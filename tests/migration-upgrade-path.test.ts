@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover", "0090_fanpage_alias_access", "0091_landing_attribution", "0092_fb_adsets", "0093_landing_gap_reasons", "0094_return_unidentified"] as const;
+const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover", "0090_fanpage_alias_access", "0091_landing_attribution", "0092_fb_adsets", "0093_landing_gap_reasons", "0094_order_promised_delivery", "0095_return_unidentified"] as const;
 
 /*
   VÌ SAO 0087 CÒN Ở TRONG DANH SÁCH DÙ NÓ ĐÃ CHẠY THẬT (bản phát hành #286).
@@ -109,7 +109,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'fanpages' and column_name = 'alias'"), 0, "bước 1: cột fanpages.alias CHƯA được có — đó là thứ 0090 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'landing_attributions'"), 0, "bước 1: bảng landing_attributions CHƯA được có — đó là thứ 0091 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'fb_adsets'"), 0, "bước 1: bảng fb_adsets CHƯA được có — đó là thứ 0092 thêm vào");
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_unidentified'"), 0, "bước 1: bảng return_unidentified CHƯA được có — đó là thứ 0094 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_unidentified'"), 0, "bước 1: bảng return_unidentified CHƯA được có — đó là thứ 0095 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -457,7 +457,7 @@ export async function testMigrationUpgradePath() {
     await client.query(`delete from orders where id = 'up-o93'`);
 
     /*
-      ═══ 0094: HÀNG HOÀN KHÔNG CÓ MÃ VẬN ĐƠN — GIỮ TẠM, KHÔNG PHẢI TỒN KHO ═══
+      ═══ 0095: HÀNG HOÀN KHÔNG CÓ MÃ VẬN ĐƠN — GIỮ TẠM, KHÔNG PHẢI TỒN KHO ═══
 
       Bảng này là chỗ DUY NHẤT trong ERP có thể đưa hàng vào tồn mà không có chứng từ đơn nào. Nên
       những gì nó chặn phải chặn được Ở CSDL, không chỉ ở tầng dịch vụ: một lượt ghi bằng ops
@@ -470,44 +470,44 @@ export async function testMigrationUpgradePath() {
            chứng từ đội lốt lượt có chứng từ và biến mất khỏi mọi báo cáo);
         4. một phiếu kho chỉ phục vụ MỘT món giữ tạm.
     */
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_unidentified'"), 1, "0094: bảng return_unidentified phải được tạo");
-    assert.equal(await dem("select count(*)::int as n from return_unidentified"), 0, "0094: KHÔNG gieo sẵn dòng nào — kiện mất nhãn chỉ sinh ra khi có người ghi nhận");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_unidentified'"), 1, "0095: bảng return_unidentified phải được tạo");
+    assert.equal(await dem("select count(*)::int as n from return_unidentified"), 0, "0095: KHÔNG gieo sẵn dòng nào — kiện mất nhãn chỉ sinh ra khi có người ghi nhận");
 
     await client.query(`insert into return_unidentified (id, code, received_at, quantity, condition) values ('up-ur1', 'UR-20260915-00001', now(), 1, 'OK')`);
     await assert.rejects(
       () => client.query(`insert into return_unidentified (id, code, received_at, quantity, condition) values ('up-ur2', 'UR-20260915-00001', now(), 1, 'OK')`),
       () => true,
-      "0094: mã nội bộ phải DUY NHẤT — hai kiện cùng một nhãn viết tay là hai kiện không phân biệt được",
+      "0095: mã nội bộ phải DUY NHẤT — hai kiện cùng một nhãn viết tay là hai kiện không phân biệt được",
     );
     await assert.rejects(
       () => client.query(`insert into return_unidentified (id, code, received_at, quantity, condition) values ('up-ur3', 'UR-20260915-00003', now(), 0, 'OK')`),
       (e: unknown) => String((e as { message?: string })?.message ?? e).includes("return_unidentified_qty_check"),
-      "0094: số lượng 0 là một dòng rác vĩnh viễn",
+      "0095: số lượng 0 là một dòng rác vĩnh viễn",
     );
     await assert.rejects(
       () => client.query(`update return_unidentified set status = 'IDENTIFIED' where id = 'up-ur1'`),
       (e: unknown) => String((e as { message?: string })?.message ?? e).includes("return_unidentified_identified_check"),
-      "0094: “đã xác định đơn” mà không chỉ được đích danh vận đơn/đơn nào là một lời khẳng định không kiểm chứng được",
+      "0095: “đã xác định đơn” mà không chỉ được đích danh vận đơn/đơn nào là một lời khẳng định không kiểm chứng được",
     );
     await client.query(`insert into stock_receipts (id, kind, received_at, reference) values ('up-sr94', 'RETURN', now(), 'UR-20260915-00001')`);
     await assert.rejects(
       () => client.query(`update return_unidentified set stock_receipt_id = 'up-sr94' where id = 'up-ur1'`),
       (e: unknown) => String((e as { message?: string })?.message ?? e).includes("return_unidentified_restock_check"),
-      "0094: “đã vào tồn” phải đủ ai · lúc nào · căn cứ · mẫu mã",
+      "0095: “đã vào tồn” phải đủ ai · lúc nào · căn cứ · mẫu mã",
     );
     await assert.rejects(
       () => client.query(`update return_unidentified set stock_receipt_id = 'up-sr94', restocked_at = now(), restocked_by = 'Kho', restock_authority = 'IDENTIFIED', variant_id = null where id = 'up-ur1'`),
       () => true,
-      "0094: căn cứ IDENTIFIED không đứng được khi dòng chưa nối được đơn",
+      "0095: căn cứ IDENTIFIED không đứng được khi dòng chưa nối được đơn",
     );
     await assert.rejects(
       () => client.query(`update return_unidentified set stock_receipt_id = 'up-sr94', restocked_at = now(), restocked_by = 'Kho', restock_authority = 'MANAGER_OVERRIDE', restock_reason = '' where id = 'up-ur1'`),
       () => true,
-      "0094: vào tồn không có chứng từ đơn thì BẮT BUỘC có lý do viết ra được",
+      "0095: vào tồn không có chứng từ đơn thì BẮT BUỘC có lý do viết ra được",
     );
     await client.query(`delete from stock_receipts where id = 'up-sr94'`);
     await client.query(`delete from return_unidentified where id = 'up-ur1'`);
-    assert.equal(await dem("select count(*)::int as n from orders where id = 'up-o1'"), 1, "0094: bảng mới KHÔNG đụng tới một dòng nghiệp vụ nào");
+    assert.equal(await dem("select count(*)::int as n from orders where id = 'up-o1'"), 1, "0095: bảng mới KHÔNG đụng tới một dòng nghiệp vụ nào");
 
     await client.query(`delete from landing_attributions where order_id = 'up-o1'`);
     await client.query(`delete from order_attributions where id = 'up-oa91'`);

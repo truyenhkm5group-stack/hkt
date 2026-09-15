@@ -14,6 +14,8 @@ import { ADS_ACTION_LABEL } from "@/lib/constants/ads-decision";
 import { getAdsDecision } from "@/lib/queries/ads-decision";
 import { getCareQueue } from "@/lib/queries/care-workbench";
 import { getFulfillmentBottleneckQueue } from "@/lib/queries/fulfillment-bottleneck";
+import { getDuplicateOrderQueue } from "@/lib/queries/order-duplicate";
+import { DUPLICATE_VERDICT_LABEL } from "@/lib/constants/order-duplicate";
 import { unclassifiedBankRows } from "@/lib/queries/finance-ops";
 import { resolvePeriod } from "@/lib/search-params";
 
@@ -358,6 +360,78 @@ export async function adaptFulfillment(): Promise<WorkItem[]> {
       creationSource: "AUTO" as const,
       actions: actionsOf("FULFILLMENT_EXCEPTION"),
       recommendedAction: c.nextAction,
+    };
+  });
+}
+
+/* ═══════════════════ 3b · ĐƠN NGHI TRÙNG ═══════════════════ */
+
+/**
+ * Nguồn: `getDuplicateOrderQueue()` — cùng truy vấn mà `/operations/preship` đang dùng, không viết
+ * lại một điều kiện nào.
+ *
+ * MỘT VIỆC CHO MỖI ĐƠN NGHI, không phải mỗi CẶP: khoá là id của đơn ĐẶT SAU. Ba đơn giống hệt nhau
+ * sinh hai việc (hai đơn sau), và người trực gọi khách MỘT lần cho mỗi đơn cần huỷ — không phải ba
+ * lần cho ba cặp.
+ *
+ * `kind` mang mức kết luận (`DUPLICATE_SUSPECTED` / `POSSIBLE_DUPLICATE`) để chủ shop đặt được hạn
+ * riêng cho từng mức về sau mà không phải sửa mã: bảng hạn đã nhận khoá dạng `<nguồn>:<loại>`.
+ */
+export async function adaptDuplicateOrders(now: Date): Promise<WorkItem[]> {
+  const queue = await getDuplicateOrderQueue();
+  const t = now.getTime();
+  return queue.rows.map((r) => {
+    const ageHours = hoursSince(r.suspectInsertedAt, t);
+    /*
+      Xếp cùng trục với `RISKY_ORDER`: cả hai đều là "đơn còn trong kho, cần một cuộc gọi trước khi
+      gửi". Không thêm một loại `CaseType` mới chỉ để chấm điểm — bảng `RECOVERABILITY` và
+      `CUSTOMER_WAITING` là bảng chung, thêm một hàng vào đó là đổi thang điểm của cả hàng đợi.
+    */
+    const score = caseScore({
+      // Đơn trước ĐÃ rời kho là ca gấp nhất: một gói đang đi, một gói sắp đi.
+      severity: r.keeperShipped || r.verdict === "DUPLICATE_SUSPECTED" ? "critical" : "warning",
+      ageHours,
+      amount: r.atRisk,
+      type: "RISKY_ORDER",
+    });
+    return {
+      key: workKey("ORDER_DUPLICATE", r.suspectOrderId),
+      sourceType: "ORDER_DUPLICATE",
+      sourceKey: r.suspectOrderId,
+      kind: r.verdict,
+      title: `${DUPLICATE_VERDICT_LABEL[r.verdict]} · ${r.suspectSystemId ? `#${r.suspectSystemId}` : r.suspectOrderId}`,
+      summary: `${r.why} Đơn giữ: ${r.keeperSystemId ? `#${r.keeperSystemId}` : r.keeperOrderId}${r.keeperShipped ? " (ĐÃ RỜI KHO)" : ""}.`,
+      department: "SALES" as DepartmentCode,
+      assignee: null,
+      status: "NEW" as WorkStatus,
+      statusAuthority: "SOURCE" as const,
+      priority: priorityOf(score),
+      score,
+      createdAt: r.suspectInsertedAt,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaAtOf("ORDER_DUPLICATE", r.suspectInsertedAt),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "ORDER",
+      businessEntityId: r.suspectOrderId,
+      sourceUrl: `/orders/${r.suspectOrderId}`,
+      /*
+        KHAI BÁO, CHƯA XÁC MINH — cùng lý do với nút thắt fulfillment: đơn chưa rời kho nên chưa có
+        chứng từ tiền nào. Và `recoverable` bằng đúng `atRisk` vì huỷ kịp thì không mất đồng nào.
+      */
+      money: {
+        atRisk: r.atRisk,
+        recoverable: r.atRisk,
+        confidence: "ESTIMATED" as const,
+        basis: "Giá trị khai trên đơn nghi trùng — đơn chưa rời kho nên chưa có chứng từ tiền",
+      },
+      tags: [r.verdict, ...(r.keeperShipped ? ["don-truoc-da-roi-kho"] : [])],
+      evidence: { source: "Đối chiếu hai đơn", detail: `${r.signalLabels.join(" · ")} · cách nhau ${r.gapHours < 1 ? "dưới 1 giờ" : `${Math.round(r.gapHours)} giờ`}` },
+      blockedReason: "",
+      creationSource: "AUTO" as const,
+      actions: actionsOf("ORDER_DUPLICATE"),
+      recommendedAction: r.nextAction,
     };
   });
 }
@@ -709,6 +783,7 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     want("CS_CASE") ? guard("CS_CASE", () => adaptCsCases(now, closedSince)) : [],
     want("SHIPMENT_CARE") ? guard("SHIPMENT_CARE", () => adaptShipmentCare(now, closedSince)) : [],
     want("FULFILLMENT_EXCEPTION") ? guard("FULFILLMENT_EXCEPTION", () => adaptFulfillment()) : [],
+    want("ORDER_DUPLICATE") ? guard("ORDER_DUPLICATE", () => adaptDuplicateOrders(now)) : [],
     want("BANK_EXCEPTION") ? guard("BANK_EXCEPTION", () => adaptBank(now)) : [],
     want("ADS_DECISION") ? guard("ADS_DECISION", () => adaptAdsDecisions(now)) : [],
     // Một lượt đọc `notifications` sinh ra bốn nguồn; lọc lại sau khi đã có.

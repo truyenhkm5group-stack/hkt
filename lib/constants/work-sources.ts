@@ -35,6 +35,7 @@ export const WORK_SOURCES = [
   "SHIPMENT_CARE",
   "RETURN_INSPECTION",
   "FULFILLMENT_EXCEPTION",
+  "ORDER_DUPLICATE",
   "BANK_EXCEPTION",
   "COD_EXCEPTION",
   "ADS_DECISION",
@@ -139,6 +140,48 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     slaHours: CASE_SLA_HOURS.ORDER_CONFIRMATION_STALE,
     outcomeAttributable: true,
     actions: ["OPEN_ORDER", "OPEN_SHIPMENT"],
+  },
+  /*
+    ═══ VÌ SAO CHỈ ĐƠN TRÙNG ĐƯỢC THÀNH NGUỒN, CÒN HAI MÁY ĐO KIA THÌ KHÔNG ═══
+
+    Bản 15/09/2026 thêm ba máy đo: soát đơn trước khi gửi, dò đơn trùng, và tuổi chặng vận đơn.
+    Chỉ MỘT trong ba vào hàng đợi chung, và đó là một quyết định theo đúng luật gộp ở cuối tệp này:
+    **cùng một gốc Ở CÙNG MỘT ĐỘ MỊN thì mới là trùng** — nhưng hệ quả của nó là cùng một gốc ở
+    cùng độ mịn thì KHÔNG được có hai nguồn.
+
+      · `preship-validation` nói về MỘT ĐƠN CHƯA GỬI. Độ mịn đó đã có chủ: `ORDER_INCOMPLETE` và
+        `ORDER_ADDRESS_NOT_NORMALIZED` (nguồn `ALERT`) cùng `FULFILLMENT_EXCEPTION`. Thêm một
+        nguồn nữa là đơn thiếu SĐT xuất hiện hai dòng, và tiền của nó cộng hai lần.
+      · `shipment-status-age` nói về MỘT KIỆN HÀNG. Độ mịn đó đã có chủ: `SHIPMENT_CARE`, cộng ba
+        loại cảnh báo đã khai ở `ALERT_KINDS_OWNED_ELSEWHERE` (`DELIVERY_FAILED` · `DELIVERY_STALE`
+        · `RETURNING`).
+      · Đơn trùng nói về MỘT CẶP ĐƠN, và không luật nào trong ERP đang hỏi câu đó.
+
+    Hai máy đo kia vẫn có màn hình riêng (`/operations/preship`, `/operations/dwell`) vì chúng trả
+    lời câu hỏi mà hàng đợi chung không trả lời được — nhưng chúng KHÔNG sinh thêm việc.
+  */
+  ORDER_DUPLICATE: {
+    key: "ORDER_DUPLICATE",
+    label: "Đơn nghi trùng",
+    why: "Hai đơn có thể là một lần mua. Gửi cả hai là mất hàng, hai chiều cước, và một khách khó chịu — chặn kịp thì không mất gì.",
+    /*
+      Điều kiện TỰ HẾT tại nguồn: người huỷ đơn thứ hai trên Pancake thì lần mở hàng đợi sau nó
+      không còn ở đó. Không job nào phải đóng hộ, nên `work_items` chỉ là lớp ghi chú — cùng hình
+      dạng với `FULFILLMENT_EXCEPTION`.
+    */
+    statusAuthority: "SOURCE",
+    // Bảng `orders` không có cột người phụ trách, nên lớp công việc là nơi duy nhất giữ ô này.
+    assigneeAuthority: "WORK",
+    department: "SALES",
+    businessEntity: "ORDER",
+    slaHours: 6,
+    outcomeAttributable: true,
+    /*
+      CỐ Ý chỉ có nút MỞ ĐƠN. ERP không ghi ngược vào Pancake (không có `update-order`), nên một
+      nút "Gộp đơn" hay "Huỷ đơn trùng" ở đây sẽ là NÚT GIẢ đúng nghĩa mà `work-actions.ts` cấm:
+      người bấm tin đã xong, còn POS vẫn giữ hai đơn và kho vẫn đóng hai gói.
+    */
+    actions: ["OPEN_ORDER"],
   },
   BANK_EXCEPTION: {
     key: "BANK_EXCEPTION",

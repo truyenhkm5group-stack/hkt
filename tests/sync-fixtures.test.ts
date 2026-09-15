@@ -173,6 +173,10 @@ import { testSmokeTiming } from "./smoke-timing.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
+import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
+import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
+import { testPreshipValidationDb, testPreshipValidationPure } from "./preship-validation.test";
+import { testPromisedDeliveryDb, testPromisedDeliveryPure } from "./promised-delivery.test";
 import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testReportingParity } from "./reporting-parity.test";
@@ -1595,6 +1599,10 @@ async function main() {
   testSmokeCoverage();
   testOperatingFunnel();
   testLogisticsFreshness();
+  testShipmentStatusAgePure();
+  testOrderDuplicatePure();
+  testPreshipValidationPure();
+  testPromisedDeliveryPure();
   await testMemoInflight();
   await testCacheSemantics();
   await testBankPipeline(db);
@@ -1694,6 +1702,17 @@ async function main() {
   // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
   // sau mọi bài kiểm khác để không đơn nào trong số đó lọt vào tổng của báo cáo khác.
   await testFulfillmentBottleneck(db);
+  // Cũng chạy CUỐI: bộ này thêm vận đơn riêng mang tiền tố `sage-` với lịch sử sự kiện dựng sẵn.
+  // Đặt trước bài khác thì những vận đơn đó lọt vào tổng của tháp giao vận và của care.
+  await testShipmentStatusAgeDb(db);
+  // Cũng chạy CUỐI: bộ này thêm đơn mang tiền tố `dup-` cố ý giống hệt nhau từng cặp. Đặt trước
+  // bài khác thì chúng lọt vào tổng doanh số và tổng đơn của mọi báo cáo.
+  await testOrderDuplicateDb(db);
+  // Cũng chạy CUỐI: bộ này thêm đơn mang tiền tố `pval-` cố ý thiếu dữ liệu từng kiểu một.
+  await testPreshipValidationDb(db);
+  // Cũng chạy CUỐI: bộ này gieo đơn mang tiền tố `prom-` và ĐỌC LẠI hàng đợi nút thắt kho để
+  // chứng minh vế lọc lời hẹn đổi đúng hành vi. Phải chạy SAU `testFulfillmentBottleneck`.
+  await testPromisedDeliveryDb(db);
   // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
   // riêng ở tháng 5/2027 rồi tự dọn sạch. Đặt giữa chừng thì những dòng đó lọt vào tổng của bài khác.
   await testFinanceTruth(db);

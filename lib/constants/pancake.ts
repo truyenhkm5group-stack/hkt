@@ -68,6 +68,20 @@ export const FAILED_STAGES: OrderStage[] = ["RETURNING", "RETURNED", "CANCELLED"
 /** Đơn đang trong luồng xử lý/giao */
 export const ACTIVE_STAGES: OrderStage[] = ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP", "SHIPPED"];
 
+/**
+ * ĐƠN CHƯA GỬI ĐI — khách đã đặt, hàng còn trong tay shop.
+ *
+ * Bằng `ACTIVE_STAGES` trừ `SHIPPED`, và sự khác nhau đó chính là điều kiện "còn chặn kịp": mọi
+ * luật soát trước khi gửi, dò đơn trùng và phát hiện nút thắt chỉ có nghĩa trên tập này.
+ *
+ * Danh sách này đã bị gõ lại nguyên văn ở vài nơi trước khi có tên (xem `lib/alerts/rules.ts`).
+ * Mã mới dùng hằng số; thấy một mảng gõ tay giống hệt ở đâu thì thay bằng nó, đừng chép thêm.
+ */
+export const PRE_SHIP_STAGES: OrderStage[] = ["NEW", "WAITING", "CONFIRMED", "PACKING", "READY_TO_SHIP"];
+
+/** Đơn đã chết: huỷ hoặc xoá. Không luật vận hành nào được coi chúng là việc phải làm. */
+export const DEAD_ORDER_STAGES: OrderStage[] = ["CANCELLED", "DELETED"];
+
 export function pancakeStatusToStage(status: number): OrderStage {
   return PANCAKE_ORDER_STATUS[status]?.stage ?? "NEW";
 }

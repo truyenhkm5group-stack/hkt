@@ -51,6 +51,7 @@ const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   SHIPMENT_CARE: "Làm việc với Viettel Post về một kiện đang mắc là nghề của giao vận, không phải của người chốt đơn.",
   RETURN_INSPECTION: "Chỉ người mở kiện và đếm hàng mới lập được phiếu tái nhập — hàng hoàn không tự vào tồn.",
   FULFILLMENT_EXCEPTION: "Đơn đã chốt mà chưa rời kho: hàng đang nằm trong tay kho, nên kho là nơi gỡ được.",
+  ORDER_DUPLICATE: "Chỉ người GỌI ĐƯỢC KHÁCH mới biết họ có cố ý đặt hai lần không. Kho nhìn hai đơn giống nhau thì vẫn phải đóng hai gói.",
   BANK_EXCEPTION: "Phân loại dòng tiền là việc kế toán; gán cho phòng khác thì lợi nhuận sai mà không ai chịu trách nhiệm.",
   COD_EXCEPTION: "Tiền đã giao mà chưa về là việc đòi soát với ĐVVC — chứng từ nằm ở kế toán.",
   ADS_DECISION: "Cắt hay tăng một dòng quảng cáo là quyết định của người tiêu tiền quảng cáo.",
