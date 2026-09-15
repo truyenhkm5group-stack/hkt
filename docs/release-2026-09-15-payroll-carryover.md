@@ -414,11 +414,13 @@ Hai bài chi phí đo bằng **chênh lệch** trước/sau, không gắn cứng
    phải thời gian tải xong trang. `/ads` được ghi `SUCCESS 102ms` trong khi cả lượt 54 trang đốt
    269 giây. Xem "Sự cố deploy #305" ở mục 7.
 
-   Commit `9d9e724` sửa phép đo. **Bước tiếp theo của F09 giờ rẻ hơn hẳn:** đọc bản ghi smoke của
-   lần deploy kế tiếp, cột `đầu phản hồi … · thân …` sẽ chỉ thẳng `/ads` chậm ở ĐẦU (truy vấn chặn
-   trước khi trang kịp bắt đầu) hay ở THÂN (một ranh giới `Suspense` chảy lâu) — hai chỗ sửa khác
-   nhau, và trước đây không cách nào phân biệt được. Vẫn CHƯA sửa `/ads`; chỉ là lần dò sau không
-   còn phải đoán.
+   Commit `9d9e724` sửa phép đo, và lượt deploy #307 đã cho con số thật: **`/ads` mất 58,9 giây**,
+   không phải 102 ms. Cùng lượt ấy lộ ra **13 màn hình chậm** trong khi bản ghi cũ luôn in "0 chậm"
+   — `/cod` 50,6 s · `/data-quality` 48,3 s · `/reports/returns` 41,5 s · `/payroll` 14,6 s. Bảng
+   đầy đủ ở mục 7.
+
+   **F09 không còn là "chưa dò được", mà là một danh sách việc có số đo kèm theo.** Vẫn CHƯA sửa
+   trang nào — nhưng lần dò sau không còn phải đoán, và nó không còn là việc của riêng `/ads`.
 
 6. **Chủ shop cần cung cấp để sổ chạy:** bật `payroll.carryover`, khai **tháng mở sổ** và lý do;
    nếu có người đang mang lỗ từ trước mốc ấy thì khai số dư mở sổ đích danh. Chưa khai thì sổ
@@ -544,8 +546,72 @@ trước khi trang kịp bắt đầu) là hai bệnh khác nhau, hai chỗ sử
 treo ở ĐẦU hay ở THÂN; và thêm một dòng **tự khai phần nằm ngoài phép đo** — chính vì thiếu nó mà
 263 giây đi lạc qua nhiều lượt deploy liền mà không ai thấy.
 
-`tests/smoke-timing.test.ts` khoá thứ tự ấy ở mức mã nguồn: `const ms = Date.now() - started` phải
-nằm SAU `await response.text()`, và `SLOW_MS` phải xét con số cả trang.
+`tests/smoke-timing.test.ts` khoá thứ tự ấy ở mức mã nguồn.
+
+#### Và bản sửa đầu tiên của tôi suýt dựng thêm một luật chặn mới
+
+Khi dời mốc dừng đồng hồ xuống sau lượt đọc thân, tôi để NGUYÊN một `AbortController` bao cả hai
+giai đoạn. Hậu quả không nằm ở phép đo mà ở **luật chặn**: `TIMEOUT` là verdict chặn deploy
+(`fatal = [APP_ERROR, REDIRECT, TIMEOUT]`), nên một trang có đầu phản hồi về sau 100ms nhưng thân
+chảy quá 60 giây sẽ nhảy từ `SUCCESS` sang `TIMEOUT` và **chặn deploy của cả ba phiên đang chạy
+song song**. Tôi đã nói với chủ shop rằng bản ấy "không thể làm đỏ một lần phát hành đang xanh" —
+**câu đó sai**.
+
+Số đo sau đó cho thấy khoảng cách mỏng tới mức nào: `/ads` mất **58,9 giây**, tức cách ngưỡng chặn
+**1,1 giây**.
+
+Đã sửa ở `d2a05de`: hai giai đoạn, hai hạn chờ. Đầu phản hồi không về = máy chủ TREO = chặn (nguyên
+nghĩa cũ). Thân trang không về hết = trang CHẬM ⇒ `SLOW`, **không chặn** — đúng luật tệp này đã chốt
+từ deploy #172. `docThan()` đọc theo từng khối và **giữ lại phần đã về**, nên nhánh "thân chưa xong"
+nằm SAU mọi phép dò lỗi và một trang HỎNG mà lại chảy chậm vẫn bị bắt đúng là `APP_ERROR` thay vì
+núp dưới nhãn `SLOW`. Kiểm bằng hành vi với một máy chủ nhả thân rồi im hẳn, không chỉ đọc mã.
+
+### Lượt đo TRUNG THỰC đầu tiên — và đây là câu trả lời còn thiếu của F09
+
+Deploy #307 là lần đầu ERP được đo đúng đại lượng. Bức tranh đổi hoàn toàn:
+
+| màn hình | trước (đo mù, tới đầu phản hồi) | **thật (tới khi xong thân)** |
+|---|---|---|
+| `/ads` | 102 ms | **58,9 s** |
+| `/cod` | 128 ms | **50,6 s** |
+| `/data-quality` | 148 ms | **48,3 s** |
+| `/reports/returns` | 153 ms | **41,5 s** |
+| `/payroll` | 110 ms | **14,6 s** |
+| `/customers` | 101 ms | **12,6 s** |
+| `/cod?recon=unproven` | 302 ms | **12,1 s** |
+| `/cod?recon=stale` | 77 ms | **11,4 s** |
+| `/customers/retention` | 123 ms | **9,7 s** |
+| `/reports/scenario` | 118 ms | **7,7 s** |
+| `/inventory/decisions` | 71 ms | **5,8 s** |
+| `/alerts` | 171 ms | **3,0 s** |
+| `/orders` | 141 ms | **2,7 s** |
+
+**13 màn hình chậm, không phải 0.** Suốt nhiều lượt deploy, bản ghi đều in "0 chậm".
+
+Hệ quả kéo theo: riêng 13 trang ấy ngốn ~279 giây, nên lượt chạy hết ngân sách 300 giây ở trang thứ
+32 và **22 màn hình còn lại ghi BỎ QUA** — luôn cùng một nhóm, vì chúng bị bỏ theo thứ tự trong danh
+sách chứ không theo mức rủi ro. Đã nâng ngân sách lên 600 giây (`99a16b0`) để lá chắn nhìn được hết
+màn hình. **Đó là miếng vá, không phải lời giải** — lời giải là làm những trang kia nhanh lại, và
+ngân sách phải hạ lại ngay khi việc ấy xong.
+
+### `/expenses` trong lượt #307 — chưa kết luận
+
+Lượt ấy còn một dòng lỗi thật: `/expenses` trả HTTP 200 nhưng gói RSC mang lỗi máy chủ (mã
+3064589366). **Chưa kết luận là hạ tầng, và cũng chưa kết luận là mã.** Những gì đã biết:
+
+- `git diff 4e5977d..9d9e724` cho thấy **không một tệp ứng dụng nào** khác giữa lượt #306 (xanh,
+  `/expenses` mở bình thường) và lượt #307. Chỉ có `scripts/smoke.ts`, tests, tài liệu. Nên `/expenses`
+  không thể vỡ vì mã của lượt này.
+- `/expenses` đứng **ngay sau** `/ads` (58,9 s) và `/payroll` (14,6 s) trong danh sách tuyến, tức
+  đúng đỉnh áp lực kết nối, ngay sau một lượt dựng lại container (bộ nhớ đệm nguội).
+- `getRecognizedCosts()` bắn **~10 truy vấn song song** trong một `Promise.all`, một trong số đó mở
+  hẳn một giao dịch — trên bể **5 kết nối**. Chú thích trong chính tệp ấy đã cảnh báo điều này, và
+  bản F08b của phiên này thêm một truy vấn nữa vào đúng chỗ đó.
+
+Điểm thứ ba là giả thuyết đáng theo nhất và nó **chạm vào mã của phiên này**, nên nó không được
+phép trôi qua dưới nhãn "nhiễu". Việc phải làm: chạy lại smoke trên máy đã lặng với ngân sách mới;
+nếu `/expenses` lặp lại thì gom `Promise.all` ấy thành từng đợt để không đòi quá số ghế của bể.
+
 
 Con số các trang sẽ **xấu đi** so với bản trước. Đó là vì phép đo bắt đầu nói thật, không phải vì
 ứng dụng vừa chậm lại — cùng nguyên tắc với luật 45: con số chưa biết TĂNG sau khi thôi khẳng định

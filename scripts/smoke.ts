@@ -53,8 +53,28 @@ const SLOW_MS = Number(process.env.SMOKE_SLOW_MS ?? 2_000);
  * làm hỏng lần phát hành thì tệ hơn là không có.
  *
  * Hết ngân sách thì các trang còn lại ghi BỎ QUA — nói thẳng là chưa kiểm, KHÔNG phải là đã đạt.
+ *
+ * ─────────── VÌ SAO NÂNG TỪ 300s LÊN 600s (15/09/2026) ───────────
+ *
+ * 300 giây được chọn khi phép đo còn dừng đồng hồ ở ĐẦU phản hồi, tức khi cả 54 trang "cộng lại"
+ * chỉ 5,6 giây. Lượt đo trung thực đầu tiên (deploy #307) cho thấy con số thật:
+ *
+ *   /ads 58,9s · /cod 50,6s · /data-quality 48,3s · /reports/returns 41,5s · /payroll 14,6s
+ *   /customers 12,6s · /cod?recon=unproven 12,1s · /cod?recon=stale 11,4s · … 13 trang > 2s
+ *
+ * RIÊNG 13 trang chậm đã ngốn ~279 giây. Giữ 300 giây nghĩa là mỗi lần deploy có hơn HAI MƯƠI màn
+ * hình không bao giờ được kiểm — và chúng bị bỏ theo thứ tự trong danh sách chứ không theo mức rủi
+ * ro, tức là luôn cùng một nhóm trang bị bỏ. Một lá chắn chỉ che được nửa đầu danh sách thì nửa sau
+ * coi như không có lá chắn.
+ *
+ * Bước SSH của workflow deploy có hạn 35 phút và lượt bootstrap đang dùng ~8 phút, nên 600 giây vẫn
+ * còn rất nhiều chỗ.
+ *
+ * ĐÂY LÀ MIẾNG VÁ, KHÔNG PHẢI LỜI GIẢI. Lời giải là làm những trang kia nhanh lại; nâng ngân sách
+ * chỉ để lá chắn nhìn được hết màn hình trong lúc việc ấy chưa xong. Hạ lại ngay khi các trang trên
+ * đã sửa.
  */
-const BUDGET_MS = Number(process.env.SMOKE_BUDGET_MS ?? 300_000);
+const BUDGET_MS = Number(process.env.SMOKE_BUDGET_MS ?? 600_000);
 
 /** Các màn hình phải mở được. Thêm route mới vào đây khi bổ sung màn hình quan trọng. */
 const ROUTES = [
