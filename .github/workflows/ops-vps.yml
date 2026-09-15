@@ -50,6 +50,7 @@ on:
           - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
+          - meta-id-probe       # dò mã Meta trong tracking landing là ad / adset / campaign (CHỈ ĐỌC; arg: các mã, bỏ trống = lấy từ đơn còn treo)
           - pages-debug         # dò endpoint Pancake Pages API với PANCAKE_ACCESS_TOKEN
           - phone-probe         # dò API Pancake có trả lịch sử SĐT toàn hệ thống không (nhập SĐT ở ô "arg")
           - vtp-probe           # dò API liệt kê vận đơn Viettel Post (đối tác + cổng web) với token hiện có (arg: mã vận đơn)
@@ -306,6 +307,11 @@ jobs:
               phone-probe)
                 fetch_script phone-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/phone-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/phone-probe.ts "$ARG" ;;
+              meta-id-probe)
+                # CHỈ ĐỌC: hỏi Graph API xem từng mã là loại nút nào, thuộc tài khoản quảng cáo nào.
+                # Không ghi một dòng nào vào CSDL.
+                fetch_script meta-id-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/meta-id-probe.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/meta-id-probe.ts $ARG ;;
               pages-debug)
                 fetch_script pages-debug.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/pages-debug.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/pages-debug.ts ;;
