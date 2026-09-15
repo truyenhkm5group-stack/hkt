@@ -3654,6 +3654,96 @@ export const payrollPeriods = pgTable(
   ],
 );
 
+/**
+ * ═══════════ SỔ LỖ LŨY KẾ THEO TỪNG MKTer ═══════════
+ *
+ * Chủ shop chốt 15/09/2026: lợi nhuận âm của một MKTer phải chuyển sang tháng sau, và tháng sau
+ * bù hết phần âm ấy trước khi tính hoa hồng được trả. Muốn thế thì con số âm phải TỒN TẠI ở đâu
+ * đó — bảng lương hôm nay tính `max(LN, 0) × %` nên nó không tồn tại ở bất cứ đâu.
+ *
+ * ─── VÌ SAO LÀ MỘT BẢNG CHỨ KHÔNG PHẢI TÍNH LẠI TỪ ĐẦU MỖI LẦN MỞ ───
+ *
+ * Tính lại được, nhưng chỉ khi mọi tháng trước đều còn tính ra đúng con số cũ. Mà chính đó là thứ
+ * không giữ được: đổi một tỷ lệ, sửa một quy kết fanpage, nhập thêm một phiếu kho — số dư của
+ * tháng đã TRẢ TIỀN đổi theo. Số dư mang sang là một NGHĨA VỤ đã phát sinh, không phải một phép
+ * tính chạy lại được.
+ *
+ * ─── GRAIN: MỘT NGƯỜI, MỘT THÁNG LỊCH VIỆT NAM ───
+ *
+ * `month_key` dạng `YYYY-MM`. Cố ý KHÔNG theo kỳ lương tuỳ ý: xem 7 ngày hay một quý không được
+ * tạo thêm số dư, vì số dư là chuỗi TUẦN TỰ theo tháng. Khoá duy nhất là (nhân sự, tháng) —
+ * KHÔNG kèm `calc_version`: đổi phiên bản phép tính không được sinh thêm một dòng chính thức thứ
+ * hai cho cùng một nghĩa vụ.
+ *
+ * `employee_id` là khoá nhân sự trong sổ lương (`settings: payroll.employees`), không phải
+ * `users.id` — sổ lương là nơi khai % hoa hồng, và một MKTer có thể chưa có tài khoản ERP.
+ * AGENTS.md mục 34 đòi khoá chứ không đòi ô chữ: đây là khoá ổn định, đổi tên không đụng tới nó.
+ */
+export const marketerProfitCarryover = pgTable(
+  "marketer_profit_carryover",
+  {
+    id: id(),
+    /** Khoá nhân sự trong sổ lương. Đổi tên / email / fanpage không được chuyển lỗ sang người khác. */
+    employeeId: text("employee_id").notNull(),
+    /** Tháng lịch Việt Nam, `YYYY-MM`. */
+    monthKey: text("month_key").notNull(),
+    /** Số dư lỗ ĐẦU tháng (≤ 0). */
+    openingBalance: integer("opening_balance").notNull(),
+    /**
+     * Số dư đầu tháng LẤY TỪ ĐÂU: `PREV_MONTH` (tháng trước đã chốt) · `OPENING_DECLARATION`
+     * (chủ shop khai số dư mở sổ, có nguồn). Không có giá trị nào nghĩa là "đoán".
+     */
+    openingSource: text("opening_source").notNull(),
+    /** LN thực phát sinh của tháng, đã trừ đủ chi phí thuộc tháng. Âm/dương/0 đều hợp lệ. */
+    realProfit: integer("real_profit").notNull(),
+    /** Phần lỗ cũ được bù trong tháng (≥ 0). */
+    lossApplied: integer("loss_applied").notNull().default(0),
+    /** `max(LN thực + số dư đầu, 0)` — cơ sở tính hoa hồng được trả (≥ 0). */
+    commissionBase: integer("commission_base").notNull(),
+    /** Tỷ lệ hoa hồng cá nhân có hiệu lực lúc chốt, nhân 100 để giữ nguyên số nguyên (10% ⇒ 1000). */
+    commissionRateBp: integer("commission_rate_bp").notNull(),
+    /** `r × (LN thực + số dư đầu)`, GIỮ DẤU — chỉ để theo dõi, KHÔNG phải khoản phải trả. */
+    signedCommission: integer("signed_commission").notNull(),
+    /** Tiền hoa hồng phải trả (≥ 0). */
+    payableCommission: integer("payable_commission").notNull(),
+    /** Số dư lỗ CUỐI tháng, chuyển sang tháng sau (≤ 0). */
+    closingBalance: integer("closing_balance").notNull(),
+    /** `DRAFT` = mô phỏng, tính sống; `FINAL` = đã chốt, đọc `snapshot`. */
+    status: text("status").notNull().default("DRAFT"),
+    /** Ảnh chụp căn cứ đủ để dựng lại con số. Bất biến sau khi `FINAL`. */
+    snapshot: jsonb("snapshot"),
+    /** Phiên bản phép tính lúc chụp (`PAYROLL_CALC_VERSION`). */
+    calcVersion: integer("calc_version").notNull().default(1),
+    note: text("note").notNull().default(""),
+    finalizedAt: ts("finalized_at"),
+    finalizedBy: text("finalized_by").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // MỘT người + MỘT tháng = MỘT dòng. Mở trang, xuất CSV, chạy lại job hay hai yêu cầu chốt
+    // đồng thời đều không được sinh dòng thứ hai cho cùng một nghĩa vụ.
+    uniqueIndex("marketer_carryover_uq").on(t.employeeId, t.monthKey),
+    index("marketer_carryover_month_idx").on(t.monthKey),
+    check("marketer_carryover_status_check", sql`${t.status} IN ('DRAFT', 'FINAL')`),
+    check("marketer_carryover_month_format", sql`${t.monthKey} ~ '^[0-9]{4}-[0-9]{2}$'`),
+    check("marketer_carryover_source_check", sql`${t.openingSource} IN ('PREV_MONTH', 'OPENING_DECLARATION')`),
+    // Số dư là LỖ chưa bù, theo định nghĩa ≤ 0. Một số dương ở đây nghĩa là "lãi mang sang" — mà
+    // lãi đã được trả hoa hồng ở tháng nó phát sinh, chuyển tiếp là trả hai lần.
+    check("marketer_carryover_opening_check", sql`${t.openingBalance} <= 0`),
+    check("marketer_carryover_closing_check", sql`${t.closingBalance} <= 0`),
+    check("marketer_carryover_base_check", sql`${t.commissionBase} >= 0`),
+    check("marketer_carryover_payable_check", sql`${t.payableCommission} >= 0`),
+    check("marketer_carryover_applied_check", sql`${t.lossApplied} >= 0`),
+    // Chốt mà không có ảnh chụp thì "chốt" không có nghĩa gì (cùng luật với `payroll_periods`).
+    check(
+      "marketer_carryover_final_check",
+      sql`${t.status} = 'DRAFT' OR (${t.snapshot} IS NOT NULL AND ${t.finalizedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
 export const departmentsRelations = relations(departments, ({ one, many }) => ({
   lead: one(users, { fields: [departments.leadUserId], references: [users.id] }),
   members: many(departmentMembers),

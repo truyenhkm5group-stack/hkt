@@ -16,6 +16,9 @@ import {
 import { fixedCostForPeriod, opsCosts, periodMonths, rescuedFromRate } from "@/lib/constants/profit";
 import { getOperatingCost, type CostEngineWarning } from "@/lib/queries/cost-engine";
 import { distributeProportionally, inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-allocation";
+import { wholeMonthKey } from "@/lib/constants/payroll-carryover";
+import { carryoverMonth } from "@/lib/payroll/profit-carryover";
+import { getCarryoverConfig, resolveOpeningMany, type OpeningBasis, type OpeningResolution } from "@/lib/queries/payroll-carryover";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -654,6 +657,35 @@ export type PayrollLine = {
   bonusRevenue: number;
   /** `null` khi một phần bất kỳ chưa biết — một phần chưa biết thì tổng cũng chưa biết. */
   salary: number | null;
+  /**
+   * BÙ TRỪ LỖ LŨY KẾ CỦA CHÍNH NGƯỜI NÀY (chủ shop chốt 15/09/2026).
+   *
+   * `null` = sổ KHÔNG ÁP DỤNG cho kỳ đang xem (chưa bật, kỳ không phải một tháng lịch, hoặc tháng
+   * nằm trước mốc mở sổ). Khác hẳn "áp dụng nhưng số dư chưa biết" — ca đó `carry` có giá trị và
+   * bên trong nó `openingBalance` mới là `null`.
+   */
+  carry: PayrollCarryLine | null;
+};
+
+/** Một dòng bù trừ lỗ lũy kế, đủ để chủ shop đọc mà không cần mở thêm màn hình nào. */
+export type PayrollCarryLine = {
+  monthKey: string;
+  /** Số dư lỗ đầu tháng (≤ 0). `null` = CHƯA BIẾT. */
+  openingBalance: number | null;
+  openingBasis: OpeningBasis;
+  /** Số dư đã đủ căn cứ để CHỐT kỳ chưa. Xem được không có nghĩa là chốt được. */
+  openingEstablished: boolean;
+  openingReason: string;
+  /** LN thực phát sinh của tháng — lỗ cũ KHÔNG bị trừ vào đây lần nữa. */
+  realProfit: number | null;
+  /** Phần lỗ cũ được bù trong tháng (≥ 0). */
+  lossApplied: number | null;
+  /** `max(LN thực + số dư đầu, 0)` — cơ sở tính hoa hồng được trả. */
+  commissionBase: number | null;
+  /** `r × (LN thực + số dư đầu)`, GIỮ DẤU. Chỉ để theo dõi, không phải tiền phải trả. */
+  signedCommission: number | null;
+  /** Số dư chuyển sang tháng sau (≤ 0). */
+  closingBalance: number | null;
 };
 
 export type PayrollReport = {
@@ -726,12 +758,27 @@ export async function getPayrollReport(
   period: Period,
   basis: PayrollBasis,
 ): Promise<PayrollReport> {
-  const [marketers, employees, cash, paid] = await Promise.all([
+  const [marketers, employees, cash, paid, carryConfig] = await Promise.all([
     getMarketerReport(period, basis),
     listEmployees(),
     basis === "cash" ? getCashProfitReport(period) : Promise.resolve(null),
     salaryPaidInPeriod(period),
+    getCarryoverConfig(),
   ]);
+  /*
+    ═══ SỔ LỖ LŨY KẾ CHỈ ĐI THEO THÁNG LỊCH ═══
+
+    Kỳ 7 ngày, kỳ tuỳ chọn hay một quý KHÔNG được tạo hay cộng lại số dư: số dư là một chuỗi TUẦN
+    TỰ theo tháng, và cộng nó lại theo một kỳ khác làm mất đúng phần lỗ mà cơ chế này sinh ra để
+    giữ. `wholeMonthKey` trả `null` cho mọi kỳ không phải trọn một tháng, và khi ấy `carry` là
+    `null` — "KHÔNG ÁP DỤNG", khác hẳn "chưa biết" và khác hẳn "bằng 0".
+  */
+  const carryMonth = wholeMonthKey(period.from, period.to);
+  const marketerIds = employees.filter((e) => e.active).map((e) => e.id);
+  const openings =
+    carryMonth && carryConfig.enabled
+      ? await resolveOpeningMany(marketerIds, carryMonth, carryConfig)
+      : new Map<string, OpeningResolution>();
   const nominalTotal = marketers.nominal.totals.expectedProfit;
   const modelTotal = marketers.totals.profit;
   const totalProfit = basis === "cash" && cash ? cash.net : basis === "nominal" ? nominalTotal : modelTotal;
@@ -771,10 +818,53 @@ export async function getPayrollReport(
       const bonusTotal = Math.round(
         Math.max(totalProfit, 0) * (e.percentTotal / 100),
       );
+      /*
+        ═══ CHỖ SỐ ÂM TỪNG BỊ XOÁ ═══
+
+        Bản cũ: `max(personalProfit, 0) × %`. Cái `max` ấy đúng ở chỗ không trả tiền âm cho người
+        ta — nhưng nó cũng VỨT MẤT con số âm. Tháng lỗ 10 triệu và tháng hoà vốn cho ra cùng một
+        kết quả là 0, nên tháng sau lãi 15 triệu thì người ấy ăn hoa hồng trên đủ 15 triệu như chưa
+        từng có tháng lỗ.
+
+        Nay số âm được GIỮ ở sổ (`marketer_profit_carryover`) và bù trước khi tính thưởng. Tiền trả
+        vẫn không bao giờ âm — cái đổi là CƠ SỞ để nhân tỷ lệ, không phải dấu của khoản phải trả.
+
+        Sổ chưa bật ⇒ nhánh dưới chạy y như trước. Đây là thay đổi cách tính tiền của người thật,
+        nên nó không được tự áp: chủ shop bật và khai tháng mở sổ thì mới có hiệu lực.
+      */
+      const opening = carryMonth ? openings.get(e.id) : undefined;
+      const carry: PayrollCarryLine | null =
+        carryMonth && opening && opening.basis !== "NOT_APPLICABLE"
+          ? (() => {
+              const r = carryoverMonth({
+                openingBalance: opening.balance,
+                realProfit: personalProfit ?? 0,
+                commissionPercent: e.percentPersonal,
+              });
+              return {
+                monthKey: carryMonth,
+                openingBalance: opening.balance,
+                openingBasis: opening.basis,
+                openingEstablished: opening.established,
+                openingReason: opening.reason,
+                // LN cá nhân chưa tính được (cơ sở dòng tiền mẫu số ≤ 0) thì LN thực của tháng
+                // cũng chưa biết — không được đọc thành "người này làm ra 0 đồng".
+                realProfit: personalProfit,
+                lossApplied: personalProfit === null ? null : r.lossApplied,
+                commissionBase: personalProfit === null ? null : r.commissionBase,
+                signedCommission: personalProfit === null ? null : r.signedCommission,
+                closingBalance: personalProfit === null ? null : r.closingBalance,
+              };
+            })()
+          : null;
       const bonusPersonal =
         m && cashRatio === null
           ? null
-          : Math.round(Math.max(personalProfit ?? 0, 0) * (e.percentPersonal / 100));
+          : carry
+            ? carry.commissionBase === null
+              ? null
+              : Math.round((carry.commissionBase * e.percentPersonal) / 100)
+            : Math.round(Math.max(personalProfit ?? 0, 0) * (e.percentPersonal / 100));
       const bonusRevenue = Math.round(
         Math.max(personalRevenue ?? 0, 0) * (e.percentRevenue / 100),
       );
@@ -804,6 +894,7 @@ export async function getPayrollReport(
         bonusPersonal,
         bonusRevenue,
         salary: fixed === null || bonusPersonal === null ? null : fixed + bonusTotal + bonusPersonal + bonusRevenue,
+        carry,
       };
     });
   return {

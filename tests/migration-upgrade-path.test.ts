@@ -32,7 +32,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
  * trạng thái đã có những cái kia". Ép về một chuỗi sẽ làm bài kiểm gieo dữ liệu thử SAU khi
  * migration cần kiểm đã áp — và phần backfill của nó không bao giờ được kiểm.
  */
-const MOI = ["0087_return_reason_observations", "0088_payroll_periods"] as const;
+const MOI = ["0087_return_reason_observations", "0088_payroll_periods", "0089_marketer_profit_carryover"] as const;
 
 /*
   VÌ SAO 0087 CÒN Ở TRONG DANH SÁCH DÙ NÓ ĐÃ CHẠY THẬT (bản phát hành #286).
@@ -105,6 +105,7 @@ export async function testMigrationUpgradePath() {
     */
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_reason_observations'"), 0, "bước 1: bảng return_reason_observations CHƯA được có — đó là thứ 0087 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'payroll_periods'"), 0, "bước 1: bảng payroll_periods CHƯA được có — đó là thứ 0088 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'marketer_profit_carryover'"), 0, "bước 1: bảng marketer_profit_carryover CHƯA được có — đó là thứ 0089 thêm vào");
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -254,6 +255,44 @@ export async function testMigrationUpgradePath() {
     // Cùng kỳ nhưng cơ sở KHÁC thì được — đó là hai câu trả lời cho hai câu hỏi khác nhau.
     await client.query(`insert into payroll_periods (id, period_key, period_start, period_end, basis) values ('up-pp3', '2026-09-01..2026-09-30', '2026-09-01', '2026-09-30', 'nominal')`);
     assert.equal(await dem("select count(*)::int as n from payroll_periods where period_key = '2026-09-01..2026-09-30'"), 2, "0088: cùng kỳ, khác cơ sở ⇒ hai dòng");
+
+    /*
+      ═══ 0089 · SỔ LỖ LŨY KẾ THEO TỪNG MKTer ═══
+
+      Năm điều phải đúng sau một lượt nâng cấp:
+        1. bảng được tạo;
+        2. RỖNG — không backfill, không đặt số dư cho ai. Đặt 0 cho tất cả là KHẲNG ĐỊNH rằng không
+           ai còn lỗ, và khẳng định không căn cứ ấy trả tiền thật ra ngoài (AGENTS.md mục 35);
+        3. số dư dương bị chặn — "lãi mang sang" là trả hoa hồng hai lần;
+        4. chốt mà thiếu ảnh chụp bị chặn;
+        5. một người + một tháng = MỘT dòng, và khoá ấy không kèm calc_version.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'marketer_profit_carryover'"), 1, "0089: bảng sổ lỗ lũy kế phải được tạo");
+    assert.equal(await dem("select count(*)::int as n from marketer_profit_carryover"), 0, "0089: KHÔNG gieo số dư cho ai — nâng cấp không được tự khẳng định 'người này hết lỗ'");
+    await assert.rejects(
+      () => client.query(`insert into marketer_profit_carryover (id, employee_id, month_key, opening_balance, opening_source, real_profit, commission_base, commission_rate_bp, signed_commission, payable_commission, closing_balance) values ('up-co-bad', 'mkt-1', '2026-09', 5000000, 'OPENING_DECLARATION', 0, 0, 1000, 0, 0, 0)`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("marketer_carryover_opening_check"),
+      "0089: số dư đầu DƯƠNG bị chặn — lãi đã được trả hoa hồng ở tháng nó phát sinh, mang sang là trả hai lần",
+    );
+    await assert.rejects(
+      () => client.query(`insert into marketer_profit_carryover (id, employee_id, month_key, opening_balance, opening_source, real_profit, commission_base, commission_rate_bp, signed_commission, payable_commission, closing_balance, status) values ('up-co-bad2', 'mkt-1', '2026-09', 0, 'OPENING_DECLARATION', 0, 0, 1000, 0, 0, 0, 'FINAL')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("marketer_carryover_final_check"),
+      "0089: chốt mà thiếu ảnh chụp bị chặn",
+    );
+    await assert.rejects(
+      () => client.query(`insert into marketer_profit_carryover (id, employee_id, month_key, opening_balance, opening_source, real_profit, commission_base, commission_rate_bp, signed_commission, payable_commission, closing_balance) values ('up-co-bad3', 'mkt-1', '2026-9', 0, 'OPENING_DECLARATION', 0, 0, 1000, 0, 0, 0)`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("marketer_carryover_month_format"),
+      "0089: khoá tháng sai định dạng bị chặn ngay ở CSDL",
+    );
+    await client.query(`insert into marketer_profit_carryover (id, employee_id, month_key, opening_balance, opening_source, real_profit, loss_applied, commission_base, commission_rate_bp, signed_commission, payable_commission, closing_balance) values ('up-co1', 'mkt-1', '2026-09', -10000000, 'OPENING_DECLARATION', 6000000, 6000000, 0, 1000, -400000, 0, -4000000)`);
+    await assert.rejects(
+      () => client.query(`insert into marketer_profit_carryover (id, employee_id, month_key, opening_balance, opening_source, real_profit, commission_base, commission_rate_bp, signed_commission, payable_commission, closing_balance, calc_version) values ('up-co2', 'mkt-1', '2026-09', -10000000, 'OPENING_DECLARATION', 6000000, 0, 1000, -400000, 0, -4000000, 99)`),
+      (e: unknown) => /unique|duplicate/i.test(String((e as { message?: string })?.message ?? e)),
+      "0089: một người + một tháng = MỘT dòng — đổi calc_version KHÔNG được sinh dòng chính thức thứ hai cho cùng nghĩa vụ",
+    );
+    // Người KHÁC cùng tháng thì được — sổ đi theo từng người, không phải một dòng chung.
+    await client.query(`insert into marketer_profit_carryover (id, employee_id, month_key, opening_balance, opening_source, real_profit, commission_base, commission_rate_bp, signed_commission, payable_commission, closing_balance) values ('up-co3', 'mkt-2', '2026-09', 0, 'OPENING_DECLARATION', 12000000, 12000000, 1000, 1200000, 1200000, 0)`);
+    assert.equal(await dem("select count(*)::int as n from marketer_profit_carryover where month_key = '2026-09'"), 2, "0089: hai người, hai dòng — không bù chéo, không gộp");
 
     /*
       ═══ 0080 NAY NẰM TRONG TRẠNG THÁI PRODUCTION (bước 1) ═══
