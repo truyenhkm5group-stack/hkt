@@ -392,6 +392,54 @@ export async function testCostDoubleCount(db: Db) {
   await db.delete(schema.shipments).where(sql`${schema.shipments.id} = 'dc-ship-return'`);
   clearMemo();
 
+  /* ══ TEST 13 — NGHĨA VỤ LƯƠNG CÓ THẬT MÀ LỢI NHUẬN KHÔNG TRỪ ĐỒNG NÀO ══
+   *
+   * Cảnh báo lùi nguồn (TEST 4) chỉ bật khi bảng Chi phí CÓ khoản lương. Nên ca nguy hiểm nhất lại
+   * là ca KHÔNG có khoản nào: thành phần Lương bằng 0 và không cảnh báo nào bật — lợi nhuận đọc như
+   * thể shop không trả lương cho ai, hoàn toàn im lặng.
+   *
+   * Đo trên production 15/09/2026: 4 nhân sự, 5.000.000 ₫/tháng lương cứng đã khai ở bảng Lương,
+   * 0 khoản chi nhóm "Lương" ở bảng Chi phí. Đây là ca THẬT, không phải giả định.
+   */
+  await db.delete(schema.expenses).where(sql`${schema.expenses.id} in ('dc-exp-salary','dc-exp-commission')`);
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "LEGACY_EXPENSES" });
+  clearMemo();
+  costs = await getRecognizedCosts(KY);
+
+  assert.equal(costs.components.SALARY.amount, 0, "13. chuẩn bị: không khoản chi lương nào ⇒ chi phí lương ghi nhận bằng 0");
+  const imLang = costs.warnings.find((w) => w.rule === "PAYROLL_OBLIGATION_NOT_RECOGNIZED");
+  assert.ok(imLang, "13. PHẢI có cảnh báo — 0 đồng lương trong lợi nhuận khi đã khai nghĩa vụ là chuyện không được im lặng");
+  assert.equal(imLang?.severity, "high", "13. và phải là mức HIGH, vì cổng chốt kỳ chặn trên mức ấy");
+  assert.ok((imLang?.amount ?? 0) > 0, "13. cảnh báo phải nói ĐÚNG số tiền đang nằm ngoài lợi nhuận, không phải một câu chung chung");
+  assert.ok(
+    /không có nghĩa là không phát sinh/i.test(imLang?.detail ?? ""),
+    "13. và nói thẳng: chưa có khoản nhập KHÔNG có nghĩa là không phát sinh chi phí",
+  );
+
+  /*
+    KHÔNG TỰ CỘNG. ERP nêu ra con số nhưng KHÔNG đưa nó vào lợi nhuận: chuyển thẩm quyền là quyết
+    định của chủ shop (AGENTS.md mục 18), và tự cộng là mở đường cho ngày mai có người nhập khoản
+    chi lương rồi bị trừ hai lần.
+  */
+  assert.equal(
+    costs.components.SALARY.amount,
+    0,
+    "13. nhưng KHÔNG tự cộng con số ấy vào lợi nhuận — tự cộng là mở đường cho việc trừ hai lần về sau",
+  );
+
+  // Có khoản chi lương trở lại ⇒ cảnh báo im lặng TẮT (nó chỉ dành cho ca không có khoản nào).
+  await db.insert(schema.expenses).values({
+    id: "dc-exp-salary", category: "SALARY", description: "Lương tháng 1 (ghi ở bảng Chi phí)",
+    amount: 9_000_000, occurredAt: d("2027-01-05"), costSource: "MANUAL",
+  });
+  clearMemo();
+  const coKhoan = await getRecognizedCosts(KY);
+  assert.ok(
+    !coKhoan.warnings.some((w) => w.rule === "PAYROLL_OBLIGATION_NOT_RECOGNIZED"),
+    "13. có khoản chi lương rồi thì cảnh báo này TẮT — nó chỉ nói về ca lợi nhuận không trừ đồng nào",
+  );
+  assert.equal(coKhoan.components.SALARY.amount, 9_000_000, "13. và lương quay lại đúng con số của bảng Chi phí");
+
   // ══ BẤT BIẾN: tổng = Σ các thành phần, và không thành phần nào đếm chồng lên thành phần khác ══
   clearMemo();
   costs = await getRecognizedCosts(KY);
@@ -411,6 +459,6 @@ export async function testCostDoubleCount(db: Db) {
   await reset(db);
 
   console.log(
-    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương · PHẢI TRẢ và ĐÃ TRẢ đứng riêng hai chiều · đúng MỘT cơ sở được phép chốt lương và nó là mặc định · ĐỔI NGUỒN không làm hoa hồng biến mất (độ phủ theo từng thành phần) · phí hoàn đọc từ VẬN ĐƠN CHIỀU VỀ chứ không từ cột rỗng, và không cộng hai lần vào cước",
+    "✓ Chống trừ hai lần: cước 20K + khoản gõ tay 20K = 20K (không phải 40K) · phí hoàn 25K = 25K · lương 9tr + khoản chi 9tr = 9tr (không phải 18tr) · bảng Lương chưa đủ thì LÙI về nguồn cũ, lương khác 0 và có cảnh báo · 9tr/tháng xem 7/30 ngày = 2,1tr Ở CẢ HAI NƠI (bảng lương = máy chi phí) · kỳ Toàn bộ là CHƯA BIẾT chứ không phải 0 · cơ sở dòng tiền mẫu số ≤ 0 ⇒ LN cá nhân CHƯA BIẾT, không phải 0 ₫ · cảnh báo nguồn chi phí đi tới tận bảng lương · PHẢI TRẢ và ĐÃ TRẢ đứng riêng hai chiều · đúng MỘT cơ sở được phép chốt lương và nó là mặc định · ĐỔI NGUỒN không làm hoa hồng biến mất (độ phủ theo từng thành phần) · phí hoàn đọc từ VẬN ĐƠN CHIỀU VỀ chứ không từ cột rỗng, và không cộng hai lần vào cước · nghĩa vụ lương có thật mà lợi nhuận không trừ đồng nào thì KÊU (mức high), nhưng KHÔNG tự cộng",
   );
 }

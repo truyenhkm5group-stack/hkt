@@ -54,7 +54,12 @@ export type RecognizedComponent = {
 };
 
 export type CostEngineWarning = {
-  rule: "PAYROLL_COST_COVERAGE_INCOMPLETE" | "DUPLICATE_PAYROLL_EXPENSE_SOURCE" | "COMMISSION_BASIS_NEEDS_REVIEW" | "DUPLICATE_LOGISTICS_COST_SOURCE";
+  rule:
+    | "PAYROLL_COST_COVERAGE_INCOMPLETE"
+    | "PAYROLL_OBLIGATION_NOT_RECOGNIZED"
+    | "DUPLICATE_PAYROLL_EXPENSE_SOURCE"
+    | "COMMISSION_BASIS_NEEDS_REVIEW"
+    | "DUPLICATE_LOGISTICS_COST_SOURCE";
   severity: "high" | "medium";
   title: string;
   detail: string;
@@ -207,6 +212,34 @@ async function build(period: Period): Promise<RecognizedCosts> {
     gọi tên nó là "chưa đối chiếu" thì đúng hơn là vứt đi.
   */
   const legacyChuaDoiChieu = payrollCovered ? Math.max(0, salaryLegacy.amount - payroll.fixedSalary) : 0;
+  /*
+    ═══ NGHĨA VỤ LƯƠNG CÓ THẬT, MÀ LỢI NHUẬN KHÔNG TRỪ ĐỒNG NÀO ═══
+
+    Cảnh báo ngay trên chỉ bật khi `salaryLegacy.amount > 0`. Nên khi bảng Chi phí KHÔNG có khoản
+    lương nào, thành phần SALARY bằng 0 và **không cảnh báo nào bật**: lợi nhuận đọc như thể shop
+    không trả lương cho ai, một cách hoàn toàn im lặng.
+
+    Đo trên production 15/09/2026: 4 nhân sự, **5.000.000 ₫/tháng** lương cứng đã khai ở bảng
+    Lương, **0 khoản chi** nhóm "Lương" ở bảng Chi phí, nguồn ghi nhận chưa khai (mặc định
+    LEGACY_EXPENSES). Lợi nhuận đang cao hơn sự thật ít nhất bằng khoản ấy, mỗi tháng.
+
+    ERP **KHÔNG tự cộng** con số từ bảng Lương vào lợi nhuận: chuyển thẩm quyền phải là một quyết
+    định tường minh của chủ shop (AGENTS.md mục 18), và tự cộng là mở đường cho ngày mai có người
+    nhập khoản chi lương rồi bị trừ hai lần. Nhưng ERP cũng không được im lặng — nên đây là cảnh
+    báo mức `high`, và cổng chốt kỳ (`payrollFinalizeBlockers`) chặn trên mức ấy: không ai chốt
+    được một kỳ lương trên con số lợi nhuận chưa trừ lương.
+  */
+  if (!payrollCovered && salaryLegacy.amount === 0 && payroll.monthlyFixedTotal > 0) {
+    warnings.push({
+      rule: "PAYROLL_OBLIGATION_NOT_RECOGNIZED",
+      severity: "high",
+      title: `Lợi nhuận KHÔNG trừ đồng lương nào, trong khi bảng Lương đã khai ${payroll.monthlyFixedTotal.toLocaleString("vi-VN")} ₫/tháng`,
+      detail: `${payroll.activeEmployees} nhân sự đang làm việc có lương cứng khai ở bảng Lương (${payroll.fixedSalaryDue.toLocaleString("vi-VN")} ₫ thuộc kỳ này), nhưng bảng Chi phí — nguồn đang có thẩm quyền — KHÔNG có khoản chi nhóm “Lương” nào. Chi phí lương ghi nhận được là 0 ₫, nên lợi nhuận đang CAO HƠN sự thật ít nhất bằng khoản ấy. Chưa có khoản nhập KHÔNG có nghĩa là không phát sinh chi phí.`,
+      action: "Chọn MỘT trong hai: nhập khoản chi lương vào bảng Chi phí cho kỳ này, HOẶC bật bảng Lương làm nguồn ghi nhận (Cấu hình → Nguồn ghi nhận chi phí nhân sự). ERP cố ý không tự cộng — chuyển thẩm quyền là quyết định của chủ shop, và tự cộng là mở đường cho việc trừ hai lần về sau.",
+      amount: payroll.fixedSalaryDue,
+      count: payroll.activeEmployees,
+    });
+  }
   if (payrollCovered && salaryLegacy.amount > 0) {
     warnings.push({
       rule: "DUPLICATE_PAYROLL_EXPENSE_SOURCE",

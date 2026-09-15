@@ -82,6 +82,15 @@ export type PayrollRecognition = {
   activeEmployees: number;
   /** Tổng lương cứng khai báo mỗi tháng (chưa chia theo kỳ) — để đối chiếu */
   monthlyFixedTotal: number;
+  /**
+   * LƯƠNG CỨNG THUỘC KỲ ĐÃ TÍNH RA, BẤT KỂ CÓ ĐƯỢC GHI NHẬN HAY KHÔNG.
+   *
+   * `fixedSalary` ở trên là con số ĐƯỢC GHI NHẬN — bằng 0 khi bảng Lương chưa cầm quyền. Nhưng
+   * "không được ghi nhận" khác hẳn "không phát sinh": nghĩa vụ vẫn có, chỉ là nó đang không nằm
+   * trong lợi nhuận. Muốn nói được câu đó thành một con số thì phải giữ lại phép tính, nên trường
+   * này tồn tại.
+   */
+  fixedSalaryDue: number;
 };
 
 /**
@@ -139,5 +148,6 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
     mode,
     activeEmployees: active.length,
     monthlyFixedTotal,
+    fixedSalaryDue: fixedSalary,
   };
 }
