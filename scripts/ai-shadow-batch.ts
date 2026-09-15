@@ -156,6 +156,31 @@ async function main() {
   console.log(`\n⑤ KẾT QUẢ LƯỢT CHẠY`);
   for (const r of runs) console.log(`   ${String(r.status).padEnd(12)} nấc ${String(r.tier).padEnd(8)} ${r.n}`);
 
+  /*
+    VÌ SAO MÁY KHÔNG TRẢ LỜI — đọc từ `ai_runs.decision`, không đoán.
+
+    Một mẻ mà mọi hội thoại đều chuyển người là một mẻ không đo được gì. Nhưng "chuyển người" có
+    nhiều lý do rất khác nhau: thiếu dữ liệu (việc của chủ shop), người đã vào (đúng, phải dừng),
+    hay một luật quá tay (lỗi của tôi). Gộp chúng vào một con số là bỏ qua đúng thứ cần biết.
+  */
+  const lyDo = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select coalesce(nullif(r.decision->>'action',''),'?')        as hanh_dong,
+             coalesce(nullif(r.decision->>'handoffReason',''),'—') as ly_do,
+             coalesce(nullif(r.decision->>'reason',''),'')         as cau,
+             coalesce(r.decision->>'missing','')                   as thieu,
+             count(*)::int                                          as n
+      from ai_runs r
+      where r.subject_id in (${dsSql}) and r.created_at >= now() - interval '2 hours'
+      group by 1,2,3,4 order by 5 desc limit 10
+    `),
+  );
+  console.log(`\n⑤b VÌ SAO — đọc từ ai_runs.decision`);
+  for (const l of lyDo) {
+    console.log(`   ${l.n}× ${String(l.hanh_dong)} · ${String(l.ly_do)}${String(l.thieu) && String(l.thieu) !== "[]" ? ` · thiếu ${l.thieu}` : ""}`);
+    if (l.cau) console.log(`        ${cat(String(l.cau), 150)}`);
+  }
+
   // ───── ⑥ ĐỐI CHIẾU NGƯỜI ↔ MÁY ─────
   const cap = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
