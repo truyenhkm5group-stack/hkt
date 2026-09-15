@@ -200,6 +200,7 @@ export function testNavigationCoverage() {
     "/payroll/migration": "tab 'Xem trước chuyển đổi' của /payroll, chỉ hiện với quyền payroll:manage",
     "/payroll/runs": "tab 'Lịch sử kỳ' của /payroll",
     "/payroll/payslip": "tab 'Phiếu lương' của /payroll — người chỉ có quyền xem của mình vào đây để xem phiếu của chính họ",
+    "/payroll/settings": "tab 'Cấu hình' của /payroll, chỉ hiện với quyền payroll:manage",
   };
 
   const pages = walkPages("app/(dashboard)");

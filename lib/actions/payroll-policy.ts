@@ -21,6 +21,9 @@ import { can, requireUser } from "@/lib/auth/session";
 import { guardSecondApproval } from "@/lib/actions/approvals";
 import { componentBasisKey, type PayrollCalcParams } from "@/lib/constants/payroll-components";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
+import { DEFAULT_PAYROLL_CARRYOVER, PAYROLL_CARRYOVER_KEY, type PayrollCarryoverConfig } from "@/lib/constants/payroll-carryover";
+import { DEFAULT_PAYROLL_RECOGNITION, PAYROLL_RECOGNITION_KEY, type PayrollRecognitionConfig } from "@/lib/queries/payroll-cost";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 import { getPolicyVersion, nextVersionNumber, overlappingActiveVersions, userNamesByIds } from "@/lib/queries/payroll-policies";
 import {
   adjustmentSchema,
@@ -574,4 +577,108 @@ export async function migrateEmployeeToPolicy(input: unknown): Promise<PolicyAct
   });
   revalidate();
   return { ok: true, id: policyId };
+}
+
+// ═════════════════════════ CẤU HÌNH LƯƠNG ═════════════════════════
+
+/**
+ * ═══ HAI CÔNG TẮC ĐỔI SỐ TIỀN CỦA NGƯỜI THẬT ═══
+ *
+ * Trước bản này, cả hai chỉ đặt được bằng script `set-setting` chạy tay trên máy chủ. Nghĩa là
+ * chúng hoặc không bao giờ được bật, hoặc được bật bởi người duy nhất biết cách chạy script — và
+ * không ai khác biết nó đã đổi. Cả hai đều là quyết định kinh doanh, nên chúng phải có một cái nút,
+ * một cảnh báo đọc được, và một dòng nhật ký.
+ *
+ *  · **Sổ lỗ lũy kế** — bật lên là đổi cơ sở tính hoa hồng của mọi MKTer.
+ *  · **Nguồn ghi nhận chi phí nhân sự** — đổi sang bảng Lương mà bảng Chi phí vẫn đang ghi lương
+ *    là trừ hai lần; đổi khi bảng Lương chưa phủ đủ là làm lương biến mất khỏi lợi nhuận. Máy chi
+ *    phí đã có lá chắn `coverage` cho cả hai chiều, nhưng người bấm vẫn phải biết mình đang bấm gì.
+ */
+const carryoverConfigSchema = z
+  .object({
+    enabled: z.boolean(),
+    startMonth: z.union([z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Tháng mở sổ phải dạng YYYY-MM"), z.literal("")]),
+    startNote: z.string().trim().max(500).default(""),
+  })
+  .refine((v) => !v.enabled || Boolean(v.startMonth), {
+    message: "Bật sổ lỗ thì phải khai THÁNG MỞ SỔ. Không có mốc bắt đầu thì không có gì để bắt đầu chuỗi số dư, và máy sẽ phải đoán.",
+    path: ["startMonth"],
+  })
+  .refine((v) => !v.enabled || v.startNote.trim().length >= 5, {
+    message: "Khai rõ VÌ SAO chọn mốc ấy. Sáu tháng sau phải giải thích được vì sao chuỗi số dư bắt đầu từ đó.",
+    path: ["startNote"],
+  });
+
+export async function savePayrollCarryoverConfig(input: unknown): Promise<PolicyActionResult> {
+  const guard = await requireManage();
+  if ("error" in guard) return guard;
+  const parsed = carryoverConfigSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const truoc = await getSettingJson<PayrollCarryoverConfig>(PAYROLL_CARRYOVER_KEY, DEFAULT_PAYROLL_CARRYOVER);
+  const sau: PayrollCarryoverConfig = { enabled: d.enabled, startMonth: d.startMonth || null, startNote: d.startNote };
+
+  const cong = await guardSecondApproval({
+    group: "PAYROLL_EDIT",
+    action: "payroll.carryover.config",
+    entity: "SETTINGS",
+    entityId: PAYROLL_CARRYOVER_KEY,
+    summary: d.enabled ? `BẬT sổ lỗ lũy kế từ tháng ${d.startMonth} — đổi cơ sở tính hoa hồng của mọi MKTer` : "TẮT sổ lỗ lũy kế",
+    amount: null,
+    payload: sau,
+  });
+  if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+  if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+
+  await setSettingJson(PAYROLL_CARRYOVER_KEY, sau);
+  await audit({
+    userId: guard.id,
+    userEmail: guard.email,
+    action: "PAYROLL_CARRYOVER_CONFIG",
+    entity: "SETTINGS",
+    entityId: PAYROLL_CARRYOVER_KEY,
+    before: truoc,
+    after: sau,
+    reason: d.startNote,
+  });
+  revalidate();
+  return { ok: true };
+}
+
+const recognitionSchema = z.object({ mode: z.enum(["LEGACY_EXPENSES", "PAYROLL"]) });
+
+export async function savePayrollRecognitionMode(input: unknown): Promise<PolicyActionResult> {
+  const guard = await requireManage();
+  if ("error" in guard) return guard;
+  const parsed = recognitionSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const truoc = await getSettingJson<PayrollRecognitionConfig>(PAYROLL_RECOGNITION_KEY, DEFAULT_PAYROLL_RECOGNITION);
+
+  const cong = await guardSecondApproval({
+    group: "PAYROLL_EDIT",
+    action: "payroll.recognition.mode",
+    entity: "SETTINGS",
+    entityId: PAYROLL_RECOGNITION_KEY,
+    summary:
+      parsed.data.mode === "PAYROLL"
+        ? "Chuyển nguồn ghi nhận chi phí nhân sự sang BẢNG LƯƠNG — nhóm “Lương” ở bảng Chi phí sẽ bị loại khỏi lợi nhuận"
+        : "Đưa nguồn ghi nhận chi phí nhân sự về BẢNG CHI PHÍ",
+    amount: null,
+    payload: parsed.data,
+  });
+  if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+  if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, parsed.data);
+  await audit({
+    userId: guard.id,
+    userEmail: guard.email,
+    action: "PAYROLL_RECOGNITION_MODE",
+    entity: "SETTINGS",
+    entityId: PAYROLL_RECOGNITION_KEY,
+    before: truoc,
+    after: parsed.data,
+  });
+  revalidate();
+  return { ok: true };
 }
