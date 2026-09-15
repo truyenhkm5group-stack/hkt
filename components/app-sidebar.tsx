@@ -134,6 +134,7 @@ const groups: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/ai", label: "Nhân sự AI", icon: Bot, permission: "ai:view" },
       { href: "/ai/review", label: "Soát & chấm tay", icon: ClipboardCheck, permission: "ai:view" },
+      { href: "/ai/fanpage", label: "Cấu hình fanpage", icon: ClipboardCheck, permission: "ai:view" },
       { href: "/ai/ad-map", label: "Bản đồ quảng cáo", icon: ClipboardCheck, permission: "ai:view" },
     ],
   },

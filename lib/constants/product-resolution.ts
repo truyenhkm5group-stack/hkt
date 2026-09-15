@@ -12,7 +12,20 @@
  */
 
 export const PRODUCT_RESOLUTION_SOURCES = [
-  /** (A) Khách hoặc nhân viên gõ thẳng mã hàng. Chắc chắn nhất, nhưng hiếm. */
+  /**
+   * (0) ẢNH CHỤP NGỮ CẢNH BÁN trên chính hội thoại — đứng trên tất cả, kể cả mã hàng gõ tay, vì
+   * nó là chuyện ĐÃ RỒI: khách đã được tư vấn mẫu nào thì cuộc ấy thuộc mẫu đó.
+   */
+  "CONVERSATION_SNAPSHOT",
+  /** (0b) Luật nguồn khai tay cho đúng quảng cáo / bài viết ấy. Ngoại lệ đè mặc định. */
+  "SOURCE_RULE",
+  /**
+   * (0c) MẪU THẮNG ĐANG CHẠY CỦA FANPAGE — ĐƯỜNG BÌNH THƯỜNG.
+   * Một page bán một mẫu thắng, nên mẫu hàng là thứ ĐÃ BIẾT chứ không phải thứ phải suy ra.
+   * Mọi tầng suy luận bên dưới tụt xuống thành ngoại lệ.
+   */
+  "FANPAGE_ACTIVE_PRODUCT",
+  /** (A) Khách hoặc nhân viên gõ thẳng mã hàng. Chắc chắn nhất trong các tầng SUY LUẬN. */
   "EXPLICIT_CODE",
   /** (C1) Mã quảng cáo đã có trong bản đồ do NGƯỜI đặt. Là sự thật, không phải suy luận. */
   "AD_MAP_HUMAN",
@@ -60,6 +73,9 @@ export const PRODUCT_RESOLUTION_ACCEPT_MIN = 0.6;
 
 /** Độ tin cậy cố định của từng tầng. Tầng khớp chữ tự tính theo điểm khớp. */
 export const PRODUCT_RESOLUTION_CONFIDENCE: Record<Exclude<ProductResolutionSource, "TEXT_MATCH" | "NONE">, number> = {
+  CONVERSATION_SNAPSHOT: 1,
+  SOURCE_RULE: 1,
+  FANPAGE_ACTIVE_PRODUCT: 0.95,
   EXPLICIT_CODE: 1,
   AD_MAP_HUMAN: 1,
   AD_MAP_AUTO: 0.85,
@@ -73,6 +89,9 @@ export const TEXT_MATCH_CONFIDENCE: Record<number, number> = { 5: 0.95, 4: 0.8, 
 
 /** Nhãn tiếng Việt cho màn hình và báo cáo. */
 export const PRODUCT_RESOLUTION_LABEL: Record<ProductResolutionSource, string> = {
+  CONVERSATION_SNAPSHOT: "Ảnh chụp trên hội thoại",
+  SOURCE_RULE: "Luật nguồn khai tay",
+  FANPAGE_ACTIVE_PRODUCT: "Mẫu thắng của fanpage",
   EXPLICIT_CODE: "Mã hàng gõ thẳng",
   AD_MAP_HUMAN: "Bản đồ quảng cáo (người đặt)",
   AD_MAP_AUTO: "Bản đồ quảng cáo (máy học)",

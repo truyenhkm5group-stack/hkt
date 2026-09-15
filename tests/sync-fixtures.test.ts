@@ -169,6 +169,7 @@ import { testProjectedDeliveryV3 } from "./projected-delivery.test";
 import { testAiPlatform } from "./ai-platform.test";
 import { testSalesAgent } from "./sales-agent.test";
 import { testProductResolver } from "./product-resolver.test";
+import { testFanpageSales } from "./fanpage-sales.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1642,6 +1643,7 @@ async function main() {
   await testAiPlatform(db);
   await testSalesAgent(db);
   await testProductResolver(db);
+  await testFanpageSales(db);
 
   // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
   console.log("\n─ Toàn vẹn kho mã");

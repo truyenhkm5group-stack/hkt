@@ -1,3 +1,6 @@
+import { TablePageSkeleton } from "@/components/skeletons";
+
 export default function Loading() {
-  return <div className="p-6 text-sm text-muted-foreground">Đang tải bản đồ quảng cáo…</div>;
+  // Bản đồ quảng cáo: tiêu đề · ba thẻ (vì sao · chờ trỏ · đã trỏ) · danh sách quảng cáo.
+  return <TablePageSkeleton cards={3} rows={6} />;
 }

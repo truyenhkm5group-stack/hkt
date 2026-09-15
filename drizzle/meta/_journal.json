@@ -610,6 +610,13 @@
       "when": 1789381043786,
       "tag": "0087_ad_media_url",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1789381103786,
+      "tag": "0088_fanpage_sales_profile",
+      "breakpoints": true
     }
   ]
 }

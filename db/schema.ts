@@ -2102,6 +2102,7 @@ export const landingOrders = pgTable(
     sizeText: text("size_text").notNull().default(""),
     colorText: text("color_text").notNull().default(""),
     quantity: integer("quantity").notNull().default(1),
+    /** NULL = CHƯA CÓ GIÁ, máy không được báo giá cho mẫu test này. */
     price: money("price"),
     total: money("total"),
     note: text("note").notNull().default(""),
@@ -2579,6 +2580,25 @@ export const salesConversations = pgTable(
     humanTakeoverAt: ts("human_takeover_at"),
     takeoverReason: text("takeover_reason").notNull().default(""),
     takeoverByUserId: text("takeover_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * ẢNH CHỤP NGỮ CẢNH BÁN — chốt một lần lúc hội thoại đủ điều kiện, sau đó BẤT BIẾN.
+     *
+     * Đây là điểm mấu chốt của cả mô hình: page đổi mẫu thắng Q004 → Q017 thì hội thoại CŨ vẫn
+     * thuộc Q004. Đọc lại cấu hình hiện hành để diễn giải chuyện đã xảy ra là viết lại quá khứ —
+     * khách được tư vấn mẫu nào, giá nào, là chuyện đã rồi.
+     */
+    sourceType: text("source_type").notNull().default(""),
+    sourceKind: text("source_kind").notNull().default(""),
+    sourceId: text("source_id").notNull().default(""),
+    salesProfileId: text("sales_profile_id").references(() => fanpageSalesProfiles.id, { onDelete: "set null" }),
+    /** Số phiên bản hồ sơ LÚC CHỤP, không phải số hiện tại. */
+    salesProfileVersion: integer("sales_profile_version"),
+    activeProductId: text("active_product_id").references(() => products.id, { onDelete: "set null" }),
+    testProductId: text("test_product_id").references(() => testProductProfiles.id, { onDelete: "set null" }),
+    /** SNAPSHOT · SOURCE_RULE · AD_MAP · FANPAGE_DEFAULT · NONE */
+    classificationSource: text("classification_source").notNull().default(""),
+    classificationConfidence: doublePrecision("classification_confidence"),
+    classifiedAt: ts("classified_at"),
     lastCustomerMessageAt: ts("last_customer_message_at"),
     lastShopMessageAt: ts("last_shop_message_at"),
     lastRunAt: ts("last_run_at"),
@@ -2860,6 +2880,217 @@ export const salesProductResolutions = pgTable(
   (t) => [
     index("sales_product_resolutions_conv_idx").on(t.conversationId, t.createdAt),
     index("sales_product_resolutions_source_idx").on(t.source),
+  ],
+);
+
+/**
+ * HỒ SƠ BÁN HÀNG CỦA MỘT FANPAGE — mẫu thắng đang chạy và toàn bộ điều kiện bán của nó.
+ *
+ * Đây là ĐƯỜNG BÌNH THƯỜNG để biết một hội thoại đang bán mẫu gì. Bản trước đi đoán từ chữ khách
+ * và từ quảng cáo, đo được 17%; cách vận hành thật là một page bán một mẫu thắng, nên mẫu hàng là
+ * thứ ĐÃ BIẾT TỪ TRƯỚC, không phải thứ phải suy ra.
+ *
+ * `version` tăng mỗi lần đổi mẫu / đổi giá. Hội thoại chụp lại số này lúc gắn hồ sơ, nên đổi cấu
+ * hình về sau KHÔNG viết lại quá khứ: page chuyển Q004 → Q017 thì cuộc cũ vẫn thuộc Q004.
+ */
+export const fanpageSalesProfiles = pgTable(
+  "fanpage_sales_profiles",
+  {
+    id: id(),
+    /** Khoá tự nhiên: page bên Pancake. */
+    pancakePageId: text("pancake_page_id").notNull(),
+    facebookPageId: text("facebook_page_id").notNull().default(""),
+    name: text("name").notNull().default(""),
+    /** OFF · SHADOW · COPILOT · AUTO — nấc quyền hạn riêng cho page này. */
+    aiMode: text("ai_mode").notNull().default("SHADOW"),
+    active: boolean("active").notNull().default(true),
+    /** Tăng mỗi lần đổi mẫu hoặc đổi điều kiện bán. Hội thoại chụp lại số này. */
+    version: integer("version").notNull().default(1),
+    effectiveFrom: ts("effective_from"),
+
+    /** MẪU THẮNG đang chạy. NULL = chưa khai ⇒ hội thoại thường rơi về UNKNOWN, KHÔNG đoán bừa. */
+    activeProductId: text("active_product_id").references(() => products.id, { onDelete: "set null" }),
+
+    // ── Điều kiện bán (có thể ĐÈ giá gốc của ERP cho riêng kênh này) ──
+    /** NULL = CHƯA KHAI GIÁ ⇒ máy KHÔNG được báo giá. `money()` mặc định 0 nên không dùng được ở đây. */
+    unitPrice: integer("unit_price"),
+    shippingFee: integer("shipping_fee"),
+    /** [{ quantity, price, freeShipping }] — giá combo. */
+    comboPricing: jsonb("combo_pricing"),
+    /** Tổng tiền từ mức này trở lên thì miễn ship. NULL = không có luật miễn ship. */
+    freeShipFrom: integer("free_ship_from"),
+    availableColors: text("available_colors").array().notNull().default(sql`'{}'::text[]`),
+    codPolicy: text("cod_policy").notNull().default(""),
+    inspectionPolicy: text("inspection_policy").notNull().default(""),
+    deliveryEstimate: text("delivery_estimate").notNull().default(""),
+    exchangePolicy: text("exchange_policy").notNull().default(""),
+    /** Câu dữ kiện ĐÃ DUYỆT máy được phép nói. Ngoài danh sách này máy không được bịa thêm. */
+    approvedFacts: text("approved_facts").array().notNull().default(sql`'{}'::text[]`),
+    sizeProfileId: text("size_profile_id").references(() => salesSizeProfiles.id, { onDelete: "set null" }),
+
+    note: text("note").notNull().default(""),
+    updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("fanpage_sales_profiles_page_uq").on(t.pancakePageId)],
+);
+
+/**
+ * BẢNG SỐ ĐO CỦA MỘT MẪU. Tách riêng để dùng lại giữa các page và giữa các mẫu cùng phom.
+ * Thiếu bảng này thì máy KHÔNG được đoán size — `SIZE_DATA_MISSING` và chuyển người.
+ */
+export const salesSizeProfiles = pgTable("sales_size_profiles", {
+  id: id(),
+  name: text("name").notNull(),
+  productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+  version: integer("version").notNull().default(1),
+  /** [{ size, heightMin, heightMax, weightMin, weightMax, bust, waist, hip }] */
+  rules: jsonb("rules"),
+  /** Co giãn / chất liệu ảnh hưởng tới chọn size. */
+  fabricStretch: text("fabric_stretch").notNull().default(""),
+  note: text("note").notNull().default(""),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * LUẬT NGUỒN — CHỈ KHAI NGOẠI LỆ.
+ *
+ * Quảng cáo bán đúng mẫu thắng của page thì KHÔNG cần khai gì: hồ sơ fanpage đã lo. Chỉ những
+ * nguồn KHÁC mẫu thắng mới phải có dòng ở đây — hàng test, hoặc nguồn chỉ người được trả lời.
+ * Nhờ vậy khối lượng khai giảm từ "mọi quảng cáo" xuống "vài ngoại lệ".
+ *
+ * Luật nguồn ĐÈ mặc định của fanpage. Đó là toàn bộ lý do nó tồn tại.
+ */
+export const salesSourceRules = pgTable(
+  "sales_source_rules",
+  {
+    id: id(),
+    pancakePageId: text("pancake_page_id").notNull(),
+    /** AD · POST */
+    sourceKind: text("source_kind").notNull().default("AD"),
+    /** Mã quảng cáo hoặc mã/đường dẫn bài viết. */
+    sourceId: text("source_id").notNull(),
+    /** WIN · TEST · HUMAN_ONLY */
+    sourceType: text("source_type").notNull(),
+    /** Khi WIN và khác mẫu thắng mặc định. */
+    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    /** Khi TEST. */
+    testProductId: text("test_product_id").references(() => testProductProfiles.id, { onDelete: "set null" }),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("sales_source_rules_uq").on(t.pancakePageId, t.sourceId)],
+);
+
+/**
+ * HỒ SƠ MỘT MẪU ĐANG TEST — tồn tại ĐƯỢC mà chưa cần mã hàng trong ERP.
+ *
+ * Mẫu test đang đo phản ứng thị trường: chưa có mã, chưa dựng xong sản phẩm, nhưng khách vẫn nhắn
+ * và vẫn phải được trả lời. Máy chỉ được dùng ĐÚNG những dữ kiện khai ở đây; thiếu thì nói chưa có
+ * chứ không bịa, và TUYỆT ĐỐI không mượn số đo hay giá của mẫu thắng.
+ */
+export const testProductProfiles = pgTable(
+  "test_product_profiles",
+  {
+    id: id(),
+    /** Mã tạm, ví dụ TEST-2026-091. Khoá tự nhiên. */
+    testCode: text("test_code").notNull(),
+    name: text("name").notNull().default(""),
+    pancakePageId: text("pancake_page_id").notNull().default(""),
+    sourceId: text("source_id").notNull().default(""),
+    images: text("images").array().notNull().default(sql`'{}'::text[]`),
+    description: text("description").notNull().default(""),
+    material: text("material").notNull().default(""),
+    colors: text("colors").array().notNull().default(sql`'{}'::text[]`),
+    /** Số đo đã biết — thiếu thì để trống, không suy từ mẫu khác. */
+    measurements: jsonb("measurements"),
+    /** Giá test. NULL = CHƯA CÓ GIÁ, máy không được báo giá. */
+    /** NULL = CHƯA CÓ GIÁ, máy không được báo giá cho mẫu test này. */
+    price: integer("price"),
+    promotion: text("promotion").notNull().default(""),
+    shippingPolicy: text("shipping_policy").notNull().default(""),
+    sizeProfileId: text("size_profile_id").references(() => salesSizeProfiles.id, { onDelete: "set null" }),
+    approvedFacts: text("approved_facts").array().notNull().default(sql`'{}'::text[]`),
+    note: text("note").notNull().default(""),
+    startAt: ts("start_at"),
+    endAt: ts("end_at"),
+    ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** DRAFT · RUNNING · ENDED · PROMOTED */
+    status: text("status").notNull().default("DRAFT"),
+    /** Khi mẫu test được nâng lên hàng thắng — hội thoại CŨ vẫn giữ nguyên là TEST. */
+    promotedProductId: text("promoted_product_id").references(() => products.id, { onDelete: "set null" }),
+
+    // ── Quyền của máy trên mẫu này. Mặc định an toàn hơn hàng thắng. ──
+    aiReplyEnabled: boolean("ai_reply_enabled").notNull().default(true),
+    allowQuotePrice: boolean("allow_quote_price").notNull().default(true),
+    allowAnswerMaterial: boolean("allow_answer_material").notNull().default(true),
+    allowAskSize: boolean("allow_ask_size").notNull().default(true),
+    allowCollectPreference: boolean("allow_collect_preference").notNull().default(true),
+    allowCollectIntent: boolean("allow_collect_intent").notNull().default(true),
+    allowCollectPhone: boolean("allow_collect_phone").notNull().default(true),
+    allowCollectAddress: boolean("allow_collect_address").notNull().default(true),
+    allowOfferProduct: boolean("allow_offer_product").notNull().default(true),
+    /** Nhóm dưới TẮT cho tới khi mẫu test có mã hàng và cấu hình đơn hợp lệ. */
+    allowAutoOrderCreate: boolean("allow_auto_order_create").notNull().default(false),
+    allowConfirmOrder: boolean("allow_confirm_order").notNull().default(false),
+    allowPromotion: boolean("allow_promotion").notNull().default(false),
+    allowUpsell: boolean("allow_upsell").notNull().default(false),
+    allowFollowUp: boolean("allow_follow_up").notNull().default(false),
+
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("test_product_profiles_code_uq").on(t.testCode)],
+);
+
+/**
+ * TÍN HIỆU THỊ TRƯỜNG THU TỪ HỘI THOẠI HÀNG TEST.
+ *
+ * Mục tiêu của hàng test KHÔNG phải là chốt nhiều đơn nhất, mà là biết thị trường có muốn mẫu này
+ * không. Vì vậy phễu của nó phải đứng RIÊNG, không trộn vào tỷ lệ chốt của hàng thắng — trộn vào
+ * thì một mẫu test tốt trông như một mẫu thắng tồi.
+ *
+ * `NULL` ở mọi ô nghĩa là CHƯA ĐO ĐƯỢC, không phải "không".
+ */
+export const testMarketSignals = pgTable(
+  "test_market_signals",
+  {
+    id: id(),
+    testProductId: text("test_product_id")
+      .notNull()
+      .references(() => testProductProfiles.id, { onDelete: "cascade" }),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesConversations.id, { onDelete: "cascade" }),
+    runId: text("run_id").references(() => aiRuns.id, { onDelete: "set null" }),
+    customerInterest: boolean("customer_interest"),
+    purchaseIntent: boolean("purchase_intent"),
+    askedPrice: boolean("asked_price"),
+    priceObjection: boolean("price_objection"),
+    requestedColor: text("requested_color").notNull().default(""),
+    requestedSize: text("requested_size").notNull().default(""),
+    heightCm: integer("height_cm"),
+    weightKg: integer("weight_kg"),
+    bustCm: integer("bust_cm"),
+    waistCm: integer("waist_cm"),
+    hipCm: integer("hip_cm"),
+    materialQuestion: boolean("material_question"),
+    sizeQuestion: boolean("size_question"),
+    shippingQuestion: boolean("shipping_question"),
+    likedDesign: boolean("liked_design"),
+    dislikedDesign: boolean("disliked_design"),
+    readyToBuy: boolean("ready_to_buy"),
+    customerFeedback: text("customer_feedback").notNull().default(""),
+    objectionCategory: text("objection_category").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("test_market_signals_conv_uq").on(t.conversationId),
+    index("test_market_signals_test_idx").on(t.testProductId),
   ],
 );
 

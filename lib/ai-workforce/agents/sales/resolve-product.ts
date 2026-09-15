@@ -22,6 +22,7 @@ import {
   type ProductResolutionSource,
 } from "@/lib/constants/product-resolution";
 import { scoreProductMatch } from "@/lib/ai-workforce/tools/erp";
+import type { SourceClassification } from "@/lib/ai-workforce/agents/sales/classify-source";
 
 export type ProductResolution = {
   productId: string | null;
@@ -39,6 +40,11 @@ export type ProductResolution = {
 export type ResolveInput = {
   conversationId: string;
   pageId: string;
+  /**
+   * Kết quả phân loại nguồn. Có nó thì KHÔNG cần đi tìm mẫu hàng nữa — page đã nói đang bán gì.
+   * Đây là đường bình thường; các tầng suy luận bên dưới chỉ chạy khi thiếu nó.
+   */
+  classification?: SourceClassification | null;
   /** Chữ khách vừa nhắn. */
   text: string;
   /** Mã quảng cáo của chính lượt này (nếu tin nhắn mang `ad_id`). */
@@ -112,6 +118,46 @@ function nhan(
  * Việc ghi bản đồ quảng cáo và ghi nhật ký kết luận nằm ở `lib/ai-workforce/agents/sales/pipeline.ts`.
  */
 export async function resolveProduct(input: ResolveInput, db: Db): Promise<ProductResolution> {
+  // ── (0) NGỮ CẢNH BÁN ĐÃ BIẾT — không đi tìm lại thứ page đã nói ─────────
+  //
+  // Đây là thay đổi lớn nhất so với bản trước. Bản trước gọi `product.search` ở MỌI lượt để "khám
+  // phá lại" mẫu hàng, và rỗng 36/36 lần. Một fanpage bán một mẫu thắng: mẫu hàng là dữ kiện có
+  // sẵn, không phải câu đố.
+  const pl = input.classification;
+  if (pl) {
+    // Hàng test KHÔNG BAO GIỜ rơi về mẫu thắng của page — bán nhầm mặt hàng là hỏng thật.
+    if (pl.sourceType === "TEST") {
+      return { ...KHONG, source: "NONE", evidence: `Hàng TEST (${pl.evidence}) — dùng hồ sơ mẫu test, KHÔNG dùng mẫu thắng của page` };
+    }
+    if (pl.sourceType === "HUMAN_ONLY") {
+      return { ...KHONG, source: "NONE", evidence: pl.evidence };
+    }
+    // CHƯA BIẾT có hai nghĩa rất khác nhau, và gộp chúng lại là hỏng theo một trong hai hướng:
+    //
+    //  · CHƯA BIẾT VÌ CÓ CHỨNG CỨ MÂU THUẪN (luật nguồn khác loại, bản đồ trỏ nhiều mẫu) ⇒ DỪNG.
+    //    Đi tiếp xuống tầng khớp chữ ở đây là cửa sau để mẫu thắng của page lọt vào đúng cuộc mà
+    //    ta vừa kết luận là không biết đang bán gì.
+    //
+    //  · CHƯA BIẾT VÌ PAGE CHƯA KHAI GÌ CẢ ⇒ đi tiếp. Không có hồ sơ thì các tầng suy luận cũ
+    //    (mã hàng gõ thẳng · lượt trước · khớp chữ) vẫn tốt hơn là không trả lời gì, và chúng
+    //    không thể tự dựng ra mẫu thắng vì page chưa khai mẫu thắng nào.
+    if (pl.sourceType === "UNKNOWN" && pl.classificationSource !== "NONE") {
+      return { ...KHONG, source: "NONE", evidence: pl.evidence };
+    }
+    if (pl.sourceType === "WIN" && pl.activeProductId) {
+      const ds0 = await danhMuc(db);
+      const u = ds0.find((x) => x.id === pl.activeProductId);
+      if (u) {
+        const nguon =
+          pl.classificationSource === "SNAPSHOT" ? "CONVERSATION_SNAPSHOT"
+          : pl.classificationSource === "SOURCE_RULE" ? "SOURCE_RULE"
+          : pl.classificationSource === "AD_MAP" ? "AD_MAP_HUMAN"
+          : "FANPAGE_ACTIVE_PRODUCT";
+        return nhan(u, nguon as ProductResolutionSource, PRODUCT_RESOLUTION_CONFIDENCE[nguon as keyof typeof PRODUCT_RESOLUTION_CONFIDENCE] ?? 0.95, pl.evidence);
+      }
+    }
+  }
+
   const ds = await danhMuc(db);
   if (!ds.length) return { ...KHONG, evidence: "Danh mục trống — chưa đồng bộ sản phẩm nào" };
 

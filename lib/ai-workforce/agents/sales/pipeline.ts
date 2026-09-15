@@ -27,6 +27,7 @@ import { generateSystemPrompt, guardGeneratedText, renderOrderReview, renderTemp
 import { bumpAsk, confirmationFingerprint, parseSalesState, parseStage, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { mergeUnderstanding, ruleIsEnough, understandByRule, understandSystemPrompt, UNDERSTANDING_SCHEMA, type Understanding } from "@/lib/ai-workforce/agents/sales/understand";
 import { resolveProduct, type ProductResolution } from "@/lib/ai-workforce/agents/sales/resolve-product";
+import { classifyConversationSource, snapshotClassification } from "@/lib/ai-workforce/agents/sales/classify-source";
 import { learnAdMapping } from "@/lib/ai-workforce/agents/sales/ad-map";
 import type { RouteTier, EscalationReason } from "@/lib/constants/ai";
 import type { SizeResultCode } from "@/lib/constants/size-engine";
@@ -282,6 +283,13 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       }
     }
 
+    // ───── 1b. PHÂN LOẠI NGUỒN, rồi CHỤP LẠI ─────
+    //
+    // Biết cuộc này đến từ đâu là biết luôn nó bán mẫu gì và chạy chính sách nào. Chụp ngay để
+    // đổi cấu hình page về sau không viết lại quá khứ.
+    const phanLoai = await classifyConversationSource({ conversationId: conversation.id, pancakePageId: conversation.pageId }, db);
+    await snapshotClassification(conversation.id, phanLoai, db);
+
     // ───── 2. NHẬN DIỆN SẢN PHẨM ─────
     // Giải TRƯỚC khi áp trạng thái, vì nó cần CSDL và cần chính tin nhắn (mã quảng cáo nằm ở
     // đính kèm của tin, không nằm trong chữ khách gõ).
@@ -293,6 +301,7 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
         adId: message.adId ?? "",
         adDescription: message.adDescription ?? "",
         postUrl: message.postUrl ?? "",
+        classification: phanLoai,
       },
       db,
     );
