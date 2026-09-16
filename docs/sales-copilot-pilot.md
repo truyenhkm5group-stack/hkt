@@ -129,6 +129,39 @@ Hai con số quan trọng nhất của đợt thí điểm:
 
 Mẫu số rỗng ⇒ in `—`, không in `0%`.
 
+## 6b. Vì sao hàng đợi từ 0 lên 11 — và con số nào mới đúng
+
+Ngày 16/09/2026 hàng đợi hiện **0 việc** trong khi page vẫn chạy quảng cáo. Không phải vì không có
+khách chờ: 48/50 hội thoại bị tính là "shop đã đáp rồi" nên biến mất khỏi màn hình.
+
+Ba dấu hiệu đo được trên 339 tin mang nhãn `PAGE_HUMAN` của page này:
+
+| Dấu hiệu | Số đo | Nói lên điều gì |
+|---|---|---|
+| Số **tài khoản** gửi | **1** | không phân biệt người với máy bằng TÊN được |
+| Tin gửi **trước** tin đầu của khách | **71** | nhân viên không chào trước khi khách nhắn |
+| Tin là bản sao **y hệt** của tin khác | **97** | hai câu dài xuất hiện đúng một lần ở mỗi 35 hội thoại |
+
+`classifySender` chạy lúc NẠP nên chỉ nhìn được MỘT tin — nó không có cách nào biết câu ấy còn nằm
+ở 34 hội thoại khác. Vì thế phép nhận dạng câu mẫu nằm ở **lớp đọc**, nơi có cả tập dữ liệu để so:
+cùng một chuỗi ký tự xuất hiện ở từ **3 hội thoại khác nhau** trở lên thì không tính là câu nhân
+viên (`AUTOMATION_TEMPLATE_MIN_CONVERSATIONS`).
+
+Sau khi sửa:
+
+| | trước | sau |
+|---|---|---|
+| shop "đã đáp rồi" | 48 | **25** |
+| khách vẫn đang chờ người | 0 | **23** |
+| còn lại trong hàng đợi | 0 | **11** |
+
+**23 khách đang bị giấu khỏi hàng đợi.** Ngưỡng 24 giờ KHÔNG bị hạ — 12 trong số 23 người ấy rơi ra
+vì đã quá hạn hoặc đang có người cầm, và đó là câu trả lời đúng.
+
+Nhánh sai rơi về phía **giữ việc lại**: nhận nhầm câu của một nhân viên thật thành câu mẫu thì một
+người đọc thẻ rồi bỏ qua; nhận nhầm câu mẫu thành câu người thì một khách không bao giờ được trả
+lời. Hai cái giá không cùng một hạng.
+
 ## 7. Ba điều đã biết trước, để không ai ngạc nhiên giữa đợt
 
 1. **Chưa có bảng số đo cho Q004.** Khách hỏi "50kg mặc size gì" ⇒ máy **chuyển người**, không đoán.
