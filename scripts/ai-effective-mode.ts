@@ -15,9 +15,9 @@
 import "dotenv/config";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { aiEnv, getAiSettings } from "@/lib/ai-workforce/config";
+import { aiEnv, effectiveMode, getAiSettings } from "@/lib/ai-workforce/config";
 import { getAgent } from "@/lib/ai-workforce/registry";
-import { MAX_ALLOWED_MODE } from "@/lib/constants/ai";
+import { clampMode, MAX_ALLOWED_MODE, modeAtLeast } from "@/lib/constants/ai";
 
 async function main() {
   const db = await getDb();
@@ -37,6 +37,26 @@ async function main() {
   console.log(`  MÁY tự gửi   : ${settings.hardLimits.allowAutoSend ? "!!! CHO PHÉP !!!" : "CẤM"}`);
   console.log(`  NGƯỜI bấm gửi: ${settings.hardLimits.allowHumanApprovedSend ? "được phép" : "CẤM"}`);
   console.log(`  tạo đơn      : ${settings.hardLimits.allowOrderCreate ? "!!! CHO PHÉP !!!" : "CẤM"}`);
+
+  /*
+    THỬ BẬT AUTO — KHÔNG GHI MỘT DÒNG NÀO.
+
+    Câu hỏi là "nếu ai đó đặt AUTO thì máy có tự nhắn khách không". Cách tồi để trả lời là ghi AUTO
+    vào `ai_agents.mode` rồi xem — tức là thật sự mở công tắc ấy ra trên một page có khách thật,
+    dù chỉ vài giây. Cách đúng là hỏi CHÍNH hàm mà ứng dụng dùng, với AUTO làm đầu vào: cùng một
+    phép tính, cùng một câu trả lời, và không có khoảnh khắc nào hệ thống ở trạng thái AUTO.
+  */
+  const neuAiDoDatAuto = effectiveMode("sales", "AUTO", settings);
+  const thoatDuoc = modeAtLeast(neuAiDoDatAuto, "AUTO") || modeAtLeast(clampMode("AUTO"), "AUTO");
+  console.log("");
+  console.log("───────── THỬ BẬT AUTO (không ghi gì) ─────────");
+  console.log(`  đặt ai_agents.mode = AUTO ⇒ nấc có hiệu lực: ${neuAiDoDatAuto}`);
+  console.log(`  clampMode("AUTO")                          : ${clampMode("AUTO")}`);
+  console.log(`  ⇒ AUTO có kích hoạt được không             : ${thoatDuoc ? "!!! CÓ — DỪNG LẠI NGAY !!!" : "KHÔNG"}`);
+  if (thoatDuoc) {
+    console.error("✗ DỪNG: có đường đi tới nấc AUTO. Đây là điều kiện để máy tự nhắn khách.");
+    process.exit(1);
+  }
 
   // Một dòng KẾT LUẬN, để không ai phải tự suy từ năm dòng ở trên.
   if (row?.mode && agent?.mode && row.mode !== agent.mode) {
