@@ -274,6 +274,20 @@ deploy dừng, không phải cảnh báo.
     này và thấy gì" khi con số gây tranh cãi. Bốn phán quyết `SAME` · `DUPLICATE_ROW` · `OLDER` ·
     `UNKNOWN_STATUS` **không phải lỗi** và không được gộp thành một nhãn "bỏ qua".
 
+50. **BÀI KIỂM KHÔNG ĐƯỢC MANG HẠN SỬ DỤNG.** Hai quả bom hẹn giờ nổ trong cùng một buổi sáng
+    16/09/2026, và mỗi quả đều CHẶN MỌI LẦN DEPLOY (workflow deploy chạy `npm test` trước khi đụng
+    máy chủ):
+
+    · `tests/order-duplicate.test.ts` ghim `NOW = 2026-09-15T10:00:00Z` rồi gieo dữ liệu tương đối
+      so với mốc ĐÓ, trong khi truy vấn lọc theo `now() - 48 giờ` THẬT. CI 03:45Z xanh, 04:25Z đỏ.
+    · `tests/care-os.test.ts` dùng `ky(gio(400), gio(300))` — một cửa sổ TRƯỢT theo đồng hồ thật
+      quét qua dữ liệu có ngày CỐ ĐỊNH. CI 04:57Z xanh, 05:25Z đỏ.
+
+    Luật: **mốc trong bài kiểm hoặc đi theo đồng hồ thật cùng nhịp với thứ nó đo, hoặc được dựng
+    TỪ CHÍNH DỮ LIỆU** (`min(opened_at)` của bảng đang kiểm). Cấm ghim một ngày tuyệt đối rồi gieo
+    dữ liệu tương đối so với nó, và cấm cửa sổ "N giờ trước" trỏ vào dữ liệu ngày cố định. Một bài
+    kiểm đỏ vì hôm nay là thứ Tư thì không ai đọc thông điệp của nó nữa — họ chỉ đi gia hạn con số.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và
