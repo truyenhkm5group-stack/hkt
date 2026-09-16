@@ -88,6 +88,9 @@ const ROUTES = [
   // Tuyến NẶNG NHẤT của trang Vận đơn: tháp điều khiển mở sẵn một rổ, tức là render cả danh sách
   // kiện kèm tuổi tin cuối. Không phủ nó thì lá chắn chỉ canh trang rỗng.
   "/shipments?bucket=CARE_TODAY",
+  // Hàng đợi "VTP cần đối chiếu": quét TOÀN BỘ kiện có mã VTP và chạy sáu vị ngữ trên chúng, nên
+  // nó là tuyến nặng nhất của module — và là tuyến duy nhất đọc `vtp_webhook_gaps`.
+  "/shipments?view=reconcile",
   "/import-vtp",
   "/cod",
   "/cod?recon=unproven",
@@ -472,6 +475,25 @@ async function main() {
       `select s.id from shipments s where exists (select 1 from care_actions a where a.shipment_id = s.id) order by s.created_at desc limit 1`,
       "kiện có thao tác chăm sóc của người",
     );
+    /*
+      TRANG CHI TIẾT MỘT LẦN NHẬP TỆP — cùng lý do, cùng cách: không có mã lần nhập nào gõ cứng
+      được mà vẫn đúng sau một tuần. Trang này đọc ba bảng (`vtp_import_batches`,
+      `vtp_webhook_gaps`, và các lượt cùng checksum) nên một truy vấn hỏng ở đó không lượt smoke
+      nào thấy nếu chỉ phủ trang danh sách.
+    */
+    try {
+      const rows = (await db.execute(
+        `select id from vtp_import_batches order by created_at desc limit 1` as never,
+      )) as unknown as { rows?: { id: string }[] } | { id: string }[];
+      const list = Array.isArray(rows) ? rows : (rows.rows ?? []);
+      const id = list[0]?.id;
+      if (id) {
+        routes.push(`/import-vtp/${id}`);
+        console.error(`  · thêm tuyến động /import-vtp/${id} — lần nhập tệp gần nhất`);
+      }
+    } catch {
+      // Chưa có lần nhập nào ⇒ bỏ qua im lặng, không làm đỏ lần deploy.
+    }
   } catch (e) {
     console.error(`  · không phân giải được tuyến chi tiết vận đơn (bỏ qua): ${e instanceof Error ? e.message : e}`);
   }
