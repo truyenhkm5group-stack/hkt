@@ -81,6 +81,7 @@ on:
           - ai-staging-ai-env     # ghi OPENAI_API_KEY / AI_PROVIDER từ Secrets vào .env.staging rồi thử kết nối (KHÔNG in giá trị)
           - ai-staging-shadow     # MẺ CHẠY NGẦM VỚI MÔ HÌNH THẬT (arg: "--page=<id> --max=20 [--dry-run]")
           - ai-staging-copilot    # BẬT/TẮT nấc TRỢ LÝ cho MỘT page (arg: "--page=<id> --on" | "--off"); MÁY TỰ GỬI vẫn ghim CẤM
+          - ai-staging-live-ingest # BẬT/TẮT bộ nạp tin sống (arg: "--on [--seconds=45]" | "--off" | "--once"); chỉ ĐỌC, không bao giờ gửi
           - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
@@ -864,6 +865,89 @@ jobs:
                 docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
                   psql -U erp -d erp -At -c "select 'page thí điểm: ' || coalesce(value, '(chưa khai)') from settings where key = 'ai.copilotPages';"
                 docker exec vnx-ai-staging-app sh -lc 'echo "MÁY tự gửi   : ${AI_ALLOW_AUTO_SEND:-(chưa đặt)}"; echo "NGƯỜI bấm gửi: ${AI_ALLOW_HUMAN_APPROVED_SEND:-(chưa đặt)}"; echo "tạo đơn      : ${AI_ALLOW_ORDER_CREATE:-(chưa đặt)}"'
+                echo ""
+                echo "Mở hàng đợi: http://127.0.0.1:3100/ai/copilot (qua tunnel SSH)" ;;
+
+              ai-staging-live-ingest)
+                # BỘ NẠP TIN SỐNG — BẬT/TẮT MỘT TIẾN TRÌNH CHỈ BIẾT ĐỌC.
+                #
+                # Tách khỏi `ai-staging-copilot` có chủ ý: "đọc tin về" và "người bấm gửi đi" là hai
+                # mức rủi ro khác nhau, nên phải bật/tắt được rời nhau. Gộp một công tắc thì để xem
+                # được tin khách phải mở luôn đường gửi.
+                #
+                # `AI_ALLOW_AUTO_SEND` vẫn ghim CẤM trong docker-compose.staging.yml cho CẢ HAI
+                # container, và chính script bộ nạp tự từ chối khởi động nếu nó bật.
+                cd /opt/vnx-ai-staging
+                upsert_stg() { if grep -qE "^$1=" .env.staging; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env.staging; else printf '%s="%s"\n' "$1" "$2" >> .env.staging; fi; }
+                BAT="0"; MOT="0"; GIAY=""
+                for a in ${ARG:-}; do
+                  case "$a" in
+                    --on) BAT="1" ;;
+                    --off) BAT="0" ;;
+                    --once) MOT="1" ;;
+                    --seconds=*) GIAY="${a#--seconds=}" ;;
+                  esac
+                done
+
+                # MỘT VÒNG RỒI THOÁT — để KIỂM, không để chạy. Không đụng tới công tắc, không dựng
+                # container nào: chạy trong chính container `app` rồi in kết quả.
+                if [ "$MOT" = "1" ]; then
+                  echo "── MỘT VÒNG NẠP (không bật gì, không gửi gì) ──"
+                  docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                    exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-live-ingest.ts --once
+                  exit 0
+                fi
+
+                if [ "$BAT" = "1" ]; then
+                  # KHÔNG bật một bộ nạp không có gì để đọc. Danh sách page rỗng nghĩa là chưa ai
+                  # chọn page thí điểm — bật lúc ấy thì log đầy dòng "không đọc gì" và người vận
+                  # hành tưởng hệ thống hỏng. Nêu đúng việc phải làm thay vì chạy rỗng.
+                  SO_PAGE=$(docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
+                    psql -U erp -d erp -At -c "select coalesce(json_array_length(value::json), 0) from settings where key = 'ai.copilotPages';" 2>/dev/null | tr -d '\r' || echo 0)
+                  if [ -z "$SO_PAGE" ] || [ "$SO_PAGE" = "0" ]; then
+                    echo "✗ Chưa khai page thí điểm nào (settings.ai.copilotPages rỗng)."
+                    echo "  Chạy trước: action = ai-staging-copilot, arg = \"--page=<PAGE_ID> --on\""
+                    exit 1
+                  fi
+                  upsert_stg AI_LIVE_INGEST_ENABLED true
+                  # `[ ... ] && cmd` ở đây sẽ TRẢ VỀ 1 khi vế trái sai, và cả bước đang chạy dưới
+                  # `set -e` — tức là không truyền --seconds thì thao tác chết ngay tại dòng này.
+                  if [ -n "$GIAY" ]; then upsert_stg AI_LIVE_INGEST_INTERVAL_SECONDS "$GIAY"; fi
+                else
+                  upsert_stg AI_LIVE_INGEST_ENABLED false
+                fi
+                upsert_stg AI_ALLOW_AUTO_SEND false
+                chmod 600 .env.staging
+
+                if [ "$BAT" = "1" ]; then
+                  docker compose -f docker-compose.staging.yml --env-file .env.staging up -d ingest
+                  # `app` cũng phải dựng lại: dải tình trạng trên /ai/copilot đọc AI_LIVE_INGEST_ENABLED
+                  # từ môi trường của CHÍNH nó, nên không dựng lại thì màn hình vẫn báo TẮT.
+                  docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
+                  sleep 20
+                else
+                  docker compose -f docker-compose.staging.yml --env-file .env.staging rm -sf ingest >/dev/null 2>&1 || true
+                  docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
+                  sleep 12
+                fi
+
+                echo ""
+                echo "── ĐỌC LẠI TỪ BẢN ĐANG CHẠY (không phải từ thứ vừa gõ) ──"
+                docker ps -a --filter 'name=vnx-ai-staging-ingest' --format '  {{.Names}}\t{{.Status}}' || echo "  (chưa có container bộ nạp)"
+                docker exec vnx-ai-staging-app sh -lc 'echo "  bộ nạp sống  : ${AI_LIVE_INGEST_ENABLED:-(chưa đặt)}"; echo "  nhịp         : ${AI_LIVE_INGEST_INTERVAL_SECONDS:-45}s"; echo "  MÁY tự gửi   : ${AI_ALLOW_AUTO_SEND:-(chưa đặt)}"; echo "  NGƯỜI bấm gửi: ${AI_ALLOW_HUMAN_APPROVED_SEND:-(chưa đặt)}"; echo "  tạo đơn      : ${AI_ALLOW_ORDER_CREATE:-(chưa đặt)}"'
+                echo ""
+                echo "── MỐC ĐỌC TRONG CSDL (chứng cứ vòng nào đã chạy) ──"
+                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
+                  psql -U erp -d erp -P pager=off -c \
+                  "select page_id, to_char(last_ok_at, 'DD/MM HH24:MI:SS') as vong_gan_nhat, to_char(last_message_at, 'DD/MM HH24:MI:SS') as tin_khach_moi_nhat, messages_ingested as tin_da_nap, consecutive_errors as hong_lien_tiep, coalesce(nullif(last_error, ''), '—') as loi_cuoi from sales_ingest_cursors order by page_id;" || echo "  (bảng sales_ingest_cursors chưa có — migration chưa chạy?)"
+                echo ""
+                echo "── KHÔNG MỘT TIN NÀO ĐI RA (đếm thẳng trong CSDL) ──"
+                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
+                  psql -U erp -d erp -At -c \
+                  "select 'gợi ý đã gửi: ' || count(*) filter (where sent) || ' · tin do AI gửi: ' || (select count(*) from sales_messages where from_agent) from sales_suggestions;"
+                echo ""
+                echo "── 25 DÒNG LOG GẦN NHẤT CỦA BỘ NẠP ──"
+                docker logs --tail=25 vnx-ai-staging-ingest 2>&1 || echo "  (chưa có log)"
                 echo ""
                 echo "Mở hàng đợi: http://127.0.0.1:3100/ai/copilot (qua tunnel SSH)" ;;
 

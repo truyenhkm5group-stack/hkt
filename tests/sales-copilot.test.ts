@@ -13,7 +13,8 @@ import {
   editDistance,
   isMeaningfulEdit,
 } from "@/lib/constants/sales-copilot";
-import { copilotKpi, copilotPageAllowed, copilotPages, copilotQueue } from "@/lib/queries/sales-copilot";
+import { copilotKpi, copilotPageAllowed, copilotPages, copilotQueue, ingestStatus } from "@/lib/queries/sales-copilot";
+import { LIVE_INGEST_MAX_BACKOFF, LIVE_INGEST_MAX_SECONDS, liveIngestHealth, nextDelaySeconds, windowHours } from "@/lib/constants/live-ingest";
 import { getAgent } from "@/lib/ai-workforce/registry";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import { setSettingJson } from "@/lib/settings";
@@ -124,6 +125,47 @@ export async function testSalesCopilot(db: Db) {
   }
   assert.deepEqual(dinhDauHuyen, [], "chú thích SQL không được chứa dấu huyền ngược — nó đóng chuỗi mẫu và làm hỏng cả truy vấn");
 
+  /*
+    1C. BỘ NẠP TIN SỐNG ĐỌC ĐƯỢC, NHƯNG KHÔNG CÓ ĐƯỜNG NÀO TỚI CỔNG GỬI.
+
+    Bốn việc, bốn mức rủi ro: ĐỌC · SOẠN · GỬI · TẠO ĐƠN. Hai việc đầu chạy nền được, hai việc sau
+    thì không. Cách chứng minh KHÔNG phải là đọc lời hứa trong chú thích, mà là quét xem tệp chạy
+    nền có nhắc tới cổng gửi hay không.
+  */
+  for (const f of ["lib/ai-workforce/live-ingest.ts", "scripts/ai-live-ingest.ts"]) {
+    const ma = readFileSync(f, "utf8");
+    assert.ok(!/sendSalesMessage|sendCopilotReply|approvedByUserId/.test(ma), `${f}: tiến trình nền KHÔNG được có đường tới cổng gửi`);
+  }
+  // Và chính nó tự từ chối khởi động nếu môi trường cho máy tự gửi — một lớp nữa, cố ý thừa.
+  assert.match(readFileSync("scripts/ai-live-ingest.ts", "utf8"), /allowAutoSend[\s\S]{0,200}process\.exit\(1\)/, "bộ nạp phải tự dừng khi AI_ALLOW_AUTO_SEND bật");
+
+  // NGHỈ DÀI DẦN KHI HỎNG — hàm thuần, và trần phải có thật.
+  assert.equal(nextDelaySeconds(45, 0), 45, "chạy được thì giữ nhịp thường");
+  assert.equal(nextDelaySeconds(45, 1), 45, "hỏng lần đầu chưa nhân đôi");
+  assert.equal(nextDelaySeconds(45, 2), 90);
+  assert.equal(nextDelaySeconds(45, 3), 180);
+  // HAI cái trần, và cái nào chặn trước là tuỳ nhịp: hệ số nhân có trần 8×, và có thêm một trần
+  // TUYỆT ĐỐI theo giây. Ở nhịp 45s thì 8× (360s) chặn trước; ở nhịp thưa thì trần giây chặn.
+  // Chỉ kiểm một trong hai là để cái còn lại tự do trôi.
+  assert.equal(nextDelaySeconds(45, 20), 45 * LIVE_INGEST_MAX_BACKOFF, "nghỉ dài dần phải có TRẦN, nếu không một lượt hỏng dài sẽ thành ngừng hẳn");
+  assert.equal(nextDelaySeconds(120, 20), LIVE_INGEST_MAX_SECONDS, "nhịp thưa thì TRẦN THEO GIÂY chặn — 120×8 = 960s là bỏ rơi hàng đợi cả mười lăm phút");
+  for (const n of [1, 2, 3, 5, 8, 13, 99]) assert.ok(nextDelaySeconds(60, n) <= LIVE_INGEST_MAX_SECONDS, `nghỉ ${n} lần hỏng vẫn phải dưới trần`);
+
+  // CỬA SỔ ĐỌC — luôn chồng lấn, và lần đầu KHÔNG đọc cả lịch sử.
+  const batDau = new Date("2026-09-16T10:00:00Z");
+  assert.equal(windowHours(null, batDau), 2, "chưa có mốc thì đọc một cửa sổ NHỎ, không phải toàn bộ lịch sử");
+  assert.equal(windowHours(new Date("2026-09-16T09:58:00Z"), batDau), 1, "vừa chạy xong vẫn hỏi lại ít nhất 1 giờ — chồng lấn để không lọt tin");
+  assert.equal(windowHours(new Date("2026-09-16T04:00:00Z"), batDau), 7, "đứt 6 tiếng thì đọc bù 6 tiếng + chồng lấn");
+  assert.equal(windowHours(new Date("2026-09-10T10:00:00Z"), batDau), 24, "đứt nhiều ngày vẫn có TRẦN 24 giờ");
+
+  // SỨC KHOẺ — và thứ tự các nhánh: TẮT phải đứng trước LỖI.
+  const luc = new Date("2026-09-16T10:00:00Z");
+  assert.equal(liveIngestHealth({ enabled: false, lastOkAt: null, consecutiveErrors: 9, now: luc }), "OFF", "đang tắt thì báo TẮT, không báo LỖI — nếu không người vận hành đi tìm một sự cố không tồn tại");
+  assert.equal(liveIngestHealth({ enabled: true, lastOkAt: null, consecutiveErrors: 3, now: luc }), "ERROR");
+  assert.equal(liveIngestHealth({ enabled: true, lastOkAt: new Date("2026-09-16T09:59:30Z"), consecutiveErrors: 0, now: luc }), "LIVE");
+  assert.equal(liveIngestHealth({ enabled: true, lastOkAt: new Date("2026-09-16T09:50:00Z"), consecutiveErrors: 0, now: luc }), "SLOW", "mười phút không có vòng nào chạy được là ĐỨT, không phải 'đang chậm một chút'");
+  assert.equal(liveIngestHealth({ enabled: true, lastOkAt: new Date("2026-09-16T09:50:00Z"), consecutiveErrors: 2, now: luc }), "ERROR");
+
   // ═════════ 2. QUYỀN GỬI TÁCH KHỎI QUYỀN XEM ═════════
   const cs = resolvePermissions("CS", null);
   assert.ok(cs.includes("ai:send"), "người trực chat (CS) phải bấm gửi được");
@@ -148,7 +190,19 @@ export async function testSalesCopilot(db: Db) {
   // Cấu hình hỏng ⇒ rơi về phía HẸP HƠN, không phải mở toang.
   await db.update(schema.settings).set({ value: "{khong-phai-json" }).where(eq(schema.settings.key, COPILOT_PAGES_KEY));
   assert.deepEqual(await copilotPages(db), [], "cấu hình hỏng ⇒ không page nào gửi được");
+  // Không page nào thí điểm ⇒ không có dòng tình trạng nào. Một dải trạng thái báo "ĐANG CHẠY"
+  // cho một page không ai bật là lời trấn an sai chỗ.
+  assert.deepEqual(await ingestStatus(db), [], "chưa khai page thì không có dòng tình trạng nạp tin nào");
   await db.update(schema.settings).set({ value: JSON.stringify(["page-thi-diem"]) }).where(eq(schema.settings.key, COPILOT_PAGES_KEY));
+
+  // TÌNH TRẠNG BỘ NẠP ĐỌC ĐƯỢC KHÔNG CẦN LOG — và mặc định là TẮT, vì `AI_LIVE_INGEST_ENABLED`
+  // vắng mặt. Trước đây câu trả lời "nó có chạy không" chỉ nằm trong `docker logs`.
+  const tinhTrang = await ingestStatus(db);
+  assert.equal(tinhTrang.length, 1, "mỗi page thí điểm một dòng tình trạng");
+  assert.equal(tinhTrang[0].pageId, "page-thi-diem");
+  assert.equal(tinhTrang[0].health, "OFF", "chưa bật công tắc ⇒ TẮT, không phải LỖI");
+  assert.equal(tinhTrang[0].lastOkAt, null, "chưa vòng nào chạy ⇒ CHƯA BIẾT, không phải mốc 0");
+  assert.equal(tinhTrang[0].messagesIngested, 0);
 
   // ═════════ 4. KHOẢNG CÁCH SỬA — HÀM THUẦN ═════════
   assert.equal(editDistance("abc", "abc"), 0);

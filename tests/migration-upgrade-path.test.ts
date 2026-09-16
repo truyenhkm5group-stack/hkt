@@ -35,7 +35,7 @@ type Entry = { idx: number; tag: string; when: number; version: string; breakpoi
 // 14/09/2026: `0083_hmt_exception_resolution` ĐÃ lên main và đã chạy trên máy chủ (bản phát hành
 // #276), nên nó không còn là "mới" nữa — giữ nó trong danh sách này làm bài kiểm đòi nâng mốc của
 // một migration ĐÃ ÁP, tức là đúng điều nguy hiểm nhất có thể làm với sổ migration.
-const MOI = ["0084_ai_workforce_foundation", "0085_sales_shadow_validation", "0086_product_resolver_v2", "0087_ad_media_url", "0088_fanpage_sales_profile", "0089_conversation_offer_snapshot", "0090_sales_knowledge", "0091_sales_policy_and_size_source", "0092_sales_review_reason_tags", "0093_sales_copilot_actions", "0094_copilot_facts_and_verify"] as const;
+const MOI = ["0084_ai_workforce_foundation", "0085_sales_shadow_validation", "0086_product_resolver_v2", "0087_ad_media_url", "0088_fanpage_sales_profile", "0089_conversation_offer_snapshot", "0090_sales_knowledge", "0091_sales_policy_and_size_source", "0092_sales_review_reason_tags", "0093_sales_copilot_actions", "0094_copilot_facts_and_verify", "0095_sales_ingest_cursors"] as const;
 
 export async function testMigrationUpgradePath() {
   const goc = path.join(process.cwd(), "drizzle");

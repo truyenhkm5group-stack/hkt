@@ -10,7 +10,9 @@ import { getAgent } from "@/lib/ai-workforce/registry";
 import { requirePermission } from "@/lib/auth/session";
 import { getCurrentUser } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { copilotKpi, copilotPages, copilotQueue } from "@/lib/queries/sales-copilot";
+import { copilotKpi, copilotPages, copilotQueue, ingestStatus } from "@/lib/queries/sales-copilot";
+import { LIVE_INGEST_HEALTH_LABEL } from "@/lib/constants/live-ingest";
+import { AutoRefresh } from "@/app/(dashboard)/ai/copilot/auto-refresh";
 
 export const metadata = { title: "Hàng đợi trợ lý AI" };
 
@@ -30,11 +32,60 @@ export default async function CopilotPage() {
   const sanSang = modeAtLeast(mode, "COPILOT") && settings.hardLimits.allowHumanApprovedSend && pages.length > 0;
   // Hội thoại người khác đang cầm KHÔNG hiện ở đây — trừ hội thoại của chính người đang xem,
   // để họ còn nút trả lại cho máy.
-  const [queue, kpi] = await Promise.all([copilotQueue({ limit: 40, heldByUserId: user?.id ?? null }), copilotKpi(7)]);
+  const [queue, kpi, nap] = await Promise.all([copilotQueue({ limit: 40, heldByUserId: user?.id ?? null }), copilotKpi(7), ingestStatus()]);
 
   return (
     <div className="space-y-4">
       <PageHeader title="Hàng đợi trợ lý AI" description="Máy soạn — nhân viên đọc, sửa nếu cần, rồi bấm gửi. Không có đường nào cho máy tự gửi." />
+
+      {/*
+        MỘT DÒNG TRẢ LỜI "HỆ THỐNG CÓ ĐANG SỐNG KHÔNG".
+
+        Nhân viên trực chat không mở log. Nếu bộ nạp chết lúc 10 giờ mà màn hình vẫn im lặng thì
+        tới trưa họ mới thấy lạ vì "hôm nay ít khách" — và lúc đó đã mất hai tiếng.
+
+        Con số quyết định là VÒNG CHẠY ĐƯỢC gần nhất, không phải vòng gần nhất: một bộ nạp hỏng
+        liên tục vẫn chạy đều đặn.
+      */}
+      <Card className="p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <span className="font-semibold">Nạp tin sống</span>
+          <AutoRefresh seconds={20} />
+        </div>
+        {nap.length === 0 ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Chưa khai page thí điểm nào, nên không có gì để đọc. Khai ở <code>settings.ai.copilotPages</code> (thao tác ops <code>ai-staging-copilot</code>) trước khi bật bộ nạp.
+          </p>
+        ) : (
+          nap.map((n) => (
+            <div key={n.pageId} className={`mt-2 rounded border p-2 ${n.health === "LIVE" ? "" : n.health === "OFF" ? "border-amber-500/60" : "border-rose-500/60"}`}>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <span className="font-mono text-[11px]">{n.pageId}</span>
+                <span
+                  className={`font-semibold ${n.health === "LIVE" ? "text-emerald-700 dark:text-emerald-300" : n.health === "OFF" ? "text-amber-700 dark:text-amber-300" : "text-rose-700 dark:text-rose-300"}`}
+                >
+                  {LIVE_INGEST_HEALTH_LABEL[n.health]}
+                </span>
+                <span className="text-muted-foreground">vòng chạy được gần nhất: {n.lastOkAt ? formatDateTime(n.lastOkAt) : "chưa có"}</span>
+                <span className="text-muted-foreground">tin khách mới nhất: {n.lastCustomerMessageAt ? formatDateTime(n.lastCustomerMessageAt) : "chưa có"}</span>
+                <span className="text-muted-foreground">đã nạp: {formatNumber(n.messagesIngested)} tin</span>
+                <span className="text-muted-foreground">hàng đợi: {formatNumber(queue.length)}</span>
+              </div>
+              {/*
+                HAI CHUYỆN KHÁC NHAU, HAI CÁCH NÓI. "Hỏng 3 vòng liền" là mất kết nối — đi xem ngay.
+                "Lỗi lẻ ở vòng vừa rồi" là một hội thoại cần xem bằng mắt trong khi phần còn lại vẫn
+                chạy. Gộp một màu đỏ thì người trực hoặc hoảng thừa, hoặc quen mắt rồi bỏ qua cả hai.
+              */}
+              {n.lastError ? (
+                <p className={`mt-1 text-[11px] ${n.consecutiveErrors > 0 ? "text-rose-700 dark:text-rose-300" : "text-amber-700 dark:text-amber-300"}`}>
+                  {n.consecutiveErrors > 0 ? `hỏng ${formatNumber(n.consecutiveErrors)} vòng liền: ` : "lỗi lẻ ở vòng vừa rồi (các hội thoại khác vẫn nạp): "}
+                  {n.lastError}
+                </p>
+              ) : null}
+            </div>
+          ))
+        )}
+      </Card>
 
       {/* TRẠNG THÁI CỔNG — đọc từ đúng nơi cổng gửi đọc, không phải một bản mô tả chép tay. */}
       <Card className="p-3">

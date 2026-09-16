@@ -2,13 +2,14 @@
 
 **Máy soạn → nhân viên đọc, sửa nếu cần → nhân viên bấm gửi.** Không có đường nào cho máy tự gửi.
 
-## 1. Ba công tắc, và ai mở được cái nào
+## 1. Bốn công tắc, và ai mở được cái nào
 
 | Công tắc | Nghĩa | Ở đâu | Ai mở được |
 |---|---|---|---|
 | `AI_ALLOW_AUTO_SEND` | MÁY tự nhắn khách | ghim `"false"` trong `docker-compose.staging.yml` | **không ai** — phải sửa tệp, commit, qua cổng kiểm thử, dựng lại |
 | `AI_ALLOW_HUMAN_APPROVED_SEND` | NHÂN VIÊN bấm gửi | `.env.staging` | thao tác ops `ai-staging-copilot` |
 | `AI_ALLOW_ORDER_CREATE` | tạo / chốt đơn trên POS | ghim `"false"` | **không ai** (giai đoạn này) |
+| `AI_LIVE_INGEST_ENABLED` | ĐỌC tin khách về, liên tục | `.env.staging` | thao tác ops `ai-staging-live-ingest` |
 
 Tên cũ `AI_ALLOW_CUSTOMER_SEND` sau bản tách **chỉ còn nghĩa "nhân viên bấm gửi"**. Nó không bao giờ
 mở được đường máy tự gửi, kể cả khi ai đó bật nó lên vì quen tay.
@@ -45,7 +46,63 @@ Tắt: `arg = --off` (danh sách page về rỗng, nấc về `SHADOW`, công t�
 
 Mở hàng đợi: `http://127.0.0.1:3100/ai/copilot` qua tunnel SSH.
 
-## 4. Nhân viên làm gì trên hàng đợi
+## 4. Nạp tin sống — khách nhắn là thẻ hiện ra
+
+**ĐỌC tự động được. GỬI thì không.** Bốn việc, bốn mức rủi ro, và chỉ hai việc đầu chạy nền:
+
+| Việc | Ai thấy | Chạy nền? |
+|---|---|---|
+| ĐỌC tin khách về | không ai ngoài shop | ✔ |
+| SOẠN câu gợi ý | không ai ngoài shop | ✔ (nấc `COPILOT`) |
+| GỬI cho khách | **người ngoài** | ✘ — chỉ khi có người bấm |
+| TẠO ĐƠN | tiền và hàng đi theo | ✘ — `AI_ALLOW_ORDER_CREATE` vẫn CẤM |
+
+Gộp bốn việc vào một công tắc thì để xem được tin khách phải mở luôn đường gửi. Tách ra thì bộ nạp
+chạy suốt ngày mà **không có đường nào tới khách**: tệp nó chạy không import cổng gửi (có bài kiểm
+quét mã nguồn khoá lại điều đó), còn cổng gửi thì đòi một khoá tài khoản mà tiến trình nền không có.
+
+Bật:
+
+```
+action = ai-staging-live-ingest
+arg    = --on            (hoặc: --on --seconds=45)
+```
+
+Tắt: `arg = --off`. Kiểm một vòng mà **không bật gì**: `arg = --once`.
+
+Thao tác này từ chối bật khi `settings["ai.copilotPages"]` còn rỗng — một bộ nạp không có page nào
+để đọc chỉ sinh ra log "không đọc gì" và làm người vận hành tưởng hệ thống hỏng.
+
+**Vì sao hỏi liên tục chứ không đợi webhook.** Webhook chat của Pancake chưa được kiểm chứng trên
+bản chạy thử: 27 giờ không một tin nào về trong khi page vẫn chạy quảng cáo. Một đường vào chưa
+chứng minh được thì không dựng cả đợt thí điểm lên nó. Hỏi mỗi 45 giây chậm hơn vài chục giây nhưng
+**đo được**: mỗi vòng để lại một mốc trong `sales_ingest_cursors`.
+
+**Chồng lấn 10 phút, và nó không sinh ra bản sao.** Pancake lọc hội thoại theo lần cập nhật, đồng hồ
+hai bên không bao giờ khớp tuyệt đối, nên hỏi đúng từ mốc cũ thì một tin rơi vào khe giữa hai vòng
+sẽ mất luôn và không ai biết. Đường nạp chống trùng bằng mã tin ngoài và bằng vân tay nội dung, nên
+đọc lại một tin cũ là một phép không-thao-tác. Lần chạy đầu (chưa có mốc) đọc **2 giờ**, không đọc
+cả lịch sử: một lượt nạp toàn bộ sẽ nuốt hạn mức Pancake và đổ hàng nghìn dòng vào hàng đợi cùng lúc.
+
+**Dựng lại container không mất chỗ đang đọc**: mốc nằm ở CSDL, không trong bộ nhớ tiến trình.
+
+**Đọc tình trạng không cần log.** Đầu trang `/ai/copilot` có một dải: `ĐANG CHẠY` / `CHẬM` / `LỖI` /
+`TẮT`, vòng chạy được gần nhất, tin khách mới nhất, số tin đã nạp, số việc đang chờ. Con số quyết
+định là **vòng CHẠY ĐƯỢC** gần nhất chứ không phải vòng gần nhất — một bộ nạp hỏng liên tục vẫn chạy
+đều đặn. Quá 5 phút không có vòng nào chạy được là **ĐỨT**, không phải "đang chậm một chút".
+
+Trang tự làm mới mỗi 20 giây bằng `router.refresh()` (không tải lại trang, nên chữ đang gõ dở trong
+ô soạn không mất), và dừng khi tab bị ẩn.
+
+**Hỏng thì nghỉ dài dần** 1× · 2× · 4× · 8×, có trần. Một hội thoại lẻ hỏng trong khi 29 hội thoại
+kia nạp bình thường **không** bị tính là vòng hỏng — nó hiện ra màn hình dưới màu hổ phách "lỗi lẻ",
+tách khỏi màu đỏ "hỏng N vòng liền".
+
+> **Không dùng hội thoại cũ để lấp quota.** Hàng đợi loại lượt quá 24 giờ, lượt đã có người trả lời,
+> lượt người khác đang cầm. Ngưỡng ấy **không** được hạ xuống chỉ để hàng đợi có dữ liệu — một thẻ
+> gợi ý cho câu khách hỏi ba ngày trước là một tin trả lời muộn ba ngày.
+
+## 5. Nhân viên làm gì trên hàng đợi
 
 | Nút | Ghi lại gì |
 |---|---|
@@ -58,7 +115,7 @@ Mở hàng đợi: `http://127.0.0.1:3100/ai/copilot` qua tunnel SSH.
 Mọi dòng mang `users.id` của người bấm. Tên hiển thị do **máy chủ** đọc từ phiên, không nhận từ
 client — client gửi tên khác với khoá thì dòng dữ liệu nói một đằng còn quy kết một nẻo.
 
-## 5. Đọc số
+## 6. Đọc số
 
 `/ai/copilot` in ở đầu trang: gợi ý đã soạn · gửi nguyên văn · sửa rồi gửi · từ chối · **tỷ lệ dùng
 được** · thời gian soát trung vị · số tin **thật sự** đã rời khỏi ERP (đọc từ sổ thao tác, không suy
@@ -72,7 +129,7 @@ Hai con số quan trọng nhất của đợt thí điểm:
 
 Mẫu số rỗng ⇒ in `—`, không in `0%`.
 
-## 6. Ba điều đã biết trước, để không ai ngạc nhiên giữa đợt
+## 7. Ba điều đã biết trước, để không ai ngạc nhiên giữa đợt
 
 1. **Chưa có bảng số đo cho Q004.** Khách hỏi "50kg mặc size gì" ⇒ máy **chuyển người**, không đoán.
    Trên mẻ đo gần nhất việc này chiếm 3/18 lượt. Khai `settings["ai.sizeRules"]` thì con số ấy về
@@ -82,13 +139,13 @@ Mẫu số rỗng ⇒ in `—`, không in `0%`.
    được tính là đã hỏi, nên máy chuyển người sớm hơn thực tế một chút. Sai về phía an toàn, và ghi
    ra đây để không ai đọc nhầm con số.
 
-## 7. Đợt thí điểm 20–50 lượt
+## 8. Đợt thí điểm 20–50 lượt
 
 Thứ tự đề nghị:
 
-1. Bật cho đúng page WIN (mục 3). Kiểm lại đầu trang `/ai/copilot`: nấc **Trợ lý** · MÁY tự gửi
+1. Bật cho đúng page WIN (mục 3) rồi bật bộ nạp tin sống (mục 4). Kiểm lại đầu trang `/ai/copilot`: nấc **Trợ lý** · MÁY tự gửi
    **CẤM** · NHÂN VIÊN bấm gửi **được phép** · page đúng một mã.
 2. Một nhân viên trực, xử lý **20–50 lượt khách nhắn** bằng năm nút trên.
 3. Không gửi hàng loạt. Mỗi tin là một cú bấm của một người đã đọc.
-4. Cuối đợt đọc lại sáu con số ở mục 5, và mở `/ai/review` chấm tay ~30 lượt: chỉ ở đó mới có
+4. Cuối đợt đọc lại sáu con số ở mục 6, và mở `/ai/review` chấm tay ~30 lượt: chỉ ở đó mới có
    những chiều máy **không** tự chấm được (hiểu đúng ý, đúng sản phẩm, giọng có tự nhiên không).

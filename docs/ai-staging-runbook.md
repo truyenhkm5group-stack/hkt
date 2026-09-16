@@ -199,6 +199,13 @@ xử lý hai lần cùng một tin, kể cả khi sau này bật cả hai.
 **Bộ lập lịch vẫn TẮT.** Compose staging không có service `scheduler`; dòng lịch `ai-sales-ingest`
 trong `scripts/scheduler.mjs` vẫn là chú thích.
 
+**Nạp TAY ở trên khác NẠP SỐNG.** Từ 16/09/2026 có thêm service `ingest` chạy liên tục
+(`scripts/ai-live-ingest.ts`, mặc định 45 giây một vòng), bật/tắt bằng thao tác ops
+`ai-staging-live-ingest` và **mặc định TẮT** vì `AI_LIVE_INGEST_ENABLED` vắng mặt. Nó chỉ ĐỌC và
+SOẠN: tệp nó chạy không import cổng gửi, và chính nó từ chối khởi động nếu `AI_ALLOW_AUTO_SEND`
+bật. Mốc đọc nằm ở `sales_ingest_cursors` nên dựng lại container không mất chỗ và không nhân đôi
+tin. Chi tiết ở `docs/sales-copilot-pilot.md` mục 4.
+
 ## 5. Khoá Pancake cần điền
 
 Điền vào `/opt/vnx-ai-staging/.env.staging` (quyền 600, đã nằm trong `.gitignore`):
@@ -253,7 +260,7 @@ nhau, và tự thử một phép gợi ý ở giữa dải trước khi ghi.
 
 ## 7b. Vận hành bằng workflow — không cần SSH
 
-Bảy thao tác nằm trong **Actions → "Vận hành ERP trên VPS"**. Bấm *Run workflow*, **chọn nhánh
+Tám thao tác nằm trong **Actions → "Vận hành ERP trên VPS"**. Bấm *Run workflow*, **chọn nhánh
 `claude/ai-workforce-sales-v1`** (chọn `main` thì không thấy chúng — `main` không có), rồi chọn
 thao tác:
 
@@ -265,6 +272,7 @@ thao tác:
 | `ai-staging-up` | Kéo ảnh, dựng ở `/opt/vnx-ai-staging` | Không |
 | `ai-staging-status` | Container · RAM/swap · bộ nhớ từng container · **migration đã áp** · sức khoẻ production | Không |
 | `ai-staging-logs` | 120 dòng log gần nhất | Không |
+| `ai-staging-live-ingest` | BẬT/TẮT bộ nạp tin sống (`--on` / `--off` / `--once`) — chỉ ĐỌC | Không |
 | `ai-staging-down` | Dừng (`arg = --volumes` xoá CSDL của RIÊNG bản chạy thử) | Không |
 
 Thứ tự lần đầu: `ai-staging-swap` → `ai-staging-image` → `ai-staging-up` → `ai-staging-status`.

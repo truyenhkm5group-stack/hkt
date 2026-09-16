@@ -12,7 +12,9 @@
 #   · volume `vnx_ai_staging_pgdata`→ CSDL riêng hoàn toàn, không có đường nào chạm dữ liệu thật
 #   · cổng 127.0.0.1:3100           → chỉ nghe trên máy, không ra Internet cho tới khi có Caddy
 #
-# KHÔNG có service `scheduler`: bản chạy thử không tự chạy job nào. Chạy tay khi cần.
+# KHÔNG có service `scheduler`: không job định kỳ nào của ERP chạy ở đây. Chạy tay khi cần.
+# CÓ service `ingest` (bộ nạp tin sống) nhưng nó MẶC ĐỊNH ĐỨNG YÊN: thiếu `AI_LIVE_INGEST_ENABLED`
+# thì script thoát 0 ngay. Nó ĐỌC và SOẠN, không bao giờ gửi — xem khối của nó ở cuối tệp.
 # KHÔNG có service `caddy`: cổng 80/443 do Caddy của production giữ, đụng vào là đụng vào khách.
 name: vnx-ai-staging
 
@@ -137,6 +139,40 @@ services:
       # CHỈ nghe trên localhost. Muốn ra Internet thì thêm route Caddy (deploy/Caddyfile.ai-staging),
       # và chỉ sau khi mọi thứ ở mục 8 của docs/ai-staging-runbook.md đã xanh.
       - "127.0.0.1:${STAGING_PORT:-3100}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # ───────── BỘ NẠP TIN SỐNG ─────────
+  #
+  # MỘT TIẾN TRÌNH RIÊNG, KHÔNG NẰM TRONG `app`, và tách ra có ba lý do:
+  #
+  #   · TẮT ĐƯỢC ĐỘC LẬP. Dừng bộ nạp không làm sập màn hình hàng đợi, và ngược lại.
+  #   · KHÔNG GIỮ TRẠNG THÁI TRONG BỘ NHỚ. Mốc đọc nằm ở CSDL (`sales_ingest_cursors`), nên container
+  #     này dựng lại bao nhiêu lần cũng không mất chỗ đang đọc và không sinh ra bản sao.
+  #   · ĐỌC ĐƯỢC BẰNG MẮT. `docker logs` của nó chỉ có một loại dòng: mỗi vòng một dòng.
+  #
+  # NÓ KHÔNG GỬI ĐƯỢC TIN, và không phải vì nhớ kiêng: tệp nó chạy không import cổng gửi, còn cổng
+  # gửi thì đòi một khoá tài khoản chỉ lấy được từ một phiên đăng nhập. Tiến trình nền không có phiên.
+  # Thêm một lớp nữa: chính nó tự từ chối khởi động nếu `AI_ALLOW_AUTO_SEND` bật.
+  ingest:
+    image: ${STAGING_IMAGE:-vnx-ai-staging-app:local}
+    container_name: vnx-ai-staging-ingest
+    env_file: .env.staging
+    environment:
+      DATABASE_URL: postgresql://erp:${STAGING_POSTGRES_PASSWORD}@db:5432/erp?schema=public
+      # GHIM LẠI MỘT LẦN NỮA. Thừa, và cố ý thừa: tiến trình chạy suốt ngày là tiến trình đáng
+      # khẳng định lại nhiều nhất.
+      AI_ALLOW_AUTO_SEND: "false"
+      AI_ALLOW_CUSTOMER_SEND: "false"
+      AI_ALLOW_ORDER_CREATE: "false"
+    command: ["npx", "tsx", "--tsconfig", "tsconfig.json", "scripts/ai-live-ingest.ts"]
+    # Nhỏ hơn `app` nhiều: một vòng lặp gọi API và ghi CSDL, không phục vụ HTTP.
+    mem_limit: 512m
+    restart: on-failure:3
     depends_on:
       db:
         condition: service_healthy

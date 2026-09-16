@@ -2777,6 +2777,38 @@ export const salesSuggestions = pgTable(
 );
 
 /**
+ * MỐC ĐỌC CỦA BỘ NẠP TIN SỐNG — một dòng cho mỗi page.
+ *
+ * Hai việc trong một bảng, và chúng đi cùng nhau có lý do: MỐC (đọc tới đâu rồi) và SỨC KHOẺ (vòng
+ * gần nhất chạy lúc nào, hỏng mấy lần liền). Người trực mở màn hình ra hỏi "hệ thống có đang sống
+ * không" — câu trả lời phải là một con số đọc được, không phải một dòng log.
+ *
+ * `lastOkAt` là mốc của vòng CHẠY ĐƯỢC gần nhất, khác `lastRunAt` (vòng gần nhất, kể cả hỏng).
+ * Gộp hai cái thì một bộ nạp hỏng liên tục vẫn trông như đang sống, vì nó vẫn "chạy" đều đặn.
+ *
+ * Dựng lại container KHÔNG mất mốc: nó nằm ở CSDL chứ không trong bộ nhớ tiến trình. Và mất mốc
+ * cũng không sinh ra bản sao — `ingestMessage` chống trùng bằng mã tin và vân tay nội dung.
+ */
+export const salesIngestCursors = pgTable("sales_ingest_cursors", {
+  pageId: text("page_id").primaryKey(),
+  /** Mốc tin mới nhất ĐÃ ĐỌC ĐƯỢC. Dùng để tính cửa sổ hỏi lại cho vòng sau. */
+  lastMessageAt: ts("last_message_at"),
+  /** Mã tin ngoài của tin mới nhất đã đọc — để đối chiếu khi nghi ngờ mốc bị nhảy. */
+  lastMessageExternalId: text("last_message_external_id").notNull().default(""),
+  /** Vòng gần nhất, KỂ CẢ vòng hỏng. */
+  lastRunAt: ts("last_run_at"),
+  /** Vòng CHẠY ĐƯỢC gần nhất. Đây mới là con số trả lời "có đang sống không". */
+  lastOkAt: ts("last_ok_at"),
+  lastError: text("last_error").notNull().default(""),
+  /** Hỏng mấy vòng liền — quyết định nghỉ dài dần, và về 0 ngay khi có một vòng chạy được. */
+  consecutiveErrors: integer("consecutive_errors").notNull().default(0),
+  /** Cộng dồn, để biết bộ nạp đã mang về bao nhiêu kể từ lúc dựng. */
+  messagesIngested: integer("messages_ingested").notNull().default(0),
+  conversationsSeen: integer("conversations_seen").notNull().default(0),
+  updatedAt: updatedAt(),
+});
+
+/**
  * SỔ THAO TÁC CỦA NHÂN VIÊN TRÊN NẤC TRỢ LÝ — một dòng cho mỗi lần bấm.
  *
  * ĐÂY LÀ NƠI DUY NHẤT GHI LẠI "AI ĐÃ GỬI GÌ CHO KHÁCH". Mỗi tin rời khỏi ERP ở nấc COPILOT đều

@@ -6,6 +6,7 @@
  */
 import { desc, eq, sql } from "drizzle-orm";
 import { loadWinKnowledge } from "@/lib/queries/sales-knowledge";
+import { LIVE_INGEST_ENV, liveIngestHealth, type LiveIngestHealth } from "@/lib/constants/live-ingest";
 import { getDb, schema, type Db } from "@/db";
 import { COPILOT_MEANINGFUL_EDIT_RATIO, COPILOT_PAGES_KEY, COPILOT_QUEUE_RELEVANT_HOURS, COPILOT_SUGGESTION_TTL_MINUTES, type CopilotWarning } from "@/lib/constants/sales-copilot";
 import { rowsOf } from "@/lib/sql-rows";
@@ -463,3 +464,42 @@ export async function copilotHistory(conversationId: string, db?: Db) {
   });
 }
 
+
+export type IngestStatus = {
+  pageId: string;
+  health: LiveIngestHealth;
+  lastOkAt: Date | null;
+  lastRunAt: Date | null;
+  lastCustomerMessageAt: Date | null;
+  lastError: string;
+  consecutiveErrors: number;
+  messagesIngested: number;
+};
+
+/**
+ * SỨC KHOẺ BỘ NẠP — để nhân viên không phải đọc log mới biết hệ thống có đang sống không.
+ *
+ * `lastOkAt` (vòng CHẠY ĐƯỢC gần nhất) mới là con số trả lời câu ấy, không phải `lastRunAt` (vòng
+ * gần nhất, kể cả hỏng): một bộ nạp hỏng liên tục vẫn "chạy" đều đặn.
+ */
+export async function ingestStatus(dbIn?: Db): Promise<IngestStatus[]> {
+  const db = dbIn ?? (await getDb());
+  const pages = await copilotPages(db);
+  if (!pages.length) return [];
+  const bat = String(process.env[LIVE_INGEST_ENV] ?? "").toLowerCase() === "true";
+  const ra: IngestStatus[] = [];
+  for (const pageId of pages) {
+    const moc = await db.query.salesIngestCursors.findFirst({ where: eq(schema.salesIngestCursors.pageId, pageId) });
+    ra.push({
+      pageId,
+      health: liveIngestHealth({ enabled: bat, lastOkAt: moc?.lastOkAt ?? null, consecutiveErrors: moc?.consecutiveErrors ?? 0 }),
+      lastOkAt: moc?.lastOkAt ?? null,
+      lastRunAt: moc?.lastRunAt ?? null,
+      lastCustomerMessageAt: moc?.lastMessageAt ?? null,
+      lastError: moc?.lastError ?? "",
+      consecutiveErrors: moc?.consecutiveErrors ?? 0,
+      messagesIngested: moc?.messagesIngested ?? 0,
+    });
+  }
+  return ra;
+}
