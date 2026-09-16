@@ -43,12 +43,21 @@ select coalesce(nullif(production_action,''),'?') as hanh_dong_san_xuat, count(*
 from sales_suggestions group by 1 order by 2 desc;
 
 \echo '── 8. HÀNG ĐỢI NGAY LÚC NÀY (cùng bộ lọc mà màn hình dùng) ──'
-with tin_khach as (
+-- PHẢI SOI CHIẾU ĐÚNG TRUY VẤN CỦA MÀN HÌNH, kể cả phép loại câu mẫu. Một câu kiểm dùng bộ lọc
+-- KHÁC màn hình là một câu kiểm nói dối — đúng lỗi đã mắc với phép đọc nấc quyền hạn bằng psql.
+with cau_mau as (
+  select lower(btrim(m.text)) as van_ban
+  from sales_messages m join sales_conversations sc on sc.id = m.conversation_id
+  where m.from_page = true and m.sender_type = 'PAGE_HUMAN' and btrim(m.text) <> ''
+    and sc.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
+  group by 1 having count(distinct m.conversation_id) >= 3
+), tin_khach as (
   select c.id, c.page_id,
          (select max(sent_at) from sales_messages m
             where m.conversation_id = c.id and m.from_page = false and m.sender_type = 'CUSTOMER' and btrim(m.text) <> '') as khach_luc,
          (select max(sent_at) from sales_messages m
-            where m.conversation_id = c.id and m.from_page = true and m.sender_type = 'PAGE_HUMAN')                       as shop_luc,
+            where m.conversation_id = c.id and m.from_page = true and m.sender_type = 'PAGE_HUMAN'
+              and btrim(m.text) <> '' and lower(btrim(m.text)) not in (select van_ban from cau_mau))                       as shop_luc,
          c.human_takeover_at
   from sales_conversations c
   where c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
@@ -79,14 +88,23 @@ with gan_nhat as (
   where c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
   order by c.updated_at desc nulls last
   limit 50
+), mau as (
+  select lower(btrim(m.text)) as van_ban
+  from sales_messages m join sales_conversations sc on sc.id = m.conversation_id
+  where m.from_page = true and m.sender_type = 'PAGE_HUMAN' and btrim(m.text) <> ''
+    and sc.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
+  group by 1 having count(distinct m.conversation_id) >= 3
 ), moc as (
   select g.id,
          (select max(sent_at) from sales_messages m where m.conversation_id = g.id
             and m.from_page = false and m.sender_type = 'CUSTOMER' and btrim(m.text) <> '')      as khach_luc,
+         -- NGƯỜI THẬT = PAGE_HUMAN và KHÔNG phải câu mẫu chạy sẵn.
          (select max(sent_at) from sales_messages m where m.conversation_id = g.id
-            and m.from_page = true and m.sender_type = 'PAGE_HUMAN')                             as nguoi_luc,
+            and m.from_page = true and m.sender_type = 'PAGE_HUMAN'
+            and btrim(m.text) <> '' and lower(btrim(m.text)) not in (select van_ban from mau))   as nguoi_luc,
          (select max(sent_at) from sales_messages m where m.conversation_id = g.id
-            and m.from_page = true and m.sender_type in ('PAGE_BOT','PAGE_SYSTEM'))              as may_luc
+            and m.from_page = true and (m.sender_type in ('PAGE_BOT','PAGE_SYSTEM')
+              or (m.sender_type = 'PAGE_HUMAN' and lower(btrim(m.text)) in (select van_ban from mau)))) as may_luc
   from gan_nhat g
 )
 select
