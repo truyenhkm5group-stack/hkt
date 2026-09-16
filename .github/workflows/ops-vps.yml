@@ -941,9 +941,12 @@ jobs:
                 docker ps -a --filter 'name=vnx-ai-staging-ingest' --format '  {{.Names}}\t{{.Status}}' || echo "  (chưa có container bộ nạp)"
                 docker exec vnx-ai-staging-app sh -lc 'echo "  bộ nạp sống  : ${AI_LIVE_INGEST_ENABLED:-(chưa đặt)}"; echo "  nhịp         : ${AI_LIVE_INGEST_INTERVAL_SECONDS:-45}s"; echo "  MÁY tự gửi   : ${AI_ALLOW_AUTO_SEND:-(chưa đặt)}"; echo "  NGƯỜI bấm gửi: ${AI_ALLOW_HUMAN_APPROVED_SEND:-(chưa đặt)}"; echo "  tạo đơn      : ${AI_ALLOW_ORDER_CREATE:-(chưa đặt)}"'
                 echo ""
+                # `|| true` CÓ CHỦ Ý, và chỉ ở đây. Ở thao tác bật nấc trợ lý, lệch nấc nghĩa là việc
+                # KHÔNG thành nên phải đỏ. Còn bộ nạp thì ĐỌC ĐƯỢC bất kể nấc nào — chặn nó lại ở
+                # dòng này sẽ nuốt mất đúng phần chứng cứ cần xem: mốc đọc và số tin đã nạp.
                 fetch_staging_script ai-effective-mode.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-effective-mode.ts'
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
-                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-effective-mode.ts
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-effective-mode.ts || echo "  (nấc lệch — xem ở trên; bộ nạp vẫn đọc được nên phần dưới vẫn có nghĩa)"
                 echo ""
                 echo "── MỐC ĐỌC TRONG CSDL (chứng cứ vòng nào đã chạy) ──"
                 docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \

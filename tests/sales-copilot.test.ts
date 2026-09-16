@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { canSend } from "@/lib/ai-workforce/agents/sales/outbound";
 import { SAFEST_HARD_LIMITS, type AiSettings } from "@/lib/ai-workforce/config";
+import { clampMode, MAX_ALLOWED_MODE, modeAtLeast } from "@/lib/constants/ai";
 import {
   COPILOT_MEANINGFUL_EDIT_RATIO,
   COPILOT_QUEUE_RELEVANT_HOURS,
@@ -165,6 +166,26 @@ export async function testSalesCopilot(db: Db) {
   assert.equal(liveIngestHealth({ enabled: true, lastOkAt: new Date("2026-09-16T09:59:30Z"), consecutiveErrors: 0, now: luc }), "LIVE");
   assert.equal(liveIngestHealth({ enabled: true, lastOkAt: new Date("2026-09-16T09:50:00Z"), consecutiveErrors: 0, now: luc }), "SLOW", "mười phút không có vòng nào chạy được là ĐỨT, không phải 'đang chậm một chút'");
   assert.equal(liveIngestHealth({ enabled: true, lastOkAt: new Date("2026-09-16T09:50:00Z"), consecutiveErrors: 2, now: luc }), "ERROR");
+
+  /*
+    1D. TRẦN NẤC QUYỀN HẠN VÀ ĐỢT THÍ ĐIỂM DÍNH VỚI NHAU — nói thẳng ra, đừng để ai phát hiện lại.
+
+    16/09/2026: thao tác ops ghi `ai_agents.mode = 'COPILOT'`, psql đọc lại ra `COPILOT`, và đợt thí
+    điểm được báo là SẴN SÀNG. Nhưng `effectiveMode()` kẹp nấc xuống `MAX_ALLOWED_MODE`, khi ấy là
+    `SHADOW`, nên nút gửi tắt và KHÔNG một dòng nào nói vì sao. Con số trên màn hình và con số trong
+    CSDL nói hai điều khác nhau suốt mấy ngày.
+
+    Bài này không quyết định trần nên là gì — đó là việc của chủ shop. Nó chỉ bắt hai thứ phải KHỚP:
+    trần dưới COPILOT thì nấc trợ lý KHÔNG thể bật, và ai đọc bài này biết ngay phải sửa ở đâu.
+  */
+  const tranChoPhepTroLy = modeAtLeast(MAX_ALLOWED_MODE, "COPILOT");
+  assert.equal(
+    modeAtLeast(clampMode("COPILOT"), "COPILOT"),
+    tranChoPhepTroLy,
+    `TRẦN ${MAX_ALLOWED_MODE} quyết định nấc trợ lý có bật được hay không — ghi 'COPILOT' vào ai_agents.mode KHÔNG đủ`,
+  );
+  // Dù trần có là gì, AUTO không bao giờ với tới được. Đây mới là câu phải luôn đúng.
+  assert.ok(!modeAtLeast(clampMode("AUTO"), "AUTO"), "không đường nào qua clampMode ra được nấc AUTO — máy tự nhắn khách phải là thứ không cấu hình nào với tới");
 
   // ═════════ 2. QUYỀN GỬI TÁCH KHỎI QUYỀN XEM ═════════
   const cs = resolvePermissions("CS", null);
