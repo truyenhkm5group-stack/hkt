@@ -613,10 +613,16 @@ export function testPayrollProductionReadiness() {
           Nhận cả `can(user, "payroll:…")` viết thẳng lẫn `can(user, spec.permission)` đọc từ bảng
           — `movePayrollRun` cố ý đọc từ bảng để màn hình và máy chủ dùng chung một nguồn. Bản
           thân bảng ấy được khoá riêng ở cuối khối này, nên không có đường nào lọt.
+
+          Dạng thứ ba là MÁY TÍNH PHẠM VI (`lib/auth/payroll-scope.ts`), thêm 16/09/2026 khi phát
+          hiện bản ghi đè vai trò trên production làm `payroll:view` mất nghĩa. Nó suy phạm vi TỪ
+          khoá quyền rồi mới quyết, nên là một lượt hỏi quyền đầy đủ. Đòi ĐỦ HAI THỨ — tính phạm vi
+          VÀ có câu chặn dựa trên phạm vi ấy — vì một cửa tính ra phạm vi rồi không dùng nó thì vẫn
+          đang mở toang.
         */
         assert.match(
           dau,
-          /can\(\s*user\s*,|requireManage\(\)/,
+          /can\(\s*user\s*,|requireManage\(\)|resolvePayrollScope\(\s*user\s*\)[\s\S]{0,400}can(?:Open|SeeAll|Administer)Payroll\(/,
           `9. ${tep}::${ten} phải kiểm QUYỀN lương, không chỉ kiểm đã đăng nhập`,
         );
         if (laRoute) {
