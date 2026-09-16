@@ -522,10 +522,11 @@ KHÔNG backfill, vì suy ngược một lời khai từ tên trạng thái là b
 - **Không dựng lại `capability` cho 31 kiện `UNKNOWN_CAPABILITY`.** 18 kiện sẽ tự xếp đúng ở lượt dò
   sau; 13 kiện còn lại không có mã nên không có gì để dò — và ép chúng thành `WEBHOOK_ONLY` là
   khẳng định một điều không chứng minh được.
-- **Không kiểm tra giao diện bằng mắt trên production.** Phiên này đo được CSDL và chạy được bộ kiểm
-  thử; nó không mở được trình duyệt có phiên đăng nhập của chủ shop. Các màn hình mới đã qua
-  `npm run build` và bộ kiểm thử dựng chúng từ truy vấn thật trên PGlite, nhưng **chưa ai nhìn thấy
-  chúng bằng mắt** — đó là việc đầu tiên của chủ shop khi mở ERP.
+- **Không kiểm tra giao diện bằng MẮT trên production.** Lá chắn `smoke` mở thật cả ba màn hình mới
+  bằng một phiên đăng nhập hợp lệ trên dữ liệu thật và báo **67/67 đạt · 0 lỗi ứng dụng** (16/09
+  08:11Z) — tức chúng dựng được, truy vấn chạy được, không màn nào vượt ngưỡng 2 giây. Nhưng smoke
+  đo *"trang có dựng được không"*, **không** đo *"trang có trông đúng không"*: một cột lệch, một
+  nhãn khó đọc, một nút đặt sai chỗ đều lọt qua nó. Nhìn bằng mắt vẫn là việc đầu tiên của chủ shop.
 
 ## 13. Cần gì để bật `API_TRACKABLE` — yêu cầu chính xác
 
@@ -548,7 +549,23 @@ Sau khi đổi: bấm **Kiểm tra quyền tra cứu VTP** trên trang Kết n�
 chạy ops `vtp-capability` với `--all --apply` để xếp lại năng lực cho toàn bộ vận đơn — bộ đối chiếu
 sẽ tự bắt đầu hỏi API cho những kiện đã xếp được.
 
-## 14. Mức đảm bảo — nói đúng, không nói quá
+## 14. Lá chắn smoke phủ luôn ba màn hình mới
+
+Lượt smoke ngay sau khi phát hành báo 65/65 đạt — nhưng **không tuyến nào trong danh sách chạm tới
+ba màn hình vừa thêm**, nên con số đó không nói gì về chúng. Đã bổ sung:
+
+- `/shipments?view=reconcile` vào danh sách tĩnh — tuyến nặng nhất của module (quét toàn bộ kiện có
+  mã VTP rồi chạy sáu vị ngữ) và là tuyến duy nhất đọc `vtp_webhook_gaps`;
+- `/import-vtp/<id>` **phân giải lúc chạy** từ lần nhập gần nhất, cùng lý do đã ghi cho
+  `/shipments/[id]`: không mã nào gõ cứng được mà vẫn đúng sau một tuần.
+
+Chưa có lần nhập nào ⇒ bỏ qua im lặng, không làm đỏ lần deploy: đây là lá chắn hiệu năng, không
+phải bài kiểm dữ liệu.
+
+Kết quả lượt sau khi bổ sung (16/09 08:11Z): **67/67 đạt · 0 lỗi ứng dụng · 0 sai quyền**, và không
+màn hình mới nào nằm trong danh sách 16 màn chậm.
+
+## 15. Mức đảm bảo — nói đúng, không nói quá
 
 | Điều | Mức | Căn cứ |
 |---|---|---|
@@ -561,4 +578,5 @@ sẽ tự bắt đầu hỏi API cho những kiện đã xếp được.
 | 20 trạng thái ĐVVC, 0 mã lạ | **ĐO ĐƯỢC** | `vtp_status_registry`, 16/09 07:27Z |
 | 13 kiện không mã, không chứng từ ĐVVC nào | **ĐO ĐƯỢC** | 16/09 07:26Z và 07:28Z |
 | Tỷ lệ khớp webhook thật sự là bao nhiêu | **CHƯA BIẾT** | mẫu = 0; chỉ lớn lên khi có người nhập tệp sau khi 0100 chạy |
-| Các màn hình mới hiển thị đúng bằng mắt | **CHƯA KIỂM** | phiên này không mở được trình duyệt có phiên đăng nhập |
+| Ba màn hình mới dựng được trên production, < 2s | **ĐO ĐƯỢC** | smoke 67/67 đạt · 0 lỗi ứng dụng · `/import-vtp/<id>` 88ms, 16/09 08:11Z |
+| Ba màn hình mới TRÔNG đúng | **CHƯA KIỂM** | smoke đo "dựng được", không đo "trông đúng"; phiên này không mở được trình duyệt |
