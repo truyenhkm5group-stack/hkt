@@ -5,7 +5,9 @@ import { z } from "zod";
 import { can, requireUser } from "@/lib/auth/session";
 import { MAX_LIST_BASE64, MAX_LIST_FILES } from "@/lib/constants/cod";
 import { runVtpDataFileImport, type VtpImportFileResult } from "@/lib/integrations/viettelpost/import-run";
-export type { VtpImportFileResult };
+import { previewVtpOrderListFile, type ImportPreview } from "@/lib/integrations/viettelpost/import-preview";
+import { ghiSoNhapTep } from "@/lib/integrations/viettelpost/import-preview";
+export type { VtpImportFileResult, ImportPreview };
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
@@ -42,6 +44,57 @@ function readableError(error: unknown, fallback: string) {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
+/**
+ * ═══════════ BƯỚC XEM TRƯỚC — CHỈ ĐỌC, KHÔNG GHI MỘT DÒNG NÀO ═══════════
+ *
+ * Nhập tệp là đường CỨU khi webhook rơi và tài khoản API không đọc được vận đơn do Pancake tạo.
+ * Nó cũng là đường duy nhất mà một người, bằng một cú bấm, đổi trạng thái hàng trăm vận đơn bằng
+ * nội dung một tệp chưa ai đọc. Trước bản này ERP chỉ có "nhập", không có "xem trước".
+ *
+ * Kết quả xem trước được GHI VÀO SỔ (`vtp_import_batches`, `mode = PREVIEW`) — cố ý: nó trả lời
+ * câu "ai đã xem tệp này và thấy gì" khi con số sau đó gây tranh cãi.
+ */
+export async function previewVtpDataFiles(input: unknown): Promise<Result<{ previews: ImportPreview[] }>> {
+  const { user, error } = await authorize();
+  if (error) return { error };
+  let files: { filename: string; base64: string }[];
+  try {
+    files = listFilesSchema.parse(input);
+  } catch (e) {
+    return { error: readableError(e, "Không đọc được danh sách tệp") };
+  }
+  try {
+    const previews: ImportPreview[] = [];
+    for (const file of files) {
+      const p = await previewVtpOrderListFile(file);
+      previews.push(p);
+      await ghiSoNhapTep({
+        filename: p.filename,
+        checksum: p.checksum,
+        bytes: p.bytes,
+        kind: p.kind,
+        mode: "PREVIEW",
+        uploadedBy: user.email,
+        uploadedById: user.id,
+        rows: p.rows,
+        matched: p.counts.NEWER + p.counts.SAME + p.counts.OLDER + p.counts.DUPLICATE_ROW,
+        stale: p.counts.OLDER,
+        duplicates: p.counts.DUPLICATE_ROW,
+        conflicts: p.counts.AMBIGUOUS,
+        unmatched: p.counts.UNMATCHED,
+        unknownStatus: p.counts.UNKNOWN_STATUS,
+        invalid: p.counts.INVALID,
+        error: p.error,
+        summary: { counts: p.counts, sample: p.sample.slice(0, 50), previouslyAppliedAt: p.previouslyAppliedAt },
+      }).catch(() => "");
+    }
+    // KHÔNG `revalidate()`: chạy thử không đổi dữ liệu nào, nên cũng không được xoá đệm của người khác.
+    return { ok: true, previews };
+  } catch (e) {
+    return { error: readableError(e, "Không đọc thử được tệp") };
+  }
+}
+
 /** Nhập tệp Viettel Post từ giao diện. Lõi nằm ở `viettelpost/import-run.ts` để luồng tự động
  *  (Apps Script đọc thư bảng kê trong Gmail) dùng chung đúng một cách xử lý. */
 export async function importVtpDataFiles(input: unknown): Promise<Result<{ files: VtpImportFileResult[]; orderRows: number; statementRows: number }>> {
@@ -54,7 +107,7 @@ export async function importVtpDataFiles(input: unknown): Promise<Result<{ files
     return { error: readableError(e, "Không đọc được danh sách tệp") };
   }
   try {
-    const result = await runVtpDataFileImport(files, user.email);
+    const result = await runVtpDataFileImport(files, user.email, { uploadedById: user.id });
     revalidate();
     return { ok: true, ...result };
   } catch (e) {

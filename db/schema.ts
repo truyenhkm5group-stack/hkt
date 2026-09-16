@@ -1292,6 +1292,44 @@ export const shipments = pgTable(
     trackingCapability: text("tracking_capability").notNull().default("UNKNOWN_CAPABILITY"),
     /** Số lần đã tra mà API trả "không thấy". Tới ngưỡng thì kết luận `WEBHOOK_ONLY`. */
     capabilityProbes: integer("capability_probes").notNull().default(0),
+    /**
+     * ═══════════ CHỮ GỐC CỦA ĐVVC — GHI NGUYÊN VĂN, KỂ CẢ KHI ERP CHƯA HIỂU ═══════════
+     *
+     * `vtp_status` / `vtp_status_name` ở trên là ẢNH CHỤP ĐÃ DỊCH: chúng do
+     * `materializeShipmentState()` dựng từ lịch sử, và hàm đó **bỏ qua** mọi sự kiện không dịch
+     * được (`stage = UNKNOWN`). Đó là quyết định đúng cho chiều logistics — không đoán thì không
+     * kết luận — nhưng nó để lại một lỗ: Viettel Post vừa nói một câu mới, ERP không hiểu, và màn
+     * hình vẫn hiện trạng thái CŨ **không kèm một dấu hiệu nào**.
+     *
+     * Bốn cột này là lời khai THÔ, ghi ở MỌI lượt nạp (webhook · đối chiếu · nhập tệp) theo mốc
+     * của ĐVVC, độc lập hoàn toàn với việc dịch được hay không. Chúng KHÔNG tham gia vào bất kỳ
+     * phép tính nghiệp vụ nào — không `ORDER_OUTCOME`, không sổ kho, không tiền — chúng chỉ để
+     * hiển thị và để đối chiếu với màn hình Viettel Post.
+     */
+    vtpRawStatusCode: integer("vtp_raw_status_code"),
+    vtpRawStatusName: text("vtp_raw_status_name"),
+    vtpRawStatusAt: ts("vtp_raw_status_at"),
+    /** `false` = ERP chưa dịch được câu này ⇒ ảnh chụp đã dịch ở trên đang CŨ HƠN lời khai thô. */
+    vtpRawMapped: boolean("vtp_raw_mapped").notNull().default(true),
+    /**
+     * NGUỒN QUYẾT ĐỊNH ẢNH CHỤP hiện tại: `VTP_WEBHOOK` · `VTP_POLL` · `VTP_IMPORT` · `MANUAL` …
+     * `deriveShipmentState()` vẫn luôn tính ra `decidedBy` nhưng trước đây vứt đi; ghi xuống để
+     * khi một con số bị nghi ngờ thì tra được nguồn mà không phải mở bảng sự kiện.
+     */
+    vtpSyncSource: text("vtp_sync_source"),
+    /*
+      ═══════════ SỔ ĐỐI CHIẾU RIÊNG CHO TỪNG KIỆN ═══════════
+
+      `last_vtp_sync_at` chỉ nói "lần cuối ERP hỏi". Nó không nói bao giờ phải hỏi lại, đã hỏi hụt
+      mấy lần, hỏng vì lý do gì. Thiếu ba thứ đó thì bộ đối chiếu chỉ biết xếp hàng theo "lâu chưa
+      hỏi" — và một kiện ĐANG ĐI GIAO (kết quả phải có trong ngày) đứng ngang hàng với một kiện
+      CHỜ LẤY HÀNG (chậm vài ngày là bình thường).
+
+      Nhịp hỏi lại nằm ở `lib/constants/vtp-reconcile.ts`, không nằm ở đây.
+    */
+    vtpNextSyncAt: ts("vtp_next_sync_at"),
+    vtpSyncAttempts: integer("vtp_sync_attempts").notNull().default(0),
+    vtpLastError: text("vtp_last_error"),
     lastPancakeSyncAt: ts("last_pancake_sync_at"),
     raw: jsonb("raw"),
     createdAt: createdAt(),
@@ -1307,6 +1345,10 @@ export const shipments = pgTable(
     index("shipments_carrier_idx").on(t.carrier),
     index("shipments_tracking_idx").on(t.trackingCode),
     index("shipments_final_sync_idx").on(t.isFinal, t.lastVtpSyncAt),
+    // Bộ đối chiếu hỏi "kiện nào tới hạn hỏi lại" mỗi vài phút trên toàn bảng vận đơn.
+    index("shipments_next_sync_idx").on(t.vtpNextSyncAt).where(sql`${t.isFinal} = false`),
+    // Kiện mà ĐVVC vừa nói một câu ERP chưa dịch được — trang sức khoẻ và bộ lọc đọc thẳng cột này.
+    index("shipments_raw_unmapped_idx").on(t.vtpRawStatusAt).where(sql`${t.vtpRawMapped} = false`),
     index("shipments_capability_idx").on(t.trackingCapability, t.isFinal),
     index("shipments_return_received_idx").on(t.returnReceivedAt),
     // Đối soát COD quét "đã giao, có thu hộ, chưa thấy tiền" trên toàn bảng vận đơn mỗi lần mở
@@ -1364,6 +1406,118 @@ export const shipmentEvents = pgTable(
       AND ${t.source} IN ('VTP_WEBHOOK', 'VTP_POLL', 'VTP_IMPORT', 'MANUAL', 'VTP_UI_MANUAL_VERIFICATION')
       AND ${t.sourceReference} IS NOT NULL AND length(trim(${t.sourceReference})) > 0
       AND ${t.verifiedAt} IS NOT NULL AND ${t.verifiedBy} IS NOT NULL AND length(trim(${t.verifiedBy})) > 0)`),
+  ],
+);
+
+/**
+ * ═══════════ SỔ ĐĂNG KÝ TRẠNG THÁI VIETTEL POST — MỖI CÂU ĐVVC TỪNG NÓI, MỘT DÒNG ═══════════
+ *
+ * ─── VÌ SAO CẦN MỘT BẢNG, KHI ĐÃ CÓ BẢNG MÃ TRONG MÃ NGUỒN ───
+ *
+ * `lib/constants/viettelpost.ts::VTP_STATUS` là những gì ERP **đã biết**. Bảng này là những gì
+ * Viettel Post **đã thật sự gửi** — hai tập khác nhau, và chênh lệch giữa chúng chính là việc phải
+ * làm. Trước bản này, muốn biết chênh lệch đó phải `group by` trên hàng chục nghìn dòng sự kiện,
+ * và một mã mới xuất hiện hôm nay trông y hệt một mã đã quen từ tháng trước.
+ *
+ * ─── KHÔNG BAO GIỜ LÀ CHỖ TÍNH TOÁN ───
+ *
+ * Bảng này KHÔNG được tham gia vào `ORDER_OUTCOME`, sổ kho, hay bất kỳ phép tính tiền nào. Nó là
+ * SỔ QUAN SÁT: đếm, ghi mốc, giữ một mẫu gói tin thô để người đọc kiểm chứng. Việc dịch trạng thái
+ * vẫn chỉ có một chỗ (`resolveVtpStatus`), và cách sửa một mã lạ vẫn là bổ sung vào `VTP_STATUS` —
+ * không phải sửa dòng ở đây.
+ *
+ * Khoá tự nhiên là `status_key` = mã số nếu có, ngược lại là tên đã chuẩn hoá. Cố ý KHÔNG dùng
+ * `(code, name)`: Viettel Post đổi câu chữ cho cùng một mã (đã gặp với 501) và ghép cả hai vào
+ * khoá sẽ đẻ ra một dòng "mã mới" mỗi lần họ sửa chính tả.
+ */
+export const vtpStatusRegistry = pgTable(
+  "vtp_status_registry",
+  {
+    id: id(),
+    /** Mã số nếu ĐVVC gửi, ngược lại tên trạng thái đã chuẩn hoá (chữ thường, bỏ dấu). */
+    statusKey: text("status_key").notNull().unique(),
+    statusCode: integer("status_code"),
+    /** Câu chữ ĐVVC dùng gần đây nhất cho khoá này — giữ nguyên dấu, nguyên hoa thường. */
+    statusName: text("status_name").notNull().default(""),
+    /** Chặng ERP dịch ra, hoặc `UNKNOWN`. Dịch lại mỗi lần gặp: bổ sung bảng mã là nó tự đúng. */
+    normalizedStage: text("normalized_stage"),
+    /** Căn cứ đã dùng để dịch: `code` · `text` · `code-group` · `unknown` (xem `resolveVtpStatus`). */
+    resolveBasis: text("resolve_basis").notNull().default("unknown"),
+    /** `false` ⇒ đây là việc phải làm: bổ sung mã vào `VTP_STATUS`. */
+    mapped: boolean("mapped").notNull().default(false),
+    occurrences: integer("occurrences").notNull().default(0),
+    firstSeenAt: ts("first_seen_at").notNull().defaultNow(),
+    lastSeenAt: ts("last_seen_at").notNull().defaultNow(),
+    /** Nguồn gần nhất đã mang câu này tới: `VTP_WEBHOOK` · `VTP_POLL` · `VTP_IMPORT` · `MANUAL`. */
+    lastSource: text("last_source").notNull().default(""),
+    lastShipmentId: text("last_shipment_id").references((): AnyPgColumn => shipments.id, { onDelete: "set null" }),
+    /** Một mẫu gói tin thô để người đọc kiểm chứng — không phải toàn bộ lịch sử. */
+    sampleRaw: jsonb("sample_raw"),
+    /**
+     * Người đã XEM và quyết định: hoặc đã bổ sung vào bảng mã, hoặc kết luận không cần. Cột này
+     * chỉ tắt cảnh báo, KHÔNG đổi cách dịch — dịch vẫn do `VTP_STATUS` quyết.
+     */
+    acknowledgedAt: ts("acknowledged_at"),
+    acknowledgedBy: text("acknowledged_by"),
+    acknowledgeNote: text("acknowledge_note").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("vtp_status_registry_unmapped_idx").on(t.lastSeenAt).where(sql`${t.mapped} = false`),
+    index("vtp_status_registry_seen_idx").on(t.lastSeenAt),
+  ],
+);
+
+/**
+ * ═══════════ SỔ LẦN NHẬP TỆP VIETTEL POST ═══════════
+ *
+ * Mỗi lần người bấm "Nhập trạng thái VTP" là một dòng — kể cả lần CHẠY THỬ. Chạy thử được ghi
+ * cố ý: nó trả lời câu "hôm qua ai đã xem trước tệp này và thấy gì" khi con số sau đó gây tranh cãi.
+ *
+ * ─── IDEMPOTENT ĐI BẰNG CHECKSUM, KHÔNG BẰNG TÊN TỆP ───
+ *
+ * Viettel Post đặt tên tệp theo khoảng ngày nên hai lần tải cùng một khoảng cho ra CÙNG tên với
+ * nội dung khác nhau, và cùng nội dung có thể mang hai tên (người dùng đổi tên khi tải lại).
+ * `checksum` (SHA-256 của nội dung tệp) là danh tính thật. Nhập lại đúng tệp cũ ⇒ không dòng lịch
+ * sử nào được sinh thêm, vì tầng dưới (`applyVtpOrderList`) đã idempotent theo
+ * `(vận đơn, nguồn, trạng thái, mốc ĐVVC)`; sổ này chỉ nói thẳng ra điều đó cho người dùng.
+ */
+export const vtpImportBatches = pgTable(
+  "vtp_import_batches",
+  {
+    id: id(),
+    filename: text("filename").notNull(),
+    /** SHA-256 của nội dung tệp — danh tính thật, không phụ thuộc tên. */
+    checksum: text("checksum").notNull(),
+    bytes: integer("bytes").notNull().default(0),
+    /** `ORDER_LIST` (trạng thái giao) · `STATEMENT_DETAIL` (tiền thực thu) · `ERROR`. */
+    kind: text("kind").notNull(),
+    /** `PREVIEW` = chạy thử, không ghi gì. `APPLY` = đã ghi. */
+    mode: text("mode").notNull(),
+    uploadedBy: text("uploaded_by").notNull().default(""),
+    uploadedById: text("uploaded_by_id").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+    rows: integer("rows").notNull().default(0),
+    matched: integer("matched").notNull().default(0),
+    applied: integer("applied").notNull().default(0),
+    /** Dòng bị bỏ vì CHỨNG TỪ TRONG TỆP CŨ HƠN trạng thái đang lưu — không phải lỗi. */
+    stale: integer("stale").notNull().default(0),
+    duplicates: integer("duplicates").notNull().default(0),
+    conflicts: integer("conflicts").notNull().default(0),
+    unmatched: integer("unmatched").notNull().default(0),
+    /** Dòng mang trạng thái ERP chưa dịch được. Vẫn vào sổ đăng ký, không bị ném đi. */
+    unknownStatus: integer("unknown_status").notNull().default(0),
+    invalid: integer("invalid").notNull().default(0),
+    error: text("error"),
+    /** Bảng kê chi tiết trước/sau của lần chạy — đủ để dựng lại màn hình xem trước. */
+    summary: jsonb("summary"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("vtp_import_batches_checksum_idx").on(t.checksum, t.createdAt),
+    index("vtp_import_batches_created_idx").on(t.createdAt),
+    check("vtp_import_batches_mode_check", sql`${t.mode} IN ('PREVIEW', 'APPLY')`),
+    check("vtp_import_batches_kind_check", sql`${t.kind} IN ('ORDER_LIST', 'STATEMENT_DETAIL', 'ERROR')`),
   ],
 );
 
@@ -2852,6 +3006,8 @@ export type VariantStock = typeof variantStocks.$inferSelect;
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
 export type Shipment = typeof shipments.$inferSelect;
+export type VtpStatusRegistryRow = typeof vtpStatusRegistry.$inferSelect;
+export type VtpImportBatch = typeof vtpImportBatches.$inferSelect;
 export type ShipmentEvent = typeof shipmentEvents.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;
 export type AdSpend = typeof adSpends.$inferSelect;

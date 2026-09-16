@@ -2,6 +2,7 @@
 
 import type { ColumnDef } from "@tanstack/react-table";
 import { SHIPMENT_DIRECTION_LABEL } from "@/lib/constants/viettelpost";
+import { timelineSourceLabel } from "@/lib/constants/shipment-timeline";
 import { Truck } from "lucide-react";
 import { RowLink } from "@/components/data-table/data-table";
 import { CopyButton } from "@/components/misc";
@@ -211,13 +212,38 @@ export const shipmentColumns: ColumnDef<ShipmentListRow, unknown>[] = [
   },
   {
     id: "lastVtpSyncAt",
-    header: "Cập nhật VTP",
+    header: "Đồng bộ VTP",
     enableSorting: false,
-    cell: ({ row }) => (
-      <div className="text-xs text-muted-foreground">
-        <div suppressHydrationWarning>{row.original.lastVtpSyncAt ? formatTimeAgo(row.original.lastVtpSyncAt) : "Chưa tra cứu"}</div>
-        {row.original.isFinal ? <div className="text-[10.5px]">Đã kết thúc</div> : null}
-      </div>
-    ),
+    /*
+      BA CÂU KHÁC NHAU TRONG MỘT Ô, và trước bản này chỉ có câu đầu:
+
+        · ERP HỎI LẦN CUỐI lúc nào — `last_vtp_sync_at`. Câu này KHÔNG nói dữ liệu có mới không:
+          đo được nguồn `VTP_POLL` sinh ra 0 sự kiện, nên hàng trăm lượt hỏi không mang về tin nào.
+        · NGUỒN nào quyết định trạng thái đang hiện — webhook / đối chiếu / tệp / người tra tay.
+        · ĐVVC vừa nói một câu ERP CHƯA DỊCH ĐƯỢC hay không. Đây là câu quan trọng nhất và cũng là
+          câu trước đây không có chỗ nào hiện ra.
+    */
+    cell: ({ row }) => {
+      const s = row.original;
+      return (
+        <div className="min-w-[124px] text-xs text-muted-foreground">
+          <div suppressHydrationWarning>{s.lastVtpSyncAt ? formatTimeAgo(s.lastVtpSyncAt) : "Chưa tra cứu"}</div>
+          {s.vtpSyncSource ? (
+            <div className="text-[10.5px]" title="Nguồn của sự kiện đã quyết định trạng thái đang hiện">
+              {timelineSourceLabel(s.vtpSyncSource)}
+            </div>
+          ) : null}
+          {!s.vtpRawMapped && s.vtpRawStatusName ? (
+            <div
+              className="mt-0.5 rounded bg-violet-100 px-1 py-0.5 text-[10.5px] font-medium text-violet-800 dark:bg-violet-950/60 dark:text-violet-300"
+              title={`Viettel Post nói "${s.vtpRawStatusName}" nhưng ERP chưa dịch được, nên trạng thái bên trái vẫn là chứng từ trước đó. Chữ gốc đã vào sổ trạng thái.`}
+            >
+              VTP: {s.vtpRawStatusName.length > 22 ? `${s.vtpRawStatusName.slice(0, 20).trimEnd()}…` : s.vtpRawStatusName}
+            </div>
+          ) : null}
+          {s.isFinal ? <div className="text-[10.5px]">Đã kết thúc</div> : null}
+        </div>
+      );
+    },
   },
 ];

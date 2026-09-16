@@ -44,6 +44,7 @@ import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
 import { testOrderOutcomeContract } from "./contract-order-outcome.test";
 import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
+import { testVtpSourceOfTruth } from "./vtp-source-of-truth.test";
 import { testReconciliation } from "./reconciliation.test";
 import { testMetricsContract } from "./metrics-contract.test";
 import { testMetricShapeConsistency } from "./metric-shape-consistency.test";
@@ -1696,6 +1697,7 @@ async function main() {
   await testPayrollPolicyEngine(db);
   await testVtpState(db);
   await testVtpIngestion(db);
+  await testVtpSourceOfTruth(db);
   await testReconciliation(db);
   await testLogisticsPerformance(db);
   await testVtpHealth(db);

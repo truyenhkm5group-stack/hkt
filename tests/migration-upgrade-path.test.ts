@@ -45,6 +45,7 @@ const MOI = [
   "0096_payroll_policy_engine",
   "0097_payroll_run_lifecycle",
   "0098_payroll_input_approval",
+  "0099_vtp_source_of_truth",
 ] as const;
 
 /*
@@ -131,6 +132,14 @@ export async function testMigrationUpgradePath() {
       0,
       "bước 1: cột trạng thái của đầu vào nhập tay CHƯA được có — đó là thứ 0098 thêm vào",
     );
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'vtp_status_registry'"), 0, "bước 1: bảng vtp_status_registry CHƯA được có — đó là thứ 0099 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipments' and column_name = 'vtp_raw_status_name'"), 0, "bước 1: cột lời khai thô CHƯA được có — đó là thứ 0099 thêm vào");
+    /*
+      Một vận đơn ĐÃ CÓ TỪ TRƯỚC 0099, mang một trạng thái Viettel Post đã dịch được. Bước 2 kiểm
+      rằng migration KHÔNG dựng hộ nó một "lời khai thô": suy ngược từ `vtp_status_name` là bịa ra
+      một câu ĐVVC với một mốc không có thật (AGENTS.md mục 35).
+    */
+    await client.query(`insert into shipments (id, tracking_code, stage, vtp_status, vtp_status_name, vtp_status_date) values ('up-s99', 'UPS99', 'IN_TRANSIT', 300, 'Đóng tải - vận chuyển đi', now())`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s9', 'UPS9', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipments (id, tracking_code, stage) values ('up-s8', 'UPS8', 'DELIVERY_FAILED')`);
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, owner_at_resolution, opened_at, active, done_at) values ('up-care-1', 'up-s9', 'RESOLVED', null, null, now(), false, now())`);
@@ -1079,6 +1088,36 @@ export async function testMigrationUpgradePath() {
     await client.query(`delete from users where id = 'up-u1'`);
     assert.equal(await dem("select count(*)::int as n from metric_targets where id = 'mt-1' and set_by is null"), 1, "xoá người đặt KHÔNG được cuốn theo đích — đó là quyết định của shop, không phải tài sản của một tài khoản");
     await client.query(`delete from metric_targets where id = 'mt-1'`);
+
+    /*
+      ═══ 0099: LỜI KHAI THÔ CỦA ĐVVC — CỘNG THÊM, KHÔNG BACKFILL ═══
+
+      Ba điều phải đúng, và điều thứ hai là điều dễ làm sai nhất:
+
+       1. bốn cột mới + hai bảng mới có mặt;
+       2. dòng CŨ giữ `vtp_raw_*` là NULL — CHƯA BIẾT ĐVVC nói gì lần cuối, khác hẳn "đã dịch
+          được". Suy ngược từ `vtp_status_name` sẽ đẻ ra một lời khai với mốc thời gian bịa;
+       3. `vtp_raw_mapped` mặc định TRUE — dòng cũ KHÔNG được hiện lên màn hình thành "ĐVVC vừa
+          nói một câu lạ", vì chúng chưa bao giờ nói câu nào cả.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'vtp_status_registry'"), 1, "0099: sổ đăng ký trạng thái phải có mặt");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'vtp_import_batches'"), 1, "0099: sổ lần nhập tệp phải có mặt");
+    assert.equal(await dem("select count(*)::int as n from vtp_status_registry"), 0, "0099: migration KHÔNG được gieo một trạng thái nào — sổ chỉ ghi thứ ĐVVC thật sự đã gửi");
+    assert.equal(
+      await dem("select count(*)::int as n from shipments where id = 'up-s99' and vtp_raw_status_name is null and vtp_raw_status_code is null and vtp_raw_status_at is null"),
+      1,
+      "0099: KHÔNG backfill lời khai thô cho vận đơn cũ — suy ngược từ tên trạng thái là bịa ra một câu ĐVVC chưa từng nói",
+    );
+    assert.equal(await dem("select count(*)::int as n from shipments where id = 'up-s99' and vtp_raw_mapped = true"), 1, "0099: dòng cũ mặc định 'đã dịch được' để không hiện thành cảnh báo giả");
+    assert.equal(await dem("select count(*)::int as n from shipments where id = 'up-s99' and vtp_sync_attempts = 0 and vtp_next_sync_at is null and vtp_sync_source is null"), 1, "0099: sổ đối chiếu của dòng cũ bắt đầu từ trống — lịch hỏi lại do lượt nạp đầu tiên đặt");
+    // Sổ lần nhập chỉ nhận hai chế độ: CHẠY THỬ và ĐÃ GHI. Một chuỗi lạ ở đây là một lần nhập
+    // không ai đọc được là đã ghi hay chưa.
+    await assert.rejects(
+      () => client.query(`insert into vtp_import_batches (id, filename, checksum, kind, mode) values ('up-ib1', 'x.csv', 'abc', 'ORDER_LIST', 'MAYBE')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("vtp_import_batches_mode_check"),
+      "0099: chế độ nhập ngoài PREVIEW/APPLY phải bị CSDL chặn",
+    );
+    await client.query(`delete from shipments where id = 'up-s99'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });

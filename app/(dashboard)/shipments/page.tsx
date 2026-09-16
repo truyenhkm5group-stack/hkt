@@ -6,6 +6,8 @@ import { ShipmentsTable } from "@/app/(dashboard)/shipments/shipments-table";
 import { CareWorkbenchView } from "@/app/(dashboard)/shipments/workbench";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { InfoHint } from "@/components/info-hint";
+import { FileUp } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/nav-progress";
 import { PageHeader } from "@/components/page-header";
 import { SyncButton } from "@/components/sync-button";
@@ -65,6 +67,19 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
           <>
             <SyncButton job="vtp-tracking" label="Cập nhật từ Viettel Post" />
             {view === "all" ? <SyncButton job="vtp-import" label="Nhập từ tài khoản VTP" params={{ days: "30" }} /> : null}
+            {/*
+              ĐƯỜNG CỨU PHẢI Ở NGAY CHỖ NGƯỜI TA PHÁT HIỆN RA VẤN ĐỀ.
+
+              Tài khoản API Viettel Post không đọc được vận đơn do Pancake tạo, nên khi webhook rơi
+              thì nhập tệp là cách duy nhất vá lại trạng thái. Trang nhập đã có sẵn (`/import-vtp`)
+              nhưng chỉ vào được từ trang Đối soát COD — tức là từ chiều TIỀN, trong khi người phát
+              hiện trạng thái sai đang đứng ở chiều GIAO HÀNG.
+            */}
+            <Button asChild variant="outline" size="sm">
+              <NavLink href="/import-vtp">
+                <FileUp className="size-4" /> Nhập trạng thái từ tệp VTP
+              </NavLink>
+            </Button>
           </>
         }
       />

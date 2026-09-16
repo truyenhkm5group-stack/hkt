@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { detectVtpFile, mergeDetectedOrderLists, type DetectedVtpFile } from "@/lib/integrations/viettelpost/import-files";
 import { applyStatementDetailRows, applyVtpOrderList, matchStatementFileToBatch, upsertBatchFromStatementFile } from "@/lib/integrations/viettelpost/statement-db";
+import { fileChecksum, ghiSoNhapTep } from "@/lib/integrations/viettelpost/import-preview";
 
 
 /** Lỗi hiển thị cho chủ shop, không phải JSON thô của Zod. */
@@ -62,7 +63,11 @@ async function luuTepGoc(files: { filename: string; base64: string }[], actor: s
   }
 }
 
-export async function runVtpDataFileImport(files: { filename: string; base64: string }[], actor: string): Promise<{ files: VtpImportFileResult[]; orderRows: number; statementRows: number }> {
+export async function runVtpDataFileImport(
+  files: { filename: string; base64: string }[],
+  actor: string,
+  options: { uploadedById?: string | null } = {},
+): Promise<{ files: VtpImportFileResult[]; orderRows: number; statementRows: number }> {
   const detected: DetectedVtpFile[] = [];
   const results: VtpImportFileResult[] = [];
   // Giữ tệp gốc TRƯỚC khi đọc. Apps Script chỉ gửi thư chưa gắn nhãn nên nếu ERP đọc sai mà không
@@ -143,6 +148,35 @@ export async function runVtpDataFileImport(files: { filename: string; base64: st
     }
   } catch {
     // chỉ là siêu dữ liệu, không được làm hỏng lần nhập
+  }
+
+  /*
+    ═══ SỔ LẦN NHẬP — MỘT DÒNG CHO MỖI TỆP, KỂ CẢ TỆP ĐỌC KHÔNG ĐƯỢC ═══
+
+    Ghi ở ĐÂY chứ không ở server action, vì đường Gmail (Apps Script đẩy tệp đính kèm sang ERP)
+    KHÔNG đi qua server action. Ghi ở hai chỗ thì một trong hai sẽ bị quên, và lần nhập không có
+    vết là lần nhập không tra được khi số liệu bị nghi ngờ.
+
+    `checksum` là SHA-256 của NỘI DUNG: Viettel Post đặt tên tệp theo khoảng ngày nên hai lần tải
+    cùng một khoảng cho ra cùng TÊN với nội dung khác nhau, và cùng nội dung có thể mang hai tên.
+  */
+  const byName = new Map(files.map((f) => [f.filename, f]));
+  for (const r of results) {
+    const file = byName.get(r.filename);
+    if (!file) continue;
+    await ghiSoNhapTep({
+      filename: r.filename,
+      checksum: fileChecksum(file.base64),
+      bytes: Math.round((file.base64.length * 3) / 4),
+      kind: r.kind,
+      mode: "APPLY",
+      uploadedBy: actor,
+      uploadedById: options.uploadedById ?? null,
+      rows: r.rows,
+      applied: r.applied,
+      error: r.kind === "ERROR" ? r.note : null,
+      summary: { note: r.note, withCash: r.withCash, matchedBatch: r.matchedBatch, periodFrom: r.periodFrom, periodTo: r.periodTo },
+    }).catch(() => "");
   }
 
   return { files: results, orderRows, statementRows };

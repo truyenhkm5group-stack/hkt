@@ -8,7 +8,10 @@ import { VTP_FINAL_STATUSES, vtpStatusMeta } from "@/lib/constants/viettelpost";
 import { getViettelPostClient, type VtpTrackingRecord } from "@/lib/integrations/viettelpost/client";
 import { publish } from "@/lib/realtime/bus";
 import { getSyncState, runSyncJob, setSyncState, type SyncTrigger } from "@/lib/sync/runner";
-import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { ghiLoiKhaiTho, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { ghiSoTrangThai, type StatusObservation } from "@/lib/integrations/viettelpost/registry";
+import { carrierSubstate } from "@/lib/constants/carrier-substate";
+import { nextSyncAt } from "@/lib/constants/vtp-reconcile";
 import { afterShipmentStateChange } from "@/lib/care/lifecycle";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 import { ghiQuanSat, type QuanSatMoi } from "@/lib/returns/reason-observe";
@@ -85,6 +88,46 @@ function journeyLegType(record: VtpTrackingRecord, step: VtpTrackingRecord["jour
 }
 
 /**
+ * ═══════════ XẾP LỊCH HỎI LẠI CHO MỘT KIỆN ═══════════
+ *
+ * Gọi sau MỌI lượt nạp thành công (webhook · đối chiếu · nhập tệp). Nhịp lấy từ
+ * `lib/constants/vtp-reconcile.ts` theo TRẠNG THÁI CON của ĐVVC — không theo `shipment_stage`, vì
+ * `stage` gộp "chờ phát lại" với "tồn - khách nghỉ" thành một nhãn trong khi hai việc ấy có nhịp
+ * khác hẳn nhau.
+ *
+ * Lượt thành công RESET bộ đếm hỏng: lùi dần là để chịu một sự cố phía ĐVVC, không phải để phạt
+ * một kiện vĩnh viễn vì nó từng hỏng một lần.
+ *
+ * `vtp_next_sync_at = NULL` nghĩa là KHÔNG XẾP HÀNG NỮA (kiện đã kết thúc) — khác hẳn "hỏi ngay".
+ * Bộ đối chiếu đọc cột này bằng `is not null and <= now()`, nên NULL không bao giờ lọt vào hàng đợi.
+ */
+async function lenLichDoiChieu(db: Db, shipmentId: string, options: { failed?: boolean; error?: string | null } = {}) {
+  const [row] = await db
+    .select({
+      isFinal: schema.shipments.isFinal,
+      vtpStatus: schema.shipments.vtpStatus,
+      vtpStatusName: schema.shipments.vtpStatusName,
+      stage: schema.shipments.stage,
+      attempts: schema.shipments.vtpSyncAttempts,
+    })
+    .from(schema.shipments)
+    .where(eq(schema.shipments.id, shipmentId));
+  if (!row) return;
+  const { substate } = carrierSubstate({ code: row.vtpStatus, text: row.vtpStatusName, stage: row.stage });
+  const attempts = options.failed ? (row.attempts ?? 0) + 1 : 0;
+  const next = nextSyncAt({ substate, isFinal: row.isFinal, failedAttempts: attempts, now: new Date() });
+  await db
+    .update(schema.shipments)
+    .set({
+      vtpNextSyncAt: next,
+      vtpSyncAttempts: attempts,
+      // Lượt thành công XOÁ câu lỗi cũ: giữ lại là để một sự cố đã qua mãi mãi hiện trên màn hình.
+      vtpLastError: options.failed ? (options.error ?? "Không rõ lỗi") : null,
+    })
+    .where(eq(schema.shipments.id, shipmentId));
+}
+
+/**
  * Áp trạng thái Viettel Post vào vận đơn. Dùng chung cho webhook, polling và import.
  * Không tạo vận đơn mới nếu không tìm thấy, trừ khi allowCreate = true.
  */
@@ -145,6 +188,31 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
   if (eventRows.length) await db.insert(schema.shipmentEvents).values(eventRows).onConflictDoNothing();
 
   /*
+    ═══ MỖI CÂU ĐVVC NÓI ĐỀU VÀO SỔ, KỂ CẢ CÂU ERP CHƯA DỊCH ĐƯỢC ═══
+
+    `deriveShipmentState()` cố ý lọc bỏ sự kiện `UNKNOWN` — không đủ căn cứ thì không kết luận. Hệ
+    quả trước bản này: Viettel Post gửi một trạng thái mới, ERP giữ nguyên câu cũ trên màn hình, và
+    KHÔNG CÓ MỘT DẤU HIỆU NÀO. Nay câu ấy hiện ở hai chỗ: sổ đăng ký (đếm được, xếp hàng để bổ sung
+    vào bảng mã) và lời khai thô trên chính vận đơn (người trực nhìn thấy ngay).
+  */
+  const quanSatTrangThai: StatusObservation[] = [];
+  if (record.status !== null || record.statusName) {
+    quanSatTrangThai.push({ code: record.status, name: record.statusName || meta.name, source, shipmentId: shipment.id, raw: record.raw, resolved: meta });
+  }
+  for (const step of record.journey) {
+    if (step.status === null && !step.statusName) continue;
+    quanSatTrangThai.push({ code: step.status, name: step.statusName, source, shipmentId: shipment.id, raw: step.raw });
+  }
+  await ghiSoTrangThai(db, quanSatTrangThai).catch(() => []);
+  // Lời khai thô đi theo MỐC của ĐVVC, không theo lượt ghi — gói tin đến muộn không kéo lùi nó.
+  await ghiLoiKhaiTho(db, shipment.id, {
+    code: record.status,
+    name: record.statusName || meta.name,
+    occurredAt: statusDate,
+    mapped: meta.basis === "code" || meta.basis === "text",
+  }).catch(() => undefined);
+
+  /*
     ═══ GÓI TIN MANG LÝ DO ⇒ GHI NGAY MỘT QUAN SÁT ═══
 
     Trước bản này, chữ lý do của Viettel Post chỉ tồn tại lẫn trong hàng chục nghìn dòng hành
@@ -179,6 +247,7 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
     // Sự kiện đã được ghi vào lịch sử ở trên; dựng lại trạng thái để ảnh chụp luôn khớp lịch sử,
     // kể cả khi vận đơn trước đó bị một luồng khác ghi sai.
     const fixed = await materializeShipmentState(db, shipment.id);
+    await lenLichDoiChieu(db, shipment.id).catch(() => undefined);
     if (fixed.changed) {
       // Trạng thái đã đổi thì vòng đời care phải biết — trước đây nhánh này dừng ở đây và ca treo mãi.
       await afterShipmentStateChange(db, shipment.id, { source: "VTP_LATE_EVENT" }).catch(() => undefined);
@@ -233,6 +302,9 @@ export async function applyVtpTracking(record: VtpTrackingRecord, source: "VTP_W
   // Ảnh chụp cuối cùng luôn được dựng từ lịch sử: một chỗ duy nhất quyết định trạng thái.
   const finalState = await materializeShipmentState(db, shipment.id);
   const stageNow = (finalState.after as ShipmentStage) ?? shipment.stage;
+  // Nhịp hỏi lại đi theo trạng thái MỚI: kiện vừa chuyển sang "đang đi giao" phải được hỏi dày hơn
+  // ngay từ lượt này, không phải đợi lượt sau mới nhận ra.
+  await lenLichDoiChieu(db, shipment.id).catch(() => undefined);
   /*
     ═══ ĐVVC MỞ CA, VÀ ĐVVC ĐÓNG CA — MỘT CỬA ═══
 
@@ -326,6 +398,15 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
             chiếu như cũ. Ngày shop trỏ ERP về đúng tài khoản, vận đơn mới sẽ tự vào lại vòng này.
           */
           sql`${schema.shipments.trackingCapability} <> 'WEBHOOK_ONLY'`,
+          /*
+            ═══ CHỈ HỎI KIỆN ĐÃ TỚI HẠN HỎI LẠI ═══
+
+            `NULL` = CHƯA XẾP LỊCH BAO GIỜ (vận đơn có trước bản này, hoặc vừa được tạo) ⇒ hỏi ngay
+            để nó có lịch. Kiện đã kết thúc nhận `NULL` nhưng không lọt vào đây vì mệnh đề
+            `is_final = false` ở trên đã loại chúng; khi người dùng khai `includeFinal` thì đó là
+            yêu cầu tường minh và chúng được hỏi lại một lượt.
+          */
+          options.includeFinal ? undefined : or(isNull(schema.shipments.vtpNextSyncAt), sql`${schema.shipments.vtpNextSyncAt} <= now()`),
         );
     const shipments = await db
       .select({
@@ -337,7 +418,15 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
       })
       .from(schema.shipments)
       .where(where)
-      .orderBy(sql`${schema.shipments.lastVtpSyncAt} asc nulls first`, asc(schema.shipments.createdAt))
+      /*
+        XẾP THEO HẠN HỎI LẠI, KHÔNG THEO "LÂU CHƯA HỎI".
+
+        Trước bản này câu này là `last_vtp_sync_at asc nulls first` — nghĩa là một kiện ĐANG ĐI GIAO
+        (kết quả phải có trong ngày) đứng ngang hàng với một kiện CHỜ LẤY HÀNG (chậm ba ngày vẫn
+        bình thường), và với trần 300 kiện mỗi lượt thì kiện nóng phải chờ hết lượt của kiện nguội.
+        Hạn hỏi lại đã mang sẵn độ nóng trong nó (xem lib/constants/vtp-reconcile.ts).
+      */
+      .orderBy(sql`${schema.shipments.vtpNextSyncAt} asc nulls first`, sql`${schema.shipments.lastVtpSyncAt} asc nulls first`, asc(schema.shipments.createdAt))
       .limit(probing ? SCOPE_PROBE_SIZE : options.limit ?? 300);
     ctx.summary.detail = `Kiểm tra ${shipments.length} vận đơn`;
     let notFound = 0;
@@ -373,6 +462,12 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
               ...(ketLuan ? { trackingCapability: "WEBHOOK_ONLY" as const } : {}),
             })
             .where(eq(schema.shipments.id, shipment.id));
+          // API trả "không thấy" là một lượt hỏi HỤT: lùi nhịp để khỏi hỏi lại ngay lượt sau. Câu
+          // lỗi nói đúng bản chất — đây là PHẠM VI TÀI KHOẢN, không phải sự cố của kiện hàng.
+          await lenLichDoiChieu(db, shipment.id, {
+            failed: true,
+            error: "Tài khoản API Viettel Post không thấy vận đơn này (vận đơn do Pancake tạo thuộc tài khoản khác)",
+          }).catch(() => undefined);
           continue;
         }
         // Tra được ⇒ bằng chứng dứt khoát theo hướng ngược lại: vận đơn này đối chiếu API được.
@@ -387,8 +482,12 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
         else ctx.summary.skipped += 1;
       } catch (error) {
         ctx.summary.failed += 1;
-        ctx.log(`${orderNumber}: ${error instanceof Error ? error.message : String(error)}`);
+        const cauLoi = error instanceof Error ? error.message : String(error);
+        ctx.log(`${orderNumber}: ${cauLoi}`);
         await db.update(schema.shipments).set({ lastVtpSyncAt: new Date() }).where(eq(schema.shipments.id, shipment.id)).catch(() => undefined);
+        // Lỗi của LƯỢT HỎI (mạng, 5xx) không phải lỗi của kiện hàng — lùi nhịp, giữ nguyên câu lỗi
+        // để trang sức khoẻ nói được vì sao chứ không chỉ nói "hỏng".
+        await lenLichDoiChieu(db, shipment.id, { failed: true, error: cauLoi }).catch(() => undefined);
       }
       await ctx.progress();
     }

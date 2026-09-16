@@ -96,7 +96,7 @@ export async function viettelPostHealth() {
   const now = Date.now();
   const since = (hours: number) => new Date(now - hours * 3600_000);
 
-  const [latest, counts, lastPoll, scope, pending, mismatch, notApplied, unresolved, unknownStatuses, capabilityRows] = await Promise.all([
+  const [latest, counts, lastPoll, scope, pending, mismatch, notApplied, unresolved, unknownStatuses, capabilityRows, lastImportRows, unmapped] = await Promise.all([
     db.query.webhookEvents.findFirst({
       where: eq(schema.webhookEvents.source, "VIETTELPOST"),
       orderBy: [desc(schema.webhookEvents.receivedAt)],
@@ -169,14 +169,29 @@ export async function viettelPostHealth() {
           sql`(${schema.webhookEvents.status} = 'FAILED' or (${schema.webhookEvents.status} = 'IGNORED' and ${schema.webhookEvents.error} ilike '%không tìm thấy%'))`,
         ),
       ),
-    // TRẠNG THÁI ĐVVC ERP CHƯA HIỂU. Không được im lặng quy về một trạng thái nào đó — phải hiện
-    // ra để bổ sung vào bảng mã, nếu không thì vận đơn đứng im mà không ai biết vì sao.
+    /*
+      TRẠNG THÁI ĐVVC ERP CHƯA HIỂU — ĐỌC TỪ SỔ ĐĂNG KÝ, KHÔNG `group by` TRÊN BẢNG SỰ KIỆN.
+
+      Cách cũ (`group by status` trên hàng chục nghìn dòng `shipment_events`) trả lời được "mã nào
+      lạ" nhưng không trả lời được ba câu quan trọng hơn: câu chữ ĐVVC dùng là gì, lần ĐẦU gặp là
+      bao giờ (một mã mới hôm nay trông y hệt một mã đã quen từ tháng trước), và đã có ai XEM chưa.
+
+      `vtp_status_registry` giữ đúng ba thứ đó, và nó cũng thấy được những câu mà bảng sự kiện
+      không bao giờ thấy: dòng tệp nhập vào mang trạng thái lạ KHÔNG sinh sự kiện nào (cố ý — ghi
+      một sự kiện không dịch được là mời `deriveShipmentState()` phải đoán).
+    */
     db
-      .select({ status: schema.shipmentEvents.status, n: sql<number>`count(*)`, lastAt: sql<Date>`max(${schema.shipmentEvents.occurredAt})` })
-      .from(schema.shipmentEvents)
-      .where(sql`${schema.shipmentEvents.source} in (${sql.raw(DOC_SOURCES)}) and (${schema.shipmentEvents.normalizedStage} is null or ${schema.shipmentEvents.normalizedStage} = 'UNKNOWN')`)
-      .groupBy(schema.shipmentEvents.status)
-      .orderBy(sql`count(*) desc`)
+      .select({
+        status: schema.vtpStatusRegistry.statusKey,
+        name: schema.vtpStatusRegistry.statusName,
+        n: schema.vtpStatusRegistry.occurrences,
+        firstAt: schema.vtpStatusRegistry.firstSeenAt,
+        lastAt: schema.vtpStatusRegistry.lastSeenAt,
+        lastSource: schema.vtpStatusRegistry.lastSource,
+      })
+      .from(schema.vtpStatusRegistry)
+      .where(sql`${schema.vtpStatusRegistry.mapped} = false and ${schema.vtpStatusRegistry.acknowledgedAt} is null`)
+      .orderBy(desc(schema.vtpStatusRegistry.lastSeenAt))
       .limit(20),
     // NĂNG LỰC TRA CỨU của vận đơn đang chạy: tài khoản API đọc được bao nhiêu, bao nhiêu chỉ nhận
     // webhook (Pancake tạo, ngoài phạm vi tài khoản), bao nhiêu chưa kết luận.
@@ -185,7 +200,20 @@ export async function viettelPostHealth() {
       .from(schema.shipments)
       .where(and(eq(schema.shipments.isFinal, false), isNotNull(schema.shipments.vtpOrderNumber)))
       .groupBy(schema.shipments.trackingCapability),
+    // Lần nhập tệp gần nhất ĐÃ GHI. Chạy thử (`PREVIEW`) cố ý bị loại ở đây: nó không đổi dữ liệu
+    // nào, nên hiện nó ở ô "nhập gần nhất" sẽ làm người đọc tưởng số liệu vừa được vá.
+    db
+      .select({ at: schema.vtpImportBatches.createdAt, filename: schema.vtpImportBatches.filename, by: schema.vtpImportBatches.uploadedBy, rows: schema.vtpImportBatches.rows, applied: schema.vtpImportBatches.applied, kind: schema.vtpImportBatches.kind })
+      .from(schema.vtpImportBatches)
+      .where(eq(schema.vtpImportBatches.mode, "APPLY"))
+      .orderBy(desc(schema.vtpImportBatches.createdAt))
+      .limit(1),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.shipments)
+      .where(and(eq(schema.shipments.isFinal, false), sql`${schema.shipments.vtpRawMapped} = false`)),
   ]);
+  const lastImport = lastImportRows[0] ?? null;
   const capability = { apiTrackable: 0, webhookOnly: 0, unknown: 0 };
   for (const r of capabilityRows) {
     if (r.capability === "API_TRACKABLE") capability.apiTrackable += Number(r.n);
@@ -225,7 +253,21 @@ export async function viettelPostHealth() {
     /** Gói tin chưa xử lý được, đang chờ xử lý lại. */
     unresolvedWebhooks: Number(unresolved[0].n),
     /** Trạng thái ĐVVC gửi tới mà ERP chưa có trong bảng mã — phải bổ sung, không được đoán. */
-    unknownStatuses: unknownStatuses.map((r) => ({ status: r.status, count: Number(r.n), lastAt: r.lastAt ? new Date(r.lastAt) : null })),
+    unknownStatuses: unknownStatuses.map((r) => ({
+      status: r.status,
+      /** Câu chữ NGUYÊN VĂN của Viettel Post — thứ cần dán vào `VTP_STATUS` để sửa. */
+      name: r.name,
+      count: Number(r.n),
+      firstAt: r.firstAt ? new Date(r.firstAt) : null,
+      lastAt: r.lastAt ? new Date(r.lastAt) : null,
+      lastSource: r.lastSource,
+    })),
+    /** Lần nhập tệp Viettel Post gần nhất ĐÃ GHI (không tính các lượt chạy thử). */
+    lastImport: lastImport
+      ? { at: lastImport.at, filename: lastImport.filename, by: lastImport.by, rows: lastImport.rows, applied: lastImport.applied, kind: lastImport.kind }
+      : null,
+    /** Vận đơn đang chạy mà ĐVVC vừa nói một câu ERP chưa dịch được — việc phải làm, không phải nhiễu. */
+    unmappedShipments: Number(unmapped[0]?.n ?? 0),
   };
 }
 

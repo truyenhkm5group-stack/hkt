@@ -210,6 +210,14 @@ export async function listShipments(params: ListParams) {
         returnedAt: true,
         isFinal: true,
         lastVtpSyncAt: true,
+        // NGUỒN quyết định ảnh chụp + LỜI KHAI THÔ của ĐVVC. Không có chúng thì cột "Cập nhật VTP"
+        // chỉ nói "ERP có hỏi", không nói "ERP có biết gì mới" — và một câu ĐVVC chưa dịch được
+        // sẽ không có chỗ nào hiện ra trên bảng.
+        vtpSyncSource: true,
+        vtpRawStatusName: true,
+        vtpRawStatusAt: true,
+        vtpRawMapped: true,
+        vtpNextSyncAt: true,
         createdAt: true,
       },
       with: { order: { columns: orderColumns } },

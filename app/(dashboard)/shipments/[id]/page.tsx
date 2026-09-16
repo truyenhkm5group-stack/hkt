@@ -8,6 +8,7 @@ import { ReturnReasonPanel } from "@/app/(dashboard)/shipments/[id]/reason-panel
 import { CopyButton, JsonViewer } from "@/components/misc";
 import { PageHeader } from "@/components/page-header";
 import { ShipmentTimeline } from "@/components/shipment-timeline";
+import { ShipmentActivityLog } from "@/components/shipment-activity-log";
 import { CodStatusBadge, OrderStageBadge, ShipmentStageBadge, SourceBadge } from "@/components/status-badge";
 import { SyncOrderButton } from "@/components/sync-order-button";
 import { DescriptionList, Money, SectionCard } from "@/components/ui-bits";
@@ -19,6 +20,8 @@ import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getShipmentDetail, outcomeOfShipment } from "@/lib/queries/shipments";
 import { reasonsForShipments } from "@/lib/queries/return-reason";
 import { getShipmentDwell } from "@/lib/queries/shipment-status-age";
+import { getShipmentTimeline } from "@/lib/queries/shipment-timeline";
+import { timelineSourceLabel } from "@/lib/constants/shipment-timeline";
 import { DWELL_BASIS_LABEL, DWELL_LEVEL_LABEL, DWELL_LEVEL_TONE, DWELL_UNRATED_HINT, DWELL_UNRATED_LABEL } from "@/lib/constants/shipment-status-age";
 import { ageLabel } from "@/lib/constants/action-queue";
 import { MISSING_TEXT } from "@/lib/format";
@@ -47,7 +50,7 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
     `stage` là chặng của hãng vận, và `RETURNED_BY_RULE` (hoàn theo luật tiền) không có mặt ở đó
     chút nào. Đặc tả mục 6 gộp `RETURNED` và `RETURNED_BY_RULE` là hoàn.
   */
-  const [outcome, dwell] = await Promise.all([outcomeOfShipment(s.id), getShipmentDwell(s.id)]);
+  const [outcome, dwell, nhatKy] = await Promise.all([outcomeOfShipment(s.id), getShipmentDwell(s.id), getShipmentTimeline(s.id)]);
   const daHoan = outcome === "RETURNED" || outcome === "RETURNED_BY_RULE";
   const lyDo = daHoan ? (await reasonsForShipments([s.id])).get(s.id) : undefined;
   const number = s.vtpOrderNumber ?? s.trackingCode;
@@ -72,7 +75,16 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
             {s.isFinal ? <span className="rounded-md bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">Đã kết thúc</span> : null}
           </span>
         }
-        description={`Tạo ${formatDateTime(s.createdAt)} · trạng thái ĐVVC ${formatDateTime(s.vtpStatusDate)} · tra cứu VTP ${s.lastVtpSyncAt ? formatTimeAgo(s.lastVtpSyncAt) : "chưa"} · đồng bộ Pancake ${s.lastPancakeSyncAt ? formatTimeAgo(s.lastPancakeSyncAt) : "chưa"}`}
+        description={
+          // BA MỐC KHÁC NHAU, KHÔNG NÉN THÀNH MỘT: "ĐVVC nói lúc nào" · "ERP hỏi lại lúc nào" ·
+          // "nguồn nào quyết định con số đang hiện". Thiếu vế cuối thì mỗi lần số liệu bị nghi ngờ
+          // lại phải mở bảng sự kiện mới biết tin này đến từ webhook, đối chiếu hay một tệp.
+          `Tạo ${formatDateTime(s.createdAt)} · trạng thái ĐVVC ${formatDateTime(s.vtpStatusDate)}` +
+          (s.vtpSyncSource ? ` (nguồn: ${timelineSourceLabel(s.vtpSyncSource)})` : "") +
+          ` · tra cứu VTP ${s.lastVtpSyncAt ? formatTimeAgo(s.lastVtpSyncAt) : "chưa"}` +
+          (s.vtpNextSyncAt ? ` · hỏi lại ${formatDateTime(s.vtpNextSyncAt)}` : "") +
+          ` · đồng bộ Pancake ${s.lastPancakeSyncAt ? formatTimeAgo(s.lastPancakeSyncAt) : "chưa"}`
+        }
         actions={
           <>
             {isVtp ? <SyncOrderButton shipmentId={s.id} label="Cập nhật từ Viettel Post" /> : null}
@@ -88,6 +100,24 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
           </>
         }
       />
+
+      {/*
+        ĐVVC VỪA NÓI MỘT CÂU ERP CHƯA HIỂU — PHẢI NÓI RA, KHÔNG ĐƯỢC IM.
+
+        `materializeShipmentState()` cố ý bỏ qua sự kiện không dịch được (không đủ căn cứ thì không
+        kết luận), nên ô trạng thái ở trên vẫn hiện câu CŨ. Trước bản này người trực không có cách
+        nào biết điều đó — họ đọc một trạng thái cũ và tưởng đó là tin mới nhất.
+      */}
+      {!s.vtpRawMapped && s.vtpRawStatusName ? (
+        <div className="rounded-lg border border-violet-300 bg-violet-50 px-4 py-3 text-sm dark:border-violet-900/60 dark:bg-violet-950/40">
+          <p className="font-semibold text-violet-900 dark:text-violet-200">Viettel Post: &ldquo;{s.vtpRawStatusName}&rdquo;{s.vtpRawStatusCode !== null ? ` (mã ${s.vtpRawStatusCode})` : ""}</p>
+          <p className="mt-0.5 text-[12.5px] text-violet-800 dark:text-violet-300">
+            ERP chưa dịch được câu này nên trạng thái vận đơn ở trên vẫn là chứng từ trước đó
+            {s.vtpRawStatusAt ? ` (ĐVVC nói lúc ${formatDateTime(s.vtpRawStatusAt)})` : ""}. Chữ gốc được giữ nguyên và đã vào sổ trạng thái;
+            việc phải làm là bổ sung mã vào bảng của ERP, không phải đoán.
+          </p>
+        </div>
+      ) : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
         <div className="space-y-5">
@@ -136,8 +166,46 @@ export default async function ShipmentDetailPage({ params }: { params: Promise<{
             </SectionCard>
           ) : null}
 
+          {/*
+            HAI KHỐI, HAI CÂU HỎI KHÁC NHAU — cố ý không gộp.
+
+            "Hành trình" là CHỨNG TỪ ĐVVC thuần tuý: đúng thứ để mở cạnh màn hình Viettel Post mà
+            đối chiếu từng dòng. "Nhật ký xử lý" là toàn bộ vòng đời — ĐVVC, hệ thống, người, và
+            kết luận ERP suy ra — để trả lời "ai đã làm gì, lúc nào, và sau đó chứng từ có đổi
+            không". Gộp chúng lại là làm hỏng việc đối chiếu, vì hàng chục dòng thao tác của người
+            sẽ xen vào giữa các mốc của ĐVVC.
+          */}
           <SectionCard title="Hành trình" description={`${formatNumber(s.events.length)} sự kiện · ${s.vtpLocation ? `vị trí hiện tại: ${s.vtpLocation}` : "chưa có vị trí"}`}>
             <ShipmentTimeline events={s.events} limit={50} />
+          </SectionCard>
+
+          <SectionCard
+            title="Nhật ký xử lý"
+            description={`${formatNumber(nhatKy.entries.length)} mốc · ${formatNumber(nhatKy.counts.carrier)} chứng từ ĐVVC · ${formatNumber(nhatKy.counts.human)} thao tác của người`}
+            hint="Bốn chiều tách rời: chứng từ Viettel Post · việc hệ thống làm · việc người làm · kết luận ERP suy ra. Một dòng của người hay của ERP KHÔNG BAO GIỜ sửa một dòng chứng từ."
+          >
+            <div className="px-5 py-3">
+              <DescriptionList
+                columns={2}
+                items={[
+                  { label: "Ca mở lúc", value: nhatKy.durations.caseOpenedAt ? formatDateTime(nhatKy.durations.caseOpenedAt) : MISSING_TEXT },
+                  // CHƯA XẢY RA in ra dấu gạch, không in thành "0 phút" (AGENTS.md luật 42).
+                  { label: "Tới lúc giao việc", value: nhatKy.durations.minutesToAssign === null ? MISSING_TEXT : `${formatNumber(nhatKy.durations.minutesToAssign)} phút` },
+                  { label: "Tới thao tác đầu", value: nhatKy.durations.minutesToFirstAction === null ? MISSING_TEXT : `${formatNumber(nhatKy.durations.minutesToFirstAction)} phút` },
+                  { label: "Tới lúc chốt ca", value: nhatKy.durations.minutesToResolution === null ? MISSING_TEXT : `${formatNumber(nhatKy.durations.minutesToResolution)} phút` },
+                  { label: "Gọi khách", value: formatNumber(nhatKy.counts.calls) },
+                  { label: "Nhắn khách", value: formatNumber(nhatKy.counts.messages) },
+                  { label: "Liên hệ ĐVVC", value: formatNumber(nhatKy.counts.carrierContacts) },
+                  {
+                    label: `Hạn phản hồi đầu (${nhatKy.durations.slaFirstResponseHours}h)`,
+                    value: nhatKy.durations.caseOpenedAt ? (nhatKy.durations.firstResponseBreached ? "ĐÃ VỠ HẠN" : "Trong hạn") : MISSING_TEXT,
+                  },
+                ]}
+              />
+            </div>
+            <div className="border-t px-5 py-3">
+              <ShipmentActivityLog entries={nhatKy.entries} />
+            </div>
           </SectionCard>
 
           <SectionCard

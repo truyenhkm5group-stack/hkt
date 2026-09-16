@@ -387,15 +387,48 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
               {vtpHealth.stageMismatch ? <span className="text-destructive"> · {formatNumber(vtpHealth.stageMismatch)} lệch trạng thái</span> : null}
               {vtpHealth.webhookNotApplied ? <span className="block text-destructive">{formatNumber(vtpHealth.webhookNotApplied)} vận đơn có webhook mới hơn trạng thái đang lưu</span> : null}
               {vtpHealth.unresolvedWebhooks ? <span className="block text-warning">{formatNumber(vtpHealth.unresolvedWebhooks)} gói tin chưa xử lý được — chờ xử lý lại</span> : null}
-              {vtpHealth.unknownStatuses.length ? (
+              {vtpHealth.unmappedShipments ? (
                 <span className="block text-warning">
-                  {vtpHealth.unknownStatuses.length} mã trạng thái ERP chưa hiểu: {vtpHealth.unknownStatuses.slice(0, 5).map((u) => `${u.status} (${formatNumber(u.count)})`).join(", ")}
-                  {vtpHealth.unknownStatuses.length > 5 ? "…" : ""}
+                  {formatNumber(vtpHealth.unmappedShipments)} vận đơn đang chạy có lời khai ĐVVC mà ERP chưa dịch được — trạng thái hiển thị đang là chứng từ TRƯỚC ĐÓ
+                </span>
+              ) : null}
+              {vtpHealth.lastImport ? (
+                <span className="block">
+                  Nhập tệp gần nhất: {vtpHealth.lastImport.filename} · {formatNumber(vtpHealth.lastImport.applied)}/{formatNumber(vtpHealth.lastImport.rows)} dòng ghi được ·{" "}
+                  {vtpHealth.lastImport.by} · {formatTimeAgo(vtpHealth.lastImport.at)}
                 </span>
               ) : null}
             </p>
           </div>
         </div>
+
+        {/*
+          SỔ TRẠNG THÁI ERP CHƯA DỊCH ĐƯỢC — mỗi dòng là MỘT VIỆC PHẢI LÀM, không phải một con số.
+
+          Một bảng chỉ in "12 mã lạ" là bảng không ai mở lần thứ hai (AGENTS.md luật 45). Nên mỗi
+          dòng mang đủ thứ cần để sửa: mã, CÂU CHỮ NGUYÊN VĂN của Viettel Post (thứ phải dán vào
+          `lib/constants/viettelpost.ts::VTP_STATUS`), gặp bao nhiêu lần, lần đầu và lần cuối.
+        */}
+        {vtpHealth.unknownStatuses.length ? (
+          <div className="mt-4 rounded-lg border border-violet-300 bg-violet-50 p-3 dark:border-violet-900/60 dark:bg-violet-950/40">
+            <p className="text-xs font-medium text-violet-900 dark:text-violet-200">
+              {vtpHealth.unknownStatuses.length} trạng thái Viettel Post ERP chưa dịch được — bổ sung vào bảng mã, không đoán
+            </p>
+            <ul className="mt-2 space-y-1 text-[11.5px] text-violet-900 dark:text-violet-300">
+              {vtpHealth.unknownStatuses.slice(0, 10).map((u) => (
+                <li key={u.status} className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-mono font-semibold">{u.status}</span>
+                  <span>&ldquo;{u.name || "(không có tên)"}&rdquo;</span>
+                  <span className="text-violet-700/80 dark:text-violet-400/80">
+                    gặp {formatNumber(u.count)} lần · lần đầu {u.firstAt ? formatTimeAgo(u.firstAt) : "—"} · gần nhất {u.lastAt ? formatTimeAgo(u.lastAt) : "—"}
+                    {u.lastSource ? ` · qua ${u.lastSource}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {vtpHealth.unknownStatuses.length > 10 ? <p className="mt-1 text-[11px] text-violet-700/80 dark:text-violet-400/80">… và {vtpHealth.unknownStatuses.length - 10} mã nữa</p> : null}
+          </div>
+        ) : null}
 
         {vtpHealth.lastPoll?.status === "FAILED" || (vtpHealth.lastPoll?.status === "PARTIAL" && vtpHealth.lastPoll.error) ? (
           <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">

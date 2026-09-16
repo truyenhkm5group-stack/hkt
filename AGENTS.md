@@ -248,6 +248,32 @@ deploy dừng, không phải cảnh báo.
     nhuận nào được đọc bảng này (`tests/product-notes.test.ts` quét mã nguồn đã vào kho). Cột
     `products.note` là ô ĐỒNG BỘ TỪ PANCAKE — không ghi đè lên nó.
 
+47. **LỜI KHAI CỦA ĐVVC VÀ KẾT LUẬN CỦA ERP LÀ HAI THỨ, KHÔNG BAO GIỜ GỘP** (`lib/constants/shipment-timeline.ts`,
+    `lib/integrations/viettelpost/registry.ts`): trạng thái Viettel Post gửi tới mà ERP chưa dịch
+    được **KHÔNG được biến mất**. `deriveShipmentState()` đúng khi lọc nó khỏi chiều logistics —
+    không đủ căn cứ thì không kết luận — nhưng chữ gốc phải đi tiếp vào `shipments.vtp_raw_*` (lời
+    khai thô, mới hơn thì thắng theo MỐC ĐVVC) và vào `vtp_status_registry` (sổ quan sát: mã, chữ,
+    số lần, lần đầu/lần cuối). Hai chỗ đó **không tham gia phép tính nghiệp vụ nào**; sửa một mã lạ
+    vẫn là bổ sung `VTP_STATUS`, KHÔNG phải sửa dòng trong sổ. Nhật ký vận đơn giữ BỐN CHIỀU tách
+    rời (`CARRIER` · `HUMAN` · `SYSTEM` · `DERIVED`): một dòng của người hay của luật tiền KHÔNG BAO
+    GIỜ sửa một dòng chứng từ — VTP ghi "Phát thành công" thì nhật ký ĐVVC mãi mãi ghi như vậy, kết
+    luận hoàn theo luật COD là một dòng `KPI_OUTCOME` riêng.
+
+48. **NHỊP ĐỐI CHIẾU ĐVVC LÀ HÀM THUẦN, VÀ CHƯA RÕ LÀ NÓNG** (`lib/constants/vtp-reconcile.ts`):
+    `nextSyncAt()` không đọc/ghi CSDL và chạy hai lần ra cùng kết quả. Nhịp đi theo TRẠNG THÁI CON
+    của ĐVVC, không theo `shipment_stage` (stage gộp "chờ phát lại" với "tồn" làm một). Kiện ERP
+    không đọc được trạng thái xếp nhóm NÓNG — lấy sự thiếu hiểu biết của mình làm bằng chứng rằng
+    không có gì đáng lo là biến CHƯA BIẾT thành 0. Chỉ cờ `is_final` đưa kiện ra khỏi hàng đợi
+    (`next_sync_at = NULL`); trạng thái con "đã giao" mà `is_final` còn `false` là MÂU THUẪN, phải
+    hỏi lại. Lỗi lượt hỏi thì LÙI DẦN có trần, lượt thành công RESET bộ đếm và xoá câu lỗi.
+
+49. **NHẬP TỆP ĐVVC PHẢI CHẠY THỬ ĐƯỢC, VÀ MỌI LƯỢT ĐỀU CÓ VẾT** (`vtp_import_batches`):
+    `previewVtpOrderListFile()` CHỈ ĐỌC và dùng lại đúng trình đọc + bộ ghép của đường ghi, để hai
+    bước không lệch nhau vì hai luật. Danh tính một tệp là **checksum của NỘI DUNG**, không phải
+    tên (Viettel Post đặt tên theo khoảng ngày). Chạy thử cũng vào sổ — nó trả lời "ai đã xem tệp
+    này và thấy gì" khi con số gây tranh cãi. Bốn phán quyết `SAME` · `DUPLICATE_ROW` · `OLDER` ·
+    `UNKNOWN_STATUS` **không phải lỗi** và không được gộp thành một nhãn "bỏ qua".
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và

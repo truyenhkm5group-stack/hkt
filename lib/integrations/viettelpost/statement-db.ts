@@ -3,7 +3,8 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
 import { legBaseCode, mergeVtpOrderLists, vtpSaysCodReceived, type CodPaymentSummary, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
-import { materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { ghiLoiKhaiTho, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
+import { ghiSoTrangThai } from "@/lib/integrations/viettelpost/registry";
 import { afterShipmentStateChange } from "@/lib/care/lifecycle";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
@@ -181,6 +182,12 @@ export type OrderListMatch = VtpOrderListRow & {
   orderLabel: string;
   currentStage: string | null;
   currentCod: string | null;
+  /**
+   * MỐC CỦA ĐVVC mà ERP đang giữ cho vận đơn này. Cần để màn hình XEM TRƯỚC trả lời được câu
+   * "dòng trong tệp mới hơn hay cũ hơn thứ ERP đang có" — trước đây chỉ so được CHẶNG, mà hai dòng
+   * cùng chặng vẫn có thể là một dòng cũ đến muộn.
+   */
+  currentStatusDate: Date | null;
   mapped: ReturnType<typeof resolveVtpStatus>;
   /**
    * direct = khớp mã vận đơn trong ERP;
@@ -288,7 +295,7 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
   ];
   const found = codes.length
     ? await db
-        .select({ id: schema.shipments.id, vtp: schema.shipments.vtpOrderNumber, tracking: schema.shipments.trackingCode, stage: schema.shipments.stage, codStatus: schema.shipments.codStatus, systemId: schema.orders.systemId, name: schema.orders.billFullName })
+        .select({ id: schema.shipments.id, vtp: schema.shipments.vtpOrderNumber, tracking: schema.shipments.trackingCode, stage: schema.shipments.stage, codStatus: schema.shipments.codStatus, statusDate: schema.shipments.vtpStatusDate, systemId: schema.orders.systemId, name: schema.orders.billFullName })
         .from(schema.shipments)
         .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
         .where(or(inArray(sql`upper(${schema.shipments.vtpOrderNumber})`, codes), inArray(sql`upper(${schema.shipments.trackingCode})`, codes)))
@@ -320,7 +327,7 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
   const codeless = needPhone.size
     ? await db
         .select({ id: schema.shipments.id, cod: schema.shipments.codAmount, phone: SHIPMENT_PHONE,
-          stage: schema.shipments.stage, codStatus: schema.shipments.codStatus, systemId: schema.orders.systemId, name: schema.orders.billFullName })
+          stage: schema.shipments.stage, codStatus: schema.shipments.codStatus, statusDate: schema.shipments.vtpStatusDate, systemId: schema.orders.systemId, name: schema.orders.billFullName })
         .from(schema.shipments)
         .leftJoin(schema.orders, eq(schema.orders.id, schema.shipments.orderId))
         .where(and(NO_CODE, inArray(SHIPMENT_PHONE, [...needPhone])))
@@ -361,6 +368,7 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       orderLabel: f ? `#${f.systemId ?? ""} ${f.name ?? ""}`.trim() : "",
       currentStage: f?.stage ?? null,
       currentCod: f?.codStatus ?? null,
+      currentStatusDate: f?.statusDate ?? null,
       // Tệp xuất từ viettelpost.vn không có mã số trạng thái, chỉ có chữ — nhưng vẫn đi qua ĐÚNG
       // bộ dịch mà webhook dùng, để cùng một trạng thái của ĐVVC không cho ra hai kết luận.
       mapped: resolveVtpStatus({ code: null, text: r.statusText }),
@@ -420,8 +428,34 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
   let duplicate = 0;
   let missingDate = 0;
   let conflicts = matches.filter((m) => m.matchIssue).length;
+  /*
+    ═══ MỖI CÂU TRONG TỆP ĐỀU VÀO SỔ TRẠNG THÁI, KỂ CẢ CÂU ERP CHƯA DỊCH ĐƯỢC ═══
+
+    Vòng lặp bên dưới bỏ qua dòng có `mapped.stage === "UNKNOWN"` — đúng, vì ghi một sự kiện không
+    dịch được vào lịch sử là mời `deriveShipmentState()` phải đoán. Nhưng trước bản này đó cũng là
+    chỗ chữ gốc của ĐVVC BIẾN MẤT HOÀN TOÀN: không sự kiện, không dòng sổ, không một con số nào nói
+    rằng tệp có mang câu ấy. `applied.unknown` đếm được nhưng không nói nổi câu đó là câu gì.
+
+    Nay mọi câu trong tệp đều được ghi vào sổ đăng ký TRƯỚC vòng lặp — kể cả dòng không khớp được
+    vận đơn nào, vì một trạng thái lạ vẫn là một trạng thái lạ dù ERP có biết kiện đó hay không.
+  */
+  await ghiSoTrangThai(
+    db,
+    matches
+      .filter((m) => m.statusText)
+      .map((m) => ({ code: m.mapped.code, name: m.statusText, source: "VTP_IMPORT", shipmentId: m.shipmentId, raw: { sourceHash: m.sourceHash ?? null, sourceRow: m.sourceRow ?? null, row: m.raw }, resolved: m.mapped })),
+  ).catch(() => []);
+
   // Ghi lịch sử theo ĐÚNG thứ tự thời gian của các lần gửi, không theo chuỗi mã vận đơn.
   for (const m of [...matches].sort((a, b) => attemptTime(a) - attemptTime(b) || a.trackingCode.localeCompare(b.trackingCode))) {
+    if (m.shipmentId && m.mapped.stage === "UNKNOWN") {
+      // Kiện có thật, câu thì chưa dịch được ⇒ ghi LỜI KHAI THÔ lên chính vận đơn để người trực
+      // nhìn thấy ngay trên màn hình, thay vì thấy một trạng thái cũ không kèm dấu hiệu nào.
+      const at = m.statusAt ? new Date(m.statusAt) : m.statusDate ? vnStartOfDay(m.statusDate) : null;
+      if (at && Number.isFinite(at.getTime())) {
+        await ghiLoiKhaiTho(db, m.shipmentId, { code: m.mapped.code, name: m.statusText, occurredAt: at, mapped: false }).catch(() => undefined);
+      }
+    }
     if (!m.shipmentId || m.mapped.stage === "UNKNOWN") continue;
     const occurredAt = m.statusAt ? new Date(m.statusAt) : m.statusDate ? vnStartOfDay(m.statusDate) : null;
     if (!occurredAt || !Number.isFinite(occurredAt.getTime())) { missingDate++; continue; }

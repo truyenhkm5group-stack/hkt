@@ -145,7 +145,7 @@ export type MaterializeResult = { shipmentId: string; changed: boolean; before: 
 export async function materializeShipmentState(db: Db, shipmentId: string): Promise<MaterializeResult> {
   const derived = await deriveShipmentState(db, shipmentId);
   const [current] = await db
-    .select({ stage: s.stage, isFinal: s.isFinal, vtpStatus: s.vtpStatus, vtpStatusDate: s.vtpStatusDate })
+    .select({ stage: s.stage, isFinal: s.isFinal, vtpStatus: s.vtpStatus, vtpStatusDate: s.vtpStatusDate, vtpSyncSource: s.vtpSyncSource })
     .from(s)
     .where(eq(s.id, shipmentId));
   if (!derived || !current) return { shipmentId, changed: false, before: current?.stage ?? null, after: null, reason: "no-events" };
@@ -154,7 +154,11 @@ export async function materializeShipmentState(db: Db, shipmentId: string): Prom
     current.stage === derived.stage &&
     current.isFinal === derived.isFinal &&
     current.vtpStatus === derived.vtpStatus &&
-    current.vtpStatusDate?.getTime() === derived.vtpStatusDate.getTime();
+    current.vtpStatusDate?.getTime() === derived.vtpStatusDate.getTime() &&
+    // NGUỒN NẰM TRONG PHÉP SO. `decidedBy` vẫn luôn được tính ra nhưng trước bản này bị vứt đi, nên
+    // khi một con số bị nghi ngờ thì không tra được nó do webhook, đối chiếu hay tệp quyết định mà
+    // không mở bảng sự kiện. Bỏ nó khỏi phép so thì dòng cũ (nguồn NULL) sẽ không bao giờ được điền.
+    current.vtpSyncSource === derived.decidedBy.source;
   if (same) return { shipmentId, changed: false, before: current.stage, after: derived.stage, reason: "unchanged" };
 
   await db
@@ -172,6 +176,8 @@ export async function materializeShipmentState(db: Db, shipmentId: string): Prom
       deliveredAt: derived.deliveredAt,
       returnedAt: derived.returnedAt,
       cancelledAt: derived.cancelledAt,
+      /** Nguồn của SỰ KIỆN đã quyết định ảnh chụp này — không phải nguồn của lượt ghi gần nhất. */
+      vtpSyncSource: derived.decidedBy.source,
       updatedAt: new Date(),
     })
     .where(eq(s.id, shipmentId));
@@ -181,4 +187,36 @@ export async function materializeShipmentState(db: Db, shipmentId: string): Prom
 /** Tiện dụng cho lớp gọi không sẵn `db`. */
 export async function materializeShipment(shipmentId: string) {
   return materializeShipmentState(await getDb(), shipmentId);
+}
+
+/**
+ * ═══════════ LỜI KHAI THÔ CỦA ĐVVC — GHI KỂ CẢ KHI ERP KHÔNG HIỂU ═══════════
+ *
+ * `materializeShipmentState()` ở trên cố ý **bỏ qua** mọi sự kiện không dịch được: chiều logistics
+ * không được phép kết luận từ một câu chưa hiểu. Đúng — nhưng hệ quả là khi Viettel Post gửi một
+ * trạng thái mới, màn hình vẫn hiện câu CŨ và **không có một dấu hiệu nào**.
+ *
+ * Bốn cột `vtp_raw_*` là đường thoát cho đúng tình huống đó. Chúng mang lời khai nguyên văn, ghi ở
+ * mọi lượt nạp, và KHÔNG tham gia vào bất kỳ phép tính nghiệp vụ nào — không `ORDER_OUTCOME`,
+ * không sổ kho, không tiền. Chúng chỉ để HIỂN THỊ và để đối chiếu với màn hình Viettel Post.
+ *
+ * MỚI HƠN THÌ THẮNG, theo mốc của ĐVVC — cùng luật với ảnh chụp đã dịch. Gói tin đến muộn không
+ * kéo lùi lời khai thô, và một câu ERP hiểu được cũng không xoá dấu vết của câu chưa hiểu trước đó
+ * nếu câu đó xảy ra SAU (vì nó không xảy ra sau — mốc quyết định, không phải thứ tự tới).
+ */
+export async function ghiLoiKhaiTho(
+  db: Db,
+  shipmentId: string,
+  input: { code: number | null; name: string; occurredAt: Date; mapped: boolean },
+): Promise<void> {
+  if (!input.name && input.code === null) return;
+  await db
+    .update(s)
+    .set({
+      vtpRawStatusCode: input.code,
+      vtpRawStatusName: input.name || null,
+      vtpRawStatusAt: input.occurredAt,
+      vtpRawMapped: input.mapped,
+    })
+    .where(and(eq(s.id, shipmentId), sql`(${s.vtpRawStatusAt} is null or ${s.vtpRawStatusAt} <= ${input.occurredAt})`));
 }
