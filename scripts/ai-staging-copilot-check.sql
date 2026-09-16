@@ -48,7 +48,7 @@ with tin_khach as (
          (select max(sent_at) from sales_messages m
             where m.conversation_id = c.id and m.from_page = false and m.sender_type = 'CUSTOMER' and btrim(m.text) <> '') as khach_luc,
          (select max(sent_at) from sales_messages m
-            where m.conversation_id = c.id and m.from_page = true and m.sender_type in ('PAGE_HUMAN','PAGE_BOT'))            as shop_luc,
+            where m.conversation_id = c.id and m.from_page = true and m.sender_type = 'PAGE_HUMAN')                       as shop_luc,
          c.human_takeover_at
   from sales_conversations c
   where c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
@@ -69,3 +69,39 @@ select max(m.sent_at) as tin_khach_moi_nhat, now() as bay_gio
 from sales_messages m join sales_conversations c on c.id = m.conversation_id
 where m.from_page = false and m.sender_type = 'CUSTOMER'
   and c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb));
+
+\echo '── 10. PHÂN LOẠI NGƯỜI GỬI — 50 HỘI THOẠI GẦN NHẤT CỦA PAGE THÍ ĐIỂM ──'
+-- Chỉ PAGE_HUMAN mới là "nhân viên đã trả lời". PAGE_BOT và PAGE_SYSTEM KHÔNG được làm một lượt
+-- khách biến mất khỏi hàng đợi: một câu tự động là đúng thứ khiến khách ngồi đợi.
+with gan_nhat as (
+  select c.id
+  from sales_conversations c
+  where c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
+  order by c.updated_at desc nulls last
+  limit 50
+), moc as (
+  select g.id,
+         (select max(sent_at) from sales_messages m where m.conversation_id = g.id
+            and m.from_page = false and m.sender_type = 'CUSTOMER' and btrim(m.text) <> '')      as khach_luc,
+         (select max(sent_at) from sales_messages m where m.conversation_id = g.id
+            and m.from_page = true and m.sender_type = 'PAGE_HUMAN')                             as nguoi_luc,
+         (select max(sent_at) from sales_messages m where m.conversation_id = g.id
+            and m.from_page = true and m.sender_type in ('PAGE_BOT','PAGE_SYSTEM'))              as may_luc
+  from gan_nhat g
+)
+select
+  count(*) filter (where khach_luc is not null)::int                                       as co_tin_khach,
+  count(*) filter (where nguoi_luc is not null and nguoi_luc >= khach_luc)::int            as nhan_vien_that_da_dap,
+  count(*) filter (where may_luc is not null)::int                                         as co_tin_may_bot_he_thong,
+  count(*) filter (where khach_luc is not null
+                     and (nguoi_luc is null or nguoi_luc < khach_luc))::int                as khach_van_dang_cho_nguoi,
+  count(*) filter (where khach_luc is not null
+                     and (nguoi_luc is null or nguoi_luc < khach_luc)
+                     and may_luc is not null and may_luc >= khach_luc)::int                as truoc_day_bi_dem_nham_la_da_dap
+from moc;
+
+\echo '── 11. Từng loại người gửi có bao nhiêu tin (để thấy phân loại có chạy không) ──'
+select m.sender_type, m.from_page, count(*)::int as so_tin
+from sales_messages m join sales_conversations c on c.id = m.conversation_id
+where c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
+group by 1, 2 order by 3 desc;

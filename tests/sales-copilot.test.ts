@@ -114,6 +114,11 @@ export async function testSalesCopilot(db: Db) {
 
     Luật nhận dạng hẹp và không báo nhầm: trong một tệp .ts, một dòng bắt đầu bằng `--` gần như
     chắc chắn là chú thích SQL nằm trong một chuỗi mẫu (TypeScript dùng `//`).
+
+    LẦN THỨ TƯ, 16/09/2026 — và bài kiểm này KHÔNG bắt được. Chú thích gây lỗi là một khối kiểu
+    xuyệc-sao nằm TRONG chuỗi mẫu SQL, không phải một dòng gạch-gạch. Một cái lưới chỉ quét một
+    hình dạng thì hình dạng kia đi qua, nên phải quét CẢ HAI: trong một chuỗi mẫu SQL, mọi dòng
+    chú thích — gạch-gạch hay thân của một khối — đều không được mang dấu huyền ngược.
   */
   const dinhDauHuyen: string[] = [];
   for (const f of tep) {
@@ -125,6 +130,20 @@ export async function testSalesCopilot(db: Db) {
       });
   }
   assert.deepEqual(dinhDauHuyen, [], "chú thích SQL không được chứa dấu huyền ngược — nó đóng chuỗi mẫu và làm hỏng cả truy vấn");
+
+  // Và luật thứ hai cho hình dạng KHỐI. Quét theo DÒNG như trên thì báo nhầm mọi chú thích tài
+  // liệu bình thường của TypeScript (kho mã này viết tên ký hiệu trong dấu huyền ngược khắp nơi),
+  // nên phải tìm đúng CHỖ KẾT THÚC của từng chuỗi mẫu SQL rồi xem sau nó là gì.
+  const gayGiua = tep.filter((f) => f.startsWith("lib/")).flatMap((f) => chuoiMauSqlDut(readFileSync(f, "utf8")).map((d) => `${f}:${d}`));
+  assert.deepEqual(gayGiua, [], "một chuỗi mẫu SQL kết thúc giữa câu — gần như chắc chắn có dấu huyền ngược trong một chú thích khối bên trong nó");
+
+  // BÀI KIỂM CỦA CHÍNH BÀI KIỂM. Một cái lưới chưa bao giờ bắt được gì thì không ai biết nó có
+  // thủng hay không — nên đưa cho nó đúng đoạn mã đã làm hỏng truy vấn hôm nay.
+  assert.deepEqual(chuoiMauSqlDut("const q = sql`select 1 from t`;\n"), [], "mã lành KHÔNG được bị báo");
+  assert.deepEqual(chuoiMauSqlDut("const z = sql`0` as unknown as number;\n"), [], "sau dấu đóng là từ khoá `as` — vẫn là mã lành");
+  assert.deepEqual(chuoiMauSqlDut("// bí danh gõ tay trong sql`` sẽ hỏng\n"), [], "một chú thích TypeScript nhắc tới SQL KHÔNG phải một truy vấn");
+  assert.deepEqual(chuoiMauSqlDut("const q = sql`select 1\n  /* xem `HUMAN_REPLY` */\n  from t`;\n"), [2], "chú thích KHỐI mang dấu huyền ngược — đúng hình dạng đã gãy hôm nay");
+  assert.deepEqual(chuoiMauSqlDut("const q = sql`select 1\n  -- xem `HUMAN_REPLY`\n  from t`;\n"), [2], "chú thích DÒNG mang dấu huyền ngược — hình dạng đã gãy ba lần trước");
 
   /*
     1C. BỘ NẠP TIN SỐNG ĐỌC ĐƯỢC, NHƯNG KHÔNG CÓ ĐƯỜNG NÀO TỚI CỔNG GỬI.
@@ -393,6 +412,43 @@ export async function testSalesCopilot(db: Db) {
   await db.insert(schema.salesSuggestions).values({ id: "s-rong", conversationId: convRong, suggestedReply: "   ", action: "NO_ACTION" }).onConflictDoNothing();
   assert.ok(!(await copilotQueue({ pageIds: ["page-thi-diem"], db })).some((r) => r.conversationId === convRong), "câu rỗng không vào hàng đợi");
 
+  /*
+    6B★. MỘT CÂU BOT KHÔNG PHẢI "ĐÃ CÓ NGƯỜI TRẢ LỜI".
+
+    ĐO 16/09/2026 trên page thí điểm: 48/50 hội thoại bị tính là "shop đã đáp rồi", hàng đợi ra
+    ĐÚNG 0, và màn hình báo "không có việc nào" một cách hoàn toàn tự tin. Truy vấn khi ấy nhận cả
+    PAGE_BOT là câu trả lời, nên Botcake chào một câu là khách biến mất khỏi hàng đợi.
+
+    Ba loại tin phía shop, ba kết quả — và chỉ MỘT loại được làm khách rời hàng đợi.
+  */
+  const dungBot = async (id: string, loai: "PAGE_BOT" | "PAGE_SYSTEM" | "PAGE_HUMAN") => {
+    await db
+      .insert(schema.salesConversations)
+      .values({ id, pageId: "page-bot", externalId: `ext-${id}`, pancakeCustomerId: `pc-${id}`, customerName: id, stage: "NEW_LEAD", sourceType: "WIN" })
+      .onConflictDoNothing();
+    const luc = new Date(Date.now() - 600_000);
+    await db
+      .insert(schema.salesMessages)
+      .values({ id: `mk-${id}`, conversationId: id, externalId: `emk-${id}`, direction: "IN", fromPage: false, senderType: "CUSTOMER", text: "còn hàng không shop", sentAt: luc })
+      .onConflictDoNothing();
+    await db
+      .insert(schema.salesMessages)
+      .values({ id: `ms-${id}`, conversationId: id, externalId: `ems-${id}`, direction: "OUT", fromPage: true, senderType: loai, text: "shop sẽ phản hồi sớm ạ", sentAt: new Date(luc.getTime() + 60_000) })
+      .onConflictDoNothing();
+    await db
+      .insert(schema.salesSuggestions)
+      .values({ id: `sb-${id}`, conversationId: id, suggestedReply: `gợi ý ${id}`, action: "ANSWER_QUESTION" })
+      .onConflictDoNothing();
+  };
+  await dungBot("conv-bot", "PAGE_BOT");
+  await dungBot("conv-he-thong", "PAGE_SYSTEM");
+  await dungBot("conv-nguoi", "PAGE_HUMAN");
+  const hangBot = await copilotQueue({ pageIds: ["page-bot"], db });
+  const coTrongHang = (id: string) => hangBot.some((r) => r.conversationId === id);
+  assert.ok(coTrongHang("conv-bot"), "câu BOT không được làm lượt khách biến mất — khách vẫn đang chờ một người");
+  assert.ok(coTrongHang("conv-he-thong"), "thông báo nền tảng cũng không phải một người đã trả lời");
+  assert.ok(!coTrongHang("conv-nguoi"), "câu NHÂN VIÊN thật thì mới hết việc");
+
   // ═════════ 6C. HÀNG ĐỢI: AI CHỜ LÂU NHẤT ĐƯỢC TRẢ LỜI TRƯỚC ═════════
   //
   // Xếp hàng theo thứ tự đến, như mọi quầy phục vụ. Một người đợi bốn mươi phút gấp hơn một người
@@ -553,4 +609,69 @@ export async function testSalesCopilot(db: Db) {
   console.log(
     `✓ Nấc trợ lý bán hàng: một đường gửi duy nhất đòi khoá tài khoản (quét ${tep.length} tệp đã vào kho) · quyền gửi tách khỏi quyền xem · danh sách trắng page rỗng ⇒ không ai gửi được · bấm hai lần bị CSDL chặn, gửi hỏng vẫn thử lại được · câu cũ / có tin mới hơn bị đánh dấu · máy KHÔNG tự gửi ở cả 4 nấc`,
   );
+}
+
+/**
+ * CHUỖI MẪU SQL CÓ DẤU HUYỀN NGƯỢC TRONG MỘT CHÚ THÍCH — trả về số dòng của mỗi chỗ. HÀM THUẦN.
+ *
+ * Điều kiện báo lỗi phải CHÍNH XÁC, không phỏng đoán. Bản nháp đầu đoán theo "sau dấu đóng là chữ
+ * thì chắc gãy" và báo nhầm ngay hai chỗ lành: `sql` + `0` + `as unknown as number` (sau dấu đóng
+ * là từ khoá `as`), và một chú thích TypeScript có nhắc tới hai dấu huyền ngược. Một cái lưới báo
+ * nhầm là một cái lưới sẽ bị tắt.
+ *
+ * Nên điều kiện là đúng cái đã xảy ra: đi từ chỗ mở một chuỗi mẫu SQL, theo dõi ô nội suy VÀ trạng
+ * thái chú thích BÊN TRONG chuỗi; nếu dấu huyền ngược đóng lại nằm TRONG một chú thích thì nó
+ * không phải chỗ kết thúc mà người viết định — nó là chỗ chuỗi bị cắt ngang.
+ */
+export function chuoiMauSqlDut(ma: string): number[] {
+  const ra: number[] = [];
+  const mo = /\bsql\s*`/g;
+  let khop: RegExpExecArray | null;
+  while ((khop = mo.exec(ma)) !== null) {
+    // Bỏ qua chỗ mở nằm trong một chú thích TypeScript dòng đơn — nó chỉ là văn xuôi nhắc tới SQL.
+    const dauDong = ma.lastIndexOf("\n", khop.index) + 1;
+    if (ma.slice(dauDong, khop.index).includes("//")) {
+      mo.lastIndex = khop.index + khop[0].length;
+      continue;
+    }
+    let i = khop.index + khop[0].length;
+    let sau = 0; // độ sâu ô nội suy ${ … }
+    let chuThichDong = false;
+    let chuThichKhoi = false;
+    for (; i < ma.length; i += 1) {
+      const c = ma[i];
+      if (c === "\\") {
+        i += 1;
+        continue;
+      }
+      if (c === "\n") {
+        chuThichDong = false;
+        continue;
+      }
+      if (!chuThichKhoi && !chuThichDong && c === "-" && ma[i + 1] === "-") chuThichDong = true;
+      if (!chuThichDong && !chuThichKhoi && c === "/" && ma[i + 1] === "*") chuThichKhoi = true;
+      if (chuThichKhoi && c === "*" && ma[i + 1] === "/") {
+        chuThichKhoi = false;
+        i += 1;
+        continue;
+      }
+      if (!chuThichDong && !chuThichKhoi) {
+        if (c === "$" && ma[i + 1] === "{") {
+          sau += 1;
+          i += 1;
+          continue;
+        }
+        if (c === "}" && sau > 0) {
+          sau -= 1;
+          continue;
+        }
+      }
+      if (c === "`" && sau === 0) break;
+    }
+    if (i >= ma.length) break;
+    // Dấu đóng NẰM TRONG một chú thích ⇒ chuỗi mẫu bị cắt ngang ở đây.
+    if (chuThichDong || chuThichKhoi) ra.push(ma.slice(0, i).split("\n").length);
+    mo.lastIndex = i + 1;
+  }
+  return ra;
 }

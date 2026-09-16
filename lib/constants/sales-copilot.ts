@@ -157,3 +157,26 @@ export function isMeaningfulEdit(suggestion: string, final: string): boolean {
   if (!goc.length) return true;
   return editDistance(goc, cuoi) / goc.length >= COPILOT_MEANINGFUL_EDIT_RATIO;
 }
+
+/**
+ * ═══════════ CHỈ NGƯỜI MỚI LÀ "ĐÃ CÓ NGƯỜI TRẢ LỜI" ═══════════
+ *
+ * Một lượt khách RỜI hàng đợi trợ lý khi phía shop đã đáp sau lượt ấy. Câu hỏi là: đáp bằng GÌ?
+ *
+ * ĐO NGÀY 16/09/2026 trên page thí điểm: 48 trên 50 hội thoại bị tính là "shop đã đáp rồi" và hàng
+ * đợi ra ĐÚNG 0. Truy vấn khi ấy nhận cả `PAGE_BOT` là câu trả lời. Nghĩa là Botcake trả lời một
+ * câu tự động xong thì khách BIẾN MẤT khỏi hàng đợi — không nhân viên nào còn thấy họ nữa, và
+ * màn hình nói "không có việc nào" một cách hoàn toàn tự tin.
+ *
+ * Một câu bot KHÔNG phải một người đã xử lý khách. Nó thường là lời chào, là "shop sẽ phản hồi
+ * sớm ạ", là đúng thứ khiến khách ngồi đợi. Gộp nó vào nhóm người là biến hàng đợi thành một
+ * màn hình luôn rỗng — dạng hỏng tệ nhất, vì nó trông y hệt như đang làm việc tốt.
+ *
+ * `UNKNOWN` (tin phía shop không rõ tên người gửi) cũng KHÔNG nằm trong danh sách này. Nhánh lỗi
+ * phải rơi về phía GIỮ LẠI việc: giữ nhầm thì một nhân viên đọc rồi bỏ qua, mất nhầm thì một
+ * khách không bao giờ được trả lời.
+ */
+export const HUMAN_REPLY_SENDER_TYPES = ["PAGE_HUMAN"] as const;
+
+/** Dạng chuỗi cho SQL: `('PAGE_HUMAN')`. Một nguồn duy nhất, không gõ lại danh sách ở truy vấn. */
+export const HUMAN_REPLY_SQL_LIST = HUMAN_REPLY_SENDER_TYPES.map((t) => `'${t}'`).join(", ");

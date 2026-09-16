@@ -49,8 +49,31 @@ export function modeAtLeast(mode: AgentMode, minimum: AgentMode): boolean {
  */
 export const DEFAULT_AGENT_MODE: AgentMode = "SHADOW";
 
-/** Nấc tối đa được phép ở giai đoạn này. Mọi yêu cầu vượt nấc bị hạ xuống đây và ghi lý do. */
-export const MAX_ALLOWED_MODE: AgentMode = "SHADOW";
+/**
+ * Nấc tối đa được phép ở giai đoạn này. Mọi yêu cầu vượt nấc bị hạ xuống đây.
+ *
+ * 16/09/2026 — NÂNG TỪ `SHADOW` LÊN `COPILOT`, chủ shop phê duyệt tường minh đúng một dòng này.
+ *
+ * VÌ SAO PHẢI SỬA: trần này là thứ DUY NHẤT chặn đợt thí điểm nấc trợ lý, và nó chặn IM LẶNG.
+ * Thao tác ops ghi `ai_agents.mode = 'COPILOT'`, cột ấy đọc ra đúng `COPILOT`, nhưng
+ * `effectiveMode()` kẹp xuống `SHADOW` — nút gửi trên `/ai/copilot` tắt, `canSend()` từ chối, và
+ * không một dòng nào nói vì sao. Đo trên bản chạy thử 07:34 ngày 16/09: cột COPILOT · không có
+ * ghi đè settings · trần SHADOW ⇒ nấc có hiệu lực SHADOW.
+ *
+ * ĐÂY KHÔNG PHẢI PHÊ DUYỆT `AUTO`, và cấu trúc giữ điều đó chứ không phải lời hứa:
+ *
+ *   · `AUTO` có thứ hạng 3, trần mới có thứ hạng 2 ⇒ `clampMode("AUTO")` vẫn trả `COPILOT`.
+ *     Không cấu hình nào, không câu SQL nào, không dòng `.env` nào với tới nấc máy tự nhắn khách.
+ *   · `AI_ALLOW_AUTO_SEND` và `AI_ALLOW_ORDER_CREATE` vẫn ghim `"false"` ở
+ *     `docker-compose.staging.yml` cho CẢ `app` LẪN `ingest` — một lớp thứ hai, độc lập, không đi
+ *     qua hằng số này.
+ *   · Nấc `COPILOT` theo đúng định nghĩa ở `AGENT_MODE_HINT` là "soạn sẵn tin, NGƯỜI bấm gửi":
+ *     vẫn cần phiên đăng nhập, quyền `ai:send`, page trong danh sách trắng, và một cú bấm.
+ *
+ * Quay lại trạng thái chỉ-quan-sát: đổi dòng này về `"SHADOW"`. Nó vẫn là công tắc hẹp nhất trong
+ * cả hệ thống.
+ */
+export const MAX_ALLOWED_MODE: AgentMode = "COPILOT";
 
 export function clampMode(requested: AgentMode, ceiling: AgentMode = MAX_ALLOWED_MODE): AgentMode {
   return MODE_RANK[requested] > MODE_RANK[ceiling] ? ceiling : requested;

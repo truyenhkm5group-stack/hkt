@@ -8,7 +8,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { loadWinKnowledge } from "@/lib/queries/sales-knowledge";
 import { LIVE_INGEST_ENV, liveIngestHealth, type LiveIngestHealth } from "@/lib/constants/live-ingest";
 import { getDb, schema, type Db } from "@/db";
-import { COPILOT_MEANINGFUL_EDIT_RATIO, COPILOT_PAGES_KEY, COPILOT_QUEUE_RELEVANT_HOURS, COPILOT_SUGGESTION_TTL_MINUTES, type CopilotWarning } from "@/lib/constants/sales-copilot";
+import { COPILOT_MEANINGFUL_EDIT_RATIO, COPILOT_PAGES_KEY, COPILOT_QUEUE_RELEVANT_HOURS, COPILOT_SUGGESTION_TTL_MINUTES, HUMAN_REPLY_SQL_LIST, type CopilotWarning } from "@/lib/constants/sales-copilot";
 import { rowsOf } from "@/lib/sql-rows";
 
 /**
@@ -178,10 +178,16 @@ export async function copilotQueue(
         where conversation_id = c.id and from_page = false and sender_type = 'CUSTOMER' and btrim(text) <> ''
         order by sent_at desc nulls last limit 1
       ) t on true
-      -- Nhân viên đã trả lời SAU tin khách cuối chưa. Chưa thì đây là việc đang chờ người.
+      /*
+        NHÂN VIÊN đã trả lời SAU tin khách cuối chưa. Chưa thì đây là việc đang chờ người.
+
+        CHỈ PAGE_HUMAN — xem HUMAN_REPLY_SENDER_TYPES. Bản trước nhận cả PAGE_BOT, nên một câu tự
+        động của Botcake làm khách biến mất khỏi hàng đợi: đo 16/09/2026 được 48/50 hội thoại
+        "shop đã đáp rồi" và hàng đợi ra ĐÚNG 0.
+      */
       left join lateral (
         select max(sent_at) as luc from sales_messages
-        where conversation_id = c.id and from_page = true and sender_type in ('PAGE_HUMAN', 'PAGE_BOT')
+        where conversation_id = c.id and from_page = true and sender_type in (${sql.raw(HUMAN_REPLY_SQL_LIST)})
       ) nv on true
       left join ai_runs r on r.id = m.run_id
       left join lateral (

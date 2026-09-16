@@ -55,9 +55,15 @@ export async function testAiPlatform(db: Db) {
     assert.ok(!modeAtLeast("SHADOW", decl.minMode), `${name} KHÔNG được chạy ở nấc SHADOW`);
   }
 
-  // ───────── 2. Nấc quyền hạn: trần là SHADOW ở giai đoạn này ─────────
+  // ───────── 2. Nấc quyền hạn: trần là COPILOT, và AUTO KHÔNG với tới được ─────────
+  //
+  // Bản trước viết `clampMode("COPILOT") === MAX_ALLOWED_MODE`. Câu ấy CÓ NGHĨA khi trần là SHADOW,
+  // nhưng nó đúng với BẤT KỲ trần nào — kể cả AUTO — nên nó không khoá được điều thật sự quan
+  // trọng. Điều phải khoá là "máy tự nhắn khách không với tới được", nên viết thẳng tên `AUTO` ra.
+  assert.notEqual(MAX_ALLOWED_MODE, "AUTO", "trần KHÔNG bao giờ được là AUTO — đó là nấc máy tự nhắn khách");
   assert.equal(clampMode("AUTO"), MAX_ALLOWED_MODE, "yêu cầu nấc AUTO phải bị kẹp xuống trần hiện hành");
-  assert.equal(clampMode("COPILOT"), MAX_ALLOWED_MODE, "yêu cầu nấc COPILOT phải bị kẹp xuống trần hiện hành");
+  assert.ok(!modeAtLeast(clampMode("AUTO"), "AUTO"), "KHÔNG đường nào qua clampMode ra được nấc AUTO");
+  assert.equal(clampMode("COPILOT"), "COPILOT", "nấc trợ lý (người bấm gửi) PHẢI đi qua được — trần kẹp nó là chặn im lặng cả đợt thí điểm");
   assert.equal(clampMode("OFF"), "OFF", "hạ nấc thì không bị kẹp");
   assert.ok(modeAtLeast("SHADOW", "SHADOW") && !modeAtLeast("SHADOW", "COPILOT"), "so sánh nấc phải theo thứ bậc, không so chuỗi");
   for (const mode of AGENT_MODES) assert.ok(modeAtLeast(mode, "OFF"), `nấc ${mode} phải >= OFF`);
