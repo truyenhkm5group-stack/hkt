@@ -35,7 +35,24 @@ import { collectWorkItems, duplicateKeys } from "@/lib/queries/work-adapters";
  * Chạy riêng: npx tsx --tsconfig tsconfig.json tests/order-duplicate.test.ts
  */
 
-const NOW = new Date("2026-09-15T10:00:00.000Z");
+/*
+  ═══════════ MỐC PHẢI ĐI THEO ĐỒNG HỒ THẬT, KHÔNG ĐƯỢC GHIM MỘT NGÀY ═══════════
+
+  Bản trước ghim `NOW = 2026-09-15T10:00:00Z` rồi gieo dữ liệu theo "bao nhiêu giờ trước" so với
+  mốc ĐÓ — trong khi `getDuplicateOrderQueue()` lọc bằng `now() - 48 giờ` theo đồng hồ THẬT. Hai
+  mốc trôi xa nhau mỗi giờ, nên bài kiểm tự hết hạn: đơn `gui-1` gieo ở 30 giờ trước mốc ghim nằm
+  ở 14/09 04:00, và tới 16/09 04:00 nó rơi RA NGOÀI cửa sổ 48 giờ — cặp trùng co lại còn một đơn
+  và khẳng định "đơn y hệt một đơn đang trên đường phải bị bắt" đỏ.
+
+  Đo được 16/09/2026: CI lúc 03:45Z còn xanh, chạy lúc 04:25Z đã đỏ. Vách đứng rộng đúng 15 phút,
+  và sau đó nó đỏ VĨNH VIỄN — tức là chặn mọi lần deploy, vì workflow deploy chạy `npm test` trước
+  khi đụng tới máy chủ.
+
+  Mọi giá trị `hoursAgo` trong bài này vốn đã là SỐ TƯƠNG ĐỐI ("30 giờ trước", "4 giờ trước",
+  "10 ngày trước"), nên cho mốc chạy theo đồng hồ thật là đúng ý định ban đầu — và bài kiểm thôi
+  mang hạn sử dụng.
+*/
+const NOW = new Date();
 const gio = (h: number) => new Date(NOW.getTime() - h * 3_600_000);
 
 function sp(variantId: string | null, quantity = 1, extra: Partial<ItemLike> = {}): ItemLike {

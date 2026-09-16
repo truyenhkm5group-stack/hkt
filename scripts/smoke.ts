@@ -437,9 +437,48 @@ async function main() {
     }
   }
 
+  /*
+    ═══════════ TRANG CHI TIẾT VẬN ĐƠN — ĐỊA CHỈ PHẢI LẤY TỪ DỮ LIỆU THẬT ═══════════
+
+    `ROUTES` là danh sách TĨNH, nên tuyến `/shipments/[id]` chưa bao giờ nằm trong lá chắn: không
+    có mã vận đơn nào gõ cứng được mà vẫn đúng sau một tháng. Nhưng đó lại là trang NẶNG NHẤT của
+    module giao vận — từ 16/09/2026 nó dựng nhật ký hợp nhất, đọc sáu bảng cho một kiện — và một
+    truy vấn hỏng ở đó sẽ không lượt smoke nào thấy.
+
+    Nên hai địa chỉ được PHÂN GIẢI LÚC CHẠY:
+      · kiện có NHIỀU SỰ KIỆN ĐVVC nhất — tuyến nặng của chiều chứng từ;
+      · kiện có THAO TÁC CHĂM SÓC của người — tuyến duy nhất đi qua cả bốn chiều của nhật ký.
+
+    Không tìm được thì BỎ QUA im lặng (kho mới, chưa có dữ liệu) chứ không làm đỏ lần deploy: đây
+    là lá chắn hiệu năng, không phải bài kiểm dữ liệu.
+  */
+  const routes = [...ROUTES];
+  try {
+    const db = await getDb();
+    const them = async (sql: string, vi_sao: string) => {
+      const rows = (await db.execute(sql as never)) as unknown as { rows?: { id: string }[] } | { id: string }[];
+      const list = Array.isArray(rows) ? rows : (rows.rows ?? []);
+      const id = list[0]?.id;
+      if (id && !routes.includes(`/shipments/${id}`)) {
+        routes.push(`/shipments/${id}`);
+        console.error(`  · thêm tuyến động /shipments/${id} — ${vi_sao}`);
+      }
+    };
+    await them(
+      `select s.id from shipments s join shipment_events e on e.shipment_id = s.id group by s.id order by count(*) desc limit 1`,
+      "kiện nhiều sự kiện ĐVVC nhất",
+    );
+    await them(
+      `select s.id from shipments s where exists (select 1 from care_actions a where a.shipment_id = s.id) order by s.created_at desc limit 1`,
+      "kiện có thao tác chăm sóc của người",
+    );
+  } catch (e) {
+    console.error(`  · không phân giải được tuyến chi tiết vận đơn (bỏ qua): ${e instanceof Error ? e.message : e}`);
+  }
+
   const runStarted = Date.now();
 
-  for (const route of ROUTES) {
+  for (const route of routes) {
     // Hết ngân sách: ghi BỎ QUA cho phần còn lại thay vì đốt thêm 60 giây mỗi trang và làm hỏng
     // chính lần deploy đang kiểm.
     if (Date.now() - runStarted > BUDGET_MS) {
