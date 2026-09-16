@@ -338,6 +338,32 @@ deploy dừng, không phải cảnh báo.
     được — vì cách sửa của mỗi cái là một việc khác; gộp thành "kết nối thất bại" là đẩy người đọc
     đi sửa nhầm chỗ.
 
+56. **ĐVVC TỰ PHỤC HỒI KHÔNG PHẢI CÔNG CỦA ĐỘI CHĂM SÓC** (`lib/constants/care-effect.ts`):
+    `shipment_care.care_outcome` đọc DUY NHẤT chứng từ ĐVVC — kiện cuối cùng `DELIVERED` ⇒
+    `RESCUED_DIRECT`. Nó KHÔNG hỏi "có ai của shop làm gì không", và đó đúng là việc của nó. Đo
+    production 16/09/2026: trong **44 ca mang nhãn "Cứu được" chỉ 17 ca có một hành động chăm sóc
+    thật** — 22–27 ca còn lại là kiện tự đi `Chờ phát lại → Đang giao → Giao thành công` mà không
+    ai gọi một cuộc nào. Nên mọi báo cáo về HIỆU QUẢ CHĂM SÓC phải đi qua `deriveCaseOutcome()` và
+    in `DELIVERED_AFTER_CARE` TÁCH KHỎI `DELIVERED_WITHOUT_MANUAL_CARE`; cặp `RETURNED_*` cũng vậy,
+    vì thiếu vế thứ hai thì mọi kiện hoàn trông như đội đã cố mà không nổi. Hành động ghi SAU mốc
+    chốt KHÔNG được tính — gán công ngược thời gian là cách dễ nhất để một báo cáo tự khen. Kết cục
+    là hàm THUẦN ĐỌC RA LÚC XEM, KHÔNG ghi thêm cột: câu trả lời phải đổi khi nhân viên bổ sung
+    dòng hành động, và backfill cho 319 dòng cũ là đoán (mục 35).
+
+57. **"CHẠM VÀO" VÀ "CHĂM SÓC" LÀ HAI CON SỐ** (`lib/queries/care-case-audit.ts`): `care_actions`
+    là việc chăm sóc không cần bàn cãi; sự kiện ca do người tạo là "có ai đó động vào". Gộp lại thì
+    không phân biệt được *đội đã làm việc* với *đội đã nhìn thấy*. `ASSIGN` bị loại khỏi CẢ HAI kể
+    cả khi do người bấm — giao việc là điều phối, và một trưởng nhóm bấm giao 50 ca trong ba phút
+    sẽ làm 50 ca trông như đã được xử lý. Đo 16/09: **221/321 ca chưa ai động vào**, 21 ca có người
+    chạm nhưng chưa ghi hành động — nhóm sau KHÔNG được backfill thành một cuộc gọi, vì đổi trạng
+    thái không chứng minh có ai gọi. ĐỘ PHỦ luôn in cạnh mọi trung vị; dưới 10 ca thì trả `null`.
+
+58. **KỲ BÁO CÁO PHẢI KHAI MỐC NÓ LỌC THEO** (`PERIOD_BASES`): "30 ngày gần đây" của ca MỞ RA và
+    của ca CHỐT KẾT QUẢ là hai TẬP CA khác nhau và hai con số khác nhau — `CASE_OPENED_AT` trả lời
+    "đội nhận bao nhiêu việc", `CASE_RESOLVED_AT` trả lời "đội xong được bao nhiêu". Màn hình phải
+    in mốc đang lọc và nói ra hậu quả của lựa chọn đó; ca chưa có mốc ấy nằm NGOÀI kỳ, không phải
+    trong kỳ với giá trị 0.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và

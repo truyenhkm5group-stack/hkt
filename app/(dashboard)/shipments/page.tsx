@@ -5,6 +5,8 @@ import { RescueReportSection } from "@/app/(dashboard)/shipments/rescue-report";
 import { ShipmentsTable } from "@/app/(dashboard)/shipments/shipments-table";
 import { CareWorkbenchView } from "@/app/(dashboard)/shipments/workbench";
 import { ReconcilePanel } from "@/app/(dashboard)/shipments/reconcile-panel";
+import { CaseOutcomeReport } from "@/app/(dashboard)/shipments/case-outcome-report";
+import { PERIOD_BASES, PERIOD_BASIS_LABEL, type PeriodBasis } from "@/lib/constants/care-effect";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { InfoHint } from "@/components/info-hint";
 import { FileUp } from "lucide-react";
@@ -47,6 +49,8 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
   const view: CareView | "report" | "reconcile" =
     viewRaw === "report" ? "report" : viewRaw === "reconcile" ? "reconcile" : (CARE_VIEWS as readonly string[]).includes(viewRaw) ? (viewRaw as CareView) : "care";
   const ngoaiCare = view === "all" || view === "report" || view === "reconcile";
+  const basisRaw = typeof raw.basis === "string" ? raw.basis : "";
+  const basis: PeriodBasis = (PERIOD_BASES as readonly string[]).includes(basisRaw) ? (basisRaw as PeriodBasis) : "CASE_OPENED_AT";
 
   const [wb, staff, presets] = ngoaiCare ? [null, [], []] : await Promise.all([getCareWorkbench(), assignableUsers(), getCareNotePresets()]);
   const counts = wb?.counts ?? (ngoaiCare ? (await getCareWorkbench()).counts : { care: 0, waiting: 0, escalated: 0, done: 0 });
@@ -124,6 +128,29 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
             ĐVVC; khối hiệu quả care cũ trả lời "đội đã chạm vào bao nhiêu kiện". Cái trên đứng
             trước vì nó là thứ ra quyết định được.
           */}
+          {/*
+            KỲ LỌC THEO MỐC NÀO là một lựa chọn, không phải một mặc định ẩn. "30 ngày gần đây" của
+            ca MỞ RA và của ca CHỐT KẾT QUẢ là hai tập ca khác nhau — nút này để người đọc chọn, và
+            màn hình in ra mốc đang dùng.
+          */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11.5px] text-muted-foreground">Kỳ lọc</span>
+            {PERIOD_BASES.map((b) => (
+              <NavLink
+                key={b}
+                href={`/shipments?view=report&basis=${b}`}
+                className={cn(
+                  "rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors",
+                  basis === b ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {PERIOD_BASIS_LABEL[b]}
+              </NavLink>
+            ))}
+          </div>
+          <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
+            <CaseOutcomeReport period={resolvePeriod(raw, "30d")} basis={basis} />
+          </Suspense>
           <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
             <RescueReportSection period={resolvePeriod(raw, "30d")} />
           </Suspense>
