@@ -173,6 +173,14 @@ export function vtpSaysCodReceived(codPaymentText: string | undefined | null): b
 
 export type VtpOrderListRow = {
   trackingCode: string; orderCode: string; statusText: string;
+  /**
+   * Cột "Mã trạng thái" khi tệp có — MẠNH HƠN cột chữ và cố ý đứng riêng.
+   *
+   * Chữ "Giao thành công" mơ hồ giữa chiều đi và chiều hoàn (mục 3 của AGENTS.md ghi đúng cái bẫy
+   * này: Viettel Post ghi "Giao thành công" cho cả chiều hoàn). Mã 501/503/504/101/107/201 thì
+   * không mơ hồ. `null` = tệp không có cột đó, KHÔNG phải mã 0.
+   */
+  statusCode?: number | null;
   /** Số trên danh sách vận đơn là COD khai báo, không tự coi là tiền đã xác minh. */
   cod: number | null; fee: number | null; statusDate: string; raw: string;
   statusAt?: string | null; createdAt?: string | null;
@@ -242,6 +250,13 @@ export function legBaseCode(code: string): string {
 
 const LIST_COL = {
   status: ["trang thai don hang", "trang thai van don", "trang thai", "status"],
+  /**
+   * CỘT MÃ TRẠNG THÁI, nếu tệp có. Phải tìm TRƯỚC và loại khỏi cột chữ: header "Mã trạng thái"
+   * chứa nguyên cụm " trang thai " nên `findCol` sẽ bắt nhầm nó thành cột chữ, và ERP sẽ đọc số
+   * "501" như một câu chữ — `mapVtpStatusText("501")` không hiểu, kiện thành trạng thái lạ, và cả
+   * tệp lặng lẽ không cập nhật được gì.
+   */
+  statusCode: ["ma trang thai", "status code", "ma tt"],
   /** Cột "Mã đơn hàng" của file VTP: với vận đơn chiều về thì đây chính là mã vận đơn gốc */
   order: ["ma don hang", "ma tham chieu", "ma don"],
   date: ["ngay chuyen trang thai", "ngay cap nhat", "ngay trang thai", "thoi gian cap nhat", "ngay tra", "ngay giao"],
@@ -289,7 +304,11 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
     throw new Error(`Không tìm thấy cột Mã vận đơn và Trạng thái trong file. Các cột đọc được: ${sample || "(trống)"}`);
   }
   const cTrack = findCol(headers, COL.tracking);
-  const cStatus = findCol(headers, LIST_COL.status);
+  const cStatusCode = findCol(headers, LIST_COL.statusCode);
+  // Loại cột MÃ ra khỏi cột CHỮ: nếu không, "Mã trạng thái" đứng trước "Trạng thái" trong tệp sẽ
+  // thắng, và ERP đọc một con số như một câu chữ.
+  const cStatusRaw = findCol(headers, LIST_COL.status, ["ma"]);
+  const cStatus = cStatusRaw >= 0 && cStatusRaw !== cStatusCode ? cStatusRaw : findCol(headers, LIST_COL.status);
   const cCod = findCol(headers, COL.cod, ["cuoc", "phi"]);
   const cFee = findCol(headers, ["tong phi", "cuoc van chuyen", ...COL.fee], ["cod", "thu ho"]);
   const cDate = findCol(headers, LIST_COL.date);
@@ -315,7 +334,10 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
     if (!/^[A-Z0-9][A-Z0-9_-]{4,}$/.test(trackingCode)) continue;
     const orderCode = cell(cOrder).toUpperCase().replace(/\s+/g, "");
     const statusAt = parseVtpListTimestamp(cDate >= 0 ? row[cDate] : null);
-    const parsed = { trackingCode, orderCode: /^[A-Z0-9][A-Z0-9_-]{4,}$/.test(orderCode) ? orderCode : "", statusText: cell(cStatus),
+    // Mã trạng thái: chỉ nhận chuỗi TOÀN SỐ 1–4 chữ số. Ô trống hay chữ ⇒ `null` = CHƯA BIẾT.
+    const maSo = cell(cStatusCode);
+    const statusCode = cStatusCode >= 0 && /^\d{1,4}$/.test(maSo) ? Number(maSo) : null;
+    const parsed = { trackingCode, orderCode: /^[A-Z0-9][A-Z0-9_-]{4,}$/.test(orderCode) ? orderCode : "", statusText: cell(cStatus), statusCode,
       cod: listMoney(cCod >= 0 ? row[cCod] : null, `${trackingCode} COD khai báo`), fee: listMoney(cFee >= 0 ? row[cFee] : null, `${trackingCode} Tổng phí`),
       statusDate: statusAt ? new Date(new Date(statusAt).getTime() + 7 * 3600_000).toISOString().slice(0, 10) : "", statusAt,
       createdAt: parseVtpListTimestamp(cCreated >= 0 ? row[cCreated] : null),

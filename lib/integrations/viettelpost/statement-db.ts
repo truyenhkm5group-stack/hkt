@@ -370,9 +370,15 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       currentStage: f?.stage ?? null,
       currentCod: f?.codStatus ?? null,
       currentStatusDate: f?.statusDate ?? null,
-      // Tệp xuất từ viettelpost.vn không có mã số trạng thái, chỉ có chữ — nhưng vẫn đi qua ĐÚNG
-      // bộ dịch mà webhook dùng, để cùng một trạng thái của ĐVVC không cho ra hai kết luận.
-      mapped: resolveVtpStatus({ code: null, text: r.statusText }),
+      /*
+        MÃ SỐ TRƯỚC, CHỮ SAU — và cả hai đi qua ĐÚNG bộ dịch mà webhook dùng, để cùng một trạng thái
+        của ĐVVC không bao giờ cho ra hai kết luận.
+
+        Phần lớn tệp xuất từ viettelpost.vn chỉ có cột chữ, nên `statusCode` thường là `null` và
+        `resolveVtpStatus` rơi về nhánh chữ y như trước. Nhưng khi tệp CÓ cột mã thì mã phải thắng:
+        chữ "Giao thành công" mơ hồ giữa chiều đi và chiều hoàn (mục 3), còn mã 501/504 thì không.
+      */
+      mapped: resolveVtpStatus({ code: r.statusCode ?? null, text: r.statusText }),
       matchKind: f ? (direct ? "direct" : leg ? "leg" : "phone") : null,
       legOf: leg ? (leg.vtp ?? base) : null,
       matchIssue,

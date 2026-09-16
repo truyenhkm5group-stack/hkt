@@ -667,10 +667,37 @@ export async function testVtpSourceOfTruth(db: Db) {
   // Mẫu số 0 ⇒ `null`, không phải 0%: chưa nhận gói nào thì tỷ lệ gửi lại là CHƯA BIẾT.
   assert.equal(suc.duplicateRate24h, suc.last24h > 0 ? suc.duplicate24h / suc.last24h : null, "tỷ lệ gửi lại phải khớp với hai con số nó dựng từ, và mẫu số 0 thì trả null");
 
+  /*
+    ═════════ 15. TỆP NGUYÊN BẢN CỦA VIETTEL POST: CỘT "MÃ TRẠNG THÁI" KHÔNG ĐƯỢC CƯỚP CỘT CHỮ ═════════
+
+    Header "Mã trạng thái" chứa nguyên cụm " trang thai ", nên bộ dò cột sẽ bắt nhầm nó thành cột
+    CHỮ nếu nó đứng trước. Hậu quả im lặng và khó tìm: ERP đọc số "501" như một câu chữ,
+    `mapVtpStatusText("501")` không hiểu, mọi dòng thành "trạng thái lạ", và CẢ TỆP không cập nhật
+    được một vận đơn nào — trong khi màn hình vẫn báo đọc được đủ số dòng.
+
+    Và khi tệp CÓ cột mã thì mã phải THẮNG chữ: "Giao thành công" mơ hồ giữa chiều đi và chiều hoàn
+    (mục 3 — Viettel Post ghi câu đó cho cả hai), còn mã 501/504 thì không.
+  */
+  const MA_CHU = "PKE-TRUTH-MACHU";
+  await applyVtpTracking(track(MA_CHU, 300, "Đóng tải - vận chuyển đi", "2026-09-10T03:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  // Cột "Mã trạng thái" đặt TRƯỚC cột "Trạng Thái", đúng thứ tự dễ gây lỗi nhất.
+  const headMa = "STT,Mã Vận Đơn,Mã đơn hàng,Ngày tạo,Mã trạng thái,Trạng Thái,Tiền thu hộ (4),Tổng phí (9),Ngày chuyển trạng thái";
+  const csvMa = [headMa, `1,${MA_CHU},REFM,01/09/2026 12:00:00,501,Giao thành công,499000,17000,14/09/2026 15:00:00`].join("\n");
+  const xemMa = await previewVtpOrderListFile({ filename: "VTP_co_ma_trang_thai.csv", base64: Buffer.from(csvMa, "utf8").toString("base64") });
+  const dongMa = xemMa.sample.find((r) => r.trackingCode === MA_CHU);
+  assert.ok(dongMa, "dòng phải đọc được");
+  assert.equal(
+    dongMa.fileStatusText,
+    "Giao thành công",
+    `cột CHỮ phải đọc đúng câu của ĐVVC, không phải con số — nhận được "${dongMa.fileStatusText}"`,
+  );
+  assert.equal(xemMa.counts.UNKNOWN_STATUS, 0, "tệp có cột mã KHÔNG được biến thành một tệp toàn trạng thái lạ");
+  assert.equal(xemMa.counts.NEWER, 1, "và nó vẫn phải nhận ra đây là chứng từ mới hơn thứ ERP đang giữ");
+
   console.log(
     `✓ VTP là nguồn sự thật: ${health.unknownStatuses.length} trạng thái chưa dịch được vào sổ (không bị nuốt) · lời khai thô theo mốc ĐVVC · ` +
       `nhịp đối chiếu theo độ nóng · chạy thử không ghi một dòng nào · nhật ký ${nk.entries.length} mốc, bốn chiều tách rời · ` +
       `khoảng hụt webhook đo được và không đếm hai lần · hàng đợi đối chiếu ${hangDoi.rows.length}/${hangDoi.total} kiện, mỗi kiện một dòng · ` +
-      `sức khoẻ webhook: nền chưa đủ ⇒ CHƯA BIẾT, không tự nhận là khoẻ`,
+      `sức khoẻ webhook: nền chưa đủ ⇒ CHƯA BIẾT, không tự nhận là khoẻ · cột 'Mã trạng thái' không cướp được cột chữ`,
   );
 }
