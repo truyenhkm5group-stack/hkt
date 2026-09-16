@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HKT · Quản lý giao dịch MB Bank</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%232563eb%27/%3E%3Ctext x=%2716%27 y=%2723%27 font-size=%2720%27 text-anchor=%27middle%27 fill=%27white%27 font-family=%27sans-serif%27%3E₫%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="logo">₫</span> <span id="shopName">HKT</span> <small>· Sổ thu chi MB Bank</small></div>
+  <nav class="tabs">
+    <button data-tab="dashboard" class="active">Tổng quan</button>
+    <button data-tab="transactions">Giao dịch <span class="badge" id="badgeUnclassified" hidden>0</span></button>
+    <button data-tab="import">Nhập sao kê</button>
+    <button data-tab="rules">Quy tắc gán nhãn</button>
+    <button data-tab="categories">Danh mục</button>
+    <button data-tab="settings">Cài đặt</button>
+  </nav>
+</header>
+
+<main>
+<!-- ============================== TỔNG QUAN -->
+<section id="tab-dashboard" class="tab">
+  <div class="toolbar">
+    <div class="period">
+      <label>Từ <input type="date" id="dashFrom"></label>
+      <label>Đến <input type="date" id="dashTo"></label>
+      <div class="quick">
+        <button data-period="this-month">Tháng này</button>
+        <button data-period="last-month">Tháng trước</button>
+        <button data-period="this-quarter">Quý này</button>
+        <button data-period="this-year">Năm nay</button>
+        <button data-period="all">Tất cả</button>
+      </div>
+      <button class="primary" id="dashRefresh">Xem báo cáo</button>
+    </div>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>Báo cáo kết quả kinh doanh <small>(cơ sở tiền · mẫu B02-DN rút gọn)</small></h3>
+      <table class="pnl" id="pnlTable"></table>
+      <div class="note" id="taxNote"></div>
+    </div>
+    <div class="card">
+      <h3>Diễn biến theo tháng <select id="chartYear"></select></h3>
+      <div id="chart" class="chart"></div>
+      <div class="legend">
+        <span><i style="background:var(--c-rev)"></i>Doanh thu thuần</span>
+        <span><i style="background:var(--c-exp)"></i>Tổng chi phí</span>
+        <span><i style="background:var(--c-profit)"></i>Lợi nhuận trước thuế</span>
+      </div>
+      <table class="mini" id="monthlyTable"></table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Chi tiết các đầu mục doanh thu &amp; chi phí</h3>
+    <table class="breakdown" id="breakdownTable"></table>
+  </div>
+</section>
+
+<!-- ============================== GIAO DỊCH -->
+<section id="tab-transactions" class="tab" hidden>
+  <div class="toolbar wrap">
+    <label>Từ <input type="date" id="txFrom"></label>
+    <label>Đến <input type="date" id="txTo"></label>
+    <input type="search" id="txQ" placeholder="Tìm nội dung / đối tác / mã GD">
+    <select id="txGroup"><option value="">— Nhóm kế toán —</option></select>
+    <select id="txCategory"><option value="">— Danh mục —</option></select>
+    <select id="txDirection">
+      <option value="">Vào + ra</option>
+      <option value="in">Tiền vào</option>
+      <option value="out">Tiền ra</option>
+    </select>
+    <label class="chk"><input type="checkbox" id="txUnclassified"> Chỉ chưa phân loại</label>
+    <button class="primary" id="txSearch">Lọc</button>
+    <span class="spacer"></span>
+    <button id="txAdd">+ Thêm giao dịch tay</button>
+    <button id="txExport">Xuất CSV</button>
+  </div>
+  <div class="toolbar bulk" id="bulkBar" hidden>
+    Đã chọn <b id="bulkCount">0</b> giao dịch → gán vào
+    <select id="bulkCategory"></select>
+    <button class="primary" id="bulkApply">Áp dụng</button>
+    <button id="bulkClear">Bỏ chọn</button>
+  </div>
+  <div class="summary" id="txSummary"></div>
+  <div class="tablewrap">
+  <table class="tx" id="txTable">
+    <thead><tr>
+      <th><input type="checkbox" id="txCheckAll"></th>
+      <th>Ngày</th><th>Nội dung</th><th>Đối tác</th>
+      <th class="num">Tiền vào</th><th class="num">Tiền ra</th>
+      <th>Danh mục</th><th>Ghi chú</th><th></th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+  </div>
+  <div class="pager" id="txPager"></div>
+</section>
+
+<!-- ============================== NHẬP SAO KÊ -->
+<section id="tab-import" class="tab" hidden>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Nhập file sao kê MB Bank</h3>
+      <p>Chọn file <b>.csv</b> hoặc <b>.xlsx</b> xuất từ app MBBank / Biz MBBank / Internet Banking. App tự nhận diện cột
+        <i>Ngày giao dịch, Nội dung, Số tiền (hoặc Ghi nợ/Ghi có), Số dư, Số tham chiếu, Đối tác</i>.</p>
+      <input type="file" id="importFile" accept=".csv,.xlsx,.xlsm,.txt">
+      <div class="actions">
+        <button class="primary" id="importPreview">Xem trước</button>
+        <button id="importCommit" disabled>Nhập vào sổ</button>
+      </div>
+      <div id="importResult" class="note"></div>
+    </div>
+    <div class="card help">
+      <h3>Cách lấy sao kê từ MB Bank</h3>
+      <ol>
+        <li>Mở app <b>MBBank</b> → chọn tài khoản → <b>Sao kê / Lịch sử giao dịch</b>.</li>
+        <li>Chọn khoảng thời gian → <b>Xuất file</b> (Excel/PDF). Chọn Excel hoặc CSV.</li>
+        <li>Với Biz MBBank (tài khoản doanh nghiệp/hộ KD): Tài khoản → Sao kê → Tải Excel.</li>
+        <li>Tải file lên đây. Giao dịch trùng (theo số tham chiếu) sẽ tự bỏ qua nên có thể nhập chồng nhiều lần.</li>
+      </ol>
+      <p>Sau khi nhập, app tự gán nhãn theo <b>Quy tắc gán nhãn</b>. Những giao dịch không khớp sẽ nằm ở
+        "Chưa phân loại" để bạn gán tay.</p>
+    </div>
+  </div>
+  <div class="card" id="importPreviewCard" hidden>
+    <h3>Xem trước <small id="importPreviewInfo"></small></h3>
+    <div class="tablewrap">
+    <table class="tx" id="importPreviewTable">
+      <thead><tr><th>Ngày</th><th>Nội dung</th><th>Đối tác</th><th class="num">Tiền vào</th><th class="num">Tiền ra</th><th>Số dư</th><th>Danh mục gợi ý</th><th>Trạng thái</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== QUY TẮC -->
+<section id="tab-rules" class="tab" hidden>
+  <div class="grid-2">
+    <div class="card">
+      <h3 id="ruleFormTitle">Thêm quy tắc</h3>
+      <form id="ruleForm" class="form">
+        <input type="hidden" id="ruleId">
+        <label>Tên <input id="ruleName" placeholder="VD: Phí ship GHTK"></label>
+        <label>Từ khoá <input id="rulePattern" required placeholder="ghtk|giao hang tiet kiem"></label>
+        <div class="row">
+          <label>Kiểu khớp
+            <select id="ruleMatch"><option value="contains">Chứa từ khoá (cách nhau bởi |)</option><option value="regex">Regex</option></select>
+          </label>
+          <label>Chiều tiền
+            <select id="ruleDirection"><option value="any">Vào + ra</option><option value="in">Tiền vào</option><option value="out">Tiền ra</option></select>
+          </label>
+          <label>So khớp trên
+            <select id="ruleField"><option value="all">Nội dung + đối tác</option><option value="description">Chỉ nội dung</option><option value="counterparty">Chỉ tên đối tác</option></select>
+          </label>
+          <label>Ưu tiên <input type="number" id="rulePriority" value="50" title="Nhỏ hơn = xét trước"></label>
+        </div>
+        <label>Gán vào danh mục <select id="ruleCategory" required></select></label>
+        <label class="chk"><input type="checkbox" id="ruleEnabled" checked> Bật</label>
+        <div class="actions">
+          <button type="submit" class="primary">Lưu</button>
+          <button type="button" id="ruleTest">Thử khớp</button>
+          <button type="button" id="ruleCancel" hidden>Huỷ</button>
+        </div>
+      </form>
+      <div class="note" id="ruleTestResult"></div>
+      <p class="hint">Từ khoá so khớp <b>không phân biệt hoa thường và dấu</b>. Quy tắc ưu tiên nhỏ được xét trước; quy tắc đầu tiên khớp sẽ thắng.
+        Chuỗi <code>{owner}</code> được thay bằng tên chủ tài khoản trong Cài đặt (dùng để nhận diện chuyển tiền cho chính mình).</p>
+    </div>
+    <div class="card">
+      <h3>Chạy lại quy tắc</h3>
+      <p>Áp dụng toàn bộ quy tắc đang bật cho các giao dịch hiện có.</p>
+      <div class="actions">
+        <button class="primary" id="applyRulesUnclassified">Chỉ giao dịch chưa phân loại</button>
+        <button id="applyRulesAll">Gán lại cả GD do quy tắc gán (giữ nguyên GD gán tay)</button>
+      </div>
+      <div class="note" id="applyRulesResult"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Danh sách quy tắc</h3>
+    <div class="tablewrap">
+    <table class="rules" id="rulesTable">
+      <thead><tr><th>Ưu tiên</th><th>Tên</th><th>Từ khoá</th><th>Kiểu</th><th>Chiều</th><th>Khớp trên</th><th>Danh mục</th><th>Bật</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== DANH MỤC -->
+<section id="tab-categories" class="tab" hidden>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Thêm danh mục riêng</h3>
+      <form id="catForm" class="form">
+        <label>Mã <input id="catCode" required placeholder="VD: PHI_LIVESTREAM"></label>
+        <label>Tên <input id="catName" required placeholder="VD: Phí thuê host livestream"></label>
+        <label>Nhóm kế toán <select id="catGroup" required></select></label>
+        <label>Chiều tiền <select id="catKind"><option value="out">Tiền ra</option><option value="in">Tiền vào</option><option value="any">Cả hai</option></select></label>
+        <label>Mô tả <input id="catDesc"></label>
+        <div class="actions"><button class="primary" type="submit">Thêm</button></div>
+      </form>
+    </div>
+    <div class="card help">
+      <h3>Logic kế toán</h3>
+      <p>Mỗi danh mục thuộc một <b>nhóm kế toán</b>, và nhóm quyết định danh mục được cộng vào dòng nào trong báo cáo lãi/lỗ:</p>
+      <ul>
+        <li><b>Doanh thu (511)</b> − <b>Giảm trừ (521)</b> = Doanh thu thuần</li>
+        <li>Doanh thu thuần − <b>Giá vốn (632)</b> = Lợi nhuận gộp</li>
+        <li>LN gộp + <b>DT tài chính (515)</b> − <b>CP tài chính (635)</b> − <b>CP bán hàng (641)</b> − <b>CP quản lý (642)</b> = LN từ HĐKD</li>
+        <li>+ Thu khác (711) − Chi khác (811) = LN trước thuế; − Thuế (821) = LN sau thuế</li>
+        <li><b>Không tính vào lãi/lỗ</b>: góp/rút vốn, vay/trả gốc, chuyển nội bộ, mua tài sản lớn, đặt cọc.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Toàn bộ danh mục</h3>
+    <div class="tablewrap"><table class="cats" id="catsTable"><tbody></tbody></table></div>
+  </div>
+</section>
+
+<!-- ============================== CÀI ĐẶT -->
+<section id="tab-settings" class="tab" hidden>
+  <div class="grid-2">
+    <div class="card">
+      <h3>Thông tin shop</h3>
+      <form id="settingsForm" class="form">
+        <label>Tên shop <input id="setShopName"></label>
+        <label>Ngân hàng <input id="setBankName"></label>
+        <label>Số tài khoản <input id="setAccountNo"></label>
+        <label>Tên chủ tài khoản (như trên sao kê, VD: NGUYEN VAN A) <input id="setOwnerName"></label>
+        <p class="hint">Tên chủ tài khoản dùng để nhận diện giao dịch chuyển tiền giữa các tài khoản của chính bạn. Tự điền khi nhập sao kê nếu còn trống.</p>
+        <h4>Thuế hộ kinh doanh (ước tính)</h4>
+        <div class="row">
+          <label>Thuế GTGT (% doanh thu) <input type="number" step="0.1" id="setVat"></label>
+          <label>Thuế TNCN (% doanh thu) <input type="number" step="0.1" id="setPit"></label>
+        </div>
+        <label>Ngưỡng doanh thu/năm phải nộp thuế (VND) <input type="number" id="setThreshold"></label>
+        <p class="hint">Mặc định theo ngành phân phối, cung cấp hàng hoá: GTGT 1%, TNCN 0,5%. Ngưỡng miễn thuế 200 triệu/năm áp dụng từ 01/01/2026 (trước đó 100 triệu). Số liệu chỉ để tham khảo, hãy đối chiếu với cơ quan thuế.</p>
+        <div class="actions"><button class="primary" type="submit">Lưu</button></div>
+      </form>
+    </div>
+    <div class="card danger">
+      <h3>Vùng nguy hiểm</h3>
+      <p>Xoá toàn bộ giao dịch (giữ lại danh mục, quy tắc, cài đặt).</p>
+      <button id="deleteAll">Xoá tất cả giao dịch</button>
+    </div>
+  </div>
+</section>
+</main>
+
+<!-- ============================== MODAL thêm giao dịch tay -->
+<div class="modal" id="txModal" hidden>
+  <div class="modal-box">
+    <h3>Thêm giao dịch tay</h3>
+    <form id="txForm" class="form">
+      <div class="row">
+        <label>Ngày <input type="date" id="fTxDate" required></label>
+        <label>Chiều <select id="fTxDir"><option value="out">Tiền ra</option><option value="in">Tiền vào</option></select></label>
+        <label>Số tiền (VND) <input type="number" id="fTxAmount" min="1" required></label>
+      </div>
+      <label>Nội dung <input id="fTxDesc" required></label>
+      <label>Đối tác <input id="fTxCounterparty"></label>
+      <label>Danh mục <select id="fTxCategory"><option value="">— Tự gán theo quy tắc —</option></select></label>
+      <label>Ghi chú <input id="fTxNote"></label>
+      <div class="actions">
+        <button type="submit" class="primary">Lưu</button>
+        <button type="button" id="txModalClose">Đóng</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
