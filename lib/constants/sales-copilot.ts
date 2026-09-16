@@ -180,3 +180,26 @@ export const HUMAN_REPLY_SENDER_TYPES = ["PAGE_HUMAN"] as const;
 
 /** Dạng chuỗi cho SQL: `('PAGE_HUMAN')`. Một nguồn duy nhất, không gõ lại danh sách ở truy vấn. */
 export const HUMAN_REPLY_SQL_LIST = HUMAN_REPLY_SENDER_TYPES.map((t) => `'${t}'`).join(", ");
+
+/**
+ * ═══════════ CÂU MẪU LẶP LẠI KHÔNG PHẢI CÂU MỘT NGƯỜI VỪA GÕ ═══════════
+ *
+ * ĐO NGÀY 16/09/2026 trên page thí điểm, 339 tin mang nhãn `PAGE_HUMAN`:
+ *
+ *   · ĐÚNG MỘT tài khoản gửi cả 339 tin — nên không thể phân biệt người với máy bằng TÊN;
+ *   · 71 tin gửi TRƯỚC tin đầu tiên của khách — nhân viên không chào trước khi khách nhắn;
+ *   · 97 tin là bản sao Y HỆT của một tin khác, và hai câu dài xuất hiện ĐÚNG MỘT LẦN trong mỗi
+ *     35 hội thoại khác nhau. Không ai gõ lại đúng từng chữ, đúng một lần, ở 35 chỗ.
+ *
+ * `classifySender` chạy lúc NẠP nên chỉ nhìn được MỘT tin: nó không thể biết câu ấy còn nằm ở 34
+ * hội thoại khác. Vì thế phép nhận dạng này nằm ở LỚP ĐỌC, nơi có cả tập dữ liệu để so.
+ *
+ * Ngưỡng theo SỐ HỘI THOẠI chứ không theo số tin: một nhân viên có thể gửi lại cùng một câu vài
+ * lần cho CÙNG một khách (gửi ảnh kèm chú thích, khách không thấy tin), nhưng cùng một câu xuất
+ * hiện ở ba hội thoại KHÁC NHAU thì nó là câu mẫu.
+ *
+ * NHÁNH SAI RƠI VỀ PHÍA GIỮ VIỆC LẠI. Nhận nhầm câu của một nhân viên thật thành câu mẫu thì một
+ * người đọc thẻ ấy rồi bỏ qua — mất vài giây. Nhận nhầm câu mẫu thành câu người thì một khách
+ * biến mất khỏi hàng đợi và không bao giờ được trả lời.
+ */
+export const AUTOMATION_TEMPLATE_MIN_CONVERSATIONS = 3;

@@ -71,6 +71,10 @@ export const SYSTEM_NOTICE_PHRASES = [
   "da thich trang",
   "da chia se bai viet",
   "da bat dau cuoc tro chuyen",
+  // 16/09/2026: đo được 7 tin mang chuỗi này trên 5 hội thoại của page thí điểm, và chúng đang bị
+  // xếp là CÂU NHÂN VIÊN. Đây là câu Facebook chèn khi một bình luận được chuyển thành tin nhắn —
+  // không nhân viên nào gõ "bạn đang phản hồi bình luận của người dùng".
+  "ban dang phan hoi binh luan cua nguoi dung",
 ] as const;
 
 /**

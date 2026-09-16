@@ -6,6 +6,7 @@ import { canSend } from "@/lib/ai-workforce/agents/sales/outbound";
 import { SAFEST_HARD_LIMITS, type AiSettings } from "@/lib/ai-workforce/config";
 import { clampMode, MAX_ALLOWED_MODE, modeAtLeast } from "@/lib/constants/ai";
 import {
+  AUTOMATION_TEMPLATE_MIN_CONVERSATIONS,
   COPILOT_MEANINGFUL_EDIT_RATIO,
   COPILOT_QUEUE_RELEVANT_HOURS,
   COPILOT_PAGES_KEY,
@@ -448,6 +449,47 @@ export async function testSalesCopilot(db: Db) {
   assert.ok(coTrongHang("conv-bot"), "câu BOT không được làm lượt khách biến mất — khách vẫn đang chờ một người");
   assert.ok(coTrongHang("conv-he-thong"), "thông báo nền tảng cũng không phải một người đã trả lời");
   assert.ok(!coTrongHang("conv-nguoi"), "câu NHÂN VIÊN thật thì mới hết việc");
+
+  /*
+    6B★★. CÂU MẪU LẶP QUA NHIỀU HỘI THOẠI KHÔNG PHẢI CÂU MỘT NGƯỜI VỪA GÕ.
+
+    ĐO 16/09/2026: 339 tin mang nhãn PAGE_HUMAN trên page thí điểm, nhưng ĐÚNG MỘT tài khoản gửi
+    tất cả, 71 tin gửi TRƯỚC tin đầu tiên của khách, và hai câu dài xuất hiện đúng một lần ở mỗi
+    35 hội thoại khác nhau. Nhãn đặt lúc NẠP không thấy được điều đó — nó chỉ nhìn một tin.
+
+    Ba hội thoại dưới đây nhận CÙNG một câu mẫu (đủ ngưỡng), hội thoại thứ tư nhận một câu riêng.
+  */
+  const cauMau = "dạ mẫu này hiện có 2 màu chị nhé, ưu đãi duy nhất hôm nay ạ";
+  const dungMau = async (id: string, van: string) => {
+    await db
+      .insert(schema.salesConversations)
+      .values({ id, pageId: "page-mau", externalId: `ext-${id}`, pancakeCustomerId: `pc-${id}`, customerName: id, stage: "NEW_LEAD", sourceType: "WIN" })
+      .onConflictDoNothing();
+    const luc = new Date(Date.now() - 900_000);
+    await db
+      .insert(schema.salesMessages)
+      .values({ id: `mk-${id}`, conversationId: id, externalId: `emk-${id}`, direction: "IN", fromPage: false, senderType: "CUSTOMER", text: "cho em hỏi mẫu này", sentAt: luc })
+      .onConflictDoNothing();
+    await db
+      .insert(schema.salesMessages)
+      .values({ id: `mh-${id}`, conversationId: id, externalId: `emh-${id}`, direction: "OUT", fromPage: true, senderType: "PAGE_HUMAN", text: van, sentAt: new Date(luc.getTime() + 60_000) })
+      .onConflictDoNothing();
+    await db
+      .insert(schema.salesSuggestions)
+      .values({ id: `sm-${id}`, conversationId: id, suggestedReply: `gợi ý ${id}`, action: "ANSWER_QUESTION" })
+      .onConflictDoNothing();
+  };
+  await dungMau("conv-mau-1", cauMau);
+  await dungMau("conv-mau-2", cauMau);
+  await dungMau("conv-mau-3", cauMau);
+  await dungMau("conv-rieng", "dạ chị Lan ơi cái váy chị hỏi hôm qua về rồi ạ, em giữ size M nhé");
+  const hangMau = await copilotQueue({ pageIds: ["page-mau"], db });
+  const trongHangMau = (id: string) => hangMau.some((r) => r.conversationId === id);
+  assert.equal(AUTOMATION_TEMPLATE_MIN_CONVERSATIONS, 3, "ngưỡng dùng trong bài kiểm phải là ngưỡng đang chạy");
+  for (const id of ["conv-mau-1", "conv-mau-2", "conv-mau-3"]) {
+    assert.ok(trongHangMau(id), `${id}: câu mẫu lặp ở 3 hội thoại KHÔNG được tính là nhân viên đã trả lời`);
+  }
+  assert.ok(!trongHangMau("conv-rieng"), "câu viết riêng cho một khách thì đúng là người đã trả lời — hết việc");
 
   // ═════════ 6C. HÀNG ĐỢI: AI CHỜ LÂU NHẤT ĐƯỢC TRẢ LỜI TRƯỚC ═════════
   //

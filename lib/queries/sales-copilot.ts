@@ -8,7 +8,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { loadWinKnowledge } from "@/lib/queries/sales-knowledge";
 import { LIVE_INGEST_ENV, liveIngestHealth, type LiveIngestHealth } from "@/lib/constants/live-ingest";
 import { getDb, schema, type Db } from "@/db";
-import { COPILOT_MEANINGFUL_EDIT_RATIO, COPILOT_PAGES_KEY, COPILOT_QUEUE_RELEVANT_HOURS, COPILOT_SUGGESTION_TTL_MINUTES, HUMAN_REPLY_SQL_LIST, type CopilotWarning } from "@/lib/constants/sales-copilot";
+import { AUTOMATION_TEMPLATE_MIN_CONVERSATIONS, COPILOT_MEANINGFUL_EDIT_RATIO, COPILOT_PAGES_KEY, COPILOT_QUEUE_RELEVANT_HOURS, COPILOT_SUGGESTION_TTL_MINUTES, HUMAN_REPLY_SQL_LIST, type CopilotWarning } from "@/lib/constants/sales-copilot";
 import { rowsOf } from "@/lib/sql-rows";
 
 /**
@@ -128,7 +128,25 @@ export async function copilotQueue(
 
   const rows = rowsOf<Record<string, unknown>>(
     await db.execute(sql`
-      with moi_nhat as (
+      with cau_mau as (
+        /*
+          CÂU MẪU CỦA PAGE — cùng một chuỗi ký tự xuất hiện ở NHIỀU HỘI THOẠI KHÁC NHAU.
+
+          Đếm theo số HỘI THOẠI chứ không theo số TIN: một nhân viên có thể gửi lại cùng một câu
+          vài lần cho CÙNG một khách (khách không thấy tin, gửi ảnh kèm chú thích), nhưng cùng một
+          câu ở ba hội thoại khác nhau thì nó là câu chạy sẵn.
+        */
+        select lower(btrim(m.text)) as van_ban
+        from sales_messages m
+        join sales_conversations sc on sc.id = m.conversation_id
+        where m.from_page = true
+          and m.sender_type in (${sql.raw(HUMAN_REPLY_SQL_LIST)})
+          and btrim(m.text) <> ''
+          and sc.page_id in (${sql.join(pages.map((p) => sql`${p}`), sql`, `)})
+        group by 1
+        having count(distinct m.conversation_id) >= ${AUTOMATION_TEMPLATE_MIN_CONVERSATIONS}
+      ),
+      moi_nhat as (
         select distinct on (s.conversation_id)
                s.id, s.conversation_id, s.run_id, s.suggested_reply, s.action, s.confidence, s.created_at, s.facts_json
         from sales_suggestions s
@@ -181,13 +199,24 @@ export async function copilotQueue(
       /*
         NHÂN VIÊN đã trả lời SAU tin khách cuối chưa. Chưa thì đây là việc đang chờ người.
 
-        CHỈ PAGE_HUMAN — xem HUMAN_REPLY_SENDER_TYPES. Bản trước nhận cả PAGE_BOT, nên một câu tự
-        động của Botcake làm khách biến mất khỏi hàng đợi: đo 16/09/2026 được 48/50 hội thoại
-        "shop đã đáp rồi" và hàng đợi ra ĐÚNG 0.
+        HAI ĐIỀU KIỆN, và cả hai đều đến từ số đo ngày 16/09/2026:
+
+        ① CHỈ PAGE_HUMAN — xem HUMAN_REPLY_SENDER_TYPES. Bản trước nhận cả PAGE_BOT, nên một câu
+           tự động làm khách biến mất khỏi hàng đợi.
+        ② KHÔNG PHẢI CÂU MẪU. Trên page thí điểm, đúng một tài khoản gửi cả 339 tin mang nhãn
+           PAGE_HUMAN, 71 tin trong số đó gửi TRƯỚC khi khách nhắn câu đầu tiên, và hai câu dài
+           xuất hiện đúng một lần ở mỗi 35 hội thoại khác nhau. Đó là một kịch bản chạy sẵn, không
+           phải người gõ. Nhãn PAGE_HUMAN đặt lúc NẠP không thể thấy điều này — nó chỉ nhìn được
+           một tin — nên phép nhận dạng nằm ở đây, nơi có cả tập dữ liệu để so.
       */
       left join lateral (
-        select max(sent_at) as luc from sales_messages
-        where conversation_id = c.id and from_page = true and sender_type in (${sql.raw(HUMAN_REPLY_SQL_LIST)})
+        select max(m.sent_at) as luc
+        from sales_messages m
+        where m.conversation_id = c.id
+          and m.from_page = true
+          and m.sender_type in (${sql.raw(HUMAN_REPLY_SQL_LIST)})
+          and btrim(m.text) <> ''
+          and lower(btrim(m.text)) not in (select van_ban from cau_mau)
       ) nv on true
       left join ai_runs r on r.id = m.run_id
       left join lateral (
