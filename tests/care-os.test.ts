@@ -348,7 +348,26 @@ export async function testCareOs(db: Db) {
     const kyCoBien = ky(gio(48), new Date());
     const tongKy = await getRescueSummary(kyCoBien);
     assert.ok(tongKy.pending >= 1, `7★ · kỳ có biên phải thấy ca treo (${tongKy.pending}) — bản trước lọc theo outcome_at nên luôn 0`);
-    const kyQuaKhu = ky(gio(400), gio(300));
+    /*
+      KỲ QUÁ KHỨ PHẢI ĐƯỢC DỰNG TỪ DỮ LIỆU, KHÔNG PHẢI TỪ MỘT SỐ GIỜ ĐOÁN SẴN.
+
+      Bản trước viết `ky(gio(400), gio(300))` — một cửa sổ TRƯỢT theo đồng hồ thật, trong khi dữ
+      liệu gieo sẵn mang ngày CỐ ĐỊNH. Mỗi giờ trôi qua, cửa sổ ấy tiến về phía trước và sớm muộn
+      cũng quét trúng một ca có thật; khi đó bài kiểm đỏ mà chẳng có gì hỏng.
+
+      Đo được 16/09/2026: CI lúc 04:57Z còn xanh, chạy lúc 05:25Z đã đỏ (`pending` = 1). Cùng một
+      họ lỗi với `tests/order-duplicate.test.ts` đã tháo sáng nay — và nó cũng chặn deploy, vì
+      workflow deploy chạy `npm test` trước khi đụng máy chủ.
+
+      Nay mốc lấy từ CHÍNH ca sớm nhất trong CSDL: cửa sổ kết thúc TRƯỚC khi ca đầu tiên mở ra, nên
+      khẳng định "kỳ kết thúc trước khi ca mở thì ca không thuộc kỳ đó" luôn đo đúng thứ nó định đo,
+      bất kể chạy lúc nào.
+    */
+    const [somNhat] = await db
+      .select({ at: sql<string | null>`min(coalesce(${schema.shipmentCare.openedAt}, ${schema.shipmentCare.createdAt}))` })
+      .from(schema.shipmentCare);
+    const mocSom = somNhat?.at ? new Date(somNhat.at) : new Date();
+    const kyQuaKhu = ky(new Date(mocSom.getTime() - 48 * 3600_000), new Date(mocSom.getTime() - 3600_000));
     const tongCu = await getRescueSummary(kyQuaKhu);
     assert.equal(tongCu.pending, 0, "7★ · kỳ kết thúc trước khi ca mở thì ca không thuộc kỳ đó");
     assert.equal(tongCu.finished, 0);

@@ -260,6 +260,42 @@ export async function testVtpSourceOfTruth(db: Db) {
   assert.equal(xemXungDot.counts.AMBIGUOUS, 1, "cùng mốc ĐVVC nhưng khác chặng phải là 'cần người quyết', không được hứa là sẽ cập nhật");
   assert.equal(xemXungDot.counts.NEWER, 0);
 
+  /*
+    ═══ DÒNG CHIỀU HOÀN PHẢI SO VỚI CHÍNH VẬN ĐƠN CHIỀU HOÀN ═══
+
+    `matchVtpOrderList` trả `shipmentId` của vận đơn GỐC cho một dòng `…1P1` (nó ghép theo mã gốc để
+    biết chiều hoàn thuộc về ai), nhưng `applyVtpOrderList` lại ghi lên dòng CHIỀU HOÀN, tra bằng
+    chính mã `…1P1`. Bản đầu của màn hình xem trước so nhầm hai thực thể.
+
+    Đo trên production 16/09/2026: cả 18 dòng "sẽ cập nhật" còn sót đều là chiều hoàn và hiện ra
+    dưới dạng vô lý `VTP:"Đang vận chuyển"` vs `ERP:DELIVERED` — "DELIVERED" là của gói hàng ĐI,
+    "đang vận chuyển" là của gói đang QUAY VỀ. Shop có 267 vận đơn chiều hoàn, nên bản đầu đọc sai
+    TOÀN BỘ nhóm đó.
+  */
+  const LEG_GOC = "PKE-TRUTH-LEGBASE";
+  await applyVtpTracking(track(LEG_GOC, 501, "Thành công - Phát thành công", "2026-09-14T02:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const LEG_MA = `${LEG_GOC}1P1`;
+  await applyVtpTracking(track(LEG_MA, 300, "Đóng tải - vận chuyển đi", "2026-09-15T02:00:00Z", { isReturning: true, orderReference: LEG_GOC }), "VTP_WEBHOOK", { allowCreate: true });
+
+  // Dòng tệp của CHIỀU HOÀN, mốc CŨ HƠN thứ chính chiều hoàn đang giữ (15/09 09:00 VN = 02:00Z).
+  const csvLeg = [head, `1,${LEG_MA},${LEG_GOC},01/09/2026 12:00:00,Đã lấy hàng,0,17000,15/09/2026 08:00:00`].join("\n");
+  const xemLeg = await previewVtpOrderListFile({ filename: "VTP_chieu_hoan.csv", base64: Buffer.from(csvLeg, "utf8").toString("base64") });
+  const dongLeg = xemLeg.sample.find((r) => r.trackingCode === LEG_MA);
+  assert.ok(dongLeg, "dòng chiều hoàn phải xuất hiện trong mẫu");
+  /*
+    `RETURNING` chứ không phải `IN_TRANSIT`: mã 300 "đóng tải - vận chuyển đi" trên CHIỀU HOÀN nghĩa
+    là hàng đang trên đường QUAY VỀ shop, và `onReturnLeg()` quy đổi đúng như vậy. Điều bài này
+    khoá là thực thể được so — chiều hoàn, chứ không phải vận đơn gốc (vốn đang `DELIVERED`).
+  */
+  assert.equal(
+    dongLeg.erpStage,
+    "RETURNING",
+    `phải so với chặng của CHÍNH vận đơn chiều hoàn, không phải của vận đơn gốc (DELIVERED) — nhận được ${dongLeg.erpStage}`,
+  );
+  assert.notEqual(dongLeg.erpStage, "DELIVERED", "so nhầm sang vận đơn gốc là lỗi đã đo được trên production");
+  assert.equal(dongLeg.verdict, "OLDER", "mốc cũ hơn thứ chiều hoàn đang giữ ⇒ 'cũ hơn ERP', không phải 'mới hơn'");
+  assert.equal(xemLeg.counts.NEWER, 0, "so đúng thực thể thì không còn lời hứa cập nhật vô lý nào");
+
   // ═════════ 7. NHẬT KÝ MỘT VẬN ĐƠN: BỐN CHIỀU TÁCH RỜI ═════════
   const nk = await getShipmentTimeline(laShip.id);
   assert.ok(nk.entries.length > 0);

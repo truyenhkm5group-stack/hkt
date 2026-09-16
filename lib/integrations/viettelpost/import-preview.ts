@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
@@ -91,7 +91,13 @@ function eventKey(shipmentId: string, statusText: string, at: Date): string {
  *  · CÙNG MỐC nhưng KHÁC CHẶNG — `applyVtpOrderList` gọi đó là `sameTimeConflict` và KHÔNG ghi;
  *    ở đây trước đây nó bị đọc thành "mới hơn ERP".
  */
-function verdictOf(m: OrderListMatch, seen: Set<string>, daCo: Set<string>): { verdict: PreviewVerdict; note: string } {
+function verdictOf(
+  m: OrderListMatch,
+  seen: Set<string>,
+  daCo: Set<string>,
+  /** Vận đơn mà ĐƯỜNG GHI sẽ thật sự chạm tới — khác `m.shipmentId` với dòng chiều hoàn. */
+  dich: { id: string; stage: string | null; statusDate: Date | null } | null,
+): { verdict: PreviewVerdict; note: string } {
   const at = rowOccurredAt(m);
   if (!at) return { verdict: "INVALID", note: "Không đọc được ngày trạng thái — dòng này sẽ bị bỏ qua" };
   if (m.matchIssue) return { verdict: "AMBIGUOUS", note: m.matchIssue };
@@ -99,28 +105,46 @@ function verdictOf(m: OrderListMatch, seen: Set<string>, daCo: Set<string>): { v
   if (m.mapped.stage === "UNKNOWN") {
     return { verdict: "UNKNOWN_STATUS", note: `Chữ của ĐVVC được ghi vào sổ trạng thái để bổ sung bảng mã; trạng thái vận đơn giữ nguyên` };
   }
-  const key = eventKey(m.shipmentId, m.statusText, at);
+  /*
+    VẬN ĐƠN CHIỀU HOÀN LÀ MỘT DÒNG KHÁC — và đây là chỗ bản đầu của màn hình xem trước sai nặng nhất.
+
+    `matchVtpOrderList` trả `shipmentId` của vận đơn GỐC cho một dòng `…1P1` (nó ghép theo mã gốc để
+    biết chiều hoàn này thuộc về ai). Nhưng `applyVtpOrderList` lại ghi lên dòng CHIỀU HOÀN, tra
+    bằng chính mã `…1P1`. Bản đầu so dòng tệp của chiều hoàn với trạng thái của vận đơn GỐC — hai
+    thực thể khác nhau.
+
+    Đo trên production 16/09/2026: cả 18 dòng "sẽ cập nhật" còn sót đều là chiều hoàn, hiện ra dưới
+    dạng vô lý `VTP:"Đang vận chuyển"` vs `ERP:DELIVERED` — vì "DELIVERED" là của gói hàng ĐI, còn
+    "đang vận chuyển" là của gói hàng đang QUAY VỀ. Shop có 267 vận đơn chiều hoàn, nên bản đầu
+    đọc sai TOÀN BỘ nhóm đó.
+  */
+  if (!dich) {
+    // Chiều hoàn chưa có trong ERP: đường ghi sẽ TẠO nó thành một dòng riêng.
+    return { verdict: "NEWER", note: "Vận đơn chiều hoàn chưa có trong ERP — sẽ được tạo thành dòng RIÊNG, không đè lên vận đơn gốc" };
+  }
+  const key = eventKey(dich.id, m.statusText, at);
   if (seen.has(key)) return { verdict: "DUPLICATE_ROW", note: "Cùng vận đơn, cùng trạng thái, cùng mốc với một dòng khác trong tệp" };
   seen.add(key);
   // ĐÃ NHẬP RỒI: đường ghi nhận ra là trùng và bỏ qua. Nói đúng điều đó thay vì hứa một cập nhật.
   if (daCo.has(key)) return { verdict: "SAME", note: "Lịch sử đã có đúng chứng từ này (một lần nhập trước) — ghi lại không đổi gì" };
-  const erpAt = m.currentStatusDate;
+  const erpAt = dich.statusDate;
+  const nhanChang = SHIPMENT_STAGE_LABEL[(dich.stage ?? "UNKNOWN") as ShipmentStage];
   if (erpAt && erpAt.getTime() > at.getTime()) {
-    return { verdict: "OLDER", note: `ERP đang giữ chứng từ muộn hơn (${SHIPMENT_STAGE_LABEL[(m.currentStage ?? "UNKNOWN") as ShipmentStage]}) — không hạ trạng thái` };
+    return { verdict: "OLDER", note: `ERP đang giữ chứng từ muộn hơn (${nhanChang}) — không hạ trạng thái` };
   }
-  if (m.currentStage === m.mapped.stage && erpAt && erpAt.getTime() === at.getTime()) {
+  if (dich.stage === m.mapped.stage && erpAt && erpAt.getTime() === at.getTime()) {
     return { verdict: "SAME", note: "Đã có đúng chứng từ này trong lịch sử" };
   }
-  if (m.currentStage === m.mapped.stage) return { verdict: "SAME", note: "Trạng thái đã trùng; chỉ làm mới tiền / cước nếu tệp có số khác" };
+  if (dich.stage === m.mapped.stage) return { verdict: "SAME", note: "Trạng thái đã trùng; chỉ làm mới tiền / cước nếu tệp có số khác" };
   // CÙNG MỐC, KHÁC CHẶNG: hai lời khai về CÙNG MỘT khoảnh khắc mà không khớp nhau. Đường ghi dừng
   // lại cho người đối chiếu (`sameTimeConflict`), nên ở đây cũng phải là "cần người quyết".
   if (erpAt && erpAt.getTime() === at.getTime()) {
     return {
       verdict: "AMBIGUOUS",
-      note: `Cùng mốc ${at.toISOString()} nhưng ERP đang giữ ${SHIPMENT_STAGE_LABEL[(m.currentStage ?? "UNKNOWN") as ShipmentStage]} — hai lời khai về cùng một khoảnh khắc, đường ghi sẽ dừng cho người đối chiếu`,
+      note: `Cùng mốc ${at.toISOString()} nhưng ERP đang giữ ${nhanChang} — hai lời khai về cùng một khoảnh khắc, đường ghi sẽ dừng cho người đối chiếu`,
     };
   }
-  return { verdict: "NEWER", note: `${SHIPMENT_STAGE_LABEL[(m.currentStage ?? "UNKNOWN") as ShipmentStage]} → ${SHIPMENT_STAGE_LABEL[m.mapped.stage]}` };
+  return { verdict: "NEWER", note: `${nhanChang} → ${SHIPMENT_STAGE_LABEL[m.mapped.stage]}` };
 }
 
 /**
@@ -163,7 +187,27 @@ export async function previewVtpOrderListFile(file: { filename: string; base64: 
     Nạp trước các sự kiện `VTP_IMPORT` của đúng những vận đơn tệp này chạm tới, rồi so trong bộ
     nhớ. Với tệp 1.198 dòng đó là MỘT truy vấn thay vì 1.198 truy vấn.
   */
-  const shipmentIds = [...new Set(matches.map((m) => m.shipmentId).filter((v): v is string => Boolean(v)))];
+  /*
+    DÒNG CHIỀU HOÀN ĐI VỀ MỘT VẬN ĐƠN KHÁC — phải tra riêng bằng chính mã `…1P1`.
+    Xem đoạn dài trong `verdictOf`: `matchVtpOrderList` trả vận đơn GỐC cho dòng chiều hoàn, còn
+    đường ghi lại chạm vào dòng CHIỀU HOÀN.
+  */
+  const maChieuHoan = [...new Set(matches.filter((m) => m.matchKind === "leg").map((m) => m.trackingCode.trim().toUpperCase()))];
+  const legRows = maChieuHoan.length
+    ? await db
+        .select({ id: schema.shipments.id, code: schema.shipments.vtpOrderNumber, stage: schema.shipments.stage, statusDate: schema.shipments.vtpStatusDate })
+        .from(schema.shipments)
+        .where(inArray(sql`upper(${schema.shipments.vtpOrderNumber})`, maChieuHoan))
+    : [];
+  const legByCode = new Map(legRows.map((r) => [String(r.code ?? "").trim().toUpperCase(), { id: r.id, stage: r.stage as string | null, statusDate: r.statusDate }]));
+
+  /** Vận đơn mà ĐƯỜNG GHI sẽ chạm tới cho dòng này. `null` = chưa tồn tại (chiều hoàn sẽ được tạo). */
+  const dichCua = (m: OrderListMatch) => {
+    if (m.matchKind === "leg") return legByCode.get(m.trackingCode.trim().toUpperCase()) ?? null;
+    return m.shipmentId ? { id: m.shipmentId, stage: m.currentStage, statusDate: m.currentStatusDate } : null;
+  };
+
+  const shipmentIds = [...new Set(matches.map((m) => dichCua(m)?.id).filter((v): v is string => Boolean(v)))];
   const daCo = new Set<string>();
   if (shipmentIds.length) {
     const rows = await db
@@ -178,7 +222,8 @@ export async function previewVtpOrderListFile(file: { filename: string; base64: 
   const sample: PreviewRow[] = [];
   // Xếp theo mốc để mẫu hiện ra đúng thứ tự mà đường ghi sẽ đi qua.
   for (const m of matches) {
-    const { verdict, note } = verdictOf(m, seen, daCo);
+    const dich = dichCua(m);
+    const { verdict, note } = verdictOf(m, seen, daCo, dich);
     counts[verdict] += 1;
     // Mẫu ưu tiên những dòng THAY ĐỔI ĐƯỢC GÌ ĐÓ hoặc cần người quyết; dòng "giống ERP" chỉ để
     // lấp chỗ trống. Một bảng xem trước toàn dòng "không đổi gì" là bảng không ai đọc tới cuối.
@@ -190,8 +235,9 @@ export async function previewVtpOrderListFile(file: { filename: string; base64: 
         fileStatusText: m.statusText,
         fileStage: m.mapped.stage === "UNKNOWN" ? null : m.mapped.stage,
         fileStatusAt: m.statusAt ?? m.statusDate ?? null,
-        erpStage: (m.currentStage ?? null) as ShipmentStage | null,
-        erpStatusAt: m.currentStatusDate ? m.currentStatusDate.toISOString() : null,
+        // Chặng của ĐÚNG vận đơn đường ghi sẽ chạm tới — với dòng chiều hoàn đó KHÔNG phải vận đơn gốc.
+        erpStage: (dich?.stage ?? null) as ShipmentStage | null,
+        erpStatusAt: dich?.statusDate ? dich.statusDate.toISOString() : null,
         note,
       });
     }
