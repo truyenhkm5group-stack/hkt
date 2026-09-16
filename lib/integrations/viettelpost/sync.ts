@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { codStatusForAmount } from "@/lib/constants/cod";
-import { CAPABILITY_PROBE_LIMIT } from "@/lib/constants/logistics-freshness";
+import { CAPABILITY_SCOPE_ERROR, CAPABILITY_PROBE_LIMIT } from "@/lib/constants/logistics-freshness";
 import { legTypeFromReturningFlag } from "@/lib/constants/truth";
 import type { CodStatus, Shipment, ShipmentStage } from "@/db/schema";
 import { VTP_FINAL_STATUSES, vtpStatusMeta } from "@/lib/constants/viettelpost";
@@ -466,7 +466,7 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
           // lỗi nói đúng bản chất — đây là PHẠM VI TÀI KHOẢN, không phải sự cố của kiện hàng.
           await lenLichDoiChieu(db, shipment.id, {
             failed: true,
-            error: "Tài khoản API Viettel Post không thấy vận đơn này (vận đơn do Pancake tạo thuộc tài khoản khác)",
+            error: CAPABILITY_SCOPE_ERROR,
           }).catch(() => undefined);
           continue;
         }

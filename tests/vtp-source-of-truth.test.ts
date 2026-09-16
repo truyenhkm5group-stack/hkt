@@ -11,7 +11,7 @@ import type { VtpTrackingRecord } from "@/lib/integrations/viettelpost/client";
 import { getShipmentTimeline } from "@/lib/queries/shipment-timeline";
 import { viettelPostHealth } from "@/lib/queries/integrations";
 import { measureWebhookGap, webhookMatchRate, gapSeverity, WEBHOOK_GAP_MIN_MINUTES, WEBHOOK_MATCH_MIN_SAMPLE } from "@/lib/constants/webhook-gap";
-import { sanitizeFreshness, effectiveThresholdFor, classifyFreshnessWith, FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
+import { sanitizeFreshness, effectiveThresholdFor, classifyFreshnessWith, FRESHNESS_BY_STAGE, CAPABILITY_SCOPE_ERROR, laLoiPhamViTaiKhoan } from "@/lib/constants/logistics-freshness";
 import { getVtpReconcileQueue } from "@/lib/queries/vtp-reconcile-queue";
 import { vtpWebhookHealth } from "@/lib/queries/vtp-webhook-health";
 import type { ReconcileReason } from "@/lib/constants/vtp-reconcile-queue";
@@ -600,6 +600,39 @@ export async function testVtpSourceOfTruth(db: Db) {
     "bộ đếm theo lý do phải khớp với thứ thật sự có trong danh sách",
   );
   assert.equal(hangDoi.truncated, Math.max(0, hangDoi.total - hangDoi.rows.length), "số kiện bị cắt khỏi danh sách phải in ra được, không biến mất lặng lẽ");
+
+  /*
+    ═══ "API KHÔNG THẤY VẬN ĐƠN NÀY" LÀ MỘT PHÂN LOẠI, KHÔNG PHẢI MỘT VIỆC ═══
+
+    Đo trên production 16/09/2026: cả 18 dòng mang `vtp_last_error` đều là ĐÚNG câu này — phán quyết
+    PHẠM VI TÀI KHOẢN, sự thật cố định của 2.139/2.151 kiện mà ERP đã biết và đã thôi hỏi. Bản đầu
+    của hàng đợi xếp chúng ở HẠNG MỘT dưới nhãn "Lỗi đối chiếu": người trực mở ra, thấy 18 dòng, và
+    KHÔNG CÓ GÌ để làm. Một hàng đợi mà dòng đầu tiên không làm được gì là hàng đợi không ai mở lần
+    thứ hai.
+  */
+  assert.equal(laLoiPhamViTaiKhoan(CAPABILITY_SCOPE_ERROR), true, "câu lỗi bộ đối chiếu ghi ra phải được nhận ra là phán quyết phạm vi tài khoản");
+  assert.equal(laLoiPhamViTaiKhoan("Kết nối tới Viettel Post quá hạn"), false, "lỗi mạng thật thì vẫn là việc phải xem");
+  assert.equal(laLoiPhamViTaiKhoan(null), false, "không có lỗi thì không phải phán quyết gì cả");
+
+  const PHAM_VI = "PKE-TRUTH-SCOPE";
+  await applyVtpTracking(track(PHAM_VI, 300, "Đóng tải - vận chuyển đi", "2026-09-15T02:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const pvShip = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, PHAM_VI) });
+  await db.update(schema.shipments).set({ vtpLastError: CAPABILITY_SCOPE_ERROR }).where(eq(schema.shipments.id, pvShip!.id));
+  const LOI_THAT = "PKE-TRUTH-REALERR";
+  await applyVtpTracking(track(LOI_THAT, 300, "Đóng tải - vận chuyển đi", "2026-09-15T02:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const ltShip = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, LOI_THAT) });
+  await db.update(schema.shipments).set({ vtpLastError: "Kết nối tới Viettel Post quá hạn" }).where(eq(schema.shipments.id, ltShip!.id));
+  clearMemo();
+  const hangDoi3 = await getVtpReconcileQueue();
+  assert.ok(
+    !hangDoi3.rows.some((r) => r.id === pvShip!.id && r.reasons.includes("SYNC_ERROR")),
+    "phán quyết phạm vi tài khoản KHÔNG được xếp thành 'lỗi đối chiếu' — ERP đã biết và đã thôi hỏi, người trực không làm được gì với nó",
+  );
+  assert.ok(
+    hangDoi3.rows.some((r) => r.id === ltShip!.id && r.reasons.includes("SYNC_ERROR")),
+    "…nhưng một lỗi THẬT (mạng, phiên, quyền) thì vẫn phải nổi lên: nó nói về lần gọi, không nói về tài khoản",
+  );
+  await db.update(schema.shipments).set({ vtpLastError: null }).where(eq(schema.shipments.id, ltShip!.id));
 
   /*
     ═════════ 14. SỨC KHOẺ WEBHOOK: BỐN CÂU HỎI, VÀ "CHƯA BIẾT" LÀ MỘT CÂU TRẢ LỜI ═════════

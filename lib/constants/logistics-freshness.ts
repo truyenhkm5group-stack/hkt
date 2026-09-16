@@ -54,6 +54,28 @@ export const CAPABILITY_NOTE: Record<TrackingCapability, string> = {
 export const CAPABILITY_PROBE_LIMIT = 3;
 
 /**
+ * ═══════════ "API KHÔNG THẤY VẬN ĐƠN NÀY" LÀ MỘT PHÂN LOẠI, KHÔNG PHẢI MỘT LỖI ═══════════
+ *
+ * Câu này do `syncViettelPostShipments` ghi vào `shipments.vtp_last_error` khi API trả "không tồn
+ * tại". Nó nói về PHẠM VI TÀI KHOẢN — một sự thật cố định của 2.139/2.151 vận đơn — chứ không phải
+ * một sự cố của lần gọi, và nó đã có nhà riêng ở `tracking_capability`.
+ *
+ * Đo trên production 16/09/2026: cả 18 dòng mang `vtp_last_error` đều là ĐÚNG câu này, và hàng đợi
+ * đối chiếu bản đầu xếp chúng ở HẠNG MỘT dưới nhãn "Lỗi đối chiếu". Người trực mở hàng đợi, thấy
+ * 18 dòng nói "API không đọc được kiện này", và KHÔNG CÓ GÌ để làm — ERP đã biết và đã thôi hỏi.
+ * 17 trong số đó còn đang dò dở (`vtp_sync_attempts = 2`) nên sẽ tự chuyển sang `WEBHOOK_ONLY`,
+ * trong khi câu lỗi thì nằm lại vĩnh viễn.
+ *
+ * Nên mọi màn hình coi `vtp_last_error` là VIỆC PHẢI LÀM đều phải loại câu này ra trước.
+ */
+export const CAPABILITY_SCOPE_ERROR = "Tài khoản API Viettel Post không thấy vận đơn này (vận đơn do Pancake tạo thuộc tài khoản khác)";
+
+/** Câu lỗi này có phải là phán quyết phạm vi tài khoản không (tức KHÔNG phải việc của người trực). */
+export function laLoiPhamViTaiKhoan(error: string | null | undefined): boolean {
+  return Boolean(error && error.includes("không thấy vận đơn này"));
+}
+
+/**
  * ═══════════ ĐỘ TƯƠI THEO TỪNG CHẶNG ═══════════
  *
  * Một kiện "chờ lấy hàng" ba ngày và một kiện "đang đi giao" ba ngày là hai chuyện khác hẳn nhau.

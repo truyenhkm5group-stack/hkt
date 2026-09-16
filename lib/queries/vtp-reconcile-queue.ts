@@ -155,7 +155,18 @@ export async function getVtpReconcileQueue(): Promise<ReconcileQueue> {
           -- người trực tra một thứ không còn đổi được nữa.
           (b.stage in ('PENDING','PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','RETURNING')) as dang_chay,
           (b.stage in ('DELIVERED','RETURNED','CANCELLED')) as da_chot,
-          (b.vtp_last_error is not null and b.vtp_last_error <> '') as r_sync_error,
+          /*
+            LỖI ĐỐI CHIẾU ≠ PHÁN QUYẾT PHẠM VI TÀI KHOẢN.
+
+            Đo trên production 16/09/2026: cả 18 dòng mang vtp_last_error đều là ĐÚNG một câu —
+            "API không thấy vận đơn này" — tức phán quyết PHẠM VI TÀI KHOẢN, một sự thật cố định của
+            2.139/2.151 kiện mà ERP đã biết và đã thôi hỏi. Bản đầu của hàng đợi xếp chúng ở HẠNG
+            MỘT dưới nhãn "Lỗi đối chiếu": người trực mở ra, thấy 18 dòng, và KHÔNG CÓ GÌ để làm.
+
+            Một hàng đợi mà dòng đầu tiên không làm được gì là hàng đợi không ai mở lần thứ hai.
+            Phán quyết ấy đã có nhà riêng ở cột tracking_capability; ở đây nó bị loại ra.
+          */
+          (b.vtp_last_error is not null and b.vtp_last_error <> '' and b.vtp_last_error not like ${"%không thấy vận đơn này%"}) as r_sync_error,
           (b.vtp_raw_mapped = false) as r_unmapped
         from base b
       ),
