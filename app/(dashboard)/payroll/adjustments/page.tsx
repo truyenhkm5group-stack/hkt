@@ -5,6 +5,7 @@ import { AdjustmentManager } from "@/app/(dashboard)/payroll/adjustments/adjustm
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { EmptyState } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
+import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { payrollPeriodKey } from "@/lib/constants/payroll";
 import { listEmployees } from "@/lib/queries/payroll";
 import { periodFinalized } from "@/lib/queries/payroll-engine";
@@ -23,7 +24,11 @@ export const metadata = { title: "Đầu vào & điều chỉnh lương" };
 export default async function PayrollAdjustmentsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
   const user = await requireUser();
-  if (!can(user, "payroll:manage")) redirect("/payroll?forbidden=1");
+  /*
+    QUẢN TRỊ LƯƠNG = QUYỀN KHAI BÁO **VÀ** PHẠM VI TOÀN CÔNG TY. Màn hình này in ra tiền của mọi
+    người, nên riêng `payroll:manage` là chưa đủ — xem `lib/auth/payroll-scope.ts`.
+  */
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) redirect("/payroll?forbidden=1");
   const period = resolvePeriod(raw, "month");
   const key = payrollPeriodKey(period.from, period.to);
 

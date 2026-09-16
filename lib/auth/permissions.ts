@@ -78,7 +78,16 @@ export const PERMISSION_GROUPS = [
     module: "Lương & hoa hồng",
     items: [
       { key: "payroll:view-own", label: "Lương: xem của mình", hint: "Chỉ dòng lương / lợi nhuận cá nhân của chính mình. Khớp bằng KHOÁ TÀI KHOẢN: ô “Email đăng nhập ERP” trong hồ sơ nhân sự phải trùng email phiên đăng nhập — KHÔNG so tên (hai người trùng tên sẽ đọc được lương của nhau). Chưa khai email ⇒ người đó thấy bảng rỗng kèm câu chỉ đường." },
-      { key: "payroll:view", label: "Lương: xem toàn bộ", hint: "Lương và lợi nhuận của mọi nhân sự (trưởng nhóm, kế toán)" },
+      {
+        key: "payroll:view-all",
+        label: "Lương: xem của MỌI NGƯỜI (toàn công ty)",
+        hint: "Khoá DUY NHẤT mở ra bảng lương của người khác. Phải cấp TƯỜNG MINH cho từng vai trò / từng người — không vai trò nào có nó vì tên gọi, và không cấu hình cũ nào mang sẵn nó. Chưa có phạm vi “trưởng nhóm xem nhóm mình”; ai cần xem chéo thì cấp khoá này, có tên, có người quyết.",
+      },
+      {
+        key: "payroll:view",
+        label: "Lương: xem (khoá CŨ — nay chỉ còn của chính mình)",
+        hint: "TỪ 16/09/2026 khoá này KHÔNG còn nghĩa là xem toàn công ty. Nó rơi về đúng phạm vi của “xem của mình”. Muốn xem của mọi người thì phải có “Lương: xem của MỌI NGƯỜI”. Lý do: production có bản ghi đè vai trò cũ mang khoá này, và một bản ghi đè lỗi thời không được phép mở bảng lương toàn công ty.",
+      },
       { key: "payroll:manage", label: "Lương: khai báo nhân sự & chia mã", hint: "Cơ chế lương, chính sách lương, phân công, người phụ trách mã, % chủ mã, fanpage → marketer. Tính và chụp ảnh kỳ." },
       {
         key: "payroll:approve",
@@ -136,7 +145,12 @@ export const LEGACY_IMPLIES: Record<string, string[]> = {
   "expenses:write": ["reports:assumptions"],
   "products:view": ["planning:view"],
   "inventory:write": ["planning:write"],
+  /*
+    `payroll:view` KHÔNG kéo theo `payroll:view-all`, và đó là cả điểm của bản vá này. Chiều kéo
+    chỉ đi từ RỘNG xuống HẸP: ai được xem của mọi người thì đương nhiên xem được của mình.
+  */
   "payroll:view": ["payroll:view-own"],
+  "payroll:view-all": ["payroll:view", "payroll:view-own"],
 };
 
 export type Permission = (typeof PERMISSION_GROUPS)[number]["items"][number]["key"];
@@ -170,8 +184,23 @@ const VIEW_ALL: Permission[] = ["dashboard:view", "ideas:view", "orders:read", "
   người ở trang Người dùng — mất quyền vì một lần triển khai thì tệ, nhưng cấp thừa một quyền tiền
   vì một phép loại trừ thì tệ hơn, vì không ai biết là nó đã được cấp.
 
-  `ACCOUNTANT` GIỮ `payroll:view`: kế toán cần bảng lương toàn công ty để trả tiền. Đó là một quyết
-  định tường minh, đúng với chức năng — không phải một phạm vi bị thiếu được lấp bằng quyền rộng.
+  `ACCOUNTANT` GIỮ quyền xem toàn công ty: kế toán cần bảng lương để trả tiền. Đó là một quyết định
+  tường minh, đúng với chức năng — không phải một phạm vi bị thiếu được lấp bằng quyền rộng.
+
+  ═══ VÀ SỬA MẶC ĐỊNH TRONG MÃ VẪN CHƯA ĐỦ (đo trên production 15/09/2026) ═══
+
+  Production có `settings['auth.rolePermissions']`, và mảng `MANAGER` trong đó CHỨA `payroll:view`.
+  `rolePermissions()` đọc mẫu vai trò bằng phép THAY THẾ — có mảng lưu thì mảng ấy LÀ quyền của vai
+  trò, và đoạn `DEFAULT_ROLE_PERMISSIONS` ngay dưới đây KHÔNG được hỏi tới. Nghĩa là bản vá ở trên,
+  tự nó, không với tới được tài khoản Quản lý trên máy chủ thật.
+
+  Nên khoá `payroll:view-all` được tách ra: nó MỚI, nên **không cấu hình cũ nào đang mang nó**, và
+  đó chính là thứ làm nó an toàn trước một bản ghi đè lỗi thời. `payroll:view` từ nay rơi về SELF.
+  Phạm vi được tính một chỗ duy nhất ở `lib/auth/payroll-scope.ts`.
+
+  Hệ quả phải nói thẳng: tài khoản nào đang xem bảng lương toàn công ty NHỜ một mảng ghi đè trong
+  `settings` (kể cả `ACCOUNTANT`) sẽ rơi về "chỉ của mình" cho tới khi được cấp `payroll:view-all`.
+  Đó là mất quyền xem, không phải lộ dữ liệu — và là chiều đúng để hỏng.
 */
 
 /** Mẫu quyền mặc định của từng vai trò (có thể chỉnh trên trang Người dùng) */
@@ -181,11 +210,11 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // cho MANAGER là để bản này lặng lẽ cấp thêm quyền duyệt lương cho những tài khoản đang có —
   // đúng thứ AGENTS.md mục 31 nói phải rơi về phía HẸP HƠN. `payroll:view` cùng lý do: xem lương
   // của mọi người là quyền phải được CẤP, không phải quyền còn lại sau một phép loại trừ.
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view"].includes(p)),
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
   LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
-  ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "integrations:view"],
+  ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "payroll:view-all", "integrations:view"],
   /*
     KHÔNG có `inventory:restock-unidentified`. Nhân viên kho nhận kiện, đếm, tra đơn — nhưng lượt
     cộng tồn cho món không có chứng từ nào là quyết định của người quản lý kho, và chủ shop cấp

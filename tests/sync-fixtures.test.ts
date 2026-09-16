@@ -35,6 +35,7 @@ import { testPayrollPreviewAndActivation } from "./payroll-preview.test";
 import { testPayrollReconcileScript } from "./payroll-reconcile-script.test";
 import { testPayrollPolicyEngine } from "./payroll-policy-engine.test";
 import { testPayrollProductionReadiness } from "./payroll-production-readiness.test";
+import { testPayrollAuthorization } from "./payroll-authorization.test";
 import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
@@ -1787,6 +1788,7 @@ async function main() {
   await testPayrollPeriod(db);
   testEveryScopedRouteIsGuarded();
   testPayrollOwnLineNeedsAccountKey();
+  testPayrollAuthorization();
   testAuthSecretHasNoProdFallback();
   testMetricConfidenceIsAFunction();
   testPeriodKeys();

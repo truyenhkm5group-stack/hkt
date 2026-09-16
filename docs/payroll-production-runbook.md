@@ -123,16 +123,66 @@ của ứng dụng, vì làm vậy là biến cả ERP thành chỉ đọc.
 > **Không bật lại bằng cách gán `payroll:view` cho một vai trò.** Ai thật sự cần xem toàn bộ thì
 > cấp cho **từng người** ở trang Người dùng, có tên, có người quyết.
 
+> ### ⛔ `MANAGER_PERMISSION_BLOCKER` — VÀ VÌ SAO SỬA MẶC ĐỊNH TRONG MÃ LÀ CHƯA ĐỦ
+>
+> **Đo trên production 15/09/2026 (chỉ đọc):** bảng `settings` có khoá `auth.rolePermissions`, và
+> mảng của vai trò `MANAGER` trong đó **CHỨA `payroll:view`**.
+>
+> `rolePermissions()` (`lib/auth/permissions.ts`) đọc mẫu vai trò bằng phép **THAY THẾ**, không hợp
+> nhất: có mảng lưu thì mảng ấy LÀ quyền của vai trò, và `DEFAULT_ROLE_PERMISSIONS` không được hỏi
+> tới. Nghĩa là bản vá quyền của PR #3 — vốn chỉ sửa mặc định trong mã — **không với tới được tài
+> khoản Quản lý trên máy chủ thật**. Mã nói TỪ CHỐI, dữ liệu nói CHO PHÉP, và dữ liệu thắng.
+>
+> **Cách đóng không phụ thuộc vào việc ai đó nhớ đi dọn cấu hình:** quyền xem toàn công ty tách ra
+> thành một khoá MỚI, `payroll:view-all`. Vì nó mới nên **không cấu hình cũ nào đang mang nó** —
+> đó chính là thứ làm nó an toàn trước một bản ghi đè lỗi thời. `payroll:view` từ nay rơi về đúng
+> phạm vi "của chính mình". Phạm vi tính một chỗ duy nhất: `lib/auth/payroll-scope.ts`.
+>
+> **Hệ quả phải biết trước:** tài khoản nào đang xem bảng lương toàn công ty NHỜ một mảng ghi đè
+> trong `settings` — **kể cả `ACCOUNTANT`** — sẽ rơi về "chỉ của mình" cho tới khi được cấp
+> `payroll:view-all` ở `/settings/users`. Đó là mất quyền xem, không phải lộ dữ liệu, và là chiều
+> đúng để hỏng.
 
-Ba quyền lương phải có người giữ, và **`payroll:manage` với `payroll:approve` nên ở hai người khác
+Bốn quyền lương phải có người giữ, và **`payroll:manage` với `payroll:approve` nên ở hai người khác
 nhau** — người khai số và người duyệt số không nên là một. Kiểm ở `/settings/users`.
 
 | Quyền | Làm được gì |
 | --- | --- |
-| `payroll:view` | Xem bảng lương toàn shop — mặc định CHỈ `ADMIN` và `ACCOUNTANT` |
+| `payroll:view-all` | **Xem lương của MỌI NGƯỜI.** Khoá duy nhất mở ra dữ liệu của người khác — mặc định CHỈ `ADMIN` và `ACCOUNTANT`, và phải cấp TƯỜNG MINH |
+| `payroll:view` | Khoá CŨ. Từ 16/09/2026 **không còn** nghĩa là xem toàn bộ; nó rơi về đúng phạm vi "của chính mình" |
 | `payroll:view-own` | Chỉ xem phiếu lương của chính mình (khớp bằng email đăng nhập) |
 | `payroll:manage` | Khai chính sách, phân công, nhập liệu, tính kỳ |
 | `payroll:approve` | Duyệt · trả lại · khoá · mở khoá · đánh dấu đã trả |
+
+**Phạm vi nhóm: `TEAM_SCOPE_NOT_IMPLEMENTED`.** Cho tới khi có, `MANAGER` và `LEADER` chỉ ở mức
+`SELF` (hoặc `NONE` nếu chưa khai email đăng nhập trong hồ sơ nhân sự) — **không bao giờ** `ALL`.
+
+> ### ⛔ LỖ HỔNG THỨ HAI, CÙNG MỘT BẢN GHI ĐÈ: `payroll:manage`
+>
+> Đọc đầy đủ `auth.rolePermissions` trên production (16/09/2026) cho thấy mảng `MANAGER` mang **cả
+> `payroll:view` lẫn `payroll:manage`** (44 khoá). Sáu vai trò còn lại không mang khoá lương nào.
+>
+> | vai trò | `payroll:view` | `payroll:view-all` | `payroll:manage` | `payroll:approve` |
+> | --- | --- | --- | --- | --- |
+> | `MANAGER` | **có** | không | **có** | không |
+> | `ACCOUNTANT` · `LEADER` · `CS` · `MARKETING` · `VIEWER` · `WAREHOUSE` | không | không | không | không |
+>
+> `payroll:manage` mở năm màn hình quản trị, và chúng **in ra tiền của mọi người** —
+> `/payroll/migration` dựng bảng đối chiếu lương cũ/mới cho TOÀN BỘ nhân sự. Nếu chỉ siết `/payroll`
+> mà để ngỏ chúng thì bản vá phạm vi bị đi vòng qua đúng một mục trong thanh tab, và người đi vòng
+> không cần biết gì về kỹ thuật.
+>
+> **Đã đóng trong bản vá này:** quản trị lương nay đòi **ĐỦ HAI** — quyền khai báo **VÀ** phạm vi
+> toàn công ty (`canAdministerPayroll`). Áp cho cả năm màn hình lẫn các Server Action, vì ẩn một
+> mục tab không chặn được ai gọi thẳng hành động.
+>
+> **Hệ quả:** với cấu hình production hiện tại, `MANAGER` mất quyền vào năm màn hình quản trị lương.
+> Nếu chủ shop THẬT SỰ muốn tài khoản ấy quản trị lương, hãy cấp thêm `payroll:view-all` **một cách
+> tường minh** — chứ không phải nới lại bản vá.
+>
+> **Chưa đụng tới:** `lib/actions/fanpage-attribution.ts` cũng dùng `payroll:manage`, nhưng nó gán
+> fanpage → marketer chứ không đọc/ghi con số lương nào. Để nguyên cho khỏi mở rộng phạm vi bản vá;
+> nêu ra đây để lần sau còn nhớ.
 
 Chưa có ai giữ `payroll:approve` thì kỳ lương sẽ đi được tới `UNDER_REVIEW` rồi dừng — không hỏng,
 nhưng không chốt được.
@@ -237,6 +287,24 @@ người đó. Không có nút hàng loạt, và cố ý không có.
 ---
 
 ## 3. SAU KHI DEPLOY
+
+### 3.0 SMOKE AN NINH — NĂM LƯỢT, LÀM TRƯỚC MỌI THỨ KHÁC
+
+Đăng nhập **bằng chính tài khoản Quản lý** (không phải tài khoản quản trị, và không phải bằng cách
+đọc mã nguồn — lỗ hổng lần trước nằm ở DỮ LIỆU chứ không ở mã). Gõ thẳng địa chỉ, đừng đi qua menu:
+ẩn một mục menu không phải là chặn.
+
+| # | Làm gì | Kỳ vọng |
+| --- | --- | --- |
+| 1 | Tài khoản **quản trị** mở `/payroll` | **Cho** — thấy đủ mọi nhân sự |
+| 2 | Tài khoản **Quản lý** mở `/payroll` | **CHẶN** ở mức dòng: chỉ thấy dòng của chính mình (chưa khai email đăng nhập ⇒ bảng rỗng kèm câu chỉ đường) |
+| 3 | Tài khoản **Quản lý** mở `/payroll/payslip?employee=<id NGƯỜI KHÁC>` | **CHẶN** — "Không có dòng lương nào bạn xem được", KHÔNG hiện phiếu của người ấy |
+| 4 | Tài khoản **Quản lý** mở `/payroll/payslip` không tham số | Phiếu của **chính mình**, hoặc câu chỉ đường nếu chưa khai email |
+| 5 | Tài khoản **Quản lý** gọi thẳng `/api/export/payroll?period=month` | **CHẶN** — tệp chỉ có dòng của chính mình, hoặc 403 nếu không có quyền lương nào. TUYỆT ĐỐI không phải cả bảng lương shop |
+
+Thêm hai lượt nữa nếu có tài khoản Trưởng nhóm: lặp lại lượt 2 và 5 với `LEADER`.
+
+**Một lượt sai ⇒ DỪNG, không kích hoạt lương cho ai, quay đầu theo mục 4.**
 
 ### 3.1 Kiểm migration đã áp đủ
 

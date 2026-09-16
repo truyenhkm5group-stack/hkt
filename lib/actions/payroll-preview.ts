@@ -18,6 +18,7 @@
  */
 import { z } from "zod";
 import { can, requireUser } from "@/lib/auth/session";
+import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { PAYROLL_INPUT_KEYS } from "@/lib/constants/payroll-components";
 import { calculatePayrollItem, type PayrollItemResult } from "@/lib/payroll/engine";
 import { resolveSegments } from "@/lib/payroll/policy-resolve";
@@ -50,7 +51,7 @@ export async function previewPolicyCalculation(input: unknown): Promise<PreviewR
     Nó không ghi gì, nhưng nó TIẾT LỘ cách tính tiền của shop: đưa vào một bộ đại lượng rồi đọc ra
     con số. Một cửa chỉ-đọc vẫn là một cửa.
   */
-  if (!can(user, "payroll:manage")) return { error: "Xem thử phép tính cần quyền khai báo lương" };
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) return { error: "Việc này cần quyền khai báo lương VÀ phạm vi xem lương toàn công ty — không được phép NHÌN bảng lương thì cũng không sửa được nó." };
 
   const parsed = previewSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };

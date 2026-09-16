@@ -9,6 +9,7 @@ import {
 } from "@/app/(dashboard)/finance-ops/sections";
 import { PageHeader } from "@/components/page-header";
 import { can,  } from "@/lib/auth/session";
+import { canSeeAllPayroll, resolvePayrollScope } from "@/lib/auth/payroll-scope";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 
@@ -32,7 +33,7 @@ export default async function FinanceOpsPage() {
   const canBank = can(user, "bank:write");
   const canExpense = can(user, "expenses:write");
   const canAccounts = can(user, "bank:accounts");
-  const canPayroll = can(user, "payroll:view");
+  const canPayroll = canSeeAllPayroll(resolvePayrollScope(user));
 
   return (
     <div className="space-y-5">

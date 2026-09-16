@@ -6,6 +6,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import {
   PAYROLL_BASES,
   PAYROLL_BASIS_ELIGIBILITY,
@@ -72,7 +73,7 @@ const finalizeSchema = z.object({
  */
 export async function finalizePayrollPeriod(input: unknown): Promise<PeriodActionResult> {
   const user = await requireUser();
-  if (!can(user, "payroll:manage")) return { error: "Chỉ người có quyền khai báo lương mới được chốt kỳ" };
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) return { error: "Việc này cần quyền khai báo lương VÀ phạm vi xem lương toàn công ty — không được phép NHÌN bảng lương thì cũng không sửa được nó." };
   const parsed = finalizeSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const { from, to, basis, note } = parsed.data;

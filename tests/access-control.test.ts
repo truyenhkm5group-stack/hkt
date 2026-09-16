@@ -48,8 +48,18 @@ export function testAccessControl() {
   for (const file of routes) {
     if (CO_Y_CONG_KHAI[file]) continue;
     const src = readFileSync(file, "utf8");
-    // "Đã đăng nhập" KHÔNG phải kiểm soát truy cập: mọi nhân viên đều đăng nhập được.
-    const coQuyen = /can\(\s*user\s*,\s*"[a-z0-9:_-]+"\s*\)/.test(src) || /requirePermission\(\s*"[a-z0-9:_-]+"\s*\)/.test(src);
+    /*
+      "Đã đăng nhập" KHÔNG phải kiểm soát truy cập: mọi nhân viên đều đăng nhập được.
+
+      Dạng thứ ba là MÁY TÍNH PHẠM VI (`lib/auth/payroll-scope.ts`): nó suy ra phạm vi TỪ khoá
+      quyền rồi mới quyết, nên nó là một lượt hỏi quyền đầy đủ chứ không phải một lối vòng. Đòi
+      ĐỦ HAI THỨ — tính phạm vi VÀ có câu chặn dựa trên phạm vi ấy — vì một tuyến tính ra phạm vi
+      rồi không dùng nó thì vẫn đang mở toang.
+    */
+    const coQuyen =
+      /can\(\s*user\s*,\s*"[a-z0-9:_-]+"\s*\)/.test(src) ||
+      /requirePermission\(\s*"[a-z0-9:_-]+"\s*\)/.test(src) ||
+      (/resolvePayrollScope\(\s*user\s*\)/.test(src) && /can(?:Open|SeeAll)Payroll\(/.test(src));
     assert.ok(
       coQuyen,
       `${file}: chỉ kiểm tra phiên đăng nhập là chưa đủ — phải hỏi đúng quyền của module. Menu ẩn không khoá được đường dẫn.`,

@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
+import { canSeeAllPayroll, resolvePayrollScope } from "@/lib/auth/payroll-scope";
 import { PAYROLL_BASIS_NAME, type PayrollBasis } from "@/lib/constants/payroll";
 import { PAYROLL_RUN_STATUS_HINT, PAYROLL_RUN_STATUS_LABEL, normalizePayrollStatus } from "@/lib/constants/payroll-lifecycle";
 import { formatDateTime } from "@/lib/format";
@@ -29,7 +30,11 @@ const TONE: Record<string, string> = {
  */
 export default async function PayrollRunsPage() {
   const user = await requireUser();
-  if (!can(user, "payroll:view")) redirect("/payroll?forbidden=1");
+  /*
+    LỊCH SỬ KỲ LƯƠNG LÀ SỐ CỦA CẢ CÔNG TY (tổng chi lương từng kỳ, ai duyệt, ai khoá) — không có
+    bản "chỉ của mình" cho màn hình này. Nên nó đòi đúng quyền xem toàn công ty.
+  */
+  if (!canSeeAllPayroll(resolvePayrollScope(user))) redirect("/payroll?forbidden=1");
   const runs = await listPayrollRuns(60);
 
   return (
