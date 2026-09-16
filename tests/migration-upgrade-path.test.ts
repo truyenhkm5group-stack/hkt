@@ -46,6 +46,7 @@ const MOI = [
   "0097_payroll_run_lifecycle",
   "0098_payroll_input_approval",
   "0099_vtp_source_of_truth",
+  "0100_vtp_webhook_gap",
 ] as const;
 
 /*
@@ -134,6 +135,7 @@ export async function testMigrationUpgradePath() {
     );
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'vtp_status_registry'"), 0, "bước 1: bảng vtp_status_registry CHƯA được có — đó là thứ 0099 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipments' and column_name = 'vtp_raw_status_name'"), 0, "bước 1: cột lời khai thô CHƯA được có — đó là thứ 0099 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'vtp_webhook_gaps'"), 0, "bước 1: sổ khoảng hụt webhook CHƯA được có — đó là thứ 0100 thêm vào");
     /*
       Một vận đơn ĐÃ CÓ TỪ TRƯỚC 0099, mang một trạng thái Viettel Post đã dịch được. Bước 2 kiểm
       rằng migration KHÔNG dựng hộ nó một "lời khai thô": suy ngược từ `vtp_status_name` là bịa ra
@@ -1117,6 +1119,36 @@ export async function testMigrationUpgradePath() {
       (e: unknown) => String((e as { message?: string })?.message ?? e).includes("vtp_import_batches_mode_check"),
       "0099: chế độ nhập ngoài PREVIEW/APPLY phải bị CSDL chặn",
     );
+
+    /*
+      ═══ 0100: SỔ KHOẢNG HỤT WEBHOOK — SỔ ĐO, KHÔNG PHẢI SỔ ĐOÁN ═══
+
+      ERP KHÔNG tự phát hiện được một gói tin webhook chưa bao giờ tới: sự vắng mặt không để lại
+      dấu vết nào trong chính hệ thống đã không nhận được nó. Chỉ một nguồn ĐỘC LẬP (tệp Viettel
+      Post) mới lộ ra khoảng hụt. Nên sổ này BẮT ĐẦU RỖNG và chỉ lớn lên khi có tệp đối chiếu —
+      migration backfill một dòng nào ở đây là bịa ra một phép đo chưa ai thực hiện.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'vtp_webhook_gaps'"), 1, "0100: sổ khoảng hụt webhook phải có mặt");
+    assert.equal(await dem("select count(*)::int as n from vtp_webhook_gaps"), 0, "0100: migration KHÔNG được gieo một khoảng hụt nào — chưa có tệp đối chiếu nào chạy thì chưa có phép đo nào");
+    assert.equal(
+      await dem("select count(*)::int as n from vtp_import_batches where checked = 0 and webhook_ok = 0 and webhook_gaps = 0"),
+      await dem("select count(*)::int as n from vtp_import_batches"),
+      "0100: lần nhập CŨ giữ ba con số đo ở 0 — chúng chạy trước khi phép đo tồn tại, không được gán một tỷ lệ khớp bịa",
+    );
+    // Mức nặng nhẹ là danh sách ĐÓNG: một chuỗi lạ buộc màn hình phải chọn giữa giấu đi và tô sai màu.
+    await assert.rejects(
+      () => client.query(`insert into vtp_webhook_gaps (id, shipment_id, tracking_code, carrier_event_at, gap_minutes, severity) values ('up-g1', 'up-s99', 'UPG1', now(), 200, 'HUGE')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("vtp_webhook_gaps_severity_check"),
+      "0100: mức nặng nhẹ ngoài MINOR/MAJOR/CRITICAL phải bị CSDL chặn",
+    );
+    // Cùng một sự việc phát hiện lại ở lần nhập sau KHÔNG được đếm thành hai lần rơi: nếu đếm hai
+    // lần thì mỗi lần nhập lại một tệp cũ sẽ tự làm xấu tỷ lệ khớp webhook của chính nó.
+    const mocGap = "2026-09-10T03:00:00.000Z";
+    await client.query(`insert into vtp_webhook_gaps (id, shipment_id, tracking_code, carrier_status_text, carrier_event_at, gap_minutes, severity) values ('up-g2', 'up-s99', 'UPG1', 'Giao thành công', $1, 200, 'MAJOR')`, [mocGap]);
+    await client.query(`insert into vtp_webhook_gaps (id, shipment_id, tracking_code, carrier_status_text, carrier_event_at, gap_minutes, severity) values ('up-g3', 'up-s99', 'UPG1', 'Giao thành công', $1, 999, 'CRITICAL') on conflict do nothing`, [mocGap]);
+    assert.equal(await dem("select count(*)::int as n from vtp_webhook_gaps where shipment_id = 'up-s99'"), 1, "0100: phát hiện lại cùng một sự việc chỉ còn MỘT dòng");
+    await client.query(`delete from vtp_webhook_gaps where shipment_id = 'up-s99'`);
+
     await client.query(`delete from shipments where id = 'up-s99'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══

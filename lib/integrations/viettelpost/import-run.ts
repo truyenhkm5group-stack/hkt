@@ -3,7 +3,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { detectVtpFile, mergeDetectedOrderLists, type DetectedVtpFile } from "@/lib/integrations/viettelpost/import-files";
 import { applyStatementDetailRows, applyVtpOrderList, matchStatementFileToBatch, upsertBatchFromStatementFile } from "@/lib/integrations/viettelpost/statement-db";
-import { fileChecksum, ghiSoNhapTep } from "@/lib/integrations/viettelpost/import-preview";
+import { capNhatSoNhapTep, fileChecksum, ghiSoNhapTep } from "@/lib/integrations/viettelpost/import-preview";
 
 
 /** Lỗi hiển thị cho chủ shop, không phải JSON thô của Zod. */
@@ -70,6 +70,7 @@ export async function runVtpDataFileImport(
 ): Promise<{ files: VtpImportFileResult[]; orderRows: number; statementRows: number }> {
   const detected: DetectedVtpFile[] = [];
   const results: VtpImportFileResult[] = [];
+  const byName = new Map(files.map((f) => [f.filename, f]));
   // Giữ tệp gốc TRƯỚC khi đọc. Apps Script chỉ gửi thư chưa gắn nhãn nên nếu ERP đọc sai mà không
   // giữ tệp thì muốn đọc lại phải vào Gmail gỡ nhãn tay — giữ ở đây để ERP tự phát lại được.
   await luuTepGoc(files, actor);
@@ -86,10 +87,46 @@ export async function runVtpDataFileImport(
   // 1) Danh sách vận đơn — gộp mọi tệp rồi ghi một lần để xử lý trùng/xung đột giữa các tệp.
   const orderFiles = detected.filter((d) => d.kind === "ORDER_LIST");
   let orderRows = 0;
+  /** Đo chất lượng webhook của lượt này — gắn vào dòng sổ của từng tệp danh sách bên dưới. */
+  let orderMeasure: { checked: number; webhookOk: number; webhookGaps: number } | null = null;
   if (orderFiles.length) {
     const merged = mergeDetectedOrderLists(detected);
     orderRows = merged.length;
-    const applied = await applyVtpOrderList(merged, actor);
+    /*
+      DÒNG SỔ LẬP TRƯỚC KHI GHI, cố ý: mỗi khoảng hụt webhook phát hiện được phải trỏ về ĐÚNG lần
+      nhập đã tìm ra nó. Lập sổ sau thì các dòng ấy mồ côi, và câu "lần nhập nào phát hiện ra" —
+      thứ duy nhất làm phép đo tra lại được — không trả lời được nữa.
+    */
+    const gopTen = orderFiles.map((f) => f.filename).join(" + ");
+    const gopBase64 = orderFiles.map((f) => byName.get(f.filename)?.base64 ?? "").join("");
+    const batchId = await ghiSoNhapTep({
+      filename: gopTen,
+      checksum: fileChecksum(gopBase64),
+      bytes: Math.round((gopBase64.length * 3) / 4),
+      kind: "ORDER_LIST",
+      mode: "APPLY",
+      uploadedBy: actor,
+      uploadedById: options.uploadedById ?? null,
+      rows: merged.length,
+    }).catch(() => null);
+    const applied = await applyVtpOrderList(merged, actor, { batchId });
+    orderMeasure = { checked: applied.checked, webhookOk: applied.webhookOk, webhookGaps: applied.webhookGaps };
+    if (batchId) {
+      await capNhatSoNhapTep(batchId, {
+        matched: applied.matched,
+        applied: applied.updated + applied.legs,
+        stale: applied.stale,
+        duplicates: applied.duplicate,
+        conflicts: applied.conflicts,
+        unmatched: applied.unmatched,
+        unknownStatus: applied.unknown,
+        invalid: applied.missingDate,
+        checked: applied.checked,
+        webhookOk: applied.webhookOk,
+        webhookGaps: applied.webhookGaps,
+        summary: { ...applied, files: orderFiles.map((f) => f.filename) },
+      }).catch(() => undefined);
+    }
     const dates = merged.map((r) => r.statusDate).filter(Boolean).sort();
     for (const f of orderFiles) {
       results.push({
@@ -104,7 +141,13 @@ export async function runVtpDataFileImport(
         note: `Toàn bộ tệp danh sách gộp lại: cập nhật ${applied.updated} vận đơn`
           + (applied.linked ? ` (${applied.linked} vận đơn được gắn mã theo SĐT người nhận)` : "")
           + `, ${applied.legs} chiều hoàn, bỏ qua ${applied.stale} dòng cũ, ${applied.conflicts} xung đột cần đối chiếu`
-          + (applied.unmatched ? `, ${applied.unmatched} vận đơn của VTP chưa có trong ERP` : ""),
+          + (applied.unmatched ? `, ${applied.unmatched} vận đơn của VTP chưa có trong ERP` : "")
+          // Phép đo chất lượng webhook của chính lượt này — lý do một lần nhập vẫn đáng chạy kể
+          // cả khi nó không đổi một vận đơn nào.
+          + (orderMeasure && orderMeasure.checked
+              ? ` · đối chiếu ${orderMeasure.checked} dòng: ERP đã biết trước ${orderMeasure.webhookOk}`
+                + (orderMeasure.webhookGaps ? `, ${orderMeasure.webhookGaps} khoảng hụt webhook` : ", không khoảng hụt nào")
+              : ""),
       });
     }
     await audit({ userId: null, userEmail: actor, action: "VTP_ORDER_LIST_IMPORT", entity: "SHIPMENT", detail: { files: orderFiles.map((f) => f.filename), ...applied } });
@@ -160,8 +203,9 @@ export async function runVtpDataFileImport(
     `checksum` là SHA-256 của NỘI DUNG: Viettel Post đặt tên tệp theo khoảng ngày nên hai lần tải
     cùng một khoảng cho ra cùng TÊN với nội dung khác nhau, và cùng nội dung có thể mang hai tên.
   */
-  const byName = new Map(files.map((f) => [f.filename, f]));
   for (const r of results) {
+    // Tệp danh sách vận đơn đã có DÒNG SỔ GỘP lập trước khi ghi ở trên — ghi lại ở đây là đếm hai lần.
+    if (r.kind === "ORDER_LIST") continue;
     const file = byName.get(r.filename);
     if (!file) continue;
     await ghiSoNhapTep({

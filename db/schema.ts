@@ -1470,6 +1470,66 @@ export const vtpStatusRegistry = pgTable(
 );
 
 /**
+ * ═══════════ KHOẢNG HỤT CỦA WEBHOOK — ĐO BẰNG NGUỒN ĐỘC LẬP, KHÔNG BẰNG LỜI HỨA ═══════════
+ *
+ * ─── VÌ SAO BẢNG NÀY TỒN TẠI ───
+ *
+ * Đo production 16/09/2026: **2.138/2.151 vận đơn là `WEBHOOK_ONLY`**. Với chúng webhook là NGUỒN
+ * TIN DUY NHẤT, và một nguồn duy nhất mà không ai biết nó rơi bao nhiêu phần trăm thì không dùng
+ * để ra quyết định được.
+ *
+ * ERP không thể tự phát hiện mình đang thiếu một gói tin CHƯA TỪNG TỚI. Chỗ hụt chỉ lộ ra khi một
+ * nguồn ĐỘC LẬP nói lại cùng một sự việc — hôm nay là tệp "Danh sách vận đơn" tải từ
+ * viettelpost.vn. Nên mỗi lần nhập tệp, ngoài việc vá dữ liệu, ERP ghi lại một PHÉP ĐO.
+ *
+ * ─── MỖI DÒNG LÀ MỘT BẰNG CHỨNG, KHÔNG PHẢI MỘT CẢNH BÁO ───
+ *
+ * Dòng ở đây nói: "ĐVVC ghi nhận việc này lúc T, mà tới lúc nhập tệp I thì ERP vẫn chưa biết".
+ * Nó KHÔNG tự thành việc phải làm và KHÔNG tham gia bất kỳ phép tính nghiệp vụ nào — trạng thái
+ * vận đơn vẫn do `shipment_events` quyết. Đây là sổ QUAN SÁT về chất lượng đường truyền.
+ *
+ * Ngưỡng và cách xếp mức nằm ở `lib/constants/webhook-gap.ts`, không nằm ở đây.
+ */
+export const vtpWebhookGaps = pgTable(
+  "vtp_webhook_gaps",
+  {
+    id: id(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    trackingCode: text("tracking_code").notNull().default(""),
+    /** Lần nhập tệp đã phát hiện ra khoảng hụt này. */
+    batchId: text("batch_id").references((): AnyPgColumn => vtpImportBatches.id, { onDelete: "set null" }),
+    /** Câu chữ ĐVVC ghi trên dòng tệp — nguyên văn. */
+    carrierStatusText: text("carrier_status_text").notNull().default(""),
+    carrierStage: text("carrier_stage"),
+    /** Mốc ĐVVC ghi nhận sự việc. */
+    carrierEventAt: ts("carrier_event_at").notNull(),
+    /**
+     * Mốc ĐVVC mà ERP đang giữ TRƯỚC lần nhập. `NULL` = ERP chưa biết gì về kiện này —
+     * CHƯA BIẾT, không phải "biết từ lúc 0".
+     */
+    erpKnewAt: ts("erp_knew_at"),
+    /** Nguồn đã quyết định ảnh chụp trước đó (`VTP_WEBHOOK` · `VTP_IMPORT` …). */
+    erpKnewSource: text("erp_knew_source"),
+    detectedAt: ts("detected_at").notNull().defaultNow(),
+    /** Số phút ERP đi sau ĐVVC, tính tới lúc nhập tệp. */
+    gapMinutes: integer("gap_minutes").notNull(),
+    /** `MINOR` · `MAJOR` · `CRITICAL` — theo ĐỘ DÀI khoảng hụt, không theo chặng. */
+    severity: text("severity").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // Cùng một sự việc phát hiện lại ở lần nhập sau KHÔNG được đếm thành hai lần rơi.
+    uniqueIndex("vtp_webhook_gaps_uq").on(t.shipmentId, t.carrierEventAt, t.carrierStatusText),
+    index("vtp_webhook_gaps_detected_idx").on(t.detectedAt),
+    index("vtp_webhook_gaps_shipment_idx").on(t.shipmentId, t.carrierEventAt),
+    index("vtp_webhook_gaps_batch_idx").on(t.batchId),
+    check("vtp_webhook_gaps_severity_check", sql`${t.severity} IN ('MINOR', 'MAJOR', 'CRITICAL')`),
+  ],
+);
+
+/**
  * ═══════════ SỔ LẦN NHẬP TỆP VIETTEL POST ═══════════
  *
  * Mỗi lần người bấm "Nhập trạng thái VTP" là một dòng — kể cả lần CHẠY THỬ. Chạy thử được ghi
@@ -1507,6 +1567,18 @@ export const vtpImportBatches = pgTable(
     unmatched: integer("unmatched").notNull().default(0),
     /** Dòng mang trạng thái ERP chưa dịch được. Vẫn vào sổ đăng ký, không bị ném đi. */
     unknownStatus: integer("unknown_status").notNull().default(0),
+    /*
+      ═══ PHÉP ĐO CHẤT LƯỢNG WEBHOOK CỦA CHÍNH LẦN NHẬP NÀY ═══
+
+      `checked`   — dòng ghép được về một vận đơn ERP đã biết (mẫu số).
+      `webhookOk` — trong số đó, ERP ĐÃ BIẾT bằng hoặc mới hơn ⇒ webhook làm đúng việc.
+      `webhookGaps` — ERP chưa hề biết dù ĐVVC ghi nhận đã lâu ⇒ webhook đã rơi.
+
+      Ba con số này là lý do lần nhập nào cũng đáng chạy, kể cả khi nó không đổi một vận đơn nào.
+    */
+    checked: integer("checked").notNull().default(0),
+    webhookOk: integer("webhook_ok").notNull().default(0),
+    webhookGaps: integer("webhook_gaps").notNull().default(0),
     invalid: integer("invalid").notNull().default(0),
     error: text("error"),
     /** Bảng kê chi tiết trước/sau của lần chạy — đủ để dựng lại màn hình xem trước. */
@@ -3008,6 +3080,7 @@ export type OrderItem = typeof orderItems.$inferSelect;
 export type Shipment = typeof shipments.$inferSelect;
 export type VtpStatusRegistryRow = typeof vtpStatusRegistry.$inferSelect;
 export type VtpImportBatch = typeof vtpImportBatches.$inferSelect;
+export type VtpWebhookGap = typeof vtpWebhookGaps.$inferSelect;
 export type ShipmentEvent = typeof shipmentEvents.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;
 export type AdSpend = typeof adSpends.$inferSelect;

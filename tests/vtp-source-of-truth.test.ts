@@ -10,6 +10,7 @@ import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import type { VtpTrackingRecord } from "@/lib/integrations/viettelpost/client";
 import { getShipmentTimeline } from "@/lib/queries/shipment-timeline";
 import { viettelPostHealth } from "@/lib/queries/integrations";
+import { measureWebhookGap, webhookMatchRate, gapSeverity, WEBHOOK_GAP_MIN_MINUTES, WEBHOOK_MATCH_MIN_SAMPLE } from "@/lib/constants/webhook-gap";
 import { clearMemo } from "@/lib/cache";
 
 /**
@@ -375,8 +376,113 @@ export async function testVtpSourceOfTruth(db: Db) {
   assert.ok(health.lastImport, "phải nói được lần nhập tệp gần nhất");
   assert.equal(health.lastImport.by, "test:vtp-truth");
 
+  /*
+    ═════════ 11. ĐO CHẤT LƯỢNG WEBHOOK BẰNG CHÍNH TỆP ĐỐI CHIẾU ═════════
+
+    2.138/2.151 vận đơn là `WEBHOOK_ONLY` (đo 16/09/2026): webhook là NGUỒN TIN DUY NHẤT, và ERP
+    KHÔNG tự phát hiện được một gói tin chưa từng tới — sự vắng mặt không để lại dấu vết nào trong
+    chính hệ thống đã không nhận được nó. Chỉ tệp Viettel Post, một nguồn ĐỘC LẬP, mới lộ ra chỗ hụt.
+
+    Nên mỗi lần nhập tệp phải để lại một PHÉP ĐO, kể cả lần nhập không đổi một vận đơn nào.
+  */
+
+  // ── Hàm thuần trước: ba câu trả lời, và hai trong số đó KHÔNG phải lỗi của webhook ──
+  const luc = (iso: string) => new Date(iso);
+  assert.equal(
+    measureWebhookGap({ carrierEventAt: luc("2026-09-12T00:23:00Z"), erpKnewAt: luc("2026-09-12T00:23:00Z"), importedAt: luc("2026-09-13T03:50:00Z") }).isGap,
+    false,
+    "ERP đã biết đúng mốc ấy ⇒ webhook làm đúng việc, không được tính là hụt",
+  );
+  assert.equal(
+    measureWebhookGap({ carrierEventAt: luc("2026-09-12T00:23:00Z"), erpKnewAt: luc("2026-09-12T10:00:00Z"), importedAt: luc("2026-09-13T03:50:00Z") }).isGap,
+    false,
+    "ERP đã biết một sự việc MỚI HƠN ⇒ dòng tệp cũ này không chứng minh được webhook rơi",
+  );
+  /*
+    NGƯỠNG HAI GIỜ: độ trễ THẬT đo được là 36–41 giây. Một sự kiện vừa xảy ra vài phút trước lúc
+    nhập tệp thì gói tin có thể đang trên đường — đếm nó là "hụt" là vu oan, và làm tỷ lệ tin cậy
+    tụt vì một cuộc đua vô hại.
+  */
+  const vuaXay = measureWebhookGap({ carrierEventAt: luc("2026-09-13T03:00:00Z"), erpKnewAt: null, importedAt: luc("2026-09-13T04:00:00Z") });
+  assert.equal(vuaXay.isGap, false, "sự kiện mới hơn ngưỡng KHÔNG được kết tội webhook");
+  assert.equal(vuaXay.isGap === false && vuaXay.reason, "TOO_FRESH", "và phải nói rõ vì sao không tính, không im lặng bỏ qua");
+  assert.equal(
+    measureWebhookGap({ carrierEventAt: luc("2026-09-13T03:00:00Z"), erpKnewAt: null, importedAt: new Date(luc("2026-09-13T03:00:00Z").getTime() + WEBHOOK_GAP_MIN_MINUTES * 60_000) }).isGap,
+    true,
+    "đúng tại ngưỡng đã là hụt — biên phải đóng, không để một dải nào không ai đếm",
+  );
+  // Ca THẬT ngày 12/09: ĐVVC ghi "Chờ phát lại" lúc 07:23, ERP chỉ biết lúc 13/09 03:50 — qua TỆP.
+  const caThat = measureWebhookGap({ carrierEventAt: luc("2026-09-12T00:23:00Z"), erpKnewAt: null, importedAt: luc("2026-09-13T03:50:00Z") });
+  assert.equal(caThat.isGap, true, "ca thật 20 giờ phải được nhận ra là một lần webhook rơi");
+  assert.equal(caThat.isGap && caThat.severity, "MAJOR", "hơn một ngày ⇒ MAJOR");
+  assert.equal(gapSeverity(24 * 60 - 1), "MINOR");
+  assert.equal(gapSeverity(3 * 24 * 60), "CRITICAL");
+
+  /*
+    MẪU NHỎ NÓI LÀ MẪU NHỎ. "1/1 hụt" KHÔNG phải "webhook rơi 100%" — in ra như thế là bịa một
+    kết luận từ một quan sát, và chủ shop sẽ ra quyết định nhập tệp theo một con số không có thật.
+  */
+  assert.equal(webhookMatchRate({ known: 1, gaps: 1 }), null, "mẫu dưới ngưỡng ⇒ CHƯA ĐỦ DỮ LIỆU, không phải 50%");
+  assert.equal(webhookMatchRate({ known: WEBHOOK_MATCH_MIN_SAMPLE, gaps: 0 }), 1, "đủ mẫu thì phát biểu được tỷ lệ");
+  assert.equal(webhookMatchRate({ known: 0, gaps: WEBHOOK_MATCH_MIN_SAMPLE }), 0, "đủ mẫu mà không dòng nào ERP biết trước ⇒ 0% là một kết luận THẬT");
+
+  /*
+    ── VÀ PHÉP ĐO PHẢI THẬT SỰ CHẠY TRÊN ĐƯỜNG NHẬP TỆP ──
+
+    Một vận đơn ERP chỉ biết tới chặng "đóng tải" từ 10/09, trong khi tệp nói ĐVVC đã phát thành
+    công từ 12/09. ERP chưa hề biết sự việc ấy cho tới lúc nhập tệp: đó chính là một lần webhook rơi.
+  */
+  const HUT = "PKE-TRUTH-GAP";
+  await applyVtpTracking(track(HUT, 300, "Đóng tải - vận chuyển đi", "2026-09-10T03:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const csvHut = [head, `1,${HUT},REFG,01/09/2026 12:00:00,Giao thành công,499000,17000,12/09/2026 15:00:00`].join("\n");
+  const tepHut = { filename: "VTP_khoang_hut.csv", base64: Buffer.from(csvHut, "utf8").toString("base64") };
+  await runVtpDataFileImport([tepHut], "test:vtp-truth");
+
+  const hutShip = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, HUT) });
+  const dongHut = await db.select().from(schema.vtpWebhookGaps).where(eq(schema.vtpWebhookGaps.shipmentId, hutShip!.id));
+  assert.equal(dongHut.length, 1, "khoảng hụt webhook phải được GHI LẠI, không chỉ vá dữ liệu rồi quên");
+  assert.equal(dongHut[0].carrierStatusText, "Giao thành công", "sổ giữ CÂU NGUYÊN VĂN của ĐVVC — đó là bằng chứng, không phải nhãn của ERP");
+  assert.equal(dongHut[0].erpKnewAt?.toISOString(), "2026-09-10T03:00:00.000Z", "phải ghi ERP ĐANG BIẾT TỚI ĐÂU trước lần nhập, nếu không thì không tra lại được");
+  assert.equal(dongHut[0].erpKnewSource, "VTP_WEBHOOK", "và nguồn nào đã quyết định ảnh chụp cũ ấy");
+  assert.ok(dongHut[0].batchId, "mỗi khoảng hụt phải trỏ về ĐÚNG lần nhập đã tìm ra nó — dòng mồ côi không trả lời được 'ai đo, lúc nào'");
+
+  // Lần nhập ấy phải mang đủ ba con số đo, kể cả khi nó không đổi một vận đơn nào.
+  const soHut = await db.query.vtpImportBatches.findFirst({ where: eq(schema.vtpImportBatches.id, dongHut[0].batchId!) });
+  assert.ok(soHut, "dòng sổ của lần nhập phải tồn tại");
+  assert.equal(soHut.mode, "APPLY");
+  assert.equal(soHut.checked, 1, "mẫu số = số dòng ghép được về một vận đơn ERP đã biết");
+  assert.equal(soHut.webhookGaps, 1);
+
+  /*
+    NHẬP LẠI CÙNG TỆP KHÔNG ĐƯỢC ĐẺ RA LẦN RƠI THỨ HAI.
+
+    Nếu đếm hai lần thì mỗi lần chủ shop nhập lại một tệp cũ sẽ tự làm xấu tỷ lệ khớp webhook của
+    chính mình — và con số càng nhập càng sai, đúng chiều ngược với mục đích của phép đo.
+  */
+  await runVtpDataFileImport([tepHut], "test:vtp-truth");
+  const dongHut2 = await db.select().from(schema.vtpWebhookGaps).where(eq(schema.vtpWebhookGaps.shipmentId, hutShip!.id));
+  assert.equal(dongHut2.length, 1, "phát hiện lại cùng một sự việc chỉ còn MỘT dòng");
+
+  /*
+    VÀ KHI WEBHOOK LÀM ĐÚNG VIỆC, SỔ PHẢI IM LẶNG.
+
+    Một phép đo chỉ biết đếm cái xấu là một phép đo luôn báo động: nó không có cách nào nói
+    "hôm nay webhook chạy tốt".
+  */
+  const DU = "PKE-TRUTH-NOGAP";
+  await applyVtpTracking(track(DU, 501, "Thành công - Phát thành công", "2026-09-12T08:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const csvDu = [head, `1,${DU},REFN,01/09/2026 12:00:00,Giao thành công,499000,17000,12/09/2026 15:00:00`].join("\n");
+  await runVtpDataFileImport([{ filename: "VTP_khong_hut.csv", base64: Buffer.from(csvDu, "utf8").toString("base64") }], "test:vtp-truth");
+  const duShip = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, DU) });
+  assert.equal(
+    (await db.select().from(schema.vtpWebhookGaps).where(eq(schema.vtpWebhookGaps.shipmentId, duShip!.id))).length,
+    0,
+    "ERP đã biết đúng mốc ấy rồi ⇒ KHÔNG được ghi một lần rơi nào",
+  );
+
   console.log(
     `✓ VTP là nguồn sự thật: ${health.unknownStatuses.length} trạng thái chưa dịch được vào sổ (không bị nuốt) · lời khai thô theo mốc ĐVVC · ` +
-      `nhịp đối chiếu theo độ nóng · chạy thử không ghi một dòng nào · nhật ký ${nk.entries.length} mốc, bốn chiều tách rời`,
+      `nhịp đối chiếu theo độ nóng · chạy thử không ghi một dòng nào · nhật ký ${nk.entries.length} mốc, bốn chiều tách rời · ` +
+      `khoảng hụt webhook đo được và không đếm hai lần`,
   );
 }
