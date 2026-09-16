@@ -860,8 +860,13 @@ jobs:
 
                 echo ""
                 echo "── ĐỌC LẠI TỪ BẢN ĐANG CHẠY (không phải từ thứ vừa gõ) ──"
-                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
-                  psql -U erp -d erp -At -c "select 'nấc quyền hạn: ' || mode from ai_agents where key = 'sales';"
+                # In KẾT QUẢ PHÉP TÍNH, không chỉ ô dữ liệu. Bản trước chỉ hỏi cột `ai_agents.mode`
+                # bằng psql: cột ghi COPILOT, mọi người tin là đã bật, trong khi `effectiveMode()`
+                # còn đi qua một ghi đè ở `settings` và một TRẦN trong hằng số rồi cho ra SHADOW.
+                # Script dưới in cả chuỗi suy luận và THOÁT KHÁC 0 nếu hai thứ lệch nhau.
+                fetch_staging_script ai-effective-mode.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-effective-mode.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-effective-mode.ts
                 docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
                   psql -U erp -d erp -At -c "select 'page thí điểm: ' || coalesce(value, '(chưa khai)') from settings where key = 'ai.copilotPages';"
                 docker exec vnx-ai-staging-app sh -lc 'echo "MÁY tự gửi   : ${AI_ALLOW_AUTO_SEND:-(chưa đặt)}"; echo "NGƯỜI bấm gửi: ${AI_ALLOW_HUMAN_APPROVED_SEND:-(chưa đặt)}"; echo "tạo đơn      : ${AI_ALLOW_ORDER_CREATE:-(chưa đặt)}"'
@@ -935,6 +940,10 @@ jobs:
                 echo "── ĐỌC LẠI TỪ BẢN ĐANG CHẠY (không phải từ thứ vừa gõ) ──"
                 docker ps -a --filter 'name=vnx-ai-staging-ingest' --format '  {{.Names}}\t{{.Status}}' || echo "  (chưa có container bộ nạp)"
                 docker exec vnx-ai-staging-app sh -lc 'echo "  bộ nạp sống  : ${AI_LIVE_INGEST_ENABLED:-(chưa đặt)}"; echo "  nhịp         : ${AI_LIVE_INGEST_INTERVAL_SECONDS:-45}s"; echo "  MÁY tự gửi   : ${AI_ALLOW_AUTO_SEND:-(chưa đặt)}"; echo "  NGƯỜI bấm gửi: ${AI_ALLOW_HUMAN_APPROVED_SEND:-(chưa đặt)}"; echo "  tạo đơn      : ${AI_ALLOW_ORDER_CREATE:-(chưa đặt)}"'
+                echo ""
+                fetch_staging_script ai-effective-mode.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-effective-mode.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-effective-mode.ts
                 echo ""
                 echo "── MỐC ĐỌC TRONG CSDL (chứng cứ vòng nào đã chạy) ──"
                 docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T db \
