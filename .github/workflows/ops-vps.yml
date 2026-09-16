@@ -55,6 +55,7 @@ on:
           - phone-probe         # dò API Pancake có trả lịch sử SĐT toàn hệ thống không (nhập SĐT ở ô "arg")
           - vtp-probe           # dò API liệt kê vận đơn Viettel Post (đối tác + cổng web) với token hiện có (arg: mã vận đơn)
           - vtp-capability      # tài khoản API đọc được vận đơn nào: dò một mẫu rồi xếp loại (MẶC ĐỊNH CHẠY THỬ; arg "--limit=30 --all --apply")
+          - vtp-import-preview  # CHẠY THỬ đọc một tệp Viettel Post đã lưu trên dữ liệu thật — chỉ đọc, không ghi vận đơn (arg: phần tên tệp)
           - vtp-web-probe       # đọc bundle JS của viettelpost.vn để tìm endpoint API trang Quản lý vận đơn
           - returns-hmt         # đối soát sổ hàng hoàn viết tay (HMT) với ERP — đọc bản TẢI LÊN QUA ERP (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
@@ -406,6 +407,11 @@ jobs:
                 # luôn dùng bản script mới nhất trên GitHub, không cần build lại image
                 fetch_script vtp-debug.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-debug.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-debug.ts "$ARG" ;;
+              vtp-import-preview)
+                # CHỈ ĐỌC với shipments / shipment_events: gọi đúng hàm mà màn hình xem trước dùng.
+                # Dòng duy nhất được tạo là một bản ghi vtp_import_batches ở chế độ PREVIEW.
+                fetch_script vtp-import-preview.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-import-preview.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-import-preview.ts "$ARG" ;;
               vtp-capability)
                 # Bộ đối chiếu định kỳ CỐ Ý không hỏi lại vận đơn đã kết luận WEBHOOK_ONLY, nên nó
                 # không bao giờ phát hiện được ngày tài khoản API bắt đầu nhìn thấy chúng. Đây là
