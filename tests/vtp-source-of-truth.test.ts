@@ -225,6 +225,41 @@ export async function testVtpSourceOfTruth(db: Db) {
   const xemLai = await previewVtpOrderListFile(tep);
   assert.ok(xemLai.previouslyAppliedAt instanceof Date, "tệp đã ghi rồi thì màn hình xem trước phải nói ra, không để người dùng ghi mù lần nữa");
 
+  /*
+    ═══ XEM TRƯỚC KHÔNG ĐƯỢC HỨA NHIỀU HƠN THỨ SẼ XẢY RA ═══
+
+    Đo trên production 16/09/2026: chạy thử lại đúng tệp VỪA ĐƯỢC GHI bốn phút trước vẫn báo
+    "18 dòng sẽ cập nhật", trong khi đường ghi bỏ qua cả 18 vì sự kiện đã nằm sẵn trong lịch sử.
+    Bộ chống trùng của màn hình xem trước lúc đó chỉ nhìn TRONG CÙNG MỘT TỆP nên nó mù với mọi
+    lần nhập trước đó.
+
+    Một màn hình xem trước hứa nhiều hơn thứ sẽ xảy ra phá đúng công dụng của chính nó: người dùng
+    bấm "Ghi vào ERP", thấy con số khác, và lần sau thôi đọc nó.
+  */
+  assert.equal(xemLai.counts.NEWER, 0, "tệp đã ghi rồi thì KHÔNG còn dòng nào 'sẽ cập nhật' — đường ghi sẽ bỏ qua chúng vì đã trùng");
+  assert.ok(xemLai.counts.SAME > 0, "những dòng đã ghi phải được gọi tên là 'giống ERP', không phải im lặng biến mất");
+  assert.equal(
+    xemLai.counts.NEWER + xemLai.counts.OLDER + xemLai.counts.SAME + xemLai.counts.UNMATCHED + xemLai.counts.UNKNOWN_STATUS + xemLai.counts.AMBIGUOUS + xemLai.counts.INVALID + xemLai.counts.DUPLICATE_ROW,
+    xemLai.rows,
+    "mọi dòng phải được xếp đúng một loại — không dòng nào rơi ra ngoài bảng tổng hợp",
+  );
+
+  /*
+    CÙNG MỐC, KHÁC CHẶNG ⇒ CẦN NGƯỜI QUYẾT, không phải "mới hơn".
+
+    `applyVtpOrderList` gọi trường hợp này là `sameTimeConflict` và KHÔNG ghi. Trước bản sửa, màn
+    hình xem trước đọc nó thành "mới hơn ERP" — tức hứa một cập nhật mà đường ghi sẽ từ chối.
+  */
+  const XUNG_DOT = "PKE-TRUTH-SAMETIME";
+  await applyVtpTracking(track(XUNG_DOT, 300, "Đóng tải - vận chuyển đi", "2026-09-14T06:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  // 13:00 GIỜ VIỆT NAM = 06:00Z — đúng bằng mốc ĐVVC mà ERP đang giữ. Tệp Viettel Post ghi giờ VN
+  // và `parseVtpListTimestamp` trừ 7 giờ; gõ thẳng 06:00 vào đây là lệch đúng 7 tiếng và bài kiểm
+  // lặng lẽ đo một tình huống khác (tôi đã mắc đúng lỗi này một lần).
+  const csvXungDot = [head, `1,${XUNG_DOT},REFX,01/09/2026 12:00:00,Giao thành công,499000,17000,14/09/2026 13:00:00`].join("\n");
+  const xemXungDot = await previewVtpOrderListFile({ filename: "VTP_xung_dot.csv", base64: Buffer.from(csvXungDot, "utf8").toString("base64") });
+  assert.equal(xemXungDot.counts.AMBIGUOUS, 1, "cùng mốc ĐVVC nhưng khác chặng phải là 'cần người quyết', không được hứa là sẽ cập nhật");
+  assert.equal(xemXungDot.counts.NEWER, 0);
+
   // ═════════ 7. NHẬT KÝ MỘT VẬN ĐƠN: BỐN CHIỀU TÁCH RỜI ═════════
   const nk = await getShipmentTimeline(laShip.id);
   assert.ok(nk.entries.length > 0);

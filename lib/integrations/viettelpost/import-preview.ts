@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { vnStartOfDay } from "@/lib/format";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
@@ -70,7 +70,28 @@ function rowOccurredAt(m: OrderListMatch): Date | null {
   return at && Number.isFinite(at.getTime()) ? at : null;
 }
 
-function verdictOf(m: OrderListMatch, seen: Set<string>): { verdict: PreviewVerdict; note: string } {
+/** Khoá của MỘT sự việc trong lịch sử: cùng khoá mà `applyVtpOrderList` dùng để chống trùng. */
+function eventKey(shipmentId: string, statusText: string, at: Date): string {
+  return `${shipmentId}|${statusText}|${at.getTime()}`;
+}
+
+/**
+ * Phán quyết cho MỘT dòng tệp.
+ *
+ * ─── PHẢI NÓI ĐÚNG THỨ `applyVtpOrderList` SẼ LÀM, KHÔNG PHẢI THỨ NGHE HỢP LÝ ───
+ *
+ * Đo trên production 16/09/2026: chạy thử lại đúng tệp VỪA ĐƯỢC GHI bốn phút trước vẫn báo
+ * "18 dòng sẽ cập nhật", trong khi đường ghi thật sẽ bỏ qua cả 18 vì sự kiện đã nằm sẵn trong lịch
+ * sử. Một màn hình xem trước hứa nhiều hơn thứ sẽ xảy ra là màn hình phá đúng công dụng của nó —
+ * người dùng bấm "Ghi vào ERP" rồi thấy con số khác, và lần sau họ thôi đọc nó.
+ *
+ * Hai nguồn sai đã bịt:
+ *  · `daCo` — sự kiện `VTP_IMPORT` ĐÃ CÓ trong lịch sử cho đúng (vận đơn, trạng thái, mốc). Trước
+ *    đây bộ `seen` chỉ chống trùng TRONG CÙNG MỘT TỆP, nên nó mù với mọi lần nhập trước đó.
+ *  · CÙNG MỐC nhưng KHÁC CHẶNG — `applyVtpOrderList` gọi đó là `sameTimeConflict` và KHÔNG ghi;
+ *    ở đây trước đây nó bị đọc thành "mới hơn ERP".
+ */
+function verdictOf(m: OrderListMatch, seen: Set<string>, daCo: Set<string>): { verdict: PreviewVerdict; note: string } {
   const at = rowOccurredAt(m);
   if (!at) return { verdict: "INVALID", note: "Không đọc được ngày trạng thái — dòng này sẽ bị bỏ qua" };
   if (m.matchIssue) return { verdict: "AMBIGUOUS", note: m.matchIssue };
@@ -78,9 +99,11 @@ function verdictOf(m: OrderListMatch, seen: Set<string>): { verdict: PreviewVerd
   if (m.mapped.stage === "UNKNOWN") {
     return { verdict: "UNKNOWN_STATUS", note: `Chữ của ĐVVC được ghi vào sổ trạng thái để bổ sung bảng mã; trạng thái vận đơn giữ nguyên` };
   }
-  const key = `${m.shipmentId}|${m.statusText}|${at.getTime()}`;
+  const key = eventKey(m.shipmentId, m.statusText, at);
   if (seen.has(key)) return { verdict: "DUPLICATE_ROW", note: "Cùng vận đơn, cùng trạng thái, cùng mốc với một dòng khác trong tệp" };
   seen.add(key);
+  // ĐÃ NHẬP RỒI: đường ghi nhận ra là trùng và bỏ qua. Nói đúng điều đó thay vì hứa một cập nhật.
+  if (daCo.has(key)) return { verdict: "SAME", note: "Lịch sử đã có đúng chứng từ này (một lần nhập trước) — ghi lại không đổi gì" };
   const erpAt = m.currentStatusDate;
   if (erpAt && erpAt.getTime() > at.getTime()) {
     return { verdict: "OLDER", note: `ERP đang giữ chứng từ muộn hơn (${SHIPMENT_STAGE_LABEL[(m.currentStage ?? "UNKNOWN") as ShipmentStage]}) — không hạ trạng thái` };
@@ -89,6 +112,14 @@ function verdictOf(m: OrderListMatch, seen: Set<string>): { verdict: PreviewVerd
     return { verdict: "SAME", note: "Đã có đúng chứng từ này trong lịch sử" };
   }
   if (m.currentStage === m.mapped.stage) return { verdict: "SAME", note: "Trạng thái đã trùng; chỉ làm mới tiền / cước nếu tệp có số khác" };
+  // CÙNG MỐC, KHÁC CHẶNG: hai lời khai về CÙNG MỘT khoảnh khắc mà không khớp nhau. Đường ghi dừng
+  // lại cho người đối chiếu (`sameTimeConflict`), nên ở đây cũng phải là "cần người quyết".
+  if (erpAt && erpAt.getTime() === at.getTime()) {
+    return {
+      verdict: "AMBIGUOUS",
+      note: `Cùng mốc ${at.toISOString()} nhưng ERP đang giữ ${SHIPMENT_STAGE_LABEL[(m.currentStage ?? "UNKNOWN") as ShipmentStage]} — hai lời khai về cùng một khoảnh khắc, đường ghi sẽ dừng cho người đối chiếu`,
+    };
+  }
   return { verdict: "NEWER", note: `${SHIPMENT_STAGE_LABEL[(m.currentStage ?? "UNKNOWN") as ShipmentStage]} → ${SHIPMENT_STAGE_LABEL[m.mapped.stage]}` };
 }
 
@@ -125,12 +156,29 @@ export async function previewVtpOrderListFile(file: { filename: string; base64: 
   const db = await getDb();
   const merged = mergeDetectedOrderLists([detected]);
   const matches = await matchVtpOrderList(merged);
+
+  /*
+    LỊCH SỬ ĐÃ CÓ GÌ RỒI — MỘT CÂU HỎI, KHÔNG PHẢI MỘT CÂU CHO MỖI DÒNG.
+
+    Nạp trước các sự kiện `VTP_IMPORT` của đúng những vận đơn tệp này chạm tới, rồi so trong bộ
+    nhớ. Với tệp 1.198 dòng đó là MỘT truy vấn thay vì 1.198 truy vấn.
+  */
+  const shipmentIds = [...new Set(matches.map((m) => m.shipmentId).filter((v): v is string => Boolean(v)))];
+  const daCo = new Set<string>();
+  if (shipmentIds.length) {
+    const rows = await db
+      .select({ shipmentId: schema.shipmentEvents.shipmentId, status: schema.shipmentEvents.status, occurredAt: schema.shipmentEvents.occurredAt })
+      .from(schema.shipmentEvents)
+      .where(and(eq(schema.shipmentEvents.source, "VTP_IMPORT"), inArray(schema.shipmentEvents.shipmentId, shipmentIds)));
+    for (const r of rows) if (r.occurredAt) daCo.add(eventKey(r.shipmentId, r.status, r.occurredAt));
+  }
+
   const counts = { ...RONG };
   const seen = new Set<string>();
   const sample: PreviewRow[] = [];
   // Xếp theo mốc để mẫu hiện ra đúng thứ tự mà đường ghi sẽ đi qua.
   for (const m of matches) {
-    const { verdict, note } = verdictOf(m, seen);
+    const { verdict, note } = verdictOf(m, seen, daCo);
     counts[verdict] += 1;
     // Mẫu ưu tiên những dòng THAY ĐỔI ĐƯỢC GÌ ĐÓ hoặc cần người quyết; dòng "giống ERP" chỉ để
     // lấp chỗ trống. Một bảng xem trước toàn dòng "không đổi gì" là bảng không ai đọc tới cuối.
