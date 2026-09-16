@@ -105,3 +105,38 @@ select m.sender_type, m.from_page, count(*)::int as so_tin
 from sales_messages m join sales_conversations c on c.id = m.conversation_id
 where c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
 group by 1, 2 order by 3 desc;
+
+\echo '── 12. PAGE_HUMAN CÓ THẬT SỰ LÀ NGƯỜI KHÔNG — ba dấu hiệu, không in tên ai ──'
+-- Kho mã này PUBLIC và log Actions đọc được, nên KHÔNG in tên người gửi hay tên khách.
+-- Ba con số dưới đây đủ để phân biệt người thật với máy mà không lộ một danh tính nào:
+--   · bao nhiêu TÀI KHOẢN khác nhau đang gửi — một tài khoản duy nhất cho 339 tin là dấu hiệu máy;
+--   · bao nhiêu tin nằm TRƯỚC tin đầu tiên của khách — nhân viên không chào trước khi khách nhắn;
+--   · bao nhiêu tin là bản sao y hệt của một tin khác — người không gõ lại đúng từng chữ.
+with h as (
+  select m.id, m.conversation_id, m.from_name, m.sent_at,
+         lower(btrim(m.text)) as van_ban,
+         (select min(sent_at) from sales_messages k
+            where k.conversation_id = m.conversation_id and k.from_page = false and k.sender_type = 'CUSTOMER') as khach_dau
+  from sales_messages m join sales_conversations c on c.id = m.conversation_id
+  where m.sender_type = 'PAGE_HUMAN'
+    and c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
+), lap as (
+  select van_ban, count(*)::int as n, count(distinct conversation_id)::int as so_hoi_thoai
+  from h where van_ban <> '' group by 1 having count(distinct conversation_id) >= 3
+)
+select
+  (select count(*)::int from h)                                                         as tong_tin_page_human,
+  (select count(distinct from_name)::int from h)                                        as so_tai_khoan_gui,
+  (select count(*)::int from h where khach_dau is not null and sent_at < khach_dau)     as gui_TRUOC_khi_khach_nhan,
+  (select coalesce(sum(n), 0)::int from lap)                                            as tin_lap_lai_tren_3_hoi_thoai,
+  (select count(*)::int from lap)                                                       as so_mau_cau_bi_lap;
+
+\echo '── 13. Mẫu câu bị lặp nhiều nhất (cắt 60 ký tự; câu lặp qua nhiều hội thoại thì không phải câu riêng của ai) ──'
+select left(lower(btrim(m.text)), 60) as mau_cau,
+       count(*)::int as so_tin,
+       count(distinct m.conversation_id)::int as so_hoi_thoai
+from sales_messages m join sales_conversations c on c.id = m.conversation_id
+where m.sender_type = 'PAGE_HUMAN' and btrim(m.text) <> ''
+  and c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
+group by 1 having count(distinct m.conversation_id) >= 3
+order by 3 desc, 2 desc limit 12;
