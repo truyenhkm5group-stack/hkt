@@ -91,6 +91,11 @@ const ROUTES = [
   // Hàng đợi "VTP cần đối chiếu": quét TOÀN BỘ kiện có mã VTP và chạy sáu vị ngữ trên chúng, nên
   // nó là tuyến nặng nhất của module — và là tuyến duy nhất đọc `vtp_webhook_gaps`.
   "/shipments?view=reconcile",
+  // Báo cáo kết cục ca chăm sóc: quét toàn bộ ca trong kỳ và chạy phép suy kết cục trên từng ca.
+  // Hai mốc lọc kỳ đứng trên HAI TẬP CA khác nhau nên phải phủ cả hai — một tuyến xanh không nói
+  // gì về tuyến kia.
+  "/shipments?view=report&basis=CASE_OPENED_AT",
+  "/shipments?view=report&basis=CASE_RESOLVED_AT",
   "/import-vtp",
   "/cod",
   "/cod?recon=unproven",
