@@ -348,7 +348,14 @@ export async function testCareOs(db: Db) {
     const kyCoBien = ky(gio(48), new Date());
     const tongKy = await getRescueSummary(kyCoBien);
     assert.ok(tongKy.pending >= 1, `7★ · kỳ có biên phải thấy ca treo (${tongKy.pending}) — bản trước lọc theo outcome_at nên luôn 0`);
-    const kyQuaKhu = ky(gio(400), gio(300));
+    // Kỳ "quá khứ" phải neo vào CHÍNH DỮ LIỆU, không neo vào `Date.now()`. Bản trước viết
+    // `ky(gio(400), gio(300))`: cửa sổ ấy TRƯỢT theo ngày thật, nên tới 16/09/2026 nó trùm lên
+    // đợt care mà bài nhập vận đơn VTP mở cho `rr-9002` từ mốc CỐ ĐỊNH 04/09/2026 — bài đỏ vì
+    // lịch sang ngày, không vì mã sai. Lấy mốc mở SỚM NHẤT rồi lùi về trước là điều kiện đúng
+    // với câu đang khẳng định và không bao giờ hết hạn.
+    const [somNhat] = await db.select({ t: sql<string | null>`min(${schema.shipmentCare.openedAt})` }).from(schema.shipmentCare);
+    const truocMoiCa = somNhat?.t ? new Date(new Date(somNhat.t).getTime() - 3600_000) : gio(300);
+    const kyQuaKhu = ky(new Date(truocMoiCa.getTime() - 100 * 3600_000), truocMoiCa);
     const tongCu = await getRescueSummary(kyQuaKhu);
     assert.equal(tongCu.pending, 0, "7★ · kỳ kết thúc trước khi ca mở thì ca không thuộc kỳ đó");
     assert.equal(tongCu.finished, 0);
