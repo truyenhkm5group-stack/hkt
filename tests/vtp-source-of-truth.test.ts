@@ -11,6 +11,10 @@ import type { VtpTrackingRecord } from "@/lib/integrations/viettelpost/client";
 import { getShipmentTimeline } from "@/lib/queries/shipment-timeline";
 import { viettelPostHealth } from "@/lib/queries/integrations";
 import { measureWebhookGap, webhookMatchRate, gapSeverity, WEBHOOK_GAP_MIN_MINUTES, WEBHOOK_MATCH_MIN_SAMPLE } from "@/lib/constants/webhook-gap";
+import { sanitizeFreshness, effectiveThresholdFor, classifyFreshnessWith, FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
+import { getVtpReconcileQueue } from "@/lib/queries/vtp-reconcile-queue";
+import { vtpWebhookHealth } from "@/lib/queries/vtp-webhook-health";
+import type { ReconcileReason } from "@/lib/constants/vtp-reconcile-queue";
 import { clearMemo } from "@/lib/cache";
 
 /**
@@ -480,9 +484,160 @@ export async function testVtpSourceOfTruth(db: Db) {
     "ERP đã biết đúng mốc ấy rồi ⇒ KHÔNG được ghi một lần rơi nào",
   );
 
+  /*
+    ═════════ 12. NGƯỠNG IM LẶNG SỬA ĐƯỢC — VÀ BỘ GHI ĐÈ HỎNG KHÔNG ĐƯỢC LÀM SẬP GÌ ═════════
+
+    Ngưỡng dựng từ phân bố 11/09/2026, nhưng phân bố đổi theo mùa. Một ngưỡng không sửa được sẽ
+    hoặc chôn hàng đợi dưới hàng trăm kiện không đáng lo, hoặc im đúng lúc cần hét.
+  */
+  assert.deepEqual(sanitizeFreshness(null), {}, "đọc cấu hình phải LUÔN thành công — dòng rác không được làm sập hàng đợi của cả shop");
+  assert.deepEqual(sanitizeFreshness({ KHONG_CO_CHANG_NAY: { aging: 1, stale: 2, critical: 3 } }), {}, "khoá lạ là gõ nhầm, không phải một chặng mới");
+  assert.deepEqual(
+    sanitizeFreshness({ OUT_FOR_DELIVERY: { aging: 40, stale: 20, critical: 10 } }),
+    {},
+    "ba mốc ĐẢO THỨ TỰ ⇒ bỏ NGUYÊN CẢ CHẶNG: sửa hộ một ô là đoán ý người nhập, và con số đoán ra sẽ đứng trên màn hình như thể có người chọn nó",
+  );
+  assert.deepEqual(
+    sanitizeFreshness({ OUT_FOR_DELIVERY: { aging: 4, stale: 12, critical: 24 }, RETURNING: { aging: 0, stale: 2, critical: 3 } }),
+    { OUT_FOR_DELIVERY: { aging: 4, stale: 12, critical: 24 } },
+    "ghi đè hỏng của một chặng KHÔNG được kéo theo chặng khác — mất một ghi đè còn hơn mất cả màn hình",
+  );
+  const ghiDe = sanitizeFreshness({ OUT_FOR_DELIVERY: { aging: 4, stale: 12, critical: 24 } });
+  assert.equal(effectiveThresholdFor("OUT_FOR_DELIVERY", ghiDe).critical, 24, "ghi đè của chủ shop phải thắng mặc định trong mã");
+  assert.equal(
+    effectiveThresholdFor("OUT_FOR_DELIVERY", ghiDe).why,
+    FRESHNESS_BY_STAGE.OUT_FOR_DELIVERY.why,
+    "câu giải thích VÌ SAO chặng này cần ngưỡng riêng vẫn lấy từ mã — lý lẽ không đổi khi ai đó chỉnh con số",
+  );
+  assert.equal(effectiveThresholdFor("IN_TRANSIT", ghiDe).critical, FRESHNESS_BY_STAGE.IN_TRANSIT.critical, "chặng không ai sửa vẫn dùng mặc định — bảng ghi đè là THƯA, không phải bản sao đầy đủ");
+  assert.equal(classifyFreshnessWith(30, "OUT_FOR_DELIVERY", ghiDe), "CRITICAL_STALE", "hạ ngưỡng xuống 24h thì kiện im 30h thành nghiêm trọng");
+  assert.equal(classifyFreshnessWith(30, "OUT_FOR_DELIVERY", {}), "STALE", "…và vẫn chỉ là 'cũ' với bộ mặc định — cùng một luật, khác bộ số");
+  assert.equal(classifyFreshnessWith(null, "OUT_FOR_DELIVERY", ghiDe), "CRITICAL_STALE", "KHÔNG có tin tức gì là tình huống xấu nhất, không bao giờ được xếp là 'mới'");
+
+  /*
+    ═════════ 13. HÀNG ĐỢI "VTP CẦN ĐỐI CHIẾU" ═════════
+
+    Câu hỏi của hàng đợi này KHÁC HẲN câu hỏi của hàng đợi care: care hỏi "kiện này có cần gọi
+    khách không", còn đây hỏi "ERP có đang tin một điều không còn đúng không". Và nó dựng hoàn toàn
+    từ dữ liệu ĐÃ CÓ — không một lượt gọi API nào, vì nó tồn tại chính vì ERP không hỏi được.
+  */
+  clearMemo();
+  const hangDoi = await getVtpReconcileQueue();
+
+  /*
+    Kiện mang trạng thái ERP CHƯA dịch được phải có mặt, kèm ĐÚNG lý do đó.
+
+    Dùng `PKE-TRUTH-FILE2` (nhận câu lạ qua đường NHẬP TỆP ở khối 6) chứ không dùng `laShip`: kiện
+    kia đã nhận một câu HIỂU ĐƯỢC đến sau nên cờ của nó đã chuyển lại thành "đã dịch được" — đúng
+    như khối 1 khoá. Một kiện ERP đã hiểu lại thì KHÔNG còn việc gì để người trực đi tra.
+  */
+  const laFile = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, KHAC) });
+  const dongLa = hangDoi.rows.find((r) => r.id === laFile!.id);
+  assert.ok(dongLa, "kiện ĐVVC vừa nói một câu ERP chưa dịch được PHẢI vào hàng đợi đối chiếu — trước bản này nó không hiện ở đâu cả");
+  assert.ok(dongLa.reasons.includes("UNMAPPED_STATUS"), "và phải nói rõ vì sao nó ở đây");
+  assert.ok(
+    !hangDoi.rows.some((r) => r.id === laShip.id && r.reasons.includes("UNMAPPED_STATUS")),
+    "kiện đã nhận được một câu HIỂU ĐƯỢC đến sau thì thôi là việc — hàng đợi không được giữ lại một lý do đã hết",
+  );
+
+  /*
+    MỘT KIỆN NHIỀU LÝ DO LÀ MỘT DÒNG, KHÔNG PHẢI NHIỀU DÒNG.
+
+    Người trực mở viettelpost.vn đúng MỘT lần cho một vận đơn. Tách thành nhiều dòng là bắt họ làm
+    cùng một việc ba lần, và làm mọi con số đếm việc to lên gấp bội mà không có thêm việc nào.
+  */
+  for (const r of hangDoi.rows) {
+    assert.ok(r.reasons.length > 0, "không dòng nào được vào hàng đợi mà không nói được vì sao");
+    assert.equal(new Set(hangDoi.rows.filter((x) => x.id === r.id)).size, 1, "mỗi vận đơn chỉ một dòng dù mang nhiều lý do");
+    assert.equal(r.topReason, r.reasons[0], "lý do MẠNH NHẤT phải đứng đầu — nó quyết định chỗ đứng trong hàng đợi");
+  }
+
+  /*
+    BA LÝ DO CHỈ CÓ NGHĨA VỚI KIỆN ĐANG CHẠY.
+
+    "Im lặng" với một kiện đã giao xong là chuyện hoàn toàn bình thường — kiện xong thì ĐVVC còn
+    gửi thêm mốc làm gì. Đưa nó vào hàng đợi là bắt người trực tra một thứ không còn đổi được nữa,
+    và với vài nghìn kiện đã giao thì hàng đợi chết ngay ngày đầu.
+
+    Ba lý do CÒN LẠI vẫn là việc dù kiện đã chốt: chúng nói rằng ERP đang KHÔNG HIỂU một câu ĐVVC
+    đã nói, và điều đó không tự hết theo thời gian.
+  */
+  const CHOT = ["DELIVERED", "RETURNED", "CANCELLED"];
+  const CHI_KHI_DANG_CHAY: ReconcileReason[] = ["STALE_NO_NEWS", "CARE_WITHOUT_MOVEMENT"];
+  for (const r of hangDoi.rows) {
+    if (!CHOT.includes(r.stage)) continue;
+    for (const ly of CHI_KHI_DANG_CHAY) {
+      assert.ok(!r.reasons.includes(ly), `kiện đã chốt (${r.stage}) KHÔNG được mang lý do "${ly}" — ${r.id}`);
+    }
+  }
+  assert.ok(hangDoi.rows.some((r) => r.id === gocShip!.id && r.reasons.includes("STALE_NO_NEWS")), "kiện chưa chốt mà im lặng quá ngưỡng của chặng phải vào hàng đợi");
+  assert.ok(!hangDoi.rows.some((r) => r.id === legShip.id), "vận đơn chiều hoàn đã phát thành công về shop, ERP hiểu đúng câu ĐVVC nói ⇒ không có gì để tra lại");
+
+  /*
+    MÂU THUẪN ĐI CẢ HAI CHIỀU.
+
+    Luật 48: trạng thái con "đã giao" mà cờ kết thúc còn `false` là một MÂU THUẪN trong dữ liệu của
+    chính ERP — nếu không gọi tên nó thì kiện nằm mãi ở hàng đợi đối chiếu và không bao giờ rời ra.
+  */
+  const MAU_THUAN = "PKE-TRUTH-MAUTHUAN";
+  await applyVtpTracking(track(MAU_THUAN, 300, "Đóng tải - vận chuyển đi", "2026-09-15T02:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const mtShip = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, MAU_THUAN) });
+  await db.update(schema.shipments).set({ isFinal: true }).where(eq(schema.shipments.id, mtShip!.id));
+  clearMemo();
+  const hangDoi2 = await getVtpReconcileQueue();
+  const dongMT = hangDoi2.rows.find((r) => r.id === mtShip!.id);
+  assert.ok(dongMT, "cờ 'đã kết thúc' bật mà chặng vẫn đang chạy PHẢI thành việc");
+  assert.ok(dongMT.reasons.includes("CONTRADICTION"), "…và phải được gọi đúng tên là MÂU THUẪN, không phải 'im lặng'");
+  await db.update(schema.shipments).set({ isFinal: false }).where(eq(schema.shipments.id, mtShip!.id));
+
+  // Số giờ im lặng là CHƯA BIẾT khi chưa có mốc ĐVVC nào — không phải 0 giờ.
+  for (const r of hangDoi.rows) {
+    assert.ok(r.hoursSilent === null || Number.isFinite(r.hoursSilent), "số giờ im lặng phải là một số thật hoặc CHƯA BIẾT, không bao giờ NaN");
+  }
+  assert.equal(
+    hangDoi.counts.UNMAPPED_STATUS >= 1,
+    true,
+    "bộ đếm theo lý do phải khớp với thứ thật sự có trong danh sách",
+  );
+  assert.equal(hangDoi.truncated, Math.max(0, hangDoi.total - hangDoi.rows.length), "số kiện bị cắt khỏi danh sách phải in ra được, không biến mất lặng lẽ");
+
+  /*
+    ═════════ 14. SỨC KHOẺ WEBHOOK: BỐN CÂU HỎI, VÀ "CHƯA BIẾT" LÀ MỘT CÂU TRẢ LỜI ═════════
+
+    Webhook là nguồn tin duy nhất cho 2.138/2.151 vận đơn. Một ô "OK" gộp mọi thứ thì không ai sửa
+    được gì khi nó hỏng, vì bốn loại hỏng sửa ở bốn chỗ khác nhau.
+  */
+  clearMemo();
+  const suc = await vtpWebhookHealth();
+  assert.ok(Number.isFinite(suc.last15m) && Number.isFinite(suc.last1h) && Number.isFinite(suc.last24h), "ba mốc thời gian phải đếm được, không NaN");
+
+  /*
+    NỀN SO SÁNH CHƯA ĐỦ ⇒ `UNKNOWN`, KHÔNG PHẢI `HEALTHY`.
+
+    Đây là điểm dễ làm sai nhất và cũng tai hại nhất: không có nền để so mà kết luận "khoẻ" là lấy
+    sự thiếu hiểu biết của mình làm bằng chứng rằng không có gì đáng lo — đúng thứ luật 48 cấm.
+  */
+  assert.equal(suc.baseline1h, null, "bài kiểm không gieo 14 ngày lịch sử webhook nên nền phải là CHƯA BIẾT");
+  assert.equal(suc.liveness, "UNKNOWN", "chưa đủ nền thì kết luận là CHƯA BIẾT, KHÔNG được là 'khoẻ'");
+  assert.ok(suc.livenessNote.includes("CHƯA BIẾT"), "và màn hình phải nói thẳng ra như vậy");
+
+  /*
+    TỶ LỆ KHỚP KHÔNG ĐƯỢC PHÁT BIỂU KHI MẪU NHỎ.
+
+    Khối 11 đã đo một khoảng hụt THẬT qua đường nhập tệp, nên mẫu ở đây khác 0 — nhưng vẫn dưới
+    ngưỡng 30. "1/2 hụt" không phải "webhook rơi 50%".
+  */
+  assert.equal(suc.matchRate, null, "mẫu dưới ngưỡng ⇒ CHƯA ĐỦ DỮ LIỆU, không được làm tròn thành một con số");
+  assert.ok(suc.matchSample > 0, "…nhưng mẫu đã bắt đầu đếm: lần nhập tệp ở khối 11 có vào sổ");
+  assert.ok(suc.gaps30d >= 1, "khoảng hụt đo được ở khối 11 phải hiện ở bảng sức khoẻ, không nằm im trong một bảng riêng");
+
+  // Mẫu số 0 ⇒ `null`, không phải 0%: chưa nhận gói nào thì tỷ lệ gửi lại là CHƯA BIẾT.
+  assert.equal(suc.duplicateRate24h, suc.last24h > 0 ? suc.duplicate24h / suc.last24h : null, "tỷ lệ gửi lại phải khớp với hai con số nó dựng từ, và mẫu số 0 thì trả null");
+
   console.log(
     `✓ VTP là nguồn sự thật: ${health.unknownStatuses.length} trạng thái chưa dịch được vào sổ (không bị nuốt) · lời khai thô theo mốc ĐVVC · ` +
       `nhịp đối chiếu theo độ nóng · chạy thử không ghi một dòng nào · nhật ký ${nk.entries.length} mốc, bốn chiều tách rời · ` +
-      `khoảng hụt webhook đo được và không đếm hai lần`,
+      `khoảng hụt webhook đo được và không đếm hai lần · hàng đợi đối chiếu ${hangDoi.rows.length}/${hangDoi.total} kiện, mỗi kiện một dòng · ` +
+      `sức khoẻ webhook: nền chưa đủ ⇒ CHƯA BIẾT, không tự nhận là khoẻ`,
   );
 }

@@ -18,6 +18,9 @@ import { JOB_RUN_KEYS, SYNC_SOURCE_LABEL } from "@/lib/constants/sync";
 import { aiDisabledReason, MODEL_BY_TIER, modelFor, resolveProviderName } from "@/lib/ai/router";
 import { env, integrationStatus } from "@/lib/env";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
+import { VtpCapabilityCheck } from "@/app/(dashboard)/integrations/vtp-capability-check";
+import { VtpWebhookHealthPanel } from "@/app/(dashboard)/integrations/vtp-webhook-health-panel";
+import { vtpWebhookHealth } from "@/lib/queries/vtp-webhook-health";
 import { getIntegrationTokenInfo, listRecentWebhooks, listSyncRuns, SYNC_RUN_SORTABLE, syncRunFacets, viettelPostHealth } from "@/lib/queries/integrations";
 import { HEALTH_LABEL, HEALTH_TONE, getIntegrationHealth } from "@/lib/queries/integration-health";
 import { paramList, parseListParams, type SearchParams } from "@/lib/search-params";
@@ -50,7 +53,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const runParams = parseListParams(raw, { defaultSort: "startedAt", filterKeys: ["source", "status"], sortable: SYNC_RUN_SORTABLE, defaultPeriod: "7d" });
   const webhookFilters = { source: paramList(raw, "whSource"), status: paramList(raw, "whStatus") };
 
-  const [vtpToken, cursor, backfill, runs, runFacets, webhooks, vtpHealth, connectors] = await Promise.all([
+  const [vtpToken, cursor, backfill, runs, runFacets, webhooks, vtpHealth, webhookHealth, connectors] = await Promise.all([
     getIntegrationTokenInfo("viettelpost"),
     getSyncState<{ cursor: string }>("pancake.orders.updated_at.cursor"),
     getSyncState<BackfillState>("pancake.orders.backfill"),
@@ -58,6 +61,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
     syncRunFacets(runParams),
     listRecentWebhooks(webhookFilters, 30),
     viettelPostHealth(),
+    vtpWebhookHealth(),
     getIntegrationHealth(),
   ]);
 
@@ -429,6 +433,22 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             {vtpHealth.unknownStatuses.length > 10 ? <p className="mt-1 text-[11px] text-violet-700/80 dark:text-violet-400/80">… và {vtpHealth.unknownStatuses.length - 10} mã nữa</p> : null}
           </div>
         ) : null}
+
+        {/*
+          ═══ WEBHOOK LÀ NGUỒN TIN DUY NHẤT CHO 2.138/2.151 VẬN ĐƠN ═══
+
+          Nên bốn câu hỏi bên dưới phải trả lời được RIÊNG RẼ, vì mỗi cái là một loại hỏng với một
+          cách sửa khác nhau: có đang nhận không · nhận rồi có đọc được không · có đúng thứ tự
+          không · có rơi gói nào không. Một ô "webhook: OK" gộp cả bốn là một ô không ai sửa được gì.
+        */}
+        <VtpWebhookHealthPanel health={webhookHealth} />
+
+        {/*
+          NÚT KIỂM TRA ĐỨNG NGAY DƯỚI KHỐI SỨC KHOẺ, cố ý: người vừa đọc "đối chiếu API đang hụt"
+          là người cần trả lời ngay "vì credential sai hay vì tài khoản không thấy vận đơn của tôi".
+          Hai thứ đó sửa ở hai chỗ khác nhau.
+        */}
+        <VtpCapabilityCheck />
 
         {vtpHealth.lastPoll?.status === "FAILED" || (vtpHealth.lastPoll?.status === "PARTIAL" && vtpHealth.lastPoll.error) ? (
           <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">

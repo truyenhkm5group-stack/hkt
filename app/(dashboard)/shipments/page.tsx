@@ -4,6 +4,7 @@ import { CareReportSection } from "@/app/(dashboard)/shipments/care-report";
 import { RescueReportSection } from "@/app/(dashboard)/shipments/rescue-report";
 import { ShipmentsTable } from "@/app/(dashboard)/shipments/shipments-table";
 import { CareWorkbenchView } from "@/app/(dashboard)/shipments/workbench";
+import { ReconcilePanel } from "@/app/(dashboard)/shipments/reconcile-panel";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { InfoHint } from "@/components/info-hint";
 import { FileUp } from "lucide-react";
@@ -21,6 +22,11 @@ import { formatNumber, formatVND } from "@/lib/format";
 import { getCareNotePresets, getCareWorkbench } from "@/lib/queries/care-workbench";
 import { listShipments, shipmentFacets, shipmentSummary, SHIPMENT_SORTABLE } from "@/lib/queries/shipments";
 import { productCodesOfShipments, variantIdsOfCodes } from "@/lib/queries/product-code";
+import { getVtpReconcileQueue } from "@/lib/queries/vtp-reconcile-queue";
+import { getFreshnessConfig } from "@/lib/queries/logistics-config";
+import { effectiveThresholdFor, FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
+import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
+import type { ShipmentStage } from "@/db/schema";
 import { parseListParams, resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -38,12 +44,14 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
   if (decision.allow === "NONE") return <ScopeDenied title="Vận đơn" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const viewRaw = typeof raw.view === "string" ? raw.view : "care";
-  const view: CareView | "report" = viewRaw === "report" ? "report" : (CARE_VIEWS as readonly string[]).includes(viewRaw) ? (viewRaw as CareView) : "care";
+  const view: CareView | "report" | "reconcile" =
+    viewRaw === "report" ? "report" : viewRaw === "reconcile" ? "reconcile" : (CARE_VIEWS as readonly string[]).includes(viewRaw) ? (viewRaw as CareView) : "care";
+  const ngoaiCare = view === "all" || view === "report" || view === "reconcile";
 
-  const [wb, staff, presets] = view === "all" || view === "report" ? [null, [], []] : await Promise.all([getCareWorkbench(), assignableUsers(), getCareNotePresets()]);
-  const counts = wb?.counts ?? (view === "all" || view === "report" ? (await getCareWorkbench()).counts : { care: 0, waiting: 0, escalated: 0, done: 0 });
+  const [wb, staff, presets] = ngoaiCare ? [null, [], []] : await Promise.all([getCareWorkbench(), assignableUsers(), getCareNotePresets()]);
+  const counts = wb?.counts ?? (ngoaiCare ? (await getCareWorkbench()).counts : { care: 0, waiting: 0, escalated: 0, done: 0 });
 
-  const tab = (key: CareView | "report", label: string, count?: number) => (
+  const tab = (key: CareView | "report" | "reconcile", label: string, count?: number) => (
     <NavLink
       href={key === "care" ? "/shipments" : `/shipments?view=${key}`}
       className={cn(
@@ -95,8 +103,17 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
           {tab("done", CARE_VIEW_LABEL.done, counts.done)}
           {tab("all", CARE_VIEW_LABEL.all)}
         </div>
-        <InfoHint>{view === "report" ? "Báo cáo hiệu quả care theo kỳ: kết cục kiện, SLA, tiền cứu được, theo nhân viên." : CARE_VIEW_HINT[view]}</InfoHint>
-        <span className="ml-auto">{tab("report", "Hiệu quả care")}</span>
+        <InfoHint>
+          {view === "report"
+            ? "Báo cáo hiệu quả care theo kỳ: kết cục kiện, SLA, tiền cứu được, theo nhân viên."
+            : view === "reconcile"
+              ? "Kiện mà ERP đang có lý do để nghi ngờ chính mình: ĐVVC nói một câu chưa dịch được, webhook đã rơi, dữ liệu tự mâu thuẫn, hoặc im lặng quá ngưỡng của chặng. Câu hỏi ở đây là “ERP có đang tin một điều không còn đúng không”, khác hẳn câu hỏi của hàng đợi care."
+              : CARE_VIEW_HINT[view]}
+        </InfoHint>
+        <span className="ml-auto flex items-center gap-1">
+          {tab("reconcile", "VTP cần đối chiếu")}
+          {tab("report", "Hiệu quả care")}
+        </span>
       </div>
 
       {view === "report" ? (
@@ -114,6 +131,10 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
             <CareReportSection period={resolvePeriod(raw, "30d")} />
           </Suspense>
         </>
+      ) : view === "reconcile" ? (
+        <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
+          <ReconcileSection canAdmin={can(user, "work:admin")} />
+        </Suspense>
       ) : view === "all" ? (
         <AllShipments raw={raw} user={user} />
       ) : (
@@ -121,6 +142,24 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
       )}
     </div>
   );
+}
+
+/**
+ * Hàng đợi đối chiếu KHÔNG gọi Viettel Post một câu nào — nó dựng từ dữ liệu đã có. Đúng ra là
+ * ngược lại: nó tồn tại chính vì tài khoản API không đọc được 2.138/2.151 vận đơn của shop.
+ */
+async function ReconcileSection({ canAdmin }: { canAdmin: boolean }) {
+  const [queue, ghiDe] = await Promise.all([getVtpReconcileQueue(), getFreshnessConfig()]);
+  // Ngưỡng ĐANG CHẠY dựng lại từ hằng số + ghi đè, không gõ lại con số nào: hai nơi nói hai số là
+  // cách chắc chắn nhất để không ai tin con số nào (luật 22).
+  const nguong = Object.keys(FRESHNESS_BY_STAGE).map((stage) => ({
+    stage,
+    label: SHIPMENT_STAGE_LABEL[stage as ShipmentStage] ?? stage,
+    hieuLuc: effectiveThresholdFor(stage, ghiDe),
+    macDinh: FRESHNESS_BY_STAGE[stage],
+    daGhiDe: Boolean(ghiDe[stage]),
+  }));
+  return <ReconcilePanel queue={queue} nguong={nguong} canAdmin={canAdmin} />;
 }
 
 async function AllShipments({ raw, user }: { raw: SearchParams; user: SessionUser }) {

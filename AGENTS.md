@@ -288,6 +288,56 @@ deploy dừng, không phải cảnh báo.
     dữ liệu tương đối so với nó, và cấm cửa sổ "N giờ trước" trỏ vào dữ liệu ngày cố định. Một bài
     kiểm đỏ vì hôm nay là thứ Tư thì không ai đọc thông điệp của nó nữa — họ chỉ đi gia hạn con số.
 
+51. **ERP KHÔNG TỰ PHÁT HIỆN ĐƯỢC MỘT GÓI TIN CHƯA TỪNG TỚI** (`lib/constants/webhook-gap.ts`,
+    `vtp_webhook_gaps`): 2.138/2.151 vận đơn là `WEBHOOK_ONLY` (đo 16/09/2026) nên webhook là
+    NGUỒN TIN DUY NHẤT, và sự vắng mặt của một gói tin không để lại dấu vết nào trong chính hệ
+    thống đã không nhận được nó. Chỗ hụt CHỈ lộ ra khi một nguồn ĐỘC LẬP — hôm nay là tệp
+    "Danh sách vận đơn" — nói lại cùng một sự việc. Nên mỗi lần nhập tệp phải để lại một PHÉP ĐO,
+    kể cả lần nhập không đổi một vận đơn nào. `measureWebhookGap()` là hàm THUẦN với ba câu trả
+    lời, và hai trong số đó KHÔNG phải lỗi của webhook (`ERP_ALREADY_AHEAD` · `TOO_FRESH`, ngưỡng
+    120 phút = hơn 150 lần độ trễ thật 36–41 giây). Khoá duy nhất (vận đơn, mốc ĐVVC, câu chữ):
+    nhập lại tệp cũ KHÔNG đẻ ra lần rơi thứ hai, nếu không con số càng nhập càng sai. `matchRate`
+    trả `null` khi mẫu < 30 — "1/1 hụt" không phải "webhook rơi 100%". Dòng đo GOM LẠI và ghi SAU
+    vòng lặp, KHÔNG trong transaction đang vá vận đơn: một lệnh lỗi huỷ cả giao dịch và `try/catch`
+    chỉ giấu đi, còn mất một lượt vá là mất trạng thái của một kiện hàng.
+
+52. **KHÔNG CÓ NỀN SO SÁNH THÌ KHÔNG ĐƯỢC KẾT LUẬN "KHOẺ"** (`lib/queries/vtp-webhook-health.ts`):
+    im lặng một giờ tự nó không nói gì — shop không nhận đơn lúc 3 giờ sáng. Nền lấy theo ĐÚNG
+    KHUNG GIỜ ĐÓ trong 14 ngày gần nhất, TRUNG VỊ (một ngày bão đơn kéo trung bình lên và làm mọi
+    giờ bình thường trông như đang hụt), và dưới 5 ngày dữ liệu thì `liveness = UNKNOWN`, KHÔNG
+    phải `HEALTHY`. Bốn câu hỏi về webhook đứng RIÊNG vì mỗi cái sửa ở một chỗ khác: có đang nhận ·
+    nhận rồi có đọc được · có đúng thứ tự · có rơi gói nào. Gộp thành một ô "OK" là làm mất khả
+    năng sửa. Gói tin tới sai thứ tự KHÔNG phải lỗi (mạng không hứa thứ tự, mốc ĐVVC mới nhất vẫn
+    thắng) — nhưng tỷ lệ cao bất thường là điềm báo đường truyền dồn ứ.
+
+53. **HÀNG ĐỢI ĐỐI CHIẾU HỎI MỘT CÂU KHÁC HÀNG ĐỢI CARE** (`lib/constants/vtp-reconcile-queue.ts`):
+    care hỏi "kiện này có cần gọi khách không"; `/shipments?view=reconcile` hỏi "ERP có đang tin
+    một điều không còn đúng không". Gộp hai thứ vào một hàng đợi làm hỏng cả hai bộ số đo hiệu
+    quả. Một kiện mang nhiều lý do là MỘT dòng (người trực mở viettelpost.vn đúng một lần cho một
+    mã), xếp theo lý do MẠNH NHẤT — im lặng đứng CUỐI vì nó là bằng chứng yếu nhất và để nó lên
+    đầu sẽ chôn năm loại kia. Ba lý do (im lặng · care không nhúc nhích · quá ngưỡng chặng) chỉ có
+    nghĩa với kiện ĐANG CHẠY; ba lý do còn lại vẫn là việc dù kiện đã chốt vì chúng nói ERP đang
+    KHÔNG HIỂU. MÂU THUẪN đi CẢ HAI CHIỀU (cờ kết thúc bật mà chặng đang chạy, VÀ chặng đã chốt mà
+    cờ còn tắt). **Không có nút "đánh dấu xong"**: dòng là PHÉP CHIẾU (luật 19), nó rời hàng đợi
+    khi điều kiện sinh ra nó hết — một nút giấu việc là đúng thứ hàng đợi này sinh ra để chặn.
+
+54. **NGƯỠNG IM LẶNG VÀ TUỔI CHẶNG LÀ HAI ĐỒNG HỒ, KHÔNG GỘP** (`logistics.freshness` vs
+    `DWELL_SLA`): độ tươi hỏi "bao lâu rồi ERP không nghe tin gì"; tuổi chặng hỏi "kiện đứng ở
+    chặng hiện tại bao lâu rồi". Đã đo giá của việc thiếu cái sau: 106 kiện chưa rời kho, 61 triệu
+    COD, mà 0/106 im lặng quá ngưỡng vì ĐVVC vẫn đều đặn gửi "phân công bưu tá". Cả hai sửa được
+    mà không cần deploy, ghi đè là THƯA ở `settings` (lưu cả bảng thì sửa mặc định trong mã không
+    bao giờ tới được production), ba mốc phải TĂNG DẦN và bộ sai thứ tự bị bỏ NGUYÊN CẢ CHẶNG —
+    sửa hộ một ô là đoán ý người nhập.
+
+55. **KIỂM TRA QUYỀN TRA CỨU VTP KHÔNG GHI GÌ VÀ KHÔNG IN SECRET**
+    (`lib/actions/vtp-capability.ts`): nó HỎI và ĐẾM, không đổi `tracking_capability`, không đổi
+    credential, không tạo sự kiện. Danh tính tài khoản in ở dạng ĐÃ CHE — đủ để trả lời "có phải
+    cùng tài khoản với Pancake không", không đủ để dùng lại; kho mã này PUBLIC. Mẫu tối đa 20 kiện:
+    câu hỏi là NHỊ PHÂN nên 20 đã trả lời dứt khoát, dò cả 2.138 kiện là tự gây bão request. Kết
+    luận phải phân biệt được BA tình huống — không gọi được API · gọi được nhưng 0/n thấy · thấy
+    được — vì cách sửa của mỗi cái là một việc khác; gộp thành "kết nối thất bại" là đẩy người đọc
+    đi sửa nhầm chỗ.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và

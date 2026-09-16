@@ -14,6 +14,14 @@ import {
   type DwellOverrides,
 } from "@/lib/constants/shipment-status-age";
 import { DUPLICATE_SETTING_KEY, type DuplicateRule } from "@/lib/constants/order-duplicate";
+import {
+  FRESHNESS_BY_STAGE,
+  FRESHNESS_HOURS_MAX,
+  FRESHNESS_HOURS_MIN,
+  FRESHNESS_KEY,
+  sanitizeFreshness,
+  type FreshnessOverrides,
+} from "@/lib/constants/logistics-freshness";
 import type { ShipmentStage } from "@/db/schema";
 
 /**
@@ -50,6 +58,7 @@ async function authorize() {
 function revalidate() {
   clearMemo();
   revalidatePath("/operations/dwell");
+  revalidatePath("/shipments");
   revalidatePath("/operations/preship");
   revalidatePath("/work/settings");
 }
@@ -144,6 +153,73 @@ export async function setDuplicateRule(input: unknown): Promise<Result> {
     before: truoc,
     after: parsed.data,
     reason: parsed.data.enabled ? `Cửa sổ ${parsed.data.windowHours} giờ` : "TẮT luật dò đơn trùng",
+  });
+  revalidate();
+  return { ok: true };
+}
+
+/**
+ * ═══════════ NGƯỠNG IM LẶNG THEO CHẶNG ═══════════
+ *
+ * ─── ĐÂY KHÔNG PHẢI CÁI ĐỒNG HỒ Ở TRÊN ───
+ *
+ * `setDwellThreshold` chỉnh TUỔI CHẶNG: "kiện đứng ở chặng hiện tại bao lâu rồi". Hàm này chỉnh ĐỘ
+ * TƯƠI: "bao lâu rồi ERP không nghe tin gì về kiện này". Phân biệt đầy đủ ở đầu
+ * `lib/constants/shipment-status-age.ts` — và nó có giá thật: 106 kiện chưa rời kho, 61 triệu COD,
+ * mà 0/106 im lặng quá ngưỡng, vì ĐVVC vẫn đều đặn gửi "phân công bưu tá".
+ *
+ * Nên hai bộ ngưỡng là hai quyết định khác nhau, và gộp chúng lại sẽ làm một trong hai câu hỏi
+ * không trả lời được nữa.
+ *
+ * Cùng quyền, cùng lối gửi-một-chặng, cùng lối lọc-trước-khi-lưu như `setDwellThreshold`.
+ */
+export async function setFreshnessThreshold(input: unknown): Promise<Result> {
+  const { user, error } = await authorize();
+  if (error) return { error };
+  const gioTuoi = z.number().int().min(FRESHNESS_HOURS_MIN).max(FRESHNESS_HOURS_MAX);
+  const parsed = z
+    .object({
+      stage: z.string().min(2),
+      aging: gioTuoi.optional(),
+      stale: gioTuoi.optional(),
+      critical: gioTuoi.optional(),
+      /** `true` = trả chặng này về mặc định của mã. */
+      reset: z.boolean().optional(),
+    })
+    .safeParse(input);
+  if (!parsed.success) return { error: `Ngưỡng phải là số nguyên từ ${FRESHNESS_HOURS_MIN} tới ${FRESHNESS_HOURS_MAX} giờ` };
+  const d = parsed.data;
+  if (!FRESHNESS_BY_STAGE[d.stage]) return { error: "Không có chặng vận đơn nào mang mã này" };
+
+  const hienTai = sanitizeFreshness(await getSettingJson<unknown>(FRESHNESS_KEY, {}));
+  const next: FreshnessOverrides = { ...hienTai };
+  if (d.reset) {
+    delete next[d.stage];
+  } else {
+    if (d.aging === undefined || d.stale === undefined || d.critical === undefined) {
+      return { error: "Phải khai đủ ba mức — nửa bộ ngưỡng là bộ ngưỡng sai." };
+    }
+    if (!(d.aging <= d.stale && d.stale <= d.critical)) {
+      return { error: "Ba mức phải tăng dần: bắt đầu cũ ≤ cũ ≤ cũ nghiêm trọng. Đảo thứ tự thì một kiện nhảy thẳng sang “nghiêm trọng” trước khi kịp “bắt đầu cũ”." };
+    }
+    next[d.stage] = { aging: d.aging, stale: d.stale, critical: d.critical };
+  }
+
+  // Lọc lại LẦN NỮA trước khi lưu: thứ ghi xuống phải là thứ đọc lên được. Một bộ ngưỡng bị từ chối
+  // lúc đọc mà vẫn nằm trong `settings` là người sửa ngồi tự hỏi vì sao không thấy gì đổi.
+  const sach = sanitizeFreshness(next);
+  if (!d.reset && !sach[d.stage]) return { error: "Bộ ngưỡng này không hợp lệ nên không được lưu" };
+
+  await setSettingJson(FRESHNESS_KEY, sach);
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "LOGISTICS_FRESHNESS_SET",
+    entity: "SETTING",
+    entityId: FRESHNESS_KEY,
+    before: { [d.stage]: hienTai[d.stage] ?? null },
+    after: { [d.stage]: sach[d.stage] ?? null },
+    reason: `${SHIPMENT_STAGE_LABEL[d.stage as ShipmentStage] ?? d.stage}${d.reset ? " — trả về mặc định" : ""}`,
   });
   revalidate();
   return { ok: true };

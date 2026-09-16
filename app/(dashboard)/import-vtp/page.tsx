@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { VtpImportForm } from "@/app/(dashboard)/import-vtp/import-form";
+import { BatchHistory } from "@/app/(dashboard)/import-vtp/batch-history";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { requirePermission } from "@/lib/auth/session";
@@ -71,6 +72,14 @@ export default async function ImportVtpPage() {
         ) : (
           <p className="mt-3 text-sm text-muted-foreground">Mọi vận đơn đều đã có mã và trạng thái từ Viettel Post.</p>
         )}
+      </SectionCard>
+
+      <SectionCard
+        title="Các lần nhập gần đây"
+        description="Cả lượt chạy thử lẫn lượt ghi thật."
+        hint="Sổ này trả lời câu “con số này tới từ lần nhập nào, ai bấm, và lần ấy thấy gì”. Chạy thử được ghi cố ý — nó trả lời “hôm qua ai đã xem trước tệp này và thấy gì” khi con số sau đó gây tranh cãi. Bấm vào mốc thời gian để xem chi tiết."
+      >
+        <BatchHistory />
       </SectionCard>
 
       <SectionCard title="ERP tin nguồn nào" description="Khi các nguồn nói khác nhau về cùng một việc.">
