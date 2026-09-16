@@ -16,7 +16,9 @@ PROJECT="${STAGING_PROJECT:-vnx-ai-staging}"
 DIR="${STAGING_DIR:-/opt/vnx-ai-staging}"
 PORT="${STAGING_PORT:-3100}"
 VOLUME="${STAGING_VOLUME:-vnx-ai-staging_vnx_ai_staging_pgdata}"
-CONTAINERS=("vnx-ai-staging-app" "vnx-ai-staging-db")
+# `-ingest` (bộ nạp tin sống) nằm trong danh sách này vì compose dựng nó như hai cái kia. Thiếu
+# một tên ở đây thì phép kiểm va chạm im lặng bỏ qua đúng cái tên sắp bị chiếm.
+CONTAINERS=("vnx-ai-staging-app" "vnx-ai-staging-db" "vnx-ai-staging-ingest")
 
 fail=0
 say()  { printf '%s\n' "$*"; }
