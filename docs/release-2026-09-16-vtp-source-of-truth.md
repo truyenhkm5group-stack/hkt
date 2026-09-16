@@ -157,3 +157,116 @@ việc của một phiên làm việc.
 **Không backfill.** `vtp_raw_*` của vận đơn cũ để `NULL` = CHƯA BIẾT ĐVVC nói gì lần cuối. Suy
 ngược từ `vtp_status_name` là bịa ra một lời khai với mốc thời gian không có thật (AGENTS.md mục
 35). Chúng tự được điền ở lượt nạp tiếp theo.
+
+---
+
+# PHẦN II — ĐO TRÊN PRODUCTION SAU KHI PHÁT HÀNH (16/09/2026)
+
+Deploy run #317, commit `3932a83`, hoàn tất 03:59:36Z. Mọi con số dưới đây lấy bằng ops `db-query`
+(chỉ đọc) và ops `smoke` trên máy chủ thật.
+
+## 1. Migration
+
+| | trước | sau |
+|---|---|---|
+| migration đã áp | **96** (tới `0095`) | **100** (`0096`–`0099`) |
+
+Deploy này mang theo **bốn** migration: ba của phiên lương (đã vào `main` từ trước, chưa deploy) và
+`0099` của bản này. Đường nâng cấp đó đã được `tests/migration-upgrade-path.test.ts` chứng minh từ
+một mốc CÒN CŨ HƠN production hiện tại.
+
+Xác minh bằng chính lược đồ, không tin exit code: 8 cột `vtp_*` đúng kiểu và mặc định
+(`vtp_raw_mapped` NOT NULL default true, `vtp_sync_attempts` NOT NULL default 0), hai bảng mới
+(`vtp_status_registry` 18 cột, `vtp_import_batches` 20 cột), sáu chỉ mục.
+
+## 2. Nhịp đối chiếu theo độ nóng — chạy đúng trên production
+
+Sáu vận đơn thật, 15 phút sau deploy:
+
+| chặng | mã | VTP lúc | ERP nhận | trễ | hỏi lại |
+|---|---|---|---|---|---|
+| DELIVERED | 501 | 04:03:23 | 04:03:59 | 37s | `NULL` — rời hàng đợi |
+| DELIVERY_FAILED | 506 | 04:01:00 | 04:01:40 | 41s | +5′ (NÓNG) |
+| RETURNING | 505 | 03:56:46 | 03:57:24 | 38s | +30′ (ẤM) |
+| RETURNING | 502 | 03:55:37 | 03:56:13 | 37s | +30′ (ẤM) |
+| DELIVERY_FAILED | 506 | 03:55:32 | 03:56:09 | 37s | +5′ (NÓNG) |
+| DELIVERY_FAILED | 506 | 03:54:10 | 03:54:45 | 36s | +5′ (NÓNG) |
+
+**Độ trễ thật VTP → ERP: 36–41 giây.** Đây là con số để nói "gần thời gian thực", không phải
+"thời gian thực".
+
+## 3. Tài khoản API: chẩn đoán dứt điểm
+
+`vtp-capability --limit=30 --all` (chạy thử, không ghi):
+
+```
+tài khoản: ok=true · tên=HM******HMT shop · SĐT=******3448 · kho=33
+tổng dò 30 · API đọc được 0 · API không thấy 30 · lỗi quyền 0 · lỗi khác 0
+```
+
+Token **hợp lệ** (đăng nhập được, liệt kê được 33 kho) nhưng `getOrderDetailV3` trả "không tồn tại"
+cho **cả 30/30** mã vận đơn. Không phải lỗi xác thực, không phải giới hạn tần suất, không phải lỗi
+mạng — **vận đơn do Pancake tạo thuộc một tài khoản Viettel Post khác.**
+
+Phân loại toàn bảng: `API_TRACKABLE` **0** · `WEBHOOK_ONLY` **2.138** · `UNKNOWN_CAPABILITY` 13.
+
+Hệ quả đã kiểm chứng: một lượt `vtp-tracking` báo *"Đã kiểm tra 0 vận đơn · 381 vận đơn đang chạy
+chỉ nhận webhook — ngoài phạm vi tài khoản API"* ⇒ **0 lệnh gọi API lãng phí**.
+
+## 4. Nhật ký vận đơn — một ca thật, 36 mốc
+
+```
+10/09 11:16  VTP        Nhận từ bưu tá - Bưu cục gốc      → PICKED_UP
+11/09 01:41  VTP        Giao bưu tá đi phát               → OUT_FOR_DELIVERY
+12/09 07:23  VTP        Tồn - Khách hàng nghỉ, không nhà  → DELIVERY_FAILED
+12/09 07:23  HỆ THỐNG   mở ca chăm sóc
+12/09 07:23  TỆP VTP    "Chờ phát lại"   ← ERP chỉ BIẾT lúc 13/09 03:50
+13/09 03:54  NGƯỜI      Truyền HK · gọi khách, nói chuyện được
+14/09 01:58  VTP        Thành công - Phát thành công      → DELIVERED
+14/09 01:59  HỆ THỐNG   ca chốt · RESCUED_DIRECT
+```
+
+Mốc 12/09 07:23 ERP chỉ biết **20 giờ sau**, và biết **qua nhập tệp** — tức một gói webhook đã rơi
+và được tệp vá lại. Nén hai mốc thành một là xoá mất chính bằng chứng đó.
+
+Đo được từ nhật ký: tới thao tác đầu **20h31′** · tới lúc chốt **42h35′** ⇒ vỡ hạn phản hồi đầu, và
+vỡ hạn đó **vẫn nằm trong lịch sử** dù ca sau đó được cứu.
+
+Dòng nguồn `PANCAKE` mang `normalized_stage` **NULL** ⇒ không được quyền kết luận chặng, đúng thiết kế.
+
+## 5. Luật tiền không sửa một chữ nào của ĐVVC
+
+| kiểm | kết quả |
+|---|---|
+| 108 kiện mã 501 | `vtp_status_name` chỉ có **một** giá trị: "Thành công - Phát thành công" |
+| **28 kiện mã 501 mà COD ≤ 100.000đ** | vẫn nguyên văn "Thành công - Phát thành công" |
+| kiện 501 có tên khác | **0** |
+| 267 vận đơn `…1P1` | **267/267 có sự kiện** · **0** gắn vào đơn gốc · RETURNED 251 / RETURNING 16 |
+
+## 6. Một lỗi của bản này, tìm ra bằng chính production
+
+Chạy thử lại đúng tệp vừa được ghi bốn phút trước, màn hình xem trước vẫn báo "18 dòng sẽ cập nhật"
+trong khi đường ghi sẽ bỏ qua cả 18. Hai nguồn sai, đã sửa và khoá bằng kiểm thử:
+
+* bộ chống trùng chỉ nhìn TRONG CÙNG MỘT TỆP nên mù với mọi lần nhập trước đó;
+* CÙNG MỐC nhưng KHÁC CHẶNG bị đọc thành "mới hơn ERP", trong khi đường ghi gọi đó là
+  `sameTimeConflict` và dừng lại cho người đối chiếu.
+
+## 7. Một quả bom hẹn giờ KHÔNG thuộc bản này, đã tháo
+
+`tests/order-duplicate.test.ts` ghim `NOW = 2026-09-15T10:00:00Z` rồi gieo dữ liệu tương đối so với
+mốc ĐÓ, trong khi truy vấn lọc theo `now() - 48 giờ` thật. CI lúc 03:45Z còn xanh; 04:25Z đã đỏ, và
+sau đó đỏ vĩnh viễn — tức **chặn mọi lần deploy**. Đã xác minh không phải do bản này (cất riêng thay
+đổi của phiên rồi chạy lại vẫn đỏ) và đã sửa cho mốc chạy theo đồng hồ thật.
+
+## 8. Mức đảm bảo — nói đúng, không nói quá
+
+| nhóm | cơ chế | mức đảm bảo |
+|---|---|---|
+| tất cả vận đơn | webhook VTP | **gần thời gian thực**, đo được 36–41 giây, **khi** VTP gửi |
+| `API_TRACKABLE` (hiện **0**) | webhook + đối chiếu định kỳ | gần thời gian thực + tự vá khi webhook rơi |
+| `WEBHOOK_ONLY` (hiện **2.138**) | webhook + nhập tệp tay | webhook là nguồn chính; **không có** cơ chế tự vá |
+
+Viettel Post **không cam kết** gửi đủ webhook — ca ở mục 4 là một bằng chứng gói tin đã rơi. Nên
+**không được ghi "realtime 100%"** ở bất kỳ đâu. Với 2.138 vận đơn `WEBHOOK_ONLY`, đường vá duy nhất
+hôm nay là nhập tệp tay, và đó là lý do bước chạy thử phải nói đúng sự thật.
