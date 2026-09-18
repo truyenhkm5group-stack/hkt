@@ -7,6 +7,7 @@ import type { CareOutcome } from "@/lib/constants/care-outcome";
 import { CARE_TERMINAL_STATUSES, type CareStatus } from "@/lib/constants/care";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { rowsOf } from "@/lib/sql-rows";
+import { canOpenNewEpisode, chuaAiXuLyXongSql } from "@/lib/care/reopen-guard";
 import type { ShipmentStage } from "@/db/schema";
 
 export { CARE_ENTRY_SUBSTATES };
@@ -344,6 +345,24 @@ export async function applyCarrierEventToCare(db: Db, input: CarrierEventInput):
     return { ...KHONG_LAM_GI, careCaseId: dangMo.id, reason: "đợt đang mở vẫn còn — cập nhật diễn tiến, không mở ca mới" };
   }
 
+  /*
+    ═══ NGƯỜI ĐÃ XỬ LÝ XONG TÌNH TRẠNG NÀY THÌ KHÔNG DỰNG LẠI NÓ ═══
+
+    Tới đây nghĩa là kiện đang trong điều kiện cần care và KHÔNG có đợt nào đang mở. Trước bản sửa,
+    đó là đủ để mở đợt mới — và vì người vừa bấm hoàn tất cũng làm `active = false`, một gói tin
+    nhắc lại ĐÚNG tình trạng cũ sẽ dựng lại ca ngay sau lưng họ. Xem `lib/care/reopen-guard.ts`.
+  */
+  const dongGanNhat = await db.query.shipmentCare.findFirst({
+    where: and(eq(schema.shipmentCare.shipmentId, input.shipmentId), eq(schema.shipmentCare.active, false)),
+    orderBy: [desc(schema.shipmentCare.episodeNo)],
+    columns: { doneAt: true, outcomeAt: true, updatedAt: true },
+  });
+  const chotMo = canOpenNewEpisode({
+    triggerAt: input.occurredAt,
+    lastClosedAt: dongGanNhat ? (dongGanNhat.doneAt ?? dongGanNhat.outcomeAt ?? dongGanNhat.updatedAt ?? null) : null,
+  });
+  if (!chotMo.open) return { ...KHONG_LAM_GI, reason: chotMo.reason };
+
   return moDot(db, { shipmentId: input.shipmentId, orderId: input.orderId, trackingNumber: input.trackingNumber, substate, sourceTrigger: "CARRIER_EVENT", openedAt: input.occurredAt, statusName: input.vtpStatusName, reason: verdict.reason });
 }
 
@@ -475,6 +494,9 @@ export async function reconcileCareCoverage(db: Db, now = new Date(), scope: { s
          and s.stage::text not in ${[...CARE_TERMINAL_STAGES, "RETURNING"]}
          and ${con} in ${["WAITING_PROCESSING", "WAITING_REDELIVERY", "DELIVERY_EXCEPTION"]}
          and not exists (select 1 from shipment_care c where c.shipment_id = s.id and c.active)
+         -- …VÀ tình trạng này chưa có người xử lý xong. Thiếu vế này thì mỗi lượt đối chiếu dựng
+         -- lại ca ngay sau khi nhân viên bấm hoàn tất — 16/18 lần dựng lại đo được là như vậy.
+         and ${chuaAiXuLyXongSql(sql`s.id`, sql`s.vtp_status_date`)}
          and ${trongPhamVi}
     `),
   );

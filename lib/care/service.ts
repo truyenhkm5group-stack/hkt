@@ -247,6 +247,24 @@ export async function setCareStatus(user: CareActor, input: z.input<typeof statu
       states[shipmentId] = await loadCareState(shipmentId);
       continue;
     }
+    /*
+      ═══ ĐÃ ĐÓNG RỒI THÌ ĐÓNG LẦN NỮA KHÔNG GHI GÌ THÊM ═══
+
+      `canTransition` cho phép tự-chuyển (`from === to`), nên trước bản sửa một cú BẤM HAI LẦN — hoặc
+      một lần trình duyệt gửi lại request — đi lọt qua và ghi THÊM một dòng `care_actions` cùng nội
+      dung, THÊM một mốc `RESOLVE` trong nhật ký, và đẩy `done_at` về lúc bấm lần hai. Người dùng bấm
+      hai lần vì lần đầu trông như không ăn, tức lỗi này bật ra đúng lúc người ta dễ bấm lại nhất.
+
+      Vế `!note` ở trên không cứu được: kịch bản thật là "ghi note rồi bấm hoàn tất", nên lần gửi lại
+      LUÔN kèm note.
+
+      Ghi chú cho một ca đã đóng vẫn làm được qua đường ghi chú riêng — không mất lối nào.
+    */
+    if (from === status && CARE_TERMINAL_STATUSES.includes(status)) {
+      skipped.push({ shipmentId, reason: `Case đã ở trạng thái ${status} — không ghi thêm lần nữa` });
+      states[shipmentId] = await loadCareState(shipmentId);
+      continue;
+    }
     if (!canTransition(from, status)) {
       skipped.push({ shipmentId, reason: `Không chuyển được từ ${from} sang ${status}${CARE_TERMINAL_STATUSES.includes(from) ? " — case đã đóng, dùng mở lại" : ""}` });
       continue;

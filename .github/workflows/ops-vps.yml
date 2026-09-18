@@ -57,6 +57,7 @@ on:
           - vtp-capability      # tài khoản API đọc được vận đơn nào: dò một mẫu rồi xếp loại (MẶC ĐỊNH CHẠY THỬ; arg "--limit=30 --all --apply")
           - vtp-import-preview  # CHẠY THỬ đọc một tệp Viettel Post đã lưu trên dữ liệu thật — chỉ đọc, không ghi vận đơn (arg: phần tên tệp)
           - vtp-web-probe       # đọc bundle JS của viettelpost.vn để tìm endpoint API trang Quản lý vận đơn
+          - care-false-reopen   # dọn ca care bị dựng lại vô cớ sau khi người đã xử lý xong (MẶC ĐỊNH CHẠY THỬ; arg "--apply")
           - returns-hmt         # đối soát sổ hàng hoàn viết tay (HMT) với ERP — đọc bản TẢI LÊN QUA ERP (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
           - cs-rule-update      # đóng MỀM case sinh bởi luật cũ rồi quét lại (mặc định chỉ đếm; arg "--apply" mới ghi)
@@ -236,6 +237,12 @@ jobs:
                 # kiện hay tiền; đây không phải backfill dữ liệu nghiệp vụ.
                 fetch_script outcome-parity.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/outcome-parity.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/outcome-parity.ts $ARG ;;
+              care-false-reopen)
+                # MẶC ĐỊNH CHẠY THỬ: liệt kê từng đợt bị dựng lại vô cớ kèm hai mốc chứng minh.
+                # "--apply" đóng các đợt thừa mà CHƯA AI làm gì trên đó, mỗi đợt kèm một mốc
+                # SYSTEM_CORRECTION. KHÔNG xoá dòng nào, KHÔNG đụng đợt đã có người làm việc.
+                fetch_script care-false-reopen-repair.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/care-false-reopen-repair.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/care-false-reopen-repair.ts $ARG ;;
               reason-backfill)
                 # MẶC ĐỊNH CHẠY THỬ: in ra đúng những gì sẽ ghi, theo từng nguồn. "--apply" mới ghi,
                 # và ghi được chạy lại nhiều lần vì khoá chống trùng là NỘI DUNG chứ không phải số

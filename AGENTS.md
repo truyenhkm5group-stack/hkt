@@ -364,6 +364,31 @@ deploy dừng, không phải cảnh báo.
     in mốc đang lọc và nói ra hậu quả của lựa chọn đó; ca chưa có mốc ấy nằm NGOÀI kỳ, không phải
     trong kỳ với giá trị 0.
 
+59. **MỘT SỰ CỐ CŨ KHÔNG ĐƯỢC SINH RA MỘT CA MỚI** (`lib/care/reopen-guard.ts`): cả hai đường mở ca
+    (`applyCarrierEventToCare` và `reconcileCareCoverage`) từng chỉ hỏi *"kiện này có đợt nào ĐANG
+    MỞ không?"*. Người bấm hoàn tất làm `active = false`, nên câu trả lời là "không" và một đợt MỚI
+    được mở cho ĐÚNG tình trạng ĐVVC cũ — bộ đối chiếu chạy 10 phút/lần nên ca quay lại gần như
+    ngay, trạng thái về "Chưa xử lý" và note của đợt cũ không hiện nữa. Đo 18/09/2026: **16/18 cặp
+    đợt liên tiếp là dựng lại vô cớ**, 16 do bộ đối chiếu, 12 làm "mất" một note. Luật thay thế:
+    **chỉ mở đợt mới khi MỐC KÍCH HOẠT (mốc ĐVVC) MỚI HƠN mốc đóng của đợt gần nhất**; bằng nhau
+    KHÔNG phải mới hơn, và ĐVVC không cho mốc thì KHÔNG mở — lùi về "giờ hiện tại" ở nhánh đó là
+    dựng lại một đợt mỗi mười phút mãi mãi. KHÔNG chặn theo `entry_carrier_state` (7/16 lần dựng
+    lại mang nguyên nhân khác mà mốc vẫn cũ) và KHÔNG chặn theo mã vận đơn (kiện có quyền hỏng lần
+    thứ hai thật). Luật sống ở hai bản TS + SQL và `tests/care-reopen.test.ts` chạy cả hai trên
+    cùng dữ liệu rồi so từng kiện, nên chúng không trôi xa nhau được.
+
+60. **NOTE KHÔNG MẤT — MÀN HÌNH ĐANG ĐỌC NHẦM ĐỢT.** Note luôn được ghi vào `care_actions`
+    (append-only, mang khoá tài khoản) VÀ vào `last_note` của đợt. Khi người dùng báo "mất note",
+    kiểm tra đường MỞ CA trước khi kiểm tra đường ghi note: một đợt mới trắng trơn che mất đợt cũ
+    còn nguyên dữ liệu. Sửa bằng cách chép note sang đợt mới là BỊA ra một hành động chưa từng xảy
+    ra trên đợt đó.
+
+61. **ĐÓNG MỘT CA ĐÃ ĐÓNG KHÔNG ĐƯỢC GHI GÌ THÊM** (`setCareStatus`): `canTransition` cho phép
+    tự-chuyển (`from === to`), nên một cú bấm hai lần — hoặc một lần trình duyệt gửi lại — từng ghi
+    THÊM một dòng `care_actions` cùng nội dung, THÊM một mốc `RESOLVE`, và đẩy `done_at` về lúc bấm
+    lần hai. Vế `!note` cũ không cứu được vì kịch bản thật luôn kèm note. Đã ở trạng thái kết thúc
+    và xin đúng trạng thái đó ⇒ BỎ QUA, không ghi, trả về trạng thái hiện tại.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và
