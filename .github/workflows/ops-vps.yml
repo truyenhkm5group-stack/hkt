@@ -61,6 +61,7 @@ on:
           - returns-hmt         # đối soát sổ hàng hoàn viết tay (HMT) với ERP — đọc bản TẢI LÊN QUA ERP (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
           - cs-rule-update      # đóng MỀM case sinh bởi luật cũ rồi quét lại (mặc định chỉ đếm; arg "--apply" mới ghi)
+          - care-waiting-reconcile # đối chiếu ca chăm sóc ĐANG CHỜ mà không có mốc xem lại (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
@@ -401,6 +402,12 @@ jobs:
               cs-cleanup)
                 fetch_script cs-cleanup.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-cleanup.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cs-cleanup.ts ;;
+              care-waiting-reconcile)
+                # Ca lịch sử bị đẩy sang WAITING_* mà không chọn giờ xem lại. Đi qua ĐÚNG server
+                # action của miền care (`setCareStatus`), nên mỗi ca có sự kiện + nhật ký riêng —
+                # KHÔNG có nhánh nào chạy `UPDATE` thẳng. Mặc định CHẠY THỬ; "--apply" mới ghi.
+                fetch_script care-waiting-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/care-waiting-reconcile.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/care-waiting-reconcile.ts $ARG ;;
               cs-rule-update)
                 # Mặc định CHỈ ĐẾM. Truyền arg "--apply" mới ghi thật.
                 fetch_script cs-rule-update.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-rule-update.ts'
