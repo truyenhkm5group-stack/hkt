@@ -12,10 +12,11 @@ import {
   COPILOT_PAGES_KEY,
   COPILOT_REJECT_REASONS,
   COPILOT_TERMINAL_ACTIONS,
+  PILOT_REVIEWED_TURNS_TARGET,
   editDistance,
   isMeaningfulEdit,
 } from "@/lib/constants/sales-copilot";
-import { copilotKpi, copilotPageAllowed, copilotPages, copilotQueue, ingestStatus } from "@/lib/queries/sales-copilot";
+import { copilotKpi, copilotPageAllowed, copilotPages, copilotQueue, ingestStatus, pilotStatus } from "@/lib/queries/sales-copilot";
 import { LIVE_INGEST_MAX_BACKOFF, LIVE_INGEST_MAX_SECONDS, liveIngestHealth, nextDelaySeconds, windowHours } from "@/lib/constants/live-ingest";
 import { getAgent } from "@/lib/ai-workforce/registry";
 import { resolvePermissions } from "@/lib/auth/permissions";
@@ -326,6 +327,24 @@ export async function testSalesCopilot(db: Db) {
   assert.equal(isMeaningfulEdit("Dạ mẫu này 499.000đ chị nhé ạ", "Chị ơi mẫu này bên em 499k, chị lấy màu nào ạ?"), true, "viết lại nửa câu LÀ sửa đáng kể");
   assert.equal(isMeaningfulEdit("", "bất cứ gì"), true, "câu gốc rỗng thì mọi thứ gõ vào đều đáng kể");
   assert.ok(COPILOT_MEANINGFUL_EDIT_RATIO > 0 && COPILOT_MEANINGFUL_EDIT_RATIO < 1);
+
+  /*
+    ═════════ 4B. CHƯA AI BẤM LẦN NÀO — MẪU SỐ RỖNG LÀ CHƯA BIẾT, KHÔNG PHẢI 0% ═════════
+
+    Khối này phải chạy TRƯỚC khối 5 (khối đầu tiên ghi vào sổ thao tác): đây là trạng thái ngày
+    đầu thí điểm, và đúng ngày ấy một bảng in "tỷ lệ dùng được 0%" sẽ nói rằng câu máy soạn hỏng
+    hoàn toàn — trong khi sự thật là chưa ai bấm thử.
+  */
+  const chuaAiBam = await pilotStatus(db);
+  assert.equal(chuaAiBam.reviewedTurns, 0, "chưa ai soát lượt nào");
+  assert.equal(chuaAiBam.rates.acceptance, null, "chưa lượt nào ⇒ tỷ lệ dùng được CHƯA BIẾT, không phải 0%");
+  assert.equal(chuaAiBam.rates.unchanged, null);
+  assert.equal(chuaAiBam.rates.edit, null);
+  assert.equal(chuaAiBam.rates.reject, null);
+  assert.equal(chuaAiBam.conversations.handoffRate, null, "chưa hội thoại nào có người thao tác ⇒ chưa có tỷ lệ chuyển người");
+  assert.equal(chuaAiBam.reviewSeconds.avg, null);
+  assert.equal(chuaAiBam.reviewSeconds.median, null);
+  assert.deepEqual(chuaAiBam.target, { min: PILOT_REVIEWED_TURNS_TARGET.min, max: PILOT_REVIEWED_TURNS_TARGET.max });
 
   // ═════════ 5. SỔ THAO TÁC: BẤM HAI LẦN KHÔNG THÀNH HAI TIN ═════════
   const nguoi = "u-copilot-sale";
@@ -770,6 +789,41 @@ export async function testSalesCopilot(db: Db) {
   const sauCung = await copilotKpi(7, db);
   assert.equal(sauCung.firstHumanSend.pending, false, "đã có lượt gửi thì không còn là 'chờ lần gửi đầu'");
   assert.ok(sauCung.firstHumanSend.at, "phải biết lần đầu lúc nào");
+
+  /*
+    ═════════ 7C. BẢNG ĐIỂM THÍ ĐIỂM — MỘT LƯỢT KHÁCH LÀ MỘT CÂU, KHÔNG PHẢI MỘT DÒNG SỔ ═════════
+
+    Khối 5 đã ghi cho câu `s-copilot-2` hai dòng: một lần GỬI HỎNG (mạng đứt) rồi một lần gửi
+    được. Nếu tiến độ thí điểm đếm DÒNG thì đường truyền chập chờn làm thanh tiến độ chạy nhanh
+    hơn — và "đủ 20 lượt khách" sẽ tới trước khi có 20 khách thật.
+  */
+  const bang = await pilotStatus(db);
+  const congLai = bang.decisions.sendUnchanged + bang.decisions.editAndSend + bang.decisions.reject;
+  assert.equal(congLai, bang.reviewedTurns, "mỗi lượt soát được xếp vào ĐÚNG MỘT nhóm, nên ba số cộng lại bằng tổng");
+
+  const soCau = await db.query.salesCopilotActions.findMany({ columns: { suggestionId: true, action: true } });
+  const cauDaSoat = new Set(
+    soCau.filter((r) => r.suggestionId && (COPILOT_TERMINAL_ACTIONS as readonly string[]).includes(r.action)).map((r) => r.suggestionId),
+  );
+  assert.equal(bang.reviewedTurns, cauDaSoat.size, "tiến độ đếm theo CÂU GỢI Ý, không theo dòng sổ (gửi hỏng rồi gửi lại vẫn là một lượt)");
+  assert.ok(bang.reviewedTurns < soCau.length, "và số dòng sổ phải NHIỀU HƠN số lượt — nếu bằng nhau thì phép khử trùng chưa chạy");
+
+  // Bốn tỷ lệ cộng lại đúng 100% (sai số làm tròn một chữ số thập phân).
+  const tong = (bang.rates.unchanged ?? 0) + (bang.rates.edit ?? 0) + (bang.rates.reject ?? 0);
+  assert.ok(Math.abs(tong - 100) < 0.5, `ba tỷ lệ cộng lại phải bằng 100%, đang là ${tong}`);
+  assert.ok(
+    bang.rates.acceptance !== null && Math.abs(bang.rates.acceptance - ((bang.rates.unchanged ?? 0) + (bang.rates.edit ?? 0))) < 0.5,
+    "tỷ lệ dùng được = gửi nguyên văn + sửa rồi gửi",
+  );
+
+  /*
+    NGƯỜI NHẬN HẲN VIỆC ĐẾM THEO HỘI THOẠI. Khối 5 ghi MỘT dòng nhận việc cho `conv-copilot-1`,
+    trong khi chính hội thoại ấy có nhiều lượt soát. Đếm chung một mẫu số thì tỷ lệ chuyển người
+    tụt xuống theo số lượt — một con số nói về phép chia, không nói về công việc.
+  */
+  assert.equal(bang.conversations.takenOver, 1, "một hội thoại có người nhận hẳn việc");
+  assert.ok(bang.conversations.touched >= 1, "có hội thoại được thao tác");
+  assert.notEqual(bang.conversations.handoffRate, null, "đã có hội thoại được thao tác thì tính được tỷ lệ");
 
   // ═════════ 8. VÀ NẤC AUTO VẪN ĐÓNG ═════════
   //

@@ -8,7 +8,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { loadWinKnowledge } from "@/lib/queries/sales-knowledge";
 import { LIVE_INGEST_ENV, liveIngestHealth, type LiveIngestHealth } from "@/lib/constants/live-ingest";
 import { getDb, schema, type Db } from "@/db";
-import { AUTOMATION_TEMPLATE_MIN_CONVERSATIONS, COPILOT_MEANINGFUL_EDIT_RATIO, COPILOT_PAGES_KEY, COPILOT_QUEUE_RELEVANT_HOURS, COPILOT_SUGGESTION_TTL_MINUTES, HUMAN_REPLY_SQL_LIST, type CopilotWarning } from "@/lib/constants/sales-copilot";
+import { AUTOMATION_TEMPLATE_MIN_CONVERSATIONS, COPILOT_MEANINGFUL_EDIT_RATIO, COPILOT_PAGES_KEY, COPILOT_QUEUE_RELEVANT_HOURS, COPILOT_SUGGESTION_TTL_MINUTES, COPILOT_TERMINAL_SQL_LIST, HUMAN_REPLY_SQL_LIST, PILOT_REVIEWED_TURNS_TARGET, type CopilotWarning } from "@/lib/constants/sales-copilot";
 import { rowsOf } from "@/lib/sql-rows";
 
 /**
@@ -606,4 +606,169 @@ export async function firstHumanSend(dbIn?: Db): Promise<FirstHumanSend> {
     columns: { createdAt: true, actorName: true },
   });
   return { verified: true, at: dau?.createdAt ?? null, actorName: dau?.actorName ?? "", sentCount: n };
+}
+
+
+/**
+ * ═══════════════════ BẢNG ĐIỂM THÍ ĐIỂM — ỨNG DỤNG TỰ ĐỌC ĐƯỢC ═══════════════════
+ *
+ * Mọi con số dưới đây trước đây chỉ có khi một người (hoặc một phiên trợ lý) mở ops chạy SQL tay.
+ * Một chỉ số chỉ đọc được bằng cách gõ lệnh là một chỉ số KHÔNG AI ĐỌC: chủ shop không mở ops, và
+ * nhân viên trực chat lại càng không. Cho nên nó phải nằm trên chính màn hình họ đang dùng.
+ *
+ * BA ĐỘ MỊN KHÁC NHAU, KHÔNG ĐƯỢC TRỘN (luật 8.2):
+ *
+ *   · LƯỢT KHÁCH (một câu máy soạn được một người kết thúc) — tử số của tỷ lệ dùng được / phải
+ *     sửa / từ chối. Mẫu số là SỐ LƯỢT ĐÃ SOÁT.
+ *   · HỘI THOẠI — tỷ lệ người phải nhận hẳn việc. Một hội thoại có ba lượt soát vẫn là MỘT lần
+ *     nhận việc, nên chia cho số lượt sẽ ra một con số không có nghĩa.
+ *   · LƯỢT CHẠY MÔ HÌNH — đường mô hình, token, độ trễ. Một lượt soát có thể không gọi mô hình
+ *     nào (nấc luật), nên cũng không chia chung mẫu số được.
+ *
+ * KHÔNG CÓ CỬA SỔ THỜI GIAN cho phép đếm tiến độ. Chỉ số 7 ngày là để đọc CHẤT LƯỢNG hiện tại;
+ * còn "đã đủ 20 lượt chưa" là một phép đếm CỘNG DỒN. Đặt cửa sổ vào đó thì lượt thứ nhất rơi ra
+ * khỏi kỳ vào ngày thứ tám và thanh tiến độ ĐI LÙI — page ít khách sẽ không bao giờ tới đích dù
+ * đã soát đủ số lượt.
+ */
+export type PilotStatus = {
+  target: { min: number; max: number };
+  /** MỘT CÂU MÁY SOẠN ĐƯỢC MỘT NGƯỜI KẾT THÚC. Không tính tin hệ thống / bot / nhân viên. */
+  reviewedTurns: number;
+  /** Phân loại theo việc CUỐI CÙNG của mỗi lượt, nên bốn số này cộng lại đúng bằng `reviewedTurns`. */
+  decisions: { sendUnchanged: number; editAndSend: number; reject: number };
+  /** Độ mịn HỘI THOẠI — đứng riêng vì không cùng mẫu số với ba số trên. */
+  conversations: { touched: number; takenOver: number; handoffRate: number | null };
+  /** Mẫu số rỗng ⇒ `null` (CHƯA BIẾT), không phải 0% (luật 42). */
+  rates: { acceptance: number | null; unchanged: number | null; edit: number | null; reject: number | null };
+  reviewSeconds: { avg: number | null; median: number | null };
+  /** Đường mô hình của chính các câu trong thí điểm: RULE (không gọi mô hình) · ECONOMY · STRONG. */
+  route: {
+    tier: string;
+    runs: number;
+    inputTokens: number;
+    outputTokens: number;
+    medianLatencyMs: number | null;
+    /** VND. `null` = chưa khai đơn giá ⇒ CHƯA BIẾT, KHÔNG phải 0đ. */
+    costVnd: number | null;
+    unpricedRuns: number;
+  }[];
+};
+
+export async function pilotStatus(dbIn?: Db): Promise<PilotStatus> {
+  const db = dbIn ?? (await getDb());
+
+  /*
+    MỘT LƯỢT SOÁT = MỘT CÂU GỢI Ý, KHÔNG PHẢI MỘT DÒNG SỔ.
+
+    Gửi hỏng vì mạng rồi bấm lại là HAI dòng sổ cho CÙNG một lượt khách. Đếm dòng thì tiến độ
+    thí điểm tăng vì đường truyền chập chờn. Vì thế gom về từng câu gợi ý và lấy việc CUỐI CÙNG
+    của câu ấy — một câu từng gửi hỏng rồi gửi được là một lượt "đã gửi", không phải hai.
+  */
+  const [d] = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      with viec_cuoi as (
+        select suggestion_id,
+               -- Khoá dòng phá hoà: hai dòng ghi trong cùng một mili giây vẫn phải ra CÙNG một kết quả,
+               -- nếu không thì cùng một dữ liệu đọc hai lần cho hai con số.
+               (array_agg(action order by created_at desc, id desc))[1] as viec
+        from sales_copilot_actions
+        where suggestion_id is not null and action in (${sql.raw(COPILOT_TERMINAL_SQL_LIST)})
+        group by 1
+      )
+      select count(*)::int                                  as da_soat,
+             count(*) filter (where viec = 'SEND')::int      as gui_nguyen_van,
+             count(*) filter (where viec = 'EDIT_SEND')::int as sua_roi_gui,
+             count(*) filter (where viec = 'REJECT')::int    as tu_choi
+      from viec_cuoi
+    `),
+  );
+  const daSoat = Number(d?.da_soat ?? 0);
+  const guiNguyenVan = Number(d?.gui_nguyen_van ?? 0);
+  const suaRoiGui = Number(d?.sua_roi_gui ?? 0);
+  const tuChoi = Number(d?.tu_choi ?? 0);
+
+  const [h] = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select count(distinct conversation_id)::int                                    as cham_toi,
+             count(distinct conversation_id) filter (where action = 'TAKEOVER')::int as nguoi_nhan
+      from sales_copilot_actions
+      where action in (${sql.raw(COPILOT_TERMINAL_SQL_LIST)}) or action = 'TAKEOVER'
+    `),
+  );
+  const chamToi = Number(h?.cham_toi ?? 0);
+  const nguoiNhan = Number(h?.nguoi_nhan ?? 0);
+
+  const [t] = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select avg(review_seconds)::int                                          as tb,
+             percentile_cont(0.5) within group (order by review_seconds)::int  as tv
+      from sales_copilot_actions
+      where review_seconds is not null and action in (${sql.raw(COPILOT_TERMINAL_SQL_LIST)})
+    `),
+  );
+
+  /*
+    ĐƯỜNG MÔ HÌNH ĐỌC TỪ CHÍNH CÁC CÂU TRONG THÍ ĐIỂM, không từ toàn bộ bảng lượt chạy.
+
+    Bảng lượt chạy còn giữ cả giai đoạn chạy thử và các lượt đo thử nghiệm trên hội thoại dựng
+    sẵn. Trộn chúng vào đây thì tỷ lệ "bao nhiêu phần trăm phải dùng mô hình mạnh" nói về một tập
+    dữ liệu không ai đang thí điểm. Lọc theo page thí điểm là phép lọc hẹp và đúng nghĩa.
+  */
+  const pages = await copilotPages(db);
+  const route: PilotStatus["route"] = [];
+  if (pages.length) {
+    const rows = rowsOf<Record<string, unknown>>(
+      await db.execute(sql`
+        select r.tier                                                            as bac,
+               count(*)::int                                                     as luot,
+               coalesce(sum(r.input_tokens), 0)::int                             as token_vao,
+               coalesce(sum(r.output_tokens), 0)::int                            as token_ra,
+               percentile_cont(0.5) within group (order by r.latency_ms)::int    as do_tre,
+               sum(r.cost_vnd)::int                                              as chi_phi,
+               count(*) filter (where r.cost_vnd is null)::int                   as chua_khai_gia
+        from sales_suggestions s
+        join ai_runs r on r.id = s.run_id
+        join sales_conversations c on c.id = s.conversation_id
+        where c.page_id in (${sql.join(pages.map((p) => sql`${p}`), sql`, `)})
+        group by 1
+        order by 2 desc
+      `),
+    );
+    for (const r of rows) {
+      route.push({
+        tier: String(r.bac ?? ""),
+        runs: Number(r.luot ?? 0),
+        inputTokens: Number(r.token_vao ?? 0),
+        outputTokens: Number(r.token_ra ?? 0),
+        medianLatencyMs: r.do_tre === null || r.do_tre === undefined ? null : Number(r.do_tre),
+        // Một lượt chưa khai giá là CHƯA BIẾT chi phí. Cộng phần đã khai rồi in ra như tổng của
+        // cả nhóm là khẳng định những lượt kia tốn 0đ — đúng thứ luật 42 cấm.
+        costVnd: Number(r.chua_khai_gia ?? 0) > 0 || r.chi_phi === null || r.chi_phi === undefined ? null : Number(r.chi_phi),
+        unpricedRuns: Number(r.chua_khai_gia ?? 0),
+      });
+    }
+  }
+
+  const tyLe = (tu: number) => (daSoat ? Math.round((tu / daSoat) * 1000) / 10 : null);
+  return {
+    target: { min: PILOT_REVIEWED_TURNS_TARGET.min, max: PILOT_REVIEWED_TURNS_TARGET.max },
+    reviewedTurns: daSoat,
+    decisions: { sendUnchanged: guiNguyenVan, editAndSend: suaRoiGui, reject: tuChoi },
+    conversations: {
+      touched: chamToi,
+      takenOver: nguoiNhan,
+      handoffRate: chamToi ? Math.round((nguoiNhan / chamToi) * 1000) / 10 : null,
+    },
+    rates: {
+      acceptance: tyLe(guiNguyenVan + suaRoiGui),
+      unchanged: tyLe(guiNguyenVan),
+      edit: tyLe(suaRoiGui),
+      reject: tyLe(tuChoi),
+    },
+    reviewSeconds: {
+      avg: t?.tb === null || t?.tb === undefined ? null : Number(t.tb),
+      median: t?.tv === null || t?.tv === undefined ? null : Number(t.tv),
+    },
+    route,
+  };
 }

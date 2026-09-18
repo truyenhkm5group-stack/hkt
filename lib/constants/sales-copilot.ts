@@ -203,3 +203,23 @@ export const HUMAN_REPLY_SQL_LIST = HUMAN_REPLY_SENDER_TYPES.map((t) => `'${t}'`
  * biến mất khỏi hàng đợi và không bao giờ được trả lời.
  */
 export const AUTOMATION_TEMPLATE_MIN_CONVERSATIONS = 3;
+
+/** Dạng chuỗi cho SQL: `('SEND', 'EDIT_SEND', 'REJECT')`. Dẫn xuất, không gõ lại danh sách ở truy vấn. */
+export const COPILOT_TERMINAL_SQL_LIST = COPILOT_TERMINAL_ACTIONS.map((a) => `'${a}'`).join(", ");
+
+/**
+ * ═══════════ ĐỦ BAO NHIÊU LƯỢT THÌ MỚI ĐỌC ĐƯỢC KẾT QUẢ THÍ ĐIỂM ═══════════
+ *
+ * Không phải một hạn chót. Đây là CỠ MẪU: dưới 20 lượt khách được nhân viên soát thì mọi tỷ lệ
+ * đọc ra đều là tiếng ồn — một lần từ chối biến tỷ lệ dùng được từ 100% xuống 80%, và không ai
+ * phân biệt được "câu máy soạn tệ" với "hôm đó gặp đúng một khách khó".
+ *
+ * Trần 50 để chốt lại: thí điểm là để RA QUYẾT ĐỊNH, không phải để chạy mãi. Đủ 50 lượt mà vẫn
+ * chưa kết luận được thì vấn đề nằm ở câu hỏi, không nằm ở dữ liệu.
+ *
+ * ĐẾM CÁI GÌ: một lượt = MỘT CÂU MÁY SOẠN được một người kết thúc (gửi · sửa rồi gửi · từ chối).
+ * KHÔNG đếm tin hệ thống, tin bot, tin nhân viên, và KHÔNG đếm lượt khách chưa ai soát. Cũng
+ * không được kéo hội thoại cũ vào cho đủ số: cỡ mẫu đi kèm điều kiện "trên khách thật, trong kỳ
+ * thí điểm", bỏ điều kiện ấy thì con số không còn nghĩa gì.
+ */
+export const PILOT_REVIEWED_TURNS_TARGET = { min: 20, max: 50 } as const;

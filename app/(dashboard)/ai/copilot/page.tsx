@@ -3,14 +3,14 @@ import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { SendCard } from "@/app/(dashboard)/ai/copilot/send-card";
 import { SALES_ACTION_LABEL, SALES_STAGE_LABEL, HANDOFF_REASON_LABEL, type HandoffReason, type SalesAction, type SalesStage } from "@/lib/constants/sales-agent";
-import { AGENT_MODE_LABEL, modeAtLeast } from "@/lib/constants/ai";
+import { AGENT_MODE_LABEL, ROUTE_TIER_LABEL, modeAtLeast, type RouteTier } from "@/lib/constants/ai";
 import { COPILOT_REJECT_LABEL, COPILOT_WARNING_LABEL, type CopilotRejectReason } from "@/lib/constants/sales-copilot";
 import { getAiSettings } from "@/lib/ai-workforce/config";
 import { getAgent } from "@/lib/ai-workforce/registry";
 import { requirePermission } from "@/lib/auth/session";
 import { getCurrentUser } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { copilotKpi, copilotPages, copilotQueue, firstHumanSend, ingestStatus } from "@/lib/queries/sales-copilot";
+import { copilotKpi, copilotPages, copilotQueue, firstHumanSend, ingestStatus, pilotStatus } from "@/lib/queries/sales-copilot";
 import { LIVE_INGEST_HEALTH_LABEL } from "@/lib/constants/live-ingest";
 import { AutoRefresh } from "@/app/(dashboard)/ai/copilot/auto-refresh";
 
@@ -42,11 +42,51 @@ export default async function CopilotPage() {
   const sanSang = modeAtLeast(mode, "COPILOT") && settings.hardLimits.allowHumanApprovedSend && pages.length > 0;
   // Hội thoại người khác đang cầm KHÔNG hiện ở đây — trừ hội thoại của chính người đang xem,
   // để họ còn nút trả lại cho máy.
-  const [queue, kpi, nap, lanDau] = await Promise.all([copilotQueue({ limit: 40, heldByUserId: user?.id ?? null }), copilotKpi(7), ingestStatus(), firstHumanSend()]);
+  const [queue, kpi, nap, lanDau, pilot] = await Promise.all([
+    copilotQueue({ limit: 40, heldByUserId: user?.id ?? null }),
+    copilotKpi(7),
+    ingestStatus(),
+    firstHumanSend(),
+    pilotStatus(),
+  ]);
 
   return (
     <div className="space-y-4">
       <PageHeader title="Hàng đợi trợ lý AI" description="Máy soạn — nhân viên đọc, sửa nếu cần, rồi bấm gửi. Không có đường nào cho máy tự gửi." />
+
+      {/*
+        SÁU BƯỚC, IN NGAY TRÊN ĐẦU MÀN HÌNH.
+
+        Người trực chat không đọc tài liệu bàn giao, và một buổi tập huấn thì phai sau vài ngày.
+        Thứ còn lại là cái họ nhìn thấy mỗi lần mở màn hình. Chữ trên nút được viết Y HỆT nút thật
+        ("Gửi nguyên văn", "Sửa & gửi", "Từ chối", "Tự nhận việc") — một bản hướng dẫn gọi tên khác
+        với nút trước mắt là một bản hướng dẫn khiến người ta bấm nhầm.
+
+        Hai câu cuối không phải khẩu hiệu: chúng là điều màn hình này phải nói mỗi ngày, vì người
+        soát tin cần biết chắc rằng KHÔNG có đường nào để máy tự đi trước họ.
+      */}
+      <Card className="border-sky-500/60 bg-sky-50/70 p-3 dark:border-sky-400/40 dark:bg-sky-950/30">
+        <p className="text-xs font-semibold uppercase tracking-wide">Thí điểm trợ lý — sáu bước</p>
+        <ol className="mt-1 grid gap-x-4 gap-y-0.5 text-xs sm:grid-cols-2 lg:grid-cols-3">
+          <li>1. Đọc tin khách</li>
+          <li>2. Kiểm câu máy soạn</li>
+          <li>
+            3. Đúng rồi → <strong>Gửi nguyên văn</strong>
+          </li>
+          <li>
+            4. Cần sửa → <strong>Sửa &amp; gửi</strong>
+          </li>
+          <li>
+            5. Sai → <strong>Từ chối</strong>
+          </li>
+          <li>
+            6. Ca phải người xử lý hẳn → <strong>Tự nhận việc</strong>
+          </li>
+        </ol>
+        <p className="mt-1.5 text-xs font-semibold text-rose-700 dark:text-rose-300">
+          AI KHÔNG TỰ GỬI TIN. AI KHÔNG TỰ TẠO ĐƠN. Mọi tin tới khách đều do một nhân viên bấm.
+        </p>
+      </Card>
 
       {/*
         MỘT DÒNG TRẢ LỜI "HỆ THỐNG CÓ ĐANG SỐNG KHÔNG".
@@ -192,13 +232,102 @@ export default async function CopilotPage() {
         </p>
       </Card>
 
+      {/*
+        ═══════════ BẢNG ĐIỂM THÍ ĐIỂM — ĐỌC ĐƯỢC MÀ KHÔNG PHẢI GÕ MỘT CÂU SQL NÀO ═══════════
+
+        Suốt giai đoạn dựng, mọi con số của đợt thí điểm chỉ có khi ai đó mở ops chạy truy vấn tay.
+        Một chỉ số chỉ đọc được bằng dòng lệnh là một chỉ số KHÔNG AI ĐỌC: chủ shop không mở ops,
+        nhân viên trực chat lại càng không. Cho nên nó phải nằm ngay trên màn hình họ đang dùng.
+
+        Mẫu số rỗng in dấu gạch, không in 0% — chưa ai bấm lần nào thì "tỷ lệ dùng được" CHƯA BIẾT,
+        và 0% là một lời khẳng định khác hẳn (luật 42).
+      */}
+      <Card className="p-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide">Tiến độ thí điểm</p>
+          <p className="text-xs text-muted-foreground">
+            lượt khách ĐÃ CÓ NGƯỜI SOÁT: <strong className="text-sm text-foreground">{formatNumber(pilot.reviewedTurns)}</strong> / {pilot.target.min}–
+            {pilot.target.max}
+          </p>
+        </div>
+        <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-muted">
+          <div className="h-full bg-sky-600 dark:bg-sky-400" style={{ width: `${Math.min(100, Math.round((pilot.reviewedTurns / pilot.target.min) * 100))}%` }} />
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Một lượt = MỘT câu máy soạn được một người kết thúc (gửi · sửa rồi gửi · từ chối). Không tính tin hệ thống, tin bot,
+          tin nhân viên, và không tính lượt khách chưa ai soát.
+        </p>
+
+        <div className="mt-2 grid gap-2 border-t border-border/60 pt-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
+          <Stat label="Gửi nguyên văn" value={ghepTyLe(pilot.decisions.sendUnchanged, pilot.rates.unchanged)} />
+          <Stat label="Sửa &amp; gửi" value={ghepTyLe(pilot.decisions.editAndSend, pilot.rates.edit)} />
+          <Stat label="Từ chối" value={ghepTyLe(pilot.decisions.reject, pilot.rates.reject)} />
+          <Stat label="Tỷ lệ dùng được" value={pilot.rates.acceptance === null ? "—" : `${pilot.rates.acceptance}%`} />
+          <Stat
+            label="Thời gian soát"
+            value={pilot.reviewSeconds.median === null ? "—" : `${pilot.reviewSeconds.median}s (TB ${pilot.reviewSeconds.avg ?? "—"}s)`}
+          />
+        </div>
+
+        {/*
+          NGƯỜI NHẬN HẲN VIỆC ĐẾM THEO HỘI THOẠI, KHÔNG THEO LƯỢT — nên nó đứng riêng một dòng chứ
+          không xếp cạnh bốn ô trên. Một hội thoại có ba lượt soát vẫn chỉ là MỘT lần nhận việc;
+          chia nó cho số lượt thì ra một con số không nói về cái gì cả (luật 8.2: một độ mịn).
+        */}
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          Hội thoại có người thao tác: <strong>{formatNumber(pilot.conversations.touched)}</strong> · người nhận hẳn việc:{" "}
+          <strong>{formatNumber(pilot.conversations.takenOver)}</strong>
+          {pilot.conversations.handoffRate === null ? "" : ` (${pilot.conversations.handoffRate}%)`} — đếm theo HỘI THOẠI, không cùng mẫu
+          số với các ô trên.
+        </p>
+
+        {/*
+          ĐƯỜNG MÔ HÌNH · TOKEN · ĐỘ TRỄ. Chi phí chưa khai đơn giá in "chưa khai giá", KHÔNG in 0đ:
+          một mô hình chưa có bảng giá không phải một mô hình chạy miễn phí.
+        */}
+        <div className="mt-2 space-y-0.5 border-t border-border/60 pt-2 text-[11px]">
+          <p className="font-semibold uppercase tracking-wide text-muted-foreground">Đường mô hình của chính các câu trong thí điểm</p>
+          {pilot.route.length === 0 ? (
+            <p className="text-muted-foreground">Chưa có lượt chạy nào gắn với page thí điểm.</p>
+          ) : (
+            pilot.route.map((r) => (
+              <p key={r.tier}>
+                <strong>{ROUTE_TIER_LABEL[r.tier as RouteTier] ?? r.tier}</strong>: {formatNumber(r.runs)} lượt · {formatNumber(r.inputTokens)} token vào ·{" "}
+                {formatNumber(r.outputTokens)} token ra · độ trễ trung vị {r.medianLatencyMs === null ? "—" : `${formatNumber(r.medianLatencyMs)}ms`} · chi phí{" "}
+                {r.costVnd === null ? `CHƯA BIẾT${r.unpricedRuns ? ` (${formatNumber(r.unpricedRuns)} lượt chưa khai giá)` : ""}` : formatVND(r.costVnd)}
+              </p>
+            ))
+          )}
+        </div>
+
+        {/*
+          HAI CỜ CHỦ SHOP HỎI ĐÍCH DANH, in đúng tên biến để đối chiếu được với báo cáo.
+          Cả hai SUY RA từ sổ thao tác (`copilotKpi`), không phải hai giá trị ai đó đặt tay ở đâu đó.
+        */}
+        <p className="mt-2 border-t border-border/60 pt-2 text-[11px]">
+          <code>FIRST_HUMAN_SEND_PENDING</code> = <strong>{kpi.firstHumanSend.pending ? "true" : "false"}</strong> ·{" "}
+          <code>COPILOT_LIVE_SEND_VERIFIED</code> ={" "}
+          <strong>{!kpi.firstHumanSend.pending && kpi.firstHumanSend.verified === true ? "true" : "false"}</strong>
+          {kpi.firstHumanSend.pending ? " — chưa tin nào rời khỏi ERP" : ""}
+        </p>
+      </Card>
+
       {!pages.length ? (
         <Card className="p-6 text-center text-sm text-muted-foreground">
           Chưa khai page nào vào <code>ai.copilotPages</code> nên hàng đợi trống. Đây là mặc định an toàn: quên khai thì không
           ai nhắn được cho khách, chứ không phải mọi page cùng mở.
         </Card>
       ) : !queue.length ? (
-        <Card className="p-6 text-center text-sm text-muted-foreground">Không có hội thoại nào đang chờ xử lý.</Card>
+        /*
+          HÀNG ĐỢI RỖNG KHÔNG PHẢI MỘT LỖI — nhưng một màn hình trống thì trông y hệt một màn hình
+          hỏng. Câu thứ hai là câu quan trọng: nó nói hệ thống VẪN ĐANG CANH, nên người trực không
+          phải bấm tải lại để tự trấn an, và cũng không đi lục lịch sử để "tạo việc" cho đủ.
+        */
+        <Card className="p-6 text-center text-sm text-muted-foreground">
+          Hiện không có khách cần xử lý.
+          <br />
+          Hệ thống đang tự theo dõi tin nhắn mới.
+        </Card>
       ) : null}
 
       {queue.map((row) => (
@@ -302,6 +431,11 @@ export default async function CopilotPage() {
       ))}
     </div>
   );
+}
+
+/** Số lượt kèm tỷ lệ. Mẫu số rỗng ⇒ chỉ in số, KHÔNG bịa ra "0%". */
+function ghepTyLe(n: number, tyLe: number | null): string {
+  return tyLe === null ? formatNumber(n) : `${formatNumber(n)} · ${tyLe}%`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
