@@ -541,5 +541,48 @@ export function testPhase2aSourceGuards() {
     assert.ok(!/["'`]push["'`]|git.{0,3}push/.test(src.replace(/\*[^*]*\*/g, "")) || src.includes("KHÔNG merge"), `${f}: không được có đường đẩy nhánh lên kho chung`);
   }
 
-  console.log('✓ Quét mã nguồn Phase 2A: không tệp "use client" nào chạm tích hợp GitHub / runner · client GitHub chỉ GET · không log token · agent không có lệnh commit/push/merge');
+  /*
+    ───────── 5.6 ĐƯỜNG CẤU HÌNH PHẢI TỚI ĐƯỢC MÁY CHỦ ─────────
+
+    Một tích hợp chỉ-đọc hoàn chỉnh trong `lib/` mà không có đường đưa token xuống VPS là một
+    tích hợp không bao giờ chạy: trang Deploy sẽ mãi mãi nói "chưa cấu hình", và không ai đọc
+    dòng chữ đó như một lỗi cấu hình — họ đọc nó như "chưa có lượt deploy nào". Ba chỗ dưới đây
+    là toàn bộ đường đi của một biến môi trường trong kho này, và thiếu một chỗ là đứt cả đường.
+  */
+  const deployYml = doc(".github/workflows/deploy-vps.yml");
+  const opsYml = doc(".github/workflows/ops-vps.yml");
+  const installSh = doc("scripts/install-vps.sh");
+  for (const bien of ["ERP_GITHUB_TOKEN", "ERP_GITHUB_REPO", "ERP_GITHUB_DEPLOY_WORKFLOW"]) {
+    assert.ok(deployYml.includes(`envs: ERP_BRANCH`) && deployYml.includes(`,${bien},`), `deploy-vps.yml phải truyền ${bien} xuống VPS (danh sách envs)`);
+    assert.ok(new RegExp(`export .*\\b${bien}\\b`).test(deployYml), `deploy-vps.yml phải export ${bien} trong phiên SSH — biến không export thì bootstrap không thấy`);
+    assert.ok(installSh.includes(bien), `install-vps.sh phải ghi ${bien} vào .env`);
+    assert.ok(opsYml.includes(bien), `ops-vps.yml phải có ${bien} cho thao tác apply-tech-github-env`);
+  }
+  assert.ok(opsYml.includes("apply-tech-github-env"), "ops-vps.yml phải có thao tác apply-tech-github-env để đặt cấu hình mà KHÔNG phải deploy");
+
+  /*
+    ───────── 5.7 CHỈ GHI KHI CÓ GIÁ TRỊ ─────────
+
+    Secret chưa đặt mà ghi đè rỗng thì sổ deploy im lặng ngừng cập nhật — cùng đúng cái bẫy mà
+    khối SePay trong install-vps.sh đã phải học một lần. Nên đường ghi phải đi qua mệnh đề
+    "có giá trị mới ghi", ở CẢ HAI nơi ghi .env.
+  */
+  assert.ok(/\[ -n "\$\{ERP_GITHUB_TOKEN:-\}" \] && upsert_env ERP_GITHUB_TOKEN/.test(installSh), "install-vps.sh: ERP_GITHUB_TOKEN chỉ được ghi khi Secret CÓ giá trị");
+  const khoiOps = opsYml.slice(opsYml.indexOf("apply-tech-github-env)"), opsYml.indexOf("sepay-verify)"));
+  assert.ok(/if \[ -z "\$\{ERP_GITHUB_TOKEN:-\}" \]/.test(khoiOps), "apply-tech-github-env: Secret trống thì DỪNG, không ghi đè rỗng");
+
+  /*
+    ───────── 5.8 THAO TÁC ĐẶT CẤU HÌNH KHÔNG ĐƯỢC DEPLOY, KHÔNG ĐƯỢC IN SECRET ─────────
+
+    Chủ shop yêu cầu rõ: thao tác này chỉ ghi .env, khởi động lại dịch vụ cần thiết và thử kết
+    nối. Kho mã này PUBLIC nên log Actions ai cũng đọc được — in `$ERP_GITHUB_TOKEN` một lần là
+    công bố nó vĩnh viễn, không rút lại được kể cả khi xoá lần chạy.
+  */
+  assert.ok(!/echo[^\n]*\$\{?ERP_GITHUB_TOKEN\}?(?![:#])/.test(khoiOps.replace(/\$\{#ERP_GITHUB_TOKEN\}/g, "")), "apply-tech-github-env: KHÔNG được in giá trị token (chỉ được in độ dài)");
+  assert.ok(khoiOps.includes("${#ERP_GITHUB_TOKEN}"), "…và phải in ĐỘ DÀI để người vận hành biết đã ghi được gì");
+  for (const cam of ["bootstrap.sh", "install-vps.sh", "db:migrate", "--apply"]) {
+    assert.ok(!khoiOps.includes(cam), `apply-tech-github-env: KHÔNG được chạy \`${cam}\` — nó đặt cấu hình, không deploy và không ghi dữ liệu`);
+  }
+
+  console.log('✓ Quét mã nguồn Phase 2A: không tệp "use client" nào chạm tích hợp GitHub / runner · client GitHub chỉ GET · không log token · agent không có lệnh commit/push/merge · đường cấu hình ERP_GITHUB_* thông từ Secret tới .env · apply-tech-github-env không deploy và không in secret');
 }

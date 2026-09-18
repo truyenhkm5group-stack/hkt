@@ -68,6 +68,7 @@ on:
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
           - apply-sepay-env     # ghi SEPAY_WEBHOOK_SECRET từ Secrets vào .env, khởi động lại, rồi thử chữ ký đúng/sai (KHÔNG ghi tiền vào sổ)
+          - apply-tech-github-env # ghi ERP_GITHUB_TOKEN / REPO / WORKFLOW vào .env, khởi động lại, rồi thử kết nối GitHub (CHỈ ĐỌC, KHÔNG deploy)
           - sepay-verify        # kiểm chứng đường realtime SePay trên máy chủ thật: số đo + phát lại gói tin thật để chứng minh idempotency
           - sepay-reconcile     # đối chiếu sổ với API SePay và vá gói tin webhook đã mất (MẶC ĐỊNH CHẠY THỬ; arg "--apply --days=7")
           - cs-stale            # đối chiếu hàng đợi CSKH với thực tế hiện tại (MẶC ĐỊNH CHẠY THỬ; arg "--apply")
@@ -122,6 +123,13 @@ jobs:
           # nhập của mỗi lần chạy ai cũng đọc được. Một đường dẫn dạng "ai có link cũng xem được"
           # in vào đó là công bố nó vĩnh viễn — không rút lại được kể cả khi xoá lần chạy. Biến
           # thì chỉ đi vào môi trường của tiến trình và không bao giờ được in ra.
+          # Chỉ dùng cho apply-tech-github-env. Token CHỈ ĐỌC của Phòng Tech AI (Actions: read).
+          # KHÔNG phải `secrets.GITHUB_TOKEN` — token của lần chạy hết hiệu lực ngay khi workflow
+          # kết thúc, ghi nó vào .env là ghi một khoá đã chết. Cùng luật với hai khối trên: không
+          # bao giờ truyền qua ô "arg", vì ô đó in nguyên văn vào log của mọi lần chạy.
+          ERP_GITHUB_TOKEN: ${{ secrets.ERP_GITHUB_TOKEN }}
+          ERP_GITHUB_REPO: ${{ vars.ERP_GITHUB_REPO || github.repository }}
+          ERP_GITHUB_DEPLOY_WORKFLOW: ${{ vars.ERP_GITHUB_DEPLOY_WORKFLOW || 'deploy-vps.yml' }}
           HMT_WORKBOOK_URL: ${{ vars.HMT_WORKBOOK_URL }}
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -130,7 +138,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
           script: |
             set -e
             cd /root/erp
@@ -525,6 +533,32 @@ jobs:
                 # trong môi trường của tiến trình, và script chỉ in ĐỘ DÀI chứ không in giá trị.
                 fetch_script sepay-hmac-check.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-hmac-check.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sepay-hmac-check.ts ;;
+              apply-tech-github-env)
+                # ═══ GHI CẤU HÌNH ĐỌC GITHUB CHO PHÒNG TECH AI — KHÔNG DEPLOY, KHÔNG ĐỤNG SỐ LIỆU ═══
+                #
+                # Thao tác này làm ĐÚNG BA việc: ghi ba biến vào .env, khởi động lại app + scheduler
+                # để tiến trình đọc được biến mới, rồi HỎI GitHub một câu chỉ-đọc. Nó không chạy
+                # migration, không chạy job ghi, không đổi một dòng nghiệp vụ nào.
+                #
+                # GIÁ TRỊ TOKEN KHÔNG BAO GIỜ ĐƯỢC IN — chỉ ĐỘ DÀI, đủ để trả lời "đã ghi được chưa"
+                # mà không đủ để dùng lại. Kho mã này PUBLIC nên log Actions ai cũng đọc được.
+                upsert_env() { if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi; }
+                if [ -z "${ERP_GITHUB_TOKEN:-}" ]; then
+                  echo "Chưa có Secret ERP_GITHUB_TOKEN trong kho — KHÔNG ghi gì."
+                  echo "Ghi đè rỗng sẽ làm sổ deploy im lặng ngừng cập nhật, và một sổ đứng yên trông y hệt một sổ không có gì mới."
+                  echo "Tạo token CHỈ ĐỌC (Fine-grained PAT → Repository permissions → Actions: Read-only, Contents: Read-only)"
+                  echo "rồi thêm ở Settings → Secrets and variables → Actions → New repository secret → ERP_GITHUB_TOKEN."
+                  exit 1
+                fi
+                upsert_env ERP_GITHUB_TOKEN "$ERP_GITHUB_TOKEN"; echo "ERP_GITHUB_TOKEN: đã ghi (${#ERP_GITHUB_TOKEN} ký tự)"
+                [ -n "${ERP_GITHUB_REPO:-}" ] && { upsert_env ERP_GITHUB_REPO "$ERP_GITHUB_REPO"; echo "ERP_GITHUB_REPO=$ERP_GITHUB_REPO"; }
+                [ -n "${ERP_GITHUB_DEPLOY_WORKFLOW:-}" ] && { upsert_env ERP_GITHUB_DEPLOY_WORKFLOW "$ERP_GITHUB_DEPLOY_WORKFLOW"; echo "ERP_GITHUB_DEPLOY_WORKFLOW=$ERP_GITHUB_DEPLOY_WORKFLOW"; }
+                $C up -d app scheduler
+                sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo
+                # Thử kết nối CHẠY TRONG container: token đã nằm sẵn trong môi trường tiến trình nên
+                # không phải đi qua dòng lệnh, và script chỉ in danh tính ĐÃ CHE.
+                fetch_script check-integrations.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/check-integrations.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/check-integrations.ts --github ;;
               sepay-verify)
                 # Kiểm chứng trên máy chủ THẬT. Phép phát lại dùng đúng mã giao dịch SePay đã có nên ràng buộc
                 # UNIQUE ở CSDL chặn dòng thứ hai; script vẫn đếm trước/sau và báo đỏ nếu số dòng đổi.

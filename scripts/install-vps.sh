@@ -65,6 +65,12 @@ if [ -f .env ]; then
   [ -n "${SEPAY_WEBHOOK_SECRET:-}" ] && upsert_env SEPAY_WEBHOOK_SECRET "${SEPAY_WEBHOOK_SECRET}"
   [ -n "${SEPAY_WEBHOOK_API_KEY:-}" ] && upsert_env SEPAY_WEBHOOK_API_KEY "${SEPAY_WEBHOOK_API_KEY}"
   [ -n "${SEPAY_API_TOKEN:-}" ] && upsert_env SEPAY_API_TOKEN "${SEPAY_API_TOKEN}"
+  # Phòng Tech AI đọc lượt deploy từ GitHub Actions. Token CHỈ ĐỌC (Actions: read) và cũng CHỈ
+  # ghi khi Secret có giá trị — Secret chưa đặt mà ghi đè rỗng thì sổ deploy im lặng ngừng cập
+  # nhật, và một sổ đứng yên trông y hệt một sổ không có gì để cập nhật.
+  [ -n "${ERP_GITHUB_TOKEN:-}" ] && upsert_env ERP_GITHUB_TOKEN "${ERP_GITHUB_TOKEN}"
+  [ -n "${ERP_GITHUB_REPO:-}" ] && upsert_env ERP_GITHUB_REPO "${ERP_GITHUB_REPO}"
+  [ -n "${ERP_GITHUB_DEPLOY_WORKFLOW:-}" ] && upsert_env ERP_GITHUB_DEPLOY_WORKFLOW "${ERP_GITHUB_DEPLOY_WORKFLOW}"
   grep -qE "^SYNC_ADS_EVERY_MINUTES=" .env || printf 'SYNC_ADS_EVERY_MINUTES="60"\n' >> .env
 else
   say "Tạo .env — nhập thông tin (Enter để dùng mặc định)"
@@ -124,6 +130,14 @@ FACEBOOK_USD_VND="25500"
 # Pancake Pages (chat): access token người dùng để đọc hội thoại → case CSKH
 PANCAKE_ACCESS_TOKEN="${PANCAKE_ACCESS_TOKEN:-}"
 PANCAKE_PAGES_BASE_URL="https://pages.fm/api/v1"
+
+# GitHub Actions — Phòng Tech AI đọc lượt deploy để đối chiếu với bản production đang chạy.
+# CHỈ ĐỌC: token cần đúng quyền Actions: read (+ Contents: read nếu kho private). ERP không kích
+# hoạt, không huỷ, không đổi được một lượt deploy nào. Rỗng = trang Deploy nói "chưa cấu hình",
+# KHÔNG phải "không có lượt deploy nào".
+ERP_GITHUB_TOKEN="${ERP_GITHUB_TOKEN:-}"
+ERP_GITHUB_REPO="${ERP_GITHUB_REPO:-truyenhkm5group-stack/hkt}"
+ERP_GITHUB_DEPLOY_WORKFLOW="${ERP_GITHUB_DEPLOY_WORKFLOW:-deploy-vps.yml}"
 
 ERP_INTERNAL_URL="http://app:3000"
 SYNC_ORDERS_EVERY_MINUTES="3"

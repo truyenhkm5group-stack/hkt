@@ -7,6 +7,7 @@ import { getViettelPostClient } from "@/lib/integrations/viettelpost/client";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { testAiConnection } from "@/lib/ai/provider";
 import { aiDisabledReason, resolveProviderName } from "@/lib/ai/router";
+import { githubConfig, testConnection as testGithubConnection } from "@/lib/integrations/github/client";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -14,7 +15,7 @@ export const maxDuration = 120;
 /** Che các khoá bí mật nếu vô tình lọt vào thông báo lỗi */
 function scrub(message: string) {
   let out = message;
-  for (const secret of [env.pancake.apiKey, env.viettelPost.apiKey, env.viettelPost.password, env.pancake.webhookSecret, env.viettelPost.webhookSecret, env.facebook.accessToken, process.env.OPENAI_API_KEY, process.env.ANTHROPIC_API_KEY]) {
+  for (const secret of [env.pancake.apiKey, env.viettelPost.apiKey, env.viettelPost.password, env.pancake.webhookSecret, env.viettelPost.webhookSecret, env.facebook.accessToken, process.env.OPENAI_API_KEY, process.env.ANTHROPIC_API_KEY, process.env.ERP_GITHUB_TOKEN, process.env.GITHUB_TOKEN, process.env.GH_TOKEN]) {
     if (secret && secret.length >= 6) out = out.split(secret).join("***");
   }
   return out;
@@ -87,7 +88,16 @@ export async function POST(request: NextRequest) {
       const r = await testAiConnection();
       return NextResponse.json({ ok: true, detail: { provider: r.provider, model: r.model, latencyMs: r.latencyMs, message: `${r.provider} · ${r.model} trả lời "${r.answer}" sau ${r.latencyMs} ms` } });
     }
-    return NextResponse.json({ ok: false, error: "Nhà cung cấp không hợp lệ (pancake | viettelpost | facebook | pancake-pages | ai)" }, { status: 400 });
+    if (provider === "github") {
+      // CHỈ ĐỌC: hỏi GitHub một câu rẻ về workflow deploy. Không nạp lượt chạy nào vào sổ (việc đó
+      // là job `github-deployments`), không kích hoạt gì. Trả về danh tính token ĐÃ CHE.
+      const cfg = githubConfig();
+      if (!cfg.configured) return NextResponse.json({ ok: false, error: cfg.reason ?? "Chưa cấu hình GitHub trong .env" });
+      const r = await testGithubConnection();
+      if (!r.ok) return NextResponse.json({ ok: false, error: r.detail });
+      return NextResponse.json({ ok: true, detail: { message: r.detail } });
+    }
+    return NextResponse.json({ ok: false, error: "Nhà cung cấp không hợp lệ (pancake | viettelpost | facebook | pancake-pages | ai | github)" }, { status: 400 });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ ok: false, error: scrub(message) });

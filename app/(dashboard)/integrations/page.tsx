@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { can, requirePermission } from "@/lib/auth/session";
 import { JOB_RUN_KEYS, SYNC_SOURCE_LABEL } from "@/lib/constants/sync";
 import { aiDisabledReason, MODEL_BY_TIER, modelFor, resolveProviderName } from "@/lib/ai/router";
+import { deployWorkflowFile, githubConfig } from "@/lib/integrations/github/client";
 import { env, integrationStatus } from "@/lib/env";
 import { formatDate, formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { VtpCapabilityCheck } from "@/app/(dashboard)/integrations/vtp-capability-check";
@@ -49,6 +50,7 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
   const canSync = can(user, "sync:run");
   const status = integrationStatus();
   const aiProvider = resolveProviderName();
+  const gh = githubConfig();
   const running = runningJobKeys();
   const runParams = parseListParams(raw, { defaultSort: "startedAt", filterKeys: ["source", "status"], sortable: SYNC_RUN_SORTABLE, defaultPeriod: "7d" });
   const webhookFilters = { source: paramList(raw, "whSource"), status: paramList(raw, "whStatus") };
@@ -245,6 +247,24 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
             { label: "ANTHROPIC_API_KEY", value: env.ai.anthropicConfigured ? <span className="text-emerald-700 dark:text-emerald-300">đã đặt</span> : <span className="text-muted-foreground">chưa đặt</span> },
           ]}
           footer={<TestConnectionButton provider="ai" disabled={!aiProvider} />}
+        />
+        <ConnectionCard
+          initials="GH"
+          tone="bg-slate-800"
+          title="GitHub Actions (sổ deploy)"
+          description="Phòng Tech AI đọc lượt chạy workflow deploy để đối chiếu với bản production đang chạy."
+          hint="CHỈ ĐỌC. ERP không kích hoạt, không huỷ, không đổi được một lượt deploy nào — GitHub Actions vẫn là bên có thẩm quyền, bảng /tech/deployments chỉ là lớp quan sát. Token cần đúng quyền Actions: read; nó không bao giờ xuống trình duyệt và không vào nhật ký."
+          configured={gh.configured}
+          items={[
+            { label: "Kho", value: gh.repo ? <span className="font-mono text-xs">{gh.repo}</span> : <span className="text-muted-foreground">Chưa cấu hình ERP_GITHUB_REPO</span> },
+            { label: "Token", value: gh.tokenMasked ? <span className="font-mono">{gh.tokenMasked}</span> : <span className="text-muted-foreground">Chưa cấu hình ERP_GITHUB_TOKEN</span> },
+            { label: "Workflow deploy", value: <span className="font-mono text-xs">{deployWorkflowFile()}</span> },
+            { label: "Lịch", value: <span className="text-muted-foreground">Chạy tay — không có lịch tự động. Bấm “Đọc lại từ GitHub” ở trang Deploy, hoặc chạy job github-deployments.</span>, span: true },
+            gh.configured
+              ? { label: "Quyền tối thiểu", value: <span className="text-xs text-muted-foreground">Fine-grained token → Repository permissions → Actions: Read-only (+ Contents: Read-only nếu kho private). KHÔNG cần quyền ghi, KHÔNG cần workflow, KHÔNG cần administration.</span>, span: true }
+              : { label: "Chưa cấu hình", value: <span className="text-xs text-muted-foreground">{gh.reason} Tạo token CHỈ ĐỌC (Actions: Read-only), đặt vào Secret ERP_GITHUB_TOKEN, rồi chạy Actions → “Vận hành ERP trên VPS” → apply-tech-github-env.</span>, span: true },
+          ]}
+          footer={<TestConnectionButton provider="github" disabled={!gh.configured} />}
         />
       </section>
 

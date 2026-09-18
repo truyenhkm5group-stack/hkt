@@ -14,6 +14,7 @@ import { PancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { runCopilot } from "@/lib/ai/copilot";
 import { testAiConnection } from "@/lib/ai/provider";
 import { aiDisabledReason, modelFor, resolveProviderName } from "@/lib/ai/router";
+import { githubConfig, listRecentDeployRuns, testConnection as testGithubConnection } from "@/lib/integrations/github/client";
 import { getDb, schema } from "@/db";
 import { resolvePermissions } from "@/lib/auth/permissions";
 
@@ -215,10 +216,55 @@ async function checkAi() {
   info(`đã ghi ai_interactions id ${r.interactionId ?? "(không ghi được)"}`);
 }
 
+/**
+ * GitHub Actions — nguồn của sổ quan sát deploy (Phòng Tech AI).
+ *
+ * CHỈ ĐỌC và KHÔNG GHI MỘT DÒNG NÀO: hàm này hỏi GitHub hai câu rồi in ra, nó không nạp lượt chạy
+ * vào `tech_deployments` (việc đó là job `github-deployments`). Tách ra vì hai câu hỏi khác nhau:
+ * "cấu hình có đúng không" phải trả lời được TRƯỚC khi ai đó tin vào con số của sổ.
+ *
+ * DANH TÍNH TOKEN IN Ở DẠNG ĐÃ CHE. Log Actions của kho PUBLIC này ai cũng đọc được.
+ */
+async function checkGithub() {
+  console.log("\n▶ GitHub Actions (sổ deploy Phòng Tech AI)");
+  const cfg = githubConfig();
+  if (!cfg.configured) {
+    bad(`Chưa cấu hình: ${cfg.reason}`);
+    info("Token CHỈ ĐỌC: GitHub → Settings → Developer settings → Fine-grained tokens → Repository permissions → Actions: Read-only (+ Contents: Read-only nếu kho private).");
+    info("Đặt vào Secret ERP_GITHUB_TOKEN rồi chạy Actions → Vận hành ERP trên VPS → apply-tech-github-env.");
+    return;
+  }
+  info(`kho ${cfg.repo} · token ${cfg.tokenMasked}`);
+  const r = await testGithubConnection();
+  if (!r.ok) {
+    bad(r.detail);
+    info("401 = token sai hoặc hết hạn · 403 = thiếu quyền Actions: read · 404 = sai ERP_GITHUB_REPO hoặc tên tệp workflow.");
+    return;
+  }
+  ok(r.detail);
+  try {
+    const runs = await listRecentDeployRuns(5);
+    if (!runs.length) {
+      // KHÔNG nói "khoẻ" khi không đọc được gì: gọi được API mà 0 lượt chạy là một tình huống
+      // KHÁC hẳn, và nó có nghĩa là tên tệp workflow đang trỏ sai chỗ.
+      bad(`Gọi được API nhưng workflow "${cfg.repo}" không có lượt chạy nào — kiểm tra ERP_GITHUB_DEPLOY_WORKFLOW.`);
+      return;
+    }
+    ok(`Đọc được ${runs.length} lượt deploy gần nhất`);
+    for (const run of runs) info(`#${run.runNumber}.${run.runAttempt} · ${run.status}/${run.conclusion ?? "chưa xong"} · ${run.headSha.slice(0, 12)} · ${run.headBranch} · ${run.createdAt.toLocaleString("vi-VN")}`);
+  } catch (error) {
+    bad(`Không đọc được danh sách lượt chạy: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function main() {
   console.log("Kiểm tra kết nối API — VNXcommerce ERP");
   if (process.argv.includes("--ai")) {
     await checkAi();
+    process.exit(0);
+  }
+  if (process.argv.includes("--github")) {
+    await checkGithub();
     process.exit(0);
   }
   const vtpNumber = await checkPancake();
@@ -226,6 +272,7 @@ async function main() {
   await checkFacebook();
   await checkPancakePages();
   await checkAi();
+  await checkGithub();
   console.log("\nHoàn tất. Nếu tất cả ✓ thì chạy: npm run sync -- pancake-all --backfill");
   process.exit(0);
 }
