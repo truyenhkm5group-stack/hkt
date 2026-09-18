@@ -1,66 +1,57 @@
 # ───────────── ROUTE CADDY CHO BẢN CHẠY THỬ NHÂN SỰ AI ─────────────
 #
-# CHƯA ÁP DỤNG. Chỉ thêm khối này SAU KHI bản chạy thử đã xanh trên localhost (xem mục 8
-# docs/ai-staging-plan.md), và chỉ khi DNS của ai-staging.vnxcommerce.com đã trỏ về VPS.
+# Khối này ĐƯỢC NỐI VÀO CUỐI /etc/caddy/Caddyfile. Nó KHÔNG sửa một dòng nào của khối
+# {$ERP_DOMAIN} đang phục vụ khách — thêm một tên miền là phép CỘNG, và quay lui là phép trừ
+# đúng khối này.
 #
-# Cách áp dụng an toàn — KIỂM TRA TRƯỚC KHI NẠP LẠI:
-#   cat /etc/caddy/Caddyfile deploy/Caddyfile.ai-staging > /tmp/Caddyfile.moi
-#   docker cp /tmp/Caddyfile.moi erp-caddy:/tmp/Caddyfile.moi
-#   docker exec erp-caddy caddy validate --config /tmp/Caddyfile.moi --adapter caddyfile   # ← bắt buộc
-#   docker exec erp-caddy sh -c 'cp /tmp/Caddyfile.moi /etc/caddy/Caddyfile'
-#   docker exec erp-caddy caddy reload --config /etc/caddy/Caddyfile
+# Áp dụng bằng thao tác ops `ai-staging-domain` (validate → reload). Đừng sửa tay trên máy chủ:
+# thao tác ấy kiểm cấu hình TRƯỚC khi nạp, còn tay thì không.
 #
-# `caddy reload` là nạp lại MỀM: tiến trình không dừng, kết nối đang mở không đứt, tên miền
-# production không gián đoạn. Nhưng nạp một tệp HỎNG thì Caddy từ chối nạp và giữ cấu hình cũ —
-# nên bước `validate` ở trên là thứ biến "chắc là ổn" thành "đã kiểm".
+# ═══ VÌ SAO KHÔNG PHẢI `reverse_proxy 127.0.0.1:3100` ═══
 #
-# Quay lui: xoá khối này khỏi /etc/caddy/Caddyfile rồi reload lại.
+# Caddy chạy TRONG container `erp-caddy`. `127.0.0.1` ở đó là chính container ấy, không phải máy
+# chủ — proxy tới đó là proxy vào hư không. Bản chạy thử lại publish `127.0.0.1:3100` nên từ trong
+# container cũng không với tới được, và đó là điều ĐÚNG: cổng 3100 không bao giờ được nghe trên
+# 0.0.0.0, vì thế là mở thẳng bản chạy thử ra Internet, đi vòng qua cả Caddy lẫn HTTPS.
 #
-# ═══ ĐỊA CHỈ ĐÍCH: KHÔNG PHẢI 127.0.0.1 ═══
+# Đường đã chọn: nối `erp-caddy` vào MẠNG của bản chạy thử rồi gọi thẳng tên container.
 #
-# Caddy chạy TRONG container `erp-caddy`, nên `127.0.0.1` ở đây là chính container ấy, không phải
-# máy chủ. Khối production trỏ `app:3000` được là vì `app` và `caddy` cùng một compose project nên
-# cùng một mạng Docker — bản chạy thử là project KHÁC, mạng khác, không phân giải được tên đó.
+#   docker network connect vnx-ai-staging_default erp-caddy
 #
-# Ba đường, và lý do chỉ chọn đường thứ nhất:
+# `docker network connect` gắn thêm một giao diện mạng vào container ĐANG CHẠY — KHÔNG dựng lại,
+# KHÔNG đứt một kết nối nào của khách. Gỡ ra cũng vậy (`docker network disconnect`). Không phải
+# publish thêm cổng nào, không phải sửa `docker-compose.prod.yml`, không phải đụng tới
+# `docker-compose.staging.yml`.
 #
-#   1. ĐỊA CHỈ CỔNG (gateway) CỦA MẠNG BRIDGE — bản chạy thử đã publish `127.0.0.1:3100` trên máy
-#      chủ, và container nhìn thấy máy chủ qua địa chỉ cổng của mạng nó đang nối. ĐO nó, đừng đoán:
+# Hai đường còn lại đã cân nhắc và loại:
+#   · Đổi cổng của bản chạy thử sang địa chỉ cổng mạng bridge (172.x.0.1:3100): phải dựng lại bản
+#     chạy thử, và mở cổng ấy cho MỌI container trên bridge mặc định.
+#   · `extra_hosts: host.docker.internal` cho service caddy: phải sửa compose của production rồi
+#     DỰNG LẠI container Caddy — tức làm đứt tên miền của khách một nhịp. Loại thẳng.
 #
-#        docker inspect -f '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}' erp-caddy
+# ═══ VÌ SAO KHÔNG CÓ `basic_auth` Ở ĐÂY ═══
 #
-#      Thường là 172.x.0.1. Thay vào dòng `reverse_proxy` bên dưới. Không sửa gì của production.
+# Quyền truy cập dùng LẠI đăng nhập của ERP: middleware đòi phiên hợp lệ cho mọi đường ngoài
+# `/login` và vài đường công khai, trang `/ai/*` đòi quyền `ai:view`, và mọi thao tác gửi đi qua
+# `requireUser()` + `can(user, "ai:send")`. Một mật khẩu dùng chung đặt thêm ở đây KHÔNG thêm một
+# lớp quy kết nào — nó chỉ thêm một bí mật nữa để quên, và che mất việc ai đã bấm gì.
 #
-#      Kèm điều kiện: cổng 3100 đang chỉ nghe trên 127.0.0.1 nên container KHÔNG với tới được. Phải
-#      đổi `docker-compose.staging.yml` thành `"<địa chỉ cổng>:3100:3000"` rồi `up -d` LẠI BẢN CHẠY
-#      THỬ (không đụng production). Đừng đổi thành `0.0.0.0:3100` — thế là mở thẳng ra Internet,
-#      bỏ qua cả Caddy lẫn mật khẩu.
+# ĐÁNH ĐỔI CÒN LẠI, nói thẳng để chủ shop quyết: không có `basic_auth` thì TRANG ĐĂNG NHẬP của bản
+# chạy thử là công khai. Muốn thêm hàng rào ngoài, chèn khối dưới đây vào ngay trước `reverse_proxy`
+# rồi chạy lại thao tác ops:
 #
-#   2. Nối `erp-caddy` vào mạng của bản chạy thử. LÀM ĐƯỢC nhưng phải `docker network connect` vào
-#      một container ĐANG PHỤC VỤ KHÁCH, và từ đó hai ngăn xếp dính nhau — gỡ bản chạy thử sẽ phải
-#      nhớ gỡ cả mạng. Không đáng.
-#
-#   3. Thêm `extra_hosts: host.docker.internal:host-gateway` cho service caddy. Phải sửa
-#      `docker-compose.prod.yml` và DỰNG LẠI container Caddy — tức làm đứt tên miền production một
-#      nhịp. Loại.
-#
-# Và vì cả ba đường đều động vào một thứ gì đó, GIAI ĐOẠN NÀY KHUYÊN KHÔNG DÙNG CADDY: đường hầm
-# SSH (`ssh -L 3100:127.0.0.1:3100`) cho đúng kết quả, không sửa một dòng cấu hình nào của
-# production, và không mở thêm một bề mặt nào ra Internet.
+#   basic_auth {
+#       staging <chuỗi băm>     # docker run --rm caddy caddy hash-password --plaintext '<mật khẩu>'
+#   }
 
 ai-staging.vnxcommerce.com {
 	encode gzip zstd
 
-	# Bản chạy thử KHÔNG bao giờ được để công khai không khoá: nó đọc hội thoại thật của khách.
-	basic_auth {
-		# Sinh chuỗi băm:  docker run --rm caddy caddy hash-password --plaintext '<mật khẩu>'
-		staging $2a$14$THAY_BANG_CHUOI_BAM_THAT
-	}
-
-	# THAY bằng địa chỉ cổng mạng bridge ĐO ĐƯỢC ở phần đầu tệp — `127.0.0.1` ở trong container
-	# Caddy là chính nó, không phải máy chủ.
-	reverse_proxy 172.17.0.1:3100 {
-		# SSE realtime (/api/events) cần giữ kết nối lâu — giống cấu hình của production
+	# Tên CONTAINER của bản chạy thử, không phải tên service: `app` là tên service ở CẢ HAI ngăn xếp,
+	# nên gọi `app` từ một container nối vào hai mạng là để Docker chọn hộ — và nó có thể chọn
+	# container đang phục vụ khách.
+	reverse_proxy vnx-ai-staging-app:3000 {
+		# SSE realtime (/api/events) giữ kết nối lâu — giống cấu hình của production.
 		flush_interval -1
 		transport http {
 			read_timeout 0
@@ -68,14 +59,17 @@ ai-staging.vnxcommerce.com {
 	}
 
 	header {
-		# Không để công cụ tìm kiếm đánh chỉ mục một bản chạy thử có dữ liệu khách
-		X-Robots-Tag "noindex, nofollow, noarchive"
+		# Bản chạy thử chứa hội thoại THẬT của khách: không bao giờ để công cụ tìm kiếm đánh chỉ mục.
+		X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+		# Để người mở nhầm tab biết ngay mình đang ở đâu.
 		X-Environment "ai-staging"
 		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Strict-Transport-Security "max-age=31536000"
 	}
 
 	log {
-		# Nhật ký RIÊNG, không trộn vào nhật ký production
+		# Nhật ký RIÊNG, không trộn vào nhật ký production.
 		output file /var/log/caddy/ai-staging.log {
 			roll_size 10MiB
 			roll_keep 5

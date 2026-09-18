@@ -81,6 +81,7 @@ on:
           - ai-staging-ai-env     # ghi OPENAI_API_KEY / AI_PROVIDER từ Secrets vào .env.staging rồi thử kết nối (KHÔNG in giá trị)
           - ai-staging-shadow     # MẺ CHẠY NGẦM VỚI MÔ HÌNH THẬT (arg: "--page=<id> --max=20 [--dry-run]")
           - ai-staging-copilot    # BẬT/TẮT nấc TRỢ LÝ cho MỘT page (arg: "--page=<id> --on" | "--off"); MÁY TỰ GỬI vẫn ghim CẤM
+          - ai-staging-domain     # TÊN MIỀN + HTTPS cho bản chạy thử (arg: "--prepare" | "--apply" | "--status" | "--off")
           - ai-staging-live-ingest # BẬT/TẮT bộ nạp tin sống (arg: "--on [--seconds=45]" | "--off" | "--once"); chỉ ĐỌC, không bao giờ gửi
           - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
@@ -962,6 +963,140 @@ jobs:
                 docker logs --tail=25 vnx-ai-staging-ingest 2>&1 || echo "  (chưa có log)"
                 echo ""
                 echo "Mở hàng đợi: http://127.0.0.1:3100/ai/copilot (qua tunnel SSH)" ;;
+
+              ai-staging-domain)
+                # TÊN MIỀN CHO BẢN CHẠY THỬ — thêm MỘT khối vào Caddyfile, không sửa khối của khách.
+                #
+                # Bốn chế độ, và mặc định là chế độ KHÔNG ĐỔI GÌ:
+                #   --prepare (mặc định) : kiểm DNS + dựng cấu hình ghép + `caddy validate`. KHÔNG nạp lại.
+                #   --apply              : như trên, RỒI mới nối mạng và `caddy reload`.
+                #   --status             : in hiện trạng, không chạm gì.
+                #   --off                : gỡ khối, validate, reload, rồi rút mạng ra.
+                #
+                # `caddy reload` là nạp MỀM: tiến trình không dừng, kết nối đang mở không đứt. Và nạp
+                # một tệp HỎNG thì Caddy TỪ CHỐI, giữ nguyên cấu hình cũ — nhưng `validate` ở trước
+                # vẫn cần, vì nó biến "chắc là ổn" thành "đã kiểm" TRƯỚC khi đụng tới tệp thật.
+                CHE_DO="prepare"
+                for a in ${ARG:-}; do
+                  case "$a" in
+                    --prepare) CHE_DO="prepare" ;;
+                    --apply)   CHE_DO="apply" ;;
+                    --status)  CHE_DO="status" ;;
+                    --off)     CHE_DO="off" ;;
+                  esac
+                done
+                TEN_MIEN="ai-staging.vnxcommerce.com"
+                MANG="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' vnx-ai-staging-app 2>/dev/null | awk '{print $1}')"
+                [ -z "$MANG" ] && MANG="vnx-ai-staging_default"
+
+                echo "── HIỆN TRẠNG ──"
+                echo "  tên miền      : $TEN_MIEN"
+                echo "  mạng bản thử  : ${MANG:-(không đọc được)}"
+                IP_VPS="$(curl -fsS -m 10 https://api.ipify.org 2>/dev/null || echo '?')"
+                echo "  IP công khai VPS: ${IP_VPS}"
+                # Phân giải TỪ CHÍNH MÁY CHỦ. Máy nào hỏi cũng ra cùng một câu trả lời thì tốt, nhưng
+                # câu trả lời đáng tin là câu đo ở nơi Let's Encrypt sẽ đi tới.
+                IP_DNS="$(getent hosts "$TEN_MIEN" 2>/dev/null | awk '{print $1}' | head -1)"
+                if [ -z "$IP_DNS" ]; then
+                  echo "  DNS           : ✗ CHƯA TRỎ — $TEN_MIEN không phân giải được"
+                  DNS_OK=0
+                elif [ "$IP_DNS" = "$IP_VPS" ]; then
+                  echo "  DNS           : ✓ trỏ đúng VPS ($IP_DNS)"
+                  DNS_OK=1
+                else
+                  echo "  DNS           : ✗ trỏ tới $IP_DNS, KHÁC IP của VPS ($IP_VPS)"
+                  DNS_OK=0
+                fi
+                DA_CO_KHOI=0
+                docker exec erp-caddy grep -qF "$TEN_MIEN" /etc/caddy/Caddyfile 2>/dev/null && DA_CO_KHOI=1
+                echo "  khối trong Caddyfile: $([ "$DA_CO_KHOI" = 1 ] && echo 'ĐÃ CÓ' || echo 'chưa có')"
+                docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' erp-caddy 2>/dev/null | tr ' ' '\n' | grep -q "^${MANG}$" && NOI_MANG=1 || NOI_MANG=0
+                echo "  erp-caddy nối mạng bản thử: $([ "$NOI_MANG" = 1 ] && echo 'RỒI' || echo 'chưa')"
+
+                if [ "$CHE_DO" = "status" ]; then
+                  echo ""
+                  echo "── TÊN MIỀN ĐANG PHỤC VỤ ──"
+                  docker exec erp-caddy grep -E '^[a-z0-9.*-]+ *\{' /etc/caddy/Caddyfile 2>/dev/null | sed 's/^/  /' || true
+                  exit 0
+                fi
+
+                if [ "$CHE_DO" = "off" ]; then
+                  docker exec erp-caddy cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak
+                  # Cắt từ dòng mở khối tới hết tệp. Khối này LUÔN nằm cuối nên phép cắt là đủ.
+                  docker exec erp-caddy sh -c "awk -v d=\"$TEN_MIEN\" 'index(\$0, d) == 1 {exit} {print}' /etc/caddy/Caddyfile.bak > /etc/caddy/Caddyfile.moi"
+                  docker exec erp-caddy caddy validate --config /etc/caddy/Caddyfile.moi --adapter caddyfile
+                  docker exec erp-caddy sh -c 'cp /etc/caddy/Caddyfile.moi /etc/caddy/Caddyfile'
+                  docker exec erp-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+                  docker network disconnect "$MANG" erp-caddy 2>/dev/null || true
+                  echo "✓ đã gỡ tên miền bản chạy thử. Production không đổi."
+                  curl -fsS -m 10 https://erp.vnxcommerce.com/api/health && echo || echo "  ⚠ production chưa trả lời — xem ngay"
+                  exit 0
+                fi
+
+                # ───── dựng cấu hình ghép ─────
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/deploy/Caddyfile.ai-staging?ref=${STAGING_BRANCH}" > /tmp/ai-staging.caddy
+                docker exec erp-caddy sh -c 'grep -vF "ai-staging.vnxcommerce.com" /etc/caddy/Caddyfile > /tmp/base.caddy || true'
+                # Ghép: phần production HIỆN TẠI (đã bỏ khối cũ nếu có) + khối mới.
+                docker exec erp-caddy sh -c 'cp /etc/caddy/Caddyfile /tmp/hien-tai.caddy'
+                docker exec erp-caddy sh -c "awk -v d=\"$TEN_MIEN\" 'index(\$0, d) == 1 {exit} {print}' /tmp/hien-tai.caddy > /tmp/nen.caddy"
+                docker cp /tmp/ai-staging.caddy erp-caddy:/tmp/them.caddy
+                docker exec erp-caddy sh -c 'cat /tmp/nen.caddy /tmp/them.caddy > /tmp/Caddyfile.moi'
+
+                echo ""
+                echo "── KIỂM CẤU HÌNH GHÉP (chưa nạp) ──"
+                if docker exec erp-caddy caddy validate --config /tmp/Caddyfile.moi --adapter caddyfile; then
+                  echo "  ✓ cấu hình HỢP LỆ"
+                else
+                  echo "  ✗ cấu hình HỎNG — KHÔNG nạp gì, production giữ nguyên"
+                  exit 1
+                fi
+
+                if [ "$CHE_DO" = "prepare" ]; then
+                  echo ""
+                  echo "── ĐÃ CHUẨN BỊ XONG, CHƯA NẠP ──"
+                  if [ "$DNS_OK" = "1" ]; then
+                    echo "  DNS đã trỏ đúng. Chạy lại thao tác này với arg = \"--apply\" để bật."
+                  else
+                    echo "  CÒN THIẾU DNS. Thêm bản ghi sau rồi chạy lại với arg = \"--apply\":"
+                    echo ""
+                    echo "      Loại: A     Tên: ai-staging     Giá trị: ${IP_VPS}     TTL: 300     Proxy: TẮT"
+                    echo ""
+                    echo "  (Không bật proxy/CDN: Caddy tự xin chứng chỉ Let's Encrypt qua cổng 80/443.)"
+                  fi
+                  exit 0
+                fi
+
+                # ───── apply ─────
+                if [ "$DNS_OK" != "1" ]; then
+                  echo ""
+                  echo "✗ DỪNG: DNS chưa trỏ về VPS nên Let's Encrypt KHÔNG cấp được chứng chỉ."
+                  echo "  Nạp khối lúc này chỉ tạo một vòng thử-lại ACME hỏng trong log của Caddy đang phục vụ khách."
+                  echo "  Thêm bản ghi A ở trên rồi chạy lại."
+                  exit 1
+                fi
+                # Nối mạng TRƯỚC khi nạp: nạp xong mà chưa có đường tới thì tên miền trả 502.
+                if [ "$NOI_MANG" != "1" ]; then
+                  docker network connect "$MANG" erp-caddy
+                  echo "  ✓ đã nối erp-caddy vào $MANG (gắn thêm giao diện mạng, KHÔNG dựng lại container)"
+                fi
+                docker exec erp-caddy cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak
+                docker exec erp-caddy sh -c 'cp /tmp/Caddyfile.moi /etc/caddy/Caddyfile'
+                docker exec erp-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+                echo "  ✓ đã nạp lại Caddy (mềm — không dựng lại, không đứt kết nối)"
+                sleep 8
+
+                echo ""
+                echo "── PRODUCTION PHẢI KHÔNG ĐỔI ──"
+                curl -fsS -m 10 https://erp.vnxcommerce.com/api/health && echo || echo "  ✗ production KHÔNG trả lời — cân nhắc chạy lại với --off"
+                echo ""
+                echo "── BẢN CHẠY THỬ QUA TÊN MIỀN ──"
+                curl -fsS -m 20 "https://${TEN_MIEN}/api/health" && echo || echo "  (chứng chỉ có thể đang được cấp — đợi 30–60 giây rồi thử lại)"
+                echo ""
+                echo "── /ai/copilot PHẢI ĐÒI ĐĂNG NHẬP (302 về /login, KHÔNG phải 200) ──"
+                curl -s -o /dev/null -w '  mã trả về: %{http_code}  ·  chuyển hướng tới: %{redirect_url}\n' -m 20 "https://${TEN_MIEN}/ai/copilot" || true
+                echo ""
+                echo "Mở: https://${TEN_MIEN}/ai/copilot" ;;
 
               ai-staging-knowledge)
                 cd /opt/vnx-ai-staging

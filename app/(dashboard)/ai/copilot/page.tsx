@@ -10,7 +10,7 @@ import { getAgent } from "@/lib/ai-workforce/registry";
 import { requirePermission } from "@/lib/auth/session";
 import { getCurrentUser } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { copilotKpi, copilotPages, copilotQueue, ingestStatus } from "@/lib/queries/sales-copilot";
+import { copilotKpi, copilotPages, copilotQueue, firstHumanSend, ingestStatus } from "@/lib/queries/sales-copilot";
 import { LIVE_INGEST_HEALTH_LABEL } from "@/lib/constants/live-ingest";
 import { AutoRefresh } from "@/app/(dashboard)/ai/copilot/auto-refresh";
 
@@ -32,7 +32,7 @@ export default async function CopilotPage() {
   const sanSang = modeAtLeast(mode, "COPILOT") && settings.hardLimits.allowHumanApprovedSend && pages.length > 0;
   // Hội thoại người khác đang cầm KHÔNG hiện ở đây — trừ hội thoại của chính người đang xem,
   // để họ còn nút trả lại cho máy.
-  const [queue, kpi, nap] = await Promise.all([copilotQueue({ limit: 40, heldByUserId: user?.id ?? null }), copilotKpi(7), ingestStatus()]);
+  const [queue, kpi, nap, lanDau] = await Promise.all([copilotQueue({ limit: 40, heldByUserId: user?.id ?? null }), copilotKpi(7), ingestStatus(), firstHumanSend()]);
 
   return (
     <div className="space-y-4">
@@ -107,6 +107,28 @@ export default async function CopilotPage() {
           <div>
             <p className="text-muted-foreground">Page thí điểm</p>
             <p className="font-semibold">{pages.length ? pages.join(", ") : "chưa khai — không page nào gửi được"}</p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Tạo đơn</p>
+            <p className={settings.hardLimits.allowOrderCreate ? "font-semibold text-rose-600 dark:text-rose-400" : "font-semibold text-emerald-700 dark:text-emerald-300"}>
+              {settings.hardLimits.allowOrderCreate ? "⛔ ĐANG MỞ" : "CẤM"}
+            </p>
+          </div>
+          {/*
+            LẦN GỬI ĐẦU TIÊN DO NGƯỜI BẤM — đọc từ SỔ THAO TÁC, không từ một cờ ai đó đặt tay.
+            Một cờ thì sai được; một phép đếm trên chính bảng ghi vết thì không.
+          */}
+          <div>
+            <p className="text-muted-foreground">Lần gửi đầu do người bấm</p>
+            <p className="font-semibold">
+              {lanDau.verified
+                ? `ĐÃ XÁC MINH · ${lanDau.at ? formatDateTime(lanDau.at) : "—"}${lanDau.actorName ? ` · ${lanDau.actorName}` : ""}`
+                : "CHƯA CÓ — chờ nhân viên bấm lần đầu"}
+            </p>
+          </div>
+          <div>
+            <p className="text-muted-foreground">Tin đã rời khỏi ERP</p>
+            <p className="font-semibold">{formatNumber(lanDau.sentCount)}</p>
           </div>
         </div>
         {!sanSang ? (

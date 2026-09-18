@@ -107,6 +107,51 @@ export async function testSalesCopilot(db: Db) {
   }
 
   /*
+    1A★. MỌI THAO TÁC ĐỀU PHẢI ĐI QUA CỔNG — kể cả thao tác viết thêm ngày mai.
+
+    Mở `/ai/copilot` ra Internet bằng một tên miền thật đổi bản chất của bài kiểm này: trước đó
+    chỉ ai vào được đường hầm SSH mới gọi tới được, nay bất kỳ ai cũng POST được vào một Server
+    Action. Nên điều phải khoá không còn là "năm thao tác hiện có đã gọi cổng", mà là KHÔNG CÓ
+    thao tác nào — hôm nay hay mai — bỏ qua được nó.
+
+    Quét theo tên hàm xuất ra, nên một hàm mới thêm mà quên cổng sẽ đỏ ngay ở lần chạy đầu.
+  */
+  const maAction = readFileSync("lib/actions/sales-copilot.ts", "utf8");
+  const thieuCong: string[] = [];
+  for (const khop of maAction.matchAll(/export async function (\w+)\(/g)) {
+    const ten = khop[1];
+    const than = maAction.slice(khop.index ?? 0).split(/\nexport /)[0];
+    // `cuaGui()` gọi `requireUser()` + `can(user, "ai:send")` + đọc lại nấc + danh sách trắng page.
+    if (!/\bcuaGui\(/.test(than) && !/\brequireUser\(\)/.test(than)) thieuCong.push(ten);
+  }
+  assert.deepEqual(thieuCong, [], "mọi Server Action của hàng đợi trợ lý phải đi qua cuaGui() — không có ngoại lệ");
+
+  // Và bốn cửa của `cuaGui` phải còn nguyên. Xoá một dòng ở đây là mở một lỗ không ai thấy.
+  for (const [mau, y] of [
+    [/requireUser\(\)/, "đòi phiên đăng nhập"],
+    [/can\(user, "ai:send"\)/, "đòi quyền RIÊNG ai:send"],
+    [/modeAtLeast\(agent\.mode, "COPILOT"\)/, "đọc lại nấc quyền hạn từ CSDL"],
+    [/copilotPageAllowed\(/, "đòi page nằm trong danh sách thí điểm"],
+  ] as const) {
+    assert.match(maAction, mau, `cổng gửi phải ${y}`);
+  }
+
+  // Ba trang /ai/* đều đòi quyền xem — không trang nào mở cho người lạ.
+  for (const trang of ["app/(dashboard)/ai/copilot/page.tsx", "app/(dashboard)/ai/review/page.tsx", "app/(dashboard)/ai/fanpage/page.tsx"]) {
+    assert.match(readFileSync(trang, "utf8"), /requirePermission\("ai:view"\)/, `${trang} phải đòi quyền ai:view`);
+  }
+
+  // Và middleware KHÔNG được coi /ai là đường công khai. Mở tên miền ra Internet mà lọt dòng này
+  // thì hội thoại thật của khách đọc được bằng một lượt tải trang.
+  const maMw = readFileSync("middleware.ts", "utf8");
+  // `[\s\S]` chứ không phải cờ `s`: đích biên dịch của kho mã này thấp hơn ES2018 và `tsc` từ chối
+  // cờ ấy — `npm test` chạy qua tsx nên vẫn xanh, còn cổng typecheck thì đỏ. Hai nơi, một luật.
+  const congKhai = maMw.match(/const PUBLIC_PREFIXES = \[([\s\S]*?)\]/)?.[1] ?? "";
+  for (const cam of ["/ai", "/api/ai"]) {
+    assert.ok(!congKhai.includes(`"${cam}`), `middleware KHÔNG được xếp ${cam} vào nhóm công khai`);
+  }
+
+  /*
     1B. DẤU HUYỀN NGƯỢC TRONG MỘT CHÚ THÍCH SQL LÀM ĐỨT CHUỖI MẪU TYPESCRIPT.
 
     Đã vấp BA LẦN trong cùng một phiên. `tsc` có bắt được, nhưng nó nói "',' expected" ở một dòng

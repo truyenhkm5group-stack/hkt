@@ -538,3 +538,36 @@ export async function ingestStatus(dbIn?: Db): Promise<IngestStatus[]> {
   }
   return ra;
 }
+
+export type FirstHumanSend = {
+  /** ĐÃ có ít nhất một tin do NGƯỜI bấm gửi đi thành công. */
+  verified: boolean;
+  at: Date | null;
+  /** Ảnh chụp tên người bấm, do máy chủ đọc từ phiên — không nhận từ client. */
+  actorName: string;
+  /** Tổng số tin đã rời khỏi ERP do người bấm. */
+  sentCount: number;
+};
+
+/**
+ * LẦN GỬI ĐẦU TIÊN DO NGƯỜI BẤM — đọc từ SỔ THAO TÁC, không từ một cờ.
+ *
+ * `FIRST_HUMAN_SEND_PENDING` không phải một biến ai đó đặt tay: nó là câu hỏi "sổ thao tác đã có
+ * dòng gửi THÀNH CÔNG nào chưa". Một cờ đặt tay thì sai được; một phép đếm trên chính bảng ghi
+ * vết thì không.
+ */
+export async function firstHumanSend(dbIn?: Db): Promise<FirstHumanSend> {
+  const db = dbIn ?? (await getDb());
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int`, luc: sql<string | null>`min(${schema.salesCopilotActions.createdAt})` })
+    .from(schema.salesCopilotActions)
+    .where(sql`${schema.salesCopilotActions.action} in ('SEND','EDIT_SEND') and ${schema.salesCopilotActions.sendStatus} = 'SENT'`);
+  const n = Number(rows[0]?.n ?? 0);
+  if (!n) return { verified: false, at: null, actorName: "", sentCount: 0 };
+  const dau = await db.query.salesCopilotActions.findFirst({
+    where: sql`${schema.salesCopilotActions.action} in ('SEND','EDIT_SEND') and ${schema.salesCopilotActions.sendStatus} = 'SENT'`,
+    orderBy: [schema.salesCopilotActions.createdAt],
+    columns: { createdAt: true, actorName: true },
+  });
+  return { verified: true, at: dau?.createdAt ?? null, actorName: dau?.actorName ?? "", sentCount: n };
+}
