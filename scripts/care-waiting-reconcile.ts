@@ -8,12 +8,23 @@
  *
  * Trước bản vá, màn hình cho phép đẩy một ca sang `WAITING_*` mà KHÔNG chọn giờ xem lại. Đo
  * production 16/09/2026: 9 ca đang mở ở trạng thái chờ với `follow_up_at` NULL, tất cả do người
- * bấm trong hai ngày 12–13/09 và không ai động lại từ đó. Bản vá chặn đường sinh ra ca mới; 9 ca
- * lịch sử này phải được xử lý bằng NGHIỆP VỤ, không bằng một câu `UPDATE`.
+ * bấm trong hai ngày 12–13/09 và không ai động lại từ đó. Đo lại 18/09/2026 03:39Z: còn 8 ca (một
+ * ca đã tự chốt, xem dưới) và KHÔNG có ca mới nào — 6 đợt chờ sinh ra trong hai ngày đó đều có mốc
+ * xem lại. Bản vá ở bản đang chạy (594f9d7) đang giữ đúng phần của nó; 8 ca này là lịch sử.
  *
- * Máy KHÔNG tự đóng được chúng: `reconcileCareCoverage` chỉ chạm ca `care_outcome = 'PENDING'`,
- * còn cả 9 ca này mang `NULL` (ca lịch sử trước 0075, cố ý không suy ngược), và nó cũng bỏ qua mọi
- * ca người đã chạm vào lẫn mọi kiện đang ở chặng `RETURNING`.
+ * ─── MÁY CHỐT ĐƯỢC TỚI ĐÂU, VÀ VÌ SAO KHÔNG TỚI ĐƯỢC 8 CA NÀY ───
+ *
+ * Máy KHÔNG bỏ sót vĩnh viễn: khi một SỰ KIỆN KẾT THÚC tới (kiện sang `RETURNED`/`DELIVERED`),
+ * `applyCarrierEventToCare` chốt kết quả lên đúng đợt đó dù đợt đã đóng. Đó là chuyện đã xảy ra
+ * thật với PKE1517089434 — 16/09 07:54 `SYSTEM` chốt `RESCUE_FAILED` khi kiện sang `RETURNED`, nên
+ * ca ấy KHÔNG có trong kế hoạch dưới đây.
+ *
+ * Nhưng trong lúc kiện còn ở chặng `RETURNING` (đang trên đường về, chưa về tới), không lượt đối
+ * chiếu nào chạm tới chúng: `reconcileCareCoverage` bước (b)/(c) chỉ xét đợt `care_outcome =
+ * 'PENDING'`, mà cả 8 đợt này mang `NULL` (đợt lịch sử trước 0075, cố ý không suy ngược); nó còn
+ * bỏ qua thẳng `stage = 'RETURNING'` và mọi đợt người đã chạm vào. Nên chúng nằm ở trạng thái
+ * "chờ khách" trong khi không còn khách nào để chờ, và sẽ nằm như vậy tới khi kiện về tới kho.
+ * Nhãn sai nhiều ngày trên hàng đợi là thứ tệp này sửa — bằng nghiệp vụ, không bằng `UPDATE`.
  *
  * ─── HAI ĐIỀU TỆP NÀY KHÔNG LÀM ───
  *
@@ -40,7 +51,7 @@ const ACTOR: CareActor = { id: null, email: "ops:care-waiting-reconcile", source
 
 const GIO = 3_600_000;
 
-type Nhom = "A_CUU_DUOC" | "C_CHO_DVVC" | "D_KHACH_TU_CHOI" | "E_HET_VIEC_CHAM_SOC";
+type Nhom = "C_CHO_DVVC" | "E_HET_VIEC_CHAM_SOC";
 
 type KeHoach = {
   tracking: string;
@@ -60,23 +71,45 @@ type KeHoach = {
 };
 
 /**
- * CHÍN CA, MỖI CA MỘT QUYẾT ĐỊNH RIÊNG dựng từ lịch sử `shipment_events` đọc ngày 16/09/2026.
- * Bốn ca cùng đích `RESOLVED` vẫn là bốn lời gọi riêng với bốn câu lý do riêng — không có lối
+ * TÁM CA, ĐỌC LẠI `shipment_events` NGÀY 18/09/2026 03:40Z.
+ *
+ * Bản phân loại đầu (16/09) có bốn nhóm: 4 ca "ĐVVC đã mang hàng về", 3 ca "khách từ chối, hàng
+ * còn tồn ở bưu cục — ứng viên duyệt hoàn", 1 ca "giục bưu cục", 1 ca "còn cứu được". Hai ngày sau,
+ * BẢY ca đã có sự kiện `502` chiều `RETURN` rồi "Đóng bảng kê đi": ĐVVC tự chuyển hoàn hết. Ba ca
+ * "ứng viên duyệt hoàn" không còn gì để duyệt, và ca "giục bưu cục" đã tự đi. Ghi lại ở đây vì đó
+ * là một số đo chứ không phải một nhận xét: chậm hai ngày ở nhóm đó là mất hai ngày cơ hội can
+ * thiệp, và kết cục do ĐVVC quyết chứ không do shop.
+ *
+ * Bảy ca cùng đích `RESOLVED` vẫn là bảy lời gọi riêng với bảy câu chứng cứ riêng — không có lối
  * "đóng cả mẻ".
  */
 const KE_HOACH: KeHoach[] = [
   /* ── E · ĐVVC ĐANG MANG HÀNG VỀ SHOP: không còn khách nào để chăm ─────────────────────────── */
   {
-    tracking: "PKE1517089434",
+    tracking: "PKE1515084738",
     nhom: "E_HET_VIEC_CHAM_SOC",
     fromStatus: "WAITING_CUSTOMER",
     stages: ["RETURNING"],
     toStatus: "RESOLVED",
     uuTien: "-",
     note:
-      "Đối chiếu 16/09: VTP 505 ngày 14/09 'Không hài lòng về sản phẩm', tới 15/09 23:48 chuyển 'Đang chuyển hoàn'. " +
-      "Hàng đã trên chiều hoàn về shop nên không còn khách để gọi — đóng ca chăm sóc. ĐÓNG = RỜI HÀNG ĐỢI, " +
-      "không phải kết luận cứu đơn: kết quả vẫn chờ chứng từ ĐVVC chốt.",
+      "Đối chiếu 18/09: khách từ chối ba lần (13/09, 15/09, 16/09), rồi 17/09 04:10 VTP 502 chiều " +
+      "RETURN 'Khách từ chối nhận' và 17/09 10:45 đã đóng bảng kê đi. Hàng đang về shop — hết việc " +
+      "chăm sóc, đóng ca. ĐÓNG = RỜI HÀNG ĐỢI, không phải kết luận cứu đơn: kết quả vẫn chờ chứng " +
+      "từ ĐVVC chốt lên đúng đợt này.",
+  },
+  {
+    tracking: "PKE1517089550",
+    nhom: "E_HET_VIEC_CHAM_SOC",
+    fromStatus: "WAITING_CUSTOMER",
+    stages: ["RETURNING"],
+    toStatus: "RESOLVED",
+    uuTien: "-",
+    note:
+      "Đối chiếu 18/09: khách hẹn phát lại hai lần (12/09, 13/09) rồi đổi ý, 17/09 08:02 VTP 502 " +
+      "chiều RETURN 'Không có nhu cầu nhận hàng' kèm ghi chú 'Khách từ chối nhận - Sai thông tin " +
+      "đơn', 17/09 10:24 đóng bảng kê đi. Hàng đang về shop — hết việc chăm sóc. Kết quả cứu đơn " +
+      "để chứng từ ĐVVC chốt.",
   },
   {
     tracking: "PKE1515019044",
@@ -86,9 +119,22 @@ const KE_HOACH: KeHoach[] = [
     toStatus: "RESOLVED",
     uuTien: "-",
     note:
-      "Đối chiếu 16/09: 15/09 02:04 VTP 505 'Khách từ chối nhận - Không hài lòng về sản phẩm', cùng lúc 502 chiều " +
-      "RETURN 'Chuyển hoàn bưu cục gốc', 15/09 04:37 đã đóng bảng kê đi chiều hoàn. Khách đã từ chối và hàng đang " +
-      "về shop — hết việc chăm sóc. Kết quả cứu đơn để chứng từ ĐVVC chốt.",
+      "Đối chiếu 18/09: 15/09 02:04 VTP 505 'Khách từ chối nhận - Không hài lòng về sản phẩm' rồi " +
+      "502 chiều RETURN; 17/09 09:22–09:23 nhận bảng kê đến và đóng bảng kê đi — kiện đang chạy " +
+      "trên chiều hoàn. Hết việc chăm sóc. Kết quả cứu đơn để chứng từ ĐVVC chốt.",
+  },
+  {
+    tracking: "PKE1515065610",
+    nhom: "E_HET_VIEC_CHAM_SOC",
+    fromStatus: "WAITING_REDELIVERY",
+    stages: ["RETURNING"],
+    toStatus: "RESOLVED",
+    uuTien: "-",
+    note:
+      "Đối chiếu 18/09: shop yêu cầu chuyển hoàn từ 13/09, kiện tồn ở bưu cục Vĩnh Long tới 16/09 " +
+      "('Không liên lạc được khách hàng nhận'), rồi 17/09 01:09 VTP 502 chiều RETURN và 17/09 09:37 " +
+      "đóng bảng kê đi. Việc giục bưu cục đã hết ý nghĩa — hàng đang về. Đóng ca; kết quả cứu đơn " +
+      "để chứng từ ĐVVC chốt.",
   },
   {
     tracking: "PKE1517664544",
@@ -98,9 +144,9 @@ const KE_HOACH: KeHoach[] = [
     toStatus: "RESOLVED",
     uuTien: "-",
     note:
-      "Đối chiếu 16/09: 14/09 10:01 VTP 505 'Không hài lòng về sản phẩm', 14/09 11:36 bưu cục phát duyệt hoàn " +
-      "'KHÁCH HÀNG YÊU CẦU HOÀN VỀ', 15/09 00:16 502 chiều RETURN. Khách chủ động yêu cầu hoàn, ĐVVC đã duyệt — " +
-      "hết việc chăm sóc. Kết quả cứu đơn để chứng từ ĐVVC chốt.",
+      "Đối chiếu 18/09: 14/09 khách yêu cầu hoàn về, bưu cục duyệt hoàn, 15/09 00:16 chuyển hoàn " +
+      "bưu cục gốc, 17/09 07:37 đóng bảng kê đi. Khách chủ động yêu cầu hoàn và hàng đang về — hết " +
+      "việc chăm sóc. Kết quả cứu đơn để chứng từ ĐVVC chốt.",
   },
   {
     tracking: "PKE1517808316",
@@ -110,91 +156,45 @@ const KE_HOACH: KeHoach[] = [
     toStatus: "RESOLVED",
     uuTien: "-",
     note:
-      "Đối chiếu 16/09: sau lần hẹn phát lại 13/09 và một lượt sửa địa chỉ chuyển tiếp, 16/09 01:53 VTP 502 chiều " +
-      "RETURN 'Người gửi yêu cầu chuyển hoàn' → Đang chuyển hoàn. Chính shop đã yêu cầu hoàn và hàng đang về — " +
-      "hết việc chăm sóc. Kết quả cứu đơn để chứng từ ĐVVC chốt.",
-  },
-
-  /* ── A · CÒN CỨU ĐƯỢC: hàng còn nằm ở bưu cục đích, khách chưa hề từ chối ─────────────────── */
-  {
-    tracking: "PKE1517808393",
-    nhom: "A_CUU_DUOC",
-    fromStatus: "WAITING_CUSTOMER",
-    stages: ["PENDING", "DELIVERY_FAILED", "IN_TRANSIT", "OUT_FOR_DELIVERY"],
-    toStatus: "WAITING_CUSTOMER",
-    hetHanSauGio: 3,
-    uuTien: "P0",
-    note:
-      "P0 · GỌI KHÁCH HÔM NAY. 11/09 VTP 507 'Khách hàng đến bưu cục nhận' (khách TỰ hẹn ra lấy), nhưng 14/09 17:00 " +
-      "VTP 505 'Quá thời gian hẹn nhận' — bưu cục Giảng Võ đã thông báo chuyển hoàn. Khách CHƯA từ chối lần nào, " +
-      "hàng vẫn ở bưu cục đích. Việc: gọi xác nhận còn nhận không; còn thì xin bưu cục giữ hàng và phát lại / hẹn " +
-      "khách ra lấy. Không gọi trong hôm nay là mất đơn 499.000đ.",
-  },
-
-  /* ── D · KHÁCH TỪ CHỐI, HÀNG CÒN TỒN Ở BƯU CỤC: cần NGƯỜI chốt duyệt hoàn ─────────────────── */
-  {
-    tracking: "PKE1515084738",
-    nhom: "D_KHACH_TU_CHOI",
-    fromStatus: "WAITING_CUSTOMER",
-    stages: ["PENDING", "DELIVERY_FAILED", "IN_TRANSIT", "OUT_FOR_DELIVERY"],
-    toStatus: "WAITING_CUSTOMER",
-    hetHanSauGio: 8,
-    uuTien: "P1",
-    note:
-      "P1 · CHỐT TRONG NGÀY. Khách từ chối BA lần: 13/09 'Không có nhu cầu nhận hàng', 15/09 'Không hài lòng về sản " +
-      "phẩm', 16/09 03:27 'Khách từ chối nhận - Không có nhu cầu nhận hàng'. Hàng còn tồn ở bưu cục Quảng Ngãi, " +
-      "chưa vào chiều hoàn. Việc: gọi chốt lần cuối, không cứu được thì DUYỆT HOÀN trên màn hình vận đơn để hàng " +
-      "về sớm. Script này KHÔNG tự duyệt hoàn — đó là quyết định tiền, người bấm.",
-  },
-  {
-    tracking: "PKE1517089550",
-    nhom: "D_KHACH_TU_CHOI",
-    fromStatus: "WAITING_CUSTOMER",
-    stages: ["PENDING", "DELIVERY_FAILED", "IN_TRANSIT", "OUT_FOR_DELIVERY"],
-    toStatus: "WAITING_CUSTOMER",
-    hetHanSauGio: 8,
-    uuTien: "P1",
-    note:
-      "P1 · CHỐT TRONG NGÀY. Khách hẹn phát lại hai lần (12/09, 13/09) rồi đổi ý: 15/09 04:52 VTP 505 'Không có nhu " +
-      "cầu nhận hàng'. Hàng còn tồn ở bưu cục Quảng Trị, chưa vào chiều hoàn. Việc: gọi chốt lần cuối, không cứu " +
-      "được thì DUYỆT HOÀN. Script này KHÔNG tự duyệt hoàn.",
+      "Đối chiếu 18/09: sau lần hẹn phát lại 13/09 và một lượt sửa địa chỉ chuyển tiếp, 16/09 01:53 " +
+      "VTP 502 chiều RETURN 'Người gửi yêu cầu chuyển hoàn', 16/09 12:32 đóng bảng kê đi. Chính shop " +
+      "đã yêu cầu hoàn và hàng đang về — hết việc chăm sóc. Kết quả cứu đơn để chứng từ ĐVVC chốt.",
   },
   {
     tracking: "PKE1517808418",
-    nhom: "D_KHACH_TU_CHOI",
+    nhom: "E_HET_VIEC_CHAM_SOC",
     fromStatus: "WAITING_REDELIVERY",
-    stages: ["PENDING", "DELIVERY_FAILED", "IN_TRANSIT", "OUT_FOR_DELIVERY"],
-    toStatus: "WAITING_CUSTOMER",
-    hetHanSauGio: 8,
-    uuTien: "P1",
+    stages: ["RETURNING"],
+    toStatus: "RESOLVED",
+    uuTien: "-",
     note:
-      "P1 · CHỐT TRONG NGÀY. Nhãn 'Chờ phát lại' đã sai từ 15/09: 15/09 07:00 VTP 505 'Người gửi yêu cầu chuyển " +
-      "hoàn', 16/09 02:58 'Khách từ chối nhận - Không có nhu cầu nhận hàng'. Không ai đang chờ một lượt phát lại " +
-      "nào cả. Hàng còn tồn ở bưu cục Tuyên Quang. Việc: gọi chốt lần cuối, không cứu được thì DUYỆT HOÀN.",
+      "Đối chiếu 18/09: nhãn 'Chờ phát lại' đã sai từ 15/09 (shop yêu cầu chuyển hoàn), 16/09 11:13 " +
+      "VTP 502 chiều RETURN 'Khách từ chối nhận - Không có nhu cầu nhận hàng', 17/09 03:13 đóng bảng " +
+      "kê đi. Không ai đang chờ một lượt phát lại nào — hàng đang về shop. Đóng ca; kết quả cứu đơn " +
+      "để chứng từ ĐVVC chốt.",
   },
 
-  /* ── C · CHỜ ĐVVC: shop đã yêu cầu hoàn, kiện ba ngày không nhúc nhích ───────────────────── */
+  /* ── C · KIỆN IM LẶNG BỐN NGÀY: phải đi hỏi ĐVVC nó đang ở đâu ───────────────────────────── */
   {
-    tracking: "PKE1515065610",
+    tracking: "PKE1517808393",
     nhom: "C_CHO_DVVC",
-    fromStatus: "WAITING_REDELIVERY",
+    fromStatus: "WAITING_CUSTOMER",
     stages: ["PENDING", "DELIVERY_FAILED", "IN_TRANSIT", "OUT_FOR_DELIVERY"],
     toStatus: "WAITING_CARRIER",
-    hetHanSauGio: 24,
-    uuTien: "P2",
+    hetHanSauGio: 4,
+    uuTien: "P0",
     note:
-      "P2 · GIỤC BƯU CỤC. 13/09 05:59 VTP 505 'Người gửi yêu cầu chuyển hoàn', nhưng tới 16/09 00:18 kiện vẫn tồn ở " +
-      "bưu cục Vĩnh Long với 505 'Không liên lạc được khách hàng nhận' — ba ngày không vào được chiều hoàn. Đổi " +
-      "nhãn 'Chờ phát lại' sang 'Chờ ĐVVC' vì việc đang nằm ở bưu cục, không ở khách. Việc: gọi bưu cục VLG/HBVLMT " +
-      "hỏi vì sao chưa chuyển hoàn; quá 24 giờ nữa chưa chuyển thì escalate.",
+      "P0 · HỎI BƯU CỤC HÔM NAY RỒI GỌI KHÁCH. 11/09 VTP 507 'Khách hàng đến bưu cục nhận' — khách TỰ hẹn ra " +
+      "lấy, CHƯA từ chối lần nào. 14/09 17:00 VTP 505 'Quá thời gian hẹn nhận' tại bưu cục Giảng Võ (HNI/GLM), " +
+      "rồi im lặng 3,4 ngày trong khi bảy kiện cùng nhóm đã hoàn xong — ERP KHÔNG BIẾT kiện đang ở đâu, " +
+      "và im lặng không phải bằng chứng 'vẫn ổn'. Việc: gọi bưu cục xác minh kiện còn ở đó; còn thì " +
+      "gọi khách chốt nhận và xin phát lại. Kiện DUY NHẤT trong tám ca còn cơ hội giao (499K)."
   },
 ];
 
 const NHAN_NHOM: Record<Nhom, string> = {
-  A_CUU_DUOC: "A · khách vẫn có thể nhận — cần gọi khách / phát lại",
-  C_CHO_DVVC: "C · chờ bưu tá / bưu cục — cần giục ĐVVC",
-  D_KHACH_TU_CHOI: "D · khách từ chối — ứng viên duyệt hoàn (NGƯỜI quyết)",
-  E_HET_VIEC_CHAM_SOC: "E · ĐVVC đã mang hàng về — hết việc chăm sóc, đóng ca",
+  C_CHO_DVVC: "C · kiện im lặng, phải hỏi bưu cục — còn cơ hội giao",
+  E_HET_VIEC_CHAM_SOC: "E · ĐVVC đang mang hàng về — hết việc chăm sóc, đóng ca",
 };
 
 /** MỆNH ĐỀ LỖI — một chỗ khai, dùng cho cả ảnh chụp trước lẫn ảnh chụp sau. */
