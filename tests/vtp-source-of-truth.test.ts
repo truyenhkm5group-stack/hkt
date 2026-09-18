@@ -4,6 +4,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { backoffMinutes, nextSyncAt, reconcileTierOf, RECONCILE_INTERVAL_MINUTES, RECONCILE_BACKOFF_CAP_MINUTES } from "@/lib/constants/vtp-reconcile";
 import { statusRegistryKey } from "@/lib/integrations/viettelpost/registry";
+import { PREVIEW_VERDICTS, MAPPING_ERROR_VERDICTS } from "@/lib/constants/vtp-import";
 import { previewVtpOrderListFile, fileChecksum } from "@/lib/integrations/viettelpost/import-preview";
 import { runVtpDataFileImport } from "@/lib/integrations/viettelpost/import-run";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
@@ -244,7 +245,7 @@ export async function testVtpSourceOfTruth(db: Db) {
   assert.equal(xemLai.counts.NEWER, 0, "tệp đã ghi rồi thì KHÔNG còn dòng nào 'sẽ cập nhật' — đường ghi sẽ bỏ qua chúng vì đã trùng");
   assert.ok(xemLai.counts.SAME > 0, "những dòng đã ghi phải được gọi tên là 'giống ERP', không phải im lặng biến mất");
   assert.equal(
-    xemLai.counts.NEWER + xemLai.counts.OLDER + xemLai.counts.SAME + xemLai.counts.UNMATCHED + xemLai.counts.UNKNOWN_STATUS + xemLai.counts.AMBIGUOUS + xemLai.counts.INVALID + xemLai.counts.DUPLICATE_ROW,
+    PREVIEW_VERDICTS.reduce((t, v) => t + xemLai.counts[v], 0),
     xemLai.rows,
     "mọi dòng phải được xếp đúng một loại — không dòng nào rơi ra ngoài bảng tổng hợp",
   );
@@ -262,8 +263,79 @@ export async function testVtpSourceOfTruth(db: Db) {
   // lặng lẽ đo một tình huống khác (tôi đã mắc đúng lỗi này một lần).
   const csvXungDot = [head, `1,${XUNG_DOT},REFX,01/09/2026 12:00:00,Giao thành công,499000,17000,14/09/2026 13:00:00`].join("\n");
   const xemXungDot = await previewVtpOrderListFile({ filename: "VTP_xung_dot.csv", base64: Buffer.from(csvXungDot, "utf8").toString("base64") });
-  assert.equal(xemXungDot.counts.AMBIGUOUS, 1, "cùng mốc ĐVVC nhưng khác chặng phải là 'cần người quyết', không được hứa là sẽ cập nhật");
+  /*
+    VÀ NÓ PHẢI ĐỨNG RIÊNG KHỎI "LỖI GHÉP".
+
+    Hai thứ này từng chung một nhãn `AMBIGUOUS`. Chúng nghe giống nhau và sửa khác hẳn nhau:
+    lỗi ghép thì người trực đi tra lại mã / số điện thoại; xung đột trạng thái thì người trực mở
+    viettelpost.vn tra chính mã ấy và quyết bên nào đúng. Gộp lại thì một bảng 40 dòng "cần người
+    quyết" không nói được phải mở cái gì ra xem.
+  */
+  assert.equal(xemXungDot.counts.STATUS_CONFLICT, 1, "cùng mốc ĐVVC nhưng khác chặng là XUNG ĐỘT TRẠNG THÁI, không phải lỗi ghép dòng");
+  assert.equal(xemXungDot.counts.AMBIGUOUS, 0, "và nó KHÔNG được gộp vào nhãn lỗi ghép — hai việc phải làm khác nhau");
   assert.equal(xemXungDot.counts.NEWER, 0);
+  assert.ok(
+    xemXungDot.sample.some((r) => r.verdict === "STATUS_CONFLICT" && r.trackingCode === XUNG_DOT),
+    "dòng xung đột phải có mặt trong bảng mẫu — nhóm cần người quyết mà không mở ra xem được là nhóm vô dụng",
+  );
+
+  /*
+    ═══ PHÉP ĐO CHỖ HỤT WEBHOOK PHẢI ĐỌC ĐƯỢC TRƯỚC KHI GHI ═══
+
+    Câu "webhook rơi bao nhiêu" là câu người ta muốn trả lời TRƯỚC khi quyết định có ghi hay không.
+    Bắt phải ghi mới biết là bắt phải đánh cược trước khi đọc.
+
+    Ba nhóm đứng riêng, và HAI trong ba KHÔNG phải lỗi của webhook (mục 51):
+      · ERP đã biết bằng hoặc mới hơn  ⇒ webhook làm đúng việc;
+      · sự việc quá mới so với lúc đo  ⇒ gói tin có thể đang trên đường;
+      · ERP lẽ ra phải biết mà chưa    ⇒ NGHI hụt.
+
+    Và dòng ERP KHÔNG có vận đơn (`UNMATCHED`) tuyệt đối không được đếm vào đây: nó chứng minh ERP
+    chưa từng có kiện đó, không chứng minh một gói tin đã rơi.
+  */
+  const GAP_CU = "PKE-TRUTH-GAP-OLD";
+  const GAP_MOI = "PKE-TRUTH-GAP-FRESH";
+  await applyVtpTracking(track(GAP_CU, 300, "Đóng tải - vận chuyển đi", "2026-09-01T02:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  await applyVtpTracking(track(GAP_MOI, 300, "Đóng tải - vận chuyển đi", "2026-09-01T02:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  /*
+    MỐC DỰNG TỪ ĐỒNG HỒ THẬT, cùng nhịp với thứ nó đo (mục 50): `measureWebhookGap` so với "lúc
+    chạy thử" = `new Date()` bên trong hàm xem trước. Ghim một ngày tuyệt đối ở đây thì bài kiểm
+    xanh hôm nay và đỏ vào một sáng nào đó, và không ai đọc thông điệp của nó nữa.
+  */
+  const gioVN = (d: Date) => {
+    const t = new Date(d.getTime() + 7 * 3600_000);
+    const hai = (n: number) => String(n).padStart(2, "0");
+    return `${hai(t.getUTCDate())}/${hai(t.getUTCMonth() + 1)}/${t.getUTCFullYear()} ${hai(t.getUTCHours())}:${hai(t.getUTCMinutes())}:00`;
+  };
+  const nay = Date.now();
+  const csvGap = [
+    head,
+    // 3 ngày trước ⇒ quá ngưỡng 120 phút và ERP chưa hề biết ⇒ NGHI HỤT, mức "hơn ba ngày" hoặc "hơn một ngày".
+    `1,${GAP_CU},REF-G1,01/09/2026 12:00:00,Giao thành công,499000,17000,${gioVN(new Date(nay - 3 * 24 * 3600_000))}`,
+    // 10 phút trước ⇒ dưới ngưỡng ⇒ QUÁ MỚI, không được kết tội webhook.
+    `2,${GAP_MOI},REF-G2,01/09/2026 12:00:00,Giao thành công,499000,17000,${gioVN(new Date(nay - 10 * 60_000))}`,
+    // Mã ERP không có ⇒ UNMATCHED, phải nằm NGOÀI cả ba nhóm của phép đo.
+    `3,PKE-TRUTH-GAP-NONE,REF-G3,01/09/2026 12:00:00,Giao thành công,499000,17000,${gioVN(new Date(nay - 5 * 24 * 3600_000))}`,
+  ].join("\n");
+  const xemGap = await previewVtpOrderListFile({ filename: "VTP_do_hut.csv", base64: Buffer.from(csvGap, "utf8").toString("base64") });
+  const g = xemGap.webhookGap;
+  assert.equal(xemGap.counts.UNMATCHED, 1, "dòng mang mã ERP không có phải được gọi tên là 'không có trong ERP'");
+  assert.equal(g.suspectedGaps, 1, `đúng MỘT dòng là nghi hụt (được ${g.suspectedGaps}) — dòng quá mới và dòng không ghép được đều không phải`);
+  assert.equal(g.tooFresh, 1, "sự việc 10 phút trước là QUÁ MỚI, không phải webhook rơi");
+  assert.equal(g.erpAlreadyAhead + g.tooFresh + g.suspectedGaps, 2, "chỉ dòng ghép được vận đơn mới vào phép đo — UNMATCHED nằm ngoài");
+  assert.equal(g.matchRate, null, `mẫu ${g.erpAlreadyAhead + g.suspectedGaps} < 30 ⇒ KHÔNG phát biểu một tỷ lệ (mục 51)`);
+  assert.ok(g.medianMinutes !== null && g.medianMinutes >= 2 * 24 * 60, `khoảng hụt phải tính bằng ngày, không phải phút (được ${g.medianMinutes})`);
+  assert.equal(g.medianMinutes, g.maxMinutes, "một quan sát thì trung vị và lớn nhất là cùng một con số");
+  assert.equal(g.bySeverity.MINOR + g.bySeverity.MAJOR + g.bySeverity.CRITICAL, g.suspectedGaps, "mỗi chỗ hụt phải rơi vào ĐÚNG một mức nghiêm trọng");
+
+  // Chưa có chỗ hụt nào thì các phân vị là CHƯA BIẾT, không phải 0 (mục 42).
+  assert.equal(xemXungDot.webhookGap.suspectedGaps, 0);
+  assert.equal(xemXungDot.webhookGap.medianMinutes, null, "không có chỗ hụt nào ⇒ trung vị là CHƯA BIẾT, không được in ra 0");
+  assert.equal(xemXungDot.webhookGap.p90Minutes, null);
+  assert.equal(xemXungDot.webhookGap.maxMinutes, null);
+
+  // Lỗi GHÉP và xung đột TRẠNG THÁI là hai danh sách, không phải một.
+  assert.ok(!MAPPING_ERROR_VERDICTS.includes("STATUS_CONFLICT"), "xung đột trạng thái KHÔNG phải lỗi ghép — mã đã ghép chắc chắn");
 
   /*
     ═══ DÒNG CHIỀU HOÀN PHẢI SO VỚI CHÍNH VẬN ĐƠN CHIỀU HOÀN ═══

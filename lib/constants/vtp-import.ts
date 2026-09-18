@@ -5,20 +5,21 @@
  * kéo nó vào một client component là kéo cả trình đọc Excel và drizzle sang trình duyệt.
  * `tests/client-boundary-exports.test.ts` khoá ranh giới này ở mức mã nguồn.
  *
- * Tám phán quyết, và bốn trong số đó KHÔNG phải lỗi:
+ * Chín phán quyết, và bốn trong số đó KHÔNG phải lỗi:
  *  · `SAME` / `DUPLICATE_ROW` — tệp nói đúng thứ ERP đang giữ;
  *  · `OLDER` — tệp mang chứng từ CŨ HƠN. ERP cố ý không hạ trạng thái (luật đã có từ trước);
  *  · `UNKNOWN_STATUS` — ERP chưa dịch được câu của ĐVVC. Chữ gốc vẫn vào sổ, không bị ném đi.
  * Gộp chúng vào một nhãn "bỏ qua" là mời người dùng đọc một sự cố thành chuyện bình thường, hoặc
  * ngược lại.
  */
-export const PREVIEW_VERDICTS = ["SAME", "NEWER", "OLDER", "UNMATCHED", "UNKNOWN_STATUS", "AMBIGUOUS", "INVALID", "DUPLICATE_ROW"] as const;
+export const PREVIEW_VERDICTS = ["SAME", "NEWER", "OLDER", "STATUS_CONFLICT", "UNMATCHED", "UNKNOWN_STATUS", "AMBIGUOUS", "INVALID", "DUPLICATE_ROW"] as const;
 export type PreviewVerdict = (typeof PREVIEW_VERDICTS)[number];
 
 export const PREVIEW_VERDICT_LABEL: Record<PreviewVerdict, string> = {
   SAME: "Giống ERP",
   NEWER: "Mới hơn ERP",
   OLDER: "Cũ hơn ERP",
+  STATUS_CONFLICT: "Cùng mốc, khác trạng thái",
   UNMATCHED: "Không có trong ERP",
   UNKNOWN_STATUS: "Trạng thái ERP chưa hiểu",
   AMBIGUOUS: "Ghép được nhiều vận đơn",
@@ -30,6 +31,7 @@ export const PREVIEW_VERDICT_HINT: Record<PreviewVerdict, string> = {
   SAME: "ERP đã có đúng chứng từ này — ghi vào cũng không đổi gì.",
   NEWER: "Tệp mang chứng từ MUỘN HƠN thứ ERP đang giữ. Đây là phần tệp thật sự vá được.",
   OLDER: "Tệp mang chứng từ CŨ HƠN. ERP giữ trạng thái mới hơn và vẫn ghi dòng này vào lịch sử — không bao giờ hạ trạng thái vì một tệp cũ.",
+  STATUS_CONFLICT: "ĐVVC và ERP nói hai điều khác nhau về ĐÚNG MỘT khoảnh khắc. Không phải lỗi ghép dòng: mã đã ghép chắc chắn, chỉ hai lời khai không khớp. Đường ghi dừng lại cho người đối chiếu, vì chọn hộ một bên là bịa ra một chứng từ.",
   UNMATCHED: "ERP chưa có vận đơn nào mang mã này. Không tự tạo: một vận đơn không gắn đơn là một vận đơn không ai đối chiếu được.",
   UNKNOWN_STATUS: "Chữ của Viettel Post được ghi nguyên văn vào sổ trạng thái và lên chính vận đơn, nhưng KHÔNG dùng để kết luận chặng — không đủ căn cứ thì không đoán.",
   AMBIGUOUS: "Mã hoặc số điện thoại ghép được nhiều vận đơn. Người phải quyết, máy không đoán.",
@@ -41,6 +43,7 @@ export const PREVIEW_VERDICT_TONE: Record<PreviewVerdict, string> = {
   SAME: "bg-muted text-muted-foreground",
   NEWER: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300",
   OLDER: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
+  STATUS_CONFLICT: "bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300",
   UNMATCHED: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
   UNKNOWN_STATUS: "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300",
   AMBIGUOUS: "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300",
@@ -49,4 +52,18 @@ export const PREVIEW_VERDICT_TONE: Record<PreviewVerdict, string> = {
 };
 
 /** Thứ tự đọc: việc phải làm trước, chuyện bình thường sau. */
-export const PREVIEW_VERDICT_ORDER: PreviewVerdict[] = ["NEWER", "UNKNOWN_STATUS", "AMBIGUOUS", "UNMATCHED", "OLDER", "INVALID", "DUPLICATE_ROW", "SAME"];
+export const PREVIEW_VERDICT_ORDER: PreviewVerdict[] = ["NEWER", "STATUS_CONFLICT", "UNKNOWN_STATUS", "AMBIGUOUS", "UNMATCHED", "OLDER", "INVALID", "DUPLICATE_ROW", "SAME"];
+
+/**
+ * ═══════════ HAI LOẠI "KHÔNG KHỚP", HAI VIỆC PHẢI LÀM KHÁC HẲN NHAU ═══════════
+ *
+ * `AMBIGUOUS` và `STATUS_CONFLICT` từng là MỘT nhãn. Chúng nghe giống nhau và sửa khác nhau hoàn toàn:
+ *
+ *  · `AMBIGUOUS`       — LỖI GHÉP. Không biết dòng này thuộc vận đơn nào. Sửa bằng cách tra lại mã /
+ *                        số điện thoại, hoặc chấp nhận là tệp có dòng không dùng được.
+ *  · `STATUS_CONFLICT` — ĐÃ GHÉP ĐÚNG, nhưng ĐVVC và ERP khai khác nhau về cùng một khoảnh khắc.
+ *                        Sửa bằng cách mở viettelpost.vn tra chính mã đó và quyết bên nào đúng.
+ *
+ * Gộp lại thì một bảng 40 dòng "cần người quyết" không nói được người trực phải mở cái gì ra xem.
+ */
+export const MAPPING_ERROR_VERDICTS: PreviewVerdict[] = ["AMBIGUOUS", "INVALID"];
