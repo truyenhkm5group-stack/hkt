@@ -102,3 +102,107 @@ export function testDeployScript() {
 
   console.log("✓ Khối dọn ảnh của deploy: sống khi máy SẠCH (lỗi #244) · gỡ đúng 2 ảnh cũ khi máy bẩn · không bao giờ gỡ ảnh sắp dùng · chạy thật dưới bash -euo pipefail, không mô phỏng bằng lời");
 }
+
+/* ═════════════════ THAO TÁC `apply-tech-github-env` CỦA ops-vps.yml ═════════════════ */
+
+/**
+ * ═══════════ MỘT KHỐI SẼ CHẠY TRÊN `.env` CỦA PRODUCTION, ĐỌC QUA MẮT LÀ CHƯA ĐỦ ═══════════
+ *
+ * Lỗi deploy #244 (khối trên) đã dạy đúng bài này một lần: `bash -n` xanh, `tsc`/`eslint` không
+ * đọc shell, và khối chỉ lộ ra khi đã chạy trên máy chủ thật. Khối `apply-tech-github-env` còn
+ * nguy hiểm hơn ở một điểm — nó GHI vào `.env` của production. Một lần chết giữa chừng để lại một
+ * tệp `.env` đã sửa một nửa, và khoá của các tích hợp khác nằm ngay trong đó.
+ *
+ * Nên trích đúng khối ra khỏi `ops-vps.yml` rồi CHẠY THẬT dưới `bash -e` (đúng cờ workflow đặt),
+ * với `docker`/`$C`/`fetch_script` giả và một `.env` tạm. Không mô phỏng bằng lời.
+ */
+function khoiApplyGithubEnv(): string {
+  const src = readFileSync(".github/workflows/ops-vps.yml", "utf8");
+  const i = src.indexOf("              apply-tech-github-env)");
+  assert.ok(i > 0, "không tìm thấy thao tác apply-tech-github-env trong ops-vps.yml");
+  const j = src.indexOf("              sepay-verify)", i);
+  assert.ok(j > i, "không tìm thấy mốc kết thúc khối apply-tech-github-env");
+  // Khối nằm trong YAML block scalar, thụt 14 dấu cách; bỏ thụt đầu dòng rồi cắt `;;` cuối.
+  const raw = src.slice(i, j).split("\n").map((l) => l.replace(/^ {14}/, "")).join("\n");
+  return raw.replace(/^apply-tech-github-env\)\n/, "").replace(/;;\s*$/, "");
+}
+
+/** Chạy khối với `.env` tạm và token cho trước. Trả mã thoát, `.env` sau khi chạy, và đầu ra. */
+function chayApply(token: string, envBanDau: string): { ma: number; env: string; raOut: string } {
+  const tmp = mkdtempSync(path.join(tmpdir(), "ops-gh-env-"));
+  const envFile = path.join(tmp, ".env");
+  writeFileSync(envFile, envBanDau);
+  const kich = path.join(tmp, "run.sh");
+  writeFileSync(
+    kich,
+    [
+      "#!/usr/bin/env bash",
+      // ĐÚNG cờ mà workflow đặt (`set -e`, KHÔNG có `-u`/`pipefail`) — kiểm cái sẽ chạy thật,
+      // không kiểm một phiên bản nghiêm khắc hơn rồi yên tâm nhầm.
+      "set -e",
+      `cd "${tmp}"`,
+      'C="docker_gia compose"',
+      "docker_gia() { :; }",
+      "docker() { :; }",
+      "fetch_script() { echo '// script giả'; }",
+      `export ERP_GITHUB_TOKEN=${JSON.stringify(token)}`,
+      'export ERP_GITHUB_REPO="chu-so-huu/ten-kho"',
+      'export ERP_GITHUB_DEPLOY_WORKFLOW="deploy-vps.yml"',
+      khoiApplyGithubEnv(),
+      "",
+    ].join("\n"),
+  );
+  let ma = 0;
+  let raOut = "";
+  try {
+    raOut = execFileSync("bash", [kich], { stdio: "pipe", encoding: "utf8" });
+  } catch (e) {
+    const err = e as { status?: number; stdout?: Buffer | string };
+    ma = err.status ?? 1;
+    raOut = String(err.stdout ?? "");
+  }
+  const env = readFileSync(envFile, "utf8");
+  rmSync(tmp, { recursive: true, force: true });
+  return { ma, env, raOut };
+}
+
+export function testApplyGithubEnvBlock() {
+  const ENV_CU = 'PANCAKE_API_KEY="pk-dang-chay"\nANTHROPIC_API_KEY="khoa-ai-dang-chay"\nERP_COMMIT="abc123"\n';
+  const TOKEN = "github_pat_KHOA_GIA_1234567890";
+
+  /*
+    ───────── SECRET TRỐNG ⇒ DỪNG, VÀ KHÔNG ĐỤNG MỘT KÝ TỰ NÀO CỦA `.env` ─────────
+    Ghi đè rỗng làm sổ deploy im lặng ngừng cập nhật — và một sổ đứng yên trông y hệt một sổ
+    không có gì để cập nhật. Đúng cái bẫy khối SePay trong install-vps.sh đã học một lần.
+  */
+  const trong = chayApply("", ENV_CU);
+  assert.equal(trong.ma, 1, "Secret trống thì thao tác phải DỪNG với mã lỗi, không âm thầm chạy tiếp");
+  assert.equal(trong.env, ENV_CU, "…và KHÔNG được sửa `.env` một ký tự nào");
+  assert.ok(trong.raOut.includes("ERP_GITHUB_TOKEN"), "lời báo phải nói thiếu đúng cái gì");
+
+  // ───────── CÓ TOKEN ⇒ ghi đủ ba biến, GIỮ NGUYÊN mọi khoá khác ─────────
+  const co = chayApply(TOKEN, ENV_CU);
+  assert.equal(co.ma, 0, `khối phải chạy trót lọt — đầu ra: ${co.raOut}`);
+  assert.match(co.env, new RegExp(`^ERP_GITHUB_TOKEN="${TOKEN}"$`, "m"), "phải ghi token vào .env");
+  assert.match(co.env, /^ERP_GITHUB_REPO="chu-so-huu\/ten-kho"$/m, "phải ghi tên kho");
+  assert.match(co.env, /^ERP_GITHUB_DEPLOY_WORKFLOW="deploy-vps\.yml"$/m, "phải ghi tên tệp workflow");
+  assert.match(co.env, /^PANCAKE_API_KEY="pk-dang-chay"$/m, "KHÔNG được đụng khoá của tích hợp khác");
+  assert.match(co.env, /^ANTHROPIC_API_KEY="khoa-ai-dang-chay"$/m, "KHÔNG được đụng khoá AI đang chạy");
+
+  /*
+    ───────── GIÁ TRỊ TOKEN KHÔNG BAO GIỜ ĐƯỢC IN ─────────
+    Kho mã này PUBLIC, nên log Actions ai cũng đọc được. In token một lần là công bố nó vĩnh viễn
+    — không rút lại được kể cả khi xoá lần chạy. GitHub có che secret trong log, nhưng không dựa
+    vào một lớp bảo vệ duy nhất.
+  */
+  assert.ok(!co.raOut.includes(TOKEN), "ĐẦU RA THẬT của khối không được chứa giá trị token");
+  assert.ok(co.raOut.includes(String(TOKEN.length)), "…nhưng phải in ĐỘ DÀI để người vận hành biết đã ghi được gì");
+
+  // ───────── CHẠY LẠI KHÔNG NHÂN ĐÔI DÒNG ─────────
+  const lai = chayApply(TOKEN, co.env);
+  assert.equal(lai.ma, 0);
+  assert.equal((lai.env.match(/^ERP_GITHUB_TOKEN=/gm) ?? []).length, 1, "chạy lại phải SỬA dòng cũ, không thêm dòng thứ hai — hai dòng cùng tên thì giá trị nào thắng là tuỳ trình đọc .env");
+
+  console.log("✓ Thao tác apply-tech-github-env: Secret trống thì DỪNG và không sửa .env · có token thì ghi đủ 3 biến và giữ nguyên khoá tích hợp khác · KHÔNG in giá trị token (chỉ độ dài) · chạy lại không nhân đôi dòng · chạy thật dưới bash -e, không mô phỏng bằng lời");
+}
+

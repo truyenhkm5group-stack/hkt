@@ -76,7 +76,7 @@ import {
 } from "./attribution.test";
 import { testAuthSecretHasNoProdFallback, testEveryScopedRouteIsGuarded, testPayrollOwnLineNeedsAccountKey, testScopeDecisions } from "./scope-enforcement.test";
 import { testAccessModel, testDisabledRoleFallsBackNarrow, testPositionGrantsNothing, testRoleBuilderCannotEscalate, testScopeOnlyNarrows } from "./access-model.test";
-import { testDeployScript } from "./deploy-script.test";
+import { testApplyGithubEnvBlock, testDeployScript } from "./deploy-script.test";
 import { testPrepaidCash } from "./prepaid-cash.test";
 import { testProductIntelligence } from "./product-intelligence.test";
 import { testActionQueue } from "./action-queue.test";
@@ -1840,6 +1840,7 @@ async function main() {
   testTechHealthParsing();
   testRepoIntegrity();
   testDeployScript();
+  testApplyGithubEnvBlock();
   testMigrationAppendOnly();
   await testMigrationUpgradePath();
   testMigrationNumberUnique();
