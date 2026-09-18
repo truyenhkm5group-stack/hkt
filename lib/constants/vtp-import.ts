@@ -67,3 +67,16 @@ export const PREVIEW_VERDICT_ORDER: PreviewVerdict[] = ["NEWER", "STATUS_CONFLIC
  * Gộp lại thì một bảng 40 dòng "cần người quyết" không nói được người trực phải mở cái gì ra xem.
  */
 export const MAPPING_ERROR_VERDICTS: PreviewVerdict[] = ["AMBIGUOUS", "INVALID"];
+
+/**
+ * ═══════════ CỘT `conflicts` CỦA SỔ NHẬP TỆP GỒM NHỮNG PHÁN QUYẾT NÀO ═══════════
+ *
+ * `vtp_import_batches.conflicts` là MỘT con số, còn phán quyết thì có chín. Đường GHI đếm
+ * "mọi thứ không phải updated/linked/leg/stale/duplicate" nên nó gồm cả xung đột trạng thái; đường
+ * CHẠY THỬ phải đếm đúng cùng tập ấy, nếu không hai lượt trên cùng một tệp ghi hai con số khác nhau
+ * vào cùng một cột và không ai biết bên nào đúng.
+ *
+ * Khai thành danh sách chứ không cộng tay tại chỗ gọi: thêm một phán quyết mới thì chỉ có ĐÚNG MỘT
+ * chỗ phải nghĩ xem nó thuộc nhóm nào, và `tests/vtp-source-of-truth.test.ts` bắt được nếu quên.
+ */
+export const LEDGER_CONFLICT_VERDICTS: PreviewVerdict[] = ["AMBIGUOUS", "STATUS_CONFLICT"];

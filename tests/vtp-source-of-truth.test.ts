@@ -4,7 +4,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { backoffMinutes, nextSyncAt, reconcileTierOf, RECONCILE_INTERVAL_MINUTES, RECONCILE_BACKOFF_CAP_MINUTES } from "@/lib/constants/vtp-reconcile";
 import { statusRegistryKey } from "@/lib/integrations/viettelpost/registry";
-import { PREVIEW_VERDICTS, MAPPING_ERROR_VERDICTS } from "@/lib/constants/vtp-import";
+import { PREVIEW_VERDICTS, MAPPING_ERROR_VERDICTS, LEDGER_CONFLICT_VERDICTS, PREVIEW_VERDICT_LABEL, PREVIEW_VERDICT_HINT, PREVIEW_VERDICT_TONE, PREVIEW_VERDICT_ORDER } from "@/lib/constants/vtp-import";
 import { previewVtpOrderListFile, fileChecksum } from "@/lib/integrations/viettelpost/import-preview";
 import { runVtpDataFileImport } from "@/lib/integrations/viettelpost/import-run";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
@@ -336,6 +336,30 @@ export async function testVtpSourceOfTruth(db: Db) {
 
   // Lỗi GHÉP và xung đột TRẠNG THÁI là hai danh sách, không phải một.
   assert.ok(!MAPPING_ERROR_VERDICTS.includes("STATUS_CONFLICT"), "xung đột trạng thái KHÔNG phải lỗi ghép — mã đã ghép chắc chắn");
+
+  /*
+    ═══ THÊM MỘT PHÁN QUYẾT THÌ KHÔNG ĐƯỢC QUÊN CHỖ NÀO ═══
+
+    Tách `STATUS_CONFLICT` khỏi `AMBIGUOUS` đã suýt làm hụt cột `vtp_import_batches.conflicts`:
+    đường GHI đếm "mọi thứ còn lại" nên nó gồm cả xung đột, còn đường CHẠY THỬ cộng tay đúng một
+    phán quyết. Hai lượt trên cùng một tệp sẽ ghi hai con số khác nhau vào CÙNG một cột, và không
+    ai biết bên nào đúng.
+
+    Bài này bắt mọi phán quyết phải có đủ nhãn / câu giải thích / màu / chỗ trong thứ tự đọc — nên
+    lần thêm tiếp theo không thể lặng lẽ rơi ra ngoài một bảng nào.
+  */
+  for (const v of PREVIEW_VERDICTS) {
+    assert.ok(PREVIEW_VERDICT_LABEL[v], `phán quyết ${v} thiếu nhãn`);
+    assert.ok(PREVIEW_VERDICT_HINT[v], `phán quyết ${v} thiếu câu giải thích việc phải làm`);
+    assert.ok(PREVIEW_VERDICT_TONE[v], `phán quyết ${v} thiếu màu`);
+    assert.ok(PREVIEW_VERDICT_ORDER.includes(v), `phán quyết ${v} không có chỗ trong thứ tự đọc — nó sẽ không bao giờ hiện ra`);
+  }
+  assert.equal(PREVIEW_VERDICT_ORDER.length, PREVIEW_VERDICTS.length, "thứ tự đọc phải phủ đúng chừng ấy phán quyết, không thừa không thiếu");
+  assert.ok(LEDGER_CONFLICT_VERDICTS.every((v) => PREVIEW_VERDICTS.includes(v)), "nhóm xung đột của sổ chỉ được gồm phán quyết có thật");
+  assert.ok(
+    LEDGER_CONFLICT_VERDICTS.includes("AMBIGUOUS") && LEDGER_CONFLICT_VERDICTS.includes("STATUS_CONFLICT"),
+    "cột conflicts của sổ nhập tệp phải gồm CẢ hai — đường ghi đếm cả hai, chạy thử mà đếm một là hai lượt nói hai số",
+  );
 
   /*
     ═══ DÒNG CHIỀU HOÀN PHẢI SO VỚI CHÍNH VẬN ĐƠN CHIỀU HOÀN ═══

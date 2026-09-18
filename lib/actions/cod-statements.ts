@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { can, requireUser } from "@/lib/auth/session";
 import { MAX_LIST_BASE64, MAX_LIST_FILES } from "@/lib/constants/cod";
+import { LEDGER_CONFLICT_VERDICTS } from "@/lib/constants/vtp-import";
 import { runVtpDataFileImport, type VtpImportFileResult } from "@/lib/integrations/viettelpost/import-run";
 import { previewVtpOrderListFile, type ImportPreview } from "@/lib/integrations/viettelpost/import-preview";
 import { ghiSoNhapTep } from "@/lib/integrations/viettelpost/import-preview";
@@ -80,7 +81,9 @@ export async function previewVtpDataFiles(input: unknown): Promise<Result<{ prev
         matched: p.counts.NEWER + p.counts.SAME + p.counts.OLDER + p.counts.DUPLICATE_ROW,
         stale: p.counts.OLDER,
         duplicates: p.counts.DUPLICATE_ROW,
-        conflicts: p.counts.AMBIGUOUS,
+        // Cùng tập phán quyết mà đường GHI đếm vào cột này — hai lượt trên một tệp không được ghi
+        // hai con số khác nhau vào cùng một cột.
+        conflicts: LEDGER_CONFLICT_VERDICTS.reduce((n, v) => n + p.counts[v], 0),
         unmatched: p.counts.UNMATCHED,
         unknownStatus: p.counts.UNKNOWN_STATUS,
         invalid: p.counts.INVALID,
