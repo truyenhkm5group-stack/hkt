@@ -7,6 +7,7 @@ import { detectVtpFile, mergeDetectedOrderLists, VtpFileError, type DetectedVtpF
 import { matchVtpOrderList, type OrderListMatch } from "@/lib/integrations/viettelpost/statement-db";
 import type { ShipmentStage } from "@/db/schema";
 import { PREVIEW_VERDICTS, type PreviewVerdict } from "@/lib/constants/vtp-import";
+import { measureWebhookGap, webhookMatchRate, type GapSeverity } from "@/lib/constants/webhook-gap";
 
 export type { PreviewVerdict };
 
@@ -54,8 +55,50 @@ export type ImportPreview = {
   sample: PreviewRow[];
   /** Lần nhập trước đã ÁP DỤNG đúng tệp này (theo checksum). Có nghĩa lần này sẽ không đổi gì mới. */
   previouslyAppliedAt: Date | null;
+  /**
+   * PHÉP ĐO CHỖ HỤT WEBHOOK, TÍNH NGAY Ở LƯỢT CHẠY THỬ.
+   *
+   * Đường ghi vẫn là nơi LƯU phép đo (`vtp_webhook_gaps`); ở đây chỉ TÍNH và in ra, không ghi gì.
+   * Lý do phải có ở bước chạy thử: câu "webhook rơi bao nhiêu" là câu người ta muốn trả lời TRƯỚC
+   * khi quyết định có ghi hay không — bắt phải ghi mới biết là bắt phải đánh cược trước khi đọc.
+   */
+  webhookGap: WebhookGapSummary;
   error: string | null;
 };
+
+export type WebhookGapSummary = {
+  /** Dòng ERP đã biết bằng hoặc mới hơn — webhook làm đúng việc của nó. */
+  erpAlreadyAhead: number;
+  /** Sự việc quá mới so với lúc chạy thử: gói tin có thể đang trên đường. KHÔNG phải lỗi. */
+  tooFresh: number;
+  /** Dòng ERP lẽ ra phải biết mà tới giờ vẫn chưa biết — NGHI chỗ hụt, không phải kết luận. */
+  suspectedGaps: number;
+  /** `null` khi mẫu < 30: "1/1 hụt" không phải "webhook rơi 100%" (mục 51). */
+  matchRate: number | null;
+  /** Phút. `null` khi chưa có chỗ hụt nào. */
+  medianMinutes: number | null;
+  p90Minutes: number | null;
+  maxMinutes: number | null;
+  bySeverity: Record<GapSeverity, number>;
+};
+
+const GAP_RONG = (): WebhookGapSummary => ({
+  erpAlreadyAhead: 0,
+  tooFresh: 0,
+  suspectedGaps: 0,
+  matchRate: null,
+  medianMinutes: null,
+  p90Minutes: null,
+  maxMinutes: null,
+  bySeverity: { MINOR: 0, MAJOR: 0, CRITICAL: 0 },
+});
+
+/** Phân vị trên mảng ĐÃ SẮP XẾP. Mảng rỗng ⇒ `null`, không phải 0. */
+function phanVi(daSapXep: number[], q: number): number | null {
+  if (!daSapXep.length) return null;
+  const i = Math.min(daSapXep.length - 1, Math.max(0, Math.ceil(q * daSapXep.length) - 1));
+  return daSapXep[i] ?? null;
+}
 
 const RONG = Object.fromEntries(PREVIEW_VERDICTS.map((v) => [v, 0])) as Record<PreviewVerdict, number>;
 
@@ -140,7 +183,7 @@ function verdictOf(
   // lại cho người đối chiếu (`sameTimeConflict`), nên ở đây cũng phải là "cần người quyết".
   if (erpAt && erpAt.getTime() === at.getTime()) {
     return {
-      verdict: "AMBIGUOUS",
+      verdict: "STATUS_CONFLICT",
       note: `Cùng mốc ${at.toISOString()} nhưng ERP đang giữ ${nhanChang} — hai lời khai về cùng một khoảnh khắc, đường ghi sẽ dừng cho người đối chiếu`,
     };
   }
@@ -157,7 +200,7 @@ function verdictOf(
 export async function previewVtpOrderListFile(file: { filename: string; base64: string }): Promise<ImportPreview> {
   const buffer = Buffer.from(file.base64, "base64");
   const checksum = fileChecksum(file.base64);
-  const base = { filename: file.filename, checksum, bytes: buffer.byteLength, rows: 0, counts: { ...RONG }, sample: [] as PreviewRow[], previouslyAppliedAt: null as Date | null };
+  const base = { filename: file.filename, checksum, bytes: buffer.byteLength, rows: 0, counts: { ...RONG }, sample: [] as PreviewRow[], previouslyAppliedAt: null as Date | null, webhookGap: GAP_RONG() };
 
   let detected: DetectedVtpFile;
   try {
@@ -221,10 +264,30 @@ export async function previewVtpOrderListFile(file: { filename: string; base64: 
   const seen = new Set<string>();
   const sample: PreviewRow[] = [];
   // Xếp theo mốc để mẫu hiện ra đúng thứ tự mà đường ghi sẽ đi qua.
+  const gap = GAP_RONG();
+  const gapPhut: number[] = [];
+  const luc = new Date();
   for (const m of matches) {
     const dich = dichCua(m);
     const { verdict, note } = verdictOf(m, seen, daCo, dich);
     counts[verdict] += 1;
+    /*
+      ĐO CHỖ HỤT CHỈ TRÊN DÒNG NÓI VỀ KIỆN ERP ĐÃ BIẾT.
+
+      Dòng `UNMATCHED` (ERP chưa có vận đơn nào mang mã ấy) KHÔNG phải bằng chứng webhook rơi — nó
+      là bằng chứng ERP chưa từng có kiện đó, một việc khác hẳn và sửa ở chỗ khác. Đếm nó vào đây
+      là nguồn dễ nhất để biến một con số vận hành thành một lời buộc tội sai.
+    */
+    const mocDVVC = rowOccurredAt(m);
+    if (dich && mocDVVC) {
+      const d = measureWebhookGap({ carrierEventAt: mocDVVC, erpKnewAt: dich.statusDate, importedAt: luc });
+      if (d.isGap) {
+        gap.suspectedGaps += 1;
+        gap.bySeverity[d.severity] += 1;
+        gapPhut.push(d.minutes);
+      } else if (d.reason === "ERP_ALREADY_AHEAD") gap.erpAlreadyAhead += 1;
+      else gap.tooFresh += 1;
+    }
     // Mẫu ưu tiên những dòng THAY ĐỔI ĐƯỢC GÌ ĐÓ hoặc cần người quyết; dòng "giống ERP" chỉ để
     // lấp chỗ trống. Một bảng xem trước toàn dòng "không đổi gì" là bảng không ai đọc tới cuối.
     if (sample.length < 200 && verdict !== "SAME") {
@@ -257,6 +320,14 @@ export async function previewVtpOrderListFile(file: { filename: string; base64: 
     counts,
     sample,
     previouslyAppliedAt: truoc?.at ?? null,
+    webhookGap: (() => {
+      gapPhut.sort((a, b) => a - b);
+      gap.matchRate = webhookMatchRate({ known: gap.erpAlreadyAhead, gaps: gap.suspectedGaps });
+      gap.medianMinutes = phanVi(gapPhut, 0.5);
+      gap.p90Minutes = phanVi(gapPhut, 0.9);
+      gap.maxMinutes = gapPhut.length ? gapPhut[gapPhut.length - 1]! : null;
+      return gap;
+    })(),
     error: null,
   };
 }

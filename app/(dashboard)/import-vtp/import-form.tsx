@@ -15,6 +15,48 @@ import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { formatDateTime, formatNumber, MISSING_TEXT } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
+/**
+ * ═══════════ CHỖ HỤT WEBHOOK, ĐỌC RA TRƯỚC KHI GHI ═══════════
+ *
+ * Ba con số đứng RIÊNG vì hai trong ba KHÔNG phải lỗi của webhook (mục 51):
+ *   · ERP đã biết  — webhook làm đúng việc của nó;
+ *   · quá mới      — sự việc xảy ra sát giờ chạy thử, gói tin có thể đang trên đường;
+ *   · nghi hụt     — ĐVVC ghi nhận từ lâu mà ERP tới giờ vẫn chưa biết.
+ *
+ * Gộp thành một ô "lệch" là làm mất khả năng sửa, vì mỗi cái sửa ở một chỗ khác. Và "nghi" là
+ * NGHI: một dòng tệp không chứng minh được gói tin đã rơi, nó chỉ chứng minh ERP chưa biết.
+ */
+function GapPanel({ g }: { g: ImportPreview["webhookGap"] }) {
+  const mau = g.erpAlreadyAhead + g.suspectedGaps;
+  if (!mau) return null;
+  const phut = (v: number | null) => (v === null ? "—" : v < 120 ? `${v}p` : v < 48 * 60 ? `${Math.round(v / 60)}h` : `${Math.round(v / 1440)} ngày`);
+  return (
+    <div className="mt-2 rounded-md border border-dashed px-2.5 py-2 text-[11.5px]">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-semibold">Chỗ hụt webhook (nghi, chưa phải kết luận)</span>
+        <span className="text-muted-foreground">ERP đã biết: <b className="text-foreground">{formatNumber(g.erpAlreadyAhead)}</b></span>
+        <span className="text-muted-foreground">nghi hụt: <b className="text-amber-700 dark:text-amber-400">{formatNumber(g.suspectedGaps)}</b></span>
+        <span className="text-muted-foreground" title="Sự việc xảy ra sát giờ chạy thử — gói tin có thể đang trên đường. KHÔNG tính là hụt.">
+          quá mới (không tính): {formatNumber(g.tooFresh)}
+        </span>
+        <span className="text-muted-foreground" title="Dưới 30 mẫu thì KHÔNG phát biểu một tỷ lệ — 1/1 hụt không phải webhook rơi 100%.">
+          webhook nói đúng: <b className="text-foreground">{g.matchRate === null ? `— (mẫu ${mau})` : `${(g.matchRate * 100).toFixed(1)}%`}</b>
+        </span>
+      </div>
+      {g.suspectedGaps ? (
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+          <span>trung vị {phut(g.medianMinutes)}</span>
+          <span>p90 {phut(g.p90Minutes)}</span>
+          <span>lâu nhất {phut(g.maxMinutes)}</span>
+          <span className="text-[11px]">
+            (chậm vài giờ {formatNumber(g.bySeverity.MINOR)} · hơn một ngày {formatNumber(g.bySeverity.MAJOR)} · hơn ba ngày {formatNumber(g.bySeverity.CRITICAL)})
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const KIND_LABEL: Record<VtpImportFileResult["kind"], string> = {
   ORDER_LIST: "Danh sách vận đơn",
   STATEMENT_DETAIL: "Chi tiết bảng kê COD",
@@ -272,6 +314,7 @@ function KhoiXemTruoc({ p }: { p: ImportPreview }) {
               </button>
             ) : null}
           </div>
+          <GapPanel g={p.webhookGap} />
           {mau.length ? (
             <div className="mt-2 max-h-72 overflow-auto rounded-md border">
               <Table>
