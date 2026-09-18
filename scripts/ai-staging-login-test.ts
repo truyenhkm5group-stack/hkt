@@ -94,7 +94,25 @@ async function main() {
     const noi = trong.status === 200 ? await trong.text() : "";
     dat(trong.status === 200, "/ai/copilot trả 200 cho phiên đã đăng nhập", `HTTP ${trong.status}${trong.headers.get("location") ? ` → ${trong.headers.get("location")}` : ""}`);
     dat(noi.includes("Hàng đợi trợ lý AI"), "đúng là trang hàng đợi trợ lý");
-    console.log(`  · giao diện thí điểm (hướng dẫn sáu bước): ${noi.includes("Thí điểm trợ lý — sáu bước") ? "ĐÃ LÊN" : "CHƯA LÊN (ảnh cũ) — không ảnh hưởng đăng nhập"}`);
+    /*
+      GIAO DIỆN THÍ ĐIỂM: ĐỌC TỪ HTML ĐÃ DỰNG, KHÔNG SUY TỪ "ẢNH ĐÃ KÉO XONG".
+
+      Kéo đúng digest chỉ chứng minh cái tệp đã nằm trên máy. Thứ phải chứng minh là TRANG NHÂN
+      VIÊN MỞ có đủ các khối ấy — hai chuyện khác nhau, và đã có lần ảnh mới nằm sẵn trên đĩa mà
+      container vẫn chạy ảnh cũ.
+    */
+    dat(noi.includes("Thí điểm trợ lý — sáu bước"), "hướng dẫn sáu bước hiện trên đầu trang");
+    dat(noi.includes("Tiến độ thí điểm"), "thẻ tiến độ thí điểm hiện trên trang");
+    for (const nhan of ["Gửi nguyên văn", "Sửa &amp; gửi", "Từ chối", "Tự nhận việc (hội thoại)", "Tỷ lệ dùng được"]) {
+      dat(noi.includes(nhan), `thẻ tiến độ có ô "${nhan.replace("&amp;", "&")}"`);
+    }
+    dat(noi.includes("FIRST_HUMAN_SEND_PENDING"), "trang in trạng thái lần gửi đầu tiên");
+    // Hàng đợi rỗng phải nói rõ hệ thống vẫn đang canh. Có khách chờ thì thẻ hội thoại hiện ra —
+    // một trong hai, không được cả hai cùng vắng.
+    dat(
+      noi.includes("Hiện không có khách cần xử lý") || noi.includes("Khách nhắn"),
+      noi.includes("Khách nhắn") ? "hàng đợi đang có khách — hiện thẻ hội thoại" : "hàng đợi rỗng nói rõ hệ thống vẫn đang theo dõi tin mới",
+    );
 
     /*
       HAI CÔNG TẮC ĐỌC TỪ CHÍNH TRANG NHÂN VIÊN NHÌN, không từ một biến môi trường đọc lại.
