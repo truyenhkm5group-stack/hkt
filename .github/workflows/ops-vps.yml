@@ -70,6 +70,7 @@ on:
           - ai-staging-preflight  # CHỈ ĐỌC: chụp hiện trạng + kiểm 7 lớp va chạm + RAM/đĩa
           - ai-staging-image      # dựng ảnh trên máy chạy GitHub rồi đẩy lên GHCR (KHÔNG chạm VPS)
           - ai-staging-up         # kéo ảnh và dựng bản chạy thử ở /opt/vnx-ai-staging
+          - ai-staging-app        # kéo ảnh mới rồi dựng lại DUY NHẤT container ứng dụng (không đụng bộ nạp, không đụng CSDL)
           - ai-staging-creds      # ghi PANCAKE_ACCESS_TOKEN (từ Secrets) + PANCAKE_PAGE_ID (arg) vào .env.staging
           - ai-staging-read-test  # CHỈ GỌI GET: page có đọc được không, tên page, hội thoại, tin nhắn
           - ai-staging-signal-audit # CHỈ GỌI GET: Pancake THẬT SỰ trả về những trường nào (để dựng Product Resolver)
@@ -651,6 +652,58 @@ jobs:
                 done
                 STAGING_BRANCH="$STAGING_BRANCH" STAGING_IMAGE="$STAGING_IMAGE" \
                   GHCR_USER="$GHCR_USER" GHCR_TOKEN="$GHCR_TOKEN" bash /tmp/staging-up.sh ;;
+
+              ai-staging-app)
+                cd /opt/vnx-ai-staging
+                #
+                # DỰNG LẠI ĐÚNG MỘT CONTAINER.
+                #
+                # `ai-staging-up` chạy `compose up -d` cho cả bộ: app VÀ bộ nạp dùng chung một ảnh,
+                # nên đổi ảnh là cắt luôn vòng đọc hội thoại đang chạy dở. Lượt phát hành chỉ đổi
+                # giao diện thì không có lý do gì để bộ nạp phải ngừng. `--no-deps` giữ cả CSDL.
+                #
+                TRUOC_NAP="$(docker inspect -f '{{.Id}}' vnx-ai-staging-ingest 2>/dev/null || echo none)"
+                TRUOC_APP="$(docker inspect -f '{{.Image}}' vnx-ai-staging-app 2>/dev/null || echo none)"
+                if [ -n "${GHCR_TOKEN:-}" ]; then
+                  printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USER:-x}" --password-stdin >/dev/null
+                fi
+                #
+                # TRẦN THỜI GIAN CHO TỪNG LƯỢT KÉO — thứ vòng thử lại cũ còn thiếu.
+                #
+                # Vòng thử lại chỉ chạy khi `docker pull` TRẢ VỀ. Ngày 18/09 một lượt kéo treo trên
+                # một kết nối chết: pull không hỏng, không xong, và giữ nguyên lane vận hành 70 phút
+                # — chặn cả một lượt phát hành production của phiên khác. `timeout` biến một lượt
+                # treo thành một lượt hỏng, và lượt hỏng thì thử lại được.
+                #
+                lan=1
+                while :; do
+                  if timeout 600 docker pull "$STAGING_IMAGE"; then break; fi
+                  if [ "$lan" -ge 3 ]; then
+                    echo "⛔ kéo ảnh hỏng/treo sau $lan lần — nhiều khả năng là đường truyền tới GHCR."
+                    docker logout ghcr.io >/dev/null 2>&1 || true
+                    exit 1
+                  fi
+                  echo "  … lần $lan hỏng hoặc quá 10 phút, chờ $((lan * 20))s rồi thử lại (lớp đã tải vẫn được dùng lại)"
+                  sleep $((lan * 20))
+                  lan=$((lan + 1))
+                done
+                docker logout ghcr.io >/dev/null 2>&1 || true
+                echo "  digest ảnh vừa kéo: $(docker inspect -f '{{index .RepoDigests 0}}' "$STAGING_IMAGE" 2>/dev/null || echo '(không đọc được)')"
+                docker compose -f docker-compose.staging.yml --env-file .env.staging up -d --no-deps app
+                sleep 15
+                curl -fsS -m 10 http://127.0.0.1:3100/api/health && echo || echo "  ✗ bản chạy thử chưa trả lời"
+                echo ""
+                echo "── ĐỔI ĐÚNG CÁI ĐỊNH ĐỔI CHƯA ──"
+                echo "  ảnh của app: $TRUOC_APP"
+                echo "            → $(docker inspect -f '{{.Image}}' vnx-ai-staging-app 2>/dev/null || echo none)"
+                SAU_NAP="$(docker inspect -f '{{.Id}}' vnx-ai-staging-ingest 2>/dev/null || echo none)"
+                if [ "$TRUOC_NAP" = "$SAU_NAP" ]; then
+                  echo "  ✓ bộ nạp KHÔNG bị dựng lại (vẫn đúng container cũ)"
+                else
+                  echo "  ⚠ bộ nạp ĐÃ bị dựng lại — kiểm lại vì sao"
+                fi
+                echo ""
+                kiem_production ;;
 
               ai-staging-creds)
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
