@@ -118,6 +118,39 @@ chính agent không đọc được khoá đang trả tiền cho nó.
 Chưa có khoá thì `executor.available()` trả `ok=false` và lượt chạy dừng ở **BLOCKED — CHƯA CẤU
 HÌNH**. Đó là hành vi ĐÚNG, và nó khác hẳn "đã chạy xong".
 
+## 2.5 · Máy xếp rủi ro CHẶN NHẦM việc tài liệu — hai lần, vì hai lý do khác nhau
+
+Việc R0 đầu tiên được soạn đúng như đặc tả yêu cầu (module `PLATFORM`, mô tả nhắc "giới hạn
+**quyền** của vai tài liệu"). Máy xếp nó là **R2**. Đo thật:
+
+| Module | Mô tả | Kết quả | Luật khớp |
+| --- | --- | --- | --- |
+| `PLATFORM` | có chữ "quyền" | **R2** | `ACCESS` |
+| `PLATFORM` | không có chữ "quyền" | **R1** | `INFRA` |
+| `TECH` | có chữ "quyền" | **R2** | `ACCESS` |
+| `TECH` | không có chữ "quyền" | **R0** | không luật nào |
+
+Hai lỗi dương tính giả, và cả hai đều đáng biết:
+
+1. **`ACCESS` khớp từ khoá `quyen` ở bất kỳ đâu trong tiêu đề hoặc mô tả.** Một việc *mô tả* giới
+   hạn quyền bị xếp ngang với một việc *thay đổi* quyền. Máy đọc chữ, không đọc ý.
+
+2. **`classifyTechRisk()` khớp module / loại việc / từ khoá bằng phép HOẶC.** Luật `INFRA` khai cả
+   `taskTypes: ["INFRA"]` lẫn `modules: ["PLATFORM"]` — rõ ràng có ý là "việc hạ tầng TRONG module
+   nền tảng" — nhưng phép HOẶC làm **mọi** việc thuộc module `PLATFORM` tự động ít nhất R1, kể cả
+   một việc chỉ viết một tệp markdown.
+
+**Đã KHÔNG đè mức rủi ro** (đặc tả cấm, và đè là đúng thứ làm cổng phê duyệt thành vô nghĩa).
+Thay vào đó việc được khai lại cho ĐÚNG với thứ nó làm: module `TECH` (việc của Phòng Tech, không
+phải thay đổi hạ tầng), và mô tả nói "những việc vai tài liệu **KHÔNG được làm**" thay vì "giới
+hạn **quyền**" — cùng một nội dung agent phải viết ra, nhưng không còn khẳng định sai rằng việc
+này chạm tới quyền.
+
+**Cũng KHÔNG sửa máy xếp rủi ro trong lượt này.** Chuyển `INFRA` sang phép VÀ sẽ HẠ mức của nhiều
+việc đang có, mà luật của máy là *chỉ nâng, không bao giờ hạ*. Chặn nhầm là hướng an toàn; nới ra
+là quyết định của chủ shop, không phải của một lượt dọn dẹp. Nhưng nó đáng biết: mọi việc trong
+module `PLATFORM` hiện không bao giờ tới tay agent R0 được.
+
 ## 3 · Chín hàng rào — đã kiểm, KHÔNG phải bằng cách thử phá máy chủ thật
 
 `tests/tech-phase2a.test.ts::testPhase2aBarriers()` chạy trên kho git tạm + CSDL kiểm thử:
