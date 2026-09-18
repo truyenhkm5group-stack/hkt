@@ -216,7 +216,18 @@ export async function setTechTaskStatus(
   if (input.to === "BLOCKED" && note.length < 5) {
     return { error: "Báo bị chặn thì phải nói bị chặn bởi cái gì — chặn mà không nói vì sao thì không ai gỡ được." };
   }
-  if (input.to === "DEPLOYING") {
+  /*
+    CỔNG PHÊ DUYỆT CHẶN Ở CẢ HAI BƯỚC, KHÔNG CHỈ Ở LƯỢT DEPLOY.
+
+    `READY_TO_DEPLOY` đọc ra là "đã xanh hết và (nếu cần) đã được chủ shop phê duyệt" — chính câu
+    trong `TECH_TASK_STATUS_HINT`. Chặn muộn hơn một bước thì cái nhãn ấy nói dối: một việc R2 chưa
+    ai ký vẫn đứng trong cột "Sẵn sàng deploy", và người nhìn bảng sẽ tin là nó sẵn sàng thật.
+
+    Vẫn giữ nguyên lá chắn ở `DEPLOYING` chứ không dời đi: một việc đã duyệt, đã vào
+    `READY_TO_DEPLOY`, rồi bị xếp lại thành R2 (đè mức rủi ro) sẽ quay về "chờ duyệt" — và lúc đó
+    chỉ còn lá chắn thứ hai đứng giữa nó với production.
+  */
+  if (input.to === "READY_TO_DEPLOY" || input.to === "DEPLOYING") {
     const chan = techDeployBlockers({
       approvalRequired: task.approvalRequired,
       approvalStatus: task.approvalStatus as TechApprovalStatus,
@@ -457,9 +468,25 @@ export async function startTechAgentRun(
   actor: TechActor,
 ): Promise<TechResult<{ id: string }>> {
   const db = await getDb();
-  const agent = await db.query.techAgents.findFirst({ where: eq(schema.techAgents.id, input.agentId), columns: { id: true, key: true, enabled: true, name: true } });
+  const agent = await db.query.techAgents.findFirst({ where: eq(schema.techAgents.id, input.agentId), columns: { id: true, key: true, enabled: true, name: true, allowedRisks: true } });
   if (!agent) return { error: "Không tìm thấy agent này." };
   if (!agent.enabled) return { error: `Agent “${agent.name}” đang TẮT — không mở lượt chạy cho một agent chưa ai bật.` };
+
+  /*
+    KIỂM LẠI MỨC RỦI RO LÚC CHẠY, KHÔNG CHỈ LÚC GIAO.
+
+    `assignTechTaskAgent` đã chặn giao việc R2 cho agent chưa được phép. Nhưng một việc được giao
+    lúc còn R0 có thể bị NÂNG lên R2 sau đó (người đè mức rủi ro), và lúc ấy agent vẫn đang nằm ở ô
+    phụ trách. Máy KHÔNG tự gỡ việc khỏi tay người/agent đang cầm (AGENTS.md mục 25) — nên chỗ phải
+    chặn là lúc SẮP LÀM, không phải lúc được giao.
+  */
+  if (input.taskId) {
+    const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId), columns: { id: true, risk: true, code: true } });
+    if (!task) return { error: "Không tìm thấy việc này." };
+    if (!agent.allowedRisks.includes(task.risk)) {
+      return { error: `Việc ${task.code} nay ở mức ${task.risk}, agent “${agent.name}” chưa được phép chạm mức đó. Giao lại cho agent khác, hoặc đổi mức rủi ro (có lý do).` };
+    }
+  }
 
   const [row] = await db
     .insert(schema.techAgentRuns)

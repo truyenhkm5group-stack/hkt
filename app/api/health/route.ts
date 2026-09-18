@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { runningVersion } from "@/lib/version";
+import { redactedErrorMessage, runningVersion } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +13,10 @@ export const dynamic = "force-dynamic";
  * Việc đọc biến môi trường nằm ở `lib/version.ts` để trang `/tech` và tuyến này đọc CÙNG một chỗ;
  * phong bì trả về giữ nguyên hình dạng cũ (`"unknown"` khi chưa biết) vì `scripts/smoke.ts`, VPS và
  * người đang dùng đã đọc nó nhiều tháng.
+ *
+ * TUYẾN NÀY CÔNG KHAI (`middleware.ts::PUBLIC_PREFIXES`) — không đăng nhập vẫn gọi được, vì cả
+ * workflow deploy lẫn script cài đặt đều hỏi nó trước khi có phiên nào. Nên câu lỗi phải đi qua
+ * `redactedErrorMessage()`: lỗi CSDL có thể mang chuỗi kết nối, và kho mã này PUBLIC.
  */
 export async function GET() {
   const running = runningVersion();
@@ -22,6 +26,6 @@ export async function GET() {
     await db.execute(sql`select 1`);
     return NextResponse.json({ ok: true, time: new Date().toISOString(), ...version });
   } catch (error) {
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error), ...version }, { status: 500 });
+    return NextResponse.json({ ok: false, error: redactedErrorMessage(error), ...version }, { status: 500 });
   }
 }

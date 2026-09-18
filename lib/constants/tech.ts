@@ -324,6 +324,11 @@ export const TECH_APPROVAL_TONE: Record<TechApprovalStatus, string> = {
 /**
  * CỔNG DEPLOY — một hàm THUẦN, và nó là nơi DUY NHẤT trả lời "việc này được đi tiếp chưa".
  *
+ * `lib/tech/service.ts` gọi nó ở HAI bước: vào `READY_TO_DEPLOY` và vào `DEPLOYING`. Bước đầu vì
+ * nhãn của trạng thái ấy đã hứa "đã được chủ shop phê duyệt" — chặn muộn hơn thì cái nhãn nói dối.
+ * Bước sau vì một việc đã duyệt vẫn có thể bị NÂNG lại lên R2 sau đó, và lúc ấy lá chắn thứ hai là
+ * thứ duy nhất còn lại.
+ *
  * Trả về lý do CHẶN chứ không trả về `boolean`: một cổng chỉ nói "không" thì màn hình phải tự đoán
  * vì sao, và nó sẽ đoán sai vào đúng lúc người dùng cần biết nhất.
  */

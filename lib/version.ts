@@ -33,3 +33,36 @@ export function runningVersion(): RunningVersion {
 export function shortCommit(commit: string | null): string | null {
   return commit ? commit.slice(0, 7) : null;
 }
+
+/**
+ * ───────────── CÂU LỖI ĐI RA NGOÀI PHẢI SẠCH ─────────────
+ *
+ * `/api/health` là tuyến CÔNG KHAI (`middleware.ts::PUBLIC_PREFIXES`) — không đăng nhập vẫn gọi
+ * được, vì cả GitHub Actions lẫn script cài đặt đều hỏi nó trước khi có phiên nào. Nhánh lỗi của
+ * nó trả về nguyên văn `error.message` của CSDL, và câu ấy có thể mang chuỗi kết nối: `pg` in ra
+ * host, cổng, tên cơ sở dữ liệu, và với một URL sai định dạng thì in cả phần `user:mật_khẩu@`.
+ *
+ * Kho mã này PUBLIC và một lần lộ là lộ vĩnh viễn (AGENTS.md mục 5). Nên câu lỗi được CHE trước
+ * khi đi ra: giữ đủ để chẩn đoán ("không kết nối được CSDL"), bỏ phần nói mình là ai.
+ *
+ * KHÔNG đổi hình dạng phong bì: `scripts/install-vps.sh`, `deploy-vps.yml` và `ops-vps.yml` chỉ
+ * đọc `ok` và `commit`, không nơi nào đọc `error` — nên che nó không phá lá chắn nào.
+ *
+ * HÀM THUẦN, kiểm thử được mà không cần dựng một CSDL hỏng.
+ */
+export function redactedErrorMessage(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  return (
+    raw
+      // `postgres://nguoi:matkhau@may:5432/db` → `postgres://***@***`
+      .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s"']*/gi, "***")
+      // `password=...`, `PGPASSWORD=...`, `token: ...` ở dạng cặp khoá–giá trị
+      // Tiền tố tuỳ ý trước từ khoá: `PGPASSWORD`, `DB_PASSWORD`, `x-api-key` đều phải khớp.
+      // Dùng `\b` ở đầu thì `PGPASSWORD` KHÔNG khớp (không có ranh giới từ giữa `G` và `PASSWORD`)
+      // — đúng cái bẫy mà bài kiểm bắt được.
+      .replace(/([A-Za-z_-]*(?:pass(?:word)?|pwd|secret|token|api[_-]?key|authorization))\s*[=:]\s*\S+/gi, "$1=***")
+      // Địa chỉ máy chủ nội bộ + cổng (`10.0.0.4:5432`, `db:5432`)
+      .replace(/\b[a-z0-9_.-]+:\d{2,5}\b/gi, "***")
+      .slice(0, 300)
+  );
+}

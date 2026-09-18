@@ -122,7 +122,8 @@ thấy cổng phê duyệt trước khi bấm Lưu; máy chủ chạy lại nó 
 - **13 luật R2** phủ đúng các vùng sự thật của AGENTS.md: `ORDER_OUTCOME` · lương · lợi nhuận &
   phân bổ chi phí · tồn kho · quyền · migration · sửa dữ liệu production · scheduler · secret ·
   đổi tích hợp ngoài · COD · chứng từ ĐVVC · định nghĩa chỉ số.
-- **R2 ⇒ bắt buộc chủ shop phê duyệt** trước khi vào bước deploy.
+- **R2 ⇒ bắt buộc chủ shop phê duyệt** trước khi vào cột *Sẵn sàng deploy* — và lá chắn thứ hai
+  đứng lại ở bước deploy, cho trường hợp việc bị nâng lên R2 SAU khi đã sẵn sàng.
 - Không luật nào khớp ⇒ R0, và màn hình nói đúng nghĩa: *"chưa thấy rủi ro"*, không phải *"đã kiểm
   tra và an toàn"*.
 - Người đè được, nhưng phải ký tên: lý do ≥ 10 ký tự, lưu `risk_overridden_by` (khoá tài khoản),

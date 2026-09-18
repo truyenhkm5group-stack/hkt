@@ -19,6 +19,7 @@ import {
 } from "@/lib/constants/tech";
 import { TECH_RISK_RULES, classifyTechRisk } from "@/lib/constants/tech-risk";
 import { commitMatches, parseHealthPayload } from "@/lib/tech/health-parse";
+import { redactedErrorMessage } from "@/lib/version";
 import { worstHealth } from "@/lib/queries/tech-health";
 import { listTechTasks, techOverviewCounts, techTaskFacets } from "@/lib/queries/tech";
 import { listTechAgents } from "@/lib/queries/tech-agents";
@@ -190,6 +191,52 @@ export function testTechPermissions() {
   const tuyChinh = resolvePermissions("MANAGER", ["dashboard:view", "orders:read"], null, null);
   assert.ok(!tuyChinh.includes("tech:manage"), "quyền Tech không được rơi vào tài khoản có danh sách quyền riêng");
 
+  /*
+    ───────── BẢN GHI ĐÈ MẪU VAI TRÒ TRONG `settings` KHÔNG ĐƯỢC CẤP QUYỀN TECH ─────────
+
+    Production có `settings['auth.rolePermissions']`, và `rolePermissions()` đọc mẫu vai trò bằng
+    phép THAY THẾ: có mảng lưu thì mảng ấy LÀ quyền của vai trò, `DEFAULT_ROLE_PERMISSIONS` không
+    được hỏi tới. Đó chính là đường đã làm bản vá `payroll:view` không với tới máy chủ thật
+    (xem ghi chú dài trong `lib/auth/permissions.ts`).
+
+    Hai khoá Tech an toàn trước đường đó vì chúng MỚI — không mảng ghi đè nào đang mang chúng. Bài
+    này khoá điều đó lại: mô phỏng một bản ghi đè rộng rãi (kể cả một bản cố tình nhét khoá Tech
+    vào) và chứng minh không vai trò nào ngoài ADMIN nhận được quyền quản trị Tech.
+  */
+  /*
+    Mảng ghi đè trên production được lưu TRƯỚC bản này, nên theo đúng nghĩa đen nó KHÔNG THỂ chứa
+    hai khoá vừa ra đời. Bộ dữ liệu giả lập phải mang đúng hình dạng ấy: bộ khoá của thời điểm
+    TRƯỚC bản này, tức mọi khoá trừ `tech:*`. Dựng nó từ `ALL_PERMISSIONS` hôm nay là dựng một
+    tình huống không tồn tại — và bài kiểm sẽ đỏ vì bộ dữ liệu sai chứ không vì mã sai.
+  */
+  const KHOA_TECH = ["tech:view", "tech:manage"];
+  const boKhoaTruocBanNay = (ALL_PERMISSIONS as string[]).filter((p) => !KHOA_TECH.includes(p));
+  const ghiDeCu: Record<string, string[]> = {
+    // Bản ghi đè RỘNG NHẤT có thể tồn tại: mọi khoá đã có lúc lưu, chỉ trừ hai khoá quản trị.
+    MANAGER: boKhoaTruocBanNay.filter((p) => !["users:manage", "settings:manage"].includes(p)),
+    LEADER: ["dashboard:view", "orders:read", "payroll:view"],
+  };
+  const quanLyTheoGhiDe = resolvePermissions("MANAGER", null, ghiDeCu, null);
+  assert.ok(!quanLyTheoGhiDe.includes("tech:manage"), "bản ghi đè cũ KHÔNG được cấp tech:manage — đây là đường đã làm bản vá payroll:view không với tới production");
+  assert.ok(!quanLyTheoGhiDe.includes("tech:view"), "bản ghi đè cũ KHÔNG được cấp tech:view");
+  const truongNhomTheoGhiDe = resolvePermissions("LEADER", null, ghiDeCu, null);
+  assert.ok(!truongNhomTheoGhiDe.includes("tech:view") && !truongNhomTheoGhiDe.includes("tech:manage"), "bản ghi đè hẹp cũng không cấp quyền Tech");
+  // Người dùng có DANH SÁCH RIÊNG lưu từ trước, đứng cạnh một bản ghi đè mẫu vai trò: vẫn không
+  // nhận được quyền Tech. Đây là tổ hợp sát production nhất.
+  const nguoiCuTrenNenGhiDe = resolvePermissions("MANAGER", ["dashboard:view", "orders:read"], ghiDeCu, null);
+  assert.ok(!nguoiCuTrenNenGhiDe.some((p) => KHOA_TECH.includes(p)), "danh sách quyền riêng cũ + bản ghi đè mẫu vai trò vẫn KHÔNG mở được quyền Tech");
+  /*
+    Chiều ngược lại phải nói thẳng, không giấu: nếu chủ shop MỞ trang Người dùng hôm nay và tự tay
+    tích ô, thì quyền được cấp — đó là một quyết định có người, có tên, có nhật ký, và đúng là điều
+    ta muốn. Thứ bài này chặn là quyền tự xuất hiện, không phải quyền được cấp.
+  */
+  const coYCap = resolvePermissions("MANAGER", null, { MANAGER: ["dashboard:view", "tech:view"] }, null);
+  assert.ok(coYCap.includes("tech:view"), "chủ shop cấp tay thì phải cấp được — cổng này chặn quyền TỰ xuất hiện, không chặn quyết định của người");
+  assert.ok(!coYCap.includes("tech:manage"), "…và chỉ cấp đúng khoá được tích, không kéo theo khoá quản trị");
+
+  const adminLuonDu = resolvePermissions("ADMIN", null, ghiDeCu, null);
+  assert.ok(adminLuonDu.includes("tech:manage") && adminLuonDu.includes("tech:view"), "ADMIN luôn toàn quyền, không phụ thuộc bản ghi đè");
+
   // ───────── Mọi trang /tech phải tự kiểm quyền, không dựa vào menu ─────────
   // Menu ẩn không khoá được đường dẫn: gõ thẳng `/tech/tasks` vẫn mở được nếu trang không hỏi quyền.
   for (const tuyen of ["", "/tasks", "/tasks/[id]", "/agents", "/deployments", "/incidents", "/incidents/[id]"]) {
@@ -245,6 +292,22 @@ export function testTechHealthParsing() {
   assert.equal(commitMatches(null, null), null, "hai vế cùng trống KHÔNG phải là 'khớp' — đây là chỗ dễ nói dối nhất");
   assert.equal(commitMatches("abc1234def", "abc1234"), true, "so theo độ dài chung: SHA ngắn khớp SHA dài");
   assert.equal(commitMatches("abc1234def", "zzz9999"), false);
+
+  /*
+    ───────── 4.35 CÂU LỖI CỦA TUYẾN CÔNG KHAI PHẢI SẠCH ─────────
+
+    `/api/health` nằm trong `PUBLIC_PREFIXES`: không đăng nhập vẫn gọi được. Nhánh lỗi của nó trả
+    về câu lỗi của CSDL, mà câu ấy có thể mang nguyên chuỗi kết nối. Kho mã này PUBLIC và một lần
+    lộ là lộ vĩnh viễn (AGENTS.md mục 5).
+  */
+  const loiCoBiMat = redactedErrorMessage(new Error('connect ECONNREFUSED postgres://erp:S3cr3t!@10.0.0.4:5432/erp'));
+  assert.ok(!loiCoBiMat.includes("S3cr3t"), "mật khẩu KHÔNG được đi ra ngoài qua tuyến công khai");
+  assert.ok(!loiCoBiMat.includes("10.0.0.4"), "địa chỉ máy chủ nội bộ cũng không");
+  assert.ok(loiCoBiMat.includes("ECONNREFUSED"), "nhưng vẫn phải giữ đủ để chẩn đoán được");
+  const loiCapKhoa = redactedErrorMessage(new Error("auth failed: PGPASSWORD=hunter2 rejected"));
+  assert.ok(!loiCapKhoa.includes("hunter2"), "cặp khoá–giá trị mang mật khẩu cũng phải bị che");
+  assert.ok(redactedErrorMessage(new Error("x".repeat(5000))).length <= 300, "câu lỗi phải có trần độ dài");
+  assert.equal(redactedErrorMessage(new Error("relation \"orders\" does not exist")), 'relation "orders" does not exist', "câu lỗi sạch thì giữ nguyên, không che bừa");
 
   // ───────── 4.4 Mức tổng = mức XẤU NHẤT, và UNKNOWN xếp trên HEALTHY ─────────
   assert.equal(worstHealth(["HEALTHY", "HEALTHY"]), "HEALTHY");
@@ -356,12 +419,19 @@ export async function testTechControlPlaneDb() {
   assert.ok((daChan?.blockedReason ?? "").length > 5, "lý do bị chặn phải được lưu");
 
   /* ───────── 5.4 Cổng phê duyệt KHÔNG lách được ───────── */
-  for (const b of ["BUILDING", "REVIEW", "QA", "READY_TO_DEPLOY"] as TechTaskStatus[]) {
+  for (const b of ["BUILDING", "REVIEW", "QA"] as TechTaskStatus[]) {
     const r = await setTechTaskStatus({ taskId: r2Id, to: b }, chuShop);
     assert.ok("ok" in r, `phải đi được tới ${b}`);
   }
-  const chanDeploy = await setTechTaskStatus({ taskId: r2Id, to: "DEPLOYING" }, chuShop);
-  assert.ok("error" in chanDeploy && chanDeploy.error.includes("phê duyệt"), "việc R2 chưa duyệt KHÔNG vào được bước deploy");
+  /*
+    CHẶN NGAY Ở "SẴN SÀNG DEPLOY", không đợi tới lượt deploy.
+
+    Nhãn của trạng thái ấy đọc ra là "đã xanh hết và (nếu cần) đã được chủ shop phê duyệt". Chặn
+    muộn hơn một bước thì cái nhãn nói dối: việc R2 chưa ai ký vẫn đứng trong cột "Sẵn sàng deploy"
+    và người nhìn bảng tin là nó sẵn sàng thật.
+  */
+  const chanSanSang = await setTechTaskStatus({ taskId: r2Id, to: "READY_TO_DEPLOY" }, chuShop);
+  assert.ok("error" in chanSanSang && chanSanSang.error.includes("phê duyệt"), "việc R2 chưa duyệt KHÔNG được vào cột 'Sẵn sàng deploy'");
 
   // Máy KHÔNG tự duyệt được cho mình.
   const mayDuyet = await decideTechApproval({ taskId: r2Id, decision: "APPROVED" }, may);
@@ -377,6 +447,8 @@ export async function testTechControlPlaneDb() {
   assert.equal(daDuyet?.approvedBy, userId, "chữ ký đi bằng khoá tài khoản");
   assert.ok(daDuyet?.approvedAt, "phải có mốc phê duyệt");
 
+  const quaCongSanSang = await setTechTaskStatus({ taskId: r2Id, to: "READY_TO_DEPLOY" }, chuShop);
+  assert.ok("ok" in quaCongSanSang, "đã duyệt thì vào được cột 'Sẵn sàng deploy'");
   const quaCong = await setTechTaskStatus({ taskId: r2Id, to: "DEPLOYING" }, chuShop);
   assert.ok("ok" in quaCong, "đã duyệt thì đi tiếp được");
 
@@ -409,15 +481,36 @@ export async function testTechControlPlaneDb() {
   /* ───────── 5.7 Đè mức rủi ro: bắt buộc lý do, và nâng lên R2 thì phải xin duyệt lại ───────── */
   const deThieuLyDo = await overrideTechTaskRisk({ taskId: r0Id, risk: "R2", reason: "cần" }, chuShop);
   assert.ok("error" in deThieuLyDo, "đè mức rủi ro mà không nói vì sao phải bị từ chối");
+  // Đưa việc R0 lên tới "Sẵn sàng deploy" TRƯỚC khi nâng mức — để kiểm đúng kịch bản nguy hiểm:
+  // việc đã qua cổng ở mức nhẹ, rồi mới bị xếp lại thành R2.
+  for (const b of ["TRIAGED", "BUILDING", "REVIEW", "QA", "READY_TO_DEPLOY"] as TechTaskStatus[]) {
+    const r = await setTechTaskStatus({ taskId: r0Id, to: b }, chuShop);
+    assert.ok("ok" in r, `việc R0 phải đi được tới ${b} mà không cần ai duyệt`);
+  }
   await overrideTechTaskRisk({ taskId: r0Id, risk: "R2", reason: "Tài liệu này mô tả cách tính lương nên người đọc sẽ tin nó như luật" }, chuShop);
   const daDe = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, r0Id) });
   assert.equal(daDe?.risk, "R2");
   assert.equal(daDe?.approvalRequired, true, "nâng lên R2 thì cổng phê duyệt bật lên");
   assert.equal(daDe?.approvalStatus, "PENDING", "và việc phải xin duyệt lại — cái đã duyệt trước đó là một việc khác");
   assert.equal(daDe?.riskOverriddenBy, userId, "lượt đè phải ký tên bằng khoá tài khoản");
+  /*
+    LÁ CHẮN THỨ HAI. Việc này ĐÃ ở "Sẵn sàng deploy" từ lúc còn R0, nên cổng ở bước trước không còn
+    đứng giữa nó với production nữa. Chặn ở `DEPLOYING` là thứ duy nhất còn lại — và đó đúng là lý
+    do giữ hai lá chắn thay vì dời một.
+  */
+  const chanLanHai = await setTechTaskStatus({ taskId: r0Id, to: "DEPLOYING" }, chuShop);
+  assert.ok("error" in chanLanHai && chanLanHai.error.includes("phê duyệt"), "việc bị NÂNG lên R2 sau khi đã sẵn sàng vẫn phải bị chặn ở lượt deploy");
+  /*
+    VÀ AGENT ĐANG CẦM VIỆC CŨNG KHÔNG CHẠY ĐƯỢC NỮA. Agent `backend` được giao việc này lúc nó còn
+    R0. Máy KHÔNG tự gỡ việc khỏi tay ai (AGENTS.md mục 25), nên chỗ phải chặn là lúc SẮP LÀM.
+  */
+  const chanLuotChay = await startTechAgentRun({ agentId: backend.id, taskId: r0Id }, chuShop);
+  assert.ok("error" in chanLuotChay, "agent chưa được phép chạm R2 thì không mở được lượt chạy cho việc vừa bị nâng lên R2");
 
   /* ───────── 5.8 Lượt chạy: bốn cổng mặc định CHƯA XÁC MINH ───────── */
-  const luot = await startTechAgentRun({ agentId: backend.id, taskId: r0Id, branch: "claude/tech-t" }, chuShop);
+  // Lượt chạy KHÔNG gắn việc: hợp lệ (dọn dẹp, dò tìm), và là cách kiểm bốn cổng mà không vướng
+  // mức rủi ro của một việc cụ thể.
+  const luot = await startTechAgentRun({ agentId: backend.id, branch: "claude/tech-t" }, chuShop);
   assert.ok("ok" in luot, "mở được lượt chạy cho agent đang bật");
   const luotId = "ok" in luot ? luot.id : "";
   const dangChay = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, luotId) });
