@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { applyCarrierEventToCare, reconcileCareCoverage } from "@/lib/care/lifecycle";
+import { afterShipmentStateChange, applyCarrierEventToCare, reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { setCareStatus, type CareActor } from "@/lib/care/service";
 import { canOpenNewEpisode, chuaAiXuLyXongSql } from "@/lib/care/reopen-guard";
+import { classifyReopen, REOPEN_CLASS_COUNTS_AS_CASE } from "@/lib/constants/care-reopen-class";
+import { getCareAudit } from "@/lib/queries/care-case-audit";
 import { rowsOf } from "@/lib/sql-rows";
 
 /**
@@ -145,16 +147,138 @@ export async function testCareReopen(db: Db) {
     }
   }
 
+  /* ═════════ 8 · BẢNG CHÂN LÝ MỞ LẠI — NĂM TÌNH HUỐNG CHỦ SHOP CHỐT ═════════ */
+  //
+  // Năm tình huống này là đặc tả, không phải ví dụ: chúng phân định chính xác ranh giới giữa "sự cố
+  // cũ" và "sự cố mới", và mỗi cái đi qua một ĐƯỜNG VÀO khác nhau (webhook, bộ đối chiếu, nhập tệp).
+
+  // ── A · Bộ đối chiếu chạy nhiều vòng sau khi người xử lý xong ⇒ KHÔNG mở lại ──
+  const sA = await dungKien(db, "sa");
+  const mocA = gio(6);
+  await suKien(db, sA, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: mocA });
+  await setCareStatus(NGUOI, { shipmentIds: [sA], status: "RESOLVED", note: "A: đã gọi khách" });
+  await db.update(schema.shipments).set({ vtpStatus: 507, vtpStatusName: "Chờ phát lại", stage: "DELIVERY_FAILED", vtpStatusDate: mocA, isFinal: false }).where(eq(schema.shipments.id, sA));
+  for (let i = 0; i < 3; i++) await reconcileCareCoverage(db, new Date(), { shipmentIds: [sA] });
+  assert.equal((await dot(db, sA)).length, 1, "A · ba vòng đối chiếu sau khi xử lý xong KHÔNG được dựng lại ca");
+
+  // ── B · ĐVVC có sự kiện MỚI THẬT ⇒ ĐƯỢC mở đợt mới ──
+  const mocB = new Date();
+  await db.update(schema.shipments).set({ vtpStatusDate: mocB }).where(eq(schema.shipments.id, sA));
+  await reconcileCareCoverage(db, new Date(), { shipmentIds: [sA] });
+  const sauB = await dot(db, sA);
+  assert.equal(sauB.length, 2, "B · sự kiện ĐVVC mới hơn lúc đóng ⇒ đây là sự cố MỚI, phải mở đợt mới");
+  assert.equal(sauB[1].sourceTrigger, "RECONCILE");
+
+  // ── C · Webhook GỬI LẠI một sự kiện CŨ sau khi đã xử lý xong ⇒ KHÔNG mở lại ──
+  //
+  // Viettel Post thử lại tới 5 lần, nên đây không phải tình huống hiếm. Gói tin gửi lại mang mốc
+  // ĐVVC CŨ, và mốc mới là thứ quyết định — không phải lúc ERP nhận được gói tin.
+  const sC = await dungKien(db, "sc");
+  const mocC = gio(8);
+  await suKien(db, sC, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: mocC });
+  await setCareStatus(NGUOI, { shipmentIds: [sC], status: "RESOLVED", note: "C: xong" });
+  for (let i = 0; i < 5; i++) {
+    const lai = await suKien(db, sC, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: mocC });
+    assert.equal(lai.opened, false, "C · webhook gửi lại sự kiện cũ KHÔNG được dựng lại ca");
+  }
+  assert.equal((await dot(db, sC)).length, 1);
+
+  /*
+    ── D · NHẬP TỆP mang một sự kiện CŨ ⇒ KHÔNG mở lại ──
+
+    Đường nhập tệp đi qua `afterShipmentStateChange`, và hàm đó lấy mốc từ `shipments.vtp_status_date`
+    — ảnh chụp đã dựng từ lịch sử, nên một dòng tệp CŨ không đẩy mốc ấy lùi lại được. Bài kiểm dựng
+    đúng tình huống đó: ảnh chụp giữ mốc cũ, gọi lại đường vòng đời, và ca không được quay lại.
+  */
+  const sD = await dungKien(db, "sd");
+  const mocD = gio(12);
+  await suKien(db, sD, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: mocD });
+  await setCareStatus(NGUOI, { shipmentIds: [sD], status: "RESOLVED", note: "D: xong" });
+  await db.update(schema.shipments).set({ vtpStatus: 507, vtpStatusName: "Chờ phát lại", stage: "DELIVERY_FAILED", vtpStatusDate: mocD, isFinal: false }).where(eq(schema.shipments.id, sD));
+  const nhapCu = await afterShipmentStateChange(db, sD, { source: "VTP_IMPORT" });
+  assert.equal(nhapCu.opened, false, "D · nhập tệp mang sự kiện CŨ KHÔNG được dựng lại ca");
+  await reconcileCareCoverage(db, new Date(), { shipmentIds: [sD] });
+  assert.equal((await dot(db, sD)).length, 1, "D · và vòng đối chiếu sau đó cũng vậy");
+
+  // ── E · NHẬP TỆP mang một sự kiện MỚI THẬT ⇒ ĐƯỢC mở đợt mới ──
+  await db.update(schema.shipments).set({ vtpStatusDate: new Date() }).where(eq(schema.shipments.id, sD));
+  const nhapMoi = await afterShipmentStateChange(db, sD, { source: "VTP_IMPORT" });
+  assert.equal(nhapMoi.opened, true, "E · nhập tệp mang sự kiện MỚI HƠN lúc đóng ⇒ được mở đợt mới");
+  assert.equal((await dot(db, sD)).length, 2);
+
+  /* ═════════ 9 · HAI NGƯỜI CÙNG MỞ MỘT CA, MỘT NGƯỜI ĐÓNG TRƯỚC ═════════ */
+  //
+  // Người thứ hai bấm từ một màn hình CŨ (chưa thấy là ca đã đóng). Không được: mở lại ca, đè kết
+  // quả, mất note, hay sinh thêm một kết cục thứ hai.
+  const sF = await dungKien(db, "sf");
+  await suKien(db, sF, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: gio(3) });
+  await setCareStatus(NGUOI, { shipmentIds: [sF], status: "RESOLVED", note: "A đóng trước" });
+  const truocKhiB = (await dot(db, sF))[0];
+
+  const NGUOI_B: CareActor = { id: `${P}u2`, email: "b@shop.vn", name: "Người B" };
+  await db.insert(schema.users).values({ id: `${P}u2`, email: "b@shop.vn", name: "Người B", passwordHash: "x", role: "CS" }).onConflictDoNothing();
+  const bBam = await setCareStatus(NGUOI_B, { shipmentIds: [sF], status: "IN_PROGRESS", note: "B bấm từ màn hình cũ" });
+  assert.ok("ok" in bBam && bBam.data.skipped.length === 1, "B bấm từ màn hình cũ phải bị TỪ CHỐI kèm lý do, không âm thầm ghi");
+
+  const sauB2 = (await dot(db, sF))[0];
+  assert.equal(sauB2.careStatus, "RESOLVED", "kết quả của A không bị đè");
+  assert.equal(sauB2.active, false, "ca KHÔNG bị mở lại");
+  assert.equal(sauB2.lastNote, truocKhiB.lastNote, "note của A còn nguyên");
+  assert.equal(sauB2.doneAt?.getTime(), truocKhiB.doneAt?.getTime(), "mốc hoàn tất không bị đẩy đi");
+  assert.equal((await dot(db, sF)).length, 1, "và không sinh đợt thứ hai");
+
+  /* ═════════ 10 · BẢN SAO DO LỖI CŨ KHÔNG ĐƯỢC ĐẾM NHƯ MỘT CA NGHIỆP VỤ ═════════ */
+  //
+  // Đo 18/09/2026 trên 19 cặp đợt liên tiếp: 10 bản sao chắc chắn · 6 chưa đủ bằng chứng · 3 hợp lệ.
+  // Nếu không gọi tên chúng thì mọi con số care còn nói sai rất lâu sau khi lỗi đã hết.
+  assert.equal(classifyReopen({ episodeNo: 1, triggerAt: gio(2), previousClosedAt: null, carrierEventBetween: false }), "FIRST_EPISODE");
+  assert.equal(classifyReopen({ episodeNo: 2, triggerAt: gio(1), previousClosedAt: gio(5), carrierEventBetween: false }), "LEGITIMATE_REOPEN", "mốc mới hơn lúc đóng ⇒ sự cố thật");
+  assert.equal(classifyReopen({ episodeNo: 2, triggerAt: gio(5), previousClosedAt: gio(1), carrierEventBetween: false }), "FALSE_REOPEN_LEGACY", "mốc cũ hơn và không có sự kiện xen giữa ⇒ bản sao");
+  /*
+    SỰ KIỆN ĐVVC XEN GIỮA LÀ RANH GIỚI GIỮA "CHẮC CHẮN" VÀ "CHƯA RÕ".
+
+    Gộp nhóm này vào "lỗi" là khẳng định một điều không chứng minh được — và nó làm con số lỗi to
+    lên 60% (10 → 16). Gộp vào "thật" thì giấu mất chúng. Đứng riêng mới là câu trả lời đúng.
+  */
+  assert.equal(classifyReopen({ episodeNo: 2, triggerAt: gio(5), previousClosedAt: gio(1), carrierEventBetween: true }), "REOPEN_UNVERIFIED");
+  assert.equal(REOPEN_CLASS_COUNTS_AS_CASE.FALSE_REOPEN_LEGACY, false, "bản sao KHÔNG vào mẫu số của bất kỳ con số nào");
+  assert.equal(REOPEN_CLASS_COUNTS_AS_CASE.REOPEN_UNVERIFIED, true, "chưa rõ thì VẪN đếm — loại bỏ một ca vì không chắc là giấu việc");
+
+  /* ═════════ 11 · TRUY VẤN KIỂM KÊ CHẠY ĐƯỢC VÀ LOẠI ĐÚNG BẢN SAO ═════════ */
+  //
+  // `getCareAudit` là nơi duy nhất mọi màn hình care đọc số. Truy vấn của nó phải chạy được THẬT —
+  // một câu SQL chỉ hỏng lúc chạy sẽ không lỗi nào phát ra ở typecheck.
+  const sG = await dungKien(db, "sg");
+  const mocG = gio(20);
+  await suKien(db, sG, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: mocG });
+  await setCareStatus(NGUOI, { shipmentIds: [sG], status: "RESOLVED", note: "G: xong" });
+  // Dựng thẳng một BẢN SAO đúng như lỗi cũ từng sinh ra: mốc kích hoạt cũ hơn lúc đóng.
+  await db.insert(schema.shipmentCare).values({
+    shipmentId: sG, orderId: `${P}o-sg`, episodeNo: 2, active: true, careStatus: "NEW",
+    entryCarrierState: "WAITING_REDELIVERY", sourceTrigger: "RECONCILE", openedAt: mocG, careOutcome: "PENDING", updatedBy: "SYSTEM",
+  });
+  clearMemo();
+  const kiemKe = await getCareAudit({ from: gio(72), to: new Date(Date.now() + 3600_000) }, "CASE_OPENED_AT");
+  const dongG = kiemKe.rows.filter((r) => r.shipmentId === sG);
+  assert.equal(dongG.length, 2, "cả hai đợt vẫn nằm trong danh sách để tra lịch sử — không xoá gì");
+  assert.equal(dongG.find((r) => r.careId !== undefined && r.outcome !== undefined && r.reopenClass === "FALSE_REOPEN_LEGACY") !== undefined, true, "bản sao phải được gọi đúng tên");
+  assert.ok(kiemKe.reopen.byClass.FALSE_REOPEN_LEGACY >= 1, "bộ đếm theo loại phải thấy nó");
+  /*
+    Con số DUY NHẤT nói lỗi có còn đang xảy ra hay không. Bản sao trong bài kiểm mang mốc kích hoạt
+    CŨ (20 giờ trước) nên nó là DI SẢN, không phải lỗi mới — đúng như các đợt thật trên production.
+  */
+  assert.equal(kiemKe.reopen.falseReopenAfterFix, 0, "không có bản sao nào sinh ra SAU khi luật mới chạy");
+
   /* ───── dọn ───── */
-  const ids = [s1, s2];
+  const ids = [s1, s2, sA, sC, sD, sF, sG];
   await db.delete(schema.careActions).where(sql`${schema.careActions.shipmentId} in ${ids}`);
   await db.delete(schema.careCaseEvents).where(sql`${schema.careCaseEvents.shipmentId} in ${ids}`);
   await db.delete(schema.shipmentCare).where(sql`${schema.shipmentCare.shipmentId} in ${ids}`);
   await db.delete(schema.shipmentEvents).where(sql`${schema.shipmentEvents.shipmentId} in ${ids}`);
   await db.delete(schema.shipments).where(sql`${schema.shipments.id} in ${ids}`);
   await db.delete(schema.orders).where(sql`${schema.orders.id} like ${`${P}o-%`}`);
-  await db.delete(schema.users).where(eq(schema.users.id, `${P}u1`));
+  await db.delete(schema.users).where(sql`${schema.users.id} in ${[`${P}u1`, `${P}u2`]}`);
   clearMemo();
 
-  console.log("✓ Ca đã xử lý xong KHÔNG tự quay lại: webhook nhắc lại tình trạng cũ · bộ đối chiếu 10 phút/lần · bấm hai lần ra một hoàn tất · note còn nguyên · sự cố MỚI vẫn mở được đợt mới · hai bản TS/SQL của luật nói cùng một điều");
+  console.log("✓ Ca đã xử lý xong KHÔNG tự quay lại: webhook nhắc lại tình trạng cũ · bộ đối chiếu 10 phút/lần · bấm hai lần ra một hoàn tất · note còn nguyên · sự cố MỚI vẫn mở được đợt mới · hai bản TS/SQL của luật nói cùng một điều · bảng chân lý A–E · màn hình cũ không đè được kết quả mới · bản sao do lỗi cũ không vào con số nào");
 }

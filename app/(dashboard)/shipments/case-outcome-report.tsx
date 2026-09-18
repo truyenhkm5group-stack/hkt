@@ -10,8 +10,9 @@ import {
   PERIOD_BASIS_LABEL,
   type PeriodBasis,
 } from "@/lib/constants/care-effect";
+import { REOPEN_CLASSES, REOPEN_CLASS_HINT, REOPEN_CLASS_LABEL } from "@/lib/constants/care-reopen-class";
 import { getCareAudit } from "@/lib/queries/care-case-audit";
-import { formatNumber, formatPercent } from "@/lib/format";
+import { formatDateTime, formatNumber, formatPercent } from "@/lib/format";
 import type { Period } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -94,6 +95,46 @@ export async function CaseOutcomeReport({ period, basis }: { period: Period; bas
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/*
+        ═══ SỨC KHOẺ LUẬT MỞ LẠI — BA CON SỐ, KHÔNG PHẢI MỘT ═══
+
+        Tới 18/09/2026 bộ đối chiếu dựng lại một đợt MỚI mỗi khi người bấm hoàn tất (luật 59). Các
+        bản sao đã trót sinh ra vẫn nằm trong CSDL, nên phải gọi tên chúng — nếu không mọi con số
+        care còn nói sai rất lâu sau khi lỗi đã hết. Chúng KHÔNG được đếm ở các ô phía trên.
+      */}
+      <div className="mt-4 rounded-lg border p-3">
+        <p className="text-[12.5px] font-medium">Đợt thứ hai trở đi: thật, bản sao, hay chưa rõ</p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {REOPEN_CLASSES.map((k) => (
+            <div key={k} className="rounded-md border bg-muted/20 px-2.5 py-2" title={REOPEN_CLASS_HINT[k]}>
+              <p className="text-[11.5px] text-muted-foreground">{REOPEN_CLASS_LABEL[k]}</p>
+              <p className={cn("numeric text-lg font-bold", k === "FALSE_REOPEN_LEGACY" && a.reopen.byClass[k] > 0 && "text-amber-700 dark:text-amber-400")}>
+                {formatNumber(a.reopen.byClass[k])}
+              </p>
+            </div>
+          ))}
+        </div>
+        <p
+          className={cn(
+            "mt-2 rounded-md px-2.5 py-2 text-[11.5px]",
+            a.reopen.falseReopenAfterFix === 0
+              ? "bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
+              : "bg-destructive/10 text-destructive",
+          )}
+        >
+          {a.reopen.falseReopenAfterFix === 0 ? (
+            <>
+              <strong>Không có bản sao nào sinh ra sau khi luật mới chạy</strong> ({formatDateTime(a.reopen.guardLiveAt)}). Các con số “bản sao” ở trên là DI SẢN đã được vá,
+              không phải lỗi đang xảy ra.
+            </>
+          ) : (
+            <>
+              <strong>{formatNumber(a.reopen.falseReopenAfterFix)} bản sao sinh ra SAU khi luật mới chạy</strong> ({formatDateTime(a.reopen.guardLiveAt)}) — lỗi vẫn đang xảy ra, phải điều tra ngay.
+            </>
+          )}
+        </p>
       </div>
 
       <p className="mt-3 flex items-start gap-2 text-[11.5px] text-muted-foreground">

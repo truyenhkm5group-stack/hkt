@@ -389,6 +389,19 @@ deploy dừng, không phải cảnh báo.
     lần hai. Vế `!note` cũ không cứu được vì kịch bản thật luôn kèm note. Đã ở trạng thái kết thúc
     và xin đúng trạng thái đó ⇒ BỎ QUA, không ghi, trả về trạng thái hiện tại.
 
+62. **ĐỢT THỨ HAI LÀ THẬT, GIẢ, HAY CHƯA RÕ — BA CÂU TRẢ LỜI, KHÔNG PHẢI HAI**
+    (`lib/constants/care-reopen-class.ts`): các đợt sinh ra bởi lỗi mở ca (mục 59) vẫn nằm trong
+    CSDL sau khi luật đã vá, và vẫn được đếm như ca độc lập ở MỌI con số care. Phân loại ĐỌC RA LÚC
+    XEM (không cột mới, không backfill — mục 8.8): `FIRST_EPISODE` · `LEGITIMATE_REOPEN` (mốc kích
+    hoạt mới hơn lúc đóng) · `FALSE_REOPEN_LEGACY` (mốc cũ hơn VÀ không có sự kiện ĐVVC xen giữa) ·
+    `REOPEN_UNVERIFIED` (mốc cũ hơn NHƯNG có sự kiện xen giữa). Đo 18/09/2026 trên 19 cặp:
+    **10 bản sao · 6 chưa rõ · 3 hợp lệ** — gộp 6 cặp giữa vào nhóm lỗi làm con số lỗi to lên 60%
+    và là khẳng định không chứng minh được; gộp vào nhóm thật thì giấu mất chúng. Chỉ
+    `FALSE_REOPEN_LEGACY` bị loại khỏi mẫu số; `REOPEN_UNVERIFIED` VẪN đếm, vì loại một ca ra chỉ
+    vì không chắc là giấu việc. `REOPEN_GUARD_LIVE_AT` chia đôi con số: bản sao tạo TRƯỚC mốc đó là
+    di sản đã vá, tạo SAU là lỗi CÒN ĐANG XẢY RA và phải bằng 0 — gộp hai bên làm chủ shop tưởng
+    lỗi chưa hết trong khi nó đã hết.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và

@@ -10,6 +10,13 @@ import {
   type CaseOutcome,
   type PeriodBasis,
 } from "@/lib/constants/care-effect";
+import {
+  classifyReopen,
+  REOPEN_CLASSES,
+  REOPEN_CLASS_COUNTS_AS_CASE,
+  REOPEN_GUARD_LIVE_AT,
+  type ReopenClass,
+} from "@/lib/constants/care-reopen-class";
 
 /**
  * ═══════════ MỘT CA CHĂM SÓC, ĐỌC ĐẦY ĐỦ ═══════════
@@ -51,6 +58,8 @@ export type CareCaseRow = {
   lastActorId: string | null;
   resolverId: string | null;
   actionKinds: string[];
+  /** Đợt này là ca thật, bản sao do lỗi cũ, hay chưa kết luận được. */
+  reopenClass: ReopenClass;
   callsReached: number;
   callsNoAnswer: number;
   messages: number;
@@ -81,6 +90,13 @@ export type CareAudit = {
   /** Trung vị phút, `null` khi mẫu chưa đủ. CHƯA ĐỦ khác hẳn 0. */
   medians: { toAssign: number | null; toFirstAction: number | null; toResolution: number | null };
   minSample: number;
+  /**
+   * ═══ SỨC KHOẺ LUẬT MỞ LẠI — BA CON SỐ, KHÔNG PHẢI MỘT ═══
+   *
+   * `falseReopenAfterFix` là con số DUY NHẤT nói lỗi có còn đang xảy ra hay không; nó phải bằng 0.
+   * Gộp nó với di sản đã vá làm chủ shop tưởng lỗi chưa hết trong khi nó đã hết.
+   */
+  reopen: { byClass: Record<ReopenClass, number>; falseReopenAfterFix: number; guardLiveAt: Date };
 };
 
 /** Dưới ngưỡng này thì KHÔNG phát biểu một trung vị: số nhỏ nhảy loạn theo từng ca. */
@@ -128,6 +144,23 @@ export async function getCareAudit(period: { from: Date | null; to: Date | null 
           c.resolution,
           c.owner_id,
           c.owner_at_resolution,
+          c.episode_no,
+          -- Mốc đóng của đợt LIỀN TRƯỚC trên cùng kiện — vế so của luật mở lại.
+          (select coalesce(p.done_at, p.outcome_at) from shipment_care p
+            where p.shipment_id = c.shipment_id and p.episode_no < c.episode_no
+            order by p.episode_no desc limit 1) as truoc_dong,
+          -- Có sự kiện ĐVVC nào XEN GIỮA lúc đóng đợt trước và lúc dựng đợt này không. Đây là bằng
+          -- chứng phân biệt "bản sao chắc chắn" với "chưa đủ bằng chứng" — thiếu nó thì 6 cặp mơ hồ
+          -- bị gộp vào nhóm lỗi và con số lỗi to lên 60%.
+          exists (
+            select 1 from shipment_events ev
+            where ev.shipment_id = c.shipment_id
+              and ev.source in ('VTP_WEBHOOK','VTP_IMPORT','PANCAKE')
+              and ev.occurred_at > (select coalesce(p2.done_at, p2.outcome_at) from shipment_care p2
+                                     where p2.shipment_id = c.shipment_id and p2.episode_no < c.episode_no
+                                     order by p2.episode_no desc limit 1)
+              and ev.occurred_at <= c.created_at
+          ) as co_su_kien_xen_giua,
           -- HÀNH ĐỘNG CHĂM SÓC THẬT: bảng care_actions, mọi loại đều do NGƯỜI ghi.
           (select min(a.created_at) from care_actions a
             where a.shipment_id = c.shipment_id and a.created_at >= coalesce(c.opened_at, c.created_at)) as first_care_action_at,
@@ -201,6 +234,12 @@ export async function getCareAudit(period: { from: Date | null; to: Date | null 
         actionKinds: kinds,
         humanRequestedRedelivery: Boolean(r.human_redelivery) && humanActionBeforeOutcome,
       });
+      const reopenClass = classifyReopen({
+        episodeNo: Number(r.episode_no ?? 1),
+        triggerAt: openedAt,
+        previousClosedAt: d(r.truoc_dong),
+        carrierEventBetween: Boolean(r.co_su_kien_xen_giua),
+      });
       counts[outcome] += 1;
       out.push({
         careId: String(r.care_id),
@@ -224,6 +263,7 @@ export async function getCareAudit(period: { from: Date | null; to: Date | null 
         // Người CHỊU TRÁCH NHIỆM lúc chốt — KHÔNG phải "người cuối cùng chạm vào" (mục 13).
         resolverId: (r.owner_at_resolution as string | null) ?? null,
         actionKinds: kinds,
+        reopenClass,
         callsReached: Number(r.calls_reached ?? 0),
         callsNoAnswer: Number(r.calls_no_answer ?? 0),
         messages: Number(r.messages ?? 0),
@@ -232,9 +272,19 @@ export async function getCareAudit(period: { from: Date | null; to: Date | null 
       });
     }
 
-    const withCareAction = out.filter((r) => r.firstCareActionAt).length;
-    const touched = out.filter((r) => r.firstCareActionAt || r.firstHumanTouchAt).length;
-    const resolved = out.filter((r) => r.resolvedAt).length;
+    /*
+      ═══ BẢN SAO DO LỖI CŨ KHÔNG ĐƯỢC ĐẾM NHƯ MỘT CA NGHIỆP VỤ ═══
+
+      Chúng vẫn nằm nguyên trong `rows` để tra lịch sử, nhưng mọi con số tổng hợp đứng trên tập ĐÃ
+      LỌC. Đếm chúng là nhân đôi một việc đã xong: số ca mở, số ca giao người, tỷ lệ cứu đơn và
+      thời gian xử lý đều lệch theo.
+    */
+    const ca = out.filter((r) => REOPEN_CLASS_COUNTS_AS_CASE[r.reopenClass]);
+    const withCareAction = ca.filter((r) => r.firstCareActionAt).length;
+    const touched = ca.filter((r) => r.firstCareActionAt || r.firstHumanTouchAt).length;
+    const resolved = ca.filter((r) => r.resolvedAt).length;
+    const byClass = Object.fromEntries(REOPEN_CLASSES.map((k) => [k, 0])) as Record<ReopenClass, number>;
+    for (const r of out) byClass[r.reopenClass] += 1;
 
     return {
       basis,
@@ -243,22 +293,28 @@ export async function getCareAudit(period: { from: Date | null; to: Date | null 
       rows: out,
       counts,
       totals: {
-        opened: out.length,
-        assigned: out.filter((r) => r.assignedAt).length,
+        opened: ca.length,
+        assigned: ca.filter((r) => r.assignedAt).length,
         withCareAction,
         touched,
-        untouched: out.length - touched,
+        untouched: ca.length - touched,
         resolved,
         // ĐỘ PHỦ luôn đứng cạnh con số: một trung vị trên 2/319 ca không phải một trung vị.
-        firstActionCoverage: out.length ? withCareAction / out.length : 0,
-        outcomeCoverage: out.length ? resolved / out.length : 0,
+        firstActionCoverage: ca.length ? withCareAction / ca.length : 0,
+        outcomeCoverage: ca.length ? resolved / ca.length : 0,
       },
       medians: {
-        toAssign: median(out.map((r) => khoangDuong(r.openedAt, r.assignedAt)).filter((x): x is number => x !== null)),
-        toFirstAction: median(out.map((r) => khoangDuong(r.openedAt, r.firstCareActionAt)).filter((x): x is number => x !== null)),
-        toResolution: median(out.map((r) => khoangDuong(r.openedAt, r.resolvedAt)).filter((x): x is number => x !== null)),
+        toAssign: median(ca.map((r) => khoangDuong(r.openedAt, r.assignedAt)).filter((x): x is number => x !== null)),
+        toFirstAction: median(ca.map((r) => khoangDuong(r.openedAt, r.firstCareActionAt)).filter((x): x is number => x !== null)),
+        toResolution: median(ca.map((r) => khoangDuong(r.openedAt, r.resolvedAt)).filter((x): x is number => x !== null)),
       },
       minSample: MEDIAN_MIN_SAMPLE,
+      reopen: {
+        byClass,
+        // Con số DUY NHẤT nói lỗi có còn đang xảy ra hay không. Phải bằng 0.
+        falseReopenAfterFix: out.filter((r) => r.reopenClass === "FALSE_REOPEN_LEGACY" && r.openedAt && r.openedAt > REOPEN_GUARD_LIVE_AT).length,
+        guardLiveAt: REOPEN_GUARD_LIVE_AT,
+      },
     };
   });
 }
