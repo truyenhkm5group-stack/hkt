@@ -62,6 +62,7 @@ on:
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
           - cs-rule-update      # đóng MỀM case sinh bởi luật cũ rồi quét lại (mặc định chỉ đếm; arg "--apply" mới ghi)
           - care-waiting-reconcile # đối chiếu ca chăm sóc ĐANG CHỜ mà không có mốc xem lại (mặc định CHẠY THỬ; arg "--apply" mới ghi)
+          - payroll-reconcile   # ĐỐI CHIẾU LƯƠNG cũ/mới trên dữ liệu production — CHỈ ĐỌC, Postgres tự chặn ghi (arg: "--from 2026-08-01 --to 2026-08-31")
           - backup              # pg_dump vào /root/backups
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
@@ -432,6 +433,27 @@ jobs:
                 # lượt dò CHỦ ĐỘNG cho câu hỏi đó. Mặc định CHẠY THỬ; "--apply" mới ghi.
                 fetch_script vtp-capability-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-capability-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-capability-probe.ts $ARG ;;
+              payroll-reconcile)
+                # ═══ CỔNG BẮT BUỘC TRƯỚC KHI KÍCH HOẠT LƯƠNG CHO BẤT KỲ AI ═══
+                #
+                # Chạy ĐƯỜNG TÍNH CŨ và MÁY LƯƠNG MỚI trên CÙNG dữ liệu nguồn production rồi so
+                # từng người. Chính sách ứng viên dựng TRONG BỘ NHỚ: không gán chính sách, không
+                # tạo kỳ lương, không ghi sổ lỗ lũy kế, không ghi nhật ký.
+                #
+                # "CHỈ ĐỌC" ở đây do POSTGRES ÉP, không do script hứa. Script tự đặt
+                # `ERP_READ_ONLY=1` TRƯỚC khi nạp `@/db`, nên gói khởi tạo kết nối bật
+                # `default_transaction_read_only=on`; rồi nó HỎI LẠI Postgres và DỪNG nếu phiên
+                # không phải chỉ đọc. Nó cũng chụp ảnh đếm 10 bảng lương TRƯỚC/SAU để chứng minh
+                # không ghi gì — chứ không chỉ khẳng định.
+                #
+                # Bỏ trống `arg` thì script TỰ TÌM kỳ gần nhất CÓ dữ liệu nguồn và in ra từng kỳ đã
+                # thử. Kỳ không có nguồn số nào khác 0 ra `RECONCILIATION_BLOCKED_BY_CONFIG` —
+                # KHÔNG phải "đạt": hai phép tính cùng ra 0 trên dữ liệu rỗng không chứng minh
+                # chúng đồng ý.
+                #
+                # KHÔNG có cờ nào bật chế độ ghi. Thao tác này không thể kích hoạt lương cho ai.
+                fetch_script payroll-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/payroll-reconcile.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/payroll-reconcile.ts $ARG ;;
               backup)
                 mkdir -p /root/backups
                 $C exec -T db pg_dump -U erp erp | gzip > "/root/backups/erp-$(date +%F-%H%M).sql.gz"
