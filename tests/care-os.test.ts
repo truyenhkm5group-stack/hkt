@@ -532,6 +532,59 @@ export async function testCareOs(db: Db) {
     assert.ok(!ds.rows.some((r) => r.id === sB), "30 · và kiện “chờ phát lại” KHÔNG lọt vào");
   }
 
+  /* ───── TRUNG VỊ PHẢI GOM THEO ĐÚNG CÁI GRAIN MÀ NHÃN NÓI ───── */
+  {
+    /*
+      Câu đếm kết cục phải nhóm theo (NGƯỜI × KẾT CỤC). Nếu trung vị thời gian đi chung câu ấy thì
+      con số in ra cạnh tên một người là trung vị của MỘT nhóm kết cục — và nhóm nào thắng phụ thuộc
+      thứ tự dòng Postgres trả về, nên nó còn đổi giữa hai lần chạy.
+
+      Bài này gieo 12 ca cho một người, chia đôi theo kết cục và CHÊNH LỆCH HẲN về thời gian:
+
+        6 ca "cứu được"     · chạm sau  60 phút
+        6 ca "không cứu"    · chạm sau 600 phút
+
+      Trung vị ĐÚNG của người đó = (60 + 600) / 2 = 330 phút. Trung vị của từng nhóm là 60 hoặc 600.
+      Một con số 60 hay 600 ở đây nghĩa là phép gom đang sai grain — cả hai đều "trông hợp lý".
+    */
+    const u3 = await db.insert(schema.users).values({ id: `${P}u3`, email: "pic3@test", name: "PIC C", passwordHash: "x", role: "CS" }).onConflictDoNothing().returning({ id: schema.users.id });
+    const picC = u3[0]?.id ?? `${P}u3`;
+    const MO = 48 * 60; // phút, mốc mở ca — dựng từ đồng hồ thật cùng nhịp với thứ nó đo (mục 50).
+    const phut = (m: number) => new Date(Date.now() - m * 60_000);
+    for (let i = 0; i < 12; i++) {
+      const cuuDuoc = i < 6;
+      const treMin = cuuDuoc ? 60 : 600;
+      const id = await dungKien(db, `gr${i}`, { stage: "DELIVERY_FAILED" });
+      await db.insert(schema.shipmentCare).values({
+        shipmentId: id,
+        orderId: `${P}o-gr${i}`,
+        episodeNo: 1,
+        active: false,
+        careStatus: "RESOLVED",
+        ownerId: picC,
+        ownerAtResolution: picC,
+        entryCarrierState: "WAITING_REDELIVERY",
+        sourceTrigger: "CARRIER_EVENT",
+        openedAt: phut(MO),
+        firstResponseAt: phut(MO - treMin),
+        outcomeAt: phut(MO - 900),
+        doneAt: phut(MO - 900),
+        careOutcome: cuuDuoc ? "RESCUED_DIRECT" : "RESCUE_FAILED",
+        updatedBy: "pic3@test",
+      });
+    }
+    clearMemo();
+    const bang = await getCarePerformanceByPic(KY_TAT_CA);
+    const dongC = bang.find((r) => r.userId === picC);
+    assert.ok(dongC, "người có 12 ca đã chốt phải có một dòng");
+    assert.equal(dongC?.touchSample, 12, `độ phủ phải đếm CẢ 12 ca của người đó, không phải một nhóm kết cục (được ${dongC?.touchSample})`);
+    assert.equal(dongC?.medianFirstTouchMin, 330, `trung vị phải gom theo NGƯỜI: 330 phút. 60 hoặc 600 nghĩa là đang gom theo (người × kết cục) (được ${dongC?.medianFirstTouchMin})`);
+    assert.equal(dongC?.medianFirstActionMin, null, "không ca nào có hành động nghiệp vụ ⇒ cột ấy để TRỐNG, không mượn số của cột bên cạnh");
+    assert.equal(dongC?.actionSample, 0, "và độ phủ của nó nói thẳng là 0");
+    assert.equal(dongC?.direct, 6, "đếm kết cục vẫn đúng sau khi tách hai câu lệnh");
+    assert.equal(dongC?.failed, 6);
+  }
+
   /* ───── DỌN: bài này thêm đơn/vận đơn riêng, không được để lọt vào tổng của bài khác ───── */
   const kienIds = (await db.select({ id: schema.shipments.id }).from(schema.shipments).where(sql`${schema.shipments.id} like ${`${P}%`}`)).map((r) => r.id);
   if (kienIds.length) {
@@ -544,7 +597,7 @@ export async function testCareOs(db: Db) {
     await db.delete(schema.shipments).where(inArray(schema.shipments.id, kienIds));
   }
   await db.delete(schema.orders).where(sql`${schema.orders.id} like ${`${P}o-%`}`);
-  await db.delete(schema.users).where(inArray(schema.users.id, [`${P}u1`, `${P}u2`]));
+  await db.delete(schema.users).where(inArray(schema.users.id, [`${P}u1`, `${P}u2`, `${P}u3`]));
   clearMemo();
 
   console.log("✓ Hệ điều hành chăm sóc vận đơn: 60 kiểm thử · ĐVVC mở ca và ĐVVC đóng ca · 501 chiều hoàn = hàng về shop · mã 102 chưa rời kho không phải việc · đối chiếu 48→48 và đóng 106 · đóng ⇔ active=false · chờ phải có giờ hẹn · PENDING đếm tại cuối kỳ · quy kết bằng khoá · trung vị dưới ngưỡng mẫu để TRỐNG");

@@ -175,16 +175,38 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
     // Ca đã chốt quy về `owner_at_resolution`; ca còn treo quy về người ĐANG cầm — để cột "đang
     // treo" của mỗi người nói đúng khối việc họ đang giữ. Khoá quy kết tính MỘT LẦN trong CTE:
     // Postgres không nhận ra hai biểu thức có tham số khác số thứ tự là cùng một biểu thức GROUP BY.
-    const ketQua = rowsOf<{ user_id: string | null; name: string; outcome: string | null; n: number; p_touch: number | null; p_action: number | null; p_resolve: number | null; n_touch: number; n_action: number; n_resolve: number }>(
+    const ketQua = rowsOf<{ user_id: string | null; name: string; outcome: string | null; n: number }>(
       await db.execute(sql`
         with ca as (
           select coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end) as uid,
-                 ${sc.careOutcome} as outcome, ${sc.firstActionAt} as first_action_at, ${sc.firstResponseAt} as first_touch_at,
+                 ${sc.careOutcome} as outcome
+            from ${sc}
+           where ${tapCaHieuSuat(period)}
+        )
+        select ca.uid as user_id, coalesce(max(u.name), '') as name, ca.outcome, count(*)::int as n
+          from ca left join users u on u.id = ca.uid
+         group by ca.uid, ca.outcome
+      `),
+    );
+
+    /*
+      ═══ TRUNG VỊ THỜI GIAN GOM THEO NGƯỜI, KHÔNG THEO (NGƯỜI × KẾT CỤC) ═══
+
+      Câu đếm ở trên phải nhóm theo kết cục — đó là việc của nó. Nhưng một trung vị nhóm theo
+      (người × kết cục) rồi in dưới nhãn của NGƯỜI là trung vị của MỘT nhóm kết cục, và nhóm nào
+      thắng thì phụ thuộc thứ tự dòng Postgres trả về. Đúng cái lỗi vòng này đi sửa: con số đo trên
+      một tập, cái nhãn nói về một tập khác. Nên nó là một phép gom RIÊNG, theo đúng grain của nhãn.
+    */
+    const thoiGian = rowsOf<{ user_id: string | null; p_touch: number | null; p_action: number | null; p_resolve: number | null; n_touch: number; n_action: number; n_resolve: number }>(
+      await db.execute(sql`
+        with ca as (
+          select coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end) as uid,
+                 ${sc.firstActionAt} as first_action_at, ${sc.firstResponseAt} as first_touch_at,
                  ${sc.openedAt} as opened_at, ${sc.outcomeAt} as outcome_at
             from ${sc}
            where ${tapCaHieuSuat(period)}
         )
-        select ca.uid as user_id, coalesce(max(u.name), '') as name, ca.outcome, count(*)::int as n,
+        select ca.uid as user_id,
                -- Trung vị, không phải trung bình: một ca treo ba tuần kéo trung bình đi mà không nói gì
                -- về ngày làm việc bình thường của người đó.
                percentile_cont(0.5) within group (order by extract(epoch from (ca.first_touch_at - ca.opened_at)) / 60) filter (where ca.first_touch_at is not null and ca.opened_at is not null) as p_touch,
@@ -200,8 +222,8 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
                count(*) filter (where ca.first_touch_at is not null and ca.opened_at is not null)::int as n_touch,
                count(*) filter (where ca.first_action_at is not null and ca.opened_at is not null)::int as n_action,
                count(*) filter (where ca.outcome_at is not null and ca.opened_at is not null)::int as n_resolve
-          from ca left join users u on u.id = ca.uid
-         group by ca.uid, ca.outcome
+          from ca
+         group by ca.uid
       `),
     );
 
@@ -250,24 +272,22 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
       return moi;
     };
 
-    for (const r of ketQua) {
-      const row = lay(r.user_id, r.name);
-      cong(row, r.outcome, Number(r.n));
-      /*
-        NGƯỠNG MẪU ÁP Ở ĐÂY, KHÔNG Ở SQL: `percentile_cont` luôn trả một con số nếu có ít nhất một
-        dòng, nên chặn phải nằm sau khi đã biết cỡ mẫu. Dưới ngưỡng ⇒ để TRỐNG, và màn hình hiện
-        "chưa đủ mẫu" — một ô trống nói đúng sự thật, một con số từ hai dòng thì nói sai mà trông
-        như đúng (mục 39: CHƯA ĐỦ DỮ LIỆU tách hẳn khỏi LÀM KÉM).
-      */
-      const nTouch = Number(r.n_touch ?? 0);
-      const nAction = Number(r.n_action ?? 0);
-      const nResolve = Number(r.n_resolve ?? 0);
-      row.touchSample += nTouch;
-      row.actionSample += nAction;
-      row.resolveSample += nResolve;
-      if (r.p_touch !== null && r.p_touch !== undefined && nTouch >= TIMING_MIN_SAMPLE) row.medianFirstTouchMin = Math.round(Number(r.p_touch));
-      if (r.p_action !== null && r.p_action !== undefined && nAction >= TIMING_MIN_SAMPLE) row.medianFirstActionMin = Math.round(Number(r.p_action));
-      if (r.p_resolve !== null && r.p_resolve !== undefined && nResolve >= TIMING_MIN_SAMPLE) row.medianResolveMin = Math.round(Number(r.p_resolve));
+    for (const r of ketQua) cong(lay(r.user_id, r.name), r.outcome, Number(r.n));
+
+    /*
+      NGƯỠNG MẪU ÁP Ở ĐÂY, KHÔNG Ở SQL: `percentile_cont` luôn trả một con số nếu có ít nhất một
+      dòng, nên chặn phải nằm sau khi đã biết cỡ mẫu. Dưới ngưỡng ⇒ để TRỐNG, và màn hình hiện
+      "chưa đủ mẫu" — một ô trống nói đúng sự thật, một con số từ hai dòng thì nói sai mà trông
+      như đúng (mục 39: CHƯA ĐỦ DỮ LIỆU tách hẳn khỏi LÀM KÉM).
+    */
+    for (const r of thoiGian) {
+      const row = lay(r.user_id, "");
+      row.touchSample = Number(r.n_touch ?? 0);
+      row.actionSample = Number(r.n_action ?? 0);
+      row.resolveSample = Number(r.n_resolve ?? 0);
+      if (r.p_touch !== null && r.p_touch !== undefined && row.touchSample >= TIMING_MIN_SAMPLE) row.medianFirstTouchMin = Math.round(Number(r.p_touch));
+      if (r.p_action !== null && r.p_action !== undefined && row.actionSample >= TIMING_MIN_SAMPLE) row.medianFirstActionMin = Math.round(Number(r.p_action));
+      if (r.p_resolve !== null && r.p_resolve !== undefined && row.resolveSample >= TIMING_MIN_SAMPLE) row.medianResolveMin = Math.round(Number(r.p_resolve));
     }
     for (const r of giao) lay(r.userId, "").assigned += Number(r.n);
     for (const r of thaoTac) {
