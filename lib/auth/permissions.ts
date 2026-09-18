@@ -120,6 +120,17 @@ export const PERMISSION_GROUPS = [
     ],
   },
   {
+    module: "Phòng Tech AI",
+    items: [
+      { key: "tech:view", label: "Phòng Tech AI: xem", hint: "Sức khoẻ hệ thống, hàng đợi việc Tech, sổ agent, lịch sử deploy, sự cố đang mở" },
+      {
+        key: "tech:manage",
+        label: "Phòng Tech AI: quản trị",
+        hint: "Tạo / đổi việc Tech, đổi mức rủi ro (có lý do bắt buộc), duyệt việc mức R2, bật tắt định nghĩa agent, mở & đóng sự cố. Đây là cổng phê duyệt của chủ shop — không cấp cho vai trò nào theo mặc định.",
+      },
+    ],
+  },
+  {
     module: "Hệ thống",
     items: [
       { key: "integrations:view", label: "Kết nối dữ liệu: xem" },
@@ -210,7 +221,14 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // cho MANAGER là để bản này lặng lẽ cấp thêm quyền duyệt lương cho những tài khoản đang có —
   // đúng thứ AGENTS.md mục 31 nói phải rơi về phía HẸP HƠN. `payroll:view` cùng lý do: xem lương
   // của mọi người là quyền phải được CẤP, không phải quyền còn lại sau một phép loại trừ.
-  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all"].includes(p)),
+  /*
+    `tech:view` và `tech:manage` nằm trong danh sách LOẠI vì mẫu của MANAGER dựng bằng phép TRỪ —
+    và một quyền dựng bằng phép trừ là quyền không ai từng quyết định cấp (xem ghi chú dài phía
+    trên về `payroll:view`). Mặt phẳng điều khiển Tech mang cổng phê duyệt cho việc chạm lương,
+    lợi nhuận, quyền và migration; nó phải được CẤP có tên, không phải còn lại sau một phép loại.
+    Chủ shop cấp tay ở trang Người dùng cho ai thật sự cần.
+  */
+  MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
   LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],

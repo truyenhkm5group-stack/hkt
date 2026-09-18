@@ -1,0 +1,764 @@
+import { and, desc, eq, sql } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import {
+  canTransitionTechIncident,
+  canTransitionTechTask,
+  TECH_AGENT_TEMPLATES,
+  TECH_TASK_STATUS_LABEL,
+  techDeployBlockers,
+  techIncidentCloseBlockers,
+  type TechActorKind,
+  type TechApprovalStatus,
+  type TechEventKind,
+  type TechGateResult,
+  type TechIncidentSeverity,
+  type TechIncidentStatus,
+  type TechModule,
+  type TechPriority,
+  type TechRisk,
+  type TechTaskSource,
+  type TechTaskStatus,
+  type TechTaskType,
+} from "@/lib/constants/tech";
+import { classifyTechRisk } from "@/lib/constants/tech-risk";
+
+/**
+ * ═══════════ DỊCH VỤ CỦA PHÒNG TECH — MỘT ĐƯỜNG GHI DUY NHẤT ═══════════
+ *
+ * Mọi lượt ghi vào mặt phẳng điều khiển Tech đi qua tệp này. `lib/actions/tech.ts` chỉ là lớp vỏ
+ * mỏng: kiểm quyền → gọi vào đây → `audit()` → `revalidatePath`. Tách như vậy vì hai lý do:
+ *
+ *  1. Luật vòng đời (chuyển trạng thái nào hợp lệ, cổng phê duyệt, chống bấm hai lần) KIỂM THỬ
+ *     ĐƯỢC mà không cần dựng một phiên đăng nhập Next.js. Luật không kiểm thử được là luật sẽ trôi.
+ *  2. Phase 2 sẽ có một agent gọi vào đúng những hàm này với `actor.kind = "AI_AGENT"`. Nếu luật
+ *     nằm trong Server Action thì agent sẽ phải có đường ghi RIÊNG — và hai đường ghi cho một sự
+ *     việc luôn lệch nhau (AGENTS.md mục 32).
+ *
+ * ─── AI LÀM: BA LOẠI, KHOÁ ĐI CÙNG TÊN ───
+ *
+ * `TechActor` bắt nơi gọi khai CẢ `kind` lẫn danh tính. `id` chỉ có nghĩa khi `kind = "HUMAN"`;
+ * `agentId` chỉ có nghĩa khi `kind = "AI_AGENT"`. Ràng buộc CHECK ở CSDL ép đúng điều đó, nên một
+ * đường ghi mới không thể lặng lẽ ghi một agent thành người (AGENTS.md mục 34 & 36).
+ */
+export type TechActor = {
+  kind: TechActorKind;
+  /** `users.id` — CHỈ khi `kind = "HUMAN"`. */
+  id?: string | null;
+  /** `tech_agents.id` — CHỈ khi `kind = "AI_AGENT"`. */
+  agentId?: string | null;
+  /** Ảnh chụp tên để người đọc. Máy chủ đọc từ `users`/`tech_agents`, không nhận từ client. */
+  name: string;
+};
+
+export type TechResult<T = object> = ({ ok: true } & T) | { error: string };
+
+type Db = Awaited<ReturnType<typeof getDb>>;
+
+/** Chuẩn hoá người thao tác về đúng ba cột mà ràng buộc CSDL chấp nhận. */
+function coloumnsOfActor(actor: TechActor) {
+  return {
+    actorKind: actor.kind,
+    actorId: actor.kind === "HUMAN" ? (actor.id ?? null) : null,
+    actorAgentId: actor.kind === "AI_AGENT" ? (actor.agentId ?? null) : null,
+    actorName: actor.name,
+  };
+}
+
+async function ghiSuKien(
+  db: Db,
+  input: { taskId: string; kind: TechEventKind; note?: string; previousValue?: string; nextValue?: string; payload?: unknown },
+  actor: TechActor,
+) {
+  await db.insert(schema.techTaskEvents).values({
+    taskId: input.taskId,
+    kind: input.kind,
+    note: input.note ?? "",
+    previousValue: input.previousValue ?? "",
+    nextValue: input.nextValue ?? "",
+    payload: (input.payload as object) ?? null,
+    ...coloumnsOfActor(actor),
+  });
+}
+
+/**
+ * MÃ VIỆC ĐỌC ĐƯỢC (`TECH-12`).
+ *
+ * Tính từ số lớn nhất đang có chứ không phải từ `count(*)`: xoá một việc rồi thì `count` sẽ cấp lại
+ * một mã đã từng dùng, và hai việc khác nhau mang cùng một mã trong lịch sử chat là cách chắc chắn
+ * nhất để hai người nói về hai thứ mà tưởng là một.
+ *
+ * Có khoá duy nhất ở CSDL đứng sau, nên hai lượt tạo cùng lúc thì lượt thua sẽ lỗi và được thử lại
+ * ở `createTechTask` — không im lặng ghi đè.
+ */
+async function nextCode(db: Db, prefix: "TECH" | "INC") {
+  const bang = prefix === "TECH" ? schema.techTasks : schema.techIncidents;
+  const [row] = await db
+    .select({ max: sql<number>`coalesce(max(nullif(regexp_replace(${bang.code}, '^[A-Z]+-', ''), '')::int), 0)` })
+    .from(bang);
+  return `${prefix}-${Number(row?.max ?? 0) + 1}`;
+}
+
+/* ═════════════════════ VIỆC TECH ═════════════════════ */
+
+export type CreateTechTaskInput = {
+  title: string;
+  description?: string;
+  taskType: TechTaskType;
+  module: TechModule;
+  priority: TechPriority;
+  source: TechTaskSource;
+  sourceRef?: string;
+  branch?: string;
+  worktree?: string;
+  parentTaskId?: string | null;
+  dependsOn?: string[];
+  agentId?: string | null;
+  /**
+   * Mức rủi ro do NGƯỜI đặt, đè lên máy. Phải kèm lý do ≥ 10 ký tự — xem
+   * `lib/constants/tech-risk.ts`. Bỏ trống ⇒ dùng mức máy xếp.
+   */
+  riskOverride?: { risk: TechRisk; reason: string } | null;
+};
+
+export async function createTechTask(input: CreateTechTaskInput, actor: TechActor): Promise<TechResult<{ id: string; code: string; risk: TechRisk }>> {
+  const title = input.title.trim();
+  if (title.length < 5) return { error: "Tiêu đề quá ngắn — viết đủ để người khác đọc là hiểu phải làm gì." };
+
+  const mayXep = classifyTechRisk({ taskType: input.taskType, module: input.module, title, description: input.description });
+  const dat = input.riskOverride ?? null;
+  if (dat && dat.reason.trim().length < 10) {
+    return { error: "Đè mức rủi ro của máy thì phải nói vì sao (ít nhất một câu) — nếu không, không ai đọc lại được quyết định đó." };
+  }
+
+  const risk = dat?.risk ?? mayXep.risk;
+  const approvalRequired = risk === "R2";
+  const db = await getDb();
+
+  for (let lan = 0; lan < 3; lan += 1) {
+    const code = await nextCode(db, "TECH");
+    try {
+      const [row] = await db
+        .insert(schema.techTasks)
+        .values({
+          code,
+          title,
+          description: input.description?.trim() ?? "",
+          taskType: input.taskType,
+          module: input.module,
+          status: "NEW",
+          priority: input.priority,
+          risk,
+          riskRules: dat ? [] : mayXep.rules,
+          riskOverriddenBy: dat && actor.kind === "HUMAN" ? (actor.id ?? null) : null,
+          riskOverrideReason: dat ? dat.reason.trim() : "",
+          source: input.source,
+          sourceRef: input.sourceRef?.trim() ?? "",
+          branch: input.branch?.trim() ?? "",
+          worktree: input.worktree?.trim() ?? "",
+          parentTaskId: input.parentTaskId || null,
+          dependsOn: input.dependsOn ?? [],
+          agentId: input.agentId || null,
+          approvalRequired,
+          approvalStatus: approvalRequired ? "PENDING" : "NOT_REQUIRED",
+          createdByKind: actor.kind,
+          createdById: actor.kind === "HUMAN" ? (actor.id ?? null) : null,
+          createdByName: actor.name,
+        })
+        .returning({ id: schema.techTasks.id, code: schema.techTasks.code });
+
+      await ghiSuKien(
+        db,
+        {
+          taskId: row.id,
+          kind: "CREATE",
+          note: title,
+          nextValue: "NEW",
+          payload: { risk, riskRules: dat ? ["OVERRIDE"] : mayXep.rules, riskReasons: dat ? [dat.reason.trim()] : mayXep.reasons, approvalRequired },
+        },
+        actor,
+      );
+      return { ok: true, id: row.id, code: row.code, risk };
+    } catch (error) {
+      // Đụng khoá duy nhất vì một lượt tạo song song vừa lấy mất mã — thử lại với mã kế tiếp.
+      if (lan < 2 && String(error).includes("tech_tasks_code_uq")) continue;
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  return { error: "Không cấp được mã việc sau ba lần thử — thử lại sau." };
+}
+
+/**
+ * ĐỔI TRẠNG THÁI.
+ *
+ * Bốn lá chắn, theo đúng thứ tự:
+ *  1. **Bấm lại đúng trạng thái đang có ⇒ BỎ QUA, không ghi gì.** Một cú bấm hai lần, hoặc một lần
+ *     trình duyệt gửi lại, từng đẻ ra hai dòng lịch sử và đẩy mốc hoàn thành về lần bấm sau
+ *     (AGENTS.md mục 61). Đây là nhánh ĐẦU TIÊN, trước cả kiểm tra hợp lệ.
+ *  2. Phép chuyển phải nằm trong `TECH_TASK_TRANSITIONS`.
+ *  3. `BLOCKED` phải nói bị chặn bởi cái gì.
+ *  4. `DEPLOYING` phải qua cổng phê duyệt; `DONE` phải có bằng chứng.
+ */
+export async function setTechTaskStatus(
+  input: { taskId: string; to: TechTaskStatus; note?: string },
+  actor: TechActor,
+): Promise<TechResult<{ status: TechTaskStatus; skipped?: true }>> {
+  const db = await getDb();
+  const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId) });
+  if (!task) return { error: "Không tìm thấy việc này." };
+  const from = task.status as TechTaskStatus;
+  const note = input.note?.trim() ?? "";
+
+  if (from === input.to) return { ok: true, status: from, skipped: true };
+
+  if (!canTransitionTechTask(from, input.to)) {
+    return { error: `Không đi thẳng từ “${TECH_TASK_STATUS_LABEL[from]}” sang “${TECH_TASK_STATUS_LABEL[input.to]}” được.` };
+  }
+  if (input.to === "BLOCKED" && note.length < 5) {
+    return { error: "Báo bị chặn thì phải nói bị chặn bởi cái gì — chặn mà không nói vì sao thì không ai gỡ được." };
+  }
+  /*
+    CỔNG PHÊ DUYỆT CHẶN Ở CẢ HAI BƯỚC, KHÔNG CHỈ Ở LƯỢT DEPLOY.
+
+    `READY_TO_DEPLOY` đọc ra là "đã xanh hết và (nếu cần) đã được chủ shop phê duyệt" — chính câu
+    trong `TECH_TASK_STATUS_HINT`. Chặn muộn hơn một bước thì cái nhãn ấy nói dối: một việc R2 chưa
+    ai ký vẫn đứng trong cột "Sẵn sàng deploy", và người nhìn bảng sẽ tin là nó sẵn sàng thật.
+
+    Vẫn giữ nguyên lá chắn ở `DEPLOYING` chứ không dời đi: một việc đã duyệt, đã vào
+    `READY_TO_DEPLOY`, rồi bị xếp lại thành R2 (đè mức rủi ro) sẽ quay về "chờ duyệt" — và lúc đó
+    chỉ còn lá chắn thứ hai đứng giữa nó với production.
+  */
+  if (input.to === "READY_TO_DEPLOY" || input.to === "DEPLOYING") {
+    const chan = techDeployBlockers({
+      approvalRequired: task.approvalRequired,
+      approvalStatus: task.approvalStatus as TechApprovalStatus,
+      risk: task.risk as TechRisk,
+    });
+    if (chan.length) return { error: chan.join(" ") };
+  }
+  /*
+    ĐÓNG MỘT VIỆC PHẢI CÓ BẰNG CHỨNG.
+
+    Hoặc đã xác minh trên production (mốc + chứng cứ), hoặc nói rõ vì sao việc này không có gì để
+    xác minh (tài liệu, dọn mã, kiểm thử). Không có đường thứ ba: một việc đóng im lặng là một việc
+    không ai biết nó có thật sự chạy được hay không.
+  */
+  if (input.to === "DONE" && !task.productionVerifiedAt && note.length < 10) {
+    return { error: "Đóng việc thì phải có xác minh trên production, hoặc một câu nói rõ vì sao việc này không có gì để xác minh." };
+  }
+
+  const now = new Date();
+  await db
+    .update(schema.techTasks)
+    .set({
+      status: input.to,
+      blockedReason: input.to === "BLOCKED" ? note : "",
+      // Mốc bắt đầu ghi MỘT LẦN, ở lần đầu việc rời khỏi khâu chuẩn bị. Ghi đè mỗi lần quay lại
+      // `BUILDING` thì mọi phép đo thời gian làm việc đều ngắn đi một cách có hệ thống.
+      startedAt: task.startedAt ?? (input.to === "BUILDING" ? now : null),
+      completedAt: input.to === "DONE" ? (task.completedAt ?? now) : null,
+    })
+    .where(eq(schema.techTasks.id, input.taskId));
+
+  await ghiSuKien(db, { taskId: input.taskId, kind: "STATUS", note, previousValue: from, nextValue: input.to }, actor);
+  return { ok: true, status: input.to };
+}
+
+export async function setTechTaskPriority(input: { taskId: string; priority: TechPriority; note?: string }, actor: TechActor): Promise<TechResult> {
+  const db = await getDb();
+  const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId), columns: { id: true, priority: true } });
+  if (!task) return { error: "Không tìm thấy việc này." };
+  if (task.priority === input.priority) return { ok: true };
+  await db.update(schema.techTasks).set({ priority: input.priority }).where(eq(schema.techTasks.id, input.taskId));
+  await ghiSuKien(db, { taskId: input.taskId, kind: "PRIORITY", note: input.note?.trim() ?? "", previousValue: task.priority, nextValue: input.priority }, actor);
+  return { ok: true };
+}
+
+/**
+ * NGƯỜI ĐÈ MỨC RỦI RO CỦA MÁY.
+ *
+ * Chỉ NGƯỜI được đè — một agent tự hạ mức rủi ro của chính việc mình đang làm là tự cấp cho mình
+ * quyền đi qua cổng phê duyệt. Lý do bắt buộc, và cổng phê duyệt được tính lại ngay: nâng lên `R2`
+ * thì việc quay về "chờ duyệt" kể cả khi trước đó đã được duyệt — vì cái đã duyệt là một việc khác.
+ */
+export async function overrideTechTaskRisk(input: { taskId: string; risk: TechRisk; reason: string }, actor: TechActor): Promise<TechResult> {
+  if (actor.kind !== "HUMAN") return { error: "Chỉ người mới đè được mức rủi ro — đây là cổng phê duyệt, không phải một ô dữ liệu." };
+  const reason = input.reason.trim();
+  if (reason.length < 10) return { error: "Phải nói vì sao đổi mức rủi ro (ít nhất một câu)." };
+
+  const db = await getDb();
+  const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId) });
+  if (!task) return { error: "Không tìm thấy việc này." };
+  if (task.risk === input.risk) return { ok: true };
+
+  const canDuyet = input.risk === "R2";
+  await db
+    .update(schema.techTasks)
+    .set({
+      risk: input.risk,
+      riskRules: [],
+      riskOverriddenBy: actor.id ?? null,
+      riskOverrideReason: reason,
+      approvalRequired: canDuyet,
+      approvalStatus: canDuyet ? "PENDING" : "NOT_REQUIRED",
+      approvedBy: canDuyet ? null : task.approvedBy,
+      approvedByName: canDuyet ? "" : task.approvedByName,
+      approvedAt: canDuyet ? null : task.approvedAt,
+    })
+    .where(eq(schema.techTasks.id, input.taskId));
+
+  await ghiSuKien(db, { taskId: input.taskId, kind: "RISK", note: reason, previousValue: task.risk, nextValue: input.risk, payload: { approvalRequired: canDuyet } }, actor);
+  return { ok: true };
+}
+
+export async function assignTechTaskAgent(input: { taskId: string; agentId: string | null; note?: string }, actor: TechActor): Promise<TechResult> {
+  const db = await getDb();
+  const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId), with: { agent: { columns: { key: true } } } });
+  if (!task) return { error: "Không tìm thấy việc này." };
+
+  let tenAgent = "";
+  if (input.agentId) {
+    const agent = await db.query.techAgents.findFirst({ where: eq(schema.techAgents.id, input.agentId), columns: { id: true, key: true, name: true, enabled: true, allowedRisks: true } });
+    if (!agent) return { error: "Không tìm thấy agent này trong sổ." };
+    if (!agent.enabled) return { error: `Agent “${agent.name}” đang TẮT — bật ở /tech/agents trước khi giao việc.` };
+    /*
+      Giao một việc R2 cho agent chưa được phép chạm R2 là mở cổng bằng cửa sau. Phase 1 chưa agent
+      nào khai `R2`, nên nhánh này luôn chặn — và đó đúng là ý định.
+    */
+    if (!agent.allowedRisks.includes(task.risk)) {
+      return { error: `Agent “${agent.name}” chưa được phép làm việc mức ${task.risk}. Sửa quyền của agent, hoặc đổi mức rủi ro (có lý do) — không lách bằng cách giao bừa.` };
+    }
+    tenAgent = agent.key;
+  }
+
+  if ((task.agentId ?? null) === (input.agentId ?? null)) return { ok: true };
+  await db.update(schema.techTasks).set({ agentId: input.agentId || null }).where(eq(schema.techTasks.id, input.taskId));
+  await ghiSuKien(db, { taskId: input.taskId, kind: "ASSIGN", note: input.note?.trim() ?? "", previousValue: task.agent?.key ?? "", nextValue: tenAgent }, actor);
+  return { ok: true };
+}
+
+/**
+ * CHỦ SHOP BẤM DUYỆT / TỪ CHỐI.
+ *
+ * Chỉ NGƯỜI. Một agent tự duyệt việc của mình là toàn bộ cổng này trở thành trang trí.
+ */
+export async function decideTechApproval(
+  input: { taskId: string; decision: Extract<TechApprovalStatus, "APPROVED" | "REJECTED">; note?: string },
+  actor: TechActor,
+): Promise<TechResult> {
+  if (actor.kind !== "HUMAN") return { error: "Chỉ người mới phê duyệt được — cổng này tồn tại để một con người chịu trách nhiệm." };
+  const db = await getDb();
+  const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId), columns: { id: true, approvalRequired: true, approvalStatus: true } });
+  if (!task) return { error: "Không tìm thấy việc này." };
+  if (!task.approvalRequired) return { error: "Việc này không cần phê duyệt — đừng ký một thứ không ai hỏi." };
+  if (task.approvalStatus === input.decision) return { ok: true };
+
+  await db
+    .update(schema.techTasks)
+    .set({
+      approvalStatus: input.decision,
+      approvedBy: actor.id ?? null,
+      approvedByName: actor.name,
+      approvedAt: new Date(),
+      approvalNote: input.note?.trim() ?? "",
+    })
+    .where(eq(schema.techTasks.id, input.taskId));
+
+  await ghiSuKien(db, { taskId: input.taskId, kind: "APPROVAL", note: input.note?.trim() ?? "", previousValue: task.approvalStatus, nextValue: input.decision }, actor);
+  return { ok: true };
+}
+
+/** Ghi lại rằng một người đã MỞ MÀN HÌNH THẬT trên production và thấy đúng thứ mong đợi. */
+export async function verifyTechTaskOnProduction(input: { taskId: string; evidence: string }, actor: TechActor): Promise<TechResult> {
+  const evidence = input.evidence.trim();
+  if (evidence.length < 10) return { error: "Xác minh phải kèm bằng chứng: câu truy vấn đã chạy, số trước/sau, hoặc màn hình đã mở." };
+  const db = await getDb();
+  const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId), columns: { id: true } });
+  if (!task) return { error: "Không tìm thấy việc này." };
+  await db
+    .update(schema.techTasks)
+    .set({ productionVerifiedAt: new Date(), productionVerifiedBy: actor.kind === "HUMAN" ? (actor.id ?? null) : null, productionEvidence: evidence })
+    .where(eq(schema.techTasks.id, input.taskId));
+  await ghiSuKien(db, { taskId: input.taskId, kind: "VERIFY", note: evidence }, actor);
+  return { ok: true };
+}
+
+export async function addTechTaskNote(input: { taskId: string; note: string }, actor: TechActor): Promise<TechResult> {
+  const note = input.note.trim();
+  if (!note) return { error: "Ghi chú rỗng thì không ghi." };
+  const db = await getDb();
+  const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId), columns: { id: true } });
+  if (!task) return { error: "Không tìm thấy việc này." };
+  await ghiSuKien(db, { taskId: input.taskId, kind: "NOTE", note }, actor);
+  return { ok: true };
+}
+
+export async function setTechTaskBranch(input: { taskId: string; branch: string; worktree?: string }, actor: TechActor): Promise<TechResult> {
+  const db = await getDb();
+  const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId), columns: { id: true, branch: true } });
+  if (!task) return { error: "Không tìm thấy việc này." };
+  const branch = input.branch.trim();
+  if (task.branch === branch) return { ok: true };
+  await db.update(schema.techTasks).set({ branch, worktree: input.worktree?.trim() ?? "" }).where(eq(schema.techTasks.id, input.taskId));
+  await ghiSuKien(db, { taskId: input.taskId, kind: "BRANCH", previousValue: task.branch, nextValue: branch }, actor);
+  return { ok: true };
+}
+
+/* ═════════════════════ SỔ AGENT ═════════════════════ */
+
+/**
+ * KHỞI TẠO SỔ AGENT TỪ BẢN KHAI — CHỈ KHI CÓ NGƯỜI BẤM.
+ *
+ * Mẫu không tự kích hoạt (AGENTS.md mục 23). Hàm này CHỈ THÊM những khoá còn thiếu và KHÔNG đụng
+ * tới dòng đã có: chủ shop đã tắt một agent rồi thì bấm lại nút này không được bật nó lên.
+ *
+ * Mọi agent sinh ra ở trạng thái TẮT.
+ */
+export async function seedTechAgents(actor: TechActor): Promise<TechResult<{ created: number; skipped: number }>> {
+  if (actor.kind !== "HUMAN") return { error: "Chỉ người mới khởi tạo được sổ agent." };
+  const db = await getDb();
+  const daCo = new Set((await db.select({ key: schema.techAgents.key }).from(schema.techAgents)).map((r) => r.key));
+  const them = TECH_AGENT_TEMPLATES.filter((t) => !daCo.has(t.key));
+  if (them.length) {
+    await db.insert(schema.techAgents).values(
+      them.map((t) => ({
+        key: t.key,
+        name: t.name,
+        role: t.role,
+        description: t.description,
+        enabled: false,
+        capabilities: [...t.capabilities],
+        allowedRisks: [...t.allowedRisks],
+        canCode: t.canCode,
+        canReview: t.canReview,
+        canMerge: t.canMerge,
+        canDeploy: t.canDeploy,
+        canRunProdRead: t.canRunProdRead,
+        canRunProdWrite: t.canRunProdWrite,
+        status: "IDLE" as const,
+      })),
+    );
+  }
+  return { ok: true, created: them.length, skipped: daCo.size };
+}
+
+/**
+ * Bật / tắt một định nghĩa agent.
+ *
+ * Phase 1 KHÔNG cho bật một agent mang cờ `can_deploy` / `can_merge` / `can_run_prod_write`: máy
+ * thi hành chưa tồn tại, nên một cờ bật ở đây là một lời hứa mã nguồn không giữ được. Chặn ở đây
+ * chứ không ở CSDL, vì Phase 2 sẽ nới nó bằng mã chứ không bằng một migration.
+ */
+export async function setTechAgentEnabled(input: { agentId: string; enabled: boolean }, actor: TechActor): Promise<TechResult> {
+  if (actor.kind !== "HUMAN") return { error: "Chỉ người mới bật/tắt được agent." };
+  const db = await getDb();
+  const agent = await db.query.techAgents.findFirst({ where: eq(schema.techAgents.id, input.agentId) });
+  if (!agent) return { error: "Không tìm thấy agent này." };
+  if (input.enabled && (agent.canDeploy || agent.canMerge || agent.canRunProdWrite)) {
+    return { error: "Phase 1 chưa có máy thi hành: không bật được agent mang quyền merge / deploy / ghi production." };
+  }
+  if (agent.enabled === input.enabled) return { ok: true };
+  await db.update(schema.techAgents).set({ enabled: input.enabled }).where(eq(schema.techAgents.id, input.agentId));
+  return { ok: true };
+}
+
+/* ═════════════════════ LƯỢT CHẠY ═════════════════════ */
+
+export async function startTechAgentRun(
+  input: { agentId: string; taskId?: string | null; branch?: string; baseCommit?: string; metadata?: unknown },
+  actor: TechActor,
+): Promise<TechResult<{ id: string }>> {
+  const db = await getDb();
+  const agent = await db.query.techAgents.findFirst({ where: eq(schema.techAgents.id, input.agentId), columns: { id: true, key: true, enabled: true, name: true, allowedRisks: true } });
+  if (!agent) return { error: "Không tìm thấy agent này." };
+  if (!agent.enabled) return { error: `Agent “${agent.name}” đang TẮT — không mở lượt chạy cho một agent chưa ai bật.` };
+
+  /*
+    KIỂM LẠI MỨC RỦI RO LÚC CHẠY, KHÔNG CHỈ LÚC GIAO.
+
+    `assignTechTaskAgent` đã chặn giao việc R2 cho agent chưa được phép. Nhưng một việc được giao
+    lúc còn R0 có thể bị NÂNG lên R2 sau đó (người đè mức rủi ro), và lúc ấy agent vẫn đang nằm ở ô
+    phụ trách. Máy KHÔNG tự gỡ việc khỏi tay người/agent đang cầm (AGENTS.md mục 25) — nên chỗ phải
+    chặn là lúc SẮP LÀM, không phải lúc được giao.
+  */
+  if (input.taskId) {
+    const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId), columns: { id: true, risk: true, code: true } });
+    if (!task) return { error: "Không tìm thấy việc này." };
+    if (!agent.allowedRisks.includes(task.risk)) {
+      return { error: `Việc ${task.code} nay ở mức ${task.risk}, agent “${agent.name}” chưa được phép chạm mức đó. Giao lại cho agent khác, hoặc đổi mức rủi ro (có lý do).` };
+    }
+  }
+
+  const [row] = await db
+    .insert(schema.techAgentRuns)
+    .values({
+      agentId: agent.id,
+      agentKey: agent.key,
+      taskId: input.taskId || null,
+      status: "RUNNING",
+      branch: input.branch?.trim() ?? "",
+      baseCommit: input.baseCommit?.trim() ?? "",
+      metadata: (input.metadata as object) ?? null,
+    })
+    .returning({ id: schema.techAgentRuns.id });
+
+  if (input.taskId) {
+    await ghiSuKien(db, { taskId: input.taskId, kind: "RUN", note: `Mở lượt chạy của ${agent.key}`, nextValue: "RUNNING", payload: { runId: row.id } }, actor);
+  }
+  return { ok: true, id: row.id };
+}
+
+/**
+ * ĐÓNG MỘT LƯỢT CHẠY.
+ *
+ * Bốn cổng khai riêng và mặc định `UNKNOWN`: nơi gọi phải nói CHẠY GÌ và KẾT QUẢ RA SAO. Chưa chạy
+ * `npm test` mà để trống thì nó nằm ở `UNKNOWN` — KHÔNG phải `PASSED` (AGENTS.md mục 42).
+ *
+ * `summary` cắt ở 4.000 ký tự và chỉ nhận KẾT LUẬN: không lưu dòng suy nghĩ của model.
+ */
+export async function finishTechAgentRun(
+  input: {
+    runId: string;
+    status: "SUCCEEDED" | "FAILED" | "CANCELLED";
+    summary?: string;
+    resultCommit?: string;
+    testsRun?: string;
+    typecheckResult?: TechGateResult;
+    lintResult?: TechGateResult;
+    testResult?: TechGateResult;
+    buildResult?: TechGateResult;
+    filesChanged?: string[];
+    error?: string;
+  },
+  actor: TechActor,
+): Promise<TechResult> {
+  const db = await getDb();
+  const run = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, input.runId) });
+  if (!run) return { error: "Không tìm thấy lượt chạy này." };
+  // Đóng một lượt đã đóng KHÔNG được đẩy mốc kết thúc về lần bấm sau (AGENTS.md mục 61).
+  if (run.status !== "RUNNING") return { ok: true };
+
+  await db
+    .update(schema.techAgentRuns)
+    .set({
+      status: input.status,
+      endedAt: new Date(),
+      summary: (input.summary ?? "").trim().slice(0, 4000),
+      resultCommit: input.resultCommit?.trim() ?? "",
+      testsRun: input.testsRun?.trim() ?? "",
+      typecheckResult: input.typecheckResult ?? "UNKNOWN",
+      lintResult: input.lintResult ?? "UNKNOWN",
+      testResult: input.testResult ?? "UNKNOWN",
+      buildResult: input.buildResult ?? "UNKNOWN",
+      filesChanged: input.filesChanged ?? [],
+      error: input.error?.trim().slice(0, 4000) ?? "",
+    })
+    .where(eq(schema.techAgentRuns.id, input.runId));
+
+  if (run.taskId) {
+    await ghiSuKien(
+      db,
+      { taskId: run.taskId, kind: "RUN", note: (input.summary ?? "").slice(0, 500), previousValue: "RUNNING", nextValue: input.status, payload: { runId: run.id } },
+      actor,
+    );
+  }
+  return { ok: true };
+}
+
+/* ═════════════════════ DEPLOYMENT (QUAN SÁT) ═════════════════════ */
+
+/**
+ * GHI LẠI MỘT LƯỢT DEPLOY ĐÃ XẢY RA.
+ *
+ * Hàm này KHÔNG deploy. Nó ghi một QUAN SÁT về thứ GitHub Actions đã làm, để `/tech` đọc lại được.
+ * Cùng một commit deploy hai lần là chuyện có thật (chạy lại workflow), nên KHÔNG chống trùng theo
+ * commit — chống trùng ở đây sẽ giấu mất lần chạy lại, mà lần chạy lại mới là lần đáng xem.
+ */
+export async function recordTechDeployment(
+  input: {
+    commitSha: string;
+    branch?: string;
+    status?: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
+    taskId?: string | null;
+    externalRef?: string;
+    notes?: string;
+    startedAt?: Date;
+  },
+  actor: TechActor,
+): Promise<TechResult<{ id: string }>> {
+  const commit = input.commitSha.trim();
+  if (!/^[0-9a-f]{7,40}$/i.test(commit)) return { error: "Mã commit không hợp lệ — cần 7–40 ký tự hex." };
+  const db = await getDb();
+  const [row] = await db
+    .insert(schema.techDeployments)
+    .values({
+      commitSha: commit,
+      branch: input.branch?.trim() || "main",
+      status: input.status ?? "PENDING",
+      startedAt: input.startedAt ?? new Date(),
+      finishedAt: input.status === "SUCCEEDED" || input.status === "FAILED" ? new Date() : null,
+      actorKind: actor.kind,
+      actorId: actor.kind === "HUMAN" ? (actor.id ?? null) : null,
+      actorName: actor.name,
+      taskId: input.taskId || null,
+      externalRef: input.externalRef?.trim() ?? "",
+      notes: input.notes?.trim() ?? "",
+    })
+    .returning({ id: schema.techDeployments.id });
+
+  if (input.taskId) {
+    await ghiSuKien(db, { taskId: input.taskId, kind: "DEPLOY", note: `Commit ${commit.slice(0, 7)}`, nextValue: input.status ?? "PENDING", payload: { deploymentId: row.id } }, actor);
+  }
+  return { ok: true, id: row.id };
+}
+
+export async function updateTechDeployment(
+  input: {
+    deploymentId: string;
+    status?: "RUNNING" | "SUCCEEDED" | "FAILED" | "ROLLED_BACK";
+    healthResult?: TechGateResult;
+    smokeResult?: TechGateResult;
+    observationResult?: TechGateResult;
+    rollbackOfId?: string | null;
+    notes?: string;
+  },
+  actor: TechActor,
+): Promise<TechResult> {
+  const db = await getDb();
+  const dep = await db.query.techDeployments.findFirst({ where: eq(schema.techDeployments.id, input.deploymentId) });
+  if (!dep) return { error: "Không tìm thấy lượt deploy này." };
+  if (input.status === "ROLLED_BACK" && !(input.rollbackOfId ?? dep.rollbackOfId)) {
+    return { error: "Một lượt quay lui phải trỏ tới lượt nó quay lui — nếu không thì nó chỉ là một lượt deploy nữa." };
+  }
+  const ketThuc = input.status && input.status !== "RUNNING";
+  await db
+    .update(schema.techDeployments)
+    .set({
+      status: input.status ?? dep.status,
+      finishedAt: ketThuc ? (dep.finishedAt ?? new Date()) : dep.finishedAt,
+      healthResult: input.healthResult ?? dep.healthResult,
+      smokeResult: input.smokeResult ?? dep.smokeResult,
+      observationResult: input.observationResult ?? dep.observationResult,
+      rollbackOfId: input.rollbackOfId ?? dep.rollbackOfId,
+      notes: input.notes?.trim() ?? dep.notes,
+    })
+    .where(eq(schema.techDeployments.id, input.deploymentId));
+
+  if (dep.taskId && input.status && input.status !== dep.status) {
+    await ghiSuKien(db, { taskId: dep.taskId, kind: "DEPLOY", previousValue: dep.status, nextValue: input.status, payload: { deploymentId: dep.id } }, actor);
+  }
+  return { ok: true };
+}
+
+/* ═════════════════════ SỰ CỐ ═════════════════════ */
+
+export async function createTechIncident(
+  input: {
+    title: string;
+    severity: TechIncidentSeverity;
+    module: TechModule;
+    source?: string;
+    evidence?: string;
+    detectedAt?: Date;
+    taskId?: string | null;
+    deploymentId?: string | null;
+  },
+  actor: TechActor,
+): Promise<TechResult<{ id: string; code: string }>> {
+  const title = input.title.trim();
+  if (title.length < 5) return { error: "Tiêu đề sự cố quá ngắn." };
+  const db = await getDb();
+  for (let lan = 0; lan < 3; lan += 1) {
+    const code = await nextCode(db, "INC");
+    try {
+      const [row] = await db
+        .insert(schema.techIncidents)
+        .values({
+          code,
+          title,
+          severity: input.severity,
+          module: input.module,
+          source: input.source?.trim() || "MONITOR",
+          evidence: input.evidence?.trim() ?? "",
+          // Mốc PHÁT HIỆN do nơi gọi khai; mặc định là bây giờ vì đó là lúc người mở sự cố nhìn thấy nó.
+          detectedAt: input.detectedAt ?? new Date(),
+          status: "OPEN",
+          taskId: input.taskId || null,
+          deploymentId: input.deploymentId || null,
+          openedByKind: actor.kind,
+          openedById: actor.kind === "HUMAN" ? (actor.id ?? null) : null,
+          openedByName: actor.name,
+        })
+        .returning({ id: schema.techIncidents.id, code: schema.techIncidents.code });
+      if (input.taskId) await ghiSuKien(db, { taskId: input.taskId, kind: "INCIDENT", note: `${code} · ${title}`, nextValue: "OPEN", payload: { incidentId: row.id } }, actor);
+      return { ok: true, id: row.id, code: row.code };
+    } catch (error) {
+      if (lan < 2 && String(error).includes("tech_incidents_code_uq")) continue;
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+  return { error: "Không cấp được mã sự cố sau ba lần thử." };
+}
+
+/**
+ * ĐỔI TRẠNG THÁI SỰ CỐ.
+ *
+ * Đóng thì bắt buộc kể được ĐÃ LÀM GÌ (`resolution`). KHÔNG bắt buộc `rootCause`: chưa chứng minh
+ * được nguyên nhân là chuyện bình thường, và ép điền nó chỉ đẻ ra những câu nghe hợp lý mà không
+ * ai kiểm được (AGENTS.md mục 45).
+ */
+export async function setTechIncidentStatus(
+  input: { incidentId: string; to: TechIncidentStatus; resolution?: string; mitigation?: string; rootCause?: string },
+  actor: TechActor,
+): Promise<TechResult<{ skipped?: true }>> {
+  const db = await getDb();
+  const inc = await db.query.techIncidents.findFirst({ where: eq(schema.techIncidents.id, input.incidentId) });
+  if (!inc) return { error: "Không tìm thấy sự cố này." };
+  const from = inc.status as TechIncidentStatus;
+  if (from === input.to) return { ok: true, skipped: true };
+  if (!canTransitionTechIncident(from, input.to)) return { error: `Sự cố không đi thẳng từ ${from} sang ${input.to} được.` };
+
+  const resolution = (input.resolution ?? inc.resolution).trim();
+  if (input.to === "RESOLVED") {
+    const chan = techIncidentCloseBlockers({ resolution });
+    if (chan.length) return { error: chan.join(" ") };
+  }
+
+  await db
+    .update(schema.techIncidents)
+    .set({
+      status: input.to,
+      resolution,
+      mitigation: (input.mitigation ?? inc.mitigation).trim(),
+      rootCause: (input.rootCause ?? inc.rootCause).trim(),
+      resolvedAt: input.to === "RESOLVED" ? (inc.resolvedAt ?? new Date()) : null,
+    })
+    .where(eq(schema.techIncidents.id, input.incidentId));
+
+  if (inc.taskId) await ghiSuKien(db, { taskId: inc.taskId, kind: "INCIDENT", previousValue: from, nextValue: input.to, payload: { incidentId: inc.id } }, actor);
+  return { ok: true };
+}
+
+/** Nối một sự cố vào việc Tech đang xử lý nó. Nối chứ không chép: việc vẫn giữ trạng thái của việc. */
+export async function linkTechIncidentToTask(input: { incidentId: string; taskId: string | null }, actor: TechActor): Promise<TechResult> {
+  const db = await getDb();
+  const inc = await db.query.techIncidents.findFirst({ where: eq(schema.techIncidents.id, input.incidentId), columns: { id: true, code: true, title: true, taskId: true } });
+  if (!inc) return { error: "Không tìm thấy sự cố này." };
+  if (input.taskId) {
+    const task = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, input.taskId), columns: { id: true } });
+    if (!task) return { error: "Không tìm thấy việc Tech này." };
+  }
+  if ((inc.taskId ?? null) === (input.taskId ?? null)) return { ok: true };
+  await db.update(schema.techIncidents).set({ taskId: input.taskId || null }).where(eq(schema.techIncidents.id, input.incidentId));
+  if (input.taskId) await ghiSuKien(db, { taskId: input.taskId, kind: "INCIDENT", note: `Nối sự cố ${inc.code} · ${inc.title}`, payload: { incidentId: inc.id } }, actor);
+  return { ok: true };
+}
+
+/** Lượt chạy gần nhất của một agent — dùng cho màn hình và cho kiểm thử, không nhân bản truy vấn. */
+export async function lastRunOfAgent(agentId: string) {
+  const db = await getDb();
+  const row = await db.query.techAgentRuns.findFirst({
+    where: and(eq(schema.techAgentRuns.agentId, agentId)),
+    orderBy: [desc(schema.techAgentRuns.startedAt)],
+  });
+  return row ?? null;
+}

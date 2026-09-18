@@ -4946,3 +4946,409 @@ export type PayrollInputRow = typeof payrollInputs.$inferSelect;
 export type PayrollAdjustmentRow = typeof payrollAdjustments.$inferSelect;
 export type AccessRole = typeof accessRoles.$inferSelect;
 export type Position = typeof positions.$inferSelect;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PHÒNG TECH AI — MẶT PHẲNG ĐIỀU KHIỂN (Phase 1)
+
+   Từ vựng, phép chuyển trạng thái và luật rủi ro ở `lib/constants/tech.ts` +
+   `lib/constants/tech-risk.ts`. Ở đây chỉ có nơi CHỨA.
+
+   VÌ SAO LÀ BẢNG MỚI CHỨ KHÔNG PHẢI `work_items`: xem chú thích đầu `lib/constants/tech.ts`.
+   Tóm tắt: việc Tech là một MIỀN có trạng thái riêng, nên theo đúng AGENTS.md mục 19 nó phải tự
+   giữ trạng thái của mình; `/work` sẽ CHIẾU lên nó ở Phase 2, không chép nó.
+
+   PHASE 1 KHÔNG CÓ MÁY THI HÀNH. Không bảng nào ở đây kích hoạt một lượt deploy, một lượt merge
+   hay một lượt ghi vào production. `tech_deployments` là LỚP QUAN SÁT — GitHub Actions vẫn là bên
+   có thẩm quyền về deploy, và commit đang chạy đọc từ `/api/health`.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * SỔ AGENT — DỮ LIỆU ĐIỀU KHIỂN, KHÔNG PHẢI MỘT CON NGƯỜI.
+ *
+ * `tech_agents` KHÔNG tham chiếu `users`, và đó là cả điểm của nó (AGENTS.md mục 36): một job hay
+ * một agent đứng ở cột "là máy", tách hẳn khỏi "có người làm" LẪN "chưa ai nhận". Gộp agent vào
+ * bảng người là để một ngày nào đó báo cáo nói có 12 nhân viên Tech trong khi con số thật là 0.
+ *
+ * Bảng này TRỐNG sau migration. Mẫu ở `TECH_AGENT_TEMPLATES` chỉ chạy khi có người bấm — mẫu không
+ * tự kích hoạt (mục 23).
+ */
+export const techAgents = pgTable(
+  "tech_agents",
+  {
+    id: id(),
+    /** Khoá ổn định do mã nguồn đặt (`ai-cto`, `backend`…). Đổi khoá là làm mồ côi mọi lượt chạy cũ. */
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    /** `lib/constants/tech.ts::TECH_AGENT_ROLES`. */
+    role: text("role").notNull(),
+    description: text("description").notNull().default(""),
+    /**
+     * TẮT LÀ MẶC ĐỊNH. Một agent bật sẵn lúc cài đặt là một agent chưa ai quyết định cho chạy —
+     * cùng lý do phân việc tự động mặc định TẮT ở mọi phòng (mục 25).
+     */
+    enabled: boolean("enabled").notNull().default(false),
+    capabilities: jsonb("capabilities").$type<string[]>().notNull().default([]),
+    /** Mức rủi ro agent được phép đụng (`R0` · `R1` · `R2`). Phase 1 không mẫu nào khai `R2`. */
+    allowedRisks: jsonb("allowed_risks").$type<string[]>().notNull().default([]),
+    canCode: boolean("can_code").notNull().default(false),
+    canReview: boolean("can_review").notNull().default(false),
+    canMerge: boolean("can_merge").notNull().default(false),
+    canDeploy: boolean("can_deploy").notNull().default(false),
+    canRunProdRead: boolean("can_run_prod_read").notNull().default(false),
+    canRunProdWrite: boolean("can_run_prod_write").notNull().default(false),
+    /** `lib/constants/tech.ts::TECH_AGENT_STATUSES`. */
+    status: text("status").notNull().default("IDLE"),
+    /** `NULL` = CHƯA TỪNG chạy. Không phải "chạy lúc 0 giờ". */
+    lastSeenAt: ts("last_seen_at"),
+    note: text("note").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_agents_key_uq").on(t.key),
+    index("tech_agents_role_idx").on(t.role),
+    check(
+      "tech_agents_role_check",
+      sql`${t.role} IN ('AI_CTO','ARCHITECT','BACKEND','FRONTEND','DATA','INTEGRATION','QA','SECURITY','DEVOPS_SRE','DATA_QUALITY','INCIDENT','DOCUMENTATION')`,
+    ),
+    check(
+      "tech_agents_status_check",
+      sql`${t.status} IN ('IDLE','PLANNING','WORKING','REVIEWING','TESTING','DEPLOYING','OBSERVING','BLOCKED','ERROR')`,
+    ),
+  ],
+);
+
+/**
+ * VIỆC TECH.
+ *
+ * `code` (`TECH-12`) là mã ĐỌC ĐƯỢC để người nói chuyện với nhau; `id` vẫn là khoá. Hai thứ tồn tại
+ * cùng lúc vì một UUID không đọc lên điện thoại được, còn một số đếm thì không an toàn làm khoá.
+ */
+export const techTasks = pgTable(
+  "tech_tasks",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    /** `lib/constants/tech.ts::TECH_TASK_TYPES`. */
+    taskType: text("task_type").notNull().default("BUGFIX"),
+    /** `lib/constants/tech.ts::TECH_MODULES`. */
+    module: text("module").notNull().default("PLATFORM"),
+    /** `lib/constants/tech.ts::TECH_TASK_STATUSES`. Phép chuyển ở `TECH_TASK_TRANSITIONS`. */
+    status: text("status").notNull().default("NEW"),
+    priority: text("priority").notNull().default("P2"),
+    risk: text("risk").notNull().default("R0"),
+    /** Khoá các luật đã đẩy mức rủi ro lên — ẢNH CHỤP lúc xếp, để đọc lại được "hồi đó máy nghĩ gì". */
+    riskRules: jsonb("risk_rules").$type<string[]>().notNull().default([]),
+    /**
+     * Người đè mức rủi ro của máy. Đè được là cần thiết; đè mà không ký tên thì cổng không tồn tại.
+     * Có người đè ⇒ BẮT BUỘC có lý do (ràng buộc CHECK bên dưới).
+     */
+    riskOverriddenBy: text("risk_overridden_by").references(() => users.id, { onDelete: "set null" }),
+    riskOverrideReason: text("risk_override_reason").notNull().default(""),
+    /** `lib/constants/tech.ts::TECH_TASK_SOURCES`. */
+    source: text("source").notNull().default("OWNER"),
+    /** Chứng từ gốc: id sự cố, id lượt deploy, mã lỗi kiểm thử, đường dẫn màn hình. */
+    sourceRef: text("source_ref").notNull().default(""),
+
+    /** Agent được giao. `NULL` = CHƯA GIAO — khác hẳn "giao cho máy". */
+    agentId: text("agent_id").references(() => techAgents.id, { onDelete: "set null" }),
+    /** Nhánh git và cây làm việc (AGENTS.md mục 9: mỗi phiên một cây, một nhánh). */
+    branch: text("branch").notNull().default(""),
+    worktree: text("worktree").notNull().default(""),
+
+    parentTaskId: text("parent_task_id").references((): AnyPgColumn => techTasks.id, { onDelete: "set null" }),
+    /** `tech_tasks.id` của những việc phải xong trước. Danh sách, không phải một khoá ngoại. */
+    dependsOn: jsonb("depends_on").$type<string[]>().notNull().default([]),
+
+    /* ───── Cổng phê duyệt của NGƯỜI ───── */
+    approvalRequired: boolean("approval_required").notNull().default(false),
+    /** `NOT_REQUIRED` · `PENDING` · `APPROVED` · `REJECTED`. */
+    approvalStatus: text("approval_status").notNull().default("NOT_REQUIRED"),
+    approvedBy: text("approved_by").references(() => users.id, { onDelete: "set null" }),
+    /** ẢNH CHỤP TÊN do MÁY CHỦ đọc từ `users` — không nhận từ client (AGENTS.md mục 34). */
+    approvedByName: text("approved_by_name").notNull().default(""),
+    approvedAt: ts("approved_at"),
+    approvalNote: text("approval_note").notNull().default(""),
+
+    /* ───── Xác minh trên production ───── */
+    /** `NULL` = CHƯA AI XÁC MINH. Đây KHÔNG phải "đã xác minh và thấy hỏng". */
+    productionVerifiedAt: ts("production_verified_at"),
+    productionVerifiedBy: text("production_verified_by").references(() => users.id, { onDelete: "set null" }),
+    /** Bằng chứng: câu truy vấn đã chạy, số trước/sau, đường dẫn màn hình đã mở. */
+    productionEvidence: text("production_evidence").notNull().default(""),
+
+    /* ───── Ai tạo ───── */
+    /** `HUMAN` · `SYSTEM` · `AI_AGENT` — ba loại, không bao giờ gộp. */
+    createdByKind: text("created_by_kind").notNull().default("HUMAN"),
+    createdById: text("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+
+    startedAt: ts("started_at"),
+    completedAt: ts("completed_at"),
+    blockedReason: text("blocked_reason").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_tasks_code_uq").on(t.code),
+    index("tech_tasks_status_idx").on(t.status, t.priority),
+    index("tech_tasks_created_idx").on(t.createdAt),
+    index("tech_tasks_agent_idx").on(t.agentId),
+    index("tech_tasks_module_idx").on(t.module),
+    check(
+      "tech_tasks_status_check",
+      sql`${t.status} IN ('NEW','TRIAGED','SPEC_READY','BUILDING','REVIEW','QA','READY_TO_DEPLOY','DEPLOYING','OBSERVING','DONE','BLOCKED','FAILED','ROLLED_BACK')`,
+    ),
+    check("tech_tasks_priority_check", sql`${t.priority} IN ('P0','P1','P2','P3')`),
+    check("tech_tasks_risk_check", sql`${t.risk} IN ('R0','R1','R2')`),
+    check("tech_tasks_approval_check", sql`${t.approvalStatus} IN ('NOT_REQUIRED','PENDING','APPROVED','REJECTED')`),
+    check("tech_tasks_actor_kind_check", sql`${t.createdByKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
+    /*
+      "Không cần duyệt" và "đang chờ duyệt" không được cùng đúng một lúc. Thiếu ràng buộc này thì
+      một việc R2 có thể mang `approval_required = false` kèm `approval_status = 'PENDING'`, và màn
+      hình sẽ hiện nó ở cả hai nhóm — hoặc tệ hơn, ở nhóm "đi tiếp được".
+    */
+    check(
+      "tech_tasks_approval_consistency_check",
+      sql`(${t.approvalRequired} = false AND ${t.approvalStatus} = 'NOT_REQUIRED') OR (${t.approvalRequired} = true AND ${t.approvalStatus} <> 'NOT_REQUIRED')`,
+    ),
+    /* Đè mức rủi ro mà không nói vì sao thì không ai đọc lại được quyết định đó. */
+    check(
+      "tech_tasks_risk_override_check",
+      sql`${t.riskOverriddenBy} IS NULL OR length(btrim(${t.riskOverrideReason})) >= 10`,
+    ),
+    /* `BLOCKED` mà không nói bị chặn bởi cái gì thì không ai gỡ được — cùng luật với `work_items`. */
+    check("tech_tasks_blocked_reason_check", sql`${t.status} <> 'BLOCKED' OR length(btrim(${t.blockedReason})) > 0`),
+    /* Xong thì phải có mốc xong. Một việc `DONE` không mốc là một dòng không đo được thời gian. */
+    check("tech_tasks_completed_check", sql`${t.status} <> 'DONE' OR ${t.completedAt} IS NOT NULL`),
+  ],
+);
+
+/**
+ * NHẬT KÝ VIỆC TECH — CHỈ THÊM, KHÔNG SỬA.
+ *
+ * Mỗi dòng trả lời: ai (loại nào), làm gì, từ giá trị nào sang giá trị nào, vì sao. Cột `actor_name`
+ * là ẢNH CHỤP TÊN do máy chủ đọc từ `users`, không nhận từ client (AGENTS.md mục 34).
+ */
+export const techTaskEvents = pgTable(
+  "tech_task_events",
+  {
+    id: id(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => techTasks.id, { onDelete: "cascade" }),
+    /** `lib/constants/tech.ts::TECH_EVENT_KINDS`. */
+    kind: text("kind").notNull(),
+    note: text("note").notNull().default(""),
+    previousValue: text("previous_value").notNull().default(""),
+    nextValue: text("next_value").notNull().default(""),
+    /** `HUMAN` · `SYSTEM` · `AI_AGENT`. */
+    actorKind: text("actor_kind").notNull().default("HUMAN"),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    /** Agent đã làm, khi `actor_kind = 'AI_AGENT'`. */
+    actorAgentId: text("actor_agent_id").references(() => techAgents.id, { onDelete: "set null" }),
+    actorName: text("actor_name").notNull().default(""),
+    payload: jsonb("payload"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("tech_task_events_task_idx").on(t.taskId, t.createdAt),
+    check("tech_task_events_actor_kind_check", sql`${t.actorKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
+    /* Một người thật không bao giờ được ghi dưới danh nghĩa agent, và ngược lại. */
+    check("tech_task_events_actor_link_check", sql`${t.actorKind} = 'AI_AGENT' OR ${t.actorAgentId} IS NULL`),
+    check("tech_task_events_human_link_check", sql`${t.actorKind} = 'HUMAN' OR ${t.actorId} IS NULL`),
+  ],
+);
+
+/**
+ * LƯỢT CHẠY CỦA AGENT — HÀNH ĐỘNG, BẰNG CHỨNG, KẾT QUẢ. KHÔNG LƯU DÒNG SUY NGHĨ.
+ *
+ * `summary` là một câu kết luận có kiểm chứng được ("đã sửa 3 tệp, `npm test` xanh"), không phải
+ * bản ghi quá trình lập luận. Lý do giống hệt `ai_interactions` (migration 0062): dòng suy nghĩ
+ * dài, không kiểm chứng được, và lưu nó là mời người đọc tin vào một thứ không phải bằng chứng.
+ *
+ * Bốn cổng (`typecheck` · `lint` · `test` · `build`) mặc định `UNKNOWN`. CHƯA CHẠY KHÔNG PHẢI ĐẠT.
+ */
+export const techAgentRuns = pgTable(
+  "tech_agent_runs",
+  {
+    id: id(),
+    agentId: text("agent_id").references(() => techAgents.id, { onDelete: "set null" }),
+    /** Ảnh chụp khoá agent: agent bị xoá khỏi sổ thì vẫn đọc được lượt chạy này là của ai. */
+    agentKey: text("agent_key").notNull().default(""),
+    taskId: text("task_id").references(() => techTasks.id, { onDelete: "set null" }),
+    startedAt: ts("started_at").notNull().defaultNow(),
+    /** `NULL` = ĐANG CHẠY (hoặc đã chết mà không ai đóng). Không phải "chạy 0 giây". */
+    endedAt: ts("ended_at"),
+    /** `RUNNING` · `SUCCEEDED` · `FAILED` · `CANCELLED`. */
+    status: text("status").notNull().default("RUNNING"),
+    branch: text("branch").notNull().default(""),
+    baseCommit: text("base_commit").notNull().default(""),
+    resultCommit: text("result_commit").notNull().default(""),
+    summary: text("summary").notNull().default(""),
+    /** Lệnh đã chạy, nguyên văn: `npm run typecheck && npm test`. */
+    testsRun: text("tests_run").notNull().default(""),
+    typecheckResult: text("typecheck_result").notNull().default("UNKNOWN"),
+    lintResult: text("lint_result").notNull().default("UNKNOWN"),
+    testResult: text("test_result").notNull().default("UNKNOWN"),
+    buildResult: text("build_result").notNull().default("UNKNOWN"),
+    filesChanged: jsonb("files_changed").$type<string[]>().notNull().default([]),
+    error: text("error").notNull().default(""),
+    metadata: jsonb("metadata"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("tech_agent_runs_agent_idx").on(t.agentId, t.startedAt),
+    index("tech_agent_runs_task_idx").on(t.taskId, t.startedAt),
+    index("tech_agent_runs_started_idx").on(t.startedAt),
+    check("tech_agent_runs_status_check", sql`${t.status} IN ('RUNNING','SUCCEEDED','FAILED','CANCELLED')`),
+    check("tech_agent_runs_typecheck_check", sql`${t.typecheckResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
+    check("tech_agent_runs_lint_check", sql`${t.lintResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
+    check("tech_agent_runs_test_check", sql`${t.testResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
+    check("tech_agent_runs_build_check", sql`${t.buildResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
+    /* Lượt chạy đã kết thúc thì phải có mốc kết thúc — và ngược lại. */
+    check(
+      "tech_agent_runs_ended_check",
+      sql`(${t.status} = 'RUNNING' AND ${t.endedAt} IS NULL) OR (${t.status} <> 'RUNNING' AND ${t.endedAt} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * DEPLOYMENT — LỚP QUAN SÁT, KHÔNG PHẢI BÊN CÓ THẨM QUYỀN.
+ *
+ * GitHub Actions quyết định một bản có lên máy chủ hay không. Bảng này chỉ ghi lại để `/tech` trả
+ * lời được "lần deploy gần nhất là commit nào, do ai, kết quả ra sao". Commit ĐANG CHẠY vẫn đọc từ
+ * `/api/health` — không nhân đôi nguồn sự thật.
+ */
+export const techDeployments = pgTable(
+  "tech_deployments",
+  {
+    id: id(),
+    commitSha: text("commit_sha").notNull(),
+    branch: text("branch").notNull().default("main"),
+    startedAt: ts("started_at").notNull().defaultNow(),
+    finishedAt: ts("finished_at"),
+    /** `PENDING` · `RUNNING` · `SUCCEEDED` · `FAILED` · `ROLLED_BACK`. */
+    status: text("status").notNull().default("PENDING"),
+    /** `HUMAN` · `SYSTEM` · `AI_AGENT` — Phase 1 chỉ có `HUMAN` và `SYSTEM`. */
+    actorKind: text("actor_kind").notNull().default("HUMAN"),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    actorName: text("actor_name").notNull().default(""),
+    taskId: text("task_id").references(() => techTasks.id, { onDelete: "set null" }),
+    /** Ba cổng sau khi lên. Mặc định `UNKNOWN` — chưa đo KHÔNG phải đã đạt. */
+    healthResult: text("health_result").notNull().default("UNKNOWN"),
+    smokeResult: text("smoke_result").notNull().default("UNKNOWN"),
+    observationResult: text("observation_result").notNull().default("UNKNOWN"),
+    rollbackOfId: text("rollback_of_id").references((): AnyPgColumn => techDeployments.id, { onDelete: "set null" }),
+    /** Đường dẫn lượt chạy GitHub Actions — để đối chiếu với bên có thẩm quyền. */
+    externalRef: text("external_ref").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("tech_deployments_started_idx").on(t.startedAt),
+    index("tech_deployments_commit_idx").on(t.commitSha),
+    check("tech_deployments_status_check", sql`${t.status} IN ('PENDING','RUNNING','SUCCEEDED','FAILED','ROLLED_BACK')`),
+    check("tech_deployments_actor_kind_check", sql`${t.actorKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
+    check("tech_deployments_health_check", sql`${t.healthResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
+    check("tech_deployments_smoke_check", sql`${t.smokeResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
+    check("tech_deployments_observation_check", sql`${t.observationResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
+    /* Một lượt quay lui phải trỏ tới lượt nó quay lui — nếu không thì nó chỉ là một lượt deploy nữa. */
+    check("tech_deployments_rollback_check", sql`${t.status} <> 'ROLLED_BACK' OR ${t.rollbackOfId} IS NOT NULL`),
+  ],
+);
+
+/**
+ * SỰ CỐ.
+ *
+ * `root_cause` để RỖNG là trạng thái hợp lệ và thường gặp: AGENTS.md mục 45 — chỗ trống loại
+ * `TRUE_UNKNOWN` phải được giữ nguyên, không lấp bằng một câu nghe hợp lý. Cái BẮT BUỘC khi đóng
+ * là `resolution` (đã làm gì để nó hết), vì việc đó luôn có thật.
+ */
+export const techIncidents = pgTable(
+  "tech_incidents",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    title: text("title").notNull(),
+    /** Ai / cái gì phát hiện: `MONITOR` · `OWNER` · `STAFF` · `DEPLOY` · `TEST_FAILURE` · `AI_AGENT`. */
+    source: text("source").notNull().default("MONITOR"),
+    /** Mốc SỰ CỐ BẮT ĐẦU (đo được), không phải mốc dòng này được tạo. */
+    detectedAt: ts("detected_at").notNull().defaultNow(),
+    severity: text("severity").notNull().default("SEV2"),
+    status: text("status").notNull().default("OPEN"),
+    module: text("module").notNull().default("PLATFORM"),
+    /** Bằng chứng: log, số đo, ảnh màn hình, câu truy vấn. Không có bằng chứng thì không có sự cố. */
+    evidence: text("evidence").notNull().default(""),
+    taskId: text("task_id").references(() => techTasks.id, { onDelete: "set null" }),
+    deploymentId: text("deployment_id").references(() => techDeployments.id, { onDelete: "set null" }),
+    rootCause: text("root_cause").notNull().default(""),
+    mitigation: text("mitigation").notNull().default(""),
+    resolution: text("resolution").notNull().default(""),
+    resolvedAt: ts("resolved_at"),
+    openedByKind: text("opened_by_kind").notNull().default("HUMAN"),
+    openedById: text("opened_by_id").references(() => users.id, { onDelete: "set null" }),
+    openedByName: text("opened_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_incidents_code_uq").on(t.code),
+    index("tech_incidents_status_idx").on(t.status, t.severity),
+    index("tech_incidents_detected_idx").on(t.detectedAt),
+    check("tech_incidents_severity_check", sql`${t.severity} IN ('SEV0','SEV1','SEV2','SEV3')`),
+    check("tech_incidents_status_check", sql`${t.status} IN ('OPEN','INVESTIGATING','MITIGATED','MONITORING','RESOLVED')`),
+    check("tech_incidents_actor_kind_check", sql`${t.openedByKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
+    /* Đóng sự cố thì phải có mốc đóng VÀ phải kể được đã làm gì. */
+    check(
+      "tech_incidents_resolved_check",
+      sql`${t.status} <> 'RESOLVED' OR (${t.resolvedAt} IS NOT NULL AND length(btrim(${t.resolution})) >= 10)`,
+    ),
+  ],
+);
+
+export const techTasksRelations = relations(techTasks, ({ one, many }) => ({
+  agent: one(techAgents, { fields: [techTasks.agentId], references: [techAgents.id] }),
+  parent: one(techTasks, { fields: [techTasks.parentTaskId], references: [techTasks.id], relationName: "techTaskParent" }),
+  children: many(techTasks, { relationName: "techTaskParent" }),
+  events: many(techTaskEvents),
+  runs: many(techAgentRuns),
+  deployments: many(techDeployments),
+  incidents: many(techIncidents),
+}));
+
+export const techTaskEventsRelations = relations(techTaskEvents, ({ one }) => ({
+  task: one(techTasks, { fields: [techTaskEvents.taskId], references: [techTasks.id] }),
+  agent: one(techAgents, { fields: [techTaskEvents.actorAgentId], references: [techAgents.id] }),
+}));
+
+export const techAgentsRelations = relations(techAgents, ({ many }) => ({
+  tasks: many(techTasks),
+  runs: many(techAgentRuns),
+}));
+
+export const techAgentRunsRelations = relations(techAgentRuns, ({ one }) => ({
+  agent: one(techAgents, { fields: [techAgentRuns.agentId], references: [techAgents.id] }),
+  task: one(techTasks, { fields: [techAgentRuns.taskId], references: [techTasks.id] }),
+}));
+
+export const techDeploymentsRelations = relations(techDeployments, ({ one }) => ({
+  task: one(techTasks, { fields: [techDeployments.taskId], references: [techTasks.id] }),
+  rollbackOf: one(techDeployments, { fields: [techDeployments.rollbackOfId], references: [techDeployments.id], relationName: "techDeployRollback" }),
+}));
+
+export const techIncidentsRelations = relations(techIncidents, ({ one }) => ({
+  task: one(techTasks, { fields: [techIncidents.taskId], references: [techTasks.id] }),
+  deployment: one(techDeployments, { fields: [techIncidents.deploymentId], references: [techDeployments.id] }),
+}));
+
+export type TechAgentRow = typeof techAgents.$inferSelect;
+export type TechTaskRow = typeof techTasks.$inferSelect;
+export type TechTaskEventRow = typeof techTaskEvents.$inferSelect;
+export type TechAgentRunRow = typeof techAgentRuns.$inferSelect;
+export type TechDeploymentRow = typeof techDeployments.$inferSelect;
+export type TechIncidentRow = typeof techIncidents.$inferSelect;
