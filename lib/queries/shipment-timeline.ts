@@ -81,7 +81,7 @@ export type ShipmentTimeline = {
 const CARRIER_SOURCE_SET = new Set<string>(CARRIER_EVENT_SOURCES);
 
 /** Phút giữa hai mốc; `null` khi thiếu một trong hai — CHƯA BIẾT không được in thành 0. */
-function minutesBetween(from: Date | null, to: Date | null): number | null {
+export function minutesBetween(from: Date | null, to: Date | null): number | null {
   if (!from || !to) return null;
   return Math.round((to.getTime() - from.getTime()) / 60_000);
 }

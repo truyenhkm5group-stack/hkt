@@ -134,67 +134,7 @@ export function VtpImportForm() {
           ) : null}
 
           {previews.map((p) => (
-            <div key={`${p.filename}-${p.checksum}`} className="rounded-lg border bg-card p-3">
-              <div className="flex flex-wrap items-baseline gap-2">
-                <span className="text-[13px] font-semibold">{p.filename}</span>
-                <Badge variant={p.error ? "outline" : "secondary"}>{KIND_LABEL[p.kind]}</Badge>
-                <span className="text-[11px] text-muted-foreground">{formatNumber(p.rows)} dòng · mã tệp {p.checksum.slice(0, 12)}…</span>
-              </div>
-              {p.error ? (
-                <p className="mt-2 flex items-start gap-1.5 text-xs text-destructive">
-                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {p.error}
-                </p>
-              ) : (
-                <>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {PREVIEW_VERDICT_ORDER.filter((v) => p.counts[v] > 0).map((v) => (
-                      <span key={v} className={cn("rounded-md px-2 py-0.5 text-[11.5px] font-medium", PREVIEW_VERDICT_TONE[v])} title={PREVIEW_VERDICT_HINT[v]}>
-                        {PREVIEW_VERDICT_LABEL[v]}: {formatNumber(p.counts[v])}
-                      </span>
-                    ))}
-                  </div>
-                  {p.sample.length ? (
-                    <div className="mt-2 max-h-72 overflow-auto rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Mã vận đơn</TableHead>
-                            <TableHead>Kết luận</TableHead>
-                            <TableHead>VTP nói (nguyên văn)</TableHead>
-                            <TableHead>ERP đang giữ</TableHead>
-                            <TableHead>Vì sao</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {p.sample.map((r, i) => (
-                            <TableRow key={`${r.trackingCode}-${i}`}>
-                              <TableCell className="font-mono text-[11.5px]">
-                                {r.trackingCode}
-                                {r.orderLabel ? <span className="block text-[10.5px] text-muted-foreground">{r.orderLabel}</span> : null}
-                              </TableCell>
-                              <TableCell>
-                                <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", PREVIEW_VERDICT_TONE[r.verdict])}>{PREVIEW_VERDICT_LABEL[r.verdict]}</span>
-                              </TableCell>
-                              <TableCell className="text-[11.5px]">
-                                {r.fileStatusText || MISSING_TEXT}
-                                <span className="block text-[10.5px] text-muted-foreground">{r.fileStatusAt ?? MISSING_TEXT}</span>
-                              </TableCell>
-                              <TableCell className="text-[11.5px]">
-                                {r.erpStage ? SHIPMENT_STAGE_LABEL[r.erpStage] : MISSING_TEXT}
-                                <span className="block text-[10.5px] text-muted-foreground">{r.erpStatusAt ? formatDateTime(new Date(r.erpStatusAt)) : MISSING_TEXT}</span>
-                              </TableCell>
-                              <TableCell className="max-w-[280px] text-[11px] text-muted-foreground">{r.note}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-[11.5px] text-muted-foreground">Không dòng nào khác với thứ ERP đang giữ — ghi vào cũng không đổi gì.</p>
-                  )}
-                </>
-              )}
-            </div>
+            <KhoiXemTruoc key={`${p.filename}-${p.checksum}`} p={p} />
           ))}
 
           <div className="flex flex-wrap items-center gap-2">
@@ -267,6 +207,114 @@ export function VtpImportForm() {
           </Button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * ═══════════ MỘT TỆP, MỘT KHỐI — VÀ NHÓM LẠI THEO PHÁN QUYẾT ═══════════
+ *
+ * Một tệp Viettel Post thật có 1.198 dòng (đo 16/09/2026). Đổ cả nghìn dòng vào một bảng phẳng thì
+ * người bấm không đọc, và không đọc nghĩa là bước xem trước không còn công dụng gì.
+ *
+ * Nên bảng mẫu CHỈ giữ dòng KHÁC với thứ ERP đang giữ — dòng "giống ERP" không có gì để xem và đã
+ * bị loại ngay ở `previewVtpOrderListFile`. Trên đó là các ô đếm, BẤM ĐƯỢC: người muốn xem riêng
+ * "cũ hơn ERP" hay "cần người quyết" thì lọc thẳng ở đây.
+ *
+ * Bốn phán quyết `SAME` · `DUPLICATE_ROW` · `OLDER` · `UNKNOWN_STATUS` KHÔNG phải lỗi (luật 49) và
+ * không được gộp thành một nhãn "bỏ qua" — mỗi cái nói một chuyện khác, và gộp lại thì người đọc
+ * không biết tệp có vấn đề hay chính ERP có vấn đề.
+ */
+function KhoiXemTruoc({ p }: { p: ImportPreview }) {
+  const [loc, setLoc] = useState<string | null>(null);
+  const mau = loc ? p.sample.filter((r) => r.verdict === loc) : p.sample;
+
+  return (
+    <div className="rounded-lg border bg-card p-3">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="text-[13px] font-semibold">{p.filename}</span>
+        <Badge variant={p.error ? "outline" : "secondary"}>{KIND_LABEL[p.kind]}</Badge>
+        <span className="text-[11px] text-muted-foreground">
+          {formatNumber(p.rows)} dòng · mã tệp {p.checksum.slice(0, 12)}…
+        </span>
+      </div>
+      {p.error ? (
+        <p className="mt-2 flex items-start gap-1.5 text-xs text-destructive">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {p.error}
+        </p>
+      ) : (
+        <>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {PREVIEW_VERDICT_ORDER.filter((v) => p.counts[v] > 0).map((v) => {
+              // Nhóm "giống ERP" không lọc được: nó cố ý KHÔNG có dòng nào trong bảng mẫu.
+              const coDong = p.sample.some((r) => r.verdict === v);
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  disabled={!coDong}
+                  onClick={() => setLoc(loc === v ? null : v)}
+                  title={coDong ? PREVIEW_VERDICT_HINT[v] : `${PREVIEW_VERDICT_HINT[v]} — nhóm này không có dòng nào để xem`}
+                  className={cn(
+                    "rounded-md px-2 py-0.5 text-[11.5px] font-medium transition-opacity",
+                    PREVIEW_VERDICT_TONE[v],
+                    loc === v && "ring-2 ring-foreground/40",
+                    !coDong && "cursor-default opacity-60",
+                  )}
+                >
+                  {PREVIEW_VERDICT_LABEL[v]}: {formatNumber(p.counts[v])}
+                </button>
+              );
+            })}
+            {loc ? (
+              <button type="button" onClick={() => setLoc(null)} className="rounded-md px-2 py-0.5 text-[11.5px] font-medium text-muted-foreground underline">
+                bỏ lọc
+              </button>
+            ) : null}
+          </div>
+          {mau.length ? (
+            <div className="mt-2 max-h-72 overflow-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Mã vận đơn</TableHead>
+                    <TableHead>Kết luận</TableHead>
+                    <TableHead>VTP nói (nguyên văn)</TableHead>
+                    <TableHead>ERP đang giữ</TableHead>
+                    <TableHead>Vì sao</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {mau.map((r, i) => (
+                    <TableRow key={`${r.trackingCode}-${i}`}>
+                      <TableCell className="font-mono text-[11.5px]">
+                        {r.trackingCode}
+                        {r.orderLabel ? <span className="block text-[10.5px] text-muted-foreground">{r.orderLabel}</span> : null}
+                      </TableCell>
+                      <TableCell>
+                        <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", PREVIEW_VERDICT_TONE[r.verdict])}>{PREVIEW_VERDICT_LABEL[r.verdict]}</span>
+                      </TableCell>
+                      <TableCell className="text-[11.5px]">
+                        {r.fileStatusText || MISSING_TEXT}
+                        <span className="block text-[10.5px] text-muted-foreground">{r.fileStatusAt ?? MISSING_TEXT}</span>
+                      </TableCell>
+                      <TableCell className="text-[11.5px]">
+                        {r.erpStage ? SHIPMENT_STAGE_LABEL[r.erpStage] : MISSING_TEXT}
+                        <span className="block text-[10.5px] text-muted-foreground">{r.erpStatusAt ? formatDateTime(new Date(r.erpStatusAt)) : MISSING_TEXT}</span>
+                      </TableCell>
+                      <TableCell className="max-w-[280px] text-[11px] text-muted-foreground">{r.note}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          ) : (
+            <p className="mt-2 text-[11.5px] text-muted-foreground">
+              {loc ? "Nhóm này không có dòng nào để xem." : "Không dòng nào khác với thứ ERP đang giữ — ghi vào cũng không đổi gì."}
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }

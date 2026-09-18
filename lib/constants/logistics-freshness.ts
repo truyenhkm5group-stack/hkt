@@ -54,6 +54,28 @@ export const CAPABILITY_NOTE: Record<TrackingCapability, string> = {
 export const CAPABILITY_PROBE_LIMIT = 3;
 
 /**
+ * ═══════════ "API KHÔNG THẤY VẬN ĐƠN NÀY" LÀ MỘT PHÂN LOẠI, KHÔNG PHẢI MỘT LỖI ═══════════
+ *
+ * Câu này do `syncViettelPostShipments` ghi vào `shipments.vtp_last_error` khi API trả "không tồn
+ * tại". Nó nói về PHẠM VI TÀI KHOẢN — một sự thật cố định của 2.139/2.151 vận đơn — chứ không phải
+ * một sự cố của lần gọi, và nó đã có nhà riêng ở `tracking_capability`.
+ *
+ * Đo trên production 16/09/2026: cả 18 dòng mang `vtp_last_error` đều là ĐÚNG câu này, và hàng đợi
+ * đối chiếu bản đầu xếp chúng ở HẠNG MỘT dưới nhãn "Lỗi đối chiếu". Người trực mở hàng đợi, thấy
+ * 18 dòng nói "API không đọc được kiện này", và KHÔNG CÓ GÌ để làm — ERP đã biết và đã thôi hỏi.
+ * 17 trong số đó còn đang dò dở (`vtp_sync_attempts = 2`) nên sẽ tự chuyển sang `WEBHOOK_ONLY`,
+ * trong khi câu lỗi thì nằm lại vĩnh viễn.
+ *
+ * Nên mọi màn hình coi `vtp_last_error` là VIỆC PHẢI LÀM đều phải loại câu này ra trước.
+ */
+export const CAPABILITY_SCOPE_ERROR = "Tài khoản API Viettel Post không thấy vận đơn này (vận đơn do Pancake tạo thuộc tài khoản khác)";
+
+/** Câu lỗi này có phải là phán quyết phạm vi tài khoản không (tức KHÔNG phải việc của người trực). */
+export function laLoiPhamViTaiKhoan(error: string | null | undefined): boolean {
+  return Boolean(error && error.includes("không thấy vận đơn này"));
+}
+
+/**
  * ═══════════ ĐỘ TƯƠI THEO TỪNG CHẶNG ═══════════
  *
  * Một kiện "chờ lấy hàng" ba ngày và một kiện "đang đi giao" ba ngày là hai chuyện khác hẳn nhau.
@@ -120,6 +142,81 @@ export function thresholdFor(stage: string): FreshnessThreshold {
 export function classifyFreshness(hours: number | null, stage: string): FreshnessClass {
   if (hours === null) return "CRITICAL_STALE";
   const t = thresholdFor(stage);
+  if (hours >= t.critical) return "CRITICAL_STALE";
+  if (hours >= t.stale) return "STALE";
+  if (hours >= t.aging) return "AGING";
+  return "FRESH";
+}
+
+/*
+ * ═══════════ NGƯỠNG IM LẶNG LÀ QUYẾT ĐỊNH VẬN HÀNH, KHÔNG PHẢI HẰNG SỐ ═══════════
+ *
+ * Các con số trên dựng từ phân bố đo được 11/09/2026. Nhưng phân bố đó đổi theo mùa: giáp Tết
+ * tuyến Bắc chậm thêm một ngày là chuyện bình thường, và một ngưỡng không đổi được sẽ hoặc chôn
+ * hàng đợi dưới hàng trăm kiện "cũ" mà không kiện nào đáng lo, hoặc im lặng đúng lúc cần hét.
+ *
+ * Nên chủ shop sửa được mà không cần deploy. Cùng lối với `work.sla`:
+ *
+ *  · GHI ĐÈ LÀ THƯA — chỉ chặng nào ĐÃ SỬA mới nằm trong `settings`. Lưu cả bảng thì sửa
+ *    `FRESHNESS_BY_STAGE` trong mã sẽ không bao giờ tới được production nữa vì bản chụp cũ đè lên.
+ *  · ĐỌC PHẢI LUÔN THÀNH CÔNG — một dòng rác trong `settings` không được làm sập hàng đợi của cả
+ *    shop; `sanitizeFreshness` bỏ khoá hỏng và giữ phần còn lại.
+ *  · BA MỐC PHẢI TĂNG DẦN. `aging ≤ stale ≤ critical` là điều kiện để `classifyFreshness` còn có
+ *    nghĩa: đảo thứ tự thì một kiện nhảy thẳng sang "nghiêm trọng" trước khi kịp "bắt đầu cũ", và
+ *    cảnh báo bắn ra sớm hơn chính cái ngưỡng in trên màn hình. Bộ ghi đè sai thứ tự bị BỎ NGUYÊN
+ *    CẢ CHẶNG, không sửa hộ — sửa hộ là đoán ý người nhập.
+ */
+
+export const FRESHNESS_KEY = "logistics.freshness";
+
+/** Dải cho phép: 1 giờ tới 30 ngày. Ngoài dải là gõ nhầm đơn vị, không phải một quyết định. */
+export const FRESHNESS_HOURS_MIN = 1;
+export const FRESHNESS_HOURS_MAX = 24 * 30;
+
+/** Chỉ các chặng CÓ KHAI mặc định mới nhận ghi đè — khoá lạ là gõ nhầm, không phải chặng mới. */
+export const FRESHNESS_STAGE_KEYS = Object.keys(FRESHNESS_BY_STAGE);
+
+export type FreshnessOverrides = Record<string, { aging: number; stale: number; critical: number }>;
+
+export function sanitizeFreshness(raw: unknown): FreshnessOverrides {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: FreshnessOverrides = {};
+  for (const [stage, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!FRESHNESS_BY_STAGE[stage]) continue;
+    if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+    const o = v as Record<string, unknown>;
+    const so = (k: string) => {
+      const n = Number(o[k]);
+      return Number.isFinite(n) && n >= FRESHNESS_HOURS_MIN && n <= FRESHNESS_HOURS_MAX ? Math.round(n) : null;
+    };
+    const aging = so("aging");
+    const stale = so("stale");
+    const critical = so("critical");
+    if (aging === null || stale === null || critical === null) continue;
+    // Thứ tự sai ⇒ bỏ CẢ chặng. Sửa hộ một ô là đoán ý người nhập, và con số đoán ra sẽ đứng trên
+    // màn hình như thể có ai đó đã chọn nó.
+    if (!(aging <= stale && stale <= critical)) continue;
+    out[stage] = { aging, stale, critical };
+  }
+  return out;
+}
+
+/**
+ * Ngưỡng ĐANG CÓ HIỆU LỰC cho một chặng: ghi đè của chủ shop nếu có, còn lại lấy từ mã.
+ *
+ * `why` luôn lấy từ MÃ kể cả khi số bị ghi đè: câu giải thích nói VÌ SAO chặng này cần một ngưỡng
+ * riêng, và lý lẽ ấy không đổi khi ai đó chỉnh con số.
+ */
+export function effectiveThresholdFor(stage: string, overrides: FreshnessOverrides = {}): FreshnessThreshold {
+  const base = thresholdFor(stage);
+  const o = overrides[stage];
+  return o ? { ...o, why: base.why } : base;
+}
+
+/** Như `classifyFreshness` nhưng áp ghi đè của chủ shop. Cùng một luật, chỉ khác bộ số. */
+export function classifyFreshnessWith(hours: number | null, stage: string, overrides: FreshnessOverrides = {}): FreshnessClass {
+  if (hours === null) return "CRITICAL_STALE";
+  const t = effectiveThresholdFor(stage, overrides);
   if (hours >= t.critical) return "CRITICAL_STALE";
   if (hours >= t.stale) return "STALE";
   if (hours >= t.aging) return "AGING";

@@ -10,6 +10,11 @@ import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import type { VtpTrackingRecord } from "@/lib/integrations/viettelpost/client";
 import { getShipmentTimeline } from "@/lib/queries/shipment-timeline";
 import { viettelPostHealth } from "@/lib/queries/integrations";
+import { measureWebhookGap, webhookMatchRate, gapSeverity, WEBHOOK_GAP_MIN_MINUTES, WEBHOOK_MATCH_MIN_SAMPLE } from "@/lib/constants/webhook-gap";
+import { sanitizeFreshness, effectiveThresholdFor, classifyFreshnessWith, FRESHNESS_BY_STAGE, CAPABILITY_SCOPE_ERROR, laLoiPhamViTaiKhoan } from "@/lib/constants/logistics-freshness";
+import { getVtpReconcileQueue } from "@/lib/queries/vtp-reconcile-queue";
+import { vtpWebhookHealth } from "@/lib/queries/vtp-webhook-health";
+import type { ReconcileReason } from "@/lib/constants/vtp-reconcile-queue";
 import { clearMemo } from "@/lib/cache";
 
 /**
@@ -375,8 +380,324 @@ export async function testVtpSourceOfTruth(db: Db) {
   assert.ok(health.lastImport, "phải nói được lần nhập tệp gần nhất");
   assert.equal(health.lastImport.by, "test:vtp-truth");
 
+  /*
+    ═════════ 11. ĐO CHẤT LƯỢNG WEBHOOK BẰNG CHÍNH TỆP ĐỐI CHIẾU ═════════
+
+    2.138/2.151 vận đơn là `WEBHOOK_ONLY` (đo 16/09/2026): webhook là NGUỒN TIN DUY NHẤT, và ERP
+    KHÔNG tự phát hiện được một gói tin chưa từng tới — sự vắng mặt không để lại dấu vết nào trong
+    chính hệ thống đã không nhận được nó. Chỉ tệp Viettel Post, một nguồn ĐỘC LẬP, mới lộ ra chỗ hụt.
+
+    Nên mỗi lần nhập tệp phải để lại một PHÉP ĐO, kể cả lần nhập không đổi một vận đơn nào.
+  */
+
+  // ── Hàm thuần trước: ba câu trả lời, và hai trong số đó KHÔNG phải lỗi của webhook ──
+  const luc = (iso: string) => new Date(iso);
+  assert.equal(
+    measureWebhookGap({ carrierEventAt: luc("2026-09-12T00:23:00Z"), erpKnewAt: luc("2026-09-12T00:23:00Z"), importedAt: luc("2026-09-13T03:50:00Z") }).isGap,
+    false,
+    "ERP đã biết đúng mốc ấy ⇒ webhook làm đúng việc, không được tính là hụt",
+  );
+  assert.equal(
+    measureWebhookGap({ carrierEventAt: luc("2026-09-12T00:23:00Z"), erpKnewAt: luc("2026-09-12T10:00:00Z"), importedAt: luc("2026-09-13T03:50:00Z") }).isGap,
+    false,
+    "ERP đã biết một sự việc MỚI HƠN ⇒ dòng tệp cũ này không chứng minh được webhook rơi",
+  );
+  /*
+    NGƯỠNG HAI GIỜ: độ trễ THẬT đo được là 36–41 giây. Một sự kiện vừa xảy ra vài phút trước lúc
+    nhập tệp thì gói tin có thể đang trên đường — đếm nó là "hụt" là vu oan, và làm tỷ lệ tin cậy
+    tụt vì một cuộc đua vô hại.
+  */
+  const vuaXay = measureWebhookGap({ carrierEventAt: luc("2026-09-13T03:00:00Z"), erpKnewAt: null, importedAt: luc("2026-09-13T04:00:00Z") });
+  assert.equal(vuaXay.isGap, false, "sự kiện mới hơn ngưỡng KHÔNG được kết tội webhook");
+  assert.equal(vuaXay.isGap === false && vuaXay.reason, "TOO_FRESH", "và phải nói rõ vì sao không tính, không im lặng bỏ qua");
+  assert.equal(
+    measureWebhookGap({ carrierEventAt: luc("2026-09-13T03:00:00Z"), erpKnewAt: null, importedAt: new Date(luc("2026-09-13T03:00:00Z").getTime() + WEBHOOK_GAP_MIN_MINUTES * 60_000) }).isGap,
+    true,
+    "đúng tại ngưỡng đã là hụt — biên phải đóng, không để một dải nào không ai đếm",
+  );
+  // Ca THẬT ngày 12/09: ĐVVC ghi "Chờ phát lại" lúc 07:23, ERP chỉ biết lúc 13/09 03:50 — qua TỆP.
+  const caThat = measureWebhookGap({ carrierEventAt: luc("2026-09-12T00:23:00Z"), erpKnewAt: null, importedAt: luc("2026-09-13T03:50:00Z") });
+  assert.equal(caThat.isGap, true, "ca thật 20 giờ phải được nhận ra là một lần webhook rơi");
+  assert.equal(caThat.isGap && caThat.severity, "MAJOR", "hơn một ngày ⇒ MAJOR");
+  assert.equal(gapSeverity(24 * 60 - 1), "MINOR");
+  assert.equal(gapSeverity(3 * 24 * 60), "CRITICAL");
+
+  /*
+    MẪU NHỎ NÓI LÀ MẪU NHỎ. "1/1 hụt" KHÔNG phải "webhook rơi 100%" — in ra như thế là bịa một
+    kết luận từ một quan sát, và chủ shop sẽ ra quyết định nhập tệp theo một con số không có thật.
+  */
+  assert.equal(webhookMatchRate({ known: 1, gaps: 1 }), null, "mẫu dưới ngưỡng ⇒ CHƯA ĐỦ DỮ LIỆU, không phải 50%");
+  assert.equal(webhookMatchRate({ known: WEBHOOK_MATCH_MIN_SAMPLE, gaps: 0 }), 1, "đủ mẫu thì phát biểu được tỷ lệ");
+  assert.equal(webhookMatchRate({ known: 0, gaps: WEBHOOK_MATCH_MIN_SAMPLE }), 0, "đủ mẫu mà không dòng nào ERP biết trước ⇒ 0% là một kết luận THẬT");
+
+  /*
+    ── VÀ PHÉP ĐO PHẢI THẬT SỰ CHẠY TRÊN ĐƯỜNG NHẬP TỆP ──
+
+    Một vận đơn ERP chỉ biết tới chặng "đóng tải" từ 10/09, trong khi tệp nói ĐVVC đã phát thành
+    công từ 12/09. ERP chưa hề biết sự việc ấy cho tới lúc nhập tệp: đó chính là một lần webhook rơi.
+  */
+  const HUT = "PKE-TRUTH-GAP";
+  await applyVtpTracking(track(HUT, 300, "Đóng tải - vận chuyển đi", "2026-09-10T03:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const csvHut = [head, `1,${HUT},REFG,01/09/2026 12:00:00,Giao thành công,499000,17000,12/09/2026 15:00:00`].join("\n");
+  const tepHut = { filename: "VTP_khoang_hut.csv", base64: Buffer.from(csvHut, "utf8").toString("base64") };
+  await runVtpDataFileImport([tepHut], "test:vtp-truth");
+
+  const hutShip = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, HUT) });
+  const dongHut = await db.select().from(schema.vtpWebhookGaps).where(eq(schema.vtpWebhookGaps.shipmentId, hutShip!.id));
+  assert.equal(dongHut.length, 1, "khoảng hụt webhook phải được GHI LẠI, không chỉ vá dữ liệu rồi quên");
+  assert.equal(dongHut[0].carrierStatusText, "Giao thành công", "sổ giữ CÂU NGUYÊN VĂN của ĐVVC — đó là bằng chứng, không phải nhãn của ERP");
+  assert.equal(dongHut[0].erpKnewAt?.toISOString(), "2026-09-10T03:00:00.000Z", "phải ghi ERP ĐANG BIẾT TỚI ĐÂU trước lần nhập, nếu không thì không tra lại được");
+  assert.equal(dongHut[0].erpKnewSource, "VTP_WEBHOOK", "và nguồn nào đã quyết định ảnh chụp cũ ấy");
+  assert.ok(dongHut[0].batchId, "mỗi khoảng hụt phải trỏ về ĐÚNG lần nhập đã tìm ra nó — dòng mồ côi không trả lời được 'ai đo, lúc nào'");
+
+  // Lần nhập ấy phải mang đủ ba con số đo, kể cả khi nó không đổi một vận đơn nào.
+  const soHut = await db.query.vtpImportBatches.findFirst({ where: eq(schema.vtpImportBatches.id, dongHut[0].batchId!) });
+  assert.ok(soHut, "dòng sổ của lần nhập phải tồn tại");
+  assert.equal(soHut.mode, "APPLY");
+  assert.equal(soHut.checked, 1, "mẫu số = số dòng ghép được về một vận đơn ERP đã biết");
+  assert.equal(soHut.webhookGaps, 1);
+
+  /*
+    NHẬP LẠI CÙNG TỆP KHÔNG ĐƯỢC ĐẺ RA LẦN RƠI THỨ HAI.
+
+    Nếu đếm hai lần thì mỗi lần chủ shop nhập lại một tệp cũ sẽ tự làm xấu tỷ lệ khớp webhook của
+    chính mình — và con số càng nhập càng sai, đúng chiều ngược với mục đích của phép đo.
+  */
+  await runVtpDataFileImport([tepHut], "test:vtp-truth");
+  const dongHut2 = await db.select().from(schema.vtpWebhookGaps).where(eq(schema.vtpWebhookGaps.shipmentId, hutShip!.id));
+  assert.equal(dongHut2.length, 1, "phát hiện lại cùng một sự việc chỉ còn MỘT dòng");
+
+  /*
+    VÀ KHI WEBHOOK LÀM ĐÚNG VIỆC, SỔ PHẢI IM LẶNG.
+
+    Một phép đo chỉ biết đếm cái xấu là một phép đo luôn báo động: nó không có cách nào nói
+    "hôm nay webhook chạy tốt".
+  */
+  const DU = "PKE-TRUTH-NOGAP";
+  await applyVtpTracking(track(DU, 501, "Thành công - Phát thành công", "2026-09-12T08:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const csvDu = [head, `1,${DU},REFN,01/09/2026 12:00:00,Giao thành công,499000,17000,12/09/2026 15:00:00`].join("\n");
+  await runVtpDataFileImport([{ filename: "VTP_khong_hut.csv", base64: Buffer.from(csvDu, "utf8").toString("base64") }], "test:vtp-truth");
+  const duShip = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, DU) });
+  assert.equal(
+    (await db.select().from(schema.vtpWebhookGaps).where(eq(schema.vtpWebhookGaps.shipmentId, duShip!.id))).length,
+    0,
+    "ERP đã biết đúng mốc ấy rồi ⇒ KHÔNG được ghi một lần rơi nào",
+  );
+
+  /*
+    ═════════ 12. NGƯỠNG IM LẶNG SỬA ĐƯỢC — VÀ BỘ GHI ĐÈ HỎNG KHÔNG ĐƯỢC LÀM SẬP GÌ ═════════
+
+    Ngưỡng dựng từ phân bố 11/09/2026, nhưng phân bố đổi theo mùa. Một ngưỡng không sửa được sẽ
+    hoặc chôn hàng đợi dưới hàng trăm kiện không đáng lo, hoặc im đúng lúc cần hét.
+  */
+  assert.deepEqual(sanitizeFreshness(null), {}, "đọc cấu hình phải LUÔN thành công — dòng rác không được làm sập hàng đợi của cả shop");
+  assert.deepEqual(sanitizeFreshness({ KHONG_CO_CHANG_NAY: { aging: 1, stale: 2, critical: 3 } }), {}, "khoá lạ là gõ nhầm, không phải một chặng mới");
+  assert.deepEqual(
+    sanitizeFreshness({ OUT_FOR_DELIVERY: { aging: 40, stale: 20, critical: 10 } }),
+    {},
+    "ba mốc ĐẢO THỨ TỰ ⇒ bỏ NGUYÊN CẢ CHẶNG: sửa hộ một ô là đoán ý người nhập, và con số đoán ra sẽ đứng trên màn hình như thể có người chọn nó",
+  );
+  assert.deepEqual(
+    sanitizeFreshness({ OUT_FOR_DELIVERY: { aging: 4, stale: 12, critical: 24 }, RETURNING: { aging: 0, stale: 2, critical: 3 } }),
+    { OUT_FOR_DELIVERY: { aging: 4, stale: 12, critical: 24 } },
+    "ghi đè hỏng của một chặng KHÔNG được kéo theo chặng khác — mất một ghi đè còn hơn mất cả màn hình",
+  );
+  const ghiDe = sanitizeFreshness({ OUT_FOR_DELIVERY: { aging: 4, stale: 12, critical: 24 } });
+  assert.equal(effectiveThresholdFor("OUT_FOR_DELIVERY", ghiDe).critical, 24, "ghi đè của chủ shop phải thắng mặc định trong mã");
+  assert.equal(
+    effectiveThresholdFor("OUT_FOR_DELIVERY", ghiDe).why,
+    FRESHNESS_BY_STAGE.OUT_FOR_DELIVERY.why,
+    "câu giải thích VÌ SAO chặng này cần ngưỡng riêng vẫn lấy từ mã — lý lẽ không đổi khi ai đó chỉnh con số",
+  );
+  assert.equal(effectiveThresholdFor("IN_TRANSIT", ghiDe).critical, FRESHNESS_BY_STAGE.IN_TRANSIT.critical, "chặng không ai sửa vẫn dùng mặc định — bảng ghi đè là THƯA, không phải bản sao đầy đủ");
+  assert.equal(classifyFreshnessWith(30, "OUT_FOR_DELIVERY", ghiDe), "CRITICAL_STALE", "hạ ngưỡng xuống 24h thì kiện im 30h thành nghiêm trọng");
+  assert.equal(classifyFreshnessWith(30, "OUT_FOR_DELIVERY", {}), "STALE", "…và vẫn chỉ là 'cũ' với bộ mặc định — cùng một luật, khác bộ số");
+  assert.equal(classifyFreshnessWith(null, "OUT_FOR_DELIVERY", ghiDe), "CRITICAL_STALE", "KHÔNG có tin tức gì là tình huống xấu nhất, không bao giờ được xếp là 'mới'");
+
+  /*
+    ═════════ 13. HÀNG ĐỢI "VTP CẦN ĐỐI CHIẾU" ═════════
+
+    Câu hỏi của hàng đợi này KHÁC HẲN câu hỏi của hàng đợi care: care hỏi "kiện này có cần gọi
+    khách không", còn đây hỏi "ERP có đang tin một điều không còn đúng không". Và nó dựng hoàn toàn
+    từ dữ liệu ĐÃ CÓ — không một lượt gọi API nào, vì nó tồn tại chính vì ERP không hỏi được.
+  */
+  clearMemo();
+  const hangDoi = await getVtpReconcileQueue();
+
+  /*
+    Kiện mang trạng thái ERP CHƯA dịch được phải có mặt, kèm ĐÚNG lý do đó.
+
+    Dùng `PKE-TRUTH-FILE2` (nhận câu lạ qua đường NHẬP TỆP ở khối 6) chứ không dùng `laShip`: kiện
+    kia đã nhận một câu HIỂU ĐƯỢC đến sau nên cờ của nó đã chuyển lại thành "đã dịch được" — đúng
+    như khối 1 khoá. Một kiện ERP đã hiểu lại thì KHÔNG còn việc gì để người trực đi tra.
+  */
+  const laFile = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, KHAC) });
+  const dongLa = hangDoi.rows.find((r) => r.id === laFile!.id);
+  assert.ok(dongLa, "kiện ĐVVC vừa nói một câu ERP chưa dịch được PHẢI vào hàng đợi đối chiếu — trước bản này nó không hiện ở đâu cả");
+  assert.ok(dongLa.reasons.includes("UNMAPPED_STATUS"), "và phải nói rõ vì sao nó ở đây");
+  assert.ok(
+    !hangDoi.rows.some((r) => r.id === laShip.id && r.reasons.includes("UNMAPPED_STATUS")),
+    "kiện đã nhận được một câu HIỂU ĐƯỢC đến sau thì thôi là việc — hàng đợi không được giữ lại một lý do đã hết",
+  );
+
+  /*
+    MỘT KIỆN NHIỀU LÝ DO LÀ MỘT DÒNG, KHÔNG PHẢI NHIỀU DÒNG.
+
+    Người trực mở viettelpost.vn đúng MỘT lần cho một vận đơn. Tách thành nhiều dòng là bắt họ làm
+    cùng một việc ba lần, và làm mọi con số đếm việc to lên gấp bội mà không có thêm việc nào.
+  */
+  for (const r of hangDoi.rows) {
+    assert.ok(r.reasons.length > 0, "không dòng nào được vào hàng đợi mà không nói được vì sao");
+    assert.equal(new Set(hangDoi.rows.filter((x) => x.id === r.id)).size, 1, "mỗi vận đơn chỉ một dòng dù mang nhiều lý do");
+    assert.equal(r.topReason, r.reasons[0], "lý do MẠNH NHẤT phải đứng đầu — nó quyết định chỗ đứng trong hàng đợi");
+  }
+
+  /*
+    BA LÝ DO CHỈ CÓ NGHĨA VỚI KIỆN ĐANG CHẠY.
+
+    "Im lặng" với một kiện đã giao xong là chuyện hoàn toàn bình thường — kiện xong thì ĐVVC còn
+    gửi thêm mốc làm gì. Đưa nó vào hàng đợi là bắt người trực tra một thứ không còn đổi được nữa,
+    và với vài nghìn kiện đã giao thì hàng đợi chết ngay ngày đầu.
+
+    Ba lý do CÒN LẠI vẫn là việc dù kiện đã chốt: chúng nói rằng ERP đang KHÔNG HIỂU một câu ĐVVC
+    đã nói, và điều đó không tự hết theo thời gian.
+  */
+  const CHOT = ["DELIVERED", "RETURNED", "CANCELLED"];
+  const CHI_KHI_DANG_CHAY: ReconcileReason[] = ["STALE_NO_NEWS", "CARE_WITHOUT_MOVEMENT"];
+  for (const r of hangDoi.rows) {
+    if (!CHOT.includes(r.stage)) continue;
+    for (const ly of CHI_KHI_DANG_CHAY) {
+      assert.ok(!r.reasons.includes(ly), `kiện đã chốt (${r.stage}) KHÔNG được mang lý do "${ly}" — ${r.id}`);
+    }
+  }
+  assert.ok(hangDoi.rows.some((r) => r.id === gocShip!.id && r.reasons.includes("STALE_NO_NEWS")), "kiện chưa chốt mà im lặng quá ngưỡng của chặng phải vào hàng đợi");
+  assert.ok(!hangDoi.rows.some((r) => r.id === legShip.id), "vận đơn chiều hoàn đã phát thành công về shop, ERP hiểu đúng câu ĐVVC nói ⇒ không có gì để tra lại");
+
+  /*
+    MÂU THUẪN ĐI CẢ HAI CHIỀU.
+
+    Luật 48: trạng thái con "đã giao" mà cờ kết thúc còn `false` là một MÂU THUẪN trong dữ liệu của
+    chính ERP — nếu không gọi tên nó thì kiện nằm mãi ở hàng đợi đối chiếu và không bao giờ rời ra.
+  */
+  const MAU_THUAN = "PKE-TRUTH-MAUTHUAN";
+  await applyVtpTracking(track(MAU_THUAN, 300, "Đóng tải - vận chuyển đi", "2026-09-15T02:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const mtShip = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, MAU_THUAN) });
+  await db.update(schema.shipments).set({ isFinal: true }).where(eq(schema.shipments.id, mtShip!.id));
+  clearMemo();
+  const hangDoi2 = await getVtpReconcileQueue();
+  const dongMT = hangDoi2.rows.find((r) => r.id === mtShip!.id);
+  assert.ok(dongMT, "cờ 'đã kết thúc' bật mà chặng vẫn đang chạy PHẢI thành việc");
+  assert.ok(dongMT.reasons.includes("CONTRADICTION"), "…và phải được gọi đúng tên là MÂU THUẪN, không phải 'im lặng'");
+  await db.update(schema.shipments).set({ isFinal: false }).where(eq(schema.shipments.id, mtShip!.id));
+
+  // Số giờ im lặng là CHƯA BIẾT khi chưa có mốc ĐVVC nào — không phải 0 giờ.
+  for (const r of hangDoi.rows) {
+    assert.ok(r.hoursSilent === null || Number.isFinite(r.hoursSilent), "số giờ im lặng phải là một số thật hoặc CHƯA BIẾT, không bao giờ NaN");
+  }
+  assert.equal(
+    hangDoi.counts.UNMAPPED_STATUS >= 1,
+    true,
+    "bộ đếm theo lý do phải khớp với thứ thật sự có trong danh sách",
+  );
+  assert.equal(hangDoi.truncated, Math.max(0, hangDoi.total - hangDoi.rows.length), "số kiện bị cắt khỏi danh sách phải in ra được, không biến mất lặng lẽ");
+
+  /*
+    ═══ "API KHÔNG THẤY VẬN ĐƠN NÀY" LÀ MỘT PHÂN LOẠI, KHÔNG PHẢI MỘT VIỆC ═══
+
+    Đo trên production 16/09/2026: cả 18 dòng mang `vtp_last_error` đều là ĐÚNG câu này — phán quyết
+    PHẠM VI TÀI KHOẢN, sự thật cố định của 2.139/2.151 kiện mà ERP đã biết và đã thôi hỏi. Bản đầu
+    của hàng đợi xếp chúng ở HẠNG MỘT dưới nhãn "Lỗi đối chiếu": người trực mở ra, thấy 18 dòng, và
+    KHÔNG CÓ GÌ để làm. Một hàng đợi mà dòng đầu tiên không làm được gì là hàng đợi không ai mở lần
+    thứ hai.
+  */
+  assert.equal(laLoiPhamViTaiKhoan(CAPABILITY_SCOPE_ERROR), true, "câu lỗi bộ đối chiếu ghi ra phải được nhận ra là phán quyết phạm vi tài khoản");
+  assert.equal(laLoiPhamViTaiKhoan("Kết nối tới Viettel Post quá hạn"), false, "lỗi mạng thật thì vẫn là việc phải xem");
+  assert.equal(laLoiPhamViTaiKhoan(null), false, "không có lỗi thì không phải phán quyết gì cả");
+
+  const PHAM_VI = "PKE-TRUTH-SCOPE";
+  await applyVtpTracking(track(PHAM_VI, 300, "Đóng tải - vận chuyển đi", "2026-09-15T02:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const pvShip = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, PHAM_VI) });
+  await db.update(schema.shipments).set({ vtpLastError: CAPABILITY_SCOPE_ERROR }).where(eq(schema.shipments.id, pvShip!.id));
+  const LOI_THAT = "PKE-TRUTH-REALERR";
+  await applyVtpTracking(track(LOI_THAT, 300, "Đóng tải - vận chuyển đi", "2026-09-15T02:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  const ltShip = await db.query.shipments.findFirst({ where: eq(schema.shipments.vtpOrderNumber, LOI_THAT) });
+  await db.update(schema.shipments).set({ vtpLastError: "Kết nối tới Viettel Post quá hạn" }).where(eq(schema.shipments.id, ltShip!.id));
+  clearMemo();
+  const hangDoi3 = await getVtpReconcileQueue();
+  assert.ok(
+    !hangDoi3.rows.some((r) => r.id === pvShip!.id && r.reasons.includes("SYNC_ERROR")),
+    "phán quyết phạm vi tài khoản KHÔNG được xếp thành 'lỗi đối chiếu' — ERP đã biết và đã thôi hỏi, người trực không làm được gì với nó",
+  );
+  assert.ok(
+    hangDoi3.rows.some((r) => r.id === ltShip!.id && r.reasons.includes("SYNC_ERROR")),
+    "…nhưng một lỗi THẬT (mạng, phiên, quyền) thì vẫn phải nổi lên: nó nói về lần gọi, không nói về tài khoản",
+  );
+  await db.update(schema.shipments).set({ vtpLastError: null }).where(eq(schema.shipments.id, ltShip!.id));
+
+  /*
+    ═════════ 14. SỨC KHOẺ WEBHOOK: BỐN CÂU HỎI, VÀ "CHƯA BIẾT" LÀ MỘT CÂU TRẢ LỜI ═════════
+
+    Webhook là nguồn tin duy nhất cho 2.138/2.151 vận đơn. Một ô "OK" gộp mọi thứ thì không ai sửa
+    được gì khi nó hỏng, vì bốn loại hỏng sửa ở bốn chỗ khác nhau.
+  */
+  clearMemo();
+  const suc = await vtpWebhookHealth();
+  assert.ok(Number.isFinite(suc.last15m) && Number.isFinite(suc.last1h) && Number.isFinite(suc.last24h), "ba mốc thời gian phải đếm được, không NaN");
+
+  /*
+    NỀN SO SÁNH CHƯA ĐỦ ⇒ `UNKNOWN`, KHÔNG PHẢI `HEALTHY`.
+
+    Đây là điểm dễ làm sai nhất và cũng tai hại nhất: không có nền để so mà kết luận "khoẻ" là lấy
+    sự thiếu hiểu biết của mình làm bằng chứng rằng không có gì đáng lo — đúng thứ luật 48 cấm.
+  */
+  assert.equal(suc.baseline1h, null, "bài kiểm không gieo 14 ngày lịch sử webhook nên nền phải là CHƯA BIẾT");
+  assert.equal(suc.liveness, "UNKNOWN", "chưa đủ nền thì kết luận là CHƯA BIẾT, KHÔNG được là 'khoẻ'");
+  assert.ok(suc.livenessNote.includes("CHƯA BIẾT"), "và màn hình phải nói thẳng ra như vậy");
+
+  /*
+    TỶ LỆ KHỚP KHÔNG ĐƯỢC PHÁT BIỂU KHI MẪU NHỎ.
+
+    Khối 11 đã đo một khoảng hụt THẬT qua đường nhập tệp, nên mẫu ở đây khác 0 — nhưng vẫn dưới
+    ngưỡng 30. "1/2 hụt" không phải "webhook rơi 50%".
+  */
+  assert.equal(suc.matchRate, null, "mẫu dưới ngưỡng ⇒ CHƯA ĐỦ DỮ LIỆU, không được làm tròn thành một con số");
+  assert.ok(suc.matchSample > 0, "…nhưng mẫu đã bắt đầu đếm: lần nhập tệp ở khối 11 có vào sổ");
+  assert.ok(suc.gaps30d >= 1, "khoảng hụt đo được ở khối 11 phải hiện ở bảng sức khoẻ, không nằm im trong một bảng riêng");
+
+  // Mẫu số 0 ⇒ `null`, không phải 0%: chưa nhận gói nào thì tỷ lệ gửi lại là CHƯA BIẾT.
+  assert.equal(suc.duplicateRate24h, suc.last24h > 0 ? suc.duplicate24h / suc.last24h : null, "tỷ lệ gửi lại phải khớp với hai con số nó dựng từ, và mẫu số 0 thì trả null");
+
+  /*
+    ═════════ 15. TỆP NGUYÊN BẢN CỦA VIETTEL POST: CỘT "MÃ TRẠNG THÁI" KHÔNG ĐƯỢC CƯỚP CỘT CHỮ ═════════
+
+    Header "Mã trạng thái" chứa nguyên cụm " trang thai ", nên bộ dò cột sẽ bắt nhầm nó thành cột
+    CHỮ nếu nó đứng trước. Hậu quả im lặng và khó tìm: ERP đọc số "501" như một câu chữ,
+    `mapVtpStatusText("501")` không hiểu, mọi dòng thành "trạng thái lạ", và CẢ TỆP không cập nhật
+    được một vận đơn nào — trong khi màn hình vẫn báo đọc được đủ số dòng.
+
+    Và khi tệp CÓ cột mã thì mã phải THẮNG chữ: "Giao thành công" mơ hồ giữa chiều đi và chiều hoàn
+    (mục 3 — Viettel Post ghi câu đó cho cả hai), còn mã 501/504 thì không.
+  */
+  const MA_CHU = "PKE-TRUTH-MACHU";
+  await applyVtpTracking(track(MA_CHU, 300, "Đóng tải - vận chuyển đi", "2026-09-10T03:00:00Z"), "VTP_WEBHOOK", { allowCreate: true });
+  // Cột "Mã trạng thái" đặt TRƯỚC cột "Trạng Thái", đúng thứ tự dễ gây lỗi nhất.
+  const headMa = "STT,Mã Vận Đơn,Mã đơn hàng,Ngày tạo,Mã trạng thái,Trạng Thái,Tiền thu hộ (4),Tổng phí (9),Ngày chuyển trạng thái";
+  const csvMa = [headMa, `1,${MA_CHU},REFM,01/09/2026 12:00:00,501,Giao thành công,499000,17000,14/09/2026 15:00:00`].join("\n");
+  const xemMa = await previewVtpOrderListFile({ filename: "VTP_co_ma_trang_thai.csv", base64: Buffer.from(csvMa, "utf8").toString("base64") });
+  const dongMa = xemMa.sample.find((r) => r.trackingCode === MA_CHU);
+  assert.ok(dongMa, "dòng phải đọc được");
+  assert.equal(
+    dongMa.fileStatusText,
+    "Giao thành công",
+    `cột CHỮ phải đọc đúng câu của ĐVVC, không phải con số — nhận được "${dongMa.fileStatusText}"`,
+  );
+  assert.equal(xemMa.counts.UNKNOWN_STATUS, 0, "tệp có cột mã KHÔNG được biến thành một tệp toàn trạng thái lạ");
+  assert.equal(xemMa.counts.NEWER, 1, "và nó vẫn phải nhận ra đây là chứng từ mới hơn thứ ERP đang giữ");
+
   console.log(
     `✓ VTP là nguồn sự thật: ${health.unknownStatuses.length} trạng thái chưa dịch được vào sổ (không bị nuốt) · lời khai thô theo mốc ĐVVC · ` +
-      `nhịp đối chiếu theo độ nóng · chạy thử không ghi một dòng nào · nhật ký ${nk.entries.length} mốc, bốn chiều tách rời`,
+      `nhịp đối chiếu theo độ nóng · chạy thử không ghi một dòng nào · nhật ký ${nk.entries.length} mốc, bốn chiều tách rời · ` +
+      `khoảng hụt webhook đo được và không đếm hai lần · hàng đợi đối chiếu ${hangDoi.rows.length}/${hangDoi.total} kiện, mỗi kiện một dòng · ` +
+      `sức khoẻ webhook: nền chưa đủ ⇒ CHƯA BIẾT, không tự nhận là khoẻ · cột 'Mã trạng thái' không cướp được cột chữ`,
   );
 }

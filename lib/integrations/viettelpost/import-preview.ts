@@ -311,3 +311,50 @@ export async function ghiSoNhapTep(input: {
     .returning({ id: schema.vtpImportBatches.id });
   return row.id;
 }
+
+/**
+ * Bổ sung kết quả vào một dòng sổ ĐÃ LẬP.
+ *
+ * Dòng sổ của lần ghi thật phải tồn tại TRƯỚC khi ghi vận đơn, vì mỗi khoảng hụt webhook phát hiện
+ * được đều trỏ về `batch_id` của lần nhập tìm ra nó. Lập sổ sau thì các dòng ấy mồ côi, và câu
+ * "lần nhập nào phát hiện ra" — thứ duy nhất làm phép đo tra lại được — không trả lời được nữa.
+ * Nên: lập dòng rỗng trước, điền số vào sau bằng hàm này.
+ */
+export async function capNhatSoNhapTep(
+  id: string,
+  patch: {
+    matched?: number;
+    applied?: number;
+    stale?: number;
+    duplicates?: number;
+    conflicts?: number;
+    unmatched?: number;
+    unknownStatus?: number;
+    invalid?: number;
+    checked?: number;
+    webhookOk?: number;
+    webhookGaps?: number;
+    error?: string | null;
+    summary?: unknown;
+  },
+): Promise<void> {
+  const db = await getDb();
+  await db
+    .update(schema.vtpImportBatches)
+    .set({
+      ...(patch.matched === undefined ? {} : { matched: patch.matched }),
+      ...(patch.applied === undefined ? {} : { applied: patch.applied }),
+      ...(patch.stale === undefined ? {} : { stale: patch.stale }),
+      ...(patch.duplicates === undefined ? {} : { duplicates: patch.duplicates }),
+      ...(patch.conflicts === undefined ? {} : { conflicts: patch.conflicts }),
+      ...(patch.unmatched === undefined ? {} : { unmatched: patch.unmatched }),
+      ...(patch.unknownStatus === undefined ? {} : { unknownStatus: patch.unknownStatus }),
+      ...(patch.invalid === undefined ? {} : { invalid: patch.invalid }),
+      ...(patch.checked === undefined ? {} : { checked: patch.checked }),
+      ...(patch.webhookOk === undefined ? {} : { webhookOk: patch.webhookOk }),
+      ...(patch.webhookGaps === undefined ? {} : { webhookGaps: patch.webhookGaps }),
+      ...(patch.error === undefined ? {} : { error: patch.error }),
+      ...(patch.summary === undefined ? {} : { summary: patch.summary as Record<string, unknown> | null }),
+    })
+    .where(eq(schema.vtpImportBatches.id, id));
+}

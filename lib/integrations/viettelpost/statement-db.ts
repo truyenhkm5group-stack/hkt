@@ -5,6 +5,7 @@ import { vnStartOfDay } from "@/lib/format";
 import { legBaseCode, mergeVtpOrderLists, vtpSaysCodReceived, type CodPaymentSummary, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 import { ghiLoiKhaiTho, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
 import { ghiSoTrangThai } from "@/lib/integrations/viettelpost/registry";
+import { measureWebhookGap } from "@/lib/constants/webhook-gap";
 import { afterShipmentStateChange } from "@/lib/care/lifecycle";
 import { resolveVtpStatus } from "@/lib/integrations/viettelpost/status";
 
@@ -369,9 +370,15 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
       currentStage: f?.stage ?? null,
       currentCod: f?.codStatus ?? null,
       currentStatusDate: f?.statusDate ?? null,
-      // Tệp xuất từ viettelpost.vn không có mã số trạng thái, chỉ có chữ — nhưng vẫn đi qua ĐÚNG
-      // bộ dịch mà webhook dùng, để cùng một trạng thái của ĐVVC không cho ra hai kết luận.
-      mapped: resolveVtpStatus({ code: null, text: r.statusText }),
+      /*
+        MÃ SỐ TRƯỚC, CHỮ SAU — và cả hai đi qua ĐÚNG bộ dịch mà webhook dùng, để cùng một trạng thái
+        của ĐVVC không bao giờ cho ra hai kết luận.
+
+        Phần lớn tệp xuất từ viettelpost.vn chỉ có cột chữ, nên `statusCode` thường là `null` và
+        `resolveVtpStatus` rơi về nhánh chữ y như trước. Nhưng khi tệp CÓ cột mã thì mã phải thắng:
+        chữ "Giao thành công" mơ hồ giữa chiều đi và chiều hoàn (mục 3), còn mã 501/504 thì không.
+      */
+      mapped: resolveVtpStatus({ code: r.statusCode ?? null, text: r.statusText }),
       matchKind: f ? (direct ? "direct" : leg ? "leg" : "phone") : null,
       legOf: leg ? (leg.vtp ?? base) : null,
       matchIssue,
@@ -416,7 +423,7 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
 }
 
 /** Danh sách vận đơn cập nhật logistics/COD khai báo; không chứng minh tiền thực thu hay ngân hàng. */
-export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IMPORT") {
+export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IMPORT", options: { batchId?: string | null } = {}) {
   const db = await getDb();
   const matches = await matchVtpOrderList(mergeVtpOrderLists(rows));
   const now = new Date();
@@ -427,6 +434,22 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
   let stale = 0;
   let duplicate = 0;
   let missingDate = 0;
+  /*
+    ═══ PHÉP ĐO CHẤT LƯỢNG WEBHOOK, CHẠY KÈM LƯỢT VÁ DỮ LIỆU ═══
+
+    `checked`   — dòng ghép được về một vận đơn ERP đã biết (mẫu số);
+    `webhookOk` — ERP đã biết bằng hoặc mới hơn ⇒ webhook làm đúng việc;
+    `gaps`      — ERP chưa hề biết dù ĐVVC ghi nhận đã lâu ⇒ webhook đã rơi.
+
+    Đây là lý do một lần nhập tệp vẫn đáng chạy kể cả khi nó không đổi một vận đơn nào: nó vẫn trả
+    lời được câu "webhook đang rơi bao nhiêu". Xem `lib/constants/webhook-gap.ts`.
+  */
+  let checked = 0;
+  let webhookOk = 0;
+  let gaps = 0;
+  const importedAt = new Date();
+  /** Gom trong vòng lặp, ghi MỘT LẦN sau đó — xem lý do ở chỗ `gapRows.push`. */
+  const gapRows: (typeof schema.vtpWebhookGaps.$inferInsert)[] = [];
   let conflicts = matches.filter((m) => m.matchIssue).length;
   /*
     ═══ MỖI CÂU TRONG TỆP ĐỀU VÀO SỔ TRẠNG THÁI, KỂ CẢ CÂU ERP CHƯA DỊCH ĐƯỢC ═══
@@ -502,6 +525,47 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
       const older = current.vtpStatusDate !== null && current.vtpStatusDate > occurredAt;
       const sameTimeConflict = current.vtpStatusDate?.getTime() === occurredAt.getTime() && current.stage !== m.mapped.stage;
       const before = { stage: current.stage, codAmount: current.codAmount, shippingFee: current.shippingFee, vtpStatusDate: current.vtpStatusDate };
+
+      /*
+        ═══ WEBHOOK CÓ RƠI GÓI TIN NÀY KHÔNG ═══
+
+        Đo TRƯỚC khi ghi, trên ảnh chụp `current` còn nguyên — sau lệnh ghi thì mốc cũ biến mất và
+        không còn gì để so. Phép đo là hàm thuần ở `lib/constants/webhook-gap.ts`; ở đây chỉ ghi
+        kết quả xuống sổ.
+
+        Dòng TRÙNG (`verdict === "same"`) đã thoát ở trên, nên tới đây mỗi dòng là một lời khai mà
+        ERP hoặc đã biết, hoặc chưa. Cả hai đều vào mẫu số.
+      */
+      checked += 1;
+      const dauVet = measureWebhookGap({ carrierEventAt: occurredAt, erpKnewAt: current.vtpStatusDate, importedAt });
+      if (dauVet.isGap) {
+        gaps += 1;
+        /*
+          GOM LẠI, GHI SAU VÒNG LẶP — CỐ Ý KHÔNG GHI TRONG TRANSACTION NÀY.
+
+          Một lệnh ghi lỗi bên trong transaction làm Postgres huỷ cả giao dịch ("current transaction
+          is aborted"), và mọi lệnh sau đó trong cùng giao dịch cũng hỏng theo — kể cả lệnh đang vá
+          trạng thái một gói hàng thật. `try/catch` KHÔNG cứu được điều đó, nó chỉ giấu đi.
+
+          Sổ quan sát không bao giờ được quan trọng hơn lượt vá dữ liệu: mất một dòng đo là mất một
+          phép đo; mất một lượt vá là mất trạng thái của một kiện hàng.
+        */
+        gapRows.push({
+          shipmentId: current.id,
+          trackingCode: m.trackingCode,
+          batchId: options.batchId ?? null,
+          carrierStatusText: m.statusText,
+          carrierStage: m.mapped.stage,
+          carrierEventAt: occurredAt,
+          erpKnewAt: current.vtpStatusDate,
+          erpKnewSource: current.vtpSyncSource,
+          detectedAt: importedAt,
+          gapMinutes: dauVet.minutes,
+          severity: dauVet.severity,
+        });
+      } else if (dauVet.reason === "ERP_ALREADY_AHEAD") {
+        webhookOk += 1;
+      }
       if (!older && !sameTimeConflict) {
         // ĐVVC tự khai "Đã nhận COD" ⇒ nâng chiều tiền lên COLLECTED (tiền đang ở ĐVVC). Không
         // nâng thẳng lên "đã về ngân hàng": chỉ bảng kê đối soát mới chứng minh tiền về tài khoản.
@@ -545,8 +609,20 @@ export async function applyVtpOrderList(rows: VtpOrderListRow[], actor = "VTP_IM
     else if (result === "duplicate") duplicate++;
     else conflicts++;
   }
+  /*
+    Ghi sổ quan sát SAU khi mọi lượt vá đã xong, ngoài mọi transaction. Chống trùng nằm ở khoá duy
+    nhất `(vận đơn, mốc ĐVVC, câu chữ)` nên nhập lại cùng tệp không đếm thành hai lần rơi.
+  */
+  if (gapRows.length) {
+    await db.insert(schema.vtpWebhookGaps).values(gapRows).onConflictDoNothing().catch((e: unknown) => {
+      console.warn(`[vtp-gap] không ghi được sổ khoảng hụt webhook: ${e instanceof Error ? e.message : e}`);
+    });
+  }
+
   return { total: rows.length, matched: matches.filter((m) => m.shipmentId).length, updated, linked, paid: 0, legs, stale, duplicate, conflicts, missingDate,
-    unmatched: matches.filter((m) => !m.shipmentId).length, unknown: matches.filter((m) => m.shipmentId && m.mapped.stage === "UNKNOWN").length };
+    unmatched: matches.filter((m) => !m.shipmentId).length, unknown: matches.filter((m) => m.shipmentId && m.mapped.stage === "UNKNOWN").length,
+    // Phép đo chất lượng webhook của chính lần nhập này — xem lib/constants/webhook-gap.ts.
+    checked, webhookOk, webhookGaps: gaps };
 }
 
 export type StatementFileMatch = {

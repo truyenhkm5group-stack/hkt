@@ -189,6 +189,7 @@ import { testPreshipValidationDb, testPreshipValidationPure } from "./preship-va
 import { testPromisedDeliveryDb, testPromisedDeliveryPure } from "./promised-delivery.test";
 import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
+import { testCareEffect } from "./care-effect.test";
 import { testReportingParity } from "./reporting-parity.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
@@ -1742,6 +1743,7 @@ async function main() {
   // Ngay sau đó: bài này dựng đợt chăm sóc, thao tác nghiệp vụ và sự kiện ĐVVC riêng, rồi TỰ DỌN
   // sạch mọi dòng nó thêm — đặt giữa chừng thì những dòng đó lọt vào tổng của báo cáo khác.
   await testCareOs(db);
+  testCareEffect();
   // Ngay sau đó: bài này gieo lịch sử vận đơn riêng để học xác suất, rồi TỰ DỌN sạch — đặt giữa
   // chừng thì những dòng đó lọt vào mẫu của báo cáo khác.
   await testReportingParity(db);
