@@ -43,8 +43,26 @@ const COPILOT_PERMISSION = "ai:send";
 function banChayThu(): string {
   const url = process.env.DATABASE_URL ?? "";
   if (!url) throw new Error("Thiếu DATABASE_URL — không xác định được đang nối vào CSDL nào, nên dừng.");
-  if (!/vnx-ai-staging|ai-staging|staging/i.test(url)) {
-    throw new Error("DATABASE_URL không trỏ tới CSDL bản chạy thử. Tệp này chỉ chạy trong container bản chạy thử.");
+
+  /*
+    KHÔNG DÙNG `DATABASE_URL` LÀM BẰNG CHỨNG. Hai bản dùng CÙNG một chuỗi `@db:5432/erp` (compose
+    đặt tên dịch vụ giống nhau ở cả hai nơi) — nên nhìn vào nó là nhìn vào đúng chỗ KHÔNG phân biệt
+    được. Phải dùng hai dấu hiệu độc lập, và đòi CẢ HAI:
+
+      · `AI_STAGING=1` — do chính lệnh `docker exec` trong workflow đặt, nơi tên container đích
+        (`vnx-ai-staging-app`) được viết ra tường minh;
+      · hai công tắc chặn cứng ghim "false" — CHỈ `docker-compose.staging.yml` ghim chúng;
+        `docker-compose.prod.yml` không ghim `AI_ALLOW_*` nào.
+
+    Một dấu hiệu thì sao chép nhầm được; hai dấu hiệu ở hai tệp khác nhau thì không.
+  */
+  const goiDungCho = process.env.AI_STAGING === "1";
+  const ghimCung = process.env.AI_ALLOW_AUTO_SEND === "false" && process.env.AI_ALLOW_ORDER_CREATE === "false";
+  if (!goiDungCho || !ghimCung) {
+    throw new Error(
+      "KHÔNG PHẢI CONTAINER BẢN CHẠY THỬ (thiếu AI_STAGING=1 hoặc thiếu công tắc chặn cứng ghim ở compose).\n" +
+        "Tệp này GHI vào bảng users nên nhánh nghi ngờ rơi về phía KHÔNG LÀM GÌ.",
+    );
   }
   return url.replace(/:\/\/[^@]*@/, "://***@");
 }
@@ -68,7 +86,7 @@ async function kiemTra() {
   const db = await getDb();
   console.log("───────── 1. ĐANG XÁC THỰC TỪ ĐÂU ─────────");
   console.log(`  nguồn danh tính : bảng "users" trong CSDL của CHÍNH bản chạy thử`);
-  console.log(`  chuỗi kết nối   : ${banChayThu()}`);
+  console.log(`  chuỗi kết nối   : ${banChayThu()}  (production trông y hệt ở chỗ này — xem chú thích ở banChayThu)`);
   console.log(`  cơ chế          : mật khẩu bcrypt trong CSDL → phiên JWT ký bằng AUTH_SECRET → cookie "erp_session"`);
   console.log(`  KHÔNG có        : NextAuth, dịch vụ xác thực riêng, hay đọc chéo sang CSDL production`);
   console.log("");

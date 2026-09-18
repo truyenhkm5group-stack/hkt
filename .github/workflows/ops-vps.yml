@@ -82,7 +82,7 @@ on:
           - ai-staging-shadow     # MẺ CHẠY NGẦM VỚI MÔ HÌNH THẬT (arg: "--page=<id> --max=20 [--dry-run]")
           - ai-staging-copilot    # BẬT/TẮT nấc TRỢ LÝ cho MỘT page (arg: "--page=<id> --on" | "--off"); MÁY TỰ GỬI vẫn ghim CẤM
           - ai-staging-domain     # TÊN MIỀN + HTTPS cho bản chạy thử (arg: "--prepare" | "--apply" | "--status" | "--off")
-          - ai-staging-auth      # ĐĂNG NHẬP bản chạy thử: kiểm tra ("--check") · vá APP_URL ("--fix-app-url") · tạo tài khoản thí điểm ("--user --email=... --name=... [--role=CS]")
+          - ai-staging-auth      # ĐĂNG NHẬP bản chạy thử: kiểm tra ("--check") · vá APP_URL ("--fix-app-url") · đặt lại tài khoản thí điểm ("--user --email=... --name=... [--role=ADMIN]") · thử đăng nhập thật ("--test --email=...")
           - ai-staging-live-ingest # BẬT/TẮT bộ nạp tin sống (arg: "--on [--seconds=45]" | "--off" | "--once"); chỉ ĐỌC, không bao giờ gửi
           - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
@@ -901,8 +901,18 @@ jobs:
                 esac
                 fetch_staging_script ai-staging-auth.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-auth.ts'
                 # Mật khẩu đi qua BIẾN MÔI TRƯỜNG. Script không in nó, không in chuỗi băm.
-                docker exec -e STAGING_USER_PASSWORD="${STAGING_USER_PASSWORD:-}" vnx-ai-staging-app \
-                  npx tsx --tsconfig tsconfig.json scripts/ai-staging-auth.ts ${ARG:---check} ;;
+                # `AI_STAGING=1` là một nửa cổng chặn: nửa kia là hai công tắc ghim trong
+                # docker-compose.staging.yml. Chạy nhầm vào container production thì script tự dừng.
+                docker exec -e AI_STAGING=1 -e STAGING_USER_PASSWORD="${STAGING_USER_PASSWORD:-}" vnx-ai-staging-app \
+                  npx tsx --tsconfig tsconfig.json scripts/ai-staging-auth.ts ${ARG:---check}
+                case "${ARG:-}" in
+                  *--test*)
+                    echo ""
+                    echo "════════ THỬ ĐĂNG NHẬP THẬT BẰNG HTTP ════════"
+                    fetch_staging_script ai-staging-login-test.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-login-test.ts'
+                    docker exec -e AI_STAGING=1 -e STAGING_USER_PASSWORD="${STAGING_USER_PASSWORD:-}" vnx-ai-staging-app \
+                      npx tsx --tsconfig tsconfig.json scripts/ai-staging-login-test.ts ${ARG:-} ;;
+                esac ;;
 
               ai-staging-live-ingest)
                 # BỘ NẠP TIN SỐNG — BẬT/TẮT MỘT TIẾN TRÌNH CHỈ BIẾT ĐỌC.
