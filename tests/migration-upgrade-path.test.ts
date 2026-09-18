@@ -48,6 +48,7 @@ const MOI = [
   "0099_vtp_source_of_truth",
   "0100_vtp_webhook_gap",
   "0101_tech_control_plane",
+  "0102_tech_github_runner",
 ] as const;
 
 /*
@@ -139,6 +140,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'vtp_webhook_gaps'"), 0, "bước 1: sổ khoảng hụt webhook CHƯA được có — đó là thứ 0100 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_tasks'"), 0, "bước 1: hàng đợi việc Tech CHƯA được có — đó là thứ 0101 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_agents'"), 0, "bước 1: sổ agent CHƯA được có — đó là thứ 0101 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_deployments' and column_name = 'external_run_id'"), 0, "bước 1: khoá lượt chạy GitHub CHƯA được có — đó là thứ 0102 thêm vào");
     /*
       Một vận đơn ĐÃ CÓ TỪ TRƯỚC 0099, mang một trạng thái Viettel Post đã dịch được. Bước 2 kiểm
       rằng migration KHÔNG dựng hộ nó một "lời khai thô": suy ngược từ `vtp_status_name` là bịa ra
@@ -1179,6 +1181,43 @@ export async function testMigrationUpgradePath() {
       "0101: một agent không được mang khoá tài khoản của người",
     );
     await client.query(`delete from tech_tasks where id = 'up-tt3'`);
+
+    /*
+      ═══ 0102: ĐỌC DEPLOY TỪ GITHUB — CHỈ CỘNG THÊM, KHÔNG BỊA MỘT PHÉP ĐỐI CHIẾU NÀO ═══
+
+      Dòng deploy GÕ TAY của Phase 1 phải giữ nguyên `provider = 'MANUAL'` và
+      `verification = 'UNKNOWN'`: chúng CHƯA từng được đối chiếu với bản đang chạy, và gắn cho
+      chúng nhãn 'VERIFIED' là bịa ra một phép đo chưa ai thực hiện (AGENTS.md mục 8.8).
+    */
+    await client.query(`insert into tech_deployments (id, commit_sha, branch, status) values ('up-td1', 'abc1234', 'main', 'SUCCEEDED')`);
+    assert.equal(await dem("select count(*)::int as n from tech_deployments where id = 'up-td1' and provider = 'MANUAL' and verification = 'UNKNOWN' and production_commit is null"), 1, "0102: dòng gõ tay mặc định là CHƯA đối chiếu, không phải đã khớp");
+
+    // Khoá duy nhất chỉ áp cho dòng CÓ mã lượt chạy: hai dòng gõ tay phải cùng tồn tại được.
+    await client.query(`insert into tech_deployments (id, commit_sha, branch, status) values ('up-td2', 'def5678', 'main', 'SUCCEEDED')`);
+    assert.equal(await dem("select count(*)::int as n from tech_deployments where external_run_id = ''"), 2, "0102: nhiều dòng gõ tay cùng tồn tại — chỉ mục duy nhất phải CÓ ĐIỀU KIỆN");
+
+    // …còn cùng một lượt chạy GitHub thì KHÔNG được có hai dòng.
+    await client.query(`insert into tech_deployments (id, commit_sha, provider, external_run_id, external_run_attempt, status) values ('up-td3', 'aaa1111', 'GITHUB_ACTIONS', '99001', 1, 'SUCCEEDED')`);
+    await assert.rejects(
+      () => client.query(`insert into tech_deployments (id, commit_sha, provider, external_run_id, external_run_attempt, status) values ('up-td4', 'aaa1111', 'GITHUB_ACTIONS', '99001', 1, 'SUCCEEDED')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("tech_deployments_external_uq"),
+      "0102: một lượt chạy GitHub chỉ được một dòng",
+    );
+    // Nhưng lần CHẠY LẠI (attempt 2) là một sự việc mới, phải ghi được.
+    await client.query(`insert into tech_deployments (id, commit_sha, provider, external_run_id, external_run_attempt, status) values ('up-td5', 'aaa1111', 'GITHUB_ACTIONS', '99001', 2, 'SUCCEEDED')`);
+    assert.equal(await dem("select count(*)::int as n from tech_deployments where external_run_id = '99001'"), 2, "0102: chạy lại workflow là dòng RIÊNG — gộp là giấu mất lần người ta quan tâm");
+
+    // Bốn giá trị xác minh là danh sách ĐÓNG: chuỗi lạ buộc màn hình chọn giữa giấu đi và tô sai màu.
+    await assert.rejects(
+      () => client.query(`insert into tech_deployments (id, commit_sha, status, verification) values ('up-td6', 'bbb2222', 'SUCCEEDED', 'PROBABLY')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("tech_deployments_verification_check"),
+      "0102: trạng thái xác minh ngoài bốn giá trị phải bị CSDL chặn",
+    );
+    await client.query(`delete from tech_deployments where id like 'up-td%'`);
+
+    // Cây làm việc của agent: hai cột mới, mặc định TRỐNG — chưa lượt chạy nào từng có cây.
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_agent_runs' and column_name = 'worktree'"), 1, "0102: cột cây làm việc phải có mặt");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_agent_runs' and column_name = 'heartbeat_at'"), 1, "0102: cột nhịp tim phải có mặt");
 
     // Cùng một sự việc phát hiện lại ở lần nhập sau KHÔNG được đếm thành hai lần rơi: nếu đếm hai
     // lần thì mỗi lần nhập lại một tệp cũ sẽ tự làm xấu tỷ lệ khớp webhook của chính nó.

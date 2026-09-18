@@ -41,6 +41,7 @@ export const WORK_SOURCES = [
   "ADS_DECISION",
   "INVENTORY_EXCEPTION",
   "ALERT",
+  "TECH_TASK",
   "MANUAL_TASK",
   "RECURRING_TASK",
 ] as const;
@@ -244,6 +245,55 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     businessEntity: "NONE",
     slaHours: null,
     outcomeAttributable: true,
+    actions: ["OPEN_SOURCE"],
+  },
+  /*
+    ═══ VIỆC TECH — PHÉP CHIẾU, KHÔNG PHẢI BẢN SAO ═══
+
+    `tech_tasks` là MIỀN, và nó giữ trạng thái của chính nó: 13 trạng thái riêng, mức rủi ro, cổng
+    phê duyệt, nhánh git. `work_items` KHÔNG được giữ một `status` thứ hai cho nguồn này — ràng
+    buộc `work_items_authority_check` ở CSDL ép đúng điều đó.
+
+    VÌ SAO PHÒNG BAN LÀ `MANAGEMENT` CHỨ KHÔNG PHẢI MỘT PHÒNG "TECH" MỚI:
+
+    ERP có bảy phòng ban, mỗi phòng có DANH SÁCH NGƯỜI, thẻ điểm hiệu suất, mẫu BSC và trần việc
+    trong máy phân việc. Một phòng thứ tám không có ai trong đó là một phòng không nhận được việc
+    (AGENTS.md mục 22: luật sở hữu trỏ tới PHÒNG BAN, và mục 25: máy phân việc cần người có chỗ
+    trống), và nó sẽ hiện ra ở mọi bảng hiệu suất dưới dạng một cột rỗng vĩnh viễn.
+
+    `MANAGEMENT` là lựa chọn ĐÃ CÓ TIỀN LỆ trong chính kho này: `TEAM_DEPARTMENT` xếp nhóm việc
+    `DATA` vào `MANAGEMENT` với đúng lý do — "số liệu sai không thuộc phòng nào cụ thể, nó chặn
+    quyết định của mọi phòng". Việc kỹ thuật ở shop này cũng vậy: người quyết là chủ shop.
+
+    Thêm một phòng Tech thật là việc của tổ chức, không phải của một bản phát hành — và nó phải đi
+    kèm người, thẻ điểm, mẫu BSC. Chưa có người thì chưa có phòng.
+  */
+  TECH_TASK: {
+    key: "TECH_TASK",
+    label: "Việc Phòng Tech AI",
+    why: "Hệ thống hỏng hoặc một con số không tin được thì mọi phòng khác đứng lại — nhưng việc sửa nó không nằm trong hàng đợi của phòng nào.",
+    statusAuthority: "SOURCE",
+    /*
+      Người/agent phụ trách nằm ở `tech_tasks.agent_id` và đi qua Server Action của miền
+      (`assignTechTaskAgentAction`). Lớp công việc KHÔNG ghi `assignee_id` cho nguồn này — nếu
+      không, trang `/tech` thấy một tên còn `/work` thấy tên khác, đúng lỗi đã đo được ngày
+      13/09/2026 với hai nút "Nhận việc" của CSKH.
+    */
+    assigneeAuthority: "SOURCE",
+    department: "MANAGEMENT",
+    businessEntity: "NONE",
+    /*
+      `null` = loại việc này CỐ Ý không đặt hạn chung. Hạn của một việc Tech phụ thuộc mức ưu tiên
+      (P0 "đang chảy máu" vs P3 "khi rảnh") chứ không phải một con số cho cả nguồn; đặt một hạn
+      duy nhất ở đây sẽ làm mọi việc P3 trông như đang quá hạn.
+    */
+    slaHours: null,
+    outcomeAttributable: true,
+    /*
+      CHỈ CÓ NÚT MỞ. Vòng đời Tech có 13 trạng thái với cổng phê duyệt và bảng phép chuyển riêng;
+      một nút "Xong" trên hàng đợi chung sẽ là NÚT GIẢ đúng nghĩa mà `work-actions.ts` cấm — người
+      bấm tin đã xong, còn `tech_tasks.status` vẫn nguyên. Đóng một việc Tech đi qua `/tech/tasks/[id]`.
+    */
     actions: ["OPEN_SOURCE"],
   },
   MANUAL_TASK: {

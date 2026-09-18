@@ -57,6 +57,7 @@ import { testFinanceTruth } from "./finance-truth.test";
 import { testFinanceInvariants } from "./finance-invariants.test";
 import { testWorkOs } from "./work-os.test";
 import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testTechPermissions, testTechRiskEngine } from "./tech-control-plane.test";
+import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
 import { testPayrollPeriod } from "./payroll-period.test";
 import { testWorkforce } from "./workforce.test";
 import { testNoAutoReassignOnOrgChange, testNoEmptyValueSelect, testOneMembershipReadPath, testOrgMembership } from "./org-membership.test";
@@ -1788,6 +1789,14 @@ async function main() {
     tất cả nằm trong các bảng `tech_*` nên không đụng tới con số của bài nào phía trên.
   */
   await testTechControlPlaneDb();
+  /*
+    PHASE 2A. Chạy ngay sau mặt phẳng điều khiển và tự dọn bằng tiền tố `p2a-`. Ba khối đầu đụng
+    CSDL; khối runner còn dựng KHO GIT TẠM và chạy tiến trình con thật (`npm run typecheck` trong
+    một cây làm việc riêng) — đó là điểm của nó: cổng phải đo bằng exit code, không bằng lời khai.
+  */
+  await testGithubDeploymentSync();
+  await testTechWorkProjection();
+  await testAgentRunner();
   await testWorkforce(db);
   await testOrgMembership(db);
   await testAccessModel(db);
@@ -1823,6 +1832,8 @@ async function main() {
   // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
   console.log("\n─ Toàn vẹn kho mã");
   testTechLifecycle();
+  testAgentSandbox();
+  testPhase2aSourceGuards();
   testTechRiskEngine();
   testTechPermissions();
   testTechHealthParsing();

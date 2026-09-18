@@ -39,6 +39,12 @@ const KHONG_CAN_LICH: Record<string, string> = {
   "failed-delivery": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",
   "phone-verify": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",
   "facebook-ad-index": "chạy lồng trong `facebook-ads` (lib/sync/jobs.ts), mỗi 60 phút",
+  /*
+    Phase 2A CỐ Ý chưa đưa vào lịch. Đổi lịch scheduler production là việc phải hỏi chủ shop
+    (AGENTS.md mục 7), và bản này đang ở bước "bật đọc, chưa bật tự chạy": job chạy tay từ trang
+    Kết nối dữ liệu hoặc ops `run-job` để đo xem nó tốn bao nhiêu hạn mức API GitHub trước đã.
+  */
+  "github-deployments": "Phase 2A: chạy tay để đo hạn mức API trước; đưa vào lịch là quyết định của chủ shop (AGENTS.md mục 7)",
   "facebook-adset-index": "chạy lồng trong `facebook-ads` (lib/sync/jobs.ts), mỗi 60 phút — tra theo ĐÚNG mã tracking landing đang cần, không quét cả tài khoản",
 };
 
