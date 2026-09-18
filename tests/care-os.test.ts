@@ -573,15 +573,69 @@ export async function testCareOs(db: Db) {
         updatedBy: "pic3@test",
       });
     }
+    /*
+      ÂM MỘT PHẦN GIÂY LÀ THỨ TỰ GHI · ÂM MỘT GIỜ LÀ MÂU THUẪN — HAI CÁCH XỬ LÝ KHÁC NHAU.
+
+      Đo production 18/09/2026: 36/232 đợt có `first_response_at` SỚM HƠN `opened_at`, tất cả đều
+      `source_trigger = 'MANUAL'` và chênh lệch âm SÂU NHẤT là dưới 30 giây — người mở ca bằng tay
+      thì hai mốc ghi trong cùng một thao tác. Đó là những ca PHẢN HỒI NGAY.
+
+      Bản vá đầu tiên loại chúng khỏi phép tính; đo lại thì trung vị của người ấy nhảy từ 266 lên
+      594 phút, vì nó cắt đúng 34 ca nhanh nhất. Nên luật là KẸP VỀ 0, không loại. Chỉ chênh lệch
+      âm QUÁ dung sai mới là mâu thuẫn thật và ra khỏi phép tính (mục 45).
+
+      Bài này gieo CẢ HAI: một ca âm trong dung sai (phải tính, thành 0 phút) và một ca âm sâu
+      (phải bị loại và đếm riêng).
+    */
+    const idGanNhu0 = await dungKien(db, "grz", { stage: "DELIVERY_FAILED" });
+    await db.insert(schema.shipmentCare).values({
+      shipmentId: idGanNhu0,
+      orderId: `${P}o-grz`,
+      episodeNo: 1,
+      active: false,
+      careStatus: "RESOLVED",
+      ownerId: picC,
+      ownerAtResolution: picC,
+      entryCarrierState: "WAITING_REDELIVERY",
+      sourceTrigger: "MANUAL",
+      openedAt: phut(MO),
+      firstResponseAt: new Date(phut(MO).getTime() - 5_000), // sớm 5 giây — thứ tự ghi, KHÔNG phải mâu thuẫn
+      outcomeAt: phut(MO - 900),
+      doneAt: phut(MO - 900),
+      careOutcome: "RESCUED_DIRECT",
+      updatedBy: "pic3@test",
+    });
+    const idXungDot = await dungKien(db, "grx", { stage: "DELIVERY_FAILED" });
+    await db.insert(schema.shipmentCare).values({
+      shipmentId: idXungDot,
+      orderId: `${P}o-grx`,
+      episodeNo: 1,
+      active: false,
+      careStatus: "RESOLVED",
+      ownerId: picC,
+      ownerAtResolution: picC,
+      entryCarrierState: "WAITING_REDELIVERY",
+      sourceTrigger: "MANUAL",
+      openedAt: phut(MO),
+      firstResponseAt: phut(MO + 120), // sớm 2 TIẾNG — mâu thuẫn thật
+      outcomeAt: phut(MO - 900),
+      doneAt: phut(MO - 900),
+      careOutcome: "RESCUED_DIRECT",
+      updatedBy: "pic3@test",
+    });
+
     clearMemo();
     const bang = await getCarePerformanceByPic(KY_TAT_CA);
     const dongC = bang.find((r) => r.userId === picC);
     assert.ok(dongC, "người có 12 ca đã chốt phải có một dòng");
-    assert.equal(dongC?.touchSample, 12, `độ phủ phải đếm CẢ 12 ca của người đó, không phải một nhóm kết cục (được ${dongC?.touchSample})`);
-    assert.equal(dongC?.medianFirstTouchMin, 330, `trung vị phải gom theo NGƯỜI: 330 phút. 60 hoặc 600 nghĩa là đang gom theo (người × kết cục) (được ${dongC?.medianFirstTouchMin})`);
+    assert.equal(dongC?.touchSample, 13, `độ phủ đếm CẢ hai nhóm kết cục (12) CỘNG ca âm trong dung sai (1), và KHÔNG đếm ca mâu thuẫn thật (được ${dongC?.touchSample})`);
+    // 13 quan sát đã kẹp: [0, 60×6, 600×6] ⇒ trung vị là phần tử thứ 7 = 60 phút.
+    assert.equal(dongC?.medianFirstTouchMin, 60, `ca âm 5 giây phải được KẸP VỀ 0 và VẪN TÍNH — loại nó ra thì trung vị thành 330 (được ${dongC?.medianFirstTouchMin})`);
     assert.equal(dongC?.medianFirstActionMin, null, "không ca nào có hành động nghiệp vụ ⇒ cột ấy để TRỐNG, không mượn số của cột bên cạnh");
     assert.equal(dongC?.actionSample, 0, "và độ phủ của nó nói thẳng là 0");
-    assert.equal(dongC?.direct, 6, "đếm kết cục vẫn đúng sau khi tách hai câu lệnh");
+    assert.equal(dongC?.touchInconsistent, 1, "chỉ ca âm QUÁ dung sai mới là mâu thuẫn, và nó phải được ĐẾM RIÊNG chứ không lặng lẽ biến mất");
+    assert.equal(dongC?.actionInconsistent, 0, "không ca nào mâu thuẫn ở cột hành động");
+    assert.equal(dongC?.direct, 8, "cả hai ca âm vẫn là CA — chỉ khác nhau ở chỗ có thời gian dùng được hay không");
     assert.equal(dongC?.failed, 6);
   }
 

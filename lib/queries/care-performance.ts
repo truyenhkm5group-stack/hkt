@@ -73,6 +73,27 @@ function trongKy(basis: CareTimeBasis, period: Period) {
   return [period.from ? gte(cot, period.from) : undefined, period.to ? lte(cot, period.to) : undefined].filter(Boolean);
 }
 
+/**
+ * ═══════════ DUNG SAI THỨ TỰ GHI ═══════════
+ *
+ * Khi người mở ca bằng tay, `opened_at` và `first_response_at` được ghi trong CÙNG một thao tác,
+ * nên thứ tự giữa chúng là ngẫu nhiên ở mức mili giây. Đo production 18/09/2026: 36 đợt có mốc
+ * phản hồi sớm hơn mốc mở ca, và chênh lệch âm SÂU NHẤT trong cả 36 là dưới 30 giây.
+ *
+ * Đây KHÔNG phải một ngưỡng nghiệp vụ (mục 7) — nó không đổi kết luận về bất kỳ đơn hàng nào, chỉ
+ * nói "hai mốc ghi cùng lúc thì coi là 0 phút". Một phút là rộng gấp đôi chênh lệch lớn nhất quan
+ * sát được, và vẫn hẹp hơn mọi khoảng thời gian phản hồi có nghĩa.
+ */
+const CLOCK_SKEW_TOLERANCE_MIN = 1;
+
+/** Mốc dùng được: có thật, và không sớm hơn mốc mở ca quá dung sai ghi. */
+const TRONG_DUNG_SAI = (cot: SQL) =>
+  sql`${cot} is not null and ca.opened_at is not null and ${cot} >= ca.opened_at - make_interval(mins => ${CLOCK_SKEW_TOLERANCE_MIN})`;
+
+/** Mâu thuẫn thật: sớm hơn mốc mở ca QUÁ dung sai — ra khỏi phép tính, nhưng phải đếm được. */
+const MAU_THUAN = (cot: SQL) =>
+  sql`${cot} is not null and ca.opened_at is not null and ${cot} < ca.opened_at - make_interval(mins => ${CLOCK_SKEW_TOLERANCE_MIN})`;
+
 /** Đợt đóng vì không phải điều kiện care (`NOT_CARE_CONDITION`) nằm ngoài mọi thống kê cứu đơn. */
 const LA_CA_CARE = or(isNull(sc.resolution), sql`${sc.resolution} <> ${NOT_CARE_CONDITION}`);
 
@@ -147,10 +168,29 @@ export type PicRow = RescueCounts & {
   medianFirstTouchMin: number | null;
   medianFirstActionMin: number | null;
   medianResolveMin: number | null;
-  /** Số ca thật sự có mốc để tính trung vị — ĐỘ PHỦ, luôn đứng cạnh con số (mục 39). */
+  /** Số ca thật sự có mốc DÙNG ĐƯỢC để tính trung vị — ĐỘ PHỦ, luôn đứng cạnh con số (mục 39). */
   touchSample: number;
   actionSample: number;
   resolveSample: number;
+  /*
+    ═══ ÂM MỘT PHẦN GIÂY LÀ THỨ TỰ GHI, ÂM MỘT GIỜ LÀ MÂU THUẪN ═══
+
+    Đo production 18/09/2026: 36/232 đợt có `first_response_at` SỚM HƠN `opened_at` — 34 của một
+    người, 2 ở nhóm chưa nối được người. Chênh lệch ÂM SÂU NHẤT trong cả 36 đợt là **dưới 30 giây**,
+    và cả 36 đều `source_trigger = 'MANUAL'`: người mở ca bằng tay thì hai mốc được ghi trong CÙNG
+    một thao tác, thứ tự giữa chúng là ngẫu nhiên ở mức mili giây.
+
+    Nên đó là những ca PHẢN HỒI NGAY, không phải dữ liệu hỏng. Bản vá đầu tiên của tôi loại chúng
+    khỏi phép tính — đo lại thì trung vị của người ấy nhảy từ **266 lên 594 phút**, vì phép "làm
+    sạch" đó cắt đúng 34 ca nhanh nhất và làm đội trông chậm gấp đôi. Một bộ lọc nghe hợp lý vẫn
+    có thể là một lời nói dối.
+
+    Luật thay thế: chênh lệch âm TRONG dung sai ghi (`CLOCK_SKEW_TOLERANCE_MIN`) được KẸP VỀ 0 và
+    vẫn tính; âm sâu hơn thế là mâu thuẫn thật — ra khỏi phép tính và đếm riêng ở đây. Hôm nay con
+    số thứ hai là 0, và nó phải nói đúng như vậy chứ không được im lặng.
+  */
+  touchInconsistent: number;
+  actionInconsistent: number;
   /** Cỡ mẫu tối thiểu để một trung vị được phát biểu. */
   timingMinSample: number;
 };
@@ -197,7 +237,7 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
       thắng thì phụ thuộc thứ tự dòng Postgres trả về. Đúng cái lỗi vòng này đi sửa: con số đo trên
       một tập, cái nhãn nói về một tập khác. Nên nó là một phép gom RIÊNG, theo đúng grain của nhãn.
     */
-    const thoiGian = rowsOf<{ user_id: string | null; p_touch: number | null; p_action: number | null; p_resolve: number | null; n_touch: number; n_action: number; n_resolve: number }>(
+    const thoiGian = rowsOf<{ user_id: string | null; p_touch: number | null; p_action: number | null; p_resolve: number | null; n_touch: number; n_action: number; n_resolve: number; n_touch_xung_dot: number; n_action_xung_dot: number }>(
       await db.execute(sql`
         with ca as (
           select coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end) as uid,
@@ -209,9 +249,13 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
         select ca.uid as user_id,
                -- Trung vị, không phải trung bình: một ca treo ba tuần kéo trung bình đi mà không nói gì
                -- về ngày làm việc bình thường của người đó.
-               percentile_cont(0.5) within group (order by extract(epoch from (ca.first_touch_at - ca.opened_at)) / 60) filter (where ca.first_touch_at is not null and ca.opened_at is not null) as p_touch,
-               percentile_cont(0.5) within group (order by extract(epoch from (ca.first_action_at - ca.opened_at)) / 60) filter (where ca.first_action_at is not null and ca.opened_at is not null) as p_action,
-               percentile_cont(0.5) within group (order by extract(epoch from (ca.outcome_at - ca.opened_at)) / 60) filter (where ca.outcome_at is not null and ca.opened_at is not null) as p_resolve,
+               --
+               -- KẸP VỀ 0, KHÔNG LOẠI BỎ. Âm dưới dung sai là thứ tự ghi trong cùng một thao tác (ca mở
+               -- tay), tức PHẢN HỒI NGAY — loại nó đi là cắt mất đúng những ca nhanh nhất. Âm sâu hơn
+               -- dung sai là mâu thuẫn thật: ra khỏi phép tính, và đếm riêng ở cột *_xung_dot bên dưới.
+               percentile_cont(0.5) within group (order by greatest(extract(epoch from (ca.first_touch_at - ca.opened_at)) / 60, 0)) filter (where ${TRONG_DUNG_SAI(sql`ca.first_touch_at`)}) as p_touch,
+               percentile_cont(0.5) within group (order by greatest(extract(epoch from (ca.first_action_at - ca.opened_at)) / 60, 0)) filter (where ${TRONG_DUNG_SAI(sql`ca.first_action_at`)}) as p_action,
+               percentile_cont(0.5) within group (order by greatest(extract(epoch from (ca.outcome_at - ca.opened_at)) / 60, 0)) filter (where ${TRONG_DUNG_SAI(sql`ca.outcome_at`)}) as p_resolve,
                /*
                  ĐẾM SỐ DÒNG THẬT SỰ GÓP VÀO TRUNG VỊ.
 
@@ -219,9 +263,12 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
                  Đo 16/09/2026: cột first_action_at chỉ có ở 2/319 đợt, nên ô "thời gian phản hồi"
                  cạnh tên nhân viên là trung vị của HAI dòng — nói về sự ngẫu nhiên, không nói về họ.
                */
-               count(*) filter (where ca.first_touch_at is not null and ca.opened_at is not null)::int as n_touch,
-               count(*) filter (where ca.first_action_at is not null and ca.opened_at is not null)::int as n_action,
-               count(*) filter (where ca.outcome_at is not null and ca.opened_at is not null)::int as n_resolve
+               count(*) filter (where ${TRONG_DUNG_SAI(sql`ca.first_touch_at`)})::int as n_touch,
+               count(*) filter (where ${TRONG_DUNG_SAI(sql`ca.first_action_at`)})::int as n_action,
+               count(*) filter (where ${TRONG_DUNG_SAI(sql`ca.outcome_at`)})::int as n_resolve,
+               -- Chỗ dữ liệu cần sửa, KHÔNG phải một quan sát. Đếm riêng để nó không lặng lẽ biến mất.
+               count(*) filter (where ${MAU_THUAN(sql`ca.first_touch_at`)})::int as n_touch_xung_dot,
+               count(*) filter (where ${MAU_THUAN(sql`ca.first_action_at`)})::int as n_action_xung_dot
           from ca
          group by ca.uid
       `),
@@ -266,6 +313,8 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
         touchSample: 0,
         actionSample: 0,
         resolveSample: 0,
+        touchInconsistent: 0,
+        actionInconsistent: 0,
         timingMinSample: TIMING_MIN_SAMPLE,
       };
       theoNguoi.set(k, moi);
@@ -285,6 +334,8 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
       row.touchSample = Number(r.n_touch ?? 0);
       row.actionSample = Number(r.n_action ?? 0);
       row.resolveSample = Number(r.n_resolve ?? 0);
+      row.touchInconsistent = Number(r.n_touch_xung_dot ?? 0);
+      row.actionInconsistent = Number(r.n_action_xung_dot ?? 0);
       if (r.p_touch !== null && r.p_touch !== undefined && row.touchSample >= TIMING_MIN_SAMPLE) row.medianFirstTouchMin = Math.round(Number(r.p_touch));
       if (r.p_action !== null && r.p_action !== undefined && row.actionSample >= TIMING_MIN_SAMPLE) row.medianFirstActionMin = Math.round(Number(r.p_action));
       if (r.p_resolve !== null && r.p_resolve !== undefined && row.resolveSample >= TIMING_MIN_SAMPLE) row.medianResolveMin = Math.round(Number(r.p_resolve));

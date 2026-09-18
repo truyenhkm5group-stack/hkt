@@ -36,18 +36,24 @@ function Ty({ value, mau }: { value: number | null; mau: number }) {
  * In một trung vị thời gian kèm ĐỘ PHỦ. Mẫu dưới ngưỡng ⇒ truy vấn đã trả `null`, và ô này in "—"
  * kèm số ca có mốc ấy: người quản lý phải phân biệt được CHƯA ĐỦ DỮ LIỆU với LÀM NHANH (mục 39).
  */
-function Gio({ phut, mau, nguong }: { phut: number | null; mau: number; nguong: number }) {
+function Gio({ phut, mau, nguong, xungDot = 0 }: { phut: number | null; mau: number; nguong: number; xungDot?: number }) {
+  // Ca ghi mốc phản hồi sớm hơn mốc mở ca QUÁ dung sai ghi là mâu thuẫn thật, không phải phản hồi
+  // nhanh. Nó nằm ngoài phép tính, nhưng hiện ra ở đây để không ai phải đi tìm mới biết.
+  // (Sớm dưới dung sai là hai mốc ghi cùng một thao tác — những ca ấy được kẹp về 0 và VẪN tính.)
+  const canhBao = xungDot ? ` · ${xungDot} ca ghi mốc phản hồi sớm hơn hẳn mốc mở ca — mâu thuẫn dữ liệu, nằm ngoài phép tính` : "";
   if (phut === null) {
     return (
-      <span className="text-muted-foreground" title={mau === 0 ? "Chưa ca nào của người này có mốc ấy" : `Chỉ ${mau} ca có mốc ấy — dưới ngưỡng ${nguong} ca nên không phát biểu một trung vị`}>
+      <span className="text-muted-foreground" title={(mau === 0 ? "Chưa ca nào của người này có mốc dùng được" : `Chỉ ${mau} ca có mốc dùng được — dưới ngưỡng ${nguong} ca nên không phát biểu một trung vị`) + canhBao}>
         —<span className="ml-0.5 text-[10px]">/{mau}</span>
+        {xungDot ? <span className="ml-0.5 text-[10px] text-amber-600 dark:text-amber-400">!</span> : null}
       </span>
     );
   }
   return (
-    <span className="numeric font-medium" title={`Trung vị trên ${mau} ca có mốc ấy`}>
+    <span className="numeric font-medium" title={`Trung vị trên ${mau} ca có mốc dùng được${canhBao}`}>
       {phut < 60 ? `${phut}p` : `${Math.round(phut / 60)}h`}
       {mau < nguong * 2 ? <span className="ml-0.5 text-[10px] font-normal text-amber-600 dark:text-amber-400">/{mau}</span> : null}
+      {xungDot ? <span className="ml-0.5 text-[10px] text-amber-600 dark:text-amber-400">!</span> : null}
     </span>
   );
 }
@@ -130,8 +136,8 @@ export async function RescueReportSection({ period }: { period: Period }) {
                     <td className="numeric px-2.5 py-2 text-right text-rose-700 dark:text-rose-400">{formatNumber(r.failed)}</td>
                     <td className="numeric px-2.5 py-2 text-right text-muted-foreground">{formatNumber(r.pending)}</td>
                     <td className="px-2.5 py-2 text-right"><Ty value={r.directRate} mau={r.direct + r.failed} /></td>
-                    <td className="px-2.5 py-2 text-right"><Gio phut={r.medianFirstTouchMin} mau={r.touchSample} nguong={r.timingMinSample} /></td>
-                    <td className="px-2.5 py-2 text-right"><Gio phut={r.medianFirstActionMin} mau={r.actionSample} nguong={r.timingMinSample} /></td>
+                    <td className="px-2.5 py-2 text-right"><Gio phut={r.medianFirstTouchMin} mau={r.touchSample} nguong={r.timingMinSample} xungDot={r.touchInconsistent} /></td>
+                    <td className="px-2.5 py-2 text-right"><Gio phut={r.medianFirstActionMin} mau={r.actionSample} nguong={r.timingMinSample} xungDot={r.actionInconsistent} /></td>
                     {BUSINESS_ACTIONS.map((a) => (
                       <td key={a} className="numeric px-2.5 py-2 text-right text-muted-foreground">{formatNumber(r.actions[a] ?? 0)}</td>
                     ))}

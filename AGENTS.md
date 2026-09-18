@@ -415,6 +415,18 @@ deploy dừng, không phải cảnh báo.
     dòng. Không gộp hai cột lại "cho gọn": mọi hành động nghiệp vụ đều là một lần chạm, nên gộp là
     in con số của cột đông dưới nhãn của cột thưa.
 
+64. **ÂM MỘT PHẦN GIÂY LÀ THỨ TỰ GHI, ÂM MỘT GIỜ LÀ MÂU THUẪN — VÀ "LÀM SẠCH" SAI CÁCH THÌ TỰ NÓ
+    LÀ MỘT LỜI NÓI DỐI** (`CLOCK_SKEW_TOLERANCE_MIN` trong `lib/queries/care-performance.ts`).
+    Đo production 18/09/2026: 36/232 đợt có `first_response_at` SỚM HƠN `opened_at`, tất cả đều
+    `source_trigger = 'MANUAL'` và chênh lệch âm SÂU NHẤT là **dưới 30 giây** — người mở ca bằng
+    tay thì hai mốc ghi trong CÙNG một thao tác, thứ tự giữa chúng ngẫu nhiên ở mức mili giây. Đó
+    là những ca PHẢN HỒI NGAY. Bản vá đầu tiên loại chúng khỏi phép tính vì "thời gian âm là vô
+    nghĩa"; đo lại thì trung vị của người ấy nhảy từ **266 lên 594 phút** — phép làm sạch đó cắt
+    đúng 34 ca nhanh nhất và làm đội trông chậm gấp đôi. Luật: âm TRONG dung sai thì **KẸP VỀ 0 và
+    VẪN TÍNH**; chỉ âm QUÁ dung sai mới ra khỏi phép tính và phải ĐẾM RIÊNG, không biến mất. Trước
+    khi loại bất kỳ nhóm quan sát nào khỏi một con số chấm người, **phải đo con số ấy trước và sau
+    khi loại** — một bộ lọc nghe hợp lý vẫn có thể đổi kết luận theo hướng ngược hẳn.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và
