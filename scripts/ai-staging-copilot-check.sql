@@ -262,5 +262,13 @@ select
   end                                                                    as suc_khoe,
   consecutive_errors                                                     as hong_lien_tiep,
   messages_ingested                                                      as tin_da_nap,
+  -- PHÂN BIỆT "PAGE IM" VỚI "ĐỌC MÀ KHÔNG THẤY GÌ".
+  --
+  -- `messages_ingested` đứng yên có HAI nghĩa trái ngược: khách không nhắn, hoặc Pancake trả về
+  -- rỗng (token hết hạn kiểu trả danh sách rỗng chứ không báo lỗi — `consecutive_errors` = 0 ở CẢ
+  -- HAI trường hợp). `conversations_seen` tách chúng ra: còn tăng nghĩa là API vẫn trả dữ liệu
+  -- thật, chỉ là không có tin mới; đứng yên cùng lúc với tin nạp nghĩa là bộ nạp đang mù.
+  conversations_seen                                                     as hoi_thoai_da_doc,
+  to_char(last_run_at, 'DD/MM HH24:MI:SS')                               as vong_gan_nhat_ke_ca_hong,
   coalesce(nullif(last_error, ''), '—')                                  as loi_cuoi
 from sales_ingest_cursors order by page_id;
