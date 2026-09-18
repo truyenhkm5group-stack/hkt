@@ -8,11 +8,37 @@ dừng lại ở chỗ chúng thật sự bị chặn.
 
 | Việc | Tình trạng | Cần gì |
 | --- | --- | --- |
-| Đồng bộ deploy GitHub chạy thật | **không còn chặn** | không cần gì — kho public đọc được không cần token |
-| Agent DOCUMENTATION R0 chạy thật | **CHƯA** | một khoá AI trên máy runner |
+| Đồng bộ deploy GitHub chạy thật | **XONG** (đo 18/09, xem mục 0) | không cần gì — kho public đọc được không cần token |
+| Agent DOCUMENTATION R0 chạy thật | **CHƯA** | một khoá AI trên máy runner + một cú bấm khởi tạo sổ agent |
 
 Chỗ còn lại là **CHƯA BIẾT**, không phải *đã chạy và hỏng*, và cũng không phải *0*: `tech_agent_runs`
 không có dòng nào, đúng như phải thế khi chưa có khoá.
+
+## 0 · Đo thật trên production 18/09/2026 — GitHub đã chạy, không cần token
+
+Chạy qua `Actions → Vận hành ERP trên VPS → run-job`, arg `github-deployments --limit=20`,
+trên máy chủ **không có `ERP_GITHUB_TOKEN`**:
+
+| | lần 1 | lần 2 |
+| --- | --- | --- |
+| scanned | 20 | 20 |
+| inserted | **20** | **0** |
+| updated | 0 | 0 |
+| unchanged | 0 | **20** |
+| errors | 0 | 0 |
+| verified | 1 | 1 |
+| mismatched | 0 | 0 |
+| productionCommit | `149a6d0a5ed8` | `149a6d0a5ed8` |
+| skippedReason / skippedKind | `null` / `null` | `null` / `null` |
+
+Sổ `tech_deployments` sau hai lượt: **20 dòng · 20 khoá duy nhất ⇒ 0 bản trùng**
+(`provider` + `external_run_id` + `external_run_attempt`), 18 lượt thành công, và phép đối chiếu
+commit ra: **VERIFIED 1 · MISMATCH 0 · SUPERSEDED 17 · UNKNOWN 2**.
+
+Đọc bảng ấy cho đúng: **1 khớp** là lượt deploy thành công MỚI NHẤT, và commit của nó bằng đúng
+commit production đang chạy. **17 bị thay** là các lượt thành công cũ hơn — chúng không "lệch",
+chúng đã bị một lượt sau thay thế. **2 chưa biết** là hai lượt không thành công: không có gì để
+đối chiếu, và đó là `UNKNOWN` chứ không phải `MISMATCH`.
 
 ## 1 · Vì sao trước bước này token không bao giờ tới được máy chủ
 
