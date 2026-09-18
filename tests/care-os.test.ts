@@ -7,6 +7,7 @@ import { recordBusinessAction, reopenCase, setCareOwner, setCareStatus, type Car
 import { careViewOf, slaOf } from "@/lib/care/view";
 import { CARE_FOLLOW_UP_DEFAULT_HOURS } from "@/lib/constants/care";
 import { rescueRates } from "@/lib/constants/care-outcome";
+import { TIMING_MIN_SAMPLE, timingStat } from "@/lib/constants/care-timing";
 import { getCarePerformanceByPic, getCarePerformanceByProduct, getRescueSummary } from "@/lib/queries/care-performance";
 import { getCareReport } from "@/lib/queries/care-report";
 import { IntegrationError } from "@/lib/integrations/http";
@@ -385,6 +386,44 @@ export async function testCareOs(db: Db) {
     const dongB = nguoi.find((r) => r.userId === picB.id);
     assert.ok((dongB?.assigned ?? 0) >= 1, "12★ · B nhận ca s7 sau A — cả hai đều được đếm là được giao, A không mất dấu");
 
+    /*
+      ───── MỘT TRUNG VỊ CHỈ ĐƯỢC PHÁT BIỂU KHI CÓ ĐỦ MẪU ─────
+
+      Đo production 16/09/2026: `first_action_at` chỉ có giá trị ở **2/319** đợt care (cột ấy chỉ
+      được ghi ở đường `requestCarrierAction`, còn việc care hằng ngày ghi `first_response_at`).
+      Nên ô "thời gian phản hồi trung vị" cạnh tên nhân viên là trung vị của HAI DÒNG — nó nói về
+      sự ngẫu nhiên, không nói về người đó, và không ai đi kiểm lại một con số trông hợp lý.
+
+      Bài kiểm này gieo ít ca hơn ngưỡng, nên MỌI dòng phải để TRỐNG. Một ô trống kèm độ phủ nói
+      đúng sự thật; một con số từ hai dòng thì nói sai mà trông như đúng (mục 39: CHƯA ĐỦ DỮ LIỆU
+      tách hẳn khỏi LÀM KÉM).
+    */
+    for (const r of nguoi) {
+      assert.equal(r.timingMinSample, TIMING_MIN_SAMPLE, "ngưỡng mẫu phải LẤY LẠI từ hằng số dùng chung, không gõ lại");
+      if (r.touchSample < TIMING_MIN_SAMPLE) {
+        assert.equal(r.medianFirstTouchMin, null, `mẫu ${r.touchSample} < ${TIMING_MIN_SAMPLE} ⇒ KHÔNG được in một trung vị chạm đầu (${r.name})`);
+      }
+      if (r.actionSample < TIMING_MIN_SAMPLE) {
+        assert.equal(r.medianFirstActionMin, null, `mẫu ${r.actionSample} < ${TIMING_MIN_SAMPLE} ⇒ KHÔNG được in một trung vị hành động đầu (${r.name})`);
+      }
+      if (r.resolveSample < TIMING_MIN_SAMPLE) {
+        assert.equal(r.medianResolveMin, null, `mẫu ${r.resolveSample} < ${TIMING_MIN_SAMPLE} ⇒ KHÔNG được in một trung vị (${r.name})`);
+      }
+      // ĐỘ PHỦ luôn đếm được, kể cả khi trung vị để trống — người đọc phải thấy phần mình không biết.
+      for (const [ten, mau] of [["chạm đầu", r.touchSample], ["hành động đầu", r.actionSample], ["chốt", r.resolveSample]] as const) {
+        assert.ok(Number.isInteger(mau) && mau >= 0, `độ phủ ${ten} phải là một con số đếm được`);
+      }
+      // Hai mốc là HAI cột, không phải một cột đổi tên: ca có người chạm vào nhiều hơn hẳn ca có
+      // hành động nghiệp vụ, nên gộp chúng lại là in con số của cột này dưới nhãn của cột kia.
+      assert.ok(r.touchSample >= r.actionSample, `mọi hành động nghiệp vụ đều là một lần chạm, nên độ phủ chạm đầu không thể nhỏ hơn (${r.name}: ${r.touchSample} < ${r.actionSample})`);
+    }
+
+    // Và luật thuần phải khoá được cả hai biên, không phụ thuộc dữ liệu gieo.
+    assert.equal(timingStat([5], 10).median, null, "một quan sát KHÔNG thành một trung vị");
+    assert.equal(timingStat(Array.from({ length: TIMING_MIN_SAMPLE }, () => 6), 20).median, 6, "đủ mẫu thì phát biểu được");
+    assert.equal(timingStat([], 0).coverage, null, "tổng thể rỗng ⇒ độ phủ CHƯA BIẾT, không phải 0%");
+    assert.equal(timingStat(Array.from({ length: TIMING_MIN_SAMPLE }, () => 6), 20).coverage, 0.5, "độ phủ đi kèm con số");
+
     /* ───── 21–23 · Báo cáo theo mã hàng: grain đúng, không nhân dòng ───── */
     const theoMa = await getCarePerformanceByProduct(KY_TAT_CA);
     assert.ok(theoMa.totalCases >= 6, "21 · mỗi ca đếm đúng MỘT lần bất kể bao nhiêu sự kiện/thao tác");
@@ -493,6 +532,113 @@ export async function testCareOs(db: Db) {
     assert.ok(!ds.rows.some((r) => r.id === sB), "30 · và kiện “chờ phát lại” KHÔNG lọt vào");
   }
 
+  /* ───── TRUNG VỊ PHẢI GOM THEO ĐÚNG CÁI GRAIN MÀ NHÃN NÓI ───── */
+  {
+    /*
+      Câu đếm kết cục phải nhóm theo (NGƯỜI × KẾT CỤC). Nếu trung vị thời gian đi chung câu ấy thì
+      con số in ra cạnh tên một người là trung vị của MỘT nhóm kết cục — và nhóm nào thắng phụ thuộc
+      thứ tự dòng Postgres trả về, nên nó còn đổi giữa hai lần chạy.
+
+      Bài này gieo 12 ca cho một người, chia đôi theo kết cục và CHÊNH LỆCH HẲN về thời gian:
+
+        6 ca "cứu được"     · chạm sau  60 phút
+        6 ca "không cứu"    · chạm sau 600 phút
+
+      Trung vị ĐÚNG của người đó = (60 + 600) / 2 = 330 phút. Trung vị của từng nhóm là 60 hoặc 600.
+      Một con số 60 hay 600 ở đây nghĩa là phép gom đang sai grain — cả hai đều "trông hợp lý".
+    */
+    const u3 = await db.insert(schema.users).values({ id: `${P}u3`, email: "pic3@test", name: "PIC C", passwordHash: "x", role: "CS" }).onConflictDoNothing().returning({ id: schema.users.id });
+    const picC = u3[0]?.id ?? `${P}u3`;
+    const MO = 48 * 60; // phút, mốc mở ca — dựng từ đồng hồ thật cùng nhịp với thứ nó đo (mục 50).
+    const phut = (m: number) => new Date(Date.now() - m * 60_000);
+    for (let i = 0; i < 12; i++) {
+      const cuuDuoc = i < 6;
+      const treMin = cuuDuoc ? 60 : 600;
+      const id = await dungKien(db, `gr${i}`, { stage: "DELIVERY_FAILED" });
+      await db.insert(schema.shipmentCare).values({
+        shipmentId: id,
+        orderId: `${P}o-gr${i}`,
+        episodeNo: 1,
+        active: false,
+        careStatus: "RESOLVED",
+        ownerId: picC,
+        ownerAtResolution: picC,
+        entryCarrierState: "WAITING_REDELIVERY",
+        sourceTrigger: "CARRIER_EVENT",
+        openedAt: phut(MO),
+        firstResponseAt: phut(MO - treMin),
+        outcomeAt: phut(MO - 900),
+        doneAt: phut(MO - 900),
+        careOutcome: cuuDuoc ? "RESCUED_DIRECT" : "RESCUE_FAILED",
+        updatedBy: "pic3@test",
+      });
+    }
+    /*
+      ÂM MỘT PHẦN GIÂY LÀ THỨ TỰ GHI · ÂM MỘT GIỜ LÀ MÂU THUẪN — HAI CÁCH XỬ LÝ KHÁC NHAU.
+
+      Đo production 18/09/2026: 36/232 đợt có `first_response_at` SỚM HƠN `opened_at`, tất cả đều
+      `source_trigger = 'MANUAL'` và chênh lệch âm SÂU NHẤT là dưới 30 giây — người mở ca bằng tay
+      thì hai mốc ghi trong cùng một thao tác. Đó là những ca PHẢN HỒI NGAY.
+
+      Bản vá đầu tiên loại chúng khỏi phép tính; đo lại thì trung vị của người ấy nhảy từ 266 lên
+      594 phút, vì nó cắt đúng 34 ca nhanh nhất. Nên luật là KẸP VỀ 0, không loại. Chỉ chênh lệch
+      âm QUÁ dung sai mới là mâu thuẫn thật và ra khỏi phép tính (mục 45).
+
+      Bài này gieo CẢ HAI: một ca âm trong dung sai (phải tính, thành 0 phút) và một ca âm sâu
+      (phải bị loại và đếm riêng).
+    */
+    const idGanNhu0 = await dungKien(db, "grz", { stage: "DELIVERY_FAILED" });
+    await db.insert(schema.shipmentCare).values({
+      shipmentId: idGanNhu0,
+      orderId: `${P}o-grz`,
+      episodeNo: 1,
+      active: false,
+      careStatus: "RESOLVED",
+      ownerId: picC,
+      ownerAtResolution: picC,
+      entryCarrierState: "WAITING_REDELIVERY",
+      sourceTrigger: "MANUAL",
+      openedAt: phut(MO),
+      firstResponseAt: new Date(phut(MO).getTime() - 5_000), // sớm 5 giây — thứ tự ghi, KHÔNG phải mâu thuẫn
+      outcomeAt: phut(MO - 900),
+      doneAt: phut(MO - 900),
+      careOutcome: "RESCUED_DIRECT",
+      updatedBy: "pic3@test",
+    });
+    const idXungDot = await dungKien(db, "grx", { stage: "DELIVERY_FAILED" });
+    await db.insert(schema.shipmentCare).values({
+      shipmentId: idXungDot,
+      orderId: `${P}o-grx`,
+      episodeNo: 1,
+      active: false,
+      careStatus: "RESOLVED",
+      ownerId: picC,
+      ownerAtResolution: picC,
+      entryCarrierState: "WAITING_REDELIVERY",
+      sourceTrigger: "MANUAL",
+      openedAt: phut(MO),
+      firstResponseAt: phut(MO + 120), // sớm 2 TIẾNG — mâu thuẫn thật
+      outcomeAt: phut(MO - 900),
+      doneAt: phut(MO - 900),
+      careOutcome: "RESCUED_DIRECT",
+      updatedBy: "pic3@test",
+    });
+
+    clearMemo();
+    const bang = await getCarePerformanceByPic(KY_TAT_CA);
+    const dongC = bang.find((r) => r.userId === picC);
+    assert.ok(dongC, "người có 12 ca đã chốt phải có một dòng");
+    assert.equal(dongC?.touchSample, 13, `độ phủ đếm CẢ hai nhóm kết cục (12) CỘNG ca âm trong dung sai (1), và KHÔNG đếm ca mâu thuẫn thật (được ${dongC?.touchSample})`);
+    // 13 quan sát đã kẹp: [0, 60×6, 600×6] ⇒ trung vị là phần tử thứ 7 = 60 phút.
+    assert.equal(dongC?.medianFirstTouchMin, 60, `ca âm 5 giây phải được KẸP VỀ 0 và VẪN TÍNH — loại nó ra thì trung vị thành 330 (được ${dongC?.medianFirstTouchMin})`);
+    assert.equal(dongC?.medianFirstActionMin, null, "không ca nào có hành động nghiệp vụ ⇒ cột ấy để TRỐNG, không mượn số của cột bên cạnh");
+    assert.equal(dongC?.actionSample, 0, "và độ phủ của nó nói thẳng là 0");
+    assert.equal(dongC?.touchInconsistent, 1, "chỉ ca âm QUÁ dung sai mới là mâu thuẫn, và nó phải được ĐẾM RIÊNG chứ không lặng lẽ biến mất");
+    assert.equal(dongC?.actionInconsistent, 0, "không ca nào mâu thuẫn ở cột hành động");
+    assert.equal(dongC?.direct, 8, "cả hai ca âm vẫn là CA — chỉ khác nhau ở chỗ có thời gian dùng được hay không");
+    assert.equal(dongC?.failed, 6);
+  }
+
   /* ───── DỌN: bài này thêm đơn/vận đơn riêng, không được để lọt vào tổng của bài khác ───── */
   const kienIds = (await db.select({ id: schema.shipments.id }).from(schema.shipments).where(sql`${schema.shipments.id} like ${`${P}%`}`)).map((r) => r.id);
   if (kienIds.length) {
@@ -505,8 +651,8 @@ export async function testCareOs(db: Db) {
     await db.delete(schema.shipments).where(inArray(schema.shipments.id, kienIds));
   }
   await db.delete(schema.orders).where(sql`${schema.orders.id} like ${`${P}o-%`}`);
-  await db.delete(schema.users).where(inArray(schema.users.id, [`${P}u1`, `${P}u2`]));
+  await db.delete(schema.users).where(inArray(schema.users.id, [`${P}u1`, `${P}u2`, `${P}u3`]));
   clearMemo();
 
-  console.log("✓ Hệ điều hành chăm sóc vận đơn: 60 kiểm thử · ĐVVC mở ca và ĐVVC đóng ca · 501 chiều hoàn = hàng về shop · mã 102 chưa rời kho không phải việc · đối chiếu 48→48 và đóng 106 · đóng ⇔ active=false · chờ phải có giờ hẹn · PENDING đếm tại cuối kỳ · quy kết bằng khoá");
+  console.log("✓ Hệ điều hành chăm sóc vận đơn: 60 kiểm thử · ĐVVC mở ca và ĐVVC đóng ca · 501 chiều hoàn = hàng về shop · mã 102 chưa rời kho không phải việc · đối chiếu 48→48 và đóng 106 · đóng ⇔ active=false · chờ phải có giờ hẹn · PENDING đếm tại cuối kỳ · quy kết bằng khoá · trung vị dưới ngưỡng mẫu để TRỐNG");
 }
