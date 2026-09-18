@@ -258,10 +258,19 @@ export default async function CopilotPage() {
           tin nhân viên, và không tính lượt khách chưa ai soát.
         </p>
 
-        <div className="mt-2 grid gap-2 border-t border-border/60 pt-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
+        <div className="mt-2 grid gap-2 border-t border-border/60 pt-2 text-xs sm:grid-cols-3 lg:grid-cols-6">
           <Stat label="Gửi nguyên văn" value={ghepTyLe(pilot.decisions.sendUnchanged, pilot.rates.unchanged)} />
           <Stat label="Sửa &amp; gửi" value={ghepTyLe(pilot.decisions.editAndSend, pilot.rates.edit)} />
           <Stat label="Từ chối" value={ghepTyLe(pilot.decisions.reject, pilot.rates.reject)} />
+          {/*
+            NGƯỜI NHẬN HẲN VIỆC ĐỨNG CÙNG HÀNG — nhưng NHÃN MANG THEO ĐỘ MỊN.
+
+            Chủ shop đọc bốn nút trên thẻ như bốn lựa chọn ngang nhau, nên giấu một trong bốn xuống
+            một dòng chữ nhỏ là làm nó biến mất. Nhưng nó KHÔNG cùng mẫu số: một hội thoại có ba
+            lượt soát vẫn chỉ là MỘT lần nhận việc, nên nó không có phần trăm đi kèm như ba ô kia và
+            nhãn phải nói ra điều đó (luật 8.2: một con số, một độ mịn, viết rõ).
+          */}
+          <Stat label="Tự nhận việc (hội thoại)" value={formatNumber(pilot.conversations.takenOver)} />
           <Stat label="Tỷ lệ dùng được" value={pilot.rates.acceptance === null ? "—" : `${pilot.rates.acceptance}%`} />
           <Stat
             label="Thời gian soát"
@@ -269,16 +278,11 @@ export default async function CopilotPage() {
           />
         </div>
 
-        {/*
-          NGƯỜI NHẬN HẲN VIỆC ĐẾM THEO HỘI THOẠI, KHÔNG THEO LƯỢT — nên nó đứng riêng một dòng chứ
-          không xếp cạnh bốn ô trên. Một hội thoại có ba lượt soát vẫn chỉ là MỘT lần nhận việc;
-          chia nó cho số lượt thì ra một con số không nói về cái gì cả (luật 8.2: một độ mịn).
-        */}
         <p className="mt-2 text-[11px] text-muted-foreground">
-          Hội thoại có người thao tác: <strong>{formatNumber(pilot.conversations.touched)}</strong> · người nhận hẳn việc:{" "}
+          Hội thoại có người thao tác: <strong>{formatNumber(pilot.conversations.touched)}</strong> · trong đó người nhận hẳn việc:{" "}
           <strong>{formatNumber(pilot.conversations.takenOver)}</strong>
-          {pilot.conversations.handoffRate === null ? "" : ` (${pilot.conversations.handoffRate}%)`} — đếm theo HỘI THOẠI, không cùng mẫu
-          số với các ô trên.
+          {pilot.conversations.handoffRate === null ? "" : ` (${pilot.conversations.handoffRate}%)`} — hai số này đếm theo HỘI THOẠI, không
+          cùng mẫu số với ba ô đầu.
         </p>
 
         {/*
