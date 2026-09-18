@@ -158,3 +158,42 @@ where m.sender_type = 'PAGE_HUMAN' and btrim(m.text) <> ''
   and c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
 group by 1 having count(distinct m.conversation_id) >= 3
 order by 3 desc, 2 desc limit 12;
+
+\echo '── 14. AI GIAO CHO NGƯỜI hay NGƯỜI TỰ NHẬN — hai chuyện khác nhau, cùng một cột ──'
+-- `human_takeover_at` có HAI nơi ghi: nút "Tự nhận việc" của nhân viên (có `takeover_by_user_id`),
+-- và công cụ `conversation.handoff` do CHÍNH MÁY gọi khi nó quyết định không trả lời được (không có
+-- khoá người). Hàng đợi loại cả hai. Nhưng "người đang cầm" và "máy xin người vào" là ngược nhau:
+-- cái sau nghĩa là CHƯA AI cầm, và nó phải nằm ĐẦU hàng đợi chứ không phải bị xoá khỏi hàng đợi.
+select
+  count(*) filter (where c.human_takeover_at is not null)::int                                       as tong_da_danh_dau,
+  count(*) filter (where c.human_takeover_at is not null and c.takeover_by_user_id is not null)::int as NGUOI_tu_nhan,
+  count(*) filter (where c.human_takeover_at is not null and c.takeover_by_user_id is null)::int     as MAY_xin_nguoi_vao
+from sales_conversations c
+where c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb));
+
+\echo '── 15. HỘI THOẠI CÒN TƯƠI (khách nhắn trong 24h) — vì sao từng cái KHÔNG ở hàng đợi ──'
+with cau_mau as (
+  select lower(btrim(m.text)) as van_ban
+  from sales_messages m join sales_conversations sc on sc.id = m.conversation_id
+  where m.from_page = true and m.sender_type = 'PAGE_HUMAN' and btrim(m.text) <> ''
+    and sc.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
+  group by 1 having count(distinct m.conversation_id) >= 3
+)
+select
+  left(c.id, 8) as hoi_thoai,
+  (select max(sent_at) from sales_messages m where m.conversation_id = c.id
+     and m.from_page = false and m.sender_type = 'CUSTOMER' and btrim(m.text) <> '') as khach_luc,
+  (c.human_takeover_at is not null and c.takeover_by_user_id is not null)            as nguoi_dang_cam,
+  (c.human_takeover_at is not null and c.takeover_by_user_id is null)                as may_xin_nguoi,
+  ((select max(sent_at) from sales_messages m where m.conversation_id = c.id
+      and m.from_page = true and m.sender_type = 'PAGE_HUMAN' and btrim(m.text) <> ''
+      and lower(btrim(m.text)) not in (select van_ban from cau_mau))
+    >= (select max(sent_at) from sales_messages m where m.conversation_id = c.id
+          and m.from_page = false and m.sender_type = 'CUSTOMER' and btrim(m.text) <> ''))  as nguoi_da_dap,
+  exists (select 1 from sales_suggestions s where s.conversation_id = c.id
+            and btrim(s.suggested_reply) <> '' and s.evaluation_only = false)          as co_cau_goi_y
+from sales_conversations c
+where c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
+  and (select max(sent_at) from sales_messages m where m.conversation_id = c.id
+         and m.from_page = false and m.sender_type = 'CUSTOMER' and btrim(m.text) <> '') >= now() - interval '24 hours'
+order by 2 desc limit 15;
