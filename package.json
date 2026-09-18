@@ -29,7 +29,8 @@
     "bench:explain": "tsx --tsconfig tsconfig.json scripts/bench/explain.ts",
     "returns:hmt": "tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts",
     "bench:cs": "tsx --tsconfig tsconfig.json scripts/bench-cs-queue.ts",
-    "payroll:reconcile": "tsx --tsconfig tsconfig.json scripts/payroll-reconcile.ts"
+    "payroll:reconcile": "tsx --tsconfig tsconfig.json scripts/payroll-reconcile.ts",
+    "agent:run": "tsx --tsconfig tsconfig.json scripts/agent-run.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

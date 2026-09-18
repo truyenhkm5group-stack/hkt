@@ -1,5 +1,6 @@
 /** Nhãn tiếng Việt cho tên job nội bộ ghi trong bảng sync_runs */
 export const SYNC_JOB_LABEL: Record<string, string> = {
+  deploy_runs: "Lượt deploy đọc từ GitHub Actions",
   orders_incremental: "Đơn hàng mới cập nhật",
   orders_backfill: "Đồng bộ lịch sử đơn hàng",
   orders_reconcile: "Đối chiếu lại đơn gần đây",
@@ -34,9 +35,11 @@ export const JOB_RUN_KEYS: Record<string, string[]> = {
   "vtp-tracking": ["VIETTELPOST:tracking_poll", "VIETTELPOST:tracking_selected"],
   "vtp-import": ["VIETTELPOST:orders_import"],
   "facebook-ads": ["FACEBOOK:ads_insights"],
+  "github-deployments": ["GITHUB:deploy_runs"],
 };
 
 export const SYNC_SOURCE_LABEL: Record<string, string> = {
+  GITHUB: "GitHub Actions",
   PANCAKE: "Pancake POS",
   VIETTELPOST: "Viettel Post",
   FACEBOOK: "Facebook Ads",

@@ -251,7 +251,19 @@ export async function testWorkOs(db: Db) {
     `work_items.assignee_id` cho nguồn này; giao / nhận việc đi qua `lib/work/assign.ts` tới Server
     Action của miền. Trước bản này hai nút "Nhận việc" (hàng đợi và trang CSKH) ghi hai chỗ.
   */
-  assert.deepEqual([...ASSIGNEE_OWNED_BY_SOURCE].sort(), ["CS_CASE", "SHIPMENT_CARE"], "hai nguồn có cột người phụ trách trong bảng nghiệp vụ");
+  /*
+    BA nguồn có cột người phụ trách NGAY TRONG bảng nghiệp vụ, nên lớp công việc không được ghi
+    `work_items.assignee_id` cho chúng:
+
+      · `cs_cases.assignee_user_id`     — người CSKH đang cầm case;
+      · `shipment_care.owner_id`        — người đang care kiện hàng;
+      · `tech_tasks.agent_id`           — AGENT đang làm việc Tech (Phase 2A).
+
+    Cái thứ ba khác hai cái đầu ở một điểm đáng nói: nó KHÔNG trỏ tới `users`. Một agent không phải
+    một con người (AGENTS.md mục 36), nên phép chiếu lên `/work` để ô người phụ trách RỖNG và gắn
+    nhãn "máy đang cầm" — nếu không, mọi thẻ điểm nhân sự sẽ đếm việc của máy thành việc của người.
+  */
+  assert.deepEqual([...ASSIGNEE_OWNED_BY_SOURCE].sort(), ["CS_CASE", "SHIPMENT_CARE", "TECH_TASK"], "ba nguồn có cột người/agent phụ trách trong bảng nghiệp vụ");
   const giaoOverlay = await assignWork(csKey, `${P}u-linh`, mai);
   assert.ok("error" in giaoOverlay, "lớp công việc KHÔNG được ghi người phụ trách cho case CSKH — đó là sự thật thứ hai");
   assert.match(giaoOverlay.error, /miền nghiệp vụ/, "lời từ chối phải chỉ sang đúng nơi giữ người phụ trách");

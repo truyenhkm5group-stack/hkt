@@ -1,4 +1,5 @@
-import { TechHealthBadge } from "@/app/(dashboard)/tech/badges";
+import { TechHealthBadge, TechVerificationBadge } from "@/app/(dashboard)/tech/badges";
+import { SyncButton } from "@/components/sync-button";
 import { TechDeploymentRecordForm, TechDeploymentUpdateForm } from "@/app/(dashboard)/tech/deployments/deployment-form";
 import { TechDeploymentsTable } from "@/app/(dashboard)/tech/deployments/deployments-table";
 import { TechNav } from "@/app/(dashboard)/tech/tech-nav";
@@ -6,7 +7,8 @@ import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
-import { TECH_DEPLOY_SORTABLE } from "@/lib/constants/tech";
+import { TECH_DEPLOY_SORTABLE, TECH_VERIFICATION_HINT, type TechVerification } from "@/lib/constants/tech";
+import { githubConfig } from "@/lib/integrations/github/client";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { getTechSystemHealth } from "@/lib/queries/tech-health";
 import { lastSuccessfulDeployment, listTechDeployments, recentTechDeployments, techDeploymentFacets } from "@/lib/queries/tech-ops";
@@ -27,6 +29,7 @@ export default async function TechDeploymentsPage({ searchParams }: { searchPara
     lastSuccessfulDeployment(),
     recentTechDeployments(10),
   ]);
+  const gh = githubConfig();
 
   const khop = commitMatches(health.version.commit, last?.commitSha ?? null);
 
@@ -39,6 +42,8 @@ export default async function TechDeploymentsPage({ searchParams }: { searchPara
         actions={
           canManage ? (
             <div className="flex flex-wrap gap-2">
+              {/* ĐỌC, không phải deploy: nút này nạp lại lượt chạy từ GitHub Actions vào sổ quan sát. */}
+              {gh.configured ? <SyncButton job="github-deployments" label="Đọc lại từ GitHub" /> : null}
               <TechDeploymentUpdateForm deployments={ganDay.map((d) => ({ id: d.id, label: `${d.commitSha.slice(0, 7)} · ${d.branch} · ${formatDateTime(d.startedAt)}` }))} />
               <TechDeploymentRecordForm />
             </div>
@@ -73,6 +78,15 @@ export default async function TechDeploymentsPage({ searchParams }: { searchPara
               ),
             },
             {
+              label: "Đọc từ GitHub Actions",
+              value: gh.configured ? (
+                <span className="text-success">Đã bật · {gh.repo}</span>
+              ) : (
+                <span className="text-muted-foreground">Chưa bật — {gh.reason} Sổ deploy vẫn ghi tay được.</span>
+              ),
+              span: true,
+            },
+            {
               label: "Đối chiếu",
               value:
                 khop === null ? (
@@ -82,6 +96,16 @@ export default async function TechDeploymentsPage({ searchParams }: { searchPara
                 ) : (
                   <span className="font-semibold text-destructive">LỆCH — container có thể chưa khởi động lại, hoặc máy chủ được cập nhật bằng đường khác</span>
                 ),
+            },
+            {
+              label: "Xác minh lượt gần nhất",
+              value: last ? (
+                <span title={TECH_VERIFICATION_HINT[last.verification as TechVerification]}>
+                  <TechVerificationBadge verification={last.verification as TechVerification} />
+                </span>
+              ) : (
+                <span className="text-muted-foreground">—</span>
+              ),
             },
             { label: "Sức khoẻ tổng", value: <TechHealthBadge state={health.worst} />, span: true },
           ]}

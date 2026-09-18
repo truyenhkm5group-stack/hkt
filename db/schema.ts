@@ -5185,6 +5185,17 @@ export const techAgentRuns = pgTable(
     /** `RUNNING` · `SUCCEEDED` · `FAILED` · `CANCELLED`. */
     status: text("status").notNull().default("RUNNING"),
     branch: text("branch").notNull().default(""),
+    /**
+     * Cây làm việc riêng của lượt chạy (AGENTS.md mục 9: mỗi phiên một cây, một nhánh). Hai lượt
+     * chạy KHÔNG BAO GIỜ dùng chung một thư mục — đó là thứ đã làm `main` đỏ bốn lần trong một
+     * buổi chiều. Giữ lại cả sau khi dọn cây, để đọc ngược được lượt chạy đã diễn ra ở đâu.
+     */
+    worktree: text("worktree").notNull().default(""),
+    /**
+     * NHỊP TIM. Runner cập nhật trong lúc chạy; tiến trình chết thì mốc này đứng im và lượt chạy
+     * trở thành CŨ (`STALE`) thay vì nằm mãi ở "đang chạy". `NULL` = chưa đập nhịp nào.
+     */
+    heartbeatAt: ts("heartbeat_at"),
     baseCommit: text("base_commit").notNull().default(""),
     resultCommit: text("result_commit").notNull().default(""),
     summary: text("summary").notNull().default(""),
@@ -5229,6 +5240,24 @@ export const techDeployments = pgTable(
     id: id(),
     commitSha: text("commit_sha").notNull(),
     branch: text("branch").notNull().default("main"),
+    /**
+     * `MANUAL` (người gõ tay — đường của Phase 1) hoặc `GITHUB_ACTIONS` (ERP đọc lại workflow).
+     * Hai nguồn có độ tin cậy khác nhau: một dòng gõ tay là LỜI KỂ, một dòng đọc từ Actions là
+     * CHỨNG TỪ. Gộp thì không phân biệt được "chưa ai ghi" với "workflow chưa chạy".
+     */
+    provider: text("provider").notNull().default("MANUAL"),
+    /** Tệp workflow (`deploy-vps.yml`). Rỗng với dòng gõ tay. */
+    workflow: text("workflow").notNull().default(""),
+    /**
+     * KHOÁ TỰ NHIÊN của lượt chạy bên GitHub. Đây là thứ làm cho đồng bộ IDEMPOTENT: chạy lại job
+     * mười lần vẫn đúng một dòng cho một lượt chạy. Rỗng với dòng gõ tay — và chỉ mục duy nhất
+     * dưới đây CỐ Ý loại chuỗi rỗng, nếu không hai dòng gõ tay sẽ đụng nhau.
+     */
+    externalRunId: text("external_run_id").notNull().default(""),
+    /** Lượt chạy lại (`run_attempt`). Chạy lại là một sự việc đáng xem, không phải một bản sao. */
+    externalRunAttempt: integer("external_run_attempt").notNull().default(1),
+    /** Chữ GitHub dùng: `success` · `failure` · `cancelled` · `timed_out`… Giữ NGUYÊN VĂN để đọc lại được. */
+    externalConclusion: text("external_conclusion").notNull().default(""),
     startedAt: ts("started_at").notNull().defaultNow(),
     finishedAt: ts("finished_at"),
     /** `PENDING` · `RUNNING` · `SUCCEEDED` · `FAILED` · `ROLLED_BACK`. */
@@ -5242,6 +5271,14 @@ export const techDeployments = pgTable(
     healthResult: text("health_result").notNull().default("UNKNOWN"),
     smokeResult: text("smoke_result").notNull().default("UNKNOWN"),
     observationResult: text("observation_result").notNull().default("UNKNOWN"),
+    /**
+     * Commit mà PRODUCTION đang chạy tại lúc đối chiếu — lời khai của chính tiến trình đang sống
+     * (`lib/version.ts`), không phải của GitHub. `NULL` = chưa đối chiếu lần nào.
+     */
+    productionCommit: text("production_commit"),
+    /** `UNKNOWN` · `VERIFIED` · `MISMATCH` · `SUPERSEDED` — xem `verifyDeployment()`. */
+    verification: text("verification").notNull().default("UNKNOWN"),
+    verifiedAt: ts("verified_at"),
     rollbackOfId: text("rollback_of_id").references((): AnyPgColumn => techDeployments.id, { onDelete: "set null" }),
     /** Đường dẫn lượt chạy GitHub Actions — để đối chiếu với bên có thẩm quyền. */
     externalRef: text("external_ref").notNull().default(""),
@@ -5252,6 +5289,13 @@ export const techDeployments = pgTable(
   (t) => [
     index("tech_deployments_started_idx").on(t.startedAt),
     index("tech_deployments_commit_idx").on(t.commitSha),
+    /*
+      MỘT LƯỢT CHẠY GITHUB = MỘT DÒNG. Chỉ mục duy nhất CÓ ĐIỀU KIỆN: dòng gõ tay mang
+      `external_run_id = ''` và phải được phép trùng nhau, nếu không người chỉ ghi tay được một lần.
+    */
+    uniqueIndex("tech_deployments_external_uq").on(t.provider, t.externalRunId, t.externalRunAttempt).where(sql`${t.externalRunId} <> ''`),
+    check("tech_deployments_provider_check", sql`${t.provider} IN ('MANUAL','GITHUB_ACTIONS')`),
+    check("tech_deployments_verification_check", sql`${t.verification} IN ('UNKNOWN','VERIFIED','MISMATCH','SUPERSEDED')`),
     check("tech_deployments_status_check", sql`${t.status} IN ('PENDING','RUNNING','SUCCEEDED','FAILED','ROLLED_BACK')`),
     check("tech_deployments_actor_kind_check", sql`${t.actorKind} IN ('HUMAN','SYSTEM','AI_AGENT')`),
     check("tech_deployments_health_check", sql`${t.healthResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),

@@ -35,10 +35,18 @@ import { reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { getDb } from "@/db";
 import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
+import { runGithubDeploymentSync } from "@/lib/integrations/github/deployments";
 
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
-export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "SEPAY" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
+export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "SEPAY" | "GITHUB" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
+  "github-deployments": {
+    label: "Đọc lượt deploy từ GitHub Actions",
+    source: "GITHUB",
+    description:
+      "CHỈ ĐỌC: nạp N lượt chạy gần nhất của workflow deploy vào sổ quan sát `tech_deployments`, rồi đối chiếu commit của lượt thành công mới nhất với bản production ĐANG CHẠY. ERP không kích hoạt, không huỷ, không đổi được một lượt deploy nào — GitHub Actions vẫn là bên có thẩm quyền. Idempotent theo khoá (lượt chạy, lần chạy lại).",
+    run: (o) => runGithubDeploymentSync({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit) }),
+  },
   "sepay-reconcile": {
     label: "Đối chiếu giao dịch ngân hàng qua API SePay",
     source: "SEPAY",

@@ -593,7 +593,131 @@ export async function adaptAlerts(now: Date): Promise<WorkItem[]> {
   return items;
 }
 
-/* ═══════════════════ 7 · VIỆC TAY & VIỆC ĐỊNH KỲ ═══════════════════ */
+/* ═══════════════════ 7 · VIỆC PHÒNG TECH AI ═══════════════════ */
+
+/**
+ * Nguồn: `tech_tasks`. PHÉP CHIẾU thuần — adapter này không viết lại một luật vòng đời nào.
+ *
+ * ─── HAI BỘ TRẠNG THÁI, MỘT NƠI GIỮ SỰ THẬT ───
+ *
+ * Miền Tech có 13 trạng thái; hàng đợi chung chỉ có 7. `TECH_TO_WORK_STATUS` là phép chiếu MỘT
+ * CHIỀU: nó đổi hình dạng để hiển thị và không bao giờ đi ngược. `tech_tasks.status` vẫn là nơi
+ * duy nhất giữ sự thật, và `work_items.status` của nguồn này bắt buộc `NULL` (ràng buộc
+ * `work_items_authority_check` ở CSDL).
+ *
+ * Mất mát của phép chiếu là CÓ THẬT và cố ý: `REVIEW`, `QA`, `DEPLOYING`, `OBSERVING` đều hiện ra
+ * "Đang làm". Ai cần biết việc đang ở khâu nào thì mở `/tech/tasks/[id]` — hàng đợi chung trả lời
+ * "hôm nay tôi phải làm gì", không phải "việc này đang ở bước nào".
+ *
+ * ─── KHÔNG ĐẾM HAI LẦN ───
+ *
+ * `tech_tasks` không trùng ĐỘ MỊN với nguồn nào đang có: không cảnh báo nào, không case nào nói về
+ * một việc kỹ thuật. Nên KHÔNG phải thêm gì vào `ALERT_KINDS_OWNED_ELSEWHERE` — và
+ * `tests/tech-phase2a.test.ts` chứng minh điều đó bằng cách chạy cả hàng đợi rồi soi khoá trùng.
+ */
+const TECH_TO_WORK_STATUS: Record<string, WorkStatus> = {
+  NEW: "NEW",
+  TRIAGED: "NEW",
+  SPEC_READY: "ASSIGNED",
+  BUILDING: "IN_PROGRESS",
+  REVIEW: "IN_PROGRESS",
+  QA: "IN_PROGRESS",
+  READY_TO_DEPLOY: "IN_PROGRESS",
+  DEPLOYING: "IN_PROGRESS",
+  OBSERVING: "IN_PROGRESS",
+  BLOCKED: "BLOCKED",
+  FAILED: "BLOCKED",
+  ROLLED_BACK: "BLOCKED",
+  DONE: "DONE",
+};
+
+/**
+ * P0–P3 của miền Tech → bốn mức của hàng đợi chung.
+ *
+ * Hai thang KHÔNG cùng tên và đó là chuyện bình thường: `P0` là từ vựng của đội kỹ thuật, `URGENT`
+ * là từ vựng của hàng đợi mà cả shop đọc. Chiếu tường minh ở đây, một lần, thay vì để mỗi màn hình
+ * tự đoán.
+ */
+const TECH_TO_WORK_PRIORITY: Record<string, WorkPriority> = { P0: "URGENT", P1: "HIGH", P2: "NORMAL", P3: "LOW" };
+
+export async function adaptTechTasks(now: Date, includeClosed = false): Promise<WorkItem[]> {
+  const db = await getDb();
+  const t = schema.techTasks;
+  const rows = await db.query.techTasks.findMany({
+    where: includeClosed ? undefined : sql`${t.status} <> 'DONE'`,
+    orderBy: [sql`case ${t.priority} when 'P0' then 0 when 'P1' then 1 when 'P2' then 2 else 3 end`],
+    limit: 300,
+    with: { agent: { columns: { key: true, name: true } } },
+  });
+  const ms = now.getTime();
+
+  return rows.map((r) => {
+    const status = TECH_TO_WORK_STATUS[r.status] ?? "NEW";
+    const ageHours = hoursSince(r.createdAt, ms);
+    /*
+      Dùng lại thang điểm chung `caseScore` thay vì một công thức riêng: hai thang điểm trong một
+      hàng đợi làm thứ tự sắp xếp vô nghĩa. Mức nghiêm trọng suy từ mức ưu tiên do NGƯỜI đặt, và
+      việc đang chờ chủ shop ký được nâng lên vì nó đứng im cho tới khi có người bấm.
+    */
+    const choKy = r.approvalStatus === "PENDING";
+    const score = caseScore({
+      severity: r.priority === "P0" ? "critical" : r.priority === "P1" || choKy ? "warning" : "info",
+      ageHours,
+      amount: 0,
+      /*
+        Dùng lại `DATA_ERROR` — loại việc gần nhất đã có trong thang chung: cùng tính chất "hệ
+        thống sai thì mọi phòng ra quyết định trên số sai". Thêm một `CaseType` mới chỉ để chấm
+        điểm là đổi thang của CẢ hàng đợi (bảng `RECOVERABILITY` và `CUSTOMER_WAITING` là bảng
+        chung) — đúng lý do `adaptDuplicateOrders` cũng dùng lại một loại đã có.
+      */
+      type: "DATA_ERROR",
+    });
+    const nhan = [r.risk, r.taskType, ...(choKy ? ["cho-chu-shop-duyet"] : []), ...(r.agent ? [] : ["chua-giao-agent"])];
+    return {
+      key: workKey("TECH_TASK", r.id),
+      sourceType: "TECH_TASK",
+      sourceKey: r.id,
+      kind: r.taskType,
+      title: `${r.code} · ${r.title}`,
+      summary: choKy
+        ? `Việc mức ${r.risk} đang CHỜ CHỦ SHOP PHÊ DUYỆT — không đi tiếp được cho tới khi có người ký.`
+        : (r.description || "").split("\n")[0].slice(0, 300),
+      department: "MANAGEMENT" as DepartmentCode,
+      /*
+        LUÔN `null`. Người phụ trách của nguồn này là một AGENT, và agent KHÔNG phải một con người
+        (AGENTS.md mục 36) — đặt nó vào ô `assignee` sẽ làm mọi thẻ điểm nhân sự đếm việc của máy
+        thành việc của người. Tên agent đi vào `tags` để đọc, kèm nhãn "máy đang cầm".
+      */
+      assignee: null,
+      status,
+      statusAuthority: "SOURCE" as const,
+      priority: TECH_TO_WORK_PRIORITY[r.priority] ?? "P2",
+      score,
+      createdAt: r.createdAt,
+      startedAt: r.startedAt,
+      dueAt: null,
+      slaAt: slaAtOf("TECH_TASK", r.createdAt),
+      completedAt: r.completedAt,
+      snoozedUntil: null,
+      businessEntity: "NONE",
+      businessEntityId: r.id,
+      sourceUrl: `/tech/tasks/${r.id}`,
+      /*
+        Việc kỹ thuật KHÔNG khai tiền: không chứng từ nào đo được "sửa lỗi này cứu bao nhiêu".
+        `MONEY_UNKNOWN` là câu trả lời đúng; `0` sẽ là một lời khẳng định sai (AGENTS.md mục 42).
+      */
+      money: MONEY_UNKNOWN,
+      tags: r.agent ? [...nhan, `agent:${r.agent.key}`, WORK_TAG_MACHINE_HELD] : nhan,
+      evidence: { source: "Phòng Tech AI", detail: `${r.status} · mức ${r.risk} · ${r.module}${r.branch ? ` · ${r.branch}` : ""}` },
+      blockedReason: r.blockedReason,
+      creationSource: (r.createdByKind === "HUMAN" ? "MANUAL" : "AUTO") as WorkItem["creationSource"],
+      actions: actionsOf("TECH_TASK"),
+      recommendedAction: choKy ? "Mở việc và bấm Duyệt hoặc Từ chối" : "Mở việc ở Phòng Tech AI",
+    };
+  });
+}
+
+/* ═══════════════════ 8 · VIỆC TAY & VIỆC ĐỊNH KỲ ═══════════════════ */
 
 /** Nguồn duy nhất giữ trạng thái trong `work_items`. Ở đây không có phép chiếu nào. */
 export async function adaptOwnedWork(now: Date, includeClosed: boolean, closedSince: Date | null = null): Promise<WorkItem[]> {
@@ -788,6 +912,7 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     want("ADS_DECISION") ? guard("ADS_DECISION", () => adaptAdsDecisions(now)) : [],
     // Một lượt đọc `notifications` sinh ra bốn nguồn; lọc lại sau khi đã có.
     want("ALERT") || want("COD_EXCEPTION") || want("INVENTORY_EXCEPTION") || want("RETURN_INSPECTION") ? guard("ALERT", () => adaptAlerts(now)) : [],
+    want("TECH_TASK") ? guard("TECH_TASK", () => adaptTechTasks(now, opts.includeClosed ?? false)) : [],
     want("MANUAL_TASK") || want("RECURRING_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);
 

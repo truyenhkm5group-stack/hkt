@@ -1,5 +1,8 @@
 import {
   TECH_APPROVAL_LABEL,
+  TECH_DEPLOY_PROVIDER_LABEL,
+  TECH_VERIFICATION_LABEL,
+  TECH_VERIFICATION_TONE,
   TECH_APPROVAL_TONE,
   TECH_DEPLOY_STATUS_LABEL,
   TECH_DEPLOY_STATUS_TONE,
@@ -22,7 +25,9 @@ import {
   type TechIncidentStatus,
   type TechPriority,
   type TechRisk,
+  type TechDeployProvider,
   type TechTaskStatus,
+  type TechVerification,
 } from "@/lib/constants/tech";
 import { cn } from "@/lib/utils";
 
@@ -97,4 +102,22 @@ const HEALTH_LABEL_LOCAL: Record<string, string> = {
 
 export function TechHealthBadge({ state, className }: { state: string; className?: string }) {
   return <span className={cn(base, HEALTH_TONE_LOCAL[state] ?? HEALTH_TONE_LOCAL.UNKNOWN, className)}>{HEALTH_LABEL_LOCAL[state] ?? "Chưa xác minh"}</span>;
+}
+
+/**
+ * XÁC MINH ≠ KẾT QUẢ WORKFLOW. Đây là chiều THỨ BA của một lượt deploy (xem `verifyDeployment`):
+ * GitHub nói xong, production đang chạy gì, và hai cái đó có khớp không. Ba chiều ba nhãn — gộp
+ * lại thành một ô xanh/đỏ là xoá mất bài học đã phải học bằng một bước kiểm trong `deploy-vps.yml`.
+ */
+export function TechVerificationBadge({ verification, className }: { verification: TechVerification; className?: string }) {
+  return <span className={cn(base, TECH_VERIFICATION_TONE[verification], className)}>{TECH_VERIFICATION_LABEL[verification]}</span>;
+}
+
+/** Dòng này do NGƯỜI gõ hay do ERP đọc về — hai mức tin cậy khác nhau, phải nhìn ra được. */
+export function TechProviderBadge({ provider, className }: { provider: TechDeployProvider; className?: string }) {
+  return (
+    <span className={cn(base, provider === "GITHUB_ACTIONS" ? "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300" : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300", className)}>
+      {TECH_DEPLOY_PROVIDER_LABEL[provider]}
+    </span>
+  );
 }

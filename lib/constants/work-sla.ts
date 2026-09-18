@@ -233,6 +233,20 @@ const SOURCE_RULES: SlaRule[] = [
     alsoShownOn: "Quảng cáo",
   },
 
+  /* ───── Việc Phòng Tech AI ───── */
+  {
+    key: "TECH_TASK",
+    label: "Việc Phòng Tech AI",
+    hours: null,
+    why:
+      "CỐ Ý bỏ trống ở mức nguồn. Hạn của một việc kỹ thuật đi theo MỨC ƯU TIÊN, không theo loại: " +
+      "P0 là 'đang chảy máu' (production hỏng, số liệu sai, tiền đang mất), P3 là 'khi rảnh'. Một " +
+      "con số chung đặt ở đây sẽ làm mọi việc P3 đỏ ngay hôm đặt — đúng cái bẫy của Quyết định " +
+      "quảng cáo ngay phía trên. Chủ shop đặt được hạn riêng cho từng việc ở /tech/tasks.",
+    department: "MANAGEMENT",
+    alsoShownOn: "Phòng Tech AI",
+  },
+
   /* ───── Việc tay & định kỳ ───── */
   {
     key: "MANUAL_TASK",

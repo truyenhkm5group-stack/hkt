@@ -783,3 +783,104 @@ export const TECH_TASK_SORTABLE = ["createdAt", "updatedAt", "priority", "risk",
 export const TECH_RUN_SORTABLE = ["startedAt", "status", "agentKey"];
 export const TECH_DEPLOY_SORTABLE = ["startedAt", "status", "commitSha", "branch"];
 export const TECH_INCIDENT_SORTABLE = ["detectedAt", "severity", "status", "code"];
+
+/* ═════════════════════ PHASE 2A · NGUỒN CỦA MỘT LƯỢT DEPLOY ═════════════════════ */
+
+/**
+ * AI GHI DÒNG DEPLOY NÀY.
+ *
+ * `MANUAL` là đường của Phase 1: người mở `/tech/deployments` và gõ tay. `GITHUB_ACTIONS` là đường
+ * của Phase 2A: ERP ĐỌC lại lượt chạy workflow. Tách hai nguồn vì chúng có độ tin cậy khác nhau —
+ * một dòng gõ tay là lời kể, một dòng đọc từ Actions là chứng từ. Gộp lại thì không còn phân biệt
+ * được "chưa ai ghi" với "workflow chưa chạy".
+ */
+export const TECH_DEPLOY_PROVIDERS = ["MANUAL", "GITHUB_ACTIONS"] as const;
+export type TechDeployProvider = (typeof TECH_DEPLOY_PROVIDERS)[number];
+
+export const TECH_DEPLOY_PROVIDER_LABEL: Record<TechDeployProvider, string> = {
+  MANUAL: "Người ghi tay",
+  GITHUB_ACTIONS: "Đọc từ GitHub Actions",
+};
+
+/**
+ * ═══════════ BA CHIỀU CỦA MỘT LƯỢT DEPLOY — KHÔNG BAO GIỜ GỘP THÀNH MỘT Ô ═══════════
+ *
+ * Cùng hình dạng với `components/status-badge.tsx` (trạng thái đơn ≠ trạng thái vận đơn ≠ trạng
+ * thái tiền). Ở đây ba chiều là:
+ *
+ *   1. **GitHub nói gì**      — `status`: workflow chạy xong hay hỏng. Đây là bên CÓ THẨM QUYỀN.
+ *   2. **Production đang chạy gì** — `productionCommit`: lời khai của chính tiến trình đang sống.
+ *   3. **Hai cái đó có khớp không** — `verification`.
+ *
+ * Gộp ba thứ thành một cờ `deployed: boolean` là đúng cái bẫy đã xảy ra thật trên kho mã này:
+ * workflow xanh KHÔNG chứng minh máy chủ đang chạy bản đó (container có thể chưa khởi động lại).
+ * `deploy-vps.yml` đã phải thêm hẳn một bước đối chiếu commit vì lý do đó.
+ */
+export const TECH_VERIFICATIONS = ["UNKNOWN", "VERIFIED", "MISMATCH", "SUPERSEDED"] as const;
+export type TechVerification = (typeof TECH_VERIFICATIONS)[number];
+
+export const TECH_VERIFICATION_LABEL: Record<TechVerification, string> = {
+  UNKNOWN: "Chưa đối chiếu",
+  VERIFIED: "Production khớp",
+  MISMATCH: "Production LỆCH",
+  SUPERSEDED: "Đã bị bản sau thay",
+};
+
+export const TECH_VERIFICATION_HINT: Record<TechVerification, string> = {
+  UNKNOWN: "Chưa đủ căn cứ để so: hoặc workflow chưa xong, hoặc production chưa khai commit đang chạy",
+  VERIFIED: "Commit của lượt deploy này ĐÚNG BẰNG commit mà production đang chạy",
+  MISMATCH: "Đây là lượt deploy thành công MỚI NHẤT, nhưng production đang chạy commit khác — phải đi xem ngay",
+  SUPERSEDED: "Commit này từng lên production nhưng đã có lượt deploy sau thay thế. Không phải lỗi",
+};
+
+export const TECH_VERIFICATION_TONE: Record<TechVerification, string> = {
+  UNKNOWN: "bg-muted text-muted-foreground",
+  VERIFIED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  MISMATCH: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+  SUPERSEDED: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+};
+
+/**
+ * ĐỐI CHIẾU MỘT LƯỢT DEPLOY VỚI BẢN ĐANG CHẠY — HÀM THUẦN.
+ *
+ * Bốn câu trả lời, và ba trong bốn KHÔNG phải lỗi:
+ *
+ *  · `UNKNOWN`    — lượt chưa thành công, hoặc production chưa khai commit. CHƯA BIẾT, không phải
+ *                   "chưa khớp" (AGENTS.md mục 42).
+ *  · `VERIFIED`   — khớp.
+ *  · `SUPERSEDED` — không khớp NHƯNG đã có lượt thành công mới hơn. Đây là trạng thái BÌNH THƯỜNG
+ *                   của mọi lượt deploy cũ; tô đỏ chúng là dạy người đọc bỏ qua màu đỏ.
+ *  · `MISMATCH`   — không khớp VÀ đây là lượt thành công mới nhất. Chỉ ca này mới là chuông báo:
+ *                   workflow xanh mà máy chủ chạy bản khác.
+ */
+export function verifyDeployment(input: {
+  status: TechDeployStatus;
+  commitSha: string;
+  /** Commit production đang chạy. `null` = CHƯA BIẾT. */
+  productionCommit: string | null;
+  /** Đây có phải lượt THÀNH CÔNG mới nhất không. */
+  isLatestSuccess: boolean;
+}): TechVerification {
+  if (input.status !== "SUCCEEDED") return "UNKNOWN";
+  if (!input.productionCommit || !input.commitSha) return "UNKNOWN";
+  const n = Math.min(input.commitSha.length, input.productionCommit.length, 40);
+  if (n < 7) return "UNKNOWN";
+  const khop = input.commitSha.slice(0, n) === input.productionCommit.slice(0, n);
+  if (khop) return "VERIFIED";
+  return input.isLatestSuccess ? "MISMATCH" : "SUPERSEDED";
+}
+
+/**
+ * GitHub nói gì → ERP hiểu là gì.
+ *
+ * `null` conclusion nghĩa là lượt chạy CHƯA XONG, không phải hỏng. `cancelled`, `timed_out`,
+ * `action_required` đều là KHÔNG THÀNH CÔNG nhưng khác `failure` về cách sửa — Phase 2A gộp chúng
+ * vào `FAILED` và giữ chữ gốc ở `externalConclusion` để đọc lại được.
+ */
+export function techDeployStatusFromGithub(status: string, conclusion: string | null): TechDeployStatus {
+  if (status === "queued" || status === "pending" || status === "waiting" || status === "requested") return "PENDING";
+  if (status === "in_progress") return "RUNNING";
+  if (conclusion === "success") return "SUCCEEDED";
+  if (conclusion === null) return "RUNNING";
+  return "FAILED";
+}
