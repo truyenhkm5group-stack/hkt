@@ -910,8 +910,18 @@ jobs:
                     echo ""
                     echo "════════ THỬ ĐĂNG NHẬP THẬT BẰNG HTTP ════════"
                     fetch_staging_script ai-staging-login-test.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-login-test.ts'
-                    docker exec -e AI_STAGING=1 -e STAGING_USER_PASSWORD="${STAGING_USER_PASSWORD:-}" vnx-ai-staging-app \
-                      npx tsx --tsconfig tsconfig.json scripts/ai-staging-login-test.ts ${ARG:-} ;;
+                    # Bài kiểm đỏ thì PHẢI kèm log máy chủ. Next ở chế độ production giấu chi tiết
+                    # lỗi trong thân phản hồi, nên một lượt 500 không kèm log là một lượt phải chạy
+                    # lại chỉ để biết vì sao — mỗi lượt như thế tốn một vòng xếp hàng trên lane VPS.
+                    if docker exec -e AI_STAGING=1 -e STAGING_USER_PASSWORD="${STAGING_USER_PASSWORD:-}" vnx-ai-staging-app \
+                      npx tsx --tsconfig tsconfig.json scripts/ai-staging-login-test.ts ${ARG:-}; then
+                      :
+                    else
+                      echo ""
+                      echo "──────── LOG MÁY CHỦ BẢN CHẠY THỬ (40 dòng cuối) ────────"
+                      docker logs --tail 40 vnx-ai-staging-app 2>&1 || true
+                      exit 1
+                    fi ;;
                 esac ;;
 
               ai-staging-live-ingest)

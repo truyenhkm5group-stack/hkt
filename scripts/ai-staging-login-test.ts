@@ -60,7 +60,12 @@ async function dangNhap(email: string, matKhau: string, oAn: [string, string][])
   form.append("next", "/");
   form.append("email", email);
   form.append("password", matKhau);
-  return fetch(`${GOC}/login`, { method: "POST", body: form, redirect: "manual" });
+  /*
+    `Origin` PHẢI CÓ VÀ PHẢI KHỚP. Next 15 chặn mọi lượt gọi Server Action mà nó không tin là
+    cùng gốc — thiếu tiêu đề này thì lượt POST bị từ chối TRƯỚC khi `loginAction` chạy dòng nào,
+    và cái ta đo được sẽ là hàng rào chống giả mạo chứ không phải đường đăng nhập.
+  */
+  return fetch(`${GOC}/login`, { method: "POST", body: form, redirect: "manual", headers: { origin: GOC } });
 }
 
 async function main() {
@@ -98,7 +103,16 @@ async function main() {
     const xau = await dangNhap(email, SAI, oAn);
     const than = await xau.text().catch(() => "");
     dat(!cookiePhien(xau), "sai mật khẩu KHÔNG cấp cookie phiên");
-    dat(than.includes("Email hoặc mật khẩu không đúng") || xau.status >= 400, "sai mật khẩu trả về đúng thông báo từ chối");
+    /*
+      MỘT LỖI 500 KHÔNG PHẢI MỘT LẦN TỪ CHỐI ĐÚNG.
+
+      Bản đầu chấp nhận `status >= 400` là đạt. Nhưng máy chủ hỏng cũng trả 4xx/5xx và cũng không
+      cấp cookie — nên cả hai phép thử đều XANH trong khi đường đăng nhập chưa chạy dòng nào. Đúng
+      cái bẫy đã gặp nhiều lần trong đợt này: một phép đo nhìn vào chỗ khác chỗ mã đang chạy.
+      Phải đòi ĐÚNG câu từ chối, và đòi máy chủ không hỏng.
+    */
+    dat(xau.status < 500, "lượt sai mật khẩu KHÔNG làm máy chủ lỗi", `HTTP ${xau.status}`);
+    dat(than.includes("Email hoặc mật khẩu không đúng"), "sai mật khẩu trả về ĐÚNG câu từ chối");
 
     console.log("");
     console.log("───────── 3. ĐÚNG MẬT KHẨU PHẢI VÀO ĐƯỢC ─────────");
@@ -106,6 +120,15 @@ async function main() {
     const phien = cookiePhien(tot);
     phienChung = phien;
     dat(Boolean(phien), "đúng mật khẩu ⇒ được cấp cookie erp_session", `HTTP ${tot.status}`);
+    if (!phien) {
+      // Manh mối để khỏi phải đoán. Thân phản hồi của Next ở chế độ production không mang chi tiết
+      // lỗi, nên in cả mã truy vết — log container mới có câu đầy đủ.
+      const than2 = await tot.text().catch(() => "");
+      const dau = /"digest":"(\d+)"|Digest: (\d+)/.exec(than2);
+      console.log(`    · mã truy vết lỗi: ${dau ? dau[1] ?? dau[2] : "(không có)"}`);
+      console.log(`    · vị trí chuyển tới: ${tot.headers.get("location") ?? "(không có)"} · x-nextjs: ${tot.headers.get("x-nextjs-redirect") ?? "-"}`);
+      console.log(`    · đầu thân phản hồi: ${than2.slice(0, 160).replace(/\s+/g, " ")}`);
+    }
 
     if (phien) {
       console.log("");
