@@ -8,7 +8,7 @@ import {
   UnconfirmedAccountsSection,
 } from "@/app/(dashboard)/finance-ops/sections";
 import { PageHeader } from "@/components/page-header";
-import { can,  } from "@/lib/auth/session";
+import { can } from "@/lib/auth/session";
 import { canSeeAllPayroll, resolvePayrollScope } from "@/lib/auth/payroll-scope";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
