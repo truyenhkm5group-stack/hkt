@@ -1007,9 +1007,11 @@ jobs:
                   echo "  DNS           : ✗ trỏ tới $IP_DNS, KHÁC IP của VPS ($IP_VPS)"
                   DNS_OK=0
                 fi
+                # Hỏi cấu hình ĐANG CHẠY qua API quản trị, không hỏi tệp: tệp gắn chỉ-đọc không bao
+                # giờ đổi, nên đọc nó sẽ luôn trả lời "chưa có" kể cả khi tên miền đang phục vụ.
                 DA_CO_KHOI=0
-                docker exec erp-caddy grep -qF "$TEN_MIEN" /etc/caddy/Caddyfile 2>/dev/null && DA_CO_KHOI=1
-                echo "  khối trong Caddyfile: $([ "$DA_CO_KHOI" = 1 ] && echo 'ĐÃ CÓ' || echo 'chưa có')"
+                docker exec erp-caddy sh -c "wget -qO- http://127.0.0.1:2019/config/ 2>/dev/null | grep -qF '$TEN_MIEN'" && DA_CO_KHOI=1
+                echo "  khối trong cấu hình ĐANG CHẠY: $([ "$DA_CO_KHOI" = 1 ] && echo 'ĐÃ CÓ' || echo 'chưa có')"
                 docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' erp-caddy 2>/dev/null | tr ' ' '\n' | grep -q "^${MANG}$" && NOI_MANG=1 || NOI_MANG=0
                 echo "  erp-caddy nối mạng bản thử: $([ "$NOI_MANG" = 1 ] && echo 'RỒI' || echo 'chưa')"
 
@@ -1021,11 +1023,8 @@ jobs:
                 fi
 
                 if [ "$CHE_DO" = "off" ]; then
-                  docker exec erp-caddy cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak
-                  # Cắt từ dòng mở khối tới hết tệp. Khối này LUÔN nằm cuối nên phép cắt là đủ.
-                  docker exec erp-caddy sh -c "awk -v d=\"$TEN_MIEN\" 'index(\$0, d) == 1 {exit} {print}' /etc/caddy/Caddyfile.bak > /etc/caddy/Caddyfile.moi"
-                  docker exec erp-caddy caddy validate --config /etc/caddy/Caddyfile.moi --adapter caddyfile
-                  docker exec erp-caddy sh -c 'cp /etc/caddy/Caddyfile.moi /etc/caddy/Caddyfile'
+                  # Quay lui = nạp lại ĐÚNG tệp production đang gắn chỉ-đọc. Không phải dựng lại một
+                  # tệp đã cắt: tệp gốc chưa bao giờ bị sửa, nên nó vẫn là bản sạch.
                   docker exec erp-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
                   docker network disconnect "$MANG" erp-caddy 2>/dev/null || true
                   echo "✓ đã gỡ tên miền bản chạy thử. Production không đổi."
@@ -1034,12 +1033,20 @@ jobs:
                 fi
 
                 # ───── dựng cấu hình ghép ─────
+                #
+                # /etc/caddy/Caddyfile GẮN CHỈ-ĐỌC từ máy chủ (`./deploy/Caddyfile:...:ro` trong
+                # docker-compose.prod.yml) nên KHÔNG ghi vào đó được, và cũng KHÔNG NÊN ghi vào tệp
+                # trên máy chủ: lượt triển khai chạy `git checkout -B` trong /root/erp, nên một tệp
+                # bị sửa tại chỗ sẽ làm HỎNG lần deploy production tiếp theo.
+                #
+                # Nên cấu hình ghép nằm ở /tmp TRONG container và Caddy nạp thẳng từ đó. Đánh đổi
+                # phải nói ra: dựng lại container `erp-caddy` sẽ đọc lại tệp trên máy chủ và tên
+                # miền bản chạy thử biến mất — chạy lại thao tác này là có ngay.
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
                   "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/deploy/Caddyfile.ai-staging?ref=${STAGING_BRANCH}" > /tmp/ai-staging.caddy
-                docker exec erp-caddy sh -c 'grep -vF "ai-staging.vnxcommerce.com" /etc/caddy/Caddyfile > /tmp/base.caddy || true'
-                # Ghép: phần production HIỆN TẠI (đã bỏ khối cũ nếu có) + khối mới.
-                docker exec erp-caddy sh -c 'cp /etc/caddy/Caddyfile /tmp/hien-tai.caddy'
-                docker exec erp-caddy sh -c "awk -v d=\"$TEN_MIEN\" 'index(\$0, d) == 1 {exit} {print}' /tmp/hien-tai.caddy > /tmp/nen.caddy"
+                # NỀN là cấu hình production ĐANG DÙNG, cắt bỏ khối bản chạy thử nếu đã có (chạy lại
+                # nhiều lần không nhân đôi khối).
+                docker exec erp-caddy sh -c "awk -v d=\"$TEN_MIEN\" 'index(\$0, d) == 1 {exit} {print}' /etc/caddy/Caddyfile > /tmp/nen.caddy"
                 docker cp /tmp/ai-staging.caddy erp-caddy:/tmp/them.caddy
                 docker exec erp-caddy sh -c 'cat /tmp/nen.caddy /tmp/them.caddy > /tmp/Caddyfile.moi'
 
@@ -1080,9 +1087,9 @@ jobs:
                   docker network connect "$MANG" erp-caddy
                   echo "  ✓ đã nối erp-caddy vào $MANG (gắn thêm giao diện mạng, KHÔNG dựng lại container)"
                 fi
-                docker exec erp-caddy cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak
-                docker exec erp-caddy sh -c 'cp /tmp/Caddyfile.moi /etc/caddy/Caddyfile'
-                docker exec erp-caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+                # Nạp THẲNG từ tệp ghép. Không đụng vào /etc/caddy/Caddyfile (chỉ-đọc) và không đụng
+                # vào tệp trên máy chủ (sẽ làm hỏng `git checkout -B` của lượt deploy tiếp theo).
+                docker exec erp-caddy caddy reload --config /tmp/Caddyfile.moi --adapter caddyfile
                 echo "  ✓ đã nạp lại Caddy (mềm — không dựng lại, không đứt kết nối)"
                 sleep 8
 
