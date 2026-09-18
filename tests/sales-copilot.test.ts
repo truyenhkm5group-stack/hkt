@@ -136,9 +136,37 @@ export async function testSalesCopilot(db: Db) {
     assert.match(maAction, mau, `cổng gửi phải ${y}`);
   }
 
-  // Ba trang /ai/* đều đòi quyền xem — không trang nào mở cho người lạ.
-  for (const trang of ["app/(dashboard)/ai/copilot/page.tsx", "app/(dashboard)/ai/review/page.tsx", "app/(dashboard)/ai/fanpage/page.tsx"]) {
+  /*
+    QUYỀN CỦA TỪNG TRANG — và hàng đợi KHÔNG cùng mức với hai trang kia.
+
+    `/ai/review` và `/ai/fanpage` là màn hình QUAN SÁT: đọc lượt chạy, chấm tay, khai hồ sơ page.
+    `ai:view` là đúng mức cho chúng, và trưởng nhóm có quyền ấy.
+
+    `/ai/copilot` là màn hình LÀM VIỆC: nó bày hội thoại THẬT của khách đang chờ, và cả năm nút
+    đều đòi `ai:send`. Để nó ở `ai:view` là cho một người không thao tác được gì đọc dữ liệu khách,
+    rồi bắt họ nhìn một hàng đợi toàn nút bấm không nổi.
+  */
+  assert.match(readFileSync("app/(dashboard)/ai/copilot/page.tsx", "utf8"), /requirePermission\("ai:send"\)/, "hàng đợi trợ lý phải đòi ai:send, không phải ai:view");
+  for (const trang of ["app/(dashboard)/ai/review/page.tsx", "app/(dashboard)/ai/fanpage/page.tsx"]) {
     assert.match(readFileSync(trang, "utf8"), /requirePermission\("ai:view"\)/, `${trang} phải đòi quyền ai:view`);
+  }
+
+  // Thanh bên phải nói CÙNG một mức với trang. Hai nơi lệch nhau thì hoặc hiện một mục bấm vào là
+  // 403, hoặc giấu mất một mục người ta có quyền vào — cả hai đều là lỗi người dùng gặp thật.
+  assert.match(readFileSync("components/app-sidebar.tsx", "utf8"), /href: "\/ai\/copilot".*permission: "ai:send"/, "mục thanh bên của hàng đợi phải cùng mức quyền với trang");
+
+  /*
+    QUYỀN THAO TÁC KHÔNG ĐƯỢC CẤP MẶC ĐỊNH CHO MỌI VAI.
+
+    Mở ra Internet thì danh sách này là thứ quyết định ai chạm được vào hội thoại của khách. Kiểm
+    từng vai một, không kiểm "có ít nhất một vai bị chặn".
+  */
+  for (const vai of ["VIEWER", "ACCOUNTANT", "WAREHOUSE", "MARKETING", "LEADER"] as const) {
+    const q = resolvePermissions(vai, null);
+    assert.ok(!q.includes("ai:send"), `${vai} KHÔNG được có quyền bấm gửi tin cho khách`);
+  }
+  for (const vai of ["CS", "ADMIN", "MANAGER"] as const) {
+    assert.ok(resolvePermissions(vai, null).includes("ai:send"), `${vai} phải trực được hàng đợi trợ lý`);
   }
 
   // Và middleware KHÔNG được coi /ai là đường công khai. Mở tên miền ra Internet mà lọt dòng này

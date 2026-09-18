@@ -25,7 +25,17 @@ export const metadata = { title: "Hàng đợi trợ lý AI" };
  * rồi mới biết tin không đi (hoặc tệ hơn: tưởng không đi mà lại đi).
  */
 export default async function CopilotPage() {
-  await requirePermission("ai:view");
+  /*
+    QUYỀN CỦA MÀN HÌNH NÀY LÀ `ai:send`, KHÔNG PHẢI `ai:view`.
+
+    `ai:view` là quyền QUAN SÁT nhân sự AI (lượt chạy, chi phí, chấm tay) và trưởng nhóm có nó.
+    Hàng đợi trợ lý thì khác hẳn: nó bày hội thoại THẬT của khách đang chờ, và cả năm nút trên thẻ
+    đều đòi `ai:send`. Mở nó cho người chỉ có `ai:view` là lộ dữ liệu khách cho một người không
+    thao tác được gì — vừa thừa quyền đọc, vừa vô ích cho chính họ.
+
+    Khai ở ĐÂY chứ không chỉ ở thanh bên: giấu một mục menu không phải là chặn một đường dẫn.
+  */
+  await requirePermission("ai:send");
   const [user, settings, pages] = await Promise.all([getCurrentUser(), getAiSettings(), copilotPages()]);
   const agent = await getAgent("sales", settings);
   const mode = agent?.mode ?? "OFF";
