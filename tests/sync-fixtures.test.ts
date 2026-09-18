@@ -195,6 +195,7 @@ import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testCareEffect } from "./care-effect.test";
 import { testCareReopen } from "./care-reopen.test";
+import { testCareResolution } from "./care-resolution.test";
 import { testReportingParity } from "./reporting-parity.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
@@ -1751,6 +1752,9 @@ async function main() {
   await testCareOs(db);
   testCareEffect();
   await testCareReopen(db);
+  // Ngay sau đó: bài kết quả xử lý dựng kiện + đợt riêng mang tiền tố `cres-` và TỰ DỌN sạch, nên
+  // không dòng nào của nó lọt vào tổng của báo cáo khác.
+  await testCareResolution(db);
   // Ngay sau đó: bài này gieo lịch sử vận đơn riêng để học xác suất, rồi TỰ DỌN sạch — đặt giữa
   // chừng thì những dòng đó lọt vào mẫu của báo cáo khác.
   await testReportingParity(db);

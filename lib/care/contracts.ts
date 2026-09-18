@@ -1,3 +1,4 @@
+import type { BusinessAction } from "@/lib/constants/care-outcome";
 import type { CarrierSubstate } from "@/lib/constants/carrier-substate";
 import type { CareSlaHours } from "@/lib/care/view";
 import type { CareEventAction, CareEventSource, CareReasonClass, CareReasonKey, CareStatus, CareView, CarrierActionKey, CarrierRequestStatus } from "@/lib/constants/care";
@@ -28,6 +29,24 @@ export type CareState = {
   reopenCount: number;
   updatedAt: Date | null;
   updatedBy: string;
+  /**
+   * KẾT QUẢ XỬ LÝ gần nhất — chiều thứ BA, tách hẳn khỏi `status` (đội đang ở đâu) và khỏi chiều
+   * ĐVVC (gói hàng ở đâu). Xem `lib/constants/care-resolution.ts`.
+   *
+   * ĐỌC RA từ dòng `care_business_actions` mới nhất của ĐÚNG đợt này, KHÔNG phải một cột lưu song
+   * song: một cột thứ hai là tự nhận câu hỏi “hai chỗ lệch nhau thì tin chỗ nào”. `null` = chưa ai
+   * quyết gì, khác hẳn “đã quyết là không làm gì”.
+   *
+   * Optional vì hợp đồng này cấm đổi hình dạng cũ — nơi gọi cũ không truyền thì coi như chưa biết.
+   */
+  lastDecision?: {
+    action: BusinessAction;
+    at: Date;
+    /** Tên (hoặc email) người quyết — ẢNH CHỤP để đọc; quy kết đi bằng `care_business_actions.actor_user_id`. */
+    by: string;
+    reasonCode: string | null;
+    note: string;
+  } | null;
 };
 
 export type CarrierRequestView = {
@@ -185,6 +204,20 @@ export type CareCaseDetail = {
     receiver: { name: string; phone: string; address: string };
     attemptNo: number | null;
     trackingCapability: "API_TRACKABLE" | "WEBHOOK_ONLY" | "UNKNOWN_CAPABILITY";
+    /**
+     * MÃ VIETTEL POST THẬT — chỉ `shipments.vtp_order_number`. Đứng riêng khỏi `tracking` (đã bị
+     * `coalesce` sang mã Pancake / id ERP) vì CHỈ cột này dựng được liên kết tra cứu: tra bằng mã
+     * Pancake trên viettelpost.vn ra "không tìm thấy", và một liên kết sai tệ hơn không có.
+     */
+    vtpOrderNumber: string | null;
+    /** ĐVVC ĐANG LÀM GÌ ở mức chi tiết — `stage` gộp "chờ phát lại" với "tồn - khách nghỉ" làm một. */
+    substate: CarrierSubstate;
+    substateLabel: string;
+    /** Số lần bưu tá phát hụt, đếm từ chứng từ hành trình. */
+    failedAttempts: number;
+    /** Giờ kể từ tin ĐVVC gần nhất. `null` = CHƯA CÓ TIN NÀO, không phải 0 giờ. */
+    ageHours: number | null;
+    vtpStatus: number | null;
   };
   order: { id: string; systemId: number | null; total: number; prepaid: number; items: { name: string; qty: number; price: number }[]; chatUrl: string | null } | null;
   customer: { name: string; phone: string; history: { delivered: number; returned: number; totalOrders: number } | null };
@@ -195,6 +228,23 @@ export type CareCaseDetail = {
   sla: CareSlaView | null;
   events: CareEvent[];
   careActions: { kind: string; label: string; note: string; actor: string; at: Date }[];
+  /**
+   * NHẬT KÝ QUYẾT ĐỊNH — `care_business_actions`, chỉ thêm, mới nhất trước. Trả lời đúng câu hỏi
+   * "ai đã quyết gì, lúc nào, kèm lý do gì, ĐVVC nói lại ra sao" mà `care_case_events` (mọi lần
+   * chạm) và `care_actions` (việc chăm sóc thô) đều không trả lời được một mình.
+   */
+  decisions: {
+    id: string;
+    at: Date;
+    actor: string;
+    action: BusinessAction;
+    reasonCode: string | null;
+    note: string;
+    carrierResult: string | null;
+    previousCareStatus: string | null;
+    nextCareStatus: string | null;
+    followUpAt: Date | null;
+  }[];
   carrierRequests: CarrierRequestView[];
   capabilities: CarrierCapabilityView[];
 };

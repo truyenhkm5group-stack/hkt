@@ -20,8 +20,10 @@ import { can, type SessionUser } from "@/lib/auth/session";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { CARE_VIEWS, CARE_VIEW_HINT, CARE_VIEW_LABEL, type CareView } from "@/lib/constants/care";
+import { RESOLUTION_NOTES_DEFAULT, type ResolutionAction } from "@/lib/constants/care-resolution";
+import type { CareNotePreset } from "@/lib/constants/care";
 import { formatNumber, formatVND } from "@/lib/format";
-import { getCareNotePresets, getCareWorkbench } from "@/lib/queries/care-workbench";
+import { getCareNotePresets, getCareWorkbench, getResolutionNotePresets } from "@/lib/queries/care-workbench";
 import { listShipments, shipmentFacets, shipmentSummary, SHIPMENT_SORTABLE } from "@/lib/queries/shipments";
 import { productCodesOfShipments, variantIdsOfCodes } from "@/lib/queries/product-code";
 import { getVtpReconcileQueue } from "@/lib/queries/vtp-reconcile-queue";
@@ -52,7 +54,9 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
   const basisRaw = typeof raw.basis === "string" ? raw.basis : "";
   const basis: PeriodBasis = (PERIOD_BASES as readonly string[]).includes(basisRaw) ? (basisRaw as PeriodBasis) : "CASE_OPENED_AT";
 
-  const [wb, staff, presets] = ngoaiCare ? [null, [], []] : await Promise.all([getCareWorkbench(), assignableUsers(), getCareNotePresets()]);
+  const [wb, staff, presets, resolutionPresets]: [Awaited<ReturnType<typeof getCareWorkbench>> | null, { id: string; name: string }[], CareNotePreset[], Record<ResolutionAction, string[]>] = ngoaiCare
+    ? [null, [], [], RESOLUTION_NOTES_DEFAULT]
+    : await Promise.all([getCareWorkbench(), assignableUsers(), getCareNotePresets(), getResolutionNotePresets()]);
   const counts = wb?.counts ?? (ngoaiCare ? (await getCareWorkbench()).counts : { care: 0, waiting: 0, escalated: 0, done: 0 });
 
   const tab = (key: CareView | "report" | "reconcile", label: string, count?: number) => (
@@ -165,7 +169,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
       ) : view === "all" ? (
         <AllShipments raw={raw} user={user} />
       ) : (
-        <CareWorkbenchView initial={wb!} view={view} staff={staff} presets={presets} canManage={can(user, "shipments:manage")} />
+        <CareWorkbenchView initial={wb!} view={view} staff={staff} presets={presets} resolutionPresets={resolutionPresets} canManage={can(user, "shipments:manage")} />
       )}
     </div>
   );

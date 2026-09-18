@@ -7,7 +7,7 @@ import { clearMemo } from "@/lib/cache";
 import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { careSlaHours } from "@/lib/care/sla";
 import { carrierSubstate } from "@/lib/constants/carrier-substate";
-import { ACTION_CALLS_CARRIER, BUSINESS_ACTIONS, BUSINESS_ACTION_LABEL } from "@/lib/constants/care-outcome";
+import { ACTION_CALLS_CARRIER, BUSINESS_ACTIONS, BUSINESS_ACTION_LABEL, type BusinessAction } from "@/lib/constants/care-outcome";
 import { NOT_CARE_CONDITION } from "@/lib/care/lifecycle";
 import { slaOf } from "@/lib/care/view";
 import {
@@ -46,7 +46,7 @@ export type Result<T> = { ok: true; data: T } | { error: string };
 
 type CareRow = typeof schema.shipmentCare.$inferSelect;
 
-const EMPTY: CareState = { status: "NEW", owner: null, followUpAt: null, lastNote: "", lastNoteAt: null, lastNoteBy: "", firstResponseAt: null, doneAt: null, reopenCount: 0, updatedAt: null, updatedBy: "" };
+const EMPTY: CareState = { status: "NEW", owner: null, followUpAt: null, lastNote: "", lastNoteAt: null, lastNoteBy: "", firstResponseAt: null, doneAt: null, reopenCount: 0, updatedAt: null, updatedBy: "", lastDecision: null };
 
 /**
  * Trạng thái care của một kiện để trả về màn hình sau mỗi thao tác: đợt ĐANG MỞ, hoặc — khi không
@@ -63,7 +63,22 @@ export async function loadCareState(shipmentId: string): Promise<CareState> {
     .orderBy(desc(schema.shipmentCare.active), desc(schema.shipmentCare.episodeNo))
     .limit(1);
   if (!r) return EMPTY;
+  /*
+    KẾT QUẢ XỬ LÝ đi cùng mọi lượt trả về, không phải chỉ lượt nào nhớ đọc thêm.
+
+    Mỗi Server Action trả `CareState` mới nhất và màn hình vá dòng bằng đúng nó (mục 18 của đề bài:
+    máy chủ là nguồn sự thật). Nếu ô "kết quả" phải đợi một lượt tải trang mới đúng thì người bấm
+    thấy nút không ăn và bấm lại — chính kịch bản bấm-hai-lần mà luật 61 phải sinh ra để chặn.
+  */
+  const [d] = await db
+    .select({ action: schema.careBusinessActions.actionType, at: schema.careBusinessActions.requestedAt, email: schema.careBusinessActions.actorEmail, name: schema.users.name, reasonCode: schema.careBusinessActions.reasonCode, note: schema.careBusinessActions.reasonNote })
+    .from(schema.careBusinessActions)
+    .leftJoin(schema.users, eq(schema.users.id, schema.careBusinessActions.actorUserId))
+    .where(eq(schema.careBusinessActions.careCaseId, r.care.id))
+    .orderBy(desc(schema.careBusinessActions.requestedAt), desc(schema.careBusinessActions.createdAt))
+    .limit(1);
   return {
+    lastDecision: d ? { action: d.action as BusinessAction, at: d.at, by: d.name || d.email || "", reasonCode: d.reasonCode, note: d.note ?? "" } : null,
     status: r.care.careStatus as CareStatus,
     owner: r.care.ownerId ? { id: r.care.ownerId, name: r.ownerName || r.care.ownerEmail || r.care.ownerId } : null,
     followUpAt: r.care.followUpAt,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, MessageSquare, Phone, Sparkles } from "lucide-react";
@@ -11,30 +11,68 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Textarea } from "@/components/ui/textarea";
 import { resolveNotification } from "@/lib/actions/alerts";
-import { loadShipmentQuickView, recordCareAction } from "@/lib/actions/care";
+import { loadCareWorkspace, recordCareAction, type CareWorkspace } from "@/lib/actions/care";
+import { recordBusinessAction, setCareOwner } from "@/lib/actions/care-workbench";
+import { ResolutionBadge, ResolutionControl, type ResolutionExtra } from "@/app/(dashboard)/shipments/resolution-control";
+import { journeyTone, parseCourier } from "@/lib/care/journey-display";
+import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
+import { ACTION_CALLS_CARRIER, BUSINESS_ACTION_LABEL, type BusinessAction } from "@/lib/constants/care-outcome";
+import { RESOLUTION_ACTIONS, RESOLUTION_LABEL, RESOLUTION_TO_BUSINESS, resolutionOf, type ResolutionAction } from "@/lib/constants/care-resolution";
+import { CARE_STATUS_LABEL, CARE_STATUS_TONE, type CareStatus } from "@/lib/constants/care";
 import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
-import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import type { QuickView } from "@/lib/queries/shipment-quickview";
+import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
+import { getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
+import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /**
- * ───────────── NGĂN KÉO TRA NHANH ─────────────
+ * ───────────── BÀN XỬ LÝ MỘT KIỆN HÀNG (panel bên phải) ─────────────
  *
  * ĐO ĐƯỢC: gọi một khách giao hụt trước đây cần SÁU lần chuyển màn hình (vận đơn → chi tiết → quay
- * lại → đơn → khách → tab Pancake). Ngăn kéo này gom vào MỘT lần mở, và danh sách phía sau không
- * mất chỗ — đóng lại là vẫn ở đúng dòng vừa đọc.
+ * lại → đơn → khách → tab Pancake). Panel này gom vào MỘT lần mở, và danh sách phía sau không mất
+ * chỗ — đóng lại là vẫn ở đúng dòng vừa đọc.
  *
- * Dữ liệu tải KHI MỞ, không tải sẵn cho cả 60 dòng: tải sẵn là bắt người dùng trả giá cho 59 kiện
- * họ không mở.
+ * ─── BẢN NÀY ĐỔI GÌ (18/09/2026) ───
  *
- * KHÔNG có nút nào tự nhắn khách. Nút ở đây GHI LẠI việc người vừa làm.
+ * Panel cũ chỉ TRA CỨU được: nó đọc `getShipmentQuickView`, nên không có trạng thái care, không có
+ * người phụ trách, không có hạn, không có kết quả đã quyết, và không có mã Viettel Post thật (nên
+ * mã vận đơn chỉ sao chép được chứ không bấm sang ĐVVC được). Muốn XỬ LÝ thì phải đóng panel, tìm
+ * lại dòng trong bảng, thao tác ở ngoài — đúng thứ panel sinh ra để khỏi phải làm.
  *
- * LÀM MỘT LƯỢT, KHÔNG MỞ-ĐÓNG TỪNG KIỆN. Truyền `queue` (danh sách kiện theo đúng thứ tự của
- * bảng/hàng đợi phía sau) thì ngăn kéo có ‹ Trước · n/N · Tiếp › và sau khi ghi nhận sẽ TỰ CHUYỂN
- * sang kiện kế tiếp: một buổi gọi 30 khách là 30 lần bấm "Ghi nhận", không phải 30 lần đóng ngăn
- * kéo, tìm dòng, mở lại. `caseId` (việc trong hàng đợi Cần xử lý) cho phép "Ghi nhận & đóng việc".
+ * Nay panel đọc `getCareCaseDetail` (cùng phép đọc mà AI Copilot dùng) và mang đủ BA CHIỀU:
+ *
+ *   ĐVVC nói gì   → hành trình + trạng thái con, CHỈ ĐỌC, không nút nào sửa được;
+ *   đội ở đâu     → trạng thái xử lý, người phụ trách, hạn;
+ *   đội quyết gì  → ba nút Đã hoàn · Phát tiếp · Xử lý sau, CÙNG một bản dựng với bảng bên ngoài.
+ *
+ * Ba chiều đứng ba khối riêng và KHÔNG khối nào suy ra khối nào. Bấm "Đã hoàn" ở đây KHÔNG làm vận
+ * đơn thành hoàn: hành trình bên dưới vẫn nguyên si cho tới khi Viettel Post nói khác.
+ *
+ * ─── VẪN KHÔNG CÓ NÚT NÀO TỰ NHẮN KHÁCH ───
+ *
+ * Nút ở đây GHI LẠI điều người vừa làm, hoặc GỬI một yêu cầu có ghi vết sang ĐVVC. ERP không thay
+ * người nói chuyện với khách.
+ *
+ * LÀM MỘT LƯỢT, KHÔNG MỞ-ĐÓNG TỪNG KIỆN. `queue` (danh sách kiện theo đúng thứ tự của bảng phía
+ * sau) cho panel có ‹ Trước · n/N · Tiếp ›, phím J/K, và — nếu bật — TỰ CHUYỂN sang kiện kế tiếp
+ * sau khi ghi nhận: một buổi gọi 30 khách là 30 lần bấm, không phải 30 lần đóng panel và tìm dòng.
  */
 export type CareQueueItem = { shipmentId: string; caseId?: string | null };
+
+/** Bật/tắt "ghi nhận xong tự chuyển kiện kế". Lựa chọn của từng người, từng máy — nên ở trình duyệt. */
+const AUTO_NEXT_KEY = "erp.care.autoNext";
+
+function readAutoNext(): boolean {
+  try {
+    return window.localStorage.getItem(AUTO_NEXT_KEY) !== "0";
+  } catch {
+    // Chặn cookie / chế độ ẩn danh ⇒ mặc định BẬT, không làm panel chết.
+    return true;
+  }
+}
+
+/** Một dòng nhật ký gộp: quyết định · thao tác care · việc đã chăm. Ba nguồn, một trục thời gian. */
+type LogRow = { at: Date; actor: string; kind: "DECISION" | "CARE" | "ACTION"; title: string; detail: string };
 
 export function CareDrawer({
   shipmentId,
@@ -50,10 +88,10 @@ export function CareDrawer({
   caseId?: string | null;
   /** Danh sách kiện để đi lần lượt. Kiện hiện tại phải nằm trong danh sách; không có thì bỏ qua. */
   queue?: CareQueueItem[];
-  /** Không truyền thì ngăn kéo không tự vẽ nút mở — dùng cho nơi đã có sẵn nút (ô lệnh ⌘K). */
+  /** Không truyền thì panel không tự vẽ nút mở — dùng cho nơi đã có sẵn nút (ô lệnh ⌘K). */
   children?: React.ReactNode;
   className?: string;
-  /** Điều khiển từ ngoài. Bỏ trống thì ngăn kéo tự quản trạng thái mở của mình. */
+  /** Điều khiển từ ngoài. Bỏ trống thì panel tự quản trạng thái mở của mình. */
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
 }) {
@@ -66,32 +104,48 @@ export function CareDrawer({
   };
   // Kiện ĐANG XEM có thể khác kiện được truyền vào khi người dùng đi tiếp trong danh sách.
   const [current, setCurrent] = useState<CareQueueItem>({ shipmentId, caseId });
-  const [data, setData] = useState<QuickView | null>(null);
+  const [ws, setWs] = useState<CareWorkspace | null>(null);
   const [dangTai, setDangTai] = useState(false);
   const [kind, setKind] = useState<CareActionKind>("CALLED_REACHED");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [autoNext, setAutoNext] = useState(true);
+  const [openFor, setOpenFor] = useState<ResolutionAction | null>(null);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
 
+  useEffect(() => setAutoNext(readAutoNext()), []);
+
+  const data = ws?.detail ?? null;
   const hangDoi = queue && queue.some((q) => q.shipmentId === current.shipmentId) ? queue : null;
   const viTri = hangDoi ? hangDoi.findIndex((q) => q.shipmentId === current.shipmentId) : -1;
   const truoc = hangDoi && viTri > 0 ? hangDoi[viTri - 1] : null;
   const tiep = hangDoi && viTri >= 0 && viTri < hangDoi.length - 1 ? hangDoi[viTri + 1] : null;
 
-  async function tai(id = current.shipmentId) {
+  const tai = useCallback(async (id: string) => {
     setDangTai(true);
-    const r = await loadShipmentQuickView(id);
-    setData(r ?? null);
+    const r = await loadCareWorkspace(id);
+    setWs(r ?? null);
     setDangTai(false);
-  }
+  }, []);
 
-  function chuyen(item: CareQueueItem) {
-    setCurrent(item);
-    setData(null);
-    setMsg(null);
-    setNote("");
-    void tai(item.shipmentId);
-  }
+  const chuyen = useCallback(
+    (item: CareQueueItem) => {
+      setCurrent(item);
+      setWs(null);
+      setMsg(null);
+      setNote("");
+      setOpenFor(null);
+      void tai(item.shipmentId);
+    },
+    [tai],
+  );
+
+  /** Nạp lại kiện đang xem — dùng sau mỗi lần ghi, để panel đọc ĐÚNG thứ máy chủ vừa lưu. */
+  const naplai = useCallback(async () => {
+    const r = await loadCareWorkspace(current.shipmentId);
+    setWs(r ?? null);
+  }, [current.shipmentId]);
 
   function ghi(dongViec: boolean) {
     start(async () => {
@@ -109,24 +163,137 @@ export function CareDrawer({
         router.refresh();
       }
       setNote("");
-      if (tiep) {
-        // Tự chuyển sang kiện kế tiếp — người gọi khách không phải quay lại bảng để tìm dòng tiếp theo.
+      if (autoNext && tiep) {
         toast.success(`Đã ghi nhận${dongViec ? " và đóng việc" : ""} · chuyển sang kiện ${viTri + 2}/${hangDoi!.length}`);
         chuyen(tiep);
         return;
       }
-      setMsg(hangDoi ? "Đã ghi nhận — hết danh sách" : "Đã ghi nhận");
-      const lai = await loadShipmentQuickView(current.shipmentId);
-      setData(lai ?? null);
+      setMsg("Đã ghi nhận");
+      await naplai();
     });
   }
 
-  // Mở từ ngoài (ô lệnh ⌘K) cũng phải nạp dữ liệu — nếu chỉ nạp trong hàm bấm nút thì ngăn kéo
-  // mở ra rỗng và đứng im mãi.
+  /*
+    ═══ BA NÚT KẾT QUẢ — CÙNG SERVER ACTION VỚI BẢNG BÊN NGOÀI ═══
+
+    `recordBusinessAction` là đường ghi DUY NHẤT cho một quyết định xử lý. Panel không có đường tắt
+    riêng: nếu có, thì kiểm tra điều kiện ĐVVC, nhật ký, và sổ `care_business_actions` sẽ có hai
+    phiên bản, và phiên bản nào thiếu một bước sẽ là phiên bản người ta dùng vì nó nhanh hơn.
+
+    Sau khi ghi: TẢI LẠI từ máy chủ (mục 18 — máy chủ là nguồn sự thật, không vá bằng thứ mình đoán),
+    rồi mới tự chuyển kiện nếu người dùng bật. Ghi lỗi thì KHÔNG chuyển, và panel đứng nguyên ở kiện
+    đang lỗi — chuyển đi là giấu mất lỗi.
+  */
+  const doResolution = (a: ResolutionAction, extra: ResolutionExtra) =>
+    start(async () => {
+      const r = await recordBusinessAction({ shipmentId: current.shipmentId, action: RESOLUTION_TO_BUSINESS[a], note: extra.note, reasonCode: extra.reasonCode, followUpAt: extra.followUpAt });
+      if ("error" in r) {
+        toast.error(r.error, { duration: 9000 });
+        return;
+      }
+      toast.success(`${RESOLUTION_LABEL[a]} · ${data?.shipment.tracking ?? ""}`, { description: r.data.message, duration: 8000 });
+      // Danh sách phía sau đọc lại hàng đợi: dòng ngoài bảng phải đổi theo panel, không đợi F5.
+      router.refresh();
+      if (autoNext && tiep) {
+        chuyen(tiep);
+        return;
+      }
+      await naplai();
+    });
+
+  const doOwner = (ownerId: string) =>
+    start(async () => {
+      const r = await setCareOwner({ shipmentIds: [current.shipmentId], ownerId: ownerId || null });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      router.refresh();
+      await naplai();
+    });
+
+  // Mở từ ngoài (ô lệnh ⌘K) cũng phải nạp dữ liệu — nếu chỉ nạp trong hàm bấm nút thì panel mở ra
+  // rỗng và đứng im mãi.
   useEffect(() => {
-    if (open && !data && !dangTai) void tai();
+    if (open && !ws && !dangTai) void tai(current.shipmentId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  /*
+    ═══ PHÍM TẮT: CHỈ KHI KHÔNG AI ĐANG GÕ ═══
+
+    J/K đi kiện · 1/2/3 mở ba kết quả · N nhảy vào ô note. Điều kiện chặn đứng TRƯỚC mọi nhánh: một
+    người đang gõ "note 3 lần gọi" mà bị nhảy kiện thì họ mất cả câu vừa gõ và mất cả chỗ đang đứng.
+    Phím có phụ trợ (Ctrl/⌘/Alt) cũng bỏ qua — đó là phím tắt của trình duyệt, không phải của ta.
+  */
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.getAttribute("role") === "combobox")) return;
+      if (e.key === "j" || e.key === "J") {
+        if (tiep) chuyen(tiep);
+      } else if (e.key === "k" || e.key === "K") {
+        if (truoc) chuyen(truoc);
+      } else if (e.key === "1" || e.key === "2" || e.key === "3") {
+        if (!ws?.canManage) return;
+        setOpenFor(RESOLUTION_ACTIONS[Number(e.key) - 1]);
+      } else if (e.key === "n" || e.key === "N") {
+        e.preventDefault();
+        noteRef.current?.focus();
+      } else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, tiep, truoc, chuyen, ws?.canManage]);
+
+  const vtpUrl = getViettelPostTrackingUrl(data?.shipment.vtpOrderNumber);
+  const resolution = resolutionOf(data?.care.lastDecision?.action ?? null);
+
+  /* Nhật ký gộp ba nguồn, mới nhất trước — xem `LogRow`. Dựng ở client vì nó chỉ là cách BÀY, không
+     phải một phép đo: ba nguồn vẫn là ba bảng riêng ở CSDL. */
+  const log = useMemo<LogRow[]>(() => {
+    if (!data) return [];
+    const rows: LogRow[] = [];
+    for (const d of data.decisions) {
+      const chiTiet = [
+        d.reasonCode ? `Lý do: ${RETURN_REASON_LABEL[d.reasonCode as ReturnReason] ?? d.reasonCode}` : "",
+        d.followUpAt ? `Hẹn: ${formatDateTime(d.followUpAt)}` : "",
+        d.carrierResult ? `ĐVVC: ${d.carrierResult}` : "",
+        d.note,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      rows.push({ at: d.at, actor: d.actor, kind: "DECISION", title: `Chọn: ${resolutionOf(d.action) ? RESOLUTION_LABEL[resolutionOf(d.action)!] : BUSINESS_ACTION_LABEL[d.action]}`, detail: chiTiet });
+    }
+    for (const e of data.events) {
+      // Sự kiện CARRIER_REQUEST đã được kể bằng dòng quyết định ở trên — kể lại là nhân đôi.
+      if (e.action === "CARRIER_REQUEST") continue;
+      const truocSau = e.previousStatus && e.nextStatus && e.previousStatus !== e.nextStatus ? `${CARE_STATUS_LABEL[e.previousStatus]} → ${CARE_STATUS_LABEL[e.nextStatus]}` : "";
+      rows.push({ at: e.at, actor: e.actor || (e.source === "SYSTEM" ? "Hệ thống" : "không rõ người"), kind: "CARE", title: truocSau || e.action, detail: e.note });
+    }
+    for (const a of data.careActions) rows.push({ at: a.at, actor: a.actor || "không rõ người", kind: "ACTION", title: a.label, detail: a.note });
+    return rows.sort((x, y) => y.at.getTime() - x.at.getTime()).slice(0, 60);
+  }, [data]);
+
+  const eligibility = (a: ResolutionAction) => {
+    if (!data) return null;
+    const b = RESOLUTION_TO_BUSINESS[a];
+    if (!ACTION_CALLS_CARRIER[b as BusinessAction]) return null;
+    const e = canRequestCarrierAction(b === "APPROVE_RETURN" ? "approve-return" : "redeliver", {
+      stage: data.shipment.stage,
+      vtpStatus: data.shipment.vtpStatus,
+      vtpStatusName: data.shipment.rawStatus,
+      orderNumber: data.shipment.vtpOrderNumber,
+      trackingCapability: data.shipment.trackingCapability,
+      configured: true,
+    });
+    return { ok: e.ok, reason: e.reason };
+  };
+
+  const breached = Boolean(data?.sla && (data.sla.firstResponseBreached || data.sla.resolveBreached));
 
   return (
     <>
@@ -135,7 +302,7 @@ export function CareDrawer({
           type="button"
           onClick={() => {
             setOpen(true);
-            if (!data && !dangTai) void tai();
+            if (!ws && !dangTai) void tai(current.shipmentId);
           }}
           className={cn("text-left hover:underline", className)}
         >
@@ -143,93 +310,220 @@ export function CareDrawer({
         </button>
       ) : null}
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="right" className="w-full gap-0 overflow-y-auto sm:max-w-xl">
-          <SheetHeader className="pb-2">
-            {hangDoi ? (
-              <div className="flex items-center gap-1 text-[11.5px] text-muted-foreground">
-                <button type="button" disabled={!truoc} onClick={() => truoc && chuyen(truoc)} className="rounded border p-0.5 hover:bg-accent disabled:opacity-40" aria-label="Kiện trước">
-                  <ChevronLeft className="size-3.5" />
-                </button>
-                <span className="numeric px-1">
-                  {viTri + 1}/{hangDoi.length}
-                </span>
-                <button type="button" disabled={!tiep} onClick={() => tiep && chuyen(tiep)} className="rounded border p-0.5 hover:bg-accent disabled:opacity-40" aria-label="Kiện tiếp theo">
-                  <ChevronRight className="size-3.5" />
-                </button>
-                <span className="ml-1">đi lần lượt theo danh sách — ghi nhận xong tự chuyển kiện kế</span>
-              </div>
-            ) : null}
-            <SheetTitle className="text-base">{data ? `${data.customer} · ${data.tracking}` : "Đang mở kiện hàng…"}</SheetTitle>
-            <SheetDescription>
-              {data ? `${data.stageLabel} · VTP báo "${data.rawStatus}" · COD ${formatVND(data.codAmount)}` : "Tải thông tin cần để gọi khách"}
+        {/* Panel CUỘN RIÊNG và đầu panel DÍNH: người cuộn xuống đọc hành trình vẫn bấm được ba nút. */}
+        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+          <SheetHeader className="shrink-0 border-b px-4 pb-2.5 pt-4">
+            {/* `pr-8` chừa chỗ cho nút đóng của Sheet — không chừa thì dòng gợi ý phím tắt chui xuống dưới nó. */}
+            <div className="flex flex-wrap items-center gap-1 pr-8 text-[11.5px] text-muted-foreground">
+              {hangDoi ? (
+                <>
+                  <button type="button" disabled={!truoc} onClick={() => truoc && chuyen(truoc)} className="rounded border p-0.5 hover:bg-accent disabled:opacity-40" aria-label="Kiện trước (phím K)" title="Kiện trước · phím K">
+                    <ChevronLeft className="size-3.5" />
+                  </button>
+                  <span className="numeric px-1">
+                    {viTri + 1}/{hangDoi.length}
+                  </span>
+                  <button type="button" disabled={!tiep} onClick={() => tiep && chuyen(tiep)} className="rounded border p-0.5 hover:bg-accent disabled:opacity-40" aria-label="Kiện tiếp theo (phím J)" title="Kiện tiếp theo · phím J">
+                    <ChevronRight className="size-3.5" />
+                  </button>
+                  <label className="ml-1 inline-flex cursor-pointer items-center gap-1" title="Ghi nhận xong thì panel tự mở kiện kế tiếp trong danh sách. Ghi LỖI thì không chuyển — panel đứng lại ở kiện đang lỗi.">
+                    <input
+                      type="checkbox"
+                      checked={autoNext}
+                      onChange={(e) => {
+                        setAutoNext(e.target.checked);
+                        try {
+                          window.localStorage.setItem(AUTO_NEXT_KEY, e.target.checked ? "1" : "0");
+                        } catch {
+                          /* Không lưu được thì lựa chọn chỉ sống trong phiên này — không chặn thao tác. */
+                        }
+                      }}
+                    />
+                    Ghi nhận xong tự chuyển kiện kế
+                  </label>
+                  <span className="ml-auto hidden sm:inline">Phím: J/K đi kiện · 1·2·3 kết quả · N ghi note</span>
+                </>
+              ) : (
+                <span className="ml-auto hidden sm:inline">Phím: 1·2·3 kết quả · N ghi note</span>
+              )}
+            </div>
+            <SheetTitle className="flex flex-wrap items-center gap-2 text-base">
+              {data ? (
+                <>
+                  <span>{data.customer.name}</span>
+                  {/*
+                    MÃ VẬN ĐƠN BẤM ĐƯỢC — mở thẳng trang tra cứu Viettel Post ở TAB MỚI, panel giữ
+                    nguyên chỗ đang đứng. Địa chỉ dựng bằng `getViettelPostTrackingUrl`, cùng hàm mà
+                    bảng và trang chi tiết dùng: không có chuỗi địa chỉ thứ hai trong kho mã.
+
+                    Chưa có mã Viettel Post thì KHÔNG vẽ liên kết — mã Pancake tra trên viettelpost.vn
+                    ra "không tìm thấy", và một liên kết sai tệ hơn không có liên kết.
+                  */}
+                  {vtpUrl ? (
+                    <a
+                      href={vtpUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Mở hành trình kiện này trên viettelpost.vn (tab mới)"
+                      className="inline-flex cursor-pointer items-center gap-1 font-mono text-[13px] font-semibold text-primary underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                    >
+                      {data.shipment.tracking} <ExternalLink className="size-3.5" />
+                    </a>
+                  ) : (
+                    <span className="font-mono text-[13px]" title="Chưa có mã Viettel Post — không tra cứu trên viettelpost.vn được.">
+                      {data.shipment.tracking}
+                    </span>
+                  )}
+                  <CopyButton value={data.shipment.tracking} what="mã vận đơn" className="size-6 shrink-0" />
+                </>
+              ) : (
+                "Đang mở kiện hàng…"
+              )}
+            </SheetTitle>
+            <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              {data ? (
+                <>
+                  <span>
+                    ĐVVC: <b className="font-medium text-foreground">{data.shipment.rawStatus}</b> · {data.shipment.substateLabel}
+                  </span>
+                  <span>· COD {formatVND(data.shipment.codAmount)}</span>
+                  <ResolutionBadge value={resolution} at={data.care.lastDecision?.at ?? null} by={data.care.lastDecision?.by} />
+                </>
+              ) : (
+                "Tải đủ ba chiều: ĐVVC nói gì · đội ở đâu · đội quyết gì"
+              )}
             </SheetDescription>
           </SheetHeader>
 
-          {dangTai || !data ? (
+          {dangTai || !data || !ws ? (
             <div className="flex items-center gap-2 px-4 py-10 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" /> Đang tải…
             </div>
           ) : (
-            <div className="space-y-4 px-4 pb-8">
-              {/* ───── Gọi được ngay, và sao chép được khi việc là nhắn chứ không phải gọi ───── */}
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-8 pt-3">
+              {/* ───── Liên hệ: gọi · sao chép · chat · đơn ───── */}
               <div className="flex flex-wrap items-center gap-2">
-                {data.phone ? (
+                {data.customer.phone ? (
                   <span className="inline-flex items-center gap-0.5 rounded-lg border bg-card pr-1">
-                    <a href={`tel:${data.phone}`} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12.5px] font-semibold hover:bg-accent">
-                      <Phone className="size-3.5" /> {data.phone}
+                    <a href={`tel:${data.customer.phone}`} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[12.5px] font-semibold hover:bg-accent">
+                      <Phone className="size-3.5" /> {data.customer.phone}
                     </a>
-                    <CopyButton value={data.phone} what="SĐT" className="size-6 shrink-0" />
+                    <CopyButton value={data.customer.phone} what="SĐT" className="size-6 shrink-0" />
                   </span>
                 ) : (
                   <span className="rounded-lg border px-2.5 py-1.5 text-[12.5px] text-muted-foreground">Chưa có SĐT</span>
                 )}
-                {/* Mã vận đơn: việc thường xuyên nhất sau khi gọi là dán mã sang trang ĐVVC. */}
-                {data.tracking ? (
-                  <span className="inline-flex items-center gap-0.5 rounded-lg border bg-card pl-2.5 pr-1">
-                    <span className="font-mono text-[12.5px]">{data.tracking}</span>
-                    <CopyButton value={data.tracking} what="mã vận đơn" className="size-6 shrink-0" />
-                  </span>
-                ) : null}
-                {data.chatUrl ? (
-                  <a href={data.chatUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent">
+                {data.order?.chatUrl ? (
+                  <a href={data.order.chatUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent">
                     <MessageSquare className="size-3.5" /> Mở chat Pancake
                   </a>
                 ) : null}
-                {data.orderSystemId ? (
-                  <Link href={`/orders/${data.orderId}`} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent">
-                    <ExternalLink className="size-3.5" /> Đơn #{data.orderSystemId}
+                {data.order?.systemId ? (
+                  <Link href={`/orders/${data.order.id}`} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent">
+                    <ExternalLink className="size-3.5" /> Đơn #{data.order.systemId}
                   </Link>
                 ) : null}
-                <Link href={`/shipments/${data.shipmentId}`} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent">
+                <Link href={`/shipments/${data.shipment.id}`} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent">
                   Chi tiết vận đơn
                 </Link>
                 <button
                   type="button"
                   className="inline-flex items-center gap-1.5 rounded-lg border border-brand/40 bg-card px-2.5 py-1.5 text-[12.5px] hover:bg-accent"
                   title="AI đọc đơn, khách, hành trình Viettel Post, COD và lịch sử care rồi tóm tắt + đề nghị bước tiếp theo. Không tự làm gì."
-                  onClick={() => openCopilot({ message: "Tóm tắt kiện này: chuyện gì đang xảy ra, vì sao cần care, tiền nào đang rủi ro, nên làm gì tiếp?", context: { entityType: "shipment", entityId: data.shipmentId }, send: true })}
+                  onClick={() => openCopilot({ message: "Tóm tắt kiện này: chuyện gì đang xảy ra, vì sao cần care, tiền nào đang rủi ro, nên làm gì tiếp?", context: { entityType: "shipment", entityId: data.shipment.id }, send: true })}
                 >
                   <Sparkles className="size-3.5 text-brand" /> Tóm tắt bằng AI
                 </button>
               </div>
 
-              {data.address ? <p className="text-[12px] leading-snug text-muted-foreground">{data.address}</p> : null}
+              {/* ───── Dữ kiện trong một lưới: không phải cuộn đi tìm từng con số ───── */}
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-xl border px-3 py-2 text-[12px] sm:grid-cols-3">
+                <Fact label="COD" value={formatVND(data.shipment.codAmount)} />
+                <Fact label="Lần phát hụt" value={data.shipment.failedAttempts ? `${formatNumber(data.shipment.failedAttempts)} lần` : "chưa hụt lần nào"} />
+                {/* CHƯA CÓ TIN khác hẳn 0 giờ — in dấu gạch, không in số 0 (luật 42). */}
+                <Fact label="Tin ĐVVC gần nhất" value={data.shipment.ageHours === null ? "—" : data.shipment.ageHours < 1 ? "<1 giờ trước" : data.shipment.ageHours < 48 ? `${Math.round(data.shipment.ageHours)} giờ trước` : `${Math.round(data.shipment.ageHours / 24)} ngày trước`} />
+                <Fact label="Lần gửi thứ" value={data.shipment.attemptNo === null ? "—" : String(data.shipment.attemptNo)} />
+                <Fact
+                  label="Hạn xử lý"
+                  value={data.sla ? (breached ? "QUÁ HẠN" : `đóng trước ${formatDateTime(data.sla.resolveDueAt)}`) : "—"}
+                  tone={breached ? "font-semibold text-rose-600 dark:text-rose-400" : ""}
+                  title={data.sla ? `Phản hồi đầu hạn ${formatDateTime(data.sla.firstResponseDueAt)} · đóng hạn ${formatDateTime(data.sla.resolveDueAt)}` : undefined}
+                />
+                <Fact
+                  label="Trạng thái xử lý"
+                  value={CARE_STATUS_LABEL[data.care.status as CareStatus]}
+                  tone={cn("rounded px-1", CARE_STATUS_TONE[data.care.status as CareStatus])}
+                  title="Đội đang ở đâu với việc của mình. KHÔNG phải trạng thái gói hàng."
+                />
+                <div className="col-span-2 flex items-center gap-1.5 sm:col-span-3">
+                  <span className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Phụ trách</span>
+                  <select
+                    value={data.care.owner?.id ?? ""}
+                    disabled={pending || !ws.canManage}
+                    onChange={(e) => doOwner(e.target.value)}
+                    className="h-7 max-w-[180px] rounded-md border bg-background px-1.5 text-[11.5px] disabled:opacity-60"
+                    aria-label="Người phụ trách ca"
+                  >
+                    <option value="">Chưa ai nhận</option>
+                    {ws.staff.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </select>
+                  {data.care.followUpAt ? (
+                    <span className={cn("text-[11.5px]", data.care.followUpAt.getTime() <= Date.now() && "font-semibold text-rose-600 dark:text-rose-400")}>· hẹn {formatDateTime(data.care.followUpAt)}</span>
+                  ) : null}
+                </div>
+              </div>
+
+              {/* ───── XỬ LÝ CASE — khối quan trọng nhất, đứng trước mọi thứ phải cuộn ───── */}
+              <div className="rounded-xl border border-primary/30 bg-primary/[0.03] p-3">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span className="text-[12px] font-semibold uppercase tracking-wide">Xử lý case</span>
+                  <span className="text-[11px] text-muted-foreground">quyết định của shop — KHÔNG đổi trạng thái Viettel Post</span>
+                </div>
+                {ws.canManage ? (
+                  <ResolutionControl
+                    variant="panel"
+                    value={resolution}
+                    pending={pending}
+                    presets={ws.resolutionPresets}
+                    canEditPresets={ws.canManage}
+                    eligibility={eligibility}
+                    onSubmit={doResolution}
+                    openFor={openFor}
+                    onOpenForChange={setOpenFor}
+                  />
+                ) : (
+                  <p className="text-[12px] text-muted-foreground">Bạn không có quyền thao tác vận đơn (`shipments:manage`) nên ba nút kết quả bị khoá. Ghi chú và ghi nhận việc đã chăm thì vẫn làm được ở dưới.</p>
+                )}
+                {data.care.lastNote ? (
+                  <p className="mt-2 border-t pt-2 text-[12px]">
+                    <span className="text-muted-foreground">Note gần nhất: </span>
+                    {data.care.lastNote}
+                    <span className="text-[11px] text-muted-foreground">
+                      {" "}
+                      — {data.care.lastNoteBy || "không rõ người"} · {data.care.lastNoteAt ? formatDateTime(data.care.lastNoteAt) : "—"}
+                    </span>
+                  </p>
+                ) : null}
+              </div>
+
+              {data.shipment.receiver.address ? <p className="text-[12px] leading-snug text-muted-foreground">{data.shipment.receiver.address}</p> : null}
 
               {/* ───── Khách này đã mua bao nhiêu lần: đổi hẳn cách nói chuyện ───── */}
-              {data.history ? (
+              {data.customer.history ? (
                 <div className="rounded-lg border bg-muted/30 px-3 py-2 text-[12px]" title="Đếm theo số điện thoại — một người nhắn từ hai trang Pancake vẫn là một khách.">
-                  <b>Khách cũ:</b> {formatNumber(data.history.totalOrders)} đơn · giao thành công {formatNumber(data.history.delivered)} · hoàn {formatNumber(data.history.returned)}
-                  {data.attemptNo && data.attemptNo > 1 ? <> · đây là lần gửi thứ {data.attemptNo}</> : null}
-                  {data.failedAttempts > 0 ? <> · bưu tá đã giao hụt {formatNumber(data.failedAttempts)} lần</> : null}
-                  {/* Đếm theo SĐT, không theo customer_id: Pancake tách khách theo trang nên một người có thể có nhiều hồ sơ — nói trong tooltip, không chiếm dòng. */}
+                  <b>Khách cũ:</b> {formatNumber(data.customer.history.totalOrders)} đơn · giao thành công {formatNumber(data.customer.history.delivered)} · hoàn {formatNumber(data.customer.history.returned)}
                 </div>
               ) : null}
 
-              {data.items.length ? (
+              {data.order?.items.length ? (
                 <div>
                   <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Khách đặt gì</div>
                   <ul className="space-y-0.5 text-[12.5px]">
-                    {data.items.map((it, idx) => (
+                    {data.order.items.map((it, idx) => (
                       <li key={idx} className="flex justify-between gap-3">
                         <span>{it.name}</span>
                         <span className="numeric shrink-0 text-muted-foreground">
@@ -241,21 +535,36 @@ export function CareDrawer({
                 </div>
               ) : null}
 
+              {/* ───── Hành trình ĐVVC: CHỨNG TỪ, chỉ đọc ───── */}
               <div>
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">ĐVVC nói gì</div>
-                {data.timeline.length ? (
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">ĐVVC nói gì</span>
+                  <span className="text-[10.5px] text-muted-foreground">chứng từ Viettel Post · không thao tác nào của đội sửa được dòng nào ở đây</span>
+                </div>
+                {data.journey.length ? (
                   <ul className="space-y-1.5 border-l pl-3 text-[12px]">
-                    {data.timeline.map((t, idx) => (
-                      <li key={idx} className="relative">
-                        <span className="absolute -left-[15px] top-1.5 size-1.5 rounded-full bg-border" />
-                        <div className="font-medium">{t.status}</div>
-                        <div className="text-[11px] text-muted-foreground">
-                          {formatDateTime(t.at)}
-                          {t.location ? ` · ${t.location}` : ""} · {t.source}
-                        </div>
-                        {t.note ? <div className="text-[11.5px] leading-snug text-muted-foreground">{t.note}</div> : null}
-                      </li>
-                    ))}
+                    {data.journey.map((t, idx) => {
+                      const buuTa = parseCourier(`${t.status} ${t.note}`);
+                      return (
+                        <li key={idx} className="relative">
+                          <span className="absolute -left-[15px] top-1.5 size-1.5 rounded-full bg-border" />
+                          <div className={cn("font-medium", journeyTone(t.status))}>{t.status}</div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {formatDateTime(t.at)}
+                            {t.location ? ` · ${t.location}` : ""} · <span className="rounded bg-muted px-1">{t.source}</span>
+                          </div>
+                          {buuTa ? (
+                            <div className="text-[11.5px]">
+                              Bưu tá {buuTa.name} ·{" "}
+                              <a href={`tel:${buuTa.phone}`} className="text-primary hover:underline">
+                                {buuTa.phone}
+                              </a>
+                            </div>
+                          ) : null}
+                          {t.note && t.note !== t.status ? <div className="text-[11.5px] leading-snug text-muted-foreground">{t.note}</div> : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                 ) : (
                   /* Không có mốc nào là một THÔNG TIN, không phải một ô trống: kiện này ERP chưa từng nhận tin gì. */
@@ -263,27 +572,22 @@ export function CareDrawer({
                 )}
               </div>
 
-              {/* ───── Ghi lại việc vừa làm ───── */}
+              {/* ───── Ghi lại việc vừa làm (đo hiệu quả chăm sóc) ───── */}
               <div className="rounded-xl border p-3">
                 <div className="text-[12px] font-semibold" title="ERP không tự nhắn khách. Ghi ở đây để đo được việc chăm có cứu được đơn hay không — đo từ hôm nay, không dựng lại quá khứ.">
                   Ghi lại việc vừa làm
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {CARE_ACTION_KINDS.map((k) => (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setKind(k)}
-                      className={cn("rounded-lg border px-2 py-1 text-[11.5px]", kind === k ? "border-primary bg-primary/10 font-semibold" : "hover:bg-accent")}
-                    >
+                    <button key={k} type="button" onClick={() => setKind(k)} className={cn("rounded-lg border px-2 py-1 text-[11.5px]", kind === k ? "border-primary bg-primary/10 font-semibold" : "hover:bg-accent")}>
                       {CARE_ACTION_LABEL[k]}
                     </button>
                   ))}
                 </div>
-                <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Khách nói gì? (không bắt buộc)" className="mt-2 min-h-[60px] text-[12.5px]" />
+                <Textarea ref={noteRef} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Khách nói gì? (không bắt buộc · phím N để nhảy vào ô này)" className="mt-2 min-h-[60px] text-[12.5px]" />
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Button size="sm" onClick={() => ghi(false)} disabled={pending}>
-                    {pending ? <Loader2 className="size-3.5 animate-spin" /> : null} Ghi nhận{tiep ? " · kiện tiếp" : ""}
+                    {pending ? <Loader2 className="size-3.5 animate-spin" /> : null} Ghi nhận{autoNext && tiep ? " · kiện tiếp" : ""}
                   </Button>
                   {current.caseId ? (
                     <Button size="sm" variant="outline" onClick={() => ghi(true)} disabled={pending} title="Ghi nhận việc chăm và đóng việc này trong hàng đợi Cần xử lý">
@@ -294,23 +598,31 @@ export function CareDrawer({
                 </div>
               </div>
 
-              {data.careActions.length ? (
-                <div>
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Đã chăm trước đó</div>
-                  <ul className="space-y-1 text-[12px]">
-                    {data.careActions.map((c, idx) => (
-                      <li key={idx}>
-                        <b className="font-medium">{c.label}</b>
-                        {c.note ? ` · ${c.note}` : ""}
-                        <span className="text-[11px] text-muted-foreground">
-                          {" "}
-                          · {c.actor || "không rõ người"} · {formatDateTime(c.at)}
+              {/* ───── Nhật ký xử lý: ai · lúc nào · đã quyết gì · note gì ───── */}
+              <div>
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Nhật ký xử lý</span>
+                  <span className="text-[10.5px] text-muted-foreground">chỉ thêm — không thao tác nào sửa hay xoá được một dòng đã ghi</span>
+                </div>
+                {log.length ? (
+                  <ul className="space-y-1.5 text-[12px]">
+                    {log.map((r, idx) => (
+                      <li key={idx} className="flex gap-2">
+                        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground" title={formatDateTime(r.at)}>
+                          {formatTimeAgo(r.at)}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <b className={cn("font-medium", r.kind === "DECISION" && "text-foreground")}>{r.title}</b>
+                          {r.detail ? <span className="text-muted-foreground"> · {r.detail}</span> : null}
+                          <span className="text-[11px] text-muted-foreground"> — {r.actor}</span>
                         </span>
                       </li>
                     ))}
                   </ul>
-                </div>
-              ) : null}
+                ) : (
+                  <p className="text-[12px] text-muted-foreground">Chưa ai chạm vào ca này.</p>
+                )}
+              </div>
             </div>
           )}
         </SheetContent>
@@ -319,13 +631,22 @@ export function CareDrawer({
   );
 }
 
+function Fact({ label, value, tone, title }: { label: string; value: string; tone?: string; title?: string }) {
+  return (
+    <div title={title}>
+      <div className="text-[10.5px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={cn("font-medium", tone)}>{value}</div>
+    </div>
+  );
+}
+
 /**
- * ───────────── MỘT NGĂN KÉO CHO CẢ DANH SÁCH ─────────────
+ * ───────────── MỘT PANEL CHO CẢ DANH SÁCH ─────────────
  *
- * Ngăn kéo đặt TRONG từng dòng thì sống chết theo dòng: bấm "Ghi nhận & đóng việc" là việc biến
- * khỏi hàng đợi, dòng bị gỡ, ngăn kéo đóng sập giữa chừng và không sang được kiện kế. Vì thế ngăn
- * kéo đứng NGOÀI danh sách (host), còn mỗi dòng chỉ là một nút phát tín hiệu "mở kiện này". Danh
- * sách dựng lại bao nhiêu lần thì host vẫn đứng nguyên.
+ * Panel đặt TRONG từng dòng thì sống chết theo dòng: bấm "Ghi nhận & đóng việc" là việc biến khỏi
+ * hàng đợi, dòng bị gỡ, panel đóng sập giữa chừng và không sang được kiện kế. Vì thế panel đứng
+ * NGOÀI danh sách (host), còn mỗi dòng chỉ là một nút phát tín hiệu "mở kiện này". Danh sách dựng
+ * lại bao nhiêu lần thì host vẫn đứng nguyên.
  */
 const CARE_OPEN_EVENT = "erp:care-open";
 
@@ -341,7 +662,7 @@ export function CareDrawerHost({ queue }: { queue: CareQueueItem[] }) {
   return <CareDrawer key={item.shipmentId} shipmentId={item.shipmentId} caseId={item.caseId ?? null} queue={queue} open onOpenChange={(v) => !v && setItem(null)} />;
 }
 
-/** Nút mở ngăn kéo dùng chung (host) — đặt được trong bất kỳ dòng nào, kể cả trong server component. */
+/** Nút mở panel dùng chung (host) — đặt được trong bất kỳ dòng nào, kể cả trong server component. */
 export function CareOpenButton({ shipmentId, caseId = null, className, children }: { shipmentId: string; caseId?: string | null; className?: string; children: React.ReactNode }) {
   return (
     <button

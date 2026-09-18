@@ -7,6 +7,8 @@ import { can, requireUser } from "@/lib/auth/session";
 import * as svc from "@/lib/care/service";
 import { CARE_NOTE_PRESETS_KEY, CARE_NOTE_PRESETS_MAX, type CareNotePreset } from "@/lib/constants/care";
 import { CARE_ACTION_KINDS } from "@/lib/constants/delivery-tower";
+import { RESOLUTION_ACTIONS, RESOLUTION_NOTES_KEY, RESOLUTION_NOTES_MAX, type ResolutionAction } from "@/lib/constants/care-resolution";
+import { getResolutionNotePresets } from "@/lib/queries/care-workbench";
 import { setSettingJson } from "@/lib/settings";
 
 /**
@@ -98,4 +100,35 @@ export async function saveCareNotePresets(input: z.input<typeof presetsSchema>):
   await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: CARE_NOTE_PRESETS_KEY, after: { count: presets.length }, reason: "Mẫu note care" });
   revalidatePath("/shipments");
   return { ok: true, data: presets };
+}
+
+/**
+ * MỘT KẾT QUẢ MỖI LƯỢT GHI, cố ý.
+ *
+ * Người dùng sửa mẫu của ĐÚNG cái nút họ đang mở, nên gửi cả ba rổ là gửi kèm hai rổ họ không chạm
+ * tới — và nếu hai người cùng sửa hai rổ khác nhau thì người bấm sau ghi đè mất phần của người kia
+ * bằng chính bản sao cũ mà màn hình họ đang cầm.
+ */
+const resolutionNotesSchema = z.object({
+  action: z.enum(RESOLUTION_ACTIONS),
+  presets: z.array(z.string().trim().min(1, "Mẫu không được trống").max(200, "Mẫu tối đa 200 ký tự")).max(RESOLUTION_NOTES_MAX, `Tối đa ${RESOLUTION_NOTES_MAX} mẫu mỗi kết quả`),
+});
+
+/**
+ * Mẫu note gắn với từng KẾT QUẢ XỬ LÝ — cùng luật quyền với mẫu note chung: ai cũng DÙNG được,
+ * chỉ `shipments:manage` mới SỬA. Mẫu là ngôn ngữ của shop, và đổi nó là đổi cách cả đội ghi nhận.
+ */
+export async function saveResolutionNotePresets(input: z.input<typeof resolutionNotesSchema>): Promise<{ ok: true; data: Record<ResolutionAction, string[]> } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "shipments:manage")) return { error: "Chỉ người có quyền thao tác vận đơn (shipments:manage) mới sửa được mẫu chung" };
+  const parsed = resolutionNotesSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  // Bản lưu là bản ĐẦY ĐỦ: hai rổ người dùng không chạm tới giữ nguyên bộ ĐANG CHẠY đọc từ máy chủ,
+  // không phải bản sao cũ trên màn hình họ.
+  const dangChay = await getResolutionNotePresets();
+  const next: Record<ResolutionAction, string[]> = { ...dangChay, [parsed.data.action]: [...new Set(parsed.data.presets.map((x) => x.trim()).filter(Boolean))] };
+  await setSettingJson(RESOLUTION_NOTES_KEY, next);
+  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: RESOLUTION_NOTES_KEY, after: Object.fromEntries(RESOLUTION_ACTIONS.map((k) => [k, next[k].length])), reason: "Mẫu note theo kết quả xử lý" });
+  revalidatePath("/shipments");
+  return { ok: true, data: next };
 }

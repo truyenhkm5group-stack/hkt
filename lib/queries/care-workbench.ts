@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { carrierCapabilitiesFor } from "@/lib/care/carrier-capabilities";
 import type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
+import type { BusinessAction } from "@/lib/constants/care-outcome";
 import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { careSlaHours } from "@/lib/care/sla";
 import { careViewOf, slaOf } from "@/lib/care/view";
@@ -20,6 +21,7 @@ import type { ShipmentStage } from "@/db/schema";
 export type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
 export { careViewOf, slaOf } from "@/lib/care/view";
 import { CARE_NOTE_PRESETS_DEFAULT, CARE_NOTE_PRESETS_KEY, type CareNotePreset } from "@/lib/constants/care";
+import { RESOLUTION_ACTIONS, RESOLUTION_NOTES_DEFAULT, RESOLUTION_NOTES_KEY, RESOLUTION_NOTES_MAX, type ResolutionAction } from "@/lib/constants/care-resolution";
 import { getSettingJson } from "@/lib/settings";
 /** Tên cũ — UI hiện tại đang dùng; giữ nguyên hình dạng, `CareQueue` là bản đầy đủ. */
 export type CareWorkbench = CareQueue;
@@ -52,13 +54,14 @@ const REASON_CLASS: Record<CareReasonKey, CareReasonClass> = {
   RETURN_AT_SHOP: "CARRIER_ACTION",
 };
 
-const EMPTY_CARE: CareState = { status: "NEW", owner: null, followUpAt: null, lastNote: "", lastNoteAt: null, lastNoteBy: "", firstResponseAt: null, doneAt: null, reopenCount: 0, updatedAt: null, updatedBy: "" };
+const EMPTY_CARE: CareState = { status: "NEW", owner: null, followUpAt: null, lastNote: "", lastNoteAt: null, lastNoteBy: "", firstResponseAt: null, doneAt: null, reopenCount: 0, updatedAt: null, updatedBy: "", lastDecision: null };
 
 type CareRow = typeof schema.shipmentCare.$inferSelect & { ownerName: string | null };
 
-function toCareState(r: CareRow | undefined): CareState {
+function toCareState(r: CareRow | undefined, decision: CareDecision | null = null): CareState {
   if (!r) return EMPTY_CARE;
   return {
+    lastDecision: decision,
     status: r.careStatus as CareStatus,
     owner: r.ownerId ? { id: r.ownerId, name: r.ownerName || r.ownerEmail || r.ownerId } : null,
     followUpAt: r.followUpAt,
@@ -71,6 +74,42 @@ function toCareState(r: CareRow | undefined): CareState {
     updatedAt: r.updatedAt,
     updatedBy: r.updatedBy,
   };
+}
+
+export type CareDecision = NonNullable<CareState["lastDecision"]>;
+
+/**
+ * ═══════════ KẾT QUẢ XỬ LÝ ĐỌC RA, KHÔNG LƯU SONG SONG ═══════════
+ *
+ * Quyết định gần nhất của MỖI ĐỢT, lấy thẳng từ sổ chỉ-thêm `care_business_actions`. Không có cột
+ * `resolution_action` nào trên `shipment_care`, cố ý: một cột thứ hai giữ cùng một sự thật là tự
+ * nhận lấy câu hỏi *"hai chỗ lệch nhau thì tin chỗ nào"* — và mọi đường ghi sau này (AI, job, thao
+ * tác hàng loạt) đều phải nhớ cập nhật cả hai, lần quên đầu tiên thì màn hình nói sai mà không ai
+ * biết.
+ *
+ * Khoá theo `care_case_id` (ĐỢT), không theo `shipment_id`: kiện hỏng lần hai là một đợt mới, và
+ * quyết định của đợt trước KHÔNG được hiện lên như thể vừa mới bấm.
+ *
+ * Tên người ĐỌC TỪ `users` ở máy chủ (luật 34): cột email trong sổ là ảnh chụp, còn tên hiển thị
+ * phải theo tài khoản hiện tại.
+ */
+async function loadDecisions(careCaseIds: string[]): Promise<Map<string, CareDecision>> {
+  if (!careCaseIds.length) return new Map();
+  const db = await getDb();
+  const rows = rowsOf<{ care_case_id: string; action_type: string; at: string; by: string | null; actor_email: string; reason_code: string | null; reason_note: string }>(
+    await db.execute(sql`
+      select distinct on (b.care_case_id)
+             b.care_case_id, b.action_type, b.requested_at as at,
+             u.name as by, b.actor_email, b.reason_code, b.reason_note
+        from care_business_actions b
+        left join users u on u.id = b.actor_user_id
+       where b.care_case_id in ${careCaseIds}
+       order by b.care_case_id, b.requested_at desc, b.created_at desc
+    `),
+  );
+  return new Map(
+    rows.map((r) => [r.care_case_id, { action: r.action_type as BusinessAction, at: new Date(r.at), by: r.by || r.actor_email || "", reasonCode: r.reason_code, note: r.reason_note ?? "" }] as const),
+  );
 }
 
 async function loadCareRows(shipmentIds: string[]): Promise<Map<string, CareRow>> {
@@ -257,6 +296,10 @@ async function buildQueue(): Promise<CareQueue> {
   // ghi đè bằng đợt 1 là màn hình hiện "Đã xong" cho một kiện đang cần người.
   for (const r of doneRows) if (!careMap.has(r.care.shipmentId)) careMap.set(r.care.shipmentId, { ...r.care, ownerName: r.ownerName });
 
+  // Quyết định gần nhất của ĐÚNG đợt đang hiển thị — một truy vấn cho cả hàng đợi, không một câu
+  // cho mỗi dòng. Đợt nào không có quyết định nào thì `lastDecision = null` (CHƯA AI QUYẾT).
+  const decisionMap = await loadDecisions([...careMap.values()].map((c) => c.id));
+
   /*
     MỐC VÀO HÀNG ĐỢI: `opened_at` của đợt (lúc ĐVVC báo sự cố mở đợt này) khi có; đợt cũ chưa có mốc
     thì suy từ lần giao hụt gần nhất → tin cuối. Cùng thứ tự với `lib/care/service.ts::queueSinceOf`
@@ -271,7 +314,8 @@ async function buildQueue(): Promise<CareQueue> {
 
   const all: CareCase[] = [];
   const push = (base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier" | "products" | "vtpOrderNumber"> & { carrier: Omit<CareCase["carrier"], "trackingCapability" | "substate" | "substateLabel"> }) => {
-    const care = toCareState(careMap.get(base.shipmentId));
+    const dot = careMap.get(base.shipmentId);
+    const care = toCareState(dot, dot ? (decisionMap.get(dot.id) ?? null) : null);
     const { view, reopened } = careViewOf(care, base.queueSince, now);
     const capability = facts.get(base.shipmentId)?.capability;
     all.push({
@@ -442,7 +486,7 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
   const db = await getDb();
   const [qv, s, careRows, events, requests] = await Promise.all([
     getShipmentQuickView(shipmentId),
-    db.query.shipments.findFirst({ where: eq(schema.shipments.id, shipmentId), columns: { id: true, carrier: true, stage: true, attemptNo: true, trackingCapability: true, receiverAddress: true, vtpOrderNumber: true, trackingCode: true }, with: { order: { columns: { id: true, systemId: true, totalPriceAfterDiscount: true, prepaid: true, transferMoney: true, cash: true } } } }),
+    db.query.shipments.findFirst({ where: eq(schema.shipments.id, shipmentId), columns: { id: true, carrier: true, stage: true, attemptNo: true, trackingCapability: true, receiverAddress: true, vtpOrderNumber: true, trackingCode: true, vtpStatus: true, vtpStatusName: true }, with: { order: { columns: { id: true, systemId: true, totalPriceAfterDiscount: true, prepaid: true, transferMoney: true, cash: true } } } }),
     loadCareRows([shipmentId]),
     getCareEvents(shipmentId),
     db.select().from(schema.carrierActionRequests).where(eq(schema.carrierActionRequests.shipmentId, shipmentId)).orderBy(desc(schema.carrierActionRequests.createdAt)).limit(20),
@@ -450,8 +494,25 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
   if (!qv || !s) return null;
   const facts = await loadQueueFacts([shipmentId]);
   const f = facts.get(shipmentId);
-  const care = toCareState(careRows.get(shipmentId));
   const dot = careRows.get(shipmentId);
+  /*
+    NHẬT KÝ QUYẾT ĐỊNH LẤY THEO KIỆN, KHÔNG THEO ĐỢT.
+
+    Panel chi tiết phải đọc được cả câu chuyện: "lần hỏng trước đội đã duyệt hoàn, lần này lại phát
+    tiếp" là thông tin, và cắt nó theo đợt đang mở sẽ giấu mất. Còn Ô KẾT QUẢ HIỆN TẠI thì chỉ lấy
+    quyết định của ĐÚNG đợt đang mở (`decisionMap`) — hai câu hỏi khác nhau, hai phép đọc khác nhau.
+  */
+  const [decisionMap, decisionRows] = await Promise.all([
+    dot ? loadDecisions([dot.id]) : Promise.resolve(new Map<string, CareDecision>()),
+    db
+      .select({ b: schema.careBusinessActions, actorName: schema.users.name })
+      .from(schema.careBusinessActions)
+      .leftJoin(schema.users, eq(schema.users.id, schema.careBusinessActions.actorUserId))
+      .where(eq(schema.careBusinessActions.shipmentId, shipmentId))
+      .orderBy(desc(schema.careBusinessActions.requestedAt))
+      .limit(50),
+  ]);
+  const care = toCareState(dot, dot ? (decisionMap.get(dot.id) ?? null) : null);
   const queueSince = (dot?.active ? dot.openedAt : null) ?? f?.failedAt ?? f?.lastAt ?? null;
   const slaHours = await careSlaHours();
   const tracking = s.vtpOrderNumber ?? s.trackingCode ?? qv.tracking;
@@ -467,6 +528,12 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
       receiver: { name: qv.customer, phone: qv.phone, address: qv.address || s.receiverAddress || "" },
       attemptNo: s.attemptNo ?? qv.attemptNo,
       trackingCapability: asTrackingCapability(s.trackingCapability),
+      // Chỉ cột này dựng được liên kết viettelpost.vn — `tracking` ở trên có thể là mã Pancake.
+      vtpOrderNumber: s.vtpOrderNumber?.trim() ? s.vtpOrderNumber.trim() : null,
+      ...substateOf({ stage: s.stage, vtpStatus: s.vtpStatus, rawStatus: s.vtpStatusName ?? qv.rawStatus }),
+      failedAttempts: qv.failedAttempts,
+      ageHours: f?.lastAt ? (new Date().getTime() - f.lastAt.getTime()) / 3_600_000 : null,
+      vtpStatus: s.vtpStatus ?? null,
     },
     order: s.order ? { id: s.order.id, systemId: s.order.systemId, total: Number(s.order.totalPriceAfterDiscount ?? 0), prepaid: Number(s.order.prepaid ?? 0) + Number(s.order.transferMoney ?? 0) + Number(s.order.cash ?? 0), items: qv.items, chatUrl: qv.chatUrl } : null,
     customer: { name: qv.customer, phone: qv.phone, history: qv.history },
@@ -476,6 +543,21 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
     sla: queueSince ? slaOf(queueSince, care, new Date(), slaHours) : null,
     events,
     careActions: qv.careActions,
+    decisions: decisionRows.map(({ b, actorName }) => ({
+      id: b.id,
+      at: b.requestedAt,
+      actor: actorName || b.actorEmail || "không rõ người",
+      action: b.actionType as BusinessAction,
+      reasonCode: b.reasonCode,
+      note: b.reasonNote,
+      carrierResult: b.carrierResult,
+      previousCareStatus: b.previousCareStatus,
+      nextCareStatus: b.nextCareStatus,
+      followUpAt: (() => {
+        const m = b.metadata as { followUpAt?: string } | null;
+        return m?.followUpAt ? new Date(m.followUpAt) : null;
+      })(),
+    })),
     carrierRequests: requests.map(toRequestView),
     // Địa chỉ "làm tay trên web" dựng từ MÃ VIETTEL POST, không phải `tracking` (có thể là mã Pancake).
     capabilities: carrierCapabilitiesFor({ stage: s.stage, trackingCapability: s.trackingCapability, configured: vtpConfigured(), vtpOrderNumber: s.vtpOrderNumber }),
@@ -491,4 +573,23 @@ export function careActionLabel(kind: string): string {
 export async function getCareNotePresets(): Promise<CareNotePreset[]> {
   const v = await getSettingJson<{ presets: CareNotePreset[] }>(CARE_NOTE_PRESETS_KEY, { presets: CARE_NOTE_PRESETS_DEFAULT });
   return Array.isArray(v.presets) ? v.presets : CARE_NOTE_PRESETS_DEFAULT;
+}
+
+/**
+ * MẪU NOTE THEO TỪNG KẾT QUẢ XỬ LÝ (`care.resolutionNotes`).
+ *
+ * Chưa ai chỉnh ⇒ dùng bộ mặc định. Chỉnh rồi ⇒ đọc ĐÚNG bộ đã lưu, KHÔNG trộn với mặc định: trộn
+ * là chủ shop xoá một mẫu xong thấy nó quay lại, và không có cách nào xoá được nữa.
+ *
+ * Kết quả nào không có trong bản đã lưu thì rơi về mặc định của CHÍNH nó — một bản lưu chỉ khai
+ * "Đã hoàn" không được làm hai kết quả kia mất sạch mẫu.
+ */
+export async function getResolutionNotePresets(): Promise<Record<ResolutionAction, string[]>> {
+  const v = await getSettingJson<Partial<Record<ResolutionAction, string[]>>>(RESOLUTION_NOTES_KEY, {});
+  const out = {} as Record<ResolutionAction, string[]>;
+  for (const k of RESOLUTION_ACTIONS) {
+    const list = v?.[k];
+    out[k] = Array.isArray(list) ? list.filter((x) => typeof x === "string" && x.trim()).slice(0, RESOLUTION_NOTES_MAX) : RESOLUTION_NOTES_DEFAULT[k];
+  }
+  return out;
 }
