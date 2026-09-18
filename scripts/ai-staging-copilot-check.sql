@@ -246,3 +246,21 @@ from ai_model_calls mc
 join ai_runs r on r.id = mc.run_id
 where r.subject_type = 'CONVERSATION' and mc.created_at >= now() - interval '7 days'
 group by 1, 2 order by 3 desc;
+
+\echo '── 19. SỨC KHOẺ BỘ NẠP (vòng CHẠY ĐƯỢC gần nhất — KHÁC "tin khách mới nhất") ──'
+-- Mục 9 đo LƯU LƯỢNG KHÁCH, không đo bộ nạp. Page im ba tiếng lúc 9 giờ sáng là chuyện thường;
+-- bộ nạp chết ba tiếng thì không. Hai câu hỏi khác nhau nên phải có hai con số khác nhau.
+select
+  page_id,
+  to_char(last_ok_at, 'DD/MM HH24:MI:SS')                                as vong_chay_duoc_gan_nhat,
+  round(extract(epoch from (now() - last_ok_at)))::int                   as giay_ke_tu_vong_do,
+  case
+    when last_ok_at is null                             then 'CHUA_CHAY'
+    when now() - last_ok_at > interval '30 minutes'     then 'DUT'
+    when now() - last_ok_at > interval '5 minutes'      then 'CHAM'
+    else 'DANG_CHAY'
+  end                                                                    as suc_khoe,
+  consecutive_errors                                                     as hong_lien_tiep,
+  messages_ingested                                                      as tin_da_nap,
+  coalesce(nullif(last_error, ''), '—')                                  as loi_cuoi
+from sales_ingest_cursors order by page_id;
