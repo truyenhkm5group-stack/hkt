@@ -26,6 +26,8 @@ const GOC = process.env.TEST_BASE_URL ?? "http://127.0.0.1:3000";
 const SAI = "mat-khau-chac-chan-sai-9f2b7c41";
 
 let hong = 0;
+/** Cookie phiên của lượt đăng nhập ĐÚNG mật khẩu — mục kiểm tên miền dùng lại. */
+let phienChung = "";
 function dat(ok: boolean, ten: string, them = "") {
   console.log(`  ${ok ? "✓" : "✗"} ${ten}${them ? ` — ${them}` : ""}`);
   if (!ok) hong += 1;
@@ -102,6 +104,7 @@ async function main() {
     console.log("───────── 3. ĐÚNG MẬT KHẨU PHẢI VÀO ĐƯỢC ─────────");
     const tot = await dangNhap(email, matKhau, oAn);
     const phien = cookiePhien(tot);
+    phienChung = phien;
     dat(Boolean(phien), "đúng mật khẩu ⇒ được cấp cookie erp_session", `HTTP ${tot.status}`);
 
     if (phien) {
@@ -133,7 +136,24 @@ async function main() {
   }
 
   console.log("");
-  console.log("───────── 5. QUYỀN VÀ HAI CÔNG TẮC CHẶN CỨNG ─────────");
+  console.log("───────── 5. TÊN MIỀN CÔNG KHAI (qua Caddy + HTTPS thật) ─────────");
+  const congKhai = "https://ai-staging.vnxcommerce.com";
+  try {
+    const ngoai = await fetch(`${congKhai}/ai/copilot`, { redirect: "manual" });
+    const den = ngoai.headers.get("location") ?? "";
+    dat([302, 303, 307].includes(ngoai.status) && den.includes("/login"), `${congKhai}/ai/copilot chưa đăng nhập ⇒ chuyển sang /login`, `${ngoai.status} → ${den || "(không có)"}`);
+    if (phienChung) {
+      const trongNgoai = await fetch(`${congKhai}/ai/copilot`, { headers: { cookie: `erp_session=${phienChung}` }, redirect: "manual" });
+      dat(trongNgoai.status === 200, `${congKhai}/ai/copilot có phiên ⇒ 200`, `HTTP ${trongNgoai.status}`);
+    }
+  } catch (e) {
+    // Container không ra được internet là chuyện hạ tầng, không phải lỗi đăng nhập — báo, không đỏ.
+    console.log(`  · không gọi được tên miền công khai từ trong container: ${e instanceof Error ? e.message : e}`);
+    console.log("    (không tính là KHÔNG ĐẠT — đường đăng nhập đã kiểm ở các mục trên)");
+  }
+
+  console.log("");
+  console.log("───────── 6. QUYỀN VÀ HAI CÔNG TẮC CHẶN CỨNG ─────────");
   const quyen = resolvePermissions(user.role as Role, user.permissions);
   const coGui = user.role === "ADMIN" || hasPermission(quyen, "ai:send");
   dat(coGui, `tài khoản có quyền ai:send (vai trò ${user.role})`);

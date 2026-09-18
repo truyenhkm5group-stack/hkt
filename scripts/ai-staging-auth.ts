@@ -129,7 +129,9 @@ async function taoNguoi() {
   const db = await getDb();
   banChayThu();
   const email = doc("email").trim().toLowerCase();
-  const name = doc("name").trim() || email.split("@")[0];
+  // KHÔNG đặt tên khi người gọi không nêu tên. Tài khoản đã có thì giữ nguyên tên đang hiển thị —
+  // đây là lượt ĐẶT LẠI MẬT KHẨU, không phải lượt khai lại hồ sơ.
+  const tenMoi = doc("name").trim();
   const role = (doc("role", "CS").trim().toUpperCase() || "CS") as Role;
   const matKhau = process.env.STAGING_USER_PASSWORD ?? "";
 
@@ -150,10 +152,13 @@ async function taoNguoi() {
   const dangCo = await db.query.users.findFirst({ where: eq(schema.users.email, email) });
   const hash = await hashPassword(matKhau);
   if (dangCo) {
-    await db.update(schema.users).set({ name, role, active: true, passwordHash: hash }).where(eq(schema.users.id, dangCo.id));
-    console.log(`✓ CẬP NHẬT tài khoản đã có: ${email}`);
+    await db
+      .update(schema.users)
+      .set({ ...(tenMoi ? { name: tenMoi } : {}), role, active: true, passwordHash: hash })
+      .where(eq(schema.users.id, dangCo.id));
+    console.log(`✓ ĐẶT LẠI MẬT KHẨU cho tài khoản đã có: ${email}${tenMoi ? "" : " (giữ nguyên tên)"}`);
   } else {
-    await db.insert(schema.users).values({ email, name, role, active: true, passwordHash: hash });
+    await db.insert(schema.users).values({ email, name: tenMoi || email.split("@")[0], role, active: true, passwordHash: hash });
     console.log(`✓ TẠO MỚI tài khoản: ${email}`);
   }
   const sau = await db.query.users.findFirst({
