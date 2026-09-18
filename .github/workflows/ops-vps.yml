@@ -452,6 +452,25 @@ jobs:
                 # chúng đồng ý.
                 #
                 # KHÔNG có cờ nào bật chế độ ghi. Thao tác này không thể kích hoạt lương cho ai.
+                #
+                # ─── THAM SỐ ĐƯỢC SOÁT TRƯỚC KHI VÀO SHELL ───
+                #
+                # `$ARG` không đóng ngoặc được: tham số hợp lệ là NHIỀU cờ ("--from X --to Y") nên
+                # nó phải tách theo khoảng trắng. Đóng ngoặc thành `"$ARG"` sẽ gộp tất cả thành MỘT
+                # tham số và script đọc sai.
+                #
+                # Nên chặn ở đầu vào: chỉ cho chữ, số, và sáu ký tự `= : . _ / -` cùng khoảng trắng.
+                # Bộ ấy đủ cho mọi tham số script nhận (`--from 2026-08-01`, `--employee <id>`,
+                # `--csv /tmp/x.csv`) và KHÔNG chứa `; | & $ \` ( ) < > ' "` hay dòng mới — tức là
+                # không còn ký tự nào ghép được một lệnh thứ hai.
+                #
+                # Đây là cổng ĐỌC SỐ TIỀN CỦA NGƯỜI THẬT, nên nó không đi theo lệ "truyền thẳng
+                # $ARG" của các thao tác khác trong tệp này.
+                case "$ARG" in
+                  *[!A-Za-z0-9\ =:._/-]*)
+                    echo "::error::Tham số chứa ký tự không cho phép. Chỉ nhận chữ, số và = : . _ / - (ví dụ: --from 2026-08-01 --to 2026-08-31)"
+                    exit 1 ;;
+                esac
                 fetch_script payroll-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/payroll-reconcile.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/payroll-reconcile.ts $ARG ;;
               backup)
