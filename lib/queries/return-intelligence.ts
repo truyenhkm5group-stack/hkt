@@ -49,6 +49,7 @@ import { getProjectedDeliveryMetrics, getProbabilityLookup } from "@/lib/queries
 import { getReturnReasonReport, type ReturnReasonReport } from "@/lib/queries/return-reason-report";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
+import { timingStat } from "@/lib/constants/care-timing";
 import type { Period } from "@/lib/search-params";
 
 /* ═══════════════════ 1. RỦI RO THEO MÃ HÀNG ═══════════════════ */
@@ -465,11 +466,17 @@ async function careRows(period: Period, basis: TimeBasis): Promise<ReturnIntelli
     if (at && !Number.isNaN(at.getTime()) && (!since || at < since)) since = at;
   }
 
+  /*
+    NGƯỠNG MẪU, KHÔNG PHẢI "CÓ DÒNG NÀO LÀ IN".
+
+    Bản trước trả về một con số cho MỌI mảng khác rỗng — kể cả một dòng. Cùng lỗi với ô "thời gian
+    phản hồi" ở thẻ điểm người: `first_action_at` chỉ có ở 2/319 đợt (đo 16/09/2026), nên "giờ tới
+    hành động đầu" ở đây cũng đang dựng trên một hai quan sát. Ngưỡng dùng chung ở
+    `lib/constants/care-timing.ts` để hai màn hình không nói hai ngưỡng khác nhau.
+  */
   const trungVi = (xs: number[]): number | null => {
-    if (!xs.length) return null;
-    const v = [...xs].sort((a, b) => a - b);
-    const mid = Math.floor(v.length / 2);
-    return Math.round((v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2) * 10) / 10;
+    const m = timingStat(xs, xs.length).median;
+    return m === null ? null : Math.round(m * 10) / 10;
   };
 
   const byState: CareStateRow[] = [...theoTrangThai]

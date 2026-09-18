@@ -7,6 +7,7 @@ import { recordBusinessAction, reopenCase, setCareOwner, setCareStatus, type Car
 import { careViewOf, slaOf } from "@/lib/care/view";
 import { CARE_FOLLOW_UP_DEFAULT_HOURS } from "@/lib/constants/care";
 import { rescueRates } from "@/lib/constants/care-outcome";
+import { TIMING_MIN_SAMPLE, timingStat } from "@/lib/constants/care-timing";
 import { getCarePerformanceByPic, getCarePerformanceByProduct, getRescueSummary } from "@/lib/queries/care-performance";
 import { getCareReport } from "@/lib/queries/care-report";
 import { IntegrationError } from "@/lib/integrations/http";
@@ -385,6 +386,44 @@ export async function testCareOs(db: Db) {
     const dongB = nguoi.find((r) => r.userId === picB.id);
     assert.ok((dongB?.assigned ?? 0) >= 1, "12★ · B nhận ca s7 sau A — cả hai đều được đếm là được giao, A không mất dấu");
 
+    /*
+      ───── MỘT TRUNG VỊ CHỈ ĐƯỢC PHÁT BIỂU KHI CÓ ĐỦ MẪU ─────
+
+      Đo production 16/09/2026: `first_action_at` chỉ có giá trị ở **2/319** đợt care (cột ấy chỉ
+      được ghi ở đường `requestCarrierAction`, còn việc care hằng ngày ghi `first_response_at`).
+      Nên ô "thời gian phản hồi trung vị" cạnh tên nhân viên là trung vị của HAI DÒNG — nó nói về
+      sự ngẫu nhiên, không nói về người đó, và không ai đi kiểm lại một con số trông hợp lý.
+
+      Bài kiểm này gieo ít ca hơn ngưỡng, nên MỌI dòng phải để TRỐNG. Một ô trống kèm độ phủ nói
+      đúng sự thật; một con số từ hai dòng thì nói sai mà trông như đúng (mục 39: CHƯA ĐỦ DỮ LIỆU
+      tách hẳn khỏi LÀM KÉM).
+    */
+    for (const r of nguoi) {
+      assert.equal(r.timingMinSample, TIMING_MIN_SAMPLE, "ngưỡng mẫu phải LẤY LẠI từ hằng số dùng chung, không gõ lại");
+      if (r.touchSample < TIMING_MIN_SAMPLE) {
+        assert.equal(r.medianFirstTouchMin, null, `mẫu ${r.touchSample} < ${TIMING_MIN_SAMPLE} ⇒ KHÔNG được in một trung vị chạm đầu (${r.name})`);
+      }
+      if (r.actionSample < TIMING_MIN_SAMPLE) {
+        assert.equal(r.medianFirstActionMin, null, `mẫu ${r.actionSample} < ${TIMING_MIN_SAMPLE} ⇒ KHÔNG được in một trung vị hành động đầu (${r.name})`);
+      }
+      if (r.resolveSample < TIMING_MIN_SAMPLE) {
+        assert.equal(r.medianResolveMin, null, `mẫu ${r.resolveSample} < ${TIMING_MIN_SAMPLE} ⇒ KHÔNG được in một trung vị (${r.name})`);
+      }
+      // ĐỘ PHỦ luôn đếm được, kể cả khi trung vị để trống — người đọc phải thấy phần mình không biết.
+      for (const [ten, mau] of [["chạm đầu", r.touchSample], ["hành động đầu", r.actionSample], ["chốt", r.resolveSample]] as const) {
+        assert.ok(Number.isInteger(mau) && mau >= 0, `độ phủ ${ten} phải là một con số đếm được`);
+      }
+      // Hai mốc là HAI cột, không phải một cột đổi tên: ca có người chạm vào nhiều hơn hẳn ca có
+      // hành động nghiệp vụ, nên gộp chúng lại là in con số của cột này dưới nhãn của cột kia.
+      assert.ok(r.touchSample >= r.actionSample, `mọi hành động nghiệp vụ đều là một lần chạm, nên độ phủ chạm đầu không thể nhỏ hơn (${r.name}: ${r.touchSample} < ${r.actionSample})`);
+    }
+
+    // Và luật thuần phải khoá được cả hai biên, không phụ thuộc dữ liệu gieo.
+    assert.equal(timingStat([5], 10).median, null, "một quan sát KHÔNG thành một trung vị");
+    assert.equal(timingStat(Array.from({ length: TIMING_MIN_SAMPLE }, () => 6), 20).median, 6, "đủ mẫu thì phát biểu được");
+    assert.equal(timingStat([], 0).coverage, null, "tổng thể rỗng ⇒ độ phủ CHƯA BIẾT, không phải 0%");
+    assert.equal(timingStat(Array.from({ length: TIMING_MIN_SAMPLE }, () => 6), 20).coverage, 0.5, "độ phủ đi kèm con số");
+
     /* ───── 21–23 · Báo cáo theo mã hàng: grain đúng, không nhân dòng ───── */
     const theoMa = await getCarePerformanceByProduct(KY_TAT_CA);
     assert.ok(theoMa.totalCases >= 6, "21 · mỗi ca đếm đúng MỘT lần bất kể bao nhiêu sự kiện/thao tác");
@@ -508,5 +547,5 @@ export async function testCareOs(db: Db) {
   await db.delete(schema.users).where(inArray(schema.users.id, [`${P}u1`, `${P}u2`]));
   clearMemo();
 
-  console.log("✓ Hệ điều hành chăm sóc vận đơn: 60 kiểm thử · ĐVVC mở ca và ĐVVC đóng ca · 501 chiều hoàn = hàng về shop · mã 102 chưa rời kho không phải việc · đối chiếu 48→48 và đóng 106 · đóng ⇔ active=false · chờ phải có giờ hẹn · PENDING đếm tại cuối kỳ · quy kết bằng khoá");
+  console.log("✓ Hệ điều hành chăm sóc vận đơn: 60 kiểm thử · ĐVVC mở ca và ĐVVC đóng ca · 501 chiều hoàn = hàng về shop · mã 102 chưa rời kho không phải việc · đối chiếu 48→48 và đóng 106 · đóng ⇔ active=false · chờ phải có giờ hẹn · PENDING đếm tại cuối kỳ · quy kết bằng khoá · trung vị dưới ngưỡng mẫu để TRỐNG");
 }

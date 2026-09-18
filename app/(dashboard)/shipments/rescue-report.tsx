@@ -32,6 +32,26 @@ function Ty({ value, mau }: { value: number | null; mau: number }) {
   );
 }
 
+/**
+ * In một trung vị thời gian kèm ĐỘ PHỦ. Mẫu dưới ngưỡng ⇒ truy vấn đã trả `null`, và ô này in "—"
+ * kèm số ca có mốc ấy: người quản lý phải phân biệt được CHƯA ĐỦ DỮ LIỆU với LÀM NHANH (mục 39).
+ */
+function Gio({ phut, mau, nguong }: { phut: number | null; mau: number; nguong: number }) {
+  if (phut === null) {
+    return (
+      <span className="text-muted-foreground" title={mau === 0 ? "Chưa ca nào của người này có mốc ấy" : `Chỉ ${mau} ca có mốc ấy — dưới ngưỡng ${nguong} ca nên không phát biểu một trung vị`}>
+        —<span className="ml-0.5 text-[10px]">/{mau}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="numeric font-medium" title={`Trung vị trên ${mau} ca có mốc ấy`}>
+      {phut < 60 ? `${phut}p` : `${Math.round(phut / 60)}h`}
+      {mau < nguong * 2 ? <span className="ml-0.5 text-[10px] font-normal text-amber-600 dark:text-amber-400">/{mau}</span> : null}
+    </span>
+  );
+}
+
 export async function RescueReportSection({ period }: { period: Period }) {
   const [tong, theoNguoi, theoMa] = await Promise.all([getRescueSummary(period), getCarePerformanceByPic(period), getCarePerformanceByProduct(period)]);
 
@@ -80,7 +100,7 @@ export async function RescueReportSection({ period }: { period: Period }) {
         padded={false}
       >
         <div className={TABLE_SCROLL}>
-          <table className="w-full min-w-[980px] text-[12px]">
+          <table className="w-full min-w-[1060px] text-[12px]">
             <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
               <tr>
                 <th className="px-2.5 py-2 font-semibold">Người xử lý</th>
@@ -91,7 +111,8 @@ export async function RescueReportSection({ period }: { period: Period }) {
                 <th className="px-2.5 py-2 text-right font-semibold">Không cứu được</th>
                 <th className="px-2.5 py-2 text-right font-semibold" title="Ca chưa có kết cục — KHÔNG thưởng phạt trên nhóm này">Đang treo</th>
                 <th className="px-2.5 py-2 text-right font-semibold">Tỷ lệ cứu</th>
-                <th className="px-2.5 py-2 text-right font-semibold" title="Trung vị, không phải trung bình: một ca treo ba tuần kéo trung bình đi mà không nói gì về ngày làm việc bình thường">Phản hồi đầu</th>
+                <th className="px-2.5 py-2 text-right font-semibold" title="Trung vị từ lúc MỞ ca tới lần đầu có NGƯỜI CHẠM VÀO: nhận ca, đổi trạng thái, ghi note. Trung vị chứ không phải trung bình — một ca treo ba tuần kéo trung bình đi mà không nói gì về ngày làm việc bình thường.">Chạm đầu</th>
+                <th className="px-2.5 py-2 text-right font-semibold" title="Trung vị tới lần đầu có HÀNH ĐỘNG NGHIỆP VỤ gửi sang ĐVVC (phát tiếp · đổi địa chỉ · thu hồi). Hai cột cố ý tách nhau: chạm vào một ca không có nghĩa là đã làm gì với kiện hàng.">Hành động đầu</th>
                 {BUSINESS_ACTIONS.map((a) => (
                   <th key={a} className="px-2.5 py-2 text-right font-semibold">{BUSINESS_ACTION_LABEL[a]}</th>
                 ))}
@@ -109,7 +130,8 @@ export async function RescueReportSection({ period }: { period: Period }) {
                     <td className="numeric px-2.5 py-2 text-right text-rose-700 dark:text-rose-400">{formatNumber(r.failed)}</td>
                     <td className="numeric px-2.5 py-2 text-right text-muted-foreground">{formatNumber(r.pending)}</td>
                     <td className="px-2.5 py-2 text-right"><Ty value={r.directRate} mau={r.direct + r.failed} /></td>
-                    <td className="numeric px-2.5 py-2 text-right text-muted-foreground">{r.medianFirstResponseMin === null ? "—" : `${Math.round(r.medianFirstResponseMin / 60)}h`}</td>
+                    <td className="px-2.5 py-2 text-right"><Gio phut={r.medianFirstTouchMin} mau={r.touchSample} nguong={r.timingMinSample} /></td>
+                    <td className="px-2.5 py-2 text-right"><Gio phut={r.medianFirstActionMin} mau={r.actionSample} nguong={r.timingMinSample} /></td>
                     {BUSINESS_ACTIONS.map((a) => (
                       <td key={a} className="numeric px-2.5 py-2 text-right text-muted-foreground">{formatNumber(r.actions[a] ?? 0)}</td>
                     ))}
@@ -117,7 +139,7 @@ export async function RescueReportSection({ period }: { period: Period }) {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={13} className="px-3 py-8 text-center text-muted-foreground">Chưa ca nào chốt kết quả trong kỳ này.</td>
+                  <td colSpan={14} className="px-3 py-8 text-center text-muted-foreground">Chưa ca nào chốt kết quả trong kỳ này.</td>
                 </tr>
               )}
             </tbody>

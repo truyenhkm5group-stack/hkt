@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { NOT_CARE_CONDITION } from "@/lib/care/lifecycle";
 import { rowsOf } from "@/lib/sql-rows";
+import { TIMING_MIN_SAMPLE } from "@/lib/constants/care-timing";
 import { CARE_OUTCOMES, OUTCOME_IS_FINAL, rescueRates, type CareOutcome, type RescueCounts } from "@/lib/constants/care-outcome";
 import type { Period } from "@/lib/search-params";
 
@@ -131,9 +132,27 @@ export type PicRow = RescueCounts & {
   rateWithExchange: number | null;
   /** Số thao tác nghiệp vụ theo loại — đo VIỆC ĐÃ LÀM, KHÔNG dùng để chấm điểm. */
   actions: Record<string, number>;
-  /** Phút. `null` = chưa đủ dữ liệu, không phải 0. */
-  medianFirstResponseMin: number | null;
+  /*
+    ═══ HAI MỐC "PHẢN HỒI", VÀ CHÚNG ĐO HAI THỨ KHÁC NHAU ═══
+
+    · `medianFirstTouchMin`  — từ `first_response_at`: lần đầu có NGƯỜI CHẠM VÀO ca (nhận ca, ghi
+      note, đổi trạng thái). Trả lời "đội có phản ứng nhanh không". Độ phủ 193/319 ca (đo 16/09).
+    · `medianFirstActionMin` — từ `first_action_at`: lần đầu có HÀNH ĐỘNG NGHIỆP VỤ gửi sang ĐVVC
+      (Duyệt hoàn · Phát tiếp · Đổi). Trả lời "đội có làm gì với ĐVVC không". Độ phủ 2/319 ca.
+
+    Gộp hai cái làm một là lý do ô cũ in ra một trung vị của HAI DÒNG cạnh tên nhân viên. Chủ shop
+    chốt 18/09/2026: hiện CẢ HAI, mỗi cột kèm độ phủ riêng.
+  */
+  /** Phút. `null` = CHƯA ĐỦ MẪU, không phải 0 và không phải "làm nhanh". */
+  medianFirstTouchMin: number | null;
+  medianFirstActionMin: number | null;
   medianResolveMin: number | null;
+  /** Số ca thật sự có mốc để tính trung vị — ĐỘ PHỦ, luôn đứng cạnh con số (mục 39). */
+  touchSample: number;
+  actionSample: number;
+  resolveSample: number;
+  /** Cỡ mẫu tối thiểu để một trung vị được phát biểu. */
+  timingMinSample: number;
 };
 
 /**
@@ -156,19 +175,31 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
     // Ca đã chốt quy về `owner_at_resolution`; ca còn treo quy về người ĐANG cầm — để cột "đang
     // treo" của mỗi người nói đúng khối việc họ đang giữ. Khoá quy kết tính MỘT LẦN trong CTE:
     // Postgres không nhận ra hai biểu thức có tham số khác số thứ tự là cùng một biểu thức GROUP BY.
-    const ketQua = rowsOf<{ user_id: string | null; name: string; outcome: string | null; n: number; p_response: number | null; p_resolve: number | null }>(
+    const ketQua = rowsOf<{ user_id: string | null; name: string; outcome: string | null; n: number; p_touch: number | null; p_action: number | null; p_resolve: number | null; n_touch: number; n_action: number; n_resolve: number }>(
       await db.execute(sql`
         with ca as (
           select coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end) as uid,
-                 ${sc.careOutcome} as outcome, ${sc.firstActionAt} as first_action_at, ${sc.openedAt} as opened_at, ${sc.outcomeAt} as outcome_at
+                 ${sc.careOutcome} as outcome, ${sc.firstActionAt} as first_action_at, ${sc.firstResponseAt} as first_touch_at,
+                 ${sc.openedAt} as opened_at, ${sc.outcomeAt} as outcome_at
             from ${sc}
            where ${tapCaHieuSuat(period)}
         )
         select ca.uid as user_id, coalesce(max(u.name), '') as name, ca.outcome, count(*)::int as n,
                -- Trung vị, không phải trung bình: một ca treo ba tuần kéo trung bình đi mà không nói gì
                -- về ngày làm việc bình thường của người đó.
-               percentile_cont(0.5) within group (order by extract(epoch from (ca.first_action_at - ca.opened_at)) / 60) filter (where ca.first_action_at is not null and ca.opened_at is not null) as p_response,
-               percentile_cont(0.5) within group (order by extract(epoch from (ca.outcome_at - ca.opened_at)) / 60) filter (where ca.outcome_at is not null and ca.opened_at is not null) as p_resolve
+               percentile_cont(0.5) within group (order by extract(epoch from (ca.first_touch_at - ca.opened_at)) / 60) filter (where ca.first_touch_at is not null and ca.opened_at is not null) as p_touch,
+               percentile_cont(0.5) within group (order by extract(epoch from (ca.first_action_at - ca.opened_at)) / 60) filter (where ca.first_action_at is not null and ca.opened_at is not null) as p_action,
+               percentile_cont(0.5) within group (order by extract(epoch from (ca.outcome_at - ca.opened_at)) / 60) filter (where ca.outcome_at is not null and ca.opened_at is not null) as p_resolve,
+               /*
+                 ĐẾM SỐ DÒNG THẬT SỰ GÓP VÀO TRUNG VỊ.
+
+                 Thiếu con số này thì không cách nào biết một trung vị dựng trên 2 dòng hay 200.
+                 Đo 16/09/2026: cột first_action_at chỉ có ở 2/319 đợt, nên ô "thời gian phản hồi"
+                 cạnh tên nhân viên là trung vị của HAI dòng — nói về sự ngẫu nhiên, không nói về họ.
+               */
+               count(*) filter (where ca.first_touch_at is not null and ca.opened_at is not null)::int as n_touch,
+               count(*) filter (where ca.first_action_at is not null and ca.opened_at is not null)::int as n_action,
+               count(*) filter (where ca.outcome_at is not null and ca.opened_at is not null)::int as n_resolve
           from ca left join users u on u.id = ca.uid
          group by ca.uid, ca.outcome
       `),
@@ -207,8 +238,13 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
         directRate: null,
         rateWithExchange: null,
         actions: {},
-        medianFirstResponseMin: null,
+        medianFirstTouchMin: null,
+        medianFirstActionMin: null,
         medianResolveMin: null,
+        touchSample: 0,
+        actionSample: 0,
+        resolveSample: 0,
+        timingMinSample: TIMING_MIN_SAMPLE,
       };
       theoNguoi.set(k, moi);
       return moi;
@@ -217,8 +253,21 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
     for (const r of ketQua) {
       const row = lay(r.user_id, r.name);
       cong(row, r.outcome, Number(r.n));
-      if (r.p_response !== null && r.p_response !== undefined) row.medianFirstResponseMin = Math.round(Number(r.p_response));
-      if (r.p_resolve !== null && r.p_resolve !== undefined) row.medianResolveMin = Math.round(Number(r.p_resolve));
+      /*
+        NGƯỠNG MẪU ÁP Ở ĐÂY, KHÔNG Ở SQL: `percentile_cont` luôn trả một con số nếu có ít nhất một
+        dòng, nên chặn phải nằm sau khi đã biết cỡ mẫu. Dưới ngưỡng ⇒ để TRỐNG, và màn hình hiện
+        "chưa đủ mẫu" — một ô trống nói đúng sự thật, một con số từ hai dòng thì nói sai mà trông
+        như đúng (mục 39: CHƯA ĐỦ DỮ LIỆU tách hẳn khỏi LÀM KÉM).
+      */
+      const nTouch = Number(r.n_touch ?? 0);
+      const nAction = Number(r.n_action ?? 0);
+      const nResolve = Number(r.n_resolve ?? 0);
+      row.touchSample += nTouch;
+      row.actionSample += nAction;
+      row.resolveSample += nResolve;
+      if (r.p_touch !== null && r.p_touch !== undefined && nTouch >= TIMING_MIN_SAMPLE) row.medianFirstTouchMin = Math.round(Number(r.p_touch));
+      if (r.p_action !== null && r.p_action !== undefined && nAction >= TIMING_MIN_SAMPLE) row.medianFirstActionMin = Math.round(Number(r.p_action));
+      if (r.p_resolve !== null && r.p_resolve !== undefined && nResolve >= TIMING_MIN_SAMPLE) row.medianResolveMin = Math.round(Number(r.p_resolve));
     }
     for (const r of giao) lay(r.userId, "").assigned += Number(r.n);
     for (const r of thaoTac) {
