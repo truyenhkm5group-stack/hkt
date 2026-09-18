@@ -1,9 +1,64 @@
 # Sổ tay đưa module Lương lên production
 
-> **Tài liệu này CHƯA được thực thi.** Nó là bản hướng dẫn để chủ shop (hoặc phiên deploy) làm
-> theo sau khi đã đọc báo cáo cuối và quyết định merge. Không bước nào ở đây đã chạy.
+> ## ⚠ ĐỌC TRƯỚC: MÃ LƯƠNG ĐÃ Ở TRÊN PRODUCTION TỪ 18/09/2026 — KHÔNG PHẢI DO MỘT LƯỢT PHÁT HÀNH LƯƠNG
+>
+> Câu "tài liệu này chưa được thực thi" ở các bản trước **đã hết đúng**. Đo trên production
+> 18/09/2026 05:12 UTC (chỉ đọc):
+>
+> ```
+> {"ok":true,"time":"2026-09-18T05:12:40.491Z","commit":"313e40160557","branch":"main"}
+> ```
+>
+> `313e401` là một lượt deploy **bản vá miền care** của phiên khác (workflow run #323, 03:56–04:12
+> ngày 18/09). Nhưng `main` lúc ấy đã mang PR #3, nên lượt deploy ấy **chở theo cả mã lương và ba
+> migration** — đúng cơ chế mục 1b đã nêu: deploy đọc `github.sha`, ứng dụng áp migration lúc khởi
+> động. Không ai quyết định phát hành lương; nó đi kèm hàng của người khác.
+>
+> **Điều đã được chứng minh bằng thực tế, không phải bằng lập luận:** *deploy ≠ kích hoạt.*
+>
+> | Đo trên production 18/09 05:07 | |
+> | --- | --- |
+> | Migration đã áp | **101** (15/09 là 96 ⇒ `0096`–`0100` đã chạy) |
+> | Bảy bảng lương | **có mặt** |
+> | Chính sách lương · gán chính sách · phân công | **0 · 0 · 0** |
+> | Kỳ lương · lỗ lũy kế · nhập tay · điều chỉnh | **0 · 0 · 0 · 0** |
+>
+> Không một dòng nào được ghi, không backfill, không kích hoạt. Mọi người vẫn được trả bằng
+> **đường tính cũ**. Đó là tính chất mục 0 hứa, và nó đã đứng vững qua một lượt deploy ngoài ý muốn.
+>
+> **Nhưng cùng lượt deploy ấy đưa LỖ HỔNG QUYỀN lên máy chủ.** `313e401` mang mã lương **chưa có**
+> bản vá an ninh (`lib/auth/payroll-scope.ts` không tồn tại trong nó), trong khi
+> `settings['auth.rolePermissions']` vẫn cho `MANAGER` cả `payroll:view` lẫn `payroll:manage`. Nên
+> tính tới lúc viết dòng này, một tài khoản Quản lý **xem được bảng lương toàn công ty trên
+> production**.
+>
+> Bản vá đã nằm trên `main` ở `2ad8a02` (PR [#6](https://github.com/truyenhkm5group-stack/hkt/pull/6)).
+> **Nó chỉ có hiệu lực sau một lượt deploy.** Nghĩa là lượt deploy tiếp theo KHÔNG còn là "bước mở
+> ra rủi ro" — nó là **bước đóng một lỗ hổng đang mở**.
 
-Nhánh: `claude/elegant-curie-zn92up` · PR [#3](https://github.com/truyenhkm5group-stack/hkt/pull/3)
+Lịch sử: PR [#3](https://github.com/truyenhkm5group-stack/hkt/pull/3) (máy tính lương) ·
+PR [#6](https://github.com/truyenhkm5group-stack/hkt/pull/6) (bản vá an ninh quyền xem lương)
+
+---
+
+## 0b. BỐN PHA, VÀ RANH GIỚI GIỮA CHÚNG LÀ THỨ GIỮ AN TOÀN
+
+| Pha | Nội dung | Trạng thái |
+| --- | --- | --- |
+| **1** | Máy tính lương vào `main` (PR #3) | ✅ xong 15/09 |
+| **1b** | Bản vá an ninh quyền xem lương vào `main` (PR #6) | ✅ xong 18/09 |
+| **2** | **Deploy** `main` (mã + migration cộng thêm) — **KHÔNG kích hoạt lương** | ⏳ chờ phê duyệt |
+| **2-cổng** | Smoke an ninh (mục 3.0) + **đối chiếu production CHỈ ĐỌC** (mục 2.3) | ⏳ |
+| **3** | Khai chính sách / phân công, **từng người**, có người bấm | ⏳ |
+| **4** | Chuyển từng người sang máy mới sau khi đọc bảng đối chiếu của chính họ | ⏳ |
+
+**Không gộp pha 2 với pha 3.** Deploy đưa mã lên; kích hoạt là một lượt người bấm, có mốc hiệu lực,
+có bảng đối chiếu, có dấu vết. Lượt deploy 18/09 đã cho thấy ranh giới ấy là thật: mã lên máy chủ mà
+không một con số lương nào đổi.
+
+**Đích quay đầu của pha 2 phải CHỤP LẠI ngay trước lúc bấm deploy** — xem mục 4.1. Không ghi cứng
+một ảnh cũ vào tài liệu: production đã bị các phiên khác thay ba lần trong ba ngày, nên một đích
+quay đầu chép sẵn là một đích trỏ vào quá khứ.
 
 ---
 
@@ -378,13 +433,37 @@ Xuất CSV từ `/payroll`. Kiểm:
 
 ## 4. QUAY ĐẦU (ROLLBACK)
 
-### 4.1 Quay ứng dụng về bản trước
+### 4.1 Quay ứng dụng về bản trước — ĐÍCH PHẢI CHỤP, KHÔNG ĐƯỢC CHÉP SẴN
+
+> **Đừng quay về "commit trước khi merge PR #3".** Câu ấy đúng hôm 15/09 và sai từ 18/09: các phiên
+> khác đã deploy `main` nhiều lần, nên bản đang chạy trước pha 2 **không phải** bản trước PR #3 —
+> quay về đó là xoá luôn hai ngày công của người khác.
+
+**NGAY TRƯỚC khi bấm deploy pha 2**, chạy `action: status` và ghi lại hai dòng này:
 
 ```
-Actions → "Deploy ERP to VPS" trên commit TRƯỚC khi merge PR #3
+PRE_PAYROLL_DEPLOY_SHA   = commit trong {"ok":true,…,"commit":"…"} của /api/health
+PRE_PAYROLL_DEPLOY_IMAGE = cột IMAGE của erp-app trong `docker compose ps`
 ```
 
-Hoặc trên VPS: `docker compose up -d app scheduler` với thẻ ảnh cũ.
+Ví dụ lần đo 18/09 05:12 (KHÔNG dùng lại con số này, chỉ để biết dạng):
+`SHA = 313e40160557` · `IMAGE = erp-app:local` · `erp-app` up ~1 giờ.
+
+Quay đầu:
+
+```
+Actions → "Deploy ERP to VPS" → ref: <PRE_PAYROLL_DEPLOY_SHA>
+```
+
+Ảnh theo SHA đã có trên GHCR (workflow đẩy lên trước khi chạm máy chủ), nên lượt quay đầu không
+phải dựng lại từ đầu. Hoặc trên VPS: `docker compose up -d app scheduler` với thẻ ảnh đã ghi.
+
+> ⚠ `erp-app:local` là thẻ **cục bộ**, không mang SHA. Nên **SHA từ `/api/health` mới là danh tính
+> thật** của bản đang chạy — thẻ ảnh một mình không quay đầu được đúng chỗ.
+
+**Quay `main` bằng git thì dùng revert, không dùng force push:** `git revert -m 1 <merge-sha>`
+(`-m 1` giữ nhánh cha thứ nhất). Không `reset --hard`, không force push — nhánh này nằm trên máy
+nhiều phiên khác.
 
 ### 4.2 Migration thì KHÔNG quay đầu — và không cần quay
 
