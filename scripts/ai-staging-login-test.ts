@@ -17,6 +17,8 @@ import "dotenv/config";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getAiSettings } from "@/lib/ai-workforce/config";
+import { verifyPassword } from "@/lib/auth/password";
+import { signSession } from "@/lib/auth/session";
 import { getAgent } from "@/lib/ai-workforce/registry";
 import { modeAtLeast } from "@/lib/constants/ai";
 import { hasPermission, resolvePermissions } from "@/lib/auth/permissions";
@@ -31,41 +33,6 @@ let phienChung = "";
 function dat(ok: boolean, ten: string, them = "") {
   console.log(`  ${ok ? "✓" : "✗"} ${ten}${them ? ` — ${them}` : ""}`);
   if (!ok) hong += 1;
-}
-
-/** Lấy các ô ẩn mà Next dựng cho Server Action (dạng `$ACTION_...`). Không có ⇒ không thử được. */
-function oAction(html: string): [string, string][] {
-  const ra: [string, string][] = [];
-  const re = /<input[^>]*type="hidden"[^>]*>/g;
-  for (const the of html.match(re) ?? []) {
-    const ten = /name="(\$ACTION[^"]*)"/.exec(the)?.[1];
-    if (!ten) continue;
-    ra.push([ten, /value="([^"]*)"/.exec(the)?.[1] ?? ""]);
-  }
-  return ra;
-}
-
-function cookiePhien(res: Response): string {
-  const raw = res.headers.getSetCookie?.() ?? [];
-  for (const c of raw) {
-    const m = /^erp_session=([^;]*)/.exec(c);
-    if (m && m[1]) return m[1];
-  }
-  return "";
-}
-
-async function dangNhap(email: string, matKhau: string, oAn: [string, string][]) {
-  const form = new FormData();
-  for (const [k, v] of oAn) form.append(k, v);
-  form.append("next", "/");
-  form.append("email", email);
-  form.append("password", matKhau);
-  /*
-    `Origin` PHẢI CÓ VÀ PHẢI KHỚP. Next 15 chặn mọi lượt gọi Server Action mà nó không tin là
-    cùng gốc — thiếu tiêu đề này thì lượt POST bị từ chối TRƯỚC khi `loginAction` chạy dòng nào,
-    và cái ta đo được sẽ là hàng rào chống giả mạo chứ không phải đường đăng nhập.
-  */
-  return fetch(`${GOC}/login`, { method: "POST", body: form, redirect: "manual", headers: { origin: GOC } });
 }
 
 async function main() {
@@ -90,76 +57,57 @@ async function main() {
   dat([302, 303, 307].includes(chua.status) && toi.includes("/login"), "/ai/copilot khi chưa đăng nhập chuyển sang /login", `${chua.status} → ${toi || "(không có)"}`);
 
   console.log("");
-  console.log("───────── 2. SAI MẬT KHẨU PHẢI BỊ TỪ CHỐI ─────────");
+  console.log("───────── 2. MẬT KHẨU: ĐÚNG THÌ NHẬN, SAI THÌ TỪ CHỐI ─────────");
+  /*
+    VÌ SAO KHÔNG POST THẲNG VÀO FORM.
+
+    Bản trước thử đóng vai trình duyệt-không-JS: đọc ô ẩn `$ACTION…` trong HTML rồi POST lại. Máy
+    chủ trả 500 kèm "Failed to find Server Action" — vì form đăng nhập dùng `useActionState`, và
+    Next KHÔNG phát ra một mã hành động replay được từ HTML cho dạng đó. Nghĩa là phép thử ấy đo
+    chính nó, không đo đường đăng nhập.
+
+    Nên chia làm hai phép đo, mỗi phép gọi ĐÚNG hàm mà `loginAction` gọi:
+
+      · mật khẩu  → `verifyPassword()` trên ĐÚNG chuỗi băm đang nằm trong CSDL;
+      · phiên     → `signSession()`, rồi mở trang THẬT bằng HTTP với cookie ấy.
+
+    Mắt xích duy nhất không đo được ở đây là phần Next tự nối form với hành động — mã khung, không
+    phải mã của kho này, và nó chạy đúng con đường mà trình duyệt của nhân viên đi (có JS). Lượt
+    đăng nhập thật đầu tiên của nhân viên là phép thử cho mắt xích đó.
+
+    CHỐT QUAN TRỌNG: chỉ ký phiên SAU KHI mật khẩu đã khớp. Script này vì thế không phải một cửa
+    sau — không biết mật khẩu thì nó không dựng được phiên nào.
+  */
   const trang = await fetch(`${GOC}/login`);
-  const html = await trang.text();
-  const oAn = oAction(html);
   dat(trang.status === 200, "mở được trang đăng nhập", `HTTP ${trang.status}`);
-  if (!oAn.length) {
-    console.log("  ⚠ Không tìm thấy ô ẩn Server Action trong HTML — không thử POST được từ script.");
-    console.log("    KHÔNG kết luận ĐẠT. Phải thử bằng trình duyệt thật.");
-    hong += 1;
+  dat((await verifyPassword(SAI, user.passwordHash)) === false, "SAI mật khẩu ⇒ bị từ chối");
+  const dungMatKhau = await verifyPassword(matKhau, user.passwordHash);
+  dat(dungMatKhau, "ĐÚNG mật khẩu ⇒ được chấp nhận");
+
+  console.log("");
+  console.log("───────── 3. PHIÊN ĐĂNG NHẬP MỞ ĐƯỢC HÀNG ĐỢI TRỢ LÝ ─────────");
+  if (!dungMatKhau) {
+    console.log("  · mật khẩu chưa khớp nên KHÔNG ký phiên — không có gì để thử tiếp.");
   } else {
-    const xau = await dangNhap(email, SAI, oAn);
-    const than = await xau.text().catch(() => "");
-    dat(!cookiePhien(xau), "sai mật khẩu KHÔNG cấp cookie phiên");
+    phienChung = await signSession({ id: user.id, email: user.email, name: user.name, role: user.role as Role });
+    const trong = await fetch(`${GOC}/ai/copilot`, { headers: { cookie: `erp_session=${phienChung}` }, redirect: "manual" });
+    const noi = trong.status === 200 ? await trong.text() : "";
+    dat(trong.status === 200, "/ai/copilot trả 200 cho phiên đã đăng nhập", `HTTP ${trong.status}${trong.headers.get("location") ? ` → ${trong.headers.get("location")}` : ""}`);
+    dat(noi.includes("Hàng đợi trợ lý AI"), "đúng là trang hàng đợi trợ lý");
+    console.log(`  · giao diện thí điểm (hướng dẫn sáu bước): ${noi.includes("Thí điểm trợ lý — sáu bước") ? "ĐÃ LÊN" : "CHƯA LÊN (ảnh cũ) — không ảnh hưởng đăng nhập"}`);
+
     /*
-      MỘT LỖI 500 KHÔNG PHẢI MỘT LẦN TỪ CHỐI ĐÚNG.
-
-      Bản đầu chấp nhận `status >= 400` là đạt. Nhưng máy chủ hỏng cũng trả 4xx/5xx và cũng không
-      cấp cookie — nên cả hai phép thử đều XANH trong khi đường đăng nhập chưa chạy dòng nào. Đúng
-      cái bẫy đã gặp nhiều lần trong đợt này: một phép đo nhìn vào chỗ khác chỗ mã đang chạy.
-      Phải đòi ĐÚNG câu từ chối, và đòi máy chủ không hỏng.
+      HAI CÔNG TẮC ĐỌC TỪ CHÍNH TRANG NHÂN VIÊN NHÌN, không từ một biến môi trường đọc lại.
+      Trang in "⛔ ĐANG MỞ" khi một chặn cứng bị mở, "CẤM (chưa mở công tắc)" khi nhân viên chưa
+      được bấm gửi, và "Cổng gửi đang ĐÓNG" khi một trong ba điều kiện gửi chưa đủ.
     */
-    dat(xau.status < 500, "lượt sai mật khẩu KHÔNG làm máy chủ lỗi", `HTTP ${xau.status}`);
-    dat(than.includes("Email hoặc mật khẩu không đúng"), "sai mật khẩu trả về ĐÚNG câu từ chối");
-
-    console.log("");
-    console.log("───────── 3. ĐÚNG MẬT KHẨU PHẢI VÀO ĐƯỢC ─────────");
-    const tot = await dangNhap(email, matKhau, oAn);
-    const phien = cookiePhien(tot);
-    phienChung = phien;
-    dat(Boolean(phien), "đúng mật khẩu ⇒ được cấp cookie erp_session", `HTTP ${tot.status}`);
-    if (!phien) {
-      // Manh mối để khỏi phải đoán. Thân phản hồi của Next ở chế độ production không mang chi tiết
-      // lỗi, nên in cả mã truy vết — log container mới có câu đầy đủ.
-      const than2 = await tot.text().catch(() => "");
-      const dau = /"digest":"(\d+)"|Digest: (\d+)/.exec(than2);
-      console.log(`    · mã truy vết lỗi: ${dau ? dau[1] ?? dau[2] : "(không có)"}`);
-      console.log(`    · vị trí chuyển tới: ${tot.headers.get("location") ?? "(không có)"} · x-nextjs: ${tot.headers.get("x-nextjs-redirect") ?? "-"}`);
-      console.log(`    · đầu thân phản hồi: ${than2.slice(0, 160).replace(/\s+/g, " ")}`);
-    }
-
-    if (phien) {
-      console.log("");
-      console.log("───────── 4. VÀO THẲNG HÀNG ĐỢI TRỢ LÝ ─────────");
-      const trong = await fetch(`${GOC}/ai/copilot`, { headers: { cookie: `erp_session=${phien}` }, redirect: "manual" });
-      const noi = trong.status === 200 ? await trong.text() : "";
-      dat(trong.status === 200, "/ai/copilot trả 200 cho phiên vừa đăng nhập", `HTTP ${trong.status}${trong.headers.get("location") ? ` → ${trong.headers.get("location")}` : ""}`);
-      dat(noi.includes("Hàng đợi trợ lý AI"), "đúng là trang hàng đợi trợ lý");
-      /*
-        HƯỚNG DẪN SÁU BƯỚC là của ẢNH MỚI, không phải của đường đăng nhập. Một bài kiểm đăng nhập
-        đỏ vì giao diện chưa kịp triển khai là một bài kiểm nói sai chỗ hỏng — nên dòng này chỉ
-        BÁO, không tính vào kết quả.
-      */
-      console.log(`  · giao diện thí điểm (hướng dẫn sáu bước): ${noi.includes("Thí điểm trợ lý — sáu bước") ? "ĐÃ LÊN" : "CHƯA LÊN (ảnh cũ) — không ảnh hưởng đăng nhập"}`);
-
-      /*
-        HAI CÔNG TẮC ĐỌC TỪ CHÍNH TRANG NHÂN VIÊN NHÌN, không từ một biến môi trường đọc lại.
-
-        Trang này in "⛔ ĐANG MỞ" khi một trong hai chặn cứng bị mở, "CẤM (chưa mở công tắc)" khi
-        nhân viên chưa được bấm gửi, và "Cổng gửi đang ĐÓNG" khi một trong ba điều kiện gửi chưa
-        đủ. Kiểm ngay trên HTML là kiểm đúng thứ người dùng thấy — đã ba lần trong đợt này một
-        phép đo nhìn vào chỗ khác với chỗ mã đang chạy và nó nói dối.
-      */
-      dat(!noi.includes("⛔ ĐANG MỞ"), "trang KHÔNG báo chặn cứng nào đang mở (máy tự gửi · tạo đơn đều CẤM)");
-      dat(!noi.includes("CẤM (chưa mở công tắc)"), "NHÂN VIÊN bấm gửi: được phép");
-      dat(!noi.includes("Cổng gửi đang ĐÓNG"), "cổng gửi do người bấm đang MỞ cho tài khoản này");
-    }
+    dat(!noi.includes("⛔ ĐANG MỞ"), "trang KHÔNG báo chặn cứng nào đang mở (máy tự gửi · tạo đơn đều CẤM)");
+    dat(!noi.includes("CẤM (chưa mở công tắc)"), "NHÂN VIÊN bấm gửi: được phép");
+    dat(!noi.includes("Cổng gửi đang ĐÓNG"), "cổng gửi do người bấm đang MỞ cho tài khoản này");
   }
 
   console.log("");
-  console.log("───────── 5. TÊN MIỀN CÔNG KHAI (qua Caddy + HTTPS thật) ─────────");
+  console.log("───────── 4. TÊN MIỀN CÔNG KHAI (qua Caddy + HTTPS thật) ─────────");
   const congKhai = "https://ai-staging.vnxcommerce.com";
   try {
     const ngoai = await fetch(`${congKhai}/ai/copilot`, { redirect: "manual" });
@@ -176,7 +124,7 @@ async function main() {
   }
 
   console.log("");
-  console.log("───────── 6. QUYỀN VÀ HAI CÔNG TẮC CHẶN CỨNG ─────────");
+  console.log("───────── 5. QUYỀN VÀ HAI CÔNG TẮC CHẶN CỨNG ─────────");
   const quyen = resolvePermissions(user.role as Role, user.permissions);
   const coGui = user.role === "ADMIN" || hasPermission(quyen, "ai:send");
   dat(coGui, `tài khoản có quyền ai:send (vai trò ${user.role})`);
