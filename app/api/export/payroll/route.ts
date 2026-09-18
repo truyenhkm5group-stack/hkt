@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { can, getCurrentUser } from "@/lib/auth/session";
+import { getCurrentUser } from "@/lib/auth/session";
+import { canOpenPayroll, canSeeAllPayroll, payrollLineVisible, resolvePayrollScope } from "@/lib/auth/payroll-scope";
 import { PAYROLL_BASIS_LABEL, PAYROLL_BASIS_SHORT, parsePayrollBasis } from "@/lib/constants/payroll";
 import { employeeMatchesUser, getPayrollReport, type PayrollLine } from "@/lib/queries/payroll";
 import { getPayrollPeriodState, type PayrollSnapshot } from "@/lib/queries/payroll-period";
@@ -128,8 +129,13 @@ function snapshotRows(snapshot: PayrollSnapshot, live: readonly PayrollLine[]) {
 export async function GET(request: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return new Response("Chưa đăng nhập", { status: 401 });
-  const viewAll = can(user, "payroll:view");
-  if (!viewAll && !can(user, "payroll:view-own")) return new Response("Không có quyền xuất bảng lương", { status: 403 });
+  /*
+    CỔNG XUẤT TỆP DÙNG ĐÚNG MỘT MÁY TÍNH PHẠM VI VỚI MÀN HÌNH. Đây là chỗ dễ lệch nhất: ẩn một cái
+    nút trên giao diện không chặn được ai gõ thẳng địa chỉ này, và tệp CSV thì mang đi được.
+  */
+  const scope = resolvePayrollScope(user);
+  if (!canOpenPayroll(scope)) return new Response("Không có quyền xuất bảng lương", { status: 403 });
+  const viewAll = canSeeAllPayroll(scope);
 
   const raw = Object.fromEntries(request.nextUrl.searchParams.entries()) as SearchParams;
   const period = resolvePeriod(raw, "month");
@@ -144,7 +150,7 @@ export async function GET(request: NextRequest) {
   */
   const dongBang = state.frozen && state.snapshot !== null;
   const nguon = dongBang && state.snapshot ? snapshotRows(state.snapshot, report.lines) : report.lines;
-  const lines = nguon.filter((l) => viewAll || employeeMatchesUser(l.employee, user));
+  const lines = nguon.filter((l) => payrollLineVisible(scope, l.employee, user, employeeMatchesUser));
 
   const header = [
     "Nhân sự",

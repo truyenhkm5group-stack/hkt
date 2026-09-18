@@ -4,6 +4,7 @@ import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { AssignmentManager } from "@/app/(dashboard)/payroll/assignments/assignment-manager";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
+import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { EMPLOYMENT_STATUS_LABEL, EMPLOYMENT_TYPE_LABEL, WORK_MODE_LABEL, type EmploymentStatus, type EmploymentType, type WorkMode } from "@/lib/constants/payroll-components";
 import { formatDate } from "@/lib/format";
 import { listEmployees } from "@/lib/queries/payroll";
@@ -19,7 +20,11 @@ export const metadata = { title: "Phân công & gán chính sách" };
  */
 export default async function PayrollAssignmentsPage() {
   const user = await requireUser();
-  if (!can(user, "payroll:manage")) redirect("/payroll?forbidden=1");
+  /*
+    QUẢN TRỊ LƯƠNG = QUYỀN KHAI BÁO **VÀ** PHẠM VI TOÀN CÔNG TY. Màn hình này in ra tiền của mọi
+    người, nên riêng `payroll:manage` là chưa đủ — xem `lib/auth/payroll-scope.ts`.
+  */
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) redirect("/payroll?forbidden=1");
   const [employees, policies, org, book] = await Promise.all([listEmployees(), listSalaryPolicies(), listOrgOptions(), loadAssignmentBook()]);
   const nameOf = (id: string) => employees.find((e) => e.id === id)?.shortName || employees.find((e) => e.id === id)?.name || id;
 

@@ -5,6 +5,7 @@ import { MigrationTable } from "@/app/(dashboard)/payroll/migration/migration-ta
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { EmptyState } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
+import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { PAYROLL_BASIS_NAME, parsePayrollBasis, type PayrollBasis } from "@/lib/constants/payroll";
 import { MIGRATION_STATUS_LABEL, migrationStatus, type MigrationStatus } from "@/lib/payroll/migration-preview";
 import { previewLegacyMigration } from "@/lib/queries/payroll-migration";
@@ -22,7 +23,11 @@ export const metadata = { title: "Xem trước chuyển đổi lương" };
 export default async function PayrollMigrationPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
   const user = await requireUser();
-  if (!can(user, "payroll:manage")) redirect("/payroll?forbidden=1");
+  /*
+    QUẢN TRỊ LƯƠNG = QUYỀN KHAI BÁO **VÀ** PHẠM VI TOÀN CÔNG TY. Màn hình này in ra tiền của mọi
+    người, nên riêng `payroll:manage` là chưa đủ — xem `lib/auth/payroll-scope.ts`.
+  */
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) redirect("/payroll?forbidden=1");
   const period = resolvePeriod(raw, "month");
   const basis: PayrollBasis = parsePayrollBasis(param(raw, "basis"));
 

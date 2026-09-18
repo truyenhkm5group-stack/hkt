@@ -91,6 +91,6 @@ export const FINANCE_NAV: FinanceNavItem[] = [
     icon: HandCoins,
     hint: "Phải trả người làm bao nhiêu, theo lương cứng và theo hoa hồng.",
     permission: "payroll:view-own",
-    anyOf: ["payroll:view-own", "payroll:view"],
+    anyOf: ["payroll:view-own", "payroll:view", "payroll:view-all"],
   },
 ];

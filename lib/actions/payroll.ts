@@ -5,6 +5,7 @@ import { guardSecondApproval } from "@/lib/actions/approvals";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
 import { reapplyAdsMapping } from "@/lib/integrations/facebook/mapping";
 import { listEmployees } from "@/lib/queries/payroll";
@@ -23,7 +24,7 @@ function revalidate() {
 
 export async function saveEmployee(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user, "payroll:manage")) return { error: "Chỉ Quản trị mới được sửa nhân sự và cơ chế lương" };
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) return { error: "Chỉ Quản trị mới được sửa nhân sự và cơ chế lương" };
   const parsed = employeeSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const data = parsed.data;
@@ -54,7 +55,7 @@ export async function saveEmployee(input: unknown): Promise<ActionResult> {
 
 export async function deleteEmployee(id: string): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user, "payroll:manage")) return { error: "Chỉ Quản trị mới được xoá nhân sự" };
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) return { error: "Chỉ Quản trị mới được xoá nhân sự" };
   const list = await listEmployees();
   if (!list.some((e) => e.id === id)) return { error: "Không tìm thấy nhân sự" };
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: list.filter((e) => e.id !== id) });
@@ -74,7 +75,7 @@ const payrollConfigSchema = z.object({
 /** Lưu người phụ trách chính từng mã và % chủ mã nhận từ đơn đẩy chéo */
 export async function savePayrollConfig(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
-  if (!can(user, "payroll:manage")) return { error: "Không có quyền" };
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) return { error: "Không có quyền" };
   const parsed = payrollConfigSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const productOwners = Object.fromEntries(Object.entries(parsed.data.productOwners).filter(([, v]) => Boolean(v)));

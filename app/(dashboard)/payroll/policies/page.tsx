@@ -4,6 +4,7 @@ import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { PolicyManager } from "@/app/(dashboard)/payroll/policies/policy-manager";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
+import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { PAYROLL_INPUTS } from "@/lib/constants/payroll-components";
 import { listOrgOptions, listSalaryPolicies } from "@/lib/queries/payroll-policies";
 
@@ -17,7 +18,11 @@ export const metadata = { title: "Chính sách lương" };
  */
 export default async function PayrollPoliciesPage() {
   const user = await requireUser();
-  if (!can(user, "payroll:manage")) redirect("/payroll?forbidden=1");
+  /*
+    QUẢN TRỊ LƯƠNG = QUYỀN KHAI BÁO **VÀ** PHẠM VI TOÀN CÔNG TY. Màn hình này in ra tiền của mọi
+    người, nên riêng `payroll:manage` là chưa đủ — xem `lib/auth/payroll-scope.ts`.
+  */
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) redirect("/payroll?forbidden=1");
   const [policies, org] = await Promise.all([listSalaryPolicies(), listOrgOptions()]);
 
   return (

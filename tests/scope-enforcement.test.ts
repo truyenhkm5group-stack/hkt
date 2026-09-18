@@ -346,10 +346,17 @@ export function testPayrollOwnLineNeedsAccountKey() {
     phải lọc bằng chính hàm so khớp khoá tài khoản.
   */
   const xuat = fs.readFileSync(path.resolve(__dirname, "..", "app/api/export/payroll/route.ts"), "utf8");
-  assert.ok(/can\(user, "payroll:view"\)/.test(xuat), "đường xuất phải hỏi quyền xem toàn bộ");
-  assert.ok(/can\(user, "payroll:view-own"\)/.test(xuat), "và phải cho người chỉ có quyền xem-của-mình đi tiếp, thay vì mở toang hoặc chặn hẳn");
-  assert.ok(/employeeMatchesUser\(l\.employee, user\)/.test(xuat), "và phải LỌC bằng chính hàm so khớp khoá tài khoản mà màn hình dùng");
-  assert.ok(/viewAll \|\| employeeMatchesUser/.test(xuat), "bộ lọc phải là 'xem hết HOẶC đúng dòng của mình', không phải một nhánh riêng dễ lệch");
+  assert.ok(/resolvePayrollScope\(user\)/.test(xuat), "đường xuất phải tính PHẠM VI ở máy chủ, bằng đúng máy tính mà màn hình dùng");
+  assert.ok(/canOpenPayroll\(scope\)/.test(xuat), "và phải chặn ngay khi phạm vi là NONE, thay vì mở toang hoặc chặn hẳn cả người xem-của-mình");
+  assert.ok(/employeeMatchesUser/.test(xuat), "và phải LỌC bằng chính hàm so khớp khoá tài khoản mà màn hình dùng");
+  assert.ok(
+    /payrollLineVisible\(scope, l\.employee, user, employeeMatchesUser\)/.test(xuat),
+    "bộ lọc phải là CHÍNH hàm chung `payrollLineVisible`, không phải một nhánh viết lại dễ lệch — và nó phải nhận `scope`, vì đó là thứ quyết định ai thấy dòng nào",
+  );
+  assert.ok(
+    !/can\(user, "payroll:view"\)/.test(xuat),
+    "KHÔNG được quay lại hỏi thẳng `payroll:view`: production có bản ghi đè cũ mang khoá ấy, và nó không được mở tệp xuất toàn công ty",
+  );
 
   console.log("✓ Lương xem-của-mình đi bằng KHOÁ TÀI KHOẢN: hai người cùng tên (đầy đủ · ngắn · đã bỏ dấu) không đọc được lương của nhau; chưa khai liên kết ⇒ không khớp ai; sửa tham số URL cũng không mở được khối chi tiết của người khác; đường xuất CSV hẹp đúng bằng màn hình");
 }

@@ -120,7 +120,7 @@ export const SENSITIVE_AREAS: readonly SensitiveArea[] = [
     department: "HR",
     label: "Nhân sự & lương",
     reason: "Lương và lợi nhuận cá nhân của người khác",
-    permissions: ["payroll:view", "payroll:manage", "payroll:approve"],
+    permissions: ["payroll:view", "payroll:view-all", "payroll:manage", "payroll:approve"],
   },
   {
     department: "MANAGEMENT",

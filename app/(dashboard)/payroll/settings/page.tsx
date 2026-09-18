@@ -4,6 +4,7 @@ import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { PayrollSettingsForm } from "@/app/(dashboard)/payroll/settings/settings-form";
 import { SectionCard } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
+import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { COMPENSATION_PROFIT_LABEL, COMPENSATION_PROFIT_RULES } from "@/lib/constants/compensation-profit";
 import { COST_COMPONENTS } from "@/lib/constants/cost-authority";
 import { DEFAULT_STATUTORY, STATUTORY_DEDUCTION_KEY, type StatutoryConfig } from "@/lib/constants/payroll-statutory";
@@ -26,7 +27,11 @@ export const metadata = { title: "Cấu hình lương" };
 export default async function PayrollSettingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
   const user = await requireUser();
-  if (!can(user, "payroll:manage")) redirect("/payroll?forbidden=1");
+  /*
+    QUẢN TRỊ LƯƠNG = QUYỀN KHAI BÁO **VÀ** PHẠM VI TOÀN CÔNG TY. Màn hình này in ra tiền của mọi
+    người, nên riêng `payroll:manage` là chưa đủ — xem `lib/auth/payroll-scope.ts`.
+  */
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) redirect("/payroll?forbidden=1");
   const period = resolvePeriod(raw, "month");
   const [carryover, recognition, statutory] = await Promise.all([
     getCarryoverConfig(),

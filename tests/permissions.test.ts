@@ -17,7 +17,12 @@ export async function testPermissions() {
 
   // ───────── 1. Bản lưu CŨ (không có ảnh chụp) ─────────
   // Mô phỏng đúng tình huống thật: danh sách lưu trước khi khoá mới ra đời.
-  const luuCu = (ALL_PERMISSIONS as string[]).filter((p) => !PERMISSIONS_ADDED_AFTER_SNAPSHOT.includes(p) && p !== "payroll:view");
+  /*
+    `payroll:view-all` bị loại khỏi bản lưu giả lập vì một bản lưu CŨ không thể chứa một khoá chưa
+    ra đời lúc nó được lưu. Giữ nó lại thì bài kiểm tự mâu thuẫn: `payroll:view-all` kéo theo
+    `payroll:view` (rộng kéo theo hẹp), nên khoá vừa bị bỏ ra sẽ quay lại qua cửa sau.
+  */
+  const luuCu = (ALL_PERMISSIONS as string[]).filter((p) => !PERMISSIONS_ADDED_AFTER_SNAPSHOT.includes(p) && p !== "payroll:view" && p !== "payroll:view-all");
   const ketQua = resolvePermissions("MANAGER", luuCu, null, null);
   assert.ok(ketQua.includes(moi), "khoá sinh ra SAU khi lưu phải theo mẫu vai trò, không bị đóng băng");
   assert.ok(!ketQua.includes("payroll:view"), "khoá đã tồn tại mà bị bỏ ra là quyết định có chủ ý — phải giữ nguyên");

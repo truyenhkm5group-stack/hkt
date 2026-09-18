@@ -5,6 +5,7 @@ import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
+import { canOpenPayroll, payrollLineVisible, resolvePayrollScope } from "@/lib/auth/payroll-scope";
 import { PAYROLL_BASIS_NAME, parsePayrollBasis, type PayrollBasis } from "@/lib/constants/payroll";
 import { PAYROLL_COMPONENT_KIND_LABEL, PAYROLL_COMPONENT_SIGN, type PayrollComponentKind } from "@/lib/constants/payroll-components";
 import { PAYROLL_RUN_STATUS_LABEL } from "@/lib/constants/payroll-lifecycle";
@@ -35,8 +36,8 @@ export const metadata = { title: "Phiếu lương" };
 export default async function PayslipPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const raw = await searchParams;
   const user = await requireUser();
-  const viewAll = can(user, "payroll:view");
-  if (!viewAll && !can(user, "payroll:view-own")) redirect("/?forbidden=1");
+  const scope = resolvePayrollScope(user);
+  if (!canOpenPayroll(scope)) redirect("/?forbidden=1");
   const period = resolvePeriod(raw, "month");
   const basis: PayrollBasis = parsePayrollBasis(param(raw, "basis"));
   const wanted = param(raw, "employee");
@@ -47,7 +48,12 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
     getSettingJson<StatutoryConfig>(STATUTORY_DEDUCTION_KEY, DEFAULT_STATUTORY),
   ]);
   const statutory = statutoryDisplay(statutoryConfig);
-  const visible = report.lines.filter((l) => viewAll || employeeMatchesUser(l.employee, user));
+  /*
+    LỌC TRƯỚC, CHỌN SAU — và cả hai bước đi qua `filterPayrollLines`. `wanted` đến từ THANH ĐỊA CHỈ
+    nên nó chỉ được phép chọn TRONG danh sách đã lọc; đổi `?employee=` sang người khác thì không có
+    dòng nào khớp, không phải "thấy dòng của người ấy".
+  */
+  const visible = report.lines.filter((l) => payrollLineVisible(scope, l.employee, user, employeeMatchesUser));
   const line = wanted ? visible.find((l) => l.employee.id === wanted) : visible.length === 1 ? visible[0] : undefined;
   const qs = new URLSearchParams({ period: period.key, basis, ...(period.key === "custom" ? { from: period.fromKey ?? "", to: period.toKey ?? "" } : {}) }).toString();
 

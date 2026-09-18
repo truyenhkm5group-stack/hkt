@@ -57,6 +57,7 @@ import { getPayrollPeriodState, payrollDrift } from "@/lib/queries/payroll-perio
 import { validatePolicyBookForPeriod } from "@/lib/queries/payroll-policies";
 import { listProductsForMapping } from "@/lib/queries/ads-mapping";
 import { cn } from "@/lib/utils";
+import { canOpenPayroll, canSeeAllPayroll, resolvePayrollScope } from "@/lib/auth/payroll-scope";
 
 export const metadata = { title: "Lương & hoa hồng" };
 
@@ -67,8 +68,13 @@ export default async function PayrollPage({
 }) {
   const raw = await searchParams;
   const user = await requireUser();
-  const viewAll = can(user, "payroll:view");
-  if (!viewAll && !can(user, "payroll:view-own")) redirect("/?forbidden=1");
+  /*
+    PHẠM VI TÍNH MỘT LẦN, Ở MÁY CHỦ, TRƯỚC KHI ĐỌC DÒNG NÀO (`lib/auth/payroll-scope.ts`).
+    `payroll:view` cũ KHÔNG còn là "xem tất cả" — xem mục đầu tệp ấy để biết vì sao.
+  */
+  const scope = resolvePayrollScope(user);
+  if (!canOpenPayroll(scope)) redirect("/?forbidden=1");
+  const viewAll = canSeeAllPayroll(scope);
   const canManage = viewAll && can(user, "payroll:manage");
   const period = resolvePeriod(raw, "month");
   const basis: PayrollBasis = parsePayrollBasis(param(raw, "basis"));

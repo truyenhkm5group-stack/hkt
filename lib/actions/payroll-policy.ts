@@ -18,6 +18,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { guardSecondApproval } from "@/lib/actions/approvals";
 import { componentBasisKey, payrollInput, type PayrollCalcParams } from "@/lib/constants/payroll-components";
 import { policyActivationBlockers } from "@/lib/payroll/policy-validation";
@@ -52,7 +53,7 @@ type SessionUser = Awaited<ReturnType<typeof requireUser>>;
 /** Trả về NGƯỜI, hoặc một lời từ chối đọc được. Không có trạng thái thứ ba. */
 async function requireManage(): Promise<SessionUser | { error: string }> {
   const user = await requireUser();
-  if (!can(user, "payroll:manage")) return { error: "Chỉ người có quyền khai báo lương mới làm được việc này" };
+  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) return { error: "Việc này cần quyền khai báo lương VÀ phạm vi xem lương toàn công ty — không được phép NHÌN bảng lương thì cũng không sửa được nó." };
   return user;
 }
 

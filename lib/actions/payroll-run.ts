@@ -26,6 +26,7 @@ import { getDb, schema } from "@/db";
 import { guardSecondApproval } from "@/lib/actions/approvals";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
+import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import {
   PAYROLL_ACTION_SPEC,
   PAYROLL_RUN_ACTIONS,
@@ -54,7 +55,7 @@ export async function movePayrollRun(input: unknown): Promise<RunActionResult> {
 
   // 1 · QUYỀN. Nút cũng ẩn theo đúng quyền này, nhưng máy chủ vẫn kiểm: một cái nút ẩn không phải
   //     một lớp bảo vệ, nó chỉ là một lời gợi ý.
-  if (!can(user, spec.permission)) {
+  if (!can(user, spec.permission) || !canAdministerPayroll(user, true)) {
     return {
       error:
         spec.permission === "payroll:approve"
