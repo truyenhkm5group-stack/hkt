@@ -63,6 +63,15 @@ nên chính agent không đọc được khoá đang trả tiền cho nó.
 Chưa có khoá thì `executor.available()` trả `ok=false` và lượt chạy dừng ở **BLOCKED — CHƯA CẤU
 HÌNH**. Đó là hành vi ĐÚNG, và nó khác hẳn "đã chạy xong".
 
+### 2.3 Khởi tạo sổ agent, rồi bật ĐÚNG MỘT vai
+
+`/tech/agents` → nút **“Khởi tạo sổ agent”**. Mẫu trong mã nguồn không tự kích hoạt (AGENTS.md
+mục 23): 12 vai sinh ra ở trạng thái **TẮT**, và bấm lại không nhân đôi sổ. Chỉ **người** khởi
+tạo được — `seedTechAgents()` từ chối mọi người thao tác không phải `HUMAN`.
+
+Sau đó bật **duy nhất** vai `documentation`. Vai này khai sẵn trong mã: `allowedRisks: ["R0"]`,
+`canMerge / canDeploy / canRunProdWrite` đều `false`. Không bật vai nào khác ở Phase 2A.
+
 ## 3 · Chín hàng rào — đã kiểm, KHÔNG phải bằng cách thử phá máy chủ thật
 
 `tests/tech-phase2a.test.ts::testPhase2aBarriers()` chạy trên kho git tạm + CSDL kiểm thử:
