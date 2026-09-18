@@ -253,16 +253,38 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           tone="bg-slate-800"
           title="GitHub Actions (sổ deploy)"
           description="Phòng Tech AI đọc lượt chạy workflow deploy để đối chiếu với bản production đang chạy."
-          hint="CHỈ ĐỌC. ERP không kích hoạt, không huỷ, không đổi được một lượt deploy nào — GitHub Actions vẫn là bên có thẩm quyền, bảng /tech/deployments chỉ là lớp quan sát. Token cần đúng quyền Actions: read; nó không bao giờ xuống trình duyệt và không vào nhật ký."
+          hint="CHỈ ĐỌC. ERP không kích hoạt, không huỷ, không đổi được một lượt deploy nào — GitHub Actions vẫn là bên có thẩm quyền, bảng /tech/deployments chỉ là lớp quan sát. Kho này PUBLIC nên KHÔNG cần token: GitHub cho đọc workflow và lượt chạy của kho public mà không xác thực. Token chỉ để nâng hạn mức (60 → 5.000 request/giờ) hoặc khi kho chuyển sang private."
           configured={gh.configured}
           items={[
-            { label: "Kho", value: gh.repo ? <span className="font-mono text-xs">{gh.repo}</span> : <span className="text-muted-foreground">Chưa cấu hình ERP_GITHUB_REPO</span> },
-            { label: "Token", value: gh.tokenMasked ? <span className="font-mono">{gh.tokenMasked}</span> : <span className="text-muted-foreground">Chưa cấu hình ERP_GITHUB_TOKEN</span> },
+            { label: "Kho", value: gh.repo ? <span className="font-mono text-xs">{gh.repo}</span> : <span className="text-muted-foreground">Chưa có ERP_GITHUB_REPO</span> },
+            {
+              label: "Cách gọi",
+              value:
+                gh.auth === "TOKEN" ? (
+                  <span>
+                    Có token <span className="font-mono">{gh.tokenMasked}</span> · hạn mức 5.000 request/giờ
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">Gọi ẩn danh (kho public) · hạn mức 60 request/giờ theo IP máy chủ</span>
+                ),
+            },
             { label: "Workflow deploy", value: <span className="font-mono text-xs">{deployWorkflowFile()}</span> },
             { label: "Lịch", value: <span className="text-muted-foreground">Chạy tay — không có lịch tự động. Bấm “Đọc lại từ GitHub” ở trang Deploy, hoặc chạy job github-deployments.</span>, span: true },
             gh.configured
-              ? { label: "Quyền tối thiểu", value: <span className="text-xs text-muted-foreground">Fine-grained token → Repository permissions → Actions: Read-only (+ Contents: Read-only nếu kho private). KHÔNG cần quyền ghi, KHÔNG cần workflow, KHÔNG cần administration.</span>, span: true }
-              : { label: "Chưa cấu hình", value: <span className="text-xs text-muted-foreground">{gh.reason} Tạo token CHỈ ĐỌC (Actions: Read-only), đặt vào Secret ERP_GITHUB_TOKEN, rồi chạy Actions → “Vận hành ERP trên VPS” → apply-tech-github-env.</span>, span: true },
+              ? {
+                  label: "Token",
+                  value: (
+                    <span className="text-xs text-muted-foreground">
+                      KHÔNG bắt buộc. Chỉ đặt <span className="font-mono">ERP_GITHUB_TOKEN</span> khi kho chuyển sang private, hoặc khi gặp lỗi hạn mức (60 request/giờ dùng chung cho cả máy chủ). Quyền tối thiểu: Fine-grained token → Actions: Read-only.
+                    </span>
+                  ),
+                  span: true,
+                }
+              : {
+                  label: "Chưa cấu hình",
+                  value: <span className="text-xs text-muted-foreground">{gh.reason}</span>,
+                  span: true,
+                },
           ]}
           footer={<TestConnectionButton provider="github" disabled={!gh.configured} />}
         />

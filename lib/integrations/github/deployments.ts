@@ -3,7 +3,7 @@ import { getDb, schema } from "@/db";
 import { techDeployStatusFromGithub, verifyDeployment, type TechDeployStatus, type TechVerification } from "@/lib/constants/tech";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 import { runningVersion } from "@/lib/version";
-import { deployWorkflowFile, githubConfig, listRecentDeployRuns, type GithubRun } from "@/lib/integrations/github/client";
+import { GithubError, deployWorkflowFile, githubConfig, listRecentDeployRuns, type GithubErrorKind, type GithubRun } from "@/lib/integrations/github/client";
 
 /**
  * ═══════════ ĐỌC LƯỢT DEPLOY TỪ GITHUB VÀO SỔ QUAN SÁT ═══════════
@@ -36,7 +36,19 @@ export type GithubDeploySyncResult = {
   mismatched: number;
   /** `null` = production chưa khai commit (chạy dev, hoặc `.env` thiếu `ERP_COMMIT`). */
   productionCommit: string | null;
+  /** Vì sao lượt chạy không quét được gì. `null` = có quét thật. */
   skippedReason: string | null;
+  /**
+   * PHÂN LOẠI của `skippedReason`, vì ba lý do dưới đây sửa ở ba nơi khác hẳn:
+   *
+   * · `NOT_CONFIGURED` — thiếu tên kho, sửa ở `.env` / chạy một lượt deploy.
+   * · `RATE_LIMITED`   — KHÔNG phải lỗi cấu hình, chỉ cần CHỜ (hoặc thêm token cho hạn mức cao hơn).
+   * · `AUTH_FAILED`    — có token nhưng token sai; với kho public thì XOÁ token cũng xong.
+   *
+   * Gộp cả ba thành một dòng "chưa đồng bộ được" là đẩy người vận hành đi sửa nhầm chỗ — và với
+   * `RATE_LIMITED` thì "sửa" đúng nghĩa là không làm gì cả.
+   */
+  skippedKind: GithubErrorKind | null;
 };
 
 function rowFromRun(run: GithubRun): {
@@ -86,12 +98,25 @@ function rowFromRun(run: GithubRun): {
  * "chưa bật", và job phải phân biệt được hai thứ đó.
  */
 export async function syncGithubDeployments(opts: { limit?: number } = {}): Promise<GithubDeploySyncResult> {
-  const base: GithubDeploySyncResult = { scanned: 0, inserted: 0, updated: 0, unchanged: 0, errors: 0, verified: 0, mismatched: 0, productionCommit: null, skippedReason: null };
+  const base: GithubDeploySyncResult = { scanned: 0, inserted: 0, updated: 0, unchanged: 0, errors: 0, verified: 0, mismatched: 0, productionCommit: null, skippedReason: null, skippedKind: null };
   const cfg = githubConfig();
-  if (!cfg.configured) return { ...base, skippedReason: cfg.reason };
+  if (!cfg.configured) return { ...base, skippedReason: cfg.reason, skippedKind: "NOT_CONFIGURED" };
 
   const db = await getDb();
-  const runs = await listRecentDeployRuns(opts.limit ?? 20);
+  /*
+    LỖI ĐỌC KHÔNG ĐƯỢC NÉM RA NGOÀI THÀNH MỘT DÒNG "JOB HỎNG" KHÔNG TÊN.
+
+    Hết hạn mức là tình huống BÌNH THƯỜNG của đường gọi ẩn danh (60 request/giờ theo IP) và cách
+    xử lý của nó là CHỜ — khác hẳn token sai hay sai tên kho. Nên bắt ở đây, phân loại, rồi trả về
+    số liệu bằng 0 KÈM LÝ DO, thay vì để nguyên một ngoại lệ mà người đọc phải tự đoán.
+  */
+  let runs: Awaited<ReturnType<typeof listRecentDeployRuns>>;
+  try {
+    runs = await listRecentDeployRuns(opts.limit ?? 20);
+  } catch (e) {
+    if (e instanceof GithubError) return { ...base, skippedReason: e.message, skippedKind: e.kind };
+    throw e;
+  }
   const out: GithubDeploySyncResult = { ...base, scanned: runs.length };
 
   for (const run of runs) {
@@ -204,9 +229,22 @@ export async function runGithubDeploymentSync(options: { trigger?: SyncTrigger; 
     ctx.summary.skipped = res.unchanged;
     ctx.summary.failed = res.errors;
     if (res.skippedReason) {
-      // CHƯA BẬT, không phải HỎNG. Ghi thành cảnh báo để trang Kết nối dữ liệu nói đúng câu đó.
+      /*
+        BA CÂU TRẢ LỜI KHÁC NHAU, KHÔNG PHẢI MỘT.
+
+        `CHƯA BẬT` và `HỎNG` đã là hai thứ; `TẠM HẾT HẠN MỨC` là thứ thứ ba và nó KHÔNG phải lỗi
+        của ai — lượt sau tự chạy được. Chỉ nhánh cuối mới đếm là `failed`, vì chỉ nó cần người
+        đi sửa một cái gì đó.
+      */
       ctx.summary.warning = `Chưa đồng bộ được: ${res.skippedReason}`;
-      ctx.summary.detail = "Bỏ qua — chưa cấu hình GitHub.";
+      if (res.skippedKind === "NOT_CONFIGURED") {
+        ctx.summary.detail = "Bỏ qua — chưa biết đang đọc kho nào.";
+      } else if (res.skippedKind === "RATE_LIMITED") {
+        ctx.summary.detail = "Bỏ qua — GitHub tạm khoá vì hạn mức. Lượt sau tự chạy lại được, không phải sửa gì.";
+      } else {
+        ctx.summary.detail = `Đọc GitHub hỏng (${res.skippedKind ?? "HTTP"}).`;
+        ctx.summary.failed = 1;
+      }
       return res;
     }
     const doiChieu =

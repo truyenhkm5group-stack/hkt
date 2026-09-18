@@ -17,8 +17,13 @@
  * 1. **CHỈ ĐỌC.** Không hàm nào ở đây dùng `POST`/`PUT`/`PATCH`/`DELETE`. ERP không kích hoạt được
  *    một lượt deploy, không huỷ được, không đổi được. GitHub Actions là bên có thẩm quyền và bản
  *    này không tranh chỗ đó.
- * 2. **Token chỉ ở biến môi trường máy chủ.** Không lưu CSDL, không đi vào prompt, không xuống
- *    trình duyệt, không vào nhật ký.
+ * 2. **Token là TUỲ CHỌN, không phải điều kiện.** Kho này PUBLIC, và GitHub cho đọc workflow +
+ *    lượt chạy của kho public mà không cần xác thực. Bắt chủ shop tạo một PAT chỉ để đọc thứ ai
+ *    cũng đọc được là dựng một hàng rào không bảo vệ gì — và tệ hơn, nó làm "chưa cấu hình" và
+ *    "không có lượt deploy nào" trông giống hệt nhau trên màn hình. Có token thì gửi kèm (hạn mức
+ *    5.000 request/giờ thay vì 60, và đọc được cả kho private); không có thì gọi ẩn danh. Khi có,
+ *    token chỉ sống ở biến môi trường máy chủ: không lưu CSDL, không vào prompt, không xuống trình
+ *    duyệt, không vào nhật ký.
  * 3. **Không log token.** `maskToken()` là thứ duy nhất được in ra, và nó chỉ đủ để trả lời "có
  *    đúng token mình nghĩ không", không đủ để dùng lại.
  * 4. **Lỗi GitHub không được làm sập việc khác.** Mọi hàm ném lỗi có câu chữ đọc được; job gọi
@@ -70,7 +75,34 @@ export function maskToken(t: string): string {
   return `${t.slice(0, 4)}••••${t.slice(-4)}`;
 }
 
-export type GithubConfigState = { configured: boolean; reason: string | null; repo: string | null; tokenMasked: string | null };
+/**
+ * ═══════════ NĂM CÁCH HỎNG, NĂM CÁCH SỬA ═══════════
+ *
+ * Gộp tất cả thành "không kết nối được" là đẩy người đọc đi sửa nhầm chỗ. Mỗi loại dưới đây sửa ở
+ * một nơi khác hẳn: `NOT_CONFIGURED` sửa ở `.env`, `AUTH_FAILED` sửa ở token, `RATE_LIMITED` chỉ
+ * cần CHỜ (hoặc thêm token), `NOT_FOUND` sửa ở tên kho / tên tệp workflow, `NETWORK` không phải
+ * lỗi của ai cả.
+ */
+export type GithubErrorKind = "NOT_CONFIGURED" | "AUTH_FAILED" | "RATE_LIMITED" | "NOT_FOUND" | "NETWORK" | "HTTP";
+
+export class GithubError extends Error {
+  readonly kind: GithubErrorKind;
+  readonly status: number | null;
+  /** Giây còn phải chờ, CHỈ khi `kind = "RATE_LIMITED"` và GitHub nói ra. `null` = không biết. */
+  readonly retryAfterSec: number | null;
+  constructor(kind: GithubErrorKind, message: string, status: number | null = null, retryAfterSec: number | null = null) {
+    super(message);
+    this.name = "GithubError";
+    this.kind = kind;
+    this.status = status;
+    this.retryAfterSec = retryAfterSec;
+  }
+}
+
+/** `auth` nói ĐANG gọi kiểu nào — chứ không phải "nên" gọi kiểu nào. Màn hình in thẳng giá trị này. */
+export type GithubAuthMode = "TOKEN" | "PUBLIC";
+
+export type GithubConfigState = { configured: boolean; reason: string | null; repo: string | null; auth: GithubAuthMode; tokenMasked: string | null };
 
 /**
  * Đã cấu hình chưa — và nếu chưa thì THIẾU ĐÚNG CÁI GÌ.
@@ -81,31 +113,70 @@ export type GithubConfigState = { configured: boolean; reason: string | null; re
 export function githubConfig(): GithubConfigState {
   const t = token();
   const r = repo();
-  if (!t && !r) return { configured: false, reason: "Chưa có ERP_GITHUB_TOKEN và ERP_GITHUB_REPO.", repo: null, tokenMasked: null };
-  if (!t) return { configured: false, reason: "Chưa có ERP_GITHUB_TOKEN (token CHỈ ĐỌC, quyền Actions: read).", repo: r, tokenMasked: null };
-  if (!r) return { configured: false, reason: "Chưa có ERP_GITHUB_REPO dạng `chu-so-huu/ten-kho`.", repo: null, tokenMasked: maskToken(t) };
-  return { configured: true, reason: null, repo: r, tokenMasked: maskToken(t) };
+  /*
+    CHỈ TÊN KHO LÀ BẮT BUỘC.
+
+    Thiếu token KHÔNG phải "chưa cấu hình": với kho public, gọi ẩn danh đọc được đúng những thứ
+    ERP cần. Trả `configured: false` ở đây là dán nhãn BLOCKED lên một đường đang chạy được, và
+    trang Deploy sẽ nói "chưa cấu hình" mãi mãi trong khi nó chỉ cần bấm đọc.
+
+    Tên kho thì máy không đoán được. Nó đến từ `deploy-vps.yml` (`github.repository`) — chính
+    workflow deploy là chỗ biết chắc hôm nay đang triển khai kho nào.
+  */
+  if (!r) {
+    return {
+      configured: false,
+      reason: "Chưa có ERP_GITHUB_REPO dạng `chu-so-huu/ten-kho` — biến này do workflow deploy tự truyền xuống, nên máy chủ chưa chạy lượt deploy nào sau khi bản này lên thì nó còn trống.",
+      repo: null,
+      auth: t ? "TOKEN" : "PUBLIC",
+      tokenMasked: t ? maskToken(t) : null,
+    };
+  }
+  return { configured: true, reason: null, repo: r, auth: t ? "TOKEN" : "PUBLIC", tokenMasked: t ? maskToken(t) : null };
+}
+
+/**
+ * Đọc hạn mức còn lại từ header phản hồi. GitHub trả `x-ratelimit-remaining: 0` kèm 403 khi hết —
+ * KHÔNG phải 429, nên một bộ dò chỉ nhìn mã trạng thái sẽ gọi nhầm nó là "thiếu quyền" và gửi
+ * người vận hành đi tạo token mới cho một thứ chỉ cần chờ.
+ */
+function rateLimited(res: { status: number; headers: { get(name: string): string | null } }): number | null {
+  const remaining = res.headers.get("x-ratelimit-remaining");
+  if (res.status !== 403 && res.status !== 429) return null;
+  if (remaining !== null && remaining.trim() !== "0") return null;
+  if (res.status === 403 && remaining === null) return null;
+  const reset = Number(res.headers.get("x-ratelimit-reset"));
+  if (Number.isFinite(reset) && reset > 0) return Math.max(0, Math.round(reset - Date.now() / 1000));
+  const retryAfter = Number(res.headers.get("retry-after"));
+  return Number.isFinite(retryAfter) && retryAfter > 0 ? Math.round(retryAfter) : null;
 }
 
 async function get<T>(path: string): Promise<T> {
   const t = token();
   const r = repo();
-  if (!t || !r) throw new Error(githubConfig().reason ?? "Chưa cấu hình GitHub.");
+  if (!r) throw new GithubError("NOT_CONFIGURED", githubConfig().reason ?? "Chưa cấu hình GitHub.");
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await (fetchImpl ?? fetch)(`${API}/repos/${r}${path}`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${t}`,
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "vnxcommerce-erp",
-      },
-      signal: controller.signal,
-      cache: "no-store",
-    });
+    /*
+      KHÔNG có token thì KHÔNG gửi header `Authorization` — gửi một header rỗng hay `Bearer `
+      không phải là "gọi ẩn danh", GitHub trả 401 cho nó. Đây là chỗ duy nhất quyết định chế độ.
+    */
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "vnxcommerce-erp",
+    };
+    if (t) headers.Authorization = `Bearer ${t}`;
+
+    let res: Awaited<ReturnType<FetchLike>>;
+    try {
+      res = await (fetchImpl ?? fetch)(`${API}/repos/${r}${path}`, { method: "GET", headers, signal: controller.signal, cache: "no-store" });
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      throw new GithubError("NETWORK", controller.signal.aborted ? `Hết ${TIMEOUT_MS / 1000} giây chờ GitHub trả lời.` : `Không gọi được GitHub: ${m}`);
+    }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       /*
@@ -118,7 +189,33 @@ async function get<T>(path: string): Promise<T> {
       } catch {
         message = "";
       }
-      throw new Error(`GitHub trả ${res.status}${message ? `: ${message.slice(0, 200)}` : ""}`);
+      const doi = rateLimited(res);
+      if (doi !== null) {
+        const phut = Math.ceil(doi / 60);
+        throw new GithubError(
+          "RATE_LIMITED",
+          t
+            ? `GitHub tạm khoá vì vượt hạn mức (5.000 request/giờ cho token). Thử lại sau ~${phut} phút.`
+            : `GitHub tạm khoá vì vượt hạn mức GỌI ẨN DANH (60 request/giờ, tính theo địa chỉ IP của máy chủ). Thử lại sau ~${phut} phút, hoặc đặt ERP_GITHUB_TOKEN để được 5.000/giờ.`,
+          res.status,
+          doi,
+        );
+      }
+      if (res.status === 401) {
+        throw new GithubError(
+          "AUTH_FAILED",
+          `GitHub từ chối token đang dùng (401${message ? `: ${message.slice(0, 120)}` : ""}). Kho này PUBLIC nên đọc được mà KHÔNG cần token — hoặc xoá ERP_GITHUB_TOKEN/GITHUB_TOKEN/GH_TOKEN khỏi .env, hoặc thay bằng token còn hiệu lực.`,
+          401,
+        );
+      }
+      if (res.status === 404) {
+        throw new GithubError(
+          "NOT_FOUND",
+          `GitHub không thấy \`${r}\` hoặc tệp workflow \`${deployWorkflowFile()}\` (404). Kiểm tra ERP_GITHUB_REPO và ERP_GITHUB_DEPLOY_WORKFLOW${t ? "" : " — nếu kho là PRIVATE thì lượt gọi ẩn danh luôn thấy 404, lúc đó mới cần token"}.`,
+          404,
+        );
+      }
+      throw new GithubError("HTTP", `GitHub trả ${res.status}${message ? `: ${message.slice(0, 200)}` : ""}`, res.status);
     }
     return (await res.json()) as T;
   } finally {
@@ -184,14 +281,16 @@ function toRun(r: RawRun): GithubRun {
  *
  * Gọi một endpoint RẺ và CHỈ ĐỌC. Không in token, chỉ in dạng đã che.
  */
-export async function testConnection(): Promise<{ ok: boolean; detail: string }> {
+export async function testConnection(): Promise<{ ok: boolean; detail: string; kind: GithubErrorKind | null; auth: GithubAuthMode }> {
   const cfg = githubConfig();
-  if (!cfg.configured) return { ok: false, detail: cfg.reason ?? "Chưa cấu hình." };
+  if (!cfg.configured) return { ok: false, detail: cfg.reason ?? "Chưa cấu hình.", kind: "NOT_CONFIGURED", auth: cfg.auth };
   try {
     const wf = await get<{ name?: string; state?: string }>(`/actions/workflows/${encodeURIComponent(deployWorkflowFile())}`);
-    return { ok: true, detail: `Đọc được workflow "${wf.name ?? deployWorkflowFile()}" (${wf.state ?? "?"}) của ${cfg.repo} · token ${cfg.tokenMasked}` };
+    const cach = cfg.auth === "TOKEN" ? `token ${cfg.tokenMasked}` : "gọi ẩn danh (kho public, không cần token)";
+    return { ok: true, detail: `Đọc được workflow "${wf.name ?? deployWorkflowFile()}" (${wf.state ?? "?"}) của ${cfg.repo} · ${cach}`, kind: null, auth: cfg.auth };
   } catch (e) {
-    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    if (e instanceof GithubError) return { ok: false, detail: e.message, kind: e.kind, auth: cfg.auth };
+    return { ok: false, detail: e instanceof Error ? e.message : String(e), kind: "HTTP", auth: cfg.auth };
   }
 }
 

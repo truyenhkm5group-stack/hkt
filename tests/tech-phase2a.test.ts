@@ -16,7 +16,7 @@ import {
 } from "@/lib/constants/agent-sandbox";
 import { TECH_AGENT_TEMPLATES, techDeployStatusFromGithub, verifyDeployment } from "@/lib/constants/tech";
 import { WORK_SOURCE_SPEC, authorityOf } from "@/lib/constants/work-sources";
-import { __setGithubFetchForTests } from "@/lib/integrations/github/client";
+import { __setGithubFetchForTests, githubConfig } from "@/lib/integrations/github/client";
 import { syncGithubDeployments, verifyDeployments } from "@/lib/integrations/github/deployments";
 import { adaptTechTasks } from "@/lib/queries/work-adapters";
 import { createTechTask, decideTechApproval, overrideTechTaskRisk, recordTechDeployment, seedTechAgents, setTechAgentEnabled, setTechTaskStatus, startTechAgentRun, updateTechDeployment, type TechActor } from "@/lib/tech/service";
@@ -142,12 +142,29 @@ function ghRun(over: Partial<Record<string, unknown>> & { ageMinutes?: number } 
   };
 }
 
+/** Header của lượt gọi gần nhất — để kiểm ERP CÓ/KHÔNG gửi `Authorization`, chứ không tin lời kể. */
+let headerLanCuoi: Record<string, string> = {};
+
 function fakeGithub(runs: unknown[]) {
-  __setGithubFetchForTests((async (url: string | URL | Request) => {
+  headerLanCuoi = {};
+  __setGithubFetchForTests((async (url: string | URL | Request, init?: RequestInit) => {
+    headerLanCuoi = { ...((init?.headers as Record<string, string> | undefined) ?? {}) };
     const u = String(url);
     if (u.includes("/runs?")) return new Response(JSON.stringify({ workflow_runs: runs }), { status: 200 });
     return new Response(JSON.stringify({ name: "Deploy", state: "active" }), { status: 200 });
   }) as typeof fetch);
+}
+
+/** GitHub hết hạn mức: 403 kèm `x-ratelimit-remaining: 0` — KHÔNG phải 429, và đó là cái bẫy. */
+function fakeGithubHetHanMuc(sauBaoNhieuGiay = 900) {
+  __setGithubFetchForTests((async () =>
+    new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+      status: 403,
+      headers: {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(Math.round(Date.now() / 1000) + sauBaoNhieuGiay),
+      },
+    })) as typeof fetch);
 }
 
 export async function testGithubDeploymentSync() {
@@ -218,22 +235,77 @@ export async function testGithubDeploymentSync() {
   assert.ok(lech.superseded >= 1, "các lượt thành công cũ hơn là 'đã bị bản sau thay', không phải lỗi");
 
   /*
-    ───────── 2.8 Chưa cấu hình ⇒ BỎ QUA có lý do, KHÔNG phải lỗi ─────────
+    ═══════════ 2.8 KHO PUBLIC: THIẾU TOKEN KHÔNG PHẢI "CHƯA CẤU HÌNH" ═══════════
+
+    GitHub cho đọc workflow và lượt chạy của kho public mà không cần xác thực. Trả "chưa cấu hình"
+    khi thiếu token là dán nhãn BLOCKED lên một đường đang chạy được — và trên màn hình, "chưa cấu
+    hình" với "không có lượt deploy nào" trông giống hệt nhau.
 
     Phải xoá CẢ BA biến: `token()` có chuỗi dự phòng `ERP_GITHUB_TOKEN → GITHUB_TOKEN → GH_TOKEN`
     (cố ý, để máy CI đã có sẵn token dùng được ngay). Chỉ xoá biến đầu thì trên một máy có
-    `GITHUB_TOKEN` bài kiểm sẽ đi tiếp và gọi mạng thật — xanh ở chỗ này, đỏ ở máy khác.
+    `GITHUB_TOKEN` bài kiểm sẽ đi nhánh khác — xanh ở chỗ này, đỏ ở máy khác.
   */
   const giuToken = { erp: process.env.ERP_GITHUB_TOKEN, gh: process.env.GITHUB_TOKEN, gh2: process.env.GH_TOKEN };
   delete process.env.ERP_GITHUB_TOKEN;
   delete process.env.GITHUB_TOKEN;
   delete process.env.GH_TOKEN;
-  const chuaBat = await syncGithubDeployments({ limit: 5 });
-  assert.ok(chuaBat.skippedReason && chuaBat.skippedReason.includes("ERP_GITHUB_TOKEN"), "phải nói THIẾU ĐÚNG CÁI GÌ");
-  assert.equal(chuaBat.scanned, 0);
-  assert.equal(chuaBat.errors, 0, "chưa bật KHÔNG phải lỗi");
+
+  const cfgAnDanh = githubConfig();
+  assert.equal(cfgAnDanh.configured, true, "kho public + biết tên kho ⇒ ĐÃ cấu hình, dù không có token");
+  assert.equal(cfgAnDanh.auth, "PUBLIC", "…và nói rõ đang gọi kiểu ẩn danh");
+  assert.equal(cfgAnDanh.tokenMasked, null);
+
+  await db.delete(schema.techDeployments).where(eq(schema.techDeployments.provider, "GITHUB_ACTIONS"));
+  fakeGithub([ghRun({ id: 3001, head_sha: "e".repeat(40), ageMinutes: 30 })]);
+  const anDanh = await syncGithubDeployments({ limit: 5 });
+  assert.equal(anDanh.skippedReason, null, "KHÔNG được bỏ qua chỉ vì thiếu token");
+  assert.equal(anDanh.scanned, 1, "vẫn quét được lượt chạy");
+  assert.equal(anDanh.inserted, 1);
+  // Kiểm HEADER THẬT, không tin lời kể: gửi `Authorization` rỗng hay `Bearer ` KHÔNG phải gọi ẩn
+  // danh — GitHub trả 401 cho nó, và lỗi ấy sẽ trông y hệt "token sai".
+  assert.ok(!("Authorization" in headerLanCuoi), "lượt gọi ẩn danh KHÔNG được gửi header Authorization");
+  assert.equal(headerLanCuoi["User-Agent"], "vnxcommerce-erp", "…nhưng các header khác vẫn phải còn");
+
+  // Có token trở lại ⇒ CÓ gửi Authorization. Hai chiều, không chỉ một.
+  process.env.ERP_GITHUB_TOKEN = "test-token-not-real";
+  fakeGithub([ghRun({ id: 3001, head_sha: "e".repeat(40), ageMinutes: 30 })]);
+  await syncGithubDeployments({ limit: 5 });
+  assert.equal(headerLanCuoi.Authorization, "Bearer test-token-not-real", "có token thì phải gửi kèm");
+  assert.equal(githubConfig().auth, "TOKEN");
+
+  /*
+    ───────── 2.9 HẾT HẠN MỨC KHÔNG PHẢI LỖI CẤU HÌNH, VÀ KHÔNG PHẢI LỖI CỦA AI ─────────
+
+    Cách sửa của nó là CHỜ. Xếp nó chung với "thiếu token" thì người vận hành đi tạo một PAT mới
+    cho một thứ tự khỏi sau mười lăm phút; xếp chung với "token sai" thì họ đi xoá token đang đúng.
+    GitHub báo hết hạn mức bằng **403** kèm `x-ratelimit-remaining: 0`, không phải 429 — một bộ dò
+    chỉ nhìn mã trạng thái sẽ gọi nhầm nó là "thiếu quyền".
+  */
+  fakeGithubHetHanMuc(900);
+  const hetHanMuc = await syncGithubDeployments({ limit: 5 });
+  assert.equal(hetHanMuc.skippedKind, "RATE_LIMITED", "403 + remaining 0 là HẾT HẠN MỨC, không phải thiếu quyền");
+  assert.equal(hetHanMuc.scanned, 0);
+  assert.equal(hetHanMuc.errors, 0, "hết hạn mức KHÔNG tính là lỗi đọc — lượt sau tự chạy lại được");
+  assert.ok(hetHanMuc.skippedReason?.includes("phút"), "phải nói phải chờ bao lâu, không bắt người đoán");
+
+  // ───────── 2.10 Token SAI ⇒ AUTH_FAILED, và lời sửa phải nhắc rằng kho public không cần token ─────────
+  __setGithubFetchForTests((async () => new Response(JSON.stringify({ message: "Bad credentials" }), { status: 401 })) as typeof fetch);
+  const tokenSai = await syncGithubDeployments({ limit: 5 });
+  assert.equal(tokenSai.skippedKind, "AUTH_FAILED");
+  assert.ok(tokenSai.skippedReason?.includes("KHÔNG cần token"), "với kho public, XOÁ token cũng là một cách sửa — phải nói ra");
+
+  // ───────── 2.11 KHÔNG biết tên kho mới thật sự là CHƯA CẤU HÌNH ─────────
+  const giuRepo = process.env.ERP_GITHUB_REPO;
+  delete process.env.ERP_GITHUB_REPO;
+  delete process.env.GITHUB_REPOSITORY;
+  const khongBietKho = await syncGithubDeployments({ limit: 5 });
+  assert.equal(khongBietKho.skippedKind, "NOT_CONFIGURED");
+  assert.ok(khongBietKho.skippedReason?.includes("ERP_GITHUB_REPO"), "phải nói THIẾU ĐÚNG CÁI GÌ");
+  assert.equal(khongBietKho.errors, 0, "chưa biết kho KHÔNG phải lỗi");
+  if (giuRepo) process.env.ERP_GITHUB_REPO = giuRepo;
 
   // Trả lại môi trường đúng như lúc mượn — bài kiểm sau có thể cần token thật.
+  delete process.env.ERP_GITHUB_TOKEN;
   if (giuToken.erp) process.env.ERP_GITHUB_TOKEN = giuToken.erp;
   if (giuToken.gh) process.env.GITHUB_TOKEN = giuToken.gh;
   if (giuToken.gh2) process.env.GH_TOKEN = giuToken.gh2;
@@ -241,7 +313,7 @@ export async function testGithubDeploymentSync() {
   delete process.env.ERP_GITHUB_REPO;
   delete process.env.ERP_COMMIT;
   await db.delete(schema.techDeployments).where(eq(schema.techDeployments.provider, "GITHUB_ACTIONS"));
-  console.log("✓ Đọc deploy từ GitHub: 6 ca ánh xạ · idempotent (chạy lại không nhân đôi) · chạy lại workflow là dòng riêng · bốn câu trả lời đối chiếu · chưa cấu hình thì BỎ QUA có lý do");
+  console.log("✓ Đọc deploy từ GitHub: 6 ca ánh xạ · idempotent · chạy lại workflow là dòng riêng · bốn câu trả lời đối chiếu · KHO PUBLIC đọc được không cần token (không gửi header Authorization) · hết hạn mức / token sai / chưa biết kho là BA câu trả lời khác nhau");
 }
 
 /* ═════════════════ 3 · PHÉP CHIẾU VIỆC TECH LÊN /work ═════════════════ */
@@ -720,6 +792,29 @@ export function testPhase2aSourceGuards() {
   assert.ok(opsYml.includes("apply-tech-github-env"), "ops-vps.yml phải có thao tác apply-tech-github-env để đặt cấu hình mà KHÔNG phải deploy");
 
   /*
+    ───────── 5.6b TÊN KHO DO WORKFLOW KHAI, KHÔNG DO NGƯỜI GÕ LẠI ─────────
+
+    `github.repository` là thứ workflow deploy biết chắc chắn — nó ĐANG triển khai kho đó. Bắt chủ
+    shop gõ lại "truyenhkm5group-stack/hkt" vào một ô cấu hình là thêm một chỗ để gõ sai, cho một
+    thông tin máy đã cầm sẵn trong tay. Ô `vars.` giữ lại để đổi được khi cần, nhưng KHÔNG ai phải
+    điền nó cho trường hợp bình thường.
+  */
+  assert.ok(/ERP_GITHUB_REPO: \$\{\{ vars\.ERP_GITHUB_REPO \|\| github\.repository \}\}/.test(deployYml), "deploy-vps.yml phải tự suy ERP_GITHUB_REPO từ github.repository");
+  assert.ok(/ERP_GITHUB_DEPLOY_WORKFLOW: \$\{\{ vars\.ERP_GITHUB_DEPLOY_WORKFLOW \|\| 'deploy-vps\.yml' \}\}/.test(deployYml), "…và ERP_GITHUB_DEPLOY_WORKFLOW phải có mặc định, không bắt ai khai");
+
+  /*
+    ───────── 5.6c TOKEN LÀ TUỲ CHỌN, VÀ MÀN HÌNH PHẢI NÓI ĐÚNG THẾ ─────────
+
+    Kho này PUBLIC. Một dòng chữ khiến chủ shop tưởng phải tạo PAT mới chạy được Phase 2A là một
+    rào cản tự dựng — tốn của họ một buổi và không bảo vệ thứ gì, vì dữ liệu đó ai cũng đọc được.
+  */
+  const theGithub = doc("app/(dashboard)/integrations/page.tsx");
+  const khoiThe = theGithub.slice(theGithub.indexOf('initials="GH"'), theGithub.indexOf('provider="github"'));
+  assert.ok(/KHÔNG bắt buộc|không cần token|KHÔNG cần token/.test(khoiThe), "thẻ GitHub ở trang Kết nối dữ liệu phải nói rõ token KHÔNG bắt buộc với kho public");
+  const khoiOpsMoTa = opsYml.slice(opsYml.indexOf("- apply-tech-github-env"), opsYml.indexOf("- apply-tech-github-env") + 200);
+  assert.ok(/TUỲ CHỌN/.test(khoiOpsMoTa), "mô tả thao tác trong danh sách ops phải nói rõ đây là TUỲ CHỌN");
+
+  /*
     ───────── 5.7 CHỈ GHI KHI CÓ GIÁ TRỊ ─────────
 
     Secret chưa đặt mà ghi đè rỗng thì sổ deploy im lặng ngừng cập nhật — cùng đúng cái bẫy mà
@@ -743,5 +838,5 @@ export function testPhase2aSourceGuards() {
     assert.ok(!khoiOps.includes(cam), `apply-tech-github-env: KHÔNG được chạy \`${cam}\` — nó đặt cấu hình, không deploy và không ghi dữ liệu`);
   }
 
-  console.log('✓ Quét mã nguồn Phase 2A: không tệp "use client" nào chạm tích hợp GitHub / runner · client GitHub chỉ GET · không log token · agent không có lệnh commit/push/merge · đường cấu hình ERP_GITHUB_* thông từ Secret tới .env · apply-tech-github-env không deploy và không in secret');
+  console.log('✓ Quét mã nguồn Phase 2A: không tệp "use client" nào chạm tích hợp GitHub / runner · client GitHub chỉ GET · không log token · agent không có lệnh commit/push/merge · đường cấu hình ERP_GITHUB_* thông từ Secret tới .env · tên kho tự suy từ github.repository · token khai rõ là TUỲ CHỌN ở cả UI lẫn ops · apply-tech-github-env không deploy và không in secret');
 }

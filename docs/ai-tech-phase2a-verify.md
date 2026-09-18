@@ -6,13 +6,13 @@ Phase 2A đã có đủ **mã**: tích hợp GitHub chỉ-đọc, sổ quan sát
 `/work`, runner agent có hàng rào. Bước này đi tìm **bằng chứng production** cho hai việc, và
 dừng lại ở chỗ chúng thật sự bị chặn.
 
-| Việc | Tình trạng | Chặn ở đâu |
+| Việc | Tình trạng | Cần gì |
 | --- | --- | --- |
-| Đồng bộ deploy GitHub chạy thật | **CHƯA** | thiếu Secret `ERP_GITHUB_TOKEN` |
-| Agent DOCUMENTATION R0 chạy thật | **CHƯA** | thiếu khoá AI trên máy runner |
+| Đồng bộ deploy GitHub chạy thật | **không còn chặn** | không cần gì — kho public đọc được không cần token |
+| Agent DOCUMENTATION R0 chạy thật | **CHƯA** | một khoá AI trên máy runner |
 
-Hai ô ấy là **CHƯA BIẾT**, không phải *đã chạy và hỏng*, và cũng không phải *0*. Không có dòng
-nào trong `tech_deployments` và không có dòng nào trong `tech_agent_runs` — đúng như phải thế.
+Chỗ còn lại là **CHƯA BIẾT**, không phải *đã chạy và hỏng*, và cũng không phải *0*: `tech_agent_runs`
+không có dòng nào, đúng như phải thế khi chưa có khoá.
 
 ## 1 · Vì sao trước bước này token không bao giờ tới được máy chủ
 
@@ -31,23 +31,62 @@ ngay khi workflow kết thúc — ghi nó vào `.env` là ghi một khoá đã h
 Hậu quả của lỗ hổng này không tự lộ ra: trang Deploy nói *"chưa cấu hình"* mãi mãi, và không ai
 đọc dòng đó như một lỗi cấu hình — họ đọc nó như *"chưa có lượt deploy nào"*.
 
-## 2 · Chủ shop cần làm gì (hai việc, mỗi việc vài phút)
+## 2 · Token GitHub là TUỲ CHỌN, không phải điều kiện
 
-### 2.1 Token GitHub CHỈ ĐỌC
+Kho `truyenhkm5group-stack/hkt` đang **PUBLIC**, và GitHub cho đọc workflow + lượt chạy của kho
+public **không cần xác thực**. Bắt chủ shop tạo một PAT chỉ để đọc thứ ai cũng đọc được là dựng
+một rào cản không bảo vệ gì — và tệ hơn, nó làm *"chưa cấu hình"* với *"không có lượt deploy nào"*
+trông giống hệt nhau trên màn hình.
 
-1. GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new token.
-2. Repository access: chỉ kho `truyenhkm5group-stack/hkt`.
-3. Repository permissions: **Actions: Read-only**. Thêm **Contents: Read-only** nếu GitHub đòi.
-   KHÔNG cấp quyền ghi, KHÔNG `workflow`, KHÔNG `administration`.
-4. Settings → Secrets and variables → Actions → New repository secret → tên `ERP_GITHUB_TOKEN`.
-5. Actions → **Vận hành ERP trên VPS** → action = `apply-tech-github-env` → Run.
-   Thao tác này chỉ ghi ba biến vào `.env`, khởi động lại app + scheduler, rồi hỏi GitHub một câu
-   chỉ-đọc. Nó **không deploy**, không chạy migration, không đụng một dòng dữ liệu nghiệp vụ nào,
-   và chỉ in **độ dài** token chứ không bao giờ in giá trị — kho mã này PUBLIC.
+| Có gì | ERP làm gì | Hạn mức |
+| --- | --- | --- |
+| `ERP_GITHUB_REPO` (workflow deploy tự truyền) | gọi ẩn danh, **không** gửi `Authorization` | 60 request/giờ theo IP máy chủ |
+| thêm `ERP_GITHUB_TOKEN` | gửi `Authorization: Bearer …` | 5.000 request/giờ |
 
-Sau đó: Actions → Vận hành ERP trên VPS → action = `run-job`, ô **arg** = `github-deployments --limit=20`.
+Một lượt đồng bộ tốn **đúng một** request, và job này chạy tay (không có lịch), nên 60/giờ là dư.
 
-### 2.2 Khoá AI cho MÁY RUNNER
+### Tên kho cũng không phải gõ
+
+`deploy-vps.yml` truyền `ERP_GITHUB_REPO=${{ vars.ERP_GITHUB_REPO || github.repository }}`.
+Workflow deploy là chỗ biết chắc hôm nay đang triển khai kho nào — bắt người gõ lại là thêm một
+chỗ để gõ sai cho một thông tin máy đã cầm sẵn.
+
+### Năm cách hỏng, năm cách sửa
+
+Gộp lại thành "không kết nối được" là đẩy người đọc đi sửa nhầm chỗ:
+
+| Loại | Nghĩa | Sửa ở đâu |
+| --- | --- | --- |
+| `NOT_CONFIGURED` | chưa biết đọc kho nào | chạy một lượt deploy |
+| `RATE_LIMITED` | hết hạn mức (403 + `x-ratelimit-remaining: 0`) | **chờ** — hoặc thêm token |
+| `AUTH_FAILED` | có token nhưng token sai | xoá token, hoặc thay token |
+| `NOT_FOUND` | sai tên kho / tên tệp workflow | `.env`; kho private thì mới cần token |
+| `NETWORK` | máy chủ không ra được api.github.com | mạng, không phải token |
+
+`RATE_LIMITED` là loại quan trọng nhất phải tách riêng: GitHub báo nó bằng **403**, không phải
+429, nên một bộ dò chỉ nhìn mã trạng thái sẽ gọi nhầm nó là "thiếu quyền" và gửi người vận hành
+đi tạo token mới cho một thứ tự khỏi sau mười lăm phút.
+
+### Khi nào mới cần token
+
+Đúng hai trường hợp, và thao tác ops `apply-tech-github-env` vẫn giữ nguyên cho chúng:
+
+1. Kho chuyển sang **private** — lượt gọi ẩn danh khi đó luôn thấy 404.
+2. Gặp lỗi **hạn mức** — 60 request/giờ dùng chung cho cả máy chủ.
+
+Fine-grained PAT → Repository permissions → **Actions: Read-only** (+ Contents: Read-only).
+Secret `ERP_GITHUB_TOKEN` → Actions → *Vận hành ERP trên VPS* → `apply-tech-github-env`.
+
+## 2.3 · Khởi tạo sổ agent, rồi bật ĐÚNG MỘT vai
+
+`/tech/agents` → nút **“Khởi tạo sổ agent”**. Mẫu trong mã nguồn không tự kích hoạt (AGENTS.md
+mục 23): 12 vai sinh ra ở trạng thái **TẮT**, và bấm lại không nhân đôi sổ. Chỉ **người** khởi
+tạo được — `seedTechAgents()` từ chối mọi người thao tác không phải `HUMAN`.
+
+Sau đó bật **duy nhất** vai `documentation`: `allowedRisks: ["R0"]`, `canMerge / canDeploy /
+canRunProdWrite` đều `false`.
+
+## 2.4 · Khoá AI cho MÁY RUNNER — việc duy nhất còn lại
 
 Máy runner là máy có kho git + npm + khoá AI. **KHÔNG phải container production**: production là
 ERP + PostgreSQL + scheduler + Caddy, và biến nó thành máy build là mở một bề mặt tấn công mới
@@ -56,21 +95,12 @@ trên chính chỗ giữ tiền của shop.
 Khuyên dùng `ANTHROPIC_API_KEY` **riêng cho runner**, không dùng chung khoá AI Copilot đang chạy
 production: lỗi 429 của Copilot sẽ lẫn vào lỗi của runner và không ai phân biệt được cái nào hỏng.
 
-Khoá nằm trong **môi trường của máy runner**, không nằm trong `tech_tasks`, không trong CSDL,
-không trong log, không trong prompt. `sandboxEnv()` gỡ nó ra khỏi mọi tiến trình con của agent,
-nên chính agent không đọc được khoá đang trả tiền cho nó.
+Khoá nằm trong **môi trường của máy runner** — không trong `tech_tasks`, không trong CSDL, không
+trong log, không trong prompt. `sandboxEnv()` gỡ nó ra khỏi mọi tiến trình con của agent, nên
+chính agent không đọc được khoá đang trả tiền cho nó.
 
 Chưa có khoá thì `executor.available()` trả `ok=false` và lượt chạy dừng ở **BLOCKED — CHƯA CẤU
 HÌNH**. Đó là hành vi ĐÚNG, và nó khác hẳn "đã chạy xong".
-
-### 2.3 Khởi tạo sổ agent, rồi bật ĐÚNG MỘT vai
-
-`/tech/agents` → nút **“Khởi tạo sổ agent”**. Mẫu trong mã nguồn không tự kích hoạt (AGENTS.md
-mục 23): 12 vai sinh ra ở trạng thái **TẮT**, và bấm lại không nhân đôi sổ. Chỉ **người** khởi
-tạo được — `seedTechAgents()` từ chối mọi người thao tác không phải `HUMAN`.
-
-Sau đó bật **duy nhất** vai `documentation`. Vai này khai sẵn trong mã: `allowedRisks: ["R0"]`,
-`canMerge / canDeploy / canRunProdWrite` đều `false`. Không bật vai nào khác ở Phase 2A.
 
 ## 3 · Chín hàng rào — đã kiểm, KHÔNG phải bằng cách thử phá máy chủ thật
 

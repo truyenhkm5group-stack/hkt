@@ -230,15 +230,18 @@ async function checkGithub() {
   const cfg = githubConfig();
   if (!cfg.configured) {
     bad(`Chưa cấu hình: ${cfg.reason}`);
-    info("Token CHỈ ĐỌC: GitHub → Settings → Developer settings → Fine-grained tokens → Repository permissions → Actions: Read-only (+ Contents: Read-only nếu kho private).");
-    info("Đặt vào Secret ERP_GITHUB_TOKEN rồi chạy Actions → Vận hành ERP trên VPS → apply-tech-github-env.");
+    info("ERP_GITHUB_REPO do workflow deploy tự truyền xuống (github.repository) — chạy một lượt deploy là có.");
     return;
   }
-  info(`kho ${cfg.repo} · token ${cfg.tokenMasked}`);
+  info(`kho ${cfg.repo} · ${cfg.auth === "TOKEN" ? `có token ${cfg.tokenMasked}` : "gọi ẩn danh (kho public, KHÔNG cần token)"}`);
   const r = await testGithubConnection();
   if (!r.ok) {
-    bad(r.detail);
-    info("401 = token sai hoặc hết hạn · 403 = thiếu quyền Actions: read · 404 = sai ERP_GITHUB_REPO hoặc tên tệp workflow.");
+    bad(`[${r.kind}] ${r.detail}`);
+    // BỐN LỐI RA KHÁC NHAU. Gộp lại thành "kết nối thất bại" là đẩy người đọc đi sửa nhầm chỗ.
+    if (r.kind === "RATE_LIMITED") info("KHÔNG phải lỗi cấu hình — chờ hết cửa sổ là chạy lại được. Cần gọi dày hơn thì đặt ERP_GITHUB_TOKEN (60 → 5.000 request/giờ).");
+    if (r.kind === "AUTH_FAILED") info("Kho PUBLIC đọc được mà không cần token — xoá ERP_GITHUB_TOKEN/GITHUB_TOKEN/GH_TOKEN khỏi .env cũng là một cách sửa.");
+    if (r.kind === "NOT_FOUND") info("Sai ERP_GITHUB_REPO hoặc ERP_GITHUB_DEPLOY_WORKFLOW. Kho private thì lượt gọi ẩn danh luôn thấy 404 — lúc đó mới cần token.");
+    if (r.kind === "NETWORK") info("Máy chủ không ra được api.github.com — kiểm tra mạng/tường lửa, không phải kiểm tra token.");
     return;
   }
   ok(r.detail);
@@ -247,7 +250,7 @@ async function checkGithub() {
     if (!runs.length) {
       // KHÔNG nói "khoẻ" khi không đọc được gì: gọi được API mà 0 lượt chạy là một tình huống
       // KHÁC hẳn, và nó có nghĩa là tên tệp workflow đang trỏ sai chỗ.
-      bad(`Gọi được API nhưng workflow "${cfg.repo}" không có lượt chạy nào — kiểm tra ERP_GITHUB_DEPLOY_WORKFLOW.`);
+      bad(`Gọi được API nhưng workflow của ${cfg.repo} không có lượt chạy nào — kiểm tra ERP_GITHUB_DEPLOY_WORKFLOW.`);
       return;
     }
     ok(`Đọc được ${runs.length} lượt deploy gần nhất`);

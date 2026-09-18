@@ -7,7 +7,7 @@ import { getViettelPostClient } from "@/lib/integrations/viettelpost/client";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { testAiConnection } from "@/lib/ai/provider";
 import { aiDisabledReason, resolveProviderName } from "@/lib/ai/router";
-import { githubConfig, testConnection as testGithubConnection } from "@/lib/integrations/github/client";
+import { testConnection as testGithubConnection } from "@/lib/integrations/github/client";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -91,10 +91,9 @@ export async function POST(request: NextRequest) {
     if (provider === "github") {
       // CHỈ ĐỌC: hỏi GitHub một câu rẻ về workflow deploy. Không nạp lượt chạy nào vào sổ (việc đó
       // là job `github-deployments`), không kích hoạt gì. Trả về danh tính token ĐÃ CHE.
-      const cfg = githubConfig();
-      if (!cfg.configured) return NextResponse.json({ ok: false, error: cfg.reason ?? "Chưa cấu hình GitHub trong .env" });
+      // CHỈ ĐỌC: hỏi GitHub một câu rẻ về workflow deploy. Kho public thì KHÔNG cần token.
       const r = await testGithubConnection();
-      if (!r.ok) return NextResponse.json({ ok: false, error: r.detail });
+      if (!r.ok) return NextResponse.json({ ok: false, error: `[${r.kind}] ${r.detail}` });
       return NextResponse.json({ ok: true, detail: { message: r.detail } });
     }
     return NextResponse.json({ ok: false, error: "Nhà cung cấp không hợp lệ (pancake | viettelpost | facebook | pancake-pages | ai | github)" }, { status: 400 });
