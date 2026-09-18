@@ -14,6 +14,7 @@
 import { calculatePayrollItem } from "@/lib/payroll/engine";
 import { resolveSegments } from "@/lib/payroll/policy-resolve";
 import { proposePolicyFromLegacy, reconcile, type MigrationProposal, type ReconResult } from "@/lib/payroll/migration-preview";
+import { buildCandidateEmployments, legacyConfigGaps, newModelConfigGaps, type ConfigGap } from "@/lib/payroll/reconcile-context";
 import { getCarryoverConfig } from "@/lib/queries/payroll-carryover";
 import { getPayrollReport, listEmployees } from "@/lib/queries/payroll";
 import { employeesOnPolicyEngine, loadAdjustments, loadAssignmentBook } from "@/lib/queries/payroll-policies";
@@ -28,6 +29,17 @@ export type MigrationRow = {
   alreadyMigrated: boolean;
   /** Đã khai phân công lao động chưa — thiếu nó thì máy chung coi như người ấy không đi làm ngày nào. */
   hasEmployment: boolean;
+  /**
+   * ═══ HAI DANH SÁCH THIẾU, TÁCH RỜI — XEM `lib/payroll/reconcile-context.ts` ═══
+   *
+   * `blockers` của bản đề xuất GỘP cả hai và màn hình “Xem trước chuyển đổi” chặn nút bấm bằng nó,
+   * điều ấy đúng với câu hỏi CỦA MÀN HÌNH. Phép ĐỐI CHIẾU hỏi một câu khác nên phải đọc riêng:
+   * thiếu dữ liệu của mô hình MỚI không làm nó mù, vì nó tự dựng bối cảnh ứng viên trong bộ nhớ.
+   */
+  legacyGaps: ConfigGap[];
+  newModelGaps: ConfigGap[];
+  /** Cột “mới” chạy trên phân công DỰNG TẠM (`true`) hay trên phân công thật (`false`). */
+  syntheticEmployment: boolean;
 };
 
 /**
@@ -65,34 +77,22 @@ export async function previewLegacyMigration(period: Period, basis: PayrollBasis
     /*
       CỘT "MỚI" CHẠY THẬT TRÊN BẢN ĐỀ XUẤT.
 
-      Dựng một phân công GIẢ phủ trọn kỳ khi người ấy chưa khai — chỉ để XEM TRƯỚC. Không có nó thì
-      cột mới luôn rỗng và bảng đối chiếu không nói được gì; có nó thì người bấm thấy đúng con số
-      họ sẽ nhận được sau khi khai đủ.
+      Chưa khai phân công thì dựng một bối cảnh làm việc ỨNG VIÊN phủ trọn kỳ, CHỈ trong bộ nhớ.
+      Không có nó thì cột mới luôn rỗng và bảng đối chiếu không nói được gì; có nó thì người bấm
+      thấy đúng con số họ sẽ nhận sau khi khai đủ — và cổng đối chiếu trả lời được câu hỏi của nó
+      TRƯỚC lượt chuyển, thay vì đòi kết quả của lượt chuyển làm điều kiện để chạy.
     */
-    const gia = employments.length
-      ? employments
-      : [
-          {
-            id: "preview",
-            employeeId: e.id,
-            departmentId: null,
-            departmentName: "",
-            positionId: null,
-            positionName: "",
-            managerUserId: null,
-            employmentType: "FULL_TIME" as const,
-            workMode: "ONSITE" as const,
-            status: "ACTIVE" as const,
-            standardWorkDays: null,
-            effectiveFrom: period.from,
-            effectiveTo: null,
-          },
-        ];
+    const boiCanh = buildCandidateEmployments({
+      employeeId: e.id,
+      legacyDepartment: e.department,
+      period: { from: period.from, to: period.to },
+      real: employments,
+    });
 
     const segments = resolveSegments({
       from: period.from,
       to: period.to,
-      employments: gia,
+      employments: boiCanh.employments,
       policyAssignments: [
         { id: "preview", employeeId: e.id, policyId: "preview", policyCode: proposal.policyCode, policyName: proposal.policyName, effectiveFrom: period.from, effectiveTo: null },
       ],
@@ -126,6 +126,15 @@ export async function previewLegacyMigration(period: Period, basis: PayrollBasis
       proposal,
       alreadyMigrated,
       hasEmployment: employments.length > 0,
+      legacyGaps: legacyConfigGaps({
+        name: proposal.employeeName,
+        fixed: e.fixed,
+        percentTotal: e.percentTotal,
+        percentPersonal: e.percentPersonal,
+        percentRevenue: e.percentRevenue,
+      }),
+      newModelGaps: newModelConfigGaps({ hasEmployment: employments.length > 0, hasPolicyAssignment: alreadyMigrated }),
+      syntheticEmployment: boiCanh.synthetic,
       recon: line
         ? reconcile({
             employeeId: e.id,
