@@ -47,6 +47,7 @@ const MOI = [
   "0098_payroll_input_approval",
   "0099_vtp_source_of_truth",
   "0100_vtp_webhook_gap",
+  "0101_tech_control_plane",
 ] as const;
 
 /*
@@ -136,6 +137,8 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'vtp_status_registry'"), 0, "bước 1: bảng vtp_status_registry CHƯA được có — đó là thứ 0099 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'shipments' and column_name = 'vtp_raw_status_name'"), 0, "bước 1: cột lời khai thô CHƯA được có — đó là thứ 0099 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'vtp_webhook_gaps'"), 0, "bước 1: sổ khoảng hụt webhook CHƯA được có — đó là thứ 0100 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_tasks'"), 0, "bước 1: hàng đợi việc Tech CHƯA được có — đó là thứ 0101 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_agents'"), 0, "bước 1: sổ agent CHƯA được có — đó là thứ 0101 thêm vào");
     /*
       Một vận đơn ĐÃ CÓ TỪ TRƯỚC 0099, mang một trạng thái Viettel Post đã dịch được. Bước 2 kiểm
       rằng migration KHÔNG dựng hộ nó một "lời khai thô": suy ngược từ `vtp_status_name` là bịa ra
@@ -1141,6 +1144,42 @@ export async function testMigrationUpgradePath() {
       (e: unknown) => String((e as { message?: string })?.message ?? e).includes("vtp_webhook_gaps_severity_check"),
       "0100: mức nặng nhẹ ngoài MINOR/MAJOR/CRITICAL phải bị CSDL chặn",
     );
+    /*
+      ═══ 0101: MẶT PHẲNG ĐIỀU KHIỂN PHÒNG TECH AI — CHỈ CỘNG THÊM, SỔ AGENT BẮT ĐẦU TRỐNG ═══
+
+      Sổ agent KHÔNG được migration gieo sẵn: mẫu chỉ chạy khi có NGƯỜI bấm (AGENTS.md mục 23).
+      Một sổ tự đầy lúc migration chạy là một sổ không ai từng quyết định — và cái không ai quyết
+      định thì không ai chịu trách nhiệm.
+
+      Hai ràng buộc quan trọng nhất được kiểm ngay ở đây vì chúng là CỔNG, không phải trang trí:
+      cổng phê duyệt không được mâu thuẫn, và một việc bị chặn phải nói được bị chặn bởi cái gì.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_tasks'"), 1, "0101: hàng đợi việc Tech phải có mặt");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_agents'"), 1, "0101: sổ agent phải có mặt");
+    assert.equal(await dem("select count(*)::int as n from tech_agents"), 0, "0101: migration KHÔNG được gieo agent nào — mẫu chỉ chạy khi có người bấm");
+    assert.equal(await dem("select count(*)::int as n from tech_tasks"), 0, "0101: migration KHÔNG được gieo việc nào");
+    // "Không cần duyệt" và "đang chờ duyệt" không được cùng đúng một lúc: thiếu ràng buộc này thì
+    // một việc R2 có thể mang cờ không-cần-duyệt và đi thẳng qua cổng.
+    await assert.rejects(
+      () => client.query(`insert into tech_tasks (id, code, title, approval_required, approval_status) values ('up-tt1', 'TECH-9001', 'Việc mâu thuẫn', false, 'PENDING')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("tech_tasks_approval_consistency_check"),
+      "0101: cờ phê duyệt mâu thuẫn phải bị CSDL chặn",
+    );
+    // Chặn mà không nói vì sao thì không ai gỡ được — cùng luật với `work_items`.
+    await assert.rejects(
+      () => client.query(`insert into tech_tasks (id, code, title, status) values ('up-tt2', 'TECH-9002', 'Việc bị chặn không lý do', 'BLOCKED')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("tech_tasks_blocked_reason_check"),
+      "0101: việc BLOCKED không có lý do phải bị CSDL chặn",
+    );
+    // Một agent KHÔNG BAO GIỜ được ghi dưới danh nghĩa một con người (AGENTS.md mục 34 & 36).
+    await client.query(`insert into tech_tasks (id, code, title) values ('up-tt3', 'TECH-9003', 'Việc để kiểm nhật ký')`);
+    await assert.rejects(
+      () => client.query(`insert into tech_task_events (id, task_id, kind, actor_kind, actor_id) values ('up-te1', 'up-tt3', 'NOTE', 'AI_AGENT', 'up-u1')`),
+      (e: unknown) => String((e as { message?: string })?.message ?? e).includes("tech_task_events_human_link_check"),
+      "0101: một agent không được mang khoá tài khoản của người",
+    );
+    await client.query(`delete from tech_tasks where id = 'up-tt3'`);
+
     // Cùng một sự việc phát hiện lại ở lần nhập sau KHÔNG được đếm thành hai lần rơi: nếu đếm hai
     // lần thì mỗi lần nhập lại một tệp cũ sẽ tự làm xấu tỷ lệ khớp webhook của chính nó.
     const mocGap = "2026-09-10T03:00:00.000Z";

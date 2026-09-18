@@ -172,6 +172,20 @@ const ROUTES = [
   "/products/performance",
   "/reports/funnel",
   "/reports/cashflow",
+  /*
+    Phòng Tech AI: năm màn hình nhưng chỉ `/tech` có trên thanh điều hướng, nên
+    `tests/smoke-coverage.test.ts` chỉ đòi được tuyến đó. Bốn tuyến kia là tab BÊN TRONG module —
+    đúng hình dạng đã làm `/bank` và `/ideas` hỏng trên production ngày 10/09/2026, nên liệt kê
+    đủ cả năm ở đây.
+
+    `/tech` là tuyến nặng nhất của module: nó dựng bảng sức khoẻ (đo CSDL, đọc `sync_runs`, gọi
+    `getIntegrationHealth`) cùng lúc với năm truy vấn đếm.
+  */
+  "/tech",
+  "/tech/tasks",
+  "/tech/agents",
+  "/tech/deployments",
+  "/tech/incidents",
   "/integrations",
   "/settings/users",
   "/audit",

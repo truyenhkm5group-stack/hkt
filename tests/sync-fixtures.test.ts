@@ -55,6 +55,7 @@ import { testFinancialTruth } from "./financial-truth.test";
 import { testFinanceTruth } from "./finance-truth.test";
 import { testFinanceInvariants } from "./finance-invariants.test";
 import { testWorkOs } from "./work-os.test";
+import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testTechPermissions, testTechRiskEngine } from "./tech-control-plane.test";
 import { testPayrollPeriod } from "./payroll-period.test";
 import { testWorkforce } from "./workforce.test";
 import { testNoAutoReassignOnOrgChange, testNoEmptyValueSelect, testOneMembershipReadPath, testOrgMembership } from "./org-membership.test";
@@ -1779,6 +1780,12 @@ async function main() {
     gieo dữ liệu mang tiền tố `wos-` rồi tự dọn sạch.
   */
   await testWorkOs(db);
+  /*
+    MẶT PHẲNG ĐIỀU KHIỂN PHÒNG TECH AI. Chạy SAU `testWorkOs` và tự dọn bằng tiền tố `tech-t-`:
+    nó gieo một tài khoản, hai việc Tech, sổ agent, một lượt chạy, hai lượt deploy và một sự cố —
+    tất cả nằm trong các bảng `tech_*` nên không đụng tới con số của bài nào phía trên.
+  */
+  await testTechControlPlaneDb();
   await testWorkforce(db);
   await testOrgMembership(db);
   await testAccessModel(db);
@@ -1813,6 +1820,10 @@ async function main() {
 
   // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
   console.log("\n─ Toàn vẹn kho mã");
+  testTechLifecycle();
+  testTechRiskEngine();
+  testTechPermissions();
+  testTechHealthParsing();
   testRepoIntegrity();
   testDeployScript();
   testMigrationAppendOnly();

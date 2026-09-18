@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import * as React from "react";
 import {
   Banknote,
+  Bot,
   BarChart3,
   BellRing,
   Boxes,
@@ -133,6 +134,7 @@ const groups: { label: string; items: NavItem[] }[] = [
   {
     label: "Hệ thống",
     items: [
+      { href: "/tech", label: "Phòng Tech AI", icon: Bot, permission: "tech:view" },
       { href: "/integrations", label: "Kết nối dữ liệu", icon: PlugZap, permission: "integrations:view" },
       { href: "/data-quality", label: "Chất lượng dữ liệu", icon: ShieldCheck, permission: "dashboard:view" },
       { href: "/settings/users", label: "Người dùng", icon: UserCog, permission: "users:manage" },
