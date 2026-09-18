@@ -662,6 +662,8 @@ export async function testPhase2aBarriers() {
   const rNang = await runAgentOnTask({ taskId: vNang.id, agentKey: "documentation", executor: nangGiuaChung, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
   assert.equal(rNang.status, "BLOCKED", "RÀO 4: quyền được xét LẠI lúc sắp commit, không chỉ lúc bắt đầu");
   assert.equal(rNang.resultCommit, null, "RÀO 4: KHÔNG đưa gì vào kho");
+  const runNang = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, rNang.runId ?? "") });
+  assert.equal(runNang?.status, "CANCELLED", "RÀO 4: lượt chạy phải được ĐÓNG LẠI đàng hoàng, không bỏ treo — một dòng RUNNING vĩnh viễn chặn mọi lượt sau trên cùng việc");
 
   // ───────── RÀO 8 · AGENT KHÔNG TỰ PHÊ DUYỆT ─────────
   const vDuyet = await taoViec("p2a-rao-can: thử tự duyệt", "FEATURE", "PAYROLL");
@@ -688,6 +690,12 @@ export async function testPhase2aBarriers() {
   }
   const rSan = await setTechTaskStatus({ taskId: vDeploy.id, to: "READY_TO_DEPLOY", note: "agent tự dán nhãn sẵn sàng" }, may);
   assert.ok("error" in rSan, "RÀO 9: agent KHÔNG tự dán được nhãn 'sẵn sàng deploy' — đó là AI tự chấm mình ở đúng chỗ tốn kém nhất");
+  // Người đưa việc tới READY_TO_DEPLOY, rồi agent thử bước cuối cùng: tự bấm deploy.
+  const nguoiSan = await setTechTaskStatus({ taskId: vDeploy.id, to: "READY_TO_DEPLOY", note: "chủ shop duyệt và dán nhãn" }, nguoi);
+  assert.ok("ok" in nguoiSan, "người vẫn dán được nhãn — cổng chặn AGENT, không chặn việc");
+  const rDang = await setTechTaskStatus({ taskId: vDeploy.id, to: "DEPLOYING", note: "agent tự bấm deploy" }, may);
+  assert.ok("error" in rDang, "RÀO 9: agent KHÔNG tự chuyển việc sang ĐANG DEPLOY — hai bước, hai lá chắn, vì một việc đã duyệt vẫn có thể bị xếp lại thành R2");
+
   const rGhiDeploy = await recordTechDeployment({ commitSha: "deadbeef1234", branch: "main", status: "SUCCEEDED", taskId: vDeploy.id, notes: "agent tự ghi" }, may);
   assert.ok("error" in rGhiDeploy, "RÀO 9: agent KHÔNG ghi được một lượt deploy vào sổ quan sát");
   // Người vẫn làm được — cổng chặn AGENT, không phải chặn việc.
@@ -730,7 +738,7 @@ export async function testPhase2aBarriers() {
   await db.delete(schema.techTasks);
   await db.delete(schema.techAgents);
 
-  console.log("✓ Chín hàng rào Phase 2A: R1 chặn · R2 chặn · agent tắt chặn · nâng rủi ro giữa chừng thì dừng trước commit · 7 lệnh cấm bị từ chối kèm lý do · 5 đường ghi ngoài phạm vi bị chặn và .env nguyên vẹn · thiếu khoá API nói CHƯA CẤU HÌNH chứ không giả xong · agent không duyệt/không hạ rủi ro/không tự bật · agent không dán nhãn sẵn sàng deploy, không ghi và không sửa sổ deploy · 8 ca lỗi nhà cung cấp xếp đúng AUTH_FAILED / QUOTA_OR_RATE_LIMIT / PROVIDER_ERROR (không đổ cho agent)");
+  console.log("✓ Chín hàng rào Phase 2A: R1 chặn · R2 chặn · agent tắt chặn · nâng rủi ro giữa chừng thì dừng trước commit · 7 lệnh cấm bị từ chối kèm lý do · 5 đường ghi ngoài phạm vi bị chặn và .env nguyên vẹn · thiếu khoá API nói CHƯA CẤU HÌNH chứ không giả xong · agent không duyệt/không hạ rủi ro/không tự bật · agent không dán nhãn sẵn sàng deploy, không tự chuyển sang ĐANG DEPLOY, không ghi và không sửa sổ deploy (người vẫn làm được cả ba) · 8 ca lỗi nhà cung cấp xếp đúng AUTH_FAILED / QUOTA_OR_RATE_LIMIT / PROVIDER_ERROR (không đổ cho agent)");
 }
 
 /* ═════════════════ 5 · QUÉT MÃ NGUỒN ═════════════════ */
