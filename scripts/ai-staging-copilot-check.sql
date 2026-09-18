@@ -200,3 +200,49 @@ where c.page_id in (select jsonb_array_elements_text(coalesce((select value from
   and (select max(sent_at) from sales_messages m where m.conversation_id = c.id
          and m.from_page = false and m.sender_type = 'CUSTOMER' and btrim(m.text) <> '') >= now() - interval '24 hours'
 order by 2 desc limit 15;
+
+\echo '── 16. PILOT: TỪNG THAO TÁC CỦA NHÂN VIÊN (đếm từ SỔ, không suy từ cờ) ──'
+select
+  coalesce(nullif(a.action, ''), '?')        as thao_tac,
+  coalesce(nullif(a.send_status, ''), '—')   as trang_thai_gui,
+  count(*)::int                              as so_luot,
+  count(distinct a.conversation_id)::int     as so_hoi_thoai,
+  count(*) filter (where a.edited)::int      as co_sua,
+  round(avg(a.edit_distance) filter (where a.edit_distance is not null))::int as kc_sua_tb,
+  percentile_cont(0.5) within group (order by a.review_seconds)::int          as giay_soat_trung_vi
+from sales_copilot_actions a
+group by 1, 2 order by 3 desc;
+
+\echo '── 17. PILOT: TỶ LỆ — mẫu số rỗng thì để NULL, không in 0% ──'
+with q as (
+  select
+    count(*) filter (where action = 'SEND'      and send_status = 'SENT')::int as gui_nguyen_van,
+    count(*) filter (where action = 'EDIT_SEND' and send_status = 'SENT')::int as sua_roi_gui,
+    count(*) filter (where action = 'REJECT')::int                             as tu_choi,
+    count(*) filter (where action = 'TAKEOVER')::int                           as tu_nhan_viec,
+    count(*) filter (where action = 'REGENERATE')::int                         as soan_lai,
+    count(*) filter (where send_status = 'FAILED')::int                        as gui_hong
+  from sales_copilot_actions
+)
+select *,
+  (gui_nguyen_van + sua_roi_gui)                                as tong_da_gui,
+  (gui_nguyen_van + sua_roi_gui + tu_choi)                      as tong_da_quyet_dinh,
+  case when (gui_nguyen_van + sua_roi_gui + tu_choi) = 0 then null
+       else round(100.0 * (gui_nguyen_van + sua_roi_gui) / (gui_nguyen_van + sua_roi_gui + tu_choi), 1) end as ty_le_dung_duoc_pct,
+  case when (gui_nguyen_van + sua_roi_gui) = 0 then null
+       else round(100.0 * sua_roi_gui / (gui_nguyen_van + sua_roi_gui), 1) end                              as ty_le_phai_sua_pct
+from q;
+
+\echo '── 18. PILOT: ĐƯỜNG MÔ HÌNH & CHI PHÍ (CHƯA KHAI GIÁ thì để NULL, không thành 0đ) ──'
+select
+  coalesce(nullif(mc.tier, ''), '?')                as nac_mo_hinh,
+  coalesce(nullif(mc.model, ''), '?')               as mo_hinh,
+  count(*)::int                                     as so_luot_goi,
+  sum(mc.input_tokens)::int                         as token_vao,
+  sum(mc.output_tokens)::int                        as token_ra,
+  percentile_cont(0.5) within group (order by nullif(mc.latency_ms, 0))::int as tre_trung_vi_ms,
+  count(*) filter (where mc.cost_vnd is null)::int  as chua_khai_gia
+from ai_model_calls mc
+join ai_runs r on r.id = mc.run_id
+where r.subject_type = 'CONVERSATION' and mc.created_at >= now() - interval '7 days'
+group by 1, 2 order by 3 desc;
