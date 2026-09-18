@@ -536,6 +536,67 @@ export async function testSalesCopilot(db: Db) {
   }
   assert.ok(!trongHangMau("conv-rieng"), "câu viết riêng cho một khách thì đúng là người đã trả lời — hết việc");
 
+  /*
+    6B★★★. MÁY XIN NGƯỜI VÀO ≠ NGƯỜI ĐÃ CẦM VIỆC.
+
+    ĐO 18/09/2026 trên page thí điểm: 24 hội thoại có `human_takeover_at`, NGƯỜI tự nhận 0, máy xin
+    người vào 24. Tức là mọi cuộc mà máy tự nhận "tôi không xử lý được" đều BIẾN MẤT khỏi đúng cái
+    màn hình người trực mở ra. Và vì khoá người là NULL, mệnh đề "trừ việc của chính mình" không bao
+    giờ khớp — chúng vô hình với TẤT CẢ mọi người, không riêng ai.
+
+    Bốn hội thoại dưới đây khác nhau ĐÚNG ở cột quyết định, để bài kiểm chỉ nói về một điều.
+  */
+  const nguoiThat = await db.query.users.findFirst();
+  assert.ok(nguoiThat, "cần một tài khoản thật để đóng vai người nhận việc");
+  const dungGiao = async (id: string, opts: { may?: boolean; nguoiId?: string | null; lyDo?: string }) => {
+    await db
+      .insert(schema.salesConversations)
+      .values({
+        id,
+        pageId: "page-giao",
+        externalId: `ext-${id}`,
+        pancakeCustomerId: `pc-${id}`,
+        customerName: id,
+        stage: "NEW_LEAD",
+        sourceType: "WIN",
+        humanTakeoverAt: opts.may || opts.nguoiId ? new Date(Date.now() - 300_000) : null,
+        takeoverByUserId: opts.nguoiId ?? null,
+        takeoverReason: opts.lyDo ?? "",
+      })
+      .onConflictDoNothing();
+    const luc = new Date(Date.now() - 600_000);
+    await db
+      .insert(schema.salesMessages)
+      .values({ id: `mg-${id}`, conversationId: id, externalId: `emg-${id}`, direction: "IN", fromPage: false, senderType: "CUSTOMER", text: "shop ơi tư vấn giúp em", sentAt: luc })
+      .onConflictDoNothing();
+    await db
+      .insert(schema.salesSuggestions)
+      .values({ id: `sg-${id}`, conversationId: id, suggestedReply: `gợi ý ${id}`, action: "ANSWER_QUESTION" })
+      .onConflictDoNothing();
+  };
+  await dungGiao("conv-may-giao", { may: true, lyDo: "SIZE_DATA_MISSING" });
+  await dungGiao("conv-nguoi-cam", { nguoiId: nguoiThat.id });
+  await dungGiao("conv-thuong", {});
+
+  const hangGiao = await copilotQueue({ pageIds: ["page-giao"], db });
+  const trongHangGiao = (id: string) => hangGiao.some((r) => r.conversationId === id);
+  assert.ok(trongHangGiao("conv-may-giao"), "MÁY xin người vào thì việc PHẢI còn trong hàng đợi — nó là việc cần người nhất");
+  assert.ok(trongHangGiao("conv-thuong"), "hội thoại thường vẫn ở hàng đợi");
+  assert.ok(!trongHangGiao("conv-nguoi-cam"), "NGƯỜI THẬT đã nhận thì rời hàng đợi CHUNG");
+
+  // Cờ và lý do phải tới được màn hình, nếu không thẻ đỏ mà không nói vì sao.
+  const theMay = hangGiao.find((r) => r.conversationId === "conv-may-giao");
+  assert.equal(theMay?.machineHandoff, true, "thẻ phải mang cờ máy-xin-người-vào");
+  assert.equal(theMay?.handoffRequestReason, "SIZE_DATA_MISSING", "lý do máy chuyển việc phải đọc được trên thẻ");
+  assert.equal(hangGiao.find((r) => r.conversationId === "conv-thuong")?.machineHandoff, false, "hội thoại thường KHÔNG mang cờ ấy");
+
+  // Và nó đứng ĐẦU: máy đã sàng một lượt rồi, nên nó không phải xếp hàng theo giờ như người khác.
+  assert.equal(hangGiao[0]?.conversationId, "conv-may-giao", "việc máy kêu cứu phải nằm đầu hàng đợi");
+
+  // Người đã cầm thì thấy lại được việc của CHÍNH MÌNH — để còn trả lại cho máy.
+  const hangCuaNguoi = await copilotQueue({ pageIds: ["page-giao"], heldByUserId: nguoiThat.id, db });
+  assert.ok(hangCuaNguoi.some((r) => r.conversationId === "conv-nguoi-cam"), "người đang cầm vẫn thấy việc của chính mình");
+
   // ═════════ 6C. HÀNG ĐỢI: AI CHỜ LÂU NHẤT ĐƯỢC TRẢ LỜI TRƯỚC ═════════
   //
   // Xếp hàng theo thứ tự đến, như mọi quầy phục vụ. Một người đợi bốn mươi phút gấp hơn một người

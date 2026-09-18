@@ -58,17 +58,20 @@ with cau_mau as (
          (select max(sent_at) from sales_messages m
             where m.conversation_id = c.id and m.from_page = true and m.sender_type = 'PAGE_HUMAN'
               and btrim(m.text) <> '' and lower(btrim(m.text)) not in (select van_ban from cau_mau))                       as shop_luc,
-         c.human_takeover_at
+         c.human_takeover_at, c.takeover_by_user_id
   from sales_conversations c
   where c.page_id in (select jsonb_array_elements_text(coalesce((select value from settings where key = 'ai.copilotPages'), '[]')::jsonb))
 )
+-- LOẠI THEO `takeover_by_user_id`, KHÔNG theo `human_takeover_at` — giống hệt truy vấn màn hình.
+-- Máy xin người vào thì CHƯA AI cầm, nên nó vẫn là việc; chỉ người thật nhận mới hết việc chung.
 select
   count(*)::int                                                                            as hoi_thoai_cua_page,
   count(*) filter (where khach_luc is null)::int                                            as khong_co_tin_khach,
-  count(*) filter (where human_takeover_at is not null)::int                                as nguoi_dang_cam,
+  count(*) filter (where takeover_by_user_id is not null)::int                              as NGUOI_THAT_dang_cam,
+  count(*) filter (where human_takeover_at is not null and takeover_by_user_id is null)::int as MAY_xin_nguoi_vao,
   count(*) filter (where shop_luc is not null and shop_luc >= khach_luc)::int               as shop_da_dap_roi,
   count(*) filter (where khach_luc < now() - interval '24 hours')::int                      as qua_24_gio,
-  count(*) filter (where khach_luc is not null and human_takeover_at is null
+  count(*) filter (where khach_luc is not null and takeover_by_user_id is null
                      and (shop_luc is null or shop_luc < khach_luc)
                      and khach_luc >= now() - interval '24 hours')::int                     as CON_LAI_TRONG_HANG_DOI
 from tin_khach;

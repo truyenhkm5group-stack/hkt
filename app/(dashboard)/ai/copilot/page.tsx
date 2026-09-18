@@ -194,6 +194,13 @@ export default async function CopilotPage() {
       {queue.map((row) => (
         <Card key={row.conversationId} className="space-y-3 p-4">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            {/*
+              MÁY ĐÃ KÊU CỨU — nhãn đứng TRƯỚC mọi nhãn khác vì nó đổi cách đọc cả thẻ.
+
+              Đây KHÔNG phải "đã có người cầm": khoá người vẫn rỗng. Máy đọc xong và tự nhận là
+              mình không xử lý được, nên thẻ này cần một người NHẤT trong cả hàng đợi.
+            */}
+            {row.machineHandoff ? <Badge tone="hot">AI CẦN NGƯỜI XỬ LÝ</Badge> : null}
             {/* Bậc ưu tiên cao nhất của hàng đợi, nên nó phải nhìn thấy được ngay. */}
             {row.waitingForReply ? <Badge tone="hot">khách đang chờ</Badge> : null}
             <span className="font-semibold">{row.customerName || "(chưa có tên)"}</span>
@@ -206,6 +213,20 @@ export default async function CopilotPage() {
               xem lượt chạy
             </Link>
           </div>
+
+          {/*
+            LÝ DO MÁY XIN NGƯỜI VÀO, viết ra thành câu.
+
+            Một nhãn đỏ không nói người trực phải làm gì. Lý do thì có: thiếu bảng số đo là một
+            việc khác hẳn với khách hỏi một chuyện phức tạp.
+          */}
+          {row.machineHandoff ? (
+            <p className="rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100">
+              <span className="font-semibold">Máy đã chuyển việc này cho người</span>
+              {row.handoffRequestReason ? <> · lý do: {HANDOFF_REASON_LABEL[row.handoffRequestReason as HandoffReason] ?? row.handoffRequestReason}</> : null}
+              {" "}— chưa ai nhận. Bấm <span className="font-semibold">Tự nhận việc</span> để ghi tên mình vào, hoặc trả lời ngay.
+            </p>
+          ) : null}
 
           <div className="grid gap-3 lg:grid-cols-2">
             <div className="space-y-1">

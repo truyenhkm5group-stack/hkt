@@ -51,6 +51,15 @@ export type CopilotQueueRow = {
   productName: string;
   humanTakeoverAt: Date | null;
   takeoverByUserId: string | null;
+  /**
+   * MÁY đã xin người vào (`conversation.handoff`) nhưng CHƯA AI nhận.
+   *
+   * Khác hẳn `takeoverByUserId` có giá trị — cái đó là "đã có chủ". Cái này là "cần chủ", nên thẻ
+   * phải nói ra bằng chữ và phải nằm đầu hàng đợi.
+   */
+  machineHandoff: boolean;
+  /** Vì sao máy xin người vào. Rỗng = không có lý do được ghi. */
+  handoffRequestReason: string;
   customerMessage: string;
   customerMessageAt: Date | null;
   suggestedReply: string;
@@ -163,6 +172,7 @@ export async function copilotQueue(
              m.run_id                                        as run_id,
              c.page_id, c.external_id, c.customer_name, c.source_type, c.stage,
              c.human_takeover_at, c.takeover_by_user_id,
+             coalesce(c.takeover_reason, '')                  as takeover_reason,
              coalesce(p.name, '')                            as product_name,
              coalesce(m.suggested_reply, '')                 as suggested_reply,
              m.facts_json                                    as facts_json,
@@ -225,7 +235,23 @@ export async function copilotQueue(
         order by created_at desc limit 1
       ) a on true
 
-      where (c.human_takeover_at is null or c.takeover_by_user_id = ${options.heldByUserId ?? null})
+      /*
+        CHỈ NGƯỜI THẬT MỚI LÀM MỘT HỘI THOẠI RỜI HÀNG ĐỢI CHUNG.
+
+        Cột human_takeover_at có HAI nơi ghi, và chúng nói hai điều NGƯỢC nhau:
+
+          · nhân viên bấm "Tự nhận việc"  ⇒ có takeover_by_user_id ⇒ ĐÃ CÓ CHỦ, người khác khỏi đọc;
+          · công cụ conversation.handoff do CHÍNH MÁY gọi khi nó không trả lời được ⇒ KHÔNG có
+            khoá người ⇒ CHƯA AI CẦM, và đây đúng là việc cần người nhất.
+
+        Bản trước loại cả hai như nhau. Đo 18/09/2026: 24 hội thoại bị đánh dấu, NGƯỜI tự nhận 0,
+        máy xin người vào 24 — nghĩa là mọi cuộc mà máy kêu cứu đều biến mất khỏi màn hình người.
+        Và vì khoá người là NULL, mệnh đề "trừ việc của chính mình" không bao giờ khớp, nên chúng
+        vô hình với TẤT CẢ.
+
+        Nên điều kiện loại trừ đọc takeover_by_user_id, KHÔNG đọc human_takeover_at.
+      */
+      where (c.takeover_by_user_id is null or c.takeover_by_user_id = ${options.heldByUserId ?? null})
         -- KHÔNG có tin khách thật thì không có việc: một hội thoại chỉ gồm thông báo quảng cáo
         -- không phải một người đang chờ được trả lời.
         and t.sent_at is not null
@@ -270,6 +296,14 @@ export async function copilotQueue(
         "đáng giá hơn" chen lên.
       */
       order by
+        /*
+          BẬC 0 — MÁY ĐÃ KÊU CỨU THÌ LÊN ĐẦU.
+
+          Đứng TRÊN cả thời gian chờ, và đó là khác biệt có chủ ý so với mọi bậc còn lại: những
+          cuộc này máy đã đọc và tự nhận là mình không xử lý được. Chúng không "đến lượt" — chúng
+          đã được sàng lọc một lần rồi.
+        */
+        case when c.human_takeover_at is not null and c.takeover_by_user_id is null then 0 else 1 end,
         t.sent_at asc nulls last,
         case
           when r.understanding->'intents' @> '["PURCHASE_INTENT"]'::jsonb or r.understanding->'intents' @> '["CONFIRM"]'::jsonb then 1
@@ -321,6 +355,8 @@ export async function copilotQueue(
         productName: String(r.product_name ?? ""),
         humanTakeoverAt: r.human_takeover_at ? new Date(String(r.human_takeover_at)) : null,
         takeoverByUserId: r.takeover_by_user_id ? String(r.takeover_by_user_id) : null,
+        machineHandoff: Boolean(r.human_takeover_at) && !r.takeover_by_user_id,
+        handoffRequestReason: String(r.takeover_reason ?? ""),
         customerMessage: String(r.customer_message ?? ""),
         customerMessageAt: r.customer_message_at ? new Date(String(r.customer_message_at)) : null,
         suggestedReply: String(r.suggested_reply ?? ""),
