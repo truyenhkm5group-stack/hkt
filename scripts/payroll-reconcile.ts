@@ -76,6 +76,7 @@ import {
   tallyStatuses,
   type ReconStatus,
 } from "@/lib/payroll/reconcile-gate";
+import { RECONCILIATION_ONLY_SYNTHETIC_CONTEXT } from "@/lib/payroll/reconcile-context";
 import type { Period } from "@/lib/search-params";
 
 function arg(name: string): string | null {
@@ -178,7 +179,18 @@ async function main() {
     console.log(`   Cơ chế cũ: ${coCheCu.length ? coCheCu.join(" + ") : "(không khai khoản nào)"}`);
     console.log(`   Chính sách ứng viên: ${p.policyCode} — ${p.components.length} thành phần${p.components.length ? `: ${p.components.map((c) => `${c.code}/${c.kind}`).join(", ")}` : ""}`);
 
-    if (p.blockers.length) for (const b of p.blockers) console.log(`   ⚠ THIẾU KHAI BÁO: ${b}`);
+    /*
+      ═══ HAI LOẠI "THIẾU", IN TÁCH RỜI VÌ CHỈ MỘT LOẠI CHẶN ═══
+
+      Bản trước in chung một danh sách và kết luận bằng cả danh sách ấy — nên "chưa khai phân công
+      lao động" (việc của mô hình MỚI, mà chính phép đối chiếu đã tự dựng bối cảnh ứng viên để đi
+      qua) đã ném đi một phép so ĐÃ CHẠY XONG VÀ ĐÃ KHỚP. Xem `lib/payroll/reconcile-context.ts`.
+    */
+    if (r.syntheticEmployment) {
+      console.log(`   Bối cảnh làm việc: DỰNG TẠM phủ trọn kỳ (${RECONCILIATION_ONLY_SYNTHETIC_CONTEXT}) — chỉ trong bộ nhớ, không ghi, không dùng để trả tiền.`);
+    }
+    for (const g of r.newModelGaps) console.log(`   · Chưa khai ở mô hình MỚI (KHÔNG chặn đối chiếu): ${g.message}`);
+    for (const g of r.legacyGaps) console.log(`   ⚠ THIẾU KHAI BÁO NGHIỆP VỤ CŨ (CHẶN đối chiếu): ${g.message}`);
 
     /*
       ═══ BÓC TÁCH LỢI NHUẬN CHO NGƯỜI ĂN THEO % LỢI NHUẬN ═══
@@ -208,7 +220,7 @@ async function main() {
         classifyEmployee({
           employeeId: p.employeeId,
           employeeName: p.employeeName,
-          missingConfig: p.blockers,
+          missingConfig: r.legacyGaps.map((g) => g.message),
           hasOwnActivity: false,
           hasLegacyLine: false,
           netDiff: null,
@@ -233,13 +245,42 @@ async function main() {
         giaiThich: l.explanation,
       });
     }
+    /*
+      ═══ BỐN DÒNG TỔNG HỢP, ĐẶT CẠNH NHAU ═══
+
+      Đây là PHÉP CỘNG LẠI những con số hai đường tính đã trả về, KHÔNG phải một công thức lương
+      thứ ba: `cong()` chỉ cộng đúng các dòng ở ngay trên. Nếu một phần là CHƯA BIẾT thì tổng cũng
+      là CHƯA BIẾT — cộng `null` thành 0 ở đây là in ra một con số lương không ai tính (mục 42).
+
+      Đường cũ không có khoản khấu trừ nào, nên "tổng thu nhập" của nó = lương cứng + biến đổi.
+    */
+    const dong = (k: string) => r.recon?.lines.find((l) => l.key === k) ?? null;
+    const cong = (...vs: (number | null | undefined)[]): number | null =>
+      vs.reduce<number | null>((t, v) => (t === null || v === null || v === undefined ? null : t + v), 0);
+    const bien = (canh: "old" | "next") => cong(dong("shopProfit")?.[canh], dong("personalProfit")?.[canh], dong("revenue")?.[canh]);
+    const tongHop = (["old", "next"] as const).map((canh) => {
+      const base = dong("base")?.[canh] ?? null;
+      const variable = bien(canh);
+      return { base, variable, gross: cong(base, variable), net: dong("net")?.[canh] ?? null };
+    });
+    const [cuTH, moiTH] = tongHop;
+    console.log("   ── Tổng hợp ──");
+    for (const [nhan, a, b] of [
+      ["Lương cứng (Base)", cuTH.base, moiTH.base],
+      ["Biến đổi (Variable)", cuTH.variable, moiTH.variable],
+      ["Tổng thu nhập (Gross)", cuTH.gross, moiTH.gross],
+      ["Thực nhận (Net)", cuTH.net, moiTH.net],
+    ] as const) {
+      console.log(`     ${nhan.padEnd(24)} cũ ${tien(a).padStart(14)}   mới ${tien(b).padStart(14)}   lệch ${tien(cong(b, a === null ? null : -a)).padStart(14)}`);
+    }
+
     if (r.recon.netDiff !== 0) coLech += 1;
     if (r.recon.hasUnexplained) chuaGiaiThich += 1;
 
     const tt = classifyEmployee({
       employeeId: p.employeeId,
       employeeName: p.employeeName,
-      missingConfig: p.blockers,
+      missingConfig: r.legacyGaps.map((g) => g.message),
       hasOwnActivity: coGiDeSo,
       hasLegacyLine: true,
       netDiff: r.recon.netDiff,

@@ -33,6 +33,7 @@ import { testPayrollDependencyDirection } from "./payroll-dependency.test";
 import { testCompensationBasisArithmetic } from "./compensation-basis.test";
 import { testPayrollPreviewAndActivation } from "./payroll-preview.test";
 import { testPayrollReconcileScript } from "./payroll-reconcile-script.test";
+import { testPayrollReconcileContext } from "./payroll-reconcile-context.test";
 import { testPayrollPolicyEngine } from "./payroll-policy-engine.test";
 import { testPayrollProductionReadiness } from "./payroll-production-readiness.test";
 import { testPayrollAuthorization } from "./payroll-authorization.test";
@@ -1698,6 +1699,7 @@ async function main() {
   testCompensationBasisArithmetic();
   testPayrollPreviewAndActivation();
   testPayrollReconcileScript();
+  await testPayrollReconcileContext(db);
   await testPayrollPolicyEngine(db);
   await testVtpState(db);
   await testVtpIngestion(db);
