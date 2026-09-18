@@ -86,7 +86,23 @@ tạo được — `seedTechAgents()` từ chối mọi người thao tác khôn
 Sau đó bật **duy nhất** vai `documentation`: `allowedRisks: ["R0"]`, `canMerge / canDeploy /
 canRunProdWrite` đều `false`.
 
-## 2.4 · Khoá AI cho MÁY RUNNER — việc duy nhất còn lại
+## 2.4 · Máy runner — việc duy nhất còn lại
+
+Chạy `npm run agent:check` trên máy định dùng làm runner. Nó trả lời trong hai giây, và KHÔNG in
+một ký tự bí mật nào — chỉ CÓ/KHÔNG và DÙNG ĐƯỢC/KHÔNG:
+
+```
+▶ Máy runner        git · Node · cây làm việc có sạch không
+▶ Hàng rào          4 lệnh nguy hiểm mẫu còn bị chặn · 10 biến bí mật còn bị gỡ
+▶ Khoá AI           gọi thật một lượt ping rẻ
+
+KẾT LUẬN: READY | MISSING | AUTH_FAILED | QUOTA_OR_RATE_LIMIT | PROVIDER_ERROR
+```
+
+Bốn kết luận cuối là bốn cách sửa khác nhau, và không cái nào là "agent hỏng" — gộp chúng lại là
+đổ cho agent một thứ agent chưa từng chạy.
+
+### Khoá AI
 
 Máy runner là máy có kho git + npm + khoá AI. **KHÔNG phải container production**: production là
 ERP + PostgreSQL + scheduler + Caddy, và biến nó thành máy build là mở một bề mặt tấn công mới
