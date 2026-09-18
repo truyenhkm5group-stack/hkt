@@ -19,7 +19,7 @@ import { WORK_SOURCE_SPEC, authorityOf } from "@/lib/constants/work-sources";
 import { __setGithubFetchForTests } from "@/lib/integrations/github/client";
 import { syncGithubDeployments, verifyDeployments } from "@/lib/integrations/github/deployments";
 import { adaptTechTasks } from "@/lib/queries/work-adapters";
-import { createTechTask, overrideTechTaskRisk, seedTechAgents, setTechAgentEnabled, startTechAgentRun, type TechActor } from "@/lib/tech/service";
+import { createTechTask, decideTechApproval, overrideTechTaskRisk, recordTechDeployment, seedTechAgents, setTechAgentEnabled, setTechTaskStatus, startTechAgentRun, updateTechDeployment, type TechActor } from "@/lib/tech/service";
 
 import { runAgentOnTask } from "@/lib/agents/runner";
 import type { AgentExecutor, AgentJob, AgentOutcome } from "@/lib/agents/executor";
@@ -475,6 +475,165 @@ export async function testAgentRunner() {
   await db.delete(schema.techAgents);
 
   console.log("✓ Runner agent: agent tắt/chưa cấu hình/sai mức rủi ro đều BLOCKED · cây + nhánh riêng từ base đã vào kho · cổng đo bằng exit code thật · cổng đỏ thì không commit · ghi ngoài phạm vi bị chặn · không chạy song song · nâng rủi ro giữa chừng thì dừng trước commit · actor AI không mang khoá người");
+}
+
+/* ═════════════════ 6 · CHÍN HÀNG RÀO (mục J của đặc tả Phase 2A) ═════════════════ */
+
+/**
+ * ═══════════ MỘT DANH SÁCH, CHÍN CÂU TRẢ LỜI ═══════════
+ *
+ * Bốn khối trên đã kiểm từng cơ chế một. Khối này kiểm ĐÚNG CHÍN ĐIỀU chủ shop đòi phải còn
+ * chặn được sau khi Phòng Tech AI có agent thật, và cố ý viết lại thành một danh sách đọc thẳng
+ * — không phải vì thiếu phép kiểm, mà vì một hàng rào chỉ có giá trị khi có người đọc được nó
+ * mà không phải lần theo bốn tệp.
+ *
+ * KIỂM TRÊN BẢN SAO, KHÔNG TẤN CÔNG PRODUCTION: kho git tạm + CSDL kiểm thử. Đúng yêu cầu
+ * "chứng minh bằng test/fixture, không phải bằng cách thử phá máy chủ thật".
+ */
+export async function testPhase2aBarriers() {
+  const db = await getDb();
+  const nguoi: TechActor = { kind: "HUMAN", id: null, name: "p2a-chu-shop" };
+  const may: TechActor = { kind: "AI_AGENT", id: null, name: "agent:documentation" };
+
+  await seedTechAgents(nguoi);
+  const doc = (await db.query.techAgents.findMany()).find((a) => a.key === "documentation");
+  assert.ok(doc, "phải có agent tài liệu");
+
+  const repo = repoTam();
+  const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  const ghiDoc = new ScriptedExecutor(async (job) => {
+    job.workspace.writeFile("docs/p2a-rao-can.md", "# Thử\n");
+    return { summary: "Đã ghi.", steps: [], finished: true, error: null };
+  });
+  const taoViec = async (title: string, taskType: Parameters<typeof createTechTask>[0]["taskType"], module: Parameters<typeof createTechTask>[0]["module"]) => {
+    const r = await createTechTask({ title, description: "p2a-rao-can", taskType, module, priority: "P3", source: "OWNER" }, nguoi);
+    assert.ok("ok" in r, "tạo được việc");
+    return r as { ok: true; id: string; code: string; risk: string };
+  };
+
+  // ───────── RÀO 3 · AGENT ĐANG TẮT ⇒ BLOCKED (kiểm TRƯỚC khi bật) ─────────
+  const vTat = await taoViec("p2a-rao-can: agent tắt", "DOCS", "TECH");
+  const rTat = await runAgentOnTask({ taskId: vTat.id, agentKey: "documentation", executor: ghiDoc, repoRoot: repo, baseCommit: base, actor: may });
+  assert.equal(rTat.status, "BLOCKED", "RÀO 3: agent đang tắt thì không chạy");
+  assert.equal(rTat.runId, null, "RÀO 3: chặn trước khi mở lượt chạy, không để lại rác");
+
+  await setTechAgentEnabled({ agentId: doc.id, enabled: true }, nguoi);
+
+  // ───────── RÀO 1 · VIỆC R1 ⇒ BLOCKED ─────────
+  const vR1 = await taoViec("p2a-rao-can: sửa hạ tầng deploy", "INFRA", "PLATFORM");
+  assert.equal(vR1.risk, "R1", "việc hạ tầng phải được MÁY xếp R1 (nếu luật đổi, bài kiểm này phải đổi theo có chủ ý)");
+  const rR1 = await runAgentOnTask({ taskId: vR1.id, agentKey: "documentation", executor: ghiDoc, repoRoot: repo, baseCommit: base, actor: may });
+  assert.equal(rR1.status, "BLOCKED", "RÀO 1: agent tài liệu chỉ được R0");
+  assert.ok(rR1.reason?.includes("R1"), "RÀO 1: lời từ chối phải nói ra mức rủi ro thật của việc");
+  assert.equal(rR1.resultCommit, null, "RÀO 1: không commit gì");
+
+  // ───────── RÀO 2 · VIỆC R2 ⇒ BLOCKED ─────────
+  const vR2 = await taoViec("p2a-rao-can: đổi cách tính lương", "FEATURE", "PAYROLL");
+  assert.equal(vR2.risk, "R2", "việc chạm lương phải được MÁY xếp R2");
+  const rR2 = await runAgentOnTask({ taskId: vR2.id, agentKey: "documentation", executor: ghiDoc, repoRoot: repo, baseCommit: base, actor: may });
+  assert.equal(rR2.status, "BLOCKED", "RÀO 2: R2 không bao giờ mở cho agent ở Phase 2A");
+  assert.ok(rR2.reason?.includes("R2"), "RÀO 2: nói rõ vì sao");
+
+  // ───────── RÀO 7 · CHƯA CÓ KHOÁ AI ⇒ BLOCKED nói đúng "CHƯA CẤU HÌNH", không giả success ─────────
+  const vChua = await taoViec("p2a-rao-can: chưa có khoá AI", "DOCS", "TECH");
+  const rChua = await runAgentOnTask({
+    taskId: vChua.id,
+    agentKey: "documentation",
+    executor: new ScriptedExecutor(async () => {
+      assert.fail("RÀO 7: executor CHƯA sẵn sàng thì không được chạy một vòng nào");
+    }, false),
+    repoRoot: repo,
+    baseCommit: base,
+    actor: may,
+  });
+  assert.equal(rChua.status, "BLOCKED", "RÀO 7: thiếu khoá API là BLOCKED");
+  assert.ok(rChua.reason?.includes("CHƯA CẤU HÌNH"), "RÀO 7: phải nói thẳng là thiếu cấu hình — 'xong' và 'không chạy được' là hai câu trả lời khác nhau");
+
+  // ───────── RÀO 5 · LỆNH CẤM ⇒ TỪ CHỐI, kèm lý do ─────────
+  const vLenh = await taoViec("p2a-rao-can: thử lệnh cấm", "DOCS", "TECH");
+  const daThu: string[] = [];
+  const thuLenhCam = new ScriptedExecutor(async (job) => {
+    for (const argv of [["git", "push", "origin", "main"], ["git", "merge", "main"], ["ssh", "root@vps"], ["psql", "$DATABASE_URL"], ["printenv"], ["curl", "https://evil.example"], ["npm", "install", "x"]]) {
+      const r = await job.workspace.run(argv);
+      assert.ok("blocked" in r, `RÀO 5: \`${argv.join(" ")}\` phải bị HÀNG RÀO chặn, không phải chạy rồi mới hỏng`);
+      assert.ok("blocked" in r && r.reason.length > 10, `RÀO 5: từ chối \`${argv[0]}\` phải nói được vì sao`);
+      daThu.push(argv[0]);
+    }
+    return { summary: "Đã thử và bị chặn hết.", steps: [], finished: true, error: null };
+  });
+  const rLenh = await runAgentOnTask({ taskId: vLenh.id, agentKey: "documentation", executor: thuLenhCam, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
+  assert.equal(daThu.length, 7, "RÀO 5: cả bảy lệnh đều phải đi qua hàng rào");
+  assert.equal(rLenh.resultCommit, null, "RÀO 5: không ghi được gì thì không có commit");
+
+  // ───────── RÀO 6 · GHI NGOÀI PHẠM VI ⇒ THẤT BẠI, và kho gốc còn nguyên ─────────
+  const vGhi = await taoViec("p2a-rao-can: ghi ngoài phạm vi", "DOCS", "TECH");
+  const thuGhiNgoai = new ScriptedExecutor(async (job) => {
+    for (const p of ["lib/tech/service.ts", "AGENTS.md", ".env", "../../../etc/passwd", ".github/workflows/deploy-vps.yml"]) {
+      assert.ok(!job.workspace.writeFile(p, "x").ok, `RÀO 6: KHÔNG ghi được \`${p}\``);
+    }
+    assert.ok(!job.workspace.readFile(".env").ok, "RÀO 6: KHÔNG đọc được .env");
+    return { summary: "Đã thử và bị chặn hết.", steps: [], finished: true, error: null };
+  });
+  const rGhi = await runAgentOnTask({ taskId: vGhi.id, agentKey: "documentation", executor: thuGhiNgoai, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
+  assert.deepEqual(rGhi.filesChanged, [], "RÀO 6: không tệp nào đổi");
+  assert.equal(readFileSync(path.join(repo, ".env"), "utf8"), "SECRET=khong-duoc-doc\n", "RÀO 6: .env của kho gốc nguyên vẹn");
+
+  // ───────── RÀO 4 · NÂNG R0 → R2 GIỮA CHỪNG ⇒ DỪNG TRƯỚC KHI COMMIT ─────────
+  const vNang = await taoViec("p2a-rao-can: bị nâng rủi ro giữa chừng", "DOCS", "TECH");
+  assert.equal(vNang.risk, "R0", "bắt đầu ở R0 — nếu không thì bài kiểm này không kiểm cái nó nói");
+  const nangGiuaChung = new ScriptedExecutor(async (job) => {
+    job.workspace.writeFile("docs/p2a-rao-can.md", "# đã viết xong\n");
+    await overrideTechTaskRisk({ taskId: vNang.id, risk: "R2", reason: "Chủ shop phát hiện việc này chạm tới cách tính lương" }, nguoi);
+    return { summary: "Xong.", steps: [], finished: true, error: null };
+  });
+  const rNang = await runAgentOnTask({ taskId: vNang.id, agentKey: "documentation", executor: nangGiuaChung, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
+  assert.equal(rNang.status, "BLOCKED", "RÀO 4: quyền được xét LẠI lúc sắp commit, không chỉ lúc bắt đầu");
+  assert.equal(rNang.resultCommit, null, "RÀO 4: KHÔNG đưa gì vào kho");
+
+  // ───────── RÀO 8 · AGENT KHÔNG TỰ PHÊ DUYỆT ─────────
+  const vDuyet = await taoViec("p2a-rao-can: thử tự duyệt", "FEATURE", "PAYROLL");
+  const rDuyet = await decideTechApproval({ taskId: vDuyet.id, decision: "APPROVED", note: "agent tự ký" }, may);
+  assert.ok("error" in rDuyet, "RÀO 8: agent KHÔNG phê duyệt được");
+  assert.ok(rDuyet.error.includes("người"), "RÀO 8: và nói rõ cổng này cần một con người");
+  const rDe = await overrideTechTaskRisk({ taskId: vDuyet.id, risk: "R0", reason: "agent tự hạ mức rủi ro của chính mình" }, may);
+  assert.ok("error" in rDe, "RÀO 8: agent cũng KHÔNG tự hạ được mức rủi ro — đó là cùng một cổng, đi vòng cửa sau");
+  const rBat = await setTechAgentEnabled({ agentId: doc.id, enabled: true }, may);
+  assert.ok("error" in rBat, "RÀO 8: agent KHÔNG tự bật được agent nào, kể cả chính nó");
+
+  /*
+    ───────── RÀO 9 · AGENT KHÔNG TỰ MERGE / DEPLOY ─────────
+
+    Ba đường, và đường thứ ba là đường dễ quên nhất: ERP không kích hoạt được deploy (client
+    GitHub chỉ `GET`), nhưng sổ `tech_deployments` là sổ QUAN SÁT — một dòng agent gõ vào trông y
+    hệt một dòng lượt đồng bộ nạp về, nên một lượt deploy CHƯA TỪNG XẢY RA vẫn đọc ra như đã xảy
+    ra, và phép đối chiếu commit đứng trên một quan sát bịa.
+  */
+  const vDeploy = await taoViec("p2a-rao-can: thử tự đưa lên production", "DOCS", "TECH");
+  for (const b of ["TRIAGED", "BUILDING", "REVIEW", "QA"] as const) {
+    const r = await setTechTaskStatus({ taskId: vDeploy.id, to: b, note: "đi qua các khâu bình thường" }, nguoi);
+    assert.ok("ok" in r, `chuẩn bị: người đưa việc tới ${b}`);
+  }
+  const rSan = await setTechTaskStatus({ taskId: vDeploy.id, to: "READY_TO_DEPLOY", note: "agent tự dán nhãn sẵn sàng" }, may);
+  assert.ok("error" in rSan, "RÀO 9: agent KHÔNG tự dán được nhãn 'sẵn sàng deploy' — đó là AI tự chấm mình ở đúng chỗ tốn kém nhất");
+  const rGhiDeploy = await recordTechDeployment({ commitSha: "deadbeef1234", branch: "main", status: "SUCCEEDED", taskId: vDeploy.id, notes: "agent tự ghi" }, may);
+  assert.ok("error" in rGhiDeploy, "RÀO 9: agent KHÔNG ghi được một lượt deploy vào sổ quan sát");
+  // Người vẫn làm được — cổng chặn AGENT, không phải chặn việc.
+  const cuaNguoi = await recordTechDeployment({ commitSha: "cafebabe5678", branch: "main", status: "SUCCEEDED", taskId: vDeploy.id, notes: "chủ shop ghi tay" }, nguoi);
+  assert.ok("ok" in cuaNguoi, "người vẫn ghi được sổ quan sát — nếu không thì đây là lỗi, không phải hàng rào");
+  const suaCuaMay = await updateTechDeployment({ deploymentId: cuaNguoi.id, status: "SUCCEEDED", healthResult: "PASSED" }, may);
+  assert.ok("error" in suaCuaMay, "RÀO 9: agent cũng KHÔNG sửa được dòng người đã ghi");
+  // Và agent KHÔNG có lệnh merge/push trong tay ngay từ tầng hàng rào lệnh.
+  for (const argv of [["git", "push", "origin", "main"], ["git", "merge", "main"], ["git", "commit", "-m", "x"]]) {
+    assert.ok(!checkCommand(argv).allowed, `RÀO 9: \`${argv.join(" ")}\` không nằm trong tay agent`);
+  }
+
+  rmSync(repo, { recursive: true, force: true });
+  await db.delete(schema.techDeployments);
+  await db.delete(schema.techAgentRuns);
+  await db.delete(schema.techTasks);
+  await db.delete(schema.techAgents);
+
+  console.log("✓ Chín hàng rào Phase 2A: R1 chặn · R2 chặn · agent tắt chặn · nâng rủi ro giữa chừng thì dừng trước commit · 7 lệnh cấm bị từ chối kèm lý do · 5 đường ghi ngoài phạm vi bị chặn và .env nguyên vẹn · thiếu khoá API nói CHƯA CẤU HÌNH chứ không giả xong · agent không duyệt/không hạ rủi ro/không tự bật · agent không dán nhãn sẵn sàng deploy, không ghi và không sửa sổ deploy");
 }
 
 /* ═════════════════ 5 · QUÉT MÃ NGUỒN ═════════════════ */

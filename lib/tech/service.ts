@@ -54,6 +54,27 @@ export type TechResult<T = object> = ({ ok: true } & T) | { error: string };
 
 type Db = Awaited<ReturnType<typeof getDb>>;
 
+/*
+  ═══════════ HAI CỔNG CUỐI CÙNG TRƯỚC PRODUCTION CHỈ NGƯỜI MỚI MỞ ĐƯỢC ═══════════
+
+  ERP KHÔNG kích hoạt được một lượt deploy — GitHub Actions giữ thẩm quyền đó, và client GitHub
+  trong kho này chỉ có `GET`. Nhưng hai thứ agent VẪN chạm tới được nếu không chặn, và cả hai đều
+  là lời KHẲNG ĐỊNH về production chứ không phải một ô dữ liệu:
+
+  · `READY_TO_DEPLOY` / `DEPLOYING` — nhãn "việc này sẵn sàng ra production". Một agent tự dán
+    nhãn đó lên việc của chính nó là AI tự chấm mình lần thứ hai, ở đúng chỗ tốn kém nhất.
+  · `tech_deployments` — sổ QUAN SÁT. Dòng do agent gõ vào trông y hệt dòng do lượt đồng bộ
+    GitHub nạp về, nên một lượt deploy chưa từng xảy ra vẫn đọc ra như đã xảy ra, và phép đối
+    chiếu commit (VERIFIED / MISMATCH) đứng trên một quan sát bịa.
+
+  Lượt đồng bộ GitHub ghi thẳng với `actorKind: "SYSTEM"` (xem `lib/integrations/github/
+  deployments.ts`), KHÔNG đi qua hai hàm dưới, nên cổng này không chặn nhầm nó. Cấm đích danh
+  `AI_AGENT` chứ không đòi `HUMAN`: một job nền của hệ thống vẫn phải ghi được sổ quan sát.
+*/
+function chanAgent(viec: string): { error: string } | null {
+  return { error: `Agent KHÔNG được ${viec} — đây là lời khẳng định về production, phải có một con người chịu trách nhiệm. Phòng Tech AI không có đường tự deploy, và cũng không có đường tự nói rằng mình đã deploy.` };
+}
+
 /** Chuẩn hoá người thao tác về đúng ba cột mà ràng buộc CSDL chấp nhận. */
 function coloumnsOfActor(actor: TechActor) {
   return {
@@ -228,6 +249,7 @@ export async function setTechTaskStatus(
     chỉ còn lá chắn thứ hai đứng giữa nó với production.
   */
   if (input.to === "READY_TO_DEPLOY" || input.to === "DEPLOYING") {
+    if (actor.kind === "AI_AGENT") return chanAgent("tự đưa việc sang khâu deploy")!;
     const chan = techDeployBlockers({
       approvalRequired: task.approvalRequired,
       approvalStatus: task.approvalStatus as TechApprovalStatus,
@@ -585,6 +607,7 @@ export async function recordTechDeployment(
   },
   actor: TechActor,
 ): Promise<TechResult<{ id: string }>> {
+  if (actor.kind === "AI_AGENT") return chanAgent("ghi một lượt deploy vào sổ")!;
   const commit = input.commitSha.trim();
   if (!/^[0-9a-f]{7,40}$/i.test(commit)) return { error: "Mã commit không hợp lệ — cần 7–40 ký tự hex." };
   const db = await getDb();
@@ -623,6 +646,7 @@ export async function updateTechDeployment(
   },
   actor: TechActor,
 ): Promise<TechResult> {
+  if (actor.kind === "AI_AGENT") return chanAgent("sửa một lượt deploy trong sổ")!;
   const db = await getDb();
   const dep = await db.query.techDeployments.findFirst({ where: eq(schema.techDeployments.id, input.deploymentId) });
   if (!dep) return { error: "Không tìm thấy lượt deploy này." };

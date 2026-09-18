@@ -57,7 +57,7 @@ import { testFinanceTruth } from "./finance-truth.test";
 import { testFinanceInvariants } from "./finance-invariants.test";
 import { testWorkOs } from "./work-os.test";
 import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testTechPermissions, testTechRiskEngine } from "./tech-control-plane.test";
-import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
+import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aBarriers, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
 import { testPayrollPeriod } from "./payroll-period.test";
 import { testWorkforce } from "./workforce.test";
 import { testNoAutoReassignOnOrgChange, testNoEmptyValueSelect, testOneMembershipReadPath, testOrgMembership } from "./org-membership.test";
@@ -1797,6 +1797,7 @@ async function main() {
   await testGithubDeploymentSync();
   await testTechWorkProjection();
   await testAgentRunner();
+  await testPhase2aBarriers();
   await testWorkforce(db);
   await testOrgMembership(db);
   await testAccessModel(db);
