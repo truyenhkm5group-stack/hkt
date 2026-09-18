@@ -111,7 +111,12 @@ async function main() {
       const noi = trong.status === 200 ? await trong.text() : "";
       dat(trong.status === 200, "/ai/copilot trả 200 cho phiên vừa đăng nhập", `HTTP ${trong.status}${trong.headers.get("location") ? ` → ${trong.headers.get("location")}` : ""}`);
       dat(noi.includes("Hàng đợi trợ lý AI"), "đúng là trang hàng đợi trợ lý");
-      dat(noi.includes("Thí điểm trợ lý — sáu bước"), "hướng dẫn sáu bước hiện trên đầu trang");
+      /*
+        HƯỚNG DẪN SÁU BƯỚC là của ẢNH MỚI, không phải của đường đăng nhập. Một bài kiểm đăng nhập
+        đỏ vì giao diện chưa kịp triển khai là một bài kiểm nói sai chỗ hỏng — nên dòng này chỉ
+        BÁO, không tính vào kết quả.
+      */
+      console.log(`  · giao diện thí điểm (hướng dẫn sáu bước): ${noi.includes("Thí điểm trợ lý — sáu bước") ? "ĐÃ LÊN" : "CHƯA LÊN (ảnh cũ) — không ảnh hưởng đăng nhập"}`);
 
       /*
         HAI CÔNG TẮC ĐỌC TỪ CHÍNH TRANG NHÂN VIÊN NHÌN, không từ một biến môi trường đọc lại.
