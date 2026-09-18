@@ -185,7 +185,12 @@ export async function requireUser(roles?: Role[]): Promise<SessionUser> {
 /** Như requireUser nhưng bắt buộc có quyền; thiếu quyền → về trang chủ với thông báo */
 export async function requirePermission(permission: Permission): Promise<SessionUser> {
   const user = await requireUser();
-  if (!can(user, permission)) redirect("/?forbidden=1");
+  /*
+    NÓI RÕ THIẾU QUYỀN GÌ. Trước đây chỉ có `?forbidden=1` và không màn hình nào đọc nó, nên người
+    bị chặn chỉ thấy mình bị đưa về Tổng quan mà không biết vì sao — và "không vào được" rất dễ bị
+    hiểu thành "đăng nhập hỏng". Tổng quan đọc tham số này và in ra một dòng 403 rõ ràng.
+  */
+  if (!can(user, permission)) redirect(`/?forbidden=${encodeURIComponent(permission)}`);
   return user;
 }
 

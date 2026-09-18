@@ -33,6 +33,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   await requirePermission("dashboard:view");
   const params = await searchParams;
   const period = resolvePeriod(params, "30d");
+  // Khoá quyền còn thiếu, do `requirePermission` gắn vào đường dẫn khi nó chặn một trang.
+  const thieuQuyen = typeof params.forbidden === "string" ? params.forbidden : "";
   const data = await getDashboardData(period);
   const status = integrationStatus();
   // GTC dùng CHUNG định nghĩa với báo cáo Tỷ lệ giao thành công (giao TC ÷ đơn đã kết thúc).
@@ -57,6 +59,28 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           </>
         }
       />
+
+      {/*
+        BỊ CHẶN VÌ THIẾU QUYỀN — PHẢI NÓI RA, KHÔNG ĐƯỢC ÂM THẦM ĐƯA VỀ TRANG CHỦ.
+
+        `requirePermission` chuyển người dùng về đây kèm `?forbidden=<khoá quyền>`. Trước bản này
+        không màn hình nào đọc tham số ấy, nên người bị chặn chỉ thấy mình "bị nhảy về Tổng quan"
+        — trông y hệt một lỗi hệ thống, và ở màn hình đăng nhập thì rất dễ bị hiểu nhầm thành sai
+        mật khẩu. ĐĂNG NHẬP ĐƯỢC NHƯNG KHÔNG ĐỦ QUYỀN là một câu trả lời khác hẳn SAI MẬT KHẨU, và
+        người dùng phải phân biệt được hai câu ấy để biết nên đi hỏi ai.
+      */}
+      {thieuQuyen ? (
+        <div className="flex items-start gap-3 rounded-xl border border-rose-500/50 bg-rose-50 p-4 text-sm dark:bg-rose-950/40">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-rose-600" />
+          <div>
+            <p className="font-semibold text-rose-800 dark:text-rose-200">403 · Tài khoản của bạn không có quyền vào trang vừa mở</p>
+            <p className="text-muted-foreground">
+              Bạn ĐÃ đăng nhập đúng — đây không phải lỗi email hay mật khẩu. Tài khoản này chỉ chưa được cấp quyền
+              {thieuQuyen === "1" ? " cần thiết" : ` ${thieuQuyen}`}. Nhờ quản trị viên cấp quyền ở màn hình Người dùng rồi mở lại.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {!status.pancake ? (
         <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">

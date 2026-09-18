@@ -82,6 +82,7 @@ on:
           - ai-staging-shadow     # MẺ CHẠY NGẦM VỚI MÔ HÌNH THẬT (arg: "--page=<id> --max=20 [--dry-run]")
           - ai-staging-copilot    # BẬT/TẮT nấc TRỢ LÝ cho MỘT page (arg: "--page=<id> --on" | "--off"); MÁY TỰ GỬI vẫn ghim CẤM
           - ai-staging-domain     # TÊN MIỀN + HTTPS cho bản chạy thử (arg: "--prepare" | "--apply" | "--status" | "--off")
+          - ai-staging-auth      # ĐĂNG NHẬP bản chạy thử: kiểm tra ("--check") · vá APP_URL ("--fix-app-url") · tạo tài khoản thí điểm ("--user --email=... --name=... [--role=CS]")
           - ai-staging-live-ingest # BẬT/TẮT bộ nạp tin sống (arg: "--on [--seconds=45]" | "--off" | "--once"); chỉ ĐỌC, không bao giờ gửi
           - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
@@ -241,6 +242,13 @@ jobs:
           # Khoá POS — CHỈ để kéo DANH MỤC SẢN PHẨM vào CSDL riêng của bản chạy thử. Không có danh
           # mục thì `product.search` trả rỗng và lượt chạy thử chỉ chứng minh bảng sản phẩm rỗng.
           PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
+          # MẬT KHẨU TÀI KHOẢN THÍ ĐIỂM trên bản chạy thử. Khai ở Settings → Secrets and variables
+          # → Actions → New repository secret, tên AI_STAGING_PILOT_PASSWORD.
+          #
+          # VÌ SAO KHÔNG DÙNG Ô "arg": ô đó được in nguyên văn vào log của mọi lần chạy, và kho mã
+          # này CÔNG KHAI nên log ấy ai cũng đọc được. Secret thì GitHub che trong log và script
+          # nhận tuyệt đối không in nó ra.
+          STAGING_USER_PASSWORD: ${{ secrets.AI_STAGING_PILOT_PASSWORD }}
           PANCAKE_SHOP_ID: ${{ vars.PANCAKE_SHOP_ID || '408063069' }}
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -249,7 +257,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL,STAGING_BRANCH,STAGING_IMAGE,GHCR_USER,GHCR_TOKEN,PANCAKE_ACCESS_TOKEN,PANCAKE_API_KEY,PANCAKE_SHOP_ID
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL,STAGING_BRANCH,STAGING_IMAGE,GHCR_USER,GHCR_TOKEN,PANCAKE_ACCESS_TOKEN,PANCAKE_API_KEY,PANCAKE_SHOP_ID,STAGING_USER_PASSWORD
           script: |
             set -e
             cd /root/erp
@@ -873,6 +881,28 @@ jobs:
                 docker exec vnx-ai-staging-app sh -lc 'echo "MÁY tự gửi   : ${AI_ALLOW_AUTO_SEND:-(chưa đặt)}"; echo "NGƯỜI bấm gửi: ${AI_ALLOW_HUMAN_APPROVED_SEND:-(chưa đặt)}"; echo "tạo đơn      : ${AI_ALLOW_ORDER_CREATE:-(chưa đặt)}"'
                 echo ""
                 echo "Mở hàng đợi: http://127.0.0.1:3100/ai/copilot (qua tunnel SSH)" ;;
+
+              ai-staging-auth)
+                cd /opt/vnx-ai-staging
+                # `.env.staging` nằm trên MÁY CHỦ chứ không trong container, nên sửa APP_URL phải
+                # làm ở đây. Ứng dụng đọc biến lúc khởi động, nên sửa xong phải dựng lại container.
+                case "${ARG:-}" in
+                  *--fix-app-url*)
+                    DICH="https://ai-staging.vnxcommerce.com"
+                    if grep -q '^APP_URL=' .env.staging; then
+                      sed -i "s|^APP_URL=.*|APP_URL=\"$DICH\"|" .env.staging
+                    else
+                      echo "APP_URL=\"$DICH\"" >> .env.staging
+                    fi
+                    echo "✓ APP_URL → $DICH (cờ Secure của cookie phiên bật lên sau khi dựng lại)"
+                    docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
+                    sleep 15
+                    curl -fsS -m 10 http://127.0.0.1:3100/api/health && echo || echo "  ✗ bản chạy thử chưa trả lời" ;;
+                esac
+                fetch_staging_script ai-staging-auth.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-auth.ts'
+                # Mật khẩu đi qua BIẾN MÔI TRƯỜNG. Script không in nó, không in chuỗi băm.
+                docker exec -e STAGING_USER_PASSWORD="${STAGING_USER_PASSWORD:-}" vnx-ai-staging-app \
+                  npx tsx --tsconfig tsconfig.json scripts/ai-staging-auth.ts ${ARG:---check} ;;
 
               ai-staging-live-ingest)
                 # BỘ NẠP TIN SỐNG — BẬT/TẮT MỘT TIẾN TRÌNH CHỈ BIẾT ĐỌC.
