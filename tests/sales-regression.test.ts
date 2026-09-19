@@ -17,6 +17,9 @@ import { buildOrderDraft, ORDER_REQUIREMENTS, QUANTITY_WARN_FROM } from "@/lib/c
 import { EMPTY_SALES_STATE, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { missingOrderRequirements } from "@/lib/ai-workforce/agents/sales/confirm";
 import { findColor, findSize, understandByRule } from "@/lib/ai-workforce/agents/sales/understand";
+import { RUN_BREAKDOWNS, salesModelBreakdown, salesRunBreakdown } from "@/lib/queries/sales-metrics";
+import { shadowMetrics } from "@/lib/queries/sales-review";
+import { clearMemo } from "@/lib/cache";
 
 /** Mốc gốc CỐ ĐỊNH — mốc trong ca là số phút tương đối, nên bài kiểm không già đi (AGENTS.md mục 50). */
 const MOC_GOC = new Date("2026-01-01T02:00:00.000Z");
@@ -271,7 +274,44 @@ export async function testSalesRegression(db: Db) {
     '"lấy cho chị …" là câu MUA — đọc thiếu vế đó thì máy đi hỏi lại đúng cái màu khách vừa nói',
   );
 
+  // ═══════════ 10. BÓC TÁCH PHẢI CỘNG RA ĐÚNG TỔNG ═══════════
+  //
+  // Đây là điều KHÓA LẠI việc bóc tách không được trở thành nguồn sự thật thứ hai. Hai nơi cùng
+  // tính một con số thì sớm muộn lệch nhau, và chúng luôn lệch đúng vào ngày cần chúng khớp
+  // (AGENTS.md mục 8.12). Nên bài kiểm này CỘNG các dòng rồi so với `shadowMetrics()` từng số.
+  clearMemo();
+  const tong = await shadowMetrics(7);
+  for (const dim of RUN_BREAKDOWNS) {
+    const rows = await salesRunBreakdown(7, dim);
+    const cong = (f: (r: (typeof rows)[number]) => number) => rows.reduce((a, r) => a + f(r), 0);
+    // MẪU SỐ cũng phải khớp, không chỉ tử số. `shadowMetrics` không in ra số lượt chạy, nhưng nó
+    // in TỶ LỆ chuyển người — và tỷ lệ ấy chỉ khớp khi cả tử lẫn mẫu cùng khớp.
+    const soLuot = cong((r) => r.runs);
+    const tyLe = soLuot > 0 ? (cong((r) => r.handoffs) / soLuot) * 100 : null;
+    assert.equal(tyLe, tong.handoffRate, `bóc tách theo ${dim}: tỷ lệ chuyển người phải bằng shadowMetrics (khớp tỷ lệ ⇒ khớp cả mẫu số)`);
+    assert.equal(cong((r) => r.handoffs), tong.handoffs, `bóc tách theo ${dim}: tổng chuyển người phải bằng shadowMetrics`);
+    assert.equal(cong((r) => r.errors), tong.errors, `bóc tách theo ${dim}: tổng lỗi phải bằng shadowMetrics`);
+    assert.equal(cong((r) => r.inputTokens), tong.inputTokens, `bóc tách theo ${dim}: tổng token vào phải bằng shadowMetrics`);
+    assert.equal(cong((r) => r.outputTokens), tong.outputTokens, `bóc tách theo ${dim}: tổng token ra phải bằng shadowMetrics`);
+    assert.equal(cong((r) => r.unpricedRuns), tong.unpricedRuns, `bóc tách theo ${dim}: số lượt chưa khai giá phải bằng shadowMetrics`);
+    // MỖI LƯỢT NẰM Ở ĐÚNG MỘT DÒNG: không dòng nào trùng khoá, nếu không tổng cộng được nhưng
+    // người đọc vẫn thấy hai dòng cùng tên.
+    const khoaRows = rows.map((r) => r.key);
+    assert.equal(new Set(khoaRows).size, khoaRows.length, `bóc tách theo ${dim}: khoá dòng không được trùng`);
+    // Mẫu số 0 ⇒ null, không phải 0%.
+    for (const r of rows) {
+      if (r.runs === 0) assert.equal(r.handoffRate, null, `bóc tách theo ${dim}: dòng không có lượt nào phải trả null, không phải 0%`);
+      // Còn lượt chưa khai đơn giá ⇒ CẢ DÒNG là CHƯA BIẾT, y như con số tổng.
+      if (r.unpricedRuns > 0) assert.equal(r.costVnd, null, `bóc tách theo ${dim}: còn lượt chưa khai giá thì chi phí dòng phải là CHƯA BIẾT`);
+    }
+  }
+  // Bảng mô hình ở ĐỘ MỊN KHÁC (lần gọi), nên nó KHÔNG phải cộng ra bằng số lượt chạy — kiểm rằng
+  // nó chạy được và giữ đúng luật "chưa khai giá ⇒ CHƯA BIẾT".
+  for (const m of await salesModelBreakdown(7)) {
+    if (m.unpricedCalls > 0) assert.equal(m.costVnd, null, "lần gọi chưa khai giá ⇒ chi phí là CHƯA BIẾT, không phải 0đ");
+  }
+
   console.log(
-    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ`,
+    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai)`,
   );
 }

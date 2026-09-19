@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Bot, CircleSlash, Coins, HandHelping, MessageSquareText } from "lucide-react";
 import { AiRunsTable } from "@/app/(dashboard)/ai/runs-table";
+import { BreakdownCard } from "@/app/(dashboard)/ai/breakdown";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
@@ -12,11 +13,19 @@ import { aiSummary, listAiAgents, listAiRuns, recentAiErrors, salesStageBreakdow
 import { ensureAgents } from "@/lib/ai-workforce/registry";
 import { getAiSettings } from "@/lib/ai-workforce/config";
 import { effectiveMode } from "@/lib/ai-workforce/config";
+import { RUN_BREAKDOWNS, type RunBreakdown } from "@/lib/queries/sales-metrics";
+import type { SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Nhân sự AI" };
 
-export default async function AiPage() {
+export default async function AiPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   await requirePermission("ai:view");
+  const raw = await searchParams;
+  const one = (k: string) => (Array.isArray(raw[k]) ? raw[k][0] : raw[k]) ?? "";
+  // Chiều lạ rơi về PAGE thay vì ném lỗi: một tham số gõ nhầm trên thanh địa chỉ không đáng làm
+  // hỏng cả trang.
+  const dim = (RUN_BREAKDOWNS as readonly string[]).includes(one("dim")) ? (one("dim") as RunBreakdown) : "PAGE";
+  const days = Math.min(Math.max(Number(one("days")) || 7, 1), 90);
   await ensureAgents();
   const settings = await getAiSettings();
   const [summary, runs, agents, stages, errors] = await Promise.all([aiSummary(7), listAiRuns({ days: 7, limit: 200 }), listAiAgents(), salesStageBreakdown(), recentAiErrors(10)]);
@@ -130,6 +139,8 @@ export default async function AiPage() {
           )}
         </Card>
       </div>
+
+      <BreakdownCard dim={dim} days={days} />
 
       <AiRunsTable rows={runs} />
     </div>
