@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { clearMemo } from "@/lib/cache";
 import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf } from "@/lib/constants/marketing-daily";
 import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
+import { METRIC_BINDINGS } from "@/lib/constants/metric-bindings";
+import { MARKETING_AI_SYSTEM, buildAiContext } from "@/lib/marketing/ai-context";
+import { MARKETING_TARGET_METRICS } from "@/lib/queries/marketing-targets";
 import { baselineOf, diagnose, lossStreakOf, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
 import { digestLines } from "@/lib/marketing/digest";
 import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter } from "@/lib/queries/marketing-daily";
@@ -265,6 +269,78 @@ export function testMarketingDigestLines() {
   assert.ok(profitLine?.includes("độ chín"), "lợi nhuận và độ chín phải nằm trên cùng một dòng");
 }
 
+/**
+ * ═══════════ BỐI CẢNH ĐƯA CHO AI: KHÔNG DỮ LIỆU THÔ, KHÔNG BIẾN NULL THÀNH 0 ═══════════
+ *
+ * Bài kiểm này bảo vệ hai thứ khác nhau. Thứ nhất là RIÊNG TƯ: bối cảnh rời khỏi máy chủ, nên nó
+ * không được mang đơn hàng, tên khách hay số điện thoại. Thứ hai là TÍNH TRUNG THỰC: một khoá mang
+ * giá trị 0 sẽ được mô hình đọc là "không đổi", trong khi sự thật có thể là "không so được".
+ */
+export function testMarketingAiContext() {
+  const totals = {
+    adSpend: null,
+    messages: null,
+    orders: 10,
+    units: 12,
+    posRevenue: 10_000_000,
+    deliveredRevenue: 4_000_000,
+    deliveredOrders: 4,
+    returnedOrders: 1,
+    cancelledOrders: 0,
+    pendingOrders: 5,
+    shippedOrders: 10,
+    finishedOrders: 5,
+    maturityBase: 10,
+    cogs: 1_000_000,
+    shippingCost: 300_000,
+    operatingCost: null,
+    contributionProfit: null,
+    netProfit: null,
+  };
+  const ctx = buildAiContext({ scopeLabel: "Toàn shop", periodLabel: "30 ngày", basisLabel: "cohort", totals, baseline: null, findings: [], warnings: ["cảnh báo cũ"] });
+
+  // CHƯA BIẾT đi qua nguyên vẹn thành `null`, KHÔNG bị hạ thành 0.
+  assert.equal(ctx.funnel.adSpend, null);
+  assert.equal(ctx.funnel.costPerOrder, null, "chi tiêu chưa biết ⇒ CPA chưa biết");
+  assert.equal(ctx.profit.contributionProfit, null);
+  // Không có nền ⇒ KHÔNG có khoá so sánh nào, chứ không phải một loạt khoá bằng 0.
+  assert.deepEqual(ctx.vsBaseline, {}, "thiếu nền thì không so — không điền 0");
+  // Độ chín 50% ⇒ phải có câu cấm kết luận lãi/lỗ.
+  assert.equal(ctx.delivery.maturityPct, 50);
+  assert.ok(ctx.caveats.some((c) => c.includes("không phải kết quả cuối cùng")), "chưa chín thì bối cảnh phải nói ra");
+  assert.ok(ctx.caveats.includes("cảnh báo cũ"), "cảnh báo của bảng phải đi kèm sang AI");
+
+  // KHÔNG RÒ DỮ LIỆU THÔ: bối cảnh chỉ có số tổng hợp và bằng chứng đã có.
+  const json = JSON.stringify(ctx);
+  for (const forbidden of ["orderId", "order_id", "customer", "phone", "address", "sku", "trackingCode"]) {
+    assert.ok(!json.includes(forbidden), `bối cảnh gửi cho AI không được mang ${forbidden}`);
+  }
+
+  // Lời nhắc hệ thống phải cấm đúng ba điều — đây là ranh giới, không phải lời khuyên.
+  assert.ok(MARKETING_AI_SYSTEM.includes("KHÔNG tự tính"), "phải cấm mô hình tự tính số tài chính");
+  assert.ok(MARKETING_AI_SYSTEM.includes("độ chín"), "phải cấm kết luận lãi/lỗ khi chưa đủ độ chín");
+  assert.ok(MARKETING_AI_SYSTEM.includes("hãy tối ưu quảng cáo"), "phải cấm lời khuyên chung chung");
+}
+
+/**
+ * ═══════════ ĐÍCH ĐI QUA SỔ CHỈ SỐ CHUNG, KHÔNG PHẢI MỘT BẢNG NGƯỠNG RIÊNG ═══════════
+ */
+export function testMarketingTargetRegistration() {
+  for (const m of MARKETING_TARGET_METRICS) {
+    const binding = METRIC_BINDINGS[m.metricKey];
+    assert.ok(binding, `${m.metricKey}: phải được khai trong METRIC_BINDINGS thì mới đặt đích được`);
+    assert.ok(binding.basis.includes("getMarketingDaily"), `${m.metricKey}: phải khai rõ nó đọc cùng bộ máy với màn hình`);
+    // Chiều phải đúng: CPA càng thấp càng tốt. Ghi cứng "UP" sẽ làm điểm ĐẢO NGƯỢC.
+    if (m.metricKey === "marketing_cpa") assert.equal(binding.direction, "DOWN", "chi phí một đơn: càng thấp càng tốt");
+    if (m.metricKey === "marketing_roas_delivered") assert.equal(binding.direction, "UP");
+    // Khoá phải nối được về một ô CÓ THẬT của bảng.
+    assert.ok(MARKETING_METRIC_BY_KEY[m.cellKey], `${m.metricKey}: ô ${m.cellKey} không tồn tại trong bảng`);
+  }
+  // KHÔNG được có bộ ngưỡng mặc định ở bất kỳ đâu trong mã của tính năng này.
+  const files = ["lib/constants/marketing-daily.ts", "lib/queries/marketing-targets.ts"].map((f) => readFileSync(f, "utf8")).join("\n");
+  assert.ok(!/DEFAULT_TARGET|defaultTarget|targetCpa|TARGET_CPA/i.test(files), "không được khai một đích mặc định — đích là quyết định kinh doanh, sống ở metric_targets");
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════════════
    PHẦN B — ĐỐI SOÁT VỚI BỘ MÁY LỢI NHUẬN (cần CSDL)
    ═══════════════════════════════════════════════════════════════════════════════════ */
@@ -428,6 +504,8 @@ export async function testMarketingDaily() {
   testMarketingLossStreak();
   testMarketingBaseline();
   testMarketingDigestLines();
+  testMarketingAiContext();
+  testMarketingTargetRegistration();
   await testMarketingDailyReconciliation();
   await testMarketingDailyTotals();
   await testMarketingDailyFilterHonesty();

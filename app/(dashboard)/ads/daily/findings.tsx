@@ -1,7 +1,12 @@
-import { CircleAlert, CircleCheck, TriangleAlert } from "lucide-react";
+import { CircleAlert, CircleCheck, Sparkles, Target, TriangleAlert } from "lucide-react";
 import { SectionCard } from "@/components/ui-bits";
 import { MARKETING_DIAGNOSIS } from "@/lib/constants/marketing-diagnosis";
+import { MARKETING_BASIS_LABEL } from "@/lib/constants/marketing-daily";
+import { CELL_STATUS_LABEL } from "@/lib/metrics/scorecard";
 import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
+import { explainMarketing } from "@/lib/marketing/ai-explain";
+import { evaluateMarketingTargets } from "@/lib/queries/marketing-targets";
+import { MISSING_TEXT } from "@/lib/format";
 import type { MarketingDaily, MarketingDailyBase } from "@/lib/queries/marketing-daily";
 
 /**
@@ -31,7 +36,7 @@ function toSnapshot(b: MarketingDailyBase): DiagnoseSnapshot {
   };
 }
 
-export function MarketingFindings({ data }: { data: MarketingDaily }) {
+export async function MarketingFindings({ data }: { data: MarketingDaily }) {
   const rows = data.rows;
   const last = rows.at(-1);
   if (!last) return null;
@@ -47,6 +52,26 @@ export function MarketingFindings({ data }: { data: MarketingDaily }) {
       staleSources: data.freshness.filter((f) => f.stale).map((f) => f.label),
     }),
   );
+
+  /*
+    ĐÍCH VÀ AI ĐỌC SONG SONG, VÀ CẢ HAI ĐỀU ĐƯỢC PHÉP KHÔNG CÓ GÌ.
+
+    Chưa ai đặt đích ⇒ khối đích không hiện (không có ngưỡng mặc định — AGENTS.md mục 38).
+    Chưa cấu hình AI ⇒ khối diễn giải không hiện, và lý do vẫn in ra để không ai tưởng nó im lặng
+    vì "mọi thứ đều ổn".
+  */
+  const [targets, ai] = await Promise.all([
+    evaluateMarketingTargets(data.totals, data.period, data.previousTotals),
+    explainMarketing({
+      scopeLabel: "Toàn shop",
+      periodLabel: data.period.label,
+      basisLabel: MARKETING_BASIS_LABEL[data.basis],
+      totals: data.totals,
+      baseline,
+      findings,
+      warnings: data.warnings,
+    }),
+  ]);
 
   return (
     <SectionCard
@@ -84,6 +109,45 @@ export function MarketingFindings({ data }: { data: MarketingDaily }) {
           ))}
         </ul>
       )}
+
+      {targets.length ? (
+        <div className="mt-4 border-t pt-3">
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
+            <Target className="size-3.5" /> So với đích đã đặt
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {targets.map((t) => (
+              <div key={t.cellKey} className="rounded-lg border p-2 text-xs">
+                <p className="text-muted-foreground">{t.label}</p>
+                <p className="font-medium">
+                  {t.cell.value === null ? MISSING_TEXT : t.cell.value}
+                  {t.cell.target ? <span className="text-muted-foreground"> / đích {t.cell.target.target}</span> : null}
+                </p>
+                {/* canConclude = false ⇒ hiện thực tế, KHÔNG tô màu, KHÔNG gắn nhãn đạt/không đạt. */}
+                <p className="text-muted-foreground">{t.cell.canConclude ? CELL_STATUS_LABEL[t.status] : (t.cell.reason ?? "Chưa kết luận được")}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="mt-4 border-t pt-3 text-xs text-muted-foreground">
+          Chưa ai đặt đích cho CPQC/đơn, ROAS, tỷ lệ chốt hay margin. ERP cố ý KHÔNG tự nghĩ ra một ngưỡng — đặt đích ở màn hình Mục tiêu (ba tầng: công ty → phòng ban → chức danh), rồi mỗi ô ở đây sẽ
+          tự chấm theo đích đó.
+        </p>
+      )}
+
+      {ai.explanation ? (
+        <div className="mt-4 rounded-lg border border-dashed p-3">
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
+            <Sparkles className="size-3.5" /> Diễn giải
+            {/* Nói rõ AI chỉ DIỄN GIẢI: mọi con số phía trên do máy chủ tính, không phải do mô hình. */}
+            <span className="font-normal text-muted-foreground">— viết bởi AI từ chính các con số trên, không tự tính thêm số nào</span>
+          </p>
+          <p className="whitespace-pre-line text-xs">{ai.explanation.text}</p>
+        </div>
+      ) : ai.skipped && findings.length ? (
+        <p className="mt-4 text-xs text-muted-foreground">Phần diễn giải bằng AI không chạy: {ai.skipped}.</p>
+      ) : null}
     </SectionCard>
   );
 }
