@@ -277,8 +277,8 @@ export async function testAiPlatform(db: Db) {
   // ───────── 8. Sổ lượt chạy: tổng token, chi phí, độ trễ ─────────
   const run = await startRun({ agentId: sales.id, agentKey: "sales", mode: "SHADOW", subjectType: "TEST", subjectId: "cost" }, db);
   await run.model([
-    { tier: "ECONOMY", provider: "stub", model: "stub-economy", ok: true, step: "understand", inputTokens: 100, outputTokens: 50, cachedInputTokens: 0, costVnd: 7, pricingVersion: "bang-gia-kiem-thu", latencyMs: 12, error: null },
-    { tier: "STRONG", provider: "stub", model: "stub-strong", ok: true, step: "generate", inputTokens: 200, outputTokens: 80, cachedInputTokens: 0, costVnd: 20, pricingVersion: "bang-gia-kiem-thu", latencyMs: 30, error: null },
+    { tier: "ECONOMY", provider: "stub", model: "stub-economy", ok: true, step: "understand", inputTokens: 100, outputTokens: 50, cachedInputTokens: 0, costVnd: 7, inputPriceVndPerMillion: null, cachedInputPriceVndPerMillion: null, outputPriceVndPerMillion: null, pricingVersion: "bang-gia-kiem-thu", latencyMs: 12, error: null },
+    { tier: "STRONG", provider: "stub", model: "stub-strong", ok: true, step: "generate", inputTokens: 200, outputTokens: 80, cachedInputTokens: 0, costVnd: 20, inputPriceVndPerMillion: null, cachedInputPriceVndPerMillion: null, outputPriceVndPerMillion: null, pricingVersion: "bang-gia-kiem-thu", latencyMs: 30, error: null },
   ]);
   await run.finish({ status: "SUCCEEDED", suggestedReply: "xin chào" });
   const saved = await db.query.aiRuns.findFirst({ where: eq(schema.aiRuns.id, run.id) });
@@ -290,8 +290,8 @@ export async function testAiPlatform(db: Db) {
   // Có lần gọi chưa khai đơn giá ⇒ TỔNG là CHƯA BIẾT, không phải "tổng phần biết được".
   const mixed = await startRun({ agentId: sales.id, agentKey: "sales", mode: "SHADOW", subjectType: "TEST", subjectId: "cost-unknown" }, db);
   await mixed.model([
-    { tier: "ECONOMY", provider: "stub", model: "a", ok: true, step: "understand", inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, costVnd: 3, pricingVersion: "bang-gia-kiem-thu", latencyMs: 1, error: null },
-    { tier: "STRONG", provider: "stub", model: "chua-khai", ok: true, step: "generate", inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, costVnd: null, pricingVersion: "bang-gia-kiem-thu", latencyMs: 1, error: null },
+    { tier: "ECONOMY", provider: "stub", model: "a", ok: true, step: "understand", inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, costVnd: 3, inputPriceVndPerMillion: null, cachedInputPriceVndPerMillion: null, outputPriceVndPerMillion: null, pricingVersion: "bang-gia-kiem-thu", latencyMs: 1, error: null },
+    { tier: "STRONG", provider: "stub", model: "chua-khai", ok: true, step: "generate", inputTokens: 10, outputTokens: 5, cachedInputTokens: 0, costVnd: null, inputPriceVndPerMillion: null, cachedInputPriceVndPerMillion: null, outputPriceVndPerMillion: null, pricingVersion: "bang-gia-kiem-thu", latencyMs: 1, error: null },
   ]);
   await mixed.finish({ status: "SUCCEEDED" });
   const mixedRow = await db.query.aiRuns.findFirst({ where: eq(schema.aiRuns.id, mixed.id) });

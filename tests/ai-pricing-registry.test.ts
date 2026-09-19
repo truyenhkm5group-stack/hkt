@@ -16,7 +16,7 @@ import { execFileSync } from "node:child_process";
 import { AI_CONFIG_KEY } from "@/lib/constants/ai";
 import { MODEL_USD_PRICES, buildVndPricing, pricingVersionLabel, usdPriceFor } from "@/lib/constants/ai-model-pricing";
 import { estimateCostUsd } from "@/lib/ai/provider";
-import { estimateCostVnd } from "@/lib/ai-workforce/model-router";
+import { estimateCostVnd, priceUsedFor } from "@/lib/ai-workforce/model-router";
 
 test("sổ giá: mỗi dòng khai đủ căn cứ, và không dòng nào bịa", () => {
   for (const [model, gia] of Object.entries(MODEL_USD_PRICES)) {
@@ -96,4 +96,31 @@ test("giá đệm: khai thiếu ⇒ CHƯA BIẾT, khai đủ ⇒ tính đúng r�
   // Nhãn phiên bản mang cả ngày chép giá lẫn tỷ giá: đổi một trong hai là ra con số khác, và hai
   // kỳ mang nhãn khác nhau thì không ai vẽ nhầm một đường xu hướng qua chúng.
   assert.notEqual(pricingVersionLabel(26_000), pricingVersionLabel(27_000));
+});
+
+test("ảnh chụp giá: đổi giá tháng sau KHÔNG được viết lại chi phí lịch sử", () => {
+  /*
+    Đây là cả lý do ba cột ảnh chụp tồn tại. `pricing_version` nói ta đã dùng BẢNG GIÁ NÀO, nhưng
+    bảng giá nằm trong `settings` và bị GHI ĐÈ khi chủ shop khai giá mới — nên chỉ có phiên bản
+    thì tháng sau cái nhãn còn đó mà nội dung đã khác, và con số cũ không dựng lại được.
+  */
+  const thang6 = buildVndPricing(26_000);
+  const thang7 = buildVndPricing(30_000); // chủ shop khai tỷ giá mới
+
+  const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 };
+  const chiPhiThang6 = estimateCostVnd("anthropic", "claude-sonnet-5", usage, thang6);
+  const chiPhiThang7 = estimateCostVnd("anthropic", "claude-sonnet-5", usage, thang7);
+  assert.notEqual(chiPhiThang6, chiPhiThang7, "đổi tỷ giá thì chi phí của CÙNG một lượt ra số khác — đó chính là mối nguy");
+
+  // ẢNH CHỤP giữ lại đầu vào đã dùng, nên dựng lại được con số tháng 6 mà không cần bảng giá cũ.
+  const anhChup = priceUsedFor("anthropic", "claude-sonnet-5", thang6);
+  assert.ok(anhChup);
+  const dungLai =
+    (usage.inputTokens / 1_000_000) * anhChup.inputVndPerMillion + (usage.outputTokens / 1_000_000) * anhChup.outputVndPerMillion;
+  assert.equal(Math.ceil(dungLai), chiPhiThang6, "từ ảnh chụp phải dựng lại ĐÚNG con số lịch sử");
+
+  // Và phép tra khoá của ảnh chụp phải TRÙNG phép tra của `estimateCostVnd` — hai phép tra viết ở
+  // hai chỗ là hai phép tra sẽ lệch nhau, và khi ấy ảnh chụp nói một đằng, chi phí nói một nẻo.
+  assert.equal(priceUsedFor("khong-co", "cung-khong-co", thang6), null);
+  assert.equal(estimateCostVnd("khong-co", "cung-khong-co", usage, thang6), null);
 });

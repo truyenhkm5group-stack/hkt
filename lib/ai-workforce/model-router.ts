@@ -81,6 +81,17 @@ export function estimateCostVnd(provider: string, model: string, usage: TokenUsa
   return Math.ceil(vnd);
 }
 
+/**
+ * Đơn giá THỰC SỰ được dùng cho một lượt gọi — cùng phép tra khoá mà `estimateCostVnd()` dùng.
+ *
+ * Tách ra một hàm thay vì tra lại ở nơi gọi: hai phép tra khoá viết ở hai chỗ là hai phép tra sẽ
+ * lệch nhau, và khi ấy ảnh chụp giá sẽ nói một đằng còn chi phí nói một nẻo — đúng thứ mà ảnh
+ * chụp sinh ra để ngăn.
+ */
+export function priceUsedFor(provider: string, model: string, pricing: Record<string, ModelPrice>): ModelPrice | null {
+  return pricing[`${provider}:${model}`] ?? pricing[model] ?? null;
+}
+
 export type ModelAttempt = {
   tier: RouteTier;
   provider: string;
@@ -93,6 +104,16 @@ export type ModelAttempt = {
   costVnd: number | null;
   /** Bảng giá nào đã ra con số trên. Rỗng = chưa khai giá ⇒ `costVnd` phải là null. */
   pricingVersion: string;
+  /**
+   * ẢNH CHỤP ĐƠN GIÁ đã dùng, VND cho một triệu token. `null` = chưa khai giá.
+   *
+   * Đi CÙNG `costVnd` chứ không thay nó: `costVnd` là kết quả, ba ô này là đầu vào đã dùng. Giữ
+   * cả hai thì một con số chi phí lịch sử kiểm lại được mà không cần tin vào một bảng giá có thể
+   * đã bị ghi đè từ lâu.
+   */
+  inputPriceVndPerMillion: number | null;
+  cachedInputPriceVndPerMillion: number | null;
+  outputPriceVndPerMillion: number | null;
   latencyMs: number;
   error: string | null;
 };
@@ -182,6 +203,9 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
       });
       const latencyMs = Date.now() - startedAt;
       const costVnd = estimateCostVnd(result.provider, result.model, result, settings.pricing);
+      // Chụp lại ĐƠN GIÁ ĐÃ DÙNG, không chỉ kết quả. Chụp cả khi `costVnd` là null: biết "bảng giá
+      // lúc ấy có giá vào nhưng thiếu giá đệm" là một manh mối thật, khác hẳn một ô trống.
+      const giaDaDung = priceUsedFor(result.provider, result.model, settings.pricing);
       const attempt: ModelAttempt = {
         tier,
         provider: result.provider,
@@ -193,6 +217,9 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
         cachedInputTokens: result.cacheReadInputTokens,
         costVnd,
         pricingVersion: costVnd === null ? "" : settings.pricingVersion,
+        inputPriceVndPerMillion: giaDaDung?.inputVndPerMillion ?? null,
+        cachedInputPriceVndPerMillion: giaDaDung?.cachedReadVndPerMillion ?? null,
+        outputPriceVndPerMillion: giaDaDung?.outputVndPerMillion ?? null,
         latencyMs,
         error: null,
       };
@@ -243,6 +270,10 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
         // Lần gọi hỏng: KHÔNG biết nhà cung cấp có tính tiền token đã nhận hay không ⇒ CHƯA BIẾT.
         costVnd: null,
         pricingVersion: "",
+        // Lượt hỏng: không có token nào để nhân giá, nên ảnh chụp giá cũng vô nghĩa ⇒ CHƯA BIẾT.
+        inputPriceVndPerMillion: null,
+        cachedInputPriceVndPerMillion: null,
+        outputPriceVndPerMillion: null,
         latencyMs,
         error: error instanceof Error ? error.message.slice(0, 500) : String(error),
       });

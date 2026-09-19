@@ -687,6 +687,13 @@
       "when": 1789835644721,
       "tag": "0098_order_field_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1789835704721,
+      "tag": "0099_model_call_price_snapshot",
+      "breakpoints": true
     }
   ]
 }

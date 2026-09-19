@@ -116,6 +116,11 @@ export async function startRun(params: StartRunInput, db?: Db): Promise<RunRecor
             cachedInputTokens: a.cachedInputTokens,
             costVnd: a.costVnd,
             pricingVersion: a.pricingVersion,
+            // Ảnh chụp đơn giá ĐÃ DÙNG — để tháng sau nhà cung cấp đổi giá thì lịch sử vẫn tính
+            // đúng theo giá lúc gọi, thay vì phải tin vào một bảng giá có thể đã bị ghi đè.
+            inputPriceVndPerMillion: a.inputPriceVndPerMillion,
+            cachedInputPriceVndPerMillion: a.cachedInputPriceVndPerMillion,
+            outputPriceVndPerMillion: a.outputPriceVndPerMillion,
             latencyMs: Math.max(0, Math.round(a.latencyMs)),
             ok: a.ok,
             error: a.error ? a.error.slice(0, 1000) : null,

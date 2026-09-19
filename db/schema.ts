@@ -2498,6 +2498,24 @@ export const aiModelCalls = pgTable(
      * số lịch sử đổi nghĩa mà không ai biết. Rỗng = chưa khai giá ⇒ `cost_vnd` phải là NULL.
      */
     pricingVersion: text("pricing_version").notNull().default(""),
+    /*
+      ẢNH CHỤP ĐƠN GIÁ TẠI THỜI ĐIỂM GỌI — VND cho MỘT TRIỆU token.
+
+      `pricing_version` nói ta đã dùng BẢNG GIÁ NÀO, nhưng bảng giá nằm trong `settings` và bị GHI
+      ĐÈ khi chủ shop khai giá mới. Nên chỉ có phiên bản thì tháng sau không ai dựng lại được con
+      số cũ: nhãn còn đó, nội dung đã khác.
+
+      Ba cột này là chính đơn giá đã dùng. Nhờ vậy nhà cung cấp đổi giá tháng sau, lịch sử vẫn
+      tính đúng theo giá LÚC GỌI — và không ai phải "sửa" chi phí lịch sử, một việc mà luật
+      không-sửa-kỳ-đã-chốt của kho mã vốn đã cấm.
+
+      NULL = lượt ấy chưa khai đơn giá ⇒ `cost_vnd` cũng phải NULL. Không bao giờ là 0.
+    */
+    inputPriceVndPerMillion: integer("input_price_vnd_per_million"),
+    cachedInputPriceVndPerMillion: integer("cached_input_price_vnd_per_million"),
+    outputPriceVndPerMillion: integer("output_price_vnd_per_million"),
+    /** Đơn vị tiền của ảnh chụp trên. ERP dùng VND; khai ra để không ai đoán. */
+    currency: text("currency").notNull().default("VND"),
     latencyMs: integer("latency_ms").notNull().default(0),
     ok: boolean("ok").notNull().default(true),
     error: text("error"),
