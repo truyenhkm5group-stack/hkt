@@ -1,5 +1,5 @@
 import { CARE_SLA_SOON_FRACTION, CARE_TERMINAL_STATUSES, CARE_WAITING_STATUSES } from "@/lib/constants/care";
-import { followUpBucket, resolutionOf, type FollowUpFilterKey, type ResolutionFilterKey } from "@/lib/constants/care-resolution";
+import { followUpBucket, type FollowUpFilterKey, type ResolutionFilterKey } from "@/lib/constants/care-resolution";
 import type { CareCase } from "@/lib/care/contracts";
 import { DEFAULT_CARE_SLA_HOURS, type CareSlaHours, type CareStateLike } from "@/lib/care/view";
 
@@ -191,10 +191,8 @@ export function matchesCareFilters(c: CareCase, f: CareFilters, now: Date, hours
     cũng trộn cả hai, và người trực lại phải đọc từng dòng — đúng thứ bộ lọc sinh ra để khỏi phải làm.
   */
   if (on("resolution") && f.resolution) {
-    const r = resolutionOf(c.care.lastDecision?.action ?? null);
-    // `EXCHANGE` (và mọi quyết định không thuộc ba nút) KHÔNG phải "chưa quyết định" — nó đã được
-    // quyết, chỉ là không nằm trong ba rổ này. Nên nó không khớp rổ nào, kể cả rổ `none`.
-    if (f.resolution === "none" ? c.care.lastDecision != null : r !== f.resolution) return false;
+    const r = c.care.lastDecision?.decision ?? null;
+    if (f.resolution === "none" ? r !== null : r !== f.resolution) return false;
   }
   if (on("followUp") && f.followUp && followUpBucket(c.care.followUpAt, now) !== f.followUp) return false;
   if (on("sku") && !matchesSku(c, f.sku.trim().toLowerCase())) return false;

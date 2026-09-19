@@ -2,6 +2,7 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { CARE_STATUS_LABEL, CARRIER_ACTION_LABEL, CARRIER_REQUEST_LABEL, type CareStatus, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
+import { RESOLUTION_LABEL, careDecisionOf } from "@/lib/constants/care-resolution";
 import { CARRIER_EVENT_SOURCES } from "@/lib/constants/truth";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { EVENT_LANE, type ActorKind, type TimelineEventType, type TimelineLane } from "@/lib/constants/shipment-timeline";
@@ -122,7 +123,7 @@ export async function getShipmentTimeline(shipmentId: string, options: { limit?:
   const db = await getDb();
   const limit = options.limit ?? 400;
 
-  const [events, caseEvents, actions, decisions, commands, cares, sla] = await Promise.all([
+  const [events, caseEvents, actions, decisions, careDecisionRows, commands, cares, sla] = await Promise.all([
     db
       .select({
         id: schema.shipmentEvents.id,
@@ -191,6 +192,31 @@ export async function getShipmentTimeline(shipmentId: string, options: { limit?:
       .from(schema.careBusinessActions)
       .where(eq(schema.careBusinessActions.shipmentId, shipmentId))
       .orderBy(asc(schema.careBusinessActions.requestedAt))
+      .limit(limit),
+    /*
+      KẾT QUẢ CARE (`care_decisions`) — LỜI KHAI CỦA NGƯỜI, đọc riêng khỏi `care_business_actions`.
+
+      Hai sổ, hai nghĩa: sổ trên ghi "đội đã quyết gì" và ghi được cả khi ĐVVC không nhận lệnh; sổ
+      dưới ghi "một lệnh đã đi (hay chưa đi) tới Viettel Post". Nhật ký vận đơn in CẢ HAI, cùng
+      làn CARE_DECISION, vì với người đọc thì cả hai đều là "shop đã quyết" — nhưng chúng không
+      bao giờ bị gộp thành một dòng.
+    */
+    db
+      .select({
+        id: schema.careDecisions.id,
+        decision: schema.careDecisions.decision,
+        reasonCode: schema.careDecisions.reasonCode,
+        note: schema.careDecisions.note,
+        actorId: schema.careDecisions.actorUserId,
+        actorEmail: schema.careDecisions.actorEmail,
+        previousCareStatus: schema.careDecisions.previousCareStatus,
+        nextCareStatus: schema.careDecisions.nextCareStatus,
+        carrierSubstateAtDecision: schema.careDecisions.carrierSubstateAtDecision,
+        decidedAt: schema.careDecisions.decidedAt,
+      })
+      .from(schema.careDecisions)
+      .where(eq(schema.careDecisions.shipmentId, shipmentId))
+      .orderBy(asc(schema.careDecisions.decidedAt))
       .limit(limit),
     db
       .select({
@@ -403,6 +429,26 @@ export async function getShipmentTimeline(shipmentId: string, options: { limit?:
       before: d.previousCareStatus ? CARE_STATUS_LABEL[d.previousCareStatus as CareStatus] ?? d.previousCareStatus : null,
       after: d.nextCareStatus ? CARE_STATUS_LABEL[d.nextCareStatus as CareStatus] ?? d.nextCareStatus : null,
       note: d.reasonNote,
+    });
+  }
+
+  // ───────── 5b. Kết quả care của người (KHÔNG phải lệnh gửi ĐVVC) ─────────
+  for (const d of careDecisionRows) {
+    const who = actor(d.actorId, d.actorEmail);
+    const kq = careDecisionOf(d.decision);
+    entries.push({
+      id: `kq-${d.id}`,
+      at: d.decidedAt,
+      receivedAt: null,
+      eventType: "CARE_DECISION",
+      lane: EVENT_LANE.CARE_DECISION,
+      title: kq ? `Kết quả care: ${RESOLUTION_LABEL[kq]}` : d.decision,
+      detail: [d.reasonCode ? `lý do ${d.reasonCode}` : "", d.carrierSubstateAtDecision ? `ĐVVC lúc đó: ${d.carrierSubstateAtDecision}` : ""].filter(Boolean).join(" · "),
+      source: "ERP",
+      ...who,
+      before: d.previousCareStatus ? CARE_STATUS_LABEL[d.previousCareStatus as CareStatus] ?? d.previousCareStatus : null,
+      after: d.nextCareStatus ? CARE_STATUS_LABEL[d.nextCareStatus as CareStatus] ?? d.nextCareStatus : null,
+      note: d.note,
     });
   }
 

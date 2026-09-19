@@ -20,7 +20,7 @@ import { can, type SessionUser } from "@/lib/auth/session";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { CARE_VIEWS, CARE_VIEW_HINT, CARE_VIEW_LABEL, type CareView } from "@/lib/constants/care";
-import { RESOLUTION_NOTES_DEFAULT, type ResolutionAction } from "@/lib/constants/care-resolution";
+import { RESOLUTION_NOTES_DEFAULT, type CareDecision } from "@/lib/constants/care-resolution";
 import type { CareNotePreset } from "@/lib/constants/care";
 import { formatNumber, formatVND } from "@/lib/format";
 import { getCareNotePresets, getCareWorkbench, getResolutionNotePresets } from "@/lib/queries/care-workbench";
@@ -54,7 +54,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
   const basisRaw = typeof raw.basis === "string" ? raw.basis : "";
   const basis: PeriodBasis = (PERIOD_BASES as readonly string[]).includes(basisRaw) ? (basisRaw as PeriodBasis) : "CASE_OPENED_AT";
 
-  const [wb, staff, presets, resolutionPresets]: [Awaited<ReturnType<typeof getCareWorkbench>> | null, { id: string; name: string }[], CareNotePreset[], Record<ResolutionAction, string[]>] = ngoaiCare
+  const [wb, staff, presets, resolutionPresets]: [Awaited<ReturnType<typeof getCareWorkbench>> | null, { id: string; name: string }[], CareNotePreset[], Record<CareDecision, string[]>] = ngoaiCare
     ? [null, [], [], RESOLUTION_NOTES_DEFAULT]
     : await Promise.all([getCareWorkbench(), assignableUsers(), getCareNotePresets(), getResolutionNotePresets()]);
   const counts = wb?.counts ?? (ngoaiCare ? (await getCareWorkbench()).counts : { care: 0, waiting: 0, escalated: 0, done: 0 });

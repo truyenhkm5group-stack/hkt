@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { addCareNote, bulkRequestCarrierAction, markCarrierManualDone, recordBusinessAction, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
+import { addCareNote, bulkRequestCarrierAction, markCarrierManualDone, recordBusinessAction, recordCareDecision, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
 import type { BulkOutcome, BulkResult } from "@/lib/care/service";
 import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
@@ -27,11 +27,9 @@ import {
   RESOLUTION_FILTER_LABEL,
   RESOLUTION_HINT,
   RESOLUTION_LABEL,
-  RESOLUTION_TO_BUSINESS,
   followUpBucket,
-  resolutionOf,
+  type CareDecision,
   type FollowUpFilterKey,
-  type ResolutionAction,
   type ResolutionFilterKey,
 } from "@/lib/constants/care-resolution";
 import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
@@ -99,7 +97,7 @@ type Props = {
   /** Mẫu note nhanh của shop — bấm là đổ chữ vào ô; thêm/bớt ngay trong popover. */
   presets: CareNotePreset[];
   /** Mẫu note gắn với TỪNG kết quả xử lý (`care.resolutionNotes`). */
-  resolutionPresets: Record<ResolutionAction, string[]>;
+  resolutionPresets: Record<CareDecision, string[]>;
   canManage: boolean;
 };
 
@@ -254,7 +252,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
     rổ nào: nó đã được quyết, nên nó không phải "chưa quyết định", và ép nó vào một rổ là đếm sai.
   */
   const resolutionFacet = useMemo(() => {
-    const m = new Map(careFacet(cases, filters, "resolution", (c) => (c.care.lastDecision ? (resolutionOf(c.care.lastDecision.action) ?? "__other") : "none"), now, hours));
+    const m = new Map(careFacet(cases, filters, "resolution", (c) => c.care.lastDecision?.decision ?? "none", now, hours));
     return RESOLUTION_FILTER_KEYS.map((k) => [k, m.get(k) ?? 0] as const).filter(([, n]) => n > 0);
   }, [cases, filters, now, hours]);
   const followUpFacet = useMemo(() => {
@@ -489,7 +487,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
                   key={k}
                   type="button"
                   onClick={() => setF({ ketqua: f.ketqua === k ? "" : k })}
-                  title={k === "none" ? "Chưa ai bấm Đã hoàn / Phát tiếp / Xử lý sau cho kiện này." : RESOLUTION_HINT[k as ResolutionAction]}
+                  title={k === "none" ? "Chưa ai bấm Đã hoàn / Phát tiếp / Xử lý sau cho kiện này." : RESOLUTION_HINT[k as CareDecision]}
                   className={cn("rounded-full border px-2.5 py-0.5 text-[11.5px] hover:bg-accent", f.ketqua === k && "border-primary bg-accent font-semibold")}
                 >
                   {RESOLUTION_FILTER_LABEL[k as ResolutionFilterKey]} <span className="numeric text-muted-foreground">{n}</span>
@@ -652,7 +650,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   );
 }
 
-function CaseRow({ c, staff, presets, resolutionPresets, onPresetsChange, canManage, checked, onCheck, onPatch }: { c: CareCase; staff: { id: string; name: string }[]; presets: CareNotePreset[]; resolutionPresets: Record<ResolutionAction, string[]>; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
+function CaseRow({ c, staff, presets, resolutionPresets, onPresetsChange, canManage, checked, onCheck, onPatch }: { c: CareCase; staff: { id: string; name: string }[]; presets: CareNotePreset[]; resolutionPresets: Record<CareDecision, string[]>; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
   const [pending, start] = useTransition();
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -753,15 +751,15 @@ function CaseRow({ c, staff, presets, resolutionPresets, onPresetsChange, canMan
     LẠC QUAN CÓ GIỚI HẠN: dòng chỉ được vá bằng `CareState` MÁY CHỦ TRẢ VỀ (mục 18 của đề bài), nên
     lỗi là dòng tự quay lại đúng trạng thái cũ — không cần bộ nhớ hoàn tác riêng.
   */
-  const doResolution = (a: ResolutionAction, extra: ResolutionExtra) =>
+  const doResolution = (a: CareDecision, extra: ResolutionExtra) =>
     start(async () => {
-      const r = await recordBusinessAction({ shipmentId: c.shipmentId, action: RESOLUTION_TO_BUSINESS[a], note: extra.note, reasonCode: extra.reasonCode, followUpAt: extra.followUpAt });
+      const r = await recordCareDecision({ shipmentId: c.shipmentId, decision: a, note: extra.note, reasonCode: extra.reasonCode, followUpAt: extra.followUpAt });
       if ("error" in r) {
         toast.error(r.error, { duration: 9000 });
         return;
       }
-      onPatch(r.data.care, r.data.request ? { carrierRequest: { ...r.data.request, at: new Date(r.data.request.at) } } : {});
-      toast.success(`${c.tracking} · ${RESOLUTION_LABEL[a]}`, { description: r.data.message, duration: 8000 });
+      onPatch(r.data);
+      toast.success(`${c.tracking} · ${RESOLUTION_LABEL[a]}`, { description: "Đã ghi kết quả xử lý. KHÔNG gửi lệnh nào sang Viettel Post và KHÔNG đổi trạng thái vận đơn.", duration: 6000 });
     });
 
   const carrier = (actionKey: CarrierActionKey) =>
@@ -872,22 +870,17 @@ function CaseRow({ c, staff, presets, resolutionPresets, onPresetsChange, canMan
       </td>
       <td className="px-2 py-2">
         {/*
-          KẾT QUẢ XỬ LÝ ĐỨNG TRÊN CÙNG Ô CARE — đây là câu hỏi người trực phải trả lời cho mỗi kiện,
-          nên nó là thứ đầu tiên mắt chạm tới, không phải thứ nằm sau hai lớp popover như bản trước.
-          Điều kiện ĐVVC xét bằng ĐÚNG hàm của máy chủ; nút không đủ điều kiện vẫn hiện nhưng khoá,
-          kèm lý do trong tooltip — biến mất thì người dùng tưởng màn hình hỏng.
+          KẾT QUẢ XỬ LÝ ĐỨNG TRÊN CÙNG Ô CARE — đây là câu hỏi người trực phải trả lời cho mỗi kiện.
+
+          KHÔNG có điều kiện ĐVVC nào ở đây: ba nút này ghi LỜI KHAI CỦA NGƯỜI, và chúng phải bấm
+          được kể cả khi ERP chưa khai tài khoản API, kiện chưa có mã vận đơn, hay kiện đã kết thúc.
+          Lệnh gửi sang Viettel Post nằm ở cột "Viettel Post" bên phải — khối đó mới được phép khoá.
         */}
         <ResolutionControl
-          value={resolutionOf(c.care.lastDecision?.action ?? null)}
+          value={c.care.lastDecision?.decision ?? null}
           pending={pending}
           presets={resolutionPresets}
           canEditPresets={canManage}
-          eligibility={(a) => {
-            const b = RESOLUTION_TO_BUSINESS[a];
-            if (!ACTION_CALLS_CARRIER[b]) return null;
-            const e = eligibility(b === "APPROVE_RETURN" ? "approve-return" : "redeliver");
-            return { ok: e.ok, reason: e.reason };
-          }}
           onSubmit={doResolution}
         />
         {c.care.lastDecision ? (

@@ -7,16 +7,18 @@ import { CalendarClock, Check, ChevronDown, Loader2, Pencil, Plus, Trash2 } from
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  CARE_DECISIONS,
+  DECISION_NEEDS_FOLLOW_UP,
+  DECISION_NEEDS_REASON,
   FOLLOW_UP_CHOICES,
-  RESOLUTION_ACTIONS,
   RESOLUTION_HINT,
   RESOLUTION_LABEL,
   RESOLUTION_NOTES_MAX,
   RESOLUTION_RING,
   RESOLUTION_TONE,
   followUpAtFrom,
+  type CareDecision,
   type FollowUpChoice,
-  type ResolutionAction,
 } from "@/lib/constants/care-resolution";
 import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
 import { formatDateTime } from "@/lib/format";
@@ -30,16 +32,24 @@ import { cn } from "@/lib/utils";
  * hoàn còn bản kia thì không — và người dùng học được rằng "bấm ở ngoài thì nhanh hơn", tức là báo
  * cáo lý do hoàn sẽ rỗng đúng ở những ca xử lý nhanh nhất.
  *
- * ─── VÌ SAO "ĐÃ HOÀN" KHÔNG PHẢI MỘT CÚ BẤM ───
+ * ─── KHÔNG NÚT NÀO Ở ĐÂY BỊ KHOÁ, VÀ KHÔNG NÚT NÀO GỌI ĐVVC (chủ shop chốt 19/09/2026) ───
  *
- * Hai nút kia bấm phát ăn ngay. "Đã hoàn" mở một bảng nhỏ hỏi LÝ DO, vì máy chủ từ chối quyết định
- * hoàn không kèm lý do (`recordBusinessAction`) — và đó là luật đúng: suy lý do hoàn từ chứng từ
- * ĐVVC chỉ phủ khoảng 22% vận đơn, phần còn lại chỉ người vừa gọi khách mới biết. Bỏ bước đó đi thì
- * báo cáo lý do hoàn rỗng vĩnh viễn, và không ai lấy lại được vì thông tin nằm trong đầu người trực
- * của ngày hôm đó.
+ * Component này CỐ Ý không nhận tham số `eligibility` nào. Ba kết quả là lời khai của người về
+ * việc họ vừa làm, nên chúng phải ghi được kể cả khi ERP chưa khai `VIETTELPOST_API_KEY`, API đang
+ * lỗi, kiện chưa có mã vận đơn, kiện đã giao / đã hoàn / đã huỷ, hay kiện đi hãng khác.
  *
- * Cái giá đó được trả bằng MỘT cú bấm thêm, không phải bằng một hộp thoại toàn màn hình: lý do hiện
- * thành chip bấm một phát ngay dưới nút.
+ * Một ô `disabled` ở đây nghĩa là một lỗi đường ống của ERP chặn mất một phép đo về CON NGƯỜI — và
+ * điều thật sự xảy ra là người trực ghi ra giấy, rồi không ai đo được gì nữa.
+ *
+ * Việc gửi lệnh sang Viettel Post nằm ở khối RIÊNG "Thao tác Viettel Post" (`care-drawer.tsx`,
+ * `workbench.tsx`). Khối ĐÓ được phép khoá, được phép hỏi lại, được phép báo lỗi API.
+ *
+ * ─── VÌ SAO "ĐÃ HOÀN" VẪN TỐN MỘT CÚ BẤM THÊM ───
+ *
+ * Không phải vì ĐVVC, mà vì LÝ DO HOÀN: suy lý do từ chứng từ ĐVVC chỉ phủ khoảng 22% vận đơn,
+ * phần còn lại chỉ người vừa gọi khách mới biết. Bỏ bước đó thì báo cáo lý do hoàn rỗng vĩnh viễn.
+ * Cái giá được trả bằng một cú bấm, không phải bằng một hộp thoại toàn màn hình: lý do hiện thành
+ * chip bấm một phát ngay dưới nút.
  *
  * ─── HAI DÁNG, MỘT LUẬT ───
  *
@@ -50,7 +60,6 @@ import { cn } from "@/lib/utils";
  */
 
 export type ResolutionExtra = { reasonCode?: string; followUpAt?: Date; note: string };
-export type ResolutionEligibility = { ok: boolean; reason: string } | null;
 
 const REASONS_BY_GROUP = RETURN_REASON_GROUPS.filter((g) => g !== "UNKNOWN").map((g) => ({ group: g, reasons: RETURN_REASONS.filter((r) => RETURN_REASON_GROUP_OF[r] === g && r !== "UNKNOWN") }));
 
@@ -230,7 +239,7 @@ function ResolutionForm({
   onPresetsChange,
   saving,
 }: {
-  action: ResolutionAction;
+  action: CareDecision;
   presets: string[];
   pending: boolean;
   onSubmit: (extra: ResolutionExtra) => void;
@@ -243,29 +252,29 @@ function ResolutionForm({
   const [note, setNote] = useState("");
   const [reason, setReason] = useState<ReturnReason | "">("");
   // Mặc định 2 giờ: bấm "Xử lý sau" rồi không chọn gì vẫn ra một cái hẹn THẬT, không ra `null`.
-  const [at, setAt] = useState<Date | null>(() => (action === "FOLLOW_UP_LATER" ? followUpAtFrom("2h", new Date()) : null));
+  const [at, setAt] = useState<Date | null>(() => (DECISION_NEEDS_FOLLOW_UP[action] ? followUpAtFrom("2h", new Date()) : null));
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (autoFocusNote) boxRef.current?.querySelector("textarea")?.focus();
   }, [autoFocusNote]);
 
-  const ready = action !== "RETURNED" || reason !== "";
+  const ready = !DECISION_NEEDS_REASON[action] || reason !== "";
   const send = () => {
     if (!ready || pending) return;
-    onSubmit({ note: note.trim(), reasonCode: action === "RETURNED" ? reason || undefined : undefined, followUpAt: action === "FOLLOW_UP_LATER" ? (at ?? undefined) : undefined });
+    onSubmit({ note: note.trim(), reasonCode: DECISION_NEEDS_REASON[action] ? reason || undefined : undefined, followUpAt: DECISION_NEEDS_FOLLOW_UP[action] ? (at ?? undefined) : undefined });
   };
 
   return (
     <div ref={boxRef} className="space-y-2">
       <p className="text-[11px] leading-snug text-muted-foreground">{RESOLUTION_HINT[action]}</p>
-      {action === "RETURNED" ? (
+      {DECISION_NEEDS_REASON[action] ? (
         <div className="space-y-1">
           <div className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Lý do hoàn (bắt buộc)</div>
           <ReasonPicker value={reason} onChange={setReason} />
         </div>
       ) : null}
-      {action === "FOLLOW_UP_LATER" ? <FollowUpPicker value={at} onChange={setAt} /> : null}
+      {DECISION_NEEDS_FOLLOW_UP[action] ? <FollowUpPicker value={at} onChange={setAt} /> : null}
       <NoteBox presets={presets} value={note} onChange={setNote} onSubmit={send} placeholder="Khách nói gì? (Ctrl/⌘ + Enter để lưu)" canEdit={canEdit} onPresetsChange={onPresetsChange} saving={saving} />
       <div className="flex items-center justify-end gap-1">
         {onCancel ? (
@@ -282,14 +291,13 @@ function ResolutionForm({
           {pending ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />} Ghi nhận “{RESOLUTION_LABEL[action]}”
         </button>
       </div>
-      {action === "RETURNED" && !ready ? <p className="text-right text-[10.5px] text-muted-foreground">Chọn lý do rồi mới ghi nhận được.</p> : null}
+      {!ready ? <p className="text-right text-[10.5px] text-muted-foreground">Chọn lý do rồi mới ghi nhận được.</p> : null}
     </div>
   );
 }
 
 export function ResolutionControl({
   value,
-  eligibility,
   pending,
   presets,
   onSubmit,
@@ -299,20 +307,18 @@ export function ResolutionControl({
   canEditPresets = false,
 }: {
   /** Kết quả ĐANG CÓ — đọc từ `care.lastDecision`, không phải từ bộ nhớ màn hình. */
-  value: ResolutionAction | null;
-  /** Kiện có đang ở đúng trạng thái ĐVVC để làm việc này không. `null` = không cần hỏi ĐVVC. */
-  eligibility: (a: ResolutionAction) => ResolutionEligibility;
+  value: CareDecision | null;
   pending: boolean;
-  presets: Record<ResolutionAction, string[]>;
-  onSubmit: (a: ResolutionAction, extra: ResolutionExtra) => void;
+  presets: Record<CareDecision, string[]>;
+  onSubmit: (a: CareDecision, extra: ResolutionExtra) => void;
   variant?: "row" | "panel";
   /** Điều khiển từ ngoài (phím tắt trong panel). Bỏ trống thì tự quản. */
-  openFor?: ResolutionAction | null;
-  onOpenForChange?: (a: ResolutionAction | null) => void;
+  openFor?: CareDecision | null;
+  onOpenForChange?: (a: CareDecision | null) => void;
   /** `shipments:manage` ⇒ sửa được bộ mẫu note dùng chung cả shop. */
   canEditPresets?: boolean;
 }) {
-  const [openTrong, setOpenTrong] = useState<ResolutionAction | null>(null);
+  const [openTrong, setOpenTrong] = useState<CareDecision | null>(null);
   /*
     BỘ MẪU LÀ TRẠNG THÁI CỦA MÀN HÌNH cho tới khi máy chủ xác nhận: sửa xong thấy ngay, và lỗi thì
     trả về đúng bộ máy chủ đang giữ (`r.data`) chứ không giữ lại thứ vừa gõ — giữ lại là màn hình
@@ -321,7 +327,7 @@ export function ResolutionControl({
   const [boMau, setBoMau] = useState(presets);
   const [saving, startSave] = useTransition();
   useEffect(() => setBoMau(presets), [presets]);
-  const luuMau = (a: ResolutionAction, next: string[]) => {
+  const luuMau = (a: CareDecision, next: string[]) => {
     const truoc = boMau;
     setBoMau({ ...boMau, [a]: next });
     startSave(async () => {
@@ -335,26 +341,24 @@ export function ResolutionControl({
     });
   };
   const open = openFor !== undefined ? openFor : openTrong;
-  const setOpen = (a: ResolutionAction | null) => {
+  const setOpen = (a: CareDecision | null) => {
     setOpenTrong(a);
     onOpenForChange?.(a);
   };
 
   const kich = variant === "panel" ? "px-3 py-1.5 text-[12.5px]" : "px-1.5 py-0.5 text-[11px]";
 
-  const nut = (a: ResolutionAction) => {
-    const e = eligibility(a);
-    const khoa = e !== null && !e.ok;
+  const nut = (a: CareDecision) => {
     const dangChon = value === a;
     return (
       <button
         key={a}
         type="button"
-        disabled={pending || khoa}
+        // CHỈ khoá trong lúc ĐANG GHI. Không có điều kiện ĐVVC nào khoá được ba nút này.
+        disabled={pending}
         aria-pressed={dangChon}
-        title={khoa ? e!.reason : RESOLUTION_HINT[a]}
+        title={RESOLUTION_HINT[a]}
         onClick={() => {
-          if (khoa) return;
           /*
             "Phát tiếp" bấm là CHẠY: không có dữ kiện nào bắt buộc, nên hỏi thêm một câu là bắt
             người trực trả giá cho một thứ họ không cần. "Đã hoàn" (cần lý do) và "Xử lý sau" (cần
@@ -363,14 +367,13 @@ export function ResolutionControl({
 
             Trong panel thì cả ba đều mở bảng: ở đó nhịp làm việc là đọc → gọi → chọn → ghi note.
           */
-          if (variant === "row" && a === "REDELIVER") onSubmit(a, { note: "" });
+          if (variant === "row" && !DECISION_NEEDS_REASON[a] && !DECISION_NEEDS_FOLLOW_UP[a]) onSubmit(a, { note: "" });
           else setOpen(open === a ? null : a);
         }}
         className={cn(
           "rounded-md border font-medium transition-colors",
           kich,
           dangChon ? cn(RESOLUTION_TONE[a], RESOLUTION_RING[a], "font-semibold") : "border-transparent bg-muted/60 text-muted-foreground hover:bg-accent hover:text-foreground",
-          khoa && "cursor-not-allowed opacity-40",
         )}
       >
         {RESOLUTION_LABEL[a]}
@@ -381,7 +384,7 @@ export function ResolutionControl({
 
   return (
     <div className={cn("flex flex-wrap items-center", variant === "panel" ? "gap-1.5" : "gap-1")}>
-      {RESOLUTION_ACTIONS.map((a) =>
+      {CARE_DECISIONS.map((a) =>
         // Dáng `row`: mỗi nút là một `PopoverTrigger` riêng để bảng tuỳ chọn neo ĐÚNG dưới nút vừa
         // bấm. Dáng `panel`: bảng nằm dưới cả cụm, vì ở đó nó là bước tiếp theo của quy trình.
         variant === "row" ? (
@@ -403,7 +406,7 @@ export function ResolutionControl({
                 saving={saving}
                 canEdit={canEditPresets}
                 onPresetsChange={(next) => luuMau(a, next)}
-                autoFocusNote={a === "REDELIVER"}
+                autoFocusNote={!DECISION_NEEDS_REASON[a] && !DECISION_NEEDS_FOLLOW_UP[a]}
                 onCancel={() => setOpen(null)}
                 onSubmit={(extra) => {
                   setOpen(null);
@@ -420,9 +423,9 @@ export function ResolutionControl({
         <button
           type="button"
           disabled={pending}
-          title="Ghi note / chọn giờ hẹn cho “Phát tiếp”"
-          aria-label="Tuỳ chọn cho Phát tiếp"
-          onClick={() => setOpen(open === "REDELIVER" ? null : "REDELIVER")}
+          title="Ghi note kèm “Phát tiếp”"
+          aria-label="Ghi note kèm Phát tiếp"
+          onClick={() => setOpen(open === "CARE_CONTINUE_DELIVERY" ? null : "CARE_CONTINUE_DELIVERY")}
           className="rounded border border-transparent px-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <ChevronDown className="size-3" />
@@ -451,7 +454,7 @@ export function ResolutionControl({
 }
 
 /** Nhãn đọc — dùng ở cột danh sách và đầu panel để trả lời "đã quyết gì" mà không phải mở gì. */
-export function ResolutionBadge({ value, at, by, className }: { value: ResolutionAction | null; at?: Date | null; by?: string; className?: string }) {
+export function ResolutionBadge({ value, at, by, className }: { value: CareDecision | null; at?: Date | null; by?: string; className?: string }) {
   if (!value) return <span className={cn("text-[10.5px] text-muted-foreground", className)}>Chưa quyết định</span>;
   return (
     <span className={cn("inline-flex items-center rounded px-1.5 py-px text-[10.5px] font-semibold", RESOLUTION_TONE[value], className)} title={`${RESOLUTION_HINT[value]}${at ? `\n— ${by || "không rõ người"} · ${formatDateTime(at)}` : ""}`}>

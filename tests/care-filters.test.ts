@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import type { CareCase } from "@/lib/care/contracts";
-import type { BusinessAction } from "@/lib/constants/care-outcome";
-import { FOLLOW_UP_FILTERS, RESOLUTION_FILTER_KEYS, followUpBucket, resolutionOf } from "@/lib/constants/care-resolution";
+import { FOLLOW_UP_FILTERS, RESOLUTION_FILTER_KEYS, followUpBucket, type CareDecision } from "@/lib/constants/care-resolution";
 import {
   CARE_ATTEMPT_BAND_KEYS,
   CARE_COD_BAND_KEYS,
@@ -36,8 +35,8 @@ type Dung = {
   henLuc?: number | null;
   dongLuc?: number | null;
   phone?: string;
-  /** Quyết định xử lý gần nhất — `undefined` = CHƯA AI QUYẾT (khác hẳn "đã quyết là không làm gì"). */
-  quyet?: BusinessAction;
+  /** Kết quả xử lý gần nhất — `undefined` = CHƯA AI QUYẾT (khác hẳn "đã quyết là không làm gì"). */
+  quyet?: CareDecision;
 };
 
 function ca(d: Dung): CareCase {
@@ -54,7 +53,7 @@ function ca(d: Dung): CareCase {
     reopenCount: 0,
     updatedAt: null,
     updatedBy: "",
-    lastDecision: d.quyet ? { action: d.quyet, at: gio(d.vaoLuc ?? 0), by: "NV", reasonCode: null, note: "" } : null,
+    lastDecision: d.quyet ? { decision: d.quyet, at: gio(d.vaoLuc ?? 0), by: "NV", reasonCode: null, note: "" } : null,
   } as CareCase["care"];
   return {
     shipmentId: d.id,
@@ -211,9 +210,9 @@ export function testCareFilters() {
     ca({ id: "1", cod: 0, hut: 0, vaoLuc: 0, ownerId: "u1", reason: "NO_CONTACT", substate: "DELIVERY_EXCEPTION", products: ["SKU-A"] }),
     ca({ id: "2", cod: 524_000, hut: 1, vaoLuc: 2, ownerId: null, reason: "DELIVERY_FAILED", substate: "DELIVERY_EXCEPTION", products: ["SKU-A", "SKU-B"] }),
     ca({ id: "3", cod: 450_000, hut: 2, vaoLuc: 10, ownerId: "u1", reason: "DELIVERY_FAILED", substate: "DELIVERY_EXCEPTION", phanHoiLuc: 11, status: "IN_PROGRESS", products: ["SKU-B"] }),
-    ca({ id: "4", cod: 800_000, hut: 3, vaoLuc: 18, ownerId: "u2", reason: "AWAITING_REDELIVERY", substate: "WAITING_REDELIVERY", products: [], quyet: "REQUEST_REDELIVERY" }),
+    ca({ id: "4", cod: 800_000, hut: 3, vaoLuc: 18, ownerId: "u2", reason: "AWAITING_REDELIVERY", substate: "WAITING_REDELIVERY", products: [], quyet: "CARE_CONTINUE_DELIVERY" }),
     ca({ id: "5", cod: 2_400_000, hut: 0, vaoLuc: 18.9, ownerId: null, reason: "WAITING_CARRIER", substate: "WAITING_PROCESSING", products: ["SKU-C"] }),
-    ca({ id: "6", cod: 1_000_000, hut: 5, vaoLuc: 0, ownerId: "u2", reason: "NO_CONTACT", substate: "DELIVERY_EXCEPTION", phanHoiLuc: 1, status: "WAITING_CUSTOMER", henLuc: 40, products: ["SKU-A"], quyet: "CONTINUE_MONITORING" }),
+    ca({ id: "6", cod: 1_000_000, hut: 5, vaoLuc: 0, ownerId: "u2", reason: "NO_CONTACT", substate: "DELIVERY_EXCEPTION", phanHoiLuc: 1, status: "WAITING_CUSTOMER", henLuc: 40, products: ["SKU-A"], quyet: "CARE_FOLLOW_UP" }),
   ].map((c) => tai(c, now));
 
   const chieuVaKhoa: [CareFilterDim, (c: CareCase) => string, readonly string[]][] = [
@@ -224,7 +223,7 @@ export function testCareFilters() {
     ["attempts", (c) => careAttemptBand(c.carrier.failedAttempts), CARE_ATTEMPT_BAND_KEYS],
     // Hai chiều mới đi cùng một vị từ với năm chiều cũ, nên tính chất "số trên chip = số dòng bảng"
     // được chứng minh cho chúng bằng CHÍNH vòng lặp này, không phải bằng một bài kiểm riêng.
-    ["resolution", (c) => (c.care.lastDecision ? (resolutionOf(c.care.lastDecision.action) ?? "__other") : "none"), RESOLUTION_FILTER_KEYS],
+    ["resolution", (c) => c.care.lastDecision?.decision ?? "none", RESOLUTION_FILTER_KEYS],
     ["followUp", (c) => followUpBucket(c.care.followUpAt, now), FOLLOW_UP_FILTERS],
   ];
 
@@ -245,7 +244,7 @@ export function testCareFilters() {
     { ...RONG, sla: "breached", cod: "500-600", attempts: "1" },
     { ...RONG, q: "VD5", sla: "ok" },
     { ...RONG, resolution: "none" },
-    { ...RONG, resolution: "REDELIVER" },
+    { ...RONG, resolution: "CARE_CONTINUE_DELIVERY" },
     { ...RONG, followUp: "none" },
   ];
 

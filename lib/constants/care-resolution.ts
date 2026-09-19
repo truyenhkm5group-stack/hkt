@@ -1,76 +1,78 @@
-import { BUSINESS_ACTIONS, type BusinessAction } from "@/lib/constants/care-outcome";
-
 /**
- * ═══════════ BA KẾT QUẢ XỬ LÝ — NGÔN NGỮ CỦA NGƯỜI TRỰC, KHÔNG PHẢI MỘT CHIỀU DỮ LIỆU MỚI ═══════════
+ * ═══════════ BA KẾT QUẢ XỬ LÝ CASE — CHIỀU THỨ BA, KHÔNG PHẢI MỘT LỆNH GỬI ĐVVC ═══════════
  *
- * ─── VÌ SAO TỆP NÀY TỒN TẠI ───
+ * ─── CÂU HỎI TỆP NÀY TRẢ LỜI ───
  *
  * Chủ shop chốt 18/09/2026: người trực vận đơn mỗi ngày chỉ phải trả lời ĐÚNG MỘT câu hỏi cho mỗi
- * kiện — *“kiện này thôi rồi, đi tiếp, hay để lát nữa?”*. Ba câu trả lời đó là:
+ * kiện — *"kiện này thôi rồi, đi tiếp, hay để lát nữa?"*. Ba câu trả lời:
  *
  *   ĐÃ HOÀN · PHÁT TIẾP · XỬ LÝ SAU
  *
- * Trước bản này ba việc ấy nằm sau hai lớp: mở popover “Xử lý” rồi đọc một danh sách BỐN quyết
- * định mang tên kế toán (“Duyệt hoàn”, “Theo dõi tiếp”). Người trực phải dịch từ việc mình vừa làm
- * sang tên trong menu, mỗi kiện một lần, vài chục lần một buổi.
+ * ─── VÀ ĐÂY LÀ KẾT QUẢ CÔNG VIỆC CỦA NGƯỜI, KHÔNG PHẢI MỘT LỆNH GỬI ĐI ĐÂU CẢ (19/09/2026) ───
  *
- * ─── KHÔNG SINH RA MỘT SỔ THỨ HAI ───
+ * Bản đầu tiên ánh xạ ba nút này về `BusinessAction` (`APPROVE_RETURN` / `REQUEST_REDELIVERY` /
+ * `CONTINUE_MONITORING`) để khỏi phải thêm bảng. Sai, và sai ở chỗ nguy hiểm: hai trong ba hành
+ * động ấy GỬI MỘT LỆNH sang Viettel Post, nên đường ghi của chúng từ chối khi ĐVVC không nhận lệnh.
+ * Hệ quả là **năng lực API của ERP quyết định xem NHÂN VIÊN có ghi nhận được việc mình vừa làm hay
+ * không** — thiếu `VIETTELPOST_API_KEY`, API lỗi, kiện chưa có mã vận đơn, kiện đã kết thúc, kiện đi
+ * hãng khác: cả năm tình huống đều khoá mất một phép đo về CON NGƯỜI.
  *
- * Đây là MỘT LỚP NGÔN NGỮ, không phải một cột mới, không phải một bảng mới, không phải một vòng đời
- * mới. Mỗi kết quả trỏ về ĐÚNG MỘT `BusinessAction` đã có và đã được ghi vào `care_business_actions`
- * (chỉ thêm, có actor, có mốc, có lệnh ĐVVC kèm theo). Thêm một cột `resolution_action` song song là
- * tự nhận lấy câu hỏi *“hai chỗ lệch nhau thì tin chỗ nào”* — và câu đó không có câu trả lời tốt.
+ * Ba kết quả ở đây **KHÔNG BAO GIỜ bị khoá** và **KHÔNG BAO GIỜ gọi API ĐVVC**. Chúng ghi vào sổ
+ * riêng `care_decisions` (chỉ thêm). Việc gửi lệnh sang ĐVVC vẫn còn nguyên, nhưng là MỘT HÀNH ĐỘNG
+ * KHÁC ở một khối khác trên màn hình ("Thao tác Viettel Post") — khối đó được phép khoá, được phép
+ * hỏi lại, được phép báo lỗi API.
  *
- * `EXCHANGE` (Đổi) cố ý KHÔNG có mặt trong ba nút: nó cần một vận đơn thay thế đã tồn tại, nên nó
- * không phải một cú bấm mà là một quy trình. Nó vẫn ở menu đầy đủ trong bàn làm việc.
- *
- * ─── BA CHIỀU VẪN LÀ BA CHIỀU (mục 9 của đề bài, luật 47 của AGENTS.md) ───
+ * ─── BA CHIỀU, KHÔNG CHIỀU NÀO SUY RA CHIỀU NÀO (luật 47) ───
  *
  *   1. ĐVVC nói gì   — `shipments.stage` / `carrierSubstate`, chứng từ, đội không sửa được.
  *   2. Đội đang ở đâu — `shipment_care.care_status` (Chưa xử lý · Đang xử lý · Chờ khách…).
  *   3. Đội quyết gì  — chính tệp này.
  *
- * Người trực bấm “Đã hoàn” KHÔNG làm vận đơn thành `RETURNED`, KHÔNG đổi `ORDER_OUTCOME`, KHÔNG đưa
- * hàng vào tồn. Nó là một câu trong sổ: *shop thôi không cứu kiện này nữa*. Hàng chỉ thành hoàn khi
- * Viettel Post báo, và chỉ vào lại kho khi kho lập phiếu đếm thực tế.
+ * Người trực bấm "Đã hoàn" trong khi ĐVVC đang báo "Đang chuyển hoàn" thì màn hình in ra CẢ HAI:
+ *
+ *   Care: Đã hoàn · VTP: Đang chuyển hoàn
+ *
+ * KHÔNG cái nào đổi cái kia. `CARE_RETURN` không làm vận đơn thành `RETURNED`, không đổi
+ * `ORDER_OUTCOME`, không đưa một món nào vào tồn. Hàng chỉ thành hoàn khi Viettel Post báo, và chỉ
+ * vào lại kho khi kho lập phiếu đếm thực tế.
+ *
+ * ─── VÌ SAO KHOÁ MANG TIỀN TỐ `CARE_` ───
+ *
+ * `APPROVE_RETURN` đọc lên như một lệnh gửi ĐVVC, và nó đúng là một lệnh gửi ĐVVC. Một lập trình
+ * viên sáu tháng sau đọc `decision = 'RETURNED'` trong CSDL sẽ tin rằng kiện đã hoàn thật. Tiền tố
+ * `CARE_` làm câu đó không đọc nhầm được: đây là quyết định của ĐỘI CHĂM SÓC, không phải trạng thái
+ * của gói hàng.
  */
-export const RESOLUTION_ACTIONS = ["RETURNED", "REDELIVER", "FOLLOW_UP_LATER"] as const;
-export type ResolutionAction = (typeof RESOLUTION_ACTIONS)[number];
-
-/** Kết quả xử lý → quyết định nghiệp vụ đã có. MỘT chiều duy nhất, không có cột lưu riêng. */
-export const RESOLUTION_TO_BUSINESS: Record<ResolutionAction, BusinessAction> = {
-  RETURNED: "APPROVE_RETURN",
-  REDELIVER: "REQUEST_REDELIVERY",
-  FOLLOW_UP_LATER: "CONTINUE_MONITORING",
-};
+export const CARE_DECISIONS = ["CARE_RETURN", "CARE_CONTINUE_DELIVERY", "CARE_FOLLOW_UP"] as const;
+export type CareDecision = (typeof CARE_DECISIONS)[number];
 
 /**
- * Chiều ngược, để đọc lịch sử. `EXCHANGE` trả `null` — nó là một quyết định thật nhưng KHÔNG phải
- * một trong ba nút, và ánh xạ ép nó vào một nút nào đó sẽ làm báo cáo đếm nhầm.
+ * Nhận một chuỗi bất kỳ đọc từ CSDL và trả về một kết quả HỢP LỆ, hoặc `null`.
+ *
+ * `null` = CHƯA AI QUYẾT, và một chuỗi lạ (dữ liệu cũ, một bản vá sai) cũng ra `null` chứ KHÔNG bị
+ * ép vào một trong ba rổ: đoán hộ ở đây là một con số sai không ai phát hiện ra được.
  */
-export function resolutionOf(action: BusinessAction | null | undefined): ResolutionAction | null {
-  if (!action) return null;
-  const found = RESOLUTION_ACTIONS.find((r) => RESOLUTION_TO_BUSINESS[r] === action);
-  return found ?? null;
+export function careDecisionOf(value: string | null | undefined): CareDecision | null {
+  return value && (CARE_DECISIONS as readonly string[]).includes(value) ? (value as CareDecision) : null;
 }
 
-export const RESOLUTION_LABEL: Record<ResolutionAction, string> = {
-  RETURNED: "Đã hoàn",
-  REDELIVER: "Phát tiếp",
-  FOLLOW_UP_LATER: "Xử lý sau",
+export const RESOLUTION_LABEL: Record<CareDecision, string> = {
+  CARE_RETURN: "Đã hoàn",
+  CARE_CONTINUE_DELIVERY: "Phát tiếp",
+  CARE_FOLLOW_UP: "Xử lý sau",
 };
 
 /**
  * Câu giải thích PHẢI nói ra điều mỗi nút KHÔNG làm — ba hiểu nhầm dưới đây là thứ làm hỏng số liệu
  * nhanh nhất, và chúng chỉ bị chặn bằng chữ đứng ngay cạnh nút.
  */
-export const RESOLUTION_HINT: Record<ResolutionAction, string> = {
-  RETURNED:
-    "Shop quyết định thôi không cứu kiện này nữa và duyệt cho hàng quay về. ĐÂY LÀ QUYẾT ĐỊNH NỘI BỘ — vận đơn KHÔNG thành “đã hoàn” vì cú bấm này, tồn kho KHÔNG tăng, doanh thu KHÔNG đổi. Viettel Post báo hoàn thì mới là hoàn; kho lập phiếu đếm thì hàng mới vào tồn.",
-  REDELIVER:
-    "Nhờ Viettel Post đi phát thêm một lần nữa. Lệnh được ĐVVC NHẬN không có nghĩa hàng đã tới tay khách — ca vẫn mở cho tới khi hành trình nói kết cục.",
-  FOLLOW_UP_LATER:
-    "Chưa gửi gì sang ĐVVC, chỉ hẹn giờ xem lại. Ca vẫn MỞ và quay về đầu hàng đợi đúng giờ hẹn — nên bắt buộc phải có giờ, hẹn không giờ là ca chìm mất.",
+export const RESOLUTION_HINT: Record<CareDecision, string> = {
+  CARE_RETURN:
+    "GHI NHẬN: shop thôi không cứu kiện này nữa, để hàng quay về. Đây là KẾT QUẢ XỬ LÝ CASE, không phải một lệnh gửi đi — cú bấm này KHÔNG gọi Viettel Post, KHÔNG làm vận đơn thành “đã hoàn”, KHÔNG tăng tồn kho, KHÔNG đổi doanh thu. Muốn gửi lệnh duyệt hoàn sang ĐVVC thì dùng khối “Thao tác Viettel Post”.",
+  CARE_CONTINUE_DELIVERY:
+    "GHI NHẬN: người xử lý muốn kiện được phát tiếp (khách đã hẹn lại, đã sửa địa chỉ, đã gọi bưu tá…). Cú bấm này KHÔNG gọi Viettel Post — muốn gửi yêu cầu phát lại thì dùng khối “Thao tác Viettel Post”.",
+  CARE_FOLLOW_UP:
+    "GHI NHẬN: chưa chốt được, hẹn giờ quay lại. Ca vẫn MỞ và trở về hàng đợi đúng giờ hẹn — nên bắt buộc phải có giờ, hẹn không giờ là ca chìm mất.",
 };
 
 /**
@@ -82,17 +84,17 @@ export const RESOLUTION_HINT: Record<ResolutionAction, string> = {
  * hổ phách cho “Xử lý sau” (chưa xong, còn nợ một lần quay lại). Chữ luôn đứng cạnh màu: màn hình
  * này phải đọc được khi in đen trắng và khi người dùng mù màu.
  */
-export const RESOLUTION_TONE: Record<ResolutionAction, string> = {
-  RETURNED: "bg-red-100 text-red-900 dark:bg-red-950/70 dark:text-red-200",
-  REDELIVER: "bg-teal-100 text-teal-900 dark:bg-teal-950/70 dark:text-teal-200",
-  FOLLOW_UP_LATER: "bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-200",
+export const RESOLUTION_TONE: Record<CareDecision, string> = {
+  CARE_RETURN: "bg-red-100 text-red-900 dark:bg-red-950/70 dark:text-red-200",
+  CARE_CONTINUE_DELIVERY: "bg-teal-100 text-teal-900 dark:bg-teal-950/70 dark:text-teal-200",
+  CARE_FOLLOW_UP: "bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-200",
 };
 
 /** Viền cho ô ĐANG CHỌN — nền không đủ: hai chế độ sáng/tối có độ tương phản nền rất khác nhau. */
-export const RESOLUTION_RING: Record<ResolutionAction, string> = {
-  RETURNED: "border-red-400 dark:border-red-700",
-  REDELIVER: "border-teal-400 dark:border-teal-700",
-  FOLLOW_UP_LATER: "border-amber-400 dark:border-amber-700",
+export const RESOLUTION_RING: Record<CareDecision, string> = {
+  CARE_RETURN: "border-red-400 dark:border-red-700",
+  CARE_CONTINUE_DELIVERY: "border-teal-400 dark:border-teal-700",
+  CARE_FOLLOW_UP: "border-amber-400 dark:border-amber-700",
 };
 
 /* ───────────────────────── MẪU NOTE THEO KẾT QUẢ ───────────────────────── */
@@ -107,10 +109,10 @@ export const RESOLUTION_RING: Record<ResolutionAction, string> = {
  */
 export const RESOLUTION_NOTES_KEY = "care.resolutionNotes";
 
-export const RESOLUTION_NOTES_DEFAULT: Record<ResolutionAction, string[]> = {
-  RETURNED: ["Khách từ chối nhận", "Không liên lạc được nhiều lần", "Khách xác nhận không lấy nữa", "Duyệt hoàn về shop", "Bưu cục xác nhận hoàn"],
-  REDELIVER: ["Khách hẹn nhận chiều nay", "Khách hẹn nhận ngày mai", "Đã gọi bưu tá, hẹn phát lại", "Khách đổi số điện thoại", "Đã xác nhận lại địa chỉ", "Yêu cầu phát lại"],
-  FOLLOW_UP_LATER: ["Chờ khách phản hồi", "Chờ bưu tá gọi lại", "Chờ CSKH xác minh", "Hẹn gọi lại sau", "Chờ Viettel Post cập nhật"],
+export const RESOLUTION_NOTES_DEFAULT: Record<CareDecision, string[]> = {
+  CARE_RETURN: ["Khách từ chối nhận", "Không liên lạc được nhiều lần", "Khách xác nhận không lấy nữa", "Duyệt hoàn về shop", "Bưu cục xác nhận hoàn"],
+  CARE_CONTINUE_DELIVERY: ["Khách hẹn nhận chiều nay", "Khách hẹn nhận ngày mai", "Đã gọi bưu tá, hẹn phát lại", "Khách đổi số điện thoại", "Đã xác nhận lại địa chỉ", "Yêu cầu phát lại"],
+  CARE_FOLLOW_UP: ["Chờ khách phản hồi", "Chờ bưu tá gọi lại", "Chờ CSKH xác minh", "Hẹn gọi lại sau", "Chờ Viettel Post cập nhật"],
 };
 
 /** Số mẫu tối đa mỗi kết quả — chặn ở lược đồ đầu vào để một lần dán nhầm không phá màn hình. */
@@ -166,14 +168,14 @@ export function followUpAtFrom(choice: FollowUpChoice, now: Date): Date {
  * Rổ lọc “kết quả xử lý”. `none` là CHƯA AI QUYẾT — cố ý là một rổ riêng chứ không phải “không
  * lọc”: đó chính là rổ người trực cần mở đầu ca, và nếu nó lẫn vào “Tất cả” thì nó không tồn tại.
  */
-export const RESOLUTION_FILTER_KEYS = ["none", ...RESOLUTION_ACTIONS] as const;
+export const RESOLUTION_FILTER_KEYS = ["none", ...CARE_DECISIONS] as const;
 export type ResolutionFilterKey = (typeof RESOLUTION_FILTER_KEYS)[number];
 
 export const RESOLUTION_FILTER_LABEL: Record<ResolutionFilterKey, string> = {
   none: "Chưa quyết định",
-  RETURNED: RESOLUTION_LABEL.RETURNED,
-  REDELIVER: RESOLUTION_LABEL.REDELIVER,
-  FOLLOW_UP_LATER: RESOLUTION_LABEL.FOLLOW_UP_LATER,
+  CARE_RETURN: RESOLUTION_LABEL.CARE_RETURN,
+  CARE_CONTINUE_DELIVERY: RESOLUTION_LABEL.CARE_CONTINUE_DELIVERY,
+  CARE_FOLLOW_UP: RESOLUTION_LABEL.CARE_FOLLOW_UP,
 };
 
 /**
@@ -218,5 +220,37 @@ export function followUpBucket(followUpAt: Date | null, now: Date): FollowUpFilt
   return "later";
 }
 
-/** Kiểm thử và bộ lọc dùng chung danh sách này để chắc chắn ba nút phủ đúng ba quyết định. */
-export const RESOLUTION_COVERS: BusinessAction[] = BUSINESS_ACTIONS.filter((a) => resolutionOf(a) !== null);
+/**
+ * TRẠNG THÁI XỬ LÝ mà mỗi kết quả đưa ca tới — KHÔNG phải trạng thái ĐVVC.
+ *
+ * Giữ nguyên ba trạng thái đang chạy trên production, không thêm giá trị mới vào
+ * `shipment_care.care_status` (cột có ràng buộc CHECK và dữ liệu thật). `CARE_FOLLOW_UP` đi tới
+ * `WAITING_REDELIVERY` vì `CARE_WORKFLOW_LABEL` đã gọi đúng ô đó là "Theo dõi tiếp" từ bản 13/09 —
+ * thêm một trạng thái thứ mười chỉ để đặt lại tên là làm mồ côi dữ liệu đang có.
+ *
+ * Chuyển KHÔNG hợp lệ (ca đã đóng) thì GIỮ NGUYÊN trạng thái cũ và vẫn ghi quyết định: kết quả xử
+ * lý là lời khai của người, nó không được mất chỉ vì bảng chuyển trạng thái nói không.
+ */
+export const DECISION_NEXT_CARE_STATUS: Record<CareDecision, "WAITING_CARRIER" | "WAITING_REDELIVERY"> = {
+  CARE_RETURN: "WAITING_CARRIER",
+  CARE_CONTINUE_DELIVERY: "WAITING_REDELIVERY",
+  CARE_FOLLOW_UP: "WAITING_REDELIVERY",
+};
+
+/**
+ * Kết quả nào BẮT BUỘC có lý do theo danh mục. Chỉ "Đã hoàn": suy lý do hoàn từ chứng từ ĐVVC chỉ
+ * phủ ~22% vận đơn, phần còn lại chỉ người vừa gọi khách mới biết — bỏ bước đó thì báo cáo lý do
+ * hoàn rỗng vĩnh viễn và không ai lấy lại được.
+ */
+export const DECISION_NEEDS_REASON: Record<CareDecision, boolean> = {
+  CARE_RETURN: true,
+  CARE_CONTINUE_DELIVERY: false,
+  CARE_FOLLOW_UP: false,
+};
+
+/** Kết quả nào BẮT BUỘC có giờ hẹn. CSDL cũng chặn (`care_decisions_follow_up_check`). */
+export const DECISION_NEEDS_FOLLOW_UP: Record<CareDecision, boolean> = {
+  CARE_RETURN: false,
+  CARE_CONTINUE_DELIVERY: false,
+  CARE_FOLLOW_UP: true,
+};

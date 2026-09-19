@@ -3349,6 +3349,87 @@ export const careBusinessActions = pgTable(
   ],
 );
 
+/**
+ * ═══════════ KẾT QUẢ XỬ LÝ CASE CỦA NGƯỜI — KHÔNG PHẢI MỘT LỆNH GỬI ĐVVC ═══════════
+ *
+ * ─── VÌ SAO BẢNG NÀY PHẢI ĐỨNG RIÊNG (chủ shop chốt 19/09/2026) ───
+ *
+ * `care_business_actions` (bảng ngay trên) ghi BỐN quyết định GẮN LIỀN với một lệnh gửi Viettel
+ * Post: nó có `carrier_command_id`, có `carrier_result`, và đường ghi của nó từ chối hành động khi
+ * ĐVVC không nhận lệnh (kiện đã kết thúc · chưa có mã VTP · ERP chưa khai tài khoản API).
+ *
+ * Nhưng ba lựa chọn mà người trực vận đơn dùng cả ngày — **Đã hoàn · Phát tiếp · Xử lý sau** — là
+ * KẾT QUẢ CÔNG VIỆC CHĂM SÓC của họ, không phải một lệnh gửi đi đâu cả. Chúng phải ghi được
+ * **LUÔN LUÔN**:
+ *
+ *   · ERP chưa khai `VIETTELPOST_API_KEY` ⇒ vẫn ghi được;
+ *   · API Viettel Post đang lỗi ⇒ vẫn ghi được;
+ *   · kiện chưa có mã vận đơn ⇒ vẫn ghi được;
+ *   · kiện đã giao / đã hoàn / đã huỷ ⇒ vẫn ghi được (người trực còn phải đóng case);
+ *   · kiện đi hãng khác ⇒ vẫn ghi được.
+ *
+ * Dùng chung một bảng cho hai thứ đó nghĩa là năng lực API của ERP quyết định xem NHÂN VIÊN có ghi
+ * nhận được việc mình vừa làm hay không — một lỗi đường ống chặn mất một phép đo về con người.
+ *
+ * ─── BA CHIỀU, KHÔNG CHIỀU NÀO SUY RA CHIỀU NÀO ───
+ *
+ *   `shipments.stage` / `carrierSubstate`  — GÓI HÀNG ở đâu. Chỉ ĐVVC đổi được.
+ *   `shipment_care.care_status`            — ĐỘI đang ở đâu với việc của mình.
+ *   bảng này                               — ĐỘI đã QUYẾT gì.
+ *
+ * `decision = 'CARE_RETURN'` KHÔNG có nghĩa hàng đã về shop: nó là "shop thôi không cứu kiện này
+ * nữa". Tên `CARE_*` cố ý mang tiền tố để không lập trình viên nào đọc nhầm thành trạng thái ĐVVC
+ * — bài học từ chính `APPROVE_RETURN` / `REQUEST_REDELIVERY`, hai cái tên nghe như lệnh gửi đi.
+ *
+ * Để chứng minh điều đó ĐỌC LẠI ĐƯỢC sau nhiều tháng, mỗi dòng chụp luôn trạng thái ĐVVC LÚC BẤM
+ * (`carrier_stage_at_decision`, `carrier_substate_at_decision`): tra một dòng "Đã hoàn" ghi lúc
+ * ĐVVC còn đang "Đang chuyển hoàn" thì thấy ngay hai chiều là hai chiều.
+ *
+ * CHỈ THÊM. Không lệnh `update` nào chạm vào dòng đã ghi; "kết quả hiện tại" là dòng MỚI NHẤT của
+ * ĐÚNG đợt (`care_case_id`), đọc ra lúc xem.
+ */
+export const careDecisions = pgTable(
+  "care_decisions",
+  {
+    id: id(),
+    careCaseId: text("care_case_id")
+      .notNull()
+      .references(() => shipmentCare.id, { onDelete: "cascade" }),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    /** `CARE_RETURN` (Đã hoàn) · `CARE_CONTINUE_DELIVERY` (Phát tiếp) · `CARE_FOLLOW_UP` (Xử lý sau). */
+    decision: text("decision").notNull(),
+    /** Lý do theo DANH MỤC (đếm được) — tách khỏi `note` là ô chữ tự do (không đếm được). */
+    reasonCode: text("reason_code"),
+    note: text("note").notNull().default(""),
+    /** Chỉ `CARE_FOLLOW_UP` bắt buộc có: một cái hẹn không có giờ không phải một cái hẹn. */
+    followUpAt: ts("follow_up_at"),
+    /** QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN (luật 34). `NULL` = MÁY làm, khác hẳn "chưa biết ai". */
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    /** ẢNH CHỤP người đang cầm ca lúc đó — A nhận ca rồi chuyển B thì việc A đã làm vẫn là của A. */
+    ownerIdAtDecision: text("owner_id_at_decision").references((): AnyPgColumn => users.id, { onDelete: "set null" }),
+    /** Kết quả TRƯỚC đó của cùng đợt — đọc được "đổi ý mấy lần" mà không phải tự nối dòng. */
+    previousDecision: text("previous_decision"),
+    previousCareStatus: text("previous_care_status"),
+    nextCareStatus: text("next_care_status"),
+    /** ẢNH CHỤP CHIỀU ĐVVC LÚC BẤM — bằng chứng đọc lại được rằng hai chiều không suy ra nhau. */
+    carrierStageAtDecision: text("carrier_stage_at_decision").notNull().default(""),
+    carrierSubstateAtDecision: text("carrier_substate_at_decision").notNull().default(""),
+    decidedAt: ts("decided_at").notNull().defaultNow(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("care_decisions_case_idx").on(t.careCaseId, t.decidedAt),
+    index("care_decisions_shipment_idx").on(t.shipmentId, t.decidedAt),
+    index("care_decisions_actor_idx").on(t.actorUserId, t.decidedAt),
+    check("care_decisions_kind_check", sql`${t.decision} IN ('CARE_RETURN', 'CARE_CONTINUE_DELIVERY', 'CARE_FOLLOW_UP')`),
+    // "Xử lý sau" mà không có giờ thì ca chìm khỏi hàng đợi — CSDL chặn, không để mã nguồn tự canh.
+    check("care_decisions_follow_up_check", sql`${t.decision} <> 'CARE_FOLLOW_UP' OR ${t.followUpAt} IS NOT NULL`),
+  ],
+);
+
 export const careCaseEvents = pgTable(
   "care_case_events",
   {

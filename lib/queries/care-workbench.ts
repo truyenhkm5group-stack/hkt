@@ -4,6 +4,7 @@ import { memo } from "@/lib/cache";
 import { carrierCapabilitiesFor } from "@/lib/care/carrier-capabilities";
 import type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
 import type { BusinessAction } from "@/lib/constants/care-outcome";
+import { careDecisionOf, type CareDecision } from "@/lib/constants/care-resolution";
 import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { careSlaHours } from "@/lib/care/sla";
 import { careViewOf, slaOf } from "@/lib/care/view";
@@ -21,7 +22,7 @@ import type { ShipmentStage } from "@/db/schema";
 export type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
 export { careViewOf, slaOf } from "@/lib/care/view";
 import { CARE_NOTE_PRESETS_DEFAULT, CARE_NOTE_PRESETS_KEY, type CareNotePreset } from "@/lib/constants/care";
-import { RESOLUTION_ACTIONS, RESOLUTION_NOTES_DEFAULT, RESOLUTION_NOTES_KEY, RESOLUTION_NOTES_MAX, type ResolutionAction } from "@/lib/constants/care-resolution";
+import { CARE_DECISIONS, RESOLUTION_NOTES_DEFAULT, RESOLUTION_NOTES_KEY, RESOLUTION_NOTES_MAX } from "@/lib/constants/care-resolution";
 import { getSettingJson } from "@/lib/settings";
 /** Tên cũ — UI hiện tại đang dùng; giữ nguyên hình dạng, `CareQueue` là bản đầy đủ. */
 export type CareWorkbench = CareQueue;
@@ -58,7 +59,7 @@ const EMPTY_CARE: CareState = { status: "NEW", owner: null, followUpAt: null, la
 
 type CareRow = typeof schema.shipmentCare.$inferSelect & { ownerName: string | null };
 
-function toCareState(r: CareRow | undefined, decision: CareDecision | null = null): CareState {
+function toCareState(r: CareRow | undefined, decision: LastDecision | null = null): CareState {
   if (!r) return EMPTY_CARE;
   return {
     lastDecision: decision,
@@ -76,7 +77,7 @@ function toCareState(r: CareRow | undefined, decision: CareDecision | null = nul
   };
 }
 
-export type CareDecision = NonNullable<CareState["lastDecision"]>;
+export type LastDecision = NonNullable<CareState["lastDecision"]>;
 
 /**
  * ═══════════ KẾT QUẢ XỬ LÝ ĐỌC RA, KHÔNG LƯU SONG SONG ═══════════
@@ -93,23 +94,27 @@ export type CareDecision = NonNullable<CareState["lastDecision"]>;
  * Tên người ĐỌC TỪ `users` ở máy chủ (luật 34): cột email trong sổ là ảnh chụp, còn tên hiển thị
  * phải theo tài khoản hiện tại.
  */
-async function loadDecisions(careCaseIds: string[]): Promise<Map<string, CareDecision>> {
+async function loadDecisions(careCaseIds: string[]): Promise<Map<string, LastDecision>> {
   if (!careCaseIds.length) return new Map();
   const db = await getDb();
-  const rows = rowsOf<{ care_case_id: string; action_type: string; at: string; by: string | null; actor_email: string; reason_code: string | null; reason_note: string }>(
+  const rows = rowsOf<{ care_case_id: string; decision: string; at: string; by: string | null; actor_email: string; reason_code: string | null; note: string }>(
     await db.execute(sql`
-      select distinct on (b.care_case_id)
-             b.care_case_id, b.action_type, b.requested_at as at,
-             u.name as by, b.actor_email, b.reason_code, b.reason_note
-        from care_business_actions b
-        left join users u on u.id = b.actor_user_id
-       where b.care_case_id in ${careCaseIds}
-       order by b.care_case_id, b.requested_at desc, b.created_at desc
+      select distinct on (d.care_case_id)
+             d.care_case_id, d.decision, d.decided_at as at,
+             u.name as by, d.actor_email, d.reason_code, d.note
+        from care_decisions d
+        left join users u on u.id = d.actor_user_id
+       where d.care_case_id in ${careCaseIds}
+       order by d.care_case_id, d.decided_at desc, d.created_at desc
     `),
   );
-  return new Map(
-    rows.map((r) => [r.care_case_id, { action: r.action_type as BusinessAction, at: new Date(r.at), by: r.by || r.actor_email || "", reasonCode: r.reason_code, note: r.reason_note ?? "" }] as const),
-  );
+  const m = new Map<string, LastDecision>();
+  for (const r of rows) {
+    // Chuỗi lạ (dữ liệu cũ / một bản vá sai) ⇒ BỎ QUA, không ép vào một trong ba rổ.
+    const kq = careDecisionOf(r.decision);
+    if (kq) m.set(r.care_case_id, { decision: kq, at: new Date(r.at), by: r.by || r.actor_email || "", reasonCode: r.reason_code, note: r.note ?? "" });
+  }
+  return m;
 }
 
 async function loadCareRows(shipmentIds: string[]): Promise<Map<string, CareRow>> {
@@ -502,8 +507,15 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
     tiếp" là thông tin, và cắt nó theo đợt đang mở sẽ giấu mất. Còn Ô KẾT QUẢ HIỆN TẠI thì chỉ lấy
     quyết định của ĐÚNG đợt đang mở (`decisionMap`) — hai câu hỏi khác nhau, hai phép đọc khác nhau.
   */
-  const [decisionMap, decisionRows] = await Promise.all([
-    dot ? loadDecisions([dot.id]) : Promise.resolve(new Map<string, CareDecision>()),
+  const [decisionMap, decisionRows, carrierDecisionRows] = await Promise.all([
+    dot ? loadDecisions([dot.id]) : Promise.resolve(new Map<string, LastDecision>()),
+    db
+      .select({ d: schema.careDecisions, actorName: schema.users.name })
+      .from(schema.careDecisions)
+      .leftJoin(schema.users, eq(schema.users.id, schema.careDecisions.actorUserId))
+      .where(eq(schema.careDecisions.shipmentId, shipmentId))
+      .orderBy(desc(schema.careDecisions.decidedAt))
+      .limit(50),
     db
       .select({ b: schema.careBusinessActions, actorName: schema.users.name })
       .from(schema.careBusinessActions)
@@ -534,6 +546,7 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
       failedAttempts: qv.failedAttempts,
       ageHours: f?.lastAt ? (new Date().getTime() - f.lastAt.getTime()) / 3_600_000 : null,
       vtpStatus: s.vtpStatus ?? null,
+      carrierConfigured: vtpConfigured(),
     },
     order: s.order ? { id: s.order.id, systemId: s.order.systemId, total: Number(s.order.totalPriceAfterDiscount ?? 0), prepaid: Number(s.order.prepaid ?? 0) + Number(s.order.transferMoney ?? 0) + Number(s.order.cash ?? 0), items: qv.items, chatUrl: qv.chatUrl } : null,
     customer: { name: qv.customer, phone: qv.phone, history: qv.history },
@@ -543,7 +556,27 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
     sla: queueSince ? slaOf(queueSince, care, new Date(), slaHours) : null,
     events,
     careActions: qv.careActions,
-    decisions: decisionRows.map(({ b, actorName }) => ({
+    // KẾT QUẢ XỬ LÝ của người — chuỗi lạ bị LOẠI khỏi danh sách chứ không hiện thành một nhãn đoán.
+    decisions: decisionRows.flatMap(({ d, actorName }) => {
+      const kq = careDecisionOf(d.decision);
+      return kq
+        ? [{
+            id: d.id,
+            at: d.decidedAt,
+            actor: actorName || d.actorEmail || "không rõ người",
+            decision: kq,
+            reasonCode: d.reasonCode,
+            note: d.note,
+            previousCareStatus: d.previousCareStatus,
+            nextCareStatus: d.nextCareStatus,
+            followUpAt: d.followUpAt,
+            carrierStageAtDecision: d.carrierStageAtDecision,
+            carrierSubstateAtDecision: d.carrierSubstateAtDecision,
+          }]
+        : [];
+    }),
+    // LỆNH GỬI ĐVVC — sổ riêng, nghĩa riêng: đây là thứ đã (hoặc chưa) đi tới Viettel Post.
+    carrierDecisions: carrierDecisionRows.map(({ b, actorName }) => ({
       id: b.id,
       at: b.requestedAt,
       actor: actorName || b.actorEmail || "không rõ người",
@@ -551,12 +584,6 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
       reasonCode: b.reasonCode,
       note: b.reasonNote,
       carrierResult: b.carrierResult,
-      previousCareStatus: b.previousCareStatus,
-      nextCareStatus: b.nextCareStatus,
-      followUpAt: (() => {
-        const m = b.metadata as { followUpAt?: string } | null;
-        return m?.followUpAt ? new Date(m.followUpAt) : null;
-      })(),
     })),
     carrierRequests: requests.map(toRequestView),
     // Địa chỉ "làm tay trên web" dựng từ MÃ VIETTEL POST, không phải `tracking` (có thể là mã Pancake).
@@ -584,10 +611,10 @@ export async function getCareNotePresets(): Promise<CareNotePreset[]> {
  * Kết quả nào không có trong bản đã lưu thì rơi về mặc định của CHÍNH nó — một bản lưu chỉ khai
  * "Đã hoàn" không được làm hai kết quả kia mất sạch mẫu.
  */
-export async function getResolutionNotePresets(): Promise<Record<ResolutionAction, string[]>> {
-  const v = await getSettingJson<Partial<Record<ResolutionAction, string[]>>>(RESOLUTION_NOTES_KEY, {});
-  const out = {} as Record<ResolutionAction, string[]>;
-  for (const k of RESOLUTION_ACTIONS) {
+export async function getResolutionNotePresets(): Promise<Record<CareDecision, string[]>> {
+  const v = await getSettingJson<Partial<Record<CareDecision, string[]>>>(RESOLUTION_NOTES_KEY, {});
+  const out = {} as Record<CareDecision, string[]>;
+  for (const k of CARE_DECISIONS) {
     const list = v?.[k];
     out[k] = Array.isArray(list) ? list.filter((x) => typeof x === "string" && x.trim()).slice(0, RESOLUTION_NOTES_MAX) : RESOLUTION_NOTES_DEFAULT[k];
   }

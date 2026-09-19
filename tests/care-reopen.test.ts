@@ -5,7 +5,7 @@ import { clearMemo } from "@/lib/cache";
 import { afterShipmentStateChange, applyCarrierEventToCare, reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { setCareStatus, type CareActor } from "@/lib/care/service";
 import { canOpenNewEpisode, chuaAiXuLyXongSql } from "@/lib/care/reopen-guard";
-import { classifyReopen, REOPEN_CLASS_COUNTS_AS_CASE } from "@/lib/constants/care-reopen-class";
+import { classifyReopen, REOPEN_CLASS_COUNTS_AS_CASE, REOPEN_GUARD_LIVE_AT } from "@/lib/constants/care-reopen-class";
 import { getCareAudit } from "@/lib/queries/care-case-audit";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -252,13 +252,28 @@ export async function testCareReopen(db: Db) {
   const mocG = gio(20);
   await suKien(db, sG, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: mocG });
   await setCareStatus(NGUOI, { shipmentIds: [sG], status: "RESOLVED", note: "G: xong" });
-  // Dựng thẳng một BẢN SAO đúng như lỗi cũ từng sinh ra: mốc kích hoạt cũ hơn lúc đóng.
+  /*
+    ═══ MỐC CỦA BẢN SAO DỰNG TỪ CHÍNH HẰNG SỐ ĐANG ĐO, KHÔNG TỪ "20 GIỜ TRƯỚC" (luật 50) ═══
+
+    Bản trước gieo `openedAt = gio(20)` rồi so với `REOPEN_GUARD_LIVE_AT` — một hằng số NGÀY CỐ
+    ĐỊNH (18/09/2026 04:10Z). Đó là một cửa sổ TRƯỢT theo đồng hồ thật quét qua một mốc đứng yên:
+    bài kiểm xanh ngày 18/09 và ĐỎ ngày 19/09, vì "20 giờ trước" đã đi qua bên kia cái mốc và bản
+    sao di sản bỗng bị đếm là "lỗi còn đang xảy ra". Đúng quả bom mà mục 50 của AGENTS.md sinh ra
+    để cấm — và nó chặn mọi lần deploy, vì workflow chạy `npm test` trước khi đụng máy chủ.
+
+    Nay mốc dựng TỪ CHÍNH `REOPEN_GUARD_LIVE_AT`: bản sao này ở TRƯỚC lúc luật mới chạy theo ĐỊNH
+    NGHĨA, nên nó là DI SẢN mãi mãi, hôm nay là thứ mấy cũng vậy.
+  */
+  const mocDiSan = new Date(REOPEN_GUARD_LIVE_AT.getTime() - 3600_000);
   await db.insert(schema.shipmentCare).values({
     shipmentId: sG, orderId: `${P}o-sg`, episodeNo: 2, active: true, careStatus: "NEW",
-    entryCarrierState: "WAITING_REDELIVERY", sourceTrigger: "RECONCILE", openedAt: mocG, careOutcome: "PENDING", updatedBy: "SYSTEM",
+    entryCarrierState: "WAITING_REDELIVERY", sourceTrigger: "RECONCILE", openedAt: mocDiSan, careOutcome: "PENDING", updatedBy: "SYSTEM",
   });
   clearMemo();
-  const kiemKe = await getCareAudit({ from: gio(72), to: new Date(Date.now() + 3600_000) }, "CASE_OPENED_AT");
+  // Kỳ phải PHỦ được mốc di sản dù hôm nay cách nó bao xa — nếu không, dòng rơi ra ngoài kỳ và
+  // `dongG.length` tụt xuống 1 vào một ngày nào đó. Cùng một quả bom, chỉ chậm hơn vài tuần.
+  const tuLuc = new Date(Math.min(gio(72).getTime(), mocDiSan.getTime() - 3600_000));
+  const kiemKe = await getCareAudit({ from: tuLuc, to: new Date(Date.now() + 3600_000) }, "CASE_OPENED_AT");
   const dongG = kiemKe.rows.filter((r) => r.shipmentId === sG);
   assert.equal(dongG.length, 2, "cả hai đợt vẫn nằm trong danh sách để tra lịch sử — không xoá gì");
   assert.equal(dongG.find((r) => r.careId !== undefined && r.outcome !== undefined && r.reopenClass === "FALSE_REOPEN_LEGACY") !== undefined, true, "bản sao phải được gọi đúng tên");

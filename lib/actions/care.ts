@@ -7,7 +7,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { assignableUsers } from "@/lib/actions/alerts";
 import { can, requireUser } from "@/lib/auth/session";
-import type { ResolutionAction } from "@/lib/constants/care-resolution";
+import type { CareDecision } from "@/lib/constants/care-resolution";
 import { CARE_ACTION_KINDS } from "@/lib/constants/delivery-tower";
 import { getCareCaseDetail, getResolutionNotePresets } from "@/lib/queries/care-workbench";
 
@@ -95,7 +95,7 @@ export async function loadCareWorkspace(shipmentId: string): Promise<CareWorkspa
 export type CareWorkspace = {
   detail: NonNullable<Awaited<ReturnType<typeof getCareCaseDetail>>>;
   staff: { id: string; name: string }[];
-  resolutionPresets: Record<ResolutionAction, string[]>;
+  resolutionPresets: Record<CareDecision, string[]>;
   /** Ba nút kết quả gọi `recordBusinessAction`, cần `shipments:manage`. Không có quyền ⇒ panel chỉ đọc. */
   canManage: boolean;
 };

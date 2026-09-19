@@ -12,13 +12,15 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Textarea } from "@/components/ui/textarea";
 import { resolveNotification } from "@/lib/actions/alerts";
 import { loadCareWorkspace, recordCareAction, type CareWorkspace } from "@/lib/actions/care";
-import { recordBusinessAction, setCareOwner } from "@/lib/actions/care-workbench";
+import { recordCareDecision, requestCarrierAction, setCareOwner } from "@/lib/actions/care-workbench";
 import { ResolutionBadge, ResolutionControl, type ResolutionExtra } from "@/app/(dashboard)/shipments/resolution-control";
 import { journeyTone, parseCourier } from "@/lib/care/journey-display";
-import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
-import { ACTION_CALLS_CARRIER, BUSINESS_ACTION_LABEL, type BusinessAction } from "@/lib/constants/care-outcome";
-import { RESOLUTION_ACTIONS, RESOLUTION_LABEL, RESOLUTION_TO_BUSINESS, resolutionOf, type ResolutionAction } from "@/lib/constants/care-resolution";
 import { CARE_STATUS_LABEL, CARE_STATUS_TONE, type CareStatus } from "@/lib/constants/care";
+import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
+import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
+import { BUSINESS_ACTION_LABEL } from "@/lib/constants/care-outcome";
+import { CARRIER_ACTION_LABEL, CARRIER_REQUEST_LABEL, CARRIER_REQUEST_TONE, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
+import { CARE_DECISIONS, RESOLUTION_LABEL, type CareDecision } from "@/lib/constants/care-resolution";
 import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
 import { getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
@@ -72,7 +74,7 @@ function readAutoNext(): boolean {
 }
 
 /** Một dòng nhật ký gộp: quyết định · thao tác care · việc đã chăm. Ba nguồn, một trục thời gian. */
-type LogRow = { at: Date; actor: string; kind: "DECISION" | "CARE" | "ACTION"; title: string; detail: string };
+type LogRow = { at: Date; actor: string; kind: "DECISION" | "CARRIER" | "CARE" | "ACTION"; title: string; detail: string };
 
 export function CareDrawer({
   shipmentId,
@@ -111,7 +113,7 @@ export function CareDrawer({
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [autoNext, setAutoNext] = useState(true);
-  const [openFor, setOpenFor] = useState<ResolutionAction | null>(null);
+  const [openFor, setOpenFor] = useState<CareDecision | null>(null);
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => setAutoNext(readAutoNext()), []);
@@ -184,14 +186,14 @@ export function CareDrawer({
     rồi mới tự chuyển kiện nếu người dùng bật. Ghi lỗi thì KHÔNG chuyển, và panel đứng nguyên ở kiện
     đang lỗi — chuyển đi là giấu mất lỗi.
   */
-  const doResolution = (a: ResolutionAction, extra: ResolutionExtra) =>
+  const doResolution = (a: CareDecision, extra: ResolutionExtra) =>
     start(async () => {
-      const r = await recordBusinessAction({ shipmentId: current.shipmentId, action: RESOLUTION_TO_BUSINESS[a], note: extra.note, reasonCode: extra.reasonCode, followUpAt: extra.followUpAt });
+      const r = await recordCareDecision({ shipmentId: current.shipmentId, decision: a, note: extra.note, reasonCode: extra.reasonCode, followUpAt: extra.followUpAt });
       if ("error" in r) {
         toast.error(r.error, { duration: 9000 });
         return;
       }
-      toast.success(`${RESOLUTION_LABEL[a]} · ${data?.shipment.tracking ?? ""}`, { description: r.data.message, duration: 8000 });
+      toast.success(`${RESOLUTION_LABEL[a]} · ${data?.shipment.tracking ?? ""}`, { description: "Đã ghi kết quả xử lý. KHÔNG gửi lệnh nào sang Viettel Post và KHÔNG đổi trạng thái vận đơn.", duration: 6000 });
       // Danh sách phía sau đọc lại hàng đợi: dòng ngoài bảng phải đổi theo panel, không đợi F5.
       router.refresh();
       if (autoNext && tiep) {
@@ -238,7 +240,7 @@ export function CareDrawer({
         if (truoc) chuyen(truoc);
       } else if (e.key === "1" || e.key === "2" || e.key === "3") {
         if (!ws?.canManage) return;
-        setOpenFor(RESOLUTION_ACTIONS[Number(e.key) - 1]);
+        setOpenFor(CARE_DECISIONS[Number(e.key) - 1]);
       } else if (e.key === "n" || e.key === "N") {
         e.preventDefault();
         noteRef.current?.focus();
@@ -250,7 +252,7 @@ export function CareDrawer({
   }, [open, tiep, truoc, chuyen, ws?.canManage]);
 
   const vtpUrl = getViettelPostTrackingUrl(data?.shipment.vtpOrderNumber);
-  const resolution = resolutionOf(data?.care.lastDecision?.action ?? null);
+  const resolution = data?.care.lastDecision?.decision ?? null;
 
   /* Nhật ký gộp ba nguồn, mới nhất trước — xem `LogRow`. Dựng ở client vì nó chỉ là cách BÀY, không
      phải một phép đo: ba nguồn vẫn là ba bảng riêng ở CSDL. */
@@ -261,12 +263,18 @@ export function CareDrawer({
       const chiTiet = [
         d.reasonCode ? `Lý do: ${RETURN_REASON_LABEL[d.reasonCode as ReturnReason] ?? d.reasonCode}` : "",
         d.followUpAt ? `Hẹn: ${formatDateTime(d.followUpAt)}` : "",
-        d.carrierResult ? `ĐVVC: ${d.carrierResult}` : "",
+        // ẢNH CHỤP CHIỀU ĐVVC LÚC BẤM — bằng chứng đọc lại được rằng hai chiều không suy ra nhau.
+        d.carrierSubstateAtDecision ? `VTP lúc đó: ${CARRIER_SUBSTATE_LABEL[d.carrierSubstateAtDecision as CarrierSubstate] ?? d.carrierSubstateAtDecision}` : "",
         d.note,
       ]
         .filter(Boolean)
         .join(" · ");
-      rows.push({ at: d.at, actor: d.actor, kind: "DECISION", title: `Chọn: ${resolutionOf(d.action) ? RESOLUTION_LABEL[resolutionOf(d.action)!] : BUSINESS_ACTION_LABEL[d.action]}`, detail: chiTiet });
+      rows.push({ at: d.at, actor: d.actor, kind: "DECISION", title: `Chọn: ${RESOLUTION_LABEL[d.decision]}`, detail: chiTiet });
+    }
+    // LỆNH GỬI ĐVVC là loại dòng KHÁC — không trộn vào "đội đã quyết gì".
+    for (const b of data.carrierDecisions) {
+      const chiTiet = [b.reasonCode ? `Lý do: ${RETURN_REASON_LABEL[b.reasonCode as ReturnReason] ?? b.reasonCode}` : "", b.carrierResult ? `ĐVVC: ${b.carrierResult}` : "", b.note].filter(Boolean).join(" · ");
+      rows.push({ at: b.at, actor: b.actor, kind: "CARRIER", title: `Gửi ĐVVC: ${BUSINESS_ACTION_LABEL[b.action]}`, detail: chiTiet });
     }
     for (const e of data.events) {
       // Sự kiện CARRIER_REQUEST đã được kể bằng dòng quyết định ở trên — kể lại là nhân đôi.
@@ -278,20 +286,38 @@ export function CareDrawer({
     return rows.sort((x, y) => y.at.getTime() - x.at.getTime()).slice(0, 60);
   }, [data]);
 
-  const eligibility = (a: ResolutionAction) => {
-    if (!data) return null;
-    const b = RESOLUTION_TO_BUSINESS[a];
-    if (!ACTION_CALLS_CARRIER[b as BusinessAction]) return null;
-    const e = canRequestCarrierAction(b === "APPROVE_RETURN" ? "approve-return" : "redeliver", {
+  /**
+   * Điều kiện của LỆNH GỬI ĐVVC — và CHỈ của nó. Ba nút kết quả care ở trên KHÔNG hỏi hàm này một
+   * câu nào: năng lực API của ERP không được phép quyết định xem nhân viên có ghi nhận được việc
+   * mình vừa làm hay không.
+   */
+  const carrierEligibility = (key: CarrierActionKey) => {
+    if (!data) return { ok: false, callsApi: false, reason: "Đang tải…" };
+    const e = canRequestCarrierAction(key, {
       stage: data.shipment.stage,
       vtpStatus: data.shipment.vtpStatus,
       vtpStatusName: data.shipment.rawStatus,
       orderNumber: data.shipment.vtpOrderNumber,
       trackingCapability: data.shipment.trackingCapability,
-      configured: true,
+      // Sự thật từ máy chủ, không phải một hằng số lạc quan: ERP chưa khai tài khoản thì nút khoá
+      // kèm đúng câu giải thích, thay vì sáng lên rồi trả về một lời từ chối.
+      configured: data.shipment.carrierConfigured,
     });
-    return { ok: e.ok, reason: e.reason };
+    return { ok: e.ok, callsApi: e.callsApi, reason: e.reason };
   };
+
+  /** Gửi một lệnh sang Viettel Post. Tách hẳn khỏi `doResolution` — hai việc, hai đường ghi. */
+  const doCarrier = (key: CarrierActionKey) =>
+    start(async () => {
+      const r = await requestCarrierAction({ shipmentId: current.shipmentId, actionKey: key, note: "" });
+      if ("error" in r) {
+        toast.error(r.error, { duration: 9000 });
+        return;
+      }
+      (r.data.request.status === "MANUAL_REQUIRED" ? toast.warning : toast.success)(r.data.message, { duration: 9000 });
+      router.refresh();
+      await naplai();
+    });
 
   const breached = Boolean(data?.sla && (data.sla.firstResponseBreached || data.sla.resolveBreached));
 
@@ -477,11 +503,13 @@ export function CareDrawer({
                 </div>
               </div>
 
-              {/* ───── XỬ LÝ CASE — khối quan trọng nhất, đứng trước mọi thứ phải cuộn ───── */}
+              {/* ───── KẾT QUẢ CARE — khối quan trọng nhất, đứng trước mọi thứ phải cuộn ─────
+                   Ba nút này KHÔNG gửi gì sang ĐVVC và KHÔNG bao giờ bị khoá vì lý do ĐVVC.
+                   Lệnh gửi ĐVVC nằm ở khối NGAY DƯỚI, tách bạch cả về chỗ đứng lẫn về chữ. */}
               <div className="rounded-xl border border-primary/30 bg-primary/[0.03] p-3">
-                <div className="mb-1.5 flex items-center gap-2">
-                  <span className="text-[12px] font-semibold uppercase tracking-wide">Xử lý case</span>
-                  <span className="text-[11px] text-muted-foreground">quyết định của shop — KHÔNG đổi trạng thái Viettel Post</span>
+                <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                  <span className="text-[12px] font-semibold uppercase tracking-wide">Kết quả care</span>
+                  <span className="text-[11px] text-muted-foreground">ghi nhận việc người xử lý vừa quyết — KHÔNG gửi lệnh sang Viettel Post, KHÔNG đổi trạng thái vận đơn</span>
                 </div>
                 {ws.canManage ? (
                   <ResolutionControl
@@ -490,13 +518,12 @@ export function CareDrawer({
                     pending={pending}
                     presets={ws.resolutionPresets}
                     canEditPresets={ws.canManage}
-                    eligibility={eligibility}
                     onSubmit={doResolution}
                     openFor={openFor}
                     onOpenForChange={setOpenFor}
                   />
                 ) : (
-                  <p className="text-[12px] text-muted-foreground">Bạn không có quyền thao tác vận đơn (`shipments:manage`) nên ba nút kết quả bị khoá. Ghi chú và ghi nhận việc đã chăm thì vẫn làm được ở dưới.</p>
+                  <p className="text-[12px] text-muted-foreground">Bạn không có quyền thao tác vận đơn (shipments:manage) nên ba nút kết quả bị khoá. Ghi chú và ghi nhận việc đã chăm thì vẫn làm được ở dưới.</p>
                 )}
                 {data.care.lastNote ? (
                   <p className="mt-2 border-t pt-2 text-[12px]">
@@ -509,6 +536,62 @@ export function CareDrawer({
                   </p>
                 ) : null}
               </div>
+
+              {/* ───── THAO TÁC VIETTELPOST — HÀNH ĐỘNG KHÁC, ĐIỀU KIỆN KHÁC ─────
+
+                   Khối này GỬI THẬT một lệnh sang ĐVVC, nên nó ĐƯỢC PHÉP khoá: kiện đã kết thúc,
+                   chưa có mã vận đơn, ERP chưa khai tài khoản API — mỗi lý do hiện nguyên văn trong
+                   tooltip. Khoá ở đây KHÔNG ảnh hưởng gì tới ba nút kết quả care bên trên, và đó
+                   chính là điều bản 19/09/2026 sinh ra để sửa. */}
+              {ws.canManage ? (
+                <div className="rounded-xl border p-3">
+                  <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                    <span className="text-[12px] font-semibold uppercase tracking-wide">Thao tác Viettel Post</span>
+                    <span className={cn("rounded px-1 text-[10.5px] font-medium", data.shipment.trackingCapability === "API_TRACKABLE" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300" : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300")}>
+                      {data.shipment.trackingCapability === "API_TRACKABLE" ? "gửi thẳng API" : "phải làm tay"}
+                    </span>
+                  </div>
+                  <p className="mb-2 text-[11px] leading-snug text-muted-foreground">
+                    Gửi một yêu cầu THẬT sang đơn vị vận chuyển. Lệnh được ĐVVC <b>nhận</b> không có nghĩa hàng đã đi tiếp — chỉ sự kiện hành trình mới xác nhận. Khối này khoá được; ba nút kết quả care ở trên thì không.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(["redeliver", "approve-return"] as CarrierActionKey[]).map((k) => {
+                      const e = carrierEligibility(k);
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          disabled={pending || !e.ok}
+                          title={e.reason}
+                          onClick={() => doCarrier(k)}
+                          className="rounded-md border px-2.5 py-1.5 text-[12px] font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          {k === "redeliver" ? "Yêu cầu phát lại trên VTP" : "Duyệt hoàn trên VTP"}
+                          {e.ok && !e.callsApi ? <span className="ml-1 text-[10.5px] text-amber-700 dark:text-amber-300">(làm tay, ERP ghi vết)</span> : null}
+                        </button>
+                      );
+                    })}
+                    {vtpUrl ? (
+                      <a href={vtpUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[12px] hover:bg-accent">
+                        <ExternalLink className="size-3.5" /> Mở trên viettelpost.vn
+                      </a>
+                    ) : null}
+                  </div>
+                  {/* Lệnh gần nhất và ĐVVC trả lời gì — không có dòng này thì "vì sao 400" không tra lại được. */}
+                  {data.carrierRequests.length ? (
+                    <p className="mt-2 text-[11.5px]">
+                      <span className={cn("rounded px-1.5 py-px text-[10.5px] font-medium", CARRIER_REQUEST_TONE[data.carrierRequests[0].status as CarrierRequestStatus])}>
+                        {CARRIER_ACTION_LABEL[data.carrierRequests[0].actionKey]}: {CARRIER_REQUEST_LABEL[data.carrierRequests[0].status as CarrierRequestStatus]}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · {data.carrierRequests[0].actor || "không rõ người"} · {formatDateTime(data.carrierRequests[0].at)}
+                        {data.carrierRequests[0].error ? ` · ${data.carrierRequests[0].error}` : ""}
+                      </span>
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
 
               {data.shipment.receiver.address ? <p className="text-[12px] leading-snug text-muted-foreground">{data.shipment.receiver.address}</p> : null}
 
