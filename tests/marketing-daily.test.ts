@@ -518,6 +518,32 @@ export async function testMarketingBreakdownConservation() {
   assert.equal(adBd.spendGrain, false);
   const campBd = await getMarketingBreakdown(ALL, "created", "campaign", {}, 5);
   assert.equal(campBd.spendGrain, true);
+
+  /*
+    ═══ MỘT DÒNG BÓC TÁCH PHẢI BẰNG ĐÚNG BẢNG CHÍNH KHI LỌC THEO CHÍNH NHÓM ẤY ═══
+
+    Đây là cổng quan trọng nhất của phần bóc tách, và nó tồn tại vì một quyết định kỹ thuật cụ thể:
+    bản đầu bảo đảm khớp bằng cách CHẠY LẠI đúng đường của bảng chính cho từng nhóm — đúng nhưng
+    tốn 48 câu truy vấn và làm trang mất 15,9 giây trên production. Bản này gộp bằng MỘT câu
+    `group by` trên cùng bảng dẫn xuất, nên hai bên giờ đi HAI đường mã nguồn khác nhau.
+
+    Hai đường thì phải có người buộc chúng bằng nhau. Bài kiểm này là người đó.
+  */
+  for (const row of bd.rows.slice(0, 3)) {
+    const filtered = await getMarketingDaily(ALL, "created", { marketerId: row.key });
+    const t = filtered.totals;
+    assert.equal(row.orders, t.orders, `nhóm ${row.label}: số đơn của bóc tách phải bằng bảng chính khi lọc theo chính nhóm ấy`);
+    assert.equal(row.deliveredRevenue, t.deliveredRevenue, `nhóm ${row.label}: doanh thu thực`);
+    assert.equal(row.deliveredOrders, t.deliveredOrders, `nhóm ${row.label}: đơn giao thành công`);
+    assert.equal(row.cogs, t.cogs, `nhóm ${row.label}: giá vốn`);
+    assert.equal(row.shippingCost, t.shippingCost, `nhóm ${row.label}: cước và phí`);
+    assert.equal(row.units, t.units, `nhóm ${row.label}: số lượng sản phẩm`);
+    assert.equal(row.adSpend, t.adSpend, `nhóm ${row.label}: chi quảng cáo`);
+    assert.equal(row.contributionProfit, t.contributionProfit, `nhóm ${row.label}: LỢI NHUẬN GÓP`);
+    // Cả hai đường đều phải trả `null` cho lợi nhuận canonical: chi phí vận hành không chia được.
+    assert.equal(row.netProfit, null, `nhóm ${row.label}: lợi nhuận canonical phải là CHƯA BIẾT`);
+    assert.equal(t.netProfit, null);
+  }
 }
 
 /** Điểm vào cho bộ chạy chung. Phần CSDL đi qua `getDb()` như các truy vấn thật, nên không cần tham số. */
