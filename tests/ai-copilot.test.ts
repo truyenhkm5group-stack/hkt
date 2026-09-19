@@ -5,7 +5,7 @@ import { schema, type Db } from "@/db";
 import { confirmCopilotActions, runCopilot } from "@/lib/ai/copilot";
 import { actionToken, stableStringify } from "@/lib/ai/policy";
 import { COPILOT_SYSTEM_PROMPT } from "@/lib/ai/prompt";
-import { estimateCostUsd, FakeProvider, type AiResponse } from "@/lib/ai/provider";
+import { anthropicCapsOf, ANTHROPIC_DECLARED_MODELS, estimateCostUsd, FakeProvider, type AiResponse } from "@/lib/ai/provider";
 import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { registerCareTools } from "@/lib/ai/tools/care";
 import { registerErpTools } from "@/lib/ai/tools/erp";
@@ -257,6 +257,34 @@ export async function testAiCopilot(db: Db) {
     delete process.env.AI_PROVIDER;
     if (hadAnthropic) process.env.ANTHROPIC_API_KEY = hadAnthropic;
     assert.equal(MODEL_BY_TIER.anthropic.copilot, "claude-opus-5");
+
+    /*
+      ───────── MỌI MODEL ĐANG DÙNG PHẢI CÓ MẶT TRONG BẢNG NĂNG LỰC ─────────
+
+      ĐÃ HỎNG THẬT (19/09/2026): provider gửi `thinking: {type:"adaptive"}` và `output_config.effort`
+      cho MỌI model, nhưng bậc `routine` là `claude-haiku-4-5` — thế hệ dùng `budget_tokens`, không
+      nhận cả hai. Mọi lượt gọi routine qua Anthropic trả
+
+          400 "adaptive thinking is not supported on this model"
+
+      kể cả `testAiConnection()`, tức là đúng cái cửa máy runner dùng để hỏi "khoá dùng được chưa".
+      Không typecheck nào thấy được: cả hai đều là tham số hợp lệ về mặt KIỂU.
+
+      Bài này khoá hai điều. Một: model nào ERP THẬT SỰ gọi cũng phải được KHAI, không rơi vào
+      nhánh đoán. Hai: `claude-haiku-4-5` phải khai là KHÔNG có hai năng lực đó — ai đổi dòng ấy
+      thành `true` sẽ làm đỏ ở đây chứ không phải ở production lúc 4 giờ sáng.
+    */
+    for (const tier of ["routine", "copilot", "analysis"] as const) {
+      const model = MODEL_BY_TIER.anthropic[tier];
+      assert.ok(ANTHROPIC_DECLARED_MODELS.includes(model), `bậc ${tier} dùng \`${model}\` nhưng model đó chưa được khai trong bảng năng lực của provider`);
+    }
+    const haiku = anthropicCapsOf("claude-haiku-4-5");
+    assert.equal(haiku.adaptiveThinking, false, "claude-haiku-4-5 KHÔNG nhận adaptive thinking — nó thuộc thế hệ budget_tokens");
+    assert.equal(haiku.effort, false, "…và cũng KHÔNG nhận output_config.effort");
+    assert.equal(anthropicCapsOf("claude-opus-5").adaptiveThinking, true, "opus-5 thì có — nếu không, mọi lượt copilot mất hẳn chiều sâu suy luận mà không báo gì");
+    // Model lạ đi hướng THẾ HỆ MỚI: sai kiểu đó là một lỗi 400 ồn ào, bắt được ngay bằng
+    // `npm run agent:check`; sai hướng ngược lại là lặng lẽ mất chiều sâu mà không ai biết.
+    assert.equal(anthropicCapsOf("claude-model-chua-ton-tai").adaptiveThinking, true);
     const src = readFileSync("lib/ai/copilot.ts", "utf8") + readFileSync("lib/ai/tools/care.ts", "utf8") + readFileSync("lib/ai/tools/erp.ts", "utf8") + readFileSync("lib/actions/ai.ts", "utf8");
     assert.ok(!/gpt-5|claude-opus|claude-sonnet|claude-haiku/.test(src), "chuỗi model chỉ được nằm ở router / provider");
   } finally {

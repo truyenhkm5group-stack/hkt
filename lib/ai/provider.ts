@@ -49,6 +49,43 @@ export function estimateCostUsd(model: string, usage: AiUsage): number | null {
   return Math.round(usd * 1_000_000) / 1_000_000;
 }
 
+/**
+ * ═══════════ KHÔNG PHẢI MODEL NÀO CŨNG NHẬN CÙNG MỘT BỘ THAM SỐ ═══════════
+ *
+ * ĐÃ ĐO THẬT (lượt chạy agent thứ ba, 19/09/2026) — khoá đúng, tài khoản có tiền, và vẫn 400:
+ *
+ *     400 invalid_request_error: "adaptive thinking is not supported on this model"
+ *
+ * Bậc `routine` của Anthropic là `claude-haiku-4-5`, và model đó KHÔNG nhận
+ * `thinking: {type: "adaptive"}` (nó thuộc thế hệ dùng `budget_tokens`) lẫn `output_config.effort`.
+ * Bản cũ gửi cả hai cho MỌI model, nên mọi lượt gọi bậc `routine` qua Anthropic đều hỏng — kể cả
+ * `testAiConnection()`, tức là đúng cái cửa mà máy runner dùng để hỏi "khoá dùng được chưa".
+ *
+ * Hai tham số ấy là TUỲ CHỌN về mặt nghiệp vụ: thiếu chúng thì câu trả lời kém sâu hơn, còn gửi
+ * nhầm thì KHÔNG có câu trả lời nào. Nên chúng đi theo BẢNG NĂNG LỰC của từng model.
+ *
+ * Model lạ (chưa có trong bảng) được coi là THẾ HỆ MỚI: sai ở hướng đó là một lỗi 400 ồn ào mà
+ * `npm run agent:check` bắt được ngay, còn sai ở hướng kia là lặng lẽ mất chiều sâu suy luận mà
+ * không ai biết. Thêm model mới thì thêm một dòng ở đây.
+ */
+type AnthropicCaps = { adaptiveThinking: boolean; effort: boolean; fallbacks: boolean };
+
+const ANTHROPIC_CAPS: Record<string, AnthropicCaps> = {
+  // Thế hệ `budget_tokens`: KHÔNG adaptive, KHÔNG effort. Bậc `routine` của ERP nằm ở đây.
+  "claude-haiku-4-5": { adaptiveThinking: false, effort: false, fallbacks: false },
+  // Thế hệ hiện tại. `fallbacks` (chạy lại trên model dự phòng khi bị từ chối vì chính sách) chỉ
+  // khai cho các model tài liệu nói rõ là có.
+  "claude-opus-5": { adaptiveThinking: true, effort: true, fallbacks: true },
+  "claude-sonnet-5": { adaptiveThinking: true, effort: true, fallbacks: false },
+};
+
+/** Model đã được KHAI. Bài kiểm đối chiếu với `MODEL_BY_TIER` để không bậc nào rơi vào nhánh đoán. */
+export const ANTHROPIC_DECLARED_MODELS: readonly string[] = Object.keys(ANTHROPIC_CAPS);
+
+export function anthropicCapsOf(model: string): AnthropicCaps {
+  return ANTHROPIC_CAPS[model] ?? { adaptiveThinking: true, effort: true, fallbacks: false };
+}
+
 export class AnthropicProvider implements AiProvider {
   readonly name = "anthropic";
   readonly model: string;
@@ -61,16 +98,16 @@ export class AnthropicProvider implements AiProvider {
 
   async complete(req: AiRequest): Promise<AiResponse> {
     const started = Date.now();
+    const caps = anthropicCapsOf(this.model);
     const res = await this.client.beta.messages.create({
       model: this.model,
       max_tokens: req.maxTokens ?? 4000,
       // Prompt hệ thống ổn định ⇒ đệm được; phần bối cảnh thay đổi nằm trong messages.
       system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
-      thinking: { type: "adaptive" },
-      output_config: { effort: this.effort },
+      ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
+      ...(caps.effort ? { output_config: { effort: this.effort } } : {}),
       // Từ chối vì chính sách ⇒ máy chủ tự chạy lại trên model dự phòng trong cùng một lần gọi.
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      ...(caps.fallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
       tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Beta.BetaTool["input_schema"], strict: true })),
       messages: req.messages.map((m) => ({
         role: m.role,
