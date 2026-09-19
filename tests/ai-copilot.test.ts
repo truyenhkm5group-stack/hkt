@@ -5,7 +5,7 @@ import { schema, type Db } from "@/db";
 import { confirmCopilotActions, runCopilot } from "@/lib/ai/copilot";
 import { actionToken, stableStringify } from "@/lib/ai/policy";
 import { COPILOT_SYSTEM_PROMPT } from "@/lib/ai/prompt";
-import { anthropicCapsOf, ANTHROPIC_DECLARED_MODELS, estimateCostUsd, FakeProvider, type AiResponse } from "@/lib/ai/provider";
+import { anthropicCapsOf, ANTHROPIC_DECLARED_MODELS, estimateCostUsd, FakeProvider, TIMEOUT_BY_TIER, type AiResponse } from "@/lib/ai/provider";
 import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { registerCareTools } from "@/lib/ai/tools/care";
 import { registerErpTools } from "@/lib/ai/tools/erp";
@@ -285,6 +285,20 @@ export async function testAiCopilot(db: Db) {
     // Model lạ đi hướng THẾ HỆ MỚI: sai kiểu đó là một lỗi 400 ồn ào, bắt được ngay bằng
     // `npm run agent:check`; sai hướng ngược lại là lặng lẽ mất chiều sâu mà không ai biết.
     assert.equal(anthropicCapsOf("claude-model-chua-ton-tai").adaptiveThinking, true);
+
+    /*
+      ───────── HẾT GIỜ CHỜ PHẢI ĐI THEO BẬC ─────────
+
+      ĐÃ HỎNG THẬT (19/09/2026): lượt AI CTO lập kế hoạch đầu tiên chết với "Request timed out".
+      Cả ba bậc dùng chung một hạn 60 giây ghim cứng — hợp lý cho một lượt trò chuyện có người
+      đang ngồi chờ, vô lý cho một lượt suy luận sâu chạy nền trên Opus 5 ở mức `high`.
+
+      Và hạn quá ngắn KHÔNG rẻ hơn: SDK thử lại hai lần, nên mỗi lần hết giờ là tiền đã tiêu cho
+      phần model đã nghĩ rồi vứt đi và nghĩ lại từ đầu.
+    */
+    assert.ok(TIMEOUT_BY_TIER.analysis >= 300_000, "bậc phân tích chạy nền — hạn chờ phải đủ cho một lượt suy luận sâu");
+    assert.ok(TIMEOUT_BY_TIER.copilot < TIMEOUT_BY_TIER.analysis, "bậc copilot có NGƯỜI đang đợi nên hạn phải ngắn hơn hẳn");
+    assert.ok(TIMEOUT_BY_TIER.routine <= TIMEOUT_BY_TIER.copilot, "một lượt ping rẻ không được chờ lâu hơn một lượt trò chuyện");
     const src = readFileSync("lib/ai/copilot.ts", "utf8") + readFileSync("lib/ai/tools/care.ts", "utf8") + readFileSync("lib/ai/tools/erp.ts", "utf8") + readFileSync("lib/actions/ai.ts", "utf8");
     assert.ok(!/gpt-5|claude-opus|claude-sonnet|claude-haiku/.test(src), "chuỗi model chỉ được nằm ở router / provider");
   } finally {
