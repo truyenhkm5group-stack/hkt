@@ -305,6 +305,7 @@ export async function testCtoProposal() {
   const giaProvider = (res: Partial<AiResponse> & { content: AiResponse["content"] }): AiProvider => ({
     name: "gia",
     model: "gia-model",
+    schemaDialect: "anthropic",
     async complete(): Promise<AiResponse> {
       return {
         stopReason: "end_turn",
@@ -342,6 +343,7 @@ export async function testCtoProposal() {
   const neVang = (mess: string, status?: number): AiProvider => ({
     name: "gia",
     model: "gia-model",
+    schemaDialect: "anthropic",
     async complete(): Promise<AiResponse> {
       throw Object.assign(new Error(mess), status === undefined ? {} : { status });
     },
@@ -392,6 +394,7 @@ export async function testCtoProposal() {
     const p: AiProvider = {
       name: "gia",
       model: "gia-model",
+      schemaDialect: "anthropic",
       async complete(req): Promise<AiResponse> {
         const i = daGoi.length;
         daGoi.push(req.messages.map((m) => m.content.map((c) => (c.type === "text" ? c.text : "")).join("")).join(""));
@@ -482,6 +485,7 @@ export async function testCtoProposal() {
     const p: AiProvider = {
       name: "gia",
       model: "gia-model",
+      schemaDialect: "anthropic",
       async complete(): Promise<AiResponse> {
         soLan += 1;
         throw Object.assign(new Error(mess), { status });
@@ -500,6 +504,7 @@ export async function testCtoProposal() {
     const p: AiProvider = {
       name: "gia",
       model: "gia-model",
+      schemaDialect: "anthropic",
       async complete(): Promise<AiResponse> {
         soLan += 1;
         return {
@@ -521,6 +526,7 @@ export async function testCtoProposal() {
     const p: AiProvider = {
       name: "gia",
       model: "gia-model",
+      schemaDialect: "anthropic",
       async complete(): Promise<AiResponse> {
         soLan += 1;
         return {

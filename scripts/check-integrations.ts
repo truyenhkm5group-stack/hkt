@@ -12,6 +12,7 @@ import { ViettelPostClient } from "@/lib/integrations/viettelpost/client";
 import { FacebookAdsClient } from "@/lib/integrations/facebook/client";
 import { PancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { runCopilot } from "@/lib/ai/copilot";
+import { AGENT_GITHUB_ALLOWED, AGENT_GITHUB_DENIED, testAgentGithubIdentity } from "@/lib/integrations/github/agent-identity";
 import { testAiConnection } from "@/lib/ai/provider";
 import { aiDisabledReason, modelFor, resolveProviderName } from "@/lib/ai/router";
 import { githubConfig, listRecentDeployRuns, testConnection as testGithubConnection } from "@/lib/integrations/github/client";
@@ -260,6 +261,43 @@ async function checkGithub() {
   }
 }
 
+/**
+ * DANH TÍNH GITHUB CỦA CODING AGENT — câu hỏi NHỊ PHÂN: agent có phải là một tài khoản KHÁC chủ
+ * shop không?
+ *
+ * Đo 19/09/2026: agent, tác giả PR, collaborator duy nhất và admin là CÙNG MỘT tài khoản, và
+ * ruleset đang áp có `required_approving_review_count: 0`. Ở tình trạng đó cổng duyệt của người
+ * không có nấc nào dùng được (0 = vô hiệu, 1 = kho tự khoá chết).
+ *
+ * KHÔNG GHI GÌ, KHÔNG IN SECRET — cùng luật với `lib/actions/vtp-capability.ts` (AGENTS.md mục 55).
+ * Kho này PUBLIC và log Actions ai cũng đọc được.
+ */
+async function checkAgentIdentity() {
+  console.log("\n▶ Danh tính GitHub của coding agent (erp-agent)");
+  const r = await testAgentGithubIdentity();
+  // BA tình huống, ba cách sửa khác nhau. Gộp thành "kết nối thất bại" là đẩy người đọc đi sai chỗ.
+  if (r.status === "NOT_CONFIGURED") {
+    bad(`Chưa cấu hình: ${r.message}`);
+    info("Chủ shop tạo GitHub App `erp-agent` rồi đặt secret — các bước chính xác ở docs/agent-github-identity.md.");
+    return;
+  }
+  if (r.status === "ERROR") {
+    bad(r.message);
+    info("Có cấu hình nhưng không đổi được token cài đặt: kiểm App id, installation id, khoá riêng (PEM hoặc base64 của PEM), và App đã được cài vào kho chưa.");
+    return;
+  }
+  ok(r.message);
+  const perms = r.identity?.permissions ?? {};
+  info(`quyền: ${Object.entries(perms).map(([k, v]) => `${k}=${v}`).join(" · ") || "(trống)"}`);
+  info(`agent được: ${AGENT_GITHUB_ALLOWED.join(" · ")}`);
+  info(`agent KHÔNG được: ${AGENT_GITHUB_DENIED.join(" · ")}`);
+  // Quyền thừa không phải chuyện nhỏ: Administration là quyền sửa được chính ruleset đang canh cổng.
+  for (const thua of ["administration", "secrets", "environments", "repository_hooks"]) {
+    if (perms[thua]) bad(`App mang quyền ${thua}=${perms[thua]} — quyền này KHÔNG cần và phải gỡ (nó mở đường sửa chính cái khoá đang canh).`);
+  }
+  if (perms.actions && perms.actions !== "read") bad(`App mang quyền actions=${perms.actions} — chỉ cần read.`);
+}
+
 async function main() {
   console.log("Kiểm tra kết nối API — VNXcommerce ERP");
   if (process.argv.includes("--ai")) {
@@ -270,12 +308,17 @@ async function main() {
     await checkGithub();
     process.exit(0);
   }
+  if (process.argv.includes("--agent-identity")) {
+    await checkAgentIdentity();
+    process.exit(0);
+  }
   const vtpNumber = await checkPancake();
   await checkViettelPost(vtpNumber);
   await checkFacebook();
   await checkPancakePages();
   await checkAi();
   await checkGithub();
+  await checkAgentIdentity();
   console.log("\nHoàn tất. Nếu tất cả ✓ thì chạy: npm run sync -- pancake-all --backfill");
   process.exit(0);
 }

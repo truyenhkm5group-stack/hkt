@@ -1,5 +1,6 @@
 import OpenAI, { type ClientOptions } from "openai";
 import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provider";
+import { toDialectSchema, type AiSchemaDialect } from "@/lib/ai/schema-dialect";
 
 /**
  * ═══════════ OPENAI — RESPONSES API ═══════════
@@ -16,6 +17,9 @@ import type { AiBlock, AiProvider, AiRequest, AiResponse } from "@/lib/ai/provid
 export class OpenAiProvider implements AiProvider {
   readonly name = "openai";
   readonly model: string;
+  // Responses API nhận các ràng buộc số / độ dài, nên phương ngữ này KHÔNG gỡ gì. Khai tường minh
+  // để một bản vá cho Anthropic không lặng lẽ cắt bớt schema của OpenAI.
+  readonly schemaDialect: AiSchemaDialect = "openai";
   private client: OpenAI;
   // `timeoutMs` đứng SAU `fetchImpl` để không đổi thứ tự tham số các nơi gọi cũ đang dùng.
   constructor(model: string, private effort: "low" | "medium" | "high" = "medium", fetchImpl?: typeof fetch, private timeoutMs: number = 120_000) {
@@ -46,7 +50,7 @@ export class OpenAiProvider implements AiProvider {
       reasoning: { effort: this.effort },
       // Không lưu hội thoại phía OpenAI: ERP tự giữ lịch sử và tự audit.
       store: false,
-      tools: req.tools.map((t) => ({ type: "function" as const, name: t.name, description: t.description, parameters: t.inputSchema, strict: true })),
+      tools: req.tools.map((t) => ({ type: "function" as const, name: t.name, description: t.description, parameters: toDialectSchema(t.inputSchema, this.schemaDialect), strict: true })),
     });
     const content: AiBlock[] = [];
     let sawCall = false;
