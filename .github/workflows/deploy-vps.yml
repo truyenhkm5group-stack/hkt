@@ -14,17 +14,25 @@ on:
         type: boolean
         default: false
 
-# MỘT THAO TÁC CHẠM VPS TẠI MỘT THỜI ĐIỂM.
+# ═══════════ KHOÁ ĐẶT Ở JOB `release`, KHÔNG Ở MỨC WORKFLOW ═══════════
 #
-# Trước đây deploy và vận hành dùng hai nhóm riêng, nên một lệnh vận hành có thể chạy ĐÈ lên giữa
-# lúc deploy đang dựng ảnh và khởi động lại container — đúng lúc máy chủ yếu nhất. Nay dùng CHUNG
-# một nhóm: việc thứ hai xếp hàng chờ.
+# TRƯỚC: cả tệp này khoá ở MỨC WORKFLOW, dùng chung một nhóm với `ops-vps.yml`. Hậu quả đo được:
+# một lượt `db-query` mười giây phải chờ hết một lượt deploy ~20 phút — mà trong hai mươi phút ấy,
+# **cổng chất lượng và lệnh dựng ảnh Docker chiếm phần lớn thời gian và KHÔNG chạm tới VPS một
+# byte nào**. Mọi phiên làm việc khác đứng chờ một việc chạy trên máy của GitHub.
 #
-# `cancel-in-progress: false` là bắt buộc: cắt ngang một lệnh đang ghi dữ liệu (nhập bảng kê, dựng
-# lại trạng thái) nguy hiểm hơn nhiều so với việc phải chờ.
-concurrency:
-  group: vps-operations
-  cancel-in-progress: false
+# SAU: khoá đi theo THỨ THẬT SỰ ĐỤNG MÁY CHỦ.
+#
+#   gates       — máy của GitHub, đọc mã nguồn.      KHÔNG khoá.
+#   build_image — máy của GitHub, đẩy ảnh lên GHCR.  KHÔNG khoá.
+#   release     — SSH vào VPS, khởi động lại dịch vụ. `vps-mutating`, cancel-in-progress: false.
+#
+# `vps-mutating` là nhóm DÙNG CHUNG với các thao tác ghi của `ops-vps.yml`: một lệnh nhập bảng kê
+# và một lượt deploy vẫn KHÔNG BAO GIỜ chạy đè lên nhau. Đổi lại, một lượt `status` hay `db-query`
+# không còn phải chờ hết một lượt deploy.
+#
+# `cancel-in-progress: false` là bắt buộc: cắt ngang một lượt deploy đang chạy migration nguy hiểm
+# hơn nhiều so với việc phải chờ.
 
 # `packages: write` để đẩy image lên GHCR bằng GITHUB_TOKEN — không cần secret mới.
 permissions:
@@ -36,16 +44,30 @@ jobs:
   #
   # Trước đây năm bước cổng được CHÉP thẳng vào đây. Nay chúng sống ở `gates.yml` và cả CI của PR
   # lẫn deploy đều gọi cùng một tệp — hai bản chép sẽ trôi xa nhau, và bản trôi chậm hơn là bản
-  # người ta tin. Deploy vẫn KHÔNG chạy nếu cổng đỏ: bước SSH `needs: gates`.
+  # người ta tin. Deploy vẫn KHÔNG chạy nếu cổng đỏ: job `release` khai `needs: [gates, …]`.
   gates:
     uses: ./.github/workflows/gates.yml
     with:
       ref: ${{ github.sha }}
 
-  deploy:
-    needs: gates
+  # ═══ DỰNG IMAGE Ở CI, KHÔNG DỰNG TRÊN VPS — VÀ KHÔNG GIỮ KHOÁ PRODUCTION ═══
+  #
+  # Deploy #208, #227 và #228 đều chết vì `next build` bị SIGKILL trên VPS ~1,9 GB đang chạy
+  # Postgres + ứng dụng + bộ lập lịch + Caddy (#228 đã chỉ còn MỘT lần dựng mà vẫn chết; `npm ci`
+  # trong Docker mất 11 phút vì máy đang tráo bộ nhớ). Máy chạy của GitHub có 7 GB: dựng ở đây,
+  # đẩy lên GHCR theo đúng SHA, VPS chỉ `docker pull` rồi khởi động lại — vài chục giây, không
+  # đụng RAM của dịch vụ đang phục vụ người dùng.
+  #
+  # VÌ SAO KHÔNG `needs: gates`: job này chạy trên máy của GitHub và KHÔNG chạm VPS, nên nó chạy
+  # SONG SONG với cổng thay vì nối đuôi — cắt được trọn thời gian dựng ảnh khỏi đường tới
+  # production. Nó KHÔNG làm yếu cổng: `release` mới là thứ chạm máy chủ, và `release` cần CẢ HAI
+  # job. Ảnh của một commit đỏ cổng vẫn nằm ở GHCR nhưng không bao giờ được triển khai.
+  build_image:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
+    outputs:
+      image: ${{ steps.build.outputs.image }}
+      sha: ${{ steps.build.outputs.sha }}
     steps:
       # BẢN ĐƯỢC KIỂM PHẢI LÀ BẢN ĐƯỢC TRIỂN KHAI: ghim thẳng vào SHA thay vì tên nhánh.
       # Nhánh có thể được đẩy tiếp trong lúc workflow đang chạy (hai phiên làm việc song song),
@@ -53,24 +75,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-          # Cần commit cha để kiểm "sổ migration chỉ nối vào cuối" (tests/repo-integrity.test.ts).
-          fetch-depth: 2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Cài phụ thuộc
-        run: npm ci
-      # Năm bước cổng (toàn vẹn · typecheck · lint · test · build) chạy ở job `gates` bên trên,
-      # trên ĐÚNG SHA này. Job dưới đây chỉ chạy khi job đó xanh.
-
-      # ═══ DỰNG IMAGE Ở CI, KHÔNG DỰNG TRÊN VPS ═══
-      #
-      # Deploy #208, #227 và #228 đều chết vì `next build` bị SIGKILL trên VPS ~1,9 GB đang chạy
-      # Postgres + ứng dụng + bộ lập lịch + Caddy (#228 đã chỉ còn MỘT lần dựng mà vẫn chết; `npm ci`
-      # trong Docker mất 11 phút vì máy đang tráo bộ nhớ). Máy chạy của GitHub có 7 GB: dựng ở đây,
-      # đẩy lên GHCR theo đúng SHA, VPS chỉ `docker pull` rồi khởi động lại — vài chục giây, không
-      # đụng RAM của dịch vụ đang phục vụ người dùng.
       - name: Đăng nhập GHCR
         uses: docker/login-action@v3
         with:
@@ -78,9 +82,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Dựng image và đẩy lên GHCR theo SHA
+        id: build
         env:
           IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
         run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
           IMAGE_LC="$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')"
           # Heap cho `next build` TRONG image. Mặc định trong Dockerfile là 1024 để bảo vệ đường
           # dựng-trên-VPS (máy ~1,9 GB, sự cố #208/#227/#228); ở đây máy có 7 GB và chỉ dựng một
@@ -88,8 +95,56 @@ jobs:
           # drizzle có thêm một bảng — đo lại thì 2048 đã qua, lấy 4096 cho có biên.
           docker build --build-arg BUILD_HEAP_MB=4096 -t "$IMAGE_LC" .
           docker push "$IMAGE_LC"
-          echo "ERP_IMAGE=$IMAGE_LC" >> "$GITHUB_ENV"
+          echo "image=$IMAGE_LC" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "Đã đẩy $IMAGE_LC"
+
+  # ═══ JOB DUY NHẤT ĐỤNG TỚI MÁY CHỦ — VÀ JOB DUY NHẤT GIỮ KHOÁ ═══
+  #
+  # Khoá bắt đầu ở ĐÂY, tức là ở đúng thời điểm đầu tiên có thể tác động tới VPS. Trước bản này
+  # khoá bắt đầu từ giây đầu tiên của cả workflow, nên ~20 phút cổng + dựng ảnh trên máy GitHub
+  # cũng chặn mọi lượt `status` / `logs` / `db-query` của các phiên khác.
+  release:
+    needs: [gates, build_image]
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    concurrency:
+      # DÙNG CHUNG với các thao tác GHI của `ops-vps.yml`: deploy và một lệnh nhập bảng kê không
+      # bao giờ chạy đè lên nhau. Đổi tên nhóm ở một trong hai tệp là gỡ bỏ sự bảo đảm đó mà
+      # không ai nhận ra — `tests/ops-concurrency.test.ts` chặn ở mức mã nguồn.
+      group: vps-mutating
+      cancel-in-progress: false
+    steps:
+      # ═══ RELEASE PHẢI TRIỂN KHAI ĐÚNG BẢN ĐÃ QUA CỔNG — ĐO, KHÔNG HỨA ═══
+      #
+      # Ba SHA phải trùng nhau: bản cổng thật sự đã kiểm, bản đã được dựng thành ảnh, và bản
+      # workflow đang triển khai. Chúng có thể lệch thật: `gates` và `build_image` là hai lượt
+      # checkout RIÊNG, và cả hai đều lấy theo `github.sha`, nên một lỗi cấu hình sau này (ai đó
+      # đổi thành tên nhánh cho "tiện") sẽ làm chúng trỏ vào hai commit khác nhau mà không có
+      # thông báo nào. So ở đây thì lỗi ấy dừng TRƯỚC khi SSH chạy.
+      - name: Ba SHA phải trùng (cổng · ảnh · bản triển khai)
+        env:
+          GATES_SHA: ${{ needs.gates.outputs.sha }}
+          BUILD_SHA: ${{ needs.build_image.outputs.sha }}
+          ERP_IMAGE: ${{ needs.build_image.outputs.image }}
+          ERP_DEPLOY_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "cổng đã kiểm  : $GATES_SHA"
+          echo "ảnh đã dựng   : $BUILD_SHA  ($ERP_IMAGE)"
+          echo "sắp triển khai: $ERP_DEPLOY_SHA"
+          if [ "$GATES_SHA" != "$ERP_DEPLOY_SHA" ]; then
+            echo "::error::Cổng kiểm $GATES_SHA nhưng workflow đang triển khai $ERP_DEPLOY_SHA — DỪNG."; exit 1
+          fi
+          if [ "$BUILD_SHA" != "$ERP_DEPLOY_SHA" ]; then
+            echo "::error::Ảnh dựng từ $BUILD_SHA nhưng workflow đang triển khai $ERP_DEPLOY_SHA — DỪNG."; exit 1
+          fi
+          # Nhãn của ảnh CHÍNH LÀ SHA (xem job build_image). Kiểm cả nhãn: ảnh là thứ VPS kéo về,
+          # nên nó mới là thứ quyết định mã nào thật sự chạy.
+          if [ "${ERP_IMAGE##*:}" != "$ERP_DEPLOY_SHA" ]; then
+            echo "::error::Nhãn ảnh (${ERP_IMAGE##*:}) không phải SHA đang triển khai ($ERP_DEPLOY_SHA) — DỪNG."; exit 1
+          fi
+          echo "✓ Ba SHA trùng nhau."
 
       - name: Kiểm tra Secrets bắt buộc
         env:
@@ -131,7 +186,7 @@ jobs:
           SEPAY_WEBHOOK_API_KEY: ${{ secrets.SEPAY_WEBHOOK_API_KEY }}
           SEPAY_API_TOKEN: ${{ secrets.SEPAY_API_TOKEN }}
           # Image đã dựng ở CI + thông tin đăng nhập GHCR (GITHUB_TOKEN chỉ sống trong lần chạy này).
-          ERP_IMAGE: ${{ env.ERP_IMAGE }}
+          ERP_IMAGE: ${{ needs.build_image.outputs.image }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # AI Copilot — tuỳ chọn. Secret trống thì .env giữ nguyên giá trị cũ (không xoá khoá đang dùng).
