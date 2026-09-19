@@ -23,6 +23,7 @@ import { isAffirmativeText } from "@/lib/ai-workforce/agents/sales/confirm";
 import { RUN_BREAKDOWNS, intentDistribution, pagesWithConversations, salesModelBreakdown, salesRunBreakdown } from "@/lib/queries/sales-metrics";
 import { listShadowTurns, shadowMetrics } from "@/lib/queries/sales-review";
 import { clearMemo } from "@/lib/cache";
+import { PancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { fanpageOps } from "@/lib/queries/fanpage-ops";
 
 /** Mốc gốc CỐ ĐỊNH — mốc trong ca là số phút tương đối, nên bài kiểm không già đi (AGENTS.md mục 50). */
@@ -553,6 +554,63 @@ export async function testSalesRegression(db: Db) {
   */
   const muonDoi = understandByRule("muốn đổi");
   assert.ok(muonDoi.confidence < 0.35, '"muốn đổi" phải rơi dưới ngưỡng tin cậy ⇒ chuyển người, KHÔNG được trả lời bừa');
+
+  /*
+    ── MÁY CHỦ LẶP LẠI TRANG MỘT: DỪNG SỚM, KHÔNG ĐẾM HAI LẦN, VÀ NÓI RA ──
+
+    ĐO TỪ VPS 19/09/2026: Pancake bỏ qua cả `page_size` lẫn `page_number` — trang 2 trùng đủ 60/60
+    mã với trang 1. Điều kiện dừng cũ (`list.length < 50`) không bao giờ đúng khi máy chủ luôn trả
+    60, nên lượt nạp gọi đủ HAI MƯƠI lần cho MỘT trang dữ liệu.
+
+    Bài kiểm dựng lại đúng máy chủ ấy bằng một `fetch` giả và khoá ba tính chất:
+      · gọi ĐÚNG HAI lần (lần hai để phát hiện sự lặp, không phải để lấy dữ liệu);
+      · trả về 60 mã KHÁC NHAU, không phải 120 dòng có 60 bản sao;
+      · `paginationStalled` bật lên, vì im lặng ở đây biến CHƯA LẤY HẾT thành ĐÃ LẤY HẾT.
+
+    Dùng `fetch` giả chứ không gọi Pancake thật: bài kiểm phải chạy được offline, chạy lại cho cùng
+    một kết quả, và không bao giờ tiêu hạn mức của một dịch vụ bên ngoài.
+  */
+  {
+    const SAU_MUOI = Array.from({ length: 60 }, (_, i) => ({
+      id: `conv-lap-${i}`,
+      customers: [{ id: `cust-${i}`, name: `Khách ${i}` }],
+      updated_at: "2026-09-19T07:44:49.000000",
+    }));
+    // ĐẾM RIÊNG lời gọi DANH SÁCH HỘI THOẠI. Client còn xin page token trước đó, nên đếm tổng số
+    // lượt `fetch` là đếm cả một lời gọi thuộc việc khác — bài kiểm sẽ nói sai về vòng lặp.
+    let soLanGoi = 0;
+    const fetchGoc = globalThis.fetch;
+    globalThis.fetch = (async (u: string | URL | Request) => {
+      if (String(u).includes("/conversations")) soLanGoi += 1;
+      return new Response(JSON.stringify({ success: true, conversations: SAU_MUOI }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      const client = new PancakePagesClient("token-gia", "https://khong-goi-that.invalid");
+      const ds = await client.listConversations("page-lap", new Date(Date.now() - 86_400_000), new Date(), 200);
+      assert.equal(soLanGoi, 2, `máy chủ lặp lại trang một ⇒ phải dừng sau 2 lời gọi, đang gọi ${soLanGoi}`);
+      assert.equal(ds.length, 60, "phải trả 60 hội thoại KHÁC NHAU, không phải 120 dòng có bản sao");
+      assert.equal(new Set(ds.map((c) => c.id)).size, 60, "không mã nào được đếm hai lần");
+      assert.equal(client.paginationStalled, true, "phải nói ra rằng mẻ này CHƯA lấy hết cửa sổ");
+
+      // VẾ NGƯỢC: máy chủ trả hết ngay lần đầu (ít hơn một trang) thì KHÔNG được báo lặp.
+      soLanGoi = 0;
+      const ITHON = SAU_MUOI.slice(0, 10);
+      globalThis.fetch = (async (u: string | URL | Request) => {
+        if (String(u).includes("/conversations")) soLanGoi += 1;
+        return new Response(JSON.stringify({ success: true, conversations: ITHON }), { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch;
+      const client2 = new PancakePagesClient("token-gia", "https://khong-goi-that.invalid");
+      const ds2 = await client2.listConversations("page-it", new Date(Date.now() - 86_400_000), new Date(), 200);
+      assert.equal(ds2.length, 10);
+      assert.equal(soLanGoi, 1, "trang đầu chưa đầy ⇒ dừng ngay, không gọi thêm");
+      assert.equal(client2.paginationStalled, false, "không lặp thì không được bật cờ — cảnh báo sai địa chỉ tệ hơn không cảnh báo");
+    } finally {
+      globalThis.fetch = fetchGoc;
+    }
+  }
 
   console.log(
     `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai) · truy vấn tình trạng vận hành CHẠY THẬT trên lược đồ đã migrate · ${BE_MAT_MOI.length} tệp bề mặt mới KHÔNG có đường gửi tin / tạo đơn nào · lọc theo page cộng lại ra đúng tổng và ô tìm thật sự thu hẹp · phân bố ý định KHÔNG phân hoạch (cố ý) và không trùng dòng · ma trận tiếng Việt 45 câu: xác nhận · màu · size · ý muốn mua · khiếu nại`,

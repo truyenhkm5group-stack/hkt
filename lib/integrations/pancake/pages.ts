@@ -30,6 +30,17 @@ function toDate(value: unknown): Date | null {
 
 export class PancakePagesClient {
   private pageTokens = new Map<string, string>();
+  /**
+   * LƯỢT GỌI `listConversations` GẦN NHẤT có gặp cảnh máy chủ lặp lại trang một không.
+   *
+   * ĐẶT LẠI Ở ĐẦU MỖI LƯỢT GỌI, và điều đó là bắt buộc: nơi gọi duyệt nhiều page bằng CÙNG MỘT
+   * đối tượng client, nên một cờ dính lại sau page thứ nhất sẽ gán tội cho mọi page sau nó. Một
+   * cảnh báo sai địa chỉ còn tệ hơn không cảnh báo — người đọc đi kiểm một page vốn không sao.
+   *
+   * Nó công khai vì "mẻ vừa nạp đã lấy hết hội thoại trong cửa sổ chưa" là câu nơi gọi phải trả
+   * lời được: im lặng ở đây biến CHƯA LẤY HẾT thành ĐÃ LẤY HẾT (luật 45).
+   */
+  paginationStalled = false;
   constructor(
     private readonly accessToken = env.pancake.pagesAccessToken,
     private readonly baseUrl = env.pancake.pagesBaseUrl,
@@ -92,10 +103,30 @@ export class PancakePagesClient {
     return { key: "access_token", value: this.accessToken };
   }
 
-  /** Hội thoại cập nhật trong khoảng thời gian (mới nhất trước), tối đa `limit` */
+  /**
+   * Hội thoại cập nhật trong khoảng thời gian (mới nhất trước), tối đa `limit`.
+   *
+   * ═══ VÌ SAO CÓ ĐIỀU KIỆN DỪNG "KHÔNG THÊM MÃ MỚI" ═══
+   *
+   * ĐO TỪ VPS 19/09/2026 trên page 1117899664739453: xin `page_size=20` nhận về 60; trang 1 và
+   * trang 2 trùng ĐỦ 60/60 mã hội thoại. Pancake bỏ qua CẢ `page_size` LẪN `page_number`.
+   *
+   * Điều kiện dừng cũ là `list.length < 50`. Máy chủ luôn trả 60 nên điều kiện ấy KHÔNG BAO GIỜ
+   * đúng: vòng lặp chạy đủ hai mươi lượt, mỗi lượt nhận lại y nguyên trang một, rồi `slice` cắt
+   * ra 200 dòng mà chỉ 60 mã là khác nhau. Hai mươi lời gọi cho một trang dữ liệu — và chính bài
+   * kiểm đọc, bắn mười lời gọi liền nhau, đã ăn 429 của Pancake. Lượt nạp này bắn hai mươi.
+   *
+   * ĐÂY KHÔNG PHẢI BẢN VÁ PHÂN TRANG. Chưa biết tên tham số đúng là gì (sáu tên đã dò đều chưa
+   * đo được vì 429), nên đoán một tên là tự dựng ra niềm tin rằng đã sửa. Cái sửa được ngay mà
+   * không cần đoán là: THÔI GỌI LẠI khi máy chủ đã lặp lại chính nó, và KHÔNG đếm một hội thoại
+   * hai lần. Phần dữ liệu vượt trần vẫn chưa lấy được — `paginationStalled` nói ra điều đó để nó
+   * không biến mất trong im lặng.
+   */
   async listConversations(pageId: string, since: Date, until: Date, limit = 200): Promise<PancakeConversation[]> {
     const token = await this.pageToken(pageId);
     const out: PancakeConversation[] = [];
+    const daThay = new Set<string>();
+    this.paginationStalled = false;
     for (let pageNumber = 1; pageNumber <= 20 && out.length < limit; pageNumber++) {
       const rec = await this.call(`pages/${pageId}/conversations`, {
         [token.key]: token.value,
@@ -107,7 +138,17 @@ export class PancakePagesClient {
       });
       const list = asArray(rec.conversations ?? asRecord(rec.data).conversations ?? rec.data).map(asRecord);
       if (!list.length) break;
+      // Trang này có mã nào CHƯA từng thấy không? Không có ⇒ máy chủ đang lặp lại chính nó ⇒ mọi
+      // lời gọi tiếp theo cũng sẽ như vậy. Kiểm TRƯỚC khi ghi để không đẩy bản sao vào `out`.
+      const maMoi = list.map((c) => str(c.id, c.conversation_id)).filter((id) => id && !daThay.has(id));
+      if (pageNumber > 1 && maMoi.length === 0) {
+        this.paginationStalled = true;
+        break;
+      }
       for (const c of list) {
+        const ma = str(c.id, c.conversation_id);
+        if (ma && daThay.has(ma)) continue;
+        if (ma) daThay.add(ma);
         const customer = asRecord(asArray(c.customers)[0] ?? c.customer ?? c.from);
         const phones = [...asArray(c.recent_phone_numbers), ...asArray(customer.phone_numbers)].map((p) => str(asRecord(p).phone_number, p)).filter(Boolean);
         out.push({

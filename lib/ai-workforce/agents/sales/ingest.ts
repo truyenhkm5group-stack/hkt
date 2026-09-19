@@ -565,6 +565,20 @@ export async function syncSalesConversations(
     let conversationList: Awaited<ReturnType<typeof client.listConversations>> = [];
     try {
       conversationList = await client.listConversations(page.id, since, until, limit);
+      /*
+        MÁY CHỦ LẶP LẠI TRANG MỘT ⇒ MẺ NÀY CHƯA LẤY HẾT CỬA SỔ.
+
+        Ghi thành một dòng ĐỌC ĐƯỢC chứ không nuốt đi. Một mẻ nạp trả về 60 hội thoại trông y hệt
+        một mẻ nạp đã lấy hết — khác nhau đúng ở chỗ này, và nếu chỗ này im lặng thì mọi con số
+        dựng trên nó (độ phủ, tỷ lệ chuyển người, chi phí mỗi hội thoại) đều đứng trên một mẫu bị
+        cắt mà không ai biết. KHÔNG phải lỗi kết nối nên không `continue`: dữ liệu lấy được vẫn
+        dùng được, chỉ là chưa đủ.
+      */
+      if (client.paginationStalled) {
+        const cau = `Page ${page.id}: Pancake lặp lại trang một — mẻ này chỉ lấy được ${conversationList.length} hội thoại, CHƯA phải toàn bộ cửa sổ.`;
+        errors.push(cau);
+        await recordAiError({ scope: "INGEST", agentKey: "sales", message: cau }, db);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       errors.push(`${page.name}: ${message}`);
