@@ -91,6 +91,7 @@ on:
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
           - ai-staging-report     # CHỈ ĐỌC: báo cáo chất lượng lượt nạp (12 khối) — chạy lại được bất cứ lúc nào
+          - ai-staging-runtime    # CHỈ ĐỌC: nấc quyền hạn CÓ HIỆU LỰC + ba công tắc + page thí điểm + mốc đọc + bằng chứng an toàn
           - ai-staging-status     # trạng thái bản chạy thử + RAM/swap + sức khoẻ production
           - ai-staging-logs       # 120 dòng log gần nhất của app bản chạy thử
           - ai-staging-down       # dừng bản chạy thử (arg "--volumes" để xoá cả CSDL của nó)
@@ -1231,6 +1232,37 @@ jobs:
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
                   "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/ai-staging-report.sql?ref=${STAGING_BRANCH}" \
                   | docker exec -i vnx-ai-staging-db psql -U erp -d erp -P pager=off -f - ;;
+
+              ai-staging-runtime)
+                cd /opt/vnx-ai-staging
+                #
+                # CHỈ ĐỌC — KHÔNG GHI MỘT DÒNG NÀO, KHÔNG DỰNG LẠI CONTAINER NÀO.
+                #
+                # Vì sao phải có thao tác này dù đã có `ai-staging-copilot` và `ai-staging-live-ingest`:
+                # cả hai thao tác ấy GHI trước rồi mới đọc lại. Nhánh `--off` của bộ nạp ghi
+                # `AI_LIVE_INGEST_ENABLED=false` vào `.env.staging` và dựng lại container — tức là
+                # muốn BIẾT trạng thái thì phải ĐỔI nó. Với một bản chạy thử đang có phiên khác
+                # dùng, đó là cái giá không được phép trả.
+                #
+                # Nấc quyền hạn in ra là KẾT QUẢ PHÉP TÍNH (`effectiveMode`), không phải cột
+                # `ai_agents.mode`: cột từng ghi COPILOT trong khi mã đang chạy tính ra SHADOW.
+                echo "── NẤC QUYỀN HẠN CÓ HIỆU LỰC ──"
+                fetch_staging_script ai-effective-mode.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-effective-mode.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-effective-mode.ts || echo "  ✗ nấc LỆCH — xem ở trên"
+                echo ""
+                echo "── BA CÔNG TẮC, ĐỌC TỪ MÔI TRƯỜNG CỦA CHÍNH CONTAINER ĐANG CHẠY ──"
+                docker exec vnx-ai-staging-app sh -lc 'echo "  MÁY tự gửi        : ${AI_ALLOW_AUTO_SEND:-(chưa đặt)}"; echo "  NGƯỜI bấm gửi     : ${AI_ALLOW_HUMAN_APPROVED_SEND:-(chưa đặt)}"; echo "  tạo đơn           : ${AI_ALLOW_ORDER_CREATE:-(chưa đặt)}"; echo "  bộ nạp sống       : ${AI_LIVE_INGEST_ENABLED:-(chưa đặt)}"; echo "  nhà cung cấp mô hình: ${AI_WORKFORCE_PROVIDER:-${AI_PROVIDER:-(chưa đặt)}}"; echo "  gọi mô hình       : ${AI_MODEL_CALLS_ENABLED:-(chưa đặt)}"'
+                echo ""
+                echo "── CONTAINER ──"
+                docker ps -a --filter 'name=vnx-ai-staging' --format '  {{.Names}}\t{{.Status}}' || true
+                echo ""
+                echo "── DANH SÁCH PAGE THÍ ĐIỂM + MỐC ĐỌC + BẰNG CHỨNG AN TOÀN ──"
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/ai-staging-runtime.sql?ref=${STAGING_BRANCH}" \
+                  | docker exec -i vnx-ai-staging-db psql -U erp -d erp -P pager=off -f -
+                echo ""
+                kiem_production ;;
 
               ai-staging-status)
                 echo "── container bản chạy thử ──"
