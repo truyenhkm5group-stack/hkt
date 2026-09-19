@@ -19,6 +19,7 @@ import { buildOrderDraft, ORDER_REQUIREMENTS, QUANTITY_WARN_FROM } from "@/lib/c
 import { EMPTY_SALES_STATE, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { missingOrderRequirements } from "@/lib/ai-workforce/agents/sales/confirm";
 import { findColor, findSize, understandByRule } from "@/lib/ai-workforce/agents/sales/understand";
+import { isAffirmativeText } from "@/lib/ai-workforce/agents/sales/confirm";
 import { RUN_BREAKDOWNS, intentDistribution, pagesWithConversations, salesModelBreakdown, salesRunBreakdown } from "@/lib/queries/sales-metrics";
 import { listShadowTurns, shadowMetrics } from "@/lib/queries/sales-review";
 import { clearMemo } from "@/lib/cache";
@@ -483,7 +484,77 @@ export async function testSalesRegression(db: Db) {
     assert.equal(new Set(ten).size, ten.length, "mỗi ý định đúng một dòng");
   }
 
+  /* ═══════════ 15. MA TRẬN CHUẨN HOÁ TIẾNG VIỆT ═══════════
+     Hai trong bốn lỗi đã bắt được đều sinh ra từ phép bỏ dấu, nên vùng này phải có một tấm lưới
+     DÀY chứ không phải vài ví dụ lẻ. Mỗi dòng dưới đây là một câu khách THẬT SỰ gõ. */
+
+  // ── XÁC NHẬN ──
+  for (const t of ["vâng", "vâng ạ", "dạ", "dạ chị lấy", "ok em", "được em", "lấy nhé", "chốt em"]) {
+    assert.ok(isAffirmativeText(t), `"${t}" phải đọc là ĐỒNG Ý`);
+  }
+  // Và câu HỎI có chứa chữ đồng ý thì KHÔNG phải đồng ý.
+  for (const t of ["ok chưa shop", "được không ạ", "chốt chưa em"]) {
+    assert.ok(!isAffirmativeText(t), `"${t}" là câu HỎI, không phải lời đồng ý`);
+  }
+
+  // ── MÀU ──
+  for (const [cau, mong] of [
+    ["lấy màu vàng", "Vàng"], ["lấy màu đỏ", "Đỏ"], ["màu đỏ đô nhé", "Đỏ"], ["cho chị màu đen", "Đen"],
+    ["màu nâu ạ", "Nâu"], ["màu xanh", "Xanh"], ["màu xanh lá", "Xanh"], ["màu xanh navy", "Xanh"],
+  ] as const) {
+    assert.equal(findColor(cau), mong, `màu của "${cau}"`);
+  }
+  // KHÔNG PHẢI MÀU. Dòng đầu là lỗi đã đo được: bỏ dấu làm "vâng" trùng "vàng".
+  for (const t of ["vâng", "vâng ạ", "cái đó", "khi nào hàng đến", "chị tìm mẫu này", "để chị xem đã", "bên em còn không"]) {
+    assert.equal(findColor(t), "", `"${t}" KHÔNG được đọc thành một màu`);
+  }
+
+  // ── SIZE: CÂU HỎI KHÔNG BAO GIỜ LÀ MỘT LỰA CHỌN ──
+  for (const t of ["size gì", "mặc size nào", "60kg mặc size gì", "chị cao 1m60 nặng 55kg", "cho chị hỏi size"]) {
+    assert.equal(findSize(t), "", `"${t}" là câu HỎI size, không được ghi thành một size`);
+  }
+  // ── SIZE: LỰA CHỌN PHẢI ĐỌC ĐƯỢC ──
+  for (const [cau, mong] of [["lấy XL", "XL"], ["đổi sang L", "L"], ["cho chị size M", "M"], ["lấy size 2XL", "2XL"]] as const) {
+    assert.equal(findSize(cau), mong, `size của "${cau}"`);
+  }
+  // SỐ HAI CHỮ SỐ TRÔI NỔI KHÔNG PHẢI SIZE. Size số chỉ nhận qua chữ "size"/"số" đứng trước —
+  // "giá 50 nghìn" mà đọc thành size 50 là ghi một lựa chọn khách chưa hề đưa ra.
+  for (const t of ["giá 50 nghìn thôi", "chị 55 tuổi rồi", "lấy 2 cái"]) {
+    assert.equal(findSize(t), "", `"${t}" không được đọc thành size`);
+  }
+  assert.equal(findSize("cho chị size 30"), "30", "size SỐ vẫn nhận khi có chữ size đứng trước");
+
+  // ── Ý MUỐN MUA: KIỂM HÀNH VI, KHÔNG KIỂM NHÃN ──
+  // "chốt mẫu này" ra CONFIRM chứ không ra PURCHASE_INTENT, và điều đó KHÔNG sao: `applyUnderstanding`
+  // bật ý muốn mua cho cả CONFIRM. Kiểm nhãn thay vì kiểm hành vi là ép dây chuyền theo một hình
+  // dạng nó không cần có.
+  const BAT_Y_MUON_MUA = ["PURCHASE_INTENT", "CONFIRM", "PROVIDE_CONTACT", "PROVIDE_ADDRESS"];
+  for (const t of ["lấy cho chị mẫu này", "chốt mẫu này", "chị lấy đỏ XL", "đặt giúp chị", "lấy 2 cái"]) {
+    const intents = understandByRule(t).intents;
+    assert.ok(intents.some((i) => BAT_Y_MUON_MUA.includes(i)), `"${t}" phải làm ý muốn mua DÍNH LẠI — đang ra ${intents.join(",")}`);
+  }
+
+  // ── KHIẾU NẠI / VIỆC SAU BÁN: PHẢI VỀ TAY NGƯỜI ──
+  for (const t of ["hàng lỗi", "hàng rách", "giao sai màu", "muốn trả", "chưa nhận được hàng", "bưu tá không giao"]) {
+    const intents = understandByRule(t).intents;
+    assert.ok(intents.includes("COMPLAINT") || intents.includes("AFTER_SALES"), `"${t}" phải vào nhóm người xử — đang ra ${intents.join(",")}`);
+  }
+  /*
+    "MUỐN ĐỔI" CỐ Ý KHÔNG ĐƯỢC KHAI TỪ KHOÁ, và đây là một QUYẾT ĐỊNH chứ không phải một chỗ sót.
+
+    Nó mang HAI nghĩa trái ngược nhau tuỳ lúc: "muốn đổi sang màu đỏ" là khách đang chọn mẫu mã
+    GIỮA MỘT CUỘC BÁN, còn "muốn đổi hàng" là việc sau bán. Khai nó vào nhóm sau bán thì mọi khách
+    đang chọn màu đều bị ném sang hàng đợi chăm sóc — một đơn sắp chốt đổi lấy một việc không có
+    thật.
+
+    Không khai thì độ tin rơi xuống 0,2 và dây chuyền CHUYỂN NGƯỜI vì không đủ tin. Khách vẫn được
+    người thật xử lý; chỉ lý do là "máy không chắc" thay vì "việc sau bán" — và với một câu thật sự
+    mơ hồ thì "máy không chắc" mới là câu trung thực.
+  */
+  const muonDoi = understandByRule("muốn đổi");
+  assert.ok(muonDoi.confidence < 0.35, '"muốn đổi" phải rơi dưới ngưỡng tin cậy ⇒ chuyển người, KHÔNG được trả lời bừa');
+
   console.log(
-    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai) · truy vấn tình trạng vận hành CHẠY THẬT trên lược đồ đã migrate · ${BE_MAT_MOI.length} tệp bề mặt mới KHÔNG có đường gửi tin / tạo đơn nào · lọc theo page cộng lại ra đúng tổng và ô tìm thật sự thu hẹp · phân bố ý định KHÔNG phân hoạch (cố ý) và không trùng dòng`,
+    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai) · truy vấn tình trạng vận hành CHẠY THẬT trên lược đồ đã migrate · ${BE_MAT_MOI.length} tệp bề mặt mới KHÔNG có đường gửi tin / tạo đơn nào · lọc theo page cộng lại ra đúng tổng và ô tìm thật sự thu hẹp · phân bố ý định KHÔNG phân hoạch (cố ý) và không trùng dòng · ma trận tiếng Việt 45 câu: xác nhận · màu · size · ý muốn mua · khiếu nại`,
   );
 }

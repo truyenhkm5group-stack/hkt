@@ -34,7 +34,7 @@
  * KHÔNG GHI GÌ. Không gửi gì. Nội dung khách bị CHE khi in — kho mã này PUBLIC.
  */
 import "dotenv/config";
-import { and, desc, eq, gte } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { moneyMentions } from "@/lib/ai-workforce/agents/sales/generate";
 import { safetyFlags, SAFETY_FLAG_LABEL, type SafetyFlag } from "@/lib/constants/sales-quality";
@@ -60,6 +60,7 @@ type Row = {
   stateAfter: unknown;
   action: string;
   customerText: string;
+  handoffReason: string;
 };
 
 /**
@@ -94,7 +95,9 @@ async function main() {
         facts: s.factsJson,
         action: s.action,
         stateAfter: r.stateAfter,
+        decision: r.decision,
         triggerMessageId: s.triggerMessageId,
+        customerText: sql<string>`coalesce((select m.text from sales_messages m where m.id = ${s.triggerMessageId}), '')`,
       })
       .from(s)
       .leftJoin(r, eq(r.id, s.runId))
@@ -109,7 +112,8 @@ async function main() {
     facts: (x.facts ?? null) as Record<string, unknown> | null,
     stateAfter: x.stateAfter,
     action: x.action ?? "",
-    customerText: "",
+    customerText: String(x.customerText ?? ""),
+    handoffReason: String(((x.decision ?? {}) as Record<string, unknown>).handoffReason ?? ""),
   }));
 
   console.log("═══════ SOI LẠI CHẤT LƯỢNG TRÊN DỮ LIỆU THẬT ═══════");
@@ -180,7 +184,7 @@ async function main() {
     ds.push(row);
     theoHoiThoai.set(row.conversationId, ds);
   }
-  type Mat = { conversationId: string; o: string; truoc: string; runTruoc: string | null; runSau: string | null; luc: Date };
+  type Mat = { conversationId: string; o: string; truoc: string; runTruoc: string | null; runSau: string | null; luc: Date; cauKhach: string };
   const mat: Mat[] = [];
   let soHoiThoaiNhieuLuot = 0;
 
@@ -197,12 +201,12 @@ async function main() {
         const b = String(sau[o] ?? "").trim();
         // CHỈ tính khi lượt sau về RỖNG. Đổi giá trị là khách đổi ý — hợp lệ.
         if (a && !b) {
-          mat.push({ conversationId, o, truoc: a, runTruoc: xuoi[i - 1].runId, runSau: xuoi[i].runId, luc: xuoi[i].createdAt });
+          mat.push({ conversationId, o, truoc: a, runTruoc: xuoi[i - 1].runId, runSau: xuoi[i].runId, luc: xuoi[i].createdAt, cauKhach: xuoi[i].customerText });
         }
       }
       // Mẫu mã đã khoá rồi mất cũng là mất — và là lần mất đắt nhất, vì nó xoá cả một lựa chọn đã chốt.
       if (truoc.variantId && !sau.variantId) {
-        mat.push({ conversationId, o: "variantId", truoc: truoc.variantLabel || truoc.variantId, runTruoc: xuoi[i - 1].runId, runSau: xuoi[i].runId, luc: xuoi[i].createdAt });
+        mat.push({ conversationId, o: "variantId", truoc: truoc.variantLabel || truoc.variantId, runTruoc: xuoi[i - 1].runId, runSau: xuoi[i].runId, luc: xuoi[i].createdAt, cauKhach: xuoi[i].customerText });
       }
     }
   }
@@ -217,6 +221,8 @@ async function main() {
     console.log("\n  Ví dụ (tối đa 8):");
     for (const m of mat.slice(0, 8)) {
       console.log(`    ${m.conversationId} · ô "${m.o}" đang là "${mask(m.truoc, 30)}" → rỗng · ${m.luc.toISOString()}`);
+      // CÂU CỦA KHÁCH LÀM MẤT — không có nó thì "2 lần mất" là một con số không đi tới đâu.
+      console.log(`      khách vừa nhắn: "${mask(m.cauKhach, 80) || "(không có chữ)"}"`);
       console.log(`      lượt trước ${m.runTruoc ?? "—"} → lượt sau ${m.runSau ?? "—"}`);
     }
   } else {
@@ -229,6 +235,23 @@ async function main() {
   console.log("\n───────── 3. VIỆC MÁY CHỌN LÀM ─────────");
   for (const [a, n] of [...theoViec.entries()].sort((x, y) => y[1] - x[1])) {
     console.log(`    ${String(n).padStart(4)} × ${a || "(rỗng)"}`);
+  }
+
+  /* ───────── 4. VÌ SAO CHUYỂN NGƯỜI ───────── */
+  const chuyen = rows.filter((x) => x.action === "HANDOFF_HUMAN");
+  console.log("\n───────── 4. VÌ SAO CHUYỂN NGƯỜI ─────────");
+  console.log(`  tổng chuyển người : ${chuyen.length}/${rows.length} lượt (${rows.length ? ((chuyen.length / rows.length) * 100).toFixed(1) : "—"}%)`);
+  const theoLyDo = new Map<string, number>();
+  for (const c of chuyen) theoLyDo.set(c.handoffReason || "(không ghi lý do)", (theoLyDo.get(c.handoffReason || "(không ghi lý do)") ?? 0) + 1);
+  for (const [ly, n] of [...theoLyDo.entries()].sort((a, b) => b[1] - a[1])) {
+    console.log(`    ${String(n).padStart(4)} × ${ly}`);
+  }
+  // Một lý do chiếm áp đảo KHÔNG phải tin xấu tự nó — nhưng nó nói chỗ duy nhất đáng sửa tiếp theo.
+  const dauBang = [...theoLyDo.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (dauBang && chuyen.length) {
+    console.log(`\n  ⇒ ${((dauBang[1] / chuyen.length) * 100).toFixed(0)}% số lần chuyển người là vì "${dauBang[0]}".`);
+    console.log("    Đây là chỗ đáng sửa tiếp theo — không phải vì chuyển người là sai, mà vì một lý do");
+    console.log("    chiếm áp đảo nghĩa là MỘT việc đang chặn phần lớn hội thoại.");
   }
 
   console.log("\n───────── KẾT LUẬN ─────────");

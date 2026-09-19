@@ -171,7 +171,7 @@ const KEYWORDS: Record<SalesIntent, string[]> = {
     Nhận rộng ở đây KHÔNG mở đường cho một đơn ma: ý muốn mua chỉ đẩy giai đoạn đi tiếp, còn lên
     đơn vẫn phải qua xác nhận CÓ NGỮ CẢNH và đủ năm điều kiện máy chủ.
   */
-  PURCHASE_INTENT: ["chot don", "chot cho em", "lay 1", "lay 2", "lay cai nay", "dat hang", "dat 1", "mua", "order", "ship cho em", "gui cho em", "lay em", "em lay", "lay cho chi", "lay cho anh", "lay cho em", "lay cho minh", "cho chi lay", "chi lay"],
+  PURCHASE_INTENT: ["chot don", "chot cho em", "lay 1", "lay 2", "lay cai nay", "dat hang", "dat 1", "mua", "order", "ship cho em", "gui cho em", "lay em", "em lay", "lay cho chi", "lay cho anh", "lay cho em", "lay cho minh", "cho chi lay", "chi lay", "dat giup", "dat cho chi", "dat cho em", "chot mau"],
   PROVIDE_VARIANT: [],
   PROVIDE_CONTACT: ["so dien thoai", "sdt cua em", "sdt em", "lien he em"],
   PROVIDE_ADDRESS: ["dia chi", "gui ve", "giao ve", "so nha", "thon", "xa", "phuong", "quan", "huyen", "tinh", "thanh pho"],
@@ -207,7 +207,7 @@ const KEYWORDS: Record<SalesIntent, string[]> = {
   */
   COMPLAINT: ["kem chat luong", "lua dao", "hang loi", "hang bi loi", "bi loi", "hang hong", "hang bi hong", "giao sai", "gui sai", "rach", "ban qua", "that vong", "bao xau", "khieu nai"],
   ASK_HUMAN: ["gap nhan vien", "nguoi that", "cho gap ad", "noi chuyen voi nguoi", "bot a", "may tra loi"],
-  AFTER_SALES: ["doi size", "doi mau", "tra hang", "tra lai", "muon tra", "doi tra", "hoan tien", "don cua em dau", "khi nao giao", "chua nhan duoc", "van don"],
+  AFTER_SALES: ["doi size", "doi mau", "tra hang", "tra lai", "muon tra", "doi tra", "doi hang", "muon doi hang", "hoan tien", "don cua em dau", "khi nao giao", "chua nhan duoc", "van don", "buu ta", "shipper"],
   OTHER: [],
 };
 
@@ -364,6 +364,12 @@ function isRealSize(raw: string): boolean {
   return /^\d{2}$/.test(v) && n >= 20 && n <= 60;
 }
 
+/**
+ * TỪ DẪN cho size MỘT CHỮ CÁI. "l" và "m" đứng trơ trọi giữa câu thì không phân biệt được với chữ
+ * viết tắt; đứng ngay sau một trong những từ này thì không còn mơ hồ.
+ */
+const TU_DAN_SIZE = ["size", "so", "lay", "mac", "chon", "doi", "sang", "mua"];
+
 export function findSize(text: string): string {
   const explicit = parseVariantText(text).size;
   if (isRealSize(explicit)) return explicit.toUpperCase();
@@ -373,6 +379,30 @@ export function findSize(text: string): string {
   if (m && isRealSize(m[1])) return m[1].toUpperCase();
   const words = n.trim().split(/\s+/);
   if (words.length === 1 && isRealSize(words[0])) return words[0].toUpperCase();
+
+  /*
+    "LẤY XL" — CÂU CHỌN SIZE NGẮN NHẤT, VÀ NÓ TỪNG KHÔNG ĐƯỢC ĐỌC.
+
+    Bản trước chỉ nhận size khi có chữ "size"/"số" đứng trước, hoặc khi cả tin nhắn CHỈ có đúng một
+    từ. "lấy XL" có hai từ và không có chữ "size", nên nó rơi ra: máy ghi nhận khách chưa chọn size
+    và đi hỏi lại đúng cái size khách vừa nói.
+
+    HAI ĐƯỜNG, và chúng khác nhau vì mức mơ hồ khác nhau:
+
+    1. Size NHIỀU CHỮ CÁI (xs · xl · xxl · 2xl …) đứng ở đâu cũng nhận. Không từ tiếng Việt nào
+       trùng với chúng, nên không có gì để nhầm.
+
+    2. Size MỘT CHỮ CÁI (s · m · l) đòi một TỪ DẪN ngay trước. "l" giữa câu có thể là bất cứ thứ gì;
+       "sang l" thì không.
+
+    CỐ Ý KHÔNG nhận size SỐ ở đường này. Size số (28 · 30 · 42) chỉ nhận qua chữ "size"/"số" đứng
+    trước, vì một số hai chữ số trôi nổi trong câu thường là tiền hoặc cân nặng: "giá 50 nghìn" mà
+    đọc thành size 50 thì máy ghi một lựa chọn khách chưa hề đưa ra.
+  */
+  const nhieuChu = words.find((w) => w.length >= 2 && SIZE_WORDS.includes(w));
+  if (nhieuChu) return nhieuChu.toUpperCase();
+  const motChu = words.findIndex((w, i) => i > 0 && SIZE_WORDS.includes(w) && TU_DAN_SIZE.includes(words[i - 1]));
+  if (motChu > 0) return words[motChu].toUpperCase();
   return "";
 }
 
