@@ -83,6 +83,7 @@ on:
           - ai-staging-shadow     # MẺ CHẠY NGẦM VỚI MÔ HÌNH THẬT (arg: "--page=<id> --max=20 [--dry-run]")
           - ai-staging-copilot    # BẬT/TẮT nấc TRỢ LÝ cho MỘT page (arg: "--page=<id> --on" | "--off"); MÁY TỰ GỬI vẫn ghim CẤM
           - ai-staging-domain     # TÊN MIỀN + HTTPS cho bản chạy thử (arg: "--prepare" | "--apply" | "--status" | "--off")
+          - ai-staging-probe     # CHỈ ĐỌC: dò vì sao một trang không bấm được (arg: "--email=...")
           - ai-staging-auth      # ĐĂNG NHẬP bản chạy thử: kiểm tra ("--check") · vá APP_URL ("--fix-app-url") · đặt lại tài khoản thí điểm ("--user --email=... --name=... [--role=ADMIN]") · thử đăng nhập thật ("--test --email=...")
           - ai-staging-live-ingest # BẬT/TẮT bộ nạp tin sống (arg: "--on [--seconds=45]" | "--off" | "--once"); chỉ ĐỌC, không bao giờ gửi
           - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
@@ -934,6 +935,12 @@ jobs:
                 docker exec vnx-ai-staging-app sh -lc 'echo "MÁY tự gửi   : ${AI_ALLOW_AUTO_SEND:-(chưa đặt)}"; echo "NGƯỜI bấm gửi: ${AI_ALLOW_HUMAN_APPROVED_SEND:-(chưa đặt)}"; echo "tạo đơn      : ${AI_ALLOW_ORDER_CREATE:-(chưa đặt)}"'
                 echo ""
                 echo "Mở hàng đợi: http://127.0.0.1:3100/ai/copilot (qua tunnel SSH)" ;;
+
+              ai-staging-probe)
+                cd /opt/vnx-ai-staging
+                fetch_staging_script ai-staging-review-probe.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-review-probe.ts'
+                docker exec -e AI_STAGING=1 -e STAGING_USER_PASSWORD="${STAGING_USER_PASSWORD:-}" vnx-ai-staging-app \
+                  npx tsx --tsconfig tsconfig.json scripts/ai-staging-review-probe.ts ${ARG:-} ;;
 
               ai-staging-auth)
                 cd /opt/vnx-ai-staging
