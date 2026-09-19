@@ -130,6 +130,13 @@ export type CareCase = {
    */
   products: string[];
   reason: CareReasonKey;
+  /**
+   * Kiện còn nằm trong ĐIỀU KIỆN CẦN CARE hay không. `false` ⇒ dòng chỉ còn giá trị tra cứu: nó
+   * luôn ở góc nhìn "Đã xử lý", không cộng vào COD treo hay số vỡ hạn của hàng đợi đang chạy.
+   * Trình duyệt phải biết cờ này vì nó tự tính lại góc nhìn sau mỗi thao tác (`patch`) — thiếu nó
+   * thì một lần đổi trạng thái care sẽ kéo kiện đã hết việc quay lại tab Cần care.
+   */
+  inCareCondition: boolean;
   reasonClass: CareReasonClass;
   reasonLabel: string;
   reasonDetail: string;
@@ -233,7 +240,36 @@ export type CareCaseDetail = {
      */
     carrierConfigured: boolean;
   };
-  order: { id: string; systemId: number | null; total: number; prepaid: number; items: { name: string; qty: number; price: number }[]; chatUrl: string | null } | null;
+  /**
+   * ĐƠN HÀNG — VÀ ĐỦ SỐ ĐỂ GIẢI THÍCH VÌ SAO COD KHÁC TỔNG SẢN PHẨM.
+   *
+   * Người trực nhìn "sản phẩm 998.000" cạnh "COD 749.000" rồi phải đoán: khách được giảm giá?
+   * trả trước một phần? phí ship shop chịu? gõ nhầm? Mỗi lần đoán là một cuộc gọi hỏi lại kế toán.
+   * Các con số dưới đây đến thẳng từ Pancake (`orders`), KHÔNG tính lại ở ERP — ERP chỉ BÀY phép
+   * cộng ra để người đọc tự đối chiếu, và khi phép cộng không khớp thì NÓI THẲNG là không khớp
+   * chứ không sửa hộ một con số nào.
+   *
+   *  · `subtotal`   — `orders.total_price` (tiền hàng trước giảm)
+   *  · `discount`   — `orders.total_discount`
+   *  · `shippingFee`— `orders.shipping_fee` (phần khách trả)
+   *  · `total`      — `orders.total_price_after_discount`
+   *  · `prepaid`    — đã trả trước (chuyển khoản + tiền mặt + cọc)
+   *
+   * `itemsTruncated` = danh sách mặt hàng đã bị cắt bớt ⇒ TUYỆT ĐỐI không được cộng các dòng đang
+   * hiện rồi gọi đó là tổng tiền hàng.
+   */
+  order: {
+    id: string;
+    systemId: number | null;
+    total: number;
+    prepaid: number;
+    subtotal: number | null;
+    discount: number | null;
+    shippingFee: number | null;
+    items: { name: string; qty: number; price: number; isBonus: boolean }[];
+    itemsTruncated: boolean;
+    chatUrl: string | null;
+  } | null;
   customer: { name: string; phone: string; history: { delivered: number; returned: number; totalOrders: number } | null };
   /** Hành trình ĐVVC thô, mới nhất trước. */
   journey: { at: Date; status: string; note: string; location: string; source: string }[];

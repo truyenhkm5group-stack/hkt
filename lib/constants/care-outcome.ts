@@ -102,7 +102,7 @@ export type CareResolution = (typeof CARE_RESOLUTIONS)[number];
  */
 export const CARE_WORKFLOW_LABEL: Record<string, string> = {
   NEW: "Chưa xử lý",
-  ASSIGNED: "Đã giao người",
+  ASSIGNED: "Đã giao việc",
   IN_PROGRESS: "Đang xử lý",
   WAITING_CUSTOMER: "Chờ khách",
   WAITING_CARRIER: "Chờ ĐVVC",

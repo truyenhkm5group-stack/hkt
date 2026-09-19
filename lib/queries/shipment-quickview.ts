@@ -30,7 +30,9 @@ export type QuickView = {
   codAmount: number;
   orderId: string | null;
   orderSystemId: number | null;
-  items: { name: string; qty: number; price: number }[];
+  items: { name: string; qty: number; price: number; isBonus: boolean }[];
+  /** Danh sách mặt hàng đã bị cắt bớt — đừng cộng các dòng đang hiện rồi gọi đó là tổng tiền hàng. */
+  itemsTruncated: boolean;
   /** Hành trình ĐVVC, mới nhất trước. Chỉ nguồn MANG TIN, không có lần tra cứu rỗng. */
   timeline: { at: Date; status: string; note: string; location: string; source: string }[];
   failedAttempts: number;
@@ -95,16 +97,29 @@ export async function getShipmentQuickView(shipmentId: string): Promise<QuickVie
        limit 12
     `);
 
+  /*
+    DANH SÁCH MẶT HÀNG — kèm cờ HÀNG TẶNG.
+
+    Một dòng "1 × 0 ₫" không tự nói nó là quà tặng hay là một mẫu chưa ai điền giá; hai thứ đó đòi
+    hai việc khác nhau (một cái đúng rồi, một cái phải đi sửa đơn). `is_bonus` đã có sẵn trong
+    `order_items` và là lời khai của chính Pancake — dùng nó, không suy từ "giá bằng 0".
+
+    Lấy 13 dòng cho một danh sách in 12: dòng thứ 13 chỉ để BIẾT là đã cắt bớt. Thiếu nó thì màn
+    hình không có cách nào phân biệt "đơn đúng 12 mẫu" với "đơn 30 mẫu, đang xem 12" — và phép cộng
+    các dòng đang hiện sẽ được đọc như tổng tiền hàng.
+  */
+  const ITEMS_HIEN = 12;
   const itemsP = s.order_id
     ? db.execute(sql`
           select coalesce(nullif(oi.product_name, ''), 'Mẫu chưa rõ')
                  || case when oi.variation_detail <> '' then ' · ' || oi.variation_detail else '' end as name,
                  oi.quantity as qty,
-                 oi.unit_price as price
+                 oi.unit_price as price,
+                 oi.is_bonus
             from order_items oi
            where oi.order_id = ${s.order_id}
            order by oi.quantity desc
-           limit 12
+           limit ${ITEMS_HIEN + 1}
         `)
     : Promise.resolve([]);
 
@@ -144,7 +159,9 @@ export async function getShipmentQuickView(shipmentId: string): Promise<QuickVie
 
   const [timelineRaw, itemsRaw, hisRows, demHutRaw, careRaw] = await Promise.all([timelineP, itemsP, hisP, demHutP, careP]);
   const timeline = rowsOf<{ at: string; status: string; note: string; location: string; source: string }>(timelineRaw);
-  const items = s.order_id ? rowsOf<{ name: string; qty: number; price: string | number }>(itemsRaw) : [];
+  const itemsTatCa = s.order_id ? rowsOf<{ name: string; qty: number; price: string | number; is_bonus: boolean }>(itemsRaw) : [];
+  const itemsTruncated = itemsTatCa.length > ITEMS_HIEN;
+  const items = itemsTatCa.slice(0, ITEMS_HIEN);
   const [his] = hisRows;
   const [demHut] = rowsOf<{ lan: number }>(demHutRaw);
   const care = rowsOf<{ kind: string; note: string; actor: string; at: string }>(careRaw);
@@ -160,7 +177,8 @@ export async function getShipmentQuickView(shipmentId: string): Promise<QuickVie
     codAmount: Number(s.cod ?? 0),
     orderId: s.order_id,
     orderSystemId: s.system_id === null || s.system_id === undefined ? null : Number(s.system_id),
-    items: items.map((i) => ({ name: i.name, qty: Number(i.qty ?? 0), price: Number(i.price ?? 0) })),
+    items: items.map((i) => ({ name: i.name, qty: Number(i.qty ?? 0), price: Number(i.price ?? 0), isBonus: Boolean(i.is_bonus) })),
+    itemsTruncated,
     timeline: timeline.map((t) => ({ at: new Date(t.at), status: t.status, note: t.note ?? "", location: t.location ?? "", source: t.source })),
     failedAttempts: Number(demHut?.lan ?? 0),
     attemptNo: s.attempt_no === null || s.attempt_no === undefined ? null : Number(s.attempt_no),

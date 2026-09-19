@@ -53,6 +53,11 @@ const REASON_CLASS: Record<CareReasonKey, CareReasonClass> = {
   DATA_GAP: "DATA_FRESHNESS",
   RETURNING: "CARRIER_ACTION",
   RETURN_AT_SHOP: "CARRIER_ACTION",
+  /*
+    Lớp này chỉ quyết định dòng đi vào `cases` (lịch sử đọc được) hay `dataGaps` (thiếu dữ liệu
+    ĐVVC). Kiện đã rời điều kiện care KHÔNG thiếu dữ liệu — nó chỉ hết việc — nên nó thuộc `cases`.
+  */
+  LEFT_CARE_CONDITION: "CUSTOMER_ACTION",
 };
 
 const EMPTY_CARE: CareState = { status: "NEW", owner: null, followUpAt: null, lastNote: "", lastNoteAt: null, lastNoteBy: "", firstResponseAt: null, doneAt: null, reopenCount: 0, updatedAt: null, updatedBy: "", lastDecision: null };
@@ -151,22 +156,34 @@ async function loadLatestRequests(shipmentIds: string[]): Promise<Map<string, Ca
 }
 
 /** Mốc vào hàng đợi + năng lực API, một lượt cho cả tập kiện. */
-async function loadQueueFacts(shipmentIds: string[]): Promise<Map<string, { failedAt: Date | null; lastAt: Date | null; createdAt: Date; capability: string; vtpOrderNumber: string | null }>> {
+async function loadQueueFacts(shipmentIds: string[]): Promise<Map<string, { failedAt: Date | null; lastAt: Date | null; createdAt: Date; capability: string; vtpOrderNumber: string | null; failedAttempts: number }>> {
   if (!shipmentIds.length) return new Map();
   const db = await getDb();
-  const rows = rowsOf<{ id: string; failed_at: string | null; last_at: string | null; created_at: string; capability: string; vtp_order_number: string | null }>(
+  const rows = rowsOf<{ id: string; failed_at: string | null; last_at: string | null; created_at: string; capability: string; vtp_order_number: string | null; failed_attempts: number }>(
     await db.execute(sql`
       select s.id,
              s.created_at,
              s.tracking_capability as capability,
              nullif(s.vtp_order_number, '') as vtp_order_number,
              (select max(e.occurred_at) from shipment_events e where e.shipment_id = s.id and e.normalized_stage = 'DELIVERY_FAILED') as failed_at,
-             (select max(e.occurred_at) from shipment_events e where e.shipment_id = s.id) as last_at
+             (select max(e.occurred_at) from shipment_events e where e.shipment_id = s.id) as last_at,
+             /*
+               SỐ LẦN PHÁT HỤT — MỘT phép đếm cho cả hàng đợi, và là ĐÚNG phép đếm mà panel chi tiết
+               dùng (lib/queries/shipment-quickview.ts). Trước bản 19/09/2026 mỗi nguồn dòng tự
+               mang một con số: tháp giao vận đếm thật, case sai thông tin đếm thật, còn nhánh kiện
+               đã rời điều kiện care ghi thẳng 0. Đo production cùng ngày: vận đơn 474b6367 (Đang
+               chuyển hoàn) có 4 lần hụt trong shipment_events nhưng bảng xếp nó vào rổ "Chưa hụt
+               lần nào" — kiện hỏng nhiều nhất lại trông sạch nhất, đúng lúc nó đang chuyển hoàn.
+
+               Đếm theo CHẶNG ĐÃ CHUẨN HOÁ, không dò chữ: ĐVVC đổi một chữ là phép dò chữ lặng lẽ
+               trả về 0.
+             */
+             (select count(*) from shipment_events e where e.shipment_id = s.id and e.normalized_stage = 'DELIVERY_FAILED')::int as failed_attempts
         from shipments s
        where s.id in ${shipmentIds}
     `),
   );
-  return new Map(rows.map((r) => [r.id, { failedAt: r.failed_at ? new Date(r.failed_at) : null, lastAt: r.last_at ? new Date(r.last_at) : null, createdAt: new Date(r.created_at), capability: r.capability, vtpOrderNumber: r.vtp_order_number }]));
+  return new Map(rows.map((r) => [r.id, { failedAt: r.failed_at ? new Date(r.failed_at) : null, lastAt: r.last_at ? new Date(r.last_at) : null, createdAt: new Date(r.created_at), capability: r.capability, vtpOrderNumber: r.vtp_order_number, failedAttempts: Number(r.failed_attempts ?? 0) }]));
 }
 
 /**
@@ -318,11 +335,31 @@ async function buildQueue(): Promise<CareQueue> {
   };
 
   const all: CareCase[] = [];
-  const push = (base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier" | "products" | "vtpOrderNumber"> & { carrier: Omit<CareCase["carrier"], "trackingCapability" | "substate" | "substateLabel"> }) => {
+  const push = (
+    base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier" | "products" | "vtpOrderNumber"> & {
+      carrier: Omit<CareCase["carrier"], "trackingCapability" | "substate" | "substateLabel">;
+      /*
+        ═══ TƯ CÁCH HÀNG ĐỢI ĐI THEO ĐIỀU KIỆN CARE, KHÔNG THEO CỜ `active` CỦA ĐỢT ═══
+
+        `false` = kiện KHÔNG còn trong điều kiện cần care (không thuộc rổ nào của tháp giao vận,
+        không có case sai thông tin còn mở), dòng chỉ ở đây để tra lại lịch sử.
+
+        Vì sao cần cờ này: `careViewOf` chỉ nhìn TRẠNG THÁI của đợt care. Một kiện đã chuyển hoàn
+        mà đợt care còn mở ở `ASSIGNED` sẽ được xếp vào góc nhìn "Cần care" — và dòng đó in ra
+        "Đã rời điều kiện cần care · Nên: Không còn việc gì" trong khi vẫn cộng vào tổng kiện, vào
+        COD treo và vào số vỡ SLA đang chạy. Đo production 19/09/2026: 8 vận đơn như vậy, trong đó
+        474b6367 (Đang chuyển hoàn) và db48a154 (Chờ xử lý) mang đợt `ASSIGNED`/`WAITING_CARRIER`
+        còn mở. Hàng đợi này là ACTIONABLE POPULATION (xem đầu tệp) — kiện RỜI khi điều kiện hết,
+        không phải khi đội bấm xong, và cũng không phải "ở lại vì chưa ai bấm xong".
+      */
+      inCareCondition: boolean;
+    },
+  ) => {
     const dot = careMap.get(base.shipmentId);
     const care = toCareState(dot, dot ? (decisionMap.get(dot.id) ?? null) : null);
-    const { view, reopened } = careViewOf(care, base.queueSince, now);
-    const capability = facts.get(base.shipmentId)?.capability;
+    const { view, reopened } = base.inCareCondition ? careViewOf(care, base.queueSince, now) : { view: "done" as const, reopened: false };
+    const fact = facts.get(base.shipmentId);
+    const capability = fact?.capability;
     all.push({
       ...base,
       /*
@@ -334,7 +371,14 @@ async function buildQueue(): Promise<CareQueue> {
       vtpOrderNumber: facts.get(base.shipmentId)?.vtpOrderNumber ?? null,
       // TRẠNG THÁI CON TÍNH Ở ĐÚNG MỘT CHỖ — mọi nguồn dòng (tháp, case sai thông tin, kiện đã
       // đóng) đi qua đây, nên không nguồn nào có thể dùng một luật khác.
-      carrier: { ...base.carrier, ...substateOf(base.carrier), trackingCapability: asTrackingCapability(capability) },
+      carrier: {
+        ...base.carrier,
+        // SỐ LẦN PHÁT HỤT CHUẨN — cùng một phép đếm cho mọi nguồn dòng và cho cả panel chi tiết.
+        // Nguồn dòng chỉ còn là nơi lấy các cột khác; nó không được phép nói một con số riêng.
+        failedAttempts: fact?.failedAttempts ?? base.carrier.failedAttempts,
+        ...substateOf(base.carrier),
+        trackingCapability: asTrackingCapability(capability),
+      },
       products: productMap.get(base.shipmentId) ?? [],
       reasonClass: REASON_CLASS[base.reason],
       care,
@@ -361,6 +405,7 @@ async function buildQueue(): Promise<CareQueue> {
       reasonDetail: r.reasonLabel,
       nextAction: BUCKET_BY_KEY[r.bucket].nextAction,
       queueSince: queueSinceOf(r.shipmentId, null),
+      inCareCondition: true,
       lastCareAction: r.lastCsAction ? { label: r.lastCsAction, at: r.lastCsActionAt ?? now, byHuman: r.lastCsActionByHuman } : null,
       botMessageFailure: null,
     });
@@ -380,6 +425,7 @@ async function buildQueue(): Promise<CareQueue> {
       reasonDetail: w.title,
       nextAction: "Xác nhận lại với khách rồi sửa người nhận / địa chỉ trên Viettel Post trước khi bưu tá đi phát.",
       queueSince: new Date(w.opened_at),
+      inCareCondition: true,
       lastCareAction: null,
       botMessageFailure: null,
     });
@@ -394,12 +440,23 @@ async function buildQueue(): Promise<CareQueue> {
       customer: d.customer || "Khách chưa có tên",
       phone: d.phone,
       codAmount: Number(d.codAmount ?? 0),
-      carrier: { stage: d.stage, stageLabel: SHIPMENT_STAGE_LABEL[d.stage] ?? d.stage, vtpStatus: d.vtpStatus, rawStatus: d.rawStatus || "—", ageHours: null, failedAttempts: 0, leftWarehouse: d.pickedUpAt !== null },
-      reason: "CARE_TODAY",
-      reasonLabel: "Đã rời điều kiện cần care",
+      carrier: {
+        stage: d.stage,
+        stageLabel: SHIPMENT_STAGE_LABEL[d.stage] ?? d.stage,
+        vtpStatus: d.vtpStatus,
+        rawStatus: d.rawStatus || "—",
+        // Tuổi tin cũng đọc từ `facts` như mọi nguồn dòng khác — `null` ở đây từng là "chưa có tin"
+        // cho một kiện đã đi hết hành trình.
+        ageHours: facts.get(d.id)?.lastAt ? (now.getTime() - facts.get(d.id)!.lastAt!.getTime()) / 3_600_000 : null,
+        failedAttempts: 0,
+        leftWarehouse: d.pickedUpAt !== null,
+      },
+      reason: "LEFT_CARE_CONDITION",
+      reasonLabel: CARE_REASON_LABEL.LEFT_CARE_CONDITION,
       reasonDetail: "Kiện không còn trong điều kiện cần care",
       nextAction: "Không còn việc gì — theo dõi ở Tất cả vận đơn nếu cần.",
       queueSince: c?.createdAt ?? now,
+      inCareCondition: false,
       lastCareAction: null,
       botMessageFailure: null,
     });
@@ -491,7 +548,7 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
   const db = await getDb();
   const [qv, s, careRows, events, requests] = await Promise.all([
     getShipmentQuickView(shipmentId),
-    db.query.shipments.findFirst({ where: eq(schema.shipments.id, shipmentId), columns: { id: true, carrier: true, stage: true, attemptNo: true, trackingCapability: true, receiverAddress: true, vtpOrderNumber: true, trackingCode: true, vtpStatus: true, vtpStatusName: true }, with: { order: { columns: { id: true, systemId: true, totalPriceAfterDiscount: true, prepaid: true, transferMoney: true, cash: true } } } }),
+    db.query.shipments.findFirst({ where: eq(schema.shipments.id, shipmentId), columns: { id: true, carrier: true, stage: true, attemptNo: true, trackingCapability: true, receiverAddress: true, vtpOrderNumber: true, trackingCode: true, vtpStatus: true, vtpStatusName: true }, with: { order: { columns: { id: true, systemId: true, totalPrice: true, totalPriceAfterDiscount: true, totalDiscount: true, shippingFee: true, prepaid: true, transferMoney: true, cash: true } } } }),
     loadCareRows([shipmentId]),
     getCareEvents(shipmentId),
     db.select().from(schema.carrierActionRequests).where(eq(schema.carrierActionRequests.shipmentId, shipmentId)).orderBy(desc(schema.carrierActionRequests.createdAt)).limit(20),
@@ -548,7 +605,25 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
       vtpStatus: s.vtpStatus ?? null,
       carrierConfigured: vtpConfigured(),
     },
-    order: s.order ? { id: s.order.id, systemId: s.order.systemId, total: Number(s.order.totalPriceAfterDiscount ?? 0), prepaid: Number(s.order.prepaid ?? 0) + Number(s.order.transferMoney ?? 0) + Number(s.order.cash ?? 0), items: qv.items, chatUrl: qv.chatUrl } : null,
+    order: s.order
+      ? {
+          id: s.order.id,
+          systemId: s.order.systemId,
+          total: Number(s.order.totalPriceAfterDiscount ?? 0),
+          prepaid: Number(s.order.prepaid ?? 0) + Number(s.order.transferMoney ?? 0) + Number(s.order.cash ?? 0),
+          /*
+            CHƯA BIẾT ≠ 0 (luật 42). Đơn nhập từ tài khoản ĐVVC không có ba cột này; in "0 ₫" ở đó
+            là khẳng định shop không giảm giá đồng nào và khách không trả phí ship — cả hai đều là
+            điều chưa ai chứng minh. `null` để màn hình bỏ dòng ấy ra khỏi phép cộng.
+          */
+          subtotal: s.order.totalPrice === null || s.order.totalPrice === undefined ? null : Number(s.order.totalPrice),
+          discount: s.order.totalDiscount === null || s.order.totalDiscount === undefined ? null : Number(s.order.totalDiscount),
+          shippingFee: s.order.shippingFee === null || s.order.shippingFee === undefined ? null : Number(s.order.shippingFee),
+          items: qv.items,
+          itemsTruncated: qv.itemsTruncated,
+          chatUrl: qv.chatUrl,
+        }
+      : null,
     customer: { name: qv.customer, phone: qv.phone, history: qv.history },
     journey: qv.timeline,
     care,

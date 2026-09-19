@@ -64,6 +64,7 @@ import {
   FOLLOW_UP_PRESETS,
   CARE_WAITING_STATUSES,
   defaultFollowUpAt,
+  followUpPresetAt,
   type CareStatus,
   type CareView,
   type CarrierActionKey,
@@ -73,6 +74,7 @@ import {
 import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import type { CareCase, CareState, CareWorkbench, CarrierRequestView } from "@/lib/queries/care-workbench";
+import { customerNameForDisplay } from "@/lib/constants/customer-name";
 import { VtpTrackingLink } from "@/components/vtp-tracking-link";
 import { getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
@@ -120,13 +122,6 @@ function gio(h: number | null) {
   if (h < 1) return "<1 giờ";
   if (h < 48) return `${Math.round(h)} giờ`;
   return `${Math.round(h / 24)} ngày`;
-}
-
-function sangMai() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(9, 0, 0, 0);
-  return d;
 }
 
 function reviveState(s: CareState): CareState {
@@ -219,7 +214,15 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
       prev.map((c) => {
         if (c.shipmentId !== shipmentId) return c;
         const revived = reviveState(care);
-        const { view: v, reopened } = careViewOf(revived, c.queueSince);
+        /*
+          KIỆN ĐÃ RỜI ĐIỀU KIỆN CARE KHÔNG QUAY LẠI TAB "CẦN CARE" VÌ MỘT LẦN ĐỔI TRẠNG THÁI.
+
+          `careViewOf` chỉ đọc trạng thái của ĐỢT care. Dòng đã hết điều kiện (`inCareCondition =
+          false`) mà mở lại / đổi sang "Đang xử lý" sẽ được nó xếp về "care" — đúng luật của nó,
+          sai với sự thật: điều kiện sinh ra việc đã hết. Máy chủ chốt điều đó, trình duyệt nghe
+          theo, nếu không thì hai bên nói hai điều khác nhau ngay sau cú bấm đầu tiên.
+        */
+        const { view: v, reopened } = c.inCareCondition ? careViewOf(revived, c.queueSince) : { view: "done" as const, reopened: false };
         return { ...c, ...extra, care: revived, view: v, reopened, sla: slaOf(c.queueSince, revived, new Date(), initial.slaHours) };
       }),
     );
@@ -289,6 +292,22 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   const queue = visible.map((c) => ({ shipmentId: c.shipmentId }));
   const moneyAtRisk = visible.reduce((a, c) => a + c.codAmount, 0);
   const overdue = visible.filter((c) => c.sla.firstResponseBreached || c.sla.resolveBreached).length;
+  /*
+    ═══ CÙNG PHÉP CỘNG, HAI CÂU KHÁC NHAU — VÀ TAB QUYẾT ĐỊNH CÂU NÀO ═══
+
+    `moneyAtRisk` và `overdue` cộng trên ĐÚNG tập dòng đang hiện. Ở tab "Cần care" đó là tiền đang
+    treo và số ca đang vỡ hạn — hai con số để hành động. Ở tab "Đã xử lý" thì chính phép cộng ấy trả
+    lời một câu khác hẳn: tiền của những ca ĐÃ ĐÓNG, và số ca TỪNG vỡ hạn phản hồi (`resolveBreached`
+    luôn tắt khi ca đã đóng, nhưng `firstResponseBreached` thì ở lại mãi nếu chưa ai từng chạm vào).
+
+    Đo trên production 19/09/2026: tab "Đã xử lý" in "COD treo 152,1 tr · 147 vỡ SLA" trên 272 ca đã
+    đóng — đọc thẳng ra là shop đang treo 152 triệu và có 147 việc quá hạn phải làm ngay, trong khi
+    con số thật của hàng đợi đang chạy nhỏ hơn hẳn. Không phải phép cộng sai: NHÃN sai. Nên nhãn đi
+    theo tab, và tab lịch sử nói rõ nó đang nhìn về quá khứ.
+  */
+  const dangChay = view === "care" || view === "waiting" || view === "escalated";
+  const nhanTien = dangChay ? "COD treo" : "COD của các ca này";
+  const nhanHan = dangChay ? "vỡ SLA" : "từng vỡ hạn phản hồi";
 
   const bulkStatus = (status: CareStatus) =>
     start(async () => {
@@ -366,12 +385,26 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
       {/* Dải tóm tắt + bộ lọc nhẹ: tất cả trên một hàng, không có thẻ KPI to. */}
       <div className="flex flex-wrap items-center gap-2 text-[12px]">
         <span className="font-semibold">{formatNumber(visible.length)} kiện</span>
-        <span className="text-muted-foreground">· COD treo {formatVND(moneyAtRisk, { compact: true })}</span>
-        {overdue ? <span className="font-semibold text-rose-600 dark:text-rose-400">· {formatNumber(overdue)} vỡ SLA</span> : null}
+        <span className="text-muted-foreground">
+          · {nhanTien} {formatVND(moneyAtRisk, { compact: true })}
+        </span>
+        {overdue ? (
+          <span className={cn("font-semibold", dangChay ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground")}>
+            · {formatNumber(overdue)} {nhanHan}
+          </span>
+        ) : null}
         <span className="text-muted-foreground">· chưa ai nhận {formatNumber(visible.filter((c) => !c.care.owner).length)}</span>
         <InfoHint>
           {/* Số giờ đọc từ ngưỡng ĐANG HIỆU LỰC máy chủ gửi xuống — chủ shop đổi hạn ở cấu hình thì câu này đổi theo, không phải sửa mã. */}
           SLA: phản hồi đầu trong {formatNumber(hours.firstResponseHours)} giờ, đóng hoặc escalate trong {formatNumber(hours.resolveHours)} giờ, tính từ lúc kiện VÀO điều kiện cần care (lần giao hụt gần nhất / tin cuối). Kiện rời danh sách khi điều kiện hết (đã giao, đã hoàn…) — lịch sử giữ nguyên.
+          {dangChay ? null : (
+            <>
+              <br />
+              <br />
+              <b>Tab này là LỊCH SỬ.</b> Hai con số trên cộng trên các ca ĐÃ ĐÓNG: tiền là COD của chính các ca đó (không phải tiền đang treo),
+              và “từng vỡ hạn phản hồi” đếm ca mà tới lúc đóng vẫn chưa ai chạm vào trong hạn — nó không sinh ra việc phải làm hôm nay.
+            </>
+          )}
         </InfoHint>
         {daLoc ? (
           <button type="button" onClick={xoaLoc} className="rounded-full border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent">
@@ -631,8 +664,18 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
                 <th className="px-2 py-2 font-semibold" title="Chiều ĐVVC — chứng từ Viettel Post, đội không sửa được">
                   VTP báo
                 </th>
-                <th className="px-2 py-2 font-semibold" title="Chiều nội bộ — đội đã quyết gì và đang ở đâu. KHÔNG suy ra từ trạng thái VTP: “Đã hoàn” ở đây là quyết định của shop, không phải chứng từ hoàn của Viettel Post.">
-                  Care · kết quả xử lý
+                {/*
+                  HAI Ô, HAI CÂU HỎI — TIÊU ĐỀ PHẢI NÓI RA CẢ HAI.
+
+                  “Care · kết quả xử lý” gộp hai trường khác hẳn nhau vào một cụm chữ: KẾT QUẢ CASE
+                  (đội quyết gì: Đã hoàn · Phát tiếp · Xử lý sau) và TRẠNG THÁI CARE (đội đang ở đâu
+                  trong quy trình: Chưa xử lý · Đang xử lý · Chờ khách…). Người đọc lần đầu tưởng
+                  chúng là một, rồi đọc “Chờ phát lại” ở ô trạng thái và tưởng Viettel Post vừa nói
+                  vậy.
+                */}
+                <th className="px-2 py-2 font-semibold" title="Chiều nội bộ — đội đã quyết gì (KẾT QUẢ CASE) và đang ở đâu (TRẠNG THÁI CARE). KHÔNG suy ra từ trạng thái VTP: “Đã hoàn” ở đây là quyết định của shop, không phải chứng từ hoàn của Viettel Post.">
+                  Kết quả case
+                  <span className="ml-1 font-normal normal-case text-muted-foreground/70">+ trạng thái care</span>
                 </th>
                 <th className="px-2 py-2 font-semibold">Note gần nhất</th>
                 <th className="px-2 py-2 font-semibold">Viettel Post</th>
@@ -808,6 +851,7 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
     });
 
   const breached = c.sla.firstResponseBreached || c.sla.resolveBreached;
+  const ten = customerNameForDisplay(c.customer, c.phone);
   /*
     MỘT LUẬT CHO MỌI NÚT: cùng `canRequestCarrierAction` mà máy chủ dùng, trên đúng dữ liệu thô
     (mã + chữ + chặng + năng lực tài khoản). Trước đây bàn care lọc bằng `carrierActionAllowed`
@@ -868,7 +912,15 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
         </div>
       </td>
       <td className="px-2 py-2">
-        <div className="font-medium">{c.customer}</div>
+        {/* Tên Pancake điền hộ ("Khách hàng 0984107775") KHÔNG được bày như một cái tên đã biết —
+            xem lib/constants/customer-name.ts. Không đoán tên thay, chỉ nói thẳng là chưa có. */}
+        {ten.isPlaceholder ? (
+          <div className="font-medium text-muted-foreground" title={ten.raw ? `Pancake điền sẵn: “${ten.raw}” — chưa ai hỏi tên khách.` : "Đơn không có tên người mua."}>
+            {ten.text}
+          </div>
+        ) : (
+          <div className="font-medium">{ten.text}</div>
+        )}
         {c.phone ? (
           // Gọi được thì bấm; nhắn Zalo / dán vào Pancake thì cần sao chép. Hai việc khác nhau nên
           // phải có hai nút — một cái link `tel:` không giúp gì cho người đang mở cửa sổ chat.
@@ -884,7 +936,12 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
         <div className="numeric font-semibold">{formatVND(c.codAmount)}</div>
       </td>
       <td className="px-2 py-2">
-        <div>{c.carrier.rawStatus}</div>
+        {/* Tiền tố “VTP:” vì cùng một cụm chữ (“Chờ phát lại”) còn xuất hiện ở lý do care và ở
+            trạng thái care — ba chỗ, ba nghĩa. Chỉ dòng này là CHỨNG TỪ của đơn vị vận chuyển. */}
+        <div title="Nguyên văn trạng thái Viettel Post gửi về — không thao tác nào của đội sửa được dòng này">
+          <span className="mr-1 rounded bg-violet-100 px-1 text-[10px] font-semibold text-violet-800 dark:bg-violet-950/60 dark:text-violet-300">VTP</span>
+          {c.carrier.rawStatus}
+        </div>
         <div className="text-[11px] text-muted-foreground">
           {c.carrier.stageLabel} · {gio(c.carrier.ageHours)}
           {c.carrier.failedAttempts ? ` · hụt ${c.carrier.failedAttempts} lần` : ""}
@@ -898,6 +955,7 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
           được kể cả khi ERP chưa khai tài khoản API, kiện chưa có mã vận đơn, hay kiện đã kết thúc.
           Lệnh gửi sang Viettel Post nằm ở cột "Viettel Post" bên phải — khối đó mới được phép khoá.
         */}
+        <div className="mb-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground/70">Kết quả case</div>
         <ResolutionControl
           value={c.care.lastDecision?.decision ?? null}
           pending={pending}
@@ -910,7 +968,13 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
             {c.care.lastDecision.by || "không rõ người"} · {formatTimeAgo(c.care.lastDecision.at)}
           </div>
         ) : null}
-        <div className="mt-1 flex flex-wrap items-center gap-1">
+        {/*
+          TRƯỜNG THỨ HAI, NÓI RÕ NÓ LÀ CHIỀU NÀO. “Chờ phát lại” ở ô này là TRẠNG THÁI CARE của đội
+          (đã hẹn / đã yêu cầu, đang chờ bưu tá đi), KHÔNG phải câu Viettel Post vừa gửi về — câu đó
+          nằm ở cột “VTP báo” bên trái và không thao tác nào của đội sửa được.
+        */}
+        <div className="mt-1.5 text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground/70">Trạng thái care</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-1">
           {terminal ? (
             <button type="button" disabled={pending} onClick={reopen} className="h-7 rounded-md border px-2 text-[11.5px] font-medium hover:bg-accent" title="Case đã đóng — mở lại để tiếp tục care (lịch sử giữ nguyên)">
               Mở lại
@@ -961,7 +1025,7 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
             </button>
           ) : (
             FOLLOW_UP_PRESETS.map((p) => (
-              <button key={p.key} type="button" disabled={pending} className="rounded border px-1 py-px text-[10.5px] hover:bg-accent" onClick={() => followUp(p.hours < 0 ? sangMai() : new Date(Date.now() + p.hours * 3600_000))}>
+              <button key={p.key} type="button" disabled={pending} className="rounded border px-1 py-px text-[10.5px] hover:bg-accent" onClick={() => followUp(followUpPresetAt(p))}>
                 {p.label}
               </button>
             ))

@@ -12,11 +12,13 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Textarea } from "@/components/ui/textarea";
 import { resolveNotification } from "@/lib/actions/alerts";
 import { loadCareWorkspace, recordCareAction, type CareWorkspace } from "@/lib/actions/care";
-import { recordCareDecision, requestCarrierAction, setCareOwner } from "@/lib/actions/care-workbench";
+import { recordCareDecision, requestCarrierAction, setCareFollowUp, setCareOwner } from "@/lib/actions/care-workbench";
 import { ResolutionBadge, ResolutionControl, type ResolutionExtra } from "@/app/(dashboard)/shipments/resolution-control";
 import type { CareState } from "@/lib/care/contracts";
 import { journeyTone, parseCourier } from "@/lib/care/journey-display";
-import { CARE_STATUS_LABEL, CARE_STATUS_TONE, type CareStatus } from "@/lib/constants/care";
+import { CARE_STATUS_LABEL, CARE_STATUS_TONE, FOLLOW_UP_PRESETS, followUpPresetAt, type CareStatus } from "@/lib/constants/care";
+import { customerNameForDisplay } from "@/lib/constants/customer-name";
+import { isAppShortcut } from "@/lib/keyboard";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { BUSINESS_ACTION_LABEL } from "@/lib/constants/care-outcome";
@@ -246,6 +248,28 @@ export function CareDrawer({
       await naplai();
     });
 
+  /*
+    HẸN NHANH TRONG PANEL — CÙNG BỘ NÚT, CÙNG PHÉP TÍNH, CÙNG MỘT CỘT `follow_up_at` VỚI BẢNG.
+
+    Ba nút +2 giờ · Sáng mai · +2 ngày trước đây chỉ có ở dòng ngoài bảng. Người trực đang mở panel
+    để gọi khách — đúng lúc họ biết nên hẹn lại khi nào — lại phải đóng panel, tìm lại dòng, rồi
+    bấm. Thực tế quan sát được là họ không hẹn nữa, và ca chìm.
+
+    Dùng lại `FOLLOW_UP_PRESETS` + `followUpPresetAt` (hàm thuần ở `lib/constants/care.ts`) chứ
+    không chép phép tính: chép là mở đường cho "Sáng mai" của panel khác "Sáng mai" của bảng.
+  */
+  const doFollowUp = (at: Date | null) =>
+    start(async () => {
+      const r = await setCareFollowUp({ shipmentId: current.shipmentId, at });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      phatCapNhat(current.shipmentId, r.data);
+      toast.success(at ? `Hẹn xem lại ${formatDateTime(at)}` : "Đã bỏ hẹn xem lại");
+      await naplai();
+    });
+
   // Mở từ ngoài (ô lệnh ⌘K) cũng phải nạp dữ liệu — nếu chỉ nạp trong hàm bấm nút thì panel mở ra
   // rỗng và đứng im mãi.
   useEffect(() => {
@@ -254,25 +278,39 @@ export function CareDrawer({
   }, [open]);
 
   /*
-    ═══ PHÍM TẮT: CHỈ KHI KHÔNG AI ĐANG GÕ ═══
+    ═══ PHÍM TẮT: CHỈ KHI KHÔNG AI ĐANG GÕ, VÀ 1·2·3 KHÔNG BAO GIỜ GHI THẲNG ═══
 
-    J/K đi kiện · 1/2/3 mở ba kết quả · N nhảy vào ô note. Điều kiện chặn đứng TRƯỚC mọi nhánh: một
-    người đang gõ "note 3 lần gọi" mà bị nhảy kiện thì họ mất cả câu vừa gõ và mất cả chỗ đang đứng.
-    Phím có phụ trợ (Ctrl/⌘/Alt) cũng bỏ qua — đó là phím tắt của trình duyệt, không phải của ta.
+    J/K đi kiện · 1/2/3 CHỌN một trong ba kết quả · N nhảy vào ô note.
+
+    ─── VÌ SAO 1·2·3 CHỈ CHỌN, KHÔNG GHI ───
+
+    Một ký tự là phím nhanh nhất và cũng nguy hiểm nhất: nó trùng với ký tự người ta gõ. Nếu nó ghi
+    thẳng thì mỗi lần bắt hụt (con trỏ vừa rời ô note, một lớp nổi vừa đóng) là một dòng sổ SAI
+    trong `care_decisions` — sổ CHỈ THÊM, không sửa được. Hoàn tác thì phải ghi thêm một dòng nữa
+    để huỷ dòng trước, và nhật ký kể một câu chuyện chưa từng xảy ra: "đã hoàn rồi lại không hoàn".
+
+    Nên phím chỉ MỞ bảng của kết quả đó (`setOpenFor`), còn nút "Ghi nhận" mới ghi. Bấm hụt thì
+    đóng bảng, không có gì được ghi, không có gì phải hoàn tác. Một cú bấm thêm rẻ hơn một sổ sai.
+
+    ─── CHẶN ĐỨNG TRƯỚC MỌI NHÁNH ───
+
+    `isAppShortcut` (`lib/keyboard.ts`) loại: đang gõ vào input/textarea/select/contenteditable/ô
+    tìm kiếm/ô note (dò bằng `closest`, vì điểm nhận phím có thể là một thẻ con bên trong), phím có
+    phụ trợ Ctrl/⌘/Alt (phím tắt của trình duyệt), và lượt gõ giữa chừng của bộ gõ tiếng Việt.
   */
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement | null;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable || el.getAttribute("role") === "combobox")) return;
+      if (!isAppShortcut(e)) return;
       if (e.key === "j" || e.key === "J") {
         if (tiep) chuyen(tiep);
       } else if (e.key === "k" || e.key === "K") {
         if (truoc) chuyen(truoc);
       } else if (e.key === "1" || e.key === "2" || e.key === "3") {
         if (!ws?.canManage) return;
-        setOpenFor(CARE_DECISIONS[Number(e.key) - 1]);
+        // CHỌN, không ghi. Bấm lại cùng phím thì đóng bảng — thoát được bằng đúng phím vừa bấm.
+        const chon = CARE_DECISIONS[Number(e.key) - 1];
+        setOpenFor((truoc) => (truoc === chon ? null : chon));
       } else if (e.key === "n" || e.key === "N") {
         e.preventDefault();
         noteRef.current?.focus();
@@ -285,6 +323,7 @@ export function CareDrawer({
 
   const vtpUrl = getViettelPostTrackingUrl(data?.shipment.vtpOrderNumber);
   const resolution = data?.care.lastDecision?.decision ?? null;
+  const tenKhach = customerNameForDisplay(data?.customer.name, data?.customer.phone);
 
   /* Nhật ký gộp ba nguồn, mới nhất trước — xem `LogRow`. Dựng ở client vì nó chỉ là cách BÀY, không
      phải một phép đo: ba nguồn vẫn là ba bảng riêng ở CSDL. */
@@ -420,7 +459,14 @@ export function CareDrawer({
             <SheetTitle className="flex flex-wrap items-center gap-2 text-base">
               {data ? (
                 <>
-                  <span>{data.customer.name}</span>
+                  {/* Tên Pancake điền hộ không được bày như tên đã biết — lib/constants/customer-name.ts */}
+                  {tenKhach.isPlaceholder ? (
+                    <span className="text-muted-foreground" title={tenKhach.raw ? `Pancake điền sẵn: “${tenKhach.raw}” — chưa ai hỏi tên khách.` : "Đơn không có tên người mua."}>
+                      {tenKhach.text}
+                    </span>
+                  ) : (
+                    <span>{tenKhach.text}</span>
+                  )}
                   {/*
                     MÃ VẬN ĐƠN BẤM ĐƯỢC — mở thẳng trang tra cứu Viettel Post ở TAB MỚI, panel giữ
                     nguyên chỗ đang đứng. Địa chỉ dựng bằng `getViettelPostTrackingUrl`, cùng hàm mà
@@ -470,6 +516,72 @@ export function CareDrawer({
               <Loader2 className="size-4 animate-spin" /> Đang tải…
             </div>
           ) : (
+            <>
+              {/* ───── KẾT QUẢ CARE — LUÔN THẤY, VÀ KHÔNG ĐỨNG ĐÈ LÊN GÌ CẢ ─────
+
+                   Khối này TỪNG là `sticky top-0` bên trong vùng cuộn: luôn thấy thật, nhưng cái giá
+                   là nó NẰM ĐÈ. Cuộn tới đâu thì một hai dòng hành trình bị phủ tới đó — mà hành
+                   trình ĐVVC chính là căn cứ người trực đang đọc để quyết. Một dòng "Phát thất bại -
+                   khách hẹn lại" bị che thì nút bên trên vẫn bấm được, chỉ là bấm mà thiếu căn cứ.
+
+                   Không chữa được bằng `top` hay `scroll-padding-top`: phủ lên nội dung phía sau là
+                   BẢN CHẤT của `sticky`. Nên khối ra HẲN khỏi vùng cuộn, thành một dải cố định của
+                   panel. Vẫn luôn thấy, còn vùng cuộn bên dưới ngắn lại đúng bằng chiều cao của nó —
+                   không dòng nào bị phủ nữa.
+
+                   Ba nút này KHÔNG gửi gì sang ĐVVC và KHÔNG bao giờ bị khoá vì lý do ĐVVC.
+                   Lệnh gửi ĐVVC nằm trong vùng cuộn bên dưới, tách bạch cả về chỗ đứng lẫn về chữ. */}
+              <div className="shrink-0 border-y border-primary/30 bg-primary/[0.03] px-4 py-3">
+                <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                  <span className="text-[12px] font-semibold uppercase tracking-wide">Kết quả care</span>
+                  <span className="text-[11px] text-muted-foreground">ghi nhận việc người xử lý vừa quyết — KHÔNG gửi lệnh sang Viettel Post, KHÔNG đổi trạng thái vận đơn</span>
+                </div>
+                {/*
+                  HAI CHIỀU IN CẠNH NHAU, LUÔN LUÔN.
+
+                  "Kết quả care: Đã hoàn" và "VTP báo: Đang chuyển hoàn" được phép cùng đúng một
+                  lúc, và màn hình phải nói ra điều đó thay vì để người đọc tự suy. Nhãn "VTP báo"
+                  KHÔNG BAO GIỜ đổi theo quyết định care.
+                */}
+                <div
+                  className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-card px-2.5 py-1.5 text-[11.5px]"
+                  title="Kết quả care là QUYẾT ĐỊNH XỬ LÝ NỘI BỘ của shop. Trạng thái vận chuyển thực tế lấy từ Viettel Post và chỉ Viettel Post đổi được."
+                >
+                  <span>
+                    <span className="text-muted-foreground">Kết quả care: </span>
+                    <ResolutionBadge value={resolution} at={data.care.lastDecision?.at ?? null} by={data.care.lastDecision?.by} />
+                  </span>
+                  <span>
+                    <span className="text-muted-foreground">VTP báo: </span>
+                    <b className="font-medium">{data.shipment.rawStatus}</b>
+                  </span>
+                </div>
+                {ws.canManage ? (
+                  <ResolutionControl
+                    variant="panel"
+                    value={resolution}
+                    pending={pending}
+                    presets={ws.resolutionPresets}
+                    canEditPresets={ws.canManage}
+                    onSubmit={doResolution}
+                    openFor={openFor}
+                    onOpenForChange={setOpenFor}
+                  />
+                ) : (
+                  <p className="text-[12px] text-muted-foreground">Bạn không có quyền thao tác vận đơn (shipments:manage) nên ba nút kết quả bị khoá. Ghi chú và ghi nhận việc đã chăm thì vẫn làm được ở dưới.</p>
+                )}
+                {data.care.lastNote ? (
+                  <p className="mt-2 border-t pt-2 text-[12px]">
+                    <span className="text-muted-foreground">Note gần nhất: </span>
+                    {data.care.lastNote}
+                    <span className="text-[11px] text-muted-foreground">
+                      {" "}
+                      — {data.care.lastNoteBy || "không rõ người"} · {data.care.lastNoteAt ? formatDateTime(data.care.lastNoteAt) : "—"}
+                    </span>
+                  </p>
+                ) : null}
+              </div>
+
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-8 pt-3">
               {/* ───── Liên hệ: gọi · sao chép · chat · đơn ───── */}
               <div className="flex flex-wrap items-center gap-2">
@@ -541,68 +653,34 @@ export function CareDrawer({
                       </option>
                     ))}
                   </select>
+                  {/* HẸN XEM LẠI — cùng bộ nút và cùng phép tính với dòng ngoài bảng. */}
                   {data.care.followUpAt ? (
-                    <span className={cn("text-[11.5px]", data.care.followUpAt.getTime() <= Date.now() && "font-semibold text-rose-600 dark:text-rose-400")}>· hẹn {formatDateTime(data.care.followUpAt)}</span>
+                    <button
+                      type="button"
+                      disabled={pending || !ws.canManage}
+                      onClick={() => doFollowUp(null)}
+                      title={`Xem lại lúc ${formatDateTime(data.care.followUpAt)} — bấm để bỏ hẹn`}
+                      className={cn("text-[11.5px] hover:underline disabled:no-underline disabled:opacity-60", data.care.followUpAt.getTime() <= Date.now() && "font-semibold text-rose-600 dark:text-rose-400")}
+                    >
+                      · hẹn {formatDateTime(data.care.followUpAt)}
+                    </button>
+                  ) : ws.canManage ? (
+                    <span className="inline-flex flex-wrap items-center gap-1">
+                      <span className="text-[10.5px] uppercase tracking-wide text-muted-foreground">Hẹn lại</span>
+                      {FOLLOW_UP_PRESETS.map((pre) => (
+                        <button
+                          key={pre.key}
+                          type="button"
+                          disabled={pending}
+                          onClick={() => doFollowUp(followUpPresetAt(pre))}
+                          className="rounded border px-1 py-px text-[10.5px] hover:bg-accent disabled:opacity-50"
+                        >
+                          {pre.label}
+                        </button>
+                      ))}
+                    </span>
                   ) : null}
                 </div>
-              </div>
-
-              {/* ───── KẾT QUẢ CARE — khối quan trọng nhất, DÍNH ở đầu vùng cuộn ─────
-
-                   `sticky top-0`: người trực cuộn xuống đọc hành trình rồi quyết vẫn bấm được ngay,
-                   không phải cuộn ngược lên. Đây là thứ họ bấm vài chục lần một buổi.
-
-                   Ba nút này KHÔNG gửi gì sang ĐVVC và KHÔNG bao giờ bị khoá vì lý do ĐVVC.
-                   Lệnh gửi ĐVVC nằm ở khối NGAY DƯỚI, tách bạch cả về chỗ đứng lẫn về chữ. */}
-              <div className="sticky top-0 z-10 rounded-xl border border-primary/30 bg-primary/[0.03] p-3 backdrop-blur supports-[backdrop-filter]:bg-background/85">
-                <div className="mb-1.5 flex flex-wrap items-center gap-2">
-                  <span className="text-[12px] font-semibold uppercase tracking-wide">Kết quả care</span>
-                  <span className="text-[11px] text-muted-foreground">ghi nhận việc người xử lý vừa quyết — KHÔNG gửi lệnh sang Viettel Post, KHÔNG đổi trạng thái vận đơn</span>
-                </div>
-                {/*
-                  HAI CHIỀU IN CẠNH NHAU, LUÔN LUÔN.
-
-                  "Kết quả care: Đã hoàn" và "VTP báo: Đang chuyển hoàn" được phép cùng đúng một
-                  lúc, và màn hình phải nói ra điều đó thay vì để người đọc tự suy. Nhãn "VTP báo"
-                  KHÔNG BAO GIỜ đổi theo quyết định care.
-                */}
-                <div
-                  className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-card px-2.5 py-1.5 text-[11.5px]"
-                  title="Kết quả care là QUYẾT ĐỊNH XỬ LÝ NỘI BỘ của shop. Trạng thái vận chuyển thực tế lấy từ Viettel Post và chỉ Viettel Post đổi được."
-                >
-                  <span>
-                    <span className="text-muted-foreground">Kết quả care: </span>
-                    <ResolutionBadge value={resolution} at={data.care.lastDecision?.at ?? null} by={data.care.lastDecision?.by} />
-                  </span>
-                  <span>
-                    <span className="text-muted-foreground">VTP báo: </span>
-                    <b className="font-medium">{data.shipment.rawStatus}</b>
-                  </span>
-                </div>
-                {ws.canManage ? (
-                  <ResolutionControl
-                    variant="panel"
-                    value={resolution}
-                    pending={pending}
-                    presets={ws.resolutionPresets}
-                    canEditPresets={ws.canManage}
-                    onSubmit={doResolution}
-                    openFor={openFor}
-                    onOpenForChange={setOpenFor}
-                  />
-                ) : (
-                  <p className="text-[12px] text-muted-foreground">Bạn không có quyền thao tác vận đơn (shipments:manage) nên ba nút kết quả bị khoá. Ghi chú và ghi nhận việc đã chăm thì vẫn làm được ở dưới.</p>
-                )}
-                {data.care.lastNote ? (
-                  <p className="mt-2 border-t pt-2 text-[12px]">
-                    <span className="text-muted-foreground">Note gần nhất: </span>
-                    {data.care.lastNote}
-                    <span className="text-[11px] text-muted-foreground">
-                      {" "}
-                      — {data.care.lastNoteBy || "không rõ người"} · {data.care.lastNoteAt ? formatDateTime(data.care.lastNoteAt) : "—"}
-                    </span>
-                  </p>
-                ) : null}
               </div>
 
               {/* ───── THAO TÁC VIETTELPOST — HÀNH ĐỘNG KHÁC, ĐIỀU KIỆN KHÁC ─────
@@ -694,13 +772,29 @@ export function CareDrawer({
                   <ul className="space-y-0.5 text-[12.5px]">
                     {data.order.items.map((it, idx) => (
                       <li key={idx} className="flex justify-between gap-3">
-                        <span>{it.name}</span>
+                        <span>
+                          {it.name}
+                          {/*
+                            MỘT DÒNG "1 × 0 ₫" KHÔNG TỰ NÓI NÓ LÀ GÌ, và hai khả năng đòi hai việc
+                            khác hẳn: hàng tặng (đúng rồi, đừng đụng vào) hay mẫu chưa ai điền giá
+                            (phải đi sửa đơn). `is_bonus` là lời khai của chính Pancake — đọc nó,
+                            không suy từ "giá bằng 0".
+                          */}
+                          {it.isBonus ? <span className="ml-1 rounded bg-emerald-100 px-1 text-[10px] font-medium text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">quà tặng</span> : null}
+                          {!it.isBonus && it.price === 0 ? (
+                            <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-medium text-amber-900 dark:bg-amber-950/60 dark:text-amber-300" title="Đơn không khai giá cho dòng này và cũng không đánh dấu là hàng tặng. ERP không đoán giá — kiểm lại trên Pancake.">
+                              chưa có giá
+                            </span>
+                          ) : null}
+                        </span>
                         <span className="numeric shrink-0 text-muted-foreground">
                           {formatNumber(it.qty)} × {formatVND(it.price)}
                         </span>
                       </li>
                     ))}
                   </ul>
+                  {data.order.itemsTruncated ? <p className="mt-0.5 text-[11px] text-muted-foreground">Đơn còn mặt hàng khác — danh sách đang cắt bớt. Mở đơn để xem đủ.</p> : null}
+                  <CodBreakdown order={data.order} codAmount={data.shipment.codAmount} />
                 </div>
               ) : null}
 
@@ -792,11 +886,89 @@ export function CareDrawer({
                   <p className="text-[12px] text-muted-foreground">Chưa ai chạm vào ca này.</p>
                 )}
               </div>
-            </div>
+              </div>
+            </>
           )}
         </SheetContent>
       </Sheet>
     </>
+  );
+}
+
+/**
+ * ═══════════ COD KHÁC TỔNG SẢN PHẨM THÌ PHẢI NÓI RA PHÉP CỘNG, KHÔNG ĐỂ NGƯỜI ĐỌC ĐOÁN ═══════════
+ *
+ * Quan sát 19/09/2026: panel in "sản phẩm 998.000" ngay cạnh "COD 749.000" và không một dòng nào
+ * giải thích khoảng chênh. Người trực chỉ có ba cách đọc, và cả ba đều dẫn tới một cuộc gọi: khách
+ * được giảm giá? khách đã trả trước? hay ai đó gõ sai COD? Con số đúng mà không có phép cộng bên
+ * cạnh thì vẫn là con số không dùng được.
+ *
+ * ─── ERP KHÔNG SỬA GÌ, CHỈ BÀY RA ───
+ *
+ * Bốn cột dưới đây đến thẳng từ Pancake (`orders`). ERP không tính lại, không làm tròn, không sửa
+ * giá và không sửa đơn — nó chỉ xếp chúng thành phép cộng mà người đọc tự kiểm được:
+ *
+ *     Tạm tính − Giảm giá + Phí ship (khách trả) = Tổng đơn
+ *     Tổng đơn − Đã trả trước               = COD dự kiến   ←→ so với COD trên vận đơn
+ *
+ * ─── VÀ KHI KHÔNG KHỚP THÌ NÓI THẲNG LÀ KHÔNG KHỚP ───
+ *
+ * Chênh lệch có thể là điều chỉnh tay trên Viettel Post, một lần sửa đơn sau khi tạo vận đơn, hay
+ * một lỗi thật. ERP KHÔNG đoán cái nào — nó chỉ nói "COD khác tổng đơn N ₫" và để người có chứng
+ * từ quyết. Ép ra một con số "đúng" ở đây là bịa một khoản mà không chứng từ nào đỡ.
+ *
+ * Cột nào Pancake không trả (`null`) thì BỎ khỏi phép cộng và nói là chưa biết — điền 0 vào đó là
+ * khẳng định "shop không giảm giá đồng nào", một điều chưa ai chứng minh (luật 42).
+ */
+function CodBreakdown({
+  order,
+  codAmount,
+}: {
+  order: NonNullable<CareWorkspace["detail"]>["order"];
+  codAmount: number;
+}) {
+  if (!order) return null;
+  const { subtotal, discount, shippingFee, total, prepaid } = order;
+  // Không có cột nào để dựng phép cộng ⇒ không vẽ một bảng rỗng.
+  if (subtotal === null && discount === null && shippingFee === null && !total && !prepaid) return null;
+
+  const codDuKien = total - prepaid;
+  const lech = codAmount - codDuKien;
+  const thieuCot = subtotal === null || discount === null || shippingFee === null;
+
+  const dong = (nhan: string, gia: number | null, dau?: string, mo?: boolean) => (
+    <div className={cn("flex justify-between gap-3", mo && "text-muted-foreground")}>
+      <span>
+        {dau ? <span className="mr-0.5">{dau}</span> : null}
+        {nhan}
+      </span>
+      <span className="numeric shrink-0">{gia === null ? "—" : formatVND(gia)}</span>
+    </div>
+  );
+
+  return (
+    <div className="mt-2 space-y-0.5 rounded-lg border bg-muted/20 px-2.5 py-2 text-[11.5px]">
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">COD được cộng ra sao</div>
+      {dong("Tạm tính (tiền hàng)", subtotal, "", true)}
+      {dong("Giảm giá", discount, "−", true)}
+      {dong("Phí ship khách trả", shippingFee, "+", true)}
+      <div className="flex justify-between gap-3 border-t pt-0.5 font-medium">
+        <span>Tổng đơn</span>
+        <span className="numeric shrink-0">{formatVND(total)}</span>
+      </div>
+      {prepaid ? dong("Đã trả trước", prepaid, "−", true) : null}
+      <div className="flex justify-between gap-3 border-t pt-0.5 font-semibold">
+        <span>COD trên vận đơn</span>
+        <span className="numeric shrink-0">{formatVND(codAmount)}</span>
+      </div>
+      {lech !== 0 ? (
+        <p className="mt-1 rounded border border-amber-300/60 bg-amber-50/60 px-1.5 py-1 text-[10.5px] leading-snug text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-200">
+          <b>COD khác tổng đơn {formatVND(Math.abs(lech))}</b> ({lech > 0 ? "vận đơn thu nhiều hơn" : "vận đơn thu ít hơn"} số đơn đang ghi). ERP không sửa hộ:
+          kiểm lại đơn trên Pancake và vận đơn trên Viettel Post rồi sửa ở nguồn.
+        </p>
+      ) : null}
+      {thieuCot ? <p className="mt-1 text-[10.5px] text-muted-foreground">Dấu “—” là Pancake chưa trả cột đó cho đơn này — chưa biết, không phải bằng 0.</p> : null}
+    </div>
   );
 }
 

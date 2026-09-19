@@ -11,7 +11,7 @@ import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { InfoHint } from "@/components/info-hint";
 import { FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { NavLink } from "@/components/nav-progress";
+import { LinkPending, NavLink, StaleWhileRefreshing } from "@/components/nav-progress";
 import { PageHeader } from "@/components/page-header";
 import { SyncButton } from "@/components/sync-button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -69,6 +69,13 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
     >
       {label}
       {count !== undefined ? <span className={cn("numeric rounded px-1 text-[10.5px]", view === key ? "bg-muted" : "bg-muted/60")}>{formatNumber(count)}</span> : null}
+      {/*
+        PHẢN HỒI TẠI CHỖ, KHÔNG CHỈ Ở THANH TRÊN ĐỈNH. Đổi tab là một lượt dựng lại trên máy chủ:
+        người dùng bấm, màn hình đứng im, và họ bấm lại lần hai. Thanh tiến trình mảnh trên đỉnh
+        trang dễ lọt khỏi tầm mắt khi mắt đang ở hàng tab. Chấm quay này chỉ sáng ở ĐÚNG tab vừa
+        bấm (`useLinkStatus`), nên nó trả lời cả "đã bấm trúng chưa" lẫn "có đang chạy không".
+      */}
+      <LinkPending />
     </NavLink>
   );
 
@@ -164,12 +171,19 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
         </>
       ) : view === "reconcile" ? (
         <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
-          <ReconcileSection canAdmin={can(user, "work:admin")} />
+          <ReconcileSection canAdmin={can(user, "work:admin")} trang={Number(typeof raw.dc === "string" ? raw.dc : 1) || 1} />
         </Suspense>
       ) : view === "all" ? (
         <AllShipments raw={raw} user={user} />
       ) : (
-        <CareWorkbenchView initial={wb!} view={view} staff={staff} presets={presets} resolutionPresets={resolutionPresets} canManage={can(user, "shipments:manage")} />
+        /*
+          SỐ CŨ MỜ ĐI, KHÔNG BIẾN MẤT. Trong lúc máy chủ dựng tab mới, bảng vẫn giữ nguyên chiều cao
+          và nội dung cũ — không màn hình trắng, không xô lệch bố cục, và người dùng đọc được rằng
+          những gì đang thấy chưa phải số mới (`aria-busy`).
+        */
+        <StaleWhileRefreshing>
+          <CareWorkbenchView initial={wb!} view={view} staff={staff} presets={presets} resolutionPresets={resolutionPresets} canManage={can(user, "shipments:manage")} />
+        </StaleWhileRefreshing>
       )}
     </div>
   );
@@ -179,8 +193,10 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
  * Hàng đợi đối chiếu KHÔNG gọi Viettel Post một câu nào — nó dựng từ dữ liệu đã có. Đúng ra là
  * ngược lại: nó tồn tại chính vì tài khoản API không đọc được 2.138/2.151 vận đơn của shop.
  */
-async function ReconcileSection({ canAdmin }: { canAdmin: boolean }) {
-  const [queue, ghiDe] = await Promise.all([getVtpReconcileQueue(), getFreshnessConfig()]);
+async function ReconcileSection({ canAdmin, trang }: { canAdmin: boolean; trang: number }) {
+  // Số trang sống trên ĐƯỜNG DẪN (`?dc=`), không trong bộ nhớ màn hình: tải lại trang không mất
+  // chỗ đang đứng, và gửi đường dẫn cho đồng nghiệp thì họ mở ra thấy đúng danh sách ấy.
+  const [queue, ghiDe] = await Promise.all([getVtpReconcileQueue(trang), getFreshnessConfig()]);
   // Ngưỡng ĐANG CHẠY dựng lại từ hằng số + ghi đè, không gõ lại con số nào: hai nơi nói hai số là
   // cách chắc chắn nhất để không ai tin con số nào (luật 22).
   const nguong = Object.keys(FRESHNESS_BY_STAGE).map((stage) => ({

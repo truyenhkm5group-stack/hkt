@@ -78,6 +78,7 @@ function ca(d: Dung): CareCase {
     },
     products: d.products ?? [],
     reason: (d.reason ?? "DELIVERY_FAILED") as CareCase["reason"],
+    inCareCondition: true,
     reasonClass: "CUSTOMER_ACTION",
     reasonLabel: "",
     reasonDetail: "",

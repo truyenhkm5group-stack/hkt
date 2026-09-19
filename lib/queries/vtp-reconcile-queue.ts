@@ -8,7 +8,6 @@ import {
   CARE_SILENCE_HOURS,
   GAP_QUEUE_DAYS,
   RECONCILE_REASON_RANK,
-  RECONCILE_REASONS,
   type ReconcileReason,
 } from "@/lib/constants/vtp-reconcile-queue";
 
@@ -57,13 +56,27 @@ export type ReconcileQueue = {
   counts: Record<ReconcileReason, number>;
   /** Số kiện bị cắt khỏi danh sách vì giới hạn — in ra, không giấu. */
   truncated: number;
+  /** Trang đang tải (cộng dồn: trang 2 nghĩa là đang có 2 × `pageSize` dòng đầu). */
+  page: number;
+  pageSize: number;
 };
 
 /**
- * Trần dòng trả về. Hàng đợi này để NGƯỜI làm tay: quá vài trăm dòng thì nó không còn là hàng đợi
- * nữa mà là một báo cáo, và số bị cắt phải được in ra cạnh bảng chứ không biến mất lặng lẽ.
+ * ═══════════ MỘT TRANG, KHÔNG PHẢI MỘT TRẦN ═══════════
+ *
+ * Bản cũ có `QUEUE_MAX_ROWS = 300` là TRẦN CỨNG: in ra "còn 54 kiện nữa chưa hiện" rồi hết cách.
+ * Đo 19/09/2026: 354 kiện cần đối chiếu, 54 kiện KHÔNG có đường nào mở ra được — và đó không phải
+ * 54 kiện tuỳ ý, chúng là 54 kiện ĐỨNG CUỐI theo thứ tự ưu tiên, tức nhóm im lặng lâu nhất.
+ *
+ * Nay 300 là CỠ MỘT TRANG: người trực bấm "Xem thêm" thì máy chủ trả thêm một trang nữa. Vẫn không
+ * đổ cả nghìn dòng vào một lượt (truy vấn này quét toàn bộ kiện đang chạy), nhưng không còn dòng
+ * nào nằm ngoài tầm với.
+ *
+ * Trần tuyệt đối vẫn có, để một lỗi ở tầng trên không thành một câu SQL kéo cả bảng về.
  */
-const QUEUE_MAX_ROWS = 300;
+const QUEUE_PAGE_ROWS = 300;
+export const RECONCILE_PAGE_SIZE = QUEUE_PAGE_ROWS;
+const QUEUE_MAX_PAGES = 20;
 
 /** Mốc tin cuối cùng từ ĐVVC. `VTP_POLL` cố ý vắng mặt: nguồn đó chưa từng sinh ra một sự kiện nào. */
 const MOC_DVVC = sql`(select max(e.occurred_at) from shipment_events e where e.shipment_id = s.id and e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION'))`;
@@ -83,11 +96,16 @@ function viNguImLang(overrides: Awaited<ReturnType<typeof getFreshnessConfig>>) 
   return sql`(case ${sql.join(nhanh, sql` `)} else ${FRESHNESS_DEFAULT.critical}::int end)`;
 }
 
-export async function getVtpReconcileQueue(): Promise<ReconcileQueue> {
+export async function getVtpReconcileQueue(trang = 1): Promise<ReconcileQueue> {
   const overrides = await getFreshnessConfig();
+  // Trang là một con số đến từ đường dẫn: kẹp nó lại NGAY, trước khi nó thành một phần của câu SQL
+  // và của khoá đệm. `?dc=999999` không được phép trở thành một lượt quét cả bảng.
+  const soTrang = Math.min(QUEUE_MAX_PAGES, Math.max(1, Number.isFinite(trang) ? Math.trunc(trang) : 1));
+  const soDong = soTrang * QUEUE_PAGE_ROWS;
   // Cache 60 s: hàng đợi này quét toàn bộ kiện đang chạy và người trực mở nó vài lần một ca. Khoá
-  // cache mang bộ ngưỡng, nếu không thì đổi ngưỡng xong màn hình vẫn nói con số của bộ cũ.
-  return memo(`vtp-reconcile-queue:${JSON.stringify(overrides)}`, 60_000, async () => {
+  // cache mang bộ ngưỡng VÀ số trang — thiếu số trang thì bấm "Xem thêm" xong vẫn nhận lại đúng
+  // trang cũ trong suốt 60 giây, và nút trông như hỏng.
+  return memo(`vtp-reconcile-queue:${soDong}:${JSON.stringify(overrides)}`, 60_000, async () => {
     const db = await getDb();
     const nguong = viNguImLang(overrides);
     const rows = await db.execute<{
@@ -204,22 +222,45 @@ export async function getVtpReconcileQueue(): Promise<ReconcileQueue> {
         l.vtp_sync_source, l.vtp_last_error, l.last_carrier_at, l.hours_silent, l.critical_hours,
         l.cod_amount, l.receiver_name, l.receiver_phone, l.care_open,
         l.r_sync_error, l.r_unmapped, l.r_gap, l.r_contradiction, l.r_care_silent, l.r_stale,
-        (select count(*) from loc) as total
+        /*
+          ĐẾM TRÊN TOÀN BỘ TẬP, KHÔNG TRÊN TRANG ĐANG HIỆN.
+
+          Hàm cửa sổ chạy TRƯỚC LIMIT, nên sáu con số dưới đây là của cả tập loc. Bản cũ đếm bằng
+          cách duyệt các dòng ĐÃ TRẢ VỀ: với 354 kiện mà chỉ trả 300, mọi chip lý do đều thiếu, và
+          thiếu KHÔNG ĐỀU — lý do xếp cuối (im lặng) mất nhiều nhất vì nó bị cắt trước. Người trực
+          đọc chip rồi kết luận sai về chỗ nào đang hỏng.
+        */
+        count(*) over () as total,
+        count(*) filter (where l.r_sync_error) over () as c_sync_error,
+        count(*) filter (where l.r_unmapped) over () as c_unmapped,
+        count(*) filter (where l.r_gap) over () as c_gap,
+        count(*) filter (where l.r_contradiction) over () as c_contradiction,
+        count(*) filter (where l.r_care_silent) over () as c_care_silent,
+        count(*) filter (where l.r_stale) over () as c_stale
       from loc l
       order by
         -- Xếp theo LÝ DO MẠNH NHẤT (số nhỏ đứng trước), rồi tới kiện im lặng lâu nhất.
         (case when l.r_sync_error then 1 when l.r_unmapped then 2 when l.r_contradiction then 3
               when l.r_gap then 4 when l.r_care_silent then 5 else 6 end),
         l.last_carrier_at asc nulls first
-      limit ${QUEUE_MAX_ROWS}
+      limit ${soDong}
     `);
 
     const list = rowsOf<Record<string, unknown>>(rows);
-    const counts = Object.fromEntries(RECONCILE_REASONS.map((r) => [r, 0])) as Record<ReconcileReason, number>;
+    const dau = list[0];
+    const so = (k: string) => Number(dau?.[k] ?? 0);
+    // Bộ đếm đến từ hàm cửa sổ (toàn bộ tập), KHÔNG từ vòng lặp dưới (chỉ trang đang hiện).
+    const counts: Record<ReconcileReason, number> = {
+      SYNC_ERROR: so("c_sync_error"),
+      UNMAPPED_STATUS: so("c_unmapped"),
+      CONTRADICTION: so("c_contradiction"),
+      WEBHOOK_GAP: so("c_gap"),
+      CARE_WITHOUT_MOVEMENT: so("c_care_silent"),
+      STALE_NO_NEWS: so("c_stale"),
+    };
+    const total = so("total");
     const out: ReconcileRow[] = [];
-    let total = 0;
     for (const raw of list) {
-      total = Number(raw.total ?? 0);
       const reasons: ReconcileReason[] = [];
       if (raw.r_sync_error) reasons.push("SYNC_ERROR");
       if (raw.r_unmapped) reasons.push("UNMAPPED_STATUS");
@@ -228,7 +269,6 @@ export async function getVtpReconcileQueue(): Promise<ReconcileQueue> {
       if (raw.r_care_silent) reasons.push("CARE_WITHOUT_MOVEMENT");
       if (raw.r_stale) reasons.push("STALE_NO_NEWS");
       if (!reasons.length) continue;
-      for (const r of reasons) counts[r] += 1;
       reasons.sort((a, b) => RECONCILE_REASON_RANK[a] - RECONCILE_REASON_RANK[b]);
       const gio = raw.hours_silent === null || raw.hours_silent === undefined ? null : Number(raw.hours_silent);
       out.push({
@@ -252,6 +292,22 @@ export async function getVtpReconcileQueue(): Promise<ReconcileQueue> {
         topReason: reasons[0],
       });
     }
-    return { rows: out, total, counts, truncated: Math.max(0, total - out.length) };
+    return { rows: out, total, counts, truncated: Math.max(0, total - out.length), page: soTrang, pageSize: QUEUE_PAGE_ROWS };
   });
+}
+
+/**
+ * ═══════════ "CHÉP TOÀN BỘ" PHẢI HỎI LẠI CSDL, KHÔNG ĐƯỢC CHÉP CÁI ĐANG HIỆN ═══════════
+ *
+ * Nút chép trên màn hình chỉ thấy những dòng đã tải. Người trực bấm "chép toàn bộ" là đang nói
+ * *"tôi sẽ dán TẤT CẢ mã này sang viettelpost.vn"* — trả về 300 mã trong khi tập thật có 354 thì
+ * 54 kiện không bao giờ được tra, và không ai biết, vì con số trên nút vẫn trông hợp lý.
+ *
+ * Nên hàm này chạy LẠI đúng phép lọc, không `limit`, và chỉ lấy MỘT cột. Lọc theo lý do làm ở máy
+ * chủ để "toàn bộ" của nút khớp với "toàn bộ" của chip đang chọn.
+ */
+export async function getVtpReconcileCodes(reason?: ReconcileReason | "all"): Promise<string[]> {
+  const queue = await getVtpReconcileQueue(QUEUE_MAX_PAGES);
+  const rows = reason && reason !== "all" ? queue.rows.filter((r) => r.reasons.includes(reason)) : queue.rows;
+  return rows.map((r) => r.vtpOrderNumber ?? r.trackingCode ?? "").filter(Boolean);
 }
