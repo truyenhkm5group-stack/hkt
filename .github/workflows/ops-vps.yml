@@ -40,6 +40,7 @@ on:
           - outcome-explain     # giải thích ERP kết luận kết quả vận đơn thế nào (arg: các mã vận đơn)
           - kpi-snapshot        # ảnh chụp KPI (kết quả đơn + ba con số tiền) để đối chiếu trước/sau deploy
           - smoke               # mở thật các màn hình chính bằng phiên đăng nhập hợp lệ, đo thời gian từng trang
+          - session-verify      # kiểm phiên trượt trên máy chủ thật: gia hạn, trần sống, hết hạn, SSE, cờ cookie (CHỈ ĐỌC)
           - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
           - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
           - fanpage-evidence-backfill # gán fanpage lịch sử cho marketer TỪ BẰNG CHỨNG quảng cáo (mặc định CHẠY THỬ; arg "--apply" mới ghi)
@@ -275,6 +276,16 @@ jobs:
               perf-probe)
                 fetch_script perf-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/perf-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-probe.ts ;;
+              session-verify)
+                # KIỂM PHIÊN TRƯỢT TRÊN CHÍNH MÁY CHỦ ĐANG CHẠY — CHỈ ĐỌC.
+                #
+                # Bài kiểm trong `tests/` gọi thẳng hàm `middleware()`. Nó không trả lời được ba câu
+                # chỉ production mới trả lời được: Next có gửi `Set-Cookie` của middleware ra dây
+                # không (kể cả trên phản hồi SSE), cờ `Secure` có sống sót qua Caddy không, và
+                # `getCurrentUser()` có còn từ chối một phiếu ký ĐÚNG trỏ tới tài khoản không tồn
+                # tại không. Script không ghi một dòng dữ liệu nào và không in token.
+                fetch_script session-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/session-verify.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/session-verify.ts ;;
               smoke)
                 # Chạy smoke trên hệ thống ĐANG ỔN ĐỊNH. Khác hẳn smoke lúc deploy: lúc đó scheduler
                 # vừa khởi động và đang đồng bộ toàn bộ đơn, nên trang nặng bị tranh CPU. Chạy tay ở
