@@ -1,0 +1,435 @@
+import assert from "node:assert/strict";
+import { clearMemo } from "@/lib/cache";
+import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf } from "@/lib/constants/marketing-daily";
+import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
+import { baselineOf, diagnose, lossStreakOf, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
+import { digestLines } from "@/lib/marketing/digest";
+import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter } from "@/lib/queries/marketing-daily";
+import { getDailyBreakdown } from "@/lib/queries/reports";
+import type { Period } from "@/lib/search-params";
+
+const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   PHẦN A — HỢP ĐỒNG THUẦN (không cần CSDL)
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+
+const ZERO: DiagnoseSnapshot = {
+  adSpend: 0,
+  messages: 0,
+  orders: 0,
+  posRevenue: 0,
+  deliveredRevenue: 0,
+  deliveredOrders: 0,
+  returnedOrders: 0,
+  finishedOrders: 0,
+  pendingOrders: 0,
+  contributionProfit: 0,
+};
+
+const snap = (over: Partial<DiagnoseSnapshot>): DiagnoseSnapshot => ({ ...ZERO, ...over });
+
+/**
+ * ═══════════ SỔ CHỈ SỐ PHẢI KHAI ĐỦ TRƯỚC KHI ĐƯỢC HIỂN THỊ ═══════════
+ *
+ * Một cột không khai được nguồn và cách xử lý CHƯA BIẾT sẽ được đọc bằng phỏng đoán. Bài kiểm này
+ * chặn ở mức mã nguồn: thêm một cột mà quên viết hợp đồng của nó thì đỏ ngay, không đợi tới lúc
+ * một người nhìn ô `0` rồi đi cắt ngân sách.
+ */
+export function testMarketingMetricContract() {
+  for (const m of MARKETING_METRICS) {
+    assert.ok(m.label.length > 1, `${m.key}: thiếu nhãn`);
+    assert.ok(m.meaning.length > 10, `${m.key}: phải nói được ô này nghĩa là gì`);
+    assert.ok(m.source.length > 5, `${m.key}: phải khai nguồn có thật`);
+    assert.ok(m.timing.length > 5, `${m.key}: phải khai đo ở thời điểm nào`);
+    assert.ok(m.nullRule.length > 5, `${m.key}: phải khai chưa biết thì in gì`);
+    // Ô TỶ LỆ phải khai CẢ tử lẫn mẫu — thiếu một vế thì hàng tổng không tính lại được và sẽ
+    // âm thầm rơi về trung bình phần trăm.
+    if (m.numerator) assert.ok(m.num && m.den, `${m.key}: đã khai tử số thì phải khai khoá num/den để hàng tổng tính lại được`);
+    if (m.num) assert.ok(MARKETING_METRIC_BY_KEY[m.num] || ["finishedOrders", "maturityBase"].includes(m.num), `${m.key}: khoá tử số ${m.num} không tồn tại`);
+  }
+  // Mọi bộ cột chỉ được dùng khoá có thật.
+  for (const [view, keys] of Object.entries(MARKETING_VIEW_COLUMNS)) {
+    for (const k of keys) assert.ok(MARKETING_METRIC_BY_KEY[k], `bộ cột ${view} dùng khoá lạ: ${k}`);
+  }
+  // Mỗi loại phát hiện phải có hành động cụ thể — không có loại nào chỉ báo mà không nói làm gì.
+  for (const kind of MARKETING_FINDING_KINDS) {
+    const actions = MARKETING_FINDING_ACTIONS[kind];
+    assert.ok(actions?.length, `${kind}: phải có đề xuất hành động`);
+    for (const a of actions) {
+      assert.ok(a.length > 20, `${kind}: hành động phải cụ thể, không phải một câu chung chung`);
+      assert.ok(!/^hãy tối ưu/i.test(a), `${kind}: "hãy tối ưu…" không nói được ai mở màn hình nào`);
+    }
+  }
+}
+
+/**
+ * ═══════════ CHƯA BIẾT KHÔNG ĐƯỢC THÀNH 0, VÀ MẪU SỐ 0 KHÔNG ĐƯỢC THÀNH VÔ CỰC ═══════════
+ */
+export function testMarketingRatioNullSafety() {
+  // Mẫu số 0 ⇒ null, KHÔNG phải Infinity.
+  assert.equal(ratioOf("closeRate", { orders: 40, messages: 0 }), null, "0 tin nhắn ⇒ tỷ lệ chốt CHƯA BIẾT");
+  assert.equal(ratioOf("costPerOrder", { adSpend: 5_000_000, orders: 0 }), null, "0 đơn ⇒ CPQC/đơn CHƯA BIẾT, không phải vô cực");
+  assert.equal(ratioOf("roasDelivered", { deliveredRevenue: 9_000_000, adSpend: 0 }), null, "chưa chi đồng nào ⇒ ROAS CHƯA BIẾT, không phải 0");
+  // Tử số CHƯA BIẾT ⇒ cả ô CHƯA BIẾT. Đây là ca đắt nhất: đồng bộ chi tiêu chết.
+  assert.equal(ratioOf("costPerOrder", { adSpend: null, orders: 40 }), null, "chi tiêu chưa biết ⇒ CPQC/đơn chưa biết");
+  assert.equal(ratioOf("margin", { contributionProfit: null, deliveredRevenue: 10_000_000 }), null);
+  // Số hỏng đi cùng nhánh CHƯA BIẾT.
+  assert.equal(ratioOf("closeRate", { orders: Number.NaN, messages: 100 }), null);
+  assert.equal(ratioOf("closeRate", { orders: Number.POSITIVE_INFINITY, messages: 100 }), null);
+  // Giá trị bình thường: phần trăm quy về 0–100 với một chữ số thập phân.
+  assert.equal(ratioOf("closeRate", { orders: 40, messages: 160 }), 25);
+  assert.equal(ratioOf("roasDelivered", { deliveredRevenue: 9_000_000, adSpend: 3_000_000 }), 3);
+}
+
+/**
+ * ═══════════ HÀNG TỔNG TÍNH LẠI TỪ TỬ/MẪU, KHÔNG BAO GIỜ TRUNG BÌNH PHẦN TRĂM ═══════════
+ *
+ * Bài kiểm dựng đúng cái bẫy: hai ngày lệch hẳn quy mô. Trung bình phần trăm cho ra 37,5%; tính
+ * lại từ tử/mẫu cho ra 12,7%. Khoảng cách giữa hai con số ấy là khoảng cách giữa "đội chốt đơn
+ * đang tốt" và "đội chốt đơn đang rơi".
+ */
+export function testMarketingTotalsRecomputeRatios() {
+  const d1 = { orders: 5, messages: 10 }; // 50%
+  const d2 = { orders: 9, messages: 100 }; // 9%
+  const naiveAverage = ((ratioOf("closeRate", d1) as number) + (ratioOf("closeRate", d2) as number)) / 2;
+  const correct = ratioOf("closeRate", { orders: d1.orders + d2.orders, messages: d1.messages + d2.messages });
+  assert.equal(naiveAverage, 29.5, "trung bình phần trăm của hai ngày");
+  assert.equal(correct, 12.7, "tỷ lệ chốt thật của cả kỳ = 14 đơn ÷ 110 tin nhắn");
+  assert.notEqual(naiveAverage, correct, "hai cách cho ra hai con số — đó là lý do hàng tổng phải tính lại");
+
+  // CPQC/đơn của cả kỳ cũng vậy.
+  const cpa = ratioOf("costPerOrder", { adSpend: 1_000_000 + 9_000_000, orders: 5 + 90 });
+  assert.equal(Math.round(cpa as number), 105_263);
+}
+
+/** ═══════════ ĐỘ CHÍN: BA NGƯỠNG, VÀ ĐƠN HUỶ KHÔNG NẰM TRONG PHÂN SỐ ═══════════ */
+export function testMarketingMaturity() {
+  assert.equal(maturityState(0, 0), "NO_ORDERS", "không đơn nào ⇒ không có gì để chín");
+  assert.equal(maturityState(100, 0), "FINAL");
+  assert.equal(maturityState(96, 4), "FINAL", "96% ≥ ngưỡng ngã ngũ");
+  assert.equal(maturityState(80, 20), "PARTIAL");
+  assert.equal(maturityState(10, 90), "TOO_EARLY");
+  // Biên phải đúng bằng hằng số, không phải một con số gõ lại.
+  assert.equal(maturityState(MATURITY.final * 100, (1 - MATURITY.final) * 100), "FINAL");
+  assert.equal(maturityState(MATURITY.tooEarly * 100 - 1, 100 - MATURITY.tooEarly * 100 + 1), "TOO_EARLY");
+  assert.equal(ratioOf("maturity", { finishedOrders: 80, maturityBase: 100 }), 80);
+}
+
+/**
+ * ═══════════ MÁY PHÂN TÍCH: BẢNG CHÂN LÝ ═══════════
+ *
+ * Điều quan trọng nhất ở đây KHÔNG phải là nó phát hiện được gì, mà là nó TỪ CHỐI kết luận ở đâu.
+ */
+export function testMarketingDiagnose() {
+  const R = MARKETING_DIAGNOSIS;
+  const kinds = (fs: ReturnType<typeof diagnose>) => fs.map((f) => f.kind);
+
+  // ── 1. Chưa có nền ⇒ chỉ những phát hiện TUYỆT ĐỐI, không bịa một nền ──
+  const noBaseline = diagnose({ day: "2026-09-18", current: snap({ adSpend: 5_000_000, messages: 200, orders: 50 }), baseline: null });
+  assert.deepEqual(kinds(noBaseline), [], "không nền, không bất thường tuyệt đối ⇒ im lặng");
+
+  // ── 2. Tiêu tiền mà không ra đơn: NÓNG, và KHÔNG chờ độ chín ──
+  const hot = diagnose({ day: "2026-09-18", current: snap({ adSpend: R.spendNoOrderHot, messages: 120, orders: 0, pendingOrders: 0 }), baseline: null });
+  assert.ok(kinds(hot).includes("SPEND_NO_ORDERS"), "chi đủ lớn mà 0 đơn phải kêu ngay, không đợi hàng giao xong");
+  assert.equal(hot[0].severity, "CRITICAL");
+  assert.ok(hot[0].evidence.some((e) => e.includes("120")), "phải nêu số tin nhắn thật để phân biệt đứt ở khâu nào");
+  // Dưới ngưỡng thì im.
+  assert.ok(!kinds(diagnose({ day: "d", current: snap({ adSpend: R.spendNoOrderHot - 1, orders: 0 }), baseline: null })).includes("SPEND_NO_ORDERS"));
+
+  // ── 3. Dưới ngưỡng MẪU thì không kết luận, dù chênh lệch rất lớn ──
+  const tinyBase = snap({ adSpend: 1_000_000, messages: 100, orders: 20, finishedOrders: 20, deliveredOrders: 18, returnedOrders: 2, posRevenue: 20_000_000, deliveredRevenue: 18_000_000, contributionProfit: 2_000_000 });
+  const tinySample = diagnose({
+    day: "d",
+    current: snap({ adSpend: 200_000, messages: R.minMessages - 1, orders: 1, finishedOrders: 1, deliveredOrders: 0, returnedOrders: 1 }),
+    baseline: tinyBase,
+  });
+  assert.ok(!kinds(tinySample).includes("CLOSE_RATE_DROP"), `dưới ${R.minMessages} tin nhắn thì tỷ lệ chốt là may rủi, không phải phát hiện`);
+  assert.ok(!kinds(tinySample).includes("DELIVERY_DROP"), `dưới ${R.minFinished} đơn đã kết thúc thì GTC dao động quá mạnh để kết luận`);
+
+  // ── 4. CASE B: tin nhắn vẫn về, đơn tụt ⇒ vấn đề ở khâu CHỐT ──
+  const closeDrop = diagnose({
+    day: "d",
+    current: snap({ adSpend: 1_000_000, messages: 200, orders: 10, posRevenue: 10_000_000 }),
+    baseline: snap({ adSpend: 1_000_000, messages: 200, orders: 40, posRevenue: 40_000_000 }),
+  });
+  assert.ok(kinds(closeDrop).includes("CLOSE_RATE_DROP"));
+  const cd = closeDrop.find((f) => f.kind === "CLOSE_RATE_DROP");
+  assert.ok(cd?.evidence.join(" ").includes("200"), "bằng chứng phải mang số thật của chính ngày đó");
+  assert.ok(cd?.actions.some((a) => /kịch bản|phản hồi|hội thoại/i.test(a)), "hành động phải trỏ tới khâu chốt, không phải khâu quảng cáo");
+
+  // ── 5. CPA tăng mà giá tin nhắn KHÔNG tăng ⇒ chẩn đoán phải nói traffic không phải nguyên nhân ──
+  const cpaOnly = diagnose({
+    day: "d",
+    current: snap({ adSpend: 2_000_000, messages: 400, orders: 10 }),
+    baseline: snap({ adSpend: 1_000_000, messages: 200, orders: 20 }),
+  });
+  const cpa = cpaOnly.find((f) => f.kind === "CPA_UP");
+  assert.ok(cpa, "CPA gấp đôi phải được phát hiện");
+  assert.ok(cpa.evidence.join(" ").includes("KHÔNG tăng tương ứng"), "phải phân biệt được traffic đắt lên với chuyển đổi kém");
+
+  // ── 6. GTC tụt: toàn shop ra DELIVERY_DROP, phạm vi MÃ HÀNG ra RETURN_UP — không bao giờ cả hai ──
+  const delivered = { adSpend: 1_000_000, messages: 100, orders: 40, finishedOrders: 40 };
+  const now = snap({ ...delivered, deliveredOrders: 24, returnedOrders: 16 }); // 60%
+  const before = snap({ ...delivered, deliveredOrders: 34, returnedOrders: 6 }); // 85%
+  const shopLevel = kinds(diagnose({ day: "d", current: now, baseline: before }));
+  assert.ok(shopLevel.includes("DELIVERY_DROP"), "mức shop: khâu giao đang hỏng");
+  assert.ok(!shopLevel.includes("RETURN_UP"), "cùng một phép trừ không được phát ra hai việc");
+  const productLevel = kinds(diagnose({ day: "d", scope: "product:Q002", scopeLabel: "Q002", current: now, baseline: before }));
+  assert.ok(productLevel.includes("RETURN_UP"), "mức mã hàng: mã này đang bị trả về");
+  assert.ok(!productLevel.includes("DELIVERY_DROP"));
+
+  // ── 7. Chưa ngã ngũ ⇒ KHÔNG kết luận về tiền ──
+  const immature = diagnose({
+    day: "d",
+    current: snap({ adSpend: 3_000_000, messages: 200, orders: 50, deliveredRevenue: 2_000_000, finishedOrders: 5, pendingOrders: 45, contributionProfit: -5_000_000 }),
+    baseline: snap({ adSpend: 1_000_000, messages: 200, orders: 50, deliveredRevenue: 40_000_000, finishedOrders: 50, pendingOrders: 0, contributionProfit: 10_000_000 }),
+  });
+  assert.ok(!kinds(immature).includes("COST_OUTRUNS_REVENUE"), "ngày còn 45/50 đơn đang đi luôn trông như lỗ — không được kết luận");
+
+  // ── 8. Khoá chống trùng mang NGÀY: vấn đề kéo dài ba ngày là ba việc thật, không phải một việc lặp ──
+  assert.notEqual(findingDedupeKey("CPA_UP", "", "2026-09-18"), findingDedupeKey("CPA_UP", "", "2026-09-19"));
+  assert.equal(findingDedupeKey("CPA_UP", "", "2026-09-18"), findingDedupeKey("CPA_UP", "", "2026-09-18"), "cùng ngày cùng phạm vi ⇒ đúng một việc");
+  assert.notEqual(findingDedupeKey("CPA_UP", "marketer:a", "2026-09-18"), findingDedupeKey("CPA_UP", "marketer:b", "2026-09-18"));
+
+  // ── 9. Máy phân tích là HÀM THUẦN: chạy hai lần ra đúng cùng kết quả ──
+  const a = diagnose({ day: "d", current: now, baseline: before });
+  const b = diagnose({ day: "d", current: now, baseline: before });
+  assert.deepEqual(a, b, "hàm thuần thì hai lượt phải giống hệt nhau");
+}
+
+/** ═══════════ CHUỖI LỖ CHỈ ĐẾM NGÀY ĐÃ NGÃ NGŨ ═══════════ */
+export function testMarketingLossStreak() {
+  const mature = (profit: number) => ({ contributionProfit: profit, finishedOrders: 95, pendingOrders: 5 });
+  const green = (profit: number) => ({ contributionProfit: profit, finishedOrders: 95, pendingOrders: 5 });
+  const tooEarly = { contributionProfit: -9_000_000, finishedOrders: 5, pendingOrders: 95 };
+
+  assert.equal(lossStreakOf([mature(-1), mature(-1), mature(-1)]), 3);
+  assert.equal(lossStreakOf([mature(-1), green(5), mature(-1)]), 1, "một ngày dương làm đứt chuỗi");
+  /*
+    NGÀY CHƯA CHÍN KHÔNG KÉO DÀI CHUỖI VÀ CŨNG KHÔNG LÀM ĐỨT CHUỖI.
+    Đếm nó là để chuỗi lỗ gần như không bao giờ đứt (ngày mới nào cũng âm), và cảnh báo leo thang
+    sẽ kêu mỗi sáng cho tới khi không ai đọc nữa.
+  */
+  assert.equal(lossStreakOf([mature(-1), mature(-1), tooEarly]), 2, "ngày chưa ngã ngũ bị bỏ qua, không cộng vào chuỗi");
+  assert.equal(lossStreakOf([green(5), tooEarly]), 0, "ngày chưa ngã ngũ không tự tạo ra một chuỗi lỗ");
+  assert.equal(lossStreakOf([]), 0);
+  // Lợi nhuận CHƯA BIẾT (chi tiêu chưa đồng bộ) không được coi là lỗ.
+  assert.equal(lossStreakOf([mature(-1), { contributionProfit: null, finishedOrders: 95, pendingOrders: 5 }]), 0, "chưa biết lãi hay lỗ thì không phải một ngày lỗ");
+}
+
+/** ═══════════ NỀN SO SÁNH: DƯỚI NGƯỠNG NGÀY THÌ KHÔNG CÓ NỀN, KHÔNG PHẢI NỀN YẾU ═══════════ */
+export function testMarketingBaseline() {
+  const day = (over: Partial<DiagnoseSnapshot>) => snap(over);
+  assert.equal(baselineOf([day({ orders: 10 }), day({ orders: 10 })], 3), null, "hai ngày không đủ để dựng nền — nền yếu còn tệ hơn không có nền");
+  const b = baselineOf([day({ orders: 10, adSpend: 1_000_000 }), day({ orders: 20, adSpend: 2_000_000 }), day({ orders: 30, adSpend: 3_000_000 })], 3);
+  assert.ok(b);
+  assert.equal(b.orders, 20, "nền là TRUNG BÌNH NGÀY, không phải tổng — tổng đem so với một ngày thì ngày nào cũng 'tụt'");
+  assert.equal(b.adSpend, 2_000_000);
+  // Ngày chưa biết chi tiêu không kéo trung bình xuống bằng cách coi nó là 0.
+  const withUnknown = baselineOf([day({ adSpend: null }), day({ adSpend: 3_000_000 }), day({ adSpend: 3_000_000 })], 3);
+  assert.equal(withUnknown?.adSpend, 2_000_000, "chia cho SỐ NGÀY của kỳ; ngày chưa biết không đóng góp tử số");
+}
+
+/** ═══════════ BẢN TIN KHÔNG BAO GIỜ IN 0 CHO MỘT Ô CHƯA BIẾT ═══════════ */
+export function testMarketingDigestLines() {
+  const totals = {
+    adSpend: null,
+    messages: null,
+    orders: 0,
+    units: 0,
+    posRevenue: 0,
+    deliveredRevenue: 0,
+    deliveredOrders: 0,
+    returnedOrders: 0,
+    cancelledOrders: 0,
+    pendingOrders: 0,
+    shippedOrders: 0,
+    finishedOrders: 0,
+    maturityBase: 0,
+    cogs: 0,
+    shippingCost: 0,
+    operatingCost: null,
+    contributionProfit: null,
+    netProfit: null,
+    maturity: "NO_ORDERS",
+  };
+  const lines = digestLines("2026-09-18", { key: "", label: "Toàn shop", totals: totals as never, findings: [] }, null, "");
+  const text = lines.join("\n");
+  assert.ok(text.includes("Chi QC: —"), "chi tiêu chưa đồng bộ phải in — chứ không phải 0đ");
+  assert.ok(text.includes("Tin nhắn: —"));
+  assert.ok(text.includes("Lợi nhuận góp: —"), "chi tiêu chưa biết ⇒ lợi nhuận chưa biết, không phải lỗ 0đ");
+  assert.ok(text.includes("Không phát hiện bất thường"), "không có phát hiện thì phải nói ra, không để bản tin cụt");
+  // ĐỘ CHÍN luôn đứng CÙNG DÒNG với lợi nhuận — tách ra là mời người đọc dừng ở dòng đầu.
+  const profitLine = lines.find((l) => l.startsWith("Lợi nhuận góp"));
+  assert.ok(profitLine?.includes("độ chín"), "lợi nhuận và độ chín phải nằm trên cùng một dòng");
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   PHẦN B — ĐỐI SOÁT VỚI BỘ MÁY LỢI NHUẬN (cần CSDL)
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * ═══════════ CỔNG QUAN TRỌNG NHẤT CỦA TỆP NÀY ═══════════
+ *
+ * Báo cáo Hiệu quả marketing theo ngày và Báo cáo lợi nhuận phải nói CÙNG một con số cho cùng một
+ * ngày. Không phải "gần đúng" — bằng nhau tới từng đồng, sau khi cộng lại phần đơn TRÙNG mà báo
+ * cáo marketing cố ý loại ra (và in ra thành số).
+ *
+ * Đây là điều kiện để cả hai trang cùng tồn tại. Thiếu nó thì trong vài tuần sẽ có hai con số lợi
+ * nhuận cho cùng một tháng, và không ai biết tin cái nào.
+ */
+export async function testMarketingDailyReconciliation() {
+  clearMemo();
+  const [daily, canonical] = await Promise.all([getMarketingDaily(ALL, "created"), getDailyBreakdown(ALL, "created")]);
+
+  const canonicalByDay = new Map(canonical.map((r) => [r.day, r]));
+  let checked = 0;
+  let reconciled = 0;
+  let unknownSpendDays = 0;
+  for (const row of daily.rows) {
+    const c = canonicalByDay.get(row.day);
+    if (!c) {
+      // Ngày chỉ có chi quảng cáo mà không có đơn nào vẫn là một dòng hợp lệ ở báo cáo marketing.
+      assert.equal(row.orders, 0, `ngày ${row.day} có đơn nhưng Báo cáo lợi nhuận không có dòng nào`);
+      continue;
+    }
+    checked += 1;
+    assert.equal(row.orders + row.duplicates.orders, c.orders, `ngày ${row.day}: số đơn phải khớp sau khi cộng lại phần trùng`);
+    assert.equal(row.deliveredRevenue + row.duplicates.deliveredRevenue, c.revenue, `ngày ${row.day}: doanh thu giao thành công phải khớp`);
+    assert.equal(row.deliveredOrders, c.success - 0, `ngày ${row.day}: đơn giao thành công`);
+    assert.equal(row.adSpend ?? 0, c.adSpend, `ngày ${row.day}: chi quảng cáo phải đọc cùng một nguồn`);
+    assert.equal(row.operatingCost ?? 0, c.operating, `ngày ${row.day}: chi phí vận hành phân bổ phải đi qua cùng bộ máy`);
+    // Cước gộp = cước + phí hoàn + phí sàn, đúng cách Báo cáo lợi nhuận cộng ba khoản đó.
+    assert.equal(row.shippingCost, c.shipping + c.returnFee + c.marketplaceFee, `ngày ${row.day}: cước và phí`);
+    // Lợi nhuận canonical: bằng nhau sau khi cộng lại phần trùng.
+    assert.equal(row.cogs, c.cogs, `ngày ${row.day}: giá vốn phải khớp`);
+
+    /*
+      LỢI NHUẬN: BẰNG NHAU TỚI TỪNG ĐỒNG, TRỪ ĐÚNG MỘT NGOẠI LỆ ĐƯỢC KHAI TRƯỚC.
+
+      Ngày nằm NGOÀI biên quan sát chi tiêu thì ở đây lợi nhuận là CHƯA BIẾT, còn Báo cáo lợi nhuận
+      coi chi tiêu chưa có là 0 rồi vẫn chốt một con số. Đó là khác biệt CÓ CHỦ Ý giữa hai báo cáo,
+      không phải sai số — và bài kiểm chặn nó lại đúng ở đó: ngoại lệ chỉ được phép xảy ra khi
+      `spendKnown = false`, và khi đó lợi nhuận PHẢI là `null` chứ không phải một con số gần đúng.
+    */
+    if (!row.spendKnown) {
+      assert.equal(row.netProfit, null, `ngày ${row.day}: chi tiêu chưa quan sát được ⇒ lợi nhuận phải là CHƯA BIẾT, không phải một con số`);
+      assert.equal(row.contributionProfit, null, `ngày ${row.day}: trừ đi một số chưa biết không ra một con số`);
+      assert.ok(daily.spendObservedThrough === null || row.day > daily.spendObservedThrough, `ngày ${row.day}: chỉ ngày NGOÀI biên quan sát mới được phép chưa biết chi tiêu`);
+      unknownSpendDays += 1;
+      continue;
+    }
+    const dupProfit = row.duplicates.profitDelta;
+    assert.equal(
+      (row.netProfit ?? 0) + dupProfit,
+      c.netProfit,
+      `ngày ${row.day}: LỢI NHUẬN phải khớp Báo cáo lợi nhuận · marketing=${JSON.stringify({ dt: row.deliveredRevenue, cogs: row.cogs, ship: row.shippingCost, ads: row.adSpend, op: row.operatingCost, cp: row.contributionProfit, np: row.netProfit })} · canonical=${JSON.stringify(c)}`,
+    );
+    reconciled += 1;
+  }
+  assert.ok(checked > 0, "phải có ít nhất một ngày để đối soát — nếu không, cổng này không kiểm được gì");
+  assert.ok(reconciled > 0, "phải có ít nhất một ngày ĐỐI SOÁT ĐƯỢC lợi nhuận — nếu mọi ngày đều 'chưa biết' thì cổng này rỗng");
+
+  // Tổng của cả kỳ cũng phải khớp, trên ĐÚNG những ngày đối soát được.
+  const comparable = new Set(daily.rows.filter((r) => r.spendKnown).map((r) => r.day));
+  const totalCanonicalProfit = canonical.filter((r) => comparable.has(r.day)).reduce((s, r) => s + r.netProfit, 0);
+  const totalDaily = daily.rows.filter((r) => comparable.has(r.day)).reduce((s, r) => s + (r.netProfit ?? 0) + r.duplicates.profitDelta, 0);
+  assert.equal(totalDaily, totalCanonicalProfit, "tổng lợi nhuận cả kỳ phải khớp Báo cáo lợi nhuận");
+
+  // Ngày chưa quan sát được chi tiêu phải được NÓI RA, không im lặng để trống.
+  if (unknownSpendDays > 0) {
+    assert.ok(daily.warnings.some((w) => w.includes("chi quảng cáo")), "có ngày chưa biết chi tiêu thì màn hình phải nói ra, không để người đọc tự đoán");
+  }
+}
+
+/**
+ * ═══════════ HÀNG TỔNG BẰNG TỔNG CÁC NGÀY, VÀ TỶ LỆ ĐƯỢC TÍNH LẠI ═══════════
+ */
+export async function testMarketingDailyTotals() {
+  clearMemo();
+  const data = await getMarketingDaily(ALL, "created");
+  const sum = (pick: (r: (typeof data.rows)[number]) => number) => data.rows.reduce((s, r) => s + pick(r), 0);
+  assert.equal(data.totals.orders, sum((r) => r.orders), "hàng tổng phải bằng tổng các ngày");
+  assert.equal(data.totals.deliveredRevenue, sum((r) => r.deliveredRevenue));
+  assert.equal(data.totals.cogs, sum((r) => r.cogs));
+
+  // Tỷ lệ của hàng tổng KHÔNG được là trung bình tỷ lệ các ngày.
+  const totalRate = ratioOf("deliveryRate", data.totals as unknown as Record<string, unknown>);
+  if (totalRate !== null) {
+    const expected = ratioOf("deliveryRate", { deliveredOrders: sum((r) => r.deliveredOrders), finishedOrders: sum((r) => r.finishedOrders) });
+    assert.equal(totalRate, expected, "tỷ lệ giao của cả kỳ = tổng tử ÷ tổng mẫu");
+  }
+
+  // Đơn huỷ KHÔNG nằm trong mẫu số của độ chín.
+  assert.equal(data.totals.maturityBase, data.totals.finishedOrders + data.totals.pendingOrders, "đơn huỷ không tham gia độ chín");
+}
+
+/**
+ * ═══════════ LỌC THEO CHIỀU: CHI PHÍ VẬN HÀNH THÀNH CHƯA BIẾT, KHÔNG THÀNH 0 ═══════════
+ *
+ * Đây là chỗ dễ sai nhất và tốn tiền nhất. Không có căn cứ nào chia tiền thuê nhà cho một chiến
+ * dịch, nên khi lọc thì `netProfit` phải là CHƯA BIẾT. Cho nó rơi về lợi nhuận góp sẽ in ra một
+ * khoản lãi không có thật — và người đọc sẽ tăng ngân sách dựa trên đó.
+ */
+export async function testMarketingDailyFilterHonesty() {
+  clearMemo();
+  assert.equal(hasDimensionFilter({}), false);
+  assert.equal(hasDimensionFilter({ campaignId: "x" }), true);
+
+  const unfiltered = await getMarketingDaily(ALL, "created");
+  for (const row of unfiltered.rows) {
+    assert.notEqual(row.operatingCost, null, "không lọc ⇒ chi phí vận hành phải đọc được");
+  }
+
+  const filtered = await getMarketingDaily(ALL, "created", { campaignId: "khong-ton-tai-campaign" });
+  for (const row of filtered.rows) {
+    assert.equal(row.operatingCost, null, "có lọc ⇒ chi phí vận hành là CHƯA BIẾT");
+    assert.equal(row.netProfit, null, "có lọc ⇒ lợi nhuận canonical là CHƯA BIẾT, KHÔNG rơi về lợi nhuận góp");
+  }
+  assert.ok(filtered.warnings.some((w) => w.includes("CHƯA BIẾT")), "màn hình phải nói ra vì sao cột trống");
+
+  // Chiều không có số chi: phải nói ra, không âm thầm in 0.
+  const adLevel = await getMarketingDaily(ALL, "created", { adId: "khong-ton-tai-ad" });
+  assert.ok(adLevel.warnings.some((w) => w.includes("chi quảng cáo")), "lọc theo mẩu quảng cáo ⇒ phải cảnh báo không có số chi");
+  for (const row of adLevel.rows) assert.equal(row.spendKnown, false, "cấp mẩu quảng cáo không có số chi — không được chia đều tiền chiến dịch xuống");
+}
+
+/**
+ * ═══════════ BÓC TÁCH: TỔNG CÁC NHÓM KHÔNG ĐƯỢC VƯỢT DÒNG GỐC ═══════════
+ *
+ * Mỗi đơn thuộc ĐÚNG MỘT nhóm (kể cả nhóm "Chưa quy kết"), nên bật một chiều lên không được làm
+ * đổi tổng. Nhóm chưa quy kết phải có mặt — giấu nó đi là làm tổng của bảng bóc tách nhỏ hơn dòng
+ * gốc mà không ai giải thích được.
+ */
+export async function testMarketingBreakdownConservation() {
+  clearMemo();
+  const total = await getMarketingDaily(ALL, "created");
+  const bd = await getMarketingBreakdown(ALL, "created", "marketer", {}, 50);
+  const sumOrders = bd.rows.reduce((s, r) => s + r.orders, 0);
+  assert.ok(sumOrders <= total.totals.orders, "bóc tách không được đẻ thêm đơn so với dòng gốc");
+  if (total.totals.orders > 0) {
+    assert.equal(sumOrders, total.totals.orders, "mỗi đơn thuộc đúng một nhóm marketer (kể cả nhóm chưa quy kết) ⇒ tổng phải bằng");
+  }
+  // Chiều mẩu quảng cáo không có số chi — cờ phải nói đúng, vì mọi tỷ lệ chia cho chi tiêu phụ thuộc nó.
+  const adBd = await getMarketingBreakdown(ALL, "created", "ad", {}, 5);
+  assert.equal(adBd.spendGrain, false);
+  const campBd = await getMarketingBreakdown(ALL, "created", "campaign", {}, 5);
+  assert.equal(campBd.spendGrain, true);
+}
+
+/** Điểm vào cho bộ chạy chung. Phần CSDL đi qua `getDb()` như các truy vấn thật, nên không cần tham số. */
+export async function testMarketingDaily() {
+  testMarketingMetricContract();
+  testMarketingRatioNullSafety();
+  testMarketingTotalsRecomputeRatios();
+  testMarketingMaturity();
+  testMarketingDiagnose();
+  testMarketingLossStreak();
+  testMarketingBaseline();
+  testMarketingDigestLines();
+  await testMarketingDailyReconciliation();
+  await testMarketingDailyTotals();
+  await testMarketingDailyFilterHonesty();
+  await testMarketingBreakdownConservation();
+}

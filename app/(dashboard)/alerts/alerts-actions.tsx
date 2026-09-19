@@ -388,6 +388,9 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret }: { config: A
           <Checkbox checked={form.enabled.adsAnomaly} onCheckedChange={(v) => toggle("adsAnomaly", v === true)} /> Quảng cáo bất thường & chiến dịch đang lỗ
         </label>
         <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.marketingDaily} onCheckedChange={(v) => toggle("marketingDaily", v === true)} /> Hiệu quả marketing theo ngày (CPQC, tỷ lệ chốt, tỷ lệ giao, lỗ nhiều ngày)
+        </label>
+        <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={form.enabled.cancelledButShipping} onCheckedChange={(v) => toggle("cancelledButShipping", v === true)} /> Đơn đã huỷ nhưng hàng vẫn đang đi tới khách
         </label>
         <label className="flex items-center gap-2">

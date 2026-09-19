@@ -47,7 +47,7 @@ const SUCCESS = sql`${ORDER_OUTCOME} = 'DELIVERED'`;
  * tính giá vốn 3 lần. Gói vào bảng dẫn xuất (kèm rào `OUTCOME_FENCE`) thì mỗi đơn tính đúng một lần.
  * Đây là đổi hình dạng truy vấn, không đổi công thức — khoá bằng tests/metric-shape-consistency.test.ts.
  */
-function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null) {
+function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null, extra?: SQL) {
   return db
     .select({
       orderId: schema.orders.id,
@@ -62,15 +62,41 @@ function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, f
       prepaidTotal: sql<number>`(${schema.orders.prepaid} + ${schema.orders.transferMoney} + ${schema.orders.cash})`.as("prepaid_total"),
       cogs: orderCogsColumn(),
       outcome: outcomeColumn(),
+      /*
+        ĐƠN BỊ KẾT LUẬN TRÙNG (một lần đặt bị nhập hai lần), đọc từ ẢNH CHỤP quy kết.
+
+        Báo cáo lợi nhuận CỐ Ý không lọc theo cột này: tiền của một đơn nhập hai lần vẫn là tiền đã
+        thu, và bỏ nó ra khỏi P&L là làm sổ lệch với ngân hàng. Cột có mặt ở đây để báo cáo hiệu quả
+        marketing — nơi câu hỏi là "quảng cáo mang về BAO NHIÊU LẦN MUA" — đếm được phần ấy và NÓI
+        RA nó, thay vì hai báo cáo lệch nhau mà không ai giải thích được.
+      */
+      duplicate: sql<boolean>`exists (select 1 from order_attributions oa where oa.order_id = ${schema.orders.id} and oa.status = 'DUPLICATE')`.as("order_duplicate"),
     })
     .from(schema.orders)
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
     .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
     // CÙNG POPULATION VỚI TỔNG QUAN: đơn đã xác nhận. Trước đây báo cáo này gom cả đơn NEW/WAITING
     // nên "N đơn" của cùng một kỳ ở hai trang là hai con số (docs/metrics-contract.md).
-    .where(and(populationFilter("confirmed"), between(basisDate(basis), from, to)))
+    .where(and(populationFilter("confirmed"), between(basisDate(basis), from, to), extra))
     .offset(OUTCOME_FENCE)
     .as("order_facts");
+}
+
+/**
+ * CỬA DUY NHẤT ĐỂ MỘT BÁO CÁO KHÁC DÙNG LẠI BỘ MÁY LỢI NHUẬN NÀY.
+ *
+ * Báo cáo Hiệu quả marketing theo ngày cần đúng bảng dẫn xuất ở trên nhưng lọc thêm theo một chiều
+ * (marketer / mã hàng / chiến dịch). Chép lại phép nối `orders ⋈ shipments`, `ORDER_OUTCOME` và
+ * `ORDER_COGS` sang một tệp thứ hai là dựng một khoá chân lý thứ hai: hai bên sẽ đồng ý hôm nay và
+ * lệch nhau vào ngày ai đó sửa một vế. Nên nó đi qua đây, và `tests/marketing-daily.test.ts` đối
+ * chiếu từng ngày với `getDailyBreakdown` để chứng minh không có đường nào lệch.
+ *
+ * `extra` là vị ngữ CHỈ ĐƯỢC PHÉP THU HẸP tập đơn. Truyền vào một vị ngữ mở rộng (một `or` với
+ * điều kiện ngoài population) là phá population, và số sẽ không còn khớp Báo cáo lợi nhuận nữa.
+ */
+export function pnlFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null, extra?: SQL) {
+  const base = orderFacts(db, basis, from, to, extra);
+  return { base, predicates: facts(base) };
 }
 
 /** Vị ngữ kết quả đơn đọc trên BẢNG DẪN XUẤT (cột đã tính sẵn), không tính lại. */

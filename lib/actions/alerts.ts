@@ -51,6 +51,7 @@ const configSchema = z.object({
     returnInspection: z.boolean().default(true),
     customerRecovery: z.boolean().default(true),
     adsAnomaly: z.boolean().default(true),
+    marketingDaily: z.boolean().default(true),
     cancelledButShipping: z.boolean().default(true),
     addressNotNormalized: z.boolean().default(true),
     bankAccountUnconfirmed: z.boolean().default(true),

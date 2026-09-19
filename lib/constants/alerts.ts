@@ -23,7 +23,7 @@ export type AlertConfig = {
   /** Hàng hoàn đã về tới shop quá N ngày mà kho chưa lập phiếu tái nhập → báo kho kiểm đếm */
   returnInspectionDays: number;
   /** Bật/tắt từng loại */
-  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean; incomplete: boolean; returnInspection: boolean; customerRecovery: boolean; adsAnomaly: boolean; cancelledButShipping: boolean; addressNotNormalized: boolean; bankAccountUnconfirmed: boolean };
+  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean; incomplete: boolean; returnInspection: boolean; customerRecovery: boolean; adsAnomaly: boolean; cancelledButShipping: boolean; addressNotNormalized: boolean; bankAccountUnconfirmed: boolean; marketingDaily: boolean };
 };
 
 export const ALERT_CONFIG_KEY = "alerts.config";
@@ -42,7 +42,7 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   staleDays: 4,
   lookbackDays: 14,
   returnInspectionDays: 3,
-  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true, incomplete: true, returnInspection: true, customerRecovery: true, adsAnomaly: true, cancelledButShipping: true, addressNotNormalized: true, bankAccountUnconfirmed: true },
+  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true, incomplete: true, returnInspection: true, customerRecovery: true, adsAnomaly: true, cancelledButShipping: true, addressNotNormalized: true, bankAccountUnconfirmed: true, marketingDaily: true },
 };
 
 export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
@@ -55,6 +55,7 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   CANCELLED_BUT_SHIPPING: "Đã huỷ nhưng hàng vẫn đang đi",
   STOCKOUT_RISK: "Hết trước khi SX xong",
   ADS_ANOMALY: "Quảng cáo bất thường",
+  MARKETING_DAILY: "Hiệu quả marketing theo ngày",
   PROFITABILITY_ALERT: "Lợi nhuận tụt ngưỡng",
   ORDER_INCOMPLETE: "Đơn thiếu SĐT / địa chỉ",
   SHIPMENT_STALE: "Vận đơn treo lâu",
@@ -70,7 +71,7 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   SYSTEM: "Hệ thống",
 };
 
-export const NOTIFICATION_KIND_ORDER = ["DATA_ERROR", "ORDER_INCOMPLETE", "ORDER_ADDRESS_NOT_NORMALIZED", "SHIPMENT_FAILED", "ORDER_PENDING", "ORDER_CONFIRMED_STALE", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "RETURN_PENDING_INSPECTION", "CUSTOMER_RECOVERY", "CANCELLED_BUT_SHIPPING", "COD_OVERDUE", "BANK_ACCOUNT_UNCONFIRMED", "CS_CASE", "CS_CASE_GROUP", "STOCK_LOW", "STOCKOUT_RISK", "ADS_BILLING", "ADS_ANOMALY", "PROFITABILITY_ALERT", "RISKY_ORDER", "SYSTEM"];
+export const NOTIFICATION_KIND_ORDER = ["DATA_ERROR", "ORDER_INCOMPLETE", "ORDER_ADDRESS_NOT_NORMALIZED", "SHIPMENT_FAILED", "ORDER_PENDING", "ORDER_CONFIRMED_STALE", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "RETURN_PENDING_INSPECTION", "CUSTOMER_RECOVERY", "CANCELLED_BUT_SHIPPING", "COD_OVERDUE", "BANK_ACCOUNT_UNCONFIRMED", "CS_CASE", "CS_CASE_GROUP", "STOCK_LOW", "STOCKOUT_RISK", "ADS_BILLING", "ADS_ANOMALY", "MARKETING_DAILY", "PROFITABILITY_ALERT", "RISKY_ORDER", "SYSTEM"];
 
 export const SEVERITY_TONE: Record<string, string> = {
   critical: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",
