@@ -379,9 +379,17 @@ export function testKhoaChayThat() {
         b.batDau < a.ketThuc,
         "bài kiểm phải THẬT SỰ chồng thời gian, nếu không nó không kiểm gì cả",
       );
-      const bChay = /\[khoá\] ĐÃ LẤY ĐƯỢC.*erp-readonly-db/.test(b.ra);
-      assert.ok(bChay, "lượt thứ hai phải đi qua ổ khoá đọc nặng");
-      assert.match(b.ra, /erp-readonly-db\.lock lúc .* — chờ [1-9]/, "…và phải CHỜ (số giây > 0) vì lượt đầu đang giữ");
+      assert.ok(/\[khoá\] ĐÃ LẤY ĐƯỢC.*erp-readonly-db/.test(b.ra), "lượt thứ hai phải đi qua ổ khoá đọc nặng");
+      // ĐO THỨ TỰ VÙNG TỚI HẠN, KHÔNG ĐỌC SỐ GIÂY TRONG LOG. Nhật ký làm tròn xuống giây
+      // (`$((_t1-_t0))`), nên một lượt chờ thật 0,6 giây in ra "chờ 0s" — bám vào chuỗi đó là
+      // dựng một bài kiểm đỏ ngẫu nhiên theo tốc độ máy. Tính chất cần chứng minh vốn là THỨ TỰ,
+      // và thứ tự thì đo được chính xác.
+      const va = vungToiHan(a);
+      const vb = vungToiHan(b);
+      assert.ok(
+        vb.vao >= va.ra - 50,
+        `lượt đọc nặng thứ hai vào vùng tới hạn lúc ${vb.vao} nhưng lượt đầu mới ra lúc ${va.ra} — hai lượt đã chồng nhau`,
+      );
     }
 
     // ───────── HAI LƯỢT ĐỌC NHẸ PHẢI CHỒNG NHAU ĐƯỢC ─────────
@@ -410,11 +418,6 @@ export function testKhoaChayThat() {
       ]);
       assert.equal(doc_.ma, 0, `lượt đọc phải chạy trót lọt:\n${doc_.ra}`);
       assert.equal(ghi.ma, 0, `lượt ghi phải chạy trót lọt (sau khi chờ):\n${ghi.ra}`);
-      assert.match(
-        ghi.ra,
-        /erp-lifecycle\.lock lúc .* — chờ [1-9]/,
-        "lượt GHI phải CHỜ lượt đọc nhả khoá vòng đời, chứ không dựng lại container dưới chân nó",
-      );
       // Vùng tới hạn của lượt GHI phải bắt đầu SAU khi vùng tới hạn của lượt ĐỌC kết thúc.
       const vd = vungToiHan(doc_);
       const vg = vungToiHan(ghi);
@@ -448,11 +451,27 @@ export function testKhoaChayThat() {
             `— khoá độc quyền không giữ được điều nó hứa`,
         );
       }
-      // Và phải thật sự có lượt ĐÃ CHỜ, nếu không bài kiểm chỉ chạy ba lệnh nối đuôi một cách
-      // tình cờ và không chứng minh gì.
+      /*
+        VÀ HÀNG ĐỢI PHẢI THẬT SỰ ĐƯỢC CHẠM TỚI — nếu không bài kiểm chỉ chạy ba lệnh nối đuôi một
+        cách tình cờ và chẳng chứng minh gì.
+
+        Bản đầu hỏi "có ít nhất hai lượt ghi nhận số giây chờ > 0 không" và nó ĐỎ NGẪU NHIÊN
+        1/12 lượt: nhật ký làm tròn xuống giây, nên một lượt chờ thật 0,6 giây in ra "chờ 0s".
+        Một bài kiểm đỏ vì máy hôm nay nhanh hơn thì sau ba lần không ai đọc thông điệp của nó
+        nữa — họ chỉ đi chạy lại.
+
+        Thay bằng một phép đo KHÔNG phụ thuộc làm tròn: ba lượt, mỗi lượt giữ khoá GIU giây, mà
+        không được chồng nhau ⇒ khoảng từ lúc lượt đầu VÀO tới lúc lượt cuối RA phải ≥ 3×GIU.
+        Nếu khoá hỏng và ba lượt chạy song song thì khoảng ấy chỉ ~1×GIU — hai con số cách nhau
+        gấp ba, không có vùng xám.
+      */
+      const vao = Math.min(...moc.map((m) => m.vao));
+      const raCuoi = Math.max(...moc.map((m) => m.ra));
+      const nhip = raCuoi - vao;
       assert.ok(
-        kq.filter((r) => /erp-lifecycle\.lock lúc .* — chờ [1-9]/.test(r.ra)).length >= 2,
-        "ít nhất hai lệnh ghi phải thật sự ĐỨNG CHỜ khoá — nếu không bài kiểm không chạm tới hàng đợi",
+        nhip >= 2500,
+        `ba lệnh ghi mỗi lệnh giữ khoá 1s phải trải ra ≥ 3s nếu chúng thật sự nối tiếp; đo được ` +
+          `${Math.round(nhip)}ms — khoá độc quyền không giữ được điều nó hứa`,
       );
     }
 
