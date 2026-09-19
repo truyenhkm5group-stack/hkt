@@ -3,11 +3,14 @@ import {
   MARKETING_FINDING_ACTIONS,
   MARKETING_FINDING_BASIS,
   MARKETING_FINDING_LABEL,
+  MARKETING_FINDING_OWNER,
+  MARKETING_FINDING_WHY,
   type FindingBasis,
   type FindingSeverity,
   type MarketingFindingKind,
 } from "@/lib/constants/marketing-diagnosis";
 import { MATURITY } from "@/lib/constants/marketing-daily";
+import type { DepartmentCode } from "@/lib/constants/departments";
 
 /**
  * ═══════════ MÁY PHÂN TÍCH HIỆU QUẢ MARKETING — HÀM THUẦN ═══════════
@@ -72,6 +75,14 @@ export type MarketingFinding = {
   day: string;
   /** Câu bằng SỐ THẬT của chính dòng này. Không có câu nào chung chung. */
   evidence: string[];
+  /**
+   * NGUYÊN NHÂN CÓ KHẢ NĂNG NHẤT — một GIẢ THUYẾT, tách hẳn khỏi `evidence` là SỐ ĐO.
+   * Gộp hai thứ vào một mảng là mời người đọc hành động với một giả thuyết như thể nó đã được
+   * chứng minh.
+   */
+  why: string;
+  /** PHÒNG BAN chịu trách nhiệm. Không bao giờ là một cá nhân (AGENTS.md mục 22). */
+  owner: DepartmentCode;
   actions: string[];
 };
 
@@ -127,6 +138,8 @@ export function diagnose(input: DiagnoseInput): MarketingFinding[] {
       scopeLabel,
       day: input.day,
       evidence,
+      why: MARKETING_FINDING_WHY[kind],
+      owner: MARKETING_FINDING_OWNER[kind],
       actions: MARKETING_FINDING_ACTIONS[kind],
     });
   };

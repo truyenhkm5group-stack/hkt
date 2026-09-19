@@ -86,11 +86,13 @@ const fromBinding = (key: string): TargetableMetric => {
     origin: "BINDING",
     department: b.department,
     basis: b.basis,
-    // Chỉ số kinh doanh đo ở mức CÔNG TY / PHÒNG. Không cái nào đọc được ở mức một con người,
-    // nên không cái nào được phép trở thành đích chấm một cá nhân.
-    personGrain: false,
+    // MẶC ĐỊNH VẪN LÀ KHÔNG. Phần lớn chỉ số kinh doanh đo ở mức CÔNG TY / PHÒNG, và gắn tên một
+    // người lên một con số của cả shop là chấm họ bằng kết quả của người khác. Chỉ số nào thật sự
+    // đọc được ở mức người thì khai `personGrain: true` NGAY TẠI CHỖ KHAI nó, để lý do đứng cạnh
+    // công thức chứ không nằm ở đây.
+    personGrain: b.personGrain === true,
     productGrain: b.productGrain === true,
-    shared: false,
+    shared: b.shared === true,
     // `MANUAL` = ERP chưa đo được. Đặt đích cho nó là đặt đích cho một con số người tự gõ.
     targetable: b.trust !== "MANUAL",
     missingWhat: b.trust === "MANUAL" ? "ERP chưa đo được chỉ số này — người phụ trách tự nhập, nên không có gì để chấm tự động" : undefined,
