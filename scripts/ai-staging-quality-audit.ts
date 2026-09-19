@@ -39,6 +39,7 @@ import { getDb, schema } from "@/db";
 import { moneyMentions } from "@/lib/ai-workforce/agents/sales/generate";
 import { safetyFlags, SAFETY_FLAG_LABEL, type SafetyFlag } from "@/lib/constants/sales-quality";
 import { parseSalesState } from "@/lib/ai-workforce/agents/sales/state";
+import { findColor, findSize } from "@/lib/ai-workforce/agents/sales/understand";
 
 function arg(name: string): string {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -61,6 +62,7 @@ type Row = {
   action: string;
   customerText: string;
   handoffReason: string;
+  coQuyetDinh: boolean;
 };
 
 /**
@@ -114,6 +116,9 @@ async function main() {
     action: x.action ?? "",
     customerText: String(x.customerText ?? ""),
     handoffReason: String(((x.decision ?? {}) as Record<string, unknown>).handoffReason ?? ""),
+    // CÓ BẢN GHI QUYẾT ĐỊNH hay không là một câu hỏi KHÁC câu "quyết định có ghi lý do không".
+    // Gộp hai thứ ấy làm một lỗi dữ liệu trông y như một lỗi nghiệp vụ.
+    coQuyetDinh: x.decision !== null && x.decision !== undefined,
   }));
 
   console.log("═══════ SOI LẠI CHẤT LƯỢNG TRÊN DỮ LIỆU THẬT ═══════");
@@ -186,6 +191,8 @@ async function main() {
   }
   type Mat = { conversationId: string; o: string; truoc: string; runTruoc: string | null; runSau: string | null; luc: Date; cauKhach: string };
   const mat: Mat[] = [];
+  /** Khách nói màu/size mới trong chính tin ấy ⇒ ĐỔI Ý, hành vi đúng. Đếm riêng để thấy tỷ lệ. */
+  const doiY: Mat[] = [];
   let soHoiThoaiNhieuLuot = 0;
 
   for (const [conversationId, ds] of theoHoiThoai) {
@@ -204,16 +211,33 @@ async function main() {
           mat.push({ conversationId, o, truoc: a, runTruoc: xuoi[i - 1].runId, runSau: xuoi[i].runId, luc: xuoi[i].createdAt, cauKhach: xuoi[i].customerText });
         }
       }
-      // Mẫu mã đã khoá rồi mất cũng là mất — và là lần mất đắt nhất, vì nó xoá cả một lựa chọn đã chốt.
+      /*
+        MẤT ≠ ĐỔI Ý, VÀ DỤNG CỤ ĐO PHẢI PHÂN BIỆT ĐƯỢC HAI THỨ.
+
+        Bản đầu của bài soi đếm mọi lần `variantId` về rỗng là MẤT, và nó báo 2 lần trên dữ liệu
+        thật. Đọc ra câu của khách thì cả hai đều là khách ĐỔI Ý: "Đổi cho mầu xanh số M nhé" và
+        một tin chốt combo hai đầm. Mẫu mã cũ bị xoá vì lựa chọn MỚI chưa khớp được về một mẫu mã
+        duy nhất — đó là hành vi ĐÚNG, không phải lỗi.
+
+        Một dụng cụ đo gộp "đổi ý" với "mất" sẽ báo động giả mãi mãi, và người đọc sẽ thôi tin nó.
+        Nên: khách có nhắc tới màu hoặc size trong chính tin ấy ⇒ ĐỔI Ý. Không nhắc gì mà mẫu mã
+        vẫn bay ⇒ MẤT, và đó mới là thứ đáng gọi dậy lúc nửa đêm.
+      */
       if (truoc.variantId && !sau.variantId) {
-        mat.push({ conversationId, o: "variantId", truoc: truoc.variantLabel || truoc.variantId, runTruoc: xuoi[i - 1].runId, runSau: xuoi[i].runId, luc: xuoi[i].createdAt, cauKhach: xuoi[i].customerText });
+        const cau = xuoi[i].customerText;
+        const khachDoiY = Boolean(findColor(cau) || findSize(cau));
+        (khachDoiY ? doiY : mat).push({
+          conversationId, o: "variantId", truoc: truoc.variantLabel || truoc.variantId,
+          runTruoc: xuoi[i - 1].runId, runSau: xuoi[i].runId, luc: xuoi[i].createdAt, cauKhach: cau,
+        });
       }
     }
   }
 
   console.log("\n───────── 2. MẤT TRẠNG THÁI GIỮA HAI LƯỢT LIÊN TIẾP ─────────");
   console.log(`  hội thoại có ≥2 lượt : ${soHoiThoaiNhieuLuot}`);
-  console.log(`  lần MẤT đo được      : ${mat.length}`);
+  console.log(`  khách ĐỔI Ý (hợp lệ) : ${doiY.length}  — nói màu/size mới trong chính tin ấy`);
+  console.log(`  lần MẤT đáng ngờ     : ${mat.length}  — mẫu mã bay mà khách KHÔNG nhắc màu/size nào`);
   if (mat.length) {
     const theoO = new Map<string, number>();
     for (const m of mat) theoO.set(m.o, (theoO.get(m.o) ?? 0) + 1);
@@ -242,7 +266,13 @@ async function main() {
   console.log("\n───────── 4. VÌ SAO CHUYỂN NGƯỜI ─────────");
   console.log(`  tổng chuyển người : ${chuyen.length}/${rows.length} lượt (${rows.length ? ((chuyen.length / rows.length) * 100).toFixed(1) : "—"}%)`);
   const theoLyDo = new Map<string, number>();
-  for (const c of chuyen) theoLyDo.set(c.handoffReason || "(không ghi lý do)", (theoLyDo.get(c.handoffReason || "(không ghi lý do)") ?? 0) + 1);
+  for (const c of chuyen) {
+    // BA RỔ, không hai. "Không có bản ghi quyết định" là lỗi DỮ LIỆU (lượt chạy ghi dở); "có bản
+    // ghi mà thiếu lý do" là lỗi NGHIỆP VỤ (luật 13: chuyển người phải có mã lý do). Gộp lại thì
+    // một lỗi hạ tầng trông y như một lỗi nghiệp vụ và người đọc đi sửa nhầm chỗ.
+    const khoa = c.handoffReason || (c.coQuyetDinh ? "⚠ CÓ bản ghi nhưng THIẾU mã lý do" : "⚠ KHÔNG có bản ghi quyết định");
+    theoLyDo.set(khoa, (theoLyDo.get(khoa) ?? 0) + 1);
+  }
   for (const [ly, n] of [...theoLyDo.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`    ${String(n).padStart(4)} × ${ly}`);
   }
