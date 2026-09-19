@@ -339,6 +339,17 @@ async function main() {
     So `có kỳ trước` với `không kỳ trước` trả lời được một câu cụ thể: dải KPI "so với kỳ trước" có
     đang nhân đôi toàn bộ chi phí của trang hay không.
   */
+  /*
+    PHÉP SO SÁNH PHÂN BIỆT ĐƯỢC.
+
+    `getDailyBreakdown` của Báo cáo lợi nhuận dùng CHÍNH bảng dẫn xuất `orderFacts` mà bảng theo
+    ngày dùng, chỉ khác là không có các cột riêng của báo cáo marketing. Đặt hai con số cạnh nhau
+    thì trả lời dứt khoát được câu "chi phí này là của tính năng mới hay là chi phí có sẵn của cả
+    kho mã" — thay vì đoán lần thứ ba.
+  */
+  const rep = await import("@/lib/queries/reports");
+  await timed("/reports (nền)", "getDailyBreakdown 30d", () => rep.getDailyBreakdown(month, "created"));
+
   const md = await import("@/lib/queries/marketing-daily");
   const { previousPeriod } = await import("@/lib/search-params");
   await timed("/ads/daily", "marketingDaily 30d (có kỳ trước)", () => md.getMarketingDaily(month, "created", {}, previousPeriod(month)));
@@ -437,7 +448,19 @@ async function main() {
         // Chỉ in nút ĐẮT hoặc chạy lại nhiều lần — bản kế hoạch đầy đủ dài hàng trăm dòng.
         const dangChuY = dong.filter((l) => /loops=[2-9]|loops=\d\d|actual time=\d{3,}|Seq Scan|SubPlan|shared read/.test(l));
         console.log(`\n  ${c.ms}ms · ${c.sql.slice(0, 110)}…`);
-        console.log(dangChuY.slice(0, 14).map((l) => `    ${l.trim().slice(0, 190)}`).join("\n") || "    (không nút nào đáng chú ý)");
+        /*
+          CÂU CHẬM NHẤT IN KẾ HOẠCH ĐẦY ĐỦ, KHÔNG LỌC.
+
+          Bản lọc bỏ sót đúng thứ cần: một nút `SubPlan` in ra tiêu đề mà không in dòng con, nên
+          không biết nó tốn bao nhiêu. Đã mất một vòng chẩn đoán vì chỗ này — thấy "SubPlan 3" trần
+          trụi rồi phải đoán. Câu chậm nhất thì in đủ; các câu sau vẫn lọc cho gọn.
+        */
+        if (chamNhat.indexOf(c) === 0) {
+          console.log("    ── kế hoạch ĐẦY ĐỦ (câu chậm nhất) ──");
+          console.log(dong.map((l) => `    ${l.slice(0, 220)}`).join("\n"));
+        } else {
+          console.log(dangChuY.slice(0, 14).map((l) => `    ${l.trim().slice(0, 190)}`).join("\n") || "    (không nút nào đáng chú ý)");
+        }
         for (const l of dong) if (l.startsWith("Execution Time") || l.startsWith("Planning Time")) console.log(`    ${l}`);
       } catch (e) {
         console.log(`\n  ${c.ms}ms — không EXPLAIN được: ${e instanceof Error ? e.message : String(e)}`);
