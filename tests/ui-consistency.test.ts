@@ -209,6 +209,7 @@ export function testNavigationCoverage() {
     // một module vào đó làm loãng bản đồ của mọi module khác. Cả bốn đều nằm trong `scripts/smoke.ts`
     // nên vẫn được lá chắn mở thử mỗi lần deploy.
     "/tech/tasks": "tab 'Hàng đợi việc' của /tech",
+    "/tech/cto": "tab 'AI CTO' của /tech",
     "/tech/agents": "tab 'Sổ agent' của /tech",
     "/tech/deployments": "tab 'Deploy' của /tech",
     "/tech/incidents": "tab 'Sự cố' của /tech",

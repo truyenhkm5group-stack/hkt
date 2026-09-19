@@ -33,7 +33,8 @@
     "agent:run": "tsx --tsconfig tsconfig.json scripts/agent-run.ts",
     "agent:check": "tsx --tsconfig tsconfig.json scripts/agent-runner-check.ts",
     "agent:proof-setup": "tsx --tsconfig tsconfig.json scripts/agent-proof-setup.ts",
-    "agent:proof-report": "tsx --tsconfig tsconfig.json scripts/agent-proof-report.ts"
+    "agent:proof-report": "tsx --tsconfig tsconfig.json scripts/agent-proof-report.ts",
+    "cto:proof": "tsx --tsconfig tsconfig.json scripts/cto-proof.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

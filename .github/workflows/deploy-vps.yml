@@ -32,13 +32,21 @@ permissions:
   packages: write
 
 jobs:
+  # ═══ CỔNG CHẤT LƯỢNG DÙNG CHUNG VỚI PR ═══
+  #
+  # Trước đây năm bước cổng được CHÉP thẳng vào đây. Nay chúng sống ở `gates.yml` và cả CI của PR
+  # lẫn deploy đều gọi cùng một tệp — hai bản chép sẽ trôi xa nhau, và bản trôi chậm hơn là bản
+  # người ta tin. Deploy vẫn KHÔNG chạy nếu cổng đỏ: bước SSH `needs: gates`.
+  gates:
+    uses: ./.github/workflows/gates.yml
+    with:
+      ref: ${{ github.sha }}
+
   deploy:
+    needs: gates
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      # GUARDRAIL NGHIỆP VỤ: contract test khoá luật "đơn giao thành công / đơn hoàn"
-      # (docs/business-rules/ORDER_OUTCOME.md) phải xanh thì mới được deploy.
-      # Đây là điều kiện CHẶN, không phải cảnh báo — đỏ là dừng, không deploy.
       # BẢN ĐƯỢC KIỂM PHẢI LÀ BẢN ĐƯỢC TRIỂN KHAI: ghim thẳng vào SHA thay vì tên nhánh.
       # Nhánh có thể được đẩy tiếp trong lúc workflow đang chạy (hai phiên làm việc song song),
       # và khi đó "main" ở bước này với "main" ở bước SSH là hai bản mã khác nhau.
@@ -53,20 +61,8 @@ jobs:
           cache: npm
       - name: Cài phụ thuộc
         run: npm ci
-      # Chạy TRƯỚC tsc: khi có tệp trỏ ra ngoài kho, bài này nói thẳng tên tệp và tên import,
-      # còn tsc chỉ nói "Cannot find module" ở một toạ độ dòng/cột.
-      - name: Toàn vẹn kho mã (không import tệp chưa vào kho)
-        run: npx tsx --tsconfig tsconfig.json tests/repo-integrity.test.ts
-      - name: Kiểm tra kiểu dữ liệu
-        run: npx tsc --noEmit
-      - name: Kiểm tra chuẩn mã nguồn
-        run: npx eslint --max-warnings=0
-      - name: Kiểm thử (gồm contract test luật nghiệp vụ)
-        run: npm test
-      # Bản dựng production bắt lỗi ranh giới client/server mà `tsc` không thấy. Chạy TRƯỚC khi
-      # đụng tới máy chủ: thà đỏ ở đây còn hơn container khởi động lại vô hạn trên VPS.
-      - name: Dựng bản production
-        run: npm run build
+      # Năm bước cổng (toàn vẹn · typecheck · lint · test · build) chạy ở job `gates` bên trên,
+      # trên ĐÚNG SHA này. Job dưới đây chỉ chạy khi job đó xanh.
 
       # ═══ DỰNG IMAGE Ở CI, KHÔNG DỰNG TRÊN VPS ═══
       #

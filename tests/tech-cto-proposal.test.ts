@@ -1,0 +1,306 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import path from "node:path";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { parseCtoPlan, type CtoPlan } from "@/lib/constants/cto-proposal";
+import { promptCoSecretKhong } from "@/lib/agents/cto";
+import { approveProposal, createProposal, rejectProposal, supersedeOpenProposals } from "@/lib/tech/proposal";
+import { createTechTask, type TechActor } from "@/lib/tech/service";
+
+/**
+ * ═══════════ AI CTO CHỈ ĐƯỢC ĐỀ NGHỊ ═══════════
+ *
+ * Mười ba điều đặc tả Phase 2B đòi, và tất cả chạy hàm THẬT trên CSDL kiểm thử — không mô phỏng.
+ *
+ * Điều quan trọng nhất nằm ở khối 4: mức rủi ro trong bản đề xuất là Ý KIẾN, và nó KHÔNG đi vào
+ * việc thật. Một bản đề xuất nói "R0" cho việc sửa lương vẫn phải ra R2 và vẫn chờ chủ shop ký —
+ * nếu không thì cổng phê duyệt của Phase 1 bị một đường mới đi vòng qua.
+ */
+
+const goc = path.resolve(__dirname, "..");
+const NGUOI: TechActor = { kind: "HUMAN", id: null, name: "cto-test:chu-shop" };
+const MAY: TechActor = { kind: "AI_AGENT", id: null, name: "agent:ai-cto" };
+
+function keHoach(over: Partial<CtoPlan> = {}): CtoPlan {
+  return {
+    summary: "Chia mục tiêu thành hai việc đọc được và đo được.",
+    assumptions: ["Trang vận đơn hiện dùng truy vấn N+1"],
+    questions: ["Ngưỡng chậm bao nhiêu mili giây thì coi là đạt?"],
+    tasks: [
+      {
+        key: "T1",
+        title: "Đo thời gian từng truy vấn của trang vận đơn",
+        description: "Chạy perf-probe trên dữ liệu thật và ghi lại truy vấn chậm nhất.",
+        taskType: "PERFORMANCE",
+        module: "SHIPMENTS",
+        suggestedPriority: "P1",
+        suggestedRisk: "R0",
+        riskExplanation: "Chỉ đo, không đổi một dòng dữ liệu nào.",
+        suggestedAgent: "qa",
+        dependsOn: [],
+        acceptanceCriteria: ["Có bảng thời gian từng truy vấn, sắp xếp giảm dần"],
+        expectedScope: ["scripts/perf-probe.ts"],
+        needsHumanDecision: false,
+        humanDecisionNote: "",
+      },
+      {
+        key: "T2",
+        title: "Gộp truy vấn chậm nhất của trang vận đơn",
+        description: "Viết lại truy vấn đã xác định ở T1.",
+        taskType: "PERFORMANCE",
+        module: "SHIPMENTS",
+        suggestedPriority: "P1",
+        suggestedRisk: "R0",
+        riskExplanation: "Không đổi công thức nào, chỉ đổi cách lấy dữ liệu.",
+        suggestedAgent: "backend",
+        dependsOn: ["T1"],
+        acceptanceCriteria: ["Thời gian dựng trang giảm và số dòng không đổi"],
+        expectedScope: ["lib/queries/shipments.ts"],
+        needsHumanDecision: false,
+        humanDecisionNote: "",
+      },
+    ],
+    ...over,
+  } as CtoPlan;
+}
+
+export async function testCtoProposal() {
+  const db = await getDb();
+
+  const mucTieu = await createTechTask(
+    { title: "Đánh giá và đề xuất cải thiện tốc độ trang vận đơn", description: "Trang mở chậm khi nhiều vận đơn.", taskType: "PERFORMANCE", module: "SHIPMENTS", priority: "P2", source: "OWNER" },
+    NGUOI,
+  );
+  assert.ok("ok" in mucTieu, "tạo được mục tiêu gốc");
+  const sourceTaskId = "ok" in mucTieu ? mucTieu.id : "";
+
+  /* ═════════ 1 · AI LẬP KẾ HOẠCH NHƯNG KHÔNG TẠO VIỆC THẬT ═════════ */
+  const truoc = (await db.query.techTasks.findMany()).length;
+  const p1 = await createProposal({ sourceTaskId, agentId: null, agentKey: "ai-cto", provider: "anthropic", model: "claude-opus-5", plan: keHoach() });
+  assert.ok("ok" in p1 && p1.status === "READY_FOR_REVIEW", "bản đề xuất vào thẳng trạng thái CHỜ DUYỆT");
+  const idP1 = "ok" in p1 ? p1.id : "";
+  assert.equal((await db.query.techTasks.findMany()).length, truoc, "lập kế hoạch KHÔNG được tạo một việc thật nào");
+  assert.equal((await db.query.techProposalTasks.findMany({ where: eq(schema.techProposalTasks.proposalId, idP1) })).length, 2, "hai việc đề nghị nằm ở bảng đề xuất");
+
+  /* ═════════ 2 · AI KHÔNG DUYỆT, KHÔNG TỪ CHỐI, KHÔNG ÁP ═════════ */
+  const mayDuyet = await approveProposal({ proposalId: idP1 }, MAY);
+  assert.ok("error" in mayDuyet, "agent KHÔNG duyệt được kế hoạch của chính nó");
+  assert.ok("error" in mayDuyet && mayDuyet.error.includes("con người"), "…và nói rõ cổng này cần một con người");
+  const mayTuChoi = await rejectProposal({ proposalId: idP1, reason: "agent tự từ chối cho xong" }, MAY);
+  assert.ok("error" in mayTuChoi, "agent cũng KHÔNG từ chối được — cùng một cổng, cửa sau khác");
+  assert.equal((await db.query.techTasks.findMany()).length, truoc, "sau hai lượt agent thử, vẫn KHÔNG có việc thật nào");
+
+  /* ═════════ 3 · NGƯỜI DUYỆT ⇒ VIỆC THẬT TẠO QUA DỊCH VỤ ═════════ */
+  const duyet = await approveProposal({ proposalId: idP1, note: "Kế hoạch hợp lý" }, NGUOI);
+  assert.ok("ok" in duyet, `người phải duyệt được — ${"error" in duyet ? duyet.error : ""}`);
+  assert.equal("ok" in duyet ? duyet.created : -1, 2, "đúng hai việc thật được tạo");
+  const sau = await db.query.techTasks.findMany();
+  assert.equal(sau.length, truoc + 2, "và đúng hai dòng mới trong hàng đợi việc");
+
+  // Phụ thuộc nối bằng khoá THẬT, không phải khoá cục bộ `T1`.
+  const rows = await db.query.techProposalTasks.findMany({ where: eq(schema.techProposalTasks.proposalId, idP1), orderBy: (t, { asc }) => [asc(t.seq)] });
+  const t1 = sau.find((t) => t.id === rows[0].appliedTaskId);
+  const t2 = sau.find((t) => t.id === rows[1].appliedTaskId);
+  assert.ok(t1 && t2, "cả hai dòng đề xuất phải nối được tới việc thật");
+  assert.deepEqual(t2!.dependsOn, [t1!.id], "T2 phụ thuộc T1 bằng id THẬT — `T1` là khoá cục bộ, không tra được ở đâu khác");
+  assert.equal(t1!.parentTaskId, sourceTaskId, "việc con treo dưới đúng mục tiêu gốc");
+
+  /* ═════════ 4 · MỨC RỦI RO ĐƯỢC MÁY XẾP LẠI — AI KHÔNG ÉP ĐƯỢC ═════════ */
+  //
+  // Đây là ca quan trọng nhất của cả bài: một bản đề xuất khai R0 cho việc chạm LƯƠNG. Nếu mức
+  // của AI đi thẳng vào `tech_tasks` thì cổng phê duyệt R2 của Phase 1 vừa bị một đường mới đi
+  // vòng qua — và không ai thấy, vì trên màn hình việc đó trông như một việc R0 bình thường.
+  const mtLuong = await createTechTask({ title: "Mục tiêu: xem lại cách tính lương", description: "Rà soát", taskType: "REFACTOR", module: "PAYROLL", priority: "P2", source: "OWNER" }, NGUOI);
+  const idLuong = "ok" in mtLuong ? mtLuong.id : "";
+  const pLuong = await createProposal({
+    sourceTaskId: idLuong,
+    agentId: null,
+    agentKey: "ai-cto",
+    provider: "anthropic",
+    model: "claude-opus-5",
+    plan: keHoach({
+      tasks: [
+        {
+          key: "T1",
+          title: "Sửa công thức lương cứng theo kỳ",
+          description: "Đổi cách chia lương cứng theo số ngày chồng lấn trong kỳ trả.",
+          taskType: "REFACTOR",
+          module: "PAYROLL",
+          suggestedPriority: "P1",
+          // AI nói R0 — và nó SAI. Máy phải sửa lại.
+          suggestedRisk: "R0",
+          riskExplanation: "Tôi nghĩ chỉ là đổi cách chia, không đổi số.",
+          suggestedAgent: "backend",
+          dependsOn: [],
+          acceptanceCriteria: ["Lương kỳ cũ không đổi một đồng"],
+          expectedScope: ["lib/queries/payroll-cost.ts"],
+          needsHumanDecision: true,
+          humanDecisionNote: "Chạm tiền của người thật",
+        },
+      ],
+    }),
+  });
+  const idPL = "ok" in pLuong ? pLuong.id : "";
+  const duyetLuong = await approveProposal({ proposalId: idPL }, NGUOI);
+  assert.ok("ok" in duyetLuong, "duyệt được");
+  const apLuong = "ok" in duyetLuong ? duyetLuong.tasks[0] : null;
+  assert.ok(apLuong, "có việc được tạo");
+  assert.equal(apLuong!.suggestedRisk, "R0", "AI đã nói R0…");
+  assert.equal(apLuong!.appliedRisk, "R2", "…nhưng MÁY xếp R2, và mức của máy là mức đi vào việc thật");
+  assert.equal(apLuong!.riskChanged, true, "và chênh lệch đó phải hiện ra, không im lặng");
+  const viecLuong = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, apLuong!.taskId) });
+  assert.equal(viecLuong?.risk, "R2");
+  assert.equal(viecLuong?.approvalRequired, true, "R2 ⇒ vẫn phải có chủ shop ký, y như mọi việc R2 khác");
+  assert.equal(viecLuong?.approvalStatus, "PENDING", "…và nó đang CHỜ ký, không phải đã ký sẵn");
+
+  /* ═════════ 5 · DUYỆT HAI LẦN KHÔNG TẠO HAI BỘ VIỆC ═════════ */
+  const soViec = (await db.query.techTasks.findMany()).length;
+  const lai = await approveProposal({ proposalId: idP1, note: "bấm nhầm lần nữa" }, NGUOI);
+  assert.ok("ok" in lai, "bấm lại không được báo lỗi — lượt áp có thể hỏng giữa chừng và cần chạy lại");
+  assert.equal("ok" in lai ? lai.created : -1, 0, "…nhưng KHÔNG tạo thêm việc nào");
+  assert.equal("ok" in lai ? lai.skipped : -1, 2, "hai dòng đã có khoá việc thật thì bỏ qua");
+  assert.equal((await db.query.techTasks.findMany()).length, soViec, "tổng số việc không đổi");
+
+  /* ═════════ 6 · BẢN ĐÃ TỪ CHỐI / ĐÃ BỊ THAY THẾ KHÔNG ÁP ĐƯỢC ═════════ */
+  const p2 = await createProposal({ sourceTaskId, agentId: null, agentKey: "ai-cto", provider: "anthropic", model: "claude-opus-5", plan: keHoach() });
+  const idP2 = "ok" in p2 ? p2.id : "";
+  const tuChoiNgan = await rejectProposal({ proposalId: idP2, reason: "không" }, NGUOI);
+  assert.ok("error" in tuChoiNgan, "từ chối mà không nói vì sao thì bị chặn");
+  assert.ok("ok" in (await rejectProposal({ proposalId: idP2, reason: "Kế hoạch bỏ sót phần đo trước khi sửa" }, NGUOI)), "nói đủ thì từ chối được");
+  const apTuChoi = await approveProposal({ proposalId: idP2 }, NGUOI);
+  assert.ok("error" in apTuChoi, "bản ĐÃ TỪ CHỐI không áp được");
+
+  const p3 = await createProposal({ sourceTaskId, agentId: null, agentKey: "ai-cto", provider: "anthropic", model: "claude-opus-5", plan: keHoach() });
+  const idP3 = "ok" in p3 ? p3.id : "";
+  const p4 = await createProposal({ sourceTaskId, agentId: null, agentKey: "ai-cto", provider: "anthropic", model: "claude-opus-5", plan: keHoach() });
+  const idP4 = "ok" in p4 ? p4.id : "";
+  const soThay = await supersedeOpenProposals(sourceTaskId, idP4);
+  assert.ok(soThay >= 1, "lập lại kế hoạch thì bản chờ duyệt cũ bị đánh dấu ĐÃ BỊ THAY THẾ");
+  const apThay = await approveProposal({ proposalId: idP3 }, NGUOI);
+  assert.ok("error" in apThay, "bản ĐÃ BỊ THAY THẾ không áp được — không ai lỡ tay duyệt một kế hoạch lỗi thời");
+  // …nhưng KHÔNG bị xoá: còn đọc được để so hai lần AI nghĩ khác nhau chỗ nào.
+  assert.ok(await db.query.techProposals.findFirst({ where: eq(schema.techProposals.id, idP3) }), "bản cũ vẫn còn trong sổ");
+
+  /* ═════════ 7 · JSON HỎNG / VAI LẠ BỊ TỪ CHỐI, KHÔNG ĐOÁN ═════════ */
+  assert.equal(parseCtoPlan("không phải json").ok, false, "văn xuôi không phải kế hoạch");
+  assert.equal(parseCtoPlan('{"summary":"thiếu tasks","tasks":[]}').ok, false, "kế hoạch không việc nào là kế hoạch rỗng");
+  const vaiLa = parseCtoPlan(
+    JSON.stringify({ summary: "x".repeat(20), tasks: [{ ...keHoach().tasks[0], suggestedAgent: "SUPER_ENGINEER" }] }),
+  );
+  assert.equal(vaiLa.ok, false, "vai agent không có thật ⇒ cả bản kế hoạch bị từ chối");
+  assert.ok(!vaiLa.ok && vaiLa.error.includes("vai agent"), "…và nói rõ vì sao");
+  const moduleLa = parseCtoPlan(JSON.stringify({ summary: "x".repeat(20), tasks: [{ ...keHoach().tasks[0], module: "KHONG_CO_THAT" }] }));
+  assert.equal(moduleLa.ok, false, "module không có thật cũng bị từ chối");
+  // Hàng rào markdown là phép BỎ VỎ xác định được — chấp nhận. Mọi thứ khác là đoán.
+  assert.equal(parseCtoPlan("```json\n" + JSON.stringify({ ...keHoach(), tasks: keHoach().tasks }) + "\n```").ok, true, "khối ```json``` bọc ngoài vẫn đọc được");
+
+  /* ═════════ 8 · PHỤ THUỘC VÒNG / TRỎ VÀO HƯ VÔ BỊ TỪ CHỐI ═════════ */
+  const vong = parseCtoPlan(
+    JSON.stringify({
+      summary: "x".repeat(20),
+      tasks: [
+        { ...keHoach().tasks[0], key: "A", dependsOn: ["B"] },
+        { ...keHoach().tasks[1], key: "B", dependsOn: ["A"] },
+      ],
+    }),
+  );
+  assert.equal(vong.ok, false, "phụ thuộc thành vòng ⇒ kế hoạch không bao giờ bắt đầu được");
+  assert.ok(!vong.ok && vong.error.includes("vòng"), "…và nói đúng tên vấn đề");
+  const treo = parseCtoPlan(JSON.stringify({ summary: "x".repeat(20), tasks: [{ ...keHoach().tasks[0], dependsOn: ["KHONG_CO"] }] }));
+  assert.equal(treo.ok, false, "phụ thuộc trỏ vào việc không tồn tại cũng bị từ chối");
+
+  /* ═════════ 9 · LƯỢT LẬP KẾ HOẠCH HỎNG VẪN ĐỂ LẠI DẤU ═════════ */
+  const hong = await createProposal({ sourceTaskId, agentId: null, agentKey: "ai-cto", provider: "anthropic", model: "claude-opus-5", plan: null, error: "Bản kế hoạch không hợp lệ — tasks: rỗng" });
+  assert.ok("ok" in hong && hong.status === "DRAFT", "bản hỏng nằm ở NHÁP, không phải CHỜ DUYỆT");
+  const apHong = await approveProposal({ proposalId: "ok" in hong ? hong.id : "" }, NGUOI);
+  assert.ok("error" in apHong, "bản NHÁP không áp được");
+
+  /* ═════════ 10 · PROMPT KHÔNG BAO GIỜ MANG BÍ MẬT ═════════ */
+  assert.equal(promptCoSecretKhong("Mục tiêu: sửa trang vận đơn"), null, "prompt bình thường thì sạch");
+  assert.equal(promptCoSecretKhong("dùng ANTHROPIC_API_KEY để gọi"), "ANTHROPIC_API_KEY", "tên biến bí mật bị bắt");
+  assert.equal(promptCoSecretKhong("DATABASE_URL=postgres://..."), "DATABASE_URL", "…kể cả khi nằm giữa câu");
+  const giu = process.env.ADMIN_PASSWORD;
+  process.env.ADMIN_PASSWORD = "mat-khau-that-12345";
+  assert.ok((promptCoSecretKhong("ai đó dán mat-khau-that-12345 vào đây") ?? "").includes("ADMIN_PASSWORD"), "GIÁ TRỊ của khoá đang đặt cũng bị bắt, không chỉ tên biến");
+  if (giu === undefined) delete process.env.ADMIN_PASSWORD; else process.env.ADMIN_PASSWORD = giu;
+
+  /* ═════════ 11 · QUÉT MÃ NGUỒN: KHÔNG ĐƯỜNG GHI THỨ HAI ═════════ */
+  const doc = (p: string) => readFileSync(path.join(goc, p), "utf8");
+  /*
+    QUÉT MÃ, KHÔNG QUÉT VĂN XUÔI.
+
+    Chú thích trong `proposal.ts` nhắc `riskOverride` để nói rõ vì sao nó KHÔNG được truyền, và một
+    bộ dò theo chuỗi thô sẽ bắt nhầm đúng câu giải thích ấy. Bỏ chú thích trước rồi mới dò — nếu
+    không, lá chắn này sẽ dạy người ta viết chú thích né nó.
+  */
+  const boChuThich = (src: string) =>
+    src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n")
+      .filter((l) => !/^\s*(\*|\/\/)/.test(l))
+      .join("\n");
+  const dv = boChuThich(doc("lib/tech/proposal.ts"));
+  assert.ok(!/riskOverride/.test(dv), "đường áp KHÔNG được truyền riskOverride — đó là cách ép mức rủi ro đi vòng qua máy");
+  assert.ok(dv.includes("createTechTask("), "…và phải tạo việc qua ĐÚNG hàm dịch vụ, không INSERT tay");
+  assert.ok(!/insert\(schema\.techTasks\)/.test(dv), "KHÔNG được INSERT thẳng vào tech_tasks");
+  for (const ham of ["approveProposal", "rejectProposal"]) {
+    const i = dv.indexOf(`export async function ${ham}`);
+    assert.ok(i > 0, `${ham} phải tồn tại`);
+    assert.ok(dv.slice(i, i + 400).includes('actor.kind !== "HUMAN"'), `${ham} phải chặn actor không phải người NGAY dòng đầu`);
+  }
+
+  /* ═════════ 12 · GIAO DIỆN KHÔNG CÓ NÚT "CHẠY TẤT CẢ" ═════════ */
+  const trang = boChuThich(doc("app/(dashboard)/tech/cto/page.tsx") + doc("app/(dashboard)/tech/cto/cto-controls.tsx"));
+  for (const cam of ["Auto execute", "auto-execute", "Chạy tất cả", "Áp tất cả", "autoApply"]) {
+    assert.ok(!trang.includes(cam), `giao diện KHÔNG được có “${cam}” — mỗi kế hoạch phải có một con người đọc rồi bấm`);
+  }
+  assert.ok(trang.includes("Phê duyệt kế hoạch"), "…nhưng phải có nút duyệt tường minh");
+
+  /* ═════════ 13 · CHƯA MỞ AGENT VIẾT MÃ NÀO ═════════ */
+  //
+  // Phase 2B mở AI CTO ở chế độ đề xuất, KHÔNG mở agent thực thi. Bài này đọc bản khai trong mã
+  // nguồn: vai CTO không được phép viết mã, và không vai nào được merge hay deploy.
+  const { TECH_AGENT_TEMPLATES } = await import("@/lib/constants/tech");
+  const cto = TECH_AGENT_TEMPLATES.find((t) => t.key === "ai-cto");
+  assert.ok(cto, "phải có vai ai-cto trong bản khai");
+  assert.equal(cto!.canCode, false, "AI CTO KHÔNG viết mã — nó lập kế hoạch");
+  assert.equal(cto!.canMerge, false);
+  assert.equal(cto!.canDeploy, false);
+  assert.equal(cto!.canRunProdWrite, false);
+  for (const t of TECH_AGENT_TEMPLATES) {
+    assert.equal(t.canMerge, false, `${t.key}: KHÔNG vai nào merge được`);
+    assert.equal(t.canDeploy, false, `${t.key}: KHÔNG vai nào deploy được`);
+    assert.equal(t.canRunProdWrite, false, `${t.key}: KHÔNG vai nào ghi production được`);
+  }
+  // …và trong CSDL, mọi vai sinh ra đều TẮT (kiểm ở tests/tech-phase2a.test.ts). Ở đây chỉ khẳng
+  // định không có đường nào trong mã tự bật một vai.
+  const quetLib = (dir: string, acc: string[] = []): string[] => {
+    const full = path.join(goc, dir);
+    if (!existsSync(full)) return acc;
+    for (const e of readdirSync(full)) {
+      const con = path.join(dir, e);
+      if (statSync(path.join(goc, con)).isDirectory()) quetLib(con, acc);
+      else if (e.endsWith(".ts")) acc.push(con);
+    }
+    return acc;
+  };
+  //
+  // Quét ĐƯỜNG CHẠY CỦA AGENT, không quét nơi ĐỊNH NGHĨA: `setTechAgentEnabled` sống ở
+  // `lib/tech/service.ts` và phải sống ở đó — người bấm nút trên `/tech/agents` gọi đúng hàm ấy.
+  // Điều cần khẳng định là KHÔNG mã nào của agent gọi nó, tức là không agent nào tự bật chính nó
+  // hay bật một vai khác.
+  const tuBat = quetLib("lib/agents").filter((f) => /setTechAgentEnabled\s*\(/.test(boChuThich(doc(f))));
+  assert.deepEqual(tuBat, [], `KHÔNG tệp nào trong lib/agents được gọi setTechAgentEnabled — agent không tự bật vai:\n${tuBat.join("\n")}`);
+  // …và đường áp kế hoạch cũng không, dù nó nằm ngoài lib/agents.
+  assert.ok(!/setTechAgentEnabled\s*\(/.test(dv), "đường áp kế hoạch KHÔNG được bật vai nào");
+
+  /* ───── dọn ───── */
+  await db.delete(schema.techProposalTasks);
+  await db.delete(schema.techProposals);
+  await db.delete(schema.techTasks);
+
+  console.log(
+    "✓ AI CTO chế độ đề xuất: lập kế hoạch KHÔNG tạo việc thật · agent không duyệt/không từ chối · người duyệt thì việc tạo qua dịch vụ và phụ thuộc nối bằng id thật · AI nói R0 cho việc lương thì MÁY vẫn xếp R2 và vẫn chờ ký · duyệt hai lần không nhân đôi · bản từ chối/bị thay thế/nháp không áp được · JSON hỏng, vai lạ, module lạ, phụ thuộc vòng đều bị từ chối · prompt không mang bí mật (cả tên lẫn giá trị) · không đường ghi thứ hai vào tech_tasks · giao diện không có nút chạy tất cả · không vai nào merge/deploy/ghi production",
+  );
+}

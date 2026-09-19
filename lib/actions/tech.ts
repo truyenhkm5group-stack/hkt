@@ -443,3 +443,128 @@ export async function linkTechIncidentAction(input: unknown): Promise<TechResult
   revalidatePath(`/tech/incidents/${data.incidentId}`);
   return { ok: true };
 }
+
+/* ═════════════════ AI CTO — CHẾ ĐỘ ĐỀ XUẤT ═════════════════ */
+
+/**
+ * Bốn hành động, và ba trong số đó là của NGƯỜI.
+ *
+ * `planTechProposalAction` là hành động duy nhất gọi model. Nó ghi vào `tech_proposals` và DỪNG —
+ * không tạo một `tech_tasks` nào. Ba hành động còn lại (duyệt · từ chối · lập lại) là quyết định,
+ * và `lib/tech/proposal.ts` từ chối mọi actor không phải người ở cả ba.
+ *
+ * Không có hành động nào tên "áp tất cả" hay "chạy luôn": mỗi bản kế hoạch phải được một con
+ * người đọc rồi bấm.
+ */
+
+const deXuatSchema = z.object({ proposalId: z.string().trim().min(1).max(60) });
+
+export async function planTechProposalAction(input: unknown): Promise<TechResult<{ id: string; status: string; tasks: number }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  let data: { taskId: string };
+  try {
+    data = z.object({ taskId: z.string().trim().min(1).max(60) }).parse(input);
+  } catch (error) {
+    return { error: loi(error, "Dữ liệu không hợp lệ") };
+  }
+
+  const { buildCtoPrompt, runCtoPlanning } = await import("@/lib/agents/cto");
+  const { createProposal, supersedeOpenProposals } = await import("@/lib/tech/proposal");
+  const { getAiProvider } = await import("@/lib/ai/provider");
+  const { aiDisabledReason } = await import("@/lib/ai/router");
+
+  const provider = getAiProvider("analysis");
+  if (!provider) return { error: `AI chưa cấu hình trên máy chủ: ${aiDisabledReason() ?? "thiếu khoá API"}` };
+
+  const db = await (await import("@/db")).getDb();
+  const agent = await db.query.techAgents.findFirst({ where: (a, { eq }) => eq(a.key, "ai-cto") });
+  /*
+    VAI PHẢI ĐƯỢC BẬT — cùng luật với agent viết mã. Một vai đang TẮT mà vẫn chạy được thì cái nút
+    bật/tắt chỉ là trang trí (AGENTS.md mục 23).
+  */
+  if (!agent) return { error: "Chưa khởi tạo sổ agent — mở /tech/agents và bấm “Khởi tạo sổ agent”." };
+  if (!agent.enabled) return { error: "Vai AI CTO đang TẮT. Bật ở /tech/agents rồi thử lại." };
+
+  const ctx = await buildCtoPrompt(data.taskId);
+  if (!ctx) return { error: "Không tìm thấy mục tiêu gốc." };
+
+  const res = await runCtoPlanning(provider, ctx);
+  const ghi = await createProposal({
+    sourceTaskId: data.taskId,
+    agentId: agent.id,
+    agentKey: agent.key,
+    provider: res.provider,
+    model: res.model,
+    plan: res.ok ? res.plan : null,
+    error: res.ok ? "" : res.error,
+    rawOutput: res.raw,
+  });
+  if (!("ok" in ghi)) return { error: ghi.error };
+  // Lập lại kế hoạch ⇒ bản chờ duyệt cũ thôi áp được, nhưng KHÔNG bị xoá: còn đọc để so hai lần nghĩ.
+  await supersedeOpenProposals(data.taskId, ghi.id);
+
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "TECH_PROPOSAL_PLANNED",
+    entity: "TECH_PROPOSAL",
+    entityId: ghi.id,
+    after: { status: ghi.status, provider: res.provider, model: res.model, ok: res.ok },
+    reason: res.ok ? "AI CTO lập kế hoạch" : `AI CTO lập kế hoạch KHÔNG đạt: ${res.error.slice(0, 200)}`,
+  });
+  lamMoi(data.taskId);
+  revalidatePath("/tech/cto");
+  return { ok: true, id: ghi.id, status: ghi.status, tasks: res.ok ? res.plan.tasks.length : 0 };
+}
+
+export async function approveTechProposalAction(input: unknown): Promise<TechResult<{ created: number; skipped: number }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  let data: z.infer<typeof deXuatSchema> & { note?: string };
+  try {
+    data = deXuatSchema.extend({ note: z.string().trim().max(2000).optional() }).parse(input);
+  } catch (error) {
+    return { error: loi(error, "Dữ liệu không hợp lệ") };
+  }
+  const { approveProposal } = await import("@/lib/tech/proposal");
+  const res = await approveProposal({ proposalId: data.proposalId, note: data.note }, actorOf(user));
+  if (!("ok" in res)) return { error: res.error };
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "TECH_PROPOSAL_APPROVED",
+    entity: "TECH_PROPOSAL",
+    entityId: data.proposalId,
+    after: { created: res.created, skipped: res.skipped, tasks: res.tasks.map((t) => ({ code: t.code, suggested: t.suggestedRisk, applied: t.appliedRisk })) },
+    reason: "Chủ shop duyệt kế hoạch AI CTO — việc thật được tạo, mức rủi ro do máy xếp lại",
+  });
+  lamMoi();
+  revalidatePath("/tech/cto");
+  return { ok: true, created: res.created, skipped: res.skipped };
+}
+
+export async function rejectTechProposalAction(input: unknown): Promise<TechResult> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  let data: z.infer<typeof deXuatSchema> & { reason: string };
+  try {
+    data = deXuatSchema.extend({ reason: z.string().trim().min(10, "Từ chối thì phải nói vì sao") }).parse(input);
+  } catch (error) {
+    return { error: loi(error, "Dữ liệu không hợp lệ") };
+  }
+  const { rejectProposal } = await import("@/lib/tech/proposal");
+  const res = await rejectProposal({ proposalId: data.proposalId, reason: data.reason }, actorOf(user));
+  if (!("ok" in res)) return { error: res.error };
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "TECH_PROPOSAL_REJECTED",
+    entity: "TECH_PROPOSAL",
+    entityId: data.proposalId,
+    after: { reason: data.reason },
+    reason: "Chủ shop từ chối kế hoạch AI CTO",
+  });
+  revalidatePath("/tech/cto");
+  return { ok: true };
+}

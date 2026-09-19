@@ -5139,6 +5139,26 @@ export const techTasks = pgTable(
     branch: text("branch").notNull().default(""),
     worktree: text("worktree").notNull().default(""),
 
+    /* ───── PHÉP CHIẾU PULL REQUEST — GITHUB LÀ BÊN CÓ THẨM QUYỀN ─────
+       ERP KHÔNG quyết định PR mở hay đóng, check xanh hay đỏ, merge được hay chưa. Nó chỉ CHÉP
+       lại để người mở `/tech` thấy việc đang nằm ở đâu mà không phải sang GitHub. Mọi cột dưới
+       đây được lượt đồng bộ ghi đè tự do; đừng ai gõ tay vào chúng.
+
+       Rỗng / NULL = CHƯA BIẾT, không phải "không có PR" và cũng không phải "check đỏ". */
+    prNumber: integer("pr_number"),
+    prUrl: text("pr_url").notNull().default(""),
+    prState: text("pr_state").notNull().default(""),
+    /** SHA đỉnh nhánh PR lúc đồng bộ gần nhất — neo mọi kết luận về check vào một bản mã cụ thể. */
+    headSha: text("head_sha").notNull().default(""),
+    baseSha: text("base_sha").notNull().default(""),
+    /** Tổng hợp check của GitHub: `PENDING` · `SUCCESS` · `FAILURE` · `` (chưa biết). */
+    ciState: text("ci_state").notNull().default(""),
+    /** `APPROVED` · `CHANGES_REQUESTED` · `REVIEW_REQUIRED` · `` (chưa biết). */
+    reviewState: text("review_state").notNull().default(""),
+    /** `MERGED` · `MERGEABLE` · `CONFLICT` · `` (chưa biết). */
+    mergeState: text("merge_state").notNull().default(""),
+    prSyncedAt: ts("pr_synced_at"),
+
     parentTaskId: text("parent_task_id").references((): AnyPgColumn => techTasks.id, { onDelete: "set null" }),
     /** `tech_tasks.id` của những việc phải xong trước. Danh sách, không phải một khoá ngoại. */
     dependsOn: jsonb("depends_on").$type<string[]>().notNull().default([]),
@@ -5204,6 +5224,11 @@ export const techTasks = pgTable(
     check("tech_tasks_blocked_reason_check", sql`${t.status} <> 'BLOCKED' OR length(btrim(${t.blockedReason})) > 0`),
     /* Xong thì phải có mốc xong. Một việc `DONE` không mốc là một dòng không đo được thời gian. */
     check("tech_tasks_completed_check", sql`${t.status} <> 'DONE' OR ${t.completedAt} IS NOT NULL`),
+    /* Phép chiếu PR: giá trị lạ lọt vào là màn hình vẽ một trạng thái không tồn tại. Rỗng = CHƯA BIẾT. */
+    check("tech_tasks_pr_state_check", sql`${t.prState} IN ('','OPEN','CLOSED','MERGED')`),
+    check("tech_tasks_ci_state_check", sql`${t.ciState} IN ('','PENDING','SUCCESS','FAILURE')`),
+    check("tech_tasks_review_state_check", sql`${t.reviewState} IN ('','REVIEW_REQUIRED','CHANGES_REQUESTED','APPROVED')`),
+    check("tech_tasks_merge_state_check", sql`${t.mergeState} IN ('','MERGEABLE','CONFLICT','MERGED')`),
   ],
 );
 
@@ -5394,6 +5419,133 @@ export const techDeployments = pgTable(
  * `TRUE_UNKNOWN` phải được giữ nguyên, không lấp bằng một câu nghe hợp lý. Cái BẮT BUỘC khi đóng
  * là `resolution` (đã làm gì để nó hết), vì việc đó luôn có thật.
  */
+/**
+ * ═══════════ ĐỀ XUẤT CỦA AI CTO — MỘT BẢN KẾ HOẠCH, KHÔNG PHẢI MỘT VIỆC ═══════════
+ *
+ * AI CTO đọc một MỤC TIÊU rồi đề nghị chia nó thành nhiều việc. Bản đề nghị đó nằm ở đây và
+ * KHÔNG phải là `tech_tasks`: chừng nào chưa có người bấm duyệt, nó không có mặt ở hàng đợi nào,
+ * không ai bị giao, không agent nào chạy được nó.
+ *
+ * ─── VÌ SAO KHÔNG NHÉT VÀO MỘT Ô CHỮ ───
+ *
+ * Một khối JSON trong `notes` thì không truy vấn được, không đếm được, và không trả lời được câu
+ * "đề xuất này đã sinh ra những việc nào" sau khi đã duyệt. Mỗi việc đề nghị là một DÒNG, và
+ * `applied_task_id` nối nó với việc thật — đó là thứ duy nhất làm phép duyệt KIỂM CHỨNG LẠI được.
+ *
+ * ─── MỨC RỦI RO Ở ĐÂY CHỈ LÀ Ý KIẾN ───
+ *
+ * `suggested_risk` là AI *nghĩ*. Nó KHÔNG bao giờ trở thành `tech_tasks.risk`: lúc duyệt, từng
+ * việc chạy lại `classifyTechRisk()` và lấy kết quả của MÁY. Giữ cả hai để đọc được "AI đoán gì,
+ * máy xếp gì" — hai con số lệch nhau là một tín hiệu đáng xem, không phải một lỗi cần giấu.
+ */
+export const techProposals = pgTable(
+  "tech_proposals",
+  {
+    id: id(),
+    /** Mục tiêu gốc — một `tech_tasks` đang mở, thường là việc "hãy xem xét X". */
+    sourceTaskId: text("source_task_id")
+      .notNull()
+      .references(() => techTasks.id, { onDelete: "cascade" }),
+    /** `DRAFT` · `READY_FOR_REVIEW` · `APPROVED` · `REJECTED` · `SUPERSEDED`. */
+    status: text("status").notNull().default("DRAFT"),
+    /** Vai agent đã lập kế hoạch. Luôn là `ai-cto` ở Phase 2B. */
+    createdByAgentId: text("created_by_agent_id").references(() => techAgents.id, { onDelete: "set null" }),
+    createdByAgentKey: text("created_by_agent_key").notNull().default(""),
+    /** Nhà cung cấp + model đã sinh ra bản này — để đọc lại được "hồi đó ai nghĩ". */
+    provider: text("provider").notNull().default(""),
+    model: text("model").notNull().default(""),
+    summary: text("summary").notNull().default(""),
+    /** Điều AI TỰ NHẬN là đã giả định. Đọc được thì mới cãi lại được. */
+    assumptions: jsonb("assumptions").$type<string[]>().notNull().default([]),
+    /** Câu AI không tự trả lời được — chỗ nó thiếu dữ liệu, không phải chỗ nó lười. */
+    questions: jsonb("questions").$type<string[]>().notNull().default([]),
+    /** Nguyên văn JSON model trả về, sau khi đã qua zod. Bằng chứng thô, không dùng để tính. */
+    rawOutput: jsonb("raw_output").$type<unknown>(),
+    error: text("error").notNull().default(""),
+    /* Ai duyệt / từ chối. `NULL` = chưa ai. */
+    decidedBy: text("decided_by").references(() => users.id, { onDelete: "set null" }),
+    /** ẢNH CHỤP TÊN do MÁY CHỦ đọc từ `users` (AGENTS.md mục 34). */
+    decidedByName: text("decided_by_name").notNull().default(""),
+    decidedAt: ts("decided_at"),
+    decisionNote: text("decision_note").notNull().default(""),
+    /** Bản đề xuất đã thay thế bản này (lập lại kế hoạch). */
+    supersededById: text("superseded_by_id").references((): AnyPgColumn => techProposals.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("tech_proposals_source_idx").on(t.sourceTaskId),
+    index("tech_proposals_status_idx").on(t.status, t.createdAt),
+    check(
+      "tech_proposals_status_check",
+      sql`${t.status} IN ('DRAFT','READY_FOR_REVIEW','APPROVED','REJECTED','SUPERSEDED')`,
+    ),
+    /*
+      Đã quyết thì phải biết AI NÀO quyết và LÚC NÀO. Một bản `APPROVED` không mốc, không tên là
+      một quyết định không ai chịu trách nhiệm — đúng thứ cổng phê duyệt sinh ra để chặn.
+    */
+    check(
+      "tech_proposals_decided_check",
+      sql`${t.status} NOT IN ('APPROVED','REJECTED') OR ${t.decidedAt} IS NOT NULL`,
+    ),
+    /* Từ chối mà không nói vì sao thì lần lập lại kế hoạch sau lặp đúng sai lầm cũ. */
+    check(
+      "tech_proposals_reject_reason_check",
+      sql`${t.status} <> 'REJECTED' OR length(btrim(${t.decisionNote})) >= 10`,
+    ),
+  ],
+);
+
+/**
+ * TỪNG VIỆC TRONG BẢN KẾ HOẠCH.
+ *
+ * `applied_task_id` là bằng chứng của phép duyệt: có khoá ⇒ việc thật đã được tạo từ dòng này.
+ * Nó cũng là thứ làm phép duyệt IDEMPOTENT — bấm duyệt lần thứ hai thấy khoá đã có thì bỏ qua,
+ * chứ không tạo thêm một việc trùng.
+ */
+export const techProposalTasks = pgTable(
+  "tech_proposal_tasks",
+  {
+    id: id(),
+    proposalId: text("proposal_id")
+      .notNull()
+      .references(() => techProposals.id, { onDelete: "cascade" }),
+    /** Khoá AI tự đặt trong bản kế hoạch (`T1`, `T2`…) — `depends_on` trỏ bằng khoá này. */
+    key: text("key").notNull(),
+    /** Thứ tự thực thi AI đề nghị. Nhỏ hơn = làm trước. */
+    seq: integer("seq").notNull().default(0),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    taskType: text("task_type").notNull().default("BUGFIX"),
+    module: text("module").notNull().default("PLATFORM"),
+    suggestedPriority: text("suggested_priority").notNull().default("P2"),
+    /** AI *nghĩ* là rủi ro này. KHÔNG bao giờ thành `tech_tasks.risk` — xem chú thích bảng trên. */
+    suggestedRisk: text("suggested_risk").notNull().default("R0"),
+    riskExplanation: text("risk_explanation").notNull().default(""),
+    /** Vai agent đề nghị, theo `TECH_AGENT_TEMPLATES`. Vai lạ ⇒ bản đề xuất bị từ chối lúc parse. */
+    suggestedAgentKey: text("suggested_agent_key").notNull().default(""),
+    /** Khoá (`T1`…) của những việc phải xong trước — trong CÙNG bản kế hoạch. */
+    dependsOnKeys: jsonb("depends_on_keys").$type<string[]>().notNull().default([]),
+    acceptanceCriteria: jsonb("acceptance_criteria").$type<string[]>().notNull().default([]),
+    /** Tệp/mô-đun AI nghĩ sẽ phải chạm. Là GỢI Ý để người soát phạm vi, không phải hàng rào. */
+    expectedScope: jsonb("expected_scope").$type<string[]>().notNull().default([]),
+    needsHumanDecision: boolean("needs_human_decision").notNull().default(false),
+    humanDecisionNote: text("human_decision_note").notNull().default(""),
+    /** Việc thật được tạo ra từ dòng này. `NULL` = CHƯA duyệt / chưa áp. */
+    appliedTaskId: text("applied_task_id").references(() => techTasks.id, { onDelete: "set null" }),
+    /** Mức rủi ro MÁY xếp lúc áp. Để cạnh `suggested_risk` cho người đọc so hai con số. */
+    appliedRisk: text("applied_risk").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("tech_proposal_tasks_key_uq").on(t.proposalId, t.key),
+    index("tech_proposal_tasks_applied_idx").on(t.appliedTaskId),
+    check("tech_proposal_tasks_priority_check", sql`${t.suggestedPriority} IN ('P0','P1','P2','P3')`),
+    check("tech_proposal_tasks_risk_check", sql`${t.suggestedRisk} IN ('R0','R1','R2')`),
+    check("tech_proposal_tasks_applied_risk_check", sql`${t.appliedRisk} IN ('','R0','R1','R2')`),
+  ],
+);
+
 export const techIncidents = pgTable(
   "tech_incidents",
   {

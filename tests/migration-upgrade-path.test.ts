@@ -50,6 +50,7 @@ const MOI = [
   "0101_tech_control_plane",
   "0102_tech_github_runner",
   "0103_care_decisions",
+  "0104_tech_cto_proposals",
 ] as const;
 
 /*
@@ -142,6 +143,8 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_tasks'"), 0, "bước 1: hàng đợi việc Tech CHƯA được có — đó là thứ 0101 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_agents'"), 0, "bước 1: sổ agent CHƯA được có — đó là thứ 0101 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_deployments' and column_name = 'external_run_id'"), 0, "bước 1: khoá lượt chạy GitHub CHƯA được có — đó là thứ 0102 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_proposals'"), 0, "bước 1: sổ đề xuất AI CTO CHƯA được có — đó là thứ 0104 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_tasks' and column_name = 'pr_number'"), 0, "bước 1: phép chiếu PR CHƯA được có — đó là thứ 0104 thêm vào");
     /*
       Một vận đơn ĐÃ CÓ TỪ TRƯỚC 0099, mang một trạng thái Viettel Post đã dịch được. Bước 2 kiểm
       rằng migration KHÔNG dựng hộ nó một "lời khai thô": suy ngược từ `vtp_status_name` là bịa ra
@@ -1230,6 +1233,58 @@ export async function testMigrationUpgradePath() {
 
     await client.query(`delete from shipments where id = 'up-s99'`);
 
+    /*
+      ═══ 0104: PHÉP CHIẾU PR VÀ SỔ ĐỀ XUẤT ═══
+
+      Hai thứ migration này thêm, và cả hai phải VÀO ĐỜI RỖNG. Một cột `ci_state` mang sẵn giá trị
+      nào đó là ERP tự khẳng định một điều GitHub chưa nói; một bản đề xuất tự sinh là AI CTO có
+      tiếng nói trước khi ai bật nó lên.
+    */
+    assert.equal(await dem("select count(*)::int as n from tech_proposals"), 0, "0104: sổ đề xuất phải vào đời RỖNG — không migration nào được sinh một kế hoạch");
+    assert.equal(await dem("select count(*)::int as n from tech_tasks where pr_state <> '' or ci_state <> '' or merge_state <> ''"), 0, "0104: phép chiếu PR phải RỖNG — rỗng là CHƯA BIẾT, không phải 'chưa có PR' và không phải 'check đỏ'");
+
+    /* Giá trị lạ lọt vào phép chiếu là màn hình vẽ một trạng thái không tồn tại. */
+    await client.query(`insert into tech_tasks (id, code, title) values ('up-t1', 'UPT-1', 'Việc kiểm phép chiếu PR')`);
+    let chanCiLa = false;
+    try {
+      await client.query(`update tech_tasks set ci_state = 'XANH_LET' where id = 'up-t1'`);
+    } catch {
+      chanCiLa = true;
+    }
+    assert.ok(chanCiLa, "0104: trạng thái CI lạ phải bị CSDL chặn");
+
+    /*
+      Bản đề xuất ĐÃ TỪ CHỐI mà không nói vì sao thì lần lập lại kế hoạch sau lặp đúng sai lầm cũ —
+      ràng buộc ở CSDL, không phải chỉ ở lớp dịch vụ.
+    */
+    await client.query(`insert into tech_proposals (id, source_task_id, status) values ('up-p1', 'up-t1', 'READY_FOR_REVIEW')`);
+    let chanTuChoi = false;
+    try {
+      await client.query(`update tech_proposals set status = 'REJECTED', decided_at = now(), decision_note = 'ngắn' where id = 'up-p1'`);
+    } catch {
+      chanTuChoi = true;
+    }
+    assert.ok(chanTuChoi, "0104: từ chối mà không nêu lý do đủ dài phải bị chặn");
+    /* …và đã quyết thì phải có MỐC. Một bản APPROVED không mốc là quyết định không ai chịu trách nhiệm. */
+    let chanThieuMoc = false;
+    try {
+      await client.query(`update tech_proposals set status = 'APPROVED' where id = 'up-p1'`);
+    } catch {
+      chanThieuMoc = true;
+    }
+    assert.ok(chanThieuMoc, "0104: chốt duyệt mà không có mốc phải bị chặn");
+    /* Khoá việc trùng trong CÙNG một bản kế hoạch làm `depends_on_keys` trỏ vào chỗ nhập nhằng. */
+    await client.query(`insert into tech_proposal_tasks (id, proposal_id, key, title) values ('up-pt1', 'up-p1', 'T1', 'Việc một')`);
+    let chanTrungKhoa = false;
+    try {
+      await client.query(`insert into tech_proposal_tasks (id, proposal_id, key, title) values ('up-pt2', 'up-p1', 'T1', 'Việc một lần nữa')`);
+    } catch {
+      chanTrungKhoa = true;
+    }
+    assert.ok(chanTrungKhoa, "0104: hai việc cùng khoá trong một bản kế hoạch phải bị chặn");
+    await client.query(`delete from tech_proposals where id = 'up-p1'`);
+    await client.query(`delete from tech_tasks where id = 'up-t1'`);
+
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });
     assert.equal(await dem("select count(*)::int as n from departments"), 7, "chạy lại migration KHÔNG được gieo thêm phòng ban lần hai");
@@ -1238,8 +1293,9 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from metric_targets where (id = 'up-mt1' and scope = 'COMPANY' and target = 65) or (id = 'up-mt2' and scope = 'PRODUCT' and scope_ref = 'Q004' and target = 55)"), 2, "chạy lại migration KHÔNG được sửa đích đã đặt");
     assert.equal(await dem("select count(*)::int as n from shipment_return_reasons where id not like 'up-rr%'"), 0, "chạy lại migration KHÔNG được sinh lý do hoàn nào");
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and assignee_user_id is null"), 1, "chạy lại migration vẫn KHÔNG được đoán người phụ trách");
+    assert.equal(await dem("select count(*)::int as n from tech_proposals"), 0, "chạy lại migration KHÔNG được sinh bản đề xuất nào");
 
-    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · chạy lại không nhân đôi`);
+    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · sổ đề xuất AI CTO và phép chiếu PR vào đời RỖNG, bốn ràng buộc mới chặn đúng · chạy lại không nhân đôi`);
   } finally {
     await client.close().catch(() => {});
     rmSync(tmp, { recursive: true, force: true });
