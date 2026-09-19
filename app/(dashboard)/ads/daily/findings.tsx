@@ -139,6 +139,14 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
         Một trang chủ shop mở hằng ngày không được phép chờ một nhà cung cấp bên ngoài. Bảng số,
         chẩn đoán và đích là dữ liệu của chính ERP — chúng phải hiện ngay; đoạn văn diễn giải điền
         vào sau. Nếu mô hình chậm hay chết thì phần còn lại của trang không hề biết.
+
+        ĐO LẠI SAU KHI SỬA, cùng phép đo, máy đang rảnh (76/76 màn hình đạt, 0 lỗi):
+
+            /ads/daily  20,3s → 9,5s        (/ads cùng lượt: 21,4s)
+
+        Phần còn lại (~9,5s) là giá thật của việc quét 30 ngày `orders ⋈ shipments` kèm
+        ORDER_OUTCOME hai lượt — bảng theo ngày và bảng bóc tách — cùng họ với `/ads` và các trang
+        `/reports/*`. Đó là việc của một lượt tối ưu truy vấn riêng, không phải của khối này.
       */}
       <Suspense fallback={<Skeleton className="mt-4 h-16 rounded-lg" />}>
         <AiExplanation data={data} baseline={baseline} findings={findings} />

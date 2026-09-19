@@ -207,3 +207,29 @@ và lý do được in ra.
 - **Không** chia chi phí cố định cho một chiến dịch.
 - **Không** đặt ngưỡng đạt/không đạt trong mã nguồn, kể cả trong màu của một ô.
 - **Không** để AI sinh ra một con số tài chính.
+
+## 13. Hiệu năng — bốn lần đo, và hai lần chẩn đoán sai
+
+Đo bằng `ops smoke` (phiên đăng nhập thật). Luôn đọc kèm `/ads` của CÙNG lượt chạy để loại nhiễu
+do phiên khác đang dùng máy chủ.
+
+| Bản | `/ads` | `/ads/daily` | Nhận định |
+|---|---|---|---|
+| Ban đầu (chưa có phát hiện nào ⇒ không gọi AI) | 18,4s | 4,7s | — |
+| Bóc tách chạy song song | 19,2s | 15,9s | ❌ tệ hơn |
+| Bóc tách gộp một câu `GROUP BY` | 19,8s | 21,1s | ❌ tệ hơn nữa |
+| Quay về bản tuần tự | 18,7s | 20,3s | vẫn chậm ⇒ **không phải lỗi truy vấn** |
+| **AI ra sau `Suspense` riêng** | 21,4s | **9,5s** | ✅ |
+
+**Nguyên nhân thật**: `explainMarketing` gọi mô hình NGAY TRONG lượt dựng trang. Lượt đo đầu nhanh
+vì máy phân tích không tìm thấy bất thường nào nên hàm trả về ngay; các lượt sau có phát hiện, và
+một lời gọi bậc `analysis` mất ~15 giây.
+
+**Hai lần chẩn đoán sai** đều là giả thuyết về *hình dạng truy vấn* trong khi thủ phạm không phải
+truy vấn. Bài học đã ghi vào chú thích mã nguồn: "48 câu truy vấn" nghe như vấn đề nhưng đó chỉ là
+một con số **đếm**; cái tốn tiền là **khối lượng quét**, và 48 câu hẹp (mỗi câu đi qua
+`order_attribution_marketer_idx`) rẻ hơn một câu rộng kèm truy vấn con tương quan. Và trước khi đổ
+cho SQL, hãy hỏi: *giữa hai lượt đo, cái gì đã thực sự đổi?*
+
+Phần còn lại (~9,5s) là giá thật của hai lượt quét 30 ngày `orders ⋈ shipments` kèm `ORDER_OUTCOME`
+— cùng họ với `/ads` (21,4s) và `/reports/*`. Đó là một lượt tối ưu truy vấn riêng, chưa làm.
