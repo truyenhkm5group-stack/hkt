@@ -556,6 +556,68 @@ export async function testSalesRegression(db: Db) {
   assert.ok(muonDoi.confidence < 0.35, '"muốn đổi" phải rơi dưới ngưỡng tin cậy ⇒ chuyển người, KHÔNG được trả lời bừa');
 
   /*
+    ── "VÀNG" KHÔNG PHẢI "VÂNG" — Ở CHỐT CHẶN CUỐI CÙNG TRƯỚC KHI TẠO ĐƠN ──
+
+    `isAffirmativeText` so trên chuỗi ĐÃ BỎ DẤU và danh sách của nó có `"vang"`. `normalize("vàng")`
+    cũng ra `"vang"`. Nên KHÁCH CHỌN MÀU VÀNG bị đọc là KHÁCH ĐỒNG Ý CHỐT ĐƠN. Cùng lỗi ấy còn ba
+    chỗ nữa: "vẫn"→"van", "đã"→"da", "ư"→"u".
+
+    Đây là một lỗi nặng hơn hẳn lỗi cùng kiểu ở `findColor` (đã vá trước): `findColor` đọc sai một
+    thuộc tính, còn chỗ này là điều kiện thứ năm trong sáu điều kiện tạo đơn.
+
+    Bài kiểm khoá CẢ HAI CHIỀU. Chiều bỏ sót (khách đồng ý mà máy không nhận) chỉ tốn một câu hỏi
+    lại; chiều nhận nhầm là một kiện hàng thật gửi cho người không đặt. Nên danh sách CẤM dài hơn
+    danh sách PHẢI NHẬN, và nó gồm cả những câu chỉ trùng nhau SAU KHI bỏ dấu.
+  */
+  const XAC_NHAN_PHAI_NHAN = [
+    "ok", "oke", "oki", "okie", "okla", "dc", "đc", "được", "ừ", "ừa", "uh", "uhm", "um",
+    "vâng", "vâng ạ", "dạ", "dạ vâng", "chốt", "chốt đơn", "chốt nhé", "lấy nhé", "gửi nhé",
+    "ship đi", "đồng ý", "yes", "ok em chốt cho anh",
+  ];
+  for (const t of XAC_NHAN_PHAI_NHAN) {
+    assert.equal(isAffirmativeText(t), true, `"${t}" là lời đồng ý thật — bỏ sót thì máy hỏi lại một câu thừa`);
+  }
+  const XAC_NHAN_CAM = [
+    // Trùng "vâng"/"dạ"/"ừ" SAU KHI bỏ dấu — mỗi câu ở đây từng tạo được một đơn khách chưa chốt.
+    "vàng", "màu vàng", "em thích màu vàng hơn", "vắng nhà", "váng đầu",
+    "vẫn chưa quyết", "em vẫn thích màu đỏ", "em đã xem rồi",
+    // Không dấu thì KHÔNG phân biệt được "vâng" với "vàng" ⇒ không được đoán.
+    "vang",
+    // Phủ định và câu hỏi.
+    "không", "ko", "k", "thôi", "để suy nghĩ", "ok à", "ok chưa shop?", "ok hả", "ok chứ", "còn hàng không",
+  ];
+  for (const t of XAC_NHAN_CAM) {
+    assert.equal(isAffirmativeText(t), false, `"${t}" KHÔNG phải lời đồng ý — nhận nhầm là gửi một kiện hàng cho người không đặt`);
+  }
+
+  /*
+    ── LỚP KÝ TỰ `h` TRƠ TRỌI TRONG BỘ DÒ CÂU HỎI ──
+
+    Bộ dò cũ coi MỌI câu kết thúc bằng chữ "h" là câu hỏi. Tiếng Việt có vô số câu đồng ý kết thúc
+    bằng "h" — và nó cũng chứa "ừ", tức chính một lời đồng ý. Hai câu dưới đây đủ để bài kiểm đỏ
+    nếu ai đó khôi phục lớp ký tự ấy.
+  */
+  assert.equal(isAffirmativeText("ok em chốt cho anh"), true, 'câu kết thúc bằng "h" KHÔNG phải câu hỏi');
+  assert.equal(isAffirmativeText("ừ"), true, '"ừ" là đồng ý, không phải tiểu từ hỏi');
+
+  // ── Ý MUỐN MUA · VIỆC SAU BÁN: hai chỗ hổng đo được, kèm BẪY chiều ngược ──
+  for (const t of ["mua 1 cái", "đặt hàng", "lấy cho chị 1 bộ", "chốt đơn nhé", "cho chị 1 cái", "order 1 cái", "em muốn mua"]) {
+    const intents = understandByRule(t).intents;
+    assert.ok(intents.some((i) => ["PURCHASE_INTENT", "CONFIRM"].includes(i)), `"${t}" là ý muốn mua — đang ra ${intents.join(",") || "(rỗng)"}`);
+  }
+  for (const t of ["giao chậm quá", "sao lâu thế shop"]) {
+    const intents = understandByRule(t).intents;
+    assert.ok(intents.some((i) => ["COMPLAINT", "AFTER_SALES"].includes(i)), `"${t}" là việc sau bán — đang ra ${intents.join(",") || "(rỗng)"}`);
+  }
+  /*
+    BẪY: khách ĐANG CHỌN MẪU không được rơi sang hàng đợi sau bán. Mọi lần nới danh sách từ khoá
+    sau bán đều có nguy cơ kéo theo nhóm này — một đơn sắp chốt đổi lấy một việc không có thật.
+  */
+  for (const t of ["cho mình 1 cái màu đỏ", "đổi sang màu xanh nhé", "lấy size L"]) {
+    assert.ok(!understandByRule(t).intents.includes("AFTER_SALES"), `"${t}" là khách đang chọn mẫu, KHÔNG phải việc sau bán`);
+  }
+
+  /*
     ── MÁY CHỦ LẶP LẠI TRANG MỘT: DỪNG SỚM, KHÔNG ĐẾM HAI LẦN, VÀ NÓI RA ──
 
     ĐO TỪ VPS 19/09/2026: Pancake bỏ qua cả `page_size` lẫn `page_number` — trang 2 trùng đủ 60/60

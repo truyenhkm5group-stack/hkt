@@ -171,7 +171,7 @@ const KEYWORDS: Record<SalesIntent, string[]> = {
     Nhận rộng ở đây KHÔNG mở đường cho một đơn ma: ý muốn mua chỉ đẩy giai đoạn đi tiếp, còn lên
     đơn vẫn phải qua xác nhận CÓ NGỮ CẢNH và đủ năm điều kiện máy chủ.
   */
-  PURCHASE_INTENT: ["chot don", "chot cho em", "lay 1", "lay 2", "lay cai nay", "dat hang", "dat 1", "mua", "order", "ship cho em", "gui cho em", "lay em", "em lay", "lay cho chi", "lay cho anh", "lay cho em", "lay cho minh", "cho chi lay", "chi lay", "dat giup", "dat cho chi", "dat cho em", "chot mau"],
+  PURCHASE_INTENT: ["chot don", "chot cho em", "lay 1", "lay 2", "lay cai nay", "dat hang", "dat 1", "mua", "order", "ship cho em", "gui cho em", "lay em", "em lay", "lay cho chi", "lay cho anh", "lay cho em", "lay cho minh", "cho chi lay", "chi lay", "dat giup", "dat cho chi", "dat cho em", "chot mau", "cho chi 1", "cho anh 1", "cho em 1", "cho minh 1"],
   PROVIDE_VARIANT: [],
   PROVIDE_CONTACT: ["so dien thoai", "sdt cua em", "sdt em", "lien he em"],
   PROVIDE_ADDRESS: ["dia chi", "gui ve", "giao ve", "so nha", "thon", "xa", "phuong", "quan", "huyen", "tinh", "thanh pho"],
@@ -207,7 +207,7 @@ const KEYWORDS: Record<SalesIntent, string[]> = {
   */
   COMPLAINT: ["kem chat luong", "lua dao", "hang loi", "hang bi loi", "bi loi", "hang hong", "hang bi hong", "giao sai", "gui sai", "rach", "ban qua", "that vong", "bao xau", "khieu nai"],
   ASK_HUMAN: ["gap nhan vien", "nguoi that", "cho gap ad", "noi chuyen voi nguoi", "bot a", "may tra loi"],
-  AFTER_SALES: ["doi size", "doi mau", "tra hang", "tra lai", "muon tra", "doi tra", "doi hang", "muon doi hang", "hoan tien", "don cua em dau", "khi nao giao", "chua nhan duoc", "van don", "buu ta", "shipper"],
+  AFTER_SALES: ["doi size", "doi mau", "tra hang", "tra lai", "muon tra", "doi tra", "doi hang", "muon doi hang", "hoan tien", "don cua em dau", "khi nao giao", "chua nhan duoc", "van don", "buu ta", "shipper", "giao cham", "ship cham", "sao lau the", "lau qua"],
   OTHER: [],
 };
 

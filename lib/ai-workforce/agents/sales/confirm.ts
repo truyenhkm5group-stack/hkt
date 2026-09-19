@@ -21,12 +21,44 @@ import { CONFIRMATION_TTL_HOURS } from "@/lib/constants/sales-agent";
 import { confirmationFingerprint, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { ORDER_REQUIREMENT_LABEL, type OrderRequirement } from "@/lib/constants/order-draft";
 
-/** Từ đồng ý. Cố tình HẸP: thà bỏ sót một lần chốt (khách sẽ nhắc lại) còn hơn tạo một đơn ma. */
+/*
+  HAI DANH SÁCH, VÌ VỚI MỘT SỐ TỪ THÌ CHÍNH CÁI DẤU LÀ NGHĨA.
+
+  Bản trước có đúng MỘT danh sách và so trên chuỗi ĐÃ BỎ DẤU. Trong danh sách ấy có `"vang"`.
+  `normalize("vàng")` cũng ra `"vang"`. Nên **khách chọn MÀU VÀNG bị đọc là khách ĐỒNG Ý CHỐT ĐƠN**
+  — và đây là chốt chặn cuối cùng trước khi ERP tạo đơn. Cùng lỗi ấy còn ba chỗ nữa:
+
+    "vàng" · "váng" · "vắng"  →  "vang"  →  trùng "vâng"
+    "vẫn"  · "văn"  · "vân"   →  "van"   →  trùng một mục vốn không nên tồn tại
+    "đã"   · "da"   · "dã"    →  "da"    →  trùng "dạ"      ("em đã xem" = một câu kể)
+    "ư"    · "u"    · "ủ"     →  "u"     →  trùng "ừ"
+
+  Nên: từ nào KHÔNG có dấu (`ok`, `chot`, `duoc`, `dc`, `yes`…) thì so trên chuỗi đã bỏ dấu như cũ;
+  từ nào CÓ dấu và cái dấu ấy phân biệt nó với một từ khác thì đòi ĐÚNG CHÍNH TẢ CÓ DẤU.
+
+  HỆ QUẢ CÓ CHỦ Ý: khách gõ "vang" không dấu sẽ KHÔNG được tính là đồng ý — vì máy không phân biệt
+  được "vâng" với "vàng", và nói rằng mình phân biệt được là nói dối. Máy hỏi lại một câu; đó là
+  cái giá rẻ. Chiều ngược lại — chốt một đơn khách chưa đồng ý — là một kiện hàng có thật gửi đi
+  cho một người không đặt, cộng tiền cước hoàn về.
+
+  Cố tình HẸP ở cả hai danh sách: thà bỏ sót một lần chốt (khách sẽ nhắc lại) còn hơn tạo một đơn ma.
+*/
 const AFFIRMATIVE = [
-  "ok", "oke", "okie", "okey", "okay", "dong y", "dong ý", "dung roi", "chuan roi", "chuan", "chinh xac",
-  "vang", "van", "da", "da vang", "u", "um", "ukm", "uk", "chot", "chot don", "chot di", "chot nhe",
-  "duoc", "duoc roi", "dc", "dc roi", "yes", "xac nhan", "lay nhe", "gui di", "gui cho em di", "dat di",
+  "ok", "oke", "okie", "okey", "okay", "oki", "okla", "dong y", "dong ý", "dung roi", "chuan roi", "chuan", "chinh xac",
+  "um", "uhm", "uh", "ukm", "uk", "chot", "chot don", "chot di", "chot nhe",
+  "duoc", "duoc roi", "dc", "dc roi", "yes", "xac nhan", "lay nhe", "gui di", "gui nhe", "gui cho em di", "ship di", "dat di",
 ];
+
+/**
+ * Từ đồng ý PHẢI ĐỌC CÓ DẤU. Mỗi mục ở đây đều có ít nhất một từ tiếng Việt khác trùng với nó sau
+ * khi bỏ dấu, và từ kia KHÔNG phải một lời đồng ý — xem khối chú thích ngay trên.
+ */
+const AFFIRMATIVE_MARKED = ["vâng", "dạ", "dạ vâng", "vâng ạ", "ừ", "ừa", "ừm", "ờ"];
+
+/** Bỏ mọi thứ không phải chữ/số nhưng GIỮ NGUYÊN DẤU, rồi bọc khoảng trắng để so trọn từ. */
+function padKeepMarks(text: string): string {
+  return ` ${text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+}
 
 /** Phủ định / hoãn — thấy là DỪNG, kể cả khi trong câu cũng có một chữ đồng ý. */
 const NEGATIVE = ["khong", "ko", "k ", "chua", "de sau", "thoi", "huy", "doi da", "cho da", "tu tu", "nghi da", "de em xem", "de em nghi"];
@@ -37,11 +69,24 @@ const NEGATIVE = ["khong", "ko", "k ", "chua", "de sau", "thoi", "huy", "doi da"
  * Tiểu từ cuối câu phải đọc trên chữ CÓ DẤU: "ạ" là lễ phép ("vâng ạ" = đồng ý), còn "à" / "ả"
  * là hỏi ("ok à?"). `normalize()` bỏ dấu nên cả hai đều thành "a" — xét trên chuỗi đã bỏ dấu thì
  * mọi câu đồng ý lễ phép của khách Việt đều bị đọc nhầm thành câu hỏi.
+ *
+ * ═══ LỚP KÝ TỰ CŨ BẮT NHẦM HAI THỨ, VÀ MỘT TRONG HAI RẤT RỘNG ═══
+ *
+ * Bản trước dùng `[àảáừửhả]` ở cuối câu. Lớp ấy chứa `h` TRƠ TRỌI, nên MỌI câu kết thúc bằng
+ * chữ "h" đều bị đọc là câu hỏi — "em lấy màu xanh", "chốt cho anh", "đặt nhanh nhé". Nó cũng
+ * chứa `ừ`, mà "ừ" là một lời ĐỒNG Ý, không phải câu hỏi: khách gõ đúng một chữ "ừ" thì bị chốt
+ * chặn này loại thẳng.
+ *
+ * Nay liệt kê TIỂU TỪ HỎI như những TỪ TRỌN VẸN đứng cuối câu, không phải như những ký tự lẻ.
+ * Không dùng `\b` trước chữ có dấu: trong JS không cờ `u`, `\b` tính theo bảng chữ ASCII nên
+ * giữa một khoảng trắng và chữ "à" KHÔNG có ranh giới nào — mệnh đề ấy im lặng không bao giờ khớp.
  */
+const TIEU_TU_HOI = /(?:^|\s)(?:à|ả|ư|hả|hử|hở|nhỉ|nhở|chứ)\s*$/i;
+
 function looksLikeQuestion(raw: string, normalized: string): boolean {
   const text = raw.trim();
   if (/\?\s*$/.test(text)) return true;
-  if (/[àảáừửhả]\s*$/i.test(text) || /\b(hả|hử|à)\s*$/i.test(text)) return true;
+  if (TIEU_TU_HOI.test(text)) return true;
   return /\b(chua|khong|ko|ha|sao|nao|gi|ntn|the nao)\s*$/.test(normalized.trim());
 }
 
@@ -76,7 +121,9 @@ export function isAffirmativeText(raw: string): boolean {
   const n = normalize(text);
   if (NEGATIVE.some((word) => n.includes(` ${word.trim()} `))) return false;
   if (looksLikeQuestion(text, n)) return false;
-  return AFFIRMATIVE.some((word) => n.includes(` ${normalize(word).trim()} `));
+  if (AFFIRMATIVE.some((word) => n.includes(` ${normalize(word).trim()} `))) return true;
+  const coDau = padKeepMarks(text);
+  return AFFIRMATIVE_MARKED.some((word) => coDau.includes(` ${word} `));
 }
 
 /**
