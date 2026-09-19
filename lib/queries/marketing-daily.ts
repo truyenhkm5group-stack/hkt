@@ -452,13 +452,30 @@ export async function marketingFreshness(db: Db): Promise<MarketingSourceFreshne
 
 /* ═══════════════════ HÀM CHÍNH ═══════════════════ */
 
-async function buildDays(db: Db, period: Period, basis: MarketingBasis, filters: MarketingFilters): Promise<{ rows: MarketingDailyRow[]; spendObservedThrough: string | null }> {
+/**
+ * `skipUnits`: KHÔNG đọc số lượng sản phẩm trong lượt này.
+ *
+ * Chỉ bảng BÓC TÁCH truyền cờ này, và nó có lý do đo được: bóc tách chạy `buildDays` một lần cho
+ * mỗi nhóm, nên câu đếm số lượng — vốn không phụ thuộc nhóm nào cả về hình dạng — bị chạy lại cho
+ * từng nhóm. Đo trên production 19/09/2026: bóc tách theo chiến dịch chạy **108 câu**, trong đó
+ * riêng câu đếm số lượng lặp **24 lần và tốn 2.236ms**.
+ *
+ * Bóc tách tự đọc số lượng MỘT LẦN cho mọi nhóm (`unitsByDimension`) rồi điền vào. Bảng chính
+ * KHÔNG truyền cờ này, nên đường của người dùng thường không đổi một chút nào.
+ */
+async function buildDays(
+  db: Db,
+  period: Period,
+  basis: MarketingBasis,
+  filters: MarketingFilters,
+  opts: { skipUnits?: boolean } = {},
+): Promise<{ rows: MarketingDailyRow[]; spendObservedThrough: string | null }> {
   const extra = dimensionFilter(filters);
   const filtered = hasDimensionFilter(filters);
   const [moneyRows, spend, units, allocated] = await Promise.all([
     filters.productId ? productDayRows(db, period, basis, filters, extra) : orderDayRows(db, period, basis, extra),
     spendByDay(db, period, filters),
-    filters.productId ? Promise.resolve(null) : unitsByDay(db, period, basis, extra),
+    filters.productId || opts.skipUnits ? Promise.resolve(null) : unitsByDay(db, period, basis, extra),
     // Chi phí vận hành phân bổ CHỈ có nghĩa ở mức toàn shop. Có bộ lọc ⇒ không đọc, và ô là `—`.
     filtered ? Promise.resolve(null) : allocatedExpenseByDay(db, period.from, period.to),
   ]);
@@ -662,11 +679,25 @@ export async function getMarketingBreakdown(
 ): Promise<{ dimension: MarketingDimension; spendGrain: boolean; rows: MarketingBreakdownRow[] }> {
   const db = await getDb();
   const keys = await dimensionKeys(db, period, dimension, filters, limit);
+  /*
+    SỐ LƯỢNG SẢN PHẨM ĐỌC MỘT LẦN CHO MỌI NHÓM.
+
+    Đây là N+1 DUY NHẤT mà bộ đo tìm được trong tính năng này, và nó đo được chứ không suy ra:
+    bóc tách theo chiến dịch chạy 108 câu, riêng câu đếm số lượng lặp 24 lần tốn 2.236ms
+    (perf-probe, production 19/09/2026).
+
+    Câu này gộp `orders ⋈ order_items` — KHÔNG đụng `ORDER_OUTCOME`, không đụng bảng dẫn xuất —
+    nên gộp theo khoá chiều là an toàn và rẻ. Cố ý KHÔNG gộp nốt phần TIỀN: đã thử ở bản trước và
+    đo được nó CHẬM HƠN (một lượt quét rộng mất đường dùng chỉ mục mà 12 lượt quét hẹp dùng được).
+    Một phép tối ưu chỉ được làm ở chỗ số đo chỉ vào.
+  */
+  const unitsByKey = dimension === "product" ? null : await unitsByDimension(db, period, basis, dimensionFilter(filters), dimension);
   const rows: MarketingBreakdownRow[] = [];
   for (const k of keys) {
     const scoped: MarketingFilters = { ...filters, ...filterForDimension(dimension, k.key) };
-    const { rows: days } = await buildDays(db, period, basis, scoped);
+    const { rows: days } = await buildDays(db, period, basis, scoped, { skipUnits: unitsByKey !== null });
     const base = sumBases(days);
+    if (unitsByKey) base.units = unitsByKey.get(k.key) ?? 0;
     rows.push({ ...base, key: k.key, label: k.label, maturity: maturityState(base.finishedOrders, base.pendingOrders), spendKnown: days.some((d) => d.spendKnown) });
   }
   rows.sort((a, b) => {
@@ -678,6 +709,61 @@ export async function getMarketingBreakdown(
     return pa - pb; // lỗ nặng nhất đứng đầu — thứ cần xử lý trước
   });
   return { dimension, spendGrain: MARKETING_DIMENSION_SPEND[dimension], rows };
+}
+
+/**
+ * SỐ LƯỢNG SẢN PHẨM THEO KHOÁ CHIỀU — một câu cho mọi nhóm.
+ *
+ * Cùng bộ lọc, cùng population, cùng quy ước loại đơn trùng và đơn huỷ như `unitsByDay`; chỉ đổi
+ * cách GỘP (theo khoá chiều thay vì theo ngày). Bóc tách chỉ cần tổng cả kỳ cho mỗi nhóm.
+ *
+ * Khoá `NULL` gom vào nhóm "Chưa quy kết" — cùng quy ước với phần tiền. Khác quy ước thì số lượng
+ * và số đơn của nhóm ấy sẽ nói về hai tập đơn khác nhau.
+ */
+async function unitsByDimension(
+  db: Db,
+  period: Period,
+  basis: MarketingBasis,
+  extra: SQL | undefined,
+  dimension: MarketingDimension,
+): Promise<Map<string, number>> {
+  void basis; // số lượng là thuộc tính của ĐƠN, không của kết quả giao — không phụ thuộc mốc
+  const conds: SQL[] = [metricScope(period, "confirmed"), sql`not ${IS_DUPLICATE_ORDER}`, sql`${ORDER_OUTCOME_FAST} <> 'CANCELLED'`];
+  if (extra) conds.push(extra);
+  const rows = await db
+    .select({ key: sql<string | null>`${dimensionKeyExpr(dimension)}`, units: sql<number>`coalesce(sum(${schema.orderItems.quantity}), 0)` })
+    .from(o)
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
+    .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, o.id))
+    .where(and(...conds))
+    .groupBy(sql`1`);
+  return new Map(rows.map((r) => [r.key ?? MARKETING_UNATTRIBUTED, Number(r.units)]));
+}
+
+/**
+ * BIỂU THỨC KHOÁ NHÓM của từng chiều, tính TRÊN `orders` — cùng chỗ mà bộ lọc chiều đọc, nên nhóm
+ * ở đây và nhóm do bộ lọc chọn ra luôn là một tập đơn.
+ *
+ * `NULL` là một nhóm THẬT ("Chưa quy kết"), không phải một dòng bị bỏ.
+ */
+function dimensionKeyExpr(dimension: MarketingDimension): SQL<string | null> {
+  switch (dimension) {
+    case "marketer":
+      return sql<string | null>`(select ${oa.marketerId} from ${oa} where ${oa.orderId} = ${o.id} and ${oa.status} = 'ATTRIBUTED' limit 1)`;
+    case "page":
+      return sql<string | null>`nullif(${o.pageId}, '')`;
+    case "campaign":
+      return sql<string | null>`${ORDER_CAMPAIGN_ID}`;
+    case "adset":
+      return sql<string | null>`(select fa.adset_id from fb_ads fa where fa.id = ${o.adId})`;
+    case "ad":
+      return sql<string | null>`(select fa.id from fb_ads fa where fa.id = ${o.adId})`;
+    case "source":
+      return sql<string | null>`nullif(${o.source}, '')`;
+    case "product":
+      // Mã hàng nằm ở DÒNG ĐƠN — bóc tách theo mã đi đường riêng, không dùng hàm này.
+      return sql<string | null>`null::text`;
+  }
 }
 
 function filterForDimension(dimension: MarketingDimension, key: string): MarketingFilters {

@@ -48,6 +48,7 @@ on:
           - reason-coverage     # độ phủ lý do hoàn: máy tính báo cáo = MÀN HÌNH THẬT (chỉ đọc)
           - cogs-drift          # giá vốn lịch sử có tự đổi không: so giá vốn hôm nay với giá vốn TẠI THỜI ĐIỂM giao (chỉ đo)
           - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
+          - marketing-calibrate # đối chiếu Hiệu quả quảng cáo theo NGÀY với báo cáo lợi nhuận chuẩn + nguồn QC (chỉ đọc; arg: "--from=2026-09-01 --to=2026-09-14 [--marketer=..] [--product=..] [--basis=delivered]")
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
           - meta-id-probe       # dò mã Meta trong tracking landing là ad / adset / campaign (CHỈ ĐỌC; arg: các mã, bỏ trống = lấy từ đơn còn treo)
@@ -233,6 +234,11 @@ jobs:
               profit-verify)
                 fetch_script profit-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/profit-verify.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/profit-verify.ts ;;
+              marketing-calibrate)
+                # CHỈ ĐỌC. In bảng theo ngày rồi tự đối chiếu với báo cáo lợi nhuận chuẩn, nguồn chi
+                # quảng cáo và kết quả vận đơn; thoát khác 0 khi có phát hiện xếp loại BUG.
+                fetch_script marketing-calibrate.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/marketing-calibrate.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/marketing-calibrate.ts $ARG ;;
               cogs-drift)
                 fetch_script cogs-drift.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cogs-drift.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cogs-drift.ts ;;
