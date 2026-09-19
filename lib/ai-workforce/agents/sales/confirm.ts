@@ -19,7 +19,7 @@ import { normalize } from "@/lib/text";
 import { addressIssue, normalizePhone } from "@/lib/constants/landing";
 import { CONFIRMATION_TTL_HOURS } from "@/lib/constants/sales-agent";
 import { confirmationFingerprint, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
-import { ORDER_REQUIREMENT_LABEL, type OrderRequirement } from "@/lib/ai-workforce/tools/erp";
+import { ORDER_REQUIREMENT_LABEL, type OrderRequirement } from "@/lib/constants/order-draft";
 
 /** Từ đồng ý. Cố tình HẸP: thà bỏ sót một lần chốt (khách sẽ nhắc lại) còn hơn tạo một đơn ma. */
 const AFFIRMATIVE = [

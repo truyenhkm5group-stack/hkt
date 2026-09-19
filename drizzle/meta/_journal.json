@@ -666,6 +666,13 @@
       "when": 1789381523786,
       "tag": "0095_sales_ingest_cursors",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1789381583786,
+      "tag": "0096_sales_regression_cases",
+      "breakpoints": true
     }
   ]
 }

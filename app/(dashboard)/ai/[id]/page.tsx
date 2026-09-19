@@ -9,6 +9,11 @@ import { HANDOFF_REASON_LABEL, SALES_ACTION_LABEL, SALES_STAGE_LABEL, type Hando
 import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getAiRunDetail } from "@/lib/queries/ai";
+import { OrderDraftCard } from "@/app/(dashboard)/ai/[id]/order-draft-card";
+import { RegressionForm } from "@/app/(dashboard)/ai/[id]/regression-form";
+import { buildOrderDraft, type OrderDraftOffer } from "@/lib/constants/order-draft";
+import { missingOrderRequirements } from "@/lib/ai-workforce/agents/sales/confirm";
+import { parseSalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Lượt chạy nhân sự AI" };
@@ -29,6 +34,38 @@ export default async function AiRunPage({ params }: { params: Promise<{ id: stri
   const decision = (run.decision ?? {}) as Record<string, unknown>;
   const stateAfter = (run.stateAfter ?? {}) as Record<string, unknown>;
   const input = (run.input ?? {}) as Record<string, unknown>;
+
+  /*
+    BẢN NHÁP ĐƠN — dựng từ TRẠNG THÁI SAU của chính lượt này, không đọc lại hội thoại hôm nay.
+
+    Đọc lại nguồn sống thì màn hình quan sát một lượt chạy của tuần trước lại in ra con số của hôm
+    nay, và lúc hai con số lệch nhau thì không ai kiểm được gì nữa. Điều kiện bán lấy từ ẢNH CHỤP
+    trên hội thoại (`offer_snapshot`) vì lý do y hệt: khách được báo 499k thì cuộc ấy thuộc mức 499k.
+
+    Xác nhận đọc từ chính quyết định đã ghi — không tính lại: `checkContextualConfirmation` cần mốc
+    tin nhắn và đồng hồ LÚC ẤY, mà lúc ấy đã qua rồi.
+  */
+  const draftState = parseSalesState(run.stateAfter);
+  const offer = (conversation?.offerSnapshot ?? null) as OrderDraftOffer | null;
+  const orderDraft = buildOrderDraft({
+    state: draftState,
+    missing: missingOrderRequirements(draftState),
+    confirmed: Boolean((decision.facts as Record<string, unknown> | undefined)?.confirmed),
+    offer: offer
+      ? {
+          unitPrice: offer.unitPrice ?? null,
+          shippingFee: offer.shippingFee ?? null,
+          freeShipFrom: offer.freeShipFrom ?? null,
+          availableColors: Array.isArray(offer.availableColors) ? offer.availableColors : [],
+          codPolicy: typeof offer.codPolicy === "string" ? offer.codPolicy : "",
+        }
+      : null,
+    productCode: "",
+    sku: draftState.variantLabel,
+    sourcePageId: conversation?.pageId ?? "",
+    sourceConversationId: conversation?.externalId ?? "",
+    humanTakeoverAt: conversation?.humanTakeoverAt ?? null,
+  });
 
   return (
     <div className="space-y-5">
@@ -213,6 +250,13 @@ export default async function AiRunPage({ params }: { params: Promise<{ id: stri
           ))}
           {messages.length === 0 ? <li className="text-muted-foreground">Chưa có tin nhắn nào.</li> : null}
         </ul>
+      </Card>
+
+      <OrderDraftCard draft={orderDraft} />
+
+      <Card className="gap-3 p-4">
+        <h2 className="text-sm font-semibold">12 · Bộ ca hồi quy</h2>
+        <RegressionForm runId={run.id} defaultTitle={`Lượt ${formatDateTime(run.startedAt)} · ${String(input.text ?? "").slice(0, 80)}`} />
       </Card>
     </div>
   );

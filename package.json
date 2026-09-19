@@ -31,7 +31,8 @@
     "bench:cs": "tsx --tsconfig tsconfig.json scripts/bench-cs-queue.ts",
     "ai:ingest": "tsx --tsconfig tsconfig.json scripts/ai-sales-ingest.ts",
     "ai:size-rules": "tsx --tsconfig tsconfig.json scripts/import-size-rules.ts",
-    "ai:probe": "tsx --tsconfig tsconfig.json scripts/pancake-chat-probe.ts"
+    "ai:probe": "tsx --tsconfig tsconfig.json scripts/pancake-chat-probe.ts",
+    "ai:regression": "tsx --tsconfig tsconfig.json scripts/run-sales-ai-regression.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

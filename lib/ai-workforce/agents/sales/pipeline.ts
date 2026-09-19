@@ -65,14 +65,22 @@ async function loadContext(db: Db, conversationId: string, messageId: string | n
   return { conversation, message };
 }
 
-type ToolRunner = <T>(name: Parameters<typeof callTool>[1], args: unknown) => Promise<T | null>;
+/**
+ * XUẤT RA để trình chạy hồi quy (`scripts/run-sales-ai-regression.ts`) dùng lại ĐÚNG hàm này.
+ *
+ * Bộ ca hồi quy cấp một `ToolRunner` đọc từ kết quả công cụ ĐÃ CHỤP trong ca, thay vì hỏi CSDL:
+ * tồn kho hôm nay khác hôm ghi ca, và một ca đỏ vì kho vừa bán hết hàng là ca không ai đọc nữa.
+ * Viết lại bước Trạng thái cho riêng phép chạy lại thì bộ ca đo một dây chuyền KHÁC dây chuyền
+ * đang phục vụ khách — và đó đúng là thứ nó sinh ra để ngăn.
+ */
+export type ToolRunner = <T>(name: Parameters<typeof callTool>[1], args: unknown) => Promise<T | null>;
 
 /**
  * BƯỚC 2 — TRẠNG THÁI. Mọi thứ khách nói đều bị máy chủ KIỂM lại: mẫu mã phải có thật trong ERP,
  * giá phải do `pricing.get` tính, tồn phải do sổ kho trả lời. Không có dòng nào ở đây lấy số liệu
  * từ văn bản của mô hình.
  */
-async function applyUnderstanding(
+export async function applyUnderstanding(
   state: SalesState,
   understanding: Understanding,
   tool: ToolRunner,

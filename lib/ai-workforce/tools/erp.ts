@@ -518,17 +518,15 @@ export const followupScheduleTool = defineTool({
 // ───────────────────────── order.create_draft / order.confirm ─────────────────────────
 
 /** Điều kiện máy chủ BẮT BUỘC đủ trước khi có thể lên đơn. Thiếu một điều là chặn, không phải cảnh báo. */
-export const ORDER_REQUIREMENTS = ["VARIANT", "QUANTITY", "PHONE", "ADDRESS", "PRICE", "CONFIRMATION"] as const;
-export type OrderRequirement = (typeof ORDER_REQUIREMENTS)[number];
-
-export const ORDER_REQUIREMENT_LABEL: Record<OrderRequirement, string> = {
-  VARIANT: "Mẫu mã hợp lệ (đúng size / màu)",
-  QUANTITY: "Số lượng",
-  PHONE: "Số điện thoại dùng được",
-  ADDRESS: "Địa chỉ đủ để ĐVVC định tuyến",
-  PRICE: "Giá do máy chủ tính",
-  CONFIRMATION: "Khách xác nhận có ngữ cảnh",
-};
+/**
+ * Năm điều kiện máy chủ nay khai ở `lib/constants/order-draft.ts` và XUẤT LẠI ở đây.
+ *
+ * Tệp này `import { getDb } from "@/db"`, nên bất cứ tệp nào nhắc tới nó đều thành mã chỉ-máy-chủ.
+ * Màn hình xem trước bản nháp đơn cần đúng danh sách ấy ở phía trình duyệt. Chuyển chỗ khai giữ
+ * nguyên MỘT danh sách; mọi nơi đang `import` từ đây chạy y như cũ.
+ */
+export { ORDER_REQUIREMENTS, ORDER_REQUIREMENT_LABEL, type OrderRequirement } from "@/lib/constants/order-draft";
+import { ORDER_REQUIREMENT_LABEL, type OrderRequirement } from "@/lib/constants/order-draft";
 
 export const orderCreateDraftTool = defineTool({
   name: "order.create_draft",

@@ -172,6 +172,7 @@ import { testSalesAgent } from "./sales-agent.test";
 import { testSalesCopilot } from "./sales-copilot.test";
 import { testProductResolver } from "./product-resolver.test";
 import { testFanpageSales } from "./fanpage-sales.test";
+import { testSalesRegression } from "./sales-regression.test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -1647,6 +1648,7 @@ async function main() {
   await testSalesCopilot(db);
   await testProductResolver(db);
   await testFanpageSales(db);
+  await testSalesRegression(db);
 
   // ═══ KIỂM TRA TOÀN VẸN KHO MÃ (không phụ thuộc dữ liệu) ═══
   console.log("\n─ Toàn vẹn kho mã");

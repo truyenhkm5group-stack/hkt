@@ -159,7 +159,19 @@ const KEYWORDS: Record<SalesIntent, string[]> = {
   STOCK_QUESTION: ["con hang", "con size", "con mau", "con khong", "het hang", "con k", "con ko"],
   SIZE_QUESTION: ["size nao", "mac size", "lay size", "size gi", "bang size", "size bao nhieu", "cao 1m", "nang bao nhieu"],
   SHIPPING_QUESTION: ["phi ship", "tien ship", "freeship", "free ship", "ship bao nhieu", "bao lau nhan", "may ngay nhan", "giao bao lau", "ship covid"],
-  PURCHASE_INTENT: ["chot don", "chot cho em", "lay 1", "lay 2", "lay cai nay", "dat hang", "dat 1", "mua", "order", "ship cho em", "gui cho em", "lay em", "em lay"],
+  /*
+    "LẤY CHO CHỊ …" LÀ CÂU CHỐT ĐƠN PHỔ BIẾN NHẤT, VÀ NÓ TỪNG KHÔNG NẰM Ở ĐÂY.
+
+    Shop thời trang xưng hô "chị / anh / mình", nên câu mua hàng thật hiếm khi là "mua" — nó là
+    "lấy cho chị màu đỏ đô size XL". Bản trước chỉ bắt "lay 1" / "lay cai nay" / "em lay", nên câu
+    ấy chỉ ra đúng `PROVIDE_VARIANT`: máy biết khách chọn gì mà KHÔNG biết khách muốn mua. Giai
+    đoạn đứng nguyên ở `PRODUCT_IDENTIFIED`, và bảng việc của giai đoạn ấy trả về HỎI MÀU — đúng
+    cái màu khách vừa nói. Ca hồi quy `seed-i-lay-cho-chi` khoá lại chỗ này.
+
+    Nhận rộng ở đây KHÔNG mở đường cho một đơn ma: ý muốn mua chỉ đẩy giai đoạn đi tiếp, còn lên
+    đơn vẫn phải qua xác nhận CÓ NGỮ CẢNH và đủ năm điều kiện máy chủ.
+  */
+  PURCHASE_INTENT: ["chot don", "chot cho em", "lay 1", "lay 2", "lay cai nay", "dat hang", "dat 1", "mua", "order", "ship cho em", "gui cho em", "lay em", "em lay", "lay cho chi", "lay cho anh", "lay cho em", "lay cho minh", "cho chi lay", "chi lay"],
   PROVIDE_VARIANT: [],
   PROVIDE_CONTACT: ["so dien thoai", "sdt cua em", "sdt em", "lien he em"],
   PROVIDE_ADDRESS: ["dia chi", "gui ve", "giao ve", "so nha", "thon", "xa", "phuong", "quan", "huyen", "tinh", "thanh pho"],
@@ -249,32 +261,102 @@ export function findQuantity(text: string): number | null {
   return value >= 1 && value <= 20 ? value : null;
 }
 
-/** Màu sắc khách nhắc tới, so theo TỪ để "chuyển đổi" không thành "đỏ". */
+/**
+ * MÀU SẮC — ĐỌC TRÊN CHỮ CÓ DẤU, VÌ BỎ DẤU LÀ TỰ TẠO RA VA CHẠM.
+ *
+ * SỰ CỐ ĐO ĐƯỢC BẰNG BỘ CA HỒI QUY (19/09/2026, ca `seed-d-vang-khong-mat-mau-ma`): khách chốt
+ * "màu đỏ đô size XL" rồi nhắn "vâng". `normalize()` bỏ dấu nên "vâng" thành "vang", trùng khít
+ * với "vàng" — máy ghi nhận khách vừa ĐỔI SANG MÀU VÀNG, đẩy `PROVIDE_VARIANT` vào ý định và nâng
+ * độ tin lên 0,85. Mẫu mã đã chốt bị xoá vì không còn màu nào khớp. Một chữ đồng ý biến thành một
+ * kiện hàng sai màu.
+ *
+ * Đó không phải một va chạm lẻ. Bỏ dấu còn cho: "đó" → "do" (= đỏ) · "đến" → "den" (= đen) ·
+ * "nâu" ↔ "nấu" · "tìm" → "tim" (= tím). Toàn từ thường gặp trong chat bán hàng.
+ *
+ * LUẬT THAY THẾ, hai đường và chỉ hai:
+ *   1. Có CHỈ DẤU "màu" / "color" đứng trước ⇒ nhận cả cách viết không dấu ("màu do", "mau den").
+ *      Chỉ dấu là bằng chứng khách đang nói về màu, nên không còn chỗ cho va chạm.
+ *   2. Không có chỉ dấu ⇒ đòi ĐÚNG CHÍNH TẢ CÓ DẤU ("đỏ", "vàng"). "vâng" không bao giờ là "vàng".
+ *
+ * Viết tắt không dấu mà không có chỉ dấu ⇒ trả rỗng = CHƯA BIẾT, và máy đi hỏi lại. Nhánh sai rơi
+ * về phía HỎI THÊM: hỏi lại màu tốn một lượt, gửi nhầm màu tốn một kiện hàng và một lần hoàn.
+ *
+ * TRẢ VỀ MÀU GỐC, KHÔNG KÈM TỪ BỔ NGHĨA. Bản trước dùng thẳng `parseVariantText()` — hàm viết cho
+ * Ô BIẾN THỂ của Google Sheet, nơi đầu vào là "Size M | Màu Đỏ Đô". Trên câu chat tự do, biểu thức
+ * `([^,;|]+)` của nó nuốt trọn phần đuôi: "màu đỏ đô size XL" ra màu `"đỏ đô size XL"`, và không
+ * mẫu mã nào trong ERP mang cái tên ấy — hội thoại đứng luôn ở bước chọn mẫu mã. Trả "Đỏ" thì phép
+ * khớp mẫu mã (`v.color.includes(state.color)`) vẫn tìm đúng "Đỏ đô", rồi `applyUnderstanding` ghi
+ * lại tên màu ĐÚNG THEO DANH MỤC. Danh mục là nơi giữ chính tả của màu, không phải câu của khách.
+ */
 const COLOR_WORDS = ["den", "trang", "do", "nau", "xanh", "vang", "hong", "tim", "be", "kem", "xam", "cam", "ghi", "reu", "navy"];
 const COLOR_LABEL: Record<string, string> = {
   den: "Đen", trang: "Trắng", do: "Đỏ", nau: "Nâu", xanh: "Xanh", vang: "Vàng", hong: "Hồng",
   tim: "Tím", be: "Be", kem: "Kem", xam: "Xám", cam: "Cam", ghi: "Ghi", reu: "Rêu", navy: "Navy",
 };
 
+/** Chính tả CÓ DẤU của từng màu — đường nhận màu khi câu không có chỉ dấu "màu". */
+const COLOR_SPELLINGS: [string, string][] = [
+  ["đen", "Đen"], ["trắng", "Trắng"], ["đỏ", "Đỏ"], ["nâu", "Nâu"], ["xanh", "Xanh"],
+  ["vàng", "Vàng"], ["hồng", "Hồng"], ["tím", "Tím"], ["kem", "Kem"], ["xám", "Xám"],
+  ["cam", "Cam"], ["ghi", "Ghi"], ["rêu", "Rêu"], ["navy", "Navy"],
+];
+
+/**
+ * Hạ chữ thường và tách từ NHƯNG GIỮ NGUYÊN DẤU. Khác `normalize()` đúng ở chỗ đó, và đó là toàn
+ * bộ lý do hàm này tồn tại.
+ *
+ * "be" cố ý KHÔNG nằm trong bảng chính tả có dấu: nó trùng với "bé" chỉ sau khi bỏ dấu, nhưng bản
+ * thân "be" cũng là một tiếng đệm quá phổ biến. Màu Be chỉ nhận qua đường có chỉ dấu ("màu be").
+ */
+function padKeepMarks(text: string): string {
+  return ` ${text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+}
+
 export function findColor(text: string): string {
-  const n = normalize(text);
-  const explicit = parseVariantText(text).color;
-  if (explicit) return explicit;
-  for (const word of COLOR_WORDS) if (n.includes(` ${word} `)) return COLOR_LABEL[word];
+  const padded = padKeepMarks(text);
+  // 1. Có chỉ dấu ⇒ lấy ĐÚNG MỘT từ ngay sau nó, rồi tra bảng. Một từ, không phải phần đuôi câu.
+  const marked = / (?:màu|mau|color) ([^ ]+) /u.exec(padded)?.[1] ?? "";
+  if (marked) {
+    const bare = normalize(marked).trim();
+    if (COLOR_WORDS.includes(bare)) return COLOR_LABEL[bare];
+  }
+  // 2. Không có chỉ dấu ⇒ đòi đúng chính tả có dấu.
+  for (const [spelling, label] of COLOR_SPELLINGS) if (padded.includes(` ${spelling} `)) return label;
   return "";
 }
 
+/**
+ * SIZE — và "G" cắt ra từ "size gì" KHÔNG phải một size.
+ *
+ * SỰ CỐ ĐO ĐƯỢC (ca `seed-b-hoi-size-co-bang`): khách hỏi "mặc size gì em". `parseVariantText()`
+ * chạy biểu thức `size\s*[:：]?\s*([A-Za-z0-9]{1,4})` — lớp ký tự ấy không nhận chữ "ì" có dấu nên
+ * nó dừng lại sau một ký tự và trả về size `"G"`. Máy ghi nhận khách vừa chọn size G, một size
+ * không tồn tại trong bất kỳ danh mục nào; phép khớp mẫu mã sau đó không bao giờ ra kết quả.
+ *
+ * Không sửa `parseVariantText()`: hàm ấy phục vụ Ô BIẾN THỂ của Google Sheet, nơi đầu vào là chuỗi
+ * có cấu trúc và nó đang đúng. Chỗ phải chặn là ĐẦU RA khi đọc câu chat tự do — một chuỗi chỉ được
+ * nhận là size khi nó THẬT SỰ là một size.
+ */
 const SIZE_WORDS = ["xs", "s", "m", "l", "xl", "xxl", "xxxl", "2xl", "3xl", "4xl"];
+
+/** Size hàng may mặc: hoặc một size chữ, hoặc một size số (28–60 — quần, giày, áo dài). */
+function isRealSize(raw: string): boolean {
+  const v = raw.trim().toLowerCase();
+  if (!v) return false;
+  if (SIZE_WORDS.includes(v)) return true;
+  const n = Number(v);
+  return /^\d{2}$/.test(v) && n >= 20 && n <= 60;
+}
 
 export function findSize(text: string): string {
   const explicit = parseVariantText(text).size;
-  if (explicit) return explicit;
+  if (isRealSize(explicit)) return explicit.toUpperCase();
   const n = normalize(text);
   // "m" và "l" là chữ cái thường gặp; chỉ nhận khi đứng một mình hoặc sau chữ "size"/"số".
   const m = /\bsize\s+([a-z0-9]{1,4})\b/.exec(n) ?? /\bso\s+([a-z0-9]{1,4})\b/.exec(n);
-  if (m && SIZE_WORDS.includes(m[1])) return m[1].toUpperCase();
+  if (m && isRealSize(m[1])) return m[1].toUpperCase();
   const words = n.trim().split(/\s+/);
-  if (words.length === 1 && SIZE_WORDS.includes(words[0])) return words[0].toUpperCase();
+  if (words.length === 1 && isRealSize(words[0])) return words[0].toUpperCase();
   return "";
 }
 

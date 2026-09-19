@@ -2946,6 +2946,57 @@ export const salesReviewLabels = pgTable(
   ],
 );
 
+/**
+ * BỘ CA HỒI QUY — ẢNH CHỤP BẤT BIẾN CỦA MỘT TÌNH HUỐNG, KHÔNG PHẢI MỘT CON TRỎ TỚI HỘI THOẠI.
+ *
+ * Người soát mở `/ai/review`, thấy một lượt máy xử lý sai (hoặc xử lý đúng một ca khó), bấm THÊM
+ * VÀO BỘ HỒI QUY và khai kỳ vọng. Từ giây ấy ca này phải cho cùng một kết quả mãi mãi — nên nó
+ * KHÔNG đọc lại hội thoại gốc lúc chạy.
+ *
+ * Ba lý do, và mỗi lý do là một cách ca sẽ hỏng nếu làm ngược:
+ *   1. Hội thoại thật đi tiếp — khách nhắn thêm, nhân viên nhận việc, trạng thái đổi. Đọc lại thì
+ *      ca đo một tình huống KHÁC tình huống người soát đã chấm.
+ *   2. Tồn kho và giá đổi mỗi ngày. Một ca đỏ vì kho vừa bán hết hàng là một ca người ta đi gia
+ *      hạn con số thay vì đọc thông điệp (AGENTS.md mục 50).
+ *   3. Dữ liệu khách có thể bị xoá. Khoá ngoại vì thế là `set null`: ca sống sót, dấu vết mất đi
+ *      thì in ra là mất, không giả vờ còn.
+ *
+ * `input` giữ: tin của khách (mốc TƯƠNG ĐỐI theo phút), trạng thái trước, kết quả công cụ ERP đã
+ * chụp, bối cảnh. `expected` giữ kỳ vọng của NGƯỜI. Hình dạng của cả hai khai ở
+ * `lib/constants/sales-regression.ts` — bảng này chỉ là chỗ cất.
+ */
+export const salesRegressionCases = pgTable(
+  "sales_regression_cases",
+  {
+    id: id(),
+    /** Khoá đọc được, dùng làm danh tính trong báo cáo. DUY NHẤT — chạy lại không đẻ ca trùng. */
+    caseKey: text("case_key").notNull(),
+    title: text("title").notNull().default(""),
+    pageId: text("page_id").notNull().default(""),
+    /** Dấu vết về nơi ca sinh ra. `set null` vì ca phải sống lâu hơn dữ liệu khách. */
+    sourceSuggestionId: text("source_suggestion_id").references(() => salesSuggestions.id, { onDelete: "set null" }),
+    sourceConversationId: text("source_conversation_id").references(() => salesConversations.id, { onDelete: "set null" }),
+    /** `RegressionCase["input"]`: messages · priorState · priorStage · toolResults · context. */
+    input: jsonb("input").notNull(),
+    /** `RegressionExpectation`. Ô `null` = NGƯỜI SOÁT CHƯA QUYẾT chiều ấy ⇒ không kiểm. */
+    expected: jsonb("expected").notNull(),
+    note: text("note").notNull().default(""),
+    /**
+     * Tắt một ca thay vì xoá: một ca sai cũng là một quyết định đã có người đưa ra, và lý do tắt
+     * nó đáng giữ lại hơn là biến mất.
+     */
+    active: boolean("active").notNull().default(true),
+    /** Quy kết đi bằng KHOÁ TÀI KHOẢN, không bằng ô chữ (AGENTS.md mục 34). */
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("sales_regression_cases_key_uq").on(t.caseKey),
+    index("sales_regression_cases_active_idx").on(t.active, t.createdAt),
+  ],
+);
+
 /** Hẹn nhắn lại. CHỈ là danh sách chờ — không có đường nào từ bảng này tự gửi tin cho khách. */
 /**
  * BẢN ĐỒ QUẢNG CÁO / BÀI VIẾT → SẢN PHẨM.
