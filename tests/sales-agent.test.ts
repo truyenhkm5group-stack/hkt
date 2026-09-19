@@ -17,12 +17,12 @@ import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
 import { registerErpTools } from "@/lib/ai-workforce/tools/erp";
 import { callTool } from "@/lib/ai-workforce/tools/gateway";
 import { parseRouting, runModelStep } from "@/lib/ai-workforce/model-router";
-import { defaultProviderName, providerNames } from "@/lib/ai-workforce/providers";
+import { defaultProviderName, getLiveProvider, getProvider, providerNames } from "@/lib/ai-workforce/providers";
 import { recommendSize, resolveSizeRule, sizeNeedsHuman, type SizeRule } from "@/lib/constants/size-engine";
 import { sql } from "drizzle-orm";
 import { REVIEW_REASON_TAGS, REVIEW_REASON_TAG_META } from "@/lib/constants/sales-review-tags";
 import { z } from "zod";
-import { SAFEST_HARD_LIMITS, WORKFORCE_PROVIDERS, aiEnv, getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
+import { ALL_PROVIDERS, SAFEST_HARD_LIMITS, SHADOW_ONLY_PROVIDERS, WORKFORCE_PROVIDERS, aiEnv, getAiSettings, isShadowOnlyProvider, type AiSettings } from "@/lib/ai-workforce/config";
 import { setSettingJson } from "@/lib/settings";
 import { queueStubResponse, resetStub } from "@/lib/ai-workforce/providers/stub";
 import { aiSummary, getAiRunDetail, listAiRuns, salesStageBreakdown } from "@/lib/queries/ai";
@@ -750,8 +750,21 @@ export async function testSalesAgent(db: Db) {
   //
   // `AI_PROVIDER` nay CHỈ thuộc về tầng ERP. Nhân sự AI không diễn giải lại nó — cầu nối `erp`
   // đọc nó qua chính bộ định tuyến của ERP.
-  assert.deepEqual([...WORKFORCE_PROVIDERS].sort(), providerNames().sort(), "danh sách tên nhà cung cấp phải khớp sổ đăng ký thật");
+  assert.deepEqual([...ALL_PROVIDERS].sort(), providerNames().sort(), "danh sách tên nhà cung cấp phải khớp sổ đăng ký thật");
   assert.ok(providerNames().includes("erp"), "cầu nối sang tầng AI của ERP phải có mặt trong sổ đăng ký");
+
+  // ── NHÀ CUNG CẤP CHỈ-Ở-BÓNG KHÔNG CÓ ĐƯỜNG NÀO RA TỚI KHÁCH ──
+  //
+  // Gemini có mặt để ĐO ĐƯỢC, không để trả lời khách: chưa ca nào được người chấm thì chưa ai biết
+  // nó nói gì với người mua thật. Khoá bằng DANH SÁCH chứ không bằng thiện chí, và kiểm cả BỐN
+  // cánh cửa — bỏ sót một cánh là đủ.
+  for (const ten of SHADOW_ONLY_PROVIDERS) {
+    assert.ok(!(WORKFORCE_PROVIDERS as readonly string[]).includes(ten), `${ten} không được nằm trong danh sách nhà cung cấp phục vụ khách`);
+    assert.ok(getProvider(ten), `${ten} vẫn phải gọi được để đo ở bóng`);
+    // ① Cửa "gọi trên đường phục vụ khách" — `runModelStep` chỉ đi qua hàm này.
+    assert.equal(getLiveProvider(ten), null, `${ten} không được trả về trên đường phục vụ khách`);
+    assert.ok(isShadowOnlyProvider(ten));
+  }
 
   const savedWf = process.env.AI_WORKFORCE_PROVIDER;
   const savedProv = process.env.AI_PROVIDER;
@@ -791,6 +804,34 @@ export async function testSalesAgent(db: Db) {
     // ⑥ Tên lạ KHÔNG được nhận: rơi về phía hẹp hơn, đúng như mọi nhánh lỗi khác của ERP.
     process.env.AI_WORKFORCE_PROVIDER = "lung-tung";
     assert.equal(aiEnv.provider, "", "tên nhà cung cấp không có thật thì coi như chưa khai");
+
+    // ⑦ Cửa "biến môi trường": `AI_WORKFORCE_PROVIDER=google` KHÔNG khai được. Một dòng trong tệp
+    //    `.env` trên VPS là thứ dễ gõ nhất và khó soát nhất, nên nó phải chết ngay ở đây.
+    for (const ten of SHADOW_ONLY_PROVIDERS) {
+      process.env.AI_WORKFORCE_PROVIDER = ten;
+      assert.equal(aiEnv.provider, "", `${ten} không được khai bằng biến môi trường`);
+    }
+
+    // ⑧ Cửa "tự chọn": kể cả khi Gemini là nhà cung cấp DUY NHẤT có khoá, bộ chọn mặc định vẫn về
+    //    `stub`. Không gọi mạng còn hơn gọi một mô hình chưa ai chấm.
+    delete process.env.AI_WORKFORCE_PROVIDER;
+    delete process.env.AI_PROVIDER;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.AI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    const savedGoogle = process.env.GOOGLE_AI_API_KEY;
+    const savedGoogleModel = process.env.AI_MODEL_GOOGLE_ECONOMY;
+    try {
+      process.env.GOOGLE_AI_API_KEY = "khoa-gia-khong-goi-that";
+      process.env.AI_MODEL_GOOGLE_ECONOMY = "gemini-test";
+      assert.ok(getProvider("google")?.available(), "có khoá thì nhà cung cấp ở bóng phải sẵn sàng cho phép đo");
+      assert.equal(defaultProviderName(), "stub", "có mỗi khoá Gemini thì KHÔNG gọi mạng, chứ không tự chọn Gemini");
+    } finally {
+      if (savedGoogle === undefined) delete process.env.GOOGLE_AI_API_KEY;
+      else process.env.GOOGLE_AI_API_KEY = savedGoogle;
+      if (savedGoogleModel === undefined) delete process.env.AI_MODEL_GOOGLE_ECONOMY;
+      else process.env.AI_MODEL_GOOGLE_ECONOMY = savedGoogleModel;
+    }
   } finally {
     const tra = (k: string, v: string | undefined) => {
       if (v === undefined) delete process.env[k];

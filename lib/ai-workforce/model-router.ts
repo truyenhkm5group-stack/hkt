@@ -14,7 +14,7 @@
  */
 import { z } from "zod";
 import { getAiSettings, aiEnv, type AiSettings, type ModelPrice } from "@/lib/ai-workforce/config";
-import { getProvider, defaultProviderName } from "@/lib/ai-workforce/providers";
+import { getLiveProvider, defaultProviderName } from "@/lib/ai-workforce/providers";
 import { ModelTimeoutError, ModelUnavailableError, type ModelMessage } from "@/lib/ai-workforce/providers/types";
 import { CONFIDENCE_FLOOR, type EscalationReason, type RouteTier } from "@/lib/constants/ai";
 
@@ -135,7 +135,10 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
   }
   const routing = input.routing;
   const providerName = routing.provider || defaultProviderName();
-  const provider = getProvider(providerName);
+  // ĐƯỜNG PHỤC VỤ KHÁCH ⇒ `getLiveProvider`: nhà cung cấp chỉ-ở-bóng trả về null ở đây, kể cả khi
+  // `routing.provider` gọi đích danh nó. Cấu hình định tuyến nằm trong CSDL và sửa được từ màn
+  // hình, nên nó KHÔNG phải một thẩm quyền đủ để đưa một mô hình chưa ai chấm ra trước mặt khách.
+  const provider = getLiveProvider(providerName);
   if (!provider || !provider.available()) {
     // CHƯA CẤU HÌNH khác hẳn MÔ HÌNH LỖI: một cái là thiếu khoá / thiếu tên mô hình (việc của
     // người vận hành), cái kia là nhà cung cấp hỏng (việc của nhà cung cấp). Gộp hai lý do lại

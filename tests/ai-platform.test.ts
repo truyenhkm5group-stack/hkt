@@ -243,6 +243,32 @@ export async function testAiPlatform(db: Db) {
   });
   assert.equal(lowFirst.tier, "STRONG", "độ tin thấp ở nấc rẻ phải leo nấc");
 
+  // 7g′. NHÀ CUNG CẤP CHỈ-Ở-BÓNG BỊ TỪ CHỐI NGAY TRÊN ĐƯỜNG PHỤC VỤ KHÁCH.
+  //
+  // Cánh cửa khó nhất trong bốn cánh: `routing.provider` đến từ `ai_agent_versions.routing`, tức
+  // một ô JSON trong CSDL sửa được từ màn hình — nó KHÔNG phải một thẩm quyền đủ để đưa một mô
+  // hình chưa ai chấm chất lượng ra trước mặt người mua. Ở đây ca gọi đích danh `google` với khoá
+  // đã cấu hình sẵn, và kết quả vẫn phải là CHUYỂN NGƯỜI.
+  const savedGoogleKey = process.env.GOOGLE_AI_API_KEY;
+  const savedGoogleModel = process.env.AI_MODEL_GOOGLE_ECONOMY;
+  try {
+    process.env.GOOGLE_AI_API_KEY = "khoa-gia-khong-goi-that";
+    process.env.AI_MODEL_GOOGLE_ECONOMY = "gemini-test";
+    resetStub();
+    const bongOnly = await runModelStep({
+      step: "test", system: "s", messages: [{ role: "user", content: "x" }], schema: schemaOk,
+      routing: parseRouting({ provider: "google", tiers: ["ECONOMY"] }), settings: onSettings,
+    });
+    assert.equal(bongOnly.tier, "HUMAN", "cấu hình gọi đích danh nhà cung cấp ở bóng vẫn phải chuyển người");
+    assert.equal(bongOnly.escalation, "MODEL_NOT_CONFIGURED");
+    assert.equal(bongOnly.attempts.length, 0, "và KHÔNG được gọi mạng lần nào — chặn trước khi gọi, không phải bỏ kết quả sau khi gọi");
+  } finally {
+    if (savedGoogleKey === undefined) delete process.env.GOOGLE_AI_API_KEY;
+    else process.env.GOOGLE_AI_API_KEY = savedGoogleKey;
+    if (savedGoogleModel === undefined) delete process.env.AI_MODEL_GOOGLE_ECONOMY;
+    else process.env.AI_MODEL_GOOGLE_ECONOMY = savedGoogleModel;
+  }
+
   // 7g. Lời dặn gửi cho mô hình KHÔNG được chứa bí mật.
   for (const call of stubCalls()) {
     assert.ok(!/sk-|api[_-]?key|password|token=/i.test(call.system), "lời dặn hệ thống không được chứa bí mật");

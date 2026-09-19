@@ -68,6 +68,31 @@ export type AiSettings = AiFeatureFlags & {
  */
 export const WORKFORCE_PROVIDERS = ["stub", "erp", "anthropic"] as const;
 
+/**
+ * Nhà cung cấp CHỈ ĐƯỢC DÙNG Ở BÓNG — đo được, so sánh được, nhưng KHÔNG BAO GIỜ trả lời khách.
+ *
+ * Đây không phải một cái nhãn nhắc nhở: nó là cái khoá. Ba chỗ cùng đọc danh sách này, và một chỗ
+ * bị bỏ sót là đủ để một mô hình chưa ai chấm chất lượng nói chuyện với người mua thật:
+ *
+ *   1. `aiEnv.provider` — biến môi trường không khai được tên nằm trong danh sách này, nên một
+ *      dòng `AI_WORKFORCE_PROVIDER=google` gõ nhầm không đổi được đường chạy.
+ *   2. `defaultProviderName()` — không bao giờ tự chọn tên trong danh sách này, kể cả khi đó là
+ *      nhà cung cấp duy nhất có khoá.
+ *   3. `runModelStep()` — từ chối ngay cả khi cấu hình định tuyến của một bản nhân sự gọi đích
+ *      danh, vì cấu hình ấy nằm trong CSDL và sửa được từ màn hình.
+ *
+ * Bộ so sánh nhiều nhà cung cấp vẫn gọi được chúng: nó đi thẳng qua `getProvider()` chứ không qua
+ * đường phục vụ khách, và đó chính là ranh giới cần giữ.
+ */
+export const SHADOW_ONLY_PROVIDERS = ["google"] as const;
+
+/** Tất cả tên nhà cung cấp có thật — hai danh sách trên KHÔNG được giao nhau (có bài kiểm). */
+export const ALL_PROVIDERS = [...WORKFORCE_PROVIDERS, ...SHADOW_ONLY_PROVIDERS] as const;
+
+export function isShadowOnlyProvider(name: string): boolean {
+  return (SHADOW_ONLY_PROVIDERS as readonly string[]).includes(name);
+}
+
 export const aiEnv = {
   /**
    * NHÀ CUNG CẤP KHAI TAY — rỗng nghĩa là "để hệ thống tự chọn".
@@ -100,6 +125,24 @@ export const aiEnv = {
   },
   get strongModel() {
     return readEnv("AI_MODEL_STRONG");
+  },
+  /**
+   * Khoá Google — RIÊNG, và cố ý không dùng chung với bất cứ khoá nào đang phục vụ khách. Có khoá
+   * này KHÔNG bật được Gemini lên đường trả lời khách (xem `SHADOW_ONLY_PROVIDERS`); nó chỉ mở
+   * đường cho bộ so sánh ở bóng.
+   */
+  get googleApiKey() {
+    return readEnv("GOOGLE_AI_API_KEY");
+  },
+  get googleBaseUrl() {
+    return readEnv("GOOGLE_AI_BASE_URL", "https://generativelanguage.googleapis.com").replace(/\/$/, "");
+  },
+  /** Tên mô hình Gemini KHÔNG ghi cứng trong mã — chọn mẫu nào là quyết định của người vận hành. */
+  get googleEconomyModel() {
+    return readEnv("AI_MODEL_GOOGLE_ECONOMY");
+  },
+  get googleStrongModel() {
+    return readEnv("AI_MODEL_GOOGLE_STRONG");
   },
   get timeoutMs() {
     return readEnvInt("AI_TIMEOUT_MS", 20_000);

@@ -1,6 +1,7 @@
-import { aiEnv } from "@/lib/ai-workforce/config";
+import { aiEnv, isShadowOnlyProvider } from "@/lib/ai-workforce/config";
 import { AnthropicProvider } from "@/lib/ai-workforce/providers/anthropic";
 import { ErpSharedProvider } from "@/lib/ai-workforce/providers/erp-shared";
+import { GoogleProvider } from "@/lib/ai-workforce/providers/google";
 import { StubProvider } from "@/lib/ai-workforce/providers/stub";
 import type { ModelProvider } from "@/lib/ai-workforce/providers/types";
 
@@ -13,6 +14,9 @@ function register(provider: ModelProvider) {
 register(new StubProvider());
 register(new ErpSharedProvider());
 register(new AnthropicProvider());
+// Gemini đăng ký để ĐO ĐƯỢC, không để phục vụ khách — cái khoá nằm ở `SHADOW_ONLY_PROVIDERS`,
+// không ở việc có mặt hay không trong sổ này.
+register(new GoogleProvider());
 
 /**
  * Lấy một nhà cung cấp theo tên. Tên lạ ⇒ null (bộ định tuyến sẽ leo nấc hoặc chuyển người),
@@ -43,6 +47,19 @@ export function defaultProviderName(): string {
   if (new ErpSharedProvider().available()) return "erp";
   if (aiEnv.apiKey) return "anthropic";
   return "stub";
+}
+
+/**
+ * Nhà cung cấp cho ĐƯỜNG PHỤC VỤ KHÁCH. Khác `getProvider()` đúng một điều, và điều đó là cả lý do
+ * hàm này tồn tại: tên nằm trong `SHADOW_ONLY_PROVIDERS` trả về `null`.
+ *
+ * Tách làm hai hàm chứ không thêm một tham số cờ: một tham số mặc định "cho phép" thì mọi chỗ gọi
+ * QUÊN truyền cờ đều mở cửa, còn ở đây chỗ gọi quên thì cánh cửa ĐÓNG. Mọi nhánh lỗi phải rơi về
+ * phía hẹp hơn.
+ */
+export function getLiveProvider(name: string): ModelProvider | null {
+  if (isShadowOnlyProvider(name)) return null;
+  return getProvider(name);
 }
 
 export function providerNames(): string[] {
