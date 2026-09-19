@@ -203,6 +203,42 @@ hội thoại lấy được.
 
 ---
 
+## P3 · BẰNG CHỨNG SỐNG — ĐÓNG HOÀN TOÀN
+
+Lượt chạy **35447295117** · cửa sổ **72 giờ** · chạy `PancakePagesClient.listConversations` —
+ĐÚNG hàm mà `ingest.ts` gọi — trong container đang chạy, đo từ ngoài bằng lớp bọc `fetch` chỉ đếm
+và ghi lại, không đổi tham số cũng không sửa dữ liệu.
+
+| | |
+|---|---|
+| Tổng lượt gọi API | **14** |
+| Tổng dòng nhận về | 500 |
+| **Mã duy nhất** | **500** |
+| Chồng lấn trang 1 ↔ 2 | **0** |
+| Hàm trả về | 500 hội thoại · 500 mã duy nhất |
+| Mã TRÙNG trong kết quả | **0** |
+| Cờ lặp trang một | **KHÔNG** |
+
+Từng lượt: `current_count` tăng đều 0 → 40 → 80 → … → 460, mỗi lượt nhận 40 dòng mới và **trùng
+với các lượt trước = 0** ở mọi lượt.
+
+**Nghiệm thu: ĐẠT cả bốn điều** — quá 60 mã duy nhất (500) · trang 2 khác trang 1 · không lặp
+trang một · không mã trùng.
+
+Đặt cạnh bản cũ: cùng đường nạp ấy trước bản vá trả về **60** và gọi hai mươi lần. Nay **500**
+trong mười bốn lượt.
+
+Hai chi tiết phải ghi cho đúng, không làm tròn:
+- **500 là TRẦN TÔI ĐẶT, không phải đáy cửa sổ.** Tham số `limit` của phép đo là 500 và kết quả
+  chạm đúng 500, nên cửa sổ 72 giờ có **≥ 500** hội thoại chứ không phải đúng 500. Phép đo chứng
+  minh "lấy được quá 60", không chứng minh "đã lấy hết".
+- **Lượt 10 nhận 0 dòng rồi lượt 11 lặp lại `current_count=340` và nhận 40.** Đó là lớp HTTP
+  (`fetchJson` với `retries: 2`) thử lại một phản hồi rỗng thoáng qua — vòng lặp phân trang không
+  nhìn thấy lượt ấy. Không phải lỗi phân trang, nhưng đáng ghi: một phản hồi rỗng thoáng qua mà
+  KHÔNG được thử lại sẽ làm vòng lặp dừng sớm và mất phần còn lại của cửa sổ trong im lặng.
+
+---
+
 ## Cổng quyết định
 
 # KEEP SHADOW
@@ -215,7 +251,7 @@ Cổng đòi bảy điều. Bốn đã đạt, ba chưa:
 | Không còn lỗi an toàn nghiêm trọng chưa vá | ✓ bảy lỗi phiên sáng đã vá và khoá bằng bài kiểm |
 | Hồi quy xanh | ✓ 9/9 · toàn bộ `npm test` đạt |
 | Bịa đặt nghiêm trọng = 0 sau khi vá | ✗ **chưa đo được ở mức người chấm** — 0 cờ máy không phải 0 lỗi người |
-| Nạp Pancake không bỏ sót vì phân trang | ◐ đã tìm đúng `current_count`, đã vá, đã triển khai và bộ nạp chạy sạch — nhưng **chưa có mẻ nào chạm trần 60 sau khi vá**, nên đường nạp chưa được nhìn thấy lấy quá 60 |
+| Nạp Pancake không bỏ sót vì phân trang | ✓ **ĐÓNG** — run 35447295117: đường nạp THẬT lấy 500 mã duy nhất trong 14 lượt gọi, chồng lấn 0, không lặp, không trùng |
 | Lý do chuyển người lưu đúng | ◐ **một nửa** — bài kiểm chứng minh, dữ liệu sống chưa chạm được đường đã hỏng (xem P5) |
 | Danh mục không bịa | ✗ chưa có người chấm để nói |
 
