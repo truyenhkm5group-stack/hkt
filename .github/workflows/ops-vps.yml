@@ -42,6 +42,7 @@ on:
           - smoke               # mở thật các màn hình chính bằng phiên đăng nhập hợp lệ, đo thời gian từng trang
           - verify              # MỘT LƯỢT: dịch vụ + health + tài nguyên + ổ đĩa + lỗi log gần nhất + smoke (CHỈ ĐỌC)
           - session-verify      # kiểm phiên trượt trên máy chủ thật: gia hạn, trần sống, hết hạn, SSE, cờ cookie (CHỈ ĐỌC)
+          - session-revoke-e2e  # nghiệm thu THU HỒI phiên — GHI, và CHỈ trên tài khoản QA (QA_SESSION_EMAIL)
           - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
           - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
           - fanpage-evidence-backfill # gán fanpage lịch sử cho marketer TỪ BẰNG CHỨNG quảng cáo (mặc định CHẠY THỬ; arg "--apply" mới ghi)
@@ -414,6 +415,17 @@ jobs:
               perf-probe)
                 fetch_script perf-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/perf-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-probe.ts ;;
+              session-revoke-e2e)
+                # NGHIỆM THU THU HỒI PHIÊN — ĐÂY LÀ MỘT THAO TÁC GHI.
+                #
+                # `session-verify` chỉ đọc, nên nó trả lời được "migration đã áp chưa" mà KHÔNG trả
+                # lời được câu quan trọng nhất: thu hồi có chặn được một lượt gọi đang chạy không.
+                # Câu đó cần một lượt GHI, nên nó cần một tài khoản dành riêng.
+                #
+                # Script tự chặn: không tìm thấy tài khoản QA, hoặc vai trò khác VIEWER, thì DỪNG
+                # trước khi ghi một dòng nào. Không có nhánh nào chạm tới tài khoản nhân viên thật.
+                fetch_script session-revocation-e2e.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/session-revocation-e2e.ts'
+                docker exec erp-app sh -c "QA_SESSION_EMAIL='${ARG:-qa-session-test@vnxcommerce.com}' npx tsx --tsconfig tsconfig.json scripts/session-revocation-e2e.ts" ;;
               session-verify)
                 # KIỂM PHIÊN TRƯỢT TRÊN CHÍNH MÁY CHỦ ĐANG CHẠY — CHỈ ĐỌC.
                 #
