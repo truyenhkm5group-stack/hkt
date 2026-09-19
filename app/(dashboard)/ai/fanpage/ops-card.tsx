@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { testFanpageConnection, type TestConnectionResult } from "@/lib/actions/fanpage-ops";
-import { formatDateTime, formatNumber } from "@/lib/format";
+import { HANDOFF_REASON_LABEL, type HandoffReason } from "@/lib/constants/sales-agent";
+import { formatDateTime, formatNumber, formatPercent, pctOrNull } from "@/lib/format";
 import type { FanpageOps } from "@/lib/queries/fanpage-ops";
 import { cn } from "@/lib/utils";
 
@@ -111,6 +112,66 @@ export function FanpageOpsCard({ ops }: { ops: FanpageOps }) {
           />
           <Dong label="Giá đã khai" value={ops.catalogPriceDeclared ? "rồi" : "CHƯA — máy không báo giá"} tone={ops.catalogPriceDeclared ? "ok" : "warn"} />
         </div>
+      </div>
+
+      {/*
+        CHỖ HỔNG DỮ LIỆU TỐN BAO NHIÊU.
+
+        Dòng "Giá đã khai: CHƯA" ở trên là đúng nhưng đọc như một ô cấu hình còn trống. Khối này
+        đặt một con số cạnh nó: bao nhiêu lượt máy PHẢI gọi người vì chính chỗ trống ấy. Cùng một
+        sự thật, nhưng một bên là ghi chú còn một bên là việc phải làm.
+
+        Mẫu số 0 ⇒ `pctOrNull` ra `null` ⇒ `—`. Một page chưa chạy lượt nào mà in "0% chuyển người"
+        là khoe một thành tích chưa ai lập được (luật 42).
+      */}
+      <div className="mt-3 rounded-lg border border-border/60 p-2.5">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-xs font-semibold">Chỗ hổng dữ liệu đang tốn gì (14 ngày)</p>
+          <span className="text-[11px] text-muted-foreground">
+            {formatNumber(ops.handoffTotal14d)}/{formatNumber(ops.runsTotal14d)} lượt phải gọi người ·{" "}
+            {formatPercent(pctOrNull(ops.handoffTotal14d, ops.runsTotal14d))}
+          </span>
+        </div>
+
+        {ops.runsTotal14d === 0 ? (
+          <p className="mt-1 text-xs text-muted-foreground">Chưa có lượt chạy nào trong 14 ngày — chưa đo được gì.</p>
+        ) : (
+          <div className="mt-1.5 grid gap-x-6 sm:grid-cols-2">
+            <div>
+              {ops.handoffs14d.length ? (
+                ops.handoffs14d.map((h) => (
+                  <Dong
+                    key={h.reason}
+                    label={HANDOFF_REASON_LABEL[h.reason as HandoffReason] ?? h.reason}
+                    value={`${formatNumber(h.count)} · ${formatPercent(pctOrNull(h.count, ops.runsTotal14d))}`}
+                    tone={h.reason === "SIZE_DATA_MISSING" ? "warn" : undefined}
+                  />
+                ))
+              ) : (
+                <p className="text-xs text-muted-foreground">Không lượt nào phải gọi người.</p>
+              )}
+            </div>
+            <div>
+              {/* BA CHỖ NỐI VỀ DỮ KIỆN. Máy không nối được về mã hàng thì mọi câu nó nói đều là
+                  câu chung chung — đây là thước đo mức độ nó đang NÓI CÓ CĂN CỨ. */}
+              <Dong
+                label="Chưa nối được về mã hàng"
+                value={`${formatNumber(ops.runsWithoutProduct14d)} · ${formatPercent(pctOrNull(ops.runsWithoutProduct14d, ops.runsTotal14d))}`}
+                tone={ops.runsWithoutProduct14d > 0 ? "warn" : "ok"}
+              />
+              <Dong
+                label="Chưa chốt được mẫu mã"
+                value={`${formatNumber(ops.runsWithoutVariant14d)} · ${formatPercent(pctOrNull(ops.runsWithoutVariant14d, ops.runsTotal14d))}`}
+                tone={ops.runsWithoutVariant14d > 0 ? "warn" : "ok"}
+              />
+              <Dong
+                label="Chưa có số tiền máy chủ tính"
+                value={`${formatNumber(ops.runsWithoutPrice14d)} · ${formatPercent(pctOrNull(ops.runsWithoutPrice14d, ops.runsTotal14d))}`}
+                tone={ops.runsWithoutPrice14d > 0 ? "warn" : "ok"}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {ops.lastError ? (

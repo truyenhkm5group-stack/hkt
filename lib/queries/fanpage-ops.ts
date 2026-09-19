@@ -1,5 +1,6 @@
 import { and, count, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { rowsOf } from "@/lib/sql-rows";
 import { env } from "@/lib/env";
 
 /**
@@ -63,6 +64,20 @@ export type FanpageOps = {
   catalogProductCode: string;
   catalogVariants: number;
   catalogPriceDeclared: boolean;
+  /**
+   * CHỖ HỔNG DỮ LIỆU ĐANG TỐN BAO NHIÊU — 14 ngày gần nhất, đếm theo LÝ DO CHUYỂN NGƯỜI.
+   *
+   * Màn hình khai bảng số đo vốn đã nói "CHƯA CÓ — máy chuyển người ở mọi câu hỏi size". Đúng,
+   * nhưng nó không nói điều đó tốn gì, nên nó đọc như một mục cấu hình còn trống chứ không như
+   * một việc phải làm. Một con số đứng cạnh biến cùng câu chữ ấy thành một ưu tiên.
+   */
+  handoffs14d: { reason: string; count: number }[];
+  handoffTotal14d: number;
+  runsTotal14d: number;
+  /** Lượt chạy KHÔNG nối được về một mã hàng / mẫu mã / giá — ba chỗ hổng nền tảng của §grounding. */
+  runsWithoutProduct14d: number;
+  runsWithoutVariant14d: number;
+  runsWithoutPrice14d: number;
 };
 
 function credentialStatus(pancakePageId: string): CredentialStatus {
@@ -125,6 +140,51 @@ export async function fanpageOps(pancakePageId: string): Promise<FanpageOps> {
     catalogVariants = Number(sp?.n ?? 0);
   }
 
+  /*
+    ĐẾM THEO LÝ DO CHUYỂN NGƯỜI, 14 ngày.
+
+    Đếm theo `sales_suggestions.action` chứ KHÔNG theo `ai_runs.status`: `status` dựng từ bản quyết
+    định ĐƯỢC PHÉP, mà ở nấc bóng hội thoại có người vào thì bản ấy luôn là `NO_ACTION` ⇒ `SUCCEEDED`.
+    Đếm bằng nó là đếm hụt đúng những lượt đáng xem nhất. `action` là bản ĐỂ CHẤM, cùng bản mà mọi
+    báo cáo chất lượng khác đang đọc — hai chỗ phải nói cùng một con số.
+
+    Lý do cũng lấy từ bản để chấm (`decision->'evaluation'`), lùi về bản được phép cho những lượt
+    chạy TRƯỚC bản vá lưu bản để chấm. Lượt không ghi được mã lý do nào hiện thành MỘT DÒNG RIÊNG,
+    không lặng lẽ rơi khỏi bảng — luật 13 đòi mọi lần chuyển người mang mã lý do, nên số lượt thiếu
+    mã chính là số lần luật ấy đang bị vi phạm.
+  */
+  const muoiBonNgay = new Date(Date.now() - 14 * 86_400_000);
+  const handoffRows = rowsOf<{ reason: string; n: number }>(
+    await db.execute(sql`
+      select coalesce(
+               nullif(r.decision->'evaluation'->>'handoffReason', ''),
+               nullif(r.decision->>'handoffReason', ''),
+               '(chưa ghi mã lý do)'
+             ) as reason,
+             count(*)::int as n
+        from sales_suggestions s
+        join sales_conversations c on c.id = s.conversation_id
+        left join ai_runs r on r.id = s.run_id
+       where c.page_id = ${pancakePageId}
+         and s.created_at >= ${muoiBonNgay}
+         and s.action = 'HANDOFF_HUMAN'
+       group by 1 order by 2 desc
+    `),
+  ).map((x) => ({ reason: String(x.reason), count: Number(x.n) }));
+
+  const [nen] = rowsOf<{ tong: number; khong_sp: number; khong_mm: number; khong_gia: number }>(
+    await db.execute(sql`
+      select count(*)::int                                                              as tong,
+             count(*) filter (where coalesce(r.state_after->>'productId', '') = '')::int as khong_sp,
+             count(*) filter (where coalesce(r.state_after->>'variantId', '') = '')::int as khong_mm,
+             count(*) filter (where r.state_after->>'quotedTotal' is null)::int          as khong_gia
+        from sales_suggestions s
+        join sales_conversations c on c.id = s.conversation_id
+        join ai_runs r on r.id = s.run_id
+       where c.page_id = ${pancakePageId} and s.created_at >= ${muoiBonNgay}
+    `),
+  );
+
   return {
     pancakePageId,
     facebookPageId: profile?.facebookPageId ?? "",
@@ -149,5 +209,11 @@ export async function fanpageOps(pancakePageId: string): Promise<FanpageOps> {
     catalogVariants,
     // `unitPrice` là `null` khi CHƯA KHAI — khác hẳn 0. Máy không báo giá khi chưa khai.
     catalogPriceDeclared: profile?.unitPrice !== null && profile?.unitPrice !== undefined,
+    handoffs14d: handoffRows,
+    handoffTotal14d: handoffRows.reduce((a, x) => a + x.count, 0),
+    runsTotal14d: Number(nen?.tong ?? 0),
+    runsWithoutProduct14d: Number(nen?.khong_sp ?? 0),
+    runsWithoutVariant14d: Number(nen?.khong_mm ?? 0),
+    runsWithoutPrice14d: Number(nen?.khong_gia ?? 0),
   };
 }

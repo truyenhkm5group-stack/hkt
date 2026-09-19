@@ -588,7 +588,22 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       status,
       stateAfter: { stage: finalStage, ...state },
       understanding,
-      decision: { ...decision, confirmation },
+      /*
+        HAI QUYẾT ĐỊNH, VÀ TRƯỚC BẢN NÀY CHỈ MỘT CÁI ĐƯỢC LƯU.
+
+        `decision`      — máy ĐƯỢC PHÉP làm gì. Người đã vào cầm hội thoại ⇒ `NO_ACTION`, không lý do.
+        `decisionDeCham`— máy LẼ RA NÊN làm gì, hỏi lại với giả định người chưa vào. Đây mới là bản
+                          đi vào `sales_suggestions.action`, tức là bản mà mọi báo cáo chất lượng đọc.
+
+        Chỉ lưu bản đầu thì một lượt có `action = HANDOFF_HUMAN` (lấy từ bản để chấm) lại không có
+        `handoffReason` nào để đọc (bản được phép là `NO_ACTION`). ĐO ĐƯỢC 19/09/2026 trên 979 lượt
+        thật: 28/258 lần chuyển người — 11% — không quy được về lý do nào. Luật 13 đòi mọi lần
+        chuyển người phải mang mã lý do, và 11% ấy đang vi phạm nó một cách lặng lẽ.
+
+        Lưu thêm dưới một khoá RIÊNG chứ không trộn vào: hai bản trả lời hai câu khác nhau, và gộp
+        chúng lại là quay về đúng chỗ vừa sửa. `decision` là jsonb nên thêm khoá không cần migration.
+      */
+      decision: { ...decision, confirmation, evaluation: chamDiem ? decisionDeCham : null },
       suggestedReply: suggested,
       tier,
       escalationReason: escalation,

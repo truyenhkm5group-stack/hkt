@@ -115,7 +115,18 @@ async function main() {
     stateAfter: x.stateAfter,
     action: x.action ?? "",
     customerText: String(x.customerText ?? ""),
-    handoffReason: String(((x.decision ?? {}) as Record<string, unknown>).handoffReason ?? ""),
+    /*
+      ĐỌC LÝ DO TỪ ĐÚNG BẢN QUYẾT ĐỊNH.
+
+      `sales_suggestions.action` lấy từ bản ĐỂ CHẤM (hỏi lại với giả định người chưa vào), nên lý
+      do cũng phải lấy từ chính bản ấy. Đọc từ bản ĐƯỢC PHÉP là so hai quyết định khác nhau: người
+      đã vào cầm hội thoại thì bản được phép là `NO_ACTION` và không có lý do nào cả.
+    */
+    handoffReason: String(
+      ((((x.decision ?? {}) as Record<string, unknown>).evaluation ?? {}) as Record<string, unknown>).handoffReason ??
+        ((x.decision ?? {}) as Record<string, unknown>).handoffReason ??
+        "",
+    ),
     // CÓ BẢN GHI QUYẾT ĐỊNH hay không là một câu hỏi KHÁC câu "quyết định có ghi lý do không".
     // Gộp hai thứ ấy làm một lỗi dữ liệu trông y như một lỗi nghiệp vụ.
     coQuyetDinh: x.decision !== null && x.decision !== undefined,
@@ -270,7 +281,7 @@ async function main() {
     // BA RỔ, không hai. "Không có bản ghi quyết định" là lỗi DỮ LIỆU (lượt chạy ghi dở); "có bản
     // ghi mà thiếu lý do" là lỗi NGHIỆP VỤ (luật 13: chuyển người phải có mã lý do). Gộp lại thì
     // một lỗi hạ tầng trông y như một lỗi nghiệp vụ và người đọc đi sửa nhầm chỗ.
-    const khoa = c.handoffReason || (c.coQuyetDinh ? "⚠ CÓ bản ghi nhưng THIẾU mã lý do" : "⚠ KHÔNG có bản ghi quyết định");
+    const khoa = c.handoffReason || (c.coQuyetDinh ? "⚠ CÓ bản ghi nhưng THIẾU mã lý do (lượt chạy TRƯỚC bản vá lưu bản để chấm)" : "⚠ KHÔNG có bản ghi quyết định");
     theoLyDo.set(khoa, (theoLyDo.get(khoa) ?? 0) + 1);
   }
   for (const [ly, n] of [...theoLyDo.entries()].sort((a, b) => b[1] - a[1])) {

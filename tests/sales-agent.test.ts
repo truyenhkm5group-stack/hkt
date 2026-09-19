@@ -1265,6 +1265,45 @@ export async function testSalesAgent(db: Db) {
   const stillTakenOver = await db.query.salesConversations.findFirst({ where: eq(schema.salesConversations.id, after.conversationId) });
   assert.equal(stillTakenOver?.stage, "HUMAN_TAKEOVER", "đã chuyển người thì không quay lại luồng bán hàng");
 
+  // ═════════ 8A. BẢN ĐỂ CHẤM PHẢI ĐƯỢC LƯU, KHÔNG CHỈ BẢN ĐƯỢC PHÉP ═════════
+  //
+  // Mỗi lượt chạy có HAI quyết định: bản ĐƯỢC PHÉP (người đã vào cầm việc ⇒ `NO_ACTION`) và bản ĐỂ
+  // CHẤM (hỏi lại với giả định người chưa vào) — bản sau mới là thứ đi vào `sales_suggestions.action`
+  // và là thứ mọi báo cáo chất lượng đọc. Trước bản vá này chỉ bản đầu được ghi vào `ai_runs.decision`,
+  // nên một lượt mang `action = 'HANDOFF_HUMAN'` lại không có mã lý do nào để tra: ĐO ĐƯỢC 19/09/2026
+  // trên 979 lượt thật của bản chạy thử, 28/258 lần chuyển người — 11% — không quy được về đâu.
+  //
+  // Bất biến khoá ở đây là bất biến CỦA LUẬT 13, không phải của một dòng mã: đã chuyển người thì
+  // phải đọc được mã lý do. Quét TOÀN BỘ gợi ý trong CSDL thử chứ không chỉ một hội thoại — một
+  // đường ghi mới quên lưu bản để chấm sẽ rơi vào đây ngay, không cần ai nhớ thêm một ca kiểm.
+  const taSuggestions = await db.query.salesSuggestions.findMany();
+  const taRuns = await db.query.aiRuns.findMany();
+  const taTheoId = new Map(taRuns.map((r) => [r.id, r]));
+  const chuyenNguoi = taSuggestions.filter((x) => x.action === "HANDOFF_HUMAN");
+  assert.ok(chuyenNguoi.length > 0, "bộ dữ liệu thử phải có ít nhất một lần chuyển người, nếu không bất biến này không kiểm được gì");
+  const thieuMaLyDo = chuyenNguoi.filter((x) => {
+    const d = (x.runId ? taTheoId.get(x.runId)?.decision : null) as Record<string, unknown> | null | undefined;
+    const banDeCham = (d?.evaluation ?? null) as Record<string, unknown> | null;
+    return !(banDeCham?.handoffReason ?? d?.handoffReason);
+  });
+  assert.deepEqual(
+    thieuMaLyDo.map((x) => x.id),
+    [],
+    "mọi lần chuyển người phải đọc được mã lý do từ chính bản quyết định đã sinh ra nó (luật 13)",
+  );
+  // Và bản để chấm chỉ được lưu khi lượt chạy ĐÚNG LÀ để chấm — không phải lưu bừa cho mọi lượt.
+  const latestDecision = (latest.decision ?? {}) as Record<string, unknown>;
+  assert.ok(latestDecision.evaluation, "hội thoại đã chuyển người: lượt chạy phải giữ lại bản để chấm");
+  const luotThuong = taRuns.find((r) => {
+    const g = taSuggestions.find((x) => x.runId === r.id);
+    return g && !g.evaluationOnly;
+  });
+  assert.equal(
+    ((luotThuong?.decision ?? {}) as Record<string, unknown>).evaluation ?? null,
+    null,
+    "lượt chạy bình thường KHÔNG có bản để chấm riêng — bản được phép chính là bản để chấm",
+  );
+
   // ═════════ 9. MÔ HÌNH TRẢ RÁC / TREO KHÔNG LÀM HỎNG LƯỢT CHẠY ═════════
 
   await setSettingJson(AI_CONFIG_KEY, { modelCallsEnabled: true });
