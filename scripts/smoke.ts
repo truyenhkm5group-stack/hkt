@@ -185,6 +185,12 @@ const ROUTES = [
   "/tech",
   "/tech/tasks",
   "/tech/agents",
+  /*
+    `/tech/cto` đọc sổ đề xuất VÀ chạy lại `classifyTechRisk()` cho từng việc con để in ra mức
+    rủi ro MÁY sẽ xếp lúc duyệt — không phải mức AI đề nghị. Nó KHÔNG gọi model (việc đó nằm sau
+    một cú bấm của người), nên đo được như mọi trang đọc khác.
+  */
+  "/tech/cto",
   "/tech/deployments",
   "/tech/incidents",
   "/integrations",
