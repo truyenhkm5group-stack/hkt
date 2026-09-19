@@ -74,6 +74,7 @@ on:
           - ai-staging-creds      # ghi PANCAKE_ACCESS_TOKEN (từ Secrets) + PANCAKE_PAGE_ID (arg) vào .env.staging
           - ai-staging-read-test  # CHỈ GỌI GET: page có đọc được không, tên page, hội thoại, tin nhắn
           - ai-staging-paging     # CHỈ GỌI GET: Pancake phân trang bằng tham số nào (dò 6 tên + cắt cửa sổ thời gian)
+          - ai-staging-page-audit # CHỈ ĐỌC: phân trang Pancake + đi tìm nguồn có thẩm quyền cho mã page Facebook — MỘT lượt
           - ai-staging-signal-audit # CHỈ GỌI GET: Pancake THẬT SỰ trả về những trường nào (để dựng Product Resolver)
           - ai-staging-sql       # CHỈ ĐỌC: chạy một tệp SQL trong kho mã (arg = tên tệp ai-staging-*.sql)
           - ai-staging-resolver  # đo phép nhận diện sản phẩm trên dữ liệu đã nạp (arg: "--page=<id> --backfill")
@@ -720,6 +721,27 @@ jobs:
                 docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
                 sleep 15
                 curl -fsS -m 10 http://127.0.0.1:3100/api/health && echo || echo "  ✗ bản chạy thử chưa trả lời" ;;
+
+              ai-staging-page-audit)
+                cd /opt/vnx-ai-staging
+                #
+                # HAI PHÉP ĐO, MỘT SUẤT XẾP HÀNG.
+                #
+                # Nhóm `vps-operations` chỉ cho MỘT thao tác chạm máy chủ tại một thời điểm, và các
+                # phiên làm việc song song cùng tranh nó — ngày 19/09/2026 hai lượt đo liên tiếp của
+                # phiên này bị huỷ khi đang xếp hàng vì một phiên khác xếp hàng sau. Gộp hai phép đo
+                # KHÔNG liên quan vào một thao tác là xấu; nhưng hai phép đo này CÙNG trả lời một câu
+                # — "dữ liệu sống nói gì về page này" — nên chúng đi chung được, và đi chung thì tốn
+                # một suất thay vì hai.
+                #
+                echo "════════ PHẦN 1/2 · PHÂN TRANG PANCAKE (chỉ gọi GET) ════════"
+                fetch_staging_script pancake-pagination-probe.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/pancake-pagination-probe.ts'
+                docker exec vnx-ai-staging-app npx tsx --tsconfig tsconfig.json scripts/pancake-pagination-probe.ts ${ARG:-} || true
+                echo ""
+                echo "════════ PHẦN 2/2 · MÃ PAGE FACEBOOK ↔ PANCAKE (chỉ đọc CSDL) ════════"
+                curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                  "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/ai-staging-page-identity.sql?ref=${STAGING_BRANCH}" \
+                  | docker exec -i vnx-ai-staging-db psql -U erp -d erp -P pager=off -f - ;;
 
               ai-staging-paging)
                 cd /opt/vnx-ai-staging
