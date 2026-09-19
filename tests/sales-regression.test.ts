@@ -20,6 +20,7 @@ import { findColor, findSize, understandByRule } from "@/lib/ai-workforce/agents
 import { RUN_BREAKDOWNS, salesModelBreakdown, salesRunBreakdown } from "@/lib/queries/sales-metrics";
 import { shadowMetrics } from "@/lib/queries/sales-review";
 import { clearMemo } from "@/lib/cache";
+import { fanpageOps } from "@/lib/queries/fanpage-ops";
 
 /** Mốc gốc CỐ ĐỊNH — mốc trong ca là số phút tương đối, nên bài kiểm không già đi (AGENTS.md mục 50). */
 const MOC_GOC = new Date("2026-01-01T02:00:00.000Z");
@@ -311,7 +312,24 @@ export async function testSalesRegression(db: Db) {
     if (m.unpricedCalls > 0) assert.equal(m.costVnd, null, "lần gọi chưa khai giá ⇒ chi phí là CHƯA BIẾT, không phải 0đ");
   }
 
+  // ═══════════ 11. TRUY VẤN TÌNH TRẠNG VẬN HÀNH PHẢI CHẠY THẬT ═══════════
+  //
+  // Bài học 19/09/2026 của chính kho mã này: `listFanpages()` mang một cột mà migration đã xoá, và
+  // vì cột ấy nằm trong một CHUỖI SQL nên `tsc` không thấy, lint không thấy — trang chỉ đổ khi có
+  // người mở nó. Nên truy vấn nào không được trình biên dịch soi thì phải có một bài kiểm CHẠY nó
+  // trên lược đồ đã migrate. Không kiểm giá trị trả về, chỉ đòi nó KHÔNG NÉM.
+  const opsTrong = await fanpageOps("page-khong-ton-tai-bao-gio");
+  assert.equal(opsTrong.conversations, 0, "page không có gì ⇒ 0 hội thoại, và KHÔNG được ném lỗi");
+  assert.equal(opsTrong.lastRunAt, null, "chưa nạp lần nào ⇒ null (CHƯA LẦN NÀO), không phải một mốc bịa");
+  assert.equal(opsTrong.hasProfile, false);
+  assert.equal(opsTrong.catalogProductCode, "", "chưa khai mã WIN ⇒ rỗng, không đoán một mã nào");
+  // Tình trạng chứng thư chỉ nói CÓ hay KHÔNG. Không trường nào ở đây mang giá trị token — kho mã
+  // này PUBLIC, và một ô chữ lọt ra màn hình là lọt ra vĩnh viễn.
+  const cacKhoa = Object.keys(opsTrong.credential);
+  assert.deepEqual(cacKhoa.sort(), ["hasPageToken", "hasUserToken", "note", "ok", "pageTokenMatchesThisPage"], "tình trạng chứng thư chỉ được mang 5 trường, không trường nào là token");
+  assert.equal(typeof opsTrong.credential.ok, "boolean");
+
   console.log(
-    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai)`,
+    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai) · truy vấn tình trạng vận hành CHẠY THẬT trên lược đồ đã migrate`,
   );
 }

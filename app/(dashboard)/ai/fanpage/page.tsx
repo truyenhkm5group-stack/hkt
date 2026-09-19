@@ -1,11 +1,13 @@
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { FanpageForm } from "@/app/(dashboard)/ai/fanpage/fanpage-form";
+import { FanpageOpsCard } from "@/app/(dashboard)/ai/fanpage/ops-card";
 import { SourceRow } from "@/app/(dashboard)/ai/fanpage/source-row";
 import { BenchmarkButton } from "@/app/(dashboard)/ai/fanpage/benchmark-button";
 import { requirePermission } from "@/lib/auth/session";
 import { formatNumber, formatVND } from "@/lib/format";
 import { listFanpages, listSourceLines, listTestProducts } from "@/lib/queries/fanpage-sales";
+import { fanpageOps } from "@/lib/queries/fanpage-ops";
 import { FactsForm, PolicyForm, SizeRuleForm } from "@/app/(dashboard)/ai/fanpage/knowledge-forms";
 import { EMPTY_SALES_POLICY } from "@/lib/constants/sales-policy";
 import { listProductChoices } from "@/lib/queries/sales-ad-map";
@@ -24,6 +26,9 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
   const [pages, choices, tests] = await Promise.all([listFanpages(), listProductChoices(), listTestProducts()]);
   const page = pages.find((p) => p.pancakePageId === chon) ?? pages[0];
   const sources = page ? await listSourceLines(page.pancakePageId) : [];
+  // Tình trạng VẬN HÀNH đọc riêng: nó trả lời "đường dữ liệu có sống không", khác hẳn câu hỏi
+  // "page này bán mẫu nào" mà phần còn lại của trang trả lời.
+  const ops = page ? await fanpageOps(page.pancakePageId) : null;
   const [kienThuc, loHong] = page
     ? await Promise.all([loadWinKnowledge(page.pancakePageId), discoverKnowledgeGaps(page.pancakePageId)])
     : [null, []];
@@ -65,6 +70,8 @@ export default async function FanpagePage({ searchParams }: { searchParams: Prom
 
       {page ? (
         <>
+          {ops ? <FanpageOpsCard ops={ops} /> : null}
+
           <Card className="p-4">
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold">1 · Mã WIN hiện tại của fanpage</h2>
