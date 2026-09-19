@@ -49,6 +49,7 @@ const MOI = [
   "0100_vtp_webhook_gap",
   "0101_tech_control_plane",
   "0102_tech_github_runner",
+  "0103_care_decisions",
 ] as const;
 
 /*

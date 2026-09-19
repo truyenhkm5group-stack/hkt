@@ -5,9 +5,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { requirePermission, requireUser } from "@/lib/auth/session";
+import { assignableUsers } from "@/lib/actions/alerts";
+import { can, requireUser } from "@/lib/auth/session";
+import type { CareDecision } from "@/lib/constants/care-resolution";
 import { CARE_ACTION_KINDS } from "@/lib/constants/delivery-tower";
-import { getShipmentQuickView } from "@/lib/queries/shipment-quickview";
+import { getCareCaseDetail, getResolutionNotePresets } from "@/lib/queries/care-workbench";
 
 /**
  * ───────────── GHI NHẬN VIỆC ĐÃ CHĂM MỘT KIỆN HÀNG ─────────────
@@ -65,8 +67,35 @@ export async function recordCareAction(input: z.input<typeof schemaGhi>): Promis
   return { ok: true };
 }
 
-/** Nạp gói thông tin cần để gọi khách — chỉ khi người dùng thật sự mở ngăn kéo. */
-export async function loadShipmentQuickView(shipmentId: string) {
-  await requirePermission("shipments:view");
-  return getShipmentQuickView(shipmentId);
+/**
+ * ───────────── BÀN XỬ LÝ MỘT KIỆN: MỘT LƯỢT TẢI, ĐỦ BA CHIỀU ─────────────
+ *
+ * Ngăn kéo trước đây đọc `getShipmentQuickView` — đủ để GỌI KHÁCH nhưng không đủ để XỬ LÝ: không có
+ * trạng thái care, không có người phụ trách, không có hạn, không có kết quả đã quyết, không có mã
+ * Viettel Post thật (nên không dựng được liên kết tra cứu). Người trực phải đóng ngăn kéo, tìm lại
+ * dòng, thao tác ngoài bảng — đúng thứ ngăn kéo sinh ra để khỏi phải làm.
+ *
+ * `getCareCaseDetail` đã trả đủ cả ba chiều và đã được dùng cho AI Copilot. Không dựng một phép đọc
+ * thứ hai: hai phép đọc cho cùng một màn hình là hai cơ hội để chúng nói hai điều khác nhau.
+ */
+export async function loadCareWorkspace(shipmentId: string): Promise<CareWorkspace | null> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return null;
+  /*
+    MỘT LƯỢT ĐI-VỀ, KHÔNG BA. Panel cần ba thứ mà nó không thể nhận qua props: nó được dựng từ bốn
+    màn hình khác nhau (bàn care, danh sách đơn, hàng đợi cảnh báo, ô lệnh ⌘K) và chỉ hai trong số
+    đó có sẵn danh sách nhân sự. Bắt cả bốn nơi truyền xuống là bốn chỗ phải nhớ — và chỗ quên đầu
+    tiên sẽ hiện một panel không giao việc được mà không báo gì.
+  */
+  const [detail, staff, resolutionPresets] = await Promise.all([getCareCaseDetail(shipmentId), assignableUsers(), getResolutionNotePresets()]);
+  if (!detail) return null;
+  return { detail, staff, resolutionPresets, canManage: can(user, "shipments:manage") };
 }
+
+export type CareWorkspace = {
+  detail: NonNullable<Awaited<ReturnType<typeof getCareCaseDetail>>>;
+  staff: { id: string; name: string }[];
+  resolutionPresets: Record<CareDecision, string[]>;
+  /** Ba nút kết quả gọi `recordBusinessAction`, cần `shipments:manage`. Không có quyền ⇒ panel chỉ đọc. */
+  canManage: boolean;
+};

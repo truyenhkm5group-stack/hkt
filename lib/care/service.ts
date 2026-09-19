@@ -8,6 +8,7 @@ import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { careSlaHours } from "@/lib/care/sla";
 import { carrierSubstate } from "@/lib/constants/carrier-substate";
 import { ACTION_CALLS_CARRIER, BUSINESS_ACTIONS, BUSINESS_ACTION_LABEL } from "@/lib/constants/care-outcome";
+import { CARE_DECISIONS, DECISION_NEEDS_FOLLOW_UP, DECISION_NEEDS_REASON, DECISION_NEXT_CARE_STATUS, careDecisionOf } from "@/lib/constants/care-resolution";
 import { NOT_CARE_CONDITION } from "@/lib/care/lifecycle";
 import { slaOf } from "@/lib/care/view";
 import {
@@ -46,7 +47,7 @@ export type Result<T> = { ok: true; data: T } | { error: string };
 
 type CareRow = typeof schema.shipmentCare.$inferSelect;
 
-const EMPTY: CareState = { status: "NEW", owner: null, followUpAt: null, lastNote: "", lastNoteAt: null, lastNoteBy: "", firstResponseAt: null, doneAt: null, reopenCount: 0, updatedAt: null, updatedBy: "" };
+const EMPTY: CareState = { status: "NEW", owner: null, followUpAt: null, lastNote: "", lastNoteAt: null, lastNoteBy: "", firstResponseAt: null, doneAt: null, reopenCount: 0, updatedAt: null, updatedBy: "", lastDecision: null };
 
 /**
  * Trạng thái care của một kiện để trả về màn hình sau mỗi thao tác: đợt ĐANG MỞ, hoặc — khi không
@@ -63,7 +64,23 @@ export async function loadCareState(shipmentId: string): Promise<CareState> {
     .orderBy(desc(schema.shipmentCare.active), desc(schema.shipmentCare.episodeNo))
     .limit(1);
   if (!r) return EMPTY;
+  /*
+    KẾT QUẢ XỬ LÝ đi cùng mọi lượt trả về, không phải chỉ lượt nào nhớ đọc thêm.
+
+    Mỗi Server Action trả `CareState` mới nhất và màn hình vá dòng bằng đúng nó (mục 18 của đề bài:
+    máy chủ là nguồn sự thật). Nếu ô "kết quả" phải đợi một lượt tải trang mới đúng thì người bấm
+    thấy nút không ăn và bấm lại — chính kịch bản bấm-hai-lần mà luật 61 phải sinh ra để chặn.
+  */
+  const [d] = await db
+    .select({ decision: schema.careDecisions.decision, at: schema.careDecisions.decidedAt, email: schema.careDecisions.actorEmail, name: schema.users.name, reasonCode: schema.careDecisions.reasonCode, note: schema.careDecisions.note })
+    .from(schema.careDecisions)
+    .leftJoin(schema.users, eq(schema.users.id, schema.careDecisions.actorUserId))
+    .where(eq(schema.careDecisions.careCaseId, r.care.id))
+    .orderBy(desc(schema.careDecisions.decidedAt), desc(schema.careDecisions.createdAt))
+    .limit(1);
+  const kq = careDecisionOf(d?.decision);
   return {
+    lastDecision: d && kq ? { decision: kq, at: d.at, by: d.name || d.email || "", reasonCode: d.reasonCode, note: d.note ?? "" } : null,
     status: r.care.careStatus as CareStatus,
     owner: r.care.ownerId ? { id: r.care.ownerId, name: r.ownerName || r.care.ownerEmail || r.care.ownerId } : null,
     followUpAt: r.care.followUpAt,
@@ -456,6 +473,132 @@ export async function addCareNote(user: CareActor, input: z.input<typeof noteSch
     .set({ lastNote: note, lastNoteAt: now, lastNoteBy: user.email, careStatus: next, firstResponseAt: firstResponse(before, now), updatedBy: user.email, updatedAt: now })
     .where(eq(schema.shipmentCare.id, before.id));
   await recordCareEvent(user, before, { action: "NOTE", note, nextStatus: next, payload: { kind } });
+  clearMemo();
+  return { ok: true, data: await loadCareState(shipmentId) };
+}
+
+// ───────────────────────────── KẾT QUẢ XỬ LÝ CASE (KHÔNG CHẠM ĐVVC) ─────────────────────────────
+
+export const careDecisionSchema = z.object({
+  shipmentId: z.string().min(1),
+  decision: z.enum(CARE_DECISIONS),
+  /** Lý do theo DANH MỤC — bắt buộc với "Đã hoàn" (`DECISION_NEEDS_REASON`). */
+  reasonCode: z.string().trim().max(60).optional(),
+  note: z.string().trim().max(500).default(""),
+  /** Bắt buộc với "Xử lý sau" — CSDL cũng chặn (`care_decisions_follow_up_check`). */
+  followUpAt: z.coerce.date().optional(),
+});
+
+/**
+ * ═══════════ ĐÃ HOÀN · PHÁT TIẾP · XỬ LÝ SAU — LỜI KHAI CỦA NGƯỜI, KHÔNG PHẢI MỘT LỆNH GỬI ĐI ═══════════
+ *
+ * Đây là chỗ dễ sai nhất của cả module, nên nói thẳng ra NĂM điều KHÔNG xảy ra ở đây:
+ *
+ *   · KHÔNG gọi một dòng API Viettel Post nào. Không `requestCarrierAction`, không
+ *     `carrier_action_requests`, không `getViettelPostClient()`. Muốn gửi lệnh sang ĐVVC thì đó là
+ *     `requestCarrierAction` / `recordBusinessAction` — một hành động KHÁC, ở một khối KHÁC trên
+ *     màn hình, và khối đó được phép khoá.
+ *   · KHÔNG xét điều kiện ĐVVC. Kiện chưa có mã vận đơn · đã giao · đã hoàn · đã huỷ · đi hãng
+ *     khác · ERP chưa khai `VIETTELPOST_API_KEY` — tất cả vẫn ghi được. Năng lực API của ERP không
+ *     được phép quyết định xem NHÂN VIÊN có ghi nhận được việc mình vừa làm hay không.
+ *   · KHÔNG chạm `shipments.stage`, `vtp_status`, `vtp_status_name` hay bất kỳ cột chứng từ nào.
+ *     Bấm "Đã hoàn" trong lúc ĐVVC đang báo "Đang chuyển hoàn" thì cả hai câu cùng đứng trên màn
+ *     hình, và câu của ĐVVC không đổi một ký tự.
+ *   · KHÔNG đổi `ORDER_OUTCOME`, không đụng tồn kho, không đụng doanh thu.
+ *   · KHÔNG sửa một dòng lịch sử nào — `care_decisions` chỉ thêm.
+ *
+ * Cái nó LÀM: ghi một dòng vào sổ quyết định (kèm ảnh chụp chiều ĐVVC lúc bấm, để sau này đọc lại
+ * vẫn thấy hai chiều là hai chiều), cập nhật hẹn / note / trạng thái xử lý trên đợt đang mở, và ghi
+ * một dòng nhật ký case.
+ */
+export async function recordCareDecision(user: CareActor, input: z.input<typeof careDecisionSchema>): Promise<Result<CareState>> {
+  const parsed = careDecisionSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const { shipmentId, decision, reasonCode, note, followUpAt } = parsed.data;
+
+  if (DECISION_NEEDS_REASON[decision] && !reasonCode) return { error: "Chọn lý do hoàn trước khi ghi nhận — báo cáo lý do hoàn rỗng vĩnh viễn nếu bước này bỏ qua" };
+  if (DECISION_NEEDS_FOLLOW_UP[decision] && !followUpAt) return { error: "Chọn thời điểm xem lại — hẹn mà không có giờ thì ca chìm xuống đáy hàng đợi" };
+
+  const db = await getDb();
+  /*
+    ĐỌC CHIỀU ĐVVC CHỈ ĐỂ CHỤP ẢNH, KHÔNG ĐỂ XÉT ĐIỀU KIỆN.
+
+    Không có một câu `if` nào dưới đây từ chối quyết định vì trạng thái ĐVVC. Ba cột này đi vào sổ
+    làm BẰNG CHỨNG đọc lại được: một dòng "Đã hoàn" ghi lúc ĐVVC còn đang "Đang chuyển hoàn" chứng
+    minh ngay rằng ERP không suy chiều nọ từ chiều kia.
+  */
+  const kien = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, shipmentId), columns: { id: true, stage: true, vtpStatus: true, vtpStatusName: true } });
+  if (!kien) return { error: "Không tìm thấy vận đơn" };
+  const { substate } = carrierSubstate({ code: kien.vtpStatus, text: kien.vtpStatusName, stage: kien.stage });
+
+  const careRow = await ensureCareRow(shipmentId, user.email);
+  if (!careRow) return { error: "Không tìm thấy vận đơn" };
+
+  const truoc = careRow.careStatus as CareStatus;
+  const mong: CareStatus = DECISION_NEXT_CARE_STATUS[decision];
+  /*
+    BẢNG CHUYỂN TRẠNG THÁI KHÔNG ĐƯỢC PHÉP NUỐT MẤT MỘT LỜI KHAI.
+
+    Ca đã đóng (RESOLVED / CANCELLED) thì `canTransition` từ chối, và đúng là nó nên từ chối —
+    nhưng người trực vẫn phải ghi được kết quả họ vừa quyết. Nên: GIỮ NGUYÊN trạng thái cũ, VẪN ghi
+    dòng quyết định. Mở lại ca là một thao tác riêng, có chủ đích (`reopenCase`).
+  */
+  const sau: CareStatus = canTransition(truoc, mong) ? mong : truoc;
+
+  // Quyết định TRƯỚC đó của cùng đợt — để đọc được "đổi ý mấy lần" mà không phải tự nối dòng.
+  const [truocDo] = await db
+    .select({ decision: schema.careDecisions.decision })
+    .from(schema.careDecisions)
+    .where(eq(schema.careDecisions.careCaseId, careRow.id))
+    .orderBy(desc(schema.careDecisions.decidedAt), desc(schema.careDecisions.createdAt))
+    .limit(1);
+
+  const now = new Date();
+  await db.insert(schema.careDecisions).values({
+    careCaseId: careRow.id,
+    shipmentId,
+    decision,
+    reasonCode: reasonCode ?? null,
+    note,
+    followUpAt: followUpAt ?? null,
+    actorUserId: user.id,
+    actorEmail: user.email,
+    ownerIdAtDecision: careRow.ownerId,
+    previousDecision: truocDo?.decision ?? null,
+    previousCareStatus: truoc,
+    nextCareStatus: sau,
+    carrierStageAtDecision: kien.stage ?? "",
+    carrierSubstateAtDecision: substate,
+    decidedAt: now,
+  });
+
+  /*
+    HẸN XEM LẠI: "Xử lý sau" lấy đúng giờ người chọn. Hai kết quả kia đưa ca vào trạng thái CHỜ, mà
+    ca chờ không có hạn là ca biến mất khỏi "Cần care" — nên giữ hẹn đang có, không có thì lấy mặc
+    định. Người chọn giờ tay thì giờ đó thắng.
+  */
+  const henXemLai = followUpAt ?? careRow.followUpAt ?? defaultFollowUpAt(now);
+
+  await db
+    .update(schema.shipmentCare)
+    .set({
+      careStatus: sau,
+      // `resolution` là QUYẾT ĐỊNH của shop (`CARE_RESOLUTIONS`), KHÔNG phải kết cục logistics —
+      // nó KHÔNG đụng `care_outcome`, `final_logistics_outcome` hay `shipments.stage`.
+      resolution: decision === "CARE_RETURN" ? "RETURN_APPROVED" : careRow.resolution,
+      followUpAt: henXemLai,
+      firstResponseAt: firstResponse(careRow, now),
+      lastActionAt: now,
+      lastNote: note || careRow.lastNote,
+      lastNoteAt: note ? now : careRow.lastNoteAt,
+      lastNoteBy: note ? user.email : careRow.lastNoteBy,
+      updatedBy: user.email,
+      updatedAt: now,
+    })
+    .where(eq(schema.shipmentCare.id, careRow.id));
+
+  await recordCareEvent(user, careRow, { action: "STATUS", note, nextStatus: sau, followUpAt: henXemLai, payload: { careDecision: decision, reasonCode: reasonCode ?? null, carrierStageAtDecision: kien.stage, carrierSubstateAtDecision: substate } });
+  await audit({ userId: user.id, userEmail: user.email, action: "CARE_DECISION", entity: "SHIPMENT", entityId: shipmentId, detail: { decision, reasonCode, previous: truoc, next: sau, carrierStage: kien.stage, carrierSubstate: substate } });
   clearMemo();
   return { ok: true, data: await loadCareState(shipmentId) };
 }

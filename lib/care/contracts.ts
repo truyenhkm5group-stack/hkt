@@ -1,3 +1,5 @@
+import type { BusinessAction } from "@/lib/constants/care-outcome";
+import type { CareDecision } from "@/lib/constants/care-resolution";
 import type { CarrierSubstate } from "@/lib/constants/carrier-substate";
 import type { CareSlaHours } from "@/lib/care/view";
 import type { CareEventAction, CareEventSource, CareReasonClass, CareReasonKey, CareStatus, CareView, CarrierActionKey, CarrierRequestStatus } from "@/lib/constants/care";
@@ -28,6 +30,27 @@ export type CareState = {
   reopenCount: number;
   updatedAt: Date | null;
   updatedBy: string;
+  /**
+   * KẾT QUẢ XỬ LÝ CASE gần nhất — chiều thứ BA, tách hẳn khỏi `status` (đội đang ở đâu) và khỏi
+   * chiều ĐVVC (gói hàng ở đâu). Xem `lib/constants/care-resolution.ts`.
+   *
+   * ĐỌC RA từ dòng `care_decisions` mới nhất của ĐÚNG đợt này, KHÔNG phải một cột lưu song song:
+   * một cột thứ hai là tự nhận câu hỏi “hai chỗ lệch nhau thì tin chỗ nào”. `null` = chưa ai quyết
+   * gì, khác hẳn “đã quyết là không làm gì”.
+   *
+   * KHÔNG phải một `BusinessAction`: `care_business_actions` ghi những quyết định GẮN LIỀN với một
+   * lệnh gửi Viettel Post, còn đây là lời khai của người và nó ghi được cả khi ĐVVC không nhận lệnh.
+   *
+   * Optional vì hợp đồng này cấm đổi hình dạng cũ — nơi gọi cũ không truyền thì coi như chưa biết.
+   */
+  lastDecision?: {
+    decision: CareDecision;
+    at: Date;
+    /** Tên (hoặc email) người quyết — ẢNH CHỤP để đọc; quy kết đi bằng `care_decisions.actor_user_id`. */
+    by: string;
+    reasonCode: string | null;
+    note: string;
+  } | null;
 };
 
 export type CarrierRequestView = {
@@ -185,6 +208,30 @@ export type CareCaseDetail = {
     receiver: { name: string; phone: string; address: string };
     attemptNo: number | null;
     trackingCapability: "API_TRACKABLE" | "WEBHOOK_ONLY" | "UNKNOWN_CAPABILITY";
+    /**
+     * MÃ VIETTEL POST THẬT — chỉ `shipments.vtp_order_number`. Đứng riêng khỏi `tracking` (đã bị
+     * `coalesce` sang mã Pancake / id ERP) vì CHỈ cột này dựng được liên kết tra cứu: tra bằng mã
+     * Pancake trên viettelpost.vn ra "không tìm thấy", và một liên kết sai tệ hơn không có.
+     */
+    vtpOrderNumber: string | null;
+    /** ĐVVC ĐANG LÀM GÌ ở mức chi tiết — `stage` gộp "chờ phát lại" với "tồn - khách nghỉ" làm một. */
+    substate: CarrierSubstate;
+    substateLabel: string;
+    /** Số lần bưu tá phát hụt, đếm từ chứng từ hành trình. */
+    failedAttempts: number;
+    /** Giờ kể từ tin ĐVVC gần nhất. `null` = CHƯA CÓ TIN NÀO, không phải 0 giờ. */
+    ageHours: number | null;
+    vtpStatus: number | null;
+    /**
+     * ERP ĐÃ KHAI TÀI KHOẢN API VIETTEL POST CHƯA — máy chủ trả lời, màn hình KHÔNG đoán.
+     *
+     * Trước đây panel gán cứng `configured: true` khi xét điều kiện, nên nút "Yêu cầu phát lại trên
+     * VTP" vẫn sáng trên một ERP chưa khai tài khoản: bấm vào là một lời từ chối. Một nút bấm-không-
+     * chạy dạy người dùng bỏ qua nút, và lần nút đó thật sự hỏng thì không ai báo nữa.
+     *
+     * Cờ này CHỈ chi phối khối "Thao tác Viettel Post". Ba nút kết quả care KHÔNG đọc nó.
+     */
+    carrierConfigured: boolean;
   };
   order: { id: string; systemId: number | null; total: number; prepaid: number; items: { name: string; qty: number; price: number }[]; chatUrl: string | null } | null;
   customer: { name: string; phone: string; history: { delivered: number; returned: number; totalOrders: number } | null };
@@ -195,6 +242,37 @@ export type CareCaseDetail = {
   sla: CareSlaView | null;
   events: CareEvent[];
   careActions: { kind: string; label: string; note: string; actor: string; at: Date }[];
+  /**
+   * NHẬT KÝ KẾT QUẢ XỬ LÝ — `care_decisions`, chỉ thêm, mới nhất trước. Ai đã quyết gì, lúc nào,
+   * lý do gì, hẹn gì — VÀ ảnh chụp chiều ĐVVC lúc bấm, để đọc lại vẫn thấy hai chiều là hai chiều.
+   */
+  decisions: {
+    id: string;
+    at: Date;
+    actor: string;
+    decision: CareDecision;
+    reasonCode: string | null;
+    note: string;
+    previousCareStatus: string | null;
+    nextCareStatus: string | null;
+    followUpAt: Date | null;
+    /** Viettel Post đang nói gì LÚC người bấm — không tính lại theo hôm nay. */
+    carrierStageAtDecision: string;
+    carrierSubstateAtDecision: string;
+  }[];
+  /**
+   * NHẬT KÝ LỆNH GỬI ĐVVC — `care_business_actions`, chỉ thêm. Đứng RIÊNG khỏi `decisions`: cái
+   * trên là lời khai của người, cái này là một lệnh đã (hoặc chưa) đi tới Viettel Post.
+   */
+  carrierDecisions: {
+    id: string;
+    at: Date;
+    actor: string;
+    action: BusinessAction;
+    reasonCode: string | null;
+    note: string;
+    carrierResult: string | null;
+  }[];
   carrierRequests: CarrierRequestView[];
   capabilities: CarrierCapabilityView[];
 };

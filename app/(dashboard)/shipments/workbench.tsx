@@ -13,11 +13,25 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { addCareNote, bulkRequestCarrierAction, markCarrierManualDone, recordBusinessAction, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
+import { addCareNote, bulkRequestCarrierAction, markCarrierManualDone, recordBusinessAction, recordCareDecision, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
 import type { BulkOutcome, BulkResult } from "@/lib/care/service";
 import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { ACTION_CALLS_CARRIER, BUSINESS_ACTIONS, BUSINESS_ACTION_HINT, BUSINESS_ACTION_LABEL, type BusinessAction } from "@/lib/constants/care-outcome";
+import { ResolutionControl, type ResolutionExtra } from "@/app/(dashboard)/shipments/resolution-control";
+import {
+  FOLLOW_UP_FILTERS,
+  FOLLOW_UP_FILTER_HINT,
+  FOLLOW_UP_FILTER_LABEL,
+  RESOLUTION_FILTER_KEYS,
+  RESOLUTION_FILTER_LABEL,
+  RESOLUTION_HINT,
+  RESOLUTION_LABEL,
+  followUpBucket,
+  type CareDecision,
+  type FollowUpFilterKey,
+  type ResolutionFilterKey,
+} from "@/lib/constants/care-resolution";
 import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
 import { careViewOf, slaOf } from "@/lib/care/view";
 import {
@@ -82,6 +96,8 @@ type Props = {
   staff: { id: string; name: string }[];
   /** Mẫu note nhanh của shop — bấm là đổ chữ vào ô; thêm/bớt ngay trong popover. */
   presets: CareNotePreset[];
+  /** Mẫu note gắn với TỪNG kết quả xử lý (`care.resolutionNotes`). */
+  resolutionPresets: Record<CareDecision, string[]>;
   canManage: boolean;
 };
 
@@ -122,8 +138,23 @@ const BULK_TONE: Record<BulkOutcome, string> = {
   FAILED: "text-rose-600 dark:text-rose-400",
 };
 
-export function CareWorkbenchView({ initial, view, staff, presets: initialPresets, canManage }: Props) {
+export function CareWorkbenchView({ initial, view, staff, presets: initialPresets, resolutionPresets, canManage }: Props) {
   const [cases, setCases] = useState<CareCase[]>(() => initial.cases.map((c) => ({ ...c, queueSince: new Date(c.queueSince) })));
+  /*
+    ═══ MÁY CHỦ NÓI LẠI THÌ DANH SÁCH NGHE THEO ═══
+
+    `useState(() => …)` chỉ chạy MỘT LẦN. Trước bản này, panel chi tiết ghi xong rồi gọi
+    `router.refresh()`: máy chủ dựng lại hàng đợi và gửi xuống `initial` mới, nhưng danh sách vẫn
+    giữ nguyên ảnh chụp lúc mở trang — người dùng đổi kết quả trong panel, đóng panel, và thấy dòng
+    ngoài bảng vẫn y như cũ cho tới khi bấm F5 (CASE 2 của đề bài).
+
+    `initial` chỉ đổi danh tính khi MÁY CHỦ gửi một lượt dựng mới (điều hướng · `router.refresh()` ·
+    SSE realtime). Thao tác ở ngay trên bảng KHÔNG đi qua đây — chúng vá dòng bằng `patch()` với
+    đúng `CareState` máy chủ trả về, nên hiệu ứng này không nuốt mất chúng.
+  */
+  useEffect(() => {
+    setCases(initial.cases.map((c) => ({ ...c, queueSince: new Date(c.queueSince) })));
+  }, [initial]);
   // Mẫu note dùng chung cho mọi dòng: sửa ở một dòng, dòng khác thấy ngay.
   const [presets, setPresets] = useState<CareNotePreset[]>(initialPresets);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -147,11 +178,13 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
       tien: parseAsString.withDefault(""),
       hut: parseAsString.withDefault(""),
       hang: parseAsString.withDefault(""),
+      ketqua: parseAsString.withDefault(""),
+      hen: parseAsString.withDefault(""),
     },
     { history: "replace", clearOnDefault: true },
   );
   const filters: CareFilters = useMemo(
-    () => ({ view, q: f.q, owner: f.nguoi, reason: f.lydo, substate: f.dvvc, sla: f.han as CareSlaBucket | "", cod: f.tien as CareCodBand | "", attempts: f.hut as CareAttemptBand | "", sku: f.hang }),
+    () => ({ view, q: f.q, owner: f.nguoi, reason: f.lydo, substate: f.dvvc, sla: f.han as CareSlaBucket | "", cod: f.tien as CareCodBand | "", attempts: f.hut as CareAttemptBand | "", sku: f.hang, resolution: f.ketqua as ResolutionFilterKey | "", followUp: f.hen as FollowUpFilterKey | "" }),
     [view, f],
   );
   const [pending, start] = useTransition();
@@ -213,10 +246,24 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
     return CARE_ATTEMPT_BANDS.map((b) => [b, m.get(b.key) ?? 0] as const).filter(([, n]) => n > 0);
   }, [cases, filters, now, hours]);
 
+  /*
+    ĐẾM THEO KẾT QUẢ và THEO CÁI HẸN — cùng `careFacet`, cùng vị từ, nên con số trên chip luôn bằng
+    số dòng sẽ hiện ra khi bấm nó. Kiện mang một quyết định NGOÀI ba nút (vd "Đổi") không rơi vào
+    rổ nào: nó đã được quyết, nên nó không phải "chưa quyết định", và ép nó vào một rổ là đếm sai.
+  */
+  const resolutionFacet = useMemo(() => {
+    const m = new Map(careFacet(cases, filters, "resolution", (c) => c.care.lastDecision?.decision ?? "none", now, hours));
+    return RESOLUTION_FILTER_KEYS.map((k) => [k, m.get(k) ?? 0] as const).filter(([, n]) => n > 0);
+  }, [cases, filters, now, hours]);
+  const followUpFacet = useMemo(() => {
+    const m = new Map(careFacet(cases, filters, "followUp", (c) => followUpBucket(c.care.followUpAt, now), now, hours));
+    return FOLLOW_UP_FILTERS.map((k) => [k, m.get(k) ?? 0] as const).filter(([, n]) => n > 0);
+  }, [cases, filters, now, hours]);
+
   /* Đếm và gỡ bộ lọc: người lọc bốn chiều rồi thấy bảng rỗng phải có một nút để ra, không phải sửa
      đường dẫn bằng tay. `view` không nằm trong đây — nó là cái TAB, không phải bộ lọc. */
   const daLoc = Object.values(f).filter((v) => v !== "").length;
-  const xoaLoc = () => setF({ q: "", nguoi: "", lydo: "", dvvc: "", han: "", tien: "", hut: "", hang: "" });
+  const xoaLoc = () => setF({ q: "", nguoi: "", lydo: "", dvvc: "", han: "", tien: "", hut: "", hang: "", ketqua: "", hen: "" });
 
   const queue = visible.map((c) => ({ shipmentId: c.shipmentId }));
   const moneyAtRisk = visible.reduce((a, c) => a + c.codAmount, 0);
@@ -423,6 +470,50 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
         </div>
       ) : null}
 
+      {/*
+        ═══ HÀNG THỨ TƯ: ĐỘI ĐÃ QUYẾT GÌ, VÀ BAO GIỜ PHẢI QUAY LẠI ═══
+
+        Ba hàng trên nói về KIỆN (vì sao cần care · ĐVVC đang làm gì · gấp tới đâu). Hàng này nói về
+        ĐỘI: đã quyết gì cho kiện, và cái hẹn rơi vào đâu. "Chưa quyết định" và "Quá hẹn" là hai rổ
+        người trực mở đầu mỗi buổi, nên chúng phải bấm được, không phải đọc từng dòng mới thấy.
+      */}
+      {resolutionFacet.length > 1 || followUpFacet.length > 1 ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          {resolutionFacet.length > 1 ? (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Kết quả</span>
+              {resolutionFacet.map(([k, n]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setF({ ketqua: f.ketqua === k ? "" : k })}
+                  title={k === "none" ? "Chưa ai bấm Đã hoàn / Phát tiếp / Xử lý sau cho kiện này." : RESOLUTION_HINT[k as CareDecision]}
+                  className={cn("rounded-full border px-2.5 py-0.5 text-[11.5px] hover:bg-accent", f.ketqua === k && "border-primary bg-accent font-semibold")}
+                >
+                  {RESOLUTION_FILTER_LABEL[k as ResolutionFilterKey]} <span className="numeric text-muted-foreground">{n}</span>
+                </button>
+              ))}
+            </span>
+          ) : null}
+          {followUpFacet.length > 1 ? (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Hẹn</span>
+              {followUpFacet.map(([k, n]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setF({ hen: f.hen === k ? "" : k })}
+                  title={FOLLOW_UP_FILTER_HINT[k]}
+                  className={cn("rounded-full border px-2.5 py-0.5 text-[11.5px] hover:bg-accent", k === "overdue" && "text-rose-700 dark:text-rose-300", f.hen === k && "border-primary bg-accent font-semibold")}
+                >
+                  {FOLLOW_UP_FILTER_LABEL[k]} <span className="numeric text-muted-foreground">{n}</span>
+                </button>
+              ))}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       {selected.size ? (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs">
           <span className="font-semibold">{selected.size} kiện đã chọn</span>
@@ -519,8 +610,8 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
                 <th className="px-2 py-2 font-semibold" title="Chiều ĐVVC — chứng từ Viettel Post, đội không sửa được">
                   VTP báo
                 </th>
-                <th className="px-2 py-2 font-semibold" title="Chiều nội bộ — đội đã làm tới đâu; không suy ra từ trạng thái VTP">
-                  Care
+                <th className="px-2 py-2 font-semibold" title="Chiều nội bộ — đội đã quyết gì và đang ở đâu. KHÔNG suy ra từ trạng thái VTP: “Đã hoàn” ở đây là quyết định của shop, không phải chứng từ hoàn của Viettel Post.">
+                  Care · kết quả xử lý
                 </th>
                 <th className="px-2 py-2 font-semibold">Note gần nhất</th>
                 <th className="px-2 py-2 font-semibold">Viettel Post</th>
@@ -533,6 +624,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
                   c={c}
                   staff={staff}
                   presets={presets}
+                  resolutionPresets={resolutionPresets}
                   onPresetsChange={setPresets}
                   canManage={canManage}
                   checked={selected.has(c.shipmentId)}
@@ -558,7 +650,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   );
 }
 
-function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onCheck, onPatch }: { c: CareCase; staff: { id: string; name: string }[]; presets: CareNotePreset[]; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
+function CaseRow({ c, staff, presets, resolutionPresets, onPresetsChange, canManage, checked, onCheck, onPatch }: { c: CareCase; staff: { id: string; name: string }[]; presets: CareNotePreset[]; resolutionPresets: Record<CareDecision, string[]>; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
   const [pending, start] = useTransition();
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -646,6 +738,28 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
       }
       onPatch(r.data.care, r.data.request ? { carrierRequest: { ...r.data.request, at: new Date(r.data.request.at) } } : {});
       toast.success(r.data.message, { duration: 9000 });
+    });
+
+  /*
+    ═══ BA NÚT KẾT QUẢ ĐI ĐÚNG MỘT ĐƯỜNG GHI ═══
+
+    Không có Server Action thứ hai cho "kết quả xử lý": ba nút ánh xạ về ba `BusinessAction` đã có
+    và gọi `recordBusinessAction` — cùng hàm mà menu đầy đủ trong popover "Xử lý" gọi. Nhờ vậy bấm
+    ở ngoài bảng và bấm trong panel ghi RA CÙNG MỘT DÒNG SỔ, và không có đường nào lách qua kiểm tra
+    điều kiện ĐVVC hay qua nhật ký.
+
+    LẠC QUAN CÓ GIỚI HẠN: dòng chỉ được vá bằng `CareState` MÁY CHỦ TRẢ VỀ (mục 18 của đề bài), nên
+    lỗi là dòng tự quay lại đúng trạng thái cũ — không cần bộ nhớ hoàn tác riêng.
+  */
+  const doResolution = (a: CareDecision, extra: ResolutionExtra) =>
+    start(async () => {
+      const r = await recordCareDecision({ shipmentId: c.shipmentId, decision: a, note: extra.note, reasonCode: extra.reasonCode, followUpAt: extra.followUpAt });
+      if ("error" in r) {
+        toast.error(r.error, { duration: 9000 });
+        return;
+      }
+      onPatch(r.data);
+      toast.success(`${c.tracking} · ${RESOLUTION_LABEL[a]}`, { description: "Đã ghi kết quả xử lý. KHÔNG gửi lệnh nào sang Viettel Post và KHÔNG đổi trạng thái vận đơn.", duration: 6000 });
     });
 
   const carrier = (actionKey: CarrierActionKey) =>
@@ -755,7 +869,26 @@ function CaseRow({ c, staff, presets, onPresetsChange, canManage, checked, onChe
         </div>
       </td>
       <td className="px-2 py-2">
-        <div className="flex flex-wrap items-center gap-1">
+        {/*
+          KẾT QUẢ XỬ LÝ ĐỨNG TRÊN CÙNG Ô CARE — đây là câu hỏi người trực phải trả lời cho mỗi kiện.
+
+          KHÔNG có điều kiện ĐVVC nào ở đây: ba nút này ghi LỜI KHAI CỦA NGƯỜI, và chúng phải bấm
+          được kể cả khi ERP chưa khai tài khoản API, kiện chưa có mã vận đơn, hay kiện đã kết thúc.
+          Lệnh gửi sang Viettel Post nằm ở cột "Viettel Post" bên phải — khối đó mới được phép khoá.
+        */}
+        <ResolutionControl
+          value={c.care.lastDecision?.decision ?? null}
+          pending={pending}
+          presets={resolutionPresets}
+          canEditPresets={canManage}
+          onSubmit={doResolution}
+        />
+        {c.care.lastDecision ? (
+          <div className="mt-0.5 text-[10.5px] text-muted-foreground" title={c.care.lastDecision.note || undefined}>
+            {c.care.lastDecision.by || "không rõ người"} · {formatTimeAgo(c.care.lastDecision.at)}
+          </div>
+        ) : null}
+        <div className="mt-1 flex flex-wrap items-center gap-1">
           {terminal ? (
             <button type="button" disabled={pending} onClick={reopen} className="h-7 rounded-md border px-2 text-[11.5px] font-medium hover:bg-accent" title="Case đã đóng — mở lại để tiếp tục care (lịch sử giữ nguyên)">
               Mở lại

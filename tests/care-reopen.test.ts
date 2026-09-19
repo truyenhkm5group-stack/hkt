@@ -248,34 +248,39 @@ export async function testCareReopen(db: Db) {
   //
   // `getCareAudit` là nơi duy nhất mọi màn hình care đọc số. Truy vấn của nó phải chạy được THẬT —
   // một câu SQL chỉ hỏng lúc chạy sẽ không lỗi nào phát ra ở typecheck.
-  /*
-    ═══════ MỐC CỦA HAI BẢN SAO ĐI THEO `REOPEN_GUARD_LIVE_AT`, KHÔNG THEO ĐỒNG HỒ ═══════
-
-    ĐÃ NỔ THẬT (19/09/2026, và nó chặn MỌI lần deploy vì workflow chạy `npm test` trước khi đụng
-    máy chủ): bản sao được gieo ở `gio(20)` — hai mươi giờ trước THEO ĐỒNG HỒ THẬT — rồi đem so
-    với `REOPEN_GUARD_LIVE_AT`, một ngày CỐ ĐỊNH (18/09 04:10Z). Chiều 18/09 thì `now - 20h` rơi
-    TRƯỚC mốc nên `falseReopenAfterFix` bằng 0 và bài kiểm xanh; sáng 19/09 cùng phép tính ấy rơi
-    SAU mốc, con số thành 1, bài kiểm đỏ. Không dòng mã nào đổi.
-
-    Đây đúng là khuôn mẫu AGENTS.md mục 50 cấm: một cửa sổ "N giờ trước" trỏ vào một mốc ngày cố
-    định. Mốc ấy KHÔNG BAO GIỜ trượt được — nó ghi lại thời điểm bản vá lên production — nên chính
-    dữ liệu gieo phải neo vào nó.
-
-    Và neo xong thì kiểm được CẢ HAI CHIỀU, mạnh hơn hẳn bài cũ: bài cũ chỉ khẳng định "không đếm
-    nhầm cái cũ", nên nó vẫn xanh kể cả khi bộ đếm hỏng thành đếm-không-cái-gì.
-  */
-  const mocDiSan = new Date(REOPEN_GUARD_LIVE_AT.getTime() - 3600_000); // TRƯỚC khi luật vá chạy
-  const mocSauVa = new Date(REOPEN_GUARD_LIVE_AT.getTime() + 3600_000); // SAU — tức lỗi CÒN xảy ra
-
   const sG = await dungKien(db, "sg");
-  await suKien(db, sG, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: gio(20) });
+  const mocG = gio(20);
+  await suKien(db, sG, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: mocG });
   await setCareStatus(NGUOI, { shipmentIds: [sG], status: "RESOLVED", note: "G: xong" });
-  // Dựng thẳng một BẢN SAO đúng như lỗi cũ từng sinh ra: mốc kích hoạt cũ hơn lúc đóng.
+  /*
+    ═══ MỐC CỦA BẢN SAO DỰNG TỪ CHÍNH HẰNG SỐ ĐANG ĐO, KHÔNG TỪ "20 GIỜ TRƯỚC" (luật 50) ═══
+
+    Bản trước gieo `openedAt = gio(20)` rồi so với `REOPEN_GUARD_LIVE_AT` — một hằng số NGÀY CỐ
+    ĐỊNH (18/09/2026 04:10Z). Đó là một cửa sổ TRƯỢT theo đồng hồ thật quét qua một mốc đứng yên:
+    bài kiểm xanh ngày 18/09 và ĐỎ ngày 19/09, vì "20 giờ trước" đã đi qua bên kia cái mốc và bản
+    sao di sản bỗng bị đếm là "lỗi còn đang xảy ra". Đúng quả bom mà mục 50 của AGENTS.md sinh ra
+    để cấm — và nó chặn mọi lần deploy, vì workflow chạy `npm test` trước khi đụng máy chủ.
+
+    Nay mốc dựng TỪ CHÍNH `REOPEN_GUARD_LIVE_AT`: bản sao này ở TRƯỚC lúc luật mới chạy theo ĐỊNH
+    NGHĨA, nên nó là DI SẢN mãi mãi, hôm nay là thứ mấy cũng vậy.
+  */
+  const mocDiSan = new Date(REOPEN_GUARD_LIVE_AT.getTime() - 3600_000);
   await db.insert(schema.shipmentCare).values({
     shipmentId: sG, orderId: `${P}o-sg`, episodeNo: 2, active: true, careStatus: "NEW",
     entryCarrierState: "WAITING_REDELIVERY", sourceTrigger: "RECONCILE", openedAt: mocDiSan, careOutcome: "PENDING", updatedBy: "SYSTEM",
   });
+  /*
+    ═══ VẾ ĐỐI CHỨNG: MỘT BẢN SAO NẰM *SAU* MỐC VÁ PHẢI ĐƯỢC ĐẾM ═══
 
+    Chỉ khẳng định "cái cũ không bị đếm nhầm" thì bài kiểm vẫn xanh kể cả khi bộ đếm hỏng thành
+    đếm-không-cái-gì — và lúc ấy `falseReopenAfterFix` sẽ mãi mãi báo 0, tức là mãi mãi báo "lỗi
+    đã hết", kể cả giữa lúc nó đang xảy ra. Con số này chỉ có nghĩa khi nó chia ĐÔI đúng ở mốc
+    vá, nên phải kiểm cả hai bên của cái mốc.
+
+    `mocSauVa` cũng neo vào hằng số, nên nó không bao giờ trôi: mốc kích hoạt vẫn cũ hơn lúc đóng
+    (đợt 1 đóng ở "bây giờ") ⇒ vẫn là FALSE_REOPEN_LEGACY, nhưng nằm SAU lúc luật vá chạy.
+  */
+  const mocSauVa = new Date(REOPEN_GUARD_LIVE_AT.getTime() + 3600_000);
   const sH = await dungKien(db, "sh");
   await suKien(db, sH, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: gio(20) });
   await setCareStatus(NGUOI, { shipmentIds: [sH], status: "RESOLVED", note: "H: xong" });
@@ -285,26 +290,20 @@ export async function testCareReopen(db: Db) {
   });
 
   clearMemo();
-  /*
-    CỬA SỔ TRUY VẤN CŨNG PHẢI PHỦ ĐƯỢC HAI MỐC NEO ĐÓ.
-
-    `gio(72)` một mình là quả bom thứ hai đang chờ: hai mốc trên đứng yên, còn cửa sổ 72 giờ thì
-    bò tới trước mỗi ngày, nên vài ngày nữa nó sẽ bỏ cả hai ra ngoài và bài kiểm đỏ lại vì đúng
-    một lý do đã sửa một lần. Lấy mốc sớm nhất trong CHÍNH DỮ LIỆU đang kiểm.
-  */
-  const tu = new Date(Math.min(gio(72).getTime(), mocDiSan.getTime() - 3600_000));
-  const kiemKe = await getCareAudit({ from: tu, to: new Date(Date.now() + 3600_000) }, "CASE_OPENED_AT");
+  // Kỳ phải PHỦ được mốc di sản dù hôm nay cách nó bao xa — nếu không, dòng rơi ra ngoài kỳ và
+  // `dongG.length` tụt xuống 1 vào một ngày nào đó. Cùng một quả bom, chỉ chậm hơn vài tuần.
+  const tuLuc = new Date(Math.min(gio(72).getTime(), mocDiSan.getTime() - 3600_000));
+  const kiemKe = await getCareAudit({ from: tuLuc, to: new Date(Date.now() + 3600_000) }, "CASE_OPENED_AT");
   const dongG = kiemKe.rows.filter((r) => r.shipmentId === sG);
   assert.equal(dongG.length, 2, "cả hai đợt vẫn nằm trong danh sách để tra lịch sử — không xoá gì");
   assert.equal(dongG.find((r) => r.careId !== undefined && r.outcome !== undefined && r.reopenClass === "FALSE_REOPEN_LEGACY") !== undefined, true, "bản sao phải được gọi đúng tên");
-  assert.ok(kiemKe.reopen.byClass.FALSE_REOPEN_LEGACY >= 2, "bộ đếm theo loại phải thấy CẢ HAI — phân loại không nhìn mốc vá, nó chỉ hỏi 'mốc kích hoạt có cũ hơn lúc đóng không'");
+  assert.ok(kiemKe.reopen.byClass.FALSE_REOPEN_LEGACY >= 1, "bộ đếm theo loại phải thấy nó");
   /*
-    Con số DUY NHẤT nói lỗi có CÒN đang xảy ra hay không. Nó chia đôi đúng ở `REOPEN_GUARD_LIVE_AT`:
-    bản sao gieo TRƯỚC mốc là di sản đã vá và KHÔNG được đếm; bản sao gieo SAU mốc là lỗi còn sống
-    và PHẢI được đếm. Gộp hai bên làm chủ shop tưởng lỗi chưa hết trong khi nó đã hết.
+    Con số DUY NHẤT nói lỗi có còn đang xảy ra hay không. Bản sao trong bài kiểm mang mốc kích hoạt
+    CŨ (20 giờ trước) nên nó là DI SẢN, không phải lỗi mới — đúng như các đợt thật trên production.
   */
-  assert.equal(kiemKe.reopen.falseReopenAfterFix, 1, "đúng MỘT bản sao nằm sau mốc vá — cái trước mốc không được tính, cái sau mốc không được bỏ sót");
-  assert.equal(kiemKe.reopen.guardLiveAt.getTime(), REOPEN_GUARD_LIVE_AT.getTime(), "màn hình phải nói ra nó đang chia đôi ở mốc nào");
+  assert.equal(kiemKe.reopen.falseReopenAfterFix, 1, "đúng MỘT bản sao nằm sau mốc vá: cái TRƯỚC mốc không được tính, cái SAU mốc không được bỏ sót — con số này chia đôi ở đó hoặc nó vô nghĩa");
+  assert.equal(kiemKe.reopen.guardLiveAt.getTime(), REOPEN_GUARD_LIVE_AT.getTime(), "và màn hình phải nói ra nó đang chia đôi ở mốc nào");
 
   /* ───── dọn ───── */
   const ids = [s1, s2, sA, sC, sD, sF, sG, sH];

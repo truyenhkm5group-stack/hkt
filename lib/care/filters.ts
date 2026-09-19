@@ -1,4 +1,5 @@
 import { CARE_SLA_SOON_FRACTION, CARE_TERMINAL_STATUSES, CARE_WAITING_STATUSES } from "@/lib/constants/care";
+import { followUpBucket, type FollowUpFilterKey, type ResolutionFilterKey } from "@/lib/constants/care-resolution";
 import type { CareCase } from "@/lib/care/contracts";
 import { DEFAULT_CARE_SLA_HOURS, type CareSlaHours, type CareStateLike } from "@/lib/care/view";
 
@@ -145,9 +146,17 @@ export type CareFilters = {
   attempts: CareAttemptBand | "";
   /** Mã hàng / tên hàng — khớp một phần, không phân biệt hoa thường. */
   sku: string;
+  /**
+   * KẾT QUẢ XỬ LÝ người đã quyết. `""` = không lọc · `"none"` = CHƯA AI QUYẾT · còn lại là một
+   * trong ba kết quả. `none` phải là một rổ riêng: đó là rổ mở đầu ca, và nếu nó lẫn vào "không
+   * lọc" thì nó không tồn tại trên màn hình.
+   */
+  resolution: ResolutionFilterKey | "";
+  /** Cái hẹn quay lại rơi vào rổ nào (quá hẹn · hôm nay · ngày mai · xa hơn · chưa hẹn). */
+  followUp: FollowUpFilterKey | "";
 };
 
-export const EMPTY_CARE_FILTERS: Omit<CareFilters, "view"> = { q: "", owner: "", reason: "", substate: "", sla: "", cod: "", attempts: "", sku: "" };
+export const EMPTY_CARE_FILTERS: Omit<CareFilters, "view"> = { q: "", owner: "", reason: "", substate: "", sla: "", cod: "", attempts: "", sku: "", resolution: "", followUp: "" };
 
 /** Các chiều có thể bị tắt khi đếm chip. `view` cố tình không nằm trong danh sách này. */
 export type CareFilterDim = Exclude<keyof CareFilters, "view">;
@@ -174,6 +183,18 @@ export function matchesCareFilters(c: CareCase, f: CareFilters, now: Date, hours
   if (on("sla") && f.sla && careSlaBucket(c, now, hours) !== f.sla) return false;
   if (on("cod") && f.cod && careCodBand(c.codAmount) !== f.cod) return false;
   if (on("attempts") && f.attempts && careAttemptBand(c.carrier.failedAttempts) !== f.attempts) return false;
+  /*
+    KẾT QUẢ XỬ LÝ và CÁI HẸN là hai chiều RỜI NHAU, cố ý.
+
+    "Xử lý sau hẹn tuần sau" và "Xử lý sau quá hẹn từ hôm qua" mang cùng một kết quả nhưng là hai
+    việc khác hẳn: một cái chưa tới lượt, một cái đang trễ. Gộp hai chiều vào một bộ lọc thì rổ nào
+    cũng trộn cả hai, và người trực lại phải đọc từng dòng — đúng thứ bộ lọc sinh ra để khỏi phải làm.
+  */
+  if (on("resolution") && f.resolution) {
+    const r = c.care.lastDecision?.decision ?? null;
+    if (f.resolution === "none" ? r !== null : r !== f.resolution) return false;
+  }
+  if (on("followUp") && f.followUp && followUpBucket(c.care.followUpAt, now) !== f.followUp) return false;
   if (on("sku") && !matchesSku(c, f.sku.trim().toLowerCase())) return false;
   if (on("q") && !matchesTerm(c, f.q.trim().toLowerCase())) return false;
   return true;
