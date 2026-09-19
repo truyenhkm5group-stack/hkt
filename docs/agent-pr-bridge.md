@@ -1,0 +1,124 @@
+# Cầu nối mở PR bằng danh tính agent
+
+*19/09/2026. Đi sau `docs/agent-github-identity.md` (Phase 2B.5) và `docs/main-protection.md`.*
+
+## 1 · Cái đang hỏng, đo được
+
+`required_approving_review_count` đã lên **1**. Nhưng mọi phiên Claude vẫn mở PR bằng tài khoản
+chủ shop:
+
+| Phép đo (19/09/2026) | Kết quả |
+| --- | --- |
+| 10 PR gần nhất | **9/10** mang `truyenhkm5group-stack` |
+| số phiên Claude khác nhau đã mở PR | **≥ 5** |
+| PR mang `erp-agent-vnx[bot]` | **đúng 1** — #24, do bộ chứng minh tự sinh nhánh của nó |
+| `GET /user` từ trong một phiên | `truyenhkm5group-stack` |
+| biến `ERP_AGENT_GITHUB_*` trong phiên | **không có** |
+
+GitHub **cấm tác giả tự duyệt PR của mình**. Chủ shop là collaborator duy nhất. Nên mọi PR do một
+phiên mở đều kẹt vĩnh viễn — đo được: **PR #26, cổng xanh, `mergeable_state: blocked`**.
+
+> Đây không phải lỗi của bản nâng cổng. Bản nâng cổng đúng. Thứ còn thiếu là **đường để phiên mở
+> PR dưới danh tính thứ hai**, và nó chưa bao giờ tồn tại.
+
+## 2 · Vòng tròn, và vì sao phải bootstrap
+
+```
+thêm cầu nối → phải merge → phải có PR → phiên mở PR dưới tài khoản chủ shop
+             → cổng đòi 1 duyệt → chủ shop không tự duyệt được → KHÔNG merge được
+```
+
+Vòng này **không tự phá được từ bên trong**. Nó cần đúng một lần can thiệp của người — xem mục 6.
+
+## 3 · Thiết kế
+
+```
+phiên Claude ──dispatch──▶ agent-open-pr.yml (trên main) ──App token──▶ POST /pulls
+                                   │
+                                   └──GITHUB_TOKEN (chỉ đọc)──▶ GET /pulls/N  ← đối chứng
+```
+
+`.github/workflows/agent-open-pr.yml` nhận bốn input: `head` · `base` · `title` · `body`.
+`scripts/agent-open-pr.ts` gọi `openAgentPullRequest()` của adapter đã có, rồi **đọc lại** PR bằng
+một credential khác.
+
+### Nhánh nguồn KHÔNG bao giờ được chạy
+
+Đây là trung tâm của thiết kế. Nhánh nguồn là **mã chưa ai review**. Cầu nối:
+
+- **không** `checkout` nhánh nguồn;
+- **không** chạy `npm`, `npx`, script hay bất cứ thứ gì của nó;
+- chỉ đưa tên nhánh vào trường `head` của một lời gọi API — một **chuỗi**, không phải mã.
+
+Và input **chỉ đi qua `env:`**, không bao giờ nội suy thẳng vào thân `run:` — nội suy là đường tiêm
+lệnh, vì tên nhánh do người gọi đặt và `$(...)` trong đó sẽ được shell chạy.
+
+### Quyền — không nới một ô nào
+
+| | |
+| --- | --- |
+| `GITHUB_TOKEN` của workflow | `contents: read` + `pull-requests: read`. **Không một quyền ghi nào** |
+| Quyền GitHub App | **không đổi** — `contents: write` + `pull_requests: write` đã đủ mở PR |
+| Gộp PR | **không có đường đi** trong adapter |
+| Duyệt PR | **không có đường đi** trong adapter |
+| `gates / gates` | **không đụng tới**, vẫn bắt buộc |
+| Người duyệt | vẫn là chủ shop |
+
+### Đối chứng bằng credential KHÁC
+
+Sau khi mở, script đọc lại PR bằng `GITHUB_TOKEN`, **không** bằng token App, và **thoát khác 0**
+nếu `user.login` không phải bot hoặc `user.type` không phải `Bot`.
+
+Hỏi lại chính cái token vừa ghi thì *"đã mở bằng bot"* và *"trông như đã mở bằng bot"* nhìn giống
+hệt nhau — đúng bài học mà bộ chứng minh danh tính đã phải trả giá để rút ra (nó từng dùng
+`git push` và phép đối chứng với token **rác** cũng thành công, vì môi trường tự tiêm credential
+của phiên).
+
+## 4 · Hàng rào chống dispatch từ nhánh chưa review
+
+Bước **đầu tiên** của workflow so `github.ref_name` với nhánh mặc định và `exit 1` nếu lệch — và
+nó đứng **trước** bước đọc secret. Kiểm sau khi đã đọc là không kiểm gì.
+
+> ⚠️ **Hàng rào này chặn nhầm lẫn, không chặn cố ý.** Nó nằm trong chính tệp workflow, nên ai sửa
+> được tệp trên một nhánh thì cũng xoá được dòng kiểm ấy rồi dispatch nhánh đó.
+
+### Hàng rào cứng — nên làm, không chặn bản này
+
+Chuyển ba secret `ERP_AGENT_GITHUB_*` vào một **Environment** (ví dụ `agent-identity`) có
+*deployment branch policy* chỉ cho `main`, rồi thêm `environment: agent-identity` vào job. Lượt
+chạy từ nhánh khác sẽ **không đọc được secret** — thất bại **ĐÓNG**, không phụ thuộc vào nội dung
+một tệp mà agent sửa được.
+
+**Đây là một lỗ hổng có từ trước, không phải do bản này sinh ra.** Hôm nay `ops-vps.yml` và
+`deploy-vps.yml` cũng dispatch được với `ref` là một nhánh đã sửa — tức là mã chưa review chạy được
+với khoá SSH của VPS và token GHCR. Environment đóng được cả ba chỗ cùng lúc.
+
+## 5 · Bài kiểm
+
+`tests/agent-pr-bridge.test.ts` quét **mã nguồn**, vì `tsc` và `eslint` không nhìn thấy một *sự
+vắng mặt*: thêm một dòng `fetch` là mở một đường mới mà mọi cổng khác vẫn xanh.
+
+Bảy khối: không `/merge` · không `/reviews` · không chạm cấu hình kho · không checkout hay chạy mã
+nhánh nguồn (và input chỉ đi qua `env:`) · phép kiểm nhánh đứng trước bước đọc secret ·
+`GITHUB_TOKEN` không có quyền ghi · đối chứng bằng credential khác và sai thì đỏ · luật nhánh dùng
+lại `assertAgentBranch` thay vì chép.
+
+## 6 · Việc của người — đúng MỘT thao tác
+
+Vòng tròn ở mục 2 chỉ phá được bằng một lần can thiệp:
+
+> **Chủ shop thêm một tài khoản GitHub thứ hai làm collaborator quyền `write`.**
+
+Tài khoản đó duyệt PR bootstrap này (PR do `truyenhkm5group-stack` mở, nên chính chủ shop không tự
+duyệt được). Merge xong thì cầu nối nằm trên `main`, và **từ đó mọi PR của mọi phiên đi qua bot** —
+chủ shop tự duyệt được chúng, không cần tài khoản thứ hai nữa.
+
+*Phương án thay thế:* chủ shop tự mở PR bootstrap bằng App (họ giữ khoá riêng). Sửa đúng lần này,
+không sửa gốc — nhưng cũng đủ để merge cầu nối.
+
+## 7 · Sau khi merge — nghiệm thu
+
+1. Dispatch `agent-open-pr.yml` với `head` của một nhánh thật.
+2. `GET /pulls/N` → `user.login` phải là **`erp-agent-vnx[bot]`**, `user.type` = `Bot`.
+3. **Đối chứng âm:** không PR mới nào của phiên còn mang `truyenhkm5group-stack`.
+4. Chỉ khi cả ba đạt mới coi phần danh tính là xong.
