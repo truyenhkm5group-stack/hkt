@@ -178,6 +178,31 @@ cũ — `reason_tags` đã lưu chuỗi, đổi tên là làm mồ côi những 
 
 ---
 
+## Triển khai bản vá phân trang
+
+Ảnh dựng từ `0601c4b` (run **35444897935**) · ứng dụng run **35445476826** · dựng lại bộ nạp
+run **35445790333**.
+
+**Bằng chứng bộ nạp đang chạy mã mới:** ô `last_error` của bộ nạp nay là `—`. Trước lượt triển
+khai nó mang câu "Pancake lặp lại trang một — mẻ này chỉ lấy được 60 hội thoại, CHƯA phải toàn bộ
+cửa sổ", tức lưới an toàn đang bật. Vòng 13:27:18 chạy sạch, và `tin_da_nap` nhích 6.868 → 6.874.
+
+**An toàn sau triển khai** (log bộ nạp 13:27:11): nấc `COPILOT` · MÁY tự gửi ✓ CẤM · tạo đơn ✓
+CẤM · `clampMode("AUTO")` vẫn ra `COPILOT` · đếm thẳng CSDL: 0 gợi ý đã gửi, 0 tin do AI gửi.
+
+**ĐIỀU CHƯA CHỨNG MINH ĐƯỢC, và không được làm tròn thành đã chứng minh:** các vòng chạy sau khi
+triển khai đều dùng cửa sổ 1 giờ và cửa sổ ấy hiện chỉ có 30 hội thoại — DƯỚI trần 60, nên một
+lời gọi là đủ và phép phân trang KHÔNG bị chạm tới. Việc `last_error` sạch vì thế là tin tốt
+nhưng CHƯA phải bằng chứng: một cửa sổ 30 hội thoại thì bản CŨ cũng không báo lặp.
+
+Phép đo dứt khoát còn thiếu là **một mẻ nạp thật trên cửa sổ có hơn 60 hội thoại, lấy về hơn 60**.
+Bản thân tham số đã được chứng minh bằng đo trực tiếp (bảng ở §P3: trùng 0, duy nhất 100) và bằng
+bài kiểm hành vi; thứ còn thiếu là nhìn thấy nó xảy ra trong chính đường nạp. Đó là việc đầu tiên
+của lần sau, và nó rẻ: chạy `ai-staging-ingest --hours=24` vào giờ có nhiều hội thoại rồi đọc số
+hội thoại lấy được.
+
+---
+
 ## Cổng quyết định
 
 # KEEP SHADOW
@@ -190,7 +215,7 @@ Cổng đòi bảy điều. Bốn đã đạt, ba chưa:
 | Không còn lỗi an toàn nghiêm trọng chưa vá | ✓ bảy lỗi phiên sáng đã vá và khoá bằng bài kiểm |
 | Hồi quy xanh | ✓ 9/9 · toàn bộ `npm test` đạt |
 | Bịa đặt nghiêm trọng = 0 sau khi vá | ✗ **chưa đo được ở mức người chấm** — 0 cờ máy không phải 0 lỗi người |
-| Nạp Pancake không bỏ sót vì phân trang | ✓ đã tìm đúng `current_count` và vá; **chờ xác minh trên dữ liệu sống sau lượt triển khai kế** |
+| Nạp Pancake không bỏ sót vì phân trang | ◐ đã tìm đúng `current_count`, đã vá, đã triển khai và bộ nạp chạy sạch — nhưng **chưa có mẻ nào chạm trần 60 sau khi vá**, nên đường nạp chưa được nhìn thấy lấy quá 60 |
 | Lý do chuyển người lưu đúng | ◐ **một nửa** — bài kiểm chứng minh, dữ liệu sống chưa chạm được đường đã hỏng (xem P5) |
 | Danh mục không bịa | ✗ chưa có người chấm để nói |
 
