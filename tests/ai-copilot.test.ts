@@ -5,7 +5,8 @@ import { schema, type Db } from "@/db";
 import { confirmCopilotActions, runCopilot } from "@/lib/ai/copilot";
 import { actionToken, stableStringify } from "@/lib/ai/policy";
 import { COPILOT_SYSTEM_PROMPT } from "@/lib/ai/prompt";
-import { anthropicCapsOf, ANTHROPIC_DECLARED_MODELS, estimateCostUsd, FakeProvider, TIMEOUT_BY_TIER, type AiResponse } from "@/lib/ai/provider";
+import { anthropicCapsOf, ANTHROPIC_DECLARED_MODELS, AnthropicProvider, estimateCostUsd, FakeProvider, TIMEOUT_BY_TIER, type AiResponse } from "@/lib/ai/provider";
+import { ANTHROPIC_UNSUPPORTED_KEYWORDS, findUnsupportedKeywords, toDialectSchema } from "@/lib/ai/schema-dialect";
 import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { registerCareTools } from "@/lib/ai/tools/care";
 import { registerErpTools } from "@/lib/ai/tools/erp";
@@ -305,6 +306,114 @@ export async function testAiCopilot(db: Db) {
     delete process.env.OPENAI_API_KEY;
   }
 
+
+  /* ───────── 4c. PHƯƠNG NGỮ SCHEMA: MỘT hợp đồng tool, HAI cách serialize ─────────
+
+     ĐÃ ĐO THẬT trên production 19/09/2026 (provider `anthropic`, một lượt Copilot có tool):
+
+         400 tools.2.custom: For 'integer' type, properties maximum, minimum are not supported
+
+     `tools.2` là `search_care_cases` — tool ĐẦU TIÊN có một ô số nguyên mang `minimum`/`maximum`.
+     AI CTO gọi model với `tools: []` nên nó không dính, và vì thế lỗi trông như "chỉ Copilot hỏng"
+     trong khi nguyên nhân nằm ở lớp serialize dùng chung.
+
+     Bài kiểm này khoá ba điều, và điều thứ ba mới là điều đáng giá:
+       1. đường Anthropic KHÔNG còn khoá nào `strict` từ chối;
+       2. đường OpenAI KHÔNG bị đổi một byte nào (sửa bên hỏng, không sửa bên đang chạy);
+       3. RÀNG BUỘC NGHIỆP VỤ VẪN CHẶN — vì nó chưa bao giờ nằm ở model. Nếu ai đó "chữa" lỗi 400
+          bằng cách nới `z.number().int()` ra khỏi `.min()/.max()`, ba assertion cuối sẽ đỏ. */
+  {
+    const thoSchema = (name: string) => strictInputSchema(allTools().find((t) => t.name === name)!.input);
+
+    // Phương ngữ là một HÀM THUẦN: chạy hai lần ra đúng một chuỗi ⇒ đệm prompt không vỡ.
+    const s1 = JSON.stringify(toDialectSchema(thoSchema("search_care_cases"), "anthropic"));
+    const s2 = JSON.stringify(toDialectSchema(thoSchema("search_care_cases"), "anthropic"));
+    assert.equal(s1, s2, "serialize hai lần phải ra cùng một chuỗi — nếu không, đệm prompt vỡ mỗi lượt");
+
+    // Đường OpenAI: KHÔNG đổi một byte nào, với MỌI tool.
+    for (const t of allTools()) {
+      const tho = strictInputSchema(t.input);
+      assert.deepEqual(toDialectSchema(tho, "openai"), tho, `${t.name}: phương ngữ OpenAI không được đổi schema`);
+    }
+    // Tool không mang ràng buộc nào ⇒ hai phương ngữ ra y hệt nhau (không "đổi semantics" oan).
+    for (const name of ["get_care_queue_summary", "get_data_freshness", "get_profit_summary", "get_cash_position", "get_owner_brief"]) {
+      const tho = thoSchema(name);
+      assert.equal(findUnsupportedKeywords(tho).length, 0, `${name}: tool này vốn không có ràng buộc schema`);
+      assert.deepEqual(toDialectSchema(tho, "anthropic"), tho, `${name}: tool không liên quan không được đổi`);
+    }
+
+    // ── Đường dây THẬT của Anthropic: bắt đúng body gửi lên (fetch giả, không mạng) ──
+    const thayAnthropic: { url: string; body: Record<string, unknown> }[] = [];
+    const fetchAnthropic = (async (url: string | URL | Request, init?: RequestInit) => {
+      thayAnthropic.push({ url: String(url), body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
+      return new Response(
+        JSON.stringify({ id: "msg_dialect", type: "message", role: "assistant", model: "claude-opus-5", content: [{ type: "text", text: "ok" }], stop_reason: "end_turn", stop_sequence: null, usage: { input_tokens: 12, output_tokens: 3 } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+    const hadKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test-khong-that";
+    try {
+      const an = new AnthropicProvider("claude-opus-5", "medium", 5_000, 0, fetchAnthropic);
+      assert.equal(an.schemaDialect, "anthropic");
+      const rDialect = await runCopilot({ user: cs, provider: an, message: "Còn kiện nào quá hạn?", context: ctx });
+      assert.equal(rDialect.status, "OK", JSON.stringify(rDialect));
+      assert.equal(thayAnthropic.length, 1, "phải gửi đúng một lượt");
+      const wire = thayAnthropic[0]!.body;
+      const wireTools = wire.tools as { name: string; input_schema: Record<string, unknown>; strict: boolean }[];
+
+      // 1. Không còn khoá nào `strict` của Anthropic từ chối — trên TOÀN BỘ danh sách tool.
+      assert.deepEqual(findUnsupportedKeywords(wireTools), [], "schema gửi cho Anthropic còn khoá không được hỗ trợ");
+      assert.ok(wireTools.every((t) => t.strict === true), "strict phải còn bật — nó là thứ làm schema có nghĩa");
+
+      // 2. Đúng cái tool đã làm production đỏ: integer còn nguyên KIỂU, mất RÀNG BUỘC, và ràng
+      //    buộc ấy được nói lại bằng chữ để model vẫn gõ đúng ngay lần đầu.
+      const search = wireTools.find((t) => t.name === "search_care_cases")!;
+      const props = search.input_schema.properties as Record<string, Record<string, unknown>>;
+      assert.equal(props.limit!.type, "integer", "kiểu số nguyên phải được giữ");
+      assert.equal(props.limit!.minimum, undefined);
+      assert.equal(props.limit!.maximum, undefined);
+      assert.match(String(props.limit!.description), /tối thiểu 1/, "ràng buộc bị gỡ phải được nói lại thành chữ");
+      assert.match(String(props.limit!.description), /tối đa 50/);
+
+      // 3. Phần CÒN LẠI của schema không được sứt mẻ: khoá bắt buộc, enum, anyOf lồng, mảng.
+      assert.equal(search.input_schema.additionalProperties, false, "vẫn phải chặn khoá lạ");
+      assert.deepEqual([...(search.input_schema.required as string[])].sort(), Object.keys(props).sort(), "không được mất khoá bắt buộc nào");
+      const careStatus = props.careStatus!.anyOf as { type: string; enum?: string[] }[];
+      assert.equal(careStatus.length, 2, "anyOf lồng (giá trị hoặc null) phải còn nguyên");
+      assert.ok(careStatus[0]!.enum!.includes("WAITING_CARRIER"), "enum không được mất");
+      const ownerName = props.ownerName!.anyOf as Record<string, unknown>[];
+      assert.equal(ownerName[0]!.type, "string");
+      assert.equal(ownerName[0]!.maxLength, undefined, "ràng buộc trong nhánh anyOf cũng phải được gỡ");
+      const assign = wireTools.find((t) => t.name === "assign_care_case")!;
+      const ids = (assign.input_schema.properties as Record<string, Record<string, unknown>>).shipmentIds!;
+      assert.equal(ids.type, "array");
+      assert.equal((ids.items as Record<string, unknown>).type, "string", "schema của phần tử mảng phải còn");
+      assert.equal(ids.minItems, undefined);
+      assert.match(String(ids.description), /ít nhất 1 phần tử/);
+    } finally {
+      if (hadKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = hadKey;
+    }
+
+    /* ── MÁY CHỦ MỚI LÀ NƠI XÁC MINH, KHÔNG PHẢI MODEL ──
+       Gỡ `minimum`/`maximum` khỏi schema gửi cho model KHÔNG nới một luật nào: zod vẫn chạy ở máy
+       chủ trước `tool.run()`. Ba lượt dưới đây gửi đúng những giá trị mà schema không còn cấm. */
+    const duoiMin = new FakeProvider([() => use("search_care_cases", { query: null, view: null, ownerName: null, careStatus: null, limit: 0 }), () => text("xong")]);
+    const rMin = await runCopilot({ user: cs, provider: duoiMin, message: "Tìm 0 kiện", context: ctx });
+    assert.equal(rMin.toolCalls[0]!.executed, false, "limit dưới ngưỡng phải bị MÁY CHỦ chặn, không được chạy");
+    assert.equal(rMin.toolCalls[0]!.summary, "Input sai");
+
+    const tremMax = new FakeProvider([() => use("search_care_cases", { query: null, view: null, ownerName: null, careStatus: null, limit: 999 }), () => text("xong")]);
+    const rMax = await runCopilot({ user: cs, provider: tremMax, message: "Tìm 999 kiện", context: ctx });
+    assert.equal(rMax.toolCalls[0]!.executed, false, "limit trên ngưỡng phải bị MÁY CHỦ chặn, không được chạy");
+    assert.equal(rMax.toolCalls[0]!.summary, "Input sai");
+
+    const hopLe = new FakeProvider([() => use("search_care_cases", { query: null, view: null, ownerName: null, careStatus: null, limit: 5 }), () => text("xong")]);
+    const rOk = await runCopilot({ user: cs, provider: hopLe, message: "Tìm 5 kiện", context: ctx });
+    assert.ok(rOk.toolCalls[0]!.executed && rOk.toolCalls[0]!.ok, "số nguyên hợp lệ vẫn phải chạy được");
+  }
+
   // ───────── 5. Benchmark: chi phí vòng lặp (không mạng) và ước tính tiền ─────────
   const lat: number[] = [];
   for (let i = 0; i < 12; i += 1) {
@@ -327,6 +436,6 @@ export async function testAiCopilot(db: Db) {
   assert.equal(estimateCostUsd("gpt-5.6-terra", typical), null, "model chưa có giá ⇒ chi phí CHƯA BIẾT, không phải 0");
 
   console.log(
-    `✓ AI Copilot (Anthropic + OpenAI Responses, router 3 bậc): ${tools.length} tool (${tools.filter((t) => t.kind === "read").length} đọc · ${tools.filter((t) => t.kind === "write" && t.policy === "confirm").length} ghi-cần-xác-nhận · ${tools.filter((t) => t.policy === "forbidden").length} cấm) · ghi chỉ chạy sau xác nhận, có token, không chạy lại · vòng lặp p50 ${p50.toFixed(0)}ms p95 ${p95.toFixed(0)}ms (không mạng) · ước ~${promptTokens} token prompt+tool, hồ sơ kiện ~${caseTokens} token · một lượt tóm tắt ≈ $${costCold.toFixed(4)} lạnh / $${costWarm.toFixed(4)} có đệm`,
+    `✓ AI Copilot (Anthropic + OpenAI Responses, router 3 bậc): ${tools.length} tool (${tools.filter((t) => t.kind === "read").length} đọc · ${tools.filter((t) => t.kind === "write" && t.policy === "confirm").length} ghi-cần-xác-nhận · ${tools.filter((t) => t.policy === "forbidden").length} cấm) · ghi chỉ chạy sau xác nhận, có token, không chạy lại · vòng lặp p50 ${p50.toFixed(0)}ms p95 ${p95.toFixed(0)}ms (không mạng) · ước ~${promptTokens} token prompt+tool, hồ sơ kiện ~${caseTokens} token · một lượt tóm tắt ≈ $${costCold.toFixed(4)} lạnh / $${costWarm.toFixed(4)} có đệm · 2 phương ngữ schema: Anthropic gỡ ${ANTHROPIC_UNSUPPORTED_KEYWORDS.length} khoá strict không nhận (ràng buộc nói lại thành chữ, zod vẫn chặn ở máy chủ), OpenAI nguyên vẹn`,
   );
 }

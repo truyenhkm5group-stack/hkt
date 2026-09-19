@@ -204,6 +204,7 @@ import { testSessionRenewal } from "./session-renewal.test";
 import { testReportingParity } from "./reporting-parity.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
+import { testAgentGithubIdentityModule } from "./agent-identity.test";
 import {
   testClassifierNeverConcludesForCarrier,
   testClassifierStepsAndCodes,
@@ -1810,6 +1811,7 @@ async function main() {
   await testTechWorkProjection();
   await testAgentRunner();
   await testPhase2aBarriers();
+  await testAgentGithubIdentityModule();
   await testCtoProposal();
   await testWorkforce(db);
   await testOrgMembership(db);

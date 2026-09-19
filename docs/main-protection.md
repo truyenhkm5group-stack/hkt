@@ -207,3 +207,62 @@ kho (mục 0), và phép đo #1 cho thấy nó cũng không đẩy thẳng đư�
 Với nhiều phiên chạy song song, `main` nhảy liên tục: PR #12 phải nhập lại `main` **ba lần** và
 chạy lại cổng mỗi lần. Đó là cái giá đúng của `strict`, không phải lỗi — nhưng nếu nhịp merge tăng
 thì nên xem **merge queue** của GitHub.
+
+---
+
+# PHỤ LỤC 2 · 19/09/2026 (chiều) — ĐỌC ĐƯỢC RULESET THẬT, SUY LUẬN Ở PHỤ LỤC 1 ĐÚNG
+
+Phụ lục 1 khép lại bằng một cảnh báo: *"Agent **không đọc được** ruleset đang áp… Nên đây là
+**suy luận**, không phải quan sát trực tiếp."* Lượt đo dưới đây làm câu đó hết đúng — và xác nhận
+suy luận từng chữ. **Bằng chứng sự cố ban đầu ở phụ lục 1 giữ nguyên, không sửa một dòng nào.**
+
+## A · Phép đo
+
+```
+GET /repos/truyenhkm5group-stack/hkt/rulesets            → 200 · [{ id: 23697012, "Khoá nhánh main", enforcement: active }]
+GET /repos/truyenhkm5group-stack/hkt/rulesets/23697012   → 200
+```
+
+| Luật | ĐANG CHẠY | `.github/rulesets/main-protection.json` (bản khai) |
+|---|---|---|
+| `required_approving_review_count` | **0** | 1 |
+| `dismiss_stale_reviews_on_push` | **false** | true |
+| `require_last_push_approval` | **false** | true |
+| `required_review_thread_resolution` | true | true |
+| `required_status_checks` | `gates / gates` · `strict: true` | như vậy |
+| `bypass_actors` | **`[]`** | `[]` |
+| `current_user_can_bypass` | **`never`** | — |
+| `deletion` · `non_fast_forward` | chặn | chặn |
+
+## B · Ba điều rút ra
+
+1. **Suy luận ở mục C của phụ lục 1 đúng.** Số duyệt bắt buộc là **0**, và **không có bypass
+   actor nào**. Agent merge được PR của chính nó không phải vì có cửa sau — mà vì cổng duyệt đang
+   đặt ở mức không cấm gì. Hai phép đo trái ngược nhau ở phụ lục 1 (đẩy thẳng bị từ chối nhưng
+   merge thì được) khớp trọn vẹn với cấu hình này.
+2. **Bản khai trong kho KHÁC ruleset thật.** Tệp là thứ người ta đọc, ruleset là thứ chạy. Từ nay
+   mọi câu về khoá `main` phải kèm một lượt `GET /rulesets/23697012` — **đừng trích tệp**.
+   Cũng vì vậy mục 0 của tài liệu này (*"không có ruleset nào"*, `rulesets → []`) là ảnh chụp lúc
+   **trước** khi admin áp, không phải hiện trạng.
+3. **Vẫn chưa được nâng số duyệt lên 1.** Lý do ở mục D của phụ lục 1 không đổi một chữ: một danh
+   tính thì 0 là vô hiệu, 1 là kho tự khoá chết.
+
+## C · Việc đang chạy để có nấc giữa
+
+Phương án 1 ở mục F của phụ lục 1 (**GitHub App `erp-agent`**) đã được triển khai ở phần mã:
+`lib/integrations/github/agent-identity.ts` + `tests/agent-identity.test.ts`. Phần còn lại —
+tạo App — **bắt buộc đi qua trình duyệt của một NGƯỜI**, và đó là điều đúng đắn: một danh tính
+thứ hai mà agent tự tạo được thì không phải danh tính thứ hai.
+
+**Các bước chính xác chủ shop phải bấm, và đúng bốn ô ruleset phải sửa SAU ĐÓ, nằm ở
+`docs/agent-github-identity.md`.** Thứ tự không đảo được: danh tính trước, khoá sau.
+
+## D · Sửa lại bảng ở mục H của phụ lục 1
+
+| Hành vi | Trạng thái (đo 19/09/2026 chiều) |
+| --- | --- |
+| đọc ruleset | ✅ **đọc được** (khác phụ lục 1 — proxy chỉ chặn GHI) |
+| sửa protection / ruleset | ⚠️ chưa đo lại lượt GHI. Sẽ đo đúng một lần ở bước nâng cổng, không đo bằng cách thử phá |
+| force push / xoá `main` | ✅ chặn — ruleset (`non_fast_forward`, `deletion`) |
+| đẩy thẳng `main` | ✅ chặn — ruleset (đo ở phụ lục 1) |
+| **merge PR của chính nó** | ❌ **KHÔNG CHẶN** — `required_approving_review_count: 0`, nay đã đọc thẳng từ ruleset |
