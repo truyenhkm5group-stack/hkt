@@ -1,0 +1,68 @@
+# ═══════════ AI CTO LẬP KẾ HOẠCH — CHỈ ĐỀ NGHỊ, KHÔNG TẠO VIỆC ═══════════
+#
+# Actions → "AI CTO lập kế hoạch" → Run workflow.
+#
+# Cùng lý do đặt ở máy Actions như `agent-run.yml`: nó cần kho git, Node/npm và một khoá AI, còn
+# container production chạy một bản Next.js ĐÃ DỰNG và không nên có ba thứ đó.
+#
+# HẬU QUẢ PHẢI NÓI RA: máy Actions không nối được tới PostgreSQL production (nó nằm sau mạng docker
+# của VPS) — và đó là ĐÚNG. Nên bản đề xuất của lượt chạy này nằm ở CSDL PGlite dùng-một-lần và
+# được XUẤT ra thành hiện vật. Nó là một lượt gọi model THẬT với một bản kế hoạch THẬT đã qua zod,
+# nhưng nó KHÔNG hiện ở `/tech/cto` trên production.
+#
+# WORKFLOW NÀY KHÔNG BAO GIỜ: duyệt kế hoạch, tạo việc thật, bật một vai viết mã, đẩy nhánh nào,
+# merge, deploy, hay chạm production.
+name: AI CTO lập kế hoạch
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tech-cto-plan
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Cài phụ thuộc
+        run: npm ci
+
+      # KHÔNG in giá trị khoá, và cũng không in độ dài — chỉ CÓ / KHÔNG. Kho mã này PUBLIC.
+      - name: Kiểm khoá AI
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::error::CONFIG_REQUIRED — kho chưa có Secret ANTHROPIC_API_KEY (hoặc OPENAI_API_KEY)."
+            echo "Đây KHÔNG phải lỗi của AI CTO: nó chưa từng chạy."
+            exit 1
+          fi
+          echo "ANTHROPIC_API_KEY: $([ -n "${ANTHROPIC_API_KEY:-}" ] && echo 'có' || echo 'không')"
+
+      - name: AI CTO lập kế hoạch (KHÔNG tạo việc thật)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Ghim nhà cung cấp cho máy runner — KHÔNG để một thứ tự ưu tiên ngầm quyết định.
+          # Tên biến cố ý khác `AI_PROVIDER` của production.
+          AI_PROVIDER: ${{ vars.AI_PROVIDER_AGENT || 'anthropic' }}
+          DATABASE_URL: pglite://./data/cto-ci-db
+        run: npm run --silent cto:proof -- --actor "github:${{ github.actor }}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bang-chung-cto
+          path: bang-chung-cto.json
+          if-no-files-found: warn
