@@ -57,6 +57,23 @@ function arr(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? (value.filter((v) => v && typeof v === "object") as Record<string, unknown>[]) : [];
 }
 
+/*
+  SỔ PHÁT HIỆN — mã thoát quyết ở CUỐI, không ở chỗ phát hiện đầu tiên.
+
+  Lượt chạy 19/09/2026 thoát ngay tại khối phân trang, nên năm khối sau nó (tin nhắn, mã trùng,
+  thứ tự thời gian, đính kèm, danh tính người gửi) KHÔNG chạy. Một bài kiểm dừng ở phát hiện đầu
+  tiên buộc người đọc phải sửa xong cái thứ nhất mới biết còn cái thứ hai hay không — và với một
+  bài kiểm gọi API thật, mỗi lượt như thế tốn một vòng triển khai. Chạy hết, rồi mới kết luận.
+
+  Vẫn còn lối THOÁT SỚM, nhưng chỉ cho những thứ làm mọi khối sau mất nghĩa: không có chứng thư,
+  không có mã page, không liệt kê được page, không đọc nổi một hội thoại nào.
+*/
+const PHAT_HIEN: string[] = [];
+function ghiLoi(cau: string) {
+  PHAT_HIEN.push(cau);
+  console.error(`  ✗ ${cau}`);
+}
+
 async function main() {
   const pageId = arg("page") || env.pancake.pageId;
   const hours = Number(arg("hours")) || 24;
@@ -189,8 +206,7 @@ async function main() {
     if (ds2.length === 0) {
       console.log("  ✓ trang 2 rỗng — page này ít hội thoại hơn một trang, phân trang không kết luận được.");
     } else if (trung === ds2.length) {
-      console.error("  ✗ TRANG 2 LẶP LẠI TRANG 1 — phân trang KHÔNG chạy. Lượt nạp sẽ không bao giờ đi quá trang đầu.");
-      process.exit(1);
+      ghiLoi("TRANG 2 LẶP LẠI TRANG 1 — phân trang KHÔNG chạy. Lượt nạp sẽ không bao giờ đi quá trang đầu.");
     } else if (trung > 0) {
       // Chồng lấn một phần là BÌNH THƯỜNG khi sắp theo `updated_at`: hội thoại có tin mới nhảy
       // trang giữa hai lời gọi. Đường nạp chống trùng bằng mã tin nên nó không đẻ ra bản sao.
@@ -198,6 +214,84 @@ async function main() {
     } else {
       console.log("  ✓ phân trang chạy, hai trang không trùng mã nào.");
     }
+  }
+
+  /*
+    ── 2c. `page_size` CÓ ĐƯỢC TÔN TRỌNG KHÔNG, VÀ 60 LÀ TRẦN HAY LÀ TOÀN BỘ? ──
+
+    Hai câu hỏi này quyết định phân trang hỏng có TỐN DỮ LIỆU hay không, và không câu nào suy ra
+    được từ câu kia:
+
+      · Xin 20 mà nhận 60 ⇒ tham số bị BỎ QUA. Lượt nạp xin 50 cũng sẽ nhận 60, tức điều kiện dừng
+        `list.length < 50` không bao giờ đúng ⇒ nó chạy đủ hai mươi vòng, mỗi vòng nhận lại y
+        nguyên trang một. Hai mươi lời gọi cho một trang dữ liệu, và hạn mức Pancake phải gánh.
+      · Nới cửa sổ thời gian mà số hội thoại KHÔNG đổi ⇒ 60 là TRẦN CỨNG, và phần vượt trần không
+        có đường nào lấy được bằng bộ tham số hiện tại ⇒ MẤT DỮ LIỆU THẬT.
+      · Nới cửa sổ mà số hội thoại TĂNG ⇒ máy chủ trả trọn cửa sổ trong một lần, phân trang chỉ là
+        thừa chứ không làm mất gì. Cùng một triệu chứng, hai hậu quả khác hẳn nhau.
+
+    Không có phép đo này thì "phân trang hỏng" là một câu báo động chưa biết nặng nhẹ ra sao.
+  */
+  console.log("\n───────── 2c. TRẦN DỮ LIỆU ─────────");
+  console.log(`  xin page_size=20   : nhận ${conversations.length}${conversations.length !== 20 ? "  ⚠ Pancake BỎ QUA page_size" : ""}`);
+  const cuaSo = [1, hours, 24 * 30];
+  const demTheoCuaSo: { gio: number; n: number }[] = [];
+  for (const gio of cuaSo) {
+    const r = await get(`pages/${pageId}/conversations`, {
+      [key]: token, since: until - gio * 3600, until, page_number: 1, page_size: 20, order_by: "updated_at",
+    });
+    const n = r.status >= 400 ? -1 : arr(r.body.conversations ?? (r.body.data as Record<string, unknown>)?.conversations ?? r.body.data).length;
+    demTheoCuaSo.push({ gio, n });
+    console.log(`  cửa sổ ${String(gio).padStart(4)} giờ  : ${n < 0 ? `HTTP ${r.status}` : n} hội thoại`);
+  }
+  const hopLeCuaSo = demTheoCuaSo.filter((x) => x.n >= 0);
+  const max = Math.max(...hopLeCuaSo.map((x) => x.n), 0);
+  const min = Math.min(...hopLeCuaSo.map((x) => x.n), Number.POSITIVE_INFINITY);
+  if (hopLeCuaSo.length >= 2 && max === min && max > 0) {
+    ghiLoi(`MỌI CỬA SỔ ĐỀU TRẢ ĐÚNG ${max} — ${max} là TRẦN CỨNG, không phải toàn bộ dữ liệu. Phần vượt trần KHÔNG có đường lấy.`);
+  } else if (max > min) {
+    console.log(`  ✓ cửa sổ có tác dụng (${min} → ${max}) — máy chủ trả theo khoảng thời gian, không kẹt ở một trần cố định.`);
+  }
+
+  /*
+    ── 2d. CÓ THAM SỐ NÀO THẬT SỰ SANG TRANG KHÔNG? ──
+
+    `page_number` bị bỏ qua không có nghĩa là API không phân trang được — có thể nó đặt tên khoá
+    khác. Dò từng tên, CHỈ GỌI GET, và so MÃ HỘI THOẠI ĐẦU TIÊN: khoá nào làm đổi mã đầu tiên thì
+    khoá ấy đang thật sự dịch cửa sổ. Không dò thì bản vá sẽ là đoán, và đoán sai một tên tham số
+    thì lượt nạp vẫn đọc lại trang một — y như hôm nay, chỉ khác là lần này có người tin nó đã sửa.
+  */
+  console.log("\n───────── 2d. DÒ TÊN THAM SỐ PHÂN TRANG ─────────");
+  const maDau = String(conversations[0]?.id ?? "");
+  const maCuoi = String(conversations[conversations.length - 1]?.id ?? "");
+  const ungVien: Record<string, string | number>[] = [
+    { page: 2 },
+    { offset: conversations.length },
+    { skip: conversations.length },
+    { current_count: conversations.length },
+    { last_conversation_id: maCuoi },
+    { after: maCuoi },
+  ];
+  let daTimRa = "";
+  for (const tham of ungVien) {
+    const ten = Object.keys(tham)[0];
+    const r = await get(`pages/${pageId}/conversations`, {
+      [key]: token, since, until, page_size: 20, order_by: "updated_at", ...tham,
+    });
+    if (r.status >= 400) {
+      console.log(`  ${ten.padEnd(22)} → HTTP ${r.status} (tham số không được chấp nhận)`);
+      continue;
+    }
+    const ds = arr(r.body.conversations ?? (r.body.data as Record<string, unknown>)?.conversations ?? r.body.data);
+    const doiTrang = ds.length > 0 && String(ds[0].id ?? "") !== maDau;
+    console.log(`  ${ten.padEnd(22)} → ${ds.length} hội thoại · mã đầu ${doiTrang ? "ĐỔI ✓" : "y nguyên"}`);
+    if (doiTrang && !daTimRa) daTimRa = ten;
+  }
+  if (daTimRa) {
+    console.log(`  ⇒ \`${daTimRa}\` LÀ tham số phân trang thật. Sửa \`PancakePagesClient.listConversations\` sang khoá này.`);
+  } else {
+    console.log("  ⇒ KHÔNG tên nào trong sáu tên dịch được cửa sổ. Chưa kết luận API không phân trang được —");
+    console.log("    mới chỉ kết luận sáu tên này không phải. Phải hỏi tài liệu / hỗ trợ Pancake.");
   }
 
   // ── 3. ĐỌC TIN NHẮN ──
@@ -213,10 +307,9 @@ async function main() {
     page_size: 10,
   });
   if (msg.status >= 400) {
-    console.error(`  ✗ HTTP ${msg.status} — đọc được hội thoại nhưng KHÔNG đọc được tin nhắn.`);
+    ghiLoi(`HTTP ${msg.status} — đọc được hội thoại nhưng KHÔNG đọc được tin nhắn.`);
     const why = msg.body.message ?? msg.body.error ?? msg.body.reason;
     if (why) console.error(`    Pancake nói: ${String(why)}`);
-    process.exit(1);
   }
   const messages = arr(msg.body.messages ?? (msg.body.data as Record<string, unknown>)?.messages ?? msg.body.data);
   console.log(`  ✓ Đọc được         : ${messages.length} tin trong hội thoại ${String(first.id)}`);
@@ -267,8 +360,15 @@ async function main() {
   }
 
   console.log("\n───────── KẾT LUẬN ─────────");
-  console.log(`  Page ${pageId}${pageName ? ` (${pageName})` : ""}: ĐỌC ĐƯỢC hội thoại và tin nhắn.`);
+  console.log(`  Page ${pageId}${pageName ? ` (${pageName})` : ""}: quyền ĐỌC đạt — hội thoại và tin nhắn đều lấy được.`);
   console.log("  Không một lời gọi GHI nào được thực hiện trong bài kiểm này.");
+  if (PHAT_HIEN.length) {
+    // QUYỀN ĐỌC ĐẠT và ĐƯỜNG NẠP ĐÚNG là hai câu khác nhau. Gộp chúng thành một chữ "hỏng" thì
+    // người đọc đi kiểm lại token — đúng cái duy nhất đang tốt.
+    console.log(`\n  NHƯNG còn ${PHAT_HIEN.length} phát hiện về ĐƯỜNG NẠP, không phải về quyền đọc:`);
+    for (const c of PHAT_HIEN) console.log(`    · ${c}`);
+    process.exit(1);
+  }
 }
 
 main().catch((error) => {
