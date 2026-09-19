@@ -12,7 +12,9 @@ import { resolveProduct } from "@/lib/ai-workforce/agents/sales/resolve-product"
 import { POLICY_BY_SOURCE, TEST_REPLY_DEFAULTS } from "@/lib/constants/fanpage-sales";
 import { runShadowBenchmark } from "@/lib/queries/shadow-benchmark";
 import { generateTestReply, testIntentOf } from "@/lib/ai-workforce/agents/sales/generate-test";
-import { discoverKnowledgeGaps, loadTestKnowledge, loadWinKnowledge } from "@/lib/queries/sales-knowledge";
+import { discoverKnowledgeGaps, listWinSizes, loadSizeRows, loadTestKnowledge, loadWinKnowledge } from "@/lib/queries/sales-knowledge";
+import { listFanpages, listSourceLines, listTestProducts } from "@/lib/queries/fanpage-sales";
+import { listProductChoices } from "@/lib/queries/sales-ad-map";
 import { checkSellability } from "@/lib/queries/sellability";
 import { extractColor, extractMeasurements, extractSize } from "@/lib/ai-workforce/agents/sales/extract-slots";
 import { EMPTY_SALES_POLICY, policyAnswerable, type SalesPolicy } from "@/lib/constants/sales-policy";
@@ -562,6 +564,58 @@ export async function testFanpageSales(db: Db) {
       );
     }
   }
+
+  /*
+    ═════════ N. MÀN HÌNH CẤU HÌNH FANPAGE PHẢI CHẠY ĐƯỢC TRÊN LƯỢC ĐỒ THẬT ═════════
+
+    SỰ CỐ 19/09/2026. `/ai/fanpage` đổ ngay ở truy vấn đầu tiên:
+
+        column f.size_profile_id does not exist   (42703, digest 2925354263)
+
+    Migration 0091 đã XOÁ cột ấy và chạy đúng; chỉ có câu SQL THÔ trong `listFanpages()` là còn
+    nhắc tới nó. Vì cột nằm trong một CHUỖI, `tsc` không nhìn thấy, `lint` không nhìn thấy, và cả
+    bộ kiểm thử cũng không — vì không bài nào GỌI hàm ấy. Lỗi chỉ lộ ra khi một người mở trang.
+
+    Nên chốt chặn đúng chỗ là ở đây: CHẠY mọi truy vấn mà trang ấy chạy, trên lược đồ đã migrate.
+    Không cần kiểm giá trị trả về — chỉ cần chúng KHÔNG NÉM. Một cột bị xoá, một bảng bị đổi tên,
+    một kiểu bị sửa đều làm bài này đỏ ngay ở máy người viết.
+  */
+  for (const [ten, chay] of [
+    ["listFanpages", () => listFanpages()],
+    ["listSourceLines", () => listSourceLines(PAGE)],
+    ["listTestProducts", () => listTestProducts()],
+    ["listProductChoices", () => listProductChoices()],
+    ["loadWinKnowledge", () => loadWinKnowledge(PAGE)],
+    ["discoverKnowledgeGaps", () => discoverKnowledgeGaps(PAGE)],
+    ["listWinSizes", () => listWinSizes(PAGE)],
+    ["loadSizeRows", () => loadSizeRows(PAGE)],
+  ] as const) {
+    await assert.doesNotReject(async () => {
+      await chay();
+    }, `/ai/fanpage gọi ${ten}() — truy vấn này phải chạy được trên lược đồ đã migrate`);
+  }
+
+  /*
+    VÀ PHẢI CHẠY ĐƯỢC CẢ KHI CHƯA KHAI GÌ.
+
+    Một page chưa có hồ sơ, chưa có mã WIN, chưa có bảng số đo là trạng thái BÌNH THƯỜNG của ngày
+    đầu — màn hình phải nói "chưa cấu hình", không được ném lỗi. Trang đọc `kienThuc` rồi mới dựng
+    từng khối, nên chỗ dễ vỡ nhất là các hàm nạp trả về `null`.
+  */
+  const pageTrong = "page-chua-khai-gi";
+  for (const [ten, chay] of [
+    ["loadWinKnowledge", () => loadWinKnowledge(pageTrong)],
+    ["discoverKnowledgeGaps", () => discoverKnowledgeGaps(pageTrong)],
+    ["listSourceLines", () => listSourceLines(pageTrong)],
+    ["listWinSizes", () => listWinSizes(pageTrong)],
+    ["loadSizeRows", () => loadSizeRows(pageTrong)],
+  ] as const) {
+    await assert.doesNotReject(async () => {
+      await chay();
+    }, `page chưa khai gì: ${ten}() phải trả về trạng thái rỗng, KHÔNG được ném lỗi`);
+  }
+  const rong = await loadWinKnowledge(pageTrong);
+  assert.ok(rong === null || !rong.code, "page chưa khai mã WIN thì không được dựng ra một mã từ hư không");
 
   console.log("  ✓ hồ sơ fanpage: mẫu thắng mặc định · TEST đè · ảnh chụp bất biến (mã + GIÁ) · cổng năng lực theo dữ liệu · mâu thuẫn ERP thì báo không đè · size đi qua máy gợi ý size của ERP · còn bán ≠ còn hàng · bốn số hiệu bốn đường đổi");
 }
