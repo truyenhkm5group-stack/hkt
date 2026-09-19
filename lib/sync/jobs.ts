@@ -46,7 +46,26 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "ALL",
     description:
       "CHỈ ĐỌC + GỬI TIN: dựng bản tin hiệu quả marketing của NGÀY HÔM QUA (mốc cohort — ngày lên đơn), chạy máy phân tích bất thường, rồi gửi Lark cho từng MKTer và bản tổng cho quản lý. Không ghi vào bảng nghiệp vụ nào, không đổi một con số nào. Sổ chống gửi lại nằm ở settings `marketing.digest.sent` nên chạy lại nhiều lần trong ngày KHÔNG gửi trùng.",
-    run: () => runMarketingDigest(),
+    /*
+      KẾT QUẢ GỬI PHẢI VÀO `sync_runs`, KHÔNG CHỈ VÀO GIÁ TRỊ TRẢ VỀ.
+
+      Trước đây nhánh này là `() => runMarketingDigest()` — không chạm `ctx`, nên mọi lượt chạy ghi
+      SUCCESS với `detail` rỗng kể cả khi Lark từ chối TOÀN BỘ tin nhắn. Kênh thông báo duy nhất mà
+      chủ shop dựa vào lại là kênh không ai biết nó đang hỏng. Nay số gửi được / hỏng / bỏ qua vào
+      đúng ba cột, và một lượt có tin gửi hỏng ghi PARTIAL kèm lý do của từng phạm vi.
+    */
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "marketing-digest", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await runMarketingDigest();
+        const hong = r.sent.filter((x) => !x.ok);
+        ctx.summary.imported = r.sent.filter((x) => x.ok).length;
+        ctx.summary.failed = hong.length;
+        ctx.summary.skipped = r.skipped.length;
+        ctx.summary.detail = r.detail;
+        if (hong.length) ctx.summary.warning = `Không gửi được ${hong.length} bản tin: ${hong.map((x) => `${x.scope} (${x.error ?? "không rõ lý do"})`).join(" · ")}`;
+        for (const sk of r.skipped) ctx.log(`bỏ qua ${sk.scope}: ${sk.reason}`);
+        return r;
+      }),
   },
   "github-deployments": {
     label: "Đọc lượt deploy từ GitHub Actions",

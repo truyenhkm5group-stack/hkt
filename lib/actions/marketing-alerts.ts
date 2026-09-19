@@ -104,6 +104,22 @@ export async function sendTestMarketingLark(): Promise<{ ok: true } | { error: s
 }
 
 /**
+ * ═══════════ XEM TRƯỚC BẢN TIN — ĐỌC ĐÚNG THỨ SẼ ĐẾN TAY NGƯỜI NHẬN ═══════════
+ *
+ * Nút "gửi thử" chứng minh webhook còn sống. Nó KHÔNG cho biết bản tin thật nói gì, gửi cho ai, và
+ * ai sẽ không nhận — ba câu hỏi phải trả lời được TRƯỚC khi bật một kênh gửi mỗi sáng cho cả đội.
+ *
+ * Dựng đủ bản tin rồi dừng ngay trước lời gọi Lark: không gửi một tin nào, không chạm sổ chống gửi
+ * lại. Nên bấm bao nhiêu lần cũng không làm mất bản tin thật của hôm nay.
+ */
+export async function previewMarketingDigest(): Promise<{ ok: true; day: string; settledDay: string | null; blocks: { scope: string; title: string; lines: string[]; willSend: boolean; reason: string | null }[] } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
+  const r = await runMarketingDigest(new Date(), { preview: true });
+  return { ok: true, day: r.day, settledDay: r.settledDay, blocks: r.preview };
+}
+
+/**
  * Chạy bản tin NGAY.
  *
  * Cố ý đi qua đúng hàm mà bộ lập lịch gọi — kể cả sổ chống gửi lại. Một nút "gửi ngay" đi vòng qua

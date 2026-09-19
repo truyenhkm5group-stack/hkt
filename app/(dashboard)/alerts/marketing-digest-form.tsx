@@ -2,14 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Send, Trash2 } from "lucide-react";
+import { Eye, Plus, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { runMarketingDigestNow, saveMarketingAlertConfig, sendTestMarketingLark } from "@/lib/actions/marketing-alerts";
+import { previewMarketingDigest, runMarketingDigestNow, saveMarketingAlertConfig, sendTestMarketingLark } from "@/lib/actions/marketing-alerts";
 import type { MarketingAlertConfig } from "@/lib/constants/marketing-alerts";
 
 /**
@@ -27,6 +27,8 @@ import type { MarketingAlertConfig } from "@/lib/constants/marketing-alerts";
  */
 export function MarketingDigestForm({ config, marketers }: { config: MarketingAlertConfig; marketers: { id: string; label: string }[] }) {
   const [form, setForm] = useState<MarketingAlertConfig>({ ...config, managerSecret: "", recipients: config.recipients.map((r) => ({ ...r, larkSecret: "" })) });
+  type Preview = { day: string; settledDay: string | null; blocks: { scope: string; title: string; lines: string[]; willSend: boolean; reason: string | null }[] };
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
 
@@ -62,6 +64,21 @@ export function MarketingDigestForm({ config, marketers }: { config: MarketingAl
       const res = await runMarketingDigestNow();
       if ("error" in res) toast.error(res.error);
       else toast.success(res.detail);
+    });
+
+  /*
+    XEM TRƯỚC KHÔNG GỬI GÌ và không chạm sổ chống gửi lại — bấm bao nhiêu lần cũng không làm mất
+    bản tin thật của hôm nay. Đây là bước phải làm TRƯỚC khi bật công tắc, vì "gửi thử" chỉ chứng
+    minh webhook còn sống chứ không cho thấy bản tin thật viết gì và ai sẽ không nhận được nó.
+  */
+  const xemTruoc = () =>
+    start(async () => {
+      const res = await previewMarketingDigest();
+      if ("error" in res) {
+        toast.error(res.error);
+        return;
+      }
+      setPreview(res);
     });
 
   return (
@@ -167,10 +184,41 @@ export function MarketingDigestForm({ config, marketers }: { config: MarketingAl
         <Button size="sm" variant="outline" disabled={pending} onClick={test}>
           <Send className="mr-1 size-3.5" /> Gửi thử vào nhóm quản lý
         </Button>
+        <Button size="sm" variant="outline" disabled={pending} onClick={xemTruoc}>
+          <Eye className="mr-1 size-3.5" /> Xem trước bản tin
+        </Button>
         <Button size="sm" variant="outline" disabled={pending} onClick={runNow}>
           Chạy bản tin ngay
         </Button>
       </div>
+
+      {preview ? (
+        <div className="space-y-3 rounded-lg border p-3">
+          <p className="text-xs font-medium">
+            Bản tin cho ngày {preview.day}
+            {preview.settledDay ? ` · kết quả cuối lấy từ ngày ${preview.settledDay}` : " · chưa có ngày nào đủ chín để kết luận tiền"}
+            <span className="ml-1 font-normal text-muted-foreground">— chưa gửi đi đâu cả</span>
+          </p>
+          {preview.blocks.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Không dựng được khối nào — chưa có phạm vi nào để gửi.</p>
+          ) : (
+            preview.blocks.map((b) => (
+              <div key={b.scope} className="space-y-1">
+                <p className="text-xs font-medium">
+                  {b.title}
+                  {b.willSend ? (
+                    <span className="ml-2 font-normal text-emerald-600 dark:text-emerald-400">sẽ gửi</span>
+                  ) : (
+                    /* KHÔNG giấu khối sẽ không gửi: một bản xem trước chỉ in khối gửi được sẽ làm người bấm tin rằng cả đội đều nhận. */
+                    <span className="ml-2 font-normal text-amber-600 dark:text-amber-400">sẽ KHÔNG gửi — {b.reason}</span>
+                  )}
+                </p>
+                <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-muted p-2 text-[11px] leading-relaxed">{b.lines.join("\n")}</pre>
+              </div>
+            ))
+          )}
+        </div>
+      ) : null}
       {/* "Chạy ngay" đi qua ĐÚNG sổ chống gửi lại của bộ lập lịch: đã gửi hôm nay thì nó báo bỏ qua,
           chứ không gửi bản thứ hai. Đó là điều làm nút này an toàn để bấm khi đang thắc mắc. */}
       <p className="text-[11px] text-muted-foreground">

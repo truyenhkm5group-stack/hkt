@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { clearMemo } from "@/lib/cache";
+import { getSettingJson } from "@/lib/settings";
 import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf, type MaturityState } from "@/lib/constants/marketing-daily";
 import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
 import { METRIC_BINDINGS } from "@/lib/constants/metric-bindings";
@@ -8,7 +9,7 @@ import { canTargetPerson } from "@/lib/constants/metric-registry";
 import { MARKETING_AI_SYSTEM, buildAiContext } from "@/lib/marketing/ai-context";
 import { MARKETING_TARGET_METRICS } from "@/lib/queries/marketing-targets";
 import { baselineOf, diagnose, lossStreakOf, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
-import { digestLines, settledLines } from "@/lib/marketing/digest";
+import { digestLines, runMarketingDigest, settledLines } from "@/lib/marketing/digest";
 import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter, type MarketingDailyBase } from "@/lib/queries/marketing-daily";
 import { getDailyBreakdown } from "@/lib/queries/reports";
 import type { Period } from "@/lib/search-params";
@@ -572,6 +573,37 @@ export async function testMarketingBreakdownConservation() {
   }
 }
 
+/**
+ * ═══════════ XEM TRƯỚC KHÔNG ĐƯỢC GỬI, VÀ KHÔNG ĐƯỢC GHI SỔ ═══════════
+ *
+ * Một nút "xem trước" lỡ ghi vào sổ chống gửi lại sẽ làm bản tin THẬT của hôm đó bị bỏ qua — và
+ * hỏng đúng theo kiểu không ai phát hiện, vì màn hình vẫn hiện đủ nội dung và lượt chạy vẫn báo
+ * "đã gửi cho ngày này". Nên bài kiểm này đo hai thứ ở mức TRẠNG THÁI, không tin lời hàm:
+ *
+ *   1. Sổ `marketing.digest.sent` KHÔNG đổi một byte sau lượt xem trước.
+ *   2. Lượt xem trước không báo đã gửi cho phạm vi nào.
+ *
+ * Nó cũng đo điều ngược lại của bản vá: khối "sẽ KHÔNG gửi" vẫn phải có mặt kèm LÝ DO, vì một bản
+ * xem trước chỉ in khối gửi được sẽ làm người bấm tin rằng cả đội đều nhận.
+ */
+export async function testMarketingDigestPreview() {
+  const truoc = JSON.stringify(await getSettingJson<Record<string, string>>("marketing.digest.sent", {}));
+  const r = await runMarketingDigest(new Date(), { preview: true });
+  const sau = JSON.stringify(await getSettingJson<Record<string, string>>("marketing.digest.sent", {}));
+
+  assert.equal(sau, truoc, "xem trước KHÔNG được chạm sổ chống gửi lại — chạm là bản tin thật của hôm đó biến mất");
+  assert.deepEqual(r.sent, [], "xem trước không được gửi một tin nào");
+  assert.ok(r.preview.length > 0, "phải dựng được ít nhất bản tổng để xem");
+
+  for (const b of r.preview) {
+    assert.ok(b.title.includes(r.day), `khối "${b.scope}" phải nói rõ nó là bản tin của ngày nào`);
+    assert.ok(b.lines.length > 0, `khối "${b.scope}" không được rỗng`);
+    // Khối không gửi được PHẢI kèm lý do; khối gửi được thì không được bịa ra một lý do.
+    if (b.willSend) assert.equal(b.reason, null);
+    else assert.ok(b.reason && b.reason.length > 0, `khối "${b.scope}" không gửi thì phải nói vì sao`);
+  }
+}
+
 /** Điểm vào cho bộ chạy chung. Phần CSDL đi qua `getDb()` như các truy vấn thật, nên không cần tham số. */
 export async function testMarketingDaily() {
   testMarketingMetricContract();
@@ -588,4 +620,5 @@ export async function testMarketingDaily() {
   await testMarketingDailyTotals();
   await testMarketingDailyFilterHonesty();
   await testMarketingBreakdownConservation();
+  await testMarketingDigestPreview();
 }
