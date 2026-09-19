@@ -274,6 +274,31 @@ Hai chi tiết phải ghi cho đúng, không làm tròn:
 
 ---
 
+## Trang soát đã SẴN SÀNG để chấm — triển khai và dò lại trên staging
+
+Ảnh `sha256:100208db…` (dựng từ `b35fa34`) · triển khai run **35448863095** · dò bề mặt run
+**35449189927**.
+
+Ba thứ thêm vào, và mỗi thứ đóng một chỗ hổng cụ thể của phép chấm:
+
+1. **Khối BÁM DỮ KIỆN, đặt ngay cạnh câu gợi ý** — mã hàng · mẫu mã · màu+size · tiền máy chủ
+   tính · SĐT · địa chỉ · đã chốt chưa · mã lý do chuyển người. Không có nó thì người chấm chỉ
+   nói được "câu này có gửi được không", không nói được "máy nói có căn cứ không" — mà vế sau
+   mới là cổng còn lại. Lượt `HANDOFF_HUMAN` thiếu mã lý do hiện thành một ô ĐỎ, nên 28 lượt di
+   sản tự lộ ra dưới mắt người chấm.
+2. **Ô "ĐÚNG RA MÁY PHẢI LÀM GÌ"** (`expected_behavior`, migration 0097) — tách khỏi ghi chú.
+   Chỉ câu này biến một lượt chấm thành một CA HỒI QUY; gộp vào ghi chú thì lúc dựng ca phải đoán
+   đoạn nào là kỳ vọng. Chỉ hiện khi đã chấm KHÔNG ĐẠT.
+3. **Kết cục ĐẠT / KHÔNG ĐẠT ghi thẳng trên nút chấm**, giữ nguyên ba nấc bên dưới. Báo cáo chỉ
+   đếm hai kết cục, nên nút phải nói ra người chấm đang bỏ phiếu về phía nào; nhưng gộp thành hai
+   nút thì mất nấc giữa — chỗ nằm của phần lớn câu trả lời thật.
+
+**Dò lại trên chính staging:** `/ai/review` HTTP 200 · **485 nút** (trước 415) · dấu hiệu
+`Mẻ chấm phân tầng` ✓ · `Bám dữ kiện` ✓ · `KHÔNG ĐẠT` ✓ · 30/30 tệp JS trả 200 · ô tìm vẫn thu
+hẹp thật (100 → 0) · `[migrate] ✓ Migration đã áp dụng xong` · bốn trang AI đều dựng được.
+
+---
+
 ## Cổng quyết định
 
 # KEEP SHADOW
