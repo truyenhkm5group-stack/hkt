@@ -272,6 +272,30 @@ deploy dừng, không phải cảnh báo.
     Chính sách đổi trả và bảng số đo KHÔNG được suy từ chat cũ: một câu nhân viên ứng khẩu với một
     khách không phải cam kết của shop.
 
+48. **BỘ CA HỒI QUY ĐO DÂY CHUYỀN, KHÔNG ĐO TỪNG HÀM** (`docs/sales-ai-regression.md`,
+    `npm run ai:regression`): cái hỏng trong bán hàng qua chat hiếm khi là một hàm — nó là một dây
+    chuyền đi sai ở lượt thứ hai. Bốn lỗi bắt được ngay lượt chạy đầu tiên 19/09/2026 đều thuộc
+    dạng ấy: `vâng` đọc thành **màu Vàng** (bỏ dấu làm "vâng" trùng "vàng", xoá mất mẫu mã đã
+    chốt), `size gì` đọc thành **size G**, `Lấy cho chị …` không được tính là ý muốn mua nên máy
+    hỏi lại đúng cái màu khách vừa nói, và `Hàng bị lỗi, tôi muốn trả lại` ra `LOW_CONFIDENCE` thay
+    vì `COMPLAINT`. Không hàm nào trong bốn dòng đó sai.
+    **Ca chụp CẢ KẾT QUẢ CÔNG CỤ ERP** và mốc là SỐ PHÚT tương đối: chạy lại không hỏi CSDL, nên
+    một ca không bao giờ đỏ vì kho vừa bán hết hàng hay vì hôm nay là thứ Tư (mục 50 của bản `main`).
+    **Kỳ vọng không khai thì KHÔNG kiểm** — `null` là "chưa quyết", không phải "phải bằng rỗng".
+    **Trình chạy lại gọi ĐÚNG bốn hàm mà `runSalesTask` gọi**, không viết bản mô phỏng riêng: một
+    bản mô phỏng đo một dây chuyền khác dây chuyền đang phục vụ khách, đúng thứ bộ ca sinh ra để
+    ngăn. Không gọi mô hình — bậc luật là bậc TẤT ĐỊNH, còn câu chữ được chấm tay ở `/ai/review`.
+    **Form thêm ca KHÔNG điền sẵn kết quả thật**: kỳ vọng phải là thứ ĐÁNG LẼ máy phải làm. Điền
+    sẵn là biến bộ hồi quy thành máy chụp ảnh hành vi hiện tại — xanh mãi mãi, kể cả khi hành vi ấy
+    sai. Bấm lại trên cùng một lượt là CẬP NHẬT (`case_key` duy nhất), không đẻ ca thứ hai.
+    **Bản nháp đơn (`lib/constants/order-draft.ts`) chỉ XEM TRƯỚC**: hàm thuần, không gọi Pancake,
+    không ghi CSDL, và năm điều kiện lấy từ CHÍNH `missingOrderRequirements()` mà đường tạo đơn thật
+    gọi. SẴN SÀNG đòi CẢ HAI vế — đủ điều kiện VÀ khách đã xác nhận; đủ dữ liệu không phải là đã chốt.
+    **Bóc tách số đo (`lib/queries/sales-metrics.ts`) KHÔNG định nghĩa lại một con số tổng nào**:
+    cùng bộ lọc của `shadowMetrics()`, chỉ đổi độ mịn, và bài kiểm CỘNG các dòng lại rồi so từng số.
+    Chiều Ý ĐỊNH lấy ý định ĐẦU TIÊN (trải hết ra thì tổng lớn hơn số lượt); MÔ HÌNH là bảng riêng
+    vì nó ở độ mịn LẦN GỌI.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`. Không sửa tay migration đã có (production đã chạy 0000–0020). Migration tự áp dụng khi app khởi động.
 - Upsert theo khoá tự nhiên: `shipments.vtp_order_number` (UNIQUE), `orders.id` (id Pancake dạng chuỗi — có thể vượt 2^53), `landing_orders.row_key`, `settings.key`.
