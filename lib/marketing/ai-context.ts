@@ -42,8 +42,15 @@ export type MarketingAiContext = {
   profit: { contributionProfit: number | null; margin: number | null; roasDelivered: number | null };
   /** So với nền — chỉ những chỉ số có cả hai vế. Thiếu vế nào thì KHÔNG có mặt, không điền 0. */
   vsBaseline: Record<string, number>;
-  /** Phát hiện đã có bằng chứng bằng số. Mô hình xếp thứ tự và diễn giải, KHÔNG tự thêm phát hiện. */
-  findings: { kind: string; severity: string; evidence: string[] }[];
+  /**
+   * Phát hiện đã có bằng chứng bằng số. Mô hình xếp thứ tự và diễn giải, KHÔNG tự thêm phát hiện.
+   *
+   * `why` và `owner` đi kèm CÓ CHỦ Ý: giả thuyết nguyên nhân và phòng chịu trách nhiệm là hai thứ
+   * máy phân tích XÁC ĐỊNH đã quyết, không phải chỗ để mô hình tự nghĩ ra. Không gửi chúng thì mô
+   * hình sẽ tự bịa một nguyên nhân và tự gán việc cho một phòng — cả hai đều nghe hợp lý và không
+   * ai đi kiểm lại.
+   */
+  findings: { kind: string; severity: string; evidence: string[]; why: string; owner: string }[];
   /** Những chỗ dữ liệu chưa đủ — mô hình phải nói ra thay vì lấp bằng suy đoán. */
   caveats: string[];
 };
@@ -106,7 +113,7 @@ export function buildAiContext(input: {
     },
     profit: { contributionProfit: input.totals.contributionProfit, margin: r("margin"), roasDelivered: r("roasDelivered") },
     vsBaseline,
-    findings: input.findings.map((f) => ({ kind: f.kind, severity: f.severity, evidence: f.evidence })),
+    findings: input.findings.map((f) => ({ kind: f.kind, severity: f.severity, evidence: f.evidence, why: f.why, owner: f.owner })),
     caveats,
   };
 }
@@ -124,6 +131,9 @@ export const MARKETING_AI_SYSTEM = [
   "2. KHÔNG kết luận lãi/lỗ khi phần `caveats` nói kỳ chưa đủ độ chín.",
   "3. KHÔNG đưa lời khuyên chung chung kiểu 'hãy tối ưu quảng cáo'. Mỗi đề xuất phải trỏ tới một",
   "   khâu cụ thể (quảng cáo · chốt đơn · giao hàng · giá vốn) và dựa trên một con số có thật.",
+  "",
+  "Mỗi phát hiện đã kèm sẵn `why` (nguyên nhân có khả năng nhất) và `owner` (phòng chịu trách nhiệm).",
+  "Dùng LẠI chúng — KHÔNG tự nghĩ ra một nguyên nhân khác và KHÔNG tự giao việc cho một phòng khác.",
   "",
   "Một trường mang giá trị null nghĩa là CHƯA BIẾT, không phải bằng 0 — nói 'chưa đo được', đừng nói 'bằng 0'.",
   "Trả lời bằng tiếng Việt có dấu, tối đa 6 câu, đi thẳng vào nguyên nhân có khả năng nhất trước.",

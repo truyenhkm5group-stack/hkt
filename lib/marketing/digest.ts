@@ -9,6 +9,7 @@ import {
 } from "@/lib/constants/marketing-alerts";
 import { MARKETING_ALERT_MAX_PER_RUN, MARKETING_DIAGNOSIS } from "@/lib/constants/marketing-diagnosis";
 import { MATURITY_LABEL } from "@/lib/constants/marketing-daily";
+import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot, type MarketingFinding } from "@/lib/marketing/diagnose";
 import { getMarketingBreakdown, getMarketingDaily, type MarketingDailyBase, type MarketingDailyRow } from "@/lib/queries/marketing-daily";
 import { ratioOf } from "@/lib/queries/marketing-daily";
@@ -157,9 +158,16 @@ export function digestLines(day: string, scope: DigestScope, previous: Marketing
   if (scope.findings.length) {
     lines.push("");
     for (const f of scope.findings.slice(0, MARKETING_ALERT_MAX_PER_RUN)) {
-      lines.push(`${f.severity === "CRITICAL" ? "🔴" : "🟡"} ${f.title}`);
+      /*
+        NĂM CÂU HỎI, THEO ĐÚNG THỨ TỰ NGƯỜI ĐỌC CẦN: chuyện gì · ở đâu · bằng chứng nào · vì sao ·
+        làm gì · ai làm. Thiếu vế "ai làm" thì một cảnh báo tỷ lệ giao gửi vào nhóm marketing sẽ
+        nằm đó mãi — và sau vài lần như vậy cả nhóm thôi đọc những cảnh báo thật sự của mình.
+      */
+      lines.push(`${f.severity === "CRITICAL" ? "🔴" : "🟡"} ${f.title} · ${f.scopeLabel}`);
       for (const e of f.evidence) lines.push(`   ${e}`);
+      lines.push(`   Vì sao: ${f.why}`);
       for (const a of f.actions.slice(0, 2)) lines.push(`   → ${a}`);
+      lines.push(`   Phòng xử lý: ${DEPARTMENT_LABEL[f.owner]}`);
     }
   } else {
     lines.push("");
@@ -195,14 +203,21 @@ export type DigestRunResult = {
   sent: { scope: string; ok: boolean; error?: string }[];
   skipped: { scope: string; reason: string }[];
   findings: number;
+  /** Chỉ có mặt ở lượt XEM TRƯỚC: đúng những dòng sẽ gửi, kèm ai sẽ không nhận và vì sao. */
+  preview: { scope: string; title: string; lines: string[]; willSend: boolean; reason: string | null }[];
   detail: string;
 };
 
 /**
  * Bản tin hằng ngày. `now` truyền vào được để kiểm thử — luật AGENTS.md mục 50 (bài kiểm không
  * được ghim một ngày tuyệt đối rồi gieo dữ liệu tương đối so với nó).
+ *
+ * `preview: true` DỰNG ĐỦ bản tin rồi DỪNG ngay trước lời gọi Lark: không gửi, không chạm sổ chống
+ * gửi lại. Đó là cách duy nhất xem TRƯỚC đúng những dòng sẽ đến tay người nhận — nút "gửi thử" chỉ
+ * chứng minh webhook còn sống, nó không cho thấy bản tin thật nói gì, và bật một kênh thông báo
+ * hằng ngày mà chưa ai đọc qua nội dung của nó một lần là cách nhanh nhất để nó bị tắt tiếng.
  */
-export async function runMarketingDigest(now: Date = new Date()): Promise<DigestRunResult> {
+export async function runMarketingDigest(now: Date = new Date(), opts: { preview?: boolean } = {}): Promise<DigestRunResult> {
   const day = shiftDay(vnDay(now), -1); // hôm qua theo giờ VN
   const cfg = await loadMarketingAlertConfig();
   const [alertCfg, sentLedger] = await Promise.all([loadAlertConfig(), getSettingJson<Record<string, string>>(SENT_KEY, {})]);
@@ -264,14 +279,15 @@ export async function runMarketingDigest(now: Date = new Date()): Promise<Digest
   const skipped: DigestRunResult["skipped"] = [];
   const ledger = { ...sentLedger };
   const minRank = SEVERITY_RANK[cfg.minSeverityToSend];
+  const preview: DigestRunResult["preview"] = [];
 
   for (const scope of scopes) {
     const ledgerKey = `${scope.key || "shop"}:${day}`;
-    if (ledger[ledgerKey]) {
+    if (!opts.preview && ledger[ledgerKey]) {
       skipped.push({ scope: scope.label, reason: "đã gửi cho ngày này" });
       continue;
     }
-    if (!cfg.enabled) {
+    if (!opts.preview && !cfg.enabled) {
       skipped.push({ scope: scope.label, reason: "cấu hình đang tắt" });
       continue;
     }
@@ -282,7 +298,7 @@ export async function runMarketingDigest(now: Date = new Date()): Promise<Digest
           const r = cfg.recipients.find((x) => `marketer:${x.marketerId}` === scope.key);
           return { url: r?.larkWebhookUrl ?? "", secret: r?.larkSecret ?? "" };
         })();
-    if (!target.url) {
+    if (!target.url && !opts.preview) {
       // KHÔNG im lặng bỏ qua: bản tin vẫn được dựng, và lý do không gửi được phải đọc được ở lượt chạy.
       skipped.push({ scope: scope.label, reason: "chưa khai webhook Lark" });
       continue;
@@ -293,7 +309,8 @@ export async function runMarketingDigest(now: Date = new Date()): Promise<Digest
       nhanh nhất để kênh này bị tắt thông báo.
     */
     const maxRank = scope.findings.reduce((m, f) => Math.max(m, SEVERITY_RANK[f.severity]), -1);
-    if (!isManager && maxRank < minRank) {
+    const duoiNguong = !isManager && maxRank < minRank;
+    if (duoiNguong && !opts.preview) {
       skipped.push({ scope: scope.label, reason: "không có phát hiện đủ mức để làm phiền" });
       ledger[ledgerKey] = new Date().toISOString();
       continue;
@@ -302,19 +319,49 @@ export async function runMarketingDigest(now: Date = new Date()): Promise<Digest
     const body = digestLines(day, scope, null, baseUrl);
     // Bản TỔNG mang thêm kết quả cuối của ngày vừa ngã ngũ; bản riêng của MKTer giữ gọn ở phễu.
     if (isManager && settled) body.splice(body.length - (baseUrl ? 1 : 0), 0, "", ...settledLines(settled));
+    if (opts.preview) {
+      /*
+        XEM TRƯỚC PHẢI NÓI CẢ "AI SẼ KHÔNG NHẬN", không chỉ nội dung. Một bản xem trước chỉ in chữ
+        sẽ làm người bấm tin rằng năm MKTer đều nhận được, trong khi ba người chưa khai webhook.
+      */
+      preview.push({
+        scope: scope.label,
+        title,
+        lines: body,
+        willSend: Boolean(target.url) && cfg.enabled && !duoiNguong && !ledger[ledgerKey],
+        reason: !target.url
+          ? "chưa khai webhook Lark cho phạm vi này"
+          : !cfg.enabled
+            ? "cấu hình đang tắt"
+            : duoiNguong
+              ? "không có phát hiện đủ mức để làm phiền"
+              : ledger[ledgerKey]
+                ? "đã gửi cho ngày này"
+                : null,
+      });
+      continue;
+    }
     const lines = body.map((text) => [{ text }]);
     const res = await sendLark(target.url, target.secret, title, lines);
     sent.push({ scope: scope.label, ok: res.ok, error: res.error });
+    /*
+      CHỈ GHI SỔ KHI GỬI ĐƯỢC — và đó CHÍNH LÀ cơ chế thử lại. Lark hỏng một lượt thì sổ không ghi,
+      nên lượt chạy kế tiếp của bộ lập lịch dựng lại đúng bản tin ấy và gửi lại. Một vòng lặp thử
+      lại ngay trong lượt này sẽ giữ job đứng đó vài chục giây và vẫn hỏng nếu Lark đang sập.
+    */
     if (res.ok) ledger[ledgerKey] = new Date().toISOString();
   }
 
-  // Dọn sổ: chỉ giữ 30 ngày gần nhất để `settings` không phình vô hạn.
-  const keep = shiftDay(day, -30);
-  for (const key of Object.keys(ledger)) {
-    const d = key.slice(key.lastIndexOf(":") + 1);
-    if (d < keep) delete ledger[key];
+  // XEM TRƯỚC KHÔNG GHI GÌ. Chạm vào sổ ở đây là biến một lượt xem thành một lượt gửi đã-gửi-rồi.
+  if (!opts.preview) {
+    // Dọn sổ: chỉ giữ 30 ngày gần nhất để `settings` không phình vô hạn.
+    const keep = shiftDay(day, -30);
+    for (const key of Object.keys(ledger)) {
+      const d = key.slice(key.lastIndexOf(":") + 1);
+      if (d < keep) delete ledger[key];
+    }
+    await setSettingJson(SENT_KEY, ledger);
   }
-  await setSettingJson(SENT_KEY, ledger);
 
   const findingCount = scopes.reduce((s, x) => s + x.findings.length, 0);
   return {
@@ -324,6 +371,7 @@ export async function runMarketingDigest(now: Date = new Date()): Promise<Digest
     sent,
     skipped,
     findings: findingCount,
+    preview,
     detail: `Ngày ${day}: ${scopes.length} phạm vi · ${findingCount} phát hiện · gửi ${sent.filter((s) => s.ok).length}/${sent.length} · bỏ qua ${skipped.length} · ngày vừa ngã ngũ: ${settled?.day ?? "chưa có"}`,
   };
 }

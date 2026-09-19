@@ -83,7 +83,13 @@ export type ScorecardInput = {
   /** Kỳ trước đọc nguồn khác ⇒ KHÔNG vẽ mũi tên, in "đổi nguồn" (AGENTS.md mục 40). */
   sourceChanged?: boolean;
   targets: TargetRow[];
-  subject: { departmentCode: string | null; positionId: string | null; userId?: string | null };
+  /**
+   * CHỦ THỂ ĐANG ĐƯỢC CHẤM. `productCode` có mặt khi màn hình đang nói về ĐÚNG MỘT mã hàng — thiếu
+   * nó thì một đích đặt riêng cho mã Q002 không bao giờ khớp và màn hình vẫn nói "chưa đặt mục
+   * tiêu" trong khi chủ shop tin là đã đặt rồi. Một dòng NGƯỜI không bao giờ mang trường này, nên
+   * đích tầng mã hàng không thể lọt vào phép chấm một con người (luật ở `resolveTarget`).
+   */
+  subject: { departmentCode: string | null; positionId: string | null; userId?: string | null; productCode?: string | null };
   period: { endsAt: Date; kind: PeriodKind; label: string };
 };
 
@@ -176,6 +182,7 @@ export function evaluateMetric(input: ScorecardInput): ScorecardCell | null {
     departmentCode: input.subject.departmentCode,
     positionId: input.subject.positionId,
     userId: input.subject.userId ?? null,
+    productCode: input.subject.productCode ?? null,
     at: input.period.endsAt,
     periodKind: input.period.kind,
   });

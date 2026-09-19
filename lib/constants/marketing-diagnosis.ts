@@ -1,3 +1,5 @@
+import type { DepartmentCode } from "@/lib/constants/departments";
+
 /**
  * ═══════════ NGƯỠNG LÊN TIẾNG CỦA MÁY PHÂN TÍCH MARKETING ═══════════
  *
@@ -160,6 +162,68 @@ export const MARKETING_FINDING_ACTIONS: Record<MarketingFindingKind, string[]> =
     "Chỉ số này đang dưới đích do chủ shop đặt — xem lý do đặt đích để biết mức nào là chấp nhận được.",
     "Bóc tách để tìm phần kéo chỉ số xuống trước khi đổi đích.",
   ],
+};
+
+/**
+ * ═══════════ PHÒNG BAN CHỊU TRÁCH NHIỆM — MỘT PHÁT HIỆN KHÔNG CÓ CHỦ LÀ MỘT PHÁT HIỆN KHÔNG AI LÀM ═══════════
+ *
+ * ─── VÌ SAO LÀ PHÒNG BAN, KHÔNG BAO GIỜ LÀ MỘT NGƯỜI ───
+ *
+ * AGENTS.md mục 22: máy không biết hôm nay ai nghỉ, và một việc mang tên người không làm được nó
+ * sẽ biến mất khỏi hàng đợi phòng. Ở đây còn một lý do nữa: phần lớn phát hiện KHÔNG do người chạy
+ * quảng cáo gây ra. "Tỷ lệ giao thành công tụt" gửi cho MKTer là gửi nhầm cửa — họ không điều được
+ * bưu tá, và sau vài lần như vậy họ thôi đọc cả những phát hiện thật sự của mình.
+ *
+ * Bốn nhóm, và ranh giới giữa chúng chính là ranh giới của cái phễu:
+ *
+ *   MARKETING → tiền và traffic (chi, giá tin nhắn, CPA, creative)
+ *   SALES     → tin nhắn đã về mà không thành đơn, hoặc thành đơn nhỏ hơn
+ *   LOGISTICS → đơn đã chốt mà không tới tay khách
+ *   MANAGEMENT→ quyết định cắt / đổi hướng, và những chỗ ERP tự biết mình đang mù
+ */
+export const MARKETING_FINDING_OWNER: Record<MarketingFindingKind, DepartmentCode> = {
+  SPEND_UP_OUTPUT_FLAT: "MARKETING",
+  CREATIVE_FATIGUE: "MARKETING",
+  // Traffic VẪN VỀ — mất đơn ở khâu trả lời, không ở khâu quảng cáo.
+  CLOSE_RATE_DROP: "SALES",
+  CPA_UP: "MARKETING",
+  // Giá trị đơn do mix mã hàng và kịch bản bán kèm quyết định, cả hai nằm ở khâu chốt đơn.
+  AOV_DROP: "SALES",
+  DELIVERY_DROP: "LOGISTICS",
+  RETURN_UP: "LOGISTICS",
+  COST_OUTRUNS_REVENUE: "MANAGEMENT",
+  // Lỗ ba ngày liên tiếp là quyết định cắt hay đổi mã, không phải một lần chỉnh ngân sách.
+  LOSS_STREAK: "MANAGEMENT",
+  SPEND_NO_ORDERS: "MARKETING",
+  // Nguồn đứng im là việc của người giữ tích hợp, không của người đọc báo cáo.
+  DATA_STALE: "MANAGEMENT",
+  TARGET_MISS: "MANAGEMENT",
+};
+
+/**
+ * ═══════════ NGUYÊN NHÂN CÓ KHẢ NĂNG NHẤT — CÂU TRẢ LỜI CHO "VÌ SAO" ═══════════
+ *
+ * Bằng chứng nói CHUYỆN GÌ ĐÃ XẢY RA; câu ở đây nói NÓ THƯỜNG DO ĐÂU. Hai thứ tách nhau vì chúng
+ * có độ chắc chắn khác hẳn: bằng chứng là số đo, còn đây là một giả thuyết xếp trước — và phải
+ * đọc được là giả thuyết, nếu không người đọc sẽ hành động như thể nó đã được chứng minh.
+ *
+ * Mỗi câu phải PHÂN BIỆT được hai khả năng, vì đó là thứ quyết định ai đi làm gì: cùng một "CPA
+ * tăng", nếu CPM tăng theo thì việc nằm ở đấu giá / creative, còn nếu CPM đứng yên thì việc nằm ở
+ * khâu chốt đơn. Một câu không phân biệt được hai vế ấy thì không đáng in ra.
+ */
+export const MARKETING_FINDING_WHY: Record<MarketingFindingKind, string> = {
+  SPEND_UP_OUTPUT_FLAT: "Thường là một chiến dịch mới bật ăn phần ngân sách tăng thêm mà chưa qua giai đoạn học, hoặc tệp đã bão hoà nên cùng số tiền mua được ít hiển thị hơn.",
+  CREATIVE_FATIGUE: "Giá một tin nhắn đắt lên trong khi tệp không đổi thường là creative đã chạy quá lâu với cùng một nhóm người — tần suất hiển thị cao là dấu hiệu xác nhận.",
+  CLOSE_RATE_DROP: "Traffic vẫn về nhưng ít đơn hơn ⇒ khả năng cao nằm ở khâu TRẢ LỜI chứ không ở quảng cáo: chậm phản hồi, kịch bản mới, hoặc mã đang bán hết size.",
+  CPA_UP: "Nếu CPM/CPC gần như không đổi thì phần đắt lên đến từ chuyển đổi tin nhắn → đơn, tức khâu chốt; CPM tăng theo mới là chuyện của đấu giá và creative.",
+  AOV_DROP: "Thường là mix mã hàng dịch sang mã giá thấp, hoặc kịch bản bán kèm / combo không còn được dùng.",
+  DELIVERY_DROP: "Hai nguyên nhân hay gặp và tách được: chất lượng đơn đầu vào (SĐT, địa chỉ, khách không chắc mua) hoặc tuyến giao của ĐVVC. Bóc theo khu vực sẽ chỉ ra vế nào.",
+  RETURN_UP: "Thường tập trung ở MỘT mã hàng chứ không rải đều — sai size, sai màu so với mô tả, hoặc chất lượng lô hàng mới nhập.",
+  COST_OUTRUNS_REVENUE: "Doanh thu tăng mà lợi nhuận tụt nghĩa là một trong ba tỷ lệ đang phình: quảng cáo, giá vốn, hoặc cước và phí hoàn. Ba tỷ lệ ấy sửa ở ba chỗ khác nhau.",
+  LOSS_STREAK: "Ba ngày lỗ liên tiếp không còn là dao động. Thường là một mã hàng kéo cả nhóm, hoặc giá bán không còn đỡ nổi CPA hiện tại.",
+  SPEND_NO_ORDERS: "Tiền chạy mà không một đơn nào thường KHÔNG phải vấn đề quảng cáo: luồng nhận tin đứt (webhook, page) hay tài khoản bị hạn chế hay gặp hơn nhiều.",
+  DATA_STALE: "Nguồn đứng im nghĩa là ERP đang thiếu một vế, không phải kết quả kinh doanh xấu đi. Đừng đọc lợi nhuận của những ngày này cho tới khi đồng bộ lại.",
+  TARGET_MISS: "Chỉ số dưới mức chủ shop đã chốt. Trước khi đổi đích, bóc tách để biết phần nào kéo nó xuống — một chiều dữ liệu xấu có thể che cả nhóm còn lại đang tốt.",
 };
 
 export const MARKETING_FINDING_BASIS: Record<MarketingFindingKind, FindingBasis> = {

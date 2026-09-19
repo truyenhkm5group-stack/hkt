@@ -207,9 +207,19 @@ export function MarketingDailyTable({ data, view }: { data: MarketingDaily; view
                   </TableCell>
                   {columns.map((c) => {
                     const v = cellValue(c, row as unknown as Record<string, unknown>);
+                    /*
+                      DẤU SAO CHỈ ĐẶT Ở NHÓM TIỀN CỦA DÒNG CHƯA NGÃ NGŨ.
+
+                      Bỏ tô màu (đã làm ở `toneFor`) mới chỉ là THÔI KẾT LUẬN; nó không nói cho
+                      người đọc biết con số đang thiếu cái gì. Một ô "−1.480.000đ" không màu vẫn
+                      đọc y hệt một khoản lỗ đã chốt. Dấu sao + chú thích ngay dưới bảng biến nó
+                      thành "phần đã ghi nhận tới lúc này", đúng thứ nó thật sự là.
+                    */
+                    const dangGhiNhan = !mature && c.group === "PROFIT" && v !== null;
                     return (
                       <TableCell key={c.key} className={cn("whitespace-nowrap text-right tabular-nums", toneFor(c, v, mature))}>
                         {renderValue(c, v)}
+                        {dangGhiNhan ? <span className="text-muted-foreground" title="Đang ghi nhận — chưa phải kết quả cuối của ngày này">*</span> : null}
                       </TableCell>
                     );
                   })}
@@ -232,6 +242,13 @@ export function MarketingDailyTable({ data, view }: { data: MarketingDaily; view
           </tfoot>
         </Table>
       </div>
+      {/* Chú thích của dấu sao. Một ký hiệu không có chú giải là một ký hiệu bị bỏ qua. */}
+      {data.rows.some((r) => r.maturity === "TOO_EARLY" || r.maturity === "PARTIAL") ? (
+        <p className="text-[11px] text-muted-foreground">
+          * Ngày chưa ngã ngũ: các số ở nhóm lợi nhuận là phần ĐÃ GHI NHẬN tới lúc này, chưa phải kết quả cuối — đơn còn trên đường chưa biết giao được hay hoàn. Di chuột lên cột ngày để xem còn
+          bao nhiêu đơn đang đi.
+        </p>
+      ) : null}
     </div>
   );
 }

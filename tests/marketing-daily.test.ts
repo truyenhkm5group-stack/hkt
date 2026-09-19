@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { clearMemo } from "@/lib/cache";
+import { getSettingJson } from "@/lib/settings";
+import { sql } from "drizzle-orm";
+import { getDb } from "@/db";
+import { calibrate } from "@/scripts/marketing-calibrate";
 import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf, type MaturityState } from "@/lib/constants/marketing-daily";
-import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
+import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, MARKETING_FINDING_OWNER, MARKETING_FINDING_WHY, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
 import { METRIC_BINDINGS } from "@/lib/constants/metric-bindings";
+import { canTargetPerson } from "@/lib/constants/metric-registry";
 import { MARKETING_AI_SYSTEM, buildAiContext } from "@/lib/marketing/ai-context";
 import { MARKETING_TARGET_METRICS } from "@/lib/queries/marketing-targets";
 import { baselineOf, diagnose, lossStreakOf, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
-import { digestLines, settledLines } from "@/lib/marketing/digest";
+import { digestLines, runMarketingDigest, settledLines } from "@/lib/marketing/digest";
 import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter, type MarketingDailyBase } from "@/lib/queries/marketing-daily";
 import { getDailyBreakdown } from "@/lib/queries/reports";
 import type { Period } from "@/lib/search-params";
@@ -302,6 +307,48 @@ export function testMarketingDigestLines() {
  * không được mang đơn hàng, tên khách hay số điện thoại. Thứ hai là TÍNH TRUNG THỰC: một khoá mang
  * giá trị 0 sẽ được mô hình đọc là "không đổi", trong khi sự thật có thể là "không so được".
  */
+/**
+ * ═══════════ MỘT PHÁT HIỆN PHẢI TRẢ LỜI ĐỦ NĂM CÂU ═══════════
+ *
+ * CHUYỆN GÌ (`title`) · Ở ĐÂU (`scopeLabel`) · BẰNG CHỨNG NÀO (`evidence`, bằng SỐ THẬT) · VÌ SAO
+ * (`why`, một giả thuyết đứng riêng) · LÀM GÌ (`actions`) · AI LÀM (`owner`, một PHÒNG BAN).
+ *
+ * Thiếu vế cuối là lớp hỏng âm thầm nhất: một cảnh báo "tỷ lệ giao thành công tụt" gửi vào nhóm
+ * marketing sẽ nằm đó mãi vì họ không điều được bưu tá, và sau vài lần như vậy cả nhóm thôi đọc cả
+ * những cảnh báo thật sự của mình. Nên bài kiểm này ghim luôn BA chỗ giao việc dễ sai nhất.
+ */
+export function testMarketingFindingCompleteness() {
+  for (const kind of MARKETING_FINDING_KINDS) {
+    const why = MARKETING_FINDING_WHY[kind];
+    assert.ok(why && why.length > 40, `${kind}: phải có câu "vì sao" đủ để phân biệt hai khả năng`);
+    assert.ok(MARKETING_FINDING_OWNER[kind], `${kind}: phải khai phòng chịu trách nhiệm`);
+    assert.ok(MARKETING_FINDING_ACTIONS[kind].length > 0, `${kind}: phải có ít nhất một việc làm được ngay`);
+  }
+
+  /*
+    BA CHỖ GIAO VIỆC DỄ SAI NHẤT — ranh giới giữa chúng chính là ranh giới của cái phễu.
+    Tin nhắn đã về mà không thành đơn là khâu CHỐT, không phải khâu quảng cáo; đơn đã chốt mà không
+    tới tay khách là khâu GIAO.
+  */
+  assert.equal(MARKETING_FINDING_OWNER.CLOSE_RATE_DROP, "SALES", "traffic vẫn về mà ít đơn hơn ⇒ khâu chốt, không phải marketing");
+  assert.equal(MARKETING_FINDING_OWNER.DELIVERY_DROP, "LOGISTICS", "tỷ lệ giao là việc của giao vận — gửi cho MKTer là gửi nhầm cửa");
+  assert.equal(MARKETING_FINDING_OWNER.RETURN_UP, "LOGISTICS");
+  assert.equal(MARKETING_FINDING_OWNER.CPA_UP, "MARKETING");
+
+  // GIẢ THUYẾT KHÔNG ĐƯỢC TRỘN VÀO BẰNG CHỨNG: hai thứ có độ chắc chắn khác hẳn nhau.
+  const f = diagnose({
+    day: "2026-09-18",
+    current: { adSpend: 3_000_000, messages: 200, orders: 8, posRevenue: 4_000_000, deliveredRevenue: 0, deliveredOrders: 0, returnedOrders: 0, finishedOrders: 0, pendingOrders: 8, contributionProfit: null },
+    baseline: { adSpend: 3_000_000, messages: 200, orders: 20, posRevenue: 10_000_000, deliveredRevenue: 0, deliveredOrders: 0, returnedOrders: 0, finishedOrders: 0, pendingOrders: 20, contributionProfit: null },
+  });
+  assert.ok(f.length > 0, "tỷ lệ chốt tụt một nửa thì phải có phát hiện");
+  for (const x of f) {
+    assert.ok(!x.evidence.includes(x.why), "câu giả thuyết không được nằm lẫn trong danh sách bằng chứng");
+    assert.equal(x.why, MARKETING_FINDING_WHY[x.kind]);
+    assert.equal(x.owner, MARKETING_FINDING_OWNER[x.kind]);
+  }
+}
+
 export function testMarketingAiContext() {
   const totals = {
     adSpend: null,
@@ -356,6 +403,31 @@ export function testMarketingTargetRegistration() {
     const binding = METRIC_BINDINGS[m.metricKey];
     assert.ok(binding, `${m.metricKey}: phải được khai trong METRIC_BINDINGS thì mới đặt đích được`);
     assert.ok(binding.basis.includes("getMarketingDaily"), `${m.metricKey}: phải khai rõ nó đọc cùng bộ máy với màn hình`);
+    /*
+      CHỈ SỐ DÙNG CHUNG VỚI SỔ CHÍNH phải khai CẢ HAI lối đọc.
+
+      `delivery_success_rate` và `return_rate` cố ý KHÔNG có bản sao mang tiền tố `marketing_`:
+      hai khoá cho một phép đo là hai đích có thể nói hai con số (AGENTS.md mục 43). Cái giá là
+      một khoá được đọc từ hai truy vấn, và AGENTS.md mục 40 gọi đúng tên nó — "đổi nguồn". Nên ô
+      `basis` phải kể ra cả hai, kèm khác biệt population, chứ không được im lặng nhận thêm một
+      nguồn thứ hai.
+    */
+    if (!m.metricKey.startsWith("marketing_")) {
+      assert.ok(binding.basis.includes("Hai lối đọc"), `${m.metricKey}: khoá dùng chung phải khai RA cả hai lối đọc trong basis`);
+      assert.ok(binding.basis.includes("loại đơn trùng"), `${m.metricKey}: phải nói rõ khác biệt population giữa hai lối đọc`);
+    }
+    /*
+      ĐÍCH CHO MỘT CON NGƯỜI. Chỉ số mà ĐVVC đồng quyết định KHÔNG được mở tầng `USER` — chấm một
+      marketer bằng tỷ lệ giao của tuyến đường là chấm họ bằng thứ họ không quyết được
+      (AGENTS.md mục 24 và 27). Khoá ở đây, không ở màn hình, vì màn hình nào cũng có thể quên.
+    */
+    const NGOAI_QUYET = ["marketing_roas_delivered", "marketing_margin", "delivery_success_rate", "return_rate"];
+    if (NGOAI_QUYET.includes(m.metricKey)) {
+      assert.equal(binding.shared, true, `${m.metricKey}: kết quả do bên ngoài đồng quyết định thì phải mang cờ shared`);
+      assert.equal(canTargetPerson(m.metricKey).ok, false, `${m.metricKey}: không được mở đích cho một cá nhân`);
+    } else {
+      assert.equal(canTargetPerson(m.metricKey).ok, true, `${m.metricKey}: đo được ở mức người thì phải đặt đích cho cá nhân được`);
+    }
     // Chiều phải đúng: CPA càng thấp càng tốt. Ghi cứng "UP" sẽ làm điểm ĐẢO NGƯỢC.
     if (m.metricKey === "marketing_cpa") assert.equal(binding.direction, "DOWN", "chi phí một đơn: càng thấp càng tốt");
     if (m.metricKey === "marketing_roas_delivered") assert.equal(binding.direction, "UP");
@@ -546,6 +618,87 @@ export async function testMarketingBreakdownConservation() {
   }
 }
 
+/**
+ * ═══════════ XEM TRƯỚC KHÔNG ĐƯỢC GỬI, VÀ KHÔNG ĐƯỢC GHI SỔ ═══════════
+ *
+ * Một nút "xem trước" lỡ ghi vào sổ chống gửi lại sẽ làm bản tin THẬT của hôm đó bị bỏ qua — và
+ * hỏng đúng theo kiểu không ai phát hiện, vì màn hình vẫn hiện đủ nội dung và lượt chạy vẫn báo
+ * "đã gửi cho ngày này". Nên bài kiểm này đo hai thứ ở mức TRẠNG THÁI, không tin lời hàm:
+ *
+ *   1. Sổ `marketing.digest.sent` KHÔNG đổi một byte sau lượt xem trước.
+ *   2. Lượt xem trước không báo đã gửi cho phạm vi nào.
+ *
+ * Nó cũng đo điều ngược lại của bản vá: khối "sẽ KHÔNG gửi" vẫn phải có mặt kèm LÝ DO, vì một bản
+ * xem trước chỉ in khối gửi được sẽ làm người bấm tin rằng cả đội đều nhận.
+ */
+export async function testMarketingDigestPreview() {
+  const truoc = JSON.stringify(await getSettingJson<Record<string, string>>("marketing.digest.sent", {}));
+  const r = await runMarketingDigest(new Date(), { preview: true });
+  const sau = JSON.stringify(await getSettingJson<Record<string, string>>("marketing.digest.sent", {}));
+
+  assert.equal(sau, truoc, "xem trước KHÔNG được chạm sổ chống gửi lại — chạm là bản tin thật của hôm đó biến mất");
+  assert.deepEqual(r.sent, [], "xem trước không được gửi một tin nào");
+  assert.ok(r.preview.length > 0, "phải dựng được ít nhất bản tổng để xem");
+
+  for (const b of r.preview) {
+    assert.ok(b.title.includes(r.day), `khối "${b.scope}" phải nói rõ nó là bản tin của ngày nào`);
+    assert.ok(b.lines.length > 0, `khối "${b.scope}" không được rỗng`);
+    // Khối không gửi được PHẢI kèm lý do; khối gửi được thì không được bịa ra một lý do.
+    if (b.willSend) assert.equal(b.reason, null);
+    else assert.ok(b.reason && b.reason.length > 0, `khối "${b.scope}" không gửi thì phải nói vì sao`);
+  }
+}
+
+/**
+ * ═══════════ CÔNG CỤ ĐỐI CHIẾU PHẢI TỰ CHẠY ĐƯỢC, TRÊN DỮ LIỆU THẬT CỦA BÀI KIỂM ═══════════
+ *
+ * `scripts/marketing-calibrate.ts` là thứ chủ shop chạy trên production khi một con số gây tranh
+ * cãi. Một công cụ như vậy mà chưa lần nào chạy trong CI sẽ hỏng đúng lúc cần nó nhất — và hỏng
+ * theo kiểu khó chịu nhất: một câu SQL sai cú pháp sau khi ai đó đổi tên một cột, phát hiện ra lúc
+ * đang cần câu trả lời gấp.
+ *
+ * Nên bài kiểm này chạy CHÍNH lõi ấy trên dữ liệu mẫu và đòi nó KHÔNG tìm thấy chênh lệch nhóm
+ * `BUG`. Đó cũng là một cổng đối soát thứ hai, đi đường khác với
+ * `testMarketingDailyReconciliation`: bài kia so báo cáo với báo cáo, bài này so báo cáo với BỐN
+ * nguồn trong đó có hai câu SQL viết độc lập từ đặc tả.
+ *
+ * ─── KHUNG NGÀY DỰNG TỪ CHÍNH DỮ LIỆU ───
+ *
+ * AGENTS.md mục 50: cấm ghim một ngày tuyệt đối, và cấm cửa sổ "N ngày trước" trỏ vào dữ liệu ngày
+ * cố định. Nên khung lấy từ `min`/`max` của chính bảng đang kiểm — bài kiểm này không có hạn dùng.
+ */
+export async function testMarketingCalibrateTool() {
+  clearMemo();
+  const db = await getDb();
+  const res = await db.execute(sql`
+    select to_char(min(inserted_at) at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD') as tu,
+           to_char(max(inserted_at) at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD') as den
+      from orders
+  `);
+  const r0 = (Array.isArray(res) ? res : ((res as { rows?: Record<string, unknown>[] }).rows ?? []))[0] as { tu?: string; den?: string } | undefined;
+  if (!r0?.tu || !r0.den) {
+    assert.fail("dữ liệu mẫu không có đơn nào — công cụ đối chiếu không có gì để chạy");
+    return;
+  }
+
+  const nuot: string[] = [];
+  const out = await calibrate({ from: r0.tu, to: r0.den }, (line) => nuot.push(line));
+
+  assert.ok(out.days > 0, "phải dựng được ít nhất một ngày trong khung lấy từ chính dữ liệu");
+  // Mọi nhóm phải nằm trong danh sách ĐÓNG — một nhãn lạ nghĩa là có đường ghi nào đó không qua `add`.
+  for (const f of out.findings) {
+    assert.ok(["TIME_BASIS", "ATTRIBUTION", "DATA_DELAY", "MISSING_DATA", "BUG"].includes(f.kind), `nhãn lạ: ${f.kind}`);
+    assert.ok(f.why.length > 20, `phát hiện "${f.what}" phải nói rõ vì sao, không chỉ nêu hai con số`);
+  }
+  assert.equal(
+    out.bugs,
+    0,
+    `công cụ đối chiếu tìm thấy ${out.bugs} chênh lệch KHÔNG giải thích được:\n${out.findings.filter((f) => f.kind === "BUG").map((f) => `  ${f.what}: kỳ vọng ${f.expected} · thực tế ${f.actual} — ${f.why}`).join("\n")}`,
+  );
+  // In ra được: một công cụ chạy xong mà không nói gì thì không ai mở lần thứ hai.
+  assert.ok(nuot.length > 10, "phải in ra bảng theo ngày và bốn khối đối chiếu");
+}
+
 /** Điểm vào cho bộ chạy chung. Phần CSDL đi qua `getDb()` như các truy vấn thật, nên không cần tham số. */
 export async function testMarketingDaily() {
   testMarketingMetricContract();
@@ -556,10 +709,13 @@ export async function testMarketingDaily() {
   testMarketingLossStreak();
   testMarketingBaseline();
   testMarketingDigestLines();
+  testMarketingFindingCompleteness();
   testMarketingAiContext();
   testMarketingTargetRegistration();
   await testMarketingDailyReconciliation();
   await testMarketingDailyTotals();
   await testMarketingDailyFilterHonesty();
   await testMarketingBreakdownConservation();
+  await testMarketingDigestPreview();
+  await testMarketingCalibrateTool();
 }
