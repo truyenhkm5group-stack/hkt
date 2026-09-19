@@ -58,4 +58,7 @@ order by 3 desc;
 select
   (select count(*) from sales_suggestions s where s.created_at > now() - interval '45 minutes' and s.sent)                  as tin_da_gui_khach,
   (select count(*) from sales_suggestions s where s.created_at > now() - interval '45 minutes' and s.production_action <> 'NO_SEND') as hanh_dong_khac_khong_gui,
-  (select count(*) from ai_tool_calls t where t.created_at > now() - interval '45 minutes' and t.tool in ('order.create_draft','order.confirm') and t.ok) as don_da_tao;
+  -- `ai_tool_calls` dùng cột `outcome` chứ không có cột `ok`: một lượt gọi công cụ có thể bị
+  -- CHẶN (DENIED) chứ không chỉ chạy-được / hỏng, nên một ô boolean không đủ chỗ nói.
+  (select count(*) from ai_tool_calls t where t.created_at > now() - interval '45 minutes' and t.tool in ('order.create_draft','order.confirm') and t.outcome = 'OK') as don_da_tao,
+  (select coalesce(string_agg(distinct t.outcome, ' · '), '(không gọi lần nào)') from ai_tool_calls t where t.created_at > now() - interval '45 minutes' and t.tool in ('order.create_draft','order.confirm')) as ket_cuc_cong_cu_don;
