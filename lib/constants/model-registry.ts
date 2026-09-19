@@ -19,8 +19,8 @@
  *
  *   3. QUAN SÁT (tính từ `ai_model_calls`) — độ trễ p50/p95, tỷ lệ lỗi, lần đo gần nhất. Những
  *      con số này ĐÃ NẰM SẴN trong sổ lượt gọi; chép chúng vào một hằng số là dựng nguồn sự thật
- *      thứ hai, và nó sai đi mỗi giờ kể từ lúc được gõ. `observedFor()` trong
- *      `lib/queries/model-registry.ts` đọc thẳng từ sổ.
+ *      thứ hai, và nó sai đi mỗi giờ kể từ lúc được gõ. `modelObserved()` trong
+ *      `lib/queries/model-metrics.ts` đọc thẳng từ sổ.
  *
  * ĐIỂM CHẤT LƯỢNG cố tình KHÔNG có ở cả ba chỗ. Nó chỉ có nghĩa khi có người chấm, và hiện
  * 0/1006 lượt được chấm — khai một con số lúc này là bịa. Khi có nhãn người thì nó tới từ

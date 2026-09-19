@@ -97,6 +97,7 @@ on:
           - ai-staging-report     # CHỈ ĐỌC: báo cáo chất lượng lượt nạp (12 khối) — chạy lại được bất cứ lúc nào
           - ai-staging-runtime    # CHỈ ĐỌC: nấc quyền hạn CÓ HIỆU LỰC + ba công tắc + page thí điểm + mốc đọc + bằng chứng an toàn
           - ai-staging-audit      # CHỈ ĐỌC: soi lại lưới an toàn + mất trạng thái trên CÂU ĐÃ LƯU (arg: "--days=7")
+          - ai-staging-router-sim # CHỈ ĐỌC: nếu có bộ định tuyến nhiều nhà cung cấp thì lượt đã chạy đi làn nào, tốn bao nhiêu (arg: "--days=30")
           - ai-staging-status     # trạng thái bản chạy thử + RAM/swap + sức khoẻ production
           - ai-staging-logs       # 120 dòng log gần nhất của app bản chạy thử
           - ai-staging-down       # dừng bản chạy thử (arg "--volumes" để xoá cả CSDL của nó)
@@ -1297,6 +1298,15 @@ jobs:
                 fetch_staging_script ai-staging-quality-audit.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-quality-audit.ts'
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-staging-quality-audit.ts ${ARG:---days=7} ;;
+
+              ai-staging-router-sim)
+                cd /opt/vnx-ai-staging
+                # CHỈ ĐỌC, KHÔNG GỌI MÔ HÌNH NÀO. Mô phỏng phản thực trên lượt ĐÃ CHẠY: làn nào,
+                # tiền bao nhiêu. Bộ định tuyến đang chạy KHÔNG bị đụng tới, và kết quả mô phỏng
+                # không đi vào một câu trả lời khách nào.
+                fetch_staging_script ai-staging-router-sim.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-router-sim.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-staging-router-sim.ts ${ARG:---days=30} ;;
 
               ai-staging-runtime)
                 cd /opt/vnx-ai-staging
