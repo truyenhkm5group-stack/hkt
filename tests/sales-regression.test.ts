@@ -620,7 +620,7 @@ export async function testSalesRegression(db: Db) {
     const intents = understandByRule(t).intents;
     assert.ok(intents.some((i) => ["PURCHASE_INTENT", "CONFIRM"].includes(i)), `"${t}" là ý muốn mua — đang ra ${intents.join(",") || "(rỗng)"}`);
   }
-  for (const t of ["giao chậm quá", "sao lâu thế shop"]) {
+  for (const t of ["giao chậm quá", "sao lâu thế shop", "bao giờ giao hàng", "bao gio giao hang"]) {
     const intents = understandByRule(t).intents;
     assert.ok(intents.some((i) => ["COMPLAINT", "AFTER_SALES"].includes(i)), `"${t}" là việc sau bán — đang ra ${intents.join(",") || "(rỗng)"}`);
   }

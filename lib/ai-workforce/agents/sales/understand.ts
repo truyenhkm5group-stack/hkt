@@ -207,7 +207,7 @@ const KEYWORDS: Record<SalesIntent, string[]> = {
   */
   COMPLAINT: ["kem chat luong", "lua dao", "hang loi", "hang bi loi", "bi loi", "hang hong", "hang bi hong", "giao sai", "gui sai", "rach", "ban qua", "that vong", "bao xau", "khieu nai"],
   ASK_HUMAN: ["gap nhan vien", "nguoi that", "cho gap ad", "noi chuyen voi nguoi", "bot a", "may tra loi"],
-  AFTER_SALES: ["doi size", "doi mau", "tra hang", "tra lai", "muon tra", "doi tra", "doi hang", "muon doi hang", "hoan tien", "don cua em dau", "khi nao giao", "chua nhan duoc", "van don", "buu ta", "shipper", "giao cham", "ship cham", "sao lau the", "lau qua"],
+  AFTER_SALES: ["doi size", "doi mau", "tra hang", "tra lai", "muon tra", "doi tra", "doi hang", "muon doi hang", "hoan tien", "don cua em dau", "khi nao giao", "bao gio giao", "may gio giao", "chua nhan duoc", "van don", "buu ta", "shipper", "giao cham", "ship cham", "sao lau the", "lau qua"],
   OTHER: [],
 };
 
