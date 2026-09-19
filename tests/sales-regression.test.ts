@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
@@ -329,7 +331,68 @@ export async function testSalesRegression(db: Db) {
   assert.deepEqual(cacKhoa.sort(), ["hasPageToken", "hasUserToken", "note", "ok", "pageTokenMatchesThisPage"], "tình trạng chứng thư chỉ được mang 5 trường, không trường nào là token");
   assert.equal(typeof opsTrong.credential.ok, "boolean");
 
+  // ═══════════ 12. BỀ MẶT MỚI KHÔNG MỞ THÊM MỘT ĐƯỜNG RA NÀO ═══════════
+  //
+  // Ba thứ thêm vào ở lượt này đều ĐỌC và SOẠN: bộ ca hồi quy, bản nháp đơn, bảng điều khiển vận
+  // hành. Không cái nào được có đường tới khách hàng hay tới POS. Kiểm bằng cách QUÉT MÃ ĐÃ VÀO
+  // KHO — không đọc đĩa — nên một dòng mới thêm sẽ đỏ ở máy người viết chứ không đợi tới lúc chạy.
+  const BE_MAT_MOI = [
+    "lib/constants/sales-regression.ts",
+    "lib/constants/sales-regression-seed.ts",
+    "lib/constants/order-draft.ts",
+    "lib/ai-workforce/agents/sales/regression.ts",
+    "lib/actions/sales-regression.ts",
+    "lib/queries/fanpage-ops.ts",
+    "lib/actions/fanpage-ops.ts",
+    "lib/queries/sales-metrics.ts",
+    "scripts/run-sales-ai-regression.ts",
+    "app/(dashboard)/ai/[id]/order-draft-card.tsx",
+    "app/(dashboard)/ai/[id]/regression-form.tsx",
+    "app/(dashboard)/ai/fanpage/ops-card.tsx",
+    "app/(dashboard)/ai/breakdown.tsx",
+  ];
+  const CAM = /\bsendSalesMessage\s*\(|\bsendMessage\s*\(|\bsendMessageWithFallback\s*\(|\bcreateOrder\s*\(|approvedByUserId\s*:|callTool\s*\(\s*[^,]+,\s*["']order\./;
+  /*
+    BỎ CHÚ THÍCH TRƯỚC KHI QUÉT.
+
+    Chính bài kiểm này vừa đỏ oan ở `lib/constants/order-draft.ts`, nơi tên công cụ tạo đơn chỉ xuất
+    hiện trong MỘT CÂU GIẢI THÍCH rằng bản nháp KHÔNG gọi nó. Một phép quét bắt cả chú thích sẽ dạy
+    người viết đừng giải thích nữa — đúng thứ kho mã này không muốn. Mã thật thì không trốn được
+    vào chú thích, nên bỏ chú thích đi làm phép quét CHẶT HƠN chứ không lỏng hơn.
+  */
+  const boChuThich = (ma: string) => ma.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  for (const f of BE_MAT_MOI) {
+    let ma = "";
+    try {
+      ma = execSync(`git show HEAD:"${f}"`, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    } catch {
+      // Tệp chưa vào kho ở commit này (đang viết dở) thì đọc đĩa — vẫn phải sạch.
+      try {
+        ma = readFileSync(f, "utf8");
+      } catch {
+        continue;
+      }
+    }
+    assert.ok(!CAM.test(boChuThich(ma)), `${f}: bề mặt mới KHÔNG được có đường gửi tin hay tạo đơn`);
+  }
+  /*
+    PHÉP QUÉT PHẢI BIẾT CẮN, không chỉ biết nói ĐẠT.
+
+    Một biểu thức gõ sai sẽ im lặng đúng bằng một kho mã sạch — và nó sẽ im lặng mãi mãi. Nên kiểm
+    chính nó trên bốn đoạn mã BẨN, và trên một câu chú thích nhắc đúng những tên ấy (câu chú thích
+    KHÔNG được làm đỏ, nếu không người viết sẽ thôi giải thích).
+  */
+  for (const ban of [
+    'await sendSalesMessage({ text: "xin chào" })',
+    "const r = await client.createOrder(payload)",
+    'approvedByUserId: user.id',
+    'await callTool(ctx, "order.create_draft", args)',
+  ]) {
+    assert.ok(CAM.test(boChuThich(ban)), `phép quét phải bắt được: ${ban}`);
+  }
+  assert.ok(!CAM.test(boChuThich("// đường tạo đơn thật vẫn là order.create_draft và nó đi qua cổng công cụ")), "một câu giải thích KHÔNG được làm đỏ phép quét");
+
   console.log(
-    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai) · truy vấn tình trạng vận hành CHẠY THẬT trên lược đồ đã migrate`,
+    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai) · truy vấn tình trạng vận hành CHẠY THẬT trên lược đồ đã migrate · ${BE_MAT_MOI.length} tệp bề mặt mới KHÔNG có đường gửi tin / tạo đơn nào`,
   );
 }
