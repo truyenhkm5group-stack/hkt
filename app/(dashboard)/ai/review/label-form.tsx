@@ -51,6 +51,7 @@ export function LabelForm({ suggestionId, initial }: { suggestionId: string; ini
   });
   const [hallucination, setHallucination] = useState<Verdict>((initial.hallucination as Verdict) ?? null);
   const [note, setNote] = useState(String(initial.note ?? ""));
+  const [expected, setExpected] = useState(String(initial.expectedBehavior ?? ""));
   const [pending, start] = useTransition();
   const [daLuu, setDaLuu] = useState<{ luc: string; ai: string } | null>(() => {
     const luc = initial.reviewedAt;
@@ -64,7 +65,7 @@ export function LabelForm({ suggestionId, initial }: { suggestionId: string; ini
     trước đó trông y hệt lúc đã lưu. So với ẢNH CHỤP LÚC MỞ chứ không giữ một cờ `dirty` bật tay:
     bấm nhầm rồi bấm lại về chỗ cũ thì đúng là không có gì để lưu, và cờ bật tay sẽ nói dối.
   */
-  const hienTai = JSON.stringify({ values, quality, verdict, tags: [...tags].sort(), hallucination, note });
+  const hienTai = JSON.stringify({ values, quality, verdict, tags: [...tags].sort(), hallucination, note, expected });
   // `useState` chỉ đọc tham số ở lần dựng ĐẦU, nên đây đúng là ảnh chụp lúc mở — và sau mỗi lần
   // lưu thành công thì dời mốc sang trạng thái vừa lưu.
   const [moc, setMoc] = useState(hienTai);
@@ -81,7 +82,7 @@ export function LabelForm({ suggestionId, initial }: { suggestionId: string; ini
 
   const submit = () => {
     start(async () => {
-      const result = await saveShadowLabel({ suggestionId, ...values, nextActionQuality: quality, verdict, reasonTags: tags, hallucination, note });
+      const result = await saveShadowLabel({ suggestionId, ...values, nextActionQuality: quality, verdict, reasonTags: tags, hallucination, note, expectedBehavior: expected });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -105,6 +106,14 @@ export function LabelForm({ suggestionId, initial }: { suggestionId: string; ini
         câu. Nó tách khỏi "hành động kế tiếp" bên dưới có chủ ý: máy chọn đúng việc (hỏi size) mà
         câu chữ vẫn có thể không gửi được, và gộp hai câu hỏi lại là mất đúng một trong hai.
       */}
+      {/*
+        BA NẤC, NHƯNG CHỈ HAI KẾT CỤC — và màn hình phải nói ra cả hai tầng.
+
+        Báo cáo chỉ đếm ĐẠT / KHÔNG ĐẠT, nên nếu nút chỉ ghi "Sửa nhẹ là gửi được" thì người chấm
+        không biết mình vừa bỏ phiếu về phía nào. Nhưng gộp thẳng thành hai nút thì mất nấc giữa —
+        mà nấc giữa chính là chỗ nằm của phần lớn câu trả lời thật, và là thứ phân biệt "máy viết
+        được, người sửa một chữ" với "máy viết hỏng". Nên: giữ ba nút, ghi kết cục ngay trên nút.
+      */}
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <span className="text-xs text-muted-foreground">Câu này:</span>
         {REVIEW_VERDICTS.map((v) => (
@@ -122,7 +131,7 @@ export function LabelForm({ suggestionId, initial }: { suggestionId: string; ini
                 : "border-border text-muted-foreground"
             }`}
           >
-            {REVIEW_VERDICT_LABEL[v]}
+            {v === "BAD" ? "KHÔNG ĐẠT" : "ĐẠT"} · {REVIEW_VERDICT_LABEL[v]}
           </button>
         ))}
       </div>
@@ -165,6 +174,26 @@ export function LabelForm({ suggestionId, initial }: { suggestionId: string; ini
         ))}
         <Tri label="Bịa / phá luật" value={hallucination} onChange={setHallucination} />
       </div>
+      {/*
+        HAI Ô CHỮ, KHÔNG MỘT — và đây không phải chuyện gọn gàng.
+
+        "Ghi chú" trả lời *người chấm nghĩ gì*; ô dưới trả lời *đúng ra máy phải làm gì*. Chỉ câu
+        thứ hai biến một lượt chấm thành một CA HỒI QUY: muốn khoá một lỗi lại thì phải có kỳ vọng,
+        và kỳ vọng ấy chỉ người vừa đọc ca mới nói được. Gộp vào một ô thì lúc dựng ca phải ĐOÁN
+        đoạn nào là kỳ vọng — đúng thứ bộ hồi quy sinh ra để khỏi phải đoán.
+
+        Ô này chỉ hiện khi đã chấm KHÔNG ĐẠT: lượt đạt thì không có gì "lẽ ra phải khác", và một ô
+        trống luôn hiện ra là một ô người ta học cách bỏ qua.
+      */}
+      {verdict === "BAD" ? (
+        <textarea
+          value={expected}
+          onChange={(e) => setExpected(e.target.value)}
+          placeholder="ĐÚNG RA MÁY PHẢI LÀM GÌ? (câu này sẽ thành kỳ vọng của ca hồi quy)"
+          className="w-full rounded-md border border-rose-500/50 bg-background p-2 text-xs"
+          rows={2}
+        />
+      ) : null}
       <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (tuỳ chọn)" className="w-full rounded-md border border-border bg-background p-2 text-xs" rows={2} />
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={submit} disabled={pending}>

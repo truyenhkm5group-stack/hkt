@@ -1276,6 +1276,56 @@ export async function testSalesAgent(db: Db) {
   // Bất biến khoá ở đây là bất biến CỦA LUẬT 13, không phải của một dòng mã: đã chuyển người thì
   // phải đọc được mã lý do. Quét TOÀN BỘ gợi ý trong CSDL thử chứ không chỉ một hội thoại — một
   // đường ghi mới quên lưu bản để chấm sẽ rơi vào đây ngay, không cần ai nhớ thêm một ca kiểm.
+  /*
+    DỰNG LẠI CHÍNH XÁC TÌNH HUỐNG ĐÃ HỎNG, chứ không chỉ quét xem có hỏng không.
+
+    Bất biến quét toàn bảng bên dưới chỉ ĐỎ khi tình huống ấy có mặt trong bộ dữ liệu thử. Nếu một
+    ngày fixture đổi và không còn lượt CHỈ-ĐỂ-CHẤM nào mang `HANDOFF_HUMAN`, phép quét vẫn xanh —
+    xanh vì không có gì để kiểm, không phải vì mọi thứ đúng. Đó đúng là cách một bài kiểm chết đi
+    mà không ai nhận ra.
+
+    Nên dựng thẳng ca ấy: hội thoại ĐÃ CÓ NGƯỜI VÀO CẦM, nấc SHADOW, rồi khách gửi một câu buộc
+    chuyển người. Bản ĐƯỢC PHÉP là `NO_ACTION` (người đang cầm việc); bản ĐỂ CHẤM là
+    `HANDOFF_HUMAN` kèm mã lý do. Trước bản vá, đúng mã lý do ấy bị ném đi.
+  */
+  const nguoiCam = { pageId: "page-eo", externalId: "conv-eo", pancakeCustomerId: "cust-eo", customerName: "Chị Mai", phone: "", platform: "facebook" };
+  const eo1 = await ingestMessage(
+    nguoiCam,
+    { externalId: "eo-1", text: "cho em gap nhan vien", fromPage: false, senderType: "CUSTOMER", fromName: "Chị Mai", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+  );
+  await drainSalesTasks(10, db);
+  const daCam = await db.query.salesConversations.findFirst({ where: eq(schema.salesConversations.id, eo1.conversationId) });
+  assert.ok(daCam?.humanTakeoverAt, "dựng ca: hội thoại này phải đã có người vào cầm");
+
+  // Tin thứ hai, trên hội thoại NGƯỜI ĐANG CẦM: đây là lượt CHỈ-ĐỂ-CHẤM.
+  const eo2 = await ingestMessage(
+    nguoiCam,
+    { externalId: "eo-2", text: "hang bi loi, toi muon tra lai", fromPage: false, senderType: "CUSTOMER", fromName: "Chị Mai", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+  );
+  await drainSalesTasks(10, db);
+
+  // ĐỌC LẠI TỪ CSDL, không đọc lại biến trong bộ nhớ — bản vá sửa đúng chỗ GHI XUỐNG, nên một phép
+  // đo đọc lại biến vừa tính sẽ luôn xanh kể cả khi đường ghi hỏng hoàn toàn.
+  const goiYEo = await db.query.salesSuggestions.findMany({ where: eq(schema.salesSuggestions.conversationId, eo2.conversationId) });
+  const chiDeCham = goiYEo.filter((x) => x.evaluationOnly);
+  assert.ok(chiDeCham.length > 0, "phải có ít nhất một lượt CHỈ-ĐỂ-CHẤM — nếu không, bất biến bên dưới không kiểm được gì");
+  const eoHandoff = chiDeCham.find((x) => x.action === "HANDOFF_HUMAN");
+  assert.ok(eoHandoff, `lượt chỉ-để-chấm phải ra HANDOFF_HUMAN, đang ra: ${chiDeCham.map((x) => x.action).join(",")}`);
+  const runEo = await db.query.aiRuns.findFirst({ where: eq(schema.aiRuns.id, eoHandoff!.runId!) });
+  const qdEo = (runEo?.decision ?? {}) as Record<string, unknown>;
+  const banDeChamEo = (qdEo.evaluation ?? null) as Record<string, unknown> | null;
+  assert.equal(qdEo.action, "NO_ACTION", "bản ĐƯỢC PHÉP phải là NO_ACTION — người đang cầm việc thì máy đứng ngoài");
+  assert.ok(banDeChamEo, "bản ĐỂ CHẤM phải được LƯU XUỐNG, đây chính là dòng bản vá thêm vào");
+  assert.equal(banDeChamEo?.action, "HANDOFF_HUMAN");
+  assert.ok(
+    String(banDeChamEo?.handoffReason ?? "").length > 0,
+    "chuyển người ⇒ PHẢI đọc được mã lý do từ CSDL (luật 13) — đây là bất biến bản vá bảo vệ",
+  );
+
   const taSuggestions = await db.query.salesSuggestions.findMany();
   const taRuns = await db.query.aiRuns.findMany();
   const taTheoId = new Map(taRuns.map((r) => [r.id, r]));

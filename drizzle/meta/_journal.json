@@ -673,6 +673,13 @@
       "when": 1789381583786,
       "tag": "0096_sales_regression_cases",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1789381643786,
+      "tag": "0097_review_expected_behavior",
+      "breakpoints": true
     }
   ]
 }

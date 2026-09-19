@@ -11,6 +11,7 @@ import { getDb } from "@/db";
 import { intentDistribution, pagesWithConversations } from "@/lib/queries/sales-metrics";
 import { batchProgress, evalBatchCoverage } from "@/lib/queries/sales-eval-batch";
 import { EVAL_BATCH_MIN, type EvalBucketKey } from "@/lib/constants/sales-eval-buckets";
+import { HANDOFF_REASON_LABEL, type HandoffReason } from "@/lib/constants/sales-agent";
 import type { SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Soát nhân sự AI" };
@@ -363,6 +364,37 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
                 </p>
                 {turn.labelSummary ? <p className="text-[11px] text-amber-700 dark:text-amber-300">{turn.labelSummary}</p> : null}
               </div>
+            </div>
+
+            {/*
+              ───────── BÁM DỮ KIỆN ─────────
+
+              Người chấm KHÔNG nói được "máy báo đúng giá không" nếu màn hình chỉ đưa câu chữ. Câu
+              "499.000 ₫" đọc thì hợp lý ở mọi hội thoại; nó chỉ sai khi đặt cạnh mẫu mã mà máy
+              TƯỞNG khách đang hỏi. Nên sáu ô này đi KÈM câu gợi ý, không nằm ở một trang khác —
+              bắt người chấm mở tab mới cho từng ca là cách chắc chắn nhất để họ thôi kiểm.
+
+              Ô tiền trống in `—` chứ không in `0 ₫`: máy KHÔNG báo giá khi chưa biết là hành vi
+              ĐÚNG, còn báo 0đ mới là hỏng. Với phép chấm thì phân biệt ấy là cốt lõi.
+            */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded border border-border/60 bg-muted/30 px-2.5 py-1.5 text-[11px]">
+              <span className="font-semibold uppercase tracking-wide text-muted-foreground">Bám dữ kiện</span>
+              <span>mã hàng: <strong className={turn.grounding.productId ? "" : "text-amber-700 dark:text-amber-300"}>{turn.grounding.productId || "CHƯA NỐI ĐƯỢC"}</strong></span>
+              <span>mẫu mã: <strong className={turn.grounding.variantId ? "" : "text-amber-700 dark:text-amber-300"}>{turn.grounding.variantId || "chưa chốt"}</strong></span>
+              <span>màu · size: <strong>{turn.grounding.color || "—"} · {turn.grounding.size || "—"}</strong></span>
+              <span>tiền máy chủ tính: <strong>{formatVND(turn.grounding.quotedTotal)}</strong></span>
+              <span>SĐT: <strong>{turn.grounding.phone ? "có" : "—"}</strong></span>
+              <span>địa chỉ: <strong>{turn.grounding.address ? "có" : "—"}</strong></span>
+              <span>khách đã chốt: <strong>{turn.grounding.confirmed ? "RỒI" : "chưa"}</strong></span>
+              {turn.handoffReason ? (
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                  chuyển người: {HANDOFF_REASON_LABEL[turn.handoffReason as HandoffReason] ?? turn.handoffReason}
+                </span>
+              ) : turn.action === "HANDOFF_HUMAN" ? (
+                <span className="rounded bg-rose-100 px-1.5 py-0.5 font-semibold text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+                  chuyển người · KHÔNG GHI MÃ LÝ DO
+                </span>
+              ) : null}
             </div>
 
             <LabelForm suggestionId={turn.suggestionId} initial={labelBySuggestion.get(turn.suggestionId) ?? {}} />

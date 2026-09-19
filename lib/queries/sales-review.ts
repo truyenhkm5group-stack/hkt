@@ -83,6 +83,28 @@ export type ShadowTurn = {
   stageAfter: string;
   action: string;
   decisionReason: string;
+  /**
+   * BÁM DỮ KIỆN — máy nối câu trả lời của nó vào ĐÂU trong ERP.
+   *
+   * Người chấm không thể nói "máy báo đúng giá không" nếu màn hình chỉ đưa câu chữ. Câu "499.000 ₫"
+   * đọc thì hợp lý ở mọi hội thoại; nó chỉ sai khi đặt cạnh mẫu mã mà máy tưởng khách đang hỏi.
+   * Vì vậy sáu ô dưới đây đi KÈM câu gợi ý, không nằm ở một trang khác.
+   *
+   * `null` ở ô tiền là CHƯA BIẾT, không phải 0 đồng (luật 42) — và với phép chấm thì phân biệt ấy
+   * là cốt lõi: máy KHÔNG báo giá khi chưa biết là hành vi ĐÚNG, báo 0đ mới là hỏng.
+   */
+  grounding: {
+    productId: string;
+    variantId: string;
+    color: string;
+    size: string;
+    quotedTotal: number | null;
+    phone: string;
+    address: string;
+    confirmed: boolean;
+  };
+  /** Mã lý do chuyển người, đọc từ bản ĐỂ CHẤM trước rồi mới tới bản được phép. `""` = không có. */
+  handoffReason: string;
   suggestedReply: string;
   confidence: number | null;
   /** Câu nhân viên trả lời (câu đầu của lượt) + số tin + thời gian phản hồi. */
@@ -163,6 +185,7 @@ export async function listShadowTurns(filters: ShadowTurnFilters = {}): Promise<
       customerMessageAt: sql<Date | null>`(select m.sent_at from sales_messages m where m.id = ${s.triggerMessageId})`,
       understanding: r.understanding,
       decision: r.decision,
+      stateAfter: r.stateAfter,
       tier: r.tier,
       inputTokens: r.inputTokens,
       outputTokens: r.outputTokens,
@@ -212,6 +235,24 @@ export async function listShadowTurns(filters: ShadowTurnFilters = {}): Promise<
       stageAfter: row.stageAfter,
       action: row.action,
       decisionReason: String(decision.reason ?? ""),
+      grounding: (() => {
+        const st = (row.stateAfter ?? {}) as Record<string, unknown>;
+        const tien = st.quotedTotal;
+        return {
+          productId: String(st.productId ?? ""),
+          variantId: String(st.variantId ?? ""),
+          color: String(st.color ?? ""),
+          size: String(st.size ?? ""),
+          // CHỈ nhận số THẬT. `null`, chuỗi rỗng và `NaN` đều đi chung nhánh CHƯA BIẾT.
+          quotedTotal: typeof tien === "number" && Number.isFinite(tien) ? tien : null,
+          phone: String(st.phone ?? ""),
+          address: String(st.address ?? ""),
+          confirmed: Boolean(st.confirmed),
+        };
+      })(),
+      handoffReason: String(
+        ((decision.evaluation ?? {}) as Record<string, unknown>).handoffReason ?? decision.handoffReason ?? "",
+      ),
       suggestedReply: row.suggestedReply,
       confidence: row.confidence === null ? null : Number(row.confidence),
       humanReply: row.humanReply,

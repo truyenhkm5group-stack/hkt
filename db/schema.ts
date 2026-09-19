@@ -2934,6 +2934,17 @@ export const salesReviewLabels = pgTable(
      */
     reasonTags: jsonb("reason_tags").$type<string[]>().notNull().default([]),
     note: text("note").notNull().default(""),
+    /**
+     * ĐIỀU MÁY LẼ RA PHẢI LÀM — tách hẳn khỏi `note`, và đó không phải chuyện gọn gàng.
+     *
+     * `note` trả lời "người chấm nghĩ gì"; ô này trả lời "đúng ra máy phải làm gì". Chỉ câu thứ
+     * hai biến được một lượt chấm thành một CA HỒI QUY: muốn khoá một lỗi lại thì phải biết kỳ
+     * vọng, mà kỳ vọng ấy chỉ người đọc ca mới nói được. Gộp hai câu vào một ô chữ thì lúc dựng ca
+     * phải đoán xem đoạn nào là kỳ vọng — và đoán kỳ vọng là đúng thứ bộ hồi quy sinh ra để tránh.
+     *
+     * Rỗng là hợp lệ và có nghĩa rõ: lượt ĐẠT thì không có gì "lẽ ra phải khác".
+     */
+    expectedBehavior: text("expected_behavior").notNull().default(""),
     /** Quy kết đi bằng KHOÁ TÀI KHOẢN, không bằng ô chữ. */
     reviewerUserId: text("reviewer_user_id").references(() => users.id, { onDelete: "set null" }),
     reviewedAt: ts("reviewed_at"),

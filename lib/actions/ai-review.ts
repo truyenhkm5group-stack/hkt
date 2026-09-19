@@ -49,6 +49,7 @@ const labelSchema = z.object({
   hallucination: z.boolean().nullable().optional(),
   hallucinationNote: z.string().trim().max(1000).optional(),
   note: z.string().trim().max(2000).optional(),
+  expectedBehavior: z.string().trim().max(2000).optional(),
 });
 
 export async function saveShadowLabel(input: unknown): Promise<ActionResult> {
@@ -85,6 +86,7 @@ export async function saveShadowLabel(input: unknown): Promise<ActionResult> {
     hallucination: data.hallucination ?? null,
     hallucinationNote: data.hallucinationNote ?? "",
     note: data.note ?? "",
+    expectedBehavior: data.expectedBehavior ?? "",
     reviewerUserId: user.id,
     reviewedAt: new Date(),
   };
