@@ -82,26 +82,52 @@ nó đứng **trước** bước đọc secret. Kiểm sau khi đã đọc là k
 > ⚠️ **Hàng rào này chặn nhầm lẫn, không chặn cố ý.** Nó nằm trong chính tệp workflow, nên ai sửa
 > được tệp trên một nhánh thì cũng xoá được dòng kiểm ấy rồi dispatch nhánh đó.
 
-### Hàng rào cứng — nên làm, không chặn bản này
+### Hàng rào cứng — Environment `agent-identity`
 
-Chuyển ba secret `ERP_AGENT_GITHUB_*` vào một **Environment** (ví dụ `agent-identity`) có
-*deployment branch policy* chỉ cho `main`, rồi thêm `environment: agent-identity` vào job. Lượt
-chạy từ nhánh khác sẽ **không đọc được secret** — thất bại **ĐÓNG**, không phụ thuộc vào nội dung
-một tệp mà agent sửa được.
+Job khai `environment: agent-identity`. Ba secret `ERP_AGENT_GITHUB_*` sống **trong Environment
+đó**, không phải ở Actions Secrets của kho, và Environment có *deployment branch policy* chỉ cho
+`main`. Lượt chạy từ nhánh khác **không đọc được secret** — thất bại **ĐÓNG**, và lần này quyết
+định nằm ở phía GitHub, không đọc một dòng nào của tệp mà agent sửa được.
+
+**Hai hàng rào cùng tồn tại, không cái nào thay cái nào.** Environment chưa được tạo thì GitHub
+**tự tạo** nó khi job chạy lần đầu — **rỗng, và không có chính sách nhánh**. Hàng rào cứng lúc đó
+biến mất mà không ai được báo, và chỉ còn phép kiểm `ref` đứng lại. Một hàng rào tự dựng lên ở
+trạng thái mở là lý do để giữ hàng rào thứ hai, không phải lý do để bỏ nó.
+
+**Tên Environment là hằng số trong tệp.** Cho nó nhận `inputs.*` là để người gọi tự chọn kho
+secret — tự chọn hàng rào của chính mình, tức là không có hàng rào. `tests/agent-pr-bridge.test.ts`
+khối 8 khoá cả ba điều: khai ở **mức job** (khai ở mức step thì bước khác trong cùng job vẫn đọc
+secret kho), tên đúng `agent-identity`, và tên **không nội suy**.
+
+#### Việc của người — đặt secret ĐÚNG CHỖ
+
+| | |
+| --- | --- |
+| Tạo Environment `agent-identity` | *Settings → Environments → New environment* |
+| *Deployment branch policy* | **Selected branches** → chỉ `main` |
+| Ba secret đặt **trong Environment** | `ERP_AGENT_GITHUB_APP_ID` · `ERP_AGENT_GITHUB_INSTALLATION_ID` · `ERP_AGENT_GITHUB_PRIVATE_KEY` |
+| Secret **cùng tên ở mức kho** | **XOÁ** — xem ngay dưới |
+
+`secrets.X` trong một job có `environment:` lấy giá trị của Environment **trước**, rồi mới **lùi
+về** secret của kho. Nên để lại một bản cùng tên ở mức kho là giữ nguyên đúng cái đường mà
+Environment sinh ra để đóng: một nhánh chưa review vẫn đọc được bản của kho. Khoá riêng của App
+chỉ được tồn tại **một bản**, và bản đó nằm trong Environment.
 
 **Đây là một lỗ hổng có từ trước, không phải do bản này sinh ra.** Hôm nay `ops-vps.yml` và
 `deploy-vps.yml` cũng dispatch được với `ref` là một nhánh đã sửa — tức là mã chưa review chạy được
-với khoá SSH của VPS và token GHCR. Environment đóng được cả ba chỗ cùng lúc.
+với khoá SSH của VPS và token GHCR. Bản này đóng **một** trong ba chỗ; hai chỗ kia đóng bằng đúng
+cách ấy, ở một bản riêng, vì chúng đụng tới đường deploy đang chạy.
 
 ## 5 · Bài kiểm
 
 `tests/agent-pr-bridge.test.ts` quét **mã nguồn**, vì `tsc` và `eslint` không nhìn thấy một *sự
 vắng mặt*: thêm một dòng `fetch` là mở một đường mới mà mọi cổng khác vẫn xanh.
 
-Bảy khối: không `/merge` · không `/reviews` · không chạm cấu hình kho · không checkout hay chạy mã
+Tám khối: không `/merge` · không `/reviews` · không chạm cấu hình kho · không checkout hay chạy mã
 nhánh nguồn (và input chỉ đi qua `env:`) · phép kiểm nhánh đứng trước bước đọc secret ·
 `GITHUB_TOKEN` không có quyền ghi · đối chứng bằng credential khác và sai thì đỏ · luật nhánh dùng
-lại `assertAgentBranch` thay vì chép.
+lại `assertAgentBranch` thay vì chép · secret nằm trong Environment `agent-identity` khai ở mức job
+với tên là hằng.
 
 ## 6 · Việc của người — đúng MỘT thao tác
 
