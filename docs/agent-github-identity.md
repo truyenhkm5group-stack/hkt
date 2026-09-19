@@ -91,7 +91,7 @@ ký bằng khoá công khai**.
 
 ---
 
-## 3 · ⛔ CHECKPOINT — phần này CHỦ SHOP phải bấm
+## 3 · ✅ ĐÃ XONG — chủ shop đã bấm 19/09/2026 (giữ lại để dựng lại được)
 
 Tạo GitHub App **bắt buộc đi qua trình duyệt**: luồng duy nhất không cần người là
 `POST /app-manifests/{code}/conversions`, và cái `code` ấy chỉ sinh ra sau khi một NGƯỜI bấm
@@ -169,7 +169,7 @@ Sau bốn bước trên, phần còn lại tự động: adapter đọc secret, 
 
 ---
 
-## 4 · Kiểm sau khi có secret — phải thấy đúng hai điều
+## 4 · ✅ Kiểm sau khi có secret (kết quả thật ở phụ lục)
 
 ```
 npm run check:integrations -- --agent-identity
@@ -186,7 +186,7 @@ và nâng số duyệt lên 1 vẫn sẽ khoá chết kho.
 
 ---
 
-## 5 · Bằng chứng danh tính — chỉ tài liệu, không chạm mã nghiệp vụ
+## 5 · ✅ Bằng chứng danh tính — đã chạy, PR #24 (kết quả ở phụ lục)
 
 Sau khi mục 4 xanh, chạy một lượt chứng minh bằng **đúng** danh tính `erp-agent`:
 
@@ -250,3 +250,98 @@ nào cũng được; chuyển sang Organization cũng chỉ đổi chỗ. Nên m
 
 Sau Phase 2B.5, vế đầu có thêm một chân: agent chạy bằng một danh tính **không mang quyền
 `Administration`**, nên nó không sửa được ruleset kể cả khi lớp proxy biến mất.
+
+
+---
+
+# PHỤ LỤC · 19/09/2026 — ĐÃ CHẠY THẬT, VỚI CREDENTIAL THẬT
+
+App đã tạo: **`erp-agent-vnx`** (id `5001810`), cài đặt `163026219`, phạm vi `selected` — đúng một
+kho. Chạy bằng `scripts/agent-identity-proof.ts`.
+
+## A · Danh tính — đạt
+
+```
+appSlug        : erp-agent-vnx
+botLogin       : erp-agent-vnx[bot]        ← KHÁC truyenhkm5group-stack
+installationId : 163026219
+repoSelection  : selected  (GET /installation/repositories → đúng 1 kho)
+```
+
+`GET /repos/…/pulls/24` đọc lại từ GitHub: `user.login = erp-agent-vnx[bot]`, `user.type = Bot`.
+Tác giả PR do **TOKEN** quyết định, không do `git config user.name` — nên đây là phép đo danh tính
+thật, không phải một cái nhãn gõ tay.
+
+## B · Quyền — đúng năm ô, không thừa một ô nào
+
+```
+checks=read · actions=read · contents=write · metadata=read · pull_requests=write
+```
+
+Không có: `administration` · `secrets` · `variables` · `environments` · `repository_hooks` ·
+`workflows`. `actions` chỉ `read`.
+
+## C · MỘT CÁI BẪY BỊ BẮT — VÀ VÌ SAO PHẢI CÓ ĐỐI CHỨNG
+
+Bản đầu của bộ chứng minh đẩy nhánh bằng `git push` với URL mang token của App. Phép **đối chứng**
+— đẩy bằng một token **RÁC** — lẽ ra phải hỏng. Nó **THÀNH CÔNG**:
+
+| Phép thử | Kết quả |
+|---|---|
+| token **rác** → đẩy nhánh vào `truyenhkm5group-stack/hkt` | **THÀNH CÔNG** |
+| token **rác** → một kho ngoài phạm vi phiên | `Invalid username or token` |
+
+Môi trường agent đang chạy **tự tiêm credential của phiên** vào mọi lời gọi git tới kho được phép.
+Ở môi trường như thế, một lượt `git push` nói về danh tính của **PHIÊN**, không nói gì về danh
+tính của **App** — và một bằng chứng danh tính rút ra từ đó là **bằng chứng giả**, thuyết phục
+đúng ở chỗ nguy hiểm nhất.
+
+Nên bằng chứng chuyển sang **đường API** (`createAgentBranch` + `commitAgentFile`), nơi
+`Authorization` là tường minh, kèm hai đối chứng rẻ và quyết định:
+
+```
+GET /user                        → 403   (token cài đặt KHÔNG có ngữ cảnh người dùng;
+                                          trả về một hồ sơ người dùng = token đã bị tráo)
+GET /installation/repositories   → 200, đúng 1 kho: truyenhkm5group-stack/hkt
+```
+
+**Bài học giữ lại:** mỗi phép đo danh tính phải kèm một đối chứng ÂM. Không có nó thì "đã chứng
+minh" và "trông như đã chứng minh" nhìn giống hệt nhau.
+
+## D · Bốn việc agent KHÔNG làm được — bốn cơ chế chặn KHÁC NHAU
+
+| Việc | Kết quả đo | Ai chặn |
+|---|---|---|
+| ghi thẳng `main` (API) | **409** · *"Changes must be made through a pull request"* | **ruleset** |
+| tự duyệt PR của chính mình | **422** | **GitHub** — tác giả không tự duyệt |
+| sửa ruleset (`POST /rulesets`) | **403** | App **thiếu** `Administration` |
+| đọc khoá secret của kho | **403** | App **thiếu** `Secrets` |
+| sửa cấu hình kho (`PATCH /repos/…`) | **403** | App **thiếu** `Administration` |
+
+Gộp bốn cái này thành một ô "an toàn" là mất khả năng sửa khi một cái hỏng.
+
+> Một 409 kèm *"rule violations"* **là** bị từ chối. Bản đầu của `phaiBiTuChoi()` chỉ nhận 403/404
+> nên chấm nó thành ĐỎ — một báo động giả đúng ở chỗ tệ nhất: nó làm người đọc nghi ngờ một hàng
+> rào đang hoạt động.
+
+## E · Cổng — xanh
+
+`gates / gates` trên `d8e44cc0af3d` (PR #24): **success**.
+
+## F · ĐIỀU DUY NHẤT CÒN HỞ — và nó chỉ đóng được bằng ruleset
+
+```
+PR #24 · gates / gates xanh · 0 lượt duyệt · mergeable_state: "clean"
+```
+
+**`clean` nghĩa là GỘP ĐƯỢC.** Một token mang `contents: write` + `pull_requests: write` gộp được
+PR khi ruleset đòi **0** lượt duyệt — quyền của App **không** chặn việc gộp, và không có cấu hình
+quyền nào của GitHub App chặn được nó.
+
+Vì thế bộ chứng minh **cố ý KHÔNG thử gộp**: thử là thật sự gộp một thứ vào `main`, chứ không phải
+chứng minh nó bị chặn. Phép thử ấy chỉ có nghĩa **sau** khi ruleset lên 1 lượt duyệt — chạy lại
+với `--probe-merge`.
+
+Adapter vẫn **không có** đường gộp (khoá bằng sự vắng mặt, có bài kiểm quét mã nguồn), nên *mã ERP*
+không gộp được. Nhưng *credential* thì gộp được — và hàng rào phải nằm ở chỗ credential, không nằm
+ở thiện chí của mã.
