@@ -68,7 +68,9 @@ select
   c.provider,
   c.model,
   -- Cắt phần thay đổi theo từng lượt (mã yêu cầu, con số) để các lượt cùng nguyên nhân gộp làm một.
-  left(regexp_replace(coalesce(c.error, '(không có lời lỗi)'), '[0-9a-f]{8,}', '<mã>', 'g'), 160) as loi_lo,
+  -- LÀM PHẲNG trước rồi mới cắt: lời lỗi của zod dài hàng chục dòng, nên `left()` trên bản nhiều
+  -- dòng vẫn in ra hàng chục dòng và đẩy chính dòng đông nhất ra khỏi màn hình.
+  left(regexp_replace(regexp_replace(coalesce(c.error, '(không có lời lỗi)'), '\s+', ' ', 'g'), '[0-9a-f]{8,}', '<mã>', 'g'), 90) as loi_lo,
   count(*)            as so_lan,
   min(c.created_at)   as lan_dau,
   max(c.created_at)   as lan_cuoi
