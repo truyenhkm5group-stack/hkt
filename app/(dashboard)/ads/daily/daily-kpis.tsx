@@ -16,8 +16,24 @@ import type { MarketingDaily, MarketingDailyBase } from "@/lib/queries/marketing
 
 type Tile = { label: string; value: string; note?: string; hint?: string; tone?: "default" | "green" | "rose" | "amber" };
 
-function changeNote(key: string, now: MarketingDailyBase, prev: MarketingDailyBase | null): { note?: string; tone?: Tile["tone"] } {
+/**
+ * ═══════════ HAI KỲ CHƯA CHÍN BẰNG NHAU THÌ KHÔNG SO ĐƯỢC TIỀN ═══════════
+ *
+ * Mũi tên so với kỳ trước là một phép so sánh HỢP LỆ cho phễu (chi, tin nhắn, đơn): chúng đóng
+ * sổ ngay trong ngày. Với LỢI NHUẬN và MARGIN thì không: kỳ này mới 2% đơn ngã ngũ còn kỳ trước
+ * đã 85%, nên "lợi nhuận giảm 70%" đang đo ĐỘ TRỄ GIAO HÀNG chứ không đo hiệu quả kinh doanh — và
+ * nó hiện ra bằng một mũi tên ĐỎ, đúng thứ làm người đọc đi cắt một chiến dịch đang lãi.
+ *
+ * Nên nhóm tiền chỉ có mũi tên khi CẢ HAI kỳ đã ngã ngũ. Không đủ điều kiện thì không có mũi tên,
+ * và lý do in ngay tại chỗ thay vì để ô trống tự nói.
+ */
+const PROFIT_KEYS = new Set(["contributionProfit", "netProfit", "margin", "roasDelivered"]);
+
+function changeNote(key: string, now: MarketingDailyBase, prev: MarketingDailyBase | null, matureNow?: boolean, maturePrev?: boolean): { note?: string; tone?: Tile["tone"] } {
   if (!prev) return {};
+  if (PROFIT_KEYS.has(key) && !(matureNow && maturePrev)) {
+    return { note: "chưa so được với kỳ trước — hai kỳ chưa ngã ngũ như nhau", tone: "default" };
+  }
   const spec = MARKETING_METRIC_BY_KEY[key];
   const read = (b: MarketingDailyBase) => (spec?.num && spec.den ? ratioOf(key, b as unknown as Record<string, unknown>) : ((b as unknown as Record<string, number | null>)[key] ?? null));
   const a = read(now);
@@ -33,6 +49,16 @@ function changeNote(key: string, now: MarketingDailyBase, prev: MarketingDailyBa
 export function MarketingKpis({ data }: { data: MarketingDaily }) {
   const t = data.totals;
   const p = data.previousTotals;
+  /*
+    "ĐÃ GHI NHẬN" ≠ "KẾT QUẢ CUỐI", và nhãn phải đứng NGAY TRÊN con số.
+
+    Dải độ chín ở đầu trang đã nói điều này, nhưng một người lướt xuống thẻ "Lợi nhuận góp" và đọc
+    một số âm sẽ kết luận xong trước khi ngước lên. Nhãn ở đây không thêm thông tin mới — nó đặt
+    thông tin cũ vào đúng chỗ người ta ra quyết định.
+  */
+  const chin = t.maturity === "FINAL";
+  const chinPrev = p?.maturity === "FINAL";
+  const nhanTien = chin ? "kết quả cuối" : `đang ghi nhận · còn ${formatNumber(t.pendingOrders)} đơn đang đi`;
   const vnd = (v: number | null) => (v === null ? MISSING_TEXT : formatVND(v));
   const cnt = (v: number | null) => (v === null ? MISSING_TEXT : formatNumber(v));
   const pct = (v: number | null) => (v === null ? MISSING_TEXT : formatPercent(v));
@@ -47,9 +73,14 @@ export function MarketingKpis({ data }: { data: MarketingDaily }) {
     { label: "Tỷ lệ giao", value: pct(ratioOf("deliveryRate", t as unknown as Record<string, unknown>)), hint: MARKETING_METRIC_BY_KEY.deliveryRate.nullRule, ...changeNote("deliveryRate", t, p) },
     { label: "Giá vốn", value: vnd(t.cogs), ...changeNote("cogs", t, p) },
     { label: "CPQC / đơn", value: vnd(ratioOf("costPerOrder", t as unknown as Record<string, unknown>)), ...changeNote("costPerOrder", t, p) },
-    { label: "ROAS thực", value: (() => { const v = ratioOf("roasDelivered", t as unknown as Record<string, unknown>); return v === null ? MISSING_TEXT : String(Math.round(v * 100) / 100); })(), ...changeNote("roasDelivered", t, p) },
-    { label: "Lợi nhuận góp", value: vnd(t.contributionProfit), hint: "Doanh thu thực − giá vốn − cước/phí − chi quảng cáo. Lọc được theo mọi chiều.", ...changeNote("contributionProfit", t, p) },
-    { label: "Margin", value: pct(ratioOf("margin", t as unknown as Record<string, unknown>)), ...changeNote("margin", t, p) },
+    { label: `ROAS thực — ${nhanTien}`, value: (() => { const v = ratioOf("roasDelivered", t as unknown as Record<string, unknown>); return v === null ? MISSING_TEXT : String(Math.round(v * 100) / 100); })(), ...changeNote("roasDelivered", t, p, chin, chinPrev) },
+    {
+      label: `Lợi nhuận góp — ${nhanTien}`,
+      value: vnd(t.contributionProfit),
+      hint: "Doanh thu thực − giá vốn − cước/phí − chi quảng cáo. Lọc được theo mọi chiều.",
+      ...changeNote("contributionProfit", t, p, chin, chinPrev),
+    },
+    { label: `Margin — ${nhanTien}`, value: pct(ratioOf("margin", t as unknown as Record<string, unknown>)), ...changeNote("margin", t, p, chin, chinPrev) },
   ];
 
   return (

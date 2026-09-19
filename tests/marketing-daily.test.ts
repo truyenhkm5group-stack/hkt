@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { clearMemo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
 import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf, type MaturityState } from "@/lib/constants/marketing-daily";
-import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
+import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, MARKETING_FINDING_OWNER, MARKETING_FINDING_WHY, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
 import { METRIC_BINDINGS } from "@/lib/constants/metric-bindings";
 import { canTargetPerson } from "@/lib/constants/metric-registry";
 import { MARKETING_AI_SYSTEM, buildAiContext } from "@/lib/marketing/ai-context";
@@ -304,6 +304,48 @@ export function testMarketingDigestLines() {
  * không được mang đơn hàng, tên khách hay số điện thoại. Thứ hai là TÍNH TRUNG THỰC: một khoá mang
  * giá trị 0 sẽ được mô hình đọc là "không đổi", trong khi sự thật có thể là "không so được".
  */
+/**
+ * ═══════════ MỘT PHÁT HIỆN PHẢI TRẢ LỜI ĐỦ NĂM CÂU ═══════════
+ *
+ * CHUYỆN GÌ (`title`) · Ở ĐÂU (`scopeLabel`) · BẰNG CHỨNG NÀO (`evidence`, bằng SỐ THẬT) · VÌ SAO
+ * (`why`, một giả thuyết đứng riêng) · LÀM GÌ (`actions`) · AI LÀM (`owner`, một PHÒNG BAN).
+ *
+ * Thiếu vế cuối là lớp hỏng âm thầm nhất: một cảnh báo "tỷ lệ giao thành công tụt" gửi vào nhóm
+ * marketing sẽ nằm đó mãi vì họ không điều được bưu tá, và sau vài lần như vậy cả nhóm thôi đọc cả
+ * những cảnh báo thật sự của mình. Nên bài kiểm này ghim luôn BA chỗ giao việc dễ sai nhất.
+ */
+export function testMarketingFindingCompleteness() {
+  for (const kind of MARKETING_FINDING_KINDS) {
+    const why = MARKETING_FINDING_WHY[kind];
+    assert.ok(why && why.length > 40, `${kind}: phải có câu "vì sao" đủ để phân biệt hai khả năng`);
+    assert.ok(MARKETING_FINDING_OWNER[kind], `${kind}: phải khai phòng chịu trách nhiệm`);
+    assert.ok(MARKETING_FINDING_ACTIONS[kind].length > 0, `${kind}: phải có ít nhất một việc làm được ngay`);
+  }
+
+  /*
+    BA CHỖ GIAO VIỆC DỄ SAI NHẤT — ranh giới giữa chúng chính là ranh giới của cái phễu.
+    Tin nhắn đã về mà không thành đơn là khâu CHỐT, không phải khâu quảng cáo; đơn đã chốt mà không
+    tới tay khách là khâu GIAO.
+  */
+  assert.equal(MARKETING_FINDING_OWNER.CLOSE_RATE_DROP, "SALES", "traffic vẫn về mà ít đơn hơn ⇒ khâu chốt, không phải marketing");
+  assert.equal(MARKETING_FINDING_OWNER.DELIVERY_DROP, "LOGISTICS", "tỷ lệ giao là việc của giao vận — gửi cho MKTer là gửi nhầm cửa");
+  assert.equal(MARKETING_FINDING_OWNER.RETURN_UP, "LOGISTICS");
+  assert.equal(MARKETING_FINDING_OWNER.CPA_UP, "MARKETING");
+
+  // GIẢ THUYẾT KHÔNG ĐƯỢC TRỘN VÀO BẰNG CHỨNG: hai thứ có độ chắc chắn khác hẳn nhau.
+  const f = diagnose({
+    day: "2026-09-18",
+    current: { adSpend: 3_000_000, messages: 200, orders: 8, posRevenue: 4_000_000, deliveredRevenue: 0, deliveredOrders: 0, returnedOrders: 0, finishedOrders: 0, pendingOrders: 8, contributionProfit: null },
+    baseline: { adSpend: 3_000_000, messages: 200, orders: 20, posRevenue: 10_000_000, deliveredRevenue: 0, deliveredOrders: 0, returnedOrders: 0, finishedOrders: 0, pendingOrders: 20, contributionProfit: null },
+  });
+  assert.ok(f.length > 0, "tỷ lệ chốt tụt một nửa thì phải có phát hiện");
+  for (const x of f) {
+    assert.ok(!x.evidence.includes(x.why), "câu giả thuyết không được nằm lẫn trong danh sách bằng chứng");
+    assert.equal(x.why, MARKETING_FINDING_WHY[x.kind]);
+    assert.equal(x.owner, MARKETING_FINDING_OWNER[x.kind]);
+  }
+}
+
 export function testMarketingAiContext() {
   const totals = {
     adSpend: null,
@@ -614,6 +656,7 @@ export async function testMarketingDaily() {
   testMarketingLossStreak();
   testMarketingBaseline();
   testMarketingDigestLines();
+  testMarketingFindingCompleteness();
   testMarketingAiContext();
   testMarketingTargetRegistration();
   await testMarketingDailyReconciliation();

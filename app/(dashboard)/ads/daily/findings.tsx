@@ -9,6 +9,7 @@ import { TARGET_SCOPE_LABEL } from "@/lib/constants/metric-registry";
 import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot, type MarketingFinding } from "@/lib/marketing/diagnose";
 import { explainMarketing } from "@/lib/marketing/ai-explain";
 import { evaluateMarketingTargets } from "@/lib/queries/marketing-targets";
+import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { MISSING_TEXT } from "@/lib/format";
 import type { MarketingDaily, MarketingDailyBase } from "@/lib/queries/marketing-daily";
 
@@ -83,18 +84,29 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
               <div className="flex items-start gap-2">
                 {f.severity === "CRITICAL" ? <CircleAlert className="mt-0.5 size-4 shrink-0 text-rose-600 dark:text-rose-400" /> : <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />}
                 <div className="min-w-0 space-y-1.5">
-                  <p className="text-sm font-medium">{f.title}</p>
+                  <p className="text-sm font-medium">
+                    {f.title}
+                    {/* Ở ĐÂU: một phát hiện không nói phạm vi thì người đọc phải tự đoán nó nói về cả shop hay về một chiến dịch. */}
+                    <span className="ml-1.5 font-normal text-muted-foreground">· {f.scopeLabel}</span>
+                  </p>
                   {/* BẰNG CHỨNG TRƯỚC, VIỆC PHẢI LÀM SAU: một khuyến nghị không kèm số của chính nó thì không kiểm chứng được. */}
                   <ul className="space-y-0.5 text-xs text-muted-foreground">
                     {f.evidence.map((e) => (
                       <li key={e}>{e}</li>
                     ))}
                   </ul>
+                  {/*
+                    GIẢ THUYẾT ĐỨNG RIÊNG, VÀ NÓI RÕ NÓ LÀ GIẢ THUYẾT. Trộn nó vào danh sách bằng
+                    chứng là mời người đọc hành động với một phỏng đoán như thể nó đã được đo.
+                  */}
+                  <p className="text-xs italic text-muted-foreground">Nguyên nhân có khả năng nhất: {f.why}</p>
                   <ul className="space-y-0.5 text-xs">
                     {f.actions.map((a) => (
                       <li key={a}>→ {a}</li>
                     ))}
                   </ul>
+                  {/* AI LÀM: phòng ban, không bao giờ một cái tên — máy không biết hôm nay ai nghỉ. */}
+                  <p className="text-[11px] text-muted-foreground">Phòng xử lý: {DEPARTMENT_LABEL[f.owner]}</p>
                 </div>
               </div>
             </li>

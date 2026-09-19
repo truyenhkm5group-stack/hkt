@@ -9,6 +9,7 @@ import {
 } from "@/lib/constants/marketing-alerts";
 import { MARKETING_ALERT_MAX_PER_RUN, MARKETING_DIAGNOSIS } from "@/lib/constants/marketing-diagnosis";
 import { MATURITY_LABEL } from "@/lib/constants/marketing-daily";
+import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot, type MarketingFinding } from "@/lib/marketing/diagnose";
 import { getMarketingBreakdown, getMarketingDaily, type MarketingDailyBase, type MarketingDailyRow } from "@/lib/queries/marketing-daily";
 import { ratioOf } from "@/lib/queries/marketing-daily";
@@ -157,9 +158,16 @@ export function digestLines(day: string, scope: DigestScope, previous: Marketing
   if (scope.findings.length) {
     lines.push("");
     for (const f of scope.findings.slice(0, MARKETING_ALERT_MAX_PER_RUN)) {
-      lines.push(`${f.severity === "CRITICAL" ? "🔴" : "🟡"} ${f.title}`);
+      /*
+        NĂM CÂU HỎI, THEO ĐÚNG THỨ TỰ NGƯỜI ĐỌC CẦN: chuyện gì · ở đâu · bằng chứng nào · vì sao ·
+        làm gì · ai làm. Thiếu vế "ai làm" thì một cảnh báo tỷ lệ giao gửi vào nhóm marketing sẽ
+        nằm đó mãi — và sau vài lần như vậy cả nhóm thôi đọc những cảnh báo thật sự của mình.
+      */
+      lines.push(`${f.severity === "CRITICAL" ? "🔴" : "🟡"} ${f.title} · ${f.scopeLabel}`);
       for (const e of f.evidence) lines.push(`   ${e}`);
+      lines.push(`   Vì sao: ${f.why}`);
       for (const a of f.actions.slice(0, 2)) lines.push(`   → ${a}`);
+      lines.push(`   Phòng xử lý: ${DEPARTMENT_LABEL[f.owner]}`);
     }
   } else {
     lines.push("");
