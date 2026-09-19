@@ -180,6 +180,32 @@ export async function buildCtoPrompt(sourceTaskId: string, repoRoot = process.cw
   return { prompt, blocked: promptCoSecretKhong(prompt) };
 }
 
+/**
+ * Dịch một lỗi của nhà cung cấp sang câu mà người đọc LÀM ĐƯỢC gì đó với nó.
+ *
+ * Nguyên văn phong bì lỗi — `{"type":"error","error":{"type":"overloaded_error",…}}` — đúng nhưng
+ * câm: nó không nói cho người đọc biết đây là lỗi của ta, của khoá, hay của bên kia, mà ba thứ đó
+ * sửa ở ba chỗ hoàn toàn khác nhau (AGENTS.md mục 55). Vẫn giữ nguyên văn ở cuối câu để còn tra
+ * `request_id` khi cần hỏi nhà cung cấp.
+ */
+function doiLoiGoiModel(e: unknown): string {
+  const raw = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 400);
+  const status = typeof (e as { status?: unknown } | null)?.status === "number" ? ((e as { status: number }).status) : null;
+  if (status === 529 || /overloaded/i.test(raw)) {
+    return `Nhà cung cấp đang QUÁ TẢI và đã hết lượt thử lại. Không phải lỗi mã nguồn, không phải lỗi khoá — chạy lại sau ít phút. Nguyên văn: ${raw}`;
+  }
+  if (status === 401 || status === 403 || /unauthor|invalid[_ ]?api[_ ]?key|authentication/i.test(raw)) {
+    return `Khoá API bị từ chối. Thay khoá trên máy runner. Nguyên văn: ${raw}`;
+  }
+  if (status === 429 || /rate[_ ]?limit|quota|credit balance|insufficient/i.test(raw)) {
+    return `Hết hạn mức hoặc hết tín dụng. Không phải lỗi mã nguồn. Nguyên văn: ${raw}`;
+  }
+  if (/timed out|timeout|aborted/i.test(raw)) {
+    return `Lượt gọi hết giờ trước khi model trả lời xong. Nguyên văn: ${raw}`;
+  }
+  return `Gọi model hỏng: ${raw}`;
+}
+
 export type CtoRunResult =
   | { ok: true; plan: CtoPlan; provider: string; model: string; raw: unknown }
   | { ok: false; error: string; provider: string; model: string; raw: unknown };
@@ -219,7 +245,7 @@ export async function runCtoPlanning(provider: AiProvider, ctx: CtoContext): Pro
       return { ok: false, error: "Model từ chối trả lời vì chính sách nội dung. Không có bản kế hoạch nào được lập.", ...meta, raw: text.slice(0, 20_000) };
     }
   } catch (e) {
-    return { ok: false, error: `Gọi model hỏng: ${(e instanceof Error ? e.message : String(e)).slice(0, 500)}`, ...meta, raw: null };
+    return { ok: false, error: doiLoiGoiModel(e), ...meta, raw: null };
   }
   const parsed = parseCtoPlan(text);
   if (!parsed.ok) return { ok: false, error: parsed.error, ...meta, raw: text.slice(0, 20_000) };
