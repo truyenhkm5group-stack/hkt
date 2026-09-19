@@ -27,6 +27,7 @@ import { getDb, schema } from "@/db";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { clearMemo } from "@/lib/cache";
 import { MARKETING_BASIS_LABEL, MATURITY_LABEL, ratioOf, type MarketingBasis } from "@/lib/constants/marketing-daily";
+import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { dimensionFilter, getMarketingDaily, type MarketingFilters } from "@/lib/queries/marketing-daily";
 import { getDailyBreakdown, pnlFacts } from "@/lib/queries/reports";
 import type { Period } from "@/lib/search-params";
@@ -209,11 +210,30 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   /* ── 4. ĐỐI CHIẾU SỐ ĐƠN VỚI POPULATION CANONICAL ── */
   log("\n" + "═".repeat(120));
   log("ĐỐI CHIẾU 3/4 — SỐ ĐƠN ĐỦ ĐIỀU KIỆN (population đơn đã xác nhận + loại trùng)");
+  /*
+    ═══════════ CÂU "ĐỘC LẬP" PHẢI ĐỘC LẬP VỀ ĐƯỜNG ĐI, KHÔNG PHẢI VỀ ĐỊNH NGHĨA ═══════════
+
+    Bản đầu viết `stage not in ('NEW','CANCELLED','DELETED')` — một danh sách LOẠI TRỪ tự gõ. Nghe
+    tương đương với population `confirmed`, nhưng không phải: `CONFIRMED_STAGES` là một danh sách
+    THÊM VÀO và nó KHÔNG có `WAITING`.
+
+    ĐO TRÊN PRODUCTION 19/09/2026, kỳ 01/09–09/09: đúng **2 đơn** ở `WAITING`, và đó là toàn bộ
+    chênh lệch mà công cụ này xếp nhóm LỖI (521 so với 519). Báo cáo đúng — `POPULATION_HINT` nói
+    thẳng population `confirmed` "bỏ đơn Mới chưa chốt". Sai là ở câu đối chiếu.
+
+    Bài học ghi lại vì nó là cái bẫy của mọi công cụ đối chiếu: một câu SQL viết tay để kiểm chứng
+    phải đi ĐƯỜNG KHÁC (đọc thẳng bảng, không qua ORM, không qua bảng dẫn xuất) nhưng phải dùng
+    CÙNG ĐỊNH NGHĨA. Gõ lại định nghĩa bằng trí nhớ là tự tạo ra một nguồn sự thật thứ hai — đúng
+    thứ cả kho mã này được viết ra để chặn.
+
+    Nên nó đọc thẳng `CONFIRMED_STAGES` từ hằng số. Thêm một giai đoạn mới vào sổ ấy thì câu này
+    tự đi theo; còn danh sách gõ tay thì im lặng lệch đi.
+  */
   const rows = await db.execute(sql`
     select count(*)::int as tong,
            count(*) filter (where exists (select 1 from order_attributions oa where oa.order_id = o.id and oa.status = 'DUPLICATE'))::int as trung
       from orders o
-     where o.stage::text not in ('NEW','CANCELLED','DELETED')
+     where o.stage::text in (${sql.join(CONFIRMED_STAGES.map((x) => sql`${x}`), sql`, `)})
        and o.inserted_at >= ${period.from}
        and o.inserted_at <= ${period.to}
   `);
@@ -239,7 +259,8 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
     select coalesce(c.outcome, 'CHUA_TINH') as ket_qua, count(*)::int as so
       from orders o
       left join canonical_order_outcome c on c.order_id = o.id
-     where o.stage::text not in ('NEW','CANCELLED','DELETED')
+     -- CÙNG population với phép so ở trên (xem lý do ở khối chú thích của ĐỐI CHIẾU 3/4).
+     where o.stage::text in (${sql.join(CONFIRMED_STAGES.map((x) => sql`${x}`), sql`, `)})
        and o.inserted_at >= ${period.from}
        and o.inserted_at <= ${period.to}
        and not exists (select 1 from order_attributions oa where oa.order_id = o.id and oa.status = 'DUPLICATE')
@@ -303,8 +324,22 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   }
   const soLoi = findings.filter((f) => f.kind === "BUG").length;
   log("\n" + "═".repeat(120));
-  if (soLoi === 0) log("✓ KHÔNG CÓ CHÊNH LỆCH NÀO THUỘC NHÓM LỖI. Mọi khác biệt đều giải thích được bằng mốc / tập đơn / độ trễ nguồn.");
-  else log(`✗ ${soLoi} CHÊNH LỆCH KHÔNG GIẢI THÍCH ĐƯỢC — đây là lỗi, không phải sai số.`);
+  /*
+    DÒNG CUỐI PHẢI TỰ KHAI NÓ LÀ LƯỢT CHẠY NÀO.
+
+    Nhiều phiên cùng chạy thao tác vận hành trên một kho, và log của GitHub Actions chỉ đọc được
+    phần ĐUÔI. Phần đầu — nơi in kỳ và bộ lọc — nằm ngoài tầm với, nên người đọc log phải đoán lượt
+    nào là lượt mình vừa gửi. Đã đoán nhầm bốn lần trong một buổi chiều, mỗi lần là một lượt chạy
+    10 phút mất trắng, và một lần suýt dựng bảng số liệu từ kết quả của phiên khác.
+
+    Nên phạm vi được in LẠI ở dòng cuối cùng. Rẻ, và nó biến "lượt nào là của tôi" từ một phép suy
+    luận thành một phép đọc.
+  */
+  const dau = [`kỳ ${args.from}→${args.to}`, args.marketer ? `marketer=${args.marketer}` : null, args.product ? `mã=${args.product}` : null, `mốc=${args.basis}`]
+    .filter(Boolean)
+    .join(" · ");
+  if (soLoi === 0) log(`✓ KHÔNG CÓ CHÊNH LỆCH NÀO THUỘC NHÓM LỖI. Mọi khác biệt đều giải thích được bằng mốc / tập đơn / độ trễ nguồn.  [${dau}]`);
+  else log(`✗ ${soLoi} CHÊNH LỆCH KHÔNG GIẢI THÍCH ĐƯỢC — đây là lỗi, không phải sai số.  [${dau}]`);
   return { findings, days: data.rows.length, bugs: soLoi };
 }
 
