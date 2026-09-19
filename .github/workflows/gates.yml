@@ -1,0 +1,57 @@
+# ═══════════ MỘT BỘ CỔNG, HAI NƠI GỌI ═══════════
+#
+# Bốn cổng chất lượng của kho này (toàn vẹn · typecheck · lint · test · build) sống ĐÚNG MỘT chỗ,
+# và được gọi lại từ:
+#
+#   · `ci.yml`         — mỗi pull request, để `main` có cái gì đó để bắt buộc;
+#   · `deploy-vps.yml` — trước khi đụng máy chủ.
+#
+# VÌ SAO KHÔNG CHÉP SANG HAI TỆP: hai bộ cổng cùng tên sẽ trôi xa nhau, và cái trôi chậm hơn là
+# cái người ta tin. Ngày `npm test` thêm một bài mới, chỉ một bên chạy nó — mà không ai thấy.
+name: Cổng chất lượng
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "SHA cần kiểm. Bỏ trống thì dùng ref mặc định của lượt gọi."
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # BẢN ĐƯỢC KIỂM PHẢI LÀ BẢN ĐƯỢC DÙNG: ghim thẳng vào SHA thay vì tên nhánh. Nhánh có thể
+      # được đẩy tiếp trong lúc workflow đang chạy (hai phiên làm việc song song), và khi đó "main"
+      # ở bước kiểm với "main" ở bước dùng là hai bản mã khác nhau.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          # Cần commit cha để kiểm "sổ migration chỉ nối vào cuối" (tests/repo-integrity.test.ts).
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Cài phụ thuộc
+        run: npm ci
+      # Chạy TRƯỚC tsc: khi có tệp trỏ ra ngoài kho, bài này nói thẳng tên tệp và tên import,
+      # còn tsc chỉ nói "Cannot find module" ở một toạ độ dòng/cột.
+      - name: Toàn vẹn kho mã (không import tệp chưa vào kho)
+        run: npx tsx --tsconfig tsconfig.json tests/repo-integrity.test.ts
+      - name: Kiểm tra kiểu dữ liệu
+        run: npx tsc --noEmit
+      - name: Kiểm tra chuẩn mã nguồn
+        run: npx eslint --max-warnings=0
+      # GUARDRAIL NGHIỆP VỤ: contract test khoá luật "đơn giao thành công / đơn hoàn"
+      # (docs/business-rules/ORDER_OUTCOME.md). Đây là điều kiện CHẶN, không phải cảnh báo.
+      - name: Kiểm thử (gồm contract test luật nghiệp vụ)
+        run: npm test
+      # Bản dựng production bắt lỗi ranh giới client/server mà `tsc` không thấy.
+      - name: Dựng bản production
+        run: npm run build

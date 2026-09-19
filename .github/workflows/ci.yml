@@ -1,0 +1,32 @@
+# ═══════════ CỔNG CỦA PULL REQUEST ═══════════
+#
+# Đây là thứ `main` sẽ BẮT BUỘC phải xanh trước khi merge (xem docs/main-protection.md).
+#
+# Trước bản này kho KHÔNG có workflow nào chạy trên `pull_request`: cả ba workflow đều là
+# `workflow_dispatch`. Tức là một PR không có cổng nào cả, và bật "required status checks" lúc đó
+# sẽ khoá chết mọi PR vì cái check bắt buộc không bao giờ chạy. Dựng cổng trước, khoá sau.
+#
+# Tên job (`gates`) là thứ đi vào danh sách required checks — đổi tên job là gỡ khoá `main` mà
+# không ai nhận ra, nên đừng đổi nếu chưa cập nhật ruleset.
+name: CI
+
+on:
+  pull_request:
+  # Chạy cả trên `main` để lịch sử của nhánh chính luôn có một lượt kiểm ứng với từng commit,
+  # kể cả những commit vào thẳng trước khi khoá được bật.
+  push:
+    branches: [main]
+
+# PR được đẩy tiếp thì lượt cũ không còn ý nghĩa — huỷ để trả kết quả cho bản mới nhanh hơn.
+# KHÁC hẳn nhóm `vps-operations`: ở đó cắt ngang một lệnh đang ghi dữ liệu là nguy hiểm, còn ở
+# đây lượt chạy chỉ đọc mã nguồn.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    uses: ./.github/workflows/gates.yml
