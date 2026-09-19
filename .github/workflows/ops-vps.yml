@@ -75,6 +75,7 @@ on:
           - ai-staging-read-test  # CHỈ GỌI GET: page có đọc được không, tên page, hội thoại, tin nhắn
           - ai-staging-paging     # CHỈ GỌI GET: Pancake phân trang bằng tham số nào (dò 6 tên + cắt cửa sổ thời gian)
           - ai-staging-page-audit # CHỈ ĐỌC: phân trang Pancake + đi tìm nguồn có thẩm quyền cho mã page Facebook — MỘT lượt
+          - ai-staging-paging-proof # CHỈ ĐỌC: chạy CHÍNH hàm lượt nạp dùng, chứng minh lấy được >60 hội thoại
           - ai-staging-signal-audit # CHỈ GỌI GET: Pancake THẬT SỰ trả về những trường nào (để dựng Product Resolver)
           - ai-staging-sql       # CHỈ ĐỌC: chạy một tệp SQL trong kho mã (arg = tên tệp ai-staging-*.sql)
           - ai-staging-resolver  # đo phép nhận diện sản phẩm trên dữ liệu đã nạp (arg: "--page=<id> --backfill")
@@ -721,6 +722,14 @@ jobs:
                 docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
                 sleep 15
                 curl -fsS -m 10 http://127.0.0.1:3100/api/health && echo || echo "  ✗ bản chạy thử chưa trả lời" ;;
+
+              ai-staging-paging-proof)
+                cd /opt/vnx-ai-staging
+                # Chạy TRONG container ứng dụng để dùng đúng `lib/integrations/pancake/pages.ts` của
+                # ẢNH ĐANG CHẠY — đó là cả điểm của phép đo này. Đẩy script vào chứ không dựng lại
+                # ảnh: script đo đổi nhanh hơn ảnh, còn thứ cần đo là mã trong ảnh.
+                fetch_staging_script ai-staging-paging-proof.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-paging-proof.ts'
+                docker exec vnx-ai-staging-app npx tsx --tsconfig tsconfig.json scripts/ai-staging-paging-proof.ts ${ARG:-} ;;
 
               ai-staging-page-audit)
                 cd /opt/vnx-ai-staging
