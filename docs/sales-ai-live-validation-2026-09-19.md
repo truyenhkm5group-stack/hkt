@@ -219,6 +219,37 @@ phải một lượt chấm.
 
 ---
 
+## 7b. TRIỂN KHAI VÀ XÁC NHẬN TRÊN DỮ LIỆU SỐNG
+
+Ảnh `sha256:6e3bd710…` (dựng từ `832aa24`, mang đủ bảy bản vá) · triển khai run **35439906471** ·
+dựng lại bộ nạp run **35440400008**.
+
+**BẰNG CHỨNG MÃ MỚI ĐANG CHẠY, không phải lời khai của lượt triển khai.** Sau khi dựng lại, ô
+`last_error` của bộ nạp mang đúng câu chữ **chỉ tồn tại trong bản vá hôm nay**:
+
+> Page 1117899664739453: Pancake lặp lại trang một — mẻ này chỉ lấy được 60 hội thoại, CHƯA phải
+> toàn bộ cửa sổ.
+
+Hai điều cùng lúc: bộ nạp thật sự chạy mã mới, VÀ lỗi phân trang có thật ngoài bài kiểm — nó vừa
+xảy ra trên lưu lượng thật. Đây là loại bằng chứng đáng tin hơn hẳn một dòng "deploy thành công".
+
+**An toàn sau khi triển khai (đọc từ log bộ nạp, 11:33:05):** nấc `COPILOT` · MÁY tự gửi ✓ CẤM ·
+tạo đơn ✓ CẤM · NGƯỜI bấm gửi được phép · `clampMode("AUTO")` vẫn ra `COPILOT`. Đếm thẳng trong
+CSDL: gợi ý đã gửi **0** · tin do AI gửi **0**.
+
+**MỘT SỐ ĐO MỚI CHO CÂU HỎI CÒN MỞ Ở §2.** Vòng 11:33:12 đọc cửa sổ 1 giờ và nhận **30** hội
+thoại — không phải 60. Vậy máy chủ KHÔNG trả 60 một cách vô điều kiện, và bộ lọc thời gian có
+tác dụng. Điều này LÀM YẾU giả thuyết trần cứng nhưng **chưa bác bỏ nó**: câu hỏi thật vẫn là
+"một cửa sổ có NHIỀU HƠN 60 hội thoại thì có bị cắt ở 60 không", và cửa sổ 720 giờ — phép đo duy
+nhất trả lời được — vẫn chưa chạy được vì 429. Ghi lại ở đây để lần đo sau không phải bắt đầu từ
+con số 0.
+
+**Chưa có lượt chạy AI mới nào sau khi triển khai** (vòng 11:33 đọc 0 tin mới ⇒ 0 lượt soạn), nên
+bản vá lưu lý do chuyển người (§3.4) mới chỉ được chứng minh bằng bài kiểm, CHƯA được xác nhận
+trên dữ liệu sống. Lần soi tiếp theo phải đo lại đúng con số 28/258 ấy.
+
+---
+
 ## 8. KHUYẾN NGHỊ
 
 # KEEP SHADOW
