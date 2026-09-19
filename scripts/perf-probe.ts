@@ -33,6 +33,25 @@ let dbCalls = 0;
 let dbRows = 0;
 
 /**
+ * ═══════ CHỜ XIN KẾT NỐI — CHI PHÍ KHÔNG NẰM TRONG BẤT KỲ CÂU LỆNH NÀO ═══════
+ *
+ * Bể kết nối của production là `max = 5` trên VPS **2 nhân** (xem `db/index.ts`, có số đo kèm lý
+ * do). Nghĩa là câu lệnh thứ sáu trở đi KHÔNG chạy chậm — nó chưa chạy, nó đang xếp hàng.
+ *
+ * Thời gian xếp hàng ấy không xuất hiện ở bất kỳ phép đo `Pool.query` nào (đồng hồ chỉ bắt đầu khi
+ * câu lệnh đã có kết nối), nên một hàm có thể mất 9 giây với "tổng thời gian csdl 1,2 giây" mà
+ * không ai giải thích nổi 7,8 giây còn lại. Đây chính là chỗ hai lần chẩn đoán sai của bản trước
+ * rơi vào: cả hai đều đọc con số câu lệnh rồi kết luận về hình dạng truy vấn.
+ *
+ * Đo bằng cách bọc `Pool.connect` (mọi lượt `query` đều xin kết nối qua đó) và ghi lại đỉnh hàng
+ * đợi. `waitPeak > 0` là bằng chứng bể cạn; `waitMs` là giá phải trả.
+ */
+let poolWaitMs = 0;
+let poolWaitCount = 0;
+let poolWaitPeak = 0;
+let poolQueuePeak = 0;
+
+/**
  * ═══════ CÂU LỆNH LẶP LẠI — NGHI PHẠM SỐ MỘT ═══════
  *
  * Một hàm báo cáo mất 18 giây với 104 lượt truy vấn thì câu hỏi đầu tiên KHÔNG phải "câu nào chậm"
@@ -74,6 +93,11 @@ const results: {
   lapNhieuNhat: { lan: number; ms: number; mau: string } | null;
   /** Số câu lệnh KHÁC NHAU. `calls` trừ đi số này là phần chạy lại. */
   khacNhau: number;
+  /** Tổng thời gian XẾP HÀNG xin kết nối, và lần chờ lâu nhất. Bể cạn thì hai số này bùng lên. */
+  poolWaitMs: number;
+  poolWaitPeak: number;
+  /** Số lượt xin kết nối phải chờ (> 1ms) và đỉnh hàng đợi quan sát được. */
+  poolQueuePeak: number;
   note: string;
 }[] = [];
 
@@ -89,6 +113,9 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
   const dbBefore = dbMs;
   const callsBefore = dbCalls;
   const rowsBefore = dbRows;
+  const waitBefore = poolWaitMs;
+  poolWaitPeak = 0;
+  poolQueuePeak = 0;
   const t0 = Date.now();
   try {
     const out = await run();
@@ -119,6 +146,9 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
       warmMs,
       lapNhieuNhat: lap ? { lan: lap.lan, ms: lap.ms, mau: lap.mau } : null,
       khacNhau: lapHienTai.size,
+      poolWaitMs: poolWaitMs - waitBefore,
+      poolWaitPeak,
+      poolQueuePeak,
       note: `${Math.round(size / 1024)}kB`,
     });
   } catch (error) {
@@ -132,6 +162,9 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
       warmMs: 0,
       lapNhieuNhat: null,
       khacNhau: lapHienTai.size,
+      poolWaitMs: poolWaitMs - waitBefore,
+      poolWaitPeak,
+      poolQueuePeak,
       note: `LỖI: ${error instanceof Error ? error.message : String(error)}`,
     });
   }
@@ -141,8 +174,45 @@ async function main() {
   // Bọc `Pool.query` NGAY ĐẦU, trước khi bất kỳ truy vấn nào chạy. Đặt ở mức mô-đun thì cần
   // top-level await, mà bản dựng CJS không hỗ trợ.
   {
-    const pg = (await import("pg")).default as unknown as { Pool: { prototype: { query: (...args: unknown[]) => Promise<unknown> } } };
+    const pg = (await import("pg")).default as unknown as {
+      Pool: { prototype: { query: (...args: unknown[]) => Promise<unknown>; connect: (...args: unknown[]) => Promise<unknown> } };
+    };
     const original = pg.Pool.prototype.query;
+
+    /*
+      ĐO THỜI GIAN XẾP HÀNG XIN KẾT NỐI.
+
+      `Pool.query` bên trong gọi `Pool.connect`. Bọc `connect` thì đo được đúng phần mà đồng hồ của
+      `query` KHÔNG thấy: khoảng thời gian câu lệnh nằm chờ tới lượt vì bể đã cạn. Trên bể 5 kết nối
+      của máy hai nhân, đây thường là phần lớn nhất của một hàm "chậm".
+    */
+    const originalConnect = pg.Pool.prototype.connect;
+    pg.Pool.prototype.connect = function patchedConnect(...args: unknown[]) {
+      const self = this as unknown as { waitingCount?: number; totalCount?: number; idleCount?: number };
+      const queued = Number(self.waitingCount ?? 0);
+      if (queued > poolQueuePeak) poolQueuePeak = queued;
+      const t0 = Date.now();
+      const out = originalConnect.apply(this, args as never) as Promise<unknown>;
+      if (out && typeof (out as Promise<unknown>).then === "function") {
+        return (out as Promise<unknown>).then(
+          (c) => {
+            const ms = Date.now() - t0;
+            // Dưới 1ms là lấy được kết nối rảnh ngay — không phải xếp hàng, đừng tính vào.
+            if (ms > 1) {
+              poolWaitMs += ms;
+              poolWaitCount += 1;
+              if (ms > poolWaitPeak) poolWaitPeak = ms;
+            }
+            return c;
+          },
+          (e) => {
+            poolWaitMs += Date.now() - t0;
+            throw e;
+          },
+        );
+      }
+      return out;
+    };
     /**
      * GHI LẠI CÂU LỆNH CHẬM NHẤT KÈM NGUYÊN VĂN SQL.
      *
@@ -253,6 +323,41 @@ async function main() {
   await timed("/ads", "adsRoas 30 ngày", () => ads.getAdsRoas(month, "campaign"));
   await timed("/ads", "adsRoas toàn kỳ", () => ads.getAdsRoas(all, "campaign"));
 
+  /*
+    ═══════ /ads/daily — ĐO TỪNG CHẶNG, KHÔNG ĐO CẢ TRANG ═══════
+
+    Trang này đã bị chẩn đoán sai HAI LẦN vì đọc con số tổng rồi suy ra nguyên nhân (xem
+    `docs/marketing-daily-contract.md` mục 13). Nên ở đây tách đúng những chặng mà trang thật sự
+    chờ, mỗi chặng một dòng:
+
+      · bảng theo ngày (pnlFacts + chi QC + số lượng + chi phí phân bổ)  — khối chính
+      · bảng theo ngày KHÔNG kèm kỳ trước                                — để biết giá của mũi tên so sánh
+      · bóc tách theo marketer / mã hàng                                 — nghi phạm N+1
+      · độ tươi nguồn · đích                                             — phải rẻ, nếu không là bất thường
+      · lớp AI                                                           — mạng bên ngoài, không phải CSDL
+
+    So `có kỳ trước` với `không kỳ trước` trả lời được một câu cụ thể: dải KPI "so với kỳ trước" có
+    đang nhân đôi toàn bộ chi phí của trang hay không.
+  */
+  const md = await import("@/lib/queries/marketing-daily");
+  const { previousPeriod } = await import("@/lib/search-params");
+  await timed("/ads/daily", "marketingDaily 30d (có kỳ trước)", () => md.getMarketingDaily(month, "created", {}, previousPeriod(month)));
+  await timed("/ads/daily", "marketingDaily 30d (không kỳ trước)", () => md.getMarketingDaily(month, "created", {}));
+  await timed("/ads/daily", "breakdown marketer", () => md.getMarketingBreakdown(month, "created", "marketer", {}));
+  await timed("/ads/daily", "breakdown product", () => md.getMarketingBreakdown(month, "created", "product", {}));
+  await timed("/ads/daily", "breakdown campaign", () => md.getMarketingBreakdown(month, "created", "campaign", {}));
+  const mdDb = await import("@/db");
+  await timed("/ads/daily", "marketingFreshness", async () => md.marketingFreshness(await mdDb.getDb()));
+  const mt = await import("@/lib/queries/marketing-targets");
+  await timed("/ads/daily", "evaluateMarketingTargets", async () => {
+    const d = await md.getMarketingDaily(month, "created", {});
+    return mt.evaluateMarketingTargets(d.totals, month, null);
+  });
+  // Kỳ NGẮN: bản tin Lark và cảnh báo chỉ đọc một ngày. Nếu một ngày cũng đắt thì chi phí đi theo
+  // SỐ CÂU TRUY VẤN chứ không theo lượng dữ liệu — hai nguyên nhân, hai cách sửa.
+  const motNgay = resolvePeriod({ period: "yesterday" }, "yesterday");
+  await timed("/ads/daily", "marketingDaily 1 ngày", () => md.getMarketingDaily(motNgay, "created", {}));
+
   results.sort((a, b) => b.ms - a.ms);
   console.log("\n── THỜI GIAN TỪNG TRUY VẤN (chậm nhất trước) ──");
   // IN CẢ PHẦN TÁCH CSDL / ỨNG DỤNG: "chậm" chưa sửa được gì, phải biết thời gian nằm ở Postgres
@@ -263,6 +368,22 @@ async function main() {
     );
   const total = results.reduce((t, r) => t + r.ms, 0);
   console.log(`\nTổng ${total}ms cho ${results.length} truy vấn.`);
+
+  /*
+    ═══ XẾP HÀNG XIN KẾT NỐI ═══
+
+    Đây là phần thời gian KHÔNG nằm trong bất kỳ câu lệnh nào. Bể của production là `max = 5` trên
+    máy 2 nhân, nên một hàm bắn nhiều câu song song sẽ tự làm chậm chính nó. Cột "chờ bể" lớn mà
+    "csdl" nhỏ nghĩa là vấn đề nằm ở SỐ LƯỢNG câu chạy đồng thời, không nằm ở câu nào cả.
+  */
+  const coCho = results.filter((r) => r.poolWaitMs > 0).sort((a, b) => b.poolWaitMs - a.poolWaitMs);
+  console.log("\n── CHỜ XIN KẾT NỐI (thời gian KHÔNG nằm trong câu lệnh nào) ──");
+  if (!coCho.length) console.log("  (không hàm nào phải xếp hàng — bể kết nối không phải nút thắt)");
+  for (const r of coCho.slice(0, 10)) {
+    const tiLe = r.ms > 0 ? Math.round((r.poolWaitMs / r.ms) * 100) : 0;
+    console.log(`  ${String(r.poolWaitMs).padStart(6)}ms chờ (${String(tiLe).padStart(3)}% của hàm)  đỉnh 1 lượt ${String(r.poolWaitPeak).padStart(5)}ms  đỉnh hàng đợi ${r.poolQueuePeak}  ${r.fn}`);
+  }
+  console.log(`  Tổng ${poolWaitMs}ms chờ trên ${poolWaitCount} lượt xin kết nối · PGPOOL_MAX=${process.env.PGPOOL_MAX ?? "(mặc định 5)"}`);
 
   /*
     ═══ NGUỘI SO VỚI ẤM ═══
