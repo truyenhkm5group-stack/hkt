@@ -12,6 +12,10 @@
  *
  * MÃ THOÁT: 0 khi mọi ca đạt, 1 khi có ca trượt. Đó là thứ cho phép cắm nó vào cổng kiểm thử sau này.
  */
+// Đọc `.env` như mọi script khác của kho mã. Thiếu dòng này thì trình chạy KHÔNG BAO GIỜ đọc được
+// ca trong CSDL — nó vẫn in ra cảnh báo (nên không nói dối), nhưng người dùng sẽ tưởng là chưa ai
+// thêm ca nào trong khi ca vẫn nằm đó.
+import "dotenv/config";
 import { SEED_REGRESSION_CASES } from "@/lib/constants/sales-regression-seed";
 import {
   REGRESSION_FAILURES,

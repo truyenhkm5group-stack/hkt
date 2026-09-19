@@ -196,8 +196,18 @@ export const SEED_REGRESSION_CASES: RegressionCase[] = [
     expected: {
       ...EMPTY_EXPECTATION,
       handoff: true,
-      // Cố ý KHÔNG khai lý do: "khiếu nại" và "việc sau bán" đều là câu trả lời đúng cho câu này,
-      // và ép một trong hai là ép một quyết định đặc tả chưa đưa ra.
+      /*
+        KHIẾU NẠI THẮNG VIỆC-SAU-BÁN, và đó là một quyết định nghiệp vụ chứ không phải một chi tiết
+        cài đặt. Câu này khớp CẢ HAI nhóm ("hàng bị lỗi" = khiếu nại · "trả lại" = việc sau bán).
+        Thứ tự trong `SALES_INTENTS` quyết định ai thắng, và khiếu nại đứng trước: một kiện hàng lỗi
+        là chuyện lòng tin của khách trước khi là chuyện vận đơn, nên nó phải về đội chăm sóc chứ
+        không về hàng đợi đổi trả.
+
+        Trước 19/09/2026 câu này ra `LOW_CONFIDENCE` — "máy không hiểu khách muốn gì". Vẫn chuyển
+        người nên không khách nào bị trả lời sai, nhưng một ca khiếu nại đội lốt lỗi mô hình thì
+        nằm nhầm ô trong mọi báo cáo.
+      */
+      handoffReason: "COMPLAINT",
       replyMustNotContain: ["chị gửi lại hàng", "bên em hoàn tiền"],
     },
   }),

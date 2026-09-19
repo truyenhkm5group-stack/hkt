@@ -189,9 +189,25 @@ const KEYWORDS: Record<SalesIntent, string[]> = {
   CONFIRM: ["ok", "oke", "okie", "dong y", "dung roi", "chuan roi", "vang", "ukm", "um", "chot", "yes", "xac nhan"],
   REJECT: ["thoi", "khong lay nua", "ko lay nua", "khong mua", "ko mua", "de sau", "huy", "khong can", "ko can"],
   OBJECTION: ["dat qua", "mac qua", "sao dat the", "giam gia", "bot chut", "re hon", "cho re", "shop khac re"],
-  COMPLAINT: ["kem chat luong", "lua dao", "hang loi", "rach", "ban qua", "that vong", "bao xau", "khieu nai"],
+  /*
+    "HÀNG BỊ LỖI, TÔI MUỐN TRẢ LẠI" — câu khiếu nại phổ biến nhất, và nó từng không khớp gì cả.
+
+    ĐO 19/09/2026 trên dây chuyền thật chạy cục bộ: câu ấy chuẩn hoá thành " hang bi loi toi muon
+    tra lai ". Danh sách cũ có "hang loi" (tiếng Việt chen chữ "bị" vào giữa) và "tra hang" (người
+    ta nói "trả lại", không nói "trả hàng"). Hai từ khoá, hai lần trượt, và kết quả là máy chuyển
+    người với lý do LOW_CONFIDENCE — "không hiểu khách muốn gì".
+
+    Chuyển người vẫn đúng, nên KHÔNG có khách nào bị trả lời sai. Nhưng lý do thì sai, và lý do là
+    thứ quyết định việc chạy về phòng nào và nằm ở ô nào trong báo cáo. Một ca khiếu nại đội lốt
+    "máy không hiểu" sẽ được đọc như một lỗi của mô hình thay vì một việc của đội chăm sóc.
+
+    Chỉ thêm những cụm KHÔNG THỂ hiểu nhầm. Cố ý BỎ "sai màu" / "sai size": khách tự nhận "em chọn
+    sai size rồi" lúc đang chọn mẫu mã là một câu bán hàng bình thường, và đọc nó thành khiếu nại
+    sẽ ném một đơn sắp chốt sang hàng đợi chăm sóc.
+  */
+  COMPLAINT: ["kem chat luong", "lua dao", "hang loi", "hang bi loi", "bi loi", "hang hong", "hang bi hong", "giao sai", "gui sai", "rach", "ban qua", "that vong", "bao xau", "khieu nai"],
   ASK_HUMAN: ["gap nhan vien", "nguoi that", "cho gap ad", "noi chuyen voi nguoi", "bot a", "may tra loi"],
-  AFTER_SALES: ["doi size", "doi mau", "tra hang", "hoan tien", "don cua em dau", "khi nao giao", "chua nhan duoc", "van don"],
+  AFTER_SALES: ["doi size", "doi mau", "tra hang", "tra lai", "muon tra", "doi tra", "hoan tien", "don cua em dau", "khi nao giao", "chua nhan duoc", "van don"],
   OTHER: [],
 };
 
