@@ -527,12 +527,79 @@ export function testTenCheckBatBuoc() {
   console.log("✓ Tên check bắt buộc `gates / gates` còn nguyên · CI chỉ huỷ lượt cũ trên PR");
 }
 
+/**
+ * ═══════════ BIẾN KHAI Ở `env:` MÀ QUÊN Ở `envs:` THÌ TRÊN MÁY CHỦ NÓ RỖNG ═══════════
+ *
+ * `appleboy/ssh-action` CHỈ chuyển xuống shell từ xa những biến có tên trong `with.envs`. Khai ở
+ * `env:` của bước là điều kiện CẦN, không phải điều kiện ĐỦ — và khi thiếu vế thứ hai thì không
+ * có lỗi nào cả: biến chỉ đơn giản rỗng ở đầu kia.
+ *
+ * ĐÃ TỐN MỘT LƯỢT THẬT (ops #1465, 19/09/2026). Ba biến `ERP_AGENT_GITHUB_*` có đủ ở `env:`,
+ * thiếu ở `envs:`, nên `apply-agent-env` in ra:
+ *
+ *     Thiếu Secret: ERP_AGENT_GITHUB_APP_ID ERP_AGENT_GITHUB_INSTALLATION_ID ERP_AGENT_GITHUB_PRIVATE_KEY
+ *
+ * trong khi cả ba Secret ĐỀU CÓ trong kho. Đó là kiểu hỏng tệ nhất: thông điệp lỗi **đúng ngữ
+ * pháp và sai địa chỉ** — nó gửi người đọc đi nhập lại secret, đúng chỗ không hỏng, và cái hỏng
+ * thật thì không ai nhìn.
+ *
+ * VÌ SAO KIỂM CẢ LỚP CHỨ KHÔNG KIỂM BA BIẾN ĐÓ: liệt kê đúng ba cái tên vừa hỏng là khoá lại
+ * ĐÚNG lần hỏng đã xảy ra. Biến thứ tư thêm vào tháng sau vẫn rơi vào y hệt cái bẫy. Bất biến
+ * đúng là: **mọi** khoá khai ở `env:` của bước SSH phải có mặt ở `envs:` — vì khối `env:` ấy tồn
+ * tại không vì mục đích nào khác ngoài việc nuôi shell từ xa.
+ */
+export function testEnvsChuyenDuXuong() {
+  const src = doc("ops-vps.yml");
+
+  // Khối `env:` của bước SSH: từ dòng `env:` tới dòng `with:` cùng mức thụt đầu dòng.
+  const iEnv = src.indexOf("\n        env:\n");
+  assert.ok(iEnv > 0, "không tìm thấy khối `env:` của bước SSH trong ops-vps.yml");
+  const iWith = src.indexOf("\n        with:\n", iEnv);
+  assert.ok(iWith > iEnv, "không tìm thấy khối `with:` sau `env:`");
+  const khaiBao = [...src.slice(iEnv, iWith).matchAll(/^ {10}([A-Z][A-Z0-9_]*):/gm)].map((m) => m[1]!);
+  assert.ok(khaiBao.length >= 15, `đọc được ${khaiBao.length} biến ở env: — quá ít, bộ đọc hỏng chứ không phải workflow hỏng`);
+
+  const dongEnvs = /^ {10}envs: (.+)$/m.exec(src.slice(iWith));
+  assert.ok(dongEnvs, "bước SSH phải có `envs:`; thiếu nó thì KHÔNG biến nào xuống được máy chủ");
+  const chuyenXuong = new Set(dongEnvs![1]!.split(",").map((x) => x.trim()).filter(Boolean));
+
+  const thieu = khaiBao.filter((k) => !chuyenXuong.has(k));
+  assert.deepEqual(
+    thieu,
+    [],
+    `khai ở env: nhưng THIẾU ở envs: ${thieu.join(", ")} — trên máy chủ chúng sẽ RỖNG, và thao tác sẽ báo "thiếu Secret" trong khi Secret có đủ`,
+  );
+
+  // Chiều ngược lại: một tên ở `envs:` mà không có ở `env:` là rác — nó không chuyển gì xuống, và
+  // nó làm danh sách trông như đã phủ một biến mà thật ra chưa.
+  const thua = [...chuyenXuong].filter((k) => !khaiBao.includes(k));
+  assert.deepEqual(thua, [], `có ở envs: nhưng KHÔNG khai ở env: ${thua.join(", ")} — tên thừa làm danh sách trông đầy đủ hơn sự thật`);
+
+  // Ba biến của danh tính agent: nêu đích danh để lần hỏng này có một dòng nói thẳng về nó.
+  for (const k of ["ERP_AGENT_GITHUB_APP_ID", "ERP_AGENT_GITHUB_INSTALLATION_ID", "ERP_AGENT_GITHUB_PRIVATE_KEY"]) {
+    assert.ok(khaiBao.includes(k), `${k} phải được khai ở env: của bước SSH`);
+    assert.ok(chuyenXuong.has(k), `${k} phải có ở envs: — đây đúng là lỗi đã làm ops #1465 đỏ`);
+  }
+
+  // KHOÁ RIÊNG KHÔNG BAO GIỜ ĐƯỢC IN. Kho này PUBLIC, log Actions ai cũng đọc.
+  const iAgent = src.indexOf("apply-agent-env)");
+  assert.ok(iAgent > 0, "không tìm thấy thao tác apply-agent-env");
+  const than = src.slice(iAgent, src.indexOf("apply-tech-github-env)", iAgent));
+  assert.ok(!/echo[^\n]*\$\{?ERP_AGENT_GITHUB_PRIVATE_KEY\}?(?![#])/.test(than), "apply-agent-env không được in GIÁ TRỊ khoá riêng");
+  assert.ok(/\$\{#ERP_AGENT_GITHUB_PRIVATE_KEY\}/.test(than), "apply-agent-env phải in ĐỘ DÀI khoá riêng — đủ để biết đã ghi được, không đủ để dùng lại");
+
+  console.log(
+    `✓ Biến xuống được máy chủ: ${khaiBao.length} khoá ở env: đều có ở envs: (và ngược lại) · ba biến danh tính agent có đủ cả hai vế · khoá riêng chỉ in độ dài`,
+  );
+}
+
 export function testOpsConcurrency() {
   testKhongDungConcurrencyLamHangDoi();
   testKhoiKhoaOps();
   testKhoaCuaRelease();
   testKhoaChayThat();
   testTenCheckBatBuoc();
+  testEnvsChuyenDuXuong();
 }
 
 if (process.argv[1] && process.argv[1].endsWith("ops-concurrency.test.ts")) testOpsConcurrency();
