@@ -1304,6 +1304,26 @@ jobs:
                 # CHỈ ĐỌC, KHÔNG GỌI MÔ HÌNH NÀO. Mô phỏng phản thực trên lượt ĐÃ CHẠY: làn nào,
                 # tiền bao nhiêu. Bộ định tuyến đang chạy KHÔNG bị đụng tới, và kết quả mô phỏng
                 # không đi vào một câu trả lời khách nào.
+                #
+                # CHÉP THÊM HAI TỆP HẰNG SỐ MÀ ẢNH ĐANG CHẠY CHƯA CÓ.
+                #
+                # `fetch_staging_script` chỉ chép ĐÚNG MỘT tệp script; bản chạy thử được dựng từ
+                # một commit cũ hơn nên `model-registry.ts` và `router-sim.ts` chưa có trong ảnh,
+                # và lượt chạy đầu chết ở `Cannot find module`.
+                #
+                # Chép hai tệp ấy vào thay vì dựng lại ảnh, vì phép CHÉP THÊM là phép an toàn:
+                # cả hai đều là tệp MỚI (không đè lên tệp nào đang chạy), đều là hằng số thuần
+                # không import gì, và Next.js của bản chạy thử đã dựng xong nên thêm tệp nguồn
+                # không đổi một byte nào của bản đã dựng. Một lượt dựng lại ảnh thì ngược lại:
+                # nó dừng dịch vụ mà phiên làm việc khác đang dùng.
+                #
+                # Khi hai tệp này đã vào ảnh qua một lượt phát hành bình thường thì ba dòng dưới
+                # thành thừa và xoá đi được — chúng chỉ ghi đè bằng CHÍNH nội dung đã có.
+                for f in model-registry router-sim; do
+                  curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
+                    "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/lib/constants/$f.ts?ref=${STAGING_BRANCH}" \
+                    | docker exec -i vnx-ai-staging-app sh -c "cat > /app/lib/constants/$f.ts"
+                done
                 fetch_staging_script ai-staging-router-sim.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-router-sim.ts'
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-staging-router-sim.ts ${ARG:---days=30} ;;
