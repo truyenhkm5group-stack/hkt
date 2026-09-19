@@ -19,6 +19,8 @@ import { claimTask, finishTask, recordAiError, runsInLastHour } from "@/lib/ai-w
 import { parseRouting, runModelStep, type ModelAttempt } from "@/lib/ai-workforce/model-router";
 import { getAgent } from "@/lib/ai-workforce/registry";
 import { startRun, type RunRecorder } from "@/lib/ai-workforce/runs";
+import { recordProvenance, snapshotOf } from "@/lib/ai-workforce/agents/sales/provenance";
+import type { ProvenanceField, ProvenanceSourceType } from "@/lib/constants/order-provenance";
 import { callTool } from "@/lib/ai-workforce/tools/gateway";
 import { registerErpTools } from "@/lib/ai-workforce/tools/erp";
 import { checkContextualConfirmation } from "@/lib/ai-workforce/agents/sales/confirm";
@@ -331,7 +333,9 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       },
       db,
     );
-    await db.insert(schema.salesProductResolutions).values({
+    // Giữ lại KHOÁ của dòng vừa ghi: sổ nguồn của ô `product_id` trỏ về đây, nên "mã hàng này ở
+    // đâu ra" tra được tới tận tầng đã kết luận và câu chữ làm căn cứ — thay vì chỉ biết "máy suy ra".
+    const [dongNhanDien] = await db.insert(schema.salesProductResolutions).values({
       runId: run.id,
       conversationId: conversation.id,
       messageId: message.id,
@@ -342,7 +346,7 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       confidence: resolution.confidence,
       evidence: resolution.evidence,
       candidateCount: resolution.candidateCount,
-    });
+    }).returning({ id: schema.salesProductResolutions.id });
     // Học bản đồ quảng cáo → sản phẩm khi vừa kết luận được từ CÂU QUẢNG CÁO. Lần sau cùng một
     // quảng cáo không phải đoán lại, và kết quả không đổi giữa hai lượt.
     await learnAdMapping({ pageId: conversation.pageId, adId: message.adId ?? "", postUrl: message.postUrl ?? "", adDescription: message.adDescription ?? "", resolution }, db);
@@ -529,6 +533,49 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
       .update(schema.salesConversations)
       .set({ stage: finalStage, state, lastRunAt: now, updatedAt: now })
       .where(eq(schema.salesConversations.id, conversation.id));
+
+    /*
+      SỔ NGUỒN CỦA TỪNG Ô — ghi SAU khi trạng thái đã lưu, và không bao giờ làm hỏng lượt này.
+
+      Đặt sau lượt ghi trạng thái có chủ ý: trạng thái là nguồn sự thật của dây chuyền, sổ nguồn
+      là ghi chép về nó. Nếu sổ ghi trước rồi lượt ghi trạng thái hỏng, ta có một cuốn sổ kể về
+      một thay đổi chưa từng xảy ra.
+
+      Ô nào do KHÁCH gõ ra thì lấy từ CHÍNH thực thể đã bóc được ở câu khách — không đoán lại, và
+      không suy ngược từ giá trị cuối (giá trị cuối có thể do danh mục ERP điền nốt).
+    */
+    const khachNoi: Partial<Record<ProvenanceField, string>> = {};
+    if (understanding.entities.color) khachNoi.color = understanding.entities.color;
+    if (understanding.entities.size) khachNoi.size = understanding.entities.size;
+    if (understanding.entities.phone) khachNoi.phone = understanding.entities.phone;
+    if (understanding.entities.quantity) khachNoi.quantity = String(understanding.entities.quantity);
+
+    // Ô do ERP suy ra, kèm nguồn CỤ THỂ. `CLAIM_OF_SOURCE` quyết định mức khẳng định, không phải
+    // chỗ này — nên không có đường nào để một gợi ý của máy thành "lời khách".
+    const suyRa: Partial<Record<ProvenanceField, { sourceType: ProvenanceSourceType; reference?: string | null }>> = {};
+    if (resolution?.productId) suyRa.product_id = { sourceType: "PRODUCT_RESOLVER", reference: dongNhanDien?.id ?? null };
+    if (state.variantId) suyRa.variant_id = { sourceType: "ERP_CATALOG" };
+    // Size do BẢNG SỐ ĐO gợi ý: chỉ khai khi chính bảng ấy ra kết quả dùng được VÀ khách không tự
+    // nói size. Đây là ca E của đặc tả, và nó được giữ ở ĐÚNG một chỗ.
+    if (applied.sizeAdvice?.code === "OK" && applied.sizeAdvice.size && !understanding.entities.size) {
+      suyRa.size = { sourceType: "ERP_SIZE_ENGINE" };
+    }
+    await recordProvenance(
+      {
+        conversationId: conversation.id,
+        runId: run.id,
+        before: snapshotOf(stateBefore),
+        after: snapshotOf(state),
+        ctx: {
+          sourceMessageId: message.id,
+          statedByCustomer: khachNoi,
+          derived: suyRa,
+          evidence: understanding.evidence || message.text.slice(0, 200),
+          confidence: understanding.confidence,
+        },
+      },
+      db,
+    );
 
     await run.model(modelAttempts);
     await db.insert(schema.salesSuggestions).values({

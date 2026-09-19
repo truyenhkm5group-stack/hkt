@@ -3064,6 +3064,55 @@ export const salesAdProductMap = pgTable(
  * `source` là một trong `PRODUCT_RESOLUTION_SOURCES`. `product_id` NULL nghĩa là KHÔNG kết luận
  * được — và đó là một kết quả hợp lệ, khác hẳn với việc chọn bừa một mẫu cho có.
  */
+/**
+ * SỔ NGUỒN CỦA TỪNG Ô ĐƠN HÀNG — ai nói ra dữ kiện này, ở tin nhắn nào.
+ *
+ * KHÔNG phải máy trạng thái thứ hai. `sales_conversations.state` vẫn là nguồn sự thật cho dây
+ * chuyền bán hàng; bảng này chỉ GHI LẠI, để khi một đơn giao sai size thì câu hỏi đầu tiên của
+ * người xử lý khiếu nại — *lúc ấy ai đã chốt size này* — có chỗ trả lời.
+ *
+ * Mỗi lần một ô đổi giá trị: dòng cũ thành `SUPERSEDED` (không xoá), dòng mới thành `ACTIVE`.
+ * Luật kho mã cấm xoá dữ liệu đã đồng bộ, và ở đây lịch sử CHÍNH LÀ thứ cần giữ.
+ */
+export const orderFieldProvenance = pgTable(
+  "order_field_provenance",
+  {
+    id: id(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => salesConversations.id, { onDelete: "cascade" }),
+    runId: text("run_id").references(() => aiRuns.id, { onDelete: "set null" }),
+    /** Một trong `PROVENANCE_FIELDS`. */
+    field: text("field").notNull(),
+    /** Giá trị dạng CHỮ — sổ này để người đọc, không để tính toán. */
+    value: text("value").notNull().default(""),
+    /** Một trong `PROVENANCE_SOURCE_TYPES`: dữ kiện tới TỪ ĐÂU. */
+    sourceType: text("source_type").notNull(),
+    /**
+     * `STATED` · `DERIVED` · `INFERRED` — có phải lời KHÁCH nói không.
+     * Tách khỏi `source_type` có chủ ý: gộp lại thì "size do bảng số đo gợi ý" và "size khách tự
+     * chọn" trông y hệt nhau, và khi kiện hàng không vừa thì hồ sơ nói khách tự chọn.
+     */
+    claim: text("claim").notNull(),
+    /** Tin nhắn đã dẫn tới dữ kiện này. NULL = không sinh từ một tin cụ thể (người sửa tay). */
+    sourceMessageId: text("source_message_id").references(() => salesMessages.id, { onDelete: "set null" }),
+    /** Trỏ tới bản ghi gốc ở miền khác, ví dụ `sales_product_resolutions.id`. */
+    sourceReference: text("source_reference").notNull().default(""),
+    /** Câu/cụm đã dẫn tới kết luận — để người đọc lại hiểu, không để máy đọc. */
+    evidence: text("evidence").notNull().default(""),
+    /** 0–1. NULL = CHƯA ĐO ĐƯỢC, không phải 0. */
+    confidence: doublePrecision("confidence"),
+    /** `ACTIVE` · `SUPERSEDED`. */
+    status: text("status").notNull().default("ACTIVE"),
+    supersededAt: ts("superseded_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("order_field_provenance_conv_idx").on(t.conversationId, t.field, t.createdAt),
+    index("order_field_provenance_run_idx").on(t.runId),
+  ],
+);
+
 export const salesProductResolutions = pgTable(
   "sales_product_resolutions",
   {
