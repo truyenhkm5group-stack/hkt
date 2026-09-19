@@ -24,6 +24,7 @@ import { testFinanceCockpit } from "./finance-cockpit.test";
 import { testCostDoubleCount } from "./cost-double-count.test";
 import { testPayrollCostPreservation } from "./payroll-cost-preservation.test";
 import { testPayrollCarryover } from "./payroll-carryover.test";
+import { testDataTruth } from "./data-truth.test";
 import { testPayrollCogsCutoff } from "./payroll-cogs-cutoff.test";
 import { testProfitCarryover } from "./profit-carryover.test";
 import { testCompensationProfitBasis } from "./compensation-profit.test";
@@ -1700,6 +1701,7 @@ async function main() {
   await testCostDoubleCount(db);
   await testPayrollCostPreservation(db);
   await testPayrollCarryover(db);
+  await testDataTruth(db);
   await testPayrollCogsCutoff(db);
   await testProfitCarryover();
   testCompensationProfitBasis();
