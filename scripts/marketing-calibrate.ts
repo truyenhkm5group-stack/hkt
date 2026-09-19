@@ -324,8 +324,22 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   }
   const soLoi = findings.filter((f) => f.kind === "BUG").length;
   log("\n" + "═".repeat(120));
-  if (soLoi === 0) log("✓ KHÔNG CÓ CHÊNH LỆCH NÀO THUỘC NHÓM LỖI. Mọi khác biệt đều giải thích được bằng mốc / tập đơn / độ trễ nguồn.");
-  else log(`✗ ${soLoi} CHÊNH LỆCH KHÔNG GIẢI THÍCH ĐƯỢC — đây là lỗi, không phải sai số.`);
+  /*
+    DÒNG CUỐI PHẢI TỰ KHAI NÓ LÀ LƯỢT CHẠY NÀO.
+
+    Nhiều phiên cùng chạy thao tác vận hành trên một kho, và log của GitHub Actions chỉ đọc được
+    phần ĐUÔI. Phần đầu — nơi in kỳ và bộ lọc — nằm ngoài tầm với, nên người đọc log phải đoán lượt
+    nào là lượt mình vừa gửi. Đã đoán nhầm bốn lần trong một buổi chiều, mỗi lần là một lượt chạy
+    10 phút mất trắng, và một lần suýt dựng bảng số liệu từ kết quả của phiên khác.
+
+    Nên phạm vi được in LẠI ở dòng cuối cùng. Rẻ, và nó biến "lượt nào là của tôi" từ một phép suy
+    luận thành một phép đọc.
+  */
+  const dau = [`kỳ ${args.from}→${args.to}`, args.marketer ? `marketer=${args.marketer}` : null, args.product ? `mã=${args.product}` : null, `mốc=${args.basis}`]
+    .filter(Boolean)
+    .join(" · ");
+  if (soLoi === 0) log(`✓ KHÔNG CÓ CHÊNH LỆCH NÀO THUỘC NHÓM LỖI. Mọi khác biệt đều giải thích được bằng mốc / tập đơn / độ trễ nguồn.  [${dau}]`);
+  else log(`✗ ${soLoi} CHÊNH LỆCH KHÔNG GIẢI THÍCH ĐƯỢC — đây là lỗi, không phải sai số.  [${dau}]`);
   return { findings, days: data.rows.length, bugs: soLoi };
 }
 
