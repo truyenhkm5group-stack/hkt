@@ -35,7 +35,12 @@ const GOC = process.env.TEST_BASE_URL ?? "http://127.0.0.1:3000";
 const BANG_TRANG: { duong: string; dau: string[] }[] = [
   {
     duong: "/ai/review",
-    dau: ["Chấm tay", "Lưu kết quả chấm", "Ghi chú (tuỳ chọn)", "Viền hổ phách", "Độ chính xác (chỉ tính trên phần đã chấm tay)"],
+    dau: [
+      "Chấm tay", "Lưu kết quả chấm", "Ghi chú (tuỳ chọn)", "Viền hổ phách",
+      "Độ chính xác (chỉ tính trên phần đã chấm tay)",
+      // Ba dấu hiệu MỚI (19/09 chiều) — người chấm cần cả ba mới chấm được "máy nói có căn cứ không".
+      "Mẻ chấm phân tầng", "Bám dữ kiện", "KHÔNG ĐẠT",
+    ],
   },
   {
     duong: "/ai/fanpage",
