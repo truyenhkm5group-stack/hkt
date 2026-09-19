@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { saveShadowLabel } from "@/lib/actions/ai-review";
 import { Button } from "@/components/ui/button";
@@ -52,12 +52,43 @@ export function LabelForm({ suggestionId, initial }: { suggestionId: string; ini
   const [hallucination, setHallucination] = useState<Verdict>((initial.hallucination as Verdict) ?? null);
   const [note, setNote] = useState(String(initial.note ?? ""));
   const [pending, start] = useTransition();
+  const [daLuu, setDaLuu] = useState<{ luc: string; ai: string } | null>(() => {
+    const luc = initial.reviewedAt;
+    return luc ? { luc: new Date(String(luc)).toLocaleString("vi-VN"), ai: String(initial.reviewerName ?? "") } : null;
+  });
+
+  /*
+    CHƯA LƯU PHẢI NHÌN THẤY ĐƯỢC.
+
+    Người soát chấm chín ô rồi chuyển sang lượt khác là mất sạch — và mất im lặng, vì màn hình
+    trước đó trông y hệt lúc đã lưu. So với ẢNH CHỤP LÚC MỞ chứ không giữ một cờ `dirty` bật tay:
+    bấm nhầm rồi bấm lại về chỗ cũ thì đúng là không có gì để lưu, và cờ bật tay sẽ nói dối.
+  */
+  const hienTai = JSON.stringify({ values, quality, verdict, tags: [...tags].sort(), hallucination, note });
+  // `useState` chỉ đọc tham số ở lần dựng ĐẦU, nên đây đúng là ảnh chụp lúc mở — và sau mỗi lần
+  // lưu thành công thì dời mốc sang trạng thái vừa lưu.
+  const [moc, setMoc] = useState(hienTai);
+  const chuaLuu = hienTai !== moc;
+
+  // Rời trang khi còn thay đổi chưa lưu ⇒ trình duyệt hỏi lại. Không cứu được mọi trường hợp,
+  // nhưng cứu đúng trường hợp hay gặp nhất: đóng tab giữa chừng.
+  useEffect(() => {
+    if (!chuaLuu) return;
+    const canh = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", canh);
+    return () => window.removeEventListener("beforeunload", canh);
+  }, [chuaLuu]);
 
   const submit = () => {
     start(async () => {
       const result = await saveShadowLabel({ suggestionId, ...values, nextActionQuality: quality, verdict, reasonTags: tags, hallucination, note });
-      if ("error" in result) toast.error(result.error);
-      else toast.success("Đã lưu kết quả chấm");
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Đã lưu kết quả chấm");
+      setDaLuu({ luc: new Date(result.reviewedAt).toLocaleString("vi-VN"), ai: result.reviewerName });
+      setMoc(hienTai);
     });
   };
 
@@ -135,9 +166,19 @@ export function LabelForm({ suggestionId, initial }: { suggestionId: string; ini
         <Tri label="Bịa / phá luật" value={hallucination} onChange={setHallucination} />
       </div>
       <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (tuỳ chọn)" className="w-full rounded-md border border-border bg-background p-2 text-xs" rows={2} />
-      <Button size="sm" onClick={submit} disabled={pending}>
-        {pending ? "Đang lưu…" : "Lưu kết quả chấm"}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={submit} disabled={pending}>
+          {pending ? "Đang lưu…" : "Lưu kết quả chấm"}
+        </Button>
+        {chuaLuu ? (
+          <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">CHƯA LƯU</span>
+        ) : daLuu ? (
+          <span className="text-[11px] text-emerald-700 dark:text-emerald-300">
+            ĐÃ LƯU · {daLuu.luc}
+            {daLuu.ai ? ` · ${daLuu.ai}` : ""}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }

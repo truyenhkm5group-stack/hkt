@@ -8,7 +8,12 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { REVIEW_REASON_TAGS, REVIEW_VERDICTS } from "@/lib/constants/sales-review-tags";
 
-export type ActionResult = { ok: true } | { error: string };
+/**
+ * Lượt lưu trả lại AI ĐÃ CHẤM và LÚC NÀO, để màn hình in ra được ngay mà không phải tải lại trang.
+ * Một dòng "ĐÃ LƯU" không kèm tên người và giờ là một dòng người soát vẫn phải tự tin — mà thứ họ
+ * cần chắc đúng là cái đó.
+ */
+export type ActionResult = { ok: true; reviewedAt: string; reviewerName: string } | { error: string };
 
 /**
  * CHẤM TAY một lượt chạy ở nấc chạy ngầm.
@@ -100,5 +105,5 @@ export async function saveShadowLabel(input: unknown): Promise<ActionResult> {
     reason: "Chấm tay lượt chạy nhân sự AI ở nấc chạy ngầm",
   });
   revalidatePath("/ai/review");
-  return { ok: true };
+  return { ok: true, reviewedAt: values.reviewedAt.toISOString(), reviewerName: user.name || user.email };
 }

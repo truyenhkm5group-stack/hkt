@@ -1553,6 +1553,41 @@ export async function testSalesAgent(db: Db) {
   assert.equal(size?.accuracy, null, "chiều chưa ai chấm vẫn là CHƯA BIẾT, không bị kéo xuống 0%");
   assert.ok(afterLabels.reviewCoverage !== null && afterLabels.reviewCoverage < 100, "độ phủ phải hiện cạnh tỷ lệ để không ai đọc nhầm");
 
+  /*
+    ═════════ 12A. TRANG SOÁT PHẢI CHIA TRANG ĐƯỢC ═════════
+
+    ĐO 19/09/2026 trên bản chạy thử: trang soát dựng một thẻ chấm cho MỖI lượt trong cửa sổ ⇒ HTML
+    1.097.170 ký tự và 2.414 thẻ <button> trong một lần dựng. Cả 30/30 tệp JS đều trả 200 — máy
+    chủ giao đủ. Nhưng React phải gắn tay cầm cho từng ấy nút trước khi BẤT CỨ cú bấm nào có tác
+    dụng, kể cả một nút chỉ đổi `useState`. Người soát bấm, không thấy gì, và kết luận "hỏng".
+    Họ đúng.
+
+    Nên `offset` không phải tiện nghi: nó là thứ giữ cho trang còn bấm được.
+  */
+  const trang1 = await listShadowTurns({ limit: 2, offset: 0 });
+  const trang2 = await listShadowTurns({ limit: 2, offset: 2 });
+  assert.ok(trang1.length <= 2, "trần mỗi trang phải được tôn trọng");
+  assert.ok(trang2.length <= 2);
+  const giao = trang1.filter((a) => trang2.some((b) => b.suggestionId === a.suggestionId));
+  assert.equal(giao.length, 0, "hai trang liên tiếp KHÔNG được trùng lượt nào");
+  const gopLai = [...trang1, ...trang2].map((t) => t.suggestionId);
+  const bonDau = (await listShadowTurns({ limit: 4, offset: 0 })).map((t) => t.suggestionId);
+  assert.deepEqual(gopLai, bonDau, "hai trang ghép lại phải đúng bằng một lần lấy liền bốn lượt");
+
+  /*
+    LƯU LẠI LẦN HAI LÀ SỬA, KHÔNG PHẢI THÊM DÒNG. Ràng buộc ở CSDL chứ không ở tầng ứng dụng: hai
+    tab cùng bấm Lưu thì cả hai đều đọc thấy "chưa có dòng nào" trước khi lượt nào kịp ghi.
+  */
+  await assert.rejects(
+    db.insert(schema.salesReviewLabels).values({
+      suggestionId: shadowTurns[0].suggestionId,
+      conversationId: shadowTurns[0].conversationId,
+      productOk: false,
+      reviewedAt: new Date(),
+    }),
+    "chấm lần hai trên cùng một lượt phải bị CSDL từ chối — đường ghi thật là cập nhật",
+  );
+
   // ═════════ 12B. LÝ DO CHẤM LÀ DANH SÁCH ĐÓNG, CHẶN Ở CẢ HAI ĐẦU ═════════
   //
   // Ô chữ tự do ghi được mọi thứ nhưng ĐẾM được không thứ gì. Sau ba mươi lượt chấm, câu hỏi thật

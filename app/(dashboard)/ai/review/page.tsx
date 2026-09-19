@@ -42,18 +42,49 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
     hasError: boolParam(raw, "error"),
     hasSuggestion: boolParam(raw, "suggestion"),
     reviewed: boolParam(raw, "reviewed"),
-    limit: 60,
   };
-  const [turns, metrics] = await Promise.all([listShadowTurns(filters), shadowMetrics(days)]);
+  /*
+    ═══════════ VÌ SAO TRANG NÀY PHẢI PHÂN TRANG ═══════════
+
+    ĐO 19/09/2026 trên bản chạy thử, đúng trang này: HTML **1.097.170 ký tự** và **2.414 thẻ
+    <button>** trong MỘT lần dựng. Cả 30/30 tệp JS đều trả 200 — máy chủ giao đủ.
+
+    Nhưng mỗi lượt kéo theo một thẻ chấm, và thẻ chấm là một client component với khoảng 40 nút.
+    Sáu mươi lượt ⇒ sáu mươi khối trạng thái React phải gắn tay cầm trước khi BẤT CỨ cú bấm nào có
+    tác dụng — kể cả một nút chỉ đổi `useState` và không đụng tới máy chủ. Trong lúc ấy trang đã vẽ
+    xong và trông y hệt một trang dùng được. Người soát bấm, không thấy gì xảy ra, và kết luận
+    "hỏng". Họ đúng: một trang cần hàng chục giây mới gắn xong là một trang không bấm được.
+
+    Nên số lượt mỗi trang phải CÓ TRẦN, và trần ấy là một con số nhỏ. Mười thẻ ≈ 400 nút — bằng
+    một trang bình thường của ERP này.
+  */
+  const perPage = 10;
+  const page = Math.max(1, Number(one(raw, "page")) || 1);
+  // Lấy DƯ MỘT dòng để biết còn trang sau hay không, khỏi tốn một câu đếm riêng.
+  const [duTurns, metrics] = await Promise.all([
+    listShadowTurns({ ...filters, limit: perPage + 1, offset: (page - 1) * perPage }),
+    shadowMetrics(days),
+  ]);
+  const coTrangSau = duTurns.length > perPage;
+  const turns = duTurns.slice(0, perPage);
   const db = await getDb();
-  const labels = await db.query.salesReviewLabels.findMany({ limit: 500 });
-  const labelBySuggestion = new Map(labels.map((l) => [l.suggestionId, l as unknown as Record<string, unknown>]));
+  const labels = await db.query.salesReviewLabels.findMany({ limit: 500, with: { reviewer: { columns: { name: true, email: true } } } });
+  const labelBySuggestion = new Map(
+    // Kèm TÊN người chấm để thẻ in được "ĐÃ LƯU · lúc nào · ai" ngay khi mở, không phải đợi tới
+    // lần lưu kế tiếp mới biết ai đã chấm.
+    labels.map((l) => {
+      const nguoi = (l as { reviewer?: { name?: string; email?: string } | null }).reviewer;
+      return [l.suggestionId, { ...(l as unknown as Record<string, unknown>), reviewerName: nguoi?.name || nguoi?.email || "" }];
+    }),
+  );
 
   const queryWith = (key: string, value: string) => {
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(raw)) {
       const single = Array.isArray(v) ? v[0] : v;
-      if (single && k !== key) params.set(k, single);
+      // Đổi bộ lọc thì QUAY VỀ TRANG 1: giữ nguyên số trang cũ trên một tập nhỏ hơn là đưa người
+      // dùng tới một trang trống và để họ tự đoán vì sao.
+      if (single && k !== key && !(k === "page" && key !== "page")) params.set(k, single);
     }
     if (value) params.set(key, value);
     const query = params.toString();
@@ -204,8 +235,30 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
         ))}
         {turns.length === 0 ? (
           <Card className="p-6 text-center text-sm text-muted-foreground">
-            Chưa có lượt nào khớp bộ lọc. Nhân sự AI chạy khi có tin nhắn khách vào qua webhook hội thoại hoặc job nạp bù.
+            {page > 1
+              ? "Hết lượt ở trang này. Quay lại trang trước."
+              : "Chưa có lượt nào khớp bộ lọc. Nhân sự AI chạy khi có tin nhắn khách vào qua webhook hội thoại hoặc job nạp bù."}
           </Card>
+        ) : null}
+
+        {page > 1 || coTrangSau ? (
+          <div className="flex items-center justify-between gap-2 text-xs">
+            {page > 1 ? (
+              <Link href={queryWith("page", String(page - 1))} className="rounded border border-border px-2 py-1">
+                ← trang trước
+              </Link>
+            ) : (
+              <span />
+            )}
+            <span className="text-muted-foreground">trang {page} · mỗi trang {perPage} lượt</span>
+            {coTrangSau ? (
+              <Link href={queryWith("page", String(page + 1))} className="rounded border border-border px-2 py-1">
+                trang sau →
+              </Link>
+            ) : (
+              <span />
+            )}
+          </div>
         ) : null}
       </div>
     </div>

@@ -35,6 +35,16 @@ export type ShadowTurnFilters = {
   /** Đã chấm tay hay chưa. */
   reviewed?: boolean;
   limit?: number;
+  /**
+   * BỎ QUA BAO NHIÊU LƯỢT — để trang soát phân được trang.
+   *
+   * ĐO 19/09/2026 trên bản chạy thử: trang soát dựng MỘT thẻ chấm cho MỖI lượt trong cửa sổ, và
+   * thẻ chấm là một client component với khoảng 40 nút. Kết quả: HTML 1.097.170 ký tự, 2.414 nút.
+   * Trình duyệt vẫn vẽ ra bình thường, nhưng React phải gắn tay cầm cho từng ấy nút trước khi bất
+   * cứ cú bấm nào có tác dụng — nên người dùng thấy "trang hiện đủ mà bấm không ăn". Không phải
+   * lỗi quyền, không phải Server Action: chỉ là quá nặng để gắn.
+   */
+  offset?: number;
 };
 
 export type ShadowTurn = {
@@ -144,7 +154,8 @@ export async function listShadowTurns(filters: ShadowTurnFilters = {}): Promise<
     .leftJoin(l, eq(l.suggestionId, s.id))
     .where(and(...conds.filter(Boolean)))
     .orderBy(desc(s.createdAt))
-    .limit(Math.min(filters.limit ?? 100, 500));
+    .limit(Math.min(filters.limit ?? 100, 500))
+    .offset(Math.max(filters.offset ?? 0, 0));
 
   return rows.map((row) => {
     const understanding = (row.understanding ?? {}) as Record<string, unknown>;
