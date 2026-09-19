@@ -118,6 +118,8 @@ export const ERROR_POLICY: Record<ProviderErrorKind, ErrorPolicy> = {
  * Mặc định của 429 là `RATE_LIMITED` (nhóm NHẸ hơn), có chủ ý: đoán nhầm hết-tiền-thành-chặn-tốc
  * làm ta thử lại thừa vài lần rồi cầu dao vẫn mở; đoán nhầm chiều ngược lại làm ta TẮT một nhà
  * cung cấp đang khoẻ trong nửa tiếng. Sai về phía ồn ào hơn nhưng không tự cắt tay mình.
+ *
+ * Và phép thử HẾT TIỀN đứng NGOÀI nhánh 429, không nằm trong — xem chú thích tại chỗ.
  */
 export function normalizeProviderError(input: { status?: number; message?: string; name?: string }): ProviderErrorKind {
   const chu = `${input.name ?? ""} ${input.message ?? ""}`.toLowerCase();
@@ -130,16 +132,26 @@ export function normalizeProviderError(input: { status?: number; message?: strin
     return "AUTH_ERROR";
   }
 
-  if (ma === 429 || /rate.?limit|quota|no credits|billing/.test(chu)) {
-    // HẾT TIỀN — bốn cách diễn đạt đã gặp thật hoặc có trong tài liệu của ba nhà cung cấp.
-    if (/no credits|insufficient[_ ]quota|exceeded your current quota|billing|credit balance|out of (credits|quota)|hết hạn mức/.test(chu)) {
-      return "QUOTA_EXHAUSTED";
-    }
-    // Ngân sách tổ chức / dự án là MỘT DẠNG hết hạn mức: người phải vào bảng điều khiển nới nó,
-    // thử lại không giúp gì. Gộp vào `RATE_LIMITED` là lặp lại đúng sai lầm của vụ 17–19/09.
-    if (/budget|spend limit|usage limit|organization.*limit|project.*limit/.test(chu)) return "QUOTA_EXHAUSTED";
-    return "RATE_LIMITED";
-  }
+  /*
+    HẾT HẠN MỨC XÉT TRƯỚC, VÀ KHÔNG PHỤ THUỘC MÃ HTTP.
+
+    Bản đầu đặt phép thử này BÊN TRONG nhánh `429`, với một cổng ngoài là
+    `/rate.?limit|quota|no credits|billing/`. Bài kiểm bắt ngay: lời lỗi hết tiền THẬT của một nhà
+    cung cấp là *"Your credit balance is too low to access the API"* — không có chữ "quota", không
+    có "no credits", và có thể về kèm một mã khác 429. Nó rơi thẳng vào `UNKNOWN`, tức là KHÔNG mở
+    cầu dao, tức là đúng lại kịch bản thử-lại-suốt-hai-ngày mà cả cơ chế này sinh ra để chặn.
+
+    Nên: hỏi "có phải hết tiền không" trước, bằng chính CHỮ, rồi mới tới mã HTTP. Một cổng ngoài
+    dựng bằng danh sách chữ là một cổng sẽ quên mất cách diễn đạt thứ năm.
+  */
+  const HET_TIEN = /no credits|insufficient[_ ]quota|exceeded your current quota|billing|credit balance|out of (credits|quota)|hết hạn mức/;
+  // Ngân sách tổ chức / dự án là MỘT DẠNG hết hạn mức: người phải vào bảng điều khiển nới nó, thử
+  // lại không giúp gì. Gộp vào `RATE_LIMITED` là lặp lại đúng sai lầm cũ với một cái tên khác.
+  const HET_NGAN_SACH = /budget|spend limit|usage limit|organization.*limit|project.*limit/;
+  if (HET_TIEN.test(chu) || HET_NGAN_SACH.test(chu)) return "QUOTA_EXHAUSTED";
+
+  // Còn lại của 429 (và mọi lời lỗi nói "rate limit") là chặn tốc độ — chờ là qua.
+  if (ma === 429 || /rate.?limit|too many requests/.test(chu)) return "RATE_LIMITED";
 
   if (ma === 400 || ma === 404 || ma === 422 || /model.*not found|unsupported|invalid.*(parameter|request|model)/.test(chu)) return "BAD_REQUEST";
   if (ma >= 500 || /internal|overloaded|service unavailable|bad gateway/.test(chu)) return "SERVER_ERROR";

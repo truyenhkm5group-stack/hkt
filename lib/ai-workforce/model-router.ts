@@ -17,6 +17,8 @@ import { getAiSettings, aiEnv, type AiSettings, type ModelPrice } from "@/lib/ai
 import { getLiveProvider, defaultProviderName } from "@/lib/ai-workforce/providers";
 import { ModelTimeoutError, ModelUnavailableError, type ModelMessage } from "@/lib/ai-workforce/providers/types";
 import { CONFIDENCE_FLOOR, type EscalationReason, type RouteTier } from "@/lib/constants/ai";
+import { normalizeProviderError } from "@/lib/constants/provider-health";
+import { circuitEnabled, recordFailure, recordSuccess, shouldSkip } from "@/lib/ai-workforce/circuit";
 
 /** Cấu hình định tuyến của một bản nhân sự (lưu ở `ai_agent_versions.routing`). */
 export type RoutingConfig = {
@@ -148,6 +150,20 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
   const tiers = routing.tiers?.length ? routing.tiers : DEFAULT_ROUTING.tiers;
   let lastReason: EscalationReason = "MODEL_ERROR";
 
+  /*
+    CẦU DAO — hỏi TRƯỚC khi gọi, không phải sau khi hỏng.
+
+    Nhà cung cấp vừa hỏng theo một nhóm lỗi mà thử lại là vô ích (hết hạn mức, khoá sai) thì lượt
+    này bỏ qua luôn, và kết luận là CHUYỂN NGƯỜI — đúng cái kết luận mà lượt gọi kia sẽ dẫn tới,
+    chỉ khác là không tốn một lượt gọi mạng và một khoảng chờ của khách.
+
+    `shouldSkip()` trả `false` khi cầu dao đang TẮT nhưng vẫn ĐẾM, nên số đo tích luỹ trước khi ai
+    bật nó. Không có nhánh nào ở đây biết tên một nhà cung cấp nào.
+  */
+  if (shouldSkip(providerName)) {
+    return { tier: "HUMAN", value: null, attempts, escalation: "MODEL_NOT_CONFIGURED" };
+  }
+
   for (const tier of tiers) {
     const model = routing.models?.[tier] || provider.defaultModel(tier);
     if (!model) {
@@ -191,6 +207,9 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
         continue;
       }
       attempts.push(attempt);
+      // Gọi được VÀ đúng lược đồ ⇒ nhà cung cấp khoẻ, đóng cầu dao lại nếu nó đang mở.
+      recordSuccess(result.provider);
+      recordSuccess(providerName);
       const confidence = input.confidenceOf?.(parsed) ?? null;
       if (confidence !== null && confidence < CONFIDENCE_FLOOR.MODEL) {
         lastReason = "LOW_CONFIDENCE";
@@ -201,6 +220,17 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
       const latencyMs = Date.now() - startedAt;
       const timeout = error instanceof ModelTimeoutError;
       lastReason = timeout ? "MODEL_TIMEOUT" : "MODEL_ERROR";
+      /*
+        Phân loại lời lỗi rồi GHI NHỚ. Phân loại bằng chính bộ chuẩn hoá mà phép dò sức khoẻ dùng,
+        nên hai chỗ không bao giờ nói hai điều khác nhau về cùng một lời lỗi.
+
+        Ghi nhớ kể cả khi cầu dao đang tắt: số đo phải có sẵn để đọc TRƯỚC khi quyết định bật.
+      */
+      const nhomLoi = normalizeProviderError({
+        message: error instanceof Error ? error.message : String(error),
+        name: error instanceof Error ? error.name : undefined,
+      });
+      recordFailure(providerName, nhomLoi);
       attempts.push({
         tier,
         provider: providerName,
@@ -216,7 +246,17 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
         latencyMs,
         error: error instanceof Error ? error.message.slice(0, 500) : String(error),
       });
+      /*
+        HAI LÝ DO DỪNG HẲN, không leo nấc tiếp:
+
+        · `ModelUnavailableError` — như trước.
+        · Cầu dao vừa mở vì một nhóm lỗi mà thử lại vô ích. Leo lên nấc MẠNH của CÙNG một nhà cung
+          cấp đã hết hạn mức thì cũng hết hạn mức — nấc là chuyện của mô hình, hạn mức là chuyện
+          của tài khoản. Chỉ dừng khi cầu dao đang BẬT: khi tắt thì giữ nguyên hành vi cũ từng
+          dòng một, để việc bật/tắt là thứ duy nhất đổi hành vi.
+      */
       if (error instanceof ModelUnavailableError) break;
+      if (circuitEnabled() && shouldSkip(providerName)) break;
     }
   }
   return { tier: "HUMAN", value: null, attempts, escalation: lastReason };

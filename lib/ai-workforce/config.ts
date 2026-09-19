@@ -158,6 +158,18 @@ export const aiEnv = {
   get modelCallsEnabled() {
     return readEnvBool("AI_MODEL_CALLS_ENABLED", false);
   },
+  /**
+   * CẦU DAO NHÀ CUNG CẤP — TẮT mặc định.
+   *
+   * Bật lên là đổi hành vi đường chạy thật: các lượt gọi tới một nhà cung cấp đang bị coi là hỏng
+   * sẽ bị BỎ QUA. Đó là điều đúng nên làm, nhưng nó phải do người bật sau khi đọc số đo, không
+   * phải tự có hiệu lực vì một lượt phát hành — nhất là khi đang có phiên soát chạy trên bản chạy
+   * thử. Khi tắt, số đo VẪN tích luỹ, nên đọc được "nếu bật thì đã bỏ qua bao nhiêu lượt" trước
+   * khi bật.
+   */
+  get circuitBreakerEnabled() {
+    return readEnvBool("AI_CIRCUIT_BREAKER_ENABLED", false);
+  },
   /** Hội thoại được phép nhận tin thật để kiểm thử vòng khép kín (một mã, phân tách bằng dấu phẩy). */
   get testConversationIds() {
     return readEnv("AI_TEST_CONVERSATION_IDS")
