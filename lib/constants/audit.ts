@@ -8,6 +8,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   USER_LOCK: "Khoá người dùng",
   USER_UNLOCK: "Mở khoá người dùng",
   USER_RESET_PASSWORD: "Đặt lại mật khẩu",
+  SESSION_REVOKE: "Thu hồi phiên đăng nhập",
+  USER_PERMISSIONS: "Đổi quyền người dùng",
   EXPENSE_CREATE: "Thêm chi phí",
   EXPENSE_UPDATE: "Sửa chi phí",
   EXPENSE_ALLOCATION_SET: "Khai kỳ hiệu lực cho chi phí",
@@ -105,7 +107,7 @@ export function auditEntityHref(entity: string, entityId: string): string | null
 
 /** Màu nhãn theo nhóm hành động */
 export function auditActionTone(action: string) {
-  if (/DELETE|LOCK$|FAILED/.test(action)) return "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300";
+  if (/DELETE|LOCK$|FAILED|SESSION_REVOKE/.test(action)) return "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300";
   if (/CREATE|UNLOCK|PAID|RECONCILE/.test(action)) return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300";
   if (/UPDATE|CHANGE|RESET/.test(action)) return "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300";
   if (/LOGIN|LOGOUT/.test(action)) return "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300";

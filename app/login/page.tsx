@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { LoginForm } from "@/app/login/login-form";
 import { BrandGlyph, BrandWordmark } from "@/components/brand";
 import { getSession } from "@/lib/auth/session";
+import { loginShouldStay } from "@/lib/constants/session-revocation";
 import { integrationStatus } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +10,18 @@ export const dynamic = "force-dynamic";
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; reason?: string }> }) {
   const session = await getSession();
   const params = await searchParams;
-  if (session && params.reason !== "inactive") redirect(params.next && params.next.startsWith("/") ? params.next : "/");
+  /*
+    VÒNG LẶP CHUYỂN HƯỚNG — CÓ THẬT, KHÔNG PHẢI PHÒNG XA.
+
+    `getSession()` chỉ kiểm CHỮ KÝ và HẠN; nó không biết gì về CSDL. Một phiên bị THU HỒI vẫn có
+    cookie ký đúng và còn hạn, nên hàm này trả về một phiên trông hợp lệ. Đẩy người dùng vào trong
+    thì trang đó gọi `requireUser()` → bị từ chối → đẩy ngược ra đây → lặp vô tận, trình duyệt báo
+    ERR_TOO_MANY_REDIRECTS và người dùng không còn đường nào đăng nhập lại.
+
+    `loginShouldStay()` giữ MỌI lý do từ chối ở lại trang này. Thêm một lý do mới thì thêm vào
+    danh sách ở `lib/constants/session-revocation.ts`, không sửa điều kiện ở đây.
+  */
+  if (session && !loginShouldStay(params.reason)) redirect(params.next && params.next.startsWith("/") ? params.next : "/");
   const status = integrationStatus();
 
   return (

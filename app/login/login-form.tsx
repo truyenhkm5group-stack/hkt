@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DENY_REASON_MESSAGE } from "@/lib/constants/session-revocation";
 
 export function LoginForm({ next, reason }: { next?: string; reason?: string }) {
   const [state, action, pending] = useActionState<LoginState, FormData>(loginAction, undefined);
@@ -35,7 +36,7 @@ export function LoginForm({ next, reason }: { next?: string; reason?: string }) 
             <Label htmlFor="password">Mật khẩu</Label>
             <Input id="password" name="password" type="password" autoComplete="current-password" required />
           </div>
-          {reason === "inactive" ? <p className="text-sm text-destructive">Tài khoản đã bị khoá hoặc không tồn tại.</p> : null}
+          {reason && DENY_REASON_MESSAGE[reason] ? <p className="text-sm text-destructive">{DENY_REASON_MESSAGE[reason]}</p> : null}
           {state?.error ? <p className="text-sm text-destructive">{state.error}</p> : null}
           <Button type="submit" className="w-full" disabled={pending}>
             {pending ? <Loader2 className="size-4 animate-spin" /> : null}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { KeyRound, Loader2 } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -9,10 +10,12 @@ import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { changeMyPassword } from "@/lib/actions/users";
+import { REASON_PASSWORD_CHANGED } from "@/lib/constants/session-revocation";
 import { changePasswordSchema, type ChangePasswordInput } from "@/lib/validation/users";
 
 export function ChangePasswordForm() {
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
   const form = useForm<ChangePasswordInput>({ resolver: zodResolver(changePasswordSchema), defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" } });
 
   const submit = (values: ChangePasswordInput) => {
@@ -22,8 +25,12 @@ export function ChangePasswordForm() {
         toast.error(result.error);
         return;
       }
-      toast.success("Đã đổi mật khẩu. Hãy dùng mật khẩu mới ở lần đăng nhập tới.");
       form.reset({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      // Đổi mật khẩu đã thu hồi MỌI phiên, kể cả phiên này — máy chủ cũng đã xoá cookie. Đưa người
+      // dùng thẳng về trang đăng nhập với đúng câu giải thích, thay vì để lượt điều hướng kế tiếp
+      // đá họ ra với câu "phiên đã bị thu hồi" nghe như có người khác vừa can thiệp.
+      toast.success("Đã đổi mật khẩu. Mọi thiết bị đã được đăng xuất.");
+      router.replace(`/login?reason=${REASON_PASSWORD_CHANGED}`);
     });
   };
 

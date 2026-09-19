@@ -268,10 +268,21 @@ export async function testSessionRenewal() {
 
   const goc = path.resolve(__dirname, "..");
   const nguon = readFileSync(path.join(goc, "lib/auth/session.ts"), "utf8");
-  const thanHam = nguon.slice(nguon.indexOf("export const getCurrentUser"));
-  assert.ok(/db\.query\.users\.findFirst/.test(thanHam), "getCurrentUser phải TRA CSDL mỗi lần — token không phải nguồn sự thật về người dùng");
-  assert.ok(/if \(!user \|\| !user\.active\) return null/.test(thanHam), "tài khoản bị khoá phải bị từ chối NGAY, không đợi token hết hạn");
+  /*
+    Neo vào `resolveCurrentUser` chứ không phải `getCurrentUser`: bản thu hồi phiên tách hàm này
+    làm hai — `resolveCurrentUser` giữ toàn bộ phép quyết định và trả về LÝ DO từ chối,
+    `getCurrentUser` chỉ là lớp mỏng nuốt lý do đi. Ba khẳng định dưới đây vẫn nói ĐÚNG câu cũ,
+    chỉ đổi chỗ đứng.
+  */
+  const thanHam = nguon.slice(nguon.indexOf("export const resolveCurrentUser"));
+  assert.ok(/db\.query\.users\.findFirst/.test(thanHam), "resolveCurrentUser phải TRA CSDL mỗi lần — token không phải nguồn sự thật về người dùng");
+  assert.ok(/if \(!user\.active\) return \{ denied: "DISABLED" \}/.test(thanHam), "tài khoản bị khoá phải bị từ chối NGAY, không đợi token hết hạn");
   assert.ok(/resolvePermissions\(user\.role/.test(thanHam), "quyền phải tính từ VAI TRÒ TRONG CSDL, không phải vai trò trong token");
+  assert.ok(/sessionRevoked\(session\.loginAtSec, user\.sessionInvalidBefore\)/.test(thanHam), "thu hồi phiên phải được kiểm ở tầng Node, nơi có CSDL");
+  // Bỏ chú thích trước khi quét: chính đoạn chú thích giải thích LUẬT lại chứa đúng chữ đang bị
+  // cấm, và một bài kiểm đỏ vì lời giải thích của chính nó thì không ai đọc thông điệp của nó nữa.
+  const khongChuThich = thanHam.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+  assert.ok(!/memo\(/.test(khongChuThich), "không được đệm lượt tra người dùng — mỗi giây đệm là một giây token đã thu hồi vẫn dùng được");
   const thanMw = readFileSync(path.join(goc, "middleware.ts"), "utf8");
   assert.ok(!/getDb|@\/db|drizzle/.test(thanMw), "middleware không được đọc CSDL (Edge) — và cũng không được giả vờ là mình biết quyền");
   assert.ok(/request\.method === "GET"/.test(thanMw), "luật chỉ-GET phải nằm ngay trong middleware, không nằm trong một lớp bọc nào khác");

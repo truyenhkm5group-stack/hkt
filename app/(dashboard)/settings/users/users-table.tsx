@@ -2,9 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, Loader2, Lock, LockOpen, MoreHorizontal, Pencil, ShieldCheck } from "lucide-react";
+import { KeyRound, Loader2, Lock, LockOpen, LogOut, MoreHorizontal, Pencil, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { PermissionsDialog } from "@/app/(dashboard)/settings/users/permissions-dialog";
+import { RevokeSessionsDialog } from "@/app/(dashboard)/settings/users/revoke-sessions-dialog";
 import { EditUserDialog, ResetPasswordDialog } from "@/app/(dashboard)/settings/users/user-dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -27,6 +28,7 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
   const [permOpen, setPermOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [lockOpen, setLockOpen] = useState(false);
+  const [revokeOpen, setRevokeOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const canLock = !isSelf && !(user.active && isLastAdmin);
@@ -63,6 +65,14 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
             <KeyRound className="size-4" /> Đặt lại mật khẩu
           </DropdownMenuItem>
           <DropdownMenuSeparator />
+          {/*
+            THU HỒI PHIÊN ĐỨNG RIÊNG KHỎI KHOÁ TÀI KHOẢN. Hai việc khác hẳn nhau: thu hồi là "máy
+            bị mất, tài khoản vẫn tốt"; khoá là "người này không được dùng ERP nữa". Gộp chúng vào
+            một nút thì quản trị phải khoá một người chỉ để đá họ ra khỏi một cái điện thoại.
+          */}
+          <DropdownMenuItem onSelect={() => setRevokeOpen(true)}>
+            <LogOut className="size-4" /> Thu hồi phiên
+          </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setLockOpen(true)} disabled={!canLock} className={user.active ? "text-destructive focus:text-destructive" : ""}>
             {user.active ? <Lock className="size-4" /> : <LockOpen className="size-4" />}
             {user.active ? "Khoá tài khoản" : "Mở khoá"}
@@ -72,6 +82,7 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
       <EditUserDialog user={user} open={editOpen} onOpenChange={setEditOpen} isSelf={isSelf} />
       <PermissionsDialog user={user} templates={templates} open={permOpen} onOpenChange={setPermOpen} />
       <ResetPasswordDialog user={user} open={resetOpen} onOpenChange={setResetOpen} />
+      <RevokeSessionsDialog user={user} open={revokeOpen} onOpenChange={setRevokeOpen} />
       <AlertDialog open={lockOpen} onOpenChange={setLockOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
