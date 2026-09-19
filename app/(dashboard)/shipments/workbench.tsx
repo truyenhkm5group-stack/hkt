@@ -5,7 +5,7 @@ import Link from "next/link";
 import { parseAsString, useQueryStates } from "nuqs";
 import { CalendarClock, Check, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
-import { CareDrawerHost, CareOpenButton } from "@/app/(dashboard)/shipments/care-drawer";
+import { CareDrawerHost, CareOpenButton, onCareUpdated } from "@/app/(dashboard)/shipments/care-drawer";
 import { CopyButton } from "@/components/misc";
 import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
@@ -103,6 +103,18 @@ type Props = {
 
 const CARRIER_MENU: CarrierActionKey[] = ["redeliver", "approve-return", "resend", "cancel"];
 
+/**
+ * CÒN BAO LÂU TỚI HẸN, hoặc ĐÃ QUÁ HẸN BAO LÂU. Hàm THUẦN: nhận `now` từ ngoài nên mọi dòng trong
+ * cùng một lượt vẽ được đo ở CÙNG một thời điểm — đọc `Date.now()` bên trong vòng lặp thì hai dòng
+ * cạnh nhau tính ở hai mốc, và tổng trên chip lệch khỏi bảng đúng lúc một ca vừa chạm hạn.
+ */
+function hanHen(at: Date, now: Date): string {
+  const phut = Math.round((at.getTime() - now.getTime()) / 60_000);
+  const doDai = (p: number) => (p < 60 ? `${p} phút` : p < 2880 ? `${Math.round(p / 60)} giờ` : `${Math.round(p / 1440)} ngày`);
+  if (phut <= 0) return `quá hẹn ${doDai(Math.max(1, -phut))}`;
+  return `còn ${doDai(phut)}`;
+}
+
 function gio(h: number | null) {
   if (h === null) return "chưa có tin";
   if (h < 1) return "<1 giờ";
@@ -155,6 +167,15 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   useEffect(() => {
     setCases(initial.cases.map((c) => ({ ...c, queueSince: new Date(c.queueSince) })));
   }, [initial]);
+
+  /*
+    ═══ PANEL ĐỔI ⇒ DÒNG NGOÀI BẢNG ĐỔI NGAY, KHÔNG ĐỢI MỘT LƯỢT DỰNG LẠI ═══
+
+    Panel phát `CareState` mà máy chủ vừa trả về; ở đây vá đúng dòng đó bằng CÙNG hàm `patch` mà
+    thao tác ngay trên bảng dùng. Nhờ vậy hai đường (bấm ngoài bảng · bấm trong panel) hội tụ về
+    một chỗ, và không có kịch bản "panel đã đổi mà row chưa đổi".
+  */
+  useEffect(() => onCareUpdated(({ shipmentId, care }) => patch(shipmentId, care)));
   // Mẫu note dùng chung cho mọi dòng: sửa ở một dòng, dòng khác thấy ngay.
   const [presets, setPresets] = useState<CareNotePreset[]>(initialPresets);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -622,6 +643,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
                 <CaseRow
                   key={c.shipmentId}
                   c={c}
+                  now={now}
                   staff={staff}
                   presets={presets}
                   resolutionPresets={resolutionPresets}
@@ -650,7 +672,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   );
 }
 
-function CaseRow({ c, staff, presets, resolutionPresets, onPresetsChange, canManage, checked, onCheck, onPatch }: { c: CareCase; staff: { id: string; name: string }[]; presets: CareNotePreset[]; resolutionPresets: Record<CareDecision, string[]>; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
+function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, canManage, checked, onCheck, onPatch }: { c: CareCase; now: Date; staff: { id: string; name: string }[]; presets: CareNotePreset[]; resolutionPresets: Record<CareDecision, string[]>; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
   const [pending, start] = useTransition();
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -922,8 +944,20 @@ function CaseRow({ c, staff, presets, resolutionPresets, onPresetsChange, canMan
         <div className="mt-1 flex flex-wrap items-center gap-1 text-[11px]">
           <CalendarClock className="size-3 text-muted-foreground" />
           {c.care.followUpAt ? (
-            <button type="button" className={cn("hover:underline", c.care.followUpAt.getTime() <= Date.now() && "font-semibold text-rose-600 dark:text-rose-400")} title="Bấm để bỏ hẹn" onClick={() => followUp(null)}>
-              {formatDateTime(c.care.followUpAt)}
+            /*
+              CÁI HẸN PHẢI ĐỌC ĐƯỢC BẰNG MẮT, KHÔNG PHẢI BẰNG PHÉP TRỪ TRONG ĐẦU.
+
+              "10:13 20/09" bắt người trực tự tính còn bao lâu; "còn 2 giờ" và "quá hẹn 3 giờ" trả
+              lời thẳng câu họ đang hỏi — *cái nào phải làm trước*. Giờ tuyệt đối vẫn ở tooltip cho
+              lúc cần chính xác.
+            */
+            <button
+              type="button"
+              className={cn("hover:underline", c.care.followUpAt.getTime() <= Date.now() && "font-semibold text-rose-600 dark:text-rose-400")}
+              title={`Xử lý lại lúc ${formatDateTime(c.care.followUpAt)} — bấm để bỏ hẹn`}
+              onClick={() => followUp(null)}
+            >
+              Xử lý lại {formatDateTime(c.care.followUpAt)} · {hanHen(c.care.followUpAt, now)}
             </button>
           ) : (
             FOLLOW_UP_PRESETS.map((p) => (

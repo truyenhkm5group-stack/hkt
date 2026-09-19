@@ -94,3 +94,25 @@ export function classifyReopen(f: ReopenFacts): ReopenClass {
  * lỗi MỚI và phải được điều tra — con số đó phải bằng 0.
  */
 export const REOPEN_GUARD_LIVE_AT = new Date("2026-09-18T04:10:00.000Z");
+
+/**
+ * ═══════════ "LỖI CÒN ĐANG XẢY RA HAY KHÔNG" — VỊ TỪ THUẦN, NHẬN MỐC TỪ NGOÀI ═══════════
+ *
+ * ─── VÌ SAO PHẢI TÁCH RA KHỎI TRUY VẤN ───
+ *
+ * Luật này so một mốc của DỮ LIỆU với một mốc LỊCH CỐ ĐỊNH (`REOPEN_GUARD_LIVE_AT`). Đó đúng là
+ * điều nó phải làm — nhưng nó cũng là cái bẫy mà mục 50 của AGENTS.md sinh ra để cấm: một bài kiểm
+ * gieo dữ liệu bằng "20 giờ trước" rồi so với mốc ấy sẽ XANH hôm nay và ĐỎ ngày mai, vì cửa sổ
+ * trượt theo đồng hồ thật quét qua một cái mốc đứng yên. Và vì workflow deploy chạy `npm test`
+ * trước khi đụng máy chủ, một bài kiểm như vậy chặn MỌI lần deploy vào đúng cái ngày nó trở mặt.
+ *
+ * Nhận `guardLiveAt` qua THAM SỐ thì bài kiểm khoá được ĐÚNG cái biên (trước · đúng · sau) bằng ba
+ * mốc do chính nó dựng, không đọc đồng hồ hệ thống một lần nào. Production vẫn gọi với hằng số
+ * thật, nên không có đường ghi thứ hai và không có hành vi nào đổi.
+ *
+ * BIÊN LÀ CHỖ DỄ SAI NHẤT: đợt tạo ĐÚNG vào mốc luật chạy KHÔNG tính là lỗi mới — lúc đó bản vá
+ * vừa mới lên, và tính nó vào con số "còn đang xảy ra" là đổ cho bản vá một lỗi nó vừa chặn.
+ */
+export function isFalseReopenAfterFix(row: { reopenClass: ReopenClass; openedAt: Date | null }, guardLiveAt: Date = REOPEN_GUARD_LIVE_AT): boolean {
+  return row.reopenClass === "FALSE_REOPEN_LEGACY" && row.openedAt !== null && row.openedAt.getTime() > guardLiveAt.getTime();
+}

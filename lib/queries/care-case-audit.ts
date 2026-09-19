@@ -15,6 +15,7 @@ import {
   REOPEN_CLASSES,
   REOPEN_CLASS_COUNTS_AS_CASE,
   REOPEN_GUARD_LIVE_AT,
+  isFalseReopenAfterFix,
   type ReopenClass,
 } from "@/lib/constants/care-reopen-class";
 
@@ -312,7 +313,8 @@ export async function getCareAudit(period: { from: Date | null; to: Date | null 
       reopen: {
         byClass,
         // Con số DUY NHẤT nói lỗi có còn đang xảy ra hay không. Phải bằng 0.
-        falseReopenAfterFix: out.filter((r) => r.reopenClass === "FALSE_REOPEN_LEGACY" && r.openedAt && r.openedAt > REOPEN_GUARD_LIVE_AT).length,
+        // Vị từ THUẦN, nhận mốc từ ngoài — bài kiểm khoá được biên mà không đọc đồng hồ hệ thống.
+        falseReopenAfterFix: out.filter((r) => isFalseReopenAfterFix(r)).length,
         guardLiveAt: REOPEN_GUARD_LIVE_AT,
       },
     };

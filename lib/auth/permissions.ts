@@ -14,7 +14,18 @@ export const PERMISSION_GROUPS = [
       { key: "orders:read", label: "Đơn hàng: xem", hint: "Danh sách & chi tiết đơn" },
       { key: "orders:export", label: "Đơn hàng: xuất CSV" },
       { key: "shipments:view", label: "Vận đơn", hint: "Vận đơn, hành trình, cập nhật từ Viettel Post" },
-      { key: "shipments:manage", label: "Vận đơn: thao tác Viettel Post", hint: "Phát tiếp, duyệt hoàn, gửi lại, huỷ, sửa người nhận / COD ngay trên ERP" },
+      /*
+        MỘT KHOÁ, HAI VIỆC — VÀ NHÃN PHẢI NÓI RA CẢ HAI.
+
+        Từ bản 19/09/2026 khoá này gác THÊM kết quả xử lý care (Đã hoàn · Phát tiếp · Xử lý sau).
+        Nhãn cũ chỉ nói "thao tác Viettel Post", nên màn hình phân quyền mô tả thiếu một nửa thứ nó
+        thật sự mở ra — người cấp quyền đọc nhãn chứ không đọc mã nguồn.
+
+        KHÔNG tách thành khoá thứ hai: cùng một đội (CS, LEADER) làm cả hai việc, và thêm một khoá
+        nữa là thêm một ô người ta phải nhớ tick — quên tick thì nhân viên không ghi nhận được việc
+        mình vừa làm, đúng lỗi mà bản này sinh ra để chặn.
+      */
+      { key: "shipments:manage", label: "Vận đơn: xử lý case + thao tác Viettel Post", hint: "Ghi kết quả care (Đã hoàn / Phát tiếp / Xử lý sau), và gửi lệnh phát tiếp, duyệt hoàn, gửi lại, huỷ, sửa người nhận / COD sang Viettel Post" },
       { key: "alerts:view", label: "Cần xử lý: xem", hint: "Danh sách cảnh báo vận hành" },
       { key: "alerts:manage", label: "Cần xử lý: cấu hình", hint: "Ngưỡng cảnh báo, Lark / Telegram, đóng cảnh báo" },
       { key: "cs:view", label: "CSKH: xem case" },
