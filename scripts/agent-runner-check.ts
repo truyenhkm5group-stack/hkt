@@ -92,8 +92,8 @@ async function kiemKhoaAi(): Promise<RunnerCredentialVerdict> {
     const conKhoaKhac = provider === "openai" ? env.ai.anthropicConfigured : env.ai.openaiConfigured;
     if (conKhoaKhac) {
       const kia = provider === "openai" ? "anthropic" : "openai";
-      info(`CÓ LỐI RA NGAY: máy này cũng có khoá ${kia.toUpperCase()} nhưng router đang chọn ${provider}.`);
-      info(`Đặt AI_PROVIDER=${kia} cho máy runner rồi chạy lại — KHÔNG cần khoá mới.`);
+      info(`CÒN MỘT KHOÁ NỮA CHƯA THỬ: máy này cũng có khoá ${kia.toUpperCase()} nhưng router đang chọn ${provider}.`);
+      info(`Thử \`AI_PROVIDER=${kia}\` rồi chạy lại. CHƯA THỬ nghĩa là chưa biết — nó có thể cũng hết tín dụng.`);
     }
     return verdict;
   }
