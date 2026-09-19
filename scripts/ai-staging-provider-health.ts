@@ -86,6 +86,17 @@ function inSo(n: number | null | undefined): string {
   return n === null || n === undefined ? "—" : n.toLocaleString("vi-VN");
 }
 
+/**
+ * Mili-giây in bằng dấu CÁCH ngăn nghìn, không bằng dấu chấm.
+ *
+ * `toLocaleString("vi-VN")` ngăn nghìn bằng dấu chấm, nên 3454 ms in ra "3.454 ms" — đọc y hệt
+ * "3,45 mili-giây" với người quen dấu chấm thập phân. Một phép đo độ trễ sai một nghìn lần theo
+ * hướng ĐẸP HƠN là kiểu sai không ai đi kiểm lại.
+ */
+function inMs(n: number | null | undefined): string {
+  return n === null || n === undefined ? "—" : `${Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ")} ms`;
+}
+
 async function doMot(ten: string, tier: RouteTier) {
   const nha = getProvider(ten);
   console.log(`\n${"─".repeat(78)}`);
@@ -137,7 +148,7 @@ async function doMot(ten: string, tier: RouteTier) {
   console.log(`   hợp lược đồ  : ${kq.tier === "HUMAN" ? "KHÔNG" : "CÓ"}${kq.tier === "HUMAN" ? `  (leo hết nấc ⇒ chuyển người · ${kq.escalation})` : ""}`);
   console.log(`   token vào    : ${inSo(lan?.inputTokens)}   (đệm: ${inSo(lan?.cachedInputTokens)})`);
   console.log(`   token ra     : ${inSo(lan?.outputTokens)}`);
-  console.log(`   độ trễ       : ${inSo(lan?.latencyMs)} ms   (cả bước: ${inSo(tong)} ms)`);
+  console.log(`   độ trễ       : ${inMs(lan?.latencyMs)}   (cả bước: ${inMs(tong)})`);
   console.log(`   nhà/mẫu thật : ${lan?.provider ?? "—"} / ${lan?.model ?? "—"}`);
   console.log(`   chi phí      : ${lan?.costVnd === null || lan?.costVnd === undefined ? "CHƯA BIẾT (chưa khai đơn giá)" : `${inSo(lan.costVnd)} ₫`}   · bảng giá: ${lan?.pricingVersion || "(chưa khai)"}`);
   console.log(`   lời lỗi      : ${loi ? loi.replace(/\s+/g, " ").slice(0, 160) : "null  ✓"}`);
