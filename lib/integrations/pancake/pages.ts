@@ -106,33 +106,49 @@ export class PancakePagesClient {
   /**
    * Hội thoại cập nhật trong khoảng thời gian (mới nhất trước), tối đa `limit`.
    *
-   * ═══ VÌ SAO CÓ ĐIỀU KIỆN DỪNG "KHÔNG THÊM MÃ MỚI" ═══
+   * ═══ PHÂN TRANG ĐI BẰNG `current_count`, VÀ ĐÓ LÀ MỘT PHÉP ĐO CHỨ KHÔNG PHẢI MỘT PHỎNG ĐOÁN ═══
    *
-   * ĐO TỪ VPS 19/09/2026 trên page 1117899664739453: xin `page_size=20` nhận về 60; trang 1 và
-   * trang 2 trùng ĐỦ 60/60 mã hội thoại. Pancake bỏ qua CẢ `page_size` LẪN `page_number`.
+   * ĐO TỪ VPS 19/09/2026 (run 35444310784) trên page 1117899664739453, cửa sổ 24 giờ. Sáu ứng
+   * viên, mỗi cái xin "trang sau" một kiểu, và so bằng GIAO CỦA HAI TẬP MÃ chứ không bằng số đếm:
    *
-   * Điều kiện dừng cũ là `list.length < 50`. Máy chủ luôn trả 60 nên điều kiện ấy KHÔNG BAO GIỜ
-   * đúng: vòng lặp chạy đủ hai mươi lượt, mỗi lượt nhận lại y nguyên trang một, rồi `slice` cắt
-   * ra 200 dòng mà chỉ 60 mã là khác nhau. Hai mươi lời gọi cho một trang dữ liệu — và chính bài
-   * kiểm đọc, bắn mười lời gọi liền nhau, đã ăn 429 của Pancake. Lượt nạp này bắn hai mươi.
+   *     page_number=2          → trang1 60 · trang2 60 · TRÙNG 60 · duy nhất  60
+   *     page=2                 → trang1 60 · trang2 60 · TRÙNG 60 · duy nhất  60
+   *     offset=60              → trang1 60 · trang2 60 · TRÙNG 60 · duy nhất  60
+   *     skip=60                → trang1 60 · trang2 60 · TRÙNG 60 · duy nhất  60
+   *     current_count=60       → trang1 60 · trang2 40 · TRÙNG  0 · duy nhất 100   ← ĐÂY
+   *     last_conversation_id   → trang1 60 · trang2 60 · TRÙNG 60 · duy nhất  60
    *
-   * ĐÂY KHÔNG PHẢI BẢN VÁ PHÂN TRANG. Chưa biết tên tham số đúng là gì (sáu tên đã dò đều chưa
-   * đo được vì 429), nên đoán một tên là tự dựng ra niềm tin rằng đã sửa. Cái sửa được ngay mà
-   * không cần đoán là: THÔI GỌI LẠI khi máy chủ đã lặp lại chính nó, và KHÔNG đếm một hội thoại
-   * hai lần. Phần dữ liệu vượt trần vẫn chưa lấy được — `paginationStalled` nói ra điều đó để nó
-   * không biến mất trong im lặng.
+   * Hai điều cùng lộ ra. Một: `current_count` LÀ tham số phân trang thật — không một mã nào trùng
+   * giữa hai trang. Hai: cửa sổ ấy có ÍT NHẤT 100 hội thoại trong khi một lời gọi trả tối đa 60,
+   * nên 60 ĐÚNG LÀ một trần cứng mỗi lượt và bản cũ ĐANG MẤT DỮ LIỆU — không phải "gọi thừa mười
+   * chín lần", mà là bốn mươi hội thoại không bao giờ tới.
+   *
+   * Khuôn này vốn đã có sẵn trong chính tệp này: `listMessages` dùng `current_count` từ đầu. Hai
+   * điểm cuối của cùng một API dùng cùng một quy ước, còn `listConversations` thì dùng
+   * `page_number` — một quy ước Pancake không hiểu và cũng không báo lỗi.
+   *
+   * ═══ VẪN GIỮ ĐIỀU KIỆN DỪNG "KHÔNG THÊM MÃ MỚI" ═══
+   *
+   * Nó không còn là đường chính nữa, nhưng nó ở lại làm LƯỚI AN TOÀN: điều kiện dừng theo số dòng
+   * (`list.length < 50`) đã một lần im lặng không bao giờ đúng, và cái giá là hai mươi lời gọi mỗi
+   * mẻ. Một điều kiện dừng dựa trên "máy chủ có đưa thêm thứ gì mới không" thì không phụ thuộc vào
+   * việc máy chủ tôn trọng tham số nào — nếu Pancake đổi ý về `current_count`, vòng lặp dừng sau
+   * hai lượt và `paginationStalled` nói ra, thay vì lại chạy đủ hai mươi vòng trong im lặng.
    */
   async listConversations(pageId: string, since: Date, until: Date, limit = 200): Promise<PancakeConversation[]> {
     const token = await this.pageToken(pageId);
     const out: PancakeConversation[] = [];
     const daThay = new Set<string>();
     this.paginationStalled = false;
-    for (let pageNumber = 1; pageNumber <= 20 && out.length < limit; pageNumber++) {
+    for (let vong = 0; vong < 20 && out.length < limit; vong++) {
       const rec = await this.call(`pages/${pageId}/conversations`, {
         [token.key]: token.value,
         since: Math.floor(since.getTime() / 1000),
         until: Math.floor(until.getTime() / 1000),
-        page_number: pageNumber,
+        // SỐ DÒNG ĐÃ LẤY, không phải SỐ THỨ TỰ TRANG. Đếm theo mã ĐÃ THẤY chứ không theo `out.length`:
+        // hai con số này bằng nhau hôm nay, nhưng `out` là thứ bị `limit` cắt, còn con trỏ của máy
+        // chủ thì không — buộc chúng vào nhau là hẹn một lỗi lệch trang vào ngày ai đó đổi `limit`.
+        current_count: daThay.size,
         page_size: 50,
         order_by: "updated_at",
       });
@@ -141,7 +157,7 @@ export class PancakePagesClient {
       // Trang này có mã nào CHƯA từng thấy không? Không có ⇒ máy chủ đang lặp lại chính nó ⇒ mọi
       // lời gọi tiếp theo cũng sẽ như vậy. Kiểm TRƯỚC khi ghi để không đẩy bản sao vào `out`.
       const maMoi = list.map((c) => str(c.id, c.conversation_id)).filter((id) => id && !daThay.has(id));
-      if (pageNumber > 1 && maMoi.length === 0) {
+      if (vong > 0 && maMoi.length === 0) {
         this.paginationStalled = true;
         break;
       }
@@ -164,7 +180,16 @@ export class PancakePagesClient {
           raw: c,
         });
       }
-      if (list.length < 50) break;
+      /*
+        BỎ ĐIỀU KIỆN DỪNG THEO SỐ DÒNG (`list.length < 50`).
+
+        Nó đoán kích thước trang, và đoán sai: Pancake trả 60 chứ không 50, nên với một trang ĐẦY
+        thì `60 < 50` luôn sai — đúng cái làm vòng lặp chạy hai mươi vòng suốt từ đầu. Sửa 50 thành
+        60 chỉ là đoán lại một lần nữa, và lần sau Pancake đổi thì không ai biết.
+
+        Hai điều kiện còn lại KHÔNG đoán gì: trang rỗng (`!list.length`) và trang không mang mã nào
+        mới. Cả hai đều hỏi "máy chủ có còn gì để đưa không" thay vì "máy chủ nên đưa bao nhiêu".
+      */
     }
     return out.slice(0, limit);
   }

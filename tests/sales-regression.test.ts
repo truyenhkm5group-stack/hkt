@@ -675,17 +675,64 @@ export async function testSalesRegression(db: Db) {
       assert.equal(new Set(ds.map((c) => c.id)).size, 60, "không mã nào được đếm hai lần");
       assert.equal(client.paginationStalled, true, "phải nói ra rằng mẻ này CHƯA lấy hết cửa sổ");
 
-      // VẾ NGƯỢC: máy chủ trả hết ngay lần đầu (ít hơn một trang) thì KHÔNG được báo lặp.
+      /*
+        ── MÁY CHỦ TÔN TRỌNG `current_count`: PHẢI LẤY ĐỦ CẢ HAI TRANG ──
+
+        Đo từ VPS 19/09/2026 (run 35444310784): `current_count` LÀ tham số phân trang thật của
+        Pancake — trang 1 và trang 2 không trùng một mã nào, và cửa sổ 24 giờ có ít nhất 100 hội
+        thoại trong khi một lời gọi trả tối đa 60. Tức bản cũ KHÔNG chỉ gọi thừa, nó MẤT 40 hội
+        thoại mỗi mẻ.
+
+        Máy chủ giả ở đây đọc đúng `current_count` và cắt lát như Pancake thật. Bài kiểm khoá HÀNH
+        VI chứ không khoá TÊN THAM SỐ: nó đòi client lấy đủ 100 mã khác nhau. Ai đổi sang một tên
+        khác mà vẫn lấy đủ thì bài kiểm vẫn xanh — đúng như vậy, vì thứ đáng bảo vệ là "không mất
+        hội thoại nào", không phải một chuỗi ký tự.
+      */
+      const TRAM = Array.from({ length: 100 }, (_, i) => ({
+        id: `conv-trang-${i}`,
+        customers: [{ id: `cust-${i}`, name: `Khách ${i}` }],
+        updated_at: "2026-09-19T07:44:49.000000",
+      }));
+      let soLanGoiPhanTrang = 0;
+      globalThis.fetch = (async (u: string | URL | Request) => {
+        const url = new URL(String(u));
+        if (!url.pathname.includes("/conversations")) {
+          return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        soLanGoiPhanTrang += 1;
+        const daCo = Number(url.searchParams.get("current_count") ?? 0);
+        // TRẦN 60 MỖI LƯỢT, y như máy chủ thật — không phải `page_size` client xin.
+        const lat = TRAM.slice(daCo, daCo + 60);
+        return new Response(JSON.stringify({ success: true, conversations: lat }), { status: 200, headers: { "content-type": "application/json" } });
+      }) as unknown as typeof fetch;
+      const client3 = new PancakePagesClient("token-gia", "https://khong-goi-that.invalid");
+      const ds3 = await client3.listConversations("page-phan-trang", new Date(Date.now() - 86_400_000), new Date(), 200);
+      assert.equal(ds3.length, 100, `phải lấy ĐỦ 100 hội thoại của cửa sổ, đang lấy ${ds3.length}`);
+      assert.equal(new Set(ds3.map((c) => c.id)).size, 100, "không mã nào được đếm hai lần");
+      assert.equal(soLanGoiPhanTrang, 3, "60 + 40 + một lượt rỗng để biết đã hết — đúng 3 lượt, không phải 20");
+      assert.equal(client3.paginationStalled, false, "máy chủ phân trang đúng thì KHÔNG được báo lặp");
+
+      /*
+        VẾ NGƯỢC: cửa sổ chỉ có 10 hội thoại. Máy chủ ĐÚNG ĐẮN trả 10 rồi trả RỖNG ở lượt sau,
+        nên client dừng vì hết dữ liệu — KHÔNG phải vì đoán được kích thước trang, và KHÔNG bật cờ
+        lặp. Một lượt gọi thêm để biết "đã hết" là cái giá đúng của việc thôi đoán: rẻ hơn hẳn so
+        với điều kiện dừng theo số dòng, thứ đã một lần im lặng sai suốt hai mươi vòng.
+      */
       soLanGoi = 0;
       const ITHON = SAU_MUOI.slice(0, 10);
       globalThis.fetch = (async (u: string | URL | Request) => {
-        if (String(u).includes("/conversations")) soLanGoi += 1;
-        return new Response(JSON.stringify({ success: true, conversations: ITHON }), { status: 200, headers: { "content-type": "application/json" } });
+        const url = new URL(String(u));
+        if (!url.pathname.includes("/conversations")) {
+          return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        soLanGoi += 1;
+        const daCo = Number(url.searchParams.get("current_count") ?? 0);
+        return new Response(JSON.stringify({ success: true, conversations: ITHON.slice(daCo) }), { status: 200, headers: { "content-type": "application/json" } });
       }) as unknown as typeof fetch;
       const client2 = new PancakePagesClient("token-gia", "https://khong-goi-that.invalid");
       const ds2 = await client2.listConversations("page-it", new Date(Date.now() - 86_400_000), new Date(), 200);
       assert.equal(ds2.length, 10);
-      assert.equal(soLanGoi, 1, "trang đầu chưa đầy ⇒ dừng ngay, không gọi thêm");
+      assert.equal(soLanGoi, 2, "10 hội thoại + một lượt rỗng để biết đã hết");
       assert.equal(client2.paginationStalled, false, "không lặp thì không được bật cờ — cảnh báo sai địa chỉ tệ hơn không cảnh báo");
     } finally {
       globalThis.fetch = fetchGoc;
