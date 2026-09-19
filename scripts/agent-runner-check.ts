@@ -34,6 +34,7 @@ import { execFileSync } from "node:child_process";
 import { checkCommand, DOCUMENTATION_COMMANDS, sandboxEnv, SECRET_ENV_NAMES } from "@/lib/constants/agent-sandbox";
 import { testAiConnection } from "@/lib/ai/provider";
 import { aiDisabledReason, modelFor, resolveProviderName } from "@/lib/ai/router";
+import { env } from "@/lib/env";
 
 const ok = (m: string) => console.log(`  ✓ ${m}`);
 const bad = (m: string) => console.log(`  ✗ ${m}`);
@@ -81,6 +82,19 @@ async function kiemKhoaAi(): Promise<RunnerCredentialVerdict> {
     if (verdict === "AUTH_FAILED") info("Khoá sai hoặc đã bị thu hồi — thay khoá. KHÔNG phải lỗi của runner.");
     if (verdict === "QUOTA_OR_RATE_LIMIT") info("Hết hạn mức / hết tín dụng — chờ, hoặc dùng khoá có quota thật. KHÔNG phải lỗi của runner.");
     if (verdict === "PROVIDER_ERROR") info("Lỗi phía nhà cung cấp hoặc mạng — thử lại sau. KHÔNG phải lỗi cấu hình.");
+    /*
+      CÓ KHOÁ CỦA NHÀ CUNG CẤP KIA MÀ KHÔNG NÓI RA LÀ ĐỂ NGƯỜI ĐỌC ĐI VÀO NGÕ CỤT.
+
+      ĐÃ XẢY RA THẬT (lượt chạy agent đầu tiên, 19/09/2026): kho có CẢ HAI khoá, router để `auto`
+      nên chọn OpenAI, và khoá OpenAI hết tín dụng. Bản in lúc đó dừng ở "hết hạn mức" — đúng
+      nhưng chưa đủ, vì lối ra đang nằm ngay đó: khoá Anthropic còn nguyên, chưa ai thử.
+    */
+    const conKhoaKhac = provider === "openai" ? env.ai.anthropicConfigured : env.ai.openaiConfigured;
+    if (conKhoaKhac) {
+      const kia = provider === "openai" ? "anthropic" : "openai";
+      info(`CÓ LỐI RA NGAY: máy này cũng có khoá ${kia.toUpperCase()} nhưng router đang chọn ${provider}.`);
+      info(`Đặt AI_PROVIDER=${kia} cho máy runner rồi chạy lại — KHÔNG cần khoá mới.`);
+    }
     return verdict;
   }
 }

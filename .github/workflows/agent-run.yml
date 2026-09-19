@@ -78,10 +78,21 @@ jobs:
           echo "ANTHROPIC_API_KEY: $([ -n "${ANTHROPIC_API_KEY:-}" ] && echo 'có' || echo 'không')"
           echo "OPENAI_API_KEY:    $([ -n "${OPENAI_API_KEY:-}" ] && echo 'có' || echo 'không')"
 
+      # ═══ GHIM NHÀ CUNG CẤP CHO MÁY RUNNER ═══
+      #
+      # ĐÃ ĐO THẬT (lượt chạy đầu tiên, 19/09/2026): kho có CẢ HAI khoá, `resolveProviderName()`
+      # để `auto` thì ưu tiên OpenAI, và khoá OpenAI trả
+      #     429 You have no credits remaining.
+      # Agent không chạy một vòng nào — và nếu lúc đó có ai đọc nhanh, họ sẽ tưởng agent hỏng.
+      #
+      # Nên runner KHAI THẲNG nó dùng khoá nào, thay vì để một thứ tự ưu tiên ngầm quyết định.
+      # `vars.AI_PROVIDER` vẫn đè được khi cần, nhưng mặc định ở ĐÂY là `anthropic` — và nó chỉ
+      # áp cho máy runner, KHÔNG đụng tới AI Copilot đang chạy trên production.
       - name: Máy runner đã sẵn sàng chưa
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER_AGENT || 'anthropic' }}
           DATABASE_URL: pglite://./data/agent-ci-db
         run: npm run agent:check
 
@@ -93,8 +104,8 @@ jobs:
         env:
           DATABASE_URL: pglite://./data/agent-ci-db
         run: |
-          npm run --silent agent:proof-setup -- --actor "github:${{ github.actor }}" | tee /tmp/setup.log
-          TASK_CODE="$(grep -oE '^TASK_CODE=.+' /tmp/setup.log | tail -1 | cut -d= -f2)"
+          npm run --silent agent:proof-setup -- --actor "github:${{ github.actor }}" | tee setup.log
+          TASK_CODE="$(grep -oE '^TASK_CODE=.+' setup.log | tail -1 | cut -d= -f2)"
           if [ -z "$TASK_CODE" ]; then echo "::error::Không lấy được mã việc."; exit 1; fi
           echo "task_code=$TASK_CODE" >> "$GITHUB_OUTPUT"
 
@@ -103,7 +114,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER_AGENT || 'anthropic' }}
           DATABASE_URL: pglite://./data/agent-ci-db
         run: |
           npm run --silent agent:run -- \
@@ -113,8 +124,11 @@ jobs:
 
       # ═══ PHẠM VI TỆP: KIỂM BẰNG GIT, KHÔNG HỎI AGENT ═══
       # Một tệp thứ hai ⇒ lượt chạy KHÔNG ĐẠT. Tuyệt đối không sửa hộ agent rồi vẫn tính là đạt.
+      # `always()` một mình là chưa đủ: lượt đầu tiên dừng ở bước kiểm khoá, chưa có mã việc nào,
+      # nên bước này chạy với `--task ` và in ra Thiếu --task — một thông báo chẳng nói gì về
+      # nguyên nhân thật, đứng ngay dưới nguyên nhân thật và che mất nó.
       - name: Kiểm phạm vi tệp và in bằng chứng
-        if: always()
+        if: always() && steps.setup.outputs.task_code != ''
         env:
           DATABASE_URL: pglite://./data/agent-ci-db
         run: npm run --silent agent:proof-report -- --task "${{ steps.setup.outputs.task_code }}"
@@ -122,7 +136,7 @@ jobs:
       # Nhánh phải sống sót sau khi máy Actions bị xoá, nếu không bằng chứng biến mất cùng nó.
       # Chỉ đẩy nhánh mang đúng tiền tố; mọi tên khác bị từ chối trước khi `git push` chạy.
       - name: Đẩy nhánh agent (KHÔNG phải main)
-        if: always()
+        if: always() && steps.setup.outputs.task_code != ''
         run: |
           BR="$(git branch --list 'ai/documentation/*' --format '%(refname:short)' | head -1)"
           if [ -z "$BR" ]; then echo "Không có nhánh agent nào để đẩy."; exit 0; fi
@@ -139,5 +153,5 @@ jobs:
           name: bang-chung-agent
           path: |
             bang-chung-agent.json
-            /tmp/setup.log
+            setup.log
           if-no-files-found: warn
