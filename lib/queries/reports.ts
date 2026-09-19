@@ -1,6 +1,6 @@
 import { and, count, desc, eq, gte, inArray, lte, sql, sum, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import { lineUnitCost, orderCogsColumn } from "@/lib/queries/cogs";
@@ -217,8 +217,24 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
   const dayOf = (col: SQL | AnyPgColumn) => sql<string>`to_char(${col} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`;
   const base = orderFacts(db, basis, period.from, period.to);
   const f = facts(base);
-  const [orderRows, adRows, expenseRows] = await Promise.all([
-    db
+  /*
+    TẮT JIT — cùng nguyên nhân, cùng bằng chứng với `lib/queries/marketing-daily.ts::buildDays`.
+
+    Đo production 19/09/2026, chính câu gộp theo ngày ở dưới:
+
+        Seq Scan on orders (cost=0,02..417,96) (actual time=3.730,452..3.734,794 rows=1148)
+        Execution Time: 3.808 ms
+
+    Chi phí ước lượng của TOÀN bộ câu là `cost=433..567.918` — vượt `jit_optimize_above_cost`
+    (500.000), nên PostgreSQL biên dịch trước khi chạy và gán thời gian biên dịch vào nút đầu tiên.
+    Đó là toàn bộ "3,7 giây khởi động" mà không ai giải thích được; phần quét thật chỉ 4ms
+    (3.730,452 → 3.734,794).
+
+    Báo cáo lợi nhuận và báo cáo marketing dùng CHUNG `orderFacts`, nên cùng trả một cái giá và
+    cùng được sửa bằng một cách. MỘT giao dịch cho cả ba truy vấn — bể kết nối chỉ có 5 chỗ.
+  */
+  const [orderRows, adRows, expenseRows] = await chayKhongJit(db, (tx) => Promise.all([
+    tx
       .select({
         day: base.day,
         orders: sql<number>`count(*) filter (where ${f.notCancelled})`,
@@ -232,7 +248,7 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
       .from(base)
       .groupBy(base.day)
       .orderBy(base.day),
-    db
+    tx
       .select({ day: dayOf(schema.adSpends.spendDate), spend: sum(schema.adSpends.spend) })
       .from(schema.adSpends)
       .where(and(eq(schema.adSpends.excluded, false), between(schema.adSpends.spendDate, period.from, period.to)))
@@ -240,8 +256,8 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
     // Chi phí RẢI ĐỀU theo ngày trong kỳ hiệu lực. Gộp theo `occurred_at` thì tiền thuê cả tháng
     // dựng thành một cột duy nhất ở ngày ghi sổ và mọi ngày khác chi phí bằng 0 — nhìn biểu đồ đó
     // sẽ kết luận "ngày 01 lỗ nặng, các ngày sau lãi đều", cả hai đều sai.
-    allocatedExpenseByDay(db, period.from, period.to),
-  ]);
+    allocatedExpenseByDay(tx, period.from, period.to),
+  ]));
 
   const map = new Map<string, DailyRow>();
   const get = (day: string) => {
