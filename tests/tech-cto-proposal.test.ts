@@ -3,8 +3,9 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { parseCtoPlan, type CtoPlan } from "@/lib/constants/cto-proposal";
-import { promptCoSecretKhong } from "@/lib/agents/cto";
+import { CTO_MAX_OUTPUT_TOKENS, parseCtoPlan, type CtoPlan } from "@/lib/constants/cto-proposal";
+import { promptCoSecretKhong, runCtoPlanning } from "@/lib/agents/cto";
+import { NGUONG_KHONG_STREAM, type AiProvider, type AiResponse } from "@/lib/ai/provider";
 import { approveProposal, createProposal, rejectProposal, supersedeOpenProposals } from "@/lib/tech/proposal";
 import { createTechTask, type TechActor } from "@/lib/tech/service";
 
@@ -295,12 +296,65 @@ export async function testCtoProposal() {
   // …và đường áp kế hoạch cũng không, dù nó nằm ngoài lib/agents.
   assert.ok(!/setTechAgentEnabled\s*\(/.test(dv), "đường áp kế hoạch KHÔNG được bật vai nào");
 
+  /* ───── 14. CÂU TRẢ LỜI BỊ CẮT KHÔNG ĐƯỢC IN RA THÀNH "JSON HỎNG" ─────
+
+     Đo thật (lượt chạy 35428943458, 19/09/2026): trần 8.000 token cắt bản kế hoạch giữa một
+     chuỗi, và màn hình in "Không đọc được JSON: Unterminated string at position 15355". Câu đó
+     sai chỗ: nó gửi người sửa đi soi lược đồ và prompt, trong khi thứ hỏng là cái trần của chính
+     ta. Hai nguyên nhân, hai câu chữ — cùng một luật với mục 55 của AGENTS.md. */
+  const giaProvider = (res: Partial<AiResponse> & { content: AiResponse["content"] }): AiProvider => ({
+    name: "gia",
+    model: "gia-model",
+    async complete(): Promise<AiResponse> {
+      return {
+        stopReason: "end_turn",
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        model: "gia-model",
+        latencyMs: 1,
+        ...res,
+      };
+    },
+  });
+  const ctxGia = { prompt: "mục tiêu thử", blocked: null } as Awaited<ReturnType<typeof import("@/lib/agents/cto").buildCtoPrompt>> & object;
+
+  const bicat = await runCtoPlanning(
+    giaProvider({ content: [{ type: "text", text: '{"summary":"một bản kế hoạch dài bị cắt giữa chừng' }], stopReason: "max_tokens" }),
+    ctxGia as never,
+  );
+  assert.equal(bicat.ok, false, "chạm trần token phải là lượt KHÔNG đạt");
+  assert.ok(!bicat.ok && /bị cắt/.test(bicat.error), `phải nói rõ câu trả lời bị CẮT, nhận: ${!bicat.ok ? bicat.error : ""}`);
+  assert.ok(!bicat.ok && !/JSON/i.test(bicat.error), "KHÔNG được đổ lỗi cho định dạng JSON khi chính ta cắt câu trả lời");
+  assert.ok(!bicat.ok && bicat.error.includes(CTO_MAX_OUTPUT_TOKENS.toLocaleString("vi-VN")), "phải in ra cái trần đang chạm");
+
+  // …còn JSON hỏng THẬT (model nói xong hẳn rồi) vẫn phải là lỗi định dạng, không bị gộp vào nhánh trên.
+  const saiDinhDang = await runCtoPlanning(giaProvider({ content: [{ type: "text", text: "không phải JSON" }], stopReason: "end_turn" }), ctxGia as never);
+  assert.ok(!saiDinhDang.ok && /JSON/i.test(saiDinhDang.error), "model nói hết câu mà sai định dạng thì vẫn là lỗi đọc JSON");
+
+  // Model từ chối vì chính sách là tình huống thứ ba, cũng không phải lỗi định dạng.
+  const tuchoi = await runCtoPlanning(giaProvider({ content: [{ type: "text", text: "" }], stopReason: "refusal" }), ctxGia as never);
+  assert.ok(!tuchoi.ok && /từ chối/.test(tuchoi.error), "model từ chối phải được gọi đúng tên");
+
+  /* ───── 15. TRẦN CỦA CTO PHẢI ĐI BẰNG STREAMING ─────
+
+     Ta truyền `timeout` tường minh cho SDK, nên phép kiểm "lượt này dài quá, hãy streaming" của
+     SDK bị BỎ QUA — nới trần mà không nới đường đi là đổi một lượt bị cắt lấy một lượt hết giờ,
+     và lượt hết giờ thì không để lại lấy một chữ để đọc. */
+  assert.ok(
+    CTO_MAX_OUTPUT_TOKENS > NGUONG_KHONG_STREAM,
+    `trần của CTO (${CTO_MAX_OUTPUT_TOKENS}) phải vượt ngưỡng không-streaming (${NGUONG_KHONG_STREAM}) để lượt gọi đi đường streaming`,
+  );
+  const nguonProvider = readFileSync(path.join(process.cwd(), "lib/ai/provider.ts"), "utf8");
+  assert.ok(
+    /max_tokens\s*>\s*NGUONG_KHONG_STREAM[\s\S]{0,200}messages\.stream\(/.test(nguonProvider),
+    "AnthropicProvider phải chọn streaming theo NGUONG_KHONG_STREAM, không theo một số ghim cứng",
+  );
+
   /* ───── dọn ───── */
   await db.delete(schema.techProposalTasks);
   await db.delete(schema.techProposals);
   await db.delete(schema.techTasks);
 
   console.log(
-    "✓ AI CTO chế độ đề xuất: lập kế hoạch KHÔNG tạo việc thật · agent không duyệt/không từ chối · người duyệt thì việc tạo qua dịch vụ và phụ thuộc nối bằng id thật · AI nói R0 cho việc lương thì MÁY vẫn xếp R2 và vẫn chờ ký · duyệt hai lần không nhân đôi · bản từ chối/bị thay thế/nháp không áp được · JSON hỏng, vai lạ, module lạ, phụ thuộc vòng đều bị từ chối · prompt không mang bí mật (cả tên lẫn giá trị) · không đường ghi thứ hai vào tech_tasks · giao diện không có nút chạy tất cả · không vai nào merge/deploy/ghi production",
+    "✓ AI CTO chế độ đề xuất: lập kế hoạch KHÔNG tạo việc thật · agent không duyệt/không từ chối · người duyệt thì việc tạo qua dịch vụ và phụ thuộc nối bằng id thật · AI nói R0 cho việc lương thì MÁY vẫn xếp R2 và vẫn chờ ký · duyệt hai lần không nhân đôi · bản từ chối/bị thay thế/nháp không áp được · JSON hỏng, vai lạ, module lạ, phụ thuộc vòng đều bị từ chối · prompt không mang bí mật (cả tên lẫn giá trị) · câu trả lời bị cắt KHÔNG bị in ra thành lỗi JSON · lượt dài đi bằng streaming · không đường ghi thứ hai vào tech_tasks · giao diện không có nút chạy tất cả · không vai nào merge/deploy/ghi production",
   );
 }

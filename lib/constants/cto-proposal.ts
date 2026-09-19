@@ -31,6 +31,19 @@ export const CTO_AGENT_KEYS = TECH_AGENT_TEMPLATES.map((t) => t.key);
 /** Trần số việc trong MỘT bản kế hoạch. Một "kế hoạch" 200 việc là một bãi rác, không phải kế hoạch. */
 export const CTO_MAX_TASKS = 12;
 
+/**
+ * Trần token cho lượt trả lời của CTO.
+ *
+ * ĐO THẬT (lượt chạy 35428943458, 19/09/2026): trần 8.000 làm bản kế hoạch bị CẮT giữa một chuỗi
+ * ở ký tự 15.355. Hai điều cộng lại mới ra con số đó: văn bản tiếng Việt có dấu tốn token hơn hẳn
+ * tiếng Anh, và `thinking` thích ứng của Opus cũng ĂN VÀO CÙNG một trần. Mười hai việc, mỗi việc
+ * kèm tiêu chí nghiệm thu và phạm vi tệp, cần chỗ gấp ba.
+ *
+ * Trần này KHÔNG phải mục tiêu — nó là chỗ dừng an toàn. Chạm tới nó là một LỖI ĐỌC ĐƯỢC
+ * (`stopReason = "max_tokens"`), không bao giờ được để nó đi tiếp thành một lỗi cú pháp JSON.
+ */
+export const CTO_MAX_OUTPUT_TOKENS = 24_000;
+
 const cau = z.string().trim().min(1).max(2000);
 
 export const ctoTaskSchema = z.object({
