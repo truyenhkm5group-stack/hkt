@@ -82,7 +82,42 @@ Cùng lượt chạy **35444310784**, phần 2. Hỏi bảy nguồn; mỗi ngu�
 **Câu hỏi dứt khoát:** mã `61589434244037` xuất hiện **0 lần** trong toàn bộ dữ liệu sống —
 0 trong `sales_messages.raw`, 0 trong `state`, 0 trong `offer_snapshot`, 0 trong `webhook_events`.
 
+### P6 · ĐÃ ĐÓNG — VÀ CÂU TRẢ LỜI LẬT LẠI TIỀN ĐỀ
+
+Lượt chạy **35447869872**. Đi qua chiếc cầu duy nhất ERP tự đi được: **44 mã quảng cáo** trong
+627 tin nhắn. Hỏi Graph API năm mã, lấy `creative.effective_object_story_id` — dạng
+`"<mã page>_<mã bài>"`, tức **lời khai của chính Facebook** về trang nào đã chạy mẩu quảng cáo mà
+khách bấm vào để mở hội thoại.
+
+| mã quảng cáo | story_id | page_id từ spec | ⇒ trang |
+|---|---|---|---|
+| 120247693169350618 | `1117899664739453_122108696234357630` | — | **1117899664739453** |
+| 120247693159380618 | `1117899664739453_122108696234357630` | — | **1117899664739453** |
+| 120247680433210618 | `1117899664739453_122108709050357630` | `1117899664739453` | **1117899664739453** |
+| 120248206753210618 | `1117899664739453_122108696234357630` | — | **1117899664739453** |
+| 120247680428480618 | `1117899664739453_122108696234357630` | `1117899664739453` | **1117899664739453** |
+
+**5/5 mã trỏ về cùng một trang, và trang ấy là `1117899664739453` — ĐÚNG BẰNG mã Pancake.**
+Hai mã còn trả thêm `object_story_spec.page_id` khớp y hệt, tức hai trường độc lập nói cùng một
+điều.
+
+**Kết luận: KHÔNG tồn tại một mã Facebook riêng cho page này.** Mã Pancake và mã Facebook là
+**cùng một số**. Con số `61589434244037` trong bản mô tả công việc **không phải** mã của trang
+này — nó chưa từng xuất hiện trong dữ liệu sống, và nay Facebook xác nhận trang thật mang số
+khác. Tiền đề "phải nối hai mã khác nhau" là sai ngay từ đầu.
+
+Điều này cũng giải thích năm hội thoại mang tiền tố lạ ở §P4: `122108696234357630` là **mã BÀI
+VIẾT**, không phải mã trang — nó là nửa sau của chính `story_id` ở bảng trên.
+
+**Việc còn lại là của người, và nhỏ:** khai `1117899664739453` vào ô `facebook_page_id` đang để
+trống, rồi sửa con số sai trong tài liệu. Tôi KHÔNG tự ghi vào ô ấy: nó là cấu hình page, và
+phiên này không đổi cấu hình.
+
 ### Kết luận P4
+
+> **CẬP NHẬT sau §P6 bên trên:** phần này viết khi chưa hỏi được Facebook. Kết luận "chưa xác
+> minh" nay đã được thay bằng một câu trả lời dứt khoát — hai mã là MỘT. Giữ nguyên đoạn dưới vì
+> nó ghi đúng thứ ERP tự biết được, và ranh giới ấy vẫn đáng đọc.
 
 **BẢN ĐỒ NÀY CHƯA ĐƯỢC XÁC MINH, và không có nguồn nào trong ERP xác minh được nó.** Con số
 `61589434244037` tới từ bản mô tả công việc, không từ dữ liệu. Ô cấu hình đáng lẽ giữ nó thì đang
@@ -254,6 +289,7 @@ Cổng đòi bảy điều. Bốn đã đạt, ba chưa:
 | Nạp Pancake không bỏ sót vì phân trang | ✓ **ĐÓNG** — run 35447295117: đường nạp THẬT lấy 500 mã duy nhất trong 14 lượt gọi, chồng lấn 0, không lặp, không trùng |
 | Lý do chuyển người lưu đúng | ◐ **một nửa** — bài kiểm chứng minh, dữ liệu sống chưa chạm được đường đã hỏng (xem P5) |
 | Danh mục không bịa | ✗ chưa có người chấm để nói |
+| Bản đồ mã page Facebook | ✓ **ĐÓNG** — Facebook xác nhận trang là `1117899664739453`, trùng mã Pancake; không có mã thứ hai |
 
 Điều kiện chặn vẫn là điều kiện cũ: **chưa một lượt nào được người chấm**. Mọi thứ đo được hôm nay
 là về CƠ CHẾ — an toàn, đường nối, tính toàn vẹn dữ liệu — và cơ chế đúng không nói gì về việc máy
