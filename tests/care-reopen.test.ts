@@ -321,6 +321,26 @@ export async function testCareReopen(db: Db) {
     shipmentId: sG, orderId: `${P}o-sg`, episodeNo: 2, active: true, careStatus: "NEW",
     entryCarrierState: "WAITING_REDELIVERY", sourceTrigger: "RECONCILE", openedAt: mocDiSan, careOutcome: "PENDING", updatedBy: "SYSTEM",
   });
+  /*
+    ═══ VẾ ĐỐI CHỨNG: MỘT BẢN SAO NẰM *SAU* MỐC VÁ PHẢI ĐƯỢC ĐẾM ═══
+
+    Chỉ khẳng định "cái cũ không bị đếm nhầm" thì bài kiểm vẫn xanh kể cả khi bộ đếm hỏng thành
+    đếm-không-cái-gì — và lúc ấy `falseReopenAfterFix` sẽ mãi mãi báo 0, tức là mãi mãi báo "lỗi
+    đã hết", kể cả giữa lúc nó đang xảy ra. Con số này chỉ có nghĩa khi nó chia ĐÔI đúng ở mốc
+    vá, nên phải kiểm cả hai bên của cái mốc.
+
+    `mocSauVa` cũng neo vào hằng số, nên nó không bao giờ trôi: mốc kích hoạt vẫn cũ hơn lúc đóng
+    (đợt 1 đóng ở "bây giờ") ⇒ vẫn là FALSE_REOPEN_LEGACY, nhưng nằm SAU lúc luật vá chạy.
+  */
+  const mocSauVa = new Date(REOPEN_GUARD_LIVE_AT.getTime() + 3600_000);
+  const sH = await dungKien(db, "sh");
+  await suKien(db, sH, { stage: "DELIVERY_FAILED", text: "Chờ phát lại", at: gio(20) });
+  await setCareStatus(NGUOI, { shipmentIds: [sH], status: "RESOLVED", note: "H: xong" });
+  await db.insert(schema.shipmentCare).values({
+    shipmentId: sH, orderId: `${P}o-sh`, episodeNo: 2, active: true, careStatus: "NEW",
+    entryCarrierState: "WAITING_REDELIVERY", sourceTrigger: "RECONCILE", openedAt: mocSauVa, careOutcome: "PENDING", updatedBy: "SYSTEM",
+  });
+
   clearMemo();
   // Kỳ phải PHỦ được mốc di sản dù hôm nay cách nó bao xa — nếu không, dòng rơi ra ngoài kỳ và
   // `dongG.length` tụt xuống 1 vào một ngày nào đó. Cùng một quả bom, chỉ chậm hơn vài tuần.
@@ -331,13 +351,15 @@ export async function testCareReopen(db: Db) {
   assert.equal(dongG.find((r) => r.careId !== undefined && r.outcome !== undefined && r.reopenClass === "FALSE_REOPEN_LEGACY") !== undefined, true, "bản sao phải được gọi đúng tên");
   assert.ok(kiemKe.reopen.byClass.FALSE_REOPEN_LEGACY >= 1, "bộ đếm theo loại phải thấy nó");
   /*
-    Con số DUY NHẤT nói lỗi có còn đang xảy ra hay không. Bản sao trong bài kiểm mang mốc kích hoạt
-    CŨ (20 giờ trước) nên nó là DI SẢN, không phải lỗi mới — đúng như các đợt thật trên production.
+    Con số DUY NHẤT nói lỗi có còn đang xảy ra hay không — và nó chỉ có nghĩa khi CHIA ĐÔI đúng ở
+    mốc vá. Hai bản sao trong bài đều NEO vào `REOPEN_GUARD_LIVE_AT` (một cái trước một giờ, một
+    cái sau một giờ), nên phán quyết này không đổi dù hôm nay là ngày nào.
   */
-  assert.equal(kiemKe.reopen.falseReopenAfterFix, 0, "không có bản sao nào sinh ra SAU khi luật mới chạy");
+  assert.equal(kiemKe.reopen.falseReopenAfterFix, 1, "đúng MỘT bản sao nằm sau mốc vá: cái TRƯỚC mốc không được tính, cái SAU mốc không được bỏ sót — con số này chia đôi ở đó hoặc nó vô nghĩa");
+  assert.equal(kiemKe.reopen.guardLiveAt.getTime(), REOPEN_GUARD_LIVE_AT.getTime(), "và màn hình phải nói ra nó đang chia đôi ở mốc nào");
 
   /* ───── dọn ───── */
-  const ids = [s1, s2, sA, sC, sD, sF, sG];
+  const ids = [s1, s2, sA, sC, sD, sF, sG, sH];
   await db.delete(schema.careActions).where(sql`${schema.careActions.shipmentId} in ${ids}`);
   await db.delete(schema.careCaseEvents).where(sql`${schema.careCaseEvents.shipmentId} in ${ids}`);
   await db.delete(schema.shipmentCare).where(sql`${schema.shipmentCare.shipmentId} in ${ids}`);
