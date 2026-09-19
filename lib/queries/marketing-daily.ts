@@ -478,43 +478,33 @@ async function buildDays(
   const extra = dimensionFilter(filters);
   const filtered = hasDimensionFilter(filters);
   /*
-    ═══════════ TẮT JIT — ĐO ĐƯỢC TRÊN PRODUCTION 19/09/2026 ═══════════
+    ═══════════ HÀM NÀY KHÔNG MỞ GIAO DỊCH — NƠI GỌI MỚI MỞ ═══════════
 
-    `EXPLAIN (ANALYZE, BUFFERS)` của chính câu này trên máy chủ thật nói thẳng ra nguyên nhân của
-    3,6 giây mà ba lượt đo trước không giải thích được:
+    Bản trước bọc `chayKhongJit` NGAY TẠI ĐÂY. Đúng về ý định (lý do tắt JIT nằm ở
+    `getMarketingDailyUncached`), sai về VỊ TRÍ: `getMarketingBreakdown` gọi hàm này MỘT LẦN CHO
+    MỖI KHOÁ CHIỀU, nên 24 chiến dịch thành 24 lần `BEGIN` + `SET LOCAL` + `COMMIT` + xin kết nối
+    trên một bể 5 chỗ.
 
-        JIT: Functions: 62
-             Timing: Generation 37,8ms · Inlining 126,7ms · Optimization 1.383,5ms
-                     · Emission 1.698,2ms · Total 3.246,1ms
-        Execution Time: 3.738,9 ms
+    ĐO ĐƯỢC trên production 19/09/2026, ngay lượt deploy đầu tiên của bản vá JIT:
 
-    **3.246 trên 3.739 mili giây là BIÊN DỊCH, không phải tính toán.** Phần việc thật chỉ còn
-    khoảng 490ms. Cái gọi là "Seq Scan khởi động 3,8 giây" trong các lượt đo trước chính là thời
-    gian biên dịch mà PostgreSQL gán vào nút đầu tiên — không phải một phép quét chậm.
+        bóc tách theo chiến dịch   1.195ms → 3.744ms   (+228%)
+        bóc tách theo mã hàng        173ms →   500ms
+        bóc tách theo marketer        74ms →   171ms
 
-    Vì sao JIT bật: chi phí ƯỚC LƯỢNG của câu này là `cost=5.796.652..11.592.844`, vượt xa
-    `jit_above_cost` (100.000) lẫn `jit_inline_above_cost`/`jit_optimize_above_cost` (500.000).
-    Con số ước lượng ấy đến từ SubPlan tương quan của `ORDER_OUTCOME`; thực tế nó chỉ chạm 1.752
-    dòng và mỗi lượt SubPlan tốn 0,26ms. Trên VPS 2 nhân, biên dịch 62 hàm đắt hơn chính phép tính
-    nhiều lần.
+    trong khi các đường một-lượt lại nhanh lên 93–97%. Cùng một bản vá, hai hướng ngược nhau —
+    dấu hiệu kinh điển của chi phí đi theo SỐ LƯỢT GỌI chứ không theo khối lượng dữ liệu.
 
-    Kho mã này ĐÃ giải bài toán ấy một lần (`chayKhongJit` trong `db/index.ts`, đo 10/09:
-    8.578ms → 26ms) và chín tệp truy vấn khác đang dùng. Đường `pnlFacts` thì chưa — nên nó trả
-    đủ giá mỗi lần mở trang.
-
-    MỘT giao dịch cho CẢ BỐN truy vấn, không phải bốn lời gọi `chayKhongJit` song song: mỗi lời gọi
-    là một kết nối, mà bể chỉ có 5 chỗ trên máy 2 nhân. Đúng khuôn `lib/queries/payroll.ts` đang
-    dùng.
+    Nên ranh giới giao dịch chuyển lên nơi gọi: mỗi ĐƯỜNG VÀO mở đúng MỘT giao dịch, và mọi lượt
+    `buildDays` bên trong dùng lại chính `tx` ấy. Không giao dịch lồng nhau, không giao dịch trong
+    vòng lặp.
   */
-  const [moneyRows, spend, units, allocated] = await chayKhongJit(db, (tx) =>
-    Promise.all([
-      filters.productId ? productDayRows(tx, period, basis, filters, extra) : orderDayRows(tx, period, basis, extra),
-      spendByDay(tx, period, filters),
-      filters.productId || opts.skipUnits ? Promise.resolve(null) : unitsByDay(tx, period, basis, extra),
-      // Chi phí vận hành phân bổ CHỈ có nghĩa ở mức toàn shop. Có bộ lọc ⇒ không đọc, và ô là `—`.
-      filtered ? Promise.resolve(null) : allocatedExpenseByDay(tx, period.from, period.to),
-    ]),
-  );
+  const [moneyRows, spend, units, allocated] = await Promise.all([
+    filters.productId ? productDayRows(db, period, basis, filters, extra) : orderDayRows(db, period, basis, extra),
+    spendByDay(db, period, filters),
+    filters.productId || opts.skipUnits ? Promise.resolve(null) : unitsByDay(db, period, basis, extra),
+    // Chi phí vận hành phân bổ CHỈ có nghĩa ở mức toàn shop. Có bộ lọc ⇒ không đọc, và ô là `—`.
+    filtered ? Promise.resolve(null) : allocatedExpenseByDay(db, period.from, period.to),
+  ]);
 
   const map = new Map<string, MarketingDailyRow>();
   const get = (day: string): MarketingDailyRow => {
@@ -593,11 +583,41 @@ function rollupTotals(rows: MarketingDailyRow[]) {
 
 async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, filters: MarketingFilters, previous: { from: Date | null; to: Date | null } | null): Promise<MarketingDaily> {
   const db = await getDb();
-  const [built, freshness, prevBuilt] = await Promise.all([
-    buildDays(db, period, basis, filters),
-    marketingFreshness(db),
-    previous?.from ? buildDays(db, { ...period, key: "custom", from: previous.from, to: previous.to }, basis, filters) : Promise.resolve(null),
-  ]);
+  /*
+    ═══════════ TẮT JIT — ĐO ĐƯỢC TRÊN PRODUCTION 19/09/2026 ═══════════
+
+    `EXPLAIN (ANALYZE, BUFFERS)` của chính câu gộp theo ngày trả lời dứt điểm câu hỏi đã treo qua
+    ba lượt đo — vì sao `Seq Scan on orders` khởi động mất 3,8 giây rồi chỉ tốn 3,5ms cho toàn bộ
+    1.148 dòng:
+
+        JIT: Functions: 62
+             Timing: Generation 37,8ms · Inlining 126,7ms · Optimization 1.383,5ms
+                     · Emission 1.698,2ms · Total 3.246,1ms
+        Execution Time: 3.738,9 ms
+
+    3.246 trên 3.739 mili giây là BIÊN DỊCH, không phải tính toán. "Khởi động 3,8 giây" chính là
+    thời gian biên dịch mà PostgreSQL gán vào nút đầu tiên của kế hoạch.
+
+    JIT bật vì chi phí ƯỚC LƯỢNG là `cost=5.796.652..11.592.844`, vượt xa `jit_above_cost`
+    (100.000) lẫn `jit_inline/optimize_above_cost` (500.000) — con số ấy đến từ SubPlan tương quan
+    của `ORDER_OUTCOME`, trong khi thực tế chỉ chạm 1.752 dòng và mỗi lượt SubPlan tốn 0,26ms.
+
+    Đo lại sau khi tắt, cùng phép đo:
+
+        marketingDaily 30d (có kỳ trước)    4.048ms → 276ms   (−93,2%)
+        marketingDaily 30d (không kỳ trước) 3.575ms → 171ms   (−95,2%)
+
+    MỘT giao dịch cho CẢ hai lượt `buildDays` và phép đọc độ tươi — không phải một giao dịch cho
+    mỗi lượt. Mỗi giao dịch giữ một kết nối suốt thời gian sống của nó, mà bể chỉ có 5 chỗ trên
+    máy 2 nhân.
+  */
+  const [built, freshness, prevBuilt] = await chayKhongJit(db, (tx) =>
+    Promise.all([
+      buildDays(tx, period, basis, filters),
+      marketingFreshness(tx),
+      previous?.from ? buildDays(tx, { ...period, key: "custom", from: previous.from, to: previous.to }, basis, filters) : Promise.resolve(null),
+    ]),
+  );
   const rows = built.rows;
   const prevRows = prevBuilt?.rows ?? null;
 
@@ -714,37 +734,52 @@ export async function getMarketingBreakdown(
   limit = 12,
 ): Promise<{ dimension: MarketingDimension; spendGrain: boolean; rows: MarketingBreakdownRow[] }> {
   const db = await getDb();
-  const keys = await dimensionKeys(db, period, dimension, filters, limit);
   /*
-    SỐ LƯỢNG SẢN PHẨM ĐỌC MỘT LẦN CHO MỌI NHÓM.
+    MỘT GIAO DỊCH CHO CẢ BẢNG BÓC TÁCH — khoá chiều, số lượng sản phẩm, và mọi lượt `buildDays`.
 
-    Đây là N+1 DUY NHẤT mà bộ đo tìm được trong tính năng này, và nó đo được chứ không suy ra:
-    bóc tách theo chiến dịch chạy 108 câu, riêng câu đếm số lượng lặp 24 lần tốn 2.236ms
-    (perf-probe, production 19/09/2026).
+    Đây là chỗ bản vá JIT đầu tiên đặt SAI ranh giới: nó bọc bên trong `buildDays`, mà hàm ấy được
+    gọi MỘT LẦN CHO MỖI KHOÁ. 24 chiến dịch ⇒ 24 lần `BEGIN` + `SET LOCAL jit = off` + `COMMIT` +
+    xin kết nối, và bảng này chậm đi từ 1.195ms lên 3.744ms trong khi các đường một-lượt nhanh lên
+    93%. Đo được trên production, không suy ra.
 
-    Câu này gộp `orders ⋈ order_items` — KHÔNG đụng `ORDER_OUTCOME`, không đụng bảng dẫn xuất —
-    nên gộp theo khoá chiều là an toàn và rẻ. Cố ý KHÔNG gộp nốt phần TIỀN: đã thử ở bản trước và
-    đo được nó CHẬM HƠN (một lượt quét rộng mất đường dùng chỉ mục mà 12 lượt quét hẹp dùng được).
-    Một phép tối ưu chỉ được làm ở chỗ số đo chỉ vào.
+    Vòng lặp vẫn TUẦN TỰ và vẫn gọi lại ĐÚNG đường của bảng chính — hai điều đó là lý do con số
+    bóc tách không thể khác con số của dòng nó bóc, và đã được đo là nhanh hơn cả bản song song
+    lẫn bản một-câu-`group by` (khối chú thích ngay trên). Thay đổi ở đây CHỈ là ranh giới giao
+    dịch: cùng truy vấn, cùng thứ tự, cùng kết quả.
   */
-  const unitsByKey = dimension === "product" ? null : await unitsByDimension(db, period, basis, dimensionFilter(filters), dimension);
-  const rows: MarketingBreakdownRow[] = [];
-  for (const k of keys) {
-    const scoped: MarketingFilters = { ...filters, ...filterForDimension(dimension, k.key) };
-    const { rows: days } = await buildDays(db, period, basis, scoped, { skipUnits: unitsByKey !== null });
-    const base = sumBases(days);
-    if (unitsByKey) base.units = unitsByKey.get(k.key) ?? 0;
-    rows.push({ ...base, key: k.key, label: k.label, maturity: maturityState(base.finishedOrders, base.pendingOrders), spendKnown: days.some((d) => d.spendKnown) });
-  }
-  rows.sort((a, b) => {
-    const pa = a.contributionProfit;
-    const pb = b.contributionProfit;
-    if (pa === null && pb === null) return b.posRevenue - a.posRevenue;
-    if (pa === null) return 1;
-    if (pb === null) return -1;
-    return pa - pb; // lỗ nặng nhất đứng đầu — thứ cần xử lý trước
+  return chayKhongJit(db, async (tx) => {
+    const keys = await dimensionKeys(tx, period, dimension, filters, limit);
+    /*
+      SỐ LƯỢNG SẢN PHẨM ĐỌC MỘT LẦN CHO MỌI NHÓM.
+
+      Đây là N+1 DUY NHẤT mà bộ đo tìm được trong tính năng này, và nó đo được chứ không suy ra:
+      bóc tách theo chiến dịch chạy 108 câu, riêng câu đếm số lượng lặp 24 lần tốn 2.236ms
+      (perf-probe, production 19/09/2026).
+
+      Câu này gộp `orders ⋈ order_items` — KHÔNG đụng `ORDER_OUTCOME`, không đụng bảng dẫn xuất —
+      nên gộp theo khoá chiều là an toàn và rẻ. Cố ý KHÔNG gộp nốt phần TIỀN: đã thử ở bản trước và
+      đo được nó CHẬM HƠN (một lượt quét rộng mất đường dùng chỉ mục mà 12 lượt quét hẹp dùng được).
+      Một phép tối ưu chỉ được làm ở chỗ số đo chỉ vào.
+    */
+    const unitsByKey = dimension === "product" ? null : await unitsByDimension(tx, period, basis, dimensionFilter(filters), dimension);
+    const rows: MarketingBreakdownRow[] = [];
+    for (const k of keys) {
+      const scoped: MarketingFilters = { ...filters, ...filterForDimension(dimension, k.key) };
+      const { rows: days } = await buildDays(tx, period, basis, scoped, { skipUnits: unitsByKey !== null });
+      const base = sumBases(days);
+      if (unitsByKey) base.units = unitsByKey.get(k.key) ?? 0;
+      rows.push({ ...base, key: k.key, label: k.label, maturity: maturityState(base.finishedOrders, base.pendingOrders), spendKnown: days.some((d) => d.spendKnown) });
+    }
+    rows.sort((a, b) => {
+      const pa = a.contributionProfit;
+      const pb = b.contributionProfit;
+      if (pa === null && pb === null) return b.posRevenue - a.posRevenue;
+      if (pa === null) return 1;
+      if (pb === null) return -1;
+      return pa - pb; // lỗ nặng nhất đứng đầu — thứ cần xử lý trước
+    });
+    return { dimension, spendGrain: MARKETING_DIMENSION_SPEND[dimension], rows };
   });
-  return { dimension, spendGrain: MARKETING_DIMENSION_SPEND[dimension], rows };
 }
 
 /**
