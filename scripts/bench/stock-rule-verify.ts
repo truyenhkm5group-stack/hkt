@@ -18,7 +18,7 @@
 import "dotenv/config";
 import { rmSync } from "node:fs";
 import path from "node:path";
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 const dir = path.join("data", `pglite-stockrule-${process.pid}`);
 rmSync(dir, { recursive: true, force: true });
@@ -129,7 +129,7 @@ async function main() {
   }
   await db.execute(sql`analyze`);
 
-  const { ORDER_OUTCOME, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE } = await import("@/lib/queries/return-rate");
+  const { ORDER_OUTCOME, PRIMARY_ATTEMPT, RETURN_PENDING_WAREHOUSE, SHIPMENT_LEFT_WAREHOUSE } = await import("@/lib/queries/return-rate");
   const pv = schema.productVariants;
   const oi = schema.orderItems;
   const o = schema.orders;
@@ -157,7 +157,7 @@ async function main() {
   const outcomes = await db
     .select({ orderId: sql<string>`${o.id}`, outcome: ORDER_OUTCOME })
     .from(o)
-    .leftJoin(s, sql`${s.orderId} = ${o.id}`);
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT));
   const outcomeOf = new Map(outcomes.map((x) => [String(x.orderId), String(x.outcome)]));
 
   const head = ["MAU MA", "TINH HUONG", "NHAP", "XUAT(so kho)", "XUAT(tien)", "TON MOI", "TON CU", "KET QUA DON", "LECH"];
@@ -188,7 +188,7 @@ async function main() {
       leftWarehouse: sql<number>`count(*) filter (where ${SHIPMENT_LEFT_WAREHOUSE})`,
     })
     .from(o)
-    .leftJoin(s, sql`${s.orderId} = ${o.id}`);
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT));
   const d = Number(kpi.delivered);
   const r = Number(kpi.returned);
   console.log(

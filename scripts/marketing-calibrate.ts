@@ -27,7 +27,9 @@ import { getDb, schema } from "@/db";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { clearMemo } from "@/lib/cache";
 import { MARKETING_BASIS_LABEL, MATURITY_LABEL, ratioOf, type MarketingBasis } from "@/lib/constants/marketing-daily";
-import { dimensionFilter, getMarketingDaily, type MarketingFilters } from "@/lib/queries/marketing-daily";
+import { dimensionFilter, getMarketingDaily, IS_DUPLICATE_ORDER, type MarketingFilters } from "@/lib/queries/marketing-daily";
+import { metricScope } from "@/lib/queries/metrics";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { getDailyBreakdown, pnlFacts } from "@/lib/queries/reports";
 import type { Period } from "@/lib/search-params";
 
@@ -209,15 +211,29 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   /* ── 4. ĐỐI CHIẾU SỐ ĐƠN VỚI POPULATION CANONICAL ── */
   log("\n" + "═".repeat(120));
   log("ĐỐI CHIẾU 3/4 — SỐ ĐƠN ĐỦ ĐIỀU KIỆN (population đơn đã xác nhận + loại trùng)");
-  const rows = await db.execute(sql`
-    select count(*)::int as tong,
-           count(*) filter (where exists (select 1 from order_attributions oa where oa.order_id = o.id and oa.status = 'DUPLICATE'))::int as trung
-      from orders o
-     where o.stage::text not in ('NEW','CANCELLED','DELETED')
-       and o.inserted_at >= ${period.from}
-       and o.inserted_at <= ${period.to}
-  `);
-  const r0 = (Array.isArray(rows) ? rows : (rows as { rows?: Record<string, unknown>[] }).rows ?? [])[0] as { tong?: number; trung?: number } | undefined;
+  /*
+    ─── "ĐỘC LẬP" NGHĨA LÀ VIẾT LẠI PHÉP ĐO, KHÔNG PHẢI VIẾT LẠI ĐỊNH NGHĨA ───
+
+    Bản đầu tự gõ population bằng một DANH SÁCH LOẠI TRỪ: `stage not in ('NEW','CANCELLED','DELETED')`.
+    Canonical thì dùng DANH SÁCH CHO PHÉP — `CONFIRMED_STAGES` qua `metricScope(period,"confirmed")`.
+    Hai cách ấy chỉ bằng nhau khi enum `order_stage` không có giá trị nào ngoài hai danh sách. Nó CÓ:
+    `WAITING` nằm ngoài cả hai, nên bản chép tay NHẬN nó còn báo cáo thì KHÔNG.
+
+    Đo trên production, kỳ 01–09/09/2026: đúng 2 đơn `WAITING` (3827, 3831). Chúng là toàn bộ
+    "lệch 2 đơn không giải thích được" mà hai lượt chạy độc lập cùng báo — một lỗi của CHÍNH BỘ ĐỐI
+    CHIẾU, không phải của báo cáo.
+
+    Bài học: một bộ đối chiếu chép tay định nghĩa nghiệp vụ sẽ có ngày tố cáo báo cáo vì chính bản
+    chép của nó đã trôi. Nó vẫn độc lập ở chỗ cần độc lập — tự đếm, tự gộp, không gọi
+    `getMarketingDaily` — nhưng population và luật trùng đơn thì đọc từ nguồn canonical.
+  */
+  const [r0] = await db
+    .select({
+      tong: sql<number>`count(*)::int`,
+      trung: sql<number>`count(*) filter (where ${IS_DUPLICATE_ORDER})::int`,
+    })
+    .from(schema.orders)
+    .where(metricScope(period, "confirmed"));
   const tongDon = Number(r0?.tong ?? 0);
   const trungDon = Number(r0?.trung ?? 0);
   log(`  SQL độc lập: ${tongDon} đơn đã xác nhận · ${trungDon} trùng ⇒ đủ điều kiện ${tongDon - trungDon}`);
@@ -235,17 +251,31 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   /* ── 5. ĐỐI CHIẾU KẾT QUẢ GIAO VỚI CHỨNG TỪ VẬN ĐƠN ── */
   log("\n" + "═".repeat(120));
   log("ĐỐI CHIẾU 4/4 — KẾT QUẢ GIAO (bảng kết quả đơn canonical)");
-  const oc = await db.execute(sql`
-    select coalesce(c.outcome, 'CHUA_TINH') as ket_qua, count(*)::int as so
-      from orders o
-      left join canonical_order_outcome c on c.order_id = o.id
-     where o.stage::text not in ('NEW','CANCELLED','DELETED')
-       and o.inserted_at >= ${period.from}
-       and o.inserted_at <= ${period.to}
-       and not exists (select 1 from order_attributions oa where oa.order_id = o.id and oa.status = 'DUPLICATE')
-     group by 1 order by 2 desc
-  `);
-  const ocRows = (Array.isArray(oc) ? oc : (oc as { rows?: Record<string, unknown>[] }).rows ?? []) as { ket_qua: string; so: number }[];
+  /*
+    ─── CÙNG HAI LỖI NHƯ KHỐI 3/4, VÀ MỘT LỖI NỮA CHỈ KHỐI NÀY CÓ ───
+
+    1. Population lại là bản chép tay `stage not in (…)` — nhận cả đơn `WAITING`.
+    2. `left join canonical_order_outcome c on c.order_id = o.id` KHÔNG khoá theo lần gửi, nên một
+       đơn gửi lại có BAO NHIÊU dòng canonical thì đếm bấy nhiêu lần. Đây đúng là lỗi đã làm ảnh
+       chụp KPI thừa 26 đơn, chỉ khác chỗ xảy ra.
+
+    Khoá theo ĐÚNG cặp mà `ORDER_OUTCOME_FAST` tra: (order_id, shipment_id của lần gửi quyết định).
+    Vẫn đọc THẲNG bảng canonical chứ không dùng `ORDER_OUTCOME_FAST` — vì mục đích của khối này là
+    ĐO ĐỘ PHỦ của bảng ấy, mà `ORDER_OUTCOME_FAST` có nhánh tính sống nên sẽ không bao giờ lộ ra
+    dòng thiếu.
+  */
+  const c = schema.canonicalOrderOutcome;
+  const ocRows = await db
+    .select({
+      ket_qua: sql<string>`coalesce(${c.outcome}, 'CHUA_TINH')`,
+      so: sql<number>`count(*)::int`,
+    })
+    .from(schema.orders)
+    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
+    .leftJoin(c, and(eq(c.orderId, schema.orders.id), sql`coalesce(${c.shipmentId}, '') = coalesce(${schema.shipments.id}, '')`))
+    .where(and(metricScope(period, "confirmed"), sql`not ${IS_DUPLICATE_ORDER}`))
+    .groupBy(sql`1`)
+    .orderBy(sql`2 desc`);
   const byOutcome = new Map(ocRows.map((x) => [String(x.ket_qua), Number(x.so)]));
   const sqlDelivered = byOutcome.get("DELIVERED") ?? 0;
   const sqlReturned = (byOutcome.get("RETURNED") ?? 0) + (byOutcome.get("RETURNED_BY_RULE") ?? 0);
