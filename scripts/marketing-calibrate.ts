@@ -27,8 +27,8 @@ import { getDb, schema } from "@/db";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { clearMemo } from "@/lib/cache";
 import { MARKETING_BASIS_LABEL, MATURITY_LABEL, ratioOf, type MarketingBasis } from "@/lib/constants/marketing-daily";
-import { getMarketingDaily, type MarketingFilters } from "@/lib/queries/marketing-daily";
-import { getDailyBreakdown } from "@/lib/queries/reports";
+import { dimensionFilter, getMarketingDaily, type MarketingFilters } from "@/lib/queries/marketing-daily";
+import { getDailyBreakdown, pnlFacts } from "@/lib/queries/reports";
 import type { Period } from "@/lib/search-params";
 
 type Args = { from: string; to: string; marketer: string | null; product: string | null; basis: MarketingBasis };
@@ -309,6 +309,93 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
 }
 
 /**
+ * ═══════════ GIẢI THÍCH MỘT CON SỐ — ĐI TỪ Ô TRÊN MÀN HÌNH VỀ TỪNG ĐƠN ═══════════
+ *
+ *   ... scripts/marketing-calibrate.ts --explain=2026-09-08 [--marketer=..] [--product=..]
+ *
+ * Khi một con số gây tranh cãi, câu hỏi luôn là "ba mươi tư triệu ấy gồm những đơn nào". Bảng theo
+ * ngày trả lời tới mức NGÀY và dừng ở đó; phần dưới ngày trước nay chỉ mở được bằng cách tự viết
+ * SQL — và người viết SQL ấy gần như chắc chắn sẽ quên một vế (loại đơn trùng, `PRIMARY_ATTEMPT`,
+ * population "đã xác nhận"), rồi ra một con số thứ ba mà không ai bác được.
+ *
+ * Nên hàm này đi qua ĐÚNG `pnlFacts` — cùng bảng dẫn xuất, cùng `ORDER_OUTCOME`, cùng `ORDER_COGS`,
+ * cùng phép nối một-đơn-một-dòng — mà báo cáo và Báo cáo lợi nhuận đang dùng. Nó KHÔNG viết lại một
+ * điều kiện nào; tổng của các dòng in ra bằng đúng ô trên màn hình, và in luôn phép cộng ấy để
+ * người đọc kiểm được ngay tại chỗ.
+ *
+ * Đơn TRÙNG vẫn in ra, có đánh dấu, và KHÔNG cộng vào tổng — vì "vì sao báo cáo marketing ít hơn
+ * Báo cáo lợi nhuận đúng hai đơn" là câu hỏi hay gặp nhất, và giấu chúng đi là bỏ mất câu trả lời.
+ */
+async function explainDay(day: string, filters: MarketingFilters, basis: MarketingBasis, log: (s: string) => void) {
+  const db = await getDb();
+  const period = periodOf(day, day);
+  const { base } = pnlFacts(db, basis, period.from, period.to, dimensionFilter(filters));
+
+  const rows = await db
+    .select({
+      orderId: base.orderId,
+      stage: base.orderStage,
+      outcome: base.outcome,
+      duplicate: base.duplicate,
+      revenue: base.revenue,
+      cogs: base.cogs,
+      prepaid: base.prepaidTotal,
+      returnFee: base.returnFee,
+      seller: base.sellerName,
+    })
+    .from(base)
+    .orderBy(sql`${base.duplicate}, ${base.outcome}, ${base.revenue} desc`);
+
+  log("═".repeat(120));
+  log(`GIẢI THÍCH NGÀY ${day} · mốc ${MARKETING_BASIS_LABEL[basis]} · ${rows.length} đơn trong population`);
+  log(`bộ lọc: marketer=${filters.marketerId ?? "(tất cả)"} · mã hàng=${filters.productId ?? "(tất cả)"}`);
+  log(`(đi qua ĐÚNG pnlFacts của lib/queries/reports.ts — không có điều kiện nào viết lại ở đây)`);
+  log("═".repeat(120));
+
+  const w = [24, 14, 20, 6, 14, 14, 14, 18];
+  log(["MÃ ĐƠN", "TRẠNG THÁI", "KẾT QUẢ", "TRÙNG", "DOANH THU", "GIÁ VỐN", "TRẢ TRƯỚC", "NGƯỜI CHỐT"].map((h, i) => h.padEnd(w[i])).join(" "));
+
+  let dtGiao = 0;
+  let giaVon = 0;
+  let soGiao = 0;
+  let soHoan = 0;
+  let soTrung = 0;
+  for (const r of rows) {
+    const trung = Boolean(r.duplicate);
+    if (trung) soTrung += 1;
+    else if (r.outcome === "DELIVERED") {
+      dtGiao += Number(r.revenue ?? 0);
+      giaVon += Number(r.cogs ?? 0);
+      soGiao += 1;
+    } else if (r.outcome === "RETURNED" || r.outcome === "RETURNED_BY_RULE") soHoan += 1;
+    log(
+      [String(r.orderId), String(r.stage), String(r.outcome ?? "—"), trung ? "TRÙNG" : "", vnd(Number(r.revenue ?? 0)), vnd(Number(r.cogs ?? 0)), vnd(Number(r.prepaid ?? 0)), String(r.seller ?? "—")]
+        .map((c, i) => c.padEnd(w[i]))
+        .join(" "),
+    );
+  }
+
+  log("-".repeat(120));
+  log(`Cộng lại từ chính các dòng trên (ĐÃ loại ${soTrung} đơn trùng):`);
+  log(`  giao thành công ${soGiao} đơn · hoàn ${soHoan} đơn`);
+  log(`  doanh thu thực  ${vnd(dtGiao)}`);
+  log(`  giá vốn         ${vnd(giaVon)}`);
+  log(`  lãi gộp         ${vnd(dtGiao - giaVon)}   (chưa trừ cước/phí và chi quảng cáo — hai khoản đó KHÔNG ở mức đơn)`);
+
+  /*
+    ĐỐI CHIẾU NGAY TẠI CHỖ. Một bảng chi tiết mà không tự chứng minh nó cộng lại bằng ô trên màn
+    hình thì chỉ là một bảng chi tiết thứ hai — và người đọc vẫn không biết tin cái nào.
+  */
+  clearMemo();
+  const bang = await getMarketingDaily(period, basis, filters);
+  const khop = bang.totals.deliveredRevenue === dtGiao && bang.totals.deliveredOrders === soGiao;
+  log("-".repeat(120));
+  log(`Bảng theo ngày nói: giao ${bang.totals.deliveredOrders} đơn · doanh thu thực ${vnd(bang.totals.deliveredRevenue)}`);
+  log(khop ? "✓ KHỚP — các dòng trên cộng lại đúng bằng ô trên màn hình." : "✗ KHÔNG KHỚP — đây là lỗi, không phải sai số. Báo ngay.");
+  return khop;
+}
+
+/**
  * Vỏ dòng lệnh — CHỈ đọc tham số, gọi lõi, và chọn mã thoát.
  *
  * Thoát khác 0 khi có phát hiện nhóm `BUG`, để nó dùng được trong một lượt chạy tự động mà không
@@ -316,7 +403,12 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
  * kế hoặc chuyện của nguồn dữ liệu, và bắt một lượt chạy đỏ vì chúng là dạy người đọc bỏ qua màu đỏ.
  */
 async function main() {
+  const giaiThich = process.argv.find((a) => a.startsWith("--explain="))?.split("=")[1] ?? null;
   const a = parseArgs();
+  if (giaiThich) {
+    const ok = await explainDay(giaiThich, { marketerId: a.marketer, productId: a.product }, a.basis, console.log);
+    process.exit(ok ? 0 : 1);
+  }
   const r = await calibrate(a);
   process.exit(r.bugs === 0 ? 0 : 1);
 }

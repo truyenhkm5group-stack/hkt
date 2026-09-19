@@ -48,7 +48,7 @@ on:
           - reason-coverage     # độ phủ lý do hoàn: máy tính báo cáo = MÀN HÌNH THẬT (chỉ đọc)
           - cogs-drift          # giá vốn lịch sử có tự đổi không: so giá vốn hôm nay với giá vốn TẠI THỜI ĐIỂM giao (chỉ đo)
           - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
-          - marketing-calibrate # đối chiếu Hiệu quả quảng cáo theo NGÀY với báo cáo lợi nhuận chuẩn + nguồn QC (chỉ đọc; arg: "--from=2026-09-01 --to=2026-09-14 [--marketer=..] [--product=..] [--basis=delivered]")
+          - marketing-calibrate # đối chiếu Hiệu quả quảng cáo theo NGÀY với báo cáo lợi nhuận chuẩn + nguồn QC (chỉ đọc; arg: "--from=2026-09-01 --to=2026-09-14 [--marketer=..] [--product=..]" · hoặc "--explain=2026-09-08" để liệt kê TỪNG ĐƠN tạo ra con số của một ngày)
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
           - meta-id-probe       # dò mã Meta trong tracking landing là ad / adset / campaign (CHỈ ĐỌC; arg: các mã, bỏ trống = lấy từ đơn còn treo)

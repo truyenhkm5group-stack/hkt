@@ -88,8 +88,13 @@ const IS_DUPLICATE_ORDER = sql`exists (select 1 from ${oa} where ${oa.orderId} =
  * fanpage chuyển người ngày 15/09 thì đơn ngày 05/09 vẫn thuộc người cũ (AGENTS.md — luật bất biến
  * 1 của `lib/constants/fanpage-attribution.ts`). Một câu `join` tới bảng phân công "đang mở" sẽ làm
  * mọi báo cáo tháng trước đổi số vào đúng cái ngày shop đổi người.
+ *
+ * XUẤT RA để công cụ chẩn đoán (`scripts/marketing-calibrate.ts --explain=…`) dựng được ĐÚNG tập
+ * đơn mà màn hình đang đếm. Chép lại vị ngữ này sang một tệp thứ hai là cách chắc chắn nhất để một
+ * bảng chi tiết cộng lại ra con số khác với ô nó đang giải thích — và khi ấy không ai biết tin cái
+ * nào.
  */
-function dimensionFilter(f: MarketingFilters): SQL | undefined {
+export function dimensionFilter(f: MarketingFilters): SQL | undefined {
   const conds: SQL[] = [];
   if (f.marketerId) {
     conds.push(
