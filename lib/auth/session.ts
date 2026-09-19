@@ -11,11 +11,16 @@ import { normalizeScope, type AccessScope } from "@/lib/constants/access-scope";
 import { env } from "@/lib/env";
 import { memo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
+import { SESSION_COOKIE as COOKIE_PHIEN, SESSION_IDLE_DAYS, SESSION_LOGIN_CLAIM, cookieMaxAgeSec, sessionCookieSecure } from "@/lib/constants/session";
 
 export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
 
-export const SESSION_COOKIE = "erp_session";
-const SESSION_DAYS = 7;
+/*
+  LUẬT PHIÊN Ở MỘT CHỖ: `lib/constants/session.ts`. Tệp đó không import gì nên `middleware.ts`
+  (chạy ở Edge) nạp được cùng một bản — số ngày, phép quyết định gia hạn và thuộc tính cookie chỉ
+  tồn tại một lần trong kho mã.
+*/
+export { SESSION_COOKIE } from "@/lib/constants/session";
 
 export type SessionUser = {
   id: string;
@@ -35,17 +40,30 @@ function secretKey() {
   return new TextEncoder().encode(env.authSecret);
 }
 
+const NGAY_GIAY = 86_400;
+
 /** Phần danh tính đi vào cookie. Quyền / phạm vi KHÔNG nằm trong token — chúng được nạp lại từ
  *  CSDL ở mỗi lần dựng, nên thu hẹp phạm vi của một người có hiệu lực ngay, không đợi họ đăng
  *  nhập lại. */
 export type SessionIdentity = Pick<SessionUser, "id" | "email" | "name" | "role">;
 
-export async function signSession(user: SessionIdentity) {
-  return new SignJWT({ email: user.email, name: user.name, role: user.role })
+/**
+ * Ký một token phiên.
+ *
+ * `loginAtSec` là mốc ĐĂNG NHẬP GỐC và nó ĐI THEO token qua mọi lần gia hạn — đó là thứ duy nhất
+ * giữ cho trần tuyệt đối có nghĩa. Bỏ trống ⇒ đây là một lần đăng nhập mới, mốc là bây giờ.
+ *
+ * `iat` thì ngược lại: nó luôn là LÚC NÀY. Hai mốc tách nhau vì chúng trả lời hai câu khác nhau —
+ * "phiên này bắt đầu khi nào" và "tờ giấy này được ký lại lần gần nhất khi nào".
+ */
+export async function signSession(user: SessionIdentity, opts: { loginAtSec?: number; nowSec?: number } = {}) {
+  const nowSec = opts.nowSec ?? Math.floor(Date.now() / 1000);
+  const loginAtSec = opts.loginAtSec ?? nowSec;
+  return new SignJWT({ email: user.email, name: user.name, role: user.role, [SESSION_LOGIN_CLAIM]: loginAtSec })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(user.id)
-    .setIssuedAt()
-    .setExpirationTime(`${SESSION_DAYS}d`)
+    .setIssuedAt(nowSec)
+    .setExpirationTime(nowSec + SESSION_IDLE_DAYS * NGAY_GIAY)
     .sign(secretKey());
 }
 
@@ -62,25 +80,28 @@ export async function verifySessionToken(token: string): Promise<SessionUser | n
 }
 
 export async function createSession(user: SessionIdentity) {
-  const token = await signSession(user);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const token = await signSession(user, { nowSec });
   const store = await cookies();
-  store.set(SESSION_COOKIE, token, {
+  store.set(COOKIE_PHIEN, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production" && env.appUrl.startsWith("https"),
+    secure: sessionCookieSecure(process.env.NODE_ENV, env.appUrl),
     path: "/",
-    maxAge: SESSION_DAYS * 86_400,
+    // Hạn của cookie đi ĐÚNG với hạn của token. Lệch nhau thì hoặc trình duyệt vứt một tờ giấy
+    // còn hạn, hoặc nó giữ một tờ giấy đã chết rồi gửi lên để nhận về 401.
+    maxAge: cookieMaxAgeSec(nowSec + SESSION_IDLE_DAYS * NGAY_GIAY, nowSec),
   });
 }
 
 export async function destroySession() {
   const store = await cookies();
-  store.delete(SESSION_COOKIE);
+  store.delete(COOKIE_PHIEN);
 }
 
 export async function getSession(): Promise<SessionUser | null> {
   const store = await cookies();
-  const token = store.get(SESSION_COOKIE)?.value;
+  const token = store.get(COOKIE_PHIEN)?.value;
   if (!token) return null;
   return verifySessionToken(token);
 }
