@@ -2,6 +2,9 @@ import Link from "next/link";
 import { AlertConfigForm, CaseActions, MarkAllReadButton, RunAlertsButton, StaffProvider } from "@/app/(dashboard)/alerts/alerts-actions";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
+import { MarketingDigestForm } from "@/app/(dashboard)/alerts/marketing-digest-form";
+import { loadMarketingAlertConfig } from "@/lib/marketing/digest";
+import { listMarketerOptions } from "@/lib/queries/fanpage-attribution";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { can, requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
@@ -47,13 +50,17 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   */
   const queuePage = Math.max(1, Number(one("qpage")) || 1);
   const queuePageSize = Math.min(200, Math.max(20, Number(one("qsize")) || 100));
-  const [config, queue, staff, throughput] = await Promise.all([
+  const [config, queue, staff, throughput, marketingConfig, marketers] = await Promise.all([
     loadAlertConfig(),
     // Phân trang THẬT: nạp đúng một trang, đếm bằng CSDL. Trước đây nạp 300 rồi lấy số đó làm tổng.
     getActionQueue({ limit: queuePageSize, page: queuePage, filter }),
     assignableUsers(),
     // 30 ngày gần nhất: đủ dài để có mẫu, đủ ngắn để nói về cách làm việc hiện tại.
     queueThroughput(new Date(Date.now() - 30 * 86_400_000), new Date()),
+    loadMarketingAlertConfig(),
+    // Danh sách MKTer lấy từ SỔ NHÂN SỰ dùng chung — cùng không gian khoá với `ad_spends.marketer_id`
+    // và `order_attributions.marketer_id`, nên người khai ở đây chắc chắn khớp người trong báo cáo.
+    listMarketerOptions(),
   ]);
   const visibleCases = queue.cases;
   const canConfig = can(user, "alerts:manage");
@@ -204,6 +211,16 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
         <SectionCard title="Cấu hình cảnh báo · Lark Suite / Telegram" description="Nơi nhận cảnh báo và ngưỡng thời gian coi là quá hạn."
  hint="Lark: thêm Custom Bot vào nhóm nhân viên vận đơn rồi dán Webhook URL. Telegram: tạo bot qua @BotFather. Ngưỡng thời gian chỉnh theo quy trình của shop.">
           <AlertConfigForm config={{ ...config, telegramBotToken: "", larkSecret: "" }} hasToken={Boolean(config.telegramBotToken)} hasLarkSecret={Boolean(config.larkSecret)} />
+        </SectionCard>
+      ) : null}
+
+      {canConfig ? (
+        <SectionCard
+          title="Bản tin hiệu quả marketing hằng ngày"
+          description="Ai nhận bản nào, và khi nào ERP được phép làm phiền."
+          hint="MKTer nhận ĐÚNG bản của mình, quản lý nhận bản tổng — gửi tất cả vào một nhóm chung thì mỗi người phải tự tìm dòng của mình, và con số của người này hiện trước mặt người kia. Bản riêng chỉ gửi khi có phát hiện đủ mức: một tin 'hôm qua bình thường' gửi mỗi sáng cho năm người là cách nhanh nhất để kênh này bị tắt thông báo."
+        >
+          <MarketingDigestForm config={marketingConfig} marketers={marketers} />
         </SectionCard>
       ) : null}
     </div>

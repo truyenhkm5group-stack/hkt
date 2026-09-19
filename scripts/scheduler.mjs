@@ -49,6 +49,16 @@ const JOBS = [
   */
   { job: "work-escalation", every: minutes("WORK_ESCALATION_EVERY_MINUTES", 30), offset: 11 },
   /*
+    BẢN TIN MARKETING HẰNG NGÀY — 30 phút/lần, và đó KHÔNG phải "gửi 48 tin mỗi ngày".
+
+    Sổ chống gửi lại (`settings["marketing.digest.sent"]`) khoá đúng MỘT bản tin cho mỗi phạm vi
+    mỗi NGÀY VIỆT NAM, nên 47 lượt còn lại chỉ đọc rồi thoát. Chạy dày là để bản tin đầu ngày tới
+    sớm ngay cả khi máy chủ vừa khởi động lại, chứ không phải để gửi nhiều hơn.
+
+    Bản tin nói về NGÀY HÔM QUA — ngày duy nhất vừa đã đóng vừa còn đáng hành động.
+  */
+  { job: "marketing-digest", every: minutes("MARKETING_DIGEST_EVERY_MINUTES", 30), offset: 13 },
+  /*
     CHỤP ẢNH HIỆU SUẤT — mỗi 6 giờ, và đó là con số chọn có lý do.
 
     Job chỉ chụp kỳ ĐÃ ĐÓNG và không bao giờ ghi đè, nên chạy dày hơn không tạo thêm dòng nào:

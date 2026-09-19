@@ -12,6 +12,7 @@ import {
 import { generateRecurringTasks } from "@/lib/work/service";
 import { snapshotPerformance } from "@/lib/work/performance-snapshot";
 import { runEscalationDigest } from "@/lib/work/escalation-run";
+import { runMarketingDigest } from "@/lib/marketing/digest";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { rematerializeStale } from "@/lib/queries/canonical-outcome";
 import { warmDashboard } from "@/lib/queries/warm";
@@ -40,6 +41,13 @@ import { runGithubDeploymentSync } from "@/lib/integrations/github/deployments";
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
 export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "SEPAY" | "GITHUB" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
+  "marketing-digest": {
+    label: "Bản tin hiệu quả marketing hằng ngày",
+    source: "ALL",
+    description:
+      "CHỈ ĐỌC + GỬI TIN: dựng bản tin hiệu quả marketing của NGÀY HÔM QUA (mốc cohort — ngày lên đơn), chạy máy phân tích bất thường, rồi gửi Lark cho từng MKTer và bản tổng cho quản lý. Không ghi vào bảng nghiệp vụ nào, không đổi một con số nào. Sổ chống gửi lại nằm ở settings `marketing.digest.sent` nên chạy lại nhiều lần trong ngày KHÔNG gửi trùng.",
+    run: () => runMarketingDigest(),
+  },
   "github-deployments": {
     label: "Đọc lượt deploy từ GitHub Actions",
     source: "GITHUB",

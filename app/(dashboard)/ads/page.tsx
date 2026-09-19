@@ -3,6 +3,7 @@ import { AdSpendDialog } from "@/app/(dashboard)/expenses/ad-spend-dialog";
 import { AdsTab } from "@/app/(dashboard)/expenses/ads-tab";
 import { AdsCoverageSection, RoasSection } from "@/app/(dashboard)/ads/roas-section";
 import { AdsDecisionSection } from "@/app/(dashboard)/ads/decision-section";
+import { AdsTabs } from "@/app/(dashboard)/ads/ads-tabs";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { can,  } from "@/lib/auth/session";
@@ -57,6 +58,8 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
         hint="Bảng quyết định xếp theo VIỆC CẦN LÀM: cắt và sửa khâu giao đứng trước, rồi mới tới tăng ngân sách. Mỗi dòng giải thích bằng số thật của chính nó. Lợi nhuận ở đây là LỢI NHUẬN GÓP SAU QUẢNG CÁO (doanh thu giao thành công − giá vốn − cước − tiền quảng cáo), cố ý không trừ chi phí cố định và thuế vì chúng không đổi theo ngân sách một chiến dịch."
         actions={canWrite ? <AdSpendDialog /> : null}
       />
+
+      <AdsTabs />
 
       {/* QUYẾT ĐỊNH — thứ người dùng mở trang để xem. Rẻ, nên chờ được. */}
       <AdsDecisionSection period={period} dimension={dimension} />

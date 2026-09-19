@@ -86,24 +86,43 @@ export function anthropicCapsOf(model: string): AnthropicCaps {
   return ANTHROPIC_CAPS[model] ?? { adaptiveThinking: true, effort: true, fallbacks: false };
 }
 
+/**
+ * Trần token mà một lượt KHÔNG streaming còn an toàn.
+ *
+ * SDK Anthropic tính `expectedTime = 60 phút × max_tokens / 128000` rồi TỪ CHỐI lượt không
+ * streaming khi nó vượt mặc định 10 phút. Phép kiểm đó chỉ chạy khi lời gọi KHÔNG truyền `timeout`
+ * — mà ta có truyền (xem `TIMEOUT_BY_TIER`), nên SDK bỏ qua nó và ta thừa hưởng nguyên cái vách đá
+ * nó dựng lên để tránh: lượt gọi hết giờ giữa chừng, không có lấy một dòng chữ để đọc.
+ *
+ * Nên ta tự giữ CÙNG MỘT ngưỡng, tính lại từ chính hai con số của SDK thay vì chép một số:
+ * xin nhiều hơn thế thì streaming, và lượt gọi không còn phụ thuộc vào việc model trả lời nhanh
+ * tới đâu.
+ */
+export const NGUONG_KHONG_STREAM = Math.floor((128_000 * 10) / 60);
+
 export class AnthropicProvider implements AiProvider {
   readonly name = "anthropic";
   readonly model: string;
   private client: Anthropic;
-  constructor(model: string, private effort: "low" | "medium" | "high" = "medium") {
+  constructor(
+    model: string,
+    private effort: "low" | "medium" | "high" = "medium",
+    timeoutMs: number = TIMEOUT_BY_TIER.copilot,
+    soLanThuLai: number = RETRIES_BY_TIER.copilot,
+  ) {
     this.model = model;
     // Khoá đọc từ môi trường bởi SDK (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN) — không truyền tay, không log.
-    this.client = new Anthropic({ maxRetries: 2, timeout: 60_000 });
+    this.client = new Anthropic({ maxRetries: soLanThuLai, timeout: timeoutMs });
   }
 
   async complete(req: AiRequest): Promise<AiResponse> {
     const started = Date.now();
     const caps = anthropicCapsOf(this.model);
-    const res = await this.client.beta.messages.create({
+    const body = {
       model: this.model,
       max_tokens: req.maxTokens ?? 4000,
       // Prompt hệ thống ổn định ⇒ đệm được; phần bối cảnh thay đổi nằm trong messages.
-      system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text" as const, text: req.system, cache_control: { type: "ephemeral" as const } }],
       ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
       ...(caps.effort ? { output_config: { effort: this.effort } } : {}),
       // Từ chối vì chính sách ⇒ máy chủ tự chạy lại trên model dự phòng trong cùng một lần gọi.
@@ -119,7 +138,13 @@ export class AnthropicProvider implements AiProvider {
               : ({ type: "tool_result", tool_use_id: b.toolUseId, content: b.content, is_error: b.isError ?? false } as const),
         ),
       })),
-    });
+    };
+    // Lượt dài đi bằng streaming — xem `NGUONG_KHONG_STREAM`. Phong bì trả về giống hệt nhau, nên
+    // phần đọc kết quả bên dưới không cần biết mình vừa đi đường nào.
+    const res =
+      body.max_tokens > NGUONG_KHONG_STREAM
+        ? await this.client.beta.messages.stream(body).finalMessage()
+        : await this.client.beta.messages.create(body);
     const content: AiBlock[] = [];
     for (const block of res.content) {
       if (block.type === "text") content.push({ type: "text", text: block.text });
@@ -163,6 +188,57 @@ const cached = new Map<AiTier, AiProvider>();
 let override: AiProvider | null | undefined;
 
 /** Provider cho một bậc việc — chọn theo `lib/ai/router.ts`. `null` = AI chưa cấu hình. */
+/**
+ * ═══════════ HẾT GIỜ CHỜ ĐI THEO BẬC, KHÔNG PHẢI MỘT CON SỐ CHO TẤT CẢ ═══════════
+ *
+ * ĐÃ ĐO THẬT (lượt AI CTO lập kế hoạch đầu tiên, 19/09/2026): khoá đúng, tài khoản có tiền, và
+ * lượt chạy chết với
+ *
+ *     Gọi model hỏng: Request timed out.
+ *
+ * Bậc `analysis` chạy Opus 5 với suy luận thích ứng ở mức `high` trên một bài lập kế hoạch — vài
+ * phút là BÌNH THƯỜNG, không phải hỏng. Nhưng cả ba bậc đang dùng chung một hạn 60 giây ghim
+ * cứng, con số hợp lý cho một lượt trò chuyện có người đang ngồi chờ và vô lý cho một lượt suy
+ * nghĩ sâu chạy nền.
+ *
+ * Ba bậc, ba kỳ vọng khác nhau:
+ *   · `routine`  — một lượt ping rẻ. Chậm quá 60 giây nghĩa là có gì đó hỏng thật.
+ *   · `copilot`  — có NGƯỜI đang nhìn con trỏ nhấp nháy. Chờ quá hai phút thì thà báo lỗi.
+ *   · `analysis` — chạy nền, không ai ngồi đợi. Lấy đúng mặc định 10 phút của SDK.
+ *
+ * Hạn quá ngắn KHÔNG rẻ hơn: SDK thử lại tối đa hai lần, nên mỗi lần hết giờ là tiền đã tiêu cho
+ * phần model đã nghĩ, rồi vứt đi và nghĩ lại từ đầu.
+ */
+/**
+ * ═══════════ SỐ LẦN THỬ LẠI CŨNG ĐI THEO BẬC ═══════════
+ *
+ * ĐÃ ĐO THẬT (hai lượt AI CTO liên tiếp, 19/09/2026 — 35429768726 và 35429814259): cả hai chết
+ * trong 2 và 5 GIÂY với
+ *
+ *     {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
+ *
+ * Đó là nhà cung cấp hết chỗ trong chốc lát, không phải lỗi của ta và không phải lỗi cấu hình.
+ * Nhưng mặc định 2 lần thử với giãn cách nửa giây thì tiêu hết trước khi cơn quá tải kịp qua, và
+ * cái giá là TRỌN MỘT lượt CI cộng một người phải vào bấm chạy lại.
+ *
+ * Kiên nhẫn đáng bao nhiêu thì tuỳ ai đang chờ:
+ *   · `routine`/`copilot` — có NGƯỜI ngồi trước màn hình. Hết chỗ thì nói ngay, đừng bắt họ đợi.
+ *   · `analysis`          — chạy nền, không ai đợi. Giãn cách luỹ thừa của SDK (0,5s → trần 8s)
+ *                           qua 8 lần là khoảng 40 giây chịu đựng. Quá tải lâu hơn thế là sự cố
+ *                           thật của nhà cung cấp, và lúc đó BÁO RA mới đúng, không phải giấu đi.
+ */
+export const RETRIES_BY_TIER: Record<AiTier, number> = {
+  routine: 2,
+  copilot: 2,
+  analysis: 8,
+};
+
+export const TIMEOUT_BY_TIER: Record<AiTier, number> = {
+  routine: 60_000,
+  copilot: 120_000,
+  analysis: 600_000,
+};
+
 export function getAiProvider(tier: AiTier = "copilot"): AiProvider | null {
   if (override !== undefined) return override;
   const hit = cached.get(tier);
@@ -171,7 +247,8 @@ export function getAiProvider(tier: AiTier = "copilot"): AiProvider | null {
   if (!name) return null;
   const effort = (env.ai.effort as "low" | "medium" | "high") || EFFORT_BY_TIER[tier];
   const model = modelFor(name, tier);
-  const p: AiProvider = name === "openai" ? new OpenAiProvider(model, effort) : new AnthropicProvider(model, effort);
+  const hanCho = TIMEOUT_BY_TIER[tier];
+  const p: AiProvider = name === "openai" ? new OpenAiProvider(model, effort, undefined, hanCho) : new AnthropicProvider(model, effort, hanCho, RETRIES_BY_TIER[tier]);
   cached.set(tier, p);
   return p;
 }

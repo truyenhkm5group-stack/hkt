@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { href: "/tech", label: "Tổng quan" },
   { href: "/tech/tasks", label: "Hàng đợi việc" },
+  { href: "/tech/cto", label: "AI CTO" },
   { href: "/tech/agents", label: "Sổ agent" },
   { href: "/tech/deployments", label: "Deploy" },
   { href: "/tech/incidents", label: "Sự cố" },

@@ -182,6 +182,65 @@ export const METRIC_BINDINGS: Record<string, MetricBinding> = {
     basis: "getAdsDecision — ước tính vì phụ thuộc độ phủ gán chiến dịch cho đơn (adsAttributionCoverage)",
   },
 
+  /*
+    BỐN CHỈ SỐ CỦA BÁO CÁO HIỆU QUẢ THEO NGÀY.
+
+    Chúng ở đây chứ không ở một bảng cấu hình riêng, vì `metric_targets` là nơi DUY NHẤT được giữ
+    đích đạt/không đạt (AGENTS.md mục 38 và 43). Dựng một bảng "Target CPA / Target ROAS" thứ hai
+    sẽ làm đích của một KR và đích của thẻ điểm nói hai con số khác nhau về cùng một chỉ số.
+
+    Cả bốn đều đọc CÙNG bộ máy với bảng theo ngày (`getMarketingDaily` trên mốc cohort), nên con số
+    dùng để chấm đích và con số người dùng nhìn thấy trên màn hình là một.
+
+    KHÔNG khai `productGrain` cho CPA và ROAS: tiền quảng cáo ghép về mã hàng qua `ad_spends.
+    product_id` là một phép GÁN chiến dịch, không phải phép đo trên chính tập đơn của mã — đặt đích
+    cho nó là đặt đích cho một phép gán.
+  */
+  marketing_cpa: {
+    key: "marketing_cpa",
+    label: "Chi phí quảng cáo cho một đơn (CPA)",
+    unit: "VND",
+    direction: "DOWN",
+    trust: "MEASURED",
+    department: "MARKETING",
+    basis: "getMarketingDaily (mốc ngày phát sinh đơn) — chi quảng cáo ÷ đơn đã xác nhận, đã loại đơn trùng",
+  },
+  marketing_roas_delivered: {
+    key: "marketing_roas_delivered",
+    label: "ROAS theo doanh thu thực",
+    // Sổ này không có đơn vị "lần"; ROAS là một TỶ SỐ không thứ nguyên nên đi cùng `NUMBER`.
+    // Cố ý KHÔNG thêm một đơn vị mới chỉ cho một chỉ số: `performance_snapshots` đã lưu các đơn vị
+    // hiện có, và mỗi đơn vị mới là một nhánh phải xử lý ở mọi nơi định dạng số.
+    unit: "NUMBER",
+    direction: "UP",
+    trust: "MEASURED",
+    department: "MARKETING",
+    basis: "getMarketingDaily — DOANH THU GIAO THÀNH CÔNG ÷ chi quảng cáo. KHÔNG dùng doanh số POS: đơn hoàn cũng lên POS",
+  },
+  marketing_close_rate: {
+    key: "marketing_close_rate",
+    label: "Tỷ lệ chốt (đơn ÷ tin nhắn)",
+    unit: "PERCENT",
+    direction: "UP",
+    trust: "ESTIMATED",
+    /*
+      ESTIMATED chứ không MEASURED, và lý do phải đọc được: tử số đếm theo MỐC ĐƠN còn mẫu số đếm
+      theo NGÀY FACEBOOK BÁO CÁO. Khách nhắn tối nay chốt sáng mai rơi vào hai ngày khác nhau. Con
+      số đúng để đọc XU HƯỚNG, không đúng để gọi là tỷ lệ chuyển đổi tuyệt đối.
+    */
+    department: "MARKETING",
+    basis: "getMarketingDaily — đơn đã xác nhận ÷ tin nhắn quảng cáo (ad_spends.messages/leads)",
+  },
+  marketing_margin: {
+    key: "marketing_margin",
+    label: "Biên lợi nhuận góp sau quảng cáo",
+    unit: "PERCENT",
+    direction: "UP",
+    trust: "ESTIMATED",
+    department: "MARKETING",
+    basis: "getMarketingDaily — (DT thực − giá vốn − cước/phí − chi QC) ÷ DT thực. Ước tính vì độ phủ giá vốn chưa 100%",
+  },
+
   /* ───── Vận hành công việc (tự Work OS đo) ───── */
   work_overdue: {
     key: "work_overdue",

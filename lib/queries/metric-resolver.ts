@@ -7,6 +7,7 @@ import { COUNT_DELIVERED, COUNT_RETURNED, DELIVERED_COGS, DELIVERED_REVENUE, IS_
 import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { collectWorkItems } from "@/lib/queries/work-adapters";
 import { rowsOf } from "@/lib/sql-rows";
+import { ratioOf } from "@/lib/constants/marketing-daily";
 import type { DepartmentCode } from "@/lib/constants/departments";
 import type { Period } from "@/lib/search-params";
 
@@ -47,6 +48,12 @@ async function outcomeAggregate(period: Period) {
 const DELIVERED_COGS_KNOWN = sql`exists (select 1 from order_items oi where oi.order_id = ${o.id})`;
 
 const CARRIER_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
+
+/** Tổng kỳ của báo cáo Hiệu quả theo ngày, mốc COHORT — cùng con số màn hình đang hiện. */
+async function marketingTotals(period: Period) {
+  const { getMarketingDaily } = await import("@/lib/queries/marketing-daily");
+  return getMarketingDaily(period, "created");
+}
 
 /* ═══════════════════ TỪNG CHỈ SỐ ═══════════════════ */
 
@@ -134,6 +141,34 @@ const RESOLVERS: Record<string, (ctx: Ctx) => Promise<Omit<MetricValue, "key" | 
     if (period.to) conds.push(sql`a.spend_date <= ${period.to}`);
     const rows = rowsOf<{ v: number }>(await db.execute(sql`select coalesce(sum(a.spend), 0)::bigint as v from ad_spends a where ${sql.join(conds, sql` and `)}`));
     return { value: Number(rows[0]?.v ?? 0), sample: null };
+  },
+
+  /*
+    ═══ BỐN CHỈ SỐ MARKETING — ĐỌC CÙNG BỘ MÁY VỚI MÀN HÌNH ═══
+
+    Cả bốn gọi `getMarketingDaily` trên mốc COHORT (ngày phát sinh đơn) — đúng con số người dùng
+    nhìn thấy ở tab "Hiệu quả theo ngày". Viết lại một truy vấn gần đúng ở đây sẽ làm đích được
+    chấm trên một con số khác con số hiện trên màn hình, và không ai phát hiện ra.
+
+    Một lượt đọc dùng chung cho cả bốn (đệm 60 giây của chính hàm ấy lo phần còn lại).
+  */
+  async marketing_cpa({ period }) {
+    const { totals } = await marketingTotals(period);
+    // Chưa chi đồng nào, hoặc chưa có đơn nào ⇒ CHƯA BIẾT. Không phải 0đ/đơn.
+    return { value: ratioOf("costPerOrder", totals as unknown as Record<string, unknown>), sample: totals.orders };
+  },
+  async marketing_roas_delivered({ period }) {
+    const { totals } = await marketingTotals(period);
+    return { value: ratioOf("roasDelivered", totals as unknown as Record<string, unknown>), sample: totals.deliveredOrders };
+  },
+  async marketing_close_rate({ period }) {
+    const { totals } = await marketingTotals(period);
+    // Mẫu của một tỷ lệ là MẪU SỐ của chính nó: số tin nhắn. `null` khi chưa quan sát được.
+    return { value: ratioOf("closeRate", totals as unknown as Record<string, unknown>), sample: totals.messages ?? 0 };
+  },
+  async marketing_margin({ period }) {
+    const { totals } = await marketingTotals(period);
+    return { value: ratioOf("margin", totals as unknown as Record<string, unknown>), sample: totals.deliveredOrders };
   },
 
   async profit_after_ads({ period }) {

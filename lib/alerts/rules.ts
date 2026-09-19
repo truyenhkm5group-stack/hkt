@@ -22,7 +22,9 @@ import { maskAccountNumber } from "@/lib/constants/bank";
 import { effectiveThreshold, isBillingBlocked, isPaymentIssue, listAdAccountBilling } from "@/lib/integrations/facebook/billing";
 import { riskyOrderCandidates } from "@/lib/alerts/risk";
 import { detectAdsAnomalies } from "@/lib/queries/ads-anomaly";
+import { detectMarketingDailyAlerts } from "@/lib/marketing/alerts";
 import { ADS_ANOMALY_LABEL } from "@/lib/constants/ads-anomaly";
+import { MARKETING_NOTIFICATION_KIND } from "@/lib/constants/marketing-alerts";
 import { previousOrderHints } from "@/lib/queries/order-hints";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
@@ -878,6 +880,26 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
       }
     } catch {
       // chưa có dữ liệu quảng cáo
+    }
+  }
+
+  /*
+    ───────── HIỆU QUẢ MARKETING THEO NGÀY ─────────
+
+    Khác `ADS_ANOMALY` (nhìn CẢ KỲ theo chiến dịch), khối này nhìn TỪNG NGÀY theo mốc cohort và
+    theo MKTer. Hai câu hỏi khác nhau nên hai loại việc khác nhau: "chiến dịch nào đang lỗ" thì
+    người xử lý là người chạy quảng cáo; "hôm qua cả shop lỗ vì tỷ lệ chốt tụt" thì người xử lý là
+    đội chốt đơn. Gộp một loại thì một trong hai đội không bao giờ thấy việc của mình.
+
+    Cảnh báo NÓNG (tiêu tiền mà không ra đơn) cố ý xét NGÀY HÔM NAY chứ không chờ hết ngày —
+    xem `lib/marketing/alerts.ts`.
+  */
+  if (cfg.enabled.marketingDaily) {
+    activeKinds.push(MARKETING_NOTIFICATION_KIND);
+    try {
+      for (const c of await detectMarketingDailyAlerts()) candidates.push(c);
+    } catch {
+      // chưa có dữ liệu quảng cáo / đơn — im lặng, không dựng cảnh báo trên chỗ trống
     }
   }
 
