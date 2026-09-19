@@ -39,6 +39,7 @@ import { clearMemo } from "@/lib/cache";
 const OFF_SETTINGS: AiSettings = {
   enabled: true,
   modelCallsEnabled: false,
+  circuitBreakerEnabled: false,
   ingestEnabled: true,
   maxRunsPerHour: 600,
   dailyCostCapVnd: 0,

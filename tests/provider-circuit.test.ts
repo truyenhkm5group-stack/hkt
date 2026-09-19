@@ -7,6 +7,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { DEFAULT_AI_FLAGS } from "@/lib/constants/ai";
 import {
   ERROR_POLICY,
   PROVIDER_ERROR_KINDS,
@@ -16,7 +17,7 @@ import {
   normalizeProviderError,
   probeAfterFor,
 } from "@/lib/constants/provider-health";
-import { allMetrics, circuitEnabled, metricsFor, recordFailure, recordSuccess, resetCircuits, retriesFor, shouldSkip } from "@/lib/ai-workforce/circuit";
+import { allMetrics, metricsFor, recordFailure, recordSuccess, resetCircuits, retriesFor, shouldSkip } from "@/lib/ai-workforce/circuit";
 
 test("429 HẾT TIỀN không được gộp với 429 CHẶN TỐC ĐỘ", () => {
   /*
@@ -76,7 +77,7 @@ test("chính sách đi theo NHÓM LỖI, và thử lại vô ích thì không th
 test("cầu dao nhớ giữa các lượt, và tính trạng thái LÚC ĐỌC", () => {
   resetCircuits();
   const t0 = new Date("2026-09-17T08:00:00Z");
-  assert.equal(shouldSkip("nha-a", t0), false, "chưa hỏng lần nào thì không bỏ qua");
+  assert.equal(shouldSkip("nha-a", true, t0), false, "chưa hỏng lần nào thì không bỏ qua");
 
   recordFailure("nha-a", "QUOTA_EXHAUSTED", t0);
   const m = metricsFor("nha-a", t0);
@@ -101,17 +102,19 @@ test("cầu dao nhớ giữa các lượt, và tính trạng thái LÚC ĐỌC",
   assert.equal(m2.openedBy, null);
   assert.deepEqual(m2.recoveredAt, t1);
   assert.ok(m2.degradedMs > 0, "phải đo được đã hỏng bao lâu");
-  assert.equal(shouldSkip("nha-a", t1), false);
+  assert.equal(shouldSkip("nha-a", true, t1), false);
 });
 
 test("TẮT mặc định — nhưng vẫn ĐẾM, để đọc số trước khi bật", () => {
   resetCircuits();
-  assert.equal(circuitEnabled(), false, "cầu dao phải TẮT mặc định: một cơ chế bắt đầu bỏ qua lượt gọi là thứ người bật, không phải thứ tự có hiệu lực vì một lượt phát hành");
+  // TẮT mặc định: một cơ chế bắt đầu bỏ qua lượt gọi là thứ NGƯỜI bật, không phải thứ tự có hiệu
+  // lực vì một lượt phát hành. Mặc định nay nằm ở `DEFAULT_AI_FLAGS`, đọc được và kiểm được.
+  assert.equal(DEFAULT_AI_FLAGS.circuitBreakerEnabled, false);
 
   const t = new Date("2026-09-17T08:00:00Z");
   recordFailure("nha-b", "QUOTA_EXHAUSTED", t);
   // Khi tắt: KHÔNG bỏ qua lượt nào (hành vi không đổi)…
-  assert.equal(shouldSkip("nha-b", t), false);
+  assert.equal(shouldSkip("nha-b", false, t), false);
   // …nhưng vẫn đếm được là "nếu bật thì đã bỏ qua lượt này".
   assert.equal(metricsFor("nha-b", t).skipped, 1, "phải đo được cái giá TRƯỚC khi bật, không phải bật lên mới biết");
   assert.ok(allMetrics(t).some((x) => x.provider === "nha-b"));

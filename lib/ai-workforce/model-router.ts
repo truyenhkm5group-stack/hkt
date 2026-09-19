@@ -18,7 +18,7 @@ import { getLiveProvider, defaultProviderName } from "@/lib/ai-workforce/provide
 import { ModelTimeoutError, ModelUnavailableError, type ModelMessage } from "@/lib/ai-workforce/providers/types";
 import { CONFIDENCE_FLOOR, type EscalationReason, type RouteTier } from "@/lib/constants/ai";
 import { normalizeProviderError } from "@/lib/constants/provider-health";
-import { circuitEnabled, recordFailure, recordSuccess, shouldSkip } from "@/lib/ai-workforce/circuit";
+import { recordFailure, recordSuccess, shouldSkip } from "@/lib/ai-workforce/circuit";
 
 /** Cấu hình định tuyến của một bản nhân sự (lưu ở `ai_agent_versions.routing`). */
 export type RoutingConfig = {
@@ -181,7 +181,8 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
     `shouldSkip()` trả `false` khi cầu dao đang TẮT nhưng vẫn ĐẾM, nên số đo tích luỹ trước khi ai
     bật nó. Không có nhánh nào ở đây biết tên một nhà cung cấp nào.
   */
-  if (shouldSkip(providerName)) {
+  const cauDaoBat = settings.circuitBreakerEnabled;
+  if (shouldSkip(providerName, cauDaoBat)) {
     return { tier: "HUMAN", value: null, attempts, escalation: "MODEL_NOT_CONFIGURED" };
   }
 
@@ -287,7 +288,7 @@ export async function runModelStep<T>(input: ModelStepInput<T>): Promise<RouteOu
           dòng một, để việc bật/tắt là thứ duy nhất đổi hành vi.
       */
       if (error instanceof ModelUnavailableError) break;
-      if (circuitEnabled() && shouldSkip(providerName)) break;
+      if (cauDaoBat && shouldSkip(providerName, cauDaoBat)) break;
     }
   }
   return { tier: "HUMAN", value: null, attempts, escalation: lastReason };

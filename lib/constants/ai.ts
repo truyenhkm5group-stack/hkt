@@ -178,6 +178,15 @@ export type AiFeatureFlags = {
   modelCallsEnabled: boolean;
   /** Nạp hội thoại Pancake vào miền bán hàng. */
   ingestEnabled: boolean;
+  /**
+   * CẦU DAO NHÀ CUNG CẤP. Tắt = giữ nguyên hành vi cũ từng dòng một.
+   *
+   * Để ở đây (cờ tính năng, chỉnh được từ `settings`) chứ không ở `hardLimits`: nó KHÔNG phải một
+   * chặn cứng an toàn. Bật nó lên chỉ làm hệ thống THÔI gọi một nhà cung cấp vừa hỏng — hướng
+   * hẹp hơn, không mở thêm quyền nào. Chặn cứng thì ngược lại, phải env-only để không ai nới được
+   * từ màn hình.
+   */
+  circuitBreakerEnabled: boolean;
   /** Số lượt chạy tối đa mỗi giờ cho MỌI nhân sự AI (chặn vòng lặp tốn tiền). */
   maxRunsPerHour: number;
   /** Trần chi phí ước tính mỗi ngày (VND). 0 = chưa khai, KHÔNG phải "miễn phí". */
@@ -189,6 +198,7 @@ export type AiFeatureFlags = {
 export const DEFAULT_AI_FLAGS: AiFeatureFlags = {
   enabled: true,
   modelCallsEnabled: false,
+  circuitBreakerEnabled: false,
   ingestEnabled: true,
   maxRunsPerHour: 600,
   dailyCostCapVnd: 0,

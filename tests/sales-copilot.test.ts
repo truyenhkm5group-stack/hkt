@@ -42,6 +42,7 @@ import { setSettingJson } from "@/lib/settings";
 const NEN: AiSettings = {
   enabled: true,
   modelCallsEnabled: false,
+  circuitBreakerEnabled: false,
   ingestEnabled: true,
   maxRunsPerHour: 600,
   dailyCostCapVnd: 0,

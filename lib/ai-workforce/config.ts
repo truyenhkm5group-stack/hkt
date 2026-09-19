@@ -244,6 +244,10 @@ export async function getAiSettings(): Promise<AiSettings> {
     enabled: typeof stored.enabled === "boolean" ? stored.enabled : DEFAULT_AI_FLAGS.enabled,
     modelCallsEnabled: typeof stored.modelCallsEnabled === "boolean" ? stored.modelCallsEnabled : aiEnv.modelCallsEnabled,
     ingestEnabled: typeof stored.ingestEnabled === "boolean" ? stored.ingestEnabled : DEFAULT_AI_FLAGS.ingestEnabled,
+    // `settings` đè biến môi trường, y như `modelCallsEnabled`: bật/tắt cầu dao là một quyết định
+    // VẬN HÀNH, và bắt người vận hành phải triển khai lại container để thử tắt nó là cái giá sai.
+    circuitBreakerEnabled:
+      typeof stored.circuitBreakerEnabled === "boolean" ? stored.circuitBreakerEnabled : aiEnv.circuitBreakerEnabled,
     maxRunsPerHour: Number.isFinite(Number(stored.maxRunsPerHour)) && Number(stored.maxRunsPerHour) > 0 ? Number(stored.maxRunsPerHour) : DEFAULT_AI_FLAGS.maxRunsPerHour,
     dailyCostCapVnd: Number.isFinite(Number(stored.dailyCostCapVnd)) && Number(stored.dailyCostCapVnd) >= 0 ? Number(stored.dailyCostCapVnd) : DEFAULT_AI_FLAGS.dailyCostCapVnd,
     testConversationIds: Array.isArray(stored.testConversationIds)

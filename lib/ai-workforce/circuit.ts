@@ -29,7 +29,6 @@
  * khởi động lại container thì nên dò lại từ đầu, chứ không nên kế thừa một cánh cửa đóng từ hôm
  * qua. Con số để ĐỌC LẠI về sau thì đã có sẵn ở `ai_model_calls`, nơi mọi lượt gọi đều được ghi.
  */
-import { aiEnv } from "@/lib/ai-workforce/config";
 import {
   ERROR_POLICY,
   circuitOpen,
@@ -74,25 +73,23 @@ function lay(provider: string): Entry {
   return m;
 }
 
-/** Cầu dao có đang được bật không. TẮT mặc định — xem chú thích đầu tệp. */
-export function circuitEnabled(): boolean {
-  return aiEnv.circuitBreakerEnabled;
-}
-
 /**
  * Lượt tới có nên BỎ QUA nhà cung cấp này không.
  *
- * Khi cầu dao TẮT, hàm này luôn trả `false` — nhưng phần ghi nhận bên dưới vẫn chạy, nên số đo
- * vẫn tích luỹ. Nhờ vậy có thể đọc "nếu bật thì nó đã bỏ qua bao nhiêu lượt" TRƯỚC khi bật, thay
- * vì phải bật lên mới biết.
+ * Khi cầu dao TẮT, hàm này luôn trả `false` — nhưng phần đếm vẫn chạy, nên số đo vẫn tích luỹ.
+ * Nhờ vậy đọc được "nếu bật thì nó đã bỏ qua bao nhiêu lượt" TRƯỚC khi bật.
+ *
+ * Cờ bật/tắt TRUYỀN VÀO chứ không đọc từ môi trường ở đây: tệp này là phần TRÍ NHỚ, còn "có được
+ * phép cắt không" là một quyết định cấu hình. Trộn hai thứ làm hàm không kiểm được nếu không đặt
+ * biến môi trường, và làm nó lặng lẽ phụ thuộc vào một thứ ở rất xa.
  */
-export function shouldSkip(provider: string, now = new Date()): boolean {
+export function shouldSkip(provider: string, enabled: boolean, now = new Date()): boolean {
   const e = so.get(provider);
   if (!e) return false;
   const dangMo = circuitOpen(e, now);
   if (!dangMo) return false;
   e.skipped += 1;
-  return circuitEnabled();
+  return enabled;
 }
 
 /** Đã tới lúc thử dò lại chưa (cầu dao từng mở, và đã hết thời gian chờ). */

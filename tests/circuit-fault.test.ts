@@ -25,6 +25,7 @@ const routing = parseRouting({ provider: "stub", tiers: ["ECONOMY", "STRONG"] })
 const SETTINGS = {
   enabled: true,
   modelCallsEnabled: true,
+  circuitBreakerEnabled: false,
   ingestEnabled: false,
   maxRunsPerHour: 1000,
   autoReplyEnabled: false,
@@ -35,28 +36,28 @@ const SETTINGS = {
   hardLimits: { allowAutoSend: false, allowHumanApprovedSend: false, allowOrderCreate: false, maxAllowedMode: "SHADOW" as const },
 } as unknown as AiSettings;
 
-async function goiMot() {
-  return runModelStep({ step: "fault", system: "s", messages: [{ role: "user", content: "x" }], schema, routing, settings: SETTINGS });
+/** Bật/tắt cầu dao qua CẤU HÌNH, đúng đường mà người vận hành sẽ dùng — không qua biến môi trường. */
+function settingsVoi(bat: boolean): AiSettings {
+  return { ...SETTINGS, circuitBreakerEnabled: bat } as AiSettings;
+}
+
+async function goiMot(bat: boolean) {
+  return runModelStep({ step: "fault", system: "s", messages: [{ role: "user", content: "x" }], schema, routing, settings: settingsVoi(bat) });
 }
 
 /** Dựng N lượt hỏng liên tiếp cùng một nhóm lỗi, rồi đếm nhà cung cấp thật sự bị gọi bao nhiêu lần. */
 async function chayNhieuLuot(soLuot: number, loi: string, bat: boolean) {
-  const cu = process.env.AI_CIRCUIT_BREAKER_ENABLED;
-  process.env.AI_CIRCUIT_BREAKER_ENABLED = bat ? "1" : "0";
   resetStub();
   resetCircuits();
-  try {
+  {
     const ketQua = [];
     for (let i = 0; i < soLuot; i += 1) {
       // Xếp sẵn dư cho cả hai nấc của mỗi lượt.
       queueStubResponse({ behavior: "error", errorMessage: loi });
       queueStubResponse({ behavior: "error", errorMessage: loi });
-      ketQua.push(await goiMot());
+      ketQua.push(await goiMot(bat));
     }
     return { ketQua, soLanGoi: stubCalls().length, doAc: metricsFor("stub") };
-  } finally {
-    if (cu === undefined) delete process.env.AI_CIRCUIT_BREAKER_ENABLED;
-    else process.env.AI_CIRCUIT_BREAKER_ENABLED = cu;
   }
 }
 
@@ -99,15 +100,13 @@ test("CHẶN TỐC ĐỘ — vẫn cắt, nhưng mốc dò lại NGẮN hơn h�
 });
 
 test("QUÁ THỜI GIAN — thử lại có hạn, KHÔNG mở cầu dao", async () => {
-  const cu = process.env.AI_CIRCUIT_BREAKER_ENABLED;
-  process.env.AI_CIRCUIT_BREAKER_ENABLED = "1";
   resetStub();
   resetCircuits();
-  try {
+  {
     for (let i = 0; i < 4; i += 1) {
       queueStubResponse({ behavior: "timeout" });
       queueStubResponse({ behavior: "timeout" });
-      const r = await goiMot();
+      const r = await goiMot(true);
       assert.equal(r.tier, "HUMAN");
       assert.equal(r.escalation, "MODEL_TIMEOUT");
     }
@@ -117,30 +116,22 @@ test("QUÁ THỜI GIAN — thử lại có hạn, KHÔNG mở cầu dao", async 
     assert.equal(m.health, "DEGRADED");
     assert.equal(m.opens, 0, "hết giờ KHÔNG được mở cầu dao");
     assert.equal(stubCalls().length, 8, "mọi lượt vẫn được thử — hết giờ không cắt đường");
-  } finally {
-    if (cu === undefined) delete process.env.AI_CIRCUIT_BREAKER_ENABLED;
-    else process.env.AI_CIRCUIT_BREAKER_ENABLED = cu;
   }
 });
 
 test("KHOẺ — bật cầu dao KHÔNG đổi một hành vi nào", async () => {
   const chay = async (bat: boolean) => {
-    const cu = process.env.AI_CIRCUIT_BREAKER_ENABLED;
-    process.env.AI_CIRCUIT_BREAKER_ENABLED = bat ? "1" : "0";
     resetStub();
     resetCircuits();
-    try {
+    {
       const out = [];
       for (let i = 0; i < 5; i += 1) {
         queueStubResponse({ text: JSON.stringify({ text: "ổn" }), inputTokens: 10, outputTokens: 5 });
-        const r = await goiMot();
+        const r = await goiMot(bat);
         out.push({ tier: r.tier, value: r.value, lanGoi: r.attempts.length, escalation: r.escalation });
       }
       return { out, tong: stubCalls().length, health: metricsFor("stub").health };
-    } finally {
-      if (cu === undefined) delete process.env.AI_CIRCUIT_BREAKER_ENABLED;
-      else process.env.AI_CIRCUIT_BREAKER_ENABLED = cu;
-    }
+  }
   };
   const tat = await chay(false);
   const bat = await chay(true);
