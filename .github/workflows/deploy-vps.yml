@@ -16,10 +16,14 @@ on:
 
 # ═══════════ KHOÁ ĐẶT Ở JOB `release`, KHÔNG Ở MỨC WORKFLOW ═══════════
 #
-# TRƯỚC: cả tệp này khoá ở MỨC WORKFLOW, dùng chung một nhóm với `ops-vps.yml`. Hậu quả đo được:
-# một lượt `db-query` mười giây phải chờ hết một lượt deploy ~20 phút — mà trong hai mươi phút ấy,
-# **cổng chất lượng và lệnh dựng ảnh Docker chiếm phần lớn thời gian và KHÔNG chạm tới VPS một
-# byte nào**. Mọi phiên làm việc khác đứng chờ một việc chạy trên máy của GitHub.
+# TRƯỚC: cả tệp này khoá ở MỨC WORKFLOW, dùng chung một nhóm với `ops-vps.yml`. Khoá được giữ từ
+# GIÂY ĐẦU TIÊN, chứ không phải từ lúc có gì đó chạm máy chủ. Đo thật trên deploy #352
+# (`31dceb0`, 19/09/2026), tổng 17m08s: cổng 5m05s + dựng ảnh 2m56s + chờ máy và `npm ci` thừa
+# 47s = **8m48s (51%) KHÔNG chạm tới VPS một byte nào**; chỉ 8m13s của bước SSH là thật sự đụng
+# máy chủ. Trong 8m48s đó, một lượt `db-query` mười giây vẫn phải đứng chờ.
+#
+# Cái giá đã trả, cũng đo được: deploy #346 tạo lúc 08:00:17 nhưng job ĐẦU TIÊN của nó mới khởi
+# động lúc 08:13:30 — đúng 2 giây sau khi #345 kết thúc. **13m13s chờ suông.**
 #
 # SAU: khoá đi theo THỨ THẬT SỰ ĐỤNG MÁY CHỦ.
 #

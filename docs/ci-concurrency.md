@@ -5,20 +5,39 @@
 ## 0 · Vấn đề đo được
 
 Tới trước bản này, `deploy-vps.yml` và `ops-vps.yml` cùng khai **một** nhóm khoá ở **mức
-workflow**. Nhóm ấy gộp ba loại việc hoàn toàn khác nhau vào một hàng đợi:
+workflow**. Khoá ấy được giữ từ **giây đầu tiên** của lượt chạy, chứ không phải từ lúc có gì đó
+chạm tới máy chủ.
 
-| Việc | Chạy ở đâu | Chạm VPS? | Thời gian |
-| --- | --- | --- | --- |
-| cổng chất lượng (typecheck · lint · test · build) | máy của GitHub | **không** | ~10–15 phút |
-| dựng ảnh Docker + đẩy GHCR | máy của GitHub | **không** | ~6–10 phút |
-| SSH vào VPS, `docker pull`, khởi động lại, migration | VPS | **có** | ~2–5 phút |
-| `db-query` chỉ đọc | VPS | có (đọc) | ~10 giây |
-| nhập bảng kê COD (GHI) | VPS | **có (ghi)** | vài phút |
+**Đo thật, deploy #352 (`31dceb0`, 19/09/2026)** — lấy từ mốc của từng bước trong GitHub Actions,
+không phải ước lượng:
 
-Thứ **thật sự** không được chạy đè lên nhau chỉ là hai hàng cuối cùng cộng với bước SSH của
-deploy. Nhưng khoá ở mức workflow giữ chỗ từ **giây đầu tiên**, nên khoảng 80% thời gian một lượt
-deploy giữ khoá là khoảng thời gian nó **không chạm tới máy chủ**. Với nhiều phiên làm việc song
-song (`AGENTS.md` mục 9), mọi phiên đứng chờ nhau để hỏi một câu chỉ đọc.
+| Giai đoạn | Thời gian | Chạm VPS? |
+| --- | ---: | --- |
+| chờ cấp máy chạy | 0m25s | không |
+| `gates / gates` (toàn vẹn · tsc 39s · eslint 21s · `npm test` 1m30s · `next build` 2m03s) | **5m05s** | không |
+| checkout + setup-node + **`npm ci` mà job cũ không dùng tới** | 0m21s | không |
+| đăng nhập GHCR | 0m01s | không |
+| dựng ảnh Docker + đẩy GHCR | **2m56s** | không |
+| **SSH vào VPS + `bootstrap.sh` (pull · migration · khởi động lại)** | **8m13s** | **có** |
+| kiểm HTTPS từ bên ngoài | 0m00s | đọc |
+| **Tổng** | **17m08s** | |
+
+**8m48s trong 17m08s — 51% — là thời gian khoá bị giữ mà không có gì chạm tới máy chủ.** (Một
+bản nháp của tài liệu này ghi "khoảng 80%"; con số ấy là ước lượng và nó SAI. Đo ra thì bước SSH
+là giai đoạn **dài nhất** của lượt deploy, không phải ngắn nhất.)
+
+### Cái giá đã trả, cũng đo được
+
+Cùng ngày, hai lượt deploy xếp hàng sau một lượt khác:
+
+- **#346** tạo lúc `08:00:17`, job **đầu tiên** của nó khởi động lúc `08:13:30` — đúng **2 giây**
+  sau khi #345 kết thúc (`08:13:28`). **13m13s chờ suông, không làm một việc gì.** Tổng lượt chạy
+  30m18s cho ~17 phút công việc.
+- **#348** tổng 25m45s cho cùng khối lượng công việc ấy, cùng một nguyên nhân.
+
+Và đó mới chỉ là deploy chờ deploy. Mọi thao tác **chỉ đọc** — `status`, `logs`, `db-query` mười
+giây — cũng đứng trong đúng hàng đợi đó. Với nhiều phiên làm việc song song (`AGENTS.md` mục 9),
+mọi phiên chờ nhau để hỏi một câu không đổi một byte nào.
 
 ## 1 · Bảng TRƯỚC / SAU
 
@@ -37,13 +56,15 @@ song (`AGENTS.md` mục 9), mọi phiên đứng chờ nhau để hỏi một c�
 | hai thao tác GHI bất kỳ | xếp hàng | **xếp hàng** *(giữ nguyên)* |
 | một thao tác `--apply` ⟷ deploy | xếp hàng | **xếp hàng** *(giữ nguyên)* |
 
-**Thời gian chờ giảm ở đâu:** ở đúng phần không chạm máy chủ. Một lượt deploy ~20 phút trước đây
-chặn mọi thao tác khác suốt 20 phút; nay nó chỉ chặn các thao tác **GHI**, và chỉ trong ~2–5 phút
-của job `release`. Một phiên muốn chạy `db-query` trong lúc phiên khác deploy: trước chờ tới 20
-phút, nay chờ 0.
+**Thời gian chờ giảm ở đâu** — tính trên đúng các con số đo được ở mục 0:
 
-**Bản thân lượt deploy cũng nhanh hơn**: `gates` và `build_image` chạy song song thay vì nối đuôi,
-và job `release` không còn `npm ci` thừa (job cũ cài phụ thuộc rồi không dùng tới).
+- **Thao tác chỉ đọc**: trước phải chờ hết 17m08s của một lượt deploy; nay **chờ 0**. Đây là phần
+  lớn nhất, và là lý do của cả bản sửa.
+- **Thao tác GHI ⟷ deploy**: trước chờ 17m08s; nay chờ **8m13s** (chỉ job `release`). Vẫn xếp
+  hàng — **đó là điều phải giữ** — nhưng chỉ trong phần thật sự chạm máy chủ.
+- **Chính lượt deploy**: `gates` (5m05s) và `build_image` (~3m01s) chạy song song thay vì nối
+  đuôi, và `release` không còn `npm ci` thừa. Đường tới production còn ≈ **13m45s** thay vì
+  17m08s — **nhanh hơn ~3m20s, khoảng 20%** — mà không bỏ một cổng nào.
 
 ## 2 · Bốn nhóm khoá, và luật của từng nhóm
 

@@ -89,9 +89,9 @@ on:
 # ═══════════ KHOÁ ĐI THEO TÁC ĐỘNG, KHÔNG THEO TÊN TỆP ═══════════
 #
 # TRƯỚC: cả tệp này dùng MỘT nhóm khoá ở mức workflow, dùng chung với `deploy-vps.yml`. Một câu
-# `db-query` mười giây và một lượt deploy hai mươi phút xếp cùng một hàng. Với nhiều phiên làm
-# việc song song (AGENTS.md mục 9) đó là nút thắt lớn nhất của kho: mọi phiên đứng chờ nhau để hỏi
-# một câu CHỈ ĐỌC.
+# `db-query` mười giây và một lượt deploy 17m08s (đo trên #352, 19/09/2026 — trong đó chỉ 8m13s
+# thật sự chạm máy chủ) xếp cùng một hàng. Với nhiều phiên làm việc song song (AGENTS.md mục 9)
+# đó là nút thắt lớn nhất của kho: mọi phiên đứng chờ nhau để hỏi một câu CHỈ ĐỌC.
 #
 # SAU: nhóm được TÍNH RA từ thao tác và tham số, theo đúng thứ nó có thể làm hỏng.
 #
