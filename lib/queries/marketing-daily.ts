@@ -633,13 +633,24 @@ export async function getMarketingBreakdown(
 ): Promise<{ dimension: MarketingDimension; spendGrain: boolean; rows: MarketingBreakdownRow[] }> {
   const db = await getDb();
   const keys = await dimensionKeys(db, period, dimension, filters, limit);
-  const rows: MarketingBreakdownRow[] = [];
-  for (const k of keys) {
-    const scoped: MarketingFilters = { ...filters, ...filterForDimension(dimension, k.key) };
-    const { rows: days } = await buildDays(db, period, basis, scoped);
-    const base = sumBases(days);
-    rows.push({ ...base, key: k.key, label: k.label, maturity: maturityState(base.finishedOrders, base.pendingOrders), spendKnown: days.some((d) => d.spendKnown) });
-  }
+  /*
+    CÁC NHÓM ĐỌC SONG SONG.
+
+    Đo trên production 19/09/2026 (ops smoke): bản đầu chạy tuần tự — một lượt `await` cho mỗi
+    nhóm — và `/ads/daily` mất **4,7 giây**. Mỗi nhóm là 4 câu truy vấn độc lập với mọi nhóm khác;
+    xếp hàng chúng chỉ cộng dồn thời gian chờ mạng chứ không giảm tải cho CSDL.
+
+    Vẫn giữ nguyên thiết kế "mỗi nhóm đọc lại bằng ĐÚNG đường của bảng chính" — đó là thứ bảo đảm
+    con số bóc tách không bao giờ khác con số của dòng nó bóc. Chỉ đổi cách CHỜ, không đổi cách TÍNH.
+  */
+  const rows: MarketingBreakdownRow[] = await Promise.all(
+    keys.map(async (k) => {
+      const scoped: MarketingFilters = { ...filters, ...filterForDimension(dimension, k.key) };
+      const { rows: days } = await buildDays(db, period, basis, scoped);
+      const base = sumBases(days);
+      return { ...base, key: k.key, label: k.label, maturity: maturityState(base.finishedOrders, base.pendingOrders), spendKnown: days.some((d) => d.spendKnown) };
+    }),
+  );
   rows.sort((a, b) => {
     const pa = a.contributionProfit;
     const pb = b.contributionProfit;

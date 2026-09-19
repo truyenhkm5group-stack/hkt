@@ -120,7 +120,15 @@ async function MainBlock({ period, basis, view, filters }: { raw: SearchParams; 
 }
 
 async function FindingsBlock({ period, basis, filters }: { period: ReturnType<typeof resolvePeriod>; basis: MarketingBasis; filters: MarketingFilters }) {
-  const data = await getMarketingDaily(period, basis, filters);
+  /*
+    CÙNG THAM SỐ VỚI `MainBlock` — CỐ Ý.
+
+    Bản đầu gọi `getMarketingDaily(period, basis, filters)` KHÔNG kèm kỳ trước, nên nó rơi vào một
+    khoá đệm khác và cả bộ máy chạy lại lần thứ hai cho cùng một trang. Kỳ trước nằm trong khoá đệm
+    (đúng luật AGENTS.md mục 2: tham số ảnh hưởng kết quả phải vào khoá), nên chỉ cần truyền đúng
+    cùng bộ tham số là hai khối dùng chung một lượt đọc.
+  */
+  const data = await getMarketingDaily(period, basis, filters, previousPeriod(period));
   return <MarketingFindings data={data} />;
 }
 
