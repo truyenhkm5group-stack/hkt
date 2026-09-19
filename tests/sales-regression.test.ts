@@ -163,9 +163,34 @@ export async function testSalesRegression(db: Db) {
   });
   const nhapDu = buildOrderDraft({
     state: du, missing: missingOrderRequirements(du), confirmed: true, offer,
-    productCode: "Q004", sku: "Q004-XL-DO", sourcePageId: "page-1", sourceConversationId: "ht-1", humanTakeoverAt: null,
+    productCode: "Q004", sku: "Q004-XL-DO", sourcePageId: "page-1", sourceConversationId: "ht-1", channelCustomerName: "Thu Nguyen", humanTakeoverAt: null,
   });
   assert.equal(nhapDu.ready, true, "đủ năm điều kiện + khách đã xác nhận ⇒ SẴN SÀNG");
+  assert.equal(nhapDu.customerNameSource, "CHAT", "tên khách TỰ XƯNG trong hội thoại là nguồn mạnh nhất");
+
+  /*
+    TÊN KÊNH ĐỨNG Ở BẬC HAI — không bị vứt đi, nhưng phải nói rõ nó từ đâu.
+
+    Bản đầu chỉ đọc `state.customerName`, nên màn hình in "chưa có tên khách" trong khi ERP đang
+    giữ tên Pancake báo về — người đọc sẽ đi hỏi lại một thứ đã biết. Nhưng in nó ra mà không nói
+    nguồn cũng sai theo hướng ngược lại: tên Facebook có thể là biệt danh, hoặc của một người khác
+    trong nhà, và bưu tá gọi nhầm tên là một lần giao hỏng.
+  */
+  const khongTenChat = state({ ...du, customerName: "" });
+  const nhapTenKenh = buildOrderDraft({
+    state: khongTenChat, missing: missingOrderRequirements(khongTenChat), confirmed: true, offer,
+    productCode: "Q004", sku: "", sourcePageId: "", sourceConversationId: "", channelCustomerName: "Thu Nguyen", humanTakeoverAt: null,
+  });
+  assert.equal(nhapTenKenh.customerName, "Thu Nguyen", "không có tên trong chat thì dùng tên kênh, KHÔNG để trống");
+  assert.equal(nhapTenKenh.customerNameSource, "CHANNEL", "và phải nói rõ tên ấy từ kênh ra");
+  assert.ok(!nhapTenKenh.warnings.includes("NO_CUSTOMER_NAME"), "có tên kênh thì không còn là 'chưa có tên khách'");
+
+  const khongTenGi = buildOrderDraft({
+    state: khongTenChat, missing: missingOrderRequirements(khongTenChat), confirmed: true, offer,
+    productCode: "Q004", sku: "", sourcePageId: "", sourceConversationId: "", channelCustomerName: "", humanTakeoverAt: null,
+  });
+  assert.equal(khongTenGi.customerNameSource, "NONE");
+  assert.ok(khongTenGi.warnings.includes("NO_CUSTOMER_NAME"), "không nguồn nào có tên ⇒ vẫn phải cảnh báo");
   assert.equal(nhapDu.missing.length, 0);
   assert.equal(nhapDu.total, 524_000, "tổng là con số MÁY CHỦ tính, không tính lại ở bản nháp");
   assert.equal(nhapDu.codAmount, 524_000, "thu hộ = đúng tổng máy chủ đã tính");
@@ -174,7 +199,7 @@ export async function testSalesRegression(db: Db) {
   // ĐỦ DỮ LIỆU KHÔNG PHẢI LÀ ĐÃ CHỐT. Hai vế, và vế thứ hai không suy ra từ vế thứ nhất.
   const chuaChot = buildOrderDraft({
     state: du, missing: missingOrderRequirements(du), confirmed: false, offer,
-    productCode: "Q004", sku: "Q004-XL-DO", sourcePageId: "page-1", sourceConversationId: "ht-1", humanTakeoverAt: null,
+    productCode: "Q004", sku: "Q004-XL-DO", sourcePageId: "page-1", sourceConversationId: "ht-1", channelCustomerName: "", humanTakeoverAt: null,
   });
   assert.equal(chuaChot.ready, false, "chưa xác nhận ⇒ KHÔNG được đánh dấu sẵn sàng");
   assert.ok(chuaChot.warnings.includes("NOT_CONFIRMED_BY_CUSTOMER"));
@@ -183,7 +208,7 @@ export async function testSalesRegression(db: Db) {
   const thieuDiaChi = state({ ...du, address: "", province: "" });
   const nhapThieu = buildOrderDraft({
     state: thieuDiaChi, missing: missingOrderRequirements(thieuDiaChi), confirmed: true, offer,
-    productCode: "Q004", sku: "", sourcePageId: "page-1", sourceConversationId: "ht-1", humanTakeoverAt: null,
+    productCode: "Q004", sku: "", sourcePageId: "page-1", sourceConversationId: "ht-1", channelCustomerName: "", humanTakeoverAt: null,
   });
   assert.equal(nhapThieu.ready, false, "thiếu điều kiện bắt buộc ⇒ KHÔNG BAO GIỜ sẵn sàng");
   assert.ok(nhapThieu.missing.some((m) => m.key === "ADDRESS"), "phải nêu đúng điều kiện đang thiếu");
@@ -192,7 +217,7 @@ export async function testSalesRegression(db: Db) {
   const chuaCoGia = state({ ...du, quotedTotal: null });
   const nhapChuaGia = buildOrderDraft({
     state: chuaCoGia, missing: missingOrderRequirements(chuaCoGia), confirmed: true, offer: null,
-    productCode: "", sku: "", sourcePageId: "", sourceConversationId: "", humanTakeoverAt: null,
+    productCode: "", sku: "", sourcePageId: "", sourceConversationId: "", channelCustomerName: "", humanTakeoverAt: null,
   });
   assert.equal(nhapChuaGia.total, null, "chưa ai tính giá ⇒ tổng là CHƯA BIẾT, không phải 0đ");
   assert.equal(nhapChuaGia.codAmount, null, "và thu hộ cũng vậy");
@@ -202,7 +227,7 @@ export async function testSalesRegression(db: Db) {
   const lech = state({ ...du, quotedTotal: 700_000 });
   const nhapLech = buildOrderDraft({
     state: lech, missing: missingOrderRequirements(lech), confirmed: true, offer,
-    productCode: "Q004", sku: "", sourcePageId: "", sourceConversationId: "", humanTakeoverAt: null,
+    productCode: "Q004", sku: "", sourcePageId: "", sourceConversationId: "", channelCustomerName: "", humanTakeoverAt: null,
   });
   assert.ok(nhapLech.warnings.includes("PRICE_DISAGREES_WITH_OFFER"), "tổng lệch với đơn giá + ship ⇒ phải cảnh báo");
   assert.equal(nhapLech.total, 700_000, "và KHÔNG được sửa con số máy chủ đã tính");
@@ -210,7 +235,7 @@ export async function testSalesRegression(db: Db) {
   // Ô chưa khai thì không kết luận được gì — nói "lệch" lúc đó là dựng ra một mâu thuẫn không có thật.
   const khongCoOffer = buildOrderDraft({
     state: du, missing: missingOrderRequirements(du), confirmed: true, offer: null,
-    productCode: "", sku: "", sourcePageId: "", sourceConversationId: "", humanTakeoverAt: null,
+    productCode: "", sku: "", sourcePageId: "", sourceConversationId: "", channelCustomerName: "", humanTakeoverAt: null,
   });
   assert.ok(!khongCoOffer.warnings.includes("PRICE_DISAGREES_WITH_OFFER"), "chưa khai giá thì không kết luận lệch");
   assert.ok(khongCoOffer.warnings.includes("OFFER_NOT_DECLARED"), "nhưng phải nói ra là KHÔNG CÓ GÌ ĐỂ ĐỐI CHIẾU");
@@ -219,7 +244,7 @@ export async function testSalesRegression(db: Db) {
   const la = state({ ...du, color: "Xanh neon", quantity: QUANTITY_WARN_FROM });
   const nhapLa = buildOrderDraft({
     state: la, missing: missingOrderRequirements(la), confirmed: true, offer,
-    productCode: "", sku: "", sourcePageId: "", sourceConversationId: "", humanTakeoverAt: new Date(),
+    productCode: "", sku: "", sourcePageId: "", sourceConversationId: "", channelCustomerName: "", humanTakeoverAt: new Date(),
   });
   assert.ok(nhapLa.warnings.includes("COLOR_NOT_IN_OFFER"));
   assert.ok(nhapLa.warnings.includes("QUANTITY_UNUSUAL"));

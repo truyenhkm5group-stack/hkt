@@ -1,6 +1,6 @@
 import { Card } from "@/components/ui/card";
 import { formatVND } from "@/lib/format";
-import { ORDER_DRAFT_WARNING_LABEL, type OrderDraft } from "@/lib/constants/order-draft";
+import { CUSTOMER_NAME_SOURCE_LABEL, ORDER_DRAFT_WARNING_LABEL, type OrderDraft } from "@/lib/constants/order-draft";
 import { cn } from "@/lib/utils";
 
 /**
@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
  * Ô tiền trống in `—`, không in `0 ₫`: một bản nháp nói "0 đồng" cho một đơn chưa ai định giá là
  * lời nói dối nguy hiểm nhất màn hình này có thể nói (AGENTS.md mục 42).
  */
-function Dong({ label, value, missing }: { label: string; value: string; missing?: boolean }) {
+function Dong({ label, value, missing }: { label: string; value: React.ReactNode; missing?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-3 border-b border-border/50 py-1 last:border-0">
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -44,7 +44,17 @@ export function OrderDraftCard({ draft }: { draft: OrderDraft }) {
 
       <div className="grid gap-x-6 sm:grid-cols-2">
         <div>
-          <Dong label="Khách" value={chua(draft.customerName)} />
+          {/* Tên đi KÈM NGUỒN: một cái tên không nói nó từ đâu ra thì người đọc không biết có nên
+              tin nó không — tên Facebook có thể là biệt danh, hoặc của một người khác trong nhà. */}
+          <Dong
+            label="Khách"
+            value={
+              <>
+                {chua(draft.customerName)}
+                <span className="ml-1 text-[11px] text-muted-foreground">({CUSTOMER_NAME_SOURCE_LABEL[draft.customerNameSource]})</span>
+              </>
+            }
+          />
           <Dong label="Số điện thoại" value={chua(draft.phone)} missing={thieu.has("PHONE")} />
           <Dong label="Địa chỉ" value={chua(draft.address)} missing={thieu.has("ADDRESS")} />
           <Dong label="Tỉnh / thành" value={chua(draft.province)} />

@@ -118,8 +118,26 @@ export type OrderDraftInput = {
   sku: string;
   sourcePageId: string;
   sourceConversationId: string;
+  /**
+   * Tên khách do KÊNH (Pancake / Facebook) báo về. Khác hẳn tên máy bóc được từ câu chat.
+   *
+   * Nó là căn cứ YẾU HƠN — tên Facebook hay là biệt danh, và người đặt hàng có thể là người khác —
+   * nhưng "yếu hơn" không phải "không có". Bỏ nó đi thì bản nháp in "chưa có tên khách" trong khi
+   * ERP đang giữ một cái tên, và người đọc sẽ đi hỏi lại một thứ đã biết.
+   */
+  channelCustomerName: string;
   /** Khác null = NGƯỜI đang cầm hội thoại. */
   humanTakeoverAt: Date | null;
+};
+
+/** Tên khách trên bản nháp lấy từ đâu ra. In kèm tên, luôn luôn. */
+export const CUSTOMER_NAME_SOURCES = ["CHAT", "CHANNEL", "NONE"] as const;
+export type CustomerNameSource = (typeof CUSTOMER_NAME_SOURCES)[number];
+
+export const CUSTOMER_NAME_SOURCE_LABEL: Record<CustomerNameSource, string> = {
+  CHAT: "khách tự xưng trong hội thoại",
+  CHANNEL: "tên kênh báo về — có thể là biệt danh, hỏi lại trước khi giao",
+  NONE: "chưa có tên",
 };
 
 export type OrderDraft = {
@@ -131,6 +149,8 @@ export type OrderDraft = {
    */
   ready: boolean;
   customerName: string;
+  /** Tên ấy lấy từ đâu. Một cái tên không nói nguồn thì người đọc không biết có nên tin nó không. */
+  customerNameSource: CustomerNameSource;
   phone: string;
   address: string;
   province: string;
@@ -174,7 +194,19 @@ export function buildOrderDraft(input: OrderDraftInput): OrderDraft {
   const unitPrice = money(offer?.unitPrice ?? null);
   const shippingFee = money(offer?.shippingFee ?? null);
 
-  if (!state.customerName.trim()) warnings.push("NO_CUSTOMER_NAME");
+  /*
+    HAI NGUỒN TÊN, VÀ CHÚNG KHÔNG NGANG NHAU.
+
+    Tên khách TỰ XƯNG trong hội thoại thắng tên kênh báo về: người ta nhắn "chị tên Lan nhé" là
+    đang nói tên người NHẬN HÀNG, còn tên Facebook có thể là biệt danh hoặc tên của một người khác
+    trong nhà. Nhưng tên kênh vẫn hơn hẳn một ô trống — nên nó đứng ở bậc hai, kèm nhãn nói rõ nó
+    yếu hơn, chứ không bị vứt đi.
+  */
+  const tenChat = state.customerName.trim();
+  const tenKenh = input.channelCustomerName.trim();
+  const customerName = tenChat || tenKenh;
+  const customerNameSource: CustomerNameSource = tenChat ? "CHAT" : tenKenh ? "CHANNEL" : "NONE";
+  if (!customerName) warnings.push("NO_CUSTOMER_NAME");
 
   /*
     ĐỐI CHIẾU TIỀN — in ra, không sửa.
@@ -212,7 +244,8 @@ export function buildOrderDraft(input: OrderDraftInput): OrderDraft {
     // Hai vế, và vế thứ hai không suy ra từ vế thứ nhất: đủ dữ liệu là chuyện của ERP, còn khách
     // có đồng ý hay không là chuyện của khách.
     ready: input.missing.length === 0 && input.confirmed,
-    customerName: state.customerName.trim(),
+    customerName,
+    customerNameSource,
     phone: normalizePhone(state.phone),
     address: state.address.trim(),
     province: state.province.trim(),

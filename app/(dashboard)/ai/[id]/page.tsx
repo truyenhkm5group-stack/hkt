@@ -64,6 +64,7 @@ export default async function AiRunPage({ params }: { params: Promise<{ id: stri
     sku: draftState.variantLabel,
     sourcePageId: conversation?.pageId ?? "",
     sourceConversationId: conversation?.externalId ?? "",
+    channelCustomerName: conversation?.customerName ?? "",
     humanTakeoverAt: conversation?.humanTakeoverAt ?? null,
   });
 
