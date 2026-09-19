@@ -11,7 +11,23 @@
 import type { RouteTier } from "@/lib/constants/ai";
 import { ModelTimeoutError, type CompletionRequest, type CompletionResult, type ModelProvider } from "@/lib/ai-workforce/providers/types";
 
-export type StubScript = { text?: string; behavior?: "ok" | "timeout" | "error"; inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheWriteInputTokens?: number };
+export type StubScript = {
+  text?: string;
+  behavior?: "ok" | "timeout" | "error";
+  /**
+   * Lời lỗi CỤ THỂ cho nhánh `error`.
+   *
+   * Cầu dao phân loại lỗi bằng CHỮ trong lời lỗi (hết hạn mức · chặn tốc độ · khoá sai là ba
+   * thế giới khác nhau cùng đến từ một mã HTTP). Một nhà cung cấp giả lập chỉ biết ném đúng một
+   * câu "báo lỗi" thì không dựng lại được ba tình huống ấy, và bài kiểm cầu dao sẽ chỉ kiểm được
+   * nhánh chung chung — tức là không kiểm được phần đáng kiểm.
+   */
+  errorMessage?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheWriteInputTokens?: number;
+};
 
 const holder = globalThis as unknown as { __aiStub?: { queue: StubScript[]; calls: CompletionRequest[] } };
 if (!holder.__aiStub) holder.__aiStub = { queue: [], calls: [] };
@@ -47,7 +63,7 @@ export class StubProvider implements ModelProvider {
     state.calls.push(request);
     const script = state.queue.shift();
     if (script?.behavior === "timeout") throw new ModelTimeoutError("stub: quá thời gian phản hồi");
-    if (script?.behavior === "error") throw new Error("stub: nhà cung cấp báo lỗi");
+    if (script?.behavior === "error") throw new Error(script.errorMessage ?? "stub: nhà cung cấp báo lỗi");
     // Không xếp sẵn gì ⇒ trả một câu KHÔNG kết luận được. Mặc định phải là "không biết",
     // vì một mặc định "biết" sẽ làm kiểm thử xanh trong khi thực tế chưa có mô hình nào chạy.
     const text = script?.text ?? JSON.stringify({ unsure: true, reason: "Chưa cấu hình mô hình thật" });
