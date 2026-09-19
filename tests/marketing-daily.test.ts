@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { clearMemo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
+import { sql } from "drizzle-orm";
+import { getDb } from "@/db";
+import { calibrate } from "@/scripts/marketing-calibrate";
 import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf, type MaturityState } from "@/lib/constants/marketing-daily";
 import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, MARKETING_FINDING_OWNER, MARKETING_FINDING_WHY, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
 import { METRIC_BINDINGS } from "@/lib/constants/metric-bindings";
@@ -646,6 +649,56 @@ export async function testMarketingDigestPreview() {
   }
 }
 
+/**
+ * ═══════════ CÔNG CỤ ĐỐI CHIẾU PHẢI TỰ CHẠY ĐƯỢC, TRÊN DỮ LIỆU THẬT CỦA BÀI KIỂM ═══════════
+ *
+ * `scripts/marketing-calibrate.ts` là thứ chủ shop chạy trên production khi một con số gây tranh
+ * cãi. Một công cụ như vậy mà chưa lần nào chạy trong CI sẽ hỏng đúng lúc cần nó nhất — và hỏng
+ * theo kiểu khó chịu nhất: một câu SQL sai cú pháp sau khi ai đó đổi tên một cột, phát hiện ra lúc
+ * đang cần câu trả lời gấp.
+ *
+ * Nên bài kiểm này chạy CHÍNH lõi ấy trên dữ liệu mẫu và đòi nó KHÔNG tìm thấy chênh lệch nhóm
+ * `BUG`. Đó cũng là một cổng đối soát thứ hai, đi đường khác với
+ * `testMarketingDailyReconciliation`: bài kia so báo cáo với báo cáo, bài này so báo cáo với BỐN
+ * nguồn trong đó có hai câu SQL viết độc lập từ đặc tả.
+ *
+ * ─── KHUNG NGÀY DỰNG TỪ CHÍNH DỮ LIỆU ───
+ *
+ * AGENTS.md mục 50: cấm ghim một ngày tuyệt đối, và cấm cửa sổ "N ngày trước" trỏ vào dữ liệu ngày
+ * cố định. Nên khung lấy từ `min`/`max` của chính bảng đang kiểm — bài kiểm này không có hạn dùng.
+ */
+export async function testMarketingCalibrateTool() {
+  clearMemo();
+  const db = await getDb();
+  const res = await db.execute(sql`
+    select to_char(min(inserted_at) at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD') as tu,
+           to_char(max(inserted_at) at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD') as den
+      from orders
+  `);
+  const r0 = (Array.isArray(res) ? res : ((res as { rows?: Record<string, unknown>[] }).rows ?? []))[0] as { tu?: string; den?: string } | undefined;
+  if (!r0?.tu || !r0.den) {
+    assert.fail("dữ liệu mẫu không có đơn nào — công cụ đối chiếu không có gì để chạy");
+    return;
+  }
+
+  const nuot: string[] = [];
+  const out = await calibrate({ from: r0.tu, to: r0.den }, (line) => nuot.push(line));
+
+  assert.ok(out.days > 0, "phải dựng được ít nhất một ngày trong khung lấy từ chính dữ liệu");
+  // Mọi nhóm phải nằm trong danh sách ĐÓNG — một nhãn lạ nghĩa là có đường ghi nào đó không qua `add`.
+  for (const f of out.findings) {
+    assert.ok(["TIME_BASIS", "ATTRIBUTION", "DATA_DELAY", "MISSING_DATA", "BUG"].includes(f.kind), `nhãn lạ: ${f.kind}`);
+    assert.ok(f.why.length > 20, `phát hiện "${f.what}" phải nói rõ vì sao, không chỉ nêu hai con số`);
+  }
+  assert.equal(
+    out.bugs,
+    0,
+    `công cụ đối chiếu tìm thấy ${out.bugs} chênh lệch KHÔNG giải thích được:\n${out.findings.filter((f) => f.kind === "BUG").map((f) => `  ${f.what}: kỳ vọng ${f.expected} · thực tế ${f.actual} — ${f.why}`).join("\n")}`,
+  );
+  // In ra được: một công cụ chạy xong mà không nói gì thì không ai mở lần thứ hai.
+  assert.ok(nuot.length > 10, "phải in ra bảng theo ngày và bốn khối đối chiếu");
+}
+
 /** Điểm vào cho bộ chạy chung. Phần CSDL đi qua `getDb()` như các truy vấn thật, nên không cần tham số. */
 export async function testMarketingDaily() {
   testMarketingMetricContract();
@@ -664,4 +717,5 @@ export async function testMarketingDaily() {
   await testMarketingDailyFilterHonesty();
   await testMarketingBreakdownConservation();
   await testMarketingDigestPreview();
+  await testMarketingCalibrateTool();
 }

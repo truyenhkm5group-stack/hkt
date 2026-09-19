@@ -57,20 +57,30 @@ type Kind = "TIME_BASIS" | "ATTRIBUTION" | "DATA_DELAY" | "MISSING_DATA" | "BUG"
 
 type Finding = { kind: Kind; what: string; expected: string; actual: string; why: string };
 
-const findings: Finding[] = [];
-const add = (kind: Kind, what: string, expected: string, actual: string, why: string) => findings.push({ kind, what, expected, actual, why });
+export type CalibrateArgs = { from: string; to: string; marketer?: string | null; product?: string | null; basis?: MarketingBasis };
 
-async function main() {
-  const args = parseArgs();
+export type CalibrateResult = { findings: Finding[]; days: number; bugs: number };
+
+/**
+ * LÕI ĐỐI CHIẾU — TÁCH KHỎI PHẦN IN RA để bài kiểm gọi được.
+ *
+ * `log` truyền vào được: bộ chạy kiểm thử nuốt phần in, còn dòng lệnh thì in ra thật. Nhờ vậy
+ * chính đường mã mà chủ shop chạy trên production cũng là đường mã bài kiểm chạy trên dữ liệu
+ * mẫu — một công cụ đối chiếu chưa từng được chạy trong CI sẽ hỏng đúng lúc cần nó nhất.
+ */
+export async function calibrate(input: CalibrateArgs, log: (s: string) => void = console.log): Promise<CalibrateResult> {
+  const args: Args = { from: input.from, to: input.to, marketer: input.marketer ?? null, product: input.product ?? null, basis: input.basis ?? "created" };
+  const findings: Finding[] = [];
+  const add = (kind: Kind, what: string, expected: string, actual: string, why: string) => findings.push({ kind, what, expected, actual, why });
   const period = periodOf(args.from, args.to);
   const filters: MarketingFilters = { marketerId: args.marketer, productId: args.product };
   const coLoc = Boolean(args.marketer || args.product);
   const db = await getDb();
 
-  console.log("═".repeat(120));
-  console.log(`ĐỐI CHIẾU HIỆU QUẢ MARKETING · ${args.from} → ${args.to} · mốc: ${MARKETING_BASIS_LABEL[args.basis]}`);
-  console.log(`bộ lọc: marketer=${args.marketer ?? "(tất cả)"} · mã hàng=${args.product ?? "(tất cả)"}`);
-  console.log("═".repeat(120));
+  log("═".repeat(120));
+  log(`ĐỐI CHIẾU HIỆU QUẢ MARKETING · ${args.from} → ${args.to} · mốc: ${MARKETING_BASIS_LABEL[args.basis]}`);
+  log(`bộ lọc: marketer=${args.marketer ?? "(tất cả)"} · mã hàng=${args.product ?? "(tất cả)"}`);
+  log("═".repeat(120));
 
   clearMemo();
   const data = await getMarketingDaily(period, args.basis, filters);
@@ -78,7 +88,7 @@ async function main() {
   /* ── 1. BẢNG THEO NGÀY ── */
   const head = ["NGÀY", "ChiQC", "TinNhắn", "Đơn", "SP", "DT POS", "DT thực", "GiáVốn", "Cước+phí", "LN góp", "Margin", "CPA", "ROAS", "Giao", "Hoàn", "ĐangĐi", "ĐộChín"];
   const w = [10, 11, 7, 5, 5, 12, 12, 11, 9, 11, 7, 8, 5, 5, 5, 6, 7];
-  console.log("\n" + head.map((h, i) => h.padStart(w[i])).join(" "));
+  log("\n" + head.map((h, i) => h.padStart(w[i])).join(" "));
   for (const r of data.rows) {
     const rec = r as unknown as Record<string, unknown>;
     const cells = [
@@ -100,21 +110,21 @@ async function main() {
       num(r.pendingOrders),
       pct(ratioOf("maturity", rec)),
     ];
-    console.log(cells.map((c, i) => String(c).padStart(w[i])).join(" "));
+    log(cells.map((c, i) => String(c).padStart(w[i])).join(" "));
   }
   const t = data.totals as unknown as Record<string, unknown>;
-  console.log("-".repeat(120));
-  console.log(
+  log("-".repeat(120));
+  log(
     ["TỔNG", vnd(data.totals.adSpend), num(data.totals.messages), num(data.totals.orders), num(data.totals.units), vnd(data.totals.posRevenue), vnd(data.totals.deliveredRevenue), vnd(data.totals.cogs), vnd(data.totals.shippingCost), vnd(data.totals.contributionProfit), pct(ratioOf("margin", t)), vnd(ratioOf("costPerOrder", t)), rat(ratioOf("roasDelivered", t)), num(data.totals.deliveredOrders), num(data.totals.returnedOrders), num(data.totals.pendingOrders), pct(ratioOf("maturity", t))]
       .map((c, i) => String(c).padStart(w[i]))
       .join(" "),
   );
-  console.log(`\nĐộ chín tổng: ${MATURITY_LABEL[data.totals.maturity]} · biên quan sát chi tiêu: ${data.spendObservedThrough ?? "—"}`);
-  for (const wr of data.warnings) console.log(`  ⚠ ${wr}`);
+  log(`\nĐộ chín tổng: ${MATURITY_LABEL[data.totals.maturity]} · biên quan sát chi tiêu: ${data.spendObservedThrough ?? "—"}`);
+  for (const wr of data.warnings) log(`  ⚠ ${wr}`);
 
   /* ── 2. ĐỐI CHIẾU VỚI BÁO CÁO LỢI NHUẬN CANONICAL ── */
-  console.log("\n" + "═".repeat(120));
-  console.log("ĐỐI CHIẾU 1/4 — BÁO CÁO LỢI NHUẬN CANONICAL (lib/queries/reports.ts::getDailyBreakdown)");
+  log("\n" + "═".repeat(120));
+  log("ĐỐI CHIẾU 1/4 — BÁO CÁO LỢI NHUẬN CANONICAL (lib/queries/reports.ts::getDailyBreakdown)");
   if (coLoc) {
     add(
       "ATTRIBUTION",
@@ -123,7 +133,7 @@ async function main() {
       "BỎ QUA",
       "Đang lọc theo một chiều. Báo cáo lợi nhuận không có khái niệm lọc theo marketer/mã, và chi phí vận hành phân bổ không chia được cho một chiều — nên hai bên cố ý không so được. Chạy lại KHÔNG kèm bộ lọc để đối chiếu.",
     );
-    console.log("  (bỏ qua — xem phân loại ATTRIBUTION ở cuối)");
+    log("  (bỏ qua — xem phân loại ATTRIBUTION ở cuối)");
   } else {
     const canonical = await getDailyBreakdown(period, args.basis);
     const byDay = new Map(canonical.map((c) => [c.day, c]));
@@ -166,12 +176,12 @@ async function main() {
         );
       }
     }
-    console.log(`  ${khop} ngày khớp · ${lech} ngày lệch (xem phân loại ở cuối)`);
+    log(`  ${khop} ngày khớp · ${lech} ngày lệch (xem phân loại ở cuối)`);
   }
 
   /* ── 3. ĐỐI CHIẾU CHI QUẢNG CÁO VỚI NGUỒN CÓ THẨM QUYỀN ── */
-  console.log("\n" + "═".repeat(120));
-  console.log("ĐỐI CHIẾU 2/4 — CHI QUẢNG CÁO (bảng ad_spends, nguồn có thẩm quyền)");
+  log("\n" + "═".repeat(120));
+  log("ĐỐI CHIẾU 2/4 — CHI QUẢNG CÁO (bảng ad_spends, nguồn có thẩm quyền)");
   const adConds = [eq(schema.adSpends.excluded, false), gte(schema.adSpends.spendDate, period.from as Date), lte(schema.adSpends.spendDate, period.to as Date)];
   if (args.marketer) adConds.push(eq(schema.adSpends.marketerId, args.marketer));
   if (args.product) adConds.push(eq(schema.adSpends.productId, args.product));
@@ -181,8 +191,8 @@ async function main() {
     .where(and(...adConds));
   const nguonSpend = Number(adRow?.spend ?? 0);
   const nguonMsg = Number(adRow?.messages ?? 0);
-  console.log(`  nguồn: ${vnd(nguonSpend)}đ · ${nguonMsg} tin nhắn · ${Number(adRow?.ngay ?? 0)} ngày có dòng`);
-  console.log(`  báo cáo: ${vnd(data.totals.adSpend)}đ · ${num(data.totals.messages)} tin nhắn`);
+  log(`  nguồn: ${vnd(nguonSpend)}đ · ${nguonMsg} tin nhắn · ${Number(adRow?.ngay ?? 0)} ngày có dòng`);
+  log(`  báo cáo: ${vnd(data.totals.adSpend)}đ · ${num(data.totals.messages)} tin nhắn`);
   if (data.totals.adSpend !== null && data.totals.adSpend !== nguonSpend) {
     /*
       Khoản chi nhóm QUẢNG CÁO gõ tay ở bảng Chi phí được PHÂN BỔ theo ngày và cộng vào cột chi
@@ -197,8 +207,8 @@ async function main() {
   }
 
   /* ── 4. ĐỐI CHIẾU SỐ ĐƠN VỚI POPULATION CANONICAL ── */
-  console.log("\n" + "═".repeat(120));
-  console.log("ĐỐI CHIẾU 3/4 — SỐ ĐƠN ĐỦ ĐIỀU KIỆN (population đơn đã xác nhận + loại trùng)");
+  log("\n" + "═".repeat(120));
+  log("ĐỐI CHIẾU 3/4 — SỐ ĐƠN ĐỦ ĐIỀU KIỆN (population đơn đã xác nhận + loại trùng)");
   const rows = await db.execute(sql`
     select count(*)::int as tong,
            count(*) filter (where exists (select 1 from order_attributions oa where oa.order_id = o.id and oa.status = 'DUPLICATE'))::int as trung
@@ -210,8 +220,8 @@ async function main() {
   const r0 = (Array.isArray(rows) ? rows : (rows as { rows?: Record<string, unknown>[] }).rows ?? [])[0] as { tong?: number; trung?: number } | undefined;
   const tongDon = Number(r0?.tong ?? 0);
   const trungDon = Number(r0?.trung ?? 0);
-  console.log(`  SQL độc lập: ${tongDon} đơn đã xác nhận · ${trungDon} trùng ⇒ đủ điều kiện ${tongDon - trungDon}`);
-  console.log(`  báo cáo: ${data.totals.orders} đơn${coLoc ? " (đang lọc theo chiều)" : ""}`);
+  log(`  SQL độc lập: ${tongDon} đơn đã xác nhận · ${trungDon} trùng ⇒ đủ điều kiện ${tongDon - trungDon}`);
+  log(`  báo cáo: ${data.totals.orders} đơn${coLoc ? " (đang lọc theo chiều)" : ""}`);
   if (!coLoc && args.basis === "created") {
     // Đơn HUỶ nằm ngoài cột "đơn xác nhận" của báo cáo nhưng vẫn trong population SQL ở trên.
     const chenh = tongDon - trungDon - data.totals.orders - data.totals.cancelledOrders;
@@ -223,8 +233,8 @@ async function main() {
   }
 
   /* ── 5. ĐỐI CHIẾU KẾT QUẢ GIAO VỚI CHỨNG TỪ VẬN ĐƠN ── */
-  console.log("\n" + "═".repeat(120));
-  console.log("ĐỐI CHIẾU 4/4 — KẾT QUẢ GIAO (bảng kết quả đơn canonical)");
+  log("\n" + "═".repeat(120));
+  log("ĐỐI CHIẾU 4/4 — KẾT QUẢ GIAO (bảng kết quả đơn canonical)");
   const oc = await db.execute(sql`
     select coalesce(c.outcome, 'CHUA_TINH') as ket_qua, count(*)::int as so
       from orders o
@@ -240,17 +250,36 @@ async function main() {
   const sqlDelivered = byOutcome.get("DELIVERED") ?? 0;
   const sqlReturned = (byOutcome.get("RETURNED") ?? 0) + (byOutcome.get("RETURNED_BY_RULE") ?? 0);
   const chuaTinh = byOutcome.get("CHUA_TINH") ?? 0;
-  for (const [k, v] of byOutcome) console.log(`  ${k.padEnd(18)} ${v}`);
-  console.log(`  báo cáo: giao ${data.totals.deliveredOrders} · hoàn ${data.totals.returnedOrders} · đang đi ${data.totals.pendingOrders}`);
-  if (chuaTinh > 0) add("MISSING_DATA", "Kết quả đơn", "mọi đơn có dòng canonical", `${chuaTinh} đơn chưa có`, "Bảng kết quả đã tính sẵn chưa phủ hết. Chạy job dựng lại (outcome-parity --apply); báo cáo vẫn đúng vì có nhánh dự phòng, chỉ chậm hơn.");
-  if (!coLoc && args.basis === "created") {
+  for (const [k, v] of byOutcome) log(`  ${k.padEnd(18)} ${v}`);
+  log(`  báo cáo: giao ${data.totals.deliveredOrders} · hoàn ${data.totals.returnedOrders} · đang đi ${data.totals.pendingOrders}`);
+  /*
+    ĐỘ PHỦ ĐỨNG TRƯỚC PHÉP SO. Bảng `canonical_order_outcome` là LỚP TĂNG TỐC, không phải nguồn
+    sự thật — báo cáo vẫn đúng khi nó trống vì có nhánh tính sống, chỉ chậm hơn.
+
+    Bản đầu của tệp này so thẳng bất kể độ phủ, nên trên một CSDL chưa dựng bảng ấy nó báo
+    "0 đơn giao thành công vs 24" và xếp nhóm LỖI. Chênh lệch đó KHÔNG phải lỗi — nó đã được giải
+    thích trọn vẹn bởi chính dòng `MISSING_DATA` ngay phía trên, và gán thêm nhãn LỖI cho nó là
+    đúng thứ mà bảng phân loại này sinh ra để chặn: một con số lệch có nguyên nhân đã biết bị đẩy
+    sang ô "phải sửa mã".
+  */
+  const phuCanonical = chuaTinh === 0;
+  if (!phuCanonical) {
+    add(
+      "MISSING_DATA",
+      "Kết quả đơn",
+      "mọi đơn có dòng canonical",
+      `${chuaTinh}/${[...byOutcome.values()].reduce((a, b) => a + b, 0)} đơn chưa có`,
+      "Bảng kết quả đã tính sẵn chưa phủ hết, nên KHÔNG so được với nó — phép đối chiếu này bị bỏ qua, không phải bị coi là khớp. Chạy job dựng lại (ops `outcome-parity --apply`); báo cáo vẫn đúng vì có nhánh tính sống, chỉ chậm hơn.",
+    );
+  } else if (!coLoc && args.basis === "created") {
     if (sqlDelivered !== data.totals.deliveredOrders) add("BUG", "Đơn giao thành công", String(sqlDelivered), String(data.totals.deliveredOrders), "Không khớp bảng kết quả đơn canonical.");
     if (sqlReturned !== data.totals.returnedOrders) add("BUG", "Đơn hoàn", String(sqlReturned), String(data.totals.returnedOrders), "Không khớp bảng kết quả đơn canonical (RETURNED + RETURNED_BY_RULE).");
   }
+  log(`  độ phủ bảng canonical: ${phuCanonical ? "đủ — đã đối chiếu" : "CHƯA ĐỦ — bỏ qua phép so này"}`);
 
   /* ── 6. PHÂN LOẠI ── */
-  console.log("\n" + "═".repeat(120));
-  console.log("PHÂN LOẠI CHÊNH LỆCH");
+  log("\n" + "═".repeat(120));
+  log("PHÂN LOẠI CHÊNH LỆCH");
   const order: Kind[] = ["BUG", "MISSING_DATA", "DATA_DELAY", "ATTRIBUTION", "TIME_BASIS"];
   const nhan: Record<Kind, string> = {
     BUG: "❌ LỖI — phải sửa mã",
@@ -262,24 +291,40 @@ async function main() {
   for (const k of order) {
     const nhom = findings.filter((f) => f.kind === k);
     if (!nhom.length) continue;
-    console.log(`\n${nhan[k]} (${nhom.length})`);
+    log(`\n${nhan[k]} (${nhom.length})`);
     // Gộp các dòng cùng lý do: 14 ngày cùng một nguyên nhân thì in 14 lần là che mất các nguyên nhân khác.
     const theoLyDo = new Map<string, Finding[]>();
     for (const f of nhom) theoLyDo.set(f.why, [...(theoLyDo.get(f.why) ?? []), f]);
     for (const [why, fs] of theoLyDo) {
-      console.log(`  · ${fs.length > 1 ? `${fs.length} mục` : fs[0].what}: kỳ vọng ${fs[0].expected} · thực tế ${fs[0].actual}`);
-      console.log(`    ${why}`);
-      if (fs.length > 1) console.log(`    (${fs.slice(0, 4).map((f) => f.what).join(", ")}${fs.length > 4 ? "…" : ""})`);
+      log(`  · ${fs.length > 1 ? `${fs.length} mục` : fs[0].what}: kỳ vọng ${fs[0].expected} · thực tế ${fs[0].actual}`);
+      log(`    ${why}`);
+      if (fs.length > 1) log(`    (${fs.slice(0, 4).map((f) => f.what).join(", ")}${fs.length > 4 ? "…" : ""})`);
     }
   }
   const soLoi = findings.filter((f) => f.kind === "BUG").length;
-  console.log("\n" + "═".repeat(120));
-  if (soLoi === 0) console.log("✓ KHÔNG CÓ CHÊNH LỆCH NÀO THUỘC NHÓM LỖI. Mọi khác biệt đều giải thích được bằng mốc / tập đơn / độ trễ nguồn.");
-  else console.log(`✗ ${soLoi} CHÊNH LỆCH KHÔNG GIẢI THÍCH ĐƯỢC — đây là lỗi, không phải sai số.`);
-  process.exit(soLoi === 0 ? 0 : 1);
+  log("\n" + "═".repeat(120));
+  if (soLoi === 0) log("✓ KHÔNG CÓ CHÊNH LỆCH NÀO THUỘC NHÓM LỖI. Mọi khác biệt đều giải thích được bằng mốc / tập đơn / độ trễ nguồn.");
+  else log(`✗ ${soLoi} CHÊNH LỆCH KHÔNG GIẢI THÍCH ĐƯỢC — đây là lỗi, không phải sai số.`);
+  return { findings, days: data.rows.length, bugs: soLoi };
 }
 
-main().catch((e) => {
-  console.error("marketing-calibrate lỗi:", e instanceof Error ? e.message : e);
-  process.exit(1);
-});
+/**
+ * Vỏ dòng lệnh — CHỈ đọc tham số, gọi lõi, và chọn mã thoát.
+ *
+ * Thoát khác 0 khi có phát hiện nhóm `BUG`, để nó dùng được trong một lượt chạy tự động mà không
+ * cần ai đọc màn hình. Ba nhóm còn lại KHÔNG làm hỏng mã thoát: chúng là khác biệt đúng theo thiết
+ * kế hoặc chuyện của nguồn dữ liệu, và bắt một lượt chạy đỏ vì chúng là dạy người đọc bỏ qua màu đỏ.
+ */
+async function main() {
+  const a = parseArgs();
+  const r = await calibrate(a);
+  process.exit(r.bugs === 0 ? 0 : 1);
+}
+
+// Chỉ chạy khi được gọi THẲNG từ dòng lệnh — `import` từ bài kiểm không được kéo theo `process.exit`.
+if (process.argv[1] && process.argv[1].endsWith("marketing-calibrate.ts")) {
+  main().catch((e) => {
+    console.error("marketing-calibrate lỗi:", e instanceof Error ? e.message : e);
+    process.exit(1);
+  });
+}
