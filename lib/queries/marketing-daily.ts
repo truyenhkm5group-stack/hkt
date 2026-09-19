@@ -625,49 +625,33 @@ export type MarketingBreakdownRow = MarketingDailyBase & {
  * hơn dòng gốc mà không ai giải thích được.
  */
 /**
- * BIỂU THỨC KHOÁ NHÓM của từng chiều, tính TRÊN BẢNG `orders` — cùng chỗ mà bảng dẫn xuất đọc.
- *
- * `NULL` là một nhóm THẬT (nhóm "Chưa quy kết"), không phải một dòng bị bỏ. Đó là điều làm cho
- * tổng các nhóm luôn bằng dòng gốc: mỗi đơn rơi vào đúng một nhóm, kể cả khi không quy kết được.
- */
-function dimensionKeyExpr(dimension: MarketingDimension): SQL<string | null> {
-  switch (dimension) {
-    case "marketer":
-      return sql<string | null>`(select ${oa.marketerId} from ${oa} where ${oa.orderId} = ${o.id} and ${oa.status} = 'ATTRIBUTED' limit 1)`;
-    case "page":
-      return sql<string | null>`nullif(${o.pageId}, '')`;
-    case "campaign":
-      return sql<string | null>`${ORDER_CAMPAIGN_ID}`;
-    case "adset":
-      return sql<string | null>`(select fa.adset_id from fb_ads fa where fa.id = ${o.adId})`;
-    case "ad":
-      return sql<string | null>`(select fa.id from fb_ads fa where fa.id = ${o.adId})`;
-    case "source":
-      return sql<string | null>`nullif(${o.source}, '')`;
-    case "product":
-      // Mã hàng nằm ở DÒNG ĐƠN, không ở đơn — nên nó đi đường riêng (`productBreakdownRows`).
-      return sql<string | null>`null::text`;
-  }
-}
-
-/**
  * ═══════════ BÓC TÁCH: "NGÀY NÀY LỖ — LỖ Ở ĐÂU?" ═══════════
  *
- * ─── MỘT CÂU `GROUP BY`, KHÔNG PHẢI N LƯỢT ĐỌC ───
+ * ─── BA BẢN, BA LẦN ĐO TRÊN PRODUCTION — VÀ BẢN ĐƠN GIẢN NHẤT THẮNG ───
  *
- * Bản đầu chạy trọn bộ máy MỘT LẦN CHO MỖI NHÓM, để chắc chắn con số bóc tách không khác con số
- * của dòng nó bóc. Ý định đúng, cái giá thì đo được trên production 19/09/2026:
+ * Chuẩn hoá theo `/ads` (cùng trang, cùng máy, cùng lượt chạy, để loại nhiễu do phiên khác):
  *
- *     tuần tự (12 nhóm × 4 câu)      → /ads/daily  4,7 giây
- *     song song (48 câu cùng lúc)    → /ads/daily 15,9 giây   ← TỆ HƠN GẤP BA
+ *     bản                         /ads     /ads/daily    tỷ lệ
+ *     ────────────────────────────────────────────────────────
+ *     tuần tự, một lượt/nhóm      18,4s        4,7s       0,26   ← NHANH NHẤT
+ *     song song, 48 câu cùng lúc  19,2s       15,9s       0,83
+ *     một câu `group by`          19,8s       21,1s       1,07   ← CHẬM NHẤT
  *
- * Chạy song song làm nó CHẬM ĐI, không nhanh lên: 48 câu truy vấn nặng cùng lúc thì tranh nhau
- * một bể kết nối có hạn, và mỗi câu đều phải dựng lại bảng dẫn xuất `ORDER_OUTCOME`. Chỗ tốn thời
- * gian chưa bao giờ là việc CHỜ — nó là 48 lần làm lại cùng một việc.
+ * Cả hai bản "tối ưu" đều làm nó CHẬM ĐI, và bản thứ hai chậm hơn cả bản thứ nhất.
  *
- * Nay khoá nhóm là một CỘT của chính bảng dẫn xuất ấy (`dimKey`, xem `pnlFacts`), nên bóc tách là
- * một câu `group by` trên ĐÚNG tập dòng mà bảng theo ngày đứng trên. Bảo đảm khớp không còn đến từ
- * "chạy lại cùng một đường" mà đến từ "cùng một bảng" — mạnh hơn, và rẻ hơn 47 câu truy vấn.
+ *   · Song song: 48 câu nặng cùng lúc tranh nhau một bể kết nối có hạn.
+ *   · Một câu `group by`: gộp trên TOÀN BỘ đơn thì Postgres mất đường dùng chỉ mục mà các câu ĐÃ
+ *     LỌC dùng được. Mười hai lượt quét HẸP (mỗi lượt một marketer, đi qua
+ *     `order_attribution_marketer_idx`) rẻ hơn hẳn một lượt quét RỘNG kèm truy vấn con tương quan
+ *     cho từng dòng.
+ *
+ * Nên bản đang chạy là bản tuần tự. Nó cũng là bản có bảo đảm đúng đắn MẠNH NHẤT: mỗi nhóm đọc
+ * lại bằng CHÍNH đường của bảng chính, nên con số bóc tách không thể khác con số của dòng nó bóc —
+ * không cần tin vào một phép suy luận nào.
+ *
+ * BÀI HỌC, ghi lại để lần sau không lặp: "48 câu truy vấn" nghe như vấn đề, nhưng nó chỉ là một
+ * con số đếm. Cái tốn tiền là KHỐI LƯỢNG QUÉT, và 48 câu hẹp có thể rẻ hơn 1 câu rộng. Đừng sửa
+ * hiệu năng bằng trực giác về hình dạng truy vấn — đo trước, rồi mới sửa.
  */
 export async function getMarketingBreakdown(
   period: Period,
@@ -677,8 +661,14 @@ export async function getMarketingBreakdown(
   limit = 12,
 ): Promise<{ dimension: MarketingDimension; spendGrain: boolean; rows: MarketingBreakdownRow[] }> {
   const db = await getDb();
-  const extra = dimensionFilter(filters);
-  const rows = dimension === "product" ? await productBreakdownRows(db, period, basis, extra, limit) : await orderBreakdownRows(db, period, basis, dimension, extra, filters, limit);
+  const keys = await dimensionKeys(db, period, dimension, filters, limit);
+  const rows: MarketingBreakdownRow[] = [];
+  for (const k of keys) {
+    const scoped: MarketingFilters = { ...filters, ...filterForDimension(dimension, k.key) };
+    const { rows: days } = await buildDays(db, period, basis, scoped);
+    const base = sumBases(days);
+    rows.push({ ...base, key: k.key, label: k.label, maturity: maturityState(base.finishedOrders, base.pendingOrders), spendKnown: days.some((d) => d.spendKnown) });
+  }
   rows.sort((a, b) => {
     const pa = a.contributionProfit;
     const pb = b.contributionProfit;
@@ -690,246 +680,94 @@ export async function getMarketingBreakdown(
   return { dimension, spendGrain: MARKETING_DIMENSION_SPEND[dimension], rows };
 }
 
-/** Tiền quảng cáo theo cùng khoá nhóm. Chiều không có số chi ⇒ map RỖNG, KHÔNG chia đều. */
-async function spendByDimension(db: Db, period: Period, dimension: MarketingDimension, filters: MarketingFilters): Promise<Map<string, { spend: number; messages: number }> | null> {
-  if (!MARKETING_DIMENSION_SPEND[dimension]) return null;
-  const key =
-    dimension === "marketer" ? sql`${ads.marketerId}` : dimension === "product" ? sql`${ads.productId}` : sql`coalesce(${ads.campaignId}, ${ads.campaign})`;
-  const rows = await db
-    .select({ key: sql<string | null>`${key}`, spend: sql<number>`coalesce(sum(${ads.spend}), 0)`, messages: sql<number>`coalesce(sum(greatest(${ads.messages}, ${ads.leads})), 0)` })
-    .from(ads)
-    .where(marketingSpendScope(period, filters))
-    .groupBy(sql`1`);
-  return new Map(rows.map((r) => [r.key ?? MARKETING_UNATTRIBUTED, { spend: Number(r.spend), messages: Number(r.messages) }]));
+function filterForDimension(dimension: MarketingDimension, key: string): MarketingFilters {
+  switch (dimension) {
+    case "marketer":
+      return { marketerId: key };
+    case "product":
+      return { productId: key };
+    case "page":
+      return { pageId: key };
+    case "campaign":
+      return { campaignId: key };
+    case "adset":
+      return { adsetId: key };
+    case "ad":
+      return { adId: key };
+    case "source":
+      return { source: key };
+  }
 }
 
-async function orderBreakdownRows(
-  db: Db,
-  period: Period,
-  basis: MarketingBasis,
-  dimension: MarketingDimension,
-  extra: SQL | undefined,
-  filters: MarketingFilters,
-  limit: number,
-): Promise<MarketingBreakdownRow[]> {
-  const { base, predicates } = pnlFacts(db, basis, period.from, period.to, extra, dimensionKeyExpr(dimension));
-  const live = sql`not ${base.duplicate}`;
-  const cnt = (cond: SQL) => sql<number>`count(*) filter (where ${cond} and ${live})`;
-  const money = (expr: SQL, cond: SQL) => sql<number>`coalesce(sum(${expr}) filter (where ${cond} and ${live}), 0)`;
+/** Các khoá đáng bóc tách — lấy theo doanh số POS giảm dần, cắt ở `limit`, luôn kèm nhóm chưa quy kết. */
+async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimension, filters: MarketingFilters, limit: number): Promise<{ key: string; label: string }[]> {
+  const extra = dimensionFilter(filters);
+  // Chọn KHOÁ thì chỉ cần population + kỳ + bộ lọc đang bật; tiền của từng nhóm do `buildDays` đọc
+  // lại bằng đúng đường của bảng chính, nên ở đây không cần tới bảng dẫn xuất đắt tiền.
+  const scope = and(metricScope(period, "confirmed"), extra);
+  const rank = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)`;
 
-  const [moneyRows, spend, units, labels] = await Promise.all([
-    db
-      .select({
-        key: sql<string | null>`${base.dimKey}`,
-        orders: cnt(predicates.notCancelled as SQL),
-        posRevenue: money(sql`${base.revenue}`, predicates.notCancelled as SQL),
-        deliveredRevenue: money(sql`${base.revenue}`, predicates.success as SQL),
-        deliveredOrders: cnt(predicates.success as SQL),
-        returnedOrders: cnt(predicates.returned as SQL),
-        cancelledOrders: cnt(predicates.cancelled as SQL),
-        pendingOrders: cnt(sql`${base.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`),
-        shippedOrders: cnt(predicates.shipped as SQL),
-        cogs: money(sql`${base.cogs}`, predicates.success as SQL),
-        shippingCost: sql<number>`coalesce(sum(${base.partnerFee}) filter (where ${predicates.shipped} and ${live}), 0)
-          + coalesce(sum(${base.returnFee} + ${base.feeMarketplace}) filter (where ${predicates.notCancelled} and ${live}), 0)`,
-      })
-      .from(base)
-      .groupBy(base.dimKey),
-    spendByDimension(db, period, dimension, filters),
-    unitsByDimension(db, period, basis, dimension, extra),
-    dimensionLabels(db, dimension),
-  ]);
-
-  const out = new Map<string, MarketingBreakdownRow>();
-  const get = (key: string): MarketingBreakdownRow => {
-    let row = out.get(key);
-    if (!row) {
-      row = { ...EMPTY_BASE(), key, label: labels.get(key) ?? (key === MARKETING_UNATTRIBUTED ? MARKETING_UNATTRIBUTED_LABEL : key), maturity: "NO_ORDERS", spendKnown: false };
-      out.set(key, row);
-    }
-    return row;
-  };
-  for (const r of moneyRows) {
-    const row = get(r.key ?? MARKETING_UNATTRIBUTED);
-    row.orders = Number(r.orders);
-    row.posRevenue = Number(r.posRevenue);
-    row.deliveredRevenue = Number(r.deliveredRevenue);
-    row.deliveredOrders = Number(r.deliveredOrders);
-    row.returnedOrders = Number(r.returnedOrders);
-    row.cancelledOrders = Number(r.cancelledOrders);
-    row.pendingOrders = Number(r.pendingOrders);
-    row.shippedOrders = Number(r.shippedOrders);
-    row.cogs = Number(r.cogs);
-    row.shippingCost = Number(r.shippingCost);
-  }
-  for (const [key, qty] of units) get(key).units = qty;
-  // Nhóm CHỈ có tiền quảng cáo mà không đơn nào vẫn phải hiện — đó chính là nhóm đốt tiền không ra gì.
-  if (spend) for (const [key, s] of spend) {
-    const row = get(key);
-    row.adSpend = s.spend;
-    row.messages = s.messages;
-    row.spendKnown = true;
-  }
-
-  for (const row of out.values()) {
-    row.finishedOrders = row.deliveredOrders + row.returnedOrders;
-    row.maturityBase = row.finishedOrders + row.pendingOrders;
-    row.maturity = maturityState(row.finishedOrders, row.pendingOrders);
-    /*
-      CHI PHÍ VẬN HÀNH KHÔNG CHIA ĐƯỢC CHO MỘT NHÓM ⇒ giữ `null`, và do đó `netProfit` cũng `null`.
-      Giống hệt luật của bảng chính khi bật bộ lọc: không có căn cứ chia tiền thuê nhà cho một
-      chiến dịch (AGENTS.md mục 14).
-    */
-    row.contributionProfit = profitOf(row);
-    row.netProfit = null;
-  }
-  // Giữ `limit` nhóm lớn nhất theo doanh số, nhưng nhóm "Chưa quy kết" KHÔNG bao giờ bị cắt: giấu
-  // nó đi là làm tổng của bảng bóc tách nhỏ hơn dòng gốc mà không ai giải thích được.
-  const all = [...out.values()];
-  const unattributed = all.filter((r) => r.key === MARKETING_UNATTRIBUTED);
-  const rest = all.filter((r) => r.key !== MARKETING_UNATTRIBUTED).sort((a, b) => b.posRevenue - a.posRevenue).slice(0, limit);
-  return [...rest, ...unattributed];
-}
-
-/** Số lượng sản phẩm theo khoá nhóm — grain DÒNG ĐƠN, nên là truy vấn riêng. */
-async function unitsByDimension(db: Db, period: Period, basis: MarketingBasis, dimension: MarketingDimension, extra: SQL | undefined): Promise<Map<string, number>> {
-  const conds: SQL[] = [metricScope(period, "confirmed"), sql`not ${IS_DUPLICATE_ORDER}`, sql`${ORDER_OUTCOME_FAST} <> 'CANCELLED'`];
-  if (extra) conds.push(extra);
-  void basis; // số lượng không phụ thuộc mốc: nó là thuộc tính của đơn, không của kết quả giao
-  const rows = await db
-    .select({ key: sql<string | null>`${dimensionKeyExpr(dimension)}`, units: sql<number>`coalesce(sum(${schema.orderItems.quantity}), 0)` })
-    .from(o)
-    .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
-    .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, o.id))
-    .where(and(...conds))
-    .groupBy(sql`1`);
-  return new Map(rows.map((r) => [r.key ?? MARKETING_UNATTRIBUTED, Number(r.units)]));
-}
-
-/** Nhãn hiển thị của từng khoá. Một lượt đọc cho cả bảng, không tra từng dòng. */
-async function dimensionLabels(db: Db, dimension: MarketingDimension): Promise<Map<string, string>> {
   if (dimension === "marketer") {
+    const rows = await db
+      .select({ key: sql<string | null>`(select ${oa.marketerId} from ${oa} where ${oa.orderId} = ${o.id} and ${oa.status} = 'ATTRIBUTED' limit 1)`, total: rank })
+      .from(o)
+      .where(scope)
+      .groupBy(sql`1`)
+      .orderBy(sql`2 desc`)
+      .limit(limit + 1);
     const names = await employeeNames();
-    return new Map([...names.keys()].map((id) => [id, marketerLabel(id, names)]));
+    return rows.map((r) => ({ key: r.key ?? MARKETING_UNATTRIBUTED, label: r.key ? marketerLabel(r.key, names) : MARKETING_UNATTRIBUTED_LABEL }));
   }
-  if (dimension === "campaign") return campaignNames();
-  if (dimension === "page") {
-    const pages = await db.select({ id: schema.fanpages.externalPageId, name: schema.fanpages.name, alias: schema.fanpages.alias }).from(schema.fanpages);
-    return new Map(pages.map((p) => [p.id, p.alias || p.name || p.id]));
-  }
-  if (dimension === "adset" || dimension === "ad") {
-    const col = dimension === "adset" ? schema.fbAds.adsetId : schema.fbAds.id;
-    const rows = await db.select({ id: sql<string | null>`${col}`, name: sql<string>`max(${schema.fbAds.name})` }).from(schema.fbAds).groupBy(sql`1`);
-    return new Map(rows.filter((r) => r.id).map((r) => [r.id as string, r.name || (r.id as string)]));
-  }
-  return new Map();
-}
-
-/**
- * BÓC TÁCH THEO MÃ HÀNG — phân bổ THEO DÒNG, cùng căn cứ với `productDayRows` và `ads-decision`.
- * Một đơn hai mã thì doanh thu không thuộc trọn về mã nào; cước chia theo tỷ trọng doanh thu dòng.
- */
-async function productBreakdownRows(db: Db, period: Period, basis: MarketingBasis, extra: SQL | undefined, limit: number): Promise<MarketingBreakdownRow[]> {
-  const i = schema.orderItems;
-  const pv = schema.productVariants;
-  const sh = schema.shipments;
-  const lastCost = variantLastCostSubquery(db);
-  const dayCol = basis === "delivered" ? sql`coalesce(${sh.deliveredAt}, ${o.insertedAt})` : sql`${o.insertedAt}`;
-  void dayCol;
-  const conds: SQL[] = [metricScope(period, "confirmed")];
-  if (extra) conds.push(extra);
-
-  const facts = db
-    .select({
-      key: sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`.as("mb_key"),
-      name: sql<string>`coalesce(nullif(${schema.products.name}, ''), ${i.productName})`.as("mb_name"),
-      orderId: sql<string>`${o.id}`.as("mb_order"),
-      lineRevenue: sql<number>`coalesce(${i.lineTotal}, 0)`.as("mb_rev"),
-      lineCogs: sql<number>`${i.quantity} * ${lineUnitCost(lastCost)}`.as("mb_cogs"),
-      qty: sql<number>`coalesce(${i.quantity}, 0)`.as("mb_qty"),
-      shipShare: sql<number>`coalesce(${i.lineTotal}, 0) / nullif(sum(coalesce(${i.lineTotal}, 0)) over (partition by ${o.id}), 0)`.as("mb_share"),
-      orderShipping: sql<number>`coalesce(${o.partnerFee}, 0) + coalesce(${o.returnFee}, 0) + coalesce(${o.feeMarketplace}, 0)`.as("mb_ship"),
-      outcome: ORDER_OUTCOME_FAST.as("mb_outcome"),
-      duplicate: sql<boolean>`${IS_DUPLICATE_ORDER}`.as("mb_dup"),
-    })
-    .from(o)
-    .leftJoin(sh, and(eq(sh.orderId, o.id), PRIMARY_ATTEMPT))
-    .innerJoin(i, eq(i.orderId, o.id))
-    .leftJoin(pv, eq(pv.id, i.variantId))
-    .leftJoin(lastCost, eq(lastCost.variantId, i.variantId))
-    .leftJoin(schema.products, eq(schema.products.id, sql`coalesce(${pv.productId}, ${i.productId})`))
-    .where(and(...conds))
-    .offset(OUTCOME_FENCE)
-    .as("mb_facts");
-
-  const delivered = sql`${facts.outcome} = 'DELIVERED'`;
-  const returned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
-  const booked = sql`${facts.outcome} <> 'CANCELLED'`;
-  const open = sql`${facts.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`;
-  const shipped = sql`${facts.outcome} in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')`;
-  const live = sql`not ${facts.duplicate}`;
-  const cnt = (cond: SQL) => sql<number>`count(distinct ${facts.orderId}) filter (where ${cond} and ${live})`;
-
-  const [rows, spend] = await Promise.all([
-    db
+  if (dimension === "product") {
+    const rows = await db
       .select({
-        key: sql<string>`${facts.key}`,
-        label: sql<string>`max(${facts.name})`,
-        orders: cnt(booked),
-        units: sql<number>`coalesce(sum(${facts.qty}) filter (where ${booked} and ${live}), 0)`,
-        posRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${booked} and ${live}), 0)`,
-        deliveredRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${delivered} and ${live}), 0)`,
-        deliveredOrders: cnt(delivered),
-        returnedOrders: cnt(returned),
-        cancelledOrders: cnt(sql`${facts.outcome} = 'CANCELLED'`),
-        pendingOrders: cnt(open),
-        shippedOrders: cnt(shipped),
-        cogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${delivered} and ${live}), 0)`,
-        shippingCost: sql<number>`coalesce(sum(${facts.orderShipping} * coalesce(${facts.shipShare}, 0)) filter (where (${delivered} or ${returned}) and ${live}), 0)`,
+        key: sql<string>`coalesce(${schema.productVariants.productId}, ${schema.orderItems.productId})`,
+        label: sql<string>`max(coalesce(nullif(${schema.products.name}, ''), ${schema.orderItems.productName}))`,
+        total: sql<number>`coalesce(sum(${schema.orderItems.lineTotal}), 0)`,
       })
-      .from(facts)
-      .groupBy(facts.key),
-    spendByDimension(db, period, "product", {}),
-  ]);
-
-  return rows
-    .filter((r) => String(r.key ?? "").trim() !== "")
-    .map((r) => {
-      const s = spend?.get(r.key);
-      const row: MarketingBreakdownRow = {
-        ...EMPTY_BASE(),
-        key: r.key,
-        label: r.label || r.key,
-        orders: Number(r.orders),
-        units: Number(r.units),
-        posRevenue: Number(r.posRevenue),
-        deliveredRevenue: Number(r.deliveredRevenue),
-        deliveredOrders: Number(r.deliveredOrders),
-        returnedOrders: Number(r.returnedOrders),
-        cancelledOrders: Number(r.cancelledOrders),
-        pendingOrders: Number(r.pendingOrders),
-        shippedOrders: Number(r.shippedOrders),
-        cogs: Number(r.cogs),
-        shippingCost: Number(r.shippingCost),
-        adSpend: s ? s.spend : null,
-        messages: s ? s.messages : null,
-        maturity: "NO_ORDERS",
-        spendKnown: Boolean(s),
-        finishedOrders: 0,
-        maturityBase: 0,
-      };
-      row.finishedOrders = row.deliveredOrders + row.returnedOrders;
-      row.maturityBase = row.finishedOrders + row.pendingOrders;
-      row.maturity = maturityState(row.finishedOrders, row.pendingOrders);
-      row.contributionProfit = profitOf(row);
-      row.netProfit = null;
-      return row;
-    })
-    .sort((a, b) => b.posRevenue - a.posRevenue)
-    .slice(0, limit);
+      .from(o)
+      .innerJoin(schema.orderItems, eq(schema.orderItems.orderId, o.id))
+      .leftJoin(schema.productVariants, eq(schema.productVariants.id, schema.orderItems.variantId))
+      .leftJoin(schema.products, eq(schema.products.id, sql`coalesce(${schema.productVariants.productId}, ${schema.orderItems.productId})`))
+      .where(scope)
+      .groupBy(sql`1`)
+      .orderBy(sql`3 desc`)
+      .limit(limit);
+    return rows.filter((r) => r.key).map((r) => ({ key: r.key, label: r.label || r.key }));
+  }
+  if (dimension === "campaign") {
+    const rows = await db
+      .select({ key: sql<string | null>`${ORDER_CAMPAIGN_ID}`, total: rank })
+      .from(o)
+      .where(scope)
+      .groupBy(sql`1`)
+      .orderBy(sql`2 desc`)
+      .limit(limit + 1);
+    const names = await campaignNames();
+    return rows.map((r) => ({ key: r.key ?? MARKETING_UNATTRIBUTED, label: r.key ? names.get(r.key) ?? r.key : MARKETING_UNATTRIBUTED_LABEL }));
+  }
+  if (dimension === "page") {
+    const rows = await db.select({ key: sql<string | null>`${o.pageId}`, total: rank }).from(o).where(scope).groupBy(sql`1`).orderBy(sql`2 desc`).limit(limit);
+    const pages = await db.select({ id: schema.fanpages.externalPageId, name: schema.fanpages.name, alias: schema.fanpages.alias }).from(schema.fanpages);
+    const byId = new Map(pages.map((p) => [p.id, p.alias || p.name || p.id]));
+    return rows.map((r) => ({ key: r.key || MARKETING_UNATTRIBUTED, label: r.key ? byId.get(r.key) ?? r.key : MARKETING_UNATTRIBUTED_LABEL }));
+  }
+  if (dimension === "source") {
+    const rows = await db.select({ key: sql<string>`${o.source}`, total: rank }).from(o).where(scope).groupBy(sql`1`).orderBy(sql`2 desc`).limit(limit);
+    return rows.filter((r) => r.key).map((r) => ({ key: r.key, label: r.key }));
+  }
+  // adset / ad — đi thẳng qua `fb_ads`, vì chỉ `ad_id` Pancake gửi mới nối được tới hai cấp này.
+  const col = dimension === "adset" ? sql`fa.adset_id` : sql`fa.id`;
+  const rows = await db
+    .select({ key: sql<string | null>`(select ${col} from fb_ads fa where fa.id = ${o.adId})`, label: sql<string>`max((select fa.name from fb_ads fa where fa.id = ${o.adId}))`, total: rank })
+    .from(o)
+    .where(scope)
+    .groupBy(sql`1`)
+    .orderBy(sql`3 desc`)
+    .limit(limit);
+  return rows.filter((r) => r.key).map((r) => ({ key: r.key as string, label: r.label || (r.key as string) }));
 }
 
-/** Tên chiến dịch, đọc một lượt cho cả bảng. `campaign_id` trống thì lấy chính tên làm khoá. */
 async function campaignNames(): Promise<Map<string, string>> {
   const db = await getDb();
   const rows = await db

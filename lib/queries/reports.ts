@@ -47,7 +47,7 @@ const SUCCESS = sql`${ORDER_OUTCOME} = 'DELIVERED'`;
  * tính giá vốn 3 lần. Gói vào bảng dẫn xuất (kèm rào `OUTCOME_FENCE`) thì mỗi đơn tính đúng một lần.
  * Đây là đổi hình dạng truy vấn, không đổi công thức — khoá bằng tests/metric-shape-consistency.test.ts.
  */
-function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null, extra?: SQL, dimKey?: SQL) {
+function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null, extra?: SQL) {
   return db
     .select({
       orderId: schema.orders.id,
@@ -71,17 +71,6 @@ function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, f
         RA nó, thay vì hai báo cáo lệch nhau mà không ai giải thích được.
       */
       duplicate: sql<boolean>`exists (select 1 from order_attributions oa where oa.order_id = ${schema.orders.id} and oa.status = 'DUPLICATE')`.as("order_duplicate"),
-      /*
-        KHOÁ NHÓM TUỲ CHỌN — để báo cáo theo chiều gộp bằng MỘT câu `group by` thay vì N lượt lọc.
-
-        Vì sao nó phải nằm ở ĐÂY chứ không ở tệp gọi: chỉ khi khoá nhóm là một CỘT của chính bảng
-        dẫn xuất này thì bảng theo ngày và bảng bóc tách mới đứng trên CÙNG một tập dòng, cùng
-        `ORDER_OUTCOME`, cùng giá vốn. Gộp ở một truy vấn riêng bên ngoài là dựng một tập dòng thứ
-        hai, và hai tập dòng thì có ngày chúng không cộng ra cùng một số.
-
-        `NULL` khi không truyền — mọi nơi gọi cũ không đổi gì.
-      */
-      dimKey: (dimKey ?? sql<string | null>`null::text`).as("dim_key"),
     })
     .from(schema.orders)
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
@@ -105,8 +94,8 @@ function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, f
  * `extra` là vị ngữ CHỈ ĐƯỢC PHÉP THU HẸP tập đơn. Truyền vào một vị ngữ mở rộng (một `or` với
  * điều kiện ngoài population) là phá population, và số sẽ không còn khớp Báo cáo lợi nhuận nữa.
  */
-export function pnlFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null, extra?: SQL, dimKey?: SQL) {
-  const base = orderFacts(db, basis, from, to, extra, dimKey);
+export function pnlFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null, extra?: SQL) {
+  const base = orderFacts(db, basis, from, to, extra);
   return { base, predicates: facts(base) };
 }
 
