@@ -304,6 +304,9 @@ export function findQuantity(text: string): number | null {
  * khớp mẫu mã (`v.color.includes(state.color)`) vẫn tìm đúng "Đỏ đô", rồi `applyUnderstanding` ghi
  * lại tên màu ĐÚNG THEO DANH MỤC. Danh mục là nơi giữ chính tả của màu, không phải câu của khách.
  */
+/** Tiếng đồng ý viết CÓ DẤU — chúng trùng một tên màu sau khi bỏ dấu, nhưng không phải màu. */
+const KHONG_PHAI_MAU = ["vâng", "dạ", "ừ", "ừa"];
+
 const COLOR_WORDS = ["den", "trang", "do", "nau", "xanh", "vang", "hong", "tim", "be", "kem", "xam", "cam", "ghi", "reu", "navy"];
 const COLOR_LABEL: Record<string, string> = {
   den: "Đen", trang: "Trắng", do: "Đỏ", nau: "Nâu", xanh: "Xanh", vang: "Vàng", hong: "Hồng",
@@ -333,8 +336,21 @@ export function findColor(text: string): string {
   // 1. Có chỉ dấu ⇒ lấy ĐÚNG MỘT từ ngay sau nó, rồi tra bảng. Một từ, không phải phần đuôi câu.
   const marked = / (?:màu|mau|color) ([^ ]+) /u.exec(padded)?.[1] ?? "";
   if (marked) {
-    const bare = normalize(marked).trim();
-    if (COLOR_WORDS.includes(bare)) return COLOR_LABEL[bare];
+    /*
+      ĐƯỜNG CÓ CHỈ DẤU VẪN PHẢI CHẶN MỘT TIẾNG ĐỒNG Ý.
+
+      Đường này cố tình đọc từ ngay sau "màu" trên chuỗi ĐÃ BỎ DẤU, để bắt được những lần khách gõ
+      thiếu dấu ("mau do" = màu đỏ). Cái giá là "vâng" cũng bỏ dấu thành "vang". Câu "chị chọn màu,
+      vâng ạ" sau khi bỏ dấu câu thành "chị chọn màu vâng ạ" ⇒ máy ghi nhận khách vừa chọn màu Vàng.
+
+      Một tiếng đồng ý KHÔNG BAO GIỜ là một màu, nên loại trực tiếp theo CHÍNH TẢ CÓ DẤU. Chỉ loại
+      đúng dạng có dấu: khách gõ "mau vang" không dấu thì Vàng vẫn là cách đọc hợp lý nhất, và đó
+      là lý do đường này tồn tại.
+    */
+    if (!KHONG_PHAI_MAU.includes(marked)) {
+      const bare = normalize(marked).trim();
+      if (COLOR_WORDS.includes(bare)) return COLOR_LABEL[bare];
+    }
   }
   // 2. Không có chỉ dấu ⇒ đòi đúng chính tả có dấu.
   for (const [spelling, label] of COLOR_SPELLINGS) if (padded.includes(` ${spelling} `)) return label;

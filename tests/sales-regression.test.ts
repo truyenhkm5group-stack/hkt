@@ -600,6 +600,21 @@ export async function testSalesRegression(db: Db) {
   assert.equal(isAffirmativeText("ok em chốt cho anh"), true, 'câu kết thúc bằng "h" KHÔNG phải câu hỏi');
   assert.equal(isAffirmativeText("ừ"), true, '"ừ" là đồng ý, không phải tiểu từ hỏi');
 
+  /*
+    ── CHIỀU CÒN LẠI CỦA CÙNG MỘT VA CHẠM: "màu, vâng ạ" KHÔNG PHẢI MÀU VÀNG ──
+
+    Đường nhận màu CÓ CHỈ DẤU đọc từ ngay sau "màu" trên chuỗi đã bỏ dấu — cố ý, để bắt được
+    "mau do" khi khách gõ thiếu dấu. Cái giá là "vâng" cũng bỏ dấu thành "vang". Câu "chị chọn
+    màu, vâng ạ" sau khi bỏ dấu câu thành "chị chọn màu vâng ạ".
+
+    Chỉ loại dạng CÓ DẤU: "mau vang" không dấu thì Vàng vẫn là cách đọc hợp lý nhất, và giữ được
+    nó chính là lý do đường có chỉ dấu tồn tại.
+  */
+  assert.equal(findColor("chị chọn màu, vâng ạ"), "", '"vâng" sau chữ "màu" là tiếng đồng ý, không phải màu Vàng');
+  assert.equal(findColor("màu, dạ em xem"), "", '"dạ" cũng vậy');
+  assert.equal(findColor("mau vang"), "Vàng", "gõ thiếu dấu thì Vàng vẫn là cách đọc hợp lý nhất — không được vá quá tay");
+  assert.equal(findColor("màu vàng"), "Vàng");
+
   // ── Ý MUỐN MUA · VIỆC SAU BÁN: hai chỗ hổng đo được, kèm BẪY chiều ngược ──
   for (const t of ["mua 1 cái", "đặt hàng", "lấy cho chị 1 bộ", "chốt đơn nhé", "cho chị 1 cái", "order 1 cái", "em muốn mua"]) {
     const intents = understandByRule(t).intents;
