@@ -129,6 +129,16 @@ export const users = pgTable("users", {
    */
   dataScope: text("data_scope").notNull().default("ALL"),
   active: boolean("active").notNull().default(true),
+  /**
+   * THU HỒI PHIÊN — mốc CHỈ TIẾN, KHÔNG BAO GIỜ LÙI.
+   *
+   * Token được ký hợp lệ vẫn bị TỪ CHỐI nếu mốc đăng nhập gốc của nó (`lgn`) CŨ HƠN giá trị này.
+   * So với `lgn` chứ không phải `iat`: gia hạn trượt đẩy `iat` lên ở mỗi lượt, nên so với `iat`
+   * thì lần gia hạn kế tiếp sẽ HỒI SINH đúng phiên vừa bị thu hồi.
+   *
+   * `NULL` = CHƯA TỪNG THU HỒI, không phải "thu hồi từ năm 1970". Không backfill, không mặc định.
+   */
+  sessionInvalidBefore: ts("session_invalid_before"),
   lastLoginAt: ts("last_login_at"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),

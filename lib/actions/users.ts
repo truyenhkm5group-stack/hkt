@@ -6,11 +6,12 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { ALL_PERMISSIONS, USER_PERMISSION_SNAPSHOT_KEY } from "@/lib/auth/permissions";
-import { can, loadPermissionSnapshots, requireUser, ROLE_PERMISSIONS_KEY } from "@/lib/auth/session";
+import { can, destroySession, loadPermissionSnapshots, requireUser, ROLE_PERMISSIONS_KEY } from "@/lib/auth/session";
+import { applySessionRevocation } from "@/lib/auth/session-revoke";
 import { setSettingJson } from "@/lib/settings";
 import { changePasswordSchema, createUserSchema, resetPasswordSchema, rolePermissionsSchema, setUserActiveSchema, updateUserSchema, userPermissionsSchema } from "@/lib/validation/users";
 
-export type ActionResult = { ok: true; id?: string } | { error: string };
+export type ActionResult = { ok: true; id?: string; signedOut?: boolean } | { error: string };
 
 function firstIssue(error: { issues: { message: string }[] }) {
   return error.issues[0]?.message ?? "Dữ liệu không hợp lệ";
@@ -59,6 +60,14 @@ export async function updateUser(input: unknown): Promise<ActionResult> {
   }
   await db.update(schema.users).set({ name: data.name, role: data.role, active: data.active }).where(eq(schema.users.id, data.id));
   await audit({ userId: user.id, userEmail: user.email, action: "USER_UPDATE", entity: "USER", entityId: target.id, detail: { email: target.email, before: { name: target.name, role: target.role, active: target.active }, after: { name: data.name, role: data.role, active: data.active } } });
+  /*
+    CHỈ khi tài khoản chuyển từ ĐANG HOẠT ĐỘNG sang BỊ KHOÁ. Hộp thoại này đổi cả tên và VAI TRÒ,
+    và đổi vai trò KHÔNG được thu hồi phiên: quyền vốn đã được nạp lại từ CSDL ở mọi lượt gọi, nên
+    thu hồi ở đó chỉ là đá người ta ra vì một lần sửa nhãn — và dạy cả đội bỏ qua thông báo phiên.
+  */
+  if (target.active && !data.active) {
+    await applySessionRevocation({ targetUserId: target.id, targetEmail: target.email, trigger: "ACCOUNT_DISABLED", actor: { id: user.id, label: user.email } });
+  }
   revalidatePath("/settings/users");
   return { ok: true, id: target.id };
 }
@@ -77,6 +86,15 @@ export async function setUserActive(input: unknown): Promise<ActionResult> {
   if (target.active === active) return { ok: true, id };
   await db.update(schema.users).set({ active }).where(eq(schema.users.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: active ? "USER_UNLOCK" : "USER_LOCK", entity: "USER", entityId: id, detail: { email: target.email } });
+  /*
+    `users.active = false` đã chặn ngay ở `resolveCurrentUser()`, nên dòng này DƯ cho hôm nay. Nó
+    tồn tại cho NGÀY MỞ KHOÁ LẠI: không đẩy mốc thì token cũ (còn trong trần 30 ngày) sống lại
+    nguyên vẹn vào lúc mở khoá, tức là một tài khoản từng bị khoá vì nghi ngờ lại tự động tiếp tục
+    phiên cũ. Rẻ: cùng một câu UPDATE.
+  */
+  if (!active) {
+    await applySessionRevocation({ targetUserId: id, targetEmail: target.email, trigger: "ACCOUNT_DISABLED", actor: { id: user.id, label: user.email } });
+  }
   revalidatePath("/settings/users");
   return { ok: true, id };
 }
@@ -92,6 +110,9 @@ export async function resetUserPassword(input: unknown): Promise<ActionResult> {
   if (!target) return { error: "Không tìm thấy người dùng" };
   await db.update(schema.users).set({ passwordHash: await hashPassword(password) }).where(eq(schema.users.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: "USER_RESET_PASSWORD", entity: "USER", entityId: id, detail: { email: target.email } });
+  // Đặt lại mật khẩu mà token cũ vẫn sống thì việc đặt lại KHÔNG có tác dụng gì — đây chính là lý
+  // do tồn tại của cả tính năng thu hồi. Bắt buộc, không có cờ tắt.
+  await applySessionRevocation({ targetUserId: id, targetEmail: target.email, trigger: "PASSWORD_RESET", actor: { id: user.id, label: user.email } });
   revalidatePath("/settings/users");
   return { ok: true, id };
 }
@@ -111,7 +132,13 @@ export async function changeMyPassword(input: unknown): Promise<ActionResult> {
   }
   await db.update(schema.users).set({ passwordHash: await hashPassword(newPassword) }).where(eq(schema.users.id, user.id));
   await audit({ userId: user.id, userEmail: user.email, action: "PASSWORD_CHANGE", entity: "USER", entityId: user.id });
-  return { ok: true, id: user.id };
+  // Đổi mật khẩu thu hồi TOÀN BỘ phiên, kể cả phiên đang dùng. Chừa lại đúng cái đang cầm thì câu
+  // "đổi mật khẩu là cắt mọi truy cập cũ" không còn đúng nữa, mà đó là câu người dùng đang tin.
+  await applySessionRevocation({ targetUserId: user.id, targetEmail: user.email, trigger: "PASSWORD_RESET", actor: { id: user.id, label: user.email } });
+  // Xoá cookie ngay tại đây: để lại thì lượt điều hướng kế tiếp đá họ ra với câu "phiên đã bị thu
+  // hồi", đọc lên như thể có ai đó vừa can thiệp — trong khi chính họ vừa bấm đổi mật khẩu.
+  await destroySession();
+  return { ok: true, id: user.id, signedOut: true };
 }
 
 /** Tuỳ chỉnh quyền riêng cho một người dùng (null = quay về mẫu quyền của vai trò) */

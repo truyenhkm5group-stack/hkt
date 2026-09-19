@@ -201,6 +201,7 @@ import { testCareReopen } from "./care-reopen.test";
 import { testCareResolution } from "./care-resolution.test";
 import { testShipmentsQaFixes } from "./shipments-qa-fixes.test";
 import { testSessionRenewal } from "./session-renewal.test";
+import { testSessionRevocation } from "./session-revocation.test";
 import { testReportingParity } from "./reporting-parity.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
@@ -1764,6 +1765,9 @@ async function main() {
   await testCareResolution(db);
   await testShipmentsQaFixes(db);
   await testSessionRenewal();
+  // Ngay sau đó: bài thu hồi phiên thêm hai tài khoản mang tiền tố `srev-` và tự dọn sạch cả dòng
+  // nhật ký lẫn tài khoản. Đặt cạnh bài gia hạn vì hai bài nói về cùng một token, từ hai phía.
+  await testSessionRevocation(db);
   // Ngay sau đó: bài này gieo lịch sử vận đơn riêng để học xác suất, rồi TỰ DỌN sạch — đặt giữa
   // chừng thì những dòng đó lọt vào mẫu của báo cáo khác.
   await testReportingParity(db);

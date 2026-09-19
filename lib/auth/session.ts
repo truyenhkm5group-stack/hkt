@@ -11,7 +11,8 @@ import { normalizeScope, type AccessScope } from "@/lib/constants/access-scope";
 import { env } from "@/lib/env";
 import { memo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
-import { SESSION_COOKIE as COOKIE_PHIEN, SESSION_IDLE_DAYS, SESSION_LOGIN_CLAIM, cookieMaxAgeSec, sessionCookieSecure } from "@/lib/constants/session";
+import { SESSION_COOKIE as COOKIE_PHIEN, SESSION_IDLE_DAYS, SESSION_LOGIN_CLAIM, claimsFrom, cookieMaxAgeSec, sessionCookieSecure } from "@/lib/constants/session";
+import { DENY_REASON_PARAM, sessionRevoked, type SessionDenyReason } from "@/lib/constants/session-revocation";
 
 export const ROLE_PERMISSIONS_KEY = "auth.rolePermissions";
 
@@ -67,16 +68,30 @@ export async function signSession(user: SessionIdentity, opts: { loginAtSec?: nu
     .sign(secretKey());
 }
 
-export async function verifySessionToken(token: string): Promise<SessionUser | null> {
+/**
+ * Phiên đọc từ cookie, KÈM mốc đăng nhập gốc.
+ *
+ * `loginAtSec` là thứ luật thu hồi so sánh. Nó phải đi cùng danh tính từ đây tới
+ * `resolveCurrentUser()` — đọc lại token lần thứ hai ở tầng dưới là mở đường cho hai chỗ đọc hai
+ * giá trị khác nhau.
+ */
+type PhienDaDoc = { user: SessionUser; loginAtSec: number | null };
+
+async function readSessionToken(token: string): Promise<PhienDaDoc | null> {
   try {
     const { payload } = await jwtVerify(token, secretKey());
     if (!payload.sub) return null;
     const role = (payload.role as Role) ?? "VIEWER";
     // quyền thực tế được nạp lại từ DB trong requireUser / getCurrentUser
-    return { id: payload.sub, email: String(payload.email ?? ""), name: String(payload.name ?? ""), role, permissions: resolvePermissions(role, null), scope: "ALL", departmentCodes: [], positionId: null };
+    const user: SessionUser = { id: payload.sub, email: String(payload.email ?? ""), name: String(payload.name ?? ""), role, permissions: resolvePermissions(role, null), scope: "ALL", departmentCodes: [], positionId: null };
+    return { user, loginAtSec: claimsFrom(payload as Record<string, unknown>)?.loginAtSec ?? null };
   } catch {
     return null;
   }
+}
+
+export async function verifySessionToken(token: string): Promise<SessionUser | null> {
+  return (await readSessionToken(token))?.user ?? null;
 }
 
 export async function createSession(user: SessionIdentity) {
@@ -99,11 +114,15 @@ export async function destroySession() {
   store.delete(COOKIE_PHIEN);
 }
 
-export async function getSession(): Promise<SessionUser | null> {
+async function getSessionRaw(): Promise<PhienDaDoc | null> {
   const store = await cookies();
   const token = store.get(COOKIE_PHIEN)?.value;
   if (!token) return null;
-  return verifySessionToken(token);
+  return readSessionToken(token);
+}
+
+export async function getSession(): Promise<SessionUser | null> {
+  return (await getSessionRaw())?.user ?? null;
 }
 
 /**
@@ -128,27 +147,42 @@ export async function loadPermissionSnapshots(): Promise<Record<string, string[]
   return memo("auth:permissionSnapshots", 60_000, () => getSettingJson<Record<string, string[]>>(USER_PERMISSION_SNAPSHOT_KEY, {}));
 }
 
+/** Kết quả đầy đủ: hoặc là người dùng, hoặc là LÝ DO bị từ chối. Ba lý do, ba câu khác nhau. */
+export type ResolvedUser = { user: SessionUser } | { denied: SessionDenyReason };
+
 /**
- * Người dùng hiện tại với quyền đã tính (null nếu chưa đăng nhập / bị khoá), không chuyển hướng.
+ * Người dùng hiện tại với quyền đã tính, HOẶC lý do bị từ chối. Không chuyển hướng.
  *
  * `cache()` của React khử trùng lặp TRONG MỘT LẦN DỰNG: layout gọi `requireUser`, trang gọi
  * `requirePermission`, các khối Suspense gọi `can` — trước đây mỗi lời gọi là một lượt tra
  * người dùng riêng. Không phải đệm theo thời gian: lần dựng kế tiếp vẫn tra lại, nên khoá tài
- * khoản là có hiệu lực ngay ở lần điều hướng tiếp theo như cũ.
+ * khoản — và thu hồi phiên — có hiệu lực ngay ở lần điều hướng tiếp theo.
  */
-export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
-  const session = await getSession();
-  if (!session) return null;
+export const resolveCurrentUser = cache(async (): Promise<ResolvedUser> => {
+  const session = await getSessionRaw();
+  if (!session) return { denied: "NOT_FOUND" };
   const db = await getDb();
   const [user, templates, snapshots] = await Promise.all([
     db.query.users.findFirst({
-      where: eq(schema.users.id, session.id),
-      columns: { id: true, email: true, name: true, role: true, active: true, permissions: true, accessRoleId: true, positionId: true, dataScope: true },
+      where: eq(schema.users.id, session.user.id),
+      // `sessionInvalidBefore` đi CÙNG lượt tra này — không thêm một câu truy vấn nào. Và tuyệt đối
+      // KHÔNG được bọc lượt tra này trong `memo()`: một cửa sổ đệm 60 giây là 60 giây mà token vừa
+      // bị thu hồi vẫn dùng được, tức là tính năng này không còn là thu hồi nữa.
+      columns: { id: true, email: true, name: true, role: true, active: true, permissions: true, accessRoleId: true, positionId: true, dataScope: true, sessionInvalidBefore: true },
     }),
     loadRoleTemplates(),
     loadPermissionSnapshots(),
   ]);
-  if (!user || !user.active) return null;
+  if (!user) return { denied: "NOT_FOUND" };
+  if (!user.active) return { denied: "DISABLED" };
+  /*
+    THU HỒI PHIÊN. So mốc đăng nhập GỐC của token (`lgn`) với `users.session_invalid_before`.
+
+    Middleware ở Edge vẫn gia hạn cookie của một phiên đã bị thu hồi — nó không có CSDL để biết.
+    Vô hại, và cố ý: gia hạn giữ NGUYÊN `lgn`, nên tờ giấy vừa được ký lại vẫn bị chặn ở ngay đây.
+    Đó chính là lý do luật so với `lgn` chứ không so với `iat`.
+  */
+  if (sessionRevoked(session.loginAtSec, user.sessionInvalidBefore)) return { denied: "REVOKED" };
   const scope = normalizeScope(user.dataScope);
   const known = snapshots[user.id] ?? null;
 
@@ -160,14 +194,16 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   */
   if (scope === "ALL" && !user.accessRoleId) {
     return {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      permissions: resolvePermissions(user.role, user.permissions, templates, known),
-      scope,
-      departmentCodes: [],
-      positionId: user.positionId ?? null,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        permissions: resolvePermissions(user.role, user.permissions, templates, known),
+        scope,
+        departmentCodes: [],
+        positionId: user.positionId ?? null,
+      },
     };
   }
 
@@ -182,23 +218,42 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
     known,
   });
   return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    permissions: access.permissions,
-    scope: access.scope,
-    departmentCodes: access.departmentCodes,
-    positionId: user.positionId ?? null,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      permissions: access.permissions,
+      scope: access.scope,
+      departmentCodes: access.departmentCodes,
+      positionId: user.positionId ?? null,
+    },
   };
 });
 
+/**
+ * Người dùng hiện tại, hoặc `null`. Lớp mỏng trên `resolveCurrentUser()` — nó nuốt LÝ DO từ chối
+ * đi, nên chỉ dùng cho những chỗ chỉ cần biết "có hay không" (API trả 401, khối tuỳ quyền).
+ * Chỗ nào phải NÓI cho người dùng biết vì sao thì đọc `resolveCurrentUser()`.
+ */
+export const getCurrentUser = async (): Promise<SessionUser | null> => {
+  const ket = await resolveCurrentUser();
+  return "user" in ket ? ket.user : null;
+};
+
 /** Lấy người dùng hiện tại (kiểm tra còn active trong DB), chuyển hướng /login nếu chưa đăng nhập */
 export async function requireUser(roles?: Role[]): Promise<SessionUser> {
-  const session = await getSession();
-  if (!session) redirect("/login");
-  const user = await getCurrentUser();
-  if (!user) redirect("/login?reason=inactive");
+  const ket = await resolveCurrentUser();
+  if ("denied" in ket) {
+    /*
+      BA NGUYÊN NHÂN, BA CÂU. Trước bản này cả ba đều ra `?reason=inactive`, tức là nói với một
+      nhân viên rằng tài khoản họ bị khoá trong khi tài khoản hoàn toàn bình thường — và họ đi gọi
+      quản trị. Không có cookie thì về `/login` trần như cũ, vì lúc đó chẳng có gì để giải thích.
+    */
+    if (ket.denied === "NOT_FOUND" && !(await getSession())) redirect("/login");
+    redirect(`/login?reason=${DENY_REASON_PARAM[ket.denied]}`);
+  }
+  const user = ket.user;
   if (roles && !roles.includes(user.role) && user.role !== "ADMIN") redirect("/?forbidden=1");
   return user;
 }

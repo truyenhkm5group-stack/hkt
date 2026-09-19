@@ -1,4 +1,5 @@
 import { ChangePasswordForm } from "@/app/(dashboard)/settings/profile/change-password-form";
+import { LogoutAllForm } from "@/app/(dashboard)/settings/profile/logout-all-form";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -33,8 +34,18 @@ export default async function ProfilePage() {
             ]}
           />
         </SectionCard>
-        <SectionCard title="Đổi mật khẩu của tôi" description="Nhập mật khẩu hiện tại để xác nhận. Các phiên đăng nhập khác vẫn còn hiệu lực tới khi hết hạn (7 ngày).">
+        {/*
+          Câu mô tả cũ ("các phiên đăng nhập khác vẫn còn hiệu lực tới khi hết hạn") đã SAI kể từ
+          bản này — đổi mật khẩu thu hồi toàn bộ phiên. Một dòng mô tả sai ở đúng chỗ người dùng
+          đang cân nhắc một việc an ninh thì tệ hơn là không có dòng nào.
+        */}
+        <SectionCard title="Đổi mật khẩu của tôi" description="Nhập mật khẩu hiện tại để xác nhận. Đổi mật khẩu sẽ đăng xuất tài khoản này trên MỌI thiết bị, kể cả máy đang dùng.">
           <ChangePasswordForm />
+        </SectionCard>
+      </section>
+      <section>
+        <SectionCard title="Phiên đăng nhập" description="Thu hồi mọi phiên đang mở mà không đổi mật khẩu">
+          <LogoutAllForm />
         </SectionCard>
       </section>
     </div>

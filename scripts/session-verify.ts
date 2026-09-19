@@ -1,7 +1,8 @@
-import { eq } from "drizzle-orm";
+import { eq, isNotNull, sql } from "drizzle-orm";
 import { SignJWT, jwtVerify } from "jose";
 import { getDb, schema } from "@/db";
 import { SESSION_ABSOLUTE_DAYS, SESSION_COOKIE, SESSION_IDLE_DAYS, SESSION_LOGIN_CLAIM } from "@/lib/constants/session";
+import { REVOKE_AUDIT_ACTION, sessionRevoked } from "@/lib/constants/session-revocation";
 
 /**
  * ═══════════ KIỂM PHIÊN TRƯỢT TRÊN CHÍNH MÁY CHỦ ĐANG CHẠY ═══════════
@@ -215,13 +216,64 @@ async function main() {
     }
   }
 
+  /* ═══ I · THU HỒI PHIÊN: CỘT ĐÃ CÓ, VÀ NHỮNG LƯỢT THU HỒI ĐÃ XẢY RA ĐỀU TỰ NHẤT QUÁN ═══
+
+     PHÉP NÀY ĐO ĐƯỢC GÌ, VÀ KHÔNG ĐO ĐƯỢC GÌ — nói thẳng để không ai đọc nhầm một dấu ✓.
+
+     ĐO ĐƯỢC: migration 0106 đã áp trên máy chủ này; luật "chỉ tiến" không bị vi phạm ở bất kỳ dòng
+     nào đang có; mỗi lượt thu hồi đã xảy ra đều có một dòng nhật ký mang khoá tài khoản; và với
+     những tài khoản ĐÃ bị thu hồi, một phiếu phiên cũ thật sự bị luật từ chối.
+
+     KHÔNG ĐO ĐƯỢC: "thu hồi có chặn được một lượt gọi thật trên production hay không". Câu đó chỉ
+     trả lời được bằng cách GHI vào CSDL production — mà script này chỉ đọc, và không có tài khoản
+     QA riêng để ghi lên. Chủ shop xác minh bằng tay: bấm "Đăng xuất mọi thiết bị" trên một máy,
+     tải lại trang trên máy thứ hai, phải ra `/login?reason=revoked`. */
+  {
+    let coCot = true;
+    try {
+      await db.select({ n: sql<number>`count(*)` }).from(schema.users).where(isNotNull(schema.users.sessionInvalidBefore));
+    } catch {
+      coCot = false;
+    }
+    if (!coCot) {
+      ghi("I", "cột thu hồi phiên đã có trên máy chủ này", false, "không đọc được users.session_invalid_before — migration 0106 CHƯA áp");
+    } else {
+      const daThuHoi = await db.query.users.findMany({
+        where: isNotNull(schema.users.sessionInvalidBefore),
+        columns: { id: true, sessionInvalidBefore: true },
+      });
+      const soDong = await db
+        .select({ n: sql<number>`count(*)` })
+        .from(schema.auditLogs)
+        .where(eq(schema.auditLogs.action, REVOKE_AUDIT_ACTION));
+      const soNhatKy = Number(soDong[0]?.n ?? 0);
+
+      // Với mỗi tài khoản đã bị thu hồi: một phiếu phiên cấp TRƯỚC mốc phải bị luật từ chối, và một
+      // phiếu cấp SAU mốc phải được chấp nhận. Hàm thuần, không gọi mạng, không ghi gì.
+      const sai = daThuHoi.filter((u) => {
+        const moc = u.sessionInvalidBefore;
+        if (!moc) return false;
+        const truoc = Math.floor(moc.getTime() / 1000) - 60;
+        const sau = Math.ceil(moc.getTime() / 1000) + 60;
+        return !sessionRevoked(truoc, moc) || sessionRevoked(sau, moc);
+      });
+
+      const dat = sai.length === 0 && (daThuHoi.length === 0 || soNhatKy > 0);
+      const thay =
+        daThuHoi.length === 0
+          ? `cột đã có · chưa tài khoản nào bị thu hồi (${soNhatKy} dòng nhật ký) — phép này chỉ xác nhận migration 0106 đã áp`
+          : `${daThuHoi.length} tài khoản đã thu hồi · ${soNhatKy} dòng nhật ký · luật từ chối đúng ở ${daThuHoi.length - sai.length}/${daThuHoi.length}`;
+      ghi("I", "thu hồi phiên: cột đã áp, luật tự nhất quán, mỗi lượt đều có nhật ký", dat, thay);
+    }
+  }
+
   const hong = bang.filter((r) => !r.dat);
   console.log(`\n═══ ${bang.length - hong.length}/${bang.length} PHÉP ĐẠT ═══`);
   if (hong.length) {
     console.log(`✗ KHÔNG ĐẠT: ${hong.map((r) => r.ma).join(" · ")}`);
     process.exitCode = 1;
   } else {
-    console.log("✓ Phiên trượt chạy đúng trên máy chủ thật: gia hạn đúng lúc, trần sống chặn được, hết hạn vẫn chết, SSE không còn 401, POST không ghi đè đăng xuất, CSDL vẫn là nơi quyết định quyền.");
+    console.log("✓ Phiên trượt chạy đúng trên máy chủ thật: gia hạn đúng lúc, trần sống chặn được, hết hạn vẫn chết, SSE không còn 401, POST không ghi đè đăng xuất, CSDL vẫn là nơi quyết định quyền, cột thu hồi phiên đã áp.");
   }
 }
 

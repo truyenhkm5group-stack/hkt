@@ -52,6 +52,7 @@ const MOI = [
   "0103_care_decisions",
   "0104_tech_cto_proposals",
   "0105_cto_repair_evidence",
+  "0106_session_revocation",
 ] as const;
 
 /*
