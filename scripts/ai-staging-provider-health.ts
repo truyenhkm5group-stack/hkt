@@ -23,9 +23,11 @@
 import "dotenv/config";
 import { desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { aiEnv, getAiSettings, SHADOW_ONLY_PROVIDERS, WORKFORCE_PROVIDERS } from "@/lib/ai-workforce/config";
+import * as cauHinh from "@/lib/ai-workforce/config";
+import { aiEnv, getAiSettings } from "@/lib/ai-workforce/config";
 import { runModelStep, type ModelAttempt } from "@/lib/ai-workforce/model-router";
-import { getLiveProvider, getProvider, defaultProviderName, providerNames } from "@/lib/ai-workforce/providers";
+import * as soNha from "@/lib/ai-workforce/providers";
+import { getProvider, defaultProviderName, providerNames } from "@/lib/ai-workforce/providers";
 import { UNDERSTANDING_SCHEMA } from "@/lib/ai-workforce/agents/sales/understand";
 import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
 import { startRun } from "@/lib/ai-workforce/runs";
@@ -42,6 +44,31 @@ import {
 import type { RouteTier } from "@/lib/constants/ai";
 
 const arg = (k: string) => process.argv.find((a) => a.startsWith(`--${k}=`))?.split("=")[1] ?? "";
+
+/*
+  ẢNH ĐANG CHẠY CÓ THỂ CŨ HƠN NHÁNH NÀY — VÀ PHÉP DÒ PHẢI NÓI RA, KHÔNG ĐƯỢC CHẾT.
+
+  Bản chạy thử được dựng từ một commit trước, nên `SHADOW_ONLY_PROVIDERS` và `getLiveProvider()`
+  có thể CHƯA tồn tại trong ảnh. Hai thứ ấy chỉ phục vụ phần soát khoá Gemini; phần P0 — "OpenAI
+  gọi được chưa" — không cần chúng.
+
+  Nên: đọc mềm, và khi thiếu thì IN RA rằng chưa soát được, chứ không im lặng bỏ qua (thành một
+  báo cáo nói dối) và cũng không chết cả lượt dò (thành một sự cố giả). Chép đè `config.ts` hay
+  `providers/index.ts` vào container là cách còn tệ hơn cả hai: đó là những tệp bản chạy thử ĐANG
+  DÙNG để phục vụ phiên soát của người khác.
+*/
+const CHI_O_BONG: readonly string[] = Array.isArray((cauHinh as Record<string, unknown>).SHADOW_ONLY_PROVIDERS)
+  ? ((cauHinh as unknown as { SHADOW_ONLY_PROVIDERS: readonly string[] }).SHADOW_ONLY_PROVIDERS)
+  : [];
+const PHUC_VU_KHACH: readonly string[] = Array.isArray((cauHinh as Record<string, unknown>).WORKFORCE_PROVIDERS)
+  ? ((cauHinh as unknown as { WORKFORCE_PROVIDERS: readonly string[] }).WORKFORCE_PROVIDERS)
+  : [];
+const layNhaPhucVuKhach: ((name: string) => unknown) | null =
+  typeof (soNha as Record<string, unknown>).getLiveProvider === "function"
+    ? ((soNha as unknown as { getLiveProvider: (n: string) => unknown }).getLiveProvider)
+    : null;
+/** Ảnh này đã có cơ chế khoá nhà cung cấp chỉ-ở-bóng chưa. */
+const ANH_CO_KHOA_BONG = layNhaPhucVuKhach !== null && CHI_O_BONG.length > 0;
 
 /**
  * Câu dò CỐ ĐỊNH, không lấy từ hội thoại nào.
@@ -63,11 +90,11 @@ async function doMot(ten: string, tier: RouteTier) {
   const nha = getProvider(ten);
   console.log(`\n${"─".repeat(78)}`);
   console.log(`NHÀ CUNG CẤP: ${ten}   ·   nấc: ${tier}`);
-  const chiOBong = (SHADOW_ONLY_PROVIDERS as readonly string[]).includes(ten);
+  const chiOBong = CHI_O_BONG.includes(ten);
   if (chiOBong) {
     // Nói ra ngay, vì đây là một khẳng định về AN TOÀN và nó phải kiểm được ở mỗi lượt dò.
     console.log(`   ⓘ CHỈ-Ở-BÓNG: dò được, nhưng KHÔNG ra được tới khách.`);
-    console.log(`     · getLiveProvider("${ten}") = ${getLiveProvider(ten) === null ? "null  ✓" : "⛔ KHÔNG PHẢI null — LỖ HỔNG"}`);
+    console.log(`     · getLiveProvider("${ten}") = ${layNhaPhucVuKhach?.(ten) === null ? "null  ✓" : "⛔ KHÔNG PHẢI null — LỖ HỔNG"}`);
     console.log(`     · khai được bằng biến môi trường? ${aiEnv.provider === ten ? "⛔ CÓ — LỖ HỔNG" : "không  ✓"}`);
     console.log(`     · là nhà cung cấp mặc định?       ${defaultProviderName() === ten ? "⛔ CÓ — LỖ HỔNG" : "không  ✓"}`);
   }
@@ -140,8 +167,14 @@ async function main() {
   console.log(`   thời điểm    : ${new Date().toISOString()}`);
   console.log(`   mặc định     : ${defaultProviderName()}`);
   console.log(`   đã đăng ký   : ${providerNames().join(" · ")}`);
-  console.log(`   phục vụ khách: ${WORKFORCE_PROVIDERS.join(" · ")}`);
-  console.log(`   chỉ-ở-bóng   : ${SHADOW_ONLY_PROVIDERS.join(" · ")}`);
+  console.log(`   phục vụ khách: ${PHUC_VU_KHACH.length ? PHUC_VU_KHACH.join(" · ") : "(ảnh cũ — chưa khai danh sách)"}`);
+  console.log(`   chỉ-ở-bóng   : ${CHI_O_BONG.length ? CHI_O_BONG.join(" · ") : "(ảnh cũ — chưa có cơ chế này)"}`);
+  if (!ANH_CO_KHOA_BONG) {
+    // Nói thẳng, vì im lặng ở đây biến "chưa soát được" thành "đã soát và không sao".
+    console.log(`   ⚠ ẢNH ĐANG CHẠY CŨ HƠN NHÁNH NÀY: chưa có Gemini và chưa có khoá chỉ-ở-bóng.`);
+    console.log(`     ⇒ P0 (OpenAI gọi được chưa) VẪN ĐO ĐƯỢC và không cần hai thứ đó.`);
+    console.log(`     ⇒ Phần soát khoá Gemini (§7) CHƯA soát được ở đây — phải dựng lại ảnh trước.`);
+  }
   console.log(`   gọi mô hình  : ${settings.modelCallsEnabled ? "BẬT" : "⛔ TẮT — sẽ không lượt nào đi được"}`);
   console.log(`   MÁY tự gửi   : ${aiEnv.hardLimits.allowAutoSend ? "⛔ MỞ" : "✓ CẤM"} · tạo đơn: ${aiEnv.hardLimits.allowOrderCreate ? "⛔ MỞ" : "✓ CẤM"}`);
 
