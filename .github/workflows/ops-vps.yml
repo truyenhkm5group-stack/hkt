@@ -100,6 +100,7 @@ on:
           - ai-staging-router-sim # CHỈ ĐỌC: nếu có bộ định tuyến nhiều nhà cung cấp thì lượt đã chạy đi làn nào, tốn bao nhiêu (arg: "--days=30")
           - ai-staging-health    # 1 lượt gọi THẬT mỗi nhà cung cấp bằng CHÍNH khoá staging; phân loại lỗi, không gửi tin, không tạo đơn (arg: "--provider=erp --tier=ECONOMY")
           - ai-staging-ctxcost   # CHỈ ĐỌC: đang gửi bao nhiêu token ngữ cảnh mỗi lượt, và gửi đủ lịch sử thì tốn bao nhiêu (arg: "--days=7")
+          - ai-staging-setting   # ghi cấu hình JSON vào settings của BẢN CHẠY THỬ (arg: "<khoá> <json>") — KHÔNG đụng production
           - ai-staging-status     # trạng thái bản chạy thử + RAM/swap + sức khoẻ production
           - ai-staging-logs       # 120 dòng log gần nhất của app bản chạy thử
           - ai-staging-down       # dừng bản chạy thử (arg "--volumes" để xoá cả CSDL của nó)
@@ -1300,6 +1301,20 @@ jobs:
                 fetch_staging_script ai-staging-quality-audit.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-quality-audit.ts'
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-staging-quality-audit.ts ${ARG:---days=7} ;;
+
+              ai-staging-setting)
+                cd /opt/vnx-ai-staging
+                #
+                # GHI CẤU HÌNH VÀO BẢN CHẠY THỬ — KHÔNG PHẢI PRODUCTION.
+                #
+                # Thao tác `set-setting` có sẵn chạy trong container `erp-app`, tức là PRODUCTION.
+                # Dùng nó để bật một thứ trên bản chạy thử là ghi nhầm vào chỗ đang phục vụ khách
+                # thật. Hai môi trường phải có hai cửa riêng, và cửa này chỉ mở vào
+                # `vnx-ai-staging-app`.
+                #
+                fetch_staging_script set-setting.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/set-setting.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/set-setting.ts ${ARG:-} ;;
 
               ai-staging-ctxcost)
                 cd /opt/vnx-ai-staging
