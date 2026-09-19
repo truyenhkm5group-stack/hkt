@@ -1,0 +1,53 @@
+# ═══════════ BẰNG CHỨNG DANH TÍNH CODING AGENT ═══════════
+#
+# Chạy bằng CREDENTIAL THẬT của GitHub App `erp-agent`, để lại một PR THẬT làm bằng chứng.
+#
+# VÌ SAO Ở ĐÂY MÀ KHÔNG PHẢI TRÊN VPS: bộ chứng minh cần `git` và một kho mã thật. Container
+# production chạy một bản Next.js ĐÃ DỰNG, trong đó không có kho git và không nên có
+# (docs/ai-tech-phase2a.md mục 5). Máy chạy của GitHub có đủ, và nó cũng chính là hình dạng môi
+# trường mà một runner coding agent sẽ có.
+#
+# VÌ SAO `permissions: contents: read` VÀ KHÔNG HƠN: `GITHUB_TOKEN` của lượt chạy này CHỈ để lấy
+# mã nguồn. Mọi thao tác ghi (đẩy nhánh, mở PR) đi bằng token của App — nếu không thì bằng chứng
+# sẽ nói về quyền của Actions chứ không nói về danh tính agent, và đó là đúng thứ cần chứng minh.
+name: Bằng chứng danh tính agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      probe_merge:
+        description: "Đo cả phép GỘP PR — CHỈ bật SAU khi ruleset đã nâng lên 1 lượt duyệt (trước đó nó sẽ thật sự gộp)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-identity-proof
+  cancel-in-progress: false
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # KHÔNG giữ credential của Actions trong `.git/config`: nếu giữ, lệnh `git push` trong bộ
+          # chứng minh có thể lặng lẽ đi bằng `GITHUB_TOKEN` và bằng chứng sẽ nói về quyền của
+          # Actions chứ không nói về danh tính App.
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Chạy bộ chứng minh danh tính
+        env:
+          ERP_AGENT_GITHUB_APP_ID: ${{ secrets.ERP_AGENT_GITHUB_APP_ID }}
+          ERP_AGENT_GITHUB_INSTALLATION_ID: ${{ secrets.ERP_AGENT_GITHUB_INSTALLATION_ID }}
+          ERP_AGENT_GITHUB_PRIVATE_KEY: ${{ secrets.ERP_AGENT_GITHUB_PRIVATE_KEY }}
+          ERP_AGENT_GITHUB_REPO: ${{ github.repository }}
+          ERP_AGENT_PROOF_BASE: ${{ github.event.repository.default_branch }}
+        run: npx tsx --tsconfig tsconfig.json scripts/agent-identity-proof.ts ${{ inputs.probe_merge && '--probe-merge' || '' }}
