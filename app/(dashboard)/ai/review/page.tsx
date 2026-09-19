@@ -9,6 +9,8 @@ import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/fo
 import { listShadowTurns, shadowMetrics, type ShadowTurnFilters } from "@/lib/queries/sales-review";
 import { getDb } from "@/db";
 import { intentDistribution, pagesWithConversations } from "@/lib/queries/sales-metrics";
+import { batchProgress, evalBatchCoverage } from "@/lib/queries/sales-eval-batch";
+import { EVAL_BATCH_MIN, type EvalBucketKey } from "@/lib/constants/sales-eval-buckets";
 import type { SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Soát nhân sự AI" };
@@ -41,6 +43,7 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
     search: one(raw, "q").trim() || undefined,
     productId: one(raw, "product") || undefined,
     intent: one(raw, "intent") || undefined,
+    evalBucket: (one(raw, "bucket") || undefined) as EvalBucketKey | undefined,
     humanTakeover: boolParam(raw, "takeover"),
     hasError: boolParam(raw, "error"),
     hasSuggestion: boolParam(raw, "suggestion"),
@@ -64,12 +67,14 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
   const perPage = 10;
   const page = Math.max(1, Number(one(raw, "page")) || 1);
   // Lấy DƯ MỘT dòng để biết còn trang sau hay không, khỏi tốn một câu đếm riêng.
-  const [duTurns, metrics, pages, yDinh] = await Promise.all([
+  const [duTurns, metrics, pages, yDinh, doPhuMe] = await Promise.all([
     listShadowTurns({ ...filters, limit: perPage + 1, offset: (page - 1) * perPage }),
     shadowMetrics(days),
     pagesWithConversations(),
     intentDistribution(days),
+    evalBatchCoverage(days),
   ]);
+  const tienDo = batchProgress(doPhuMe);
   const coTrangSau = duTurns.length > perPage;
   const turns = duTurns.slice(0, perPage);
   const db = await getDb();
@@ -148,6 +153,49 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
             />
           ))}
         </div>
+      </Card>
+
+      {/*
+        ───────── MẺ CHẤM: MƯỜI BỐN NHÓM CÂU PHẢI CÓ MẶT ─────────
+
+        Khối ý định bên dưới xếp theo NHÃN CỦA MÁY. Khối này xếp theo CHỮ KHÁCH GÕ, và đó là khác
+        biệt quyết định: lấy nhãn của máy ra làm rổ để chấm máy là một vòng tròn — lượt nào máy
+        đọc nhầm ý định sẽ rơi vào rổ sai, và rổ ĐÚNG trông như không có ca nào, đúng cái lỗi phép
+        chấm này sinh ra để bắt.
+
+        Mỗi ô in: số ca CÓ THỂ chấm / số ca ĐÃ chấm / sàn của nhóm. Viền hổ phách = chưa đạt sàn.
+      */}
+      <Card className="gap-2 p-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold">Mẻ chấm phân tầng — {tienDo.bucketsAtFloor}/{doPhuMe.length} nhóm đã đủ sàn</h2>
+          <p className="text-xs text-muted-foreground">
+            sàn cả mẻ: {formatNumber(EVAL_BATCH_MIN)} ca · còn thiếu {formatNumber(tienDo.stillMissing)} ca · bấm một nhóm để lọc
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {doPhuMe.map((b) => {
+            const dangChon = one(raw, "bucket") === b.key;
+            const chuaDu = b.missing > 0;
+            return (
+              <Link
+                key={b.key}
+                href={queryWith("bucket", dangChon ? "" : b.key)}
+                className={`rounded border px-2 py-1 text-xs ${dangChon ? "border-primary bg-primary/10 text-primary" : chuaDu ? "border-amber-500/60 text-amber-700 dark:text-amber-300" : "border-emerald-500/60 text-emerald-700 dark:text-emerald-300"}`}
+                title={`${b.question}\n\nHỏng thì: ${b.risk}\n\n${b.available} ca có thể chấm · ${b.reviewed} đã chấm · sàn ${b.min}`}
+              >
+                {b.label}
+                <span className="ml-1.5 tabular-nums opacity-70">{formatNumber(b.available)}</span>
+                <span className="ml-1 font-semibold tabular-nums">· {formatNumber(b.reviewed)}/{b.min}</span>
+              </Link>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Di chuột lên một nhóm để đọc CÂU HỎI nhóm ấy trả lời và HẬU QUẢ nếu máy hỏng ở đó. Các nhóm CỐ Ý không phân hoạch —
+          &quot;Lấy cho chị màu đỏ size XL&quot; vừa là chọn mẫu vừa là ý muốn mua — nên KHÔNG cộng các ô này lại.
+          Mệnh đề lọc ở đây CHỌN MẪU chứ không đo gì: kéo dư vài ca là chấp nhận được vì người chấm đọc rồi mới quyết,
+          còn để trống một nhóm thì mẻ chấm mất hẳn một câu hỏi.
+        </p>
       </Card>
 
       {/*

@@ -24,6 +24,9 @@ import { RUN_BREAKDOWNS, intentDistribution, pagesWithConversations, salesModelB
 import { listShadowTurns, shadowMetrics } from "@/lib/queries/sales-review";
 import { clearMemo } from "@/lib/cache";
 import { PancakePagesClient } from "@/lib/integrations/pancake/pages";
+import { EVAL_BATCH_MAX, EVAL_BATCH_MIN, EVAL_BUCKETS } from "@/lib/constants/sales-eval-buckets";
+import { evalBatchCoverage } from "@/lib/queries/sales-eval-batch";
+import { REVIEW_REASON_TAGS, REVIEW_REASON_TAG_META, type ReviewReasonTag } from "@/lib/constants/sales-review-tags";
 import { fanpageOps } from "@/lib/queries/fanpage-ops";
 
 /** Mốc gốc CỐ ĐỊNH — mốc trong ca là số phút tương đối, nên bài kiểm không già đi (AGENTS.md mục 50). */
@@ -687,6 +690,49 @@ export async function testSalesRegression(db: Db) {
     } finally {
       globalThis.fetch = fetchGoc;
     }
+  }
+
+  /*
+    ── MẺ CHẤM PHÂN TẦNG: SỔ NHÓM VÀ MỆNH ĐỀ LỌC PHẢI CHẠY THẬT ──
+
+    Ba tính chất đáng khoá, và không cái nào là "gọi hàm xem có ném lỗi không":
+
+    1. SÀN CỠ MẪU nằm TRONG khoảng chủ shop yêu cầu (30–50). Sàn được CỘNG RA từ chính sổ nhóm,
+       không gõ lại ở đâu — nên thêm một nhóm mà quên chỉnh sàn thì bài kiểm này đỏ chứ không phải
+       người vận hành phát hiện khi mẻ chấm đã phát đi.
+    2. MƯỜI BỐN MỆNH ĐỀ ĐỀU CHẠY ĐƯỢC trên lược đồ đã migrate. Một mệnh đề SQL sai cú pháp chỉ nổ
+       lúc có người bấm vào đúng nhóm ấy — tức muộn nhất có thể, và với đúng người ít có khả năng
+       sửa nó nhất.
+    3. MƯỜI LÝ DO CHẤM chủ shop đòi đều CÓ MẶT. Danh sách cũ thiếu bảy cái; thiếu một cái thì
+       người chấm phải nhét lỗi vào một nhãn gần đúng và bảng đếm nói sai về chỗ máy hay hỏng nhất.
+  */
+  assert.ok(
+    EVAL_BATCH_MIN >= 30 && EVAL_BATCH_MIN <= EVAL_BATCH_MAX,
+    `sàn cỡ mẫu phải nằm trong 30–${EVAL_BATCH_MAX}, đang là ${EVAL_BATCH_MIN}`,
+  );
+  assert.equal(new Set(EVAL_BUCKETS.map((b) => b.key)).size, EVAL_BUCKETS.length, "khoá nhóm phải duy nhất");
+  for (const b of EVAL_BUCKETS) {
+    assert.ok(b.question.trim().length > 10, `nhóm ${b.key} phải khai CÂU HỎI nó trả lời`);
+    assert.ok(b.risk.trim().length > 10, `nhóm ${b.key} phải khai HẬU QUẢ nếu máy hỏng ở đó`);
+  }
+  const doPhu = await evalBatchCoverage(90);
+  assert.equal(doPhu.length, EVAL_BUCKETS.length, "mọi nhóm phải có một dòng độ phủ, kể cả nhóm 0 ca");
+  for (const b of doPhu) {
+    assert.ok(Number.isFinite(b.available) && b.available >= 0, `nhóm ${b.key}: số ca phải là một con số`);
+    assert.ok(b.reviewed <= b.available, `nhóm ${b.key}: đã chấm (${b.reviewed}) không thể nhiều hơn số ca có (${b.available})`);
+  }
+  // Mệnh đề lọc phải thật sự LỌC, không phải trả về mọi thứ.
+  for (const b of EVAL_BUCKETS) {
+    const loc = await listShadowTurns({ evalBucket: b.key, limit: 5 });
+    assert.ok(Array.isArray(loc), `lọc theo nhóm ${b.key} phải chạy được trên lược đồ đã migrate`);
+  }
+  const BAT_BUOC = [
+    "WRONG_INTENT", "WRONG_PRODUCT", "WRONG_VARIANT", "WRONG_STATE", "BAD_REPLY",
+    "HALLUCINATION", "SHOULD_HAVE_HANDED_OFF", "MISSING_ENTITY", "WRONG_ORDER_DRAFT", "OTHER",
+  ];
+  for (const t of BAT_BUOC) {
+    assert.ok((REVIEW_REASON_TAGS as readonly string[]).includes(t), `thiếu lý do chấm bắt buộc: ${t}`);
+    assert.ok(REVIEW_REASON_TAG_META[t as ReviewReasonTag]?.label, `lý do ${t} phải có nhãn đọc được`);
   }
 
   console.log(

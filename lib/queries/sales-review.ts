@@ -15,6 +15,8 @@
  */
 import { and, asc, count, desc, eq, gte, isNotNull, lte, ne, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { bucketCond } from "@/lib/queries/sales-eval-batch";
+import type { EvalBucketKey } from "@/lib/constants/sales-eval-buckets";
 import type { SalesStage } from "@/lib/constants/sales-agent";
 import type { SenderType } from "@/lib/constants/sales-ingest";
 
@@ -36,6 +38,14 @@ export type ShadowTurnFilters = {
   productId?: string;
   /** Lọc theo một ý định bóc được. */
   intent?: string;
+  /**
+   * LỌC THEO NHÓM CỦA MẺ CHẤM PHÂN TẦNG (`lib/constants/sales-eval-buckets.ts`).
+   *
+   * Khác `intent` ở chỗ quan trọng nhất: `intent` đọc NHÃN CỦA MÁY, còn nhóm này đọc CHỮ KHÁCH GÕ.
+   * Lấy nhãn của máy ra làm rổ để chấm máy là một vòng tròn — lượt nào máy đọc nhầm ý định sẽ rơi
+   * vào rổ sai, và rổ đúng trông như không có ca nào.
+   */
+  evalBucket?: EvalBucketKey;
   /** Chỉ hội thoại đã / chưa chuyển người. */
   humanTakeover?: boolean;
   /** Chỉ lượt có lỗi. */
@@ -117,6 +127,7 @@ export async function listShadowTurns(filters: ShadowTurnFilters = {}): Promise<
     filters.reviewed === false ? sql`${l.reviewedAt} is null` : undefined,
     filters.productId ? sql`${r.stateAfter}->>'productId' = ${filters.productId}` : undefined,
     filters.intent ? sql`${r.understanding}->'intents' @> ${JSON.stringify([filters.intent])}::jsonb` : undefined,
+    filters.evalBucket ? bucketCond(filters.evalBucket) : undefined,
     filters.pageId ? eq(c.pageId, filters.pageId) : undefined,
     // `ilike` với `%…%`: không phân biệt hoa thường, và khớp giữa chuỗi. Bộ dữ liệu của một bản
     // chạy thử đếm bằng nghìn dòng nên quét tuần tự vẫn tức thì — thêm một chỉ mục ba-gram ở đây
