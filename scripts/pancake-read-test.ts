@@ -39,18 +39,41 @@ function mask(value: unknown): string {
 
 const BASE = env.pancake.pagesBaseUrl;
 
-async function get(path: string, params: Record<string, string | number>): Promise<{ status: number; body: Record<string, unknown> }> {
+const nghi = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/*
+  429 KHÔNG PHẢI MỘT CÂU TRẢ LỜI — VÀ ĐỌC NÓ NHƯ MỘT CÂU TRẢ LỜI LÀ CÁCH BÀI KIỂM TỰ NÓI DỐI.
+
+  Lượt chạy 10:44 ngày 19/09/2026 bắn mười lời gọi liền nhau. Sáu lời gọi cuối nhận 429, và bản
+  đầu của tệp này in chúng ra thành "tham số không được chấp nhận" — một kết luận về THAM SỐ rút
+  ra từ một phản hồi về TẦN SUẤT. Sáu dòng sai ấy trông y như sáu phép đo thật.
+
+  Nay: giãn nhịp giữa các lời gọi, thử lại có lùi dần khi gặp 429, và nếu vẫn 429 thì trả về đúng
+  chữ "CHƯA ĐO ĐƯỢC" chứ không bao giờ trả về một phán quyết. AGENTS.md §5 đã ghi luật tôn trọng
+  429 cho đường chạy thật; một bài kiểm phá luật ấy thì nó đo chính cái nó vừa gây ra.
+*/
+async function get(
+  path: string,
+  params: Record<string, string | number>,
+  lanThu = 3,
+): Promise<{ status: number; body: Record<string, unknown> }> {
   const url = new URL(`${BASE}/${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  // `url` không bao giờ được in ra: nó chứa token ở query string.
-  const res = await fetch(url, { method: "GET", headers: { accept: "*/*" } });
-  let body: Record<string, unknown> = {};
-  try {
-    body = (await res.json()) as Record<string, unknown>;
-  } catch {
-    body = {};
+  let cuoi = { status: 0, body: {} as Record<string, unknown> };
+  for (let i = 0; i < lanThu; i++) {
+    if (i > 0) await nghi(1500 * 2 ** (i - 1));
+    // `url` không bao giờ được in ra: nó chứa token ở query string.
+    const res = await fetch(url, { method: "GET", headers: { accept: "*/*" } });
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await res.json()) as Record<string, unknown>;
+    } catch {
+      body = {};
+    }
+    cuoi = { status: res.status, body };
+    if (res.status !== 429) return cuoi;
   }
-  return { status: res.status, body };
+  return cuoi;
 }
 
 function arr(value: unknown): Record<string, unknown>[] {
@@ -237,20 +260,35 @@ async function main() {
   const cuaSo = [1, hours, 24 * 30];
   const demTheoCuaSo: { gio: number; n: number }[] = [];
   for (const gio of cuaSo) {
+    await nghi(1200);
     const r = await get(`pages/${pageId}/conversations`, {
       [key]: token, since: until - gio * 3600, until, page_number: 1, page_size: 20, order_by: "updated_at",
     });
     const n = r.status >= 400 ? -1 : arr(r.body.conversations ?? (r.body.data as Record<string, unknown>)?.conversations ?? r.body.data).length;
     demTheoCuaSo.push({ gio, n });
-    console.log(`  cửa sổ ${String(gio).padStart(4)} giờ  : ${n < 0 ? `HTTP ${r.status}` : n} hội thoại`);
+    const vi = r.status === 429 ? "CHƯA ĐO ĐƯỢC (429 — bị giới hạn tần suất)" : n < 0 ? `CHƯA ĐO ĐƯỢC (HTTP ${r.status})` : `${n} hội thoại`;
+    console.log(`  cửa sổ ${String(gio).padStart(4)} giờ  : ${vi}`);
   }
-  const hopLeCuaSo = demTheoCuaSo.filter((x) => x.n >= 0);
-  const max = Math.max(...hopLeCuaSo.map((x) => x.n), 0);
-  const min = Math.min(...hopLeCuaSo.map((x) => x.n), Number.POSITIVE_INFINITY);
-  if (hopLeCuaSo.length >= 2 && max === min && max > 0) {
-    ghiLoi(`MỌI CỬA SỔ ĐỀU TRẢ ĐÚNG ${max} — ${max} là TRẦN CỨNG, không phải toàn bộ dữ liệu. Phần vượt trần KHÔNG có đường lấy.`);
-  } else if (max > min) {
+  /*
+    KẾT LUẬN "TRẦN CỨNG" ĐÒI MỌI CỬA SỔ ĐỀU ĐO ĐƯỢC.
+
+    Cửa sổ RỘNG NHẤT chính là cửa sổ duy nhất có thể bác bỏ giả thuyết trần — nó là phép đo mang
+    thông tin nhất, nên cũng là phép đo mà việc mất nó gây hại nhất. Hai cửa sổ hẹp cùng ra 60
+    KHÔNG chứng minh được gì: 60 hội thoại có tin mới trong một giờ là chuyện có thật với một page
+    đang chạy quảng cáo. Thiếu một phép đo thì câu trả lời đúng là CHƯA BIẾT, không phải con số
+    còn lại (AGENTS.md mục 8.5).
+  */
+  const doDuoc = demTheoCuaSo.filter((x) => x.n >= 0);
+  const thieu = demTheoCuaSo.length - doDuoc.length;
+  const max = Math.max(...doDuoc.map((x) => x.n), 0);
+  const min = Math.min(...doDuoc.map((x) => x.n), Number.POSITIVE_INFINITY);
+  if (max > min) {
     console.log(`  ✓ cửa sổ có tác dụng (${min} → ${max}) — máy chủ trả theo khoảng thời gian, không kẹt ở một trần cố định.`);
+  } else if (thieu > 0) {
+    console.log(`  ⚠ CHƯA KẾT LUẬN ĐƯỢC: ${thieu}/${demTheoCuaSo.length} cửa sổ không đo được (429). Cửa sổ rộng nhất là cửa sổ`);
+    console.log("    duy nhất bác bỏ được giả thuyết trần, nên mất nó là mất cả phép đo. Chạy lại khi hết giới hạn.");
+  } else if (doDuoc.length >= 2 && max === min && max > 0) {
+    ghiLoi(`MỌI CỬA SỔ (kể cả ${Math.max(...cuaSo)} giờ) ĐỀU TRẢ ĐÚNG ${max} — ${max} là TRẦN CỨNG. Phần vượt trần KHÔNG có đường lấy.`);
   }
 
   /*
@@ -273,13 +311,21 @@ async function main() {
     { after: maCuoi },
   ];
   let daTimRa = "";
+  let chuaDo = 0;
   for (const tham of ungVien) {
     const ten = Object.keys(tham)[0];
+    await nghi(1200);
     const r = await get(`pages/${pageId}/conversations`, {
       [key]: token, since, until, page_size: 20, order_by: "updated_at", ...tham,
     });
+    if (r.status === 429) {
+      // KHÔNG nói gì về tham số: 429 là câu trả lời về TẦN SUẤT, không phải về tên khoá.
+      console.log(`  ${ten.padEnd(22)} → CHƯA ĐO ĐƯỢC (429 — bị giới hạn tần suất, không nói gì về tham số này)`);
+      chuaDo += 1;
+      continue;
+    }
     if (r.status >= 400) {
-      console.log(`  ${ten.padEnd(22)} → HTTP ${r.status} (tham số không được chấp nhận)`);
+      console.log(`  ${ten.padEnd(22)} → HTTP ${r.status} — máy chủ TỪ CHỐI tham số này`);
       continue;
     }
     const ds = arr(r.body.conversations ?? (r.body.data as Record<string, unknown>)?.conversations ?? r.body.data);
@@ -289,9 +335,11 @@ async function main() {
   }
   if (daTimRa) {
     console.log(`  ⇒ \`${daTimRa}\` LÀ tham số phân trang thật. Sửa \`PancakePagesClient.listConversations\` sang khoá này.`);
+  } else if (chuaDo === ungVien.length) {
+    console.log(`  ⇒ CHƯA ĐO ĐƯỢC TÊN NÀO (cả ${chuaDo}/${ungVien.length} lượt đều 429). Khối này KHÔNG nói gì về phân trang.`);
   } else {
-    console.log("  ⇒ KHÔNG tên nào trong sáu tên dịch được cửa sổ. Chưa kết luận API không phân trang được —");
-    console.log("    mới chỉ kết luận sáu tên này không phải. Phải hỏi tài liệu / hỗ trợ Pancake.");
+    console.log(`  ⇒ KHÔNG tên nào trong ${ungVien.length - chuaDo} tên ĐO ĐƯỢC dịch được cửa sổ${chuaDo ? ` (còn ${chuaDo} tên chưa đo được vì 429)` : ""}.`);
+    console.log("    Mới chỉ kết luận NHỮNG TÊN ẤY không phải — KHÔNG kết luận API không phân trang được.");
   }
 
   // ── 3. ĐỌC TIN NHẮN ──
