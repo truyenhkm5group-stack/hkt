@@ -68,6 +68,40 @@ khoá chân lý thứ hai — hai bên sẽ đồng ý hôm nay và lệch nhau 
 Ba ngưỡng này không quyết định một con số tiền nào — chỉ quyết định khi nào màn hình thôi kết luận.
 Đó là lý do chúng được phép nằm trong mã, khác hẳn đích đạt/không đạt.
 
+### Đo trên production 19/09/2026 — con số quyết định thiết kế
+
+Độ chín của 14 ngày gần nhất (đơn đã có kết quả cuối ÷ đơn không huỷ):
+
+| Ngày | Độ chín | Ngày | Độ chín | Ngày | Độ chín |
+|---|---|---|---|---|---|
+| 18/09 | 0,0% | 13/09 | 46,7% | 08/09 | 71,4% |
+| 17/09 | 0,0% | 12/09 | 13,3% | 07/09 | 83,3% |
+| 16/09 | 1,8% | 11/09 | 20,8% | 06/09 | 48,0% |
+| 15/09 | 2,6% | 10/09 | 20,5% | 05/09 | 70,6% |
+| 14/09 | 22,5% | 09/09 | 85,0% | | |
+
+**12/14 ngày dưới ngưỡng 60%.** Với vòng giao của shop này, một ngày mất khoảng **9–12 ngày** mới
+ngã ngũ. Hai hệ quả, cả hai đều đã được xử lý:
+
+1. Không có độ chín thì bảng sẽ in "lỗ" cho gần như **mọi** ngày gần đây — tiền quảng cáo đã tiêu
+   hết từ sáng, hàng chưa tới tay ai.
+2. Bản tin nói về **hôm qua** không bao giờ kết luận được lãi/lỗ. Nên bản tin có **hai khối**:
+   *hôm qua* (phễu, hành động được ngay) và *ngày vừa ngã ngũ* (kết quả tiền cuối cùng, đến sau
+   ~10 ngày). Xem `lib/marketing/digest.ts`.
+
+### Các số nền khác (production, 30 ngày, đo 19/09/2026)
+
+| Chỉ số | Giá trị | Ý nghĩa cho báo cáo |
+|---|---|---|
+| Biên quan sát chi tiêu | `2026-09-19` (hôm nay) | Không ngày nào bị in `—` vì thiếu quan sát |
+| Ngày có dòng chi tiêu | 30/30 | Nguồn Facebook phủ kín kỳ |
+| Đơn đã xác nhận | 1.098 | |
+| Quy kết được marketer | **1.020 (92,9%)** | Trên ngưỡng cảnh báo 70% ⇒ bóc tách theo MKTer có nghĩa |
+| Đơn không có dòng quy kết | 0 | Ảnh chụp phủ 100% |
+| **Đơn TRÙNG** | **14** | Khác 0 ⇒ khối `duplicates` là cần thiết thật, không phải phòng xa |
+| Chi QC | 136.184.686đ | ⇒ CPA ≈ **124.031đ/đơn** |
+| Tin nhắn | 13.880 | ⇒ giá tin nhắn ≈ **9.811đ** · tỷ lệ chốt ≈ **7,9%** |
+
 ## 5. CHƯA BIẾT ≠ 0 — bốn chỗ, một luật
 
 1. **Chi quảng cáo**: phân biệt bằng **biên quan sát** (`spendObservedThrough` = ngày gần nhất

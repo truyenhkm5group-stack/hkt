@@ -38,6 +38,38 @@ import type { Period } from "@/lib/search-params";
 
 const SENT_KEY = "marketing.digest.sent";
 
+/**
+ * ═══════════ ĐO TRÊN PRODUCTION 19/09/2026 — VÌ SAO CÓ KHỐI "NGÀY VỪA NGÃ NGŨ" ═══════════
+ *
+ * Độ chín của 14 ngày gần nhất (đơn đã có kết quả cuối ÷ đơn không huỷ):
+ *
+ *     18/09   0,0%      13/09  46,7%      08/09  71,4%
+ *     17/09   0,0%      12/09  13,3%      07/09  83,3%
+ *     16/09   1,8%      11/09  20,8%      06/09  48,0%
+ *     15/09   2,6%      10/09  20,5%      05/09  70,6%
+ *     14/09  22,5%      09/09  85,0%
+ *
+ * **12/14 ngày dưới ngưỡng 60%.** Với vòng giao của shop này, một ngày phải mất khoảng 9–12 ngày
+ * mới ngã ngũ.
+ *
+ * Hệ quả mà con số ấy ép ra: bản tin nói về HÔM QUA sẽ gần như KHÔNG BAO GIỜ kết luận được lãi hay
+ * lỗ — hôm qua độ chín là 0%. Đó là hành vi ĐÚNG (tiền quảng cáo đã tiêu hết từ sáng, hàng chưa
+ * tới tay ai), nhưng một bản tin chỉ có phễu mà không bao giờ trả lời "rốt cuộc ngày ấy lãi hay
+ * lỗ" sẽ bị đọc là hỏng.
+ *
+ * Nên bản tin có HAI khối, trả lời hai câu khác nhau:
+ *
+ *   · HÔM QUA          → phễu còn nóng: tiêu bao nhiêu, ra bao nhiêu tin nhắn, bao nhiêu đơn.
+ *                        Hành động được NGAY HÔM NAY.
+ *   · NGÀY VỪA NGÃ NGŨ → ngày gần nhất đã đủ chín: rốt cuộc tiền quảng cáo hôm ấy đẻ ra bao nhiêu.
+ *                        Đây mới là câu trả lời cho "10 triệu chạy ngày 01/09 cuối cùng ra gì",
+ *                        và nó chỉ tồn tại sau khoảng 10 ngày.
+ *
+ * Gộp hai câu vào một khối là lý do khiến mọi báo cáo marketing COD hoặc nói dối (kết luận sớm)
+ * hoặc im lặng (không bao giờ kết luận).
+ */
+const SETTLED_LOOKBACK_DAYS = 21;
+
 /** Ngày theo giờ Việt Nam. "Một lần mỗi ngày" phải là một ngày của người đi làm, không phải của UTC. */
 export function vnDay(at: Date): string {
   return new Date(at.getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
@@ -137,10 +169,28 @@ export function digestLines(day: string, scope: DigestScope, previous: Marketing
   return lines;
 }
 
+/**
+ * Khối "ngày vừa ngã ngũ" — câu trả lời cuối cùng cho một ngày quảng cáo, đến sau khoảng 10 ngày.
+ *
+ * Cố ý KHÔNG in phễu ở đây (tin nhắn, giá tin nhắn): phễu của một ngày cũ 10 hôm không còn hành
+ * động được nữa. Chỉ in KẾT QUẢ TIỀN — thứ duy nhất mà việc chờ 10 ngày mua được.
+ */
+export function settledLines(row: MarketingDailyBase & { day: string; maturity: string }): string[] {
+  const t = row as unknown as Record<string, unknown>;
+  return [
+    `Kết quả cuối của ngày ${row.day} (độ chín ${pct(ratioOf("maturity", t))} — đã đủ để kết luận):`,
+    `   Chi QC ${vnd(row.adSpend)} · ${num(row.orders)} đơn · giao TC ${num(row.deliveredOrders)} · hoàn ${num(row.returnedOrders)}`,
+    `   Doanh thu thực ${vnd(row.deliveredRevenue)} · ROAS ${ratio(ratioOf("roasDelivered", t))} · CPQC/đơn ${vnd(ratioOf("costPerOrder", t))}`,
+    `   → Lợi nhuận góp ${vnd(row.contributionProfit)} · margin ${pct(ratioOf("margin", t))}`,
+  ];
+}
+
 /* ═══════════════ CHẠY ═══════════════ */
 
 export type DigestRunResult = {
   day: string;
+  /** Ngày gần nhất đã đủ chín để kết luận về tiền. `null` = chưa có ngày nào trong 21 ngày qua. */
+  settledDay: string | null;
   scopes: number;
   sent: { scope: string; ok: boolean; error?: string }[];
   skipped: { scope: string; reason: string }[];
@@ -162,7 +212,17 @@ export async function runMarketingDigest(now: Date = new Date()): Promise<Digest
   const baseFrom = shiftDay(day, -MARKETING_DIAGNOSIS.baselineDays);
   const baseTo = shiftDay(day, -1);
 
-  const [today, baselineRange] = await Promise.all([getMarketingDaily(dayP, "created"), getMarketingDaily(rangePeriod(baseFrom, baseTo), "created")]);
+  const [today, baselineRange, settledRange] = await Promise.all([
+    getMarketingDaily(dayP, "created"),
+    getMarketingDaily(rangePeriod(baseFrom, baseTo), "created"),
+    getMarketingDaily(rangePeriod(shiftDay(day, -SETTLED_LOOKBACK_DAYS), day), "created"),
+  ]);
+  /*
+    NGÀY VỪA NGÃ NGŨ = ngày MỚI NHẤT đã đủ chín trong 21 ngày qua. Lấy ngày mới nhất chứ không phải
+    ngày vừa vượt ngưỡng hôm nay: nếu bản tin lỡ một hôm thì người đọc vẫn nhận được kết quả gần
+    nhất, thay vì mất hẳn một ngày không ai kể lại.
+  */
+  const settled = [...settledRange.rows].reverse().find((r) => (r.maturity === "FINAL" || r.maturity === "PARTIAL") && r.orders > 0) ?? null;
   const baseline = baselineOf(baselineRange.rows.map(toSnapshot), 3);
   const staleSources = today.freshness.filter((f) => f.stale).map((f) => f.label);
 
@@ -239,7 +299,10 @@ export async function runMarketingDigest(now: Date = new Date()): Promise<Digest
       continue;
     }
     const title = isManager ? `MARKETING — ${day}` : `MARKETING ${day} · ${scope.label}`;
-    const lines = digestLines(day, scope, null, baseUrl).map((text) => [{ text }]);
+    const body = digestLines(day, scope, null, baseUrl);
+    // Bản TỔNG mang thêm kết quả cuối của ngày vừa ngã ngũ; bản riêng của MKTer giữ gọn ở phễu.
+    if (isManager && settled) body.splice(body.length - (baseUrl ? 1 : 0), 0, "", ...settledLines(settled));
+    const lines = body.map((text) => [{ text }]);
     const res = await sendLark(target.url, target.secret, title, lines);
     sent.push({ scope: scope.label, ok: res.ok, error: res.error });
     if (res.ok) ledger[ledgerKey] = new Date().toISOString();
@@ -256,11 +319,12 @@ export async function runMarketingDigest(now: Date = new Date()): Promise<Digest
   const findingCount = scopes.reduce((s, x) => s + x.findings.length, 0);
   return {
     day,
+    settledDay: settled?.day ?? null,
     scopes: scopes.length,
     sent,
     skipped,
     findings: findingCount,
-    detail: `Ngày ${day}: ${scopes.length} phạm vi · ${findingCount} phát hiện · gửi ${sent.filter((s) => s.ok).length}/${sent.length} · bỏ qua ${skipped.length}`,
+    detail: `Ngày ${day}: ${scopes.length} phạm vi · ${findingCount} phát hiện · gửi ${sent.filter((s) => s.ok).length}/${sent.length} · bỏ qua ${skipped.length} · ngày vừa ngã ngũ: ${settled?.day ?? "chưa có"}`,
   };
 }
 

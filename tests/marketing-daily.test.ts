@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { clearMemo } from "@/lib/cache";
-import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf } from "@/lib/constants/marketing-daily";
+import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf, type MaturityState } from "@/lib/constants/marketing-daily";
 import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
 import { METRIC_BINDINGS } from "@/lib/constants/metric-bindings";
 import { MARKETING_AI_SYSTEM, buildAiContext } from "@/lib/marketing/ai-context";
 import { MARKETING_TARGET_METRICS } from "@/lib/queries/marketing-targets";
 import { baselineOf, diagnose, lossStreakOf, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
-import { digestLines } from "@/lib/marketing/digest";
-import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter } from "@/lib/queries/marketing-daily";
+import { digestLines, settledLines } from "@/lib/marketing/digest";
+import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter, type MarketingDailyBase } from "@/lib/queries/marketing-daily";
 import { getDailyBreakdown } from "@/lib/queries/reports";
 import type { Period } from "@/lib/search-params";
 
@@ -237,7 +237,7 @@ export function testMarketingBaseline() {
 
 /** ═══════════ BẢN TIN KHÔNG BAO GIỜ IN 0 CHO MỘT Ô CHƯA BIẾT ═══════════ */
 export function testMarketingDigestLines() {
-  const totals = {
+  const totals: MarketingDailyBase & { maturity: MaturityState } = {
     adSpend: null,
     messages: null,
     orders: 0,
@@ -258,7 +258,7 @@ export function testMarketingDigestLines() {
     netProfit: null,
     maturity: "NO_ORDERS",
   };
-  const lines = digestLines("2026-09-18", { key: "", label: "Toàn shop", totals: totals as never, findings: [] }, null, "");
+  const lines = digestLines("2026-09-18", { key: "", label: "Toàn shop", totals, findings: [] }, null, "");
   const text = lines.join("\n");
   assert.ok(text.includes("Chi QC: —"), "chi tiêu chưa đồng bộ phải in — chứ không phải 0đ");
   assert.ok(text.includes("Tin nhắn: —"));
@@ -267,6 +267,32 @@ export function testMarketingDigestLines() {
   // ĐỘ CHÍN luôn đứng CÙNG DÒNG với lợi nhuận — tách ra là mời người đọc dừng ở dòng đầu.
   const profitLine = lines.find((l) => l.startsWith("Lợi nhuận góp"));
   assert.ok(profitLine?.includes("độ chín"), "lợi nhuận và độ chín phải nằm trên cùng một dòng");
+
+  /*
+    KHỐI "NGÀY VỪA NGÃ NGŨ" — lý do tồn tại đo được trên production 19/09/2026: 12/14 ngày gần nhất
+    có độ chín dưới 60%, nên bản tin về HÔM QUA không bao giờ kết luận được lãi/lỗ. Khối này mang
+    câu trả lời cuối cùng của ngày gần nhất đã đủ chín (~10 ngày trước).
+  */
+  const settled = settledLines({
+    ...totals,
+    day: "2026-09-08",
+    maturity: "FINAL",
+    adSpend: 8_000_000,
+    orders: 28,
+    deliveredOrders: 8,
+    returnedOrders: 12,
+    deliveredRevenue: 6_000_000,
+    finishedOrders: 20,
+    maturityBase: 20,
+    pendingOrders: 0,
+    contributionProfit: -3_000_000,
+  });
+  const settledText = settled.join("\n");
+  assert.ok(settledText.includes("2026-09-08"), "phải nói rõ đang kết luận về NGÀY NÀO");
+  assert.ok(settledText.includes("Lợi nhuận góp -3.000.000đ"), "ngày đã chín thì được phép kết luận về tiền");
+  assert.ok(settledText.includes("độ chín 100%"), "vẫn in độ chín — kết luận phải mang theo căn cứ của nó");
+  // Phễu KHÔNG xuất hiện ở khối này: tin nhắn của một ngày cũ 10 hôm không còn hành động được.
+  assert.ok(!settledText.includes("Tin nhắn"), "khối ngày đã chín chỉ in KẾT QUẢ TIỀN, không in phễu");
 }
 
 /**
