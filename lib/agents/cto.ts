@@ -84,6 +84,11 @@ ro cao và giải thích vì sao — đừng hạ mức để kế hoạch trôn
 
 KHI THIẾU DỮ LIỆU: đưa vào "questions". Đừng đoán rồi viết như thể đã biết.
 
+GIỚI HẠN CỨNG: "tasks" phải có TỪ 1 TỚI ${CTO_MAX_TASKS} phần tử. Từ ${CTO_MAX_TASKS + 1} trở lên thì TOÀN BỘ bản kế
+hoạch bị từ chối — không phải bị cắt bớt, là bị bỏ cả bản. Thấy cần nhiều bước hơn thì GỘP các
+bước cài đặt liên quan vào MỘT việc với NHIỀU tiêu chí nghiệm thu, đừng đẻ thêm việc. Giới hạn này
+là kiến trúc của một bản kế hoạch, không phải một con số cản đường.
+
 TRẢ LỜI: CHỈ một khối JSON hợp lệ, không văn xuôi ngoài JSON, không hàng rào markdown.`;
 
 function moTaVai(): string {
@@ -117,8 +122,9 @@ function luocDoJson(): string {
   ]
 }
 
-Tối đa ${CTO_MAX_TASKS} việc. Trường taskType và module phải lấy ĐÚNG một giá trị trong danh sách
-trên. suggestedAgent phải là một khoá trong danh sách vai.`;
+Nhắc lại GIỚI HẠN CỨNG: "tasks" có TỪ 1 TỚI ${CTO_MAX_TASKS} phần tử, không hơn. Trường taskType và module
+phải lấy ĐÚNG một giá trị trong danh sách trên. suggestedAgent phải là một khoá trong danh sách vai.
+Mọi khoá trong dependsOn phải trỏ tới một task có thật trong chính bản này.`;
 }
 
 export type CtoContext = { prompt: string; blocked: string | null };
@@ -206,48 +212,168 @@ function doiLoiGoiModel(e: unknown): string {
   return `Gọi model hỏng: ${raw}`;
 }
 
+/** Bằng chứng về lượt gọi: đếm được, và phân biệt được lượt đầu với lượt sửa. */
+export type CtoAttempts = {
+  /** 0 = bị chặn trước khi gọi · 1 = lượt đầu đã đạt · 2 = đã sửa một lần. Trần là 2. */
+  modelCalls: 0 | 1 | 2;
+  /** Lượt ĐẦU sai cái gì. Rỗng = lượt đầu đạt, hoặc chưa gọi được lượt nào. */
+  initialError: string;
+  repairOutcome: "NONE" | "PASS" | "FAIL";
+};
+
 export type CtoRunResult =
-  | { ok: true; plan: CtoPlan; provider: string; model: string; raw: unknown }
-  | { ok: false; error: string; provider: string; model: string; raw: unknown };
+  | ({ ok: true; plan: CtoPlan; provider: string; model: string; raw: unknown } & CtoAttempts)
+  | ({ ok: false; error: string; provider: string; model: string; raw: unknown } & CtoAttempts);
 
 /**
- * Gọi model THẬT và đọc bản kế hoạch.
+ * Một lượt gọi model, phân làm hai loại — và ranh giới này QUYẾT ĐỊNH có được sửa hay không.
  *
- * Không tool, không vòng lặp: CTO chỉ đọc ngữ cảnh đã chọn rồi trả về một khối JSON. Thêm tool là
- * thêm một đường để nó chạm vào thứ nó không được chạm, cho một việc không cần tới.
+ *   · `TEXT` — model đã nói xong một câu trả lời. Câu đó có thể sai hợp đồng, và SAI HỢP ĐỒNG LÀ
+ *     THỨ DUY NHẤT sửa được: ta cầm đúng chỗ sai đưa lại cho chính model.
+ *   · `CHAN` — không có câu trả lời nào để mà sửa: khoá bị từ chối, hết hạn mức, nhà cung cấp quá
+ *     tải, hết giờ, model từ chối vì chính sách, hoặc câu trả lời bị CẮT vì chạm trần token của
+ *     ta. Gọi lại lần nữa ở những nhánh này chỉ là nhân đôi một lượt hỏng — và với 429 thì còn
+ *     là đổ thêm dầu vào đúng cái đang cháy.
  */
-export async function runCtoPlanning(provider: AiProvider, ctx: CtoContext): Promise<CtoRunResult> {
-  const meta = { provider: provider.name, model: provider.model };
-  if (ctx.blocked) {
-    return { ok: false, error: `Từ chối gọi model: prompt chứa \`${ctx.blocked}\` — bí mật không bao giờ được rời máy chủ.`, ...meta, raw: null };
-  }
+type LuotGoi = { kind: "TEXT"; text: string } | { kind: "CHAN"; error: string; raw: string | null };
+
+async function goiModel(provider: AiProvider, prompt: string): Promise<LuotGoi> {
   let text = "";
   try {
     const res = await provider.complete({
       system: HE_THONG,
-      messages: [{ role: "user", content: [{ type: "text", text: ctx.prompt }] }],
+      messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
       tools: [],
       maxTokens: CTO_MAX_OUTPUT_TOKENS,
     });
     text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("");
     // Chạm trần token ⇒ câu trả lời bị CẮT, và một chuỗi JSON cụt luôn hỏng cú pháp. Để nó đi tiếp
     // xuống bộ đọc là in ra "không đọc được JSON" — câu đó đẩy người sửa đi soi prompt và lược đồ
-    // trong khi chỗ hỏng là cái trần của chính ta. Chặn ngay tại đây, gọi đúng tên.
+    // trong khi chỗ hỏng là cái trần của chính ta. Chặn ngay tại đây, gọi đúng tên. Và KHÔNG sửa:
+    // chỗ hỏng không nằm ở model, nên bảo model viết lại thì nó lại bị cắt y như vậy.
     if (res.stopReason === "max_tokens") {
       return {
-        ok: false,
+        kind: "CHAN",
         error: `Câu trả lời bị cắt: chạm trần ${CTO_MAX_OUTPUT_TOKENS.toLocaleString("vi-VN")} token (${text.length.toLocaleString("vi-VN")} ký tự đã nhận). Đây KHÔNG phải lỗi định dạng của model — hoặc nới trần, hoặc thu hẹp mục tiêu.`,
-        ...meta,
         raw: text.slice(0, 20_000),
       };
     }
     if (res.stopReason === "refusal") {
-      return { ok: false, error: "Model từ chối trả lời vì chính sách nội dung. Không có bản kế hoạch nào được lập.", ...meta, raw: text.slice(0, 20_000) };
+      return { kind: "CHAN", error: "Model từ chối trả lời vì chính sách nội dung. Không có bản kế hoạch nào được lập.", raw: text.slice(0, 20_000) };
     }
   } catch (e) {
-    return { ok: false, error: doiLoiGoiModel(e), ...meta, raw: null };
+    return { kind: "CHAN", error: doiLoiGoiModel(e), raw: null };
   }
-  const parsed = parseCtoPlan(text);
-  if (!parsed.ok) return { ok: false, error: parsed.error, ...meta, raw: text.slice(0, 20_000) };
-  return { ok: true, plan: parsed.plan, ...meta, raw: parsed.plan };
+  return { kind: "TEXT", text };
+}
+
+/** Cắt bản cũ cho vừa một lượt gọi. Đủ để model thấy nó đã viết gì, không đủ để thổi đôi prompt. */
+const TRAN_BAN_CU = 12_000;
+
+/**
+ * Prompt sửa lỗi.
+ *
+ * Nó KHÔNG xin một bản kế hoạch mới — xin mới là ném đi phần đã đúng rồi cầu may lần nữa. Nó đưa
+ * lại ĐÚNG BA thứ: lỗi kiểm tra nguyên văn, hợp đồng, và bản model vừa viết; rồi đòi TOÀN BỘ JSON
+ * đã sửa. Toàn bộ, chứ không phải một mảnh vá: một mảnh vá buộc phía ta phải ghép lại, mà ghép
+ * chính là "tự sửa dependency" — thứ mục 4 cấm.
+ */
+function promptSuaLoi(banCu: string, loi: string): string {
+  return [
+    "Bản JSON bạn vừa trả về KHÔNG ĐẠT hợp đồng.",
+    "",
+    `LỖI KIỂM TRA: ${loi}`,
+    "",
+    "CÁCH SỬA:",
+    `- tasks phải có TỪ 1 TỚI ${CTO_MAX_TASKS} phần tử. Thừa thì GỘP các việc gần nhau lại thành một`,
+    "  việc kèm nhiều tiêu chí nghiệm thu — ĐỪNG xoá bớt mục tiêu để cho vừa số.",
+    "- Sau khi gộp, sửa lại dependsOn: mọi khoá phải trỏ tới một task CÒN TỒN TẠI trong bản mới,",
+    "  không tự trỏ vào chính nó, và không tạo thành vòng.",
+    "- taskType, module, suggestedPriority, suggestedRisk, suggestedAgent phải lấy ĐÚNG một giá trị",
+    "  trong danh sách đã cho.",
+    "- Giữ nguyên summary, assumptions, questions trừ khi chính chúng bị báo lỗi.",
+    "",
+    "TRẢ VỀ TOÀN BỘ JSON ĐÃ SỬA, không phải một phần. Không văn xuôi ngoài JSON, không hàng rào markdown.",
+    "",
+    "BẢN JSON TRƯỚC:",
+    banCu.slice(0, TRAN_BAN_CU),
+  ].join("\n");
+}
+
+/**
+ * Gọi model THẬT và đọc bản kế hoạch, với ĐÚNG MỘT lượt sửa khi đầu ra không đạt hợp đồng.
+ *
+ * Không tool, không vòng lặp: CTO chỉ đọc ngữ cảnh đã chọn rồi trả về một khối JSON. Thêm tool là
+ * thêm một đường để nó chạm vào thứ nó không được chạm, cho một việc không cần tới.
+ *
+ * ─── VÌ SAO SỬA, VÀ VÌ SAO CHỈ MỘT LẦN ───
+ *
+ * Đã xảy ra thật (production, 19/09/2026): model trả 13 việc cho hợp đồng tối đa 12. Có ba cách
+ * xử, và hai trong số đó sai:
+ *
+ *   ✗ Nâng trần lên 13. Trần 12 là giới hạn KIẾN TRÚC của một bản kế hoạch, không phải một con số
+ *     cản đường. Nâng nó để model pass là để model định nghĩa lại hợp đồng.
+ *   ✗ `tasks.slice(0, 12)`. Trông gọn và hỏng ngầm: `dependsOn` của việc còn lại trỏ vào việc vừa
+ *     bị xoá, tiêu chí nghiệm thu mất mảng, và bản kế hoạch qua được zod trong khi ý nghĩa đã sai.
+ *     Một bản sai mà hợp lệ tệ hơn hẳn một bản bị từ chối.
+ *   ✓ Đưa lỗi lại cho chính model và bắt nó GỘP. Nó là bên duy nhất biết việc nào gộp được với
+ *     việc nào.
+ *
+ * Một lần, không hơn. Sửa lần hai gần như luôn là model đang lặp lại cùng một hiểu nhầm, và mỗi
+ * vòng thêm là thêm tiền, thêm thời gian chờ, thêm một lần người đọc log phải đoán xem cái đang
+ * chạy là lượt thứ mấy. Hỏng sau lượt sửa thì bản đề xuất nằm ở `DRAFT` kèm lỗi cuối — người đọc
+ * thấy cả lỗi ban đầu lẫn kết quả sửa, và tự quyết.
+ */
+export async function runCtoPlanning(provider: AiProvider, ctx: CtoContext): Promise<CtoRunResult> {
+  const meta = { provider: provider.name, model: provider.model };
+  const chuaGoi: CtoAttempts = { modelCalls: 0, initialError: "", repairOutcome: "NONE" };
+  if (ctx.blocked) {
+    return {
+      ok: false,
+      error: `Từ chối gọi model: prompt chứa \`${ctx.blocked}\` — bí mật không bao giờ được rời máy chủ.`,
+      ...meta,
+      raw: null,
+      ...chuaGoi,
+    };
+  }
+
+  /* ───── LƯỢT 1 ───── */
+  const luot1 = await goiModel(provider, ctx.prompt);
+  if (luot1.kind === "CHAN") {
+    // Không có câu trả lời nào để sửa. Gọi lại là nhân đôi một lượt hỏng.
+    return { ok: false, error: luot1.error, ...meta, raw: luot1.raw, modelCalls: 1, initialError: "", repairOutcome: "NONE" };
+  }
+  const doc1 = parseCtoPlan(luot1.text);
+  if (doc1.ok) {
+    return { ok: true, plan: doc1.plan, ...meta, raw: doc1.plan, modelCalls: 1, initialError: "", repairOutcome: "NONE" };
+  }
+
+  /* ───── LƯỢT 2: ĐÚNG MỘT lượt sửa, và vẫn qua CÙNG một bộ kiểm ───── */
+  const luot2 = await goiModel(provider, promptSuaLoi(luot1.text, doc1.error));
+  if (luot2.kind === "CHAN") {
+    return {
+      ok: false,
+      error: `Lượt sửa không gọi được model: ${luot2.error} · Lỗi ban đầu: ${doc1.error}`,
+      ...meta,
+      raw: luot1.text.slice(0, 20_000),
+      modelCalls: 2,
+      initialError: doc1.error,
+      repairOutcome: "FAIL",
+    };
+  }
+  // CÙNG `parseCtoPlan`, không có bộ đọc lỏng tay cho lượt sửa. Một cổng nới ra "chỉ cho lần hai"
+  // là một cổng không còn là cổng.
+  const doc2 = parseCtoPlan(luot2.text);
+  if (doc2.ok) {
+    return { ok: true, plan: doc2.plan, ...meta, raw: doc2.plan, modelCalls: 2, initialError: doc1.error, repairOutcome: "PASS" };
+  }
+  return {
+    ok: false,
+    error: `Sửa một lượt vẫn không đạt — ${doc2.error} · Lỗi ban đầu: ${doc1.error}`,
+    ...meta,
+    raw: luot2.text.slice(0, 20_000),
+    modelCalls: 2,
+    initialError: doc1.error,
+    repairOutcome: "FAIL",
+  };
 }

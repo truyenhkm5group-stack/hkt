@@ -49,6 +49,10 @@ export type ProposalRow = {
   assumptions: string[];
   questions: string[];
   error: string;
+  /* Bằng chứng lượt gọi — xem `tech_proposals.model_calls`. Hiện ra màn hình, không giấu trong log. */
+  modelCalls: number;
+  initialError: string;
+  repairOutcome: string;
   decidedByName: string;
   decidedAt: Date | null;
   decisionNote: string;
@@ -107,6 +111,9 @@ export async function listTechProposals(limit = 20): Promise<ProposalRow[]> {
       assumptions: (p.assumptions as string[]) ?? [],
       questions: (p.questions as string[]) ?? [],
       error: p.error,
+      modelCalls: p.modelCalls,
+      initialError: p.initialError,
+      repairOutcome: p.repairOutcome,
       decidedByName: p.decidedByName,
       decidedAt: p.decidedAt,
       decisionNote: p.decisionNote,

@@ -366,6 +366,231 @@ export async function testCtoProposal() {
     `bậc analysis (${RETRIES_BY_TIER.analysis} lần) phải thử lại nhiều hơn bậc copilot (${RETRIES_BY_TIER.copilot} lần) — chạy nền thì không ai đợi`,
   );
 
+  /* ───── 16. MỘT LƯỢT SỬA CÓ KIỂM SOÁT ─────
+
+     Đo thật (production, 19/09/2026): model trả 13 việc cho hợp đồng tối đa 12, và bản đề xuất bị
+     từ chối. Từ chối là ĐÚNG. Cái sai là dừng ở đó: model là bên duy nhất biết việc nào gộp được
+     với việc nào, nên đưa lỗi lại cho chính nó rẻ hơn hẳn bắt người mở lại màn hình bấm lần nữa.
+
+     Ba thứ bài kiểm này khoá, và cả ba đều là chỗ dễ trượt:
+       · sửa ĐÚNG MỘT lần — không phải vòng lặp;
+       · lượt sửa đi qua CÙNG `parseCtoPlan`, không có bộ đọc lỏng tay cho lần hai;
+       · KHÔNG sửa khi model chưa hề trả lời (429/529/401/hết giờ/từ chối/chạm trần). */
+  const keHoachJson = (n: number) => {
+    const k = keHoach();
+    const tasks = Array.from({ length: n }, (_, i) => ({
+      ...k.tasks[0],
+      key: `T${i + 1}`,
+      dependsOn: i === 0 ? [] : [`T${i}`],
+    }));
+    return JSON.stringify({ ...k, tasks });
+  };
+
+  /** Provider giả trả lời KHÁC NHAU theo từng lượt, và ĐẾM số lượt đã gọi. */
+  const providerTheoLuot = (...luots: string[]) => {
+    const daGoi: string[] = [];
+    const p: AiProvider = {
+      name: "gia",
+      model: "gia-model",
+      async complete(req): Promise<AiResponse> {
+        const i = daGoi.length;
+        daGoi.push(req.messages.map((m) => m.content.map((c) => (c.type === "text" ? c.text : "")).join("")).join(""));
+        return {
+          content: [{ type: "text", text: luots[Math.min(i, luots.length - 1)] }],
+          stopReason: "end_turn",
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          model: "gia-model",
+          latencyMs: 1,
+        };
+      },
+    };
+    return { provider: p, daGoi };
+  };
+
+  /* A. 13 việc → sửa còn 10 → ĐẠT */
+  {
+    const { provider, daGoi } = providerTheoLuot(keHoachJson(13), keHoachJson(10));
+    const r = await runCtoPlanning(provider, ctxGia as never);
+    assert.ok(r.ok, `A: lượt sửa phải cứu được bản kế hoạch, nhận: ${r.ok ? "" : r.error}`);
+    assert.equal(daGoi.length, 2, "A: đúng HAI lượt gọi model — một đầu, một sửa");
+    assert.equal(r.modelCalls, 2);
+    assert.equal(r.repairOutcome, "PASS");
+    assert.ok(/Too big|12/.test(r.initialError), `A: phải giữ lỗi BAN ĐẦU để đọc lại, nhận: ${r.initialError}`);
+    assert.ok(r.ok && r.plan.tasks.length === 10, "A: lấy bản ĐÃ SỬA, không phải bản 13 việc");
+    // Prompt sửa phải mang theo lỗi thật và bản cũ — không phải một lời xin làm lại chung chung.
+    assert.ok(/LỖI KIỂM TRA/.test(daGoi[1]), "A: prompt sửa phải nêu lỗi kiểm tra");
+    assert.ok(/BẢN JSON TRƯỚC/.test(daGoi[1]), "A: prompt sửa phải đính kèm bản model vừa viết");
+    assert.ok(/GỘP/.test(daGoi[1]), "A: prompt sửa phải bảo GỘP, không bảo xoá bớt");
+  }
+
+  /* B. 13 việc → sửa vẫn 13 → KHÔNG ĐẠT, và KHÔNG có lượt thứ ba */
+  {
+    const { provider, daGoi } = providerTheoLuot(keHoachJson(13), keHoachJson(13));
+    const r = await runCtoPlanning(provider, ctxGia as never);
+    assert.equal(r.ok, false, "B: sửa rồi vẫn sai thì vẫn phải hỏng");
+    assert.equal(daGoi.length, 2, "B: TRẦN là hai lượt — không có lượt thứ ba, dù lượt hai vẫn sai");
+    assert.equal(r.modelCalls, 2);
+    assert.equal(r.repairOutcome, "FAIL");
+    assert.ok(!r.ok && /Lỗi ban đầu/.test(r.error), "B: câu lỗi cuối phải nhắc cả lỗi ban đầu");
+  }
+
+  /* C. JSON hỏng → sửa ra JSON hợp lệ → ĐẠT */
+  {
+    const { provider, daGoi } = providerTheoLuot("{ đây không phải JSON", keHoachJson(3));
+    const r = await runCtoPlanning(provider, ctxGia as never);
+    assert.ok(r.ok, "C: JSON hỏng cũng là đầu ra không đạt hợp đồng — sửa được");
+    assert.equal(daGoi.length, 2);
+    assert.equal(r.repairOutcome, "PASS");
+  }
+
+  /* D. vai agent không có thật → sửa sang vai có thật → ĐẠT */
+  {
+    const lac = JSON.parse(keHoachJson(2));
+    lac.tasks[0].suggestedAgent = "SUPER_ENGINEER";
+    const { provider, daGoi } = providerTheoLuot(JSON.stringify(lac), keHoachJson(2));
+    const r = await runCtoPlanning(provider, ctxGia as never);
+    assert.ok(r.ok, "D: vai lạ phải sửa được");
+    assert.equal(daGoi.length, 2);
+    assert.equal(r.repairOutcome, "PASS");
+    assert.ok(/suggestedAgent|SUPER_ENGINEER|Invalid/i.test(r.initialError), `D: lỗi ban đầu phải chỉ đúng chỗ, nhận: ${r.initialError}`);
+  }
+
+  /* E. dependsOn trỏ khoá không tồn tại → sửa → ĐẠT */
+  {
+    const treo = JSON.parse(keHoachJson(2));
+    treo.tasks[1].dependsOn = ["T99"];
+    const { provider, daGoi } = providerTheoLuot(JSON.stringify(treo), keHoachJson(2));
+    const r = await runCtoPlanning(provider, ctxGia as never);
+    assert.ok(r.ok, "E: phụ thuộc treo phải sửa được");
+    assert.equal(daGoi.length, 2);
+    assert.equal(r.repairOutcome, "PASS");
+    assert.ok(/T99|dependsOn|phụ thuộc/i.test(r.initialError), `E: lỗi ban đầu phải nêu khoá treo, nhận: ${r.initialError}`);
+  }
+
+  /*
+    F + G. Nhà cung cấp 429 / 529 → TUYỆT ĐỐI KHÔNG SỬA.
+
+    Không có câu trả lời nào để mà sửa, nên lượt thứ hai chỉ là nhân đôi một lượt hỏng — và với
+    429 thì còn là đổ thêm request vào đúng cái đang bị giới hạn.
+  */
+  for (const [ten, mess, status] of [
+    ["F/429", "rate_limit_error: Number of requests has exceeded your rate limit", 429],
+    ["G/529", '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}', 529],
+    ["401", "authentication_error: invalid x-api-key", 401],
+  ] as [string, string, number][]) {
+    let soLan = 0;
+    const p: AiProvider = {
+      name: "gia",
+      model: "gia-model",
+      async complete(): Promise<AiResponse> {
+        soLan += 1;
+        throw Object.assign(new Error(mess), { status });
+      },
+    };
+    const r = await runCtoPlanning(p, ctxGia as never);
+    assert.equal(r.ok, false, `${ten}: phải hỏng`);
+    assert.equal(soLan, 1, `${ten}: CHỈ MỘT lượt gọi — không sửa khi model chưa hề trả lời`);
+    assert.equal(r.repairOutcome, "NONE", `${ten}: không có lượt sửa nào để ghi`);
+    assert.equal(r.modelCalls, 1);
+  }
+
+  /* Hết giờ · model từ chối · chạm trần token — cùng một luật: không có gì để sửa. */
+  {
+    let soLan = 0;
+    const p: AiProvider = {
+      name: "gia",
+      model: "gia-model",
+      async complete(): Promise<AiResponse> {
+        soLan += 1;
+        return {
+          content: [{ type: "text", text: '{"summary":"bị cắt giữa chừng' }],
+          stopReason: "max_tokens",
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          model: "gia-model",
+          latencyMs: 1,
+        };
+      },
+    };
+    const r = await runCtoPlanning(p, ctxGia as never);
+    assert.equal(r.ok, false);
+    assert.equal(soLan, 1, "chạm trần token: KHÔNG sửa — chỗ hỏng là cái trần của ta, bảo model viết lại thì nó lại bị cắt y như vậy");
+    assert.equal(r.repairOutcome, "NONE");
+  }
+  {
+    let soLan = 0;
+    const p: AiProvider = {
+      name: "gia",
+      model: "gia-model",
+      async complete(): Promise<AiResponse> {
+        soLan += 1;
+        return {
+          content: [{ type: "text", text: "" }],
+          stopReason: "refusal",
+          usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+          model: "gia-model",
+          latencyMs: 1,
+        };
+      },
+    };
+    const r = await runCtoPlanning(p, ctxGia as never);
+    assert.equal(r.ok, false);
+    assert.equal(soLan, 1, "model từ chối: KHÔNG sửa — hỏi lại một câu đã bị từ chối là hỏi lại cùng một câu");
+    assert.equal(r.repairOutcome, "NONE");
+  }
+
+  /* H. Đạt ngay lượt đầu → ĐÚNG MỘT lượt gọi, không có lượt sửa thừa */
+  {
+    const { provider, daGoi } = providerTheoLuot(keHoachJson(4));
+    const r = await runCtoPlanning(provider, ctxGia as never);
+    assert.ok(r.ok, "H: bản hợp lệ phải đạt ngay");
+    assert.equal(daGoi.length, 1, "H: đạt rồi thì KHÔNG gọi thêm lượt nào — mỗi lượt thừa là tiền thật");
+    assert.equal(r.modelCalls, 1);
+    assert.equal(r.repairOutcome, "NONE");
+    assert.equal(r.initialError, "");
+  }
+
+  /* I. Lượt sửa KHÔNG được tạo việc thật — ghi bằng chứng vào sổ đề xuất, không vào hàng đợi. */
+  {
+    const truoc = (await db.select().from(schema.techTasks)).length;
+    const { provider } = providerTheoLuot(keHoachJson(13), keHoachJson(5));
+    const r = await runCtoPlanning(provider, ctxGia as never);
+    assert.ok(r.ok && r.repairOutcome === "PASS");
+    const ghi = await createProposal({
+      sourceTaskId: mucTieu.id,
+      agentId: null,
+      agentKey: "ai-cto",
+      provider: r.provider,
+      model: r.model,
+      plan: r.ok ? r.plan : null,
+      rawOutput: r.raw,
+      modelCalls: r.modelCalls,
+      initialError: r.initialError,
+      repairOutcome: r.repairOutcome,
+    });
+    assert.ok("ok" in ghi, "I: phải ghi được bản đề xuất");
+    const sau = (await db.select().from(schema.techTasks)).length;
+    assert.equal(sau, truoc, "I: lượt sửa KHÔNG được đẻ ra một việc thật nào");
+    const dong = await db.query.techProposals.findFirst({ where: eq(schema.techProposals.id, "ok" in ghi ? ghi.id : "") });
+    assert.equal(dong?.modelCalls, 2, "I: số lượt gọi phải đọc lại được từ CSDL");
+    assert.equal(dong?.repairOutcome, "PASS");
+    assert.ok((dong?.initialError ?? "").length > 0, "I: lỗi ban đầu phải còn đọc được sau khi ghi");
+    /*
+      "Chưa áp" ở đây là HAI điều, vì sổ đề xuất giữ chúng ở hai chỗ: bản đề xuất chưa ai QUYẾT
+      (`decided_at`), và không dòng việc con nào đã nối tới một việc thật (`applied_task_id`).
+    */
+    assert.equal(dong?.decidedAt ?? null, null, "I: chưa ai quyết bản đề xuất này");
+    const conDaNoi = await db
+      .select()
+      .from(schema.techProposalTasks)
+      .where(eq(schema.techProposalTasks.proposalId, "ok" in ghi ? ghi.id : ""));
+    assert.ok(conDaNoi.length > 0, "I: phải có việc con được ghi");
+    assert.deepEqual(
+      conDaNoi.filter((c) => c.appliedTaskId !== null),
+      [],
+      "I: không việc con nào được nối tới việc thật",
+    );
+  }
+
   /* ───── 15. TRẦN CỦA CTO PHẢI ĐI BẰNG STREAMING ─────
 
      Ta truyền `timeout` tường minh cho SDK, nên phép kiểm "lượt này dài quá, hãy streaming" của
@@ -387,6 +612,6 @@ export async function testCtoProposal() {
   await db.delete(schema.techTasks);
 
   console.log(
-    "✓ AI CTO chế độ đề xuất: lập kế hoạch KHÔNG tạo việc thật · agent không duyệt/không từ chối · người duyệt thì việc tạo qua dịch vụ và phụ thuộc nối bằng id thật · AI nói R0 cho việc lương thì MÁY vẫn xếp R2 và vẫn chờ ký · duyệt hai lần không nhân đôi · bản từ chối/bị thay thế/nháp không áp được · JSON hỏng, vai lạ, module lạ, phụ thuộc vòng đều bị từ chối · prompt không mang bí mật (cả tên lẫn giá trị) · câu trả lời bị cắt KHÔNG bị in ra thành lỗi JSON · quá tải/sai khoá/hết tín dụng là ba câu khác nhau · lượt dài đi bằng streaming · không đường ghi thứ hai vào tech_tasks · giao diện không có nút chạy tất cả · không vai nào merge/deploy/ghi production",
+    "✓ AI CTO chế độ đề xuất: lập kế hoạch KHÔNG tạo việc thật · agent không duyệt/không từ chối · người duyệt thì việc tạo qua dịch vụ và phụ thuộc nối bằng id thật · AI nói R0 cho việc lương thì MÁY vẫn xếp R2 và vẫn chờ ký · duyệt hai lần không nhân đôi · bản từ chối/bị thay thế/nháp không áp được · JSON hỏng, vai lạ, module lạ, phụ thuộc vòng đều bị từ chối · prompt không mang bí mật (cả tên lẫn giá trị) · ĐÚNG MỘT lượt sửa khi sai hợp đồng, và KHÔNG sửa khi model chưa trả lời · câu trả lời bị cắt KHÔNG bị in ra thành lỗi JSON · quá tải/sai khoá/hết tín dụng là ba câu khác nhau · lượt dài đi bằng streaming · không đường ghi thứ hai vào tech_tasks · giao diện không có nút chạy tất cả · không vai nào merge/deploy/ghi production",
   );
 }
