@@ -40,6 +40,7 @@ on:
           - outcome-explain     # giải thích ERP kết luận kết quả vận đơn thế nào (arg: các mã vận đơn)
           - kpi-snapshot        # ảnh chụp KPI (kết quả đơn + ba con số tiền) để đối chiếu trước/sau deploy
           - smoke               # mở thật các màn hình chính bằng phiên đăng nhập hợp lệ, đo thời gian từng trang
+          - verify              # MỘT LƯỢT: dịch vụ + health + tài nguyên + ổ đĩa + lỗi log gần nhất + smoke (CHỈ ĐỌC)
           - session-verify      # kiểm phiên trượt trên máy chủ thật: gia hạn, trần sống, hết hạn, SSE, cờ cookie (CHỈ ĐỌC)
           - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
           - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
@@ -85,22 +86,58 @@ on:
         type: string
         default: ""
 
-# MỘT THAO TÁC CHẠM VPS TẠI MỘT THỜI ĐIỂM.
+# ═══════════ KHOÁ ĐI THEO TÁC ĐỘNG, KHÔNG THEO TÊN TỆP ═══════════
 #
-# Trước đây deploy và vận hành dùng hai nhóm riêng, nên một lệnh vận hành có thể chạy ĐÈ lên giữa
-# lúc deploy đang dựng ảnh và khởi động lại container — đúng lúc máy chủ yếu nhất. Nay dùng CHUNG
-# một nhóm: việc thứ hai xếp hàng chờ.
+# TRƯỚC: cả tệp này dùng MỘT nhóm khoá ở mức workflow, dùng chung với `deploy-vps.yml`. Một câu
+# `db-query` mười giây và một lượt deploy 17m08s (đo trên #352, 19/09/2026 — trong đó chỉ 8m13s
+# thật sự chạm máy chủ) xếp cùng một hàng. Với nhiều phiên làm việc song song (AGENTS.md mục 9)
+# đó là nút thắt lớn nhất của kho: mọi phiên đứng chờ nhau để hỏi một câu CHỈ ĐỌC.
 #
-# `cancel-in-progress: false` là bắt buộc: cắt ngang một lệnh đang ghi dữ liệu (nhập bảng kê, dựng
-# lại trạng thái) nguy hiểm hơn nhiều so với việc phải chờ.
-concurrency:
-  group: vps-operations
-  cancel-in-progress: false
+# SAU: nhóm được TÍNH RA từ thao tác và tham số, theo đúng thứ nó có thể làm hỏng.
+#
+#   vps-mutating            — GHI. Dùng chung với job `release` của deploy. MỘT lượt tại một thời
+#                             điểm, `cancel-in-progress: false`: không bao giờ cắt ngang một lệnh
+#                             đang ghi dữ liệu hay một lượt deploy đang chạy migration.
+#   vps-readonly-shell-<id> — CHỈ ĐỌC và KHÔNG dựng tiến trình nào trong container (`docker ps`,
+#                             `docker logs`, `df`, `psql` chỉ đọc). Nhóm mang mã lượt chạy nên
+#                             KHÔNG BAO GIỜ xếp hàng — chạy bao nhiêu lượt song song cũng được.
+#   vps-readonly-probe      — CHỈ ĐỌC, dò API bên ngoài (Viettel Post · Pancake · Meta). Chờ mạng
+#                             là chính, nhưng vẫn tốn một tiến trình `tsx` trong container.
+#   vps-readonly-db         — CHỈ ĐỌC, nhưng chạy báo cáo nặng / mở màn hình thật / EXPLAIN.
+#
+# VÌ SAO HAI LÀN ĐỌC NẶNG LẠI CÓ HẠN MỨC: VPS chỉ ~1,9 GB và ĐANG phục vụ người dùng thật; mỗi
+# `docker exec erp-app npx tsx` là một tiến trình Node vài trăm MB. "Chỉ đọc" nói về DỮ LIỆU, không
+# nói về BỘ NHỚ — thả tự do mười lượt đọc song song là tự gây ra sự cố mình định đi đo. Hai làn
+# riêng vì chúng tranh hai tài nguyên khác nhau: một bên là mạng ra ngoài, một bên là CPU/RAM/CSDL.
+#
+# BA LUẬT KHOÁ CHẶT CỦA BẢNG PHÂN LOẠI NÀY:
+#
+#   1. MẶC ĐỊNH LÀ GHI. Nhánh cuối cùng của biểu thức là `vps-mutating`, nên một thao tác mới thêm
+#      vào danh sách `options` mà quên phân loại sẽ tự rơi vào làn AN TOÀN NHẤT. Mọi nhánh lỗi
+#      phải rơi về phía HẸP HƠN (AGENTS.md mục 31).
+#   2. `--apply` / `--write` / `--fix` ĐÈ LÊN TẤT CẢ. Hơn một nửa thao tác "chỉ đọc" ở đây là
+#      CHẠY THỬ theo mặc định và GHI THẬT khi có cờ (`outcome-parity`, `cod-rebuild`,
+#      `care-false-reopen`, `ai-check` …). Phân loại theo TÊN thao tác thôi là sai ngay lần đầu
+#      ai đó gõ `--apply`. `contains()` là so chuỗi con, nên nó chỉ sai về phía GHI — đúng chiều.
+#   3. Thao tác GHI MỘT DÒNG VẪN LÀ GHI. `vtp-import-preview` chỉ đọc `shipments` nhưng vẫn tạo
+#      một dòng `vtp_import_batches` (AGENTS.md mục 49), `sepay-verify` phát lại một gói tin thật.
+#      Cả hai nằm ở `vps-mutating` — không có hạng "ghi một chút".
+#
+# `tests/ops-concurrency.test.ts` khoá cả ba luật ở mức mã nguồn, và chặn luôn việc ai đó đưa
+# nhóm khoá gộp-tất-cả ngày xưa trở lại.
 
 jobs:
   ops:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    concurrency:
+      group: >-
+        ${{ (contains(inputs.arg, '--apply') || contains(inputs.arg, '--write') || contains(inputs.arg, '--fix')) && 'vps-mutating'
+        || contains(fromJSON('["status","perf","disk","logs","db-query"]'), inputs.action) && format('vps-readonly-shell-{0}', github.run_id)
+        || contains(fromJSON('["check-integrations","vtp-debug","vtp-probe","vtp-web-probe","phone-probe","pages-debug","meta-id-probe","vtp-capability"]'), inputs.action) && 'vps-readonly-probe'
+        || contains(fromJSON('["verify","smoke","session-verify","perf-probe","kpi-snapshot","explain-stock","outcome-explain","outcome-parity","returns-parity","reason-coverage","reason-backfill","cogs-drift","profit-verify","marketing-calibrate","payroll-reconcile","fanpage-evidence-backfill","care-false-reopen","care-waiting-reconcile","cs-rule-update","cs-stale","sepay-reconcile","cod-rebuild","cod-status-repair","vtp-rebuild-state","vtp-replay-files","vtp-manual-verify","vtp-statement-peek","returns-hmt","ai-check"]'), inputs.action) && 'vps-readonly-db'
+        || 'vps-mutating' }}
+      cancel-in-progress: false
     steps:
       - uses: appleboy/ssh-action@v1
         env:
@@ -298,6 +335,90 @@ jobs:
                 # đây trả lời được câu "người dùng thật có phải chờ không", tách khỏi chi phí deploy.
                 fetch_script smoke.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/smoke.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/smoke.ts || true ;;
+              verify)
+                # ═══ MỘT LƯỢT HỎI THAY CHO NĂM LƯỢT — VÀ MỘT KẾT LUẬN, KHÔNG PHẢI NĂM MẢNH LOG ═══
+                #
+                # Người trực (và mọi phiên agent) luôn hỏi ĐÚNG NĂM câu ấy sau mỗi thay đổi:
+                # dịch vụ còn chạy không · ERP có trả lời không · máy còn tài nguyên không · ổ đĩa
+                # còn chỗ không (sự cố #242/#243: đĩa đầy 100%) · log gần nhất có lỗi mới không ·
+                # các màn hình chính còn mở được không. Năm lượt `workflow_dispatch` rời rạc cho
+                # năm câu đó là năm lần xếp hàng, năm lần chờ SSH, và một kết quả nằm rải ở năm
+                # trang log khác nhau.
+                #
+                # CHỈ ĐỌC: không `docker exec` nào ghi CSDL, không sửa `.env`, không khởi động lại
+                # gì. Phần `smoke` có ĐĂNG NHẬP thật bằng một tài khoản thật — phiên là phiếu ký
+                # trong cookie nên nó không tạo dòng dữ liệu nghiệp vụ nào, nhưng nói ra vẫn đúng
+                # hơn là khẳng định "không ghi gì".
+                #
+                # NÓ PHẢI ĐỎ ĐƯỢC. Một lượt kiểm không bao giờ đỏ thì không phải một lượt kiểm —
+                # nên `RC` gom kết luận của từng phần và quyết mã thoát ở cuối. (Thao tác `smoke`
+                # đứng riêng vẫn giữ `|| true` như cũ: nó là một phép ĐO, còn đây là một phép KIỂM.)
+                RC=0
+
+                echo "════════ 1/5 · DỊCH VỤ VÀ HEALTH ════════"
+                $C ps || RC=1
+                echo
+                HEALTH="$(docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null || true)"
+                echo "/api/health: ${HEALTH:-(KHÔNG phản hồi)}"
+                case "$HEALTH" in
+                  *'"ok":true'*) echo "  ✓ ERP trả lời ok:true" ;;
+                  *) echo "::error::/api/health không trả ok:true — ERP đang lỗi."; RC=1 ;;
+                esac
+                # Container nào không ở trạng thái running thì nói thẳng tên nó ra. `docker ps`
+                # in đủ thông tin nhưng người đọc phải tự dò — mà lúc cần đọc là lúc đang vội.
+                CHET="$( { $C ps --services --filter status=stopped 2>/dev/null || true; } | tr '\n' ' ')"
+                if [ -n "$(echo "$CHET" | tr -d ' ')" ]; then
+                  echo "::error::Dịch vụ KHÔNG chạy: $CHET"; RC=1
+                fi
+                echo
+
+                echo "════════ 2/5 · TÀI NGUYÊN MÁY ════════"
+                nproc; free -m; uptime
+                docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" || true
+                echo
+
+                echo "════════ 3/5 · Ổ ĐĨA ════════"
+                # SỰ CỐ #242/#243 (12/09/2026): đĩa đầy 100% làm deploy chết ở chỗ không ai ngờ —
+                # `git pull` trên VPS không ghi nổi một loose object. Ngưỡng 90% là để nói TRƯỚC
+                # khi điều đó xảy ra, chứ không phải sau.
+                df -h /
+                DUNG="$(df -P / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+                echo "  Đã dùng: ${DUNG}%"
+                if [ -n "$DUNG" ] && [ "$DUNG" -ge 90 ]; then
+                  echo "::error::Ổ đĩa đã dùng ${DUNG}% — chạy thao tác docker-prune trước khi deploy."; RC=1
+                elif [ -n "$DUNG" ] && [ "$DUNG" -ge 80 ]; then
+                  echo "::warning::Ổ đĩa đã dùng ${DUNG}% — nên dọn ảnh Docker cũ (thao tác docker-prune)."
+                fi
+                docker system df || true
+                echo
+
+                echo "════════ 4/5 · LỖI TRONG LOG GẦN NHẤT ════════"
+                # Che secret giống thao tác `logs`: kho mã này PUBLIC nên log Actions ai cũng đọc.
+                # Mọi khâu đều `|| true` — `grep` không tìm thấy gì trả về 1, và dưới `set -e` đó
+                # là cách một lượt kiểm "mọi thứ đều ổn" tự giết mình (đúng bẫy của deploy #244).
+                LOI="$( { $C logs --tail=500 app scheduler caddy 2>&1 || true; } \
+                  | { grep -iE 'error|exception|fatal|unhandled|ECONNREFUSED|ETIMEDOUT' || true; } \
+                  | sed -E 's/(pk|vtp)_[0-9a-f]{32}/\1_••••••••/g' )"
+                SO_LOI="$(printf '%s' "$LOI" | { grep -c . || true; })"
+                echo "Số dòng có dấu hiệu lỗi trong 500 dòng gần nhất: ${SO_LOI:-0}"
+                if [ "${SO_LOI:-0}" != "0" ]; then
+                  echo "── 20 dòng cuối ──"
+                  printf '%s\n' "$LOI" | tail -20
+                  # KHÔNG tự đặt RC=1 ở đây: log ứng dụng luôn có dòng lỗi lẻ (một webhook sai định
+                  # dạng, một lượt gọi API hết giờ) và một lượt kiểm đỏ vì chuyện thường ngày thì
+                  # sau ba lần không ai đọc nó nữa. Con số ở đây để NGƯỜI so với lần trước.
+                  echo "  (số này để so với lần chạy trước — nó KHÔNG tự làm lượt kiểm đỏ)"
+                fi
+                echo
+
+                echo "════════ 5/5 · SMOKE — MỞ THẬT CÁC MÀN HÌNH CHÍNH ════════"
+                fetch_script smoke.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/smoke.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/smoke.ts || { echo "::error::smoke KHÔNG đạt — xem phần trên."; RC=1; }
+                echo
+
+                if [ "$RC" = "0" ]; then echo "✓ VERIFY ĐẠT — dịch vụ chạy, ERP trả lời, đĩa còn chỗ, các màn hình chính mở được."
+                else echo "::error::VERIFY KHÔNG ĐẠT — xem các dòng ::error:: bên trên."; fi
+                exit "$RC" ;;
               kpi-snapshot)
                 # Dùng bản script mới nhất trên main; công thức kết quả đơn lấy từ lib trong image.
                 fetch_script kpi-snapshot.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/kpi-snapshot.ts'

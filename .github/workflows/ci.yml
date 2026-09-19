@@ -7,7 +7,7 @@
 # sẽ khoá chết mọi PR vì cái check bắt buộc không bao giờ chạy. Dựng cổng trước, khoá sau.
 #
 # Tên job (`gates`) là thứ đi vào danh sách required checks — đổi tên job là gỡ khoá `main` mà
-# không ai nhận ra, nên đừng đổi nếu chưa cập nhật ruleset.
+# không ai nhận ra, nên đừng đổi nếu chưa cập nhật ruleset. Tên check hiện ra là `gates / gates`.
 name: CI
 
 on:
@@ -17,12 +17,19 @@ on:
   push:
     branches: [main]
 
-# PR được đẩy tiếp thì lượt cũ không còn ý nghĩa — huỷ để trả kết quả cho bản mới nhanh hơn.
-# KHÁC hẳn nhóm `vps-operations`: ở đó cắt ngang một lệnh đang ghi dữ liệu là nguy hiểm, còn ở
-# đây lượt chạy chỉ đọc mã nguồn.
+# ═══ MỖI NHÁNH MỘT LÀN, KHÔNG NHÁNH NÀO CHỜ NHÁNH NÀO ═══
+#
+# Khoá tính theo `github.ref`, nên PR #12 và PR #13 chạy SONG SONG; chỉ lượt cũ CỦA CHÍNH nhánh
+# đó bị huỷ khi có commit mới. Đây KHÔNG bao giờ được dùng chung nhóm với thao tác production
+# (`vps-mutating`): ở đó cắt ngang một lệnh đang ghi dữ liệu là nguy hiểm, còn ở đây lượt chạy
+# chỉ đọc mã nguồn trên máy của GitHub và không chạm tới VPS một byte nào.
+#
+# `cancel-in-progress` CHỈ bật cho pull request. Trên `main` mỗi commit phải giữ được lượt kiểm
+# của chính nó: hai commit vào `main` cách nhau một phút thì huỷ lượt đầu là xoá bằng chứng của
+# commit đó — mà commit đó vẫn nằm trong lịch sử và vẫn deploy được.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
