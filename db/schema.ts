@@ -5462,6 +5462,25 @@ export const techProposals = pgTable(
     /** Nguyên văn JSON model trả về, sau khi đã qua zod. Bằng chứng thô, không dùng để tính. */
     rawOutput: jsonb("raw_output").$type<unknown>(),
     error: text("error").notNull().default(""),
+    /*
+      ═══ MỘT LƯỢT SỬA CÓ KIỂM SOÁT, VÀ ĐẾM ĐƯỢC ═══
+
+      Model trả về đúng định dạng là chuyện thường, KHÔNG PHẢI luôn luôn. Đã xảy ra thật trên
+      production 19/09/2026: nó trả 13 việc cho một hợp đồng tối đa 12. Bản đề xuất bị từ chối,
+      đúng — nhưng nếu ta chỉ lưu "hỏng" thì lần sau không ai biết nó hỏng ở bước nào.
+
+      Ba cột, ba câu hỏi khác nhau:
+        · `modelCalls`    — đã gọi model mấy lượt (0 = bị chặn trước khi gọi, 1 = không phải sửa,
+                            2 = đã sửa một lần). Trần là 2; không có lượt thứ ba.
+        · `initialError`  — lượt ĐẦU sai cái gì. Rỗng nghĩa là lượt đầu đã đạt.
+        · `repairOutcome` — lượt sửa kết thúc ra sao: `NONE` chưa cần sửa · `PASS` sửa xong đạt ·
+                            `FAIL` sửa rồi vẫn không đạt.
+
+      KHÔNG lưu dòng suy nghĩ của model — chỉ lưu lỗi kiểm tra và kết quả cuối.
+    */
+    modelCalls: integer("model_calls").notNull().default(1),
+    initialError: text("initial_error").notNull().default(""),
+    repairOutcome: text("repair_outcome").notNull().default("NONE"),
     /* Ai duyệt / từ chối. `NULL` = chưa ai. */
     decidedBy: text("decided_by").references(() => users.id, { onDelete: "set null" }),
     /** ẢNH CHỤP TÊN do MÁY CHỦ đọc từ `users` (AGENTS.md mục 34). */
@@ -5476,6 +5495,16 @@ export const techProposals = pgTable(
   (t) => [
     index("tech_proposals_source_idx").on(t.sourceTaskId),
     index("tech_proposals_status_idx").on(t.status, t.createdAt),
+    check("tech_proposals_model_calls_check", sql`${t.modelCalls} BETWEEN 0 AND 2`),
+    /*
+      Hai cột phải kể CÙNG MỘT câu chuyện. `repair_outcome` khác `NONE` mà `model_calls` không
+      phải 2 nghĩa là một lượt sửa đã xảy ra nhưng không ai đếm nó — và lúc đó con số "bao nhiêu
+      phần trăm bản đề xuất cần sửa" sai mà không có gì báo.
+    */
+    check(
+      "tech_proposals_repair_check",
+      sql`(${t.repairOutcome} = 'NONE' AND ${t.modelCalls} <= 1) OR (${t.repairOutcome} IN ('PASS','FAIL') AND ${t.modelCalls} = 2)`,
+    ),
     check(
       "tech_proposals_status_check",
       sql`${t.status} IN ('DRAFT','READY_FOR_REVIEW','APPROVED','REJECTED','SUPERSEDED')`,
