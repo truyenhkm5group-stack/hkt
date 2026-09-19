@@ -8,11 +8,37 @@ dừng lại ở chỗ chúng thật sự bị chặn.
 
 | Việc | Tình trạng | Cần gì |
 | --- | --- | --- |
-| Đồng bộ deploy GitHub chạy thật | **không còn chặn** | không cần gì — kho public đọc được không cần token |
-| Agent DOCUMENTATION R0 chạy thật | **CHƯA** | một khoá AI trên máy runner |
+| Đồng bộ deploy GitHub chạy thật | **XONG** (đo 18/09, xem mục 0) | không cần gì — kho public đọc được không cần token |
+| Agent DOCUMENTATION R0 chạy thật | **CHƯA** | một khoá AI trên máy runner + một cú bấm khởi tạo sổ agent |
 
 Chỗ còn lại là **CHƯA BIẾT**, không phải *đã chạy và hỏng*, và cũng không phải *0*: `tech_agent_runs`
 không có dòng nào, đúng như phải thế khi chưa có khoá.
+
+## 0 · Đo thật trên production 18/09/2026 — GitHub đã chạy, không cần token
+
+Chạy qua `Actions → Vận hành ERP trên VPS → run-job`, arg `github-deployments --limit=20`,
+trên máy chủ **không có `ERP_GITHUB_TOKEN`**:
+
+| | lần 1 | lần 2 |
+| --- | --- | --- |
+| scanned | 20 | 20 |
+| inserted | **20** | **0** |
+| updated | 0 | 0 |
+| unchanged | 0 | **20** |
+| errors | 0 | 0 |
+| verified | 1 | 1 |
+| mismatched | 0 | 0 |
+| productionCommit | `149a6d0a5ed8` | `149a6d0a5ed8` |
+| skippedReason / skippedKind | `null` / `null` | `null` / `null` |
+
+Sổ `tech_deployments` sau hai lượt: **20 dòng · 20 khoá duy nhất ⇒ 0 bản trùng**
+(`provider` + `external_run_id` + `external_run_attempt`), 18 lượt thành công, và phép đối chiếu
+commit ra: **VERIFIED 1 · MISMATCH 0 · SUPERSEDED 17 · UNKNOWN 2**.
+
+Đọc bảng ấy cho đúng: **1 khớp** là lượt deploy thành công MỚI NHẤT, và commit của nó bằng đúng
+commit production đang chạy. **17 bị thay** là các lượt thành công cũ hơn — chúng không "lệch",
+chúng đã bị một lượt sau thay thế. **2 chưa biết** là hai lượt không thành công: không có gì để
+đối chiếu, và đó là `UNKNOWN` chứ không phải `MISMATCH`.
 
 ## 1 · Vì sao trước bước này token không bao giờ tới được máy chủ
 
@@ -86,7 +112,23 @@ tạo được — `seedTechAgents()` từ chối mọi người thao tác khôn
 Sau đó bật **duy nhất** vai `documentation`: `allowedRisks: ["R0"]`, `canMerge / canDeploy /
 canRunProdWrite` đều `false`.
 
-## 2.4 · Khoá AI cho MÁY RUNNER — việc duy nhất còn lại
+## 2.4 · Máy runner — việc duy nhất còn lại
+
+Chạy `npm run agent:check` trên máy định dùng làm runner. Nó trả lời trong hai giây, và KHÔNG in
+một ký tự bí mật nào — chỉ CÓ/KHÔNG và DÙNG ĐƯỢC/KHÔNG:
+
+```
+▶ Máy runner        git · Node · cây làm việc có sạch không
+▶ Hàng rào          4 lệnh nguy hiểm mẫu còn bị chặn · 10 biến bí mật còn bị gỡ
+▶ Khoá AI           gọi thật một lượt ping rẻ
+
+KẾT LUẬN: READY | MISSING | AUTH_FAILED | QUOTA_OR_RATE_LIMIT | PROVIDER_ERROR
+```
+
+Bốn kết luận cuối là bốn cách sửa khác nhau, và không cái nào là "agent hỏng" — gộp chúng lại là
+đổ cho agent một thứ agent chưa từng chạy.
+
+### Khoá AI
 
 Máy runner là máy có kho git + npm + khoá AI. **KHÔNG phải container production**: production là
 ERP + PostgreSQL + scheduler + Caddy, và biến nó thành máy build là mở một bề mặt tấn công mới
@@ -101,6 +143,39 @@ chính agent không đọc được khoá đang trả tiền cho nó.
 
 Chưa có khoá thì `executor.available()` trả `ok=false` và lượt chạy dừng ở **BLOCKED — CHƯA CẤU
 HÌNH**. Đó là hành vi ĐÚNG, và nó khác hẳn "đã chạy xong".
+
+## 2.5 · Máy xếp rủi ro CHẶN NHẦM việc tài liệu — hai lần, vì hai lý do khác nhau
+
+Việc R0 đầu tiên được soạn đúng như đặc tả yêu cầu (module `PLATFORM`, mô tả nhắc "giới hạn
+**quyền** của vai tài liệu"). Máy xếp nó là **R2**. Đo thật:
+
+| Module | Mô tả | Kết quả | Luật khớp |
+| --- | --- | --- | --- |
+| `PLATFORM` | có chữ "quyền" | **R2** | `ACCESS` |
+| `PLATFORM` | không có chữ "quyền" | **R1** | `INFRA` |
+| `TECH` | có chữ "quyền" | **R2** | `ACCESS` |
+| `TECH` | không có chữ "quyền" | **R0** | không luật nào |
+
+Hai lỗi dương tính giả, và cả hai đều đáng biết:
+
+1. **`ACCESS` khớp từ khoá `quyen` ở bất kỳ đâu trong tiêu đề hoặc mô tả.** Một việc *mô tả* giới
+   hạn quyền bị xếp ngang với một việc *thay đổi* quyền. Máy đọc chữ, không đọc ý.
+
+2. **`classifyTechRisk()` khớp module / loại việc / từ khoá bằng phép HOẶC.** Luật `INFRA` khai cả
+   `taskTypes: ["INFRA"]` lẫn `modules: ["PLATFORM"]` — rõ ràng có ý là "việc hạ tầng TRONG module
+   nền tảng" — nhưng phép HOẶC làm **mọi** việc thuộc module `PLATFORM` tự động ít nhất R1, kể cả
+   một việc chỉ viết một tệp markdown.
+
+**Đã KHÔNG đè mức rủi ro** (đặc tả cấm, và đè là đúng thứ làm cổng phê duyệt thành vô nghĩa).
+Thay vào đó việc được khai lại cho ĐÚNG với thứ nó làm: module `TECH` (việc của Phòng Tech, không
+phải thay đổi hạ tầng), và mô tả nói "những việc vai tài liệu **KHÔNG được làm**" thay vì "giới
+hạn **quyền**" — cùng một nội dung agent phải viết ra, nhưng không còn khẳng định sai rằng việc
+này chạm tới quyền.
+
+**Cũng KHÔNG sửa máy xếp rủi ro trong lượt này.** Chuyển `INFRA` sang phép VÀ sẽ HẠ mức của nhiều
+việc đang có, mà luật của máy là *chỉ nâng, không bao giờ hạ*. Chặn nhầm là hướng an toàn; nới ra
+là quyết định của chủ shop, không phải của một lượt dọn dẹp. Nhưng nó đáng biết: mọi việc trong
+module `PLATFORM` hiện không bao giờ tới tay agent R0 được.
 
 ## 3 · Chín hàng rào — đã kiểm, KHÔNG phải bằng cách thử phá máy chủ thật
 

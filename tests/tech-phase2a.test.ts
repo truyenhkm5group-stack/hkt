@@ -22,6 +22,7 @@ import { adaptTechTasks } from "@/lib/queries/work-adapters";
 import { createTechTask, decideTechApproval, overrideTechTaskRisk, recordTechDeployment, seedTechAgents, setTechAgentEnabled, setTechTaskStatus, startTechAgentRun, updateTechDeployment, type TechActor } from "@/lib/tech/service";
 
 import { runAgentOnTask } from "@/lib/agents/runner";
+import { classifyProviderError } from "@/scripts/agent-runner-check";
 import type { AgentExecutor, AgentJob, AgentOutcome } from "@/lib/agents/executor";
 
 /**
@@ -661,6 +662,8 @@ export async function testPhase2aBarriers() {
   const rNang = await runAgentOnTask({ taskId: vNang.id, agentKey: "documentation", executor: nangGiuaChung, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
   assert.equal(rNang.status, "BLOCKED", "RÀO 4: quyền được xét LẠI lúc sắp commit, không chỉ lúc bắt đầu");
   assert.equal(rNang.resultCommit, null, "RÀO 4: KHÔNG đưa gì vào kho");
+  const runNang = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, rNang.runId ?? "") });
+  assert.equal(runNang?.status, "CANCELLED", "RÀO 4: lượt chạy phải được ĐÓNG LẠI đàng hoàng, không bỏ treo — một dòng RUNNING vĩnh viễn chặn mọi lượt sau trên cùng việc");
 
   // ───────── RÀO 8 · AGENT KHÔNG TỰ PHÊ DUYỆT ─────────
   const vDuyet = await taoViec("p2a-rao-can: thử tự duyệt", "FEATURE", "PAYROLL");
@@ -687,6 +690,12 @@ export async function testPhase2aBarriers() {
   }
   const rSan = await setTechTaskStatus({ taskId: vDeploy.id, to: "READY_TO_DEPLOY", note: "agent tự dán nhãn sẵn sàng" }, may);
   assert.ok("error" in rSan, "RÀO 9: agent KHÔNG tự dán được nhãn 'sẵn sàng deploy' — đó là AI tự chấm mình ở đúng chỗ tốn kém nhất");
+  // Người đưa việc tới READY_TO_DEPLOY, rồi agent thử bước cuối cùng: tự bấm deploy.
+  const nguoiSan = await setTechTaskStatus({ taskId: vDeploy.id, to: "READY_TO_DEPLOY", note: "chủ shop duyệt và dán nhãn" }, nguoi);
+  assert.ok("ok" in nguoiSan, "người vẫn dán được nhãn — cổng chặn AGENT, không chặn việc");
+  const rDang = await setTechTaskStatus({ taskId: vDeploy.id, to: "DEPLOYING", note: "agent tự bấm deploy" }, may);
+  assert.ok("error" in rDang, "RÀO 9: agent KHÔNG tự chuyển việc sang ĐANG DEPLOY — hai bước, hai lá chắn, vì một việc đã duyệt vẫn có thể bị xếp lại thành R2");
+
   const rGhiDeploy = await recordTechDeployment({ commitSha: "deadbeef1234", branch: "main", status: "SUCCEEDED", taskId: vDeploy.id, notes: "agent tự ghi" }, may);
   assert.ok("error" in rGhiDeploy, "RÀO 9: agent KHÔNG ghi được một lượt deploy vào sổ quan sát");
   // Người vẫn làm được — cổng chặn AGENT, không phải chặn việc.
@@ -699,13 +708,37 @@ export async function testPhase2aBarriers() {
     assert.ok(!checkCommand(argv).allowed, `RÀO 9: \`${argv.join(" ")}\` không nằm trong tay agent`);
   }
 
+  /*
+    ───────── RÀO 7b · "AGENT HỎNG" VÀ "KHOÁ HỎNG" LÀ HAI CÂU KHÁC NHAU ─────────
+
+    Đây là lời nói dối tốn kém nhất mà Phase 2A có thể kể: đổ cho agent một thứ agent chưa từng
+    chạy. Một lượt 429 là hết hạn mức của khoá, không phải agent viết sai tài liệu — và hai thứ đó
+    sửa ở hai nơi khác hẳn. Đọc MÃ TRẠNG THÁI trước, câu chữ sau: câu chữ đổi theo phiên bản SDK.
+  */
+  const caLoi: [unknown, string][] = [
+    [Object.assign(new Error("Incorrect API key provided"), { status: 401 }), "AUTH_FAILED"],
+    [Object.assign(new Error("permission denied"), { status: 403 }), "AUTH_FAILED"],
+    [Object.assign(new Error("Rate limit reached"), { status: 429 }), "QUOTA_OR_RATE_LIMIT"],
+    [Object.assign(new Error("overloaded"), { status: 529 }), "PROVIDER_ERROR"],
+    [Object.assign(new Error("bad gateway"), { status: 502 }), "PROVIDER_ERROR"],
+    // KHÔNG có mã trạng thái (lỗi mạng, hoặc SDK gói lại) ⇒ mới dò câu chữ.
+    [new Error("401 Unauthorized"), "AUTH_FAILED"],
+    [new Error("Your credit balance is too low"), "QUOTA_OR_RATE_LIMIT"],
+    [new Error("ECONNRESET"), "PROVIDER_ERROR"],
+  ];
+  for (const [loi, mong] of caLoi) {
+    const v = classifyProviderError(loi);
+    assert.equal(v.verdict, mong, `RÀO 7b: "${loi instanceof Error ? loi.message : String(loi)}" phải xếp là ${mong}, không phải ${v.verdict}`);
+    assert.ok(v.detail.length > 0 && v.detail.length <= 200, "RÀO 7b: lời giải thích phải có và phải CẮT NGẮN — thân lỗi của một số nhà cung cấp vọng lại header, và header mang khoá");
+  }
+
   rmSync(repo, { recursive: true, force: true });
   await db.delete(schema.techDeployments);
   await db.delete(schema.techAgentRuns);
   await db.delete(schema.techTasks);
   await db.delete(schema.techAgents);
 
-  console.log("✓ Chín hàng rào Phase 2A: R1 chặn · R2 chặn · agent tắt chặn · nâng rủi ro giữa chừng thì dừng trước commit · 7 lệnh cấm bị từ chối kèm lý do · 5 đường ghi ngoài phạm vi bị chặn và .env nguyên vẹn · thiếu khoá API nói CHƯA CẤU HÌNH chứ không giả xong · agent không duyệt/không hạ rủi ro/không tự bật · agent không dán nhãn sẵn sàng deploy, không ghi và không sửa sổ deploy");
+  console.log("✓ Chín hàng rào Phase 2A: R1 chặn · R2 chặn · agent tắt chặn · nâng rủi ro giữa chừng thì dừng trước commit · 7 lệnh cấm bị từ chối kèm lý do · 5 đường ghi ngoài phạm vi bị chặn và .env nguyên vẹn · thiếu khoá API nói CHƯA CẤU HÌNH chứ không giả xong · agent không duyệt/không hạ rủi ro/không tự bật · agent không dán nhãn sẵn sàng deploy, không tự chuyển sang ĐANG DEPLOY, không ghi và không sửa sổ deploy (người vẫn làm được cả ba) · 8 ca lỗi nhà cung cấp xếp đúng AUTH_FAILED / QUOTA_OR_RATE_LIMIT / PROVIDER_ERROR (không đổ cho agent)");
 }
 
 /* ═════════════════ 5 · QUÉT MÃ NGUỒN ═════════════════ */
