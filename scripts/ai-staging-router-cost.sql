@@ -61,9 +61,27 @@ from ai_runs r
 where r.created_at > now() - interval '30 days';
 
 \echo ''
-\echo '── 4. BẢNG GIÁ ĐÃ KHAI CHƯA (che nội dung, chỉ đếm khoá) ──'
+\echo '── 4. LƯỢT GỌI HỎNG NÓI GÌ — gộp theo LỜI LỖI, không theo từng lượt ──'
+\echo '   Khối 2 cho thấy một cặp nhà cung cấp/mẫu hỏng 100%. Một tỷ lệ hỏng không kèm LỜI LỖI thì'
+\echo '   không sửa được gì từ nó: thiếu khoá, hết hạn mức, sai tên mẫu và mạng chết đều ra "hỏng".'
 select
-  coalesce(s.value->>'pricingVersion', '(chưa khai)')                     as phien_ban_bang_gia,
-  coalesce(jsonb_array_length(coalesce(jsonb_path_query_array(s.value, '$.pricing.keyvalue().key'), '[]'::jsonb)), 0) as so_mau_da_khai_gia
+  c.provider,
+  c.model,
+  -- Cắt phần thay đổi theo từng lượt (mã yêu cầu, con số) để các lượt cùng nguyên nhân gộp làm một.
+  left(regexp_replace(coalesce(c.error, '(không có lời lỗi)'), '[0-9a-f]{8,}', '<mã>', 'g'), 160) as loi_lo,
+  count(*)            as so_lan,
+  min(c.created_at)   as lan_dau,
+  max(c.created_at)   as lan_cuoi
+from ai_model_calls c
+where c.created_at > now() - interval '30 days' and not c.ok
+group by 1, 2, 3
+order by 4 desc
+limit 12;
+
+\echo ''
+\echo '── 5. BẢNG GIÁ ĐÃ KHAI CHƯA (chỉ ĐẾM khoá, không in nội dung) ──'
+select
+  coalesce(s.value::jsonb->>'pricingVersion', '(chưa khai)')                         as phien_ban_bang_gia,
+  coalesce((select count(*) from jsonb_object_keys(s.value::jsonb->'pricing')), 0)   as so_mau_da_khai_gia
 from settings s
 where s.key = 'ai.config';
