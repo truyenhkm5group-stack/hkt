@@ -1,0 +1,143 @@
+# ═══════════ MÁY CHẠY AGENT CỦA PHÒNG TECH AI ═══════════
+#
+# Actions → "Chạy agent Tech" → Run workflow.
+#
+# ─── VÌ SAO Ở ĐÂY, KHÔNG PHẢI TRÊN VPS ───
+#
+# Runner cần kho git, `npm`, và một khoá AI. Container production chạy một bản Next.js ĐÃ DỰNG:
+# trong đó không có kho git, không có `node_modules` của dev, và KHÔNG NÊN có. Nhét runner vào đó
+# là biến máy chủ bán hàng thành máy build — thêm một bề mặt tấn công mới lên đúng chỗ giữ tiền
+# của shop. Máy Actions có đủ bốn thứ cần, dùng một lần rồi bỏ, và không chạm được production.
+#
+# ─── HẬU QUẢ PHẢI NÓI RA: SỔ NẰM Ở CSDL TẠM ───
+#
+# Máy Actions KHÔNG nối được tới PostgreSQL production (nó nằm sau mạng docker của VPS, không mở
+# ra ngoài) — và đó là ĐÚNG. Nên `tech_agent_runs` của lượt chạy này nằm trong một CSDL PGlite
+# dùng-một-lần, và bằng chứng được XUẤT RA thành hiện vật + in vào log. Nó là một dòng sổ THẬT
+# với kết quả cổng đọc từ mã thoát thật, nhưng nó KHÔNG hiện ở `/tech` trên production. Ai đọc
+# báo cáo cũng phải biết điều đó.
+#
+# ─── WORKFLOW NÀY KHÔNG BAO GIỜ ───
+#
+# Không merge. Không đẩy `main`. Không deploy. Không SSH vào production. Không ghi một dòng dữ
+# liệu nghiệp vụ nào. Thứ duy nhất nó đẩy lên kho là nhánh `ai/documentation/*` — để bằng chứng
+# sống sót sau khi máy Actions bị xoá, và để người xem được diff.
+name: Chạy agent Tech
+
+on:
+  workflow_dispatch:
+    inputs:
+      gates:
+        description: "Cổng runner phải chạy (phân tách bằng dấu phẩy)"
+        type: string
+        default: "typecheck,lint,test,build"
+
+# `contents: write` CHỈ để đẩy nhánh `ai/documentation/*`. Bước đẩy tự kiểm tên nhánh trước khi
+# chạy, nên một lỗi ở chỗ khác cũng không biến quyền này thành đường ghi vào `main`.
+permissions:
+  contents: write
+
+# Hai lượt chạy agent cùng lúc sẽ tranh nhau cùng một việc và ghi đè bằng chứng của nhau.
+# `cancel-in-progress: false`: cắt ngang một lượt đang chạy cổng còn tệ hơn phải chờ.
+concurrency:
+  group: tech-agent-run
+  cancel-in-progress: false
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # `fetch-depth: 0` là bắt buộc: runner dựng cây làm việc bằng `git worktree add` từ một SHA
+      # ĐÃ VÀO KHO. Bản checkout nông không có object đó và lượt chạy chết ở bước đầu tiên.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Cài phụ thuộc
+        run: npm ci
+
+      # KHÔNG in giá trị khoá, và cũng không in độ dài — chỉ CÓ / KHÔNG. Kho mã này PUBLIC nên
+      # log Actions ai cũng đọc được.
+      - name: Kiểm khoá AI của máy runner
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+            echo "::error::CONFIG_REQUIRED — kho chưa có Secret ANTHROPIC_API_KEY (hoặc OPENAI_API_KEY)."
+            echo "Thêm ở Settings → Secrets and variables → Actions → New repository secret, rồi chạy lại."
+            echo "Đây KHÔNG phải lỗi của agent: agent chưa từng chạy."
+            exit 1
+          fi
+          echo "ANTHROPIC_API_KEY: $([ -n "${ANTHROPIC_API_KEY:-}" ] && echo 'có' || echo 'không')"
+          echo "OPENAI_API_KEY:    $([ -n "${OPENAI_API_KEY:-}" ] && echo 'có' || echo 'không')"
+
+      - name: Máy runner đã sẵn sàng chưa
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DATABASE_URL: pglite://./data/agent-ci-db
+        run: npm run agent:check
+
+      # Dựng sổ agent + việc R0 qua ĐÚNG hàm dịch vụ mà `/tech` gọi. Người thao tác là tài khoản
+      # GitHub đã bấm Run — `seedTechAgents()` từ chối mọi actor không phải người (AGENTS.md mục
+      # 23), và workflow này chỉ chạy được bằng `workflow_dispatch`.
+      - name: Khởi tạo sổ agent và tạo việc R0
+        id: setup
+        env:
+          DATABASE_URL: pglite://./data/agent-ci-db
+        run: |
+          npm run --silent agent:proof-setup -- --actor "github:${{ github.actor }}" | tee /tmp/setup.log
+          TASK_CODE="$(grep -oE '^TASK_CODE=.+' /tmp/setup.log | tail -1 | cut -d= -f2)"
+          if [ -z "$TASK_CODE" ]; then echo "::error::Không lấy được mã việc."; exit 1; fi
+          echo "task_code=$TASK_CODE" >> "$GITHUB_OUTPUT"
+
+      - name: Chạy agent DOCUMENTATION
+        id: run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+          DATABASE_URL: pglite://./data/agent-ci-db
+        run: |
+          npm run --silent agent:run -- \
+            --task "${{ steps.setup.outputs.task_code }}" \
+            --agent documentation \
+            --gates "${{ inputs.gates }}"
+
+      # ═══ PHẠM VI TỆP: KIỂM BẰNG GIT, KHÔNG HỎI AGENT ═══
+      # Một tệp thứ hai ⇒ lượt chạy KHÔNG ĐẠT. Tuyệt đối không sửa hộ agent rồi vẫn tính là đạt.
+      - name: Kiểm phạm vi tệp và in bằng chứng
+        if: always()
+        env:
+          DATABASE_URL: pglite://./data/agent-ci-db
+        run: npm run --silent agent:proof-report -- --task "${{ steps.setup.outputs.task_code }}"
+
+      # Nhánh phải sống sót sau khi máy Actions bị xoá, nếu không bằng chứng biến mất cùng nó.
+      # Chỉ đẩy nhánh mang đúng tiền tố; mọi tên khác bị từ chối trước khi `git push` chạy.
+      - name: Đẩy nhánh agent (KHÔNG phải main)
+        if: always()
+        run: |
+          BR="$(git branch --list 'ai/documentation/*' --format '%(refname:short)' | head -1)"
+          if [ -z "$BR" ]; then echo "Không có nhánh agent nào để đẩy."; exit 0; fi
+          case "$BR" in
+            ai/documentation/*) : ;;
+            *) echo "::error::Từ chối đẩy nhánh ngoài phạm vi: $BR"; exit 1 ;;
+          esac
+          git push origin "refs/heads/$BR:refs/heads/$BR"
+          echo "Đã đẩy $BR — CHƯA merge, CHƯA deploy. Người xem rồi quyết."
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bang-chung-agent
+          path: |
+            bang-chung-agent.json
+            /tmp/setup.log
+          if-no-files-found: warn
