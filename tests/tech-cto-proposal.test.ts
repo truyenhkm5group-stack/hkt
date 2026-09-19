@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { CTO_MAX_OUTPUT_TOKENS, parseCtoPlan, type CtoPlan } from "@/lib/constants/cto-proposal";
 import { promptCoSecretKhong, runCtoPlanning } from "@/lib/agents/cto";
-import { NGUONG_KHONG_STREAM, type AiProvider, type AiResponse } from "@/lib/ai/provider";
+import { NGUONG_KHONG_STREAM, RETRIES_BY_TIER, type AiProvider, type AiResponse } from "@/lib/ai/provider";
 import { approveProposal, createProposal, rejectProposal, supersedeOpenProposals } from "@/lib/tech/proposal";
 import { createTechTask, type TechActor } from "@/lib/tech/service";
 
@@ -334,6 +334,38 @@ export async function testCtoProposal() {
   const tuchoi = await runCtoPlanning(giaProvider({ content: [{ type: "text", text: "" }], stopReason: "refusal" }), ctxGia as never);
   assert.ok(!tuchoi.ok && /từ chối/.test(tuchoi.error), "model từ chối phải được gọi đúng tên");
 
+  /* ───── 14b. QUÁ TẢI CỦA NHÀ CUNG CẤP KHÔNG ĐƯỢC ĐỘI LỐT LỖI MÃ NGUỒN ─────
+
+     Đo thật: hai lượt liên tiếp (35429768726 · 35429814259) chết trong 2 và 5 giây vì
+     `overloaded_error`, và màn hình in nguyên phong bì JSON. Người đọc không có cách nào biết
+     mình phải sửa mã, thay khoá, hay chỉ cần chạy lại — ba việc khác hẳn nhau. */
+  const neVang = (mess: string, status?: number): AiProvider => ({
+    name: "gia",
+    model: "gia-model",
+    async complete(): Promise<AiResponse> {
+      throw Object.assign(new Error(mess), status === undefined ? {} : { status });
+    },
+  });
+
+  const quaTai = await runCtoPlanning(neVang('{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}'), ctxGia as never);
+  assert.ok(!quaTai.ok && /QUÁ TẢI/.test(quaTai.error), "quá tải phải được gọi đúng tên");
+  assert.ok(!quaTai.ok && /chạy lại/.test(quaTai.error), "…kèm việc phải làm: chạy lại");
+  assert.ok(!quaTai.ok && /overloaded_error/.test(quaTai.error), "…và vẫn giữ nguyên văn để còn tra được");
+
+  const saiKhoa = await runCtoPlanning(neVang("authentication_error: invalid x-api-key", 401), ctxGia as never);
+  assert.ok(!saiKhoa.ok && /Khoá API/.test(saiKhoa.error), "khoá bị từ chối là một câu khác hẳn quá tải");
+
+  const hetTien = await runCtoPlanning(neVang("Your credit balance is too low", 400), ctxGia as never);
+  assert.ok(!hetTien.ok && /tín dụng|hạn mức/.test(hetTien.error), "hết tín dụng là một câu khác nữa");
+  assert.ok(!hetTien.ok && !/QUÁ TẢI/.test(hetTien.error), "…và KHÔNG bị gộp vào nhánh quá tải");
+
+  /* Bậc `analysis` phải kiên nhẫn hơn bậc có người ngồi đợi — nếu không, một cơn quá tải vài giây
+     lại tiêu trọn một lượt CI như hai lần đã đo. */
+  assert.ok(
+    RETRIES_BY_TIER.analysis > RETRIES_BY_TIER.copilot,
+    `bậc analysis (${RETRIES_BY_TIER.analysis} lần) phải thử lại nhiều hơn bậc copilot (${RETRIES_BY_TIER.copilot} lần) — chạy nền thì không ai đợi`,
+  );
+
   /* ───── 15. TRẦN CỦA CTO PHẢI ĐI BẰNG STREAMING ─────
 
      Ta truyền `timeout` tường minh cho SDK, nên phép kiểm "lượt này dài quá, hãy streaming" của
@@ -355,6 +387,6 @@ export async function testCtoProposal() {
   await db.delete(schema.techTasks);
 
   console.log(
-    "✓ AI CTO chế độ đề xuất: lập kế hoạch KHÔNG tạo việc thật · agent không duyệt/không từ chối · người duyệt thì việc tạo qua dịch vụ và phụ thuộc nối bằng id thật · AI nói R0 cho việc lương thì MÁY vẫn xếp R2 và vẫn chờ ký · duyệt hai lần không nhân đôi · bản từ chối/bị thay thế/nháp không áp được · JSON hỏng, vai lạ, module lạ, phụ thuộc vòng đều bị từ chối · prompt không mang bí mật (cả tên lẫn giá trị) · câu trả lời bị cắt KHÔNG bị in ra thành lỗi JSON · lượt dài đi bằng streaming · không đường ghi thứ hai vào tech_tasks · giao diện không có nút chạy tất cả · không vai nào merge/deploy/ghi production",
+    "✓ AI CTO chế độ đề xuất: lập kế hoạch KHÔNG tạo việc thật · agent không duyệt/không từ chối · người duyệt thì việc tạo qua dịch vụ và phụ thuộc nối bằng id thật · AI nói R0 cho việc lương thì MÁY vẫn xếp R2 và vẫn chờ ký · duyệt hai lần không nhân đôi · bản từ chối/bị thay thế/nháp không áp được · JSON hỏng, vai lạ, module lạ, phụ thuộc vòng đều bị từ chối · prompt không mang bí mật (cả tên lẫn giá trị) · câu trả lời bị cắt KHÔNG bị in ra thành lỗi JSON · quá tải/sai khoá/hết tín dụng là ba câu khác nhau · lượt dài đi bằng streaming · không đường ghi thứ hai vào tech_tasks · giao diện không có nút chạy tất cả · không vai nào merge/deploy/ghi production",
   );
 }

@@ -104,10 +104,15 @@ export class AnthropicProvider implements AiProvider {
   readonly name = "anthropic";
   readonly model: string;
   private client: Anthropic;
-  constructor(model: string, private effort: "low" | "medium" | "high" = "medium", timeoutMs: number = TIMEOUT_BY_TIER.copilot) {
+  constructor(
+    model: string,
+    private effort: "low" | "medium" | "high" = "medium",
+    timeoutMs: number = TIMEOUT_BY_TIER.copilot,
+    soLanThuLai: number = RETRIES_BY_TIER.copilot,
+  ) {
     this.model = model;
     // Khoá đọc từ môi trường bởi SDK (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN) — không truyền tay, không log.
-    this.client = new Anthropic({ maxRetries: 2, timeout: timeoutMs });
+    this.client = new Anthropic({ maxRetries: soLanThuLai, timeout: timeoutMs });
   }
 
   async complete(req: AiRequest): Promise<AiResponse> {
@@ -204,6 +209,30 @@ let override: AiProvider | null | undefined;
  * Hạn quá ngắn KHÔNG rẻ hơn: SDK thử lại tối đa hai lần, nên mỗi lần hết giờ là tiền đã tiêu cho
  * phần model đã nghĩ, rồi vứt đi và nghĩ lại từ đầu.
  */
+/**
+ * ═══════════ SỐ LẦN THỬ LẠI CŨNG ĐI THEO BẬC ═══════════
+ *
+ * ĐÃ ĐO THẬT (hai lượt AI CTO liên tiếp, 19/09/2026 — 35429768726 và 35429814259): cả hai chết
+ * trong 2 và 5 GIÂY với
+ *
+ *     {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}
+ *
+ * Đó là nhà cung cấp hết chỗ trong chốc lát, không phải lỗi của ta và không phải lỗi cấu hình.
+ * Nhưng mặc định 2 lần thử với giãn cách nửa giây thì tiêu hết trước khi cơn quá tải kịp qua, và
+ * cái giá là TRỌN MỘT lượt CI cộng một người phải vào bấm chạy lại.
+ *
+ * Kiên nhẫn đáng bao nhiêu thì tuỳ ai đang chờ:
+ *   · `routine`/`copilot` — có NGƯỜI ngồi trước màn hình. Hết chỗ thì nói ngay, đừng bắt họ đợi.
+ *   · `analysis`          — chạy nền, không ai đợi. Giãn cách luỹ thừa của SDK (0,5s → trần 8s)
+ *                           qua 8 lần là khoảng 40 giây chịu đựng. Quá tải lâu hơn thế là sự cố
+ *                           thật của nhà cung cấp, và lúc đó BÁO RA mới đúng, không phải giấu đi.
+ */
+export const RETRIES_BY_TIER: Record<AiTier, number> = {
+  routine: 2,
+  copilot: 2,
+  analysis: 8,
+};
+
 export const TIMEOUT_BY_TIER: Record<AiTier, number> = {
   routine: 60_000,
   copilot: 120_000,
@@ -219,7 +248,7 @@ export function getAiProvider(tier: AiTier = "copilot"): AiProvider | null {
   const effort = (env.ai.effort as "low" | "medium" | "high") || EFFORT_BY_TIER[tier];
   const model = modelFor(name, tier);
   const hanCho = TIMEOUT_BY_TIER[tier];
-  const p: AiProvider = name === "openai" ? new OpenAiProvider(model, effort, undefined, hanCho) : new AnthropicProvider(model, effort, hanCho);
+  const p: AiProvider = name === "openai" ? new OpenAiProvider(model, effort, undefined, hanCho) : new AnthropicProvider(model, effort, hanCho, RETRIES_BY_TIER[tier]);
   cached.set(tier, p);
   return p;
 }
