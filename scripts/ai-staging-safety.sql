@@ -62,7 +62,12 @@ select count(*)                                               as tong_luot_goi_y
 
 \echo ''
 \echo '═══ 6. MIGRATION ĐÃ ÁP ═══'
-select count(*) as so_migration_da_ap, to_timestamp(max(created_at)/1000) as lan_ap_cuoi
+-- `created_at` của drizzle KHÔNG phải lúc migration CHẠY — nó là mốc `when` chép từ
+-- `drizzle/meta/_journal.json`, tức một con số do người viết migration đặt. Gọi nó là "lần áp
+-- cuối" là in ra một mốc thời gian sai lệch hàng ngày mà trông hoàn toàn hợp lý.
+-- Muốn biết lúc CHẠY thật thì đọc log khởi động của container.
+select count(*)                            as so_migration_da_ap,
+       to_timestamp(max(created_at)/1000)  as moc_trong_so_cua_migration_moi_nhat
   from drizzle.__drizzle_migrations;
 
 \echo ''
