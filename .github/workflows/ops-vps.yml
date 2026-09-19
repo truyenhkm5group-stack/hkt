@@ -207,7 +207,19 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,RUN_ID,LOCK_WAIT_READ,LOCK_WAIT_WRITE,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
+          # ═══════════ DANH SÁCH NÀY LÀ MỘT CÁI CỬA, KHÔNG PHẢI MỘT LỜI MÔ TẢ ═══════════
+          #
+          # `appleboy/ssh-action` CHỈ chuyển xuống shell từ xa những biến có tên ở đây. Một biến
+          # khai ở `env:` mà quên thêm vào `envs:` thì trên máy chủ nó RỖNG — và triệu chứng là
+          # "thiếu Secret", tức nó chỉ thẳng người đọc đi kiểm lại Secrets, đúng chỗ KHÔNG hỏng.
+          #
+          # ĐÃ TỐN MỘT LƯỢT (ops #1465, 19/09/2026): ba biến `ERP_AGENT_GITHUB_*` có đủ ở `env:`
+          # nhưng thiếu ở đây, nên `apply-agent-env` báo "Thiếu Secret: …" trong khi Secret có đủ.
+          #
+          # `tests/ops-concurrency.test.ts::testEnvsChuyenDuXuong` khoá bất biến: MỌI khoá khai ở
+          # `env:` của bước này phải có mặt ở `envs:`. Bất biến đó bắt cả LỚP lỗi, không riêng ba
+          # biến đã hỏng một lần.
+          envs: ACTION,DAYS,ARG,RUN_ID,LOCK_WAIT_READ,LOCK_WAIT_WRITE,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_AGENT_GITHUB_APP_ID,ERP_AGENT_GITHUB_INSTALLATION_ID,ERP_AGENT_GITHUB_PRIVATE_KEY,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
           script: |
             set -e
             cd /root/erp
