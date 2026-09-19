@@ -10,6 +10,17 @@ import { LIVE_INGEST_ENV, liveIngestHealth, type LiveIngestHealth } from "@/lib/
 import { getDb, schema, type Db } from "@/db";
 import { AUTOMATION_TEMPLATE_MIN_CONVERSATIONS, COPILOT_MEANINGFUL_EDIT_RATIO, COPILOT_PAGES_KEY, COPILOT_QUEUE_RELEVANT_HOURS, COPILOT_SUGGESTION_TTL_MINUTES, COPILOT_TERMINAL_SQL_LIST, HUMAN_REPLY_SQL_LIST, PILOT_REVIEWED_TURNS_TARGET, type CopilotWarning } from "@/lib/constants/sales-copilot";
 import { rowsOf } from "@/lib/sql-rows";
+import { SAFETY_FLAG_LABEL, type SafetyFlag } from "@/lib/constants/sales-quality";
+import {
+  GUARD_REJECT_PREFIX,
+  ORDER_WRITE_TOOLS,
+  SAFETY_FLAG_TO_KIND,
+  SAFETY_KIND_SPEC,
+  SAFETY_VIOLATION_KINDS,
+  safetyVerdict,
+  type SafetyVerdict,
+  type SafetyViolationKind,
+} from "@/lib/constants/sales-safety";
 
 /**
  * DANH SÁCH TRẮNG PAGE ĐƯỢC THÍ ĐIỂM.
@@ -771,4 +782,205 @@ export async function pilotStatus(dbIn?: Db): Promise<PilotStatus> {
     },
     route,
   };
+}
+
+
+/**
+ * ═══════════════════ BẢNG AN TOÀN — GOM, KHÔNG PHÁT HIỆN THÊM ═══════════════════
+ *
+ * Mọi con số dưới đây đọc từ tín hiệu ĐÃ CÓ: sổ thao tác, sổ lỗi của chốt an toàn, sổ gọi công cụ,
+ * và nhãn người chấm. Hàm này KHÔNG soi câu chữ, KHÔNG thêm một luật an toàn nào — nó chỉ trả lời
+ * câu "hôm nay có gì lọt ra không" ở một chỗ, thay vì bắt người đọc ghép bốn góc màn hình.
+ *
+ * HAI CỘT TÁCH RỜI, và đó là toàn bộ ý nghĩa của thẻ:
+ *   · `blocked` — chốt nổ TRƯỚC khi câu ra khỏi máy, hoặc người soát bắt được trước khi bấm gửi.
+ *   · `escaped` — đã tới khách hoặc đã ghi dữ liệu. CHỈ cột này mới là vi phạm.
+ * Gộp hai cột là biến một hệ thống đang làm đúng việc thành báo động đỏ.
+ */
+export type SafetyRow = {
+  kind: SafetyViolationKind;
+  /** `null` = CHƯA ĐO ĐƯỢC (không có tín hiệu nào), KHÁC HẲN 0 = đã đo và sạch. */
+  blocked: number | null;
+  escaped: number | null;
+  /** Vài ca để mở ra kiểm tay. Rỗng khi không có ca nào. */
+  samples: { conversationId: string; runId: string; note: string }[];
+};
+
+export type SafetyBoard = {
+  verdict: SafetyVerdict;
+  /** Tổng số vi phạm ĐÃ LỌT — con số lớn trên đầu thẻ. */
+  escaped: number;
+  /** Tổng số lần chốt an toàn nổ đúng. Tin tốt, đứng riêng. */
+  blocked: number;
+  /** Bao nhiêu loại chưa có gì đo được. > 0 ⇒ không được kết luận PASS tuyệt đối. */
+  unmeasured: number;
+  rows: SafetyRow[];
+};
+
+export async function safetyBoard(dbIn?: Db): Promise<SafetyBoard> {
+  const db = dbIn ?? (await getDb());
+  const chan: Partial<Record<SafetyViolationKind, number>> = {};
+  const lot: Partial<Record<SafetyViolationKind, number>> = {};
+  const viDu: Partial<Record<SafetyViolationKind, SafetyRow["samples"]>> = {};
+  const them = (k: SafetyViolationKind, con: { conversationId: string; runId: string; note: string }) => {
+    const ds = (viDu[k] ??= []);
+    if (ds.length < 3) ds.push(con);
+  };
+
+  /*
+    1. GỬI MÀ KHÔNG CÓ NGƯỜI BẤM, và 2. GỬI TRÙNG.
+
+    Cả hai đọc từ sổ thao tác. Ô khoá tài khoản rỗng trên một dòng ĐÃ GỬI nghĩa là tin đi mà không
+    ai chịu trách nhiệm — đúng thứ cả kiến trúc này dựng ra để không bao giờ xảy ra (luật 34).
+  */
+  const soThaoTac = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select conversation_id, coalesce(run_id, '') as run_id, actor_user_id, verified, verify_note
+      from sales_copilot_actions
+      where action in ('SEND','EDIT_SEND') and send_status = 'SENT'
+    `),
+  );
+  chan.AUTO_SEND_WITHOUT_HUMAN_CLICK = 0;
+  lot.AUTO_SEND_WITHOUT_HUMAN_CLICK = 0;
+  /*
+    ĐƯỜNG THOÁT THẬT SỰ CỦA "MÁY TỰ GỬI" KHÔNG PHẢI Ô KHOÁ RỖNG.
+
+    `sales_copilot_actions.actor_user_id` là NOT NULL kèm khoá ngoại, nên một dòng thao tác thiếu
+    khoá tài khoản KHÔNG GHI ĐƯỢC — cửa ấy đóng ở mức CSDL, không cần đếm. Cửa còn lại là một câu
+    được đánh dấu ĐÃ GỬI mà KHÔNG có dòng sổ nào cả: đúng hình dạng của một tiến trình nền gọi
+    thẳng cổng gửi, vòng qua Server Action. Đó mới là thứ phải đếm.
+  */
+  const [khongSo] = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select count(*)::int as n, min(s.conversation_id) as hoi_thoai, min(coalesce(s.run_id, '')) as run_mau
+      from sales_suggestions s
+      where s.sent = true
+        and not exists (
+          select 1 from sales_copilot_actions a
+          where a.suggestion_id = s.id and a.action in ('SEND','EDIT_SEND') and a.send_status = 'SENT'
+        )
+    `),
+  );
+  if (Number(khongSo?.n ?? 0) > 0) {
+    lot.AUTO_SEND_WITHOUT_HUMAN_CLICK = Number(khongSo.n);
+    them("AUTO_SEND_WITHOUT_HUMAN_CLICK", {
+      conversationId: String(khongSo.hoi_thoai ?? ""),
+      runId: String(khongSo.run_mau ?? ""),
+      note: `${khongSo.n} câu bị đánh dấu ĐÃ GỬI mà không có dòng thao tác nào của người`,
+    });
+  }
+  chan.DUPLICATE_SEND = 0;
+  lot.DUPLICATE_SEND = 0;
+  for (const r of soThaoTac) {
+    const conv = String(r.conversation_id ?? "");
+    const run = String(r.run_id ?? "");
+    if (!r.actor_user_id) {
+      lot.AUTO_SEND_WITHOUT_HUMAN_CLICK = (lot.AUTO_SEND_WITHOUT_HUMAN_CLICK ?? 0) + 1;
+      them("AUTO_SEND_WITHOUT_HUMAN_CLICK", { conversationId: conv, runId: run, note: "tin đã gửi nhưng không có khoá tài khoản người bấm" });
+    }
+    if (r.verified === false) {
+      lot.DUPLICATE_SEND = (lot.DUPLICATE_SEND ?? 0) + 1;
+      them("DUPLICATE_SEND", { conversationId: conv, runId: run, note: String(r.verify_note ?? "đọc lại thấy nhiều hơn một bản") });
+    }
+  }
+
+  /*
+    3. MÁY TỰ TẠO ĐƠN — và 4 (một phần): cổng công cụ đã chặn bao nhiêu lần.
+
+    `outcome = 'OK'` trên một công cụ ghi đơn nghĩa là đơn ĐÃ được tạo. `DENIED` là cổng nổ đúng.
+  */
+  const goiCongCu = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select tool, outcome, count(*)::int as n, min(run_id) as run_mau
+      from ai_tool_calls group by 1, 2
+    `),
+  );
+  chan.AI_CREATED_ORDER = 0;
+  lot.AI_CREATED_ORDER = 0;
+  for (const r of goiCongCu) {
+    if (!(ORDER_WRITE_TOOLS as readonly string[]).includes(String(r.tool ?? ""))) continue;
+    const n = Number(r.n ?? 0);
+    if (String(r.outcome) === "OK") {
+      lot.AI_CREATED_ORDER = (lot.AI_CREATED_ORDER ?? 0) + n;
+      them("AI_CREATED_ORDER", { conversationId: "", runId: String(r.run_mau ?? ""), note: `công cụ ${r.tool} chạy THÀNH CÔNG ${n} lần` });
+    } else {
+      chan.AI_CREATED_ORDER = (chan.AI_CREATED_ORDER ?? 0) + n;
+    }
+  }
+
+  /*
+    5. SÁU CHỐT AN TOÀN — đọc từ sổ lỗi, gom theo nhãn.
+
+    Đây là cột ĐÃ CHẶN: câu mang lời bịa bị vứt ngay lúc sinh, khách không bao giờ thấy nó.
+  */
+  const soLoi = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select message, count(*)::int as n, min(coalesce(run_id, '')) as run_mau, min(subject_id) as hoi_thoai_mau
+      from ai_errors
+      where scope = 'MODEL' and message like ${`${GUARD_REJECT_PREFIX}%`}
+      group by 1 order by 2 desc limit 200
+    `),
+  );
+  for (const k of ["INVENTED_PRICE", "INVENTED_PROMOTION", "INVENTED_SIZE", "INVENTED_INVENTORY", "INVENTED_POLICY"] as const) chan[k] = 0;
+  for (const r of soLoi) {
+    const con = String(r.message ?? "").slice(GUARD_REJECT_PREFIX.length).trim();
+    for (const [co, kind] of Object.entries(SAFETY_FLAG_TO_KIND) as [SafetyFlag, SafetyViolationKind][]) {
+      if (!con.startsWith(SAFETY_FLAG_LABEL[co])) continue;
+      const n = Number(r.n ?? 0);
+      chan[kind] = (chan[kind] ?? 0) + n;
+      them(kind, { conversationId: String(r.hoi_thoai_mau ?? ""), runId: String(r.run_mau ?? ""), note: `${con} (${n} lần)` });
+      break;
+    }
+  }
+
+  /*
+    6. NHÃN NGƯỜI CHẤM — sai sản phẩm · xác nhận đơn sai · nói điều không có thật.
+
+    Người chấm bắt được TRƯỚC khi bấm gửi là CHẶN. Bắt được trên một câu ĐÃ GỬI là LỌT — khách đã
+    đọc nó rồi. Hai chuyện khác hẳn nhau nên không được cộng chung.
+  */
+  const nhan = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      select l.conversation_id,
+             l.product_ok, l.confirmation_ok, l.hallucination, l.hallucination_note,
+             exists (
+               select 1 from sales_copilot_actions a
+               where a.suggestion_id = l.suggestion_id and a.action in ('SEND','EDIT_SEND') and a.send_status = 'SENT'
+             ) as da_gui
+      from sales_review_labels l
+      where l.product_ok = false or l.confirmation_ok = false or l.hallucination = true
+    `),
+  );
+  for (const k of ["WRONG_PRODUCT", "FALSE_ORDER_CONFIRMATION"] as const) {
+    chan[k] = 0;
+    lot[k] = 0;
+  }
+  lot.INVENTED_POLICY = 0;
+  for (const r of nhan) {
+    const conv = String(r.conversation_id ?? "");
+    const daGui = r.da_gui === true;
+    const ghi = (k: SafetyViolationKind, ghiChu: string) => {
+      if (daGui) lot[k] = (lot[k] ?? 0) + 1;
+      else chan[k] = (chan[k] ?? 0) + 1;
+      them(k, { conversationId: conv, runId: "", note: `${ghiChu}${daGui ? " — ĐÃ GỬI cho khách" : " — người soát bắt được trước khi gửi"}` });
+    };
+    if (r.product_ok === false) ghi("WRONG_PRODUCT", "người chấm: nhận sai sản phẩm");
+    if (r.confirmation_ok === false) ghi("FALSE_ORDER_CONFIRMATION", "người chấm: xác nhận đơn sai");
+    if (r.hallucination === true) ghi("INVENTED_POLICY", `người chấm: ${String(r.hallucination_note ?? "nói điều không có thật")}`);
+  }
+
+  const rows: SafetyRow[] = SAFETY_VIOLATION_KINDS.map((kind) => {
+    const spec = SAFETY_KIND_SPEC[kind];
+    return {
+      kind,
+      // CHƯA ĐO ĐƯỢC ⇒ `null`, không phải 0. Đây là toàn bộ lý do thẻ này đáng tin (luật 42 · 45).
+      blocked: spec.measured ? (chan[kind] ?? 0) : null,
+      escaped: spec.measured ? (lot[kind] ?? 0) : null,
+      samples: viDu[kind] ?? [],
+    };
+  });
+  const tongLot = rows.reduce((t, r) => t + (r.escaped ?? 0), 0);
+  const tongChan = rows.reduce((t, r) => t + (r.blocked ?? 0), 0);
+  const chuaDo = rows.filter((r) => r.escaped === null).length;
+  return { verdict: safetyVerdict(tongLot, chuaDo), escaped: tongLot, blocked: tongChan, unmeasured: chuaDo, rows };
 }

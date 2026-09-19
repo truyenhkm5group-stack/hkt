@@ -16,7 +16,8 @@ import {
   editDistance,
   isMeaningfulEdit,
 } from "@/lib/constants/sales-copilot";
-import { copilotKpi, copilotPageAllowed, copilotPages, copilotQueue, ingestStatus, pilotStatus } from "@/lib/queries/sales-copilot";
+import { copilotKpi, copilotPageAllowed, copilotPages, copilotQueue, ingestStatus, pilotStatus, safetyBoard } from "@/lib/queries/sales-copilot";
+import { GUARD_REJECT_PREFIX, SAFETY_KIND_SPEC, SAFETY_VIOLATION_KINDS, safetyVerdict } from "@/lib/constants/sales-safety";
 import { LIVE_INGEST_MAX_BACKOFF, LIVE_INGEST_MAX_SECONDS, liveIngestHealth, nextDelaySeconds, windowHours } from "@/lib/constants/live-ingest";
 import { getAgent } from "@/lib/ai-workforce/registry";
 import { resolvePermissions } from "@/lib/auth/permissions";
@@ -824,6 +825,100 @@ export async function testSalesCopilot(db: Db) {
   assert.equal(bang.conversations.takenOver, 1, "một hội thoại có người nhận hẳn việc");
   assert.ok(bang.conversations.touched >= 1, "có hội thoại được thao tác");
   assert.notEqual(bang.conversations.handoffRate, null, "đã có hội thoại được thao tác thì tính được tỷ lệ");
+
+  /*
+    ═════════ 7D. THẺ AN TOÀN — "CHƯA ĐO ĐƯỢC" KHÔNG ĐƯỢC IN RA THÀNH 0 ═════════
+
+    Một bảng an toàn in "0 vi phạm" cho cả mười hai loại, trong khi hai loại không ai đo, là bảng
+    NGUY HIỂM HƠN việc không có bảng nào: nó nói ĐẠT bằng giọng của một hệ thống đã kiểm.
+  */
+  const anToan = await safetyBoard(db);
+  assert.equal(anToan.rows.length, SAFETY_VIOLATION_KINDS.length, "thẻ liệt kê đủ cả mười hai loại");
+  for (const r of anToan.rows) {
+    const khai = SAFETY_KIND_SPEC[r.kind];
+    if (khai.measured) {
+      assert.equal(typeof r.escaped, "number", `${r.kind} khai là đo được thì phải ra một con số`);
+      assert.ok(khai.source, `${r.kind} đo được thì phải nói đếm từ đâu`);
+    } else {
+      assert.equal(r.escaped, null, `${r.kind} CHƯA ĐO ĐƯỢC phải là null, KHÔNG phải 0`);
+      assert.equal(r.blocked, null);
+      assert.ok(khai.missingWhat && khai.missingWhat.length > 30, `${r.kind} phải nói rõ thiếu chính xác cái gì`);
+    }
+  }
+  assert.ok(anToan.unmeasured > 0, "hôm nay vẫn còn loại chưa đo được — nếu về 0 thì phải đổi kỳ vọng này cùng lúc");
+
+  /*
+    KHỐI 7B ĐÃ CỐ Ý DỰNG MỘT LẦN GỬI TRÙNG (`verified = false`), nên thẻ PHẢI đang cảnh báo. Nếu
+    nó nói ĐẠT ở đây thì phép gom đang bỏ sót đúng thứ nguy hiểm nhất mà hệ thống biết đo.
+  */
+  assert.equal(anToan.verdict, "ALERT", "đã có một lần gửi trùng trong dữ liệu ⇒ thẻ phải cảnh báo");
+  const dongTrung = anToan.rows.find((r) => r.kind === "DUPLICATE_SEND")!;
+  assert.ok((dongTrung.escaped ?? 0) >= 1, "gửi trùng phải nằm ở cột ĐÃ LỌT — khách đã nhận hai tin");
+
+  // Còn LUẬT kết luận thì kiểm bằng hàm thuần, không phụ thuộc dữ liệu mẫu đang có gì.
+  assert.equal(safetyVerdict(0, 0), "PASS", "sạch và phủ hết ⇒ ĐẠT");
+  assert.equal(safetyVerdict(0, 2), "PASS_WITHIN_MEASURED", "sạch NHƯNG chưa phủ hết ⇒ không được kết luận ĐẠT tuyệt đối");
+  assert.equal(safetyVerdict(1, 0), "ALERT");
+  assert.equal(safetyVerdict(1, 5), "ALERT", "có vi phạm thì phủ hết hay chưa cũng vẫn là cảnh báo");
+
+  /*
+    CỬA "MÁY TỰ GỬI" THỨ NHẤT ĐÓNG Ở MỨC CSDL, không phải bằng một phép đếm.
+    Không ghi nổi một dòng thao tác thiếu khoá tài khoản thì không cần canh nó.
+  */
+  await assert.rejects(
+    db.insert(schema.salesCopilotActions).values({
+      conversationId: convId,
+      suggestionId: null,
+      pageId: "page-thi-diem",
+      action: "REGENERATE",
+      sendStatus: "NONE",
+      actorName: "không có khoá",
+    } as never),
+    "CSDL phải từ chối một dòng thao tác không có khoá tài khoản",
+  );
+
+  /*
+    CỬA THỨ HAI mới là cửa phải đếm: một câu bị đánh dấu ĐÃ GỬI mà KHÔNG có dòng sổ nào — đúng
+    hình dạng của một tiến trình nền gọi thẳng cổng gửi, vòng qua Server Action.
+  */
+  const goiYLen = "s-copilot-khong-so";
+  await db
+    .insert(schema.salesSuggestions)
+    .values({ id: goiYLen, conversationId: convId, suggestedReply: "câu đi mà không ai bấm", action: "ANSWER_QUESTION", sent: true })
+    .onConflictDoNothing();
+  const sauKhiLen = await safetyBoard(db);
+  const dongTuGui = sauKhiLen.rows.find((r) => r.kind === "AUTO_SEND_WITHOUT_HUMAN_CLICK")!;
+  assert.ok((dongTuGui.escaped ?? 0) >= 1, "câu ĐÃ GỬI mà không có dòng thao tác nào PHẢI bị đếm là lọt");
+  assert.equal(sauKhiLen.verdict, "ALERT", "có vi phạm lọt ra ⇒ thẻ chuyển cảnh báo");
+  assert.ok(sauKhiLen.escaped > anToan.escaped, "tổng vi phạm đã lọt phải TĂNG, không chỉ giữ nguyên nhãn cảnh báo");
+  assert.ok(dongTuGui.samples.length >= 1, "phải chỉ ra hội thoại để mở kiểm, không chỉ một con số");
+
+  /*
+    CHỐT AN TOÀN NỔ LÀ TIN TỐT. Nó phải vào cột ĐÃ CHẶN, tuyệt đối không vào cột ĐÃ LỌT — cộng
+    chung thì mỗi lần hệ thống làm đúng việc lại thành một báo động đỏ.
+  */
+  await db.insert(schema.aiErrors).values({
+    scope: "MODEL",
+    agentKey: "sales",
+    subjectType: "CONVERSATION",
+    subjectId: convId,
+    message: `${GUARD_REJECT_PREFIX} Tự hứa giảm giá / khuyến mãi`,
+  });
+  const sauChot = await safetyBoard(db);
+  const dongKhuyenMai = sauChot.rows.find((r) => r.kind === "INVENTED_PROMOTION")!;
+  assert.equal(dongKhuyenMai.blocked, 1, "chốt an toàn nổ phải vào cột ĐÃ CHẶN");
+  assert.equal(dongKhuyenMai.escaped, 0, "và TUYỆT ĐỐI không vào cột ĐÃ LỌT");
+
+  /*
+    HAI NƠI PHẢI NÓI CÙNG MỘT CHUỖI. `pipeline.ts` ghi tiền tố ấy vào sổ lỗi; thẻ an toàn đọc lại
+    bằng tiền tố ấy. Sửa một nơi mà quên nơi kia thì thẻ lặng lẽ về 0 — trông y hệt "không có vi
+    phạm nào", dạng hỏng tệ nhất.
+  */
+  const nguonPipeline = readFileSync("lib/ai-workforce/agents/sales/pipeline.ts", "utf8");
+  assert.ok(
+    nguonPipeline.includes(GUARD_REJECT_PREFIX),
+    `pipeline.ts không còn ghi tiền tố "${GUARD_REJECT_PREFIX}" — thẻ an toàn sẽ đếm ra 0 một cách âm thầm`,
+  );
 
   // ═════════ 8. VÀ NẤC AUTO VẪN ĐÓNG ═════════
   //

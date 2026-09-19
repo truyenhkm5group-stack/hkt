@@ -10,7 +10,8 @@ import { getAgent } from "@/lib/ai-workforce/registry";
 import { requirePermission } from "@/lib/auth/session";
 import { getCurrentUser } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { copilotKpi, copilotPages, copilotQueue, firstHumanSend, ingestStatus, pilotStatus } from "@/lib/queries/sales-copilot";
+import { copilotKpi, copilotPages, copilotQueue, firstHumanSend, ingestStatus, pilotStatus, safetyBoard } from "@/lib/queries/sales-copilot";
+import { SAFETY_KIND_SPEC } from "@/lib/constants/sales-safety";
 import { LIVE_INGEST_HEALTH_LABEL } from "@/lib/constants/live-ingest";
 import { AutoRefresh } from "@/app/(dashboard)/ai/copilot/auto-refresh";
 
@@ -42,12 +43,13 @@ export default async function CopilotPage() {
   const sanSang = modeAtLeast(mode, "COPILOT") && settings.hardLimits.allowHumanApprovedSend && pages.length > 0;
   // Hội thoại người khác đang cầm KHÔNG hiện ở đây — trừ hội thoại của chính người đang xem,
   // để họ còn nút trả lại cho máy.
-  const [queue, kpi, nap, lanDau, pilot] = await Promise.all([
+  const [queue, kpi, nap, lanDau, pilot, anToan] = await Promise.all([
     copilotQueue({ limit: 40, heldByUserId: user?.id ?? null }),
     copilotKpi(7),
     ingestStatus(),
     firstHumanSend(),
     pilotStatus(),
+    safetyBoard(),
   ]);
 
   return (
@@ -314,6 +316,106 @@ export default async function CopilotPage() {
           <strong>{!kpi.firstHumanSend.pending && kpi.firstHumanSend.verified === true ? "true" : "false"}</strong>
           {kpi.firstHumanSend.pending ? " — chưa tin nào rời khỏi ERP" : ""}
         </p>
+      </Card>
+
+      {/*
+        ═══════════════ AN TOÀN — MỘT THẺ, BA TRẠNG THÁI, KHÔNG PHẢI HAI ═══════════════
+
+        Trước thẻ này, tín hiệu an toàn nằm rải ở bốn góc màn hình: băng gửi trùng, dòng "gửi trong
+        lúc thiếu dữ liệu", trạng thái hai công tắc, và kết quả kiểm lần gửi đầu. Đủ để phát hiện,
+        nhưng phải nhìn bốn chỗ — nên trên thực tế không ai nhìn.
+
+        HAI CỘT TÁCH RỜI. "Đã chặn" là chốt an toàn nổ TRƯỚC khi câu ra khỏi máy; đó là thứ shop
+        trả tiền để có, không phải sự cố. "Đã lọt" mới là vi phạm. Cộng chung hai cột thì mỗi lần
+        hệ thống làm đúng việc lại thành một báo động đỏ, và sau vài lần không ai đọc thẻ này nữa.
+
+        BA TRẠNG THÁI. Sạch mà CHƯA phủ hết thì nói đúng như thế — `PASS (trong phạm vi đo được)`
+        kèm tên những loại chưa ai đo. Gộp nó vào `PASS` là hứa một điều chưa kiểm.
+      */}
+      <Card
+        className={`p-3 ${anToan.verdict === "ALERT" ? "border-rose-500 bg-rose-50/70 dark:border-rose-500/70 dark:bg-rose-950/40" : "border-emerald-500/50 dark:border-emerald-500/40"}`}
+      >
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide">An toàn</p>
+          <p className="text-xs">
+            {anToan.verdict === "ALERT" ? (
+              <span className="font-semibold text-rose-700 dark:text-rose-300">
+                ⛔ {formatNumber(anToan.escaped)} VI PHẠM ĐÃ LỌT RA — dừng thí điểm và kiểm tra
+              </span>
+            ) : (
+              <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+                ✓ {anToan.verdict === "PASS" ? "ĐẠT" : "ĐẠT (trong phạm vi đo được)"} · 0 vi phạm lọt ra
+              </span>
+            )}
+          </p>
+        </div>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Chốt an toàn đã chặn <strong>{formatNumber(anToan.blocked)}</strong> lần trước khi câu ra khỏi máy — đây là tin tốt, không
+          phải sự cố.
+          {anToan.unmeasured > 0
+            ? ` · ${anToan.unmeasured}/${anToan.rows.length} loại CHƯA CÓ GÌ ĐO ĐƯỢC, nên "0" ở trên chỉ nói về phần nhìn thấy.`
+            : ""}
+        </p>
+
+        <div className="mt-2 grid gap-x-4 gap-y-0.5 border-t border-border/60 pt-2 text-[11px] sm:grid-cols-2">
+          {anToan.rows.map((r) => {
+            const spec = SAFETY_KIND_SPEC[r.kind];
+            return (
+              <div key={r.kind} className="flex items-baseline justify-between gap-2">
+                <span className={r.escaped ? "font-semibold text-rose-700 dark:text-rose-300" : "text-muted-foreground"}>
+                  {spec.label}
+                </span>
+                <span className="shrink-0 font-mono">
+                  {r.escaped === null ? (
+                    <span className="text-amber-700 dark:text-amber-300">CHƯA ĐO ĐƯỢC</span>
+                  ) : (
+                    <>
+                      <span className={r.escaped ? "font-semibold text-rose-700 dark:text-rose-300" : ""}>lọt {r.escaped}</span>
+                      {r.blocked ? <span className="text-muted-foreground"> · chặn {r.blocked}</span> : null}
+                    </>
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* CÓ VI PHẠM THÌ PHẢI CHỈ RA CHỖ ĐỂ MỞ, không chỉ một con số. */}
+        {anToan.rows.some((r) => (r.escaped ?? 0) > 0) ? (
+          <div className="mt-2 space-y-0.5 border-t border-rose-300 pt-2 text-[11px] dark:border-rose-800">
+            {anToan.rows
+              .filter((r) => (r.escaped ?? 0) > 0)
+              .map((r) =>
+                r.samples.map((v, i) => (
+                  <p key={`${r.kind}-${i}`} className="text-rose-800 dark:text-rose-200">
+                    <span className="font-semibold">{SAFETY_KIND_SPEC[r.kind].label}</span>
+                    {v.conversationId ? (
+                      <>
+                        {" · "}
+                        <Link href={`/ai/review?conversation=${v.conversationId}`} className="underline">
+                          hội thoại {v.conversationId.slice(0, 8)}
+                        </Link>
+                      </>
+                    ) : null}
+                    {v.runId ? ` · lượt chạy ${v.runId.slice(0, 8)}` : ""} — {v.note}
+                  </p>
+                )),
+              )}
+          </div>
+        ) : null}
+
+        {/* LOẠI CHƯA ĐO ĐƯỢC PHẢI NÓI THIẾU CHÍNH XÁC CÁI GÌ — một bảng chỉ in con số là bảng không ai mở lần thứ hai. */}
+        {anToan.rows.some((r) => r.escaped === null) ? (
+          <div className="mt-2 space-y-0.5 border-t border-border/60 pt-2 text-[11px] text-amber-800 dark:text-amber-200">
+            {anToan.rows
+              .filter((r) => r.escaped === null)
+              .map((r) => (
+                <p key={r.kind}>
+                  <span className="font-semibold">{SAFETY_KIND_SPEC[r.kind].label}: chưa đo được</span> — {SAFETY_KIND_SPEC[r.kind].missingWhat}
+                </p>
+              ))}
+          </div>
+        ) : null}
       </Card>
 
       {!pages.length ? (
