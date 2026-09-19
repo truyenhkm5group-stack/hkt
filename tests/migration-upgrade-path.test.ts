@@ -51,6 +51,7 @@ const MOI = [
   "0102_tech_github_runner",
   "0103_care_decisions",
   "0104_tech_cto_proposals",
+  "0105_cto_repair_evidence",
 ] as const;
 
 /*
@@ -144,6 +145,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_agents'"), 0, "bước 1: sổ agent CHƯA được có — đó là thứ 0101 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_deployments' and column_name = 'external_run_id'"), 0, "bước 1: khoá lượt chạy GitHub CHƯA được có — đó là thứ 0102 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_proposals'"), 0, "bước 1: sổ đề xuất AI CTO CHƯA được có — đó là thứ 0104 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_proposals' and column_name = 'repair_outcome'"), 0, "bước 1: bằng chứng lượt sửa CHƯA được có — đó là thứ 0105 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_tasks' and column_name = 'pr_number'"), 0, "bước 1: phép chiếu PR CHƯA được có — đó là thứ 0104 thêm vào");
     /*
       Một vận đơn ĐÃ CÓ TỪ TRƯỚC 0099, mang một trạng thái Viettel Post đã dịch được. Bước 2 kiểm
@@ -1282,6 +1284,40 @@ export async function testMigrationUpgradePath() {
       chanTrungKhoa = true;
     }
     assert.ok(chanTrungKhoa, "0104: hai việc cùng khoá trong một bản kế hoạch phải bị chặn");
+
+    /*
+      ═══ 0105: BẰNG CHỨNG LƯỢT SỬA ═══
+
+      Mặc định phải mô tả ĐÚNG những dòng đã có: hồi đó chưa có đường sửa nào tồn tại, nên mọi bản
+      đề xuất cũ là "gọi một lượt, không sửa". Một mặc định nói khác đi là backfill thầm (mục 8.8).
+    */
+    assert.equal(
+      await dem("select count(*)::int as n from tech_proposals where model_calls = 1 and initial_error = '' and repair_outcome = 'NONE'"),
+      await dem("select count(*)::int as n from tech_proposals"),
+      "0105: mọi dòng đã có phải mang mặc định (1, '', 'NONE') — không đoán hộ một lượt sửa chưa từng xảy ra",
+    );
+    /* Trần là HAI lượt. Một con số thứ ba lọt vào nghĩa là vòng lặp đã quay mà không ai chặn. */
+    let chanQuaTran = false;
+    try {
+      await client.query(`update tech_proposals set model_calls = 3 where id = 'up-p1'`);
+    } catch {
+      chanQuaTran = true;
+    }
+    assert.ok(chanQuaTran, "0105: quá hai lượt gọi phải bị CSDL chặn — không có lượt sửa thứ hai");
+    /*
+      Hai cột phải kể CÙNG MỘT câu chuyện: có kết quả sửa thì phải có lượt sửa được đếm. Lệch nhau
+      là con số "bao nhiêu phần trăm bản đề xuất cần sửa" sai mà không gì báo.
+    */
+    let chanLechNhau = false;
+    try {
+      await client.query(`update tech_proposals set repair_outcome = 'PASS', model_calls = 1 where id = 'up-p1'`);
+    } catch {
+      chanLechNhau = true;
+    }
+    assert.ok(chanLechNhau, "0105: có kết quả sửa mà chỉ đếm một lượt gọi phải bị chặn");
+    /* …và bộ đôi hợp lệ thì phải ghi được. */
+    await client.query(`update tech_proposals set repair_outcome = 'PASS', model_calls = 2, initial_error = 'tasks: Too big' where id = 'up-p1'`);
+    assert.equal(await dem("select count(*)::int as n from tech_proposals where id = 'up-p1' and model_calls = 2 and repair_outcome = 'PASS'"), 1, "0105: một lượt sửa thành công phải ghi lại được");
     await client.query(`delete from tech_proposals where id = 'up-p1'`);
     await client.query(`delete from tech_tasks where id = 'up-t1'`);
 
@@ -1295,7 +1331,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and assignee_user_id is null"), 1, "chạy lại migration vẫn KHÔNG được đoán người phụ trách");
     assert.equal(await dem("select count(*)::int as n from tech_proposals"), 0, "chạy lại migration KHÔNG được sinh bản đề xuất nào");
 
-    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · sổ đề xuất AI CTO và phép chiếu PR vào đời RỖNG, bốn ràng buộc mới chặn đúng · chạy lại không nhân đôi`);
+    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · sổ đề xuất AI CTO và phép chiếu PR vào đời RỖNG, bốn ràng buộc mới chặn đúng · bằng chứng lượt sửa mặc định (1,'',NONE) và hai ràng buộc 0105 chặn đúng · chạy lại không nhân đôi`);
   } finally {
     await client.close().catch(() => {});
     rmSync(tmp, { recursive: true, force: true });

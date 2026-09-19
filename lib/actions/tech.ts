@@ -499,6 +499,9 @@ export async function planTechProposalAction(input: unknown): Promise<TechResult
     plan: res.ok ? res.plan : null,
     error: res.ok ? "" : res.error,
     rawOutput: res.raw,
+    modelCalls: res.modelCalls,
+    initialError: res.initialError,
+    repairOutcome: res.repairOutcome,
   });
   if (!("ok" in ghi)) return { error: ghi.error };
   // Lập lại kế hoạch ⇒ bản chờ duyệt cũ thôi áp được, nhưng KHÔNG bị xoá: còn đọc để so hai lần nghĩ.

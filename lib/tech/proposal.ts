@@ -42,6 +42,14 @@ export type CreateProposalInput = {
   plan: CtoPlan | null;
   error?: string;
   rawOutput?: unknown;
+  /*
+    Bằng chứng về lượt gọi. Bỏ trống ⇒ (1, '', 'NONE') — đúng với một lượt không có đường sửa nào,
+    và đúng với mọi dòng đã có trước migration 0105. Ràng buộc `tech_proposals_repair_check` không
+    cho hai cột này nói hai điều khác nhau.
+  */
+  modelCalls?: 0 | 1 | 2;
+  initialError?: string;
+  repairOutcome?: "NONE" | "PASS" | "FAIL";
 };
 
 /**
@@ -70,6 +78,9 @@ export async function createProposal(input: CreateProposalInput): Promise<TechRe
       questions: input.plan?.questions ?? [],
       rawOutput: input.rawOutput ?? null,
       error: input.error?.slice(0, 4000) ?? "",
+      modelCalls: input.modelCalls ?? 1,
+      initialError: input.initialError?.slice(0, 4000) ?? "",
+      repairOutcome: input.repairOutcome ?? "NONE",
     })
     .returning({ id: schema.techProposals.id });
 

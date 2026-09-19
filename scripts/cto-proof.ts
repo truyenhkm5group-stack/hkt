@@ -123,6 +123,9 @@ async function main() {
     plan: res.ok ? res.plan : null,
     error: res.ok ? "" : res.error,
     rawOutput: res.raw,
+    modelCalls: res.modelCalls,
+    initialError: res.initialError,
+    repairOutcome: res.repairOutcome,
   });
   if (!("ok" in ghi)) {
     console.error(`✗ Không ghi được bản đề xuất: ${ghi.error}`);
