@@ -107,6 +107,12 @@ async function main() {
       dat(noi.includes(nhan), `thẻ tiến độ có ô "${nhan.replace("&amp;", "&")}"`);
     }
     dat(noi.includes("FIRST_HUMAN_SEND_PENDING"), "trang in trạng thái lần gửi đầu tiên");
+
+    // THẺ AN TOÀN — và quan trọng nhất là nó KHÔNG được in "0" cho loại chưa ai đo.
+    dat(noi.includes("An toàn"), "thẻ an toàn hiện trên trang");
+    dat(/0 vi phạm lọt ra|VI PHẠM ĐÃ LỌT RA/.test(noi), "thẻ an toàn in kết luận rõ ràng");
+    dat(noi.includes("CHƯA ĐO ĐƯỢC"), "loại chưa có gì đo được in CHƯA ĐO ĐƯỢC, KHÔNG in 0");
+    dat(noi.includes("Kiến thức mã TEST lọt sang hội thoại mã WIN"), "thẻ liệt kê đủ cả loại chưa đo được");
     // Hàng đợi rỗng phải nói rõ hệ thống vẫn đang canh. Có khách chờ thì thẻ hội thoại hiện ra —
     // một trong hai, không được cả hai cùng vắng.
     dat(
