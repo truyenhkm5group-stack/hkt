@@ -1,5 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { type ClientOptions } from "@anthropic-ai/sdk";
 import { EFFORT_BY_TIER, modelFor, resolveProviderName, type AiTier } from "@/lib/ai/router";
+import { toDialectSchema, type AiSchemaDialect } from "@/lib/ai/schema-dialect";
 import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { env } from "@/lib/env";
 
@@ -29,6 +30,13 @@ export type AiResponse = { content: AiBlock[]; stopReason: "end_turn" | "tool_us
 export interface AiProvider {
   readonly name: string;
   readonly model: string;
+  /**
+   * Phương ngữ JSON Schema mà provider này nhận. KHAI RA chứ không giấu trong thân `complete()`:
+   * hợp đồng tool ở cấp nghiệp vụ chỉ có một, nên chỗ duy nhất hai provider được phép khác nhau
+   * là bước serialize — và bài kiểm phải đọc được nó để chứng minh từng đường đi đúng luật của
+   * mình (`lib/ai/schema-dialect.ts`).
+   */
+  readonly schemaDialect: AiSchemaDialect;
   complete(req: AiRequest): Promise<AiResponse>;
 }
 
@@ -103,16 +111,19 @@ export const NGUONG_KHONG_STREAM = Math.floor((128_000 * 10) / 60);
 export class AnthropicProvider implements AiProvider {
   readonly name = "anthropic";
   readonly model: string;
+  readonly schemaDialect: AiSchemaDialect = "anthropic";
   private client: Anthropic;
+  // `fetchImpl` đứng CUỐI để không đổi thứ tự tham số các nơi gọi cũ đang dùng; chỉ kiểm thử truyền.
   constructor(
     model: string,
     private effort: "low" | "medium" | "high" = "medium",
     timeoutMs: number = TIMEOUT_BY_TIER.copilot,
     soLanThuLai: number = RETRIES_BY_TIER.copilot,
+    fetchImpl?: typeof fetch,
   ) {
     this.model = model;
     // Khoá đọc từ môi trường bởi SDK (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN) — không truyền tay, không log.
-    this.client = new Anthropic({ maxRetries: soLanThuLai, timeout: timeoutMs });
+    this.client = new Anthropic({ maxRetries: soLanThuLai, timeout: timeoutMs, ...(fetchImpl ? { fetch: fetchImpl as ClientOptions["fetch"] } : {}) });
   }
 
   async complete(req: AiRequest): Promise<AiResponse> {
@@ -127,7 +138,10 @@ export class AnthropicProvider implements AiProvider {
       ...(caps.effort ? { output_config: { effort: this.effort } } : {}),
       // Từ chối vì chính sách ⇒ máy chủ tự chạy lại trên model dự phòng trong cùng một lần gọi.
       ...(caps.fallbacks ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
-      tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Beta.BetaTool["input_schema"], strict: true })),
+      // Hợp đồng tool là MỘT; chỉ bước serialize đi theo phương ngữ của provider — xem
+      // `lib/ai/schema-dialect.ts`. Ràng buộc bị gỡ ở đây vẫn được zod kiểm ở máy chủ trước khi
+      // tool chạy (`runCopilot` / `confirmCopilotActions`), nên không luật nghiệp vụ nào bị nới.
+      tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: toDialectSchema(t.inputSchema, this.schemaDialect) as Anthropic.Beta.BetaTool["input_schema"], strict: true })),
       messages: req.messages.map((m) => ({
         role: m.role,
         content: m.content.map((b) =>
@@ -173,6 +187,9 @@ export class AnthropicProvider implements AiProvider {
 export class FakeProvider implements AiProvider {
   readonly name = "fake";
   readonly model = "fake-model";
+  // Provider giả không serialize gì; khai phương ngữ của production để không ai đọc nhầm nó là
+  // một đường đi thứ ba.
+  readonly schemaDialect: AiSchemaDialect = "anthropic";
   calls: AiRequest[] = [];
   constructor(private script: ((req: AiRequest, round: number) => AiResponse | Omit<AiResponse, "usage" | "model" | "latencyMs">)[] = []) {}
   async complete(req: AiRequest): Promise<AiResponse> {
