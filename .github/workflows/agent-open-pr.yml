@@ -1,0 +1,103 @@
+# ═══════════ CẦU NỐI: MỞ PR BẰNG DANH TÍNH AGENT ═══════════
+#
+# Mọi phiên Claude gọi workflow này thay vì tự mở PR. Kết quả: `user.login = erp-agent-vnx[bot]`,
+# KHÁC tài khoản chủ shop — nên chủ shop duyệt được, và `required_approving_review_count: 1` trở
+# thành một luật chạy được thay vì một cái bẫy khoá chết kho.
+#
+# ─── BỐN HÀNG RÀO, BỐN CƠ CHẾ KHÁC NHAU ───
+#
+#  1. `ref` phải là nhánh mặc định. Dispatch từ một nhánh khác ⇒ DỪNG trước khi secret được đọc.
+#     Đây là hàng rào chống chính cái lối tắt mà một agent dễ nghĩ ra nhất: sửa workflow trên một
+#     nhánh rồi dispatch nhánh đó để chạy mã chưa ai review với secret của kho.
+#  2. KHÔNG checkout, KHÔNG chạy một dòng nào của nhánh nguồn. `head` chỉ là một CHUỖI đi vào
+#     trường `head` của lời gọi API. Mã trong PR không bao giờ gặp secret ở đây.
+#  3. `permissions` của `GITHUB_TOKEN`: `contents: read` + `pull-requests: read`. Không một quyền
+#     GHI nào. Token này chỉ dùng để ĐỌC LẠI PR làm đối chứng.
+#  4. Quyền của App KHÔNG đổi: `contents: write` + `pull_requests: write` đã đủ để mở PR. Không
+#     thêm `administration`, không thêm `workflows`, không thêm gì cả.
+#
+# ─── AGENT VẪN KHÔNG GỘP VÀ KHÔNG DUYỆT ĐƯỢC ───
+#
+# Adapter không có đường `/merge` và không có đường `/reviews` — khoá bằng SỰ VẮNG MẶT của đường
+# đi, và `tests/agent-identity.test.ts` + `tests/agent-pr-bridge.test.ts` quét mã nguồn để giữ
+# điều đó. Cổng `gates / gates` không bị đụng tới. Người duyệt vẫn là chủ shop.
+#
+# ─── CÒN HỞ, VÀ CÁCH ĐÓNG HẲN ───
+#
+# Hàng rào 1 nằm TRONG chính tệp này, nên nó chặn được nhầm lẫn chứ không chặn được cố ý: ai sửa
+# được tệp trên một nhánh thì cũng xoá được dòng kiểm ấy. Hàng rào thật nằm ở phía GitHub:
+# chuyển ba secret `ERP_AGENT_GITHUB_*` vào một **Environment** có *deployment branch policy* chỉ
+# cho `main`, rồi khai `environment:` ở job dưới. Lúc đó một lượt chạy từ nhánh khác **không đọc
+# được secret** — thất bại ĐÓNG, không phụ thuộc vào thiện chí của tệp. Xem `docs/agent-pr-bridge.md`.
+name: Mở PR bằng danh tính agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      head:
+        description: "Nhánh nguồn (phải bắt đầu bằng ai/ hoặc claude/). KHÔNG bao giờ được checkout hay chạy."
+        required: true
+        type: string
+      base:
+        description: "Nhánh đích"
+        required: false
+        default: main
+        type: string
+      title:
+        description: "Tiêu đề PR"
+        required: true
+        type: string
+      body:
+        description: "Mô tả PR"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: agent-open-pr
+  cancel-in-progress: false
+
+jobs:
+  open:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Chỉ chạy từ nhánh mặc định
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::Cầu nối chỉ chạy từ nhánh mặc định ($DEFAULT_BRANCH), thấy \"$REF_NAME\". Dispatch từ nhánh khác là chạy mã chưa review với secret."
+            exit 1
+          fi
+          echo "ref = $REF_NAME (đúng nhánh mặc định)"
+
+      - uses: actions/checkout@v4
+        with:
+          # Không giữ credential của Actions trong `.git/config`: cầu nối không dùng git để ghi gì
+          # cả, và một credential nằm sẵn ở đó là một đường ghi không ai khai báo.
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Mở PR bằng danh tính agent
+        env:
+          ERP_AGENT_GITHUB_APP_ID: ${{ secrets.ERP_AGENT_GITHUB_APP_ID }}
+          ERP_AGENT_GITHUB_INSTALLATION_ID: ${{ secrets.ERP_AGENT_GITHUB_INSTALLATION_ID }}
+          ERP_AGENT_GITHUB_PRIVATE_KEY: ${{ secrets.ERP_AGENT_GITHUB_PRIVATE_KEY }}
+          ERP_AGENT_GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+          AGENT_PR_HEAD: ${{ inputs.head }}
+          AGENT_PR_BASE: ${{ inputs.base }}
+          AGENT_PR_TITLE: ${{ inputs.title }}
+          AGENT_PR_BODY: ${{ inputs.body }}
+        run: npx tsx --tsconfig tsconfig.json scripts/agent-open-pr.ts
