@@ -19,6 +19,8 @@ import { signSession } from "@/lib/auth/session";
 import type { Role } from "@/db/schema";
 
 const GOC = process.env.TEST_BASE_URL ?? "http://127.0.0.1:3000";
+/** Trang cần dò. Mặc định là trang soát; truyền `--path=/ai/fanpage` để dò trang khác. */
+const DUONG = process.argv.find((a) => a.startsWith("--path="))?.slice(7) || "/ai/review";
 
 async function main() {
   if (process.env.AI_STAGING !== "1" || process.env.AI_ALLOW_AUTO_SEND !== "false") {
@@ -34,12 +36,28 @@ async function main() {
   const cookie = `erp_session=${phien}`;
 
   console.log("───────── 1. TRANG DỰNG RA CÓ GÌ ─────────");
-  const res = await fetch(`${GOC}/ai/review`, { headers: { cookie }, redirect: "manual" });
+  console.log(`  đường dẫn: ${DUONG}`);
+  const res = await fetch(`${GOC}${DUONG}`, { headers: { cookie }, redirect: "manual" });
   const html = res.status === 200 ? await res.text() : "";
   console.log(`  HTTP ${res.status} · ${html.length} ký tự`);
   if (res.status !== 200) {
     console.log(`  chuyển tới: ${res.headers.get("location") ?? "(không có)"}`);
     process.exit(1);
+  }
+  /*
+    MỘT TRANG LỖI VẪN TRẢ HTTP 200.
+
+    Next dựng được vỏ (thanh bên, đăng nhập) rồi mới gãy ở phần nội dung, nên mã trạng thái nói
+    "ổn" trong khi người dùng thấy một khung lỗi. Chữ "Digest" là dấu vết Next để lại đúng chỗ ấy —
+    bắt nó ở đây thì không phải tin vào ảnh chụp màn hình.
+  */
+  const dauLoi = /Digest[^0-9]{0,20}(\d{6,})/.exec(html);
+  if (dauLoi) {
+    console.log(`  ⛔ TRANG GÃY Ở PHẦN NỘI DUNG — mã truy vết (digest): ${dauLoi[1]}`);
+  } else if (/application error|Something went wrong|đã xảy ra lỗi/i.test(html)) {
+    console.log("  ⛔ TRANG GÃY (có khung lỗi nhưng không đọc được mã truy vết)");
+  } else {
+    console.log("  ✓ không thấy khung lỗi nào trong HTML");
   }
   const co = (s: string) => (html.includes(s) ? "CÓ" : "KHÔNG");
   console.log(`  khối "Chấm tay"        : ${co("Chấm tay")}`);

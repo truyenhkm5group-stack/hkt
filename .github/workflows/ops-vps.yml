@@ -940,7 +940,12 @@ jobs:
                 cd /opt/vnx-ai-staging
                 fetch_staging_script ai-staging-review-probe.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-review-probe.ts'
                 docker exec -e AI_STAGING=1 -e STAGING_USER_PASSWORD="${STAGING_USER_PASSWORD:-}" vnx-ai-staging-app \
-                  npx tsx --tsconfig tsconfig.json scripts/ai-staging-review-probe.ts ${ARG:-} ;;
+                  npx tsx --tsconfig tsconfig.json scripts/ai-staging-review-probe.ts ${ARG:-} || true
+                echo ""
+                echo "──────── LOG MÁY CHỦ NGAY SAU LƯỢT DÒ (60 dòng cuối) ────────"
+                # Một trang gãy ở Server Component chỉ để lại MÃ TRUY VẾT cho người dùng; câu lỗi
+                # thật nằm ở log máy chủ. Lấy luôn ở đây thì một lượt dò trả lời được cả hai.
+                docker logs --tail 60 vnx-ai-staging-app 2>&1 || true ;;
 
               ai-staging-auth)
                 cd /opt/vnx-ai-staging
