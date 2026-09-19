@@ -1,4 +1,7 @@
 import type { BucketKey } from "@/lib/constants/delivery-tower";
+// Giờ mở cửa khai ở MỘT chỗ (`care-resolution.ts`, nơi đã có phép tính mốc hẹn). Gõ lại số 9 ở đây
+// là mở đường cho "sáng mai" của nút bấm nhanh lệch khỏi "sáng mai" của ô chọn giờ.
+import { WORK_DAY_START_HOUR } from "@/lib/constants/care-resolution";
 
 /**
  * ═══════════ CARE VẬN ĐƠN: TRẠNG THÁI NỘI BỘ, KHÔNG PHẢI TRẠNG THÁI ĐVVC ═══════════
@@ -43,7 +46,7 @@ export function canTransition(from: CareStatus, to: CareStatus): boolean {
 
 export const CARE_STATUS_LABEL: Record<CareStatus, string> = {
   NEW: "Chưa xử lý",
-  ASSIGNED: "Đã giao người",
+  ASSIGNED: "Đã giao việc",
   IN_PROGRESS: "Đang xử lý",
   WAITING_CUSTOMER: "Chờ khách",
   WAITING_CARRIER: "Chờ ĐVVC",
@@ -55,7 +58,7 @@ export const CARE_STATUS_LABEL: Record<CareStatus, string> = {
 
 export const CARE_STATUS_HINT: Record<CareStatus, string> = {
   NEW: "Chưa ai động vào. Kiện vẫn đang trong điều kiện cần care.",
-  ASSIGNED: "Đã có người nhận, chưa bắt tay làm.",
+  ASSIGNED: "Việc đã giao cho một người, người đó chưa bắt tay làm.",
   IN_PROGRESS: "Có người đang gọi / sửa / nhắn. Vẫn nằm ở Cần care cho tới khi hẹn theo dõi hoặc xong.",
   WAITING_CUSTOMER: "Đã làm phần mình, đang chờ khách trả lời. Tới hạn theo dõi thì tự quay lại Cần care.",
   WAITING_CARRIER: "Đang chờ Viettel Post / bưu cục trả lời. Tới hạn theo dõi thì tự quay lại Cần care.",
@@ -142,7 +145,13 @@ export const CARE_VIEW_HINT: Record<CareView, string> = {
 export const CARE_BUCKETS: BucketKey[] = ["NO_CONTACT", "DELIVERY_FAILED", "AWAITING_REDELIVERY", "WAITING_CARRIER", "STALE_NO_UPDATE", "DATA_GAP"];
 
 /** Lý do kiện cần care — rổ tháp hoặc case CSKH cần sửa thông tin. */
-export type CareReasonKey = BucketKey | "WRONG_INFO";
+/**
+ * `LEFT_CARE_CONDITION` KHÔNG phải một rổ của tháp giao vận: nó là câu trả lời cho *"vì sao dòng
+ * này còn nằm đây"* khi ĐIỀU KIỆN CẦN CARE đã hết mà đợt care vẫn còn mở. Trước bản 19/09/2026 các
+ * dòng ấy mượn khoá `CARE_TODAY`, nên chúng vừa mang nhãn "Đã rời điều kiện cần care" vừa được đếm
+ * vào rổ "Cần care" — một dòng nói hai điều trái nhau.
+ */
+export type CareReasonKey = BucketKey | "WRONG_INFO" | "LEFT_CARE_CONDITION";
 export const CARE_REASON_LABEL: Record<CareReasonKey, string> = {
   CARE_TODAY: "Cần care",
   NO_CONTACT: "Khách không nghe máy",
@@ -155,6 +164,7 @@ export const CARE_REASON_LABEL: Record<CareReasonKey, string> = {
   RETURN_AT_SHOP: "Hoàn đã về shop",
   DATA_GAP: "Thiếu dữ liệu ĐVVC",
   WRONG_INFO: "Cần sửa địa chỉ / SĐT",
+  LEFT_CARE_CONDITION: "Đã rời điều kiện cần care",
 };
 
 /**
@@ -198,12 +208,31 @@ export function defaultFollowUpAt(from = new Date()): Date {
   return new Date(from.getTime() + CARE_FOLLOW_UP_DEFAULT_HOURS * 3_600_000);
 }
 
-/** Bốn kiểu hẹn theo dõi bấm một phát — không mở lịch. */
+/** Ba kiểu hẹn theo dõi bấm một phát — không mở lịch. */
 export const FOLLOW_UP_PRESETS: { key: string; label: string; hours: number }[] = [
   { key: "2h", label: "+2 giờ", hours: 2 },
   { key: "tomorrow", label: "Sáng mai", hours: -1 },
   { key: "2d", label: "+2 ngày", hours: 48 },
 ];
+
+/**
+ * MỐC HẸN CỦA MỘT NÚT BẤM NHANH — hàm THUẦN, MỘT bản dựng cho mọi màn hình.
+ *
+ * `hours < 0` là quy ước "không phải một khoảng thời gian" (hiện chỉ có "Sáng mai"): mốc neo vào
+ * giờ mở cửa hôm sau chứ không phải "24 giờ nữa", vì bấm lúc 16h mà hẹn 16h hôm sau là bỏ mất cả
+ * buổi sáng — đúng buổi mà khách dễ nghe máy nhất.
+ *
+ * Trước bản 19/09/2026 phép tính này nằm trong `workbench.tsx` dưới dạng một hàm `sangMai()` cục
+ * bộ, nên ngăn kéo KHÔNG có nút hẹn nhanh nào: thêm vào đó nghĩa là chép lại phép tính, và hai bản
+ * chép sẽ trôi xa nhau. Nhận `now` từ ngoài để kiểm thử được mà không phải ghim đồng hồ (luật 50).
+ */
+export function followUpPresetAt(preset: { hours: number }, now: Date = new Date()): Date {
+  if (preset.hours >= 0) return new Date(now.getTime() + preset.hours * 3_600_000);
+  const d = new Date(now);
+  d.setDate(d.getDate() + 1);
+  d.setHours(WORK_DAY_START_HOUR, 0, 0, 0);
+  return d;
+}
 
 /** Hành động gửi ĐVVC — khoá ổn định, dùng làm idempotency và nhãn. */
 export const CARRIER_ACTION_KEYS = ["redeliver", "approve-return", "resend", "approve", "cancel", "edit"] as const;

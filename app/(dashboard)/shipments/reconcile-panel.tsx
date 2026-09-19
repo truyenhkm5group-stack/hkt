@@ -21,6 +21,7 @@ import {
 import type { ReconcileQueue, ReconcileRow } from "@/lib/queries/vtp-reconcile-queue";
 import { FRESHNESS_HOURS_MAX, FRESHNESS_HOURS_MIN, type FreshnessThreshold } from "@/lib/constants/logistics-freshness";
 import { setFreshnessThreshold } from "@/lib/actions/logistics-config";
+import { layMaDoiChieu } from "@/lib/actions/vtp-reconcile";
 import { formatNumber, formatVND, vnShortStamp } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +53,7 @@ export type NguongChang = {
 export function ReconcilePanel({ queue, nguong, canAdmin }: { queue: ReconcileQueue; nguong: NguongChang[]; canAdmin: boolean }) {
   const [reason, setReason] = useState<ReconcileReason | "all">("all");
   const [chon, setChon] = useState<Set<string>>(new Set());
+  const [pending, start] = useTransition();
 
   const rows = useMemo(() => (reason === "all" ? queue.rows : queue.rows.filter((r) => r.reasons.includes(reason))), [queue.rows, reason]);
 
@@ -65,16 +67,39 @@ export function ReconcilePanel({ queue, nguong, canAdmin }: { queue: ReconcileQu
 
   const daChon = rows.filter((r) => chon.has(r.id));
   const maDaChon = (daChon.length ? daChon : rows).map((r) => r.vtpOrderNumber ?? r.trackingCode ?? "").filter(Boolean);
+  /* Số mã mà "toàn bộ" thật sự có — của cả tập, không của trang đang hiện. */
+  const soMaToanBo = reason === "all" ? queue.total : queue.counts[reason];
+  const conAn = Math.max(0, soMaToanBo - maDaChon.length);
 
-  const chepMa = async () => {
+  const chep = async (ma: string[], cau: string) => {
+    if (!ma.length) return;
     try {
-      await navigator.clipboard.writeText(maDaChon.join("\n"));
-      toast.success(`Đã chép ${formatNumber(maDaChon.length)} mã vận đơn — dán vào ô tra cứu của viettelpost.vn`);
+      await navigator.clipboard.writeText(ma.join("\n"));
+      toast.success(`Đã chép ${formatNumber(ma.length)} mã vận đơn — ${cau}`);
     } catch {
       // Trình duyệt chặn clipboard (http, quyền bị tắt) là chuyện thật, không phải lỗi hiếm.
       toast.error("Trình duyệt không cho chép tự động. Bôi đen cột mã rồi Ctrl+C.");
     }
   };
+
+  const chepMa = () => chep(maDaChon, "dán vào ô tra cứu của viettelpost.vn");
+
+  /*
+    ═══ "CHÉP TOÀN BỘ" HỎI LẠI MÁY CHỦ, KHÔNG CHÉP CÁI ĐANG HIỆN ═══
+
+    Trình duyệt chỉ giữ những dòng đã tải. Chép từ đó rồi gọi là "toàn bộ" thì với 354 kiện mà mới
+    tải 300, người trực mang đi tra 300 mã và tin rằng mình đã tra hết — 54 kiện im lặng lâu nhất
+    lặng lẽ ở lại. Nên nút này gọi Server Action chạy lại đúng phép lọc trên CSDL.
+  */
+  const chepToanBo = () =>
+    start(async () => {
+      const r = await layMaDoiChieu(reason);
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      await chep(r.data, "toàn bộ kết quả của bộ lọc đang chọn");
+    });
 
   if (!queue.total) {
     return (
@@ -120,6 +145,13 @@ export function ReconcilePanel({ queue, nguong, canAdmin }: { queue: ReconcileQu
         <Button size="sm" variant="outline" onClick={chepMa} disabled={!maDaChon.length}>
           <Copy className="size-4" /> Chép {formatNumber(maDaChon.length)} mã {daChon.length ? "đã chọn" : "đang hiện"}
         </Button>
+        {/* Hiện khi — và chỉ khi — hai con số thật sự khác nhau. Một nút "toàn bộ" đứng cạnh một
+            nút "đang hiện" cùng đếm 300 chỉ làm người đọc phân vân thêm một nhịp. */}
+        {conAn > 0 ? (
+          <Button size="sm" variant="outline" onClick={chepToanBo} disabled={pending}>
+            <Copy className="size-4" /> Chép toàn bộ {formatNumber(soMaToanBo)} mã
+          </Button>
+        ) : null}
         <Button asChild size="sm" variant="outline">
           <a href="https://viettelpost.vn/tra-cuu-hanh-trinh-don-hang" target="_blank" rel="noreferrer">
             <ExternalLink className="size-4" /> Mở tra cứu Viettel Post
@@ -131,9 +163,15 @@ export function ReconcilePanel({ queue, nguong, canAdmin }: { queue: ReconcileQu
           </NavLink>
         </Button>
         {queue.truncated ? (
-          // Số bị cắt phải in ra. Một danh sách lặng lẽ cụt là một danh sách nói dối về khối lượng việc.
-          <span className="text-xs text-muted-foreground">
-            Đang hiện {formatNumber(queue.rows.length)} kiện đầu · còn {formatNumber(queue.truncated)} kiện nữa chưa hiện
+          // Số bị cắt phải in ra — VÀ phải có một đường mở nó ra. In con số rồi để đó là nói cho
+          // người trực biết họ đang thiếu việc mà không cho họ cách nào lấy phần thiếu.
+          <span className="flex items-center gap-2 text-xs text-muted-foreground">
+            Đang hiện {formatNumber(queue.rows.length)} kiện đầu · còn {formatNumber(queue.truncated)} kiện nữa
+            <Button asChild size="sm" variant="outline">
+              <NavLink href={`/shipments?view=reconcile&dc=${queue.page + 1}`}>
+                Xem thêm {formatNumber(Math.min(queue.truncated, queue.pageSize))} kiện
+              </NavLink>
+            </Button>
           </span>
         ) : null}
       </div>
