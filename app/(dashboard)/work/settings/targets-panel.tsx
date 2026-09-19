@@ -79,10 +79,13 @@ function so(v: string): number | null {
 export function TargetsPanel({
   rows,
   positions,
+  users,
   productCodes,
 }: {
   rows: Row[];
   positions: { id: string; name: string }[];
+  /** Tài khoản ERP — khoá của đích tầng `USER` là `users.id`, không phải một cái tên. */
+  users: { id: string; name: string; email: string }[];
   productCodes: { code: string; name: string }[];
 }) {
   const [metricKey, setMetricKey] = useState(DAT_DUOC[0]?.key ?? "");
@@ -186,8 +189,8 @@ export function TargetsPanel({
           {/* Tầng hẹp hơn ĐÈ tầng rộng hơn — nói ngay ở đây, không để người dùng tự phát hiện. */}
           <p className="text-[11px] text-muted-foreground">
             {phamVi.includes("PRODUCT")
-              ? "Mã hàng đè toàn công ty. Chức danh đè phòng ban, phòng ban đè công ty."
-              : "Chức danh đè phòng ban, phòng ban đè công ty."}
+              ? "Mã hàng đè cá nhân, cá nhân đè chức danh, chức danh đè phòng ban, phòng ban đè công ty."
+              : "Cá nhân đè chức danh, chức danh đè phòng ban, phòng ban đè công ty."}
           </p>
         </div>
 
@@ -205,11 +208,30 @@ export function TargetsPanel({
                           {p.code} · {p.name}
                         </SelectItem>
                       ))
-                    : positions.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                    : /*
+                        CÁ NHÂN và CHỨC DANH là HAI không gian khoá khác nhau, và nhánh này từng gộp
+                        chúng làm một. Lúc ấy không chỉ số nào mở tầng `USER` nên nhánh sai nằm im;
+                        mở tầng ấy cho CPQC/đơn và tỷ lệ chốt là nó thành đường ghi một `positions.id`
+                        vào ô lẽ ra giữ `users.id` — dòng đích sẽ không bao giờ khớp ai, và màn hình
+                        vẫn nói "chưa đặt mục tiêu" mà không báo lỗi ở đâu cả.
+                      */
+                      scopeThat === "USER"
+                      ? users.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {u.name} · {u.email}
+                          </SelectItem>
+                        ))
+                      : positions.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
               </SelectContent>
             </Select>
             {scopeThat === "PRODUCT" ? (
               <p className="text-[11px] text-muted-foreground">Mã mới ra mắt có thể nhận mức riêng, thấp hơn mức chung của shop.</p>
+            ) : null}
+            {scopeThat === "USER" ? (
+              <p className="text-[11px] text-muted-foreground">
+                Chỉ những chỉ số ĐO ĐƯỢC ở mức một người và KHÔNG phải kết quả chung mới mở tầng này — tỷ lệ giao thành công, tỷ lệ hoàn, ROAS thực và margin cố ý không có ở đây vì ĐVVC đồng quyết
+                định chúng.
+              </p>
             ) : null}
           </div>
         ) : null}
@@ -291,6 +313,8 @@ export function TargetsPanel({
                     ? (DEPARTMENT_LABEL[r.scopeRef as DepartmentCode] ?? r.scopeRef)
                     : r.scope === "POSITION"
                       ? (positions.find((p) => p.id === r.scopeRef)?.name ?? r.scopeRef)
+                    : r.scope === "USER"
+                      ? (users.find((u) => u.id === r.scopeRef)?.name ?? r.scopeRef)
                       : r.scope === "PRODUCT"
                         ? r.scopeRef
                         : "";

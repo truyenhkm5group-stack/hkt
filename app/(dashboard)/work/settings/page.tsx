@@ -61,9 +61,15 @@ export default async function WorkSettingsPage() {
     getScoreWeights(),
     db.select().from(schema.workRecurrences).orderBy(asc(schema.workRecurrences.title)),
   ]);
-  const [targets, positions, coverage, maHang, nhomLyDo] = await Promise.all([
+  const [targets, positions, nguoiDung, coverage, maHang, nhomLyDo] = await Promise.all([
     listTargetsForAdmin(),
     db.select({ id: schema.positions.id, name: schema.positions.name }).from(schema.positions).where(eq(schema.positions.active, true)).orderBy(asc(schema.positions.sortOrder)),
+    /*
+      TÀI KHOẢN để đặt đích cho MỘT CÁ NHÂN. Danh sách thật, khoá là `users.id` — AGENTS.md mục 34:
+      quy kết đi bằng khoá tài khoản, không bằng ô chữ. Email in kèm vì hai người trùng tên là
+      chuyện bình thường và chọn nhầm một dòng ở đây là gắn đích lên đầu người khác.
+    */
+    db.select({ id: schema.users.id, name: schema.users.name, email: schema.users.email }).from(schema.users).orderBy(asc(schema.users.name)),
     getPersonAttributionCoverage(),
     // Mã hàng để đặt đích RIÊNG cho một mã. Danh mục thật, không ô gõ tự do: gõ nhầm một mã không
     // tồn tại thì dòng đích nằm im và màn hình vẫn nói "chưa đặt mục tiêu" mà không báo lỗi.
@@ -345,7 +351,7 @@ export default async function WorkSettingsPage() {
         description="Công ty → phòng ban → chức danh, và MÃ HÀNG cho chỉ số đọc được ở mức mã. Tầng hẹp hơn đè tầng rộng hơn."
         hint="Bảng này bắt đầu rỗng và ở rỗng cho tới khi chủ shop tự điền — ERP KHÔNG đặt sẵn con số nào. Chưa có mục tiêu thì màn hình Hiệu suất và bảng Rủi ro theo mã hàng vẫn hiện số thực tế và vẫn xếp hạng, chỉ là không kết luận đạt hay không đạt; một con số không có mục tiêu vẫn đọc được, còn bịa ra mục tiêu để có màu xanh đỏ thì không."
       >
-        <TargetsPanel rows={targets} positions={positions} productCodes={maHang.map((p) => ({ code: p.code, name: p.name }))} />
+        <TargetsPanel rows={targets} positions={positions} users={nguoiDung} productCodes={maHang.map((p) => ({ code: p.code, name: p.name }))} />
       </SectionCard>
 
       <SectionCard

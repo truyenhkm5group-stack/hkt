@@ -49,10 +49,24 @@ export function testMetricRegistry() {
 
 /* ───── 2 · Đặt đích cho một CON NGƯỜI: ba điều kiện, không cái nào nới được ───── */
 export function testPersonTargetGuard() {
-  // Chỉ số mức CÔNG TY gắn tên một người = chấm người đó bằng kết quả của cả shop.
+  /*
+    TỶ LỆ GIAO THÀNH CÔNG vẫn KHÔNG đặt đích cho một cá nhân — kết luận không đổi, nhưng LÝ DO đã
+    đổi và đó là một cải thiện chứ không phải một lần nới luật.
+
+    Trước đây mọi chỉ số của `METRIC_BINDINGS` bị chặn chung một câu "đo ở mức công ty". Câu ấy sai
+    với chính chỉ số này: đơn của một marketer ĐẾM ĐƯỢC, nên nó đọc được ở mức người thật. Thứ làm
+    nó không thành điểm chấm người là ĐVVC — bưu tá giao được hay không nằm ngoài tay người bán.
+    Nên nay nó bị chặn bằng cờ `shared`, đúng AGENTS.md mục 24 và 27, và câu từ chối nói đúng thứ
+    người đọc cần biết để khỏi đi tìm cách "sửa" cho nó đo được ở mức người.
+  */
   const congTy = canTargetPerson("delivery_success_rate");
-  assert.equal(congTy.ok, false, "GTC đo ở mức công ty — không đặt đích cho một cá nhân");
-  assert.ok(congTy.reason?.includes("mức công ty"), "và nói rõ vì sao");
+  assert.equal(congTy.ok, false, "GTC là kết quả chung — không đặt đích cho một cá nhân");
+  assert.ok(congTy.reason?.includes("KẾT QUẢ CHUNG"), "và nói rõ vì sao: ĐVVC đồng quyết định, không phải vì ERP đo không nổi");
+
+  // Chỉ số mức CÔNG TY thật (không ai đọc được ở mức một người) vẫn bị chặn bằng đúng câu cũ.
+  const mucCongTy = canTargetPerson("delivered_revenue");
+  assert.equal(mucCongTy.ok, false);
+  assert.ok(mucCongTy.reason?.includes("mức công ty"), "chỉ số mức công ty vẫn phải nói đúng lý do của nó");
 
   // Chỉ số mang cờ KẾT QUẢ CHUNG = chấm người bằng thứ họ không quyết được (AGENTS mục 24, 27).
   assert.equal(metricOf("sales_delivered_quality")?.shared, true, "đơn từ case này giao thành công — bưu tá quyết phần lớn");

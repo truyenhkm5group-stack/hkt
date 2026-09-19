@@ -5,6 +5,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { MARKETING_DIAGNOSIS } from "@/lib/constants/marketing-diagnosis";
 import { MARKETING_BASIS_LABEL } from "@/lib/constants/marketing-daily";
 import { CELL_STATUS_LABEL } from "@/lib/metrics/scorecard";
+import { TARGET_SCOPE_LABEL } from "@/lib/constants/metric-registry";
 import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot, type MarketingFinding } from "@/lib/marketing/diagnose";
 import { explainMarketing } from "@/lib/marketing/ai-explain";
 import { evaluateMarketingTargets } from "@/lib/queries/marketing-targets";
@@ -62,7 +63,7 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
     Chưa cấu hình AI ⇒ khối diễn giải không hiện, và lý do vẫn in ra để không ai tưởng nó im lặng
     vì "mọi thứ đều ổn".
   */
-  const targets = await evaluateMarketingTargets(data.totals, data.period, data.previousTotals);
+  const targets = await evaluateMarketingTargets(data.totals, data.period, data.previousTotals, data.filters);
 
   return (
     <SectionCard
@@ -101,13 +102,13 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
         </ul>
       )}
 
-      {targets.length ? (
+      {targets.cells.length ? (
         <div className="mt-4 border-t pt-3">
           <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
             <Target className="size-3.5" /> So với đích đã đặt
           </p>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {targets.map((t) => (
+            {targets.cells.map((t) => (
               <div key={t.cellKey} className="rounded-lg border p-2 text-xs">
                 <p className="text-muted-foreground">{t.label}</p>
                 <p className="font-medium">
@@ -116,14 +117,32 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
                 </p>
                 {/* canConclude = false ⇒ hiện thực tế, KHÔNG tô màu, KHÔNG gắn nhãn đạt/không đạt. */}
                 <p className="text-muted-foreground">{t.cell.canConclude ? CELL_STATUS_LABEL[t.status] : (t.cell.reason ?? "Chưa kết luận được")}</p>
+                {/*
+                  TẦNG NÀO ĐANG ÁP — không phải chi tiết cho vui. Đích tầng hẹp đè tầng rộng, nên
+                  hai người nhìn cùng một ô với hai bộ lọc khác nhau có thể thấy hai đích khác
+                  nhau; không in tầng ra thì đó trông như một con số nhảy lung tung.
+                */}
+                {t.cell.target ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    Đích tầng {TARGET_SCOPE_LABEL[t.cell.target.scope]}
+                    {t.cell.target.criticalAt !== null ? ` · ngưỡng đỏ ${t.cell.target.criticalAt}` : ""}
+                  </p>
+                ) : null}
               </div>
             ))}
           </div>
+          {/* Vì sao tầng hẹp KHÔNG áp được — in ra, vì im lặng ở đây làm chủ shop tin là đích cá nhân đang chạy. */}
+          {targets.notes.map((n) => (
+            <p key={n.text} className="mt-2 text-[11px] text-muted-foreground">
+              ⓘ {n.text}
+            </p>
+          ))}
         </div>
       ) : (
         <p className="mt-4 border-t pt-3 text-xs text-muted-foreground">
-          Chưa ai đặt đích cho CPQC/đơn, ROAS, tỷ lệ chốt hay margin. ERP cố ý KHÔNG tự nghĩ ra một ngưỡng — đặt đích ở màn hình Mục tiêu (ba tầng: công ty → phòng ban → chức danh), rồi mỗi ô ở đây sẽ
-          tự chấm theo đích đó.
+          Chưa ai đặt đích cho CPQC/đơn, ROAS, tỷ lệ chốt, margin, tỷ lệ giao thành công hay tỷ lệ hoàn. ERP cố ý KHÔNG tự nghĩ ra một ngưỡng — đặt đích ở màn hình Mục tiêu (năm tầng: công ty →
+          phòng ban → chức danh → người → mã hàng, tầng hẹp đè tầng rộng), rồi mỗi ô ở đây sẽ tự chấm theo đích đó. ROAS hoà vốn khai ở ô &ldquo;ngưỡng đỏ&rdquo; của chính chỉ số ROAS, không phải
+          một chỉ số thứ hai.
         </p>
       )}
 

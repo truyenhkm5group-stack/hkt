@@ -4,6 +4,7 @@ import { clearMemo } from "@/lib/cache";
 import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf, type MaturityState } from "@/lib/constants/marketing-daily";
 import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
 import { METRIC_BINDINGS } from "@/lib/constants/metric-bindings";
+import { canTargetPerson } from "@/lib/constants/metric-registry";
 import { MARKETING_AI_SYSTEM, buildAiContext } from "@/lib/marketing/ai-context";
 import { MARKETING_TARGET_METRICS } from "@/lib/queries/marketing-targets";
 import { baselineOf, diagnose, lossStreakOf, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
@@ -356,6 +357,31 @@ export function testMarketingTargetRegistration() {
     const binding = METRIC_BINDINGS[m.metricKey];
     assert.ok(binding, `${m.metricKey}: phải được khai trong METRIC_BINDINGS thì mới đặt đích được`);
     assert.ok(binding.basis.includes("getMarketingDaily"), `${m.metricKey}: phải khai rõ nó đọc cùng bộ máy với màn hình`);
+    /*
+      CHỈ SỐ DÙNG CHUNG VỚI SỔ CHÍNH phải khai CẢ HAI lối đọc.
+
+      `delivery_success_rate` và `return_rate` cố ý KHÔNG có bản sao mang tiền tố `marketing_`:
+      hai khoá cho một phép đo là hai đích có thể nói hai con số (AGENTS.md mục 43). Cái giá là
+      một khoá được đọc từ hai truy vấn, và AGENTS.md mục 40 gọi đúng tên nó — "đổi nguồn". Nên ô
+      `basis` phải kể ra cả hai, kèm khác biệt population, chứ không được im lặng nhận thêm một
+      nguồn thứ hai.
+    */
+    if (!m.metricKey.startsWith("marketing_")) {
+      assert.ok(binding.basis.includes("Hai lối đọc"), `${m.metricKey}: khoá dùng chung phải khai RA cả hai lối đọc trong basis`);
+      assert.ok(binding.basis.includes("loại đơn trùng"), `${m.metricKey}: phải nói rõ khác biệt population giữa hai lối đọc`);
+    }
+    /*
+      ĐÍCH CHO MỘT CON NGƯỜI. Chỉ số mà ĐVVC đồng quyết định KHÔNG được mở tầng `USER` — chấm một
+      marketer bằng tỷ lệ giao của tuyến đường là chấm họ bằng thứ họ không quyết được
+      (AGENTS.md mục 24 và 27). Khoá ở đây, không ở màn hình, vì màn hình nào cũng có thể quên.
+    */
+    const NGOAI_QUYET = ["marketing_roas_delivered", "marketing_margin", "delivery_success_rate", "return_rate"];
+    if (NGOAI_QUYET.includes(m.metricKey)) {
+      assert.equal(binding.shared, true, `${m.metricKey}: kết quả do bên ngoài đồng quyết định thì phải mang cờ shared`);
+      assert.equal(canTargetPerson(m.metricKey).ok, false, `${m.metricKey}: không được mở đích cho một cá nhân`);
+    } else {
+      assert.equal(canTargetPerson(m.metricKey).ok, true, `${m.metricKey}: đo được ở mức người thì phải đặt đích cho cá nhân được`);
+    }
     // Chiều phải đúng: CPA càng thấp càng tốt. Ghi cứng "UP" sẽ làm điểm ĐẢO NGƯỢC.
     if (m.metricKey === "marketing_cpa") assert.equal(binding.direction, "DOWN", "chi phí một đơn: càng thấp càng tốt");
     if (m.metricKey === "marketing_roas_delivered") assert.equal(binding.direction, "UP");

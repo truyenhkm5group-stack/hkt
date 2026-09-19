@@ -76,6 +76,23 @@ export type MetricBinding = {
    * chia. Chỉ bật cờ này cho chỉ số mà tử số VÀ mẫu số đều đếm được trên đúng tập đơn của mã.
    */
   productGrain?: boolean;
+  /**
+   * ĐỌC ĐƯỢC Ở MỨC MỘT CON NGƯỜI KHÔNG — cửa thứ nhất của `canTargetPerson`.
+   *
+   * Mặc định KHÔNG. Cùng nguyên tắc với `productGrain`: khai tường minh, và "báo cáo có một bảng
+   * bóc tách theo marketer" KHÔNG đủ. Chỉ bật khi tử số VÀ mẫu số đều đếm được trên đúng tập dữ
+   * liệu do người đó tạo ra — không phải một phần CHIA từ con số của cả shop.
+   */
+  personGrain?: boolean;
+  /**
+   * KẾT QUẢ CHUNG — cửa thứ hai của `canTargetPerson` (AGENTS.md mục 24 và 27).
+   *
+   * Bật khi phần lớn kết quả do BÊN NGOÀI quyết định: ĐVVC có giao được không, khách có nhận
+   * không. Một chỉ số như vậy vẫn đọc được ở mức người và vẫn đáng đọc, nhưng làm điểm chấm người
+   * thì là chấm họ bằng thứ họ không quyết được. Hai cờ này ĐỘC LẬP: một chỉ số có thể vừa đọc
+   * được ở mức người vừa là kết quả chung, và khi ấy nó hiện làm bối cảnh chứ không thành đích.
+   */
+  shared?: boolean;
 };
 
 export const METRIC_BINDINGS: Record<string, MetricBinding> = {
@@ -87,10 +104,27 @@ export const METRIC_BINDINGS: Record<string, MetricBinding> = {
     direction: "UP",
     trust: "MEASURED",
     department: "LOGISTICS",
-    basis: "ORDER_OUTCOME · giao thành công ÷ (giao thành công + hoàn), chỉ đơn ĐÃ kết thúc (lib/queries/metrics.ts::successRate)",
+    /*
+      HAI LỐI ĐỌC, MỘT CÔNG THỨC — và phải khai ra cả hai, vì một khoá chỉ số khai một nguồn rồi
+      được đọc từ nguồn thứ hai chính là thứ AGENTS.md mục 40 gọi là "đổi nguồn": cùng công thức
+      đọc chỗ khác, và hai kỳ đứng trên hai tập dòng khác nhau.
+
+      Cả hai lối đều phân loại bằng ĐÚNG `ORDER_OUTCOME` (`DELIVERED` vs `RETURNED` +
+      `RETURNED_BY_RULE`) và cùng mẫu số "đơn đã ngã ngũ". Khác biệt DUY NHẤT là population:
+      `getMarketingDaily` loại đơn TRÙNG theo ảnh chụp quy kết, vì câu hỏi ở đó là "quảng cáo mang
+      về bao nhiêu LẦN MUA". Nên đích đặt cho chỉ số này chấm đúng một phép đo, chỉ khác phạm vi.
+    */
+    basis: "ORDER_OUTCOME · giao thành công ÷ (giao thành công + hoàn), chỉ đơn ĐÃ kết thúc. Hai lối đọc cùng công thức: lib/queries/metrics.ts::successRate (toàn shop / theo mã) và getMarketingDaily (phạm vi đang lọc của báo cáo theo ngày, ĐÃ loại đơn trùng)",
     // Bảng "Rủi ro theo mã hàng" đếm tử số và mẫu số trên ĐÚNG tập đơn của từng mã — không chia,
     // không phân bổ. Nên đích riêng cho một mã là một phát biểu có nghĩa.
     productGrain: true,
+    /*
+      ĐỌC ĐƯỢC ở mức người (đơn của một marketer đếm được), nhưng là KẾT QUẢ CHUNG: ĐVVC giao được
+      hay không, khách có ở nhà hay không, đều nằm ngoài tay người bán. Nên nó hiện làm BỐI CẢNH
+      trên màn hình của một marketer, và `canTargetPerson` từ chối biến nó thành điểm chấm người.
+    */
+    personGrain: true,
+    shared: true,
   },
   return_rate: {
     key: "return_rate",
@@ -99,8 +133,11 @@ export const METRIC_BINDINGS: Record<string, MetricBinding> = {
     direction: "DOWN",
     trust: "MEASURED",
     department: "LOGISTICS",
-    basis: "ORDER_OUTCOME · (RETURNED + RETURNED_BY_RULE) ÷ đơn đã kết thúc",
+    basis: "ORDER_OUTCOME · (RETURNED + RETURNED_BY_RULE) ÷ đơn đã kết thúc. Hai lối đọc cùng công thức: lib/queries/metrics.ts (toàn shop / theo mã) và getMarketingDaily (phạm vi đang lọc, ĐÃ loại đơn trùng)",
     productGrain: true,
+    // Cùng lý do với tỷ lệ giao thành công — nó là phần bù của chính chỉ số ấy, trên cùng mẫu số.
+    personGrain: true,
+    shared: true,
   },
   delivered_revenue: {
     key: "delivered_revenue",
@@ -204,6 +241,16 @@ export const METRIC_BINDINGS: Record<string, MetricBinding> = {
     trust: "MEASURED",
     department: "MARKETING",
     basis: "getMarketingDaily (mốc ngày phát sinh đơn) — chi quảng cáo ÷ đơn đã xác nhận, đã loại đơn trùng",
+    /*
+      ĐỌC ĐƯỢC Ở MỨC MỘT MARKETER, và đây là một trong số RẤT ÍT chỉ số kinh doanh được phép nói
+      như vậy. Tử số là tiền của CHÍNH tài khoản quảng cáo gán cho người đó (`ad_spends.marketer_id`),
+      mẫu số là đơn quy kết cho người đó theo ẢNH CHỤP quy kết (`order_attributions`). Không phép
+      chia nào, không phân bổ theo tỷ trọng — cả hai vế đều đếm trên đúng tập dữ liệu của họ.
+
+      KHÔNG mang cờ `shared`: chốt được đơn hay không là việc của người bán, ĐVVC chưa tham gia ở
+      bước này.
+    */
+    personGrain: true,
   },
   marketing_roas_delivered: {
     key: "marketing_roas_delivered",
@@ -216,6 +263,10 @@ export const METRIC_BINDINGS: Record<string, MetricBinding> = {
     trust: "MEASURED",
     department: "MARKETING",
     basis: "getMarketingDaily — DOANH THU GIAO THÀNH CÔNG ÷ chi quảng cáo. KHÔNG dùng doanh số POS: đơn hoàn cũng lên POS",
+    // Tử số là DOANH THU GIAO THÀNH CÔNG — ĐVVC đồng quyết định nó. Đọc được ở mức người, nhưng
+    // làm điểm chấm người thì là chấm họ bằng tỷ lệ giao của tuyến đường.
+    personGrain: true,
+    shared: true,
   },
   marketing_close_rate: {
     key: "marketing_close_rate",
@@ -230,6 +281,9 @@ export const METRIC_BINDINGS: Record<string, MetricBinding> = {
     */
     department: "MARKETING",
     basis: "getMarketingDaily — đơn đã xác nhận ÷ tin nhắn quảng cáo (ad_spends.messages/leads)",
+    // Cả hai vế đều là dữ liệu của chính người đó: tin nhắn về tài khoản quảng cáo của họ, đơn
+    // chốt mang tên họ. Không ai ngoài shop tham gia — nên đây là đích chấm người HỢP LỆ.
+    personGrain: true,
   },
   marketing_margin: {
     key: "marketing_margin",
@@ -239,6 +293,10 @@ export const METRIC_BINDINGS: Record<string, MetricBinding> = {
     trust: "ESTIMATED",
     department: "MARKETING",
     basis: "getMarketingDaily — (DT thực − giá vốn − cước/phí − chi QC) ÷ DT thực. Ước tính vì độ phủ giá vốn chưa 100%",
+    // Mẫu số là doanh thu GIAO THÀNH CÔNG và tử số trừ cước/phí hoàn — hai khoản do ĐVVC quyết.
+    // Cùng nhóm với ROAS thực: đọc được ở mức người, không dùng làm điểm chấm người.
+    personGrain: true,
+    shared: true,
   },
 
   /* ───── Vận hành công việc (tự Work OS đo) ───── */
