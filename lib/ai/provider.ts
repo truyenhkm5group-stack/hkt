@@ -86,6 +86,20 @@ export function anthropicCapsOf(model: string): AnthropicCaps {
   return ANTHROPIC_CAPS[model] ?? { adaptiveThinking: true, effort: true, fallbacks: false };
 }
 
+/**
+ * Trần token mà một lượt KHÔNG streaming còn an toàn.
+ *
+ * SDK Anthropic tính `expectedTime = 60 phút × max_tokens / 128000` rồi TỪ CHỐI lượt không
+ * streaming khi nó vượt mặc định 10 phút. Phép kiểm đó chỉ chạy khi lời gọi KHÔNG truyền `timeout`
+ * — mà ta có truyền (xem `TIMEOUT_BY_TIER`), nên SDK bỏ qua nó và ta thừa hưởng nguyên cái vách đá
+ * nó dựng lên để tránh: lượt gọi hết giờ giữa chừng, không có lấy một dòng chữ để đọc.
+ *
+ * Nên ta tự giữ CÙNG MỘT ngưỡng, tính lại từ chính hai con số của SDK thay vì chép một số:
+ * xin nhiều hơn thế thì streaming, và lượt gọi không còn phụ thuộc vào việc model trả lời nhanh
+ * tới đâu.
+ */
+export const NGUONG_KHONG_STREAM = Math.floor((128_000 * 10) / 60);
+
 export class AnthropicProvider implements AiProvider {
   readonly name = "anthropic";
   readonly model: string;
@@ -99,11 +113,11 @@ export class AnthropicProvider implements AiProvider {
   async complete(req: AiRequest): Promise<AiResponse> {
     const started = Date.now();
     const caps = anthropicCapsOf(this.model);
-    const res = await this.client.beta.messages.create({
+    const body = {
       model: this.model,
       max_tokens: req.maxTokens ?? 4000,
       // Prompt hệ thống ổn định ⇒ đệm được; phần bối cảnh thay đổi nằm trong messages.
-      system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
+      system: [{ type: "text" as const, text: req.system, cache_control: { type: "ephemeral" as const } }],
       ...(caps.adaptiveThinking ? { thinking: { type: "adaptive" as const } } : {}),
       ...(caps.effort ? { output_config: { effort: this.effort } } : {}),
       // Từ chối vì chính sách ⇒ máy chủ tự chạy lại trên model dự phòng trong cùng một lần gọi.
@@ -119,7 +133,13 @@ export class AnthropicProvider implements AiProvider {
               : ({ type: "tool_result", tool_use_id: b.toolUseId, content: b.content, is_error: b.isError ?? false } as const),
         ),
       })),
-    });
+    };
+    // Lượt dài đi bằng streaming — xem `NGUONG_KHONG_STREAM`. Phong bì trả về giống hệt nhau, nên
+    // phần đọc kết quả bên dưới không cần biết mình vừa đi đường nào.
+    const res =
+      body.max_tokens > NGUONG_KHONG_STREAM
+        ? await this.client.beta.messages.stream(body).finalMessage()
+        : await this.client.beta.messages.create(body);
     const content: AiBlock[] = [];
     for (const block of res.content) {
       if (block.type === "text") content.push({ type: "text", text: block.text });

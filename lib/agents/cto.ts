@@ -24,7 +24,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { CTO_AGENT_KEYS, CTO_MAX_TASKS, parseCtoPlan, type CtoPlan } from "@/lib/constants/cto-proposal";
+import { CTO_AGENT_KEYS, CTO_MAX_OUTPUT_TOKENS, CTO_MAX_TASKS, parseCtoPlan, type CtoPlan } from "@/lib/constants/cto-proposal";
 import { TECH_AGENT_TEMPLATES, TECH_MODULES, TECH_TASK_TYPES } from "@/lib/constants/tech";
 import type { AiProvider } from "@/lib/ai/provider";
 
@@ -201,9 +201,23 @@ export async function runCtoPlanning(provider: AiProvider, ctx: CtoContext): Pro
       system: HE_THONG,
       messages: [{ role: "user", content: [{ type: "text", text: ctx.prompt }] }],
       tools: [],
-      maxTokens: 8000,
+      maxTokens: CTO_MAX_OUTPUT_TOKENS,
     });
     text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+    // Chạm trần token ⇒ câu trả lời bị CẮT, và một chuỗi JSON cụt luôn hỏng cú pháp. Để nó đi tiếp
+    // xuống bộ đọc là in ra "không đọc được JSON" — câu đó đẩy người sửa đi soi prompt và lược đồ
+    // trong khi chỗ hỏng là cái trần của chính ta. Chặn ngay tại đây, gọi đúng tên.
+    if (res.stopReason === "max_tokens") {
+      return {
+        ok: false,
+        error: `Câu trả lời bị cắt: chạm trần ${CTO_MAX_OUTPUT_TOKENS.toLocaleString("vi-VN")} token (${text.length.toLocaleString("vi-VN")} ký tự đã nhận). Đây KHÔNG phải lỗi định dạng của model — hoặc nới trần, hoặc thu hẹp mục tiêu.`,
+        ...meta,
+        raw: text.slice(0, 20_000),
+      };
+    }
+    if (res.stopReason === "refusal") {
+      return { ok: false, error: "Model từ chối trả lời vì chính sách nội dung. Không có bản kế hoạch nào được lập.", ...meta, raw: text.slice(0, 20_000) };
+    }
   } catch (e) {
     return { ok: false, error: `Gọi model hỏng: ${(e instanceof Error ? e.message : String(e)).slice(0, 500)}`, ...meta, raw: null };
   }
