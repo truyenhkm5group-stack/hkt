@@ -57,7 +57,11 @@ order by 3 desc;
 \echo '── B4. HAI CON SỐ PHẢI BẰNG 0 — đọc lại từ bảng, không phải lời hứa ──'
 select
   (select count(*) from sales_suggestions s where s.created_at > now() - interval '45 minutes' and s.sent)                  as tin_da_gui_khach,
-  (select count(*) from sales_suggestions s where s.created_at > now() - interval '45 minutes' and s.production_action <> 'NO_SEND') as hanh_dong_khac_khong_gui,
+  -- KHÔNG phải một con số an toàn, và tên cũ ("hành động khác không gửi") đọc như thể nó là.
+  -- `production_action` là hành động máy ĐƯỢC PHÉP làm: ở nấc SHADOW luôn `NO_SEND`, ở nấc COPILOT
+  -- là hành động thật để NGƯỜI bấm. Bản chạy thử đang ở COPILOT nên con số này khác 0 là ĐÚNG.
+  -- Hai ô nói về an toàn là `sent` và số đơn đã tạo — cả hai đều ở dưới.
+  (select count(*) from sales_suggestions s where s.created_at > now() - interval '45 minutes' and s.production_action <> 'NO_SEND') as duoc_phep_nguoi_bam,
   -- `ai_tool_calls` dùng cột `outcome` chứ không có cột `ok`: một lượt gọi công cụ có thể bị
   -- CHẶN (DENIED) chứ không chỉ chạy-được / hỏng, nên một ô boolean không đủ chỗ nói.
   (select count(*) from ai_tool_calls t where t.created_at > now() - interval '45 minutes' and t.tool in ('order.create_draft','order.confirm') and t.outcome = 'OK') as don_da_tao,
