@@ -86,64 +86,85 @@ on:
         type: string
         default: ""
 
-# ═══════════ KHOÁ ĐI THEO TÁC ĐỘNG, KHÔNG THEO TÊN TỆP ═══════════
+# ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
-# TRƯỚC: cả tệp này dùng MỘT nhóm khoá ở mức workflow, dùng chung với `deploy-vps.yml`. Một câu
-# `db-query` mười giây và một lượt deploy 17m08s (đo trên #352, 19/09/2026 — trong đó chỉ 8m13s
-# thật sự chạm máy chủ) xếp cùng một hàng. Với nhiều phiên làm việc song song (AGENTS.md mục 9)
-# đó là nút thắt lớn nhất của kho: mọi phiên đứng chờ nhau để hỏi một câu CHỈ ĐỌC.
+# BẢN TRƯỚC (PR #15) chia thao tác thành bốn nhóm `concurrency` của GitHub. Nó gỡ được nút thắt
+# — đo thật: lượt chỉ đọc chờ 1–7 giây thay vì tới 17 phút — nhưng chạy trên production nửa tiếng
+# thì lộ ra HAI lỗi mà chỉ máy chủ thật mới nói được:
 #
-# SAU: nhóm được TÍNH RA từ thao tác và tham số, theo đúng thứ nó có thể làm hỏng.
+#   A. LƯỢT ĐỌC BỊ DEPLOY GIẾT GIỮA CHỪNG. `explain-stock` (lượt 1406) khởi động 13:41:25, job
+#      `release` của deploy #354 bắt đầu 13:41:29, và 13:44:11 lượt đọc chết với
+#      `container ... is not running`. Nhóm concurrency của GitHub cho hai bên chạy song song,
+#      nhưng không ai nói cho lượt đọc biết rằng container dưới chân nó sắp bị dựng lại.
 #
-#   vps-mutating            — GHI. Dùng chung với job `release` của deploy. MỘT lượt tại một thời
-#                             điểm, `cancel-in-progress: false`: không bao giờ cắt ngang một lệnh
-#                             đang ghi dữ liệu hay một lượt deploy đang chạy migration.
-#   vps-readonly-shell-<id> — CHỈ ĐỌC và KHÔNG dựng tiến trình nào trong container (`docker ps`,
-#                             `docker logs`, `df`, `psql` chỉ đọc). Nhóm mang mã lượt chạy nên
-#                             KHÔNG BAO GIỜ xếp hàng — chạy bao nhiêu lượt song song cũng được.
-#   vps-readonly-probe      — CHỈ ĐỌC, dò API bên ngoài (Viettel Post · Pancake · Meta). Chờ mạng
-#                             là chính, nhưng vẫn tốn một tiến trình `tsx` trong container.
-#   vps-readonly-db         — CHỈ ĐỌC, nhưng chạy báo cáo nặng / mở màn hình thật / EXPLAIN.
+#   B. `concurrency` CỦA GITHUB KHÔNG PHẢI HÀNG ĐỢI. Một nhóm chỉ giữ ĐÚNG một lượt đang chạy và
+#      MỘT lượt đang chờ; lượt thứ ba tới sẽ HUỶ lượt đang chờ (đo thật: lượt 1395 và 1416 bị huỷ
+#      đúng như vậy). Với một nhóm ghi, điều đó nghĩa là **một lệnh ghi đã gửi đi có thể biến mất
+#      thay vì chờ tới lượt** — im lặng, và người gửi chỉ thấy chữ "cancelled".
 #
-# VÌ SAO HAI LÀN ĐỌC NẶNG LẠI CÓ HẠN MỨC: VPS chỉ ~1,9 GB và ĐANG phục vụ người dùng thật; mỗi
-# `docker exec erp-app npx tsx` là một tiến trình Node vài trăm MB. "Chỉ đọc" nói về DỮ LIỆU, không
-# nói về BỘ NHỚ — thả tự do mười lượt đọc song song là tự gây ra sự cố mình định đi đo. Hai làn
-# riêng vì chúng tranh hai tài nguyên khác nhau: một bên là mạng ra ngoài, một bên là CPU/RAM/CSDL.
+# NÊN HÀNG ĐỢI CHUYỂN XUỐNG MÁY CHỦ. GitHub chỉ còn làm một việc: cho job KHỞI ĐỘNG. Việc chờ tài
+# nguyên do `flock` trên VPS quyết, và `flock` là hàng đợi thật của nhân Linux: không ai bị đá ra
+# vì có người tới sau.
 #
-# BA LUẬT KHOÁ CHẶT CỦA BẢNG PHÂN LOẠI NÀY:
+# BA Ổ KHOÁ:
 #
-#   1. MẶC ĐỊNH LÀ GHI. Nhánh cuối cùng của biểu thức là `vps-mutating`, nên một thao tác mới thêm
-#      vào danh sách `options` mà quên phân loại sẽ tự rơi vào làn AN TOÀN NHẤT. Mọi nhánh lỗi
-#      phải rơi về phía HẸP HƠN (AGENTS.md mục 31).
-#   2. `--apply` / `--write` / `--fix` ĐÈ LÊN TẤT CẢ. Hơn một nửa thao tác "chỉ đọc" ở đây là
-#      CHẠY THỬ theo mặc định và GHI THẬT khi có cờ (`outcome-parity`, `cod-rebuild`,
-#      `care-false-reopen`, `ai-check` …). Phân loại theo TÊN thao tác thôi là sai ngay lần đầu
-#      ai đó gõ `--apply`. `contains()` là so chuỗi con, nên nó chỉ sai về phía GHI — đúng chiều.
-#   3. Thao tác GHI MỘT DÒNG VẪN LÀ GHI. `vtp-import-preview` chỉ đọc `shipments` nhưng vẫn tạo
-#      một dòng `vtp_import_batches` (AGENTS.md mục 49), `sepay-verify` phát lại một gói tin thật.
-#      Cả hai nằm ở `vps-mutating` — không có hạng "ghi một chút".
+#   /var/lock/erp-lifecycle.lock     VÒNG ĐỜI CỦA CONTAINER.
+#                                    · ĐỘC QUYỀN (-x): deploy `release`, và mọi thao tác GHI.
+#                                    · CHIA SẺ  (-s): mọi thao tác đọc cần container đứng yên.
+#                                    Nhiều lượt đọc chia sẻ được với nhau; một lượt ghi thì không.
+#                                    Đây là thứ chữa lỗi A: deploy phải CHỜ lượt đọc xong, hoặc
+#                                    lượt đọc phải chờ deploy xong — không còn dựng lại container
+#                                    dưới chân một phép đọc đang chạy.
 #
-# `tests/ops-concurrency.test.ts` khoá cả ba luật ở mức mã nguồn, và chặn luôn việc ai đó đưa
-# nhóm khoá gộp-tất-cả ngày xưa trở lại.
+#   /var/lock/erp-readonly-db.lock   MỘT lượt đọc nặng tại một thời điểm (báo cáo · EXPLAIN ·
+#   /var/lock/erp-readonly-probe.lock MỘT lượt dò API ngoài tại một thời điểm.
+#                                    VPS chỉ ~1,9 GB và ĐANG phục vụ người dùng thật; mỗi
+#                                    `docker exec erp-app npx tsx` là một tiến trình Node vài trăm
+#                                    MB. "Chỉ đọc" nói về DỮ LIỆU, không nói về BỘ NHỚ.
+#
+# THỨ TỰ LẤY KHOÁ LÀ CỐ ĐỊNH, VÀ ĐÓ LÀ CẢ PHẦN CHỨNG MINH KHÔNG BẾ TẮC:
+#
+#       (1) khoá tài nguyên (db / probe, ĐỘC QUYỀN)  →  (2) khoá vòng đời (CHIA SẺ)
+#
+# Thao tác GHI chỉ lấy (2) ĐỘC QUYỀN. Không đường nào lấy (2) rồi mới xin (1), nên không có chu
+# trình chờ — không thể bế tắc. Thứ tự này còn quan trọng vì lý do thứ hai: một lượt đọc nặng đang
+# xếp hàng ở (1) KHÔNG cầm (2), nên nó không vô tình chặn deploy trong lúc chính nó đang chờ.
+#
+# BA LUẬT PHÂN LOẠI GIỮ NGUYÊN TỪ PR #15 (nay áp ở shell thay vì ở biểu thức YAML):
+#
+#   1. MẶC ĐỊNH LÀ GHI. Thao tác mới quên phân loại rơi vào làn AN TOÀN NHẤT (AGENTS.md mục 31).
+#   2. `--apply` / `--write` / `--fix` ĐÈ LÊN phân loại theo tên — hơn một nửa thao tác "chỉ đọc"
+#      ở đây là CHẠY THỬ theo mặc định và GHI THẬT khi có cờ.
+#   3. Thao tác GHI MỘT DÒNG VẪN LÀ GHI (`vtp-import-preview`, `sepay-verify`).
+#
+# HẾT GIỜ CHỜ THÌ DỪNG HẲN VÀ NÓI RA. Không có nhánh nào "thôi bỏ qua khoá rồi chạy": chạy một
+# lệnh ghi song song với deploy đúng là thứ cả bản này sinh ra để chặn.
+#
+# ĐIỀU BẢN NÀY *KHÔNG* PHỦ: bộ lập lịch chạy TRONG container tự nó ghi CSDL và không đi qua ổ
+# khoá nào. Ổ khoá này điều phối các thao tác đi TỪ GITHUB xuống, không phải mọi thứ chạm CSDL.
+#
+# `tests/ops-concurrency.test.ts` chạy thật khối khoá này dưới `bash` với `flock` thật.
 
 jobs:
   ops:
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    concurrency:
-      group: >-
-        ${{ (contains(inputs.arg, '--apply') || contains(inputs.arg, '--write') || contains(inputs.arg, '--fix')) && 'vps-mutating'
-        || contains(fromJSON('["status","perf","disk","logs","db-query"]'), inputs.action) && format('vps-readonly-shell-{0}', github.run_id)
-        || contains(fromJSON('["check-integrations","vtp-debug","vtp-probe","vtp-web-probe","phone-probe","pages-debug","meta-id-probe","vtp-capability"]'), inputs.action) && 'vps-readonly-probe'
-        || contains(fromJSON('["verify","smoke","session-verify","perf-probe","kpi-snapshot","explain-stock","outcome-explain","outcome-parity","returns-parity","reason-coverage","reason-backfill","cogs-drift","profit-verify","marketing-calibrate","payroll-reconcile","fanpage-evidence-backfill","care-false-reopen","care-waiting-reconcile","cs-rule-update","cs-stale","sepay-reconcile","cod-rebuild","cod-status-repair","vtp-rebuild-state","vtp-replay-files","vtp-manual-verify","vtp-statement-peek","returns-hmt","ai-check"]'), inputs.action) && 'vps-readonly-db'
-        || 'vps-mutating' }}
-      cancel-in-progress: false
+    # KHÔNG có `concurrency` ở đây — xem khối "HÀNG ĐỢI NẰM TRÊN MÁY CHỦ" ở đầu tệp.
+    # Mọi lượt chạy ĐƯỢC PHÉP KHỞI ĐỘNG; việc chờ tài nguyên xảy ra bằng `flock` trên VPS.
     steps:
       - uses: appleboy/ssh-action@v1
         env:
           ACTION: ${{ inputs.action }}
           DAYS: ${{ inputs.days }}
           ARG: ${{ inputs.arg }}
+          # Danh tính lượt chạy — đi vào mọi dòng nhật ký khoá, để đọc log trên máy chủ là
+          # truy được ngược về đúng lượt chạy trên GitHub.
+          RUN_ID: ${{ github.run_id }}
+          # Trần chờ khoá. HỮU HẠN và KHÁC NHAU theo loại: một lượt đọc chờ quá 15 phút thì
+          # gần như chắc chắn có deploy dài đang chạy và người gửi nên biết; một lượt GHI đáng
+          # được chờ lâu hơn vì gửi lại nó tốn hơn nhiều. Cả hai đều DỪNG HẲN khi hết giờ.
+          LOCK_WAIT_READ: "900"
+          LOCK_WAIT_WRITE: "1800"
           # Chỉ dùng cho apply-ai-env. Secret được GitHub che trong log; KHÔNG bao giờ truyền khoá qua ô "arg".
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -177,13 +198,79 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
+          envs: ACTION,DAYS,ARG,RUN_ID,LOCK_WAIT_READ,LOCK_WAIT_WRITE,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
           script: |
             set -e
             cd /root/erp
             C="docker compose -f docker-compose.prod.yml"
             # lấy script mới nhất trên main qua GitHub API (không bị CDN raw.githubusercontent cache 5 phút)
             fetch_script() { curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/$1?ref=main"; }
+
+            # ═════════════════ KHOÁ TRÊN MÁY CHỦ (xem đầu tệp) ═════════════════
+            # ĐÂY LÀ HÀNG ĐỢI THẬT. `flock` của nhân Linux: ai tới trước nằm trong hàng, và không
+            # ai bị đá ra vì có người tới sau — khác hẳn `concurrency` của GitHub (mục B đầu tệp).
+            # Khoá gắn vào MỘT FILE DESCRIPTOR của chính shell này, nên SSH đứt / tiến trình chết
+            # là nhân TỰ nhả khoá. Không tự chế khoá bằng "tạo file rồi xoá file": kiểu đó để lại
+            # khoá ma vĩnh viễn mỗi lần một lượt chạy bị huỷ giữa chừng.
+            KHOA_VONG_DOI=/var/lock/erp-lifecycle.lock
+            KHOA_DOC_DB=/var/lock/erp-readonly-db.lock
+            KHOA_DOC_PROBE=/var/lock/erp-readonly-probe.lock
+            mkdir -p /var/lock
+
+            # FD 8 = khoá tài nguyên (đọc nặng / dò API) · FD 9 = khoá vòng đời. Số hiệu CỐ ĐỊNH
+            # và LẤY THEO ĐÚNG THỨ TỰ 8 → 9 ở mọi nhánh; đó là phần chứng minh không bế tắc.
+            xin_khoa() { # $1=fd  $2=tệp  $3=-x|-s  $4=trần giây  $5=nhãn
+              _t0=$(date +%s)
+              _kieu=$([ "$3" = "-x" ] && echo "ĐỘC QUYỀN" || echo "CHIA SẺ")
+              echo "[khoá] xin $_kieu $2 — run=$RUN_ID action=$ACTION ($5) lúc $(date -u +%FT%TZ), trần ${4}s"
+              eval "exec $1>\"$2\""
+              if flock "$3" -w "$4" "$1"; then
+                _t1=$(date +%s)
+                echo "[khoá] ĐÃ LẤY ĐƯỢC $2 lúc $(date -u +%FT%TZ) — chờ $((_t1-_t0))s"
+              else
+                _t1=$(date +%s)
+                echo "::error::[khoá] HẾT GIỜ CHỜ $2 sau $((_t1-_t0))s (trần ${4}s) — run=$RUN_ID action=$ACTION."
+                echo "Thao tác DỪNG và KHÔNG chạy: lúc này gần như chắc chắn có deploy hoặc một lệnh ghi dài đang giữ khoá."
+                echo "Xem ai đang giữ:  Actions → Vận hành ERP trên VPS → action = status   (hoặc trên máy chủ: fuser -v $2)"
+                exit 75
+              fi
+            }
+
+            # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
+            DOC_NHE="status perf disk logs db-query"
+            DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability"
+            DOC_NANG="verify smoke session-verify perf-probe kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
+
+            LOP=GHI
+            case "$ARG" in
+              # So CHUỖI CON, y như `contains()` của biểu thức cũ: nó chỉ sai về phía GHI —
+              # đúng chiều an toàn.
+              *--apply*|*--write*|*--fix*) LOP=GHI ;;
+              *)
+                case " $DOC_NHE "   in *" $ACTION "*) LOP=DOC_NHE   ;; esac
+                case " $DOC_PROBE " in *" $ACTION "*) LOP=DOC_PROBE ;; esac
+                case " $DOC_NANG "  in *" $ACTION "*) LOP=DOC_NANG  ;; esac ;;
+            esac
+            echo "[khoá] phân loại: action=$ACTION arg=\"$ARG\" ⇒ $LOP"
+
+            case "$LOP" in
+              GHI)
+                # Thao tác GHI chỉ cầm khoá vòng đời, ĐỘC QUYỀN. Nó KHÔNG đụng FD 8, nên không
+                # đường nào cầm (2) rồi xin (1) — không có chu trình chờ.
+                xin_khoa 9 "$KHOA_VONG_DOI" -x "$LOCK_WAIT_WRITE" "ghi / khởi động lại" ;;
+              DOC_NANG)
+                xin_khoa 8 "$KHOA_DOC_DB" -x "$LOCK_WAIT_READ" "đọc nặng: một lượt tại một thời điểm"
+                xin_khoa 9 "$KHOA_VONG_DOI" -s "$LOCK_WAIT_READ" "đọc nặng: container phải đứng yên" ;;
+              DOC_PROBE)
+                xin_khoa 8 "$KHOA_DOC_PROBE" -x "$LOCK_WAIT_READ" "dò API ngoài: một lượt tại một thời điểm"
+                xin_khoa 9 "$KHOA_VONG_DOI" -s "$LOCK_WAIT_READ" "dò API ngoài: container phải đứng yên" ;;
+              DOC_NHE)
+                # Đọc nhẹ KHÔNG có trần số lượng (khoá chia sẻ cho nhiều lượt cùng lúc) nhưng VẪN
+                # cầm khoá vòng đời: đó chính là thứ chặn lỗi A — `docker exec erp-app` giữa lúc
+                # deploy dựng lại container.
+                xin_khoa 9 "$KHOA_VONG_DOI" -s "$LOCK_WAIT_READ" "đọc nhẹ: container phải đứng yên" ;;
+            esac
+
             case "$ACTION" in
               status)
                 $C ps

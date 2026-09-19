@@ -112,12 +112,16 @@ jobs:
     needs: [gates, build_image]
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    concurrency:
-      # DÙNG CHUNG với các thao tác GHI của `ops-vps.yml`: deploy và một lệnh nhập bảng kê không
-      # bao giờ chạy đè lên nhau. Đổi tên nhóm ở một trong hai tệp là gỡ bỏ sự bảo đảm đó mà
-      # không ai nhận ra — `tests/ops-concurrency.test.ts` chặn ở mức mã nguồn.
-      group: vps-mutating
-      cancel-in-progress: false
+    # KHÔNG có `concurrency` ở đây nữa. PR #15 dùng nhóm `vps-mutating` của GitHub làm hàng đợi,
+    # và production đã chứng minh nhóm ấy KHÔNG phải hàng đợi: nó giữ tối đa một lượt đang chạy +
+    # MỘT lượt đang chờ, lượt thứ ba tới sẽ HUỶ lượt đang chờ (đo thật: lượt ops 1395 và 1416).
+    # Một lượt deploy bị huỷ trong lúc xếp hàng là một bản sửa im lặng không bao giờ tới máy chủ.
+    #
+    # Nay hàng đợi là `flock` trên chính VPS (xem đầu `ops-vps.yml`): job LUÔN được khởi động, và
+    # bước SSH dưới đây cầm khoá ĐỘC QUYỀN `/var/lock/erp-lifecycle.lock` suốt thời gian chạm máy
+    # chủ. Cùng ổ khoá mà mọi thao tác GHI của `ops-vps.yml` dùng, nên deploy và một lệnh nhập
+    # bảng kê vẫn KHÔNG BAO GIỜ chạy đè lên nhau — chỉ khác là bên thua giờ XẾP HÀNG thật thay vì
+    # bị huỷ.
     steps:
       # ═══ RELEASE PHẢI TRIỂN KHAI ĐÚNG BẢN ĐÃ QUA CỔNG — ĐO, KHÔNG HỨA ═══
       #
@@ -169,6 +173,11 @@ jobs:
         uses: appleboy/ssh-action@v1
         env:
           ERP_BRANCH: ${{ github.ref_name }}
+          # Danh tính lượt chạy + trần chờ khoá vòng đời, đi vào nhật ký khoá trên máy chủ.
+          # 1200s (20 phút): cộng với ~9 phút bootstrap vẫn nằm gọn trong `timeout-minutes: 40`
+          # của job và `command_timeout: 35m` của bước SSH — hết giờ thì deploy ĐỎ, không treo.
+          RUN_ID: ${{ github.run_id }}
+          LOCK_WAIT_WRITE: "1200"
           # SHA đã qua typecheck/lint/test/build ở trên. VPS phải triển khai ĐÚNG commit này.
           ERP_DEPLOY_SHA: ${{ github.sha }}
           ERP_DOMAIN: ${{ vars.ERP_DOMAIN || 'erp.vnxcommerce.com' }}
@@ -211,10 +220,33 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 35m
-          envs: ERP_BRANCH,ERP_DEPLOY_SHA,ERP_DOMAIN,ERP_NONINTERACTIVE,ERP_RESET_ENV,PANCAKE_API_KEY,PANCAKE_SHOP_ID,VIETTELPOST_API_KEY,VIETTELPOST_USERNAME,VIETTELPOST_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID,PANCAKE_ACCESS_TOKEN,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,ERP_IMAGE,GHCR_USER,GHCR_TOKEN
+          envs: ERP_BRANCH,RUN_ID,LOCK_WAIT_WRITE,ERP_DEPLOY_SHA,ERP_DOMAIN,ERP_NONINTERACTIVE,ERP_RESET_ENV,PANCAKE_API_KEY,PANCAKE_SHOP_ID,VIETTELPOST_API_KEY,VIETTELPOST_USERNAME,VIETTELPOST_PASSWORD,ADMIN_EMAIL,ADMIN_PASSWORD,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID,PANCAKE_ACCESS_TOKEN,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,ERP_IMAGE,GHCR_USER,GHCR_TOKEN
           script: |
             set -e
             export ERP_BRANCH ERP_DEPLOY_SHA ERP_DOMAIN ERP_NONINTERACTIVE ERP_RESET_ENV PANCAKE_API_KEY PANCAKE_SHOP_ID VIETTELPOST_API_KEY VIETTELPOST_USERNAME VIETTELPOST_PASSWORD ADMIN_EMAIL ADMIN_PASSWORD FACEBOOK_ACCESS_TOKEN FACEBOOK_BUSINESS_ID PANCAKE_ACCESS_TOKEN OPENAI_API_KEY ANTHROPIC_API_KEY AI_PROVIDER SEPAY_WEBHOOK_SECRET SEPAY_WEBHOOK_API_KEY SEPAY_API_TOKEN ERP_GITHUB_TOKEN ERP_GITHUB_REPO ERP_GITHUB_DEPLOY_WORKFLOW ERP_IMAGE GHCR_USER GHCR_TOKEN
+            # ═══ KHOÁ VÒNG ĐỜI — ĐỘC QUYỀN, TRƯỚC KHI CHẠM BẤT CỨ THỨ GÌ ═══
+            #
+            # Cùng ổ khoá với mọi thao tác GHI của `ops-vps.yml`. Nó giải quyết hai việc:
+            #
+            #   · deploy không bao giờ chạy đè một lệnh ghi (như nhóm concurrency cũ đã làm), VÀ
+            #   · deploy CHỜ các lượt ĐỌC đang chạy kết thúc rồi mới dựng lại container — đúng lỗi
+            #     đã giết lượt `explain-stock` 1406 trên production ngày 19/09/2026.
+            #
+            # Khoá gắn vào FD 9 của shell này ⇒ SSH đứt là nhân tự nhả. Hết giờ chờ thì deploy ĐỎ
+            # và KHÔNG chạy: một bản deploy chạy song song với lệnh ghi khác là thứ phải chặn.
+            mkdir -p /var/lock
+            KHOA_VONG_DOI=/var/lock/erp-lifecycle.lock
+            _t0=$(date +%s)
+            echo "[khoá] xin ĐỘC QUYỀN $KHOA_VONG_DOI — run=$RUN_ID deploy=$ERP_DEPLOY_SHA lúc $(date -u +%FT%TZ), trần ${LOCK_WAIT_WRITE}s"
+            exec 9>"$KHOA_VONG_DOI"
+            if flock -x -w "$LOCK_WAIT_WRITE" 9; then
+              echo "[khoá] ĐÃ LẤY ĐƯỢC lúc $(date -u +%FT%TZ) — chờ $(( $(date +%s) - _t0 ))s"
+            else
+              echo "::error::[khoá] HẾT GIỜ CHỜ sau $(( $(date +%s) - _t0 ))s (trần ${LOCK_WAIT_WRITE}s) — DEPLOY DỪNG, chưa chạm máy chủ."
+              echo "Có thao tác ghi hoặc một lượt deploy khác đang giữ khoá. Xem: Actions → Vận hành ERP trên VPS → action = status"
+              exit 75
+            fi
+
             if [ "$ERP_RESET_ENV" = "1" ] && [ -f /root/erp/.env ]; then mv /root/erp/.env "/root/erp/.env.bak-$(date +%s)"; fi
             # Lấy chính bản bootstrap của commit đang triển khai. Lấy theo tên nhánh thì kịch bản
             # cài đặt có thể đến từ một commit khác với mã nguồn — đúng lỗi mà bước này phải chặn.

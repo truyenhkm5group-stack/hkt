@@ -2,6 +2,10 @@
 
 *19/09/2026. Đi kèm `.github/workflows/*` và `tests/ops-concurrency.test.ts`.*
 
+> **Bản này gồm hai đợt.** Đợt 1 (PR #15) tách khoá theo tác động và đã đo được trên
+> production. Đợt 2 chuyển hàng đợi xuống `flock` trên VPS để vá hai lỗi mà đợt 1 làm lộ ra
+> — xem mục 2.
+
 ## 0 · Vấn đề đo được
 
 Tới trước bản này, `deploy-vps.yml` và `ops-vps.yml` cùng khai **một** nhóm khoá ở **mức
@@ -66,41 +70,83 @@ mọi phiên chờ nhau để hỏi một câu không đổi một byte nào.
   đuôi, và `release` không còn `npm ci` thừa. Đường tới production còn ≈ **13m45s** thay vì
   17m08s — **nhanh hơn ~3m20s, khoảng 20%** — mà không bỏ một cổng nào.
 
-## 2 · Bốn nhóm khoá, và luật của từng nhóm
+## 2 · Hàng đợi nằm trên máy chủ, không nằm ở GitHub
 
-| Nhóm | Ai dùng | Song song? | Huỷ lượt cũ? |
-| --- | --- | --- | --- |
-| `ci-<sự kiện>-<ref>` | `ci.yml` | mỗi nhánh một làn | chỉ trên pull request |
-| `vps-readonly-shell-<mã lượt chạy>` | `status` · `perf` · `disk` · `logs` · `db-query` | **không giới hạn** | không |
-| `vps-readonly-probe` | dò API ngoài (VTP · Pancake · Meta) | 1 lượt | không |
-| `vps-readonly-db` | báo cáo nặng · mở màn hình thật · EXPLAIN · mọi thao tác CHẠY THỬ | 1 lượt | không |
-| `vps-mutating` | **mọi thao tác GHI + job `release` của deploy** | 1 lượt | **không bao giờ** |
-| `tech-agent-run` · `tech-cto-plan` | `agent-run.yml` · `cto-plan.yml` | 1 lượt mỗi loại | không |
+**Bản đầu (PR #15) dùng `concurrency` của GitHub làm hàng đợi. Chạy production nửa tiếng thì lộ ra
+hai lỗi.** Cả hai đều chỉ máy chủ thật mới nói được.
 
-`agent-run.yml` và `cto-plan.yml` **không đổi**: chúng chạy trên máy của GitHub, không SSH vào
-production, và nhóm khoá của chúng bảo vệ một tài nguyên thật (bằng chứng của lượt chạy, hạn mức
-khoá AI) chứ không phải VPS. Chúng chưa bao giờ nằm trong nút thắt này.
+### Lỗi A — lượt đọc bị deploy giết giữa chừng
 
-### Vì sao hai làn đọc nặng vẫn có hạn mức 1 lượt
+| Mốc | Sự việc |
+| --- | --- |
+| 13:41:25 | `explain-stock` (lượt ops 1406) khởi động |
+| 13:41:29 | job `release` của deploy #354 bắt đầu |
+| 13:44:11 | lượt đọc chết: `container ... is not running` |
 
-VPS chỉ ~1,9 GB và **đang phục vụ người dùng thật**. Mỗi `docker exec erp-app npx tsx` là một
-tiến trình Node vài trăm MB. **"Chỉ đọc" nói về DỮ LIỆU, không nói về BỘ NHỚ** — thả tự do mười
-lượt đọc song song là tự gây ra đúng sự cố mình định đi đo. Hai làn tách riêng vì chúng tranh hai
-tài nguyên khác nhau: `probe` chờ mạng ra ngoài, `db` ăn CPU/RAM/CSDL. Làn `shell` không có hạn
-mức vì nó **không dựng tiến trình nào trong container** — nó chỉ hỏi Docker và chạy `psql` ở chế
-độ chỉ đọc; bài kiểm chặn việc ai đó lén thêm `npx tsx` vào một thao tác của làn này.
+Nhóm concurrency cho hai bên chạy song song — đó đúng là điều PR #15 muốn — nhưng **không có gì
+nói cho lượt đọc biết container dưới chân nó sắp bị dựng lại.**
 
-## 3 · Ba luật khoá chặt bảng phân loại
+### Lỗi B — `concurrency` của GitHub KHÔNG phải một hàng đợi
 
-1. **MẶC ĐỊNH LÀ GHI.** Nhánh cuối của biểu thức là `vps-mutating`. Thêm một thao tác mới vào
-   `options` mà quên phân loại ⇒ nó rơi vào làn **an toàn nhất**, không phải một làn đọc.
-   (`AGENTS.md` mục 31: mọi nhánh lỗi rơi về phía HẸP HƠN.)
-2. **`--apply` / `--write` / `--fix` đè lên tất cả.** Hơn một nửa thao tác "chỉ đọc" ở đây là
-   CHẠY THỬ theo mặc định và GHI THẬT khi có cờ. Phân loại theo TÊN thao tác thôi là sai ngay lần
-   đầu ai đó gõ `--apply`.
-3. **Ghi một dòng vẫn là ghi.** `vtp-import-preview` chỉ đọc `shipments` nhưng vẫn tạo một dòng
-   `vtp_import_batches` (mục 49); `sepay-verify` phát lại một gói tin thật. Cả hai ở
-   `vps-mutating` — không có hạng "ghi một chút".
+Một nhóm giữ tối đa **một lượt đang chạy + MỘT lượt đang chờ**. Lượt thứ ba tới **huỷ lượt đang
+chờ**. Đo thật: lượt 1395 và 1416 bị huỷ đúng như vậy.
+
+Với một nhóm GHI, điều đó nghĩa là **một lệnh ghi đã gửi đi có thể biến mất thay vì chờ tới
+lượt** — im lặng, và người gửi chỉ thấy chữ "cancelled". *(Đừng viết trong tài liệu rằng nó là
+FIFO. Nó không phải.)*
+
+### Bản vá: ba ổ khoá `flock` trên VPS
+
+GitHub nay chỉ làm MỘT việc: cho job **khởi động**. Việc chờ tài nguyên do `flock` quyết — và
+`flock` là hàng đợi thật của nhân Linux, không ai bị đá ra vì có người tới sau.
+
+| Ổ khoá | Ai lấy | Chế độ |
+| --- | --- | --- |
+| `/var/lock/erp-lifecycle.lock` | deploy `release` · mọi thao tác GHI | **ĐỘC QUYỀN** |
+| | mọi thao tác đọc cần container đứng yên | **CHIA SẺ** |
+| `/var/lock/erp-readonly-db.lock` | đọc nặng (báo cáo · EXPLAIN · màn hình thật · chạy thử) | ĐỘC QUYỀN |
+| `/var/lock/erp-readonly-probe.lock` | dò API ngoài (VTP · Pancake · Meta) | ĐỘC QUYỀN |
+
+Khoá gắn vào một **file descriptor** của shell, nên SSH đứt hay tiến trình chết là nhân **tự
+nhả**. Không tự chế khoá bằng "tạo tệp rồi xoá tệp": kiểu đó để lại khoá ma vĩnh viễn mỗi lần một
+lượt chạy bị huỷ giữa chừng — mà ở đây lượt chạy bị huỷ thật.
+
+### Thứ tự lấy khoá là cố định — và đó là cả phần chứng minh không bế tắc
+
+```
+(1) khoá tài nguyên (db / probe, ĐỘC QUYỀN)   →   (2) khoá vòng đời (CHIA SẺ)
+```
+
+Thao tác GHI chỉ lấy (2) ĐỘC QUYỀN và **không bao giờ đụng (1)**. Không đường nào lấy (2) rồi mới
+xin (1), nên đồ thị chờ không có chu trình.
+
+Thứ tự này còn quan trọng vì lý do thứ hai: một lượt đọc nặng **đang xếp hàng ở (1) thì chưa cầm
+(2)**, nên nó không vô tình chặn deploy trong lúc chính nó đang chờ.
+
+### Hết giờ thì dừng hẳn và nói ra
+
+Trần chờ hữu hạn: đọc 900s, ghi 1800s (ops), release 1200s — trần của release nhỏ hơn
+`command_timeout` và `timeout-minutes` của job, nên hết giờ là **đỏ với một lời báo đọc được**,
+không phải bị cắt ngang ở một chỗ tuỳ tiện. Không có nhánh nào "chờ không được thì thôi chạy
+luôn": chạy một lệnh ghi song song với deploy đúng là thứ cả bản này sinh ra để chặn.
+
+Mỗi lượt lấy khoá ghi nhật ký: mã lượt chạy · tên thao tác · lúc bắt đầu chờ · lúc lấy được · số
+giây đã chờ.
+
+### Cái gì còn giữ `concurrency` của GitHub, và vì sao nó vô hại
+
+Chỉ `ci.yml`. Nhóm của nó chỉ chứa lượt chạy **đọc mã nguồn trên máy của GitHub** — nó không SSH
+đi đâu cả, nên huỷ một lượt CI của commit đã bị thay thế không đánh mất thao tác VPS nào. Bài kiểm
+khoá luôn điều đó: `ci.yml` không được chứa `appleboy/ssh-action`.
+
+### Điều bản này KHÔNG phủ
+
+Bộ lập lịch chạy **trong** container tự nó ghi CSDL và không đi qua ổ khoá nào. Ổ khoá này điều
+phối các thao tác đi **từ GitHub** xuống, không phải mọi thứ chạm CSDL.
+
+`flock` của Linux cũng **không hứa công bằng**: về lý thuyết một dòng lượt đọc nhẹ liên tục có thể
+làm một lượt xin ĐỘC QUYỀN đói. Trần chờ hữu hạn biến tình huống đó thành một lượt deploy ĐỎ có
+thông báo rõ, thay vì một lượt treo vô hạn.
 
 ## 4 · Thao tác `verify` — một lượt thay cho năm
 
@@ -129,14 +175,23 @@ bao giờ được triển khai**.
 
 ## 6 · Bài kiểm chặn ở mức mã nguồn
 
-`tests/ops-concurrency.test.ts` chạy trong `npm test`, tức là trong cổng của mọi PR và của deploy:
+`tests/ops-concurrency.test.ts` chạy trong `npm test`, tức là trong cổng của mọi PR và của deploy.
+`tsc` và `eslint` không đọc YAML lẫn shell, và một lỗi khoá không hiện ra ở đâu cả cho tới khi hai
+lượt chạy thật gặp nhau trên máy chủ — lúc ấy triệu chứng là "container biến mất giữa một phép
+đo".
 
-- nhóm khoá gộp-tất-cả ngày xưa không quay lại được, và deploy/ops không được khoá ở mức workflow;
-- ba làn đọc không giao nhau, chỉ chứa thao tác có thật trong `options`;
-- 24 thao tác GHI (danh sách viết tay, độc lập với YAML) không bao giờ lọt vào làn đọc;
-- mặc định là GHI, và cờ `--apply/--write/--fix` đứng TRƯỚC mọi phân loại theo tên;
-- `gates` / `build_image` không giữ khoá, `release` giữ và không cắt ngang, `release` cần cả hai;
-- tên check bắt buộc `gates / gates` còn nguyên (đổi tên job là gỡ khoá `main` mà không ai thấy);
-- khối `verify` được **trích ra và CHẠY THẬT** dưới `bash -e` với `docker` giả: xanh khi máy khoẻ
-  (kể cả ca "không có lỗi nào để in" — đúng bẫy đã giết deploy #244), đỏ ở năm kiểu hỏng, và che
-  secret trước khi in.
+Nên bài kiểm **trích khối khoá ra và CHẠY THẬT với `flock` thật**, không mô phỏng bằng lời:
+
+- hai lượt đọc nặng **nối tiếp**, lượt sau ghi nhận số giây đã chờ > 0;
+- hai lượt đọc nhẹ **chồng nhau** trong vùng tới hạn (khoá chia sẻ còn nguyên tác dụng);
+- một lượt GHI **chờ** lượt đọc nhả khoá rồi mới vào — **bản vá cho lỗi A**;
+- **ba lệnh ghi liên tiếp: không lệnh nào biến mất**, vùng tới hạn của chúng không chồng nhau, và
+  ít nhất hai lệnh thật sự đứng chờ — **bản vá cho lỗi B**;
+- hết giờ ⇒ thoát **75**, in `::error::`, và **không chạy thao tác**;
+- ba lượt cùng lúc ở cả hai ổ khoá đều kết thúc — **không bế tắc**.
+
+Phần đọc mã nguồn khoá thêm: không workflow nào dùng `concurrency` làm hàng đợi VPS · `ops` và
+`release` không có khối `concurrency` · thứ tự FD 8 → FD 9 cố định ở mọi nhánh đọc và nhánh GHI
+không đụng FD 8 · khoá gắn vào FD chứ không phải tệp tồn tại/bị xoá · trần chờ của release nhỏ hơn
+giới hạn của bước SSH và của job · `--apply`/`--write`/`--fix` vẫn ép sang GHI · mặc định vẫn là
+GHI · 24 thao tác ghi không lọt vào làn đọc · tên check bắt buộc `gates / gates` còn nguyên.
