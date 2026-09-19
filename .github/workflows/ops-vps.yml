@@ -92,6 +92,7 @@ on:
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
           - ai-staging-report     # CHỈ ĐỌC: báo cáo chất lượng lượt nạp (12 khối) — chạy lại được bất cứ lúc nào
           - ai-staging-runtime    # CHỈ ĐỌC: nấc quyền hạn CÓ HIỆU LỰC + ba công tắc + page thí điểm + mốc đọc + bằng chứng an toàn
+          - ai-staging-audit      # CHỈ ĐỌC: soi lại lưới an toàn + mất trạng thái trên CÂU ĐÃ LƯU (arg: "--days=7")
           - ai-staging-status     # trạng thái bản chạy thử + RAM/swap + sức khoẻ production
           - ai-staging-logs       # 120 dòng log gần nhất của app bản chạy thử
           - ai-staging-down       # dừng bản chạy thử (arg "--volumes" để xoá cả CSDL của nó)
@@ -1232,6 +1233,15 @@ jobs:
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
                   "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/ai-staging-report.sql?ref=${STAGING_BRANCH}" \
                   | docker exec -i vnx-ai-staging-db psql -U erp -d erp -P pager=off -f - ;;
+
+              ai-staging-audit)
+                cd /opt/vnx-ai-staging
+                # CHỈ ĐỌC. Soi lại trên câu ĐÃ LƯU, dùng ĐÚNG hàm `safetyFlags()` của đường chạy
+                # thật — vì lưới soi lúc soạn chỉ chạy cho câu DO MÔ HÌNH viết, câu dựng từ mẫu đi
+                # thẳng ra ngoài không qua lưới nào.
+                fetch_staging_script ai-staging-quality-audit.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-quality-audit.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging \
+                  exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-staging-quality-audit.ts ${ARG:---days=7} ;;
 
               ai-staging-runtime)
                 cd /opt/vnx-ai-staging
