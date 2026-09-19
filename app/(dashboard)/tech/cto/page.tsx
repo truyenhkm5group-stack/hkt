@@ -48,6 +48,25 @@ function ThePhieu({ p, canManage }: { p: ProposalRow; canManage: boolean }) {
           </div>
         ) : null}
 
+        {/*
+          MỘT LƯỢT SỬA LÀ THÔNG TIN, KHÔNG PHẢI THỨ ĐỂ GIẤU.
+
+          Bản kế hoạch phải sửa mới đạt vẫn là bản đạt — nhưng người đọc có quyền biết nó đã
+          không đạt ở lượt đầu vì cái gì. Giấu đi thì "AI CTO luôn trả đúng" trở thành một niềm
+          tin không ai kiểm được, và lần hợp đồng đổi thì không ai biết tỷ lệ sửa đang tăng.
+        */}
+        {p.repairOutcome !== "NONE" ? (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+            <p className="font-semibold">
+              {p.repairOutcome === "PASS" ? "Đạt sau MỘT lượt sửa" : "Sửa một lượt vẫn không đạt"}
+            </p>
+            <p className="mt-1 break-words text-muted-foreground">Lượt đầu sai: {p.initialError || "—"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {p.modelCalls} lượt gọi model. Trần là hai — không có lượt sửa thứ hai.
+            </p>
+          </div>
+        ) : null}
+
         {p.summary ? <p className="text-sm">{p.summary}</p> : null}
 
         {p.assumptions.length ? (
