@@ -73,6 +73,7 @@ on:
           - ai-staging-app        # kéo ảnh mới rồi dựng lại DUY NHẤT container ứng dụng (không đụng bộ nạp, không đụng CSDL)
           - ai-staging-creds      # ghi PANCAKE_ACCESS_TOKEN (từ Secrets) + PANCAKE_PAGE_ID (arg) vào .env.staging
           - ai-staging-read-test  # CHỈ GỌI GET: page có đọc được không, tên page, hội thoại, tin nhắn
+          - ai-staging-paging     # CHỈ GỌI GET: Pancake phân trang bằng tham số nào (dò 6 tên + cắt cửa sổ thời gian)
           - ai-staging-signal-audit # CHỈ GỌI GET: Pancake THẬT SỰ trả về những trường nào (để dựng Product Resolver)
           - ai-staging-sql       # CHỈ ĐỌC: chạy một tệp SQL trong kho mã (arg = tên tệp ai-staging-*.sql)
           - ai-staging-resolver  # đo phép nhận diện sản phẩm trên dữ liệu đã nạp (arg: "--page=<id> --backfill")
@@ -719,6 +720,17 @@ jobs:
                 docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
                 sleep 15
                 curl -fsS -m 10 http://127.0.0.1:3100/api/health && echo || echo "  ✗ bản chạy thử chưa trả lời" ;;
+
+              ai-staging-paging)
+                cd /opt/vnx-ai-staging
+                # Cùng khuôn với `ai-staging-read-test`: đẩy script vào container thay vì dựng lại
+                # ảnh. Script dò đổi nhanh hơn ảnh nhiều, và tám phút dựng ảnh cho một phép đo hai
+                # phút là đổi sai hướng.
+                fetch_staging_script pancake-pagination-probe.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/pancake-pagination-probe.ts'
+                # CHỈ GỌI GET. Script tự gọi fetch thay vì dùng client, vì client sẽ POST sinh page
+                # token khi chưa có — một phép đo "chỉ đọc" mà tự sinh chứng thư thì không còn là
+                # phép đo chỉ đọc.
+                docker exec vnx-ai-staging-app npx tsx --tsconfig tsconfig.json scripts/pancake-pagination-probe.ts ${ARG:-} ;;
 
               ai-staging-read-test)
                 cd /opt/vnx-ai-staging
