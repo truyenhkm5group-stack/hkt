@@ -151,8 +151,15 @@ export async function testDataTruth(db: Db) {
 
   /*
     ─── VÀ BỘ ĐỐI CHIẾU KHÔNG ĐƯỢC CHÉP LẠI LUẬT LẦN NỮA ───
+
     Phần trên chứng minh bản chép tay sai; phần này chặn nó quay lại. Quét mã nguồn, vì một bài kiểm
     dữ liệu không thấy được việc ai đó gõ lại danh sách stage vào script.
+
+    KHOÁ HẰNG SỐ, KHÔNG KHOÁ MỘT HÀM CỤ THỂ. Bài kiểm này chỉ đòi bộ đối chiếu đọc `CONFIRMED_STAGES`
+    — nó KHÔNG đòi đi qua `metricScope`. Khác biệt ấy có chủ ý: một công cụ đối chiếu phải độc lập
+    về ĐƯỜNG ĐI (đọc thẳng bảng, không qua ORM, không qua bảng dẫn xuất) nhưng dùng CÙNG ĐỊNH NGHĨA.
+    Bắt nó gọi `metricScope` là bắt nó đi chung đường với báo cáo — và từ đó nó không còn bắt được
+    một lỗi nằm TRONG `metricScope` nữa.
   */
   const src = await import("node:fs").then((fs) => fs.readFileSync("scripts/marketing-calibrate.ts", "utf8"));
   /*
@@ -167,8 +174,8 @@ export async function testDataTruth(db: Db) {
     "marketing-calibrate không được gõ lại population bằng danh sách loại trừ — dùng `metricScope(period,'confirmed')`",
   );
   assert.ok(
-    khongChuThich.includes('metricScope(period, "confirmed")'),
-    "…và phải đọc population từ nguồn canonical",
+    /CONFIRMED_STAGES/.test(khongChuThich),
+    "…và phải đọc population từ hằng số canonical `CONFIRMED_STAGES`",
   );
 
   /*

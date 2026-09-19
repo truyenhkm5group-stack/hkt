@@ -79,14 +79,7 @@ export function hasDimensionFilter(f: MarketingFilters): boolean {
  * `order_attributions` là nơi DUY NHẤT kết luận trùng đơn, kèm điểm chứng cứ và lý do. Viết lại
  * phép xét ở đây là dựng một luật trùng đơn thứ hai, và hai luật thì có ngày chúng bắt khác nhau.
  */
-/**
- * ĐƠN TRÙNG — xuất ra để bộ đối chiếu (`scripts/marketing-calibrate.ts`) dùng LẠI đúng vị ngữ này.
- *
- * Bộ đối chiếu vốn chép tay lại mệnh đề `exists (...)` y hệt. Chép đúng thì vô hại, nhưng nó là
- * một bản sao chờ trôi: ngày luật trùng đơn đổi, bên chép vẫn hỏi câu cũ và "đối chiếu độc lập"
- * lặng lẽ so hai định nghĩa khác nhau. Một nguồn, hai nơi đọc.
- */
-export const IS_DUPLICATE_ORDER = sql`exists (select 1 from ${oa} where ${oa.orderId} = ${o.id} and ${oa.status} = 'DUPLICATE')`;
+const IS_DUPLICATE_ORDER = sql`exists (select 1 from ${oa} where ${oa.orderId} = ${o.id} and ${oa.status} = 'DUPLICATE')`;
 
 /**
  * VỊ NGỮ LỌC THEO CHIỀU — chỉ THU HẸP, không bao giờ mở rộng.
