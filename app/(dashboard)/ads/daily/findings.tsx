@@ -1,9 +1,11 @@
+import { Suspense } from "react";
 import { CircleAlert, CircleCheck, Sparkles, Target, TriangleAlert } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SectionCard } from "@/components/ui-bits";
 import { MARKETING_DIAGNOSIS } from "@/lib/constants/marketing-diagnosis";
 import { MARKETING_BASIS_LABEL } from "@/lib/constants/marketing-daily";
 import { CELL_STATUS_LABEL } from "@/lib/metrics/scorecard";
-import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
+import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot, type MarketingFinding } from "@/lib/marketing/diagnose";
 import { explainMarketing } from "@/lib/marketing/ai-explain";
 import { evaluateMarketingTargets } from "@/lib/queries/marketing-targets";
 import { MISSING_TEXT } from "@/lib/format";
@@ -60,18 +62,7 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
     Chưa cấu hình AI ⇒ khối diễn giải không hiện, và lý do vẫn in ra để không ai tưởng nó im lặng
     vì "mọi thứ đều ổn".
   */
-  const [targets, ai] = await Promise.all([
-    evaluateMarketingTargets(data.totals, data.period, data.previousTotals),
-    explainMarketing({
-      scopeLabel: "Toàn shop",
-      periodLabel: data.period.label,
-      basisLabel: MARKETING_BASIS_LABEL[data.basis],
-      totals: data.totals,
-      baseline,
-      findings,
-      warnings: data.warnings,
-    }),
-  ]);
+  const targets = await evaluateMarketingTargets(data.totals, data.period, data.previousTotals);
 
   return (
     <SectionCard
@@ -136,18 +127,49 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
         </p>
       )}
 
-      {ai.explanation ? (
-        <div className="mt-4 rounded-lg border border-dashed p-3">
-          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
-            <Sparkles className="size-3.5" /> Diễn giải
-            {/* Nói rõ AI chỉ DIỄN GIẢI: mọi con số phía trên do máy chủ tính, không phải do mô hình. */}
-            <span className="font-normal text-muted-foreground">— viết bởi AI từ chính các con số trên, không tự tính thêm số nào</span>
-          </p>
-          <p className="whitespace-pre-line text-xs">{ai.explanation.text}</p>
-        </div>
-      ) : ai.skipped && findings.length ? (
-        <p className="mt-4 text-xs text-muted-foreground">Phần diễn giải bằng AI không chạy: {ai.skipped}.</p>
-      ) : null}
+      {/*
+        DIỄN GIẢI BẰNG AI NẰM SAU RANH GIỚI `Suspense` RIÊNG — và đó là một bản vá cho lỗi của chính
+        khối này.
+
+        ĐO TRÊN PRODUCTION 19/09/2026: `/ads/daily` mất 4,7 giây ở lượt đo đầu rồi 20,3 giây ở lượt
+        sau, KHÔNG có thay đổi nào ở tầng truy vấn giữa hai lượt. Nguyên nhân: lượt đầu máy phân
+        tích không tìm thấy bất thường nào nên `explainMarketing` trả về ngay; lượt sau có phát
+        hiện, và lời gọi mô hình (bậc `analysis`) chạy NGAY TRONG lượt dựng trang.
+
+        Một trang chủ shop mở hằng ngày không được phép chờ một nhà cung cấp bên ngoài. Bảng số,
+        chẩn đoán và đích là dữ liệu của chính ERP — chúng phải hiện ngay; đoạn văn diễn giải điền
+        vào sau. Nếu mô hình chậm hay chết thì phần còn lại của trang không hề biết.
+      */}
+      <Suspense fallback={<Skeleton className="mt-4 h-16 rounded-lg" />}>
+        <AiExplanation data={data} baseline={baseline} findings={findings} />
+      </Suspense>
     </SectionCard>
   );
+}
+
+async function AiExplanation({ data, baseline, findings }: { data: MarketingDaily; baseline: DiagnoseSnapshot | null; findings: MarketingFinding[] }) {
+  if (!findings.length) return null;
+  const ai = await explainMarketing({
+    scopeLabel: "Toàn shop",
+    periodLabel: data.period.label,
+    basisLabel: MARKETING_BASIS_LABEL[data.basis],
+    totals: data.totals,
+    baseline,
+    findings,
+    warnings: data.warnings,
+  });
+  if (ai.explanation) {
+    return (
+      <div className="mt-4 rounded-lg border border-dashed p-3">
+        <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
+          <Sparkles className="size-3.5" /> Diễn giải
+          {/* Nói rõ AI chỉ DIỄN GIẢI: mọi con số phía trên do máy chủ tính, không phải do mô hình. */}
+          <span className="font-normal text-muted-foreground">— viết bởi AI từ chính các con số trên, không tự tính thêm số nào</span>
+        </p>
+        <p className="whitespace-pre-line text-xs">{ai.explanation.text}</p>
+      </div>
+    );
+  }
+  // Nói ra lý do thay vì im lặng: im lặng sẽ bị đọc thành "không có gì để nói".
+  return <p className="mt-4 text-xs text-muted-foreground">Phần diễn giải bằng AI không chạy: {ai.skipped}.</p>;
 }
