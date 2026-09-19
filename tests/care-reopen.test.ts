@@ -5,7 +5,9 @@ import { clearMemo } from "@/lib/cache";
 import { afterShipmentStateChange, applyCarrierEventToCare, reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { setCareStatus, type CareActor } from "@/lib/care/service";
 import { canOpenNewEpisode, chuaAiXuLyXongSql } from "@/lib/care/reopen-guard";
-import { classifyReopen, REOPEN_CLASS_COUNTS_AS_CASE, REOPEN_GUARD_LIVE_AT } from "@/lib/constants/care-reopen-class";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { classifyReopen, isFalseReopenAfterFix, REOPEN_CLASS_COUNTS_AS_CASE, REOPEN_GUARD_LIVE_AT } from "@/lib/constants/care-reopen-class";
 import { getCareAudit } from "@/lib/queries/care-case-audit";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -244,6 +246,56 @@ export async function testCareReopen(db: Db) {
   assert.equal(REOPEN_CLASS_COUNTS_AS_CASE.FALSE_REOPEN_LEGACY, false, "bản sao KHÔNG vào mẫu số của bất kỳ con số nào");
   assert.equal(REOPEN_CLASS_COUNTS_AS_CASE.REOPEN_UNVERIFIED, true, "chưa rõ thì VẪN đếm — loại bỏ một ca vì không chắc là giấu việc");
 
+  /* ═════════ 10b · BIÊN CỦA "LỖI CÒN ĐANG XẢY RA" — BA MỐC TỰ DỰNG, KHÔNG ĐỌC ĐỒNG HỒ ═════════
+     Cả khối này KHÔNG gọi `Date.now()` một lần nào. Mốc luật chạy do chính bài kiểm đặt ra, nên nó
+     trả lời cùng một điều vào bất kỳ ngày nào trong lịch — đúng yêu cầu của AGENTS.md mục 50. */
+  const MOC_THU = new Date("2020-01-01T00:00:00.000Z");
+  const truocMoc = new Date(MOC_THU.getTime() - 1);
+  const sauMoc = new Date(MOC_THU.getTime() + 1);
+  assert.equal(isFalseReopenAfterFix({ reopenClass: "FALSE_REOPEN_LEGACY", openedAt: truocMoc }, MOC_THU), false, "bản sao tạo TRƯỚC lúc luật chạy là DI SẢN đã vá — không phải lỗi còn đang xảy ra");
+  assert.equal(isFalseReopenAfterFix({ reopenClass: "FALSE_REOPEN_LEGACY", openedAt: MOC_THU }, MOC_THU), false, "tạo ĐÚNG vào mốc luật chạy: bản vá vừa lên, tính vào đây là đổ cho nó một lỗi nó vừa chặn");
+  assert.equal(isFalseReopenAfterFix({ reopenClass: "FALSE_REOPEN_LEGACY", openedAt: sauMoc }, MOC_THU), true, "tạo SAU mốc ⇒ lỗi MỚI, phải kêu");
+  assert.equal(isFalseReopenAfterFix({ reopenClass: "FALSE_REOPEN_LEGACY", openedAt: null }, MOC_THU), false, "không có mốc ⇒ CHƯA BIẾT, không được đếm là lỗi mới");
+  // Ba lớp kia không bao giờ là "lỗi còn đang xảy ra", kể cả khi mốc mới tinh.
+  for (const lop of ["FIRST_EPISODE", "LEGITIMATE_REOPEN", "REOPEN_UNVERIFIED"] as const) {
+    assert.equal(isFalseReopenAfterFix({ reopenClass: lop, openedAt: sauMoc }, MOC_THU), false, `${lop}: chỉ FALSE_REOPEN_LEGACY mới vào con số lỗi còn đang xảy ra`);
+  }
+
+  /* ═════════ 10c · HẰNG SỐ NGÀY CỐ ĐỊNH TRONG `lib/` PHẢI ĐƯỢC KHAI ═════════
+
+     Quả bom 19/09/2026: `REOPEN_GUARD_LIVE_AT` là một mốc LỊCH đứng yên, còn bài kiểm gieo dữ liệu
+     bằng "20 giờ trước". Cửa sổ trượt quét qua mốc đứng yên ⇒ bài kiểm xanh hôm nay, đỏ ngày mai,
+     và chặn MỌI lần deploy.
+
+     Không có cách nào dò ra cái bẫy ấy bằng cú pháp. Nhưng dò được CÁI NGÒI của nó: một hằng số
+     ngày tuyệt đối trong `lib/`. Mỗi hằng số như vậy phải nằm trong danh sách dưới đây, và người
+     thêm nó phải đọc tới dòng này — lúc đó họ sẽ thấy câu hỏi "bài kiểm của anh gieo dữ liệu kiểu
+     gì?" trước khi quả bom thứ hai được lắp. */
+  const MOC_LICH_DA_KHAI: Record<string, string> = {
+    "lib/integrations/facebook/ads-index.ts": "POST_LINK_SHIPPED_AT — ngày cột `post_id` ra đời, dùng để tra lại MỘT LƯỢT những mẩu quảng cáo tra trước đó. Chỉ so với `fetched_at` của chính dòng dữ liệu (mốc thật, không phải mốc gieo tương đối), và lượt tra lại tự dừng vì `fetched_at` được cập nhật — không bài kiểm nào gieo dữ liệu tương đối so với nó.",
+    "lib/constants/care-reopen-class.ts": "REOPEN_GUARD_LIVE_AT — lúc luật mở lại bắt đầu chạy trên production (run #35305088847). Bài kiểm PHẢI dựng mốc từ chính hằng số này hoặc truyền mốc riêng vào `isFalseReopenAfterFix`, KHÔNG gieo dữ liệu bằng 'N giờ trước' rồi so với nó.",
+  };
+  /*
+    QUÉT TRÊN MÃ ĐÃ BỎ CHÚ THÍCH.
+
+    Bản quét đầu tiên dùng `git grep` và lập tức báo nhầm `lib/integrations/bank/sepay.ts` — nơi
+    chuỗi `new Date("2024-07-02 11:08:33")` nằm trong một đoạn giải thích về múi giờ, không phải
+    một hằng số. Một bộ gác kêu nhầm là một bộ gác người ta tắt đi.
+  */
+  const boChuThich = (ma: string) => ma.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const quetThuMuc = (thuMuc: string): string[] =>
+    readdirSync(thuMuc, { withFileTypes: true }).flatMap((m) => {
+      const duongDan = path.join(thuMuc, m.name);
+      if (m.isDirectory()) return quetThuMuc(duongDan);
+      if (!m.name.endsWith(".ts")) return [];
+      return /new Date\("20/.test(boChuThich(readFileSync(duongDan, "utf8"))) ? [path.relative(process.cwd(), duongDan)] : [];
+    });
+  const tepCoMocLich = quetThuMuc(path.join(process.cwd(), "lib")).sort();
+  for (const tep of tepCoMocLich) {
+    assert.ok(MOC_LICH_DA_KHAI[tep], `${tep} có hằng số ngày tuyệt đối chưa khai. Thêm vào MOC_LICH_DA_KHAI kèm lý do, và bảo đảm bài kiểm của nó KHÔNG gieo dữ liệu tương đối so với đồng hồ thật (AGENTS.md mục 50).`);
+  }
+  assert.equal(tepCoMocLich.length, Object.keys(MOC_LICH_DA_KHAI).length, "danh sách khai phải khớp đúng số tệp có mốc lịch — gỡ một hằng số thì gỡ luôn dòng khai của nó");
+
   /* ═════════ 11 · TRUY VẤN KIỂM KÊ CHẠY ĐƯỢC VÀ LOẠI ĐÚNG BẢN SAO ═════════ */
   //
   // `getCareAudit` là nơi duy nhất mọi màn hình care đọc số. Truy vấn của nó phải chạy được THẬT —
@@ -299,8 +351,9 @@ export async function testCareReopen(db: Db) {
   assert.equal(dongG.find((r) => r.careId !== undefined && r.outcome !== undefined && r.reopenClass === "FALSE_REOPEN_LEGACY") !== undefined, true, "bản sao phải được gọi đúng tên");
   assert.ok(kiemKe.reopen.byClass.FALSE_REOPEN_LEGACY >= 1, "bộ đếm theo loại phải thấy nó");
   /*
-    Con số DUY NHẤT nói lỗi có còn đang xảy ra hay không. Bản sao trong bài kiểm mang mốc kích hoạt
-    CŨ (20 giờ trước) nên nó là DI SẢN, không phải lỗi mới — đúng như các đợt thật trên production.
+    Con số DUY NHẤT nói lỗi có còn đang xảy ra hay không — và nó chỉ có nghĩa khi CHIA ĐÔI đúng ở
+    mốc vá. Hai bản sao trong bài đều NEO vào `REOPEN_GUARD_LIVE_AT` (một cái trước một giờ, một
+    cái sau một giờ), nên phán quyết này không đổi dù hôm nay là ngày nào.
   */
   assert.equal(kiemKe.reopen.falseReopenAfterFix, 1, "đúng MỘT bản sao nằm sau mốc vá: cái TRƯỚC mốc không được tính, cái SAU mốc không được bỏ sót — con số này chia đôi ở đó hoặc nó vô nghĩa");
   assert.equal(kiemKe.reopen.guardLiveAt.getTime(), REOPEN_GUARD_LIVE_AT.getTime(), "và màn hình phải nói ra nó đang chia đôi ở mốc nào");

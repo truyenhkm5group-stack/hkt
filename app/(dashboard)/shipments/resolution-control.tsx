@@ -274,7 +274,21 @@ function ResolutionForm({
           <ReasonPicker value={reason} onChange={setReason} />
         </div>
       ) : null}
-      {DECISION_NEEDS_FOLLOW_UP[action] ? <FollowUpPicker value={at} onChange={setAt} /> : null}
+      {DECISION_NEEDS_FOLLOW_UP[action] ? (
+        <>
+          <FollowUpPicker value={at} onChange={setAt} />
+          {/*
+            NÓI TRƯỚC ĐIỀU SẮP XẢY RA, KHÔNG ĐỂ NGƯỜI DÙNG TỰ PHÁT HIỆN.
+
+            "Xử lý sau" đẩy ca sang "Đang chờ kết quả" tới giờ hẹn — đúng vòng đời, nhưng nhìn từ
+            chỗ người trực thì kiện BIẾN MẤT khỏi danh sách họ đang làm. Lần đầu gặp, ai cũng nghĩ
+            mình vừa bấm hỏng. Một dòng chữ ở đây rẻ hơn mọi lời giải thích sau đó.
+          */}
+          <p className="rounded border border-amber-300/60 bg-amber-50/60 px-2 py-1 text-[10.5px] leading-snug text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-200">
+            Ca sẽ tạm rời danh sách <b>Cần care</b> và tự quay lại khi tới giờ hẹn. Tra lại bất cứ lúc nào ở tab <b>Đang chờ kết quả</b>.
+          </p>
+        </>
+      ) : null}
       <NoteBox presets={presets} value={note} onChange={setNote} onSubmit={send} placeholder="Khách nói gì? (Ctrl/⌘ + Enter để lưu)" canEdit={canEdit} onPresetsChange={onPresetsChange} saving={saving} />
       <div className="flex items-center justify-end gap-1">
         {onCancel ? (

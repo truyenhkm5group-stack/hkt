@@ -14,6 +14,7 @@ import { resolveNotification } from "@/lib/actions/alerts";
 import { loadCareWorkspace, recordCareAction, type CareWorkspace } from "@/lib/actions/care";
 import { recordCareDecision, requestCarrierAction, setCareOwner } from "@/lib/actions/care-workbench";
 import { ResolutionBadge, ResolutionControl, type ResolutionExtra } from "@/app/(dashboard)/shipments/resolution-control";
+import type { CareState } from "@/lib/care/contracts";
 import { journeyTone, parseCourier } from "@/lib/care/journey-display";
 import { CARE_STATUS_LABEL, CARE_STATUS_TONE, type CareStatus } from "@/lib/constants/care";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
@@ -119,7 +120,26 @@ export function CareDrawer({
   useEffect(() => setAutoNext(readAutoNext()), []);
 
   const data = ws?.detail ?? null;
-  const hangDoi = queue && queue.some((q) => q.shipmentId === current.shipmentId) ? queue : null;
+  /*
+    ═══ DANH SÁCH ĐI LẦN LƯỢT LÀ MỘT ẢNH CHỤP, KHÔNG PHẢI BỘ LỌC ĐANG SỐNG ═══
+
+    `queue` đến từ `visible` của bảng, và nó CO LẠI sau mỗi lần ghi: kiện vừa xử lý rời bộ lọc hiện
+    tại (vd "Phát tiếp" đẩy ca sang "Đang chờ kết quả"). Nếu điều hướng bám vào mảng sống thì ngay
+    khi người dùng KHÔNG bật tự-chuyển, kiện đang xem biến khỏi `queue`, `hangDoi` thành `null`, và
+    ‹ n/N › cùng hai nút Trước/Tiếp BIẾN MẤT giữa chừng — người trực đang đi dở một danh sách 41
+    kiện thì mất luôn đường đi.
+
+    Nên chụp danh sách MỘT LẦN lúc mở panel. Người trực đi hết đúng cái danh sách họ nhìn thấy lúc
+    bắt đầu; kiện đã xử lý vẫn còn chỗ trong đó (quay lại xem được), và số thứ tự không nhảy dưới
+    tay họ. Điều hướng đi bằng `shipmentId` chứ không bằng chỉ số, nên không có chuyện nhảy nhầm.
+  */
+  const [walk, setWalk] = useState<CareQueueItem[]>([]);
+  useEffect(() => {
+    if (!open) return;
+    setWalk((truoc) => (truoc.length ? truoc : (queue ?? [])));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  const hangDoi = walk.length && walk.some((q) => q.shipmentId === current.shipmentId) ? walk : null;
   const viTri = hangDoi ? hangDoi.findIndex((q) => q.shipmentId === current.shipmentId) : -1;
   const truoc = hangDoi && viTri > 0 ? hangDoi[viTri - 1] : null;
   const tiep = hangDoi && viTri >= 0 && viTri < hangDoi.length - 1 ? hangDoi[viTri + 1] : null;
@@ -193,9 +213,20 @@ export function CareDrawer({
         toast.error(r.error, { duration: 9000 });
         return;
       }
-      toast.success(`${RESOLUTION_LABEL[a]} · ${data?.shipment.tracking ?? ""}`, { description: "Đã ghi kết quả xử lý. KHÔNG gửi lệnh nào sang Viettel Post và KHÔNG đổi trạng thái vận đơn.", duration: 6000 });
-      // Danh sách phía sau đọc lại hàng đợi: dòng ngoài bảng phải đổi theo panel, không đợi F5.
-      router.refresh();
+      /*
+        "Xử lý sau" đẩy ca sang "Đang chờ kết quả" tới giờ hẹn. Đúng vòng đời, nhưng nhìn từ chỗ
+        người trực thì kiện BIẾN MẤT khỏi danh sách — và họ sẽ nghĩ là mình bấm hỏng. Nói ra GIỜ
+        QUAY LẠI, ngay trong câu xác nhận, là cách rẻ nhất để chặn hiểu nhầm đó.
+      */
+      const quayLai = a === "CARE_FOLLOW_UP" && extra.followUpAt ? extra.followUpAt : null;
+      toast.success(`${RESOLUTION_LABEL[a]} · ${data?.shipment.tracking ?? ""}`, {
+        description: quayLai
+          ? `Đã hẹn xử lý lại lúc ${formatDateTime(quayLai)}. Ca tạm rời “Cần care” và tự quay lại đúng giờ đó — không mất đi đâu cả.`
+          : "Đã ghi kết quả xử lý. KHÔNG gửi lệnh nào sang Viettel Post và KHÔNG đổi trạng thái vận đơn.",
+        duration: 7000,
+      });
+      // Dòng ngoài bảng đổi theo panel NGAY, bằng đúng `CareState` máy chủ vừa trả về.
+      phatCapNhat(current.shipmentId, r.data);
       if (autoNext && tiep) {
         chuyen(tiep);
         return;
@@ -210,7 +241,8 @@ export function CareDrawer({
         toast.error(r.error);
         return;
       }
-      router.refresh();
+      const st = r.data.states[current.shipmentId];
+      if (st) phatCapNhat(current.shipmentId, st);
       await naplai();
     });
 
@@ -306,15 +338,27 @@ export function CareDrawer({
     return { ok: e.ok, callsApi: e.callsApi, reason: e.reason };
   };
 
-  /** Gửi một lệnh sang Viettel Post. Tách hẳn khỏi `doResolution` — hai việc, hai đường ghi. */
+  /** Lệnh ĐVVC đang chờ xác nhận. `null` = chưa bấm gì. Xem `doCarrier`. */
+  const [confirmCarrier, setConfirmCarrier] = useState<CarrierActionKey | null>(null);
+
+  /**
+   * Gửi một lệnh sang Viettel Post. Tách hẳn khỏi `doResolution` — hai việc, hai đường ghi.
+   *
+   * CÓ BƯỚC XÁC NHẬN vì đây là hành động có TÁC DỤNG PHỤ THẬT ra ngoài ERP: bưu tá được điều đi
+   * lần nữa, hoặc kiện được duyệt cho quay đầu. Ba nút kết quả care thì không — chúng chỉ ghi vào
+   * sổ của chính shop, nên hỏi lại ở đó là thêm ma sát không đổi lấy gì.
+   */
   const doCarrier = (key: CarrierActionKey) =>
     start(async () => {
+      setConfirmCarrier(null);
       const r = await requestCarrierAction({ shipmentId: current.shipmentId, actionKey: key, note: "" });
       if ("error" in r) {
         toast.error(r.error, { duration: 9000 });
         return;
       }
       (r.data.request.status === "MANUAL_REQUIRED" ? toast.warning : toast.success)(r.data.message, { duration: 9000 });
+      // Lệnh ĐVVC đổi cột "Viettel Post" ngoài bảng — thứ KHÔNG nằm trong `CareState`, nên ở đây
+      // vẫn phải để máy chủ dựng lại. Hiếm hơn nhiều so với ba nút kết quả care.
       router.refresh();
       await naplai();
     });
@@ -503,13 +547,37 @@ export function CareDrawer({
                 </div>
               </div>
 
-              {/* ───── KẾT QUẢ CARE — khối quan trọng nhất, đứng trước mọi thứ phải cuộn ─────
+              {/* ───── KẾT QUẢ CARE — khối quan trọng nhất, DÍNH ở đầu vùng cuộn ─────
+
+                   `sticky top-0`: người trực cuộn xuống đọc hành trình rồi quyết vẫn bấm được ngay,
+                   không phải cuộn ngược lên. Đây là thứ họ bấm vài chục lần một buổi.
+
                    Ba nút này KHÔNG gửi gì sang ĐVVC và KHÔNG bao giờ bị khoá vì lý do ĐVVC.
                    Lệnh gửi ĐVVC nằm ở khối NGAY DƯỚI, tách bạch cả về chỗ đứng lẫn về chữ. */}
-              <div className="rounded-xl border border-primary/30 bg-primary/[0.03] p-3">
+              <div className="sticky top-0 z-10 rounded-xl border border-primary/30 bg-primary/[0.03] p-3 backdrop-blur supports-[backdrop-filter]:bg-background/85">
                 <div className="mb-1.5 flex flex-wrap items-center gap-2">
                   <span className="text-[12px] font-semibold uppercase tracking-wide">Kết quả care</span>
                   <span className="text-[11px] text-muted-foreground">ghi nhận việc người xử lý vừa quyết — KHÔNG gửi lệnh sang Viettel Post, KHÔNG đổi trạng thái vận đơn</span>
+                </div>
+                {/*
+                  HAI CHIỀU IN CẠNH NHAU, LUÔN LUÔN.
+
+                  "Kết quả care: Đã hoàn" và "VTP báo: Đang chuyển hoàn" được phép cùng đúng một
+                  lúc, và màn hình phải nói ra điều đó thay vì để người đọc tự suy. Nhãn "VTP báo"
+                  KHÔNG BAO GIỜ đổi theo quyết định care.
+                */}
+                <div
+                  className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-card px-2.5 py-1.5 text-[11.5px]"
+                  title="Kết quả care là QUYẾT ĐỊNH XỬ LÝ NỘI BỘ của shop. Trạng thái vận chuyển thực tế lấy từ Viettel Post và chỉ Viettel Post đổi được."
+                >
+                  <span>
+                    <span className="text-muted-foreground">Kết quả care: </span>
+                    <ResolutionBadge value={resolution} at={data.care.lastDecision?.at ?? null} by={data.care.lastDecision?.by} />
+                  </span>
+                  <span>
+                    <span className="text-muted-foreground">VTP báo: </span>
+                    <b className="font-medium">{data.shipment.rawStatus}</b>
+                  </span>
                 </div>
                 {ws.canManage ? (
                   <ResolutionControl
@@ -563,7 +631,7 @@ export function CareDrawer({
                           type="button"
                           disabled={pending || !e.ok}
                           title={e.reason}
-                          onClick={() => doCarrier(k)}
+                          onClick={() => setConfirmCarrier(k)}
                           className="rounded-md border px-2.5 py-1.5 text-[12px] font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-45"
                         >
                           {k === "redeliver" ? "Yêu cầu phát lại trên VTP" : "Duyệt hoàn trên VTP"}
@@ -577,6 +645,24 @@ export function CareDrawer({
                       </a>
                     ) : null}
                   </div>
+                  {/* XÁC NHẬN TRƯỚC KHI GỬI: nói rõ lệnh này đi RA NGOÀI ERP, và nói rõ nó KHÔNG
+                      phải kết quả care — hai thứ dễ lẫn nhất đúng ở màn hình này. */}
+                  {confirmCarrier ? (
+                    <div className="mt-2 rounded-lg border border-amber-300/70 bg-amber-50/60 px-2.5 py-2 text-[11.5px] dark:border-amber-900/60 dark:bg-amber-950/20">
+                      <p className="font-semibold">Gửi “{confirmCarrier === "redeliver" ? "Yêu cầu phát lại" : "Duyệt hoàn"}” lên Viettel Post?</p>
+                      <p className="mt-0.5 text-muted-foreground">
+                        Đây là lệnh đi RA NGOÀI ERP{data.shipment.trackingCapability === "API_TRACKABLE" ? " và sẽ được gửi thẳng qua API" : " — tài khoản API không sở hữu kiện này nên ERP sẽ ghi là PHẢI LÀM TAY, kèm đường dẫn"}. Nó KHÔNG phải kết quả care và KHÔNG thay cho ba nút ở trên.
+                      </p>
+                      <div className="mt-1.5 flex gap-1.5">
+                        <button type="button" disabled={pending} onClick={() => doCarrier(confirmCarrier)} className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 font-medium hover:bg-accent disabled:opacity-50">
+                          {pending ? <Loader2 className="size-3 animate-spin" /> : null} Gửi
+                        </button>
+                        <button type="button" disabled={pending} onClick={() => setConfirmCarrier(null)} className="rounded-md px-2 py-1 text-muted-foreground hover:bg-accent">
+                          Huỷ
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                   {/* Lệnh gần nhất và ĐVVC trả lời gì — không có dòng này thì "vì sao 400" không tra lại được. */}
                   {data.carrierRequests.length ? (
                     <p className="mt-2 text-[11.5px]">
@@ -732,6 +818,32 @@ function Fact({ label, value, tone, title }: { label: string; value: string; ton
  * lại bao nhiêu lần thì host vẫn đứng nguyên.
  */
 const CARE_OPEN_EVENT = "erp:care-open";
+
+/**
+ * ═══════════ PANEL BÁO CHO BẢNG, KHÔNG BẮT CẢ TRANG DỰNG LẠI ═══════════
+ *
+ * Bản trước gọi `router.refresh()` sau MỖI lần ghi để dòng ngoài bảng đổi theo panel. Nó đúng về
+ * kết quả nhưng đắt: mỗi cú bấm kéo máy chủ dựng lại TOÀN BỘ hàng đợi care (và `clearMemo()` vừa
+ * xoá đệm nên không có đường tắt nào) — với người xử lý vài chục kiện một buổi thì đó là vài chục
+ * lượt dựng lại cho một thay đổi chạm đúng MỘT dòng.
+ *
+ * Panel phát một tín hiệu mang theo `CareState` mà MÁY CHỦ VỪA TRẢ VỀ; bảng nghe và vá đúng dòng
+ * đó. Dữ liệu vẫn là dữ liệu máy chủ (không phải thứ màn hình tự đoán), nhưng không có lượt đi-về
+ * thứ hai. `Date` đi qua `CustomEvent` trong cùng một tiến trình nên vẫn là `Date`.
+ */
+const CARE_UPDATED_EVENT = "erp:care-updated";
+export type CareUpdatedDetail = { shipmentId: string; care: CareState };
+
+function phatCapNhat(shipmentId: string, care: CareState) {
+  window.dispatchEvent(new CustomEvent<CareUpdatedDetail>(CARE_UPDATED_EVENT, { detail: { shipmentId, care } }));
+}
+
+/** Bảng đăng ký nghe tín hiệu cập nhật từ panel. Trả về hàm huỷ đăng ký. */
+export function onCareUpdated(fn: (d: CareUpdatedDetail) => void): () => void {
+  const h = (e: Event) => fn((e as CustomEvent<CareUpdatedDetail>).detail);
+  window.addEventListener(CARE_UPDATED_EVENT, h);
+  return () => window.removeEventListener(CARE_UPDATED_EVENT, h);
+}
 
 export function CareDrawerHost({ queue }: { queue: CareQueueItem[] }) {
   const [item, setItem] = useState<CareQueueItem | null>(null);

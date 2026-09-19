@@ -4,6 +4,7 @@ import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { addCareNote, loadCareState, recordCareDecision, requestCarrierAction, setCareStatus, type CareActor } from "@/lib/care/service";
 import { applyCarrierEventToCare } from "@/lib/care/lifecycle";
+import { careViewOf } from "@/lib/care/view";
 import {
   CARE_DECISIONS,
   DECISION_NEEDS_FOLLOW_UP,
@@ -288,6 +289,73 @@ export async function testCareResolution(db: Db) {
   const ghiTrenCaDong = await recordCareDecision(nv, { shipmentId: `${P}s2`, decision: "CARE_RETURN", reasonCode: "CUSTOMER_REFUSED", note: "chốt lại trên ca đã đóng" });
   assert.ok("ok" in ghiTrenCaDong, `ca đã đóng vẫn phải ghi được kết quả — nhận: ${"error" in ghiTrenCaDong ? ghiTrenCaDong.error : ""}`);
   assert.equal((await loadCareState(`${P}s2`)).status, "RESOLVED", "ghi kết quả trên ca đã đóng KHÔNG được tự mở lại ca");
+
+  /* ═══════════ CASE H (lệnh ĐVVC) · NGƯỜI CHỦ ĐỘNG BẤM THÌ LỆNH ĐVVC VẪN TẠO ĐƯỢC ═══════════
+
+     Tách care decision khỏi carrier command KHÔNG được làm mất đường gửi lệnh. Dưới đây là chứng
+     minh chiều ngược: cùng một kiện, cùng một người, đường lệnh ĐVVC vẫn ghi được dòng của nó. */
+
+  await db.insert(schema.orders).values({ id: `${P}o3`, stage: "SHIPPED", status: 3, insertedAt: gio(30), billFullName: "Khách Lệnh ĐVVC", billPhone: "0911000333", moneyToCollect: 450_000 }).onConflictDoNothing();
+  await db
+    .insert(schema.shipments)
+    .values({ id: `${P}s3`, orderId: `${P}o3`, carrier: "Viettel Post", vtpOrderNumber: `${P}VTP3`, stage: "DELIVERY_FAILED", codAmount: 450_000, trackingCapability: "WEBHOOK_ONLY", vtpStatus: 506, vtpStatusName: "Tồn - Khách hàng nghỉ, không có nhà", vtpStatusDate: gio(4) })
+    .onConflictDoNothing();
+  clearMemo();
+
+  // Kết quả care trước — để chứng minh nó KHÔNG bị lệnh ĐVVC sau đó chạm vào.
+  await recordCareDecision(nv, { shipmentId: `${P}s3`, decision: "CARE_CONTINUE_DELIVERY", note: "Khách hẹn nhận chiều nay" });
+  assert.equal(await soLenhDVVC(db, `${P}s3`), 0, "ghi kết quả care xong vẫn chưa có lệnh ĐVVC nào");
+
+  setViettelPostClientForTests({ configured: true, getOrderDetail: async () => null, updateOrder: async () => ({ error: false, status: 200, message: "ok", data: null }) });
+  try {
+    const lenh = await requestCarrierAction(nv, { shipmentId: `${P}s3`, actionKey: "redeliver", note: "gọi bưu cục" });
+    assert.ok("ok" in lenh, `người chủ động bấm thì lệnh ĐVVC phải ghi được: ${"error" in lenh ? lenh.error : ""}`);
+    assert.equal(await soLenhDVVC(db, `${P}s3`), 1, "CASE H · đường lệnh ĐVVC vẫn tạo được `carrier_action_requests` khi NGƯỜI chủ động bấm");
+    // Kiện WEBHOOK_ONLY ⇒ làm tay có ghi vết, KHÔNG gọi API.
+    const [ct] = await db.select().from(schema.carrierActionRequests).where(eq(schema.carrierActionRequests.shipmentId, `${P}s3`));
+    assert.equal(ct.status, "MANUAL_REQUIRED", "vận đơn Pancake tạo không thuộc tài khoản API ⇒ ghi LÀM TAY, không giả vờ đã gửi");
+  } finally {
+    setViettelPostClientForTests(null);
+  }
+  const careSauLenh = await loadCareState(`${P}s3`);
+  assert.equal(careSauLenh.lastDecision?.decision, "CARE_CONTINUE_DELIVERY", "lệnh ĐVVC KHÔNG ghi đè kết quả care — hai sổ, hai nghĩa");
+  assert.equal(careSauLenh.lastNote, "Khách hẹn nhận chiều nay", "và không đè note của người");
+
+  /* ═══════════ CASE D · ĐẾN GIỜ HẸN THÌ CA QUAY LẠI "CẦN CARE" ═══════════
+
+     `careViewOf` là hàm THUẦN mà cả máy chủ lẫn trình duyệt dùng, nên khoá nó ở đây là khoá đúng
+     hành vi người trực nhìn thấy — không phải một phép gần đúng. Ba mốc dựng từ `now` truyền vào,
+     không đọc đồng hồ hệ thống. */
+  const mocXet = new Date("2026-01-15T03:00:00.000Z");
+  const vaoHangDoi = new Date(mocXet.getTime() - 10 * 3600_000);
+  const caCho = { status: "WAITING_REDELIVERY" as const, doneAt: null, firstResponseAt: vaoHangDoi };
+  assert.equal(careViewOf({ ...caCho, followUpAt: new Date(mocXet.getTime() + 3600_000) }, vaoHangDoi, mocXet).view, "waiting", "hẹn còn ở phía trước ⇒ nằm ở “Đang chờ kết quả”");
+  assert.equal(careViewOf({ ...caCho, followUpAt: mocXet }, vaoHangDoi, mocXet).view, "care", "CASE D · ĐÚNG giờ hẹn là ĐẾN LƯỢT — ca quay về “Cần care”");
+  assert.equal(careViewOf({ ...caCho, followUpAt: new Date(mocXet.getTime() - 1000) }, vaoHangDoi, mocXet).view, "care", "quá hẹn một giây cũng phải quay về");
+  assert.equal(careViewOf({ ...caCho, followUpAt: null }, vaoHangDoi, mocXet).view, "care", "ca CHỜ mà không có giờ hẹn thì coi như đã tới hạn — hẹn không giờ không phải một cái hẹn");
+
+  /* ═══════════ CASE A+B · MỘT NGUỒN CHO CẢ BẢNG LẪN PANEL ═══════════
+
+     Dòng ngoài bảng và panel chi tiết phải đọc CÙNG một chỗ. Dựng hai phép đọc khác nhau là mở
+     đường cho hai màn hình nói hai điều về cùng một kiện — đúng thứ người dùng báo là "panel đã
+     đổi mà row chưa đổi". `loadCareState` (đường bảng dùng sau mỗi thao tác) và `getCareCaseDetail`
+     (đường panel dùng) phải khớp từng trường. */
+  const quaBang = await loadCareState(`${P}s3`);
+  const quaPanel = await getCareCaseDetail(`${P}s3`);
+  assert.equal(quaPanel?.care.lastDecision?.decision, quaBang.lastDecision?.decision, "bảng và panel phải nói CÙNG một kết quả care");
+  assert.equal(quaPanel?.care.lastDecision?.at.getTime(), quaBang.lastDecision?.at.getTime(), "cùng một mốc");
+  assert.equal(quaPanel?.care.lastNote, quaBang.lastNote, "cùng một note gần nhất");
+  assert.equal(quaPanel?.care.status, quaBang.status, "cùng một trạng thái xử lý");
+  // Note MỚI NHẤT ngoài bảng phải khớp dòng nhật ký mới nhất — không có chuyện hai chỗ lệch nhau.
+  assert.equal(quaPanel?.decisions[0].note, quaBang.lastNote, "note trên dòng = note của quyết định mới nhất");
+
+  await db.delete(schema.careDecisions).where(eq(schema.careDecisions.shipmentId, `${P}s3`));
+  await db.delete(schema.carrierActionRequests).where(eq(schema.carrierActionRequests.shipmentId, `${P}s3`));
+  await db.delete(schema.careCaseEvents).where(eq(schema.careCaseEvents.shipmentId, `${P}s3`));
+  await db.delete(schema.careActions).where(eq(schema.careActions.shipmentId, `${P}s3`));
+  await db.delete(schema.shipmentCare).where(eq(schema.shipmentCare.shipmentId, `${P}s3`));
+  await db.delete(schema.shipments).where(eq(schema.shipments.id, `${P}s3`));
+  await db.delete(schema.orders).where(eq(schema.orders.id, `${P}o3`));
 
   /* ───────── DỌN SẠCH: mọi dòng bài này thêm vào đều mang tiền tố, không dòng nào ở lại ───────── */
   for (const sid of [`${P}s1`, `${P}s2`]) {
