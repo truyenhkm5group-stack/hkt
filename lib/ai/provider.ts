@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { EFFORT_BY_TIER, modelFor, resolveProviderName, type AiProviderName, type AiTier } from "@/lib/ai/router";
 import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { env } from "@/lib/env";
+import { usdPriceFor } from "@/lib/constants/ai-model-pricing";
 
 /**
  * ═══════════ LỚP PROVIDER — AI LAYER KHÔNG KHOÁ VÀO MỘT MODEL ═══════════
@@ -33,19 +34,26 @@ export interface AiProvider {
 }
 
 /**
- * Giá USD / 1M token — bảng trong mã để ước tính chi phí; không phải hoá đơn. Model không có trong
- * bảng ⇒ chi phí CHƯA BIẾT (`null`), không phải 0 — cập nhật bảng khi có giá niêm yết.
+ * Chi phí USD ước tính của một lượt gọi. `null` = CHƯA KHAI GIÁ, không phải 0.
+ *
+ * Đơn giá KHÔNG còn nằm ở tệp này. Trước đây có một bảng `PRICE_PER_MTOK` ngay đây, song song với
+ * `lib/constants/ai-model-pricing.ts` của nhân sự bán hàng — hai bảng cho cùng một mô hình, và khi
+ * một bên đổi giá thì hai tầng AI của cùng một shop báo hai con số khác nhau về cùng một hoá đơn.
+ * Giờ cả hai đọc chung một sổ.
  */
-const PRICE_PER_MTOK: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
-  "claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-  "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
-  "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-};
-
 export function estimateCostUsd(model: string, usage: AiUsage): number | null {
-  const p = PRICE_PER_MTOK[model];
+  const p = usdPriceFor(model);
   if (!p) return null;
-  const usd = (usage.inputTokens * p.input + usage.outputTokens * p.output + usage.cacheReadTokens * p.cacheRead + usage.cacheWriteTokens * p.cacheWrite) / 1_000_000;
+  // Bốn rổ token, và hai rổ đệm là TUỲ CHỌN: chưa khai giá đệm mà lượt gọi CÓ token đệm thì chi
+  // phí là CHƯA BIẾT. Lấy giá vào thường áp cho token đệm sẽ báo đắt gấp nhiều lần thực tế.
+  if (usage.cacheReadTokens > 0 && p.cachedInputUsdPerMillion === undefined) return null;
+  if (usage.cacheWriteTokens > 0 && p.cacheWriteUsdPerMillion === undefined) return null;
+  const usd =
+    (usage.inputTokens * p.inputUsdPerMillion +
+      usage.outputTokens * p.outputUsdPerMillion +
+      usage.cacheReadTokens * (p.cachedInputUsdPerMillion ?? 0) +
+      usage.cacheWriteTokens * (p.cacheWriteUsdPerMillion ?? 0)) /
+    1_000_000;
   return Math.round(usd * 1_000_000) / 1_000_000;
 }
 
