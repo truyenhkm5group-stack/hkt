@@ -1,5 +1,5 @@
 import { and, eq, sql, sum, type SQL } from "drizzle-orm";
-import { getDb, schema, type Db } from "@/db";
+import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { allocatedExpenseByDay } from "@/lib/queries/cost-allocation";
 import { lineUnitCost } from "@/lib/queries/cogs";
@@ -477,13 +477,44 @@ async function buildDays(
 ): Promise<{ rows: MarketingDailyRow[]; spendObservedThrough: string | null }> {
   const extra = dimensionFilter(filters);
   const filtered = hasDimensionFilter(filters);
-  const [moneyRows, spend, units, allocated] = await Promise.all([
-    filters.productId ? productDayRows(db, period, basis, filters, extra) : orderDayRows(db, period, basis, extra),
-    spendByDay(db, period, filters),
-    filters.productId || opts.skipUnits ? Promise.resolve(null) : unitsByDay(db, period, basis, extra),
-    // Chi phí vận hành phân bổ CHỈ có nghĩa ở mức toàn shop. Có bộ lọc ⇒ không đọc, và ô là `—`.
-    filtered ? Promise.resolve(null) : allocatedExpenseByDay(db, period.from, period.to),
-  ]);
+  /*
+    ═══════════ TẮT JIT — ĐO ĐƯỢC TRÊN PRODUCTION 19/09/2026 ═══════════
+
+    `EXPLAIN (ANALYZE, BUFFERS)` của chính câu này trên máy chủ thật nói thẳng ra nguyên nhân của
+    3,6 giây mà ba lượt đo trước không giải thích được:
+
+        JIT: Functions: 62
+             Timing: Generation 37,8ms · Inlining 126,7ms · Optimization 1.383,5ms
+                     · Emission 1.698,2ms · Total 3.246,1ms
+        Execution Time: 3.738,9 ms
+
+    **3.246 trên 3.739 mili giây là BIÊN DỊCH, không phải tính toán.** Phần việc thật chỉ còn
+    khoảng 490ms. Cái gọi là "Seq Scan khởi động 3,8 giây" trong các lượt đo trước chính là thời
+    gian biên dịch mà PostgreSQL gán vào nút đầu tiên — không phải một phép quét chậm.
+
+    Vì sao JIT bật: chi phí ƯỚC LƯỢNG của câu này là `cost=5.796.652..11.592.844`, vượt xa
+    `jit_above_cost` (100.000) lẫn `jit_inline_above_cost`/`jit_optimize_above_cost` (500.000).
+    Con số ước lượng ấy đến từ SubPlan tương quan của `ORDER_OUTCOME`; thực tế nó chỉ chạm 1.752
+    dòng và mỗi lượt SubPlan tốn 0,26ms. Trên VPS 2 nhân, biên dịch 62 hàm đắt hơn chính phép tính
+    nhiều lần.
+
+    Kho mã này ĐÃ giải bài toán ấy một lần (`chayKhongJit` trong `db/index.ts`, đo 10/09:
+    8.578ms → 26ms) và chín tệp truy vấn khác đang dùng. Đường `pnlFacts` thì chưa — nên nó trả
+    đủ giá mỗi lần mở trang.
+
+    MỘT giao dịch cho CẢ BỐN truy vấn, không phải bốn lời gọi `chayKhongJit` song song: mỗi lời gọi
+    là một kết nối, mà bể chỉ có 5 chỗ trên máy 2 nhân. Đúng khuôn `lib/queries/payroll.ts` đang
+    dùng.
+  */
+  const [moneyRows, spend, units, allocated] = await chayKhongJit(db, (tx) =>
+    Promise.all([
+      filters.productId ? productDayRows(tx, period, basis, filters, extra) : orderDayRows(tx, period, basis, extra),
+      spendByDay(tx, period, filters),
+      filters.productId || opts.skipUnits ? Promise.resolve(null) : unitsByDay(tx, period, basis, extra),
+      // Chi phí vận hành phân bổ CHỈ có nghĩa ở mức toàn shop. Có bộ lọc ⇒ không đọc, và ô là `—`.
+      filtered ? Promise.resolve(null) : allocatedExpenseByDay(tx, period.from, period.to),
+    ]),
+  );
 
   const map = new Map<string, MarketingDailyRow>();
   const get = (day: string): MarketingDailyRow => {
