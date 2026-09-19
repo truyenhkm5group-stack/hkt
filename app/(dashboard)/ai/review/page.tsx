@@ -8,7 +8,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { listShadowTurns, shadowMetrics, type ShadowTurnFilters } from "@/lib/queries/sales-review";
 import { getDb } from "@/db";
-import { pagesWithConversations } from "@/lib/queries/sales-metrics";
+import { intentDistribution, pagesWithConversations } from "@/lib/queries/sales-metrics";
 import type { SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Soát nhân sự AI" };
@@ -64,10 +64,11 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
   const perPage = 10;
   const page = Math.max(1, Number(one(raw, "page")) || 1);
   // Lấy DƯ MỘT dòng để biết còn trang sau hay không, khỏi tốn một câu đếm riêng.
-  const [duTurns, metrics, pages] = await Promise.all([
+  const [duTurns, metrics, pages, yDinh] = await Promise.all([
     listShadowTurns({ ...filters, limit: perPage + 1, offset: (page - 1) * perPage }),
     shadowMetrics(days),
     pagesWithConversations(),
+    intentDistribution(days),
   ]);
   const coTrangSau = duTurns.length > perPage;
   const turns = duTurns.slice(0, perPage);
@@ -148,6 +149,49 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
           ))}
         </div>
       </Card>
+
+      {/*
+        ───────── LẤY MẪU PHÂN TẦNG ─────────
+
+        Bảo một người "chấm 30 lượt" mà không nói 30 lượt NÀO thì họ chấm 30 lượt đầu danh sách.
+        Danh sách xếp theo thời gian, nên 30 lượt ấy gần như chắc chắn cùng một loại câu hỏi —
+        chấm xong vẫn không biết máy xử lý khiếu nại ra sao, vì trong mẫu không có ca nào.
+
+        Khối này in số lượt và số ĐÃ CHẤM của từng ý định để người soát tự rải mẫu cho đều. Đó là
+        khác biệt giữa "đã chấm 30 lượt" và "đã biết máy làm được gì".
+      */}
+      {yDinh.length ? (
+        <Card className="gap-2 p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold">Chấm rải đều theo ý định</h2>
+            <p className="text-xs text-muted-foreground">
+              bấm một ý định để lọc · số thứ hai là ĐÃ CHẤM · một lượt mang nhiều ý định nên KHÔNG cộng các ô này lại
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {yDinh.map((y) => {
+              const dangChon = one(raw, "intent") === y.intent;
+              const chuaCham = y.reviewed === 0;
+              return (
+                <Link
+                  key={y.intent}
+                  href={queryWith("intent", dangChon ? "" : y.intent)}
+                  className={`rounded border px-2 py-1 text-xs ${dangChon ? "border-primary bg-primary/10 text-primary" : chuaCham ? "border-amber-500/60 text-amber-700 dark:text-amber-300" : "border-border text-muted-foreground"}`}
+                  title={`${y.turns} lượt · ${y.withReply} có câu · ${y.reviewed} đã chấm`}
+                >
+                  {y.intent}
+                  <span className="ml-1.5 font-semibold tabular-nums">{formatNumber(y.turns)}</span>
+                  <span className="ml-1 tabular-nums opacity-70">/ {formatNumber(y.reviewed)}</span>
+                </Link>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Viền hổ phách = ý định CHƯA AI CHẤM lượt nào. Chấm hết một ý định rồi mới sang ý định khác thì mẫu lệch; rải mỗi
+            loại vài lượt thì 30 lượt nói được nhiều hơn 300 lượt cùng loại.
+          </p>
+        </Card>
+      ) : null}
 
       {/* ───────── Bộ lọc ───────── */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">

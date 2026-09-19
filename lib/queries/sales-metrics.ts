@@ -1,5 +1,6 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { rowsOf } from "@/lib/sql-rows";
 
 /**
  * BÓC TÁCH SỐ ĐO NẤC CHẠY NGẦM — theo page · ngày · ý định · bản nhắc · mô hình.
@@ -205,4 +206,49 @@ export async function pagesWithConversations(): Promise<string[]> {
     .where(sql`${schema.salesConversations.pageId} <> ''`)
     .orderBy(schema.salesConversations.pageId);
   return rows.map((r) => r.pageId);
+}
+
+export type IntentSlice = { intent: string; turns: number; reviewed: number; withReply: number };
+
+/**
+ * PHÂN BỐ Ý ĐỊNH TRONG CỬA SỔ, KÈM SỐ ĐÃ CHẤM CỦA TỪNG Ý ĐỊNH.
+ *
+ * VÌ SAO NÓ CẦN CHO VIỆC CHẤM TAY. Bản chạy thử có gần một nghìn lượt và không ai chấm lượt nào.
+ * Bảo một người "chấm 30 lượt" mà không nói 30 lượt NÀO thì họ chấm 30 lượt đầu danh sách — và
+ * danh sách xếp theo thời gian, nên 30 lượt ấy gần như chắc chắn là cùng một loại câu hỏi. Chấm
+ * xong vẫn không biết máy xử lý khiếu nại ra sao, vì trong mẫu không có ca khiếu nại nào.
+ *
+ * Nên màn hình phải nói ra: mỗi ý định có bao nhiêu lượt, và ĐÃ CHẤM bao nhiêu. Người soát tự rải
+ * mẫu cho đều — đó là phép lấy mẫu PHÂN TẦNG, và nó là khác biệt giữa "đã chấm 30 lượt" với "đã
+ * biết máy làm được gì".
+ *
+ * TRẢI HẾT ý định, không lấy ý định đầu: ở đây mục đích là TÌM ĐỦ LOẠI để chấm, không phải phân
+ * hoạch để cộng. Một lượt mang hai ý định thì nó đáng được thấy ở cả hai chỗ — và bảng này cố ý
+ * KHÔNG có dòng tổng, để không ai cộng nhầm nó thành số lượt.
+ */
+export async function intentDistribution(days = 7): Promise<IntentSlice[]> {
+  const db = await getDb();
+  const since = sinceOf(days);
+  const rows = await db.execute(sql`
+    select intent,
+           count(*)::int                                                     as turns,
+           count(*) filter (where l.reviewed_at is not null)::int            as reviewed,
+           count(*) filter (where s.suggested_reply <> '')::int              as with_reply
+      from sales_suggestions s
+      join ai_runs r on r.id = s.run_id
+      left join sales_review_labels l on l.suggestion_id = s.id
+      cross join lateral jsonb_array_elements_text(
+        case when jsonb_typeof(r.understanding -> 'intents') = 'array'
+             then r.understanding -> 'intents' else '[]'::jsonb end
+      ) as intent
+     where s.created_at >= ${since}
+     group by intent
+     order by count(*) desc
+  `);
+  return rowsOf<{ intent: string; turns: number; reviewed: number; with_reply: number }>(rows).map((r) => ({
+    intent: String(r.intent),
+    turns: Number(r.turns),
+    reviewed: Number(r.reviewed),
+    withReply: Number(r.with_reply),
+  }));
 }

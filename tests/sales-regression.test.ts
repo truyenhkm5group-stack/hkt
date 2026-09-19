@@ -19,7 +19,7 @@ import { buildOrderDraft, ORDER_REQUIREMENTS, QUANTITY_WARN_FROM } from "@/lib/c
 import { EMPTY_SALES_STATE, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { missingOrderRequirements } from "@/lib/ai-workforce/agents/sales/confirm";
 import { findColor, findSize, understandByRule } from "@/lib/ai-workforce/agents/sales/understand";
-import { RUN_BREAKDOWNS, pagesWithConversations, salesModelBreakdown, salesRunBreakdown } from "@/lib/queries/sales-metrics";
+import { RUN_BREAKDOWNS, intentDistribution, pagesWithConversations, salesModelBreakdown, salesRunBreakdown } from "@/lib/queries/sales-metrics";
 import { listShadowTurns, shadowMetrics } from "@/lib/queries/sales-review";
 import { clearMemo } from "@/lib/cache";
 import { fanpageOps } from "@/lib/queries/fanpage-ops";
@@ -448,7 +448,42 @@ export async function testSalesRegression(db: Db) {
     }
   }
 
+  // ═══════════ 14. PHÂN BỐ Ý ĐỊNH — ĐỂ LẤY MẪU PHÂN TẦNG ═══════════
+  //
+  // Bảng này CỐ Ý không phân hoạch: một lượt mang nhiều ý định thì nó đáng được thấy ở cả hai chỗ,
+  // vì mục đích là TÌM ĐỦ LOẠI để chấm chứ không phải cộng ra tổng. Bài kiểm khoá lại đúng điều đó
+  // — nếu ai đó "sửa" nó thành phân hoạch, dòng dưới đây đỏ và câu hỏi được đặt lại.
+  const phanBo = await intentDistribution(30);
+  /*
+    SO ĐÚNG TẬP, KHÔNG SO TỔNG SỐ LƯỢT.
+
+    Bản đầu của bài kiểm này so với `listShadowTurns({limit:500})` và đỏ — đúng, nhưng vì bài kiểm
+    sai chứ không vì truy vấn sai: phân bố lọc theo cửa sổ 30 ngày và NỐI TRONG với `ai_runs`, nên
+    lượt không có lượt chạy (không có ý định nào để đọc) nằm ngoài. So một tập con với một tập cha
+    rồi đòi "lớn hơn hoặc bằng" là một phép so không có nghĩa.
+
+    Thứ thật sự phải khoá: bảng này KHÔNG phân hoạch. Nên so với đúng những lượt CÓ ít nhất một ý
+    định trong cùng cửa sổ.
+  */
+  const luotTrongCuaSo = await listShadowTurns({ from: new Date(Date.now() - 30 * 86_400_000), limit: 500 });
+  const luotCoYDinh = luotTrongCuaSo.filter((t) => t.intents.length > 0);
+  if (phanBo.length && luotCoYDinh.length) {
+    const tongCacO = phanBo.reduce((a, y) => a + y.turns, 0);
+    assert.ok(
+      tongCacO >= luotCoYDinh.length,
+      `trải hết ý định thì tổng các ô (${tongCacO}) phải ≥ số lượt CÓ ý định (${luotCoYDinh.length}) — một lượt mang nhiều ý định được đếm ở nhiều ô`,
+    );
+    for (const y of phanBo) {
+      assert.ok(y.turns > 0, "ý định có trong bảng thì phải có ít nhất một lượt");
+      assert.ok(y.reviewed <= y.turns, "số đã chấm không thể lớn hơn số lượt");
+      assert.ok(y.withReply <= y.turns, "số lượt có câu không thể lớn hơn số lượt");
+    }
+    // Không ý định nào được trùng dòng, nếu không người soát thấy hai chip cùng tên.
+    const ten = phanBo.map((y) => y.intent);
+    assert.equal(new Set(ten).size, ten.length, "mỗi ý định đúng một dòng");
+  }
+
   console.log(
-    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai) · truy vấn tình trạng vận hành CHẠY THẬT trên lược đồ đã migrate · ${BE_MAT_MOI.length} tệp bề mặt mới KHÔNG có đường gửi tin / tạo đơn nào · lọc theo page cộng lại ra đúng tổng và ô tìm thật sự thu hẹp`,
+    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai) · truy vấn tình trạng vận hành CHẠY THẬT trên lược đồ đã migrate · ${BE_MAT_MOI.length} tệp bề mặt mới KHÔNG có đường gửi tin / tạo đơn nào · lọc theo page cộng lại ra đúng tổng và ô tìm thật sự thu hẹp · phân bố ý định KHÔNG phân hoạch (cố ý) và không trùng dòng`,
   );
 }
