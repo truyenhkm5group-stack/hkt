@@ -190,3 +190,19 @@ export async function salesModelBreakdown(days = 7): Promise<ModelBreakdownRow[]
     };
   });
 }
+
+/**
+ * Các fanpage ĐÃ CÓ hội thoại trong ERP — dùng cho ô lọc của trang soát.
+ *
+ * Đọc từ chính `sales_conversations` chứ không từ bảng hồ sơ fanpage: một page có hội thoại mà
+ * chưa ai khai hồ sơ vẫn phải lọc được, và đó lại đúng là page cần soát nhất.
+ */
+export async function pagesWithConversations(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db
+    .selectDistinct({ pageId: schema.salesConversations.pageId })
+    .from(schema.salesConversations)
+    .where(sql`${schema.salesConversations.pageId} <> ''`)
+    .orderBy(schema.salesConversations.pageId);
+  return rows.map((r) => r.pageId);
+}

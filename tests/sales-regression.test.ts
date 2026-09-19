@@ -19,8 +19,8 @@ import { buildOrderDraft, ORDER_REQUIREMENTS, QUANTITY_WARN_FROM } from "@/lib/c
 import { EMPTY_SALES_STATE, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { missingOrderRequirements } from "@/lib/ai-workforce/agents/sales/confirm";
 import { findColor, findSize, understandByRule } from "@/lib/ai-workforce/agents/sales/understand";
-import { RUN_BREAKDOWNS, salesModelBreakdown, salesRunBreakdown } from "@/lib/queries/sales-metrics";
-import { shadowMetrics } from "@/lib/queries/sales-review";
+import { RUN_BREAKDOWNS, pagesWithConversations, salesModelBreakdown, salesRunBreakdown } from "@/lib/queries/sales-metrics";
+import { listShadowTurns, shadowMetrics } from "@/lib/queries/sales-review";
 import { clearMemo } from "@/lib/cache";
 import { fanpageOps } from "@/lib/queries/fanpage-ops";
 
@@ -417,7 +417,38 @@ export async function testSalesRegression(db: Db) {
   }
   assert.ok(!CAM.test(boChuThich("// đường tạo đơn thật vẫn là order.create_draft và nó đi qua cổng công cụ")), "một câu giải thích KHÔNG được làm đỏ phép quét");
 
+  // ═══════════ 13. LỌC THEO PAGE VÀ Ô TÌM PHẢI THẬT SỰ THU HẸP ═══════════
+  //
+  // Một bộ lọc CHẠY ĐƯỢC mà không thu hẹp gì là bộ lọc tệ nhất: người soát tin rằng mình đang nhìn
+  // một tập con, trong khi họ nhìn toàn bộ. Nên kiểm bằng HIỆU SỐ, không chỉ kiểm nó không ném.
+  const tatCa = await listShadowTurns({ limit: 200 });
+  const pagesCoHoiThoai = await pagesWithConversations();
+  if (tatCa.length > 0 && pagesCoHoiThoai.length > 0) {
+    const tongTheoPage = (
+      await Promise.all(pagesCoHoiThoai.map((pg) => listShadowTurns({ limit: 200, pageId: pg })))
+    ).reduce((a, r) => a + r.length, 0);
+    // Mỗi hội thoại thuộc đúng MỘT page, nên cộng các page lại phải ra đúng tổng — không thiếu,
+    // và cũng không thừa (một lượt lọt vào hai page nghĩa là phép nối sai).
+    assert.equal(tongTheoPage, tatCa.length, "cộng các page lại phải ra đúng tổng số lượt");
+
+    const pageLa = await listShadowTurns({ limit: 200, pageId: "page-khong-ton-tai-bao-gio" });
+    assert.equal(pageLa.length, 0, "lọc theo một page không tồn tại phải ra RỖNG, không ra toàn bộ");
+  }
+  // Ô tìm: một chuỗi không thể có mặt ở đâu phải ra rỗng. Đây là phép thử chứng minh bộ lọc CÓ TÁC
+  // DỤNG — nếu nó bị bỏ quên ở tầng truy vấn thì dòng này trả về cả danh sách và bài kiểm đỏ.
+  const timVoNghia = await listShadowTurns({ limit: 200, search: "zzz-chuoi-khong-bao-gio-co-that-zzz" });
+  assert.equal(timVoNghia.length, 0, "ô tìm với một chuỗi không tồn tại phải ra RỖNG");
+  if (tatCa.length > 0) {
+    // Và một chuỗi CÓ THẬT (lấy từ chính dữ liệu) phải tìm ra ít nhất một dòng — bộ lọc không được
+    // chặt tới mức không bao giờ khớp.
+    const mau = tatCa.find((t) => t.conversationExternalId);
+    if (mau) {
+      const tim = await listShadowTurns({ limit: 200, search: mau.conversationExternalId });
+      assert.ok(tim.length >= 1, "tìm bằng mã hội thoại có thật phải ra ít nhất một dòng");
+    }
+  }
+
   console.log(
-    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai) · truy vấn tình trạng vận hành CHẠY THẬT trên lược đồ đã migrate · ${BE_MAT_MOI.length} tệp bề mặt mới KHÔNG có đường gửi tin / tạo đơn nào`,
+    `✓ Hồi quy nhân sự bán hàng: ${SEED_REGRESSION_CASES.length} ca dựng sẵn ĐẠT và ổn định qua hai lượt chạy · phép so bắt đủ 7 loại lỗi · "vâng" không còn là màu Vàng · "size gì" không còn là size G · bản nháp đơn thiếu điều kiện thì KHÔNG bao giờ sẵn sàng, và chưa có giá thì in CHƯA BIẾT chứ không in 0đ · bóc tách theo ${RUN_BREAKDOWNS.length} chiều cộng lại ĐÚNG BẰNG shadowMetrics (không có nguồn sự thật thứ hai) · truy vấn tình trạng vận hành CHẠY THẬT trên lược đồ đã migrate · ${BE_MAT_MOI.length} tệp bề mặt mới KHÔNG có đường gửi tin / tạo đơn nào · lọc theo page cộng lại ra đúng tổng và ô tìm thật sự thu hẹp`,
   );
 }

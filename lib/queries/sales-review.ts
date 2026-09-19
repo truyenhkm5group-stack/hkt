@@ -22,6 +22,16 @@ export type ShadowTurnFilters = {
   from?: Date | null;
   to?: Date | null;
   conversationId?: string;
+  /** Lọc theo fanpage. Một bản chạy thử nhiều page thì trộn chúng vào một danh sách là không đọc được. */
+  pageId?: string;
+  /**
+   * TÌM TỰ DO — tên khách · mã hội thoại · câu của khách · câu máy soạn · câu nhân viên trả lời.
+   *
+   * Bốn cột chứ không một: người soát nhớ lại một ca bằng ĐIỀU ĐÃ XẢY RA ("cái ca máy hứa còn
+   * hàng"), không bằng mã hội thoại. Tìm trên mỗi tên khách thì hầu hết lần tìm ra rỗng, và một ô
+   * tìm hay ra rỗng là một ô không ai dùng lần thứ hai.
+   */
+  search?: string;
   /** Lọc theo mã sản phẩm máy nhận ra trong lượt. */
   productId?: string;
   /** Lọc theo một ý định bóc được. */
@@ -107,6 +117,17 @@ export async function listShadowTurns(filters: ShadowTurnFilters = {}): Promise<
     filters.reviewed === false ? sql`${l.reviewedAt} is null` : undefined,
     filters.productId ? sql`${r.stateAfter}->>'productId' = ${filters.productId}` : undefined,
     filters.intent ? sql`${r.understanding}->'intents' @> ${JSON.stringify([filters.intent])}::jsonb` : undefined,
+    filters.pageId ? eq(c.pageId, filters.pageId) : undefined,
+    // `ilike` với `%…%`: không phân biệt hoa thường, và khớp giữa chuỗi. Bộ dữ liệu của một bản
+    // chạy thử đếm bằng nghìn dòng nên quét tuần tự vẫn tức thì — thêm một chỉ mục ba-gram ở đây
+    // là tối ưu cho một vấn đề chưa có.
+    filters.search
+      ? sql`(${c.customerName} ilike ${`%${filters.search}%`}
+          or ${c.externalId} ilike ${`%${filters.search}%`}
+          or ${s.suggestedReply} ilike ${`%${filters.search}%`}
+          or ${s.humanReply} ilike ${`%${filters.search}%`}
+          or coalesce((select m.text from sales_messages m where m.id = ${s.triggerMessageId}), '') ilike ${`%${filters.search}%`})`
+      : undefined,
   ];
 
   const rows = await db

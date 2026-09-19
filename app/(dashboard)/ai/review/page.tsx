@@ -8,6 +8,7 @@ import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { listShadowTurns, shadowMetrics, type ShadowTurnFilters } from "@/lib/queries/sales-review";
 import { getDb } from "@/db";
+import { pagesWithConversations } from "@/lib/queries/sales-metrics";
 import type { SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Soát nhân sự AI" };
@@ -36,6 +37,8 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
   const filters: ShadowTurnFilters = {
     from: new Date(Date.now() - Math.min(Math.max(days, 1), 90) * 86_400_000),
     conversationId: one(raw, "conversation") || undefined,
+    pageId: one(raw, "fanpage") || undefined,
+    search: one(raw, "q").trim() || undefined,
     productId: one(raw, "product") || undefined,
     intent: one(raw, "intent") || undefined,
     humanTakeover: boolParam(raw, "takeover"),
@@ -61,9 +64,10 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
   const perPage = 10;
   const page = Math.max(1, Number(one(raw, "page")) || 1);
   // Lấy DƯ MỘT dòng để biết còn trang sau hay không, khỏi tốn một câu đếm riêng.
-  const [duTurns, metrics] = await Promise.all([
+  const [duTurns, metrics, pages] = await Promise.all([
     listShadowTurns({ ...filters, limit: perPage + 1, offset: (page - 1) * perPage }),
     shadowMetrics(days),
+    pagesWithConversations(),
   ]);
   const coTrangSau = duTurns.length > perPage;
   const turns = duTurns.slice(0, perPage);
@@ -165,7 +169,46 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
             </Link>
           ))}
         </span>
-        {one(raw, "conversation") || one(raw, "product") || one(raw, "intent") ? (
+        {/*
+          Ô TÌM LÀ MỘT FORM GET, KHÔNG PHẢI MỘT CLIENT COMPONENT.
+
+          Nó nằm trên một trang đã đủ nặng về phía trình duyệt (mỗi thẻ chấm là một client
+          component ~40 nút — xem chú thích phân trang ở trên). Thêm một khối trạng thái React nữa
+          chỉ để giữ một chuỗi là trả thêm tiền cho đúng thứ đang phải tiết kiệm. Form GET gửi thẳng
+          sang máy chủ, chạy cả khi JS chưa gắn xong, và giữ được ô tìm trong đường dẫn — tức là
+          chia sẻ được cho người khác.
+        */}
+        <form method="GET" action="/ai/review" className="flex items-center gap-1.5">
+          {/* Giữ các bộ lọc khác khi tìm. Bỏ `page` có chủ ý: tìm xong phải về trang 1. */}
+          {["days", "reviewed", "suggestion", "error", "takeover", "conversation", "product", "intent", "fanpage"].map((k) =>
+            one(raw, k) ? <input key={k} type="hidden" name={k} value={one(raw, k)} /> : null,
+          )}
+          <input
+            type="search"
+            name="q"
+            defaultValue={one(raw, "q")}
+            placeholder="tìm: tên khách · mã hội thoại · câu khách · câu máy · câu nhân viên"
+            className="w-72 rounded border border-border bg-background px-2 py-1"
+          />
+          <button type="submit" className="rounded border border-border px-2 py-1 font-semibold text-muted-foreground hover:bg-muted">
+            Tìm
+          </button>
+        </form>
+        {pages.length > 1 ? (
+          <span className="flex items-center gap-1.5">
+            <span className="text-muted-foreground">Fanpage:</span>
+            {pages.map((pg) => (
+              <Link
+                key={pg}
+                href={queryWith("fanpage", one(raw, "fanpage") === pg ? "" : pg)}
+                className={`rounded border px-1.5 py-0.5 font-mono ${one(raw, "fanpage") === pg ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"}`}
+              >
+                {pg}
+              </Link>
+            ))}
+          </span>
+        ) : null}
+        {one(raw, "conversation") || one(raw, "product") || one(raw, "intent") || one(raw, "fanpage") || one(raw, "q") ? (
           <Link href="/ai/review" className="rounded border border-border px-1.5 py-0.5 font-semibold text-muted-foreground">
             xoá lọc
           </Link>
