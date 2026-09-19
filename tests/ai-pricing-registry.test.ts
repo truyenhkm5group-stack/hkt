@@ -44,7 +44,13 @@ test("một mô hình, MỘT đơn giá — không còn bảng giá thứ hai", 
     mô hình nghĩa là khi một bên đổi giá, hai tầng AI của cùng một shop báo hai con số khác nhau
     về cùng một hoá đơn — và không ai biết bên nào đúng.
   */
-  const nguon = execFileSync("git", ["show", "HEAD:lib/ai/provider.ts"], { encoding: "utf-8" });
+  // Bỏ dòng CHÚ THÍCH trước khi quét: chính chú thích giải thích "vì sao bảng giá thứ hai đã bị
+  // gỡ" có nhắc tên nó, và một phép quét bắt cả chú thích sẽ cấm người sau kể lại lý do — tức là
+  // ép xoá đúng phần khiến lỗi này không quay lại.
+  const nguon = execFileSync("git", ["show", "HEAD:lib/ai/provider.ts"], { encoding: "utf-8" })
+    .split("\n")
+    .filter((d) => !/^\s*(\/\/|\*|\/\*)/.test(d))
+    .join("\n");
   assert.ok(!/PRICE_PER_MTOK/.test(nguon), "bảng giá thứ hai đã quay lại trong lib/ai/provider.ts");
 
   // Và hai đường tính phải đọc CÙNG một sổ: đổi sổ thì cả hai cùng đổi.
