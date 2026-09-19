@@ -76,6 +76,7 @@ on:
           - ai-staging-paging     # CHỈ GỌI GET: Pancake phân trang bằng tham số nào (dò 6 tên + cắt cửa sổ thời gian)
           - ai-staging-page-audit # CHỈ ĐỌC: phân trang Pancake + đi tìm nguồn có thẩm quyền cho mã page Facebook — MỘT lượt
           - ai-staging-paging-proof # CHỈ ĐỌC: chạy CHÍNH hàm lượt nạp dùng, chứng minh lấy được >60 hội thoại
+          - ai-staging-fb-identity  # CHỈ GỌI GET: mã quảng cáo → trang Facebook nào đã chạy nó (nguồn CÓ THẨM QUYỀN)
           - ai-staging-signal-audit # CHỈ GỌI GET: Pancake THẬT SỰ trả về những trường nào (để dựng Product Resolver)
           - ai-staging-sql       # CHỈ ĐỌC: chạy một tệp SQL trong kho mã (arg = tên tệp ai-staging-*.sql)
           - ai-staging-resolver  # đo phép nhận diện sản phẩm trên dữ liệu đã nạp (arg: "--page=<id> --backfill")
@@ -246,6 +247,8 @@ jobs:
           # xuống đĩa VPS. GitHub che giá trị trong log; ô "arg" thì KHÔNG, nên token tuyệt đối
           # không được đi qua đó.
           PANCAKE_ACCESS_TOKEN: ${{ secrets.PANCAKE_ACCESS_TOKEN }}
+          FACEBOOK_ACCESS_TOKEN: ${{ secrets.FACEBOOK_ACCESS_TOKEN }}
+          FACEBOOK_BUSINESS_ID: ${{ secrets.FACEBOOK_BUSINESS_ID }}
           # Khoá POS — CHỈ để kéo DANH MỤC SẢN PHẨM vào CSDL riêng của bản chạy thử. Không có danh
           # mục thì `product.search` trả rỗng và lượt chạy thử chỉ chứng minh bảng sản phẩm rỗng.
           PANCAKE_API_KEY: ${{ secrets.PANCAKE_API_KEY }}
@@ -264,7 +267,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ vars.VPS_PORT || 22 }}
           command_timeout: 110m
-          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL,STAGING_BRANCH,STAGING_IMAGE,GHCR_USER,GHCR_TOKEN,PANCAKE_ACCESS_TOKEN,PANCAKE_API_KEY,PANCAKE_SHOP_ID,STAGING_USER_PASSWORD
+          envs: ACTION,DAYS,ARG,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,HMT_WORKBOOK_URL,STAGING_BRANCH,STAGING_IMAGE,GHCR_USER,GHCR_TOKEN,PANCAKE_ACCESS_TOKEN,PANCAKE_API_KEY,PANCAKE_SHOP_ID,STAGING_USER_PASSWORD,FACEBOOK_ACCESS_TOKEN,FACEBOOK_BUSINESS_ID
           script: |
             set -e
             cd /root/erp
@@ -722,6 +725,15 @@ jobs:
                 docker compose -f docker-compose.staging.yml --env-file .env.staging up -d app
                 sleep 15
                 curl -fsS -m 10 http://127.0.0.1:3100/api/health && echo || echo "  ✗ bản chạy thử chưa trả lời" ;;
+
+              ai-staging-fb-identity)
+                cd /opt/vnx-ai-staging
+                fetch_staging_script ai-staging-fb-identity.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-fb-identity.ts'
+                # Truyền chứng thư Facebook QUA BIẾN MÔI TRƯỜNG của lệnh, KHÔNG ghi vào .env.staging:
+                # phép đo này chỉ ĐỌC một lần, và để lại một secret trên đĩa máy chủ cho một lượt đo
+                # là mở rộng bề mặt rủi ro để đổi lấy đúng không gì.
+                docker exec -e FACEBOOK_ACCESS_TOKEN="${FACEBOOK_ACCESS_TOKEN:-}" -e FACEBOOK_BUSINESS_ID="${FACEBOOK_BUSINESS_ID:-}" \
+                  vnx-ai-staging-app npx tsx --tsconfig tsconfig.json scripts/ai-staging-fb-identity.ts ${ARG:-} ;;
 
               ai-staging-paging-proof)
                 cd /opt/vnx-ai-staging
