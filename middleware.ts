@@ -35,7 +35,7 @@ import {
  * Cùng luật với `/api/sync` (bí mật cron qua header) và `/api/webhooks` (bí mật trong đường dẫn /
  * chữ ký HMAC).
  */
-const PUBLIC_PREFIXES = ["/login", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
+const PUBLIC_PREFIXES = ["/login", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/api/tech/agent-task", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
 const COOKIE = SESSION_COOKIE;
 
 /**

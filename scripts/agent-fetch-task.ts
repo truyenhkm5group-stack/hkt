@@ -1,0 +1,164 @@
+/**
+ * ═══════════ LẤY ĐÚNG VIỆC ĐƯỢC GIAO TỪ ERP, RỒI GIEO VÀO CSDL TẠM CỦA MÁY RUNNER ═══════════
+ *
+ *     npm run agent:fetch-task -- --task TECH-12
+ *
+ * Bước đầu của `agent-run.yml` khi người ta giao một việc CÓ THẬT. Không truyền `--task` thì
+ * workflow vẫn chạy đường cũ (`agent:proof-setup` tự tạo việc R0 tự kiểm).
+ *
+ * ─── VÌ SAO PHẢI LẤY QUA HTTP ───
+ *
+ * Máy Actions không nối được PostgreSQL production, và giữ nguyên tính chất đó là chủ ý. Truyền
+ * tiêu đề + mô tả qua `inputs` của `workflow_dispatch` thì KHÔNG được: kho PUBLIC, và đầu vào
+ * dispatch hiện nguyên văn trong giao diện Actions. Nên việc đi qua cửa đọc hẹp
+ * `GET /api/tech/agent-task`, đối xứng với cửa ghi và dùng chung khoá.
+ *
+ * ─── MỨC RỦI RO ĐƯỢC KIỂM LẠI Ở ĐÂY, KHÔNG TIN LỜI ERP ───
+ *
+ * ERP đã chặn ở cổng giao việc, nhưng runner vẫn tự xếp lại rủi ro bằng `classifyTechRisk()` trên
+ * chính tiêu đề + mô tả nhận được. Hai lý do: (a) một gói tin bị sửa trên đường không được nâng
+ * quyền của lượt chạy; (b) nếu hai bên xếp khác nhau thì đó là một khác biệt ĐÁNG BIẾT, và lượt
+ * chạy dừng lại thay vì âm thầm chạy theo mức thấp hơn.
+ *
+ * ─── KHÔNG IN BÍ MẬT ───
+ *
+ * Kho PUBLIC nên log Actions ai cũng đọc được: chỉ in CÓ / KHÔNG cho khoá, và URL ở dạng gốc.
+ */
+import "dotenv/config";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { ensureMigrated } from "@/db/migrate";
+import { classifyTechRisk } from "@/lib/constants/tech-risk";
+import { createTechTask, seedTechAgents, setTechAgentEnabled, type TechActor } from "@/lib/tech/service";
+
+function arg(name: string): string | undefined {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+  if (hit) return hit.slice(name.length + 3);
+  const i = process.argv.indexOf(`--${name}`);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+}
+
+function goc(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return "(URL không hợp lệ)";
+  }
+}
+
+type ViecNhanDuoc = {
+  code: string;
+  title: string;
+  description: string;
+  taskType: string;
+  module: string;
+  risk: string;
+  agentKey: string;
+  writeGlobs: string[];
+};
+
+async function main() {
+  const ma = (arg("task") ?? "").trim();
+  const actor = (arg("actor") ?? "").trim() || "github:unknown";
+  if (!ma) {
+    console.error("Thiếu --task.");
+    process.exit(1);
+  }
+
+  const domain = (process.env.ERP_DOMAIN ?? "").trim();
+  const base = ((process.env.ERP_BASE_URL ?? "").trim() || (domain ? `https://${domain}` : "")).replace(/\/$/, "");
+  const secret = (process.env.AGENT_INGEST_SECRET ?? "").trim() || (process.env.CRON_SECRET ?? "").trim();
+  if (!base || !secret) {
+    console.error("══════════ LẤY VIỆC TỪ ERP: CHƯA BẬT ══════════");
+    console.error(`địa chỉ ERP          ${base ? goc(base) : "KHÔNG có"}`);
+    console.error(`AGENT_INGEST_SECRET  ${secret ? "có" : "KHÔNG có"}`);
+    console.error("Khai ở Settings → Secrets and variables → Actions.");
+    process.exit(1);
+  }
+
+  console.log("══════════ LẤY VIỆC TỪ ERP ══════════");
+  console.log(`đích   ${goc(base)}`);
+  console.log(`việc   ${ma}`);
+
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/tech/agent-task?code=${encodeURIComponent(ma)}`, {
+      headers: { "x-cron-secret": secret },
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (error) {
+    console.error(`✗ Không gọi được ERP: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    console.error(`✗ ERP trả HTTP ${res.status}: ${t.slice(0, 300)}`);
+    process.exit(1);
+  }
+  const body = (await res.json()) as { task?: ViecNhanDuoc };
+  const viec = body.task;
+  if (!viec?.code) {
+    console.error("✗ ERP trả về gói tin không có việc nào.");
+    process.exit(1);
+  }
+  console.log(`nhận   ${viec.code} · ${viec.title}`);
+  console.log(`vai    ${viec.agentKey} · ghi trong ${viec.writeGlobs.join(", ")}`);
+
+  /*
+    KIỂM LẠI RỦI RO TRÊN CHÍNH DỮ LIỆU NHẬN ĐƯỢC — không tin lời ERP.
+    Lệch nhau là một khác biệt ĐÁNG BIẾT, không phải chuyện để bỏ qua.
+  */
+  const tuXep = classifyTechRisk({ title: viec.title, description: viec.description, taskType: viec.taskType as never, module: viec.module as never });
+  console.log(`rủi ro ERP nói ${viec.risk} · runner tự xếp ${tuXep.risk} [${tuXep.rules.join(",") || "không luật nào khớp"}]`);
+  if (tuXep.risk !== viec.risk) {
+    console.error(`✗ DỪNG: hai bên xếp rủi ro KHÁC NHAU (ERP ${viec.risk} vs runner ${tuXep.risk}).`);
+    for (const r of tuXep.reasons) console.error(`   · ${r}`);
+    console.error("   Không chạy theo mức thấp hơn. Sửa mô tả việc cho đúng, hoặc hỏi chủ shop.");
+    process.exit(1);
+  }
+  if (tuXep.risk === "R2") {
+    console.error("✗ DỪNG: R2 không bao giờ mở cho agent.");
+    process.exit(1);
+  }
+
+  await ensureMigrated();
+  const db = await getDb();
+  const nguoi: TechActor = { kind: "HUMAN", id: null, name: actor };
+  await seedTechAgents(nguoi);
+  const vai = await db.query.techAgents.findFirst({ where: eq(schema.techAgents.key, viec.agentKey), columns: { id: true } });
+  if (!vai) {
+    console.error(`✗ Sổ agent cục bộ không có vai “${viec.agentKey}”.`);
+    process.exit(1);
+  }
+  await setTechAgentEnabled({ agentId: vai.id, enabled: true }, nguoi);
+
+  /*
+    GIEO LẠI BẰNG ĐÚNG HÀM DỊCH VỤ mà `/tech` dùng, KHÔNG `insert` thẳng: mức rủi ro, cổng phê
+    duyệt và mã việc đều do hàm ấy quyết. Chạy lại trên cùng CSDL tạm thì dùng lại việc đã có.
+  */
+  const daCo = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.title, viec.title), columns: { code: true } });
+  if (daCo) {
+    console.log(`▶ Việc đã có trong CSDL tạm: ${daCo.code} — dùng lại.`);
+    console.log(`TASK_CODE=${daCo.code}`);
+    return;
+  }
+  const t = await createTechTask(
+    { title: viec.title, description: viec.description, taskType: viec.taskType as never, module: viec.module as never, priority: "P3", source: "OWNER", agentId: vai.id },
+    nguoi,
+  );
+  if (!("ok" in t)) {
+    console.error(`✗ Không tạo được việc trong CSDL tạm: ${t.error}`);
+    process.exit(1);
+  }
+  console.log(`▶ Đã gieo ${t.code} (mã production: ${viec.code}) · rủi ro ${t.risk}`);
+  console.log(`TASK_CODE=${t.code}`);
+  console.log(`PROD_TASK_CODE=${viec.code}`);
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error("Lỗi:", error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
