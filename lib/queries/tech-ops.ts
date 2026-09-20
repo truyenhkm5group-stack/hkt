@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { TECH_DEPLOY_SORTABLE, TECH_INCIDENT_OPEN, TECH_INCIDENT_SORTABLE } from "@/lib/constants/tech";
 import { lastGithubRead as lastGithubReadAt } from "@/lib/integrations/github/read-marker";
@@ -110,7 +110,12 @@ export async function lastPrSyncRun(): Promise<{ at: Date | null; ranAt: Date; d
   const db = await getDb();
   const [row, at] = await Promise.all([
     db.query.syncRuns.findFirst({
-      where: and(eq(schema.syncRuns.source, "GITHUB"), eq(schema.syncRuns.job, "github-pr-sync")),
+      /*
+        BỎ `RUNNING`: một lượt đang chạy có `detail` RỖNG, nên lấy nó về sẽ thay câu tóm tắt tốt
+        cuối cùng bằng "không ghi tóm tắt" kèm một cảnh báo không có thật — suốt thời gian lượt
+        chạy diễn ra, và suốt 30 phút cửa sổ mồ côi nếu máy chủ vừa khởi động lại giữa chừng.
+      */
+      where: and(eq(schema.syncRuns.source, "GITHUB"), eq(schema.syncRuns.job, "github-pr-sync"), ne(schema.syncRuns.status, "RUNNING")),
       orderBy: [desc(schema.syncRuns.startedAt)],
       columns: { startedAt: true, detail: true, status: true },
     }),

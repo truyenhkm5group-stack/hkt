@@ -110,7 +110,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       "Nối bằng KHOÁ, không đoán: số PR đã biết, hoặc `tech_tasks.branch` BẰNG ĐÚNG nhánh nguồn của PR. Không dò mã việc trong tiêu đề. " +
       "Không đổi trạng thái việc, không đụng ô của người, và không làm `updated_at` của việc nhảy — mốc của phép chiếu nằm ở `pr_synced_at`. " +
       "PR đang mở mà không việc nào nhận được ĐẾM RIÊNG và in ra.",
-    run: (o) => runGithubPrSync({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit) }),
+    run: (o) => runGithubPrSync({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit), budget: num(o.params?.budget) }),
   },
   "tech-incident-watch": {
     label: "Mở sự cố cho job đồng bộ hỏng liên tiếp",

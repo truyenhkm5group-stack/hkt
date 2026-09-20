@@ -109,8 +109,14 @@ const JOBS = [
     CHÉP TRẠNG THÁI PR VỀ VIỆC TECH — 15 phút/lần, CHỈ ĐỌC.
 
     Lệch pha với `github-deployments` (offset khác nhau) để hai job không cùng lúc ăn vào hạn mức.
-    Mỗi lượt tốn 1 request cho danh sách PR, cộng 3 request cho mỗi việc ĐANG có PR — số lượt gọi
-    đi theo số việc đang chạy, không theo số PR của cả kho, nên nó không phình theo lịch sử.
+
+    HẠN MỨC TÍNH THEO GIỜ, KHÔNG THEO LƯỢT — đây là phép tính đã bị bỏ sót một lần. Mỗi lượt tốn
+    1 request cho danh sách PR, cộng 3 cho mỗi PR phải đọc chi tiết, và số PR ấy có TRẦN
+    (`prDetailBudget`, đi theo chế độ gọi). Ẩn danh: trần 3 ⇒ 10/lượt × 4 lượt = 40/giờ, cộng 4
+    của sổ deploy là 44 — còn chừa chỗ dưới hạn mức 60/giờ theo IP. Có token: trần 12 ⇒ 148/giờ
+    trên hạn mức 5.000, chiếm 3%.
+
+    Việc vượt trần được HOÃN chứ không cắt: thứ tự là "lâu chưa đọc nhất trước", nên nó xoay vòng.
 
     15 phút chứ không 3: cột này phục vụ một MÀN HÌNH QUẢN LÝ, không phục vụ một cái cổng. Ai cần
     biết CI vừa đỏ trong vòng một phút thì đọc GitHub, không đọc phép chiếu.

@@ -13,8 +13,8 @@ import {
   techPrStateFromGithub,
   techReviewStateFromReviews,
 } from "@/lib/constants/tech";
-import { __setGithubFetchForTests } from "@/lib/integrations/github/client";
-import { PR_DETAIL_BUDGET, syncGithubPullRequests } from "@/lib/integrations/github/pull-requests";
+import { __setGithubFetchForTests, githubConfig } from "@/lib/integrations/github/client";
+import { PR_DETAIL_BUDGET, PR_DETAIL_BUDGET_ANONYMOUS, prDetailBudget, syncGithubPullRequests } from "@/lib/integrations/github/pull-requests";
 import { lastGithubRead } from "@/lib/integrations/github/read-marker";
 import { setTechTaskStatus } from "@/lib/tech/service";
 import { watchSyncFailures } from "@/lib/tech/sync-incident-watch";
@@ -325,7 +325,20 @@ export async function testGithubPrSync() {
     lượt chạy, tức 604/giờ ở nhịp 15 phút — trong khi đường gọi ẩn danh chỉ có 60/giờ, và hết hạn
     mức thì CẢ `github-deployments` cũng chết theo.
   */
-  const nhieu = Array.from({ length: PR_DETAIL_BUDGET + 3 }, (_, i) => ({ number: 400 + i, headRef: `ai/backend/prj-budget-${i}`, sha: `${i}`.padStart(40, "e") }));
+  /*
+    TRẦN PHẢI HỎI LẠI HÀM, KHÔNG ĐƯỢC ĐOÁN TỪ MÔI TRƯỜNG.
+
+    Bản đầu của khối này giả định bài chạy ở chế độ ẩn danh vì nó đã `delete ERP_GITHUB_TOKEN`.
+    Sai: `token()` còn lùi về `GITHUB_TOKEN` và `GH_TOKEN`, mà máy chạy CI thường có sẵn
+    `GITHUB_TOKEN`. Trần thật là 12 chứ không phải 3, 6 PR không chạm trần, và khẳng định "phải
+    hoãn" đỏ — bài kiểm đo môi trường chứ không đo mã.
+
+    Nên: hỏi đúng thứ hàm sẽ dùng, rồi gieo dữ liệu tương đối so với NÓ.
+  */
+  assert.equal(prDetailBudget("TOKEN"), PR_DETAIL_BUDGET);
+  assert.equal(prDetailBudget("PUBLIC"), PR_DETAIL_BUDGET_ANONYMOUS, "đường gọi ẩn danh chỉ có 60 request/giờ THEO IP — trần phải nhỏ hơn hẳn, nếu không hết hạn mức sẽ giết cả job đọc sổ deploy");
+  const tranThat = prDetailBudget(githubConfig().auth);
+  const nhieu = Array.from({ length: tranThat + 3 }, (_, i) => ({ number: 400 + i, headRef: `ai/backend/prj-budget-${i}`, sha: `${i}`.padStart(40, "e") }));
   for (const [i] of nhieu.entries()) {
     const t = await createTechTask(
       { title: `prj- việc trần ${i}`, taskType: "BUGFIX", module: "TECH", priority: "P2", source: "OWNER", branch: `ai/backend/prj-budget-${i}` },
@@ -336,7 +349,15 @@ export async function testGithubPrSync() {
   const goiNhieu = fakeGithubPr(nhieu, {}, {});
   const coTran = await syncGithubPullRequests({ limit: 60 });
   assert.ok(coTran.deferred >= 3, `phải hoãn phần vượt trần, thực tế hoãn ${coTran.deferred}`);
-  assert.ok(goiNhieu.detail <= PR_DETAIL_BUDGET, `số lượt đọc chi tiết phải nằm dưới trần ${PR_DETAIL_BUDGET}, thực tế ${goiNhieu.detail}`);
+  assert.ok(goiNhieu.detail <= tranThat, `số lượt đọc chi tiết phải nằm dưới trần ${tranThat}, thực tế ${goiNhieu.detail}`);
+  assert.equal(coTran.budget, tranThat, "kết quả phải khai trần ĐÃ DÙNG — màn hình in con số này, không in hằng số");
+
+  /*
+    HẠN MỨC TÍNH THEO GIỜ, KHÔNG THEO LƯỢT. Đây là phép tính mà bản đầu đã bỏ sót: trần 12 với
+    nhịp 15 phút ra 148 request/giờ, gấp hơn hai lần hạn mức 60/giờ của đường ẩn danh.
+  */
+  const moiGio = 4 * (1 + 3 * PR_DETAIL_BUDGET_ANONYMOUS) + 4;
+  assert.ok(moiGio < 60, `ẩn danh: ${moiGio} request/giờ (kể cả 4 lượt của sổ deploy) phải nằm dưới hạn mức 60/giờ tính theo IP`);
 
   /*
     Lượt SAU phải đọc được những việc bị hoãn: thứ tự ưu tiên là "lâu chưa đọc nhất trước"
@@ -354,12 +375,24 @@ export async function testGithubPrSync() {
     GitHub không đổi trạng thái của một PR đã gộp nữa, nên đọc lại chúng mỗi 15 phút là tiêu hạn
     mức vào quá khứ — và chính nhóm này phình to nhất theo thời gian.
   */
-  const xong = await setTechTaskStatus({ taskId, to: "DONE", note: "prj- đóng để kiểm cửa sổ đọc lại" }, MAY);
-  if ("ok" in xong) {
-    const goiSauKhiXong = fakeGithubPr([{ number: 101, headRef: nhanh, sha, state: "closed", merged: true }], {}, {});
-    await syncGithubPullRequests({ limit: 60 });
-    assert.equal(goiSauKhiXong.detail, 0, "việc DONE + PR MERGED không được đọc lại lần nào nữa");
+  /*
+    ĐI ĐÚNG ĐƯỜNG CỦA MÁY TRẠNG THÁI, VÀ KHÔNG BỌC KẾT QUẢ TRONG MỘT `if`.
+
+    Bản đầu của khối này gọi thẳng `to: "DONE"` từ `NEW`. `TECH_TASK_TRANSITIONS.NEW` chỉ có
+    `TRIAGED` và `BLOCKED`, nên lời gọi trả `{ error }`, `"ok" in xong` là false, và khẳng định
+    bên trong KHÔNG BAO GIỜ CHẠY — một bài kiểm xanh vĩnh viễn cho một hàng rào chưa từng được
+    kiểm, trong khi tài liệu lại nói nó đã khoá. Đó đúng là loại bài kiểm tệ hơn không có bài kiểm.
+
+    Nên: đi đủ đường, và `assert.ok` từng bước để một phép chuyển bị đổi luật sau này làm bài kiểm
+    ĐỎ thay vì làm nó im lặng bỏ qua.
+  */
+  for (const buoc of ["TRIAGED", "BUILDING", "REVIEW", "QA", "READY_TO_DEPLOY", "DEPLOYING", "OBSERVING", "DONE"] as const) {
+    const b = await setTechTaskStatus({ taskId, to: buoc, note: `prj- đưa việc tới ${buoc} để kiểm cửa sổ đọc lại` }, MAY);
+    assert.ok("ok" in b, `phải chuyển được sang ${buoc}, thực tế: ${"error" in b ? b.error : ""}`);
   }
+  const goiSauKhiXong = fakeGithubPr([{ number: 101, headRef: nhanh, sha, state: "closed", merged: true }], {}, {});
+  await syncGithubPullRequests({ limit: 60 });
+  assert.equal(goiSauKhiXong.detail, 0, "việc DONE + PR MERGED không được đọc lại lần nào nữa — GitHub không đổi trạng thái một PR đã gộp");
 
   // ───────── 2.9 Chưa cấu hình kho ⇒ BỎ QUA có lý do, không phải lỗi ─────────
   delete process.env.ERP_GITHUB_REPO;

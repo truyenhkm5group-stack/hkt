@@ -17,6 +17,7 @@ import {
   listCheckRuns,
   listPullReviews,
   listRecentPulls,
+  type GithubAuthMode,
   type GithubErrorKind,
   type GithubPull,
 } from "@/lib/integrations/github/client";
@@ -75,8 +76,10 @@ export type GithubPrSyncResult = {
    * đó: *không thấy trong cửa sổ*.
    */
   unmatchedTasks: number;
-  /** Việc bị hoãn đọc sang lượt sau vì đã chạm trần lượt gọi. KHÔNG phải lỗi — xem `PR_DETAIL_BUDGET`. */
+  /** Việc bị hoãn đọc sang lượt sau vì đã chạm trần lượt gọi. KHÔNG phải lỗi — xem `prDetailBudget`. */
   deferred: number;
+  /** Trần ĐÃ DÙNG cho lượt này. In con số này ra, không in hằng số: hai thứ lệch nhau khi gọi ẩn danh. */
+  budget: number;
   /** PR đang MỞ mà không việc Tech nào nhận. Con số này phải được in ra, không được nuốt. */
   unmatchedOpenPulls: number;
   errors: number;
@@ -149,20 +152,32 @@ function motDong(p: { prState: string; ciState: string; reviewState: string; mer
 }
 
 /**
- * ═══════════ TRẦN LƯỢT GỌI — VÌ HẠN MỨC LÀ 60/GIỜ, KHÔNG PHẢI VÔ HẠN ═══════════
+ * ═══════════ TRẦN LƯỢT GỌI — VÀ NÓ PHẢI TÍNH THEO GIỜ, KHÔNG THEO LƯỢT ═══════════
  *
- * Mỗi PR gắn được việc tốn BA lượt gọi (chi tiết · check run · review). Bản đầu không có trần,
- * nên lý thuyết xấu nhất là 1 + 3×50 = **151 request mỗi lượt chạy** — với nhịp 15 phút là 604
- * request/giờ, trong khi đường gọi ẩn danh mà chính kho này khai là mặc định chỉ có **60/giờ**.
- * Hậu quả không dừng ở job này: hết hạn mức là hết cho CẢ `github-deployments`, và sổ deploy lại
- * đứng im — đúng cái đang đi sửa.
+ * Mỗi PR gắn được việc tốn BA lượt gọi (chi tiết · check run · review), cộng 1 cho danh sách.
  *
- * Trần 12 PR/lượt ⇒ tối đa 37 request/lượt, 148/giờ có token (thừa sức trong 5.000) và với đường
- * ẩn danh thì một lượt vẫn lọt dưới 60. Việc quá trần KHÔNG bị bỏ — nó được đọc ở lượt sau, vì
- * thứ tự ưu tiên là **việc lâu chưa đọc nhất trước** (`pr_synced_at` rỗng đứng đầu). Xoay vòng
- * như vậy thì mọi việc đều tới lượt, và không việc nào bị bỏ đói.
+ * Bản đầu đặt trần 12 PR/lượt rồi kết luận là "an toàn" — sai, vì nó tính theo LƯỢT trong khi
+ * hạn mức của GitHub tính theo GIỜ: 1 + 3×12 = 37 request/lượt × 4 lượt/giờ = **148/giờ**, gấp
+ * hơn hai lần hạn mức 60/giờ của đường gọi ẩn danh mà chính đoạn chú thích ấy trích dẫn. Hết hạn
+ * mức thì `github-deployments` chết theo, tức sổ deploy lại đứng im: đúng cái cả lượt này đi sửa.
+ *
+ * Nên trần đi theo CHẾ ĐỘ GỌI, vì hai chế độ khác nhau hơn hai bậc độ lớn:
+ *
+ *  · **Có token** — 5.000 request/giờ. 12 PR/lượt ⇒ 148/giờ, chiếm 3%. Thoải mái.
+ *  · **Ẩn danh** — 60 request/giờ TÍNH THEO IP MÁY CHỦ, và `github-deployments` đã ăn 4/giờ.
+ *    3 PR/lượt ⇒ 10 request/lượt × 4 = 40/giờ; cộng 4 của sổ deploy là 44, còn chừa chỗ cho
+ *    người bấm tay. Chậm, nhưng phép xoay vòng bên dưới bảo đảm mọi việc đều tới lượt.
+ *
+ * Việc quá trần KHÔNG bị bỏ — nó được đọc ở lượt sau, vì thứ tự ưu tiên là **việc lâu chưa đọc
+ * nhất trước** (`pr_synced_at` rỗng đứng đầu). Xoay vòng như vậy thì không việc nào bị bỏ đói.
  */
 export const PR_DETAIL_BUDGET = 12;
+export const PR_DETAIL_BUDGET_ANONYMOUS = 3;
+
+/** Trần thực tế của lượt chạy này. Tách ra để bài kiểm gọi được, và để màn hình in đúng con số. */
+export function prDetailBudget(auth: GithubAuthMode): number {
+  return auth === "TOKEN" ? PR_DETAIL_BUDGET : PR_DETAIL_BUDGET_ANONYMOUS;
+}
 
 export async function syncGithubPullRequests(opts: { limit?: number; budget?: number } = {}): Promise<GithubPrSyncResult> {
   const base: GithubPrSyncResult = {
@@ -173,6 +188,7 @@ export async function syncGithubPullRequests(opts: { limit?: number; budget?: nu
     unchanged: 0,
     unmatchedTasks: 0,
     deferred: 0,
+    budget: 0,
     unmatchedOpenPulls: 0,
     errors: 0,
     skippedReason: null,
@@ -238,7 +254,8 @@ export async function syncGithubPullRequests(opts: { limit?: number; budget?: nu
   }
 
   const out: GithubPrSyncResult = { ...base, pullsScanned: pulls.length, tasksConsidered: tasks.length };
-  const tran = Math.max(1, opts.budget ?? PR_DETAIL_BUDGET);
+  const tran = Math.max(1, opts.budget ?? prDetailBudget(cfg.auth));
+  out.budget = tran;
   const daGan = new Set<number>();
   // Một PR có thể gắn hai việc (việc con dùng chung nhánh); đọc chi tiết đúng MỘT lần cho mỗi PR.
   const dem = new Map<number, PrProjection>();
@@ -345,7 +362,7 @@ export async function runGithubPrSync(opts: { trigger: SyncTrigger; actor: strin
     ctx.summary.detail =
       `Quét ${r.pullsScanned} PR gần nhất · ${r.tasksConsidered} việc có khoá nối: gắn ${r.matched}, cập nhật ${r.updated}, không đổi ${r.unchanged}. ` +
       `${r.unmatchedTasks} việc không thấy PR trong cửa sổ này · ${r.unmatchedOpenPulls} PR đang MỞ không gắn việc nào` +
-      `${r.deferred ? ` · ${r.deferred} việc hoãn sang lượt sau (chạm trần ${PR_DETAIL_BUDGET} PR/lượt, ưu tiên việc lâu chưa đọc nhất)` : ""}.`;
+      `${r.deferred ? ` · ${r.deferred} việc hoãn sang lượt sau (chạm trần ${r.budget} PR/lượt, ưu tiên việc lâu chưa đọc nhất)` : ""}.`;
     if (r.errors) ctx.summary.warning = `${r.errors} việc không chép được trạng thái PR.`;
     return r;
   });
