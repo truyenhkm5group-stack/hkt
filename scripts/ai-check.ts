@@ -11,6 +11,7 @@
  * trên một kiện đang trong hàng đợi). Không có cờ thì chỉ kiểm đến chỗ "chờ xác nhận".
  */
 import "dotenv/config";
+import { AI_SELFTEST_CONTEXT } from "@/lib/constants/ai-selftest";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { confirmCopilotActions, runCopilot } from "@/lib/ai/copilot";
@@ -141,13 +142,13 @@ async function main() {
     throw Object.assign(new Error("simulated ETIMEDOUT"), { code: "ETIMEDOUT" });
   }) as unknown as typeof fetch;
   const t5a = Date.now();
-  const r5a = await runCopilot({ user, provider: new OpenAiProvider(modelFor(provider, "copilot"), "low", timeoutFetch), message: "ping", context: { route: "/", entityType: "", entityId: "" } });
+  const r5a = await runCopilot({ user, provider: new OpenAiProvider(modelFor(provider, "copilot"), "low", timeoutFetch), message: "ping", context: AI_SELFTEST_CONTEXT });
   (r5a.status === "ERROR" && r5a.error ? ok : fail)(`timeout mạng (giả) ⇒ status ${r5a.status} · lỗi "${(r5a.error ?? "").slice(0, 80)}" · ${Date.now() - t5a} ms (SDK thử lại 2 lần) · nhật ký ${r5a.interactionId ? "đã ghi" : "KHÔNG ghi"}`);
   const quotaFetch = (async () => new Response(JSON.stringify({ error: { message: "You exceeded your current quota (simulated)", type: "insufficient_quota", code: "insufficient_quota" } }), { status: 429, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
-  const r5b = await runCopilot({ user, provider: new OpenAiProvider(modelFor(provider, "copilot"), "low", quotaFetch), message: "ping", context: { route: "/", entityType: "", entityId: "" } });
+  const r5b = await runCopilot({ user, provider: new OpenAiProvider(modelFor(provider, "copilot"), "low", quotaFetch), message: "ping", context: AI_SELFTEST_CONTEXT });
   (r5b.status === "ERROR" && /quota|429/i.test(r5b.error ?? "") ? ok : fail)(`hết hạn mức 429 (giả) ⇒ status ${r5b.status} · lỗi "${(r5b.error ?? "").slice(0, 80)}"`);
   if (provider === "openai") {
-    const r5c = await runCopilot({ user, provider: new OpenAiProvider("gpt-5.6-khong-ton-tai", "low"), message: "ping", context: { route: "/", entityType: "", entityId: "" } });
+    const r5c = await runCopilot({ user, provider: new OpenAiProvider("gpt-5.6-khong-ton-tai", "low"), message: "ping", context: AI_SELFTEST_CONTEXT });
     (r5c.status === "ERROR" ? ok : fail)(`model không tồn tại (API thật) ⇒ status ${r5c.status} · lỗi "${(r5c.error ?? "").slice(0, 80)}"`);
   }
 

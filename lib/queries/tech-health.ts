@@ -1,6 +1,7 @@
-import { desc, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { aiDisabledReason, MODEL_BY_TIER, resolveProviderName } from "@/lib/ai/router";
+import { aiDisabledReason, MODEL_BY_TIER, resolveProviderName, type AiProviderName } from "@/lib/ai/router";
+import { AI_SELFTEST_ROUTE } from "@/lib/constants/ai-selftest";
 import { HEALTH_LABEL, getIntegrationHealth, type HealthState } from "@/lib/queries/integration-health";
 import { runningVersion, type RunningVersion } from "@/lib/version";
 
@@ -194,13 +195,50 @@ async function aiSignal(): Promise<TechHealthSignal> {
       href: "/integrations",
     };
   }
+  return aiSignalFor(provider);
+}
 
+/**
+ * PHẦN ĐO ĐƯỢC, TÁCH KHỎI PHẦN PHỤ THUỘC MÔI TRƯỜNG.
+ *
+ * `aiSignal()` trên kia trả lời hai câu khác hẳn nhau: *"máy chủ có khai nhà cung cấp nào không"*
+ * (đọc `.env`) và *"sổ lượt gọi nói gì về nhà cung cấp ấy"* (đọc CSDL). Gộp chúng làm câu thứ hai
+ * KHÔNG KIỂM ĐƯỢC ở nơi chưa khai khoá: hàm thoát sớm ở `UNKNOWN` và mọi mệnh đề lọc bên dưới
+ * không bao giờ chạy — một bài kiểm gọi `aiSignal()` trên máy như thế sẽ XANH mà chẳng đo gì.
+ *
+ * Tách ra để `provider` là THAM SỐ: bài kiểm truyền thẳng nhà cung cấp và đo đúng thứ cần đo, mà
+ * không phải đặt biến môi trường (AGENTS.md mục 65 — bài kiểm đo mã nguồn, không đo cái máy).
+ */
+export async function aiSignalFor(provider: AiProviderName): Promise<TechHealthSignal> {
   const db = await getDb();
+  /*
+    ═══ HAI THỨ PHẢI LOẠI RA, VÀ CẢ HAI ĐỀU ĐÃ LÀM SAI CON SỐ TRÊN PRODUCTION ═══
+
+    1 · LƯỢT TỰ KIỂM. `ops ai-check` CỐ Ý gây một timeout giả và một `429 ... (simulated)` để chứng
+        minh "lỗi có để lại dấu vết". Cả hai đi qua `runCopilot()` nên cả hai ghi `status = 'ERROR'`
+        vào đúng bảng này. Đo thật 20/09/2026: ba lượt `ai-check` (08:55 · 10:13 · 13:55) đẻ ra 6
+        dòng lỗi, và KHÔNG CÓ một lỗi OpenAI thật nào trong số đó — trong khi thẻ này kết luận
+        `DEGRADED`. Bộ đo sức khoẻ tự làm thứ nó đo trông ốm, và một cảnh báo sinh ra từ chính lượt
+        kiểm tra là cảnh báo người ta học cách bỏ qua.
+
+    2 · NHÀ CUNG CẤP KHÔNG CÒN DÙNG. Thẻ này in `detail: provider` (hôm nay là `anthropic`) nhưng
+        lại đếm lỗi của MỌI nhà cung cấp từng ghi vào bảng. Sau khi chuyển sang anthropic, những
+        lượt openai hỏng từ trước vẫn bị tính vào "sức khoẻ của anthropic" — một câu sai về một
+        thứ không liên quan.
+
+    KHÔNG BACKFILL dòng cũ (mục 8.8 · 35). Cửa sổ 24 giờ tự cuốn chúng ra sau một ngày.
+  */
+  const tu = new Date(Date.now() - 24 * 3600_000);
+  const dem = and(
+    ne(schema.aiInteractions.route, AI_SELFTEST_ROUTE),
+    eq(schema.aiInteractions.provider, provider),
+    gte(schema.aiInteractions.createdAt, tu),
+  );
   const [row] = await db
     .select({
-      lastAt: sql<Date | null>`max(${schema.aiInteractions.createdAt})`,
-      loi24h: sql<number>`count(*) filter (where ${schema.aiInteractions.status} = 'ERROR' and ${schema.aiInteractions.createdAt} >= ${new Date(Date.now() - 24 * 3600_000)})`,
-      luot24h: sql<number>`count(*) filter (where ${schema.aiInteractions.createdAt} >= ${new Date(Date.now() - 24 * 3600_000)})`,
+      lastAt: sql<Date | null>`max(${schema.aiInteractions.createdAt}) filter (where ${ne(schema.aiInteractions.route, AI_SELFTEST_ROUTE)} and ${eq(schema.aiInteractions.provider, provider)})`,
+      loi24h: sql<number>`count(*) filter (where ${dem} and ${schema.aiInteractions.status} = 'ERROR')`,
+      luot24h: sql<number>`count(*) filter (where ${dem})`,
     })
     .from(schema.aiInteractions);
 

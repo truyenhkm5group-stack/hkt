@@ -62,6 +62,7 @@ import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
 import { testTestHygiene } from "./test-hygiene.test";
+import { cleanupAiHealthFixtures, testAiHealthKhongDemLuotTuKiem, testAiHealthSourceGuards } from "./ai-health-selftest.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
 import { testPayrollPeriod } from "./payroll-period.test";
@@ -1836,6 +1837,12 @@ async function main() {
   await testAgentIngestDb();
   await cleanupAgentIngestFixtures();
   /*
+    SỨC KHOẺ AI. Chạy `getTechSystemHealth()` THẬT rồi gieo đúng hình dạng lỗi giả mà `ops ai-check`
+    để lại trên production, và đòi kết luận KHÔNG đổi. Tự dọn bằng tiền tố `ai-sel-`.
+  */
+  await testAiHealthKhongDemLuotTuKiem();
+  await cleanupAiHealthFixtures();
+  /*
     GHÉP QUẢNG CÁO TREO. Bài này chạy `reapplyAdsMapping()` THẬT, mà hàm đó quét toàn bộ dòng
     Facebook — nên nó tự chụp lại và trả về nguyên trạng `product_id`/`marketer_id` của mọi dòng
     (fixture `landing-attribution` có ba dòng như vậy). Xem `chupVaTraVe` trong bài.
@@ -1892,6 +1899,7 @@ async function main() {
   testAgentIngestPure();
   testAgentIngestSourceGuards();
   testTestHygiene();
+  testAiHealthSourceGuards();
   testAdsMappingGuards();
   testAdsIngestGuardsProductFk();
   testTechRiskEngine();
