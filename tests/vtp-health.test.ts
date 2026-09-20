@@ -6,6 +6,7 @@ import { viettelPostHealth } from "@/lib/queries/integrations";
 import { clearMemo } from "@/lib/cache";
 import { getIntegrationHealth } from "@/lib/queries/integration-health";
 import { isJobRunning, runSyncJob, runningJobKeys } from "@/lib/sync/runner";
+import { STATEMENT_MAIL_HEARTBEAT_KEY, STATEMENT_MAIL_SILENCE_HOURS, recordStatementMailContact } from "@/lib/integrations/viettelpost/statement-mail";
 
 /**
  * Hai sự thật vận hành mà production đã từng che mất:
@@ -106,6 +107,8 @@ export async function testVtpHealth(db: Db) {
   const vtpConnector = connectors.find((c) => c.key === "VIETTELPOST")!;
   assert.notEqual(vtpConnector.state, "HEALTHY", "fixture có gói tin kẹt và mã lạ nên Viettel Post không thể là ĐANG CHẠY TỐT");
 
+  await testSoNganHangVaBangKe(db);
+
     const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(schema.syncRuns)
     .where(and(eq(schema.syncRuns.source, "VIETTELPOST"), eq(schema.syncRuns.status, "RUNNING")));
   // ───────── KHOÁ JOB PHẢI ĐƯỢC NHẢ, KỂ CẢ KHI JOB HỎNG ─────────
@@ -126,4 +129,71 @@ export async function testVtpHealth(db: Db) {
   assert.ok(!runningJobKeys().includes(key), "khoá không được sót lại trong danh sách job đang chạy");
 
   console.log(`✓ Sức khoẻ Viettel Post: đóng lần chạy mồ côi (còn ${Number(n)} đang chạy thật) · đối chiếu không đạt ghi PARTIAL · phát hiện ${after.stageMismatch} vận đơn lệch trạng thái`);
+}
+
+/**
+ * ═══════════ SỔ NGÂN HÀNG / BẢNG KÊ: IM LẶNG PHẢI GIẢI THÍCH ĐƯỢC ═══════════
+ *
+ * Ca thật 12/09/2026: thẻ báo "3 ngày trước · trễ 67,6h · Đối chiếu gần nhất: Chưa chạy lần nào"
+ * trong khi trình kích hoạt Gmail vẫn chạy đủ mỗi 15 phút. Ba chỗ sai cùng lúc:
+ *
+ *   1. ô "Đối chiếu gần nhất" được truyền cứng `null` nên không bao giờ hiện lần chạy nào, dù mỗi
+ *      lượt Gmail đẩy tệp sang đều ghi một `sync_runs` job `vtp-statement-mail`;
+ *   2. mốc "nhận tin" lấy theo `received_at`, mà khoá tự nhiên là TÊN TỆP — gửi lại đúng tệp cũ
+ *      thì mốc đứng im dù đường dẫn vẫn chảy;
+ *   3. không có nhịp tim nên "Viettel Post chưa gửi bảng kê" và "script đã tắt" trông giống hệt.
+ */
+async function testSoNganHangVaBangKe(db: Db) {
+  const gioTruoc = (h: number) => new Date(Date.now() - h * 3600_000);
+
+  // Tệp bảng kê nhận cách đây 3 ngày, nhưng ĐƯỢC ĐỌC LẠI cách đây 1 giờ (script gửi lại tệp cũ).
+  await db.insert(schema.vtpStatementFiles).values({
+    filename: "BangKeChiCOD-health.xlsx",
+    content: "",
+    kind: "STATEMENT_DETAIL",
+    actor: "GMAIL:gmail",
+    receivedAt: gioTruoc(72),
+    lastImportedAt: gioTruoc(1),
+  });
+  await db.insert(schema.syncRuns).values({
+    source: "VIETTELPOST",
+    job: "vtp-statement-mail",
+    status: "SUCCESS",
+    trigger: "WEBHOOK",
+    actor: "GMAIL:gmail",
+    startedAt: gioTruoc(1),
+    finishedAt: gioTruoc(1),
+  });
+
+  clearMemo();
+  const bank = (await getIntegrationHealth()).find((c) => c.key === "BANK")!;
+  assert.ok(bank.lastEventAt, "phải nêu được mốc nhận tin gần nhất");
+  assert.ok(
+    (bank.lagHours ?? 99) < 2,
+    `gửi lại tệp cũ vẫn là một lần nhận: mốc phải theo lần ĐỌC gần nhất, không phải lần đầu thấy tên tệp (đang là ${bank.lagHours}h)`,
+  );
+  assert.ok(bank.lastReconciliation?.at, "mỗi lượt Gmail đẩy tệp đều ghi sync_runs — không được hiện 'Chưa chạy lần nào'");
+  assert.match(bank.reason, /Bảng kê Viettel Post gần nhất/, "phải tách bạch nửa bảng kê để một nửa chết không bị nửa kia che");
+  assert.ok(bank.senders?.some((s) => /Bảng kê/.test(s.label)), "phải liệt kê từng đường vào của kết nối tiền");
+
+  // ───────── Nhịp tim: chưa từng báo sống là CHƯA BIẾT, không phải đã chết ─────────
+  assert.equal(bank.heartbeat?.at, null, "chưa chạy script bản mới thì chưa có nhịp tim");
+  assert.equal(bank.heartbeat?.stale, false, "chưa từng báo sống KHÔNG được suy ra là đã chết");
+
+  await recordStatementMailContact({ actor: "GMAIL:gmail", files: 0, imported: 0, outcome: "PING" });
+  clearMemo();
+  const conSong = (await getIntegrationHealth()).find((c) => c.key === "BANK")!;
+  assert.ok(conSong.heartbeat?.at, "lượt chạy không có thư mới vẫn phải ghi được nhịp tim");
+  assert.equal(conSong.heartbeat?.stale, false, "vừa báo sống thì không thể là im lặng");
+
+  // Script tắt: nhịp tim cũ hơn ngưỡng ⇒ hạ mức, kể cả khi dữ liệu cũ vẫn còn nguyên.
+  const cu = { at: gioTruoc(STATEMENT_MAIL_SILENCE_HOURS + 1).toISOString(), actor: "GMAIL:gmail", files: 0, imported: 0, outcome: "PING" };
+  await db.update(schema.syncState).set({ value: cu }).where(eq(schema.syncState.key, STATEMENT_MAIL_HEARTBEAT_KEY));
+  clearMemo();
+  const daTat = (await getIntegrationHealth()).find((c) => c.key === "BANK")!;
+  assert.equal(daTat.heartbeat?.stale, true, "quá ngưỡng im lặng phải nhận ra");
+  assert.notEqual(daTat.state, "HEALTHY", "script lấy bảng kê đã tắt thì kết nối tiền không thể là ĐANG CHẠY TỐT");
+  assert.match(daTat.reason, /ngừng liên lạc/, "phải nói rõ vì sao hạ mức");
+
+  console.log(`✓ Sổ ngân hàng / bảng kê: mốc theo lần đọc (${bank.lagHours}h) · hiện được lần chạy vtp-statement-mail · nhịp tim script Gmail phân biệt "chưa có bảng kê" với "script đã tắt"`);
 }

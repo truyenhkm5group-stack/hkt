@@ -5,6 +5,7 @@ import { getDb, schema } from "@/db";
 import { env } from "@/lib/env";
 import { MAX_LIST_BASE64, MAX_LIST_FILES } from "@/lib/constants/cod";
 import { runVtpDataFileImport } from "@/lib/integrations/viettelpost/import-run";
+import { recordStatementMailContact } from "@/lib/integrations/viettelpost/statement-mail";
 import { staleMemo } from "@/lib/cache";
 import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
 import { publish } from "@/lib/realtime/bus";
@@ -36,9 +37,16 @@ const bodySchema = z.object({
         base64: z.string().min(1).max(MAX_LIST_BASE64),
       }),
     )
-    .min(1, "Không có tệp nào")
-    .max(MAX_LIST_FILES),
+    .max(MAX_LIST_FILES)
+    // Danh sách RỖNG là hợp lệ: đó là lượt "không có thư mới" của script, xem `ping` bên dưới.
+    .default([]),
   source: z.string().trim().max(120).optional(),
+  /**
+   * NHỊP TIM. Script chỉ có việc để làm khi hộp thư có bảng kê mới, nên những ngày Viettel Post
+   * không gửi gì thì ERP không nghe thấy gì — và "script đã chết" trông y hệt "chưa có bảng kê".
+   * Lượt không có tệp vẫn gọi sang đây để ERP biết đường dẫn còn sống.
+   */
+  ping: z.boolean().optional(),
 });
 
 function secretsFrom(request: NextRequest, body: Record<string, unknown>) {
@@ -75,6 +83,14 @@ export async function POST(request: NextRequest) {
   }
 
   const actor = `GMAIL:${parsed.data.source || "viettelpost"}`;
+
+  // Lượt không có tệp: chỉ ghi nhịp tim. KHÔNG ghi `sync_runs` — 96 lượt rỗng mỗi ngày sẽ chôn mất
+  // những lần chạy thật trong chính bảng lịch sử sinh ra để nhìn ra sự cố.
+  if (!parsed.data.files.length) {
+    await recordStatementMailContact({ actor, files: 0, imported: 0, outcome: "PING" });
+    return NextResponse.json({ ok: true, heartbeat: true, imported: 0, note: "Không có thư mới — đã ghi nhịp tim." });
+  }
+
   const db = await getDb();
   const [run] = await db
     .insert(schema.syncRuns)
@@ -108,6 +124,7 @@ export async function POST(request: NextRequest) {
       publish({ type: "sync", source: "VIETTELPOST", job: "vtp-statement-mail", status: failed.length ? "PARTIAL" : "SUCCESS" });
       scheduleAlertEvaluation();
     }
+    await recordStatementMailContact({ actor, files: parsed.data.files.length, imported, outcome: imported > 0 ? "IMPORTED" : "FAILED" });
     const body = { ok: imported > 0, imported, failed: failed.length, files: result.files.map((f) => ({ filename: f.filename, kind: f.kind, rows: f.rows, applied: f.applied, note: f.note })) };
     // KHÔNG được trả 200 khi không nhập được tệp nào. Script trong Gmail chỉ gắn nhãn
     // "đã nhập" khi nhận HTTP 200; trả 200 cho một lượt hỏng sạch khiến thư bị đánh dấu xong
@@ -116,6 +133,8 @@ export async function POST(request: NextRequest) {
   } catch (e) {
     const message = e instanceof Error ? e.message : "Lỗi không rõ";
     await db.update(schema.syncRuns).set({ status: "FAILED", error: message.slice(0, 900), finishedAt: new Date() }).where(eq(schema.syncRuns.id, run.id));
+    // Lượt hỏng vẫn là một lần script liên lạc được: đường dẫn sống, chỗ hỏng nằm ở ERP.
+    await recordStatementMailContact({ actor, files: parsed.data.files.length, imported: 0, outcome: "FAILED" });
     // Trả 500 để Apps Script biết mà thử lại lần chạy sau; tệp chưa được nhập nên không mất dữ liệu.
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
