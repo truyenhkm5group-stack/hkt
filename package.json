@@ -21,7 +21,7 @@
     "import:bank": "tsx --tsconfig tsconfig.json scripts/import-bank-ledger.ts",
     "import:vtp-statements": "tsx --tsconfig tsconfig.json scripts/import-vtp-statements.ts",
     "set:setting": "tsx --tsconfig tsconfig.json scripts/set-setting.ts",
-    "test": "tsx --tsconfig tsconfig.json tests/sync-fixtures.test.ts",
+    "test": "tsx --tsconfig tsconfig.json tests/sync-fixtures.test.ts && node scripts/run-unit-tests.mjs",
     "db:generate": "drizzle-kit generate",
     "gate": "tsx --tsconfig tsconfig.json scripts/final-gate.ts",
     "bench": "tsx --tsconfig tsconfig.json scripts/bench-reports.ts",
@@ -32,7 +32,8 @@
     "ai:ingest": "tsx --tsconfig tsconfig.json scripts/ai-sales-ingest.ts",
     "ai:size-rules": "tsx --tsconfig tsconfig.json scripts/import-size-rules.ts",
     "ai:probe": "tsx --tsconfig tsconfig.json scripts/pancake-chat-probe.ts",
-    "ai:regression": "tsx --tsconfig tsconfig.json scripts/run-sales-ai-regression.ts"
+    "ai:regression": "tsx --tsconfig tsconfig.json scripts/run-sales-ai-regression.ts",
+    "test:unit": "node scripts/run-unit-tests.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",
