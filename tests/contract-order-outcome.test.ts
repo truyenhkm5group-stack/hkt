@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { ELIGIBLE_SENT_OUTCOMES, ELIGIBLE_SENT_SQL, OUTCOME_LABEL, RETURN_RULE } from "@/lib/constants/returns";
-import { OUTCOME_GROUP } from "@/lib/constants/truth";
+import { OPEN_OUTCOMES, OPEN_OUTCOMES_SQL, OUTCOME_GROUP } from "@/lib/constants/truth";
 import { ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED } from "@/lib/queries/return-rate";
 
 /**
@@ -278,6 +278,32 @@ export async function testOrderOutcomeContract(db: Db) {
   const viPham = tepMa.filter((f) => LITERAL.test(readFileSync(f, "utf8")));
   assert.deepEqual(viPham, [], `gõ lại danh sách 'đã gửi' — dùng ELIGIBLE_SENT_SQL (lib/constants/returns.ts) thay vì chép: ${viPham.join(", ")}`);
   assert.ok(tepMa.length > 200, `phải quét được toàn bộ kho mã, chỉ thấy ${tepMa.length} tệp`);
+
+  // ───────── "CHƯA NGÃ NGŨ" (OPEN): CÙNG MỘT BÀI HỌC, MỘT LỚP LỖI ĐÃ XẢY RA THẬT ─────────
+  //
+  // Bốn vị ngữ SQL đếm đơn chưa ngã ngũ đã gõ lại danh sách bằng trí nhớ và dừng ở bộ ba của
+  // TRƯỚC 13/09/2026. Hậu quả đo được trên production 19/09/2026, kỳ 01/09–09/09: 50 đơn
+  // `AWAITING_PICKUP` rơi ra khỏi CẢ tử số lẫn mẫu số của độ chín — 423 + 46 = 469 thay vì 519,
+  // độ chín in 90,2% thay vì 81,5%. Nay danh sách SINH RA từ `OUTCOME_GROUP`.
+  assert.deepEqual(
+    [...OPEN_OUTCOMES].sort(),
+    ["AWAITING_PICKUP", "IN_TRANSIT", "NOT_SHIPPED", "UNKNOWN"],
+    "'chưa ngã ngũ' = bốn kết quả chưa kết thúc, KHÔNG phải bộ ba của trước 13/09/2026",
+  );
+  assert.ok(OPEN_OUTCOMES.includes("AWAITING_PICKUP"), "kiện chờ bưu tá tới lấy CHƯA ngã ngũ — chưa rời kho thì chưa có kết cục nào");
+  // Và nó phải là ĐÚNG tập con OPEN của bảng nhóm, không phải một danh sách song song.
+  assert.deepEqual(
+    [...OPEN_OUTCOMES].sort(),
+    (Object.keys(OUTCOME_GROUP) as (keyof typeof OUTCOME_GROUP)[]).filter((k) => OUTCOME_GROUP[k] === "OPEN").sort(),
+    "phải sinh ra từ OUTCOME_GROUP, không phải một bản khai thứ hai",
+  );
+  assert.equal(OPEN_OUTCOMES_SQL, OPEN_OUTCOMES.map((x) => `'${x}'`).join(","), "chuỗi SQL phải sinh ra từ chính mảng hằng số");
+
+  // Không tệp nào được gõ lại — kể cả bản ĐỦ BỐN GIÁ TRỊ: một bản chép đang đúng hôm nay vẫn là
+  // một chỗ phải nhớ sửa vào lần thêm kết quả tiếp theo, và đó chính là cách 50 đơn kia rơi ra.
+  const OPEN_LITERAL = /in\s*\(\s*'IN_TRANSIT'\s*,\s*'NOT_SHIPPED'\s*,\s*'UNKNOWN'/;
+  const viPhamOpen = tepMa.filter((f) => OPEN_LITERAL.test(readFileSync(f, "utf8")));
+  assert.deepEqual(viPhamOpen, [], `gõ lại danh sách 'chưa ngã ngũ' — dùng OPEN_OUTCOMES_SQL (lib/constants/truth.ts) thay vì chép: ${viPhamOpen.join(", ")}`);
 
   // ───────── Chống trôi: chỉ MỘT công thức, và nguồn phải trỏ về đặc tả ─────────
   const spec = readFileSync("docs/business-rules/ORDER_OUTCOME.md", "utf8");
