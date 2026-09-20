@@ -1,4 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { getDb, schema, type Db } from "@/db";
 import type { CodStatus, Shipment, ShipmentStage } from "@/db/schema";
 import { env } from "@/lib/env";
@@ -483,7 +484,7 @@ async function ingestOrders(ctx: SyncContext, orders: unknown[], force: boolean)
       else ctx.summary.skipped += 1;
     } catch (error) {
       ctx.summary.failed += 1;
-      ctx.log(`Đơn ${mapped.systemId ?? mapped.id}: ${error instanceof Error ? error.message : String(error)}`);
+      ctx.log(`Đơn ${mapped.systemId ?? mapped.id}: ${moTaLoiCsdl(error)}`);
     }
   }
   await ctx.progress();
@@ -598,7 +599,7 @@ export async function syncProducts(options: { trigger?: SyncTrigger; actor?: str
           count += mapped.variants.length;
         } catch (error) {
           ctx.summary.failed += 1;
-          ctx.log(`Sản phẩm ${mapped.name}: ${error instanceof Error ? error.message : String(error)}`);
+          ctx.log(`Sản phẩm ${mapped.name}: ${moTaLoiCsdl(error)}`);
         }
       }
       ctx.summary.detail = `Trang ${page}/${totalPages} · ${ctx.summary.updated} sản phẩm · ${count} mẫu mã`;
@@ -620,7 +621,7 @@ export async function syncProducts(options: { trigger?: SyncTrigger; actor?: str
         vpage += 1;
       } while (vpage <= vpages && vpage <= 500);
     } catch (error) {
-      ctx.log(`Bỏ qua danh sách mẫu mã phẳng: ${error instanceof Error ? error.message : String(error)}`);
+      ctx.log(`Bỏ qua danh sách mẫu mã phẳng: ${moTaLoiCsdl(error)}`);
     }
     publish({ type: "stock", variantId: "*" });
     ctx.summary.detail = `${ctx.summary.updated} sản phẩm · ${count} mẫu mã`;
@@ -652,7 +653,7 @@ export async function syncCustomers(options: { trigger?: SyncTrigger; actor?: st
           ctx.summary.updated += 1;
         } catch (error) {
           ctx.summary.failed += 1;
-          ctx.log(`Khách ${mapped.name}: ${error instanceof Error ? error.message : String(error)}`);
+          ctx.log(`Khách ${mapped.name}: ${moTaLoiCsdl(error)}`);
         }
       }
       ctx.summary.detail = `Trang ${page}/${totalPages} · ${ctx.summary.updated} khách hàng`;

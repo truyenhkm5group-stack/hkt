@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { schema, type Db } from "@/db";
 import { resolveVtpStatus, type VtpResolved } from "@/lib/integrations/viettelpost/status";
 
@@ -137,7 +138,7 @@ export async function ghiSoTrangThai(db: Db, quanSat: StatusObservation[]): Prom
       });
   } catch (error) {
     // Sổ quan sát không được phép làm hỏng đường ghi chứng từ ĐVVC — xem đoạn đầu tệp.
-    console.warn(`[vtp-registry] không ghi được sổ trạng thái: ${error instanceof Error ? error.message : String(error)}`);
+    console.warn(`[vtp-registry] không ghi được sổ trạng thái: ${moTaLoiCsdl(error)}`);
     return chuaDich;
   }
   if (chuaDich.length) {

@@ -1,4 +1,5 @@
 import { normalize } from "@/lib/text";
+import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { loadProductCodeIndex } from "@/lib/integrations/facebook/sync";
@@ -148,7 +149,7 @@ export async function reapplyAdsMapping(): Promise<ReapplyAdsMappingResult> {
         .returning({ id: schema.adSpends.id });
       changed += result.length;
     } catch (error) {
-      errors.push({ campaignId: row.campaignId, message: error instanceof Error ? error.message : String(error) });
+      errors.push({ campaignId: row.campaignId, message: moTaLoiCsdl(error) });
     }
   }
   return { campaigns: rows.length, changed, danglingProducts, errors };
