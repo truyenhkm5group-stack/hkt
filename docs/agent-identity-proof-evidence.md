@@ -107,13 +107,46 @@ Không có dòng `environment:` nào ở job `proof`. Ba secret chỉ tồn tạ
 > điệp **đúng ngữ pháp và sai địa chỉ**, và người đọc nó sẽ đi thêm lại Repository secret, tức dựng
 > lại đúng bản trùng tên mà Environment sinh ra để xoá.
 
-Ô này để trống có chủ đích. Điền sau khi #39 merge:
+### Cập nhật cùng ngày, 07:10 — chỗ chặn đã hết, phép đo thì chưa chạy
 
 | | |
 |---|---|
-| Run `probe_merge` | *(chưa chạy)* |
-| Kết quả mong đợi | App **KHÔNG** gộp được PR của chính nó |
-| Kết quả thực tế | *(chưa có)* |
+| #39 | **MERGED** lúc `2026-09-20T06:50:57Z` → `main` = `6df5881` |
+| Job `proof` trên main mới | **đã có** `environment: agent-identity` (dòng 46) ⇒ chỗ chặn kỹ thuật HẾT |
+| Số lượt chạy `agent-identity-proof.yml` | **0** (`total_count: 0`) — chưa bao giờ được dispatch |
+| Run `probe_merge` | **CHƯA CHẠY** |
+| Kết quả thực tế | **CHƯA CÓ** |
+| PR #24 | **ĐÃ ĐÓNG** lúc `2026-09-20T07:03:48Z` — không phải do phiên này |
+
+**Nên ô này vẫn trống, và giờ nó trống theo một kiểu khác.** Trước 06:50 nó trống vì *không chạy
+được*; sau 06:50 nó trống vì *chưa ai chạy*, trong khi cái PR dựng ra để đo đã bị đóng.
+
+Hai thứ đó khác nhau và phải nói tách ra: phần **danh tính** (mục 1) đã ĐẠT và đóng #24 là đúng —
+bằng chứng của nó đầy đủ, ghi ở trên. Phần **"App có gộp được PR không"** thì vẫn là một câu hỏi
+CHƯA CÓ CÂU TRẢ LỜI ĐO ĐƯỢC.
+
+### Và phép đo ấy KHÔNG phải read-only — đọc kỹ trước khi chạy
+
+`scripts/agent-identity-proof.ts` không phải một kịch bản quan sát. Nó là **phép thử xâm nhập vào
+chính hàng rào của kho**: mỗi bước gọi THẬT một API bị cấm rồi khẳng định lời gọi ấy **phải hỏng**
+(`phaiBiTuChoi`). Riêng `--probe-merge` gọi `PUT /pulls/{n}/merge` vào `main`. Chú thích của chính
+nó nói thẳng:
+
+> *"…thử nó là **thật sự gộp một thứ vào nhánh mặc định** chứ không phải chứng minh nó bị chặn."*
+
+Ba hệ quả phải biết trước khi bấm:
+
+1. **Nếu ruleset kín** → lời gọi bị từ chối → đó chính là bằng chứng cần. Đây là kết quả mong đợi,
+   vì ruleset nay ở 1 duyệt bắt buộc với `bypass_actors: []`.
+2. **Nếu ruleset có lỗ** → một commit **chưa ai duyệt** vào thẳng `main`. Hồi phục được bằng
+   `revert`, nhưng đó là một lần vỡ hàng rào thật.
+3. **Dù kết quả nào**, script tự tạo một nhánh + một PR mới mỗi lượt chạy (`openAgentPullRequest`)
+   rồi mới thử gộp *cái PR nó vừa tạo*. Chạy nó là **cộng thêm một PR vào hàng đợi**.
+
+Bước 5a cũng thử `PUT /contents` lên `main` và `git push HEAD:main` thật, cùng cơ chế.
+
+Không có cách nào đo "App có gộp được không" mà không thử gộp — nên đây là đánh đổi, không phải
+thiếu sót của thiết kế. Nhưng nó là quyết định của chủ shop, không phải một bước dọn dẹp.
 
 ---
 
@@ -126,3 +159,8 @@ tại. Bằng chứng thuộc về biên bản, không thuộc về cây mã.
 
 **Nhánh proof KHÔNG bị xoá:** `ai/proof/identity-2026-09-19-mu8jribc` và
 `ai/proof/bridge-env-2026-09-20` giữ nguyên, vì SHA trong bảng trên chỉ tra được khi nhánh còn sống.
+
+> Lưu ý về SHA của #24: nhánh ấy được cập nhật nhiều lần trong ngày (`3e8de1b8` → `9acd4e10` →
+> `a26fd097`) khi các phiên khác đồng bộ nó với `main`. Bảng ở mục 1 ghi SHA **tại thời điểm đọc
+> lượt duyệt**, và lượt duyệt của `nguyenloineu94` luôn được GitHub báo gắn đúng HEAD đang xét ở
+> mỗi lần đọc. Ai cần truy lại chính xác thì đọc `pullrequestreview-5256913573`.
