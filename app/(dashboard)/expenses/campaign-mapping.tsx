@@ -25,6 +25,18 @@ function valueOf(row: CampaignMappingRow) {
 }
 
 /** Bảng ghép chiến dịch Facebook → mã hàng, kèm bí danh cho từng mã */
+/**
+ * CẢNH BÁO KHÔNG ĐƯỢC ĐI CHUNG CỬA VỚI LỜI CHÚC MỪNG.
+ *
+ * Một lượt ghi vừa XONG vừa có chuyện phải biết (bảng ghép còn dòng trỏ vào mã hàng đã biến mất —
+ * đúng thứ đã làm job `facebook-ads` chết nhiều giờ ngày 20/09/2026). Nuốt nó đi thì dòng hỏng ấy
+ * sống mãi; báo nó thành `error` thì người dùng tưởng thao tác vừa rồi thất bại.
+ */
+function baoKetQua(warning: string | undefined, thanhCong: string) {
+  toast.success(thanhCong);
+  if (warning) toast.warning(warning, { duration: 12_000 });
+}
+
 export function CampaignMapping({ rows, products, aliases, marketers, canWrite, periodLabel }: { rows: CampaignMappingRow[]; products: Product[]; aliases: Record<string, string[]>; marketers: Marketer[]; canWrite: boolean; periodLabel?: string }) {
   const [search, setSearch] = useState("");
   const [onlyUnmapped, setOnlyUnmapped] = useState(false);
@@ -41,7 +53,7 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
       setPendingMarketer(null);
       if ("error" in result) toast.error(result.error);
       else {
-        toast.success(value === "__auto__" ? "Đã để tự nhận diện marketer" : value ? `Đã gán cho ${marketerName(value)}` : "Đã bỏ marketer");
+        baoKetQua(result.warning, value === "__auto__" ? "Đã để tự nhận diện marketer" : value ? `Đã gán cho ${marketerName(value)}` : "Đã bỏ marketer");
         router.refresh();
       }
     });
@@ -74,7 +86,7 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
       setBulkPending(false);
       if ("error" in result) toast.error(result.error);
       else {
-        toast.success(`Đã áp dụng cho ${ids.length} chiến dịch · ${result.changed} dòng chi tiêu được ghép lại`);
+        baoKetQua(result.warning, `Đã áp dụng cho ${ids.length} chiến dịch · ${result.changed} dòng chi tiêu được ghép lại`);
         setSelected(new Set());
         setBulkProduct("__keep__");
         setBulkMarketer("__keep__");
@@ -99,7 +111,7 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
       setPendingId(null);
       if ("error" in result) toast.error(result.error);
       else {
-        toast.success(value === "__exclude__" ? "Đã loại chiến dịch khỏi chi phí" : value === "__test__" ? "Đã đánh dấu là chi phí test" : value === "__auto__" ? "Đã để tự nhận diện" : `Đã ghép với ${productName(value)}`);
+        baoKetQua(result.warning, value === "__exclude__" ? "Đã loại chiến dịch khỏi chi phí" : value === "__test__" ? "Đã đánh dấu là chi phí test" : value === "__auto__" ? "Đã để tự nhận diện" : `Đã ghép với ${productName(value)}`);
         router.refresh();
       }
     });
@@ -291,7 +303,7 @@ function AliasEditor({ products, aliases }: { products: Product[]; aliases: Reco
       setPendingId(null);
       if ("error" in result) toast.error(result.error);
       else {
-        toast.success(`Đã lưu bí danh · ${result.changed} dòng chi tiêu được ghép lại`);
+        baoKetQua(result.warning, `Đã lưu bí danh · ${result.changed} dòng chi tiêu được ghép lại`);
         router.refresh();
       }
     });

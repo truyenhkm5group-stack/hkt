@@ -39,12 +39,6 @@ const KHONG_CAN_LICH: Record<string, string> = {
   "failed-delivery": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",
   "phone-verify": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",
   "facebook-ad-index": "chạy lồng trong `facebook-ads` (lib/sync/jobs.ts), mỗi 60 phút",
-  /*
-    Phase 2A CỐ Ý chưa đưa vào lịch. Đổi lịch scheduler production là việc phải hỏi chủ shop
-    (AGENTS.md mục 7), và bản này đang ở bước "bật đọc, chưa bật tự chạy": job chạy tay từ trang
-    Kết nối dữ liệu hoặc ops `run-job` để đo xem nó tốn bao nhiêu hạn mức API GitHub trước đã.
-  */
-  "github-deployments": "Phase 2A: chạy tay để đo hạn mức API trước; đưa vào lịch là quyết định của chủ shop (AGENTS.md mục 7)",
   "facebook-adset-index": "chạy lồng trong `facebook-ads` (lib/sync/jobs.ts), mỗi 60 phút — tra theo ĐÚNG mã tracking landing đang cần, không quét cả tài khoản",
 };
 
@@ -115,6 +109,21 @@ export function testSchedulerCoverage() {
   // Danh sách miễn trừ phải sạch: khai miễn trừ cho job đã xoá là rác tích lại, và che mất ca thật.
   const thua = Object.keys(KHONG_CAN_LICH).filter((j) => !khai.includes(j));
   assert.deepEqual(thua, [], `KHONG_CAN_LICH còn khai job đã bị xoá: ${thua.join(", ")}`);
+
+  /*
+    ───────── MIỄN TRỪ PHẢI MẤT ĐI KHI JOB ĐƯỢC LÊN LỊCH ─────────
+
+    `github-deployments` từng nằm ở đây với lý do "Phase 2A: chạy tay để đo hạn mức trước". Lý do
+    ấy hết hiệu lực ngày 20/09/2026 khi job được đưa vào lịch 15 phút — nhưng không có gì buộc
+    dòng miễn trừ phải đi theo. Một dòng miễn trừ còn sót lại nói SAI về hệ thống đang chạy, và
+    lần sau có người đọc nó rồi kết luận nhầm rằng job vẫn chưa có lịch.
+  */
+  const mienTruNhungVanCoLich = Object.keys(KHONG_CAN_LICH).filter((j) => coLich.has(j));
+  assert.deepEqual(
+    mienTruNhungVanCoLich,
+    [],
+    `KHONG_CAN_LICH khai "chạy tay" cho job ĐANG CÓ LỊCH: ${mienTruNhungVanCoLich.join(", ")} — xoá dòng miễn trừ, nó không còn đúng nữa.`,
+  );
 
   // Chốt riêng ca đã gây sự cố: lớp tăng tốc PHẢI có người làm mới, không được quay lại chạy tay.
   assert.ok(

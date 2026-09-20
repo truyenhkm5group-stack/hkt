@@ -5,8 +5,9 @@ import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
 import { can, requirePermission } from "@/lib/auth/session";
 import { TECH_TASK_SORTABLE } from "@/lib/constants/tech";
-import { formatNumber } from "@/lib/format";
+import { formatNumber, formatTimeAgo } from "@/lib/format";
 import { listTechTasks, techOverviewCounts, techTaskFacets } from "@/lib/queries/tech";
+import { lastPrSyncRun } from "@/lib/queries/tech-ops";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Hàng đợi việc Tech" };
@@ -22,7 +23,7 @@ export default async function TechTasksPage({ searchParams }: { searchParams: Pr
     defaultPeriod: "all",
   });
 
-  const [{ rows, total, pageCount }, facets, counts] = await Promise.all([listTechTasks(params), techTaskFacets(params), techOverviewCounts()]);
+  const [{ rows, total, pageCount }, facets, counts, prSync] = await Promise.all([listTechTasks(params), techTaskFacets(params), techOverviewCounts(), lastPrSyncRun()]);
 
   return (
     <div className="space-y-5">
@@ -42,6 +43,41 @@ export default async function TechTasksPage({ searchParams }: { searchParams: Pr
       />
 
       <TechNav />
+
+      {/*
+        PHÉP CHIẾU PR PHẢI KHAI ĐỘ TƯƠI CỦA CHÍNH NÓ, VÀ KHAI CẢ PHẦN NÓ KHÔNG BIẾT.
+
+        Cột "Pull request" trong bảng là ẢNH CHỤP do một job 15 phút/lần chép về — không phải tình
+        trạng ngay lúc này. Và quan trọng hơn: job đếm được số PR ĐANG MỞ mà KHÔNG việc nào nhận.
+        Một hàng đợi sạch bong trong khi GitHub có bốn PR treo là một câu trả lời sai, nên con số
+        ấy phải đứng ngay trên bảng chứ không nằm trong nhật ký đồng bộ.
+
+        In nguyên câu job đã viết, không bóc tách lại: bóc tách là dựng một nguồn thứ hai rồi để
+        nó lặng lẽ trôi khỏi nguồn thứ nhất.
+      */}
+      <p className="rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        <b className="text-foreground">Phép chiếu Pull request:</b>{" "}
+        {prSync ? (
+          <>
+            {prSync.detail || "lượt chạy gần nhất không ghi tóm tắt"} · chạy {formatTimeAgo(prSync.ranAt)}
+            {/*
+              MỐC CHẠY VÀ MỐC ĐỌC ĐƯỢC LÀ HAI THỨ, và chúng lệch nhau đúng ở ca GitHub từ chối
+              trả lời (hết hạn mức, lỗi mạng). Gộp làm một thì sổ trông tươi nhất đúng lúc nó
+              chắc chắn đứng im — xem `lib/integrations/github/read-marker.ts`.
+            */}
+            {prSync.at ? (
+              prSync.at.getTime() < prSync.ranAt.getTime() - 60_000 ? (
+                <span className="font-semibold text-warning"> · nhưng lần ĐỌC ĐƯỢC gần nhất là {formatTimeAgo(prSync.at)} — lượt chạy sau đó không hỏi được GitHub</span>
+              ) : null
+            ) : (
+              <span className="font-semibold text-warning"> · chưa lượt nào ĐỌC ĐƯỢC dữ liệu từ GitHub</span>
+            )}
+            {prSync.warning ? <span className="font-semibold text-warning"> · lượt chạy gần nhất có cảnh báo</span> : null}
+          </>
+        ) : (
+          <>chưa lượt đọc nào chạy — bốn cột PR trong bảng còn trống vì CHƯA BIẾT, không phải vì việc chưa có PR. Chạy job <code>github-pr-sync</code> ở trang Kết nối dữ liệu.</>
+        )}
+      </p>
 
       <DataTableToolbar
         searchPlaceholder="Mã việc, tiêu đề, nhánh git…"

@@ -88,17 +88,47 @@ async function phaiBiTuChoi(nhan: string, url: string, init: RequestInit, token:
     fail(`${nhan}: không gọi được (${e instanceof Error ? e.message : String(e)}) — CHƯA BIẾT, không phải "đã bị chặn"`);
     return;
   }
+  const body = await res.text();
+
+  /*
+    ═══ PHÂN LOẠI THEO KẾT CỤC, KHÔNG THEO DANH SÁCH MÃ ═══
+
+    Khẳng định đang kiểm là "lời gọi này KHÔNG được thành công". Vậy thì thứ quyết định ĐỎ hay
+    XANH là `res.ok`, không phải việc mã trả về có nằm trong một danh sách gõ tay hay không.
+
+    Đây là lần THỨ HAI cùng một lỗi. Chú thích ngay trên đã kể lần đầu: hàm chỉ nhận 403/404 nên
+    chấm 409 thành ĐỎ, và bản vá lúc ấy **thêm 409 vào danh sách**. Ngày 20/09/2026 lượt chạy
+    `probe_merge` đầu tiên gặp **405**:
+
+        gộp PR của chính mình: KHÔNG bị từ chối — HTTP 405.
+        {"message":"Repository rule violations found\n\nNew changes require approval from someone
+         other than the last pusher.\n\nRequired status check \"gates / gates\" is expected."}
+
+    Lượt gộp ấy BỊ CHẶN, và chặn bởi đúng hai luật ta muốn thấy — nhưng bài kiểm in ra chữ "KHÔNG
+    bị từ chối". Vá một mã số nữa vào danh sách thì lần thứ ba sẽ là 422, hoặc 451, hoặc một mã
+    GitHub chưa dùng tới. Nên lần này vá cái LỚP.
+  */
+  if (res.ok) {
+    fail(`${nhan}: KHÔNG bị từ chối — HTTP ${res.status} (THÀNH CÔNG). ${body.slice(0, 300)}`);
+    return;
+  }
+
+  // Bị từ chối rồi. Phần còn lại chỉ là nói ĐÚNG TÊN thứ đã chặn, vì ba lý do dưới đây sửa ở ba chỗ khác nhau.
+  const luat = [...body.matchAll(/(Changes must be made through a pull request|Required status check [^"\\]+|Cannot force-push|New changes require approval[^"\\]*|[^"\\]*review[^"\\]*required)/gi)].map((m) => m[1]!.trim()).slice(0, 3);
+  if (/rule violations|protected branch|required status check|require[sd]? approval/i.test(body)) {
+    OK(`${nhan}: BỊ TỪ CHỐI (HTTP ${res.status}) — RULESET chặn${luat.length ? `: ${luat.join(" · ")}` : ""}`);
+    return;
+  }
   if (res.status === 403 || res.status === 404) {
     OK(`${nhan}: BỊ TỪ CHỐI (HTTP ${res.status}) — App thiếu quyền`);
     return;
   }
-  const body = await res.text();
-  if (res.status === 409 && /rule violations|protected branch/i.test(body)) {
-    const ly = [...body.matchAll(/(Changes must be made through a pull request|Required status check [^\\"]+|Cannot force-push|[^\\"]*review[^\\"]*required)/gi)].map((m) => m[1]).slice(0, 3);
-    OK(`${nhan}: BỊ TỪ CHỐI (HTTP 409) — RULESET chặn${ly.length ? `: ${ly.join(" · ")}` : ""}`);
-    return;
-  }
-  fail(`${nhan}: KHÔNG bị từ chối — HTTP ${res.status}. ${body.slice(0, 300)}`);
+  /*
+    Bị từ chối nhưng KHÔNG đọc được lý do. Vẫn XANH — khẳng định "không thành công" đã đạt — nhưng
+    nói thẳng là chưa phân loại được, để không ai đọc nó thành "ruleset đã chặn". Một 500 của
+    GitHub cũng rơi vào đây, và nó không chứng minh hàng rào nào cả.
+  */
+  OK(`${nhan}: BỊ TỪ CHỐI (HTTP ${res.status}) — chưa phân loại được lý do: ${body.slice(0, 160)}`);
 }
 
 async function main() {
@@ -249,7 +279,36 @@ async function main() {
   // 5a. Đẩy thẳng nhánh mặc định. Hai đường, và chỉ đường API là đường đo được ở mọi môi trường.
   await phaiBiTuChoi(`ghi thẳng vào ${base} qua API`, `${API}/repos/${cfg.owner}/${cfg.repo}/contents/${tep.split("/").map(encodeURIComponent).join("/")}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: "phép thử phải hỏng", content: Buffer.from("x").toString("base64"), branch: base }) }, token);
   if (gitPushDoDuoc) {
+    /*
+      ═══ PHÉP THỬ NÀY TỪNG LÀ MỘT LƯỢT ĐẨY RỖNG, VÀ NÓ BÁO "SỰ CỐ" MỖI LẦN CHẠY ═══
+
+      `HEAD` của cây làm việc là bản `actions/checkout` của CHÍNH `main` — commit tài liệu ở bước 3
+      được tạo qua **API** nên nó không bao giờ đi vào cây này. Nên `git push remote HEAD:main`
+      đẩy `main` lên `main`: git trả "Everything up-to-date", thoát 0, và `try` coi đó là ĐẨY
+      THÀNH CÔNG.
+
+      Đo thật ngày 20/09/2026 (run 35496633831): dòng `✗ ĐẨY THẲNG main THÀNH CÔNG — ruleset không
+      chặn. Đây là sự cố` in ra, trong khi `main` đứng nguyên ở `6df5881` và hàng rào vẫn kín —
+      lượt ghi qua API ngay trên nó bị chặn đúng bằng 409 "Changes must be made through a pull
+      request".
+
+      Đó là báo động giả TO NHẤT mà bộ chứng minh này có thể phát ra: nó tố cáo chính cái hàng rào
+      quan trọng nhất là đã thủng. Ai tin nó sẽ đi nới một thứ đang lành.
+
+      Vá: tạo một commit RỖNG để `HEAD` thật sự đi trước `main` một bước. Lúc đó lượt đẩy mới là
+      một phép thử có nghĩa. Bị chặn ⇒ XANH (điều mong đợi). Đẩy được ⇒ một commit rỗng nằm trên
+      `main`, gỡ bằng một lượt revert — và đó đúng là sự cố cần biết, lần này là thật.
+    */
+    let dayCoNghia = true;
     try {
+      execFileSync("git", ["-c", "user.email=proof@erp.local", "-c", "user.name=agent-identity-proof", "commit", "--allow-empty", "-m", "phép thử phải hỏng: đẩy thẳng nhánh mặc định"], { encoding: "utf8", stdio: "pipe" });
+    } catch (e) {
+      dayCoNghia = false;
+      INFO(`git push thẳng ${base}: KHÔNG DỰNG ĐƯỢC commit thử (${maskRemote(String((e as { stderr?: Buffer }).stderr ?? e)).slice(0, 120)}) — bỏ qua phép thử này thay vì đẩy một lượt RỖNG rồi đọc nhầm nó thành "đẩy được"`);
+    }
+    if (!dayCoNghia) {
+      // không đo được thì không kết luận — xem khối chú thích trên
+    } else try {
       execFileSync("git", ["push", remote, `HEAD:${base}`], { encoding: "utf8", stdio: "pipe" });
       fail(`ĐẨY THẲNG ${base} THÀNH CÔNG — ruleset không chặn. Đây là sự cố, dừng mọi việc khác lại.`);
     } catch (e) {

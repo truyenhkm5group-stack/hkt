@@ -8,20 +8,28 @@ import { DescriptionList, EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
 import {
   TECH_ACTOR_KIND_LABEL,
+  TECH_CI_STATE_LABEL,
   TECH_EVENT_KIND_LABEL,
+  TECH_MERGE_STATE_LABEL,
   TECH_MODULE_LABEL,
+  TECH_PR_STATE_LABEL,
+  TECH_REVIEW_STATE_LABEL,
   TECH_RUN_STATUS_LABEL,
   TECH_TASK_SOURCE_LABEL,
   TECH_TASK_STATUS_LABEL,
   TECH_TASK_TYPE_LABEL,
   type TechActorKind,
   type TechApprovalStatus,
+  type TechCiState,
   type TechDeployStatus,
   type TechEventKind,
   type TechGateResult,
   type TechIncidentSeverity,
+  type TechMergeState,
   type TechModule,
+  type TechPrState,
   type TechPriority,
+  type TechReviewState,
   type TechRisk,
   type TechRunStatus,
   type TechTaskSource,
@@ -224,6 +232,54 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
               ]}
             />
           </SectionCard>
+
+          {/*
+            PHÉP CHIẾU PR — ở đây thì CHƯA BIẾT PHẢI IN RA THÀNH CHỮ.
+
+            Khác hẳn cột trong bảng (nhãn tự ẩn để bảng không đầy nhãn xám): trang chi tiết là chỗ
+            người ta tới để biết TÌNH TRẠNG ĐẦY ĐỦ, và một ô trống ở đây đọc ra là "không có", chứ
+            không phải "chưa đọc được" (AGENTS.md mục 42). Nên bốn chiều luôn in đủ, kèm mốc đọc.
+          */}
+          {task.prNumber || task.branch ? (
+            <SectionCard title="Pull request">
+              <DescriptionList
+                columns={2}
+                items={[
+                  {
+                    label: "PR",
+                    value: task.prNumber ? (
+                      task.prUrl ? (
+                        <a className="font-mono text-xs underline" href={task.prUrl} target="_blank" rel="noreferrer">
+                          #{task.prNumber}
+                        </a>
+                      ) : (
+                        <span className="font-mono text-xs">#{task.prNumber}</span>
+                      )
+                    ) : (
+                      <span className="text-muted-foreground">— chưa mở PR cho nhánh này</span>
+                    ),
+                  },
+                  { label: "Trạng thái PR", value: TECH_PR_STATE_LABEL[task.prState as TechPrState] ?? task.prState },
+                  { label: "Cổng CI", value: TECH_CI_STATE_LABEL[task.ciState as TechCiState] ?? task.ciState },
+                  { label: "Duyệt", value: TECH_REVIEW_STATE_LABEL[task.reviewState as TechReviewState] ?? task.reviewState },
+                  { label: "Gộp", value: TECH_MERGE_STATE_LABEL[task.mergeState as TechMergeState] ?? task.mergeState },
+                  { label: "Đỉnh nhánh lúc đọc", value: task.headSha ? <span className="font-mono text-xs">{task.headSha.slice(0, 12)}</span> : <span className="text-muted-foreground">—</span> },
+                  {
+                    label: "Đọc từ GitHub lúc",
+                    value: task.prSyncedAt ? (
+                      <span>
+                        {formatDateTime(task.prSyncedAt)}
+                        <span className="block text-xs text-muted-foreground">GitHub là bên có thẩm quyền; đây là ảnh chụp, không phải tình trạng ngay lúc này.</span>
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">— chưa lượt đồng bộ nào đọc việc này</span>
+                    ),
+                    span: true,
+                  },
+                ]}
+              />
+            </SectionCard>
+          ) : null}
 
           {task.parent || task.children.length > 0 || dependsOn.length > 0 ? (
             <SectionCard title="Liên quan">

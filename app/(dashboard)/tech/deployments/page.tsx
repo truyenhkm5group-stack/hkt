@@ -7,11 +7,11 @@ import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
-import { TECH_DEPLOY_SORTABLE, TECH_VERIFICATION_HINT, type TechVerification } from "@/lib/constants/tech";
+import { DEPLOY_LEDGER_STALE_MINUTES, TECH_DEPLOY_SORTABLE, TECH_VERIFICATION_HINT, deployLedgerFreshness, type TechVerification } from "@/lib/constants/tech";
 import { githubConfig } from "@/lib/integrations/github/client";
-import { formatDateTime, formatNumber } from "@/lib/format";
+import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getTechSystemHealth } from "@/lib/queries/tech-health";
-import { lastSuccessfulDeployment, listTechDeployments, recentTechDeployments, techDeploymentFacets } from "@/lib/queries/tech-ops";
+import { lastGithubRead, lastSuccessfulDeployment, listTechDeployments, recentTechDeployments, techDeploymentFacets } from "@/lib/queries/tech-ops";
 import { commitMatches } from "@/lib/tech/health-parse";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 
@@ -22,16 +22,29 @@ export default async function TechDeploymentsPage({ searchParams }: { searchPara
   const user = await requirePermission("tech:view");
   const canManage = can(user, "tech:manage");
   const params = parseListParams(raw, { defaultSort: "startedAt", filterKeys: ["status", "branch"], sortable: TECH_DEPLOY_SORTABLE, defaultPeriod: "30d" });
-  const [{ rows, total, pageCount }, facets, health, last, ganDay] = await Promise.all([
+  const [{ rows, total, pageCount }, facets, health, last, ganDay, mocDocGithub] = await Promise.all([
     listTechDeployments(params),
     techDeploymentFacets(params),
     getTechSystemHealth(),
     lastSuccessfulDeployment(),
     recentTechDeployments(10),
+    lastGithubRead("deployments"),
   ]);
   const gh = githubConfig();
 
   const khop = commitMatches(health.version.commit, last?.commitSha ?? null);
+  /*
+    ĐỘ TƯƠI CỦA SỔ LÀ MỘT VẾ CỦA PHÉP KẾT LUẬN, KHÔNG PHẢI MỘT CHÚ THÍCH.
+
+    Sự cố 20/09/2026: màn hình in "LỆCH — container có thể chưa khởi động lại" và gửi người đi xem
+    máy chủ, trong khi máy chủ không hỏng — sổ cũ 14 giờ nên "lượt deploy gần nhất" đem ra so là
+    một lượt cũ. Phép so vẫn đúng; cái sai là nó được phép kết luận trên một nguồn đã hết hạn.
+
+    Chỉ chặn khi ĐANG đọc từ GitHub. Chưa bật đọc thì sổ do người ghi tay, và độ tươi của một job
+    không chạy chẳng nói gì về nó.
+  */
+  const doTuoi = gh.configured ? deployLedgerFreshness(mocDocGithub) : "FRESH";
+  const soDaCu = doTuoi !== "FRESH";
 
   return (
     <div className="space-y-5">
@@ -80,7 +93,13 @@ export default async function TechDeploymentsPage({ searchParams }: { searchPara
             {
               label: "Đọc từ GitHub Actions",
               value: gh.configured ? (
-                <span className="text-success">Đã bật · {gh.repo}</span>
+                /*
+                  "Đã bật" chưa trả lời được câu người đọc cần: sổ này CŨ bao nhiêu. Không in mốc
+                  đọc thì một sổ đứng im 14 giờ trông y hệt một sổ vừa nạp xong.
+                */
+                <span className={soDaCu ? "text-warning" : "text-success"}>
+                  Đã bật · {gh.repo} · {mocDocGithub ? `đọc lần cuối ${formatTimeAgo(mocDocGithub)} (${formatDateTime(mocDocGithub)})` : "chưa lượt đọc nào"}
+                </span>
               ) : (
                 <span className="text-muted-foreground">Chưa bật — {gh.reason} Sổ deploy vẫn ghi tay được.</span>
               ),
@@ -93,6 +112,17 @@ export default async function TechDeploymentsPage({ searchParams }: { searchPara
                   <span className="text-muted-foreground">Chưa đủ căn cứ để so — một trong hai vế còn trống</span>
                 ) : khop ? (
                   <span className="text-success">Khớp</span>
+                ) : soDaCu ? (
+                  /*
+                    KHÔNG kết luận LỆCH khi nguồn đã cũ. "Chưa kết luận được" kèm việc phải làm là
+                    câu trả lời đúng — và nó chỉ vào ĐÚNG chỗ phải sửa (lượt đọc), thay vì gửi
+                    người đi khởi động lại một container không hỏng.
+                  */
+                  <span className="font-semibold text-warning">
+                    CHƯA KẾT LUẬN ĐƯỢC — sổ deploy đọc từ GitHub{" "}
+                    {doTuoi === "NEVER" ? "chưa từng chạy lượt nào" : `đã cũ (lần đọc gần nhất ${formatTimeAgo(mocDocGithub)}, ngưỡng ${DEPLOY_LEDGER_STALE_MINUTES} phút)`}. Bấm “Đọc lại từ GitHub” rồi
+                    xem lại; sổ cũ thì “lượt deploy gần nhất” trong sổ không phải lượt gần nhất thật.
+                  </span>
                 ) : (
                   <span className="font-semibold text-destructive">LỆCH — container có thể chưa khởi động lại, hoặc máy chủ được cập nhật bằng đường khác</span>
                 ),

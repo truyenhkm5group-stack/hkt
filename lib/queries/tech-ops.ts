@@ -1,6 +1,7 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { TECH_DEPLOY_SORTABLE, TECH_INCIDENT_OPEN, TECH_INCIDENT_SORTABLE } from "@/lib/constants/tech";
+import { lastGithubRead as lastGithubReadAt } from "@/lib/integrations/github/read-marker";
 import type { ListParams } from "@/lib/search-params";
 
 export { TECH_DEPLOY_SORTABLE, TECH_INCIDENT_SORTABLE };
@@ -85,6 +86,42 @@ export async function lastSuccessfulDeployment() {
     orderBy: [desc(schema.techDeployments.startedAt)],
   });
   return row ?? null;
+}
+
+/**
+ * MỐC ĐỌC GITHUB GẦN NHẤT — đọc từ `sync_state`, KHÔNG từ `sync_runs`.
+ *
+ * Vì sao không dùng `sync_runs`: `runGithubDeploymentSync` đặt `warning` cho mọi nhánh BỎ QUA
+ * (hết hạn mức, lỗi mạng, token sai), và một lượt có `warning` được ghi `PARTIAL`. Nên một lượt
+ * đọc được 0 dòng vẫn trông như một lượt đọc — và sổ trông TƯƠI nhất đúng lúc nó CHẮC CHẮN đứng
+ * im. Xem `lib/integrations/github/read-marker.ts`.
+ */
+export { lastGithubRead } from "@/lib/integrations/github/read-marker";
+
+/**
+ * Câu tóm tắt của lượt chép PR gần nhất — để MÀN HÌNH in lại, không phải để tính tiếp.
+ *
+ * Trả nguyên `detail` chứ không phân tích lại: câu ấy do job viết ra từ số đo của chính nó, và
+ * một màn hình tự bóc tách chuỗi là một nguồn thứ hai lặng lẽ trôi khỏi nguồn thứ nhất. Mốc kèm
+ * theo là mốc ĐỌC THẬT (`sync_state`), không phải mốc lượt chạy — hai thứ đó lệch nhau đúng ở ca
+ * GitHub từ chối trả lời.
+ */
+export async function lastPrSyncRun(): Promise<{ at: Date | null; ranAt: Date; detail: string; warning: boolean } | null> {
+  const db = await getDb();
+  const [row, at] = await Promise.all([
+    db.query.syncRuns.findFirst({
+      /*
+        BỎ `RUNNING`: một lượt đang chạy có `detail` RỖNG, nên lấy nó về sẽ thay câu tóm tắt tốt
+        cuối cùng bằng "không ghi tóm tắt" kèm một cảnh báo không có thật — suốt thời gian lượt
+        chạy diễn ra, và suốt 30 phút cửa sổ mồ côi nếu máy chủ vừa khởi động lại giữa chừng.
+      */
+      where: and(eq(schema.syncRuns.source, "GITHUB"), eq(schema.syncRuns.job, "github-pr-sync"), ne(schema.syncRuns.status, "RUNNING")),
+      orderBy: [desc(schema.syncRuns.startedAt)],
+      columns: { startedAt: true, detail: true, status: true },
+    }),
+    lastGithubReadAt("pulls"),
+  ]);
+  return row ? { at, ranAt: row.startedAt, detail: row.detail, warning: row.status !== "SUCCESS" } : null;
 }
 
 export function techIncidentWhere(params: ListParams) {
