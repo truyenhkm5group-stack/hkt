@@ -235,5 +235,39 @@ export function testEnvironmentOnlyAgentSecrets() {
   assert.ok(/flock -x -w/.test(thanEnv), "ops-vps.yml::agent-env ghi .env rồi dựng lại container ⇒ phải cầm khoá ĐỘC QUYỀN, cùng hàng đợi với deploy");
   assert.ok(/\$\{#ERP_AGENT_GITHUB_PRIVATE_KEY\}/.test(thanEnv) && !/echo[^\n]*"\$ERP_AGENT_GITHUB_PRIVATE_KEY"/.test(thanEnv), "ops-vps.yml::agent-env chỉ được in ĐỘ DÀI khoá riêng, không in giá trị");
 
-  console.log(`✓ Secret App chỉ từ Environment: ${nguoiDung.length} job đọc ERP_AGENT_GITHUB_* và MỌI job đều khai \`environment: ${TEN_ENV}\` ở mức job, tên là hằng · job \`ops\` KHÔNG phụ thuộc Environment (60+ thao tác VPS không liên quan) · apply-agent-env tách job riêng, cùng ổ khoá vòng đời ĐỘC QUYỀN, khoá riêng chỉ in độ dài`);
+  /*
+    ───── THÔNG ĐIỆP LỖI PHẢI TRỎ ĐÚNG CHỖ ─────
+
+    Phần nguy hiểm của lần hỏng 20/09/2026 KHÔNG phải lượt chạy đỏ, mà là câu nó in ra:
+    "Thêm ở Settings → Secrets and variables → Actions". Câu ấy đúng ngữ pháp và SAI ĐỊA CHỈ —
+    nó đẩy người đang thành thật sửa lỗi đi dựng lại đúng bản Repository secret trùng tên mà
+    Environment sinh ra để xoá. Hàng rào bị gỡ bởi người đang sửa nó là kiểu hỏng khó thấy nhất,
+    nên nó phải bị khoá ở mức mã nguồn chứ không phải ở trí nhớ của ai.
+
+    Quét MỌI workflow chạm ba secret, không liệt kê tên tệp: liệt kê là khoá lại đúng lần hỏng đã
+    xảy ra, còn workflow thứ năm vẫn rơi vào y hệt cái bẫy.
+  */
+  for (const f of tep) {
+    const src = readFileSync(`${THU_MUC}/${f}`, "utf8");
+    if (!BA_SECRET.test(src)) continue;
+    for (const job of cacJob(src)) {
+      if (!job.dong.some((d) => BA_SECRET.test(d))) continue;
+      const than = khongChuThich(job.dong.join("\n"));
+      if (!/THIEU|Không đọc được|Chưa có/.test(than)) continue;
+      assert.ok(
+        !/Secrets and variables/i.test(than),
+        `${f}::${job.ten}: thông điệp thiếu secret KHÔNG được trỏ về trang Repository secrets — đó chính là lỗ hổng Environment "${TEN_ENV}" sinh ra để đóng`,
+      );
+      assert.ok(
+        new RegExp(TEN_ENV).test(than),
+        `${f}::${job.ten}: thông điệp thiếu secret phải nêu Environment "${TEN_ENV}" — nói thiếu mà không nói tìm ở đâu là một ngõ cụt`,
+      );
+      assert.ok(
+        /KHÔNG tạo Repository secret/i.test(than),
+        `${f}::${job.ten}: thông điệp phải nói thẳng điều KHÔNG được làm, không chỉ điều nên làm`,
+      );
+    }
+  }
+
+  console.log(`✓ Secret App chỉ từ Environment: ${nguoiDung.length} job đọc ERP_AGENT_GITHUB_* và MỌI job đều khai \`environment: ${TEN_ENV}\` ở mức job, tên là hằng · job \`ops\` KHÔNG phụ thuộc Environment (60+ thao tác VPS không liên quan) · apply-agent-env tách job riêng, cùng ổ khoá vòng đời ĐỘC QUYỀN, khoá riêng chỉ in độ dài · thông điệp thiếu secret trỏ về Environment, KHÔNG về Repository secrets`);
 }

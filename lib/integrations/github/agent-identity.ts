@@ -123,14 +123,54 @@ export function agentGithubConfig(): AgentGithubConfig | null {
   }
 }
 
-/** Câu chữ nói ĐÚNG mảnh còn thiếu — "chưa cấu hình" mà không nói thiếu gì là một ngõ cụt. */
+/**
+ * Environment duy nhất giữ ba secret danh tính agent. Tên là HẰNG SỐ ở đây và trong mọi workflow
+ * (`tests/agent-pr-bridge.test.ts` khoá phía YAML) — cho nó nhận biến là để người gọi tự chọn kho
+ * secret của mình, tức tự chọn hàng rào, tức không có hàng rào.
+ */
+export const AGENT_SECRET_ENVIRONMENT = "agent-identity";
+
+/** Ba secret SỐNG TRONG Environment. `ERP_AGENT_GITHUB_REPO` KHÔNG — nó đến từ `vars` / `github.repository`. */
+const AGENT_ENVIRONMENT_SECRETS = [
+  "ERP_AGENT_GITHUB_APP_ID",
+  "ERP_AGENT_GITHUB_INSTALLATION_ID",
+  "ERP_AGENT_GITHUB_PRIVATE_KEY",
+] as const;
+
+/**
+ * Câu chữ nói ĐÚNG mảnh còn thiếu — "chưa cấu hình" mà không nói thiếu gì là một ngõ cụt.
+ *
+ * ═══ ĐÚNG NGỮ PHÁP CHƯA ĐỦ, PHẢI ĐÚNG ĐỊA CHỈ ═══
+ *
+ * Bản cũ trả về `Chưa có ERP_AGENT_GITHUB_APP_ID, …`. Câu ấy KHÔNG SAI, và chính vì vậy nó nguy
+ * hiểm: người đọc tin nó, rồi đi thêm lại **Repository secret** — tức dựng lại đúng bản trùng tên
+ * mà Environment `agent-identity` sinh ra để xoá (PR #33, #39). Đã suýt xảy ra thật ngày
+ * 20/09/2026: một lượt chạy đỏ vì job thiếu dòng `environment:`, và bước sửa đầu tiên được nghĩ
+ * ra là tạo lại secret ở mức kho.
+ *
+ * Nên thông điệp phải trỏ tới CHỖ PHẢI KIỂM, theo thứ tự, và nói thẳng điều KHÔNG được làm.
+ * Hàng rào bị gỡ bởi một người đang thành thật sửa lỗi là hàng rào hỏng theo cách khó thấy nhất.
+ *
+ * `ERP_AGENT_GITHUB_REPO` được tách riêng: nó KHÔNG nằm trong Environment, nên nếu chỉ thiếu mỗi
+ * nó thì nhắc tới Environment là gửi người đọc đi sai chỗ — đúng cái lỗi bản vá này đang sửa.
+ */
 export function agentGithubDisabledReason(): string | null {
   const missing: string[] = [];
   if (!trimmed("ERP_AGENT_GITHUB_APP_ID")) missing.push("ERP_AGENT_GITHUB_APP_ID");
   if (!trimmed("ERP_AGENT_GITHUB_INSTALLATION_ID")) missing.push("ERP_AGENT_GITHUB_INSTALLATION_ID");
   if (!trimmed("ERP_AGENT_GITHUB_PRIVATE_KEY")) missing.push("ERP_AGENT_GITHUB_PRIVATE_KEY");
   if (!(trimmed("ERP_AGENT_GITHUB_REPO") || trimmed("ERP_GITHUB_REPO") || trimmed("GITHUB_REPOSITORY"))) missing.push("ERP_AGENT_GITHUB_REPO");
-  if (missing.length) return `Chưa có ${missing.join(", ")}`;
+  if (missing.length) {
+    const thieuSecretMoiTruong = missing.filter((m) => (AGENT_ENVIRONMENT_SECRETS as readonly string[]).includes(m));
+    const dau = `Chưa đọc được ${missing.join(", ")}`;
+    if (!thieuSecretMoiTruong.length) return `${dau} — đặt biến ERP_GITHUB_REPO (hoặc vars.ERP_GITHUB_REPO) dạng chủ-kho/tên-kho.`;
+    return (
+      `${dau}. Ba secret danh tính agent CHỈ sống trong Environment "${AGENT_SECRET_ENVIRONMENT}" — ` +
+      `kiểm theo thứ tự: (1) job có khai "environment: ${AGENT_SECRET_ENVIRONMENT}" ở MỨC JOB chưa; ` +
+      `(2) deployment branch policy của Environment có cho nhánh đang chạy không (mặc định CHỈ main). ` +
+      `KHÔNG tạo Repository secret cùng tên: bản trùng tên dựng lại đúng lỗ hổng mà Environment sinh ra để đóng.`
+    );
+  }
   return agentGithubConfig() ? null : "ERP_AGENT_GITHUB_PRIVATE_KEY không đọc được (PEM hoặc base64 của PEM)";
 }
 
