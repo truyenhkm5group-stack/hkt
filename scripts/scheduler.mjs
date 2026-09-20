@@ -144,6 +144,17 @@ const JOBS = [
     Chạy trùng vô hại: nhiều nhất một sự cố CHƯA ĐÓNG cho mỗi job, khoá bằng tiêu đề.
   */
   { job: "tech-incident-watch", every: minutes("TECH_INCIDENT_WATCH_EVERY_MINUTES", 30), offset: 16 },
+  /*
+    CANH KHOÁ AI — 30 phút, lệch 21 phút so với bộ canh job đồng bộ.
+
+    Cùng nhịp với `tech-incident-watch` vì cùng bản chất: nó không đo độ nhạy, ngưỡng mới đo (2
+    lượt hỏng liên tiếp thuộc lớp cần-người). Lệch pha để hai bộ canh không cùng lúc mở sự cố và
+    cùng lúc ghi vào `tech_incidents`.
+
+    ĐÃ TRẢ GIÁ CHO VIỆC KHÔNG CÓ NÓ: 20/09/2026, tài khoản Anthropic hết credit lúc ~21:30 và
+    KHÔNG màn hình nào báo — chỉ lộ ra khi lượt chạy agent thứ 10 dừng ở bước kiểm khoá.
+  */
+  { job: "ai-incident-watch", every: minutes("AI_INCIDENT_WATCH_EVERY_MINUTES", 30), offset: 21 },
   // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
   ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
 ];

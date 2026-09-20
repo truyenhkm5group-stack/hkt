@@ -38,6 +38,7 @@ import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 import { runGithubDeploymentSync } from "@/lib/integrations/github/deployments";
 import { runGithubPrSync } from "@/lib/integrations/github/pull-requests";
+import { runAiIncidentWatch } from "@/lib/tech/ai-incident-watch";
 import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
 
@@ -121,6 +122,16 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       "Chỉ MỞ, không bao giờ tự đóng: đóng sự cố đòi kể được ĐÃ LÀM GÌ để nó hết, mà máy không có câu đó. " +
       "Nhiều nhất một sự cố chưa đóng cho mỗi job, nên chạy lại bao nhiêu lần cũng không nhân đôi.",
     run: (o) => runSyncIncidentWatch({ trigger: o.trigger, actor: o.actor, hours: num(o.params?.hours) }),
+  },
+  "ai-incident-watch": {
+    label: "Mở sự cố khi khoá AI hỏng kiểu KHÔNG TỰ KHỎI",
+    source: "ALL",
+    description:
+      "Quét `ai_interactions` 24 giờ gần nhất, tìm N lượt gọi hỏng LIÊN TIẾP (mặc định 2) thuộc lớp CẦN NGƯỜI — hết credit, hoặc khoá bị từ chối. " +
+      "Quá hạn mức KHÔNG tính: nó tự khỏi sau vài phút, mở sự cố cho nó là đổ nhiễu vào sổ. " +
+      "Ngưỡng 2 (thấp hơn job đồng bộ) vì lỗi hết credit TỰ MÔ TẢ chính nó và không bao giờ tự khỏi — chờ tới lượt thứ ba là chờ thêm một người dùng đâm vào tường. " +
+      "KHÔNG đếm lượt của `ops ai-check` (nó cố ý gây lỗi để tự kiểm). Chỉ MỞ, không bao giờ tự đóng.",
+    run: (o) => runAiIncidentWatch({ trigger: o.trigger, actor: o.actor, hours: num(o.params?.hours) }),
   },
   "sepay-reconcile": {
     label: "Đối chiếu giao dịch ngân hàng qua API SePay",

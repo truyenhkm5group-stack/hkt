@@ -63,6 +63,7 @@ import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testS
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
 import { testTestHygiene } from "./test-hygiene.test";
 import { cleanupAiHealthFixtures, testAiHealthKhongDemLuotTuKiem, testAiHealthSourceGuards } from "./ai-health-selftest.test";
+import { cleanupAiIncidentFixtures, testAiIncidentPure, testAiIncidentSourceGuards, testAiIncidentWatchDb } from "./ai-incident-watch.test";
 import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
@@ -1845,6 +1846,12 @@ async function main() {
   await testAiHealthKhongDemLuotTuKiem();
   await cleanupAiHealthFixtures();
   /*
+    CANH KHOÁ AI. Chạy bộ canh THẬT trên CSDL và gieo đúng hình dạng lỗi đã xảy ra 20/09 (hết
+    credit). Tự dọn bằng tiền tố `ai-inc-` và tiêu đề sự cố.
+  */
+  await testAiIncidentWatchDb();
+  await cleanupAiIncidentFixtures();
+  /*
     NẤC 3 — ERP giao việc cho agent. Chạy `fetch` GIẢ (không gọi mạng thật) và tự dọn bằng tiền tố
     `disp-` / `DISP-`. Khối cửa ghi đặt biến môi trường để dựng tình huống rồi trả lại nguyên trạng.
   */
@@ -1909,6 +1916,8 @@ async function main() {
   testAgentIngestSourceGuards();
   testTestHygiene();
   testAiHealthSourceGuards();
+  testAiIncidentPure();
+  testAiIncidentSourceGuards();
   testPhamViTheoVai();
   testHangRaoTuyetDoi();
   testHangRaoBaiKiem();
