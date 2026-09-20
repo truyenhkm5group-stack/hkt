@@ -58,7 +58,30 @@ export const DOCUMENTATION_COMMANDS: readonly AllowedCommand[] = [
   { key: "git-log", bin: "git", args: ["log", "--oneline", "-20"], label: "Xem lịch sử gần đây", writes: false },
   { key: "typecheck", bin: "npm", args: ["run", "typecheck"], label: "Kiểm tra kiểu dữ liệu", writes: false },
   { key: "lint", bin: "npm", args: ["run", "lint"], label: "Kiểm tra chuẩn mã nguồn", writes: false },
+  /*
+    ═══ NHẬN CẢ `npm test` LẪN `npm run test` ═══
+
+    Ba cổng kia đều gọi bằng `npm run <tên>`; riêng dòng này chỉ khớp `npm test`. `checkCommand`
+    so khớp CHÍNH XÁC chuỗi tham số, nên `npm run test` — dạng mà bất cứ ai đọc ba dòng trên cũng
+    sẽ viết theo — bị từ chối.
+
+    Cái giá đã đo được ở lượt chạy agent đầu tiên (nhánh `ai/documentation/TECH-1-mu7ws71b`). Agent
+    gọi `npm run test`, bị chặn, rồi viết vào tài liệu bàn giao:
+
+        test | `npm run test` | **không chạy được** — lệnh bị danh sách cho phép của agent chặn
+        […] runner chặn `npm run test` đối với vai tài liệu.
+
+    Câu thứ hai là một SUY ĐOÁN được trình bày như một LUẬT, và nó sai: vai tài liệu ĐƯỢC chạy
+    test. Agent chỉ quan sát được "bị chặn" rồi tự dựng ra một lý do nghe hợp lý.
+
+    Phần đáng sợ không phải agent đoán — mà là lời đoán ấy đi thẳng vào tài liệu bàn giao, đọc lên
+    y như một điều đã kiểm chứng. Một hàng rào từ chối vì LÝ DO KHÔNG AI NÓI RA thì người bị chặn
+    sẽ tự nghĩ ra lý do, và lý do tự nghĩ luôn có vẻ đúng.
+
+    Nhận cả hai dạng thì cái bẫy biến mất, và không nới một quyền nào: `npm test` vốn đã được phép.
+  */
   { key: "test", bin: "npm", args: ["test"], label: "Chạy bộ kiểm thử", writes: false },
+  { key: "test-run", bin: "npm", args: ["run", "test"], label: "Chạy bộ kiểm thử (dạng `npm run`)", writes: false },
   { key: "build", bin: "npm", args: ["run", "build"], label: "Dựng bản production", writes: false },
 ] as const;
 
