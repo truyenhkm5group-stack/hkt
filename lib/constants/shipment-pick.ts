@@ -63,11 +63,23 @@ export type TinPancake = {
  *   3. **Lần gửi MỚI NHẤT** — bản tin không mang mã nào (đơn vừa tạo, chưa đẩy sang ĐVVC). Lần gửi
  *      đang chạy là lần mới nhất; ghép vào lần cũ là viết lên một lần gửi đã đóng.
  *
- * CHIỀU HOÀN KHÔNG BAO GIỜ LÀ ỨNG VIÊN. Dòng chiều về mang mã riêng (`<mã gốc>[số]P[số]`) và là
- * một vận đơn khác; để Pancake ghi lên đó là xoá chứng từ chiều hoàn bằng dữ liệu chiều đi — đúng
- * thứ AGENTS.md mục 3.7 cấm. `direction` rỗng/`null` (dòng cũ chưa khai) được coi là OUTBOUND: dữ
- * liệu cũ không khai chiều thì mặc định là chiều đi, và đó là phía HẸP hơn ở đây vì nó giữ nguyên
- * hành vi cho mọi đơn một-lần-gửi.
+ * CHIỀU HOÀN KHÔNG BAO GIỜ LÀ ỨNG VIÊN — và nói cho đúng mức bảo vệ mà vế này đang cho.
+ *
+ * Dòng chiều về mang mã riêng (`<mã gốc>[số]P[số]`) và là một vận đơn KHÁC; để Pancake ghi lên đó
+ * là xoá chứng từ chiều hoàn bằng dữ liệu chiều đi (AGENTS.md mục 3.7).
+ *
+ * **Đo production 21/09/2026, và kết quả không phải cái tôi tưởng:** có **297 vận đơn mang dạng mã
+ * chiều hoàn**, nhưng **0 dòng nào có `direction = 'RETURN'`** — cột ấy chưa từng được ghi, mọi
+ * dòng đứng ở giá trị mặc định. Thứ THẬT SỰ tách chiều hoàn ra khỏi đơn hôm nay là `order_id NULL`
+ * (đúng mục 3.7), nên chúng không bao giờ nằm trong `order.attempts` ngay từ đầu.
+ *
+ * Nên vế lọc này hôm nay **không chặn được gì đang xảy ra** — nó là hàng rào cho ngày `direction`
+ * bắt đầu được ghi, hoặc ngày một dòng chiều hoàn được gắn vào đơn. Giữ nó vì nhánh lỗi phải rơi
+ * về phía HẸP hơn (mục 31); viết ra đây vì một hàng rào được mô tả mạnh hơn thực tế là thứ khiến
+ * người sau thôi kiểm chỗ đó.
+ *
+ * `direction` rỗng/`null` được coi là OUTBOUND — dữ liệu chưa khai chiều thì mặc định là chiều đi,
+ * và đó cũng là phía giữ nguyên hành vi cho mọi đơn một-lần-gửi.
  */
 export function chonVanDonDeGhep<T extends VanDonUngVien>(rows: readonly T[], tin: TinPancake): T | null {
   const diTiep = rows.filter((r) => (r.direction ?? "OUTBOUND") !== "RETURN");

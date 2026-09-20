@@ -205,11 +205,17 @@ export async function testHaiLuatKhongTroiXaNhau() {
     ───────── CHIỀU HOÀN KHÔNG ĐẠI DIỆN CHO ĐƠN — VÀ MỘT CHỖ LỆCH PHẢI NÓI RA ─────────
 
     `vanDonDaiDien` LOẠI dòng chiều hoàn; `PRIMARY_ATTEMPT` ở tầng SQL thì KHÔNG có vế ấy. Hai bên
-    vẫn cho cùng kết quả hôm nay, và lý do là một phép ĐO chứ không phải một niềm tin: vận đơn
-    chiều về mang `order_id NULL` (AGENTS.md mục 3.7), production 21/09/2026 có **0 dòng `RETURN`
-    gắn vào đơn**. Nên tập ứng viên của SQL không bao giờ chứa dòng chiều hoàn.
-    Nếu một ngày có, bài kiểm ngay trên sẽ đỏ — và lúc đó phải sửa `PRIMARY_ATTEMPT`, không phải
-    gỡ vế lọc ở đây. Lọc ở phía TypeScript là phía HẸP hơn (mục 31).
+    vẫn cho cùng kết quả hôm nay, và lý do là một phép ĐO chứ không phải một niềm tin: production
+    21/09/2026 có **297 vận đơn mang dạng mã chiều hoàn, tất cả đều `order_id NULL`**, và **0 dòng
+    nào có `direction = 'RETURN'`** — cột ấy chưa từng được ghi. Tập ứng viên của SQL vì thế không
+    bao giờ chứa dòng chiều hoàn.
+    Nếu một ngày `direction` được ghi VÀ một dòng chiều hoàn được gắn vào đơn, bài kiểm ngay trên
+    sẽ đỏ — và lúc đó phải sửa `PRIMARY_ATTEMPT`, không phải gỡ vế lọc ở đây. Lọc ở phía TypeScript
+    là phía HẸP hơn (mục 31).
+
+    Bài kiểm dưới đây vì thế đo một tính chất CHƯA có dữ liệu thật nào chạm tới. Nó vẫn đáng giữ —
+    nhưng đáng giữ như một hàng rào cho tương lai, không phải như bằng chứng rằng hôm nay có ai đó
+    đang bị chặn.
   */
   /*
     Dòng chiều hoàn này mang `stage = DELIVERED` — KHÔNG phải tình huống bịa: Viettel Post ghi
