@@ -39,6 +39,25 @@ export type AgentJob = {
   taskDescription: string;
   /** Phạm vi tệp được ghi, để nói thẳng cho executor thay vì để nó dò bằng cách thử và bị chặn. */
   writeGlobs: readonly string[];
+  /*
+    ═══ BỐI CẢNH AGENT KHÔNG TỰ LẤY ĐƯỢC, VÀ KHÔNG ĐƯỢC PHÉP ĐOÁN ═══
+
+    Runner CÓ SẴN hai giá trị này lúc dựng cây làm việc, nhưng trước 20/09/2026 nó không truyền
+    xuống — trong khi hàng rào chặn cả hai đường agent có thể tự lấy: `git rev-parse` không nằm
+    trong danh sách lệnh cho phép, và `.git/` nằm trong `NEVER_READ`.
+
+    Đo thật ở lượt chạy agent đầu tiên (nhánh `ai/documentation/TECH-1-mu7ws71b`): đề bài đòi ghi
+    base SHA và tên nhánh, agent thử cả hai đường, bị chặn cả hai, và viết vào tài liệu:
+
+        Base SHA | **Chưa xác minh được từ trong phiên chạy**
+        […] Để trống có chủ đích vẫn tốt hơn là điền một giá trị đoán.
+
+    Agent xử lý ĐÚNG (AGENTS.md mục 42). Cái sai là ĐỀ BÀI: nó hỏi thứ mà hàng rào cấm lấy. Một
+    việc không thể hoàn thành đúng luật thì hoặc dạy agent lách luật, hoặc dạy người đọc rằng
+    "chưa biết" là chuyện bình thường — cả hai đều đắt hơn hai dòng dưới đây.
+  */
+  baseCommit: string;
+  branch: string;
   workspace: AgentWorkspace;
 };
 
@@ -137,7 +156,10 @@ export class AiAgentExecutor implements AgentExecutor {
             text:
               `VIỆC ${job.taskCode}: ${job.taskTitle}\n\n${job.taskDescription}\n\n` +
               `Bạn được GHI trong: ${job.writeGlobs.join(", ")}\n` +
-              `Cây làm việc đã dựng sẵn trên một nhánh riêng. Bắt đầu đi.`,
+              // Nói thẳng hai giá trị này, vì hàng rào chặn mọi đường agent tự lấy — xem `AgentJob`.
+              `Nhánh làm việc: ${job.branch}\n` +
+              `Base SHA: ${job.baseCommit}\n` +
+              `Cây làm việc đã dựng sẵn trên nhánh đó. Bắt đầu đi.`,
           },
         ],
       },
