@@ -386,6 +386,31 @@ export function testAgentIngestSourceGuards() {
     Viết `secretEquals(a) || secretEquals(b)` với `||` ngắn mạch thì thời gian trả lời phụ thuộc
     việc máy chủ đang khai khoá nào — một kênh rò rỉ nhỏ nhưng có thật trên cửa hướng ra Internet.
   */
+  /*
+    ───────── 3.11 MIDDLEWARE PHẢI CHO TUYẾN NÀY ĐI QUA ─────────
+
+    ĐÃ ĐO THẬT trên production (20/09/2026, bản `d24a5da`): `POST /api/tech/agent-run` trả **401**
+    kể cả khi không kèm khoá, kèm khoá sai, hay gọi bằng `GET` (tuyến này không có `GET`, lẽ ra
+    phải là 405). Cả ba giống hệt nhau vì cả ba dừng ở `middleware.ts` — phép kiểm khoá của chính
+    route KHÔNG BAO GIỜ chạy tới.
+
+    Đây là kiểu hỏng TỆ NHẤT của lớp cấu hình: người vận hành thấy 401 sẽ đi khai lại khoá, trong
+    khi khoá chưa từng được đọc. Cửa có đúng mã, có đúng migration, có đúng secret — và vẫn không
+    bao giờ mở.
+
+    Hai vế phải cùng đúng, và vế thứ hai mới là vế dễ mất:
+      · tuyến CÓ MẶT trong `PUBLIC_PREFIXES` (nếu không thì không với tới được);
+      · tiền tố cụt `/api/tech` KHÔNG có mặt — khai cụt là mở TOÀN BỘ bề mặt API của Phòng Tech AI
+        cho lượt gọi không đăng nhập. Một ký tự thiếu đổi cửa hẹp thành cửa rộng.
+  */
+  const mw = readFileSync(path.join(goc, "middleware.ts"), "utf8");
+  const iDs = mw.indexOf("const PUBLIC_PREFIXES");
+  const dsCongKhai = mw.slice(iDs, mw.indexOf("]", iDs));
+  assert.ok(iDs > 0, "không đọc được PUBLIC_PREFIXES của middleware");
+  assert.ok(dsCongKhai.includes('"/api/tech/agent-run"'), "middleware phải cho tuyến chép sổ đi qua — nếu không, phép kiểm khoá của route không bao giờ chạy");
+  assert.ok(!dsCongKhai.includes('"/api/tech"'), "KHÔNG khai tiền tố cụt /api/tech — nó mở toàn bộ bề mặt API Phòng Tech AI");
+  assert.ok(!dsCongKhai.includes('"/api/tech/"'), "cũng không khai /api/tech/ — cùng hậu quả");
+
   assert.ok(route.includes("env.agentIngestSecret"), "cửa phải nhận khoá riêng");
   /*
     Hai lượt so phải CHẠY ĐỦ. Viết `secretEquals(a) || secretEquals(b)` thì `||` ngắn mạch, và thời

@@ -9,7 +9,33 @@ import {
   sessionCookieSecure,
 } from "@/lib/constants/session";
 
-const PUBLIC_PREFIXES = ["/login", "/api/webhooks", "/api/health", "/api/sync", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
+/**
+ * ĐƯỜNG KHÔNG ĐI QUA PHIÊN ĐĂNG NHẬP — MỖI MỤC TỰ XÁC THỰC BẰNG CÁCH KHÁC.
+ *
+ * Middleware này chạy TRƯỚC mọi route handler, nên một tuyến máy-gọi-máy không có tên ở đây sẽ
+ * nhận 401 mà KHÔNG BAO GIỜ chạy tới phép kiểm khoá của chính nó — và người vận hành thấy 401 sẽ
+ * đi tìm nhầm chỗ: họ tưởng khoá sai, trong khi khoá chưa từng được đọc.
+ *
+ * ĐÃ ĐO THẬT trên production (20/09/2026, bản `d24a5da`):
+ *
+ *     POST /api/tech/agent-run  (không khoá)   ⇒ 401
+ *     POST /api/tech/agent-run  (khoá sai)     ⇒ 401
+ *     GET  /api/tech/agent-run                 ⇒ 401   ← route này KHÔNG có GET, lẽ ra phải 405
+ *
+ * Cả ba giống hệt nhau vì cả ba dừng ở middleware. Cửa chép sổ lượt chạy agent vì thế KHÔNG THỂ
+ * mở được từ máy GitHub Actions dù khai đúng khoá gì đi nữa.
+ *
+ * ─── KHAI ĐÚNG MỘT TUYẾN, KHÔNG KHAI CẢ NHÁNH ───
+ *
+ * Viết `/api/tech` ở đây là mở TOÀN BỘ bề mặt API của Phòng Tech AI cho mọi lượt gọi không đăng
+ * nhập — một ký tự thiếu đổi một cửa hẹp thành một cửa rộng. Nên khai ĐẦY ĐỦ đường dẫn của đúng
+ * tuyến tự xác thực ấy, và `tests/agent-run-ingest.test.ts` khoá cả hai vế: tuyến phải có mặt, và
+ * tiền tố cụt `/api/tech` phải KHÔNG có mặt.
+ *
+ * Cùng luật với `/api/sync` (bí mật cron qua header) và `/api/webhooks` (bí mật trong đường dẫn /
+ * chữ ký HMAC).
+ */
+const PUBLIC_PREFIXES = ["/login", "/api/webhooks", "/api/health", "/api/sync", "/api/tech/agent-run", "/_next", "/favicon", "/icon", "/apple-icon", "/manifest", "/robots"];
 const COOKIE = SESSION_COOKIE;
 
 /**
