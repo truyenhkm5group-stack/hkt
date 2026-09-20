@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   addTechTaskNoteAction,
   assignTechTaskAgentAction,
+  dispatchTaskToAgentAction,
   decideTechApprovalAction,
   overrideTechTaskRiskAction,
   setTechTaskBranchAction,
@@ -35,6 +36,9 @@ import {
 
 type Props = {
   taskId: string;
+  taskCode: string;
+  /** Cửa giao việc đã bật chưa — tính ở MÁY CHỦ, vì nó phụ thuộc một khoá chỉ máy chủ thấy. */
+  dispatchReason: string | null;
   status: TechTaskStatus;
   priority: TechPriority;
   risk: TechRisk;
@@ -58,7 +62,7 @@ type Props = {
  *   · `BLOCKED` — chặn mà không nói vì sao thì không ai gỡ được;
  *   · `DONE` khi chưa xác minh production — đóng im lặng là cách một việc hỏng biến mất.
  */
-export function TechTaskActions({ taskId, status, priority, risk, approvalRequired, approvalStatus, agentId, branch, worktree, verified, agents }: Props) {
+export function TechTaskActions({ taskId, taskCode, dispatchReason, status, priority, risk, approvalRequired, approvalStatus, agentId, branch, worktree, verified, agents }: Props) {
   const [pending, start] = useTransition();
   const [hoiLyDo, setHoiLyDo] = useState<TechTaskStatus | null>(null);
   const [lyDo, setLyDo] = useState("");
@@ -148,6 +152,40 @@ export function TechTaskActions({ taskId, status, priority, risk, approvalRequir
               ))}
             </SelectContent>
           </Select>
+        </div>
+
+        {/*
+          ═══ GIAO VIỆC CHO AGENT ═══
+
+          Nút này khởi động một lượt chạy THẬT trên GitHub Actions — nó tốn khoá AI và phút Actions
+          thật. Nên nó nói trước điều đó, và nói trước cả lý do KHÔNG bấm được (chưa khai khoá ghi
+          trên máy chủ) thay vì để người dùng bấm rồi mới biết.
+
+          Ba cổng thật nằm ở máy chủ (`lib/tech/dispatch-service.ts`); phần ẩn/hiện ở đây chỉ là
+          phép lịch sự với người dùng, KHÔNG phải hàng rào — ẩn một nút không khoá được một action.
+        */}
+        <div className="space-y-1.5">
+          <Label className="text-xs">Khởi động lượt chạy agent</Label>
+          {dispatchReason ? (
+            <p className="text-xs text-muted-foreground">{dispatchReason}</p>
+          ) : (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => chay(() => dispatchTaskToAgentAction({ taskCode, gates: "typecheck,lint,test,build" }), `Đã khởi động lượt chạy agent — theo dõi ở GitHub Actions`)}
+              >
+                {pending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                Khởi động lượt chạy agent
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Khởi động một lượt chạy thật trên GitHub Actions (tốn khoá AI và phút Actions). Agent KHÔNG merge, KHÔNG deploy — nó mở một PR để người xem.
+                {" "}
+                <strong>Lượt chạy hiện CHƯA nhận được việc này</strong>: máy chạy agent không đọc được CSDL production nên nó tự tạo một việc R0 để tự kiểm. Trao việc thật là Nấc 3b.
+              </p>
+            </>
+          )}
         </div>
 
         <div className="space-y-1.5">
