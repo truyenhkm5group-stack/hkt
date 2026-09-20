@@ -288,7 +288,10 @@ export async function testCareReopen(db: Db) {
       const duongDan = path.join(thuMuc, m.name);
       if (m.isDirectory()) return quetThuMuc(duongDan);
       if (!m.name.endsWith(".ts")) return [];
-      return /new Date\("20/.test(boChuThich(readFileSync(duongDan, "utf8"))) ? [path.relative(process.cwd(), duongDan)] : [];
+      // `path.relative` trả `\` trên Windows và `/` trên Linux; khoá tra cứu phải là MỘT dạng,
+      // nếu không cùng một commit cho hai kết quả (AGENTS.md mục 50 — bài kiểm đo mã, không đo máy).
+      const khoa = path.relative(process.cwd(), duongDan).split(path.sep).join("/");
+      return /new Date\("20/.test(boChuThich(readFileSync(duongDan, "utf8"))) ? [khoa] : [];
     });
   const tepCoMocLich = quetThuMuc(path.join(process.cwd(), "lib")).sort();
   for (const tep of tepCoMocLich) {

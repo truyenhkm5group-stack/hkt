@@ -31,6 +31,20 @@ export const env = {
   get cronSecret() {
     return read("CRON_SECRET");
   },
+  /**
+   * KHOÁ RIÊNG CHO CỬA CHÉP SỔ LƯỢT CHẠY AGENT (`POST /api/tech/agent-run`).
+   *
+   * TÁCH KHỎI `CRON_SECRET` có chủ ý. `CRON_SECRET` là khoá của bộ lập lịch: nó mở được hàng chục
+   * job đồng bộ, trong đó có những job GHI hàng loạt. Dùng lại đúng khoá ấy cho một cửa hướng ra
+   * Internet nghĩa là bán kính thiệt hại của một lượt rò rỉ ở máy GitHub Actions bằng cả bộ lập
+   * lịch — trong khi thứ máy đó thật sự cần chỉ là ghi thêm dòng vào MỘT bảng quan sát.
+   *
+   * Rỗng = cửa ĐÓNG (`secretEquals` trả false khi thiếu một trong hai vế). Chưa khai thì
+   * `/tech/agents` tiếp tục nói "0 lượt chạy" — một câu ĐÚNG, không phải một lỗi.
+   */
+  get agentIngestSecret() {
+    return read("AGENT_INGEST_SECRET");
+  },
   pancake: {
     get apiKey() {
       return read("PANCAKE_API_KEY");

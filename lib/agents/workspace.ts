@@ -213,9 +213,38 @@ async function rawGit(cwd: string, args: string[]): Promise<CommandResult> {
   return exec(["git", ...args], cwd, 120_000);
 }
 
+/**
+ * ═══════════ GIỮ `shell: false` TRÊN MÁY WINDOWS ═══════════
+ *
+ * ĐÃ ĐO THẬT (20/09/2026, Node 24 trên Windows):
+ *
+ *     spawn("npm",     …, { shell: false })  ⇒  ENOENT   (Windows đòi phần mở rộng)
+ *     spawn("npm.cmd", …, { shell: false })  ⇒  EINVAL   (Node chặn .cmd/.bat từ bản vá
+ *                                                         CVE-2024-27980 — tiêm tham số)
+ *
+ * Lối thoát "dễ" là bật `shell: true`. TUYỆT ĐỐI KHÔNG: luật 3 ở đầu tệp này nói `&&`, `;`, `|`,
+ * `$(…)`, backtick phải là những ký tự KHÔNG BIỂU DIỄN ĐƯỢC ý nghĩa nào — bật shell là biến cả
+ * hàng rào của agent thành lời khuyên. Đổi một tính chất bảo mật để một bài kiểm xanh trên máy
+ * lập trình viên là đổi nhầm chiều.
+ *
+ * Nên thay vì gọi cái bọc `.cmd`, gọi thẳng JS CLI của npm bằng CHÍNH `node` đang chạy. `shell`
+ * vẫn `false`, tham số vẫn là mảng đã tách, và hàng rào không suy chuyển một chút nào.
+ *
+ * Trên Linux (CI và VPS — nơi runner thật sự chạy) không nhánh nào trong này chạy.
+ */
+function argvChoMayNay(argv: readonly string[]): string[] {
+  const ra = [...argv];
+  if (process.platform !== "win32" || ra[0] !== "npm") return ra;
+  const canh = path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js");
+  // Không tìm thấy thì TRẢ NGUYÊN: để lệnh thất bại với ENOENT đọc được, hơn là im lặng chạy thứ khác.
+  if (!existsSync(canh)) return ra;
+  return [process.execPath, canh, ...ra.slice(1)];
+}
+
 /** Chạy tiến trình con: không shell, môi trường tối thiểu, có hạn giờ. */
-function exec(argv: readonly string[], cwd: string, timeoutMs: number): Promise<CommandResult> {
+function exec(argvVao: readonly string[], cwd: string, timeoutMs: number): Promise<CommandResult> {
   const started = Date.now();
+  const argv = argvChoMayNay(argvVao);
   return new Promise((resolve) => {
     const child = spawn(argv[0], argv.slice(1), {
       cwd,
@@ -245,7 +274,7 @@ function exec(argv: readonly string[], cwd: string, timeoutMs: number): Promise<
     });
     const done = (code: number) => {
       clearTimeout(timer);
-      resolve({ command: argv.join(" "), exitCode: code, ok: code === 0 && !timedOut, stdout: tail(stdout), stderr: tail(stderr), durationMs: Date.now() - started, timedOut });
+      resolve({ command: argvVao.join(" "), exitCode: code, ok: code === 0 && !timedOut, stdout: tail(stdout), stderr: tail(stderr), durationMs: Date.now() - started, timedOut });
     };
     child.on("error", (e) => {
       stderr += `\n${e.message}`;

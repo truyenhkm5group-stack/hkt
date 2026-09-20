@@ -1,0 +1,38 @@
+# ═══════════ KẾT THÚC DÒNG: LF Ở MỌI MÁY, KHÔNG PHỤ THUỘC HỆ ĐIỀU HÀNH ═══════════
+#
+# ─── VÌ SAO CÓ TỆP NÀY ───
+#
+# ĐÃ ĐO THẬT (20/09/2026, Windows, `core.autocrlf=true`): 1.302 tệp trong cây làm việc là CRLF,
+# trong khi blob trong kho là LF và CI chạy trên Linux. Hàng chục bài kiểm của kho này QUÉT MÃ
+# NGUỒN — chúng `readFileSync` một tệp rồi cắt theo mẫu có xuống dòng. Với CRLF thì:
+#
+#     tuSortHeader.indexOf("\n}\n")   ⇒  -1
+#     slice(0, -1 + 2)                ⇒  "f"
+#
+# `tests/cs-workqueue.test.ts` vì thế ĐỎ trên Windows và XANH trên CI — cùng một commit, hai kết
+# luận. Đó là bài kiểm đang đo CÁI MÁY ĐANG CHẠY chứ không đo MÃ NGUỒN, đúng lớp lỗi mà AGENTS.md
+# mục 50 cấm.
+#
+# ─── VÌ SAO SỬA Ở ĐÂY, KHÔNG SỬA TỪNG BÀI KIỂM ───
+#
+# Đổi `indexOf("\n}\n")` thành một biểu thức chịu được `\r` là vá ĐÚNG MỘT CA. Còn hàng chục chỗ
+# khác đang cắt mã nguồn theo cùng kiểu, và mọi bài kiểm viết ngày mai sẽ lại dẫm vào. Nguyên nhân
+# gốc không nằm ở bài kiểm: nó nằm ở chỗ CÙNG MỘT COMMIT cho ra hai chuỗi byte khác nhau trên hai
+# máy. Ghim LF là làm cho hai máy đo cùng một thứ.
+#
+# `text=auto` vẫn để Git tự nhận diện tệp nhị phân và không đụng vào chúng.
+* text=auto eol=lf
+
+# Tệp nhị phân — khai thẳng để không phụ thuộc phép dò.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.xlsx binary
+*.xls binary
+*.zip binary
+*.woff binary
+*.woff2 binary

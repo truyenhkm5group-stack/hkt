@@ -356,7 +356,7 @@ export async function testBankLedger(db: Db) {
     const src = readFileSync(f, "utf8");
     return /integrations\/bank\/import["']/.test(src) || /insertLedgerExpenses/.test(src);
   });
-  assert.deepEqual(viPham.map((f) => path.relative(goc, f)), [], "9. không Server Action / trang nào được ghi khoản chi từ sao kê");
+  assert.deepEqual(viPham.map((f) => path.relative(goc, f).split(path.sep).join("/")), [], "9. không Server Action / trang nào được ghi khoản chi từ sao kê");
   assert.ok(!existsSync(path.join(goc, "lib", "actions", "bank-import.ts")), "9. lib/actions/bank-import.ts đã gỡ, không được thêm lại");
   assert.ok(!existsSync(path.join(goc, "app", "(dashboard)", "expenses", "bank-import-dialog.tsx")), "9. nút Nhập sao kê trên trang Chi phí đã gỡ");
   console.log("✓ Sao kê không tạo chi phí: không Server Action / trang nào import đường ghi khoản chi từ sao kê");
