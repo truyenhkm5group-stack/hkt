@@ -54,17 +54,20 @@ where c.human_takeover_at is not null and c.takeover_by_user_id is null;
 \echo ''
 \echo '── 4. MẪU HÀNG CÓ SIZE TRONG DANH MỤC — tức là CÓ THỂ khai bảng số đo cho nó ──'
 \echo '   ERP biết mẫu có size NÀO; nó không biết AI MẶC VỪA. Cột phải là danh sách size có thật.'
+-- `products` KHÔNG có cột `code` (lượt chạy 20/09 đỏ ở đúng dòng này). Khoá tự nhiên là `id`
+-- dạng uuid Pancake — và đó cũng là thứ khối 2 in ra ở cột `ma_hang`, nên hai bảng ghép được.
 select
-  p.code                                                                               as ma_hang,
-  left(p.name, 44)                                                                     as ten,
+  p.id                                                                                 as ma_hang,
+  coalesce(nullif(p.custom_id, ''), '—')                                               as ma_shop_dat,
+  left(p.name, 40)                                                                     as ten,
   count(distinct nullif(v.size, ''))                                                   as so_size,
   string_agg(distinct nullif(v.size, ''), ' · ' order by nullif(v.size, ''))            as cac_size
 from products p
 join product_variants v on v.product_id = p.id
 where coalesce(v.size, '') <> ''
-group by 1, 2
+group by 1, 2, 3
 having count(distinct nullif(v.size, '')) > 1
-order by 3 desc
+order by 4 desc
 limit 15;
 
 \echo ''
