@@ -1,11 +1,11 @@
 # Phòng Tech AI — trạng thái
 
 > **File trạng thái DUY NHẤT.** Mọi milestone cập nhật vào đây, không mở file mới.
-> Cập nhật: **20/09/2026, ~23:00 VN** · `main` = `7db0abc` · production đang chạy `7db0abc2e093`
+> Cập nhật: **21/09/2026 ~01:00 VN** · `main` = `f65134a` · production đang chạy `f65134a7d8bb`
 
 ---
 
-## DONE
+## DONE — chín milestone, chín lượt deploy xanh
 
 | Milestone | PR | `main` | Deploy |
 |---|---|---|---|
@@ -17,71 +17,64 @@
 | **B6** — lỗi OpenAI trên thẻ sức khoẻ là lỗi GIẢ do chính bộ tự kiểm sinh ra | #51 | `9283133` | #370 ✓ |
 | **Nấc 2 · cơ chế** — phạm vi ghi theo VAI + `NEVER_WRITE` + khoá lối tắt xoá khẳng định | #52 | `a52a692` | #371 ✓ |
 | **Nấc 3** — ERP khởi động lượt chạy agent: ba cổng, khoá GHI tách khỏi khoá ĐỌC | #53 | `7db0abc` | #372 ✓ |
+| **Cảnh báo hết credit AI** + **Nấc 3b** cửa ĐỌC để agent nhận đúng việc | #55 · #56 | `92875af` | #373 ✓ |
+| **Lỗi job đồng bộ nói được NGUYÊN NHÂN** (+ vá một flake làm CI đỏ) | #54 | `f65134a` | #374 ✓ |
 
 ### Production proof
 
 ```
- external_ref         | agent_key     | status    | cổng                        | tệp | xong
- github:35515944813:1 | documentation | SUCCEEDED | PASSED/PASSED/PASSED/PASSED | 1   | 20/09 21:25
- github:35513504364:1 | documentation | SUCCEEDED | PASSED/PASSED/PASSED/PASSED | 1   | 20/09 20:37
- github:35512040059:1 | documentation | SUCCEEDED | PASSED/PASSED/PASSED/PASSED | 1   | 20/09 20:06
- github:35511075146:1 | documentation | SUCCEEDED | PASSED/PASSED/PASSED/PASSED | 1   | 19:46
+production commit    f65134a7d8bb · /api/health ok:true
+agent runs trong sổ  4 lượt SUCCEEDED · 4 cổng PASSED · mỗi lượt 1 tệp
+cửa chép sổ          POST không khoá → 401 · GET → 405 (middleware thông đúng tuyến)
+bộ canh AI mới       00:09 SUCCESS · "anthropic · xét 27 lượt gọi thật · chưa đủ ngưỡng 2"
+job đồng bộ          0 lượt PARTIAL/FAILED trong 3 giờ gần nhất
 ```
-
-Bốn lượt chạy agent THẬT trong sổ production, khoá khác nhau, bốn cổng xanh, mỗi lượt đúng một tệp.
 
 ---
 
-## CURRENT — ba PR chờ duyệt (đã bật auto-merge, đã request review)
+## CURRENT
 
-| PR | Nội dung |
-|---|---|
-| **#54** | Lỗi job đồng bộ nói được NGUYÊN NHÂN thay vì chép lại 40 tên cột |
-| **#55** | Hết credit AI tự mở sự cố (kèm chính file này) |
-| #47 | *Không phải của phiên này* — nhánh cũ `claude/charming-turing-kao6lw`, tôi không đụng vào |
+**PR #57 — Nấc 4: việc Tech tự đi tiếp theo bằng chứng GitHub.** CI xanh, auto-merge bật, đã
+request review. Chỉ chờ **Approve**.
+
+Đúng HAI bước (`BUILDING → REVIEW` khi có PR mở; `REVIEW → QA` khi PR đã gộp), và **máy không cãi
+người**: lượt đổi trạng thái gần nhất do người làm thì máy để nguyên.
+
+*(PR #47 cũng đang mở nhưng KHÔNG thuộc phiên này — nhánh cũ, tôi không đụng vào.)*
 
 ---
 
 ## BLOCKED / HUMAN GATE
 
 > ### ⛔ 1 · Nạp credit Anthropic — chặn cả Phòng Tech AI
->
-> **20/09 21:48**, lượt chạy agent #10 dừng: *"Your credit balance is too low to access the Anthropic API."*
-> Lượt Copilot thành công cuối cùng **đo được** là 21:19 — credit cạn trong nửa tiếng giữa hai mốc,
-> nhiều khả năng do chính bốn lượt chạy agent trước đó tiêu hết.
->
-> **Hệ quả:** mọi lượt chạy agent dừng ở bước kiểm khoá; AI Copilot trong ERP nhiều khả năng cũng
-> đã tắt (chưa đo được sau 21:19). **ERP vẫn bán hàng, đồng bộ đơn và vận đơn bình thường.**
->
-> Tôi đã **ngừng dispatch agent** để không đốt thêm phút Actions vào những lượt chắc chắn hỏng.
+> **20/09 21:48** lượt chạy agent #10 dừng: *"Your credit balance is too low."* Mọi lượt chạy agent
+> dừng ở bước kiểm khoá. **ERP vẫn bán hàng, đồng bộ đơn và vận đơn bình thường.**
+> Tôi đã ngừng dispatch agent để không đốt phút Actions vào những lượt chắc chắn hỏng.
 
-> ### ⛔ 2 · Duyệt PR #54 và #55
-> Bấm **Approve**; auto-merge đã bật nên không cần bấm Merge.
+> ### ⛔ 2 · Duyệt PR #57
 
-> ### ⏸ 3 · `ERP_GITHUB_DISPATCH_TOKEN` — chưa gấp
-> Nút "Khởi động lượt chạy agent" ở `/tech/tasks/<mã>` hiện đang nói lý do và không gọi được gì.
-> Khai khoá (quyền `actions: write`) thì nút hoạt động. **Chưa bật**, không phải hỏng.
+> ### ⏸ 3 · `ERP_GITHUB_DISPATCH_TOKEN` (quyền `actions: write`) — chưa gấp
+> Nút "Khởi động lượt chạy agent" hiện nói lý do thay vì gọi được.
 
 ---
 
-## NEXT
+## NEXT — và vì sao tôi DỪNG ở đây
 
-| Việc | Phụ thuộc |
+| Việc | Trạng thái |
 |---|---|
-| **Nấc 3b** — cửa ĐỌC hẹp để agent nhận được ĐÚNG việc được giao | — |
-| **Nấc 4** — worker đẩy trạng thái việc theo sự kiện GitHub | — |
-| **Nấc 5** — vòng phản hồi review: agent chạy lại trên cùng nhánh | Nấc 4 |
-| **Nấc 6** — tự deploy + nghiệm thu + quay lui | Nấc 5 |
-| Bật vai QA (`tests/`) | cổng 5 lượt sạch + nạp credit |
+| **Nấc 5** — agent chạy lại trên cùng nhánh theo phản hồi review | Dựng được, nhưng **không kiểm chứng được** khi chưa có credit. Dựng một thứ không đo được là dựng niềm tin, không phải dựng tính năng. |
+| **Nấc 6** — tự deploy + nghiệm thu + quay lui | **Cần chủ shop quyết định.** Cho máy tự deploy production là một quyết định về rủi ro kinh doanh, không phải một bước kỹ thuật tiếp theo. Tôi không tự làm. |
+| Bật vai QA (ghi `tests/`) | Cổng 5 lượt sạch + nạp credit |
+| Trao việc thật đầu-cuối (Nấc 3b) | Chờ credit để chạy một lượt chứng minh |
 
-### Cổng "5 lượt chạy sạch liên tiếp" — hiện **4/5, đang tạm dừng**
+### Cổng "5 lượt chạy sạch liên tiếp" — **4/5, đang tạm dừng**
 
-Runs #6 · #7 · #8 · #9 đều SUCCEEDED với bốn cổng xanh. Run #10 hỏng vì **hết credit**, tức là nó
-chưa bao giờ chạy — `agent:check` chặn ở bước kiểm khoá.
+Runs #6 · #7 · #8 · #9 đều SUCCEEDED, bốn cổng xanh. Run #10 hỏng vì **hết credit** — nó chưa bao
+giờ chạy, `agent:check` chặn ở bước kiểm khoá.
 
-Tôi tính đây là **tạm dừng ở 4/5**, không phải đặt lại về 0, và nói rõ đó là một phán đoán: cổng
-này đo ĐỘ TIN CẬY CỦA LÕI AGENT, còn một tài khoản hết tiền không nói gì về lõi ấy. Nếu chủ shop
-muốn chặt hơn thì đặt lại về 0 sau khi nạp credit — đó là quyết định của người, không phải của tôi.
+Tôi ghi là **tạm dừng ở 4/5**, không đặt lại về 0, và nói rõ đó là một phán đoán: cổng này đo ĐỘ
+TIN CẬY CỦA LÕI AGENT, còn một tài khoản hết tiền không nói gì về lõi ấy. Muốn chặt hơn thì đặt
+lại về 0 là quyết định của người.
 
 **R2 không bao giờ mở cho agent.** Giữ nguyên.
 
@@ -90,5 +83,5 @@ muốn chặt hơn thì đặt lại về 0 sau khi nạp credit — đó là qu
 ## Nhánh WIP đã bảo toàn
 
 `wip/vtp-integration-before-tech-ai` @ `e03e8b4` — việc dở về sức khoẻ bảng kê VTP qua Gmail.
-KHÔNG gộp vào Tech AI. (Ghi chú: job `vtp-statement-mail` chạy lần cuối **16/09**, bốn ngày trước
-— đúng thứ nhánh ấy đang làm.)
+KHÔNG gộp vào Tech AI. (Ghi chú: job `vtp-statement-mail` chạy lần cuối **16/09** — đúng thứ nhánh
+ấy đang làm.)
