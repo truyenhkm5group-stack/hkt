@@ -61,6 +61,7 @@ import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testT
 import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aBarriers, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
+import { testTestHygiene } from "./test-hygiene.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
 import { testPayrollPeriod } from "./payroll-period.test";
@@ -1890,6 +1891,7 @@ async function main() {
   testSyncIncidentPure();
   testAgentIngestPure();
   testAgentIngestSourceGuards();
+  testTestHygiene();
   testAdsMappingGuards();
   testAdsIngestGuardsProductFk();
   testTechRiskEngine();

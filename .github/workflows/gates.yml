@@ -68,6 +68,35 @@ jobs:
       # (docs/business-rules/ORDER_OUTCOME.md). Đây là điều kiện CHẶN, không phải cảnh báo.
       - name: Kiểm thử (gồm contract test luật nghiệp vụ)
         run: npm test
+      # ═══════════ LƯỢT THỨ HAI: CÓ TOKEN — VÀ TOKEN ẤY LÀ TOKEN GIẢ ═══════════
+      #
+      # ─── VÌ SAO CẦN LƯỢT NÀY ───
+      #
+      # `githubConfig()` đọc `ERP_GITHUB_TOKEN | GITHUB_TOKEN | GH_TOKEN` rồi chọn `auth` =
+      # `TOKEN` hay `PUBLIC`, và NHÁNH ẤY ĐỔI HÀNH VI THẬT: trần request mỗi lượt đồng bộ là 12
+      # khi có token, 3 khi ẩn danh (`prDetailBudget`). Lượt `npm test` ở trên KHÔNG có token nào
+      # trong `env:`, nên nhánh TOKEN chưa từng được chạy ở CI.
+      #
+      # ĐÃ TRẢ GIÁ CHO ĐIỀU NÀY (20/09/2026): một khẳng định so với hằng số 12 trong khi fixture
+      # được dựng từ `prDetailBudget(...)` — xanh trên máy có token, ĐỎ ở CI. Bài kiểm đo CÁI MÁY
+      # chứ không đo mã nguồn (AGENTS.md mục 65).
+      #
+      # ─── VÌ SAO KHÔNG DÙNG `matrix` ───
+      #
+      # Ruleset của `main` bắt buộc đúng một check tên `gates / gates`. Biến job này thành matrix
+      # làm tên check thành `gates / gates (che-do)`, check bắt buộc KHÔNG BAO GIỜ xuất hiện nữa,
+      # và MỌI pull request bị chặn vĩnh viễn. Hai chế độ vì thế là hai BƯỚC trong cùng một job.
+      # `tests/ops-concurrency.test.ts::testTenCheckBatBuoc` khoá tên check ấy.
+      #
+      # ─── TOKEN PHẢI GIẢ, VÀ PHẢI NHÌN LÀ BIẾT GIẢ ───
+      #
+      # Kho này PUBLIC. Bộ kiểm thử không gọi mạng thật (adapter GitHub bị tiêm `fetch` giả), nên
+      # thứ duy nhất cần là một chuỗi KHÁC RỖNG để `auth` rẽ sang nhánh TOKEN. Đưa token thật vào
+      # đây là đổi một lớp kiểm lấy một lượt rò rỉ.
+      - name: Kiểm thử lần hai — nhánh CÓ TOKEN (token GIẢ, kho public không cần token thật)
+        env:
+          GITHUB_TOKEN: "ghp_TOKEN_GIA_KHONG_CO_THAT_chi_de_re_nhanh_auth_000"
+        run: npm test
       # Bản dựng production bắt lỗi ranh giới client/server mà `tsc` không thấy.
       - name: Dựng bản production
         run: npm run build
