@@ -88,6 +88,56 @@ const JOBS = [
   // giới kỳ, nên quét hẹp sẽ cho kết quả khác nhau tuỳ tham số — xem lib/attribution/fanpage.ts).
   // Ghi là ghi ĐÈ theo khoá `order_id`, nên chạy trùng nhau cũng không cộng đúp được gì.
   { job: "fanpage-attribution", every: minutes("FANPAGE_ATTRIBUTION_EVERY_MINUTES", 30), offset: 13 },
+  /*
+    ĐỌC LƯỢT DEPLOY TỪ GITHUB — 15 phút/lần, CHỈ ĐỌC.
+
+    Job này đã chạy được từ lâu nhưng chỉ chạy khi có người bấm, và cái giá đo được ngày 20/09/2026
+    là một BÁO ĐỘNG GIẢ: dòng mới nhất trong sổ là 12:11 hôm trước, trong khi GitHub đã có thêm 12
+    lượt deploy sau đó — nên `/tech/deployments` kết luận "LỆCH, container có thể chưa khởi động
+    lại" trong khi nguyên nhân thật là SỔ CŨ 14 GIỜ. Một cảnh báo chỉ trỏ vào độ tươi của chính nó
+    còn tệ hơn không có cảnh báo: người đọc đi khởi động lại máy chủ cho một thứ không hỏng.
+
+    15 phút là chọn theo HẠN MỨC, không theo mong muốn: đường gọi ẩn danh của GitHub cho 60
+    request/giờ tính theo IP máy chủ (`ERP_GITHUB_TOKEN` nâng lên 5.000). Mỗi lượt job tốn 1
+    request, nên 4 lượt/giờ chiếm 1/15 hạn mức chặt nhất và vẫn còn chỗ cho người bấm tay.
+
+    Idempotent theo khoá (lượt chạy, lần chạy lại) nên chạy trùng không nhân đôi dòng nào, và lượt
+    đồng bộ KHÔNG đụng những ô người điền (ghi chú, việc gắn kèm, kết quả nghiệm thu).
+  */
+  { job: "github-deployments", every: minutes("GITHUB_DEPLOY_SYNC_EVERY_MINUTES", 15), offset: 6.5 },
+  /*
+    CHÉP TRẠNG THÁI PR VỀ VIỆC TECH — 15 phút/lần, CHỈ ĐỌC.
+
+    Lệch pha với `github-deployments` (offset khác nhau) để hai job không cùng lúc ăn vào hạn mức.
+    Mỗi lượt tốn 1 request cho danh sách PR, cộng 3 request cho mỗi việc ĐANG có PR — số lượt gọi
+    đi theo số việc đang chạy, không theo số PR của cả kho, nên nó không phình theo lịch sử.
+
+    15 phút chứ không 3: cột này phục vụ một MÀN HÌNH QUẢN LÝ, không phục vụ một cái cổng. Ai cần
+    biết CI vừa đỏ trong vòng một phút thì đọc GitHub, không đọc phép chiếu.
+  */
+  { job: "github-pr-sync", every: minutes("GITHUB_PR_SYNC_EVERY_MINUTES", 15), offset: 10.5 },
+  /*
+    ĐÓNG LƯỢT CHẠY AGENT MỒ CÔI — 15 phút/lần.
+
+    Ngưỡng mặc định 45 phút, tức một lượt chạy phải im lặng qua ít nhất ba nhịp trước khi bị đóng.
+    Job KHÔNG đụng lượt chạy còn sống: điều kiện là NHỊP TIM đứng im, mà tiến trình còn chạy thì
+    còn đập nhịp.
+
+    Vì sao phải có lịch: cổng "không hai lượt song song" đọc chính bảng `tech_agent_runs`, nên một
+    tiến trình chết giữa chừng để lại một dòng RUNNING khoá VĨNH VIỄN mọi lượt sau trên cùng việc —
+    im lặng, cho tới khi có người biết phải gọi tay. Không lên lịch là chọn hỏng ĐÓNG mà không báo ai.
+  */
+  { job: "agent-reaper", every: minutes("AGENT_REAPER_EVERY_MINUTES", 15), offset: 14 },
+  /*
+    MỞ SỰ CỐ CHO JOB HỎNG LIÊN TIẾP — 30 phút/lần.
+
+    Nhịp này KHÔNG quyết định độ nhạy: ngưỡng là BA LƯỢT HỎNG LIÊN TIẾP của chính job kia, nên một
+    job chạy mỗi giờ vẫn cần ba tiếng mới đủ, dù bộ quét chạy dày tới đâu. Chạy dày chỉ để sự cố
+    hiện ra sớm sau khi đã đủ ngưỡng.
+
+    Chạy trùng vô hại: nhiều nhất một sự cố CHƯA ĐÓNG cho mỗi job, khoá bằng tiêu đề.
+  */
+  { job: "tech-incident-watch", every: minutes("TECH_INCIDENT_WATCH_EVERY_MINUTES", 30), offset: 16 },
   // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
   ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
 ];

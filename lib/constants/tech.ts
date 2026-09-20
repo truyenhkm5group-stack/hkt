@@ -747,6 +747,7 @@ export const TECH_EVENT_KINDS = [
   "NOTE",
   "APPROVAL",
   "BRANCH",
+  "PR",
   "RUN",
   "DEPLOY",
   "INCIDENT",
@@ -763,6 +764,7 @@ export const TECH_EVENT_KIND_LABEL: Record<TechEventKind, string> = {
   NOTE: "Ghi chú",
   APPROVAL: "Phê duyệt",
   BRANCH: "Nhánh / worktree",
+  PR: "Pull request",
   RUN: "Lượt chạy agent",
   DEPLOY: "Deploy",
   INCIDENT: "Sự cố",
@@ -883,4 +885,201 @@ export function techDeployStatusFromGithub(status: string, conclusion: string | 
   if (conclusion === "success") return "SUCCEEDED";
   if (conclusion === null) return "RUNNING";
   return "FAILED";
+}
+
+/* ═════════════════ PHÉP CHIẾU PULL REQUEST — BỐN CHIỀU, KHÔNG GỘP ═════════════════ */
+
+/**
+ * ═══════════ VÌ SAO BỐN CỘT CHỨ KHÔNG MỘT Ô "PR ỔN CHƯA" ═══════════
+ *
+ * Cùng lý do `/tech/deployments` giữ ba chiều tách rời: mỗi chiều dưới đây SỬA Ở MỘT CHỖ KHÁC.
+ *
+ *  · `prState`     — PR còn mở hay đã đóng/gộp. Sửa bằng cách mở lại hoặc mở PR mới.
+ *  · `ciState`     — cổng `gates` xanh hay đỏ. Sửa bằng cách sửa MÃ rồi đẩy lại.
+ *  · `reviewState` — có ai duyệt chưa. Sửa bằng cách đi tìm NGƯỜI, không phải sửa mã.
+ *  · `mergeState`  — có xung đột với `main` không. Sửa bằng cách gộp `main` vào nhánh.
+ *
+ * Gộp thành một ô là bắt người đọc mở GitHub để biết phải đi làm gì — tức là xoá sạch lý do tồn
+ * tại của phép chiếu này.
+ *
+ * **CHUỖI RỖNG LÀ CHƯA BIẾT** ở cả bốn (AGENTS.md mục 42). Nó KHÔNG phải "không có PR" và KHÔNG
+ * phải "check đỏ". Ràng buộc `CHECK` ở CSDL nhận đúng chuỗi rỗng cho ô này.
+ */
+
+export const TECH_PR_STATES = ["", "OPEN", "CLOSED", "MERGED"] as const;
+export type TechPrState = (typeof TECH_PR_STATES)[number];
+
+export const TECH_CI_STATES = ["", "PENDING", "SUCCESS", "FAILURE"] as const;
+export type TechCiState = (typeof TECH_CI_STATES)[number];
+
+export const TECH_REVIEW_STATES = ["", "REVIEW_REQUIRED", "CHANGES_REQUESTED", "APPROVED"] as const;
+export type TechReviewState = (typeof TECH_REVIEW_STATES)[number];
+
+export const TECH_MERGE_STATES = ["", "MERGEABLE", "CONFLICT", "MERGED"] as const;
+export type TechMergeState = (typeof TECH_MERGE_STATES)[number];
+
+export const TECH_PR_STATE_LABEL: Record<TechPrState, string> = {
+  "": "Chưa biết",
+  OPEN: "Đang mở",
+  CLOSED: "Đã đóng",
+  MERGED: "Đã gộp",
+};
+
+export const TECH_CI_STATE_LABEL: Record<TechCiState, string> = {
+  "": "Chưa biết",
+  PENDING: "Đang chạy",
+  SUCCESS: "Cổng xanh",
+  FAILURE: "Cổng ĐỎ",
+};
+
+export const TECH_REVIEW_STATE_LABEL: Record<TechReviewState, string> = {
+  "": "Chưa biết",
+  REVIEW_REQUIRED: "Chưa ai duyệt",
+  CHANGES_REQUESTED: "Yêu cầu sửa",
+  APPROVED: "Đã duyệt",
+};
+
+export const TECH_MERGE_STATE_LABEL: Record<TechMergeState, string> = {
+  "": "Chưa biết",
+  MERGEABLE: "Gộp được",
+  CONFLICT: "Xung đột",
+  MERGED: "Đã gộp",
+};
+
+/** Tông màu. `""` luôn là tông TRUNG TÍNH — chưa biết không được trông giống một lời kết luận. */
+export const TECH_PR_STATE_TONE: Record<TechPrState, string> = {
+  "": "bg-muted text-muted-foreground",
+  OPEN: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
+  CLOSED: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300",
+  MERGED: "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300",
+};
+
+export const TECH_CI_STATE_TONE: Record<TechCiState, string> = {
+  "": "bg-muted text-muted-foreground",
+  PENDING: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  SUCCESS: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  FAILURE: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+};
+
+export const TECH_REVIEW_STATE_TONE: Record<TechReviewState, string> = {
+  "": "bg-muted text-muted-foreground",
+  REVIEW_REQUIRED: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  CHANGES_REQUESTED: "bg-orange-100 text-orange-800 dark:bg-orange-950/60 dark:text-orange-300",
+  APPROVED: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+};
+
+export const TECH_MERGE_STATE_TONE: Record<TechMergeState, string> = {
+  "": "bg-muted text-muted-foreground",
+  MERGEABLE: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+  CONFLICT: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+  MERGED: "bg-violet-100 text-violet-800 dark:bg-violet-950/60 dark:text-violet-300",
+};
+
+/**
+ * PR mở / đóng / gộp — HÀM THUẦN.
+ *
+ * GitHub trả `state = "closed"` cho CẢ hai ca "bị đóng không gộp" và "đã gộp"; phân biệt bằng
+ * `merged` (hoặc `merged_at`). Bỏ qua vế đó là báo mọi PR đã gộp thành "đã đóng" — và người đọc
+ * sẽ đi mở lại một việc đã xong.
+ */
+export function techPrStateFromGithub(state: string, merged: boolean): TechPrState {
+  if (merged) return "MERGED";
+  if (state === "open") return "OPEN";
+  if (state === "closed") return "CLOSED";
+  return "";
+}
+
+/**
+ * CHECK RUN → MỘT CHỮ — HÀM THUẦN.
+ *
+ * **KHÔNG CÓ CHECK NÀO ⇒ CHƯA BIẾT, KHÔNG PHẢI XANH.** Đây là bẫy chính của hàm này: `every()`
+ * trên mảng rỗng trả `true`, nên một bản viết tự nhiên sẽ kết luận "mọi check đều thành công" cho
+ * một PR mà cổng `gates` còn chưa khởi động. Một PR chưa ai chạy cổng mà hiện "cổng xanh" là đúng
+ * loại lời nói dối sẽ được dùng để bấm gộp.
+ *
+ * Thứ tự xét là thứ tự của HẬU QUẢ, không phải thứ tự chữ cái: một check đỏ thắng mọi check xanh
+ * (PR đỏ), và một check chưa xong thắng mọi check xanh còn lại (PR chưa kết luận được).
+ *
+ * `neutral` và `skipped` KHÔNG phải lỗi — một job bị điều kiện `if` bỏ qua là chuyện bình thường
+ * của workflow; xếp nó vào đỏ thì mọi PR đều đỏ và không ai nhìn cột này nữa.
+ */
+export function techCiStateFromChecks(runs: { status: string; conclusion: string | null }[]): TechCiState {
+  if (!runs.length) return "";
+  const hong = new Set(["failure", "timed_out", "cancelled", "action_required", "startup_failure", "stale"]);
+  if (runs.some((r) => r.conclusion !== null && hong.has(r.conclusion.toLowerCase()))) return "FAILURE";
+  if (runs.some((r) => r.status.toLowerCase() !== "completed" || r.conclusion === null)) return "PENDING";
+  return "SUCCESS";
+}
+
+/**
+ * REVIEW → MỘT CHỮ — HÀM THUẦN.
+ *
+ * Chỉ LƯỢT CUỐI CÙNG của mỗi người được tính. GitHub giữ nguyên mọi review cũ, nên đếm gộp cả
+ * lịch sử sẽ báo "đã duyệt" cho một PR mà người ấy sau đó đã yêu cầu sửa.
+ *
+ * `COMMENTED` và `PENDING` KHÔNG đổi lập trường của ai — bỏ qua chúng, chứ không coi là đã xem.
+ * `DISMISSED` thì XOÁ lập trường cũ (GitHub huỷ duyệt khi có push mới, và ruleset của kho này bật
+ * đúng luật đó), nên nó phải ghi đè lượt duyệt trước của chính người đó.
+ *
+ * Không ai duyệt là một KẾT QUẢ ĐO ĐƯỢC (`REVIEW_REQUIRED`), khác hẳn `""` = chưa đọc được.
+ */
+export function techReviewStateFromReviews(reviews: { user: string; state: string }[]): TechReviewState {
+  const cuoi = new Map<string, string>();
+  for (const r of reviews) {
+    const s = r.state.toUpperCase();
+    if (s !== "APPROVED" && s !== "CHANGES_REQUESTED" && s !== "DISMISSED") continue;
+    cuoi.set(r.user, s);
+  }
+  const lapTruong = [...cuoi.values()];
+  if (lapTruong.includes("CHANGES_REQUESTED")) return "CHANGES_REQUESTED";
+  if (lapTruong.includes("APPROVED")) return "APPROVED";
+  return "REVIEW_REQUIRED";
+}
+
+/**
+ * GỘP ĐƯỢC CHƯA — HÀM THUẦN, VÀ BA GIÁ TRỊ CHỨ KHÔNG PHẢI HAI.
+ *
+ * `mergeable = null` nghĩa là GitHub CÒN ĐANG TÍNH (nó tính nền, sau mỗi lần base đổi). Ép nó
+ * thành `MERGEABLE` là mời người bấm gộp một nhánh có thể đang xung đột; ép thành `CONFLICT` là
+ * gửi người đi gỡ một xung đột không tồn tại. Cả hai đều tệ hơn im lặng — nên trả `""`.
+ */
+export function techMergeStateFromGithub(merged: boolean, mergeable: boolean | null): TechMergeState {
+  if (merged) return "MERGED";
+  if (mergeable === true) return "MERGEABLE";
+  if (mergeable === false) return "CONFLICT";
+  return "";
+}
+
+/* ═══════ ĐỘ TƯƠI CỦA SỔ DEPLOY — MỘT KẾT LUẬN CHỈ ĐÚNG KHI NGUỒN CÒN MỚI ═══════ */
+
+/**
+ * ═══════════ SỰ CỐ THẬT 20/09/2026 · MỘT BÁO ĐỘNG GIẢ TRỎ VÀO CHÍNH ĐỘ TƯƠI CỦA NÓ ═══════════
+ *
+ * `/tech/deployments` in "LỆCH — container có thể chưa khởi động lại" và gửi người đi xem máy chủ.
+ * Máy chủ không hỏng. Dòng mới nhất trong sổ là 12:11 hôm trước, còn GitHub đã có thêm **12 lượt
+ * deploy** sau đó — nên "lượt deploy thành công gần nhất" mà ERP đem ra so là một lượt cũ, và
+ * commit production tất nhiên khác nó.
+ *
+ * Phép so vẫn đúng như đã viết; cái sai là nó ĐƯỢC PHÉP KẾT LUẬN trên một nguồn đã cũ. Lên lịch
+ * cho job đọc làm chỗ hụt hiếm đi, nhưng không xoá được nó: job có thể chết, GitHub có thể khoá
+ * hạn mức, máy chủ có thể vừa khởi động lại. Nên **độ tươi phải là một vế của phép kết luận**,
+ * không phải một thứ người đọc tự đoán.
+ *
+ * Ba câu trả lời, vì ba cách sửa khác nhau: `NEVER` (chưa lượt đọc nào — đi bấm "Đọc lại từ
+ * GitHub") · `STALE` (job đọc đang không chạy — đi xem bộ lập lịch) · `FRESH` (nguồn còn mới, lúc
+ * này mới được kết luận LỆCH).
+ */
+export const DEPLOY_LEDGER_STALE_MINUTES = 45;
+
+export type DeployLedgerFreshness = "NEVER" | "STALE" | "FRESH";
+
+/**
+ * Sổ deploy còn mới không — HÀM THUẦN.
+ *
+ * Ngưỡng 45 phút = BA nhịp của lịch 15 phút. Một nhịp lỡ là chuyện bình thường (máy chủ khởi động
+ * lại, một lượt gọi GitHub hết giờ); ba nhịp liên tiếp thì job đang không chạy.
+ */
+export function deployLedgerFreshness(lastSyncAt: Date | null, now: Date = new Date()): DeployLedgerFreshness {
+  if (!lastSyncAt) return "NEVER";
+  return now.getTime() - lastSyncAt.getTime() <= DEPLOY_LEDGER_STALE_MINUTES * 60_000 ? "FRESH" : "STALE";
 }

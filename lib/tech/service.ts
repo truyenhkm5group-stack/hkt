@@ -119,6 +119,22 @@ async function nextCode(db: Db, prefix: "TECH" | "INC") {
   return `${prefix}-${Number(row?.max ?? 0) + 1}`;
 }
 
+/**
+ * GHI MỘT DÒNG NHẬT KÝ VIỆC TỪ BÊN NGOÀI TỆP NÀY.
+ *
+ * `ghiSuKien` nhận sẵn một `Db` vì mọi hàm trong tệp đã mở kết nối rồi. Job nền thì không — nên
+ * đây là cửa cho chúng, và nó là cửa DUY NHẤT: mọi đường ghi nhật ký vẫn đi qua cùng một phép
+ * chuẩn hoá người thao tác (`coloumnsOfActor`), nên không đường nào lặng lẽ ghi một job thành
+ * một con người (AGENTS.md mục 34 & 36).
+ */
+export async function recordTechTaskEvent(
+  input: { taskId: string; kind: TechEventKind; note?: string; previousValue?: string; nextValue?: string; payload?: unknown },
+  actor: TechActor,
+) {
+  const db = await getDb();
+  await ghiSuKien(db, input, actor);
+}
+
 /* ═════════════════════ VIỆC TECH ═════════════════════ */
 
 export type CreateTechTaskInput = {

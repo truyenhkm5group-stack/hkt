@@ -12,6 +12,14 @@ import {
   TECH_INCIDENT_SEVERITY_TONE,
   TECH_INCIDENT_STATUS_LABEL,
   TECH_INCIDENT_STATUS_TONE,
+  TECH_CI_STATE_LABEL,
+  TECH_CI_STATE_TONE,
+  TECH_MERGE_STATE_LABEL,
+  TECH_MERGE_STATE_TONE,
+  TECH_PR_STATE_LABEL,
+  TECH_PR_STATE_TONE,
+  TECH_REVIEW_STATE_LABEL,
+  TECH_REVIEW_STATE_TONE,
   TECH_PRIORITY_LABEL,
   TECH_PRIORITY_TONE,
   TECH_RISK_LABEL,
@@ -23,7 +31,11 @@ import {
   type TechGateResult,
   type TechIncidentSeverity,
   type TechIncidentStatus,
+  type TechCiState,
+  type TechMergeState,
+  type TechPrState,
   type TechPriority,
+  type TechReviewState,
   type TechRisk,
   type TechDeployProvider,
   type TechTaskStatus,
@@ -120,4 +132,37 @@ export function TechProviderBadge({ provider, className }: { provider: TechDeplo
       {TECH_DEPLOY_PROVIDER_LABEL[provider]}
     </span>
   );
+}
+
+/**
+ * ═══════════ BỐN NHÃN PR — CHƯA BIẾT THÌ KHÔNG VẼ GÌ ═══════════
+ *
+ * Mỗi nhãn tự ẩn khi giá trị là chuỗi rỗng. Một nhãn xám ghi "Chưa biết" trên mọi việc chưa có PR
+ * là bốn nhãn xám trên mỗi dòng, và người đọc sẽ học cách không nhìn cả bốn — kể cả lúc một trong
+ * chúng chuyển đỏ. Chữ "Chưa biết" vẫn sống trong `TECH_*_LABEL` cho những chỗ PHẢI in ra một giá
+ * trị (trang chi tiết, tooltip), nơi ô trống sẽ bị đọc nhầm thành "không có".
+ */
+export function TechPrStateBadge({ state, className }: { state: TechPrState; className?: string }) {
+  if (!state) return null;
+  return <span className={cn(base, TECH_PR_STATE_TONE[state], className)}>{TECH_PR_STATE_LABEL[state]}</span>;
+}
+
+export function TechCiStateBadge({ state, className }: { state: TechCiState; className?: string }) {
+  if (!state) return null;
+  return <span className={cn(base, TECH_CI_STATE_TONE[state], className)}>{TECH_CI_STATE_LABEL[state]}</span>;
+}
+
+export function TechReviewStateBadge({ state, className }: { state: TechReviewState; className?: string }) {
+  if (!state) return null;
+  return <span className={cn(base, TECH_REVIEW_STATE_TONE[state], className)}>{TECH_REVIEW_STATE_LABEL[state]}</span>;
+}
+
+export function TechMergeStateBadge({ state, className }: { state: TechMergeState; className?: string }) {
+  /*
+    "Gộp được" KHÔNG hiện, và đó là lựa chọn: nó là trạng thái BÌNH THƯỜNG của mọi PR khoẻ mạnh,
+    nên vẽ nó lên là thêm một nhãn xanh vào mỗi dòng để nói "không có gì xảy ra". Thứ đáng nhìn là
+    XUNG ĐỘT. `MERGED` vẫn hiện vì nó là một sự kiện, không phải một trạng thái chờ.
+  */
+  if (!state || state === "MERGEABLE") return null;
+  return <span className={cn(base, TECH_MERGE_STATE_TONE[state], className)}>{TECH_MERGE_STATE_LABEL[state]}</span>;
 }

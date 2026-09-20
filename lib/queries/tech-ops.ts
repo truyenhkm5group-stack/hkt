@@ -87,6 +87,25 @@ export async function lastSuccessfulDeployment() {
   return row ?? null;
 }
 
+/**
+ * LƯỢT ĐỌC GITHUB GẦN NHẤT CÓ KẾT QUẢ.
+ *
+ * `PARTIAL` cũng tính: lượt đó CÓ đọc được danh sách lượt chạy và có ghi vào sổ, chỉ kèm cảnh báo.
+ * Loại nó ra sẽ làm sổ trông cũ hơn thực tế và đẩy màn hình về "chưa kết luận được" một cách vô cớ.
+ * `FAILED` thì không tính — lượt hỏng không đọc được gì, nên nó không làm sổ mới hơn.
+ *
+ * `null` = chưa lượt nào. Đó là CHƯA BIẾT, không phải "sổ vừa được đọc".
+ */
+export async function lastGithubDeploySyncAt(): Promise<Date | null> {
+  const db = await getDb();
+  const row = await db.query.syncRuns.findFirst({
+    where: and(eq(schema.syncRuns.source, "GITHUB"), eq(schema.syncRuns.job, "deploy_runs"), inArray(schema.syncRuns.status, ["SUCCESS", "PARTIAL"])),
+    orderBy: [desc(schema.syncRuns.startedAt)],
+    columns: { startedAt: true },
+  });
+  return row?.startedAt ?? null;
+}
+
 export function techIncidentWhere(params: ListParams) {
   const i = schema.techIncidents;
   const conds: (SQL | undefined)[] = [];

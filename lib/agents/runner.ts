@@ -216,8 +216,22 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
  * là thứ phân biệt "đang chạy thật" với "đã chết" — mốc đứng im quá lâu nghĩa là không ai còn cập
  * nhật nó.
  *
- * KHÔNG tự chạy theo lịch ở Phase 2A: gọi từ CLI khi cần. Một job tự đóng lượt chạy của người khác
- * là thứ phải có người quyết.
+ * ─── VÌ SAO NAY CHẠY THEO LỊCH ───
+ *
+ * Phase 2A cố ý KHÔNG lên lịch: "một job tự đóng lượt chạy của người khác là thứ phải có người
+ * quyết". Đo lại 20/09/2026 cho thấy cái giá của lựa chọn đó lớn hơn cái nó bảo vệ — và cái nó
+ * bảo vệ thì KHÔNG tồn tại:
+ *
+ * · Hàm này KHÔNG đóng lượt chạy của ai đang chạy. Điều kiện là nhịp tim ĐỨNG IM quá ngưỡng; một
+ *   tiến trình còn sống vẫn đập nhịp, nên nó không bao giờ lọt vào tập bị đóng. Thứ nó chạm tới
+ *   đúng bằng những lượt chạy KHÔNG CÒN AI CẬP NHẬT.
+ * · Không có lịch thì hậu quả không dừng ở "một dòng sai": cổng chống chạy song song đọc đúng
+ *   bảng này, nên MỘT lượt chạy mồ côi khoá vĩnh viễn mọi lượt sau trên cùng việc — im lặng, cho
+ *   tới khi có người biết là phải gọi tay. Để nguyên là chọn hỏng ĐÓNG mà không báo ai.
+ *
+ * Nhịp 15 phút với ngưỡng 45 phút: một lượt chạy phải im lặng qua ÍT NHẤT ba nhịp tim trước khi
+ * bị đóng. Và nó đóng thành `FAILED` KÈM LÝ DO ĐO ĐƯỢC (mốc nhịp tim cuối, ngưỡng đã dùng), chứ
+ * không xoá dòng — bằng chứng ở lại.
  */
 export async function reapStaleRuns(staleMinutes = 45, actor: TechActor = { kind: "SYSTEM", name: "job:agent-reaper" }) {
   const db = await getDb();

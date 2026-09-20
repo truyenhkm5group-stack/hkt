@@ -37,6 +37,9 @@ import { getDb } from "@/db";
 import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 import { runGithubDeploymentSync } from "@/lib/integrations/github/deployments";
+import { runGithubPrSync } from "@/lib/integrations/github/pull-requests";
+import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
+import { reapStaleRuns } from "@/lib/agents/runner";
 
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
@@ -73,6 +76,51 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     description:
       "CHỈ ĐỌC: nạp N lượt chạy gần nhất của workflow deploy vào sổ quan sát `tech_deployments`, rồi đối chiếu commit của lượt thành công mới nhất với bản production ĐANG CHẠY. ERP không kích hoạt, không huỷ, không đổi được một lượt deploy nào — GitHub Actions vẫn là bên có thẩm quyền. Idempotent theo khoá (lượt chạy, lần chạy lại).",
     run: (o) => runGithubDeploymentSync({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit) }),
+  },
+  "agent-reaper": {
+    label: "Đóng lượt chạy agent mồ côi",
+    source: "ALL",
+    description:
+      "Đóng những lượt chạy agent đang ở RUNNING mà NHỊP TIM đã đứng im quá ngưỡng (mặc định 45 phút, đổi bằng ?minutes=). " +
+      "KHÔNG đụng tới lượt chạy còn sống — tiến trình còn chạy thì còn đập nhịp. Không xoá dòng nào: lượt mồ côi được ghi FAILED kèm mốc nhịp tim cuối và ngưỡng đã dùng. " +
+      "Vì sao phải có lịch: cổng 'không hai lượt song song' đọc đúng bảng này, nên một lượt mồ côi khoá vĩnh viễn mọi lượt sau trên cùng việc.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "agent-reaper", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        /*
+          NGƯỠNG KHÔNG ĐƯỢC NHỎ HƠN MỘT NHỊP TIM.
+
+          Nhịp tim của runner đo bằng phút; một ngưỡng vài phút sẽ đóng nhầm lượt chạy đang sống mà
+          chỉ tình cờ chậm một nhịp. Sàn 10 phút là để một tham số gõ nhầm trên URL không biến job
+          này thành thứ giết agent.
+        */
+        const phut = Math.max(10, num(o.params?.minutes) ?? 45);
+        const r = await reapStaleRuns(phut);
+        ctx.summary.updated = r.reaped;
+        ctx.summary.skipped = r.checked - r.reaped;
+        ctx.summary.detail = `Xét ${r.checked} lượt đang RUNNING, đóng ${r.reaped} lượt không đập nhịp quá ${phut} phút.`;
+        for (const id of r.ids) ctx.log(`đóng lượt chạy mồ côi ${id}`);
+        return { ...r, staleMinutes: phut };
+      }),
+  },
+  "github-pr-sync": {
+    label: "Chép trạng thái Pull Request về việc Tech",
+    source: "GITHUB",
+    description:
+      "CHỈ ĐỌC: đọc N pull request cập nhật gần nhất rồi chép bốn chiều (PR mở/đóng/gộp · cổng CI · duyệt · gộp được chưa) vào những việc Tech đã có khoá nối. " +
+      "Nối bằng KHOÁ, không đoán: số PR đã biết, hoặc `tech_tasks.branch` BẰNG ĐÚNG nhánh nguồn của PR. Không dò mã việc trong tiêu đề. " +
+      "Không đổi trạng thái việc, không đụng ô của người, và không làm `updated_at` của việc nhảy — mốc của phép chiếu nằm ở `pr_synced_at`. " +
+      "PR đang mở mà không việc nào nhận được ĐẾM RIÊNG và in ra.",
+    run: (o) => runGithubPrSync({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit) }),
+  },
+  "tech-incident-watch": {
+    label: "Mở sự cố cho job đồng bộ hỏng liên tiếp",
+    source: "ALL",
+    description:
+      "Quét `sync_runs` trong 24 giờ gần nhất, tìm job có N lượt hỏng LIÊN TIẾP (mặc định 3) rồi mở một sự cố Tech cho nó. " +
+      "MỘT lượt hỏng không phải sự cố — chuỗi liên tiếp mới là thứ phân biệt 'mạng chập' với 'hỏng thật'. " +
+      "Chỉ MỞ, không bao giờ tự đóng: đóng sự cố đòi kể được ĐÃ LÀM GÌ để nó hết, mà máy không có câu đó. " +
+      "Nhiều nhất một sự cố chưa đóng cho mỗi job, nên chạy lại bao nhiêu lần cũng không nhân đôi.",
+    run: (o) => runSyncIncidentWatch({ trigger: o.trigger, actor: o.actor, hours: num(o.params?.hours) }),
   },
   "sepay-reconcile": {
     label: "Đối chiếu giao dịch ngân hàng qua API SePay",

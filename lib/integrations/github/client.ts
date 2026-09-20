@@ -305,3 +305,111 @@ export async function listRecentDeployRuns(limit = 20): Promise<GithubRun[]> {
 export async function getDeployRun(runId: number): Promise<GithubRun> {
   return toRun(await get<RawRun>(`/actions/runs/${runId}`));
 }
+
+/* ═════════════════════ PULL REQUEST — VẪN CHỈ ĐỌC ═════════════════════ */
+
+/**
+ * ═══════════ VÌ SAO ERP ĐỌC PR, VÀ VÌ SAO NÓ KHÔNG ĐƯỢC KẾT LUẬN GÌ THÊM ═══════════
+ *
+ * `tech_tasks` có sẵn chín ô để CHÉP trạng thái PR về (`pr_state`, `ci_state`, `review_state`,
+ * `merge_state`…). Chúng tồn tại từ migration `0104` và tới 20/09/2026 KHÔNG một dòng mã nào ghi
+ * hay đọc chúng — khung dựng rồi, dây chưa nối. Phần dưới đây là ĐẦU ĐỌC của sợi dây đó.
+ *
+ * Ba luật giữ nguyên từ phần trên tệp này:
+ *
+ *  1. **CHỈ `GET`.** Không mở PR, không đẩy nhánh, không duyệt, không gộp. Những việc đó đi qua
+ *     `agent-open-pr.yml` với danh tính và hàng rào riêng — mở một đường ghi ở đây là xoá mất
+ *     hàng rào ấy bằng một tệp khác.
+ *  2. **GitHub là bên CÓ THẨM QUYỀN.** ERP chép lại, không phán xét. `mergeable = null` nghĩa là
+ *     GitHub CÒN ĐANG TÍNH — chép nó thành `CONFLICT` hay `MERGEABLE` đều là bịa.
+ *  3. **Không có quan sát nào ⇒ CHƯA BIẾT, không phải \"xanh\".** Một PR chưa có check run nào
+ *     KHÔNG phải một PR có CI thành công.
+ */
+
+export type GithubPull = {
+  number: number;
+  title: string;
+  state: string;
+  merged: boolean;
+  draft: boolean;
+  headRef: string;
+  headSha: string;
+  baseRef: string;
+  baseSha: string;
+  htmlUrl: string;
+  /** `true` · `false` · `null` = GitHub còn đang tính. Ba giá trị, không phải hai. */
+  mergeable: boolean | null;
+  updatedAt: Date | null;
+};
+
+type RawPull = {
+  number: number;
+  title?: string;
+  state: string;
+  draft?: boolean;
+  merged?: boolean;
+  merged_at?: string | null;
+  mergeable?: boolean | null;
+  html_url: string;
+  updated_at?: string | null;
+  head?: { ref?: string; sha?: string } | null;
+  base?: { ref?: string; sha?: string } | null;
+};
+
+function toPull(p: RawPull): GithubPull {
+  return {
+    number: p.number,
+    title: p.title ?? "",
+    state: p.state,
+    // `merged` chỉ có ở lượt đọc MỘT PR; ở danh sách thì `merged_at` là chứng cứ duy nhất.
+    merged: p.merged === true || Boolean(p.merged_at),
+    draft: p.draft === true,
+    headRef: p.head?.ref ?? "",
+    headSha: p.head?.sha ?? "",
+    baseRef: p.base?.ref ?? "",
+    baseSha: p.base?.sha ?? "",
+    htmlUrl: p.html_url,
+    mergeable: p.mergeable === undefined ? null : p.mergeable,
+    updatedAt: p.updated_at ? new Date(p.updated_at) : null,
+  };
+}
+
+/**
+ * N pull request cập nhật gần nhất (mọi trạng thái).
+ *
+ * `sort=updated` chứ không `sort=created`: cái đáng chép về là PR vừa có chuyện xảy ra, không phải
+ * PR mới mở. Lượt đọc danh sách KHÔNG có `mergeable` (GitHub chỉ tính nó khi đọc từng PR), nên mọi
+ * dòng ở đây mang `mergeable: null` — đúng nghĩa CHƯA BIẾT.
+ */
+export async function listRecentPulls(limit = 50): Promise<GithubPull[]> {
+  const n = Math.max(1, Math.min(100, limit));
+  const data = await get<RawPull[]>(`/pulls?state=all&sort=updated&direction=desc&per_page=${n}`);
+  return (Array.isArray(data) ? data : []).map(toPull);
+}
+
+/** Một PR cụ thể — lượt đọc DUY NHẤT trả lời được `mergeable`. */
+export async function getPull(number: number): Promise<GithubPull> {
+  return toPull(await get<RawPull>(`/pulls/${number}`));
+}
+
+export type GithubCheckRun = { name: string; status: string; conclusion: string | null };
+
+/** Check run của một commit. Mảng RỖNG là một câu trả lời thật: \"không có check nào\". */
+export async function listCheckRuns(sha: string): Promise<GithubCheckRun[]> {
+  const data = await get<{ check_runs?: { name?: string; status?: string; conclusion?: string | null }[] }>(
+    `/commits/${encodeURIComponent(sha)}/check-runs?per_page=100`,
+  );
+  return (data.check_runs ?? []).map((c) => ({ name: c.name ?? "", status: c.status ?? "", conclusion: c.conclusion ?? null }));
+}
+
+export type GithubReview = { user: string; state: string; submittedAt: Date | null };
+
+/** Review của một PR, theo thứ tự GitHub trả về (cũ → mới). */
+export async function listPullReviews(number: number): Promise<GithubReview[]> {
+  const data = await get<{ user?: { login?: string } | null; state?: string; submitted_at?: string | null }[]>(`/pulls/${number}/reviews?per_page=100`);
+  return (Array.isArray(data) ? data : []).map((r) => ({
+    user: r.user?.login ?? "",
+    state: (r.state ?? "").toUpperCase(),
+    submittedAt: r.submitted_at ? new Date(r.submitted_at) : null,
+  }));
+}

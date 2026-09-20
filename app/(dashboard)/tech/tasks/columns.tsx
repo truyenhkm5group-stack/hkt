@@ -1,8 +1,8 @@
 "use client";
 
 import type { ColumnDef } from "@tanstack/react-table";
-import { TechApprovalBadge, TechPriorityBadge, TechRiskBadge, TechStatusBadge } from "@/app/(dashboard)/tech/badges";
-import { TECH_MODULE_LABEL, TECH_TASK_TYPE_LABEL, type TechApprovalStatus, type TechModule, type TechPriority, type TechRisk, type TechTaskStatus, type TechTaskType } from "@/lib/constants/tech";
+import { TechApprovalBadge, TechCiStateBadge, TechMergeStateBadge, TechPrStateBadge, TechPriorityBadge, TechReviewStateBadge, TechRiskBadge, TechStatusBadge } from "@/app/(dashboard)/tech/badges";
+import { TECH_MODULE_LABEL, TECH_TASK_TYPE_LABEL, type TechApprovalStatus, type TechCiState, type TechMergeState, type TechModule, type TechPrState, type TechPriority, type TechReviewState, type TechRisk, type TechTaskStatus, type TechTaskType } from "@/lib/constants/tech";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { TechTaskListRow } from "@/lib/queries/tech";
 
@@ -54,6 +54,44 @@ export const techTaskColumns: ColumnDef<TechTaskListRow, unknown>[] = [
     header: "Rủi ro",
     cell: ({ row }) => <TechRiskBadge risk={row.original.risk as TechRisk} />,
     size: 150,
+  },
+  {
+    id: "pr",
+    header: "Pull request",
+    enableSorting: false,
+    /*
+      PHÉP CHIẾU, KHÔNG PHẢI LỜI KHẲNG ĐỊNH CỦA ERP.
+
+      GitHub là bên có thẩm quyền; ô này chỉ chép lại. Nên nó in MỐC ĐỌC GẦN NHẤT ngay dưới: một
+      dòng "Cổng xanh" không kèm mốc sẽ được đọc là tình trạng BÂY GIỜ, trong khi nó có thể là ảnh
+      chụp của mười lăm phút trước — và đó đúng là cách sổ deploy từng báo động giả ngày 20/09/2026
+      (sổ cũ 14 giờ, cảnh báo lại trỏ vào container).
+
+      Chưa có PR thì KHÔNG in "—" cụt: nói rõ "chưa mở PR" nếu việc đã có nhánh, và bỏ trống nếu
+      chưa có cả nhánh. Hai thứ đó là hai tình trạng khác nhau và gộp lại thì không ai biết phải
+      làm gì tiếp.
+    */
+    cell: ({ row }) => {
+      const r = row.original;
+      if (!r.prNumber) {
+        return <span className="whitespace-nowrap text-[11px] text-muted-foreground">{r.branch ? "— chưa mở PR" : ""}</span>;
+      }
+      return (
+        <div className="min-w-[150px]">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="font-mono text-xs font-semibold">#{r.prNumber}</span>
+            <TechPrStateBadge state={r.prState as TechPrState} />
+            <TechCiStateBadge state={r.ciState as TechCiState} />
+            <TechReviewStateBadge state={r.reviewState as TechReviewState} />
+            <TechMergeStateBadge state={r.mergeState as TechMergeState} />
+          </div>
+          <div className="text-[10.5px] text-muted-foreground">
+            {r.prSyncedAt ? `đọc ${formatTimeAgo(r.prSyncedAt)}` : "chưa đọc lần nào"}
+          </div>
+        </div>
+      );
+    },
+    size: 210,
   },
   {
     id: "agent",
