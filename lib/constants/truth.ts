@@ -198,6 +198,31 @@ export function isFinishedOutcome(outcome: OrderOutcome): boolean {
 }
 
 /**
+ * ═══════════ "CHƯA NGÃ NGŨ" — MỘT DANH SÁCH, SINH RA TỪ BẢNG NHÓM ═══════════
+ *
+ * `OUTCOME_GROUP` ở ngay trên đã là lời khai duy nhất về việc kết quả nào còn đang chạy. Nhưng
+ * lời khai ấy sống ở TypeScript, còn những chỗ ĐẾM đơn chưa ngã ngũ lại là các vị ngữ SQL — và
+ * bốn chỗ trong số đó đã gõ lại danh sách bằng trí nhớ:
+ *
+ *   `lib/queries/marketing-daily.ts` · `lib/queries/metrics.ts` · `lib/queries/ads-decision.ts`
+ *
+ * Cả bốn đều dừng ở `('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')` — bộ ba của TRƯỚC bản 13/09/2026,
+ * lúc `AWAITING_PICKUP` chưa tồn tại. Chú thích cạnh `OUTCOME_GROUP.AWAITING_PICKUP` nói "đổi
+ * nhãn 106 đơn này KHÔNG làm xê dịch một tỷ lệ nào"; câu đó chỉ đúng ở những nơi ĐỌC bảng nhóm.
+ * Ở bốn bản chép tay kia, 50 đơn của kỳ 01/09–09/09 (đo production 19/09/2026) rơi ra khỏi CẢ
+ * tử số lẫn mẫu số của độ chín: 423 đã kết thúc + 46 đang chạy = 469, trong khi population thật
+ * của kỳ là 519. Độ chín in ra 90,2% thay vì 81,5%.
+ *
+ * Nên danh sách này SINH RA từ `OUTCOME_GROUP`, không phải một bản chép thứ năm. Thêm một kết
+ * quả "đang chạy" sau này là sửa ĐÚNG MỘT chỗ — bảng nhóm — và mọi vị ngữ SQL đi theo.
+ * `tests/contract-order-outcome.test.ts` quét mã nguồn để chặn đường quay lại.
+ */
+export const OPEN_OUTCOMES = (Object.keys(OUTCOME_GROUP) as OrderOutcome[]).filter((o) => OUTCOME_GROUP[o] === "OPEN");
+
+/** Cùng danh sách, dạng dùng được trong `in (...)` của SQL — sinh ra từ mảng trên, không gõ lại. */
+export const OPEN_OUTCOMES_SQL = OPEN_OUTCOMES.map((x) => `'${x}'`).join(",");
+
+/**
  * ───────── Bằng chứng TIỀN ─────────
  * Ghi thành hằng số để không ai phải đoán "trường này có tính là tiền thật không".
  * Đặc tả `ORDER_OUTCOME.md` mục 8.

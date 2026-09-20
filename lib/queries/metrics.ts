@@ -2,6 +2,7 @@ import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
+import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
@@ -73,7 +74,7 @@ export const IS_DELIVERED = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`;
 /** `RETURNED` và `RETURNED_BY_RULE` LUÔN gộp làm một trong mọi tổng hợp (đặc tả mục 6). */
 export const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
 export const IS_CANCELLED = sql`${ORDER_OUTCOME_FAST} = 'CANCELLED'`;
-export const IS_OPEN = sql`${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`;
+export const IS_OPEN = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
 /** Đơn ĐÃ KẾT THÚC — mẫu số của tỷ lệ giao thành công. Đơn huỷ KHÔNG nằm trong mẫu số. */
 export const IS_FINISHED = sql`${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`;
 
@@ -195,7 +196,7 @@ export function factMetrics(base: OrderMetricFacts) {
     countDelivered: sql<number>`count(*) filter (where ${delivered})`,
     countReturned: sql<number>`count(*) filter (where ${returned})`,
     countCancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
-    countOpen: sql<number>`count(*) filter (where ${base.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN'))`,
+    countOpen: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
     countUnknown: sql<number>`count(*) filter (where ${base.outcome} = 'UNKNOWN')`,
     bookedRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${booked}), 0)`,
     bookedCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${booked}), 0)`,

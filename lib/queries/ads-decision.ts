@@ -10,6 +10,7 @@ import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import { adsAttributionCoverage, coverageVerdict } from "@/lib/queries/ads-attribution-coverage";
 import { LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
+import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import {
   ADS_ACTION_ORDER,
   ADS_DECISION_RULE,
@@ -252,7 +253,7 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension): Promis
   const delivered = sql`${facts.outcome} = 'DELIVERED'`;
   const returned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
   const booked = sql`${facts.outcome} <> 'CANCELLED'`;
-  const open = sql`${facts.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`;
+  const open = sql`${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
 
   const rows = await chayKhongJit(db, (tx) =>
     tx
@@ -335,7 +336,7 @@ async function aggregateByProduct(period: Period): Promise<Agg[]> {
   const delivered = sql`${facts.outcome} = 'DELIVERED'`;
   const returned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
   const booked = sql`${facts.outcome} <> 'CANCELLED'`;
-  const open = sql`${facts.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`;
+  const open = sql`${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
   /** ĐẾM ĐƠN, KHÔNG ĐẾM DÒNG: một đơn hai mã hàng vẫn là MỘT đơn của mỗi mã. */
   const countOrders = (cond: ReturnType<typeof sql>) => sql<number>`count(distinct ${facts.orderId}) filter (where ${cond})`;
 
