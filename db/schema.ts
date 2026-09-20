@@ -2599,6 +2599,17 @@ export const salesConversations = pgTable(
     takeoverReason: text("takeover_reason").notNull().default(""),
     takeoverByUserId: text("takeover_by_user_id").references(() => users.id, { onDelete: "set null" }),
     /**
+     * LÚC MỘT CON NGƯỜI THẬT SỰ NHẬN VIỆC — tách khỏi `human_takeover_at`.
+     *
+     * `human_takeover_at` trả lời "việc này bắt đầu chờ người từ lúc nào", và nó do MÁY ghi khi
+     * máy xin người vào. Cột này trả lời "người cầm lúc nào". Gộp hai mốc vào một ô thì không đo
+     * được thứ đáng đo nhất: KHÁCH ĐÃ CHỜ BAO LÂU trước khi có người.
+     *
+     * NULL = chưa ai nhận. Đi cùng `takeover_by_user_id` (khoá người) — hai ô này luôn cùng có
+     * hoặc cùng không.
+     */
+    takeoverClaimedAt: ts("takeover_claimed_at"),
+    /**
      * ẢNH CHỤP NGỮ CẢNH BÁN — chốt một lần lúc hội thoại đủ điều kiện, sau đó BẤT BIẾN.
      *
      * Đây là điểm mấu chốt của cả mô hình: page đổi mẫu thắng Q004 → Q017 thì hội thoại CŨ vẫn

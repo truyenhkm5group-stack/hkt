@@ -12,6 +12,7 @@ import { sendSalesMessage } from "@/lib/ai-workforce/agents/sales/outbound";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { modeAtLeast } from "@/lib/constants/ai";
 import { COPILOT_MAX_REPLY_CHARS, COPILOT_REJECT_REASONS, COPILOT_SUGGESTION_TTL_MINUTES, editDistance } from "@/lib/constants/sales-copilot";
+import { planTakeover } from "@/lib/constants/machine-handoff";
 import { copilotPageAllowed } from "@/lib/queries/sales-copilot";
 
 export type ActionResult<T = unknown> = ({ ok: true } & T) | { error: string };
@@ -336,14 +337,24 @@ export async function takeoverConversation(input: unknown): Promise<ActionResult
   if (!cua.ok) return { error: cua.error };
 
   const db = await getDb();
-  const daCam = cua.conversation.humanTakeoverAt;
-  if (!daCam) {
+  /*
+    QUYẾT ĐỊNH nằm ở `planTakeover` — hàm thuần, có bài kiểm riêng. Ở đây chỉ còn phép GHI.
+
+    Tách ra vì nhánh này đã sai một lần: bản trước gác bằng `humanTakeoverAt`, cột mà CHÍNH MÁY
+    cũng ghi khi nó xin người vào, nên với mọi việc máy chuyển sang thì nhánh ghi bị bỏ qua và
+    `takeover_by_user_id` không bao giờ được ghi — trong khi lượt bấm vẫn để lại một dòng nhật ký
+    nói `after: { takeoverByUserId }`, tức một dấu vết kiểm toán khẳng định điều đã KHÔNG xảy ra.
+  */
+  const ke = planTakeover(cua.conversation, cua.user.id, parsed.data.note, new Date());
+  if (ke.kind === "TAKEN_BY_OTHER") return { error: "Hội thoại này đã có người khác nhận" };
+  if (ke.kind === "CLAIM") {
     await db
       .update(schema.salesConversations)
       .set({
-        humanTakeoverAt: new Date(),
+        humanTakeoverAt: ke.humanTakeoverAt,
+        takeoverClaimedAt: ke.takeoverClaimedAt,
         takeoverByUserId: cua.user.id,
-        takeoverReason: parsed.data.note || "Nhân viên tự nhận việc từ hàng đợi trợ lý",
+        takeoverReason: ke.takeoverReason,
         stage: "HUMAN_TAKEOVER",
       })
       .where(eq(schema.salesConversations.id, parsed.data.conversationId));
@@ -391,7 +402,7 @@ export async function releaseConversation(input: unknown): Promise<ActionResult>
   const db = await getDb();
   await db
     .update(schema.salesConversations)
-    .set({ humanTakeoverAt: null, takeoverByUserId: null, takeoverReason: "", stage: "QUALIFIED" })
+    .set({ humanTakeoverAt: null, takeoverByUserId: null, takeoverClaimedAt: null, takeoverReason: "", stage: "QUALIFIED" })
     .where(eq(schema.salesConversations.id, parsed.data.conversationId));
   await db.insert(schema.salesCopilotActions).values({
     conversationId: parsed.data.conversationId,
