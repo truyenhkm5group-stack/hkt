@@ -132,6 +132,8 @@ export function testHangRaoTuyetDoi() {
   for (const xau of ["docs/../lib/actions/x.ts", "../x.ts", "/etc/passwd", "~/x"]) {
     assert.ok(!checkWritePath(xau, ["docs/", "tests/"]).allowed, `"${xau}" phải bị chặn`);
   }
+
+  testBaiKiemKhoaLuatNgoaiTamVoi();
 }
 
 /* ═════════════ 3 · KHÔNG LÀM XANH CỔNG BẰNG CÁCH XOÁ KHẲNG ĐỊNH ═════════════ */
@@ -179,7 +181,19 @@ export function testHangRaoBaiKiem() {
 
 /* ═════════════ 3b · BÀI KIỂM KHOÁ LUẬT PHẢI NẰM NGOÀI TẦM VỚI ═════════════ */
 
-export function testBaiKiemKhoaLuatNgoaiTamVoi() {
+/*
+  GỌI TỪ TRONG `testHangRaoTuyetDoi()`, KHÔNG ĐĂNG KÝ RIÊNG Ở BỘ CHẠY — và đó là một quyết định
+  về VẬN HÀNH, không phải về kiểu dáng.
+
+  Mọi phiên thêm một bài kiểm đều sửa ĐÚNG MỘT dòng `import` trong `tests/sync-fixtures.test.ts`.
+  Nhánh này đã xung đột ở đúng dòng ấy BỐN lần trong một buổi chiều, mỗi lần đều phải gộp tay và
+  mỗi lần gộp đều làm huỷ lượt duyệt đang có. Khối này thuộc về hàng rào tuyệt đối, nên gọi nó
+  ngay tại đó vừa đúng chỗ về mặt nội dung, vừa làm nhánh KHÔNG chạm bộ chạy một dòng nào.
+
+  Không mất gì: cùng một tiến trình, cùng một lượt chạy, mọi khẳng định vẫn chạy và vẫn đỏ đúng
+  lúc cần đỏ.
+*/
+function testBaiKiemKhoaLuatNgoaiTamVoi() {
   /*
     ───────── 3b.1 HAI ĐƯỜNG LÁCH MÀ BỘ ĐẾM KHẲNG ĐỊNH KHÔNG THẤY ─────────
 

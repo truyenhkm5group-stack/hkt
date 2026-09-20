@@ -112,3 +112,22 @@ Thứ còn thiếu là một chỗ **công bố việc đang làm** trước khi
 `docs/tech-ai-room-status.md` đã là "file trạng thái DUY NHẤT" cho việc ĐÃ XONG; nó chưa có mục
 cho việc ĐANG LÀM. Đó là đề xuất, không phải thay đổi trong PR này — thêm một quy ước vào AGENTS.md
 là việc của chủ shop.
+
+---
+
+## 6. Bài kiểm này KHÔNG chạm bộ chạy, và đó là chủ ý
+
+Khối `testBaiKiemKhoaLuatNgoaiTamVoi()` được gọi **ngay trong** `testHangRaoTuyetDoi()`, không đăng
+ký riêng ở `tests/sync-fixtures.test.ts`.
+
+Lý do là **vận hành**, không phải kiểu dáng: mọi phiên thêm một bài kiểm đều sửa đúng một dòng
+`import` trong bộ chạy. Nhánh này đã xung đột ở đúng dòng ấy **bốn lần trong một buổi chiều** —
+mỗi lần phải gộp tay, và mỗi lần gộp đều làm **huỷ lượt duyệt** đang có, nên PR quay lại vạch xuất
+phát dù nội dung không đổi một chữ.
+
+Khối ấy vốn thuộc về hàng rào tuyệt đối, nên gọi nó ngay tại đó vừa đúng chỗ về nội dung, vừa làm
+nhánh **không chạm bộ chạy một dòng nào**. Không mất gì: cùng một tiến trình, cùng một lượt chạy,
+mọi khẳng định vẫn chạy — đã xác nhận bằng một lượt thử phá (gỡ `tests/sync-fixtures.test.ts` khỏi
+hàng rào ⇒ **ĐỎ**), chứ không tin rằng nó vẫn chạy.
+
+PR nay còn **3 tệp**, và không tệp nào là tệp mà phiên khác đang sửa.

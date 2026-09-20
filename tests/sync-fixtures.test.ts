@@ -64,7 +64,7 @@ import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, tes
 import { testTestHygiene } from "./test-hygiene.test";
 import { cleanupAiHealthFixtures, testAiHealthKhongDemLuotTuKiem, testAiHealthSourceGuards } from "./ai-health-selftest.test";
 import { cleanupAiIncidentFixtures, testAiIncidentPure, testAiIncidentSourceGuards, testAiIncidentWatchDb } from "./ai-incident-watch.test";
-import { testBaiKiemKhoaLuatNgoaiTamVoi, testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
+import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
@@ -1925,7 +1925,6 @@ async function main() {
   testPhamViTheoVai();
   testHangRaoTuyetDoi();
   testHangRaoBaiKiem();
-  testBaiKiemKhoaLuatNgoaiTamVoi();
   testPhamViSourceGuards();
   testDispatchPure();
   testDispatchSourceGuards();
