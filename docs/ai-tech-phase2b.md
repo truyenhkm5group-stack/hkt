@@ -169,6 +169,18 @@ là bản vá tự vô hiệu hoá chính nó**:
 | 3 | Trần lượt gọi tính theo **lượt** trong khi hạn mức GitHub tính theo **giờ**: 37 × 4 lượt = 148/giờ, gấp hơn hai lần hạn mức 60/giờ mà chính chú thích ấy trích dẫn | Trần đi theo chế độ gọi (xem bảng trên). Bài kiểm ghim luôn phép tính theo giờ |
 | 4 | Câu in ra nội suy **hằng số** thay vì trần **đã dùng**, và `budget` không tới được từ sổ job | Kết quả mang `budget` thực tế, màn hình in con số đó; `lib/sync/jobs.ts` chuyển tiếp `?budget=` |
 
+### 2.9 Vòng review thứ ba — và bài học đắt nhất của cả lượt
+
+| # | Lỗi | Đã sửa bằng |
+|---|---|---|
+| 1 | Vòng sửa thứ hai vá cỡ mẫu của bài kiểm trần nhưng **bỏ sót một khẳng định** vẫn so với hằng số 12. Máy người viết có `GITHUB_TOKEN` nên trần là 12 và bài xanh; `gates.yml` **không** đưa `GITHUB_TOKEN` vào `env:` của bước `npm test` (Actions không tự xuất biến đó) nên **CI chạy ẩn danh**, trần là 3, cỡ mẫu 6, và `6 > 12` **ĐỎ** — chặn merge và chặn deploy | So với trần THẬT (`tranThat`). Và từ nay `npm test` được chạy ở **cả hai chế độ** trước khi commit |
+| 2 | `?budget=` chuyển tiếp mà **không có trần trên** | Một cú `github-pr-sync?budget=50` trên máy chủ chưa đặt token bắn 151 request, thổi bay hạn mức 60/giờ và kéo `github-deployments` chết theo — đúng chuỗi đổ vỡ cái trần sinh ra để chặn. Nay tham số tay bị **kẹp** về trần ẩn danh khi không có token; có token thì để người dùng tự quyết |
+
+**Bài học:** ba vòng review, ba lần tìm thấy lỗi thật, và **hai trong ba lần** là cùng một hình
+dạng — *một bài kiểm đo môi trường của máy đang chạy thay vì đo mã*. AGENTS.md mục 50 đã ghi luật
+này cho mốc thời gian; hoá ra nó đúng y hệt cho **biến môi trường**. Một bài kiểm xanh vì máy này
+có sẵn một token là một bài kiểm chưa được chạy.
+
 Mỗi lỗi có một bài kiểm khoá lại: mốc đọc **không được nhích** khi GitHub trả 403 hết hạn mức ·
 trần hoãn rồi lượt sau đọc tiếp (chứng minh bằng việc số việc đã đọc **vượt** trần của một lượt) ·
 việc `DONE` + PR `MERGED` tốn **0** lượt gọi · quét mã nguồn buộc vòng lặp nạp kiểm khoá ngoại và

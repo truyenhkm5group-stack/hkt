@@ -254,7 +254,17 @@ export async function syncGithubPullRequests(opts: { limit?: number; budget?: nu
   }
 
   const out: GithubPrSyncResult = { ...base, pullsScanned: pulls.length, tasksConsidered: tasks.length };
-  const tran = Math.max(1, opts.budget ?? prDetailBudget(cfg.auth));
+  /*
+    THAM SỐ TAY KHÔNG ĐƯỢC VƯỢT TRẦN CỦA CHẾ ĐỘ ẨN DANH.
+
+    `?budget=` có ích khi cần nạp gấp một loạt việc — nhưng chỉ khi hạn mức cho phép. Không kẹp
+    thì một cú `github-pr-sync?budget=50` trên máy chủ chưa đặt token bắn 151 request, thổi bay
+    hạn mức 60/giờ theo IP, và kéo `github-deployments` chết theo: đúng chuỗi đổ vỡ mà cái trần
+    này sinh ra để chặn. Có token thì để người dùng tự quyết — 5.000/giờ chịu được.
+  */
+  const tranToiDa = prDetailBudget(cfg.auth);
+  const xin = Math.max(1, opts.budget ?? tranToiDa);
+  const tran = cfg.auth === "TOKEN" ? xin : Math.min(xin, tranToiDa);
   out.budget = tran;
   const daGan = new Set<number>();
   // Một PR có thể gắn hai việc (việc con dùng chung nhánh); đọc chi tiết đúng MỘT lần cho mỗi PR.

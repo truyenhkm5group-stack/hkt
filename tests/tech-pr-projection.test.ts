@@ -368,7 +368,19 @@ export async function testGithubPrSync() {
   await syncGithubPullRequests({ limit: 60 });
   assert.ok(goiLan2.detail > 0, "lượt sau phải đọc tiếp những việc bị hoãn, không được bỏ đói chúng");
   const daDoc = await db.query.techTasks.findMany({ where: like(schema.techTasks.title, "prj- việc trần%"), columns: { prNumber: true, prSyncedAt: true } });
-  assert.ok(daDoc.filter((t) => t.prSyncedAt).length > PR_DETAIL_BUDGET, "sau hai lượt, số việc đã được đọc phải VƯỢT trần của một lượt — đó là bằng chứng nó xoay vòng");
+  /*
+    SO VỚI TRẦN THẬT, KHÔNG SO VỚI HẰNG SỐ.
+
+    Lần vá trước sửa cỡ mẫu nhưng bỏ sót đúng dòng này, và nó im lặng vì máy đang chạy CÓ
+    `GITHUB_TOKEN` (trần 12). Trên CI thì `gates.yml` KHÔNG đưa `GITHUB_TOKEN` vào `env:` của bước
+    `npm test`, và GitHub Actions không tự xuất biến đó — nên CI chạy ẨN DANH, trần là 3, cỡ mẫu
+    là 6, và `6 > 12` ĐỎ. Đúng loại lỗi commit trước tuyên bố đã dọn, chỉ đảo chiều: xanh ở máy
+    người viết, đỏ ở chỗ nó chặn deploy.
+  */
+  assert.ok(
+    daDoc.filter((t) => t.prSyncedAt).length > tranThat,
+    `sau hai lượt, số việc đã đọc phải VƯỢT trần của MỘT lượt (${tranThat}) — đó là bằng chứng nó xoay vòng chứ không cắt bỏ`,
+  );
 
   /*
     ───────── 2.8 VIỆC ĐÃ XONG VỚI PR ĐÃ GỘP THÌ THÔI ĐỌC LẠI ─────────
