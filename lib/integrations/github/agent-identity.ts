@@ -65,6 +65,7 @@ export const AGENT_GITHUB_ALLOWED = [
   "branch:push",
   "pr:open",
   "pr:update",
+  "pr:update-branch",
   "checks:read",
 ] as const;
 export type AgentGithubAction = (typeof AGENT_GITHUB_ALLOWED)[number];
@@ -344,6 +345,38 @@ export async function updateAgentPullRequest(input: { number: number; title?: st
   const token = await installationToken(cfg, input.now ?? new Date());
   const res = await call(`${API}/repos/${cfg.owner}/${cfg.repo}/pulls/${input.number}`, { method: "PATCH", auth: token, headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
   if (!res.ok) throw new Error(`Không cập nhật được pull request #${input.number} (HTTP ${res.status})`);
+}
+
+/**
+ * Nhập nhánh đích vào nhánh của PR để nó hết "behind" — GitHub gọi là *Update branch*.
+ *
+ * VÌ SAO AGENT CẦN VIỆC NÀY, VÀ VÌ SAO NÓ AN TOÀN: `strict_required_status_checks_policy` bắt PR
+ * phải cập nhật với nhánh đích NGAY TẠI LÚC merge. Với nhiều phiên chạy song song, nhánh đích
+ * nhảy liên tục, nên một PR của agent sẽ "behind" vài phút sau khi mở. Nếu NGƯỜI phải bấm nút ấy
+ * thì mỗi lần bấm lại biến người thành **người đẩy cuối**, và `require_last_push_approval` sẽ cấm
+ * chính họ duyệt — cổng đóng lại với người mà nó đang chờ.
+ *
+ * Việc này KHÔNG mở thêm quyền nào: nó là một lượt ghi vào nhánh CỦA AGENT, đúng thứ
+ * `contents: write` đã cho phép, và `assertAgentBranch` vẫn chặn nhánh mặc định. Nó KHÔNG gộp PR,
+ * KHÔNG duyệt, KHÔNG đụng nhánh đích.
+ */
+export async function updateAgentPullRequestBranch(input: { number: number; baseBranch?: string; now?: Date }): Promise<{ head: string }> {
+  const cfg = must();
+  const token = await installationToken(cfg, input.now ?? new Date());
+  const prRes = await call(`${API}/repos/${cfg.owner}/${cfg.repo}/pulls/${input.number}`, { auth: token });
+  if (!prRes.ok) throw new Error(`Không đọc được pull request #${input.number} (HTTP ${prRes.status})`);
+  const pr = (await prRes.json()) as { head?: { ref?: string }; base?: { ref?: string } };
+  // Chặn ở tầng mã TRƯỚC khi gọi: nhánh của PR phải là nhánh của agent, không phải nhánh mặc định.
+  assertAgentBranch(pr.head?.ref ?? "", input.baseBranch ?? pr.base?.ref ?? "main");
+  const res = await call(`${API}/repos/${cfg.owner}/${cfg.repo}/pulls/${input.number}/update-branch`, {
+    method: "PUT",
+    auth: token,
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  // 202 = GitHub nhận việc và làm bất đồng bộ; nơi gọi phải đọc lại SHA để biết nó xong chưa.
+  if (res.status !== 202) throw new Error(`Không cập nhật được nhánh của #${input.number} (HTTP ${res.status})`);
+  return { head: pr.head?.ref ?? "" };
 }
 
 /** Đọc kết quả cổng của một commit. CHỈ ĐỌC. */
