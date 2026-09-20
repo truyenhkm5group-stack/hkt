@@ -6,6 +6,7 @@ import { lineUnitCost } from "@/lib/queries/cogs";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { marketerLabel, marketerNames as employeeNames } from "@/lib/queries/order-marketer";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
+import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { spendPeriod } from "@/lib/queries/ads-roas";
 import { metricScope } from "@/lib/queries/metrics";
@@ -377,7 +378,7 @@ async function productDayRows(db: Db, period: Period, basis: MarketingBasis, f: 
   const delivered = sql`${facts.outcome} = 'DELIVERED'`;
   const returned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
   const booked = sql`${facts.outcome} <> 'CANCELLED'`;
-  const open = sql`${facts.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`;
+  const open = sql`${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
   const shipped = sql`${facts.outcome} in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')`;
   const live = sql`not ${facts.duplicate}`;
   const cnt = (cond: SQL) => sql<number>`count(distinct ${facts.orderId}) filter (where ${cond} and ${live})`;
@@ -422,7 +423,7 @@ async function orderDayRows(db: Db, period: Period, basis: MarketingBasis, extra
       deliveredOrders: cnt(predicates.success as SQL),
       returnedOrders: cnt(predicates.returned as SQL),
       cancelledOrders: cnt(predicates.cancelled as SQL),
-      pendingOrders: cnt(sql`${base.outcome} in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')`),
+      pendingOrders: cnt(sql`${base.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`),
       shippedOrders: cnt(predicates.shipped as SQL),
       cogs: money(sql`${base.cogs}`, predicates.success as SQL),
       // CƯỚC: cùng bậc thang với bộ máy lợi nhuận — cước của đơn ĐÃ GỬI, phí hoàn và phí sàn của
