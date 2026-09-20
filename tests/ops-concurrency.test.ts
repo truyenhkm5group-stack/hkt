@@ -339,7 +339,35 @@ function chaySongSong(kich: string, ds: { action: string; arg?: string; giu: num
   return kq;
 }
 
+/**
+ * ═══════════ CÔNG CỤ POSIX PHẢI CÓ — VÀ THIẾU THÌ NÓI THẲNG ═══════════
+ *
+ * Bài kiểm dưới đây chạy `ops-vps.yml` THẬT dưới `bash` với `flock` thật: đó là điểm của nó, vì
+ * một ổ khoá "đúng theo lời kể" đã từng để hai lệnh ghi cùng chạy trên VPS.
+ *
+ * `flock` KHÔNG có trong Git Bash trên Windows (đo 20/09/2026). Hai lối sai:
+ *
+ *  · Mô phỏng bằng lời ⇒ bài kiểm xanh mà không đo gì.
+ *  · Lặng lẽ bỏ qua    ⇒ ngày CI mất `flock` thì cũng xanh, đúng lúc cần đỏ nhất.
+ *
+ * Nên: thiếu `flock` trên LINUX (nơi script này thật sự chạy, gồm cả CI) là ĐỎ. Trên nền mà script
+ * không bao giờ chạy, in ra "CHƯA ĐO ĐƯỢC" — một câu trung thực, khác hẳn một dấu ✓.
+ */
+function coFlock(): boolean {
+  try {
+    execFileSync("flock", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function testKhoaChayThat() {
+  if (!coFlock()) {
+    assert.notEqual(process.platform, "linux", "Linux PHẢI có flock — thiếu nó thì ổ khoá vòng đời không được đo, và đó là lỗi hạ tầng CI chứ không phải chuyện bỏ qua được");
+    console.log(`⚠ Ổ khoá ops: CHƯA ĐO ĐƯỢC trên ${process.platform} (không có flock). Bài này đo bash+flock thật; nó vẫn chạy đủ trên Linux/CI.`);
+    return;
+  }
   const tmp = mkdtempSync(path.join(tmpdir(), "ops-khoa-"));
   const kich = path.join(tmp, "run.sh");
   writeFileSync(kich, kichBan(tmp));
