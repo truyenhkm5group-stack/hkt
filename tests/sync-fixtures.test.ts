@@ -60,6 +60,7 @@ import { testWorkOs } from "./work-os.test";
 import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testTechPermissions, testTechRiskEngine } from "./tech-control-plane.test";
 import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aBarriers, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
+import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
 import { testPayrollPeriod } from "./payroll-period.test";
@@ -1826,6 +1827,14 @@ async function main() {
   await testSyncIncidentWatch();
   await cleanupPrProjectionFixtures();
   /*
+    NẤC 1 — CỬA HẸP CHÉP SỔ LƯỢT CHẠY AGENT. Chạy sau phép chiếu PR vì cùng họ `tech_*`, và tự dọn
+    bằng tiền tố `ing-` / `ING-`. Bài này KHÔNG gọi mạng: nó chạy thẳng hàm dịch vụ, còn tầng HTTP
+    được khoá bằng quét mã nguồn ở khối 3 (dựng một máy chủ Next thật chỉ để gửi một POST là đổi
+    nhiều phút CI lấy một lớp kiểm mà quét mã nguồn đã nói được chắc hơn).
+  */
+  await testAgentIngestDb();
+  await cleanupAgentIngestFixtures();
+  /*
     GHÉP QUẢNG CÁO TREO. Bài này chạy `reapplyAdsMapping()` THẬT, mà hàm đó quét toàn bộ dòng
     Facebook — nên nó tự chụp lại và trả về nguyên trạng `product_id`/`marketer_id` của mọi dòng
     (fixture `landing-attribution` có ba dòng như vậy). Xem `chupVaTraVe` trong bài.
@@ -1879,6 +1888,8 @@ async function main() {
   testPhase2aSourceGuards();
   testPrPureMappers();
   testSyncIncidentPure();
+  testAgentIngestPure();
+  testAgentIngestSourceGuards();
   testAdsMappingGuards();
   testAdsIngestGuardsProductFk();
   testTechRiskEngine();

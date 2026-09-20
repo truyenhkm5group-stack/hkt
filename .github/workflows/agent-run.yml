@@ -133,6 +133,24 @@ jobs:
           DATABASE_URL: pglite://./data/agent-ci-db
         run: npm run --silent agent:proof-report -- --task "${{ steps.setup.outputs.task_code }}"
 
+      # ═══ CHÉP SỔ VỀ PRODUCTION (phương án B) ═══
+      #
+      # Máy này KHÔNG nối được PostgreSQL production, và giữ nguyên tính chất đó là chủ ý: *code
+      # chưa qua review không chạy cạnh CSDL production*. Nên sổ đi qua một cửa HTTP hẹp, xác thực
+      # bằng `CRON_SECRET`, chỉ ghi được đúng bảng `tech_agent_runs` và chỉ TẠO, không SỬA.
+      #
+      # `continue-on-error` là chủ ý: bằng chứng THẬT của lượt chạy là hiện vật + nhánh git đã đẩy.
+      # Một lần ERP bận không được làm cả lượt chạy agent trông như hỏng. Bước tự in "CHƯA BẬT" khi
+      # kho chưa khai `ERP_BASE_URL` / `CRON_SECRET`, thay vì ném một lỗi mạng khó hiểu.
+      - name: Chép sổ lượt chạy về ERP
+        if: always() && steps.setup.outputs.task_code != ''
+        continue-on-error: true
+        env:
+          DATABASE_URL: pglite://./data/agent-ci-db
+          ERP_BASE_URL: ${{ vars.ERP_BASE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: npm run --silent agent:report -- --task "${{ steps.setup.outputs.task_code }}"
+
       # Nhánh phải sống sót sau khi máy Actions bị xoá, nếu không bằng chứng biến mất cùng nó.
       # Chỉ đẩy nhánh mang đúng tiền tố; mọi tên khác bị từ chối trước khi `git push` chạy.
       - name: Đẩy nhánh agent (KHÔNG phải main)
