@@ -124,3 +124,54 @@ test("ảnh chụp giá: đổi giá tháng sau KHÔNG được viết lại chi
   assert.equal(priceUsedFor("khong-co", "cung-khong-co", thang6), null);
   assert.equal(estimateCostVnd("khong-co", "cung-khong-co", usage, thang6), null);
 });
+
+test("TÍNH RA = LƯU LẠI, sai số ĐÚNG BẰNG 0 — và đó là do cấu trúc, không phải do may", () => {
+  /*
+    Đặc tả phiên 20/09/2026 đòi: gọi thật 10–20 lượt rồi khẳng định "chi phí tính ra ≈ chi phí đã
+    lưu, trong một sai số làm tròn có khai báo".
+
+    Bài kiểm này trả lời câu ấy MẠNH HƠN một phép so xấp xỉ: sai số bằng ĐÚNG 0, vì đường ghi
+    KHÔNG tính lại. `runModelStep` lấy thẳng giá trị `estimateCostVnd()` trả về và đem lưu; không
+    có phép nhân thứ hai ở giữa để lệch. Một ngưỡng sai số ở đây sẽ là ngưỡng cho một phép tính
+    KHÔNG TỒN TẠI — và tệ hơn, nó sẽ nuốt mất đúng cái lỗi mà nó tưởng đang canh.
+
+    Nên thứ phải khoá là TÍNH CHẤT ẤY, ở mức mã nguồn. Phần này chạy được NGAY BÂY GIỜ, không
+    phải đợi chủ shop khai tỷ giá — khác hẳn phần "gọi thật 10–20 lượt", vốn còn bị chặn.
+  */
+  const nguon = execFileSync("git", ["show", "HEAD:lib/ai-workforce/model-router.ts"], { encoding: "utf-8" });
+  const than = nguon.slice(nguon.indexOf("const result = await provider.complete("));
+  const khoiGhi = than.slice(0, than.indexOf("let parsed: T;"));
+  assert.ok(/costVnd = estimateCostVnd\(/.test(khoiGhi), "chi phí phải lấy thẳng từ hàm tính, không tính lại");
+  assert.ok(/costVnd,/.test(khoiGhi), "và đem lưu ĐÚNG giá trị ấy");
+  assert.ok(
+    !/costVnd\s*[*+\-/]/.test(khoiGhi.replace(/costVnd === null/g, "")),
+    "không được có phép tính nào trên `costVnd` giữa lúc tính và lúc lưu",
+  );
+
+  /*
+    DỰNG LẠI TỪ ẢNH CHỤP — kể cả rổ ĐỆM, rổ hay bị bỏ quên nhất.
+
+    Ba cột đơn giá cộng với hai rổ token là đủ để dựng lại con số tiền mà không cần bảng giá lúc
+    ấy. Nếu phép dựng lại này lệch thì ảnh chụp vô dụng: nó vẫn có mặt trong CSDL, vẫn trông như
+    một bằng chứng, mà không tra ngược được về con số nào.
+  */
+  const bang = buildVndPricing(26_000);
+  const gia = priceUsedFor("anthropic", "claude-sonnet-5", bang);
+  assert.ok(gia, "mẫu dùng để kiểm phải có trong sổ giá");
+  assert.ok(gia.cachedReadVndPerMillion !== undefined, "mẫu này phải có khai giá đệm, nếu không ca kiểm rỗng nghĩa");
+
+  const usage = { inputTokens: 123_456, outputTokens: 7_890, cacheReadInputTokens: 45_678, cacheWriteInputTokens: 0 };
+  const daLuu = estimateCostVnd("anthropic", "claude-sonnet-5", usage, bang);
+  assert.ok(daLuu !== null);
+  const dungLai = Math.ceil(
+    (usage.inputTokens / 1_000_000) * gia.inputVndPerMillion +
+      (usage.outputTokens / 1_000_000) * gia.outputVndPerMillion +
+      (usage.cacheReadInputTokens / 1_000_000) * (gia.cachedReadVndPerMillion ?? 0),
+  );
+  assert.equal(dungLai, daLuu, "dựng lại từ ba cột ảnh chụp phải ra ĐÚNG con số đã lưu, không xấp xỉ");
+
+  // Làm tròn LÊN, không làm tròn gần nhất: tiền trong ERP là số nguyên VND, và báo rẻ hơn thực tế
+  // là hướng sai nguy hiểm hơn (nó làm một khoản lỗ trông như hoà vốn).
+  const beXiu = estimateCostVnd("anthropic", "claude-sonnet-5", { inputTokens: 1, outputTokens: 0, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 }, bang);
+  assert.equal(beXiu, 1, "một token vẫn phải ra 1đ chứ không ra 0đ — 0đ ở đây đọc như MIỄN PHÍ");
+});
