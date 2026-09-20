@@ -5,6 +5,7 @@ import {
   __setAgentGithubFetchForTests,
   AGENT_GITHUB_ALLOWED,
   AGENT_GITHUB_DENIED,
+  AGENT_SECRET_ENVIRONMENT,
   agentGithubConfig,
   agentGithubDisabledReason,
   agentRemoteUrl,
@@ -58,6 +59,50 @@ export async function testAgentGithubIdentityModule() {
     assert.match(reason, /ERP_AGENT_GITHUB_APP_ID/, `câu chữ phải nói ĐÚNG biến còn thiếu, thấy: ${reason}`);
     assert.match(reason, /ERP_AGENT_GITHUB_PRIVATE_KEY/);
     if (!hadRepoEnv) assert.match(reason, /ERP_AGENT_GITHUB_REPO/);
+
+    /*
+      ───── THÔNG ĐIỆP PHẢI TRỎ ĐÚNG CHỖ, KHÔNG CHỈ ĐÚNG NGỮ PHÁP ─────
+
+      Câu cũ — `Chưa có ERP_AGENT_GITHUB_APP_ID, …` — không sai, và chính vì vậy nó nguy hiểm:
+      người đọc tin nó rồi đi thêm lại REPOSITORY SECRET, tức dựng lại đúng bản trùng tên mà
+      Environment `agent-identity` sinh ra để xoá. Suýt xảy ra thật 20/09/2026.
+
+      Nên bài kiểm này khoá HAI vế, và vế thứ hai mới là vế cứu được hàng rào:
+        · thông điệp PHẢI nêu Environment và chính sách nhánh;
+        · thông điệp PHẢI cấm tạo Repository secret cùng tên.
+    */
+    assert.match(reason, new RegExp(AGENT_SECRET_ENVIRONMENT), `phải nêu Environment giữ secret, thấy: ${reason}`);
+    assert.match(reason, /branch policy|nhánh/i, "phải nhắc chính sách nhánh — lượt chạy ngoài main KHÔNG đọc được secret");
+    assert.match(reason, /KHÔNG tạo Repository secret/i, "phải nói thẳng điều KHÔNG được làm");
+    assert.doesNotMatch(
+      reason,
+      /Secrets and variables/i,
+      "tuyệt đối không trỏ về trang Repository secrets — đó chính là lỗ hổng Environment sinh ra để đóng",
+    );
+
+    /*
+      Và chiều ngược lại: `ERP_AGENT_GITHUB_REPO` KHÔNG nằm trong Environment. Thiếu mỗi nó mà
+      vẫn khuyên đi kiểm Environment là gửi người đọc đi sai chỗ — đúng cái lỗi đang sửa, chỉ
+      đổi hướng.
+    */
+    process.env.ERP_AGENT_GITHUB_APP_ID = "5001810";
+    process.env.ERP_AGENT_GITHUB_INSTALLATION_ID = "163026219";
+    process.env.ERP_AGENT_GITHUB_PRIVATE_KEY = "khong-phai-pem";
+    const repoCu = { a: process.env.ERP_AGENT_GITHUB_REPO, b: process.env.ERP_GITHUB_REPO, c: process.env.GITHUB_REPOSITORY };
+    delete process.env.ERP_AGENT_GITHUB_REPO;
+    delete process.env.ERP_GITHUB_REPO;
+    delete process.env.GITHUB_REPOSITORY;
+    const chiThieuKho = agentGithubDisabledReason() ?? "";
+    assert.match(chiThieuKho, /ERP_AGENT_GITHUB_REPO/);
+    assert.doesNotMatch(
+      chiThieuKho,
+      new RegExp(AGENT_SECRET_ENVIRONMENT),
+      "chỉ thiếu tên kho thì KHÔNG được nhắc Environment — tên kho đến từ vars/github.repository",
+    );
+    if (repoCu.a !== undefined) process.env.ERP_AGENT_GITHUB_REPO = repoCu.a;
+    if (repoCu.b !== undefined) process.env.ERP_GITHUB_REPO = repoCu.b;
+    if (repoCu.c !== undefined) process.env.GITHUB_REPOSITORY = repoCu.c;
+    for (const k of ["ERP_AGENT_GITHUB_APP_ID", "ERP_AGENT_GITHUB_INSTALLATION_ID", "ERP_AGENT_GITHUB_PRIVATE_KEY"]) delete process.env[k];
     const chuaCauHinh = await testAgentGithubIdentity();
     assert.equal(chuaCauHinh.status, "NOT_CONFIGURED", "ba tình huống phải phân biệt được — gộp vào 'lỗi kết nối' là đẩy người đọc đi sửa nhầm chỗ");
     assert.equal(chuaCauHinh.identity, null);

@@ -945,8 +945,17 @@ jobs:
             [ -z "${ERP_AGENT_GITHUB_INSTALLATION_ID:-}" ] && THIEU="$THIEU ERP_AGENT_GITHUB_INSTALLATION_ID"
             [ -z "${ERP_AGENT_GITHUB_PRIVATE_KEY:-}" ] && THIEU="$THIEU ERP_AGENT_GITHUB_PRIVATE_KEY"
             if [ -n "$THIEU" ]; then
-              echo "Thiếu Secret:$THIEU — KHÔNG ghi gì."
-              echo "Thêm ở Settings → Secrets and variables → Actions, theo docs/agent-github-identity.md mục 3.4."
+              # ĐÚNG NGỮ PHÁP CHƯA ĐỦ, PHẢI ĐÚNG ĐỊA CHỈ. Câu cũ ("Thêm ở Settings → Secrets and
+              # variables → Actions") đẩy người đọc đi tạo lại Repository secret — tức dựng lại
+              # đúng bản trùng tên mà Environment `agent-identity` sinh ra để xoá (PR #33, #39).
+              echo "::error::Không đọc được:$THIEU — KHÔNG ghi gì vào .env."
+              echo "Ba secret này CHỈ sống trong Environment 'agent-identity'. Kiểm theo thứ tự:"
+              echo "  1. Job có khai 'environment: agent-identity' ở MỨC JOB chưa?"
+              echo "     (mức step không đủ — bước khác trong cùng job vẫn đọc secret của kho)"
+              echo "  2. Deployment branch policy của Environment có cho nhánh đang chạy không?"
+              echo "     Mặc định CHỈ 'main'. Xem Settings → Environments → agent-identity."
+              echo "KHÔNG tạo Repository secret cùng tên: bản trùng tên dựng lại đúng lỗ hổng mà"
+              echo "Environment sinh ra để đóng. Xem docs/agent-pr-bridge.md."
               exit 1
             fi
             upsert_env ERP_AGENT_GITHUB_APP_ID "$ERP_AGENT_GITHUB_APP_ID"; echo "ERP_AGENT_GITHUB_APP_ID: đã ghi (${#ERP_AGENT_GITHUB_APP_ID} ký tự)"
