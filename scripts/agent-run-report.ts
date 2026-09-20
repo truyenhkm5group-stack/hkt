@@ -22,7 +22,7 @@
  *
  * ─── KHÔNG IN BÍ MẬT ───
  *
- * Kho mã này PUBLIC nên log Actions ai cũng đọc được. Script chỉ in CÓ / KHÔNG cho `CRON_SECRET`,
+ * Kho mã này PUBLIC nên log Actions ai cũng đọc được. Script chỉ in CÓ / KHÔNG cho khoá,
  * và URL đích in ra ở dạng gốc (scheme + host), không kèm tham số.
  */
 import "dotenv/config";
@@ -57,20 +57,38 @@ async function main() {
     process.exit(1);
   }
 
-  const base = (process.env.ERP_BASE_URL ?? "").trim().replace(/\/$/, "");
-  const secret = (process.env.CRON_SECRET ?? "").trim();
+  /*
+    ĐỊA CHỈ ERP KHÔNG PHẢI MỘT BÍ MẬT, NÊN NÓ KHÔNG ĐƯỢC LÀ MỘT VIỆC PHẢI KHAI.
+
+    `deploy-vps.yml` đã suy tên miền từ `vars.ERP_DOMAIN || 'erp.vnxcommerce.com'` từ lâu. Bắt
+    người ta khai thêm một biến mang đúng thông tin ấy là dựng một việc thủ công cho một giá trị
+    đã biết — và dựng luôn cơ hội để hai chỗ nói hai tên miền khác nhau. Ở đây dùng LẠI đúng nguồn
+    đó; `ERP_BASE_URL` vẫn đè được khi cần trỏ sang máy khác.
+  */
+  const domain = (process.env.ERP_DOMAIN ?? "").trim();
+  const base = ((process.env.ERP_BASE_URL ?? "").trim() || (domain ? `https://${domain}` : "")).replace(/\/$/, "");
+  /*
+    KHOÁ RIÊNG TRƯỚC, KHOÁ LẬP LỊCH SAU. `AGENT_INGEST_SECRET` chỉ mở được đúng một cửa ghi vào một
+    bảng quan sát; `CRON_SECRET` mở được cả bộ lập lịch, trong đó có job ghi hàng loạt — đưa nó lên
+    một máy chạy mã chưa review là đánh đổi bán kính thiệt hại lấy một dòng cấu hình.
+  */
+  const secret = (process.env.AGENT_INGEST_SECRET ?? "").trim() || (process.env.CRON_SECRET ?? "").trim();
   /*
     THIẾU CẤU HÌNH LÀ "CHƯA BẬT", KHÔNG PHẢI "HỎNG".
 
-    Kho chưa khai `ERP_BASE_URL` / `CRON_SECRET` thì bước này chưa được bật — nói thẳng câu đó kèm
-    chỗ khai, thay vì ném một lỗi mạng khó hiểu ở dưới. (AGENTS.md mục 42: chưa biết không được in
+    Kho chưa khai khoá thì bước này chưa được bật — nói thẳng câu đó kèm chỗ khai, thay vì ném một
+    lỗi mạng khó hiểu ở dưới. (AGENTS.md mục 42: chưa biết không được in
     ra thành một kết luận.)
   */
   if (!base || !secret) {
     console.log("══════════ CHÉP SỔ VỀ ERP: CHƯA BẬT ══════════");
-    console.log(`ERP_BASE_URL  ${base ? goc(base) : "KHÔNG có"}`);
-    console.log(`CRON_SECRET   ${secret ? "có" : "KHÔNG có"}`);
-    console.log("Khai ở Settings → Secrets and variables → Actions (ERP_BASE_URL là Variable, CRON_SECRET là Secret).");
+    console.log(`địa chỉ ERP          ${base ? goc(base) : "KHÔNG có"}`);
+    console.log(`AGENT_INGEST_SECRET  ${secret ? "có" : "KHÔNG có"}`);
+    // Câu hướng dẫn cố ý KHÔNG mở đầu bằng chữ `secret`: bộ gác "không in bí mật" ở
+    // `tests/agent-run-ingest.test.ts` quét theo từ khoá, và một bộ gác kêu nhầm là bộ gác bị tắt.
+    console.log("Khai ĐÚNG MỘT chỗ — Settings → Secrets and variables → Actions →");
+    console.log("New repository Secret, tên AGENT_INGEST_SECRET.");
+    console.log("Lần deploy kế tiếp tự mang khoá xuống .env của VPS.");
     console.log("Lượt chạy agent KHÔNG bị tính là hỏng vì điều này — bằng chứng vẫn nằm ở hiện vật và nhánh git.");
     process.exit(strict ? 1 : 0);
   }

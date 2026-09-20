@@ -68,6 +68,9 @@ if [ -f .env ]; then
   # Phòng Tech AI đọc lượt deploy từ GitHub Actions. Token CHỈ ĐỌC (Actions: read) và cũng CHỈ
   # ghi khi Secret có giá trị — Secret chưa đặt mà ghi đè rỗng thì sổ deploy im lặng ngừng cập
   # nhật, và một sổ đứng yên trông y hệt một sổ không có gì để cập nhật.
+  # Khoá RIÊNG của cửa chép sổ lượt chạy agent. Rỗng = giữ nguyên giá trị cũ trên máy — không
+  # xoá một khoá đang chạy chỉ vì lần deploy này không truyền nó xuống.
+  [ -n "${AGENT_INGEST_SECRET:-}" ] && upsert_env AGENT_INGEST_SECRET "${AGENT_INGEST_SECRET}"
   [ -n "${ERP_GITHUB_TOKEN:-}" ] && upsert_env ERP_GITHUB_TOKEN "${ERP_GITHUB_TOKEN}"
   [ -n "${ERP_GITHUB_REPO:-}" ] && upsert_env ERP_GITHUB_REPO "${ERP_GITHUB_REPO}"
   [ -n "${ERP_GITHUB_DEPLOY_WORKFLOW:-}" ] && upsert_env ERP_GITHUB_DEPLOY_WORKFLOW "${ERP_GITHUB_DEPLOY_WORKFLOW}"
@@ -136,6 +139,11 @@ PANCAKE_PAGES_BASE_URL="https://pages.fm/api/v1"
 # hoạt, không huỷ, không đổi được một lượt deploy nào. Rỗng = trang Deploy nói "chưa cấu hình",
 # KHÔNG phải "không có lượt deploy nào".
 ERP_GITHUB_TOKEN="${ERP_GITHUB_TOKEN:-}"
+# Khoá RIÊNG cho cửa chép sổ lượt chạy agent (`POST /api/tech/agent-run`). Máy GitHub Actions
+# không nối được CSDL production (đúng chủ ý), nên sổ đi về qua cửa HTTP hẹp này. Tách khỏi
+# CRON_SECRET vì CRON_SECRET mở được cả bộ lập lịch — bán kính thiệt hại khác hẳn nhau.
+# Rỗng = cửa ĐÓNG và `/tech/agents` nói "0 lượt chạy"; đó là câu ĐÚNG, không phải lỗi.
+AGENT_INGEST_SECRET="${AGENT_INGEST_SECRET:-}"
 ERP_GITHUB_REPO="${ERP_GITHUB_REPO:-truyenhkm5group-stack/hkt}"
 ERP_GITHUB_DEPLOY_WORKFLOW="${ERP_GITHUB_DEPLOY_WORKFLOW:-deploy-vps.yml}"
 

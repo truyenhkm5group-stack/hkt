@@ -145,25 +145,32 @@ chưa biết không được in ra thành một kết luận (AGENTS.md mục 42
 
 ---
 
-## 6. VIỆC CỦA CHỦ SHOP — hai khoá cấu hình
+## 6. VIỆC CỦA CHỦ SHOP — MỘT thao tác duy nhất
 
-Cửa đã dựng xong nhưng **chưa thông**, vì hai giá trị dưới đây chỉ chủ shop mới đặt được. Tôi
-**không tự thêm** chúng: thêm một Repository secret thay chủ shop là đúng thứ đã được dặn không làm.
+Bản đầu đòi hai thứ (`ERP_BASE_URL` + `CRON_SECRET`). Cả hai đều đã bỏ được:
 
-Settings → Secrets and variables → Actions:
+| Bỏ được | Vì sao |
+|---|---|
+| `ERP_BASE_URL` | Tên miền đã có sẵn ở `vars.ERP_DOMAIN \|\| 'erp.vnxcommerce.com'` — đúng nguồn `deploy-vps.yml` dùng. Khai lần thứ hai chỉ tạo cơ hội cho hai chỗ nói hai tên miền khác nhau. |
+| `CRON_SECRET` | Nó chỉ sinh trên VPS (`install-vps.sh`), nên lấy được nó đòi SSH. Và nó mở được **cả bộ lập lịch** — đưa lên một máy chạy mã chưa review là đánh đổi bán kính thiệt hại lấy một dòng cấu hình. |
 
-| Loại | Tên | Giá trị |
-|---|---|---|
-| **Variable** | `ERP_BASE_URL` | Địa chỉ ERP công khai, ví dụ `https://<tên miền ERP>` |
-| **Secret** | `CRON_SECRET` | **Đúng giá trị** `CRON_SECRET` đang nằm trong `.env` của VPS |
+Thay vào đó cửa dùng một khoá **RIÊNG**, `AGENT_INGEST_SECRET`, mở được đúng một đường ghi vào một
+bảng quan sát. `CRON_SECRET` vẫn được nhận làm đường lùi, nhưng không nơi nào cần khai nó nữa.
 
-Đặt sai giá trị `CRON_SECRET` thì cửa trả 401 và bước chép sổ in ra điều đó — nó không âm thầm bỏ
-qua. Chưa đặt thì mọi thứ vẫn chạy như hôm nay, chỉ là `/tech/agents` tiếp tục nói "0 lượt chạy".
+### Thao tác — làm một lần, ~30 giây
 
-Sau khi đặt: Actions → **Chạy agent Tech** → Run workflow, rồi mở `/tech/agents` — vai
-`documentation` phải hiện lượt chạy vừa rồi, với bốn cổng đọc từ mã thoát thật.
+> **GitHub → repo `hkt` → Settings → Secrets and variables → Actions → tab *Secrets* →
+> *New repository secret***
+> - **Name:** `AGENT_INGEST_SECRET`
+> - **Secret:** một chuỗi ngẫu nhiên bất kỳ, ví dụ dán kết quả của `openssl rand -hex 24`
+> - bấm **Add secret**
 
----
+Hết. **Không cần SSH, không cần sửa `.env`, không cần đụng tới `CRON_SECRET`.** Lần deploy kế tiếp
+tự mang khoá xuống `.env` của VPS (`deploy-vps.yml` → `install-vps.sh::upsert_env`), giống hệt
+đường mà `ERP_GITHUB_TOKEN` và ba khoá SePay đã đi.
+
+Chưa đặt thì mọi thứ vẫn chạy như hôm nay — bước chép sổ in **"CHƯA BẬT"** kèm chỗ khai và KHÔNG
+làm lượt chạy agent đỏ; `/tech/agents` tiếp tục nói "0 lượt chạy", một câu ĐÚNG.
 
 ## 7. Cổng đã chạy
 

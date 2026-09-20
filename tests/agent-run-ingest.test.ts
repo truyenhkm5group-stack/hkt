@@ -332,7 +332,70 @@ export function testAgentIngestSourceGuards() {
   const khoi = wf.slice(wf.indexOf("- name: Chép sổ lượt chạy về ERP"));
   assert.ok(khoi.length > 0, "workflow phải có bước chép sổ");
   assert.ok(khoi.slice(0, 400).includes("continue-on-error: true"), "bước chép sổ KHÔNG được làm hỏng lượt chạy agent");
-  assert.ok(khoi.slice(0, 400).includes("CRON_SECRET"), "bước chép sổ phải truyền CRON_SECRET xuống");
+  assert.ok(khoi.slice(0, 700).includes("AGENT_INGEST_SECRET"), "bước chép sổ phải truyền khoá RIÊNG xuống");
+
+  /*
+    ───────── 3.7 KHOÁ RIÊNG, KHÔNG MƯỢN KHOÁ CỦA BỘ LẬP LỊCH ─────────
+
+    `CRON_SECRET` mở được hàng chục job đồng bộ, trong đó có job GHI hàng loạt. Đưa nó lên một máy
+    chạy mã CHƯA QUA REVIEW là đánh đổi bán kính thiệt hại lấy một dòng cấu hình — trong khi thứ
+    máy đó cần chỉ là ghi thêm dòng vào MỘT bảng quan sát. Khoá ở mức mã nguồn vì đây là một dòng
+    YAML trông vô hại và không bài kiểm hành vi nào thấy được.
+  */
+  assert.ok(!wf.includes("secrets.CRON_SECRET"), "workflow agent KHÔNG được nhắc tới secrets.CRON_SECRET");
+
+  /*
+    ───────── 3.8 ĐỊA CHỈ ERP KHAI ĐÚNG MỘT LẦN ─────────
+
+    `deploy-vps.yml` đã suy tên miền từ `vars.ERP_DOMAIN`. Khai lại ở một biến thứ hai là dựng một
+    việc thủ công cho một giá trị đã biết, và dựng luôn cơ hội để hai chỗ nói hai tên miền khác
+    nhau. Bài kiểm đòi CÙNG một biểu thức mặc định ở cả hai nơi.
+  */
+  const deploy = readFileSync(path.join(goc, ".github/workflows/deploy-vps.yml"), "utf8");
+  const macDinh = "vars.ERP_DOMAIN || 'erp.vnxcommerce.com'";
+  assert.ok(deploy.includes(macDinh), "deploy-vps.yml phải giữ nguyên nguồn tên miền");
+  assert.ok(wf.includes(macDinh), "agent-run.yml phải dùng LẠI đúng nguồn đó, không khai lần hai");
+
+  /*
+    ───────── 3.9 KHOÁ ĐI ĐƯỢC TỪ SECRET TỚI `.env` CỦA MÁY CHỦ ─────────
+
+    Một secret khai ở GitHub mà không có đường xuống `.env` thì cửa vẫn đóng, và người khai không
+    có cách nào biết — đúng kiểu hỏng im lặng. Bốn mắt xích phải cùng có mặt.
+  */
+  const install = readFileSync(path.join(goc, "scripts/install-vps.sh"), "utf8");
+  assert.ok(deploy.includes("AGENT_INGEST_SECRET: ${{ secrets.AGENT_INGEST_SECRET }}"), "deploy phải đọc secret");
+  /*
+    Cắt theo MỐC TRONG TỆP, không tách dòng và không biểu thức chính quy: một chuỗi thoát viết sai
+    làm bộ gác lặng lẽ đo nhầm thứ khác — đã xảy ra đúng một lần khi viết chính bài kiểm này.
+  */
+  const iEnvs = deploy.indexOf("envs: ERP_BRANCH");
+  const iScript = deploy.indexOf("script:", iEnvs);
+  const iExport = deploy.indexOf("export ERP_BRANCH", iScript);
+  const iSauExport = deploy.indexOf("KHOÁ VÒNG ĐỜI", iExport);
+  assert.ok(iEnvs > 0 && iScript > iEnvs && iExport > iScript, "không tìm thấy khối envs/script của bước SSH");
+  assert.ok(deploy.slice(iEnvs, iScript).includes("AGENT_INGEST_SECRET"), "khoá phải nằm trong danh sách envs của bước SSH");
+  assert.ok(deploy.slice(iExport, iSauExport).includes("AGENT_INGEST_SECRET"), "và phải được export trong script chạy trên VPS");
+  // Đọc theo DÒNG, không regex: một chuỗi thoát viết sai làm bộ gác lặng lẽ đo nhầm thứ khác.
+  assert.ok(install.includes("upsert_env AGENT_INGEST_SECRET"), "install-vps.sh phải ghi khoá vào .env của máy đã có sẵn");
+  // Nháy ĐƠN: `String.raw` vẫn nội suy `${...}`, nên chuỗi shell phải đi trong chuỗi không nội suy.
+  assert.ok(install.includes('AGENT_INGEST_SECRET="${AGENT_INGEST_SECRET:-}"'), "mẫu .env mới cũng phải có khoá");
+
+  /*
+    ───────── 3.10 CỬA NHẬN CẢ HAI KHOÁ, VÀ LUÔN SO ĐỦ HAI LƯỢT ─────────
+
+    Viết `secretEquals(a) || secretEquals(b)` với `||` ngắn mạch thì thời gian trả lời phụ thuộc
+    việc máy chủ đang khai khoá nào — một kênh rò rỉ nhỏ nhưng có thật trên cửa hướng ra Internet.
+  */
+  assert.ok(route.includes("env.agentIngestSecret"), "cửa phải nhận khoá riêng");
+  /*
+    Hai lượt so phải CHẠY ĐỦ. Viết `secretEquals(a) || secretEquals(b)` thì `||` ngắn mạch, và thời
+    gian trả lời tiết lộ máy chủ đang khai khoá nào — một kênh rò rỉ nhỏ nhưng có thật trên cửa
+    hướng ra Internet. Đo bằng THỨ TỰ hai lượt gán, không bằng một biểu thức chính quy dễ viết sai.
+  */
+  const iRieng = route.indexOf("const rieng = secretEquals(");
+  const iLapLich = route.indexOf("const lapLich = secretEquals(");
+  const iTra = route.indexOf("return rieng || lapLich;");
+  assert.ok(iRieng > 0 && iLapLich > iRieng && iTra > iLapLich, "phải gán đủ hai lượt so TRƯỚC khi hợp lại bằng ||");
   assert.ok(!wf.includes("DATABASE_URL: ${{"), "máy Actions KHÔNG bao giờ nhận DATABASE_URL của production");
-  console.log("✓ Cửa hẹp theo hình dạng: không nhận SQL/tên bảng · lược đồ .strict() · không GET · không đường phiên · chỉ ghi 1 bảng · không in bí mật");
+  console.log("✓ Cửa hẹp theo hình dạng: không nhận SQL/tên bảng · .strict() · không GET · không đường phiên · chỉ ghi 1 bảng · không in bí mật · khoá RIÊNG (không mượn khoá bộ lập lịch) · tên miền khai một lần · secret thông được tới .env");
 }

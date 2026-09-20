@@ -29,10 +29,10 @@ export const dynamic = "force-dynamic";
  *
  * ─── XÁC THỰC ĐÓNG-KHI-THIẾU ───
  *
- * Chỉ `CRON_SECRET` qua header, không có đường phiên đăng nhập, không nhận bí mật trên URL (URL
- * nằm trong access log của Caddy và log proxy — cùng bài học với `/api/sync/[job]`). `secretEquals`
- * trả `false` khi THIẾU một trong hai vế, nên máy chủ chưa đặt `CRON_SECRET` thì cửa ĐÓNG, không
- * phải mở toang.
+ * Chỉ khoá qua header, không có đường phiên đăng nhập, không nhận bí mật trên URL (URL nằm trong
+ * access log của Caddy và log proxy — cùng bài học với `/api/sync/[job]`). Khoá chính là
+ * `AGENT_INGEST_SECRET`, RIÊNG của cửa này; `CRON_SECRET` chỉ là đường lùi cho máy chủ chưa kịp
+ * khai khoá riêng. Chưa khai khoá nào thì cửa ĐÓNG, không phải mở toang — xem `duocPhep()`.
  */
 
 const gateSchema = z.enum(TECH_GATE_RESULTS);
@@ -61,9 +61,25 @@ const bodySchema = z
   })
   .strict();
 
+/**
+ * KHOÁ RIÊNG TRƯỚC, KHOÁ LẬP LỊCH SAU — VÀ CẢ HAI ĐỀU ĐÓNG-KHI-THIẾU.
+ *
+ * `AGENT_INGEST_SECRET` dành riêng cho cửa này: bán kính thiệt hại của nó đúng bằng MỘT bảng quan
+ * sát. `CRON_SECRET` vẫn được nhận, nhưng chỉ như đường lùi — nó mở được cả bộ lập lịch, nên dùng
+ * nó ở một cửa hướng ra Internet là trả giá đắt hơn nhiều so với thứ cửa này cần.
+ *
+ * Hai lượt so LUÔN chạy đủ, KHÔNG ngắn mạch ở vế đầu: thời gian trả lời không được phép tiết lộ
+ * máy chủ đang khai khoá nào.
+ */
+function duocPhep(given: string | undefined): boolean {
+  const rieng = secretEquals(given, env.agentIngestSecret);
+  const lapLich = secretEquals(given, env.cronSecret);
+  return rieng || lapLich;
+}
+
 export async function POST(request: NextRequest) {
   const given = request.headers.get("x-cron-secret") ?? request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
-  if (!secretEquals(given, env.cronSecret)) {
+  if (!duocPhep(given)) {
     return NextResponse.json({ error: "Không có quyền" }, { status: 401 });
   }
 
