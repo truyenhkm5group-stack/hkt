@@ -1,0 +1,36 @@
+-- ═══════════ KHOÁ TỰ NHIÊN CHO LƯỢT CHẠY AGENT ĐẾN TỪ MÁY NGOÀI ═══════════
+--
+-- Runner agent chạy trên máy GitHub Actions, và máy đó KHÔNG nối được PostgreSQL production —
+-- CSDL nằm sau mạng docker của VPS, không mở ra ngoài. Đó là tính chất phải GIỮ, không phải
+-- thiếu sót: mã chưa qua review không được chạy cạnh CSDL production.
+--
+-- Hệ quả đo được trước bản này: `/tech/agents` hiện 12/12 vai "0 lượt chạy · Chưa từng chạy",
+-- trong khi `agent-run.yml` đã chạy THÀNH CÔNG nhiều lượt (run #4 ngày 19/09, run #5 ngày 20/09).
+-- Sổ và runner ở hai máy không nhìn thấy nhau.
+--
+-- Cột này là khoá của cửa hẹp nối hai máy ấy (`POST /api/tech/agent-run`).
+--
+-- ─── VÌ SAO PHẢI LÀ KHOÁ DUY NHẤT Ở CSDL, KHÔNG PHẢI MỘT PHÉP KIỂM TRONG MÃ ───
+--
+-- Cửa ấy hướng ra Internet. "Chép hai lần không đẻ hai dòng" phải là một BẢO ĐẢM, không phải một
+-- mệnh đề `where not exists` — mệnh đề ấy luôn có cửa sổ đua giữa lúc đọc và lúc ghi, và một gói
+-- tin gửi lại đúng lúc sẽ lọt qua. Khoá duy nhất thì không có cửa sổ nào.
+--
+-- ─── VÌ SAO NULLABLE ───
+--
+-- `NULL` = lượt chạy NỘI BỘ: chạy tay từ CLI, hoặc chạy trong bộ kiểm thử. Postgres cho nhiều
+-- `NULL` cùng tồn tại dưới một khoá duy nhất, nên lượt chạy nội bộ không đụng gì tới nhau và
+-- không cần một giá trị giả để lấp chỗ.
+--
+-- ─── DẠNG KHOÁ: `provider:runId:attempt` ───
+--
+-- `attempt` nằm TRONG khoá vì chạy lại một workflow là một SỰ VIỆC MỚI đáng xem. Gộp hai lần chạy
+-- thành một dòng là giấu mất đúng cái lần người ta quan tâm — cùng luật đã dùng cho
+-- `tech_deployments (provider, external_run_id, external_run_attempt)`.
+--
+-- KHÔNG BACKFILL: những lượt chạy đã có đều là lượt nội bộ hoặc lượt trên máy Actions mà sổ
+-- production chưa bao giờ thấy. Gán cho chúng một khoá ngoài là bịa ra một danh tính chưa từng
+-- tồn tại (AGENTS.md mục 35).
+ALTER TABLE "tech_agent_runs" ADD COLUMN IF NOT EXISTS "external_ref" text;--> statement-breakpoint
+
+CREATE UNIQUE INDEX IF NOT EXISTS "tech_agent_runs_external_ref_uq" ON "tech_agent_runs" ("external_ref");

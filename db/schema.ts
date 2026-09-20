@@ -5313,6 +5313,21 @@ export const techAgentRuns = pgTable(
      */
     heartbeatAt: ts("heartbeat_at"),
     baseCommit: text("base_commit").notNull().default(""),
+    /*
+      KHOÁ TỰ NHIÊN CỦA LƯỢT CHẠY ĐẾN TỪ MÁY NGOÀI — `provider:runId:attempt`.
+
+      Runner chạy trên máy GitHub Actions, không nối được CSDL production, nên lượt chạy được CHÉP
+      về qua một cửa hẹp (`/api/tech/agent-run`). Cửa ấy hướng ra Internet, nên "chép hai lần
+      không đẻ hai dòng" phải là một BẢO ĐẢM của CSDL, không phải một mệnh đề `where not exists`
+      trong mã — mệnh đề ấy luôn có cửa sổ đua giữa lúc đọc và lúc ghi.
+
+      `NULL` = lượt chạy NỘI BỘ (chạy tay, chạy trong bộ kiểm thử). Postgres cho nhiều `NULL` cùng
+      tồn tại dưới một khoá duy nhất, nên lượt chạy nội bộ không đụng gì tới nhau.
+
+      `attempt` nằm TRONG khoá: chạy lại một workflow là một sự việc mới đáng xem, gộp hai lần
+      thành một dòng là giấu mất đúng cái lần người ta quan tâm (cùng luật với `tech_deployments`).
+    */
+    externalRef: text("external_ref"),
     resultCommit: text("result_commit").notNull().default(""),
     summary: text("summary").notNull().default(""),
     /** Lệnh đã chạy, nguyên văn: `npm run typecheck && npm test`. */
@@ -5330,6 +5345,8 @@ export const techAgentRuns = pgTable(
     index("tech_agent_runs_agent_idx").on(t.agentId, t.startedAt),
     index("tech_agent_runs_task_idx").on(t.taskId, t.startedAt),
     index("tech_agent_runs_started_idx").on(t.startedAt),
+    /* Chép hai lần KHÔNG đẻ hai dòng — bảo đảm ở CSDL, xem chú thích của `external_ref`. */
+    uniqueIndex("tech_agent_runs_external_ref_uq").on(t.externalRef),
     check("tech_agent_runs_status_check", sql`${t.status} IN ('RUNNING','SUCCEEDED','FAILED','CANCELLED')`),
     check("tech_agent_runs_typecheck_check", sql`${t.typecheckResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
     check("tech_agent_runs_lint_check", sql`${t.lintResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),

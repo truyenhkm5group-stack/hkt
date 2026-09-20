@@ -53,6 +53,7 @@ const MOI = [
   "0104_tech_cto_proposals",
   "0105_cto_repair_evidence",
   "0106_session_revocation",
+  "0107_agent_run_external_ref",
 ] as const;
 
 /*
@@ -148,6 +149,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'tech_proposals'"), 0, "bước 1: sổ đề xuất AI CTO CHƯA được có — đó là thứ 0104 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_proposals' and column_name = 'repair_outcome'"), 0, "bước 1: bằng chứng lượt sửa CHƯA được có — đó là thứ 0105 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_tasks' and column_name = 'pr_number'"), 0, "bước 1: phép chiếu PR CHƯA được có — đó là thứ 0104 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_agent_runs' and column_name = 'external_ref'"), 0, "bước 1: khoá lượt chạy đến từ máy ngoài CHƯA được có — đó là thứ 0107 thêm vào");
     /*
       Một vận đơn ĐÃ CÓ TỪ TRƯỚC 0099, mang một trạng thái Viettel Post đã dịch được. Bước 2 kiểm
       rằng migration KHÔNG dựng hộ nó một "lời khai thô": suy ngược từ `vtp_status_name` là bịa ra
@@ -1319,6 +1321,35 @@ export async function testMigrationUpgradePath() {
     /* …và bộ đôi hợp lệ thì phải ghi được. */
     await client.query(`update tech_proposals set repair_outcome = 'PASS', model_calls = 2, initial_error = 'tasks: Too big' where id = 'up-p1'`);
     assert.equal(await dem("select count(*)::int as n from tech_proposals where id = 'up-p1' and model_calls = 2 and repair_outcome = 'PASS'"), 1, "0105: một lượt sửa thành công phải ghi lại được");
+    /*
+      ═══ 0107: KHOÁ TỰ NHIÊN CHO LƯỢT CHẠY AGENT ĐẾN TỪ MÁY NGOÀI ═══
+
+      Runner chạy trên máy GitHub Actions, không nối được CSDL production, nên sổ được CHÉP về qua
+      một cửa hẹp hướng ra Internet. "Chép hai lần không đẻ hai dòng" vì thế phải là BẢO ĐẢM CỦA
+      CSDL, và bài này chứng minh bằng cách chạy lệnh thật chứ không đọc tên chỉ mục.
+    */
+    await client.query(`insert into tech_agents (id, key, name, role) values ('up-ag1', 'up-doc', 'Vai tài liệu', 'DOCUMENTATION')`);
+    /* Lượt chạy CŨ (sinh trước bản này) phải ở NULL — KHÔNG backfill một danh tính chưa từng tồn tại (mục 35). */
+    await client.query(`insert into tech_agent_runs (id, agent_id, agent_key, status, ended_at) values ('up-r0', 'up-ag1', 'up-doc', 'SUCCEEDED', now())`);
+    assert.equal(await dem("select count(*)::int as n from tech_agent_runs where id = 'up-r0' and external_ref is null"), 1, "0107: lượt chạy cũ phải ở NULL — không gán cho nó một khoá ngoài chưa từng có");
+
+    await client.query(`insert into tech_agent_runs (id, agent_id, agent_key, status, ended_at, external_ref) values ('up-r1', 'up-ag1', 'up-doc', 'SUCCEEDED', now(), 'github:1:1')`);
+    await assert.rejects(
+      () => client.query(`insert into tech_agent_runs (id, agent_id, agent_key, status, ended_at, external_ref) values ('up-r2', 'up-ag1', 'up-doc', 'FAILED', now(), 'github:1:1')`),
+      () => true,
+      "0107: chép lại đúng một lượt chạy KHÔNG được đẻ dòng thứ hai",
+    );
+    /* Chạy LẠI workflow là một sự việc MỚI — `attempt` nằm trong khoá nên nó phải ghi được. */
+    await client.query(`insert into tech_agent_runs (id, agent_id, agent_key, status, ended_at, external_ref) values ('up-r3', 'up-ag1', 'up-doc', 'SUCCEEDED', now(), 'github:1:2')`);
+    /*
+      NHIỀU `NULL` PHẢI CÙNG TỒN TẠI. Nếu không, khoá mới này lặng lẽ chặn mọi lượt chạy NỘI BỘ
+      thứ hai — một migration làm hỏng đường ghi cũ mà không màn hình nào báo.
+    */
+    await client.query(`insert into tech_agent_runs (id, agent_id, agent_key, status, ended_at) values ('up-r4', 'up-ag1', 'up-doc', 'SUCCEEDED', now())`);
+    assert.equal(await dem("select count(*)::int as n from tech_agent_runs where external_ref is null"), 2, "0107: lượt chạy nội bộ (NULL) không được đụng nhau");
+    await client.query(`delete from tech_agent_runs where agent_id = 'up-ag1'`);
+    await client.query(`delete from tech_agents where id = 'up-ag1'`);
+
     await client.query(`delete from tech_proposals where id = 'up-p1'`);
     await client.query(`delete from tech_tasks where id = 'up-t1'`);
 
@@ -1331,8 +1362,9 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from shipment_return_reasons where id not like 'up-rr%'"), 0, "chạy lại migration KHÔNG được sinh lý do hoàn nào");
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and assignee_user_id is null"), 1, "chạy lại migration vẫn KHÔNG được đoán người phụ trách");
     assert.equal(await dem("select count(*)::int as n from tech_proposals"), 0, "chạy lại migration KHÔNG được sinh bản đề xuất nào");
+    assert.equal(await dem("select count(*)::int as n from tech_agent_runs"), 0, "chạy lại migration KHÔNG được sinh lượt chạy agent nào");
 
-    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · sổ đề xuất AI CTO và phép chiếu PR vào đời RỖNG, bốn ràng buộc mới chặn đúng · bằng chứng lượt sửa mặc định (1,'',NONE) và hai ràng buộc 0105 chặn đúng · chạy lại không nhân đôi`);
+    console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · sổ đề xuất AI CTO và phép chiếu PR vào đời RỖNG, bốn ràng buộc mới chặn đúng · bằng chứng lượt sửa mặc định (1,'',NONE) và hai ràng buộc 0105 chặn đúng · khoá lượt chạy ngoài chặn bản sao nhưng cho nhiều NULL, không backfill dòng cũ · chạy lại không nhân đôi`);
   } finally {
     await client.close().catch(() => {});
     rmSync(tmp, { recursive: true, force: true });

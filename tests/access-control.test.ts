@@ -38,6 +38,15 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
   "app/api/webhooks/vtp-statement/route.ts": "webhook bảng kê Viettel Post",
   "app/api/webhooks/sepay/route.ts": "webhook SePay, xác thực bằng HMAC-SHA256 trên byte gốc + chống phát lại 5 phút — không có phiên đăng nhập",
   "app/api/sync/[job]/route.ts": "gọi bằng x-cron-secret (bộ lập lịch) hoặc phiên có quyền sync:run",
+  /*
+    Cửa máy-gọi-máy: máy GitHub Actions chép sổ lượt chạy agent về (phương án B — runner KHÔNG nối
+    CSDL production). Nó CHỈ nhận `x-cron-secret` và CỐ Ý KHÔNG có đường phiên đăng nhập: thêm một
+    lượt `can(user, ...)` vào đây là mở một cửa thứ hai cho người, trên một tuyến mà không người
+    nào cần gọi. Phạm vi ghi hẹp hơn mọi tuyến khác trong bảng này — đúng một bảng
+    (`tech_agent_runs`), chỉ TẠO không SỬA, không chạm một dòng dữ liệu nghiệp vụ nào — và hình
+    dạng đó được khoá bằng quét mã nguồn ở `tests/agent-run-ingest.test.ts`.
+  */
+  "app/api/tech/agent-run/route.ts": "gọi bằng x-cron-secret từ GitHub Actions; không có đường phiên đăng nhập, hình dạng khoá ở tests/agent-run-ingest.test.ts",
 };
 
 export function testAccessControl() {
