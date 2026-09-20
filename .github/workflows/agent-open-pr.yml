@@ -22,13 +22,22 @@
 # đi, và `tests/agent-identity.test.ts` + `tests/agent-pr-bridge.test.ts` quét mã nguồn để giữ
 # điều đó. Cổng `gates / gates` không bị đụng tới. Người duyệt vẫn là chủ shop.
 #
-# ─── CÒN HỞ, VÀ CÁCH ĐÓNG HẲN ───
+# ─── HÀNG RÀO THỨ NĂM: ENVIRONMENT `agent-identity` ───
 #
 # Hàng rào 1 nằm TRONG chính tệp này, nên nó chặn được nhầm lẫn chứ không chặn được cố ý: ai sửa
-# được tệp trên một nhánh thì cũng xoá được dòng kiểm ấy. Hàng rào thật nằm ở phía GitHub:
-# chuyển ba secret `ERP_AGENT_GITHUB_*` vào một **Environment** có *deployment branch policy* chỉ
-# cho `main`, rồi khai `environment:` ở job dưới. Lúc đó một lượt chạy từ nhánh khác **không đọc
-# được secret** — thất bại ĐÓNG, không phụ thuộc vào thiện chí của tệp. Xem `docs/agent-pr-bridge.md`.
+# được tệp trên một nhánh thì cũng xoá được dòng kiểm ấy rồi dispatch nhánh đó. Hàng rào CỨNG nằm
+# ở phía GitHub và không đọc một dòng nào của tệp này: ba secret `ERP_AGENT_GITHUB_*` sống trong
+# Environment `agent-identity`, có *deployment branch policy* chỉ cho `main`. Lượt chạy từ nhánh
+# khác **không đọc được secret** — thất bại ĐÓNG.
+#
+# GIỮ CẢ HAI, không thay cái này bằng cái kia. Environment chưa tồn tại thì GitHub **tự tạo** nó
+# khi job chạy lần đầu — tạo ra một Environment RỖNG và KHÔNG có chính sách nhánh. Lúc đó hàng
+# rào 5 biến mất mà không ai được báo, và chỉ còn hàng rào 1 đứng lại. Một hàng rào tự dựng lên
+# ở trạng thái mở là lý do để có hàng rào thứ hai, không phải lý do để bỏ nó.
+#
+# Tên Environment là một CHUỖI CỐ ĐỊNH ở đây. Cho nó nhận `inputs.*` là để người gọi tự chọn kho
+# secret — tức là tự chọn hàng rào, tức là không có hàng rào. `tests/agent-pr-bridge.test.ts`
+# khoá điều đó. Xem `docs/agent-pr-bridge.md`.
 name: Mở PR bằng danh tính agent
 
 on:
@@ -64,6 +73,9 @@ concurrency:
 jobs:
   open:
     runs-on: ubuntu-latest
+    # Kho ba secret `ERP_AGENT_GITHUB_*`. Chính sách nhánh của Environment (chỉ `main`) là thứ
+    # chặn thật; bước "Chỉ chạy từ nhánh mặc định" bên dưới vẫn giữ nguyên làm lớp thứ hai.
+    environment: agent-identity
     timeout-minutes: 10
     steps:
       - name: Chỉ chạy từ nhánh mặc định
