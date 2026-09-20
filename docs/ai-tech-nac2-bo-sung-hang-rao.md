@@ -38,7 +38,10 @@ Lý lẽ của chính PR #52 — *"một agent sửa được hàng rào của m
 nghị"* — áp cho **cả hai nửa**. Khoá bản khai mà để ngỏ nơi thi hành thì vẫn còn nguyên một đường:
 sửa một dòng ở runner để nó thôi đọc bản khai.
 
-Thêm `lib/agents/`, và `app/api/` (tuyến HTTP hướng ra Internet, trong đó có cửa chép sổ).
+Thêm `lib/agents/`, `app/api/` (tuyến HTTP hướng ra Internet, trong đó có cửa chép sổ), và
+`lib/tech/` — dịch vụ giữ sổ của chính phòng Tech: `service.ts` mở/đóng lượt chạy và đổi trạng
+thái việc, `dispatch-service.ts` (PR #53, Nấc 3) là nơi ERP giao việc cho agent. Đó là đường GHI
+vào chính cuốn sổ ghi lại agent đã làm gì; sửa được nó là sửa được lời khai về chính mình.
 
 ### 1.3 Bộ đếm khẳng định có đúng hai đường lách
 
@@ -94,7 +97,7 @@ này tự động — thêm một vùng cấm mà quên ca kiểm thì đỏ, v�
 
 `npm run typecheck` · `npm run lint` · `npm test` (ẩn danh và có `GITHUB_TOKEN` giả) · `npm run build` — sạch.
 
-`✓ Nấc 2 (phạm vi theo vai): … 27 vùng cấm, gồm CHÍNH hàng rào và nơi thi hành nó … bài kiểm khoá
+`✓ Nấc 2 (phạm vi theo vai): … 28 vùng cấm, gồm CHÍNH hàng rào và nơi thi hành nó … bài kiểm khoá
 luật ngoài tầm với (đổi giá trị kỳ vọng và xoá dòng đăng ký đều lọt bộ đếm)`
 
 ---

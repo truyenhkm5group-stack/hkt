@@ -85,6 +85,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/ops-concurrency.test.ts":
     "Truyền biến xuống tiến trình bash con để dựng tình huống khoá — đầu vào của kịch bản đang đo; và dùng process.platform để nói CHƯA ĐO ĐƯỢC, không để bỏ qua một khẳng định.",
   "tests/test-hygiene.test.ts": "Chính bài này.",
+  "tests/agent-dispatch.test.ts":
+    "Đặt ERP_GITHUB_DISPATCH_TOKEN / ERP_GITHUB_REPO để dựng ba tình huống (chưa khai khoá · đã khai · khoá thiếu quyền), rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của cổng cấu hình đang đo, không phải điều kiện của kết luận.",
   "tests/setup-env.ts":
     "Tệp dựng môi trường của bộ kiểm thử: nó GHI DATABASE_URL trỏ vào CSDL dùng-một-lần của chính tiến trình này. Đó là việc của nó.",
 

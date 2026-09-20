@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
+import { DISPATCH_AUDIT_ACTION } from "@/lib/constants/agent-dispatch";
+import { dispatchTaskToAgent } from "@/lib/tech/dispatch-service";
 import { can, requireUser } from "@/lib/auth/session";
 import {
   TECH_GATE_RESULTS,
@@ -570,4 +572,53 @@ export async function rejectTechProposalAction(input: unknown): Promise<TechResu
   });
   revalidatePath("/tech/cto");
   return { ok: true };
+}
+
+/* ═════════════════ NẤC 3 · GIAO VIỆC CHO AGENT ═════════════════ */
+
+const giaoAgentSchema = z.object({
+  taskCode: z.string().trim().min(1).max(64),
+  /*
+    Danh sách cổng là một chuỗi ĐÓNG, không phải chữ tự do: nó đi thẳng vào `inputs` của
+    `workflow_dispatch`. Cho gõ tự do là cho nơi gọi bơm một giá trị lạ vào một workflow chạy trên
+    máy khác. Bốn cổng, hoặc mặc định cả bốn.
+  */
+  gates: z.enum(["typecheck,lint,test,build", "typecheck,lint", "typecheck"]).default("typecheck,lint,test,build"),
+});
+
+/**
+ * GIAO MỘT VIỆC TECH CHO AGENT — lần đầu tiên một màn hình nghiệp vụ khởi động một tiến trình
+ * ghi mã. Ba cổng (cấu hình · việc · hạn mức) nằm ở `lib/tech/dispatch-service.ts`; ở đây chỉ có
+ * quyền, lược đồ đầu vào, và làm mới màn hình.
+ */
+export async function dispatchTaskToAgentAction(input: unknown): Promise<TechResult<{ taskCode: string; agentKey: string; conLaiGio: number }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  let data: z.infer<typeof giaoAgentSchema>;
+  try {
+    data = giaoAgentSchema.parse(input);
+  } catch (e) {
+    return { error: loi(e, "Dữ liệu không hợp lệ") };
+  }
+  const res = await dispatchTaskToAgent({ taskCode: data.taskCode, gates: data.gates, actor: { id: user.id, email: user.email, name: user.name } });
+  if (!res.ok) return { error: res.reason };
+  /*
+    GHI NHẬT KÝ SAU KHI GỬI THÀNH CÔNG, KHÔNG TRƯỚC.
+
+    Dòng này vừa là nhật ký vừa là SỔ ĐẾM hạn mức (`DISPATCH_AUDIT_ACTION`). Ghi trước rồi gửi
+    hỏng ⇒ một suất bị tiêu cho một lượt chạy chưa từng tồn tại. Ghi sau ⇒ nếu tiến trình chết
+    đúng giữa hai bước thì mất một dòng nhật ký nhưng KHÔNG chặn nhầm người dùng — trong hai kiểu
+    sai, kiểu này rẻ hơn và tự lộ ra (lượt chạy có trên GitHub mà không có trong sổ).
+  */
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: DISPATCH_AUDIT_ACTION,
+    entity: "TECH_TASK",
+    entityId: res.taskId,
+    after: { taskCode: res.taskCode, agentKey: res.agentKey, workflow: res.workflow, ref: res.ref, gates: data.gates },
+    reason: `Giao việc cho agent từ ERP · còn ${res.conLaiGio}/giờ, ${res.conLaiNgay}/ngày`,
+  });
+  lamMoi();
+  return { ok: true, taskCode: res.taskCode, agentKey: res.agentKey, conLaiGio: res.conLaiGio };
 }

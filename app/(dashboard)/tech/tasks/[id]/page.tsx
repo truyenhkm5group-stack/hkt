@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { dispatchConfig } from "@/lib/integrations/github/dispatch";
 import { notFound } from "next/navigation";
 import { TechApprovalBadge, TechDeployBadge, TechGateBadge, TechPriorityBadge, TechRiskBadge, TechSeverityBadge, TechStatusBadge } from "@/app/(dashboard)/tech/badges";
 import { TechNav } from "@/app/(dashboard)/tech/tech-nav";
@@ -185,6 +186,8 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
             <SectionCard title="Thao tác">
               <TechTaskActions
                 taskId={task.id}
+                taskCode={task.code}
+                dispatchReason={dispatchConfig().configured ? null : (dispatchConfig().reason ?? "Chưa bật cửa giao việc.")}
                 status={task.status as TechTaskStatus}
                 priority={task.priority as TechPriority}
                 risk={task.risk as TechRisk}

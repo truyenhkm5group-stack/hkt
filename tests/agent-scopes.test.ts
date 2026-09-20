@@ -91,6 +91,7 @@ export function testHangRaoTuyetDoi() {
     "next.config.ts",
     "db/migrate.ts",
     "lib/agents/runner.ts",
+    "lib/tech/dispatch-service.ts",
     "app/api/tech/agent-run/route.ts",
     "tests/sync-fixtures.test.ts",
     "tests/contract-order-outcome.test.ts",

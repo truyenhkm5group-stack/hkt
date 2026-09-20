@@ -64,6 +64,7 @@ import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, tes
 import { testTestHygiene } from "./test-hygiene.test";
 import { cleanupAiHealthFixtures, testAiHealthKhongDemLuotTuKiem, testAiHealthSourceGuards } from "./ai-health-selftest.test";
 import { testBaiKiemKhoaLuatNgoaiTamVoi, testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
+import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
 import { testPayrollPeriod } from "./payroll-period.test";
@@ -1844,6 +1845,13 @@ async function main() {
   await testAiHealthKhongDemLuotTuKiem();
   await cleanupAiHealthFixtures();
   /*
+    NẤC 3 — ERP giao việc cho agent. Chạy `fetch` GIẢ (không gọi mạng thật) và tự dọn bằng tiền tố
+    `disp-` / `DISP-`. Khối cửa ghi đặt biến môi trường để dựng tình huống rồi trả lại nguyên trạng.
+  */
+  await testDispatchCua();
+  await testDispatchService();
+  await cleanupDispatchFixtures();
+  /*
     GHÉP QUẢNG CÁO TREO. Bài này chạy `reapplyAdsMapping()` THẬT, mà hàm đó quét toàn bộ dòng
     Facebook — nên nó tự chụp lại và trả về nguyên trạng `product_id`/`marketer_id` của mọi dòng
     (fixture `landing-attribution` có ba dòng như vậy). Xem `chupVaTraVe` trong bài.
@@ -1906,6 +1914,8 @@ async function main() {
   testHangRaoBaiKiem();
   testBaiKiemKhoaLuatNgoaiTamVoi();
   testPhamViSourceGuards();
+  testDispatchPure();
+  testDispatchSourceGuards();
   testAdsMappingGuards();
   testAdsIngestGuardsProductFk();
   testTechRiskEngine();

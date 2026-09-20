@@ -70,6 +70,14 @@ export const NEVER_WRITE: readonly string[] = [
   */
   "lib/agents/",
   /*
+    `lib/tech/` — DỊCH VỤ GIỮ SỔ CỦA CHÍNH PHÒNG TECH.
+
+    `service.ts` mở/đóng lượt chạy, đổi trạng thái việc và ghi sự kiện; `dispatch-service.ts` là
+    nơi ERP giao việc cho agent. Đó là đường GHI vào chính cuốn sổ ghi lại agent đã làm gì — cùng
+    một lớp với `lib/actions/`, và sửa được nó là sửa được lời khai về chính mình.
+  */
+  "lib/tech/",
+  /*
     `app/api/` — tuyến HTTP hướng ra Internet, trong đó có cửa chép sổ `POST /api/tech/agent-run`.
     Đây là bề mặt mà người ngoài chạm được; nó không bao giờ là việc của một lượt chạy agent.
   */
