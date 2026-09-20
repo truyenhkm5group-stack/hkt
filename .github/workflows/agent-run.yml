@@ -31,6 +31,14 @@ on:
         description: "Cổng runner phải chạy (phân tách bằng dấu phẩy)"
         type: string
         default: "typecheck,lint,test,build"
+      task:
+        # MÃ việc, KHÔNG phải nội dung việc. Kho này PUBLIC và đầu vào dispatch hiện nguyên văn
+        # trong giao diện Actions — nhét tiêu đề/mô tả vào đây là công khai nội dung nội bộ. Nội
+        # dung đi qua cửa ĐỌC hẹp `GET /api/tech/agent-task`, xác thực bằng khoá.
+        description: "Mã việc Tech cần làm (ví dụ TECH-12). Bỏ trống = tự tạo việc R0 để tự kiểm."
+        type: string
+        required: false
+        default: ""
 
 # `contents: write` CHỈ để đẩy nhánh `ai/documentation/*`. Bước đẩy tự kiểm tên nhánh trước khi
 # chạy, nên một lỗi ở chỗ khác cũng không biến quyền này thành đường ghi vào `main`.
@@ -99,12 +107,25 @@ jobs:
       # Dựng sổ agent + việc R0 qua ĐÚNG hàm dịch vụ mà `/tech` gọi. Người thao tác là tài khoản
       # GitHub đã bấm Run — `seedTechAgents()` từ chối mọi actor không phải người (AGENTS.md mục
       # 23), và workflow này chỉ chạy được bằng `workflow_dispatch`.
-      - name: Khởi tạo sổ agent và tạo việc R0
+      # ═══ HAI ĐƯỜNG VÀO, MỘT ĐẦU RA ═══
+      #
+      # Có `task` ⇒ lấy ĐÚNG việc ấy từ ERP qua cửa đọc hẹp rồi gieo vào CSDL tạm.
+      # Không có ⇒ đường cũ: tự tạo một việc R0 để tự kiểm.
+      #
+      # Cả hai đều in `TASK_CODE=` nên các bước sau không cần biết mình đang ở đường nào.
+      - name: Khởi tạo sổ agent và lấy việc
         id: setup
         env:
           DATABASE_URL: pglite://./data/agent-ci-db
+          ERP_DOMAIN: ${{ vars.ERP_DOMAIN || 'erp.vnxcommerce.com' }}
+          ERP_BASE_URL: ${{ vars.ERP_BASE_URL }}
+          AGENT_INGEST_SECRET: ${{ secrets.AGENT_INGEST_SECRET }}
         run: |
-          npm run --silent agent:proof-setup -- --actor "github:${{ github.actor }}" | tee setup.log
+          if [ -n "${{ inputs.task }}" ]; then
+            npm run --silent agent:fetch-task -- --task "${{ inputs.task }}" --actor "github:${{ github.actor }}" | tee setup.log
+          else
+            npm run --silent agent:proof-setup -- --actor "github:${{ github.actor }}" | tee setup.log
+          fi
           TASK_CODE="$(grep -oE '^TASK_CODE=.+' setup.log | tail -1 | cut -d= -f2)"
           if [ -z "$TASK_CODE" ]; then echo "::error::Không lấy được mã việc."; exit 1; fi
           echo "task_code=$TASK_CODE" >> "$GITHUB_OUTPUT"

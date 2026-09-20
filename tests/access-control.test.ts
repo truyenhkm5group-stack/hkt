@@ -47,6 +47,12 @@ const CO_Y_CONG_KHAI: Record<string, string> = {
     dạng đó được khoá bằng quét mã nguồn ở `tests/agent-run-ingest.test.ts`.
   */
   "app/api/tech/agent-run/route.ts": "gọi bằng x-cron-secret từ GitHub Actions; không có đường phiên đăng nhập, hình dạng khoá ở tests/agent-run-ingest.test.ts",
+  /*
+    Cửa ĐỌC đối xứng với cửa ghi trên: máy chạy agent lấy đúng việc được giao. Cũng CHỈ nhận
+    `x-cron-secret`, cũng không có đường phiên. Nó trả về đúng sáu trường và CHỈ việc được phép
+    giao (dùng lại `canDispatchTask`), nên nó không rộng hơn cổng giao việc.
+  */
+  "app/api/tech/agent-task/route.ts": "gọi bằng x-cron-secret từ GitHub Actions; chỉ GET một việc theo mã, chỉ việc được phép giao, hình dạng khoá ở tests/agent-task-read.test.ts",
 };
 
 export function testAccessControl() {

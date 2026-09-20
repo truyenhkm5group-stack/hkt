@@ -408,6 +408,7 @@ export function testAgentIngestSourceGuards() {
   const dsCongKhai = mw.slice(iDs, mw.indexOf("]", iDs));
   assert.ok(iDs > 0, "không đọc được PUBLIC_PREFIXES của middleware");
   assert.ok(dsCongKhai.includes('"/api/tech/agent-run"'), "middleware phải cho tuyến chép sổ đi qua — nếu không, phép kiểm khoá của route không bao giờ chạy");
+  assert.ok(dsCongKhai.includes('"/api/tech/agent-task"'), "cửa ĐỌC cũng phải đi qua được — cùng lý do, và cùng kiểu hỏng im lặng nếu quên");
   assert.ok(!dsCongKhai.includes('"/api/tech"'), "KHÔNG khai tiền tố cụt /api/tech — nó mở toàn bộ bề mặt API Phòng Tech AI");
   assert.ok(!dsCongKhai.includes('"/api/tech/"'), "cũng không khai /api/tech/ — cùng hậu quả");
 
