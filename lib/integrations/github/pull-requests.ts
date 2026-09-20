@@ -1,4 +1,4 @@
-import { eq, isNotNull, ne, or } from "drizzle-orm";
+import { and, eq, isNotNull, ne, notInArray, or } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import {
   techCiStateFromChecks,
@@ -20,6 +20,7 @@ import {
   type GithubErrorKind,
   type GithubPull,
 } from "@/lib/integrations/github/client";
+import { markGithubRead } from "@/lib/integrations/github/read-marker";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 import { recordTechTaskEvent } from "@/lib/tech/service";
 
@@ -66,8 +67,16 @@ export type GithubPrSyncResult = {
   matched: number;
   updated: number;
   unchanged: number;
-  /** Việc có khoá nhưng GitHub chưa có PR nào mang khoá đó. KHÔNG phải lỗi — thường là chưa mở PR. */
+  /**
+   * Việc có khoá nối nhưng KHÔNG thấy PR nào mang khoá đó **trong cửa sổ N PR cập nhật gần nhất**.
+   *
+   * Đây KHÔNG phải "chưa mở PR" — một PR đã gộp từ lâu cũng rơi ra khỏi cửa sổ. Gọi nó là "chưa
+   * mở PR" là nói ngược sự thật với đúng những việc đã xong. Tên và câu chữ phải nói đúng chừng
+   * đó: *không thấy trong cửa sổ*.
+   */
   unmatchedTasks: number;
+  /** Việc bị hoãn đọc sang lượt sau vì đã chạm trần lượt gọi. KHÔNG phải lỗi — xem `PR_DETAIL_BUDGET`. */
+  deferred: number;
   /** PR đang MỞ mà không việc Tech nào nhận. Con số này phải được in ra, không được nuốt. */
   unmatchedOpenPulls: number;
   errors: number;
@@ -139,7 +148,23 @@ function motDong(p: { prState: string; ciState: string; reviewState: string; mer
   return `PR ${o(p.prState)} · CI ${o(p.ciState)} · duyệt ${o(p.reviewState)} · gộp ${o(p.mergeState)}`;
 }
 
-export async function syncGithubPullRequests(opts: { limit?: number } = {}): Promise<GithubPrSyncResult> {
+/**
+ * ═══════════ TRẦN LƯỢT GỌI — VÌ HẠN MỨC LÀ 60/GIỜ, KHÔNG PHẢI VÔ HẠN ═══════════
+ *
+ * Mỗi PR gắn được việc tốn BA lượt gọi (chi tiết · check run · review). Bản đầu không có trần,
+ * nên lý thuyết xấu nhất là 1 + 3×50 = **151 request mỗi lượt chạy** — với nhịp 15 phút là 604
+ * request/giờ, trong khi đường gọi ẩn danh mà chính kho này khai là mặc định chỉ có **60/giờ**.
+ * Hậu quả không dừng ở job này: hết hạn mức là hết cho CẢ `github-deployments`, và sổ deploy lại
+ * đứng im — đúng cái đang đi sửa.
+ *
+ * Trần 12 PR/lượt ⇒ tối đa 37 request/lượt, 148/giờ có token (thừa sức trong 5.000) và với đường
+ * ẩn danh thì một lượt vẫn lọt dưới 60. Việc quá trần KHÔNG bị bỏ — nó được đọc ở lượt sau, vì
+ * thứ tự ưu tiên là **việc lâu chưa đọc nhất trước** (`pr_synced_at` rỗng đứng đầu). Xoay vòng
+ * như vậy thì mọi việc đều tới lượt, và không việc nào bị bỏ đói.
+ */
+export const PR_DETAIL_BUDGET = 12;
+
+export async function syncGithubPullRequests(opts: { limit?: number; budget?: number } = {}): Promise<GithubPrSyncResult> {
   const base: GithubPrSyncResult = {
     tasksConsidered: 0,
     pullsScanned: 0,
@@ -147,6 +172,7 @@ export async function syncGithubPullRequests(opts: { limit?: number } = {}): Pro
     updated: 0,
     unchanged: 0,
     unmatchedTasks: 0,
+    deferred: 0,
     unmatchedOpenPulls: 0,
     errors: 0,
     skippedReason: null,
@@ -164,9 +190,28 @@ export async function syncGithubPullRequests(opts: { limit?: number } = {}): Pro
     throw e;
   }
 
+  // Tới đây GitHub đã trả về danh sách; mọi nhánh bỏ qua đã `return` phía trên. Xem `read-marker.ts`.
+  await markGithubRead("pulls");
+
   const db = await getDb();
+  /*
+    KHÔNG ĐỌC LẠI THỨ ĐÃ KẾT THÚC.
+
+    Một việc `DONE` mà PR của nó đã `MERGED`/`CLOSED` thì không còn gì để học: GitHub không đổi
+    trạng thái của một PR đã gộp nữa. Đọc lại chúng mỗi 15 phút là tiêu hạn mức vào quá khứ, và
+    chính chúng là nhóm phình to nhất theo thời gian.
+
+    Việc `DONE` mà PR CHƯA kết thúc thì VẪN đọc — hai thứ đó lệch nhau là một dấu hiệu thật
+    (đánh dấu xong trong khi PR còn mở), và giấu nó đi là giấu đúng cái đáng nhìn.
+  */
   const tasks = await db.query.techTasks.findMany({
-    where: or(isNotNull(schema.techTasks.prNumber), ne(schema.techTasks.branch, "")),
+    where: and(
+      or(isNotNull(schema.techTasks.prNumber), ne(schema.techTasks.branch, "")),
+      or(ne(schema.techTasks.status, "DONE"), notInArray(schema.techTasks.prState, ["MERGED", "CLOSED"])),
+    ),
+    // Lâu chưa đọc nhất đi trước; chưa đọc lần nào (`NULL`) đứng đầu. Đây là thứ làm cái trần ở
+    // trên thành một phép XOAY VÒNG thay vì một phép cắt bỏ.
+    orderBy: (t, { asc, sql: raw }) => [raw`${t.prSyncedAt} asc nulls first`, asc(t.createdAt)],
     columns: {
       id: true,
       code: true,
@@ -180,6 +225,7 @@ export async function syncGithubPullRequests(opts: { limit?: number } = {}): Pro
       reviewState: true,
       mergeState: true,
       updatedAt: true,
+      status: true,
     },
   });
 
@@ -192,6 +238,7 @@ export async function syncGithubPullRequests(opts: { limit?: number } = {}): Pro
   }
 
   const out: GithubPrSyncResult = { ...base, pullsScanned: pulls.length, tasksConsidered: tasks.length };
+  const tran = Math.max(1, opts.budget ?? PR_DETAIL_BUDGET);
   const daGan = new Set<number>();
   // Một PR có thể gắn hai việc (việc con dùng chung nhánh); đọc chi tiết đúng MỘT lần cho mỗi PR.
   const dem = new Map<number, PrProjection>();
@@ -204,6 +251,12 @@ export async function syncGithubPullRequests(opts: { limit?: number } = {}): Pro
     }
     out.matched += 1;
     daGan.add(pr.number);
+    // Trần tính theo số PR PHẢI ĐỌC CHI TIẾT, không theo số việc: hai việc dùng chung một nhánh
+    // chỉ tốn một lần đọc, và tính chúng thành hai là tự thắt hầu bao vì một phép đếm sai.
+    if (!dem.has(pr.number) && dem.size >= tran) {
+      out.deferred += 1;
+      continue;
+    }
     try {
       let chieu = dem.get(pr.number);
       if (!chieu) {
@@ -265,9 +318,9 @@ export async function syncGithubPullRequests(opts: { limit?: number } = {}): Pro
 }
 
 /** Job: chép trạng thái PR về việc Tech. CHỈ ĐỌC phía GitHub. */
-export async function runGithubPrSync(opts: { trigger: SyncTrigger; actor: string; limit?: number }) {
+export async function runGithubPrSync(opts: { trigger: SyncTrigger; actor: string; limit?: number; budget?: number }) {
   return runSyncJob({ source: "GITHUB", job: "github-pr-sync", trigger: opts.trigger, actor: opts.actor }, async (ctx) => {
-    const r = await syncGithubPullRequests({ limit: opts.limit });
+    const r = await syncGithubPullRequests({ limit: opts.limit, budget: opts.budget });
     ctx.summary.updated = r.updated;
     ctx.summary.skipped = r.unchanged;
     ctx.summary.failed = r.errors;
@@ -283,9 +336,16 @@ export async function runGithubPrSync(opts: { trigger: SyncTrigger; actor: strin
       if (r.skippedKind === "AUTH_FAILED" || r.skippedKind === "NOT_FOUND") ctx.summary.warning = r.skippedReason;
       return r;
     }
+    /*
+      CÂU NÀY ĐƯỢC IN THẲNG LÊN `/tech/tasks`, nên nó phải nói đúng chừng nó biết.
+
+      `unmatchedTasks` KHÔNG phải "chưa mở PR": một PR đã gộp từ lâu cũng rơi khỏi cửa sổ N PR
+      cập nhật gần nhất. Gọi nó là "chưa mở PR" là nói ngược sự thật với đúng những việc đã xong.
+    */
     ctx.summary.detail =
-      `Quét ${r.pullsScanned} PR, ${r.tasksConsidered} việc có khoá nối: gắn ${r.matched}, cập nhật ${r.updated}, không đổi ${r.unchanged}. ` +
-      `${r.unmatchedTasks} việc chưa thấy PR · ${r.unmatchedOpenPulls} PR đang mở KHÔNG gắn việc nào.`;
+      `Quét ${r.pullsScanned} PR gần nhất · ${r.tasksConsidered} việc có khoá nối: gắn ${r.matched}, cập nhật ${r.updated}, không đổi ${r.unchanged}. ` +
+      `${r.unmatchedTasks} việc không thấy PR trong cửa sổ này · ${r.unmatchedOpenPulls} PR đang MỞ không gắn việc nào` +
+      `${r.deferred ? ` · ${r.deferred} việc hoãn sang lượt sau (chạm trần ${PR_DETAIL_BUDGET} PR/lượt, ưu tiên việc lâu chưa đọc nhất)` : ""}.`;
     if (r.errors) ctx.summary.warning = `${r.errors} việc không chép được trạng thái PR.`;
     return r;
   });

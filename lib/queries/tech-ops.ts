@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { TECH_DEPLOY_SORTABLE, TECH_INCIDENT_OPEN, TECH_INCIDENT_SORTABLE } from "@/lib/constants/tech";
+import { lastGithubRead as lastGithubReadAt } from "@/lib/integrations/github/read-marker";
 import type { ListParams } from "@/lib/search-params";
 
 export { TECH_DEPLOY_SORTABLE, TECH_INCIDENT_SORTABLE };
@@ -88,40 +89,34 @@ export async function lastSuccessfulDeployment() {
 }
 
 /**
- * LƯỢT ĐỌC GITHUB GẦN NHẤT CÓ KẾT QUẢ.
+ * MỐC ĐỌC GITHUB GẦN NHẤT — đọc từ `sync_state`, KHÔNG từ `sync_runs`.
  *
- * `PARTIAL` cũng tính: lượt đó CÓ đọc được danh sách lượt chạy và có ghi vào sổ, chỉ kèm cảnh báo.
- * Loại nó ra sẽ làm sổ trông cũ hơn thực tế và đẩy màn hình về "chưa kết luận được" một cách vô cớ.
- * `FAILED` thì không tính — lượt hỏng không đọc được gì, nên nó không làm sổ mới hơn.
- *
- * `null` = chưa lượt nào. Đó là CHƯA BIẾT, không phải "sổ vừa được đọc".
+ * Vì sao không dùng `sync_runs`: `runGithubDeploymentSync` đặt `warning` cho mọi nhánh BỎ QUA
+ * (hết hạn mức, lỗi mạng, token sai), và một lượt có `warning` được ghi `PARTIAL`. Nên một lượt
+ * đọc được 0 dòng vẫn trông như một lượt đọc — và sổ trông TƯƠI nhất đúng lúc nó CHẮC CHẮN đứng
+ * im. Xem `lib/integrations/github/read-marker.ts`.
  */
-export async function lastGithubDeploySyncAt(): Promise<Date | null> {
-  const db = await getDb();
-  const row = await db.query.syncRuns.findFirst({
-    where: and(eq(schema.syncRuns.source, "GITHUB"), eq(schema.syncRuns.job, "deploy_runs"), inArray(schema.syncRuns.status, ["SUCCESS", "PARTIAL"])),
-    orderBy: [desc(schema.syncRuns.startedAt)],
-    columns: { startedAt: true },
-  });
-  return row?.startedAt ?? null;
-}
+export { lastGithubRead } from "@/lib/integrations/github/read-marker";
 
 /**
- * LƯỢT CHÉP TRẠNG THÁI PR GẦN NHẤT — mốc đọc + câu tóm tắt CHÍNH JOB ĐÃ VIẾT.
+ * Câu tóm tắt của lượt chép PR gần nhất — để MÀN HÌNH in lại, không phải để tính tiếp.
  *
- * Trả về nguyên `detail` chứ không phân tích lại nó: câu ấy do job viết ra từ số đo của chính nó,
- * và một màn hình tự bóc tách chuỗi là một nguồn thứ hai lặng lẽ trôi khỏi nguồn thứ nhất.
- *
- * `null` = chưa lượt nào chạy. Đó là CHƯA BIẾT — khác hẳn "không có PR nào gắn việc".
+ * Trả nguyên `detail` chứ không phân tích lại: câu ấy do job viết ra từ số đo của chính nó, và
+ * một màn hình tự bóc tách chuỗi là một nguồn thứ hai lặng lẽ trôi khỏi nguồn thứ nhất. Mốc kèm
+ * theo là mốc ĐỌC THẬT (`sync_state`), không phải mốc lượt chạy — hai thứ đó lệch nhau đúng ở ca
+ * GitHub từ chối trả lời.
  */
-export async function lastPrSyncRun(): Promise<{ at: Date; detail: string; warning: boolean } | null> {
+export async function lastPrSyncRun(): Promise<{ at: Date | null; ranAt: Date; detail: string; warning: boolean } | null> {
   const db = await getDb();
-  const row = await db.query.syncRuns.findFirst({
-    where: and(eq(schema.syncRuns.source, "GITHUB"), eq(schema.syncRuns.job, "github-pr-sync"), inArray(schema.syncRuns.status, ["SUCCESS", "PARTIAL"])),
-    orderBy: [desc(schema.syncRuns.startedAt)],
-    columns: { startedAt: true, detail: true, status: true },
-  });
-  return row ? { at: row.startedAt, detail: row.detail, warning: row.status === "PARTIAL" } : null;
+  const [row, at] = await Promise.all([
+    db.query.syncRuns.findFirst({
+      where: and(eq(schema.syncRuns.source, "GITHUB"), eq(schema.syncRuns.job, "github-pr-sync")),
+      orderBy: [desc(schema.syncRuns.startedAt)],
+      columns: { startedAt: true, detail: true, status: true },
+    }),
+    lastGithubReadAt("pulls"),
+  ]);
+  return row ? { at, ranAt: row.startedAt, detail: row.detail, warning: row.status !== "SUCCESS" } : null;
 }
 
 export function techIncidentWhere(params: ListParams) {

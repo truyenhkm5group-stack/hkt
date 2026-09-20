@@ -7,6 +7,15 @@ import { AgentWorkspace } from "@/lib/agents/workspace";
 import type { AgentExecutor } from "@/lib/agents/executor";
 
 /**
+ * NHỊP TIM MỖI PHÚT, ĐỐI VỚI NGƯỠNG THU DỌN 45 PHÚT.
+ *
+ * Tỷ lệ 1:45 là cố ý rộng: một lượt chạy phải lỡ BỐN MƯƠI LĂM nhịp liên tiếp mới bị coi là đã
+ * chết. Nhịp dày hơn không làm gì thêm ngoài việc ghi CSDL nhiều hơn; nhịp thưa hơn thì khoảng
+ * mù lại rộng ra đúng bằng chỗ đã sinh ra lỗi này.
+ */
+const HEARTBEAT_EVERY_MS = 60_000;
+
+/**
  * ═══════════ RUNNER — NƠI MỌI CỔNG ĐƯỢC THI HÀNH ═══════════
  *
  * Executor (model) quyết định NỘI DUNG. Runner quyết định ĐƯỢC PHÉP HAY KHÔNG, và runner tự đo
@@ -121,14 +130,38 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
     });
     await db.update(schema.techAgentRuns).set({ worktree: ws.root, heartbeatAt: new Date() }).where(eq(schema.techAgentRuns.id, runId));
 
-    /* ───────── 9. Agent làm việc ───────── */
-    const outcome = await opts.executor.run({
-      taskCode: task.code,
-      taskTitle: task.title,
-      taskDescription: task.description,
-      writeGlobs: DOCUMENTATION_WRITE_GLOBS,
-      workspace: ws,
-    });
+    /* ───────── 9. Agent làm việc ─────────
+       NHỊP TIM PHẢI ĐẬP TRONG LÚC BƯỚC NÀY CHẠY, KHÔNG CHỈ KHI NÓ XONG.
+
+       Trước đây `heartbeat_at` chỉ được ghi ở ba mốc THƯA: dựng xong cây làm việc, executor trả
+       về, và sau mỗi cổng. Bước dưới đây — agent suy nghĩ và sửa tệp — là bước DÀI NHẤT và nằm
+       trọn giữa hai mốc. Từ lúc `agent-reaper` có lịch (ngưỡng 45 phút), một lượt chạy dài hơn
+       thế bị đóng GIỮA CHỪNG dù tiến trình vẫn sống, và hậu quả không dừng ở một dòng sai:
+
+        · Cổng "không hai lượt song song" mở ra ⇒ một lượt thứ hai khởi động trên cùng việc.
+        · Khi tiến trình thật xong, `finishTechAgentRun` thấy `status !== 'RUNNING'` và trả về
+          ngay (AGENTS.md mục 61 — đóng một ca đã đóng không được ghi gì thêm), nên commit SHA,
+          kết quả bốn cổng và danh sách tệp đổi BỊ VỨT.
+
+       Nhịp tim là lời khai "tiến trình còn sống", và một tiến trình đang chờ một lời gọi dài thì
+       VẪN SỐNG. Nên nó phải tự khai mỗi phút, chứ không phải im lặng rồi bị coi là đã chết.
+       `unref()` để nhịp này không bao giờ giữ tiến trình lại sau khi việc xong. */
+    const nhip = setInterval(() => {
+      void db.update(schema.techAgentRuns).set({ heartbeatAt: new Date() }).where(eq(schema.techAgentRuns.id, runId)).catch(() => undefined);
+    }, HEARTBEAT_EVERY_MS);
+    nhip.unref?.();
+    let outcome: Awaited<ReturnType<AgentExecutor["run"]>>;
+    try {
+      outcome = await opts.executor.run({
+        taskCode: task.code,
+        taskTitle: task.title,
+        taskDescription: task.description,
+        writeGlobs: DOCUMENTATION_WRITE_GLOBS,
+        workspace: ws,
+      });
+    } finally {
+      clearInterval(nhip);
+    }
     await db.update(schema.techAgentRuns).set({ heartbeatAt: new Date() }).where(eq(schema.techAgentRuns.id, runId));
 
     /* ───────── 10. KIỂM LẠI MỨC RỦI RO — việc có thể đã bị nâng trong lúc chạy ───────── */

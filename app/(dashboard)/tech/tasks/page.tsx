@@ -59,8 +59,20 @@ export default async function TechTasksPage({ searchParams }: { searchParams: Pr
         <b className="text-foreground">Phép chiếu Pull request:</b>{" "}
         {prSync ? (
           <>
-            {prSync.detail || "lượt đọc gần nhất không ghi tóm tắt"} · đọc {formatTimeAgo(prSync.at)}
-            {prSync.warning ? <span className="font-semibold text-warning"> · lượt đọc gần nhất có cảnh báo</span> : null}
+            {prSync.detail || "lượt chạy gần nhất không ghi tóm tắt"} · chạy {formatTimeAgo(prSync.ranAt)}
+            {/*
+              MỐC CHẠY VÀ MỐC ĐỌC ĐƯỢC LÀ HAI THỨ, và chúng lệch nhau đúng ở ca GitHub từ chối
+              trả lời (hết hạn mức, lỗi mạng). Gộp làm một thì sổ trông tươi nhất đúng lúc nó
+              chắc chắn đứng im — xem `lib/integrations/github/read-marker.ts`.
+            */}
+            {prSync.at ? (
+              prSync.at.getTime() < prSync.ranAt.getTime() - 60_000 ? (
+                <span className="font-semibold text-warning"> · nhưng lần ĐỌC ĐƯỢC gần nhất là {formatTimeAgo(prSync.at)} — lượt chạy sau đó không hỏi được GitHub</span>
+              ) : null
+            ) : (
+              <span className="font-semibold text-warning"> · chưa lượt nào ĐỌC ĐƯỢC dữ liệu từ GitHub</span>
+            )}
+            {prSync.warning ? <span className="font-semibold text-warning"> · lượt chạy gần nhất có cảnh báo</span> : null}
           </>
         ) : (
           <>chưa lượt đọc nào chạy — bốn cột PR trong bảng còn trống vì CHƯA BIẾT, không phải vì việc chưa có PR. Chạy job <code>github-pr-sync</code> ở trang Kết nối dữ liệu.</>

@@ -91,6 +91,17 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
     const until = dayKey(new Date());
     const since = dayKey(new Date(Date.now() - (days - 1) * 86_400_000));
     const [index, mapping] = await Promise.all([loadProductCodeIndex(), loadAdsMapping()]);
+    /*
+      VÒNG LẶP NẠP SỐ LIỆU CŨNG GHI THẲNG VÀO CỘT CÓ KHOÁ NGOẠI.
+
+      `reapplyAdsMapping()` đã được vá, nhưng `values.productId` dưới đây đến từ cùng một nguồn
+      (`resolveCampaign` → bảng ghép trong `settings`) và đi vào cùng một cột
+      `ad_spends.product_id → products.id`. Vá một đường mà để hở đường kia thì lỗi quay lại
+      nguyên vẹn, chỉ khác chỗ ném: một mã hàng chết làm hỏng lượt upsert và KẾT THÚC SỚM vòng
+      lặp của cả tài khoản đó — những dòng insight còn lại của tài khoản không bao giờ được ghi.
+    */
+    const maHangCoThat = new Set((await db.select({ id: schema.products.id }).from(schema.products)).map((p) => p.id));
+    const ghepTreo = new Map<string, string>();
     const accounts = await client.listAdAccounts();
     ctx.summary.detail = `${accounts.length} tài khoản · ${since} → ${until}`;
     await ctx.progress();
@@ -128,10 +139,25 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
             excluded: resolved.excluded,
             marketerId: resolved.marketerId,
           };
+          /*
+            MÃ HÀNG CHẾT ⇒ KHÔNG GHI NÓ, VÀ CŨNG KHÔNG XOÁ CÁI ĐANG CÓ.
+
+            Dòng MỚI vào đời với `product_id = NULL` (chưa quy kết — đúng sự thật, vì bảng ghép
+            đang trỏ vào hư không). Dòng ĐÃ CÓ thì giữ nguyên `product_id` cũ bằng cách trỏ lại
+            chính cột đó trong nhánh `DO UPDATE`: ghi `NULL` đè lên nó là lặng lẽ gỡ chi phí
+            quảng cáo khỏi một mã hàng và làm báo cáo lợi nhuận đổi số mà không ai được báo
+            (AGENTS.md mục 8.8).
+          */
+          const maTreo = values.productId && !maHangCoThat.has(values.productId) ? values.productId : null;
+          if (maTreo) ghepTreo.set(row.campaignId || values.campaign, maTreo);
+          const giaTri = maTreo ? { ...values, productId: null } : values;
+          const setKhiTrung = maTreo
+            ? { ...giaTri, productId: sql`${schema.adSpends.productId}`, updatedAt: new Date() }
+            : { ...giaTri, updatedAt: new Date() };
           const [r] = await db
             .insert(schema.adSpends)
-            .values(values)
-            .onConflictDoUpdate({ target: schema.adSpends.externalKey, set: { ...values, updatedAt: new Date() } })
+            .values(giaTri)
+            .onConflictDoUpdate({ target: schema.adSpends.externalKey, set: setKhiTrung })
             .returning({ createdAt: schema.adSpends.createdAt, updatedAt: schema.adSpends.updatedAt });
           if (r && r.updatedAt.getTime() - r.createdAt.getTime() < 2000) ctx.summary.imported += 1;
           else ctx.summary.updated += 1;
@@ -146,6 +172,20 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
       }
       await ctx.progress();
     }
+    /*
+      GHÉP TREO GẶP Ở VÒNG LẶP NẠP SỐ LIỆU PHẢI ĐƯỢC BÁO RIÊNG, TRƯỚC BƯỚC DỌN DẸP.
+
+      Nếu gộp nó vào khối `try` bên dưới thì một cú ném của `reapplyAdsMapping()` sẽ cuốn theo cả
+      danh sách này — và chỗ hỏng nằm ở vòng lặp nạp, nơi đã ghi dữ liệu xong, lại là chỗ biến
+      mất khỏi báo cáo.
+    */
+    const treoNap = [...ghepTreo].map(([campaignId, productId]) => ({ campaignId, campaign: campaignId, productId }));
+    if (treoNap.length) {
+      const ten = treoNap.slice(0, 5).map((d) => `${d.campaign} → ${d.productId}`);
+      ctx.summary.warning = `${treoNap.length} chiến dịch ghép vào mã hàng KHÔNG CÒN TỒN TẠI — dòng mới để trống mã hàng, dòng cũ GIỮ NGUYÊN: ${ten.join(" · ")}${treoNap.length > 5 ? " …" : ""}. Sửa ở trang Chi phí › Ghép chiến dịch.`;
+      for (const d of treoNap) ctx.log(`ghép treo (lúc nạp): ${d.campaignId} → mã hàng ${d.productId} không có trong sổ`);
+    }
+
     /*
       ÁP LẠI BẢNG GHÉP LÀ BƯỚC DỌN DẸP, KHÔNG PHẢI VIỆC CHÍNH — NÊN NÓ KHÔNG ĐƯỢC GIẾT LƯỢT CHẠY.
 
@@ -169,7 +209,9 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
       */
       if (reapplied.danglingProducts.length) {
         const ten = reapplied.danglingProducts.slice(0, 5).map((d) => `${d.campaign || d.campaignId} → ${d.productId}`);
-        ctx.summary.warning = `${reapplied.danglingProducts.length} chiến dịch ghép vào mã hàng KHÔNG CÒN TỒN TẠI — đã giữ nguyên dữ liệu cũ, chưa áp ghép: ${ten.join(" · ")}${reapplied.danglingProducts.length > 5 ? " …" : ""}. Sửa ở trang Chi phí › Ghép chiến dịch.`;
+        // GỘP VÀO, không ghi đè: cảnh báo của vòng lặp nạp ở trên nói về một chỗ hỏng khác.
+        const cauNay = `${reapplied.danglingProducts.length} chiến dịch ghép vào mã hàng KHÔNG CÒN TỒN TẠI — đã giữ nguyên dữ liệu cũ, chưa áp ghép: ${ten.join(" · ")}${reapplied.danglingProducts.length > 5 ? " …" : ""}. Sửa ở trang Chi phí › Ghép chiến dịch.`;
+        ctx.summary.warning = [ctx.summary.warning, cauNay].filter(Boolean).join(" · ");
         for (const d of reapplied.danglingProducts) ctx.log(`ghép treo: ${d.campaignId} → mã hàng ${d.productId} không có trong sổ`);
       }
       if (reapplied.errors.length) {

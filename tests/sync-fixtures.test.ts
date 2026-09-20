@@ -60,7 +60,7 @@ import { testWorkOs } from "./work-os.test";
 import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testTechPermissions, testTechRiskEngine } from "./tech-control-plane.test";
 import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aBarriers, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
-import { testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
+import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
 import { testPayrollPeriod } from "./payroll-period.test";
 import { testWorkforce } from "./workforce.test";
@@ -1879,6 +1879,7 @@ async function main() {
   testPrPureMappers();
   testSyncIncidentPure();
   testAdsMappingGuards();
+  testAdsIngestGuardsProductFk();
   testTechRiskEngine();
   testTechPermissions();
   testTechHealthParsing();

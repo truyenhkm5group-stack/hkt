@@ -14,7 +14,9 @@ import {
   techReviewStateFromReviews,
 } from "@/lib/constants/tech";
 import { __setGithubFetchForTests } from "@/lib/integrations/github/client";
-import { syncGithubPullRequests } from "@/lib/integrations/github/pull-requests";
+import { PR_DETAIL_BUDGET, syncGithubPullRequests } from "@/lib/integrations/github/pull-requests";
+import { lastGithubRead } from "@/lib/integrations/github/read-marker";
+import { setTechTaskStatus } from "@/lib/tech/service";
 import { watchSyncFailures } from "@/lib/tech/sync-incident-watch";
 import { createTechTask, type TechActor } from "@/lib/tech/service";
 
@@ -292,7 +294,74 @@ export async function testGithubPrSync() {
     "'PR đã gộp' KHÔNG phải 'việc đã xong' — việc còn phải lên production và được xác minh. Một job tự chuyển trạng thái là job tự đóng việc của người khác.",
   );
 
-  // ───────── 2.6 Chưa cấu hình kho ⇒ BỎ QUA có lý do, không phải lỗi ─────────
+  /*
+    ───────── 2.6 MỐC "ĐỌC ĐƯỢC THẬT" KHÔNG ĐƯỢC NHÍCH KHI GITHUB TỪ CHỐI TRẢ LỜI ─────────
+
+    Bản vá đầu tiên đọc độ tươi từ `sync_runs`: lượt `SUCCESS` hoặc `PARTIAL` thì coi là đã đọc.
+    Sai, và sai đúng ở ca cần đúng nhất — mọi nhánh BỎ QUA đều đặt `warning`, mà một lượt có
+    `warning` được ghi `PARTIAL`. Nên một lượt đọc được 0 dòng vẫn làm sổ trông MỚI: hết hạn mức
+    là lúc sổ CHẮC CHẮN đứng im, mà cũng là lúc nó trông tươi nhất.
+  */
+  const mocTruoc = await lastGithubRead("pulls");
+  assert.ok(mocTruoc, "lượt đọc thành công ở trên phải để lại mốc");
+  __setGithubFetchForTests((async () =>
+    new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+      status: 403,
+      headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(Math.round(Date.now() / 1000) + 900) },
+    })) as typeof fetch);
+  const hetHanMuc = await syncGithubPullRequests({});
+  assert.equal(hetHanMuc.skippedKind, "RATE_LIMITED");
+  const mocSau = await lastGithubRead("pulls");
+  assert.equal(
+    mocSau?.getTime(),
+    mocTruoc.getTime(),
+    "hết hạn mức ⇒ KHÔNG đọc được gì ⇒ mốc đọc PHẢI đứng yên. Nhích nó lên là làm sổ trông tươi nhất đúng lúc nó chắc chắn đứng im",
+  );
+
+  /*
+    ───────── 2.7 TRẦN LƯỢT GỌI: HOÃN, KHÔNG PHẢI CẮT BỎ ─────────
+
+    Mỗi PR gắn được việc tốn BA lượt gọi. Không có trần thì xấu nhất là 1 + 3×50 = 151 request mỗi
+    lượt chạy, tức 604/giờ ở nhịp 15 phút — trong khi đường gọi ẩn danh chỉ có 60/giờ, và hết hạn
+    mức thì CẢ `github-deployments` cũng chết theo.
+  */
+  const nhieu = Array.from({ length: PR_DETAIL_BUDGET + 3 }, (_, i) => ({ number: 400 + i, headRef: `ai/backend/prj-budget-${i}`, sha: `${i}`.padStart(40, "e") }));
+  for (const [i] of nhieu.entries()) {
+    const t = await createTechTask(
+      { title: `prj- việc trần ${i}`, taskType: "BUGFIX", module: "TECH", priority: "P2", source: "OWNER", branch: `ai/backend/prj-budget-${i}` },
+      MAY,
+    );
+    assert.ok("ok" in t);
+  }
+  const goiNhieu = fakeGithubPr(nhieu, {}, {});
+  const coTran = await syncGithubPullRequests({ limit: 60 });
+  assert.ok(coTran.deferred >= 3, `phải hoãn phần vượt trần, thực tế hoãn ${coTran.deferred}`);
+  assert.ok(goiNhieu.detail <= PR_DETAIL_BUDGET, `số lượt đọc chi tiết phải nằm dưới trần ${PR_DETAIL_BUDGET}, thực tế ${goiNhieu.detail}`);
+
+  /*
+    Lượt SAU phải đọc được những việc bị hoãn: thứ tự ưu tiên là "lâu chưa đọc nhất trước"
+    (`pr_synced_at` rỗng đứng đầu), nên cái trần là một phép XOAY VÒNG chứ không phải một phép
+    cắt bỏ. Không có tính chất này thì vài việc bị bỏ đói vĩnh viễn.
+  */
+  const goiLan2 = fakeGithubPr(nhieu, {}, {});
+  await syncGithubPullRequests({ limit: 60 });
+  assert.ok(goiLan2.detail > 0, "lượt sau phải đọc tiếp những việc bị hoãn, không được bỏ đói chúng");
+  const daDoc = await db.query.techTasks.findMany({ where: like(schema.techTasks.title, "prj- việc trần%"), columns: { prNumber: true, prSyncedAt: true } });
+  assert.ok(daDoc.filter((t) => t.prSyncedAt).length > PR_DETAIL_BUDGET, "sau hai lượt, số việc đã được đọc phải VƯỢT trần của một lượt — đó là bằng chứng nó xoay vòng");
+
+  /*
+    ───────── 2.8 VIỆC ĐÃ XONG VỚI PR ĐÃ GỘP THÌ THÔI ĐỌC LẠI ─────────
+    GitHub không đổi trạng thái của một PR đã gộp nữa, nên đọc lại chúng mỗi 15 phút là tiêu hạn
+    mức vào quá khứ — và chính nhóm này phình to nhất theo thời gian.
+  */
+  const xong = await setTechTaskStatus({ taskId, to: "DONE", note: "prj- đóng để kiểm cửa sổ đọc lại" }, MAY);
+  if ("ok" in xong) {
+    const goiSauKhiXong = fakeGithubPr([{ number: 101, headRef: nhanh, sha, state: "closed", merged: true }], {}, {});
+    await syncGithubPullRequests({ limit: 60 });
+    assert.equal(goiSauKhiXong.detail, 0, "việc DONE + PR MERGED không được đọc lại lần nào nữa");
+  }
+
+  // ───────── 2.9 Chưa cấu hình kho ⇒ BỎ QUA có lý do, không phải lỗi ─────────
   delete process.env.ERP_GITHUB_REPO;
   const bq = await syncGithubPullRequests({});
   assert.equal(bq.skippedKind, "NOT_CONFIGURED");

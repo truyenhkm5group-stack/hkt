@@ -4,6 +4,7 @@ import { techDeployStatusFromGithub, verifyDeployment, type TechDeployStatus, ty
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 import { runningVersion } from "@/lib/version";
 import { GithubError, deployWorkflowFile, githubConfig, listRecentDeployRuns, type GithubErrorKind, type GithubRun } from "@/lib/integrations/github/client";
+import { markGithubRead } from "@/lib/integrations/github/read-marker";
 
 /**
  * ═══════════ ĐỌC LƯỢT DEPLOY TỪ GITHUB VÀO SỔ QUAN SÁT ═══════════
@@ -117,6 +118,15 @@ export async function syncGithubDeployments(opts: { limit?: number } = {}): Prom
     if (e instanceof GithubError) return { ...base, skippedReason: e.message, skippedKind: e.kind };
     throw e;
   }
+  /*
+    MỐC ĐỌC GHI Ở ĐÂY, KHÔNG Ở CHỖ KHÁC.
+
+    Tới dòng này GitHub đã TRẢ VỀ dữ liệu — mọi nhánh bỏ qua (chưa cấu hình, hết hạn mức, lỗi
+    mạng, token sai) đều đã `return` phía trên. Đây là điểm duy nhất trong tệp mà câu "sổ vừa được
+    đọc" là đúng. `runs.length === 0` vẫn tính là ĐÃ ĐỌC: "workflow chưa có lượt chạy nào" là một
+    câu trả lời, khác hẳn "không hỏi được".
+  */
+  await markGithubRead("deployments");
   const out: GithubDeploySyncResult = { ...base, scanned: runs.length };
 
   for (const run of runs) {

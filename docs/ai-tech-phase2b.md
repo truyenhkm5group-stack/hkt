@@ -147,6 +147,24 @@ Liên quan tới mục 2.3: nếu không vá, bộ `tech-incident-watch` mới s
 là một câu trả lời sai. Chưa lượt đọc nào chạy thì màn hình nói rõ bốn cột PR trống vì **CHƯA
 BIẾT**, không phải vì việc chưa có PR.
 
+### 2.7 Năm lỗi do chính lượt này sinh ra, tìm thấy khi tự review
+
+Một lượt review độc lập chạy trên toàn diff tìm ra năm chỗ. Cả năm đều thật, và **cái nặng nhất
+là bản vá tự vô hiệu hoá chính nó**:
+
+| # | Lỗi | Vì sao nó nguy hiểm | Đã sửa bằng |
+|---|---|---|---|
+| 1 | Độ tươi sổ deploy đọc từ `sync_runs`, coi `PARTIAL` là "đã đọc" | Mọi nhánh **bỏ qua** (hết hạn mức, lỗi mạng, token sai) đều đặt `warning` ⇒ lượt ghi `PARTIAL`. Nên một lượt **đọc được 0 dòng** vẫn làm sổ trông MỚI: sổ trông tươi nhất đúng lúc nó **chắc chắn** đứng im — đúng báo động giả mục 2.4 sinh ra để chặn | `lib/integrations/github/read-marker.ts`: mốc do **chính lượt đọc** ghi, sau khi GitHub đã trả dữ liệu. Không suy từ `status`, không bóc tách `detail` |
+| 2 | `agent-reaper` đóng nhầm lượt chạy CÒN SỐNG | `heartbeat_at` chỉ ghi ở ba mốc thưa; bước agent suy nghĩ + sửa tệp nằm trọn giữa hai mốc và dễ vượt 45 phút. Bị đóng giữa chừng thì cổng chống song song **mở ra**, và khi tiến trình thật xong `finishTechAgentRun` thấy `status ≠ RUNNING` nên **vứt** commit SHA, kết quả bốn cổng và danh sách tệp đổi | Nhịp tim tự đập **mỗi phút** trong lúc bước dài chạy (`setInterval` + `unref`, dọn trong `finally`). Tỷ lệ 1:45 — phải lỡ 45 nhịp liên tiếp mới bị coi là chết |
+| 3 | `github-pr-sync` không có trần lượt gọi | Xấu nhất 1 + 3×50 = **151 request/lượt** = 604/giờ ở nhịp 15 phút, trong khi đường gọi ẩn danh chỉ có **60/giờ**. Hết hạn mức thì `github-deployments` chết theo | Trần `PR_DETAIL_BUDGET = 12` PR/lượt (≤ 37 request). Việc quá trần **hoãn**, không cắt: thứ tự là *lâu chưa đọc nhất trước* (`pr_synced_at` rỗng đứng đầu) nên nó **xoay vòng** |
+| 4 | Vòng lặp nạp của `facebook-ads` vẫn ghi thẳng vào cột có khoá ngoại | Vá `reapplyAdsMapping` mà để hở đường kia thì lỗi quay lại nguyên vẹn — và ở đây nó còn **kết thúc sớm vòng lặp của cả tài khoản**, nên các dòng insight còn lại không bao giờ được ghi | Kiểm mã hàng trước khi ghi. Dòng **mới** để `product_id = NULL`; dòng **đã có** giữ nguyên bằng cách trỏ lại chính cột đó trong nhánh `DO UPDATE` |
+| 5 | `unmatchedTasks` được in là "việc chưa mở PR" | Một PR **đã gộp từ lâu** cũng rơi khỏi cửa sổ 50 PR gần nhất ⇒ câu chữ nói **ngược** sự thật với đúng những việc đã xong | Câu chữ nói đúng chừng nó biết: *không thấy PR trong cửa sổ này*. Và việc `DONE` + PR đã `MERGED`/`CLOSED` không còn được đọc lại (GitHub không đổi trạng thái PR đã gộp nữa) |
+
+Mỗi lỗi có một bài kiểm khoá lại: mốc đọc **không được nhích** khi GitHub trả 403 hết hạn mức ·
+trần hoãn rồi lượt sau đọc tiếp (chứng minh bằng việc số việc đã đọc **vượt** trần của một lượt) ·
+việc `DONE` + PR `MERGED` tốn **0** lượt gọi · quét mã nguồn buộc vòng lặp nạp kiểm khoá ngoại và
+buộc cảnh báo của nó nằm **ngoài** khối `try` của bước dọn dẹp.
+
 ---
 
 ## 3. QUYẾT ĐỊNH CẦN CHỦ SHOP — chỗ đứng của runner và sổ

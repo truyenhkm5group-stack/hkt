@@ -120,6 +120,40 @@ export async function testAdsMappingDangling() {
 }
 
 /**
+ * ═══════ VÒNG LẶP NẠP SỐ LIỆU CŨNG GHI VÀO ĐÚNG CỘT ẤY ═══════
+ *
+ * Phát hiện lúc review. `reapplyAdsMapping()` đã vá, nhưng `syncFacebookAds` còn một đường ghi
+ * thứ hai: `values.productId` trong vòng lặp upsert, cùng nguồn (`resolveCampaign` → bảng ghép
+ * trong `settings`) và cùng cột (`ad_spends.product_id → products.id`). Vá một đường mà để hở
+ * đường kia thì lỗi quay lại nguyên vẹn, chỉ khác chỗ ném — và ở đây nó còn kết thúc sớm vòng
+ * lặp của cả tài khoản, nên những dòng insight còn lại không bao giờ được ghi.
+ *
+ * Quét mã nguồn chứ không chạy job: chạy `syncFacebookAds` đòi một client Facebook thật.
+ */
+export function testAdsIngestGuardsProductFk() {
+  const src = readFileSync("lib/integrations/facebook/sync.ts", "utf8");
+  const viTri = src.indexOf(".onConflictDoUpdate({ target: schema.adSpends.externalKey");
+  assert.ok(viTri > 0, "vòng lặp nạp phải còn upsert theo external_key");
+  const truoc = src.slice(0, viTri);
+  assert.ok(truoc.includes("maHangCoThat"), "vòng lặp nạp phải kiểm mã hàng có thật TRƯỚC khi ghi vào cột có khoá ngoại");
+  assert.ok(
+    /productId:\s*sql`/.test(src),
+    "nhánh DO UPDATE phải trỏ lại CHÍNH cột `product_id` khi gặp mã treo — ghi NULL đè lên nó là lặng lẽ gỡ chi phí quảng cáo khỏi một mã hàng (AGENTS.md mục 8.8)",
+  );
+
+  /*
+    Cảnh báo của vòng lặp NẠP phải nằm NGOÀI khối `try` của bước dọn dẹp. Gộp vào trong thì một
+    cú ném của `reapplyAdsMapping()` cuốn theo cả danh sách ấy — và chỗ hỏng nằm ở vòng lặp nạp,
+    nơi đã ghi dữ liệu xong, lại là chỗ biến mất khỏi báo cáo.
+  */
+  const baoTreoNap = src.indexOf("const treoNap =");
+  const moTry = src.indexOf("    try {\n      const reapplied = await reapplyAdsMapping()");
+  assert.ok(baoTreoNap > 0 && moTry > 0 && baoTreoNap < moTry, "cảnh báo ghép treo của vòng lặp nạp phải được phát TRƯỚC, ngoài khối try của bước dọn dẹp");
+
+  console.log("✓ Đường ghi thứ hai (vòng lặp nạp) cũng kiểm khoá ngoại, và cảnh báo của nó không bị cú ném của bước dọn dẹp cuốn đi");
+}
+
+/**
  * ═══════ HAI HÀNG RÀO, VÀ CHÚNG PHẢI CÙNG TỒN TẠI ═══════
  *
  * Hàng rào 1 (chạy được, kiểm ở trên): `reapplyAdsMapping` bỏ qua mã hàng không tồn tại.

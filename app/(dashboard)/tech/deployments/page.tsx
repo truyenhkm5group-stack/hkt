@@ -11,7 +11,7 @@ import { DEPLOY_LEDGER_STALE_MINUTES, TECH_DEPLOY_SORTABLE, TECH_VERIFICATION_HI
 import { githubConfig } from "@/lib/integrations/github/client";
 import { formatDateTime, formatNumber, formatTimeAgo } from "@/lib/format";
 import { getTechSystemHealth } from "@/lib/queries/tech-health";
-import { lastGithubDeploySyncAt, lastSuccessfulDeployment, listTechDeployments, recentTechDeployments, techDeploymentFacets } from "@/lib/queries/tech-ops";
+import { lastGithubRead, lastSuccessfulDeployment, listTechDeployments, recentTechDeployments, techDeploymentFacets } from "@/lib/queries/tech-ops";
 import { commitMatches } from "@/lib/tech/health-parse";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 
@@ -28,7 +28,7 @@ export default async function TechDeploymentsPage({ searchParams }: { searchPara
     getTechSystemHealth(),
     lastSuccessfulDeployment(),
     recentTechDeployments(10),
-    lastGithubDeploySyncAt(),
+    lastGithubRead("deployments"),
   ]);
   const gh = githubConfig();
 
