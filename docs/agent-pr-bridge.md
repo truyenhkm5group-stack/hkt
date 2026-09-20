@@ -148,3 +148,65 @@ không sửa gốc — nhưng cũng đủ để merge cầu nối.
 2. `GET /pulls/N` → `user.login` phải là **`erp-agent-vnx[bot]`**, `user.type` = `Bot`.
 3. **Đối chứng âm:** không PR mới nào của phiên còn mang `truyenhkm5group-stack`.
 4. Chỉ khi cả ba đạt mới coi phần danh tính là xong.
+
+---
+
+# PHỤ LỤC · 20/09/2026 — ENVIRONMENT PHẢI PHỦ **MỌI** NGƯỜI DÙNG, KHÔNG CHỈ CẦU NỐI ĐẦU TIÊN
+
+Bản gốc của tài liệu này chuyển ba secret vào Environment `agent-identity` và khai `environment:`
+ở **một** workflow. Điều đó đúng, và chưa đủ.
+
+## Sự việc — đo thật
+
+Sau khi ba secret dọn về Environment và bản cùng tên ở mức kho bị xoá, lượt chạy đầu tiên của một
+workflow **khác** đọc cùng ba secret đã hỏng:
+
+```
+run 35482454679 · agent-update-pr.yml
+env:
+  ERP_AGENT_GITHUB_APP_ID:            ← rỗng
+  ERP_AGENT_GITHUB_INSTALLATION_ID:   ← rỗng
+  ERP_AGENT_GITHUB_PRIVATE_KEY:       ← rỗng
+  GITHUB_TOKEN: ***                   ← có giá trị thì GitHub in ***
+✗ Chưa có ERP_AGENT_GITHUB_APP_ID, ERP_AGENT_GITHUB_INSTALLATION_ID, ERP_AGENT_GITHUB_PRIVATE_KEY
+```
+
+`GITHUB_TOKEN` in `***` chứng minh cơ chế che vẫn chạy — nên ba dòng rỗng kia là **thật sự không
+có giá trị**, không phải bị che. Chạy lại lượt thứ hai: y hệt.
+
+Thông điệp lỗi **đúng ngữ pháp và sai địa chỉ**: nó nói "chưa có Secret", nên người đọc đi thêm lại
+Repository secret — tức **dựng lại đúng cái bản trùng tên mà Environment sinh ra để xoá**. Suýt nữa
+thì bản vá cho một lỗ hổng lại mở lại chính lỗ hổng ấy.
+
+## Luật
+
+**Mọi** job chạm tới `ERP_AGENT_GITHUB_*` phải khai `environment: agent-identity`. Bốn job hôm nay:
+
+| Workflow | Job |
+|---|---|
+| `agent-open-pr.yml` | `open` |
+| `agent-update-pr.yml` | `update` |
+| `agent-identity-proof.yml` | `proof` |
+| `ops-vps.yml` | `agent-env` |
+
+`tests/agent-pr-bridge.test.ts::testEnvironmentOnlyAgentSecrets` quét **toàn bộ** `.github/workflows/`
+và khoá bất biến ấy — không liệt kê bốn cái tên, vì liệt kê là khoá lại đúng lần hỏng đã xảy ra
+còn workflow thứ năm vẫn rơi vào y hệt cái bẫy.
+
+## Và một chiều ngược lại, dễ quên hơn
+
+`apply-agent-env` từng là một nhánh `case` trong job `ops` của `ops-vps.yml`. Gắn
+`environment: agent-identity` cho job ấy sẽ bắt **~60 thao tác VPS** — `status`, `logs`,
+`db-query`, `verify` — đi qua chính sách nhánh của một Environment dựng cho ba secret **chúng
+không hề dùng**.
+
+Nên `apply-agent-env` tách thành **job riêng** `agent-env`, và chỉ job đó mang Environment. Job
+`ops` khai `if: inputs.action != 'apply-agent-env'`; job `agent-env` khai điều ngược lại. Bài kiểm
+khẳng định cả hai chiều: job `agent-env` **phải** có Environment, job `ops` **không được** có.
+
+Job mới cầm **đúng** ổ khoá `/var/lock/erp-lifecycle.lock` ở chế độ **độc quyền** như mọi thao tác
+GHI — nó ghi `.env` rồi dựng lại container, nên chạy song song với deploy là đúng thứ `flock` sinh
+ra để chặn.
+
+> **Hàng rào đặt sai chỗ là hàng rào người ta sẽ tìm cách đi vòng.** Một Environment bảo vệ ba
+> secret không được phép trở thành điều kiện của những thao tác không liên quan tới ba secret ấy.
