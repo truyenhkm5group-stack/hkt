@@ -461,7 +461,22 @@ export async function testGithubPrSync() {
 /* ═════════════════ 3 · JOB HỎNG LIÊN TIẾP → SỰ CỐ ═════════════════ */
 
 export function testSyncIncidentPure() {
-  const t = (phut: number) => new Date(Date.now() - phut * 60_000);
+  /*
+    MỘT MỐC "BÂY GIỜ" DUY NHẤT CHO CẢ BÀI.
+
+    Bản đầu viết `t = (phut) => new Date(Date.now() - phut * 60_000)` và gọi `t(60)` HAI lần: một
+    lần dựng dữ liệu, một lần trong khẳng định. Giữa hai lần ấy `Date.now()` nhích — nên bài kiểm
+    XANH khi cả hai rơi vào cùng một mili giây và ĐỎ khi không.
+
+    ĐÃ ĐỎ THẬT ở CI ngày 20/09/2026 (run 35519181971) trong khi máy người viết xanh: CI chậm hơn,
+    nên nó rơi vào phía bên kia của ranh giới mili giây thường xuyên hơn. Đúng lớp lỗi AGENTS.md
+    mục 50 và 65 — bài kiểm đo ĐỒNG HỒ CỦA MÁY, không đo mã nguồn.
+
+    Ghim `BAY_GIO` một lần thì mọi mốc dẫn xuất từ nó là hằng số trong suốt bài, và hai lần gọi
+    `t(60)` chắc chắn ra cùng một giá trị.
+  */
+  const BAY_GIO = Date.now();
+  const t = (phut: number) => new Date(BAY_GIO - phut * 60_000);
 
   // ───────── 3.1 Một lượt hỏng KHÔNG phải một sự cố ─────────
   const motLan = classifySyncJobHealth([{ status: "FAILED", startedAt: t(5) }, { status: "SUCCESS", startedAt: t(65) }]);
@@ -524,7 +539,9 @@ export async function testSyncIncidentWatch() {
   const job = "prj-job-hong";
   const source = "PANCAKE";
   const title = syncIncidentTitle(source, job);
-  const t = (phut: number) => new Date(Date.now() - phut * 60_000);
+  /* Ghim một mốc "bây giờ" — cùng lý do với `testSyncIncidentPure` ở trên. */
+  const BAY_GIO = Date.now();
+  const t = (phut: number) => new Date(BAY_GIO - phut * 60_000);
 
   await db.delete(schema.techIncidents).where(eq(schema.techIncidents.title, title));
   await db.delete(schema.syncRuns).where(eq(schema.syncRuns.job, job));

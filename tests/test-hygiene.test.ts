@@ -72,6 +72,46 @@ export function testDuongDanChuanHoa() {
   );
 }
 
+/* ═════════════ 2b · KHÔNG SO BẰNG VỚI MỘT MỐC ĐỌC LẠI ĐỒNG HỒ ═════════════ */
+
+export function testKhongSoBangMocDocLaiDongHo() {
+  /*
+    ĐÃ ĐỎ THẬT Ở CI (20/09/2026, run 35519181971) trong khi máy người viết xanh.
+
+        const t = (phut: number) => new Date(Date.now() - phut * 60_000);
+        …
+        assert.equal(x.firstFailureAt?.getTime(), t(60).getTime());
+
+    `t(60)` được gọi HAI lần — một lần dựng dữ liệu, một lần trong khẳng định — và `Date.now()`
+    nhích giữa hai lần. Bài kiểm XANH khi cả hai rơi cùng một mili giây, ĐỎ khi không. CI chậm hơn
+    nên nó rơi vào phía bên kia thường xuyên hơn.
+
+    ─── LUẬT HẸP, KHÔNG PHẢI LUẬT RỘNG ───
+
+    Kho này có hơn mười lăm tệp định nghĩa helper kiểu `(h) => new Date(Date.now() - h * …)`, và
+    ĐA SỐ VÔ HẠI: chúng chỉ GIEO dữ liệu, mỗi mốc gọi đúng một lần. Cấm cả lớp ấy là một cuộc
+    refactor lớn để đổi lấy rất ít.
+
+    Chỗ THẬT SỰ cắn là khi cùng một helper vừa gieo vừa được so BẰNG CHÍNH XÁC. Bộ gác này chỉ hỏi
+    đúng câu đó, nên nó gần như không kêu nhầm — và nó KHÔNG đụng tới những phép kiểm tất định kiểu
+    `assert.equal(f(k, moc).getTime(), f(k, moc).getTime())`, nơi `moc` là một giá trị đã ghim.
+  */
+  const pham: string[] = [];
+  for (const tep of tepKiemThu()) {
+    const ma = boChuThich(readFileSync(path.join(goc, tep), "utf8"));
+    const ten = [...ma.matchAll(/const\s+(\w+)\s*=\s*\([^)]*\)\s*=>\s*new Date\(Date\.now\(\)/g)].map((m) => m[1]);
+    for (const n of ten) {
+      const re = new RegExp(String.raw`assert\.(?:equal|deepEqual)\([^\n]*\b` + n + String.raw`\([^)]*\)\.getTime\(\)`, "g");
+      for (const m of ma.matchAll(re)) pham.push(`${tep}: ${m[0].trim().slice(0, 100)}`);
+    }
+  }
+  assert.deepEqual(
+    pham,
+    [],
+    "so BẰNG với một mốc dựng từ `Date.now()` ĐỌC LẠI lúc khẳng định là một flake: ghim một mốc `BAY_GIO` rồi dẫn xuất mọi mốc từ nó (AGENTS.md mục 50 · 65)",
+  );
+}
+
 /* ═════════════ 3 · KHÔNG RẼ NHÁNH KHẲNG ĐỊNH THEO MÔI TRƯỜNG ═════════════ */
 
 /** Miễn trừ — mỗi dòng nói RÕ vì sao đọc môi trường ở đó là đo MÃ NGUỒN chứ không đo máy. */
@@ -212,11 +252,12 @@ export function testKhongDoiHangRaoLayMauXanh() {
 export function testTestHygiene() {
   testKetThucDongGhimLF();
   testDuongDanChuanHoa();
+  testKhongSoBangMocDocLaiDongHo();
   testKhongReNhanhTheoMoiTruong();
   testCiChayHaiCheDo();
   testThieuCongCuNoiThang();
   testKhongDoiHangRaoLayMauXanh();
   console.log(
-    "✓ Vệ sinh bài kiểm (mục 65): LF ghim ở tầng kho · đường dẫn chuẩn hoá · mọi bài đọc môi trường đều có lý do · CI chạy 2 chế độ bằng token GIẢ · thiếu công cụ thì nói CHƯA ĐO ĐƯỢC chứ không ✓ · hàng rào agent không bị đổi để lấy màu xanh",
+    "✓ Vệ sinh bài kiểm (mục 65): LF ghim ở tầng kho · đường dẫn chuẩn hoá · không so BẰNG với mốc đọc lại đồng hồ · mọi bài đọc môi trường đều có lý do · CI chạy 2 chế độ bằng token GIẢ · thiếu công cụ thì nói CHƯA ĐO ĐƯỢC chứ không ✓ · hàng rào agent không bị đổi để lấy màu xanh",
   );
 }
