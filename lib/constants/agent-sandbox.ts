@@ -1,3 +1,4 @@
+import { NEVER_WRITE } from "@/lib/constants/agent-scopes";
 /**
  * ═══════════ HÀNG RÀO CỦA AGENT — BẰNG MÃ NGUỒN, KHÔNG BẰNG LỜI DẶN ═══════════
  *
@@ -189,6 +190,15 @@ export function checkWritePath(raw: string, writeGlobs: readonly string[] = DOCU
   const p = normalise(raw);
   if (!p) return { allowed: false, reason: `Đường dẫn \`${raw}\` ra ngoài cây làm việc.` };
   if (matches(p, NEVER_READ)) return { allowed: false, reason: `\`${p}\` nằm trong vùng không bao giờ chạm.` };
+  /*
+    HÀNG RÀO TUYỆT ĐỐI — KIỂM TRƯỚC SỔ VAI.
+
+    `NEVER_WRITE` không đọc `writeGlobs`, nên một dòng khai sai ở sổ phạm vi theo vai cũng không
+    mở được nó. Đó là điểm của việc tách hai tầng: hàng rào không được phụ thuộc vào việc cấu
+    hình có đúng hay không. Trong danh sách có CHÍNH tệp này và sổ phạm vi — một agent sửa được
+    hàng rào của mình thì hàng rào chỉ còn là một lời đề nghị.
+  */
+  if (matches(p, NEVER_WRITE)) return { allowed: false, reason: `\`${p}\` nằm trong vùng KHÔNG VAI NÀO được ghi (đường ghi dữ liệu, quyền, lược đồ, migration, workflow, hoặc chính hàng rào này).` };
   if (!matches(p, writeGlobs)) return { allowed: false, reason: `Agent này chỉ được ghi trong ${writeGlobs.join(", ")} — \`${p}\` nằm ngoài.` };
   return { allowed: true, path: p };
 }

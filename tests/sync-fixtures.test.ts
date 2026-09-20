@@ -63,6 +63,7 @@ import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testS
 import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, testAgentIngestSourceGuards } from "./agent-run-ingest.test";
 import { testTestHygiene } from "./test-hygiene.test";
 import { cleanupAiHealthFixtures, testAiHealthKhongDemLuotTuKiem, testAiHealthSourceGuards } from "./ai-health-selftest.test";
+import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
 import { testPayrollPeriod } from "./payroll-period.test";
@@ -1900,6 +1901,10 @@ async function main() {
   testAgentIngestSourceGuards();
   testTestHygiene();
   testAiHealthSourceGuards();
+  testPhamViTheoVai();
+  testHangRaoTuyetDoi();
+  testHangRaoBaiKiem();
+  testPhamViSourceGuards();
   testAdsMappingGuards();
   testAdsIngestGuardsProductFk();
   testTechRiskEngine();

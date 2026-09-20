@@ -22,6 +22,7 @@ import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { kiemHangRaoBaiKiem, moTaViPham } from "@/lib/constants/agent-test-guard";
 import { ensureMigrated } from "@/db/migrate";
 
 /** Phạm vi ghi của vai tài liệu trong lượt kiểm chứng này. Đúng một tệp. */
@@ -120,6 +121,30 @@ async function main() {
   console.log("═══════════════════════════════════════════════");
 
   const hong: string[] = [];
+  /*
+    ───────── HÀNG RÀO CHỐNG LÀM YẾU BỘ KIỂM THỬ ─────────
+
+    Nấc 2 cho vai QA ghi `tests/`. Mục tiêu của runner là "bốn cổng xanh"; cách ĐẮT là sửa mã cho
+    đúng, cách RẺ là xoá khẳng định đang đỏ. Một bộ tối ưu sẽ tìm ra cách rẻ — không phải vì nó
+    gian, mà vì ta định nghĩa mục tiêu như thế rồi quên khoá lối tắt.
+
+    Đọc nội dung TRƯỚC và SAU từ chính kho git (`git show <sha>:<path>`), không hỏi agent.
+  */
+  const tepTest = tepTheoGit.filter((f) => f.startsWith("tests/"));
+  if (tepTest.length) {
+    const doc = (sha: string, f: string): string | null => {
+      try {
+        return execFileSync("git", ["show", `${sha}:${f}`], { encoding: "utf8" });
+      } catch {
+        return null; // không có ở phía ấy = tệp mới (hoặc đã xoá)
+      }
+    };
+    const dich = run.resultCommit || run.branch;
+    const ketLuan = kiemHangRaoBaiKiem(tepTest.map((f) => ({ path: f, truoc: doc(run.baseCommit, f), sau: doc(dich, f) })));
+    console.log(`hàng rào test ${moTaViPham(ketLuan)}`);
+    if (!ketLuan.ok) hong.push(moTaViPham(ketLuan));
+  }
+
   if (ngoaiPhamVi.length) hong.push(`agent đổi ${ngoaiPhamVi.length} tệp NGOÀI phạm vi: ${ngoaiPhamVi.join(", ")}`);
   if (lechSoVoiSo) hong.push(`sổ và git không khớp — sổ ghi [${tepTheoSo.join(", ")}], git thấy [${tepTheoGit.join(", ")}]`);
   if (run.status !== "SUCCEEDED") hong.push(`lượt chạy kết thúc ở ${run.status}, không phải SUCCEEDED`);
