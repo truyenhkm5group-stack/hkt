@@ -68,6 +68,7 @@ import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.tes
 import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
+import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
@@ -1867,6 +1868,8 @@ async function main() {
   await testAgentTaskRead();
   await cleanupAgentTaskReadFixtures();
   /* NẤC 4 — đẩy trạng thái việc theo bằng chứng GitHub. Tự dọn bằng tiền tố `ADV-`. */
+  await testGuiLaiKhongDamKhoa();
+  await cleanupShipmentPickFixtures();
   await testTaskAdvanceDb();
   await cleanupTaskAdvanceFixtures();
   /*
@@ -1937,6 +1940,7 @@ async function main() {
   testDispatchPure();
   testDispatchSourceGuards();
   testAgentTaskReadGuards();
+  testChonVanDonPure();
   testTaskAdvancePure();
   testTaskAdvanceGuards();
   testAdsMappingGuards();

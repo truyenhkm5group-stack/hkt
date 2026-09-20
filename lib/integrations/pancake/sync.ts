@@ -1,4 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { chonVanDonDeGhep } from "@/lib/constants/shipment-pick";
 import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { getDb, schema, type Db } from "@/db";
 import type { CodStatus, Shipment, ShipmentStage } from "@/db/schema";
@@ -191,7 +192,15 @@ export async function upsertOrder(mapped: MappedOrder, options: { force?: boolea
   const existing = await db.query.orders.findFirst({
     where: eq(schema.orders.id, mapped.id),
     columns: { id: true, status: true, updatedAtExternal: true },
-    with: { shipment: true },
+    /*
+      NẠP MỌI DÒNG VẬN ĐƠN, KHÔNG NẠP "MỘT DÒNG".
+
+      `orders.shipment` khai `one(...)` nhưng `shipments.order_id` KHÔNG duy nhất — một đơn gửi lại
+      có nhiều dòng, và chiều hoàn cũng là dòng riêng. Drizzle khi ấy trả về một dòng BẤT KỲ, không
+      `ORDER BY` nào. Đo 21/09/2026: 23/492 đơn hỏng mỗi lượt đối chiếu vì dòng nạp về là lần gửi 1
+      trong khi Pancake đang nói về lần gửi 2 — xem `lib/constants/shipment-pick.ts`.
+    */
+    with: { attempts: true },
   });
   if (
     existing &&
@@ -323,7 +332,7 @@ export async function upsertOrder(mapped: MappedOrder, options: { force?: boolea
     }
   });
 
-  await upsertShipmentFromOrder(db, mapped, existing?.shipment ?? null);
+  await upsertShipmentFromOrder(db, mapped, existing ? chonVanDonDeGhep(existing.attempts, { vtpOrderNumber: mapped.shipment?.vtpOrderNumber ?? null, trackingCode: mapped.shipment?.trackingCode ?? null }) : null);
   publish({ type: "order", orderId: mapped.id, action: existing ? "updated" : "created" });
   return existing ? "updated" : "created";
 }
@@ -406,6 +415,25 @@ async function upsertShipmentFromOrder(db: Db, mapped: MappedOrder, existing: Sh
     existing &&
     (!s.vtpOrderNumber || !existing.vtpOrderNumber || existing.vtpOrderNumber === s.vtpOrderNumber) &&
     (!s.trackingCode || !existing.trackingCode || existing.trackingCode === s.trackingCode);
+
+  /*
+    MÃ VẬN ĐƠN ĐÃ THUỘC VỀ MỘT ĐƠN KHÁC ⇒ NÓI RA, ĐỪNG ĐỂ KHOÁ DUY NHẤT TRẢ LỜI HỘ.
+
+    Sau khi `chonVanDonDeGhep` chọn đúng dòng, va chạm trong CÙNG một đơn không còn. Nhưng vẫn còn
+    một tình huống thật: Pancake báo một mã đang nằm ở đơn KHÁC. Đó là mâu thuẫn dữ liệu cần người
+    xem, không phải thứ mã nguồn được tự quyết — và nó phải nói được ĐƠN NÀO đang giữ mã ấy, thay
+    vì ném ra một câu 23505 để người đọc tự đi tra (AGENTS.md mục 55).
+  */
+  const maMoi = s.vtpOrderNumber?.trim() || null;
+  if (maMoi && (!existing || !cungVanDon)) {
+    const chuKhac = await db.query.shipments.findFirst({
+      where: and(eq(schema.shipments.vtpOrderNumber, maMoi), sql`${schema.shipments.orderId} is not null`, sql`${schema.shipments.orderId} <> ${mapped.id}`),
+      columns: { orderId: true, attemptNo: true },
+    });
+    if (chuKhac) {
+      throw new Error(`Mã vận đơn ${maMoi} Pancake báo cho đơn ${mapped.id} đang thuộc đơn ${chuKhac.orderId} (lần gửi ${chuKhac.attemptNo ?? 1}). Một mã vận đơn chỉ thuộc một đơn — cần người đối chiếu, ERP không tự chuyển chủ.`);
+    }
+  }
 
   if (existing && !cungVanDon) {
     // Lần gửi mới: giữ nguyên dòng cũ, thêm dòng mới với số thứ tự kế tiếp.
