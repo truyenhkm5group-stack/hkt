@@ -406,13 +406,53 @@ export async function testGithubPrSync() {
   await syncGithubPullRequests({ limit: 60 });
   assert.equal(goiSauKhiXong.detail, 0, "việc DONE + PR MERGED không được đọc lại lần nào nữa — GitHub không đổi trạng thái một PR đã gộp");
 
-  // ───────── 2.9 Chưa cấu hình kho ⇒ BỎ QUA có lý do, không phải lỗi ─────────
+  /*
+    ───────── 2.9 THAM SỐ TAY KHÔNG VƯỢT ĐƯỢC TRẦN CỦA CHẾ ĐỘ ẨN DANH ─────────
+
+    Không có bài này thì xoá cái kẹp đi `npm test` vẫn xanh, và cú nổ 151 request quay lại trong
+    im lặng. Bài dựng chế độ gọi bằng chính biến môi trường mà `token()` đọc — cả BA biến, vì nó
+    lùi qua từng cái một.
+  */
+  const tokenCu = { erp: process.env.ERP_GITHUB_TOKEN, gh: process.env.GITHUB_TOKEN, gh2: process.env.GH_TOKEN };
+  delete process.env.ERP_GITHUB_TOKEN;
+  delete process.env.GITHUB_TOKEN;
+  delete process.env.GH_TOKEN;
+  assert.equal(githubConfig().auth, "PUBLIC", "xoá đủ ba biến thì phải ra chế độ ẩn danh");
+  fakeGithubPr(nhieu, {}, {});
+  const doiTran = await syncGithubPullRequests({ limit: 60, budget: 50 });
+  assert.equal(
+    doiTran.budget,
+    PR_DETAIL_BUDGET_ANONYMOUS,
+    "ẩn danh: `?budget=50` phải bị KẸP về trần ẩn danh — không kẹp thì một cú bấm tay bắn 151 request, thổi bay hạn mức 60/giờ theo IP và kéo `github-deployments` chết theo",
+  );
+  process.env.ERP_GITHUB_TOKEN = "test-token-not-real";
+  assert.equal(githubConfig().auth, "TOKEN");
+  fakeGithubPr(nhieu, {}, {});
+  const coToken = await syncGithubPullRequests({ limit: 60, budget: PR_DETAIL_BUDGET + 5 });
+  assert.equal(coToken.budget, PR_DETAIL_BUDGET + 5, "có token thì 5.000 request/giờ chịu được — để người bấm tự quyết, không kẹp");
+  if (tokenCu.erp === undefined) delete process.env.ERP_GITHUB_TOKEN;
+  else process.env.ERP_GITHUB_TOKEN = tokenCu.erp;
+  if (tokenCu.gh !== undefined) process.env.GITHUB_TOKEN = tokenCu.gh;
+  if (tokenCu.gh2 !== undefined) process.env.GH_TOKEN = tokenCu.gh2;
+
+  /*
+    ───────── 2.10 Chưa cấu hình kho ⇒ BỎ QUA có lý do, không phải lỗi ─────────
+
+    XOÁ CẢ HAI BIẾN, VÀ TRẢ LẠI CẢ HAI. `repo()` lùi từ `ERP_GITHUB_REPO` sang
+    `GITHUB_REPOSITORY`, mà GitHub Actions LUÔN đặt biến sau. Bản đầu chỉ xoá biến trước, nên bài
+    xanh hoàn toàn nhờ việc một bài KHÁC chạy trước đó đã xoá `GITHUB_REPOSITORY` và không trả
+    lại. Chạy riêng bài này, hoặc đảo thứ tự bộ kiểm thử, là nó đỏ — đúng loại lỗi cả ba vòng
+    review vừa đi dọn.
+  */
+  const repoCu = { erp: process.env.ERP_GITHUB_REPO, actions: process.env.GITHUB_REPOSITORY };
   delete process.env.ERP_GITHUB_REPO;
+  delete process.env.GITHUB_REPOSITORY;
   const bq = await syncGithubPullRequests({});
   assert.equal(bq.skippedKind, "NOT_CONFIGURED");
   assert.equal(bq.matched, 0);
   assert.ok(bq.skippedReason && bq.skippedReason.length > 20, "bỏ qua thì phải nói THIẾU ĐÚNG CÁI GÌ");
-  process.env.ERP_GITHUB_REPO = "owner/repo";
+  process.env.ERP_GITHUB_REPO = repoCu.erp ?? "owner/repo";
+  if (repoCu.actions !== undefined) process.env.GITHUB_REPOSITORY = repoCu.actions;
 
   __setGithubFetchForTests(null);
   console.log(`✓ Chép PR về việc Tech: nối bằng khoá (1/3 PR), ${lan1.unmatchedOpenPulls} PR mở không ai nhận được đếm, updated_at giữ nguyên`);

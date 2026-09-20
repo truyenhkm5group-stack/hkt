@@ -176,10 +176,24 @@ là bản vá tự vô hiệu hoá chính nó**:
 | 1 | Vòng sửa thứ hai vá cỡ mẫu của bài kiểm trần nhưng **bỏ sót một khẳng định** vẫn so với hằng số 12. Máy người viết có `GITHUB_TOKEN` nên trần là 12 và bài xanh; `gates.yml` **không** đưa `GITHUB_TOKEN` vào `env:` của bước `npm test` (Actions không tự xuất biến đó) nên **CI chạy ẩn danh**, trần là 3, cỡ mẫu 6, và `6 > 12` **ĐỎ** — chặn merge và chặn deploy | So với trần THẬT (`tranThat`). Và từ nay `npm test` được chạy ở **cả hai chế độ** trước khi commit |
 | 2 | `?budget=` chuyển tiếp mà **không có trần trên** | Một cú `github-pr-sync?budget=50` trên máy chủ chưa đặt token bắn 151 request, thổi bay hạn mức 60/giờ và kéo `github-deployments` chết theo — đúng chuỗi đổ vỡ cái trần sinh ra để chặn. Nay tham số tay bị **kẹp** về trần ẩn danh khi không có token; có token thì để người dùng tự quyết |
 
-**Bài học:** ba vòng review, ba lần tìm thấy lỗi thật, và **hai trong ba lần** là cùng một hình
-dạng — *một bài kiểm đo môi trường của máy đang chạy thay vì đo mã*. AGENTS.md mục 50 đã ghi luật
-này cho mốc thời gian; hoá ra nó đúng y hệt cho **biến môi trường**. Một bài kiểm xanh vì máy này
-có sẵn một token là một bài kiểm chưa được chạy.
+Vòng thứ tư tìm thêm hai chỗ, cả hai trong chính tệp kiểm thử: bài "chưa cấu hình kho" chỉ xoá
+`ERP_GITHUB_REPO` trong khi `repo()` còn lùi sang `GITHUB_REPOSITORY` (Actions **luôn** đặt biến
+này) — nó xanh hoàn toàn nhờ một bài KHÁC chạy trước đã xoá biến ấy và không trả lại, nên chạy
+riêng hoặc đảo thứ tự là đỏ; và cái kẹp `?budget=` **không có bài kiểm nào**, xoá nó đi `npm test`
+vẫn xanh.
+
+**Bài học, và nó là thứ đáng giữ lại nhất của cả lượt:** bốn vòng review, bốn lần tìm thấy lỗi
+thật, và **ba trong bốn** là cùng một hình dạng — *một bài kiểm đo môi trường của máy đang chạy
+thay vì đo mã*. AGENTS.md mục 50 đã ghi luật này cho **mốc thời gian**; nó đúng y hệt cho **biến
+môi trường**, và còn khó thấy hơn vì biến môi trường không tự đổi mỗi ngày — nó đổi khi bài chạy ở
+một máy khác, tức đúng lúc nó chặn deploy.
+
+Từ nay bộ cổng của việc này chạy `npm test` ở **cả hai chế độ** trước khi commit:
+
+```
+env -u GITHUB_TOKEN -u GH_TOKEN -u ERP_GITHUB_TOKEN -u GITHUB_REPOSITORY npm test   # như CI
+GITHUB_REPOSITORY=owner/ci-repo GITHUB_TOKEN=dummy npm test                          # như máy có token
+```
 
 Mỗi lỗi có một bài kiểm khoá lại: mốc đọc **không được nhích** khi GitHub trả 403 hết hạn mức ·
 trần hoãn rồi lượt sau đọc tiếp (chứng minh bằng việc số việc đã đọc **vượt** trần của một lượt) ·
