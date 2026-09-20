@@ -9,6 +9,7 @@ import {
   agentGithubDisabledReason,
   agentRemoteUrl,
   appJwt,
+  updateAgentPullRequestBranch,
   commitAgentFile,
   createAgentBranch,
   assertAgentBranch,
@@ -71,7 +72,7 @@ export async function testAgentGithubIdentityModule() {
     assert.throws(() => assertAgentBranch(""), /Thiếu tên nhánh/);
 
     // ───────── 3. Khả năng là DANH SÁCH CHO PHÉP, và cấm là SỰ VẮNG MẶT ─────────
-    assert.deepEqual([...AGENT_GITHUB_ALLOWED], ["branch:create", "branch:push", "pr:open", "pr:update", "checks:read"]);
+    assert.deepEqual([...AGENT_GITHUB_ALLOWED], ["branch:create", "branch:push", "pr:open", "pr:update", "pr:update-branch", "checks:read"]);
     for (const denied of ["push:default-branch", "pr:approve", "pr:merge", "ruleset:write"]) {
       assert.ok((AGENT_GITHUB_DENIED as readonly string[]).includes(denied), `phải khai tường minh là agent KHÔNG được ${denied}`);
       assert.ok(!(AGENT_GITHUB_ALLOWED as readonly string[]).includes(denied), `${denied} không được lọt vào danh sách cho phép`);
@@ -141,7 +142,9 @@ export async function testAgentGithubIdentityModule() {
       if (u.endsWith("/git/refs")) return json({ ref: "refs/heads/ai/proof/identity-test" });
       if (u.includes("/contents/")) return json({ commit: { sha: "commit0sha" } });
       if (u.endsWith("/pulls")) return json({ number: 99, html_url: "https://github.com/truyenhkm5group-stack/hkt/pull/99" });
-      if (/\/pulls\/\d+$/.test(u)) return json({ number: 99 });
+      if (u.endsWith("/update-branch")) return new Response(JSON.stringify({ message: "Updating pull request branch." }), { status: 202, headers: { "content-type": "application/json" } });
+      if (/\/pulls\/77$/.test(u)) return json({ number: 77, head: { ref: "main" }, base: { ref: "main" } });
+      if (/\/pulls\/\d+$/.test(u)) return json({ number: 99, head: { ref: "ai/proof/identity-test" }, base: { ref: "main" } });
       if (u.includes("/check-runs")) return json({ check_runs: [{ name: "gates / gates", status: "completed", conclusion: "success" }] });
       return new Response("{}", { status: 404, headers: { "content-type": "application/json" } });
     }) as unknown as typeof fetch);
@@ -207,6 +210,17 @@ export async function testAgentGithubIdentityModule() {
     assert.equal((putTep.body as { branch: string }).branch, "ai/proof/identity-test", "phải ghi lên NHÁNH, không lên nhánh mặc định");
     await assert.rejects(commitAgentFile({ branch: "main", path: "a.md", content: "x", message: "m" }), /không được đẩy thẳng vào main/);
     await assert.rejects(commitAgentFile({ branch: "ai/proof/identity-test", path: "../../etc/passwd", content: "x", message: "m" }), /không hợp lệ/, "đường dẫn đi ngược phải bị chặn");
+
+    /* ─── Cập nhật nhánh PR: một lượt ghi vào nhánh CỦA AGENT, không phải nhánh mặc định ───
+       Tồn tại vì `require_last_push_approval` biến mọi lượt đẩy thành "người đẩy cuối": nếu NGƯỜI
+       bấm Update branch thì chính họ mất quyền duyệt PR đó (đo trên PR #27, 405). */
+    const capNhat = await updateAgentPullRequestBranch({ number: 99, now: new Date("2026-09-19T11:00:00Z") });
+    assert.equal(capNhat.head, "ai/proof/identity-test");
+    const put = calls.filter((c) => c.url.endsWith("/update-branch")).at(-1)!;
+    assert.equal(put.method, "PUT");
+    assert.ok(put.auth.startsWith("Bearer ghs_token_"), "cập nhật nhánh phải đi bằng token CÀI ĐẶT");
+    // Nhánh của PR là nhánh mặc định ⇒ chặn ở tầng mã, TRƯỚC khi gọi GitHub.
+    await assert.rejects(updateAgentPullRequestBranch({ number: 77 }), /không được đẩy thẳng vào main/, "không được 'cập nhật' chính nhánh mặc định");
 
     const checks = await readAgentCheckRuns("113e487", new Date("2026-09-19T11:00:00Z"));
     assert.deepEqual(checks, [{ name: "gates / gates", status: "completed", conclusion: "success" }]);
