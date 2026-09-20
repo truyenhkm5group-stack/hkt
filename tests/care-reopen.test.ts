@@ -273,6 +273,7 @@ export async function testCareReopen(db: Db) {
      gì?" trước khi quả bom thứ hai được lắp. */
   const MOC_LICH_DA_KHAI: Record<string, string> = {
     "lib/integrations/facebook/ads-index.ts": "POST_LINK_SHIPPED_AT — ngày cột `post_id` ra đời, dùng để tra lại MỘT LƯỢT những mẩu quảng cáo tra trước đó. Chỉ so với `fetched_at` của chính dòng dữ liệu (mốc thật, không phải mốc gieo tương đối), và lượt tra lại tự dừng vì `fetched_at` được cập nhật — không bài kiểm nào gieo dữ liệu tương đối so với nó.",
+    "lib/constants/agent-run-ledger.ts": "LEDGER_LIVE_AT — lúc cửa chép sổ lượt chạy agent bắt đầu với tới được (deploy #368 kết thúc 12:35:20Z, lượt chạy agent #6 bắt đầu 34 giây sau và là dòng đầu tiên trong sổ). Nó chia đôi “mất dòng” thành DI SẢN ĐÃ VÁ và LỖI CÒN ĐANG XẢY RA. Bài kiểm dựng mốc TỪ CHÍNH hằng số này (`LEDGER_LIVE_AT ± 1 giờ`), KHÔNG gieo dữ liệu bằng 'N giờ trước' theo đồng hồ thật.",
     "lib/constants/care-reopen-class.ts": "REOPEN_GUARD_LIVE_AT — lúc luật mở lại bắt đầu chạy trên production (run #35305088847). Bài kiểm PHẢI dựng mốc từ chính hằng số này hoặc truyền mốc riêng vào `isFalseReopenAfterFix`, KHÔNG gieo dữ liệu bằng 'N giờ trước' rồi so với nó.",
   };
   /*

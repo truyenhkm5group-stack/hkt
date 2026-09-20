@@ -68,6 +68,7 @@ import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.tes
 import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
+import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
@@ -1868,6 +1869,8 @@ async function main() {
   await cleanupAgentTaskReadFixtures();
   /* NẤC 4 — đẩy trạng thái việc theo bằng chứng GitHub. Tự dọn bằng tiền tố `ADV-`. */
   await testTaskAdvanceDb();
+  await testLedgerReconcile();
+  await cleanupLedgerFixtures();
   await cleanupTaskAdvanceFixtures();
   /*
     GHÉP QUẢNG CÁO TREO. Bài này chạy `reapplyAdsMapping()` THẬT, mà hàm đó quét toàn bộ dòng
@@ -1937,6 +1940,8 @@ async function main() {
   testDispatchPure();
   testDispatchSourceGuards();
   testAgentTaskReadGuards();
+  testLedgerPure();
+  testLedgerGuards();
   testTaskAdvancePure();
   testTaskAdvanceGuards();
   testAdsMappingGuards();

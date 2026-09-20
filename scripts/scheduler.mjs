@@ -163,6 +163,17 @@ const JOBS = [
     (pr-sync lệch 10.5), chứ không đọc dữ liệu của chu kỳ trước.
   */
   { job: "task-advance-watch", every: minutes("TASK_ADVANCE_EVERY_MINUTES", 15), offset: 26 },
+  /*
+    ĐỐI CHIẾU SỔ LƯỢT CHẠY AGENT — 60 phút, lệch 33 phút.
+
+    Thưa hơn hẳn các bộ canh khác, và đó là chủ ý: nó trả lời một câu hỏi về QUÁ KHỨ ("lượt chạy
+    nào đã mất dòng sổ"), không phải một câu hỏi về hiện tại. Lượt chạy agent là chuyện vài lần
+    một ngày, nên hỏi GitHub mỗi mười lăm phút chỉ tốn hạn mức để nhận lại cùng một câu trả lời.
+
+    Lệch 33 để không đứng cùng chỗ với bất kỳ bộ nào đang gọi GitHub (`github-deployments` 6.5 ·
+    `github-pr-sync` 10.5): ba lượt gọi cùng lúc thì lần đầu chạm trần hạn mức sẽ hạ cả ba.
+  */
+  { job: "agent-run-reconcile", every: minutes("AGENT_RUN_RECONCILE_EVERY_MINUTES", 60), offset: 33 },
   // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
   ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
 ];

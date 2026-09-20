@@ -30,6 +30,8 @@
  *    chúng bắt lại và ghi vào `sync_runs`.
  */
 
+import { DISPATCHABLE_WORKFLOWS } from "@/lib/constants/agent-dispatch";
+
 const API = "https://api.github.com";
 const TIMEOUT_MS = 20_000;
 
@@ -298,6 +300,23 @@ export async function testConnection(): Promise<{ ok: boolean; detail: string; k
 export async function listRecentDeployRuns(limit = 20): Promise<GithubRun[]> {
   const n = Math.max(1, Math.min(100, limit));
   const data = await get<{ workflow_runs?: RawRun[] }>(`/actions/workflows/${encodeURIComponent(deployWorkflowFile())}/runs?per_page=${n}`);
+  return (data.workflow_runs ?? []).map(toRun);
+}
+
+/**
+ * N lượt chạy gần nhất của workflow CHẠY AGENT. CHỈ ĐỌC.
+ *
+ * Tên tệp workflow lấy từ `DISPATCHABLE_WORKFLOWS` — sổ đã khai nó một lần cho đường GHI (dispatch).
+ * Gõ lại chuỗi `"agent-run.yml"` ở đây là mở một chỗ thứ hai để hai bên trỏ vào hai workflow khác
+ * nhau, và phép đối chiếu sổ khi ấy sẽ so sổ với một thứ không sinh ra nó.
+ *
+ * Tham số là `limit`, KHÔNG phải tên workflow: một hàm nhận tên tệp từ nơi gọi là một hàm đọc được
+ * mọi workflow của kho, và bản này cố ý chỉ đọc đúng hai thứ nó có việc phải đọc.
+ */
+export async function listRecentAgentRuns(limit = 30): Promise<GithubRun[]> {
+  const n = Math.max(1, Math.min(100, limit));
+  const file = DISPATCHABLE_WORKFLOWS[0];
+  const data = await get<{ workflow_runs?: RawRun[] }>(`/actions/workflows/${encodeURIComponent(file)}/runs?per_page=${n}`);
   return (data.workflow_runs ?? []).map(toRun);
 }
 
