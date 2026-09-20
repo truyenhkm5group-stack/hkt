@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { assertAgentBranch } from "@/lib/integrations/github/agent-identity";
 
@@ -140,4 +140,100 @@ export function testAgentPrBridge() {
   console.log(
     "✓ Cầu nối mở PR: không gộp · không duyệt · không chạm cấu hình kho · KHÔNG checkout hay chạy mã nhánh nguồn · chỉ chạy từ nhánh mặc định (kiểm TRƯỚC khi đọc secret) · GITHUB_TOKEN không có quyền ghi · đối chứng bằng credential khác và sai thì đỏ · luật nhánh dùng lại adapter · secret nằm trong Environment agent-identity (tên là hằng, khai ở mức job)",
   );
+}
+
+/**
+ * ═══════════ BA SECRET CỦA APP CHỈ ĐỌC ĐƯỢC TỪ ENVIRONMENT `agent-identity` ═══════════
+ *
+ * Bài kiểm trên khoá MỘT tệp. Bài này quét TOÀN BỘ `.github/workflows/`, vì hàng rào mất giá trị
+ * ngay khi có một workflow thứ hai đọc cùng ba secret mà quên khai Environment — và đó đúng là
+ * thứ đã xảy ra: `agent-update-pr.yml` ra đời sau `agent-open-pr.yml`, đọc cùng ba secret, không
+ * ai nhắc, và nó đỏ ngay lượt chạy đầu sau khi secret dọn về Environment (run 35482454679:
+ * `✗ Chưa có ERP_AGENT_GITHUB_APP_ID, …`, trong khi Environment có đủ).
+ *
+ * Liệt kê tên ba workflow đang có là khoá lại đúng lần hỏng đã xảy ra. Bất biến đúng là: **mọi**
+ * job chạm tới ba secret ấy phải khai `environment: agent-identity`.
+ *
+ * ─── VÌ SAO KIỂM Ở MỨC JOB, VÀ VÌ SAO TÊN PHẢI LÀ HẰNG ───
+ *
+ *  · mức job — khai ở mức step thì bước khác trong cùng job vẫn đọc secret của kho;
+ *  · tên hằng — nhận `inputs.*` là để người gọi tự chọn kho secret, tức tự chọn hàng rào của chính
+ *    mình, tức không có hàng rào.
+ *
+ * ─── VÀ MỘT CHIỀU NGƯỢC LẠI, DỄ QUÊN ───
+ *
+ * Job `ops` của `ops-vps.yml` KHÔNG ĐƯỢC mang Environment này. Gắn vào đó thì `status`, `logs`,
+ * `db-query` và ~60 thao tác khác đều phải đi qua chính sách nhánh của một Environment dựng cho ba
+ * secret chúng không hề dùng. Hàng rào đặt sai chỗ là hàng rào người ta sẽ tìm cách đi vòng.
+ */
+export function testEnvironmentOnlyAgentSecrets() {
+  const THU_MUC = ".github/workflows";
+  const TEN_ENV = "agent-identity";
+  const BA_SECRET = /ERP_AGENT_GITHUB_(APP_ID|INSTALLATION_ID|PRIVATE_KEY)/;
+
+  /** Cắt tệp workflow thành từng JOB: tên + số dòng bắt đầu/kết thúc. Job thụt 2, khoá trong thụt 4. */
+  function cacJob(src: string): { ten: string; dong: string[] }[] {
+    const dong = src.split("\n");
+    const iJobs = dong.findIndex((d) => /^jobs:\s*$/.test(d));
+    if (iJobs < 0) return [];
+    const moc: { ten: string; tu: number }[] = [];
+    for (let i = iJobs + 1; i < dong.length; i += 1) {
+      const m = /^ {2}([A-Za-z_][\w-]*):\s*$/.exec(dong[i]!);
+      if (m) moc.push({ ten: m[1]!, tu: i });
+    }
+    return moc.map((m, k) => ({ ten: m.ten, dong: dong.slice(m.tu, k + 1 < moc.length ? moc[k + 1]!.tu : dong.length) }));
+  }
+
+  const tep = readdirSync(THU_MUC).filter((f) => f.endsWith(".yml") || f.endsWith(".yaml"));
+  assert.ok(tep.length >= 5, `đọc được ${tep.length} workflow — quá ít, bộ đọc hỏng chứ không phải kho hỏng`);
+
+  const nguoiDung: string[] = [];
+  for (const f of tep) {
+    const src = readFileSync(`${THU_MUC}/${f}`, "utf8");
+    if (!BA_SECRET.test(src)) continue;
+    const jobs = cacJob(src);
+    assert.ok(jobs.length > 0, `${f}: không đọc được job nào — bộ cắt job hỏng`);
+    for (const job of jobs) {
+      if (!job.dong.some((d) => BA_SECRET.test(d))) continue;
+      nguoiDung.push(`${f}::${job.ten}`);
+
+      const iEnv = job.dong.findIndex((d) => /^ {4}environment:/.test(d));
+      assert.ok(
+        iEnv >= 0,
+        `${f}::${job.ten} đọc ERP_AGENT_GITHUB_* nhưng KHÔNG khai \`environment:\` ở MỨC JOB. Không có nó thì secret của Environment không tới được job, và thao tác sẽ báo "thiếu Secret" trong khi Environment có đủ (đã xảy ra: run 35482454679).`,
+      );
+      const ten = job.dong[iEnv]!.split(":").slice(1).join(":").trim();
+      assert.equal(ten, TEN_ENV, `${f}::${job.ten}: tên Environment phải là "${TEN_ENV}", thấy "${ten}"`);
+      assert.ok(!ten.includes("${{"), `${f}::${job.ten}: tên Environment phải là HẰNG — nội suy là để người gọi tự chọn kho secret của chính mình`);
+
+      const iSecret = job.dong.findIndex((d) => BA_SECRET.test(d));
+      assert.ok(iEnv < iSecret, `${f}::${job.ten}: \`environment\` phải khai TRƯỚC bước đọc secret`);
+    }
+  }
+
+  // Ba workflow đã biết phải nằm trong danh sách — nếu một cái biến mất, hoặc bộ quét hỏng, hoặc
+  // ai đó vừa gỡ một đường đi mà không ai nhắc.
+  for (const can of ["agent-open-pr.yml::open", "agent-update-pr.yml::update", "agent-identity-proof.yml::proof", "ops-vps.yml::agent-env"]) {
+    assert.ok(nguoiDung.includes(can), `thiếu ${can} trong danh sách job đọc ERP_AGENT_GITHUB_* — quét được: ${nguoiDung.join(", ")}`);
+  }
+
+  /* CHIỀU NGƯỢC LẠI: job `ops` không được phụ thuộc Environment của ba secret. */
+  const ops = readFileSync(`${THU_MUC}/ops-vps.yml`, "utf8");
+  const jobOps = cacJob(ops).find((j) => j.ten === "ops")!;
+  assert.ok(jobOps, "ops-vps.yml phải còn job `ops`");
+  assert.ok(
+    !jobOps.dong.some((d) => /^ {4}environment:/.test(d)),
+    "ops-vps.yml::ops KHÔNG được mang environment — gắn vào đó là bắt ~60 thao tác VPS không liên quan phải đi qua chính sách nhánh của một Environment dựng cho ba secret chúng không dùng",
+  );
+  assert.ok(jobOps.dong.some((d) => /if:\s*inputs\.action != 'apply-agent-env'/.test(d)), "ops-vps.yml::ops phải loại apply-agent-env — thao tác ấy đi ở job riêng");
+  assert.ok(!jobOps.dong.some((d) => BA_SECRET.test(d)), "ops-vps.yml::ops không được còn tham chiếu ERP_AGENT_GITHUB_*");
+
+  /* Hai chỗ cầm khoá vòng đời phải cầm CÙNG tệp và CÙNG chế độ, nếu không chúng trôi xa nhau. */
+  const jobEnv = cacJob(ops).find((j) => j.ten === "agent-env")!;
+  const thanEnv = jobEnv.dong.join("\n");
+  assert.ok(/\/var\/lock\/erp-lifecycle\.lock/.test(thanEnv), "ops-vps.yml::agent-env phải cầm ĐÚNG ổ khoá vòng đời mà nhánh GHI của `ops` cầm");
+  assert.ok(/flock -x -w/.test(thanEnv), "ops-vps.yml::agent-env ghi .env rồi dựng lại container ⇒ phải cầm khoá ĐỘC QUYỀN, cùng hàng đợi với deploy");
+  assert.ok(/\$\{#ERP_AGENT_GITHUB_PRIVATE_KEY\}/.test(thanEnv) && !/echo[^\n]*"\$ERP_AGENT_GITHUB_PRIVATE_KEY"/.test(thanEnv), "ops-vps.yml::agent-env chỉ được in ĐỘ DÀI khoá riêng, không in giá trị");
+
+  console.log(`✓ Secret App chỉ từ Environment: ${nguoiDung.length} job đọc ERP_AGENT_GITHUB_* và MỌI job đều khai \`environment: ${TEN_ENV}\` ở mức job, tên là hằng · job \`ops\` KHÔNG phụ thuộc Environment (60+ thao tác VPS không liên quan) · apply-agent-env tách job riêng, cùng ổ khoá vòng đời ĐỘC QUYỀN, khoá riêng chỉ in độ dài`);
 }
