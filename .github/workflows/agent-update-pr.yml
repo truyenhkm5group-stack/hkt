@@ -26,6 +26,11 @@ on:
         description: "Số hiệu PR cần cập nhật (nhánh của nó phải bắt đầu bằng ai/ hoặc claude/)"
         required: true
         type: string
+      note:
+        description: "Để TRỐNG = nhập nhánh đích (KHÔNG đổi diff, KHÔNG huỷ lượt duyệt). Có chữ = bot ghi một tệp tài liệu (ĐỔI DIFF ⇒ huỷ lượt duyệt đang có)."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -69,4 +74,5 @@ jobs:
           ERP_AGENT_GITHUB_REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
           AGENT_PR_NUMBER: ${{ inputs.pr }}
+          AGENT_PR_NOTE: ${{ inputs.note }}
         run: npx tsx --tsconfig tsconfig.json scripts/agent-update-pr.ts
