@@ -125,6 +125,75 @@ Hai thứ đó khác nhau và phải nói tách ra: phần **danh tính** (mục
 bằng chứng của nó đầy đủ, ghi ở trên. Phần **"App có gộp được PR không"** thì vẫn là một câu hỏi
 CHƯA CÓ CÂU TRẢ LỜI ĐO ĐƯỢC.
 
+### ĐÃ CHẠY — 20/09/2026 07:21, và kết quả quan trọng hơn câu hỏi ban đầu
+
+| | |
+|---|---|
+| Run | [`35496633831`](https://github.com/truyenhkm5group-stack/hkt/actions/runs/35496633831) · `agent-identity-proof.yml` · ref `main` @ `6df5881` |
+| Kết luận của workflow | **failure** — "3 khẳng định KHÔNG đạt" |
+| `main` trước probe | `6df58818dd61b1e7744b5c643d49c0c287b2fde5` |
+| `main` sau probe | `6df58818dd61b1e7744b5c643d49c0c287b2fde5` — **KHÔNG ĐỔI** |
+| PR sinh ra | #43, nhánh `ai/proof/identity-2026-09-20-mu9hmxkj` @ `bf38c9f07479` |
+
+**Nhưng "3 khẳng định không đạt" KHÔNG có nghĩa là ba hàng rào thủng.** Đọc từng dòng thì hai
+trong ba là **lỗi phân loại của chính bộ chứng minh**, và cái thứ ba là một câu trả lời trung thực.
+
+#### Quyền của App — đọc thẳng từ GitHub, không đọc tài liệu
+
+```
+checks=read · actions=read · contents=write · metadata=read · pull_requests=write
+✓ không có administration   ✓ không có secrets    ✓ không có variables
+✓ không có environments     ✓ không có repository_hooks   ✓ không có workflows
+```
+
+`botLogin` = `erp-agent-vnx[bot]`, **khác** chủ kho. Token cài đặt chỉ với tới **đúng một kho**.
+
+#### Năm phép thử hàng rào — bốn XANH, một bị chấm nhầm
+
+| Phép thử | Kết quả thật | Bộ chứng minh chấm |
+|---|---|---|
+| Ghi thẳng `main` qua API | **409** — *"Changes must be made through a pull request"* | ✓ đúng |
+| Tự duyệt PR của chính mình | **422** | ✓ đúng |
+| Sửa ruleset | **403** | ✓ đúng |
+| Đọc khoá secret của kho | **403** | ✓ đúng |
+| Sửa cấu hình kho | **403** | ✓ đúng |
+| **Gộp PR của chính mình** | **405** — `Repository rule violations found` · *"New changes require approval from someone other than the last pusher"* · *"Required status check `gates / gates` is expected"* | ✗ **chấm nhầm thành "KHÔNG bị từ chối"** |
+
+> **Câu trả lời cho câu hỏi cuối cùng của mô hình danh tính: KHÔNG. App không gộp được PR của
+> chính nó.** Và GitHub nói ra **đúng hai luật** đã chặn nó. Đây là bằng chứng mạnh hơn mong đợi —
+> nó không chỉ nói "bị chặn", nó nói *chặn bởi cái gì*.
+
+#### Hai lỗi của bộ chứng minh, đã vá trong cùng lượt này
+
+**1 · `phaiBiTuChoi` liệt kê mã trạng thái thay vì đọc kết cục.** Hàm chỉ nhận `403/404/409`.
+GitHub trả **405** cho lượt gộp bị ruleset chặn ⇒ một lượt bị từ chối **đúng** bị in ra là *"KHÔNG
+bị từ chối"*. Chú thích của chính hàm kể rằng lỗi này **đã xảy ra một lần** với mã `409`, và bản vá
+lúc ấy *thêm 409 vào danh sách* — tức vá đúng cái ca đã hỏng, không vá cái lớp. Nay phân loại theo
+`res.ok`: khẳng định đang kiểm là *"lời gọi này không được thành công"*, nên thứ quyết định phải là
+**nó có thành công không**, không phải mã trả về có nằm trong một danh sách gõ tay hay không.
+
+**2 · Phép thử `git push` là một lượt đẩy RỖNG, và nó báo "sự cố" mỗi lần chạy.** `HEAD` của cây
+làm việc là bản `actions/checkout` của chính `main`; commit tài liệu ở bước 3 tạo qua **API** nên
+không bao giờ vào cây ấy. `git push remote HEAD:main` do đó đẩy `main` lên `main` → *Everything
+up-to-date* → thoát `0` → `try` coi là **đẩy thành công** →
+
+```
+✗ ĐẨY THẲNG main THÀNH CÔNG — ruleset không chặn. Đây là sự cố, dừng mọi việc khác lại.
+```
+
+`main` đứng nguyên ở `6df5881` suốt lượt chạy, và lượt ghi qua API **ngay dòng trên** bị chặn bằng
+409. Hàng rào kín; lời tố cáo là bịa. Đây là **báo động giả to nhất bộ chứng minh có thể phát ra**
+— nó tố cáo đúng cái hàng rào quan trọng nhất là đã thủng, và ai tin nó sẽ đi nới một thứ đang
+lành. Nay phép thử dựng một **commit rỗng** để `HEAD` thật sự đi trước `main` một bước; bị chặn ⇒
+xanh, đẩy được ⇒ một commit rỗng trên `main` gỡ bằng một lượt revert, và lúc đó sự cố là **thật**.
+
+**3 · `gates / gates: còn in_progress sau 4 phút — CHƯA BIẾT, không kết luận là xanh`** — dòng này
+**đúng**, và nên giữ. Cổng chưa xong thì chưa biết; đó là hành vi mong muốn, không phải lỗi.
+
+> Sau hai bản vá, lượt chạy tới sẽ chấm đúng **năm trên năm** phép thử hàng rào. Nhưng con số
+> đáng nhớ của hôm nay không phải "5/5" — mà là: **bộ chứng minh an ninh vừa tự tố cáo sai hai
+> lần, và một trong hai lần là lời tố cáo nghiêm trọng nhất nó biết nói.**
+
 ### Và phép đo ấy KHÔNG phải read-only — đọc kỹ trước khi chạy
 
 `scripts/agent-identity-proof.ts` không phải một kịch bản quan sát. Nó là **phép thử xâm nhập vào
