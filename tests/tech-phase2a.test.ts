@@ -44,6 +44,47 @@ export function testAgentSandbox() {
   assert.ok(checkCommand(["git", "diff", "--stat"]).allowed, "tham số phụ đã khai thì được phép");
   assert.ok(!checkCommand(["git", "diff", "--exec=rm"]).allowed, "tham số CHƯA khai thì không");
 
+  /*
+    ───────── 1.1b BỐN CỔNG PHẢI GỌI ĐƯỢC BẰNG DẠNG `npm run <tên>` ─────────
+
+    ĐO THẬT ở lượt chạy agent đầu tiên (nhánh `ai/documentation/TECH-1-mu7ws71b`, 19/09/2026).
+    Ba cổng khai `npm run typecheck|lint|build`, riêng test khai `npm test`. Agent đọc ba dòng
+    trên rồi gọi `npm run test` — bị chặn, vì `checkCommand` so khớp CHÍNH XÁC.
+
+    Rồi nó viết vào tài liệu bàn giao: *"runner chặn `npm run test` đối với vai tài liệu"*. Một
+    SUY ĐOÁN trình bày như một LUẬT, và sai — vai tài liệu ĐƯỢC chạy test.
+
+    Bài kiểm này khoá cả LỚP, không riêng ca test: mọi cổng phải gọi được bằng dạng `npm run`,
+    vì đó là dạng người (và máy) suy ra từ những dòng bên cạnh.
+  */
+  for (const g of ["typecheck", "lint", "test", "build"]) {
+    assert.ok(checkCommand(["npm", "run", g]).allowed, `\`npm run ${g}\` phải được phép — ba cổng kia dùng dạng này, nên đây là dạng ai cũng sẽ viết theo`);
+  }
+  assert.ok(checkCommand(["npm", "test"]).allowed, "`npm test` vẫn phải được phép — không thay dạng này bằng dạng kia, nhận CẢ HAI");
+
+  /*
+    ───────── 1.1c AGENT PHẢI ĐƯỢC CHO BIẾT BASE SHA VÀ TÊN NHÁNH ─────────
+
+    Cùng lượt chạy ấy, đề bài đòi ghi base SHA và tên nhánh. Agent thử `git rev-parse` (không có
+    trong danh sách cho phép) rồi thử đọc `.git/HEAD` (nằm trong `NEVER_READ`), bị chặn cả hai, và
+    ghi "Chưa xác minh được" — xử lý ĐÚNG theo AGENTS.md mục 42.
+
+    Cái sai là phía ta: runner có sẵn hai giá trị mà không truyền xuống. Một việc không thể hoàn
+    thành đúng luật thì hoặc dạy agent lách luật, hoặc dạy người đọc rằng "chưa biết" là bình
+    thường. Hai khẳng định dưới giữ hàng rào NGUYÊN VẸN và bắt `AgentJob` phải mang bối cảnh.
+  */
+  assert.ok(!checkCommand(["git", "rev-parse", "HEAD"]).allowed, "`git rev-parse` vẫn KHÔNG được phép — hàng rào giữ nguyên");
+  assert.ok(!checkReadPath(".git/HEAD").allowed, "`.git/` vẫn KHÔNG đọc được — hàng rào giữ nguyên");
+  {
+    const src = readFileSync("lib/agents/executor.ts", "utf8");
+    for (const f of ["baseCommit", "branch"]) {
+      assert.ok(new RegExp(`^\\s*${f}:`, "m").test(src), `AgentJob phải mang \`${f}\` — agent bị hàng rào chặn mọi đường tự lấy`);
+      assert.ok(src.includes(`job.${f}`), `prompt phải NÓI RA \`${f}\`, nếu không việc vẫn không hoàn thành được`);
+    }
+    const runner = readFileSync("lib/agents/runner.ts", "utf8");
+    assert.ok(/baseCommit: opts\.baseCommit/.test(runner) && /^\s*branch,$/m.test(runner), "runner phải truyền cả hai xuống executor");
+  }
+
   // ───────── 1.2 Danh sách CHO PHÉP: lệnh lạ bị chặn vì KHÔNG KHỚP, không vì có tên trong sổ cấm ─────────
   for (const argv of [["cat", "/etc/passwd"], ["node", "-e", "1"], ["bash", "-c", "ls"], ["npx", "tsx", "x.ts"]]) {
     assert.ok(!checkCommand(argv).allowed, `\`${argv.join(" ")}\` phải bị chặn`);
