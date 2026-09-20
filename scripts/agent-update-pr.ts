@@ -21,13 +21,25 @@
  * đụng nhánh đích. Đúng một lượt `PUT /pulls/{n}/update-branch`, tức một lượt ghi vào nhánh CỦA
  * AGENT — đúng thứ `contents: write` đã cho phép, và `assertAgentBranch` vẫn chặn nhánh mặc định.
  *
+ * ─── HAI VIỆC, VÀ CHÚNG KHÁC NHAU Ở MỘT ĐIỂM QUYẾT ĐỊNH ───
+ *
+ * ĐO THẬT 20/09/2026 trên PR #24: sau khi bot chạy `update-branch`, lượt duyệt của người **KHÔNG**
+ * bị huỷ — `mergeable_state` về `clean` và `commit_id` của review được GitHub neo lại sang head
+ * mới. GitHub không coi việc nhập nhánh đích vào là một **reviewable push**: diff của PR không
+ * đổi, nên `dismiss_stale_reviews_on_push` không kích hoạt.
+ *
+ * Đó là hành vi TỐT cho vận hành (bot giữ PR luôn cập nhật mà không đốt lượt duyệt của người),
+ * nhưng nó có nghĩa: muốn chứng minh "commit mới làm lượt duyệt cũ mất hiệu lực" thì commit ấy
+ * phải **ĐỔI DIFF**. Nên `AGENT_PR_NOTE` tồn tại: bot ghi một tệp tài liệu vào nhánh PR của chính
+ * nó — một lượt đẩy CÓ nội dung, đúng thứ luật duyệt nói tới.
+ *
  * ─── ĐỌC LẠI BẰNG MỘT CREDENTIAL KHÁC ───
  *
  * Sau khi cập nhật, script đọc lại bằng `GITHUB_TOKEN` (chỉ `pull-requests: read`), KHÔNG bằng
  * token App. Hỏi chính cái token vừa ghi thì "đã đẩy bằng bot" và "trông như đã đẩy bằng bot" nhìn
  * giống hệt nhau — bài học đã phải trả giá ở bộ chứng minh danh tính.
  */
-import { getAgentGithubIdentity, updateAgentPullRequestBranch } from "@/lib/integrations/github/agent-identity";
+import { commitAgentFile, getAgentGithubIdentity, updateAgentPullRequestBranch } from "@/lib/integrations/github/agent-identity";
 
 function bat(ten: string): string {
   const v = (process.env[ten] ?? "").trim();
@@ -56,7 +68,20 @@ async function main() {
   const truoc = await doc();
   console.log(`head trước          : ${truoc.head.sha.slice(0, 12)} (${truoc.head.ref}) · ${truoc.mergeable_state}`);
 
-  await updateAgentPullRequestBranch({ number: so });
+  const ghiChu = (process.env.AGENT_PR_NOTE ?? "").trim();
+  if (ghiChu) {
+    // Lượt đẩy CÓ nội dung: đổi diff của PR, nên nó là một `reviewable push` thật.
+    const tep = `docs/proof/agent-note-${so}-${Date.now().toString(36)}.md`;
+    const { sha } = await commitAgentFile({
+      branch: truoc.head.ref,
+      path: tep,
+      content: `# Ghi chú của agent trên PR #${so}\n\n${ghiChu}\n\nĐẩy bởi \`${danhTinh.botLogin}\` lúc ${new Date().toISOString()}.\nSinh bởi \`scripts/agent-update-pr.ts\`.\n`,
+      message: `Ghi chú của agent trên PR #${so}\n\n${ghiChu.split("\n")[0]}`,
+    });
+    console.log(`đã ghi              : ${tep} → ${sha.slice(0, 12)}`);
+  } else {
+    await updateAgentPullRequestBranch({ number: so });
+  }
 
   /*
     `update-branch` trả 202: GitHub NHẬN việc chứ chưa làm xong. Đọc lại tới khi SHA đổi thật.
@@ -71,6 +96,7 @@ async function main() {
     console.log("head KHÔNG đổi sau 60 giây — nhánh có thể đã cập nhật sẵn, hoặc GitHub chưa làm xong.");
     process.exit(0);
   }
+  console.log(`việc đã làm         : ${ghiChu ? "ghi một tệp tài liệu (ĐỔI DIFF ⇒ reviewable push)" : "nhập nhánh đích (KHÔNG đổi diff ⇒ không phải reviewable push)"}`);
   console.log(`head sau            : ${sau.head.sha.slice(0, 12)} · ${sau.mergeable_state}`);
 
   // ĐỐI CHỨNG: người đẩy commit mới phải là BOT. Nếu không, mọi kết luận về cổng duyệt sai hướng.
