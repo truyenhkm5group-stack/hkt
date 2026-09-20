@@ -155,6 +155,14 @@ const JOBS = [
     KHÔNG màn hình nào báo — chỉ lộ ra khi lượt chạy agent thứ 10 dừng ở bước kiểm khoá.
   */
   { job: "ai-incident-watch", every: minutes("AI_INCIDENT_WATCH_EVERY_MINUTES", 30), offset: 21 },
+  /*
+    ĐẨY TRẠNG THÁI VIỆC — 15 phút, lệch 26 phút.
+
+    Cùng nhịp với `github-pr-sync` (15 phút) vì nó ĐỌC đúng thứ lượt đồng bộ ấy vừa ghi; chạy dày
+    hơn chỉ đọc lại cùng một dữ liệu. Lệch 26 để nó luôn chạy SAU lượt chép PR của cùng chu kỳ
+    (pr-sync lệch 10.5), chứ không đọc dữ liệu của chu kỳ trước.
+  */
+  { job: "task-advance-watch", every: minutes("TASK_ADVANCE_EVERY_MINUTES", 15), offset: 26 },
   // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
   ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
 ];

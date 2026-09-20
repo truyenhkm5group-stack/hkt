@@ -68,6 +68,7 @@ import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.tes
 import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
+import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
 import { testPayrollPeriod } from "./payroll-period.test";
@@ -1865,6 +1866,9 @@ async function main() {
   /* NẤC 3B — cửa ĐỌC việc. Chạy hàm thật trên CSDL; tự dọn bằng tiền tố `rd-` / `RD-`. */
   await testAgentTaskRead();
   await cleanupAgentTaskReadFixtures();
+  /* NẤC 4 — đẩy trạng thái việc theo bằng chứng GitHub. Tự dọn bằng tiền tố `ADV-`. */
+  await testTaskAdvanceDb();
+  await cleanupTaskAdvanceFixtures();
   /*
     GHÉP QUẢNG CÁO TREO. Bài này chạy `reapplyAdsMapping()` THẬT, mà hàm đó quét toàn bộ dòng
     Facebook — nên nó tự chụp lại và trả về nguyên trạng `product_id`/`marketer_id` của mọi dòng
@@ -1933,6 +1937,8 @@ async function main() {
   testDispatchPure();
   testDispatchSourceGuards();
   testAgentTaskReadGuards();
+  testTaskAdvancePure();
+  testTaskAdvanceGuards();
   testAdsMappingGuards();
   testAdsIngestGuardsProductFk();
   testTechRiskEngine();
