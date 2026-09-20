@@ -44,6 +44,9 @@ export type VanDonUngVien = {
   createdAt: Date | null;
 };
 
+/** Thêm hai trường mà luật CHỌN LẦN GỬI ĐẠI DIỆN cần — `PRIMARY_ATTEMPT` đọc đúng bấy nhiêu. */
+export type VanDonDaiDienUngVien = VanDonUngVien & { id: string; stage: string | null };
+
 export type TinPancake = {
   vtpOrderNumber: string | null;
   trackingCode: string | null;
@@ -92,5 +95,44 @@ export function chonVanDonDeGhep<T extends VanDonUngVien>(rows: readonly T[], ti
     const d = (b.attemptNo ?? 1) - (a.attemptNo ?? 1);
     if (d !== 0) return d;
     return (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0);
+  })[0];
+}
+
+/**
+ * ═══════════ LẦN GỬI ĐẠI DIỆN CHO ĐƠN — BẢN TYPESCRIPT CỦA `PRIMARY_ATTEMPT` ═══════════
+ *
+ * ĐÂY LÀ MỘT CÂU HỎI KHÁC HẲN `chonVanDonDeGhep`, và gộp chúng là làm hỏng cả hai:
+ *
+ *   · `chonVanDonDeGhep` hỏi **"bản tin này nói về dòng nào?"** — dùng ở đường GHI. Câu trả lời
+ *     phải là lần gửi ĐANG CHẠY, vì bản tin mô tả tình trạng hiện thời. Ghi nó lên một lần gửi đã
+ *     giao xong là bôi lên chứng từ.
+ *   · `vanDonDaiDien` hỏi **"lần gửi nào ĐẠI DIỆN cho đơn?"** — dùng ở đường ĐỌC. Câu trả lời là
+ *     lần gửi TỚI TAY KHÁCH nếu có: khách đã nhận hàng ở lần nào thì đơn ấy là giao thành công,
+ *     và một lần gửi thay thế sau đó không xoá được sự thật đó.
+ *
+ * Và nó phải khớp TỪNG BẬC với `PRIMARY_ATTEMPT` trong `lib/queries/return-rate.ts` — điều kiện
+ * nối mà MỌI báo cáo tiền đang dùng:
+ *
+ *     order by (sh.stage = 'DELIVERED') desc, sh.attempt_no desc nulls last, sh.created_at desc, sh.id
+ *
+ * Lệch một bậc là màn hình danh sách in mã vận đơn của lần gửi này trong khi cột tiền ngay cạnh
+ * tính theo lần gửi kia — cùng lớp bẫy với AGENTS.md mục 41, nơi SQL và TypeScript lặng lẽ nói hai
+ * điều khác nhau. `tests/shipment-pick.test.ts` chạy cả hai bản trên cùng dữ liệu rồi so từng đơn.
+ *
+ * Đo 21/09/2026: 31 đơn hai lần gửi, 15 đơn có lần đã giao, và **0 đơn mà hai luật chọn khác nhau**
+ * — nên khớp chúng lại hôm nay KHÔNG đổi một con số nào; nó chỉ chặn ngày chúng bắt đầu lệch.
+ */
+export function vanDonDaiDien<T extends VanDonDaiDienUngVien>(rows: readonly T[]): T | null {
+  const diTiep = rows.filter((r) => (r.direction ?? "OUTBOUND") !== "RETURN");
+  if (!diTiep.length) return null;
+  return [...diTiep].sort((a, b) => {
+    const giao = Number(b.stage === "DELIVERED") - Number(a.stage === "DELIVERED");
+    if (giao !== 0) return giao;
+    const lan = (b.attemptNo ?? 0) - (a.attemptNo ?? 0);
+    if (lan !== 0) return lan;
+    const moc = (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0);
+    if (moc !== 0) return moc;
+    // Chốt bằng `id` để hai lần chạy ra cùng kết quả — số liệu không được đổi chỉ vì thứ tự trả về.
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
   })[0];
 }

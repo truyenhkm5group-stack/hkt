@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { chonVanDonDeGhep, type VanDonUngVien } from "@/lib/constants/shipment-pick";
+import { chonVanDonDeGhep, vanDonDaiDien, type VanDonUngVien } from "@/lib/constants/shipment-pick";
 import { mapOrder } from "@/lib/integrations/pancake/mapper";
 import { upsertOrder } from "@/lib/integrations/pancake/sync";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { sql } from "drizzle-orm";
 
 /**
  * ═══════════ MỘT ĐƠN GỬI HAI LẦN THÌ ĐỒNG BỘ PHẢI CHỌN ĐÚNG DÒNG ═══════════
@@ -149,4 +151,103 @@ export async function cleanupShipmentPickFixtures() {
     await db.delete(schema.shipments).where(eq(schema.shipments.orderId, id));
     await db.delete(schema.orders).where(eq(schema.orders.id, id));
   }
+}
+
+/* ═════════════ 3 · HAI LUẬT, VÀ CHÚNG KHÔNG ĐƯỢC TRÔI XA NHAU ═════════════ */
+
+/**
+ * `chonVanDonDeGhep` (đường GHI) và `vanDonDaiDien` (đường ĐỌC) trả lời hai câu hỏi KHÁC nhau —
+ * "bản tin nói về dòng nào" và "dòng nào đại diện cho đơn". Nhưng `vanDonDaiDien` phải khớp TỪNG
+ * BẬC với `PRIMARY_ATTEMPT` ở tầng SQL, thứ mà mọi báo cáo tiền đang nối bằng.
+ *
+ * Lệch một bậc là màn hình in mã vận đơn của lần gửi này trong khi cột tiền ngay cạnh tính theo
+ * lần gửi kia — AGENTS.md mục 41, nơi SQL và TypeScript lặng lẽ nói hai điều khác nhau. Nên bài
+ * này chạy CẢ HAI bản trên CÙNG dữ liệu rồi so từng đơn, thay vì đọc hai đoạn mã rồi tin là giống.
+ */
+export async function testHaiLuatKhongTroiXaNhau() {
+  const db = await getDb();
+  const DON2 = "990479";
+  await db.insert(schema.orders).values({ id: DON2, systemId: 990479, status: 2, statusName: "x", stage: "SHIPPED", insertedAt: new Date("2026-09-01T00:00:00Z") });
+  const dong = [
+    { orderId: DON2, attemptNo: 1, direction: "OUTBOUND", stage: "DELIVERED" as const, vtpOrderNumber: "PKE990000101", carrier: "Viettel Post" },
+    { orderId: DON2, attemptNo: 2, direction: "OUTBOUND", stage: "IN_TRANSIT" as const, vtpOrderNumber: "PKE990000102", carrier: "Viettel Post" },
+    { orderId: DON2, attemptNo: 3, direction: "OUTBOUND", stage: "PENDING" as const, vtpOrderNumber: "PKE990000103", carrier: "Viettel Post" },
+  ];
+  await db.insert(schema.shipments).values(dong);
+
+  const rows = await db.query.shipments.findMany({ where: eq(schema.shipments.orderId, DON2) });
+  const ts = vanDonDaiDien(rows);
+
+  /*
+    HỎI SQL BẰNG CHÍNH `PRIMARY_ATTEMPT`, không viết lại điều kiện.
+
+    Viết lại là dựng bản thứ ba, và khi ấy bài kiểm chỉ chứng minh hai bản tôi vừa gõ giống nhau.
+  */
+  const sqlRows = await db
+    .select({ id: schema.shipments.id })
+    .from(schema.orders)
+    .innerJoin(schema.shipments, sql`${schema.shipments.orderId} = ${schema.orders.id} and ${PRIMARY_ATTEMPT}`)
+    .where(eq(schema.orders.id, DON2));
+
+  assert.equal(sqlRows.length, 1, "PRIMARY_ATTEMPT phải cho ĐÚNG một dòng cho mỗi đơn");
+  assert.ok(ts, "bản TypeScript phải chọn được một dòng");
+  assert.equal(ts.id, sqlRows[0].id, "bản TypeScript và PRIMARY_ATTEMPT phải chọn CÙNG một lần gửi");
+  /* Và cả hai phải chọn lần ĐÃ GIAO, dù nó không phải lần gửi mới nhất. */
+  assert.equal(ts.vtpOrderNumber, "PKE990000101", "lần tới tay khách thắng — lần gửi thay thế sau đó không xoá được sự thật ấy");
+
+  /*
+    VÀ ĐÂY LÀ CHỖ HAI LUẬT CỐ Ý KHÁC NHAU.
+
+    Cùng dữ liệu ấy, một bản tin KHÔNG mang mã nào thuộc về lần gửi ĐANG CHẠY, không phải lần đã
+    giao xong: ghi tình trạng hiện thời lên một vận đơn đã đóng là bôi lên chứng từ.
+  */
+  /*
+    ───────── CHIỀU HOÀN KHÔNG ĐẠI DIỆN CHO ĐƠN — VÀ MỘT CHỖ LỆCH PHẢI NÓI RA ─────────
+
+    `vanDonDaiDien` LOẠI dòng chiều hoàn; `PRIMARY_ATTEMPT` ở tầng SQL thì KHÔNG có vế ấy. Hai bên
+    vẫn cho cùng kết quả hôm nay, và lý do là một phép ĐO chứ không phải một niềm tin: vận đơn
+    chiều về mang `order_id NULL` (AGENTS.md mục 3.7), production 21/09/2026 có **0 dòng `RETURN`
+    gắn vào đơn**. Nên tập ứng viên của SQL không bao giờ chứa dòng chiều hoàn.
+    Nếu một ngày có, bài kiểm ngay trên sẽ đỏ — và lúc đó phải sửa `PRIMARY_ATTEMPT`, không phải
+    gỡ vế lọc ở đây. Lọc ở phía TypeScript là phía HẸP hơn (mục 31).
+  */
+  /*
+    Dòng chiều hoàn này mang `stage = DELIVERED` — KHÔNG phải tình huống bịa: Viettel Post ghi
+    "Phát thành công" (mã 501) cho CẢ chiều hoàn, và đó chính là cái bẫy mà `leg_type` sinh ra để
+    chặn (AGENTS.md mục 3.2). Nếu vế lọc chiều bị gỡ, dòng này thắng ở bậc "đã giao" VÀ ở bậc số
+    lần gửi — nghĩa là màn hình sẽ in vận đơn CHIỀU VỀ làm vận đơn của đơn.
+  */
+  const hoanGanVaoDon = { ...dong[2], attemptNo: 9, direction: "RETURN", vtpOrderNumber: "PKE990000103P1", stage: "DELIVERED" as const };
+  const coHoan = vanDonDaiDien([...rows, { ...rows[0], ...hoanGanVaoDon, id: "gia-lap-hoan" }]);
+  assert.equal(coHoan?.id, ts.id, "dòng chiều hoàn KHÔNG được đại diện cho đơn, dù số lần gửi lớn nhất");
+
+  const deGhi = chonVanDonDeGhep(rows, { vtpOrderNumber: null, trackingCode: null });
+  assert.equal(deGhi?.vtpOrderNumber, "PKE990000103", "đường GHI đi theo lần gửi đang chạy");
+  assert.notEqual(deGhi?.id, ts.id, "hai câu hỏi khác nhau thì được phép ra hai câu trả lời — và bài kiểm nói rõ điều đó");
+
+  await db.delete(schema.shipments).where(eq(schema.shipments.orderId, DON2));
+  await db.delete(schema.orders).where(eq(schema.orders.id, DON2));
+}
+
+/* ═════════════ 4 · CÁI BẪY KHÔNG ĐƯỢC MỌC LẠI Ở BẢNG KHÁC ═════════════ */
+
+export function testKhongCoOneTrenKhoaNgoaiKhongDuyNhat() {
+  const schemaSrc = readFileSync(path.join(process.cwd(), "db/schema.ts"), "utf8");
+  /*
+    Mọi `one(...)` phải trỏ vào cột `id` của bảng đích — tức khoá chính, tức DUY NHẤT.
+
+    `orders.shipment` từng trỏ vào `shipments.orderId`, một khoá ngoại KHÔNG duy nhất, và Drizzle
+    khi ấy trả về một dòng BẤT KỲ. Nó đã tốn 23 đơn không đồng bộ được mỗi mười lăm phút. Quan hệ
+    ấy đã bị gỡ; bài kiểm này là thứ giữ cho nó không mọc lại ở một bảng khác — nơi lần sau sẽ
+    không ai nghĩ tới.
+  */
+  const re = /(\w+): one\((\w+), \{ fields: \[(\w+)\.(\w+)\], references: \[(\w+)\.(\w+)\] \}/g;
+  const xau: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(schemaSrc))) {
+    const [, ten, , , , bangRef, cotRef] = m;
+    if (cotRef !== "id") xau.push(`${ten} → ${bangRef}.${cotRef}`);
+  }
+  assert.deepEqual(xau, [], `quan hệ one(...) phải trỏ vào khoá chính; những quan hệ sau trỏ vào cột có thể trùng: ${xau.join(" · ")}`);
+  assert.ok(re.source.length > 0);
 }

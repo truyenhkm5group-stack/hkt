@@ -68,7 +68,7 @@ import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.tes
 import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
-import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa } from "./shipment-pick.test";
+import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
@@ -312,11 +312,11 @@ async function main() {
   assert.equal(r1, "created");
   const r2 = await upsertOrder(mapped, { force: false });
   assert.equal(r2, "skipped", "không ghi đè khi không mới hơn");
-  const stored = await db.query.orders.findFirst({ where: eq(schema.orders.id, "480"), with: { items: true, customer: true, shipment: true } });
+  const stored = await db.query.orders.findFirst({ where: eq(schema.orders.id, "480"), with: { items: true, customer: true, attempts: true } });
   assert.ok(stored);
   assert.equal(stored.items.length, 2);
   assert.ok(stored.customer?.phone === "0900000000");
-  assert.equal(stored.shipment, null, "đơn mới chưa có vận đơn");
+  assert.equal(stored.attempts.length, 0, "đơn mới chưa có vận đơn");
   console.log(`✓ Đơn hàng #${stored.systemId}: ${stored.items.length} sản phẩm, khách ${stored.customer?.name}, giá vốn ${stored.cogs}`);
 
   // 3. Đơn chuyển sang đã gửi hàng với Viettel Post
@@ -1869,6 +1869,7 @@ async function main() {
   await cleanupAgentTaskReadFixtures();
   /* NẤC 4 — đẩy trạng thái việc theo bằng chứng GitHub. Tự dọn bằng tiền tố `ADV-`. */
   await testGuiLaiKhongDamKhoa();
+  await testHaiLuatKhongTroiXaNhau();
   await cleanupShipmentPickFixtures();
   await testTaskAdvanceDb();
   await cleanupTaskAdvanceFixtures();
@@ -1941,6 +1942,7 @@ async function main() {
   testDispatchSourceGuards();
   testAgentTaskReadGuards();
   testChonVanDonPure();
+  testKhongCoOneTrenKhoaNgoaiKhongDuyNhat();
   testTaskAdvancePure();
   testTaskAdvanceGuards();
   testAdsMappingGuards();
