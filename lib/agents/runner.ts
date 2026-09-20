@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { DOCUMENTATION_COMMANDS, DOCUMENTATION_READ_GLOBS, DOCUMENTATION_WRITE_GLOBS } from "@/lib/constants/agent-sandbox";
+import { DOCUMENTATION_COMMANDS, DOCUMENTATION_READ_GLOBS } from "@/lib/constants/agent-sandbox";
+import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import type { TechGateResult, TechRisk } from "@/lib/constants/tech";
 import { finishTechAgentRun, startTechAgentRun, type TechActor } from "@/lib/tech/service";
 import { AgentWorkspace } from "@/lib/agents/workspace";
@@ -111,6 +112,11 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
   const san = opts.executor.available();
   if (!san.ok) return { ...rong, reason: `CHƯA CẤU HÌNH: ${san.reason}` };
 
+  /* ───────── 6b. Phạm vi ghi ĐỌC TỪ VAI, không ghi cứng một hằng số ─────────
+     Sổ `lib/constants/agent-scopes.ts` là chỗ duy nhất khai vai nào ghi được ở đâu. Vai lạ hay
+     chưa khai rơi về `docs/` — mọi nhánh lỗi rơi về phía HẸP HƠN (cùng luật AGENTS.md mục 31). */
+  const phamViGhi = writeGlobsForRole(agent.role);
+
   /* ───────── 7. Mở lượt chạy ───────── */
   const branch = `ai/${agent.key}/${task.code}-${Date.now().toString(36)}`;
   const mo = await startTechAgentRun({ agentId: agent.id, taskId: task.id, branch, baseCommit: opts.baseCommit }, opts.actor);
@@ -126,7 +132,7 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
       baseCommit: opts.baseCommit,
       allowedCommands: DOCUMENTATION_COMMANDS,
       readGlobs: DOCUMENTATION_READ_GLOBS,
-      writeGlobs: DOCUMENTATION_WRITE_GLOBS,
+      writeGlobs: phamViGhi,
     });
     await db.update(schema.techAgentRuns).set({ worktree: ws.root, heartbeatAt: new Date() }).where(eq(schema.techAgentRuns.id, runId));
 
@@ -156,7 +162,7 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
         taskCode: task.code,
         taskTitle: task.title,
         taskDescription: task.description,
-        writeGlobs: DOCUMENTATION_WRITE_GLOBS,
+        writeGlobs: phamViGhi,
         // Runner biết hai giá trị này từ lúc dựng cây; agent thì bị hàng rào chặn cả hai đường tự lấy.
         baseCommit: opts.baseCommit,
         branch,
