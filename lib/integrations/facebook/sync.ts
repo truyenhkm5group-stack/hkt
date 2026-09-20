@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { getDb, schema } from "@/db";
 import { env } from "@/lib/env";
 import { getFacebookAdsClient } from "@/lib/integrations/facebook/client";
@@ -21,7 +22,7 @@ function addDays(key: string, days: number) {
 }
 
 function isRateLimit(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = moTaLoiCsdl(error);
   return /request limit reached|\(mã (4|17|32|613)\)|too many calls|rate limit/i.test(message);
 }
 
@@ -50,7 +51,7 @@ async function fetchInsightsChunked(client: ReturnType<typeof getFacebookAdsClie
     } catch (error) {
       if (!sizes.length || isRateLimit(error)) throw error;
       const [size, ...rest] = sizes;
-      log(`act_${accountId} ${s}→${e}: ${error instanceof Error ? error.message : String(error)} — chia cửa sổ ${size} ngày`);
+      log(`act_${accountId} ${s}→${e}: ${moTaLoiCsdl(error)} — chia cửa sổ ${size} ngày`);
       let cur = s;
       while (cur <= e) {
         const stop = addDays(cur, size - 1) < e ? addDays(cur, size - 1) : e;
@@ -166,7 +167,7 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
         ctx.log(`${account.name} (${account.accountId}): ${insights.length} dòng`);
       } catch (error) {
         ctx.summary.failed += 1;
-        const message = error instanceof Error ? error.message : String(error);
+        const message = moTaLoiCsdl(error);
         errors.push(`${account.name}: ${message.slice(0, 160)}`);
         ctx.log(`${account.name} (${account.accountId}): ${message}`);
       }
@@ -219,7 +220,7 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
         ctx.summary.warning = [ctx.summary.warning, `${reapplied.errors.length} chiến dịch không áp được ghép: ${cau.join(" | ")}`].filter(Boolean).join(" · ");
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = moTaLoiCsdl(error);
       ctx.summary.warning = [ctx.summary.warning, `Không áp lại được bảng ghép mã hàng: ${message.slice(0, 200)}. Số liệu quảng cáo của lượt này VẪN ĐÃ GHI XONG.`].filter(Boolean).join(" · ");
       ctx.log(`áp lại ghép mã hàng hỏng: ${message}`);
     }

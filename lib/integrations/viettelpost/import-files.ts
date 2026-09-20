@@ -1,4 +1,5 @@
 import { parseCodPaymentStatement, parseCodPaymentSummary, parseStatementDetail, parseVtpOrderList, mergeVtpOrderLists, type CodPaymentSummary, type StatementDetailRow, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
+import { moTaLoiCsdl } from "@/lib/db/error-message";
 
 /**
  * Hai loại tệp tải trực tiếp từ Viettel Post, dùng làm DỮ LIỆU GỐC cho ERP:
@@ -29,7 +30,7 @@ export class VtpFileError extends Error {
 }
 
 function message(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
+  return moTaLoiCsdl(error);
 }
 
 /**
