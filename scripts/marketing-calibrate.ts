@@ -27,8 +27,10 @@ import { getDb, schema } from "@/db";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { clearMemo } from "@/lib/cache";
 import { MARKETING_BASIS_LABEL, MATURITY_LABEL, ratioOf, type MarketingBasis } from "@/lib/constants/marketing-daily";
+import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { dimensionFilter, getMarketingDaily, type MarketingFilters } from "@/lib/queries/marketing-daily";
 import { getDailyBreakdown, pnlFacts } from "@/lib/queries/reports";
+import { PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 
 type Args = { from: string; to: string; marketer: string | null; product: string | null; basis: MarketingBasis };
@@ -209,11 +211,30 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   /* ── 4. ĐỐI CHIẾU SỐ ĐƠN VỚI POPULATION CANONICAL ── */
   log("\n" + "═".repeat(120));
   log("ĐỐI CHIẾU 3/4 — SỐ ĐƠN ĐỦ ĐIỀU KIỆN (population đơn đã xác nhận + loại trùng)");
+  /*
+    ═══════════ CÂU "ĐỘC LẬP" PHẢI ĐỘC LẬP VỀ ĐƯỜNG ĐI, KHÔNG PHẢI VỀ ĐỊNH NGHĨA ═══════════
+
+    Bản đầu viết `stage not in ('NEW','CANCELLED','DELETED')` — một danh sách LOẠI TRỪ tự gõ. Nghe
+    tương đương với population `confirmed`, nhưng không phải: `CONFIRMED_STAGES` là một danh sách
+    THÊM VÀO và nó KHÔNG có `WAITING`.
+
+    ĐO TRÊN PRODUCTION 19/09/2026, kỳ 01/09–09/09: đúng **2 đơn** ở `WAITING`, và đó là toàn bộ
+    chênh lệch mà công cụ này xếp nhóm LỖI (521 so với 519). Báo cáo đúng — `POPULATION_HINT` nói
+    thẳng population `confirmed` "bỏ đơn Mới chưa chốt". Sai là ở câu đối chiếu.
+
+    Bài học ghi lại vì nó là cái bẫy của mọi công cụ đối chiếu: một câu SQL viết tay để kiểm chứng
+    phải đi ĐƯỜNG KHÁC (đọc thẳng bảng, không qua ORM, không qua bảng dẫn xuất) nhưng phải dùng
+    CÙNG ĐỊNH NGHĨA. Gõ lại định nghĩa bằng trí nhớ là tự tạo ra một nguồn sự thật thứ hai — đúng
+    thứ cả kho mã này được viết ra để chặn.
+
+    Nên nó đọc thẳng `CONFIRMED_STAGES` từ hằng số. Thêm một giai đoạn mới vào sổ ấy thì câu này
+    tự đi theo; còn danh sách gõ tay thì im lặng lệch đi.
+  */
   const rows = await db.execute(sql`
     select count(*)::int as tong,
            count(*) filter (where exists (select 1 from order_attributions oa where oa.order_id = o.id and oa.status = 'DUPLICATE'))::int as trung
       from orders o
-     where o.stage::text not in ('NEW','CANCELLED','DELETED')
+     where o.stage::text in (${sql.join(CONFIRMED_STAGES.map((x) => sql`${x}`), sql`, `)})
        and o.inserted_at >= ${period.from}
        and o.inserted_at <= ${period.to}
   `);
@@ -235,14 +256,38 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   /* ── 5. ĐỐI CHIẾU KẾT QUẢ GIAO VỚI CHỨNG TỪ VẬN ĐƠN ── */
   log("\n" + "═".repeat(120));
   log("ĐỐI CHIẾU 4/4 — KẾT QUẢ GIAO (bảng kết quả đơn canonical)");
+  /*
+    MỘT ĐƠN, MỘT DÒNG — VÀ PHẢI LÀ VẬN ĐƠN MÀ BÁO CÁO ĐANG ĐỌC.
+
+    `canonical_order_outcome` có grain (đơn, vận đơn). Đơn hai vận đơn — vận đơn gốc cộng vận đơn
+    chiều hoàn `[số]P[số]`, hoặc một lượt tạo lại mã — có HAI dòng ở đó. Bản đầu của khối này nối
+    theo `order_id` không thôi, nên những đơn ấy được đếm hai lần.
+
+    Đo production 19/09/2026, kỳ 01/09–09/09: bảng in ra 548 đơn cho một population 519 — thừa
+    đúng 29 dòng, tất cả mang `AWAITING_PICKUP` (vận đơn thứ hai còn nằm ở `PENDING`). Con số
+    `AWAITING_PICKUP` in ra 79 trong khi sự thật là 50. Không phép so nào đỏ lên, vì 29 dòng thừa
+    đó tình cờ không rơi vào `DELIVERED` hay `RETURNED` — tức khối này đang in một con số sai mà
+    vẫn tự nhận là "đã đối chiếu".
+
+    Và nó sẽ thành BUG GIẢ ngay lần một vận đơn chiều hoàn mang chặng `DELIVERED` (luật mục 2:
+    `501 + RETURN` = phát thành công chiều hoàn): lúc đó `sqlDelivered` đếm dư và khối này báo
+    lệch với báo cáo — một lỗi không tồn tại, do chính công cụ đối chiếu tạo ra.
+
+    Bản vá dùng lại ĐÚNG `PRIMARY_ATTEMPT` của `lib/queries/return-rate.ts` — cùng phép chọn vận
+    đơn chính mà báo cáo dùng — thay vì mô tả lại nó bằng lời. Cùng bài học với lượt sửa
+    population: câu đối chiếu phải dùng CÙNG định nghĩa, không gõ lại bằng trí nhớ.
+  */
   const oc = await db.execute(sql`
     select coalesce(c.outcome, 'CHUA_TINH') as ket_qua, count(*)::int as so
-      from orders o
-      left join canonical_order_outcome c on c.order_id = o.id
-     where o.stage::text not in ('NEW','CANCELLED','DELETED')
-       and o.inserted_at >= ${period.from}
-       and o.inserted_at <= ${period.to}
-       and not exists (select 1 from order_attributions oa where oa.order_id = o.id and oa.status = 'DUPLICATE')
+      from orders
+      left join shipments on shipments.order_id = orders.id and ${PRIMARY_ATTEMPT}
+      left join canonical_order_outcome c
+             on c.order_id = orders.id and coalesce(c.shipment_id, '') = coalesce(shipments.id, '')
+     -- CÙNG population với phép so ở trên (xem lý do ở khối chú thích của ĐỐI CHIẾU 3/4).
+     where orders.stage::text in (${sql.join(CONFIRMED_STAGES.map((x) => sql`${x}`), sql`, `)})
+       and orders.inserted_at >= ${period.from}
+       and orders.inserted_at <= ${period.to}
+       and not exists (select 1 from order_attributions oa where oa.order_id = orders.id and oa.status = 'DUPLICATE')
      group by 1 order by 2 desc
   `);
   const ocRows = (Array.isArray(oc) ? oc : (oc as { rows?: Record<string, unknown>[] }).rows ?? []) as { ket_qua: string; so: number }[];
@@ -251,6 +296,26 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   const sqlReturned = (byOutcome.get("RETURNED") ?? 0) + (byOutcome.get("RETURNED_BY_RULE") ?? 0);
   const chuaTinh = byOutcome.get("CHUA_TINH") ?? 0;
   for (const [k, v] of byOutcome) log(`  ${k.padEnd(18)} ${v}`);
+  /*
+    BẢNG NÀY PHẢI CỘNG ĐÚNG BẰNG POPULATION — và đó là phép kiểm mà bản đầu thiếu.
+
+    Grain của `canonical_order_outcome` là (đơn, vận đơn), còn khối này đếm ĐƠN. Nếu tổng các nhóm
+    không bằng số đơn đủ điều kiện thì hoặc phép chọn vận đơn chính đã trôi, hoặc một đơn đang
+    được đếm nhiều lần — cả hai đều làm mọi con số bên dưới vô nghĩa, nên phải đỏ lên ngay tại đây
+    thay vì để người đọc tự cộng nhẩm. Một dòng thừa im lặng chính là cách con số 79 đi được tới
+    tận báo cáo.
+  */
+  const tongDongKetQua = [...byOutcome.values()].reduce((a, b) => a + b, 0);
+  log(`  cộng lại ${tongDongKetQua} dòng · population đủ điều kiện ${tongDon - trungDon}`);
+  if (tongDongKetQua !== tongDon - trungDon) {
+    add(
+      "BUG",
+      "Tổng dòng kết quả đơn",
+      String(tongDon - trungDon),
+      String(tongDongKetQua),
+      "Bảng kết quả đơn phải có ĐÚNG MỘT dòng cho mỗi đơn đủ điều kiện. Lệch nghĩa là phép chọn vận đơn chính (PRIMARY_ATTEMPT) không còn khớp với báo cáo — đơn nhiều vận đơn đang được đếm nhiều lần.",
+    );
+  }
   log(`  báo cáo: giao ${data.totals.deliveredOrders} · hoàn ${data.totals.returnedOrders} · đang đi ${data.totals.pendingOrders}`);
   /*
     ĐỘ PHỦ ĐỨNG TRƯỚC PHÉP SO. Bảng `canonical_order_outcome` là LỚP TĂNG TỐC, không phải nguồn
@@ -303,8 +368,22 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   }
   const soLoi = findings.filter((f) => f.kind === "BUG").length;
   log("\n" + "═".repeat(120));
-  if (soLoi === 0) log("✓ KHÔNG CÓ CHÊNH LỆCH NÀO THUỘC NHÓM LỖI. Mọi khác biệt đều giải thích được bằng mốc / tập đơn / độ trễ nguồn.");
-  else log(`✗ ${soLoi} CHÊNH LỆCH KHÔNG GIẢI THÍCH ĐƯỢC — đây là lỗi, không phải sai số.`);
+  /*
+    DÒNG CUỐI PHẢI TỰ KHAI NÓ LÀ LƯỢT CHẠY NÀO.
+
+    Nhiều phiên cùng chạy thao tác vận hành trên một kho, và log của GitHub Actions chỉ đọc được
+    phần ĐUÔI. Phần đầu — nơi in kỳ và bộ lọc — nằm ngoài tầm với, nên người đọc log phải đoán lượt
+    nào là lượt mình vừa gửi. Đã đoán nhầm bốn lần trong một buổi chiều, mỗi lần là một lượt chạy
+    10 phút mất trắng, và một lần suýt dựng bảng số liệu từ kết quả của phiên khác.
+
+    Nên phạm vi được in LẠI ở dòng cuối cùng. Rẻ, và nó biến "lượt nào là của tôi" từ một phép suy
+    luận thành một phép đọc.
+  */
+  const dau = [`kỳ ${args.from}→${args.to}`, args.marketer ? `marketer=${args.marketer}` : null, args.product ? `mã=${args.product}` : null, `mốc=${args.basis}`]
+    .filter(Boolean)
+    .join(" · ");
+  if (soLoi === 0) log(`✓ KHÔNG CÓ CHÊNH LỆCH NÀO THUỘC NHÓM LỖI. Mọi khác biệt đều giải thích được bằng mốc / tập đơn / độ trễ nguồn.  [${dau}]`);
+  else log(`✗ ${soLoi} CHÊNH LỆCH KHÔNG GIẢI THÍCH ĐƯỢC — đây là lỗi, không phải sai số.  [${dau}]`);
   return { findings, days: data.rows.length, bugs: soLoi };
 }
 

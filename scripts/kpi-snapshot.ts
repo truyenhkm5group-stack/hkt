@@ -13,9 +13,9 @@
  *
  * Dùng qua ops: Actions → "Vận hành ERP trên VPS" → kpi-snapshot
  */
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { ORDER_OUTCOME } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 
 const o = schema.orders;
 const s = schema.shipments;
@@ -23,7 +23,21 @@ const s = schema.shipments;
 async function main() {
   const db = await getDb();
 
-  // ── Phân bố kết quả đơn: con số quan trọng nhất, và là con số dễ bị đổi ngầm nhất ──
+  /*
+   * ── Phân bố kết quả đơn: con số quan trọng nhất, và là con số dễ bị đổi ngầm nhất ──
+   *
+   * MỖI ĐƠN MỘT DÒNG — `PRIMARY_ATTEMPT`. Nối trần `shipments.order_id = orders.id` sinh MỘT DÒNG
+   * MỖI LẦN GỬI, nên một đơn gửi lại rơi vào HAI ô kết quả cùng lúc: `count(distinct o.id)` khử
+   * trùng BÊN TRONG từng ô, nhưng không ai khử trùng GIỮA các ô. Tổng các phần khi ấy LỚN HƠN
+   * tổng — đúng chiều lệch đã đo trên production 19/09/2026: tổng 3.132 đơn, các ô cộng lại 3.158,
+   * thừa 26.
+   *
+   * 26 đơn ấy đều cùng một hình: hai lần gửi, một lần còn `AWAITING_PICKUP` và một lần đã đi tiếp
+   * (11 `DELIVERED` · 14 `IN_TRANSIT` · 1 `RETURNED`). Đo cùng ngày: 31 đơn có nhiều lần gửi, và
+   * với `PRIMARY_ATTEMPT` thì 0 đơn còn ra khác một dòng.
+   *
+   * Đây KHÔNG phải "thiếu một ô kết quả" như lời báo lỗi cũ đoán — xem lại lời báo ở cuối hàm.
+   */
   const [outcome] = await db
     .select({
       tong: sql<number>`count(distinct ${o.id})`,
@@ -45,7 +59,7 @@ async function main() {
       cancelled: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
     })
     .from(o)
-    .leftJoin(s, sql`${s.orderId} = ${o.id}`);
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT));
 
   // ── Ba con số tiền, tách bạch theo đúng luật: lên đơn ≠ giao thành công ≠ thực nhận ──
   const [money] = await db
@@ -57,7 +71,7 @@ async function main() {
       codPending: sql<number>`coalesce(sum(coalesce(${s.codAmount}, 0)) filter (where ${ORDER_OUTCOME} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0), 0)`,
     })
     .from(o)
-    .leftJoin(s, sql`${s.orderId} = ${o.id}`);
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT));
 
   // ── Vài con số nền để phát hiện lệch dữ liệu, không phải lệch công thức ──
   const [scale] = await db
@@ -93,9 +107,21 @@ async function main() {
     Number(outcome?.cancelled ?? 0);
   const tong = Number(outcome?.tong ?? 0);
   if (cacPhan !== tong) {
+    /*
+     * HAI CHIỀU LỆCH, HAI NGUYÊN NHÂN KHÁC HẲN NHAU — và lời báo phải nói đúng cái nào.
+     *
+     * Bản đầu chỉ viết cho chiều THIẾU ("thêm ô vào khối ket_qua_don"). Ngày 19/09/2026 nó đỏ với
+     * chiều NGƯỢC LẠI (thừa 26) và vẫn khuyên thêm ô — một lời khuyên đẩy người đọc đi đúng hướng
+     * sai. Một thông báo lỗi tự tin mà sai còn tốn thời gian hơn không có thông báo nào.
+     */
+    const thua = cacPhan - tong;
     throw new Error(
-      `Ảnh chụp KPI đếm thiếu: tổng ${tong} đơn nhưng các ô cộng lại chỉ ${cacPhan} (lệch ${tong - cacPhan}). ` +
-        `Gần như chắc chắn ORDER_OUTCOME có thêm một kết quả mới mà script này chưa có ô cho nó — thêm ô vào khối "ket_qua_don" ở scripts/kpi-snapshot.ts.`,
+      thua > 0
+        ? `Ảnh chụp KPI đếm THỪA: tổng ${tong} đơn nhưng các ô cộng lại ${cacPhan} (thừa ${thua}). ` +
+          `Một đơn đang rơi vào NHIỀU ô cùng lúc — gần như chắc chắn truy vấn nối orders↔shipments mà thiếu ` +
+          `\`PRIMARY_ATTEMPT\`, nên đơn gửi lại nhiều lần sinh nhiều dòng. Kiểm câu SQL, ĐỪNG thêm ô.`
+        : `Ảnh chụp KPI đếm THIẾU: tổng ${tong} đơn nhưng các ô cộng lại ${cacPhan} (thiếu ${-thua}). ` +
+          `Gần như chắc chắn ORDER_OUTCOME có thêm một kết quả mới mà script này chưa có ô cho nó — thêm ô vào khối "ket_qua_don".`,
     );
   }
 

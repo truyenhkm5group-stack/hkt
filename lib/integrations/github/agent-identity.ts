@@ -65,6 +65,7 @@ export const AGENT_GITHUB_ALLOWED = [
   "branch:push",
   "pr:open",
   "pr:update",
+  "pr:update-branch",
   "checks:read",
 ] as const;
 export type AgentGithubAction = (typeof AGENT_GITHUB_ALLOWED)[number];
@@ -254,6 +255,66 @@ export function maskRemote(url: string): string {
   return url.replace(/\/\/[^@]*@/, "//***@");
 }
 
+/**
+ * ═══════════ TẠO NHÁNH VÀ GHI COMMIT BẰNG API, KHÔNG BẰNG `git` ═══════════
+ *
+ * `agentRemoteUrl()` (git push) và hai hàm dưới đây làm cùng một việc bằng hai đường, và đường
+ * nào dùng được là chuyện của MÔI TRƯỜNG chứ không phải của sở thích:
+ *
+ *   · `git push` cần một tiến trình `git` mà credential của nó KHÔNG bị ai khác tiêm vào. Đo thật
+ *     19/09/2026 trong một phiên agent: một lượt đẩy mang token RÁC vẫn THÀNH CÔNG vào kho này,
+ *     vì lớp proxy của phiên tự gắn credential của phiên. Ở môi trường như thế, lượt đẩy nói về
+ *     danh tính của PHIÊN, không nói gì về danh tính của App — và một bằng chứng danh tính rút ra
+ *     từ đó là bằng chứng giả.
+ *   · Lời gọi API mang `Authorization` TƯỜNG MINH. Kiểm được bằng một câu hỏi: `GET /user` với
+ *     token cài đặt phải trả 403 (token cài đặt không có ngữ cảnh người dùng). Trả về một hồ sơ
+ *     người dùng nghĩa là có ai đó đã tráo token.
+ *
+ * Nên đường API là đường CHỨNG MINH ĐƯỢC, và nó cũng đủ cho một agent chỉ có `contents: write`.
+ */
+
+/** Tạo nhánh mới từ một ref có sẵn. Nhánh phải mang tiền tố của agent. */
+export async function createAgentBranch(input: { branch: string; fromRef?: string; now?: Date }): Promise<{ branch: string; baseSha: string }> {
+  const cfg = must();
+  const base = input.fromRef ?? "main";
+  const branch = assertAgentBranch(input.branch, base);
+  const token = await installationToken(cfg, input.now ?? new Date());
+  const baseRes = await call(`${API}/repos/${cfg.owner}/${cfg.repo}/git/ref/heads/${encodeURIComponent(base)}`, { auth: token });
+  if (!baseRes.ok) throw new Error(`Không đọc được nhánh gốc ${base} (HTTP ${baseRes.status})`);
+  const baseSha = ((await baseRes.json()) as { object?: { sha?: string } }).object?.sha;
+  if (!baseSha) throw new Error(`Nhánh gốc ${base} không có SHA`);
+  const res = await call(`${API}/repos/${cfg.owner}/${cfg.repo}/git/refs`, {
+    method: "POST",
+    auth: token,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: baseSha }),
+  });
+  if (!res.ok) throw new Error(`Không tạo được nhánh ${branch} (HTTP ${res.status})`);
+  return { branch, baseSha };
+}
+
+/**
+ * Ghi MỘT tệp thành MỘT commit trên nhánh của agent. Tác giả commit do TOKEN quyết định (GitHub
+ * ghi `<slug>[bot]`), nên không có ô nào để gõ một cái tên khác vào — cùng tinh thần AGENTS.md
+ * mục 34: quy kết đi bằng khoá, không bằng ô chữ.
+ */
+export async function commitAgentFile(input: { branch: string; path: string; content: string; message: string; baseBranch?: string; now?: Date }): Promise<{ sha: string }> {
+  const cfg = must();
+  const branch = assertAgentBranch(input.branch, input.baseBranch ?? "main");
+  if (!input.path || input.path.startsWith("/") || input.path.includes("..")) throw new Error(`Đường dẫn không hợp lệ: ${input.path}`);
+  const token = await installationToken(cfg, input.now ?? new Date());
+  const res = await call(`${API}/repos/${cfg.owner}/${cfg.repo}/contents/${input.path.split("/").map(encodeURIComponent).join("/")}`, {
+    method: "PUT",
+    auth: token,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: input.message, content: Buffer.from(input.content, "utf8").toString("base64"), branch }),
+  });
+  if (!res.ok) throw new Error(`Không ghi được ${input.path} lên ${branch} (HTTP ${res.status})`);
+  const sha = ((await res.json()) as { commit?: { sha?: string } }).commit?.sha;
+  if (!sha) throw new Error("GitHub không trả SHA của commit");
+  return { sha };
+}
+
 /** Mở PR bằng danh tính agent. Base mặc định là nhánh mặc định; head phải là nhánh của agent. */
 export async function openAgentPullRequest(input: { head: string; base?: string; title: string; body: string; now?: Date }): Promise<{ number: number; url: string }> {
   const cfg = must();
@@ -284,6 +345,38 @@ export async function updateAgentPullRequest(input: { number: number; title?: st
   const token = await installationToken(cfg, input.now ?? new Date());
   const res = await call(`${API}/repos/${cfg.owner}/${cfg.repo}/pulls/${input.number}`, { method: "PATCH", auth: token, headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
   if (!res.ok) throw new Error(`Không cập nhật được pull request #${input.number} (HTTP ${res.status})`);
+}
+
+/**
+ * Nhập nhánh đích vào nhánh của PR để nó hết "behind" — GitHub gọi là *Update branch*.
+ *
+ * VÌ SAO AGENT CẦN VIỆC NÀY, VÀ VÌ SAO NÓ AN TOÀN: `strict_required_status_checks_policy` bắt PR
+ * phải cập nhật với nhánh đích NGAY TẠI LÚC merge. Với nhiều phiên chạy song song, nhánh đích
+ * nhảy liên tục, nên một PR của agent sẽ "behind" vài phút sau khi mở. Nếu NGƯỜI phải bấm nút ấy
+ * thì mỗi lần bấm lại biến người thành **người đẩy cuối**, và `require_last_push_approval` sẽ cấm
+ * chính họ duyệt — cổng đóng lại với người mà nó đang chờ.
+ *
+ * Việc này KHÔNG mở thêm quyền nào: nó là một lượt ghi vào nhánh CỦA AGENT, đúng thứ
+ * `contents: write` đã cho phép, và `assertAgentBranch` vẫn chặn nhánh mặc định. Nó KHÔNG gộp PR,
+ * KHÔNG duyệt, KHÔNG đụng nhánh đích.
+ */
+export async function updateAgentPullRequestBranch(input: { number: number; baseBranch?: string; now?: Date }): Promise<{ head: string }> {
+  const cfg = must();
+  const token = await installationToken(cfg, input.now ?? new Date());
+  const prRes = await call(`${API}/repos/${cfg.owner}/${cfg.repo}/pulls/${input.number}`, { auth: token });
+  if (!prRes.ok) throw new Error(`Không đọc được pull request #${input.number} (HTTP ${prRes.status})`);
+  const pr = (await prRes.json()) as { head?: { ref?: string }; base?: { ref?: string } };
+  // Chặn ở tầng mã TRƯỚC khi gọi: nhánh của PR phải là nhánh của agent, không phải nhánh mặc định.
+  assertAgentBranch(pr.head?.ref ?? "", input.baseBranch ?? pr.base?.ref ?? "main");
+  const res = await call(`${API}/repos/${cfg.owner}/${cfg.repo}/pulls/${input.number}/update-branch`, {
+    method: "PUT",
+    auth: token,
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  // 202 = GitHub nhận việc và làm bất đồng bộ; nơi gọi phải đọc lại SHA để biết nó xong chưa.
+  if (res.status !== 202) throw new Error(`Không cập nhật được nhánh của #${input.number} (HTTP ${res.status})`);
+  return { head: pr.head?.ref ?? "" };
 }
 
 /** Đọc kết quả cổng của một commit. CHỈ ĐỌC. */

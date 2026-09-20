@@ -24,6 +24,7 @@ import { testFinanceCockpit } from "./finance-cockpit.test";
 import { testCostDoubleCount } from "./cost-double-count.test";
 import { testPayrollCostPreservation } from "./payroll-cost-preservation.test";
 import { testPayrollCarryover } from "./payroll-carryover.test";
+import { testDataTruth } from "./data-truth.test";
 import { testPayrollCogsCutoff } from "./payroll-cogs-cutoff.test";
 import { testProfitCarryover } from "./profit-carryover.test";
 import { testCompensationProfitBasis } from "./compensation-profit.test";
@@ -206,6 +207,7 @@ import { testReportingParity } from "./reporting-parity.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
 import { testAgentGithubIdentityModule } from "./agent-identity.test";
+import { testAgentPrBridge } from "./agent-pr-bridge.test";
 import {
   testClassifierNeverConcludesForCarrier,
   testClassifierStepsAndCodes,
@@ -1699,6 +1701,7 @@ async function main() {
   await testCostDoubleCount(db);
   await testPayrollCostPreservation(db);
   await testPayrollCarryover(db);
+  await testDataTruth(db);
   await testPayrollCogsCutoff(db);
   await testProfitCarryover();
   testCompensationProfitBasis();
@@ -1816,6 +1819,9 @@ async function main() {
   await testAgentRunner();
   await testPhase2aBarriers();
   await testAgentGithubIdentityModule();
+  // Ngay sau đó: cầu nối mở PR dùng chung adapter ấy. Bài này chỉ quét mã nguồn — không mạng,
+  // không token, không CSDL — nên nó chạy được ở bất kỳ chỗ nào trong chuỗi.
+  testAgentPrBridge();
   await testCtoProposal();
   await testWorkforce(db);
   await testOrgMembership(db);

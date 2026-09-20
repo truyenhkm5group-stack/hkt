@@ -1,0 +1,72 @@
+# ═══════════ CẦU NỐI: CẬP NHẬT NHÁNH PR BẰNG DANH TÍNH AGENT ═══════════
+#
+# Anh em với `agent-open-pr.yml`, cùng bốn hàng rào, và tồn tại vì cùng một lý do: với
+# `require_last_push_approval: true`, MỌI lượt đẩy vào nhánh PR đều phải là của agent — kể cả lượt
+# "Update branch". Người bấm nút ấy tự biến mình thành người đẩy cuối và mất quyền duyệt chính PR
+# đó (đo 19/09/2026 trên PR #27: 405 "New changes require approval from someone other than the
+# last pusher"). Người chỉ làm đúng một việc: DUYỆT.
+#
+# ─── BỐN HÀNG RÀO ───
+#
+#  1. `ref` phải là nhánh mặc định. Dispatch từ nhánh khác ⇒ DỪNG trước khi secret được đọc.
+#  2. KHÔNG checkout, KHÔNG chạy một dòng nào của nhánh PR. Số hiệu PR chỉ là một CON SỐ.
+#  3. `permissions` của `GITHUB_TOKEN`: `contents: read` + `pull-requests: read`. Không quyền GHI
+#     nào — token này chỉ để ĐỌC LẠI làm đối chứng.
+#  4. Quyền của App KHÔNG đổi. `contents: write` đã đủ; không thêm `administration`, không thêm
+#     `workflows`.
+#
+# Agent vẫn KHÔNG gộp và KHÔNG duyệt được: adapter không có đường `/merge` lẫn `/reviews`, và
+# `tests/agent-identity.test.ts` quét mã nguồn để giữ điều đó.
+name: Cập nhật nhánh PR bằng danh tính agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "Số hiệu PR cần cập nhật (nhánh của nó phải bắt đầu bằng ai/ hoặc claude/)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: agent-update-pr
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Chỉ chạy từ nhánh mặc định
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [ "$REF_NAME" != "$DEFAULT_BRANCH" ]; then
+            echo "::error::Cầu nối chỉ chạy từ nhánh mặc định ($DEFAULT_BRANCH), thấy \"$REF_NAME\"."
+            exit 1
+          fi
+          echo "ref = $REF_NAME (đúng nhánh mặc định)"
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Cập nhật nhánh PR bằng danh tính agent
+        env:
+          ERP_AGENT_GITHUB_APP_ID: ${{ secrets.ERP_AGENT_GITHUB_APP_ID }}
+          ERP_AGENT_GITHUB_INSTALLATION_ID: ${{ secrets.ERP_AGENT_GITHUB_INSTALLATION_ID }}
+          ERP_AGENT_GITHUB_PRIVATE_KEY: ${{ secrets.ERP_AGENT_GITHUB_PRIVATE_KEY }}
+          ERP_AGENT_GITHUB_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+          AGENT_PR_NUMBER: ${{ inputs.pr }}
+        run: npx tsx --tsconfig tsconfig.json scripts/agent-update-pr.ts
