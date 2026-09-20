@@ -427,6 +427,40 @@ deploy dừng, không phải cảnh báo.
     khi loại bất kỳ nhóm quan sát nào khỏi một con số chấm người, **phải đo con số ấy trước và sau
     khi loại** — một bộ lọc nghe hợp lý vẫn có thể đổi kết luận theo hướng ngược hẳn.
 
+65. **BÀI KIỂM ĐO MÃ NGUỒN VÀ HỢP ĐỒNG, KHÔNG ĐO CÁI MÁY ĐANG CHẠY.** Mục 50 đã cấm ghim ngày
+    tuyệt đối; luật này mở rộng đúng lớp ấy sang MỌI thứ thuộc về môi trường chạy. Một bài kiểm
+    cho hai kết luận trên hai máy thì nó không đo mã nguồn — nó đo cái máy, và người ta sẽ đi gia
+    hạn con số thay vì đọc thông điệp của nó.
+
+    Bốn nguồn đã CẮN THẬT trong kho này, cả bốn đều xanh ở một nơi và đỏ ở nơi khác:
+
+    · **Kết thúc dòng.** Không có `.gitattributes`, `core.autocrlf=true` ⇒ 1.302 tệp CRLF trên
+      Windows còn CI (Linux) đo LF. Bài kiểm quét mã nguồn cắt theo `indexOf("\n}\n")` nhận `-1`,
+      rồi `slice(0, -1 + 2)` ra `"f"` — `tests/cs-workqueue.test.ts` ĐỎ trên Windows, XANH ở CI
+      (20/09/2026). Sửa ở tầng kho: `* text=auto eol=lf`. **Không vá từng lời gọi `indexOf`** —
+      còn hàng chục chỗ khác cắt mã nguồn theo cùng kiểu.
+    · **Dấu phân cách đường dẫn.** `path.relative()` trả `\` trên Windows, `/` trên Linux, nên
+      khoá tra cứu trong danh sách khai không bao giờ khớp. Luôn `.split(path.sep).join("/")`.
+    · **Biến môi trường và sự CÓ MẶT của secret.** `githubConfig()` rẽ nhánh theo `GITHUB_TOKEN`,
+      và nhánh ấy đổi hành vi thật (trần request 12 khi có token, 3 khi ẩn danh). Một khẳng định
+      so với hằng số `12` trong khi fixture dựng từ `prDetailBudget(...)` xanh trên máy có token
+      và ĐỎ ở CI. Bài kiểm phải dựng kỳ vọng TỪ CÙNG MỘT NGUỒN mà mã nguồn dùng, không gõ lại con
+      số. `gates.yml` chạy `npm test` **HAI LẦN** — ẩn danh, rồi có token — và token ở lượt hai
+      **BẮT BUỘC LÀ TOKEN GIẢ**: kho PUBLIC, bộ kiểm thử không gọi mạng thật, nên thứ duy nhất
+      cần là một chuỗi khác rỗng để rẽ nhánh. Tuyệt đối không đưa token/private key thật vào CI.
+    · **Công cụ của hệ điều hành.** `flock` không có trên Git Bash; `spawn("npm", {shell:false})`
+      ⇒ `ENOENT`, `spawn("npm.cmd", {shell:false})` ⇒ `EINVAL` (Node chặn `.cmd` từ bản vá
+      CVE-2024-27980). **Không được đổi một tính chất bảo mật để lấy màu xanh** — bật `shell: true`
+      là biến cả hàng rào của agent thành lời khuyên; gọi thẳng `npm-cli.js` bằng `process.execPath`
+      giữ nguyên `shell: false`.
+
+    Khi một bài kiểm THẬT SỰ cần công cụ chỉ có trên nền triển khai: **thiếu công cụ trên nền ấy
+    là ĐỎ** (ngày CI mất `flock` phải đỏ, đúng lúc cần nhất), còn trên nền mà mã ấy không bao giờ
+    chạy thì in **"CHƯA ĐO ĐƯỢC"** — một câu trung thực, KHÔNG phải một dấu ✓. Bỏ qua im lặng và
+    mô phỏng bằng lời đều là nói dối, chỉ khác cách.
+
+    `tests/test-hygiene.test.ts` quét cả lớp ở mức mã nguồn; miễn trừ phải khai kèm lý do.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và
