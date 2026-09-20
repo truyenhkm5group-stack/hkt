@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { getDb, schema, type Db } from "@/db";
 import { codStatusForAmount } from "@/lib/constants/cod";
 import { CAPABILITY_SCOPE_ERROR, CAPABILITY_PROBE_LIMIT } from "@/lib/constants/logistics-freshness";
@@ -482,7 +483,7 @@ export async function syncViettelPostShipments(options: { trigger?: SyncTrigger;
         else ctx.summary.skipped += 1;
       } catch (error) {
         ctx.summary.failed += 1;
-        const cauLoi = error instanceof Error ? error.message : String(error);
+        const cauLoi = moTaLoiCsdl(error);
         ctx.log(`${orderNumber}: ${cauLoi}`);
         await db.update(schema.shipments).set({ lastVtpSyncAt: new Date() }).where(eq(schema.shipments.id, shipment.id)).catch(() => undefined);
         // Lỗi của LƯỢT HỎI (mạng, 5xx) không phải lỗi của kiện hàng — lùi nhịp, giữ nguyên câu lỗi
@@ -549,7 +550,7 @@ export async function importViettelPostOrders(options: { trigger?: SyncTrigger; 
           else ctx.summary.skipped += 1;
         } catch (error) {
           ctx.summary.failed += 1;
-          ctx.log(`${record.orderNumber}: ${error instanceof Error ? error.message : String(error)}`);
+          ctx.log(`${record.orderNumber}: ${moTaLoiCsdl(error)}`);
         }
       }
       fetched += result.orders.length;

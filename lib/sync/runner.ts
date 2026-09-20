@@ -1,4 +1,5 @@
 import { and, eq, lt } from "drizzle-orm";
+import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { getDb, schema } from "@/db";
 import { staleMemo } from "@/lib/cache";
 import { publish } from "@/lib/realtime/bus";
@@ -142,7 +143,7 @@ export async function runSyncJob<T>(
       if (coGiDeBao) publish({ type: "sync", source: options.source, job: options.job, status });
       return { run: { id: run.id, status }, summary, result };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = moTaLoiCsdl(error);
       await db
         .update(schema.syncRuns)
         .set({ status: "FAILED", imported: summary.imported, updated: summary.updated, skipped: summary.skipped, failed: summary.failed + 1, detail: summary.detail || logs.at(-1) || "", error: message.slice(0, 2000), finishedAt: new Date() })

@@ -64,6 +64,7 @@ import { cleanupAgentIngestFixtures, testAgentIngestDb, testAgentIngestPure, tes
 import { testTestHygiene } from "./test-hygiene.test";
 import { cleanupAiHealthFixtures, testAiHealthKhongDemLuotTuKiem, testAiHealthSourceGuards } from "./ai-health-selftest.test";
 import { cleanupAiIncidentFixtures, testAiIncidentPure, testAiIncidentSourceGuards, testAiIncidentWatchDb } from "./ai-incident-watch.test";
+import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.test";
 import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
@@ -1846,6 +1847,8 @@ async function main() {
   */
   await testAiHealthKhongDemLuotTuKiem();
   await cleanupAiHealthFixtures();
+  /* LỖI CSDL ĐỌC ĐƯỢC — gây lỗi Postgres THẬT trên PGlite rồi đọc lại, không mô phỏng bằng lời. */
+  await testMoTaLoiCsdl();
   /*
     CANH KHOÁ AI. Chạy bộ canh THẬT trên CSDL và gieo đúng hình dạng lỗi đã xảy ra 20/09 (hết
     credit). Tự dọn bằng tiền tố `ai-inc-` và tiêu đề sự cố.
@@ -1922,6 +1925,7 @@ async function main() {
   testAiHealthSourceGuards();
   testAiIncidentPure();
   testAiIncidentSourceGuards();
+  testMoTaLoiSourceGuards();
   testPhamViTheoVai();
   testHangRaoTuyetDoi();
   testHangRaoBaiKiem();
