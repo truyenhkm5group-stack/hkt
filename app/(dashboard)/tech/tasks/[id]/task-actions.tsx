@@ -165,7 +165,7 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
           phép lịch sự với người dùng, KHÔNG phải hàng rào — ẩn một nút không khoá được một action.
         */}
         <div className="space-y-1.5">
-          <Label className="text-xs">Giao cho agent</Label>
+          <Label className="text-xs">Khởi động lượt chạy agent</Label>
           {dispatchReason ? (
             <p className="text-xs text-muted-foreground">{dispatchReason}</p>
           ) : (
@@ -174,13 +174,15 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
                 size="sm"
                 variant="outline"
                 disabled={pending}
-                onClick={() => chay(() => dispatchTaskToAgentAction({ taskCode, gates: "typecheck,lint,test,build" }), `Đã giao ${taskCode} cho agent — theo dõi ở GitHub Actions`)}
+                onClick={() => chay(() => dispatchTaskToAgentAction({ taskCode, gates: "typecheck,lint,test,build" }), `Đã khởi động lượt chạy agent — theo dõi ở GitHub Actions`)}
               >
                 {pending ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
-                Giao cho agent
+                Khởi động lượt chạy agent
               </Button>
               <p className="text-xs text-muted-foreground">
                 Khởi động một lượt chạy thật trên GitHub Actions (tốn khoá AI và phút Actions). Agent KHÔNG merge, KHÔNG deploy — nó mở một PR để người xem.
+                {" "}
+                <strong>Lượt chạy hiện CHƯA nhận được việc này</strong>: máy chạy agent không đọc được CSDL production nên nó tự tạo một việc R0 để tự kiểm. Trao việc thật là Nấc 3b.
               </p>
             </>
           )}

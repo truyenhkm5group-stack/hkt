@@ -12,6 +12,23 @@ import { recordTechTaskEvent } from "@/lib/tech/service";
  *
  *     cấu hình  →  việc  →  hạn mức  →  GỬI  →  ghi vết
  *
+ * ─── GIỚI HẠN PHẢI NÓI RA: LƯỢT CHẠY CHƯA NHẬN ĐƯỢC VIỆC NÀY ───
+ *
+ * `agent-run.yml` hôm nay chỉ nhận MỘT đầu vào: `gates`. Nó tự tạo việc R0 của riêng nó bằng
+ * `agent:proof-setup` rồi chạy agent trên việc ấy. Nghĩa là: bấm "giao việc" cho `TECH-12` sẽ
+ * KHỞI ĐỘNG một lượt chạy, nhưng lượt chạy đó KHÔNG làm `TECH-12`.
+ *
+ * Lý do chưa trao được việc: runner nằm trên máy GitHub Actions với một CSDL PGlite dùng-một-lần,
+ * nên nó KHÔNG đọc được `tech_tasks` của production. Hai lối trao việc, và lối thứ nhất bị loại:
+ *
+ *   · truyền tiêu đề/mô tả việc qua `inputs` của `workflow_dispatch` — KHÔNG: kho này PUBLIC, và
+ *     đầu vào dispatch hiện nguyên văn trong giao diện Actions. Nội dung việc Tech trở thành công
+ *     khai.
+ *   · một cửa ĐỌC hẹp trên ERP, đối xứng với cửa ghi `/api/tech/agent-run` — đó là Nấc 3b, chưa làm.
+ *
+ * Nên bản này KHÔNG nói "đã giao việc". Nó nói đúng thứ nó làm: khởi động một lượt chạy. Một nút
+ * hứa nhiều hơn thứ nó làm là cách nhanh nhất để người dùng thôi tin mọi nút khác.
+ *
  * ─── VÌ SAO HẠN MỨC ĐẾM SAU CÙNG, NGAY TRƯỚC LÚC GỬI ───
  *
  * Đếm sớm rồi mới kiểm việc nghĩa là một lượt bấm vào việc KHÔNG HỢP LỆ vẫn tiêu một suất trong
@@ -97,7 +114,7 @@ export async function dispatchTaskToAgent(input: { taskCode: string; gates: stri
     {
       taskId: task.id,
       kind: "RUN",
-      note: `Giao cho agent ${agent?.key ?? "?"} qua GitHub Actions (${res.workflow} @ ${res.ref})`,
+      note: `Khởi động lượt chạy agent ${agent?.key ?? "?"} (${res.workflow} @ ${res.ref}). LƯU Ý: lượt chạy tự tạo việc R0 của riêng nó — nó CHƯA nhận được việc này (xem Nấc 3b).`,
       payload: { workflow: res.workflow, ref: res.ref, gates: input.gates },
     },
     { kind: "HUMAN", id: input.actor.id, name: input.actor.name || input.actor.email },

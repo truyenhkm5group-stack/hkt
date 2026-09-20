@@ -208,7 +208,7 @@ export async function testDispatchService() {
 
     const viec = await db.query.techTasks.findFirst({ where: like(schema.techTasks.code, "DISP-1"), columns: { id: true, status: true } });
     assert.equal(viec?.status, "TRIAGED", "GIAO việc KHÔNG được tự đổi trạng thái việc — đó là một quyết định khác");
-    const suKien = await db.query.techTaskEvents.findMany({ where: like(schema.techTaskEvents.note, "Giao cho agent%") });
+    const suKien = await db.query.techTaskEvents.findMany({ where: like(schema.techTaskEvents.note, "Khởi động lượt chạy agent%") });
     assert.ok(suKien.length >= 1, "phải có một dòng trong lịch sử của chính việc ấy");
 
     /*
@@ -317,5 +317,36 @@ export function testDispatchSourceGuards() {
   assert.ok(jGui > 0 && jAudit > jGui, "audit phải ghi SAU lượt gửi — ghi trước rồi gửi hỏng là tiêu một suất cho một lượt chạy chưa từng tồn tại");
   assert.ok(than.includes("DISPATCH_AUDIT_ACTION"), "và phải dùng ĐÚNG khoá hành động mà sổ đếm hạn mức đang đọc");
 
-  console.log("✓ Nấc 3 (giao việc cho agent): 4 lý do từ chối phân biệt được · khoá GHI tách khỏi khoá ĐỌC không fallback · chỉ agent-run.yml, chỉ ref main · 403/404/hạn mức là ba câu khác nhau · hạn mức đếm từ audit_logs và chạm trần thì dừng trước khi gọi mạng");
+  /*
+    ───────── LỜI NÓI PHẢI KHỚP VỚI THỨ MÃ NGUỒN LÀM ─────────
+
+    `agent-run.yml` hôm nay chỉ nhận MỘT đầu vào (`gates`) và tự tạo việc R0 của riêng nó bằng
+    `agent:proof-setup`. Nghĩa là bấm nút cho `TECH-12` KHỞI ĐỘNG một lượt chạy nhưng lượt ấy
+    KHÔNG làm `TECH-12`. Bản này nói đúng thứ nó làm, và bộ gác dưới đây giữ cho hai thứ không
+    trôi xa nhau theo CẢ HAI chiều:
+
+      · workflow mọc thêm đầu vào việc  ⇒ ĐỎ, buộc đi sửa lại câu chữ (nay đã trao được việc);
+      · câu chữ quay lại hứa "giao việc" ⇒ ĐỎ, vì mã nguồn chưa làm được điều đó.
+
+    Một nút hứa nhiều hơn thứ nó làm là cách nhanh nhất để người dùng thôi tin mọi nút khác.
+  */
+  const wf = readFileSync(path.join(goc, ".github/workflows/agent-run.yml"), "utf8");
+  const khoiInputs = wf.slice(wf.indexOf("inputs:"), wf.indexOf("permissions:"));
+  const coDauVaoViec = /task(_code)?\s*:/.test(khoiInputs);
+  const ui = readFileSync(path.join(goc, "app/(dashboard)/tech/tasks/[id]/task-actions.tsx"), "utf8");
+  if (!coDauVaoViec) {
+    assert.ok(
+      ui.includes("CHƯA nhận được việc này"),
+      "workflow chưa nhận được việc thì màn hình PHẢI nói rõ điều đó — không được để nút hứa nhiều hơn thứ nó làm",
+    );
+    assert.ok(!ui.includes(">Giao cho agent<"), "…và nhãn nút không được là 'Giao cho agent' khi việc chưa được trao");
+    assert.ok(svc.includes("CHƯA nhận được việc này"), "đường thực thi cũng phải ghi lại giới hạn ấy vào lịch sử của việc");
+  } else {
+    assert.ok(
+      !ui.includes("CHƯA nhận được việc này"),
+      "workflow ĐÃ nhận được việc — gỡ câu cảnh báo cũ đi, một cảnh báo sai còn tệ hơn không có",
+    );
+  }
+
+  console.log("✓ Nấc 3 (giao việc cho agent): 4 lý do từ chối phân biệt được · khoá GHI tách khỏi khoá ĐỌC không fallback · chỉ agent-run.yml, chỉ ref main · 403/404/hạn mức là ba câu khác nhau · hạn mức đếm từ audit_logs và chạm trần thì dừng trước khi gọi mạng · lời nói khớp mã nguồn (lượt chạy CHƯA nhận được việc, và màn hình nói ra)");
 }
