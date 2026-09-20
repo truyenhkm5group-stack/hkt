@@ -42,6 +42,7 @@ on:
           - smoke               # mở thật các màn hình chính bằng phiên đăng nhập hợp lệ, đo thời gian từng trang
           - verify              # MỘT LƯỢT: dịch vụ + health + tài nguyên + ổ đĩa + lỗi log gần nhất + smoke (CHỈ ĐỌC)
           - session-verify      # kiểm phiên trượt trên máy chủ thật: gia hạn, trần sống, hết hạn, SSE, cờ cookie (CHỈ ĐỌC)
+          - session-revoke-e2e  # nghiệm thu THU HỒI phiên — GHI, và CHỈ trên tài khoản QA (QA_SESSION_EMAIL)
           - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
           - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
           - fanpage-evidence-backfill # gán fanpage lịch sử cho marketer TỪ BẰNG CHỨNG quảng cáo (mặc định CHẠY THỬ; arg "--apply" mới ghi)
@@ -148,6 +149,11 @@ on:
 
 jobs:
   ops:
+    # `apply-agent-env` đi ở job RIÊNG bên dưới. Nếu gắn `environment: agent-identity` cho job này
+    # thì MỌI thao tác VPS — status, logs, db-query, deploy-adjacent — đều phải đi qua Environment
+    # và chịu chính sách nhánh của nó. Một hàng rào dựng cho ba secret không được phép trở thành
+    # điều kiện của sáu mươi thao tác không liên quan.
+    if: inputs.action != 'apply-agent-env'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     # KHÔNG có `concurrency` ở đây — xem khối "HÀNG ĐỢI NẰM TRÊN MÁY CHỦ" ở đầu tệp.
@@ -189,13 +195,6 @@ jobs:
           # kết thúc, ghi nó vào .env là ghi một khoá đã chết. Cùng luật với hai khối trên: không
           # bao giờ truyền qua ô "arg", vì ô đó in nguyên văn vào log của mọi lần chạy.
           ERP_GITHUB_TOKEN: ${{ secrets.ERP_GITHUB_TOKEN }}
-          # Chỉ dùng cho apply-agent-env. Danh tính GitHub RIÊNG của coding agent (GitHub App
-          # `erp-agent`) — tách khỏi tài khoản chủ shop, vì một danh tính thì cổng duyệt không có
-          # nấc nào dùng được (docs/agent-github-identity.md mục 1). KHOÁ RIÊNG KHÔNG BAO GIỜ đi
-          # qua ô "arg": ô đó in nguyên văn vào log của kho PUBLIC này.
-          ERP_AGENT_GITHUB_APP_ID: ${{ secrets.ERP_AGENT_GITHUB_APP_ID }}
-          ERP_AGENT_GITHUB_INSTALLATION_ID: ${{ secrets.ERP_AGENT_GITHUB_INSTALLATION_ID }}
-          ERP_AGENT_GITHUB_PRIVATE_KEY: ${{ secrets.ERP_AGENT_GITHUB_PRIVATE_KEY }}
           ERP_GITHUB_REPO: ${{ vars.ERP_GITHUB_REPO || github.repository }}
           ERP_GITHUB_DEPLOY_WORKFLOW: ${{ vars.ERP_GITHUB_DEPLOY_WORKFLOW || 'deploy-vps.yml' }}
           HMT_WORKBOOK_URL: ${{ vars.HMT_WORKBOOK_URL }}
@@ -218,7 +217,7 @@ jobs:
           # `tests/ops-concurrency.test.ts::testEnvsChuyenDuXuong` khoá bất biến: MỌI khoá khai ở
           # `env:` của bước này phải có mặt ở `envs:`. Bất biến đó bắt cả LỚP lỗi, không riêng ba
           # biến đã hỏng một lần.
-          envs: ACTION,DAYS,ARG,RUN_ID,LOCK_WAIT_READ,LOCK_WAIT_WRITE,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_AGENT_GITHUB_APP_ID,ERP_AGENT_GITHUB_INSTALLATION_ID,ERP_AGENT_GITHUB_PRIVATE_KEY,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
+          envs: ACTION,DAYS,ARG,RUN_ID,LOCK_WAIT_READ,LOCK_WAIT_WRITE,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
           script: |
             set -e
             cd /root/erp
@@ -426,6 +425,17 @@ jobs:
               perf-probe)
                 fetch_script perf-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/perf-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-probe.ts ;;
+              session-revoke-e2e)
+                # NGHIỆM THU THU HỒI PHIÊN — ĐÂY LÀ MỘT THAO TÁC GHI.
+                #
+                # `session-verify` chỉ đọc, nên nó trả lời được "migration đã áp chưa" mà KHÔNG trả
+                # lời được câu quan trọng nhất: thu hồi có chặn được một lượt gọi đang chạy không.
+                # Câu đó cần một lượt GHI, nên nó cần một tài khoản dành riêng.
+                #
+                # Script tự chặn: không tìm thấy tài khoản QA, hoặc vai trò khác VIEWER, thì DỪNG
+                # trước khi ghi một dòng nào. Không có nhánh nào chạm tới tài khoản nhân viên thật.
+                fetch_script session-revocation-e2e.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/session-revocation-e2e.ts'
+                docker exec erp-app sh -c "QA_SESSION_EMAIL='${ARG:-qa-session-test@vnxcommerce.com}' npx tsx --tsconfig tsconfig.json scripts/session-revocation-e2e.ts" ;;
               session-verify)
                 # KIỂM PHIÊN TRƯỢT TRÊN CHÍNH MÁY CHỦ ĐANG CHẠY — CHỈ ĐỌC.
                 #
@@ -778,37 +788,6 @@ jobs:
                 # trong môi trường của tiến trình, và script chỉ in ĐỘ DÀI chứ không in giá trị.
                 fetch_script sepay-hmac-check.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/sepay-hmac-check.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/sepay-hmac-check.ts ;;
-              apply-agent-env)
-                # ═══ DANH TÍNH GITHUB RIÊNG CỦA CODING AGENT ═══
-                #
-                # Ghi credential của GitHub App `erp-agent` vào .env rồi khởi động lại app, rồi HỎI
-                # GitHub một câu CHỈ ĐỌC để xác nhận đổi được token cài đặt.
-                #
-                # KHOÁ RIÊNG KHÔNG BAO GIỜ ĐƯỢC IN — chỉ ĐỘ DÀI. Kho mã này PUBLIC nên log Actions
-                # ai cũng đọc được, và một khoá riêng in ra log là một khoá phải thu hồi.
-                #
-                # Thao tác này KHÔNG cấp thêm quyền cho agent: quyền nằm ở chính GitHub App, khai
-                # lúc tạo App. Nó chỉ đưa credential tới nơi ERP đọc được.
-                upsert_env() { if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi; }
-                THIEU=""
-                [ -z "${ERP_AGENT_GITHUB_APP_ID:-}" ] && THIEU="$THIEU ERP_AGENT_GITHUB_APP_ID"
-                [ -z "${ERP_AGENT_GITHUB_INSTALLATION_ID:-}" ] && THIEU="$THIEU ERP_AGENT_GITHUB_INSTALLATION_ID"
-                [ -z "${ERP_AGENT_GITHUB_PRIVATE_KEY:-}" ] && THIEU="$THIEU ERP_AGENT_GITHUB_PRIVATE_KEY"
-                if [ -n "$THIEU" ]; then
-                  echo "Thiếu Secret:$THIEU — KHÔNG ghi gì."
-                  echo "Thêm ở Settings → Secrets and variables → Actions, theo docs/agent-github-identity.md mục 3.4."
-                  exit 1
-                fi
-                upsert_env ERP_AGENT_GITHUB_APP_ID "$ERP_AGENT_GITHUB_APP_ID"; echo "ERP_AGENT_GITHUB_APP_ID: đã ghi (${#ERP_AGENT_GITHUB_APP_ID} ký tự)"
-                upsert_env ERP_AGENT_GITHUB_INSTALLATION_ID "$ERP_AGENT_GITHUB_INSTALLATION_ID"; echo "ERP_AGENT_GITHUB_INSTALLATION_ID: đã ghi (${#ERP_AGENT_GITHUB_INSTALLATION_ID} ký tự)"
-                upsert_env ERP_AGENT_GITHUB_PRIVATE_KEY "$ERP_AGENT_GITHUB_PRIVATE_KEY"; echo "ERP_AGENT_GITHUB_PRIVATE_KEY: đã ghi (${#ERP_AGENT_GITHUB_PRIVATE_KEY} ký tự — GIÁ TRỊ KHÔNG IN)"
-                [ -n "${ERP_GITHUB_REPO:-}" ] && { upsert_env ERP_AGENT_GITHUB_REPO "$ERP_GITHUB_REPO"; echo "ERP_AGENT_GITHUB_REPO=$ERP_GITHUB_REPO"; }
-                $C up -d app scheduler
-                sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo
-                # Thử CHẠY TRONG container: credential đã nằm sẵn trong môi trường tiến trình nên
-                # không phải đi qua dòng lệnh, và script chỉ in danh tính ĐÃ CHE.
-                fetch_script check-integrations.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/check-integrations.ts'
-                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/check-integrations.ts --agent-identity ;;
               apply-tech-github-env)
                 # ═══ TUỲ CHỌN — KHO PUBLIC KHÔNG CẦN THAO TÁC NÀY ═══
                 #
@@ -892,3 +871,91 @@ jobs:
                 sleep 10; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo ;;
               *) echo "Thao tác không hợp lệ: $ACTION"; exit 1 ;;
             esac
+
+  # ═══════════ apply-agent-env — JOB RIÊNG, VÀ CHỈ NÓ MANG ENVIRONMENT ═══════════
+  #
+  # Ba secret `ERP_AGENT_GITHUB_*` sống trong Environment `agent-identity` (chính sách nhánh: chỉ
+  # `main`). Job này là chỗ DUY NHẤT trong tệp đọc chúng, nên nó là chỗ duy nhất khai `environment`.
+  #
+  # VÌ SAO KHÔNG GẮN CHO JOB `ops`: làm thế thì `status`, `logs`, `db-query` và ~60 thao tác khác
+  # đều phải đi qua Environment và chịu chính sách nhánh của nó. Một hàng rào dựng cho ba secret
+  # không được phép trở thành điều kiện của những thao tác không liên quan tới ba secret ấy.
+  #
+  # Nó VẪN cầm đúng ổ khoá vòng đời như mọi thao tác GHI: nó ghi `.env` rồi dựng lại container, nên
+  # chạy song song với deploy là đúng thứ `flock` sinh ra để chặn.
+  agent-env:
+    if: inputs.action == 'apply-agent-env'
+    environment: agent-identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: appleboy/ssh-action@v1
+        env:
+          ACTION: ${{ inputs.action }}
+          RUN_ID: ${{ github.run_id }}
+          LOCK_WAIT_WRITE: "1800"
+          # ĐỌC TỪ ENVIRONMENT `agent-identity`, không phải từ secret của kho. Không có bản cùng
+          # tên ở mức kho — để một bản là giữ nguyên đúng cái đường mà Environment sinh ra để đóng.
+          ERP_AGENT_GITHUB_APP_ID: ${{ secrets.ERP_AGENT_GITHUB_APP_ID }}
+          ERP_AGENT_GITHUB_INSTALLATION_ID: ${{ secrets.ERP_AGENT_GITHUB_INSTALLATION_ID }}
+          ERP_AGENT_GITHUB_PRIVATE_KEY: ${{ secrets.ERP_AGENT_GITHUB_PRIVATE_KEY }}
+          ERP_GITHUB_REPO: ${{ vars.ERP_GITHUB_REPO || github.repository }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ vars.VPS_USER || 'root' }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ vars.VPS_PORT || 22 }}
+          command_timeout: 25m
+          envs: ACTION,RUN_ID,LOCK_WAIT_WRITE,ERP_AGENT_GITHUB_APP_ID,ERP_AGENT_GITHUB_INSTALLATION_ID,ERP_AGENT_GITHUB_PRIVATE_KEY,ERP_GITHUB_REPO
+          script: |
+            set -e
+            cd /root/erp
+            C="docker compose -f docker-compose.prod.yml"
+            fetch_script() { curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" "https://api.github.com/repos/truyenhkm5group-stack/hkt/contents/scripts/$1?ref=main"; }
+
+            # CÙNG ổ khoá vòng đời, CÙNG chế độ ĐỘC QUYỀN như nhánh GHI của job `ops`. Đây là thao
+            # tác ghi `.env` + dựng lại container, nên nó phải nằm cùng hàng đợi với deploy.
+            # `tests/ops-concurrency.test.ts` khẳng định hai chỗ dùng đúng một tệp khoá và một chế độ.
+            KHOA_VONG_DOI=/var/lock/erp-lifecycle.lock
+            mkdir -p /var/lock
+            _t0=$(date +%s)
+            echo "[khoá] xin ĐỘC QUYỀN $KHOA_VONG_DOI — run=$RUN_ID action=$ACTION (ghi / khởi động lại) lúc $(date -u +%FT%TZ), trần ${LOCK_WAIT_WRITE}s"
+            exec 9>"$KHOA_VONG_DOI"
+            if flock -x -w "$LOCK_WAIT_WRITE" 9; then
+              echo "[khoá] ĐÃ LẤY ĐƯỢC $KHOA_VONG_DOI lúc $(date -u +%FT%TZ) — chờ $(( $(date +%s)-_t0 ))s"
+            else
+              echo "::error::[khoá] HẾT GIỜ CHỜ $KHOA_VONG_DOI sau $(( $(date +%s)-_t0 ))s — run=$RUN_ID action=$ACTION. Thao tác DỪNG và KHÔNG chạy."
+              exit 75
+            fi
+
+            # ═══ DANH TÍNH GITHUB RIÊNG CỦA CODING AGENT ═══
+            #
+            # Ghi credential của GitHub App `erp-agent` vào .env rồi khởi động lại app, rồi HỎI
+            # GitHub một câu CHỈ ĐỌC để xác nhận đổi được token cài đặt.
+            #
+            # KHOÁ RIÊNG KHÔNG BAO GIỜ ĐƯỢC IN — chỉ ĐỘ DÀI. Kho mã này PUBLIC nên log Actions
+            # ai cũng đọc được, và một khoá riêng in ra log là một khoá phải thu hồi.
+            #
+            # Thao tác này KHÔNG cấp thêm quyền cho agent: quyền nằm ở chính GitHub App, khai
+            # lúc tạo App. Nó chỉ đưa credential tới nơi ERP đọc được.
+            upsert_env() { if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi; }
+            THIEU=""
+            [ -z "${ERP_AGENT_GITHUB_APP_ID:-}" ] && THIEU="$THIEU ERP_AGENT_GITHUB_APP_ID"
+            [ -z "${ERP_AGENT_GITHUB_INSTALLATION_ID:-}" ] && THIEU="$THIEU ERP_AGENT_GITHUB_INSTALLATION_ID"
+            [ -z "${ERP_AGENT_GITHUB_PRIVATE_KEY:-}" ] && THIEU="$THIEU ERP_AGENT_GITHUB_PRIVATE_KEY"
+            if [ -n "$THIEU" ]; then
+              echo "Thiếu Secret:$THIEU — KHÔNG ghi gì."
+              echo "Thêm ở Settings → Secrets and variables → Actions, theo docs/agent-github-identity.md mục 3.4."
+              exit 1
+            fi
+            upsert_env ERP_AGENT_GITHUB_APP_ID "$ERP_AGENT_GITHUB_APP_ID"; echo "ERP_AGENT_GITHUB_APP_ID: đã ghi (${#ERP_AGENT_GITHUB_APP_ID} ký tự)"
+            upsert_env ERP_AGENT_GITHUB_INSTALLATION_ID "$ERP_AGENT_GITHUB_INSTALLATION_ID"; echo "ERP_AGENT_GITHUB_INSTALLATION_ID: đã ghi (${#ERP_AGENT_GITHUB_INSTALLATION_ID} ký tự)"
+            upsert_env ERP_AGENT_GITHUB_PRIVATE_KEY "$ERP_AGENT_GITHUB_PRIVATE_KEY"; echo "ERP_AGENT_GITHUB_PRIVATE_KEY: đã ghi (${#ERP_AGENT_GITHUB_PRIVATE_KEY} ký tự — GIÁ TRỊ KHÔNG IN)"
+            [ -n "${ERP_GITHUB_REPO:-}" ] && { upsert_env ERP_AGENT_GITHUB_REPO "$ERP_GITHUB_REPO"; echo "ERP_AGENT_GITHUB_REPO=$ERP_GITHUB_REPO"; }
+            $C up -d app scheduler
+            sleep 12; docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health; echo
+            # Thử CHẠY TRONG container: credential đã nằm sẵn trong môi trường tiến trình nên
+            # không phải đi qua dòng lệnh, và script chỉ in danh tính ĐÃ CHE.
+            fetch_script check-integrations.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/check-integrations.ts'
+            docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/check-integrations.ts --agent-identity 

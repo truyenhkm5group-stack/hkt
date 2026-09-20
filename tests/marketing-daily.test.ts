@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { clearMemo } from "@/lib/cache";
 import { getSettingJson } from "@/lib/settings";
 import { sql } from "drizzle-orm";
-import { getDb } from "@/db";
+import { getDb, schema } from "@/db";
 import { calibrate } from "@/scripts/marketing-calibrate";
 import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf, type MaturityState } from "@/lib/constants/marketing-daily";
 import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, MARKETING_FINDING_OWNER, MARKETING_FINDING_WHY, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
@@ -123,6 +123,40 @@ export function testMarketingMaturity() {
   assert.equal(maturityState(MATURITY.final * 100, (1 - MATURITY.final) * 100), "FINAL");
   assert.equal(maturityState(MATURITY.tooEarly * 100 - 1, 100 - MATURITY.tooEarly * 100 + 1), "TOO_EARLY");
   assert.equal(ratioOf("maturity", { finishedOrders: 80, maturityBase: 100 }), 80);
+
+  /*
+    ═══════ ĐƠN CHỜ BƯU TÁ TỚI LẤY PHẢI NẰM TRONG MẪU SỐ ═══════
+
+    Bốn vị ngữ SQL đếm "đang chạy" từng dừng ở bộ ba `IN_TRANSIT / NOT_SHIPPED / UNKNOWN` — bộ ba
+    của TRƯỚC 13/09/2026, lúc `AWAITING_PICKUP` chưa tồn tại. Đơn chờ bưu tá tới lấy vì thế rơi ra
+    khỏi CẢ tử số lẫn mẫu số: chúng không kết thúc, mà cũng không được đếm là đang chạy.
+
+    Đo production 19/09/2026, kỳ 01/09–09/09 (population chuẩn 519 đơn, đã loại đơn trùng):
+    423 đã kết thúc · 46 đang chạy theo bộ ba cũ · 50 chờ bưu tá tới lấy. Ba số cộng lại đúng 519,
+    nên chỗ hụt đo được chính xác chứ không phải ước lượng.
+  */
+  const DO_19_09 = { ketThuc: 423, dangChayCu: 46, choLayHang: 50, population: 519 };
+  assert.equal(DO_19_09.ketThuc + DO_19_09.dangChayCu + DO_19_09.choLayHang, DO_19_09.population, "ba nhóm phải cộng đúng bằng population — nếu không thì phép đo sai, không phải luật sai");
+  const truoc = DO_19_09.ketThuc / (DO_19_09.ketThuc + DO_19_09.dangChayCu);
+  const sau = DO_19_09.ketThuc / DO_19_09.population;
+  assert.equal(Math.round(truoc * 1000) / 10, 90.2, "độ chín khi 50 đơn rơi khỏi mẫu số");
+  assert.equal(Math.round(sau * 1000) / 10, 81.5, "độ chín khi mẫu số đủ — mẫu số là TOÀN BỘ đơn không huỷ");
+  assert.ok(sau < truoc, "đưa đơn chưa ngã ngũ vào mẫu số chỉ có thể làm độ chín GIẢM, không bao giờ tăng");
+  // Kỳ này vẫn PARTIAL ở cả hai cách tính — nói thẳng ra để không ai đọc bản vá này như một lượt
+  // đổi nhãn. Cái đổi là CON SỐ, và con số mới nhỏ hơn.
+  assert.equal(maturityState(DO_19_09.ketThuc, DO_19_09.dangChayCu), "PARTIAL");
+  assert.equal(maturityState(DO_19_09.ketThuc, DO_19_09.dangChayCu + DO_19_09.choLayHang), "PARTIAL");
+
+  /*
+    ═══════ VÀ CÓ KỲ MÀ NÓ ĐỔI HẲN NHÃN ═══════
+
+    Một kỳ đang đứng ngay trên ngưỡng `tooEarly` sẽ TỤT XUỐNG khi mẫu số được trả lại đủ. Đó không
+    phải chuyện thẩm mỹ: `TOO_EARLY` là mức mà màn hình thôi tô màu, thôi xếp hạng, thôi kết luận
+    (`canConclude = false`). Trước bản vá, một kỳ như vậy vẫn được đọc như thể đã đủ chín để ra
+    quyết định cắt ngân sách.
+  */
+  assert.equal(maturityState(62, 38), "PARTIAL", "62% — trên ngưỡng, màn hình vẫn kết luận");
+  assert.equal(maturityState(62, 38 + 24), "TOO_EARLY", "thêm 24 đơn chờ bưu tá vào mẫu số ⇒ 50%, dưới ngưỡng ⇒ THÔI kết luận");
 }
 
 /**
@@ -537,6 +571,16 @@ export async function testMarketingDailyTotals() {
 
   // Đơn huỷ KHÔNG nằm trong mẫu số của độ chín.
   assert.equal(data.totals.maturityBase, data.totals.finishedOrders + data.totals.pendingOrders, "đơn huỷ không tham gia độ chín");
+
+  // VÀ KHÔNG ĐƠN NÀO ĐƯỢC RƠI RA GIỮA HAI NHÓM. `orders` đếm đơn KHÔNG huỷ; mỗi đơn không huỷ
+  // hoặc đã kết thúc, hoặc đang chạy — không có ô thứ ba. Bất biến này chính là cái đã vỡ trước
+  // 19/09/2026: 50 đơn `AWAITING_PICKUP` của kỳ 01/09–09/09 không thuộc nhóm nào, nên 423 + 46
+  // ra 469 trong khi population là 519, và không một màn hình nào đỏ lên.
+  assert.equal(
+    data.totals.orders,
+    data.totals.finishedOrders + data.totals.pendingOrders,
+    "mọi đơn không huỷ phải thuộc ĐÚNG MỘT nhóm: đã kết thúc hoặc đang chạy — chênh lệch nghĩa là có kết quả rơi ra khỏi cả hai",
+  );
 }
 
 /**
@@ -700,6 +744,60 @@ export async function testMarketingCalibrateTool() {
 }
 
 /** Điểm vào cho bộ chạy chung. Phần CSDL đi qua `getDb()` như các truy vấn thật, nên không cần tham số. */
+/**
+ * ═══════════ ĐƠN CHỜ BƯU TÁ TỚI LẤY: CÓ MẶT Ở CỘT "ĐANG CHẠY", TRÊN DỮ LIỆU THẬT ═══════════
+ *
+ * Bài kiểm trên là số học thuần. Bài này chạy ĐÚNG truy vấn của màn hình trên một đơn thật mang
+ * kết quả `AWAITING_PICKUP`, vì chỗ hỏng nằm ở vị ngữ SQL chứ không ở `maturityState`.
+ *
+ * Đơn được gieo ở MỘT NGÀY RIÊNG rồi hỏi ĐÚNG ngày đó, và dọn sạch sau khi đo — fixture dùng
+ * chung của khối 8 không được xê dịch một dòng nào (AGENTS.md mục 6.3).
+ */
+export async function testMarketingAwaitingPickupIsPending() {
+  const db = await getDb();
+  const NGAY = new Date("2026-02-17T03:00:00Z");
+  const donId = "ap-9001";
+  const shipId = "ap-ship-9001";
+  const donDep = async () => {
+    await db.delete(schema.shipmentEvents).where(sql`${schema.shipmentEvents.shipmentId} = ${shipId}`);
+    await db.delete(schema.shipments).where(sql`${schema.shipments.id} = ${shipId}`);
+    await db.delete(schema.orderItems).where(sql`${schema.orderItems.orderId} = ${donId}`);
+    await db.delete(schema.orders).where(sql`${schema.orders.id} = ${donId}`);
+  };
+  await donDep();
+  try {
+    await db.insert(schema.orders).values({ id: donId, systemId: 990001, stage: "PACKING", status: 0, insertedAt: NGAY, cod: 499000, partnerFee: 0 });
+    await db.insert(schema.orderItems).values({ id: `${donId}-i`, orderId: donId, variantId: "rr-var", productId: "rr-prod", productName: "Đầm kiểm thử", sku: "RR-001", quantity: 1, unitPrice: 499000, lineTotal: 499000 });
+    // Vận đơn đã có mã, ĐVVC đã biết tới kiện (sự kiện webhook 104 "Giao cho Bưu tá đi nhận") —
+    // nhưng KHÔNG chặng nào trong `CARRIER_HANDOFF_STAGES`, và không có mốc lấy hàng. Đây đúng
+    // hình dạng của 5 đơn thật đã kiểm trên production 19/09/2026 (PKE1524533009 và cộng sự).
+    await db.insert(schema.shipments).values({ id: shipId, orderId: donId, carrier: "Viettel Post", stage: "PENDING", codAmount: 499000, shippingFee: 0, vtpOrderNumber: "PKE1502170001" });
+    await db.insert(schema.shipmentEvents).values({ shipmentId: shipId, source: "VTP_WEBHOOK", status: "104", statusName: "Giao cho Bưu tá đi nhận", occurredAt: NGAY, normalizedStage: "PENDING" });
+
+    clearMemo();
+    const ngayKhoa = "2026-02-17";
+    const ky: Period = { key: "custom", from: new Date("2026-02-17T00:00:00+07:00"), to: new Date("2026-02-17T23:59:59.999+07:00"), label: ngayKhoa, fromKey: ngayKhoa, toKey: ngayKhoa };
+    const data = await getMarketingDaily(ky, "created");
+    const row = data.rows.find((r) => r.day === ngayKhoa);
+    assert.ok(row, `phải có dòng ngày ${ngayKhoa} — nếu không thì bài kiểm này không kiểm được gì`);
+    assert.equal(row.orders, 1, "đơn chờ bưu tá tới lấy KHÔNG huỷ nên vẫn nằm trong population");
+    assert.equal(row.pendingOrders, 1, "và nó phải được đếm là ĐANG CHẠY — đây chính là chỗ hỏng trước 19/09/2026");
+    assert.equal(row.finishedOrders, 0, "chưa rời kho thì chưa kết thúc");
+    assert.equal(row.deliveredOrders, 0);
+    assert.equal(row.returnedOrders, 0);
+    assert.equal(row.shippedOrders, 0, "'đã gửi' đòi chứng từ ĐVVC cầm hàng — bản vá này KHÔNG được đụng tới danh sách đó");
+    // TIỀN KHÔNG ĐỔI: đơn chưa ngã ngũ không sinh doanh thu giao thành công và không sinh giá vốn.
+    assert.equal(row.deliveredRevenue, 0, "chưa giao thì chưa có doanh thu thực");
+    assert.equal(row.cogs, 0, "giá vốn ghi nhận theo đơn giao thành công");
+    // MẪU SỐ ĐỘ CHÍN = đã kết thúc + đang chạy, và đơn này phải nằm trong đó.
+    assert.equal(row.maturityBase, row.finishedOrders + row.pendingOrders);
+    assert.equal(row.maturityBase, 1, "một đơn không huỷ ⇒ mẫu số bằng 1, không phải 0");
+  } finally {
+    await donDep();
+    clearMemo();
+  }
+}
+
 export async function testMarketingDaily() {
   testMarketingMetricContract();
   testMarketingRatioNullSafety();
@@ -714,6 +812,7 @@ export async function testMarketingDaily() {
   testMarketingTargetRegistration();
   await testMarketingDailyReconciliation();
   await testMarketingDailyTotals();
+  await testMarketingAwaitingPickupIsPending();
   await testMarketingDailyFilterHonesty();
   await testMarketingBreakdownConservation();
   await testMarketingDigestPreview();

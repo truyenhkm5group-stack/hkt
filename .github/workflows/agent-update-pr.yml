@@ -26,6 +26,11 @@ on:
         description: "Số hiệu PR cần cập nhật (nhánh của nó phải bắt đầu bằng ai/ hoặc claude/)"
         required: true
         type: string
+      note:
+        description: "Để TRỐNG = nhập nhánh đích (KHÔNG đổi diff, KHÔNG huỷ lượt duyệt). Có chữ = bot ghi một tệp tài liệu (ĐỔI DIFF ⇒ huỷ lượt duyệt đang có)."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -38,6 +43,20 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    # ═══════════ KHO BA SECRET `ERP_AGENT_GITHUB_*` ═══════════
+    #
+    # Chính sách nhánh của Environment (chỉ `main`) là hàng rào CỨNG: lượt chạy từ nhánh khác
+    # KHÔNG ĐỌC ĐƯỢC secret, và quyết định ấy nằm ở phía GitHub chứ không đọc một dòng nào của tệp
+    # này — nên nó chặn được cả cố ý, không chỉ nhầm lẫn.
+    #
+    # Khai ở MỨC JOB, không phải mức step: khai ở mức step thì bước khác trong cùng job vẫn đọc
+    # được secret của kho. Tên là CHUỖI CỐ ĐỊNH — cho nó nhận `inputs.*` là để người gọi tự chọn
+    # kho secret của mình, tức tự chọn hàng rào, tức không có hàng rào.
+    #
+    # Bước "Chỉ chạy từ nhánh mặc định" bên dưới VẪN GIỮ: Environment chưa tồn tại thì GitHub TỰ
+    # TẠO nó lúc job chạy lần đầu — rỗng và KHÔNG có chính sách nhánh. Một hàng rào tự dựng lên ở
+    # trạng thái MỞ là lý do để giữ hàng rào thứ hai, không phải lý do để bỏ nó.
+    environment: agent-identity
     timeout-minutes: 10
     steps:
       - name: Chỉ chạy từ nhánh mặc định
@@ -69,4 +88,5 @@ jobs:
           ERP_AGENT_GITHUB_REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
           AGENT_PR_NUMBER: ${{ inputs.pr }}
+          AGENT_PR_NOTE: ${{ inputs.note }}
         run: npx tsx --tsconfig tsconfig.json scripts/agent-update-pr.ts

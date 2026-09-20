@@ -551,45 +551,65 @@ export function testTenCheckBatBuoc() {
 export function testEnvsChuyenDuXuong() {
   const src = doc("ops-vps.yml");
 
-  // Khối `env:` của bước SSH: từ dòng `env:` tới dòng `with:` cùng mức thụt đầu dòng.
-  const iEnv = src.indexOf("\n        env:\n");
-  assert.ok(iEnv > 0, "không tìm thấy khối `env:` của bước SSH trong ops-vps.yml");
-  const iWith = src.indexOf("\n        with:\n", iEnv);
-  assert.ok(iWith > iEnv, "không tìm thấy khối `with:` sau `env:`");
-  const khaiBao = [...src.slice(iEnv, iWith).matchAll(/^ {10}([A-Z][A-Z0-9_]*):/gm)].map((m) => m[1]!);
-  assert.ok(khaiBao.length >= 15, `đọc được ${khaiBao.length} biến ở env: — quá ít, bộ đọc hỏng chứ không phải workflow hỏng`);
+  /* Mỗi bước `appleboy/ssh-action` là một cặp `env:` + `with.envs:`. Quét TẤT CẢ, không chỉ bước
+     đầu: ba secret của agent đã dọn sang job `agent-env` riêng (Environment `agent-identity`), nên
+     một bài kiểm ghim vào một bước duy nhất sẽ đỏ vì kiến trúc đổi, chứ không vì luật bị phá. */
+  const dong = src.split("\n");
+  const buoc: { ten: string; khaiBao: string[]; chuyenXuong: Set<string> }[] = [];
+  for (let i = 0; i < dong.length; i += 1) {
+    if (!/^ {8}env:\s*$/.test(dong[i]!)) continue;
+    let k = i + 1;
+    const khaiBao: string[] = [];
+    for (; k < dong.length && !/^ {8}with:\s*$/.test(dong[k]!); k += 1) {
+      const m = /^ {10}([A-Z][A-Z0-9_]*):/.exec(dong[k]!);
+      if (m) khaiBao.push(m[1]!);
+    }
+    if (k >= dong.length) continue;
+    let envs: string | null = null;
+    for (let t = k; t < dong.length && !/^ {8}\w/.test(dong[t]!) || t === k; t += 1) {
+      const m = /^ {10}envs: (.+)$/.exec(dong[t]!);
+      if (m) {
+        envs = m[1]!;
+        break;
+      }
+      if (t > k + 40) break;
+    }
+    assert.ok(envs, `bước SSH ở dòng ${i + 1} phải có \`envs:\`; thiếu nó thì KHÔNG biến nào xuống được máy chủ`);
+    const ten = [...dong.slice(Math.max(0, i - 60), i)].reverse().find((d) => /^ {2}[\w-]+:\s*$/.test(d))?.trim().replace(":", "") ?? `dòng ${i + 1}`;
+    buoc.push({ ten, khaiBao, chuyenXuong: new Set(envs!.split(",").map((x) => x.trim()).filter(Boolean)) });
+  }
+  assert.ok(buoc.length >= 2, `phải thấy ít nhất 2 bước SSH (ops + agent-env), thấy ${buoc.length}`);
 
-  const dongEnvs = /^ {10}envs: (.+)$/m.exec(src.slice(iWith));
-  assert.ok(dongEnvs, "bước SSH phải có `envs:`; thiếu nó thì KHÔNG biến nào xuống được máy chủ");
-  const chuyenXuong = new Set(dongEnvs![1]!.split(",").map((x) => x.trim()).filter(Boolean));
-
-  const thieu = khaiBao.filter((k) => !chuyenXuong.has(k));
-  assert.deepEqual(
-    thieu,
-    [],
-    `khai ở env: nhưng THIẾU ở envs: ${thieu.join(", ")} — trên máy chủ chúng sẽ RỖNG, và thao tác sẽ báo "thiếu Secret" trong khi Secret có đủ`,
-  );
-
-  // Chiều ngược lại: một tên ở `envs:` mà không có ở `env:` là rác — nó không chuyển gì xuống, và
-  // nó làm danh sách trông như đã phủ một biến mà thật ra chưa.
-  const thua = [...chuyenXuong].filter((k) => !khaiBao.includes(k));
-  assert.deepEqual(thua, [], `có ở envs: nhưng KHÔNG khai ở env: ${thua.join(", ")} — tên thừa làm danh sách trông đầy đủ hơn sự thật`);
-
-  // Ba biến của danh tính agent: nêu đích danh để lần hỏng này có một dòng nói thẳng về nó.
-  for (const k of ["ERP_AGENT_GITHUB_APP_ID", "ERP_AGENT_GITHUB_INSTALLATION_ID", "ERP_AGENT_GITHUB_PRIVATE_KEY"]) {
-    assert.ok(khaiBao.includes(k), `${k} phải được khai ở env: của bước SSH`);
-    assert.ok(chuyenXuong.has(k), `${k} phải có ở envs: — đây đúng là lỗi đã làm ops #1465 đỏ`);
+  for (const b of buoc) {
+    assert.ok(b.khaiBao.length >= 3, `${b.ten}: đọc được ${b.khaiBao.length} biến ở env: — quá ít, bộ đọc hỏng chứ không phải workflow hỏng`);
+    const thieu = b.khaiBao.filter((k) => !b.chuyenXuong.has(k));
+    assert.deepEqual(thieu, [], `${b.ten}: khai ở env: nhưng THIẾU ở envs: ${thieu.join(", ")} — trên máy chủ chúng sẽ RỖNG, và thao tác sẽ báo "thiếu Secret" trong khi Secret có đủ`);
+    const thua = [...b.chuyenXuong].filter((k) => !b.khaiBao.includes(k));
+    assert.deepEqual(thua, [], `${b.ten}: có ở envs: nhưng KHÔNG khai ở env: ${thua.join(", ")} — tên thừa làm danh sách trông đầy đủ hơn sự thật`);
   }
 
+  /* Ba biến danh tính agent: nay thuộc bước SSH của job `agent-env`, và PHẢI đủ cả hai vế ở ĐÓ —
+     đây đúng là lỗi đã làm ops #1465 đỏ, chỉ khác chỗ ở. */
+  const agent = buoc.find((b) => b.khaiBao.includes("ERP_AGENT_GITHUB_APP_ID"));
+  assert.ok(agent, "phải có một bước SSH khai ba biến danh tính agent (job `agent-env`)");
+  for (const k of ["ERP_AGENT_GITHUB_APP_ID", "ERP_AGENT_GITHUB_INSTALLATION_ID", "ERP_AGENT_GITHUB_PRIVATE_KEY"]) {
+    assert.ok(agent!.khaiBao.includes(k), `${k} phải được khai ở env: của bước SSH job agent-env`);
+    assert.ok(agent!.chuyenXuong.has(k), `${k} phải có ở envs: — đây đúng là lỗi đã làm ops #1465 đỏ`);
+  }
+  // Và chúng KHÔNG được quay lại bước SSH của job `ops`: ở đó chúng kéo theo cả Environment.
+  const ops = buoc.find((b) => b.ten === "ops");
+  assert.ok(ops, "phải thấy bước SSH của job `ops`");
+  assert.ok(!ops!.khaiBao.some((k) => k.startsWith("ERP_AGENT_GITHUB_")), "job `ops` không được khai lại ba biến danh tính agent — chúng đã dọn sang job riêng có Environment");
+
   // KHOÁ RIÊNG KHÔNG BAO GIỜ ĐƯỢC IN. Kho này PUBLIC, log Actions ai cũng đọc.
-  const iAgent = src.indexOf("apply-agent-env)");
-  assert.ok(iAgent > 0, "không tìm thấy thao tác apply-agent-env");
-  const than = src.slice(iAgent, src.indexOf("apply-tech-github-env)", iAgent));
-  assert.ok(!/echo[^\n]*\$\{?ERP_AGENT_GITHUB_PRIVATE_KEY\}?(?![#])/.test(than), "apply-agent-env không được in GIÁ TRỊ khoá riêng");
-  assert.ok(/\$\{#ERP_AGENT_GITHUB_PRIVATE_KEY\}/.test(than), "apply-agent-env phải in ĐỘ DÀI khoá riêng — đủ để biết đã ghi được, không đủ để dùng lại");
+  const iAgent = src.indexOf("agent-env:");
+  assert.ok(iAgent > 0, "không tìm thấy job agent-env");
+  const than = src.slice(iAgent);
+  assert.ok(!/echo[^\n]*"\$ERP_AGENT_GITHUB_PRIVATE_KEY"/.test(than), "job agent-env không được in GIÁ TRỊ khoá riêng");
+  assert.ok(/\$\{#ERP_AGENT_GITHUB_PRIVATE_KEY\}/.test(than), "job agent-env phải in ĐỘ DÀI khoá riêng — đủ để biết đã ghi được, không đủ để dùng lại");
 
   console.log(
-    `✓ Biến xuống được máy chủ: ${khaiBao.length} khoá ở env: đều có ở envs: (và ngược lại) · ba biến danh tính agent có đủ cả hai vế · khoá riêng chỉ in độ dài`,
+    `✓ Biến xuống được máy chủ: ${buoc.length} bước SSH, mỗi bước mọi khoá ở env: đều có ở envs: (và ngược lại) · ba biến danh tính agent nằm ở job agent-env và KHÔNG còn ở job ops · khoá riêng chỉ in độ dài`,
   );
 }
 
