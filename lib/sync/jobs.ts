@@ -39,6 +39,7 @@ import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 import { runGithubDeploymentSync } from "@/lib/integrations/github/deployments";
 import { runGithubPrSync } from "@/lib/integrations/github/pull-requests";
 import { runAiIncidentWatch } from "@/lib/tech/ai-incident-watch";
+import { runTaskAdvanceWatch } from "@/lib/tech/task-advance-watch";
 import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
 
@@ -122,6 +123,16 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       "Chỉ MỞ, không bao giờ tự đóng: đóng sự cố đòi kể được ĐÃ LÀM GÌ để nó hết, mà máy không có câu đó. " +
       "Nhiều nhất một sự cố chưa đóng cho mỗi job, nên chạy lại bao nhiêu lần cũng không nhân đôi.",
     run: (o) => runSyncIncidentWatch({ trigger: o.trigger, actor: o.actor, hours: num(o.params?.hours) }),
+  },
+  "task-advance-watch": {
+    label: "Đẩy trạng thái việc Tech theo bằng chứng GitHub",
+    source: "ALL",
+    description:
+      "Đọc phép chiếu PR đã chép về `tech_tasks` rồi đẩy việc đi tiếp ĐÚNG HAI bước: BUILDING → REVIEW khi có PR đang mở, và REVIEW → QA khi PR đã gộp (ruleset đòi 1 duyệt + cổng gates xanh trước khi gộp). " +
+      "KHÔNG bao giờ tự đặt READY_TO_DEPLOY, DEPLOYING, OBSERVING, DONE, FAILED hay BLOCKED — những bước ấy là QUYẾT ĐỊNH hoặc lời QUY KẾT, không phải quan sát. " +
+      "MÁY KHÔNG CÃI NGƯỜI: nếu lượt đổi trạng thái gần nhất do người làm thì để nguyên. " +
+      "Chỉ xét việc ĐÃ có phép chiếu PR — `pr_synced_at` rỗng nghĩa là CHƯA BIẾT, đẩy theo chưa-biết là đoán.",
+    run: (o) => runTaskAdvanceWatch({ trigger: o.trigger, actor: o.actor }),
   },
   "ai-incident-watch": {
     label: "Mở sự cố khi khoá AI hỏng kiểu KHÔNG TỰ KHỎI",
