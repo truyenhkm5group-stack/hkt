@@ -105,6 +105,48 @@ lại một container không hỏng.
 Ba câu trả lời vì ba cách sửa: `NEVER` (bấm "Đọc lại từ GitHub") · `STALE` (đi xem bộ lập lịch) ·
 `FRESH` (lúc này mới được kết luận LỆCH).
 
+### 2.5 B5 — `facebook-ads` hỏng lặp lại: tìm ra nguyên nhân gốc
+
+Audit ghi câu lệnh hỏng là `update "ad_spends" ... returning "id"`. Trong toàn kho mã, **đúng một
+hàm** chạy câu đó: `reapplyAdsMapping()`. Ba mắt xích, cả ba đọc được từ mã nguồn:
+
+1. `ad_spends.product_id` có **khoá ngoại** tới `products.id`.
+2. Giá trị ghi vào nó đến từ **`settings`** (`ads.campaignMap`, `ads.productAliases`) — chuỗi
+   người lưu lúc ghép tay. Không gì ràng buộc chúng còn tồn tại trong `products`; sổ mã hàng đổi
+   mà bảng ghép thì không đổi theo.
+3. Hàm được gọi ở **cuối** `syncFacebookAds`, **ngoài mọi `try/catch`**.
+
+⇒ Một dòng ghép trỏ vào mã hàng đã biến mất làm cả lượt đồng bộ ghi `FAILED` — **sau khi** toàn bộ
+số liệu quảng cáo đã ghi xong. Và vì nguyên nhân là **tất định** (cùng bảng ghép, cùng dòng, cùng
+cú ném), nó lặp lại mỗi lượt chạy, mãi mãi. Màn hình chỉ nói "FAILED", nên không ai phân biệt được
+*đồng bộ hỏng* với *một bước dọn dẹp hỏng* — hai thứ sửa ở hai chỗ khác hẳn.
+
+`tests/ads-mapping-dangling.test.ts` **chạy thật** câu lệnh cũ trên PGlite và khẳng định nó ném
+lỗi khoá ngoại; không mô phỏng bằng lời. Nếu ngày nào đó nó không ném nữa (ai đó gỡ khoá ngoại)
+thì bài kiểm đỏ — và đó đúng là lúc phải đọc lại cả tệp.
+
+Ba lớp vá, **không lớp nào đụng vào một con số**:
+
+| Lớp | Chặn cái gì |
+|---|---|
+| Đường ghi (`lib/actions/ads-mapping.ts`) | Mã hàng không có trong sổ thì **không lưu** vào bảng ghép. Chặn **nguyên nhân**, và người bấm biết ngay thay vì một job nền hỏng lúc 4 giờ sáng ba ngày sau |
+| `reapplyAdsMapping()` | Dòng ghép trỏ vào mã đã biến mất thì **bỏ qua và nêu tên** — giữ nguyên dữ liệu cũ, **không** ghi `null` (ghi `null` là lặng lẽ gỡ chi phí quảng cáo khỏi một mã hàng, AGENTS.md mục 8.8). Mỗi chiến dịch có `try/catch` riêng nên một dòng hỏng không kéo theo 200 dòng còn lại |
+| `syncFacebookAds` | Bước áp lại bảng ghép nay nằm **trong** `try` ⇒ ra `warning`, lượt chạy ghi `PARTIAL` kèm lý do đọc được. `PARTIAL` nói đúng sự thật: việc chính xong, một phần phụ chưa xong |
+
+Dòng ghép treo hiện lên **ngay lúc người bấm** (toast cảnh báo ở trang Chi phí › Ghép chiến dịch)
+và trong `sync_runs.detail`, nêu đích danh chiến dịch nào trỏ vào mã nào.
+
+Liên quan tới mục 2.3: nếu không vá, bộ `tech-incident-watch` mới sẽ mở một sự cố SEV2 cho
+`facebook-ads` mỗi 24 giờ — đúng, nhưng vô ích, vì nó báo về một bước dọn dẹp chứ không phải về
+đường đồng bộ.
+
+### 2.6 Phép chiếu PR khai độ tươi của chính nó
+
+`/tech/tasks` in nguyên câu tóm tắt mà job `github-pr-sync` đã viết, kèm mốc đọc — trong đó có
+**số PR đang mở mà không việc nào nhận**. Một hàng đợi sạch bong trong khi GitHub có bốn PR treo
+là một câu trả lời sai. Chưa lượt đọc nào chạy thì màn hình nói rõ bốn cột PR trống vì **CHƯA
+BIẾT**, không phải vì việc chưa có PR.
+
 ---
 
 ## 3. QUYẾT ĐỊNH CẦN CHỦ SHOP — chỗ đứng của runner và sổ
@@ -145,5 +187,8 @@ cả hai đều giả định sổ lượt chạy đọc được từ ERP.
   còn thiếu ấy nay chạy được. **Việc của người**: gộp và đóng PR là quyết định, không phải một lượt
   đồng bộ.
 - **P0.4** Quyết định deploy `de8a449` hay giữ nguyên có chủ đích (production đang chạy `a535d4e`).
+- **B5 · việc của người sau khi deploy**: mở trang Chi phí › Ghép chiến dịch và sửa những dòng ghép
+  treo mà lượt đồng bộ đầu tiên nêu tên. Bản vá **giữ nguyên số cũ** chứ không tự chữa bảng ghép —
+  chọn mã hàng nào thay thế là quyết định kinh doanh.
 - **P1.2 → P1.6** Chờ quyết định ở mục 3.
 - **R2 không bao giờ mở cho agent.** Giữ nguyên.

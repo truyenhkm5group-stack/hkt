@@ -73,8 +73,45 @@ export function resolveCampaign(campaignId: string, campaignName: string, mappin
   return { productId: auto, excluded: false, marketerId, source: auto ? "auto" : "none" };
 }
 
-/** Áp lại ghép mã hàng / loại trừ cho toàn bộ dòng Facebook đã có (sau khi sửa bảng ghép hoặc bí danh) */
-export async function reapplyAdsMapping() {
+/**
+ * ═══════════ ÁP LẠI GHÉP MÃ HÀNG — VÀ VÌ SAO NÓ KHÔNG ĐƯỢC PHÉP GIẾT LƯỢT ĐỒNG BỘ ═══════════
+ *
+ * SỰ CỐ THẬT (đo 20/09/2026). `facebook-ads` báo FAILED lặp lại nhiều giờ, câu lệnh hỏng là
+ * `update "ad_spends" ... returning "id"` — tức ĐÚNG hàm này. Ba tính chất cộng lại thành một
+ * lỗi im lặng và VĨNH VIỄN:
+ *
+ *  1. `ad_spends.product_id` có KHOÁ NGOẠI tới `products.id`.
+ *  2. Nhưng `productId` ở đây đến từ **`settings`** (`ads.campaignMap`, `ads.productAliases`) —
+ *     những chuỗi NGƯỜI đã lưu lúc ghép tay. Không gì ràng buộc chúng còn tồn tại trong
+ *     `products`; sổ mã hàng đổi mà bảng ghép thì không đổi theo.
+ *  3. Hàm được gọi ở CUỐI `syncFacebookAds`, NGOÀI mọi `try/catch`. Nên một dòng ghép trỏ vào
+ *     một mã hàng không còn tồn tại làm hỏng cả lượt chạy — **sau khi** toàn bộ số liệu quảng
+ *     cáo đã ghi xong. `sync_runs` ghi FAILED cho một lượt đã làm đúng việc của nó.
+ *
+ * Và vì nguyên nhân là TẤT ĐỊNH (cùng bảng ghép, cùng dòng, cùng cú ném), nó lặp lại mỗi lượt
+ * chạy, mãi mãi, trong khi màn hình chỉ nói "FAILED" — không ai phân biệt được *đồng bộ hỏng*
+ * với *một bước dọn dẹp hỏng*, mà hai thứ đó sửa ở hai chỗ khác hẳn.
+ *
+ * ─── BA THAY ĐỔI, VÀ KHÔNG THAY ĐỔI NÀO ĐỤNG VÀO MỘT CON SỐ ───
+ *
+ *  · **Mã hàng phải CÓ THẬT mới được ghi.** Kiểm trước bằng một câu đọc `products`. Dòng ghép trỏ
+ *    vào mã đã biến mất thì BỎ QUA — giữ nguyên dữ liệu cũ, KHÔNG ghi `null`. Ghi `null` là lặng
+ *    lẽ gỡ chi phí quảng cáo khỏi một mã hàng, và báo cáo lợi nhuận đổi số mà không ai được báo
+ *    (AGENTS.md mục 8.8). Bỏ qua thì số giữ nguyên, và lý do được nêu tên.
+ *  · **Một chiến dịch hỏng không kéo theo 200 chiến dịch còn lại.** Mỗi lượt ghi có `try/catch`
+ *    riêng; câu lỗi được giữ lại để in ra, không nuốt.
+ *  · **Trả về cái đã bỏ qua.** Một hàm im lặng làm ít hơn lời hứa của nó là hàm không ai kiểm được.
+ */
+export type ReapplyAdsMappingResult = {
+  campaigns: number;
+  changed: number;
+  /** Chiến dịch trỏ vào mã hàng KHÔNG CÒN TỒN TẠI — nêu tên để người sửa được bảng ghép. */
+  danglingProducts: { campaignId: string; campaign: string; productId: string }[];
+  /** Lỗi ghi của từng chiến dịch. Rỗng = mọi lượt ghi đều qua. */
+  errors: { campaignId: string; message: string }[];
+};
+
+export async function reapplyAdsMapping(): Promise<ReapplyAdsMappingResult> {
   const db = await getDb();
   const [mapping, index] = await Promise.all([loadAdsMapping(), loadProductCodeIndex()]);
   const rows = await db
@@ -82,16 +119,37 @@ export async function reapplyAdsMapping() {
     .from(schema.adSpends)
     .where(and(eq(schema.adSpends.platform, "Facebook"), sql`${schema.adSpends.campaignId} is not null`))
     .groupBy(schema.adSpends.campaignId);
+
+  /*
+    ĐỌC SỔ MÃ HÀNG MỘT LẦN, KHÔNG HỎI MỖI DÒNG.
+
+    Đọc cả cột `id` của `products` chứ KHÔNG lọc `is_removed`: câu hỏi ở đây là "khoá ngoại có
+    thoả không", và một mã hàng đã ẩn vẫn còn dòng trong bảng nên vẫn ghi được. Lọc `is_removed`
+    ở đây sẽ bỏ qua cả những ghép hoàn toàn hợp lệ.
+  */
+  const coThat = new Set((await db.select({ id: schema.products.id }).from(schema.products)).map((p) => p.id));
+
   let changed = 0;
+  const danglingProducts: ReapplyAdsMappingResult["danglingProducts"] = [];
+  const errors: ReapplyAdsMappingResult["errors"] = [];
+
   for (const row of rows) {
     if (!row.campaignId) continue;
     const r = resolveCampaign(row.campaignId, row.campaign ?? "", mapping, index, row.accountId);
-    const result = await db
-      .update(schema.adSpends)
-      .set({ productId: r.productId, excluded: r.excluded, marketerId: r.marketerId })
-      .where(and(eq(schema.adSpends.campaignId, row.campaignId), sql`(${schema.adSpends.productId} is distinct from ${r.productId} or ${schema.adSpends.excluded} <> ${r.excluded} or ${schema.adSpends.marketerId} is distinct from ${r.marketerId})`))
-      .returning({ id: schema.adSpends.id });
-    changed += result.length;
+    if (r.productId && !coThat.has(r.productId)) {
+      danglingProducts.push({ campaignId: row.campaignId, campaign: row.campaign ?? "", productId: r.productId });
+      continue;
+    }
+    try {
+      const result = await db
+        .update(schema.adSpends)
+        .set({ productId: r.productId, excluded: r.excluded, marketerId: r.marketerId })
+        .where(and(eq(schema.adSpends.campaignId, row.campaignId), sql`(${schema.adSpends.productId} is distinct from ${r.productId} or ${schema.adSpends.excluded} <> ${r.excluded} or ${schema.adSpends.marketerId} is distinct from ${r.marketerId})`))
+        .returning({ id: schema.adSpends.id });
+      changed += result.length;
+    } catch (error) {
+      errors.push({ campaignId: row.campaignId, message: error instanceof Error ? error.message : String(error) });
+    }
   }
-  return { campaigns: rows.length, changed };
+  return { campaigns: rows.length, changed, danglingProducts, errors };
 }

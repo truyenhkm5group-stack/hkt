@@ -146,9 +146,41 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
       }
       await ctx.progress();
     }
-    // Áp lại bảng ghép / bí danh cho các dòng cũ (khi có sản phẩm hoặc ghép tay mới)
-    const reapplied = await reapplyAdsMapping();
-    if (reapplied.changed) ctx.log(`Áp lại ghép mã hàng: ${reapplied.changed} dòng thay đổi`);
+    /*
+      ÁP LẠI BẢNG GHÉP LÀ BƯỚC DỌN DẸP, KHÔNG PHẢI VIỆC CHÍNH — NÊN NÓ KHÔNG ĐƯỢC GIẾT LƯỢT CHẠY.
+
+      Số liệu quảng cáo đã ghi xong ở vòng lặp trên. Bước này chỉ áp lại mã hàng / marketer cho
+      những dòng CŨ. Trước đây nó nằm ngoài mọi `try/catch`, nên một dòng ghép trỏ vào mã hàng
+      không còn tồn tại (khoá ngoại `ad_spends.product_id → products.id`) làm cả lượt chạy ghi
+      FAILED — mỗi lượt, mãi mãi, vì nguyên nhân là tất định. Và màn hình chỉ nói "FAILED": không
+      ai phân biệt được ĐỒNG BỘ HỎNG với MỘT BƯỚC DỌN DẸP HỎNG, mà hai thứ đó sửa ở hai chỗ khác.
+
+      Nay nó ra `warning` ⇒ lượt chạy ghi PARTIAL kèm lý do đọc được. PARTIAL nói đúng sự thật:
+      việc chính xong, một phần phụ chưa xong.
+    */
+    try {
+      const reapplied = await reapplyAdsMapping();
+      if (reapplied.changed) ctx.log(`Áp lại ghép mã hàng: ${reapplied.changed} dòng thay đổi`);
+      /*
+        BẢNG GHÉP TRỎ VÀO MÃ HÀNG ĐÃ BIẾN MẤT PHẢI NÊU TÊN.
+
+        Dữ liệu cũ được GIỮ NGUYÊN (không ghi `null` — xem `reapplyAdsMapping`), nên không con số
+        nào đổi. Nhưng im lặng thì bảng ghép hỏng đó sống mãi: đúng cái đã làm job chết nhiều giờ.
+      */
+      if (reapplied.danglingProducts.length) {
+        const ten = reapplied.danglingProducts.slice(0, 5).map((d) => `${d.campaign || d.campaignId} → ${d.productId}`);
+        ctx.summary.warning = `${reapplied.danglingProducts.length} chiến dịch ghép vào mã hàng KHÔNG CÒN TỒN TẠI — đã giữ nguyên dữ liệu cũ, chưa áp ghép: ${ten.join(" · ")}${reapplied.danglingProducts.length > 5 ? " …" : ""}. Sửa ở trang Chi phí › Ghép chiến dịch.`;
+        for (const d of reapplied.danglingProducts) ctx.log(`ghép treo: ${d.campaignId} → mã hàng ${d.productId} không có trong sổ`);
+      }
+      if (reapplied.errors.length) {
+        const cau = reapplied.errors.slice(0, 3).map((e) => `${e.campaignId}: ${e.message.slice(0, 120)}`);
+        ctx.summary.warning = [ctx.summary.warning, `${reapplied.errors.length} chiến dịch không áp được ghép: ${cau.join(" | ")}`].filter(Boolean).join(" · ");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.summary.warning = [ctx.summary.warning, `Không áp lại được bảng ghép mã hàng: ${message.slice(0, 200)}. Số liệu quảng cáo của lượt này VẪN ĐÃ GHI XONG.`].filter(Boolean).join(" · ");
+      ctx.log(`áp lại ghép mã hàng hỏng: ${message}`);
+    }
     ctx.summary.detail = `${accounts.length} tài khoản · ${rows} dòng ngày×chiến dịch (${since} → ${until}) · ghép được mã hàng ${matched}/${rows}${errors.length ? ` · lỗi: ${errors.join(" | ")}` : ""}`;
     publish({ type: "ads" });
     return { accounts: accounts.length, rows, matched };

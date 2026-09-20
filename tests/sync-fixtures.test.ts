@@ -60,6 +60,7 @@ import { testWorkOs } from "./work-os.test";
 import { testTechControlPlaneDb, testTechHealthParsing, testTechLifecycle, testTechPermissions, testTechRiskEngine } from "./tech-control-plane.test";
 import { testAgentRunner, testAgentSandbox, testGithubDeploymentSync, testPhase2aBarriers, testPhase2aSourceGuards, testTechWorkProjection } from "./tech-phase2a.test";
 import { cleanupPrProjectionFixtures, testGithubPrSync, testPrPureMappers, testSyncIncidentPure, testSyncIncidentWatch } from "./tech-pr-projection.test";
+import { testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
 import { testPayrollPeriod } from "./payroll-period.test";
 import { testWorkforce } from "./workforce.test";
@@ -1824,6 +1825,12 @@ async function main() {
   await testGithubPrSync();
   await testSyncIncidentWatch();
   await cleanupPrProjectionFixtures();
+  /*
+    GHÉP QUẢNG CÁO TREO. Bài này chạy `reapplyAdsMapping()` THẬT, mà hàm đó quét toàn bộ dòng
+    Facebook — nên nó tự chụp lại và trả về nguyên trạng `product_id`/`marketer_id` của mọi dòng
+    (fixture `landing-attribution` có ba dòng như vậy). Xem `chupVaTraVe` trong bài.
+  */
+  await testAdsMappingDangling();
   await testTechWorkProjection();
   await testAgentRunner();
   await testPhase2aBarriers();
@@ -1871,6 +1878,7 @@ async function main() {
   testPhase2aSourceGuards();
   testPrPureMappers();
   testSyncIncidentPure();
+  testAdsMappingGuards();
   testTechRiskEngine();
   testTechPermissions();
   testTechHealthParsing();

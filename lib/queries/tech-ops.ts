@@ -106,6 +106,24 @@ export async function lastGithubDeploySyncAt(): Promise<Date | null> {
   return row?.startedAt ?? null;
 }
 
+/**
+ * LƯỢT CHÉP TRẠNG THÁI PR GẦN NHẤT — mốc đọc + câu tóm tắt CHÍNH JOB ĐÃ VIẾT.
+ *
+ * Trả về nguyên `detail` chứ không phân tích lại nó: câu ấy do job viết ra từ số đo của chính nó,
+ * và một màn hình tự bóc tách chuỗi là một nguồn thứ hai lặng lẽ trôi khỏi nguồn thứ nhất.
+ *
+ * `null` = chưa lượt nào chạy. Đó là CHƯA BIẾT — khác hẳn "không có PR nào gắn việc".
+ */
+export async function lastPrSyncRun(): Promise<{ at: Date; detail: string; warning: boolean } | null> {
+  const db = await getDb();
+  const row = await db.query.syncRuns.findFirst({
+    where: and(eq(schema.syncRuns.source, "GITHUB"), eq(schema.syncRuns.job, "github-pr-sync"), inArray(schema.syncRuns.status, ["SUCCESS", "PARTIAL"])),
+    orderBy: [desc(schema.syncRuns.startedAt)],
+    columns: { startedAt: true, detail: true, status: true },
+  });
+  return row ? { at: row.startedAt, detail: row.detail, warning: row.status === "PARTIAL" } : null;
+}
+
 export function techIncidentWhere(params: ListParams) {
   const i = schema.techIncidents;
   const conds: (SQL | undefined)[] = [];
