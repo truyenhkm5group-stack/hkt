@@ -145,6 +145,7 @@ async function main() {
   if (sanCo) {
     console.log(`▶ Việc đã có: ${sanCo.code} (rủi ro ${sanCo.risk}) — dùng lại, không tạo trùng.`);
     console.log(`TASK_CODE=${sanCo.code}`);
+    console.log("AGENT_KEY=documentation");
     return;
   }
 
@@ -159,6 +160,8 @@ async function main() {
     process.exit(1);
   }
   console.log(`TASK_CODE=${t.code}`);
+  /* Lượt TỰ KIỂM bật đúng một vai `documentation` (xem khối 2) — in ra để workflow không phải đoán. */
+  console.log("AGENT_KEY=documentation");
 }
 
 main()
