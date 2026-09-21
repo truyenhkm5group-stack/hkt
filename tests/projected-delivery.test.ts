@@ -197,7 +197,7 @@ export async function testTrainingLabelsFromOrderOutcome(db: Db) {
 
 /* ───── 4 · Chấm cohort theo ORDER_OUTCOME, không theo stage / mã thô ───── */
 export async function testScoringUsesOrderOutcome(db: Db) {
-  for (const [ma, ten] of [["R", "Hàng trông-như-đã-giao"], ["A", "Hàng đang giao"], ["U", "Hàng chưa đo được"], ["W", "Hàng chờ ĐVVC lấy"]]) {
+  for (const [ma, ten] of [["R", "Hàng trông-như-đã-giao"], ["A", "Hàng đang giao"], ["U", "Hàng chưa đo được"], ["W", "Hàng chờ ĐVVC lấy"], ["N", "Hàng mã mới chưa kết cục"]]) {
     await db.insert(schema.products).values({ id: `${P}p-${ma}`, name: ten, customId: `PDV-${ma}` }).onConflictDoNothing();
     await db.insert(schema.productVariants).values({ id: `${P}v-${ma}`, productId: `${P}p-${ma}`, sku: `PDV-${ma}`, retailPrice: 500_000 }).onConflictDoNothing();
   }
@@ -227,6 +227,16 @@ export async function testScoringUsesOrderOutcome(db: Db) {
     { id: "w-1", productId: "W", luc: TUOI, chuaLayHang: true, ship: { stage: "PENDING", vtpStatusName: "Giao cho Bưu tá đi nhận", events: [["104", "Giao cho Bưu tá đi nhận", "OUTBOUND", "PENDING"]] } },
     { id: "w-2", productId: "W", luc: TUOI, chuaLayHang: true, ship: { stage: "PENDING", vtpStatusName: "Đơn hàng chờ xử lý", events: [["102", "Đơn hàng chờ xử lý", "OUTBOUND", "PENDING"]] } },
     { id: "w-3", productId: "W", luc: TUOI, chuaLayHang: true, ship: { stage: "PENDING", vtpStatusName: "Đơn hàng chờ xử lý", events: [["102", "Đơn hàng chờ xử lý", "OUTBOUND", "PENDING"]] } },
+    /*
+      ── Mã N: MÃ MỚI — có đơn đang giao mà CHƯA đơn nào kết thúc ──
+
+      Đây là hình dạng của Đầm Q005 trên production 21/09/2026: `giao thật 0 · hoàn 0 · đang giao
+      62`, mà ô tỷ lệ in 37,5%. Hai đơn dưới đây ở "chờ phát lại" — trạng thái mà mô hình ĐÃ học
+      được (mã A gieo tập huấn luyện), nên hợp đồng VẪN trả ra một con số. Nhưng tử số của con số
+      ấy là `0 + Σ P`, toàn bộ mượn từ mã khác.
+    */
+    { id: "n-1", productId: "N", luc: TUOI, ship: { stage: "DELIVERY_FAILED", vtpStatusName: "Chờ phát lại", events: [...CHO_PHAT_LAI] } },
+    { id: "n-2", productId: "N", luc: TUOI, ship: { stage: "DELIVERY_FAILED", vtpStatusName: "Chờ phát lại", events: [...CHO_PHAT_LAI] } },
     // ── Mã U: hai đơn đang giao ở trạng thái chưa đủ mẫu, và KHÔNG biết giá vốn ──
     { id: "u-1", productId: "U", luc: TUOI, unitCost: 0, ship: { stage: "IN_TRANSIT", vtpStatusName: "Lấy hàng thất bại", events: [["", "Lấy hàng thất bại", "OUTBOUND", "IN_TRANSIT"]] } },
     { id: "u-2", productId: "U", luc: TUOI, unitCost: 0, ship: { stage: "IN_TRANSIT", vtpStatusName: "Lấy hàng thất bại", events: [["", "Lấy hàng thất bại", "OUTBOUND", "IN_TRANSIT"]] } },
@@ -343,6 +353,36 @@ export async function testNominalParityWithActiveOrders() {
     ĐÚNG tỷ lệ khai trong giả định, và TIỀN bằng ĐÚNG `Doanh số POS × tỷ lệ ấy` — cùng một tỷ lệ
     cho cả hai ô. Kỳ vọng dựng TỪ `bao.assumptions`, không gõ lại con số (AGENTS.md §65).
   */
+  /*
+    ═══ MÔ HÌNH RA ĐƯỢC SỐ ≠ MÃ NÀY ĐÃ ĐO ĐƯỢC ═══
+
+    Mã N có 2 đơn đang giao ở "chờ phát lại" — trạng thái mô hình ĐÃ học — nên hợp đồng vẫn trả ra
+    một tỷ lệ khác `null`. Nhưng 0 đơn của chính mã N có kết cục, nên tử số hoàn toàn là xác suất
+    MƯỢN từ mã khác. Đây là ca Đầm Q005 trên production 21/09/2026 (giao 0 · hoàn 0 · đang giao 62
+    mà in 37,5%).
+
+    Khối này khoá CẢ HAI vế, vì chỉ một vế thì không chứng minh được gì:
+      · hợp đồng VẪN đo ra một con số cho mã N  →  nếu không, điều kiện mới chưa bị thử;
+      · và bảng lợi nhuận KHÔNG dùng con số đó.
+  */
+  const hN = theoMa.get(`${P}p-N`)!;
+  assert.ok(hN, "hợp đồng phải thấy mã N");
+  assert.equal(hN.deliveredActual + hN.failedActual, 0, "mã N chưa đơn nào kết thúc — đó là điều kiện của ca này");
+  assert.ok(hN.active > 0, "nhưng nó CÓ đơn đang giao");
+  assert.notEqual(hN.projectedRate, null, "và hợp đồng VẪN ra một con số — nếu null thì bài này chưa thử được điều kiện mới");
+
+  const N = bao.rows.find((r) => r.productId === `${P}p-N`)!;
+  assert.ok(N, "bảng lợi nhuận phải thấy mã N");
+  assert.notEqual(N.returnRateSource, "projected", "mã chưa có kết cục nào thì KHÔNG được mang con số mượn từ mã khác");
+  assert.equal(N.returnRateSource, "default", "chưa lịch sử, chưa kết cục ⇒ tỷ lệ khai ở Giả định");
+  assert.equal(N.deliveryRate, Math.round((100 - bao.assumptions.defaultReturnRate) * 10) / 10);
+  assert.equal(N.expectedRevenue, Math.round(N.grossSales * (1 - bao.assumptions.defaultReturnRate / 100)), "tiền đi cùng đúng tỷ lệ đang hiện");
+
+  // Mã A CÓ kết cục thật ⇒ vẫn dùng hợp đồng. Ranh giới nằm ở đó, không ở chỗ khác.
+  assert.ok(hA.deliveredActual + hA.failedActual > 0);
+  assert.equal(A.returnRateSource, "projected");
+  assert.equal(A.projection?.finished, hA.deliveredActual + hA.failedActual, "màn hình phải nói ra con số này dựa trên bao nhiêu đơn đã kết thúc");
+
   const U = bao.rows.find((r) => r.productId === `${P}p-U`)!;
   assert.ok(U);
   const tyLeKhai = bao.assumptions.defaultReturnRate;
