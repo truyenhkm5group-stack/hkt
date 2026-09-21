@@ -101,6 +101,7 @@ const JOB = {
   taskTitle: "Viết tài liệu",
   taskDescription: "",
   writeGlobs: ["docs/"] as const,
+  readGlobs: ["docs/", "lib/"] as const,
   baseCommit: "abc1234",
   branch: "ai/documentation/TECH-2-x",
   workspace: null as never,
