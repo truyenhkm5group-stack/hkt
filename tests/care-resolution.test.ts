@@ -16,6 +16,7 @@ import {
   WORK_DAY_END_HOUR,
   WORK_DAY_START_HOUR,
   careDecisionOf,
+  decisionReasonCode,
   followUpAtFrom,
   followUpBucket,
 } from "@/lib/constants/care-resolution";
@@ -197,13 +198,43 @@ export async function testCareResolution(db: Db) {
 
   const truocKhiThu = await db.$count(schema.careDecisions, eq(schema.careDecisions.shipmentId, `${P}s1`));
   assert.ok("error" in (await recordCareDecision(nv, { shipmentId: `${P}s1`, decision: "CARE_FOLLOW_UP", note: "quên chọn giờ" })), "hẹn không có giờ phải bị TỪ CHỐI — hẹn không giờ là ca chìm xuống đáy hàng đợi");
-  assert.ok("error" in (await recordCareDecision(nv, { shipmentId: `${P}s1`, decision: "CARE_RETURN", note: "thôi khỏi nói vì sao" })), "duyệt hoàn không lý do phải bị từ chối — báo cáo lý do hoàn rỗng vĩnh viễn nếu bước này bỏ qua");
+  /*
+    "ĐÃ HOÀN" KHÔNG DANH MỤC **VÀ** KHÔNG NOTE ⇒ TỪ CHỐI. Đây mới là trường hợp đặc tả lo: một dòng
+    hoàn mà không ai nói vì sao. Có note thì không còn là trường hợp ấy nữa (xem khối ngay dưới).
+  */
+  assert.ok("error" in (await recordCareDecision(nv, { shipmentId: `${P}s1`, decision: "CARE_RETURN", note: "" })), "duyệt hoàn không lý do VÀ không note phải bị từ chối — báo cáo lý do hoàn rỗng vĩnh viễn nếu bước này bỏ qua");
   assert.equal(await db.$count(schema.careDecisions, eq(schema.careDecisions.shipmentId, `${P}s1`)), truocKhiThu, "lượt bị từ chối KHÔNG được ghi một dòng nào");
+
+  /* ═══════════ LÝ DO HOÀN GHI ĐƯỢC BẰNG CHỮ CỦA NGƯỜI XỬ LÝ (chủ shop chốt 21/09/2026) ═══════════
+
+     Danh mục ba mươi ô không bao giờ phủ hết câu khách nói. Người trực gõ "bơm hàng" rồi bấm ghi
+     nhận thì phải ghi được — và phải ghi thành `OTHER` ("Lý do khác (có ghi chú)"), KHÔNG phải
+     `UNKNOWN`: `UNKNOWN` nghĩa là CHƯA AI HỎI, còn đây là đã hỏi, đã biết, chỉ không nằm trong
+     danh mục. Màn hình và máy chủ hỏi cùng một câu qua `decisionReasonCode()`. */
+
+  assert.ok(!decisionReasonCode("CARE_RETURN", "   ", "  ").ok, "chỉ khoảng trắng KHÔNG phải một lời khai — cắt trắng rồi mới xét");
+  const chiCoNote = decisionReasonCode("CARE_RETURN", undefined, "bơm hàng");
+  assert.ok(chiCoNote.ok && chiCoNote.reasonCode === "OTHER" && chiCoNote.fromNote, "note tay ⇒ lý do OTHER, và màn hình phải biết để nói trước điều sắp lưu");
+  const coDanhMuc = decisionReasonCode("CARE_RETURN", "CUSTOMER_REFUSED", "bơm hàng");
+  assert.ok(coDanhMuc.ok && coDanhMuc.reasonCode === "CUSTOMER_REFUSED" && !coDanhMuc.fromNote, "chọn danh mục thì danh mục THẮNG — note không được đè lên nó");
+  assert.ok(!decisionReasonCode("CARE_RETURN", undefined, "").ok, "không danh mục, không note ⇒ chặn");
+  assert.ok(decisionReasonCode("CARE_CONTINUE_DELIVERY", undefined, "").ok, "kết quả không cần lý do thì không bịa ra một mã nào");
+
+  const ghiBangChu = await recordCareDecision(nv, { shipmentId: `${P}s1`, decision: "CARE_RETURN", note: "bơm hàng" });
+  assert.ok("ok" in ghiBangChu, `note tay phải ghi nhận được “Đã hoàn” — nhận: ${"error" in ghiBangChu ? ghiBangChu.error : ""}`);
+  const [dongBangChu] = await db
+    .select()
+    .from(schema.careDecisions)
+    .where(and(eq(schema.careDecisions.shipmentId, `${P}s1`), eq(schema.careDecisions.decision, "CARE_RETURN")))
+    .orderBy(desc(schema.careDecisions.decidedAt))
+    .limit(1);
+  assert.equal(dongBangChu.reasonCode, "OTHER", "lý do gõ tay lưu là OTHER — “đã hỏi, không thuộc danh mục”, KHÔNG phải UNKNOWN “chưa ai hỏi”");
+  assert.equal(dongBangChu.note, "bơm hàng", "và chính câu người gõ là phần “có ghi chú” của OTHER — mất nó thì OTHER rỗng nghĩa");
 
   /* ═══════════ NHẬT KÝ: AI · LÚC NÀO · TRƯỚC/SAU · LÝ DO · VÀ ĐVVC LÚC ĐÓ NÓI GÌ ═══════════ */
 
   const so = await db.select().from(schema.careDecisions).where(eq(schema.careDecisions.shipmentId, `${P}s1`)).orderBy(desc(schema.careDecisions.decidedAt));
-  assert.equal(so.length, 4, "bốn lượt bấm thành công ⇒ bốn dòng, chỉ thêm, không ghi đè");
+  assert.equal(so.length, 5, "năm lượt bấm thành công ⇒ năm dòng, chỉ thêm, không ghi đè");
   for (const r of so) {
     assert.equal(r.actorEmail, nv.email, "mỗi dòng phải nói ai bấm");
     assert.ok(r.previousCareStatus && r.nextCareStatus, "mỗi dòng phải nói trạng thái xử lý TRƯỚC và SAU");
@@ -215,11 +246,15 @@ export async function testCareResolution(db: Db) {
     assert.equal(r.carrierStageAtDecision, "DELIVERY_FAILED", "phải chụp lại chặng ĐVVC lúc bấm");
     assert.ok(r.carrierSubstateAtDecision, "phải chụp lại trạng thái con của ĐVVC lúc bấm");
   }
-  assert.equal(so.filter((r) => r.decision === "CARE_RETURN")[0].reasonCode, "CUSTOMER_REFUSED", "lý do lưu theo DANH MỤC (đếm được), không chỉ là ô chữ");
+  const lyDoHoan = so.filter((r) => r.decision === "CARE_RETURN").map((r) => r.reasonCode);
+  assert.ok(
+    lyDoHoan.every((m) => m !== null) && lyDoHoan.filter((m) => m === "OTHER").length === 1 && lyDoHoan.filter((m) => m === "CUSTOMER_REFUSED").length === 2,
+    `lý do luôn lưu thành MỘT MÃ ĐẾM ĐƯỢC — danh mục khi người chọn, OTHER khi người gõ chữ; không bao giờ NULL. Nhận: ${JSON.stringify(lyDoHoan)}`,
+  );
   assert.ok(so.some((r) => r.previousDecision !== null), "dòng sau phải nhớ kết quả TRƯỚC đó — không có nó thì “đổi ý mấy lần” phải tự nối tay");
 
   const chiTiet = await getCareCaseDetail(`${P}s1`);
-  assert.equal(chiTiet?.decisions.length, 4, "panel phải đọc được cả bốn quyết định");
+  assert.equal(chiTiet?.decisions.length, 5, "panel phải đọc được cả năm quyết định");
   assert.equal(chiTiet?.decisions[0].decision, "CARE_RETURN", "mới nhất đứng trước");
   assert.equal(chiTiet?.carrierDecisions.length, 0, "sổ LỆNH GỬI ĐVVC phải RỖNG — ba nút care không gửi gì");
   assert.equal(chiTiet?.care.lastDecision?.decision, "CARE_RETURN", "“kết quả hiện tại” = quyết định MỚI NHẤT của đợt");
@@ -238,7 +273,7 @@ export async function testCareResolution(db: Db) {
   const sauWebhook = await loadCareState(`${P}s1`);
   assert.equal(sauWebhook.lastDecision?.decision, truocWebhook.lastDecision?.decision, "CASE F · sự kiện ĐVVC KHÔNG được xoá quyết định của người");
   assert.equal(sauWebhook.lastNote, truocWebhook.lastNote, "CASE F · sự kiện ĐVVC KHÔNG được xoá note của người");
-  assert.equal(await db.$count(schema.careDecisions, eq(schema.careDecisions.shipmentId, `${P}s1`)), 4, "CASE F · sổ quyết định CHỈ THÊM — webhook không xoá, không sửa một dòng nào");
+  assert.equal(await db.$count(schema.careDecisions, eq(schema.careDecisions.shipmentId, `${P}s1`)), 5, "CASE F · sổ quyết định CHỈ THÊM — webhook không xoá, không sửa một dòng nào");
 
   /* ═══════════ CASE C · ĐVVC ĐÃ KẾT THÚC ⇒ VẪN GHI ĐƯỢC KẾT QUẢ CARE ═══════════ */
 
@@ -373,6 +408,6 @@ export async function testCareResolution(db: Db) {
   clearMemo();
 
   console.log(
-    "✓ Kết quả care ĐỘC LẬP với ĐVVC: ghi được khi ERP chưa khai API (A) · kiện chưa có mã vận đơn (B) · kiện đã kết thúc (C) · không sinh lệnh ĐVVC nào (D) · không chạm chứng từ (E) · webhook không xoá quyết định/note (F) · lệnh ĐVVC hỏng không kéo theo kết quả care (G) · tải lại còn nguyên kết quả + note + giờ hẹn (H)",
+    "✓ Kết quả care ĐỘC LẬP với ĐVVC: ghi được khi ERP chưa khai API (A) · kiện chưa có mã vận đơn (B) · kiện đã kết thúc (C) · không sinh lệnh ĐVVC nào (D) · không chạm chứng từ (E) · webhook không xoá quyết định/note (F) · lệnh ĐVVC hỏng không kéo theo kết quả care (G) · tải lại còn nguyên kết quả + note + giờ hẹn (H) · lý do hoàn ghi được bằng DANH MỤC hoặc bằng CHỮ (⇒ OTHER, không phải UNKNOWN), chặn chỉ khi không có cả hai",
   );
 }

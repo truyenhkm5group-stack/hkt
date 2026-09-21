@@ -9,6 +9,7 @@ import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
+import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { distributeProportionally, inventoryRiskExposure, inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
 import { getProjectedDeliveryMetrics, type BacktestSummary } from "@/lib/queries/projected-delivery";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
@@ -23,10 +24,42 @@ const ads = schema.adSpends;
 const NOT_CANCELLED = sql`${o.stage} not in ('CANCELLED','DELETED')`;
 const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
 
-function periodCond(from: Date | null, to: Date | null): SQL[] {
+/**
+ * ═══════════ MỐC COHORT LÀ MỘT LỰA CHỌN CÓ TÊN, KHÔNG PHẢI MỘT HẰNG SỐ ═══════════
+ *
+ * Mặc định `ORDERED` (ngày tạo đơn) — đúng câu hỏi bảng lợi nhuận trả lời: *"đơn chốt trong khoảng
+ * này ra bao nhiêu tiền"*, và là mốc duy nhất so sánh được với chi phí quảng cáo cùng khoảng. Giữ
+ * mặc định nghĩa là không con số nào của kỳ đang xem bị xê dịch.
+ *
+ * Nhưng trang Tỷ lệ giao thành công mặc định `SHIPPED`, nên CÙNG một mã trong CÙNG 30 ngày ra hai
+ * con số ở hai màn hình — hai câu trả lời đúng cho hai câu hỏi khác nhau, mà người đọc không có
+ * cách nào biết điều đó. Nay mốc là một ô chọn ở CẢ HAI trang: đặt cả hai về cùng một mốc thì hai
+ * màn hình phải nói CÙNG một số, và `tests/projected-delivery.test.ts` khoá đúng điều ấy.
+ *
+ * Ba biểu thức lấy nguyên từ `lib/constants/report-time-basis.ts` — không viết lại ở đây, vì hai
+ * bản chép tay của cùng một mốc là đúng thứ làm hai trang trôi xa nhau.
+ */
+function mocCuaBasis(basis: TimeBasis): SQL {
+  if (basis === "ORDERED") return sql`${o.insertedAt}`;
+  return sql.raw(basis === "SHIPPED" ? CARRIER_HANDOFF_AT_SQL : FINAL_OUTCOME_AT_SQL);
+}
+
+/**
+ * `moc is not null` CHỈ áp cho mốc khác `ORDERED`: đơn chưa bàn giao ĐVVC không có `handoff_at`, và
+ * một đơn không có mốc thì nằm NGOÀI cohort chứ không phải trong cohort với giá trị 0 (§42).
+ */
+function periodCond(from: Date | null, to: Date | null, basis: TimeBasis = "ORDERED"): SQL[] {
+  if (basis === "ORDERED") {
+    const conds: SQL[] = [];
+    if (from) conds.push(gte(o.insertedAt, from));
+    if (to) conds.push(lte(o.insertedAt, to));
+    return conds;
+  }
+  const moc = mocCuaBasis(basis);
   const conds: SQL[] = [];
-  if (from) conds.push(gte(o.insertedAt, from));
-  if (to) conds.push(lte(o.insertedAt, to));
+  if (from) conds.push(sql`${moc} >= ${from}`);
+  if (to) conds.push(sql`${moc} <= ${to}`);
+  if (from || to) conds.push(sql`${moc} is not null`);
   return conds;
 }
 
@@ -84,7 +117,7 @@ export async function resolveAssumptions(): Promise<ResolvedAssumptions> {
 const FAILED_EVENT = sql`(${schema.shipmentEvents.status} ilike 'Tồn%' or ${schema.shipmentEvents.status} ilike 'Phát tiếp%' or ${schema.shipmentEvents.status} in ('505','506','507','508'))`;
 
 /** Số đơn "cứu được": đã từng phát không thành nhưng cuối cùng giao thành công, gộp theo mã hàng (đơn đã xác nhận lên trong kỳ) */
-export async function rescuedOrdersByProduct(period: Period): Promise<Map<string, number>> {
+export async function rescuedOrdersByProduct(period: Period, basis: TimeBasis = "ORDERED"): Promise<Map<string, number>> {
   const db = await getDb();
   const rows = await db
     .select({
@@ -101,7 +134,7 @@ export async function rescuedOrdersByProduct(period: Period): Promise<Map<string
         inArray(o.stage, [...CONFIRMED_STAGES]),
         sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`,
         sql`exists (select 1 from ${schema.shipmentEvents} where ${schema.shipmentEvents.shipmentId} = ${s.id} and ${FAILED_EVENT})`,
-        ...periodCond(period.from, period.to),
+        ...periodCond(period.from, period.to, basis),
       ),
     )
     .groupBy(sql`1`);
@@ -421,7 +454,7 @@ async function stockValueByProduct(): Promise<Map<string, number>> {
 }
 
 /** Lợi nhuận danh nghĩa theo mã hàng: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − quảng cáo */
-async function getNominalProfitReportUncached(period: Period): Promise<NominalReport> {
+async function getNominalProfitReportUncached(period: Period, basis: TimeBasis): Promise<NominalReport> {
   const db = await getDb();
   const assumptions = await resolveAssumptions();
   /*
@@ -429,7 +462,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
     LỖI LÀ LỖI: hợp đồng hỏng thì bảng vẫn dựng được (tiền theo tỷ lệ lịch sử, có nhãn) nhưng lỗi
     được trả lên màn hình bằng tên của nó, không hoá thành "chưa đủ dữ liệu".
   */
-  const duBaoHoacLoi = await getProjectedDeliveryMetrics(period, "ORDERED").then(
+  const duBaoHoacLoi = await getProjectedDeliveryMetrics(period, basis).then(
     (v) => ({ v, e: null as string | null }),
     (e: unknown) => ({ v: null, e: e instanceof Error ? e.message : String(e) }),
   );
@@ -481,7 +514,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       .leftJoin(pv, eq(pv.id, i.variantId))
       .leftJoin(p, eq(p.id, sql`coalesce(${pv.productId}, ${i.productId})`))
       // chỉ tính đơn đã xác nhận trên Pancake (bỏ đơn mới / chờ xác nhận / huỷ)
-      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), ...periodCond(period.from, period.to)))
+      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), ...periodCond(period.from, period.to, basis)))
       .groupBy(sql`1`),
     db
       .select({ productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
@@ -494,8 +527,12 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       .select({ orderId: o.id, productId: PID, lineSales: sql<number>`coalesce(sum(${i.lineTotal}), 0)`, orderTotal: sql<number>`max(coalesce(${o.totalPriceAfterDiscount}, 0))` })
       .from(i)
       .innerJoin(o, eq(o.id, i.orderId))
+      // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT). Bảng vận đơn có mặt vì biểu thức mốc NGÀY GỬI /
+      // NGÀY XỬ LÝ đọc `"shipments".*`; thiếu nó thì Postgres báo "missing FROM-clause entry" — và
+      // chỉ báo khi người dùng ĐỔI mốc, tức không lần deploy nào bắt được.
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .leftJoin(pv, eq(pv.id, i.variantId))
-      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), NOT_CANCELLED, ...periodCond(period.from, period.to)))
+      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), NOT_CANCELLED, ...periodCond(period.from, period.to, basis)))
       .groupBy(o.id, PID),
     // CHI PHÍ VẬN HÀNH đi qua Profit Engine — nơi duy nhất quyết định nguồn nào có thẩm quyền,
     // nguồn chính đã phủ đủ chưa, và khoản gõ tay nào bị loại vì trùng nguồn.
@@ -826,9 +863,16 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
 export type NominalDailyRow = { day: string; orders: number; items: number; grossSales: number; adSpend: number; expectedRevenue: number; expectedCogs: number; shipCost: number; expectedProfit: number; margin: number | null; cpo: number | null; delivered: number; returned: number };
 
 /** Bảng theo ngày của một mã hàng (giống sheet báo cáo mẫu): đơn, SP, CPQC, doanh số, DT ước tính, giá vốn, VC, lợi nhuận, margin */
-export async function getNominalDailyForProduct(productId: string, period: Period, returnRate: number, assumptions: ResolvedAssumptions): Promise<NominalDailyRow[]> {
+export async function getNominalDailyForProduct(productId: string, period: Period, returnRate: number, assumptions: ResolvedAssumptions, basis: TimeBasis = "ORDERED"): Promise<NominalDailyRow[]> {
   const db = await getDb();
-  const day = sql<string>`to_char(${o.insertedAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`;
+  /*
+    NGÀY CỦA MỘT DÒNG PHẢI LÀ NGÀY CỦA CHÍNH MỐC ĐANG LỌC.
+
+    Lọc theo ngày gửi rồi xếp cột theo ngày TẠO ĐƠN là một bảng mà tổng thì đúng còn từng dòng sai
+    chỗ: đo trên production, hai mốc lệch trung bình 4,5 ngày và 73,6% đơn rơi vào hai ngày khác
+    nhau (lib/constants/report-time-basis.ts).
+  */
+  const day = sql<string>`to_char(${mocCuaBasis(basis)} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`;
   const adDay = sql<string>`to_char(${ads.spendDate} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`;
   const adConds: SQL[] = [eq(ads.productId, productId), eq(ads.excluded, false)];
   if (period.from) adConds.push(gte(ads.spendDate, period.from));
@@ -848,7 +892,7 @@ export async function getNominalDailyForProduct(productId: string, period: Perio
       .innerJoin(o, eq(o.id, i.orderId))
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .leftJoin(pv, eq(pv.id, i.variantId))
-      .where(and(eq(i.isBonus, false), sql`coalesce(${pv.productId}, ${i.productId}) = ${productId}`, ...periodCond(period.from, period.to)))
+      .where(and(eq(i.isBonus, false), sql`coalesce(${pv.productId}, ${i.productId}) = ${productId}`, ...periodCond(period.from, period.to, basis)))
       .groupBy(sql`1`)
       .orderBy(sql`1`),
     db
@@ -870,6 +914,10 @@ export async function getNominalDailyForProduct(productId: string, period: Perio
     });
 }
 
-export async function getNominalProfitReport(period: Period) : Promise<NominalReport> {
-  return memo(`getNominalProfitReport:${periodKey(period)}`, 120000, () => getNominalProfitReportUncached(period));
+/**
+ * `basis` ĐI VÀO KHOÁ CACHE. Thiếu nó thì lượt xem mốc này phục vụ lại con số của mốc kia — không
+ * lỗi, không cảnh báo, chỉ là số sai (AGENTS.md §2: tham số ảnh hưởng kết quả → phải vào cache key).
+ */
+export async function getNominalProfitReport(period: Period, basis: TimeBasis = "ORDERED") : Promise<NominalReport> {
+  return memo(`getNominalProfitReport:${basis}:${periodKey(period)}`, 120000, () => getNominalProfitReportUncached(period, basis));
 }
