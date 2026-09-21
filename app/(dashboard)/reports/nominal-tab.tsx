@@ -141,6 +141,88 @@ function Pct({
   );
 }
 
+/**
+ * ═══════════ Ô SỐ HAI TẦNG — CÁCH BẢNG NÀY HẸP LẠI MÀ KHÔNG BỎ MỘT CON SỐ NÀO ═══════════
+ *
+ * Bảng "Lợi nhuận danh nghĩa theo mã hàng" từng có 24 cột và `min-w-[1500px]`; bảng "theo hàng
+ * nhập" có 17 cột và `min-w-[1200px]`. Màn hình 1440px trừ thanh điều hướng còn chừng 1.150px,
+ * nên cả hai luôn phải kéo ngang — và ngay khi kéo, cột "Mã hàng" trôi ra khỏi màn hình. Từ lúc
+ * đó mọi phép so sánh theo hàng đều làm bằng trí nhớ, tức là bảng rộng không cho đọc được NHIỀU
+ * hơn, nó chỉ cho đọc được ÍT hơn.
+ *
+ * Cách chữa KHÔNG phải là bỏ cột: mỗi con số ở đây đều có người cần. Những con số vốn luôn được
+ * đọc CÙNG NHAU — tiền và số lượng của cùng một thứ, một khoản chi và tỷ lệ của chính nó, lợi
+ * nhuận và margin của chính nó — vào chung một ô, con số chính ở trên và phần chi tiết ở dưới.
+ * Không có phép cộng nào bị giấu: hai tầng là hai con số riêng, chỉ đứng gần nhau hơn.
+ */
+function OKep({ children, sub, subTitle, className }: { children: React.ReactNode; sub?: React.ReactNode; subTitle?: string; className?: string }) {
+  return (
+    <TableCell className={cn("text-right align-top", className)}>
+      <div>{children}</div>
+      {sub ? (
+        <div className="text-[10.5px] font-normal leading-tight text-muted-foreground" title={subTitle}>
+          {sub}
+        </div>
+      ) : null}
+    </TableCell>
+  );
+}
+
+/** Bốn khoản vận hành in dưới tổng — gộp bốn cột thành một ô, KHÔNG gộp bốn con số thành một. */
+function chiTietVanHanh(r: { operatingAlloc: number; packingCost: number; opsStaffCost: number; fixedAlloc: number; rescued: number }) {
+  const phan = [
+    r.operatingAlloc ? `nhập ${formatVND(r.operatingAlloc, { compact: true })}` : null,
+    r.packingCost ? `đóng ${formatVND(r.packingCost, { compact: true })}` : null,
+    r.opsStaffCost ? `NV ${formatVND(r.opsStaffCost, { compact: true })}` : null,
+    r.fixedAlloc ? `cố định ${formatVND(r.fixedAlloc, { compact: true })}` : null,
+  ].filter(Boolean);
+  if (!phan.length) return null;
+  return (
+    <span title={`CP vận hành đã nhập ${formatVND(r.operatingAlloc)} · đóng hàng ${formatVND(r.packingCost)} · nhân viên vận đơn ${formatVND(r.opsStaffCost)}${r.rescued ? ` (cứu ước ${formatNumber(r.rescued)} đơn)` : ""} · chi phí cố định ${formatVND(r.fixedAlloc)}`}>
+      {phan.join(" · ")}
+    </span>
+  );
+}
+
+/** Một dòng của bảng hàng nhập, hoặc dòng tổng — hai chỗ dùng chung đúng một phép trừ. */
+type CoTonKho = Pick<NominalRow, "purchaseQty" | "purchaseCost" | "purchaseCostKnown" | "expectedQty" | "expectedCogs" | "cogsKnown" | "stockQty" | "stockValue" | "stockKnown" | "outInTransitQty" | "outAwaitingReturnQty">;
+
+/**
+ * HÀNG NHẬP − HÀNG ĐÃ TỚI TAY KHÁCH. Không kẹp về 0: số âm nghĩa là trong kỳ bán ra nhiều hơn
+ * nhập vào — hoặc hàng đến từ tồn đầu kỳ, hoặc một phiếu nhập còn thiếu. Cả hai đều là việc phải
+ * làm, và cả hai biến mất nếu ô in ra 0.
+ */
+function conLaiUocTinh(r: CoTonKho) {
+  return {
+    qty: r.purchaseQty - r.expectedQty,
+    cost: r.purchaseCost - r.expectedCogs,
+    /* Hiệu số chỉ biết được khi CẢ HAI vế biết — thiếu một vế thì nó là số trừ đi một ẩn số. */
+    costKnown: r.purchaseCostKnown && r.cogsKnown,
+  };
+}
+
+/** Tồn THẬT theo Sổ kho, in ngay dưới phép trừ. Chưa có phiếu nhập nào ⇒ CHƯA BIẾT, không phải 0. */
+function nhanSoKho(r: CoTonKho) {
+  if (!r.stockKnown) return <span title="Mã chưa có phiếu nhập nào trên ERP ⇒ Sổ kho chưa có cơ sở để nói tồn là bao nhiêu (mục 10)">sổ kho —</span>;
+  return <>sổ kho {formatNumber(r.stockQty)}</>;
+}
+
+/**
+ * VÌ SAO HAI CON SỐ LỆCH NHAU — câu trả lời phải đứng ngay cạnh chúng, không nằm trong đầu người
+ * đã đọc mã nguồn. Đo production 21/09/2026 (toàn bộ lịch sử): Q002 nhập 1.374, giao thành công
+ * 321, phép trừ ra 1.053 trong khi Sổ kho đếm 352 — 301 cái đang hoàn mà kho chưa lập phiếu tái
+ * nhập, phần còn lại đang trên đường.
+ */
+function giaiThichConLai(r: CoTonKho, conLai: { qty: number }) {
+  const cho = [
+    r.stockKnown ? `trong kho ${formatNumber(r.stockQty)}` : "trong kho CHƯA BIẾT (mã chưa có phiếu nhập)",
+    `đang trên đường ${formatNumber(r.outInTransitQty)}`,
+    `hoàn về mà kho chưa lập phiếu tái nhập ${formatNumber(r.outAwaitingReturnQty)}`,
+  ].join(" · ");
+  const lech = r.stockKnown ? conLai.qty - r.stockQty : null;
+  return `Hàng nhập ${formatNumber(r.purchaseQty)} − đã giao thành công (ước tính) ${formatNumber(r.expectedQty)} = ${formatNumber(conLai.qty)} sp shop còn giữ.\nHàng thật đang ở: ${cho}.${lech === null ? "" : `\nChênh với Sổ kho: ${formatNumber(lech)} sp — hàng chưa về kệ chứ không phải lỗi hiển thị.`}\nLƯU Ý: phép trừ chạy TRONG KỲ đang xem (hàng nhập theo mốc nhận hàng, hàng giao theo mốc của cohort), còn Sổ kho là số HIỆN TẠI của toàn bộ lịch sử. Hai con số chỉ so được với nhau ở kỳ “Toàn bộ”.`;
+}
+
 export async function NominalTab({
   period,
   productId,
@@ -341,51 +423,56 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận danh nghĩa theo mã hàng"
-        description={`${period.label} · mỗi mã: đơn ĐÃ XÁC NHẬN lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch. Tỷ lệ và doanh thu GTC ước tính (đơn GTC theo ORDER_OUTCOME) dùng CÙNG hợp đồng với trang Tỷ lệ giao thành công theo mã hàng (${PROJECTED_GTC_VERSION}): mỗi đơn chưa có kết cục được cân theo xác suất của CHÍNH trạng thái Viettel Post nó đang ở, học từ vận đơn đã kết thúc và đủ chín. Mã có cohort mà chưa đo được thì in “—” (không lùi về giả định); chỉ mã KHÔNG có đơn nào trong cohort mới dùng tỷ lệ hoàn ${report.assumptions.returnRateWindowDays} ngày của mã, và tiền của mã đó mang nhãn “ước tính theo tỷ lệ”. Cột nhỏ dưới mỗi tỷ lệ nói rõ nguồn. Bấm mã để xem theo ngày.`}
+        description={`${period.label} · mỗi mã: đơn ĐÃ XÁC NHẬN lên trong kỳ, CPQC Facebook ghép theo tên chiến dịch. Cột nhỏ dưới mỗi con số là phần chi tiết của chính nó. Bấm mã để xem theo ngày.`}
+        hint={
+          <>
+            <p>
+              Tỷ lệ và doanh thu GTC ước tính (đơn GTC theo ORDER_OUTCOME) dùng CÙNG hợp đồng với trang Tỷ lệ giao thành công
+              theo mã hàng ({PROJECTED_GTC_VERSION}): mỗi đơn chưa có kết cục được cân theo xác suất của CHÍNH trạng thái
+              Viettel Post nó đang ở, học từ vận đơn đã kết thúc và đủ chín. Mã có cohort mà chưa đo được thì in “—” (không lùi
+              về giả định); chỉ mã KHÔNG có đơn nào trong cohort mới dùng tỷ lệ hoàn {report.assumptions.returnRateWindowDays}{" "}
+              ngày của mã, và tiền của mã đó mang nhãn “ước tính theo tỷ lệ”. Cột nhỏ dưới mỗi tỷ lệ nói rõ nguồn.
+            </p>
+            <p className="mt-2">
+              Bảng gộp những con số vốn phải đọc CÙNG NHAU vào một ô hai tầng (tiền ở trên, phần chi tiết ở dưới) thay vì tách
+              thành hai mươi tư cột. Thanh cuộn ngang làm người đọc mất cột “Mã hàng” ngay khi kéo, nên mọi phép so sánh theo
+              hàng phải làm bằng trí nhớ. Không con số nào bị bỏ đi — nút “Cột” ở góc bảng vẫn ẩn/hiện được từng cột.
+            </p>
+          </>
+        }
         padded={false}
       >
         <div className="overflow-x-auto">
-          <Table className="min-w-[1500px]">
+          <Table className="min-w-[1120px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Mã hàng</TableHead>
-                <TableHead className="text-right">Đơn</TableHead>
-                <TableHead className="text-right">SP</TableHead>
-                <TableHead className="text-right">Doanh số POS</TableHead>
-                <TableHead className="text-right">CPQC</TableHead>
+                <TableHead className="text-right" title="Tiền hàng của mã trên đơn đã xác nhận trong kỳ (trước hoàn huỷ). Dòng nhỏ: số đơn và số sản phẩm.">Doanh số POS</TableHead>
                 {/*
                   HAI TỶ LỆ QUẢNG CÁO — MẪU SỐ KHÁC NHAU CÓ CHỦ ĐÍCH, KHÔNG THAY THẾ CHO NHAU.
 
                   Một bên chia cho tiền khách CHỐT, một bên chia cho tiền dự kiến THẬT SỰ TỚI TAY
                   KHÁCH. Tỷ lệ đầu luôn đẹp hơn vì mẫu số chưa trừ đơn hoàn; đọc nhầm nó thành
-                  hiệu quả quảng cáo là lý do người ta tăng ngân sách cho một mã đang lỗ.
+                  hiệu quả quảng cáo là lý do người ta tăng ngân sách cho một mã đang lỗ. Gộp vào
+                  một ô KHÔNG phải gộp hai con số: chúng vẫn in cạnh nhau, vẫn mang nhãn riêng.
                 */}
-                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh số đơn đã lên POS trong kỳ. Tử số: CPQC đã quy kết về đúng mã trong kỳ. Mẫu số: doanh số POS của cùng mã, cùng kỳ. Mẫu số bằng 0 hoặc chưa quy kết được ⇒ hiện “—”, KHÔNG hiện 0%.">CPQC / DS POS %</TableHead>
-                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh thu giao thành công ƯỚC TÍNH (cột DT GTC ƯT bên cạnh: đã giao thật + đang giao × P, cân theo từng đơn). Mẫu số bằng 0 hoặc chưa đo được ⇒ “—”, KHÔNG phải 0%.">CPQC / DT GTC ƯT %</TableHead>
+                <TableHead className="text-right" title="Chi quảng cáo đã quy kết về mã trong kỳ. Dòng nhỏ, theo thứ tự: tỷ lệ trên DOANH SỐ POS (mẫu số chưa trừ đơn hoàn — luôn đẹp hơn), tỷ lệ trên DT GIAO THÀNH CÔNG ƯỚC TÍNH, và chi phí quảng cáo trên mỗi đơn. Mẫu số bằng 0 hoặc chưa quy kết được ⇒ “—”, KHÔNG hiện 0%.">CPQC</TableHead>
                 <TableHead className="text-right" title="Tỷ lệ giao thành công ước tính = ước tính giao được ÷ (đã gửi − ngoài ước tính); đơn GTC theo ORDER_OUTCOME. “—” = chưa đo được.">TL GTC ƯT</TableHead>
-                <TableHead className="text-right" title="DT đơn đã giao thật + Σ(DT đơn đang giao × P(trạng thái)) + Σ(DT đơn chưa gửi × P(chưa gửi)) — cân theo TỪNG ĐƠN. Dòng có nhãn “ước tính theo tỷ lệ” (ghi đè / lịch sử / mặc định) mới là Doanh số POS × TL GTC.">DT GTC ƯT</TableHead>
-                <TableHead className="text-right" title="Giá vốn cân theo từng đơn cùng cách với DT GTC ƯT. “—” = có sản phẩm chưa biết giá vốn (không phiếu nhập, không giá Pancake).">Giá vốn</TableHead>
-                <TableHead className="text-right">Vận chuyển</TableHead>
-                <TableHead className="text-right">CPQC/đơn</TableHead>
-                <TableHead className="text-right">DT/đơn</TableHead>
-                <TableHead className="text-right" title="Chi phí vận hành đã nhập ở bảng Chi phí trong kỳ (lương, phần mềm, khác; trừ QC & nhập hàng) phân bổ theo tỷ trọng doanh số POS">CP vận hành đã nhập</TableHead>
-                <TableHead className="text-right" title={`Đóng hàng = đơn gửi × ${(report.assumptions.packingFeePerOrder ?? 0).toLocaleString("vi-VN")} ₫`}>Đóng hàng</TableHead>
-                <TableHead className="text-right" title={`Nhân viên vận đơn = đơn × ${(report.assumptions.opsStaffPerOrder ?? 0).toLocaleString("vi-VN")} ₫ + đơn giao thất bại cứu được thành GTC × ${(report.assumptions.opsStaffPerRescued ?? 0).toLocaleString("vi-VN")} ₫`}>NV vận đơn</TableHead>
-                <TableHead className="text-right" title={`Chi phí cố định (văn phòng, điện nước…) ${(report.assumptions.fixedCostMonthly ?? 0).toLocaleString("vi-VN")} ₫/tháng × ${report.periodMonths} tháng của kỳ, phân bổ theo tỷ trọng doanh số POS`}>CP cố định</TableHead>
-                <TableHead className="text-right" title="Mọi chi phí ngoài tiền hàng, QC, vận chuyển (vận hành đã nhập + đóng hàng + NV vận đơn + cố định + rủi ro TK + thuế + CP khác) ÷ số đơn lên (trước hoàn huỷ)">CP vận hành/đơn trước hoàn</TableHead>
-                <TableHead className="text-right" title="Cùng các chi phí trên ÷ số đơn giao thành công ước tính (sau hoàn huỷ)">CP vận hành/đơn sau hoàn huỷ</TableHead>
-                <TableHead className="text-right" title="Dự phòng rủi ro tồn kho ghi vào kỳ = % giả định × GIÁ VỐN HÀNG BÁN RA trong kỳ. Không tính trên giá trị hàng nhập: nhập hàng là sự kiện một lần, ném trọn vào kỳ chứa nó thì tuần chỉ bán được 1/10 lô vẫn gánh đủ dự phòng cả lô. Phần rủi ro của hàng chưa bán nằm ở cột 'Rủi ro còn treo'. “—” = chưa biết giá vốn nên chưa tính được.">Rủi ro TK {riskPct}% giá vốn bán</TableHead>
-                <TableHead className="text-right" title="Dự trù thuế = DT GTC ước tính × %">Thuế {report.assumptions.taxPercent ?? 1.5}%</TableHead>
-                <TableHead className="text-right" title="Chi phí khác = CPQC × % (phí thanh toán thẻ ngoại tệ khi Meta thu tiền)">CP khác {report.assumptions.otherCostPercentOfAds ?? 1.1}% QC</TableHead>
-                <TableHead className="text-right" title="Lợi nhuận danh nghĩa = DT GTC ước tính − giá vốn − vận chuyển − CPQC − vận hành − rủi ro TK − thuế − CP khác">LN danh nghĩa</TableHead>
-                <TableHead className="text-right">Margin</TableHead>
+                <TableHead className="text-right" title="DT đơn đã giao thật + Σ(DT đơn đang giao × P(trạng thái)) + Σ(DT đơn chưa gửi × P(chưa gửi)) — cân theo TỪNG ĐƠN. Dòng có nhãn “ước tính theo tỷ lệ” (ghi đè / lịch sử / mặc định) mới là Doanh số POS × TL GTC. Dòng nhỏ: doanh thu trên mỗi đơn, và phần doanh số nằm NGOÀI ước tính (nếu có).">DT GTC ƯT</TableHead>
+                <TableHead className="text-right" title="Giá vốn cân theo từng đơn cùng cách với DT GTC ƯT. Dòng nhỏ: số sản phẩm giao thành công ước tính. Tiền “—” = có sản phẩm chưa biết giá vốn (không phiếu nhập, không giá Pancake); SỐ LƯỢNG vẫn đo được nên vẫn in ra.">Giá vốn</TableHead>
+                <TableHead className="text-right" title="Đơn × cước gửi + Đơn × (1 − TL GTC) × phí hoàn về. Sửa đơn giá ở khối Giả định.">Vận chuyển</TableHead>
+                <TableHead className="text-right" title="Tổng vận hành = CP vận hành đã nhập (bảng Chi phí, trừ QC & nhập hàng, phân bổ theo doanh số POS) + đóng hàng + nhân viên vận đơn + chi phí cố định. Dòng nhỏ tách đủ bốn khoản.">Vận hành</TableHead>
+                <TableHead className="text-right" title="Mọi chi phí ngoài tiền hàng, QC, vận chuyển ÷ số đơn LÊN (trước hoàn huỷ). Dòng nhỏ: cùng các chi phí ấy ÷ số đơn GIAO THÀNH CÔNG ước tính (sau hoàn huỷ) — con số thứ hai mới là chi phí thật của một đơn thành công.">CP VH/đơn</TableHead>
+                <TableHead className="text-right" title="Dự phòng rủi ro tồn kho ghi vào kỳ = % giả định × GIÁ VỐN HÀNG BÁN RA trong kỳ. Không tính trên giá trị hàng nhập: nhập hàng là sự kiện một lần, ném trọn vào kỳ chứa nó thì tuần chỉ bán được 1/10 lô vẫn gánh đủ dự phòng cả lô. Dòng nhỏ “còn treo” là rủi ro của hàng CHƯA BÁN — chưa trừ vào lợi nhuận kỳ này. “—” = chưa biết giá vốn nên chưa tính được.">Rủi ro TK</TableHead>
+                <TableHead className="text-right" title="Thuế = DT GTC ước tính × %. Dòng nhỏ: chi phí khác = CPQC × % (phí thanh toán thẻ ngoại tệ khi Meta thu tiền).">Thuế · khác</TableHead>
+                <TableHead className="text-right" title="Lợi nhuận danh nghĩa = DT GTC ước tính − giá vốn − vận chuyển − CPQC − vận hành − rủi ro TK − thuế − CP khác. Dòng nhỏ: margin trên DT GTC ước tính.">LN danh nghĩa</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {report.rows.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={24}
+                    colSpan={12}
                     className="py-10 text-center text-sm text-muted-foreground"
                   >
                     Không có đơn trong kỳ.
@@ -399,7 +486,7 @@ export async function NominalTab({
                       selected?.productId === r.productId && "bg-primary/5",
                     )}
                   >
-                    <TableCell>
+                    <TableCell className="align-top">
                       <Link
                         href={`/reports?${tabQuery}&product=${encodeURIComponent(r.productId)}#ma-hang`}
                         className="flex items-center gap-2.5 hover:text-primary"
@@ -427,76 +514,49 @@ export async function NominalTab({
                         </div>
                       </Link>
                     </TableCell>
-                    <TableCell className="numeric text-right font-semibold">
-                      {formatNumber(r.orders)}
-                    </TableCell>
-                    <TableCell className="numeric text-right text-muted-foreground">
-                      {formatNumber(r.items)}
-                    </TableCell>
-                    <TableCell className="text-right">
+                    <OKep sub={`${formatNumber(r.orders)} đơn · ${formatNumber(r.items)} sp`}>
                       <Money value={r.grossSales} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Money
-                        value={r.adSpend}
-                        className={
-                          r.adSpend ? "text-rose-600" : "text-muted-foreground"
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="text-right"><Pct value={r.ads.overPosSales} tone={false} /></TableCell>
-                    <TableCell className="text-right"><Pct value={r.ads.overProjectedRevenue} tone={false} /></TableCell>
-                    <TableCell className="text-right">
+                    </OKep>
+                    <OKep
+                      sub={
+                        <>
+                          <Pct value={r.ads.overPosSales} tone={false} /> DS · <Pct value={r.ads.overProjectedRevenue} tone={false} /> DT ƯT
+                          {r.cpo === null ? null : <> · {formatVND(Math.round(r.cpo), { compact: true })}/đơn</>}
+                        </>
+                      }
+                    >
+                      <Money value={r.adSpend} className={r.adSpend ? "text-rose-600" : "text-muted-foreground"} />
+                    </OKep>
+                    <TableCell className="text-right align-top">
                       <OTyLe r={r} />
                     </TableCell>
-                    <TableCell className="text-right">
-                      <Money
-                        value={r.expectedRevenue}
-                        className="font-semibold"
-                      />
-                      {r.unmodelledRevenue ? <div className="text-[10.5px] text-muted-foreground" title="Doanh số của đơn ở trạng thái chưa đủ mẫu — không nằm trong DT GTC ƯT">ngoài ƯT {formatVND(r.unmodelledRevenue, { compact: true })}</div> : null}
-                    </TableCell>
-                    <TableCell className="text-right">
+                    <OKep
+                      sub={
+                        <>
+                          {r.revenuePerOrder === null ? null : <>{formatVND(Math.round(r.revenuePerOrder), { compact: true })}/đơn</>}
+                          {r.unmodelledRevenue ? <div title="Doanh số của đơn ở trạng thái chưa đủ mẫu — không nằm trong DT GTC ƯT">ngoài ƯT {formatVND(r.unmodelledRevenue, { compact: true })}</div> : null}
+                        </>
+                      }
+                    >
+                      <Money value={r.expectedRevenue} className="font-semibold" />
+                    </OKep>
+                    <OKep sub={`${formatNumber(r.expectedQty)} sp`}>
                       <TienCoTheChuaBiet value={r.expectedCogs} known={r.cogsKnown} reason={`${formatNumber(r.cogsUnknownQty)} sản phẩm chưa biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn đang bị tính 0đ nên không in ra`} className="text-muted-foreground" />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Money
-                        value={r.shipCost}
-                        className="text-muted-foreground"
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Money
-                        value={r.cpo === null ? 0 : Math.round(r.cpo)}
-                        className="text-muted-foreground"
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Money
-                        value={
-                          r.revenuePerOrder === null
-                            ? 0
-                            : Math.round(r.revenuePerOrder)
-                        }
-                        className="text-muted-foreground"
-                      />
-                    </TableCell>
-                    <TableCell className="text-right"><Money value={r.operatingAlloc} className="text-muted-foreground" /></TableCell>
-                    <TableCell className="text-right"><Money value={r.packingCost} className="text-muted-foreground" /></TableCell>
-                    <TableCell className="text-right">
-                      <Money value={r.opsStaffCost} className="text-muted-foreground" />
-                      {r.rescued ? <div className="text-[10.5px] text-muted-foreground">cứu ước {formatNumber(r.rescued)} đơn</div> : null}
-                    </TableCell>
-                    <TableCell className="text-right"><Money value={r.fixedAlloc} className="text-muted-foreground" /></TableCell>
-                    <TableCell className="text-right"><Money value={r.opexPerOrder ?? 0} className="text-muted-foreground" /></TableCell>
-                    <TableCell className="text-right"><Money value={r.opexPerDelivered ?? 0} className="text-muted-foreground" /></TableCell>
-                    <TableCell className="text-right">
+                    </OKep>
+                    <OKep><Money value={r.shipCost} className="text-muted-foreground" /></OKep>
+                    <OKep sub={chiTietVanHanh(r)}>
+                      <Money value={r.opexTotal} className="text-muted-foreground" />
+                    </OKep>
+                    <OKep sub={r.opexPerDelivered === null ? "sau hoàn —" : <>sau hoàn {formatVND(r.opexPerDelivered, { compact: true })}</>}>
+                      <Money value={r.opexPerOrder ?? 0} className="text-muted-foreground" />
+                    </OKep>
+                    <OKep sub={r.inventoryRiskPending ? <span title="Rủi ro của hàng CÒN TRONG KHO — chưa trừ vào lợi nhuận kỳ này, sẽ được ghi dần khi hàng bán ra">còn treo {formatVND(r.inventoryRiskPending, { compact: true })}</span> : null}>
                       <TienCoTheChuaBiet value={r.inventoryRisk} known={r.cogsKnown} reason="Chưa biết giá vốn hàng bán ⇒ chưa tính được dự phòng rủi ro (không phải rủi ro = 0)" className="text-muted-foreground" />
-                      {r.inventoryRiskPending ? <div className="text-[10.5px] text-muted-foreground" title="Rủi ro của hàng CÒN TRONG KHO — chưa trừ vào lợi nhuận kỳ này, sẽ được ghi dần khi hàng bán ra">còn treo {formatVND(r.inventoryRiskPending, { compact: true })}</div> : null}
-                    </TableCell>
-                    <TableCell className="text-right"><Money value={r.tax} className="text-muted-foreground" /></TableCell>
-                    <TableCell className="text-right"><Money value={r.otherCost} className="text-muted-foreground" /></TableCell>
-                    <TableCell className="text-right">
+                    </OKep>
+                    <OKep sub={<>khác <Money value={r.otherCost} /></>}>
+                      <Money value={r.tax} className="text-muted-foreground" />
+                    </OKep>
+                    <OKep sub={<Pct value={r.netMargin} />}>
                       <Money
                         value={r.netProfit}
                         className={cn(
@@ -504,16 +564,13 @@ export async function NominalTab({
                           r.netProfit >= 0 ? "text-success" : "text-destructive",
                         )}
                       />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Pct value={r.netMargin} />
-                    </TableCell>
+                    </OKep>
                   </TableRow>
                 ))
               )}
               {report.rows.length ? (
                 <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
-                  <TableCell>
+                  <TableCell className="align-top">
                     Tổng
                     {report.unmatchedAdSpend ? (
                       <div className="text-[10.5px] font-normal text-muted-foreground" title="Tiền quảng cáo chưa ghép được mã hàng: trừ vào tổng, KHÔNG rải vào dòng nào. Hai cột tỷ lệ QC ở dòng tổng chỉ tính phần ĐÃ quy kết để khớp Σ các dòng.">
@@ -521,74 +578,57 @@ export async function NominalTab({
                       </div>
                     ) : null}
                   </TableCell>
-                  <TableCell className="numeric text-right">
-                    {formatNumber(t.orders)}
-                  </TableCell>
-                  <TableCell className="numeric text-right">
-                    {formatNumber(t.items)}
-                  </TableCell>
-                  <TableCell className="text-right">
+                  <OKep sub={`${formatNumber(t.orders)} đơn · ${formatNumber(t.items)} sp`}>
                     <Money value={t.grossSales} />
-                  </TableCell>
-                  <TableCell className="text-right">
+                  </OKep>
+                  <OKep
+                    sub={
+                      <span title={`CPQC đã quy kết ${formatVND(t.adSpendAttributed)} — tỷ lệ ở dòng tổng chỉ tính phần đã quy kết`}>
+                        <Pct value={t.adsAttributed.overPosSales} tone={false} /> DS · <Pct value={t.adsAttributed.overProjectedRevenue} tone={false} /> DT ƯT
+                        {t.orders ? <> · {formatVND(Math.round(t.adSpend / t.orders), { compact: true })}/đơn</> : null}
+                      </span>
+                    }
+                  >
                     <Money value={t.adSpend} className="text-rose-600" />
-                  </TableCell>
-                  <TableCell className="text-right" title={`CPQC đã quy kết ${formatVND(t.adSpendAttributed)} ÷ doanh số POS`}><Pct value={t.adsAttributed.overPosSales} tone={false} /></TableCell>
-                  <TableCell className="text-right" title={`CPQC đã quy kết ${formatVND(t.adSpendAttributed)} ÷ DT GTC ước tính`}><Pct value={t.adsAttributed.overProjectedRevenue} tone={false} /></TableCell>
-                  <TableCell className="text-right">
+                  </OKep>
+                  <TableCell className="text-right align-top">
                     <span className="inline-flex items-center justify-end gap-1">
                       <Pct value={t.weightedDeliveryRate} tone={false} />
                       {pj ? <ProjectionConfidence backtest={pj.backtest} error={pj.backtestError} /> : null}
                     </span>
                   </TableCell>
-                  <TableCell className="text-right">
+                  <OKep
+                    sub={
+                      <>
+                        {t.orders ? <>{formatVND(Math.round(t.expectedRevenue / t.orders), { compact: true })}/đơn</> : null}
+                        {t.unmodelledRevenue ? <div className="font-normal">ngoài ƯT {formatVND(t.unmodelledRevenue, { compact: true })}</div> : null}
+                      </>
+                    }
+                  >
                     <Money value={t.expectedRevenue} />
-                    {t.unmodelledRevenue ? <div className="text-[10.5px] font-normal text-muted-foreground">ngoài ƯT {formatVND(t.unmodelledRevenue, { compact: true })}</div> : null}
-                  </TableCell>
-                  <TableCell className="text-right">
+                  </OKep>
+                  <OKep sub={`${formatNumber(t.expectedQty)} sp`}>
                     <TienCoTheChuaBiet value={t.expectedCogs} known={t.cogsKnown} reason={`${formatNumber(t.cogsUnknownQty)} sản phẩm chưa biết giá vốn — tổng giá vốn đang thiếu phần đó`} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Money value={t.shipCost} />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Money
-                      value={t.orders ? Math.round(t.adSpend / t.orders) : 0}
-                    />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Money
-                      value={
-                        t.orders ? Math.round(t.expectedRevenue / t.orders) : 0
-                      }
-                    />
-                  </TableCell>
-                  <TableCell className="text-right"><Money value={t.operatingExpenses} /></TableCell>
-                  <TableCell className="text-right"><Money value={t.packingCost} /></TableCell>
-                  <TableCell className="text-right">
-                    <Money value={t.opsStaffCost} />
-                    {t.rescued ? <div className="text-[10.5px] font-normal text-muted-foreground">cứu ước {formatNumber(t.rescued)} đơn</div> : null}
-                  </TableCell>
-                  <TableCell className="text-right"><Money value={t.fixedCost} /></TableCell>
-                  <TableCell className="text-right"><Money value={t.opexPerOrder ?? 0} /></TableCell>
-                  <TableCell className="text-right"><Money value={t.opexPerDelivered ?? 0} /></TableCell>
-                  <TableCell className="text-right">
+                  </OKep>
+                  <OKep><Money value={t.shipCost} /></OKep>
+                  <OKep sub={chiTietVanHanh({ operatingAlloc: t.operatingExpenses, packingCost: t.packingCost, opsStaffCost: t.opsStaffCost, fixedAlloc: t.fixedCost, rescued: t.rescued })}>
+                    <Money value={t.opexTotal} />
+                  </OKep>
+                  <OKep sub={t.opexPerDelivered === null ? "sau hoàn —" : <>sau hoàn {formatVND(t.opexPerDelivered, { compact: true })}</>}>
+                    <Money value={t.opexPerOrder ?? 0} />
+                  </OKep>
+                  <OKep sub={t.inventoryRiskPending ? <span title={`Rủi ro của hàng còn trong kho (${formatVND(t.stockValue, { compact: true })} giá trị tồn) — chưa trừ vào lợi nhuận kỳ này`}>còn treo {formatVND(t.inventoryRiskPending, { compact: true })}</span> : null}>
                     <TienCoTheChuaBiet value={t.inventoryRisk} known={t.cogsKnown} reason="Có sản phẩm chưa biết giá vốn ⇒ dự phòng rủi ro chưa tính đủ" />
-                    {t.inventoryRiskPending ? <div className="text-[10.5px] font-normal text-muted-foreground" title={`Rủi ro của hàng còn trong kho (${formatVND(t.stockValue, { compact: true })} giá trị tồn) — chưa trừ vào lợi nhuận kỳ này`}>còn treo {formatVND(t.inventoryRiskPending, { compact: true })}</div> : null}
-                  </TableCell>
-                  <TableCell className="text-right"><Money value={t.tax} /></TableCell>
-                  <TableCell className="text-right"><Money value={t.otherCost} /></TableCell>
-                  <TableCell className="text-right">
+                  </OKep>
+                  <OKep sub={<>khác <Money value={t.otherCost} /></>}>
+                    <Money value={t.tax} />
+                  </OKep>
+                  <OKep sub={<Pct value={t.netMargin} />}>
                     <Money
                       value={t.netProfit}
-                      className={
-                        t.netProfit >= 0 ? "text-success" : "text-destructive"
-                      }
+                      className={t.netProfit >= 0 ? "text-success" : "text-destructive"}
                     />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Pct value={t.netMargin} />
-                  </TableCell>
+                  </OKep>
                 </TableRow>
               ) : null}
             </TableBody>
@@ -618,7 +658,7 @@ export async function NominalTab({
         <div id="ma-hang">
           <SectionCard
             title={`${selected.productName}${selected.code ? ` (${selected.code})` : ""} · theo ngày`}
-            description={`Tỷ lệ giao thành công ước tính ${selected.deliveryRate === null ? "— (chưa đo được)" : `${selected.deliveryRate.toFixed(1)}%`} (${moTaUocTinh(selected)}) · bảng theo ngày tính theo tỷ lệ ${(100 - dailyRate).toFixed(1)}%${selected.returnRate === null ? " (tỷ lệ lịch sử của mã, vì mô hình chưa đo được)" : ""} · giá vốn ${selected.items && selected.cogsKnown ? formatVND(Math.round(selected.expectedCogs / Math.max(1 - dailyRate / 100, 0.01) / selected.items)) : "—"}/sp`}
+            description={`Tỷ lệ giao thành công ước tính ${selected.deliveryRate === null ? "— (chưa đo được)" : `${selected.deliveryRate.toFixed(1)}%`} (${moTaUocTinh(selected)}) · bảng theo ngày tính theo tỷ lệ ${(100 - dailyRate).toFixed(1)}%${selected.returnRate === null ? " (tỷ lệ lịch sử của mã, vì mô hình chưa đo được)" : ""} · giá vốn ${selected.expectedQty && selected.cogsKnown ? formatVND(Math.round(selected.expectedCogs / selected.expectedQty)) : "—"}/sp`}
             actions={
               <div className="flex items-center gap-3">
                 <ReturnRateOverride
@@ -636,73 +676,37 @@ export async function NominalTab({
             padded={false}
           >
             <div className="overflow-x-auto">
-              <Table className="min-w-[1000px]">
+              <Table className="min-w-[820px]">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Ngày</TableHead>
-                    <TableHead className="text-right">Đơn</TableHead>
-                    <TableHead className="text-right">SP</TableHead>
-                    <TableHead className="text-right">CPQC</TableHead>
-                    <TableHead className="text-right">Doanh số POS</TableHead>
+                    <TableHead className="text-right" title="Tiền hàng của mã trên đơn đã xác nhận trong ngày. Dòng nhỏ: số đơn và số sản phẩm.">Doanh số POS</TableHead>
+                    <TableHead className="text-right" title="Chi quảng cáo của ngày. Dòng nhỏ: chi phí quảng cáo trên mỗi đơn.">CPQC</TableHead>
                     <TableHead className="text-right">DT GTC ƯT</TableHead>
-                    <TableHead className="text-right">Giá vốn</TableHead>
+                    <TableHead className="text-right" title="Giá vốn hàng giao thành công ước tính của ngày. Dòng nhỏ: số sản phẩm. Tiền “—” = có sản phẩm chưa biết giá vốn; SỐ LƯỢNG vẫn đo được nên vẫn in ra.">Giá vốn</TableHead>
                     <TableHead className="text-right">Vận chuyển</TableHead>
-                    <TableHead className="text-right">CPQC/đơn</TableHead>
-                    <TableHead className="text-right" title="Theo ngày chỉ có DT − giá vốn − vận chuyển − CPQC (chưa trừ vận hành, rủi ro TK, thuế, CP khác vì các khoản này tính theo kỳ)">LN gộp sau QC</TableHead>
-                    <TableHead className="text-right">Margin gộp</TableHead>
+                    <TableHead className="text-right" title="Theo ngày chỉ có DT − giá vốn − vận chuyển − CPQC (chưa trừ vận hành, rủi ro TK, thuế, CP khác vì các khoản này tính theo kỳ). Dòng nhỏ: margin gộp.">LN gộp sau QC</TableHead>
                     <TableHead className="text-right">Thực tế</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {daily.map((d) => (
                     <TableRow key={d.day}>
-                      <TableCell className="font-medium">
+                      <TableCell className="align-top font-medium">
                         {d.day.split("-").reverse().join("/")}
                       </TableCell>
-                      <TableCell className="numeric text-right">
-                        {formatNumber(d.orders)}
-                      </TableCell>
-                      <TableCell className="numeric text-right text-muted-foreground">
-                        {formatNumber(d.items)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Money
-                          value={d.adSpend}
-                          className={
-                            d.adSpend
-                              ? "text-rose-600"
-                              : "text-muted-foreground"
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
+                      <OKep sub={`${formatNumber(d.orders)} đơn · ${formatNumber(d.items)} sp`}>
                         <Money value={d.grossSales} />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Money
-                          value={d.expectedRevenue}
-                          className="font-semibold"
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Money
-                          value={d.expectedCogs}
-                          className="text-muted-foreground"
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Money
-                          value={d.shipCost}
-                          className="text-muted-foreground"
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Money
-                          value={d.cpo === null ? 0 : Math.round(d.cpo)}
-                          className="text-muted-foreground"
-                        />
-                      </TableCell>
-                      <TableCell className="text-right">
+                      </OKep>
+                      <OKep sub={d.cpo === null ? null : <>{formatVND(Math.round(d.cpo), { compact: true })}/đơn</>}>
+                        <Money value={d.adSpend} className={d.adSpend ? "text-rose-600" : "text-muted-foreground"} />
+                      </OKep>
+                      <OKep><Money value={d.expectedRevenue} className="font-semibold" /></OKep>
+                      <OKep sub={`${formatNumber(d.expectedQty)} sp`}>
+                        <TienCoTheChuaBiet value={d.expectedCogs} known={d.cogsKnown} reason={`${formatNumber(d.cogsUnknownQty)} sản phẩm của ngày này chưa biết giá vốn — giá vốn đang bị tính 0đ nên KHÔNG in ra; số lượng bên dưới vẫn đo được`} className="text-muted-foreground" />
+                      </OKep>
+                      <OKep><Money value={d.shipCost} className="text-muted-foreground" /></OKep>
+                      <OKep sub={<Pct value={d.margin} />}>
                         <Money
                           value={d.expectedProfit}
                           className={cn(
@@ -712,11 +716,8 @@ export async function NominalTab({
                               : "text-destructive",
                           )}
                         />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Pct value={d.margin} />
-                      </TableCell>
-                      <TableCell className="text-right text-xs text-muted-foreground">
+                      </OKep>
+                      <TableCell className="align-top text-right text-xs text-muted-foreground">
                         giao {d.delivered} · hoàn {d.returned}
                       </TableCell>
                     </TableRow>
@@ -724,7 +725,7 @@ export async function NominalTab({
                   {daily.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={12}
+                        colSpan={8}
                         className="py-8 text-center text-sm text-muted-foreground"
                       >
                         Không có dữ liệu trong kỳ.
@@ -740,73 +741,111 @@ export async function NominalTab({
 
       <SectionCard
         title="Lợi nhuận theo tổng giá trị hàng nhập trong kỳ"
-        description={`Thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − tổng vận hành (đã nhập + đóng hàng + NV vận đơn + cố định) − CP rủi ro tồn kho phân bổ cho kỳ (theo giá vốn hàng BÁN RA, cùng một con số với bảng trên — không theo giá trị hàng nhập) − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có đơn vẫn được liệt kê.`}
+        description={`${period.label} · thay giá vốn hàng giao ước tính bằng TOÀN BỘ giá trị hàng nhập trong kỳ theo phiếu nhập (${formatNumber(t.purchaseQty)} sp · ${formatVND(t.purchaseCost, { compact: true })}). Ba cột đầu là một phép trừ: hàng nhập − hàng đã giao tới khách = hàng shop còn giữ.`}
+        hint={
+          <>
+            <p>
+              LN = DT GTC ước tính − CPQC − hàng nhập − vận chuyển − tổng vận hành (đã nhập + đóng hàng + NV vận đơn + cố định)
+              − CP rủi ro tồn kho phân bổ cho kỳ (theo giá vốn hàng BÁN RA, cùng một con số với bảng trên — không theo giá trị
+              hàng nhập) − thuế − CP khác. Thấp hơn bảng trên đúng bằng phần hàng nhập còn tồn chưa bán; mã nhập hàng mà chưa có
+              đơn vẫn được liệt kê.
+            </p>
+            <p className="mt-2">
+              <b>Cột “Còn lại ƯT” là một PHÉP TRỪ, không phải số đếm kho.</b> Nó bằng tồn kho thật chỉ khi ba điều cùng đúng:
+              kỳ đang xem phủ toàn bộ lịch sử, hàng hoàn đã được kho đếm lại, và không còn kiện nào trên đường. Đo production
+              21/09/2026 trên toàn bộ lịch sử, mã Q002: nhập 1.374 sản phẩm, mới 321 sản phẩm ĐÃ CÓ KẾT CỤC “giao thành công”,
+              phép trừ ra 1.053 cái — trong khi SỔ KHO đếm được 352 cái. Chênh 701 cái, vì 301 cái đang hoàn mà kho chưa lập
+              phiếu tái nhập (mục 10) và phần còn lại đang trên đường. Cột trên màn hình dùng số ƯỚC TÍNH (đã giao thật + đang
+              giao × xác suất) nên nhỉnh hơn 321 một chút, còn khoảng cách với sổ kho thì vẫn nguyên. Nên con số sổ kho in ngay
+              dưới phép trừ; hai số lệch nhau nhiều là việc phải làm, không phải lỗi hiển thị.
+            </p>
+            <p className="mt-2">
+              Hai vế của phép trừ còn đứng trên hai CÁCH ĐỊNH GIÁ: giá trị hàng nhập lấy đơn giá ghi trên CHÍNH phiếu nhập đó,
+              còn giá vốn ước tính lấy đơn giá của phiếu nhập GẦN NHẤT. Mã đổi giá nhập giữa các lô thì hiệu số mang cả phần
+              chênh giá, không chỉ phần chênh số lượng.
+            </p>
+          </>
+        }
         padded={false}
       >
         <div className="overflow-x-auto">
-          <Table className="min-w-[1200px]">
+          <Table className="min-w-[1080px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Mã hàng</TableHead>
-                <TableHead className="text-right">SL nhập</TableHead>
-                <TableHead className="text-right">Giá trị hàng nhập</TableHead>
-                <TableHead className="text-right">Đơn</TableHead>
-                <TableHead className="text-right">DT GTC ƯT</TableHead>
-                <TableHead className="text-right">CPQC</TableHead>
-                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh số đơn đã lên POS trong kỳ. Tử số: CPQC đã quy kết về đúng mã trong kỳ. Mẫu số: doanh số POS của cùng mã, cùng kỳ. Mẫu số bằng 0 hoặc chưa quy kết được ⇒ hiện “—”, KHÔNG hiện 0%.">CPQC / DS POS %</TableHead>
-                <TableHead className="text-right" title="Tỷ lệ chi phí quảng cáo trên doanh thu giao thành công ƯỚC TÍNH. Doanh thu ước tính dùng CÙNG mô hình dự báo với báo cáo giao vận: từng đơn chưa kết thúc được cân theo xác suất giao thành công của chính trạng thái nó đang ở. Mẫu số bằng 0 hoặc chưa đo được ⇒ “—”, KHÔNG phải 0%.">CPQC / DT GTC ƯT %</TableHead>
+                <TableHead className="text-right" title="Toàn bộ phiếu nhập kho (kind RECEIPT) có mốc nhận hàng trong kỳ: giá trị ở trên, số lượng ở dưới. Phiếu không ghi đơn giá ⇒ giá trị CHƯA BIẾT, in “—”.">Hàng nhập</TableHead>
+                <TableHead className="text-right" title="Hàng ĐÃ TỚI TAY KHÁCH, ước tính: giá vốn ở trên, số sản phẩm ở dưới. Cân theo TỪNG ĐƠN cùng một phép cân với cột DT GTC ƯT (đã giao thật + đang giao × P + chưa rời kho × P). Giá vốn “—” = mã chưa biết giá nhập; SỐ LƯỢNG vẫn đo được bình thường nên vẫn in ra.">Đã giao TC ƯT</TableHead>
+                <TableHead className="text-right" title="PHÉP TRỪ hàng nhập − đã giao TC, tức phần hàng shop CÒN GIỮ theo hai cột bên trái: giá trị ở trên, số lượng ở dưới. Dòng nhỏ thứ hai là TỒN THẬT theo Sổ kho để đối chiếu — chênh lệch nằm ở hàng đang trên đường và hàng hoàn kho chưa đếm lại. Số âm = bán nhiều hơn nhập trong kỳ (tồn đầu kỳ, hoặc thiếu phiếu nhập).">Còn lại ƯT</TableHead>
+                <TableHead className="text-right" title="DT đơn đã giao thật + Σ(DT đơn đang giao × P) + Σ(DT đơn chưa gửi × P) — cân theo TỪNG ĐƠN. Dòng nhỏ: số đơn đã xác nhận trong kỳ.">DT GTC ƯT</TableHead>
+                <TableHead className="text-right" title="Chi quảng cáo đã quy kết về mã trong kỳ. Dòng nhỏ: tỷ lệ trên doanh số đơn đã lên POS, và trên doanh thu giao thành công ƯỚC TÍNH. Mẫu số 0 hoặc chưa quy kết được ⇒ “—”, KHÔNG phải 0%.">CPQC</TableHead>
                 <TableHead className="text-right">Vận chuyển</TableHead>
-                <TableHead className="text-right" title="Tổng vận hành = CP vận hành đã nhập + đóng hàng + nhân viên vận đơn + chi phí cố định">Vận hành (tổng)</TableHead>
-                <TableHead className="text-right" title="CHI PHÍ CỦA KỲ NÀY, không phải rủi ro cả đời của lô: % giả định × GIÁ VỐN HÀNG BÁN RA trong kỳ — cùng MỘT con số với bảng trên. Trước bản này cột lấy % × giá trị hàng NHẬP, nên kỳ có phiếu nhập thì gánh rủi ro của hàng sẽ bán nhiều tháng sau, còn kỳ không nhập gì thì bằng đúng 0 và bảng nói hàng đang bán không có rủi ro nào. Rủi ro cả đời của lô nhập vẫn tính và hiện ở cột bên cạnh — là GHI CHÚ, không trừ vào lợi nhuận.">CP rủi ro TK phân bổ kỳ này</TableHead>
-                <TableHead className="text-right" title="GHI CHÚ, KHÔNG trừ vào lợi nhuận: rủi ro CẢ ĐỜI của lô hàng nhập trong kỳ (% × giá trị hàng nhập). Đây là phơi nhiễm TẠI MỘT THỜI ĐIỂM, không phải chi phí CỦA MỘT KỲ.">Rủi ro cả lô nhập (ghi chú)</TableHead>
-                <TableHead className="text-right">Thuế</TableHead>
-                <TableHead className="text-right">CP khác</TableHead>
+                <TableHead className="text-right" title="Tổng vận hành = CP vận hành đã nhập + đóng hàng + nhân viên vận đơn + chi phí cố định">Vận hành</TableHead>
+                <TableHead className="text-right" title="CHI PHÍ CỦA KỲ NÀY, không phải rủi ro cả đời của lô: % giả định × GIÁ VỐN HÀNG BÁN RA trong kỳ — cùng MỘT con số với bảng trên. Dòng nhỏ “cả lô” là GHI CHÚ: rủi ro cả đời của lô nhập trong kỳ (% × giá trị hàng nhập), một phơi nhiễm TẠI MỘT THỜI ĐIỂM chứ không phải chi phí CỦA MỘT KỲ — KHÔNG trừ vào lợi nhuận.">Rủi ro TK</TableHead>
+                <TableHead className="text-right" title="Thuế = DT GTC ước tính × %. Dòng nhỏ: chi phí khác = CPQC × % (phí thanh toán thẻ ngoại tệ…).">Thuế · khác</TableHead>
                 <TableHead className="text-right">LN theo hàng nhập</TableHead>
-                <TableHead className="text-right">Margin</TableHead>
-                <TableHead className="text-right" title="Giá vốn hàng giao ước tính (bảng trên) để đối chiếu: hàng nhập − giá vốn ước tính ≈ giá trị còn tồn / chưa bán">Giá vốn ƯT (đối chiếu)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {[...report.rows].sort((a, b) => b.profitOnPurchase - a.profitOnPurchase).map((r) => (
-                <TableRow key={`pur-${r.productId}`} className={cn(!r.orders && "text-muted-foreground")}>
-                  <TableCell className="font-medium">{r.code ? `${r.code} · ` : ""}{r.productName}{!r.orders ? <span className="ml-1 text-[11px]">(chưa có đơn)</span> : null}</TableCell>
-                  <TableCell className="numeric text-right">{formatNumber(r.purchaseQty)}</TableCell>
-                  <TableCell className="text-right"><TienCoTheChuaBiet value={r.purchaseCost} known={r.purchaseCostKnown} reason="Phiếu nhập trong kỳ có dòng không ghi đơn giá — giá trị hàng nhập CHƯA BIẾT, không phải 0 ₫" className={r.purchaseCost ? "text-rose-600" : "text-muted-foreground"} /></TableCell>
-                  <TableCell className="numeric text-right">{formatNumber(r.orders)}</TableCell>
-                  <TableCell className="text-right"><Money value={r.expectedRevenue} /></TableCell>
-                  <TableCell className="text-right"><Money value={r.adSpend} className="text-rose-600" /></TableCell>
-                  <TableCell className="text-right"><Pct value={r.ads.overPosSales} tone={false} /></TableCell>
-                  <TableCell className="text-right"><Pct value={r.ads.overProjectedRevenue} tone={false} /></TableCell>
-                  <TableCell className="text-right"><Money value={r.shipCost} className="text-muted-foreground" /></TableCell>
-                  <TableCell className="text-right"><Money value={r.opexTotal} className="text-muted-foreground" /></TableCell>
-                  <TableCell className="text-right"><TienCoTheChuaBiet value={r.inventoryRisk} known={r.cogsKnown} reason="Chưa biết giá vốn hàng bán ⇒ chưa tính được dự phòng" className="text-muted-foreground" /></TableCell>
-                  <TableCell className="text-right"><TienCoTheChuaBiet value={r.inventoryRiskOnPurchase} known={r.purchaseCostKnown} reason="Giá trị hàng nhập chưa biết ⇒ rủi ro cả lô chưa tính được" className="text-muted-foreground/70 italic" /></TableCell>
-                  <TableCell className="text-right"><Money value={r.tax} className="text-muted-foreground" /></TableCell>
-                  <TableCell className="text-right"><Money value={r.otherCost} className="text-muted-foreground" /></TableCell>
-                  <TableCell className="text-right"><Money value={r.profitOnPurchase} className={cn("font-bold", r.profitOnPurchase >= 0 ? "text-success" : "text-destructive")} /></TableCell>
-                  <TableCell className="text-right"><Pct value={r.marginOnPurchase} /></TableCell>
-                  <TableCell className="text-right"><Money value={r.expectedCogs} className="text-muted-foreground" /></TableCell>
-                </TableRow>
-              ))}
-              <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
-                <TableCell>Tổng{report.unmatchedAdSpend ? <div className="text-[10.5px] font-normal text-muted-foreground">+ {formatVND(report.unmatchedAdSpend)} QC chưa quy kết (tỷ lệ ở dòng này chỉ tính phần đã quy kết)</div> : null}</TableCell>
-                <TableCell className="numeric text-right">{formatNumber(t.purchaseQty)}</TableCell>
-                <TableCell className="text-right"><TienCoTheChuaBiet value={t.purchaseCost} known={t.purchaseCostKnown} reason="Có phiếu nhập không ghi đơn giá — tổng giá trị hàng nhập chưa biết đủ" className="text-rose-600" /></TableCell>
-                <TableCell className="numeric text-right">{formatNumber(t.orders)}</TableCell>
-                <TableCell className="text-right"><Money value={t.expectedRevenue} /></TableCell>
-                <TableCell className="text-right"><Money value={t.adSpend} className="text-rose-600" /></TableCell>
-                <TableCell className="text-right"><Pct value={t.adsAttributed.overPosSales} tone={false} /></TableCell>
-                <TableCell className="text-right"><Pct value={t.adsAttributed.overProjectedRevenue} tone={false} /></TableCell>
-                <TableCell className="text-right"><Money value={t.shipCost} /></TableCell>
-                <TableCell className="text-right"><Money value={t.opexTotal} /></TableCell>
-                <TableCell className="text-right"><TienCoTheChuaBiet value={t.inventoryRisk} known={t.cogsKnown} reason="Có sản phẩm chưa biết giá vốn ⇒ dự phòng chưa tính đủ" /></TableCell>
-                <TableCell className="text-right"><TienCoTheChuaBiet value={t.inventoryRiskOnPurchase} known={t.purchaseCostKnown} reason="Giá trị hàng nhập chưa biết đủ ⇒ rủi ro cả lô chưa tính được" className="text-muted-foreground/70 italic" /></TableCell>
-                <TableCell className="text-right"><Money value={t.tax} /></TableCell>
-                <TableCell className="text-right"><Money value={t.otherCost} /></TableCell>
-                <TableCell className="text-right"><Money value={t.profitOnPurchase} className={t.profitOnPurchase >= 0 ? "text-success" : "text-destructive"} /></TableCell>
-                <TableCell className="text-right"><Pct value={t.marginOnPurchase} /></TableCell>
-                <TableCell className="text-right"><Money value={t.expectedCogs} /></TableCell>
-              </TableRow>
+              {[...report.rows].sort((a, b) => b.profitOnPurchase - a.profitOnPurchase).map((r) => {
+                const conLai = conLaiUocTinh(r);
+                return (
+                  <TableRow key={`pur-${r.productId}`} className={cn(!r.orders && "text-muted-foreground")}>
+                    <TableCell className="font-medium">{r.code ? `${r.code} · ` : ""}{r.productName}{!r.orders ? <span className="ml-1 text-[11px]">(chưa có đơn)</span> : null}</TableCell>
+                    <OKep sub={`${formatNumber(r.purchaseQty)} sp`}>
+                      <TienCoTheChuaBiet value={r.purchaseCost} known={r.purchaseCostKnown} reason="Phiếu nhập trong kỳ có dòng không ghi đơn giá — giá trị hàng nhập CHƯA BIẾT, không phải 0 ₫" className={r.purchaseCost ? "text-rose-600" : "text-muted-foreground"} />
+                    </OKep>
+                    <OKep sub={`${formatNumber(r.expectedQty)} sp`}>
+                      <TienCoTheChuaBiet value={r.expectedCogs} known={r.cogsKnown} reason={`${formatNumber(r.cogsUnknownQty)} sản phẩm bán ra chưa biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn đang bị tính 0đ nên KHÔNG in ra; số lượng bên dưới vẫn đo được`} className="text-muted-foreground" />
+                    </OKep>
+                    <OKep sub={<>{formatNumber(conLai.qty)} sp · {nhanSoKho(r)}</>} subTitle={giaiThichConLai(r, conLai)}>
+                      <TienCoTheChuaBiet value={conLai.cost} known={conLai.costKnown} reason="Một trong hai vế (giá trị hàng nhập / giá vốn hàng đã giao) chưa biết ⇒ hiệu số chưa tính được" className="font-semibold" />
+                    </OKep>
+                    <OKep sub={`${formatNumber(r.orders)} đơn`}><Money value={r.expectedRevenue} /></OKep>
+                    <OKep sub={<><Pct value={r.ads.overPosSales} tone={false} /> DS · <Pct value={r.ads.overProjectedRevenue} tone={false} /> DT ƯT</>}>
+                      <Money value={r.adSpend} className="text-rose-600" />
+                    </OKep>
+                    <OKep><Money value={r.shipCost} className="text-muted-foreground" /></OKep>
+                    <OKep><Money value={r.opexTotal} className="text-muted-foreground" /></OKep>
+                    <OKep sub={<>cả lô <TienCoTheChuaBiet value={r.inventoryRiskOnPurchase} known={r.purchaseCostKnown} reason="Giá trị hàng nhập chưa biết ⇒ rủi ro cả lô chưa tính được" className="italic" /></>}>
+                      <TienCoTheChuaBiet value={r.inventoryRisk} known={r.cogsKnown} reason="Chưa biết giá vốn hàng bán ⇒ chưa tính được dự phòng" className="text-muted-foreground" />
+                    </OKep>
+                    <OKep sub={<>khác <Money value={r.otherCost} /></>}><Money value={r.tax} className="text-muted-foreground" /></OKep>
+                    <OKep sub={<Pct value={r.marginOnPurchase} />}>
+                      <Money value={r.profitOnPurchase} className={cn("font-bold", r.profitOnPurchase >= 0 ? "text-success" : "text-destructive")} />
+                    </OKep>
+                  </TableRow>
+                );
+              })}
+              {(() => {
+                const conLai = conLaiUocTinh(t);
+                return (
+                  <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
+                    <TableCell>Tổng{report.unmatchedAdSpend ? <div className="text-[10.5px] font-normal text-muted-foreground">+ {formatVND(report.unmatchedAdSpend)} QC chưa quy kết (tỷ lệ ở dòng này chỉ tính phần đã quy kết)</div> : null}</TableCell>
+                    <OKep sub={`${formatNumber(t.purchaseQty)} sp`}>
+                      <TienCoTheChuaBiet value={t.purchaseCost} known={t.purchaseCostKnown} reason="Có phiếu nhập không ghi đơn giá — tổng giá trị hàng nhập chưa biết đủ" className="text-rose-600" />
+                    </OKep>
+                    <OKep sub={`${formatNumber(t.expectedQty)} sp`}>
+                      <TienCoTheChuaBiet value={t.expectedCogs} known={t.cogsKnown} reason={`${formatNumber(t.cogsUnknownQty)} sản phẩm bán ra chưa biết giá vốn — tổng giá vốn đang thiếu hẳn phần đó, nên KHÔNG in ra một con số trông như đã đủ`} />
+                    </OKep>
+                    <OKep sub={<>{formatNumber(conLai.qty)} sp · {nhanSoKho(t)}</>} subTitle={giaiThichConLai(t, conLai)}>
+                      <TienCoTheChuaBiet value={conLai.cost} known={conLai.costKnown} reason="Một trong hai vế chưa biết ⇒ hiệu số chưa tính được" />
+                    </OKep>
+                    <OKep sub={`${formatNumber(t.orders)} đơn`}><Money value={t.expectedRevenue} /></OKep>
+                    <OKep sub={<><Pct value={t.adsAttributed.overPosSales} tone={false} /> DS · <Pct value={t.adsAttributed.overProjectedRevenue} tone={false} /> DT ƯT</>}>
+                      <Money value={t.adSpend} className="text-rose-600" />
+                    </OKep>
+                    <OKep><Money value={t.shipCost} /></OKep>
+                    <OKep><Money value={t.opexTotal} /></OKep>
+                    <OKep sub={<>cả lô <TienCoTheChuaBiet value={t.inventoryRiskOnPurchase} known={t.purchaseCostKnown} reason="Giá trị hàng nhập chưa biết đủ ⇒ rủi ro cả lô chưa tính được" className="italic" /></>}>
+                      <TienCoTheChuaBiet value={t.inventoryRisk} known={t.cogsKnown} reason="Có sản phẩm chưa biết giá vốn ⇒ dự phòng chưa tính đủ" />
+                    </OKep>
+                    <OKep sub={<>khác <Money value={t.otherCost} /></>}><Money value={t.tax} /></OKep>
+                    <OKep sub={<Pct value={t.marginOnPurchase} />}>
+                      <Money value={t.profitOnPurchase} className={t.profitOnPurchase >= 0 ? "text-success" : "text-destructive"} />
+                    </OKep>
+                  </TableRow>
+                );
+              })()}
             </TableBody>
           </Table>
         </div>
