@@ -37,6 +37,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TIME_BASES, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { formatNumber, formatVND, pct } from "@/lib/format";
 import { successRate } from "@/lib/queries/metrics";
 import {
@@ -171,7 +172,17 @@ export default async function ReportsPage({
     period.key === "month"
       ? ""
       : `&period=${period.key}${period.key === "custom" ? `&from=${period.fromKey ?? ""}&to=${period.toKey ?? ""}` : ""}`;
-  const tabQuery = `tab=${tab}${periodQuery}`;
+  /*
+    MỐC COHORT CỦA TAB LỢI NHUẬN DANH NGHĨA — khoá riêng `moc`, KHÔNG dùng lại `basis`.
+
+    `basis` đã thuộc về tab P&L với hai giá trị `created` / `delivered`; nhồi thêm ba giá trị
+    `TimeBasis` vào cùng một khoá là để một ô chọn lặng lẽ đổi nghĩa khi người dùng sang tab khác.
+    Mặc định `ORDERED`, đúng thứ tab này vẫn tính — mở trang lên không con số nào xê dịch.
+  */
+  const mocNominal: TimeBasis = TIME_BASES.includes(param(raw, "moc") as TimeBasis) ? (param(raw, "moc") as TimeBasis) : "ORDERED";
+  // Mốc phải đi theo mọi liên kết trong tab (bấm mã hàng để xem theo ngày), nếu không thì bảng con
+  // rơi về mặc định và nói một con số khác bảng cha.
+  const tabQuery = `tab=${tab}${periodQuery}${mocNominal === "ORDERED" ? "" : `&moc=${mocNominal}`}`;
   const basis = parseBasis(param(raw, "basis"));
   const report = await getProfitReport(period, basis);
   const { current, previous, cash } = report;
@@ -274,6 +285,7 @@ export default async function ReportsPage({
           productId={productParam}
           tabQuery={tabQuery}
           canWrite={canWrite}
+          basis={mocNominal}
         />
       ) : null}
       {tab === "pnl" ? (
