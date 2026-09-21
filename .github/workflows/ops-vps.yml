@@ -73,7 +73,7 @@ on:
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
           - apply-sepay-env     # ghi SEPAY_WEBHOOK_SECRET từ Secrets vào .env, khởi động lại, rồi thử chữ ký đúng/sai (KHÔNG ghi tiền vào sổ)
-          - apply-tech-github-env # TUỲ CHỌN: đặt ERP_GITHUB_TOKEN khi kho chuyển private hoặc cần hạn mức cao hơn (kho public KHÔNG cần token)
+          - apply-tech-github-env # ghi Secret GitHub vào .env — ERP_GITHUB_TOKEN (TUỲ CHỌN, kho public không cần) và/hoặc ERP_GITHUB_DISPATCH_TOKEN (để ERP khởi động lượt chạy agent)
           - apply-agent-env      # đặt credential GitHub App `erp-agent` vào .env (danh tính riêng của coding agent)
           - sepay-verify        # kiểm chứng đường realtime SePay trên máy chủ thật: số đo + phát lại gói tin thật để chứng minh idempotency
           - sepay-reconcile     # đối chiếu sổ với API SePay và vá gói tin webhook đã mất (MẶC ĐỊNH CHẠY THỬ; arg "--apply --days=7")
@@ -196,6 +196,8 @@ jobs:
           # kết thúc, ghi nó vào .env là ghi một khoá đã chết. Cùng luật với hai khối trên: không
           # bao giờ truyền qua ô "arg", vì ô đó in nguyên văn vào log của mọi lần chạy.
           ERP_GITHUB_TOKEN: ${{ secrets.ERP_GITHUB_TOKEN }}
+          # Khoá RIÊNG cho quyền KHỞI ĐỘNG workflow — tách hẳn khỏi khoá ĐỌC ở trên.
+          ERP_GITHUB_DISPATCH_TOKEN: ${{ secrets.ERP_GITHUB_DISPATCH_TOKEN }}
           ERP_GITHUB_REPO: ${{ vars.ERP_GITHUB_REPO || github.repository }}
           ERP_GITHUB_DEPLOY_WORKFLOW: ${{ vars.ERP_GITHUB_DEPLOY_WORKFLOW || 'deploy-vps.yml' }}
           HMT_WORKBOOK_URL: ${{ vars.HMT_WORKBOOK_URL }}
@@ -218,7 +220,7 @@ jobs:
           # `tests/ops-concurrency.test.ts::testEnvsChuyenDuXuong` khoá bất biến: MỌI khoá khai ở
           # `env:` của bước này phải có mặt ở `envs:`. Bất biến đó bắt cả LỚP lỗi, không riêng ba
           # biến đã hỏng một lần.
-          envs: ACTION,DAYS,ARG,RUN_ID,LOCK_WAIT_READ,LOCK_WAIT_WRITE,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
+          envs: ACTION,DAYS,ARG,RUN_ID,LOCK_WAIT_READ,LOCK_WAIT_WRITE,OPENAI_API_KEY,ANTHROPIC_API_KEY,AI_PROVIDER,SEPAY_WEBHOOK_SECRET,SEPAY_WEBHOOK_API_KEY,SEPAY_API_TOKEN,ERP_GITHUB_TOKEN,ERP_GITHUB_DISPATCH_TOKEN,ERP_GITHUB_REPO,ERP_GITHUB_DEPLOY_WORKFLOW,HMT_WORKBOOK_URL
           script: |
             set -e
             cd /root/erp
@@ -810,20 +812,37 @@ jobs:
                 # GIÁ TRỊ TOKEN KHÔNG BAO GIỜ ĐƯỢC IN — chỉ ĐỘ DÀI, đủ để trả lời "đã ghi được chưa"
                 # mà không đủ để dùng lại. Kho mã này PUBLIC nên log Actions ai cũng đọc được.
                 upsert_env() { if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi; }
-                if [ -z "${ERP_GITHUB_TOKEN:-}" ]; then
-                  echo "Chưa có Secret ERP_GITHUB_TOKEN trong kho — KHÔNG ghi gì."
+                # ═══ HAI KHOÁ, HAI QUYỀN, VÀ KHÔNG KHOÁ NÀO BẮT BUỘC ═══
+                #
+                # `ERP_GITHUB_TOKEN`          — ĐỌC lượt deploy. Kho PUBLIC thì KHÔNG cần.
+                # `ERP_GITHUB_DISPATCH_TOKEN` — KHỞI ĐỘNG workflow (`actions: write`). Đây là thứ
+                #                                nút "Khởi động lượt chạy agent" trong ERP cần.
+                #
+                # Bản trước BẮT BUỘC phải có khoá ĐỌC rồi mới ghi được gì — nên người chỉ muốn khai
+                # khoá KHỞI ĐỘNG thì thao tác chết ở dòng đầu, với một thông điệp nói về đúng thứ họ
+                # không cần. Đã cắn thật (run #1624). Nay: có khoá nào thì ghi khoá ấy.
+                if [ -z "${ERP_GITHUB_TOKEN:-}" ] && [ -z "${ERP_GITHUB_DISPATCH_TOKEN:-}" ]; then
+                  echo "Kho chưa có Secret nào trong hai khoá này — KHÔNG ghi gì:"
+                  echo "  · ERP_GITHUB_TOKEN          — để ĐỌC lượt deploy (kho PUBLIC thì KHÔNG cần)."
+                  echo "  · ERP_GITHUB_DISPATCH_TOKEN — để ERP KHỞI ĐỘNG được lượt chạy agent."
                   echo
-                  echo "ĐÂY THƯỜNG KHÔNG PHẢI VẤN ĐỀ: kho truyenhkm5group-stack/hkt đang PUBLIC, nên ERP đọc"
-                  echo "lượt deploy bằng lượt gọi ẩn danh và KHÔNG cần token. Kiểm tra bằng:"
-                  echo "  Actions → Vận hành ERP trên VPS → action = run-job, arg = github-deployments --limit=20"
-                  echo "hoặc ERP → Kết nối dữ liệu → thẻ GitHub Actions → Kiểm tra kết nối."
+                  echo "Thêm ở: Settings → Secrets and variables → Actions → New repository secret,"
+                  echo "rồi chạy lại đúng thao tác này. Token KHÔNG nhập vào ô \"arg\" — ô ấy không dùng ở đây."
                   echo
-                  echo "CHỈ cần token khi: kho chuyển sang PRIVATE, hoặc gặp lỗi hạn mức (60 request/giờ theo IP)."
-                  echo "Khi đó tạo Fine-grained PAT → Repository permissions → Actions: Read-only (+ Contents: Read-only),"
-                  echo "thêm ở Settings → Secrets and variables → Actions → ERP_GITHUB_TOKEN, rồi chạy lại thao tác này."
+                  echo "Khoá KHỞI ĐỘNG tạo bằng Fine-grained PAT, chọn ĐÚNG kho này, và ĐÚNG MỘT quyền:"
+                  echo "  Repository permissions → Actions → Read and write."
                   exit 1
                 fi
-                upsert_env ERP_GITHUB_TOKEN "$ERP_GITHUB_TOKEN"; echo "ERP_GITHUB_TOKEN: đã ghi (${#ERP_GITHUB_TOKEN} ký tự)"
+                if [ -n "${ERP_GITHUB_TOKEN:-}" ]; then
+                  upsert_env ERP_GITHUB_TOKEN "$ERP_GITHUB_TOKEN"; echo "ERP_GITHUB_TOKEN: đã ghi (${#ERP_GITHUB_TOKEN} ký tự)"
+                else
+                  echo "ERP_GITHUB_TOKEN: chưa khai — bỏ qua (kho PUBLIC đọc được mà không cần token)."
+                fi
+                if [ -n "${ERP_GITHUB_DISPATCH_TOKEN:-}" ]; then
+                  upsert_env ERP_GITHUB_DISPATCH_TOKEN "$ERP_GITHUB_DISPATCH_TOKEN"; echo "ERP_GITHUB_DISPATCH_TOKEN: đã ghi (${#ERP_GITHUB_DISPATCH_TOKEN} ký tự)"
+                else
+                  echo "ERP_GITHUB_DISPATCH_TOKEN: chưa khai — nút \"Khởi động lượt chạy agent\" sẽ vẫn nói lý do và không gọi gì."
+                fi
                 [ -n "${ERP_GITHUB_REPO:-}" ] && { upsert_env ERP_GITHUB_REPO "$ERP_GITHUB_REPO"; echo "ERP_GITHUB_REPO=$ERP_GITHUB_REPO"; }
                 [ -n "${ERP_GITHUB_DEPLOY_WORKFLOW:-}" ] && { upsert_env ERP_GITHUB_DEPLOY_WORKFLOW "$ERP_GITHUB_DEPLOY_WORKFLOW"; echo "ERP_GITHUB_DEPLOY_WORKFLOW=$ERP_GITHUB_DEPLOY_WORKFLOW"; }
                 $C up -d app scheduler

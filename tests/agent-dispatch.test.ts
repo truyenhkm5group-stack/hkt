@@ -350,3 +350,49 @@ export function testDispatchSourceGuards() {
 
   console.log("✓ Nấc 3 (giao việc cho agent): 4 lý do từ chối phân biệt được · khoá GHI tách khỏi khoá ĐỌC không fallback · chỉ agent-run.yml, chỉ ref main · 403/404/hạn mức là ba câu khác nhau · hạn mức đếm từ audit_logs và chạm trần thì dừng trước khi gọi mạng · lời nói khớp mã nguồn (lượt chạy CHƯA nhận được việc, và màn hình nói ra)");
 }
+
+
+/**
+ * ═══════════ KHOÁ KHỞI ĐỘNG PHẢI CÓ ĐƯỜNG ĐI TỪ SECRET TỚI `.env` ═══════════
+ *
+ * ĐÃ CẮN THẬT — lượt chạy ops #1624. Chủ shop làm theo hướng dẫn của tôi và thao tác chết ngay:
+ * `apply-tech-github-env` **không hề biết** `ERP_GITHUB_DISPATCH_TOKEN`, lại còn BẮT BUỘC phải có
+ * khoá ĐỌC trước — nên người chỉ muốn khai khoá KHỞI ĐỘNG nhận một thông điệp nói về đúng thứ họ
+ * không cần.
+ *
+ * Mã ứng dụng đòi biến ấy (`canDispatchTask` báo thiếu nó), nhưng KHÔNG có đường nào đưa nó lên
+ * máy chủ. Một biến được đòi mà không có đường khai là một biến không bao giờ được khai.
+ *
+ * Bài này nối hai đầu lại: tên biến mà mã đòi PHẢI xuất hiện đủ ba chặng của workflow ops —
+ * nhận từ Secret · truyền qua SSH · ghi vào `.env`.
+ */
+export function testDuongKhaiKhoaKhoiDong() {
+  const wf = readFileSync(path.join(goc, ".github/workflows/ops-vps.yml"), "utf8");
+  const than = wf.split("\n").filter((d) => !d.trimStart().startsWith("#")).join("\n");
+  const TEN = "ERP_GITHUB_DISPATCH_TOKEN";
+
+  // Ba chặng: nhận từ Secret · truyền qua SSH · ghi vào `.env`. Thiếu một chặng là biến không tới nơi.
+  assert.ok(than.includes(TEN + ': ${{ secrets.' + TEN + ' }}'), `workflow phải nhận Secret ${TEN}`);
+  const dongEnvs = than.split("\n").find((d) => d.trimStart().startsWith("envs:") && d.includes("ERP_GITHUB_TOKEN"));
+  assert.ok(dongEnvs?.includes(TEN), `${TEN} phải nằm trong danh sách envs truyền qua SSH — thiếu thì nó không tới máy chủ`);
+  assert.ok(than.includes("upsert_env " + TEN), `phải GHI ${TEN} vào .env`);
+
+  /*
+    VÀ KHÔNG KHOÁ NÀO ĐƯỢC BẮT BUỘC PHẢI CÓ KHOÁ KIA.
+
+    Hai khoá phục vụ hai việc khác nhau (ĐỌC lượt deploy · KHỞI ĐỘNG workflow). Bắt buộc có khoá
+    này mới khai được khoá kia là dựng một phụ thuộc không có thật — và nó đã chặn chủ shop thật
+    ở lượt chạy ops #1624.
+  */
+  assert.ok(
+    than.includes('[ -z "${ERP_GITHUB_TOKEN:-}" ] && [ -z "${' + TEN + ':-}" ]'),
+    "chỉ được dừng khi THIẾU CẢ HAI khoá",
+  );
+
+  /*
+    GIÁ TRỊ KHOÁ KHÔNG BAO GIỜ ĐƯỢC IN — kho PUBLIC, log Actions ai cũng đọc. Chỉ ĐỘ DÀI.
+  */
+  assert.ok(than.includes("${#" + TEN + "}"), "phải in ĐỘ DÀI khoá để biết đã ghi được chưa");
+  const dongIn = than.split("\n").filter((d) => d.includes("echo") && d.includes("$" + TEN) && !d.includes("${#" + TEN + "}"));
+  assert.deepEqual(dongIn, [], "KHÔNG dòng echo nào được chạm vào GIÁ TRỊ khoá");
+}
