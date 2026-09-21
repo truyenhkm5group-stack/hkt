@@ -321,6 +321,28 @@ function exec(argvVao: readonly string[], cwd: string, timeoutMs: number): Promi
  * Dùng cho lượt chạy lại: base SHA khi ấy là đỉnh nhánh cũ, KHÔNG phải `main`. Lấy `main` nghĩa là
  * vứt bỏ công việc của lượt trước và làm lại từ đầu — đúng thứ Nấc 5 sinh ra để tránh.
  */
+/**
+ * ═══════════ ĐẾM LƯỢT AGENT ĐÃ LÀM TRÊN MỘT NHÁNH — BẰNG CHÍNH NHÁNH ĐÓ ═══════════
+ *
+ * Trần "3 lượt chạy cho một việc" của Nấc 5 đếm từ `tech_agent_runs`. Chú thích ở
+ * `lib/constants/agent-rerun.ts` viết *"bộ nhớ mất khi container khởi động lại, còn sổ thì
+ * không"* — đúng ở máy có CSDL thật, và SAI ở chỗ nó thật sự chạy: trên máy Actions, sổ là một
+ * CSDL PGlite **dựng mới mỗi lượt**, nên nó luôn đếm được 0 và trần KHÔNG BAO GIỜ chạm tới.
+ *
+ * Thứ DUY NHẤT sống sót qua các lượt chạy trên máy dùng-một-lần là chính cái nhánh git. Mỗi lượt
+ * agent để lại đúng một commit, nên số commit của nhánh so với `main` là số lượt đã làm — đo được,
+ * không phụ thuộc máy nào đang chạy.
+ *
+ * `--no-merges`: lượt đồng bộ nhánh với `main` cũng tạo commit, nhưng nó không phải công của agent.
+ * Đếm cả nó thì trần chạm sớm, và người ta sẽ gỡ trần thay vì sửa phép đếm.
+ */
+export async function soCommitCuaAgent(repoRoot: string, branch: string, base: string): Promise<number | null> {
+  const r = await rawGit(repoRoot, ["rev-list", "--count", "--no-merges", `${base}..${branch}`]);
+  if (!r.ok) return null;
+  const n = Number.parseInt(r.stdout.trim(), 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 export async function dinhNhanh(repoRoot: string, branch: string): Promise<string | null> {
   /*
     HAI CHỖ PHẢI HỎI, THEO ĐÚNG THỨ TỰ NÀY.
