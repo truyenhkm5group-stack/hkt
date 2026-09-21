@@ -47,7 +47,7 @@ const MIEN_KHUNG_XUONG: Record<string, string> = {
  *
  * Bộ dò tự tìm là để bắt trang MỚI. Nhưng một bộ dò tự tìm cũng có thể âm thầm HẸP LẠI khi ai đó đổi
  * cách viết — và lúc đó lá chắn im lặng đúng kiểu nó sinh ra để chống. Đã suýt xảy ra ngay khi viết
- * bài kiểm này: tiêu chí đầu tiên dùng `Period` nên trượt `resolvePeriod`, và bốn tuyến
+ * bài kiểm này: tiêu chí đầu tiên dùng `\bPeriod\b` nên trượt `resolvePeriod`, và bốn tuyến
  * (`alerts`, `landing`, `payroll`, `inventory/planning`) rơi khỏi phạm vi canh mà không có gì báo.
  *
  * Nên sàn này không phải danh sách trắng: nó là **cận dưới** mà bộ dò phải luôn phủ hết.
@@ -170,12 +170,39 @@ export function testLoadingUxContract() {
     const duongDan = file.split(path.sep).join("/");
     if (NGOAI_LE.has(duongDan)) continue;
     const dieuHuong = /shallow:\s*false/.test(src) || /router\.push\(/.test(src);
-    const transitionTran = /import\s*\{[^}]*useTransition[^}]*\}\s*from\s*"react"/.test(src);
+    const transitionTran = /import\s*\{[^}]*\buseTransition\b[^}]*\}\s*from\s*"react"/.test(src);
     if (dieuHuong && transitionTran) viPham.push(duongDan);
   }
   // Ngoại lệ phải còn tồn tại thật — tệp bị đổi tên mà danh sách còn nguyên là danh sách nói dối.
   for (const [file, lyDo] of NGOAI_LE) assert.ok(existsSync(file), `ngoại lệ trỏ tới tệp không còn tồn tại: ${file} (${lyDo})`);
-  assert.deepEqual(viPham, [], `các tệp sau gây điều hướng nhưng không báo lên thanh tiến trình chung: ${viPham.join(", ")}`);
+
+  /*
+    ═══════════ DANH SÁCH NÀY LÀ MỘT PHÉP ĐO, KHÔNG PHẢI MỘT LỜI MIỄN TRỪ ═══════════
+
+    Luật số 5 ở trên **chưa từng bắt được gì**: biểu thức nhận diện `useTransition` chứa một byte
+    BACKSPACE thật (0x08) thay cho hai ký tự `\` + `b`, nên `transitionTran` vĩnh viễn `false` và
+    `viPham` vĩnh viễn rỗng. Sửa đúng một ký tự vào ngày 21/09/2026 làm sáu tệp hiện ra cùng lúc.
+
+    Sáu tệp ấy là NỢ CÓ THẬT, không phải ngoại lệ có chủ ý — khác hẳn `NGOAI_LE` bên trên, nơi mỗi
+    dòng mang một lý do thiết kế. Gộp chúng vào đó là biến một phát hiện thành một lời bào chữa.
+
+    Nên danh sách so BẰNG, không so "tập con": thêm một tệp vi phạm ⇒ ĐỎ, và **sửa xong một tệp
+    cũng ⇒ ĐỎ**, buộc người sửa xoá nó khỏi đây. Một danh sách nợ chỉ được phép NGẮN ĐI.
+  */
+  const CHUA_SUA = [
+    "app/(dashboard)/bank/bank-filters.tsx",
+    "app/(dashboard)/bank/bank-tabs.tsx",
+    "app/(dashboard)/cs/cs-table.tsx",
+    "app/(dashboard)/inventory/returns/receive-queue.tsx",
+    "app/(dashboard)/work/okr/toolbar.tsx",
+    "app/(dashboard)/work/review/panel.tsx",
+  ];
+  for (const f of CHUA_SUA) assert.ok(existsSync(f), `nợ trỏ tới tệp không còn tồn tại: ${f}`);
+  assert.deepEqual(
+    [...viPham].sort(),
+    [...CHUA_SUA].sort(),
+    `danh sách nợ "điều hướng không báo lên thanh tiến trình" phải NGẮN ĐI, không dài ra. Đo được: ${viPham.join(", ") || "(rỗng)"}`,
+  );
 
   // ───────── 6. BA TRẠNG THÁI PHẢI PHÂN BIỆT ĐƯỢC ─────────
   assert.ok(existsSync("app/(dashboard)/error.tsx"), "phải có màn hình lỗi riêng");

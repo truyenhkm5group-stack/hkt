@@ -5,6 +5,7 @@ import { eq, inArray, like } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { TASK_ADVANCE_NEVER, TASK_ADVANCE_RULES, shouldAdvanceTask, type TaskPrState } from "@/lib/constants/task-advance";
 import { TECH_TASK_TRANSITIONS } from "@/lib/constants/tech";
+import { DISPATCHABLE_STATUSES } from "@/lib/constants/agent-dispatch";
 import { advanceTasksFromGithub } from "@/lib/tech/task-advance-watch";
 import { setTechTaskStatus } from "@/lib/tech/service";
 
@@ -47,10 +48,42 @@ export function testTaskAdvancePure() {
   assert.ok(!nguoiGiu.advance, "người vừa đổi ⇒ máy KHÔNG đẩy tiếp");
   assert.match(nguoiGiu.reason, /NGƯỜI/, "và phải nói rõ vì sao");
 
+  /*
+    ───────── KHÚC ĐẦU CŨNG PHẢI ĐI ĐƯỢC ─────────
+
+    ĐO PRODUCTION 21/09/2026: TECH-2 nằm ở TRIAGED trong khi PR #82 của nó ĐÃ GỘP. Việc được giao
+    thẳng từ giao diện Actions nên không ai bấm nó sang BUILDING, và không luật nào nhận nó.
+  */
+  for (const tu of ["TRIAGED", "SPEC_READY"]) {
+    const v = shouldAdvanceTask({ status: tu, pr: pr({ prState: "OPEN" }), nguoiVuaDoi: false });
+    assert.ok(v.advance && v.to === "BUILDING", `${tu} + PR mở ⇒ BUILDING`);
+  }
+
+  /*
+    ───────── BẰNG CHỨNG "ĐÃ CÓ PR" KHÔNG HẾT HẠN KHI PR GỘP ─────────
+
+    Bản đầu của bộ này đòi `prState === "OPEN"` ở mọi khúc đầu, nên một việc không được đẩy ĐÚNG
+    LÚC PR còn mở thì mắc kẹt vĩnh viễn: cửa sổ quan sát đóng lại và không luật nào còn khớp.
+    Khẳng định cũ ở đây ("BUILDING với PR MERGED không được đẩy") mã hoá đúng chỗ hỏng ấy.
+
+    Một bộ tự động chỉ đúng khi nó chạy đúng nhịp là một bộ tự động sẽ sai — nó không chịu được
+    một lần mất điện, một lần đổi lịch, hay một lượt chạy khởi động từ chỗ khác.
+  */
+  const ketDuocGo = shouldAdvanceTask({ status: "BUILDING", pr: pr({ prState: "MERGED" }), nguoiVuaDoi: false });
+  assert.ok(ketDuocGo.advance && ketDuocGo.to === "REVIEW", "việc bị bỏ lỡ lúc PR còn mở vẫn phải đi tiếp được sau khi PR gộp");
+  assert.ok(shouldAdvanceTask({ status: "TRIAGED", pr: pr({ prState: "MERGED" }), nguoiVuaDoi: false }).advance, "TRIAGED + PR đã gộp vẫn phải nhận ra là đã có người làm");
+
   // ───────── Chưa đủ bằng chứng ─────────
-  for (const st of ["", "CLOSED", "MERGED"]) {
+  for (const st of ["", "CLOSED"]) {
     const v = shouldAdvanceTask({ status: "BUILDING", pr: pr({ prState: st }), nguoiVuaDoi: false });
     assert.ok(!v.advance, `BUILDING với PR "${st}" KHÔNG được đẩy sang REVIEW`);
+  }
+  /*
+    PR ĐÓNG MÀ KHÔNG GỘP là bằng chứng rằng thứ đã làm KHÔNG được dùng. Đi tới bằng một cái đã bỏ
+    là tệ hơn đứng yên.
+  */
+  for (const tu of ["TRIAGED", "SPEC_READY"]) {
+    assert.ok(!shouldAdvanceTask({ status: tu, pr: pr({ prState: "CLOSED" }), nguoiVuaDoi: false }).advance, `${tu} + PR bị đóng bỏ ⇒ KHÔNG đẩy`);
   }
   assert.ok(!shouldAdvanceTask({ status: "REVIEW", pr: pr({ prState: "OPEN" }), nguoiVuaDoi: false }).advance, "PR còn mở thì chưa qua QA");
   assert.ok(!shouldAdvanceTask({ status: "REVIEW", pr: pr({ prState: "CLOSED" }), nguoiVuaDoi: false }).advance, "PR đóng mà KHÔNG gộp ⇒ không phải đã xong review");
@@ -65,11 +98,19 @@ export function testTaskAdvancePure() {
   for (const cam of TASK_ADVANCE_NEVER) {
     assert.ok(!dich.includes(cam), `máy KHÔNG BAO GIỜ được tự đặt trạng thái ${cam}`);
   }
-  assert.deepEqual([...dich], ["REVIEW", "QA"], "đúng hai đích, không hơn");
+  assert.deepEqual([...dich], ["BUILDING", "BUILDING", "REVIEW", "QA"], "đúng ba đích, không hơn — mọi trạng thái còn lại là QUYẾT ĐỊNH hoặc lời QUY KẾT");
 
-  /* Không trạng thái nào có hai luật — hai luật cùng `from` là một cuộc đua không ai thắng chắc. */
-  const tu = TASK_ADVANCE_RULES.map((r) => r.from);
-  assert.equal(new Set(tu).size, tu.length, "mỗi trạng thái nhiều nhất MỘT luật đẩy");
+  /*
+    Mỗi trạng thái nhiều nhất MỘT luật: hai luật cùng `from` là một cuộc đua không ai thắng chắc,
+    và kết quả sẽ phụ thuộc vào thứ tự khai trong mảng.
+  */
+  const tuTrangThai = TASK_ADVANCE_RULES.map((r) => r.from);
+  assert.equal(new Set(tuTrangThai).size, tuTrangThai.length, "mỗi trạng thái nhiều nhất MỘT luật đẩy");
+
+  /* Mọi trạng thái GIAO ĐƯỢC cho agent phải có đường đi tiếp — nếu không, việc agent làm sẽ mắc kẹt. */
+  for (const st of DISPATCHABLE_STATUSES) {
+    assert.ok(tuTrangThai.includes(st), `${st} giao được cho agent nhưng KHÔNG có luật đẩy — việc sẽ mắc kẹt như TECH-2`);
+  }
 
   /* Mọi luật phải là phép chuyển hợp lệ theo bảng CÓ THẨM QUYỀN. */
   for (const r of TASK_ADVANCE_RULES) {

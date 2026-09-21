@@ -37,6 +37,23 @@ export const DISPATCHABLE_WORKFLOWS: readonly string[] = ["agent-run.yml"];
  */
 export const DISPATCH_REF = "main";
 
+/**
+ * MÃ VIỆC — VÀ CHỈ MÃ VIỆC — ĐƯỢC PHÉP ĐI QUA Ô `inputs` CỦA `workflow_dispatch`.
+ *
+ * Kho này PUBLIC, và đầu vào dispatch hiện NGUYÊN VĂN trong giao diện Actions lẫn trong log. Một
+ * mã dạng `TECH-12` không nói gì với người ngoài; một tiêu đề việc thì nói hết. Nội dung việc đi
+ * qua cửa ĐỌC hẹp `GET /api/tech/agent-task`, xác thực bằng khoá — xem `lib/tech/agent-task-read.ts`.
+ *
+ * Nên hình dạng được kiểm ở ĐÂY, tại hàm thực thi, chứ không ở nơi gọi: nơi gọi có thể quên, có
+ * thể được thêm một nhánh mới, có thể là một server action viết vội. Cùng lý lẽ với
+ * `DISPATCHABLE_WORKFLOWS`.
+ */
+export const MA_VIEC_DISPATCH = /^[A-Z][A-Z0-9]{1,11}-[0-9]{1,9}$/;
+
+export function laMaViecHopLe(value: string): boolean {
+  return MA_VIEC_DISPATCH.test(value);
+}
+
 export const DISPATCH_QUOTA = {
   /**
    * Trần mỗi GIỜ, tính trên TOÀN HỆ THỐNG chứ không theo người.

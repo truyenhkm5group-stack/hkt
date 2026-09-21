@@ -1,7 +1,7 @@
 # Phòng Tech AI — trạng thái
 
 > **File trạng thái DUY NHẤT.** Mọi milestone cập nhật vào đây, không mở file mới.
-> Cập nhật: **21/09/2026** · `main` = `6ca2bc3` · **dây chuyền đã chạy trọn vẹn một vòng đầu-cuối**
+> Cập nhật: **21/09/2026** · **nửa đi đã chạy trọn; nửa về vừa đo ra ba khúc đứt và đã vá**
 
 ---
 
@@ -13,6 +13,10 @@ việc thật trên /tech  →  cửa đọc có khoá  →  agent làm  →  4 
 ```
 
 Chỗ duy nhất còn cần NGƯỜI là **duyệt PR** — và đó là chỗ nó phải ở lại.
+
+> **Đọc mũi tên cuối cùng cho kỹ.** Tới 21/09 nửa ĐI đã chạy thật tới `TỰ MỞ PR`. Nửa VỀ — việc
+> trên `/tech` biết PR của nó ở đâu và tự đi tiếp — thì **chưa từng chạy một lần nào**, và tôi đã
+> ghi nhầm là đã khép kín. Xem mục *Nửa về*.
 
 | Milestone | PR | Deploy |
 |---|---|---|
@@ -40,7 +44,7 @@ Chỗ duy nhất còn cần NGƯỜI là **duyệt PR** — và đó là chỗ n
 
 ---
 
-## ✅ VÒNG ĐẦU-CUỐI ĐẦU TIÊN — đã khép kín
+## Vòng đầu-cuối đầu tiên — nửa ĐI
 
 ```
 Lượt #19   việc thật TECH-2 → cửa đọc có khoá → agent làm → 4 cổng xanh
@@ -53,6 +57,36 @@ gộp        PR #82 vào `main`
 
 **Tổng tiền cho cả vòng: $0,259.**
 
+---
+
+## Nửa VỀ — tôi đã ghi "khép kín" trước khi đo, và nó chưa khép
+
+Hôm sau tôi đi đo production đúng câu hỏi lẽ ra phải hỏi trước khi viết chữ ấy:
+
+```
+TECH-2 | TRIAGED | pr = 0 | pr_state = (trống)
+```
+
+PR #82 đã duyệt và ĐÃ GỘP. Production vẫn tưởng việc ấy **chưa có PR nào** và **chưa ai bắt tay
+vào**. Không có gì đỏ: agent xanh, bốn cổng xanh, PR gộp được. Chỉ hàng đợi `/tech` lặng lẽ nói
+sai — và nói sai theo hướng dễ tin nhất: *"việc vẫn đang chờ"*.
+
+Ba khúc đứt, cùng một câu chuyện:
+
+| # | Khúc đứt | Hậu quả |
+|---|---|---|
+| 1 | Nút **khởi động lượt chạy** trong ERP gửi dispatch **không kèm mã việc** | `agent-run.yml` rơi vào nhánh tự-kiểm, tự tạo việc R0 của riêng nó — việc người bấm **không bao giờ được làm**. Cửa đọc có khoá của Nấc 3b dựng ra để phục vụ đúng chuyện này, và chưa từng được ERP gọi |
+| 2 | Cửa chép sổ nhận `branch`, cất vào `tech_agent_runs`, rồi **dừng** | `syncPullRequests()` ghép PR với việc bằng `tech_tasks.branch === head.ref`. Cột ấy chỉ có MỘT đường ghi: người gõ tay. Với mọi việc agent tự làm, ô khoá ấy **vĩnh viễn rỗng** ⇒ toàn bộ Nấc 4 chạy không tải |
+| 3 | Cả hai luật đẩy trạng thái đòi `prState === "OPEN"` | Việc không được đẩy **đúng lúc PR còn mở** thì mắc kẹt vĩnh viễn: cửa sổ quan sát đóng lại và không luật nào còn khớp |
+
+Khúc 1 tệ nhất, vì nó **đã được ghi thành tài liệu thay vì được vá**: ghi chú sự kiện của mỗi lượt
+giao việc nói thẳng *"lượt chạy tự tạo việc R0 của riêng nó — nó CHƯA nhận được việc này"*. Một
+khúc hỏng được mô tả chính xác vẫn là một khúc hỏng.
+
+Và khúc 3 là lớp lỗi đáng nhớ hơn cả: **một bộ tự động chỉ đúng khi nó chạy đúng nhịp là một bộ
+tự động sẽ sai.** Nó không chịu được một lần mất điện, một lần đổi lịch, hay một lượt chạy khởi
+động từ chỗ khác. Bằng chứng *"việc này đã có PR"* không hết hạn khi PR gộp — nó chỉ mạnh thêm.
+
 ### Bốn lỗi review bắt được, và Nấc 5 sửa đúng
 
 Agent **bịa ra một hằng số không tồn tại** (`REAP_STALE_RUNS_LIVE_AT`), bịa giá trị
@@ -60,7 +94,27 @@ Agent **bịa ra một hằng số không tồn tại** (`REAP_STALE_RUNS_LIVE_A
 đưa vào Nấc 5 — đó đúng là việc nó sinh ra để làm.
 
 | Kiểm | Trước | Sau |
+|
+### Và trên đường vá, hai bộ gác lộ ra là đã CHẾT TỪ LÚC SINH RA
+
+Khi sửa khúc 1, một bài kiểm đáng lẽ phải đỏ từ nhiều ngày trước vẫn xanh. Lý do nằm ở mức BYTE:
+người viết định gõ `` (ranh giới từ trong biểu thức chính quy), nhưng thứ nằm trong tệp là
+**một byte BACKSPACE thật (0x08)** — một ký tự, không phải hai. Biểu thức khi ấy đòi một ký tự
+điều khiển đứng ngay cạnh chữ: không bao giờ khớp, không bao giờ báo lỗi.
+
+| Bộ gác | Đáng lẽ bắt gì | Thực tế |
 |---|---|---|
+| `agent-dispatch` · `/task…/` | workflow mọc thêm đầu vào việc ⇒ buộc sửa câu chữ trên màn hình | vĩnh viễn `false` — màn hình nói sai với chủ shop suốt nhiều ngày mà không gì đỏ |
+| `loading-ux-contract` · `/useTransition/` | trang gây điều hướng mà không báo lên thanh tiến trình | chưa từng bắt được gì; sửa một ký tự làm **6 tệp** hiện ra |
+
+Lớp lỗi này vô hình theo đúng nghĩa đen — trình soạn thảo, `git diff` và mọi lần đọc lại đều hiện
+`` y như một chuỗi thoát bình thường. Nên nó được chặn ở mức byte trong `tests/test-hygiene.test.ts`:
+không tệp kiểm thử nào được chứa ký tự điều khiển.
+
+Sáu tệp giao diện kia là **nợ có thật, đã đo, chưa sửa** — chúng nằm trong một danh sách chỉ được
+phép NGẮN ĐI (thêm một tệp ⇒ đỏ, sửa xong một tệp cũng ⇒ đỏ để buộc xoá khỏi danh sách). Sửa
+chúng là việc giao diện, không thuộc dây chuyền agent, nên tôi không gộp vào đây.
+---|---|---|
 | Hằng số bịa `REAP_STALE_RUNS_LIVE_AT` | có | **0** |
 | Tên thật `LEDGER_LIVE_AT` | 0 | **5** |
 | Giá trị bịa `2026-09-15` | có | **0** |
@@ -239,7 +293,8 @@ lời nói dối.
 
 | Việc | Phụ thuộc |
 |---|---|
-| Giao việc thật thứ hai cho agent, đo lại toàn vòng | — (sẵn sàng) |
+| Giao việc thật thứ hai cho agent — lần này bấm từ **`/tech`**, không phải từ Actions | chủ shop tạo việc (AI không tự tạo việc thật, cố ý) |
+| Đo lại nửa VỀ trên production: `branch` có về tới dòng việc không, việc có tự đi tiếp không | — (sau khi bản vá lên production) |
 | Hạ bậc model cho Copilot ERP | **quyết định của chủ shop** — đổi model là đổi chất lượng trả lời |
 | Bỏ bước duyệt workflow cho PR của agent | **quyết định của chủ shop** — đây là cài đặt bảo mật |
 | Bật **merge queue** cho `main` | **quyết định của chủ shop** — sẽ hết vòng lặp duyệt-lại khi `main` nhích |

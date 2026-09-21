@@ -320,19 +320,27 @@ export function testDispatchSourceGuards() {
   /*
     ───────── LỜI NÓI PHẢI KHỚP VỚI THỨ MÃ NGUỒN LÀM ─────────
 
-    `agent-run.yml` hôm nay chỉ nhận MỘT đầu vào (`gates`) và tự tạo việc R0 của riêng nó bằng
-    `agent:proof-setup`. Nghĩa là bấm nút cho `TECH-12` KHỞI ĐỘNG một lượt chạy nhưng lượt ấy
-    KHÔNG làm `TECH-12`. Bản này nói đúng thứ nó làm, và bộ gác dưới đây giữ cho hai thứ không
-    trôi xa nhau theo CẢ HAI chiều:
+    Bộ gác hai chiều: workflow mọc thêm đầu vào việc ⇒ buộc sửa câu chữ; câu chữ quay lại hứa
+    "giao việc" khi mã nguồn chưa làm được ⇒ ĐỎ. Một nút hứa nhiều hơn thứ nó làm là cách nhanh
+    nhất để người dùng thôi tin mọi nút khác.
 
-      · workflow mọc thêm đầu vào việc  ⇒ ĐỎ, buộc đi sửa lại câu chữ (nay đã trao được việc);
-      · câu chữ quay lại hứa "giao việc" ⇒ ĐỎ, vì mã nguồn chưa làm được điều đó.
+    ─── BỘ GÁC NÀY ĐÃ CHẾT TỪ LÚC SINH RA, VÀ KHÔNG AI BIẾT ───
 
-    Một nút hứa nhiều hơn thứ nó làm là cách nhanh nhất để người dùng thôi tin mọi nút khác.
+    Phát hiện 21/09/2026. Biểu thức nhận diện đầu vào việc từng được viết là `/\btask…/`, nhưng
+    trong tệp nguồn ký tự ấy là **một byte BACKSPACE thật (0x08)**, không phải hai ký tự `\` + `b`.
+    Nên nó đòi một ký tự điều khiển đứng ngay trước chữ `task` — điều không bao giờ xảy ra.
+
+    Hậu quả: `coDauVaoViec` VĨNH VIỄN `false`. Nấc 3b đã thêm đầu vào `task` vào workflow từ lâu,
+    chiều "buộc đi sửa lại câu chữ" lẽ ra phải đỏ ngay hôm đó — nó im lặng, và màn hình tiếp tục
+    nói với chủ shop một câu không còn đúng.
+
+    Một bài kiểm luôn đi VÀO CÙNG MỘT NHÁNH thì nửa còn lại của nó chưa từng tồn tại.
+    `tests/test-hygiene.test.ts` nay chặn cả LỚP lỗi này: không tệp kiểm thử nào được chứa ký tự
+    điều khiển lọt vào mã nguồn.
   */
   const wf = readFileSync(path.join(goc, ".github/workflows/agent-run.yml"), "utf8");
   const khoiInputs = wf.slice(wf.indexOf("inputs:"), wf.indexOf("permissions:"));
-  const coDauVaoViec = /task(_code)?\s*:/.test(khoiInputs);
+  const coDauVaoViec = /\btask(_code)?\s*:/.test(khoiInputs);
   const ui = readFileSync(path.join(goc, "app/(dashboard)/tech/tasks/[id]/task-actions.tsx"), "utf8");
   if (!coDauVaoViec) {
     assert.ok(
@@ -346,9 +354,16 @@ export function testDispatchSourceGuards() {
       !ui.includes("CHƯA nhận được việc này"),
       "workflow ĐÃ nhận được việc — gỡ câu cảnh báo cũ đi, một cảnh báo sai còn tệ hơn không có",
     );
+    /*
+      VÀ ĐƯỜNG THỰC THI PHẢI THẬT SỰ TRAO VIỆC.
+
+      Workflow nhận được đầu vào việc KHÔNG có nghĩa ERP đang gửi nó. Đúng khoảng hở ấy đã tồn tại
+      từ Nấc 3b tới 21/09/2026: ô `task` có sẵn, mà `dispatchTaskToAgent()` gửi mỗi `gates`.
+    */
+    assert.match(svc, /dispatchAgentRun\(\{[^}]*taskCode:\s*task\.code/, "workflow nhận được việc thì ERP phải GỬI mã việc — có ô mà không gửi thì vẫn là lượt chạy tự kiểm");
   }
 
-  console.log("✓ Nấc 3 (giao việc cho agent): 4 lý do từ chối phân biệt được · khoá GHI tách khỏi khoá ĐỌC không fallback · chỉ agent-run.yml, chỉ ref main · 403/404/hạn mức là ba câu khác nhau · hạn mức đếm từ audit_logs và chạm trần thì dừng trước khi gọi mạng · lời nói khớp mã nguồn (lượt chạy CHƯA nhận được việc, và màn hình nói ra)");
+  console.log("✓ Nấc 3 (giao việc cho agent): 4 lý do từ chối phân biệt được · khoá GHI tách khỏi khoá ĐỌC không fallback · chỉ agent-run.yml, chỉ ref main · 403/404/hạn mức là ba câu khác nhau · hạn mức đếm từ audit_logs và chạm trần thì dừng trước khi gọi mạng · lời nói khớp mã nguồn (workflow nhận được việc, ERP GỬI mã việc, màn hình nói đúng)");
 }
 
 
