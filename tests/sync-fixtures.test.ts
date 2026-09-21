@@ -69,6 +69,7 @@ import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPh
 import { testRerunDeBai, testRerunDinhNhanh, testRerunGuards, testRerunPhanHoi, testRerunPure, testRerunWorktree } from "./agent-rerun.test";
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
+import { testCauNoiVanGiuHangRao, testChuPrKhongLoNoiDungViec, testDieuKienMoPr } from "./agent-pr-text.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
@@ -1951,6 +1952,9 @@ async function main() {
   testDispatchPure();
   testDispatchSourceGuards();
   testAgentTaskReadGuards();
+  testChuPrKhongLoNoiDungViec();
+  testDieuKienMoPr();
+  testCauNoiVanGiuHangRao();
   testLedgerPure();
   testLedgerGuards();
   testChonVanDonPure();
