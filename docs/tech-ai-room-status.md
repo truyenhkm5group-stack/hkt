@@ -289,11 +289,91 @@ lời nói dối.
 
 ---
 
+## Việc thật thứ hai (TECH-3) — nửa VỀ chạy tới đâu
+
+Chủ shop tạo **TECH-3**, gán vai **QA**, rồi bấm *Khởi động lượt chạy agent* **ngay trong ERP** —
+lần đầu tiên lệnh chạy đi từ màn hình nghiệp vụ chứ không từ giao diện Actions.
+
+| Khúc | Kết quả |
+|---|---|
+| Lệnh khởi động mang MÃ việc | **chạy** — nhật ký việc ghi *"cho ĐÚNG việc này"*, câu cũ *"nó CHƯA nhận được việc này"* đã biến mất |
+| Cửa đọc có khoá trả đúng việc | **chạy** — log in `▶ TECH-3 · Bài kiểm khoá luật…` |
+| Agent làm việc | **chưa tới** — BLOCKED trước khi gọi model một lần nào |
+
+```
+▶ TECH-3 · Bài kiểm khoá luật "nhánh agent về tới dòng việc" chạy trên CSDL thật
+  agent=documentation · vai=DOCUMENTATION
+⛔ BLOCKED — Agent "Tài liệu" đang TẮT
+  tiền: chưa gọi model lần nào.
+```
+
+Việc giao cho vai **QA**; workflow gọi `--agent documentation`. Bước lấy việc chỉ BẬT vai của
+chính việc ấy, nên vai bị gọi nhầm đang tắt và hàng rào chặn đúng lúc — **hàng rào làm đúng việc
+của nó**. Cái sai là ĐỀ BÀI ở tầng YAML.
+
+Đây là **lần thứ ba** cùng một lớp lỗi: một sự thật của VIỆC bị thay bằng một hằng số viết sẵn,
+và hằng số ấy đúng đúng một lần — cho vai đầu tiên từng chạy.
+
+| Lượt | Thứ bị giấu / bịa trong đề bài |
+|---|---|
+| trước #13 | nhánh và commit nền |
+| #17 | phạm vi ĐỌC |
+| **#21** | **VAI** — và cả mẫu tên nhánh `ai/documentation/*` ở bước đẩy |
+
+Tên nhánh mang cùng chỗ hở: bước đẩy tìm `ai/documentation/*` và từ chối mọi tên khác, nên một
+lượt QA có làm xong vẫn không đẩy nổi nhánh `ai/qa/…` của chính nó. Hai chỗ, một nguyên nhân.
+
+**Chi phí của lượt hỏng này: $0** — nó dừng trước khi gọi model.
+
+---
+## Lượt #22 — vai QA chạy được, và lộ ra trần cửa sổ ngữ cảnh
+
+Bản vá vai làm đúng việc: `agent=qa · vai=QA`, nhánh `ai/qa/TECH-3-mubfsts5`. Rồi:
+
+```
+✗ FAILED
+  lý do: 400 prompt is too long: 205.844 tokens > 200.000 maximum
+  tiền: chưa gọi model lần nào.
+```
+
+**Hai lỗi trong bốn dòng ấy, và lỗi thứ hai tệ hơn lỗi thứ nhất.**
+
+### ① `read_file` không có trần
+
+`run_command` đã cắt kết quả còn 4.000 ký tự cuối từ lâu; `read_file` trả về NGUYÊN tệp. Người
+viết trần ấy nghĩ tới một chiều. Vai DOCUMENTATION không bao giờ chạm tới (`docs/` toàn tệp nhỏ);
+vai QA thì BẮT BUỘC đọc những tệp lớn nhất kho — đo 21/09/2026:
+
+| Tệp | Ký tự |
+|---|---|
+| `tests/sync-fixtures.test.ts` | **160.430** (~45k token) — phải đọc để đăng ký bài kiểm |
+| `tests/migration-upgrade-path.test.ts` | 121.663 |
+| `tests/tech-phase2a.test.ts` | 66.632 |
+
+### ② Báo cáo in một câu SAI về tiền
+
+Lượt đầu tiên chỉ có đề bài, **không thể** dài 205.844 token — nên model đã được gọi nhiều vòng và
+tiền đã tiêu thật. Ngoại lệ 400 ném thẳng ra ngoài vòng lặp và cuốn theo cả `chiPhi`.
+
+Lỗi ① làm hỏng một lượt chạy. Lỗi ② làm hỏng **khả năng biết mình đã tiêu bao nhiêu** — đúng thứ
+chủ shop phàn nàn khi hết $25. Một báo cáo nói *"chưa từng xảy ra"* về thứ đã xảy ra còn tệ hơn
+nói *"chưa biết"* (mục 42).
+
+**Số tiền của lượt #22 đã mất cùng ngoại lệ. Không bịa lại.**
+
+### Đã vá
+
+Ngân sách **40.000 ký tự/lần · 240.000 ký tự/lượt**; tệp lớn giữ **ĐẦU + ĐUÔI** (import ở đầu,
+danh sách đăng ký ở cuối — đúng hình dạng tệp kho này) kèm dấu cắt nói rõ bỏ bao nhiêu; hết ngân
+sách thì TỪ CHỐI có lý do chứ không trả chuỗi rỗng. Lời gọi model vào `try/catch`: hỏng thì trả về
+KÈM số tiền đã cộng được.
+
+---
 ## NEXT
 
 | Việc | Phụ thuộc |
 |---|---|
-| Giao việc thật thứ hai cho agent — lần này bấm từ **`/tech`**, không phải từ Actions | chủ shop tạo việc (AI không tự tạo việc thật, cố ý) |
+| Chạy lại TECH-3 sau khi vá vai — đo nốt nửa VỀ | — (sau khi bản vá lên production) |
 | Đo lại nửa VỀ trên production: `branch` có về tới dòng việc không, việc có tự đi tiếp không | — (sau khi bản vá lên production) |
 | Hạ bậc model cho Copilot ERP | **quyết định của chủ shop** — đổi model là đổi chất lượng trả lời |
 | Bỏ bước duyệt workflow cho PR của agent | **quyết định của chủ shop** — đây là cài đặt bảo mật |

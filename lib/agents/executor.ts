@@ -1,5 +1,6 @@
 import { estimateCostUsd, type AiProvider, type AiMessage, type AiToolDef } from "@/lib/ai/provider";
 import type { AgentWorkspace } from "@/lib/agents/workspace";
+import { DOC_NGAN_SACH, catTepChoVua } from "@/lib/constants/agent-read-budget";
 
 /**
  * ═══════════ AGENT EXECUTOR — MỘT GIAO DIỆN, NHIỀU CÁCH THỰC THI ═══════════
@@ -140,7 +141,10 @@ export interface AgentExecutor {
 export const AGENT_TOOLS: AiToolDef[] = [
   {
     name: "read_file",
-    description: "Đọc một tệp trong kho mã. Chỉ đọc được các đường dẫn thuộc phạm vi của agent.",
+    description:
+      "Đọc một tệp trong kho mã. Chỉ đọc được các đường dẫn thuộc phạm vi của agent. "
+      + `Tệp dài hơn ${DOC_NGAN_SACH.moiLan} ký tự sẽ được đưa về ở dạng ĐẦU + CUỐI và có ghi rõ khúc giữa bị bỏ; `
+      + `cả lượt chạy chỉ đọc được tổng ${DOC_NGAN_SACH.caLuot} ký tự, nên hãy chọn tệp cần đọc thay vì đọc hết.`,
     inputSchema: { type: "object", properties: { path: { type: "string", description: "Đường dẫn tương đối, ví dụ docs/abc.md" } }, required: ["path"], additionalProperties: false },
   },
   {
@@ -239,10 +243,29 @@ export class AiAgentExecutor implements AgentExecutor {
     let doDuocGia = true;
     /** Đã nhắc gọi `finish` chưa — nhắc tối đa MỘT lần cho cả lượt chạy. */
     let daNhac = false;
+    /** Tổng ký tự tệp đã đưa vào hội thoại — trần ở `DOC_NGAN_SACH.caLuot`. */
+    let daDocChars = 0;
     const chotChiPhi = () => ({ ...chiPhi, usd: doDuocGia ? Math.round(usdCong * 1_000_000) / 1_000_000 : null });
 
     for (let round = 0; round < MAX_ROUNDS && !finished; round += 1) {
-      const res = await this.provider.complete({ system: SYSTEM, messages, tools: AGENT_TOOLS, maxTokens: 8000 });
+      /*
+        MỘT LỜI GỌI HỎNG KHÔNG ĐƯỢC CUỐN THEO PHÉP ĐO TIỀN.
+
+        ĐÃ CẮN THẬT, lượt #22: lời gọi thứ N trả 400 "prompt is too long", ngoại lệ ném thẳng ra
+        ngoài vòng lặp, và `chiPhi` đi theo nó. Báo cáo in "tiền: chưa gọi model lần nào" trong
+        khi N-1 vòng trước đã gọi thật và đã tiêu tiền thật.
+
+        Đó là một câu SAI trong một bản báo cáo — đúng lớp mà mục 42 gọi tên: chưa biết không
+        được in thành 0, và ở đây còn tệ hơn: nó in thành "chưa từng xảy ra".
+      */
+      let res: Awaited<ReturnType<AiProvider["complete"]>>;
+      try {
+        res = await this.provider.complete({ system: SYSTEM, messages, tools: AGENT_TOOLS, maxTokens: 8000 });
+      } catch (e) {
+        const loi = e instanceof Error ? e.message : String(e);
+        steps.push({ kind: "NOTE", detail: `Lời gọi model hỏng ở vòng ${round + 1}: ${loi.slice(0, 300)}` });
+        return { summary, steps, finished: false, error: loi, chiPhi: chotChiPhi() };
+      }
       messages.push({ role: "assistant", content: res.content });
 
       chiPhi.soVong += 1;
@@ -300,8 +323,26 @@ export class AiAgentExecutor implements AgentExecutor {
         }
         if (call.name === "read_file") {
           const r = job.workspace.readFile(String(input.path ?? ""));
-          steps.push({ kind: "READ", path: String(input.path ?? ""), ok: r.ok, detail: r.ok ? `${r.content.length} ký tự` : r.reason });
-          results.push({ type: "tool_result", toolUseId: call.id, content: r.ok ? r.content : r.reason, isError: !r.ok });
+          if (!r.ok) {
+            steps.push({ kind: "READ", path: String(input.path ?? ""), ok: false, detail: r.reason });
+            results.push({ type: "tool_result", toolUseId: call.id, content: r.reason, isError: true });
+            continue;
+          }
+          /* Hàng rào phạm vi đã cho đọc; ngân sách quyết ĐƯA VÀO HỘI THOẠI được bao nhiêu. */
+          const v = catTepChoVua({ noiDung: r.content, daDung: daDocChars });
+          if (!v.ok) {
+            steps.push({ kind: "READ", path: String(input.path ?? ""), ok: false, detail: v.ly });
+            results.push({ type: "tool_result", toolUseId: call.id, content: v.ly, isError: true });
+            continue;
+          }
+          daDocChars = v.daDungSau;
+          steps.push({
+            kind: "READ",
+            path: String(input.path ?? ""),
+            ok: true,
+            detail: v.daCat ? `${r.content.length} ký tự — ĐÃ CẮT còn ${v.noiDung.length}` : `${r.content.length} ký tự`,
+          });
+          results.push({ type: "tool_result", toolUseId: call.id, content: v.noiDung });
           continue;
         }
         if (call.name === "write_file") {
