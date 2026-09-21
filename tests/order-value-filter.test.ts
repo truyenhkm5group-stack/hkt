@@ -17,6 +17,8 @@ import {
   type OrderValueFilter,
 } from "@/lib/constants/order-value";
 import { getReturnRateByTier, getReturnRateSummary, MIN_TIER_SAMPLE } from "@/lib/queries/return-rate";
+import { getReturnReasonReport } from "@/lib/queries/return-reason-report";
+import { logisticsPerformance } from "@/lib/queries/logistics";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -215,4 +217,24 @@ export async function testOrderValueFilter(db: Db) {
   assert.equal(chi300toi500.returned, MIN_TIER_SAMPLE - 2, "lọc 300–500K giữ đúng số đơn hoàn của bậc");
   assert.ok(tatCa.delivered >= chiDuoi200.delivered + chi300toi500.delivered, "tập lọc phải là TẬP CON của tập không lọc");
   assert.notEqual(chiDuoi200.successRate, chi300toi500.successRate, "hai bậc giá phải cho hai tỷ lệ khác nhau — nếu bằng nhau thì bộ lọc chưa được nối vào truy vấn");
+
+  // ───────────────────── 7. CẢ TRANG ĐỨNG TRÊN MỘT TẬP ĐƠN ─────────────────────
+  /*
+    Đây là bài kiểm chống lại cái bẫy nguy hiểm nhất của tính năng này: nối bộ lọc vào BẢNG CHÍNH
+    rồi quên một khối bên cạnh. Khối bị quên vẫn hiện số của cả kỳ, dưới cùng một tiêu đề, và
+    người đọc sẽ cộng hai bảng rồi thấy lệch mà không hiểu vì sao.
+
+    Nên mỗi khối được kiểm bằng cùng một câu hỏi: lọc vào thì con số có NHỎ ĐI không. Bằng nhau
+    nghĩa là bộ lọc chưa tới được truy vấn ấy.
+  */
+  const lyDoTatCa = await getReturnReasonReport({ period: KY, basis: "ORDERED" });
+  const lyDoDuoi200 = await getReturnReasonReport({ period: KY, basis: "ORDERED", value: { min: null, max: 200_000 } });
+  assert.ok(lyDoTatCa.finished > lyDoDuoi200.finished, "báo cáo lý do hoàn phải thu hẹp theo bộ lọc giá trị đơn");
+  assert.equal(lyDoDuoi200.returned, 0, "bậc dưới 200K trong dữ liệu gieo không có đơn hoàn nào");
+  assert.equal(lyDoDuoi200.delivered, soGiaoTC, "báo cáo lý do hoàn phải thấy đúng số đơn giao thành công của bậc");
+
+  const giaoVanTatCa = await logisticsPerformance(KY);
+  const giaoVanDuoi200 = await logisticsPerformance(KY, { min: null, max: 200_000 });
+  assert.ok(giaoVanTatCa.tracked > giaoVanDuoi200.tracked, "hiệu suất giao vận phải thu hẹp theo bộ lọc giá trị đơn");
+  assert.equal(giaoVanDuoi200.returned, 0, "bậc dưới 200K không có kiện hoàn nào trong dữ liệu gieo");
 }

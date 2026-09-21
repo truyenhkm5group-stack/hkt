@@ -52,6 +52,7 @@ import {
 import { rescueRate, type RescueRate } from "@/lib/constants/return-rescue";
 import { timeBasisColumnSql, type TimeBasis } from "@/lib/constants/report-time-basis";
 import type { Period } from "@/lib/search-params";
+import { NO_ORDER_VALUE_FILTER, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 
 const o = schema.orders;
 
@@ -175,6 +176,14 @@ export type ReturnReasonReport = {
 export type ReasonFilter = {
   period: Period;
   basis?: TimeBasis;
+  /**
+   * Khoảng GIÁ TRỊ ĐƠN (xem `lib/constants/order-value.ts`). Có mặt ở đây vì bảng lý do hoàn đứng
+   * trên CÙNG một trang với bảng theo mã hàng: một bảng lọc còn bảng kia đọc cả kỳ là đặt hai tập
+   * đơn khác nhau dưới cùng một tiêu đề, và người đọc sẽ cộng chúng lại.
+   *
+   * `ReasonDrilldownFilter` mở rộng kiểu này nên hai tầng drilldown cũng đi theo, không cần khai lại.
+   */
+  value?: OrderValueFilter;
   codes?: string[];
   /** Mẫu mã cụ thể (`VARIANT_KEY` của bảng hiệu quả theo mã) — hẹp hơn mã hàng một bậc. */
   variantKeys?: string[];
@@ -197,6 +206,8 @@ async function baseRows(f: ReasonFilter) {
   const db = await getDb();
   const basis = f.basis ?? "OUTCOME";
   const conds: SQL[] = [REPORTABLE_ORDER];
+  const locGiaTri = orderValueWhereSql(f.value ?? NO_ORDER_VALUE_FILTER);
+  if (locGiaTri) conds.push(sql.raw(locGiaTri));
   if (f.codes?.length) {
     const { variantIds } = await variantIdsOfCodes(f.codes);
     conds.push(orderHasProductCode(sql`${o.id}`, variantIds));

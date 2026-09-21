@@ -115,7 +115,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
         })()
       : null;
 
-  const reasonFilter = { period: params.period, basis, codes, marketerIds };
+  const reasonFilter = { period: params.period, basis, codes, marketerIds, value: giaTriDon };
 
   const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer] = await Promise.all([
     getReturnRateByVariant({ period: params.period, basis, value: giaTriDon, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
@@ -129,8 +129,8 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
 
   // Tầng quyết định dùng LẠI báo cáo lý do vừa dựng — không dựng lần thứ hai cho cùng một tập ca.
   const [logistics, intel, theoBacGia] = await Promise.all([
-    logisticsPerformance(params.period),
-    getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport }),
+    logisticsPerformance(params.period, giaTriDon),
+    getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport, value: giaTriDon }),
     getReturnRateByTier(params.period, params.q, basis),
   ]);
 
@@ -253,18 +253,21 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       {/*
         ═══ BỘ LỌC ÁP TỚI ĐÂU THÌ NÓI TỚI ĐÓ ═══
 
-        Trang này có bảy khối; bộ lọc giá trị đơn mới nối vào bốn. Ba khối còn lại (lý do hoàn,
-        chăm sóc & cứu đơn, hiệu suất giao vận) vẫn đọc TOÀN BỘ đơn của kỳ vì chúng đi qua những
-        truy vấn khác.
+        Cả trang đứng trên MỘT tập đơn: mọi khối đều nhận cùng bộ lọc, kể cả lý do hoàn, chăm sóc
+        và hiệu suất giao vận. Giữ một khối đọc cả kỳ trong khi khối bên cạnh đã lọc là đặt hai
+        tập đơn khác nhau dưới cùng một tiêu đề kỳ, và người đọc sẽ cộng chúng lại.
 
-        Để chúng đứng im lặng cạnh bốn khối đã lọc là đặt hai tập đơn khác nhau dưới cùng một tiêu
-        đề kỳ — đúng cái bẫy mà mục 8 của AGENTS.md gọi tên. Khi chưa nối được thì phải NÓI RA,
-        không được để người đọc tự phát hiện bằng cách cộng hai bảng rồi thấy lệch.
+        Dòng này vẫn phải hiện: người đọc cần biết mình KHÔNG đang xem toàn bộ đơn của kỳ. Một
+        bảng đã lọc mà không nói ra là một bảng nói dối bằng cách im lặng.
+
+        NGOẠI LỆ DUY NHẤT, và nó được nêu ngay tại chỗ: bảng "theo bậc giá trị đơn" — bảng ấy
+        CHÍNH LÀ phép phân bậc, lọc nó thì chỉ còn một dòng.
       */}
       {dangLocGiaTri ? (
-        <p className="-mt-2 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-[12px] leading-5 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
-          <b>{orderValueLabel(giaTriDon)}</b> đang áp cho: khối tổng quan, bảng theo mã hàng, bảng theo nguồn đơn và bảng theo bậc giá. <b>CHƯA áp cho</b> ba khối phân tích lý do hoàn, chăm
-          sóc &amp; cứu đơn, và hiệu suất giao vận — chúng vẫn tính trên toàn bộ đơn của kỳ, nên đừng cộng chúng với bốn khối trên.
+        <p className="-mt-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-[12px] leading-5">
+          <b>{orderValueLabel(giaTriDon)}</b> — mọi khối trên trang (tổng quan, theo mã hàng, theo nguồn đơn, lý do hoàn, chăm sóc &amp; cứu đơn, hiệu suất giao vận) đều tính trên đúng tập đơn
+          này: tiền hàng sau giảm giá của CẢ ĐƠN nằm trong khoảng, chưa gồm cước. Riêng bảng &ldquo;theo bậc giá trị đơn&rdquo; luôn hiện đủ các bậc — nó chính là phép phân bậc.
+          {basis !== "ORDERED" ? " Kiện không gắn đơn nào (vận đơn chiều hoàn) không có giá trị đơn để xét nên nằm ngoài bộ lọc." : ""}
         </p>
       ) : null}
 
