@@ -69,6 +69,27 @@ export function testMaViecLaMaProduction() {
   const khoi = service.slice(iTao, iTao + 2000);
   assert.ok(/const code = await nextCode\(/.test(khoi), "mã việc vẫn do `nextCode` quyết, không nhận từ đầu vào");
   assert.ok(!/input\.code/.test(khoi), "`createTechTask` KHÔNG được nhận mã từ nơi gọi");
+
+  /*
+    ───────── NỬA THỨ HAI: LƯỢT TỰ KIỂM KHÔNG THUỘC VIỆC NÀO ─────────
+
+    Lượt tự kiểm không lấy việc từ production — nó tự tạo một việc R0 trong CSDL tạm, và trong một
+    CSDL RỖNG việc ấy cũng mang mã `TECH-1`. Gửi mã đó đi thì cửa nhận tra thấy `TECH-1` CỦA
+    PRODUCTION và gắn vào. Đo được: 4 lượt tự kiểm đang nằm dưới một việc chúng chưa từng chạm tới.
+
+    Nên mã gửi đi phải là mã PRODUCTION do workflow truyền xuống, KHÔNG phải `task.code` của CSDL
+    tạm — và rỗng thì không gắn vào đâu cả.
+  */
+  const rp = readFileSync(path.join(goc, "scripts/agent-run-report.ts"), "utf8");
+  const rpThan = rp.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  assert.ok(/taskCode: maProduction/.test(rpThan), "mã gửi cho cửa nhận phải là mã production truyền xuống");
+  assert.ok(!/taskCode: task\.code/.test(rpThan), "KHÔNG được gửi mã của CSDL tạm — hai không gian mã khác nhau");
+  assert.ok(/maProduction \|\| undefined/.test(rpThan), "rỗng ⇒ không gắn vào việc nào, chứ không gắn bừa");
+
+  const wf = readFileSync(path.join(goc, ".github/workflows/agent-run.yml"), "utf8");
+  const wfThan = wf.split("\n").filter((d) => !d.trimStart().startsWith("#")).join("\n");
+  assert.ok(/--prod-task "\$\{\{ steps\.setup\.outputs\.prod_task_code \}\}"/.test(wfThan), "workflow phải truyền mã production cho bước chép sổ");
+  assert.ok(/prod_task_code=" >> "\$GITHUB_OUTPUT"/.test(wfThan), "lượt tự kiểm phải xuất mã production RỖNG");
 }
 
 /* ═════════════ 2 · NHẮC MỘT LẦN RỒI MỚI BỎ CUỘC ═════════════ */
