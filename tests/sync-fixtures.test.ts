@@ -71,6 +71,7 @@ import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatc
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
 import { testCauNoiVanGiuHangRao, testChuPrKhongLoNoiDungViec, testDieuKienMoPr, testQuyenNoiGoiDuChoNoiDuocGoi } from "./agent-pr-text.test";
 import { testMaViecLaMaProduction, testNhacFinishDungMotLan } from "./agent-run-that.test";
+import { testBanKhaiGanLai, testGanLaiSourceGuards } from "./agent-run-reattach.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
@@ -1959,6 +1960,8 @@ async function main() {
   testCauNoiVanGiuHangRao();
   testQuyenNoiGoiDuChoNoiDuocGoi();
   testMaViecLaMaProduction();
+  testBanKhaiGanLai();
+  testGanLaiSourceGuards();
   testLedgerPure();
   testLedgerGuards();
   testChonVanDonPure();
