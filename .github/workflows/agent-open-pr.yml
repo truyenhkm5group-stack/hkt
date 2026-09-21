@@ -41,6 +41,34 @@
 name: Mở PR bằng danh tính agent
 
 on:
+  # ═══ GỌI ĐƯỢC TỪ WORKFLOW KHÁC, VỚI ĐÚNG NHỮNG HÀNG RÀO CŨ ═══
+  #
+  # `agent-run.yml` gọi cầu nối này để agent tự mở PR sau lượt chạy, thay vì người mở tay. KHÔNG
+  # thêm một đường mở PR thứ hai: một cầu nối thứ hai là một bộ hàng rào thứ hai, và hai bộ hàng
+  # rào thì sớm muộn cũng lệch nhau.
+  #
+  # Hàng rào 1 vẫn giữ nguyên tác dụng: trong workflow được gọi, `github.ref_name` là ref của
+  # workflow GỌI. `agent-run.yml` chỉ chạy bằng `workflow_dispatch` trên `main`, nên phép kiểm vẫn
+  # so đúng thứ nó vẫn so; một workflow chạy trên nhánh khác mà gọi tới đây sẽ DỪNG.
+  #
+  # Hàng rào 5 (Environment `agent-identity`, chính sách nhánh chỉ `main`) cũng không đổi: nó nằm
+  # ở phía GitHub và không đọc một dòng nào của tệp này.
+  workflow_call:
+    inputs:
+      head:
+        required: true
+        type: string
+      base:
+        required: false
+        default: main
+        type: string
+      title:
+        required: true
+        type: string
+      body:
+        required: false
+        default: ""
+        type: string
   workflow_dispatch:
     inputs:
       head:

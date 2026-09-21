@@ -71,6 +71,11 @@ jobs:
   agent:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      # Rỗng = KHÔNG mở PR. Bước đẩy nhánh chỉ điền ba giá trị này khi đủ MỌI điều kiện.
+      nhanh_pr: ${{ steps.day.outputs.nhanh_pr }}
+      pr_title: ${{ steps.chu.outputs.title }}
+      pr_body: ${{ steps.chu.outputs.body }}
     steps:
       # `fetch-depth: 0` là bắt buộc: runner dựng cây làm việc bằng `git worktree add` từ một SHA
       # ĐÃ VÀO KHO. Bản checkout nông không có object đó và lượt chạy chết ở bước đầu tiên.
@@ -230,9 +235,11 @@ jobs:
       # Nhánh phải sống sót sau khi máy Actions bị xoá, nếu không bằng chứng biến mất cùng nó.
       # Chỉ đẩy nhánh mang đúng tiền tố; mọi tên khác bị từ chối trước khi `git push` chạy.
       - name: Đẩy nhánh agent (KHÔNG phải main)
+        id: day
         if: always() && steps.setup.outputs.task_code != ''
         env:
           RERUN_BRANCH: ${{ inputs.rerun_branch }}
+          CO_VIEC: ${{ inputs.task }}
         run: |
           # Lượt chạy lại đẩy ĐÚNG nhánh được yêu cầu; `git branch --list` chỉ là đường của lượt mới.
           BR="${RERUN_BRANCH:-$(git branch --list 'ai/documentation/*' --format '%(refname:short)' | head -1)}"
@@ -244,6 +251,31 @@ jobs:
           git push origin "refs/heads/$BR:refs/heads/$BR"
           echo "Đã đẩy $BR — CHƯA merge, CHƯA deploy. Người xem rồi quyết."
 
+          # ═══ BỐN ĐIỀU KIỆN MỚI MỞ PR, VÀ MỖI ĐIỀU KIỆN CHẶN MỘT KIỂU RÁC KHÁC ═══
+          #
+          #  1. CÓ MÃ VIỆC. Không có thì bước khởi tạo tự tạo một việc R0 để TỰ KIỂM — mở PR cho nó
+          #     nghĩa là mỗi lượt chạy kiểm chứng đẻ một PR không ai cần.
+          #  2. KHÔNG PHẢI LƯỢT CHẠY LẠI. Nấc 5 sinh ra để sửa tiếp trên nhánh ĐÃ CÓ PR; mở thêm PR
+          #     thứ hai cho cùng nhánh vừa hỏng vừa trái ý nghĩa của cả nấc ấy.
+          #  3. CÓ COMMIT THẬT so với `main`. Agent không đổi gì thì PR sẽ rỗng — GitHub từ chối, và
+          #     một lượt chạy hỏng ở bước cuối chỉ vì không có gì để mở là một cảnh báo giả.
+          #  4. (ở job sau) LƯỢT CHẠY PHẢI THÀNH CÔNG.
+          if [ -z "${CO_VIEC:-}" ]; then echo "Không mở PR: lượt tự kiểm, không có mã việc."; exit 0; fi
+          if [ -n "${RERUN_BRANCH:-}" ]; then echo "Không mở PR: đây là lượt chạy lại, PR đã có sẵn."; exit 0; fi
+          SO_COMMIT="$(git rev-list --count "origin/main..refs/heads/$BR" || echo 0)"
+          if [ "$SO_COMMIT" = "0" ]; then echo "Không mở PR: nhánh không có commit nào so với main."; exit 0; fi
+          echo "nhanh_pr=$BR" >> "$GITHUB_OUTPUT"
+          echo "Sẽ mở PR cho $BR ($SO_COMMIT commit)."
+
+      # Chữ của PR dựng bằng HÀM THUẦN có bài kiểm (`lib/constants/agent-pr-text.ts`), không ghép
+      # chuỗi trong YAML: kho PUBLIC nên đây là chỗ dễ rò rỉ nội dung việc nhất.
+      - name: Dựng tiêu đề và thân PR
+        id: chu
+        if: steps.day.outputs.nhanh_pr != ''
+        env:
+          DATABASE_URL: pglite://./data/agent-ci-db
+        run: npm run --silent agent:pr-text -- --task "${{ steps.setup.outputs.task_code }}"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -252,3 +284,25 @@ jobs:
             bang-chung-agent.json
             setup.log
           if-no-files-found: warn
+
+  # ═══════════ AGENT TỰ MỞ PR — MẮT XÍCH CUỐI CỦA DÂY CHUYỀN ═══════════
+  #
+  # Gọi lại ĐÚNG cầu nối mà người vẫn gọi (`agent-open-pr.yml`), không dựng đường thứ hai: một cầu
+  # nối thứ hai là một bộ hàng rào thứ hai, và hai bộ hàng rào sớm muộn cũng lệch nhau.
+  #
+  # `needs.agent.result == 'success'` là điều kiện thứ tư (ba điều kiện kia ở bước đẩy nhánh).
+  # Lượt chạy hỏng vẫn ĐẨY NHÁNH — bằng chứng phải sống sót — nhưng KHÔNG mở PR: một PR mở ra từ
+  # lượt chạy hỏng là mời người xem đi đọc thứ chính máy đã biết là chưa xong.
+  #
+  # Cầu nối KHÔNG checkout và KHÔNG chạy một dòng nào của nhánh nguồn, nên mã do agent viết không
+  # bao giờ gặp secret của App. Điều đó không đổi khi người gọi là máy thay vì người.
+  mo-pr:
+    needs: agent
+    if: needs.agent.result == 'success' && needs.agent.outputs.nhanh_pr != ''
+    uses: ./.github/workflows/agent-open-pr.yml
+    with:
+      head: ${{ needs.agent.outputs.nhanh_pr }}
+      base: main
+      title: ${{ needs.agent.outputs.pr_title }}
+      body: ${{ needs.agent.outputs.pr_body }}
+    secrets: inherit
