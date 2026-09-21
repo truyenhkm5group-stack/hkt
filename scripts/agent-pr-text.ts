@@ -90,7 +90,19 @@ async function main() {
   console.log(`Đã dựng chữ PR cho ${task.code} · ${facts.filesChanged.length} tệp.`);
 }
 
-main().catch((e) => {
-  console.error("✗ Không dựng được chữ PR:", e instanceof Error ? e.message : e);
-  process.exit(1);
-});
+/*
+  THOÁT TƯỜNG MINH — nếu không, bước này TREO cho tới khi job hết giờ.
+
+  ĐÃ CẮN THẬT, lượt chạy #18: mọi bước trước đều xanh (agent làm xong, bốn cổng PASSED, phạm vi tệp
+  đạt, sổ đã chép, nhánh đã đẩy) rồi bước "Dựng tiêu đề và thân PR" đứng im. PGlite giữ một handle
+  mở, nên `main()` chạy xong mà vòng lặp sự kiện của Node không bao giờ rỗng.
+
+  Không có lỗi, không có log, không có gì đỏ — chỉ là một bước không bao giờ kết thúc, và job sẽ
+  chết sau 60 phút. Mọi script agent khác đã thoát tường minh; đúng cái tôi vừa thêm thì quên.
+*/
+main()
+  .then(() => process.exit(0))
+  .catch((e) => {
+    console.error("✗ Không dựng được chữ PR:", e instanceof Error ? e.message : e);
+    process.exit(1);
+  });
