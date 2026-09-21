@@ -161,6 +161,14 @@ jobs:
           TASK_CODE="$(grep -oE '^TASK_CODE=.+' setup.log | tail -1 | cut -d= -f2)"
           if [ -z "$TASK_CODE" ]; then echo "::error::Không lấy được mã việc."; exit 1; fi
           echo "task_code=$TASK_CODE" >> "$GITHUB_OUTPUT"
+          # MÃ VIỆC TRÊN PRODUCTION. Có ô `task` ⇒ mã vừa lấy CHÍNH LÀ mã production (script lấy
+          # việc đã đổi mã của CSDL tạm về đúng nó). Không có ⇒ lượt TỰ KIỂM, để RỖNG: lượt ấy không
+          # thuộc việc nào trên production, và cửa chép sổ khi ấy không gắn nó vào đâu cả.
+          if [ -n "${{ inputs.task }}" ]; then
+            echo "prod_task_code=$TASK_CODE" >> "$GITHUB_OUTPUT"
+          else
+            echo "prod_task_code=" >> "$GITHUB_OUTPUT"
+          fi
 
       # ═══ CHẠY LẠI PHẢI ĐI KÈM MỘT VIỆC CÓ THẬT ═══
       #
@@ -241,7 +249,7 @@ jobs:
           ERP_DOMAIN: ${{ vars.ERP_DOMAIN || 'erp.vnxcommerce.com' }}
           ERP_BASE_URL: ${{ vars.ERP_BASE_URL }}
           AGENT_INGEST_SECRET: ${{ secrets.AGENT_INGEST_SECRET }}
-        run: npm run --silent agent:report -- --task "${{ steps.setup.outputs.task_code }}"
+        run: npm run --silent agent:report -- --task "${{ steps.setup.outputs.task_code }}" --prod-task "${{ steps.setup.outputs.prod_task_code }}"
 
       # Nhánh phải sống sót sau khi máy Actions bị xoá, nếu không bằng chứng biến mất cùng nó.
       # Chỉ đẩy nhánh mang đúng tiền tố; mọi tên khác bị từ chối trước khi `git push` chạy.

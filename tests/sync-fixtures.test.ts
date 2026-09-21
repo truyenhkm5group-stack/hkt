@@ -70,6 +70,7 @@ import { testRerunDeBai, testRerunDinhNhanh, testRerunGuards, testRerunPhanHoi, 
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
 import { testCauNoiVanGiuHangRao, testChuPrKhongLoNoiDungViec, testDieuKienMoPr, testQuyenNoiGoiDuChoNoiDuocGoi } from "./agent-pr-text.test";
+import { testMaViecLaMaProduction, testNhacFinishDungMotLan } from "./agent-run-that.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
@@ -1875,6 +1876,7 @@ async function main() {
   await testHaiLuatKhongTroiXaNhau();
   await cleanupShipmentPickFixtures();
   await testTaskAdvanceDb();
+  await testNhacFinishDungMotLan();
   await testLedgerReconcile();
   await cleanupLedgerFixtures();
   await cleanupTaskAdvanceFixtures();
@@ -1956,6 +1958,7 @@ async function main() {
   testDieuKienMoPr();
   testCauNoiVanGiuHangRao();
   testQuyenNoiGoiDuChoNoiDuocGoi();
+  testMaViecLaMaProduction();
   testLedgerPure();
   testLedgerGuards();
   testChonVanDonPure();
