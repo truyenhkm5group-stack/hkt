@@ -67,7 +67,7 @@ import { cleanupAiIncidentFixtures, testAiIncidentPure, testAiIncidentSourceGuar
 import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.test";
 import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
 import { testRerunDeBai, testRerunDinhNhanh, testRerunGuards, testRerunPhanHoi, testRerunPure, testRerunWorktree } from "./agent-rerun.test";
-import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
+import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards, testDuongKhaiKhoaKhoiDong } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
 import { testCauNoiVanGiuHangRao, testChuPrKhongLoNoiDungViec, testDieuKienMoPr, testQuyenNoiGoiDuChoNoiDuocGoi } from "./agent-pr-text.test";
 import { testMaViecLaMaProduction, testNhacFinishDungMotLan } from "./agent-run-that.test";
@@ -1956,6 +1956,7 @@ async function main() {
   testPhamViSourceGuards();
   testDispatchPure();
   testDispatchSourceGuards();
+  testDuongKhaiKhoaKhoiDong();
   testAgentTaskReadGuards();
   testChuPrKhongLoNoiDungViec();
   testDieuKienMoPr();

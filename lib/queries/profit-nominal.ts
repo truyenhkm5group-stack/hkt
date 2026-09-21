@@ -167,7 +167,7 @@ export type NominalRow = {
    */
   returnRateSource: "override" | "projected" | "unmeasured" | "history" | "default";
   /** Xuất xứ con số ước tính — để màn hình nói ra thay vì để người đọc đoán. */
-  projection: { eligibleSent: number; active: number; unmodelledActive: number; pending: number; pendingUnmodelled: number; unmodelledRevenue: number } | null;
+  projection: { eligibleSent: number; active: number; unmodelledActive: number; pending: number; pendingUnmodelled: number; awaitingPickup: number; unmodelledRevenue: number } | null;
   /**
    * `ORDER_LEVEL` — DT/giá vốn GTC ước tính cân THEO TỪNG ĐƠN (nguồn `projected` / `unmeasured`).
    * `RATE`        — Doanh số POS × TL GTC — chỉ cho nguồn ghi đè / lịch sử / mặc định ("ước tính theo tỷ lệ").
@@ -300,7 +300,7 @@ export type NominalReport = {
      */
     assumedDeliveryRate: number | null;
     /** Xuất xứ + nhãn tin cậy của `weightedDeliveryRate`, để in cạnh con số. */
-    projection: { version: string; eligibleSent: number; active: number; unmodelledActive: number; pending: number; unmodelledRevenue: number; backtest: BacktestSummary | null; backtestError: string | null } | null;
+    projection: { version: string; eligibleSent: number; active: number; unmodelledActive: number; pending: number; awaitingPickup: number; unmodelledRevenue: number; backtest: BacktestSummary | null; backtestError: string | null } | null;
     /** Lỗi khi tính ước tính — hiện đúng là LỖI, không hiện "chưa đủ dữ liệu". */
     projectionError: string | null;
     /** CPQC ĐÃ QUY KẾT về mã hàng (Σ các dòng). `adSpend` = số này + `unmatchedAdSpend`. */
@@ -573,7 +573,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       if (overrideRate !== undefined && Number.isFinite(overrideRate)) {
         returnRate = overrideRate;
         returnRateSource = "override";
-      } else if (duBao && duBao.eligibleSent + duBao.pending > 0) {
+      } else if (duBao && duBao.eligibleSent + duBao.pending + duBao.awaitingPickup > 0) {
         orderLevel = { revenue: duBao.projectedDeliveredRevenue, cogs: duBao.projectedCogs };
         if (duBao.projectedRate !== null) {
           returnRate = Math.round((100 - duBao.projectedRate) * 10) / 10;
@@ -596,7 +596,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
         returnRate,
         deliveryRate: returnRate === null ? null : Math.round((100 - returnRate) * 10) / 10,
         returnRateSource,
-        projection: duBao && orderLevel ? { eligibleSent: duBao.eligibleSent, active: duBao.active, unmodelledActive: duBao.unmodelledActive, pending: duBao.pending, pendingUnmodelled: duBao.pendingUnmodelled, unmodelledRevenue: duBao.unmodelledRevenue } : null,
+        projection: duBao && orderLevel ? { eligibleSent: duBao.eligibleSent, active: duBao.active, unmodelledActive: duBao.unmodelledActive, pending: duBao.pending, pendingUnmodelled: duBao.pendingUnmodelled, awaitingPickup: duBao.awaitingPickup, unmodelledRevenue: duBao.unmodelledRevenue } : null,
         revenueBasis: (orderLevel ? "ORDER_LEVEL" : "RATE") as NominalRow["revenueBasis"],
         unmodelledRevenue: orderLevel && duBao ? duBao.unmodelledRevenue : 0,
         cogsKnown: cogsUnknownQty === 0,
@@ -781,7 +781,7 @@ async function getNominalProfitReportUncached(period: Period): Promise<NominalRe
       weightedReturnRate: mucDon && mucDon.projectedRate !== null ? Math.round((100 - mucDon.projectedRate) * 10) / 10 : null,
       assumedDeliveryRate: totals.ordersWithRate ? 100 - totals.weightedReturn / totals.ordersWithRate : null,
       projection: duBaoGiaoVan && mucDon
-        ? { version: duBaoGiaoVan.version, eligibleSent: mucDon.eligibleSent, active: mucDon.active, unmodelledActive: mucDon.unmodelledActive, pending: mucDon.pending, unmodelledRevenue: mucDon.unmodelledRevenue, backtest: duBaoGiaoVan.backtest, backtestError: duBaoGiaoVan.backtestError }
+        ? { version: duBaoGiaoVan.version, eligibleSent: mucDon.eligibleSent, active: mucDon.active, unmodelledActive: mucDon.unmodelledActive, pending: mucDon.pending, awaitingPickup: mucDon.awaitingPickup, unmodelledRevenue: mucDon.unmodelledRevenue, backtest: duBaoGiaoVan.backtest, backtestError: duBaoGiaoVan.backtestError }
         : null,
       projectionError,
       adSpendAttributed,
