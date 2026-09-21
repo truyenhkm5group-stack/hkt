@@ -67,11 +67,12 @@ import { cleanupAiIncidentFixtures, testAiIncidentPure, testAiIncidentSourceGuar
 import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.test";
 import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
 import { testRerunDeBai, testRerunDinhNhanh, testRerunGuards, testRerunPhanHoi, testRerunPure, testRerunWorktree } from "./agent-rerun.test";
-import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
+import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards, testDuongKhaiKhoaKhoiDong } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
 import { testCauNoiVanGiuHangRao, testChuPrKhongLoNoiDungViec, testDieuKienMoPr, testQuyenNoiGoiDuChoNoiDuocGoi } from "./agent-pr-text.test";
 import { testMaViecLaMaProduction, testNhacFinishDungMotLan } from "./agent-run-that.test";
 import { testBanKhaiGanLai, testGanLaiSourceGuards } from "./agent-run-reattach.test";
+import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham } from "./agent-chi-phi.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
@@ -1878,6 +1879,7 @@ async function main() {
   await cleanupShipmentPickFixtures();
   await testTaskAdvanceDb();
   await testNhacFinishDungMotLan();
+  await testDemTienLuotChay();
   await testLedgerReconcile();
   await cleanupLedgerFixtures();
   await cleanupTaskAdvanceFixtures();
@@ -1954,6 +1956,7 @@ async function main() {
   testPhamViSourceGuards();
   testDispatchPure();
   testDispatchSourceGuards();
+  testDuongKhaiKhoaKhoiDong();
   testAgentTaskReadGuards();
   testChuPrKhongLoNoiDungViec();
   testDieuKienMoPr();
@@ -1961,6 +1964,9 @@ async function main() {
   testQuyenNoiGoiDuChoNoiDuocGoi();
   testMaViecLaMaProduction();
   testBanKhaiGanLai();
+  testBacModelTheoVai();
+  testDemHoiThoai();
+  testKhongNangBacAmTham();
   testGanLaiSourceGuards();
   testLedgerPure();
   testLedgerGuards();
