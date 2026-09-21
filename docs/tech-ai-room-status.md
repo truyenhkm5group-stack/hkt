@@ -1,7 +1,7 @@
 # Phòng Tech AI — trạng thái
 
 > **File trạng thái DUY NHẤT.** Mọi milestone cập nhật vào đây, không mở file mới.
-> Cập nhật: **21/09/2026** · `main` = `9b6476f` · deploy thành công gần nhất **#381**
+> Cập nhật: **21/09/2026** · `main` = `6ca2bc3` · **dây chuyền đã chạy trọn vẹn một vòng đầu-cuối**
 
 ---
 
@@ -34,6 +34,50 @@ Chỗ duy nhất còn cần NGƯỜI là **duyệt PR** — và đó là chỗ n
 | **Cắt chi phí lượt chạy agent** | #67 | #381 |
 | Vá đường khai khoá dispatch | #68 | — |
 | Vá bộ đo chi phí + phạm vi tệp cho phép | #70 | — |
+| Đề bài nói cả phạm vi ĐỌC | #72 | — |
+| Vá treo ở bước dựng chữ PR | #78 | — |
+| **PR ĐẦU TIÊN DO AGENT TỰ MỞ** (TECH-2) | **#82** | — |
+
+---
+
+## ✅ VÒNG ĐẦU-CUỐI ĐẦU TIÊN — đã khép kín
+
+```
+Lượt #19   việc thật TECH-2 → cửa đọc có khoá → agent làm → 4 cổng xanh
+           → commit → đẩy nhánh → TỰ MỞ PR #82                    $0,1931
+review     tôi đọc tài liệu, tìm ra 4 lỗi SỰ THẬT, ghi vào PR
+Lượt #20   phản hồi (1.126 ký tự) → agent sửa tiếp TRÊN CÙNG NHÁNH
+           → 4 cổng xanh → commit thứ hai                          $0,0659
+gộp        PR #82 vào `main`
+```
+
+**Tổng tiền cho cả vòng: $0,259.**
+
+### Bốn lỗi review bắt được, và Nấc 5 sửa đúng
+
+Agent **bịa ra một hằng số không tồn tại** (`REAP_STALE_RUNS_LIVE_AT`), bịa giá trị
+`2026-09-15`, hiểu sai ý nghĩa của mốc, và mô tả sai luật `KHONG_CHAY`. Tôi **không tự sửa** mà
+đưa vào Nấc 5 — đó đúng là việc nó sinh ra để làm.
+
+| Kiểm | Trước | Sau |
+|---|---|---|
+| Hằng số bịa `REAP_STALE_RUNS_LIVE_AT` | có | **0** |
+| Tên thật `LEDGER_LIVE_AT` | 0 | **5** |
+| Giá trị bịa `2026-09-15` | có | **0** |
+| Giá trị thật `2026-09-20T12:35:20Z` | 0 | **2** |
+
+Và nó sửa đúng **nghĩa**, không chỉ đúng chữ: §3.4 nay viết *"không phải ngày bảng được tạo, mà là
+ngày cửa chép sổ bắt đầu với tới được"*.
+
+**Hai hàng rào làm đúng việc trong vòng này:** lượt chạy lại KHÔNG mở PR thứ hai (điều kiện 2), và
+commit thứ hai vào CÙNG nhánh nên PR tự có cả hai.
+
+### Một chỗ ma sát còn lại, chủ shop nên biết
+
+PR do agent mở bị GitHub đặt ở trạng thái **`action_required`** — workflow phải có người bấm duyệt
+mới chạy. Tôi duyệt được bằng API, nhưng nghĩa là **mỗi PR của agent cần thêm một cú bấm**. Đây là
+cài đặt bảo mật của kho ("require approval for workflows"), sửa được ở Settings → Actions → General
+— **quyết định của chủ shop**, tôi không tự đổi.
 
 ---
 
@@ -195,10 +239,11 @@ lời nói dối.
 
 | Việc | Phụ thuộc |
 |---|---|
-| Chạy TECH-2 trọn vẹn: agent → 4 cổng → **PR tự mở** | #72 gộp |
-| Agent đọc bình luận review rồi tự chạy lại (nối vào Nấc 5) | sau khi dây chuyền chạy trọn một lần |
+| Giao việc thật thứ hai cho agent, đo lại toàn vòng | — (sẵn sàng) |
 | Hạ bậc model cho Copilot ERP | **quyết định của chủ shop** — đổi model là đổi chất lượng trả lời |
-| **Nấc 6** | **quyết định của chủ shop** |
+| Bỏ bước duyệt workflow cho PR của agent | **quyết định của chủ shop** — đây là cài đặt bảo mật |
+| Bật **merge queue** cho `main` | **quyết định của chủ shop** — sẽ hết vòng lặp duyệt-lại khi `main` nhích |
+| **Nấc 6** — tự deploy + nghiệm thu + quay lui | **quyết định của chủ shop** |
 
 ---
 

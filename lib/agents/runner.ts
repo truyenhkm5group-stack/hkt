@@ -5,7 +5,7 @@ import { goiPhanHoi, checkRerun } from "@/lib/constants/agent-rerun";
 import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import type { TechGateResult, TechRisk } from "@/lib/constants/tech";
 import { finishTechAgentRun, startTechAgentRun, type TechActor } from "@/lib/tech/service";
-import { dinhNhanh, AgentWorkspace } from "@/lib/agents/workspace";
+import { dinhNhanh, soCommitCuaAgent, AgentWorkspace } from "@/lib/agents/workspace";
 import type {AgentExecutor, AgentOutcome } from "@/lib/agents/executor";
 
 /**
@@ -142,12 +142,23 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
   let dungLaiNhanh = false;
   if (opts.rerunBranch) {
     /*
-      ĐẾM LƯỢT CHẠY TỪ SỔ, KHÔNG TỪ BỘ NHỚ.
+      ĐẾM BẰNG HAI NGUỒN, LẤY SỐ LỚN HƠN — VÀ ĐÂY LÀ MỘT BẢN VÁ CHO LỜI KHẲNG ĐỊNH CỦA CHÍNH TÔI.
 
-      Một bộ đếm trong tiến trình mất sạch khi container khởi động lại, và vòng lặp "review → sửa →
-      review" lại bắt đầu từ 0. Sổ thì không quên.
+      Bản đầu chỉ đếm từ `tech_agent_runs` và chú thích rằng *"sổ thì không quên"*. Câu ấy đúng ở
+      máy có CSDL thật — và SAI ở chỗ nó thật sự chạy: trên máy Actions, sổ là một CSDL PGlite
+      DỰNG MỚI MỖI LƯỢT, nên nó luôn đếm được 0 và trần KHÔNG BAO GIỜ chạm tới. Một cái trần không
+      bao giờ chạm tới thì không phải cái trần; nó là một dòng chú thích.
+
+      Thứ DUY NHẤT sống sót qua các lượt chạy trên máy dùng-một-lần là chính cái nhánh git: mỗi
+      lượt agent để lại đúng một commit. Nên lấy MAX của hai nguồn — sổ (đúng trên máy người vận
+      hành) và số commit của nhánh (đúng trên máy CI). Không nguồn nào thay được nguồn kia, và lấy
+      số lớn hơn là rơi về phía CHẶT hơn (AGENTS.md mục 31).
+
+      Đếm được `null` (git không trả lời) ⇒ chỉ còn sổ. KHÔNG coi `null` là 0: đó là CHƯA BIẾT.
     */
-    const daCo = await db.$count(schema.techAgentRuns, eq(schema.techAgentRuns.taskId, task.id));
+    const theoSo = await db.$count(schema.techAgentRuns, eq(schema.techAgentRuns.taskId, task.id));
+    const theoNhanh = await soCommitCuaAgent(opts.repoRoot, opts.rerunBranch, "origin/main");
+    const daCo = Math.max(theoSo, theoNhanh ?? 0);
     const v = checkRerun({ branch: opts.rerunBranch, agentKey: agent.key, soLuotDaCo: daCo });
     if (!v.ok) return { ...rong, reason: v.reason };
     const dinh = await dinhNhanh(opts.repoRoot, v.branch);
