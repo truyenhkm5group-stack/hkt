@@ -1,8 +1,8 @@
 # Phòng Tech AI — trạng thái
 
 > **File trạng thái DUY NHẤT.** Mọi milestone cập nhật vào đây, không mở file mới.
-> Cập nhật: **21/09/2026** · `main` = `9c4324f` · deploy thành công gần nhất **#379** ·
-> lượt chạy agent gần nhất **#15 ✗ (hết credit)**
+> Cập nhật: **21/09/2026** · `main` = `661ffd7` · deploy thành công gần nhất **#380** ·
+> lượt chạy agent gần nhất **#15 ✗ (hết credit Anthropic)**
 
 ---
 
@@ -28,6 +28,7 @@
 | **Agent tự mở PR sau lượt chạy** | #61 | `bcf649b` | #379 ✓ |
 | Vá quyền gọi cầu nối (lượt chạy #13 chết ở startup) | #62 | `c3dab99` | — |
 | Vá hai lỗi của lượt chạy thật đầu tiên | #63 | `9c4324f` | — |
+| **Bộ gắn lại lượt chạy agent về đúng việc** (thi hành BẢN KHAI, không suy diễn) | #64 | `661ffd7` | #380 ✓ |
 
 ### Production proof — sổ lượt chạy agent
 
@@ -45,12 +46,36 @@ hai `success`. Lượt chạy agent THẬT trong sổ production, khoá khác nh
 
 ---
 
-## CURRENT — một PR chờ DUYỆT
+## CURRENT — không PR nào chờ duyệt
+
+Mọi milestone đã gộp và đã lên production. Việc duy nhất đang chặn là **credit Anthropic**.
 
 | PR | Nội dung |
 |---|---|
-| **#64** | Bộ gắn lại lượt chạy agent về đúng việc — thi hành một BẢN KHAI, không suy diễn |
-| #47 | *Không phải của phiên này* — nhánh cũ `claude/charming-turing-kao6lw` |
+| #47 | *Không phải của phiên này* — nhánh cũ `claude/charming-turing-kao6lw`, tôi không đụng vào |
+
+---
+
+## Sổ lượt chạy agent — đã sửa xong, có bằng chứng từng dòng
+
+7 dòng đều nằm nhầm dưới `TECH-1`. Trước khi sửa tôi đi lấy bằng chứng cho **từng dòng** thay vì
+suy từ tên tệp: đọc log của cả 7 lượt chạy trên GitHub và lấy TIÊU ĐỀ việc mà runner in ra.
+
+Phép dò đầu tiên của tôi **sai** — nó tìm chuỗi `agent:fetch-task` trong log, nhưng log in CẢ HAI
+nhánh của khối `if/else` trong shell, nên chuỗi ấy có mặt kể cả khi nhánh kia chạy. Bằng chứng
+thật là tiêu đề: `Kiểm chứng DOCUMENTATION agent Phase 2A` = lượt TỰ KIỂM.
+
+Kết quả sau khi ghi (`agent-run-reattach --apply`, chạy thử trước, khớp từng dòng):
+
+| Việc | Số lượt | Đúng chưa |
+|---|---|---|
+| *(không gắn)* | 6 | ✓ lượt TỰ KIỂM không thuộc việc nào — cửa nhận vốn cho `task_id` trống |
+| **TECH-2** | 1 | ✓ lượt chạy #14, đúng việc nó làm |
+| TECH-1 | **0** | ✓ agent chưa bao giờ làm việc R2 này |
+
+Không dòng nào bị xoá: cổng, tệp đã đổi, nhánh, tóm tắt còn nguyên — chỉ ô quy kết đổi.
+
+---
 
 ---
 
@@ -174,9 +199,6 @@ kéo dài bao lâu, và đặt một con số khi chưa đo được thì chính
 >
 > **ERP vẫn bán hàng, đồng bộ đơn và vận đơn bình thường.**
 
-> ### ⛔ 2 · Duyệt PR #64
-> Bấm **Approve**. Gộp xong tôi chạy thử bộ sửa sổ, dán kết quả, rồi mới ghi thật.
-
 > ### ⏸ 3 · `ERP_GITHUB_DISPATCH_TOKEN` (quyền `actions: write`)
 > Nút "Khởi động lượt chạy agent" trong ERP đang nói lý do và không gọi được gì. Tôi vẫn dispatch
 > workflow bằng tay được, nên đây **chưa chặn** việc gì.
@@ -195,7 +217,6 @@ kéo dài bao lâu, và đặt một con số khi chưa đo được thì chính
 | Việc | Phụ thuộc |
 |---|---|
 | Chạy lại TECH-2 đầu-cuối (agent → PR tự mở) | **credit Anthropic** |
-| Gắn lại 6 dòng sổ về đúng việc | PR #64 gộp |
 | Agent đọc bình luận review rồi tự chạy lại (nối vào Nấc 5) | credit |
 | **Nấc 6** — tự deploy + nghiệm thu + quay lui | **giữ lại chờ quyết định của chủ shop** |
 
