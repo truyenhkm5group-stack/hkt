@@ -66,6 +66,7 @@ import { cleanupAiHealthFixtures, testAiHealthKhongDemLuotTuKiem, testAiHealthSo
 import { cleanupAiIncidentFixtures, testAiIncidentPure, testAiIncidentSourceGuards, testAiIncidentWatchDb } from "./ai-incident-watch.test";
 import { testMoTaLoiCsdl, testMoTaLoiSourceGuards } from "./db-error-message.test";
 import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPhamViTheoVai } from "./agent-scopes.test";
+import { testRerunDeBai, testRerunDinhNhanh, testRerunGuards, testRerunPhanHoi, testRerunPure, testRerunWorktree } from "./agent-rerun.test";
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
@@ -1931,6 +1932,12 @@ async function main() {
   testAiIncidentSourceGuards();
   testMoTaLoiSourceGuards();
   testPhamViTheoVai();
+  testRerunPure();
+  testRerunPhanHoi();
+  testRerunDeBai();
+  testRerunWorktree();
+  testRerunGuards();
+  await testRerunDinhNhanh();
   testHangRaoTuyetDoi();
   testHangRaoBaiKiem();
   testPhamViSourceGuards();

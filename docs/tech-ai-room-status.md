@@ -1,7 +1,8 @@
 # Phòng Tech AI — trạng thái
 
 > **File trạng thái DUY NHẤT.** Mọi milestone cập nhật vào đây, không mở file mới.
-> Cập nhật: **20/09/2026, ~23:00 VN** · `main` = `7db0abc` · production đang chạy `7db0abc2e093`
+> Cập nhật: **21/09/2026** · `main` = `dedab48` · deploy thành công gần nhất **#375** · lượt chạy
+> agent gần nhất **#12 ✓**
 
 ---
 
@@ -17,8 +18,12 @@
 | **B6** — lỗi OpenAI trên thẻ sức khoẻ là lỗi GIẢ do chính bộ tự kiểm sinh ra | #51 | `9283133` | #370 ✓ |
 | **Nấc 2 · cơ chế** — phạm vi ghi theo VAI + `NEVER_WRITE` + khoá lối tắt xoá khẳng định | #52 | `a52a692` | #371 ✓ |
 | **Nấc 3** — ERP khởi động lượt chạy agent: ba cổng, khoá GHI tách khỏi khoá ĐỌC | #53 | `7db0abc` | #372 ✓ |
+| **Lỗi CSDL đọc được** — job đồng bộ nói NGUYÊN NHÂN thay vì chép 40 tên cột | #54 | — | #373 ✓ |
+| **Canh khoá AI** — hết credit tự mở sự cố, tách hẳn khỏi quá hạn mức | #55 | — | #373 ✓ |
+| **Nấc 3b** — cửa ĐỌC hẹp `GET /api/tech/agent-task`: agent nhận ĐÚNG việc được giao | #56 | — | #374 ✓ |
+| **Nấc 4** — việc tự đi tiếp theo bằng chứng GitHub (`BUILDING→REVIEW→QA`) | #57 | `dedab48` | #375 ✓ |
 
-### Production proof
+### Production proof — sổ lượt chạy agent
 
 ```
  external_ref         | agent_key     | status    | cổng                        | tệp | xong
@@ -28,39 +33,93 @@
  github:35511075146:1 | documentation | SUCCEEDED | PASSED/PASSED/PASSED/PASSED | 1   | 19:46
 ```
 
-Bốn lượt chạy agent THẬT trong sổ production, khoá khác nhau, bốn cổng xanh, mỗi lượt đúng một tệp.
+Cộng hai lượt **#11** và **#12** chạy sau khi chủ shop nạp credit (20/09 18:04 và 18:12 UTC), cả
+hai `success`. Lượt chạy agent THẬT trong sổ production, khoá khác nhau, bốn cổng xanh, mỗi lượt
+đúng một tệp.
 
 ---
 
-## CURRENT — ba PR chờ duyệt (đã bật auto-merge, đã request review)
+## CURRENT — ba PR chờ DUYỆT, cả ba cổng đã xanh
 
-| PR | Nội dung |
+| PR | Nội dung | Vì sao nó quan trọng |
+|---|---|---|
+| **#60** | **23 đơn không nhận được cập nhật nào từ Pancake** — đồng bộ nạp nhầm dòng vận đơn | **Ưu tiên cao nhất.** Lỗi đang xảy ra trên dữ liệu bán hàng thật, mỗi mười lăm phút. |
+| **#59** | Sổ lượt chạy agent tự đối chiếu với GitHub — mất dòng thì phải nói ra | 2 lượt chạy thành công đã mất bằng chứng mà không gì đỏ lên |
+| **#58** | **Nấc 5** — agent sửa tiếp trên CHÍNH nhánh đã mở PR | Đóng vòng review → sửa → review của Phòng Tech AI |
+| #47 | *Không phải của phiên này* — nhánh cũ `claude/charming-turing-kao6lw` | tôi không đụng vào |
+
+Cả ba đã bật auto-merge và đã request review `nguyenloineu94`. **Bấm Approve là chúng tự gộp.**
+
+### #60 — cái giá đang phải trả, đo được
+
+```
+ orders_reconcile 02:15 → hỏng 23/492 đơn
+ shipments: duplicate key ... "shipments_vtp_order_number_unique" [23505]
+ Key (vtp_order_number)=(PKE1523318522) already exists.
+```
+
+Mã trùng thuộc về **chính đơn đang đồng bộ**: đơn 3459 có `PKE1519955287` (lần gửi 1) và
+`PKE1523318522` (lần gửi 2). **31/2.000 đơn** có hai lần gửi; **23** hỏng mỗi lượt. Cả lượt ghi của
+đơn ấy bị huỷ ⇒ trạng thái, COD, cước của chúng đứng yên; lượt ghi Pancake cũ nhất trong nhóm là
+**10/09** — mười một ngày.
+
+Nguyên nhân gốc nằm ở LƯỢC ĐỒ: `orders.shipment` khai `one(...)` trên một khoá ngoại KHÔNG duy
+nhất, nên Drizzle trả về một dòng **bất kỳ**. Sáu đường ĐỌC khác cũng đang rơi vào — danh sách đơn,
+lịch sử khách, đơn của sản phẩm, **tệp CSV xuất ra**, và đường tra sự kiện ĐVVC theo mã tham chiếu
+(chỗ đắt nhất: chứng từ ĐVVC là nguồn tin cao nhất). Quan hệ ấy đã bị **gỡ hẳn**, và một bài kiểm
+chặn mọi `one(...)` trỏ vào cột không phải khoá chính để nó không mọc lại ở bảng khác.
+
+### #59 — chỗ hụt chỉ lộ ra khi có nguồn thứ hai
+
+12 lượt chạy `agent-run.yml` trên GitHub · 6 dòng trong sổ production. 4 lượt hỏng trước khi agent
+chạy (không có dòng sổ là ĐÚNG), 6 lượt đủ, và **2 lượt thành công đã mất bằng chứng**. Tôi phát
+hiện được vì **so tay** — không màn hình nào, không job nào biết điều đó.
+
+### #58 — Nấc 5
+
+Tới Nấc 4, một lượt chạy đẩy MỘT nhánh rồi kết thúc: người xem yêu cầu sửa, và **không có đường nào
+để agent sửa tiếp**. Nay có: trần 3 lượt/việc đếm từ sổ, nhánh phải thuộc đúng vai, base là ĐỈNH
+NHÁNH chứ không phải `main`, và phản hồi review đi vào prompt như **dữ liệu** — phạm vi ghi vẫn do
+`checkWritePath` quyết ở tầng mã.
+
+---
+
+## Production — đã đo đêm nay (chỉ đọc)
+
+| Hỏi | Trả lời |
 |---|---|
-| **#54** | Lỗi job đồng bộ nói được NGUYÊN NHÂN thay vì chép lại 40 tên cột |
-| **#55** | Hết credit AI tự mở sự cố (kèm chính file này) |
-| #47 | *Không phải của phiên này* — nhánh cũ `claude/charming-turing-kao6lw`, tôi không đụng vào |
+| Job đồng bộ hỏng (ERROR) trong 24 giờ | **0** |
+| Ba bộ canh của Phòng Tech AI (`github-pr-sync` · `task-advance-watch` · `ai-incident-watch`) | chạy đúng lịch, đều SUCCESS |
+| Việc Tech có khoá nối PR | **0** — nên Nấc 3b/4 chạy đúng nhưng **chưa có gì để làm** |
+| Lỗi CSDL còn ở dạng thô (`Failed query: …`) sau deploy #373 | **0/151** — bản vá thông điệp lỗi (PR #54) đang chạy đúng |
+| Sổ deploy | lượt mới nhất `VERIFIED`, các lượt cũ `SUPERSEDED` — không lệch |
+
+**Một quan sát chưa kết luận:** `deploy_runs` báo PARTIAL 2/47 lượt với câu *"1 lượt deploy thành
+công nhưng production đang chạy commit khác"*. Trạng thái hiện tại lành, nên nhiều khả năng đó là
+khoảng CHUYỂN TIẾP lúc container khởi động lại. Tôi **không** thêm ngưỡng ân hạn để dập cảnh báo
+ấy: sổ chỉ lưu kết luận MỚI NHẤT nên không có dữ liệu về việc một lần lệch kéo dài bao lâu, và đặt
+một con số khi chưa đo được thì chính nó mới là lời nói dối. Muốn kết luận thì phải ghi lại lịch sử
+lệch trước đã.
 
 ---
 
 ## BLOCKED / HUMAN GATE
 
-> ### ⛔ 1 · Nạp credit Anthropic — chặn cả Phòng Tech AI
+> ### ⛔ 1 · Duyệt PR #60, #59, #58
+> Bấm **Approve** cho cả ba. Auto-merge đã bật nên không cần bấm Merge.
 >
-> **20/09 21:48**, lượt chạy agent #10 dừng: *"Your credit balance is too low to access the Anthropic API."*
-> Lượt Copilot thành công cuối cùng **đo được** là 21:19 — credit cạn trong nửa tiếng giữa hai mốc,
-> nhiều khả năng do chính bốn lượt chạy agent trước đó tiêu hết.
->
-> **Hệ quả:** mọi lượt chạy agent dừng ở bước kiểm khoá; AI Copilot trong ERP nhiều khả năng cũng
-> đã tắt (chưa đo được sau 21:19). **ERP vẫn bán hàng, đồng bộ đơn và vận đơn bình thường.**
->
-> Tôi đã **ngừng dispatch agent** để không đốt thêm phút Actions vào những lượt chắc chắn hỏng.
+> Nếu chỉ duyệt được một: **#60 trước** — nó đang chữa lỗi trên dữ liệu bán hàng thật.
 
-> ### ⛔ 2 · Duyệt PR #54 và #55
-> Bấm **Approve**; auto-merge đã bật nên không cần bấm Merge.
-
-> ### ⏸ 3 · `ERP_GITHUB_DISPATCH_TOKEN` — chưa gấp
+> ### ⏸ 2 · `ERP_GITHUB_DISPATCH_TOKEN` — chưa gấp
 > Nút "Khởi động lượt chạy agent" ở `/tech/tasks/<mã>` hiện đang nói lý do và không gọi được gì.
 > Khai khoá (quyền `actions: write`) thì nút hoạt động. **Chưa bật**, không phải hỏng.
+
+> ### ⏸ 3 · Một việc THẬT để chứng minh Nấc 3b đầu-cuối
+> Production đang có đúng một việc: **TECH-1** (R2 · NEW · chưa gán agent) — **R2 không bao giờ mở
+> cho agent**, nên nó không dispatch được, và đó là đúng luật chứ không phải lỗi.
+>
+> Để chứng minh cửa đọc hẹp chạy thật: mở `/tech/tasks/TECH-1` → **Lập kế hoạch** → duyệt đề xuất.
+> `approveProposal` đòi `actor.kind === "HUMAN"` — cổng ấy là **cố ý**, không phải thiếu sót.
 
 ---
 
@@ -68,20 +127,19 @@ Bốn lượt chạy agent THẬT trong sổ production, khoá khác nhau, bốn
 
 | Việc | Phụ thuộc |
 |---|---|
-| **Nấc 3b** — cửa ĐỌC hẹp để agent nhận được ĐÚNG việc được giao | — |
-| **Nấc 4** — worker đẩy trạng thái việc theo sự kiện GitHub | — |
-| **Nấc 5** — vòng phản hồi review: agent chạy lại trên cùng nhánh | Nấc 4 |
-| **Nấc 6** — tự deploy + nghiệm thu + quay lui | Nấc 5 |
-| Bật vai QA (`tests/`) | cổng 5 lượt sạch + nạp credit |
+| **Nấc 6** — tự deploy + nghiệm thu + quay lui | **giữ lại chờ quyết định của chủ shop** |
+| Bật vai QA (agent ghi `tests/`) | cổng 5 lượt sạch + chủ shop bật ở `/tech/agents` |
+| Tự mở PR sau lượt chạy agent | chỉ khi `inputs.task` khác rỗng, và nó chạm `agent-open-pr.yml` |
 
-### Cổng "5 lượt chạy sạch liên tiếp" — hiện **4/5, đang tạm dừng**
+### Cổng "5 lượt chạy sạch liên tiếp" — **6/5, đã đạt**
 
-Runs #6 · #7 · #8 · #9 đều SUCCEEDED với bốn cổng xanh. Run #10 hỏng vì **hết credit**, tức là nó
-chưa bao giờ chạy — `agent:check` chặn ở bước kiểm khoá.
+Runs #6 · #7 · #8 · #9 SUCCEEDED bốn cổng xanh; #10 hỏng vì **hết credit** (chưa bao giờ chạy —
+`agent:check` chặn ở bước kiểm khoá); #11 và #12 SUCCEEDED sau khi nạp credit.
 
-Tôi tính đây là **tạm dừng ở 4/5**, không phải đặt lại về 0, và nói rõ đó là một phán đoán: cổng
-này đo ĐỘ TIN CẬY CỦA LÕI AGENT, còn một tài khoản hết tiền không nói gì về lõi ấy. Nếu chủ shop
-muốn chặt hơn thì đặt lại về 0 sau khi nạp credit — đó là quyết định của người, không phải của tôi.
+Cổng đã đạt về SỐ LƯỢNG. Việc **bật vai QA vẫn là quyết định của người**: nó mở cho agent quyền ghi
+`tests/`, và một vai ghi được bài kiểm là một vai có thể làm xanh cổng bằng cách xoá khẳng định —
+`lib/constants/agent-test-guard.ts` đếm khẳng định để chặn đúng nước đi ấy, nhưng nó bắt được việc
+XOÁ, không bắt được việc LÀM YẾU. Nói ra giới hạn ấy ở đây thay vì để nó nằm im trong một docblock.
 
 **R2 không bao giờ mở cho agent.** Giữ nguyên.
 
@@ -90,5 +148,5 @@ muốn chặt hơn thì đặt lại về 0 sau khi nạp credit — đó là qu
 ## Nhánh WIP đã bảo toàn
 
 `wip/vtp-integration-before-tech-ai` @ `e03e8b4` — việc dở về sức khoẻ bảng kê VTP qua Gmail.
-KHÔNG gộp vào Tech AI. (Ghi chú: job `vtp-statement-mail` chạy lần cuối **16/09**, bốn ngày trước
-— đúng thứ nhánh ấy đang làm.)
+KHÔNG gộp vào Tech AI. (Ghi chú: job `vtp-statement-mail` chạy lần cuối **16/09** — đúng thứ nhánh
+ấy đang làm.)

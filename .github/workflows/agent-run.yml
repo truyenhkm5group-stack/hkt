@@ -39,6 +39,22 @@ on:
         type: string
         required: false
         default: ""
+      rerun_branch:
+        # NẤC 5 — sửa tiếp trên CHÍNH nhánh đã mở PR, thay vì đẻ nhánh thứ hai và bỏ PR cũ chết ở đó.
+        # Tên nhánh được kiểm ở `checkRerun` (phải thuộc đúng vai đang chạy) chứ KHÔNG kiểm ở đây:
+        # một phép kiểm trong YAML thì chỉ workflow này có, phép kiểm trong mã thì mọi đường gọi đều có.
+        description: "Chạy lại trên nhánh ai/<vai>/... đã có. Bỏ trống = mở nhánh mới."
+        type: string
+        required: false
+        default: ""
+      feedback:
+        # Phản hồi review là DỮ LIỆU, không phải mệnh lệnh: nó tới tay model, nhưng phạm vi ghi do
+        # `checkWritePath` quyết ở tầng mã. Nội dung này đã công khai ở PR nên ô dispatch công khai
+        # không làm lộ thêm gì — khác hẳn nội dung VIỆC, thứ phải đi qua cửa đọc có khoá.
+        description: "Phản hồi review cần agent sửa (chỉ dùng cùng rerun_branch)."
+        type: string
+        required: false
+        default: ""
 
 # `contents: write` CHỈ để đẩy nhánh `ai/documentation/*`. Bước đẩy tự kiểm tên nhánh trước khi
 # chạy, nên một lỗi ở chỗ khác cũng không biến quyền này thành đường ghi vào `main`.
@@ -130,6 +146,23 @@ jobs:
           if [ -z "$TASK_CODE" ]; then echo "::error::Không lấy được mã việc."; exit 1; fi
           echo "task_code=$TASK_CODE" >> "$GITHUB_OUTPUT"
 
+      # ═══ CHẠY LẠI PHẢI ĐI KÈM MỘT VIỆC CÓ THẬT ═══
+      #
+      # Không có `task` thì bước khởi tạo tự tạo một việc R0 MỚI mỗi lượt — và trần "3 lượt cho một
+      # việc" đếm theo VIỆC, nên mỗi lượt chạy lại sẽ đứng trên một việc mới và trần không bao giờ
+      # chạm tới. Vòng lặp ấy tốn tiền thật, nên nó dừng ở đây chứ không dừng ở hoá đơn.
+      - name: Kiểm điều kiện chạy lại
+        if: inputs.rerun_branch != '' || inputs.feedback != ''
+        run: |
+          if [ -z "${{ inputs.task }}" ]; then
+            echo "::error::Chạy lại (rerun_branch/feedback) phải kèm mã việc ở ô task — trần số lượt đếm theo VIỆC."
+            exit 1
+          fi
+          if [ -z "${{ inputs.rerun_branch }}" ]; then
+            echo "::error::Có feedback nhưng không có rerun_branch: phản hồi review chỉ có nghĩa khi sửa tiếp trên nhánh đã mở PR."
+            exit 1
+          fi
+
       - name: Chạy agent DOCUMENTATION
         id: run
         env:
@@ -137,11 +170,26 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           AI_PROVIDER: ${{ vars.AI_PROVIDER_AGENT || 'anthropic' }}
           DATABASE_URL: pglite://./data/agent-ci-db
+          # QUA BIẾN MÔI TRƯỜNG, KHÔNG QUA `${{ }}` TRONG THÂN LỆNH: hai ô này do người ngoài gõ, và
+          # một dấu nháy trong phản hồi review không được phép trở thành một lệnh shell thứ hai.
+          RERUN_BRANCH: ${{ inputs.rerun_branch }}
+          FEEDBACK: ${{ inputs.feedback }}
         run: |
-          npm run --silent agent:run -- \
-            --task "${{ steps.setup.outputs.task_code }}" \
-            --agent documentation \
-            --gates "${{ inputs.gates }}"
+          if [ -n "${RERUN_BRANCH:-}" ]; then
+            printenv FEEDBACK > agent-feedback.txt || : > agent-feedback.txt
+            npm run --silent agent:run -- \
+              --task "${{ steps.setup.outputs.task_code }}" \
+              --agent documentation \
+              --gates "${{ inputs.gates }}" \
+              --rerun-branch "$RERUN_BRANCH" \
+              --feedback-file agent-feedback.txt \
+              --feedback-author "github:${{ github.actor }}"
+          else
+            npm run --silent agent:run -- \
+              --task "${{ steps.setup.outputs.task_code }}" \
+              --agent documentation \
+              --gates "${{ inputs.gates }}"
+          fi
 
       # ═══ PHẠM VI TỆP: KIỂM BẰNG GIT, KHÔNG HỎI AGENT ═══
       # Một tệp thứ hai ⇒ lượt chạy KHÔNG ĐẠT. Tuyệt đối không sửa hộ agent rồi vẫn tính là đạt.
@@ -183,8 +231,11 @@ jobs:
       # Chỉ đẩy nhánh mang đúng tiền tố; mọi tên khác bị từ chối trước khi `git push` chạy.
       - name: Đẩy nhánh agent (KHÔNG phải main)
         if: always() && steps.setup.outputs.task_code != ''
+        env:
+          RERUN_BRANCH: ${{ inputs.rerun_branch }}
         run: |
-          BR="$(git branch --list 'ai/documentation/*' --format '%(refname:short)' | head -1)"
+          # Lượt chạy lại đẩy ĐÚNG nhánh được yêu cầu; `git branch --list` chỉ là đường của lượt mới.
+          BR="${RERUN_BRANCH:-$(git branch --list 'ai/documentation/*' --format '%(refname:short)' | head -1)}"
           if [ -z "$BR" ]; then echo "Không có nhánh agent nào để đẩy."; exit 0; fi
           case "$BR" in
             ai/documentation/*) : ;;
