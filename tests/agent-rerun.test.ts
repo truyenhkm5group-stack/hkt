@@ -126,12 +126,25 @@ export function testRerunDeBai() {
     taskTitle: "Viết tài liệu X",
     taskDescription: "Mô tả việc",
     writeGlobs: ["docs/"] as const,
+    readGlobs: ["docs/", "lib/"] as const,
     baseCommit: "abc1234",
     branch: "ai/documentation/TECH-9-a",
   };
 
   const dau = dungDeBai(nen);
   assert.ok(!dau.includes("YÊU CẦU SỬA"), "lượt chạy đầu KHÔNG mang thêm mục phản hồi nào");
+  /*
+    ───────── ĐỀ BÀI PHẢI NÓI CẢ PHẠM VI ĐỌC ─────────
+
+    ĐÃ CẮN THẬT, lượt chạy #17: đề bài chỉ nói phạm vi GHI (`docs/`), nên agent kết luận nó cũng
+    chỉ ĐỌC được chừng ấy và bỏ cuộc — "không có quyền đọc mã nguồn". Câu ấy SAI, hàng rào cho vai
+    tài liệu đọc được `lib/`, `app/`, `db/`… Một lượt chạy CÓ TRẢ TIỀN kết thúc bằng một lời từ
+    chối không đúng, chỉ vì đề bài giấu một sự thật agent cần.
+  */
+  assert.ok(dau.includes("Bạn được ĐỌC trong:"), "đề bài phải nói phạm vi ĐỌC, không để agent tự suy từ phạm vi GHI");
+  assert.ok(dau.includes("lib/"), "và phạm vi đọc phải thật sự liệt kê ra, không nói chung chung");
+  assert.ok(dau.indexOf("Bạn được GHI trong:") < dau.indexOf("Bạn được ĐỌC trong:"), "GHI trước, ĐỌC sau — quyền hẹp đứng trước quyền rộng");
+
   assert.ok(dau.includes("Base SHA: abc1234") && dau.includes("Nhánh làm việc: ai/documentation/TECH-9-a"), "hai giá trị agent bị hàng rào cấm tự lấy phải được nói thẳng");
 
   const lai = dungDeBai({ ...nen, feedback: goiPhanHoi([{ tacGia: "nguyenloineu94", noiDung: "Bổ sung phần đo" }]) });
@@ -241,6 +254,20 @@ export function testRerunGuards() {
     dòng lỗi nào, và PR chỉ đơn giản đổi sạch nội dung.
   */
   assert.ok(new RegExp("baseCommit = dinh" + String.fromCharCode(92) + "b").test(runner), "lượt chạy lại phải đặt base = ĐỈNH NHÁNH vừa đọc, không phải base của nơi gọi");
+
+  /*
+    ───────── PHẠM VI ĐỌC TRUYỀN XUỐNG PHẢI LÀ SỔ, KHÔNG PHẢI MỘT DANH SÁCH GÕ TAY ─────────
+
+    Đề bài nói phạm vi đọc là chưa đủ — nó phải nói ĐÚNG phạm vi mà hàng rào thật sự cho. Gõ tay
+    một danh sách hẹp ở runner thì agent lại bỏ cuộc y như lượt #17, chỉ khác là lần này đề bài
+    nói dối một cách tự tin.
+  */
+  const soLanReadGlobs = (runner.match(/readGlobs: DOCUMENTATION_READ_GLOBS/g) ?? []).length;
+  assert.equal(
+    soLanReadGlobs,
+    2,
+    "phạm vi đọc phải xuất hiện ĐÚNG hai lần và từ CÙNG một sổ: một lần cho HÀNG RÀO (cây làm việc) và một lần cho LỜI DẶN (đề bài). Lệch nhau thì hoặc agent bị chặn thứ đề bài bảo nó đọc được, hoặc đề bài giấu quyền nó đang có — lượt #17 chết vì vế thứ hai",
+  );
 
   const iCheck = runner.indexOf("checkRerun(");
   const iDinh = runner.indexOf("dinhNhanh(");
