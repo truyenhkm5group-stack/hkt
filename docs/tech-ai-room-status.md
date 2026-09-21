@@ -326,6 +326,49 @@ lượt QA có làm xong vẫn không đẩy nổi nhánh `ai/qa/…` của chí
 **Chi phí của lượt hỏng này: $0** — nó dừng trước khi gọi model.
 
 ---
+## Lượt #22 — vai QA chạy được, và lộ ra trần cửa sổ ngữ cảnh
+
+Bản vá vai làm đúng việc: `agent=qa · vai=QA`, nhánh `ai/qa/TECH-3-mubfsts5`. Rồi:
+
+```
+✗ FAILED
+  lý do: 400 prompt is too long: 205.844 tokens > 200.000 maximum
+  tiền: chưa gọi model lần nào.
+```
+
+**Hai lỗi trong bốn dòng ấy, và lỗi thứ hai tệ hơn lỗi thứ nhất.**
+
+### ① `read_file` không có trần
+
+`run_command` đã cắt kết quả còn 4.000 ký tự cuối từ lâu; `read_file` trả về NGUYÊN tệp. Người
+viết trần ấy nghĩ tới một chiều. Vai DOCUMENTATION không bao giờ chạm tới (`docs/` toàn tệp nhỏ);
+vai QA thì BẮT BUỘC đọc những tệp lớn nhất kho — đo 21/09/2026:
+
+| Tệp | Ký tự |
+|---|---|
+| `tests/sync-fixtures.test.ts` | **160.430** (~45k token) — phải đọc để đăng ký bài kiểm |
+| `tests/migration-upgrade-path.test.ts` | 121.663 |
+| `tests/tech-phase2a.test.ts` | 66.632 |
+
+### ② Báo cáo in một câu SAI về tiền
+
+Lượt đầu tiên chỉ có đề bài, **không thể** dài 205.844 token — nên model đã được gọi nhiều vòng và
+tiền đã tiêu thật. Ngoại lệ 400 ném thẳng ra ngoài vòng lặp và cuốn theo cả `chiPhi`.
+
+Lỗi ① làm hỏng một lượt chạy. Lỗi ② làm hỏng **khả năng biết mình đã tiêu bao nhiêu** — đúng thứ
+chủ shop phàn nàn khi hết $25. Một báo cáo nói *"chưa từng xảy ra"* về thứ đã xảy ra còn tệ hơn
+nói *"chưa biết"* (mục 42).
+
+**Số tiền của lượt #22 đã mất cùng ngoại lệ. Không bịa lại.**
+
+### Đã vá
+
+Ngân sách **40.000 ký tự/lần · 240.000 ký tự/lượt**; tệp lớn giữ **ĐẦU + ĐUÔI** (import ở đầu,
+danh sách đăng ký ở cuối — đúng hình dạng tệp kho này) kèm dấu cắt nói rõ bỏ bao nhiêu; hết ngân
+sách thì TỪ CHỐI có lý do chứ không trả chuỗi rỗng. Lời gọi model vào `try/catch`: hỏng thì trả về
+KÈM số tiền đã cộng được.
+
+---
 ## NEXT
 
 | Việc | Phụ thuộc |
