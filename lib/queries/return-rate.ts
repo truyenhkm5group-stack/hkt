@@ -828,6 +828,13 @@ export type ReturnRateSummary = {
     active: number;
     /** Đơn đang chạy mà mô hình KHÔNG dự báo được (trạng thái chưa đủ mẫu) — NGOÀI ước tính. */
     unmodelledActive: number;
+    /**
+     * Đơn CÓ mã vận đơn mà ĐVVC CHƯA cầm hàng — ngoài cohort tỷ lệ GTC, đếm riêng để nói ra.
+     *
+     * Ở mốc `SHIPPED` con số này luôn 0 (không có chứng cứ bàn giao thì kiện không vào cohort);
+     * nó chỉ khác 0 ở mốc `ORDERED`, và đó đúng là chỗ nó từng lặng lẽ chui vào mẫu số.
+     */
+    awaitingPickup: number;
     /** Đơn huỷ / không dấu vết ĐVVC — ngoài cohort, đếm riêng để tổng khớp trang khác. */
     cancelled: number;
     unknown: number;
@@ -964,6 +971,7 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
           eligibleSent: mucDon.eligibleSent,
           active: mucDon.active,
           unmodelledActive: mucDon.unmodelledActive,
+          awaitingPickup: mucDon.awaitingPickup,
           cancelled: mucDon.cancelled,
           unknown: mucDon.unknown,
           byState: duBao.probabilities
