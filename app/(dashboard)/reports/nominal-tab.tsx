@@ -11,6 +11,7 @@ import {
   AssumptionsForm,
   ReturnRateOverride,
 } from "@/app/(dashboard)/reports/assumptions-form";
+import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { CostQualityPanel } from "@/app/(dashboard)/reports/cost-quality-panel";
 import { MetricCard } from "@/components/metric-card";
 import { MarketerNominalRows } from "./marketer-nominal-rows";
@@ -33,6 +34,7 @@ import {
 import type { Period } from "@/lib/search-params";
 import { DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
 import { PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
+import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { successTone } from "@/lib/constants/returns";
 import { ProjectionConfidence } from "@/app/(dashboard)/reports/projection-confidence";
 import { getNominalMarketerBreakdown } from "@/lib/queries/payroll";
@@ -132,13 +134,23 @@ export async function NominalTab({
   productId,
   tabQuery,
   canWrite,
+  basis = "ORDERED",
 }: {
   period: Period;
   productId: string;
   tabQuery: string;
   canWrite: boolean;
+  /** Mốc gán đơn vào kỳ. Mặc định ngày tạo đơn — xem `mocCuaBasis` ở lib/queries/profit-nominal.ts. */
+  basis?: TimeBasis;
 }) {
-  const [report, byMarketer] = await Promise.all([getNominalProfitReport(period), getNominalMarketerBreakdown(period)]);
+  /*
+    BẢNG MARKETER CỐ Ý Ở LẠI MỐC NGÀY TẠO ĐƠN.
+
+    Nó ghi đơn cho người phụ trách fanpage TẠI MỐC ĐƠN LÊN; đổi mốc cohort sang ngày gửi là hỏi
+    một câu mà cách ghi nhận ấy không trả lời được. Chú thích dưới bảng nói ra điều đó thay vì để
+    hai khối trên cùng màn hình lặng lẽ đứng trên hai tập đơn.
+  */
+  const [report, byMarketer] = await Promise.all([getNominalProfitReport(period, basis), getNominalMarketerBreakdown(period)]);
   const selected = productId
     ? report.rows.find((r) => r.productId === productId)
     : null;
@@ -151,6 +163,7 @@ export async function NominalTab({
         period,
         dailyRate,
         report.assumptions,
+        basis,
       )
     : [];
   const t = report.totals;
@@ -159,6 +172,25 @@ export async function NominalTab({
 
   return (
     <div className="space-y-5">
+      {/*
+        ═══ MỐC COHORT ĐỨNG NGAY ĐẦU TAB, VÌ NÓ QUYẾT ĐỊNH MỌI CON SỐ BÊN DƯỚI ═══
+
+        Trang Tỷ lệ giao thành công có đúng ô này. Đặt cả hai về cùng một mốc thì cùng một mã phải
+        ra CÙNG một tỷ lệ GTC ước tính — `tests/reporting-parity.test.ts` khoá điều đó.
+      */}
+      <DataTableToolbar
+        period={{ defaultKey: "month" }}
+        facets={[
+          {
+            key: "moc",
+            label: "Mốc thời gian",
+            options: TIME_BASES.map((b) => ({ value: b, label: TIME_BASIS_LABEL[b] })),
+            single: true,
+          },
+        ]}
+        resultLabel={`${TIME_BASIS_QUESTION[basis]} Cùng mốc + cùng mã ⇒ trang Tỷ lệ giao thành công phải ra cùng một tỷ lệ GTC ước tính. Chi phí quảng cáo và chi phí vận hành luôn theo NGÀY PHÁT SINH của chính chúng, không đổi theo mốc này; bảng theo marketer giữ mốc ngày tạo đơn vì nó ghi đơn theo người phụ trách fanpage tại lúc đơn lên.`}
+      />
+
       <AssumptionsForm assumptions={report.assumptions} canWrite={canWrite} />
 
       <CostQualityPanel period={period} />
