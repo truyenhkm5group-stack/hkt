@@ -25,6 +25,7 @@ import {
   type ProjectedState,
 } from "@/lib/constants/projected-delivery";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
+import type { OrderOutcome } from "@/lib/constants/returns";
 import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
@@ -615,6 +616,13 @@ export type ProjectedCounts = {
   /** Đơn chốt nhưng chưa gửi ĐVVC — chỉ có ở cohort theo ngày chốt; KHÔNG vào tỷ lệ GTC. */
   pending: number;
   pendingUnmodelled: number;
+  /**
+   * ĐÃ CÓ MÃ VẬN ĐƠN NHƯNG ĐVVC CHƯA CẦM HÀNG (`AWAITING_PICKUP`) — hàng còn trong kho shop.
+   *
+   * Đứng RIÊNG khỏi `active` và KHÔNG nằm trong `eligibleSent`. Xem `canMotDon` cho số đo và lý do.
+   */
+  awaitingPickup: number;
+  awaitingPickupUnmodelled: number;
   /** Tỷ lệ GTC THỰC TẾ: chỉ trên đơn ĐÃ KẾT THÚC. `null` = chưa đơn nào kết thúc. */
   actualRate: number | null;
   /** Ước tính giao được = đã giao thật + Σ(đang ở trạng thái s × P(s)). */
@@ -676,6 +684,8 @@ function accMoi(): Acc {
     unknown: 0,
     pending: 0,
     pendingUnmodelled: 0,
+    awaitingPickup: 0,
+    awaitingPickupUnmodelled: 0,
     actualRate: null,
     projectedDelivered: 0,
     projectedRate: null,
@@ -688,8 +698,57 @@ function accMoi(): Acc {
 }
 
 /**
+ * TIỀN CỦA ĐƠN CÒN NẰM TRONG KHO SHOP — chưa gửi, hoặc đã có mã mà ĐVVC chưa cầm.
+ *
+ * Cân bằng ĐÚNG MỘT xác suất `P(chưa rời kho)`: nó học từ ĐƠN CHỐT đã kết thúc (kể cả huỷ), tức
+ * đúng dân số "hàng còn trong tay shop, sẽ ra tiền bao nhiêu phần". Trả `false` khi chưa đo được —
+ * lúc ấy tiền đi vào `unmodelledRevenue` và được nói ra, không im lặng thành 0.
+ *
+ * Hàm này KHÔNG đụng tới `eligibleSent`, `active` hay `projectedDelivered`: tiền và tỷ lệ GTC là
+ * hai chiều riêng (đặc tả §1), và một kiện chưa rời kho không nằm trong tỷ lệ nào.
+ */
+function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number }, lookup: ProbabilityLookup): boolean {
+  const tra = lookup.of(NOT_SHIPPED_STATE);
+  if (tra.p === null) {
+    acc.unmodelledRevenue += don.revenue;
+    return false;
+  }
+  acc.projectedDeliveredRevenue += don.revenue * tra.p;
+  acc.projectedCogs += don.cogs * tra.p;
+  return true;
+}
+
+/**
  * MỘT vòng cân cho MỌI grain. Phân loại theo `ORDER_OUTCOME` TRƯỚC; trạng thái con ĐVVC chỉ dùng để
  * chọn P(s) cho đơn `IN_TRANSIT`. Không có nhánh nào đọc `stage` hay mã ĐVVC để kết luận đã giao.
+ *
+ * ═══ VÌ SAO KHÔNG CÒN NHÁNH `default` NÀO RƠI VÀO "ĐANG GIAO" ═══
+ *
+ * Bản trước bắt `IN_TRANSIT` bằng `default:`. `AWAITING_PICKUP` là một giá trị THẬT của
+ * `ORDER_OUTCOME` (`lib/queries/return-rate.ts`) và nó rơi thẳng vào nhánh ấy — được cộng vào CẢ
+ * `eligibleSent` LẪN `active`, tức nhét kiện CHƯA RỜI KHO vào mẫu số của tỷ lệ giao thành công.
+ *
+ * Đó đúng là điều `ELIGIBLE_SENT_OUTCOMES` (`lib/constants/returns.ts`) sinh ra để chặn, và
+ * `tests/contract-order-outcome.test.ts` nói nguyên văn: *"chưa rời kho thì CHƯA KẾT THÚC — không
+ * vào tử số lẫn mẫu số tỷ lệ giao thành công"*. Bài kiểm ấy quét mã nguồn tìm ai GÕ LẠI danh sách;
+ * một nhánh `default` không bao giờ gõ tên nó nên đi lọt.
+ *
+ * ─── ĐO PRODUCTION 21/09/2026, cohort 30 ngày theo ngày tạo đơn (chỉ đọc) ───
+ *
+ *   mã    giao  hoàn  đang giao  CHỜ LẤY   "đã gửi" in ra   đúng ra phải là
+ *   Q004    58    43         26       40             167               127
+ *   Q002   128   351         48       13             540               527
+ *   Q003    72    94          6       29             201               172
+ *   Q005     0     0          0       21              21                 0
+ *
+ * Ba con số cột áp chót đúng bằng thứ trang Lợi nhuận danh nghĩa đang in. Hệ quả nặng nhất là
+ * **Q005: tỷ lệ GTC ước tính in ra 0,0%** trong khi ERP chưa đo được MỘT kết cục nào — cả 21 đơn
+ * đó là hàng còn trong kho (12.606.000đ), mang mã ĐVVC 102 "Đơn hàng chờ xử lý" và 104 "Giao cho
+ * Bưu tá đi nhận". CHƯA BIẾT bị in ra thành 0, đúng thứ §42 cấm. Sau bản này mẫu số về 0 và ô in
+ * "—".
+ *
+ * Nhánh cuối nay là một SAI SÓT THỰC SỰ (kết quả đơn mà tệp này chưa biết), được `never` chặn ở
+ * mức biên dịch và đếm vào `unknown` — ngoài cohort, không bao giờ lặng lẽ thành "đã gửi".
  */
 function canMotDon(
   acc: Acc,
@@ -697,7 +756,8 @@ function canMotDon(
   lookup: ProbabilityLookup,
 ) {
   acc.cogsUnknownQty += don.cogsUnknownQty;
-  switch (don.outcome) {
+  const outcome = don.outcome as OrderOutcome;
+  switch (outcome) {
     case "DELIVERED":
       acc.eligibleSent += 1;
       acc.deliveredActual += 1;
@@ -717,20 +777,16 @@ function canMotDon(
     case "UNKNOWN":
       acc.unknown += 1;
       return;
-    case "NOT_SHIPPED": {
+    case "NOT_SHIPPED":
       acc.pending += 1;
-      const tra = lookup.of(NOT_SHIPPED_STATE);
-      if (tra.p === null) {
-        acc.pendingUnmodelled += 1;
-        acc.unmodelledRevenue += don.revenue;
-      } else {
-        acc.projectedDeliveredRevenue += don.revenue * tra.p;
-        acc.projectedCogs += don.cogs * tra.p;
-      }
+      if (!canTienConTrongKho(acc, don, lookup)) acc.pendingUnmodelled += 1;
       return;
-    }
-    default: {
-      // IN_TRANSIT — trạng thái con quyết định P; trạng thái cuối / chưa đủ mẫu ⇒ ngoài ước tính.
+    case "AWAITING_PICKUP":
+      acc.awaitingPickup += 1;
+      if (!canTienConTrongKho(acc, don, lookup)) acc.awaitingPickupUnmodelled += 1;
+      return;
+    case "IN_TRANSIT": {
+      // Trạng thái con quyết định P; trạng thái cuối / chưa đủ mẫu ⇒ ngoài ước tính.
       acc.eligibleSent += 1;
       acc.active += 1;
       const con = don.con as CarrierSubstate;
@@ -744,6 +800,14 @@ function canMotDon(
         acc.projectedDeliveredRevenue += don.revenue * tra.p;
         acc.projectedCogs += don.cogs * tra.p;
       }
+      return;
+    }
+    default: {
+      // Kết quả đơn mà tệp này chưa biết. `never` làm việc thêm một giá trị vào `OrderOutcome` mà
+      // quên chỗ này thành lỗi biên dịch, thay vì một dòng lặng lẽ chảy vào mẫu số tỷ lệ GTC.
+      const chuaKhai: never = outcome;
+      void chuaKhai;
+      acc.unknown += 1;
     }
   }
 }

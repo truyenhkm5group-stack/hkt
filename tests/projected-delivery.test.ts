@@ -52,6 +52,11 @@ type DonFixture = {
   /** Mốc ĐVVC nhận (giờ trước). */
   luc: number;
   unitCost?: number;
+  /**
+   * ĐVVC CHƯA CẦM HÀNG: không `picked_up_at`, và mọi sự kiện đều ngoài `CARRIER_HANDOFF_STAGES`.
+   * Đó đúng là điều kiện để `ORDER_OUTCOME` kết luận `AWAITING_PICKUP`.
+   */
+  chuaLayHang?: boolean;
 };
 
 async function gieo(db: Db, don: DonFixture[]) {
@@ -77,7 +82,7 @@ async function gieo(db: Db, don: DonFixture[]) {
         isFinal: d.ship.final !== undefined,
         codAmount: 500_000,
         codCollected: d.ship.codCollected ?? 0,
-        pickedUpAt: luc,
+        pickedUpAt: d.chuaLayHang ? null : luc,
         deliveredAt: d.ship.final === "DELIVERED" ? cuoi : null,
         returnedAt: d.ship.final === "RETURNED" ? cuoi : null,
       })
@@ -192,7 +197,7 @@ export async function testTrainingLabelsFromOrderOutcome(db: Db) {
 
 /* ───── 4 · Chấm cohort theo ORDER_OUTCOME, không theo stage / mã thô ───── */
 export async function testScoringUsesOrderOutcome(db: Db) {
-  for (const [ma, ten] of [["R", "Hàng trông-như-đã-giao"], ["A", "Hàng đang giao"], ["U", "Hàng chưa đo được"]]) {
+  for (const [ma, ten] of [["R", "Hàng trông-như-đã-giao"], ["A", "Hàng đang giao"], ["U", "Hàng chưa đo được"], ["W", "Hàng chờ ĐVVC lấy"]]) {
     await db.insert(schema.products).values({ id: `${P}p-${ma}`, name: ten, customId: `PDV-${ma}` }).onConflictDoNothing();
     await db.insert(schema.productVariants).values({ id: `${P}v-${ma}`, productId: `${P}p-${ma}`, sku: `PDV-${ma}`, retailPrice: 500_000 }).onConflictDoNothing();
   }
@@ -208,6 +213,20 @@ export async function testScoringUsesOrderOutcome(db: Db) {
     { id: "a-lhtb", productId: "A", luc: TUOI, ship: { stage: "IN_TRANSIT", vtpStatusName: "Lấy hàng thất bại", events: [["", "Lấy hàng thất bại", "OUTBOUND", "IN_TRANSIT"]] } },
     { id: "a-huy", productId: "A", luc: TUOI, orderStage: "CANCELLED", ship: { stage: "CANCELLED", events: [["101", "Huỷ", "OUTBOUND", "CANCELLED"]] } },
     { id: "a-chuagui", productId: "A", luc: TUOI, orderStage: "CONFIRMED", ship: null },
+    /*
+      ── Mã W: CHỜ ĐVVC TỚI LẤY — hàng còn trong kho shop ──
+
+      Ba đơn có mã vận đơn, ĐVVC đã biết tới kiện (sự kiện 104 "Giao cho Bưu tá đi nhận"), nhưng
+      KHÔNG một chứng từ nào nói họ đã cầm hàng. `ORDER_OUTCOME` gọi đúng tên: `AWAITING_PICKUP`.
+
+      Trước bản 21/09/2026, `canMotDon` bắt chúng bằng nhánh `default:` ghi "IN_TRANSIT" nên cả ba
+      chui vào `eligibleSent` — mẫu số của tỷ lệ giao thành công. Mã W ở đây KHÔNG có đơn nào đã
+      gửi thật, nên nếu luật hỏng thì tỷ lệ sẽ ra một con số (gần 0%) thay vì `null`; đó đúng là
+      cái đã đo trên production: mã Q005 in "0,0%" trên 21 đơn còn nằm trong kho.
+    */
+    { id: "w-1", productId: "W", luc: TUOI, chuaLayHang: true, ship: { stage: "PENDING", vtpStatusName: "Giao cho Bưu tá đi nhận", events: [["104", "Giao cho Bưu tá đi nhận", "OUTBOUND", "PENDING"]] } },
+    { id: "w-2", productId: "W", luc: TUOI, chuaLayHang: true, ship: { stage: "PENDING", vtpStatusName: "Đơn hàng chờ xử lý", events: [["102", "Đơn hàng chờ xử lý", "OUTBOUND", "PENDING"]] } },
+    { id: "w-3", productId: "W", luc: TUOI, chuaLayHang: true, ship: { stage: "PENDING", vtpStatusName: "Đơn hàng chờ xử lý", events: [["102", "Đơn hàng chờ xử lý", "OUTBOUND", "PENDING"]] } },
     // ── Mã U: hai đơn đang giao ở trạng thái chưa đủ mẫu, và KHÔNG biết giá vốn ──
     { id: "u-1", productId: "U", luc: TUOI, unitCost: 0, ship: { stage: "IN_TRANSIT", vtpStatusName: "Lấy hàng thất bại", events: [["", "Lấy hàng thất bại", "OUTBOUND", "IN_TRANSIT"]] } },
     { id: "u-2", productId: "U", luc: TUOI, unitCost: 0, ship: { stage: "IN_TRANSIT", vtpStatusName: "Lấy hàng thất bại", events: [["", "Lấy hàng thất bại", "OUTBOUND", "IN_TRANSIT"]] } },
@@ -251,9 +270,37 @@ export async function testScoringUsesOrderOutcome(db: Db) {
   assert.equal(U.projectedRate, null, "100% đang giao ngoài ước tính ⇒ CHƯA ĐO ĐƯỢC, không phải 0% và không phải giả định");
   assert.equal(U.cogsUnknownQty, 2, "hai sản phẩm không có giá vốn ở bất kỳ nguồn nào ⇒ đếm là CHƯA BIẾT, không phải 0đ");
 
-  // Grain đơn: cohort đếm đúng một lần, kể cả huỷ / chưa gửi.
+  /*
+    ═══ KIỆN CHƯA RỜI KHO KHÔNG Ở TỬ SỐ LẪN MẪU SỐ ═══
+
+    `ELIGIBLE_SENT_OUTCOMES` cố ý loại `AWAITING_PICKUP`, và `tests/contract-order-outcome.test.ts`
+    nói thẳng "chưa rời kho thì CHƯA KẾT THÚC". Bài kiểm ấy quét mã nguồn tìm ai GÕ LẠI danh sách
+    nên nó không thấy được một nhánh `default:`; khối này canh chính cái lỗ đó bằng dữ liệu.
+  */
+  const W = theoMa.get("PDV-W")!;
+  assert.ok(W, "phải thấy mã W");
+  assert.equal(W.awaitingPickup, 3, "ba đơn chờ bưu tá tới lấy phải có rổ riêng, không lẫn vào đâu");
+  assert.equal(W.eligibleSent, 0, "chưa rời kho thì KHÔNG phải 'đã gửi' — mẫu số của tỷ lệ GTC phải rỗng");
+  assert.equal(W.active, 0, "'đang giao' là một khẳng định về VỊ TRÍ; hàng còn trong kho thì không đang giao");
+  assert.equal(W.projectedDelivered, 0, "không kiện nào rời kho thì không có gì ở tử số");
+  assert.equal(W.projectedRate, null, "CHƯA ĐO ĐƯỢC — đây là ca đã in ra '0,0%' trên production 21/09/2026");
+  assert.notEqual(W.projectedRate, 0, "0% là 'đã đo và bằng không'; mã này chưa đo được gì cả");
+  assert.ok(W.projectedDeliveredRevenue > 0 || W.unmodelledRevenue > 0, "tiền của hàng trong kho vẫn phải được nói ra: hoặc cân theo P(chưa rời kho), hoặc nêu là ngoài ước tính");
+
+  // Mọi mã khác KHÔNG được xê dịch vì mã W có mặt: rổ mới chỉ rút bớt, không cộng thêm vào đâu.
+  assert.equal(A.awaitingPickup, 0);
+  assert.equal(R.awaitingPickup, 0);
+
+  // Grain đơn: cohort đếm đúng một lần, kể cả huỷ / chưa gửi / chờ lấy.
   const od = m.orderLevel;
-  assert.equal(od.eligibleSent + od.cancelled + od.unknown + od.pending, m.totalOrders);
+  // Fixture DÙNG CHUNG nên các khối khác cũng gieo kiện chưa rời kho; chốt một con số tuyệt đối ở
+  // đây là buộc mọi khối sau phải sửa nó. Điều cần khoá là rổ có THẬT và chứa đủ ba đơn của mã W.
+  assert.ok(od.awaitingPickup >= 3, `rổ chờ lấy phải tồn tại ở grain đơn y như ở grain mã hàng (thấy ${od.awaitingPickup})`);
+  assert.equal(
+    od.eligibleSent + od.cancelled + od.unknown + od.pending + od.awaitingPickup,
+    m.totalOrders,
+    "mọi đơn phải nằm trong ĐÚNG MỘT rổ — thiếu một rổ trong phép cộng này là dấu hiệu có nhóm đang lẫn vào nhóm khác",
+  );
   assert.equal(od.projectedRate, projectedRateOf(od));
 }
 

@@ -147,9 +147,19 @@ export async function testProjectedMetricsConsistent() {
   assert.equal(od.eligibleSent, od.deliveredActual + od.failedActual + od.active, "ở grain đơn cũng không rổ nào được rơi ra");
   /*
     Mẫu số ở grain đơn = ĐÚNG số đơn ĐÃ GỬI trong cohort — đơn chưa lần được về mã nào VẪN nằm trong
-    đó; đơn huỷ / chưa gửi / không dấu vết ĐVVC được đếm RIÊNG, không trộn vào.
+    đó; đơn huỷ / chưa gửi / CHỜ ĐVVC TỚI LẤY / không dấu vết ĐVVC được đếm RIÊNG, không trộn vào.
+
+    Rổ `awaitingPickup` có mặt trong phép cộng này từ 21/09/2026. Trước đó nó KHÔNG tồn tại: kiện
+    chưa rời kho bị nhánh `default:` của `canMotDon` cộng thẳng vào `eligibleSent`, nên phép cộng
+    vẫn khớp — mà khớp vì SAI, không phải vì đúng. Đây đúng là bất biến sinh ra để bắt một nhóm
+    đang lẫn vào nhóm khác, nên nó chỉ bắt được khi mọi rổ đều có tên.
   */
-  assert.equal(od.eligibleSent + od.cancelled + od.unknown + od.pending, m.totalOrders, "mỗi đơn trong cohort đếm ĐÚNG MỘT LẦN: đã gửi + huỷ + không dấu vết + chưa gửi");
+  assert.equal(
+    od.eligibleSent + od.cancelled + od.unknown + od.pending + od.awaitingPickup,
+    m.totalOrders,
+    "mỗi đơn trong cohort đếm ĐÚNG MỘT LẦN: đã gửi + huỷ + không dấu vết + chưa gửi + chờ ĐVVC lấy",
+  );
+  assert.ok(od.awaitingPickup >= 0, "kiện chờ bưu tá tới lấy phải có rổ riêng — không nằm trong 'đã gửi'");
   assert.ok(od.unmodelledActive >= 0 && od.unmodelledActive <= od.active, "phần chưa dự báo được là một TẬP CON của phần đang giao");
   assert.ok(od.projectedDelivered >= od.deliveredActual - 1e-9, "ước tính không được THẤP HƠN số đã giao thật");
   assert.ok(od.projectedDelivered <= od.eligibleSent + 1e-9, "ước tính không được vượt quá số đơn đã gửi");
