@@ -332,14 +332,36 @@ export async function testNominalParityWithActiveOrders() {
   assert.equal(R.returned, 4, "bảng lợi nhuận đếm hoàn theo ORDER_OUTCOME: 4, gồm 60K và 503");
   assert.equal(R.expectedRevenue, 0);
 
+  /*
+    ═══ CHƯA ĐO ĐƯỢC ⇒ RƠI VỀ TỶ LỆ ĐÃ KHAI, VÀ TIỀN ĐI CÙNG TỶ LỆ ẤY ═══
+
+    Chủ shop chốt 21/09/2026. Bản trước gắn nhãn `unmeasured`: ô tỷ lệ in "—" nhưng cột tiền vẫn
+    in một con số, vì tiền đi đường khác (cân từng đơn theo `P(chưa rời kho)`). Trên production mã
+    Q005 ra "—" cạnh 25.687.174 ₫ = 106.287.000 × 24,2% — một dòng nói hai điều trái nhau.
+
+    Điều bài này khoá KHÔNG phải con số 60%, mà là BA tính chất: tỷ lệ không còn `null`, nó bằng
+    ĐÚNG tỷ lệ khai trong giả định, và TIỀN bằng ĐÚNG `Doanh số POS × tỷ lệ ấy` — cùng một tỷ lệ
+    cho cả hai ô. Kỳ vọng dựng TỪ `bao.assumptions`, không gõ lại con số (AGENTS.md §65).
+  */
   const U = bao.rows.find((r) => r.productId === `${P}p-U`)!;
   assert.ok(U);
-  assert.equal(U.returnRateSource, "unmeasured", "mô hình có cohort nhưng chưa đo được ⇒ KHÔNG lùi về lịch sử / giả định 40%");
-  assert.equal(U.deliveryRate, null, "màn hình in “—”, không in một con số đoán");
-  assert.equal(U.returnRate, null);
+  const tyLeKhai = bao.assumptions.defaultReturnRate;
+  assert.equal(U.returnRateSource, "default", "mã chưa đo được tỷ lệ nào ⇒ dùng tỷ lệ khai ở Giả định, không để trống");
+  assert.equal(U.returnRate, Math.round(tyLeKhai * 10) / 10);
+  assert.equal(U.deliveryRate, Math.round((100 - tyLeKhai) * 10) / 10, "ô tỷ lệ in con số giả định, có nhãn — không in “—”");
+  assert.equal(
+    U.expectedRevenue,
+    Math.round(U.grossSales * (1 - tyLeKhai / 100)),
+    "TIỀN phải bằng ĐÚNG Doanh số POS × tỷ lệ đang hiện; đây chính là chỗ bản cũ lệch — tiền cân theo đơn còn tỷ lệ để trống",
+  );
+  assert.ok(U.grossSales > 0, "mã phải có doanh số POS, nếu không phép nhân trên không chứng minh được gì");
   assert.equal(U.cogsKnown, false, "không biết giá vốn ⇒ cờ tắt, màn hình in “—” thay vì 0 ₫");
   assert.equal(U.cogsUnknownQty, 2);
-  assert.equal(U.opexPerDelivered, null, "chưa có tỷ lệ thì không có “đơn GTC ước tính” để chia");
+
+  // Mã KHÔNG có đơn nào thì vẫn KHÔNG có tỷ lệ — giả định chỉ áp cho mã đang chạy thật.
+  for (const x of bao.rows) {
+    if (!x.orders) assert.equal(x.deliveryRate, null, `${x.code || x.productId}: không đơn nào ⇒ không áp giả định`);
+  }
 
   // Không dòng nào có đơn mà in 100% "cho đẹp"; dòng chưa có đơn cũng không in 100%.
   for (const r of bao.rows) {

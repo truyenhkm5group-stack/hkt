@@ -610,16 +610,41 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis):
       if (overrideRate !== undefined && Number.isFinite(overrideRate)) {
         returnRate = overrideRate;
         returnRateSource = "override";
-      } else if (duBao && duBao.eligibleSent + duBao.pending + duBao.awaitingPickup > 0) {
+      } else if (duBao && duBao.projectedRate !== null) {
+        /*
+          ĐO ĐƯỢC THÌ DÙNG SỐ ĐO — tỷ lệ của hợp đồng, và TIỀN cân theo TỪNG ĐƠN.
+        */
         orderLevel = { revenue: duBao.projectedDeliveredRevenue, cogs: duBao.projectedCogs };
-        if (duBao.projectedRate !== null) {
-          returnRate = Math.round((100 - duBao.projectedRate) * 10) / 10;
-          returnRateSource = "projected";
-        } else {
-          returnRate = null;
-          returnRateSource = "unmeasured";
-        }
+        returnRate = Math.round((100 - duBao.projectedRate) * 10) / 10;
+        returnRateSource = "projected";
       }
+      /*
+        ═══════════ CHƯA ĐO ĐƯỢC THÌ RƠI VỀ TỶ LỆ ĐÃ KHAI, KHÔNG PHẢI VỀ MỘT Ô TRỐNG ═══════════
+
+        Bản trước, mã có cohort mà hợp đồng trả `null` bị gắn nhãn `unmeasured`: ô tỷ lệ in "—"
+        NHƯNG cột tiền vẫn in một con số — vì tiền đi đường khác, cân từng đơn theo `P(chưa rời
+        kho)`. Hệ quả đo trên production 21/09/2026, mã Q005 (183 đơn, chưa gửi đơn nào):
+
+            TL GTC ƯT   →  "—"
+            DT GTC ƯT   →  25.687.174 ₫   = 106.287.000 × 24,2%
+
+        Tức cùng một dòng vừa nói "không có tỷ lệ" vừa in một khoản tiền hàm ý tỷ lệ 24,2%. Và
+        24,2% ấy là `P(đơn chốt bất kỳ → giao thành công)` học TOÀN SHOP, KỂ CẢ ĐƠN HUỶ — nó trả
+        lời một câu hỏi khác hẳn câu chủ shop đang hỏi về một mã đang chạy.
+
+        Chủ shop chốt 21/09/2026: mã nào ĐO ĐƯỢC thì dùng số đo; mã đang sản xuất, đã có đơn xác
+        nhận và doanh số POS mà chưa giao đơn nào thì tính theo TỶ LỆ ĐÃ KHAI ở Giả định
+        (`defaultReturnRate`, hiện là 40 ⇒ GTC 60%) — để còn nhìn được lợi nhuận và margin ước
+        tính mà quyết định action cho mã và cho campaign. Một ô trống không giúp ra quyết định nào.
+
+        Thứ tự lùi giữ nguyên tinh thần cũ, chỉ khác là nó ĐƯỢC CHẠY: lịch sử thật của mã trước
+        (đã gán ở trên khi đủ mẫu), hết lịch sử mới tới tỷ lệ khai. Cả hai nhánh mang nhãn "ước
+        tính theo tỷ lệ" và KHÔNG được tô màu — xem `OTyLe`: một con số giả định tô xanh là một
+        con số giả định trông như đã đo.
+
+        `orderLevel` để `null` là cố ý: tiền khi đó = Doanh số POS × TL GTC, cùng một tỷ lệ với ô
+        bên cạnh. Trộn tiền-cân-theo-đơn với tỷ lệ-giả-định là tái lập đúng cái mâu thuẫn trên.
+      */
       const calc = applyAssumptions(base, returnRate, assumptions, orderLevel);
       const cogsUnknownQty = Number(r.cogsUnknownQty ?? 0);
       const pur = purchases.get(r.productId);
