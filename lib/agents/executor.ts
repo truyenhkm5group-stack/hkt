@@ -50,6 +50,21 @@ export type AgentJob = {
   taskDescription: string;
   /** Phạm vi tệp được ghi, để nói thẳng cho executor thay vì để nó dò bằng cách thử và bị chặn. */
   writeGlobs: readonly string[];
+  /**
+   * PHẠM VI ĐỌC — và vì sao nó phải được NÓI RA, không để agent tự suy.
+   *
+   * ĐÃ CẮN THẬT, lượt chạy #17 của `TECH-2`. Đề bài chỉ nói phạm vi GHI (`docs/`), nên agent kết
+   * luận nó cũng chỉ ĐỌC được chừng ấy, rồi bỏ cuộc bằng đúng câu này:
+   *
+   *     "Không thể hoàn thành task vì không có quyền đọc mã nguồn (phạm vi chỉ có docs/)"
+   *
+   * Câu ấy SAI: hàng rào cho vai tài liệu đọc được `lib/`, `app/`, `db/`, `tests/`, `scripts/`,
+   * `AGENTS.md`… Nhưng agent không có cách nào biết — nó chỉ có một dòng nói về quyền GHI.
+   *
+   * Cùng lớp lỗi với `branch`/`baseCommit` ở dưới: đề bài giấu một sự thật mà agent cần, nên
+   * agent ĐOÁN — và một lượt chạy CÓ TRẢ TIỀN kết thúc bằng một lời từ chối không đúng.
+   */
+  readGlobs: readonly string[];
   /*
     ═══ BỐI CẢNH AGENT KHÔNG TỰ LẤY ĐƯỢC, VÀ KHÔNG ĐƯỢC PHÉP ĐOÁN ═══
 
@@ -93,6 +108,8 @@ export function dungDeBai(job: Omit<AgentJob, "workspace">): string {
   return (
     `VIỆC ${job.taskCode}: ${job.taskTitle}\n\n${job.taskDescription}\n\n` +
     `Bạn được GHI trong: ${job.writeGlobs.join(", ")}\n` +
+    // Phạm vi ĐỌC rộng hơn phạm vi GHI rất nhiều — không nói ra thì agent tưởng hai cái bằng nhau.
+    `Bạn được ĐỌC trong: ${job.readGlobs.join(", ")}\n` +
     // Nói thẳng hai giá trị này, vì hàng rào chặn mọi đường agent tự lấy — xem `AgentJob`.
     `Nhánh làm việc: ${job.branch}\n` +
     `Base SHA: ${job.baseCommit}\n` +
