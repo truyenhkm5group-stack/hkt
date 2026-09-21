@@ -200,7 +200,9 @@ export type NominalRow = {
    */
   returnRateSource: "override" | "projected" | "unmeasured" | "history" | "default";
   /** Xuất xứ con số ước tính — để màn hình nói ra thay vì để người đọc đoán. */
-  projection: { eligibleSent: number; active: number; unmodelledActive: number; pending: number; pendingUnmodelled: number; awaitingPickup: number; unmodelledRevenue: number } | null;
+  projection: { eligibleSent: number; active: number; unmodelledActive: number; pending: number; pendingUnmodelled: number; awaitingPickup: number; unmodelledRevenue: number;
+    /** Đơn CỦA CHÍNH MÃ đã đi tới kết cục trong cohort — thước đo con số kia dựa trên bao nhiêu sự thật. */
+    finished: number } | null;
   /**
    * `ORDER_LEVEL` — DT/giá vốn GTC ước tính cân THEO TỪNG ĐƠN (nguồn `projected` / `unmeasured`).
    * `RATE`        — Doanh số POS × TL GTC — chỉ cho nguồn ghi đè / lịch sử / mặc định ("ước tính theo tỷ lệ").
@@ -610,9 +612,28 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis):
       if (overrideRate !== undefined && Number.isFinite(overrideRate)) {
         returnRate = overrideRate;
         returnRateSource = "override";
-      } else if (duBao && duBao.projectedRate !== null) {
+      } else if (duBao && duBao.projectedRate !== null && duBao.deliveredActual + duBao.failedActual > 0) {
         /*
           ĐO ĐƯỢC THÌ DÙNG SỐ ĐO — tỷ lệ của hợp đồng, và TIỀN cân theo TỪNG ĐƠN.
+
+          ═══ "ĐO ĐƯỢC" NGHĨA LÀ MÃ NÀY ĐÃ CÓ KẾT CỤC THẬT, KHÔNG PHẢI "MÔ HÌNH RA ĐƯỢC SỐ" ═══
+
+          Bản trước chỉ hỏi `projectedRate !== null`. Nhưng hợp đồng vẫn trả ra một con số khi mã
+          có đơn ĐANG CHẠY mà CHƯA đơn nào kết thúc — lúc ấy tử số là `0 + Σ P(trạng thái)`, tức
+          **toàn bộ xác suất MƯỢN từ lịch sử các mã khác**, không một chút dữ liệu nào của chính mã.
+
+          Đo production 21/09/2026, Đầm Q005: `giao thật 0 · hoàn 0 · đang giao 62` mà ô tỷ lệ in
+          **37,5%**. Chủ shop hỏi đúng câu phải hỏi: mã chưa giao thành công đơn nào thì 37,5% ở
+          đâu ra? Nó ở lịch sử của Q002/Q003/Q004 — và ba mã ấy lệch nhau từ 26% tới 49%, nên con
+          số mượn KHÔNG nói được gì về mã mới.
+
+          Nay phải có ít nhất MỘT đơn của chính mã đi tới kết cục thì hợp đồng mới được dùng; và
+          nhãn in kèm SỐ ĐƠN ĐÃ KẾT THÚC để một mã mới có 3 đơn kết thúc trông khác hẳn một mã có
+          500. Chưa có kết cục nào ⇒ rơi về lịch sử 90 ngày của mã, hết lịch sử mới tới tỷ lệ khai.
+
+          Đo cùng ngày: Q005 và Q006 có 0 đơn kết thúc trong 90 ngày ⇒ cả hai về 60% khai ở Giả
+          định. Q004 (105 đơn kết thúc), Q002 (1.138), Q003 (474) giữ nguyên số đo; Q001 vốn đã ở
+          nhánh lịch sử (71 đơn) nên không đổi.
         */
         orderLevel = { revenue: duBao.projectedDeliveredRevenue, cogs: duBao.projectedCogs };
         returnRate = Math.round((100 - duBao.projectedRate) * 10) / 10;
@@ -658,7 +679,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis):
         returnRate,
         deliveryRate: returnRate === null ? null : Math.round((100 - returnRate) * 10) / 10,
         returnRateSource,
-        projection: duBao && orderLevel ? { eligibleSent: duBao.eligibleSent, active: duBao.active, unmodelledActive: duBao.unmodelledActive, pending: duBao.pending, pendingUnmodelled: duBao.pendingUnmodelled, awaitingPickup: duBao.awaitingPickup, unmodelledRevenue: duBao.unmodelledRevenue } : null,
+        projection: duBao && orderLevel ? { eligibleSent: duBao.eligibleSent, active: duBao.active, unmodelledActive: duBao.unmodelledActive, pending: duBao.pending, pendingUnmodelled: duBao.pendingUnmodelled, awaitingPickup: duBao.awaitingPickup, unmodelledRevenue: duBao.unmodelledRevenue, finished: duBao.deliveredActual + duBao.failedActual } : null,
         revenueBasis: (orderLevel ? "ORDER_LEVEL" : "RATE") as NominalRow["revenueBasis"],
         unmodelledRevenue: orderLevel && duBao ? duBao.unmodelledRevenue : 0,
         cogsKnown: cogsUnknownQty === 0,
