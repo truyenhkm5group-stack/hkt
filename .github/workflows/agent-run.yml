@@ -60,6 +60,17 @@ on:
 # chạy, nên một lỗi ở chỗ khác cũng không biến quyền này thành đường ghi vào `main`.
 permissions:
   contents: write
+  # ═══ ĐỦ CHO CẦU NỐI MỞ PR, KHÔNG HƠN MỘT NẤC ═══
+  #
+  # Khai `permissions:` ở đây đặt MỌI phạm vi không được liệt kê thành `none`. Cầu nối mở PR xin
+  # `pull-requests: read` để đọc lại PR làm đối chứng — nhiều hơn `none`, nên GitHub coi đó là leo
+  # thang và TỪ CHỐI CẢ WORKFLOW trước khi job đầu tiên chạy (`startup_failure`, không log, không
+  # annotation — đã cắn thật ở lượt chạy #13).
+  #
+  # Luật của workflow được gọi: nó chỉ ĐƯỢC BỚT, không được thêm. Nên nơi gọi phải cấp ÍT NHẤT
+  # những gì nơi được gọi khai. `read` chứ không `write`: cầu nối dùng GITHUB_TOKEN để ĐỌC LẠI PR,
+  # còn việc mở PR đi bằng danh tính App — hai thứ khác nhau và phải giữ khác nhau.
+  pull-requests: read
 
 # Hai lượt chạy agent cùng lúc sẽ tranh nhau cùng một việc và ghi đè bằng chứng của nhau.
 # `cancel-in-progress: false`: cắt ngang một lượt đang chạy cổng còn tệ hơn phải chờ.
