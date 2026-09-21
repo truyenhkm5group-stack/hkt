@@ -92,6 +92,33 @@ export function testMaViecLaMaProduction() {
   assert.ok(/prod_task_code=" >> "\$GITHUB_OUTPUT"/.test(wfThan), "lượt tự kiểm phải xuất mã production RỖNG");
 }
 
+/* ═════════════ 1b · PHẠM VI CHO PHÉP ĐỌC TỪ SỔ VAI ═════════════ */
+
+/**
+ * ĐÃ CẮN THẬT — lượt chạy #16 của `TECH-2`: agent viết `docs/agent-run-reconciliation.md`, bốn cổng
+ * đều PASSED, nhưng bước kiểm phạm vi vẫn ĐỎ vì danh sách cho phép ghi cứng đúng MỘT tên tệp — tệp
+ * mà lượt TỰ KIỂM viết.
+ *
+ * Hậu quả không dừng ở một dòng đỏ: job hỏng ⇒ điều kiện mở PR không đạt ⇒ PR không được mở. Đúng
+ * cái vòng đã cắn ở lượt #14, chỉ khác nguyên nhân.
+ */
+export function testPhamViDocTuSoVai() {
+  const src = readFileSync(path.join(goc, "scripts/agent-proof-report.ts"), "utf8");
+  const than = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  assert.ok(/writeGlobsForRole/.test(than), "phạm vi phải đọc từ CÙNG sổ mà hàng rào lúc chạy dùng");
+  assert.ok(!/"docs\/ai-tech-agent-runner-proof\.md"/.test(than), "KHÔNG được ghi cứng tên tệp của lượt tự kiểm");
+
+  /*
+    VÀ PHẢI SO ĐÚNG KIỂU `checkWritePath` SO: mục kết thúc bằng `/` là TIỀN TỐ.
+
+    Dùng `includes()` trên một sổ khai `docs/` thì KHÔNG tệp nào trong `docs/` khớp — phạm vi rộng
+    hơn lại thành chặt hơn, và mọi lượt chạy thật đều đỏ.
+  */
+  assert.ok(/endsWith\("\/"\)/.test(than), "phải so tiền tố cho mục kết thúc bằng `/`");
+  assert.ok(!/choPhep\.includes\(/.test(than), "so BẰNG với một sổ khai theo thư mục là không tệp nào khớp");
+}
+
 /* ═════════════ 2 · NHẮC MỘT LẦN RỒI MỚI BỎ CUỘC ═════════════ */
 
 /** Provider giả: trả về đúng chuỗi lượt đã dựng sẵn, và đếm xem nó được hỏi mấy lần. */

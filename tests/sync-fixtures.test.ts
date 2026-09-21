@@ -70,9 +70,9 @@ import { testRerunDeBai, testRerunDinhNhanh, testRerunGuards, testRerunPhanHoi, 
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards, testDuongKhaiKhoaKhoiDong } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
 import { testCauNoiVanGiuHangRao, testChuPrKhongLoNoiDungViec, testDieuKienMoPr, testQuyenNoiGoiDuChoNoiDuocGoi } from "./agent-pr-text.test";
-import { testMaViecLaMaProduction, testNhacFinishDungMotLan } from "./agent-run-that.test";
+import { testMaViecLaMaProduction, testNhacFinishDungMotLan, testPhamViDocTuSoVai } from "./agent-run-that.test";
 import { testBanKhaiGanLai, testGanLaiSourceGuards } from "./agent-run-reattach.test";
-import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham } from "./agent-chi-phi.test";
+import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo } from "./agent-chi-phi.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
@@ -1963,8 +1963,10 @@ async function main() {
   testCauNoiVanGiuHangRao();
   testQuyenNoiGoiDuChoNoiDuocGoi();
   testMaViecLaMaProduction();
+  testPhamViDocTuSoVai();
   testBanKhaiGanLai();
   testBacModelTheoVai();
+  testTraGiaTheoTienTo();
   testDemHoiThoai();
   testKhongNangBacAmTham();
   testGanLaiSourceGuards();
