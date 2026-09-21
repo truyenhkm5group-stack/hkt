@@ -38,9 +38,9 @@ So sánh với sổ ERP
 |---|---|---|
 | **Có sổ** | `CO_SO` | Lượt chạy GitHub đã có dòng trong `tech_agent_runs`. Bình thường. |
 | **Chưa xong** | `CHUA_XONG` | Lượt chạy vẫn đang chạy (status = `in_progress`). Chỗ này chỉ bỏ qua, chờ tới khi xong. |
-| **Hỏng trước** | `KHONG_CHAY` | Lượt chạy kết thúc với status `failure` / `neutral` / `cancelled` **TRỊ CÓ MỐC TẠO TRƯỚC KHI AGENT CHẠY**. Đó là lỗi của workflow setup hoặc tác vụ sơ bộ, không liên quan sổ. |
-| **Mất di sản** | `MAT_DI_SAN` | Lượt chạy THÀNH CÔNG nhưng KHÔNG có dòng sổ, **MỐC TẠO TRƯỚC KHI CỬA `tech_agent_runs` HOẠT ĐỘNG** (mục 3.4). Là di sản từ lỗi cũ đã vá, không còn xảy ra. |
-| **Mất ĐANG XẢY RA** | `MAT_DANG_XAY_RA` | Lượt chạy THÀNH CÔNG nhưng KHÔNG có dòng sổ, **MỐC TẠO SAU KHI CỬA HOẠT ĐỘNG**. Điều này **PHẢI BẰNG KHÔNG**. Nếu không, cửa chép sổ đang bị lỗi. |
+| **Hỏng trước** | `KHONG_CHAY` | Lượt chạy kết thúc với status không phải `success` (ví dụ `failure`, `neutral`, `cancelled`). Đó là lỗi của workflow setup hoặc tác vụ sơ bộ, agent chưa kịp chạy, không liên quan sổ. |
+| **Mất di sản** | `MAT_DI_SAN` | Lượt chạy THÀNH CÔNG nhưng KHÔNG có dòng sổ, **tạo TRƯỚC MỐC CỬA CHÉP SỔ HOẠT ĐỘNG** (mục 3.4). Là di sản từ lỗi cũ đã vá, không còn xảy ra. |
+| **Mất ĐANG XẢY RA** | `MAT_DANG_XAY_RA` | Lượt chạy THÀNH CÔNG nhưng KHÔNG có dòng sổ, **tạo SAU MỐC CỬA HOẠT ĐỘNG**. Điều này **PHẢI BẰNG KHÔNG**. Nếu không, cửa chép sổ đang bị lỗi. |
 
 ## 3. Chi tiết kỹ thuật
 
@@ -48,7 +48,7 @@ So sánh với sổ ERP
 
 Mỗi lượt chạy GitHub được xác định bởi:
 - `run_id` (ID workflow run)
-- `run_attempt` (số lần retry của cùng một run_id — GitHub tự retry nếu bước quá timeout)
+- `run_attempt` (số lần retry của cùng một run_id — tăng khi có người bấm re-run)
 
 ERP nối thông qua hàm `agentRunExternalRef()`:
 ```typescript
@@ -70,7 +70,7 @@ classifyAgentRunLedger({
 })
 ```
 
-**Mốc chia đôi di sản vs. đang xảy ra** nằm ở hằng số `REAP_STALE_RUNS_LIVE_AT` trong `lib/agents/runner.ts`. Lượt chạy được tạo:
+**Mốc chia đôi di sản vs. đang xảy ra** nằm ở hằng số `LEDGER_LIVE_AT` trong `lib/constants/agent-run-ledger.ts`. Lượt chạy được tạo:
 - TRƯỚC mốc này: mất sổ → đếm vào `MAT_DI_SAN` (không báo, vì đã vá)
 - SAU mốc này: mất sổ → đếm vào `MAT_DANG_XAY_RA` ⚠️ (báo, vì lỗi còn)
 
@@ -82,23 +82,28 @@ Workflow `agent-run.yml` có một loạt bước trước `run-agent.js`:
 - Xác thực API
 - ...
 
-Nếu một bước ấy thất bại, workflow dừng lại với status `failure` hoặc `neutral` — **lỗi này không liên quan tới sổ** vì agent chưa kịp chạy. Job phân loại nó vào `KHONG_CHAY` và bỏ qua.
+Nếu một bước ấy thất bại, workflow dừng lại với status không phải `success` (ví dụ `failure` hoặc `neutral`) — **lỗi này không liên quan tới sổ** vì agent chưa kịp chạy. Job phân loại nó vào `KHONG_CHAY` và bỏ qua.
 
-Cách nhận biết: mốc workflow tạo (`createdAt`) sớm hơn thời gian agent kỳ vọng chạy xong, và status không phải `success`.
+Cách nhận biết: `conclusion !== "success"` — khi đó agent chưa chạy một vòng nào, không có dòng sổ là đúng.
 
-### 3.4 Cửa `tech_agent_runs` khi nào hoạt động?
+### 3.4 Mốc `LEDGER_LIVE_AT` — khi nào cửa chép sổ bắt đầu hoạt động?
 
-Bảng `tech_agent_runs` được tạo lần đầu trong lần deploy nào đó. **Tất cả lượt chạy TRƯỚC mốc đó không thể có sổ**, dù có thành công hay không.
+Bảng `tech_agent_runs` đã tồn tại từ trước. **Tất cả lượt chạy TRƯỚC một mốc cụ thể không thể có sổ**, dù có thành công hay không.
 
-Hằng số `REAP_STALE_RUNS_LIVE_AT` trong `lib/agents/runner.ts` ghi mốc đó:
+Hằng số `LEDGER_LIVE_AT` trong `lib/constants/agent-run-ledger.ts` ghi mốc ấy — **không phải ngày bảng được tạo, mà là ngày cửa chép sổ bắt đầu với tới được**:
+
 ```typescript
-// Ví dụ: khi bộ này được triển khai lần đầu ngày 15/09/2026
-const REAP_STALE_RUNS_LIVE_AT = new Date("2026-09-15T00:00:00Z");
+/**
+ * Deploy #368 (PR #49 — middleware chặn cửa TRƯỚC khi phép kiểm khoá chạy) kết thúc lúc
+ * `2026-09-20T12:35:20Z`. Lượt chạy agent #6 bắt đầu lúc `12:35:54Z` — **34 giây sau** — và nó là
+ * dòng ĐẦU TIÊN từng có trong sổ production. Mọi lượt trước đó không có dòng nào.
+ */
+export const LEDGER_LIVE_AT = new Date("2026-09-20T12:35:20Z");
 ```
 
 Job dùng mốc này để phân biệt:
-- Lượt cũ (trước ngày bộ hoạt động): `MAT_DI_SAN` — chỉ báo số, không kêu cảnh báo
-- Lượt mới (sau ngày bộ hoạt động): `MAT_DANG_XAY_RA` — kêu cảnh báo ⚠️
+- Lượt cũ (trước mốc): `MAT_DI_SAN` — chỉ báo số, không kêu cảnh báo
+- Lượt mới (sau mốc): `MAT_DANG_XAY_RA` — kêu cảnh báo ⚠️
 
 ## 4. Bản ghi (output trong `sync_runs`)
 
@@ -181,7 +186,7 @@ Vá là việc của người. Job chỉ chỉ ra chỗ hụt để person/autom
 ### Lỗi sơ bộ vs. lỗi sổ
 
 Nếu workflow hỏng ở bước `Install dependencies` chẳng hạn:
-- Agent không kịp chạy → `status = failure`, `conclusion != success`
+- Agent không kịp chạy → `conclusion != "success"`
 - Job phân loại → `KHONG_CHAY`
 - Bỏ qua (không liên quan sổ)
 
@@ -250,7 +255,7 @@ Job báo:
 
 - [ ] Bảng `tech_agent_runs` đã được tạo (migration đã áp, hoặc chạy `npm run db:migrate`).
 
-- [ ] Hằng số `REAP_STALE_RUNS_LIVE_AT` đã được đặt đúng trong `lib/agents/runner.ts` (mốc khi bộ này được triển khai lần đầu).
+- [ ] Hằng số `LEDGER_LIVE_AT` đã được đặt đúng trong `lib/constants/agent-run-ledger.ts` (mốc khi cửa chép sổ bắt đầu hoạt động).
 
 - [ ] Workflow `agent-run.yml` đã có bước ghi sổ (gọi API `POST /api/sync/agent-run-reconcile` hoặc tương tự).
 
@@ -261,5 +266,6 @@ Job báo:
 - **Mã nguồn**: `lib/tech/agent-run-reconcile.ts`
 - **Workflow**: `.github/workflows/agent-run.yml`
 - **Sổ lượt chạy**: `tech_agent_runs` trong `db/schema.ts`
+- **Hằng số mốc**: `lib/constants/agent-run-ledger.ts`
 - **AGENTS.md mục 51**: Giải thích tại sao không tự phát hiện khoảng hụt mà cần so sánh hai nguồn
 - **AGENTS.md mục 35**: Giải thích tại sao không tự dựng lại dòng đã mất
