@@ -2,6 +2,7 @@ import { listKey, memo } from "@/lib/cache";
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
+import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { toDate } from "@/lib/format";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { availableStockExpr, erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
@@ -511,7 +512,7 @@ export async function getProductDetail(id: string) {
       limit: 10,
       columns: { id: true, systemId: true, billFullName: true, billPhone: true, source: true, stage: true, statusName: true, totalPriceAfterDiscount: true, insertedAt: true },
       with: {
-        shipment: { columns: { stage: true, vtpStatusName: true } },
+        attempts: { columns: { id: true, attemptNo: true, direction: true, createdAt: true, vtpOrderNumber: true, trackingCode: true, stage: true, vtpStatusName: true } },
         items: {
           columns: { productName: true, variationDetail: true, quantity: true, variantId: true, productId: true, sku: true },
           where: (oi, ops) => (variantIds.length ? ops.or(ops.inArray(oi.variantId, variantIds), ops.eq(oi.productId, product.id)) : ops.eq(oi.productId, product.id)),
@@ -542,7 +543,8 @@ export async function getProductDetail(id: string) {
     selling: variants.filter((v) => !v.isHidden && !v.isLocked && !v.isRemoved).length,
   };
 
-  return { ...product, variants, totals, daily, histories, recentOrders, warehouses };
+  // Một đơn có thể nhiều lần gửi — chọn lần ĐẠI DIỆN bằng đúng luật `PRIMARY_ATTEMPT` mà cột tiền dùng.
+  return { ...product, variants, totals, daily, histories, recentOrders: recentOrders.map((d) => ({ ...d, shipment: vanDonDaiDien(d.attempts) })), warehouses };
 }
 
 export type ProductDetail = NonNullable<Awaited<ReturnType<typeof getProductDetail>>>;

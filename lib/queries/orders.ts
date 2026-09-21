@@ -2,6 +2,7 @@ import { listKey, memo } from "@/lib/cache";
 import { and, asc, count, desc, eq, exists, gte, ilike, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
+import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { OrderStage } from "@/db/schema";
 import { ORDER_STAGE_LABEL, ORDER_STAGE_ORDER } from "@/lib/constants/pancake";
@@ -106,7 +107,8 @@ export async function listOrders(params: ListParams) {
         lastUpdateStatusAt: true,
       },
       with: {
-        shipment: { columns: { id: true, stage: true, carrier: true, trackingCode: true, vtpOrderNumber: true, codStatus: true, vtpStatusName: true } },
+        // MỌI lần gửi rồi CHỌN lần đại diện — cùng luật với `PRIMARY_ATTEMPT` mà cột tiền dùng.
+        attempts: { columns: { id: true, attemptNo: true, direction: true, createdAt: true, vtpOrderNumber: true, trackingCode: true, stage: true, carrier: true, codStatus: true, vtpStatusName: true } },
         items: { columns: { productName: true, variationDetail: true, quantity: true, image: true }, limit: 3 },
         // Lịch sử khách theo Pancake — đủ để chấm rủi ro ngay trên dòng.
         customer: { columns: { succeedOrderCount: true, returnedOrderCount: true, isBlock: true } },
@@ -125,7 +127,13 @@ export async function listOrders(params: ListParams) {
   const rows = rowsRaw.map((r) => {
     const c = r.customer;
     const risk = c ? assessCustomerRisk({ succeed: c.succeedOrderCount ?? 0, returned: c.returnedOrderCount ?? 0, isBlock: Boolean(c.isBlock) }, riskCfg) : null;
-    return { ...r, risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null };
+    /*
+      MỘT CHỖ TÍNH, MỌI CỘT ĐỌC LẠI.
+
+      Cột tiền của trang này đi qua `PRIMARY_ATTEMPT` ở tầng SQL; `vanDonDaiDien` là bản TypeScript
+      của đúng luật ấy. Để mỗi cột tự chọn lần gửi là mở đường cho dòng nói hai điều khác nhau.
+    */
+    return { ...r, shipment: vanDonDaiDien(r.attempts), risk: risk?.risky ? { severity: risk.severity, reasons: risk.reasons } : null };
   });
 
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };

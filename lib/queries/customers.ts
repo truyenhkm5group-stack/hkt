@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lte, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getDb, schema, type Db } from "@/db";
+import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { toDate } from "@/lib/format";
 import type { ListParams } from "@/lib/search-params";
@@ -245,7 +246,7 @@ export async function getCustomerDetail(id: string) {
       orderBy: [desc(o.insertedAt)],
       limit: 100,
       columns: { id: true, systemId: true, source: true, stage: true, statusName: true, totalPriceAfterDiscount: true, moneyToCollect: true, itemsCount: true, totalQuantity: true, insertedAt: true },
-      with: { shipment: { columns: { id: true, stage: true, carrier: true, vtpStatusName: true, codStatus: true } }, items: { columns: { productName: true, variationDetail: true, quantity: true }, limit: 3 } },
+      with: { attempts: { columns: { id: true, attemptNo: true, direction: true, createdAt: true, vtpOrderNumber: true, trackingCode: true, stage: true, carrier: true, vtpStatusName: true, codStatus: true } }, items: { columns: { productName: true, variationDetail: true, quantity: true }, limit: 3 } },
     }),
     db
       .select({
@@ -283,7 +284,8 @@ export async function getCustomerDetail(id: string) {
   return {
     ...customer,
     stats,
-    orders,
+    // Một đơn có thể nhiều lần gửi — chọn lần ĐẠI DIỆN bằng đúng luật `PRIMARY_ATTEMPT` mà cột tiền dùng.
+    orders: orders.map((d) => ({ ...d, shipment: vanDonDaiDien(d.attempts) })),
     topProducts: topProducts.map((p) => ({ ...p, quantity: Number(p.quantity ?? 0), revenue: Number(p.revenue ?? 0), orders: Number(p.orders ?? 0), lastAt: toDate(p.lastAt) })),
   };
 }
