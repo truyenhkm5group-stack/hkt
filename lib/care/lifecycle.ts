@@ -4,6 +4,7 @@ import { careEntryFor, CARE_ENTRY_SUBSTATES, CARE_TERMINAL_STAGES, LEFT_WAREHOUS
 import { settleCarrierRequests } from "@/lib/care/carrier-requests";
 import { SUBSTATE_IMPLIES_PICKED_UP, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import type { CareOutcome } from "@/lib/constants/care-outcome";
+import { returnApproved } from "@/lib/constants/care-return-approval";
 import { CARE_TERMINAL_STATUSES, type CareStatus } from "@/lib/constants/care";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { rowsOf } from "@/lib/sql-rows";
@@ -300,20 +301,48 @@ export async function applyCarrierEventToCare(db: Db, input: CarrierEventInput):
     where: and(eq(schema.shipmentCare.shipmentId, input.shipmentId), eq(schema.shipmentCare.active, true)),
   });
 
+  // Đợt đang mở, hoặc đợt gần nhất người đã đóng mà chưa có kết cục — "đã xong" của người không
+  // làm chứng từ ĐVVC mất chỗ để về.
+  const doiKetCuc = async () =>
+    dangMo ??
+    (await db.query.shipmentCare.findFirst({
+      where: and(eq(schema.shipmentCare.shipmentId, input.shipmentId), CHUA_CO_KET_QUA),
+      orderBy: [desc(schema.shipmentCare.episodeNo)],
+    }));
+
   /* ───────── ĐÓNG: ĐVVC đã nói kết cục cuối ───────── */
   if (CARE_TERMINAL_STAGES.includes(stage)) {
     const ketCuc = ketCucCua(stage, stage === "CANCELLED" ? await roiKho() : true);
     if (!ketCuc) return { ...KHONG_LAM_GI, careCaseId: dangMo?.id ?? null, reason: "chặng cuối không dịch được kết cục" };
-    // Đợt đang mở, hoặc đợt gần nhất người đã đóng mà chưa có kết cục — "đã xong" của người không
-    // làm chứng từ ĐVVC mất chỗ để về.
-    const target =
-      dangMo ??
-      (await db.query.shipmentCare.findFirst({
-        where: and(eq(schema.shipmentCare.shipmentId, input.shipmentId), CHUA_CO_KET_QUA),
-        orderBy: [desc(schema.shipmentCare.episodeNo)],
-      }));
+    const target = await doiKetCuc();
     if (!target) return { ...KHONG_LAM_GI, reason: "không có đợt nào chờ kết cục" };
     return chotKetQua(db, target, ketCuc, { substate, occurredAt: input.occurredAt, statusName: input.vtpStatusName, source });
+  }
+
+  /*
+    ───────── ĐÓNG: ĐVVC ĐÃ DUYỆT HOÀN — hết cửa can thiệp (chủ shop chốt 21/09/2026) ─────────
+
+    `RETURNING` cố ý KHÔNG nằm trong `CARE_TERMINAL_STAGES`: bưu cục vẫn phát lại được, nên chặng
+    ấy một mình không kết luận gì. Nhưng nó gộp ba mã có ý nghĩa vận hành trái ngược, và một trong
+    ba là điểm không quay lại — xem `lib/constants/care-return-approval.ts`:
+
+      505 "Yêu cầu chuyển hoàn"      → mới ĐỀ NGHỊ, shop còn bấm được phát tiếp (508 / 550).
+      515 "Bưu cục phát duyệt hoàn"  → ĐÃ DUYỆT. Chữ "Đã duyệt hoàn" trên viettelpost.vn.
+      502 "Chuyển hoàn bưu cục gốc"  → hàng đã trên đường về.
+
+    Từ 515/502 trở đi, ca vẫn nằm trong hàng đợi thì nhân viên mở ra và không làm được gì —
+    đúng thứ hàng đợi sinh ra để chặn. Nên chốt luôn `RESCUE_FAILED`, đúng như hợp đồng
+    `CARE_OUTCOME_HINT.RESCUE_FAILED` đã khai từ đầu ("vận đơn cuối cùng quay đầu — ĐANG HOÀN /
+    đã hoàn"); phần `đang hoàn` của câu ấy trước nay chưa có nhánh nào thi hành.
+
+    KHÔNG chạm tới `ORDER_OUTCOME`: đây là kết quả của một CA CHĂM SÓC, không phải kết quả đơn —
+    tiền và tồn kho vẫn chờ chứng từ 504 như cũ (luật 1). Và khi 504 tới thật, `CHUA_CO_KET_QUA`
+    trong mệnh đề `where` của `chotKetQua` chặn lượt ghi thứ hai, nên không đếm hai lần.
+  */
+  if (stage === "RETURNING" && returnApproved({ code: input.vtpStatus, text: input.vtpStatusName })) {
+    const target = await doiKetCuc();
+    if (!target) return { ...KHONG_LAM_GI, reason: "ĐVVC đã duyệt hoàn nhưng không có đợt nào chờ kết cục" };
+    return chotKetQua(db, target, { outcome: "RESCUE_FAILED", logistics: "FAILED" }, { substate, occurredAt: input.occurredAt, statusName: input.vtpStatusName, source });
   }
 
   /* ───────── MỞ: ĐVVC báo một sự cố cần người ───────── */

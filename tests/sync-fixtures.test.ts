@@ -218,6 +218,7 @@ import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testCareEffect } from "./care-effect.test";
 import { testCareReopen } from "./care-reopen.test";
+import { testCareReturnApproval } from "./care-return-approval.test";
 import { testCareResolution } from "./care-resolution.test";
 import { testShipmentsQaFixes } from "./shipments-qa-fixes.test";
 import { testSessionRenewal } from "./session-renewal.test";
@@ -1783,6 +1784,8 @@ async function main() {
   await testCareOs(db);
   testCareEffect();
   await testCareReopen(db);
+  // Cùng nhóm: bài "đã duyệt hoàn" dựng kiện + đợt riêng mang tiền tố `cra-` và TỰ DỌN sạch.
+  await testCareReturnApproval(db);
   // Ngay sau đó: bài kết quả xử lý dựng kiện + đợt riêng mang tiền tố `cres-` và TỰ DỌN sạch, nên
   // không dòng nào của nó lọt vào tổng của báo cáo khác.
   await testCareResolution(db);
