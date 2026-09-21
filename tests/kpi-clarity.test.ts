@@ -135,6 +135,58 @@ export async function testKpiCohortUsesHandoffDate(db: Db) {
   console.log("✓ Cohort KPI theo NGÀY ĐVVC TIẾP NHẬN: cùng một cửa sổ, lọc theo ngày gửi thấy 1 kiện còn lọc theo ngày tạo đơn thấy 0 — hai câu hỏi khác nhau, hai câu trả lời khác nhau");
 }
 
+/* ───── 5b · Dòng gộp theo mã đếm ĐƠN, không cộng các mẫu mã ───── */
+export async function testProductRowCountsOrdersOnce(db: Db) {
+  const P = "gop-";
+  await db.insert(schema.products).values({ id: `${P}p1`, name: "Đầm GỘP", customId: "GOPQ9", isRemoved: false }).onConflictDoNothing();
+  for (const v of ["S", "M"]) {
+    await db.insert(schema.productVariants).values({ id: `${P}v-${v}`, productId: `${P}p1`, sku: `GOPQ9-${v}`, detail: v }).onConflictDoNothing();
+  }
+  /*
+    MỘT đơn, HAI mẫu mã của CÙNG một mã hàng — hình dạng dữ liệu đã đo trên production 21/09/2026:
+    Q003 có 365 đơn thật nhưng cộng các dòng mẫu mã lại ra 405 (+11,0%), Q005 202/175 (+15,4%).
+
+    Ở grain MẪU MÃ mỗi dòng đếm đúng một đơn, nên TỔNG hai dòng là 2. Dòng gộp phải nói 1.
+  */
+  await db.insert(schema.orders).values({ id: `${P}o1`, stage: "CONFIRMED", status: 2, insertedAt: new Date("2026-08-10T03:00:00Z"), totalPriceAfterDiscount: 900_000, billFullName: "Khách GỘP" }).onConflictDoNothing();
+  for (const v of ["S", "M"]) {
+    await db.insert(schema.orderItems).values({ id: `${P}i-${v}`, orderId: `${P}o1`, variantId: `${P}v-${v}`, sku: `GOPQ9-${v}`, productName: "Đầm GỘP", variationDetail: v, quantity: 1, lineTotal: 450_000, isBonus: false }).onConflictDoNothing();
+  }
+  await db.insert(schema.shipments).values({ id: `${P}s1`, orderId: `${P}o1`, vtpOrderNumber: `${P}T1`, trackingCode: `${P}T1`, stage: "DELIVERED", codCollected: 900_000, pickedUpAt: new Date("2026-08-11T03:00:00Z"), deliveredAt: new Date("2026-08-14T03:00:00Z"), createdAt: new Date("2026-08-10T04:00:00Z"), isFinal: true }).onConflictDoNothing();
+
+  const r = await getReturnRateByVariant({
+    period: { key: "custom", label: "thử", from: new Date("2026-08-09T00:00:00Z"), to: new Date("2026-08-20T23:59:59Z"), fromKey: "2026-08-09", toKey: "2026-08-20" },
+    basis: "SHIPPED",
+    q: "GOPQ9",
+    minShipped: 1,
+    sort: "successRate",
+    dir: "asc",
+    page: 1,
+    pageSize: 50,
+  });
+
+  assert.equal(r.all.length, 2, "hai mẫu mã ⇒ hai dòng ở grain mẫu mã");
+  const congLai = r.all.reduce((t, x) => t + x.shipped, 0);
+  assert.equal(congLai, 2, "và cộng hai dòng ấy lại ra 2 — ĐÚNG cái mà dòng gộp cũ in ra");
+
+  const ma = r.productRows.find((x) => x.productKey === `${P}p1`);
+  assert.ok(ma, "phải có dòng gộp theo mã hàng do MÁY CHỦ dựng");
+  assert.equal(ma.shipped, 1, "nhưng chỉ có MỘT đơn thật — dòng gộp đếm đơn, không cộng mẫu mã");
+  assert.equal(ma.delivered, 1);
+  assert.equal(ma.variants, 2, "vẫn nói rõ mã này có 2 mẫu mã phát sinh trong kỳ");
+  assert.notEqual(ma.shipped, congLai, "hai con số PHẢI khác nhau ở ca này, nếu không bài kiểm chưa chứng minh được gì");
+
+  // Mọi dòng mẫu mã mang khoá mã hàng để trình duyệt gộp theo ĐÚNG mã, không theo chuỗi tên.
+  for (const x of r.all) assert.equal(x.productKey, `${P}p1`);
+
+  await db.delete(schema.shipments).where(eq(schema.shipments.id, `${P}s1`));
+  for (const v of ["S", "M"]) await db.delete(schema.orderItems).where(eq(schema.orderItems.id, `${P}i-${v}`));
+  await db.delete(schema.orders).where(eq(schema.orders.id, `${P}o1`));
+  for (const v of ["S", "M"]) await db.delete(schema.productVariants).where(eq(schema.productVariants.id, `${P}v-${v}`));
+  await db.delete(schema.products).where(eq(schema.products.id, `${P}p1`));
+  console.log("✓ Dòng gộp theo mã: 1 đơn 2 mẫu mã ⇒ dòng gộp nói 1 đơn, cộng các mẫu mã nói 2 — đếm ở máy chủ theo đơn, không cộng ở trình duyệt");
+}
+
 /* ───── 6 · Kiện không có chứng cứ ĐVVC tiếp nhận thì NGOÀI cohort, không bị gán ngày ───── */
 export async function testNoHandoffEvidenceStaysOut(db: Db) {
   const P = "kpin-";
