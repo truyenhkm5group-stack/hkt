@@ -50,8 +50,41 @@ const PRICE_PER_MTOK: Record<string, { input: number; output: number; cacheRead:
   "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
 };
 
+/**
+ * ═══════════ TÊN MODEL TRONG PHONG BÌ TRẢ VỀ KHÔNG PHẢI TÊN TRONG BẢNG GIÁ ═══════════
+ *
+ * ĐÃ CẮN THẬT — lượt chạy agent #16. Kho gọi bí danh `claude-haiku-4-5`, nhưng Anthropic trả về
+ * `claude-haiku-4-5-20251001` (bí danh + ngày phát hành). Tra thẳng chuỗi ấy trong bảng giá không
+ * thấy gì, nên cả lượt chạy in ra **"tiền: CHƯA ĐO ĐƯỢC"** — đúng luật (mục 42: không định giá
+ * được thì không được bịa ra 0), nhưng vô dụng: phép đo sinh ra để trả lời câu "tốn bao nhiêu" lại
+ * không trả lời được câu nào.
+ *
+ * Nên tra theo TIỀN TỐ DÀI NHẤT khớp. Chọn dài nhất chứ không phải khớp đầu tiên: nếu một ngày có
+ * cả `claude-opus-5` lẫn `claude-opus-5-mini` trong bảng, khớp đầu tiên sẽ tính giá model to cho
+ * model nhỏ — sai theo hướng đắt lên, và không ai kiểm lại một con số đã có vẻ hợp lý.
+ *
+ * Không khớp tiền tố nào thì VẪN trả `null`. Đoán giá của một model chưa khai còn tệ hơn nói
+ * "chưa biết".
+ */
+export function khoaGiaKhop(model: string, khoa: readonly string[]): string | null {
+  if (khoa.includes(model)) return model;
+  /*
+    KHỚP DÀI NHẤT. Bảng giá hôm nay không có khoá nào là tiền tố của khoá khác, nên tính chất này
+    chưa đổi được kết quả nào — nó là hàng rào cho ngày bảng giá có thêm một biến thể. Tách thành
+    hàm thuần nhận danh sách khoá chính là để bài kiểm dựng được tình huống ấy mà không phải đợi
+    tới ngày nó xảy ra thật.
+  */
+  const hop = khoa.filter((k) => model.startsWith(k)).sort((a, b) => b.length - a.length);
+  return hop.length ? hop[0] : null;
+}
+
+export function giaCuaModel(model: string): { input: number; output: number; cacheRead: number; cacheWrite: number } | null {
+  const k = khoaGiaKhop(model, Object.keys(PRICE_PER_MTOK));
+  return k ? PRICE_PER_MTOK[k] : null;
+}
+
 export function estimateCostUsd(model: string, usage: AiUsage): number | null {
-  const p = PRICE_PER_MTOK[model];
+  const p = giaCuaModel(model);
   if (!p) return null;
   const usd = (usage.inputTokens * p.input + usage.outputTokens * p.output + usage.cacheReadTokens * p.cacheRead + usage.cacheWriteTokens * p.cacheWrite) / 1_000_000;
   return Math.round(usd * 1_000_000) / 1_000_000;
