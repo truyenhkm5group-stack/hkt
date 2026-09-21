@@ -48,6 +48,7 @@ import { testOrderOutcomeContract } from "./contract-order-outcome.test";
 import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
 import { testVtpSourceOfTruth } from "./vtp-source-of-truth.test";
+import { testWebhookLatency } from "./webhook-latency.test";
 import { testReconciliation } from "./reconciliation.test";
 import { testMetricsContract } from "./metrics-contract.test";
 import { testMetricShapeConsistency } from "./metric-shape-consistency.test";
@@ -1738,6 +1739,9 @@ async function main() {
   await testVtpState(db);
   await testVtpIngestion(db);
   await testVtpSourceOfTruth(db);
+  // Độ trễ webhook: hàm thuần + một lượt đọc truy vấn thật. KHÔNG gieo dòng nào vào
+  // `webhook_events`, nên nó không đổi tổng của bài nào khác.
+  await testWebhookLatency();
   await testReconciliation(db);
   await testLogisticsPerformance(db);
   await testVtpHealth(db);
