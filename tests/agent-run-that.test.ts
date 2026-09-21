@@ -201,3 +201,60 @@ export async function testNhacFinishDungMotLan() {
   assert.equal(c.soLuot(), 1, "gọi finish ngay ⇒ không có lượt hỏi thừa nào");
   assert.equal(c.daNhan.length, 1, "và không câu nhắc nào được gửi");
 }
+
+/* ═════════════ VAI AGENT ĐI THEO VIỆC, KHÔNG PHẢI HẰNG SỐ TRONG YAML ═════════════ */
+
+/**
+ * ĐÃ CẮN THẬT — lượt chạy #21, việc thật THỨ HAI của Phòng Tech AI.
+ *
+ * Chủ shop tạo `TECH-3`, gán vai **QA**, rồi bấm "Khởi động lượt chạy agent" ngay trong ERP. Cửa
+ * đọc có khoá trả về đúng việc ấy — log in `▶ TECH-3 · Bài kiểm khoá luật…` nên khúc đó chạy đúng.
+ * Rồi bước chạy gọi:
+ *
+ *     npm run agent:run -- --task "TECH-3" --agent documentation
+ *
+ * `agent-fetch-task.ts` chỉ BẬT vai của chính việc (`qa`); mọi vai khác nằm im như `seedTechAgents`
+ * để lại. Nên vai bị gọi nhầm đang TẮT:
+ *
+ *     ⛔ BLOCKED — Agent "Tài liệu" đang TẮT — chủ shop chưa bật nó.
+ *     tiền: chưa gọi model lần nào.
+ *
+ * Hàng rào làm ĐÚNG việc của nó. Cái sai là ĐỀ BÀI ở tầng YAML — cùng lớp với "đề bài giấu phạm vi
+ * ĐỌC" (lượt #17) và "đề bài giấu nhánh/base": một sự thật của việc bị thay bằng một hằng số viết
+ * sẵn, và hằng số ấy đúng đúng một lần — cho vai đầu tiên từng chạy.
+ *
+ * Tên nhánh cũng mang cùng chỗ hở: bước đẩy tìm `ai/documentation/*` và từ chối mọi tên khác, nên
+ * một lượt QA có làm xong vẫn không đẩy nổi nhánh `ai/qa/…` của chính nó.
+ */
+export function testVaiAgentTheoViec() {
+  const wf = readFileSync(path.join(goc, ".github/workflows/agent-run.yml"), "utf8");
+  // Bỏ dòng chú thích YAML: một câu GIẢI THÍCH về cái bẫy không phải là cái bẫy.
+  const than = wf
+    .split("\n")
+    .filter((d) => !/^\s*#/.test(d))
+    .join("\n");
+
+  assert.ok(!/--agent\s+documentation/.test(than), "KHÔNG được ghi cứng vai trong workflow — vai là thuộc tính của VIỆC");
+  assert.equal(
+    (than.match(/--agent "\$\{\{ steps\.setup\.outputs\.agent_key \}\}"/g) ?? []).length,
+    2,
+    "cả hai đường (chạy mới và chạy lại) đều phải lấy vai từ bước lấy việc",
+  );
+  assert.ok(/agent_key=\$AGENT_KEY/.test(than), "bước lấy việc phải xuất `agent_key` cho các bước sau");
+  assert.ok(!/ai\/documentation\//.test(than), "tên nhánh được phép đẩy phải theo VAI của việc, không ghim một vai");
+  assert.ok(/ai\/\$VAI\//.test(than), "bước đẩy phải dựng mẫu nhánh từ vai đang chạy");
+
+  /*
+    HÌNH DẠNG KHOÁ VAI LÀ ĐÓNG.
+
+    Khoá này đi thẳng vào một mẫu `git branch --list` và một nhánh `case`. Một khoá mang ký tự lạ
+    thì mẫu ấy không còn là mẫu mình nghĩ nữa.
+  */
+  assert.ok(/\*\[!a-z0-9_-\]\*/.test(than), "vai phải kiểm hình dạng trước khi đi vào mẫu tên nhánh");
+
+  /* Và hai bước khởi tạo PHẢI in ra vai — không in thì bước trên không có gì để đọc. */
+  for (const t of ["scripts/agent-fetch-task.ts", "scripts/agent-proof-setup.ts"]) {
+    const src = readFileSync(path.join(goc, t), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.ok(/AGENT_KEY=/.test(src), `${t} phải in AGENT_KEY= để workflow đọc lại`);
+  }
+}

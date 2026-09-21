@@ -161,6 +161,20 @@ jobs:
           TASK_CODE="$(grep -oE '^TASK_CODE=.+' setup.log | tail -1 | cut -d= -f2)"
           if [ -z "$TASK_CODE" ]; then echo "::error::Không lấy được mã việc."; exit 1; fi
           echo "task_code=$TASK_CODE" >> "$GITHUB_OUTPUT"
+
+          # ═══ VAI ĐI THEO VIỆC, KHÔNG PHẢI MỘT HẰNG SỐ Ở ĐÂY ═══
+          #
+          # ĐÃ CẮN THẬT, lượt chạy #21: việc thật thứ hai được giao cho vai QA, còn bước chạy gọi
+          # `--agent documentation`. Bước lấy việc chỉ BẬT vai của chính việc ấy, nên vai bị gọi
+          # nhầm đang TẮT và lượt chạy BLOCKED trước khi gọi model một lần nào. Việc đã tới đúng
+          # nơi — chỉ cái TÊN VAI là bịa ra ở tầng YAML.
+          AGENT_KEY="$(grep -oE '^AGENT_KEY=.+' setup.log | tail -1 | cut -d= -f2)"
+          if [ -z "$AGENT_KEY" ]; then echo "::error::Không lấy được vai agent."; exit 1; fi
+          # Hình dạng ĐÓNG: khoá vai này đi thẳng vào một mẫu tên nhánh ở bước đẩy.
+          case "$AGENT_KEY" in
+            *[!a-z0-9_-]*|"") echo "::error::Vai agent có ký tự lạ: $AGENT_KEY"; exit 1 ;;
+          esac
+          echo "agent_key=$AGENT_KEY" >> "$GITHUB_OUTPUT"
           # MÃ VIỆC TRÊN PRODUCTION. Có ô `task` ⇒ mã vừa lấy CHÍNH LÀ mã production (script lấy
           # việc đã đổi mã của CSDL tạm về đúng nó). Không có ⇒ lượt TỰ KIỂM, để RỖNG: lượt ấy không
           # thuộc việc nào trên production, và cửa chép sổ khi ấy không gắn nó vào đâu cả.
@@ -187,7 +201,7 @@ jobs:
             exit 1
           fi
 
-      - name: Chạy agent DOCUMENTATION
+      - name: Chạy agent
         id: run
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -203,7 +217,7 @@ jobs:
             printenv FEEDBACK > agent-feedback.txt || : > agent-feedback.txt
             npm run --silent agent:run -- \
               --task "${{ steps.setup.outputs.task_code }}" \
-              --agent documentation \
+              --agent "${{ steps.setup.outputs.agent_key }}" \
               --gates "${{ inputs.gates }}" \
               --rerun-branch "$RERUN_BRANCH" \
               --feedback-file agent-feedback.txt \
@@ -211,7 +225,7 @@ jobs:
           else
             npm run --silent agent:run -- \
               --task "${{ steps.setup.outputs.task_code }}" \
-              --agent documentation \
+              --agent "${{ steps.setup.outputs.agent_key }}" \
               --gates "${{ inputs.gates }}"
           fi
 
@@ -259,12 +273,13 @@ jobs:
         env:
           RERUN_BRANCH: ${{ inputs.rerun_branch }}
           CO_VIEC: ${{ inputs.task }}
+          VAI: ${{ steps.setup.outputs.agent_key }}
         run: |
           # Lượt chạy lại đẩy ĐÚNG nhánh được yêu cầu; `git branch --list` chỉ là đường của lượt mới.
-          BR="${RERUN_BRANCH:-$(git branch --list 'ai/documentation/*' --format '%(refname:short)' | head -1)}"
+          BR="${RERUN_BRANCH:-$(git branch --list "ai/$VAI/*" --format '%(refname:short)' | head -1)}"
           if [ -z "$BR" ]; then echo "Không có nhánh agent nào để đẩy."; exit 0; fi
           case "$BR" in
-            ai/documentation/*) : ;;
+            "ai/$VAI/"*) : ;;
             *) echo "::error::Từ chối đẩy nhánh ngoài phạm vi: $BR"; exit 1 ;;
           esac
           git push origin "refs/heads/$BR:refs/heads/$BR"

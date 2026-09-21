@@ -289,11 +289,48 @@ lời nói dối.
 
 ---
 
+## Việc thật thứ hai (TECH-3) — nửa VỀ chạy tới đâu
+
+Chủ shop tạo **TECH-3**, gán vai **QA**, rồi bấm *Khởi động lượt chạy agent* **ngay trong ERP** —
+lần đầu tiên lệnh chạy đi từ màn hình nghiệp vụ chứ không từ giao diện Actions.
+
+| Khúc | Kết quả |
+|---|---|
+| Lệnh khởi động mang MÃ việc | **chạy** — nhật ký việc ghi *"cho ĐÚNG việc này"*, câu cũ *"nó CHƯA nhận được việc này"* đã biến mất |
+| Cửa đọc có khoá trả đúng việc | **chạy** — log in `▶ TECH-3 · Bài kiểm khoá luật…` |
+| Agent làm việc | **chưa tới** — BLOCKED trước khi gọi model một lần nào |
+
+```
+▶ TECH-3 · Bài kiểm khoá luật "nhánh agent về tới dòng việc" chạy trên CSDL thật
+  agent=documentation · vai=DOCUMENTATION
+⛔ BLOCKED — Agent "Tài liệu" đang TẮT
+  tiền: chưa gọi model lần nào.
+```
+
+Việc giao cho vai **QA**; workflow gọi `--agent documentation`. Bước lấy việc chỉ BẬT vai của
+chính việc ấy, nên vai bị gọi nhầm đang tắt và hàng rào chặn đúng lúc — **hàng rào làm đúng việc
+của nó**. Cái sai là ĐỀ BÀI ở tầng YAML.
+
+Đây là **lần thứ ba** cùng một lớp lỗi: một sự thật của VIỆC bị thay bằng một hằng số viết sẵn,
+và hằng số ấy đúng đúng một lần — cho vai đầu tiên từng chạy.
+
+| Lượt | Thứ bị giấu / bịa trong đề bài |
+|---|---|
+| trước #13 | nhánh và commit nền |
+| #17 | phạm vi ĐỌC |
+| **#21** | **VAI** — và cả mẫu tên nhánh `ai/documentation/*` ở bước đẩy |
+
+Tên nhánh mang cùng chỗ hở: bước đẩy tìm `ai/documentation/*` và từ chối mọi tên khác, nên một
+lượt QA có làm xong vẫn không đẩy nổi nhánh `ai/qa/…` của chính nó. Hai chỗ, một nguyên nhân.
+
+**Chi phí của lượt hỏng này: $0** — nó dừng trước khi gọi model.
+
+---
 ## NEXT
 
 | Việc | Phụ thuộc |
 |---|---|
-| Giao việc thật thứ hai cho agent — lần này bấm từ **`/tech`**, không phải từ Actions | chủ shop tạo việc (AI không tự tạo việc thật, cố ý) |
+| Chạy lại TECH-3 sau khi vá vai — đo nốt nửa VỀ | — (sau khi bản vá lên production) |
 | Đo lại nửa VỀ trên production: `branch` có về tới dòng việc không, việc có tự đi tiếp không | — (sau khi bản vá lên production) |
 | Hạ bậc model cho Copilot ERP | **quyết định của chủ shop** — đổi model là đổi chất lượng trả lời |
 | Bỏ bước duyệt workflow cho PR của agent | **quyết định của chủ shop** — đây là cài đặt bảo mật |

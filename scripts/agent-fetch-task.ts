@@ -143,6 +143,7 @@ async function main() {
     if (daCo.code !== viec.code) await db.update(schema.techTasks).set({ code: viec.code }).where(eq(schema.techTasks.id, daCo.id));
     console.log(`▶ Việc đã có trong CSDL tạm — dùng lại dưới mã ${viec.code}.`);
     console.log(`TASK_CODE=${viec.code}`);
+    console.log(`AGENT_KEY=${viec.agentKey}`);
     return;
   }
   const t = await createTechTask(
@@ -174,6 +175,17 @@ async function main() {
   await db.update(schema.techTasks).set({ code: viec.code }).where(eq(schema.techTasks.id, t.id));
   console.log(`▶ Đã gieo ${viec.code} (mã cục bộ ban đầu ${t.code}, đã đổi về mã production) · rủi ro ${t.risk}`);
   console.log(`TASK_CODE=${viec.code}`);
+  /*
+    VAI ĐI THEO VIỆC, KHÔNG PHẢI MỘT HẰNG SỐ TRONG YAML.
+
+    ĐÃ CẮN THẬT, lượt chạy #21 — việc thật thứ hai, giao cho vai QA: workflow gọi
+    `--agent documentation`, vai ấy KHÔNG được bật trong CSDL tạm (chỉ vai của việc mới được
+    bật), nên lượt chạy BLOCKED ngay trước khi gọi model. Việc đã tới đúng nơi; chỉ cái TÊN VAI
+    là bịa.
+
+    In ra đây để workflow đọc lại, cùng đường với `TASK_CODE`.
+  */
+  console.log(`AGENT_KEY=${viec.agentKey}`);
 }
 
 main()
