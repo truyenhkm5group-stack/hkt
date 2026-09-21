@@ -6,7 +6,7 @@ import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import type { TechGateResult, TechRisk } from "@/lib/constants/tech";
 import { finishTechAgentRun, startTechAgentRun, type TechActor } from "@/lib/tech/service";
 import { dinhNhanh, AgentWorkspace } from "@/lib/agents/workspace";
-import type { AgentExecutor } from "@/lib/agents/executor";
+import type {AgentExecutor, AgentOutcome } from "@/lib/agents/executor";
 
 /**
  * NHỊP TIM MỖI PHÚT, ĐỐI VỚI NGƯỠNG THU DỌN 45 PHÚT.
@@ -45,6 +45,12 @@ export type RunnerResult = {
   gates: { typecheck: TechGateResult; lint: TechGateResult; test: TechGateResult; build: TechGateResult };
   summary: string;
   reason: string | null;
+  /**
+   * Tiền của lượt chạy — `null` khi lượt chạy dừng TRƯỚC khi gọi model lần nào (thiếu khoá, việc
+   * không hợp lệ). `null` ở đây là CHƯA CÓ LƯỢT GỌI NÀO, khác hẳn "gọi rồi mà không định giá được"
+   * (cái đó là `chiPhi.usd === null`).
+   */
+  chiPhi: AgentOutcome["chiPhi"] | null;
 };
 
 const KHONG_CHAY: TechGateResult = "UNKNOWN";
@@ -89,6 +95,8 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
     gates: { typecheck: KHONG_CHAY, lint: KHONG_CHAY, test: KHONG_CHAY, build: KHONG_CHAY },
     summary: "",
     reason: null,
+    // Dừng trước khi gọi model lần nào ⇒ CHƯA CÓ lượt gọi, không phải "tốn 0 đồng".
+    chiPhi: null,
   };
 
   /* ───────── 1. Việc và agent phải có thật ───────── */
@@ -270,7 +278,7 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
       opts.actor,
     );
 
-    return { status, runId, branch, baseCommit: opts.baseCommit, resultCommit, filesChanged, gates, summary, reason: outcome.error };
+    return { status, runId, branch, baseCommit: opts.baseCommit, resultCommit, filesChanged, gates, summary, reason: outcome.error, chiPhi: outcome.chiPhi };
   } catch (e) {
     const loi = e instanceof Error ? e.message : String(e);
     await finishTechAgentRun({ runId, status: "FAILED", summary: "Lượt chạy hỏng giữa chừng.", error: loi }, opts.actor).catch(() => undefined);

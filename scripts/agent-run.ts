@@ -22,6 +22,7 @@ import { getDb, schema } from "@/db";
 import { AiAgentExecutor } from "@/lib/agents/executor";
 import { runAgentOnTask } from "@/lib/agents/runner";
 import { getAiProvider } from "@/lib/ai/provider";
+import { tierForRole } from "@/lib/constants/agent-model";
 import { aiDisabledReason } from "@/lib/ai/router";
 import { systemActor } from "@/lib/constants/actor";
 
@@ -78,11 +79,20 @@ async function main() {
     process.exit(1);
   }
 
-  const provider = getAiProvider("copilot");
+  /*
+    BẬC MODEL ĐI THEO VAI, KHÔNG PHẢI MỘT HẰNG SỐ.
+
+    Trước 21/09/2026 chỗ này gọi thẳng `getAiProvider("copilot")` cho MỌI vai — tức `claude-opus-5`
+    ($5/M vào, $25/M ra) để viết một tệp Markdown. Xem `lib/constants/agent-model.ts`.
+  */
+  const vai = await db.query.techAgents.findFirst({ where: eq(schema.techAgents.key, agentKey), columns: { role: true } });
+  const bac = tierForRole(vai?.role);
+  const provider = getAiProvider(bac);
   const executor = new AiAgentExecutor(provider, aiDisabledReason());
 
   console.log(`▶ ${task.code} · ${task.title}`);
-  console.log(`  agent=${agentKey} · base=${baseCommit.slice(0, 12)} · cổng=${gates.join(",")}`);
+  console.log(`  agent=${agentKey} · vai=${vai?.role ?? "?"} · bậc=${bac} · model=${provider?.model ?? "(chưa bật)"}`);
+  console.log(`  base=${baseCommit.slice(0, 12)} · cổng=${gates.join(",")}`);
   // In ĐỘ DÀI phản hồi, không in nội dung: log CI công khai, còn nội dung thì đã nằm ở PR.
   if (rerunBranch) console.log(`  chạy lại trên nhánh ${rerunBranch} · phản hồi: ${feedback.length ? `${feedback[0].noiDung.length} ký tự` : "không có"}`);
   const san = executor.available();
@@ -109,6 +119,20 @@ async function main() {
   if (res.resultCommit) console.log(`  commit: ${res.resultCommit}`);
   if (res.filesChanged.length) console.log(`  tệp đổi: ${res.filesChanged.join(", ")}`);
   console.log(`  cổng: typecheck=${res.gates.typecheck} lint=${res.gates.lint} test=${res.gates.test} build=${res.gates.build}`);
+  /*
+    IN TIỀN RA, MỖI LƯỢT CHẠY.
+
+    Chủ shop báo "mới test luồng mà đã hết $25" và không ai chỉ ra được tiền đi đâu — vì lượt chạy
+    agent diễn ra trên máy Actions với CSDL tạm, không ghi vào `ai_interactions` của production.
+    Một con số in ngay trong log là thứ rẻ nhất chấm dứt chuyện đoán.
+  */
+  if (res.chiPhi) {
+    const c = res.chiPhi;
+    const gia = c.usd === null ? "CHƯA ĐO ĐƯỢC (model không có trong bảng giá)" : `$${c.usd.toFixed(4)}`;
+    console.log(`  tiền: ${gia} · ${c.soVong} vòng · vào ${c.vao} · ra ${c.ra} · đệm đọc ${c.demDoc} · đệm ghi ${c.demGhi}`);
+  } else {
+    console.log("  tiền: chưa gọi model lần nào.");
+  }
   if (res.summary) console.log(`  tóm tắt: ${res.summary.slice(0, 500)}`);
   console.log("\nKHÔNG merge, KHÔNG push, KHÔNG deploy — người xem rồi quyết.");
   process.exit(res.status === "SUCCEEDED" ? 0 : 1);

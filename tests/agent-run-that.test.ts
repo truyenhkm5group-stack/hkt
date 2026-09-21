@@ -106,10 +106,12 @@ function providerGia(luot: { text?: string; finish?: string }[]) {
       if (cuoi?.role === "user") daNhan.push(cuoi.content.map((c) => c.text ?? "").join(" "));
       const b = luot[Math.min(i, luot.length - 1)];
       i += 1;
+      // Mọi provider THẬT đều trả `usage`; fake phải trả theo, nếu không nó đang kiểm một hợp đồng khác.
+      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
       if (b.finish !== undefined) {
-        return { content: [{ type: "tool_use" as const, id: `t${i}`, name: "finish", input: { summary: b.finish } }] };
+        return { content: [{ type: "tool_use" as const, id: `t${i}`, name: "finish", input: { summary: b.finish } }], usage, model: "claude-haiku-4-5" };
       }
-      return { content: [{ type: "text" as const, text: b.text ?? "" }] };
+      return { content: [{ type: "text" as const, text: b.text ?? "" }], usage, model: "claude-haiku-4-5" };
     },
   };
   return { provider: provider as unknown as AiProvider, daNhan, soLuot: () => i };

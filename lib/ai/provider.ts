@@ -142,15 +142,33 @@ export class AnthropicProvider implements AiProvider {
       // `lib/ai/schema-dialect.ts`. Ràng buộc bị gỡ ở đây vẫn được zod kiểm ở máy chủ trước khi
       // tool chạy (`runCopilot` / `confirmCopilotActions`), nên không luật nghiệp vụ nào bị nới.
       tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: toDialectSchema(t.inputSchema, this.schemaDialect) as Anthropic.Beta.BetaTool["input_schema"], strict: true })),
-      messages: req.messages.map((m) => ({
+      /*
+        ═══════════ ĐỆM CẢ PHẦN ĐẦU CỦA CUỘC HỘI THOẠI, KHÔNG CHỈ PROMPT HỆ THỐNG ═══════════
+
+        Một vòng lặp agent gửi lại TOÀN BỘ lịch sử ở mỗi vòng. Tới vòng thứ n, phần đầu giống hệt
+        n−1 lần trước — nhưng nếu không đánh dấu đệm thì lần nào cũng trả tiền đầu vào đầy đủ.
+
+        Đo trên bảng giá đang khai: `claude-opus-5` là **$5/M** đầu vào nhưng **$0,5/M** khi đọc từ
+        đệm — mười lần. Với 24 vòng, phần lịch sử lặp lại chính là khoản tiền lớn nhất của cả lượt
+        chạy, và nó là khoản dễ cắt nhất vì nội dung KHÔNG đổi.
+
+        Cách làm: đánh dấu `cache_control` lên khối CUỐI CÙNG của tin nhắn CUỐI CÙNG. Anthropic đệm
+        toàn bộ tiền tố tính tới điểm ấy, nên vòng sau đọc lại gần như cả cuộc hội thoại từ đệm.
+        Chỉ một điểm đánh dấu — nhiều điểm không đệm được nhiều hơn, chỉ tốn thêm chỗ.
+
+        KHÔNG đổi một chữ nào của nội dung gửi đi: đệm là chuyện hoá đơn, không phải chuyện ngữ nghĩa.
+      */
+      messages: req.messages.map((m, iTin) => ({
         role: m.role,
-        content: m.content.map((b) =>
-          b.type === "text"
-            ? ({ type: "text", text: b.text } as const)
+        content: m.content.map((b, iKhoi) => {
+          const cuoiCung = iTin === req.messages.length - 1 && iKhoi === m.content.length - 1;
+          const dem = cuoiCung ? { cache_control: { type: "ephemeral" as const } } : {};
+          return b.type === "text"
+            ? ({ type: "text", text: b.text, ...dem } as const)
             : b.type === "tool_use"
-              ? ({ type: "tool_use", id: b.id, name: b.name, input: b.input } as const)
-              : ({ type: "tool_result", tool_use_id: b.toolUseId, content: b.content, is_error: b.isError ?? false } as const),
-        ),
+              ? ({ type: "tool_use", id: b.id, name: b.name, input: b.input, ...dem } as const)
+              : ({ type: "tool_result", tool_use_id: b.toolUseId, content: b.content, is_error: b.isError ?? false, ...dem } as const);
+        }),
       })),
     };
     // Lượt dài đi bằng streaming — xem `NGUONG_KHONG_STREAM`. Phong bì trả về giống hệt nhau, nên
