@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { checkWritePath } from "@/lib/constants/agent-sandbox";
-import { NEVER_WRITE, WRITE_GLOBS_BY_ROLE, writeGlobsForRole } from "@/lib/constants/agent-scopes";
+import { NEVER_WRITE, TEST_NEU_LAM_VI_DU, WRITE_GLOBS_BY_ROLE, writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import { demKhangDinh, kiemHangRaoBaiKiem, moTaViPham } from "@/lib/constants/agent-test-guard";
 import { TECH_AGENT_ROLES } from "@/lib/constants/tech";
 
@@ -89,6 +89,21 @@ export function testHangRaoTuyetDoi() {
     "CLAUDE.md",
     "package.json",
     "next.config.ts",
+    "db/migrate.ts",
+    "lib/agents/runner.ts",
+    "lib/tech/dispatch-service.ts",
+    "app/api/tech/agent-run/route.ts",
+    "tests/sync-fixtures.test.ts",
+    "tests/contract-order-outcome.test.ts",
+    "tests/repo-integrity.test.ts",
+    "tests/migration-journal.test.ts",
+    "tests/migration-upgrade-path.test.ts",
+    "tests/access-model.test.ts",
+    "tests/cost-allocation.test.ts",
+    "tests/product-notes.test.ts",
+    "tests/care-reopen.test.ts",
+    "tests/test-hygiene.test.ts",
+    "tests/agent-scopes.test.ts",
   ];
   for (const f of cam) {
     assert.ok(matchesNeverWrite(f), `ca kiểm "${f}" phải nằm trong NEVER_WRITE, nếu không nó đang đo nhầm hàng rào`);
@@ -117,6 +132,8 @@ export function testHangRaoTuyetDoi() {
   for (const xau of ["docs/../lib/actions/x.ts", "../x.ts", "/etc/passwd", "~/x"]) {
     assert.ok(!checkWritePath(xau, ["docs/", "tests/"]).allowed, `"${xau}" phải bị chặn`);
   }
+
+  testBaiKiemKhoaLuatNgoaiTamVoi();
 }
 
 /* ═════════════ 3 · KHÔNG LÀM XANH CỔNG BẰNG CÁCH XOÁ KHẲNG ĐỊNH ═════════════ */
@@ -162,6 +179,71 @@ export function testHangRaoBaiKiem() {
 
 /* ═════════════ 4 · QUÉT MÃ NGUỒN ═════════════ */
 
+/* ═════════════ 3b · BÀI KIỂM KHOÁ LUẬT PHẢI NẰM NGOÀI TẦM VỚI ═════════════ */
+
+/*
+  GỌI TỪ TRONG `testHangRaoTuyetDoi()`, KHÔNG ĐĂNG KÝ RIÊNG Ở BỘ CHẠY — và đó là một quyết định
+  về VẬN HÀNH, không phải về kiểu dáng.
+
+  Mọi phiên thêm một bài kiểm đều sửa ĐÚNG MỘT dòng `import` trong `tests/sync-fixtures.test.ts`.
+  Nhánh này đã xung đột ở đúng dòng ấy BỐN lần trong một buổi chiều, mỗi lần đều phải gộp tay và
+  mỗi lần gộp đều làm huỷ lượt duyệt đang có. Khối này thuộc về hàng rào tuyệt đối, nên gọi nó
+  ngay tại đó vừa đúng chỗ về mặt nội dung, vừa làm nhánh KHÔNG chạm bộ chạy một dòng nào.
+
+  Không mất gì: cùng một tiến trình, cùng một lượt chạy, mọi khẳng định vẫn chạy và vẫn đỏ đúng
+  lúc cần đỏ.
+*/
+function testBaiKiemKhoaLuatNgoaiTamVoi() {
+  /*
+    ───────── 3b.1 HAI ĐƯỜNG LÁCH MÀ BỘ ĐẾM KHẲNG ĐỊNH KHÔNG THẤY ─────────
+
+    `kiemHangRaoBaiKiem()` đếm SỐ khẳng định, nên nó chặn được "xoá bớt" nhưng không thấy hai
+    đường dưới đây. Bài kiểm dựng CẢ HAI trên chính cái hàm ấy — nếu một ngày nó tự phát hiện
+    được thì hai dòng này đỏ, và đó là tin tốt cần biết.
+  */
+  const doiGiaTri = kiemHangRaoBaiKiem([
+    { path: "tests/contract-order-outcome.test.ts", truoc: "assert.equal(outcome, 'RETURNED');", sau: "assert.equal(outcome, 'DELIVERED');" },
+  ]);
+  assert.ok(doiGiaTri.ok, "bộ đếm khẳng định KHÔNG thấy việc đổi giá trị kỳ vọng — đó là vì sao cần hàng rào đường dẫn");
+
+  const xoaDongDangKy = kiemHangRaoBaiKiem([
+    { path: "tests/sync-fixtures.test.ts", truoc: "  await testA();\n  await testB();", sau: "  await testA();" },
+  ]);
+  assert.ok(xoaDongDangKy.ok, "xoá một dòng ĐĂNG KÝ không đổi số khẳng định — cả một khối biến mất mà bộ đếm im lặng");
+
+  /* …và hàng rào đường dẫn bịt đúng hai chỗ đó. */
+  for (const f of ["tests/contract-order-outcome.test.ts", "tests/sync-fixtures.test.ts"]) {
+    assert.ok(!checkWritePath(f, ["docs/", "tests/"]).allowed, `${f} phải ngoài tầm với của vai QA`);
+  }
+  /* Nhưng vai QA vẫn phải viết được bài kiểm MỚI — hàng rào chặn tất cả là hàng rào vô dụng. */
+  assert.ok(checkWritePath("tests/mot-bai-moi.test.ts", ["docs/", "tests/"]).allowed, "vai QA vẫn viết được bài kiểm mới");
+
+  /*
+    ───────── 3b.2 CHỐNG TRÔI: SỔ ĐI THEO AGENTS.md, KHÔNG ĐI THEO TRÍ NHỚ ─────────
+
+    Mọi tệp kiểm thử mà AGENTS.md NHẮC TÊN phải được xếp vào một trong hai chỗ: hàng rào tuyệt
+    đối, hoặc danh sách "nêu làm ví dụ" kèm lý do. Thêm một luật mới có nhắc tên một bài kiểm mà
+    quên xếp ⇒ dòng này đỏ ngay, thay vì bài ấy lặng lẽ nằm trong tầm với.
+  */
+  const luat = readFileSync(path.join(goc, "AGENTS.md"), "utf8");
+  const duocNhac = [...new Set([...luat.matchAll(/tests\/[a-z0-9-]+\.test\.ts/g)].map((m) => m[0]))];
+  assert.ok(duocNhac.length >= 10, `AGENTS.md phải nhắc tên ít nhất 10 bài kiểm, mới thấy ${duocNhac.length}`);
+  const chuaXep = duocNhac.filter((f) => !matchesNeverWrite(f) && !TEST_NEU_LAM_VI_DU[f]);
+  assert.deepEqual(chuaXep, [], "bài kiểm được AGENTS.md nhắc tên phải nằm trong NEVER_WRITE, hoặc khai ở TEST_NEU_LAM_VI_DU kèm lý do");
+
+  /* Danh sách miễn trừ phải nêu lý do, và chỉ chứa tệp CÓ THẬT — mục trỏ vào hư không là mục không ai dám xoá. */
+  for (const [f, vi] of Object.entries(TEST_NEU_LAM_VI_DU)) {
+    assert.ok(vi.trim().length > 20, `miễn trừ "${f}" phải nêu lý do`);
+    assert.ok(existsSync(path.join(goc, f)), `miễn trừ "${f}" trỏ vào tệp không còn tồn tại`);
+    assert.ok(!matchesNeverWrite(f), `"${f}" vừa trong hàng rào vừa trong danh sách miễn trừ — hai chỗ nói hai điều khác nhau`);
+  }
+
+  /* Mọi mục kiểm thử TRONG hàng rào cũng phải trỏ vào tệp có thật, cùng lý do chống trôi. */
+  for (const g of NEVER_WRITE.filter((x) => x.startsWith("tests/"))) {
+    assert.ok(existsSync(path.join(goc, g)), `vùng cấm "${g}" không còn tồn tại — đổi tên thì phải sửa sổ, nếu không nó hết bảo vệ mà không ai biết`);
+  }
+}
+
 export function testPhamViSourceGuards() {
   const sandbox = readFileSync(path.join(goc, "lib/constants/agent-sandbox.ts"), "utf8");
   const runner = readFileSync(path.join(goc, "lib/agents/runner.ts"), "utf8");
@@ -194,5 +276,7 @@ export function testPhamViSourceGuards() {
   assert.ok(boChuThich(proof).includes("kiemHangRaoBaiKiem"), "bước nghiệm thu phải kiểm việc làm yếu bộ kiểm thử");
   assert.ok(proof.includes('f.startsWith("tests/")'), "và phải xét đúng các tệp trong tests/");
 
-  console.log("✓ Nấc 2 (phạm vi theo vai): vai lạ rơi về docs/ · NEVER_WRITE chặn TRƯỚC sổ vai (12 vùng cấm, gồm CHÍNH hàng rào) · xoá khẳng định hay xoá cả tệp kiểm thử đều KHÔNG ĐẠT");
+  console.log(
+    `✓ Nấc 2 (phạm vi theo vai): vai lạ rơi về docs/ · NEVER_WRITE chặn TRƯỚC sổ vai (${NEVER_WRITE.length} vùng cấm, gồm CHÍNH hàng rào và nơi thi hành nó) · xoá khẳng định hay xoá cả tệp kiểm thử đều KHÔNG ĐẠT · bài kiểm khoá luật ngoài tầm với (đổi giá trị kỳ vọng và xoá dòng đăng ký đều lọt bộ đếm)`,
+  );
 }
