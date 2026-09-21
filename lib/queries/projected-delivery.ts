@@ -637,6 +637,17 @@ export type ProjectedCounts = {
   unmodelledRevenue: number;
   /** Giá vốn ước tính cân theo từng đơn, cùng cách với doanh thu. */
   projectedCogs: number;
+  /**
+   * SỐ SẢN PHẨM ước tính GIAO TỚI TAY KHÁCH — cân theo từng đơn, CÙNG một phép cân với
+   * `projectedCogs` (đã giao thật + đang giao × P + chưa rời kho × P(chưa rời kho)).
+   *
+   * Tách khỏi `projectedCogs` vì tiền và số lượng trả lời hai câu hỏi khác nhau, và vì tiền
+   * BIẾN MẤT khi mẫu mã chưa có giá nhập: đo production 21/09/2026, Q004 · Q005 · Q006 có
+   * 492 sản phẩm bán ra không biết giá vốn ⇒ `projectedCogs` bị ép về 0 trong khi SỐ LƯỢNG
+   * vẫn đo được bình thường. Bảng "LN theo hàng nhập" cần đúng số lượng đó để lấy
+   * `SL nhập − SL giao TC`, nên nó không được đi nhờ cột tiền.
+   */
+  projectedQty: number;
   /** Số sản phẩm không biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn bị tính là 0. */
   cogsUnknownQty: number;
 };
@@ -694,6 +705,7 @@ function accMoi(): Acc {
     projectedDeliveredRevenue: 0,
     unmodelledRevenue: 0,
     projectedCogs: 0,
+    projectedQty: 0,
     cogsUnknownQty: 0,
   };
 }
@@ -708,7 +720,7 @@ function accMoi(): Acc {
  * Hàm này KHÔNG đụng tới `eligibleSent`, `active` hay `projectedDelivered`: tiền và tỷ lệ GTC là
  * hai chiều riêng (đặc tả §1), và một kiện chưa rời kho không nằm trong tỷ lệ nào.
  */
-function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number }, lookup: ProbabilityLookup): boolean {
+function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number; qty: number }, lookup: ProbabilityLookup): boolean {
   const tra = lookup.of(NOT_SHIPPED_STATE);
   if (tra.p === null) {
     acc.unmodelledRevenue += don.revenue;
@@ -716,6 +728,7 @@ function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number }, lo
   }
   acc.projectedDeliveredRevenue += don.revenue * tra.p;
   acc.projectedCogs += don.cogs * tra.p;
+  acc.projectedQty += don.qty * tra.p;
   return true;
 }
 
@@ -753,7 +766,7 @@ function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number }, lo
  */
 function canMotDon(
   acc: Acc,
-  don: { outcome: string; con: string; revenue: number; cogs: number; cogsUnknownQty: number; productCode: string | null; ageHours: number | null },
+  don: { outcome: string; con: string; revenue: number; cogs: number; qty: number; cogsUnknownQty: number; productCode: string | null; ageHours: number | null },
   lookup: ProbabilityLookup,
 ) {
   acc.cogsUnknownQty += don.cogsUnknownQty;
@@ -766,6 +779,7 @@ function canMotDon(
       acc.deliveredRevenueActual += don.revenue;
       acc.projectedDeliveredRevenue += don.revenue;
       acc.projectedCogs += don.cogs;
+      acc.projectedQty += don.qty;
       return;
     case "RETURNED":
     case "RETURNED_BY_RULE":
@@ -800,6 +814,7 @@ function canMotDon(
         acc.projectedDelivered += tra.p;
         acc.projectedDeliveredRevenue += don.revenue * tra.p;
         acc.projectedCogs += don.cogs * tra.p;
+        acc.projectedQty += don.qty * tra.p;
       }
       return;
     }
@@ -825,6 +840,7 @@ function chotAcc(a: Acc): ProjectedCounts {
     projectedDeliveredRevenue: Math.round(a.projectedDeliveredRevenue),
     unmodelledRevenue: Math.round(a.unmodelledRevenue),
     projectedCogs: Math.round(a.projectedCogs),
+    projectedQty: Math.round(a.projectedQty),
   };
 }
 
@@ -911,7 +927,7 @@ export async function getProjectedDeliveryMetrics(
       nhận `count(distinct …) over (…)`, và các dòng của cùng một đơn đã nằm sẵn trong tay sau vòng
       gộp bên dưới — đếm ở đó vừa đúng vừa không tốn thêm một lượt quét nào.
     */
-    const rows = rowsOf<{ order_id: string; key: string | null; code: string | null; name: string | null; line_total: string | number; line_cogs: string | number; cogs_unknown_qty: string | number; order_total: string | number; outcome: string; con: string; age_hours: string | number | null; product_code: string | null }>(
+    const rows = rowsOf<{ order_id: string; key: string | null; code: string | null; name: string | null; line_total: string | number; line_qty: string | number; line_cogs: string | number; cogs_unknown_qty: string | number; order_total: string | number; outcome: string; con: string; age_hours: string | number | null; product_code: string | null }>(
       await db.execute(sql`
         with don as (
           select "orders"."id" as order_id,
@@ -930,6 +946,7 @@ export async function getProjectedDeliveryMetrics(
                ${ten} as name,
                max(coalesce("products"."custom_id", '')) as product_code,
                coalesce(sum("order_items"."line_total"), 0) as line_total,
+               coalesce(sum("order_items"."quantity"), 0) as line_qty,
                coalesce(sum("order_items"."quantity" * ${LINE_UNIT_COST}), 0) as line_cogs,
                coalesce(sum("order_items"."quantity") filter (where ${LINE_UNIT_COST} = 0), 0) as cogs_unknown_qty
           from don d
@@ -944,14 +961,15 @@ export async function getProjectedDeliveryMetrics(
     const maCuaDon = new Map<string, Set<string>>();
     const donThieuMa = new Set<string>();
     // Mỗi đơn ĐÚNG MỘT dòng ở grain đơn: tất cả dòng-mã của cùng đơn mang cùng `con`/`outcome`/`order_total`.
-    const donTheoId = new Map<string, { outcome: string; con: string; revenue: number; cogs: number; cogsUnknownQty: number; productCode: string | null; ageHours: number | null }>();
+    const donTheoId = new Map<string, { outcome: string; con: string; revenue: number; cogs: number; qty: number; cogsUnknownQty: number; productCode: string | null; ageHours: number | null }>();
     /* Mã hàng THẬT (custom_id) của từng đơn — để biết đơn thuộc đúng một mã hay nhiều mã. */
     const maHangCuaDon = new Map<string, Set<string>>();
     /* Dòng-mã chờ cân: phải đợi quét hết mới biết đơn có mấy mã, mà mã quyết định bậc điều kiện hoá. */
-    const choCan: { key: string; outcome: string; con: string; revenue: number; cogs: number; cogsUnknownQty: number; orderId: string }[] = [];
+    const choCan: { key: string; outcome: string; con: string; revenue: number; cogs: number; qty: number; cogsUnknownQty: number; orderId: string }[] = [];
 
     for (const r of rows) {
       const cogs = Number(r.line_cogs ?? 0);
+      const soLuong = Number(r.line_qty ?? 0);
       const tuoi = r.age_hours === null || r.age_hours === undefined ? null : Number(r.age_hours);
       const cu =
         donTheoId.get(r.order_id) ??
@@ -960,11 +978,13 @@ export async function getProjectedDeliveryMetrics(
           con: r.con,
           revenue: Number(r.order_total ?? 0),
           cogs: 0,
+          qty: 0,
           cogsUnknownQty: 0,
           productCode: null,
           ageHours: tuoi !== null && Number.isFinite(tuoi) ? tuoi : null,
         };
       cu.cogs += cogs;
+      cu.qty += soLuong;
       cu.cogsUnknownQty += Number(r.cogs_unknown_qty ?? 0);
       donTheoId.set(r.order_id, cu);
 
@@ -987,7 +1007,7 @@ export async function getProjectedDeliveryMetrics(
       if (!theoMa.has(key)) theoMa.set(key, { ...accMoi(), key, code: (r.code ?? "").trim() || key, name: r.name ?? "" });
       // Doanh thu của mã trong đơn = tổng dòng hàng của mã đó; không có dòng nào thì lấy tiền đơn.
       const doanhThu = Number(r.line_total ?? 0) || Number(r.order_total ?? 0);
-      choCan.push({ key, outcome: r.outcome, con: r.con, revenue: doanhThu, cogs, cogsUnknownQty: Number(r.cogs_unknown_qty ?? 0), orderId: r.order_id });
+      choCan.push({ key, outcome: r.outcome, con: r.con, revenue: doanhThu, cogs, qty: soLuong, cogsUnknownQty: Number(r.cogs_unknown_qty ?? 0), orderId: r.order_id });
     }
 
     /*
@@ -1004,7 +1024,7 @@ export async function getProjectedDeliveryMetrics(
       const row = theoMa.get(x.key);
       if (!row) continue;
       const d = donTheoId.get(x.orderId);
-      canMotDon(row, { outcome: x.outcome, con: x.con, revenue: x.revenue, cogs: x.cogs, cogsUnknownQty: x.cogsUnknownQty, productCode: d?.productCode ?? null, ageHours: d?.ageHours ?? null }, lookup);
+      canMotDon(row, { outcome: x.outcome, con: x.con, revenue: x.revenue, cogs: x.cogs, qty: x.qty, cogsUnknownQty: x.cogsUnknownQty, productCode: d?.productCode ?? null, ageHours: d?.ageHours ?? null }, lookup);
     }
 
     let multiCodeOrders = 0;

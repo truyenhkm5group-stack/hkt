@@ -3,7 +3,7 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
-import { ColumnVisibility } from "@/components/data-table/column-visibility"
+import { TableTools } from "@/components/data-table/table-tools"
 import { STICKY_HEAD, TABLE_FLOW, TABLE_SCROLL } from "@/lib/constants/table-ux"
 
 /**
@@ -28,7 +28,7 @@ function Table({ className, columnToggle = true, containerClassName, scrollable 
   const ref = React.useRef<HTMLTableElement>(null)
   return (
     <div className="relative w-full">
-      {columnToggle ? <ColumnVisibility tableRef={ref} /> : null}
+      {columnToggle ? <TableTools tableRef={ref} /> : null}
       <div
         data-slot="table-container"
         data-scrollable={scrollable ? "true" : "false"}
@@ -94,12 +94,19 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
   )
 }
 
+/**
+ * `relative` là CHỖ NEO của tay kéo bề rộng (`components/data-table/column-resize.tsx`): tay kéo
+ * là con tuyệt đối của chính ô tiêu đề. Ở bảng có tiêu đề DÍNH, `position: sticky` đã là một vị
+ * trí neo hợp lệ nên `relative` không đổi gì; ở bảng KHÔNG dính (bảng in, bảng lồng trong ô) thì
+ * nó là thứ giữ tay kéo không văng ra góc trang. Tuyệt đối KHÔNG đổi `sticky` thành `relative` ở
+ * đây — làm vậy là gỡ mất tiêu đề dính của toàn ERP để lấy một cái neo.
+ */
 function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (
     <th
       data-slot="table-head"
       className={cn(
-        "h-9 px-2.5 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+        "relative h-9 px-2.5 text-left align-middle font-medium whitespace-nowrap text-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className
       )}
       {...props}

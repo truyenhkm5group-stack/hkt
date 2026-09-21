@@ -4,21 +4,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Columns3, RotateCcw } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { columnHeaders } from "@/components/data-table/column-dom";
+import { tableConfigKey } from "@/lib/table/column-resize";
 
 type HeaderInfo = { index: number; label: string };
 
-function headerLabel(th: HTMLTableCellElement, index: number) {
-  if (th.querySelector('input[type="checkbox"], [role="checkbox"]')) return "Chọn";
-  const text = (th.textContent ?? "").replace(/\s+/g, " ").trim();
-  return text || `Cột ${index + 1}`;
-}
-
+/*
+  PHÉP ĐẾM CỘT VÀ CÁCH ĐẶT KHOÁ nay dùng chung với tay kéo bề rộng — xem
+  `components/data-table/column-dom.ts` và `lib/table/column-resize.ts`. Trước đây tệp này giữ bản
+  riêng của cả hai; hai bản sao của phép cộng dồn `colSpan` sẽ lệch nhau vào đúng ngày ai đó thêm
+  một tiêu đề gộp, và lệch một cách im lặng vì cả hai vẫn chạy.
+*/
 function storageKey(table: HTMLTableElement, headers: HeaderInfo[]) {
-  const path = typeof window !== "undefined" ? window.location.pathname.replace(/\/[0-9a-f-]{20,}/g, "/:id") : "";
-  const sig = headers.map((h) => h.label).join("|");
-  let hash = 0;
-  for (let i = 0; i < sig.length; i++) hash = (hash * 31 + sig.charCodeAt(i)) | 0;
-  return `erp.cols:${path}:${table.dataset.tableId ?? ""}:${hash}`;
+  const path = typeof window !== "undefined" ? window.location.pathname : "";
+  return tableConfigKey("erp.cols", path, table.dataset.tableId ?? "", headers.map((h) => h.label));
 }
 
 /** Áp dụng ẩn/hiện theo chỉ số cột cho mọi hàng (kể cả hàng gộp colSpan) */
@@ -59,14 +58,7 @@ export function ColumnVisibility({ tableRef, minColumns = 4 }: { tableRef: React
   const readHeaders = useCallback(() => {
     const table = tableRef.current;
     if (!table) return;
-    const ths = Array.from(table.querySelectorAll<HTMLTableCellElement>("thead tr:first-child th, thead tr:first-child td"));
-    const list: HeaderInfo[] = [];
-    let col = 0;
-    for (const th of ths) {
-      const span = th.dataset.origColspan ? Number(th.dataset.origColspan) : th.colSpan;
-      list.push({ index: col, label: headerLabel(th, col) });
-      col += span;
-    }
+    const list: HeaderInfo[] = columnHeaders(table).map((h) => ({ index: h.index, label: h.label }));
     setHeaders((prev) => (prev.length === list.length && prev.every((h, i) => h.label === list[i].label) ? prev : list));
     const key = storageKey(table, list);
     if (key !== keyRef.current) {
@@ -119,8 +111,7 @@ export function ColumnVisibility({ tableRef, minColumns = 4 }: { tableRef: React
   const visibleCount = useMemo(() => headers.length - hidden.size, [headers, hidden]);
   if (headers.length < minColumns) return null;
   return (
-    <div className="flex justify-end px-2 pt-1 print:hidden">
-      <Popover>
+    <Popover>
         <PopoverTrigger asChild>
           <button type="button" className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground" title="Ẩn / hiện cột">
             <Columns3 className="size-3.5" /> Cột {hidden.size ? <span className="rounded bg-primary/10 px-1 text-primary">{visibleCount}/{headers.length}</span> : null}
@@ -141,7 +132,6 @@ export function ColumnVisibility({ tableRef, minColumns = 4 }: { tableRef: React
           </div>
           <p className="mt-1 px-1 text-[10.5px] text-muted-foreground">Lưu riêng cho trang này trên trình duyệt của bạn.</p>
         </PopoverContent>
-      </Popover>
-    </div>
+    </Popover>
   );
 }

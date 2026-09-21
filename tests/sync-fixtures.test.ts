@@ -199,7 +199,9 @@ import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
 import { testAdsDecision } from "./ads-decision.test";
 import { testAuditTrail } from "./audit-trail.test";
+import { testColumnResize } from "./column-resize.test";
 import { testFormatNullSafety } from "./format-null-safety.test";
+import { testNominalTableDisplay } from "./nominal-table-display.test";
 import { testHandoffPureFunction, testHandoffSqlMatchesTypescript, testHandoffStageSet } from "./carrier-handoff.test";
 import { testMetricRegistry, testPersonTargetGuard, testProductTargetGuard, testRangeAndBands, testScorecardContract, testScorecardEvaluator, testTargetWindowAndPeriod } from "./metric-targets-model.test";
 import { testDataQualityIssues } from "./data-quality-issues.test";
@@ -903,7 +905,35 @@ async function main() {
       bên trên vẫn khoá nó, nên nó không thể biến mất trong im lặng.
     */
     assert.equal(r.profitOnPurchase, r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRisk - r.tax - r.otherCost, `LN theo hàng nhập ${r.code}`);
+
+    /*
+      ═══ SỐ LƯỢNG GIAO THÀNH CÔNG ƯỚC TÍNH SỐNG ĐỘC LẬP VỚI GIÁ VỐN ═══
+
+      Cột "Giá vốn ƯT (đối chiếu)" của bảng theo hàng nhập là TIỀN, và tiền biến mất ở mã chưa có
+      giá nhập: đo production 21/09/2026 (kỳ Toàn bộ), Q004 · Q005 · Q006 có 492 sản phẩm bán ra
+      không biết giá vốn ⇒ `expectedCogs` bị ép về 0. Phép trừ "hàng nhập − hàng đã giao" mà đi
+      nhờ cột tiền thì ở ba mã ấy sẽ nói "chưa giao được gì", trong khi SỐ LƯỢNG vẫn đo được
+      bình thường. Nên `expectedQty` đi đường riêng — và bài kiểm này khoá nó ở đường riêng đó.
+    */
+    assert.ok(r.expectedQty >= 0, `số sp giao TC ước tính không âm (${r.code})`);
+    assert.ok(r.expectedQty <= r.items, `không giao được nhiều sản phẩm hơn số đã bán (${r.code}: ${r.expectedQty} > ${r.items})`);
+    if (r.items > 0 && !r.cogsKnown && r.cogsUnknownQty === r.items) {
+      assert.equal(r.expectedCogs, 0, `mã ${r.code} không biết giá vốn ⇒ tiền bằng 0 (và màn hình in "—")`);
+      // Đây là điều kiện then chốt: TIỀN mất nhưng SỐ LƯỢNG còn.
+      assert.ok(r.expectedQty > 0 || r.deliveryRate === 0, `mã ${r.code} vẫn phải đếm được sản phẩm đã giao dù chưa biết giá vốn`);
+    }
+
+    // TỒN KHO: chưa có phiếu nhập nào thì là CHƯA BIẾT, không phải "tồn 0" (AGENTS.md §10).
+    assert.ok(r.stockQty >= 0 && r.stockValue >= 0, `tồn kho không âm sau khi kẹp đáy (${r.code})`);
+    if (!r.stockKnown) {
+      assert.equal(r.stockQty, 0, `mã ${r.code} chưa có phiếu nhập ⇒ Sổ kho không được suy ra một con số tồn`);
+      assert.equal(r.stockValue, 0, `mã ${r.code} chưa có phiếu nhập ⇒ giá trị tồn cũng chưa biết`);
+    }
+    assert.ok(r.outInTransitQty >= 0 && r.outAwaitingReturnQty >= 0, `hàng đã rời kho không âm (${r.code})`);
   }
+  assert.equal(nominal.totals.expectedQty, nominal.rows.reduce((a, r) => a + r.expectedQty, 0), "tổng sp giao TC ước tính = Σ các mã");
+  assert.equal(nominal.totals.stockQty, nominal.rows.reduce((a, r) => a + r.stockQty, 0), "tổng tồn kho = Σ các mã");
+  assert.equal(nominal.totals.stockKnown, nominal.rows.every((r) => r.stockKnown), "một mã chưa có phiếu nhập là cả TỔNG tồn chưa biết");
   // Σ phần phân bổ của các mã = ĐÚNG tổng của shop (largest remainder), không lệch vì làm tròn từng dòng.
   if (nominal.totals.grossSales > 0) {
     assert.equal(nominal.rows.reduce((a, r) => a + r.operatingAlloc, 0), nominal.operatingExpenses, "Σ CP vận hành phân bổ các mã = tổng CP vận hành của kỳ");
@@ -1609,6 +1639,8 @@ async function main() {
   await testAdsAttributionLink(db);
   await testAuditTrail(db);
   testFormatNullSafety();
+  testColumnResize();
+  testNominalTableDisplay();
   testHandoffStageSet();
   testHandoffPureFunction();
   await testHandoffSqlMatchesTypescript(db);
