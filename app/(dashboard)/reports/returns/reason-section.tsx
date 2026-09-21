@@ -6,6 +6,7 @@ import { REASON_CONFIDENCE_LABEL, RETURN_REASON_GROUP_LABEL, RETURN_REASON_LABEL
 import { MARKETER_UNRESOLVED_LABEL } from "@/lib/constants/marketer-attribution";
 import { REASON_COVERAGE_ACTION, REASON_COVERAGE_LABEL } from "@/lib/constants/return-reason-source";
 import { TIME_BASIS_LABEL } from "@/lib/constants/report-time-basis";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 import { formatDateTime, formatNumber, formatPercent, pctOrNull } from "@/lib/format";
@@ -243,8 +244,9 @@ export async function ReturnReasonSection({
             }
             padded={false}
           >
+            <TableToolsFor tableId="ly-do-hoan-van-don" />
             <div className={TABLE_SCROLL}>
-              <table className="w-full min-w-[1200px] text-sm">
+              <table id="ly-do-hoan-van-don" className="w-full min-w-[1200px] text-sm">
                 <thead className={cn(STICKY_HEAD, "text-[11.5px] uppercase tracking-wide text-muted-foreground")}>
                   <tr>
                     <th className="px-3 py-2 text-left font-semibold">Vận đơn</th>
@@ -324,8 +326,9 @@ export async function ReturnReasonSection({
         hint="Một đơn nhiều mã hàng mà bị hoàn thì KHÔNG có gì trong dữ liệu nói mã nào gây hoàn. Đơn đó được tính cho cả hai mã (cả hai đều bị ảnh hưởng) và lý do của nó xếp vào nhóm 'lý do khác' thay vì gán bừa cho một mã."
         padded={false}
       >
+        <TableToolsFor tableId="ly-do-hoan-theo-ma" />
         <div className={TABLE_SCROLL}>
-          <table className="w-full min-w-[720px] text-sm">
+          <table id="ly-do-hoan-theo-ma" className="w-full min-w-[720px] text-sm">
             <thead className={cn(STICKY_HEAD, "text-[11.5px] uppercase tracking-wide text-muted-foreground")}>
               <tr>
                 <th className="px-3 py-2 text-left font-semibold">Mã hàng</th>
