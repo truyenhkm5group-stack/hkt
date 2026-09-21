@@ -63,7 +63,9 @@ const choLay = (r: NominalRow) => (r.projection?.awaitingPickup ? ` · ${formatN
 
 const NHAN_NGUON: Record<NominalRow["returnRateSource"], (r: NominalRow) => string> = {
   override: () => "ghi đè · ước tính theo tỷ lệ",
-  projected: (r) => (r.projection ? `${formatNumber(r.projection.eligibleSent)} đơn đã gửi${r.projection.unmodelledActive ? ` · ${formatNumber(r.projection.unmodelledActive)} ngoài ước tính` : ""}${choLay(r)}` : "mô hình"),
+  // SỐ ĐƠN ĐÃ KẾT THÚC đứng trước: nó cho biết tỷ lệ này dựa trên bao nhiêu SỰ THẬT của chính mã,
+  // còn phần đang giao chỉ là xác suất. Một mã 3 đơn kết thúc phải trông khác một mã 500 đơn.
+  projected: (r) => (r.projection ? `${formatNumber(r.projection.finished)} đơn đã kết thúc · ${formatNumber(r.projection.eligibleSent)} đã gửi${r.projection.unmodelledActive ? ` · ${formatNumber(r.projection.unmodelledActive)} ngoài ước tính` : ""}${choLay(r)}` : "mô hình"),
   unmeasured: (r) =>
     r.projection
       ? r.projection.eligibleSent === 0
@@ -79,7 +81,7 @@ function moTaUocTinh(r: NominalRow): string {
   const dem = `Đã giao TC ${formatNumber(r.delivered)} · không thành công ${formatNumber(r.returned)} · đang giao ${formatNumber(Math.max(0, r.orders - r.delivered - r.returned))}`;
   if (r.returnRateSource === "override") return `${dem} — tỷ lệ do chủ shop gõ tay, thắng mọi nguồn khác; tiền = Doanh số POS × tỷ lệ (ước tính theo tỷ lệ)`;
   if (r.returnRateSource === "projected" && r.projection)
-    return `${dem} — mỗi đơn đang giao cân theo xác suất của chính trạng thái ĐVVC nó đang ở (${PROJECTED_GTC_VERSION}, ${formatNumber(r.projection.eligibleSent)} đơn đã gửi trong kỳ${r.projection.pending ? `, ${formatNumber(r.projection.pending)} chưa gửi cân theo P(chưa rời kho)` : ""}${r.projection.awaitingPickup ? `, ${formatNumber(r.projection.awaitingPickup)} chờ ĐVVC tới lấy — hàng còn trong kho nên KHÔNG ở tử số lẫn mẫu số tỷ lệ` : ""})${r.projection.unmodelledActive ? ` · ${formatNumber(r.projection.unmodelledActive)} đơn ngoài ước tính (${formatVND(r.unmodelledRevenue, { compact: true })})` : ""}`;
+    return `${dem} — ${formatNumber(r.projection.finished)} đơn của chính mã đã có kết cục; phần còn lại cân theo xác suất của chính trạng thái ĐVVC từng đơn đang ở (${PROJECTED_GTC_VERSION}, ${formatNumber(r.projection.eligibleSent)} đơn đã gửi trong kỳ${r.projection.pending ? `, ${formatNumber(r.projection.pending)} chưa gửi cân theo P(chưa rời kho)` : ""}${r.projection.awaitingPickup ? `, ${formatNumber(r.projection.awaitingPickup)} chờ ĐVVC tới lấy — hàng còn trong kho nên KHÔNG ở tử số lẫn mẫu số tỷ lệ` : ""})${r.projection.unmodelledActive ? ` · ${formatNumber(r.projection.unmodelledActive)} đơn ngoài ước tính (${formatVND(r.unmodelledRevenue, { compact: true })})` : ""}`;
   if (r.returnRateSource === "unmeasured" && r.projection?.eligibleSent === 0)
     return `${dem} — CHƯA ĐO ĐƯỢC: mã này chưa có đơn nào rời kho trong kỳ${r.projection.awaitingPickup ? ` (${formatNumber(r.projection.awaitingPickup)} đơn đã có mã vận đơn nhưng ĐVVC chưa cầm hàng)` : ""}. Không có mẫu số thì không có tỷ lệ — “—” KHÔNG phải 0%`;
   if (r.returnRateSource === "unmeasured")
