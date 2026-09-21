@@ -107,7 +107,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
 
   const reasonFilter = { period: params.period, basis, codes, marketerIds };
 
-  const [{ rows, total, pageCount, all, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer] = await Promise.all([
+  const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer] = await Promise.all([
     getReturnRateByVariant({ period: params.period, basis, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
     getReturnRateSummary(params.period, params.q, basis),
     variantKey ? listOrdersForVariant(variantKey, params.period) : Promise.resolve([]),
@@ -321,7 +321,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       ) : null}
 
       {/* ═════════ B. GTC THEO MÃ HÀNG ═════════ */}
-      <ReturnRateTable rows={rows} pageCount={pageCount} total={total} baseQuery={baseQuery} probabilities={probabilities} />
+      <ReturnRateTable rows={rows} productRows={productRows} pageCount={pageCount} total={total} baseQuery={baseQuery} probabilities={probabilities} />
 
       {variantKey ? (
         <div id="chi-tiet">
