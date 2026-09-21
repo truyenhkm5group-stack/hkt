@@ -1,4 +1,4 @@
-import type { AiProvider, AiMessage, AiToolDef } from "@/lib/ai/provider";
+import { estimateCostUsd, type AiProvider, type AiMessage, type AiToolDef } from "@/lib/ai/provider";
 import type { AgentWorkspace } from "@/lib/agents/workspace";
 
 /**
@@ -31,6 +31,17 @@ export type AgentOutcome = {
   /** Agent tự nhận là đã xong hay bỏ cuộc. Runner KHÔNG tin nó để chấm cổng — cổng đo bằng exit code. */
   finished: boolean;
   error: string | null;
+  /**
+   * TIỀN CỦA LƯỢT CHẠY NÀY — cộng dồn qua mọi vòng.
+   *
+   * Không có con số này thì mọi lượt tối ưu chi phí đều là niềm tin. Chủ shop báo "mới test luồng
+   * mà đã hết $25" và không ai — kể cả tôi — chỉ ra được tiền đi đâu, vì lượt chạy agent diễn ra
+   * trên máy Actions với CSDL tạm, không ghi vào `ai_interactions` của production.
+   *
+   * `usd` là ƯỚC TÍNH theo bảng giá khai trong kho, và nó có thể `null` khi model chưa có trong
+   * bảng ấy — `null` là CHƯA BIẾT, không phải 0 (AGENTS.md mục 42).
+   */
+  chiPhi: { soVong: number; vao: number; ra: number; demDoc: number; demGhi: number; usd: number | null };
 };
 
 export type AgentJob = {
@@ -189,7 +200,7 @@ export class AiAgentExecutor implements AgentExecutor {
 
   async run(job: AgentJob): Promise<AgentOutcome> {
     const steps: AgentStep[] = [];
-    if (!this.provider) return { summary: "", steps, finished: false, error: this.available().reason };
+    if (!this.provider) return { summary: "", steps, finished: false, error: this.available().reason, chiPhi: { soVong: 0, vao: 0, ra: 0, demDoc: 0, demGhi: 0, usd: 0 } };
 
     const messages: AiMessage[] = [
       {
@@ -206,11 +217,31 @@ export class AiAgentExecutor implements AgentExecutor {
 
     let summary = "";
     let finished = false;
+    const chiPhi = { soVong: 0, vao: 0, ra: 0, demDoc: 0, demGhi: 0, usd: null as number | null };
+    let usdCong = 0;
+    let doDuocGia = true;
     /** Đã nhắc gọi `finish` chưa — nhắc tối đa MỘT lần cho cả lượt chạy. */
     let daNhac = false;
+    const chotChiPhi = () => ({ ...chiPhi, usd: doDuocGia ? Math.round(usdCong * 1_000_000) / 1_000_000 : null });
+
     for (let round = 0; round < MAX_ROUNDS && !finished; round += 1) {
       const res = await this.provider.complete({ system: SYSTEM, messages, tools: AGENT_TOOLS, maxTokens: 8000 });
       messages.push({ role: "assistant", content: res.content });
+
+      chiPhi.soVong += 1;
+      chiPhi.vao += res.usage.inputTokens;
+      chiPhi.ra += res.usage.outputTokens;
+      chiPhi.demDoc += res.usage.cacheReadTokens;
+      chiPhi.demGhi += res.usage.cacheWriteTokens;
+      /*
+        MỘT VÒNG KHÔNG ĐỊNH GIÁ ĐƯỢC LÀM CẢ LƯỢT CHẠY THÀNH CHƯA BIẾT.
+
+        Cộng phần định giá được rồi in nó ra như một tổng là nói dối bằng phép cộng: con số nhỏ hơn
+        sự thật mà trông y như một phép đo đầy đủ.
+      */
+      const usdVong = estimateCostUsd(res.model, res.usage);
+      if (usdVong === null) doDuocGia = false;
+      else usdCong += usdVong;
 
       const calls = res.content.filter((b): b is Extract<typeof b, { type: "tool_use" }> => b.type === "tool_use");
       if (!calls.length) {
@@ -238,7 +269,7 @@ export class AiAgentExecutor implements AgentExecutor {
           continue;
         }
         steps.push({ kind: "NOTE", detail: text.slice(0, 500) });
-        return { summary: summary || text.slice(0, 1000), steps, finished: false, error: "Agent dừng mà không gọi finish (đã nhắc một lần)." };
+        return { summary: summary || text.slice(0, 1000), steps, finished: false, error: "Agent dừng mà không gọi finish (đã nhắc một lần).", chiPhi: chotChiPhi() };
       }
 
       const results: AiMessage["content"] = [];
@@ -280,6 +311,6 @@ export class AiAgentExecutor implements AgentExecutor {
       messages.push({ role: "user", content: results });
     }
 
-    return { summary, steps, finished, error: finished ? null : "Hết số vòng cho phép mà agent chưa gọi finish." };
+    return { summary, steps, finished, error: finished ? null : "Hết số vòng cho phép mà agent chưa gọi finish.", chiPhi: chotChiPhi() };
   }
 }
