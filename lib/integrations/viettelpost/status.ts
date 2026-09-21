@@ -31,10 +31,14 @@ export type VtpResolved = {
   basis: "code" | "text" | "code-group" | "unknown";
 };
 
-export function resolveVtpStatus(input: { code?: number | null; text?: string | null }): VtpResolved {
+/**
+ * `returnFlag` là cột "Trả hàng" của tệp Danh sách vận đơn — bối cảnh của DÒNG, không phải một
+ * câu chữ. Chỉ đường nhập tệp có nó; webhook không, và ở đó mã số đã tự nói rõ chiều.
+ */
+export function resolveVtpStatus(input: { code?: number | null; text?: string | null; returnFlag?: boolean }): VtpResolved {
   const text = String(input.text ?? "").trim();
   const code = input.code ?? null;
-  const byText = text ? mapVtpStatusText(text) : null;
+  const byText = text ? mapVtpStatusText(text, { returnFlag: input.returnFlag }) : null;
   const cod = byText && byText.stage !== "UNKNOWN" ? byText.cod : null;
 
   if (code !== null && VTP_STATUS[code]) {
