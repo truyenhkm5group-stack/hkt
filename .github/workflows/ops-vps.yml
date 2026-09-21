@@ -32,6 +32,7 @@ on:
           - vtp-rebuild-state    # dựng lại trạng thái vận đơn từ lịch sử sự kiện (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - cod-rebuild          # dựng lại tiền COD từ sổ chi tiết bảng kê (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - cod-status-repair    # sửa vận đơn bị gắn sai "không thu hộ" (mặc định CHẠY THỬ; arg "--apply" mới ghi)
+          - agent-run-reattach   # gắn lại lượt chạy agent về đúng việc theo BẢN KHAI ở ô arg (mặc định CHẠY THỬ; "--apply" mới ghi)
           - vtp-replay-files     # nhập lại các tệp Viettel Post đã lưu (mặc định CHỈ LIỆT KÊ; arg "--apply")
           - vtp-statement-peek   # xem bố cục thật của tệp bảng kê đã lưu (arg: phần tên tệp)
           - vtp-retry-webhooks   # xử lý lại gói tin Viettel Post chưa ghép/chưa xử lý được
@@ -258,7 +259,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability"
-            DOC_NANG="verify smoke session-verify perf-probe kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
+            DOC_NANG="verify smoke session-verify perf-probe kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
 
             LOP=GHI
             case "$ARG" in
@@ -549,6 +550,9 @@ jobs:
               cod-status-repair)
                 fetch_script cod-status-repair.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cod-status-repair.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cod-status-repair.ts $ARG ;;
+              agent-run-reattach)
+                fetch_script agent-run-reattach.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/agent-run-reattach.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/agent-run-reattach.ts $ARG ;;
               vtp-replay-files)
                 fetch_script vtp-replay-files.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-replay-files.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-replay-files.ts $ARG ;;
