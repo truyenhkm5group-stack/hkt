@@ -1,4 +1,5 @@
 import { InfoHint } from "@/components/info-hint";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { MetricCard } from "@/components/metric-card";
 import { SectionCard } from "@/components/ui-bits";
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
@@ -105,8 +106,9 @@ export async function RescueReportSection({ period }: { period: Period }) {
         actions={<InfoHint>Một ca qua tay nhiều người thì cộng kết quả cho tất cả sẽ đếm một ca thành nhiều lần trong tỷ lệ tổng. Số THAO TÁC của từng người đếm riêng ở các cột bên phải để thấy ai đã đóng góp — nhưng nó KHÔNG tham gia tỷ lệ cứu đơn.</InfoHint>}
         padded={false}
       >
+        <TableToolsFor tableId="shipments-rescue-report-1" />
         <div className={TABLE_SCROLL}>
-          <table className="w-full min-w-[1060px] text-[12px]">
+          <table id="shipments-rescue-report-1" className="w-full min-w-[1060px] text-[12px]">
             <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
               <tr>
                 <th className="px-2.5 py-2 font-semibold">Người xử lý</th>
@@ -167,8 +169,9 @@ export async function RescueReportSection({ period }: { period: Period }) {
           {formatNumber(theoMa.totalCases)} ca trong kỳ · <b>{formatNumber(theoMa.multiCodeCases)}</b> ca thuộc đơn nhiều mã (được cộng cho từng mã) ·{" "}
           <b>{formatNumber(theoMa.unmappedCases)}</b> ca chưa lần được về mã nào
         </p>
+        <TableToolsFor tableId="shipments-rescue-report-2" />
         <div className={TABLE_SCROLL}>
-          <table className="w-full min-w-[720px] text-[12px]">
+          <table id="shipments-rescue-report-2" className="w-full min-w-[720px] text-[12px]">
             <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
               <tr>
                 <th className="px-2.5 py-2 font-semibold">Mã hàng</th>

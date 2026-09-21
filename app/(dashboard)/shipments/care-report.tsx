@@ -1,5 +1,7 @@
 import { InfoHint } from "@/components/info-hint";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { MetricCard } from "@/components/metric-card";
+<TableToolsFor tableId="shipments-care-report-1" />
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { SectionCard } from "@/components/ui-bits";
 import { formatNumber, formatVND, pct } from "@/lib/format";
@@ -25,7 +27,7 @@ export async function CareReportSection({ period }: { period: Period }) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <SectionCard title="Giao hụt → kết cục" hint="So sánh hai nhóm cùng bị giao hụt trong kỳ: có người can thiệp và không ai can thiệp. Khác biệt giữa hai tỷ lệ mới là giá trị của việc care, không phải số cuộc gọi.">
-          <table className="w-full text-[12.5px]">
+          <table id="shipments-care-report-1" className="w-full text-[12.5px]">
             <thead className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="py-1">Nhóm</th>
@@ -79,8 +81,9 @@ export async function CareReportSection({ period }: { period: Period }) {
 
       {r.backlog.byOwner.length ? (
         <SectionCard title="Khối lượng đang cầm" hint="Kiện đang mở (kể cả đang chờ / escalated) theo người nhận, tính lúc này. Để chia lại việc, không phải để xếp hạng." padded={false}>
+          <TableToolsFor tableId="shipments-care-report-2" />
           <div className={TABLE_SCROLL}>
-            <table className="w-full min-w-[480px] text-[12.5px]">
+            <table id="shipments-care-report-2" className="w-full min-w-[480px] text-[12.5px]">
               <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
                 <tr>
                   <th className="px-4 py-2">Người</th>
@@ -113,42 +116,45 @@ export async function CareReportSection({ period }: { period: Period }) {
         {r.staff.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">Chưa có hành động care nào trong kỳ.</p>
         ) : (
-          <div className={TABLE_SCROLL}>
-            <table className="w-full min-w-[820px] text-[12.5px]">
-              <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
-                <tr>
-                  <th className="px-4 py-2">Người</th>
-                  <th className="px-3 py-2 text-right">COD cứu được</th>
-                  <th className="px-3 py-2 text-right">Cứu / can thiệp</th>
-                  <th className="px-3 py-2 text-right">Hoàn sau care</th>
-                  <th className="px-3 py-2 text-right">Đã đóng</th>
-                  <th className="px-3 py-2 text-right">Phản hồi đầu</th>
-                  <th className="px-3 py-2 text-right">Vỡ SLA đang cầm</th>
-                  <th className="px-3 py-2 text-right">
-                    Hành động <InfoHint>Tổng số lần ghi nhận, và trong đó bao nhiêu lần tiếp xúc được khách. Chỉ để tham khảo khối lượng — không dùng để xếp hạng.</InfoHint>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {r.staff.map((s) => (
-                  <tr key={s.userId ?? "none"}>
-                    <td className={s.userId ? "px-4 py-2 font-medium" : "px-4 py-2 italic text-muted-foreground"} title={s.userId ? undefined : "Hành động / ca chỉ có ô chữ, không nối được về tài khoản — không ghi công cho ai"}>{s.actor}</td>
-                    <td className="numeric px-3 py-2 text-right font-semibold">{formatVND(s.recoveredCod, { compact: true })}</td>
-                    <td className="numeric px-3 py-2 text-right">
-                      {formatNumber(s.recovered)}/{formatNumber(s.intervened)} · {rate(s.recovered, s.intervened)}
-                    </td>
-                    <td className="numeric px-3 py-2 text-right">{formatNumber(s.returnedAfterCare)}</td>
-                    <td className="numeric px-3 py-2 text-right">{formatNumber(s.casesDone)}</td>
-                    <td className="numeric px-3 py-2 text-right">{s.medianFirstResponseHours === null ? "—" : `${s.medianFirstResponseHours} giờ`}</td>
-                    <td className={`numeric px-3 py-2 text-right ${s.overdueOwned ? "font-semibold text-rose-600 dark:text-rose-400" : ""}`}>{formatNumber(s.overdueOwned)}</td>
-                    <td className="numeric px-3 py-2 text-right text-muted-foreground">
-                      {formatNumber(s.actions)} · tiếp xúc {formatNumber(s.reached)}
-                    </td>
+          <>
+            <TableToolsFor tableId="shipments-care-report-3" />
+            <div className={TABLE_SCROLL}>
+              <table id="shipments-care-report-3" className="w-full min-w-[820px] text-[12.5px]">
+                <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
+                  <tr>
+                    <th className="px-4 py-2">Người</th>
+                    <th className="px-3 py-2 text-right">COD cứu được</th>
+                    <th className="px-3 py-2 text-right">Cứu / can thiệp</th>
+                    <th className="px-3 py-2 text-right">Hoàn sau care</th>
+                    <th className="px-3 py-2 text-right">Đã đóng</th>
+                    <th className="px-3 py-2 text-right">Phản hồi đầu</th>
+                    <th className="px-3 py-2 text-right">Vỡ SLA đang cầm</th>
+                    <th className="px-3 py-2 text-right">
+                      Hành động <InfoHint>Tổng số lần ghi nhận, và trong đó bao nhiêu lần tiếp xúc được khách. Chỉ để tham khảo khối lượng — không dùng để xếp hạng.</InfoHint>
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y">
+                  {r.staff.map((s) => (
+                    <tr key={s.userId ?? "none"}>
+                      <td className={s.userId ? "px-4 py-2 font-medium" : "px-4 py-2 italic text-muted-foreground"} title={s.userId ? undefined : "Hành động / ca chỉ có ô chữ, không nối được về tài khoản — không ghi công cho ai"}>{s.actor}</td>
+                      <td className="numeric px-3 py-2 text-right font-semibold">{formatVND(s.recoveredCod, { compact: true })}</td>
+                      <td className="numeric px-3 py-2 text-right">
+                        {formatNumber(s.recovered)}/{formatNumber(s.intervened)} · {rate(s.recovered, s.intervened)}
+                      </td>
+                      <td className="numeric px-3 py-2 text-right">{formatNumber(s.returnedAfterCare)}</td>
+                      <td className="numeric px-3 py-2 text-right">{formatNumber(s.casesDone)}</td>
+                      <td className="numeric px-3 py-2 text-right">{s.medianFirstResponseHours === null ? "—" : `${s.medianFirstResponseHours} giờ`}</td>
+                      <td className={`numeric px-3 py-2 text-right ${s.overdueOwned ? "font-semibold text-rose-600 dark:text-rose-400" : ""}`}>{formatNumber(s.overdueOwned)}</td>
+                      <td className="numeric px-3 py-2 text-right text-muted-foreground">
+                        {formatNumber(s.actions)} · tiếp xúc {formatNumber(s.reached)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </SectionCard>
     </div>

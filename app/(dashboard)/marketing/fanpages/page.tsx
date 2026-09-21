@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { AlertTriangle } from "lucide-react";
 import { AssignPanel, type FanpageView, type MarketerOption } from "@/app/(dashboard)/marketing/fanpages/assign-panel";
 import { SkuFilter } from "@/app/(dashboard)/marketing/fanpages/sku-filter";
@@ -241,63 +242,66 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
               {report.rows.length === 0 ? (
                 <EmptyState title="Chưa có đơn nào trong kỳ" description="Đổi kỳ hoặc bỏ bớt bộ lọc." />
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[680px] text-[13px]">
-                    <thead className="text-left text-muted-foreground">
-                      <tr className="border-b">
-                        <th className="py-2 pr-3 font-medium">Marketer</th>
-                        <th className="py-2 pr-3 text-right font-medium">Fanpage</th>
-                        <th className="py-2 pr-3 text-right font-medium">Đơn quy kết</th>
-                        <th className="py-2 pr-3 text-right font-medium">Đơn đã xác nhận</th>
-                        <th className="py-2 pr-3 text-right font-medium">Doanh thu xác nhận</th>
-                        <th className="py-2 pr-3 text-right font-medium">DT / đơn</th>
-                        <th className="py-2 pr-3 text-right font-medium">Trùng bị loại</th>
-                        <th className="py-2 text-right font-medium">Tỷ lệ chốt</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {report.rows.map((r) => {
-                        const rate = pctOrNull(r.confirmedOrders, r.attributedOrders);
-                        return (
-                          <tr key={r.marketerId ?? ATTR_UNATTRIBUTED} className={cn("border-b last:border-0", r.marketerId === null && "text-muted-foreground")}>
-                            <td className="py-2 pr-3 font-medium">
-                              <Link className="hover:underline" href={{ pathname: "/marketing/fanpages", query: { tab: "orders", mkt: r.marketerId ?? ATTR_UNATTRIBUTED, period: params.period.key, ...(params.period.fromKey ? { from: params.period.fromKey, to: params.period.toKey ?? "" } : {}) } }}>
-                                {r.label}
-                              </Link>
-                            </td>
-                            <td className="py-2 pr-3 text-right font-mono">{formatNumber(r.pages)}</td>
-                            <td className="py-2 pr-3 text-right font-mono">{formatNumber(r.attributedOrders)}</td>
-                            <td className="py-2 pr-3 text-right font-mono">{formatNumber(r.confirmedOrders)}</td>
-                            <td className="py-2 pr-3 text-right font-mono font-semibold">{formatVND(r.confirmedRevenue)}</td>
-                            <td className="py-2 pr-3 text-right font-mono">{r.revenuePerOrder === null ? "—" : formatVND(r.revenuePerOrder)}</td>
-                            <td className="py-2 pr-3 text-right font-mono">
-                              {r.duplicateExcluded ? (
-                                <Link className="hover:underline" href={{ pathname: "/marketing/fanpages", query: { tab: "orders", st: "DUPLICATE", period: params.period.key, ...(params.period.fromKey ? { from: params.period.fromKey, to: params.period.toKey ?? "" } : {}) } }}>
-                                  {formatNumber(r.duplicateExcluded)}
+                <>
+                  <TableToolsFor tableId="marketing-fanpages-page-1" />
+                  <div className="overflow-x-auto">
+                    <table id="marketing-fanpages-page-1" className="w-full min-w-[680px] text-[13px]">
+                      <thead className="text-left text-muted-foreground">
+                        <tr className="border-b">
+                          <th className="py-2 pr-3 font-medium">Marketer</th>
+                          <th className="py-2 pr-3 text-right font-medium">Fanpage</th>
+                          <th className="py-2 pr-3 text-right font-medium">Đơn quy kết</th>
+                          <th className="py-2 pr-3 text-right font-medium">Đơn đã xác nhận</th>
+                          <th className="py-2 pr-3 text-right font-medium">Doanh thu xác nhận</th>
+                          <th className="py-2 pr-3 text-right font-medium">DT / đơn</th>
+                          <th className="py-2 pr-3 text-right font-medium">Trùng bị loại</th>
+                          <th className="py-2 text-right font-medium">Tỷ lệ chốt</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {report.rows.map((r) => {
+                          const rate = pctOrNull(r.confirmedOrders, r.attributedOrders);
+                          return (
+                            <tr key={r.marketerId ?? ATTR_UNATTRIBUTED} className={cn("border-b last:border-0", r.marketerId === null && "text-muted-foreground")}>
+                              <td className="py-2 pr-3 font-medium">
+                                <Link className="hover:underline" href={{ pathname: "/marketing/fanpages", query: { tab: "orders", mkt: r.marketerId ?? ATTR_UNATTRIBUTED, period: params.period.key, ...(params.period.fromKey ? { from: params.period.fromKey, to: params.period.toKey ?? "" } : {}) } }}>
+                                  {r.label}
                                 </Link>
-                              ) : (
-                                <span className="text-muted-foreground">0</span>
-                              )}
-                            </td>
-                            <td className="py-2 text-right font-mono">{rate === null ? "—" : `${rate}%`}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr className="border-t-2 font-semibold">
-                        <td className="py-2 pr-3">Tổng</td>
-                        <td className="py-2 pr-3" />
-                        <td className="py-2 pr-3 text-right font-mono">{formatNumber(report.rows.reduce((t, r) => t + r.attributedOrders, 0))}</td>
-                        <td className="py-2 pr-3 text-right font-mono">{formatNumber(report.totalConfirmedOrders)}</td>
-                        <td className="py-2 pr-3 text-right font-mono">{formatVND(report.totalConfirmedRevenue)}</td>
-                        <td className="py-2 pr-3 text-right font-mono">{report.totalConfirmedOrders > 0 ? formatVND(Math.round(report.totalConfirmedRevenue / report.totalConfirmedOrders)) : "—"}</td>
-                        <td className="py-2 pr-3 text-right font-mono">{formatNumber(report.duplicates.orders)}</td>
-                        <td className="py-2" />
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
+                              </td>
+                              <td className="py-2 pr-3 text-right font-mono">{formatNumber(r.pages)}</td>
+                              <td className="py-2 pr-3 text-right font-mono">{formatNumber(r.attributedOrders)}</td>
+                              <td className="py-2 pr-3 text-right font-mono">{formatNumber(r.confirmedOrders)}</td>
+                              <td className="py-2 pr-3 text-right font-mono font-semibold">{formatVND(r.confirmedRevenue)}</td>
+                              <td className="py-2 pr-3 text-right font-mono">{r.revenuePerOrder === null ? "—" : formatVND(r.revenuePerOrder)}</td>
+                              <td className="py-2 pr-3 text-right font-mono">
+                                {r.duplicateExcluded ? (
+                                  <Link className="hover:underline" href={{ pathname: "/marketing/fanpages", query: { tab: "orders", st: "DUPLICATE", period: params.period.key, ...(params.period.fromKey ? { from: params.period.fromKey, to: params.period.toKey ?? "" } : {}) } }}>
+                                    {formatNumber(r.duplicateExcluded)}
+                                  </Link>
+                                ) : (
+                                  <span className="text-muted-foreground">0</span>
+                                )}
+                              </td>
+                              <td className="py-2 text-right font-mono">{rate === null ? "—" : `${rate}%`}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t-2 font-semibold">
+                          <td className="py-2 pr-3">Tổng</td>
+                          <td className="py-2 pr-3" />
+                          <td className="py-2 pr-3 text-right font-mono">{formatNumber(report.rows.reduce((t, r) => t + r.attributedOrders, 0))}</td>
+                          <td className="py-2 pr-3 text-right font-mono">{formatNumber(report.totalConfirmedOrders)}</td>
+                          <td className="py-2 pr-3 text-right font-mono">{formatVND(report.totalConfirmedRevenue)}</td>
+                          <td className="py-2 pr-3 text-right font-mono">{report.totalConfirmedOrders > 0 ? formatVND(Math.round(report.totalConfirmedRevenue / report.totalConfirmedOrders)) : "—"}</td>
+                          <td className="py-2 pr-3 text-right font-mono">{formatNumber(report.duplicates.orders)}</td>
+                          <td className="py-2" />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </>
               )}
             </SectionCard>
           )}
@@ -409,8 +413,9 @@ async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseL
         <EmptyState title="Không có đơn nào khớp bộ lọc" description="Đổi kỳ, bỏ bớt bộ lọc, hoặc chạy đối soát nếu vừa gán fanpage." />
       ) : (
         <>
+          <TableToolsFor tableId="marketing-fanpages-page-2" />
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] text-[12.5px]">
+            <table id="marketing-fanpages-page-2" className="w-full min-w-[1180px] text-[12.5px]">
               <thead className="text-left text-muted-foreground">
                 <tr className="border-b">
                   <th className="py-2 pr-3 font-medium">Đơn</th>

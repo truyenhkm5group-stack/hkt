@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { PageHeader } from "@/components/page-header";
 import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { AssignmentManager } from "@/app/(dashboard)/payroll/assignments/assignment-manager";
@@ -48,39 +49,42 @@ export default async function PayrollAssignmentsPage() {
         {book.employments.length === 0 ? (
           <EmptyState title="Chưa có dòng phân công nào" description="Chưa khai phân công thì máy tính lương chung coi như người đó không đi làm ngày nào trong kỳ, và sẽ nói thẳng điều đó thay vì ghi 0 ₫." />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] text-[13px]">
-              <thead className="text-left text-muted-foreground">
-                <tr>
-                  <th className="py-1 pr-3 font-medium">Nhân sự</th>
-                  <th className="py-1 pr-3 font-medium">Phòng ban</th>
-                  <th className="py-1 pr-3 font-medium">Chức danh</th>
-                  <th className="py-1 pr-3 font-medium">Hình thức</th>
-                  <th className="py-1 pr-3 font-medium">Nơi làm</th>
-                  <th className="py-1 pr-3 font-medium">Trạng thái</th>
-                  <th className="py-1 font-medium">Hiệu lực</th>
-                </tr>
-              </thead>
-              <tbody>
-                {book.employments
-                  .slice()
-                  .sort((a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime())
-                  .map((e) => (
-                    <tr key={e.id} className="border-t">
-                      <td className="py-1.5 pr-3 font-medium">{nameOf(e.employeeId)}</td>
-                      <td className="py-1.5 pr-3">{e.departmentName || "—"}</td>
-                      <td className="py-1.5 pr-3">{e.positionName || "—"}</td>
-                      <td className="py-1.5 pr-3">{EMPLOYMENT_TYPE_LABEL[e.employmentType as EmploymentType]}</td>
-                      <td className="py-1.5 pr-3">{WORK_MODE_LABEL[e.workMode as WorkMode]}</td>
-                      <td className="py-1.5 pr-3">{EMPLOYMENT_STATUS_LABEL[e.status as EmploymentStatus]}</td>
-                      <td className="py-1.5 whitespace-nowrap">
-                        {formatDate(e.effectiveFrom)} → {e.effectiveTo ? formatDate(e.effectiveTo) : "còn hiệu lực"}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <TableToolsFor tableId="payroll-assignments-page-1" />
+            <div className="overflow-x-auto">
+              <table id="payroll-assignments-page-1" className="w-full min-w-[860px] text-[13px]">
+                <thead className="text-left text-muted-foreground">
+                  <tr>
+                    <th className="py-1 pr-3 font-medium">Nhân sự</th>
+                    <th className="py-1 pr-3 font-medium">Phòng ban</th>
+                    <th className="py-1 pr-3 font-medium">Chức danh</th>
+                    <th className="py-1 pr-3 font-medium">Hình thức</th>
+                    <th className="py-1 pr-3 font-medium">Nơi làm</th>
+                    <th className="py-1 pr-3 font-medium">Trạng thái</th>
+                    <th className="py-1 font-medium">Hiệu lực</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {book.employments
+                    .slice()
+                    .sort((a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime())
+                    .map((e) => (
+                      <tr key={e.id} className="border-t">
+                        <td className="py-1.5 pr-3 font-medium">{nameOf(e.employeeId)}</td>
+                        <td className="py-1.5 pr-3">{e.departmentName || "—"}</td>
+                        <td className="py-1.5 pr-3">{e.positionName || "—"}</td>
+                        <td className="py-1.5 pr-3">{EMPLOYMENT_TYPE_LABEL[e.employmentType as EmploymentType]}</td>
+                        <td className="py-1.5 pr-3">{WORK_MODE_LABEL[e.workMode as WorkMode]}</td>
+                        <td className="py-1.5 pr-3">{EMPLOYMENT_STATUS_LABEL[e.status as EmploymentStatus]}</td>
+                        <td className="py-1.5 whitespace-nowrap">
+                          {formatDate(e.effectiveFrom)} → {e.effectiveTo ? formatDate(e.effectiveTo) : "còn hiệu lực"}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </SectionCard>
 
@@ -91,35 +95,38 @@ export default async function PayrollAssignmentsPage() {
             description="Đây là trạng thái đúng ngay sau khi phát hành: máy tính lương chung đã sẵn sàng nhưng chưa chạm vào tiền của ai. Gán từng người một, có mốc hiệu lực, và đối chiếu số trước khi chốt kỳ."
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-[13px]">
-              <thead className="text-left text-muted-foreground">
-                <tr>
-                  <th className="py-1 pr-3 font-medium">Nhân sự</th>
-                  <th className="py-1 pr-3 font-medium">Chính sách</th>
-                  <th className="py-1 pr-3 font-medium">Hiệu lực</th>
-                  <th className="py-1 font-medium">Ghi chú</th>
-                </tr>
-              </thead>
-              <tbody>
-                {book.policyAssignments
-                  .slice()
-                  .sort((a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime())
-                  .map((a) => (
-                    <tr key={a.id} className="border-t">
-                      <td className="py-1.5 pr-3 font-medium">{nameOf(a.employeeId)}</td>
-                      <td className="py-1.5 pr-3">
-                        {a.policyName} <code className="rounded bg-muted px-1 text-[11px]">{a.policyCode}</code>
-                      </td>
-                      <td className="py-1.5 pr-3 whitespace-nowrap">
-                        {formatDate(a.effectiveFrom)} → {a.effectiveTo ? formatDate(a.effectiveTo) : "còn hiệu lực"}
-                      </td>
-                      <td className="py-1.5 text-muted-foreground">—</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <TableToolsFor tableId="payroll-assignments-page-2" />
+            <div className="overflow-x-auto">
+              <table id="payroll-assignments-page-2" className="w-full min-w-[640px] text-[13px]">
+                <thead className="text-left text-muted-foreground">
+                  <tr>
+                    <th className="py-1 pr-3 font-medium">Nhân sự</th>
+                    <th className="py-1 pr-3 font-medium">Chính sách</th>
+                    <th className="py-1 pr-3 font-medium">Hiệu lực</th>
+                    <th className="py-1 font-medium">Ghi chú</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {book.policyAssignments
+                    .slice()
+                    .sort((a, b) => b.effectiveFrom.getTime() - a.effectiveFrom.getTime())
+                    .map((a) => (
+                      <tr key={a.id} className="border-t">
+                        <td className="py-1.5 pr-3 font-medium">{nameOf(a.employeeId)}</td>
+                        <td className="py-1.5 pr-3">
+                          {a.policyName} <code className="rounded bg-muted px-1 text-[11px]">{a.policyCode}</code>
+                        </td>
+                        <td className="py-1.5 pr-3 whitespace-nowrap">
+                          {formatDate(a.effectiveFrom)} → {a.effectiveTo ? formatDate(a.effectiveTo) : "còn hiệu lực"}
+                        </td>
+                        <td className="py-1.5 text-muted-foreground">—</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </SectionCard>
     </div>

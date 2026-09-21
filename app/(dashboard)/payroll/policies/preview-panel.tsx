@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { FlaskConical } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -93,61 +94,64 @@ export function PreviewPanel({ components }: { components: PolicyComponent[] }) 
       </Button>
 
       {result ? (
-        <div className="overflow-x-auto rounded-md border bg-muted/30 p-2">
-          <table className="w-full min-w-[520px] text-[13px]">
-            <tbody>
-              {[...result.components, ...result.adjustments].map((c) => {
-                const sign = PAYROLL_COMPONENT_SIGN[c.kind as PayrollComponentKind] ?? 1;
-                return (
-                  <tr key={c.code} className="border-b align-top">
-                    <td className="py-1 pr-3">
-                      {c.label}
-                      <ul className="mt-0.5 space-y-0.5 text-[10px] text-muted-foreground">
-                        {c.explain.map((s, i) => (
-                          <li key={i}>
-                            {s.label}
-                            {s.value !== null ? `: ${formatNumber(s.value)}` : ""}
-                            {s.note ? ` — ${s.note}` : ""}
-                          </li>
-                        ))}
-                      </ul>
-                    </td>
-                    <td className={cn("py-1 text-right tabular-nums", sign < 0 ? "text-rose-700 dark:text-rose-400" : "")}>
-                      {c.amount === null ? <span className="text-muted-foreground">{MISSING_TEXT}</span> : <Money value={c.amount} sign />}
-                    </td>
-                  </tr>
-                );
-              })}
-              <tr>
-                <td className="py-1 pr-3 text-right font-medium">Tổng thu nhập</td>
-                <td className="py-1 text-right tabular-nums font-medium">
-                  <Money value={result.grossEarnings} />
-                </td>
-              </tr>
-              <tr>
-                <td className="py-1 pr-3 text-right font-medium">Tổng khấu trừ</td>
-                <td className="py-1 text-right tabular-nums font-medium">
-                  <Money value={result.totalDeductions} />
-                </td>
-              </tr>
-              <tr className="border-t-2">
-                <td className="py-1.5 pr-3 text-right font-semibold">Thực nhận</td>
-                <td className="py-1.5 text-right tabular-nums font-semibold">
-                  <Money value={result.netPay} />
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          {result.missing.length ? (
-            <ul className="mt-2 list-disc space-y-0.5 pl-5 text-[11px] text-amber-700 dark:text-amber-400">
-              {result.missing.map((m, i) => (
-                <li key={i}>
-                  <b>{m.label}</b> — {m.message}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
+        <>
+          <TableToolsFor tableId="payroll-policies-preview-panel" />
+          <div className="overflow-x-auto rounded-md border bg-muted/30 p-2">
+            <table id="payroll-policies-preview-panel" className="w-full min-w-[520px] text-[13px]">
+              <tbody>
+                {[...result.components, ...result.adjustments].map((c) => {
+                  const sign = PAYROLL_COMPONENT_SIGN[c.kind as PayrollComponentKind] ?? 1;
+                  return (
+                    <tr key={c.code} className="border-b align-top">
+                      <td className="py-1 pr-3">
+                        {c.label}
+                        <ul className="mt-0.5 space-y-0.5 text-[10px] text-muted-foreground">
+                          {c.explain.map((s, i) => (
+                            <li key={i}>
+                              {s.label}
+                              {s.value !== null ? `: ${formatNumber(s.value)}` : ""}
+                              {s.note ? ` — ${s.note}` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
+                      <td className={cn("py-1 text-right tabular-nums", sign < 0 ? "text-rose-700 dark:text-rose-400" : "")}>
+                        {c.amount === null ? <span className="text-muted-foreground">{MISSING_TEXT}</span> : <Money value={c.amount} sign />}
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr>
+                  <td className="py-1 pr-3 text-right font-medium">Tổng thu nhập</td>
+                  <td className="py-1 text-right tabular-nums font-medium">
+                    <Money value={result.grossEarnings} />
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1 pr-3 text-right font-medium">Tổng khấu trừ</td>
+                  <td className="py-1 text-right tabular-nums font-medium">
+                    <Money value={result.totalDeductions} />
+                  </td>
+                </tr>
+                <tr className="border-t-2">
+                  <td className="py-1.5 pr-3 text-right font-semibold">Thực nhận</td>
+                  <td className="py-1.5 text-right tabular-nums font-semibold">
+                    <Money value={result.netPay} />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            {result.missing.length ? (
+              <ul className="mt-2 list-disc space-y-0.5 pl-5 text-[11px] text-amber-700 dark:text-amber-400">
+                {result.missing.map((m, i) => (
+                  <li key={i}>
+                    <b>{m.label}</b> — {m.message}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </>
       ) : null}
     </div>
   );

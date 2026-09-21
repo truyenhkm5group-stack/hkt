@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import Link from "next/link";
 import { parseAsString, useQueryStates } from "nuqs";
 import { CalendarClock, Check, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
@@ -652,61 +653,64 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
           {view === "care" ? "Không có kiện nào đang cần care — mọi kiện đang chạy đúng lịch hoặc đã có người theo." : `Không có kiện nào ở “${CARE_VIEW_LABEL[view]}”.`}
         </div>
       ) : (
-        <div className={cn(TABLE_SCROLL, "rounded-xl border")}>
-          <table className="w-full min-w-[1180px] text-[12px]">
-            <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
-              <tr>
-                <th className="w-8 px-2 py-2">
-                  <input type="checkbox" aria-label="Chọn tất cả" checked={selected.size > 0 && selected.size === visible.length} onChange={toggleAll} />
-                </th>
-                <th className="px-2 py-2 font-semibold">Kiện · vì sao</th>
-                <th className="px-2 py-2 font-semibold">Khách · COD</th>
-                <th className="px-2 py-2 font-semibold" title="Chiều ĐVVC — chứng từ Viettel Post, đội không sửa được">
-                  VTP báo
-                </th>
-                {/*
-                  HAI Ô, HAI CÂU HỎI — TIÊU ĐỀ PHẢI NÓI RA CẢ HAI.
+        <>
+          <TableToolsFor tableId="shipments-workbench" />
+          <div className={cn(TABLE_SCROLL, "rounded-xl border")}>
+            <table id="shipments-workbench" className="w-full min-w-[1180px] text-[12px]">
+              <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
+                <tr>
+                  <th className="w-8 px-2 py-2">
+                    <input type="checkbox" aria-label="Chọn tất cả" checked={selected.size > 0 && selected.size === visible.length} onChange={toggleAll} />
+                  </th>
+                  <th className="px-2 py-2 font-semibold">Kiện · vì sao</th>
+                  <th className="px-2 py-2 font-semibold">Khách · COD</th>
+                  <th className="px-2 py-2 font-semibold" title="Chiều ĐVVC — chứng từ Viettel Post, đội không sửa được">
+                    VTP báo
+                  </th>
+                  {/*
+                    HAI Ô, HAI CÂU HỎI — TIÊU ĐỀ PHẢI NÓI RA CẢ HAI.
 
-                  “Care · kết quả xử lý” gộp hai trường khác hẳn nhau vào một cụm chữ: KẾT QUẢ CASE
-                  (đội quyết gì: Đã hoàn · Phát tiếp · Xử lý sau) và TRẠNG THÁI CARE (đội đang ở đâu
-                  trong quy trình: Chưa xử lý · Đang xử lý · Chờ khách…). Người đọc lần đầu tưởng
-                  chúng là một, rồi đọc “Chờ phát lại” ở ô trạng thái và tưởng Viettel Post vừa nói
-                  vậy.
-                */}
-                <th className="px-2 py-2 font-semibold" title="Chiều nội bộ — đội đã quyết gì (KẾT QUẢ CASE) và đang ở đâu (TRẠNG THÁI CARE). KHÔNG suy ra từ trạng thái VTP: “Đã hoàn” ở đây là quyết định của shop, không phải chứng từ hoàn của Viettel Post.">
-                  Kết quả case
-                  <span className="ml-1 font-normal normal-case text-muted-foreground/70">+ trạng thái care</span>
-                </th>
-                <th className="px-2 py-2 font-semibold">Note gần nhất</th>
-                <th className="px-2 py-2 font-semibold">Viettel Post</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {visible.map((c) => (
-                <CaseRow
-                  key={c.shipmentId}
-                  c={c}
-                  now={now}
-                  staff={staff}
-                  presets={presets}
-                  resolutionPresets={resolutionPresets}
-                  onPresetsChange={setPresets}
-                  canManage={canManage}
-                  checked={selected.has(c.shipmentId)}
-                  onCheck={(v) =>
-                    setSelected((s) => {
-                      const n = new Set(s);
-                      if (v) n.add(c.shipmentId);
-                      else n.delete(c.shipmentId);
-                      return n;
-                    })
-                  }
-                  onPatch={(care, extra) => patch(c.shipmentId, care, extra)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    “Care · kết quả xử lý” gộp hai trường khác hẳn nhau vào một cụm chữ: KẾT QUẢ CASE
+                    (đội quyết gì: Đã hoàn · Phát tiếp · Xử lý sau) và TRẠNG THÁI CARE (đội đang ở đâu
+                    trong quy trình: Chưa xử lý · Đang xử lý · Chờ khách…). Người đọc lần đầu tưởng
+                    chúng là một, rồi đọc “Chờ phát lại” ở ô trạng thái và tưởng Viettel Post vừa nói
+                    vậy.
+                  */}
+                  <th className="px-2 py-2 font-semibold" title="Chiều nội bộ — đội đã quyết gì (KẾT QUẢ CASE) và đang ở đâu (TRẠNG THÁI CARE). KHÔNG suy ra từ trạng thái VTP: “Đã hoàn” ở đây là quyết định của shop, không phải chứng từ hoàn của Viettel Post.">
+                    Kết quả case
+                    <span className="ml-1 font-normal normal-case text-muted-foreground/70">+ trạng thái care</span>
+                  </th>
+                  <th className="px-2 py-2 font-semibold">Note gần nhất</th>
+                  <th className="px-2 py-2 font-semibold">Viettel Post</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {visible.map((c) => (
+                  <CaseRow
+                    key={c.shipmentId}
+                    c={c}
+                    now={now}
+                    staff={staff}
+                    presets={presets}
+                    resolutionPresets={resolutionPresets}
+                    onPresetsChange={setPresets}
+                    canManage={canManage}
+                    checked={selected.has(c.shipmentId)}
+                    onCheck={(v) =>
+                      setSelected((s) => {
+                        const n = new Set(s);
+                        if (v) n.add(c.shipmentId);
+                        else n.delete(c.shipmentId);
+                        return n;
+                      })
+                    }
+                    onPatch={(care, extra) => patch(c.shipmentId, care, extra)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
       <p className="text-[11px] text-muted-foreground">
         {(["care", "waiting", "escalated", "done"] as const).map((v) => `${CARE_VIEW_LABEL[v]} ${counts[v]}`).join(" · ")}
