@@ -1,20 +1,26 @@
-import { AlertTriangle, CheckCircle2, CircleHelp, VolumeX } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleHelp, Timer, VolumeX } from "lucide-react";
 import { WEBHOOK_MATCH_MIN_SAMPLE } from "@/lib/constants/webhook-gap";
+import { WEBHOOK_LATENCY_MIN_SAMPLE } from "@/lib/constants/webhook-latency";
 import type { WebhookHealth } from "@/lib/queries/vtp-webhook-health";
 import { formatNumber, formatPercent, formatTimeAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /**
- * ═══════════ BỐN CÂU HỎI VỀ WEBHOOK, KHÔNG PHẢI MỘT Ô "OK" ═══════════
+ * ═══════════ NĂM CÂU HỎI VỀ WEBHOOK, KHÔNG PHẢI MỘT Ô "OK" ═══════════
  *
  * Webhook là nguồn tin DUY NHẤT cho 2.138/2.151 vận đơn của shop (đo 16/09/2026): tài khoản API
  * không đọc được chúng. Một nguồn duy nhất mà màn hình chỉ nói "OK" thì không ai sửa được gì khi
  * nó hỏng — vì bốn loại hỏng dưới đây sửa ở bốn chỗ khác nhau:
  *
  *   không nhận được   → cấu hình chuyển tiếp ở Pancake / Viettel Post
+ *   nhận nhưng đã cũ  → hàng đợi gửi của ĐVVC dồn ứ; không sửa được ở đây, phải BIẾT mà đừng tin
  *   nhận mà đọc hỏng  → bảng mã trạng thái, mã nguồn xử lý
  *   sai thứ tự        → không phải lỗi; cao bất thường thì đường truyền đang dồn ứ
  *   rơi gói           → nhập tệp để vá, và nhập dày hơn
+ *
+ * Ô ĐỘ TRỄ ĐỨNG NGANG HÀNG VỚI Ô "CÓ ĐANG NHẬN", KHÔNG NẰM DƯỚI DẠNG CHÚ THÍCH. Ngày 21/09/2026
+ * số gói vẫn bình thường nên ô trên xanh cả ngày, trong khi mọi gói đều nói chuyện của 28 phút
+ * trước. Một ô xanh đứng một mình chính là thứ đã giấu sự cố ấy.
  */
 export function VtpWebhookHealthPanel({ health }: { health: WebhookHealth }) {
   const tone =
@@ -26,6 +32,15 @@ export function VtpWebhookHealthPanel({ health }: { health: WebhookHealth }) {
           ? "border-muted bg-muted/30"
           : "border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/30";
   const Icon = health.liveness === "SILENT" ? VolumeX : health.liveness === "QUIET" ? AlertTriangle : health.liveness === "UNKNOWN" ? CircleHelp : CheckCircle2;
+  const toneTre =
+    health.latency === "STALLED"
+      ? "border-destructive/40 bg-destructive/5"
+      : health.latency === "LAGGING"
+        ? "border-amber-300 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30"
+        : health.latency === "UNKNOWN"
+          ? "border-muted bg-muted/30"
+          : "border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/30";
+  const IconTre = health.latency === "STALLED" ? Timer : health.latency === "LAGGING" ? AlertTriangle : health.latency === "UNKNOWN" ? CircleHelp : CheckCircle2;
 
   return (
     <div className="mt-4 space-y-3">
@@ -40,6 +55,25 @@ export function VtpWebhookHealthPanel({ health }: { health: WebhookHealth }) {
             ngưỡng phẳng sẽ hoặc hét mỗi đêm, hoặc câm cả ngày.
           */}
           <p className="mt-1 text-muted-foreground">{health.livenessNote}</p>
+        </div>
+      </div>
+
+      <div className={cn("flex items-start gap-3 rounded-lg border p-3", toneTre)}>
+        <IconTre className="mt-0.5 size-4 shrink-0" />
+        <div className="text-xs leading-5">
+          <p className="font-medium text-foreground">
+            Độ trễ giờ qua:{" "}
+            {health.latencyMedianSeconds === null || health.latencySample < WEBHOOK_LATENCY_MIN_SAMPLE ? (
+              <span className="text-muted-foreground">chưa đủ mẫu ({formatNumber(health.latencySample)}/{WEBHOOK_LATENCY_MIN_SAMPLE} gói) — CHƯA BIẾT</span>
+            ) : (
+              <span className="numeric">{doDaiTre(health.latencyMedianSeconds)}</span>
+            )}
+            {health.latencyBaselineSeconds === null ? null : (
+              <span className="text-muted-foreground"> · giờ này mọi hôm {doDaiTre(health.latencyBaselineSeconds)}</span>
+            )}
+            <span className="text-muted-foreground"> · {formatNumber(health.latencySample)} gói</span>
+          </p>
+          <p className="mt-1 text-muted-foreground">{health.latencyNote}</p>
         </div>
       </div>
 
@@ -110,4 +144,9 @@ function O({ nhan, so, phu, xau }: { nhan: string; so: string; phu: string; xau?
       <p className="mt-1 text-[11.5px] leading-4 text-muted-foreground">{phu}</p>
     </div>
   );
+}
+
+/** Giây → câu chữ người đọc được. Dưới 90 giây thì giây, trên thì phút — không in "0,6 phút". */
+function doDaiTre(giay: number): string {
+  return giay < 90 ? `${Math.round(giay)} giây` : `${Math.round(giay / 60)} phút`;
 }

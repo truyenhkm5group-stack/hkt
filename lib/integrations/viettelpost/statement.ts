@@ -357,8 +357,14 @@ export function parseVtpOrderList(input: Buffer | string): VtpOrderListRow[] {
  */
 export type VtpStatusMap = { stage: "PENDING" | "PICKED_UP" | "IN_TRANSIT" | "OUT_FOR_DELIVERY" | "DELIVERED" | "DELIVERY_FAILED" | "RETURNING" | "RETURNED" | "CANCELLED" | "UNKNOWN"; cod: "PAID_TO_BANK" | "COLLECTED" | "PENDING" | "NOT_APPLICABLE" | null; final: boolean };
 
+/**
+ * Bối cảnh của chính DÒNG mang câu chữ ấy. Cột "Trả hàng" của tệp Danh sách vận đơn là thứ DUY
+ * NHẤT phân định được hai nghĩa trái ngược của chữ "Chờ xử lý" — xem khối luật trong hàm.
+ */
+export type VtpStatusTextContext = { returnFlag?: boolean };
+
 /** Trạng thái chữ trên viettelpost.vn → giai đoạn & trạng thái COD trong ERP */
-export function mapVtpStatusText(text: string): VtpStatusMap {
+export function mapVtpStatusText(text: string, ctx: VtpStatusTextContext = {}): VtpStatusMap {
   const n = normalize(text);
   const has = (...keys: string[]) => keys.some((k) => n.includes(` ${k} `) || n.includes(k));
   // Trên viettelpost.vn (Quản lý vận đơn) cột "Trạng thái" là trạng thái GIAO/HOÀN của vận đơn,
@@ -390,10 +396,35 @@ export function mapVtpStatusText(text: string): VtpStatusMap {
   if (has("dang giao hang", "phat tiep", "dang phat", "di giao")) return { stage: "OUT_FOR_DELIVERY", cod: "PENDING", final: false };
   if (has("dang van chuyen", "dang trung chuyen", "trung chuyen", "dang luan chuyen")) return { stage: "IN_TRANSIT", cod: "PENDING", final: false };
   if (has("da lay hang", "da nhan hang", "lay hang thanh cong")) return { stage: "PICKED_UP", cod: "PENDING", final: false };
-  // "dang lay hang" đứng SAU "da lay hang" ở dòng trên và không phải tiền tố của nó (`includes`
-  // thuần) — bưu tá đang trên đường tới lấy thì hàng vẫn trong kho, nên chặng là PENDING, tức NGOÀI
+  /*
+    ═══ "CHỜ XỬ LÝ" LÀ HAI SỰ VIỆC TRÁI NGƯỢC, VÀ CỘT "TRẢ HÀNG" PHÂN ĐỊNH ═══
+
+    Trong cột "Trạng thái" của tệp Danh sách vận đơn, "Chờ xử lý" nghĩa là CHỜ XỬ LÝ HOÀN — bước
+    ngay trước "Đã duyệt hoàn" (mã 515). Trong từ vựng webhook, "Đơn hàng chờ xử lý" (mã 102)
+    nghĩa NGƯỢC LẠI: hàng còn nằm trong kho, chưa bưu tá nào cầm.
+
+    Đo production 21/09/2026: **295/295** dòng "Chờ xử lý" nhập từ tệp đều mang cờ Trả hàng = x —
+    không một dòng nào là "chờ lấy hàng" — và 269 trong số đó tới SAU một webhook đã chứng minh
+    gói hàng rời kho. Bộ dịch cũ trả `PENDING` cho cả 295 dòng, nên vận đơn đang chuyển hoàn bị
+    kéo lùi về điểm xuất phát: 20 vận đơn (10.222.000 ₫ COD) hiện "Chờ xử lý" trên màn hình Vận
+    đơn, và biến mất khỏi hàng đợi care đúng lúc đội còn can thiệp được (chọn phát tiếp 508/550
+    hay để hoàn). Trường hợp gốc: PKE1521276709 — webhook 505 lúc 21/09 09:08:47 kết luận đúng là
+    RETURNING, rồi dòng tệp "Chờ xử lý" mốc 09:09:57 (mới hơn 70 giây) ghi đè thành PENDING.
+
+    Nên: có cờ Trả hàng ⇒ `RETURNING`. Không có cờ ⇒ `UNKNOWN`, KHÔNG phải `PENDING` — một dòng
+    tệp chỉ-có-chữ không đủ chứng minh gói hàng còn nằm trong kho, và `deriveShipmentState()` bỏ
+    qua `UNKNOWN` nên kết luận của webhook được giữ nguyên thay vì bị thay bằng một câu sai (luật
+    47: lời khai chưa dịch được không bao giờ trở thành kết luận).
+
+    Câu của ĐVVC tự nói rõ hàng chưa đi ("Đơn hàng chờ xử lý" = 102, "Lấy hàng thất bại") vẫn là
+    `PENDING`, và phải xét TRƯỚC vì chúng chứa sẵn chuỗi "chờ xử lý".
+  */
+  if (has("don hang cho xu ly", "lay hang that bai")) return { stage: "PENDING", cod: "PENDING", final: false };
+  if (has("cho xu ly")) return ctx.returnFlag ? { stage: "RETURNING", cod: null, final: false } : { stage: "UNKNOWN", cod: null, final: false };
+  // "dang lay hang" đứng SAU "da lay hang" ở trên và không phải tiền tố của nó (`includes` thuần) —
+  // bưu tá đang trên đường tới lấy thì hàng vẫn trong kho, nên chặng là PENDING, tức NGOÀI
   // `CARRIER_HANDOFF_STAGES`. Xem `SUBSTATE_TEXT_RULES` cho số đo và lý do.
-  if (has("cho xu ly", "cho lay hang", "dang lay hang", "cho duyet", "moi tao", "tao moi", "khoi tao")) return { stage: "PENDING", cod: "PENDING", final: false };
+  if (has("cho lay hang", "dang lay hang", "cho duyet", "moi tao", "tao moi", "khoi tao")) return { stage: "PENDING", cod: "PENDING", final: false };
 
   // ───── Từ vựng của CHÍNH ĐVVC (STATUS_NAME trong webhook và bản sao hành trình từ Pancake) ─────
   // Khác hẳn từ vựng cột "Trạng Thái" của tệp Excel. Thiếu nhóm này thì 17.881/19.362 sự kiện

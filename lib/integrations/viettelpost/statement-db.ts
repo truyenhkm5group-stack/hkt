@@ -378,7 +378,10 @@ export async function matchVtpOrderList(rows: VtpOrderListRow[]): Promise<OrderL
         `resolveVtpStatus` rơi về nhánh chữ y như trước. Nhưng khi tệp CÓ cột mã thì mã phải thắng:
         chữ "Giao thành công" mơ hồ giữa chiều đi và chiều hoàn (mục 3), còn mã 501/504 thì không.
       */
-      mapped: resolveVtpStatus({ code: r.statusCode ?? null, text: r.statusText }),
+      // Cột "Trả hàng" đi kèm vào phép dịch: nó là thứ duy nhất phân định "Chờ xử lý" = chờ xử lý
+      // HOÀN với "Chờ xử lý" = chưa lấy hàng (xem `mapVtpStatusText`). Trước bản này nó được đọc
+      // và lưu vào `snapshot` nhưng không ảnh hưởng một quyết định nào.
+      mapped: resolveVtpStatus({ code: r.statusCode ?? null, text: r.statusText, returnFlag: r.returnFlag ?? false }),
       matchKind: f ? (direct ? "direct" : leg ? "leg" : "phone") : null,
       legOf: leg ? (leg.vtp ?? base) : null,
       matchIssue,
