@@ -71,7 +71,8 @@ const NHAN_NGUON: Record<NominalRow["returnRateSource"], (r: NominalRow) => stri
         : `chưa đo được · ${formatNumber(r.projection.unmodelledActive)}/${formatNumber(r.projection.active)} đang giao ngoài ước tính${choLay(r)}`
       : "chưa đo được",
   history: (r) => `lịch sử ${formatNumber(r.historyFinished)} đơn · ước tính theo tỷ lệ`,
-  default: () => "mặc định · ước tính theo tỷ lệ",
+  // GIẢ ĐỊNH phải tự khai là giả định, kèm CON SỐ đang dùng — "mặc định" không nói được nó là bao nhiêu.
+  default: (r) => `giả định ${(100 - r.baseReturnRate).toFixed(0)}% GTC (Giả định) · chưa đo được${choLay(r)}`,
 };
 
 function moTaUocTinh(r: NominalRow): string {
@@ -83,15 +84,22 @@ function moTaUocTinh(r: NominalRow): string {
     return `${dem} — CHƯA ĐO ĐƯỢC: mã này chưa có đơn nào rời kho trong kỳ${r.projection.awaitingPickup ? ` (${formatNumber(r.projection.awaitingPickup)} đơn đã có mã vận đơn nhưng ĐVVC chưa cầm hàng)` : ""}. Không có mẫu số thì không có tỷ lệ — “—” KHÔNG phải 0%`;
   if (r.returnRateSource === "unmeasured")
     return `${dem} — CHƯA ĐO ĐƯỢC: phần đang giao ở trạng thái chưa đủ mẫu quá lớn, không lùi về giả định. DT GTC ƯT chỉ gồm phần đã dự báo được; ${formatVND(r.unmodelledRevenue, { compact: true })} doanh số nằm ngoài ước tính`;
-  if (r.returnRateSource === "history") return `${dem} — mã không có đơn nào trong cohort mô hình, dùng tỷ lệ hoàn lịch sử của mã (${formatNumber(r.historyFinished)} đơn đã kết thúc); tiền = Doanh số POS × tỷ lệ`;
-  return `${dem} — chưa có lịch sử lẫn dự báo cho mã này, dùng giả định chung của shop; tiền = Doanh số POS × tỷ lệ`;
+  if (r.returnRateSource === "history") return `${dem} — mô hình chưa dự báo được cho mã này, dùng tỷ lệ hoàn LỊCH SỬ thật của mã (${formatNumber(r.historyFinished)} đơn đã kết thúc); tiền = Doanh số POS × tỷ lệ`;
+  return `${dem} — mã chưa có đơn nào kết thúc nên KHÔNG có tỷ lệ đo được. Đang dùng tỷ lệ GTC khai ở Giả định (${(100 - r.baseReturnRate).toFixed(0)}%) để còn ước lượng được lợi nhuận và margin; tiền = Doanh số POS × tỷ lệ. Đây là GIẢ ĐỊNH — đổi con số ở khối Giả định phía trên là cả cột đổi theo.`;
 }
 
 /** Ô "TL GTC ƯT" của một dòng: số + nguồn, KHÔNG có prose; `null` in "—" chứ không in 0% hay 100%. */
+/**
+ * TÔ MÀU LÀ MỘT KẾT LUẬN. Chỉ tỷ lệ ĐO ĐƯỢC (`projected`, `history`) hoặc do chủ shop tự đặt
+ * (`override`) mới được tô; tỷ lệ GIẢ ĐỊNH thì không — xem AGENTS.md §44: chưa kết luận được thì
+ * hiện thực tế, KHÔNG tô màu, KHÔNG xếp hạng. Một con số giả định tô xanh trông y hệt một con số
+ * đã đo, và đó là cách nhanh nhất để người đọc tin vào thứ chưa ai đo.
+ */
 function OTyLe({ r }: { r: NominalRow }) {
+  const doDuoc = r.returnRateSource !== "default";
   return (
     <>
-      <span className={cn("numeric font-semibold", successTone(r.deliveryRate))}>
+      <span className={cn("numeric font-semibold", doDuoc ? successTone(r.deliveryRate) : "text-muted-foreground")}>
         <span title={moTaUocTinh(r)}>{r.deliveryRate === null ? "—" : `${r.deliveryRate.toFixed(1)}%`}</span>
       </span>
       <div className="text-[10.5px] text-muted-foreground">{NHAN_NGUON[r.returnRateSource](r)}</div>
