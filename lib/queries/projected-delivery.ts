@@ -24,6 +24,7 @@ import {
   type ProbabilityConfidence,
   type ProjectedState,
 } from "@/lib/constants/projected-delivery";
+import { NO_ORDER_VALUE_FILTER, orderValueKey, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import type { OrderOutcome } from "@/lib/constants/returns";
 import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
@@ -866,8 +867,21 @@ export async function getProjectedDeliveryMetrics(
   period: { from: Date | null; to: Date | null },
   basis: TimeBasis = "SHIPPED",
   grain: ProjectedGrain = "PRODUCT",
+  value: OrderValueFilter = NO_ORDER_VALUE_FILTER,
 ): Promise<ProjectedMetrics> {
-  const key = `projected-metrics:${PROJECTED_GTC_VERSION}:${basis}:${grain}:${period.from?.toISOString() ?? "-"}:${period.to?.toISOString() ?? "-"}`;
+  /*
+    ═══ BỘ LỌC GIÁ TRỊ ĐƠN PHẢI NẰM TRONG KHOÁ NHỚ (AGENTS mục 2) ═══
+
+    Thiếu nó thì lần xem "đơn dưới 300K" đầu tiên nhận lại con số của CẢ SHOP đang nằm trong bộ
+    nhớ đệm — tỷ lệ GTC của một tập đơn khác, in dưới nhãn của tập đang lọc, và không có gì đỏ lên.
+
+    BẢNG XÁC SUẤT (`getProbabilityLookup`) CỐ Ý KHÔNG lọc theo giá trị đơn: nó học "kiện đang ở
+    trạng thái này, tuổi này thì bao nhiêu phần trăm về đích" từ TOÀN BỘ lịch sử. Cắt tập học theo
+    bậc giá làm mẫu mỗi ô nhỏ đi vài lần và đẩy phần lớn ô xuống dưới `MIN_CELL_SAMPLE` — tức đổi
+    một con số ĐO ĐƯỢC lấy một con số KHÔNG đo được. Thứ được lọc là COHORT ĐANG ĐẾM, không phải
+    tập huấn luyện.
+  */
+  const key = `projected-metrics:${PROJECTED_GTC_VERSION}:${basis}:${grain}:${period.from?.toISOString() ?? "-"}:${period.to?.toISOString() ?? "-"}:${orderValueKey(value)}`;
   return memo(key, 90_000, async () => {
     const db = await getDb();
     const lookup = await getProbabilityLookup();
@@ -884,6 +898,8 @@ export async function getProjectedDeliveryMetrics(
     if (period.from) dk.push(sql`${moc} >= ${period.from}`);
     if (period.to) dk.push(sql`${moc} <= ${period.to}`);
     if ((period.from || period.to) && coTheRong) dk.push(sql`${moc} is not null`);
+    const locGiaTri = orderValueWhereSql(value);
+    if (locGiaTri) dk.push(sql.raw(locGiaTri));
 
     /*
       Khoá gộp phải là ĐÚNG biểu thức của bảng đích: `VARIANT_KEY` ở `return-rate.ts`, và

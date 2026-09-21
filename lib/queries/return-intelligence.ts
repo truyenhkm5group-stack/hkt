@@ -47,6 +47,7 @@ import { listTargets } from "@/lib/queries/metric-targets";
 import { marketerLabel, marketerNames } from "@/lib/queries/order-marketer";
 import { getProjectedDeliveryMetrics, getProbabilityLookup } from "@/lib/queries/projected-delivery";
 import { getReturnReasonReport, type ReturnReasonReport } from "@/lib/queries/return-reason-report";
+import { NO_ORDER_VALUE_FILTER, orderValueKey, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
 import { timingStat } from "@/lib/constants/care-timing";
@@ -177,6 +178,8 @@ export type ReturnIntelligence = {
 
 export type IntelligenceInput = {
   period: Period;
+  /** Khoảng giá trị đơn — xem `lib/constants/order-value.ts`. Mặc định không lọc. */
+  value?: OrderValueFilter;
   /** Kỳ TRƯỚC cùng độ dài. `null` khi kỳ hiện tại không có cả hai đầu mốc (xem "tất cả"). */
   previous: { from: Date | null; to: Date | null } | null;
   basis: TimeBasis;
@@ -198,23 +201,26 @@ export async function getReturnIntelligence(input: IntelligenceInput): Promise<R
     (input.variantKeys ?? []).join("+"),
     (input.marketerIds ?? []).join("+"),
     input.trendGrain ?? "DAY",
+    // Bộ lọc giá trị đơn đổi TẤT CẢ các khối bên dưới ⇒ phải nằm trong khoá nhớ (§2).
+    orderValueKey(input.value ?? NO_ORDER_VALUE_FILTER),
   ].join(":");
   // 90 giây, đúng dải AGENTS.md mục 2. Mọi tham số đổi kết quả đều nằm trong khoá.
   return memo(key, 90_000, () => dung(input));
 }
 
 async function dung(input: IntelligenceInput): Promise<ReturnIntelligence> {
-  const loc = { period: input.period, basis: input.basis, codes: input.codes, variantKeys: input.variantKeys, marketerIds: input.marketerIds };
+  const value = input.value ?? NO_ORDER_VALUE_FILTER;
+  const loc = { period: input.period, basis: input.basis, codes: input.codes, variantKeys: input.variantKeys, marketerIds: input.marketerIds, value };
   const trendGrain: TrendGrain = input.trendGrain ?? "DAY";
 
   const [hienTai, kyTruoc, duBao, targets, ten, cham, xuHuong] = await Promise.all([
     input.reasonReport ? Promise.resolve(input.reasonReport) : getReturnReasonReport(loc),
     input.previous ? getReturnReasonReport({ ...loc, period: { ...input.period, from: input.previous.from, to: input.previous.to } }) : Promise.resolve(null),
-    getProjectedDeliveryMetrics(input.period, input.basis, "PRODUCT"),
+    getProjectedDeliveryMetrics(input.period, input.basis, "PRODUCT", value),
     listTargets(),
     marketerNames(),
-    careRows(input.period, input.basis),
-    trendPoints(input.period, input.basis, trendGrain),
+    careRows(input.period, input.basis, value),
+    trendPoints(input.period, input.basis, trendGrain, value),
   ]);
 
   /*
@@ -397,9 +403,11 @@ async function problemByProduct(loc: {
 
 /* ═══════════════════ CHĂM SÓC KIỆN ═══════════════════ */
 
-async function careRows(period: Period, basis: TimeBasis): Promise<ReturnIntelligence["care"]> {
+async function careRows(period: Period, basis: TimeBasis, value: OrderValueFilter = NO_ORDER_VALUE_FILTER): Promise<ReturnIntelligence["care"]> {
   const db = await getDb();
   const dk: SQL[] = [REPORTABLE_ORDER];
+  const locGiaTri = orderValueWhereSql(value);
+  if (locGiaTri) dk.push(sql.raw(locGiaTri));
   const moc = sql.raw(timeBasisColumnSql(basis));
   if (period.from) dk.push(sql`${moc} >= ${period.from}`);
   if (period.to) dk.push(sql`${moc} <= ${period.to}`);
@@ -518,12 +526,14 @@ async function careRows(period: Period, basis: TimeBasis): Promise<ReturnIntelli
 
 /* ═══════════════════ XU HƯỚNG ═══════════════════ */
 
-async function trendPoints(period: Period, basis: TimeBasis, grain: TrendGrain): Promise<TrendPoint[]> {
+async function trendPoints(period: Period, basis: TimeBasis, grain: TrendGrain, value: OrderValueFilter = NO_ORDER_VALUE_FILTER): Promise<TrendPoint[]> {
   const db = await getDb();
   const lookup = await getProbabilityLookup();
   const moc = sql.raw(timeBasisColumnSql(basis));
   const con = carrierSubstateSql(sql`"shipments"."vtp_status"`, sql`"shipments"."vtp_status_name"`, sql`"shipments"."stage"::text`);
   const dk: SQL[] = [REPORTABLE_ORDER];
+  const locGiaTri = orderValueWhereSql(value);
+  if (locGiaTri) dk.push(sql.raw(locGiaTri));
   if (period.from) dk.push(sql`${moc} >= ${period.from}`);
   if (period.to) dk.push(sql`${moc} <= ${period.to}`);
   dk.push(sql`${moc} is not null`);

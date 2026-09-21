@@ -8,6 +8,7 @@ import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getCashProfitReport } from "@/lib/queries/profit-cash";
+import { NO_ORDER_VALUE_FILTER, orderValueKey, type OrderValueFilter } from "@/lib/constants/order-value";
 import {
   getNominalProfitReport,
   resolveAssumptions,
@@ -1225,11 +1226,24 @@ export type NominalMarketerProduct = {
   personalNet: number;
 };
 
-/** Lợi nhuận danh nghĩa (ước tính theo đơn lên trong kỳ) chia theo marketer — cùng quy tắc chủ mã / đẩy chéo với bảng lương */
-export async function getNominalMarketerBreakdown(period: Period): Promise<{ rows: NominalMarketerRow[]; unattributed: number; shopRetained: number; ownerSharePct: number; pagesMapped: number; pagesTotal: number }> {
-  return memo(`nominalByMarketer:${periodKey(period)}`, 120_000, async () => {
+/**
+ * Lợi nhuận danh nghĩa (ước tính theo đơn lên trong kỳ) chia theo marketer — cùng quy tắc chủ mã /
+ * đẩy chéo với bảng lương.
+ *
+ * ═══ BỘ LỌC GIÁ TRỊ ĐƠN ĐI CÙNG BẢNG THEO MÃ, KHÔNG ĐƯỢC ĐỨNG NGOÀI ═══
+ *
+ * Bảng này nằm NGAY DƯỚI bảng lợi nhuận theo mã trên cùng một trang. Để nó đọc cả kỳ trong khi
+ * bảng trên đã lọc "đơn dưới 300K" là đặt hai tập đơn khác nhau cạnh nhau dưới cùng một tiêu đề
+ * kỳ — người đọc không có cách nào biết, và sẽ cộng chúng với nhau.
+ *
+ * Nó KHÔNG phải bảng lương: `getPayrollReport` gọi `getNominalProfitReport(period)` không tham số
+ * lọc, nên lương giữ nguyên. Lọc một lát cắt đơn rồi tính lương trên đó là sai bản chất (AGENTS
+ * mục 16: lương cố định đi theo THỜI GIAN).
+ */
+export async function getNominalMarketerBreakdown(period: Period, value: OrderValueFilter = NO_ORDER_VALUE_FILTER, includeAds = true): Promise<{ rows: NominalMarketerRow[]; unattributed: number; shopRetained: number; ownerSharePct: number; pagesMapped: number; pagesTotal: number }> {
+  return memo(`nominalByMarketer:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}`, 120_000, async () => {
     const db = await getDb();
-    const [nominal, employees, config, byPage] = await Promise.all([getNominalProfitReport(period), listEmployees(), loadPayrollConfig(), salesByProductPage(period, "confirmed")]);
+    const [nominal, employees, config, byPage] = await Promise.all([getNominalProfitReport(period, "ORDERED", value, includeAds), listEmployees(), loadPayrollConfig(), salesByProductPage(period, "confirmed")]);
     const ads = schema.adSpends;
     const spendRows = await db
       .select({ marketerId: ads.marketerId, productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
@@ -1267,6 +1281,17 @@ export async function getNominalMarketerBreakdown(period: Period): Promise<{ row
     const pagesMappedSet = new Set<string>();
     for (const r of nominal.rows) {
       const spend = byProduct.get(r.productId);
+      /*
+        ═══ AI CHẠY QUẢNG CÁO ĐO BẰNG SỐ THÔ; BAO NHIÊU TIỀN THÌ ĐO BẰNG SỐ ĐÃ CHIA ═══
+
+        `adShares` (tỷ trọng quy kết) tính từ chi phí THÔ — ai bỏ tiền chạy mã này là một sự thật
+        của cả kỳ, không đổi theo việc người xem đang lọc bậc giá nào.
+
+        Số TIỀN thì phải đi theo bảng trên: `r.adSpend` đã là phần CPQC thuộc tập đang lọc (và
+        bằng 0 khi công tắc quảng cáo tắt). Chia lại theo đúng tỷ lệ ấy để Σ CPQC của các marketer
+        trên một mã = ĐÚNG ô CPQC của mã đó ở bảng trên — hai bảng cùng trang không được lệch nhau.
+      */
+      const adScale = spend && spend.total > 0 ? r.adSpend / spend.total : 0;
       const ownerId = config.productOwners[r.productId] ?? null;
       // LN ròng danh nghĩa trước QC của mã = LN ròng + QC + chi phí khác theo QC
       const netBeforeAds = r.netProfit + r.adSpend + r.otherCost;
@@ -1294,7 +1319,7 @@ export async function getNominalMarketerBreakdown(period: Period): Promise<{ row
       let bonusTotal = 0;
       for (const [mid, share] of shares) {
         const m = ensure(mid);
-        const mySpend = spend?.byMarketer.get(mid) ?? 0;
+        const mySpend = Math.round((spend?.byMarketer.get(mid) ?? 0) * adScale);
         const other = Math.round(mySpend * otherPct);
         const isOwner = ownerId !== null && mid === ownerId;
         const base = Math.round(netBeforeAds * share) - mySpend - other;
@@ -1325,7 +1350,11 @@ export async function getNominalMarketerBreakdown(period: Period): Promise<{ row
         }
       }
     }
-    for (const [mid, amount] of testByMarketer) {
+    for (const [mid, thoc] of testByMarketer) {
+      // QC TEST không gắn mã hàng nên không có tỷ trọng riêng: đi theo tỷ trọng doanh số của tập
+      // đang lọc, và về 0 khi công tắc quảng cáo tắt — cùng luật với mọi đồng quảng cáo khác.
+      const amount = includeAds ? Math.round(thoc * nominal.costShare) : 0;
+      if (!amount) continue;
       const m = ensure(mid);
       m.testSpend += amount;
       m.otherCost += Math.round(amount * otherPct);

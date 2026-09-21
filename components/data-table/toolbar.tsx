@@ -219,14 +219,21 @@ export function DataTableToolbar({
   period,
   children,
   resultLabel,
+  extraResetKeys = [],
 }: {
   searchPlaceholder?: string;
   facets?: FacetDef[];
   period?: { defaultKey?: PeriodKey } | false;
   children?: React.ReactNode;
   resultLabel?: React.ReactNode;
+  /**
+   * Khoá URL của những bộ lọc KHÔNG phải facet (bộ lọc giá trị đơn, công tắc CPQC…). Nút "Xoá
+   * lọc" phải xoá được chúng — một bộ lọc không xoá được bằng nút xoá lọc là bộ lọc người dùng
+   * quên mất mình đang bật, rồi đọc con số của một tập đơn khác.
+   */
+  extraResetKeys?: string[];
 }) {
-  const resetKeys = ["q", "page", ...facets.map((f) => f.key), ...(period ? ["period", "from", "to"] : [])];
+  const resetKeys = ["q", "page", ...facets.map((f) => f.key), ...extraResetKeys, ...(period ? ["period", "from", "to"] : [])];
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">

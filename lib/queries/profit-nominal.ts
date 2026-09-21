@@ -12,6 +12,7 @@ import { getOperatingCost } from "@/lib/queries/cost-engine";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { distributeProportionally, inventoryRiskExposure, inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
 import { getProjectedDeliveryMetrics, type BacktestSummary } from "@/lib/queries/projected-delivery";
+import { NO_ORDER_VALUE_FILTER, orderValueActive, orderValueKey, orderValueMatches, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 
 const o = schema.orders;
@@ -305,6 +306,17 @@ export type NominalRow = {
 export type NominalReport = {
   assumptions: ResolvedAssumptions;
   rows: NominalRow[];
+  /** Khoảng giá trị đơn đang lọc — màn hình phải in ra, không để người đọc đoán mình đang xem tập nào. */
+  valueFilter: OrderValueFilter;
+  /** Công tắc CPQC. `false` ⇒ mọi CPQC hiện 0 và lợi nhuận KHÔNG trừ quảng cáo (xem `ADS_EXCLUDED_NOTE`). */
+  adsIncluded: boolean;
+  /**
+   * Tỷ trọng doanh số của tập đang lọc trong TOÀN KỲ — mẫu số đã dùng để chia CPQC và chi phí
+   * chung. `1` khi không lọc. In ra để người đọc kiểm được vì sao chi phí chung nhỏ đi.
+   */
+  costShare: number;
+  /** Đơn KHÔNG khai được giá trị (tổng tiền <= 0), rơi khỏi bộ lọc — đếm riêng, không giấu (mục 42). */
+  unknownValueOrders: number;
   unmatchedAdSpend: number;
   /** Chi phí vận hành trong kỳ (bảng Chi phí, trừ Quảng cáo & Nhập hàng): lương, mặt bằng, phần mềm, đóng gói… */
   operatingExpenses: number;
@@ -536,7 +548,9 @@ async function stockByProduct(): Promise<Map<string, StockSnapshot>> {
 const TON_CHUA_BIET: StockSnapshot = { qty: 0, value: 0, known: false, inTransitQty: 0, awaitingReturnQty: 0 };
 
 /** Lợi nhuận danh nghĩa theo mã hàng: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − quảng cáo */
-async function getNominalProfitReportUncached(period: Period, basis: TimeBasis): Promise<NominalReport> {
+async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, value: OrderValueFilter, includeAds: boolean): Promise<NominalReport> {
+  const locGiaTri = orderValueWhereSql(value);
+  const dangLoc = orderValueActive(value);
   const db = await getDb();
   const assumptions = await resolveAssumptions();
   /*
@@ -544,7 +558,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis):
     LỖI LÀ LỖI: hợp đồng hỏng thì bảng vẫn dựng được (tiền theo tỷ lệ lịch sử, có nhãn) nhưng lỗi
     được trả lên màn hình bằng tên của nó, không hoá thành "chưa đủ dữ liệu".
   */
-  const duBaoHoacLoi = await getProjectedDeliveryMetrics(period, basis).then(
+  const duBaoHoacLoi = await getProjectedDeliveryMetrics(period, basis, "PRODUCT", value).then(
     (v) => ({ v, e: null as string | null }),
     (e: unknown) => ({ v: null, e: e instanceof Error ? e.message : String(e) }),
   );
@@ -596,7 +610,8 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis):
       .leftJoin(pv, eq(pv.id, i.variantId))
       .leftJoin(p, eq(p.id, sql`coalesce(${pv.productId}, ${i.productId})`))
       // chỉ tính đơn đã xác nhận trên Pancake (bỏ đơn mới / chờ xác nhận / huỷ)
-      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), ...periodCond(period.from, period.to, basis)))
+      // Bộ lọc GIÁ TRỊ ĐƠN đọc tổng tiền của CẢ ĐƠN: một đơn vào trọn vẹn hoặc ra trọn vẹn.
+      .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), ...(locGiaTri ? [sql.raw(locGiaTri)] : []), ...periodCond(period.from, period.to, basis)))
       .groupBy(sql`1`),
     db
       .select({ productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
@@ -605,6 +620,12 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis):
       .groupBy(ads.productId),
     // từng (đơn, mã): tiền hàng của mã trong đơn & tổng đơn sau giảm — để chia ĐƠN (1/N mã) và DOANH SỐ SAU GIẢM theo tỷ trọng tiền hàng,
     // sao cho cộng mọi mã = số đơn đã xác nhận (đếm 1 lần) và = tổng tiền sau giảm giá của thẻ "Doanh số đơn đã xác nhận"
+    //
+    // CỐ Ý KHÔNG lọc giá trị đơn trong câu này: nó phải trả về CẢ KỲ để tính được TỶ TRỌNG của
+    // tập đang lọc (`costShare` bên dưới). Không có mẫu số ấy thì quảng cáo và chi phí vận hành
+    // của TOÀN KỲ bị trút hết lên lát cắt nhỏ đang xem, và "đơn dưới 300K" trông lỗ nặng vì gánh
+    // tiền quảng cáo của những đơn không nằm trong đó. Phép lọc làm ở tầng ứng dụng bằng
+    // `orderValueMatches` — CÙNG một luật với mệnh đề SQL, xem lib/constants/order-value.ts.
     db
       .select({ orderId: o.id, productId: PID, lineSales: sql<number>`coalesce(sum(${i.lineTotal}), 0)`, orderTotal: sql<number>`max(coalesce(${o.totalPriceAfterDiscount}, 0))` })
       .from(i)
@@ -620,7 +641,8 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis):
     // nguồn chính đã phủ đủ chưa, và khoản gõ tay nào bị loại vì trùng nguồn.
     getOperatingCost(period),
   ]);
-  const operatingExpenses = operating.amount;
+  // Số THÔ của cả kỳ. Phần thuộc về tập đang lọc tính sau, khi đã biết tỷ trọng doanh số (`costShare`).
+  const operatingExpensesCaKy = operating.amount;
   const operatingCount = operating.count;
   const riskPct = Number(assumptions.inventoryRiskPercent ?? 0);
   // kỳ "Toàn bộ" / thiếu mốc: lấy từ đơn đầu tiên tới đơn cuối (hoặc hôm nay nếu kỳ chưa kết thúc)
@@ -631,7 +653,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis):
   const monthsFrom = period.from ?? firstAt;
   const monthsTo = period.to ? (period.to.getTime() > now.getTime() ? now : period.to) : lastAt && lastAt.getTime() > now.getTime() ? lastAt : now;
   const months = monthsFrom ? Math.round(periodMonths(monthsFrom, monthsTo) * 100) / 100 : 0;
-  const fixedCost = fixedCostForPeriod(Number(assumptions.fixedCostMonthly ?? 0), months);
+  const fixedCostCaKy = fixedCostForPeriod(Number(assumptions.fixedCostMonthly ?? 0), months);
   // chia từng đơn cho các mã trong đơn: đơn = 1/N mã, doanh số sau giảm = tổng đơn × tiền hàng của mã / tiền hàng cả đơn
   const perOrderByOrder = new Map<string, { productId: string; lineSales: number; orderTotal: number }[]>();
   for (const r of perOrder) {
@@ -640,22 +662,77 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis):
     perOrderByOrder.set(r.orderId, list);
   }
   const allocByProduct = new Map<string, { ordersWeighted: number; salesAfterDiscount: number }>();
+  /** CÙNG phép chia, nhưng trên TOÀN KỲ — chỉ làm mẫu số của tỷ trọng, không bao giờ hiện ra bảng. */
+  const allocCaKy = new Map<string, number>();
+  let ordersDistinct = 0;
+  let doanhSoTrongLoc = 0;
+  let doanhSoCaKy = 0;
+  let donChuaBietGiaTri = 0;
   for (const list of perOrderByOrder.values()) {
     const n = list.length;
     const lineSum = list.reduce((t, x) => t + Math.max(0, x.lineSales), 0);
+    // Mọi dòng của cùng một đơn mang cùng `orderTotal` (nó là `max()` theo đơn) — lấy dòng đầu.
+    const tongDon = list[0]?.orderTotal ?? 0;
+    const trongLoc = orderValueMatches(value, tongDon);
+    if (dangLoc && tongDon <= 0) donChuaBietGiaTri += 1;
+    doanhSoCaKy += tongDon;
+    if (trongLoc) {
+      ordersDistinct += 1;
+      doanhSoTrongLoc += tongDon;
+    }
     for (const x of list) {
+      const phan = lineSum > 0 ? (x.orderTotal * Math.max(0, x.lineSales)) / lineSum : x.orderTotal / n;
+      allocCaKy.set(x.productId, (allocCaKy.get(x.productId) ?? 0) + phan);
+      if (!trongLoc) continue;
       const e = allocByProduct.get(x.productId) ?? { ordersWeighted: 0, salesAfterDiscount: 0 };
       e.ordersWeighted += 1 / n;
-      e.salesAfterDiscount += lineSum > 0 ? (x.orderTotal * Math.max(0, x.lineSales)) / lineSum : x.orderTotal / n;
+      e.salesAfterDiscount += phan;
       allocByProduct.set(x.productId, e);
     }
   }
-  const ordersDistinct = perOrderByOrder.size;
+  /*
+    ═══════════ TỶ TRỌNG CỦA TẬP ĐANG LỌC — MẪU SỐ CỦA MỌI CHI PHÍ CHUNG ═══════════
+
+    Chủ shop chốt 21/09/2026: chi phí vận hành chung (lương, mặt bằng, phần mềm, cố định) phân bổ
+    cho tập đang lọc theo TỶ TRỌNG DOANH SỐ của nó — mặt bằng vẫn tốn dù đơn to hay nhỏ. Nhờ vậy
+    cộng các bậc giá lại vẫn ra đúng tổng chi phí của kỳ.
+
+    Không lọc gì thì tỷ trọng là ĐÚNG 1 — gán thẳng, KHÔNG chia `x/x`: phép chia dấu phẩy động trên
+    một kỳ vài tỷ đồng ra 0,9999999 và mọi con số của mọi báo cáo cũ lệch vài đồng. Không ai đọc
+    được nguyên nhân từ một cột lệch 3đ.
+  */
+  const costShare = !dangLoc ? 1 : doanhSoCaKy > 0 ? doanhSoTrongLoc / doanhSoCaKy : 0;
+  const operatingExpenses = dangLoc ? Math.round(operatingExpensesCaKy * costShare) : operatingExpensesCaKy;
+  const fixedCost = dangLoc ? Math.round(fixedCostCaKy * costShare) : fixedCostCaKy;
   const adByProduct = new Map<string, number>();
   let unmatchedAdSpend = 0;
   for (const r of adRows) {
     if (r.productId) adByProduct.set(r.productId, Number(r.spend));
     else unmatchedAdSpend += Number(r.spend);
+  }
+  /*
+    ═══════════ QUẢNG CÁO: MỘT CÔNG TẮC, VÀ MỘT PHÉP CHIA TỶ TRỌNG ═══════════
+
+    · `includeAds = false` (công tắc "Tính chi phí quảng cáo" tắt) ⇒ CPQC về 0 ở MỌI dòng; "chi phí
+      khác" tính bằng `CPQC × %` nên cũng tự về 0. Đây là câu hỏi "bán thêm một đơn xả — không tiêu
+      thêm đồng quảng cáo nào — thì được thêm bao nhiêu tiền".
+    · Đang lọc mà VẪN tính CPQC ⇒ mỗi mã chỉ gánh phần quảng cáo TƯƠNG ỨNG với doanh số của mã đó
+      nằm trong khoảng đang lọc. Trút trọn CPQC cả kỳ lên một lát cắt nhỏ là tạo ra một khoản lỗ
+      không có thật, và nó sẽ trông đủ hợp lý để không ai đi kiểm lại.
+
+    Cả hai nhánh sửa CHÍNH bản đồ `adByProduct`, không đẻ ra bản thứ hai: dòng mã chỉ có phiếu nhập
+    ở dưới cũng đọc bản đồ này, và hai bản sao sẽ lệch nhau vào đúng ngày ai đó sửa một bản.
+  */
+  if (!includeAds) {
+    for (const k of adByProduct.keys()) adByProduct.set(k, 0);
+    unmatchedAdSpend = 0;
+  } else if (dangLoc) {
+    for (const [k, chi] of adByProduct) {
+      const caKy = allocCaKy.get(k) ?? 0;
+      const trongLoc = allocByProduct.get(k)?.salesAfterDiscount ?? 0;
+      adByProduct.set(k, caKy > 0 ? Math.round(chi * (trongLoc / caKy)) : 0);
+    }
+    unmatchedAdSpend = Math.round(unmatchedAdSpend * costShare);
   }
 
   const rows: NominalRow[] = sales
@@ -930,6 +1007,10 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis):
   return {
     assumptions,
     rows,
+    valueFilter: value,
+    adsIncluded: includeAds,
+    costShare,
+    unknownValueOrders: donChuaBietGiaTri,
     unmatchedAdSpend,
     operatingExpenses,
     operatingCount,
@@ -1077,6 +1158,14 @@ export async function getNominalDailyForProduct(productId: string, period: Perio
  * `basis` ĐI VÀO KHOÁ CACHE. Thiếu nó thì lượt xem mốc này phục vụ lại con số của mốc kia — không
  * lỗi, không cảnh báo, chỉ là số sai (AGENTS.md §2: tham số ảnh hưởng kết quả → phải vào cache key).
  */
-export async function getNominalProfitReport(period: Period, basis: TimeBasis = "ORDERED") : Promise<NominalReport> {
-  return memo(`getNominalProfitReport:${basis}:${periodKey(period)}`, 120000, () => getNominalProfitReportUncached(period, basis));
+export async function getNominalProfitReport(
+  period: Period,
+  basis: TimeBasis = "ORDERED",
+  value: OrderValueFilter = NO_ORDER_VALUE_FILTER,
+  includeAds = true,
+): Promise<NominalReport> {
+  // Bộ lọc giá trị đơn VÀ công tắc quảng cáo đều đổi kết quả ⇒ đều phải vào khoá cache (§2).
+  return memo(`getNominalProfitReport:${basis}:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}`, 120000, () =>
+    getNominalProfitReportUncached(period, basis, value, includeAds),
+  );
 }

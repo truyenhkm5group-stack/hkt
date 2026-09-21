@@ -36,6 +36,8 @@ import { DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
 import { PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
 import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { successTone } from "@/lib/constants/returns";
+import { ADS_EXCLUDED_NOTE, NO_ORDER_VALUE_FILTER, orderValueActive, orderValueLabel, type OrderValueFilter } from "@/lib/constants/order-value";
+import { OrderValueFilterControl } from "@/components/order-value-filter";
 import { ProjectionConfidence } from "@/app/(dashboard)/reports/projection-confidence";
 import { getNominalMarketerBreakdown } from "@/lib/queries/payroll";
 import { cn } from "@/lib/utils";
@@ -227,6 +229,8 @@ export async function NominalTab({
   tabQuery,
   canWrite,
   basis = "ORDERED",
+  value = NO_ORDER_VALUE_FILTER,
+  includeAds = true,
 }: {
   period: Period;
   productId: string;
@@ -234,6 +238,10 @@ export async function NominalTab({
   canWrite: boolean;
   /** Mốc gán đơn vào kỳ. Mặc định ngày tạo đơn — xem `mocCuaBasis` ở lib/queries/profit-nominal.ts. */
   basis?: TimeBasis;
+  /** Khoảng giá trị đơn đang lọc — xem `lib/constants/order-value.ts`. */
+  value?: OrderValueFilter;
+  /** Công tắc CPQC: `false` ⇒ CPQC hiện 0 và lợi nhuận không trừ quảng cáo. */
+  includeAds?: boolean;
 }) {
   /*
     BẢNG MARKETER CỐ Ý Ở LẠI MỐC NGÀY TẠO ĐƠN.
@@ -242,7 +250,16 @@ export async function NominalTab({
     một câu mà cách ghi nhận ấy không trả lời được. Chú thích dưới bảng nói ra điều đó thay vì để
     hai khối trên cùng màn hình lặng lẽ đứng trên hai tập đơn.
   */
-  const [report, byMarketer] = await Promise.all([getNominalProfitReport(period, basis), getNominalMarketerBreakdown(period)]);
+  const dangLocGiaTri = orderValueActive(value);
+  /*
+    BẢNG MARKETER NHẬN CÙNG BỘ LỌC với bảng theo mã: hai bảng đứng trên cùng một trang, dưới cùng
+    một tiêu đề kỳ. Để một bảng lọc còn bảng kia đọc cả kỳ là đặt hai tập đơn khác nhau cạnh nhau
+    mà không ai biết — rồi người đọc sẽ cộng chúng lại.
+  */
+  const [report, byMarketer] = await Promise.all([
+    getNominalProfitReport(period, basis, value, includeAds),
+    getNominalMarketerBreakdown(period, value, includeAds),
+  ]);
   const selected = productId
     ? report.rows.find((r) => r.productId === productId)
     : null;
@@ -280,8 +297,33 @@ export async function NominalTab({
             single: true,
           },
         ]}
+        extraResetKeys={["vmin", "vmax", "ads"]}
         resultLabel={`${TIME_BASIS_QUESTION[basis]} Cùng mốc + cùng mã ⇒ trang Tỷ lệ giao thành công phải ra cùng một tỷ lệ GTC ước tính. Chi phí quảng cáo và chi phí vận hành luôn theo NGÀY PHÁT SINH của chính chúng, không đổi theo mốc này; bảng theo marketer giữ mốc ngày tạo đơn vì nó ghi đơn theo người phụ trách fanpage tại lúc đơn lên.`}
-      />
+      >
+        <OrderValueFilterControl value={value} showAds adsIncluded={includeAds} />
+      </DataTableToolbar>
+
+      {/*
+        ═══ ĐANG XEM MỘT LÁT CẮT THÌ PHẢI NÓI RA, Ở CHỖ KHÔNG BỎ QUA ĐƯỢC ═══
+
+        Hai lời khai khác nhau, hai hậu quả khác nhau:
+         · LỌC GIÁ TRỊ ĐƠN — các con số vẫn cộng ra được tổng kỳ (chi phí chung chia theo tỷ trọng
+           doanh số), nhưng đây KHÔNG phải toàn bộ đơn của kỳ.
+         · TẮT CPQC — con số lợi nhuận KHÔNG cộng ra được lợi nhuận thật, vì tiền quảng cáo vẫn đã
+           tiêu. Cảnh báo này tô đậm hơn đúng vì nó dễ bị đọc nhầm hơn.
+      */}
+      {dangLocGiaTri || !includeAds ? (
+        <div className={cn("rounded-xl border px-4 py-2.5 text-[12.5px] leading-5", includeAds ? "border-primary/30 bg-primary/5" : "border-amber-400/60 bg-amber-50 text-amber-900 dark:bg-amber-950/50 dark:text-amber-100")}>
+          {dangLocGiaTri ? (
+            <p>
+              <b>{orderValueLabel(value)}</b> — chỉ tính đơn có tiền hàng sau giảm giá trong khoảng này (chưa gồm cước, lấy theo CẢ ĐƠN). Chi phí quảng cáo và chi phí vận hành chung được chia
+              theo tỷ trọng doanh số của tập này: <b>{(report.costShare * 100).toFixed(1)}%</b> doanh số của kỳ.
+              {report.unknownValueOrders ? ` ${formatNumber(report.unknownValueOrders)} đơn không khai được giá trị (tổng tiền bằng 0) nằm ngoài bộ lọc — chưa biết, không phải đơn 0đ.` : ""}
+            </p>
+          ) : null}
+          {!includeAds ? <p className={cn(dangLocGiaTri && "mt-1")}><b>KHÔNG tính chi phí quảng cáo.</b> {ADS_EXCLUDED_NOTE}</p> : null}
+        </div>
+      ) : null}
 
       <AssumptionsForm assumptions={report.assumptions} canWrite={canWrite} />
 

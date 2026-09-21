@@ -45,6 +45,7 @@ import { testCareWorkbench } from "./care-workbench.test";
 import { testAiCopilot } from "./ai-copilot.test";
 import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
 import { testOrderOutcomeContract } from "./contract-order-outcome.test";
+import { testOrderValueFilter } from "./order-value-filter.test";
 import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
 import { testVtpSourceOfTruth } from "./vtp-source-of-truth.test";
@@ -1600,6 +1601,7 @@ async function main() {
   }
 
   await testOrderOutcomeContract(db);
+  await testOrderValueFilter(db);
   await testCanonicalTruth(db);
   await testDataQuality(db);
   await testBackfill(db);
