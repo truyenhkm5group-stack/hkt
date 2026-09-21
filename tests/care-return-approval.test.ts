@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { applyCarrierEventToCare } from "@/lib/care/lifecycle";
+import { applyCarrierEventToCare, reconcileCareCoverage } from "@/lib/care/lifecycle";
 import { RETURN_APPROVED_CODES, RETURN_APPROVED_TEXTS, RETURN_PROPOSED_CODES, returnApproved } from "@/lib/constants/care-return-approval";
 import { VTP_STATUS } from "@/lib/constants/viettelpost";
 import { mapVtpStatusText } from "@/lib/integrations/viettelpost/statement";
@@ -202,8 +202,40 @@ export async function testCareReturnApproval(db: Db) {
   const dung = await materializeShipmentState(db, sB);
   assert.equal(dung.after, "RETURNING", "dòng tệp “Chờ xử lý” tới sau webhook 505 KHÔNG được biến vận đơn đang hoàn thành “chờ xử lý”");
 
+  /* ───── 6 · BỘ ĐỐI CHIẾU PHẢI NÓI CÙNG MỘT ĐIỀU VỚI ĐƯỜNG SỰ KIỆN ───── */
+  /*
+    Đường sự kiện chỉ chạy khi có gói tin MỚI. Kiện nhận bằng chứng duyệt hoàn trước khi luật tồn
+    tại thì không đường nào chạm tới nó nữa — đo được 29 ca như vậy trên production ngay sau khi
+    luật lên máy chủ (15.086.000 ₫), vì bộ đối chiếu có một câu `continue` bỏ qua cả chiều hoàn.
+  */
+  const sC = await dungKien(db, "s3");
+  const caC = await moCa(db, sC, gio(8));
+  // Ảnh chụp kiện nói ĐÃ DUYỆT HOÀN, nhưng KHÔNG gói tin nào chạy qua vòng đời — đúng tình huống
+  // của 29 ca tồn đọng.
+  await db
+    .update(schema.shipments)
+    .set({ stage: "RETURNING", vtpStatus: null, vtpStatusName: "Đang chuyển hoàn", vtpStatusDate: gio(2), isFinal: false })
+    .where(sql`${schema.shipments.id} = ${sC}`);
+  assert.equal((await doc(db, caC)).careOutcome, "PENDING", "trước khi đối chiếu thì ca vẫn treo");
+  await reconcileCareCoverage(db, new Date(), { shipmentIds: [sC] });
+  const sauDoiChieu = await doc(db, caC);
+  assert.equal(sauDoiChieu.careOutcome, "RESCUE_FAILED", "bộ đối chiếu phải chốt được ca trên kiện ĐÃ duyệt hoàn, không bỏ qua cả chiều hoàn");
+  assert.equal(sauDoiChieu.active, false, "và đưa nó ra khỏi hàng đợi");
+
+  /* ───── 7 · 505 vẫn phải được ĐỂ YÊN ở cả đường đối chiếu ───── */
+  const sD = await dungKien(db, "s4");
+  const caD = await moCa(db, sD, gio(8));
+  await db
+    .update(schema.shipments)
+    .set({ stage: "RETURNING", vtpStatus: 505, vtpStatusName: "Tồn - Thông báo chuyển hoàn bưu cục gốc", vtpStatusDate: gio(2), isFinal: false })
+    .where(sql`${schema.shipments.id} = ${sD}`);
+  await reconcileCareCoverage(db, new Date(), { shipmentIds: [sD] });
+  const sau505 = await doc(db, caD);
+  assert.equal(sau505.careOutcome, "PENDING", "505 mới là ĐỀ NGHỊ hoàn — shop còn xin phát tiếp được, ca phải còn mở");
+  assert.equal(sau505.active, true);
+
   /* ───── dọn ───── */
-  const ids = [sA, sB];
+  const ids = [sA, sB, sC, sD];
   await db.delete(schema.careActions).where(sql`${schema.careActions.shipmentId} in ${ids}`);
   await db.delete(schema.careCaseEvents).where(sql`${schema.careCaseEvents.shipmentId} in ${ids}`);
   await db.delete(schema.shipmentCare).where(sql`${schema.shipmentCare.shipmentId} in ${ids}`);
@@ -213,6 +245,6 @@ export async function testCareReturnApproval(db: Db) {
   clearMemo();
 
   console.log(
-    "✓ Chờ xử lý + Trả hàng = chờ xử lý HOÀN (không phải chờ lấy hàng) · mã 102 vẫn PENDING · 505 đề nghị ≠ 515 đã duyệt và chữ không tách nổi nên mã quyết định · ca chốt ở 515, 504 tới sau không đếm lại · dòng tệp đến sau không kéo vận đơn đang hoàn về điểm xuất phát",
+    "✓ Chờ xử lý + Trả hàng = chờ xử lý HOÀN (không phải chờ lấy hàng) · mã 102 vẫn PENDING · 505 đề nghị ≠ 515 đã duyệt và chữ không tách nổi nên mã quyết định · ca chốt ở 515, 504 tới sau không đếm lại · dòng tệp đến sau không kéo vận đơn đang hoàn về điểm xuất phát · ĐƯỜNG SỰ KIỆN và BỘ ĐỐI CHIẾU nói cùng một điều",
   );
 }

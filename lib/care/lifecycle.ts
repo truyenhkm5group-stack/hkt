@@ -574,6 +574,27 @@ export async function reconcileCareCoverage(db: Db, now = new Date(), scope: { s
       if (res.resolved || res.dismissed) out.settled += 1;
       continue;
     }
+    /*
+      ═══ ĐVVC ĐÃ DUYỆT HOÀN — CHỐT Ở ĐÂY NỮA, KHÔNG CHỈ Ở ĐƯỜNG SỰ KIỆN ═══
+
+      Đường sự kiện (`applyCarrierEventToCare`) chỉ chạy khi có một gói tin MỚI tới. Kiện đã nhận
+      bằng chứng duyệt hoàn TRƯỚC khi luật này tồn tại — hoặc nhận qua một đường không gọi vòng
+      đời — sẽ không bao giờ được chốt, và ca nằm lại hàng đợi vĩnh viễn.
+
+      Đo production 21/09/2026, ngay sau khi luật lên máy chủ: **29 ca đang mở trên kiện ĐÃ duyệt
+      hoàn** (24 ca "Đang chuyển hoàn" · 3 ca mã 502 · 2 ca "Đã duyệt hoàn"), 15.086.000 ₫ — nhân
+      viên mở ra và không làm được gì. Đúng thứ hàng đợi sinh ra để chặn.
+
+      Vế này phải đứng TRƯỚC câu `continue` bỏ qua chiều hoàn bên dưới, và phải dùng CÙNG một hàm
+      `returnApproved` với đường sự kiện: hai đường đọc hai luật thì sớm muộn chúng nói hai điều
+      khác nhau về cùng một kiện. 505 "Yêu cầu chuyển hoàn" KHÔNG lọt vào đây — shop vẫn còn bấm
+      được phát tiếp (508/550), và 2 ca như vậy đang mở phải được để yên.
+    */
+    if (stage === "RETURNING" && returnApproved({ code: r.vtpStatus, text: r.vtpStatusName })) {
+      const res = await chotKetQua(db, r.care, { outcome: "RESCUE_FAILED", logistics: "FAILED" }, { substate, occurredAt: at, statusName: r.vtpStatusName, source: "RECONCILE" });
+      if (res.resolved) out.settled += 1;
+      continue;
+    }
     if (stage === "RETURNING" || !chuaAiDongVao(r.care)) continue;
     const chungTu: LeftWarehouseEvidence = { left: Boolean(r.daRoiKho), since: r.roiKhoTuLuc ? new Date(r.roiKhoTuLuc) : null };
     if (careEntryFor(substate, chungTu.left).enters || !moTruocKhiRoiKho(r.care, chungTu)) continue;
