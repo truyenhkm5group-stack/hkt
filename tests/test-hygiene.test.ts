@@ -127,6 +127,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/test-hygiene.test.ts": "Chính bài này.",
   "tests/ai-incident-watch.test.ts":
     "Ép AI_PROVIDER=anthropic để resolveProviderName() có câu trả lời xác định, rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của bộ canh đang đo (nó hỏi nhà cung cấp nào đang dùng), không phải điều kiện của kết luận.",
+  "tests/viec-di-tiep.test.ts":
+    "Cùng lý do với agent-dispatch: đặt ERP_GITHUB_DISPATCH_TOKEN / ERP_GITHUB_REPO (khoá BỊA) để cổng cấu hình mở ra, rồi mới đo được thứ bài này thật sự hỏi — lượt dispatch có mang theo MÃ VIỆC không. Trả lại nguyên trạng trong finally, và không khẳng định nào rẽ theo giá trị sẵn có của máy.",
   "tests/agent-dispatch.test.ts":
     "Đặt ERP_GITHUB_DISPATCH_TOKEN / ERP_GITHUB_REPO để dựng ba tình huống (chưa khai khoá · đã khai · khoá thiếu quyền), rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của cổng cấu hình đang đo, không phải điều kiện của kết luận.",
   "tests/setup-env.ts":
@@ -249,7 +251,47 @@ export function testKhongDoiHangRaoLayMauXanh() {
   );
 }
 
+/* ═════════════ 8 · KÝ TỰ ĐIỀU KHIỂN KHÔNG ĐƯỢC LỌT VÀO MÃ NGUỒN BÀI KIỂM ═════════════ */
+
+/**
+ * ĐÃ CẮN THẬT — HAI LẦN, cùng một hình dạng, phát hiện 21/09/2026.
+ *
+ * Người viết định gõ `\b` (ranh giới từ trong biểu thức chính quy). Thứ nằm trong tệp lại là **một
+ * byte BACKSPACE thật, 0x08** — một ký tự, không phải hai. Biểu thức khi ấy đòi một ký tự điều
+ * khiển đứng ngay cạnh chữ, điều không bao giờ xảy ra:
+ *
+ *   · `tests/agent-dispatch.test.ts` — `/\btask…/` ⇒ `coDauVaoViec` VĨNH VIỄN `false`. Bộ gác hai
+ *     chiều ấy chỉ còn một chiều, và chiều "workflow đã nhận được việc thì đi sửa câu chữ" chưa
+ *     từng đỏ, kể cả khi màn hình đã nói sai với chủ shop suốt nhiều ngày.
+ *   · `tests/loading-ux-contract.test.ts` — `/\buseTransition\b/` ⇒ luật số 5 chưa từng bắt được
+ *     gì. Sửa đúng một ký tự làm SÁU tệp vi phạm hiện ra cùng lúc.
+ *
+ * Lớp lỗi này vô hình theo đúng nghĩa đen: trình soạn thảo, `git diff` và mọi lần đọc lại đều hiện
+ * `\b` y như một chuỗi thoát bình thường. Không cổng nào khác nhìn thấy nó, và biểu thức hỏng
+ * không báo lỗi — nó chỉ lặng lẽ không khớp, và bài kiểm chuyển sang màu xanh vĩnh viễn.
+ *
+ * Nên chặn ở mức BYTE. Cho phép `\t` (9) và `\n` (10); `\r` (13) đã có bộ gác LF riêng.
+ */
+export function testKhongCoKyTuDieuKhien() {
+  const pham: string[] = [];
+  for (const tep of tepKiemThu()) {
+    const b = readFileSync(path.join(goc, tep));
+    const viTri: number[] = [];
+    for (let i = 0; i < b.length; i += 1) {
+      const c = b[i];
+      if (c < 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d) viTri.push(i);
+    }
+    if (viTri.length) pham.push(`${tep} (${viTri.length} ký tự, byte đầu ở ${viTri[0]})`);
+  }
+  assert.deepEqual(
+    pham,
+    [],
+    "ký tự điều khiển lọt vào mã nguồn bài kiểm: một `\\b` bị ghi thành byte 0x08 làm biểu thức chính quy KHÔNG BAO GIỜ khớp, và bài kiểm xanh vĩnh viễn mà không ai thấy",
+  );
+}
+
 export function testTestHygiene() {
+  testKhongCoKyTuDieuKhien();
   testKetThucDongGhimLF();
   testDuongDanChuanHoa();
   testKhongSoBangMocDocLaiDongHo();
@@ -258,6 +300,6 @@ export function testTestHygiene() {
   testThieuCongCuNoiThang();
   testKhongDoiHangRaoLayMauXanh();
   console.log(
-    "✓ Vệ sinh bài kiểm (mục 65): LF ghim ở tầng kho · đường dẫn chuẩn hoá · không so BẰNG với mốc đọc lại đồng hồ · mọi bài đọc môi trường đều có lý do · CI chạy 2 chế độ bằng token GIẢ · thiếu công cụ thì nói CHƯA ĐO ĐƯỢC chứ không ✓ · hàng rào agent không bị đổi để lấy màu xanh",
+    "✓ Vệ sinh bài kiểm (mục 65): không ký tự điều khiển lọt vào mã nguồn · LF ghim ở tầng kho · đường dẫn chuẩn hoá · không so BẰNG với mốc đọc lại đồng hồ · mọi bài đọc môi trường đều có lý do · CI chạy 2 chế độ bằng token GIẢ · thiếu công cụ thì nói CHƯA ĐO ĐƯỢC chứ không ✓ · hàng rào agent không bị đổi để lấy màu xanh",
   );
 }

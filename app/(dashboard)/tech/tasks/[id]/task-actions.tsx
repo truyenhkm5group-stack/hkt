@@ -182,7 +182,7 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
               <p className="text-xs text-muted-foreground">
                 Khởi động một lượt chạy thật trên GitHub Actions (tốn khoá AI và phút Actions). Agent KHÔNG merge, KHÔNG deploy — nó mở một PR để người xem.
                 {" "}
-                <strong>Lượt chạy hiện CHƯA nhận được việc này</strong>: máy chạy agent không đọc được CSDL production nên nó tự tạo một việc R0 để tự kiểm. Trao việc thật là Nấc 3b.
+                <strong>Lượt chạy nhận ĐÚNG việc này</strong>: chỉ MÃ việc đi kèm lệnh khởi động (ô ấy công khai), còn tiêu đề và mô tả đi qua cửa đọc có khoá.
               </p>
             </>
           )}

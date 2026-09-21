@@ -97,7 +97,17 @@ export async function dispatchTaskToAgent(input: { taskCode: string; gates: stri
   if (!vQuota.ok) return { ok: false, code: "QUOTA", reason: vQuota.reason };
 
   /* ───────── 4 · GỬI ───────── */
-  const res = await dispatchAgentRun({ workflow: "agent-run.yml", gates: input.gates });
+  /*
+    TRUYỀN MÃ VIỆC — ĐÂY LÀ THỨ NẤC 3B DỰNG CỬA ĐỌC ĐỂ PHỤC VỤ.
+
+    Trước bản vá này, nút "khởi động lượt chạy" ở TECH-n gửi dispatch KHÔNG kèm mã việc, nên
+    `agent-run.yml` rơi vào nhánh tự-kiểm: nó tự tạo một việc R0 của riêng nó và agent không bao
+    giờ nhận được việc người vừa bấm. Ghi chú sự kiện bên dưới từng NÓI RA điều đó như một hạn
+    chế đã biết — tức là dây chuyền có một khúc hỏng được ghi thành tài liệu thay vì được vá.
+
+    Chỉ MÃ đi qua ô công khai; nội dung việc vẫn đi cửa đọc có khoá.
+  */
+  const res = await dispatchAgentRun({ workflow: "agent-run.yml", gates: input.gates, taskCode: task.code });
   if (!res.ok) return { ok: false, code: "GITHUB", reason: res.detail };
 
   /* ───────── 5 · GHI VẾT ─────────
@@ -114,8 +124,8 @@ export async function dispatchTaskToAgent(input: { taskCode: string; gates: stri
     {
       taskId: task.id,
       kind: "RUN",
-      note: `Khởi động lượt chạy agent ${agent?.key ?? "?"} (${res.workflow} @ ${res.ref}). LƯU Ý: lượt chạy tự tạo việc R0 của riêng nó — nó CHƯA nhận được việc này (xem Nấc 3b).`,
-      payload: { workflow: res.workflow, ref: res.ref, gates: input.gates },
+      note: `Khởi động lượt chạy agent ${agent?.key ?? "?"} (${res.workflow} @ ${res.ref}) cho ĐÚNG việc này — mã việc đi kèm dispatch, nội dung đi qua cửa đọc có khoá.`,
+      payload: { workflow: res.workflow, ref: res.ref, gates: input.gates, taskCode: task.code },
     },
     { kind: "HUMAN", id: input.actor.id, name: input.actor.name || input.actor.email },
   );

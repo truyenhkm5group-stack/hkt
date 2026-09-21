@@ -1,4 +1,4 @@
-import { DISPATCHABLE_WORKFLOWS, DISPATCH_REF } from "@/lib/constants/agent-dispatch";
+import { DISPATCHABLE_WORKFLOWS, DISPATCH_REF, laMaViecHopLe } from "@/lib/constants/agent-dispatch";
 import { GithubError, githubConfig, maskToken } from "@/lib/integrations/github/client";
 
 /**
@@ -83,7 +83,7 @@ export type DispatchResult = { ok: true; workflow: string; ref: string } | { ok:
  * tuyệt đối không được ghi một id bịa ra. Muốn biết lượt chạy nào thì đọc lại danh sách run —
  * một câu hỏi khác, của một hàm khác.
  */
-export async function dispatchAgentRun(input: { workflow: string; gates: string }): Promise<DispatchResult> {
+export async function dispatchAgentRun(input: { workflow: string; gates: string; taskCode?: string }): Promise<DispatchResult> {
   /*
     DANH SÁCH ĐÓNG KIỂM Ở ĐÂY, KHÔNG Ở NƠI GỌI.
 
@@ -92,6 +92,15 @@ export async function dispatchAgentRun(input: { workflow: string; gates: string 
   */
   if (!DISPATCHABLE_WORKFLOWS.includes(input.workflow)) {
     return { ok: false, kind: "FORBIDDEN", detail: `ERP chỉ được khởi động ${DISPATCHABLE_WORKFLOWS.join(", ")} — \`${input.workflow}\` không nằm trong danh sách.` };
+  }
+  /*
+    MÃ VIỆC PHẢI ĐÚNG HÌNH DẠNG MÃ.
+
+    Ô này đi thẳng ra giao diện Actions công khai. Chặn ở đây thì mọi nơi gọi đều được chặn, kể cả
+    nơi gọi viết sau — xem `MA_VIEC_DISPATCH`.
+  */
+  if (input.taskCode !== undefined && !laMaViecHopLe(input.taskCode)) {
+    return { ok: false, kind: "FORBIDDEN", detail: `“${input.taskCode}” không phải một mã việc (dạng TECH-12). Ô inputs của workflow là CÔNG KHAI — chỉ mã việc được đi qua đó.` };
   }
   const cfg = dispatchConfig();
   if (!cfg.configured || !cfg.repo) return { ok: false, kind: "NOT_CONFIGURED", detail: cfg.reason ?? "Chưa cấu hình." };
@@ -113,7 +122,7 @@ export async function dispatchAgentRun(input: { workflow: string; gates: string 
           "Content-Type": "application/json",
         },
         // `ref` là HẰNG SỐ, không phải tham số — xem `DISPATCH_REF`.
-        body: JSON.stringify({ ref: DISPATCH_REF, inputs: { gates: input.gates } }),
+        body: JSON.stringify({ ref: DISPATCH_REF, inputs: input.taskCode ? { gates: input.gates, task: input.taskCode } : { gates: input.gates } }),
         signal: controller.signal,
         cache: "no-store",
       });

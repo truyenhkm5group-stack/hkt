@@ -7,15 +7,16 @@ import { TECH_TASK_TRANSITIONS, type TechTaskStatus } from "@/lib/constants/tech
  * `tech_tasks`. Nhưng TRẠNG THÁI VIỆC vẫn chỉ nhúc nhích khi có người bấm — nên hàng đợi `/tech`
  * đo TRÍ NHỚ của người bấm, không đo việc thật sự đang ở đâu.
  *
- * ─── HAI BƯỚC, VÀ CHỈ HAI ───
+ * ─── MÁY CHỈ ĐI NHỮNG BƯỚC BẰNG CHỨNG NÓI RA DỨT KHOÁT ───
  *
  * Cám dỗ là để máy đi hết vòng đời. Không: phần lớn các bước còn lại là QUYẾT ĐỊNH, không phải
- * quan sát. Máy chỉ đi những bước mà bằng chứng GitHub nói ra dứt khoát:
+ * quan sát.
  *
- *   BUILDING → REVIEW   khi có PR đang MỞ cho việc ấy — "đã có thứ để người xem" là một SỰ KIỆN,
- *                       không phải một phán đoán.
- *   REVIEW  → QA        khi PR ĐÃ GỘP — ruleset đòi 1 duyệt và cổng `gates` xanh, nên gộp được
- *                       nghĩa là cả hai điều kiện ấy ĐÃ xảy ra. Không phải máy tự kết luận.
+ *   TRIAGED / SPEC_READY → BUILDING   khi việc ĐÃ CÓ một PR — "có người/agent bắt tay vào" là một
+ *                                     sự kiện quan sát được, không phải một phán đoán.
+ *   BUILDING → REVIEW                 khi đã có PR — "đã có thứ để người xem".
+ *   REVIEW  → QA                      khi PR ĐÃ GỘP — ruleset đòi 1 duyệt và cổng `gates` xanh,
+ *                                     nên gộp được nghĩa là cả hai điều kiện ấy ĐÃ xảy ra.
  *
  * NHỮNG BƯỚC MÁY KHÔNG BAO GIỜ ĐI, và lý do từng bước:
  *
@@ -26,6 +27,17 @@ import { TECH_TASK_TRANSITIONS, type TechTaskStatus } from "@/lib/constants/tech
  *   · `FAILED` / `BLOCKED` — cả hai là lời QUY KẾT. CI đỏ giữa chừng là chuyện bình thường của
  *     một PR đang làm; gọi nó là "việc hỏng" thì mọi việc đều hỏng vài lần trước khi xong.
  *
+ * ─── VÌ SAO "ĐÃ CÓ PR" LÀ `OPEN` **HOẶC** `MERGED`, KHÔNG CHỈ `OPEN` ───
+ *
+ * ĐÃ CẮN THẬT, đo production 21/09/2026: TECH-2 nằm ở `TRIAGED` trong khi PR #82 của nó đã được
+ * duyệt và ĐÃ GỘP. Bản đầu của bộ này chỉ có hai luật, cả hai cùng đòi `prState === "OPEN"` ở
+ * khúc đầu — nên một việc không được đẩy đúng lúc PR còn mở thì MẮC KẸT VĨNH VIỄN: cửa sổ quan
+ * sát đã đóng, và không luật nào còn khớp.
+ *
+ * Một bộ tự động chỉ đúng khi nó chạy đúng nhịp là một bộ tự động sẽ sai — nó không chịu được một
+ * lần mất điện, một lần đổi lịch, hay một lượt chạy khởi động từ chỗ khác. Bằng chứng "việc này
+ * đã có PR" KHÔNG hết hạn khi PR gộp; nó chỉ mạnh thêm.
+ *
  * ─── MÁY KHÔNG CÃI NGƯỜI ───
  *
  * Nếu lượt đổi trạng thái GẦN NHẤT là do NGƯỜI làm, máy KHÔNG đẩy tiếp. Không có luật này thì một
@@ -33,13 +45,33 @@ import { TECH_TASK_TRANSITIONS, type TechTaskStatus } from "@/lib/constants/tech
  * nhảy lại sau mười phút — và lần thứ hai họ sẽ tắt hẳn bộ này đi.
  */
 
+/**
+ * Việc này ĐÃ CÓ một PR chưa.
+ *
+ * `OPEN` và `MERGED` đều trả lời CÓ. `CLOSED` (đóng mà không gộp) KHÔNG: một PR bị đóng bỏ là bằng
+ * chứng rằng thứ đã làm không được dùng, và đẩy việc đi tiếp theo nó là đi tới bằng một cái đã bỏ.
+ */
+const daCoPr = (pr: TaskPrState) => pr.prState === "OPEN" || pr.prState === "MERGED";
+
 export const TASK_ADVANCE_RULES = [
+  {
+    from: "TRIAGED" as TechTaskStatus,
+    to: "BUILDING" as TechTaskStatus,
+    khi: daCoPr,
+    viSao: (pr: TaskPrState) => `PR #${pr.prNumber ?? "?"} đang ${pr.prState} — đã có người/agent bắt tay vào việc này.`,
+  },
+  {
+    from: "SPEC_READY" as TechTaskStatus,
+    to: "BUILDING" as TechTaskStatus,
+    khi: daCoPr,
+    viSao: (pr: TaskPrState) => `PR #${pr.prNumber ?? "?"} đang ${pr.prState} — đã có người/agent bắt tay vào việc này.`,
+  },
   {
     from: "BUILDING" as TechTaskStatus,
     to: "REVIEW" as TechTaskStatus,
-    /** PR đang MỞ cho việc này. */
-    khi: (pr: TaskPrState) => pr.prState === "OPEN",
-    viSao: (pr: TaskPrState) => `PR #${pr.prNumber ?? "?"} đang MỞ — đã có thứ để người xem.`,
+    /** Đã có PR cho việc này. */
+    khi: daCoPr,
+    viSao: (pr: TaskPrState) => `PR #${pr.prNumber ?? "?"} đang ${pr.prState} — đã có thứ để người xem.`,
   },
   {
     from: "REVIEW" as TechTaskStatus,
@@ -66,15 +98,20 @@ export type AdvanceVerdict =
  * Việc này có nên được đẩy tiếp không — HÀM THUẦN.
  *
  * `nguoiVuaDoi` = lượt đổi trạng thái gần nhất do NGƯỜI làm. Xem khối "máy không cãi người".
+ *
+ * Mỗi lượt chỉ đi MỘT bước, cố ý: từng bước để lại một dòng sự kiện đọc được, và một việc nhảy ba
+ * bậc trong một lượt thì không ai đọc lại được nó đã đi qua đâu.
  */
 export function shouldAdvanceTask(input: { status: string; pr: TaskPrState; nguoiVuaDoi: boolean }): AdvanceVerdict {
   if (input.nguoiVuaDoi) {
     return { advance: false, reason: "Lượt đổi trạng thái gần nhất là do NGƯỜI — máy không đẩy tiếp." };
   }
-  const luat = TASK_ADVANCE_RULES.find((r) => r.from === input.status);
-  if (!luat) return { advance: false, reason: `Trạng thái ${input.status} không có luật đẩy tự động.` };
-  if (!luat.khi(input.pr)) {
-    return { advance: false, reason: `Chưa đủ bằng chứng để đi từ ${luat.from} sang ${luat.to} (PR đang ${input.pr.prState || "CHƯA BIẾT"}).` };
+  const tuTrangThai = TASK_ADVANCE_RULES.filter((r) => r.from === input.status);
+  if (!tuTrangThai.length) return { advance: false, reason: `Trạng thái ${input.status} không có luật đẩy tự động.` };
+  const luat = tuTrangThai.find((r) => r.khi(input.pr));
+  if (!luat) {
+    const dich = tuTrangThai.map((r) => r.to).join(" · ");
+    return { advance: false, reason: `Chưa đủ bằng chứng để đi từ ${input.status} sang ${dich} (PR đang ${input.pr.prState || "CHƯA BIẾT"}).` };
   }
   /*
     KIỂM LẠI PHÉP CHUYỂN Ở ĐÂY, dù luật trên đã khai đúng.

@@ -76,6 +76,7 @@ import { testBanKhaiGanLai, testGanLaiSourceGuards } from "./agent-run-reattach.
 import { testScriptDayChuyenPhaiThoat } from "./script-phai-thoat.test";
 import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo } from "./agent-chi-phi.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
+import { cleanupViecDiTiepFixtures, testDispatchKemMaViec, testIngestGhiNhanhViec, testNhanhVeToiViecPure, testViecDiTiepGuards } from "./viec-di-tiep.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
@@ -1893,6 +1894,10 @@ async function main() {
   await testLedgerReconcile();
   await cleanupLedgerFixtures();
   await cleanupTaskAdvanceFixtures();
+  /* NỬA SAU DÂY CHUYỀN — dispatch mang mã việc, nhánh về tới dòng việc. Tự dọn bằng tiền tố `VDT-`/`vdt-`. */
+  await testDispatchKemMaViec();
+  await testIngestGhiNhanhViec();
+  await cleanupViecDiTiepFixtures();
   /*
     GHÉP QUẢNG CÁO TREO. Bài này chạy `reapplyAdsMapping()` THẬT, mà hàm đó quét toàn bộ dòng
     Facebook — nên nó tự chụp lại và trả về nguyên trạng `product_id`/`marketer_id` của mọi dòng
@@ -1985,6 +1990,8 @@ async function main() {
   testLedgerGuards();
   testChonVanDonPure();
   testKhongCoOneTrenKhoaNgoaiKhongDuyNhat();
+  testNhanhVeToiViecPure();
+  testViecDiTiepGuards();
   testTaskAdvancePure();
   testTaskAdvanceGuards();
   testAdsMappingGuards();
