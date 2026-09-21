@@ -1,10 +1,11 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { DOCUMENTATION_COMMANDS, DOCUMENTATION_READ_GLOBS } from "@/lib/constants/agent-sandbox";
+import { goiPhanHoi, checkRerun } from "@/lib/constants/agent-rerun";
 import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import type { TechGateResult, TechRisk } from "@/lib/constants/tech";
 import { finishTechAgentRun, startTechAgentRun, type TechActor } from "@/lib/tech/service";
-import { AgentWorkspace } from "@/lib/agents/workspace";
+import { dinhNhanh, AgentWorkspace } from "@/lib/agents/workspace";
 import type { AgentExecutor } from "@/lib/agents/executor";
 
 /**
@@ -59,6 +60,15 @@ export type RunnerOptions = {
   gates?: ("typecheck" | "lint" | "test" | "build")[];
   /** Giữ cây làm việc lại để soi bằng tay. Mặc định dọn. */
   keepWorkspace?: boolean;
+  /**
+   * NẤC 5 — chạy lại trên một nhánh ĐÃ CÓ thay vì mở nhánh mới.
+   *
+   * Có giá trị ⇒ base SHA là ĐỈNH của nhánh ấy, không phải `main`: lấy `main` nghĩa là vứt công
+   * việc của lượt trước và làm lại từ đầu, đúng thứ nấc này sinh ra để tránh.
+   */
+  rerunBranch?: string;
+  /** Phản hồi của người xem, đi vào prompt dưới dạng DỮ LIỆU — xem `lib/constants/agent-rerun.ts`. */
+  feedback?: readonly { tacGia: string; noiDung: string }[];
 };
 
 /**
@@ -118,8 +128,27 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
   const phamViGhi = writeGlobsForRole(agent.role);
 
   /* ───────── 7. Mở lượt chạy ───────── */
-  const branch = `ai/${agent.key}/${task.code}-${Date.now().toString(36)}`;
-  const mo = await startTechAgentRun({ agentId: agent.id, taskId: task.id, branch, baseCommit: opts.baseCommit }, opts.actor);
+  /* ───────── 6c. NHÁNH: mở mới, hay chạy lại trên nhánh đã có ───────── */
+  let branch = `ai/${agent.key}/${task.code}-${Date.now().toString(36)}`;
+  let baseCommit = opts.baseCommit;
+  let dungLaiNhanh = false;
+  if (opts.rerunBranch) {
+    /*
+      ĐẾM LƯỢT CHẠY TỪ SỔ, KHÔNG TỪ BỘ NHỚ.
+
+      Một bộ đếm trong tiến trình mất sạch khi container khởi động lại, và vòng lặp "review → sửa →
+      review" lại bắt đầu từ 0. Sổ thì không quên.
+    */
+    const daCo = await db.$count(schema.techAgentRuns, eq(schema.techAgentRuns.taskId, task.id));
+    const v = checkRerun({ branch: opts.rerunBranch, agentKey: agent.key, soLuotDaCo: daCo });
+    if (!v.ok) return { ...rong, reason: v.reason };
+    const dinh = await dinhNhanh(opts.repoRoot, v.branch);
+    if (!dinh) return { ...rong, reason: `Không đọc được đỉnh nhánh “${v.branch}” — nhánh chưa có trong kho?` };
+    branch = v.branch;
+    baseCommit = dinh;
+    dungLaiNhanh = true;
+  }
+  const mo = await startTechAgentRun({ agentId: agent.id, taskId: task.id, branch, baseCommit }, opts.actor);
   if ("error" in mo) return { ...rong, reason: mo.error };
   const runId = mo.id;
 
@@ -129,7 +158,8 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
     ws = await AgentWorkspace.create({
       repoRoot: opts.repoRoot,
       branch,
-      baseCommit: opts.baseCommit,
+      baseCommit,
+      reuseBranch: dungLaiNhanh,
       allowedCommands: DOCUMENTATION_COMMANDS,
       readGlobs: DOCUMENTATION_READ_GLOBS,
       writeGlobs: phamViGhi,
@@ -163,8 +193,9 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
         taskTitle: task.title,
         taskDescription: task.description,
         writeGlobs: phamViGhi,
+        feedback: goiPhanHoi(opts.feedback ?? []),
         // Runner biết hai giá trị này từ lúc dựng cây; agent thì bị hàng rào chặn cả hai đường tự lấy.
-        baseCommit: opts.baseCommit,
+        baseCommit,
         branch,
         workspace: ws,
       });
