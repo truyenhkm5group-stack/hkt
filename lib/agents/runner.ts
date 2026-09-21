@@ -209,6 +209,8 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
     try {
       outcome = await opts.executor.run({
         taskCode: task.code,
+        // VAI lấy từ SỔ AGENT — cùng nguồn với phạm vi ghi, không gõ lại (mục 65).
+        role: agent.role,
         taskTitle: task.title,
         taskDescription: task.description,
         writeGlobs: phamViGhi,

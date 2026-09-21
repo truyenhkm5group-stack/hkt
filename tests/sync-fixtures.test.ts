@@ -77,6 +77,8 @@ import { testBanKhaiGanLai, testGanLaiSourceGuards } from "./agent-run-reattach.
 import { testScriptDayChuyenPhaiThoat } from "./script-phai-thoat.test";
 import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo } from "./agent-chi-phi.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
+import { chayBaiKiemAgentTuDangKy } from "./agent-tu-dang-ky.test";
+import { testKheDangKyAgent, testKhongCoBaiKiemMoCoi, testPromptTheoVai } from "./dang-ky-bai-kiem.test";
 import { testLoiGoiHongVanGiuTien, testNganSachDocTep } from "./agent-read-budget.test";
 import { cleanupViecDiTiepFixtures, testDispatchKemMaViec, testIngestGhiNhanhViec, testNhanhVeToiViecPure, testViecDiTiepGuards } from "./viec-di-tiep.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
@@ -1895,6 +1897,8 @@ async function main() {
   await testNhacFinishDungMotLan();
   await testDemTienLuotChay();
   await testLedgerReconcile();
+  /* Bài kiểm do chính agent viết và tự đăng ký — xem `lib/constants/agent-test-registry.ts`. */
+  await chayBaiKiemAgentTuDangKy();
   await cleanupLedgerFixtures();
   await cleanupTaskAdvanceFixtures();
   /* NỬA SAU DÂY CHUYỀN — dispatch mang mã việc, nhánh về tới dòng việc. Tự dọn bằng tiền tố `VDT-`/`vdt-`. */
@@ -1992,6 +1996,9 @@ async function main() {
   testDemHoiThoai();
   testKhongNangBacAmTham();
   testGanLaiSourceGuards();
+  testKhongCoBaiKiemMoCoi();
+  testKheDangKyAgent();
+  testPromptTheoVai();
   testLedgerPure();
   testLedgerGuards();
   testChonVanDonPure();
