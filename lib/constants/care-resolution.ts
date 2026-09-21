@@ -254,3 +254,42 @@ export const DECISION_NEEDS_FOLLOW_UP: Record<CareDecision, boolean> = {
   CARE_CONTINUE_DELIVERY: false,
   CARE_FOLLOW_UP: true,
 };
+
+/**
+ * ═══════════ LÝ DO HOÀN: CHỌN DANH MỤC, HOẶC NÓI RA BẰNG CHỮ ═══════════
+ *
+ * Chủ shop báo 21/09/2026: bấm "Đã hoàn", bấm một chip MẪU NHANH ("Khách từ chối nhận") hoặc gõ
+ * tay ("bơm hàng"), nút "Ghi nhận Đã hoàn" vẫn xám. Hai thứ cùng lúc dựng nên bức tường ấy:
+ *
+ *   · Bảng LÝ DO HOÀN bị kẹp trong một ô cuộn cao 176px. Năm nhóm, chỉ ba nhóm đầu lọt vào tầm
+ *     mắt — đúng hai nhóm bị cắt (**Cố ý boom hàng**, **Lý do khác**) lại là chỗ chứa "cố ý boom
+ *     hàng" và "khách từ chối nhận", tức chính hai câu người dùng đang muốn nói.
+ *   · Chip MẪU NHANH nằm ngay dưới, cùng kiểu dáng, nên bấm vào nó CẢM GIÁC như đã chọn lý do.
+ *     Nó chỉ điền vào ô note. Màn hình thì đáp lại bằng một câu không nhắc gì tới note:
+ *     "Chọn lý do rồi mới ghi nhận được."
+ *
+ * Luật thay thế: **lý do hoàn có thể đến từ DANH MỤC hoặc từ CHỮ CỦA NGƯỜI XỬ LÝ — nhưng không
+ * bao giờ từ hư không.** Có note mà chưa chọn danh mục ⇒ ghi `OTHER` ("Lý do khác (có ghi chú)"),
+ * và chính ô note là phần "có ghi chú" ấy. Không danh mục VÀ không note thì vẫn chặn: đó mới là
+ * trường hợp đặc tả lo — một dòng hoàn không ai nói vì sao.
+ *
+ * `OTHER` CỐ Ý khác `UNKNOWN` (`lib/constants/return-reason.ts`): `OTHER` = đã hỏi, đã biết, chỉ
+ * không nằm trong danh mục; `UNKNOWN` = chưa ai hỏi. Rơi về `UNKNOWN` ở đây là biến một câu trả
+ * lời có thật của người trực thành một khoảng trống dữ liệu.
+ *
+ * HÀM THUẦN, một bản, hai chỗ gọi: màn hình dùng nó để quyết định nút có bấm được không, máy chủ
+ * dùng chính nó để quyết định có ghi hay không. Hai bản riêng là mở đường cho màn hình cho bấm còn
+ * máy chủ từ chối — hoặc ngược lại, tệ hơn: máy chủ ghi `null` trong khi người dùng tưởng đã khai.
+ */
+export const REASON_FROM_NOTE = "OTHER";
+
+export type DecisionReason = { ok: true; reasonCode: string | undefined; fromNote: boolean } | { ok: false; error: string };
+
+export function decisionReasonCode(decision: CareDecision, reasonCode: string | undefined | null, note: string | undefined | null): DecisionReason {
+  const chon = reasonCode?.trim() || "";
+  const chu = note?.trim() || "";
+  if (!DECISION_NEEDS_REASON[decision]) return { ok: true, reasonCode: chon || undefined, fromNote: false };
+  if (chon) return { ok: true, reasonCode: chon, fromNote: false };
+  if (chu) return { ok: true, reasonCode: REASON_FROM_NOTE, fromNote: true };
+  return { ok: false, error: "Chọn lý do hoàn trong danh mục, hoặc ghi một câu vào ô note — báo cáo lý do hoàn rỗng vĩnh viễn nếu bước này bỏ qua" };
+}
