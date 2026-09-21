@@ -10,6 +10,7 @@ import {
   CARE_DECISIONS,
   DECISION_NEEDS_FOLLOW_UP,
   DECISION_NEEDS_REASON,
+  decisionReasonCode,
   FOLLOW_UP_CHOICES,
   RESOLUTION_HINT,
   RESOLUTION_LABEL,
@@ -50,6 +51,12 @@ import { cn } from "@/lib/utils";
  * phần còn lại chỉ người vừa gọi khách mới biết. Bỏ bước đó thì báo cáo lý do hoàn rỗng vĩnh viễn.
  * Cái giá được trả bằng một cú bấm, không phải bằng một hộp thoại toàn màn hình: lý do hiện thành
  * chip bấm một phát ngay dưới nút.
+ *
+ * NHƯNG "phải nói vì sao" KHÔNG có nghĩa là "phải nói bằng đúng ba mươi ô có sẵn" (chủ shop chốt
+ * 21/09/2026). Danh mục không bao giờ phủ hết câu khách nói; gõ tay "bơm hàng" cũng là một lời
+ * khai, và nó được lưu thành `OTHER` — "Lý do khác (có ghi chú)" — kèm nguyên câu vừa gõ. Luật ở
+ * `decisionReasonCode()`, MỘT bản, màn hình và máy chủ cùng gọi. Chỉ khi KHÔNG danh mục VÀ KHÔNG
+ * note thì nút mới xám, vì lúc đó mới đúng là không ai nói gì.
  *
  * ─── HAI DÁNG, MỘT LUẬT ───
  *
@@ -104,7 +111,14 @@ function NoteBox({
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-muted-foreground">
-        <span>Mẫu nhanh</span>
+        {/*
+          NÓI RÕ ĐÂY LÀ MẪU CÂU CHO Ô NOTE, KHÔNG PHẢI DANH MỤC LÝ DO.
+
+          Hai hàng chip cùng kiểu dáng đứng sát nhau thì người dùng đọc chúng là một. Chủ shop bấm
+          "Khách từ chối nhận" ở hàng dưới và tưởng đã chọn lý do — trong khi danh mục có ĐÚNG một
+          ô mang tên ấy, nằm khuất phía trên.
+        */}
+        <span>Mẫu câu cho ô note</span>
         {canEdit && onPresetsChange ? (
           <button type="button" className="inline-flex items-center gap-1 rounded px-1 normal-case hover:bg-accent" onClick={() => setEditing((v) => !v)}>
             <Pencil className="size-3" /> {editing ? "Xong" : "Sửa mẫu"}
@@ -208,9 +222,21 @@ function FollowUpPicker({ value, onChange }: { value: Date | null; onChange: (d:
   );
 }
 
-function ReasonPicker({ value, onChange }: { value: ReturnReason | ""; onChange: (r: ReturnReason) => void }) {
+/**
+ * DANH MỤC LÝ DO — PHẢI THẤY ĐƯỢC HẾT, VÀ PHẢI TRÔNG KHÁC MẪU NOTE.
+ *
+ * Bản trước kẹp cả bảng trong `max-h-44` (176px): năm nhóm, ba nhóm lọt vào tầm mắt, và hai nhóm
+ * bị cắt đúng là **Cố ý boom hàng** + **Lý do khác** — chỗ chứa "cố ý boom hàng", "khách từ chối
+ * nhận", "kho đóng sai". Người dùng không cuộn một ô mà họ không biết là có thể cuộn; họ kết luận
+ * lý do của mình không có trong danh sách, rồi đi gõ tay.
+ *
+ * Trong panel (chi tiết vận đơn) thì cả khối cuộn theo drawer, nên bỏ hẳn cái kẹp. Trong popover
+ * của hàng bảng vẫn phải kẹp — popover không cao hơn màn hình được — nhưng kẹp cao hơn và luôn
+ * hiện đường viền để mép cắt nhìn thấy được.
+ */
+function ReasonPicker({ value, onChange, compact }: { value: ReturnReason | ""; onChange: (r: ReturnReason) => void; compact?: boolean }) {
   return (
-    <div className="max-h-44 space-y-1.5 overflow-y-auto">
+    <div className={cn("space-y-1.5 rounded-md border bg-background/60 p-1.5", compact && "max-h-56 overflow-y-auto")}>
       {REASONS_BY_GROUP.map(({ group, reasons }) => (
         <div key={group}>
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{RETURN_REASON_GROUP_LABEL[group]}</div>
@@ -238,6 +264,7 @@ function ResolutionForm({
   canEdit,
   onPresetsChange,
   saving,
+  compact,
 }: {
   action: CareDecision;
   presets: string[];
@@ -248,6 +275,8 @@ function ResolutionForm({
   canEdit?: boolean;
   onPresetsChange?: (next: string[]) => void;
   saving?: boolean;
+  /** Dáng popover trong bảng: danh mục lý do phải kẹp chiều cao, panel thì không. */
+  compact?: boolean;
 }) {
   const [note, setNote] = useState("");
   const [reason, setReason] = useState<ReturnReason | "">("");
@@ -259,10 +288,17 @@ function ResolutionForm({
     if (autoFocusNote) boxRef.current?.querySelector("textarea")?.focus();
   }, [autoFocusNote]);
 
-  const ready = !DECISION_NEEDS_REASON[action] || reason !== "";
+  /*
+    MÀN HÌNH VÀ MÁY CHỦ HỎI CÙNG MỘT CÂU.
+
+    `decisionReasonCode()` là hàm chung: nó nói nút có bấm được không, và chính nó quyết định máy
+    chủ ghi mã gì. Viết lại điều kiện ở đây là mở đường cho màn hình cho bấm còn máy chủ từ chối.
+  */
+  const lyDo = decisionReasonCode(action, reason || undefined, note);
+  const ready = lyDo.ok;
   const send = () => {
-    if (!ready || pending) return;
-    onSubmit({ note: note.trim(), reasonCode: DECISION_NEEDS_REASON[action] ? reason || undefined : undefined, followUpAt: DECISION_NEEDS_FOLLOW_UP[action] ? (at ?? undefined) : undefined });
+    if (!lyDo.ok || pending) return;
+    onSubmit({ note: note.trim(), reasonCode: lyDo.reasonCode, followUpAt: DECISION_NEEDS_FOLLOW_UP[action] ? (at ?? undefined) : undefined });
   };
 
   return (
@@ -270,8 +306,8 @@ function ResolutionForm({
       <p className="text-[11px] leading-snug text-muted-foreground">{RESOLUTION_HINT[action]}</p>
       {DECISION_NEEDS_REASON[action] ? (
         <div className="space-y-1">
-          <div className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Lý do hoàn (bắt buộc)</div>
-          <ReasonPicker value={reason} onChange={setReason} />
+          <div className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Lý do hoàn — chọn một ô, hoặc ghi rõ ở ô note bên dưới</div>
+          <ReasonPicker value={reason} onChange={setReason} compact={compact} />
         </div>
       ) : null}
       {DECISION_NEEDS_FOLLOW_UP[action] ? (
@@ -289,7 +325,7 @@ function ResolutionForm({
           </p>
         </>
       ) : null}
-      <NoteBox presets={presets} value={note} onChange={setNote} onSubmit={send} placeholder="Khách nói gì? (Ctrl/⌘ + Enter để lưu)" canEdit={canEdit} onPresetsChange={onPresetsChange} saving={saving} />
+      <NoteBox presets={presets} value={note} onChange={setNote} onSubmit={send} placeholder={DECISION_NEEDS_REASON[action] ? "Vì sao hoàn? Khách nói gì? (Ctrl/⌘ + Enter để lưu)" : "Khách nói gì? (Ctrl/⌘ + Enter để lưu)"} canEdit={canEdit} onPresetsChange={onPresetsChange} saving={saving} />
       <div className="flex items-center justify-end gap-1">
         {onCancel ? (
           <button type="button" className="rounded px-2 py-1 text-[11.5px] text-muted-foreground hover:bg-accent" onClick={onCancel} disabled={pending}>
@@ -305,7 +341,20 @@ function ResolutionForm({
           {pending ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />} Ghi nhận “{RESOLUTION_LABEL[action]}”
         </button>
       </div>
-      {!ready ? <p className="text-right text-[10.5px] text-muted-foreground">Chọn lý do rồi mới ghi nhận được.</p> : null}
+      {/*
+        CÂU DƯỚI NÚT PHẢI NÓI ĐÚNG THỨ ĐANG XẢY RA.
+
+        Bản trước in "Chọn lý do rồi mới ghi nhận được" kể cả khi người dùng vừa gõ xong một câu
+        note — không nhắc gì tới note, nên người đọc không có cách nào biết mình còn thiếu gì.
+        Giờ có ba câu cho ba tình huống, và tình huống "ghi bằng chữ" nói trước điều sắp được lưu.
+      */}
+      {!ready ? (
+        <p className="text-right text-[10.5px] text-muted-foreground">Chọn một lý do ở trên, hoặc ghi một câu vào ô note — rồi mới ghi nhận được.</p>
+      ) : lyDo.ok && lyDo.fromNote ? (
+        <p className="text-right text-[10.5px] text-muted-foreground">
+          Chưa chọn danh mục — sẽ lưu là <b>{RETURN_REASON_LABEL.OTHER}</b> kèm đúng câu note bạn vừa ghi.
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -418,6 +467,7 @@ export function ResolutionControl({
                 presets={boMau[a]}
                 pending={pending}
                 saving={saving}
+                compact
                 canEdit={canEditPresets}
                 onPresetsChange={(next) => luuMau(a, next)}
                 autoFocusNote={!DECISION_NEEDS_REASON[a] && !DECISION_NEEDS_FOLLOW_UP[a]}
