@@ -39,6 +39,7 @@ import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
 import { runGithubDeploymentSync } from "@/lib/integrations/github/deployments";
 import { runGithubPrSync } from "@/lib/integrations/github/pull-requests";
 import { runAiIncidentWatch } from "@/lib/tech/ai-incident-watch";
+import { runAgentRunReconcile } from "@/lib/tech/agent-run-reconcile";
 import { runTaskAdvanceWatch } from "@/lib/tech/task-advance-watch";
 import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
@@ -123,6 +124,16 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       "Chỉ MỞ, không bao giờ tự đóng: đóng sự cố đòi kể được ĐÃ LÀM GÌ để nó hết, mà máy không có câu đó. " +
       "Nhiều nhất một sự cố chưa đóng cho mỗi job, nên chạy lại bao nhiêu lần cũng không nhân đôi.",
     run: (o) => runSyncIncidentWatch({ trigger: o.trigger, actor: o.actor, hours: num(o.params?.hours) }),
+  },
+  "agent-run-reconcile": {
+    label: "Đối chiếu sổ lượt chạy agent với GitHub",
+    source: "GITHUB",
+    description:
+      "CHỈ ĐỌC: so N lượt chạy `agent-run.yml` gần nhất trên GitHub với `tech_agent_runs`. Cửa chép sổ mang `continue-on-error`, nên một lượt chạy THÀNH CÔNG vẫn có thể không bao giờ về tới production — và hôm nay không gì đỏ lên. " +
+      "Năm câu trả lời tách bạch: có sổ · chưa xong · hỏng trước khi agent chạy (KHÔNG phải mất) · mất dòng TRƯỚC khi cửa hoạt động (di sản đã vá) · mất dòng SAU khi cửa hoạt động (lỗi còn đang xảy ra, phải bằng 0). " +
+      "KHÔNG tự dựng lại dòng đã mất: GitHub không biết agent sửa tệp nào hay cổng nào xanh, nên dòng dựng từ đó chỉ TRÔNG như có bằng chứng. " +
+      "Không đọc được GitHub thì báo CHƯA ĐO ĐƯỢC, không báo 'mất 0 dòng'.",
+    run: (o) => runAgentRunReconcile({ trigger: o.trigger, actor: o.actor, limit: num(o.params?.limit) }),
   },
   "task-advance-watch": {
     label: "Đẩy trạng thái việc Tech theo bằng chứng GitHub",

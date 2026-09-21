@@ -69,6 +69,7 @@ import { testHangRaoBaiKiem, testHangRaoTuyetDoi, testPhamViSourceGuards, testPh
 import { testRerunDeBai, testRerunDinhNhanh, testRerunGuards, testRerunPhanHoi, testRerunPure, testRerunWorktree } from "./agent-rerun.test";
 import { cleanupDispatchFixtures, testDispatchCua, testDispatchPure, testDispatchService, testDispatchSourceGuards } from "./agent-dispatch.test";
 import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuards } from "./agent-task-read.test";
+import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
@@ -1873,6 +1874,8 @@ async function main() {
   await testHaiLuatKhongTroiXaNhau();
   await cleanupShipmentPickFixtures();
   await testTaskAdvanceDb();
+  await testLedgerReconcile();
+  await cleanupLedgerFixtures();
   await cleanupTaskAdvanceFixtures();
   /*
     GHÉP QUẢNG CÁO TREO. Bài này chạy `reapplyAdsMapping()` THẬT, mà hàm đó quét toàn bộ dòng
@@ -1948,6 +1951,8 @@ async function main() {
   testDispatchPure();
   testDispatchSourceGuards();
   testAgentTaskReadGuards();
+  testLedgerPure();
+  testLedgerGuards();
   testChonVanDonPure();
   testKhongCoOneTrenKhoaNgoaiKhongDuyNhat();
   testTaskAdvancePure();
