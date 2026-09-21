@@ -390,7 +390,10 @@ export function mapVtpStatusText(text: string): VtpStatusMap {
   if (has("dang giao hang", "phat tiep", "dang phat", "di giao")) return { stage: "OUT_FOR_DELIVERY", cod: "PENDING", final: false };
   if (has("dang van chuyen", "dang trung chuyen", "trung chuyen", "dang luan chuyen")) return { stage: "IN_TRANSIT", cod: "PENDING", final: false };
   if (has("da lay hang", "da nhan hang", "lay hang thanh cong")) return { stage: "PICKED_UP", cod: "PENDING", final: false };
-  if (has("cho xu ly", "cho lay hang", "cho duyet", "moi tao", "tao moi", "khoi tao")) return { stage: "PENDING", cod: "PENDING", final: false };
+  // "dang lay hang" đứng SAU "da lay hang" ở dòng trên và không phải tiền tố của nó (`includes`
+  // thuần) — bưu tá đang trên đường tới lấy thì hàng vẫn trong kho, nên chặng là PENDING, tức NGOÀI
+  // `CARRIER_HANDOFF_STAGES`. Xem `SUBSTATE_TEXT_RULES` cho số đo và lý do.
+  if (has("cho xu ly", "cho lay hang", "dang lay hang", "cho duyet", "moi tao", "tao moi", "khoi tao")) return { stage: "PENDING", cod: "PENDING", final: false };
 
   // ───── Từ vựng của CHÍNH ĐVVC (STATUS_NAME trong webhook và bản sao hành trình từ Pancake) ─────
   // Khác hẳn từ vựng cột "Trạng Thái" của tệp Excel. Thiếu nhóm này thì 17.881/19.362 sự kiện

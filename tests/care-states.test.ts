@@ -45,6 +45,28 @@ export function test02ChoXuLyKhongPhaiGiaoHong() {
   assert.equal(carrierSubstate({ code: 102, text: "Đơn hàng chờ xử lý", stage: "PENDING" }).substate, "WAITING_PROCESSING");
 }
 
+/* ───── 2b · Ba câu chữ có chung cụm "lấy hàng" nhưng ba kết luận khác nhau ───── */
+export function test02bBaCauLayHang() {
+  /*
+    Phép khớp câu chữ là `includes` THUẦN, nên ba cụm dưới đây phân biệt được nhau chỉ nhờ độ dài.
+    Rút gọn bất kỳ cụm nào thành "lay hang" là làm hai cụm kia đổ vào nhánh của nó — và hai kết
+    luận ở hai đầu đối lập: PICKED_UP đưa kiện vào "đã gửi", AWAITING_PICKUP giữ nó ngoài.
+
+    "Đang lấy hàng" đo được trên production 21/09/2026: 74 lần trong `vtp_status_registry`, dịch ra
+    `UNKNOWN` và `mapped = false`. Chủ shop chốt cùng ngày: trên viettelpost.vn chỉ "Đã lấy hàng"
+    và "Đang vận chuyển" mới chắc chắn ĐVVC đã cầm hàng.
+  */
+  assert.equal(carrierSubstate({ text: "Đang lấy hàng" }).substate, "AWAITING_PICKUP", "bưu tá đang trên đường tới lấy thì hàng VẪN trong kho");
+  assert.equal(carrierSubstate({ text: "Đã lấy hàng" }).substate, "PICKED_UP", "và cụm này thì ngược lại — không được lẫn");
+  assert.equal(carrierSubstate({ text: "Lấy hàng thất bại" }).substate, "PICKUP_FAILED");
+  assert.equal(carrierSubstate({ text: "Lấy không thành công" }).substate, "PICKUP_FAILED", "câu chữ màn hình VTP dùng; ERP chưa từng nhận được nó qua webhook nhưng phải dịch được khi nó tới");
+
+  // Cái quan trọng nhất: chỉ MỘT trong bốn cụm trên có nghĩa "đã rời kho".
+  assert.equal(SUBSTATE_IMPLIES_PICKED_UP.AWAITING_PICKUP, "NO");
+  assert.equal(SUBSTATE_IMPLIES_PICKED_UP.PICKUP_FAILED, "NO");
+  assert.notEqual(SUBSTATE_IMPLIES_PICKED_UP.PICKED_UP, "NO");
+}
+
 /* ───── 3 · Mã ĐVVC thắng chữ, luôn luôn ───── */
 export function test03MaThangChu() {
   // Mã 508 = "đơn vị yêu cầu phát tiếp" — đang đi giao, dù chữ có từ "tồn".
@@ -403,6 +425,7 @@ export async function testCareStates(db: Db) {
   test23LuatVaoCareMotHam();
   test24MotMaHaiChieu();
   test02ChoXuLyKhongPhaiGiaoHong();
+  test02bBaCauLayHang();
   test03MaThangChu();
   test04MauCuTheTruocMauChung();
   test05LaThiNoiLaLa();
