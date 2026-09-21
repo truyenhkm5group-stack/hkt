@@ -137,10 +137,12 @@ async function main() {
     GIEO LẠI BẰNG ĐÚNG HÀM DỊCH VỤ mà `/tech` dùng, KHÔNG `insert` thẳng: mức rủi ro, cổng phê
     duyệt và mã việc đều do hàm ấy quyết. Chạy lại trên cùng CSDL tạm thì dùng lại việc đã có.
   */
-  const daCo = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.title, viec.title), columns: { code: true } });
+  const daCo = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.title, viec.title), columns: { id: true, code: true } });
   if (daCo) {
-    console.log(`▶ Việc đã có trong CSDL tạm: ${daCo.code} — dùng lại.`);
-    console.log(`TASK_CODE=${daCo.code}`);
+    // Dùng lại việc cũ vẫn phải mang mã production — xem khối bên dưới.
+    if (daCo.code !== viec.code) await db.update(schema.techTasks).set({ code: viec.code }).where(eq(schema.techTasks.id, daCo.id));
+    console.log(`▶ Việc đã có trong CSDL tạm — dùng lại dưới mã ${viec.code}.`);
+    console.log(`TASK_CODE=${viec.code}`);
     return;
   }
   const t = await createTechTask(
@@ -151,9 +153,27 @@ async function main() {
     console.error(`✗ Không tạo được việc trong CSDL tạm: ${t.error}`);
     process.exit(1);
   }
-  console.log(`▶ Đã gieo ${t.code} (mã production: ${viec.code}) · rủi ro ${t.risk}`);
-  console.log(`TASK_CODE=${t.code}`);
-  console.log(`PROD_TASK_CODE=${viec.code}`);
+  /*
+    ═══════════ MÃ VIỆC PHẢI LÀ MÃ CỦA PRODUCTION ═══════════
+
+    ĐÃ CẮN THẬT — lượt chạy agent #14, việc thật đầu tiên của Phòng Tech AI:
+
+      · Chủ shop tạo `TECH-2` trên production.
+      · `createTechTask` gieo lại vào CSDL tạm — một CSDL RỖNG, nên bộ sinh mã cấp `TECH-1`.
+      · Mọi bước sau đọc mã CỤC BỘ: nhánh thành `ai/documentation/TECH-1-…`, và cửa chép sổ ghi
+        lượt chạy ấy vào **TECH-1 trên production** — một việc HOÀN TOÀN KHÁC (“Đánh giá tốc độ
+        trang vận đơn”, mức R2).
+
+    Không có gì đỏ lên. Sổ production nói một lượt chạy thuộc về một việc nó không thuộc về, và đó
+    đúng là loại sai mà AGENTS.md mục 34–35 gọi tên: quy kết đi bằng khoá, và không được đoán.
+
+    Nên CSDL tạm mang ĐÚNG danh tính của production. Sửa ở đây — một script chỉ chạy trên máy CI,
+    ghi vào một CSDL dùng-một-lần — thay vì mở cho `createTechTask` nhận mã từ ngoài: đó là hàm
+    dịch vụ của `/tech`, và nới nó ra để phục vụ một đường CI là đổi luật thật vì một nhu cầu giả.
+  */
+  await db.update(schema.techTasks).set({ code: viec.code }).where(eq(schema.techTasks.id, t.id));
+  console.log(`▶ Đã gieo ${viec.code} (mã cục bộ ban đầu ${t.code}, đã đổi về mã production) · rủi ro ${t.risk}`);
+  console.log(`TASK_CODE=${viec.code}`);
 }
 
 main()

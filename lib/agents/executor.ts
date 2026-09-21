@@ -155,6 +155,20 @@ LUẬT:
 const MAX_ROUNDS = 24;
 
 /**
+ * Câu nhắc khi model dừng mà chưa gọi `finish`.
+ *
+ * Cố ý KHÔNG nói "coi như đã xong" và KHÔNG gợi ý nội dung kết luận: nếu câu nhắc mớm sẵn câu trả
+ * lời thì tóm tắt thu về là lời của câu nhắc, không phải lời của model — và cả sổ lượt chạy mất ý
+ * nghĩa. Nó chỉ nói ra giao thức và trả lại quyền chọn.
+ */
+const NHAC_FINISH = [
+  "Bạn vừa kết thúc lượt mà chưa gọi công cụ `finish`, nên lượt chạy này đang bị tính là CHƯA XONG.",
+  "Nếu đã làm xong: gọi `finish` với một câu kết luận KIỂM CHỨNG ĐƯỢC (đã sửa tệp nào, cổng nào xanh).",
+  "Nếu chưa xong: cứ làm tiếp bằng công cụ.",
+  "Đây là lần nhắc duy nhất.",
+].join("\n");
+
+/**
  * Executor chạy bằng một `AiProvider`.
  *
  * KHÔNG gọi thẳng SDK của nhà cung cấp nào: nó nhận `AiProvider` — giao diện đã có từ bản AI
@@ -192,16 +206,39 @@ export class AiAgentExecutor implements AgentExecutor {
 
     let summary = "";
     let finished = false;
+    /** Đã nhắc gọi `finish` chưa — nhắc tối đa MỘT lần cho cả lượt chạy. */
+    let daNhac = false;
     for (let round = 0; round < MAX_ROUNDS && !finished; round += 1) {
       const res = await this.provider.complete({ system: SYSTEM, messages, tools: AGENT_TOOLS, maxTokens: 8000 });
       messages.push({ role: "assistant", content: res.content });
 
       const calls = res.content.filter((b): b is Extract<typeof b, { type: "tool_use" }> => b.type === "tool_use");
       if (!calls.length) {
-        // Model nói chuyện mà không gọi công cụ nào: ghi lại rồi dừng — không đoán ý nó.
         const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join(" ").trim();
+        /*
+          ═══════════ NHẮC MỘT LẦN, RỒI MỚI BỎ CUỘC ═══════════
+
+          ĐÃ CẮN THẬT — lượt chạy agent #14, việc thật đầu tiên: agent viết xong tài liệu, commit,
+          **bốn cổng đều PASSED**, rồi kết thúc lượt bằng một đoạn văn tóm tắt thay vì gọi `finish`.
+          Lượt chạy bị tính là FAILED, và vì hỏng nên PR cũng không được mở. Công đã làm xong nằm
+          lại trên một nhánh không ai mở ra xem.
+
+          Bỏ cuộc ngay ở đây là ĐÚNG về nguyên tắc — máy không được đoán ý model — nhưng nó bỏ phí
+          một lượt chạy tốn tiền thật vì một lỗi giao thức sửa được bằng một câu.
+
+          Nên: nhắc ĐÚNG MỘT LẦN. Câu nhắc cố ý hẹp — nó KHÔNG nói "coi như xong", không gợi ý kết
+          luận, chỉ nói ra giao thức và để model tự chọn giữa gọi `finish` hay làm tiếp. Nhắc lần
+          thứ hai là bắt đầu dỗ model nói câu mình muốn nghe, và lúc đó tóm tắt không còn là lời
+          của nó nữa.
+        */
+        if (!daNhac) {
+          daNhac = true;
+          steps.push({ kind: "NOTE", detail: `Dừng mà chưa gọi finish — nhắc một lần. Lời model: ${text.slice(0, 300)}` });
+          messages.push({ role: "user", content: [{ type: "text", text: NHAC_FINISH }] });
+          continue;
+        }
         steps.push({ kind: "NOTE", detail: text.slice(0, 500) });
-        return { summary: summary || text.slice(0, 1000), steps, finished: false, error: "Agent dừng mà không gọi finish." };
+        return { summary: summary || text.slice(0, 1000), steps, finished: false, error: "Agent dừng mà không gọi finish (đã nhắc một lần)." };
       }
 
       const results: AiMessage["content"] = [];
