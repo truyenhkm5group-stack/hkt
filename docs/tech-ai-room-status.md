@@ -410,6 +410,27 @@ nói trước điều đó; đêm nay nó tự chứng minh hai lần.
 
 · `agent-scopes` bắt tôi thêm một vùng cấm mà quên ca kiểm cho nó.
 
+### Xác minh trên PRODUCTION, không phải trên ảnh chụp
+
+Đo 22/09/2026 bằng `db-query`:
+
+```
+ code   | status  |         nhanh         | pr | so_luot | sk_branch
+--------+---------+-----------------------+----+---------+-----------
+ TECH-3 | TRIAGED | ai/qa/TECH-3-mubjc3n2 |  0 |       3 |         3
+ TECH-2 | TRIAGED | (rỗng)                |  0 |       6 |         0
+```
+
+Ba điều được xác minh cùng lúc:
+
+· **Nhánh về tới dòng việc** — khúc 2 của nửa VỀ chạy thật.
+· **Luật "lượt mới thắng" đúng** — nhánh đang là của lượt #24 (`mubjc3n2`), đã thay nhánh lượt
+  #22 (`mubfsts5`). Đúng `xetGhiNhanhViec`: nhánh agent cũ bị thay, nhánh NGƯỜI khai thì không.
+· **Không backfill lén** — TECH-2 vẫn RỖNG dù có 6 lượt chạy, vì mọi lượt của nó xảy ra TRƯỚC khi
+  bản vá tồn tại (mục 8.8). Quá khứ không được viết lại cho đẹp.
+
+`pr = 0` cũng đúng: chưa lượt nào qua được cổng nên chưa PR nào được mở. **Khúc 3 (tự mở PR) và
+khúc 4 (việc tự đi tiếp) vẫn CHƯA từng chạy** — không được ghi là đã xong.
 ### Đã đo, chưa sửa — chờ chủ shop quyết
 
 `/reports/funnel` **34,4 giây** (máy rảnh). Nguyên nhân xác định: `lib/queries/sales-funnel.ts` và
