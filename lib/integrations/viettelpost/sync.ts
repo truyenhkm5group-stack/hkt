@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { moTaLoiCsdl } from "@/lib/db/error-message";
 import { getDb, schema, type Db } from "@/db";
+import { chonVanDonDeGhep } from "@/lib/constants/shipment-pick";
 import { codStatusForAmount } from "@/lib/constants/cod";
 import { CAPABILITY_SCOPE_ERROR, CAPABILITY_PROBE_LIMIT } from "@/lib/constants/logistics-freshness";
 import { legTypeFromReturningFlag } from "@/lib/constants/truth";
@@ -43,8 +44,19 @@ export async function findShipmentForVtp(db: Db, record: VtpTrackingRecord): Pro
     // họ gửi ORDER_REFERENCE = 123456789101112), so sánh thẳng sẽ làm Postgres báo lỗi "value out
     // of range for type integer" và cả gói tin hỏng. Chỉ so khi số nằm trong phạm vi.
     if (Number.isSafeInteger(systemId) && systemId > 0 && systemId <= 2_147_483_647) conditions.push(eq(schema.orders.systemId, systemId));
-    const order = await db.query.orders.findFirst({ where: or(...conditions), with: { shipment: true } });
-    if (order?.shipment) return order.shipment;
+    const order = await db.query.orders.findFirst({ where: or(...conditions), with: { attempts: true } });
+    /*
+      TỚI ĐÂY NGHĨA LÀ MÃ VẬN ĐƠN KHÔNG KHỚP DÒNG NÀO — nên đây là đường CUỐI, tra theo mã tham
+      chiếu của đơn. Một đơn có thể có nhiều lần gửi, và quan hệ `one(...)` cũ trả về MỘT dòng bất
+      kỳ: sự kiện của ĐVVC có thể rơi vào lần gửi đã đóng. Chứng từ ĐVVC là nguồn tin CAO NHẤT
+      (`docs/business-rules/ORDER_OUTCOME.md` mục 3), nên gắn nhầm dòng ở đây là làm hỏng đúng thứ
+      khó sửa nhất.
+
+      Dùng `chonVanDonDeGhep` chứ KHÔNG dùng `vanDonDaiDien`: bản tin đang mô tả tình trạng HIỆN
+      THỜI của kiện, nên nó thuộc về lần gửi đang chạy — không phải lần gửi đã tới tay khách.
+    */
+    const khop = order ? chonVanDonDeGhep(order.attempts, { vtpOrderNumber: orderNumber || null, trackingCode: orderNumber || null }) : null;
+    if (khop) return khop;
     if (order) {
       const [created] = await db
         .insert(schema.shipments)

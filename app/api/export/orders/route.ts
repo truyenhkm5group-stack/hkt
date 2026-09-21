@@ -1,6 +1,7 @@
 import { asc, desc } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { getDb, schema } from "@/db";
+import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { can, getCurrentUser } from "@/lib/auth/session";
 import { ORDER_STAGE_LABEL } from "@/lib/constants/pancake";
 import { SHIPMENT_STAGE_LABEL, COD_STATUS_LABEL } from "@/lib/constants/viettelpost";
@@ -31,11 +32,17 @@ export async function GET(request: NextRequest) {
     where: orderListWhere(params),
     orderBy: [params.dir === "asc" ? asc(schema.orders.insertedAt) : desc(schema.orders.insertedAt)],
     limit: 20000,
-    with: { shipment: true, items: { columns: { productName: true, variationDetail: true, quantity: true, sku: true } } },
+    with: { attempts: true, items: { columns: { productName: true, variationDetail: true, quantity: true, sku: true } } },
   });
   const header = ["Mã đơn", "Ngày tạo", "Trạng thái", "Kênh", "Khách hàng", "SĐT", "Địa chỉ", "Tỉnh/TP", "Sản phẩm", "Số lượng", "Tiền hàng", "Giảm giá", "Tổng đơn", "COD", "Giá vốn", "Phí ship khách trả", "Phí ĐVVC", "ĐVVC", "Mã vận đơn", "Trạng thái vận đơn", "Trạng thái COD", "Nhân viên", "Ghi chú", "Thẻ"];
   const lines = [header.map(csvCell).join(",")];
-  for (const o of rows) {
+  for (const r of rows) {
+    /*
+      MỘT ĐƠN CÓ THỂ NHIỀU LẦN GỬI — cột "Mã vận đơn" của tệp xuất phải là lần gửi ĐẠI DIỆN, cùng
+      luật với `PRIMARY_ATTEMPT` mà mọi báo cáo tiền dùng. Trước đây quan hệ `one(...)` trả về một
+      dòng bất kỳ, nên tệp xuất có thể đưa cho khách mã của lần gửi đã đóng.
+    */
+    const o = { ...r, shipment: vanDonDaiDien(r.attempts) };
     lines.push(
       [
         o.systemId ?? o.id,
