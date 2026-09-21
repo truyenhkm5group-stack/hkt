@@ -262,6 +262,17 @@ export function testRerunGuards() {
     một danh sách hẹp ở runner thì agent lại bỏ cuộc y như lượt #17, chỉ khác là lần này đề bài
     nói dối một cách tự tin.
   */
+  /*
+    ───────── TRẦN PHẢI ĐẾM ĐƯỢC Ở CHỖ NÓ THẬT SỰ CHẠY ─────────
+
+    Sổ `tech_agent_runs` trên máy Actions là một CSDL PGlite DỰNG MỚI MỖI LƯỢT, nên đếm một mình
+    nó thì luôn ra 0 và trần không bao giờ chạm tới. Thứ sống sót qua một máy dùng-một-lần là
+    chính cái nhánh git. Lấy MAX của hai nguồn là rơi về phía CHẶT hơn.
+  */
+  assert.ok(/soCommitCuaAgent\(/.test(runner), "trần phải đếm cả số commit của nhánh — sổ trên máy CI là CSDL dùng-một-lần");
+  assert.ok(/Math\.max\(theoSo, theoNhanh/.test(runner), "lấy số LỚN HƠN của hai nguồn, không thay nguồn này bằng nguồn kia");
+  assert.ok(/theoNhanh \?\? 0/.test(runner), "git không trả lời ⇒ chỉ còn sổ; KHÔNG coi CHƯA BIẾT là 0 lượt đã chạy");
+
   const soLanReadGlobs = (runner.match(/readGlobs: DOCUMENTATION_READ_GLOBS/g) ?? []).length;
   assert.equal(
     soLanReadGlobs,
