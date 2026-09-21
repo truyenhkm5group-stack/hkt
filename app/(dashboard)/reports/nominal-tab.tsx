@@ -50,10 +50,24 @@ import { cn } from "@/lib/utils";
   gõ tay, một con số mô hình dựng từ trạng thái thật, một tỷ lệ lịch sử của mã, và một giả định
   chung của shop — gộp cả bốn vào chữ "lịch sử" là xoá đúng thông tin mà người đọc cần.
 */
+/**
+ * Kiện CHƯA RỜI KHO phải hiện ra ngay cạnh tỷ lệ, chứ không chỉ biến mất khỏi mẫu số.
+ *
+ * Đo 21/09/2026: Q004 có 40 đơn như vậy trên 167 đơn từng bị tính là "đã gửi". Lặng lẽ bỏ chúng
+ * đi thì dòng lại không cộng được lần nữa — chỉ khác chiều. Chúng là VIỆC PHẢI LÀM (đi giục bưu
+ * tá), nên cột nhỏ gọi tên chúng.
+ */
+const choLay = (r: NominalRow) => (r.projection?.awaitingPickup ? ` · ${formatNumber(r.projection.awaitingPickup)} chờ ĐVVC lấy (ngoài tỷ lệ)` : "");
+
 const NHAN_NGUON: Record<NominalRow["returnRateSource"], (r: NominalRow) => string> = {
   override: () => "ghi đè · ước tính theo tỷ lệ",
-  projected: (r) => (r.projection ? `${formatNumber(r.projection.eligibleSent)} đơn đã gửi${r.projection.unmodelledActive ? ` · ${formatNumber(r.projection.unmodelledActive)} ngoài ước tính` : ""}` : "mô hình"),
-  unmeasured: (r) => (r.projection ? `chưa đo được · ${formatNumber(r.projection.unmodelledActive)}/${formatNumber(r.projection.active)} đang giao ngoài ước tính` : "chưa đo được"),
+  projected: (r) => (r.projection ? `${formatNumber(r.projection.eligibleSent)} đơn đã gửi${r.projection.unmodelledActive ? ` · ${formatNumber(r.projection.unmodelledActive)} ngoài ước tính` : ""}${choLay(r)}` : "mô hình"),
+  unmeasured: (r) =>
+    r.projection
+      ? r.projection.eligibleSent === 0
+        ? `chưa gửi đơn nào${choLay(r)}`
+        : `chưa đo được · ${formatNumber(r.projection.unmodelledActive)}/${formatNumber(r.projection.active)} đang giao ngoài ước tính${choLay(r)}`
+      : "chưa đo được",
   history: (r) => `lịch sử ${formatNumber(r.historyFinished)} đơn · ước tính theo tỷ lệ`,
   default: () => "mặc định · ước tính theo tỷ lệ",
 };
@@ -62,7 +76,9 @@ function moTaUocTinh(r: NominalRow): string {
   const dem = `Đã giao TC ${formatNumber(r.delivered)} · không thành công ${formatNumber(r.returned)} · đang giao ${formatNumber(Math.max(0, r.orders - r.delivered - r.returned))}`;
   if (r.returnRateSource === "override") return `${dem} — tỷ lệ do chủ shop gõ tay, thắng mọi nguồn khác; tiền = Doanh số POS × tỷ lệ (ước tính theo tỷ lệ)`;
   if (r.returnRateSource === "projected" && r.projection)
-    return `${dem} — mỗi đơn đang giao cân theo xác suất của chính trạng thái ĐVVC nó đang ở (${PROJECTED_GTC_VERSION}, ${formatNumber(r.projection.eligibleSent)} đơn đã gửi trong kỳ${r.projection.pending ? `, ${formatNumber(r.projection.pending)} chưa gửi cân theo P(chưa gửi)` : ""})${r.projection.unmodelledActive ? ` · ${formatNumber(r.projection.unmodelledActive)} đơn ngoài ước tính (${formatVND(r.unmodelledRevenue, { compact: true })})` : ""}`;
+    return `${dem} — mỗi đơn đang giao cân theo xác suất của chính trạng thái ĐVVC nó đang ở (${PROJECTED_GTC_VERSION}, ${formatNumber(r.projection.eligibleSent)} đơn đã gửi trong kỳ${r.projection.pending ? `, ${formatNumber(r.projection.pending)} chưa gửi cân theo P(chưa rời kho)` : ""}${r.projection.awaitingPickup ? `, ${formatNumber(r.projection.awaitingPickup)} chờ ĐVVC tới lấy — hàng còn trong kho nên KHÔNG ở tử số lẫn mẫu số tỷ lệ` : ""})${r.projection.unmodelledActive ? ` · ${formatNumber(r.projection.unmodelledActive)} đơn ngoài ước tính (${formatVND(r.unmodelledRevenue, { compact: true })})` : ""}`;
+  if (r.returnRateSource === "unmeasured" && r.projection?.eligibleSent === 0)
+    return `${dem} — CHƯA ĐO ĐƯỢC: mã này chưa có đơn nào rời kho trong kỳ${r.projection.awaitingPickup ? ` (${formatNumber(r.projection.awaitingPickup)} đơn đã có mã vận đơn nhưng ĐVVC chưa cầm hàng)` : ""}. Không có mẫu số thì không có tỷ lệ — “—” KHÔNG phải 0%`;
   if (r.returnRateSource === "unmeasured")
     return `${dem} — CHƯA ĐO ĐƯỢC: phần đang giao ở trạng thái chưa đủ mẫu quá lớn, không lùi về giả định. DT GTC ƯT chỉ gồm phần đã dự báo được; ${formatVND(r.unmodelledRevenue, { compact: true })} doanh số nằm ngoài ước tính`;
   if (r.returnRateSource === "history") return `${dem} — mã không có đơn nào trong cohort mô hình, dùng tỷ lệ hoàn lịch sử của mã (${formatNumber(r.historyFinished)} đơn đã kết thúc); tiền = Doanh số POS × tỷ lệ`;
@@ -202,7 +218,7 @@ export async function NominalTab({
         */}
         <MetricCard
           label="Tỷ lệ giao thành công ước tính"
-          hint={`Ước tính giao được ÷ (đã gửi − đơn ngoài ước tính), trong đó ước tính giao được = đã giao thật (ORDER_OUTCOME) + Σ(đơn đang giao × xác suất giao được của trạng thái ĐVVC nó đang ở). Đơn chưa gửi và đơn huỷ không ở tử số lẫn mẫu số. ${PROJECTED_GTC_VERSION}, mốc ngày chốt đơn — cùng hợp đồng với trang Tỷ lệ giao thành công theo mã hàng. “—” = chưa đo được (không phải 0%).`}
+          hint={`Ước tính giao được ÷ (đã gửi − đơn ngoài ước tính), trong đó ước tính giao được = đã giao thật (ORDER_OUTCOME) + Σ(đơn đang giao × xác suất giao được của trạng thái ĐVVC nó đang ở). Đơn chưa gửi, đơn CHỜ ĐVVC TỚI LẤY (hàng còn trong kho) và đơn huỷ không ở tử số lẫn mẫu số. ${PROJECTED_GTC_VERSION}, mốc ngày chốt đơn — cùng hợp đồng với trang Tỷ lệ giao thành công theo mã hàng. “—” = chưa đo được (không phải 0%).`}
           value={
             <span className="inline-flex flex-wrap items-center gap-2">
               <span className={successTone(t.weightedDeliveryRate)}>{t.weightedDeliveryRate !== null ? `${t.weightedDeliveryRate.toFixed(1)}%` : "—"}</span>
@@ -212,7 +228,7 @@ export async function NominalTab({
           note={
             t.projectionError
               ? `LỖI khi tính ước tính: ${t.projectionError}`
-              : `${pj ? `${formatNumber(pj.eligibleSent)} đơn đã gửi · ${formatNumber(pj.active)} đang giao${pj.unmodelledActive ? ` (${formatNumber(pj.unmodelledActive)} ngoài ước tính)` : ""}` : "chưa có cohort"} · thực tế ${formatNumber(t.delivered)} giao TC, ${formatNumber(t.returned)} không TC${t.assumedDeliveryRate !== null && t.weightedDeliveryRate !== null && Math.abs(t.assumedDeliveryRate - t.weightedDeliveryRate) >= 0.05 ? ` · bình quân tỷ lệ đang dùng trong bảng (gồm ghi đè/lịch sử) ${t.assumedDeliveryRate.toFixed(1)}%` : ""}`
+              : `${pj ? `${formatNumber(pj.eligibleSent)} đơn đã gửi · ${formatNumber(pj.active)} đang giao${pj.unmodelledActive ? ` (${formatNumber(pj.unmodelledActive)} ngoài ước tính)` : ""}${pj.awaitingPickup ? ` · ${formatNumber(pj.awaitingPickup)} chờ ĐVVC lấy, ngoài tỷ lệ` : ""}` : "chưa có cohort"} · thực tế ${formatNumber(t.delivered)} giao TC, ${formatNumber(t.returned)} không TC${t.assumedDeliveryRate !== null && t.weightedDeliveryRate !== null && Math.abs(t.assumedDeliveryRate - t.weightedDeliveryRate) >= 0.05 ? ` · bình quân tỷ lệ đang dùng trong bảng (gồm ghi đè/lịch sử) ${t.assumedDeliveryRate.toFixed(1)}%` : ""}`
           }
           icon={Percent}
           tone={t.weightedDeliveryRate === null ? "slate" : t.weightedDeliveryRate < 55 ? "rose" : "green"}
