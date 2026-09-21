@@ -134,10 +134,40 @@ function applyWrap(table: HTMLTableElement, sized: Set<number>) {
   });
 }
 
+/**
+ * ═══ TAY KÉO CHỈ DỰNG CHO THIẾT BỊ CÓ CON TRỎ CHÍNH XÁC ═══
+ *
+ * Trên màn hình cảm ứng, tay kéo KHÔNG phải vô hại — nó CƯỚP thao tác vuốt. Nó rộng 9px, mang
+ * `touch-action: none`, và nằm ở mép phải của MỌI cột: một bảng 12 cột rải hơn 100px vùng không
+ * cuộn được dọc theo đúng thứ người ta hay đặt ngón tay. Tệ hơn, chạm trúng rồi vuốt ngang không
+ * cuộn bảng mà ĐỔI BỀ RỘNG CỘT — người dùng không hề định làm vậy và cũng không biết vì sao nó
+ * xảy ra.
+ *
+ * `(pointer: fine)` là chuột / bút cảm ứng — nơi nhắm trúng 9px là chuyện bình thường. Ngón tay
+ * thì không, nên ở đó không dựng tay kéo nào. Nút "Cột" và nút "Bề rộng" vẫn còn: ẩn cột là cách
+ * thu hẹp bảng dùng được bằng ngón tay.
+ *
+ * Đo ở LÚC GẮN và nghe thay đổi: máy tính bảng cắm/rút chuột rời đổi câu trả lời giữa chừng.
+ * Mặc định `true` để lượt kết xuất đầu (chưa có `window`) không làm nhấp nháy trên máy bàn.
+ */
+function useConTroChinhXac() {
+  const [co, setCo] = useState(true);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(pointer: fine)");
+    const doc = () => setCo(mq.matches);
+    doc();
+    mq.addEventListener("change", doc);
+    return () => mq.removeEventListener("change", doc);
+  }, []);
+  return co;
+}
+
 export function ColumnResize({ tableRef }: { tableRef: React.RefObject<HTMLTableElement | null> }) {
   const [heads, setHeads] = useState<{ index: number; el: HTMLTableCellElement; label: string }[]>([]);
   const [widths, setWidths] = useState<Record<number, number>>({});
   const [dragging, setDragging] = useState<number | null>(null);
+  const coConTro = useConTroChinhXac();
   const keyRef = useRef("");
   const widthsRef = useRef(widths);
   widthsRef.current = widths;
@@ -293,7 +323,7 @@ export function ColumnResize({ tableRef }: { tableRef: React.RefObject<HTMLTable
           <Ruler className="size-3.5" /> Bề rộng
         </button>
       ) : null}
-      {heads.map((h) =>
+      {(coConTro ? heads : []).map((h) =>
         // Cột đang bị ẩn bằng nút "Cột" thì không có tay kéo — kéo một cột không nhìn thấy là một
         // thao tác không có phản hồi.
         h.el.style.display === "none"

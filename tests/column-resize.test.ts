@@ -116,6 +116,15 @@ export function testColumnResize() {
   assert.ok(src.includes('overflowWrap = "break-word"'), "ô chữ phải gãy ở khoảng trắng bằng `break-word` — nó KHÔNG làm giảm min-content nên từ dài nhất vẫn nguyên vẹn");
   assert.ok(src.includes("ensureColGroup"), "bề rộng phải đặt ở `<col>`, không đặt lên từng ô");
 
+  // ───────── MÀN HÌNH CẢM ỨNG: KHÔNG DỰNG TAY KÉO ─────────
+  //
+  // Tay kéo rộng 9px, mang `touch-action: none`, và nằm ở mép phải của MỌI cột. Trên điện thoại /
+  // máy tính bảng đó không phải một tính năng không dùng tới — nó CƯỚP thao tác vuốt: chạm trúng
+  // rồi vuốt ngang sẽ ĐỔI BỀ RỘNG CỘT thay vì cuộn bảng, và người dùng không hiểu vì sao.
+  assert.ok(/\(pointer:\s*fine\)/.test(src), "phải hỏi `(pointer: fine)` trước khi dựng tay kéo");
+  assert.ok(/\(coConTro \? heads : \[\]\)\.map/.test(src), "không có con trỏ chính xác ⇒ KHÔNG dựng tay kéo nào");
+  assert.ok(/touch-none/.test(src), "tay kéo vẫn phải chặn cuộn khi ĐANG kéo bằng bút cảm ứng");
+
   console.log(
     `✓ Kéo rộng cột: sàn ${MIN_COLUMN_WIDTH}px / trần ${MAX_COLUMN_WIDTH}px · chưa biết ⇒ null · số không gãy, chữ gãy ở khoảng trắng · không cắt chữ ở bất kỳ đâu · đổi cột thì cấu hình cũ không áp nhầm`,
   );
