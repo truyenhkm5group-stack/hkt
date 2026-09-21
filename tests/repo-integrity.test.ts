@@ -37,9 +37,53 @@ const CANDIDATE_SUFFIXES = ["", ".ts", ".tsx", ".d.ts", ".js", ".jsx", ".json", 
  * này — bỏ qua nó thì bài kiểm mù đúng nửa số đường dẫn nội bộ của kho.
  * Gói ngoài (`react`, `drizzle-orm`…) thì do `node_modules` lo, không thuộc phạm vi bài kiểm.
  */
+/**
+ * BỎ CHÚ THÍCH TRƯỚC KHI QUÉT — một dòng `import` nằm trong chú thích KHÔNG được biên dịch.
+ *
+ * ĐÃ CẮN THẬT, PR #90: `tests/agent-tu-dang-ky.test.ts` có một ví dụ minh hoạ trong khối chú
+ * thích để chỉ agent cách tự đăng ký bài kiểm:
+ *
+ *     import { testXxx } from "./ten-bai-kiem.test";
+ *
+ * Bài kiểm này đọc nguyên văn, thấy một import trỏ tới tệp không tồn tại, và đỏ — trong khi
+ * `tsc` hoàn toàn không thấy gì. Nó bắt một thứ KHÔNG THỂ làm đỏ một bản checkout sạch, tức là
+ * đúng cái nó sinh ra để chặn thì nó lại báo động giả.
+ *
+ * Đây là lần thứ NĂM cái bẫy chú thích cắn trong kho này (bốn lần trước ở các bộ quét mã nguồn
+ * khác), nên vá ở mức LỚP: mọi bộ quét đều phải bỏ chú thích trước, bằng cùng một phép.
+ *
+ * Vế `(^|[^:])` giữ cho `https://` không bị cắt nhầm thành chú thích — không có nó thì một URL
+ * trong chuỗi sẽ nuốt luôn phần còn lại của dòng, và một import THẬT trên dòng ấy biến mất.
+ */
+function boChuThich(ma: string): string {
+  return ma.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
 const IMPORT_RE = /(?:from|import|require)\s*\(?\s*["']((?:\.\.?|@)\/[^"']+)["']/g;
 
+/**
+ * Phép bỏ chú thích phải ĐÚNG hai chiều, và cả hai đều đã có tiền lệ trong kho:
+ *  · import trong chú thích  ⇒ KHÔNG được tính (PR #90);
+ *  · `https://` trong chuỗi  ⇒ KHÔNG được coi là mở chú thích, nếu không một import THẬT trên
+ *    cùng dòng sẽ biến mất và bài kiểm mù đúng chỗ nó phải nhìn.
+ */
+function tuKiemBoChuThich() {
+  const trongKhoi = boChuThich(`/*
+  import { x } from "./khong-co-that";
+*/`);
+  assert.ok(!IMPORT_RE.test(trongKhoi), "import trong khối chú thích KHÔNG được tính là import");
+  IMPORT_RE.lastIndex = 0;
+
+  const trongDong = boChuThich(`// import { x } from "./khong-co-that";`);
+  assert.ok(!IMPORT_RE.test(trongDong), "import trong chú thích một dòng KHÔNG được tính");
+  IMPORT_RE.lastIndex = 0;
+
+  const coUrl = boChuThich(`const u = "https://vi.du/x"; import { y } from "./that";`);
+  assert.ok(IMPORT_RE.test(coUrl), "`https://` KHÔNG được nuốt mất một import thật trên cùng dòng");
+  IMPORT_RE.lastIndex = 0;
+}
 export function testRepoIntegrity() {
+  tuKiemBoChuThich();
+
   const tracked = new Set(
     execSync("git ls-files", { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
       .split("\n")
@@ -65,7 +109,7 @@ export function testRepoIntegrity() {
     }
 
     const dir = path.posix.dirname(file);
-    for (const match of src.matchAll(IMPORT_RE)) {
+    for (const match of boChuThich(src).matchAll(IMPORT_RE)) {
       const spec = match[1];
       checked += 1;
       // `@/x` neo ở gốc kho; `./x` và `../x` neo theo thư mục của tệp đang xét.
