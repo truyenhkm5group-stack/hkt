@@ -41,7 +41,14 @@ export type DataTableProps<T> = {
    * Gom nhóm cha – con (vd mã hàng → mẫu mã): key(row) là khoá nhóm; parent(rows) tạo dòng cha (tổng hợp) hiển thị bằng chính
    * các cột; defaultExpanded mở sẵn (mặc định đóng, bấm mũi tên để xổ). Nhóm chỉ có 1 dòng thì hiện thẳng dòng đó.
    */
-  group?: { key: (row: T) => string; parent: (rows: T[], key: string) => T; defaultExpanded?: boolean; parentHref?: (parent: T, rows: T[]) => string | undefined };
+  /**
+   * `parent` trả `null` = nhóm này KHÔNG có dòng cha; các dòng con vẫn hiện như thường.
+   *
+   * Cách vẽ vốn đã xử lý `null` (nhóm một dòng luôn ra `null` — xem `groups` bên dưới); chỉ có kiểu
+   * khai báo là chưa cho phép. Nó cần thiết khi dòng cha do MÁY CHỦ dựng: nhóm nào máy chủ không
+   * dựng được dòng cha thì thà không có dòng cha, còn hơn để trình duyệt tự cộng ra một con số sai.
+   */
+  group?: { key: (row: T) => string; parent: (rows: T[], key: string) => T | null; defaultExpanded?: boolean; parentHref?: (parent: T, rows: T[]) => string | undefined };
   /** Cột và chiều sắp xếp mặc định của trang (khớp với parseListParams ở phía máy chủ) để mũi tên hiển thị đúng thứ tự thật */
   defaultSort?: string;
   defaultDir?: "asc" | "desc";

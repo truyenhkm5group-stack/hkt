@@ -16,6 +16,7 @@ const EVENT_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
 const o = schema.orders;
 const s = schema.shipments;
 const i = schema.orderItems;
+const pv = schema.productVariants;
 
 /** Cước ĐVVC của đơn: ưu tiên số trên vận đơn, không có thì lấy phí đối tác Pancake ghi trên đơn */
 const FEE = sql`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`;
@@ -576,8 +577,44 @@ export type ReturnRateQuery = {
   pageSize: number;
 };
 
+/**
+ * DÒNG GỘP THEO MÃ HÀNG — gộp ở MÁY CHỦ theo ĐƠN, không phải cộng các dòng mẫu mã lại.
+ *
+ * Xem `rawMa` trong `getReturnRateByVariant` cho số đo và lý do. Kiểu này cố ý KHÔNG mở rộng
+ * `ReturnRateRow`: dòng gộp không có `variantId`, không có `sku`, và không mở được trang chi tiết
+ * mẫu mã — để một dòng gộp không bao giờ lọt vào chỗ chỉ dòng mẫu mã mới đúng.
+ */
+export type ProductRateRow = {
+  productKey: string;
+  productName: string;
+  image: string | null;
+  /** Số mẫu mã có phát sinh trong kỳ — hiện dưới tên mã hàng. */
+  variants: number;
+  shipped: number;
+  delivered: number;
+  returned: number;
+  returnedByRule: number;
+  inTransit: number;
+  failed: number;
+  cancelled: number;
+  returnedQty: number;
+  lostRevenue: number;
+  deliveredRevenue: number;
+  rate: number | null;
+  successRate: number | null;
+  expectedSuccessRate: number | null;
+  expectedRate: number | null;
+  projectedSent: number;
+  projectedDelivered: number;
+  projectedActive: number;
+  unmodelledActive: number;
+  activeByState: Partial<Record<string, number>>;
+};
+
 export type ReturnRateRow = {
   key: string;
+  /** Khoá mã hàng của mẫu mã này — để trình duyệt gộp theo ĐÚNG mã, không theo chuỗi tên. */
+  productKey: string;
   variantId: string | null;
   sku: string;
   productName: string;
@@ -656,7 +693,7 @@ function baseWhere(period: Period, q: string, basis: TimeBasis = "SHIPPED"): SQL
 }
 
 /** Tỷ lệ hoàn theo từng mẫu mã (SKU) — gộp theo đơn, một đơn có N mẫu mã được tính cho cả N mẫu mã. */
-export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ rows: ReturnRateRow[]; total: number; pageCount: number; all: ReturnRateRow[]; projectionError: string | null }> {
+export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ rows: ReturnRateRow[]; total: number; pageCount: number; all: ReturnRateRow[]; productRows: ProductRateRow[]; projectionError: string | null }> {
   const db = await getDb();
   // 11 cột gộp trên cùng một biểu thức kết quả đơn ⇒ tính một lần cho mỗi dòng bằng bảng dẫn xuất.
   const base = db
@@ -672,11 +709,17 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
       lineTotal: i.lineTotal,
       shipmentStage: s.stage,
       outcome: outcomeColumn(),
+      /*
+        KHOÁ MÃ HÀNG — ĐÚNG biểu thức mà `getProjectedDeliveryMetrics(..., "PRODUCT")` và bảng lợi
+        nhuận dùng. Chép lệch một dấu nối thì ba nơi gộp ra ba tập dòng khác nhau.
+      */
+      productKey: sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`.as("product_key"),
     })
     .from(i)
     .innerJoin(o, eq(o.id, i.orderId))
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .leftJoin(pv, eq(pv.id, i.variantId))
     .where(baseWhere(query.period, query.q, query.basis ?? "SHIPPED"))
     .offset(OUTCOME_FENCE)
     .as("variant_base");
@@ -687,6 +730,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
   const raw = await chayKhongJit(db, (tx) => tx
     .select({
       key: base.key,
+      productKey: sql<string>`max(${base.productKey})`,
       variantId: sql<string | null>`max(${base.variantId})`,
       sku: sql<string>`max(${base.sku})`,
       productName: sql<string>`max(${base.productName})`,
@@ -705,6 +749,48 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     })
     .from(base)
     .groupBy(base.key));
+
+  /*
+    ═══════════ DÒNG GỘP THEO MÃ ĐẾM ĐƠN, KHÔNG CỘNG CÁC MẪU MÃ ═══════════
+
+    Dòng gộp từng được dựng ở TRÌNH DUYỆT bằng `rows.reduce(...)` cộng các dòng mẫu mã lại. Mỗi dòng
+    mẫu mã đã `count(distinct order_id)` trong phạm vi mẫu mã của nó, nên một đơn mua HAI mẫu mã của
+    CÙNG một mã hàng được cộng HAI lần.
+
+    Đo production 21/09/2026, cửa sổ 30 ngày:
+
+      mã     đơn thật   dòng gộp cộng ra   đếm thừa
+      Q002        699                744        +45
+      Q003        365                405        +40  (11,0%)
+      Q005        175                202        +27  (15,4%)
+      Q004        195                207        +12
+
+    Tỷ lệ chỉ méo nhẹ (tử và mẫu cùng phồng) nhưng các cột ĐÃ GỬI / GTC / KHÔNG THÀNH CÔNG là SAI
+    với tư cách SỐ ĐƠN, và không bao giờ khớp được với bảng lợi nhuận.
+
+    Nay gộp ở MÁY CHỦ, trên CÙNG bảng dẫn xuất, chỉ đổi khoá gộp sang mã hàng — nên `count(distinct
+    order_id)` lại đếm mỗi đơn đúng một lần. Không có công thức thứ hai: từng biểu thức dưới đây là
+    bản sao nguyên văn của dòng mẫu mã ở trên, khác đúng chỗ `groupBy`.
+  */
+  const rawMa = await chayKhongJit(db, (tx) => tx
+    .select({
+      productKey: base.productKey,
+      productName: sql<string>`max(${base.productName})`,
+      image: sql<string | null>`max(${base.image})`,
+      variants: sql<number>`count(distinct ${base.key})`,
+      shipped: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
+      delivered: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'DELIVERED')`,
+      returned: sql<number>`count(distinct ${base.orderId}) filter (where ${RETURNED_ANY})`,
+      returnedByRule: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'RETURNED_BY_RULE')`,
+      inTransit: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'IN_TRANSIT')`,
+      failed: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'IN_TRANSIT' and ${base.shipmentStage} = 'DELIVERY_FAILED')`,
+      cancelled: sql<number>`count(distinct ${base.orderId}) filter (where ${base.outcome} = 'CANCELLED')`,
+      returnedQty: sql<number>`coalesce(sum(${base.quantity}) filter (where ${RETURNED_ANY}), 0)`,
+      lostRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${RETURNED_ANY}), 0)`,
+      deliveredRevenue: sql<number>`coalesce(sum(${base.lineTotal}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
+    })
+    .from(base)
+    .groupBy(base.productKey));
 
   /*
     ═══ MỘT HỢP ĐỒNG, HAI GRAIN ═══
@@ -728,13 +814,24 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     Nay lỗi được giữ lại và trả lên màn hình bằng tên của nó.
   */
   let duBao: Awaited<ReturnType<typeof getProjectedDeliveryMetrics>> | null = null;
+  let duBaoMa: Awaited<ReturnType<typeof getProjectedDeliveryMetrics>> | null = null;
   let projectionError: string | null = null;
   try {
-    duBao = await getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "VARIANT");
+    /*
+      HAI GRAIN, MỘT HỢP ĐỒNG. Dòng mẫu mã đọc grain `VARIANT`; dòng gộp theo mã đọc grain
+      `PRODUCT` — KHÔNG cộng các dòng mẫu mã lại, vì ở grain `VARIANT` một đơn hai mẫu mã cùng mã
+      đã được đếm hai lần (xem `rawMa`). `getProjectedDeliveryMetrics` nhớ kết quả theo khoá có cả
+      grain, nên lượt thứ hai không phải tính lại từ đầu.
+    */
+    [duBao, duBaoMa] = await Promise.all([
+      getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "VARIANT"),
+      getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "PRODUCT"),
+    ]);
   } catch (e) {
     projectionError = e instanceof Error ? e.message : String(e);
   }
   const duBaoTheoKhoa = new Map((duBao?.rows ?? []).map((x) => [x.key, x]));
+  const duBaoTheoMa = new Map((duBaoMa?.rows ?? []).map((x) => [x.key, x]));
 
   const all: ReturnRateRow[] = raw
     .map((r) => {
@@ -748,6 +845,7 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
       const expectedRate = d && d.projectedRate !== null ? Math.round((100 - d.projectedRate) * 10) / 10 : null;
       return {
         key: r.key,
+        productKey: (r.productKey ?? "").trim(),
         variantId: r.variantId,
         sku: r.sku ?? "",
         productName: r.productName ?? "",
@@ -790,10 +888,57 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     return sign * (av - bv) || b.returned - a.returned || b.shipped - a.shipped;
   });
 
+  /*
+    DÒNG GỘP DỰNG SẴN Ở MÁY CHỦ, cùng hàm `projectedRateOf` với mọi nơi khác. Trình duyệt chỉ việc
+    tra theo khoá mã hàng — nó không còn phép cộng nào để làm sai.
+
+    Mã hàng KHÔNG xác định được (`productKey` rỗng) thì không có dòng gộp: gom mọi mẫu mã vô chủ vào
+    một dòng "khác" là bịa ra một mã hàng chưa từng tồn tại.
+  */
+  const productRows: ProductRateRow[] = rawMa
+    .filter((r) => (r.productKey ?? "").trim())
+    .map((r) => {
+      const productKey = String(r.productKey).trim();
+      const delivered = Number(r.delivered);
+      const returned = Number(r.returned);
+      const finished = delivered + returned;
+      const d = duBaoTheoMa.get(productKey);
+      const projectedSent = d?.eligibleSent ?? 0;
+      const projectedDelivered = d?.projectedDelivered ?? 0;
+      const projectedActive = d?.active ?? 0;
+      const unmodelledActive = d?.unmodelledActive ?? 0;
+      const projectedRate = d ? d.projectedRate : null;
+      return {
+        productKey,
+        productName: r.productName ?? "",
+        image: r.image,
+        variants: Number(r.variants),
+        shipped: Number(r.shipped),
+        delivered,
+        returned,
+        returnedByRule: Number(r.returnedByRule),
+        inTransit: Number(r.inTransit),
+        failed: Number(r.failed),
+        cancelled: Number(r.cancelled),
+        returnedQty: Number(r.returnedQty),
+        lostRevenue: Number(r.lostRevenue),
+        deliveredRevenue: Number(r.deliveredRevenue),
+        rate: finished ? (returned / finished) * 100 : null,
+        successRate: finished ? (delivered / finished) * 100 : null,
+        expectedSuccessRate: projectedRate,
+        expectedRate: projectedRate === null ? null : Math.round((100 - projectedRate) * 10) / 10,
+        projectedSent,
+        projectedDelivered,
+        projectedActive,
+        unmodelledActive,
+        activeByState: d?.activeByState ?? {},
+      };
+    });
+
   const total = all.length;
   const pageCount = Math.max(1, Math.ceil(total / query.pageSize));
   const start = (query.page - 1) * query.pageSize;
-  return { rows: all.slice(start, start + query.pageSize), total, pageCount, all, projectionError };
+  return { rows: all.slice(start, start + query.pageSize), total, pageCount, all, productRows, projectionError };
 }
 
 export type ReturnRateSummary = {
