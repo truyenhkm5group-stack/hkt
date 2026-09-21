@@ -222,6 +222,11 @@ export type NominalRow = {
   historyFinished: number;
   expectedRevenue: number;
   expectedCogs: number;
+  /**
+   * SỐ SẢN PHẨM giao thành công ước tính — CÙNG phép cân với `expectedCogs`, nhưng đo được cả ở
+   * mã chưa biết giá vốn (ở đó `expectedCogs` bị ép về 0).
+   */
+  expectedQty: number;
   shipCost: number;
   expectedProfit: number;
   margin: number | null;
@@ -276,6 +281,14 @@ export type NominalRow = {
   inventoryRiskOnPurchase: number;
   /** Giá trị hàng còn trong kho của mã (chỉ mẫu mã đã có phiếu nhập) */
   stockValue: number;
+  /** Tồn thực tế theo SỔ KHO (số lượng) — mốc để đối chiếu với phép trừ "nhập − giao TC". */
+  stockQty: number;
+  /** Mã đã có phiếu nhập chưa. `false` ⇒ tồn CHƯA BIẾT, màn hình in "—" chứ không in 0. */
+  stockKnown: boolean;
+  /** Hàng đã rời kho, đang trên đường (chưa kết thúc) — không nằm trong kho, cũng chưa tới khách. */
+  outInTransitQty: number;
+  /** Hàng phải quay về mà kho CHƯA lập phiếu tái nhập — chưa được cộng lại tồn (mục 10). */
+  outAwaitingReturnQty: number;
   /** Rủi ro CÒN TREO trên hàng tồn = % × `stockValue` — memo, KHÔNG trừ vào lợi nhuận kỳ */
   inventoryRiskPending: number;
   /** LN theo tổng giá trị hàng nhập = DT GTC ƯT − CPQC − hàng nhập − VC − vận hành − rủi ro TK cả lô − thuế − CP khác */
@@ -326,6 +339,8 @@ export type NominalReport = {
     adSpend: number;
     expectedRevenue: number;
     expectedCogs: number;
+    /** Σ số sản phẩm giao thành công ước tính — đo được cả ở mã chưa biết giá vốn. */
+    expectedQty: number;
     shipCost: number;
     expectedProfit: number;
     margin: number | null;
@@ -377,6 +392,11 @@ export type NominalReport = {
     inventoryRisk: number;
     inventoryRiskOnPurchase: number;
     stockValue: number;
+    stockQty: number;
+    /** `false` khi CÓ mã chưa có phiếu nhập nào ⇒ tổng tồn là CHƯA BIẾT, không phải một con số. */
+    stockKnown: boolean;
+    outInTransitQty: number;
+    outAwaitingReturnQty: number;
     inventoryRiskPending: number;
     netProfit: number;
     failed: number;
@@ -407,14 +427,21 @@ function applyAssumptions(
   base: { orders: number; items: number; grossSales: number; cogsFull: number; adSpend: number },
   rate: number | null,
   a: ResolvedAssumptions,
-  orderLevel?: { revenue: number; cogs: number } | null,
+  orderLevel?: { revenue: number; cogs: number; qty: number } | null,
 ) {
   const r = rate === null ? 0 : Math.min(Math.max(rate, 0), 100) / 100;
   const expectedRevenue = orderLevel ? orderLevel.revenue : Math.round(base.grossSales * (1 - r));
   const expectedCogs = orderLevel ? orderLevel.cogs : Math.round(base.cogsFull * (1 - r));
+  /*
+    SỐ SẢN PHẨM GIAO THÀNH CÔNG ƯỚC TÍNH đi ĐÚNG cùng một đường với tiền: cân theo từng đơn ở
+    nhánh hợp đồng, nhân tỷ lệ ở nhánh "ước tính theo tỷ lệ". Không được suy ra từ `expectedCogs`
+    chia đơn giá — mẫu mã chưa biết giá vốn thì `expectedCogs` bằng 0 và phép chia ấy sẽ nói là
+    "chưa giao được sản phẩm nào" trong khi số lượng vẫn đo được bình thường.
+  */
+  const expectedQty = orderLevel ? orderLevel.qty : Math.round(base.items * (1 - r));
   const shipCost = Math.round(base.orders * ((1 - r) * a.shipFeeDeliveredUsed + r * a.shipFeeReturnedUsed));
   const expectedProfit = expectedRevenue - expectedCogs - shipCost - base.adSpend;
-  return { expectedRevenue, expectedCogs, shipCost, expectedProfit, margin: expectedRevenue ? (expectedProfit / expectedRevenue) * 100 : null };
+  return { expectedRevenue, expectedCogs, expectedQty, shipCost, expectedProfit, margin: expectedRevenue ? (expectedProfit / expectedRevenue) * 100 : null };
 }
 
 /** Hàng nhập trong kỳ theo phiếu nhập (kind RECEIPT, số lượng dương) gộp theo mã */
@@ -442,14 +469,47 @@ export async function purchaseByProduct(period: Period): Promise<Map<string, { q
   return new Map(rows.filter((r) => r.productId).map((r) => [r.productId as string, { qty: Number(r.qty), cost: Number(r.cost), name: r.name ?? "", code: r.code ?? "", costKnown: Number(r.unknownQty) === 0, unknownQty: Number(r.unknownQty) }]));
 }
 
+/** Tồn kho của một mã theo SỔ KHO, kèm hai nhóm hàng ĐÃ RỜI KHO mà chưa về lại. */
+export type StockSnapshot = {
+  /** Tồn thực tế (số lượng) theo sổ kho — chỉ mẫu mã đã có phiếu nhập. */
+  qty: number;
+  /** Giá trị tồn thực tế — cơ sở của phần rủi ro còn treo (memo). */
+  value: number;
+  /** Mã đã có ÍT NHẤT một phiếu nhập chưa. `false` ⇒ tồn là CHƯA BIẾT, không phải 0. */
+  known: boolean;
+  /** Hàng đã rời kho, đang trên đường, chưa kết thúc — không ở trong kho, cũng chưa tới khách. */
+  inTransitQty: number;
+  /** Hàng phải quay về mà kho CHƯA lập phiếu tái nhập — chưa được tính vào tồn (mục 10). */
+  awaitingReturnQty: number;
+};
+
 /**
- * GIÁ TRỊ HÀNG CÒN TRONG KHO theo mã — cơ sở của phần rủi ro còn treo (memo).
+ * TỒN KHO THEO MÃ — cơ sở của phần rủi ro còn treo (memo) VÀ của phép đối chiếu
+ * "hàng nhập − hàng đã giao thành công" ở bảng Lợi nhuận theo hàng nhập.
  *
  * Dùng lại đúng định nghĩa tồn của SỔ KHO (`lib/queries/stock.ts`), không tự dựng công thức tồn thứ
  * hai. Mẫu mã CHƯA CÓ PHIẾU NHẬP nào bị loại hẳn: ở đó "nhập = 0" là THIẾU DỮ LIỆU chứ không phải
  * "nhập 0 cái", lấy 0 trừ số đã xuất sẽ ra tồn âm bịa ra.
+ *
+ * ═══ VÌ SAO HAI NHÓM "ĐÃ RỜI KHO" ĐI CÙNG, CHỨ KHÔNG PHẢI MỘT CON SỐ TỒN TRƠ TRỌI ═══
+ *
+ * `SL nhập − SL giao thành công` KHÔNG bằng tồn kho, và khoảng cách giữa hai con số không nhỏ.
+ * Đo production 21/09/2026, toàn bộ lịch sử:
+ *
+ *     mã     nhập   giao TC   nhập − giao   tồn SỔ KHO   hoàn chưa tái nhập
+ *     Q002   1.374      321         1.053          352                  301
+ *     Q003     388      230           158           −5                  184
+ *     Q004     217       62           155           35                   48
+ *     Q001     146       36           110           95                   47
+ *     Q005      74        0            74            6                    0
+ *     X001      40       14            26           26                    0
+ *
+ * Chênh lệch của Q002 là **701 cái** — gấp ba lần con số tồn thật. Nó không phải sai số làm tròn
+ * mà là hai nhóm hàng CÓ THẬT: hàng đang trên đường, và hàng hoàn mà kho chưa đếm lại. In một
+ * mình "nhập − giao" là khẳng định 701 cái ấy đang nằm trên kệ. Nên phép trừ chỉ được hiện KÈM
+ * chỗ hàng thật sự đang ở.
  */
-async function stockValueByProduct(): Promise<Map<string, number>> {
+async function stockByProduct(): Promise<Map<string, StockSnapshot>> {
   const db = await getDb();
   const salesAgg = variantSalesSubquery(db);
   const receiptsAgg = variantReceiptsSubquery(db);
@@ -457,15 +517,35 @@ async function stockValueByProduct(): Promise<Map<string, number>> {
   const rows = await db
     .select({
       productId: pv.productId,
+      qty: sql<number>`coalesce(sum(greatest(${erpStockExpr(salesAgg, receiptsAgg)}, 0)) filter (where ${stockKnownExpr(receiptsAgg)}), 0)`,
       value: sql<number>`coalesce(sum(greatest(${erpStockExpr(salesAgg, receiptsAgg)}, 0) * ${unitCost}) filter (where ${stockKnownExpr(receiptsAgg)}), 0)`,
+      knownVariants: sql<number>`count(*) filter (where ${stockKnownExpr(receiptsAgg)})`,
+      inTransitQty: sql<number>`coalesce(sum(coalesce(${salesAgg.inTransit}, 0)), 0)`,
+      awaitingReturnQty: sql<number>`coalesce(sum(coalesce(${salesAgg.awaitingReturn}, 0)), 0)`,
     })
     .from(pv)
     .leftJoin(salesAgg, eq(salesAgg.variantId, pv.id))
     .leftJoin(receiptsAgg, eq(receiptsAgg.variantId, pv.id))
     .where(eq(pv.isRemoved, false))
     .groupBy(pv.productId);
-  return new Map(rows.filter((r) => r.productId).map((r) => [r.productId as string, Number(r.value)]));
+  return new Map(
+    rows
+      .filter((r) => r.productId)
+      .map((r) => [
+        r.productId as string,
+        {
+          qty: Number(r.qty),
+          value: Number(r.value),
+          known: Number(r.knownVariants) > 0,
+          inTransitQty: Number(r.inTransitQty),
+          awaitingReturnQty: Number(r.awaitingReturnQty),
+        } satisfies StockSnapshot,
+      ]),
+  );
 }
+
+/** Mã chưa có phiếu nhập nào: tồn là CHƯA BIẾT (mục 10), không phải 0. */
+const TON_CHUA_BIET: StockSnapshot = { qty: 0, value: 0, known: false, inTransitQty: 0, awaitingReturnQty: 0 };
 
 /** Lợi nhuận danh nghĩa theo mã hàng: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − quảng cáo */
 async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, value: OrderValueFilter, includeAds: boolean): Promise<NominalReport> {
@@ -484,10 +564,10 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
   );
   const duBaoGiaoVan = duBaoHoacLoi.v;
   const projectionError = duBaoHoacLoi.e;
-  const [history, purchases, stockValues] = await Promise.all([
+  const [history, purchases, stocks] = await Promise.all([
     productReturnHistory(assumptions.returnRateWindowDays),
     purchaseByProduct(period),
-    stockValueByProduct(),
+    stockByProduct(),
   ]);
   // Khoá theo `product_id` — ĐÚNG khoá `coalesce(pv.product_id, order_items.product_id)` của bảng này,
   // không theo mã hàng (`custom_id` có thể trống hoặc trùng).
@@ -684,7 +764,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         returnRateSource = "history";
       }
       let returnRate: number | null = Math.round(baseReturnRate * 10) / 10;
-      let orderLevel: { revenue: number; cogs: number } | null = null;
+      let orderLevel: { revenue: number; cogs: number; qty: number } | null = null;
       const overrideRate = assumptions.overrides[r.productId];
       if (overrideRate !== undefined && Number.isFinite(overrideRate)) {
         returnRate = overrideRate;
@@ -712,7 +792,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
           định. Q004 (105 đơn kết thúc), Q002 (1.138), Q003 (474) giữ nguyên số đo; Q001 vốn đã ở
           nhánh lịch sử (71 đơn) nên không đổi.
         */
-        orderLevel = { revenue: duBao.projectedDeliveredRevenue, cogs: duBao.projectedCogs };
+        orderLevel = { revenue: duBao.projectedDeliveredRevenue, cogs: duBao.projectedCogs, qty: duBao.projectedQty };
         returnRate = Math.round((100 - duBao.projectedRate) * 10) / 10;
         returnRateSource = "projected";
       }
@@ -786,8 +866,12 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         // Dự phòng đi theo HÀNG BÁN RA, không theo hàng nhập — xem `inventoryRiskOnSold`.
         inventoryRisk: inventoryRiskOnSold(calc.expectedCogs, riskPct),
         inventoryRiskOnPurchase: inventoryRiskOnSold(purchases.get(r.productId)?.cost ?? 0, riskPct),
-        stockValue: stockValues.get(r.productId) ?? 0,
-        inventoryRiskPending: inventoryRiskExposure(stockValues.get(r.productId) ?? 0, riskPct),
+        stockValue: (stocks.get(r.productId) ?? TON_CHUA_BIET).value,
+        stockQty: (stocks.get(r.productId) ?? TON_CHUA_BIET).qty,
+        stockKnown: (stocks.get(r.productId) ?? TON_CHUA_BIET).known,
+        outInTransitQty: (stocks.get(r.productId) ?? TON_CHUA_BIET).inTransitQty,
+        outAwaitingReturnQty: (stocks.get(r.productId) ?? TON_CHUA_BIET).awaitingReturnQty,
+        inventoryRiskPending: inventoryRiskExposure((stocks.get(r.productId) ?? TON_CHUA_BIET).value, riskPct),
         profitOnPurchase: 0,
         marginOnPurchase: null,
         tax: Math.round(calc.expectedRevenue * taxPct),
@@ -805,12 +889,14 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       // Mã CHƯA CÓ ĐƠN: không có tỷ lệ nào để in — `null`, không phải 100% (không giao đơn nào thì không "giao thành công 100%").
       ads: adsRatios({ adSpend: adByProduct.get(pid) ?? 0, posSales: 0, deliveredRevenueActual: 0, projectedDeliveredRevenue: 0 }),
       returnRate: null, deliveryRate: null, returnRateSource: "unmeasured" as const, projection: null, revenueBasis: "RATE" as const, unmodelledRevenue: 0, cogsKnown: true, cogsUnknownQty: 0, purchaseCostKnown: pur.costKnown,
-      baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
+      baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, expectedQty: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
       delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
       // Chưa bán được gì trong kỳ ⇒ chưa giải phóng đồng dự phòng nào vào lãi lỗ; rủi ro của lô
       // nằm nguyên ở phần CÒN TREO trên hàng tồn.
       purchaseQty: pur.qty, purchaseCost: pur.cost, inventoryRisk: 0, inventoryRiskOnPurchase: inventoryRiskOnSold(pur.cost, riskPct),
-      stockValue: stockValues.get(pid) ?? 0, inventoryRiskPending: inventoryRiskExposure(stockValues.get(pid) ?? 0, riskPct),
+      stockValue: (stocks.get(pid) ?? TON_CHUA_BIET).value, stockQty: (stocks.get(pid) ?? TON_CHUA_BIET).qty, stockKnown: (stocks.get(pid) ?? TON_CHUA_BIET).known,
+      outInTransitQty: (stocks.get(pid) ?? TON_CHUA_BIET).inTransitQty, outAwaitingReturnQty: (stocks.get(pid) ?? TON_CHUA_BIET).awaitingReturnQty,
+      inventoryRiskPending: inventoryRiskExposure((stocks.get(pid) ?? TON_CHUA_BIET).value, riskPct),
       profitOnPurchase: 0, marginOnPurchase: null, tax: 0, otherCost: Math.round((adByProduct.get(pid) ?? 0) * otherPct), netProfit: 0, netMargin: null,
     });
   }
@@ -867,6 +953,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       adSpend: t.adSpend + r.adSpend,
       expectedRevenue: t.expectedRevenue + r.expectedRevenue,
       expectedCogs: t.expectedCogs + r.expectedCogs,
+      expectedQty: t.expectedQty + r.expectedQty,
       shipCost: t.shipCost + r.shipCost,
       expectedProfit: t.expectedProfit + r.expectedProfit,
       delivered: t.delivered + r.delivered,
@@ -884,6 +971,11 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       inventoryRisk: t.inventoryRisk + r.inventoryRisk,
       inventoryRiskOnPurchase: t.inventoryRiskOnPurchase + r.inventoryRiskOnPurchase,
       stockValue: t.stockValue + r.stockValue,
+      stockQty: t.stockQty + r.stockQty,
+      // Tồn TỔNG chỉ biết được khi MỌI mã đều biết; một mã chưa có phiếu nhập là cả tổng chưa biết.
+      stockUnknown: t.stockUnknown + (r.stockKnown ? 0 : 1),
+      outInTransitQty: t.outInTransitQty + r.outInTransitQty,
+      outAwaitingReturnQty: t.outAwaitingReturnQty + r.outAwaitingReturnQty,
       inventoryRiskPending: t.inventoryRiskPending + r.inventoryRiskPending,
       failed: t.failed + r.failed,
       pending: t.pending + r.pending,
@@ -892,7 +984,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       purchaseQty: t.purchaseQty + r.purchaseQty,
       purchaseCost: t.purchaseCost + r.purchaseCost,
     }),
-    { orders: 0, ordersWeighted: 0, salesAfterDiscount: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, ordersWithRate: 0, unmodelledRevenue: 0, cogsUnknownQty: 0, purchaseUnknown: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, inventoryRisk: 0, inventoryRiskOnPurchase: 0, stockValue: 0, inventoryRiskPending: 0, failed: 0, pending: 0, tax: 0, otherCost: 0, purchaseQty: 0, purchaseCost: 0 },
+    { orders: 0, ordersWeighted: 0, salesAfterDiscount: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, expectedQty: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, ordersWithRate: 0, unmodelledRevenue: 0, cogsUnknownQty: 0, purchaseUnknown: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, inventoryRisk: 0, inventoryRiskOnPurchase: 0, stockValue: 0, stockQty: 0, stockUnknown: 0, outInTransitQty: 0, outAwaitingReturnQty: 0, inventoryRiskPending: 0, failed: 0, pending: 0, tax: 0, otherCost: 0, purchaseQty: 0, purchaseCost: 0 },
   );
   const adSpendAll = totals.adSpend + unmatchedAdSpend;
   const otherCostAll = totals.otherCost + Math.round(unmatchedAdSpend * otherPct);
@@ -934,6 +1026,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       adSpend: adSpendAll,
       expectedRevenue: totals.expectedRevenue,
       expectedCogs: totals.expectedCogs,
+      expectedQty: totals.expectedQty,
       shipCost: totals.shipCost,
       expectedProfit: expectedProfitAll,
       margin: totals.expectedRevenue ? (expectedProfitAll / totals.expectedRevenue) * 100 : null,
@@ -970,6 +1063,10 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       inventoryRisk: totals.inventoryRisk,
       inventoryRiskOnPurchase: totals.inventoryRiskOnPurchase,
       stockValue: totals.stockValue,
+      stockQty: totals.stockQty,
+      stockKnown: totals.stockUnknown === 0,
+      outInTransitQty: totals.outInTransitQty,
+      outAwaitingReturnQty: totals.outAwaitingReturnQty,
       inventoryRiskPending: totals.inventoryRiskPending,
       netProfit,
       netMargin: totals.expectedRevenue ? (netProfit / totals.expectedRevenue) * 100 : null,
@@ -987,7 +1084,21 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
   };
 }
 
-export type NominalDailyRow = { day: string; orders: number; items: number; grossSales: number; adSpend: number; expectedRevenue: number; expectedCogs: number; shipCost: number; expectedProfit: number; margin: number | null; cpo: number | null; delivered: number; returned: number };
+export type NominalDailyRow = {
+  day: string; orders: number; items: number; grossSales: number; adSpend: number;
+  expectedRevenue: number; expectedCogs: number;
+  /** Số sản phẩm giao thành công ước tính của ngày — đo được cả khi giá vốn chưa biết. */
+  expectedQty: number;
+  shipCost: number; expectedProfit: number; margin: number | null; cpo: number | null; delivered: number; returned: number;
+  /**
+   * `false` khi ngày đó có sản phẩm KHÔNG biết giá vốn (không phiếu nhập, không giá Pancake).
+   *
+   * Bảng theo ngày trước đây không mang cờ này, nên nó in `0 ₫` ở đúng những mã mà bảng theo mã
+   * đã biết in "—" — cùng một chỗ trống, hai cách nói, trên cùng một màn hình (AGENTS.md §42).
+   */
+  cogsKnown: boolean;
+  cogsUnknownQty: number;
+};
 
 /** Bảng theo ngày của một mã hàng (giống sheet báo cáo mẫu): đơn, SP, CPQC, doanh số, DT ước tính, giá vốn, VC, lợi nhuận, margin */
 export async function getNominalDailyForProduct(productId: string, period: Period, returnRate: number, assumptions: ResolvedAssumptions, basis: TimeBasis = "ORDERED"): Promise<NominalDailyRow[]> {
@@ -1012,6 +1123,7 @@ export async function getNominalDailyForProduct(productId: string, period: Perio
         items: sql<number>`coalesce(sum(${i.quantity}) filter (where ${NOT_CANCELLED}), 0)`,
         grossSales: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${NOT_CANCELLED}), 0)`,
         cogsFull: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${NOT_CANCELLED}), 0)`,
+        cogsUnknownQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${NOT_CANCELLED} and ${LINE_UNIT_COST} = 0), 0)`,
         delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
         returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
       })
@@ -1037,7 +1149,8 @@ export async function getNominalDailyForProduct(productId: string, period: Perio
       const sr = salesMap.get(d);
       const base = { orders: Number(sr?.orders ?? 0), items: Number(sr?.items ?? 0), grossSales: Number(sr?.grossSales ?? 0), cogsFull: Number(sr?.cogsFull ?? 0), adSpend: adMap.get(d) ?? 0 };
       const calc = applyAssumptions(base, returnRate, assumptions);
-      return { day: d, ...base, ...calc, cpo: base.orders ? base.adSpend / base.orders : null, delivered: Number(sr?.delivered ?? 0), returned: Number(sr?.returned ?? 0) };
+      const cogsUnknownQty = Number(sr?.cogsUnknownQty ?? 0);
+      return { day: d, ...base, ...calc, cogsKnown: cogsUnknownQty === 0, cogsUnknownQty, cpo: base.orders ? base.adSpend / base.orders : null, delivered: Number(sr?.delivered ?? 0), returned: Number(sr?.returned ?? 0) };
     });
 }
 
