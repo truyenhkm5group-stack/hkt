@@ -154,6 +154,50 @@ export function testDieuKienMoPr() {
   assert.ok(!/task\.title|task\.description/.test(scriptThan), "script KHÔNG được đọc tiêu đề hay mô tả việc");
 }
 
+/* ═════════════ 3 · NƠI GỌI PHẢI CẤP ĐỦ QUYỀN CHO NƠI ĐƯỢC GỌI ═════════════ */
+
+/**
+ * ĐÃ CẮN THẬT — lượt chạy agent #13, `startup_failure`: không một job nào chạy, không log, không
+ * annotation, chỉ một chữ "hỏng" trần trụi.
+ *
+ * Nguyên nhân: khai `permissions:` ở workflow GỌI đặt MỌI phạm vi không được liệt kê thành `none`.
+ * `agent-run.yml` chỉ khai `contents: write`, nên `pull-requests` của nó là `none`; cầu nối được
+ * gọi lại khai `pull-requests: read`. Workflow được gọi chỉ ĐƯỢC BỚT, không được THÊM — GitHub
+ * coi đó là leo thang và từ chối cả workflow TRƯỚC khi job đầu tiên chạy.
+ *
+ * Đây đúng là lớp hỏng mà một bài kiểm phải bắt: nó không đỏ ở `typecheck`, không đỏ ở `test`, và
+ * chỉ lộ ra khi có người bấm chạy thật.
+ */
+export function testQuyenNoiGoiDuChoNoiDuocGoi() {
+  const doc = (f: string) => readFileSync(path.join(goc, f), "utf8");
+  /** Đọc khối `permissions:` ở MỨC WORKFLOW (không thụt đầu dòng) thành bảng phạm vi → mức. */
+  const quyen = (wf: string): Record<string, string> => {
+    const dong = wf.split("\n");
+    const i = dong.findIndex((d) => d.startsWith("permissions:"));
+    if (i < 0) return {};
+    const ra: Record<string, string> = {};
+    for (const d of dong.slice(i + 1)) {
+      if (!d.startsWith("  ")) break;
+      const m = d.trim().match(/^([a-z-]+):\s*([a-z]+)$/);
+      if (m) ra[m[1]] = m[2];
+    }
+    return ra;
+  };
+  const MUC: Record<string, number> = { none: 0, read: 1, write: 2 };
+  const nguoiGoi = quyen(doc(".github/workflows/agent-run.yml"));
+  const cauNoi = quyen(doc(".github/workflows/agent-open-pr.yml"));
+  assert.ok(Object.keys(cauNoi).length > 0, "cầu nối phải khai permissions tường minh");
+  for (const [pham, can] of Object.entries(cauNoi)) {
+    const co = nguoiGoi[pham] ?? "none";
+    assert.ok(
+      MUC[co] >= MUC[can],
+      `agent-run.yml cấp \`${pham}: ${co}\` nhưng cầu nối khai \`${can}\` — GitHub sẽ từ chối CẢ WORKFLOW ở startup, không log gì`,
+    );
+  }
+  // Và nơi gọi KHÔNG được nới quá tay nhân dịp này: cầu nối chỉ cần ĐỌC pull request.
+  assert.notEqual(nguoiGoi["pull-requests"], "write", "agent-run.yml không được có quyền GHI pull request — mở PR đi bằng danh tính App, không bằng GITHUB_TOKEN");
+}
+
 /* ═════════════ 3 · CẦU NỐI GIỮ NGUYÊN HÀNG RÀO KHI ĐƯỢC GỌI TỪ MÁY ═════════════ */
 
 export function testCauNoiVanGiuHangRao() {
