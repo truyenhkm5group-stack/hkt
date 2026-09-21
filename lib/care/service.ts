@@ -8,7 +8,7 @@ import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { careSlaHours } from "@/lib/care/sla";
 import { carrierSubstate } from "@/lib/constants/carrier-substate";
 import { ACTION_CALLS_CARRIER, BUSINESS_ACTIONS, BUSINESS_ACTION_LABEL } from "@/lib/constants/care-outcome";
-import { CARE_DECISIONS, DECISION_NEEDS_FOLLOW_UP, DECISION_NEEDS_REASON, DECISION_NEXT_CARE_STATUS, careDecisionOf } from "@/lib/constants/care-resolution";
+import { CARE_DECISIONS, DECISION_NEEDS_FOLLOW_UP, DECISION_NEXT_CARE_STATUS, careDecisionOf, decisionReasonCode } from "@/lib/constants/care-resolution";
 import { NOT_CARE_CONDITION } from "@/lib/care/lifecycle";
 import { slaOf } from "@/lib/care/view";
 import {
@@ -482,7 +482,7 @@ export async function addCareNote(user: CareActor, input: z.input<typeof noteSch
 export const careDecisionSchema = z.object({
   shipmentId: z.string().min(1),
   decision: z.enum(CARE_DECISIONS),
-  /** Lý do theo DANH MỤC — bắt buộc với "Đã hoàn" (`DECISION_NEEDS_REASON`). */
+  /** Lý do hoàn theo DANH MỤC. Bỏ trống mà có `note` thì `decisionReasonCode()` ghi `OTHER`. */
   reasonCode: z.string().trim().max(60).optional(),
   note: z.string().trim().max(500).default(""),
   /** Bắt buộc với "Xử lý sau" — CSDL cũng chặn (`care_decisions_follow_up_check`). */
@@ -516,7 +516,9 @@ export async function recordCareDecision(user: CareActor, input: z.input<typeof 
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   const { shipmentId, decision, reasonCode, note, followUpAt } = parsed.data;
 
-  if (DECISION_NEEDS_REASON[decision] && !reasonCode) return { error: "Chọn lý do hoàn trước khi ghi nhận — báo cáo lý do hoàn rỗng vĩnh viễn nếu bước này bỏ qua" };
+  // Lý do hoàn: danh mục HOẶC chữ của người xử lý (⇒ `OTHER`). Cùng một hàm với màn hình.
+  const lyDo = decisionReasonCode(decision, reasonCode, note);
+  if (!lyDo.ok) return { error: lyDo.error };
   if (DECISION_NEEDS_FOLLOW_UP[decision] && !followUpAt) return { error: "Chọn thời điểm xem lại — hẹn mà không có giờ thì ca chìm xuống đáy hàng đợi" };
 
   const db = await getDb();
@@ -558,7 +560,7 @@ export async function recordCareDecision(user: CareActor, input: z.input<typeof 
     careCaseId: careRow.id,
     shipmentId,
     decision,
-    reasonCode: reasonCode ?? null,
+    reasonCode: lyDo.reasonCode ?? null,
     note,
     followUpAt: followUpAt ?? null,
     actorUserId: user.id,
@@ -597,8 +599,8 @@ export async function recordCareDecision(user: CareActor, input: z.input<typeof 
     })
     .where(eq(schema.shipmentCare.id, careRow.id));
 
-  await recordCareEvent(user, careRow, { action: "STATUS", note, nextStatus: sau, followUpAt: henXemLai, payload: { careDecision: decision, reasonCode: reasonCode ?? null, carrierStageAtDecision: kien.stage, carrierSubstateAtDecision: substate } });
-  await audit({ userId: user.id, userEmail: user.email, action: "CARE_DECISION", entity: "SHIPMENT", entityId: shipmentId, detail: { decision, reasonCode, previous: truoc, next: sau, carrierStage: kien.stage, carrierSubstate: substate } });
+  await recordCareEvent(user, careRow, { action: "STATUS", note, nextStatus: sau, followUpAt: henXemLai, payload: { careDecision: decision, reasonCode: lyDo.reasonCode ?? null, carrierStageAtDecision: kien.stage, carrierSubstateAtDecision: substate } });
+  await audit({ userId: user.id, userEmail: user.email, action: "CARE_DECISION", entity: "SHIPMENT", entityId: shipmentId, detail: { decision, reasonCode: lyDo.reasonCode ?? null, reasonFromNote: lyDo.fromNote, previous: truoc, next: sau, carrierStage: kien.stage, carrierSubstate: substate } });
   clearMemo();
   return { ok: true, data: await loadCareState(shipmentId) };
 }

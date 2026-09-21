@@ -201,6 +201,7 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
         taskTitle: task.title,
         taskDescription: task.description,
         writeGlobs: phamViGhi,
+        readGlobs: DOCUMENTATION_READ_GLOBS,
         feedback: goiPhanHoi(opts.feedback ?? []),
         // Runner biết hai giá trị này từ lúc dựng cây; agent thì bị hàng rào chặn cả hai đường tự lấy.
         baseCommit,

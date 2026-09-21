@@ -147,6 +147,7 @@ import { testFinanceOpsPure, testFinanceOpsQueries } from "./finance-ops.test";
 import { testActionWiring } from "./action-wiring.test";
 import {
   testKpiCohortUsesHandoffDate,
+  testProductRowCountsOrdersOnce,
   testMachineNeverInventsHumanReason,
   testNoHandoffEvidenceStaysOut,
   testReasonReportDefaultsToOutcomeDate,
@@ -1644,6 +1645,7 @@ async function main() {
   testRescueRateNeverFakesZero();
   testTimeBasisHasNoSilentFallback();
   await testKpiCohortUsesHandoffDate(db);
+  await testProductRowCountsOrdersOnce(db);
   await testNoHandoffEvidenceStaysOut(db);
   await testReasonReportDefaultsToOutcomeDate();
 
