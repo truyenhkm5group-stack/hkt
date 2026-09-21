@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { webhookMatchRate, WEBHOOK_MATCH_MIN_SAMPLE } from "@/lib/constants/webhook-gap";
+import { webhookLatencyVerdict, WEBHOOK_LATENCY_BASELINE_MIN_DAYS, type WebhookLatencyVerdict } from "@/lib/constants/webhook-latency";
 import { rowsOf } from "@/lib/sql-rows";
 
 /**
@@ -12,9 +13,14 @@ import { rowsOf } from "@/lib/sql-rows";
  * mỗi câu là một loại hỏng khác nhau với một cách sửa khác nhau:
  *
  *  1. CÓ ĐANG NHẬN KHÔNG          → 15 phút · 1 giờ · 24 giờ
- *  2. NHẬN RỒI CÓ ĐỌC ĐƯỢC KHÔNG  → gói tin hỏng / không ghép được vận đơn
- *  3. NHẬN CÓ ĐÚNG THỨ TỰ KHÔNG   → gói tin tới SAU nhưng mang mốc CŨ HƠN
- *  4. CÓ RƠI GÓI NÀO KHÔNG        → tỷ lệ khớp đo bằng tệp đối chiếu (`vtp_webhook_gaps`)
+ *  2. NHẬN CÓ CÒN KỊP KHÔNG       → độ trễ từ lúc sự việc xảy ra tới lúc ERP nhận
+ *  3. NHẬN RỒI CÓ ĐỌC ĐƯỢC KHÔNG  → gói tin hỏng / không ghép được vận đơn
+ *  4. NHẬN CÓ ĐÚNG THỨ TỰ KHÔNG   → gói tin tới SAU nhưng mang mốc CŨ HƠN
+ *  5. CÓ RƠI GÓI NÀO KHÔNG        → tỷ lệ khớp đo bằng tệp đối chiếu (`vtp_webhook_gaps`)
+ *
+ * Câu 2 được thêm sau sự cố 21/09/2026: cả ngày hôm ấy gói tin về ĐỦ SỐ nhưng trung vị trễ 28
+ * phút (mọi hôm 31–37 giây), và vì `liveness` chỉ đếm SỐ GÓI nên nó báo `HEALTHY` suốt. Xem
+ * `lib/constants/webhook-latency.ts`.
  *
  * ─── "MỘT GIỜ KHÔNG CÓ GÓI TIN NÀO" TỰ NÓ KHÔNG NÓI GÌ ───
  *
@@ -35,6 +41,15 @@ export type WebhookHealth = {
   /** `HEALTHY` · `QUIET` (thấp hơn hẳn nền) · `SILENT` (nền có mà giờ này không gói nào) · `UNKNOWN`. */
   liveness: "HEALTHY" | "QUIET" | "SILENT" | "UNKNOWN";
   livenessNote: string;
+  /** Trung vị độ trễ (giây) của 1 giờ qua: từ mốc ĐVVC tới lúc ERP nhận. `null` = chưa đo được. */
+  latencyMedianSeconds: number | null;
+  /** Cùng khung giờ, trung vị 14 ngày gần nhất. `null` = chưa đủ nền. */
+  latencyBaselineSeconds: number | null;
+  /** Số gói đã vào phép đo độ trễ của giờ qua — ĐỘ PHỦ luôn đứng cạnh con số. */
+  latencySample: number;
+  /** `FRESH` · `LAGGING` (vượt nền nhiều lần) · `STALLED` (quá ngưỡng tuyệt đối) · `UNKNOWN`. */
+  latency: WebhookLatencyVerdict;
+  latencyNote: string;
   /** Gói tin ERP không đọc được (hỏng định dạng / thiếu trường). */
   parseFailed24h: number;
   /** Gói tin đọc được nhưng không ghép được về vận đơn nào — giữ lại để xử lý lại. */
@@ -138,6 +153,46 @@ export async function vtpWebhookHealth(): Promise<WebhookHealth> {
     }
 
     /*
+      ═══ ĐỘ TRỄ: TỪ LÚC SỰ VIỆC XẢY RA TỚI LÚC ERP BIẾT ═══
+
+      `received_at` được ghi NGAY khi request chạm ERP (trong `storeWebhook`, trước mọi xử lý), nên
+      hiệu số này đo đúng quãng đường từ Viettel Post tới đây — không lẫn thời gian ERP xử lý.
+
+      `greatest(..., 0)`: lệch đồng hồ giữa hai hệ thống có thể cho ra số âm. Âm nghĩa là hai cái
+      đồng hồ không khớp, KHÔNG phải "gói tin tới trước khi sự việc xảy ra"; kẹp về 0 và vẫn tính,
+      không loại quan sát ra khỏi mẫu (mục 64).
+
+      Nền lấy TRUNG VỊ CỦA TỪNG NGÀY rồi lấy trung vị các ngày — không gộp tất cả gói của 14 ngày
+      vào một rổ, vì ngày nhiều đơn sẽ áp đảo ngày ít đơn và nền thành ra của riêng vài ngày bận.
+    */
+    const [tre] = rowsOf<{ n: number; median: number | null }>(await db.execute(sql`
+      select count(*)::int as n,
+             percentile_cont(0.5) within group (order by greatest(extract(epoch from (received_at - occurred_at)), 0)) as median
+      from webhook_events
+      where source = 'VIETTELPOST' and occurred_at is not null and received_at >= now() - interval '1 hour'
+    `));
+    const [nenTre] = rowsOf<{ median: number | null; ngay: number }>(await db.execute(sql`
+      with theo_ngay as (
+        select date_trunc('day', received_at at time zone 'Asia/Ho_Chi_Minh') as ngay,
+               percentile_cont(0.5) within group (order by greatest(extract(epoch from (received_at - occurred_at)), 0)) as med
+        from webhook_events
+        where source = 'VIETTELPOST'
+          and occurred_at is not null
+          and received_at >= now() - interval '14 days'
+          and received_at < date_trunc('hour', now())
+          and extract(hour from (received_at at time zone 'Asia/Ho_Chi_Minh'))
+              = extract(hour from (now() at time zone 'Asia/Ho_Chi_Minh'))
+        group by 1
+      )
+      select percentile_cont(0.5) within group (order by med) as median, count(*)::int as ngay from theo_ngay
+    `));
+    const latencySample = Number(tre?.n ?? 0);
+    const latencyMedianSeconds = tre?.median === null || tre?.median === undefined ? null : Math.round(Number(tre.median));
+    const latencyBaselineSeconds =
+      nenTre && nenTre.ngay >= WEBHOOK_LATENCY_BASELINE_MIN_DAYS && nenTre.median !== null ? Math.round(Number(nenTre.median)) : null;
+    const doTre = webhookLatencyVerdict({ medianSeconds: latencyMedianSeconds, baselineSeconds: latencyBaselineSeconds, sample: latencySample });
+
+    /*
       TỶ LỆ KHỚP — chỉ đo được bằng TỆP, và chỉ phát biểu khi đủ mẫu.
 
       Mẫu số là số dòng tệp ghép được về một vận đơn ERP đã biết; tử số là số dòng ERP đã biết
@@ -172,6 +227,11 @@ export async function vtpWebhookHealth(): Promise<WebhookHealth> {
       baseline1h,
       liveness,
       livenessNote,
+      latencyMedianSeconds,
+      latencyBaselineSeconds,
+      latencySample,
+      latency: doTre.verdict,
+      latencyNote: doTre.note,
       parseFailed24h: Number(dem?.parse_failed ?? 0),
       unmatched24h: Number(dem?.unmatched ?? 0),
       duplicate24h,

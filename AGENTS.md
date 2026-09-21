@@ -461,6 +461,37 @@ deploy dừng, không phải cảnh báo.
 
     `tests/test-hygiene.test.ts` quét cả lớp ở mức mã nguồn; miễn trừ phải khai kèm lý do.
 
+66. **MỘT CÂU CHỮ CỦA ĐVVC KHÔNG ĐƯỢC DỊCH TÁCH KHỎI DÒNG MANG NÓ** (`mapVtpStatusText`,
+    `lib/constants/care-return-approval.ts`): cột "Trạng thái" của tệp Danh sách vận đơn dùng chữ
+    **"Chờ xử lý"** cho **chờ xử lý HOÀN** — bước ngay trước "Đã duyệt hoàn" — trong khi từ vựng
+    webhook dùng "Đơn hàng chờ xử lý" (mã 102) cho điều NGƯỢC LẠI: hàng còn trong kho. Bộ dịch cũ
+    đọc mỗi câu chữ, trả `PENDING` cho cả hai, và vì dòng tệp mang mốc mới hơn webhook 505 chừng
+    60–70 giây nên nó THẮNG trong `deriveShipmentState()`. Đo 21/09/2026: **295/295** dòng
+    "Chờ xử lý" nhập từ tệp đều mang cờ **Trả hàng = x** (không dòng nào là "chờ lấy hàng"),
+    269 tới sau một webhook đã chứng minh hàng rời kho, **256 vận đơn** từng bị kéo về điểm xuất
+    phát và **20 vận đơn · 10.222.000 ₫ COD** đang kẹt — hiện "Chờ xử lý" đúng lúc chúng đang
+    chuyển hoàn. Luật: phép dịch nhận **BỐI CẢNH CỦA DÒNG** (cờ Trả hàng), không chỉ câu chữ; và
+    câu mơ hồ thiếu bối cảnh trả **`UNKNOWN`**, KHÔNG BAO GIỜ `PENDING` — `PENDING` là một khẳng
+    định ("hàng còn trong kho"), còn `UNKNOWN` để kết luận của webhook đứng nguyên (mục 47).
+    Bối cảnh đã đọc được mà không dùng thì vô nghĩa: cờ này nằm sẵn trong `raw.snapshot` từ lâu
+    mà không ảnh hưởng một quyết định nào.
+
+    **`RETURNING` gộp ba mã có hệ quả vận hành trái ngược, và chữ KHÔNG tách nổi chúng.** `505`
+    "Yêu cầu chuyển hoàn" mới là **ĐỀ NGHỊ** — shop còn bấm được `508`/`550` phát tiếp, nên chốt ca
+    chăm sóc ở đây là giết việc đúng lúc nó còn làm được (tiền lệ thật: PKE1521276709 nhận 505 ngày
+    19/09, shop xin phát tiếp ngày 20/09). `515` "Bưu cục phát duyệt hoàn" mới là **ĐÃ DUYỆT** —
+    chữ "Đã duyệt hoàn" trên viettelpost.vn — và `502` là hàng đã lên đường về; từ đó nhân viên mở
+    ca ra không làm được gì, nên ca chốt `RESCUE_FAILED` ngay, đúng vế "ĐANG HOÀN" mà
+    `CARE_OUTCOME_HINT` đã khai từ đầu. Tên của 505 chứa đúng chuỗi con trong tên của 502
+    ("chuyển hoàn bưu cục gốc") nên **có mã thì MÃ quyết định, không bao giờ hỏi tới chữ**; chữ chỉ
+    dùng cho dòng tệp không có cột mã, và chỉ những câu mà 505 không bao giờ mang. Việc này KHÔNG
+    chạm `ORDER_OUTCOME`: tiền và tồn kho vẫn chờ `504` như cũ.
+
+    Chặng đã lưu ở `shipment_events.normalized_stage` **không tự đúng lại** khi bộ dịch được sửa —
+    `deriveShipmentState()` ưu tiên nó hơn bản dịch lại — nên sửa luật phải đi kèm một lượt vá
+    tường minh (`scripts/vtp-return-status-repair.ts`, mặc định CHẠY THỬ), và lượt vá dịch lại bằng
+    CHÍNH bộ dịch của đường ghi chứ không viết luật thứ hai bằng SQL.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và
