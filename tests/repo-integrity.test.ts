@@ -67,17 +67,29 @@ const IMPORT_RE = /(?:from|import|require)\s*\(?\s*["']((?:\.\.?|@)\/[^"']+)["']
  *    cùng dòng sẽ biến mất và bài kiểm mù đúng chỗ nó phải nhìn.
  */
 function tuKiemBoChuThich() {
+  /*
+    ĐƯỜNG DẪN GHÉP TỪ BIẾN, KHÔNG VIẾT THẲNG.
+
+    Bài kiểm này quét MỌI tệp nguồn — kể cả chính nó. Bản đầu viết thẳng `from "./khong-co-that"`
+    trong chuỗi mẫu, và lượt quét thấy đúng chuỗi ấy rồi báo một import gãy. Bộ gác bắt chính
+    fixture của mình — đúng, nhưng vô ích.
+
+    Ghép từ biến thì mã NGUỒN không còn khớp biểu thức, còn lúc CHẠY vẫn dựng ra đúng chuỗi cần đo.
+  */
+  const giaMao = "./khong-co-that";
+  const coThat = "./repo-integrity.test";
+
   const trongKhoi = boChuThich(`/*
-  import { x } from "./khong-co-that";
+  import { x } from "${giaMao}";
 */`);
   assert.ok(!IMPORT_RE.test(trongKhoi), "import trong khối chú thích KHÔNG được tính là import");
   IMPORT_RE.lastIndex = 0;
 
-  const trongDong = boChuThich(`// import { x } from "./khong-co-that";`);
+  const trongDong = boChuThich(`// import { x } from "${giaMao}";`);
   assert.ok(!IMPORT_RE.test(trongDong), "import trong chú thích một dòng KHÔNG được tính");
   IMPORT_RE.lastIndex = 0;
 
-  const coUrl = boChuThich(`const u = "https://vi.du/x"; import { y } from "./that";`);
+  const coUrl = boChuThich(`const u = "https://vi.du/x"; import { y } from "${coThat}";`);
   assert.ok(IMPORT_RE.test(coUrl), "`https://` KHÔNG được nuốt mất một import thật trên cùng dòng");
   IMPORT_RE.lastIndex = 0;
 }

@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { DOCUMENTATION_COMMANDS, DOCUMENTATION_READ_GLOBS } from "@/lib/constants/agent-sandbox";
 import { goiPhanHoi, checkRerun } from "@/lib/constants/agent-rerun";
+import { GATE_REPAIR, congChiPhi, dungPhanHoiCong, type KetQuaCong } from "@/lib/constants/agent-gate-repair";
 import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import type { TechGateResult, TechRisk } from "@/lib/constants/tech";
 import { finishTechAgentRun, startTechAgentRun, type TechActor } from "@/lib/tech/service";
@@ -205,22 +206,24 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
       void db.update(schema.techAgentRuns).set({ heartbeatAt: new Date() }).where(eq(schema.techAgentRuns.id, runId)).catch(() => undefined);
     }, HEARTBEAT_EVERY_MS);
     nhip.unref?.();
+    /* Cây làm việc đã dựng; giữ một tham chiếu KHÔNG null để lượt sửa dùng lại đúng cây ấy. */
+    const cay = ws;
+    /** Dựng đề bài MỘT chỗ — lượt sửa phải nhận y hệt lượt đầu, chỉ khác phần phản hồi. */
+    const deBai = (phanHoi: string) => ({
+      taskCode: task.code,
+      role: agent.role,
+      taskTitle: task.title,
+      taskDescription: task.description,
+      writeGlobs: phamViGhi,
+      readGlobs: DOCUMENTATION_READ_GLOBS,
+      feedback: phanHoi,
+      baseCommit,
+      branch,
+      workspace: cay,
+    });
     let outcome: Awaited<ReturnType<AgentExecutor["run"]>>;
     try {
-      outcome = await opts.executor.run({
-        taskCode: task.code,
-        // VAI lấy từ SỔ AGENT — cùng nguồn với phạm vi ghi, không gõ lại (mục 65).
-        role: agent.role,
-        taskTitle: task.title,
-        taskDescription: task.description,
-        writeGlobs: phamViGhi,
-        readGlobs: DOCUMENTATION_READ_GLOBS,
-        feedback: goiPhanHoi(opts.feedback ?? []),
-        // Runner biết hai giá trị này từ lúc dựng cây; agent thì bị hàng rào chặn cả hai đường tự lấy.
-        baseCommit,
-        branch,
-        workspace: ws,
-      });
+      outcome = await opts.executor.run(deBai(goiPhanHoi(opts.feedback ?? [])));
     } finally {
       clearInterval(nhip);
     }
@@ -240,15 +243,48 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
     const gates = { typecheck: KHONG_CHAY, lint: KHONG_CHAY, test: KHONG_CHAY, build: KHONG_CHAY } as RunnerResult["gates"];
     const lenh: Record<string, string[]> = { typecheck: ["npm", "run", "typecheck"], lint: ["npm", "run", "lint"], test: ["npm", "test"], build: ["npm", "run", "build"] };
     const daChay: string[] = [];
-    for (const g of canChay) {
-      const r = await ws.run(lenh[g]);
-      if ("blocked" in r) {
-        gates[g] = KHONG_CHAY;
-        continue;
+
+    /** Chạy đủ bộ cổng một lượt; trả về những cổng ĐỎ kèm đầu ra, để còn đưa lại cho agent. */
+    const chayCong = async (): Promise<KetQuaCong[]> => {
+      const hong: KetQuaCong[] = [];
+      for (const g of canChay) {
+        const r = await cay.run(lenh[g]);
+        if ("blocked" in r) {
+          gates[g] = KHONG_CHAY;
+          continue;
+        }
+        daChay.push(`${lenh[g].join(" ")} (exit=${r.exitCode})`);
+        gates[g] = r.ok ? "PASSED" : "FAILED";
+        if (!r.ok) hong.push({ ten: lenh[g].join(" "), exitCode: r.exitCode, dauRa: `${r.stdout}
+${r.stderr}` });
+        await db.update(schema.techAgentRuns).set({ heartbeatAt: new Date() }).where(eq(schema.techAgentRuns.id, runId));
       }
-      daChay.push(`${lenh[g].join(" ")} (exit=${r.exitCode})`);
-      gates[g] = r.ok ? "PASSED" : "FAILED";
-      await db.update(schema.techAgentRuns).set({ heartbeatAt: new Date() }).where(eq(schema.techAgentRuns.id, runId));
+      return hong;
+    };
+
+    const hong = await chayCong();
+
+    /*
+      ═══ MỘT LƯỢT SỬA NGAY TRONG LƯỢT CHẠY — xem `lib/constants/agent-gate-repair.ts` ═══
+
+      Cổng chạy SAU khi agent gọi `finish`, nên agent chưa từng nhìn thấy lỗi của chính mình. Hai
+      lượt liền (#23 $0,2719 · #24 $0,3024) mất trắng vì đúng chỗ hở đó — cả hai đều tin là đã xong.
+
+      Tệp nó viết VẪN CÒN trên cây làm việc, nên đưa lỗi lại và cho sửa tiếp rẻ hơn hẳn việc bỏ cả
+      lượt rồi dispatch lại từ đầu. Chỉ MỘT lần; hết thì lượt chạy kết thúc ĐỎ như cũ.
+
+      Chỉ sửa khi agent ĐÃ gọi finish: nó dừng giữa chừng vì lý do khác (hết vòng, bỏ cuộc) thì cổng
+      đỏ không phải thứ đáng nói tới trước.
+    */
+    if (hong.length && outcome.finished && GATE_REPAIR.toiDa > 0) {
+      const lan2 = await opts.executor.run(deBai(dungPhanHoiCong(hong)));
+      outcome = {
+        ...lan2,
+        summary: lan2.summary || outcome.summary,
+        steps: [...outcome.steps, { kind: "NOTE", detail: `Cổng đỏ (${hong.map((h) => h.ten).join(", ")}) — đưa lỗi lại cho agent sửa một lần.` }, ...lan2.steps],
+        chiPhi: congChiPhi(outcome.chiPhi, lan2.chiPhi),
+      };
+      await chayCong();
     }
 
     const filesChanged = await ws.changedFiles();

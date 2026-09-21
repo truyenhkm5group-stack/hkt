@@ -79,6 +79,7 @@ import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNan
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { chayBaiKiemAgentTuDangKy } from "./agent-tu-dang-ky.test";
 import { testKheDangKyAgent, testKhongCoBaiKiemMoCoi, testPromptTheoVai } from "./dang-ky-bai-kiem.test";
+import { testSuaCongTrongLuot } from "./sua-cong-trong-luot.test";
 import { testLoiGoiHongVanGiuTien, testNganSachDocTep } from "./agent-read-budget.test";
 import { cleanupViecDiTiepFixtures, testDispatchKemMaViec, testIngestGhiNhanhViec, testNhanhVeToiViecPure, testViecDiTiepGuards } from "./viec-di-tiep.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
@@ -2031,6 +2032,7 @@ async function main() {
   testKhongCoBaiKiemMoCoi();
   testKheDangKyAgent();
   testPromptTheoVai();
+  testSuaCongTrongLuot();
   testLedgerPure();
   testLedgerGuards();
   testChonVanDonPure();
