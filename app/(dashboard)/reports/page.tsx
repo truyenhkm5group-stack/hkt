@@ -47,6 +47,7 @@ import {
   type PnlLines,
 } from "@/lib/queries/reports";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
+import { parseAdsIncluded, parseOrderValue } from "@/lib/constants/order-value";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Báo cáo lợi nhuận" };
@@ -182,7 +183,15 @@ export default async function ReportsPage({
   const mocNominal: TimeBasis = TIME_BASES.includes(param(raw, "moc") as TimeBasis) ? (param(raw, "moc") as TimeBasis) : "ORDERED";
   // Mốc phải đi theo mọi liên kết trong tab (bấm mã hàng để xem theo ngày), nếu không thì bảng con
   // rơi về mặc định và nói một con số khác bảng cha.
-  const tabQuery = `tab=${tab}${periodQuery}${mocNominal === "ORDERED" ? "" : `&moc=${mocNominal}`}`;
+  const giaTriDon = parseOrderValue(raw);
+  const tinhCPQC = parseAdsIncluded(raw);
+  /*
+    BỘ LỌC PHẢI SỐNG QUA MỌI ĐƯỜNG DẪN TRONG TRANG. `tabQuery` là chuỗi đi kèm mọi liên kết
+    drilldown (mở một mã, đổi tab); bỏ `vmin`/`vmax`/`ads` ra khỏi nó là bấm vào một dòng thì bộ
+    lọc lặng lẽ biến mất và bảng chi tiết nói về một tập đơn khác bảng vừa bấm.
+  */
+  const locQuery = `${giaTriDon.min !== null ? `&vmin=${giaTriDon.min}` : ""}${giaTriDon.max !== null ? `&vmax=${giaTriDon.max}` : ""}${tinhCPQC ? "" : "&ads=0"}`;
+  const tabQuery = `tab=${tab}${periodQuery}${mocNominal === "ORDERED" ? "" : `&moc=${mocNominal}`}${locQuery}`;
   const basis = parseBasis(param(raw, "basis"));
   const report = await getProfitReport(period, basis);
   const { current, previous, cash } = report;
@@ -286,6 +295,8 @@ export default async function ReportsPage({
           tabQuery={tabQuery}
           canWrite={canWrite}
           basis={mocNominal}
+          value={giaTriDon}
+          includeAds={tinhCPQC}
         />
       ) : null}
       {tab === "pnl" ? (

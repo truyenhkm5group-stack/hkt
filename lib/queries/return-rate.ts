@@ -1,10 +1,11 @@
-import { and, desc, eq, gte, lte, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import { CARRIER_HANDOFF_KNOWN_SQL } from "@/lib/constants/carrier-handoff";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
 import { ELIGIBLE_SENT_SQL, RETURN_RULE, RETURN_RATE_SORTABLE, type OrderOutcome } from "@/lib/constants/returns";
+import { NO_ORDER_VALUE_FILTER, ORDER_VALUE_SQL, ORDER_VALUE_TIERS, ORDER_VALUE_UNKNOWN_SQL, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import type { Period } from "@/lib/search-params";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
@@ -563,12 +564,27 @@ const IS_FAILED = sql`${ORDER_OUTCOME_FAST} = 'IN_TRANSIT' and ${s.stage} = 'DEL
 const IS_SHIPPED = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)})`;
 
 /** Khoá gộp theo mẫu mã: id mẫu mã Pancake, hoặc SKU + tên nếu mẫu mã chưa có trong ERP */
+/**
+ * "HOÀN" GỘP CẢ HAI KẾT QUẢ HOÀN — MỘT BIỂU THỨC, KHÔNG PHẢI MỘT HẰNG SỐ CHO MỖI BẢNG.
+ *
+ * `RETURNED` (thu < 50K) và `RETURNED_BY_RULE` (thu 50K–100K) luôn được gộp là "hoàn" trong mọi
+ * tổng hợp (AGENTS mục 3.3). Mỗi bảng dẫn xuất có bí danh riêng nên biểu thức phải nhận cột vào
+ * làm tham số; trước đây mỗi hàm tự khai một hằng số CÙNG TÊN, và hai bản sao của một danh sách
+ * hai phần tử sẽ lệch nhau vào đúng ngày ai đó thêm một kết quả hoàn thứ ba.
+ */
+const returnedAnyOf = (outcome: SQLWrapper) => sql`${outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+
 const VARIANT_KEY = sql<string>`coalesce(${i.variantId}, 'sku:' || ${i.sku} || '|' || ${i.productName} || '|' || ${i.variationDetail})`;
 
 export type ReturnRateQuery = {
   period: Period;
   /** Mốc lọc cohort. Mặc định `SHIPPED` — xem `baseWhere`. */
   basis?: TimeBasis;
+  /**
+   * Khoảng GIÁ TRỊ ĐƠN (tiền hàng sau giảm giá của cả đơn) — xem `lib/constants/order-value.ts`.
+   * Mặc định không lọc, nên mọi lời gọi cũ giữ nguyên tập đơn và nguyên con số.
+   */
+  value?: OrderValueFilter;
   q: string;
   minShipped: number;
   sort: string;
@@ -677,8 +693,15 @@ export { RETURN_RATE_SORTABLE } from "@/lib/constants/returns";
  * ngoài cohort. CỐ Ý không rơi về `created_at`: mốc đó là lúc người bán bấm nút tạo vận đơn, và
  * lấy nó lấp vào chỗ trống sẽ nhét kiện chưa ai lấy vào "lô hàng gửi tuần này".
  */
-function baseWhere(period: Period, q: string, basis: TimeBasis = "SHIPPED"): SQL | undefined {
+function baseWhere(period: Period, q: string, basis: TimeBasis = "SHIPPED", value: OrderValueFilter = NO_ORDER_VALUE_FILTER): SQL | undefined {
   const conds: SQL[] = [eq(i.isBonus, false), REPORTABLE_ORDER];
+  /*
+    LỌC THEO GIÁ TRỊ CỦA CẢ ĐƠN, KHÔNG PHẢI THEO DÒNG HÀNG. Bảng này gộp theo mẫu mã nên mỗi đơn
+    có mặt ở nhiều dòng; điều kiện đọc `orders.total_price_after_discount` nên một đơn hoặc vào
+    trọn vẹn, hoặc ra trọn vẹn — không có chuyện một mã trong đơn lọt còn mã kia rơi.
+  */
+  const locGiaTri = orderValueWhereSql(value);
+  if (locGiaTri) conds.push(sql.raw(locGiaTri));
   const moc = basis === "ORDERED" ? sql`${o.insertedAt}` : basis === "SHIPPED" ? sql.raw(CARRIER_HANDOFF_AT_SQL) : sql.raw(FINAL_OUTCOME_AT_SQL);
   if (period.from) conds.push(sql`${moc} >= ${period.from}`);
   if (period.to) conds.push(sql`${moc} <= ${period.to}`);
@@ -720,11 +743,11 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .leftJoin(pv, eq(pv.id, i.variantId))
-    .where(baseWhere(query.period, query.q, query.basis ?? "SHIPPED"))
+    .where(baseWhere(query.period, query.q, query.basis ?? "SHIPPED", query.value ?? NO_ORDER_VALUE_FILTER))
     .offset(OUTCOME_FENCE)
     .as("variant_base");
 
-  const RETURNED_ANY = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const RETURNED_ANY = returnedAnyOf(base.outcome);
   // Cùng lý do và cùng cách bọc như `getReturnRateSummary`: chỉ câu lệnh cuối, hợp đồng ước tính
   // nằm ngoài giao dịch. Đo được 7.066ms nguội cho hàm này.
   const raw = await chayKhongJit(db, (tx) => tx
@@ -824,8 +847,8 @@ export async function getReturnRateByVariant(query: ReturnRateQuery): Promise<{ 
       grain, nên lượt thứ hai không phải tính lại từ đầu.
     */
     [duBao, duBaoMa] = await Promise.all([
-      getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "VARIANT"),
-      getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "PRODUCT"),
+      getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "VARIANT", query.value ?? NO_ORDER_VALUE_FILTER),
+      getProjectedDeliveryMetrics(query.period, query.basis ?? "SHIPPED", "PRODUCT", query.value ?? NO_ORDER_VALUE_FILTER),
     ]);
   } catch (e) {
     projectionError = e instanceof Error ? e.message : String(e);
@@ -1001,7 +1024,7 @@ export type ReturnRateSummary = {
 };
 
 /** Tổng hợp ở cấp đơn (mỗi đơn tính một lần) với cùng bộ lọc kỳ / tìm kiếm */
-export async function getReturnRateSummary(period: Period, q: string, basis: TimeBasis = "SHIPPED"): Promise<ReturnRateSummary> {
+export async function getReturnRateSummary(period: Period, q: string, basis: TimeBasis = "SHIPPED", value: OrderValueFilter = NO_ORDER_VALUE_FILTER): Promise<ReturnRateSummary> {
   const db = await getDb();
   /*
     CÙNG MỐC VỚI BẢNG BÊN DƯỚI — nếu không thì khối tổng đầu trang và bảng theo mã nói hai con số
@@ -1016,6 +1039,9 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
   if (period.from) conds.push(sql`${moc} >= ${period.from}`);
   if (period.to) conds.push(sql`${moc} <= ${period.to}`);
   if ((period.from || period.to) && basis !== "ORDERED") conds.push(sql`${moc} is not null`);
+  // CÙNG bộ lọc giá trị đơn với bảng bên dưới — nếu không thì khối tổng và bảng nói hai con số khác nhau.
+  const locGiaTri = orderValueWhereSql(value);
+  if (locGiaTri) conds.push(sql.raw(locGiaTri));
   const term = q.trim();
   if (term) {
     const like = `%${term}%`;
@@ -1087,7 +1113,7 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
   let duBao: Awaited<ReturnType<typeof getProjectedDeliveryMetrics>> | null = null;
   let projectionError: string | null = null;
   try {
-    duBao = await getProjectedDeliveryMetrics(period, basis);
+    duBao = await getProjectedDeliveryMetrics(period, basis, "PRODUCT", value);
   } catch (e) {
     projectionError = e instanceof Error ? e.message : String(e);
   }
@@ -1245,11 +1271,13 @@ export type ReturnRateBySource = {
  * Mỗi đơn thuộc đúng MỘT nguồn (đơn có mặt ở cả hai kênh ghi cho nơi khách đặt trước), nên cộng
  * các nguồn lại đúng bằng tổng toàn shop.
  */
-export async function getReturnRateBySource(period: Period, q: string): Promise<ReturnRateBySource[]> {
+export async function getReturnRateBySource(period: Period, q: string, value: OrderValueFilter = NO_ORDER_VALUE_FILTER): Promise<ReturnRateBySource[]> {
   const db = await getDb();
   const conds: SQL[] = [REPORTABLE_ORDER];
   if (period.from) conds.push(gte(o.insertedAt, period.from));
   if (period.to) conds.push(lte(o.insertedAt, period.to));
+  const locGiaTri = orderValueWhereSql(value);
+  if (locGiaTri) conds.push(sql.raw(locGiaTri));
   const term = q.trim();
   if (term) {
     const like = `%${term}%`;
@@ -1296,4 +1324,138 @@ export async function getReturnRateBySource(period: Period, q: string): Promise<
       };
     })
     .sort((a, b) => thuTu.indexOf(a.source) - thuTu.indexOf(b.source));
+}
+
+
+/**
+ * ═══════════ GTC / TỶ LỆ HOÀN THEO BẬC GIÁ TRỊ ĐƠN ═══════════
+ *
+ * Bảng này trả lời thẳng câu hỏi sinh ra cả tính năng: *"hạ giá xuống bậc thấp hơn thì tỷ lệ giao
+ * thành công có tăng không"*. Bộ lọc khoảng ở đầu trang trả lời được câu đó, nhưng chỉ khi người
+ * đọc đổi khoảng năm lần rồi tự nhớ năm con số — và người ta sẽ không làm thế.
+ *
+ * CỐ Ý KHÔNG áp bộ lọc `vmin`/`vmax` đang bật: bảng này LÀ phép phân bậc, lọc nó thì chỉ còn một
+ * dòng. Kỳ, mốc thời gian và ô tìm kiếm thì vẫn áp, để nó nói về đúng tập đơn mà trang đang xem.
+ *
+ * ─── HAI ĐIỀU BẢNG NÀY KHÔNG KẾT LUẬN HỘ ───
+ *
+ *  · **Tương quan không phải nhân quả.** Bậc giá thấp có GTC cao hơn KHÔNG chứng minh giảm giá làm
+ *    tăng GTC — đơn rẻ thường là mã khác, khách khác, vùng khác. Nó nói "có đáng thử không", và
+ *    phép thử thật là hạ giá MỘT mã rồi so chính mã đó trước / sau.
+ *  · **Bậc ít đơn không so được.** Dòng dưới `MIN_TIER_SAMPLE` đơn đã kết thúc trả tỷ lệ `null`
+ *    (mục 39/42: chưa đủ dữ liệu khác hẳn 0%), và màn hình in "—" chứ không tô màu, không xếp hạng.
+ */
+export const MIN_TIER_SAMPLE = 10;
+
+export type OrderValueTierRow = {
+  key: string;
+  label: string;
+  min: number | null;
+  max: number | null;
+  orders: number;
+  shipped: number;
+  delivered: number;
+  returned: number;
+  inTransit: number;
+  cancelled: number;
+  /** Doanh số đơn (sau giảm giá) của các đơn GIAO THÀNH CÔNG trong bậc. */
+  revenue: number;
+  /** Doanh số đơn của các đơn HOÀN — tiền hụt vì hoàn, ở đúng bậc giá sinh ra nó. */
+  lostRevenue: number;
+  /** Giá trị đơn bình quân THẬT của bậc — để biết bậc "200K–300K" thực tế đang nằm ở đâu. */
+  avgValue: number | null;
+  /** `null` khi số đơn đã kết thúc dưới `MIN_TIER_SAMPLE` — CHƯA ĐỦ DỮ LIỆU, không phải 0%. */
+  successRate: number | null;
+  returnRate: number | null;
+  /** Đơn đã kết thúc (giao TC + hoàn) — mẫu số của hai tỷ lệ trên, luôn in cạnh chúng. */
+  finished: number;
+};
+
+export type OrderValueTierReport = {
+  rows: OrderValueTierRow[];
+  /** Đơn KHÔNG khai được giá trị (tổng tiền <= 0) — ngoài mọi bậc, in ra chứ không giấu (mục 42). */
+  unknownValueOrders: number;
+};
+
+/** Biểu thức xếp bậc — SINH RA từ `ORDER_VALUE_TIERS`, không gõ lại danh sách lần thứ hai. */
+function tierCaseSql(): string {
+  const ve = ORDER_VALUE_TIERS.map((t) => {
+    const dk: string[] = [];
+    if (t.min !== null) dk.push(`${ORDER_VALUE_SQL} >= ${t.min}`);
+    if (t.max !== null) dk.push(`${ORDER_VALUE_SQL} < ${t.max}`);
+    return `when ${dk.length ? dk.join(" and ") : "true"} then '${t.key}'`;
+  });
+  return `case when ${ORDER_VALUE_UNKNOWN_SQL} then '?' ${ve.join(" ")} else '?' end`;
+}
+
+export async function getReturnRateByTier(period: Period, q: string, basis: TimeBasis = "SHIPPED"): Promise<OrderValueTierReport> {
+  const db = await getDb();
+  const conds: SQL[] = [REPORTABLE_ORDER];
+  const moc = basis === "ORDERED" ? sql`${o.insertedAt}` : basis === "SHIPPED" ? sql.raw(CARRIER_HANDOFF_AT_SQL) : sql.raw(FINAL_OUTCOME_AT_SQL);
+  if (period.from) conds.push(sql`${moc} >= ${period.from}`);
+  if (period.to) conds.push(sql`${moc} <= ${period.to}`);
+  if ((period.from || period.to) && basis !== "ORDERED") conds.push(sql`${moc} is not null`);
+  const term = q.trim();
+  if (term) {
+    const like = `%${term}%`;
+    conds.push(sql`exists (select 1 from order_items oi where oi.order_id = ${o.id} and oi.is_bonus = false and (oi.sku ilike ${like} or oi.product_name ilike ${like} or oi.variation_detail ilike ${like}))`);
+  }
+  // Cùng lý do bảng dẫn xuất + tắt JIT như `getReturnRateSummary`: `ORDER_OUTCOME` chỉ tính một lần mỗi đơn.
+  const base = db
+    .select({
+      tier: sql<string>`${sql.raw(tierCaseSql())}`.as("tier"),
+      value: o.totalPriceAfterDiscount,
+      outcome: outcomeColumn(),
+    })
+    .from(o)
+    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    .where(and(...conds))
+    .offset(OUTCOME_FENCE)
+    .as("tier_base");
+
+  const raw = await chayKhongJit(db, (tx) => tx
+    .select({
+      tier: base.tier,
+      orders: sql<number>`count(*)`,
+      shipped: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
+      delivered: sql<number>`count(*) filter (where ${base.outcome} = 'DELIVERED')`,
+      returned: sql<number>`count(*) filter (where ${returnedAnyOf(base.outcome)})`,
+      inTransit: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT')`,
+      cancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
+      revenue: sql<number>`coalesce(sum(${base.value}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
+      lostRevenue: sql<number>`coalesce(sum(${base.value}) filter (where ${returnedAnyOf(base.outcome)}), 0)`,
+      sumValue: sql<number>`coalesce(sum(${base.value}), 0)`,
+    })
+    .from(base)
+    .groupBy(base.tier));
+
+  const theoBac = new Map(raw.map((r) => [String(r.tier), r]));
+  const rows: OrderValueTierRow[] = ORDER_VALUE_TIERS.map((t) => {
+    const r = theoBac.get(t.key);
+    const orders = Number(r?.orders ?? 0);
+    const delivered = Number(r?.delivered ?? 0);
+    const returned = Number(r?.returned ?? 0);
+    const finished = delivered + returned;
+    // Mẫu mỏng ⇒ KHÔNG in một tỷ lệ trông như đo được. Xem `MIN_TIER_SAMPLE`.
+    const duMau = finished >= MIN_TIER_SAMPLE;
+    return {
+      key: t.key,
+      label: t.label,
+      min: t.min,
+      max: t.max,
+      orders,
+      shipped: Number(r?.shipped ?? 0),
+      delivered,
+      returned,
+      inTransit: Number(r?.inTransit ?? 0),
+      cancelled: Number(r?.cancelled ?? 0),
+      revenue: Number(r?.revenue ?? 0),
+      lostRevenue: Number(r?.lostRevenue ?? 0),
+      avgValue: orders ? Math.round(Number(r?.sumValue ?? 0) / orders) : null,
+      successRate: duMau ? (delivered / finished) * 100 : null,
+      returnRate: duMau ? (returned / finished) * 100 : null,
+      finished,
+    };
+  });
+  return { rows, unknownValueOrders: Number(theoBac.get("?")?.orders ?? 0) };
 }
