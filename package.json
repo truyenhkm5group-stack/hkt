@@ -36,6 +36,7 @@
     "agent:proof-report": "tsx --tsconfig tsconfig.json scripts/agent-proof-report.ts",
     "agent:report": "tsx --tsconfig tsconfig.json scripts/agent-run-report.ts",
     "agent:fetch-task": "tsx --tsconfig tsconfig.json scripts/agent-fetch-task.ts",
+    "agent:pr-text": "tsx --tsconfig tsconfig.json scripts/agent-pr-text.ts",
     "cto:proof": "tsx --tsconfig tsconfig.json scripts/cto-proof.ts",
     "agent:identity-proof": "tsx --tsconfig tsconfig.json scripts/agent-identity-proof.ts"
   },
