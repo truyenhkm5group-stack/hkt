@@ -3,6 +3,7 @@ import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
+import { NO_ORDER_VALUE_FILTER, orderValueKey, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 
 const EVENT_SOURCES = sqlSourceList(CARRIER_EVENT_SOURCES);
 
@@ -64,9 +65,20 @@ export type LogisticsPerformance = {
   stuck72h: number;
 };
 
-export async function logisticsPerformance(period: Period): Promise<LogisticsPerformance> {
-  return memo(`logistics-performance:${period.fromKey ?? "-"}:${period.toKey ?? "-"}`, 90_000, async () => {
+export async function logisticsPerformance(period: Period, value: OrderValueFilter = NO_ORDER_VALUE_FILTER): Promise<LogisticsPerformance> {
+  return memo(`logistics-performance:${period.fromKey ?? "-"}:${period.toKey ?? "-"}:${orderValueKey(value)}`, 90_000, async () => {
     const db = await getDb();
+    /*
+      ═══ PHÉP NỐI SANG `orders` CHỈ XUẤT HIỆN KHI ĐANG LỌC GIÁ TRỊ ĐƠN ═══
+
+      Khối này đo hiệu suất của ĐVVC trên KIỆN HÀNG, kể cả kiện không gắn đơn nào — vận đơn chiều
+      hoàn có `order_id` NULL (AGENTS mục 3.7). Nối cứng vào `orders` sẽ lặng lẽ ném những kiện đó
+      ra khỏi mọi con số của MỌI lượt xem, kể cả lượt không lọc gì.
+
+      Khi CÓ lọc thì kiện không gắn đơn không có giá trị đơn để xét ⇒ CHƯA BIẾT ⇒ nằm ngoài bộ lọc,
+      đúng luật mục 42. Phép nối trong làm đúng việc đó.
+    */
+    const locGiaTri = orderValueWhereSql(value);
     const from = period.from ? sql`${period.from}` : sql`'-infinity'::timestamptz`;
     const to = period.to ? sql`${period.to}` : sql`'infinity'::timestamptz`;
 
@@ -94,6 +106,12 @@ export async function logisticsPerformance(period: Period): Promise<LogisticsPer
           extract(epoch from (ev.delivered_at - ev.picked_at)) / 3600.0 as delivery_hours
         from shipments s
         join ev on ev.shipment_id = s.id
+        /*
+          PHEP NOI SANG "orders" CHI XUAT HIEN KHI DANG LOC GIA TRI DON -- va do la chu y.
+          Xem chu thich tieng Viet day du ngay tren than ham (backtick khong dung duoc trong
+          template literal nay).
+        */
+        ${locGiaTri ? sql.raw(`join "orders" on "orders"."id" = s.order_id and ${locGiaTri}`) : sql``}
         where ev.last_event_at >= ${from} and ev.last_event_at <= ${to}
       )
       select

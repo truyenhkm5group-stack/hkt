@@ -12,7 +12,10 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RETURN_RULE, SUCCESS_RATE_OK, successTone } from "@/lib/constants/returns";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { getReturnRateBySource, getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant, RETURN_RATE_SORTABLE } from "@/lib/queries/return-rate";
+import { getReturnRateBySource, getReturnRateByTier, getReturnRateByVariant, getReturnRateSummary, listOrdersForVariant, RETURN_RATE_SORTABLE } from "@/lib/queries/return-rate";
+import { OrderValueFilterControl } from "@/components/order-value-filter";
+import { ValueTierSection } from "@/app/(dashboard)/reports/returns/value-tier-section";
+import { orderValueActive, orderValueLabel, parseOrderValue } from "@/lib/constants/order-value";
 import { ORDER_SOURCE_HINT, ORDER_SOURCE_LABEL, ORDER_SOURCE_TONE } from "@/lib/queries/order-source";
 import { logisticsPerformance, SUCCESS_RATE_TERMINAL_LABEL } from "@/lib/queries/logistics";
 import { ProjectionConfidence } from "@/app/(dashboard)/reports/projection-confidence";
@@ -70,6 +73,13 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
   const minShipped = Math.max(1, Number(params.filters.min?.[0] ?? "1") || 1);
   const variantKey = param(raw, "variant");
   /*
+    BỘ LỌC GIÁ TRỊ ĐƠN — xem `lib/constants/order-value.ts` cho định nghĩa và lý do chọn giá chốt.
+    Nó áp cho KPI tổng quan, bảng theo mã, bảng theo nguồn đơn và bảng lý do hoàn, tức mọi con số
+    trên trang trừ bảng "theo bậc giá trị đơn" (bảng ấy CHÍNH LÀ phép phân bậc).
+  */
+  const giaTriDon = parseOrderValue(raw);
+  const dangLocGiaTri = orderValueActive(giaTriDon);
+  /*
     MỐC LỌC LÀ MỘT LỰA CHỌN CÓ TÊN, KHÔNG PHẢI MỘT GIẢ ĐỊNH NGẦM.
 
     Mặc định `SHIPPED` vì bảng này có cột "Đã gửi" — nó trả lời "lô hàng gửi trong khoảng này đi
@@ -105,22 +115,23 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
         })()
       : null;
 
-  const reasonFilter = { period: params.period, basis, codes, marketerIds };
+  const reasonFilter = { period: params.period, basis, codes, marketerIds, value: giaTriDon };
 
   const [{ rows, total, pageCount, all, productRows, projectionError: loiBang }, summary, variantOrders, theoNguon, reasonReport, danhMucMa, danhSachMarketer] = await Promise.all([
-    getReturnRateByVariant({ period: params.period, basis, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
-    getReturnRateSummary(params.period, params.q, basis),
+    getReturnRateByVariant({ period: params.period, basis, value: giaTriDon, q: params.q, minShipped, sort: params.sort, dir: params.dir, page: params.page, pageSize: params.pageSize }),
+    getReturnRateSummary(params.period, params.q, basis, giaTriDon),
     variantKey ? listOrdersForVariant(variantKey, params.period) : Promise.resolve([]),
-    getReturnRateBySource(params.period, params.q),
+    getReturnRateBySource(params.period, params.q, giaTriDon),
     getReturnReasonReport(reasonFilter),
     listProductCodes(),
     listAttributedMarketers(),
   ]);
 
   // Tầng quyết định dùng LẠI báo cáo lý do vừa dựng — không dựng lần thứ hai cho cùng một tập ca.
-  const [logistics, intel] = await Promise.all([
-    logisticsPerformance(params.period),
-    getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport }),
+  const [logistics, intel, theoBacGia] = await Promise.all([
+    logisticsPerformance(params.period, giaTriDon),
+    getReturnIntelligence({ period: params.period, previous, basis, codes, marketerIds, trendGrain, reasonReport, value: giaTriDon }),
+    getReturnRateByTier(params.period, params.q, basis),
   ]);
 
   const selected = variantKey ? all.find((r) => r.key === variantKey) : null;
@@ -146,6 +157,10 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
     period: params.period.key,
     q: params.q,
     min: String(minShipped),
+    // Tệp xuất ra PHẢI là đúng tập đơn đang hiện trên màn hình, nếu không người nhận tệp đọc một
+    // bảng khác với người gửi.
+    ...(giaTriDon.min !== null ? { vmin: String(giaTriDon.min) } : {}),
+    ...(giaTriDon.max !== null ? { vmax: String(giaTriDon.max) } : {}),
     ...(params.period.key === "custom" ? { from: params.period.fromKey ?? "", to: params.period.toKey ?? "" } : {}),
   }).toString();
 
@@ -224,8 +239,37 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
           },
           { key: "trend", label: "Xu hướng theo", options: [{ value: "DAY", label: "Ngày" }, { value: "WEEK", label: "Tuần" }], single: true },
         ]}
-        resultLabel={`${formatNumber(total)} mã hàng · bấm vào một dòng để xem danh sách đơn`}
-      />
+        extraResetKeys={["vmin", "vmax"]}
+        resultLabel={
+          <>
+            {formatNumber(total)} mã hàng · bấm vào một dòng để xem danh sách đơn
+            {dangLocGiaTri ? <span className="ml-1 font-semibold text-primary">· đang lọc {orderValueLabel(giaTriDon).toLowerCase()} (tiền hàng sau giảm giá, chưa gồm cước)</span> : null}
+          </>
+        }
+      >
+        <OrderValueFilterControl value={giaTriDon} />
+      </DataTableToolbar>
+
+      {/*
+        ═══ BỘ LỌC ÁP TỚI ĐÂU THÌ NÓI TỚI ĐÓ ═══
+
+        Cả trang đứng trên MỘT tập đơn: mọi khối đều nhận cùng bộ lọc, kể cả lý do hoàn, chăm sóc
+        và hiệu suất giao vận. Giữ một khối đọc cả kỳ trong khi khối bên cạnh đã lọc là đặt hai
+        tập đơn khác nhau dưới cùng một tiêu đề kỳ, và người đọc sẽ cộng chúng lại.
+
+        Dòng này vẫn phải hiện: người đọc cần biết mình KHÔNG đang xem toàn bộ đơn của kỳ. Một
+        bảng đã lọc mà không nói ra là một bảng nói dối bằng cách im lặng.
+
+        NGOẠI LỆ DUY NHẤT, và nó được nêu ngay tại chỗ: bảng "theo bậc giá trị đơn" — bảng ấy
+        CHÍNH LÀ phép phân bậc, lọc nó thì chỉ còn một dòng.
+      */}
+      {dangLocGiaTri ? (
+        <p className="-mt-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-[12px] leading-5">
+          <b>{orderValueLabel(giaTriDon)}</b> — mọi khối trên trang (tổng quan, theo mã hàng, theo nguồn đơn, lý do hoàn, chăm sóc &amp; cứu đơn, hiệu suất giao vận) đều tính trên đúng tập đơn
+          này: tiền hàng sau giảm giá của CẢ ĐƠN nằm trong khoảng, chưa gồm cước. Riêng bảng &ldquo;theo bậc giá trị đơn&rdquo; luôn hiện đủ các bậc — nó chính là phép phân bậc.
+          {basis !== "ORDERED" ? " Kiện không gắn đơn nào (vận đơn chiều hoàn) không có giá trị đơn để xét nên nằm ngoài bộ lọc." : ""}
+        </p>
+      ) : null}
 
       {/*
         ĐANG LỌC THEO MỐC NÀO — NÓI THẲNG, KHÔNG ĐỂ ĐOÁN.
@@ -413,6 +457,15 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       >
         <ProductRiskTable rows={intel.products} hasTarget={intel.hasTarget} />
       </IntelSection>
+
+      {/*
+        ═════════ B2. GTC THEO BẬC GIÁ TRỊ ĐƠN ═════════
+
+        Đứng NGAY SAU bảng theo mã hàng vì nó trả lời câu hỏi tiếp theo của cùng một quyết định:
+        biết mã nào đang hỏng rồi thì hỏi "hạ giá có cứu được không". Đặt nó sau khối nguồn đơn /
+        giao vận là bắt người đọc đi qua hai quyết định khác rồi mới quay lại.
+      */}
+      <ValueTierSection report={theoBacGia} basis={basis} />
 
       {/* ═════════ C. GTC THEO NGUỒN ĐƠN ═════════ */}
       <SectionCard
