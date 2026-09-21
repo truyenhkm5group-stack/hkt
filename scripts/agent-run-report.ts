@@ -113,6 +113,14 @@ async function main() {
     uuid khác, nên nó chống được đúng số 0 lần phát lại. `runId` + `attempt` của Actions mới là thứ
     nhận diện được cùng một sự việc từ hai phía.
   */
+  /*
+    Mã việc TRÊN PRODUCTION, do workflow truyền xuống. Rỗng = lượt tự kiểm, không thuộc việc nào.
+    KHÔNG suy từ `task.code` của CSDL tạm: hai không gian mã khác nhau, và chúng trùng nhau một
+    cách tình cờ chính là cái bẫy đã cắn.
+  */
+  const maProduction = (arg("prod-task") ?? "").trim();
+  if (!maProduction) console.log("Không có mã việc production — chép sổ KHÔNG gắn vào việc nào (đúng với lượt tự kiểm).");
+
   const externalRef = agentRunExternalRef(
     "github",
     process.env.GITHUB_RUN_ID ?? `local-${run.id}`,
@@ -160,7 +168,21 @@ async function main() {
   const body = {
     externalRef,
     agentKey: run.agentKey,
-    taskCode: task.code,
+    /*
+      ═══════════ CHỈ GẮN VÀO VIỆC KHI CÓ MỘT VIỆC THẬT TRÊN PRODUCTION ═══════════
+
+      ĐÃ CẮN THẬT. Lượt TỰ KIỂM không lấy việc từ production — nó tự tạo một việc R0 trong CSDL
+      tạm, và trong một CSDL RỖNG việc ấy mang mã `TECH-1`. Gửi mã đó đi thì cửa nhận tra thấy
+      `TECH-1` CỦA PRODUCTION — một việc có thật, hoàn toàn khác — và gắn lượt chạy vào đó.
+
+      Đo được: 4 lượt tự kiểm đang nằm dưới việc “Đánh giá tốc độ trang vận đơn” (R2), một việc
+      chúng chưa bao giờ chạm tới.
+
+      Một lượt tự kiểm KHÔNG THUỘC việc nào trên production, và cửa nhận chấp nhận điều đó
+      (`task_id` để trống). Không gắn là câu trả lời ĐÚNG; gắn bừa vào một mã trùng là bịa ra một
+      quan hệ chưa từng có (AGENTS.md mục 34–35).
+    */
+    taskCode: maProduction || undefined,
     status: run.status,
     branch: run.branch || undefined,
     baseCommit: run.baseCommit || undefined,
