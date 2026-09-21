@@ -4,6 +4,7 @@ import path from "node:path";
 import { AiAgentExecutor } from "@/lib/agents/executor";
 import { TIER_MAC_DINH, tierForRole } from "@/lib/constants/agent-model";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
+import { estimateCostUsd, giaCuaModel, khoaGiaKhop } from "@/lib/ai/provider";
 import type { AiProvider } from "@/lib/ai/provider";
 
 /**
@@ -136,6 +137,40 @@ export async function testDemTienLuotChay() {
   const tat = await new AiAgentExecutor(null, "chưa bật").run(JOB);
   assert.equal(tat.chiPhi.usd, 0);
   assert.equal(tat.chiPhi.soVong, 0);
+}
+
+/* ═════════════ 3b · TÊN MODEL TRẢ VỀ ≠ TÊN TRONG BẢNG GIÁ ═════════════ */
+
+/**
+ * ĐÃ CẮN THẬT — lượt chạy agent #16. Kho gọi bí danh `claude-haiku-4-5`; Anthropic trả về
+ * `claude-haiku-4-5-20251001`. Tra thẳng chuỗi ấy không thấy gì, nên cả lượt chạy in
+ * **"tiền: CHƯA ĐO ĐƯỢC"** — đúng luật nhưng vô dụng: phép đo sinh ra để trả lời "tốn bao nhiêu"
+ * lại không trả lời được câu nào.
+ */
+export function testTraGiaTheoTienTo() {
+  const alias = MODEL_BY_TIER.anthropic.routine;
+  assert.ok(giaCuaModel(alias), "bí danh phải tra được");
+  assert.deepEqual(giaCuaModel(`${alias}-20251001`), giaCuaModel(alias), "bí danh + ngày phát hành phải ra CÙNG một bảng giá");
+
+  /*
+    KHỚP TIỀN TỐ DÀI NHẤT, KHÔNG PHẢI KHỚP ĐẦU TIÊN.
+
+    Nếu một ngày bảng giá có cả `claude-opus-5` lẫn một biến thể dài hơn, khớp đầu tiên sẽ tính
+    giá model to cho model nhỏ — sai theo hướng ĐẮT LÊN, và không ai kiểm lại một con số đã có vẻ
+    hợp lý. Bài này dựng đúng tình huống ấy bằng hai khoá có thật trong bảng.
+  */
+  const KHOA = ["claude-opus-5", "claude-opus-5-mini"];
+  assert.equal(khoaGiaKhop("claude-opus-5-mini-20260101", KHOA), "claude-opus-5-mini", "biến thể phải ăn giá của CHÍNH nó, không phải của model to hơn");
+  assert.equal(khoaGiaKhop("claude-opus-5-20260101", KHOA), "claude-opus-5");
+  assert.equal(khoaGiaKhop("claude-sonnet-9", KHOA), null, "không khớp tiền tố nào ⇒ CHƯA BIẾT, không đoán");
+
+  const opus = MODEL_BY_TIER.anthropic.copilot;
+  assert.deepEqual(giaCuaModel(`${opus}-20260101`), giaCuaModel(opus));
+  assert.notDeepEqual(giaCuaModel(`${alias}-20251001`), giaCuaModel(opus), "biến thể của haiku KHÔNG được ăn giá của opus");
+
+  // Model chưa khai vẫn phải là CHƯA BIẾT — đoán giá còn tệ hơn nói không biết.
+  assert.equal(giaCuaModel("model-hoan-toan-la"), null);
+  assert.equal(estimateCostUsd("model-hoan-toan-la", { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 }), null);
 }
 
 /* ═════════════ 4 · KHÔNG AI LẶNG LẼ NÂNG BẬC LÊN LẠI ═════════════ */

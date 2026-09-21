@@ -361,6 +361,49 @@ export async function testNominalParityWithActiveOrders() {
   assert.deepEqual(bao.totals.ads, adsRatios({ adSpend: bao.totals.adSpend, posSales: bao.totals.salesAfterDiscount, deliveredRevenueActual: bao.totals.actualRevenue, projectedDeliveredRevenue: bao.totals.expectedRevenue }));
   assert.deepEqual(bao.totals.adsAttributed, adsRatios({ adSpend: bao.totals.adSpendAttributed, posSales: bao.totals.salesAfterDiscount, deliveredRevenueActual: bao.totals.actualRevenue, projectedDeliveredRevenue: bao.totals.expectedRevenue }));
   for (const r of bao.rows) assert.deepEqual(r.ads, adsRatios({ adSpend: r.adSpend, posSales: r.salesAfterDiscount, deliveredRevenueActual: r.actualRevenue, projectedDeliveredRevenue: r.expectedRevenue }), `${r.code}: tỷ lệ QC từng dòng đi qua đúng một hàm`);
+
+  /*
+    ═══════════ ĐỔI MỐC LÀ ĐỔI COHORT, VÀ HAI TRANG PHẢI ĐỔI CÙNG NHAU ═══════════
+
+    Trang Tỷ lệ giao thành công mặc định mốc NGÀY GỬI, bảng lợi nhuận mặc định NGÀY TẠO ĐƠN — hai
+    câu trả lời đúng cho hai câu hỏi khác nhau, mà trên màn hình chúng đứng dưới CÙNG một cái tên
+    "Tỷ lệ GTC ước tính". Ô chọn mốc tồn tại để đặt được cả hai về cùng một mốc; khối này khoá
+    đúng lời hứa đó, và khoá luôn việc `basis` phải có mặt trong khoá cache (thiếu nó thì lượt xem
+    mốc này phục vụ lại con số của mốc kia — không lỗi, không cảnh báo, chỉ là số sai).
+  */
+  /*
+    CỐ Ý KHÔNG `clearMemo()` Ở ĐÂY.
+
+    Lượt đọc mốc NGÀY TẠO ĐƠN phía trên vừa nạp cache. Nếu `basis` vắng mặt trong khoá, lượt này
+    nhận lại ĐÚNG kết quả của mốc kia — không lỗi, không cảnh báo, chỉ là số sai. Xoá cache trước
+    khi đo là tự tay gỡ mất cái bẫy: bản nháp đầu của khối này có `clearMemo()`, và kiểm đột biến
+    (bỏ `basis` khỏi khoá) SỐNG SÓT. Một bài kiểm xanh cả khi lỗi còn đó thì không phải hàng rào.
+  */
+  const baoGui = await getNominalProfitReport(ky, "SHIPPED");
+  const hopDongGui = await getProjectedDeliveryMetrics(ky, "SHIPPED", "PRODUCT");
+  const guiTheoMa = new Map(hopDongGui.rows.map((r) => [r.key, r]));
+  const aGui = baoGui.rows.find((r) => r.productId === `${P}p-A`)!;
+  assert.ok(aGui, "đổi mốc không được làm biến mất mã đang có đơn đã gửi thật");
+  assert.equal(aGui.deliveryRate, guiTheoMa.get(`${P}p-A`)!.projectedRate, "ở mốc NGÀY GỬI cũng phải là CÙNG MỘT SỐ với hợp đồng ở CÙNG mốc ấy");
+
+  const tongGui = await getReturnRateSummary(ky, "", "SHIPPED");
+  assert.equal(tongGui.expectedSuccessRate, baoGui.totals.weightedDeliveryRate, "HAI TRANG, CÙNG MỐC NGÀY GỬI ⇒ CÙNG MỘT SỐ toàn shop");
+  assert.notEqual(baoGui.totals.weightedDeliveryRate, undefined);
+
+  /*
+    Mã W chỉ gồm kiện ĐVVC CHƯA CẦM HÀNG. Chúng không có `carrier_handoff_at`, nên ở mốc NGÀY GỬI
+    chúng nằm NGOÀI cohort — khác hẳn "có cohort mà tỷ lệ bằng 0". Ở mốc NGÀY TẠO ĐƠN chúng có
+    mặt, trong rổ riêng của mình, và vẫn không chạm vào tỷ lệ.
+  */
+  assert.equal(guiTheoMa.get(`${P}p-W`), undefined, "kiện chưa bàn giao không có mốc gửi ⇒ ngoài cohort mốc NGÀY GỬI");
+  assert.equal(
+    baoGui.rows.find((r) => r.productId === `${P}p-W`),
+    undefined,
+    "và bảng lợi nhuận ở mốc NGÀY GỬI cũng không được có dòng ấy — thấy nó nghĩa là lượt đọc này đang dùng lại kết quả đã nhớ của MỐC KHÁC",
+  );
+  assert.ok(bao.rows.some((r) => r.productId === `${P}p-W`), "trong khi ở mốc NGÀY TẠO ĐƠN thì dòng ấy PHẢI có — nếu không, hai vế trên không chứng minh được gì");
+  assert.equal(theoMa.get(`${P}p-W`)!.awaitingPickup, 3, "ở mốc NGÀY TẠO ĐƠN chúng có mặt, trong rổ riêng");
+  assert.equal(theoMa.get(`${P}p-W`)!.projectedRate, null, "và ở cả hai mốc đều KHÔNG sinh ra một tỷ lệ nào");
 }
 
 /* ───── 6 · Thử ngược chạy trên CSDL, không lộ trạng thái cuối ───── */

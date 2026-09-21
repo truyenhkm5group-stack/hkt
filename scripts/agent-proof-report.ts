@@ -24,9 +24,30 @@ import { desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { kiemHangRaoBaiKiem, moTaViPham } from "@/lib/constants/agent-test-guard";
 import { ensureMigrated } from "@/db/migrate";
+import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 
-/** Phạm vi ghi của vai tài liệu trong lượt kiểm chứng này. Đúng một tệp. */
-const CHO_PHEP = ["docs/ai-tech-agent-runner-proof.md"];
+/**
+ * ═══════════ PHẠM VI CHO PHÉP ĐỌC TỪ SỔ VAI, KHÔNG GHI CỨNG MỘT TÊN TỆP ═══════════
+ *
+ * Bản cũ ghi cứng đúng một tệp — tệp mà lượt TỰ KIỂM viết. Nó đúng khi Phòng Tech AI mới chỉ tự
+ * kiểm chính mình, và SAI ngay lần đầu có việc thật: lượt chạy #16 của `TECH-2` viết
+ * `docs/agent-run-reconciliation.md`, bốn cổng đều PASSED, và bước kiểm phạm vi vẫn ĐỎ vì tên tệp
+ * không nằm trong danh sách một-phần-tử ấy.
+ *
+ * Hậu quả không dừng ở một dòng đỏ: job hỏng ⇒ điều kiện mở PR không đạt ⇒ PR không được mở. Công
+ * đã làm xong lại nằm trên một nhánh không ai mở ra xem — đúng cái vòng đã cắn ở lượt #14.
+ *
+ * Nguồn đúng là `writeGlobsForRole()` — CÙNG sổ mà hàng rào `checkWritePath` dùng lúc chạy. Hai
+ * nơi khai cùng một phạm vi là hai nơi để chúng trôi xa nhau, và khi ấy một trong hai sẽ nói dối.
+ */
+function phamViChoPhep(role: string | null | undefined): readonly string[] {
+  return writeGlobsForRole(role as never);
+}
+
+/** Đúng phép so mà `checkWritePath` dùng: mục kết thúc bằng `/` là TIỀN TỐ, còn lại là so BẰNG. */
+function trongPhamVi(tep: string, globs: readonly string[]): boolean {
+  return globs.some((g) => (g.endsWith("/") ? tep.startsWith(g) : tep === g));
+}
 
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -74,7 +95,8 @@ async function main() {
       ? git("diff", "--name-only", `${run.baseCommit}..${run.branch}`).split("\n").filter(Boolean)
       : [];
 
-  const ngoaiPhamVi = tepTheoGit.filter((f) => !CHO_PHEP.includes(f));
+  const choPhep = phamViChoPhep(agent?.role);
+  const ngoaiPhamVi = tepTheoGit.filter((f) => !trongPhamVi(f, choPhep));
   const lechSoVoiSo = JSON.stringify([...tepTheoGit].sort()) !== JSON.stringify([...tepTheoSo].sort());
 
   const bangChung = {
@@ -96,7 +118,7 @@ async function main() {
       worktree: run.worktree,
     },
     git: { filesChanged: tepTheoGit, outOfScope: ngoaiPhamVi, showStat: run.resultCommit ? git("show", "--stat", "--oneline", run.resultCommit) : "" },
-    allowlist: CHO_PHEP,
+    allowlist: choPhep,
   };
   writeFileSync("bang-chung-agent.json", JSON.stringify(bangChung, null, 2));
 
