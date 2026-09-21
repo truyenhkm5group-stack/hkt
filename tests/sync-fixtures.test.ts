@@ -195,6 +195,7 @@ import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
 import { testAdsDecision } from "./ads-decision.test";
 import { testAuditTrail } from "./audit-trail.test";
+import { testColumnResize } from "./column-resize.test";
 import { testFormatNullSafety } from "./format-null-safety.test";
 import { testHandoffPureFunction, testHandoffSqlMatchesTypescript, testHandoffStageSet } from "./carrier-handoff.test";
 import { testMetricRegistry, testPersonTargetGuard, testProductTargetGuard, testRangeAndBands, testScorecardContract, testScorecardEvaluator, testTargetWindowAndPeriod } from "./metric-targets-model.test";
@@ -1604,6 +1605,7 @@ async function main() {
   await testAdsAttributionLink(db);
   await testAuditTrail(db);
   testFormatNullSafety();
+  testColumnResize();
   testHandoffStageSet();
   testHandoffPureFunction();
   await testHandoffSqlMatchesTypescript(db);
