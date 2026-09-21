@@ -79,13 +79,22 @@ export class AgentWorkspace {
     writeGlobs: readonly string[];
     /** Thư mục cha của cây. Mặc định một thư mục tạm riêng cho lượt chạy. */
     parentDir?: string;
+    /**
+     * DÙNG LẠI một nhánh ĐÃ CÓ thay vì tạo nhánh mới (Nấc 5 — chạy lại theo phản hồi review).
+     *
+     * Khác biệt là một chữ `-b` trong lệnh `git worktree add`, nhưng hậu quả thì không nhỏ: với
+     * `-b`, git TỪ CHỐI nếu nhánh đã tồn tại — đó chính là thứ giữ cho hai lượt chạy không bao giờ
+     * ghi đè nhau. Bỏ `-b` là bỏ phép kiểm ấy, nên nó chỉ được bỏ khi nơi gọi CHỦ Ý chạy lại, và
+     * nơi gọi phải tự kiểm tên nhánh trước (`checkRerun`).
+     */
+    reuseBranch?: boolean;
   }): Promise<AgentWorkspace> {
     const parent = opts.parentDir ?? mkdtempSync(path.join(tmpdir(), "erp-agent-"));
     mkdirSync(parent, { recursive: true });
     const root = path.join(parent, opts.branch.replace(/[^\w.-]+/g, "-"));
     if (existsSync(root)) throw new Error(`Cây làm việc ${root} đã tồn tại — hai lượt chạy không được dùng chung thư mục.`);
 
-    const res = await rawGit(opts.repoRoot, ["worktree", "add", "-b", opts.branch, root, opts.baseCommit]);
+    const res = await rawGit(opts.repoRoot, argvWorktreeAdd({ root, branch: opts.branch, baseCommit: opts.baseCommit, reuseBranch: opts.reuseBranch === true }));
     if (!res.ok) throw new Error(`Không dựng được cây làm việc: ${res.stderr || res.stdout}`);
 
     /*
@@ -209,6 +218,28 @@ export class AgentWorkspace {
  * Tách hẳn khỏi `AgentWorkspace.run()` là cố ý: runner cần `worktree add`, `add`, `commit`,
  * `rev-parse` — đúng những thứ agent KHÔNG được phép. Hàm này không bao giờ nhận đầu vào từ model.
  */
+/**
+ * Lệnh `git worktree add` cho một lượt chạy — HÀM THUẦN, để bài kiểm đo được thay vì quét chữ.
+ *
+ * Khác biệt giữa hai nhánh chỉ là một chữ `-b`, nhưng hậu quả thì không nhỏ:
+ *
+ *   · CÓ `-b` (lượt chạy MỚI): git TỪ CHỐI nếu nhánh đã tồn tại. Đó chính là phép kiểm giữ cho hai
+ *     lượt chạy không bao giờ ghi đè bằng chứng của nhau.
+ *   · `-B` (CHẠY LẠI): đặt nhánh tại SHA nơi gọi đưa xuống, tạo nếu chưa có ở máy này. Máy Actions
+ *     là máy mới tinh mỗi lượt, nên nhánh của lượt trước chỉ tồn tại ở `origin` — `-b` sẽ chết vì
+ *     "nhánh đã tồn tại" ở máy đã có nó, còn không cờ nào thì chết vì "không có nhánh ấy" ở máy
+ *     chưa có. `-B` là nước đi duy nhất đúng ở CẢ HAI máy.
+ *
+ * Nơi gọi PHẢI đưa xuống ĐỈNH CỦA NHÁNH ẤY, không phải base của chính nó: `-B` đặt nhánh về đúng
+ * SHA được đưa, nên đưa `main` xuống là ném sạch công của lượt trước — và git sẽ làm việc đó lặng
+ * lẽ, không một dòng lỗi nào.
+ *
+ * Nên bỏ `-b` chỉ hợp lệ khi nơi gọi CHỦ Ý chạy lại và đã tự kiểm tên nhánh trước (`checkRerun`).
+ */
+export function argvWorktreeAdd(o: { root: string; branch: string; baseCommit: string; reuseBranch: boolean }): string[] {
+  return o.reuseBranch ? ["worktree", "add", "-B", o.branch, o.root, o.baseCommit] : ["worktree", "add", "-b", o.branch, o.root, o.baseCommit];
+}
+
 async function rawGit(cwd: string, args: string[]): Promise<CommandResult> {
   return exec(["git", ...args], cwd, 120_000);
 }
@@ -282,4 +313,31 @@ function exec(argvVao: readonly string[], cwd: string, timeoutMs: number): Promi
     });
     child.on("close", (code) => done(code ?? 1));
   });
+}
+
+/**
+ * Đỉnh của một nhánh đã có — lệnh của RUNNER, không đi qua hàng rào của agent.
+ *
+ * Dùng cho lượt chạy lại: base SHA khi ấy là đỉnh nhánh cũ, KHÔNG phải `main`. Lấy `main` nghĩa là
+ * vứt bỏ công việc của lượt trước và làm lại từ đầu — đúng thứ Nấc 5 sinh ra để tránh.
+ */
+export async function dinhNhanh(repoRoot: string, branch: string): Promise<string | null> {
+  /*
+    HAI CHỖ PHẢI HỎI, THEO ĐÚNG THỨ TỰ NÀY.
+
+    Máy chạy lượt sau thường KHÔNG phải máy chạy lượt trước: mỗi lượt Actions là một máy mới tinh,
+    và nhánh của lượt trước tới đó dưới dạng `refs/remotes/origin/…` chứ không phải `refs/heads/…`
+    (`actions/checkout` với `fetch-depth: 0` lấy mọi nhánh về — bài kiểm khoá luôn dòng ấy trong
+    workflow, vì mất nó là mất luôn đường chạy lại).
+
+    Trên máy người vận hành thì ngược lại: nhánh nằm ở `refs/heads/…` và có thể MỚI HƠN `origin`.
+    Nên local hỏi trước.
+
+    Và KHÔNG viết trần trụi `rev-parse <branch>`: một tên trần trụi để git tự dò qua nhiều không
+    gian tên, còn `refs/heads/…` thì hỏi đúng một chỗ.
+  */
+  let r = await rawGit(repoRoot, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+  if (!r.ok || !r.stdout.trim()) r = await rawGit(repoRoot, ["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${branch}`]);
+  const sha = r.stdout.trim();
+  return r.ok && /^[0-9a-f]{7,40}$/.test(sha) ? sha : null;
 }

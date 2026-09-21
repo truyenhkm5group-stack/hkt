@@ -3041,7 +3041,20 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
    * GIỮ quan hệ một-vận-đơn cho các đường đã có (nó lấy MỘT dòng bất kỳ), nhưng từ 10/09/2026 một
    * đơn có thể có NHIỀU lần gửi — dùng `attempts` khi cần đủ.
    */
-  shipment: one(shipments, { fields: [orders.id], references: [shipments.orderId] }),
+  /*
+    KHÔNG CÓ `shipment: one(...)` Ở ĐÂY, VÀ ĐÓ LÀ CÓ CHỦ Ý.
+
+    `shipments.order_id` KHÔNG duy nhất: một đơn gửi lại có nhiều dòng (`attempt_no` 2, 3…) và
+    chiều hoàn là dòng riêng (AGENTS.md mục 3.7). Khai `one(...)` lên một khoá ngoại như vậy thì
+    Drizzle trả về MỘT dòng bất kỳ — không `ORDER BY`, không lời hứa nào — và mọi nơi gọi đều tin
+    rằng đó là "vận đơn của đơn".
+
+    Nó đã tốn 23 đơn không đồng bộ được mỗi mười lăm phút (đo 21/09/2026, xem
+    `lib/constants/shipment-pick.ts`). Nên quan hệ ấy bị GỠ HẲN thay vì được chú thích là nguy
+    hiểm: dùng `attempts` rồi chọn bằng `chonVanDonDeGhep()`, một cái bẫy đã gỡ thì không ai rơi
+    vào lần thứ hai. `tests/schema-relations.test.ts` chặn mọi `one(...)` trỏ vào cột không phải
+    khoá chính, để cái bẫy này không mọc lại ở bảng khác.
+  */
   /** Mọi lần gửi của đơn, gồm cả lần đã huỷ và lần gửi lại. */
   attempts: many(shipments),
   returns: many(orderReturns),

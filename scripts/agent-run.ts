@@ -17,6 +17,7 @@
  */
 import { eq, or } from "drizzle-orm";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { getDb, schema } from "@/db";
 import { AiAgentExecutor } from "@/lib/agents/executor";
 import { runAgentOnTask } from "@/lib/agents/runner";
@@ -42,6 +43,28 @@ async function main() {
   const repoRoot = arg("repo") ?? process.cwd();
 
   /*
+    ═══ CHẠY LẠI TRÊN NHÁNH CŨ (NẤC 5) ═══
+
+    `--feedback-file` là TỆP, không phải đối số.
+
+    Phản hồi review do NGƯỜI NGOÀI viết: nhiều dòng, có dấu nháy, có ký tự lạ. Nhét nó vào dòng
+    lệnh là mời mọc chuyện trích dẫn sai ở một tầng nào đó trên đường đi. Một tệp thì không có
+    tầng nào để sai — và luật ở `checkRerun`/`checkWritePath` mới là thứ quyết phạm vi, không phải
+    cách truyền chuỗi này.
+  */
+  const rerunBranch = arg("rerun-branch") || undefined;
+  const feedbackFile = arg("feedback-file");
+  let feedback: { tacGia: string; noiDung: string }[] = [];
+  if (feedbackFile) {
+    const noiDung = readFileSync(feedbackFile, "utf8").trim();
+    if (noiDung) feedback = [{ tacGia: arg("feedback-author") ?? "người xem", noiDung }];
+  }
+  if (feedback.length && !rerunBranch) {
+    console.error("Có --feedback-file nhưng thiếu --rerun-branch: phản hồi review chỉ có nghĩa khi sửa tiếp trên chính nhánh đã mở PR.");
+    process.exit(1);
+  }
+
+  /*
     BASE SHA PHẢI LÀ MỘT COMMIT ĐÃ VÀO KHO. Lấy `HEAD` của kho gốc chứ không phải cây làm việc
     đang bẩn: nếu không, lượt chạy mang theo việc dở của người khác và không ai đọc ngược được
     nó đã đứng trên nền nào (AGENTS.md mục 9).
@@ -60,6 +83,8 @@ async function main() {
 
   console.log(`▶ ${task.code} · ${task.title}`);
   console.log(`  agent=${agentKey} · base=${baseCommit.slice(0, 12)} · cổng=${gates.join(",")}`);
+  // In ĐỘ DÀI phản hồi, không in nội dung: log CI công khai, còn nội dung thì đã nằm ở PR.
+  if (rerunBranch) console.log(`  chạy lại trên nhánh ${rerunBranch} · phản hồi: ${feedback.length ? `${feedback[0].noiDung.length} ký tự` : "không có"}`);
   const san = executor.available();
   if (!san.ok) console.log(`  ⚠ executor chưa dùng được: ${san.reason}`);
 
@@ -72,6 +97,8 @@ async function main() {
     // MÁY làm — `id: null` có nghĩa rõ ràng và khác hẳn "chưa biết ai" (AGENTS.md mục 34).
     actor: { kind: "AI_AGENT", name: `agent:${agentKey}`, ...systemActor(`agent:${agentKey}`) },
     gates,
+    rerunBranch,
+    feedback,
     keepWorkspace: process.argv.includes("--keep"),
   });
 
