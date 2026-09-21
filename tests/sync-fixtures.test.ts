@@ -48,6 +48,7 @@ import { testOrderOutcomeContract } from "./contract-order-outcome.test";
 import { testCanonicalTruth } from "./canonical-truth.test";
 import { testVtpIngestion } from "./vtp-ingestion.test";
 import { testVtpSourceOfTruth } from "./vtp-source-of-truth.test";
+import { testWebhookLatency } from "./webhook-latency.test";
 import { testReconciliation } from "./reconciliation.test";
 import { testMetricsContract } from "./metrics-contract.test";
 import { testMetricShapeConsistency } from "./metric-shape-consistency.test";
@@ -148,6 +149,7 @@ import { testFinanceOpsPure, testFinanceOpsQueries } from "./finance-ops.test";
 import { testActionWiring } from "./action-wiring.test";
 import {
   testKpiCohortUsesHandoffDate,
+  testProductRowCountsOrdersOnce,
   testMachineNeverInventsHumanReason,
   testNoHandoffEvidenceStaysOut,
   testReasonReportDefaultsToOutcomeDate,
@@ -218,6 +220,7 @@ import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testCareEffect } from "./care-effect.test";
 import { testCareReopen } from "./care-reopen.test";
+import { testCareReturnApproval } from "./care-return-approval.test";
 import { testCareResolution } from "./care-resolution.test";
 import { testShipmentsQaFixes } from "./shipments-qa-fixes.test";
 import { testSessionRenewal } from "./session-renewal.test";
@@ -1645,6 +1648,7 @@ async function main() {
   testRescueRateNeverFakesZero();
   testTimeBasisHasNoSilentFallback();
   await testKpiCohortUsesHandoffDate(db);
+  await testProductRowCountsOrdersOnce(db);
   await testNoHandoffEvidenceStaysOut(db);
   await testReasonReportDefaultsToOutcomeDate();
 
@@ -1736,6 +1740,9 @@ async function main() {
   await testVtpState(db);
   await testVtpIngestion(db);
   await testVtpSourceOfTruth(db);
+  // Độ trễ webhook: hàm thuần + một lượt đọc truy vấn thật. KHÔNG gieo dòng nào vào
+  // `webhook_events`, nên nó không đổi tổng của bài nào khác.
+  await testWebhookLatency();
   await testReconciliation(db);
   await testLogisticsPerformance(db);
   await testVtpHealth(db);
@@ -1782,6 +1789,8 @@ async function main() {
   await testCareOs(db);
   testCareEffect();
   await testCareReopen(db);
+  // Cùng nhóm: bài "đã duyệt hoàn" dựng kiện + đợt riêng mang tiền tố `cra-` và TỰ DỌN sạch.
+  await testCareReturnApproval(db);
   // Ngay sau đó: bài kết quả xử lý dựng kiện + đợt riêng mang tiền tố `cres-` và TỰ DỌN sạch, nên
   // không dòng nào của nó lọt vào tổng của báo cáo khác.
   await testCareResolution(db);

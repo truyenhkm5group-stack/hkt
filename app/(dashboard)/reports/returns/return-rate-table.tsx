@@ -2,18 +2,20 @@
 
 import { makeReturnRateColumns, type StateProb } from "@/app/(dashboard)/reports/returns/columns";
 import { DataTable } from "@/components/data-table/data-table";
-import { projectedRateOf } from "@/lib/constants/projected-delivery";
 import { RETURN_RATE_SORTABLE } from "@/lib/constants/returns";
-import type { ReturnRateRow } from "@/lib/queries/return-rate";
+import type { ProductRateRow, ReturnRateRow } from "@/lib/queries/return-rate";
 
 export function ReturnRateTable({
   rows,
+  productRows,
   pageCount,
   total,
   baseQuery,
   probabilities,
 }: {
   rows: ReturnRateRow[];
+  /** Dòng gộp theo mã hàng, ĐÃ đếm theo đơn ở máy chủ — trình duyệt không cộng lại. */
+  productRows: ProductRateRow[];
   pageCount: number;
   total: number;
   baseQuery: string;
@@ -32,62 +34,57 @@ export function ReturnRateTable({
       getRowId={(row) => row.key}
       rowHref={(row) => `/reports/returns?${baseQuery}${baseQuery ? "&" : ""}variant=${encodeURIComponent(row.key)}#chi-tiet`}
       group={{
-        key: (row) => row.productName || row.sku.split(" ")[0] || row.key,
+        /*
+          GỘP THEO KHOÁ MÃ HÀNG, KHÔNG THEO CHUỖI TÊN. Hai mẫu mã ghi tên sản phẩm lệch một dấu cách
+          từng rơi vào hai nhóm khác nhau; `productKey` là `product_id` thật nên không có chuyện đó.
+          Mẫu mã chưa lần được về mã hàng giữ khoá riêng của nó — không gom vào một nhóm "khác".
+        */
+        key: (row) => row.productKey || `sku:${row.key}`,
+        /*
+          ═══ DÒNG GỘP ĐỌC SỐ MÁY CHỦ ĐÃ ĐẾM, KHÔNG TỰ CỘNG ═══
+
+          Bản trước cộng các dòng mẫu mã ngay tại đây. Mỗi dòng mẫu mã đã `count(distinct order_id)`
+          trong phạm vi mẫu mã của nó, nên một đơn mua HAI mẫu mã của CÙNG một mã bị cộng HAI lần —
+          đo production 21/09/2026: Q003 in ra 405 đơn trong khi thật sự có 365 (+11,0%), Q005
+          202/175 (+15,4%), Q002 744/699.
+
+          Không có phép cộng nào ở đây nữa, nên không có phép cộng nào để sai. Máy chủ gộp trên CÙNG
+          bảng dẫn xuất, chỉ đổi khoá — xem `rawMa` ở lib/queries/return-rate.ts.
+
+          Mã hàng không có dòng gộp từ máy chủ (mẫu mã vô chủ) ⇒ trả `null`: DataTable hiện các dòng
+          con như thường, KHÔNG dựng một dòng cha bịa ra.
+        */
         parent: (rows, key) => {
-          const sum = (f: (r: ReturnRateRow) => number) => rows.reduce((t, r) => t + f(r), 0);
-          const delivered = sum((r) => r.delivered);
-          const returned = sum((r) => r.returned);
-          const failed = sum((r) => r.failed);
-          const finished = delivered + returned;
-          /*
-            ═══ DÒNG GỘP CỘNG TỬ SỐ VÀ MẪU SỐ, KHÔNG SUY NGƯỢC MỘT THAM SỐ ═══
-
-            Bản cũ ở đây lấy `expectedRate` của từng mẫu mã rồi GIẢI NGƯỢC ra `pFail` — tham số đầu
-            vào của chính công thức đã sinh ra nó — bằng một phép chia có `Math.min(1, Math.max(0,
-            …))` bọc ngoài để chặn kết quả vô nghĩa. Cái kẹp đó là bằng chứng: một đại lượng suy
-            ngược đúng thì không cần kẹp. Mẫu mã có `expectedRate = null` bị bỏ khỏi tử số nhưng
-            `failed` của nó VẪN nằm ở mẫu số, nên dòng gộp lạc quan hơn tổng các dòng con.
-
-            Nay mỗi mẫu mã mang sẵn tử số và mẫu số THÔ của cùng một hợp đồng, nên dòng gộp chỉ
-            việc cộng rồi đưa qua ĐÚNG hàm `projectedRateOf` — cùng luật loại đơn ngoài ước tính khỏi
-            mẫu số và cùng ngưỡng "ngoài ước tính quá lớn ⇒ chưa đo được" như mọi nơi khác.
-          */
-          const projectedSent = sum((r) => r.projectedSent);
-          const projectedDelivered = sum((r) => r.projectedDelivered);
-          const projectedActive = sum((r) => r.projectedActive);
-          const unmodelledActive = sum((r) => r.unmodelledActive);
-          const projectedRate = projectedRateOf({ projectedDelivered, eligibleSent: projectedSent, active: projectedActive, unmodelledActive });
+          const p = productRows.find((x) => x.productKey === key);
+          if (!p) return null;
           return {
             ...rows[0],
             key: `group:${key}`,
+            productKey: p.productKey,
             variantId: null,
-            sku: key,
-            productName: key,
-            variationDetail: `${rows.length} mẫu mã`,
-            shipped: sum((r) => r.shipped),
-            delivered,
-            returned,
-            returnedByRule: sum((r) => r.returnedByRule),
-            inTransit: sum((r) => r.inTransit),
-            failed,
-            cancelled: sum((r) => r.cancelled),
-            returnedQty: sum((r) => r.returnedQty),
-            lostRevenue: sum((r) => r.lostRevenue),
-            deliveredRevenue: sum((r) => r.deliveredRevenue),
-            rate: finished ? (returned / finished) * 100 : null,
-            expectedRate: projectedRate === null ? null : Math.round((100 - projectedRate) * 10) / 10,
-            successRate: finished ? (delivered / finished) * 100 : null,
-            expectedSuccessRate: projectedRate,
-            projectedSent,
-            projectedDelivered,
-            projectedActive,
-            unmodelledActive,
-            // Cộng số đơn đang chạy của MỌI mẫu mã con theo từng trạng thái, để tooltip của dòng
-            // gộp nói đúng thứ nó đang gộp thay vì mượn breakdown của mẫu mã đầu tiên.
-            activeByState: rows.reduce<Record<string, number>>((acc, r) => {
-              for (const [k, n] of Object.entries(r.activeByState)) acc[k] = (acc[k] ?? 0) + (n ?? 0);
-              return acc;
-            }, {}),
+            sku: p.productName,
+            productName: p.productName,
+            variationDetail: `${p.variants} mẫu mã`,
+            image: p.image,
+            shipped: p.shipped,
+            delivered: p.delivered,
+            returned: p.returned,
+            returnedByRule: p.returnedByRule,
+            inTransit: p.inTransit,
+            failed: p.failed,
+            cancelled: p.cancelled,
+            returnedQty: p.returnedQty,
+            lostRevenue: p.lostRevenue,
+            deliveredRevenue: p.deliveredRevenue,
+            rate: p.rate,
+            successRate: p.successRate,
+            expectedSuccessRate: p.expectedSuccessRate,
+            expectedRate: p.expectedRate,
+            projectedSent: p.projectedSent,
+            projectedDelivered: p.projectedDelivered,
+            projectedActive: p.projectedActive,
+            unmodelledActive: p.unmodelledActive,
+            activeByState: p.activeByState,
           };
         },
       }}
