@@ -45,7 +45,14 @@ import { type TechAgentRole } from "@/lib/constants/tech";
 export const NEVER_WRITE: readonly string[] = [
   "lib/actions/",
   "lib/auth/",
-  "db/schema.ts",
+  /*
+    `db/` CHỨ KHÔNG CHỈ `db/schema.ts`.
+
+    Cạnh lược đồ còn `db/migrate.ts` — bộ áp migration CHẠY TỰ ĐỘNG lúc app khởi động, trên dữ
+    liệu thật, không ai bấm gì — và `db/index.ts`, nơi mở kết nối và ép cờ chỉ-đọc. Khoá đúng một
+    tệp trong ba tệp ấy là khoá cái cửa rồi để ngỏ hai cửa bên cạnh.
+  */
+  "db/",
   "drizzle/",
   ".github/",
   "middleware.ts",
@@ -53,11 +60,77 @@ export const NEVER_WRITE: readonly string[] = [
   "lib/constants/agent-sandbox.ts",
   "lib/constants/agent-scopes.ts",
   "lib/constants/agent-test-guard.ts",
+  /*
+    `lib/agents/` — RUNNER VÀ EXECUTOR, tức nơi hàng rào được ÁP LÊN.
+
+    Ba tệp hằng số ở trên là nơi hàng rào được KHAI; `lib/agents/runner.ts` là nơi nó được ĐỌC và
+    truyền xuống `AgentWorkspace`. Khoá bản khai mà để ngỏ nơi thi hành thì vẫn còn nguyên một
+    đường: sửa một dòng ở runner để nó thôi đọc bản khai. Lý lẽ "agent sửa được hàng rào của mình
+    thì hàng rào chỉ còn là một lời đề nghị" áp cho CẢ HAI nửa.
+  */
+  "lib/agents/",
+  /*
+    `lib/tech/` — DỊCH VỤ GIỮ SỔ CỦA CHÍNH PHÒNG TECH.
+
+    `service.ts` mở/đóng lượt chạy, đổi trạng thái việc và ghi sự kiện; `dispatch-service.ts` là
+    nơi ERP giao việc cho agent. Đó là đường GHI vào chính cuốn sổ ghi lại agent đã làm gì — cùng
+    một lớp với `lib/actions/`, và sửa được nó là sửa được lời khai về chính mình.
+  */
+  "lib/tech/",
+  /*
+    `app/api/` — tuyến HTTP hướng ra Internet, trong đó có cửa chép sổ `POST /api/tech/agent-run`.
+    Đây là bề mặt mà người ngoài chạm được; nó không bao giờ là việc của một lượt chạy agent.
+  */
+  "app/api/",
   "AGENTS.md",
   "CLAUDE.md",
   "package.json",
   "next.config.ts",
+  /*
+    ═══════════ BÀI KIỂM KHOÁ LUẬT — CHỖ HỞ MÀ BỘ ĐẾM KHẲNG ĐỊNH KHÔNG BỊT ═══════════
+
+    `lib/constants/agent-test-guard.ts` chặn lối tắt "xoá khẳng định cho cổng xanh", và nó làm
+    việc đó tốt. Nhưng nó đếm SỐ khẳng định, nên có đúng hai đường lách mà nó không thấy:
+
+     1. **Đổi GIÁ TRỊ KỲ VỌNG.** `assert.equal(x, 5)` → `assert.equal(x, 6)`: số khẳng định không
+        đổi, cổng xanh, và luật nghiệp vụ vừa bị viết lại. AGENTS.md mục 0 gọi thẳng tên đường
+        này: *"Không được sửa giá trị kỳ vọng của chúng để CI xanh — nếu chúng đỏ thì code sai,
+        không phải test sai."*
+     2. **Xoá một dòng ĐĂNG KÝ trong bộ chạy.** `testX()` trong `tests/sync-fixtures.test.ts`
+        không phải một khẳng định, nên xoá nó không làm bộ đếm nhúc nhích — mà cả một khối kiểm
+        thử biến mất, và diff chỉ là MỘT DÒNG.
+
+    Nên những bài kiểm mà AGENTS.md TỰ NHẮC TỚI như chỗ khoá một luật nằm ngoài tầm với, ở mọi
+    vai. Sửa chúng là một quyết định của người, không phải một bước trong một lượt chạy.
+    `tests/agent-scopes.test.ts` nằm đây cùng lý do với ba tệp hằng số ở trên: nó là bài kiểm của
+    chính hàng rào.
+  */
+  "tests/sync-fixtures.test.ts",
+  "tests/contract-order-outcome.test.ts",
+  "tests/repo-integrity.test.ts",
+  "tests/migration-journal.test.ts",
+  "tests/migration-upgrade-path.test.ts",
+  "tests/access-model.test.ts",
+  "tests/cost-allocation.test.ts",
+  "tests/product-notes.test.ts",
+  "tests/care-reopen.test.ts",
+  "tests/test-hygiene.test.ts",
+  "tests/agent-scopes.test.ts",
 ];
+
+/**
+ * BÀI KIỂM ĐƯỢC AGENTS.md NHẮC TỚI NHƯNG **KHÔNG** PHẢI CHỖ KHOÁ MỘT LUẬT.
+ *
+ * Ba tệp này bị nêu tên như VÍ DỤ về một lỗi đã xảy ra (mục 50 và 65), không phải như nơi một
+ * luật được ghim. Khai riêng ra, kèm lý do, để phép kiểm chống trôi ở `tests/agent-scopes.test.ts`
+ * phân biệt được "đã cân nhắc và xếp ra ngoài" với "quên chưa xếp" — một danh sách miễn trừ không
+ * có lý do là một danh sách không ai dám xoá dòng nào.
+ */
+export const TEST_NEU_LAM_VI_DU: Record<string, string> = {
+  "tests/order-duplicate.test.ts": "Mục 50 nêu nó như VÍ DỤ về bài kiểm ghim ngày tuyệt đối, không phải chỗ khoá một luật nghiệp vụ.",
+  "tests/care-os.test.ts": "Mục 50 nêu nó như VÍ DỤ thứ hai về cùng lỗi cửa sổ trượt.",
+  "tests/cs-workqueue.test.ts": "Mục 65 nêu nó như VÍ DỤ về bài kiểm đỏ vì kết thúc dòng CRLF, không phải chỗ khoá một luật.",
+};
 
 /**
  * PHẠM VI GHI THEO VAI — mặc định là `docs/` cho mọi vai chưa khai gì thêm.
