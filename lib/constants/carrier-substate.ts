@@ -184,7 +184,20 @@ export const SUBSTATE_TEXT_RULES: { match: string[]; substate: CarrierSubstate }
   // Cụ thể nhất trước: "chờ phát lại" phải thắng "chờ" chung và thắng "phát".
   { match: ["cho phat lai", "hen phat lai", "yeu cau phat lai", "phat lai"], substate: "WAITING_REDELIVERY" },
   { match: ["cho xu ly", "don hang cho xu ly", "cho duyet"], substate: "WAITING_PROCESSING" },
-  { match: ["cho lay hang", "moi tao", "tao moi", "khoi tao", "giao cho buu ta di nhan", "dieu phoi buu ta", "tiep nhan don"], substate: "AWAITING_PICKUP" },
+  /*
+    "dang lay hang" — BƯU TÁ ĐANG TRÊN ĐƯỜNG TỚI LẤY, CHƯA CẦM HÀNG.
+
+    Đo production 21/09/2026: 74 lần ghi nhận, `normalized_stage = UNKNOWN`, `mapped = false` trong
+    `vtp_status_registry` — tức ERP nhận được câu chữ này mà chưa dịch được nó (§47 gọi đúng đây là
+    "việc phải làm: bổ sung mã vào bảng"). Chủ shop chốt cùng ngày: trên viettelpost.vn chỉ "Đã lấy
+    hàng" và "Đang vận chuyển" mới chắc chắn ĐVVC đã cầm hàng; "Đang lấy hàng" nằm trong nhóm
+    "Chờ lấy" của chính màn hình VTP.
+
+    KHÔNG rút gọn thành "lay hang": phép khớp là `includes` thuần, nên chuỗi ngắn ấy sẽ nuốt cả
+    "da lay hang" (PICKED_UP) lẫn "lay hang that bai" (PICKUP_FAILED) — hai kết luận ngược nhau.
+    Cụm đầy đủ "dang lay hang" không phải tiền tố của bất kỳ cụm nào ở trên.
+  */
+  { match: ["cho lay hang", "dang lay hang", "moi tao", "tao moi", "khoi tao", "giao cho buu ta di nhan", "dieu phoi buu ta", "tiep nhan don"], substate: "AWAITING_PICKUP" },
   { match: ["lay hang that bai", "lay khong thanh cong", "khong lay duoc hang"], substate: "PICKUP_FAILED" },
   // Sự cố CỤ THỂ khi đang phát — không phải "chờ phát lại", vì chưa hẹn được lần sau.
   { match: ["ton -", "khach hang nghi", "khong co nha", "den buu cuc nhan", "khach tu choi", "khong lien lac", "khach di vang"], substate: "DELIVERY_EXCEPTION" },
