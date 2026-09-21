@@ -72,6 +72,7 @@ import { cleanupAgentTaskReadFixtures, testAgentTaskRead, testAgentTaskReadGuard
 import { testCauNoiVanGiuHangRao, testChuPrKhongLoNoiDungViec, testDieuKienMoPr, testQuyenNoiGoiDuChoNoiDuocGoi } from "./agent-pr-text.test";
 import { testMaViecLaMaProduction, testNhacFinishDungMotLan, testPhamViDocTuSoVai } from "./agent-run-that.test";
 import { testBanKhaiGanLai, testGanLaiSourceGuards } from "./agent-run-reattach.test";
+import { testScriptDayChuyenPhaiThoat } from "./script-phai-thoat.test";
 import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo } from "./agent-chi-phi.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
@@ -1965,6 +1966,7 @@ async function main() {
   testMaViecLaMaProduction();
   testPhamViDocTuSoVai();
   testBanKhaiGanLai();
+  testScriptDayChuyenPhaiThoat();
   testBacModelTheoVai();
   testTraGiaTheoTienTo();
   testDemHoiThoai();
