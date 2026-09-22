@@ -71,7 +71,7 @@ export async function readAgentTask(taskCode: string): Promise<AgentTaskResult> 
   */
   if (!task) return { error: `Không có việc “${ma}”.`, code: "UNKNOWN_TASK" };
 
-  const agent = task.agentId ? await db.query.techAgents.findFirst({ where: eq(schema.techAgents.id, task.agentId), columns: { key: true, role: true, enabled: true } }) : null;
+  const agent = task.agentId ? await db.query.techAgents.findFirst({ where: eq(schema.techAgents.id, task.agentId), columns: { key: true, role: true, enabled: true, allowedRisks: true } }) : null;
 
   const v = canDispatchTask({
     code: task.code,
@@ -80,6 +80,15 @@ export async function readAgentTask(taskCode: string): Promise<AgentTaskResult> 
     approvalRequired: task.approvalRequired,
     approvalStatus: task.approvalStatus,
     agentKey: agent?.key ?? null,
+    /*
+      CỬA ĐỌC ÁP ĐÚNG CỔNG CỦA ĐƯỜNG GIAO VIỆC — hai nơi, MỘT luật.
+
+      Cửa này là thứ agent trên máy Actions gọi để lấy nội dung việc. Nếu nó hỏi ít điều kiện hơn
+      `dispatch-service`, thì một việc không giao được qua nút vẫn đọc được qua cửa — tức hàng rào
+      có hai bản và bản lỏng hơn là bản thật.
+    */
+    agentAllowedRisks: agent ? agent.allowedRisks : null,
+    agentWriteGlobs: agent ? writeGlobsForRole(agent.role) : null,
   });
   if (!v.ok) return { error: v.reason, code: "NOT_DISPATCHABLE" };
   if (agent && !agent.enabled) return { error: `Vai “${agent.key}” đang TẮT trong sổ agent.`, code: "NOT_DISPATCHABLE" };

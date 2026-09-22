@@ -1,5 +1,6 @@
 import { and, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import { DISPATCH_AUDIT_ACTION, canDispatchTask, checkDispatchQuota, type DispatchVerdict, type QuotaVerdict } from "@/lib/constants/agent-dispatch";
 import { dispatchAgentRun, dispatchConfig } from "@/lib/integrations/github/dispatch";
 import { recordTechTaskEvent } from "@/lib/tech/service";
@@ -24,10 +25,12 @@ import { recordTechTaskEvent } from "@/lib/tech/service";
  *   · truyền tiêu đề/mô tả việc qua `inputs` của `workflow_dispatch` — KHÔNG: kho này PUBLIC, và
  *     đầu vào dispatch hiện nguyên văn trong giao diện Actions. Nội dung việc Tech trở thành công
  *     khai.
- *   · một cửa ĐỌC hẹp trên ERP, đối xứng với cửa ghi `/api/tech/agent-run` — đó là Nấc 3b, chưa làm.
+ *   · một cửa ĐỌC hẹp trên ERP, đối xứng với cửa ghi `/api/tech/agent-run` — ĐÃ DỰNG (Nấc 3b):
+ *     `GET /api/tech/agent-task`, xác thực bằng khoá.
  *
- * Nên bản này KHÔNG nói "đã giao việc". Nó nói đúng thứ nó làm: khởi động một lượt chạy. Một nút
- * hứa nhiều hơn thứ nó làm là cách nhanh nhất để người dùng thôi tin mọi nút khác.
+ * Nên từ Nấc 3b, MÃ việc đi kèm dispatch và nội dung đi qua cửa đọc có khoá: nút này giao ĐÚNG
+ * việc người vừa bấm. Đoạn văn cũ ở đây còn nói "chưa làm" sau khi nó đã làm xong — một tài liệu
+ * nói sai về hệ thống của chính mình còn tệ hơn không có tài liệu, nên sửa luôn ở bản này.
  *
  * ─── VÌ SAO HẠN MỨC ĐẾM SAU CÙNG, NGAY TRƯỚC LÚC GỬI ───
  *
@@ -68,7 +71,7 @@ export async function dispatchTaskToAgent(input: { taskCode: string; gates: stri
   });
   if (!task) return { ok: false, code: "UNKNOWN_TASK", reason: `Không có việc \`${input.taskCode}\`.` };
 
-  const agent = task.agentId ? await db.query.techAgents.findFirst({ where: eq(schema.techAgents.id, task.agentId), columns: { key: true, enabled: true } }) : null;
+  const agent = task.agentId ? await db.query.techAgents.findFirst({ where: eq(schema.techAgents.id, task.agentId), columns: { key: true, enabled: true, role: true, allowedRisks: true } }) : null;
 
   /* ───────── 2 · CỔNG VIỆC — hàm thuần, trả LÝ DO cụ thể ───────── */
   const vTask: DispatchVerdict = canDispatchTask({
@@ -78,6 +81,15 @@ export async function dispatchTaskToAgent(input: { taskCode: string; gates: stri
     approvalRequired: task.approvalRequired,
     approvalStatus: task.approvalStatus,
     agentKey: agent?.key ?? null,
+    /*
+      HAI TRỤC, KHÔNG PHẢI MỘT.
+
+      Cổng cũ chỉ hỏi "việc này rủi ro mức nào". Nó không bao giờ hỏi "vai được gán ghi được vào
+      đâu" — mà đó mới là câu quyết định một lượt chạy hỏng thì hỏng tới đâu. Hai câu hỏi ấy nay
+      đi cùng nhau, và `writeGlobsForRole` là sổ DUY NHẤT trả lời câu thứ hai.
+    */
+    agentAllowedRisks: agent ? agent.allowedRisks : null,
+    agentWriteGlobs: agent ? writeGlobsForRole(agent.role) : null,
   });
   if (!vTask.ok) return { ok: false, code: "TASK", reason: vTask.reason };
   /*
