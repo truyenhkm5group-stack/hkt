@@ -118,7 +118,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
           <span className="text-muted-foreground">
             {" "}
             khi mã có dưới {assumptions.minFinishedOrders} đơn kết thúc trong{" "}
-            {assumptions.returnRateWindowDays} ngày
+            {assumptions.returnRateWindowDays} ngày — đủ số đơn ấy thì theo SỐ ĐO của chính mã
           </span>
         </span>
         <span>
@@ -228,7 +228,9 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             />
           </div>
           <div className="space-y-1">
-            <Label>Đơn kết thúc tối thiểu</Label>
+            <Label title="Mốc để một mã THÔI dùng tỷ lệ chung và tuân theo SỐ ĐO CỦA CHÍNH NÓ. Mã đủ ngần này đơn đã có kết cục (giao thành công + hoàn) trong cửa sổ lịch sử thì mọi báo cáo lấy tỷ lệ thật của mã ấy. NÂNG SỐ NÀY LÀ ĐÒI BẰNG CHỨNG CHẮC HƠN, nhưng cũng đẩy thêm mã về dùng tỷ lệ chung ở trên — nên chỉ nâng khi tỷ lệ chung đang gần đúng với thực tế.">
+              Đơn kết thúc tối thiểu
+            </Label>
             <Input
               type="number"
               inputMode="numeric"

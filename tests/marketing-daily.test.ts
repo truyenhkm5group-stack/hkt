@@ -15,6 +15,7 @@ import { baselineOf, diagnose, lossStreakOf, type DiagnoseSnapshot } from "@/lib
 import { digestLines, runMarketingDigest, settledLines } from "@/lib/marketing/digest";
 import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter, type MarketingDailyBase } from "@/lib/queries/marketing-daily";
 import { resolveDeliveryRate } from "@/lib/constants/delivery-rate";
+import { DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
 import { getDailyBreakdown } from "@/lib/queries/reports";
 import type { Period } from "@/lib/search-params";
 
@@ -683,6 +684,23 @@ export async function testMarketingBreakdownConservation() {
  * sử mẫu mỏng được dùng như lịch sử mẫu dày.
  */
 export function testDeliveryRateLadder() {
+  /*
+    ─── MỐC CHUYỂN SANG SỐ THẬT LÀ QUYẾT ĐỊNH CỦA CHỦ SHOP, KHÔNG PHẢI MỘT HẰNG SỐ TIỆN TAY ───
+
+    Chủ shop chốt 22/09/2026: **50 đơn đã có kết cục** thì một mã thôi dùng tỷ lệ khai chung và
+    tuân theo số đo của chính nó. Khoá ở đây để không ai hạ xuống cho một bài kiểm dễ xanh hơn —
+    hạ nó là đổi con số lợi nhuận ước tính của mọi mã mẫu mỏng mà không màn hình nào báo gì.
+
+    Giá trị THẬT ĐANG CHẠY nằm ở `settings` (Báo cáo → Giả định), sửa được không cần deploy; hằng
+    số này chỉ là điểm khởi đầu cho một cài đặt mới.
+  */
+  assert.equal(
+    DEFAULT_PROFIT_ASSUMPTIONS.minFinishedOrders,
+    50,
+    "mốc tuân theo số thật do chủ shop chốt 22/09/2026 — đổi phải có chủ shop yêu cầu (AGENTS.md mục 7)",
+  );
+
+  // Các khẳng định dưới đây dùng NỀN RIÊNG để kiểm CHÍNH thang bậc, không phụ thuộc mặc định đang khai.
   const nen = { minFinishedOrders: 10, defaultReturnRate: 40 };
 
   // Không quan sát nào ⇒ bậc cuối: tỷ lệ khai ở Giả định (40% hoàn ⇒ 60% giao).
