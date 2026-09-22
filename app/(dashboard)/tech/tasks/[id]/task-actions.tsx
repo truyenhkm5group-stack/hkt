@@ -72,6 +72,7 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
   const [moXacMinh, setMoXacMinh] = useState(false);
   const [bangChung, setBangChung] = useState("");
   const [ghiChu, setGhiChu] = useState("");
+  const [lyDoKy, setLyDoKy] = useState("");
   const [nhanh, setNhanh] = useState(branch);
   const [cay, setCay] = useState(worktree);
   const router = useRouter();
@@ -103,18 +104,49 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
 
   return (
     <div className="space-y-4">
-      {/* ───────── Cổng phê duyệt: đứng trên cùng vì nó chặn mọi thứ khác ───────── */}
-      {approvalRequired && approvalStatus === "PENDING" ? (
+      {/*
+        ───────── Cổng phê duyệt: đứng trên cùng vì nó chặn mọi thứ khác ─────────
+
+        HIỆN CẢ KHI ĐÃ TỪ CHỐI, không chỉ khi đang chờ. `decideTechApproval()` vốn cho đổi ý (một
+        việc `REJECTED` vẫn ký `APPROVED` được, và đó đúng là quyền của người ký), nhưng màn hình
+        cũ chỉ mời khi `PENDING` — nên một việc bị từ chối là kẹt vĩnh viễn ở đây, dù dịch vụ không
+        hề cấm. Cùng lớp lỗi với nút "Áp lại" ở /tech/cto và ô cấp mức ở /tech/agents: logic mở,
+        màn hình đóng.
+      */}
+      {approvalRequired && approvalStatus !== "APPROVED" ? (
         <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
           <p className="flex items-center gap-1.5 text-sm font-semibold">
-            <ShieldAlert className="size-4 text-amber-600" /> Việc mức {risk} — cần chủ shop phê duyệt
+            <ShieldAlert className="size-4 text-amber-600" />
+            {approvalStatus === "REJECTED" ? `Việc mức ${risk} — đã bị từ chối` : `Việc mức ${risk} — cần chủ shop phê duyệt`}
           </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">Chưa duyệt thì không vào được bước deploy. Từ chối cũng là một câu trả lời hợp lệ và được ghi lại.</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {approvalStatus === "REJECTED"
+              ? "Đổi ý được: duyệt lại thì việc đi tiếp. Lượt đổi ý cũng vào nhật ký như mọi chữ ký khác."
+              : "Chưa duyệt thì không vào được bước deploy. Từ chối cũng là một câu trả lời hợp lệ và được ghi lại."}
+          </p>
+          {/*
+            TỪ CHỐI BẮT BUỘC NÊU LÝ DO — Y HỆT ĐƯỜNG KÝ HÀNG LOẠT.
+
+            Đường ký loạt buộc nêu lý do; nếu chỗ này không buộc thì hàng rào ấy có cửa sau, và
+            "một luật có hai bản thì bản LỎNG HƠN là bản thật".
+          */}
+          <input
+            value={lyDoKy}
+            onChange={(e) => setLyDoKy(e.target.value)}
+            placeholder="Lý do (bắt buộc khi từ chối)"
+            className="mt-2 w-full rounded-lg border bg-background px-3 py-1.5 text-sm"
+          />
           <div className="mt-2 flex flex-wrap gap-2">
-            <Button size="sm" disabled={pending} onClick={() => chay(() => decideTechApprovalAction({ taskId, decision: "APPROVED" }), "Đã duyệt")}>
+            <Button size="sm" disabled={pending} onClick={() => chay(() => decideTechApprovalAction({ taskId, decision: "APPROVED", note: lyDoKy || undefined }), "Đã duyệt")}>
               <CheckCircle2 className="size-4" /> Duyệt
             </Button>
-            <Button size="sm" variant="outline" disabled={pending} onClick={() => chay(() => decideTechApprovalAction({ taskId, decision: "REJECTED" }), "Đã từ chối")}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending || lyDoKy.trim().length < 5}
+              title={lyDoKy.trim().length < 5 ? "Chặn một việc mà không nói vì sao thì không ai gỡ được" : undefined}
+              onClick={() => chay(() => decideTechApprovalAction({ taskId, decision: "REJECTED", note: lyDoKy }), "Đã từ chối")}
+            >
               <XCircle className="size-4" /> Từ chối
             </Button>
           </div>

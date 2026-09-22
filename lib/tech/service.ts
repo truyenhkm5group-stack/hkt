@@ -15,6 +15,7 @@ import {
   type TechIncidentStatus,
   type TechModule,
   type TechPriority,
+  TECH_RISKS,
   type TechRisk,
   type TechTaskSource,
   type TechTaskStatus,
@@ -486,6 +487,61 @@ export async function seedTechAgents(actor: TechActor): Promise<TechResult<{ cre
  * thi hành chưa tồn tại, nên một cờ bật ở đây là một lời hứa mã nguồn không giữ được. Chặn ở đây
  * chứ không ở CSDL, vì Phase 2 sẽ nới nó bằng mã chứ không bằng một migration.
  */
+/**
+ * ═══════════ CẤP MỨC RỦI RO CHO MỘT VAI ═══════════
+ *
+ * ─── VÌ SAO HÀM NÀY PHẢI TỒN TẠI ───
+ *
+ * `tech_agents.allowed_risks` là một trong những cổng quyết định agent nhận được việc nào — nó
+ * được HỎI ở `canDispatchTask()` và lại ở `runner.ts`, và câu từ chối của cổng giao việc nói thẳng
+ * *"Cấp mức cho vai ở /tech/agents"*. Nhưng màn hình ấy chỉ IN ra cột rủi ro, chưa bao giờ có chỗ
+ * sửa, và không có đường ghi nào khác. Nghĩa là sản phẩm đang chỉ người dùng tới một cái nút không
+ * tồn tại (đo 22/09/2026: chủ shop bật đủ 12 vai nhưng 0/12 vai đổi được mức, vì không có cách).
+ *
+ * Một cổng mà người có quyền không mở được thì không phải cổng chặt — nó là cổng hỏng.
+ *
+ * ─── BA HÀNG RÀO GIỮ NGUYÊN ───
+ *
+ *  1. Chỉ NGƯỜI. Agent tự nới mức của chính nó là hết chuyện.
+ *  2. Danh sách ĐÓNG: chỉ `R0` · `R1` · `R2`. Chuỗi lạ buộc mã phải chọn giữa khoá nhầm và mở
+ *     nhầm, nên không có ô gõ tự do (cùng luật với mục 30).
+ *  3. Cấp `R2` là quyết định RIÊNG và phải nêu LÝ DO. Đó là mức chạm tiền; một lượt nới không ai
+ *     đọc lại được sau này thì sổ quyền chỉ là một bảng số.
+ *
+ * KHÔNG kiểm phạm vi ghi ở đây, và đó là cố ý: `allowed_risks` khai vai ĐƯỢC PHÉP làm việc mức nào,
+ * còn "ghi được vào đâu" là câu hỏi của `writeGlobsForRole()` mà cổng giao việc hỏi riêng. Gộp hai
+ * trục vào một chỗ là đúng thứ đã làm cổng cũ đọc sai (xem `agent-dispatch.ts`). Vai `qa` cấp R2
+ * được — rồi vẫn không qua cửa hẹp vì nó ghi `tests/`, và câu từ chối ở cổng nói rõ điều đó.
+ */
+export async function setTechAgentRisks(
+  input: { agentId: string; allowedRisks: string[]; reason?: string },
+  actor: TechActor,
+): Promise<TechResult<{ truoc: string[]; sau: TechRisk[] }>> {
+  if (actor.kind !== "HUMAN") return { error: "Chỉ người mới đổi được mức rủi ro của một vai." };
+
+  const hopLe = input.allowedRisks.filter((r): r is TechRisk => TECH_RISKS.includes(r as TechRisk));
+  if (hopLe.length !== input.allowedRisks.length) {
+    return { error: `Mức rủi ro không hợp lệ. Chỉ nhận: ${TECH_RISKS.join(" · ")}.` };
+  }
+  /* Xếp theo đúng thứ tự sổ để hai lần cấp cùng tập mức không ra hai dòng dữ liệu khác nhau. */
+  const sau = TECH_RISKS.filter((r) => hopLe.includes(r));
+
+  const db = await getDb();
+  const agent = await db.query.techAgents.findFirst({ where: eq(schema.techAgents.id, input.agentId) });
+  if (!agent) return { error: "Không tìm thấy agent này." };
+
+  const truoc = agent.allowedRisks ?? [];
+  const themR2 = sau.includes("R2") && !truoc.includes("R2");
+  if (themR2 && (input.reason ?? "").trim().length < 10) {
+    return { error: "Cấp mức R2 cho một vai thì phải nói vì sao (ít nhất một câu) — đây là mức chạm tiền, và một lượt nới không ai đọc lại được là một lượt nới không ai kiểm được." };
+  }
+
+  if (truoc.length === sau.length && truoc.every((r, i) => r === sau[i])) return { ok: true, truoc, sau };
+
+  await db.update(schema.techAgents).set({ allowedRisks: sau }).where(eq(schema.techAgents.id, input.agentId));
+  return { ok: true, truoc, sau };
+}
+
 export async function setTechAgentEnabled(input: { agentId: string; enabled: boolean }, actor: TechActor): Promise<TechResult> {
   if (actor.kind !== "HUMAN") return { error: "Chỉ người mới bật/tắt được agent." };
   const db = await getDb();

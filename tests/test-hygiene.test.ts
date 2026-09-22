@@ -292,8 +292,67 @@ export function testKhongCoKyTuDieuKhien() {
   );
 }
 
+/**
+ * ═══ CÙNG BYTE ẤY, NHƯNG TRONG MÃ PRODUCTION — NƠI HẬU QUẢ NẶNG HƠN HẲN ═══
+ *
+ * Bộ gác trên chỉ quét `tests/`. Nhưng đúng cái bẫy ấy lọt vào `lib/` hay `app/` thì tệ hơn nhiều:
+ * một biểu thức hỏng trong mã production lặng lẽ KHÔNG KHỚP lúc chạy thật, và không bài kiểm nào
+ * thấy — nó không đỏ, nó chỉ trả lời sai.
+ *
+ * Đã cắn thêm HAI lần ngày 22/09/2026 (lần 3 và 4 của cùng một lớp lỗi), lần thứ tư rơi vào đúng
+ * đoạn văn đang mô tả chính nó.
+ *
+ * ─── VÌ SAO DANH SÁCH BYTE Ở ĐÂY HẸP HƠN ───
+ *
+ * `\0` (0x00) được DÙNG CÓ CHỦ Ý ở kho này: làm dấu ngăn khoá ghép trong template literal
+ * (`${a}` + NUL + `${b}`) — đo 22/09/2026 có 5 chỗ ở `lib/returns/hmt-reconcile.ts` và
+ * `lib/returns/hmt-workbook.ts`. NUL không bao giờ có trong dữ liệu nên nó là dấu ngăn an toàn, và
+ * cấm nó là cấm một cách viết đúng.
+ *
+ * Năm byte dưới đây thì KHÔNG có công dụng hợp lệ nào trong mã nguồn TypeScript — chúng chỉ xuất
+ * hiện khi một chuỗi thoát bị một tầng công cụ nuốt mất: `\b` `\a` `\v` `\f` và `\e`.
+ */
+const BYTE_KHONG_BAO_GIO: readonly number[] = [0x07, 0x08, 0x0b, 0x0c, 0x1b];
+
+function tepMaNguon(thuMuc: string): string[] {
+  const ra: string[] = [];
+  const di = (d: string) => {
+    for (const m of readdirSync(path.join(goc, d), { withFileTypes: true })) {
+      const con = `${d}/${m.name}`;
+      if (m.isDirectory()) {
+        if (m.name !== "node_modules") di(con);
+      } else if (m.name.endsWith(".ts") || m.name.endsWith(".tsx")) {
+        ra.push(con);
+      }
+    }
+  };
+  di(thuMuc);
+  return ra;
+}
+
+export function testKhongCoKyTuDieuKhienTrongMaNguon() {
+  const pham: string[] = [];
+  let quet = 0;
+  for (const thuMuc of ["lib", "app", "db"]) {
+    for (const tep of tepMaNguon(thuMuc)) {
+      quet += 1;
+      const b = readFileSync(path.join(goc, tep));
+      const viTri: number[] = [];
+      for (let i = 0; i < b.length; i += 1) if (BYTE_KHONG_BAO_GIO.includes(b[i])) viTri.push(i);
+      if (viTri.length) pham.push(`${tep} (${viTri.length} byte, đầu ở ${viTri[0]})`);
+    }
+  }
+  assert.ok(quet > 200, `phải quét được cả cây mã nguồn, mới thấy ${quet} tệp`);
+  assert.deepEqual(
+    pham,
+    [],
+    "byte điều khiển lọt vào MÃ PRODUCTION: một chuỗi thoát bị nuốt mất một tầng. Biểu thức hỏng ở đây không đỏ — nó lặng lẽ trả lời sai lúc chạy thật.",
+  );
+}
+
 export function testTestHygiene() {
   testKhongCoKyTuDieuKhien();
+  testKhongCoKyTuDieuKhienTrongMaNguon();
   testKetThucDongGhimLF();
   testDuongDanChuanHoa();
   testKhongSoBangMocDocLaiDongHo();

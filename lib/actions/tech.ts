@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { DISPATCH_AUDIT_ACTION } from "@/lib/constants/agent-dispatch";
+import { KY_LOAT_TOI_DA, nhanLoatKy, xetLoatKy, type LyDoBoQua } from "@/lib/constants/tech-approval-bulk";
 import { dispatchTaskToAgent } from "@/lib/tech/dispatch-service";
 import { can, requireUser } from "@/lib/auth/session";
 import {
@@ -28,6 +29,7 @@ import {
   recordTechDeployment,
   seedTechAgents,
   setTechAgentEnabled,
+  setTechAgentRisks,
   setTechIncidentStatus,
   setTechTaskBranch,
   setTechTaskPriority,
@@ -199,7 +201,20 @@ export async function assignTechTaskAgentAction(input: unknown): Promise<TechRes
   return { ok: true };
 }
 
-const duyetSchema = z.object({ taskId: z.string().min(1), decision: z.enum(["APPROVED", "REJECTED"]), note: z.string().trim().max(2000).optional() });
+/*
+  TỪ CHỐI BẮT BUỘC NÊU LÝ DO — Ở CẢ HAI ĐƯỜNG KÝ.
+
+  Chặn một việc mà không nói vì sao thì không ai gỡ được (cùng lý lẽ với nhánh `BLOCKED` ở
+  `setTechTaskStatus`). Ràng buộc này phải ở TẦNG MÁY CHỦ và phải giống hệt đường ký hàng loạt: chỉ
+  chặn ở giao diện thì một lượt gọi thẳng action vẫn đi qua, và một luật có hai bản thì bản LỎNG
+  HƠN là bản thật.
+*/
+const duyetSchema = z
+  .object({ taskId: z.string().min(1), decision: z.enum(["APPROVED", "REJECTED"]), note: z.string().trim().max(2000).optional() })
+  .refine((v) => v.decision !== "REJECTED" || (v.note ?? "").length >= 5, {
+    message: "Từ chối thì phải nói vì sao — chặn mà không nêu lý do thì không ai gỡ được.",
+    path: ["note"],
+  });
 
 export async function decideTechApprovalAction(input: unknown): Promise<TechResult> {
   const user = await nguoiQuanTri();
@@ -215,6 +230,117 @@ export async function decideTechApprovalAction(input: unknown): Promise<TechResu
   await audit({ userId: user.id, userEmail: user.email, action: "TECH_TASK_APPROVAL", entity: "TECH_TASK", entityId: data.taskId, after: { approval: data.decision }, reason: data.note });
   lamMoi(data.taskId);
   return { ok: true };
+}
+
+/**
+ * ═══════════ KÝ DUYỆT NHIỀU VIỆC MỘT LƯỢT ═══════════
+ *
+ * Luật ở `lib/constants/tech-approval-bulk.ts`. Ở đây chỉ ghép nó với CSDL, và điều đáng nói nhất
+ * là thứ hàm này KHÔNG làm: nó không có một lệnh `update ... where id in (...)` nào.
+ *
+ * Mỗi việc đi qua ĐÚNG `decideTechApproval()` mà đường ký-từng-việc vẫn dùng, nên mỗi việc để lại
+ * MỘT dòng `APPROVAL` riêng trong nhật ký của chính nó, mang tên người ký và mốc ký. Một lệnh ký
+ * chín việc bằng một câu SQL sẽ nhanh hơn và để lại đúng một vết — rồi sáu tháng sau không ai trả
+ * lời được "ai ký TECH-7, lúc nào". Tốc độ ở đây không đáng đổi lấy điều đó.
+ *
+ * Từ chối BẮT BUỘC có lý do, còn duyệt thì không: nói "không" mà không nói vì sao là chặn một việc
+ * mà không ai gỡ được (cùng lý lẽ với nhánh `BLOCKED` ở `setTechTaskStatus`).
+ */
+const duyetLoatSchema = z
+  .object({
+    taskIds: z.array(z.string().min(1)).min(1, "Chưa chọn việc nào").max(KY_LOAT_TOI_DA, `Mỗi lượt tối đa ${KY_LOAT_TOI_DA} việc`),
+    decision: z.enum(["APPROVED", "REJECTED"]),
+    note: z.string().trim().max(2000).optional(),
+  })
+  .refine((v) => v.decision !== "REJECTED" || (v.note ?? "").length >= 5, {
+    message: "Từ chối thì phải nói vì sao — chặn mà không nêu lý do thì không ai gỡ được.",
+    path: ["note"],
+  });
+
+export async function decideTechApprovalBulkAction(
+  input: unknown,
+): Promise<TechResult<{ daKy: number; boQua: { code: string; vi: LyDoBoQua }[]; cau: string }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  let data: z.infer<typeof duyetLoatSchema>;
+  try {
+    data = duyetLoatSchema.parse(input);
+  } catch (e) {
+    return { error: loi(e, "Dữ liệu không hợp lệ") };
+  }
+
+  const db = await (await import("@/db")).getDb();
+  const rows = await db.query.techTasks.findMany({
+    where: (t, { inArray }) => inArray(t.id, data.taskIds),
+    columns: { id: true, code: true, approvalRequired: true, approvalStatus: true },
+  });
+  if (!rows.length) return { error: "Không tìm thấy việc nào trong số đã chọn." };
+
+  const phan = xetLoatKy(rows, data.decision);
+  const canKy = new Set(phan.ky);
+  const actor = actorOf(user);
+
+  let daKy = 0;
+  for (const r of rows) {
+    if (!canKy.has(r.code)) continue;
+    const res = await decideTechApproval({ taskId: r.id, decision: data.decision, note: data.note }, actor);
+    /*
+      Một việc hỏng KHÔNG được huỷ cả loạt: những chữ ký đã ghi là thật và người ký đã có ý định
+      thật. Nó rơi xuống danh sách bỏ qua để hiện ra, không biến mất.
+    */
+    if ("error" in res) phan.boQua.push({ code: r.code, vi: "KHONG_CAN" });
+    else daKy += 1;
+    lamMoi(r.id);
+  }
+
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "TECH_TASK_APPROVAL_BULK",
+    entity: "TECH_TASK",
+    after: { decision: data.decision, daKy, ky: phan.ky, boQua: phan.boQua },
+    reason: data.note,
+  });
+
+  return { ok: true, daKy, boQua: phan.boQua, cau: nhanLoatKy({ daKy, boQua: phan.boQua }, data.decision) };
+}
+
+/**
+ * Cấp / thu mức rủi ro cho một vai.
+ *
+ * Câu từ chối của cổng giao việc nói *"Cấp mức cho vai ở /tech/agents"* — trước bản này màn hình
+ * ấy chỉ IN cột rủi ro và không có đường ghi nào, nên sản phẩm đang chỉ người dùng tới một cái nút
+ * không tồn tại. Đo 22/09/2026: chủ shop bật đủ 12 vai mà 0/12 vai đổi được mức, vì không có cách.
+ */
+const mucVaiSchema = z.object({
+  agentId: z.string().min(1),
+  allowedRisks: z.array(z.enum(["R0", "R1", "R2"])).max(3),
+  reason: z.string().trim().max(2000).optional(),
+});
+
+export async function setTechAgentRisksAction(input: unknown): Promise<TechResult<{ truoc: string[]; sau: string[] }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  let data: z.infer<typeof mucVaiSchema>;
+  try {
+    data = mucVaiSchema.parse(input);
+  } catch (e) {
+    return { error: loi(e, "Dữ liệu không hợp lệ") };
+  }
+  const res = await setTechAgentRisks(data, actorOf(user));
+  if ("error" in res) return res;
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "TECH_AGENT_RISKS",
+    entity: "TECH_AGENT",
+    entityId: data.agentId,
+    before: { allowedRisks: res.truoc },
+    after: { allowedRisks: res.sau },
+    reason: data.reason,
+  });
+  revalidatePath("/tech/agents");
+  return { ok: true, truoc: res.truoc, sau: res.sau };
 }
 
 const xacMinhSchema = z.object({ taskId: z.string().min(1), evidence: z.string().trim().min(10, "Xác minh phải kèm bằng chứng").max(8000) });

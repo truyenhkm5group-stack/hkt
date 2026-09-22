@@ -173,6 +173,13 @@ function ThePhieu({ p, canManage }: { p: ProposalRow; canManage: boolean }) {
             <RejectButton proposalId={p.id} />
           </div>
         ) : null}
+        {canManage && p.status === "APPROVED" ? (
+          <div className="border-t pt-3">
+            {/* Bản đã duyệt vẫn áp lại được — xem docblock ở `cto-controls.tsx`. Thiếu nút này thì
+                lượt áp bắt-kịp không có đường nào chạm tới. */}
+            <ApproveButton proposalId={p.id} count={p.tasks.length} apLai />
+          </div>
+        ) : null}
         {canManage && (p.status === "REJECTED" || p.status === "SUPERSEDED" || p.status === "DRAFT") ? (
           <div className="border-t pt-3">
             <PlanButton taskId={p.sourceTaskId} label="Yêu cầu AI lập lại kế hoạch" />
