@@ -158,6 +158,54 @@ export function testSizeRules() {
     );
   }
 
+  /*
+    ═════════ 6. GÁN BẢNG THEO MÃ HÀNG ═════════
+
+    Cả sáu mã đều tiền tố Q, nên phạm vi FAMILY không tách được nam với nữ — phải gán theo TỪNG MÃ.
+    Và khai bằng MÃ HÀNG ("Q006") chứ không phải id nội bộ: id là dữ liệu đồng bộ từ Pancake, một
+    lần đồng bộ lại là mọi lựa chọn đã lưu trỏ vào hư không mà không ai biết.
+  */
+  const tra = (code: string) => resolveSizeRule(payload.rules, { productCode: code, productId: null, variantId: null, family: "Q" });
+  assert.equal(tra("Q006")?.version, nam.version, "Q006 là hàng nam");
+  assert.equal(tra("q006")?.version, nam.version, "khai mã không phân biệt hoa thường");
+
+  /*
+    CHƯA GÁN LÀ MỘT TRẠNG THÁI HỢP LỆ, và nó phải dẫn tới CHUYỂN NGƯỜI.
+
+    Đây là chỗ dễ hỏng nhất khi ai đó "sửa cho tiện": cho mã chưa gán rơi về một bảng mặc định.
+    Lúc đó một mẫu hàng mới toanh sẽ được tư vấn size theo bảng của một mẫu khác, rất tự tin, và
+    không có gì trên màn hình nói rằng điều đó đang xảy ra.
+  */
+  const chuaGan = tra("Q999");
+  assert.equal(chuaGan, null, "mã chưa gán KHÔNG được rơi về một bảng mặc định");
+  assert.equal(recommendSize(chuaGan, { weightKg: 55, heightCm: 170 }).code, "SIZE_DATA_MISSING");
+
+  /*
+    MỘT MÃ CHỈ THUỘC ĐÚNG MỘT BẢNG.
+
+    Nếu một mã lọt vào `keys` của hai bảng cùng phạm vi PRODUCT thì `resolveSizeRule` xếp hạng
+    hoà nhau, và thứ quyết định size của khách trở thành THỨ TỰ PHẦN TỬ trong một tệp JSON. Không
+    ai gỡ nổi một lỗi như thế về sau. Đường ghi (`assignSizeChart`) gỡ mã khỏi mọi bảng trước khi
+    thêm; bài kiểm này khoá lại tính chất mà đường ghi phải giữ.
+  */
+  const moiMa = new Map<string, string[]>();
+  for (const r of payload.rules) {
+    for (const k of [r.key ?? "", ...(r.keys ?? [])]) {
+      const kk = k.trim().toLowerCase();
+      if (!kk) continue;
+      moiMa.set(kk, [...(moiMa.get(kk) ?? []), r.version]);
+    }
+  }
+  for (const [ma, bang] of moiMa) {
+    assert.equal(bang.length, 1, `mã ${ma} đang thuộc ${bang.length} bảng (${bang.join(", ")}) — phải đúng một`);
+  }
+
+  // Bảng phải có TÊN cho người đọc, tách khỏi `version`. Dùng `version` làm nhãn thì mỗi lần sửa
+  // một con số trong bảng là mọi lựa chọn đã lưu trỏ vào một tên khác.
+  for (const r of payload.rules) {
+    assert.ok((r.label ?? "").trim().length > 0, `bảng ${r.version} thiếu tên hiển thị`);
+  }
+
   console.log(
     `✓ Bảng số đo thật: ma trận nam ${CAO.length}×${NANG.length} rã đúng từng ô (${oDung} ô có size · ${oHetSize} ô HẾT SIZE ⇒ chuyển người) · 1m80 dính hai dải ⇒ CHƯA BIẾT · bảng nữ chỉ ràng buộc cân nặng, 50kg và 56kg ⇒ CHƯA BIẾT`,
   );

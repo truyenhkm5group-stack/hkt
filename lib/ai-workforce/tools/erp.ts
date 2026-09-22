@@ -337,21 +337,33 @@ export const sizeRecommendTool = defineTool({
     const rules = Array.isArray(stored.rules) ? stored.rules : [];
     // Nhóm hàng lấy từ mã hàng của sản phẩm (Q002 → Q) — đủ để một bảng áp cho cả dòng đầm.
     let family: string | null = null;
+    let productCode: string | null = null;
     let productId = args.productId ?? null;
-    if (args.variantId) {
+    /*
+      ĐỌC MÃ HÀNG TỪ CẢ HAI ĐƯỜNG VÀO.
+
+      Bản trước chỉ tra bảng sản phẩm khi có `variantId`, nên lượt nào mới biết sản phẩm mà chưa
+      chốt mẫu mã thì `family` và mã hàng đều là null — và một bảng khai theo mã hàng sẽ không
+      bao giờ khớp. Đó đúng là giai đoạn máy cần gợi ý size nhất: khách vừa hỏi "cao 1m7 nặng
+      70 mặc size gì", chưa chọn gì cả.
+    */
+    if (args.variantId || productId) {
       const db = await getDb();
-      const row = await db
-        .select({ productId: pv.productId, code: p.customId })
-        .from(pv)
-        .innerJoin(p, eq(p.id, pv.productId))
-        .where(eq(pv.id, args.variantId))
-        .limit(1);
+      const row = args.variantId
+        ? await db
+            .select({ productId: pv.productId, code: p.customId })
+            .from(pv)
+            .innerJoin(p, eq(p.id, pv.productId))
+            .where(eq(pv.id, args.variantId))
+            .limit(1)
+        : await db.select({ productId: p.id, code: p.customId }).from(p).where(eq(p.id, productId!)).limit(1);
       if (row[0]) {
         productId = productId ?? row[0].productId;
+        productCode = (row[0].code ?? "").trim() || null;
         family = /^([A-Za-z]{1,2})\d{3}$/.exec(row[0].code ?? "")?.[1]?.toUpperCase() ?? null;
       }
     }
-    const rule = resolveSizeRule(rules, { variantId: args.variantId ?? null, productId, family });
+    const rule = resolveSizeRule(rules, { variantId: args.variantId ?? null, productId, productCode, family });
     const result = recommendSize(rule, {
       heightCm: args.heightCm ?? null,
       weightKg: args.weightKg ?? null,

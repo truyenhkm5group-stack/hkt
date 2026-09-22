@@ -121,6 +121,7 @@ const ROUTES = [
   "/ai/copilot",
   "/ai/review",
   "/ai/ad-map",
+  "/ai/size-rules",
   "/ai/fanpage",
   /*
     BÀN LÀM VIỆC CÔNG VIỆC — tuyến NẶNG NHẤT của bản Work OS.

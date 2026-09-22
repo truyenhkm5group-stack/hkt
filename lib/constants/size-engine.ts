@@ -81,9 +81,27 @@ export type FabricStretch = (typeof FABRIC_STRETCH)[number];
 export type SizeRule = {
   /** Phiên bản bảng — đổi bảng là đổi phiên bản, để gợi ý cũ đọc lại vẫn hiểu theo bảng lúc đó. */
   version: string;
+  /**
+   * TÊN BẢNG cho người đọc ("Bảng nam", "Bảng nữ").
+   *
+   * Tách khỏi `version` vì hai thứ đổi theo hai nhịp khác nhau: tên là thứ chủ shop chọn trong ô
+   * chọn trên màn hình và gần như không đổi; phiên bản đổi mỗi lần sửa một con số trong bảng.
+   * Dùng `version` làm nhãn hiển thị thì mỗi lần sửa bảng là mọi lựa chọn đã lưu trỏ vào hư không.
+   */
+  label?: string;
   scope: SizeScope;
   /** Khoá của phạm vi: mã mẫu mã / mã sản phẩm / tên nhóm hàng. Bỏ trống với `GLOBAL`. */
   key?: string;
+  /**
+   * NHIỀU KHOÁ CHO CÙNG MỘT BẢNG — sáu mã hàng dùng chung hai bảng, không phải sáu bảng.
+   *
+   * Không có trường này thì mỗi mã hàng phải là một dòng `SizeRule` riêng, và bảng nữ bị chép ra
+   * năm bản. Chép năm bản nghĩa là sửa một dòng size phải sửa đúng năm chỗ, và chỉ cần quên một
+   * chỗ là hai mã hàng cùng loại tư vấn hai size khác nhau cho cùng một khách.
+   *
+   * `key` cũ vẫn dùng được và vẫn tính — bảng đã khai theo lối cũ không bị bỏ rơi.
+   */
+  keys?: string[];
   fabricStretch?: FabricStretch;
   rows: SizeRow[];
   note?: string;
@@ -94,7 +112,20 @@ export const SIZE_RULES_KEY = "ai.sizeRules";
 /** MẶC ĐỊNH RỖNG — và KHÔNG được thêm bảng mẫu nào vào đây. Xem ghi chú đầu tệp. */
 export const DEFAULT_SIZE_RULES: { version: string; rules: SizeRule[] } = { version: "", rules: [] };
 
-export type SizeLookup = { variantId?: string | null; productId?: string | null; family?: string | null };
+export type SizeLookup = {
+  variantId?: string | null;
+  productId?: string | null;
+  /**
+   * MÃ HÀNG CỦA SHOP (`products.custom_id`, ví dụ "Q006") — khác `productId` là id nội bộ đồng bộ
+   * từ Pancake.
+   *
+   * Phạm vi `PRODUCT` nhận CẢ HAI, và đó là điều cố ý. Chủ shop khai bằng mã hàng vì đó là thứ
+   * người ta nói với nhau; id nội bộ thì không ai nhớ, và nó là dữ liệu của bên thứ ba nên một
+   * lần đồng bộ lại là mọi lựa chọn đã lưu trỏ vào hư không mà không ai biết.
+   */
+  productCode?: string | null;
+  family?: string | null;
+};
 
 /**
  * Bảng áp dụng cho một mẫu mã: phạm vi HẸP NHẤT khớp được. Không khớp gì ⇒ `null` ⇒
@@ -103,11 +134,15 @@ export type SizeLookup = { variantId?: string | null; productId?: string | null;
 export function resolveSizeRule(rules: SizeRule[], lookup: SizeLookup): SizeRule | null {
   const matches = rules.filter((rule) => {
     if (rule.scope === "GLOBAL") return true;
-    const key = (rule.key ?? "").trim().toLowerCase();
-    if (!key) return false;
-    if (rule.scope === "VARIANT") return key === (lookup.variantId ?? "").toLowerCase();
-    if (rule.scope === "PRODUCT") return key === (lookup.productId ?? "").toLowerCase();
-    return key === (lookup.family ?? "").trim().toLowerCase();
+    // `key` đơn và `keys` nhiều đứng chung một rổ — bảng khai theo lối cũ vẫn chạy y như trước.
+    const keys = [rule.key ?? "", ...(rule.keys ?? [])].map((k) => k.trim().toLowerCase()).filter(Boolean);
+    if (!keys.length) return false;
+    if (rule.scope === "VARIANT") return keys.includes((lookup.variantId ?? "").toLowerCase());
+    if (rule.scope === "PRODUCT") {
+      // Khớp id nội bộ HOẶC mã hàng của shop. Xem ghi chú ở `SizeLookup.productCode`.
+      return keys.includes((lookup.productId ?? "").toLowerCase()) || keys.includes((lookup.productCode ?? "").trim().toLowerCase());
+    }
+    return keys.includes((lookup.family ?? "").trim().toLowerCase());
   });
   if (!matches.length) return null;
   return matches.sort((a, b) => SCOPE_RANK[a.scope] - SCOPE_RANK[b.scope])[0];

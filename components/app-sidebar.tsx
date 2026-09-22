@@ -28,6 +28,7 @@ import {
   PlugZap,
   ReceiptText,
   RotateCcw,
+  Ruler,
   ScrollText,
   ShieldCheck,
   Shirt,
@@ -147,6 +148,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/ai/review", label: "Soát & chấm tay", icon: ClipboardCheck, permission: "ai:view" },
       { href: "/ai/fanpage", label: "Cấu hình fanpage", icon: ClipboardCheck, permission: "ai:view" },
       { href: "/ai/ad-map", label: "Bản đồ quảng cáo", icon: ClipboardCheck, permission: "ai:view" },
+      { href: "/ai/size-rules", label: "Bảng số đo", icon: Ruler, permission: "ai:view" },
     ],
   },
   {
