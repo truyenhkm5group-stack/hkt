@@ -17,6 +17,16 @@ const minutes = (name, fallback) => {
 //
 // Và nó chạy CHẠY THỬ: `apply=1` phải khai tường minh. Một job tự ghi vào sổ tiền mỗi giờ là thứ
 // phải bật bằng tay sau khi đã nhìn ít nhất một lượt chạy thử.
+/*
+  SỔ QUYẾT ĐỊNH QUẢNG CÁO — MẶC ĐỊNH TẮT, vì thêm một mục vào lịch là đổi lịch (AGENTS.md mục 7).
+
+  Bật bằng `MARKETING_LEDGER_EVERY_MINUTES` (gợi ý 30). Job chỉ đọc nghiệp vụ và chỉ ghi vào sổ của
+  chính nó, nên chạy dày vô hại — khoá duy nhất theo NGÀY biến mọi lượt sau thành cập nhật.
+
+  Chạy 30 phút/lần thay vì một lần mỗi ngày là có lý do: một NGÀY bỏ lỡ thì mất hẳn. Kết luận của
+  ngày 12/09 phải tính trên dữ liệu như nó có ngày 12/09, và không dựng lại được từ dữ liệu hôm nay.
+*/
+const marketingLedgerEvery = Number(process.env.MARKETING_LEDGER_EVERY_MINUTES) || 0;
 const sepayEvery = Number(process.env.SYNC_SEPAY_EVERY_MINUTES) || 0;
 const sepayApply = process.env.SYNC_SEPAY_APPLY === "1" ? "&apply=1" : "";
 
@@ -176,6 +186,7 @@ const JOBS = [
   { job: "agent-run-reconcile", every: minutes("AGENT_RUN_RECONCILE_EVERY_MINUTES", 60), offset: 33 },
   // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
   ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
+  ...(marketingLedgerEvery > 0 ? [{ job: "marketing-decision-ledger", every: marketingLedgerEvery, offset: 14 }] : []),
 ];
 
 const DAILY = [

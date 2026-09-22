@@ -202,6 +202,7 @@ import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
 import { testAdsDecision } from "./ads-decision.test";
+import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testColumnResize } from "./column-resize.test";
 import { testFormatNullSafety } from "./format-null-safety.test";
@@ -1637,6 +1638,7 @@ async function main() {
   await testAdsRoas(db);
   await testMarketingDaily();
   await testAdsDecision(db);
+  await testMarketingDecisionLedger();
   await testAdsAttribution(db);
   await testAdsAnomaly(db);
   await testAdsIdentity(db);

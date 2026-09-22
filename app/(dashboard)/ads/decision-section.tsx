@@ -3,6 +3,9 @@ import { InfoHint } from "@/components/info-hint";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { getAdsDecision, DECISION_METRIC_HINT } from "@/lib/queries/ads-decision";
 import { ADS_DIMENSION_HAS_SPEND, type AdsDimension } from "@/lib/constants/ads-decision";
+import { LEDGER_WINDOW_DAYS, vnDay } from "@/lib/constants/marketing-decision-ledger";
+import { decisionStability } from "@/lib/queries/marketing-ledger";
+import type { Stability } from "@/lib/marketing/decision-stability";
 import { AdsDecisionTable } from "@/app/(dashboard)/ads/decision-table";
 import { AdsDimensionTabs } from "@/app/(dashboard)/ads/dimension-tabs";
 import type { Period } from "@/lib/search-params";
@@ -34,6 +37,17 @@ function Kpi({ label, value, hint, tone }: { label: string; value: string; hint:
 
 export async function AdsDecisionSection({ period, dimension }: { period: Period; dimension: AdsDimension }) {
   const d = await getAdsDecision(period, dimension);
+  /*
+    ─── ĐỘ BỀN ĐỌC TỪ SỔ, VÀ SỔ CÓ THỂ RỖNG ───
+
+    Sổ chỉ đầy lên khi job `marketing-decision-ledger` chạy. Chưa bật thì mọi dòng đều `heldDays = 0`,
+    và câu trả lời đúng là NÓI RA MỘT LẦN ở đầu bảng — không phải lặp "chưa đo" trên từng dòng, và
+    càng không phải im lặng để người đọc tưởng mọi khuyến nghị đều mới toanh.
+  */
+  const stabilityMap = await decisionStability(dimension, d.rows.map((r) => r.key), vnDay(new Date()));
+  const stability: Record<string, Stability> = Object.fromEntries(stabilityMap);
+  const soDaChay = Object.values(stability).some((s) => s.heldDays > 0);
+  const daChin = Object.values(stability).filter((s) => s.ready).length;
   const hasSpend = ADS_DIMENSION_HAS_SPEND[dimension];
   const lowCoverage = d.confidence.verdict === "DATA_INSUFFICIENT";
   const pendingSpend = d.pending.spendInsufficientData + d.pending.spendWithoutOrders;
@@ -90,7 +104,29 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
           </p>
         ) : null}
 
-        <AdsDecisionTable rows={d.rows} dimension={dimension} />
+        {/*
+          SỔ QUYẾT ĐỊNH — TRÍ NHỚ CỦA BẢNG NÀY.
+
+          Bảng trên trả lời "lúc này nên làm gì". Sổ trả lời "ERP có đang đổi ý xoành xoạch không" —
+          câu mà một người ra quyết định cần, và là điều kiện tồn tại của bất kỳ cỗ máy tự chủ nào.
+        */}
+        <p className={cn("border-b px-5 py-2 text-xs", soDaChay ? "text-muted-foreground" : "bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300")}>
+          {soDaChay ? (
+            <>
+              Sổ quyết định: {formatNumber(daChin)}/{formatNumber(d.rows.length)} dòng đã chín (khuyến nghị giữ nguyên đủ số ngày và không đổi ý quá
+              số lần cho phép). Sổ chạy trên KỲ CHUẨN {LEDGER_WINDOW_DAYS} ngày kết thúc hôm qua — không phải kỳ đang chọn ở trên, nên hai con số có
+              thể nói khác nhau và cả hai đều đúng.
+            </>
+          ) : (
+            <>
+              Sổ quyết định CHƯA CHẠY, nên chưa đo được khuyến nghị nào ổn định hay đang nhảy qua nhảy lại. Bật bằng biến môi trường{" "}
+              <code>MARKETING_LEDGER_EVERY_MINUTES</code> (gợi ý 30) hoặc chạy tay job <code>marketing-decision-ledger</code>. Sổ không dựng lại được
+              quá khứ: mỗi ngày không chạy là một ngày mất hẳn.
+            </>
+          )}
+        </p>
+
+        <AdsDecisionTable rows={d.rows} dimension={dimension} stability={stability} />
 
         <div className="border-t px-5 py-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">Phần chưa kết luận được (hiện riêng, không chia đều):</p>

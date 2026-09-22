@@ -54,6 +54,7 @@ const MOI = [
   "0105_cto_repair_evidence",
   "0106_session_revocation",
   "0107_agent_run_external_ref",
+  "0108_ads_decision_ledger",
 ] as const;
 
 /*
@@ -150,6 +151,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_proposals' and column_name = 'repair_outcome'"), 0, "bước 1: bằng chứng lượt sửa CHƯA được có — đó là thứ 0105 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_tasks' and column_name = 'pr_number'"), 0, "bước 1: phép chiếu PR CHƯA được có — đó là thứ 0104 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_agent_runs' and column_name = 'external_ref'"), 0, "bước 1: khoá lượt chạy đến từ máy ngoài CHƯA được có — đó là thứ 0107 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'ads_decision_ledger'"), 0, "bước 1: sổ quyết định quảng cáo CHƯA được có — đó là thứ 0108 thêm vào");
     /*
       Một vận đơn ĐÃ CÓ TỪ TRƯỚC 0099, mang một trạng thái Viettel Post đã dịch được. Bước 2 kiểm
       rằng migration KHÔNG dựng hộ nó một "lời khai thô": suy ngược từ `vtp_status_name` là bịa ra
@@ -202,6 +204,36 @@ export async function testMigrationUpgradePath() {
     */
     await client.query(`insert into cs_cases (id, kind, status, title) values ('up-c2', 'RETURN', 'NEEDS_REVIEW', 'Máy thấy nghi, người chưa xem')`);
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c2' and status = 'NEEDS_REVIEW'"), 1, "trạng thái 'chờ người xem lại' phải ghi được mà không cần migration");
+
+    /*
+      ═══ 0108: SỔ QUYẾT ĐỊNH QUẢNG CÁO — THUẦN BỔ SUNG, VÀ KHOÁ THEO NGÀY PHẢI THẬT ═══
+
+      Ba điều, và điều thứ hai là điều duy nhất khiến bảng này dùng được cho một cỗ máy tự chủ:
+      job ghi sổ chạy nhiều lượt mỗi ngày, nên "chạy lại không đẻ dòng thứ hai" phải là một BẢO ĐẢM
+      ở tầng dữ liệu chứ không phải một mệnh đề trong mã.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'ads_decision_ledger'"), 1, "0108: bảng sổ quyết định phải có mặt");
+    await client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, period_from, period_to, rule_version, rule_snapshot, spend_known) values ('up-dl1', '2026-09-22', 'campaign', 'c1', 'CUT', 'ACTIONABLE', '2026-09-08', '2026-09-21', 1, '{}'::jsonb, true)`);
+    await assert.rejects(
+      () => client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, period_from, period_to, rule_version, rule_snapshot, spend_known) values ('up-dl2', '2026-09-22', 'campaign', 'c1', 'SCALE', 'ACTIONABLE', '2026-09-08', '2026-09-21', 1, '{}'::jsonb, true)`),
+      () => true,
+      "0108: một mục chỉ được MỘT dòng mỗi ngày — lượt chạy thứ hai phải là cập nhật, không phải dòng mới",
+    );
+    // Hạng lạ bị CSDL chặn: một dòng `undefined` lọt vào sẽ làm mọi phép lọc "việc cần làm" nói sai.
+    await assert.rejects(
+      () => client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, period_from, period_to, rule_version, rule_snapshot, spend_known) values ('up-dl3', '2026-09-22', 'campaign', 'c2', 'CUT', 'MAYBE', '2026-09-08', '2026-09-21', 1, '{}'::jsonb, true)`),
+      () => true,
+      "0108: hạng hành động ngoài ba giá trị đã khai phải bị CSDL từ chối",
+    );
+    // Ngày phải là NGÀY. Chuỗi lạ làm mọi phép so chuỗi theo thứ tự nói sai mà không gì đỏ.
+    await assert.rejects(
+      () => client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, period_from, period_to, rule_version, rule_snapshot, spend_known) values ('up-dl4', '22/09/2026', 'campaign', 'c3', 'CUT', 'ACTIONABLE', '2026-09-08', '2026-09-21', 1, '{}'::jsonb, true)`),
+      () => true,
+      "0108: `decision_day` sai định dạng phải bị CSDL từ chối",
+    );
+    // Sổ bắt đầu RỖNG ngoài dòng vừa gieo: KHÔNG backfill. Kết luận của quá khứ không dựng lại được
+    // từ dữ liệu hôm nay — đơn hôm ấy còn treo nay đã ngã ngũ (AGENTS.md mục 8.8).
+    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id <> 'up-dl1'"), 0, "0108: migration KHÔNG được dựng hộ một dòng lịch sử nào");
 
     /*
       ═══ 0082: SỔ HÀNG HOÀN ĐƯA VÀO BẰNG CHÍNH ERP — MỘT BẢNG MỚI, KHOÁ LÀ NỘI DUNG ═══
