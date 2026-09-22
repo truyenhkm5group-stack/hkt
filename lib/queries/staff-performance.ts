@@ -1,5 +1,5 @@
 import { sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
 import type { Period } from "@/lib/search-params";
@@ -93,7 +93,22 @@ export async function getStaffPerformance(period: Period, field: AttributionFiel
   const isDelivered = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`;
   const isReturned = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
 
-  const rows = await db
+  /*
+    ═══════════ TẮT JIT — CÙNG CHẨN ĐOÁN ĐÃ ĐO Ở `marketing-daily`, ĐO LẠI 22/09/2026 ═══════════
+
+    `EXPLAIN` trên production cho đúng dấu vân tay ấy: `Seq Scan on orders` chạm **1.997 dòng** mà
+    `actual time=15342.1..15347.7` — nghĩa là gần như TOÀN BỘ thời gian nằm ở KHỞI ĐỘNG nút đầu tiên, chứ
+    không ở việc đọc dòng. Đó là thời gian PostgreSQL gán cho phần BIÊN DỊCH JIT.
+
+    JIT bật vì chi phí ƯỚC LƯỢNG của kế hoạch lên tới hàng triệu (`cost=…857..3.631.619`) — con số ấy đến từ
+    các truy vấn con tương quan `ORDER_OUTCOME_FAST` và `PRIMARY_ATTEMPT` được nội tuyến lại vào
+    TỪNG cột `filter (where …)`, trong khi thực tế chỉ chạm vài nghìn dòng.
+
+    `lib/queries/marketing-daily.ts` đã trả giá và đã vá đúng chỗ này (4.048ms → 276ms). Hàm này
+    mang CÙNG hình dạng truy vấn nhưng chưa được vá, nên nó vẫn là một trong ba câu chậm nhất của
+    cả hệ thống. Cùng truy vấn, cùng kết quả — chỉ thêm một `set local jit = off`.
+  */
+  const rows = await chayKhongJit(db, (tx) => tx
     .select({
       name: sql<string>`${who}`,
       orders: sql<number>`count(distinct ${o.id})`,
@@ -112,7 +127,7 @@ export async function getStaffPerformance(period: Period, field: AttributionFiel
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
     .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`)
     .where(sql`${from} and ${to}`)
-    .groupBy(sql`${who}`);
+    .groupBy(sql`${who}`));
 
   let totalOrders = 0;
   let assignedOrders = 0;

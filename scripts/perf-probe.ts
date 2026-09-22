@@ -384,6 +384,22 @@ async function main() {
   const rep = await import("@/lib/queries/reports");
   await timed("/reports (nền)", "getDailyBreakdown 30d", () => rep.getDailyBreakdown(month, "created"));
 
+  /*
+    ═══ THANG BẬC TỶ LỆ ĐO RIÊNG, VÌ NÓ LÀ CHI PHÍ DÙNG CHUNG CHỨ KHÔNG PHẢI CHI PHÍ CỦA TRANG ═══
+
+    `productDeliveryRates` kéo theo hợp đồng `PROJECTED_GTC_V3` — bảng xác suất học từ ~19.000 dòng
+    `shipment_events`. Nó có bộ đệm riêng 90 giây và Báo cáo lợi nhuận danh nghĩa cũng gọi nó, nên
+    LƯỢT ĐẦU của bất kỳ trang nào cũng trả tiền, còn lượt sau thì không.
+
+    Đo riêng hai dòng này để lần sau không ai phải đoán lại: con số "nguội" của /ads/daily là giá
+    của thang bậc dùng chung hay là giá của chính bảng theo ngày. 22/09/2026 tôi đã mất một vòng
+    chẩn đoán vì hai thứ ấy nằm gộp trong một con số.
+  */
+  const dr = await import("@/lib/queries/delivery-rate");
+  const pd = await import("@/lib/queries/projected-delivery");
+  await timed("/ads/daily (dùng chung)", "getProjectedDeliveryMetrics 30d", () => pd.getProjectedDeliveryMetrics(month, "ORDERED", "PRODUCT"));
+  await timed("/ads/daily (dùng chung)", "productDeliveryRates 30d", () => dr.productDeliveryRates(month));
+
   const md = await import("@/lib/queries/marketing-daily");
   const { previousPeriod } = await import("@/lib/search-params");
   await timed("/ads/daily", "marketingDaily 30d (có kỳ trước)", () => md.getMarketingDaily(month, "created", {}, previousPeriod(month)));
