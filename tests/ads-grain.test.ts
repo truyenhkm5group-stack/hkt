@@ -140,8 +140,22 @@ export function testAdsGrain() {
     `${SYNC}: LẦN GÁN CUỐI của summary.detail phải mang số (tài khoản × ngày) ở mỗi hạt — lần gán nào trước đó cũng bị nó ghi đè`,
   );
 
-  // Sổ mẩu KHÔNG được ghi đè `post_id` — đó là mắt xích nối đơn về chiến dịch, do job khác điền.
   const capNhat = sync.slice(sync.indexOf("async function capNhatSoMauVaNhom"));
+
+  /*
+    ─── ĐƯỜNG QUAN SÁT KHÔNG ĐƯỢC ĐÓNG DẤU "ĐÃ HỎI" ───
+
+    `fetched_at` nghĩa là "đã hỏi Facebook về mẩu này". `capNhatSoMauVaNhom` chỉ QUAN SÁT — tên và
+    cây cha–con đi kèm số liệu chi tiêu, không ai gọi `/{ad_id}` để xin creative.
+
+    Khai sai có hậu quả đo được: `syncFacebookAdIndex` chọn ứng viên hỏi bài viết bằng
+    `fetched_at < now - 7 ngày`, nên mẩu mang dấu HÔM NAY phải đợi trọn một tuần. Đo 22/09/2026 sau
+    backfill 30 ngày: hàng đợi thiếu bài viết nhảy 95 → 1.171 và hai lượt tra rút được 0 dòng.
+  */
+  assert.ok(capNhat.includes("CHUA_TUNG_HOI"), "đường quan sát phải đóng dấu MỐC KHÔNG, không phải now — nếu không bộ tra bài viết bỏ qua mẩu mới trọn một tuần");
+  assert.ok(!/set: \{[^}]*fetchedAt/.test(capNhat), "nhánh DO UPDATE không được ghi đè fetchedAt: dòng đã hỏi thật phải giữ dấu của lần hỏi ấy");
+
+  // Sổ mẩu KHÔNG được ghi đè `post_id` — đó là mắt xích nối đơn về chiến dịch, do job khác điền.
   assert.ok(!capNhat.includes("postId:"), "cập nhật sổ mẩu KHÔNG được đụng post_id — insights không trả nó, ghi NULL đè lên là xoá mắt xích nối đơn");
 
   // ═══════════ ③ BỐN CẤP NAY ĐỀU CÓ SỐ CHI ═══════════

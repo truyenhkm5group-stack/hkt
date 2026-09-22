@@ -198,30 +198,46 @@ async function capNhatSoMauVaNhom(adRows: FbAdInsight[], accountId: string) {
   }
 
   const now = new Date();
+  /*
+    ─── `fetched_at` NGHĨA LÀ "ĐÃ HỎI FACEBOOK VỀ MẨU NÀY", VÀ ĐƯỜNG NÀY KHÔNG HỎI ───
+
+    Nó chỉ QUAN SÁT: insights trả về tên và cây cha–con như một phần của số liệu chi tiêu, chứ không
+    ai gọi `/{ad_id}` để xin creative. Đóng dấu `fetched_at = now` ở đây là khai một việc chưa làm.
+
+    Và cái khai sai ấy có hậu quả đo được. `syncFacebookAdIndex` chọn ứng viên hỏi bài viết bằng
+    `fetched_at < (now - 7 ngày)`; mẩu vừa vào sổ mang dấu HÔM NAY nên bị loại, và phải đợi TRỌN
+    MỘT TUẦN mới được hỏi. Đo 22/09/2026 sau lượt backfill 30 ngày: hàng đợi thiếu bài viết nhảy từ
+    95 lên **1.171**, và hai lượt tra chạy ngay sau đó rút được **0** dòng.
+
+    Nên dấu thời gian ở đây là MỐC KHÔNG — "chưa từng hỏi". Bộ tra bài viết nhận chúng ngay lượt kế
+    tiếp, và khi nó hỏi thật thì chính nó đóng dấu `fetched_at` thật.
+  */
+  const CHUA_TUNG_HOI = new Date(0);
   for (const lo of chiaLo([...nhom.values()], 200)) {
     await db
       .insert(schema.fbAdsets)
-      .values(lo.map((n) => ({ ...n, status: "", missing: false, fetchedAt: now })))
+      .values(lo.map((n) => ({ ...n, status: "", missing: false, fetchedAt: CHUA_TUNG_HOI })))
       .onConflictDoUpdate({
         target: schema.fbAdsets.id,
         // `status` KHÔNG có trong insights — giữ nguyên giá trị cũ thay vì ghi chuỗi rỗng đè lên.
-        set: { name: sql`excluded.name`, campaignId: sql`excluded.campaign_id`, accountId: sql`excluded.account_id`, fetchedAt: now, updatedAt: now },
+        // `fetchedAt` cũng vậy: dòng đã được hỏi thật thì giữ nguyên dấu của lần hỏi ấy.
+        set: { name: sql`excluded.name`, campaignId: sql`excluded.campaign_id`, accountId: sql`excluded.account_id`, updatedAt: now },
       });
   }
   for (const lo of chiaLo([...mau.values()], 200)) {
     await db
       .insert(schema.fbAds)
-      .values(lo.map((m) => ({ ...m, status: "", missing: false, fetchedAt: now })))
+      .values(lo.map((m) => ({ ...m, status: "", missing: false, fetchedAt: CHUA_TUNG_HOI })))
       .onConflictDoUpdate({
         target: schema.fbAds.id,
         // KHÔNG liệt kê `postId` / `storyId`: chúng là việc của syncFacebookAdIndex.
+        // KHÔNG liệt kê `fetchedAt`: đường này không hỏi Facebook nên không được đóng dấu đã hỏi.
         set: {
           name: sql`excluded.name`,
           adsetId: sql`excluded.adset_id`,
           campaignId: sql`excluded.campaign_id`,
           campaignName: sql`excluded.campaign_name`,
           accountId: sql`excluded.account_id`,
-          fetchedAt: now,
           updatedAt: now,
         },
       });
