@@ -34,7 +34,7 @@ import {
   type ResolutionFilterKey,
 } from "@/lib/constants/care-resolution";
 import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
-import { careViewOf, slaOf } from "@/lib/care/view";
+import { careViewOf, slaOf, teamWorkEnded } from "@/lib/care/view";
 import {
   CARE_ATTEMPT_BANDS,
   CARE_COD_BANDS,
@@ -730,8 +730,11 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
 
   const changeStatus = (status: CareStatus) =>
     start(async () => {
-      // Trạng thái CHỜ bắt buộc có giờ xem lại: giữ giờ đang có, không có thì lấy mặc định.
-      const r = await setCareStatus({ shipmentIds: [c.shipmentId], status, followUpAt: CARE_WAITING_STATUSES.includes(status) ? (c.care.followUpAt ?? defaultFollowUpAt()) : undefined });
+      // Trạng thái CHỜ bắt buộc có giờ xem lại: giữ giờ đang có CHỈ KHI nó còn ở phía trước, không
+      // thì cấp giờ mới. Thừa kế một mốc đã trôi qua là đẩy ca về "Cần care" ngay giây sau khi vừa
+      // chuyển nó sang "đang chờ", kèm nhãn "quá hẹn" — người trực học cách bỏ qua chính cảnh báo đó.
+      const henCu = c.care.followUpAt && c.care.followUpAt.getTime() > Date.now() ? c.care.followUpAt : null;
+      const r = await setCareStatus({ shipmentIds: [c.shipmentId], status, followUpAt: CARE_WAITING_STATUSES.includes(status) ? (henCu ?? defaultFollowUpAt()) : undefined });
       if ("error" in r) {
         toast.error(r.error);
         return;
@@ -1027,6 +1030,18 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
             >
               Xử lý lại {formatDateTime(c.care.followUpAt)} · {hanHen(c.care.followUpAt, now)}
             </button>
+          ) : teamWorkEnded(c.care) ? (
+            /*
+              Ô TRỐNG Ở CHỖ VỪA CÓ MỘT NGÀY THÁNG LÀ MỘT CÂU HỎI BỎ NGỎ.
+
+              Ca đã chốt "Đã hoàn" cố ý KHÔNG có hẹn (xem `DECISION_ENDS_TEAM_WORK`). Để nguyên ba
+              nút hẹn nhanh ở đây thì người trực sẽ bấm một cái — và kéo ngược ca đã xử lý xong về
+              "Cần care", đúng thứ bản vá này đi sửa. Nói ra vì sao, và để đường quay lại nằm ở bộ
+              ba kết quả ngay bên cạnh ("Phát tiếp" cấp lại hẹn mới).
+            */
+            <span className="text-muted-foreground" title="Đội đã chốt bỏ kiện này. Không còn việc cho người tới khi Viettel Post báo kết cục — đổi ý thì bấm “Phát tiếp”.">
+              Không hẹn lại · chờ chứng từ ĐVVC
+            </span>
           ) : (
             FOLLOW_UP_PRESETS.map((p) => (
               <button key={p.key} type="button" disabled={pending} className="rounded border px-1 py-px text-[10.5px] hover:bg-accent" onClick={() => followUp(followUpPresetAt(p))}>

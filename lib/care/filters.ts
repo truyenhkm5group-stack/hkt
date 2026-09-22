@@ -1,7 +1,7 @@
 import { CARE_SLA_SOON_FRACTION, CARE_TERMINAL_STATUSES, CARE_WAITING_STATUSES } from "@/lib/constants/care";
 import { followUpBucket, type FollowUpFilterKey, type ResolutionFilterKey } from "@/lib/constants/care-resolution";
 import type { CareCase } from "@/lib/care/contracts";
-import { DEFAULT_CARE_SLA_HOURS, type CareSlaHours, type CareStateLike } from "@/lib/care/view";
+import { DEFAULT_CARE_SLA_HOURS, teamWorkEnded, type CareSlaHours, type CareStateLike } from "@/lib/care/view";
 
 /**
  * ═══════════ MỘT LUẬT LỌC, DÙNG CHO CẢ BẢNG LẪN CON SỐ TRÊN CHIP ═══════════
@@ -64,7 +64,9 @@ export function careSlaBucket(c: Pick<CareCase, "queueSince" | "care" | "sla">, 
   const t = now.getTime();
   const since = c.queueSince.getTime();
   const responded = care.firstResponseAt !== null && care.firstResponseAt.getTime() >= since;
-  const closed = CARE_TERMINAL_STATUSES.includes(care.status) || care.status === "ESCALATED";
+  // Ca đã chốt "Đã hoàn" tính như ca đã đóng: `slaOf` cũng nói vậy, và hai phép tính hạn của cùng
+  // một dòng không được nói hai điều khác nhau.
+  const closed = CARE_TERMINAL_STATUSES.includes(care.status) || care.status === "ESCALATED" || teamWorkEnded(care);
   const paused = CARE_WAITING_STATUSES.includes(care.status) && care.followUpAt !== null && care.followUpAt.getTime() > t;
 
   const live: number[] = [];
