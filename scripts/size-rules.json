@@ -1,0 +1,72 @@
+{
+  "_doc": [
+    "BẢNG SỐ ĐO THẬT CỦA SHOP — nạp bằng: ops ai-staging-size-rules (mặc định CHẠY THỬ).",
+    "",
+    "BẢNG NAM là một MA TRẬN cao × nặng: cùng 70kg, người 1m72 mặc S còn người 1m79 mặc M.",
+    "Máy gợi ý size khớp theo KHOẢNG CHỮ NHẬT cho mỗi dòng, nên ma trận được rã thành từng ô rồi",
+    "GỘP NGANG trong cùng một dải chiều cao (các ô liền nhau cùng size thì gộp khoảng cân nặng).",
+    "Gộp DỌC thì sai: hai dải chiều cao khác nhau cùng size nhưng khác khoảng cân nặng.",
+    "",
+    "Ô 'HẾT SIZE' KHÔNG được khai thành dòng nào. Thiếu dòng ⇒ máy trả OUT_OF_RANGE ⇒ chuyển",
+    "người. Đó đúng là điều phải xảy ra: shop không có hàng cho số đo ấy, và câu trả lời đó do",
+    "người nói, không phải máy tự chọn một size gần đúng.",
+    "",
+    "BẢNG NỮ chỉ khai CÂN NẶNG. Hai cột 'Ngực' và 'Eo' trong ảnh là THÔNG SỐ CỦA SẢN PHẨM (mỗi",
+    "size một con số duy nhất: M=85, L=90...), KHÔNG phải khoảng số đo của người mặc. Khai chúng",
+    "thành khoảng [85,85] sẽ bắt khách phải có vòng ngực đúng 85cm mới ra được size — gần như",
+    "không ai khớp. Chúng nằm ở 'note' để nhân viên đọc khi tư vấn."
+  ],
+  "version": "2026-09-22",
+  "rules": [
+    {
+      "version": "nam-2026-09-22",
+      "scope": "FAMILY",
+      "key": "ĐIỀN-TIỀN-TỐ-MÃ-HÀNG-NAM",
+      "note": "Bảng nam theo ma trận chiều cao × cân nặng. Ô HẾT SIZE không có dòng — máy chuyển người.",
+      "rows": [
+        { "size": "XS", "heightCm": [80, 159], "weightKg": [50, 63] },
+        { "size": "M", "heightCm": [80, 159], "weightKg": [64, 73] },
+        { "size": "L", "heightCm": [80, 159], "weightKg": [74, 76] },
+        { "size": "XL", "heightCm": [80, 159], "weightKg": [77, 83] },
+
+        { "size": "XS", "heightCm": [160, 168], "weightKg": [50, 63] },
+        { "size": "S", "heightCm": [160, 168], "weightKg": [64, 69] },
+        { "size": "M", "heightCm": [160, 168], "weightKg": [70, 73] },
+        { "size": "L", "heightCm": [160, 168], "weightKg": [74, 83] },
+        { "size": "XL", "heightCm": [160, 168], "weightKg": [84, 93] },
+
+        { "size": "XS", "heightCm": [169, 174], "weightKg": [50, 63] },
+        { "size": "S", "heightCm": [169, 174], "weightKg": [64, 73] },
+        { "size": "M", "heightCm": [169, 174], "weightKg": [74, 76] },
+        { "size": "L", "heightCm": [169, 174], "weightKg": [77, 83] },
+        { "size": "XL", "heightCm": [169, 174], "weightKg": [84, 93] },
+
+        { "size": "S", "heightCm": [175, 177], "weightKg": [50, 63] },
+        { "size": "M", "heightCm": [175, 177], "weightKg": [64, 83] },
+        { "size": "L", "heightCm": [175, 177], "weightKg": [84, 86] },
+        { "size": "XL", "heightCm": [175, 177], "weightKg": [87, 98] },
+
+        { "size": "M", "heightCm": [178, 180], "weightKg": [50, 76] },
+        { "size": "L", "heightCm": [178, 180], "weightKg": [77, 86] },
+        { "size": "XL", "heightCm": [178, 180], "weightKg": [87, 103] },
+
+        { "size": "M", "heightCm": [180, 185], "weightKg": [50, 63] },
+        { "size": "L", "heightCm": [180, 185], "weightKg": [64, 93] },
+        { "size": "XL", "heightCm": [180, 185], "weightKg": [94, 103] }
+      ]
+    },
+    {
+      "version": "nu-2026-09-22",
+      "scope": "FAMILY",
+      "key": "ĐIỀN-TIỀN-TỐ-MÃ-HÀNG-NỮ",
+      "note": "Thông số SẢN PHẨM theo size (ngực/eo, cm): M 85/68 · L 90/74 · XL 95/80 · XXL 100/86 · 3XL 105/92. Đây là số đo của áo, không phải của người mặc — chỉ dùng để tư vấn.",
+      "rows": [
+        { "size": "M", "weightKg": [40, 50] },
+        { "size": "L", "weightKg": [50, 56] },
+        { "size": "XL", "weightKg": [56, 63] },
+        { "size": "XXL", "weightKg": [64, 71] },
+        { "size": "3XL", "weightKg": [72, 79] }
+      ]
+    }
+  ]
+}

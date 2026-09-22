@@ -15,7 +15,7 @@
  */
 import "dotenv/config";
 import { z } from "zod";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
 import { FABRIC_STRETCH, SIZE_RULES_KEY, SIZE_SCOPES, recommendSize, resolveSizeRule, type SizeRule } from "@/lib/constants/size-engine";
@@ -75,6 +75,55 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/** In các tiền tố mã hàng đang có, để người khai biết điền gì vào phạm vi FAMILY. */
+async function inPrefixes(db: Awaited<ReturnType<typeof getDb>>) {
+  const rows = await db
+    .select({ code: schema.products.customId, name: schema.products.name })
+    .from(schema.products)
+    .where(eq(schema.products.isRemoved, false));
+  const nhom = new Map<string, { n: number; vd: string[] }>();
+  for (const r of rows) {
+    const m = /^([A-Za-z]{1,2})\d{3}$/.exec((r.code ?? "").trim());
+    if (!m) continue;
+    const k = m[1].toUpperCase();
+    const cur = nhom.get(k) ?? { n: 0, vd: [] };
+    cur.n += 1;
+    if (cur.vd.length < 3) cur.vd.push(`${r.code} ${r.name}`.slice(0, 44));
+    nhom.set(k, cur);
+  }
+  console.error("\nTiền tố mã hàng đang có trong ERP:");
+  if (!nhom.size) console.error("    (chưa có mã hàng nào dạng <chữ><3 số> — kiểm tra lại danh mục)");
+  for (const [k, v] of [...nhom].sort((a, b) => b[1].n - a[1].n)) {
+    console.error(`    ${k} — ${v.n} sản phẩm · ${v.vd.join(" | ")}`);
+  }
+}
+
+/** Sản phẩm mà một phạm vi thật sự khớp, kèm các tên size đang có của chúng. */
+async function sanPhamKhop(
+  db: Awaited<ReturnType<typeof getDb>>,
+  scope: string,
+  key: string,
+): Promise<{ products: string[]; sizes: string[] }> {
+  const all = await db
+    .select({ id: schema.products.id, code: schema.products.customId, name: schema.products.name })
+    .from(schema.products)
+    .where(eq(schema.products.isRemoved, false));
+  const k = key.trim().toUpperCase();
+  const hit = all.filter((p2) => {
+    if (scope === "GLOBAL") return true;
+    if (scope === "PRODUCT") return p2.id.toUpperCase() === k;
+    if (scope === "FAMILY") return /^([A-Za-z]{1,2})\d{3}$/.exec((p2.code ?? "").trim())?.[1]?.toUpperCase() === k;
+    return false; // VARIANT tra ở bảng mẫu mã, đã có phép kiểm riêng bên trên
+  });
+  if (!hit.length) return { products: [], sizes: [] };
+  const sizes = await db
+    .select({ size: schema.productVariants.size })
+    .from(schema.productVariants)
+    .where(inArray(schema.productVariants.productId, hit.map((h) => h.id)));
+  const tenSize = [...new Set(sizes.map((r) => (r.size ?? "").trim()).filter(Boolean))].sort();
+  return { products: hit.map((h) => `${h.code ?? "?"} ${h.name}`.slice(0, 40)), sizes: tenSize };
+}
+
 async function main() {
   if (process.argv.includes("--template")) {
     console.log(JSON.stringify(TEMPLATE, null, 2));
@@ -122,6 +171,91 @@ async function main() {
     const found = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(inArray(schema.productVariants.id, variantKeys));
     const missing = variantKeys.filter((k) => !found.some((f) => f.id === k));
     for (const key of missing) warnings.push(`Phạm vi VARIANT trỏ vào mã mẫu mã không có trong ERP: ${key}`);
+  }
+
+  /*
+    KHOÁ CÒN LÀ CHỖ ĐIỀN ⇒ DỪNG HẲN, không phải cảnh báo.
+
+    Một bảng mang khoá giữ chỗ vẫn qua được mọi phép kiểm khác, vẫn ghi được vào settings, và vẫn
+    im lặng không bao giờ khớp mẫu nào — máy tiếp tục trả SIZE_DATA_MISSING y như lúc chưa khai
+    bảng. Người khai sẽ tưởng đã xong. Đó là kiểu hỏng tệ nhất: tốn công mà không đổi gì, và không
+    có dấu hiệu nào.
+  */
+  for (const rule of payload.rules) {
+    if ((rule.key ?? "").includes("ĐIỀN")) {
+      console.error(`✗ Bảng ${rule.version} còn khoá giữ chỗ "${rule.key}" — điền tiền tố mã hàng thật rồi chạy lại.`);
+      console.error("  Danh sách tiền tố đang có trong ERP được in ở phần ĐỘ PHỦ bên dưới khi chạy thử một bảng hợp lệ.");
+      await inPrefixes(db);
+      process.exit(1);
+    }
+  }
+
+  /*
+    CHỒNG MỘT PHẦN — phép kiểm cũ chỉ bắt được khoảng GIỐNG HỆT.
+
+    Bảng nam là ma trận cao × nặng rã thành ô, nên hai dải chiều cao viết liền nhau rất dễ dính
+    nhau ở đúng một giá trị (1m78–1m80 và 1m80–1m85 cùng chứa 180). Mọi khách rơi đúng vào giá trị
+    ấy sẽ ra AMBIGUOUS và bị chuyển người — an toàn, nhưng im lặng. In ra ĐÚNG khoảng bị chồng để
+    người khai quyết định, thay vì tự sửa hộ: 180cm nên là M hay L là quyết định của shop.
+  */
+  const DIMS = ["heightCm", "weightKg", "bustCm", "waistCm", "hipCm"] as const;
+  const giao = (a?: [number, number], b?: [number, number]): [number, number] | null => {
+    // Chiều không ràng buộc ở một bên = bên đó phủ mọi giá trị, nên vẫn giao nhau.
+    if (!a && !b) return null;
+    if (!a || !b) return a ?? b ?? null;
+    const lo = Math.max(a[0], b[0]);
+    const hi = Math.min(a[1], b[1]);
+    return lo <= hi ? [lo, hi] : null;
+  };
+  for (const rule of payload.rules) {
+    for (let i = 0; i < rule.rows.length; i += 1) {
+      for (let j = i + 1; j < rule.rows.length; j += 1) {
+        const a = rule.rows[i];
+        const b = rule.rows[j];
+        if (a.size === b.size) continue; // cùng size thì chồng nhau vô hại
+        const parts: string[] = [];
+        let chongMoiChieu = true;
+        for (const k of DIMS) {
+          if (!a[k] && !b[k]) continue;
+          const g = giao(a[k], b[k]);
+          if (!g) { chongMoiChieu = false; break; }
+          parts.push(`${k} ${g[0]}–${g[1]}`);
+        }
+        if (chongMoiChieu && parts.length) {
+          warnings.push(`Bảng ${rule.version}: size ${a.size} và ${b.size} chồng nhau tại ${parts.join(" · ")} — mọi khách rơi vào đó sẽ bị chuyển người (AMBIGUOUS)`);
+        }
+      }
+    }
+  }
+
+  /*
+    ĐỘ PHỦ THẬT: bảng này áp cho SẢN PHẨM NÀO, và những sản phẩm ấy có ĐÚNG các size trong bảng không.
+
+    Đây là phép kiểm đắt giá nhất, vì nó bắt được kiểu hỏng không lộ ra ở đâu khác: bảng ghi "XXL"
+    trong khi ERP lưu mẫu mã là "2XL". Máy sẽ kết luận size XXL rất tự tin, rồi bước chốt mẫu mã
+    không tìm thấy mẫu nào tên XXL — hội thoại chết ở một chỗ khác hẳn, và không ai lần ngược về
+    được tới bảng số đo.
+  */
+  for (const rule of payload.rules) {
+    const matched = await sanPhamKhop(db, rule.scope, rule.key ?? "");
+    const tenSize = [...new Set(rule.rows.map((r) => r.size.trim().toUpperCase()))];
+    console.log(`
+  ĐỘ PHỦ bảng ${rule.version} (${rule.scope}${rule.key ? ` ${rule.key}` : ""}): ${matched.products.length} sản phẩm`);
+    if (!matched.products.length) {
+      warnings.push(`Bảng ${rule.version} KHÔNG khớp sản phẩm nào trong ERP — nó sẽ không bao giờ được dùng`);
+    } else {
+      console.log(`    ${matched.products.slice(0, 6).join(" · ")}${matched.products.length > 6 ? ` … +${matched.products.length - 6}` : ""}`);
+      console.log(`    size trong ERP: ${matched.sizes.join(" · ") || "(mẫu mã chưa có tên size)"}`);
+      console.log(`    size trong bảng: ${tenSize.join(" · ")}`);
+      const thieuTrongErp = tenSize.filter((s2) => !matched.sizes.some((e) => e.toUpperCase() === s2));
+      const thieuTrongBang = matched.sizes.filter((e) => !tenSize.includes(e.toUpperCase()));
+      for (const s2 of thieuTrongErp) {
+        warnings.push(`Bảng ${rule.version}: size "${s2}" KHÔNG có mẫu mã nào mang tên đó trong ERP — máy sẽ gợi ý một size không bán được`);
+      }
+      if (thieuTrongBang.length) {
+        console.log(`    ⓘ size có hàng nhưng bảng chưa phủ: ${thieuTrongBang.join(" · ")} — khách hợp size đó sẽ bị chuyển người`);
+      }
+    }
   }
 
   // Hai size chồng nhau TOÀN PHẦN thì mọi số đo rơi vào đó đều ra AMBIGUOUS — bảng vô dụng mà im lặng.

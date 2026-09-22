@@ -87,6 +87,7 @@ on:
           - ai-staging-auth      # ĐĂNG NHẬP bản chạy thử: kiểm tra ("--check") · vá APP_URL ("--fix-app-url") · đặt lại tài khoản thí điểm ("--user --email=... --name=... [--role=ADMIN]") · thử đăng nhập thật ("--test --email=...")
           - ai-staging-live-ingest # BẬT/TẮT bộ nạp tin sống (arg: "--on [--seconds=45]" | "--off" | "--once"); chỉ ĐỌC, không bao giờ gửi
           - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
+          - ai-staging-size-rules # nạp BẢNG SỐ ĐO (scripts/size-rules.json) — MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
@@ -1226,6 +1227,16 @@ jobs:
                 # Mặc định CHẠY THỬ; "--apply" trong ô arg mới ghi. Không gọi mô hình, không gửi tin.
                 docker compose -f docker-compose.staging.yml --env-file .env.staging \
                   exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-sales-knowledge.ts ${ARG:-} ;;
+
+              ai-staging-size-rules)
+                # BẢNG SỐ ĐO THẬT — CHẠY THỬ là mặc định, "--apply" trong ô arg mới ghi vào
+                # settings["ai.sizeRules"]. Script tự kiểm: khoảng lộn đầu đuôi, hai size chồng
+                # nhau, phạm vi không khớp sản phẩm nào, và tên size trong bảng có tồn tại trong
+                # ERP không. Có cảnh báo mà không "--force" thì nó DỪNG, không ghi.
+                cd /opt/vnx-ai-staging
+                fetch_staging_script import-size-rules.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/import-size-rules.ts'
+                fetch_staging_script size-rules.json | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/size-rules.json'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging                   exec -T app sh -c 'cat /app/scripts/size-rules.json | npx tsx --tsconfig tsconfig.json scripts/import-size-rules.ts --stdin '"${ARG:-}" ;;
 
               ai-staging-report)
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
