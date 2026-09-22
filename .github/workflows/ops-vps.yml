@@ -841,7 +841,20 @@ jobs:
                 fi
                 [ -n "${OPENAI_API_KEY:-}" ] && { upsert_stg OPENAI_API_KEY "$OPENAI_API_KEY"; echo "OPENAI_API_KEY: đã ghi vào .env.staging (${#OPENAI_API_KEY} ký tự)"; }
                 [ -n "${ANTHROPIC_API_KEY:-}" ] && { upsert_stg ANTHROPIC_API_KEY "$ANTHROPIC_API_KEY"; echo "ANTHROPIC_API_KEY: đã ghi vào .env.staging (${#ANTHROPIC_API_KEY} ký tự)"; }
-                upsert_stg AI_PROVIDER "${AI_PROVIDER:-auto}"
+                # NHÀ CUNG CẤP CHỌN TƯỜNG MINH ĐƯỢC: `arg` dạng "--provider=anthropic".
+                #
+                # `auto` chọn OpenAI trước khi có cả hai khoá, và bậc mạnh của OpenAI chưa có trong
+                # bảng giá — nên "chi phí mỗi đơn" vĩnh viễn là CHƯA BIẾT và trần chi phí mỗi ngày
+                # mất hiệu lực. Chọn nhà cung cấp là một quyết định, không phải một mặc định.
+                NHA_CC=""
+                case "${ARG:-}" in *--provider=*) NHA_CC="${ARG##*--provider=}"; NHA_CC="${NHA_CC%% *}" ;; esac
+                case "$NHA_CC" in
+                  openai|anthropic|auto|off) : ;;
+                  "") NHA_CC="${AI_PROVIDER:-auto}" ;;
+                  *) echo "provider không hợp lệ: $NHA_CC (chỉ openai|anthropic|auto|off)"; exit 1 ;;
+                esac
+                upsert_stg AI_PROVIDER "$NHA_CC"
+                echo "AI_PROVIDER = $NHA_CC"
                 # CHẶN CỨNG GIỮ NGUYÊN. Bật mô hình thật KHÔNG được kéo theo quyền gửi tin hay tạo
                 # đơn — đó là những khoá riêng, và chúng phải ở lại CẤM.
                 #

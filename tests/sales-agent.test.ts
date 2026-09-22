@@ -22,6 +22,9 @@ import { recommendSize, resolveSizeRule, sizeNeedsHuman, type SizeRule } from "@
 import { sql } from "drizzle-orm";
 import { REVIEW_REASON_TAGS, REVIEW_REASON_TAG_META } from "@/lib/constants/sales-review-tags";
 import { z } from "zod";
+import { MODEL_USD_PRICES } from "@/lib/constants/ai-model-pricing";
+import { SALES_AGENT } from "@/lib/ai-workforce/agents/sales/definition";
+import { parseRouting as parseRoutingCfg } from "@/lib/ai-workforce/model-router";
 import { SAFEST_HARD_LIMITS, WORKFORCE_PROVIDERS, aiEnv, getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
 import { setSettingJson } from "@/lib/settings";
 import { queueStubResponse, resetStub } from "@/lib/ai-workforce/providers/stub";
@@ -1418,6 +1421,34 @@ export async function testSalesAgent(db: Db) {
 
   await db.delete(schema.aiModelCalls).where(eq(schema.aiModelCalls.model, "mo-hinh-chua-khai-gia"));
   await setSettingJson(AI_CONFIG_KEY, {});
+
+  /*
+    ═════════ 9C. NHÂN SỰ CHỈ ĐƯỢC CHẠY TRÊN MÔ HÌNH ĐÃ KHAI GIÁ ═════════
+
+    Bản trước để `routing.models` trống và rơi về mô hình mặc định của nhà cung cấp. Với Anthropic
+    bậc mạnh mặc định là `claude-opus-5`, và nó KHÔNG có trong bảng giá — nên mọi lượt leo nấc trả
+    về chi phí CHƯA BIẾT.
+
+    Hậu quả không phải một ô trống trên màn hình: `dailyCostCapVnd` chỉ kiểm chứng được khi mọi
+    lượt gọi đều định giá được, nên một mô hình chưa khai giá làm CẢ CÁI TRẦN CHI PHÍ mất hiệu
+    lực. Đúng cái trần đã dựng ra để một phòng tự vận hành không tiêu vượt mức.
+
+    Bài kiểm này là chỗ duy nhất buộc hai sổ đi cùng nhau.
+  */
+  const routingSales = parseRoutingCfg(SALES_AGENT.routing);
+  assert.ok(routingSales.models, "nhân sự bán hàng phải khai rõ mô hình từng bậc");
+  for (const bac of routingSales.tiers ?? []) {
+    const model = routingSales.models?.[bac];
+    assert.ok(model, `bậc ${bac} chưa khai mô hình`);
+    assert.ok(
+      MODEL_USD_PRICES[model!],
+      `mô hình "${model}" của bậc ${bac} chưa có đơn giá trong MODEL_USD_PRICES — chi phí sẽ là CHƯA BIẾT và trần chi phí mỗi ngày mất hiệu lực`,
+    );
+  }
+  // Bậc mạnh phải ĐẮT HƠN bậc rẻ, nếu không việc leo nấc không còn nghĩa gì.
+  const giaRe = MODEL_USD_PRICES[routingSales.models!.ECONOMY!];
+  const giaManh = MODEL_USD_PRICES[routingSales.models!.STRONG!];
+  assert.ok(giaManh.outputUsdPerMillion > giaRe.outputUsdPerMillion, "bậc STRONG phải là mô hình đắt hơn bậc ECONOMY");
 
   // ═════════ 10. VIỆC KHÔNG TỒN TẠI / NẤC OFF ═════════
 
