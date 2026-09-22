@@ -492,6 +492,32 @@ deploy dừng, không phải cảnh báo.
     tường minh (`scripts/vtp-return-status-repair.ts`, mặc định CHẠY THỬ), và lượt vá dịch lại bằng
     CHÍNH bộ dịch của đường ghi chứ không viết luật thứ hai bằng SQL.
 
+67. **QUY KẾT ĐƠN VÀ QUY KẾT TIỀN ĐI HAI ĐƯỜNG — KHÔNG ĐƯỜNG NÀO SUY RA ĐƯỜNG KIA**
+    (`spendDimensionConds` · `spendByDay` trong `lib/queries/marketing-daily.ts`): đơn về tay một
+    marketer bằng **ảnh chụp phân công FANPAGE** (`order_attributions`), còn tiền quảng cáo về tay
+    họ bằng **ánh xạ CHIẾN DỊCH → marketer** (`ad_spends.marketer_id`, điền từ khai tay · bí danh
+    trong tên chiến dịch · tài khoản quảng cáo). Đường thứ hai có thể trống trong khi đường thứ
+    nhất đầy. **BIÊN QUAN SÁT chỉ trả lời "đồng bộ đã chạy tới ngày nào"** — nó KHÔNG trả lời được
+    "nguồn có biết tới nhóm này không", và để nó trả lời thay là in `0 ₫` cho mọi marketer chưa
+    khai: ROAS đẹp, lợi nhuận góp dương, còn toàn bộ tiền thật dồn vào dòng "Chưa quy kết" và dòng
+    ấy lỗ nặng — **cả hai con số đều sai** và không ô nào nói rằng có gì chưa biết. Hai ô trống
+    trông giống hệt nhau nhưng đưa người đọc đi hai nơi ("đợi đồng bộ" ≠ "đi khai ánh xạ"), nên
+    chúng phải là HAI câu cảnh báo, không gộp thành một câu "chưa có số chi". Và nhóm chỉ có TIỀN
+    mà không có đơn vẫn phải là MỘT DÒNG của bảng bóc tách: xếp hạng theo doanh số làm người tiêu
+    tiền không ra đơn biến mất khỏi đúng cái bảng tên là "lỗ ở đâu".
+
+68. **TỶ LỆ GIAO THÀNH CÔNG ƯỚC TÍNH CÓ ĐÚNG MỘT THANG BẬC** (`lib/constants/delivery-rate.ts`):
+    ghi đè tay → số đo từng đơn của CHÍNH mã → lịch sử 90 ngày của mã → tỷ lệ khai ở Giả định
+    (`profit.assumptions.defaultReturnRate`). Hàm THUẦN, dùng chung cho Báo cáo lợi nhuận danh
+    nghĩa lẫn Hiệu quả marketing theo ngày — chép sang tệp thứ hai là để hai màn hình cùng nói
+    "tỷ lệ giao thành công" mà ra hai con số. Bậc `projected` CHỈ được dùng khi mã đã có ít nhất
+    MỘT đơn đi tới kết cục: chưa có thì tử số toàn bộ là xác suất **mượn** của mã khác (đo
+    21/09/2026, Đầm Q005 `giao 0 · hoàn 0 · đang giao 62` mà ô in 37,5%). Ô ước tính **đứng cạnh**
+    ô đo được chứ không thay nó, KHÔNG BAO GIỜ nhỏ hơn số đo, bằng đúng số đo khi hết đơn đang đi,
+    và **không được tô màu / xếp hạng** — luôn kèm nhãn và ĐỘ PHỦ (bao nhiêu mã theo số đo, bao
+    nhiêu mã theo tỷ lệ khai). Vế nào CỐ Ý không dự phóng (cước — phí hoàn của đơn đang đi chưa
+    phát sinh) thì hợp đồng cột phải NÓI RA hướng sai, không vá bằng thêm một giả định.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và

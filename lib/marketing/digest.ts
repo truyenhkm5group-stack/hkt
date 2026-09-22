@@ -398,5 +398,9 @@ function divideBase<T extends MarketingDailyBase>(b: T, days: number): Marketing
     operatingCost: d(b.operatingCost),
     contributionProfit: d(b.contributionProfit),
     netProfit: d(b.netProfit),
+    projectedDeliveredRevenue: d(b.projectedDeliveredRevenue),
+    projectedCogs: d(b.projectedCogs),
+    projectedDeliveredOrders: d(b.projectedDeliveredOrders),
+    projectedContributionProfit: d(b.projectedContributionProfit),
   };
 }

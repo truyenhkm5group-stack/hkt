@@ -11,6 +11,7 @@ import { getSettingJson } from "@/lib/settings";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { distributeProportionally, inventoryRiskExposure, inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
+import { resolveDeliveryRate } from "@/lib/constants/delivery-rate";
 import { getProjectedDeliveryMetrics, type BacktestSummary } from "@/lib/queries/projected-delivery";
 import { NO_ORDER_VALUE_FILTER, orderValueActive, orderValueKey, orderValueMatches, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
@@ -757,19 +758,26 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
              giả định — và nhãn nói rõ "ước tính theo tỷ lệ".
       */
       const duBao = projected.get(r.productId);
-      let baseReturnRate = assumptions.defaultReturnRate;
-      let returnRateSource: NominalRow["returnRateSource"] = "default";
-      if (h && h.rate !== null && h.finished >= assumptions.minFinishedOrders) {
-        baseReturnRate = h.rate;
-        returnRateSource = "history";
-      }
-      let returnRate: number | null = Math.round(baseReturnRate * 10) / 10;
+      /*
+        THANG BẬC SỐNG Ở `lib/constants/delivery-rate.ts` — hàm THUẦN, dùng chung với Hiệu quả
+        marketing theo ngày. Trước 22/09/2026 nó nằm ngay trong vòng lặp này và là bản DUY NHẤT;
+        báo cáo thứ hai cần đúng thang bậc ấy thì chỉ còn đường chép, và hai bản chép có ngày trả
+        lời khác nhau về cùng một mã trong khi cả hai màn hình đều nói "tỷ lệ giao thành công".
+      */
+      const bac = resolveDeliveryRate({
+        overrideReturnRate: assumptions.overrides[r.productId],
+        projectedDeliveryRate: duBao?.projectedRate ?? null,
+        projectedFinished: duBao ? duBao.deliveredActual + duBao.failedActual : 0,
+        historyReturnRate: h?.rate ?? null,
+        historyFinished: h?.finished ?? 0,
+        minFinishedOrders: assumptions.minFinishedOrders,
+        defaultReturnRate: assumptions.defaultReturnRate,
+      });
+      const baseReturnRate = bac.baseReturnRate;
+      const returnRateSource: NominalRow["returnRateSource"] = bac.source;
+      const returnRate: number | null = bac.returnRate;
       let orderLevel: { revenue: number; cogs: number; qty: number } | null = null;
-      const overrideRate = assumptions.overrides[r.productId];
-      if (overrideRate !== undefined && Number.isFinite(overrideRate)) {
-        returnRate = overrideRate;
-        returnRateSource = "override";
-      } else if (duBao && duBao.projectedRate !== null && duBao.deliveredActual + duBao.failedActual > 0) {
+      if (bac.source === "projected" && duBao) {
         /*
           ĐO ĐƯỢC THÌ DÙNG SỐ ĐO — tỷ lệ của hợp đồng, và TIỀN cân theo TỪNG ĐƠN.
 
@@ -793,8 +801,6 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
           nhánh lịch sử (71 đơn) nên không đổi.
         */
         orderLevel = { revenue: duBao.projectedDeliveredRevenue, cogs: duBao.projectedCogs, qty: duBao.projectedQty };
-        returnRate = Math.round((100 - duBao.projectedRate) * 10) / 10;
-        returnRateSource = "projected";
       }
       /*
         ═══════════ CHƯA ĐO ĐƯỢC THÌ RƠI VỀ TỶ LỆ ĐÃ KHAI, KHÔNG PHẢI VỀ MỘT Ô TRỐNG ═══════════
