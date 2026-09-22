@@ -18,7 +18,8 @@ import { getDb, schema, type Db } from "@/db";
 import { asArray, asRecord, str } from "@/lib/integrations/http";
 import { getPancakePagesClient, type PancakeMessage } from "@/lib/integrations/pancake/pages";
 import { normalize, stripHtml } from "@/lib/text";
-import { AD_AUTO_GREETING_PHRASES, BOT_SENDER_NAMES, CHAT_FIELD_MAP, SYSTEM_NOTICE_PHRASES, REQUIRED_CHAT_FIELDS, type ChatRejectReason, type IngestSource, type SenderType } from "@/lib/constants/sales-ingest";
+import { getSettingJson } from "@/lib/settings";
+import { AD_AUTO_GREETING_PHRASES, BOT_SENDER_NAMES, BOT_SENDER_NAMES_KEY, CHAT_FIELD_MAP, SYSTEM_NOTICE_PHRASES, REQUIRED_CHAT_FIELDS, type ChatRejectReason, type IngestSource, type SenderType } from "@/lib/constants/sales-ingest";
 import { normalizePhone } from "@/lib/constants/landing";
 import { emitAndDispatch, recordAiError } from "@/lib/ai-workforce/events";
 import { aiEventKey } from "@/lib/constants/ai-events";
@@ -63,8 +64,11 @@ export type NormalizeResult =
   | { ok: false; reason: ChatRejectReason; missing: string[]; seenKeys: string[] };
 
 /** Tên người gửi có phải MÁY không. So khớp theo cụm, không dấu, không phân biệt hoa thường. */
-export function isBotName(name: string): boolean {
+export function isBotName(name: string, declared: readonly string[] = []): boolean {
   const n = normalize(name);
+  // Tên shop KHAI khớp TRỌN VẸN, không khớp một phần: một cái tên do người gõ vào settings mà
+  // khớp lỏng sẽ nuốt cả những nhân viên có tên chứa chuỗi đó.
+  if (declared.some((d) => normalize(d).trim() === n.trim() && n.trim())) return true;
   return BOT_SENDER_NAMES.some((bot) => n.includes(` ${bot} `));
 }
 
@@ -80,9 +84,17 @@ export function classifySender(input: {
   text?: string;
   /** Tên khách của hội thoại — tin phía shop mang ĐÚNG tên này không thể là nhân viên viết. */
   customerName?: string;
+  /**
+   * Tên máy do CHÍNH SHOP khai (`settings["ai.botSenderNames"]`).
+   *
+   * Không có nó thì một bot trả lời dưới tên fanpage là không thể phân biệt với nhân viên — và
+   * đó không phải giả thiết: 4.749/4.749 tin "nhân viên" của shop này đến từ tên fanpage
+   * (đo 22/09/2026). Xem ghi chú ở `BOT_SENDER_NAMES_KEY`.
+   */
+  botNames?: readonly string[];
 }): SenderType {
   if (!input.fromPage) return "CUSTOMER";
-  if (input.fromAgent || isBotName(input.fromName)) return "PAGE_BOT";
+  if (input.fromAgent || isBotName(input.fromName, input.botNames ?? [])) return "PAGE_BOT";
 
   /*
     THÔNG BÁO CỦA NỀN TẢNG — nhận ra bằng HAI dấu hiệu độc lập, mỗi cái đủ để kết luận.
@@ -151,7 +163,7 @@ function firstByMap(sources: Record<string, unknown>[], field: keyof typeof CHAT
  * tin. Ghi một dòng không chống trùng được còn tệ hơn không ghi: nó mở cửa cho tin nhân bản và
  * cho những lượt chạy AI lặp lại trên cùng một câu của khách.
  */
-export function normalizeChatWebhook(payload: unknown): NormalizeResult {
+export function normalizeChatWebhook(payload: unknown, botNames: readonly string[] = []): NormalizeResult {
   if (payload === null || payload === undefined) return { ok: false, reason: "EMPTY_PAYLOAD", missing: REQUIRED_CHAT_FIELDS, seenKeys: [] };
   if (typeof payload !== "object" || Array.isArray(payload)) return { ok: false, reason: "NOT_JSON_OBJECT", missing: REQUIRED_CHAT_FIELDS, seenKeys: [] };
 
@@ -198,7 +210,7 @@ export function normalizeChatWebhook(payload: unknown): NormalizeResult {
       externalId: messageId,
       text: noiDungTin,
       fromPage,
-      senderType: classifySender({ fromPage, fromName, text: noiDungTin, customerName: tenKhachHT }),
+      senderType: classifySender({ fromPage, fromName, text: noiDungTin, customerName: tenKhachHT, botNames }),
       fromName,
       sentAt: toDate(body.inserted_at ?? body.created_time ?? body.created_at ?? root.inserted_at),
       hasAttachment: attachments.length > 0,
@@ -247,6 +259,15 @@ export async function upsertConversation(conversation: NormalizedConversation, d
   });
   if (!again) throw new Error("Không tạo được hội thoại bán hàng");
   return again.id;
+}
+
+/**
+ * Tên máy do shop khai, đọc từ `settings`. Đọc MỘT LẦN cho mỗi lượt nạp chứ không mỗi tin: một
+ * mẻ ba mươi hội thoại là hàng trăm tin, và ba trăm lượt đọc settings cho cùng một câu trả lời.
+ */
+export async function declaredBotNames(): Promise<string[]> {
+  const raw = await getSettingJson<unknown>(BOT_SENDER_NAMES_KEY, []);
+  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [];
 }
 
 export type IngestResult = { conversationId: string; messageId: string | null; duplicate: boolean; eventEmitted: boolean; reason: string };
@@ -496,7 +517,7 @@ export async function relinkHumanReplies(options: { pageId?: string } = {}, db?:
 export async function ingestChatWebhook(payload: unknown, db?: Db): Promise<IngestResult | { conversationId: null; reason: string }> {
   const settings = await getAiSettings();
   if (!settings.enabled || !settings.ingestEnabled) return { conversationId: null, reason: "Nạp hội thoại đang tắt trong cấu hình" };
-  const normalized = normalizeChatWebhook(payload);
+  const normalized = normalizeChatWebhook(payload, await declaredBotNames());
   if (!normalized.ok) {
     // Gói tin không nhận dạng được vẫn được lưu nguyên văn ở `webhook_events` (tầng route lo việc
     // đó). Ở đây chỉ ghi CHẨN ĐOÁN: thiếu khoá nào, gói tin thật sự có khoá gì. Một mẫu thật là đủ
@@ -516,13 +537,13 @@ export async function ingestChatWebhook(payload: unknown, db?: Db): Promise<Inge
 }
 
 /** Tin từ Pages API (đường đã kiểm chứng) → dạng chuẩn hoá dùng chung với webhook. */
-function toNormalizedMessage(m: PancakeMessage, customerName = ""): NormalizedMessage {
+function toNormalizedMessage(m: PancakeMessage, customerName = "", botNames: readonly string[] = []): NormalizedMessage {
   const text = stripHtml(m.text);
   return {
     externalId: m.id,
     text,
     fromPage: m.fromPage,
-    senderType: classifySender({ fromPage: m.fromPage, fromName: m.fromName, text, customerName }),
+    senderType: classifySender({ fromPage: m.fromPage, fromName: m.fromName, text, customerName, botNames }),
     fromName: m.fromName,
     sentAt: m.insertedAt,
     hasAttachment: m.hasAttachment,
@@ -551,6 +572,9 @@ export async function syncSalesConversations(
   // rồi mới phát hiện ánh xạ sai là dọn dẹp hàng nghìn dòng, còn nạp 20 hội thoại thì đọc hết bằng mắt.
   const maxConversations = Math.min(Math.max(options.maxConversations ?? 1_000, 1), 1_000);
   const db = await getDb();
+  // Đọc MỘT LẦN cho cả mẻ — một mẻ ba mươi hội thoại là hàng trăm tin, và hàng trăm lượt đọc
+  // settings cho cùng một câu trả lời.
+  const botNames = await declaredBotNames();
   const client = getPancakePagesClient();
   const until = new Date();
   const since = new Date(until.getTime() - hours * 3_600_000);
@@ -604,7 +628,7 @@ export async function syncSalesConversations(
               phone: conversation.phones.map(normalizePhone).find((p) => /^0\d{9}$/.test(p)) ?? "",
               platform: page.platform,
             },
-            toNormalizedMessage(raw, conversation.customerName),
+            toNormalizedMessage(raw, conversation.customerName, botNames),
             "pancake-pages-poll",
             db,
             "POLL",

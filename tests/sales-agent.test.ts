@@ -919,6 +919,39 @@ export async function testSalesAgent(db: Db) {
     "test",
     db,
   );
+  /*
+    ═════════ BOT TRẢ LỜI DƯỚI TÊN FANPAGE ═════════
+
+    ĐO 22/09/2026: toàn bộ 4.749 tin ERP xếp là "nhân viên trả lời" đến từ ĐÚNG MỘT tên —
+    `Hải An Fashion`, tên fanpage — và chủ shop xác nhận đó là bot Gemini. Số tin nhận ra là máy: 0.
+
+    Không có gì trong cái tên hay trong câu chữ nói rằng nó là máy, nên phép đoán KHÔNG làm được;
+    chỉ shop mới biết. Hệ quả của việc đoán sai không dừng ở một cột hiển thị: ERP đặt
+    `humanTakeoverAt` cho 205 hội thoại vì tưởng người đã vào, và nhân sự AI đứng im ở đúng những
+    cuộc ấy.
+  */
+  assert.equal(
+    classifySender({ fromPage: true, fromName: "Hải An Fashion", text: "Dạ chị cho em xin chiều cao ạ" }),
+    "PAGE_HUMAN",
+    "chưa khai thì vẫn là 'chưa biết, tạm coi là người' — đoán là máy cũng sai như đoán là người",
+  );
+  assert.equal(
+    classifySender({ fromPage: true, fromName: "Hải An Fashion", text: "Dạ chị cho em xin chiều cao ạ", botNames: ["Hải An Fashion"] }),
+    "PAGE_BOT",
+    "shop khai rồi thì phải nhận ra là máy",
+  );
+  // Khớp TRỌN VẸN, không khớp một phần: khai "Hải An Fashion" không được nuốt một nhân viên tên khác.
+  assert.equal(
+    classifySender({ fromPage: true, fromName: "Hải An Fashion Trang", text: "x", botNames: ["Hải An Fashion"] }),
+    "PAGE_HUMAN",
+    "khớp một phần sẽ nuốt nhầm nhân viên có tên chứa chuỗi đó",
+  );
+  // Khai hoa thường khác nhau vẫn phải nhận ra — người gõ vào settings không canh chính tả.
+  assert.equal(
+    classifySender({ fromPage: true, fromName: "HẢI AN FASHION", text: "x", botNames: ["hải an fashion"] }),
+    "PAGE_BOT",
+  );
+
   assert.equal(echo.eventEmitted, false, "tin của shop KHÔNG được tạo việc — nếu không con bot sẽ tự nói chuyện với chính nó");
   assert.match(echo.reason, /vòng lặp/);
 

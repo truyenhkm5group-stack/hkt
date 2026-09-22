@@ -47,6 +47,26 @@ export const INGEST_SOURCE_LABEL: Record<IngestSource, string> = {
 export const BOT_SENDER_NAMES = ["botcake", "bot erp", "chatbot", "pancake bot", "auto reply", "tra loi tu dong"] as const;
 
 /**
+ * ═══════════ TÊN MÁY DO CHÍNH SHOP KHAI ═══════════
+ *
+ * Danh sách trên chỉ bắt được những cái tên TỰ XƯNG là máy. Một bot trả lời dưới tên của chính
+ * fanpage thì không có gì trong câu chữ hay trong cái tên nói rằng nó là máy.
+ *
+ * ĐO 22/09/2026, và đây là lý do khoá này tồn tại: toàn bộ **4.749** tin được ERP xếp là
+ * "nhân viên trả lời" đến từ ĐÚNG MỘT cái tên — `Hải An Fashion`, tức tên fanpage — và chủ shop
+ * xác nhận đó là một bot Gemini, không có nhân viên nào. Số tin được nhận ra là máy: **0**.
+ *
+ * Hệ quả không dừng ở một cột hiển thị sai. `humanTakeoverAt` được đặt cho 205 hội thoại vì ERP
+ * tưởng người đã vào, nên nhân sự AI đứng im ở đúng những cuộc ấy; mọi phép đo "thời gian phản
+ * hồi của người", "đội đã chạm vào bao nhiêu ca" đều đang nói về một cái máy; và màn hình soát
+ * đặt câu của AI cạnh câu của một AI khác dưới nhãn "nhân viên trả lời".
+ *
+ * Khoá này nằm ở `settings` chứ không ghi cứng: tên fanpage là dữ liệu của shop, đổi bất cứ lúc
+ * nào, và một shop khác dùng kho mã này sẽ có tên khác.
+ */
+export const BOT_SENDER_NAMES_KEY = "ai.botSenderNames";
+
+/**
  * ═══════════ THÔNG BÁO CỦA NỀN TẢNG — KHÔNG PHẢI CÂU NHÂN VIÊN TRẢ LỜI ═══════════
  *
  * ĐO ĐƯỢC NGÀY 15/09/2026, mẻ 18 hội thoại thật: 17/18 bị kết luận "người đã tiếp quản" và nhân sự
