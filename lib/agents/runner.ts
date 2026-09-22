@@ -7,7 +7,7 @@ import { catDauRa } from "@/lib/constants/agent-run-error";
 import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import type { TechGateResult, TechRisk } from "@/lib/constants/tech";
 import { finishTechAgentRun, startTechAgentRun, type TechActor } from "@/lib/tech/service";
-import { dinhNhanh, soCommitCuaAgent, AgentWorkspace } from "@/lib/agents/workspace";
+import { dinhNhanh, soCommitCuaAgent, tepCuaNhanh, AgentWorkspace } from "@/lib/agents/workspace";
 import type {AgentExecutor, AgentOutcome } from "@/lib/agents/executor";
 
 /**
@@ -142,6 +142,8 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
   let branch = `ai/${agent.key}/${task.code}-${Date.now().toString(36)}`;
   let baseCommit = opts.baseCommit;
   let dungLaiNhanh = false;
+  /** Tệp lượt trước để lại trên nhánh. Rỗng ở lượt MỞ NHÁNH MỚI — khi ấy không có gì để nói. */
+  let tepLuotTruoc: string[] = [];
   if (opts.rerunBranch) {
     /*
       ĐẾM BẰNG HAI NGUỒN, LẤY SỐ LỚN HƠN — VÀ ĐÂY LÀ MỘT BẢN VÁ CHO LỜI KHẲNG ĐỊNH CỦA CHÍNH TÔI.
@@ -168,6 +170,16 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
     branch = v.branch;
     baseCommit = dinh;
     dungLaiNhanh = true;
+    /*
+      ĐỌC RA THỨ LƯỢT TRƯỚC ĐÃ LÀM, ĐỂ ĐỀ BÀI NÓI ĐƯỢC NÓ.
+
+      Thiếu câu này thì model nhận đề bài GỐC cộng phản hồi, và làm lại cả cuộc điều tra từ đầu —
+      đo thật trên TECH-8 ngày 22/09/2026: 24 vòng chạm trần, $0,1021, không commit nào.
+
+      `null` là CHƯA ĐỌC ĐƯỢC, và khi ấy để DANH SÁCH RỖNG: thà không nói gì còn hơn nói "lượt
+      trước tạo 0 tệp" cho một lượt đã tạo năm tệp.
+    */
+    tepLuotTruoc = (await tepCuaNhanh(opts.repoRoot, v.branch, "origin/main")) ?? [];
   }
   const mo = await startTechAgentRun({ agentId: agent.id, taskId: task.id, branch, baseCommit }, opts.actor);
   if ("error" in mo) return { ...rong, reason: mo.error };
@@ -224,7 +236,7 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
     });
     let outcome: Awaited<ReturnType<AgentExecutor["run"]>>;
     try {
-      outcome = await opts.executor.run(deBai(goiPhanHoi(opts.feedback ?? [])));
+      outcome = await opts.executor.run(deBai(goiPhanHoi(opts.feedback ?? [], tepLuotTruoc)));
     } finally {
       clearInterval(nhip);
     }

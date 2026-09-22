@@ -92,6 +92,36 @@ export function testRerunPure() {
 export function testRerunPhanHoi() {
   assert.equal(goiPhanHoi([]), "", "không có phản hồi ⇒ không thêm một chữ nào vào đề bài");
 
+  /*
+    ═══ ĐỀ BÀI LƯỢT CHẠY LẠI PHẢI NÓI RA THỨ ĐÃ CÓ ═══
+
+    ĐÃ CẮN THẬT 22/09/2026 trên TECH-8. Ba yêu cầu sửa cỏn con — một năm ghi sai, hai lỗi chính tả,
+    thêm một mục ngắn — tốn 24 VÒNG (chạm trần), $0,1021, và KHÔNG commit nào. Bốn cổng vẫn xanh,
+    vì chúng chấm cây làm việc chứ không chấm việc agent có làm xong hay chưa.
+
+    Nguyên nhân KHÔNG phải trần vòng thấp: đề bài lượt chạy lại là đề bài GỐC cộng khối phản hồi,
+    và không dòng nào nói rằng tài liệu đã nằm sẵn trên nhánh. Nên model đọc lại đề bài gốc và làm
+    LẠI cả cuộc điều tra. Nâng trần chỉ cho lượt lạc đường đi xa hơn và tốn hơn.
+  */
+  const coTep = goiPhanHoi(
+    [{ tacGia: "cto", noiDung: "Sai năm" }],
+    ["docs/TECH-8-AUDIT.md", "docs/TECH-8-PHU-LUC.md"],
+  );
+  assert.match(coTep, /LƯỢT TRƯỚC ĐÃ TẠO SẴN 2 TỆP/, "phải nói rõ lượt trước để lại mấy tệp");
+  assert.ok(coTep.includes("docs/TECH-8-AUDIT.md"), "…và kể đúng tên từng tệp");
+  assert.match(coTep, /KHÔNG điều tra lại từ đầu/, "…kèm câu chặn đúng hành vi đã đốt 24 vòng");
+  assert.ok(coTep.indexOf("LƯỢT TRƯỚC") < coTep.indexOf("PHẢN HỒI CỦA NGƯỜI XEM"), "khối 'đã có' phải đứng TRƯỚC phản hồi — model đọc thứ tự đó");
+
+  /*
+    DANH SÁCH TỆP KHÔNG ĐƯỢC LÀM HỎNG PHÉP ĐẾM DÒNG BÌNH LUẬN.
+    Hai khối dùng hai dấu đầu dòng khác nhau, cố ý — xem chú thích ở `goiPhanHoi`.
+  */
+  assert.equal(coTep.split("\n").filter((d) => d.startsWith("— ")).length, 1, "hai tệp KHÔNG được đếm thành hai dòng bình luận");
+
+  /* Không truyền tệp ⇒ không thêm một chữ nào: lượt MỞ NHÁNH MỚI chẳng có gì để nói. */
+  const khongTep = goiPhanHoi([{ tacGia: "cto", noiDung: "Sai năm" }]);
+  assert.ok(!khongTep.includes("LƯỢT TRƯỚC"), "lượt mở nhánh mới KHÔNG được nói về một lượt trước không tồn tại");
+
   const mot = goiPhanHoi([{ tacGia: "nguyenloineu94", noiDung: "Thiếu phần đo thật" }]);
   assert.ok(mot.includes("nguyenloineu94") && mot.includes("Thiếu phần đo thật"), "phản hồi phải tới tay model nguyên văn");
   assert.ok(mot.includes("YÊU CẦU SỬA"), "phản hồi được gắn nhãn là yêu cầu sửa, không phải đề bài mới");
@@ -232,6 +262,22 @@ function execTest(cwd: string, args: string[]): string {
 
 export function testRerunGuards() {
   const runner = boChuThich(readFileSync(path.join(goc, "lib/agents/runner.ts"), "utf8"));
+
+  /*
+    ═══ ĐƯỜNG NỐI GIỮA GIT VÀ ĐỀ BÀI PHẢI CÒN ═══
+
+    Khối "lượt trước đã tạo…" ở `goiPhanHoi()` chỉ có nghĩa khi runner THẬT SỰ đọc danh sách tệp
+    của nhánh và truyền sang. Bài kiểm khối văn bản không thấy được đường nối ấy: đo 22/09/2026,
+    một lượt đột biến thay `tepCuaNhanh(...)` bằng mảng rỗng vẫn để bộ kiểm XANH (ĐB19 sống sót).
+
+    Bản vá khi ấy vẫn còn nguyên trong mã mà đã mất hết tác dụng — đúng kiểu hỏng mà không ai thấy.
+  */
+  assert.ok(/tepCuaNhanh\(\s*opts\.repoRoot/.test(runner), "runner phải ĐỌC danh sách tệp của nhánh từ git khi chạy lại");
+  assert.ok(/goiPhanHoi\([^)]*tepLuotTruoc\s*\)/.test(runner), "…và TRUYỀN nó vào đề bài — đọc mà không truyền thì bằng không đọc");
+  assert.ok(
+    !/tepLuotTruoc\s*=\s*\[\]\s*;[\s\S]{0,80}rerunBranch/.test(runner),
+    "KHÔNG được để danh sách rỗng cứng trên nhánh chạy lại",
+  );
 
   /*
     ───────── TRẦN ĐẾM TỪ SỔ, KHÔNG TỪ BỘ NHỚ ─────────

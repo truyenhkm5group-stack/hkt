@@ -86,13 +86,50 @@ export function checkRerun(input: { branch: string; agentKey: string; soLuotDaCo
  * câu nhắc ấy chặn được gì (hàng rào nằm ở `checkWritePath`), mà vì một model đọc thấy yêu cầu
  * mâu thuẫn nên biết trước rằng nó sẽ bị chặn, thay vì thử rồi thất bại giữa chừng.
  */
-export function goiPhanHoi(nhanXet: readonly { tacGia: string; noiDung: string }[]): string {
+export function goiPhanHoi(
+  nhanXet: readonly { tacGia: string; noiDung: string }[],
+  tepDaCo: readonly string[] = [],
+): string {
   if (!nhanXet.length) return "";
   const than = nhanXet
     .map((n) => `— ${n.tacGia}: ${n.noiDung.replace(/\s+/g, " ").trim()}`)
     .join("\n")
     .slice(0, RERUN_RULE.maxFeedbackChars);
+  /*
+    ═══ NÓI RA THỨ ĐÃ CÓ, KHÔNG ĐỂ AGENT TỰ ĐI TÌM ═══
+
+    Đề bài của lượt chạy lại xưa nay là đề bài GỐC cộng thêm khối phản hồi này. Không dòng nào nói
+    rằng nhánh ĐÃ CÓ kết quả của lượt trước — nên model đọc lại đề bài gốc ("Kiểm tra trang vận đơn
+    có tự tính kết quả đơn không") và làm LẠI cả cuộc điều tra từ đầu.
+
+    Đo thật 22/09/2026 trên TECH-8: ba yêu cầu sửa cỏn con — một năm ghi sai, hai lỗi chính tả,
+    thêm một mục ngắn — tốn **24 vòng (chạm trần), $0,1021, và KHÔNG commit nào**. Bốn cổng vẫn
+    xanh, vì chúng chấm cây làm việc chứ không chấm việc agent có làm xong hay chưa.
+
+    Trần vòng KHÔNG phải nguyên nhân: nâng nó chỉ cho lượt lạc đường đi xa hơn và tốn hơn. Cái
+    thiếu là một câu nói thẳng rằng tài liệu đã nằm sẵn đó, và việc lần này là SỬA chứ không phải
+    ĐIỀU TRA.
+  */
+  const daCo = tepDaCo.length
+    ? [
+        "",
+        `LƯỢT TRƯỚC ĐÃ TẠO SẴN ${tepDaCo.length} TỆP TRÊN CHÍNH NHÁNH NÀY:`,
+        /*
+          DẤU ĐẦU DÒNG Ở ĐÂY CỐ Ý KHÁC dấu của khối bình luận bên dưới.
+
+          Khối bình luận dùng `— `, và `tests/agent-rerun.test.ts` ĐẾM những dòng ấy để chứng minh
+          "một bình luận ra đúng một dòng". Dùng chung ký tự thì mỗi tệp cũng thành một dòng bình
+          luận trong mắt bài kiểm, và phép đếm ấy lặng lẽ mất nghĩa.
+        */
+        ...tepDaCo.map((t) => `· ${t}`),
+        "",
+        "ĐỌC CHÚNG TRƯỚC KHI LÀM BẤT CỨ GÌ KHÁC. Việc lần này là SỬA những tệp ấy theo phản hồi bên",
+        "dưới — KHÔNG điều tra lại từ đầu, KHÔNG viết tệp mới. Phần nào phản hồi không nhắc tới thì",
+        "giữ nguyên.",
+      ]
+    : [];
   return [
+    ...daCo,
     "",
     "PHẢN HỒI CỦA NGƯỜI XEM (đây là YÊU CẦU SỬA, không phải đề bài mới):",
     than,
