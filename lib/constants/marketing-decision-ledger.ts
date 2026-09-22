@@ -28,21 +28,58 @@ import type { Period } from "@/lib/search-params";
  */
 
 /**
- * ───────────── KỲ CHUẨN: MỘT, VÀ KHÔNG PHỤ THUỘC NGƯỜI ĐANG XEM ─────────────
+ * ───────────── KỲ CHUẨN: MỘT, VÀ NÓ PHẢI LÙI LẠI ĐỦ XA ─────────────
  *
  * Bảng trên màn hình chạy theo kỳ người dùng chọn — đổi từ tháng sang tuần là đổi khuyến nghị, và
  * đó là hành vi ĐÚNG cho một màn tra cứu. Nhưng một dòng sổ phải so sánh được với dòng hôm qua,
  * nên nó chỉ được sinh ra trên MỘT kỳ đã khai.
  *
- * **14 ngày, kết thúc ở NGÀY HÔM QUA (giờ Việt Nam).**
+ * **14 ngày, KẾT THÚC 15 NGÀY TRƯỚC.**
  *
- * · *Kết thúc hôm qua* vì hôm nay chưa đóng: tiền quảng cáo tiêu từ sáng còn hàng thì chưa tới tay
- *   ai. Một ngày đang chạy luôn trông như đang lỗ.
- * · *14 ngày* vì cổng độ chín của `decideAction` đòi 60% số đơn đã ngã ngũ. Hàng đi 3–7 ngày, nên
- *   cửa sổ 7 ngày sẽ rơi vào `INSUFFICIENT_DATA` gần như mọi hôm — một sổ toàn chữ "chưa đủ dữ
- *   liệu" thì không phải trí nhớ, chỉ là tiếng ồn có ngày tháng.
+ * ─── VÌ SAO KHÔNG KẾT THÚC Ở HÔM QUA, NHƯ BẢN ĐẦU ───
+ *
+ * Bản đầu chọn "kết thúc hôm qua" và biện minh bằng câu *"hàng đi 3–7 ngày"*. Câu ấy **chưa bao giờ
+ * được đo**, và nó sai với mô hình BÁN TRƯỚC của shop. Đường cong độ chín thật, đo trên production
+ * 22/09/2026 (2.492 đơn đã chốt trong 60 ngày):
+ *
+ * | Tuổi đơn | Đã ngã ngũ |
+ * |---|---|
+ * | 0–6 ngày  | **8,2%** |
+ * | 7–13      | 28,9% |
+ * | 14–20     | **83,5%** |
+ * | 21–29     | 93,4% |
+ * | 30–44     | 98,7% |
+ *
+ * Cửa sổ "1–14 ngày tuổi" vì thế có độ chín ~18% — và `decideAction` đòi 60%. Hệ quả đo được ở lượt
+ * ghi sổ đầu tiên: **425/425 dòng cấp chiến dịch đều `INSUFFICIENT_DATA`**, độ chín trung bình
+ * **0,02** ở cấp chiến dịch và **0,18** ở cấp mã hàng. Một cuốn sổ chỉ ghi "chưa đủ dữ liệu" thì
+ * không phải trí nhớ, chỉ là tiếng ồn có ngày tháng.
+ *
+ * Lùi cửa sổ về `[D−28, D−15]` cho cohort tuổi 15–28 ngày ⇒ độ chín ~93%. Đó là cửa sổ ĐẦU TIÊN
+ * vượt ngưỡng một cách thoải mái; `[D−21, D−8]` chỉ được ~55%, tức vẫn trượt.
+ *
+ * ─── CÁI GIÁ, VÀ VÌ SAO NÓ KHÔNG TRÁNH ĐƯỢC ───
+ *
+ * Quyết định về TIỀN vì thế trễ hai tuần: hôm nay ta kết luận về ngân sách đã tiêu 2–4 tuần trước.
+ * Đó không phải khuyết điểm của ERP mà là hình dạng của mô hình bán trước — **kết quả tiền của một
+ * đồng quảng cáo hôm nay đơn giản là chưa tồn tại**. Rút ngắn cửa sổ không làm nó tồn tại sớm hơn,
+ * chỉ làm ERP kết luận trên phần hoàn chưa về, tức lợi nhuận đẹp hơn sự thật.
+ *
+ * Những thứ KHÔNG cần đợi giao hàng — tiêu tiền mà không ra đơn, giá tin nhắn vọt, tỷ lệ chốt sụp —
+ * đã có đường riêng ở `lib/marketing/alerts.ts` với cửa sổ NÓNG (hôm nay / hôm qua). Hai câu hỏi
+ * khác nhau, hai cửa sổ khác nhau; gộp chúng là lý do phần lớn hệ thống cảnh báo bị tắt sau một tuần.
  */
 export const LEDGER_WINDOW_DAYS = 14;
+
+/**
+ * Cửa sổ kết thúc cách hôm nay bấy nhiêu ngày. `1` = kết thúc hôm qua (bản đầu); `15` = lùi đủ xa
+ * để cohort đạt ~93% độ chín theo đường cong đo được ở trên.
+ *
+ * > Đây là NGƯỠNG NGHIỆP VỤ (AGENTS.md mục 7): nó đánh đổi **độ tin cậy** lấy **độ trễ**. Con số
+ * > hiện tại suy ra từ phép đo, không phải từ sở thích — nhưng chủ shop muốn quyết định sớm hơn và
+ * > chấp nhận kết luận trên dữ liệu non thì đó là quyền của chủ shop, và chỉ sửa ở ĐÂY.
+ */
+export const LEDGER_SETTLE_LAG_DAYS = 15;
 
 /**
  * ───────────── PHIÊN BẢN LUẬT — ĐỔI CÔNG THỨC LÀ CẮT CHUỖI ─────────────
@@ -51,15 +88,17 @@ export const LEDGER_WINDOW_DAYS = 14;
  * không được nối thành một chuỗi "đã giữ 9 ngày". Đây đúng là luật AGENTS.md mục 40 áp cho chỉ số
  * (`METRIC_DEFINITION_VERSION`): hai kỳ khác phiên bản đứng trên hai tập luật khác nhau.
  *
- * **Tăng số này mỗi khi `ADS_DECISION_RULE` hoặc `decideAction()` đổi.**
+ * **Tăng số này mỗi khi `ADS_DECISION_RULE`, `decideAction()`, hoặc HÌNH DẠNG KỲ CHUẨN đổi.**
+ * Đổi kỳ là đổi TẬP DỮ LIỆU sinh ra kết luận — cùng chữ `CUT` trên hai kỳ khác nhau không phải cùng
+ * một kết luận, đúng như đổi ngưỡng (AGENTS.md mục 40).
  * `tests/marketing-decision-ledger.test.ts` khoá bộ ngưỡng lại: sửa ngưỡng mà quên tăng phiên bản
  * thì bài kiểm đỏ, không phải chuỗi lặng lẽ nói sai.
  */
-export const DECISION_RULE_VERSION = 1;
+export const DECISION_RULE_VERSION = 2;
 
 /** Ảnh chụp ngưỡng đang chạy — ghi vào từng dòng sổ để "vì sao hôm ấy nó nói CẮT" trả lời được mãi mãi. */
 export function decisionRuleSnapshot() {
-  return { version: DECISION_RULE_VERSION, windowDays: LEDGER_WINDOW_DAYS, ...ADS_DECISION_RULE };
+  return { version: DECISION_RULE_VERSION, windowDays: LEDGER_WINDOW_DAYS, settleLagDays: LEDGER_SETTLE_LAG_DAYS, ...ADS_DECISION_RULE };
 }
 
 /**
@@ -155,7 +194,7 @@ export function dayDiff(a: string, b: string): number {
  */
 export function ledgerPeriod(now: Date): { decisionDay: string; period: Period } {
   const decisionDay = vnDay(now);
-  const toKey = shiftDay(decisionDay, -1);
+  const toKey = shiftDay(decisionDay, -LEDGER_SETTLE_LAG_DAYS);
   const fromKey = shiftDay(toKey, -(LEDGER_WINDOW_DAYS - 1));
   return {
     decisionDay,
