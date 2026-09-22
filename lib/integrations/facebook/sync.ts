@@ -323,6 +323,7 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
         }
 
         let soNgayMau = 0;
+        let dongCuaTaiKhoan = 0;
         for (const [date, g] of theoNgay) {
           const campTotal = g.camp.reduce((t, r) => t + Math.round(r.spend * rate), 0);
           const adTotal = g.ad.reduce((t, r) => t + Math.round(r.spend * rate), 0);
@@ -376,6 +377,7 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
             else ctx.summary.updated += 1;
             khoaDaGhi.push(values.externalKey);
             rows += 1;
+            dongCuaTaiKhoan += 1;
           }
 
           // ② Dọn dòng TỰ ĐỘNG của ngày này mà lượt vừa rồi không ghi ra.
@@ -389,7 +391,14 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
         }
 
         await capNhatSoMauVaNhom(adRows, account.accountId);
-        ctx.log(`${account.name} (${account.accountId}): ${theoNgay.size} ngày · ${soNgayMau} ngày ở hạt MẨU · ${rows} dòng`);
+        /*
+          IN SỐ DÒNG CỦA CHÍNH TÀI KHOẢN NÀY, không in bộ đếm chung.
+
+          Bản trước in `rows` — biến cộng dồn qua mọi tài khoản — nên nhật ký đọc ra
+          "HIEU.HM 01: 0 ngày · 0 ngày ở hạt MẨU · 152 dòng", tức một tài khoản không có ngày nào
+          lại trông như đã ghi 152 dòng. Con số đúng thì vô nghĩa khi đứng cạnh sai nhãn.
+        */
+        ctx.log(`${account.name} (${account.accountId}): ${theoNgay.size} ngày · ${soNgayMau} ngày ở hạt MẨU · ${dongCuaTaiKhoan} dòng`);
       } catch (error) {
         ctx.summary.failed += 1;
         const message = moTaLoiCsdl(error);
@@ -406,13 +415,17 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
       mất khỏi báo cáo.
     */
     /*
-      HAI CON SỐ NÀY VÀO `detail`, KHÔNG VÀO `log`.
+      HAI CON SỐ NÀY VÀO `detail`, KHÔNG VÀO `log` — nhưng vào ở LẦN GÁN CUỐI CÙNG.
 
-      `detail` hiện thẳng trên trang Kết nối dữ liệu và trong mọi lượt tra `sync_runs`, nên câu hỏi
-      "hôm nay có bao nhiêu ngày lấy được chi tiết cấp mẩu" trả lời được mà không phải mở log.
+      Bản trước đặt `detail` ngay tại đây và bị lần gán ở cuối hàm ghi đè, nên số liệu hạt KHÔNG BAO
+      GIỜ tới được `sync_runs`. Đo production 22/09/2026: `detail` in đúng câu cũ ("dòng ngày×chiến
+      dịch") suốt hai lượt chạy sau khi vá.
+
+      Và bài kiểm vẫn xanh, vì nó chỉ hỏi "có dòng nào gán `detail` kèm chữ hạt MẨU không" — không
+      hỏi dòng ấy có phải dòng CUỐI hay không. Một bộ gác đúng mà vô dụng. Nay chỉ còn MỘT lần gán
+      `detail` trong cả hàm, và bài kiểm đếm số lần gán ấy.
     */
     const tongNgay = ngayHatMau + ngayHatChienDich;
-    ctx.summary.detail = `${accounts.length} tài khoản · ${rows} dòng · ${tongNgay} (tài khoản × ngày): ${ngayHatMau} ở hạt MẨU, ${ngayHatChienDich} ở hạt CHIẾN DỊCH · ghép được mã hàng ${matched}/${rows}`;
 
     /*
       LÙI HẠT LÀ CẢNH BÁO, KHÔNG PHẢI CHUYỆN BÌNH THƯỜNG — nhưng cũng KHÔNG phải lỗi.
@@ -471,7 +484,7 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
       ctx.summary.warning = [ctx.summary.warning, `Không áp lại được bảng ghép mã hàng: ${message.slice(0, 200)}. Số liệu quảng cáo của lượt này VẪN ĐÃ GHI XONG.`].filter(Boolean).join(" · ");
       ctx.log(`áp lại ghép mã hàng hỏng: ${message}`);
     }
-    ctx.summary.detail = `${accounts.length} tài khoản · ${rows} dòng ngày×chiến dịch (${since} → ${until}) · ghép được mã hàng ${matched}/${rows}${errors.length ? ` · lỗi: ${errors.join(" | ")}` : ""}`;
+    ctx.summary.detail = `${accounts.length} tài khoản · ${rows} dòng (${since} → ${until}) · ${tongNgay} (tài khoản × ngày): ${ngayHatMau} ở hạt MẨU, ${ngayHatChienDich} ở hạt CHIẾN DỊCH · ghép được mã hàng ${matched}/${rows}${errors.length ? ` · lỗi: ${errors.join(" | ")}` : ""}`;
     publish({ type: "ads" });
     return { accounts: accounts.length, rows, matched };
   });
