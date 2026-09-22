@@ -250,6 +250,55 @@ vì phải tin:
 
 ---
 
+---
+
+## 7b. Hạ hạt đã chạy thật — đối chiếu trước/sau trên production
+
+Deploy 22/09 chiều, rồi chạy `sync-facebook-ads --days=3` và đo lại **đúng câu SQL** của ảnh chụp
+trước đó (AGENTS.md mục 6.5).
+
+| Ngày | Trước (dòng / chi) | Sau (dòng / chi) | Δ tiền |
+|---|---|---|---|
+| **20/09** | 37 / 3.806.757 ₫ | **51** / 3.806.757 ₫ | **0 ₫** |
+| 21/09 | 40 / 5.901.807 ₫ | 57 / 5.901.935 ₫ | +128 ₫ — làm tròn từng dòng |
+| 22/09 *(hôm nay, còn đang tiêu)* | 35 / 3.096.617 ₫ | 37 / 3.276.410 ₫ | +179.793 ₫ |
+| 19/09 *(ngoài cửa sổ đồng bộ)* | 61 / 4.367.171 ₫ | 61 / 4.367.171 ₫ | 0 ₫ |
+
+**Ngày 20/09 là bằng chứng sạch nhất: số dòng tăng 38%, tiền không đổi một đồng.**
+
+Và bất biến giữ được:
+
+```
+cặp (tài khoản × ngày) mang HAI hạt : 0
+cặp (chiến dịch × ngày) mang HAI hạt: 0
+tổng cặp đã xét                     : 19
+```
+
+### Một ngày CÓ THỂ mang hai hạt, và đó không phải lỗi
+
+Ngày 22/09 có **16 chiến dịch ở hạt MẨU và 19 ở hạt CHIẾN DỊCH**. Hàng rào quyết định hạt theo
+**(tài khoản × ngày)**, nên với 7 tài khoản thì một NGÀY có thể có tài khoản ở hạt này và tài khoản
+ở hạt kia. 16 + 19 = 35 = đúng số chiến dịch của ngày ấy ⇒ **hai tập rời nhau, không đồng nào bị
+đếm hai lần**.
+
+Bất biến đúng là *"một **(tài khoản × ngày)** một hạt"* — không phải *"một ngày một hạt"*. Viết tắt
+thành vế sau là mô tả sai hàng rào, và người đọc sẽ tưởng bảng đang hỏng khi nó đang chạy đúng.
+
+### Và cổng an toàn đã im lặng — lỗi tìm ra bằng cách CHẠY THẬT
+
+Không có đường nào biết 19 trường hợp kia là `MISMATCH` hay `NO_AD_DATA`, mà **hai thứ đó sửa ở hai
+chỗ khác nhau** — đúng lý do ba phán quyết được tách riêng ngay từ đầu.
+
+Nguyên nhân: cổng ghi lý do vào `ctx.log`, còn `runSyncJob` chỉ giữ **5 dòng cuối** và chỉ đổ chúng
+vào `sync_runs.error` **khi** lượt chạy có `warning`. Lượt ấy không đặt warning nên ghi `SUCCESS`,
+và với 7 tài khoản × 3 ngày thì lý do bị đẩy ra ngoài cửa sổ trước khi ai kịp đọc.
+
+> **Một cổng an toàn im lặng lùi về phía an toàn là một cổng không sửa được.**
+
+Đã vá: số (tài khoản × ngày) ở mỗi hạt vào `summary.detail`; có ngày lùi hạt ⇒ `summary.warning` ⇒
+lượt chạy ghi **PARTIAL** kèm tối đa 8 lý do nguyên vẹn. Bốn cổng đều xanh trong suốt thời gian lỗi
+này tồn tại — nó chỉ lộ ra khi có người chạy thật rồi đi đọc kết quả.
+
 ## 8. Câu SQL đã dùng
 
 Ba câu dưới đây chạy được nguyên văn qua ops `db-query` (một câu mỗi lần, enum cast `::text`) để đo
