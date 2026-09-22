@@ -38,7 +38,39 @@ import { TECH_TASK_TRANSITIONS, type TechTaskStatus } from "@/lib/constants/tech
  * lần mất điện, một lần đổi lịch, hay một lượt chạy khởi động từ chỗ khác. Bằng chứng "việc này
  * đã có PR" KHÔNG hết hạn khi PR gộp; nó chỉ mạnh thêm.
  *
- * ─── MÁY KHÔNG CÃI NGƯỜI ───
+ * ─── MÁY KHÔNG CÃI NGƯỜI — NHƯNG CHỈ Ở ĐÚNG BƯỚC NGƯỜI ĐÃ LẬT ───
+ *
+ * Bản đầu hỏi một câu quá rộng: *"lượt đổi trạng thái gần nhất có phải của NGƯỜI không?"* Nếu có
+ * thì máy im lặng, vĩnh viễn.
+ *
+ * ĐÃ ĐO THẬT trên production 22/09/2026 — và hậu quả lớn hơn nhiều so với ý định:
+ *
+ *     BRANCH | SYSTEM | mubjc3n2 → mubycq1x | 22/09 00:58
+ *     …
+ *     STATUS | HUMAN  | NEW → TRIAGED       | 21/09 15:10   ← lượt đổi gần nhất
+ *
+ * TECH-3 có PR #94 đang MỞ, phép chiếu đã ghép đúng, bộ đẩy chạy đều 5–10 phút một lần và luôn
+ * SUCCESS. Nó vẫn đứng yên, vì lượt đổi trạng thái gần nhất là của người — xảy ra **10 tiếng
+ * trước khi PR tồn tại**.
+ *
+ * Và đây không phải một ca lẻ. **Mọi việc thật đều bắt đầu bằng người kéo `NEW → TRIAGED`**, còn
+ * máy thì không bao giờ tự đặt `TRIAGED` (nó nằm trong `TASK_ADVANCE_NEVER`). Nên lượt đổi gần
+ * nhất của mọi việc thật LUÔN là của người, và cả Nấc 4 chưa từng nổ được một lần nào.
+ *
+ * ─── CÂU HỎI HẸP HƠN, GIỮ NGUYÊN THỨ CẦN GIỮ ───
+ *
+ * Thứ luật cũ sinh ra để chặn là PING-PONG: người kéo `REVIEW → BUILDING` vì họ biết điều máy
+ * không biết, rồi máy đẩy lại `BUILDING → REVIEW` sau mười phút — và lần thứ hai họ tắt hẳn bộ
+ * này đi.
+ *
+ * Nên câu hỏi đúng không phải "người có vừa đổi không", mà **"người có vừa LẬT NGƯỢC đúng bước
+ * máy đang định đi không"**:
+ *
+ *     người `REVIEW → BUILDING`, máy muốn `BUILDING → REVIEW`   ⇒ NHƯỜNG (đúng bước bị lật)
+ *     người `NEW → TRIAGED`,     máy muốn `TRIAGED → BUILDING`  ⇒ ĐI TIẾP (chưa ai phản đối)
+ *
+ * Cùng hình dạng với luật mục 59 của care: không chặn theo "có người động vào", mà chặn theo
+ * ĐÚNG cái sự kiện chứng minh người đã phản đối.
  *
  * Nếu lượt đổi trạng thái GẦN NHẤT là do NGƯỜI làm, máy KHÔNG đẩy tiếp. Không có luật này thì một
  * người kéo việc từ `REVIEW` về `BUILDING` (vì họ biết điều gì đó máy không biết) sẽ thấy nó tự
@@ -102,10 +134,20 @@ export type AdvanceVerdict =
  * Mỗi lượt chỉ đi MỘT bước, cố ý: từng bước để lại một dòng sự kiện đọc được, và một việc nhảy ba
  * bậc trong một lượt thì không ai đọc lại được nó đã đi qua đâu.
  */
-export function shouldAdvanceTask(input: { status: string; pr: TaskPrState; nguoiVuaDoi: boolean }): AdvanceVerdict {
-  if (input.nguoiVuaDoi) {
-    return { advance: false, reason: "Lượt đổi trạng thái gần nhất là do NGƯỜI — máy không đẩy tiếp." };
-  }
+/** Lượt đổi trạng thái GẦN NHẤT do NGƯỜI làm — `null` nghĩa là chưa người nào từng đổi. */
+export type LuotNguoiDoi = { tu: string; sang: string } | null;
+
+/**
+ * Người có vừa LẬT NGƯỢC đúng bước máy đang định đi không — HÀM THUẦN.
+ *
+ * Lật ngược = người đi từ ĐÍCH của máy về ĐÚNG trạng thái hiện tại. Đó là bằng chứng duy nhất
+ * cho thấy họ đã nhìn thấy bước ấy và không muốn nó.
+ */
+export function nguoiDaLatNguoc(luot: LuotNguoiDoi, tu: string, den: string): boolean {
+  return luot !== null && luot.tu === den && luot.sang === tu;
+}
+
+export function shouldAdvanceTask(input: { status: string; pr: TaskPrState; nguoiDoi: LuotNguoiDoi }): AdvanceVerdict {
   const tuTrangThai = TASK_ADVANCE_RULES.filter((r) => r.from === input.status);
   if (!tuTrangThai.length) return { advance: false, reason: `Trạng thái ${input.status} không có luật đẩy tự động.` };
   const luat = tuTrangThai.find((r) => r.khi(input.pr));
@@ -122,6 +164,13 @@ export function shouldAdvanceTask(input: { status: string; pr: TaskPrState; nguo
   */
   if (!TECH_TASK_TRANSITIONS[luat.from]?.includes(luat.to)) {
     return { advance: false, reason: `${luat.from} → ${luat.to} KHÔNG còn là phép chuyển hợp lệ — luật đẩy tự động đã trôi khỏi TECH_TASK_TRANSITIONS.` };
+  }
+  /*
+    NHƯỜNG NGƯỜI — nhưng chỉ ở ĐÚNG bước họ đã lật. Xem khối docblock bên trên: hỏi rộng hơn thế
+    thì bộ đẩy tê liệt với mọi việc thật.
+  */
+  if (nguoiDaLatNguoc(input.nguoiDoi, luat.from, luat.to)) {
+    return { advance: false, reason: `NGƯỜI vừa kéo ${luat.to} về ${luat.from} — máy không đẩy lại đúng bước họ đã lật.` };
   }
   return { advance: true, to: luat.to, reason: luat.viSao(input.pr) };
 }
