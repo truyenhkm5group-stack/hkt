@@ -45,6 +45,16 @@ export async function testAgentTaskRead() {
   assert.equal(ok.task.code, "RD-1");
   assert.equal(ok.task.agentKey, `${TIEN_TO}doc`);
   assert.deepEqual([...ok.task.writeGlobs], ["docs/"], "phải kèm phạm vi ghi của VAI để runner dựng đúng hàng rào");
+  /*
+    MỨC CHỦ SHOP ĐÃ CẤP CŨNG PHẢI ĐI KÈM.
+
+    Runner chạy trên CSDL PGlite dùng-một-lần, gieo từ `TECH_AGENT_TEMPLATES` — tức mang mức của
+    MÃ NGUỒN, không mang mức của PRODUCTION. Thiếu trường này thì một vai được chủ shop cấp R2 vẫn
+    bị chính runner chặn bằng "chỉ được phép R0" (đo 22/09/2026 trên TECH-12).
+
+    Đây là dữ liệu KHÔNG nhạy cảm: nó nói vai được phép làm gì, không nói việc có gì trong đó.
+  */
+  assert.deepEqual([...ok.task.agentAllowedRisks], ["R0"], "phải kèm mức chủ shop đã cấp cho vai — sổ cục bộ của runner không có nó");
 
   /*
     ───────── DANH SÁCH TRƯỜNG LÀ ĐÓNG ─────────
@@ -55,7 +65,7 @@ export async function testAgentTaskRead() {
   */
   assert.deepEqual(
     Object.keys(ok.task).sort(),
-    ["agentKey", "code", "description", "module", "risk", "taskType", "title", "writeGlobs"],
+    ["agentAllowedRisks", "agentKey", "code", "description", "module", "risk", "taskType", "title", "writeGlobs"],
     "cửa đọc chỉ được trả về đúng danh sách trường đã khai",
   );
   for (const cam of ["approvalStatus", "approvedBy", "prUrl", "branch", "worktree", "createdBy", "blockedReason"]) {

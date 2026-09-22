@@ -40,6 +40,22 @@ export type AgentTaskPayload = {
   agentKey: string;
   /** Phạm vi ghi của vai được gán — để runner dựng hàng rào ĐÚNG cho vai ấy. */
   writeGlobs: readonly string[];
+  /**
+   * Mức rủi ro CHỦ SHOP đã cấp cho vai này, đọc từ `tech_agents` trên production.
+   *
+   * Runner chạy trên máy GitHub Actions với một CSDL PGlite DÙNG-MỘT-LẦN, gieo từ
+   * `TECH_AGENT_TEMPLATES` trong mã. Mẫu khai `documentation: ["R0"]`, nên bản mirror cục bộ nói
+   * MỘT ĐẰNG còn production nói MỘT NẺO — và runner tin bản cục bộ.
+   *
+   * Đã cắn thật 22/09/2026: chủ shop cấp R2 cho `documentation`, việc TECH-12 đi qua đủ mọi cổng
+   * của ERP, rồi runner chặn lại bằng *"agent Tài liệu chỉ được phép R0"* — một câu KHÔNG còn đúng
+   * ở nơi có thẩm quyền. Cờ `enabled` xưa nay vẫn đi theo đường này; mức rủi ro thì bị bỏ quên.
+   *
+   * Đây KHÔNG phải chỗ để "không tin lời ERP": mức được cấp là QUYẾT ĐỊNH của chủ shop, ghi ở
+   * production, và runner không có cách nào tự suy ra. Thứ runner tự kiểm lại là MỨC RỦI RO CỦA
+   * VIỆC và PHẠM VI GHI — hai thứ suy được từ dữ liệu, và vẫn được kiểm ở `agent-fetch-task.ts`.
+   */
+  agentAllowedRisks: readonly string[];
 };
 
 export type AgentTaskResult = { ok: true; task: AgentTaskPayload } | { error: string; code: "UNKNOWN_TASK" | "NOT_DISPATCHABLE" };
@@ -104,6 +120,7 @@ export async function readAgentTask(taskCode: string): Promise<AgentTaskResult> 
       risk: task.risk,
       agentKey: agent?.key ?? "",
       writeGlobs: writeGlobsForRole(agent?.role ?? null),
+      agentAllowedRisks: agent?.allowedRisks ?? [],
     },
   };
 }

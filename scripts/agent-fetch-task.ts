@@ -32,7 +32,7 @@ import { PHAM_VI_CHI_SINH_CHU, chiSinhRaChu } from "@/lib/constants/agent-dispat
 import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import { TECH_AGENT_TEMPLATES } from "@/lib/constants/tech";
 import { classifyTechRisk } from "@/lib/constants/tech-risk";
-import { createTechTask, seedTechAgents, setTechAgentEnabled, type TechActor } from "@/lib/tech/service";
+import { createTechTask, seedTechAgents, setTechAgentEnabled, setTechAgentRisks, type TechActor } from "@/lib/tech/service";
 
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -59,6 +59,8 @@ type ViecNhanDuoc = {
   risk: string;
   agentKey: string;
   writeGlobs: string[];
+  /** Mức chủ shop đã cấp cho vai, đọc từ production — sổ cục bộ gieo từ mẫu nên KHÔNG có nó. */
+  agentAllowedRisks: string[];
 };
 
 async function main() {
@@ -163,6 +165,27 @@ async function main() {
     process.exit(1);
   }
   await setTechAgentEnabled({ agentId: vai.id, enabled: true }, nguoi);
+
+  /*
+    MỨC CHỦ SHOP CẤP PHẢI ĐI THEO VIỆC — CÙNG ĐƯỜNG VỚI CỜ BẬT/TẮT.
+
+    Sổ agent cục bộ gieo từ `TECH_AGENT_TEMPLATES`, nên nó mang mức của MÃ NGUỒN chứ không mang
+    mức của PRODUCTION. `runner.ts` lại hỏi đúng bản cục bộ ấy. Hệ quả đo được 22/09/2026: chủ shop
+    cấp R2 cho `documentation`, TECH-12 qua đủ mọi cổng của ERP, rồi runner chặn bằng câu
+    *"agent Tài liệu chỉ được phép R0"* — một câu không còn đúng ở nơi có thẩm quyền.
+
+    Cờ `enabled` xưa nay vẫn đi theo đường này (ngay dòng trên). Mức rủi ro bị bỏ quên, và chỉ một
+    lượt chạy THẬT mới lộ ra.
+  */
+  const capMuc = await setTechAgentRisks(
+    { agentId: vai.id, allowedRisks: [...viec.agentAllowedRisks], reason: `Chép mức chủ shop đã cấp trên production cho vai “${viec.agentKey}” sang sổ cục bộ của lượt chạy.` },
+    nguoi,
+  );
+  if ("error" in capMuc) {
+    console.error(`✗ Không chép được mức của vai: ${capMuc.error}`);
+    process.exit(1);
+  }
+  console.log(`mức    ${viec.agentAllowedRisks.join(", ") || "(chưa khai)"} · chép từ production sang sổ cục bộ`);
 
   /*
     GIEO LẠI BẰNG ĐÚNG HÀM DỊCH VỤ mà `/tech` dùng, KHÔNG `insert` thẳng: mức rủi ro, cổng phê
