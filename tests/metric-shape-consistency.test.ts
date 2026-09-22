@@ -6,7 +6,9 @@ import { clearMemo } from "@/lib/cache";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { CONFIRMED_ORDER, IS_RETURNED, metricScope } from "@/lib/queries/metrics";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
-import { ORDER_OUTCOME, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
+import { getReturnRateBySource, ORDER_OUTCOME, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
+import { ORDER_SOURCE } from "@/lib/queries/order-source";
+import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import { getProductIntelligence } from "@/lib/queries/product-intelligence";
 import { getProfitReport } from "@/lib/queries/reports";
 import { listProducts, productFacets, PRODUCT_SORTABLE } from "@/lib/queries/products";
@@ -184,7 +186,57 @@ export async function testMetricShapeConsistency(db: Db) {
   assert.ok(shipLine, "phải có dòng cước gửi hàng trong bảng phân rã");
   assert.equal(Math.abs(shipLine.amount), Number(naive.shippingDelivered), "cước chiều giao phải giống hệt cách tính nội tuyến");
 
+  /* ───────── Tỷ lệ hoàn THEO NGUỒN ĐƠN: bảng dẫn xuất vs nội tuyến ─────────
+
+     Hàm này là hàm ở mức ĐƠN cuối cùng còn viết theo lối nội tuyến, và nó đã trả giá đắt nhất:
+     đo production 22/09/2026 thấy **31.211ms nguội ↔ 30.122ms ẤM** — không nhanh lên một chút
+     nào khi đệm đầy, tức làm lại đủ từ đầu mỗi lần ai mở trang. Kế hoạch mang 246 `SubPlan` cho
+     một phép đếm trả về ĐÚNG BA DÒNG.
+
+     `ORDER_SOURCE` làm ca này khó hơn hai ca trên: nó vừa nằm ở danh sách chọn VỪA nằm ở
+     `group by`, và bản thân nó là một `CASE` mang `exists` trên `landing_orders`. Chuyển sang
+     bảng dẫn xuất nghĩa là nó được tính một lần rồi gộp theo BÍ DANH — nếu phép đổi ấy làm lệch
+     cách xếp nhóm thì một đơn sẽ nhảy nguồn, và khối dưới đây bắt được ngay. */
+  const sourceCanonical = await db
+    .select({
+      source: ORDER_SOURCE,
+      orders: sql<number>`count(*)`,
+      shipped: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
+      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
+      returned: sql<number>`count(*) filter (where ${IS_RETURNED})`,
+      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
+      failed: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED')`,
+      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
+      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME} = 'DELIVERED'), 0)`,
+      lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
+    })
+    .from(o)
+    .leftJoin(s, eq(s.orderId, o.id))
+    .where(REPORTABLE_ORDER)
+    .groupBy(ORDER_SOURCE);
+
+  const sourceFast = await getReturnRateBySource(ALL, "");
+  const bySource = new Map(sourceFast.map((r) => [r.source, r]));
+  assert.ok(sourceCanonical.length > 0, "bộ dữ liệu kiểm thử phải có ít nhất một nguồn đơn để so sánh");
+  assert.equal(sourceFast.length, sourceCanonical.length, "hai cách tính phải ra CÙNG SỐ NHÓM NGUỒN — lệch nghĩa là phép gộp đã đổi cách xếp nhóm");
+  let soNguon = 0;
+  for (const row of sourceCanonical) {
+    const fast = bySource.get(row.source);
+    assert.ok(fast, `nguồn ${row.source} có trong cách tính nguyên thuỷ nhưng thiếu trong bảng dẫn xuất`);
+    const at = (field: string) => `nguồn ${row.source} · ${field}`;
+    assert.equal(fast.orders, Number(row.orders), at("số đơn"));
+    assert.equal(fast.shipped, Number(row.shipped), at("đã gửi"));
+    assert.equal(fast.delivered, Number(row.delivered), at("giao thành công"));
+    assert.equal(fast.returned, Number(row.returned), at("hoàn"));
+    assert.equal(fast.inTransit, Number(row.inTransit), at("đang giao"));
+    assert.equal(fast.failed, Number(row.failed), at("giao hụt chờ phát lại"));
+    assert.equal(fast.cancelled, Number(row.cancelled), at("huỷ"));
+    assert.equal(fast.revenue, Number(row.revenue), at("doanh thu giao thành công"));
+    assert.equal(fast.lostRevenue, Number(row.lostRevenue), at("doanh thu mất vì hoàn"));
+    soNguon += 1;
+  }
+
   console.log(
-    `✓ Lớp tăng tốc không đổi số liệu: ${compared} mẫu mã khớp từng cột với cách tính nguyên thuỷ · Chân lý tài chính khớp 6/6 con số · Báo cáo lợi nhuận khớp · đệm không đổi kết quả · bộ đếm tồn kho khớp cột tồn (${expected.out} hết hàng · ${expected.low} sắp hết)`,
+    `✓ Lớp tăng tốc không đổi số liệu: ${compared} mẫu mã khớp từng cột với cách tính nguyên thuỷ · ${soNguon} nguồn đơn khớp 9/9 cột · Chân lý tài chính khớp 6/6 con số · Báo cáo lợi nhuận khớp · đệm không đổi kết quả · bộ đếm tồn kho khớp cột tồn (${expected.out} hết hàng · ${expected.low} sắp hết)`,
   );
 }
