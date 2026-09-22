@@ -82,6 +82,9 @@ const JOBS = [
 ];
 
 const DAILY = [
+  // Tỷ giá TRƯỚC mọi việc khác trong ngày: mọi con số tiền quy từ USD trong ngày hôm nay đều
+  // dùng nó, nên lấy muộn hơn là một buổi sáng tính bằng giá hôm qua mà không ai biết.
+  { job: "vcb-rate", hour: 1, minute: 45 },
   { job: "pancake-reconcile", hour: 2, minute: 15 }, // 02:15 giờ Việt Nam
   { job: "vtp-tracking", hour: 3, minute: 0, query: "all=1&limit=2000" },
   { job: "pancake-warehouses", hour: 3, minute: 30 },

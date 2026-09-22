@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { recommendSize, resolveSizeRule, type SizeRule } from "@/lib/constants/size-engine";
 import { allKeysOf, sizePayloadSchema, type SizePayload } from "@/lib/constants/size-rules-payload";
+import { renderTemplate } from "@/lib/ai-workforce/agents/sales/generate";
+import { EMPTY_SALES_STATE } from "@/lib/ai-workforce/agents/sales/state";
 
 /**
  * ═══════════ BẢNG SỐ ĐO THẬT CỦA SHOP — KHOÁ PHÉP RÃ MA TRẬN ═══════════
@@ -123,8 +125,15 @@ export function testSizeRules() {
     không ai "sửa cho gọn" bằng cách lặng lẽ cắt một dải.
   */
   const oDinh = recommendSize(nam, { heightCm: 180, weightKg: 71 });
-  assert.equal(oDinh.code, "AMBIGUOUS", "cao đúng 180 phải là CHƯA BIẾT, không được tự chọn một bên");
-  assert.deepEqual([...oDinh.candidates].sort(), ["L", "M"], "phải nói rõ đang phân vân giữa hai size nào");
+  assert.equal(oDinh.code, "OK", "rơi đúng ranh giới thì vẫn kết luận được — lấy size lớn hơn");
+  assert.equal(oDinh.size, "L", "M và L cùng khớp ⇒ lấy L, thà rộng còn hơn chật");
+  assert.equal(oDinh.roundedUpFrom, "M", "phải nhớ size nhỏ hơn đã bỏ qua, để câu chữ nói ra được");
+  assert.deepEqual([...oDinh.candidates].sort(), ["L", "M"], "vẫn phải nói rõ hai size nào cùng khớp");
+
+  // Ranh giới ở đầu kia của dải: XL và L cùng khớp ⇒ lấy XL.
+  const oDinhTren = recommendSize(nam, { heightCm: 180, weightKg: 90 });
+  assert.equal(oDinhTren.size, "XL", "XL lớn hơn L — nâng lên XL");
+  assert.equal(oDinhTren.roundedUpFrom, "L");
 
   // Ngoài đúng giá trị dính đó thì hai dải vẫn kết luận bình thường.
   assert.equal(recommendSize(nam, { heightCm: 179, weightKg: 71 }).size, "M");
@@ -171,10 +180,11 @@ export function testSizeRules() {
     Ảnh viết "40-50kg" rồi "50-56kg" rồi "56-63kg", nên 50 và 56 nằm trong HAI size cùng lúc.
     Giữ nguyên và để máy chuyển người: một người 50kg mặc M hay L là quyết định của shop.
   */
-  for (const [kg, cap] of [[50, ["L", "M"]], [56, ["L", "XL"]]] as const) {
+  for (const [kg, lon, nho] of [[50, "L", "M"], [56, "XL", "L"]] as const) {
     const ra = recommendSize(nu, { weightKg: kg });
-    assert.equal(ra.code, "AMBIGUOUS", `${kg}kg nằm trong hai size — phải chuyển người`);
-    assert.deepEqual([...ra.candidates].sort(), [...cap].sort(), `${kg}kg phải nói rõ phân vân giữa ${cap.join(" và ")}`);
+    assert.equal(ra.code, "OK", `${kg}kg nằm giữa hai size — vẫn kết luận được bằng luật nâng size`);
+    assert.equal(ra.size, lon, `${kg}kg phải ra ${lon} (size lớn hơn)`);
+    assert.equal(ra.roundedUpFrom, nho, `${kg}kg phải nhớ đã bỏ qua ${nho}`);
   }
 
   // Khe giữa hai bảng: 63→XL, 64→XXL. Không được có khoảng trống ở đây.
@@ -252,7 +262,38 @@ export function testSizeRules() {
     assert.ok((r.label ?? "").trim().length > 0, `bảng ${r.version} thiếu tên hiển thị`);
   }
 
+  /*
+    ═════════ 7. NÂNG SIZE PHẢI ĐƯỢC NÓI RA ═════════
+
+    Chọn hộ size lớn hơn mà câu chữ im lặng thì khách nhận một cái áo rộng mình không chọn, và
+    cũng không biết mình có quyền đổi. Cái áo rộng ấy quay về thành một đơn đổi size — đúng thứ
+    luật "thà rộng còn hơn chật" định tránh.
+
+    Nên `roundedUpFrom` là một RÀNG BUỘC lên câu chữ, không phải một ghi chú, và bài kiểm này là
+    chỗ duy nhất buộc hai bên phải đi cùng nhau.
+  */
+  const nen = {
+    action: "ASK_SIZE" as const,
+    state: EMPTY_SALES_STATE,
+    sizes: ["M", "L", "XL", "2XL"],
+    colors: [],
+    stockKnown: true,
+    available: 5,
+    shippingFee: 25_000,
+    missing: [],
+    reason: "",
+  };
+  const cauNang = renderTemplate({ ...nen, sizeAdvice: recommendSize(nu, { weightKg: 50 }) });
+  assert.ok(cauNang.includes("L"), "câu chữ phải nêu size đã chọn");
+  assert.ok(cauNang.includes("M"), "câu chữ phải nêu size nhỏ hơn đã bỏ qua — nếu không khách không đổi lại được");
+  assert.ok(/ôm|thoải mái/.test(cauNang), "phải hỏi lại khách thích mặc ôm hay thoải mái, đúng yêu cầu của chủ shop");
+
+  // Không rơi ranh giới thì KHÔNG được thêm câu hỏi thừa — mỗi câu hỏi phụ là một lượt khách có
+  // thể không quay lại.
+  const cauThuong = renderTemplate({ ...nen, sizeAdvice: recommendSize(nu, { weightKg: 45 }) });
+  assert.ok(!/ôm/.test(cauThuong), "số đo rõ ràng thì trả lời thẳng, không hỏi thêm");
+
   console.log(
-    `✓ Bảng số đo thật: ma trận nam ${CAO.length}×${NANG.length} rã đúng từng ô (${oDung} ô có size · ${oHetSize} ô HẾT SIZE ⇒ chuyển người) · 1m80 dính hai dải ⇒ CHƯA BIẾT · bảng nữ chỉ ràng buộc cân nặng, 50kg và 56kg ⇒ CHƯA BIẾT`,
+    `✓ Bảng số đo thật: ma trận nam ${CAO.length}×${NANG.length} rã đúng từng ô (${oDung} ô có size · ${oHetSize} ô HẾT SIZE ⇒ chuyển người) · rơi ranh giới (1m80 · 50kg · 56kg) ⇒ NÂNG size lớn hơn và nhớ size đã bỏ qua`,
   );
 }

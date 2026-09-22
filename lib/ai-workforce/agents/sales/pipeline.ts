@@ -34,7 +34,17 @@ import type { RouteTier, EscalationReason } from "@/lib/constants/ai";
 import type { SizeResultCode } from "@/lib/constants/size-engine";
 
 /** Kết quả máy gợi ý size, đúng hình dạng công cụ `size.recommend` trả về. */
-export type SizeAdvice = { code: SizeResultCode; size: string | null; reason: string; needsHuman: boolean; missing: string[]; candidates: string[] };
+/** Kết quả máy gợi ý size, đúng hình dạng công cụ `size.recommend` trả về. */
+export type SizeAdvice = {
+  code: SizeResultCode;
+  size: string | null;
+  reason: string;
+  needsHuman: boolean;
+  missing: string[];
+  candidates: string[];
+  /** Size nhỏ hơn đã bị bỏ qua khi số đo rơi đúng ranh giới. Khác null ⇒ câu chữ PHẢI nói ra. */
+  roundedUpFrom?: string | null;
+};
 import { nextStage, SALES_STALE_HOURS, type SalesStage } from "@/lib/constants/sales-agent";
 
 // Nạp công cụ vào cổng ngay khi mô-đun được tải: dây chuyền không bao giờ chạy với cổng rỗng.

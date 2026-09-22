@@ -155,8 +155,16 @@ export type SizeRecommendation = {
   reason: string;
   /** Số đo còn thiếu để kết luận được (chỉ có nghĩa với `MEASUREMENTS_MISSING`). */
   missing: MeasurementKey[];
-  /** Các size cùng khớp (chỉ có nghĩa với `AMBIGUOUS`). */
+  /** Các size cùng khớp (có nghĩa với `AMBIGUOUS`, và với `OK` khi đã nâng size). */
   candidates: string[];
+  /**
+   * SIZE NHỎ HƠN ĐÃ BỊ BỎ QUA khi số đo rơi đúng ranh giới hai size. `null` = không nâng.
+   *
+   * Khác `null` nghĩa là câu trả lời CÓ ĐIỀU KIỆN: máy đã chọn hộ theo luật "thà rộng còn hơn
+   * chật", và câu chữ BẮT BUỘC phải nói ra để khách đổi lại được. Giấu đi thì khách nhận một
+   * size mình không chọn và cũng không biết là mình có quyền chọn khác.
+   */
+  roundedUpFrom: string | null;
   ruleVersion: string;
   scope: SizeScope | null;
 };
@@ -181,6 +189,7 @@ export function recommendSize(rule: SizeRule | null, body: BodyMeasurements): Si
       reason: "ERP chưa có bảng số đo cho mẫu này — không có căn cứ nào để gợi ý size",
       missing: [],
       candidates: [],
+      roundedUpFrom: null,
       ruleVersion: rule?.version ?? "",
       scope: rule?.scope ?? null,
     };
@@ -196,6 +205,7 @@ export function recommendSize(rule: SizeRule | null, body: BodyMeasurements): Si
       reason: `Cần thêm: ${missing.map((key) => MEASUREMENT_LABEL[key]).join(", ")}`,
       missing,
       candidates: [],
+      roundedUpFrom: null,
       ruleVersion: rule.version,
       scope: rule.scope,
     };
@@ -209,17 +219,67 @@ export function recommendSize(rule: SizeRule | null, body: BodyMeasurements): Si
       reason: "Số đo của khách nằm ngoài mọi size trong bảng — để nhân viên tư vấn",
       missing: [],
       candidates: [],
+      roundedUpFrom: null,
       ruleVersion: rule.version,
       scope: rule.scope,
     };
   }
   if (fits.length > 1) {
+    /*
+      SỐ ĐO RƠI ĐÚNG RANH GIỚI ⇒ LẤY SIZE LỚN HƠN, VÀ NÓI RA.
+
+      Luật của chủ shop (22/09/2026): "nâng size to hơn để không bị chật, hoặc hỏi lại khách xem
+      muốn mặc ôm hay mặc vừa thoải mái". Hai vế ấy KHÔNG loại trừ nhau và bản này làm cả hai
+      trong MỘT tin: chọn size lớn hơn để không ai nhận một cái áo chật, rồi nói thẳng rằng đã
+      chọn hộ và khách đổi lại được.
+
+      Vì sao không dừng lại ở hỏi: hỏi rồi chờ là mất một lượt, và trên dữ liệu thật phần lớn
+      khách không quay lại trả lời một câu hỏi phụ. Vì sao không chọn im lặng: khách nhận một
+      size mình không chọn và cũng không biết là mình có quyền chọn khác — `roundedUpFrom` khác
+      `null` là một RÀNG BUỘC lên câu chữ, không phải một ghi chú.
+
+      THỨ TỰ SIZE SUY TỪ CHÍNH BẢNG, không từ một danh sách tên ghi cứng. Một bảng có thể dùng
+      XS/S/M/L/XL, bảng khác M/L/XL/2XL, bảng sau nữa dùng số — mọi vốn từ ghi cứng đều sẽ sai
+      với một bảng nào đó. Ở đây "lớn hơn" = size có CẬN TRÊN cao nhất trên chiều đang ràng buộc,
+      đọc trên toàn bộ các dòng của size ấy. Hoà nhau ⇒ không kết luận được ⇒ vẫn là CHƯA BIẾT.
+    */
+    const chieu = MEASUREMENT_KEYS.filter((k) => rule.rows.some((r) => r[k]));
+    // Chiều để xếp hạng: chiều mà các ứng viên THẬT SỰ khác nhau. Cân nặng trước, vì đó là chiều
+    // quyết định độ rộng của áo; chiều cao chỉ phân dải người.
+    const xepTheo = (["weightKg", "bustCm", "hipCm", "waistCm", "heightCm"] as const).find((k) => chieu.includes(k));
+    const tran = (size: string): number | null => {
+      if (!xepTheo) return null;
+      const cans = rule.rows.filter((r) => r.size === size && r[xepTheo]).map((r) => r[xepTheo]![1]);
+      return cans.length ? Math.max(...cans) : null;
+    };
+    const ungVien = [...new Set(fits.map((r) => r.size))];
+    const xep = ungVien.map((s2) => ({ size: s2, tran: tran(s2) })).filter((x) => x.tran !== null) as { size: string; tran: number }[];
+    const caoNhat = xep.length === ungVien.length ? Math.max(...xep.map((x) => x.tran)) : null;
+    const lon = caoNhat === null ? [] : xep.filter((x) => x.tran === caoNhat);
+
+    if (lon.length === 1) {
+      const nho = ungVien.filter((s2) => s2 !== lon[0].size);
+      return {
+        code: "OK",
+        size: lon[0].size,
+        reason: `Số đo nằm giữa ${ungVien.join(" và ")} — lấy size lớn hơn để không bị chật, và hỏi lại khách thích mặc ôm hay thoải mái`,
+        missing: [],
+        candidates: ungVien,
+        roundedUpFrom: nho.join(", "),
+        ruleVersion: rule.version,
+        scope: rule.scope,
+      };
+    }
+
+    // Không xếp được thứ tự (hoà cận trên, hoặc bảng không có chiều số nào để so) ⇒ CHƯA BIẾT.
+    // Đoán ở đây là chọn hộ mà không có căn cứ nào, khác hẳn việc chọn size lớn hơn có căn cứ.
     return {
       code: "AMBIGUOUS",
       size: null,
-      reason: "Số đo rơi vào nhiều size — để nhân viên hỏi thêm sở thích mặc rộng/ôm",
+      reason: "Số đo rơi vào nhiều size mà bảng không cho biết size nào lớn hơn — để nhân viên hỏi thêm",
       missing: [],
-      candidates: fits.map((row) => row.size),
+      candidates: ungVien,
+      roundedUpFrom: null,
       ruleVersion: rule.version,
       scope: rule.scope,
     };
@@ -230,6 +290,7 @@ export function recommendSize(rule: SizeRule | null, body: BodyMeasurements): Si
     reason: rule.note || `Theo bảng số đo ${rule.version} (phạm vi ${rule.scope})`,
     missing: [],
     candidates: [],
+    roundedUpFrom: null,
     ruleVersion: rule.version,
     scope: rule.scope,
   };

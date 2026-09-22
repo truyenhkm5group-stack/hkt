@@ -22,7 +22,7 @@ export type GenerationContext = {
   sizes: string[];
   colors: string[];
   /** Gợi ý size của máy (chỉ dùng khi mã là OK). */
-  sizeAdvice?: { code: string; size: string | null; reason: string } | null;
+  sizeAdvice?: { code: string; size: string | null; reason: string; roundedUpFrom?: string | null } | null;
   /** Tồn có xác định được không — CHƯA BIẾT thì không được hứa còn hàng. */
   stockKnown: boolean;
   available: number | null;
@@ -110,6 +110,20 @@ export function renderTemplate(ctx: GenerationContext): string {
       const sizes = ctx.sizes.length ? ` Mẫu này có size ${ctx.sizes.join(", ")}.` : "";
       // Chỉ nói một size cụ thể khi BẢNG SỐ ĐO kết luận được. Mọi mã khác đều quay về hỏi thêm.
       if (ctx.sizeAdvice?.code === "OK" && ctx.sizeAdvice.size) {
+        /*
+          SỐ ĐO RƠI ĐÚNG RANH GIỚI — PHẢI NÓI RA, KHÔNG ĐƯỢC IM.
+
+          Máy đã chọn hộ size lớn hơn theo luật của chủ shop ("thà rộng còn hơn chật"). Nếu câu
+          chữ không nói ra thì khách nhận một size mình không chọn và cũng không biết mình có
+          quyền chọn khác — và cái áo rộng ấy quay về thành một đơn đổi size.
+
+          Nên một tin làm cả hai việc chủ shop yêu cầu: chọn size lớn hơn, VÀ hỏi lại khách thích
+          mặc ôm hay thoải mái. Hỏi rồi mới chọn thì mất một lượt, và phần lớn khách không quay
+          lại trả lời một câu hỏi phụ.
+        */
+        if (ctx.sizeAdvice.roundedUpFrom) {
+          return `Số đo của chị nằm giữa size ${ctx.sizeAdvice.roundedUpFrom} và ${ctx.sizeAdvice.size} ạ. Em lấy size ${ctx.sizeAdvice.size} cho chị mặc thoải mái nhé — nếu chị thích mặc ôm thì em đổi sang ${ctx.sizeAdvice.roundedUpFrom} giúp chị ạ.`;
+        }
         return `Với số đo của chị thì bên em tư vấn size ${ctx.sizeAdvice.size} ạ.${sizes}`;
       }
       /*

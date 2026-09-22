@@ -230,10 +230,28 @@ export function answerFromKnowledge(
         { field: "bảng số đo", source: `settings["ai.sizeRules"] · bản ${kq.ruleVersion || "—"} · phạm vi ${kq.scope ?? "—"}`, value: `${k.sizeRuleCount} dòng` },
       ];
       if (kq.code === "OK") {
+        /*
+          NÂNG SIZE Ở RANH GIỚI PHẢI ĐƯỢC NÓI RA — Ở CẢ HAI ĐƯỜNG SINH CÂU CHỮ.
+
+          `recommendSize()` nay chọn size lớn hơn khi số đo rơi đúng ranh giới (luật của chủ shop
+          22/09/2026: thà rộng còn hơn chật). Đường này và `generate.ts::renderTemplate` là HAI
+          nơi biến kết quả ấy thành câu chữ; vá một nơi thì nơi kia vẫn nói một size cụ thể mà
+          giấu chuyện đã chọn hộ, và khách nhận một cái áo rộng không biết mình đổi được.
+        */
+        const text = kq.roundedUpFrom
+          ? `Dạ số đo của chị nằm giữa size ${kq.roundedUpFrom} và ${kq.size} ạ. Em tư vấn size ${kq.size} cho chị mặc thoải mái — nếu chị thích mặc ôm thì em đổi sang ${kq.roundedUpFrom} giúp chị ạ.`
+          : `Dạ với số đo của chị thì bên em tư vấn size ${kq.size} ạ.`;
         return {
           intent, action: "ANSWER", capability: can, missing: [], blockedBy: "", humanReview: false,
-          text: `Dạ với số đo của chị thì bên em tư vấn size ${kq.size} ạ.`,
-          provenance: [...nguon, { field: "kết quả tra bảng", source: "size-engine.recommendSize", value: kq.size ?? "" }],
+          text,
+          provenance: [
+            ...nguon,
+            {
+              field: "kết quả tra bảng",
+              source: "size-engine.recommendSize",
+              value: kq.roundedUpFrom ? `${kq.size} (nâng từ ${kq.roundedUpFrom})` : (kq.size ?? ""),
+            },
+          ],
         };
       }
       if (kq.code === "MEASUREMENTS_MISSING") {

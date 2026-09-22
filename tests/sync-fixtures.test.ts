@@ -172,6 +172,7 @@ import { testSalesAgent } from "./sales-agent.test";
 import { testSalesDepartment } from "./sales-department.test";
 import { testSizeRules } from "./size-rules.test";
 import { testSalesFunnelRehearsal } from "./sales-funnel-rehearsal.test";
+import { testVcbRate } from "./vcb-rate.test";
 import { testSalesCopilot } from "./sales-copilot.test";
 import { testProductResolver } from "./product-resolver.test";
 import { testFanpageSales } from "./fanpage-sales.test";
@@ -1650,6 +1651,7 @@ async function main() {
   await testSalesDepartment(db);
   testSizeRules();
   testSalesFunnelRehearsal();
+  testVcbRate();
   await testSalesCopilot(db);
   await testProductResolver(db);
   await testFanpageSales(db);

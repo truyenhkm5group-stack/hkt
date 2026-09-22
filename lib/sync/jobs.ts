@@ -9,6 +9,7 @@ import {
   syncProducts,
   syncWarehouses,
 } from "@/lib/integrations/pancake/sync";
+import { syncVcbRate } from "@/lib/integrations/vcb/sync";
 import { generateRecurringTasks } from "@/lib/work/service";
 import { snapshotPerformance } from "@/lib/work/performance-snapshot";
 import { runEscalationDigest } from "@/lib/work/escalation-run";
@@ -133,6 +134,16 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       // tra ad_id của đơn Pancake → chiến dịch → marketer (ghi nhận đơn đúng người chạy)
       const adIndex = await syncFacebookAdIndex().catch((e) => ({ errors: [e instanceof Error ? e.message : String(e)] }));
       return { ...r, adIndex };
+    },
+  },
+  "vcb-rate": {
+    label: "Tỷ giá USD Vietcombank",
+    source: "ALL",
+    description:
+      "Đọc tỷ giá BÁN USD của Vietcombank rồi quy bảng giá mô hình AI sang VND. Lấy không được thì GIỮ NGUYÊN bảng giá cũ — không bao giờ ghi 0.",
+    run: async (o) => {
+      const r = await syncVcbRate({ apply: o.params?.apply !== "0" });
+      return { imported: 0, updated: r.ok ? r.models.length : 0, skipped: 0, failed: r.ok ? 0 : 1, detail: r.message };
     },
   },
   "landing-sheet": {

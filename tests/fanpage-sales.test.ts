@@ -423,11 +423,19 @@ export async function testFanpageSales(db: Db) {
   assert.ok(/chiều cao/.test(sz2.text) && /cân nặng/.test(sz2.text));
   assert.ok(!/vòng ngực|vòng mông/.test(sz2.text), "KHÔNG đòi cho đủ bộ số đo — bảng không dùng ba vòng");
 
-  // RƠI VÀO HAI SIZE ⇒ CHUYỂN NGƯỜI, không chọn bừa cái nào.
+  /*
+    RƠI VÀO HAI SIZE ⇒ LẤY SIZE LỚN HƠN, VÀ NÓI RA.
+
+    Luật của chủ shop (22/09/2026) thay hành vi cũ ở đây: trước kia chuyển người, nay chọn size
+    lớn hơn để không ai nhận một cái áo chật, rồi hỏi lại khách thích mặc ôm hay thoải mái. Chọn
+    hộ mà IM thì mới là sai — khách nhận cái áo rộng và không biết mình đổi được.
+  */
   const sz3 = answerFromKnowledge("SIZE", bdSize.knowledge, bdSize.permissions, { ...ctxSize, body: { heightCm: 157, weightKg: 51 } });
-  assert.equal(sz3.action, "HANDOFF");
-  assert.ok(sz3.provenance.some((x) => x.value.includes("AMBIGUOUS")), "phải ghi lại là vì rơi vào nhiều size");
-  assert.ok(!/size M|size L/.test(sz3.text), "tuyệt đối không nói ra một size khi chưa kết luận được");
+  assert.equal(sz3.action, "ANSWER", "ranh giới nay vẫn trả lời được, không chuyển người");
+  assert.ok(/size L/.test(sz3.text), `phải lấy L (lớn hơn M), thực tế: ${sz3.text}`);
+  assert.ok(/size M/.test(sz3.text), "phải nói cả size nhỏ hơn đã bỏ qua để khách đổi lại được");
+  assert.ok(/ôm|thoải mái/.test(sz3.text), "phải hỏi lại sở thích mặc ôm hay thoải mái");
+  assert.ok(sz3.provenance.some((x) => x.value.includes("nâng từ")), "vết phải ghi rõ đã nâng size từ đâu");
 
   // NGOÀI BẢNG ⇒ CHUYỂN NGƯỜI. Bịa một size ở đây là gửi đi một kiện hàng không vừa.
   const sz4 = answerFromKnowledge("SIZE", bdSize.knowledge, bdSize.permissions, { ...ctxSize, body: { heightCm: 175, weightKg: 85 } });
