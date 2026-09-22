@@ -2723,6 +2723,79 @@ export const adsDecisionLedger = pgTable(
   ],
 );
 
+/**
+ * ───────────────────── SỔ LƯỢT GHI NGÂN SÁCH QUẢNG CÁO ─────────────────────
+ *
+ * Hàng rào và mọi con số: `lib/constants/ads-write.ts`. Đặc tả: `docs/marketing-ai-department.md` mục 5.
+ *
+ * MỘT dòng = một lượt XIN ghi vào Facebook, **kể cả lượt bị chặn**.
+ *
+ * ─── VÌ SAO LƯỢT BỊ CHẶN CŨNG VÀO SỔ ───
+ *
+ * *"Máy đã ĐỊNH làm gì"* là thông tin quý nhất khi đánh giá một cỗ máy tự chủ, và nó chỉ tồn tại
+ * nếu lượt bị chặn cũng để lại dấu. Một sổ chỉ ghi lượt thành công sẽ khiến một luật sai trông như
+ * một luật thận trọng: nó xin sai hai mươi lần mỗi ngày và hàng rào chặn hết, nhưng không ai biết.
+ *
+ * ─── HAI ẢNH CHỤP TIỀN, VÀ CHÚNG TRẢ LỜI HAI CÂU ───
+ *
+ * `budget_before` / `budget_after` là NGÂN SÁCH — thứ lượt ghi này đổi.
+ * `profit_before` là lợi nhuận góp sau quảng cáo TẠI THỜI ĐIỂM bấm, chép từ dòng sổ quyết định đã
+ * sinh ra đề nghị. Nó là mốc để PHANH so về sau; không có nó thì "lượt đổi ấy tốt hay xấu" là một
+ * câu không trả lời được, và phanh thành một cái tên không có nội dung.
+ */
+export const adsBudgetChanges = pgTable(
+  "ads_budget_changes",
+  {
+    id: id(),
+    /** Ngày Việt Nam của lượt bấm (`YYYY-MM-DD`) — trần theo ngày đếm trên cột này. */
+    changeDay: text("change_day").notNull(),
+    campaignId: text("campaign_id").notNull(),
+    /** ẢNH CHỤP tên lúc bấm: tên chiến dịch đổi được, dòng sổ cũ vẫn phải đọc được. */
+    campaignName: text("campaign_name").notNull().default(""),
+
+    /** `SET_DAILY_BUDGET` · `PAUSE_CAMPAIGN`. */
+    action: text("action").notNull(),
+    /** `APPLIED` · `DENIED` · `FAILED` — ba thứ khác nhau, không gộp. */
+    outcome: text("outcome").notNull(),
+    /** Mã lý do bị chặn (`AdsWriteDenial`). Rỗng khi không bị chặn. */
+    denial: text("denial").notNull().default(""),
+    /** Câu giải thích cho người đọc — lý do chặn, hoặc lỗi Facebook trả về. */
+    detail: text("detail").notNull().default(""),
+
+    /** Khuyến nghị đã sinh ra lượt này, và dòng sổ quyết định của nó. */
+    decision: text("decision").notNull(),
+    ledgerId: text("ledger_id").references(() => adsDecisionLedger.id, { onDelete: "set null" }),
+    /** Số ngày khuyến nghị đã giữ lúc bấm — đọc lại được "nó chín tới đâu khi ta tin nó". */
+    heldDays: integer("held_days").notNull().default(0),
+
+    /** `NULL` = CHƯA BIẾT, không phải 0 (mục 42). Với `PAUSE_CAMPAIGN` thì `budget_after` vô nghĩa. */
+    budgetBefore: integer("budget_before"),
+    budgetAfter: integer("budget_after"),
+    /** Lợi nhuận góp sau QC lúc bấm — mốc để PHANH so về sau. */
+    profitBefore: integer("profit_before"),
+
+    /** QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN (mục 34). `NULL` = MÁY làm, khác hẳn "chưa biết ai". */
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** ẢNH CHỤP TÊN do MÁY CHỦ đọc từ `users` — không nhận từ client. */
+    actorEmail: text("actor_email").notNull().default(""),
+    /** `COPILOT` (người bấm) · `AUTO` (máy tự) — để về sau phân biệt được hai nguồn trong cùng một sổ. */
+    mode: text("mode").notNull(),
+
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("ads_budget_changes_day_idx").on(t.changeDay, t.outcome),
+    index("ads_budget_changes_campaign_idx").on(t.campaignId, t.changeDay),
+    index("ads_budget_changes_actor_idx").on(t.actorUserId, t.createdAt),
+    check("ads_budget_changes_outcome_check", sql`${t.outcome} IN ('APPLIED', 'DENIED', 'FAILED')`),
+    check("ads_budget_changes_action_check", sql`${t.action} IN ('SET_DAILY_BUDGET', 'PAUSE_CAMPAIGN')`),
+    check("ads_budget_changes_day_format_check", sql`${t.changeDay} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`),
+    // Lượt ĐÃ ÁP phải nói được nó bị chặn bởi cái gì — tức là KHÔNG bị chặn. Một dòng vừa APPLIED
+    // vừa mang mã chặn là một dòng không ai đọc được, và nó sẽ làm mọi phép đếm nói sai.
+    check("ads_budget_changes_denial_check", sql`${t.outcome} <> 'APPLIED' OR ${t.denial} = ''`),
+  ],
+);
+
 // ───────────────────── Quy kết fanpage → marketer ─────────────────────
 //
 // Hợp đồng, lý lẽ và mọi ngưỡng: `lib/constants/fanpage-attribution.ts`. Ba bảng, ba việc rời nhau:

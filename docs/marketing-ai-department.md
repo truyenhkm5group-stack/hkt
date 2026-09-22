@@ -1,7 +1,7 @@
 # Phòng Marketing AI — đặc tả và lộ trình
 
 > **File trạng thái DUY NHẤT của phòng.** Mọi nấc cập nhật vào đây, không mở file mới.
-> Cập nhật: **22/09/2026** · **Nấc 0 đã dựng (trí nhớ); chủ shop đã duyệt Nấc 1–3 (bàn tay ở nấc COPILOT)**
+> Cập nhật: **22/09/2026** · **Nấc 0 (trí nhớ) và Nấc 3 (bàn tay, nấc COPILOT) đã dựng · Nấc 1·2·4 chưa**
 >
 > Đọc kèm: `docs/ads-decision-contract.md` (hợp đồng chỉ số) · `docs/marketing-daily-contract.md` ·
 > `docs/tech-ai-room-status.md` (phòng AI đầu tiên — mọi lớp lỗi ở đó sẽ lặp lại ở đây) ·
@@ -22,7 +22,7 @@ Chủ shop yêu cầu: *"phòng Marketing AI agent có thể tự động làm v
 | 2. CHẨN ĐOÁN nguyên nhân | `lib/marketing/diagnose.ts` — phát hiện có bằng chứng, có `why` và `owner` | — |
 | 3. QUYẾT ĐỊNH từng chiến dịch | `decideAction()` — hàm THUẦN, có cổng từ chối kết luận | — |
 | 4. NHỚ đã quyết gì, có ai làm không, kết quả ra sao | **KHÔNG CÓ** (tới 22/09) | ⇒ **Nấc 0 dựng ở bản này** |
-| 5. LÀM: đổi ngân sách · tắt/bật chiến dịch | **KHÔNG CÓ ĐƯỜNG NÀO** | ⇒ **Nấc 3, chủ shop đã duyệt ở nấc COPILOT** |
+| 5. LÀM: đổi ngân sách · tắt/bật chiến dịch | **Nấc 3 đã dựng** — bảy hàng rào, hai bước bấm | ⇒ chờ token `ads_management` |
 | 6. NỘI DUNG: ý tưởng, câu chữ, ảnh | `marketing_ideas` là bảng ghi tay, không nối vào vòng | ⇒ Nấc 4 |
 
 **Khâu 5 là cái trần thật, và nó không phải giới hạn của mô hình.** `lib/integrations/facebook/client.ts`
@@ -67,7 +67,7 @@ nào đọc nó. Job ghi sổ hỏng hoàn toàn cũng không làm lệch một 
 Nấc 0  TRÍ NHỚ      sổ quyết định + độ bền                        ✅ bản này
 Nấc 1  VIỆC         khuyến nghị đã chín → hàng đợi /work          ⏳ (Nấc 0 phải có dữ liệu trước)
 Nấc 2  DIỄN ĐẠT     agent đọc sổ, viết bản tin, xếp ưu tiên       ⏳
-Nấc 3  BÀN TAY      ghi ngân sách Facebook, có trần và phanh      ✅ duyệt ở nấc COPILOT (người bấm)
+Nấc 3  BÀN TAY      ghi ngân sách Facebook, có trần và phanh      ✅ ĐÃ DỰNG (COPILOT) · chờ token ads_management
 Nấc 4  NỘI DUNG     ý tưởng → chiến dịch → kết quả, khép vòng     ⏸
 ```
 
@@ -203,33 +203,65 @@ nghị đã giữ 6 ngày và một khuyến nghị mới nảy hôm nay không 
 
 ### 5.1 Phải mở gì
 
-Token Facebook hiện có chỉ đọc. Để ERP đổi được ngân sách cần quyền **`ads_management`** trên System
-User token, và `lib/integrations/facebook/client.ts` phải có đường `POST` — hôm nay nó không có.
+Token Facebook hiện có **chỉ đọc**. Để ERP đổi được ngân sách cần quyền **`ads_management`** trên
+System User token — đó là thứ duy nhất còn thiếu, và nó là việc của chủ shop.
 
-### 5.2 Hàng rào tối thiểu, nếu chủ shop đồng ý
+`client.ts` vẫn **không** có đường `POST`, và phải giữ nguyên như vậy: đường ghi nằm ở một tệp riêng
+(`ads-write.ts`) để lời khẳng định *"chưa bật thì không đổi được ngân sách nào"* kiểm chứng được
+bằng cách đọc ĐÚNG MỘT TỆP, chứ không bằng cách tin vào một câu trong tài liệu.
 
-Không nấc nào dưới đây được bỏ. Chúng chép từ nền tảng đã chốt (`docs/ai-workforce.md` §9) vì lớp
-lỗi giống hệt, chỉ khác là ở đây tiền chảy ra ngay chứ không qua một khách hàng:
+### 5.2 Bảy hàng rào — ĐÃ DỰNG
 
-1. **Chặn cứng cấp môi trường.** `AI_ALLOW_ADS_WRITE` đọc THẲNG từ biến môi trường, **không** hợp
-   nhất với bảng `settings` — ghi khoá ấy vào CSDL là ghi vào hư không. Chỉ đúng chuỗi `"true"` mở
-   được. Chốt này đứng TRƯỚC mọi chốt khác.
-2. **Một cổng ghi duy nhất.** Đúng một tệp trong kho gọi API ghi của Facebook, để đọc một tệp là
-   kiểm chứng được lời khẳng định "chưa bật thì không ghi gì".
-3. **Trần dịch chuyển ngân sách mỗi ngày** — theo phần trăm của tổng chi, và theo số tuyệt đối. Một
-   cỗ máy không có trần là một cỗ máy sẽ tiêu hết ngân sách tháng trong một đêm vì một lỗi dấu.
-4. **Cổng độ bền là bắt buộc**, không phải khuyến khích: chỉ `ready = true` mới được thực thi.
-5. **Phiếu duyệt ở nấc COPILOT** — cơ chế token HMAC đã có ở `lib/ai/policy.ts`, dùng lại nguyên.
-6. **Mỗi lần ghi để lại một dòng sổ** với ảnh chụp trước/sau và lý do, nối vào đúng dòng
-   `ads_decision_ledger` đã sinh ra nó. Không có dòng ấy thì không đo được bàn tay làm tốt hay xấu.
-7. **Phanh tự động**: `N` lần ghi liên tiếp mà lợi nhuận góp sau quảng cáo đi xuống ⇒ dừng và báo
-   người. Máy phải biết tự nghi ngờ mình.
+Không cái nào được bỏ. Chúng chép từ nền tảng đã chốt (`docs/ai-workforce.md` §9) vì lớp lỗi giống
+hệt, chỉ khác là ở đây tiền chảy ra ngay chứ không qua một khách hàng.
 
-### 5.3 Con đường KHÔNG được đi
+| # | Hàng rào | Ở đâu |
+|---|---|---|
+| 1 | **Chốt cứng cấp môi trường** — `ADS_WRITE_ENABLED` đọc THẲNG từ `process.env`, **không** hợp nhất với `settings` (ghi khoá ấy vào CSDL là ghi vào hư không). Chỉ đúng chuỗi `"true"`; `1`/`yes`/`on` đều là CẤM | `lib/env.ts::adsWrite` |
+| 2 | **Một cửa ghi duy nhất** — `client.ts` vẫn không có một `POST` nào; bài kiểm quét **toàn bộ** `lib/`, `app/`, `scripts/` và đỏ nếu có tệp thứ hai chạm API ghi | `lib/integrations/facebook/ads-write.ts` |
+| 3 | **Bốn cái trần** — biên độ một lần 30% · trần dịch chuyển 2 triệu/ngày toàn shop · 1 lần/chiến dịch/ngày · sàn 50K | `lib/constants/ads-write.ts` |
+| 4 | **Cổng độ bền bắt buộc** — chỉ `ready = true` (Nấc 0) mới đi tiếp | `gateAdsWrite()` |
+| 5 | **Phiếu duyệt HMAC** — gắn (người · tool · đầu vào); đổi một chữ số là phiếu vô hiệu | `lib/ai/policy.ts`, dùng lại nguyên |
+| 6 | **Mọi lượt vào sổ, kể cả lượt bị CHẶN** — ảnh chụp ngân sách trước/sau để quay lui được | `ads_budget_changes` (0109) |
+| 7 | **Phanh** — 3 lượt liên tiếp làm lợi nhuận đi xuống ⇒ dừng đường ghi | `brakeState()` |
 
-`ADS_BUDGET_MUTATION` đã có mặt trong sổ phê duyệt hai bước (`tests/second-approval` liệt kê nó ở
-nhóm **CHƯA nối**). Nối nó vào một nút bấm trước khi có mục 5.2 là dựng một nút giả thứ hai — lần
-này là nút giả có thể tiêu tiền.
+**Trần cứng của mã nguồn**: `MAX_ALLOWED_ADS_WRITE_MODE = "COPILOT"`. Khai `AUTO` ở env hay ở
+`settings` cũng bị kẹp xuống. Nâng nấc là một lần sửa mã có người đọc, không phải một biến môi
+trường ai đó gõ lúc nửa đêm.
+
+**Hai hành động, không có hành động thứ ba**: `SET_DAILY_BUDGET` (từ `SCALE`) và `PAUSE_CAMPAIGN`
+(từ `CUT`). `FIX_DELIVERY` **cố ý không** nối vào bàn tay — sửa khâu giao là việc của kho và CSKH;
+nối nó vào một nút đổi tiền là chữa sai bệnh, đúng thứ `FIX_DELIVERY` sinh ra để ngăn.
+
+**Thứ tự các chốt là một phần của thiết kế**, và bài kiểm khoá nó lại: chốt cứng đứng trước tất cả,
+rồi tới phanh — vì phanh nói về SỨC KHOẺ CỦA CHÍNH LUẬT, và một luật đang sai thì khuyến nghị "đã
+chín" của nó cũng không đáng tin.
+
+### 5.3 Ba quyết định nhỏ đáng ghi lại
+
+- **Bước đề nghị (20%) thấp hơn trần (30%) có chủ ý.** Nếu đề nghị luôn bằng đúng trần thì trần
+  thôi là trần — nó thành giá trị mặc định, và cái lưới an toàn biến mất vào hành vi bình thường.
+- **Lời gọi GHI không tự thử lại** (`retries: 0`). Graph API không nhận khoá chống trùng, nên một
+  lượt thử lại sau khi máy chủ đã nhận nhưng phản hồi rơi mất sẽ ghi hai lần. Hỏng thì báo người:
+  người bấm lại là một quyết định, máy thử lại thì không.
+- **Phanh bỏ qua lượt CHƯA ĐO ĐƯỢC, và đếm riêng chúng.** Kết quả một lượt đổi chỉ ngã ngũ sau vài
+  ngày nên lượt mới nhất gần như luôn chưa đo được; nếu nó cắt chuỗi thì phanh không bao giờ bật.
+  Nhưng bỏ qua trong im lặng là nói dối, nên `unmeasured` đi kèm mọi lần trả về và màn hình in nó.
+
+### 5.4 Còn thiếu để bàn tay chạy được
+
+| Việc | Ai làm |
+|---|---|
+| **System User token có quyền `ads_management`** — token hiện tại chỉ đọc | chủ shop |
+| Đặt `ADS_WRITE_ENABLED=true` và `ADS_WRITE_MODE=COPILOT` trên máy chủ | chủ shop |
+| Bật job ghi sổ (Nấc 0) và chờ đủ `minHeldDays` ngày dữ liệu | chủ shop bật, rồi tự chạy |
+| **Chốt bốn cái trần** ở mục 5.2 dòng 3 — đang là đề xuất khởi điểm (AGENTS.md mục 7) | chủ shop |
+| **Quyền**: đang dùng lại `expenses:write`. Một quyền riêng `ads:budget-write` sẽ hẹp hơn, nhưng thêm quyền là đổi vai trò (mục 7) nên chưa tự làm | chủ shop quyết |
+
+### 5.5 Con đường KHÔNG được đi
+
+`ADS_BUDGET_MUTATION` có mặt trong sổ phê duyệt hai bước ở nhóm **CHƯA nối**. Nối nó vào một nút
+bấm mà bỏ qua bảy hàng rào trên là dựng một nút giả thứ hai — lần này là nút giả tiêu được tiền.
 
 ---
 
@@ -272,6 +304,18 @@ select decision_day, sum(spend) filter (where action_class = 'NO_OPINION') as ti
 from ads_decision_ledger where dimension = 'campaign' group by 1 order by 1 desc limit 14;
 ```
 
+```sql
+-- 4. BÀN TAY: máy đã ĐỊNH làm gì, và cái gì chặn nó lại (câu quan trọng nhất của Nấc 3)
+select outcome, denial, count(*) as so_luot, sum(abs(coalesce(budget_after,0) - coalesce(budget_before,0))) as tien_dich_chuyen
+from ads_budget_changes group by 1, 2 order by 3 desc limit 30;
+```
+
+```sql
+-- 5. Từng lượt ĐÃ ÁP, kèm ngân sách trước/sau — đây là thứ cho phép QUAY LUI
+select change_day, campaign_name, action, budget_before, budget_after, held_days, actor_email, detail
+from ads_budget_changes where outcome = 'APPLIED' order by created_at desc limit 30;
+```
+
 ---
 
 ## 8. BLOCKED / HUMAN GATE
@@ -297,4 +341,4 @@ from ads_decision_ledger where dimension = 'campaign' group by 1 order by 1 desc
 | Nấc 1 — chiếu khuyến nghị đã chín vào `/work` | sổ có ít nhất `minHeldDays` ngày dữ liệu |
 | Nấc 2 — đưa độ bền vào bối cảnh AI | Nấc 1 |
 | Nấc 4 — khép vòng nội dung | Nấc 1 |
-| **Nấc 3 — bàn tay ở nấc COPILOT** | chủ shop đã duyệt 22/09 · cần System User token có `ads_management` |
+| **Nấc 3 — bàn tay: đã dựng**, chờ token `ads_management` rồi chạy thử trên MỘT chiến dịch | chủ shop cấp token |
