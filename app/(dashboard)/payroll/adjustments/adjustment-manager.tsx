@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { useRouter } from "next/navigation";
 import { Check, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -177,8 +178,9 @@ export function AdjustmentManager({
           </div>
         ) : null}
 
+        <TableToolsFor tableId="payroll-adjustments-adjustment-manager-1" />
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[720px] text-[13px]">
+          <table id="payroll-adjustments-adjustment-manager-1" className="w-full min-w-[720px] text-[13px]">
             <thead className="text-left text-muted-foreground">
               <tr>
                 <th className="py-1 pr-3 font-medium">Nhân sự</th>
@@ -295,8 +297,9 @@ export function AdjustmentManager({
           </div>
         ) : null}
 
+        <TableToolsFor tableId="payroll-adjustments-adjustment-manager-2" />
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[820px] text-[13px]">
+          <table id="payroll-adjustments-adjustment-manager-2" className="w-full min-w-[820px] text-[13px]">
             <thead className="text-left text-muted-foreground">
               <tr>
                 <th className="py-1 pr-3 font-medium">Nhân sự</th>

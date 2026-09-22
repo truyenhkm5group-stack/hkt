@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { sep } from "node:path";
 import {
   MAX_COLUMN_WIDTH,
   MIN_COLUMN_WIDTH,
@@ -22,6 +23,27 @@ import {
  *   2. LUẬT XUỐNG DÒNG cho `min-content` một giá trị hợp lý — số thì không gãy, chữ thì gãy ở
  *      khoảng trắng chứ không gãy giữa từ.
  */
+/**
+ * Mọi tệp `.tsx` dưới một thư mục, kèm đường dẫn ĐÃ CHUẨN HOÁ dấu phân cách.
+ *
+ * `path.sep` là `\` trên Windows và `/` trên Linux; một thông điệp lỗi mang dấu này còn dùng
+ * được, nhưng một KHOÁ TRA CỨU thì không — đó là lớp lỗi "xanh ở đây, đỏ ở CI" mà AGENTS.md §65
+ * đã liệt kê. Chuẩn hoá ngay tại chỗ đọc để không nơi nào phải nhớ.
+ */
+function docTatCaTsx(goc: URL): [string, string][] {
+  const ra: [string, string][] = [];
+  const di = (thuMuc: URL, tien: string) => {
+    for (const muc of readdirSync(thuMuc, { withFileTypes: true })) {
+      if (muc.name === "node_modules" || muc.name.startsWith(".")) continue;
+      const duong = tien ? `${tien}/${muc.name}` : muc.name;
+      if (muc.isDirectory()) di(new URL(`${muc.name}/`, thuMuc), duong);
+      else if (muc.name.endsWith(".tsx")) ra.push([duong.split(sep).join("/"), readFileSync(new URL(muc.name, thuMuc), "utf8").replace(/\r/g, "")]);
+    }
+  };
+  di(goc, "");
+  return ra;
+}
+
 export function testColumnResize() {
   // ───────── KẸP BỀ RỘNG: CHƯA BIẾT KHÔNG ĐƯỢC HOÁ THÀNH MỘT CON SỐ (§42) ─────────
   assert.equal(clampColumnWidth(200), 200);
@@ -124,9 +146,31 @@ export function testColumnResize() {
   assert.ok(/\(pointer:\s*fine\)/.test(src), "phải hỏi `(pointer: fine)` trước khi dựng tay kéo");
   assert.ok(/\(coConTro \? heads : \[\]\)\.map/.test(src), "không có con trỏ chính xác ⇒ KHÔNG dựng tay kéo nào");
   assert.ok(/touch-none/.test(src), "tay kéo vẫn phải chặn cuộn khi ĐANG kéo bằng bút cảm ứng");
+  // ───────── BẢNG THÔ: THANH CÔNG CỤ PHẢI TRỎ VÀO MỘT BẢNG CÓ THẬT ─────────
+  //
+  // `<TableToolsFor tableId="x" />` tìm bảng bằng `document.getElementById`. Gõ sai một chữ, hay
+  // đổi `id` của bảng mà quên đổi ở đây, thì thanh công cụ LẶNG LẼ không hiện — không lỗi, không
+  // cảnh báo, chỉ là một tính năng biến mất ở đúng trang đó. Ghép cặp ở mức mã nguồn thay vì đợi
+  // ai đó mở trang ra và nhận ra mình thiếu cái gì.
+  const goc = new URL("../app/", import.meta.url);
+  const tep = docTatCaTsx(goc);
+  let soCap = 0;
+  for (const [duongDan, noiDung] of tep) {
+    const dungCu = [...noiDung.matchAll(/<TableToolsFor\s+tableId="([^"]+)"/g)].map((m) => m[1]);
+    if (!dungCu.length) continue;
+    const bang = new Set([...noiDung.matchAll(/<table\s+id="([^"]+)"/g)].map((m) => m[1]));
+    for (const id of dungCu) {
+      assert.ok(bang.has(id), `${duongDan}: <TableToolsFor tableId="${id}"> không có <table id="${id}"> nào trong cùng tệp`);
+      soCap += 1;
+    }
+    // Hai bảng cùng `id` trong một trang thì `getElementById` chỉ thấy cái đầu.
+    const trung = [...noiDung.matchAll(/<table\s+id="([^"]+)"/g)].map((m) => m[1]);
+    assert.equal(new Set(trung).size, trung.length, `${duongDan}: có hai <table> trùng id`);
+  }
+  assert.ok(soCap >= 7, `phải có ít nhất 7 bảng thô đã gắn thanh công cụ, đang thấy ${soCap}`);
 
   console.log(
-    `✓ Kéo rộng cột: sàn ${MIN_COLUMN_WIDTH}px / trần ${MAX_COLUMN_WIDTH}px · chưa biết ⇒ null · số không gãy, chữ gãy ở khoảng trắng · không cắt chữ ở bất kỳ đâu · đổi cột thì cấu hình cũ không áp nhầm`,
+    `✓ Kéo rộng cột: sàn ${MIN_COLUMN_WIDTH}px / trần ${MAX_COLUMN_WIDTH}px · chưa biết ⇒ null · số không gãy, chữ gãy ở khoảng trắng · không cắt chữ ở bất kỳ đâu · đổi cột thì cấu hình cũ không áp nhầm · ${soCap} bảng thô gắn đúng bảng có thật`,
   );
 }
 

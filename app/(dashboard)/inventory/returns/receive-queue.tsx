@@ -1,6 +1,7 @@
 "use client";
 
 import { RECEIVE_SLA_DAYS } from "@/lib/constants/return-lifecycle";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { parseAsString, useQueryState } from "nuqs";
@@ -174,8 +175,9 @@ export function ReceiveQueue({ rows, total, loaded, searching, canWrite }: { row
         ) : null}
       </div>
 
+      <TableToolsFor tableId="inventory-returns-receive-queue" />
       <div className={cn(TABLE_SCROLL, "rounded-xl border")}>
-        <table className="w-full text-[12.5px]">
+        <table id="inventory-returns-receive-queue" className="w-full text-[12.5px]">
           <thead className={cn(STICKY_HEAD, "text-[11px] uppercase tracking-wide text-muted-foreground")}>
             <tr>
               {canWrite ? <th className="w-8 px-2 py-2" /> : null}

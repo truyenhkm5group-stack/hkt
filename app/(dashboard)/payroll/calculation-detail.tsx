@@ -1,4 +1,5 @@
 import { HelpCircle } from "lucide-react";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PAYROLL_COMPONENT_KIND_LABEL, PAYROLL_COMPONENT_SIGN, payrollInput, type PayrollComponentKind } from "@/lib/constants/payroll-components";
@@ -72,8 +73,9 @@ export function CalculationDetail({ engine, employeeName }: { engine: EmployeeEn
         </ul>
       ) : null}
 
+      <TableToolsFor tableId="payroll-calculation-detail" />
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-[13px]">
+        <table id="payroll-calculation-detail" className="w-full min-w-[720px] text-[13px]">
           <thead className="text-left text-muted-foreground">
             <tr>
               <th className="py-1 pr-3 font-medium">Khoản</th>

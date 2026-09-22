@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { NavLink } from "@/components/nav-progress";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
@@ -68,38 +69,41 @@ export default async function ImportBatchPage({ params }: { params: Promise<{ ba
         )}
 
         {gaps.length ? (
-          <div className="mt-3 overflow-x-auto rounded-md border">
-            <table className="w-full text-[12.5px]">
-              <thead className="bg-muted/50 text-left text-muted-foreground">
-                <tr>
-                  <th className="p-2 font-medium">Mã vận đơn</th>
-                  <th className="p-2 font-medium">ĐVVC ghi nhận</th>
-                  <th className="p-2 font-medium">ERP đang biết tới</th>
-                  <th className="p-2 text-right font-medium">Chậm</th>
-                </tr>
-              </thead>
-              <tbody>
-                {gaps.map((g) => (
-                  <tr key={`${g.trackingCode}-${g.carrierEventAt.toISOString()}`} className="border-t">
-                    <td className="numeric p-2">{g.trackingCode}</td>
-                    <td className="p-2">
-                      “{g.carrierStatusText}”
-                      <span className="block text-[11px] text-muted-foreground">{formatDateTime(g.carrierEventAt)}</span>
-                    </td>
-                    {/* CHƯA BIẾT in ra là “—”, không phải một mốc bịa: ERP chưa hề biết gì về kiện này. */}
-                    <td className="p-2">
-                      {g.erpKnewAt ? formatDateTime(g.erpKnewAt) : "— chưa biết gì"}
-                      {g.erpKnewSource ? <span className="block text-[11px] text-muted-foreground">qua {g.erpKnewSource}</span> : null}
-                    </td>
-                    <td className="numeric p-2 text-right">
-                      {formatNumber(Math.round(g.gapMinutes / 60))} giờ
-                      <span className="block text-[11px] text-muted-foreground">{GAP_SEVERITY_LABEL[g.severity as GapSeverity] ?? g.severity}</span>
-                    </td>
+          <>
+            <TableToolsFor tableId="import-vtp-batchid-page" />
+            <div className="mt-3 overflow-x-auto rounded-md border">
+              <table id="import-vtp-batchid-page" className="w-full text-[12.5px]">
+                <thead className="bg-muted/50 text-left text-muted-foreground">
+                  <tr>
+                    <th className="p-2 font-medium">Mã vận đơn</th>
+                    <th className="p-2 font-medium">ĐVVC ghi nhận</th>
+                    <th className="p-2 font-medium">ERP đang biết tới</th>
+                    <th className="p-2 text-right font-medium">Chậm</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {gaps.map((g) => (
+                    <tr key={`${g.trackingCode}-${g.carrierEventAt.toISOString()}`} className="border-t">
+                      <td className="numeric p-2">{g.trackingCode}</td>
+                      <td className="p-2">
+                        “{g.carrierStatusText}”
+                        <span className="block text-[11px] text-muted-foreground">{formatDateTime(g.carrierEventAt)}</span>
+                      </td>
+                      {/* CHƯA BIẾT in ra là “—”, không phải một mốc bịa: ERP chưa hề biết gì về kiện này. */}
+                      <td className="p-2">
+                        {g.erpKnewAt ? formatDateTime(g.erpKnewAt) : "— chưa biết gì"}
+                        {g.erpKnewSource ? <span className="block text-[11px] text-muted-foreground">qua {g.erpKnewSource}</span> : null}
+                      </td>
+                      <td className="numeric p-2 text-right">
+                        {formatNumber(Math.round(g.gapMinutes / 60))} giờ
+                        <span className="block text-[11px] text-muted-foreground">{GAP_SEVERITY_LABEL[g.severity as GapSeverity] ?? g.severity}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : null}
       </SectionCard>
 
