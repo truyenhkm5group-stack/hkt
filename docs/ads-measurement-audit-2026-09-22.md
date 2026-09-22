@@ -170,6 +170,20 @@ một nền đủ để kết luận về chiến dịch lớn; 60,6% thì khôn
 **Phần 286 đơn mất dấu là trần thật của quy kết**, và nó nằm ở phía Pancake chứ không phải ERP.
 Không được lấp nó bằng suy đoán.
 
+### Đã sửa, và đã đối chiếu lại trên production (22/09 chiều, AGENTS.md mục 6.5)
+
+```
+đơn đã chốt 1.402 · xác định 852 · nhập nhằng 35 · mất dấu 287 · ngoài quảng cáo 228
+mẫu số đúng 1.174
+
+độ phủ CŨ  (chia cho TỔNG đơn)   : 60,8%
+độ phủ MỚI (chia cho mẫu số đúng): 72,6%
+```
+
+Dự báo trước khi sửa là 60,6% → 72,5%; đo lại ra 60,8% → 72,6%. Lệch 0,1–0,2 điểm vì cửa sổ 30 ngày
+đã trôi vài giờ (1.395 → 1.402 đơn). **Bản sửa làm đúng thứ nó nói** — và đó là điều kiện để tin nó,
+chứ không phải việc bài kiểm xanh.
+
 ---
 
 ## 6. Bảng điều khiển sẽ có hình gì
