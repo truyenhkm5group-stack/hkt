@@ -765,9 +765,19 @@ export function decideAction(input: {
     Câu mở đầu của MỌI lý do ở căn cứ tạm tính phải nói ra nó là ước tính, và nói bằng con số nào —
     người đọc phải cãi lại được cái giả định, chứ không chỉ đọc kết luận.
   */
+  /*
+    KHÔNG GỌI TỶ LỆ NÀY LÀ "ƯỚC TÍNH".
+
+    Nó có thể là số đo của chính mã, có thể là MỤC TIÊU khai chung ở Giả định — hai thứ khác hẳn
+    nhau về cách sửa khi sai (mô hình sai ⇒ sửa mô hình; mục tiêu không đạt ⇒ sửa vận hành). Dòng
+    này trộn nhiều mã nên nó không biết mình đang đứng trên bậc nào; nói tên bậc ở đây là đoán.
+
+    Nên câu chữ chỉ nêu CON SỐ đã dùng, và chỉ người đọc sang dải "Căn cứ tỷ lệ GTC" ngay trên bảng
+    để biết bao nhiêu mã đi bằng số đo và bao nhiêu mã đang chạy theo mục tiêu.
+  */
   const nen = measured
     ? ""
-    : `[TẠM TÍNH] ${pct(input.maturity)} đơn đã ngã ngũ, phần còn lại cân theo GTC ước tính ${input.appliedDeliveryRate ?? "—"}%. `;
+    : `[TẠM TÍNH] ${pct(input.maturity)} đơn đã ngã ngũ, phần còn lại cân theo GTC ${input.appliedDeliveryRate ?? "—"}% (xem căn cứ tỷ lệ trên bảng). `;
 
   /**
    * CỔNG 3 — QUẢNG CÁO TỐT NHƯNG GIAO KÉM.

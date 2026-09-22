@@ -699,6 +699,19 @@ export function testDeliveryRateLadder() {
     50,
     "mốc tuân theo số thật do chủ shop chốt 22/09/2026 — đổi phải có chủ shop yêu cầu (AGENTS.md mục 7)",
   );
+  /*
+    BẬC CUỐI LÀ MỘT MỤC TIÊU, VÀ CON SỐ CỦA NÓ CŨNG DO CHỦ SHOP CHỐT.
+
+    23/09/2026: GTC 55% (⇒ hoàn 45%) là mức hàng mới PHẢI ĐẠT, dùng làm căn cứ chăm sóc quảng cáo
+    khi chưa có số thật. Cố ý KHÔNG đặt bằng số đo của shop (hoàn 66,2% trên 1.862 đơn, đo
+    22/09/2026): đặt bằng số đo sẽ biến bậc này thành một DỰ BÁO, và khi ấy hàng mới mặc định bị
+    coi là sẽ hoàn hai phần ba trước khi có một đơn nào được giao.
+  */
+  assert.equal(
+    DEFAULT_PROFIT_ASSUMPTIONS.defaultReturnRate,
+    45,
+    "GTC mục tiêu 55% do chủ shop chốt 23/09/2026 — đây là ĐÍCH, không phải dự báo",
+  );
 
   // Các khẳng định dưới đây dùng NỀN RIÊNG để kiểm CHÍNH thang bậc, không phụ thuộc mặc định đang khai.
   const nen = { minFinishedOrders: 10, defaultReturnRate: 40 };

@@ -16,7 +16,31 @@ export type ProfitAssumptions = {
   fixedCostMonthly: number;
   /** Số ngày lịch sử dùng để ước tính tỷ lệ hoàn của từng mã */
   returnRateWindowDays: number;
-  /** Tỷ lệ hoàn mặc định (%) khi mã chưa có đủ lịch sử */
+  /**
+   * ═══════════ TỶ LỆ KHAI CHUNG LÀ MỘT MỤC TIÊU, KHÔNG PHẢI MỘT DỰ BÁO ═══════════
+   *
+   * Tỷ lệ hoàn (%) áp cho mã CHƯA có đủ lịch sử của chính nó — bậc cuối của thang bậc
+   * `resolveDeliveryRate()` (AGENTS.md mục 68).
+   *
+   * Chủ shop chốt 23/09/2026: **GTC 55% ⇒ hoàn 45%**, và khai rõ đây là **mức hàng mới PHẢI ĐẠT**,
+   * dùng làm căn cứ chăm sóc quảng cáo khi chưa có số thật — chứ không phải một lời tiên đoán về
+   * việc hàng mới SẼ giao được bao nhiêu.
+   *
+   * Sự phân biệt ấy không phải chuyện chữ nghĩa, nó đổi cách đọc màn hình: một con số DỰ BÁO sai
+   * thì mô hình sai và phải sửa mô hình; một con số MỤC TIÊU không đạt thì khâu vận hành chưa đạt
+   * và phải sửa vận hành. Nên mọi nhãn của bậc này phải nói "mục tiêu", không nói "ước tính".
+   *
+   * ─── VÌ SAO KHÔNG ĐẶT BẰNG SỐ ĐO ───
+   *
+   * Đo production 22/09/2026 trên 1.862 đơn đã có kết cục của 90 ngày: tỷ lệ hoàn thật **66,2%**
+   * (⇒ GTC ~33,8%). Đặt bậc cuối bằng con số ấy sẽ cho ước tính sát hơn, nhưng nó biến bậc này
+   * thành một dự báo — và khi đó hàng mới mặc định bị coi là sẽ hoàn hai phần ba trước khi có một
+   * đơn nào được giao. Chủ shop chọn để nó là ĐÍCH. Mã nào có số thật thì thang bậc tự chuyển sang
+   * số thật, nên đây chỉ là quy ước để vận hành trong lúc chưa có số, không phải một khẳng định.
+   *
+   * Hệ quả phải nhìn thấy: dòng nào đang chạy trên bậc này thì màn hình phải in ĐỘ PHỦ bên cạnh,
+   * và lợi nhuận tạm tính của nó đọc là "theo kế hoạch", không phải "sẽ về ngần ấy".
+   */
   defaultReturnRate: number;
   /**
    * ═══════════ MỐC CHUYỂN TỪ GIẢ ĐỊNH SANG SỐ THẬT CỦA CHÍNH MÃ HÀNG ═══════════
@@ -62,7 +86,8 @@ export const DEFAULT_PROFIT_ASSUMPTIONS: ProfitAssumptions = {
   rescueRatePercent: 10,
   fixedCostMonthly: 5_000_000,
   returnRateWindowDays: 90,
-  defaultReturnRate: 30,
+  // Chủ shop chốt 23/09/2026: GTC mục tiêu 55% cho hàng mới. Xem chú thích ở kiểu.
+  defaultReturnRate: 45,
   // Chủ shop chốt 22/09/2026: "giao 50 đơn có trạng thái" là mốc tuân theo số thật. Xem chú thích ở kiểu.
   minFinishedOrders: 50,
   overrides: {},

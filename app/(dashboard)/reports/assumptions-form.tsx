@@ -113,7 +113,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
           <span className="text-muted-foreground">/tháng</span>
         </span>
         <span>
-          Tỷ lệ giao thành công mặc định{" "}
+          Tỷ lệ giao thành công MỤC TIÊU{" "}
           <b className="numeric">{Math.round((100 - assumptions.defaultReturnRate) * 10) / 10}%</b>
           <span className="text-muted-foreground">
             {" "}
@@ -201,7 +201,9 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             <Input type="number" inputMode="numeric" min={0} step={100000} value={form.fixedCostMonthly} onChange={(e) => setForm({ ...form, fixedCostMonthly: e.target.value })} />
           </div>
           <div className="space-y-1">
-            <Label>Tỷ lệ giao thành công mặc định (%)</Label>
+            <Label title="MỤC TIÊU hàng mới phải đạt, không phải dự báo. Áp cho mã chưa đủ số đơn kết thúc ở ô bên cạnh. Mã nào đã có số thật thì thang bậc tự chuyển sang số thật — nên đây là quy ước để vận hành trong lúc chưa có số, và mọi lợi nhuận ước tính dựa trên nó phải đọc là 'theo kế hoạch'.">
+              Tỷ lệ giao thành công MỤC TIÊU (%)
+            </Label>
             <Input
               type="number"
               inputMode="decimal"
