@@ -28,6 +28,9 @@ import "dotenv/config";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
+import { PHAM_VI_CHI_SINH_CHU, chiSinhRaChu } from "@/lib/constants/agent-dispatch";
+import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
+import { TECH_AGENT_TEMPLATES } from "@/lib/constants/tech";
 import { classifyTechRisk } from "@/lib/constants/tech-risk";
 import { createTechTask, seedTechAgents, setTechAgentEnabled, type TechActor } from "@/lib/tech/service";
 
@@ -117,9 +120,37 @@ async function main() {
     console.error("   Không chạy theo mức thấp hơn. Sửa mô tả việc cho đúng, hoặc hỏi chủ shop.");
     process.exit(1);
   }
+  /*
+    ═══ CỬA HẸP R2 — MỘT LUẬT, KHÔNG PHẢI HAI BẢN ═══
+
+    Chỗ này từng chặn CỨNG mọi việc R2. Khi `canDispatchTask()` đổi sang cửa hẹp ba điều kiện, bản
+    sao ở đây KHÔNG đổi theo — và nó là bản CHẶT hơn, nên nó thắng: đo 22/09/2026, TECH-12 đi qua
+    đủ mọi cổng của ERP (vai được cấp R2 · chỉ ghi `docs/` · chủ shop đã ký · đã phân loại), lấy
+    được việc từ production, rồi chết ở đúng dòng này. Cả dây chuyền đứng lại vì một bản sao bị bỏ
+    quên. Một luật có hai bản thì bản nào cũng là bản thật ở đâu đó — và người dùng gặp bản nào
+    thì đó là luật của họ.
+
+    Nay hỏi `chiSinhRaChu()`, CÙNG hàm mà cổng giao việc dùng.
+
+    ─── VÀ VẪN KHÔNG TIN LỜI ERP ───
+
+    `viec.writeGlobs` do ERP gửi sang. Cả khối này tồn tại để kiểm LẠI trên dữ liệu nhận được, nên
+    lấy con số của bên kia làm căn cứ là tự bỏ mục đích của mình. Phạm vi ghi tính TẠI ĐÂY từ sổ
+    vai cục bộ; lệch nhau là một khác biệt đáng biết, không phải chuyện bỏ qua.
+  */
   if (tuXep.risk === "R2") {
-    console.error("✗ DỪNG: R2 không bao giờ mở cho agent.");
-    process.exit(1);
+    const vaiMau = TECH_AGENT_TEMPLATES.find((t) => t.key === viec.agentKey);
+    const phamVi = writeGlobsForRole(vaiMau?.role ?? null);
+    if (phamVi.join("|") !== [...viec.writeGlobs].join("|")) {
+      console.error(`✗ DỪNG: phạm vi ghi hai bên nói khác nhau (ERP ${viec.writeGlobs.join(", ")} vs runner ${phamVi.join(", ")}).`);
+      process.exit(1);
+    }
+    if (!chiSinhRaChu(phamVi)) {
+      console.error(`✗ DỪNG: việc R2 chỉ mở cho vai CHỈ GHI RA CHỮ (${PHAM_VI_CHI_SINH_CHU.join(" · ")}); vai “${viec.agentKey}” ghi được ${phamVi.join(", ") || "(chưa khai)"}.`);
+      console.error("   Một bài kiểm không phải chữ — nó là khẳng định chặn deploy.");
+      process.exit(1);
+    }
+    console.log(`R2 qua cửa hẹp: vai “${viec.agentKey}” chỉ ghi ${phamVi.join(", ")} · chủ shop đã ký · ERP đã mở cổng`);
   }
 
   await ensureMigrated();

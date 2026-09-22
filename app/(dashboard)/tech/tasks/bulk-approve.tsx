@@ -41,8 +41,22 @@ export function BulkApprove({ rows, clear }: { rows: TechTaskListRow[]; clear: (
     bản sai là bản người dùng đọc.
   */
   const theoMa = new Map(rows.map((r) => [r.code, r]));
-  const canKy = xetLoatKy(rows, "APPROVED").ky.map((c) => theoMa.get(c)!);
-  const soR2 = canKy.filter((r) => r.risk === "R2").length;
+  /*
+    MỖI QUYẾT ĐỊNH MỘT TẬP RIÊNG — KHÔNG DÙNG CHUNG MỘT DANH SÁCH CHO CẢ HAI NÚT.
+
+    Bản đầu tính `canKy` ĐÚNG MỘT LẦN với `"APPROVED"` rồi lấy nó chặn cả nút Duyệt lẫn nút Từ chối.
+    Hậu quả lộ ra ngay lần dùng thật (22/09/2026): chín việc đã ký duyệt hết ⇒ không còn gì để duyệt
+    ⇒ `canKy` rỗng ⇒ **cả thanh biến mất**, kể cả nút Từ chối — trong khi `decideTechApproval()` vẫn
+    cho đổi ý trên việc đã duyệt. Chủ shop tích chọn được chín dòng mà không thấy nút nào.
+
+    Đây đúng lớp lỗi "logic mở, màn hình đóng" mà chính PR trước vá ở bốn chỗ khác — rồi dựng lại ở
+    đây. Nên tính RIÊNG cho từng quyết định, bằng chính hàm luật của máy chủ.
+  */
+  const nhom = (q: "APPROVED" | "REJECTED") => xetLoatKy(rows, q).ky.map((c) => theoMa.get(c)!);
+  const canDuyet = nhom("APPROVED");
+  const canTuChoi = nhom("REJECTED");
+  const coViec = canDuyet.length > 0 || canTuChoi.length > 0;
+  const soR2 = canDuyet.filter((r) => r.risk === "R2").length;
   const quaTran = ids.length > KY_LOAT_TOI_DA;
 
   const chay = (decision: "APPROVED" | "REJECTED") =>
@@ -62,26 +76,35 @@ export function BulkApprove({ rows, clear }: { rows: TechTaskListRow[]; clear: (
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs text-muted-foreground">
-        {canKy.length ? (
+        {coViec ? (
           <>
-            <b>{canKy.length}</b> việc đang chờ ký
-            {soR2 ? (
+            {canDuyet.length ? (
               <>
-                {" "}
-                (<b className="text-destructive">{soR2} việc mức R2</b> — chạm tiền)
+                <b>{canDuyet.length}</b> việc duyệt được
+                {soR2 ? (
+                  <>
+                    {" "}
+                    (<b className="text-destructive">{soR2} việc mức R2</b> — chạm tiền)
+                  </>
+                ) : null}
               </>
-            ) : null}
-            {canKy.length < rows.length ? ` · ${rows.length - canKy.length} dòng khác không cần ký` : ""}
+            ) : (
+              "Không việc nào còn chờ duyệt"
+            )}
+            {canTuChoi.length ? ` · ${canTuChoi.length} việc từ chối được` : ""}
           </>
         ) : (
-          "Không dòng nào đang chờ ký"
+          "Không dòng nào cần một quyết định — các việc này không cần duyệt."
         )}
       </span>
 
-      {canKy.length ? (
+      {coViec ? (
         <>
-          <span className="max-w-[320px] truncate font-mono text-[11px] text-muted-foreground" title={canKy.map((r) => r.code).join(", ")}>
-            {canKy.map((r) => r.code).join(", ")}
+          <span
+            className="max-w-[320px] truncate font-mono text-[11px] text-muted-foreground"
+            title={(canDuyet.length ? canDuyet : canTuChoi).map((r) => r.code).join(", ")}
+          >
+            {(canDuyet.length ? canDuyet : canTuChoi).map((r) => r.code).join(", ")}
           </span>
           <input
             value={note}
@@ -89,14 +112,19 @@ export function BulkApprove({ rows, clear }: { rows: TechTaskListRow[]; clear: (
             placeholder="Lý do (bắt buộc khi từ chối)"
             className="w-56 rounded-lg border bg-background px-3 py-1.5 text-sm"
           />
-          <Button size="sm" disabled={dang || quaTran} onClick={() => chay("APPROVED")}>
-            {dang ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-            Duyệt {canKy.length} việc
-          </Button>
-          <Button size="sm" variant="outline" disabled={dang || quaTran} onClick={() => chay("REJECTED")}>
-            <X className="size-4" />
-            Từ chối
-          </Button>
+          {/* Mỗi nút mang SỐ CỦA CHÍNH NÓ: "Duyệt 3" và "Từ chối 5" là hai tập khác nhau. */}
+          {canDuyet.length ? (
+            <Button size="sm" disabled={dang || quaTran} onClick={() => chay("APPROVED")}>
+              {dang ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
+              Duyệt {canDuyet.length} việc
+            </Button>
+          ) : null}
+          {canTuChoi.length ? (
+            <Button size="sm" variant="outline" disabled={dang || quaTran} onClick={() => chay("REJECTED")}>
+              <X className="size-4" />
+              Từ chối {canTuChoi.length} việc
+            </Button>
+          ) : null}
         </>
       ) : null}
 
