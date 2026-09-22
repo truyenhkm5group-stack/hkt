@@ -52,6 +52,8 @@ export type ShadowTurn = {
   runId: string | null;
   conversationId: string;
   conversationExternalId: string;
+  /** Page Pancake giữ hội thoại — cùng với mã hội thoại là đủ dựng liên kết về chat gốc. */
+  pageId: string;
   customerName: string;
   createdAt: Date;
   /** Tin khách đã kích hoạt lượt. */
@@ -115,6 +117,7 @@ export async function listShadowTurns(filters: ShadowTurnFilters = {}): Promise<
       runId: s.runId,
       conversationId: s.conversationId,
       conversationExternalId: c.externalId,
+      pageId: c.pageId,
       customerName: c.customerName,
       createdAt: s.createdAt,
       stageBefore: s.stageBefore,
@@ -170,6 +173,7 @@ export async function listShadowTurns(filters: ShadowTurnFilters = {}): Promise<
       runId: row.runId,
       conversationId: row.conversationId,
       conversationExternalId: row.conversationExternalId,
+      pageId: row.pageId,
       customerName: row.customerName,
       createdAt: row.createdAt,
       customerMessage: row.customerMessage ?? "",

@@ -223,3 +223,22 @@ export const COPILOT_TERMINAL_SQL_LIST = COPILOT_TERMINAL_ACTIONS.map((a) => `'$
  * thí điểm", bỏ điều kiện ấy thì con số không còn nghĩa gì.
  */
 export const PILOT_REVIEWED_TURNS_TARGET = { min: 20, max: 50 } as const;
+
+/**
+ * LIÊN KẾT TỚI HỘI THOẠI GỐC TRÊN PANCAKE.
+ *
+ * Người chấm cần đọc NGỮ CẢNH, không chỉ một lượt: ERP giữ tin kích hoạt và câu nhân viên trả
+ * lời, nhưng một hội thoại 25 tin thì hai câu ấy không đủ để nói câu máy soạn có đúng hay không.
+ *
+ * Định dạng này đã tồn tại rải rác ở hơn mười nơi trong kho mã (đơn hàng, CSKH, cảnh báo, hàng
+ * đợi tắc nghẽn…). Khai ở đây để nơi thứ mười một dùng lại thay vì chép chuỗi lần nữa — Pancake
+ * đổi đường dẫn thì có ĐÚNG MỘT chỗ phải sửa.
+ *
+ * Trả `null` khi thiếu một trong hai khoá. Một liên kết dựng từ chuỗi rỗng vẫn bấm được, vẫn mở
+ * ra một trang, và trang ấy là hội thoại của người khác hoặc một lỗi 404 — cả hai đều tệ hơn
+ * việc không hiện nút.
+ */
+export function pancakeConversationUrl(pageId: string, conversationExternalId: string): string | null {
+  if (!pageId.trim() || !conversationExternalId.trim()) return null;
+  return `https://pancake.vn/${pageId}?c_id=${conversationExternalId}`;
+}

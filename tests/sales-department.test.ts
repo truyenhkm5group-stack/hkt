@@ -21,6 +21,7 @@ import {
   type AutonomyReading,
 } from "@/lib/constants/sales-autonomy";
 import { COST_UNKNOWN_REASON, salesFunnel, salesUnitEconomics } from "@/lib/queries/sales-economics";
+import { pancakeConversationUrl } from "@/lib/constants/sales-copilot";
 import { setSettingJson } from "@/lib/settings";
 
 /** Số đo "mọi thứ đều đẹp" — từng phép thử chỉ đổi ĐÚNG một chiều so với nền này. */
@@ -229,6 +230,22 @@ export async function testSalesDepartment(db: Db) {
 
   // Bậc cuối không có bậc sau ⇒ tỷ lệ đi tiếp là KHÔNG ÁP DỤNG, không phải 0%.
   assert.equal(phieu.rows[phieu.rows.length - 1].passRate, null, "bậc cuối không được mang một thất bại nó không có");
+
+  /*
+    ═════════ 6. LIÊN KẾT VỀ CHAT GỐC ═════════
+
+    Người chấm không kết luận được từ MỘT lượt: đo 22/09/2026 là 12 tin mỗi hội thoại, nhiều nhất
+    79, trong khi thẻ chấm chỉ in tin kích hoạt và câu đầu nhân viên trả lời. Nên nút mở chat gốc
+    là điều kiện để chấm được, không phải tiện nghi.
+
+    Nhánh THIẾU KHOÁ mới là nhánh phải khoá lại: một liên kết dựng từ chuỗi rỗng vẫn bấm được và
+    vẫn mở ra một trang — hội thoại của người khác, hoặc 404. Cả hai đều tệ hơn việc không có nút,
+    vì người chấm sẽ chấm dựa trên ngữ cảnh của một cuộc nói chuyện khác.
+  */
+  assert.equal(pancakeConversationUrl("111789", "abc123"), "https://pancake.vn/111789?c_id=abc123");
+  assert.equal(pancakeConversationUrl("", "abc123"), null, "thiếu page thì KHÔNG dựng liên kết");
+  assert.equal(pancakeConversationUrl("111789", ""), null, "thiếu mã hội thoại thì KHÔNG dựng liên kết");
+  assert.equal(pancakeConversationUrl("   ", "  "), null, "khoảng trắng không phải một khoá");
 
   console.log(
     `✓ Phòng Sales AI: phễu ${SALES_FUNNEL.length} bậc khớp sổ giai đoạn · nhánh rẽ đứng ngoài · chốt đơn POS khai là NGOÀI TẦM (không có API) · ${AUTONOMY_GATES.length} cổng tự chủ · phanh chỉ HẠ không NÂNG · sàn tụt lỏng hơn ngưỡng lên nên hệ không rung`,

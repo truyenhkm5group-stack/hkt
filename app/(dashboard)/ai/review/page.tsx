@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { ExternalLink } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { LabelForm } from "@/app/(dashboard)/ai/review/label-form";
 import { SALES_ACTION_LABEL, SALES_STAGE_LABEL, type SalesAction, type SalesStage } from "@/lib/constants/sales-agent";
 import { costLabel } from "@/lib/constants/ai";
+import { pancakeConversationUrl } from "@/lib/constants/sales-copilot";
 import { requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { listShadowTurns, shadowMetrics, type ShadowTurnFilters } from "@/lib/queries/sales-review";
@@ -183,6 +185,30 @@ export default async function ShadowReviewPage({ searchParams }: { searchParams:
                   hội thoại {turn.conversationExternalId}
                 </Link>
                 {turn.humanTakeoverAt ? " · ĐÃ CHUYỂN NGƯỜI" : ""}
+                {/*
+                  LIÊN KẾT VỀ CHAT GỐC — không phải tiện nghi, mà là điều kiện để chấm được.
+
+                  Thẻ này chỉ in TIN KÍCH HOẠT và CÂU ĐẦU nhân viên trả lời. Đo 22/09/2026: trung
+                  bình 12 tin mỗi hội thoại, nhiều nhất 79. Nên "máy có hiểu đúng ý khách không"
+                  thường KHÔNG trả lời được từ một lượt — người chấm phải đọc cả mạch.
+
+                  Thiếu một trong hai khoá thì KHÔNG hiện nút: một liên kết dựng từ chuỗi rỗng vẫn
+                  bấm được và vẫn mở ra một trang — hội thoại của người khác, hoặc 404.
+                */}
+                {pancakeConversationUrl(turn.pageId, turn.conversationExternalId) ? (
+                  <>
+                    {" · "}
+                    <a
+                      href={pancakeConversationUrl(turn.pageId, turn.conversationExternalId)!}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                    >
+                      <ExternalLink className="size-3" />
+                      Mở chat gốc
+                    </a>
+                  </>
+                ) : null}
               </span>
               <span>
                 {turn.tier} · {turn.model || "không gọi mô hình"} · {formatNumber(turn.inputTokens)}/{formatNumber(turn.outputTokens)} token ·{" "}
