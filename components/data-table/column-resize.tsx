@@ -7,12 +7,13 @@ import {
   MIN_COLUMN_WIDTH,
   RESIZE_HANDLE_WIDTH,
   clampColumnWidth,
+  clipFadeEdge,
+  clipFadeMask,
   parseStoredWidths,
   resizedWidths,
   tableConfigKey,
-  wrapModeFor,
 } from "@/lib/table/column-resize";
-import { columnHeaders, forEachCellByColumn } from "@/components/data-table/column-dom";
+import { columnCount, columnHeaders, forEachCellByColumn } from "@/components/data-table/column-dom";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,43 +23,72 @@ import { cn } from "@/lib/utils";
  * (thao tác trên DOM của bảng đã dựng sẵn), nên bảng do máy chủ kết xuất cũng dùng được mà không
  * trang nào phải khai thêm gì.
  *
- * ─── BỐN QUYẾT ĐỊNH, VÀ LÝ DO CỦA TỪNG CÁI ───
+ * ─── NĂM QUYẾT ĐỊNH, VÀ LÝ DO CỦA TỪNG CÁI ───
  *
- *  1. BỀ RỘNG ĐẶT Ở `<col>`, BẢNG GIỮ `table-layout: auto`.
- *     Bố cục tự động lấy `max(bề rộng khai, min-content)`, nên trình duyệt KHÔNG BAO GIỜ thu một
- *     cột xuống dưới bề rộng tối thiểu của nội dung. Hàng rào chống cắt chữ nằm trong công cụ bố
- *     cục chứ không nằm trong mã của chúng ta — không có đường nào lách qua. Dùng
- *     `table-layout: fixed` thì ngược lại: bề rộng khai THẮNG nội dung, và chữ bị cắt thật.
+ *  1. CÓ BỀ RỘNG NGƯỜI ĐẶT ⇒ BẢNG CHUYỂN SANG `table-layout: fixed`.
+ *     Đó là cách duy nhất để bề rộng khai THẮNG nội dung, tức để cột hẹp được xuống dưới bề rộng
+ *     tối thiểu của chữ trong nó. Chưa ai kéo thì không đụng gì: bảng vẫn y như trước.
  *
- *  2. LÚC BẮT ĐẦU KÉO, ĐÓNG BĂNG BỀ RỘNG ĐANG HIỂN THỊ CỦA MỌI CỘT.
- *     Không làm vậy thì thu hẹp một cột sẽ khiến các cột chưa khai bề rộng giãn ra theo tỷ lệ
- *     không ai đoán được: người dùng kéo một cột và thấy cả bảng nhảy. Đóng băng đúng tại con số
- *     đang hiện nên khoảnh khắc bấm chuột không có cú nhảy nào.
+ *  2. LỚP NÀY CHỈ GHI `style`, KHÔNG BAO GIỜ DI CHUYỂN MỘT NÚT DOM NÀO.
+ *     Cách "gọn" hơn là bọc nội dung ô vào một `<div>` có bề rộng px — `min-content` của nó bằng
+ *     đúng bề rộng khai, nên `table-layout` giữ nguyên `auto` và chỉ cột đã kéo bị cắt. Nhưng
+ *     những ô ấy do React dựng: chuyển chúng sang một cha khác thì lượt kết xuất sau React gọi
+ *     `td.removeChild(node)` với `node` đã nằm trong lớp bọc ⇒ `NotFoundError` ⇒ sập cả trang.
+ *     Không phải giả thuyết: 11 bảng của ERP nằm trong client component và ô của chúng có nhánh
+ *     điều kiện (`{x ? <Money/> : "—"}`), tức React CÓ thay con của ô khi sang trang.
  *
- *  3. Ô SỐ KHÔNG BAO GIỜ XUỐNG DÒNG, Ô CHỮ XUỐNG DÒNG Ở KHOẢNG TRẮNG.
- *     Xem `lib/table/column-resize.ts`. Tóm tắt: "205.892.000 ₫" gãy làm đôi là đọc ra một con số
- *     khác; còn `overflow-wrap: break-word` (KHÔNG phải `anywhere`) giữ nguyên `min-content`, nên
- *     cột chữ vẫn không hẹp hơn từ dài nhất trong nó — mã vận đơn, SKU, số điện thoại còn nguyên.
+ *  3. CHỈ CỘT ĐÃ KÉO MỚI CÓ BỀ RỘNG LƯU. Mọi cột khác được ĐO LẠI mỗi lần dữ liệu đổi, từ chính
+ *     bảng ở trạng thái không có bề rộng khai nào — nên chúng bám nội dung y như khi tính năng này
+ *     chưa tồn tại, không cắt và cũng không đóng băng ở con số của trang trước. Đây là phần trả
+ *     giá cho quyết định 1: `table-layout` là thuộc tính của cả bảng, nên quyền "nở theo nội dung"
+ *     phải được trả lại bằng phép đo.
  *
- *  4. KHÔNG `text-overflow`, KHÔNG `line-clamp`, KHÔNG `overflow: hidden`.
- *     Cả ba đều là giấu nội dung đi, và người đọc không có cách nào biết mình đang thiếu gì. Thu
- *     hẹp ở đây nghĩa là chữ DỒN XUỐNG DÒNG — dòng cao lên, không mất chữ nào.
+ *  4. MÉP BỊ CẮT PHẢI NHÌN RA ĐƯỢC LÀ ĐÃ CẮT. `1.307.910.998 ₫` cắt còn `1.307.9` vẫn là một con
+ *     số đọc được — và là một con số KHÁC. Ô của cột đã kéo mang mặt nạ chuyển sắc ở đúng MÉP
+ *     TRÀN (`clipFadeEdge`, suy từ CHIỀU VIẾT — `text-align` không quyết định điều này, đã đo):
+ *     nội dung vừa chỗ thì mặt nạ rơi vào khoảng trống nên không ai thấy gì; nội dung tràn thì
+ *     phần cuối nhoè hẳn.
+ *
+ *  5. LỐI RA NẰM NGAY CHỖ VỪA KÉO: bấm đúp lên tay kéo trả ĐÚNG cột đó về tự động. Nút "Bề rộng"
+ *     trả cả bảng về.
  *
  * Bề rộng lưu theo trang + bảng + chữ ký nhãn cột trong trình duyệt của chính người dùng, cùng
  * cách với nút "Cột".
  */
 
-const PREFIX = "erp.colw";
+const PREFIX = "erp.colw2";
 
-/** Bề rộng ĐANG HIỂN THỊ của từng cột. Tiêu đề gộp nhiều cột thì chia đều — không có nguồn nào mịn hơn. */
+/**
+ * Bề rộng ĐANG HIỂN THỊ của từng cột.
+ *
+ * ═══ HÀNG ĐO PHẢI CÓ ĐÚNG MỘT Ô CHO MỖI CỘT ═══
+ *
+ * Bản đầu luôn đo ở dòng tiêu đề đầu tiên và chia đều bề rộng của ô gộp `colSpan`. Chia đều là
+ * ĐOÁN, và với bố cục tự động cái đoán ấy vô hại (bề rộng khai chỉ là sàn, nội dung vẫn thắng).
+ * Với `table-layout: fixed` thì không: bề rộng khai thắng, nên bảng có tiêu đề gộp sẽ NHẢY một cú
+ * ngay khoảnh khắc bấm chuột. Nên tìm một hàng 1:1 trước — hàng dữ liệu đầu tiên gần như luôn là
+ * một hàng như vậy — và chỉ lùi về phép chia đều khi không có hàng nào.
+ *
+ * Ô đang bị nút "Cột" ẩn đi trả 0, và số 0 được giữ nguyên: xem `resizedWidths`.
+ */
 function measureColumns(table: HTMLTableElement, count: number): number[] {
+  const rong = (cell: HTMLTableCellElement) =>
+    cell.style.display === "none" ? 0 : Math.max(Math.round(cell.getBoundingClientRect().width), MIN_COLUMN_WIDTH);
+  const nhip = (cell: HTMLTableCellElement) => (cell.dataset.origColspan ? Number(cell.dataset.origColspan) : cell.colSpan);
+
+  for (const row of Array.from(table.rows)) {
+    const cells = Array.from(row.cells);
+    if (cells.length !== count || !cells.every((c) => nhip(c) === 1)) continue;
+    return cells.map(rong);
+  }
+
   const out = new Array<number>(count).fill(MIN_COLUMN_WIDTH);
   const ths = Array.from(table.querySelectorAll<HTMLTableCellElement>("thead tr:first-child th, thead tr:first-child td"));
   let col = 0;
   for (const th of ths) {
-    const span = th.dataset.origColspan ? Number(th.dataset.origColspan) : th.colSpan;
-    const w = th.getBoundingClientRect().width / Math.max(span, 1);
-    for (let c = col; c < col + span && c < count; c++) out[c] = Math.max(Math.round(w), MIN_COLUMN_WIDTH);
+    const span = nhip(th);
+    const w = Math.round(rong(th) / Math.max(span, 1));
+    for (let c = col; c < col + span && c < count; c++) out[c] = w;
     col += span;
   }
   return out;
@@ -85,53 +115,110 @@ function ensureColGroup(table: HTMLTableElement, count: number): HTMLTableColEle
  *
  * ═══ KHI ĐÃ CÓ BỀ RỘNG NGƯỜI ĐẶT, BẢNG PHẢI THÔI LÀ `width: 100%` ═══
  *
- * Mọi bảng ERP mang lớp `w-full`. Với bố cục tự động, `width: 100%` là một RÀNG BUỘC: nếu tổng bề
- * rộng các cột lớn hơn khung chứa, trình duyệt ép các cột co lại về phía `min-content` cho vừa —
- * và nó ép MỌI cột, không riêng cột đang kéo.
- *
- * Bình thường điều đó vô hại vì mọi ô đều `white-space: nowrap`, nên `min-content` bằng đúng nội
- * dung và không cột nào co được. Nhưng lượt kéo đầu tiên bật xuống dòng cho ô chữ ⇒ `min-content`
- * tụt hẳn xuống ⇒ trình duyệt co được, và nó co thật.
+ * Mọi bảng ERP mang lớp `w-full`. `width: 100%` là một RÀNG BUỘC: tổng bề rộng các cột lớn hơn
+ * khung chứa thì trình duyệt ép các cột co lại cho vừa — và nó ép MỌI cột, không riêng cột đang
+ * kéo.
  *
  * ĐO TRÊN TRÌNH DUYỆT THẬT (21/09/2026, bảng 24 cột, khung ~1.160px): kéo cột "Mã hàng" hẹp đi
  * 80px làm cả bảng tụt từ 3.158px xuống 2.516px, và cột "CPQC" tự co từ 133px còn 56px dù không
- * ai chạm vào nó. Người dùng kéo MỘT cột và thấy SÁU cột khác đổi — đúng thứ quyết định "đóng
- * băng" sinh ra để chặn, nhưng đóng băng một mình không đủ.
+ * ai chạm vào nó. Người dùng kéo MỘT cột và thấy SÁU cột khác đổi.
  *
- * `width: max-content` gỡ ràng buộc ấy: bảng rộng đúng bằng tổng các cột, khung bao tự cuộn ngang.
+ * Nên bề rộng bảng được khai bằng ĐÚNG TỔNG các cột, tính bằng px.
+ *
+ * ═══ VÀ PHẢI LÀ px, KHÔNG ĐƯỢC LÀ `max-content` ═══
+ *
+ * `table-layout: fixed` CHỈ có hiệu lực khi bảng có một bề rộng khai; bề rộng `auto` thì trình
+ * duyệt lặng lẽ lùi về bố cục tự động. `max-content` là một từ khoá theo-nội-dung, nên Chrome xếp
+ * nó vào nhóm `auto` — ĐO TRÊN CHROME THẬT (22/09/2026, bảng Đơn hàng): `<col>` khai 12px,
+ * `getComputedStyle().tableLayout` trả về `"fixed"`, mà cột vẫn rộng 110px, đúng bằng `min-content`
+ * của "1.234.000 ₫". Không lỗi, không cảnh báo, chỉ là cái lật không xảy ra.
+ *
  * Bỏ hết bề rộng tuỳ chỉnh thì trả `w-full` về nguyên trạng — mặc định của bảng không đổi.
  */
-function applyWidths(table: HTMLTableElement, widths: Record<number, number>, count: number) {
+function applyWidths(table: HTMLTableElement, widths: readonly number[] | null, count: number) {
   const cols = ensureColGroup(table, count);
   cols.forEach((col, i) => {
-    const w = widths[i];
-    col.style.width = w ? `${w}px` : "";
+    const w = widths?.[i];
+    col.style.width = w == null ? "" : `${w}px`;
   });
-  const coDat = Object.keys(widths).length > 0;
-  table.style.width = coDat ? "max-content" : "";
+  const coDat = widths != null;
+  table.style.tableLayout = coDat ? "fixed" : "";
+  table.style.width = coDat ? `${widths.reduce((t, w) => t + w, 0)}px` : "";
   table.dataset.colSized = coDat ? "true" : "";
 }
 
 /**
- * Đặt luật xuống dòng cho các ô thuộc cột ĐÃ CÓ bề rộng. Đắt hơn (duyệt mọi ô) nên CHỈ gọi khi
- * TẬP cột có bề rộng đổi, không gọi theo từng bước kéo.
+ * Luật cắt cho từng ô. Đắt hơn `applyWidths` (duyệt mọi ô) nên KHÔNG gọi theo từng bước kéo — tập
+ * cột đã kéo chỉ đổi khi người dùng bấm, còn bề rộng thì đi qua `<colgroup>`.
+ *
+ * `overflow: hidden` đặt cho MỌI ô khi bảng đã ở `table-layout: fixed`: ở bố cục ấy nội dung dài
+ * hơn cột không bị chặn lại mà TRÀN ĐÈ sang ô bên cạnh, và hai con số chồng lên nhau còn tệ hơn
+ * một con số bị cắt.
+ *
+ * Mặt nạ làm mờ thì CHỈ đặt ở cột đã kéo: cột khác được đo lại theo nội dung nên không có gì để
+ * cắt, và một mặt nạ chuyển sắc trên vài nghìn ô là một cái giá dựng hình không đổi lấy được gì.
+ * Ô trải nhiều cột (`span > 1`) cũng không mang mặt nạ — bề rộng của nó là tổng nhiều cột.
  */
-function applyWrap(table: HTMLTableElement, sized: Set<number>) {
-  forEachCellByColumn(table, (cell, colIndex) => {
-    if (!sized.has(colIndex)) {
+function applyClip(table: HTMLTableElement, daKeo: Set<number>, batCat: boolean) {
+  forEachCellByColumn(table, (cell, colIndex, span) => {
+    if (!batCat) {
+      cell.style.overflow = "";
       cell.style.whiteSpace = "";
-      cell.style.overflowWrap = "";
+      if (cell.dataset.colMasked) {
+        cell.style.removeProperty("mask-image");
+        cell.style.removeProperty("-webkit-mask-image");
+        delete cell.dataset.colMasked;
+      }
       return;
     }
-    const mode = wrapModeFor({ className: cell.className, containsNumeric: !!cell.querySelector(".numeric") });
-    if (mode === "nowrap") {
+    cell.style.overflow = "hidden";
+    if (span === 1 && daKeo.has(colIndex)) {
+      // Không để chữ xuống dòng ở cột đã kéo: người dùng thu hẹp để BỎ QUA cột đó, mà xuống dòng
+      // thì cột hẹp lại làm hàng cao lên và cả bảng dài ra — ngược hẳn ý định.
       cell.style.whiteSpace = "nowrap";
-      cell.style.overflowWrap = "";
+      if (!cell.dataset.colMasked) {
+        const mask = clipFadeMask(clipFadeEdge(getComputedStyle(cell).direction));
+        cell.style.setProperty("mask-image", mask);
+        cell.style.setProperty("-webkit-mask-image", mask);
+        cell.dataset.colMasked = "1";
+      }
     } else {
-      cell.style.whiteSpace = "normal";
-      cell.style.overflowWrap = "break-word";
+      cell.style.whiteSpace = "";
+      if (cell.dataset.colMasked) {
+        cell.style.removeProperty("mask-image");
+        cell.style.removeProperty("-webkit-mask-image");
+        delete cell.dataset.colMasked;
+      }
     }
   });
+}
+
+/**
+ * Đo bề rộng TỰ NHIÊN của mọi cột: gỡ sạch bề rộng khai và `table-layout`, đọc, rồi trả nguyên
+ * trạng — tất cả trong MỘT lượt đồng bộ, nên trình duyệt không vẽ lại lần nào ở giữa và không ai
+ * thấy một cú nhấp nháy.
+ *
+ * Đo ở trạng thái `w-full` (không phải `max-content`) là có chủ ý: đó đúng là hình dáng bảng khi
+ * chưa ai kéo gì, kể cả phần giãn ra cho đủ khung. Đo ở `max-content` thì lượt kéo đầu tiên sẽ
+ * làm MỌI cột co lại về bề rộng chữ — người dùng kéo một cột và thấy cả bảng đổi.
+ */
+function measureNatural(table: HTMLTableElement, count: number): number[] {
+  const cols = ensureColGroup(table, count);
+  const layout = table.style.tableLayout;
+  const width = table.style.width;
+  const cu = cols.map((c) => c.style.width);
+  cols.forEach((c) => {
+    c.style.width = "";
+  });
+  table.style.tableLayout = "";
+  table.style.width = "";
+  const nat = measureColumns(table, count);
+  cols.forEach((c, i) => {
+    c.style.width = cu[i];
+  });
+  table.style.tableLayout = layout;
+  table.style.width = width;
+  return nat;
 }
 
 /**
@@ -165,52 +252,104 @@ function useConTroChinhXac() {
 
 export function ColumnResize({ tableRef }: { tableRef: React.RefObject<HTMLTableElement | null> }) {
   const [heads, setHeads] = useState<{ index: number; el: HTMLTableCellElement; label: string }[]>([]);
+  /** Bề rộng NGƯỜI ĐẶT — mỗi khoá là một cột đã kéo, tức một cột được phép cắt nội dung. */
   const [widths, setWidths] = useState<Record<number, number>>({});
   const [dragging, setDragging] = useState<number | null>(null);
   const coConTro = useConTroChinhXac();
   const keyRef = useRef("");
   const widthsRef = useRef(widths);
   widthsRef.current = widths;
-  const sizedRef = useRef("");
-  const dragRef = useRef<{ index: number; startX: number; base: number[] } | null>(null);
+  const clipRef = useRef("");
+  const dragRef = useRef<{ index: number; startX: number; base: number[]; cuoi: number } | null>(null);
 
-  const count = heads.length;
+  /**
+   * SỐ CỘT, KHÔNG PHẢI SỐ Ô TIÊU ĐỀ.
+   *
+   * Hai con số ấy bằng nhau ở hầu hết bảng, nên sai ở đây không ai thấy — cho tới bảng có TIÊU ĐỀ
+   * GỘP. `/ads/daily` có 1 + 5 ô ở dòng tiêu đề đầu cho 29 cột: lấy `heads.length` thì `<colgroup>`
+   * chỉ có 6 `<col>`, và với `table-layout: fixed` thì 6 cột đầu nhận bề rộng khai còn 23 cột sau
+   * chia đều phần thừa. Phép cộng dồn `colSpan` nằm ở `columnCount`, dùng chung với nút "Cột".
+   */
+  const [count, setCount] = useState(0);
+
+  /**
+   * Áp cấu hình lên bảng: đo lại bề rộng tự nhiên, để cột đã kéo giữ con số người đặt, cột còn lại
+   * lấy con số vừa đo. Cột đang bị ẩn đo ra 0 và giữ nguyên 0 — xem `resizedWidths`.
+   */
+  const apDung = useCallback((table: HTMLTableElement, soCot: number, rong: Record<number, number>) => {
+    const keys = Object.keys(rong).map(Number);
+    if (!keys.length) {
+      applyWidths(table, null, soCot);
+      if (clipRef.current !== "") {
+        clipRef.current = "";
+        applyClip(table, new Set(), false);
+      }
+      return;
+    }
+    const nat = measureNatural(table, soCot);
+    applyWidths(
+      table,
+      nat.map((w, i) => (w > 0 && rong[i] != null ? rong[i] : w)),
+      soCot,
+    );
+    const chuKy = keys.sort((a, b) => a - b).join(",");
+    if (clipRef.current !== chuKy) {
+      clipRef.current = chuKy;
+      applyClip(table, new Set(keys), true);
+    }
+  }, []);
 
   /** Đọc lại tiêu đề, nạp cấu hình đã lưu, rồi áp. Chạy lúc gắn và mỗi khi bảng đổi dữ liệu. */
   const doc = useCallback(() => {
     const table = tableRef.current;
-    if (!table) return;
+    // Đang kéo thì KHÔNG đo lại: phép đo gỡ sạch bề rộng khai, và làm vậy giữa lượt kéo là giật
+    // cột đang cầm ra khỏi tay chuột.
+    if (!table || dragRef.current) return;
     const list = columnHeaders(table);
     setHeads((prev) => (prev.length === list.length && prev.every((h, i) => h.el === list[i].el) ? prev : list));
     if (!list.length) return;
+    const soCot = columnCount(table);
+    setCount(soCot);
     const key = tableConfigKey(PREFIX, window.location.pathname, table.dataset.tableId ?? "", list.map((h) => h.label));
     if (key !== keyRef.current) {
       keyRef.current = key;
       let saved: Record<number, number> = {};
       try {
-        saved = parseStoredWidths(localStorage.getItem(key), list.length);
+        saved = parseStoredWidths(localStorage.getItem(key), soCot);
       } catch {
         saved = {};
       }
       setWidths(saved);
-      applyWidths(table, saved, list.length);
-      sizedRef.current = Object.keys(saved).sort().join(",");
-      applyWrap(table, new Set(Object.keys(saved).map(Number)));
+      apDung(table, soCot, saved);
     } else {
-      applyWidths(table, widthsRef.current, list.length);
-      applyWrap(table, new Set(Object.keys(widthsRef.current).map(Number)));
+      // Gọi lại vô điều kiện: trang sau có DÒNG MỚI, và dòng mới chưa mang luật cắt nào.
+      applyClip(table, new Set(Object.keys(widthsRef.current).map(Number)), Object.keys(widthsRef.current).length > 0);
+      apDung(table, soCot, widthsRef.current);
     }
-  }, [tableRef]);
+  }, [apDung, tableRef]);
 
   useEffect(() => {
     doc();
     const table = tableRef.current;
     if (!table) return;
-    // CHỈ quan sát thêm/bớt NÚT, không quan sát thuộc tính: nút "Cột" ghi `style` lên từng ô, và
-    // quan sát thuộc tính sẽ biến hai lớp này thành một vòng lặp tự kích hoạt lẫn nhau.
-    const obs = new MutationObserver(() => doc());
+    // CHỈ quan sát thêm/bớt NÚT, không quan sát thuộc tính: lớp này (và nút "Cột") ghi `style` lên
+    // từng ô, và quan sát thuộc tính sẽ biến chúng thành một vòng lặp tự kích hoạt lẫn nhau.
+    // Gom về MỘT lượt mỗi khung hình: một lượt kết xuất của React sinh ra nhiều đợt đổi DOM, và
+    // `apDung` phải ÉP TÍNH LẠI BỐ CỤC để đo bề rộng tự nhiên — chạy nó vài chục lần cho cùng một
+    // lượt sang trang là trả giá thật cho một câu trả lời không đổi.
+    let khung = 0;
+    const obs = new MutationObserver(() => {
+      if (khung) return;
+      khung = requestAnimationFrame(() => {
+        khung = 0;
+        doc();
+      });
+    });
     obs.observe(table, { childList: true, subtree: true });
-    return () => obs.disconnect();
+    return () => {
+      obs.disconnect();
+      if (khung) cancelAnimationFrame(khung);
+    };
   }, [doc, tableRef]);
 
   const luu = useCallback((next: Record<number, number>) => {
@@ -245,34 +384,49 @@ export function ColumnResize({ tableRef }: { tableRef: React.RefObject<HTMLTable
     if (!table) return;
     e.preventDefault();
     const base = measureColumns(table, count);
-    dragRef.current = { index, startX: e.clientX, base };
+    dragRef.current = { index, startX: e.clientX, base, cuoi: base[index] ?? MIN_COLUMN_WIDTH };
     setDragging(index);
-    // ĐÓNG BĂNG mọi cột tại đúng con số đang hiện (quyết định 2 ở đầu tệp).
-    const dong = Object.fromEntries(base.map((w, i) => [i, w]));
-    setWidths(dong);
-    applyWidths(table, dong, count);
-    const chuKy = base.map((_, i) => i).join(",");
-    if (sizedRef.current !== chuKy) {
-      sizedRef.current = chuKy;
-      applyWrap(table, new Set(base.map((_, i) => i)));
+    /*
+      GIỮ NGUYÊN BỀ RỘNG ĐANG HIỂN THỊ CỦA MỌI CỘT, rồi mới bật `table-layout: fixed`.
+
+      `fixed` đòi bề rộng cho mọi cột; cột nào không khai thì trình duyệt chia đều phần còn lại.
+      Khai đúng con số đang hiện nên khoảnh khắc bấm chuột không có cú nhảy nào — và từ đó trở đi
+      chỉ đúng một cột đổi.
+
+      Cột đang kéo vào danh sách CẮT ngay từ đây, không đợi thả chuột: không bật cắt thì bước kéo
+      đầu tiên đã bị `min-content` của chữ chặn lại, cột đứng yên, và người dùng kết luận tính
+      năng hỏng.
+    */
+    applyWidths(table, base, count);
+    const cat = new Set([...Object.keys(widthsRef.current).map(Number), index]);
+    const chuKy = [...cat].sort((a, b) => a - b).join(",");
+    if (clipRef.current !== chuKy) {
+      clipRef.current = chuKy;
+      applyClip(table, cat, true);
     }
 
     const keo = (ev: PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
       const next = resizedWidths(d.base, d.index, ev.clientX - d.startX);
-      const map = Object.fromEntries(next.map((w, i) => [i, w]));
-      setWidths(map);
-      applyWidths(table, map, count);
+      d.cuoi = next[d.index];
+      applyWidths(table, next, count);
     };
     const ketThuc = () => {
       window.removeEventListener("pointermove", keo);
       window.removeEventListener("pointerup", ketThuc);
       window.removeEventListener("pointercancel", ketThuc);
-      if (!dragRef.current) return;
+      const d = dragRef.current;
+      if (!d) return;
       dragRef.current = null;
       setDragging(null);
-      luu(widthsRef.current);
+      const w = clampColumnWidth(d.cuoi);
+      // Cột đang ẩn (bề rộng 0) không vào bản lưu: nó chưa từng được kéo, chỉ được đo.
+      const next = w == null || d.base[d.index] <= 0 ? widthsRef.current : { ...widthsRef.current, [d.index]: w };
+      setWidths(next);
+      widthsRef.current = next;
+      luu(next);
+      apDung(table, count, next);
     };
     window.addEventListener("pointermove", keo);
     window.addEventListener("pointerup", ketThuc);
@@ -285,17 +439,19 @@ export function ColumnResize({ tableRef }: { tableRef: React.RefObject<HTMLTable
     }
   };
 
-  /** Bấm đúp lên tay kéo: trả ĐÚNG cột đó về tự động, giữ nguyên các cột khác. */
+  /** Bấm đúp lên tay kéo: trả ĐÚNG cột đó về tự động (hết cắt, đo lại theo nội dung). */
   const veTuDong = (index: number) => {
     const table = tableRef.current;
     if (!table) return;
     const next = { ...widthsRef.current };
     delete next[index];
     setWidths(next);
-    applyWidths(table, next, count);
-    const chuKy = Object.keys(next).sort().join(",");
-    sizedRef.current = chuKy;
-    applyWrap(table, new Set(Object.keys(next).map(Number)));
+    widthsRef.current = next;
+    // Gỡ luật cắt của ô thuộc cột này trước khi đo lại: còn `overflow: hidden` thì phép đo vẫn ra
+    // bề rộng cũ, và cột "về tự động" xong vẫn đứng nguyên chỗ hẹp.
+    applyClip(table, new Set(Object.keys(next).map(Number)), Object.keys(next).length > 0);
+    clipRef.current = Object.keys(next).map(Number).sort((a, b) => a - b).join(",");
+    apDung(table, count, next);
     luu(next);
   };
 
@@ -303,9 +459,10 @@ export function ColumnResize({ tableRef }: { tableRef: React.RefObject<HTMLTable
     const table = tableRef.current;
     if (!table) return;
     setWidths({});
-    applyWidths(table, {}, count);
-    sizedRef.current = "";
-    applyWrap(table, new Set());
+    widthsRef.current = {};
+    applyClip(table, new Set(), false);
+    clipRef.current = "";
+    apDung(table, count, {});
     luu({});
   };
 

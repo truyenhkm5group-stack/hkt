@@ -2,26 +2,34 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { sep } from "node:path";
 import {
+  CLIP_FADE_PX,
   MAX_COLUMN_WIDTH,
   MIN_COLUMN_WIDTH,
+  RESIZE_HANDLE_WIDTH,
   clampColumnWidth,
+  clipFadeEdge,
+  clipFadeMask,
   parseStoredWidths,
   resizedWidths,
   tableConfigKey,
-  wrapModeFor,
 } from "@/lib/table/column-resize";
 
 /**
- * ═══════ KÉO RỘNG CỘT: THU HẸP LÀ XUỐNG DÒNG, KHÔNG BAO GIỜ LÀ CẮT CHỮ ═══════
+ * ═══════ KÉO RỘNG CỘT: THU HẸP ĐƯỢC TỚI SÁT, NHƯNG CHỈ ĐÚNG CỘT ĐÃ KÉO ═══════
  *
- * Toàn bộ tính năng đứng trên một lời hứa: kéo cột hẹp lại thì nội dung DỒN XUỐNG DÒNG chứ không
- * mất đi. Lời hứa ấy được giữ bằng hai thứ, và bài kiểm này khoá cả hai:
+ * Lời hứa của tính năng ĐÃ ĐỔI (chủ shop yêu cầu 22/09/2026). Trước đây thu hẹp nghĩa là chữ dồn
+ * xuống dòng và không mất chữ nào — một lời hứa trình duyệt tự giữ, nhưng nó cũng chặn luôn việc
+ * kéo một cột sát lại để tạm bỏ qua nó. Lời hứa mới có ba vế, và bài kiểm này khoá cả ba:
  *
- *   1. BỀ RỘNG ĐẶT Ở `<col>`, bảng giữ `table-layout: auto` ⇒ trình duyệt lấy
- *      `max(bề rộng khai, min-content)` và KHÔNG BAO GIỜ thu cột xuống dưới nội dung.
- *      Đổi sang `table-layout: fixed` là lật ngược điều đó: bề rộng khai thắng, chữ bị cắt thật.
- *   2. LUẬT XUỐNG DÒNG cho `min-content` một giá trị hợp lý — số thì không gãy, chữ thì gãy ở
- *      khoảng trắng chứ không gãy giữa từ.
+ *   1. KÉO ĐƯỢC TỚI SÁT. Sàn bằng bề rộng tay kéo + 3px, không phải một con số gõ tay: cột hẹp
+ *      hơn tay kéo thì tay kéo tràn sang đè tay kéo của cột bên trái và người dùng mất lối ra.
+ *   2. CHỈ CỘT ĐÃ KÉO MỚI CÓ BỀ RỘNG LƯU. `table-layout: fixed` lấy quyền nở-theo-nội-dung của
+ *      MỌI cột, kể cả cột chưa ai chạm vào, nên quyền ấy phải được trả lại bằng một phép ĐO LẠI
+ *      cho các cột còn lại. Không trả lại thì trang sau có số dài hơn là cắt im lặng.
+ *   3. MÉP BỊ CẮT PHẢI NHÌN RA ĐƯỢC LÀ ĐÃ CẮT, và mặt nạ phải nằm ở đúng MÉP TRÀN — mép ấy do
+ *      CHIỀU VIẾT quyết định, không phải `text-align` (đã đo, xem `clipFadeEdge`). Đặt nhầm mép
+ *      là làm mờ khoảng trống, còn `1.307.9` cắt từ `1.307.910.998 ₫` vẫn hiện ra sắc nét như
+ *      một con số đầy đủ.
  */
 /**
  * Mọi tệp `.tsx` dưới một thư mục, kèm đường dẫn ĐÃ CHUẨN HOÁ dấu phân cách.
@@ -45,9 +53,17 @@ function docTatCaTsx(goc: URL): [string, string][] {
 }
 
 export function testColumnResize() {
+  // ───────── SÀN KÉO: HAI MÉP GẦN CHẠM NHAU, NHƯNG KHÔNG CHÔN MẤT TAY KÉO ─────────
+  //
+  // Con số này phải DẪN XUẤT từ bề rộng tay kéo. Gõ tay một sàn nhỏ hơn tay kéo là dựng một cái
+  // bẫy một chiều: cột thu về 6px thì tay kéo 9px của nó tràn sang đè lên tay kéo của cột bên
+  // trái, và cột bên trái không kéo lại được nữa.
+  assert.ok(MIN_COLUMN_WIDTH > RESIZE_HANDLE_WIDTH, "sàn phải rộng hơn tay kéo, nếu không tay kéo đè sang cột bên cạnh");
+  assert.ok(MIN_COLUMN_WIDTH <= RESIZE_HANDLE_WIDTH + 4, "sàn phải sát tay kéo: đây là mức 'hai mép gần chạm nhau'");
+
   // ───────── KẸP BỀ RỘNG: CHƯA BIẾT KHÔNG ĐƯỢC HOÁ THÀNH MỘT CON SỐ (§42) ─────────
   assert.equal(clampColumnWidth(200), 200);
-  assert.equal(clampColumnWidth(10), MIN_COLUMN_WIDTH, "kéo quá hẹp thì dừng ở sàn, không về 0");
+  assert.equal(clampColumnWidth(1), MIN_COLUMN_WIDTH, "kéo quá hẹp thì dừng ở sàn, không về 0");
   assert.equal(clampColumnWidth(99_999), MAX_COLUMN_WIDTH, "kéo quá rộng thì dừng ở trần");
   assert.equal(clampColumnWidth(123.6), 124, "bề rộng là số nguyên px");
   for (const xau of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
@@ -63,28 +79,35 @@ export function testColumnResize() {
   // ỔN ĐỊNH: cùng nền + cùng khoảng ⇒ cùng kết quả. Kéo qua kéo lại không được trôi.
   assert.deepEqual(resizedWidths(nen, 1, -60), sau, "hàm thuần: chạy hai lần ra cùng một kết quả");
   assert.deepEqual(resizedWidths(nen, 0, -1000), [MIN_COLUMN_WIDTH, 200, 90, 300], "kéo mạnh tay vẫn dừng ở sàn");
+  // Nút "Cột" ẩn một cột bằng `display: none`, và phép đo trả 0 cho cột đó. Với `table-layout:
+  // fixed` cột ẩn KHÔNG tự biến mất — nó lấy đúng bề rộng đã khai. Kẹp số 0 lên sàn là ẩn 10 cột
+  // thì được 120px khoảng trắng không ai giải thích nổi.
+  assert.deepEqual(resizedWidths([120, 0, 90], 2, -30), [120, 0, 60], "cột đang ẩn (0) đi thẳng qua, không bị kẹp lên sàn");
+  assert.deepEqual(resizedWidths([120, 0, 90], 1, 200), [120, 0, 90], "kéo một cột đang ẩn là một lượt không làm gì");
 
   /*
-    ───────── LUẬT XUỐNG DÒNG ─────────
+    ───────── MẶT NẠ NẰM Ở ĐÚNG MÉP TRÀN, VÀ MÉP ẤY KHÔNG PHẢI THỨ TRỰC GIÁC NÓI ─────────
 
-    ĐÂY LÀ CHỖ ĐÃ SAI MỘT LẦN, VÀ SAI THEO KIỂU IM LẶNG. Bản đầu coi `whitespace-nowrap` là lời
-    khai "ô này không được xuống dòng". Nhưng `components/ui/table.tsx` đặt lớp ấy MẶC ĐỊNH cho
-    MỌI `<th>` và `<td>` của ERP — nên mọi ô đều rơi vào nhánh "nowrap", không cột nào hẹp lại
-    được, và cả tính năng chỉ còn nới rộng được. Bảng vẫn chạy, không lỗi, chỉ là vô dụng.
+    Trực giác: ô tiền canh phải giữ đuôi số sát mép phải ⇒ phần bị đẩy ra là phần ĐẦU ⇒ làm mờ mép
+    TRÁI. Bản đầu viết đúng như vậy và nó SAI. ĐO TRÊN CHROME (22/09/2026, khối 40px chứa nội dung
+    148px, `overflow: hidden`): với CẢ BA giá trị `left` · `right` · `center`, phần tràn là 108px ở
+    mép PHẢI và 0px ở mép trái. `text-align` chỉ xếp dòng khi dòng còn VỪA.
+
+    Nên câu hỏi duy nhất là CHIỀU VIẾT. Đặt nhầm mép thì mặt nạ chỉ làm mờ khoảng trống: trông vẫn
+    "có làm gì đó", mà con số bị cắt vẫn hiện ra sắc nét như một con số đầy đủ.
   */
-  assert.equal(
-    wrapModeFor({ className: "px-2.5 py-2 whitespace-nowrap", containsNumeric: false }),
-    "wrap",
-    "`whitespace-nowrap` là MẶC ĐỊNH của mọi ô, không phải ý định của ô này — đọc nó thành ý định làm cả tính năng thành vô dụng",
-  );
-  assert.equal(wrapModeFor({ className: "numeric text-right", containsNumeric: false }), "nowrap", "ô số không bao giờ xuống dòng");
-  assert.equal(
-    wrapModeFor({ className: "text-right", containsNumeric: true }),
-    "nowrap",
-    "ô chứa <Money> (nó luôn phát lớp `numeric`) cũng là ô số",
-  );
-  assert.equal(wrapModeFor({ className: "font-medium", containsNumeric: false }), "wrap", "ô chữ xuống dòng được");
-  assert.equal(wrapModeFor({ className: "numeric-ish", containsNumeric: false }), "wrap", "khớp nguyên từ, không khớp tiền tố");
+  assert.equal(clipFadeEdge("ltr"), "right", "chiều viết trái→phải thì nội dung tràn về mép PHẢI");
+  assert.equal(clipFadeEdge("rtl"), "left");
+  assert.equal(clipFadeEdge(""), "right", "không đọc được chiều viết thì theo mặc định của ERP (ltr)");
+  assert.equal(clipFadeEdge(" LTR "), "right", "giá trị từ getComputedStyle không được tin là đã chuẩn hoá");
+  assert.ok(clipFadeMask("right").includes("to left"), "làm mờ mép PHẢI = chuyển sắc chạy TỪ phải sang");
+  assert.ok(clipFadeMask("left").includes("to right"));
+  for (const canh of ["left", "right"] as const) {
+    assert.ok(clipFadeMask(canh).includes(`${CLIP_FADE_PX}px`), "dải mờ phải lấy từ hằng số, không gõ lại con số");
+  }
+  // `px-2.5` = 10px mỗi bên. Dải mờ hẹp hơn thế thì nó chỉ phủ phần đệm và không chạm tới chữ —
+  // nội dung bị cắt vẫn sắc nét, và cả hàng rào thứ ba thành trang trí.
+  assert.ok(CLIP_FADE_PX > 10, "dải mờ phải ăn qua phần đệm của ô mới nói được điều gì");
 
   // ───────── KHOÁ LƯU: ĐỔI CỘT THÌ CẤU HÌNH CŨ KHÔNG ĐƯỢC ÁP NHẦM ─────────
   const a = tableConfigKey("erp.colw", "/reports", "t1", ["Mã hàng", "Đơn", "Doanh số"]);
@@ -96,6 +119,11 @@ export function testColumnResize() {
   );
   assert.notEqual(a, tableConfigKey("erp.colw", "/reports", "t1", ["Đơn", "Mã hàng", "Doanh số"]), "đổi thứ tự cột ⇒ khoá đổi");
   assert.notEqual(a, tableConfigKey("erp.cols", "/reports", "t1", ["Mã hàng", "Đơn", "Doanh số"]), "bề rộng và ẩn/hiện là hai cấu hình, hai khoá");
+  assert.notEqual(
+    a,
+    tableConfigKey("erp.colclip", "/reports", "t1", ["Mã hàng", "Đơn", "Doanh số"]),
+    "bề rộng và 'cột nào được cắt' cũng là hai cấu hình, hai khoá",
+  );
   assert.equal(
     tableConfigKey("erp.colw", "/orders/0a9f3b21c4d5e6f70819", "t1", ["A"]),
     tableConfigKey("erp.colw", "/orders/ffffffffffffffffffff", "t1", ["A"]),
@@ -110,11 +138,11 @@ export function testColumnResize() {
   assert.deepEqual(parseStoredWidths('{"9":200}', 4), {}, "cột đã biến mất khỏi bảng thì bỏ qua, không dựng lại");
   assert.deepEqual(parseStoredWidths('{"0":5}', 4), { 0: MIN_COLUMN_WIDTH }, "giá trị cũ ngoài khoảng vẫn được kẹp về khoảng dùng được");
   assert.deepEqual(parseStoredWidths('{"0":"rộng"}', 4), {}, "giá trị không phải số bị bỏ, không hoá thành 0");
+  // Mỗi khoá đọc ra ở đây là một cột ĐƯỢC PHÉP CẮT nội dung, nên rác không được thành một khoá.
+  // `Number(null)` là 0: đọc bằng phép ép kiểu thì một giá trị `null` bật cắt cho một cột chưa ai kéo.
+  assert.deepEqual(parseStoredWidths('{"0":null,"1":true}', 4), {}, "chỉ nhận SỐ: `null` không được hoá thành một bề rộng hợp lệ");
 
-  // ───────── KHOÁ Ở MỨC MÃ NGUỒN: KHÔNG ĐƯỢC GIẤU NỘI DUNG ĐI ─────────
-  //
-  // Bốn cách "cho gọn" đều làm chữ biến mất mà người đọc không có cách nào biết mình đang thiếu
-  // gì. Một bảng giấu nội dung tệ hơn một bảng phải cuộn ngang.
+  // ───────── KHOÁ Ở MỨC MÃ NGUỒN ─────────
   //
   // Quét MÃ, không quét VĂN XUÔI: chính tệp ấy giải thích vì sao KHÔNG dùng `table-layout: fixed`,
   // nên một phép quét cả tệp sẽ bắt đúng câu giải thích và báo đỏ. Bỏ chú thích trước khi quét —
@@ -126,17 +154,55 @@ export function testColumnResize() {
     .filter((l) => !/^\s*(\/\/|\*)/.test(l))
     .join("\n");
   assert.ok(src.length > 1000 && src.length < raw.length, "phép bỏ chú thích phải bỏ được thứ gì đó mà vẫn còn mã để quét");
-  for (const [mau, vi] of [
-    [/table-?[Ll]ayout/, "`table-layout: fixed` làm bề rộng khai THẮNG nội dung — chữ bị cắt thật"],
-    [/text-?[Oo]verflow|truncate/, "`text-overflow`/`truncate` là cắt chữ rồi chấm lửng"],
-    [/line-?clamp/, "`line-clamp` cắt bớt số dòng"],
-    [/overflow:\s*hidden|overflow-hidden/, "`overflow: hidden` cắt phần tràn ra"],
-    [/overflow-?[Ww]rap:\s*"?anywhere/, "`anywhere` kéo `min-content` xuống một ký tự — cột thu được tới mức chữ thành một sợi dọc"],
-  ] as const) {
-    assert.ok(!mau.test(src), `components/data-table/column-resize.tsx: ${vi}`);
-  }
-  assert.ok(src.includes('overflowWrap = "break-word"'), "ô chữ phải gãy ở khoảng trắng bằng `break-word` — nó KHÔNG làm giảm min-content nên từ dài nhất vẫn nguyên vẹn");
+
+  assert.ok(!/line-?clamp/.test(src), "`line-clamp` cắt bớt SỐ DÒNG mà không có mép tràn nào để làm mờ — không ai biết mình đang thiếu gì");
+
+  // ─── 1. CÁI LẬT LÀ CÓ CHỦ Ý, VÀ CHỈ LẬT KHI NGƯỜI DÙNG ĐÃ ĐẶT BỀ RỘNG ───
   assert.ok(src.includes("ensureColGroup"), "bề rộng phải đặt ở `<col>`, không đặt lên từng ô");
+  assert.ok(
+    /tableLayout = coDat \? "fixed" : ""/.test(src),
+    "`fixed` là thứ duy nhất làm bề rộng khai thắng nội dung — và nó phải TẮT khi không còn bề rộng người đặt",
+  );
+
+  /*
+    ─── 2. KHÔNG BAO GIỜ DI CHUYỂN MỘT NÚT DOM CỦA Ô ───
+
+    Cách "gọn" là bọc nội dung ô vào một `<div>` có bề rộng px: `min-content` tụt xuống, bảng giữ
+    `table-layout: auto`, và chỉ cột đã kéo bị cắt. Nhưng những ô ấy do React dựng — chuyển chúng
+    sang một cha khác thì lượt kết xuất sau React gọi `td.removeChild(node)` với `node` đã nằm
+    trong lớp bọc ⇒ `NotFoundError` ⇒ sập trang. 11 bảng của ERP nằm trong client component và ô
+    của chúng có nhánh điều kiện, tức React CÓ thay con của ô khi sang trang.
+  */
+  for (const mau of [/\bcell\.(append|appendChild|insertBefore|removeChild|replaceChildren)\b/, /\bcell\.innerHTML\b/]) {
+    assert.ok(!mau.test(src), "lớp này chỉ được ghi `style`: dựng lại con của một ô do React quản là `NotFoundError` ở lượt kết xuất sau");
+  }
+
+  // ─── 3. CỘT CHƯA AI KÉO PHẢI ĐƯỢC ĐO LẠI THEO NỘI DUNG ───
+  assert.ok(
+    /measureNatural\(table, soCot\)/.test(src),
+    "`fixed` lấy quyền nở-theo-nội-dung của MỌI cột; không đo lại thì cột chưa ai chạm vào cũng cắt im lặng ở trang sau",
+  );
+  assert.ok(/rong\[i\] != null \? rong\[i\] : w/.test(src), "cột đã kéo giữ con số người đặt, cột còn lại lấy con số vừa đo");
+
+  // ─── 4. MÉP BỊ CẮT PHẢI NHÌN RA ĐƯỢC LÀ ĐÃ CẮT ───
+  assert.ok(/overflow = "hidden"/.test(src), "ở `fixed`, nội dung dài hơn cột TRÀN ĐÈ sang ô bên cạnh chứ không tự dừng lại");
+  assert.ok(
+    /span === 1 && daKeo\.has\(colIndex\)/.test(src),
+    "mặt nạ chỉ đặt ở cột ĐÃ KÉO, và không đặt lên ô trải nhiều cột: bề rộng của ô ấy là tổng nhiều cột",
+  );
+  assert.ok(
+    /clipFadeEdge\(getComputedStyle\(cell\)\.direction\)/.test(src),
+    "mép làm mờ suy từ CHIỀU VIẾT, không phải `text-align` — đã đo: canh phải vẫn tràn sang phải",
+  );
+  for (const thuoc of ["mask-image", "-webkit-mask-image"]) {
+    assert.ok(src.includes(`"${thuoc}"`), `thiếu \`${thuoc}\`: nội dung bị cắt mà không có dấu hiệu nào trên màn hình`);
+  }
+
+  // ─── 5. ĐANG KÉO THÌ KHÔNG ĐO LẠI ───
+  //
+  // Phép đo gỡ sạch bề rộng khai để đọc bề rộng tự nhiên. Chạy nó giữa lượt kéo là giật cột đang
+  // cầm ra khỏi tay chuột.
+  assert.ok(/if \(!table \|\| dragRef\.current\) return;/.test(src), "`doc()` phải bỏ qua khi đang có lượt kéo");
 
   // ───────── MÀN HÌNH CẢM ỨNG: KHÔNG DỰNG TAY KÉO ─────────
   //
@@ -170,7 +236,7 @@ export function testColumnResize() {
   assert.ok(soCap >= 7, `phải có ít nhất 7 bảng thô đã gắn thanh công cụ, đang thấy ${soCap}`);
 
   console.log(
-    `✓ Kéo rộng cột: sàn ${MIN_COLUMN_WIDTH}px / trần ${MAX_COLUMN_WIDTH}px · chưa biết ⇒ null · số không gãy, chữ gãy ở khoảng trắng · không cắt chữ ở bất kỳ đâu · đổi cột thì cấu hình cũ không áp nhầm · ${soCap} bảng thô gắn đúng bảng có thật`,
+    `✓ Kéo rộng cột: sàn ${MIN_COLUMN_WIDTH}px (tay kéo ${RESIZE_HANDLE_WIDTH}px) / trần ${MAX_COLUMN_WIDTH}px · chưa biết ⇒ null · chỉ ghi style, không dựng lại DOM của ô · cột chưa ai kéo được đo lại theo nội dung · mép tràn làm mờ ${CLIP_FADE_PX}px theo đúng chiều viết · ${soCap} bảng thô gắn đúng bảng có thật`,
   );
 }
 
