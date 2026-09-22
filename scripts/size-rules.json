@@ -15,7 +15,7 @@
     "BẢNG NỮ chỉ khai CÂN NẶNG. Hai cột 'Ngực'/'Eo' trong ảnh là THÔNG SỐ CỦA SẢN PHẨM (mỗi size",
     "một con số), không phải khoảng số đo người mặc — chúng nằm ở 'note' để nhân viên tư vấn."
   ],
-  "version": "2026-09-22b",
+  "version": "2026-09-22c",
   "rules": [
     {
       "version": "nam-2026-09-22",
@@ -296,7 +296,14 @@
       "version": "nu-2026-09-22",
       "label": "Bảng nữ",
       "scope": "PRODUCT",
-      "keys": [],
+      "keys": [
+        "X001",
+        "Q001",
+        "Q002",
+        "Q003",
+        "Q004",
+        "Q005"
+      ],
       "note": "Thông số SẢN PHẨM theo size (ngực/eo, cm): M 85/68 · L 90/74 · XL 95/80 · XXL 100/86 · 3XL 105/92. Đây là số đo của áo, không phải của người mặc — chỉ dùng để tư vấn.",
       "rows": [
         {

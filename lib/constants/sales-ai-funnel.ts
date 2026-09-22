@@ -94,24 +94,36 @@ export const SALES_FUNNEL: FunnelStep[] = [
     blockedBy: "",
     owner: "SALES",
   },
+  /*
+    SIZE ĐỨNG TRƯỚC MÀU, và thứ tự ấy KHÔNG suy từ `SALES_STAGES`.
+
+    `SALES_STAGES` liệt kê `VARIANT_SELECTION` trước `SIZE_SELECTION`, nhưng đó là thứ tự KHAI
+    BÁO chứ không phải thứ tự ĐI QUA. `nextStage()` hỏi `needsSize` trước `needsColor` một cách
+    vô điều kiện, nên một sản phẩm cần cả hai sẽ được hỏi size trước.
+
+    Bản đầu của sổ này chép thứ tự từ `SALES_STAGES` và vì thế khai ngược. Hậu quả không phải một
+    lỗi chạy: màn hình vẫn vẽ ra một cái phễu trông hợp lý, chỉ là hai bậc giữa đứng sai chỗ và
+    "tỷ lệ đi tiếp" của chúng nói về hai bước chuyển không có thật. Bài diễn tập trọn phễu bắt
+    được, và `assertFunnelMatchesPipeline()` giữ cho nó không lệch lại.
+  */
+  {
+    stage: "SIZE_SELECTION",
+    order: 4,
+    label: "Chốt size",
+    requires: "Khách tự chọn một size, HOẶC bảng số đo để quy từ chiều cao / cân nặng",
+    autonomy: "AI_NEEDS_DATA",
+    blockedBy:
+      "Khoá ai.sizeRules trong settings chưa khai cho mã hàng này, nên size.recommend trả SIZE_DATA_MISSING và dây chuyền chuyển người. Khách đưa số đo mà không có bảng tra thì AI KHÔNG đoán — đoán một size trên cơ thể người thật là thứ không được phép đoán. Gán bảng ở /ai/size-rules.",
+    owner: "MANAGEMENT",
+  },
   {
     stage: "VARIANT_SELECTION",
-    order: 4,
+    order: 5,
     label: "Chốt màu",
     requires: "Danh sách màu của sản phẩm, và câu trả lời của khách",
     autonomy: "AI_ALONE",
     blockedBy: "",
     owner: "SALES",
-  },
-  {
-    stage: "SIZE_SELECTION",
-    order: 5,
-    label: "Chốt size",
-    requires: "Khách tự chọn một size, HOẶC bảng số đo để quy từ chiều cao / cân nặng",
-    autonomy: "AI_NEEDS_DATA",
-    blockedBy:
-      "Khoá ai.sizeRules trong settings chưa khai, nên size.recommend trả SIZE_DATA_MISSING và dây chuyền chuyển người. Khách đưa số đo mà không có bảng tra thì AI KHÔNG đoán — đoán một size trên cơ thể người thật là thứ không được phép đoán.",
-    owner: "MANAGEMENT",
   },
   {
     stage: "PURCHASE_INTENT",

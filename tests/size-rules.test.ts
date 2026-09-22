@@ -168,6 +168,12 @@ export function testSizeRules() {
   const tra = (code: string) => resolveSizeRule(payload.rules, { productCode: code, productId: null, variantId: null, family: "Q" });
   assert.equal(tra("Q006")?.version, nam.version, "Q006 là hàng nam");
   assert.equal(tra("q006")?.version, nam.version, "khai mã không phân biệt hoa thường");
+  for (const ma of ["X001", "Q001", "Q002", "Q003", "Q004", "Q005"]) {
+    assert.equal(tra(ma)?.version, nu.version, `${ma} là hàng nữ`);
+  }
+  // X001 KHÁC tiền tố với sáu mã kia. Đây là bằng chứng gán theo MÃ chứ không theo NHÓM: một
+  // bảng khai theo nhóm "Q" sẽ bỏ sót đúng mã này, và nó sẽ im lặng chuyển người mãi mãi.
+  assert.notEqual(tra("X001"), null, "X001 khác tiền tố nhưng vẫn phải khớp bảng nữ");
 
   /*
     CHƯA GÁN LÀ MỘT TRẠNG THÁI HỢP LỆ, và nó phải dẫn tới CHUYỂN NGƯỜI.
