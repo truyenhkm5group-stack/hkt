@@ -182,7 +182,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
           những gì đang thấy chưa phải số mới (`aria-busy`).
         */
         <StaleWhileRefreshing>
-          <CareWorkbenchView initial={wb!} view={view} staff={staff} presets={presets} resolutionPresets={resolutionPresets} canManage={can(user, "shipments:manage")} />
+          <CareWorkbenchView initial={wb!} view={view} staff={staff} presets={presets} resolutionPresets={resolutionPresets} canManage={can(user, "shipments:manage")} meId={user.id} />
         </StaleWhileRefreshing>
       )}
     </div>

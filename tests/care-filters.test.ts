@@ -5,14 +5,17 @@ import {
   CARE_ATTEMPT_BAND_KEYS,
   CARE_COD_BAND_KEYS,
   CARE_SLA_BUCKETS,
+  EMPTY_CARE_FILTERS,
   careAttemptBand,
   careCodBand,
   careFacet,
+  careRoundBandOf,
   careSlaBucket,
   matchesCareFilters,
   type CareFilterDim,
   type CareFilters,
 } from "@/lib/care/filters";
+import { CARE_ROUND_BAND_KEYS } from "@/lib/constants/care-rounds";
 import { CARE_SLA_SOON_FRACTION } from "@/lib/constants/care";
 import type { CareSlaHours } from "@/lib/care/view";
 import { slaOf } from "@/lib/care/view";
@@ -37,6 +40,8 @@ type Dung = {
   phone?: string;
   /** Kết quả xử lý gần nhất — `undefined` = CHƯA AI QUYẾT (khác hẳn "đã quyết là không làm gì"). */
   quyet?: CareDecision;
+  /** Số LƯỢT đã xử lý của đợt. `undefined` = 0 (chưa ai đụng). */
+  luot?: number;
 };
 
 function ca(d: Dung): CareCase {
@@ -88,6 +93,16 @@ function ca(d: Dung): CareCase {
     care,
     reopened: false,
     lastCareAction: null,
+    history: {
+      rounds: d.luot ?? 0,
+      touches: d.luot ?? 0,
+      lastRoundAt: d.luot ? gio((d.vaoLuc ?? 0) + 0.5) : null,
+      lastRoundActorId: d.luot ? (d.ownerId ?? null) : null,
+      carrierNewsAfterLastRound: false,
+      previousEpisodes: 0,
+      timeline: [],
+      timelineTruncated: false,
+    },
     botMessageFailure: null,
     carrierRequest: null,
     carrierCapability: "API",
@@ -100,7 +115,15 @@ function tai(c: CareCase, now: Date): CareCase {
   return { ...c, sla: slaOf(c.queueSince, c.care, now, GIO) };
 }
 
-const RONG: CareFilters = { view: "care", q: "", owner: "", reason: "", substate: "", sla: "", cod: "", attempts: "", sku: "", resolution: "", followUp: "" };
+/*
+  DỰNG TỪ `EMPTY_CARE_FILTERS`, KHÔNG GÕ LẠI TỪNG CHIỀU.
+
+  Gõ lại nghĩa là bài kiểm phải sửa mỗi lần thêm một chiều lọc — và lần sửa ấy rất dễ thành "thêm
+  đại một ô rỗng cho hết đỏ" thay vì thêm một khẳng định cho chiều mới. Dựng từ hằng số ĐANG CHẠY
+  thì chiều mới tự có mặt với giá trị "không lọc", và phần dưới của tệp này vẫn kiểm được rằng mọi
+  chiều đều đi qua `matchesExcept`.
+*/
+const RONG: CareFilters = { view: "care", ...EMPTY_CARE_FILTERS };
 
 export function testCareFilters() {
   /* ═══════════ 1. DẢI TIỀN VÀ DẢI LẦN PHÁT: BIÊN LÀ CHỖ DỄ SAI NHẤT ═══════════ */
@@ -210,10 +233,10 @@ export function testCareFilters() {
   const tap = [
     ca({ id: "1", cod: 0, hut: 0, vaoLuc: 0, ownerId: "u1", reason: "NO_CONTACT", substate: "DELIVERY_EXCEPTION", products: ["SKU-A"] }),
     ca({ id: "2", cod: 524_000, hut: 1, vaoLuc: 2, ownerId: null, reason: "DELIVERY_FAILED", substate: "DELIVERY_EXCEPTION", products: ["SKU-A", "SKU-B"] }),
-    ca({ id: "3", cod: 450_000, hut: 2, vaoLuc: 10, ownerId: "u1", reason: "DELIVERY_FAILED", substate: "DELIVERY_EXCEPTION", phanHoiLuc: 11, status: "IN_PROGRESS", products: ["SKU-B"] }),
-    ca({ id: "4", cod: 800_000, hut: 3, vaoLuc: 18, ownerId: "u2", reason: "AWAITING_REDELIVERY", substate: "WAITING_REDELIVERY", products: [], quyet: "CARE_CONTINUE_DELIVERY" }),
+    ca({ id: "3", cod: 450_000, hut: 2, vaoLuc: 10, ownerId: "u1", reason: "DELIVERY_FAILED", substate: "DELIVERY_EXCEPTION", phanHoiLuc: 11, status: "IN_PROGRESS", products: ["SKU-B"], luot: 1 }),
+    ca({ id: "4", cod: 800_000, hut: 3, vaoLuc: 18, ownerId: "u2", reason: "AWAITING_REDELIVERY", substate: "WAITING_REDELIVERY", products: [], quyet: "CARE_CONTINUE_DELIVERY", luot: 2 }),
     ca({ id: "5", cod: 2_400_000, hut: 0, vaoLuc: 18.9, ownerId: null, reason: "WAITING_CARRIER", substate: "WAITING_PROCESSING", products: ["SKU-C"] }),
-    ca({ id: "6", cod: 1_000_000, hut: 5, vaoLuc: 0, ownerId: "u2", reason: "NO_CONTACT", substate: "DELIVERY_EXCEPTION", phanHoiLuc: 1, status: "WAITING_CUSTOMER", henLuc: 40, products: ["SKU-A"], quyet: "CARE_FOLLOW_UP" }),
+    ca({ id: "6", cod: 1_000_000, hut: 5, vaoLuc: 0, ownerId: "u2", reason: "NO_CONTACT", substate: "DELIVERY_EXCEPTION", phanHoiLuc: 1, status: "WAITING_CUSTOMER", henLuc: 40, products: ["SKU-A"], quyet: "CARE_FOLLOW_UP", luot: 4 }),
   ].map((c) => tai(c, now));
 
   const chieuVaKhoa: [CareFilterDim, (c: CareCase) => string, readonly string[]][] = [
@@ -226,6 +249,9 @@ export function testCareFilters() {
     // được chứng minh cho chúng bằng CHÍNH vòng lặp này, không phải bằng một bài kiểm riêng.
     ["resolution", (c) => c.care.lastDecision?.decision ?? "none", RESOLUTION_FILTER_KEYS],
     ["followUp", (c) => followUpBucket(c.care.followUpAt, now), FOLLOW_UP_FILTERS],
+    // Chiều "đã xử lý mấy lượt" đi cùng vòng lặp này vì lý do y hệt: nó phải thoả "số trên chip =
+    // số dòng bảng" như mọi chiều khác, và nó KHÔNG được có một bài kiểm riêng nới lỏng hơn.
+    ["rounds", (c) => careRoundBandOf(c), CARE_ROUND_BAND_KEYS],
   ];
 
   /*

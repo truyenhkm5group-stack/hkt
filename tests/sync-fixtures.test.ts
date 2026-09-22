@@ -225,6 +225,7 @@ import { testOutreachEligibility, testOutreachOutcomeFacet } from "./outreach-se
 import { testCsCustomerQueue } from "./cs-customer-queue.test";
 import { testCareUiContrast } from "./care-ui-contrast.test";
 import { testCareFilters } from "./care-filters.test";
+import { testCareRounds } from "./care-rounds.test";
 import { testProductNotes } from "./product-notes.test";
 import { testSmokeTiming } from "./smoke-timing.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
@@ -1681,6 +1682,7 @@ async function main() {
   await testCsCustomerQueue(db);
   testCareUiContrast();
   testCareFilters();
+  testCareRounds();
   await testProductNotes(db);
   testSmokeTiming();
   testUiConsistency();

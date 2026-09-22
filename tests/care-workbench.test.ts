@@ -77,8 +77,47 @@ export async function testCareWorkbench(db: Db) {
   assert.equal(asg.data.states["care-s1"].status, "ASSIGNED", "giao người cho case mới ⇒ ASSIGNED");
   assert.equal(asg.data.states["care-s1"].owner?.name, "Linh");
   assert.ok(asg.data.states["care-s1"].firstResponseAt, "lần đầu có người động vào ⇒ chốt mốc phản hồi đầu");
+
+  /*
+    ═══ GIAO VIỆC KHÔNG PHẢI MỘT LƯỢT XỬ LÝ — VÀ ĐÂY LÀ KỊCH BẢN ĐÃ ĐO TRÊN PRODUCTION ═══
+
+    Đo 22/09/2026: **22 trong 25 đợt chưa xử lý lần nào vẫn mang `first_response_at`**, tất cả đều
+    ở `ASSIGNED` với 0 hành động chăm sóc. Mốc ấy do chính `setCareOwner` ghi. Nên một ca vừa được
+    giao cho ai đó trông như "đã phản hồi" trong khi chưa ai gọi một cuộc nào.
+
+    Hai khẳng định dưới đây khoá đúng chỗ đó lại: mốc phản hồi CÓ (dòng trên), số lượt xử lý VẪN
+    LÀ 0. Ngày nào đó có người "sửa" cho hai con số bằng nhau thì bài kiểm này đỏ — và đó là lần
+    duy nhất ai đó sẽ đọc lại lý do.
+  */
+  clearMemo();
+  const qSauGiao = await getCareQueue();
+  const s1SauGiao = qSauGiao.cases.find((c) => c.shipmentId === "care-s1");
+  assert.equal(s1SauGiao?.history?.rounds, 0, "GIAO VIỆC không phải một lượt xử lý (luật 57) — dù nó đã ghi mốc phản hồi đầu");
+  assert.equal(s1SauGiao?.history?.touches, 0, "giao việc cũng không phải một lần CHẠM: một trưởng nhóm giao 50 ca không làm 50 ca được xử lý");
+  assert.equal(qSauGiao.backlogGroups.UNTOUCHED.count, qSauGiao.counts.care, "chưa ai làm gì thì mọi kiện cần care đều thuộc nhóm CHƯA AI ĐỤNG");
+
   const nt = await addCareNote(actor, { shipmentId: "care-s1", note: "Khách hẹn mai 9h", kind: "RESCHEDULED" });
   assert.ok("ok" in nt && nt.ok && nt.data.status === "IN_PROGRESS" && nt.data.lastNote === "Khách hẹn mai 9h", "note ⇒ đang xử lý");
+  /*
+    GHI NOTE LÀ MỘT LƯỢT — và nó phải hiện ra ở nhật ký, cùng với dòng GIAO VIỆC đứng trước nó.
+    Nhật ký GIỮ dòng giao việc (nó giải thích vì sao ca có người), nhưng KHÔNG đếm nó.
+  */
+  clearMemo();
+  const qSauNote = await getCareQueue();
+  const s1SauNote = qSauNote.cases.find((c) => c.shipmentId === "care-s1");
+  assert.equal(s1SauNote?.history?.rounds, 1, "một lần ghi việc đã làm = một lượt xử lý");
+  assert.equal(s1SauNote?.history?.touches, 1, "…và đúng một lần chạm (dòng ASSIGN bị loại khỏi cả hai)");
+  assert.ok(s1SauNote?.history?.lastRoundAt, "có lượt rồi thì phải có mốc lượt cuối");
+  assert.equal(s1SauNote?.history?.lastRoundActorId, actor.id, "quy kết đi bằng KHOÁ tài khoản, không bằng ô chữ (luật 34)");
+  const nhatKy = s1SauNote?.history?.timeline ?? [];
+  assert.ok(nhatKy.some((e) => e.kind === "ACTION"), "nhật ký phải có dòng chăm sóc vừa ghi");
+  assert.ok(nhatKy.some((e) => e.kind === "ASSIGN"), "nhật ký VẪN GIỮ dòng giao việc — không đếm nó không có nghĩa là giấu nó");
+  assert.ok(
+    nhatKy.every((e, i) => i === 0 || nhatKy[i - 1].at.getTime() >= e.at.getTime()),
+    "nhật ký phải mới nhất trước — người đọc hỏi “vừa rồi làm gì” trước khi hỏi “hôm kia làm gì”",
+  );
+  assert.equal(qSauNote.backlogGroups.UNTOUCHED.count + qSauNote.backlogGroups.WORKED_DUE.count + qSauNote.backlogGroups.WORKED_SCHEDULED.count, qSauNote.counts.care, "ba nhóm backlog là một phép BỔ: tổng phải bằng đúng số kiện cần care");
+
   const later = new Date(Date.now() + 3600_000);
   const fu = await setCareFollowUp(actor, { shipmentId: "care-s1", at: later, waitingFor: "WAITING_REDELIVERY" });
   assert.ok("ok" in fu && fu.ok && fu.data.status === "WAITING_REDELIVERY" && fu.data.followUpAt, "hẹn theo dõi ⇒ chờ phát lại");

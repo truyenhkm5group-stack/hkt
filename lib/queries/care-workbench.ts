@@ -2,13 +2,24 @@ import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { carrierCapabilitiesFor } from "@/lib/care/carrier-capabilities";
-import type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
+import type { CareCase, CareCaseDetail, CareEvent, CareHistory, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
 import type { BusinessAction } from "@/lib/constants/care-outcome";
-import { careDecisionOf, type CareDecision } from "@/lib/constants/care-resolution";
+import { careDecisionOf, RESOLUTION_LABEL, type CareDecision } from "@/lib/constants/care-resolution";
+import {
+  CARE_BACKLOG_GROUPS,
+  CARE_TIMELINE_INLINE_MAX,
+  careBacklogGroup,
+  careRoundCount,
+  careStatusArrow,
+  type CareBacklogGroup,
+  type CareRoundEntry,
+  type CareTimelineEntry,
+  type CareTimelineKind,
+} from "@/lib/constants/care-rounds";
 import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { careSlaHours } from "@/lib/care/sla";
 import { careViewOf, slaOf } from "@/lib/care/view";
-import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
+import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_STATUS_LABEL, CARE_STATUSES, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
 import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
 import { botMessageFailuresByShipment } from "@/lib/queries/cs";
 import { BUCKET_BY_KEY, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
@@ -211,6 +222,173 @@ async function loadProducts(shipmentIds: string[]): Promise<Map<string, string[]
   return new Map(rows.map((r) => [r.shipment_id, r.nhan ?? []]));
 }
 
+/**
+ * ═══════════ "ĐÃ AI LÀM GÌ VỚI KIỆN NÀY CHƯA" — BA SỔ, MỘT LƯỢT ĐỌC ═══════════
+ *
+ * MỘT truy vấn cho cả hàng đợi, không một câu cho mỗi dòng: hàng đợi có cả trăm kiện và mỗi kiện
+ * cần ba sổ, nên đọc từng dòng là ba trăm lượt đi CSDL cho một màn hình.
+ *
+ * ─── CỬA SỔ ĐỌC LÀ ĐỢT, KHÔNG PHẢI KIỆN ───
+ *
+ * `care_actions` và `care_case_events` khoá theo `shipment_id` (chúng có trước khi đợt care tồn
+ * tại), `care_decisions` khoá theo `care_case_id`. Nên đợt được cắt bằng MỐC: chỉ lấy dòng ghi từ
+ * `opened_at` của đợt đang hiển thị trở đi. Thiếu vế đó thì một kiện hỏng lần hai sẽ mang theo ba
+ * lượt gọi của lần một, và màn hình nói "đã xử lý 3 lượt" về một đợt chưa ai đụng.
+ *
+ * ─── DÒNG CỦA MÁY VẪN VÀO NHẬT KÝ, NHƯNG KHÔNG VÀO PHÉP ĐẾM ───
+ *
+ * `source = 'SYSTEM'` (bộ đối chiếu mở ca, webhook đóng ca) được GIỮ trong `timeline` vì nó giải
+ * thích vì sao ca đổi trạng thái lúc 3 giờ sáng — nhưng nó KHÔNG phải một lượt xử lý và cũng không
+ * phải một lần chạm. `ASSIGN` bị loại khỏi cả hai phép đếm kể cả khi do người bấm (luật 57).
+ */
+type CareHistoryRow = {
+  shipment_id: string;
+  nguon: "ACTION" | "DECISION" | "EVENT";
+  at: string;
+  actor_id: string | null;
+  actor_name: string | null;
+  by_system: boolean;
+  /** `care_actions.kind` · `care_decisions.decision` · `care_case_events.action`. */
+  ma: string;
+  note: string;
+  truoc: string | null;
+  sau: string | null;
+};
+
+async function loadCareHistory(dots: { careCaseId: string; shipmentId: string; since: Date; lastCarrierAt: Date | null }[]): Promise<Map<string, CareHistory>> {
+  if (!dots.length) return new Map();
+  const db = await getDb();
+  const ids = dots.map((d) => d.careCaseId);
+  const kien = dots.map((d) => d.shipmentId);
+  /*
+    `cua` là bảng (đợt, kiện, mốc mở) dựng từ chính danh sách đang hiển thị. Ghép nó vào cả ba sổ
+    bằng một `join` thay vì lọc `created_at >= min(...)` chung cho tất cả: mốc mở của mỗi đợt một
+    khác, và một mốc chung sẽ kéo theo dòng của đợt trước cho những kiện mở sớm.
+  */
+  const cua = sql.join(
+    dots.map((d) => sql`(${d.careCaseId}, ${d.shipmentId}, ${d.since.toISOString()}::timestamptz)`),
+    sql`, `,
+  );
+  const rows = rowsOf<CareHistoryRow>(
+    await db.execute(sql`
+      with cua(care_case_id, shipment_id, since) as (values ${cua})
+      select a.shipment_id, 'ACTION' as nguon, a.created_at as at, a.actor_id,
+             u.name as actor_name, false as by_system, a.kind as ma, a.note, null as truoc, null as sau
+        from care_actions a
+        join cua on cua.shipment_id = a.shipment_id and a.created_at >= cua.since
+        left join users u on u.id = a.actor_id
+       where a.shipment_id in ${kien}
+      union all
+      select d.shipment_id, 'DECISION', d.decided_at, d.actor_user_id,
+             u.name, false, d.decision, d.note, d.previous_care_status, d.next_care_status
+        from care_decisions d
+        join cua on cua.care_case_id = d.care_case_id
+        left join users u on u.id = d.actor_user_id
+       where d.care_case_id in ${ids}
+      union all
+      select e.shipment_id, 'EVENT', e.created_at, e.actor_id,
+             u.name, e.source = 'SYSTEM', e.action, e.note, e.previous_status, e.next_status
+        from care_case_events e
+        join cua on cua.shipment_id = e.shipment_id and e.created_at >= cua.since
+        left join users u on u.id = e.actor_id
+       where e.shipment_id in ${kien}
+    `),
+  );
+
+  // Số đợt ĐÃ ĐÓNG trước đợt đang hiển thị — mất nó thì kiện hỏng lần thứ ba trông y hệt kiện mới.
+  const truocDo = rowsOf<{ shipment_id: string; n: number }>(
+    await db.execute(sql`
+      select shipment_id, count(*) filter (where not active)::int as n
+        from shipment_care where shipment_id in ${kien} group by shipment_id
+    `),
+  );
+  const soDotTruoc = new Map(truocDo.map((r) => [r.shipment_id, Number(r.n ?? 0)]));
+
+  const gom = new Map<string, CareHistoryRow[]>();
+  for (const r of rows) {
+    const cu = gom.get(r.shipment_id);
+    if (cu) cu.push(r);
+    else gom.set(r.shipment_id, [r]);
+  }
+
+  const ra = new Map<string, CareHistory>();
+  for (const d of dots) {
+    const cua_kien = gom.get(d.shipmentId) ?? [];
+    const dong = cua_kien.map(toTimelineEntry).sort((a, b) => b.at.getTime() - a.at.getTime());
+    /*
+      LƯỢT XỬ LÝ đếm trên ĐÚNG hai sổ việc (`ACTION` · `DECISION`), qua hàm thuần dùng chung với
+      kiểm thử — không có một phép đếm thứ hai viết bằng SQL ở đây, vì hai bản sẽ trôi xa nhau.
+    */
+    const viec: CareRoundEntry[] = cua_kien
+      .filter((r) => r.nguon === "ACTION" || r.nguon === "DECISION")
+      .map((r) => ({ at: new Date(r.at), actorId: r.actor_id, kind: r.nguon === "ACTION" ? ("ACTION" as const) : ("DECISION" as const) }));
+    /*
+      ═══ MỘT LẦN GHI NOTE ĐỂ LẠI HAI DÒNG Ở HAI SỔ — ĐẾM THẲNG LÀ ĐẾM ĐÔI ═══
+
+      `addCareNote` ghi MỘT dòng `care_actions` VÀ MỘT sự kiện `NOTE`; `recordCareDecision` ghi một
+      dòng `care_decisions` VÀ một sự kiện `STATUS`. Hai sổ soi bóng nhau theo thiết kế (một sổ là
+      việc đã làm, một sổ là nhật ký ca), nên "số lần chạm" phải đi qua ĐÚNG cửa sổ gộp mà số lượt
+      xử lý dùng — nếu không thì mỗi thao tác đếm thành hai lần chạm, và con số ấy đứng cạnh con số
+      lượt trong cùng một tooltip.
+
+      Bắt được nhờ một khẳng định trong `tests/care-workbench.test.ts` chạy trên đường ghi thật.
+
+      `ASSIGN` bị loại (luật 57): giao việc là điều phối, không phải chăm sóc lẫn chạm vào.
+    */
+    const chamVao = cua_kien
+      .filter((r) => !r.by_system && !(r.nguon === "EVENT" && r.ma === "ASSIGN"))
+      .map((r) => ({ at: new Date(r.at), actorId: r.actor_id }));
+    const viecXep = [...viec].sort((a, b) => a.at.getTime() - b.at.getTime());
+    const cuoi = viecXep.length ? viecXep[viecXep.length - 1] : null;
+    ra.set(d.shipmentId, {
+      rounds: careRoundCount(viec),
+      touches: careRoundCount(chamVao),
+      lastRoundAt: cuoi?.at ?? null,
+      lastRoundActorId: cuoi?.actorId ?? null,
+      // So với MỐC ĐVVC (`shipment_events.occurred_at`), không với `updated_at` của kiện: cột kia
+      // nhúc nhích mỗi lượt đồng bộ kể cả khi ĐVVC không nói gì mới.
+      carrierNewsAfterLastRound: cuoi !== null && d.lastCarrierAt !== null && d.lastCarrierAt.getTime() > cuoi.at.getTime(),
+      previousEpisodes: soDotTruoc.get(d.shipmentId) ?? 0,
+      timeline: dong.slice(0, CARE_TIMELINE_INLINE_MAX),
+      timelineTruncated: dong.length > CARE_TIMELINE_INLINE_MAX,
+    });
+  }
+  return ra;
+}
+
+/** Nhãn của một dòng nhật ký — dựng Ở ĐÂY, một lần, để trình duyệt không phải mang theo ba bảng chữ. */
+function toTimelineEntry(r: CareHistoryRow): CareTimelineEntry {
+  const at = new Date(r.at);
+  const actor = r.actor_id ? r.actor_name || r.actor_id : "";
+  const bySystem = Boolean(r.by_system);
+  const st = (v: string | null) => (v && (CARE_STATUSES as readonly string[]).includes(v) ? (v as CareStatus) : null);
+  if (r.nguon === "ACTION") {
+    return { at, kind: "ACTION", label: CARE_ACTION_LABEL[r.ma as CareActionKind] ?? r.ma, note: r.note ?? "", actor, bySystem };
+  }
+  if (r.nguon === "DECISION") {
+    const kq = careDecisionOf(r.ma);
+    return { at, kind: "DECISION", label: kq ? RESOLUTION_LABEL[kq] : r.ma, note: r.note ?? "", actor, bySystem };
+  }
+  const kind: CareTimelineKind =
+    r.ma === "ASSIGN" ? "ASSIGN" : r.ma === "FOLLOW_UP" ? "FOLLOW_UP" : r.ma.startsWith("CARRIER_") ? "CARRIER_REQUEST" : r.ma === "STATUS" ? "STATUS" : "LIFECYCLE";
+  const mui = careStatusArrow(st(r.truoc), st(r.sau), CARE_STATUS_LABEL);
+  return { at, kind, label: mui || CARE_EVENT_LABEL[r.ma] || r.ma, note: r.note ?? "", actor, bySystem };
+}
+
+/** Nhãn đọc được của một loại sự kiện ca, cho dòng không mang trạng thái trước / sau. */
+const CARE_EVENT_LABEL: Record<string, string> = {
+  STATUS: "Đổi trạng thái",
+  ASSIGN: "Giao việc",
+  NOTE: "Ghi chú",
+  FOLLOW_UP: "Đặt hẹn xử lý lại",
+  RESOLVE: "Đóng ca",
+  REOPEN: "Mở lại ca",
+  CANCEL: "Huỷ ca",
+  CARRIER_REQUEST: "Gửi lệnh Viettel Post",
+  CARRIER_RESULT: "Viettel Post trả lời",
+  CARRIER_MANUAL: "Xác nhận đã làm tay trên Viettel Post",
+};
+
 type WrongInfoRow = { shipment_id: string; tracking: string; order_id: string; system_id: number | null; customer: string; phone: string; cod_amount: string | number; stage: string; vtp_status_name: string | null; kind: string; title: string; opened_at: string; tuoi_gio: string | number | null; lan_hut: number };
 
 /**
@@ -323,6 +501,16 @@ async function buildQueue(): Promise<CareQueue> {
   const decisionMap = await loadDecisions([...careMap.values()].map((c) => c.id));
 
   /*
+    LỊCH SỬ XỬ LÝ của ĐÚNG đợt đang hiển thị. Mốc cắt là `opened_at` của đợt, không thì `created_at`
+    — cùng thứ tự với `queueSinceOf` bên dưới và với `lib/care/service.ts::queueSinceOf`, để "lượt
+    xử lý của đợt này" và "SLA của đợt này" đứng trên cùng một mốc.
+
+    Kiện KHÔNG có dòng `shipment_care` nào thì không có đợt, nên không có lịch sử — và đó là câu
+    trả lời đúng: chưa ai mở nó ra bao giờ.
+  */
+  const historyMap = await loadCareHistory([...careMap.values()].map((c) => ({ careCaseId: c.id, shipmentId: c.shipmentId, since: c.openedAt ?? c.createdAt, lastCarrierAt: facts.get(c.shipmentId)?.lastAt ?? null })));
+
+  /*
     MỐC VÀO HÀNG ĐỢI: `opened_at` của đợt (lúc ĐVVC báo sự cố mở đợt này) khi có; đợt cũ chưa có mốc
     thì suy từ lần giao hụt gần nhất → tin cuối. Cùng thứ tự với `lib/care/service.ts::queueSinceOf`
     để SLA trên màn hình và SLA chụp vào sự kiện là một con số.
@@ -380,6 +568,13 @@ async function buildQueue(): Promise<CareQueue> {
         trackingCapability: asTrackingCapability(capability),
       },
       products: productMap.get(base.shipmentId) ?? [],
+      /*
+        KIỆN CHƯA CÓ ĐỢT CARE NÀO VẪN PHẢI CÓ MỘT CÂU TRẢ LỜI, và câu đó là "0 lượt · chưa ai chạm"
+        — một sự thật ĐO ĐƯỢC (không có dòng nào trong ba sổ), khác hẳn `undefined` (nơi gọi cũ
+        chưa truyền gì). Để `undefined` ở đây là bắt màn hình in "chưa đọc được" cho đúng cái nhóm
+        đông nhất và quan trọng nhất của hàng đợi.
+      */
+      history: historyMap.get(base.shipmentId) ?? { rounds: 0, touches: 0, lastRoundAt: null, lastRoundActorId: null, carrierNewsAfterLastRound: false, previousEpisodes: 0, timeline: [], timelineTruncated: false },
       reasonClass: REASON_CLASS[base.reason],
       care,
       reopened,
@@ -485,6 +680,21 @@ async function buildQueue(): Promise<CareQueue> {
     const cur = byReasonMap.get(c.reason) ?? { count: 0, money: 0 };
     byReasonMap.set(c.reason, { count: cur.count + 1, money: cur.money + c.codAmount });
   }
+  /*
+    ═══ "CÒN TREO" BỔ RA BA CON SỐ — MỘT PHÉP BỔ, KHÔNG PHẢI MỘT BỘ LỌC THỨ HAI ═══
+
+    Cộng trên ĐÚNG tập `careCases` mà `counts.care` đếm, nên tổng ba nhóm luôn bằng `counts.care`:
+    không kiện nào rơi ra, không kiện nào đếm hai lần. Nếu một ngày nào đó hai con số lệch nhau thì
+    lỗi nằm ở `careBacklogGroup` chứ không phải ở phép cộng — `tests/care-rounds.test.ts` khoá điều
+    đó lại.
+  */
+  const backlogGroups = Object.fromEntries(CARE_BACKLOG_GROUPS.map((g) => [g, { count: 0, money: 0 }])) as Record<CareBacklogGroup, { count: number; money: number }>;
+  for (const c of careCases) {
+    const g = backlogGroups[careBacklogGroup(c.history?.rounds ?? 0, c.care.followUpAt, now)];
+    g.count += 1;
+    g.money += c.codAmount;
+  }
+
   const byOwnerMap = new Map<string, { ownerId: string | null; name: string; open: number; overdue: number; money: number }>();
   for (const c of openCases) {
     const key = c.care.owner?.id ?? "";
@@ -504,6 +714,7 @@ async function buildQueue(): Promise<CareQueue> {
     moneyAtRisk: careCases.reduce((a, c) => a + c.codAmount, 0),
     overdue: careCases.filter((c) => c.sla.firstResponseBreached || c.sla.resolveBreached).length,
     unassigned: careCases.filter((c) => !c.care.owner).length,
+    backlogGroups,
     // Ngưỡng đang hiệu lực đi cùng dữ liệu: trình duyệt vá lại SLA sau mỗi thao tác bằng ĐÚNG bộ số
     // máy chủ vừa dùng, không phải bằng mặc định dựng sẵn.
     slaHours,
