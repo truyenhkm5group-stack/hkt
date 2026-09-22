@@ -33,8 +33,8 @@
 import { and, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
-import { OM_MARKETER_ID, orderMarketerJoin } from "@/lib/queries/order-marketer";
-import { MARKETER_UNRESOLVED } from "@/lib/constants/marketer-attribution";
+import { OM_CONFLICT, OM_EVIDENCE, OM_MARKETER_ID, OM_STATE, orderMarketerJoin, summarizeMarketerCoverage } from "@/lib/queries/order-marketer";
+import { MARKETER_EVIDENCE, MARKETER_UNRESOLVED, type MarketerCoverage, type MarketerEvidence, type MarketerLinkState } from "@/lib/constants/marketer-attribution";
 import { rowsOf } from "@/lib/sql-rows";
 import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
 import { reasonGroupTable } from "@/lib/constants/return-reason-mapping";
@@ -120,6 +120,14 @@ export type MarketerReturnRow = {
   successRate: number | null;
   lostRevenue: number;
   topReason: { reason: ReturnReason; label: string; count: number } | null;
+  /**
+   * Đơn của người này đi bằng loại bằng chứng nào. Cộng hai ô = `finished` (với nhóm "Chưa xác
+   * định" thì cả hai ô đều 0).
+   *
+   * Phải hiện ra: "38 đơn theo chiến dịch" và "38 đơn theo fanpage phụ trách" là hai mức chắc chắn
+   * khác nhau, và người quản lý cần phân biệt được trước khi lấy tỷ lệ hoàn ra nói chuyện với ai.
+   */
+  byEvidence: Record<MarketerEvidence, number>;
 };
 
 export type ReturnReasonReport = {
@@ -156,7 +164,7 @@ export type ReturnReasonReport = {
    * Đo trên tập đang hiện chứ không đo trên toàn bộ đơn: một con số độ phủ của tập khác không nói
    * gì về bảng người đọc đang nhìn. `pct` là `null` khi tập rỗng — không phải 0%.
    */
-  marketerCoverage: { total: number; resolved: number; pct: number | null };
+  marketerCoverage: MarketerCoverage;
   /** Vỡ theo marketer. Cộng mọi dòng = `finished`; nhóm "Chưa xác định" luôn có mặt khi có ca. */
   marketers: MarketerReturnRow[];
   /** Doanh thu mất vì hoàn, trên chính tập ca này — để khối hành động nói được bằng tiền. */
@@ -241,19 +249,32 @@ async function baseRows(f: ReasonFilter) {
   }
   const locSauCung = veMarketer.length ? sql` and (${sql.join(veMarketer, sql` or `)})` : locMarketer ? sql` and false` : sql``;
 
-  const rows = rowsOf<{ order_id: string; shipment_id: string | null; outcome: string; basis_at: unknown; marketer_id: string | null; revenue: string | number }>(
+  const rows = rowsOf<{
+    order_id: string;
+    shipment_id: string | null;
+    outcome: string;
+    basis_at: unknown;
+    marketer_id: string | null;
+    marketer_evidence: MarketerEvidence | null;
+    marketer_state: MarketerLinkState;
+    marketer_conflict: boolean;
+    revenue: string | number;
+  }>(
     await db.execute(sql`
-      select b.order_id, b.shipment_id, b.outcome, b.basis_at, b.marketer_id, b.revenue
+      select b.order_id, b.shipment_id, b.outcome, b.basis_at, b.marketer_id, b.marketer_evidence, b.marketer_state, b.marketer_conflict, b.revenue
         from (
           select "orders"."id" as order_id,
                  "shipments"."id" as shipment_id,
                  ${ORDER_OUTCOME_FAST} as outcome,
                  ${sql.raw(timeBasisColumnSql(basis))} as basis_at,
                  coalesce("orders"."total_price_after_discount", 0) as revenue,
-                 ${OM_MARKETER_ID} as marketer_id
+                 ${OM_MARKETER_ID} as marketer_id,
+                 ${OM_EVIDENCE} as marketer_evidence,
+                 ${OM_STATE} as marketer_state,
+                 ${OM_CONFLICT} as marketer_conflict
             from "orders"
             left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
-            ${orderMarketerJoin(sql`"orders"."ad_id"`, sql`coalesce("orders"."post_id", '')`)}
+            ${orderMarketerJoin(sql`"orders"."ad_id"`, sql`coalesce("orders"."post_id", '')`, sql`"orders"."id"`)}
            where ${and(...conds)}
           offset 0
         ) b
@@ -274,6 +295,9 @@ async function baseRows(f: ReasonFilter) {
       outcome: r.outcome,
       basisAt: r.basis_at as Date | null,
       marketerId: r.marketer_id,
+      marketerEvidence: r.marketer_evidence,
+      marketerState: r.marketer_state,
+      marketerConflict: Boolean(r.marketer_conflict),
       revenue: Number(r.revenue ?? 0),
     })),
   };
@@ -471,11 +495,12 @@ export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReas
     missingBasis,
     multiSkuOrders: products.reduce((n, p) => Math.max(n, p.multiSku), 0),
     rescueCoverage: { eligible: eligibleTong, withIntervention: interventionTong, rescued: rescuedTong },
-    marketerCoverage: {
-      total: ketThucRows.length,
-      resolved: ketThucRows.filter((r) => r.marketerId).length,
-      pct: ketThucRows.length ? Math.round((ketThucRows.filter((r) => r.marketerId).length / ketThucRows.length) * 1000) / 10 : null,
-    },
+    /*
+      ĐỘ PHỦ dựng bằng CHÍNH phép gộp của `lib/queries/order-marketer.ts` — mỗi ca đã mang sẵn tình
+      trạng và loại bằng chứng từ `baseRows`, nên không có đường nào để ô độ phủ và bảng theo
+      marketer trên cùng màn hình nói hai con số khác nhau.
+    */
+    marketerCoverage: summarizeMarketerCoverage(ketThucRows.map((r) => ({ state: r.marketerState, evidence: r.marketerEvidence, conflicts: r.marketerConflict ? 1 : 0, n: 1 }))),
     marketers: marketerRows(ketThucRows, verdicts),
     lostRevenue: hoanRows.reduce((n, r) => n + r.revenue, 0),
     eligibleSent,
@@ -489,13 +514,24 @@ export async function getReturnReasonReport(f: ReasonFilter): Promise<ReturnReas
  * tổng theo marketer lệch khỏi tổng chung.
  */
 function marketerRows(
-  rows: { orderId: string; shipmentId: string | null; outcome: string; marketerId: string | null; revenue: number }[],
+  rows: { orderId: string; shipmentId: string | null; outcome: string; marketerId: string | null; marketerEvidence: MarketerEvidence | null; revenue: number }[],
   verdicts: Map<string, { reason: ReturnReason }>,
 ): MarketerReturnRow[] {
-  const theoNguoi = new Map<string | null, { finished: number; delivered: number; returned: number; lostRevenue: number; reasons: Map<ReturnReason, number> }>();
+  const theoNguoi = new Map<
+    string | null,
+    { finished: number; delivered: number; returned: number; lostRevenue: number; reasons: Map<ReturnReason, number>; byEvidence: Record<MarketerEvidence, number> }
+  >();
   for (const r of rows) {
-    const cur = theoNguoi.get(r.marketerId) ?? { finished: 0, delivered: 0, returned: 0, lostRevenue: 0, reasons: new Map() };
+    const cur = theoNguoi.get(r.marketerId) ?? {
+      finished: 0,
+      delivered: 0,
+      returned: 0,
+      lostRevenue: 0,
+      reasons: new Map(),
+      byEvidence: Object.fromEntries(MARKETER_EVIDENCE.map((e) => [e, 0])) as Record<MarketerEvidence, number>,
+    };
     cur.finished += 1;
+    if (r.marketerEvidence) cur.byEvidence[r.marketerEvidence] += 1;
     if (r.outcome === "DELIVERED") cur.delivered += 1;
     else {
       cur.returned += 1;
@@ -518,6 +554,7 @@ function marketerRows(
         successRate: v.finished ? Math.round((v.delivered / v.finished) * 1000) / 10 : null,
         lostRevenue: v.lostRevenue,
         topReason: top ? { reason: top[0], label: RETURN_REASON_LABEL[top[0]], count: top[1] } : null,
+        byEvidence: v.byEvidence,
       };
     })
     // "Chưa xác định" xuống cuối: nó là một nhóm thật nhưng không phải một người để so sánh.

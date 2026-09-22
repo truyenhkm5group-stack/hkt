@@ -26,7 +26,7 @@ import { memo } from "@/lib/cache";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { resolveTarget, verdict as targetVerdict, type TargetRow } from "@/lib/constants/metric-targets";
-import { MARKETER_COVERAGE_WARN_PCT } from "@/lib/constants/marketer-attribution";
+import { MARKETER_COVERAGE_WARN_PCT, type MarketerCoverage, type MarketerEvidence } from "@/lib/constants/marketer-attribution";
 import { isModelledSubstate } from "@/lib/constants/projected-delivery";
 import { CARRIER_HANDOFF_AT_SQL, timeBasisColumnSql, type TimeBasis } from "@/lib/constants/report-time-basis";
 import {
@@ -99,6 +99,8 @@ export type MarketerQualityRow = {
   gapPoints: number | null;
   /** Đủ mẫu để so với toàn shop chưa. `false` ⇒ hiện thực tế, KHÔNG xếp hạng, KHÔNG gắn nhãn. */
   comparable: boolean;
+  /** Đơn của người này vỡ theo LOẠI BẰNG CHỨNG quy kết. Cộng hai ô = `finished`. */
+  byEvidence: Record<MarketerEvidence, number>;
 };
 
 /* ═══════════════════ 3. HIỆU QUẢ CHĂM SÓC KIỆN ═══════════════════ */
@@ -151,7 +153,7 @@ export type TrendPoint = {
 export type ReturnIntelligence = {
   products: ProductRiskRow[];
   marketers: MarketerQualityRow[];
-  marketerCoverage: { total: number; resolved: number; pct: number | null; warn: boolean };
+  marketerCoverage: MarketerCoverage & { warn: boolean };
   care: { byState: CareStateRow[]; byPic: CarePicRow[]; totalCases: number; since: Date | null };
   trend: { grain: TrendGrain; points: TrendPoint[] };
   compare: {
@@ -306,6 +308,7 @@ async function dung(input: IntelligenceInput): Promise<ReturnIntelligence> {
       topReason: m.topReason,
       gapPoints: comparable && m.returnRate !== null && tongHoanShop !== null ? Math.round((m.returnRate - tongHoanShop) * 10) / 10 : null,
       comparable,
+      byEvidence: m.byEvidence,
     };
   });
 

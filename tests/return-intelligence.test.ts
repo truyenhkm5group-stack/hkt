@@ -3,7 +3,17 @@ import { eq } from "drizzle-orm";
 import { readFileSync } from "node:fs";
 import { schema, type Db } from "@/db";
 import { AGE_BUCKETS, ageBucketOf, MIN_CELL_SAMPLE, PROBABILITY_FALLBACK, TRAINING_SNAPSHOT_OFFSETS_HOURS } from "@/lib/constants/projected-delivery";
-import { MARKETER_UNRESOLVED, MARKETER_UNRESOLVED_LABEL, MARKETER_LINK_FIX, MARKETER_LINK_STATES } from "@/lib/constants/marketer-attribution";
+import {
+  MARKETER_EVIDENCE,
+  MARKETER_EVIDENCE_ORDER,
+  MARKETER_LINK_FIX,
+  MARKETER_LINK_STATES,
+  MARKETER_RESOLVED_STATES,
+  MARKETER_UNRESOLVED,
+  MARKETER_UNRESOLVED_LABEL,
+  type MarketerEvidence,
+  type MarketerLinkState,
+} from "@/lib/constants/marketer-attribution";
 import { ACTION_LIST_MAX, ALERT_MIN_SAMPLE, PROBLEM_CLASSES, PROBLEM_DEPARTMENT, PROBLEM_OF_REASON, PRODUCT_RISK_METRIC, RISK_LEVELS } from "@/lib/constants/return-intelligence";
 import { RETURN_REASONS, RETURN_REASON_GROUPS, RETURN_REASON_GROUP_OF } from "@/lib/constants/return-reason";
 import { canRegroup, effectiveGroupOf, PINNED_REASON_GROUP, reasonGroupTable, sanitizeReasonGroups } from "@/lib/constants/return-reason-mapping";
@@ -106,14 +116,89 @@ export function testMarketerAttributionGoesByKey() {
   assert.ok(src.includes("having count(distinct a.marketer_id) = 1"), "chiến dịch phải có ĐÚNG MỘT người phụ trách mới được quy kết — nhiều người là nhập nhằng");
   assert.ok(src.includes("having count(distinct fa.campaign_id) = 1") || src.includes("POST_TO_CAMPAIGN"), "nối qua bài viết chỉ khi bài thuộc đúng một chiến dịch");
 
-  // Bốn tình trạng, và ba trong số đó đều hiện ra dưới nhãn "Chưa xác định" nhưng đếm RIÊNG.
-  assert.equal(MARKETER_LINK_STATES.length, 4, "bốn tình trạng quy kết");
+  /*
+    ĐƯỜNG THỨ HAI PHẢI ĐỌC ẢNH CHỤP, KHÔNG TỰ TRA SỔ PHÂN CÔNG.
+
+    `fanpage_marketer_assignments` có KHOẢNG HIỆU LỰC. Một truy vấn tự tra nó sẽ hoặc quên vế mốc
+    (⇒ đổi người phụ trách hôm nay viết lại báo cáo tháng trước), hoặc viết lại đúng phép tra mà
+    `rebuildFanpageAttribution` đã làm — tức dựng bản thứ hai của cùng một quan hệ. `order_attributions`
+    là ảnh chụp, MỘT dòng MỘT đơn, nên nó vừa đúng vừa không nhân dòng.
+  */
+  assert.ok(src.includes("order_attributions"), "đường fanpage phải đọc ẢNH CHỤP order_attributions");
+  assert.ok(
+    !/fanpage_marketer_assignments/.test(src),
+    "KHÔNG tự tra sổ phân công ở đây — sổ có khoảng hiệu lực, tra lại là dựng bản thứ hai của cùng một quan hệ (và dễ quên vế mốc đơn lên)",
+  );
+
+  // Bảy tình trạng; hai trong số đó ghi được tên một người, năm còn lại hiện dưới nhãn
+  // "Chưa xác định" nhưng đếm RIÊNG — vì mỗi loại sửa ở một màn hình khác.
+  assert.equal(MARKETER_LINK_STATES.length, 7, "bảy tình trạng quy kết");
+  assert.deepEqual([...MARKETER_RESOLVED_STATES], ["RESOLVED", "RESOLVED_BY_PAGE"], "đúng hai tình trạng được ghi tên một người");
   for (const s of MARKETER_LINK_STATES) {
-    if (s === "RESOLVED") continue;
+    if (MARKETER_RESOLVED_STATES.includes(s)) continue;
     assert.ok(MARKETER_LINK_FIX[s].length > 20, `${s}: phải khai VIỆC PHẢI LÀM để lấp chỗ trống, không chỉ in một con số`);
   }
+
+  /*
+    THỨ TỰ THẨM QUYỀN CHỈ ĐƯỢC KHAI MỘT CHỖ.
+
+    `OM_MARKETER_ID` và `OM_EVIDENCE` phải nhất quán: nếu một cái ưu tiên quảng cáo còn cái kia
+    ưu tiên fanpage thì bảng in "38 đơn theo fanpage" cho một người đang được tính theo chiến dịch,
+    và không ai phát hiện vì cả hai con số đều trông hợp lý.
+  */
+  assert.equal(MARKETER_EVIDENCE_ORDER.length, MARKETER_EVIDENCE.length, "thứ tự thẩm quyền phải phủ hết các loại bằng chứng");
+  const viTriMarketer = src.indexOf("export const OM_MARKETER_ID");
+  const bieuThuc = src.slice(viTriMarketer, src.indexOf("export const OM_EVIDENCE"));
+  const thuTuTrongSql = MARKETER_EVIDENCE_ORDER.map((e) => (e === "AD_CAMPAIGN" ? bieuThuc.indexOf("om_marketer.marketer_id") : bieuThuc.indexOf("om_fp.marketer_id")));
+  assert.ok(
+    thuTuTrongSql.every((v, i) => v >= 0 && (i === 0 || v > thuTuTrongSql[i - 1])),
+    "coalesce của OM_MARKETER_ID phải xếp theo đúng MARKETER_EVIDENCE_ORDER — thứ tự thẩm quyền chỉ được khai một chỗ",
+  );
+
   assert.equal(MARKETER_UNRESOLVED_LABEL, "Chưa xác định", "nhóm không quy kết được phải mang đúng cái tên đó — không phải 'Khác', không phải rỗng");
-  console.log("✓ Quy kết marketer: đi bằng KHOÁ chiến dịch (0 phép dò chữ) · chiến dịch nhiều người = nhập nhằng · 4 tình trạng, 3 loại chỗ trống đều có việc phải làm");
+  console.log("✓ Quy kết marketer: HAI đường đi bằng KHOÁ (chiến dịch → ảnh chụp fanpage), 0 phép dò chữ · thứ tự thẩm quyền khai một chỗ · 7 tình trạng, 5 loại chỗ trống đều có việc phải làm");
+}
+
+/* ═══════════════════ 3b · HAI ĐƯỜNG QUY KẾT KHÔNG ĐƯỢC LÀM ĐỔI TỔNG ═══════════════════ */
+
+/**
+ * Thêm một đường quy kết là thêm một cách để một đơn thuộc về ai đó — KHÔNG phải thêm một cách để
+ * một đơn bị đếm hai lần, và cũng không phải một cách để một đơn rơi ra ngoài.
+ *
+ * Bài kiểm này đứng riêng khỏi phép cộng tổng ở khối 8 vì nó kiểm một bất biến KHÁC: `byEvidence`
+ * là một phép CHIA của `finished`, nên cộng hai ô phải ra đúng `finished` trên TỪNG dòng người, và
+ * cộng qua mọi dòng phải ra đúng `resolved` của độ phủ.
+ */
+export function testEvidenceSplitIsAPartition(report: {
+  finished: number;
+  marketers: { marketerId: string | null; finished: number; byEvidence: Record<MarketerEvidence, number> }[];
+  marketerCoverage: { total: number; resolved: number; byEvidence: Record<MarketerEvidence, number>; byState: Record<MarketerLinkState, number>; conflicts: number };
+}) {
+  let tongTheoBangChung = 0;
+  for (const m of report.marketers) {
+    const cong = MARKETER_EVIDENCE.reduce((n, e) => n + m.byEvidence[e], 0);
+    if (m.marketerId === null) {
+      assert.equal(cong, 0, "nhóm 'Chưa xác định' KHÔNG được mang bằng chứng nào — nếu có thì nó đã quy kết được rồi");
+    } else {
+      assert.equal(cong, m.finished, `${m.marketerId}: cộng hai loại bằng chứng phải bằng đúng số đơn của người đó`);
+    }
+    tongTheoBangChung += cong;
+  }
+  assert.equal(tongTheoBangChung, report.marketerCoverage.resolved, "cộng bằng chứng qua mọi người phải bằng đúng phần quy kết được của độ phủ");
+  assert.equal(
+    MARKETER_EVIDENCE.reduce((n, e) => n + report.marketerCoverage.byEvidence[e], 0),
+    report.marketerCoverage.resolved,
+    "byEvidence của độ phủ cũng phải là một phép CHIA của resolved",
+  );
+
+  // Mỗi đơn mang ĐÚNG MỘT tình trạng, nên cộng mọi tình trạng phải bằng tổng số ca của tập.
+  const tongTheoTinhTrang = MARKETER_LINK_STATES.reduce((n, st) => n + report.marketerCoverage.byState[st], 0);
+  assert.equal(tongTheoTinhTrang, report.marketerCoverage.total, "cộng mọi tình trạng quy kết phải bằng đúng tổng số ca — không đơn nào mang hai tình trạng, không đơn nào rơi ra");
+  assert.equal(report.marketerCoverage.total, report.finished, "độ phủ phải đo trên ĐÚNG tập ca mà bảng đang hiện, không phải một tập khác");
+
+  // Mâu thuẫn là một con số phải ĐẾM ĐƯỢC, kể cả khi hôm nay nó bằng 0 (đo production 22/09/2026: 0/720).
+  assert.ok(report.marketerCoverage.conflicts >= 0, "số đơn mâu thuẫn giữa hai đường phải luôn đếm được, không bao giờ là undefined");
+  console.log(`✓ Hai đường quy kết là một phép CHIA: Σ bằng chứng = ${report.marketerCoverage.resolved} quy kết được · Σ tình trạng = ${tongTheoTinhTrang} ca · ${report.marketerCoverage.conflicts} đơn mâu thuẫn`);
 }
 
 /* ═══════════════════ 4 · LỚP VẤN ĐỀ PHỦ KÍN VÀ TRỎ TỚI PHÒNG BAN ═══════════════════ */
@@ -244,9 +329,42 @@ async function dungDuLieu(db: Db) {
       })
       .onConflictDoNothing();
   }
+
+  /*
+    ─── ĐƯỜNG QUY KẾT THỨ HAI PHẢI CÓ MẶT TRONG BỘ DỮ LIỆU ───
+
+    Bộ dữ liệu này không có `fb_ads` / `ad_spends` nào, nên đường QUẢNG CÁO im lặng trên cả bốn đơn.
+    Nếu không gieo thêm ảnh chụp fanpage thì bài kiểm chạy qua nhánh mới mà không bao giờ vào nó —
+    một bài kiểm xanh vì chưa chạm tới thứ nó nói là đang bảo vệ.
+
+    Hai đơn được quy kết (một giao được, một hoàn) và hai đơn KHÔNG: mỗi trạng thái dẫn tới một
+    tình trạng khác nhau (`NO_ASSIGNMENT` ⇒ `PAGE_NO_ASSIGNMENT`, và đơn không có dòng nào ⇒
+    `NO_CAMPAIGN`), nên phép chia theo bằng chứng có cả phần có lẫn phần không.
+  */
+  const anhChup = [
+    { id: `${P}o1`, marketerId: `${P}mk`, status: "ATTRIBUTED" },
+    { id: `${P}o2`, marketerId: `${P}mk`, status: "ATTRIBUTED" },
+    { id: `${P}o3`, marketerId: null, status: "NO_ASSIGNMENT" },
+  ];
+  for (const a of anhChup) {
+    await db
+      .insert(schema.orderAttributions)
+      .values({
+        orderId: a.id,
+        sourcePageId: `${P}page`,
+        marketerId: a.marketerId,
+        status: a.status,
+        sourceOrderAt: new Date("2026-08-10T03:00:00Z"),
+        ruleVersion: 1,
+        attributionSource: "PANCAKE_PAGE",
+        computedAt: new Date("2026-08-10T04:00:00Z"),
+      })
+      .onConflictDoNothing();
+  }
 }
 
 async function donDep(db: Db) {
+  for (const id of [`${P}o1`, `${P}o2`, `${P}o3`]) await db.delete(schema.orderAttributions).where(eq(schema.orderAttributions.orderId, id));
   for (let i = 0; i < 4; i += 1) {
     await db.delete(schema.shipmentEvents).where(eq(schema.shipmentEvents.id, `${P}e${i}`));
     await db.delete(schema.shipments).where(eq(schema.shipments.id, `${P}s${i}`));
@@ -327,9 +445,29 @@ export async function testReasonDenominatorsAndFilters(db: Db) {
   assert.equal(chiRiq2.finished, 0, "RIQ2 chỉ có một đơn ĐANG CHẠY — chưa ca nào ngã ngũ");
   assert.equal(chiRiq2.eligibleSent, 1, "…nhưng nó VẪN nằm trong lô hàng đã gửi");
 
+  /*
+    ─── ĐƯỜNG FANPAGE PHẢI THẬT SỰ QUY KẾT ĐƯỢC ───
+
+    Không đơn nào của bộ dữ liệu này nối được về một chiến dịch quảng cáo, nên mọi cái tên ở đây
+    đều tới từ ảnh chụp fanpage. Trước bản 22/09/2026 cả ba đơn đã kết thúc đều nằm ở "Chưa xác
+    định"; giờ hai trong ba phải mang tên người — đó chính là phần mà bảng trên production đang
+    bỏ rơi (đo cùng ngày: 44,2% ⇒ 93,0% độ phủ trong 30 ngày).
+  */
+  const theoFanpage = tatCa.marketers.find((m) => m.marketerId === `${P}mk`);
+  assert.ok(theoFanpage, "đơn có ảnh chụp fanpage phải hiện thành một dòng mang tên người, không nằm ở 'Chưa xác định'");
+  assert.equal(theoFanpage.finished, 2, "đúng hai đơn đã kết thúc mang ảnh chụp quy kết");
+  assert.equal(theoFanpage.byEvidence.FANPAGE_ASSIGNMENT, 2, "cả hai đi bằng đường FANPAGE — bộ dữ liệu này không có chiến dịch nào");
+  assert.equal(theoFanpage.byEvidence.AD_CAMPAIGN, 0, "không đơn nào đi bằng đường quảng cáo ở đây — nếu khác 0 thì hai đường đang bị gộp");
+  assert.equal(tatCa.marketerCoverage.byState.PAGE_NO_ASSIGNMENT, 1, "đơn có fanpage nhưng chưa ai được phân công phải mang ĐÚNG tình trạng đó, không bị gộp vào 'không nối được chiến dịch'");
+  testEvidenceSplitIsAPartition(tatCa);
+
   /* ─── BỘ LỌC MARKETER: nhóm "Chưa xác định" là một lựa chọn hợp lệ ─── */
   const chuaXacDinh = await getReturnReasonReport({ period: ky, basis: "SHIPPED", codes: CUA_TA, marketerIds: [MARKETER_UNRESOLVED] });
-  assert.equal(chuaXacDinh.finished, tatCa.finished, "bộ dữ liệu này không đơn nào nối được chiến dịch, nên lọc 'Chưa xác định' phải ra đúng tập đầy đủ");
+  assert.equal(chuaXacDinh.finished, tatCa.finished - 2, "lọc 'Chưa xác định' phải ra đúng phần CHƯA quy kết được — hai đơn đã có tên không được đếm vào đó nữa");
+
+  const locTheoNguoi = await getReturnReasonReport({ period: ky, basis: "SHIPPED", codes: CUA_TA, marketerIds: [`${P}mk`] });
+  assert.equal(locTheoNguoi.finished, 2, "lọc theo người được quy kết bằng FANPAGE phải ra đúng đơn của người đó — bộ lọc phải biết cả hai đường");
+  assert.equal(chuaXacDinh.finished + locTheoNguoi.finished, tatCa.finished, "hai nhóm là một phép CHIA của tập đầy đủ — không đơn nào đếm hai lần, không đơn nào rơi ra");
 
   const nguoiKhongCo = await getReturnReasonReport({ period: ky, basis: "SHIPPED", codes: CUA_TA, marketerIds: ["ri-khong-ton-tai"] });
   assert.equal(nguoiKhongCo.finished, 0, "lọc theo một marketer không có đơn nào phải ra RỖNG, không rơi về 'không lọc gì'");
@@ -344,7 +482,7 @@ export async function testReasonDenominatorsAndFilters(db: Db) {
 
   /* ─── LỌC KẾT HỢP: mã hàng + marketer ─── */
   const ketHop = await getReturnReasonReport({ period: ky, basis: "SHIPPED", codes: ["RIQ1"], marketerIds: [MARKETER_UNRESOLVED] });
-  assert.equal(ketHop.finished, 3, "lọc kết hợp phải là GIAO của hai bộ lọc, không phải hợp");
+  assert.equal(ketHop.finished, 1, "lọc kết hợp phải là GIAO của hai bộ lọc, không phải hợp — RIQ1 có 3 đơn đã kết thúc, 2 trong đó nay đã quy kết được");
 
   /* ─── DRILLDOWN ĐẾM RA ĐÚNG CON SỐ BẢNG IN ─── */
   const moiCaHoan = await listReasonShipments({ period: ky, basis: "SHIPPED", codes: CUA_TA });
