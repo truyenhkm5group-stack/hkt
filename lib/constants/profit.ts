@@ -18,7 +18,26 @@ export type ProfitAssumptions = {
   returnRateWindowDays: number;
   /** Tỷ lệ hoàn mặc định (%) khi mã chưa có đủ lịch sử */
   defaultReturnRate: number;
-  /** Số đơn đã có kết quả tối thiểu để dùng tỷ lệ lịch sử của mã */
+  /**
+   * ═══════════ MỐC CHUYỂN TỪ GIẢ ĐỊNH SANG SỐ THẬT CỦA CHÍNH MÃ HÀNG ═══════════
+   *
+   * Mã có đủ ngần này đơn ĐÃ CÓ KẾT CỤC (giao thành công + hoàn) trong cửa sổ `returnRateWindowDays`
+   * thì thang bậc `resolveDeliveryRate()` thôi dùng tỷ lệ khai chung và **tuân theo số đo của chính
+   * mã ấy**. Đây là bậc `history` trong thang bậc (AGENTS.md mục 68).
+   *
+   * Nó là NGƯỠNG NGHIỆP VỤ và sửa được không cần deploy — trang **Báo cáo → Giả định**, ô
+   * *"Đơn kết thúc tối thiểu"*. Con số ở đây chỉ là giá trị khởi đầu cho một cài đặt mới.
+   *
+   * ─── ĐÁNH ĐỔI, ĐO ĐƯỢC, KHÔNG PHẢI CẢM TÍNH ───
+   *
+   * Nâng ngưỡng = đòi bằng chứng chắc hơn, nhưng cũng = ĐẨY THÊM MÃ về dùng tỷ lệ khai chung. Đo
+   * production 22/09/2026 (7 mã, cửa sổ 90 ngày), số đơn đã có kết cục:
+   *
+   *     Đầm Q002 1.157 · Đầm Q003 474 · Đầm Q004 124 · Q001 71 · Quần định hình 33 · ĐẦM Q005 3 · Set Q006 0
+   *
+   * Nên 10 → 50 làm ĐÚNG MỘT mã đổi phe: **Quần định hình** (33 đơn, hoàn 60,6% đo được) rơi về tỷ
+   * lệ khai chung. Bốn mã lớn vẫn đi bằng số đo của mình, hai mã mới vẫn chưa có gì để đo.
+   */
   minFinishedOrders: number;
   /** Ghi đè tỷ lệ hoàn (%) theo productId */
   overrides: Record<string, number>;
@@ -44,7 +63,8 @@ export const DEFAULT_PROFIT_ASSUMPTIONS: ProfitAssumptions = {
   fixedCostMonthly: 5_000_000,
   returnRateWindowDays: 90,
   defaultReturnRate: 30,
-  minFinishedOrders: 10,
+  // Chủ shop chốt 22/09/2026: "giao 50 đơn có trạng thái" là mốc tuân theo số thật. Xem chú thích ở kiểu.
+  minFinishedOrders: 50,
   overrides: {},
   inventoryRiskPercent: 10,
   taxPercent: 1.5,
