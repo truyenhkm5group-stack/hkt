@@ -11,7 +11,7 @@ import { checkContextualConfirmation, isAffirmativeText, missingOrderRequirement
 import { EMPTY_SALES_STATE, confirmationFingerprint, parseSalesState, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { ROUNDTRIP_TEST_MESSAGE, assertOutboundAllowed, canSend } from "@/lib/ai-workforce/agents/sales/outbound";
 import { guardGeneratedText, moneyMentions, nextStepKey, renderOrderReview, renderTemplate, type GenerationContext } from "@/lib/ai-workforce/agents/sales/generate";
-import { classifySender, ingestMessage, normalizeChatWebhook, relinkHumanReplies } from "@/lib/ai-workforce/agents/sales/ingest";
+import { classifySender, ingestMessage, normalizeChatWebhook, readNameList, relinkHumanReplies } from "@/lib/ai-workforce/agents/sales/ingest";
 import { decide } from "@/lib/ai-workforce/agents/sales/decide";
 import { drainSalesTasks, runSalesTask } from "@/lib/ai-workforce/agents/sales/pipeline";
 import { ensureAgents, getAgent } from "@/lib/ai-workforce/registry";
@@ -1533,6 +1533,27 @@ export async function testSalesAgent(db: Db) {
 
   // Giá trị lạ rơi về mặc định ĐANG VẬN HÀNH, không rơi về "AI trả lời ngay": một chuỗi gõ nhầm
   // trong settings không được biến thành việc máy chen vào câu đầu của mọi khách.
+  /*
+    BA HÌNH DẠNG, VÌ CÁI BẪY TRỘN NẰM Ở CẢ ĐƯỜNG ĐỌC LẪN ĐƯỜNG GHI.
+
+    `scripts/set-setting.ts` (ops) cũng trộn: ghi chuỗi "META_AUTO_REPLY_FIRST" qua nó thì CSDL
+    nhận `{0:"M",1:"E",…}` — đúng 21 trường, và log ops in ra "21 trường cập nhật" (đo 23/09/2026).
+    Không lỗi, không dấu vết, cấu hình không bao giờ có hiệu lực.
+
+    Hình dạng CHUẨN là object (`{ mode }` / `{ names }`) vì nó đi qua được mọi công cụ đang có.
+    Hai nhánh kia là để đọc lại được thứ đã lỡ ghi, thay vì im lặng rơi về mặc định.
+  */
+  assert.equal(parseHandoverMode({ mode: "AI_FROM_FIRST_MESSAGE" }), "AI_FROM_FIRST_MESSAGE", "hình dạng chuẩn");
+  assert.equal(parseHandoverMode("AI_FROM_FIRST_MESSAGE"), "AI_FROM_FIRST_MESSAGE", "chuỗi trần vẫn đọc được");
+  const xacTron = Object.fromEntries([..."AI_FROM_FIRST_MESSAGE"].map((c, i) => [String(i), c]));
+  assert.equal(parseHandoverMode(xacTron), "AI_FROM_FIRST_MESSAGE", "xác của phép trộn phải ghép lại được, không rơi về mặc định");
+
+  assert.deepEqual(readNameList({ names: ["Hai An Fashion"] }), ["Hai An Fashion"], "hình dạng chuẩn");
+  assert.deepEqual(readNameList(["Hai An Fashion"]), ["Hai An Fashion"], "mảng trần vẫn đọc được");
+  assert.deepEqual(readNameList({ "0": "Hai An Fashion" }), ["Hai An Fashion"], "xác của phép trộn — đây đúng là thứ đã nằm trong CSDL");
+  assert.deepEqual(readNameList(null), [], "không khai thì rỗng, không đoán");
+  assert.deepEqual(readNameList({ linh: "tinh" }), [], "object lạ thì rỗng, không nhặt bừa giá trị");
+
   assert.equal(parseHandoverMode("gõ nhầm"), DEFAULT_HANDOVER_MODE);
   assert.equal(parseHandoverMode(null), DEFAULT_HANDOVER_MODE);
   assert.equal(parseHandoverMode(123), DEFAULT_HANDOVER_MODE);

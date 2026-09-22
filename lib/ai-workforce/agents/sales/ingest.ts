@@ -267,7 +267,26 @@ export async function upsertConversation(conversation: NormalizedConversation, d
  */
 export async function declaredBotNames(): Promise<string[]> {
   const raw = await getSettingValue<unknown>(BOT_SENDER_NAMES_KEY, []);
-  return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [];
+  return readNameList(raw);
+}
+
+/**
+ * Nhận BA hình dạng, vì cả đường đọc lẫn đường ghi của `settings` đều TRỘN giá trị vào một object.
+ *
+ * Một mảng lưu qua chúng thành `{0:"Hai An Fashion"}` — `Array.isArray()` trả false, danh sách rơi
+ * về rỗng, và ERP tiếp tục gọi bot là nhân viên dù cấu hình đã ghi thành công (đo 23/09/2026).
+ * Hình dạng chuẩn là `{ names: [...] }`; hai nhánh kia là để đọc lại được thứ đã lỡ ghi.
+ */
+export function readNameList(raw: unknown): string[] {
+  const loc = (xs: unknown[]) => xs.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+  if (Array.isArray(raw)) return loc(raw);
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    if (Array.isArray(o.names)) return loc(o.names);
+    const khoa = Object.keys(o);
+    if (khoa.length && khoa.every((k, i) => k === String(i))) return loc(khoa.map((k) => o[k]));
+  }
+  return [];
 }
 
 export type IngestResult = { conversationId: string; messageId: string | null; duplicate: boolean; eventEmitted: boolean; reason: string };

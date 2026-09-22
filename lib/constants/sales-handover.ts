@@ -73,8 +73,31 @@ export function shouldEngage(mode: HandoverMode, customerTurns: number): Handove
   };
 }
 
+/**
+ * ĐỌC CHẾ ĐỘ TỪ `settings`. Nhận CẢ HAI hình dạng, và đó là chuyện bắt buộc chứ không phải chiều ý.
+ *
+ * Cả đường đọc (`getSettingJson`) lẫn đường ghi (`scripts/set-setting.ts`) đều TRỘN giá trị vào
+ * một object. Lưu một chuỗi trần qua chúng thì "META_AUTO_REPLY_FIRST" thành `{0:"M",1:"E",…}` —
+ * 21 trường, không lỗi, không dấu vết, và cấu hình không bao giờ có hiệu lực (đo 23/09/2026).
+ *
+ * Nên hình dạng chuẩn là OBJECT `{ mode }`: nó đi qua được mọi công cụ đang có. Nhánh chuỗi trần
+ * giữ lại cho những nơi ghi thẳng bằng `setSettingJson`, và nhánh object-ký-tự nhận lại đúng cái
+ * xác mà cái bẫy để lại, thay vì im lặng rơi về mặc định.
+ */
 export function parseHandoverMode(raw: unknown): HandoverMode {
+  const hopLe = (v: unknown): v is HandoverMode => typeof v === "string" && (HANDOVER_MODES as readonly string[]).includes(v);
+  if (hopLe(raw)) return raw;
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    if (hopLe(o.mode)) return o.mode;
+    // Xác của phép trộn: object chỉ gồm khoá số 0..n-1. Ghép lại thành chuỗi gốc.
+    const khoa = Object.keys(o);
+    if (khoa.length && khoa.every((k, i) => k === String(i))) {
+      const ghep = khoa.map((k) => o[k]).join("");
+      if (hopLe(ghep)) return ghep;
+    }
+  }
   // Giá trị lạ rơi về mặc định ĐANG VẬN HÀNH, không rơi về "AI trả lời ngay": một chuỗi gõ nhầm
   // trong settings không được biến thành việc máy chen vào câu đầu của mọi khách.
-  return typeof raw === "string" && (HANDOVER_MODES as readonly string[]).includes(raw) ? (raw as HandoverMode) : DEFAULT_HANDOVER_MODE;
+  return DEFAULT_HANDOVER_MODE;
 }
