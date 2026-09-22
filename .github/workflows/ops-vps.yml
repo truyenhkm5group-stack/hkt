@@ -89,6 +89,7 @@ on:
           - ai-staging-knowledge  # khai SỔ DỮ KIỆN của mã WIN rồi kiểm tra máy trả lời được gì (arg: "--page=<id> [--apply]")
           - ai-staging-size-rules # nạp BẢNG SỐ ĐO (scripts/size-rules.json) — MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi
           - ai-staging-setting   # ghi MỘT khoá cấu hình vào settings của BẢN CHẠY THỬ (arg: "<khoá> <json>")
+          - ai-staging-job       # chạy MỘT job đồng bộ trong BẢN CHẠY THỬ (arg: tên job, vd "vcb-rate")
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
@@ -1259,6 +1260,15 @@ jobs:
                 cd /opt/vnx-ai-staging
                 fetch_script set-setting.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/set-setting.ts'
                 docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T app sh -c "npx tsx --tsconfig tsconfig.json scripts/set-setting.ts $ARG" ;;
+
+              ai-staging-job)
+                # Chạy một job đồng bộ TRONG BẢN CHẠY THỬ. `run-job` của ops thường trỏ vào
+                # container production — dùng nhầm nó là chạy job trên dữ liệu shop thật.
+                #
+                # Bản chạy thử KHÔNG có bộ lập lịch, nên những job vốn chạy theo giờ (tỷ giá
+                # Vietcombank chẳng hạn) phải gọi tay ở đây mới có mặt.
+                cd /opt/vnx-ai-staging
+                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T app npm run --silent sync -- ${ARG:-} ;;
 
               ai-staging-report)
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
