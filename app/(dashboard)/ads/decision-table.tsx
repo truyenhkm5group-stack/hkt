@@ -239,7 +239,8 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return rows;
-    return rows.filter((r) => r.name.toLowerCase().includes(q) || r.key.toLowerCase().includes(q));
+    // Tìm cả theo TÊN CHA: ở tab Mẩu quảng cáo, thứ người ta gõ thường là tên chiến dịch.
+    return rows.filter((r) => r.name.toLowerCase().includes(q) || r.key.toLowerCase().includes(q) || (r.parentName ?? "").toLowerCase().includes(q));
   }, [rows, query]);
 
   return (
@@ -328,8 +329,21 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
                     <TableCell className="pr-0">
                       <ChevronRight className={cn("size-3.5 text-muted-foreground transition-transform", isOpen && "rotate-90")} />
                     </TableCell>
-                    <TableCell className="max-w-[260px] truncate font-medium" title={row.name}>
-                      {row.name}
+                    <TableCell className="max-w-[260px]">
+                      <div className="flex flex-col leading-tight">
+                        <span className="truncate font-medium" title={row.name}>
+                          {row.name}
+                        </span>
+                        {/*
+                          BỐI CẢNH CHA đi ngay dưới tên, không thành một cột riêng: bảng đã chín cột
+                          và người đọc cần biết "mẩu này của chiến dịch nào" ở đúng chỗ họ đọc tên.
+                        */}
+                        {row.parentName ? (
+                          <span className="truncate text-[11px] text-muted-foreground" title={row.parentName}>
+                            {row.parentName}
+                          </span>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right">
                       <Cell

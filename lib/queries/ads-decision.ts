@@ -69,6 +69,16 @@ const pv = schema.productVariants;
 export type AdsDecisionRow = {
   key: string;
   name: string;
+  /**
+   * ─── BỐI CẢNH CHA: THỨ LÀM MỘT DANH SÁCH 1.254 MẨU TRỞ NÊN ĐỌC ĐƯỢC ───
+   *
+   * `null` ở cấp chiến dịch và cấp mã hàng (chúng không có cha trong cây quảng cáo), và `null` ở
+   * hai cấp dưới khi sổ mẩu chưa biết mẩu ấy thuộc đâu — CHƯA BIẾT, không phải "không có cha".
+   *
+   * Không có nó thì tab Mẩu quảng cáo là một danh sách tên phẳng, và hai mẩu cùng tên ở hai chiến
+   * dịch khác nhau trông y hệt nhau. Đó là cách một bảng đúng số vẫn không dùng được.
+   */
+  parentName: string | null;
   dimension: AdsDimension;
   /**
    * Có biết số chi của dòng này không. `false` ⇒ mọi chỉ số chia cho tiền là `null`, KHÔNG phải 0.
@@ -538,6 +548,41 @@ async function spendGrainCoverage(period: Period): Promise<SpendGrainCoverage> {
   return { total, atAdGrain, pct: total > 0 ? Math.round((atAdGrain / total) * 1000) / 10 : null };
 }
 
+/**
+ * ───────────── TÊN CHA CHO CẤP NHÓM VÀ CẤP MẨU ─────────────
+ *
+ * Đọc từ `fb_ads` / `fb_adsets` chứ không từ `ad_spends`: sổ mẩu biết cả những mẩu KHÔNG tiêu tiền
+ * trong kỳ đang xem (chúng vẫn có đơn từ kỳ trước), còn bảng chi tiêu thì không. Lấy từ bảng chi
+ * tiêu sẽ để trống đúng những dòng khó đọc nhất.
+ *
+ * Trả về `Map` rỗng ở hai cấp còn lại — chiến dịch và mã hàng không có cha trong cây quảng cáo, và
+ * bịa ra một cái là nói sai về hình dạng của dữ liệu.
+ */
+async function parentNames(dimension: AdsDimension): Promise<ParentNames> {
+  const out: ParentNames = new Map();
+  if (dimension !== "adset" && dimension !== "ad") return out;
+  const db = await getDb();
+  if (dimension === "adset") {
+    const rows = await db
+      .select({ adsetId: schema.fbAds.adsetId, campaignName: sql<string>`max(nullif(${schema.fbAds.campaignName}, ''))` })
+      .from(schema.fbAds)
+      .where(sql`${schema.fbAds.adsetId} is not null`)
+      .groupBy(schema.fbAds.adsetId);
+    for (const r of rows) if (r.adsetId && r.campaignName) out.set(r.adsetId, r.campaignName);
+    return out;
+  }
+  const rows = await db
+    .select({ id: schema.fbAds.id, campaignName: schema.fbAds.campaignName, adsetName: schema.fbAdsets.name })
+    .from(schema.fbAds)
+    .leftJoin(schema.fbAdsets, eq(schema.fbAdsets.id, schema.fbAds.adsetId));
+  for (const r of rows) {
+    // Ghép hai tầng bằng "›" — đọc từ trái sang là đi từ rộng vào hẹp, cùng chiều với cây quảng cáo.
+    const parts = [r.campaignName, r.adsetName].map((x) => (x ?? "").trim()).filter(Boolean);
+    if (parts.length) out.set(r.id, parts.join(" › "));
+  }
+  return out;
+}
+
 const round2 = (n: number) => Math.round(n * 100) / 100;
 /** Chia an toàn: mẫu số 0 ⇒ `null` (CHƯA BIẾT), không bao giờ 0. Hợp đồng chỉ số mục 6.5. */
 const ratio = (numerator: number, denominator: number): number | null => (denominator > 0 ? round2(numerator / denominator) : null);
@@ -652,7 +697,10 @@ export function decideAction(input: {
  */
 export type AdMetrics = { impressions: number; clicks: number; messages: number };
 
-export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: number, spendKnown: boolean, metrics?: AdMetrics): AdsDecisionRow {
+/** Tên cha của một khoá ở cấp nhóm / cấp mẩu. Rỗng ở hai cấp còn lại. */
+export type ParentNames = Map<string, string>;
+
+export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: number, spendKnown: boolean, metrics?: AdMetrics, parentName?: string | null): AdsDecisionRow {
   const contributionBeforeAds = agg.deliveredRevenue - agg.cogs - agg.shipping;
   const spendForRatio = spendKnown ? spend : 0;
   const profitAfterAds = contributionBeforeAds - spendForRatio;
@@ -709,6 +757,7 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
   return {
     key: agg.key,
     name: agg.name,
+    parentName: parentName ?? null,
     dimension,
     spendKnown,
     spend: spendForRatio,
@@ -756,11 +805,12 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
 
 async function decisionUncached(period: Period, dimension: AdsDimension): Promise<AdsDecision> {
   const spendKnown = ADS_DIMENSION_HAS_SPEND[dimension];
-  const [aggs, spend, coverage, spendDetail] = await Promise.all([
+  const [aggs, spend, coverage, spendDetail, cha] = await Promise.all([
     dimension === "product" ? aggregateByProduct(period) : aggregateByOrder(period, dimension),
     spendByKey(period, dimension),
     adsAttributionCoverage(period.from, period.to),
     spendGrainCoverage(period),
+    parentNames(dimension),
   ]);
 
   const rows: AdsDecisionRow[] = [];
@@ -768,7 +818,7 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
   for (const agg of aggs) {
     seen.add(agg.key);
     const sp = spend.get(agg.key);
-    rows.push(buildDecisionRow(agg, dimension, sp?.spend ?? 0, spendKnown, sp));
+    rows.push(buildDecisionRow(agg, dimension, sp?.spend ?? 0, spendKnown, sp, cha.get(agg.key) ?? null));
   }
 
   /**
@@ -818,6 +868,7 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
           value.spend,
           true,
           value,
+          cha.get(key) ?? null,
         ),
       );
     }
