@@ -254,11 +254,26 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
     const maHangCoThat = new Set((await db.select({ id: schema.products.id }).from(schema.products)).map((p) => p.id));
     const ghepTreo = new Map<string, string>();
     const accounts = await client.listAdAccounts();
+    // Câu mở đầu, ghi đè ở cuối bằng bản có phán quyết hạt.
     ctx.summary.detail = `${accounts.length} tài khoản · ${since} → ${until}`;
     await ctx.progress();
     let rows = 0;
     let matched = 0;
     const errors: string[] = [];
+    /*
+      ─── PHÁN QUYẾT HẠT PHẢI ĐẾM ĐƯỢC, KHÔNG CHỈ GHI VÀO `ctx.log` ───
+
+      Đo trên production 22/09/2026, lượt chạy đầu tiên sau khi hạ hạt: 19/35 chiến dịch của ngày
+      hôm ấy vẫn ở hạt CHIẾN DỊCH, và **không ai tra được vì sao**. `ctx.log` chỉ giữ 5 DÒNG CUỐI
+      (`runner.ts`), và chỉ đổ vào `sync_runs.error` khi lượt chạy có `warning` — với 7 tài khoản ×
+      3 ngày thì lý do bị đẩy ra ngoài cửa sổ trước khi ai kịp đọc.
+
+      Một cổng an toàn im lặng lùi về phía an toàn là một cổng không sửa được: người đọc thấy hai
+      tab cấp mẩu thiếu dữ liệu mà không có đường nào biết nên đi sửa cái gì.
+    */
+    let ngayHatMau = 0;
+    let ngayHatChienDich = 0;
+    const lyDoLuiHat: string[] = [];
     /*
       ═══════════ MỘT (TÀI KHOẢN × NGÀY) CHỈ ĐƯỢC MANG MỘT HẠT ═══════════
 
@@ -312,10 +327,23 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
           const campTotal = g.camp.reduce((t, r) => t + Math.round(r.spend * rate), 0);
           const adTotal = g.ad.reduce((t, r) => t + Math.round(r.spend * rate), 0);
           const quyet = decideGrain(campTotal, adTotal, g.ad.length);
-          if (quyet.verdict === "MISMATCH") ctx.log(`${account.name} ${date}: ${quyet.reason}`);
-
           const ghiCapMau = quyet.grain === "AD";
-          if (ghiCapMau) soNgayMau += 1;
+          if (ghiCapMau) {
+            soNgayMau += 1;
+            ngayHatMau += 1;
+          } else {
+            ngayHatChienDich += 1;
+            /*
+              GIỮ TỐI ĐA 8 LÝ DO, VÀ LÀ 8 LÝ DO ĐẦU TIÊN.
+
+              `sync_runs.error` cắt ở 2.000 ký tự. Giữ tất cả thì phần đuôi bị cắt giữa chừng và
+              dòng cuối thành một câu dở dang; giữ 8 dòng đầu thì mỗi dòng còn nguyên vẹn, và số
+              còn lại đã có ở bộ đếm ngay bên cạnh — người đọc biết mình đang xem một mẫu, không
+              tưởng đó là tất cả.
+            */
+            if (lyDoLuiHat.length < 8) lyDoLuiHat.push(`${account.name} ${date}: ${quyet.reason}`);
+            ctx.log(`${account.name} ${date}: ${quyet.reason}`);
+          }
 
           const dong = ghiCapMau
             ? g.ad.map((r) => dungDong(r, account, rate, date, "AD", mapping, index))
@@ -377,6 +405,28 @@ export async function syncFacebookAds(options: { trigger?: SyncTrigger; actor?: 
       danh sách này — và chỗ hỏng nằm ở vòng lặp nạp, nơi đã ghi dữ liệu xong, lại là chỗ biến
       mất khỏi báo cáo.
     */
+    /*
+      HAI CON SỐ NÀY VÀO `detail`, KHÔNG VÀO `log`.
+
+      `detail` hiện thẳng trên trang Kết nối dữ liệu và trong mọi lượt tra `sync_runs`, nên câu hỏi
+      "hôm nay có bao nhiêu ngày lấy được chi tiết cấp mẩu" trả lời được mà không phải mở log.
+    */
+    const tongNgay = ngayHatMau + ngayHatChienDich;
+    ctx.summary.detail = `${accounts.length} tài khoản · ${rows} dòng · ${tongNgay} (tài khoản × ngày): ${ngayHatMau} ở hạt MẨU, ${ngayHatChienDich} ở hạt CHIẾN DỊCH · ghép được mã hàng ${matched}/${rows}`;
+
+    /*
+      LÙI HẠT LÀ CẢNH BÁO, KHÔNG PHẢI CHUYỆN BÌNH THƯỜNG — nhưng cũng KHÔNG phải lỗi.
+
+      Lượt chạy ghi PARTIAL kèm lý do đọc được: việc chính (nạp chi tiêu) đã xong và TỔNG TIỀN vẫn
+      đúng, chỉ là một phần kỳ không có chi tiết cấp mẩu. Ghi SUCCESS ở đây là để hai tab cấp mẩu
+      thiếu dữ liệu mà không ai được báo; ghi FAILED là nói sai về mức nghiêm trọng và làm người ta
+      thôi đọc cảnh báo sau vài lần.
+    */
+    if (ngayHatChienDich > 0) {
+      const them = lyDoLuiHat.length < ngayHatChienDich ? ` … và ${ngayHatChienDich - lyDoLuiHat.length} trường hợp nữa` : "";
+      ctx.summary.warning = `${ngayHatChienDich}/${tongNgay} (tài khoản × ngày) KHÔNG lấy được chi tiết cấp mẩu — tổng chi vẫn đúng, nhưng hai tab Nhóm/Mẩu thiếu phần này: ${lyDoLuiHat.join(" · ")}${them}`;
+    }
+
     const treoNap = [...ghepTreo].map(([campaignId, productId]) => ({ campaignId, campaign: campaignId, productId }));
     if (treoNap.length) {
       const ten = treoNap.slice(0, 5).map((d) => `${d.campaign} → ${d.productId}`);
