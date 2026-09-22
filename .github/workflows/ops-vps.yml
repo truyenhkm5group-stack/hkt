@@ -46,6 +46,7 @@ on:
           - session-verify      # kiểm phiên trượt trên máy chủ thật: gia hạn, trần sống, hết hạn, SSE, cờ cookie (CHỈ ĐỌC)
           - session-revoke-e2e  # nghiệm thu THU HỒI phiên — GHI, và CHỈ trên tài khoản QA (QA_SESSION_EMAIL)
           - perf-probe          # đo THỜI GIAN TỪNG TRUY VẤN của các trang chậm, trên dữ liệu thật (chỉ đọc)
+          - perf-audit          # đo THỜI GIAN TỪNG MÀN HÌNH qua ĐÚNG hàm ứng dụng gọi (có chayKhongJit, xoá memo trước mỗi phép đo) — chỉ đọc
           - outcome-parity      # đối chiếu TOÀN BỘ đơn: bảng kết quả đã tính sẵn vs luật chuẩn (chỉ đo; arg "--apply" mới dựng lại bảng DẪN XUẤT)
           - fanpage-evidence-backfill # gán fanpage lịch sử cho marketer TỪ BẰNG CHỨNG quảng cáo (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - returns-parity      # báo cáo hoàn: MÀN HÌNH THẬT = máy tính kết quả = SQL viết độc lập từ đặc tả (chỉ đọc; arg: "Q001,Q002" mã hàng)
@@ -262,7 +263,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability"
-            DOC_NANG="verify smoke session-verify perf-probe kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
+            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
 
             LOP=GHI
             case "$ARG" in
@@ -387,6 +388,19 @@ jobs:
                 # quảng cáo và kết quả vận đơn; thoát khác 0 khi có phát hiện xếp loại BUG.
                 fetch_script marketing-calibrate.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/marketing-calibrate.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/marketing-calibrate.ts $ARG ;;
+              perf-audit)
+                # ═══ ĐO ĐÚNG THỨ NGƯỜI DÙNG CHỜ, KHÔNG PHẢI THỨ CÔNG CỤ ĐO CHẠY ═══
+                #
+                # `perf-probe` chạy `explain (analyze…)` THẲNG trên `pool.query`, ngoài giao dịch —
+                # nên nó đo một đường mà ứng dụng KHÔNG dùng: báo cáo thật đi qua `chayKhongJit()`
+                # (`set local jit = off`). Đêm 22/09/2026 khoảng cách đó làm một lượt phân tích kết
+                # luận "JIT ăn 90% thời gian" trong khi đường thật đã tắt JIT từ lâu.
+                #
+                # `perf-audit` gọi CHÍNH các hàm mà trang gọi (`getReturnRateByVariant`, …) và
+                # `clearMemo()` trước mỗi phép đo, nên con số nó in ra là thứ người dùng thật sự
+                # chờ khi bộ đệm hết hạn. Chỉ đọc.
+                fetch_script perf-audit.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/perf-audit.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-audit.ts ;;
               cogs-drift)
                 fetch_script cogs-drift.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cogs-drift.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cogs-drift.ts ;;
