@@ -40,12 +40,17 @@ type Dung = {
   phone?: string;
   /** Kết quả xử lý gần nhất — `undefined` = CHƯA AI QUYẾT (khác hẳn "đã quyết là không làm gì"). */
   quyet?: CareDecision;
-  /** Số LƯỢT đã xử lý của đợt. `undefined` = 0 (chưa ai đụng). */
+  /** Số LƯỢT đã xử lý của đợt. `undefined` = suy từ `phanHoiLuc` (có phản hồi ⇒ 1 lượt, không ⇒ 0). */
   luot?: number;
+  /** ĐVVC nói thêm điều gì sau lượt xử lý cuối ⇒ cái hẹn hết hiệu lực (`followUpStillHolds`). */
+  tinMoiSauLuotCuoi?: boolean;
 };
 
 function ca(d: Dung): CareCase {
   const queueSince = gio(d.vaoLuc ?? 0);
+  const coPhanHoi = d.phanHoiLuc !== undefined && d.phanHoiLuc !== null;
+  const luot = d.luot ?? (coPhanHoi ? 1 : 0);
+  const mocLuotDau = coPhanHoi ? gio(d.phanHoiLuc as number) : luot ? gio((d.vaoLuc ?? 0) + 0.5) : null;
   const care = {
     status: d.status ?? "NEW",
     owner: d.ownerId ? { id: d.ownerId, name: `NV ${d.ownerId}` } : null,
@@ -93,12 +98,19 @@ function ca(d: Dung): CareCase {
     care,
     reopened: false,
     lastCareAction: null,
+    /*
+      `phanHoiLuc` CỦA BỘ DỰNG NÀY LÀ "LÚC CÓ NGƯỜI LÀM VIỆC THẬT ĐẦU TIÊN", nên nó phải đi vào
+      `firstRoundAt` chứ không chỉ vào cột `firstResponseAt`. Từ bản 22/09/2026 hạn phản hồi đầu
+      đọc theo LƯỢT XỬ LÝ (`teamResponded`) — để `firstRoundAt` rỗng ở đây thì mọi ca trong bộ
+      dựng bỗng thành "chưa ai phản hồi", và phần kiểm hạn xử lý bên dưới đo một thứ khác hẳn.
+    */
     history: {
-      rounds: d.luot ?? 0,
-      touches: d.luot ?? 0,
-      lastRoundAt: d.luot ? gio((d.vaoLuc ?? 0) + 0.5) : null,
-      lastRoundActorId: d.luot ? (d.ownerId ?? null) : null,
-      carrierNewsAfterLastRound: false,
+      rounds: luot,
+      touches: luot,
+      firstRoundAt: mocLuotDau,
+      lastRoundAt: mocLuotDau,
+      lastRoundActorId: luot ? (d.ownerId ?? null) : null,
+      carrierNewsAfterLastRound: d.tinMoiSauLuotCuoi ?? false,
       previousEpisodes: 0,
       timeline: [],
       timelineTruncated: false,

@@ -8,7 +8,7 @@ import * as svc from "@/lib/care/service";
 import { CARE_NOTE_PRESETS_KEY, CARE_NOTE_PRESETS_MAX, type CareNotePreset } from "@/lib/constants/care";
 import { CARE_ACTION_KINDS } from "@/lib/constants/delivery-tower";
 import { CARE_DECISIONS, RESOLUTION_NOTES_KEY, RESOLUTION_NOTES_MAX, type CareDecision } from "@/lib/constants/care-resolution";
-import { getResolutionNotePresets } from "@/lib/queries/care-workbench";
+import { getCareCarrierJourney, getResolutionNotePresets } from "@/lib/queries/care-workbench";
 import { setSettingJson } from "@/lib/settings";
 
 /**
@@ -144,4 +144,17 @@ export async function saveResolutionNotePresets(input: z.input<typeof resolution
   await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: RESOLUTION_NOTES_KEY, after: Object.fromEntries(CARE_DECISIONS.map((k) => [k, next[k].length])), reason: "Mẫu note theo kết quả xử lý" });
   revalidatePath("/shipments");
   return { ok: true, data: next };
+}
+
+/**
+ * HÀNH TRÌNH ĐVVC CỦA MỘT KIỆN — CHỈ ĐỌC, tải khi người mở nhật ký ngay trên bảng.
+ *
+ * Quyền `shipments:view`: ai nhìn thấy dòng thì được đọc chứng từ của dòng đó. Không ghi gì, không
+ * `revalidatePath` — nó không đổi một byte nào.
+ */
+export async function loadCarrierJourney(shipmentId: string): Promise<{ ok: true; data: { at: Date; status: string; note: string; location: string }[] } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "shipments:view")) return { error: "Không có quyền xem vận đơn" };
+  if (!shipmentId) return { error: "Thiếu mã kiện" };
+  return { ok: true, data: await getCareCarrierJourney(shipmentId) };
 }

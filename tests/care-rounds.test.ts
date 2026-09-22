@@ -10,10 +10,12 @@ import {
   careRoundAppend,
   careRoundBand,
   careRoundCount,
+  careRoundGapsHours,
   careStatusArrow,
   type CareRoundEntry,
 } from "@/lib/constants/care-rounds";
 import { CARE_STATUS_LABEL } from "@/lib/constants/care";
+import { careViewOf, followUpStillHolds, slaOf, teamResponded } from "@/lib/care/view";
 
 /**
  * ═══════════ "ĐÃ XỬ LÝ MẤY LƯỢT" — BÀI KIỂM CỦA MỘT PHÉP ĐẾM CHẤM NGƯỜI ═══════════
@@ -149,13 +151,69 @@ export function testCareRounds() {
   for (const k of CARE_TIMELINE_KINDS) assert.equal(typeof CARE_TIMELINE_IS_ROUND[k], "boolean", `loại dòng ${k} chưa khai có phải một lượt hay không`);
   assert.equal(CARE_TIMELINE_KINDS.filter((k) => CARE_TIMELINE_IS_ROUND[k]).length, 2, "đúng HAI loại dòng được tính là lượt xử lý — thêm loại thứ ba là đổi nghĩa con số chấm người");
 
+  /* ═══════════ 9b · ĐỘ NGUỘI: KHOẢNG GIỮA CÁC LƯỢT ĐÃ GỘP ═══════════
+
+     Phép đo này phải đứng trên CÙNG phép gộp với `careRoundCount`, nếu không "3 lượt" và "2 khoảng"
+     sẽ nói về hai thứ khác nhau trên cùng một ca. */
+  assert.deepEqual(careRoundGapsHours([]), [], "không ghi nhận nào ⇒ không có khoảng nào");
+  assert.deepEqual(careRoundGapsHours([ghi(0, "u1")]), [], "một lượt CHƯA CÓ khoảng để đo — không phải “độ nguội bằng 0”");
+  // Hai dòng trong cửa sổ gộp là MỘT lượt ⇒ vẫn chưa có khoảng nào.
+  assert.deepEqual(careRoundGapsHours([ghi(0, "u1"), ghi(2, "u1")]), [], "hai dòng cùng một lần ngồi làm không tạo ra một khoảng");
+  assert.deepEqual(careRoundGapsHours([ghi(0, "u1"), ghi(120, "u1")]), [2], "hai lượt cách nhau 120 phút = 2 giờ");
+  // Số khoảng LUÔN bằng số lượt trừ 1 — tính chất khoá hai hàm lại với nhau.
+  for (const day of dayThu) {
+    assert.equal(careRoundGapsHours(day).length, careRoundCount(day) - 1, "số khoảng phải bằng số lượt trừ 1, trên cùng một dãy");
+  }
+  // Khoảng đo từ mốc BẮT ĐẦU của mỗi lượt, không từ mốc cuối của lượt trước.
+  assert.deepEqual(careRoundGapsHours([ghi(0, "u1"), ghi(3, "u1"), ghi(63, "u1")]), [1.05], "gộp 0 và 3 thành một lượt ⇒ khoảng tính từ phút 0, không từ phút 3");
+
   /* ═══════════ 10 · NHÃN "A → B" ═══════════ */
   assert.equal(careStatusArrow("NEW", "IN_PROGRESS", CARE_STATUS_LABEL), `${CARE_STATUS_LABEL.NEW} → ${CARE_STATUS_LABEL.IN_PROGRESS}`);
   assert.equal(careStatusArrow(null, "RESOLVED", CARE_STATUS_LABEL), CARE_STATUS_LABEL.RESOLVED, "không biết trạng thái trước thì in trạng thái sau, không vẽ mũi tên từ hư không");
   assert.equal(careStatusArrow("NEW", "NEW", CARE_STATUS_LABEL), CARE_STATUS_LABEL.NEW, "tự-chuyển không vẽ mũi tên");
   assert.equal(careStatusArrow("NEW", null, CARE_STATUS_LABEL), "", "không có trạng thái sau thì không có nhãn trạng thái");
 
+  /* ═══════════ 11 · GIAO VIỆC KHÔNG PHẢI MỘT LẦN PHẢN HỒI (chủ shop chốt 22/09/2026) ═══════════
+
+     `setCareOwner` ghi `first_response_at` ngay lúc giao việc. Đo production cùng ngày: 22 trong 25
+     đợt chưa xử lý lần nào vẫn mang mốc ấy, nên chúng KHÔNG BAO GIỜ bị tính vỡ hạn phản hồi đầu.
+     Bản vá đọc ở TẦNG ĐỌC: cột giữ nguyên trong CSDL, câu hỏi "đã phản hồi chưa" đọc theo LƯỢT. */
+  const vaoLuc = phut(0);
+  const daGiaoChuaLam = { status: "ASSIGNED" as const, followUpAt: null, doneAt: null, firstResponseAt: phut(1), firstRoundAt: null };
+  assert.equal(teamResponded(daGiaoChuaLam, vaoLuc), false, "có mốc phản hồi (do giao việc) nhưng 0 lượt ⇒ CHƯA phản hồi");
+  assert.equal(teamResponded({ ...daGiaoChuaLam, firstRoundAt: phut(30) }, vaoLuc), true, "có một lượt thật ⇒ đã phản hồi");
+
+  /* BA GIÁ TRỊ, BA NGHĨA: `undefined` là CHƯA ĐỌC ĐƯỢC và phải lùi về hành vi cũ, không được biến
+     thành một khẳng định "chưa ai phản hồi" cho mọi ca của một màn hình chưa cập nhật (luật 42). */
+  const chuaDocDuoc = { status: "ASSIGNED" as const, followUpAt: null, doneAt: null, firstResponseAt: phut(1) };
+  assert.equal(teamResponded(chuaDocDuoc, vaoLuc), true, "`firstRoundAt` undefined ⇒ lùi về cột cũ, giữ nguyên hành vi cũ");
+
+  /* Vỡ hạn phản hồi đầu phải ĐI THEO vị từ đó — hai nơi không được nói hai điều. */
+  const quaHan = new Date(vaoLuc.getTime() + 5 * 3_600_000);
+  assert.equal(slaOf(vaoLuc, daGiaoChuaLam, quaHan, { firstResponseHours: 2, resolveHours: 24 }).firstResponseBreached, true, "ca đã giao mà chưa ai làm gì PHẢI vỡ hạn phản hồi đầu");
+  assert.equal(slaOf(vaoLuc, { ...daGiaoChuaLam, firstRoundAt: phut(30) }, quaHan, { firstResponseHours: 2, resolveHours: 24 }).firstResponseBreached, false, "có lượt thật trong hạn ⇒ không vỡ");
+
+  /* ═══════════ 12 · TIN ĐVVC MỚI LÀM HẾT HIỆU LỰC CÁI HẸN ═══════════
+
+     Người trực gọi khách lúc 9 giờ rồi hẹn xem lại chiều mai; 10 giờ ĐVVC báo phát hụt lần nữa.
+     Cái hẹn ấy đứng trên một bức tranh đã cũ nhưng vẫn giữ ca nằm im. Đo 22/09/2026: 3/17 đợt. */
+  // Hẹn đặt SAU hạn đóng ca (24 giờ = phút 1440), để phần dưới kiểm được đúng thứ nó định kiểm:
+  // đồng hồ đóng ca dừng vì CÁI HẸN, chứ không phải vì chưa tới hạn.
+  const dangCho = { status: "WAITING_CUSTOMER" as const, followUpAt: phut(2000), doneAt: null, firstResponseAt: phut(10), firstRoundAt: phut(10) };
+  assert.equal(followUpStillHolds(dangCho, phut(0)), true, "hẹn còn ở phía trước, ĐVVC im ⇒ cái hẹn còn hiệu lực");
+  assert.equal(followUpStillHolds({ ...dangCho, carrierNewsAfterLastRound: true }, phut(0)), false, "ĐVVC nói thêm sau lượt cuối ⇒ cái hẹn hết hiệu lực");
+  assert.equal(careViewOf(dangCho, vaoLuc, phut(0)).view, "waiting", "…nên ca nằm ở Đang chờ");
+  assert.equal(careViewOf({ ...dangCho, carrierNewsAfterLastRound: true }, vaoLuc, phut(0)).view, "care", "…và quay lại Cần care khi có tin mới");
+  // `undefined` = chưa đọc được ⇒ giữ nguyên hành vi cũ, không kéo mọi ca đang chờ về Cần care.
+  assert.equal(careViewOf({ status: "WAITING_CUSTOMER", followUpAt: phut(2000), doneAt: null, firstResponseAt: phut(10) }, vaoLuc, phut(0)).view, "waiting", "chưa đọc được tin ĐVVC ⇒ hành vi cũ");
+  /* Hạn xử lý PHẢI đi cùng góc nhìn: ca rời "Đang chờ" mà đồng hồ vẫn dừng thì nó nằm ở Cần care
+     và không bao giờ vỡ hạn — một dòng vô hình với mọi cảnh báo. */
+  // Quá hạn đóng ca (24 giờ) nhưng CHƯA tới giờ hẹn — đúng khe mà `paused` sinh ra để xử lý.
+  const treHan = phut(1500);
+  assert.equal(slaOf(vaoLuc, { ...dangCho, carrierNewsAfterLastRound: true }, treHan).resolveBreached, true, "hẹn hết hiệu lực ⇒ đồng hồ đóng ca chạy tiếp");
+  assert.equal(slaOf(vaoLuc, dangCho, treHan).resolveBreached, false, "hẹn còn hiệu lực ⇒ đồng hồ vẫn dừng");
+
   console.log(
-    `✓ Lượt xử lý care: cửa sổ gộp ${CARE_ROUND_MERGE_MINUTES} phút (biên đóng) · hai người khác nhau không gộp · dòng chưa nối tài khoản đếm THIẾU không đếm thừa · thứ tự đầu vào không đổi kết quả · cộng dần = đếm một lượt · giao việc KHÔNG phải một lượt · ba nhóm backlog rời nhau`,
+    `✓ Lượt xử lý care: cửa sổ gộp ${CARE_ROUND_MERGE_MINUTES} phút (biên đóng) · hai người khác nhau không gộp · dòng chưa nối tài khoản đếm THIẾU không đếm thừa · thứ tự đầu vào không đổi kết quả · cộng dần = đếm một lượt · giao việc KHÔNG phải một lượt · ba nhóm backlog rời nhau · số khoảng độ nguội = số lượt − 1 · giao việc KHÔNG phải một lần phản hồi · tin ĐVVC mới làm hết hiệu lực cái hẹn (góc nhìn và đồng hồ cùng đổi)`,
   );
 }

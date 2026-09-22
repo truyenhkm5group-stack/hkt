@@ -212,3 +212,101 @@ select count(*) filter (where first_response_at is not null) as co_moc_phan_hoi,
 ```
 
 Con số thứ hai phải tiến về 0. Nó đang là **22/25** (22/09/2026).
+
+---
+
+## 7. Vòng hai (22/09/2026) — bốn việc đọc theo lượt xử lý
+
+### 7.1 "Đã phản hồi chưa" thôi đếm cú bấm GIAO VIỆC
+
+Chủ shop chốt: sửa ở **tầng đọc**. Cột `shipment_care.first_response_at` **giữ nguyên trong CSDL**
+— không migration, không backfill (đoán là thứ mục 35 cấm), không mất một dòng lịch sử nào. Câu hỏi
+*"đội đã phản hồi chưa"* đọc theo **lượt xử lý thật**:
+
+| Nơi | Trước | Sau |
+|---|---|---|
+| `slaOf().firstResponseBreached` | `first_response_at` | `teamResponded()` → `firstRoundAt` |
+| `careSlaBucket()` ("sắp quá hạn") | bản chép tay của cùng phép tính | cùng vị từ |
+| Trung vị "Phản hồi đầu" của báo cáo | `first_response_at` | `CARE_FIRST_ROUND_AT` (SQL) |
+
+Ba vị từ (`teamResponded` · `teamWorkEnded` · `followUpStillHolds`) nay sống ở **một chỗ**
+(`lib/care/view.ts`). Trước đó `responded` và `paused` được chép tay trong `careSlaBucket`, nên bản
+vá này sẽ chỉ tới được một trong hai nơi và một ca hiện "bình thường" ngay cạnh con số nói nó đã
+quá hạn.
+
+**Ba giá trị, ba nghĩa** của `firstRoundAt` (luật 42):
+
+| Giá trị | Nghĩa | Hành vi |
+|---|---|---|
+| `undefined` | nơi gọi CHƯA ĐỌC lịch sử | lùi về cột cũ |
+| `null` | đã đọc, KHÔNG có lượt nào | chưa phản hồi |
+| `Date` | lượt xử lý thật đầu tiên | đã phản hồi |
+
+Hệ quả trên màn hình: **số vỡ hạn phản hồi đầu TĂNG** (tới 22 ca đang ẩn hiện ra), trung vị
+"Phản hồi đầu" **tăng** (chậm hơn, vì thôi tính những cú bấm giao việc mất 2 giây). Số xấu đi, và
+đó là số thật.
+
+### 7.2 Tin ĐVVC mới làm hết hiệu lực cái hẹn
+
+`followUpStillHolds()`. Một cái hẹn là lời khai *"tôi đã làm phần mình, tới giờ đó tôi quay lại"* —
+nó đứng trên bức tranh của **lúc đặt hẹn**. Người trực gọi khách 9 giờ rồi hẹn chiều mai; 10 giờ
+Viettel Post báo phát hụt lần nữa. Cái hẹn không còn nói về tình trạng hiện tại nhưng vẫn giữ ca
+nằm im tới chiều mai.
+
+Nay ca quay lại **Cần care**. Nó **không xoá** `follow_up_at` và **không ghi gì** vào CSDL — câu
+hỏi này đọc ra lúc xem, nên nó tự đúng lại khi có người xử lý thêm một lượt.
+
+Góc nhìn và đồng hồ đổi **cùng nhau**: ca rời "Đang chờ" mà đồng hồ vẫn dừng thì nó nằm ở Cần care
+và không bao giờ vỡ hạn — một dòng vô hình với mọi cảnh báo.
+
+Đo 22/09/2026: **3 trong 17 đợt đã xử lý**.
+
+### 7.3 "Đã giao mà chưa ai bắt đầu"
+
+Đo 22/09/2026: **22 đợt `ASSIGNED` với 0 lượt và 0 lần chạm**. Cột `open` một mình không nói được
+điều đó — một người cầm 10 việc và làm cả 10 trông y hệt một người cầm 10 việc và chưa mở cái nào.
+
+- Bảng **"Khối lượng đang cầm"**: thêm cột `Chưa bắt đầu`.
+- Trên dòng: nhãn **"đã giao, chưa bắt đầu"**.
+
+### 7.4 Độ nguội giữa hai lượt
+
+`careRoundGapsHours()` + `timingStat()` (ngưỡng và độ phủ dùng chung với `lib/constants/care-timing.ts`).
+
+Trả lời câu **khác hẳn** "phản hồi đầu": cái kia hỏi *đội bắt đầu nhanh không*, cái này hỏi *đội có
+bỏ ca giữa chừng không*. Một đội gọi trong 20 phút rồi im ba ngày và một đội gọi sau 3 giờ rồi gọi
+lại mỗi sáng cho ra **cùng một con số** ở phép đo thứ nhất.
+
+Mỗi ca đóng góp **đúng một phiếu** (trung vị các khoảng của chính nó) — một ca được gọi tám lượt
+không được lấn át bảy ca chỉ có một khoảng.
+
+> Trên dữ liệu 22/09/2026 thẻ này đọc **"—"**: chỉ 7/42 ca đang mở có từ 2 lượt trở lên, dưới
+> ngưỡng `TIMING_MIN_SAMPLE = 10`. Đó là kết quả **đúng**, và thẻ nói thẳng lý do thay vì in một
+> con số dựng trên 7 ca.
+
+### 7.5 Nhật ký hai cột, tải khi mở
+
+Cột trái **Viettel Post nói gì · chứng từ**, cột phải **Đội làm gì · nhật ký xử lý**. Đứng cạnh
+nhau, **không trộn** — luật 47: trộn thành một dòng thời gian thì đọc xuôi rất dễ, nhưng sau vài
+dòng không ai còn phân biệt được đâu là chứng từ và đâu là việc shop tự làm.
+
+Hành trình ĐVVC **tải khi người mở** (`loadCarrierJourney`, chỉ đọc, quyền `shipments:view`), không
+đi kèm hàng đợi: trang Vận đơn đã nằm trong danh sách trang chậm, và cột này chỉ được mở ở vài dòng
+mỗi buổi. "Đang đọc…" là một trạng thái riêng — một danh sách rỗng ở đó là một lời khẳng định sai
+trong nửa giây.
+
+### 7.6 Ô ghi note nói ra đây là lượt thứ mấy
+
+*"Khách hẹn mai"* ở lượt 1 và ở lượt 3 là hai tình huống khác hẳn nhau — cái sau nghĩa là khách đã
+hẹn rồi lỡ hai lần. Chữ gợi ý lấy thẳng `CARE_ROUND_BAND_HINT`, cùng bộ chữ với chip lọc và tooltip
+của nút mở nhật ký, nên ba chỗ không nói ba điều khác nhau về cùng một rổ.
+
+### 7.7 Một luật, hai bản — và một bài kiểm so chúng
+
+`CARE_FIRST_ROUND_AT` (SQL, cho báo cáo theo kỳ) và `CareHistory.firstRoundAt` (TS, cho hàng đợi)
+là cùng một luật viết hai lần. Chúng **nằm cạnh nhau** trong `lib/queries/care-workbench.ts`, và
+`tests/care-workbench.test.ts` chạy cả hai trên **cùng dữ liệu** rồi so từng kiện — đúng cách
+`tests/care-reopen.test.ts` khoá cặp TS/SQL của luật mở ca.
+
+Không có cửa sổ gộp trong bản SQL, và đó là đúng: gộp chỉ ảnh hưởng tới phép **đếm** số lượt; mốc
+lượt **đầu tiên** là `min` của hai sổ dù có gộp hay không.

@@ -10,6 +10,7 @@ import {
   CARE_TIMELINE_INLINE_MAX,
   careBacklogGroup,
   careRoundCount,
+  careRoundGapsHours,
   careStatusArrow,
   type CareBacklogGroup,
   type CareRoundEntry,
@@ -18,7 +19,8 @@ import {
 } from "@/lib/constants/care-rounds";
 import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { careSlaHours } from "@/lib/care/sla";
-import { careViewOf, slaOf } from "@/lib/care/view";
+import { rawMedian, timingStat } from "@/lib/constants/care-timing";
+import { careViewOf, slaOf, type CareStateLike } from "@/lib/care/view";
 import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_STATUS_LABEL, CARE_STATUSES, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
 import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
 import { botMessageFailuresByShipment } from "@/lib/queries/cs";
@@ -255,8 +257,36 @@ type CareHistoryRow = {
   sau: string | null;
 };
 
-async function loadCareHistory(dots: { careCaseId: string; shipmentId: string; since: Date; lastCarrierAt: Date | null }[]): Promise<Map<string, CareHistory>> {
-  if (!dots.length) return new Map();
+/**
+ * ═══════════ MỐC LƯỢT XỬ LÝ ĐẦU TIÊN — BẢN SQL, ĐỨNG NGAY CẠNH BẢN TYPESCRIPT ═══════════
+ *
+ * Bản TS là `loadCareHistory` ngay dưới (`viecXep[0].at`). Bản SQL này để các báo cáo chạy trên
+ * TẬP KIỆN CỦA MỘT KỲ — tập ấy gồm cả đợt đã đóng, không nằm trong hàng đợi đang chạy, nên không
+ * đọc lại qua `getCareQueue()` được.
+ *
+ * Hai bản phải nói cùng một điều, và chúng NẰM CẠNH NHAU cố ý: một luật viết ở hai nơi xa nhau là
+ * một luật sẽ trôi. `tests/care-workbench.test.ts` chạy cả hai trên cùng dữ liệu rồi so từng kiện.
+ *
+ * KHÔNG có cửa sổ gộp ở đây, và đó là đúng: gộp chỉ ảnh hưởng tới phép ĐẾM số lượt. Mốc lượt ĐẦU
+ * TIÊN là `min` của hai sổ dù có gộp hay không.
+ *
+ * `least` bỏ qua `NULL` (khác `min` của một cột), nên đợt chỉ có một trong hai sổ vẫn ra đúng mốc;
+ * không sổ nào có dòng thì ra `NULL` — CHƯA CÓ LƯỢT NÀO, không phải 0 giờ.
+ */
+export const CARE_FIRST_ROUND_AT = sql`least(
+  (select min(a.created_at) from care_actions a where a.shipment_id = c.shipment_id and a.created_at >= coalesce(c.opened_at, c.created_at)),
+  (select min(d.decided_at) from care_decisions d where d.care_case_id = c.id)
+)`;
+
+/**
+ * Trả về CẢ hai thứ: lịch sử từng kiện, và các khoảng cách giữa hai lượt gộp lại cho phép đo "độ
+ * nguội". Gom ở đây vì đây là nơi DUY NHẤT có các ghi nhận thô — trả riêng thì nơi gọi phải đọc
+ * lại ba sổ một lần nữa chỉ để cộng một con số.
+ */
+type CareHistoryLoad = { byShipment: Map<string, CareHistory>; gapsHours: number[]; casesWithGap: number };
+
+async function loadCareHistory(dots: { careCaseId: string; shipmentId: string; since: Date; lastCarrierAt: Date | null }[]): Promise<CareHistoryLoad> {
+  if (!dots.length) return { byShipment: new Map(), gapsHours: [], casesWithGap: 0 };
   const db = await getDb();
   const ids = dots.map((d) => d.careCaseId);
   const kien = dots.map((d) => d.shipmentId);
@@ -312,6 +342,8 @@ async function loadCareHistory(dots: { careCaseId: string; shipmentId: string; s
   }
 
   const ra = new Map<string, CareHistory>();
+  const gapsHours: number[] = [];
+  let casesWithGap = 0;
   for (const d of dots) {
     const cua_kien = gom.get(d.shipmentId) ?? [];
     const dong = cua_kien.map(toTimelineEntry).sort((a, b) => b.at.getTime() - a.at.getTime());
@@ -340,9 +372,20 @@ async function loadCareHistory(dots: { careCaseId: string; shipmentId: string; s
       .map((r) => ({ at: new Date(r.at), actorId: r.actor_id }));
     const viecXep = [...viec].sort((a, b) => a.at.getTime() - b.at.getTime());
     const cuoi = viecXep.length ? viecXep[viecXep.length - 1] : null;
+    /*
+      ĐỘ NGUỘI gom theo KIỆN, không theo khoảng: một ca được gọi tám lượt sẽ đóng góp bảy khoảng và
+      lấn át bảy ca chỉ có một khoảng. Lấy TRUNG VỊ CỦA TỪNG CA rồi mới gộp — mỗi ca một phiếu.
+    */
+    const khoang = careRoundGapsHours(viecXep);
+    const giuaCa = rawMedian(khoang);
+    if (giuaCa !== null) {
+      gapsHours.push(giuaCa);
+      casesWithGap += 1;
+    }
     ra.set(d.shipmentId, {
       rounds: careRoundCount(viec),
       touches: careRoundCount(chamVao),
+      firstRoundAt: viecXep.length ? viecXep[0].at : null,
       lastRoundAt: cuoi?.at ?? null,
       lastRoundActorId: cuoi?.actorId ?? null,
       // So với MỐC ĐVVC (`shipment_events.occurred_at`), không với `updated_at` của kiện: cột kia
@@ -353,7 +396,34 @@ async function loadCareHistory(dots: { careCaseId: string; shipmentId: string; s
       timelineTruncated: dong.length > CARE_TIMELINE_INLINE_MAX,
     });
   }
-  return ra;
+  return { byShipment: ra, gapsHours, casesWithGap };
+}
+
+/**
+ * ═══════════ HÀNH TRÌNH ĐVVC CHO MỘT KIỆN — TẢI KHI NGƯỜI MỞ, KHÔNG TẢI SẴN ═══════════
+ *
+ * Bàn care gửi cả trăm dòng trong một lượt dựng. Kèm hành trình Viettel Post cho từng dòng là nhân
+ * kích thước gói dữ liệu lên để phục vụ một thứ người dùng chỉ mở ra ở vài dòng mỗi buổi — và
+ * trang Vận đơn đã nằm trong danh sách trang chậm.
+ *
+ * Nên nó là một lượt đọc RIÊNG, chạy khi người bấm mở nhật ký của đúng một kiện. Cùng bộ nguồn sự
+ * kiện với ngăn kéo (`lib/queries/shipment-quickview.ts`): thiếu `source in (...)` thì dòng ERP tự
+ * ghi ("ERP · đã làm tay") sẽ lọt vào cột CHỨNG TỪ, và luật 47 sập ngay tại chỗ — lời khai của
+ * ĐVVC không bao giờ được lẫn với kết luận của shop.
+ */
+export async function getCareCarrierJourney(shipmentId: string, limit = CARE_TIMELINE_INLINE_MAX): Promise<{ at: Date; status: string; note: string; location: string }[]> {
+  const db = await getDb();
+  const rows = rowsOf<{ at: string; status: string; note: string | null; location: string | null }>(
+    await db.execute(sql`
+      select e.occurred_at as at, coalesce(nullif(e.status_name, ''), e.status) as status, e.note, e.location
+        from shipment_events e
+       where e.shipment_id = ${shipmentId}
+         and e.source in ('VTP_WEBHOOK','PANCAKE','VTP_IMPORT','VTP_UI_MANUAL_VERIFICATION','MANUAL')
+       order by e.occurred_at desc
+       limit ${limit}
+    `),
+  );
+  return rows.map((r) => ({ at: new Date(r.at), status: r.status, note: r.note ?? "", location: r.location ?? "" }));
 }
 
 /** Nhãn của một dòng nhật ký — dựng Ở ĐÂY, một lần, để trình duyệt không phải mang theo ba bảng chữ. */
@@ -508,7 +578,7 @@ async function buildQueue(): Promise<CareQueue> {
     Kiện KHÔNG có dòng `shipment_care` nào thì không có đợt, nên không có lịch sử — và đó là câu
     trả lời đúng: chưa ai mở nó ra bao giờ.
   */
-  const historyMap = await loadCareHistory([...careMap.values()].map((c) => ({ careCaseId: c.id, shipmentId: c.shipmentId, since: c.openedAt ?? c.createdAt, lastCarrierAt: facts.get(c.shipmentId)?.lastAt ?? null })));
+  const lichSu = await loadCareHistory([...careMap.values()].map((c) => ({ careCaseId: c.id, shipmentId: c.shipmentId, since: c.openedAt ?? c.createdAt, lastCarrierAt: facts.get(c.shipmentId)?.lastAt ?? null })));
 
   /*
     MỐC VÀO HÀNG ĐỢI: `opened_at` của đợt (lúc ĐVVC báo sự cố mở đợt này) khi có; đợt cũ chưa có mốc
@@ -545,7 +615,32 @@ async function buildQueue(): Promise<CareQueue> {
   ) => {
     const dot = careMap.get(base.shipmentId);
     const care = toCareState(dot, dot ? (decisionMap.get(dot.id) ?? null) : null);
-    const { view, reopened } = base.inCareCondition ? careViewOf(care, base.queueSince, now) : { view: "done" as const, reopened: false };
+    /*
+      KIỆN CHƯA CÓ ĐỢT CARE NÀO VẪN PHẢI CÓ MỘT CÂU TRẢ LỜI, và câu đó là "0 lượt · chưa ai chạm"
+      — một sự thật ĐO ĐƯỢC (không có dòng nào trong ba sổ), khác hẳn `undefined` (nơi gọi cũ chưa
+      truyền gì). Để `undefined` ở đây là bắt màn hình in "chưa đọc được" cho đúng cái nhóm đông
+      nhất và quan trọng nhất của hàng đợi.
+    */
+    const hist: CareHistory = lichSu.byShipment.get(base.shipmentId) ?? {
+      rounds: 0,
+      touches: 0,
+      firstRoundAt: null,
+      lastRoundAt: null,
+      lastRoundActorId: null,
+      carrierNewsAfterLastRound: false,
+      previousEpisodes: 0,
+      timeline: [],
+      timelineTruncated: false,
+    };
+    /*
+      HẠN XỬ LÝ VÀ GÓC NHÌN ĐỌC CHIỀU CARE **KÈM LỊCH SỬ** — không đọc `care` trơn.
+
+      Thiếu `firstRoundAt` thì `teamResponded` lùi về cột `first_response_at`, tức là bản vá "giao
+      việc không phải một lần phản hồi" (22/25 ca, đo 22/09/2026) biến mất mà bài kiểm nào cũng
+      xanh. Thiếu `carrierNewsAfterLastRound` thì ca có tin ĐVVC mới vẫn nằm im tới giờ hẹn.
+    */
+    const careChoHan: CareStateLike = { ...care, firstRoundAt: hist.firstRoundAt, carrierNewsAfterLastRound: hist.carrierNewsAfterLastRound };
+    const { view, reopened } = base.inCareCondition ? careViewOf(careChoHan, base.queueSince, now) : { view: "done" as const, reopened: false };
     const fact = facts.get(base.shipmentId);
     const capability = fact?.capability;
     all.push({
@@ -574,11 +669,11 @@ async function buildQueue(): Promise<CareQueue> {
         chưa truyền gì). Để `undefined` ở đây là bắt màn hình in "chưa đọc được" cho đúng cái nhóm
         đông nhất và quan trọng nhất của hàng đợi.
       */
-      history: historyMap.get(base.shipmentId) ?? { rounds: 0, touches: 0, lastRoundAt: null, lastRoundActorId: null, carrierNewsAfterLastRound: false, previousEpisodes: 0, timeline: [], timelineTruncated: false },
+      history: hist,
       reasonClass: REASON_CLASS[base.reason],
       care,
       reopened,
-      sla: slaOf(base.queueSince, care, now, slaHours),
+      sla: slaOf(base.queueSince, careChoHan, now, slaHours),
       carrierRequest: reqMap.get(base.shipmentId) ?? null,
       carrierCapability: carrierCapabilityOf(capability ?? "UNKNOWN_CAPABILITY"),
       view,
@@ -695,12 +790,15 @@ async function buildQueue(): Promise<CareQueue> {
     g.money += c.codAmount;
   }
 
-  const byOwnerMap = new Map<string, { ownerId: string | null; name: string; open: number; overdue: number; money: number }>();
+  const byOwnerMap = new Map<string, { ownerId: string | null; name: string; open: number; overdue: number; notStarted: number; money: number }>();
   for (const c of openCases) {
     const key = c.care.owner?.id ?? "";
-    const cur = byOwnerMap.get(key) ?? { ownerId: c.care.owner?.id ?? null, name: c.care.owner?.name ?? "Chưa ai nhận", open: 0, overdue: 0, money: 0 };
+    const cur = byOwnerMap.get(key) ?? { ownerId: c.care.owner?.id ?? null, name: c.care.owner?.name ?? "Chưa ai nhận", open: 0, overdue: 0, notStarted: 0, money: 0 };
     cur.open += 1;
     if (c.sla.firstResponseBreached || c.sla.resolveBreached) cur.overdue += 1;
+    // VIỆC ĐÃ NẰM TRONG TAY MÀ CHƯA AI MỞ RA — 22 đợt như vậy trên production 22/09/2026, và
+    // trước bản này không con số nào trên màn hình đếm chúng.
+    if ((c.history?.rounds ?? 0) === 0) cur.notStarted += 1;
     cur.money += c.codAmount;
     byOwnerMap.set(key, cur);
   }
@@ -715,6 +813,13 @@ async function buildQueue(): Promise<CareQueue> {
     overdue: careCases.filter((c) => c.sla.firstResponseBreached || c.sla.resolveBreached).length,
     unassigned: careCases.filter((c) => !c.care.owner).length,
     backlogGroups,
+    /*
+      ĐỘ NGUỘI trên ĐÚNG tập ca đang mở — `population` là số ca đang mở, `sample` là số ca có ít
+      nhất HAI lượt. Chênh lệch giữa hai con số chính là thứ phải in ra (luật 63): 7/42 và 40/42
+      nói hai điều rất khác nhau về mức đáng tin, và `timingStat` trả `median = null` khi mẫu dưới
+      ngưỡng thay vì một con số nhỏ trông có vẻ dùng được.
+    */
+    roundGap: timingStat(lichSu.gapsHours, openCases.length),
     // Ngưỡng đang hiệu lực đi cùng dữ liệu: trình duyệt vá lại SLA sau mỗi thao tác bằng ĐÚNG bộ số
     // máy chủ vừa dùng, không phải bằng mặc định dựng sẵn.
     slaHours,
