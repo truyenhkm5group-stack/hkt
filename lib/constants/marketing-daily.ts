@@ -179,9 +179,17 @@ export type MarketingMetricSpec = {
   den?: string;
   /** `UP` càng cao càng tốt · `DOWN` càng thấp càng tốt · `CONTEXT` chỉ để đọc. */
   direction: "UP" | "DOWN" | "CONTEXT";
+  /**
+   * Ô này là SUY ĐOÁN, không phải phép đo (AGENTS.md mục 8.6). Màn hình KHÔNG được tô màu nó và
+   * phải in nhãn — một con số giả định tô xanh là một con số giả định trông như đã đo.
+   */
+  estimated?: boolean;
 };
 
 const SPEND_SOURCE = "ad_spends (excluded = false) gộp theo spend_date, giờ VN";
+/** Một câu, dán vào MỌI ô ước tính: căn cứ ở đâu ra và nó KHÔNG phải một phép đo. */
+const ESTIMATE_NOTE =
+  "Tỷ lệ theo THANG BẬC chung (lib/constants/delivery-rate.ts): ghi đè tay → số đo từng đơn của chính mã → lịch sử 90 ngày của mã → tỷ lệ khai ở Giả định. ĐÂY LÀ SUY ĐOÁN, không phải phép đo.";
 const ORDER_SOURCE = "orders ⋈ shipments qua ORDER_OUTCOME (lib/queries/return-rate.ts), population đơn đã xác nhận";
 
 export const MARKETING_METRICS: MarketingMetricSpec[] = [
@@ -359,6 +367,22 @@ export const MARKETING_METRICS: MarketingMetricSpec[] = [
     direction: "UP",
   },
 
+  {
+    key: "projectedDeliveredRevenue",
+    label: "DT thực ước tính",
+    group: "REVENUE",
+    unit: "VND",
+    meaning:
+      "Doanh thu ĐÃ TỚI TAY KHÁCH cộng phần doanh thu của đơn đang đi đã cân theo tỷ lệ giao thành công của từng mã. Đây là ô trả lời 'ngày này rồi sẽ ra bao nhiêu tiền', khác hẳn ô 'tới lúc này đã về bao nhiêu'.",
+    numerator: null,
+    denominator: null,
+    source: `${ORDER_SOURCE}; ${ESTIMATE_NOTE}`,
+    timing: "Đơn thuộc ngày theo mốc đang chọn; phần dự phóng đọc ở thời điểm xem.",
+    nullRule: "Chưa dựng được bản đồ tỷ lệ ⇒ `—`.",
+    direction: "UP",
+    estimated: true,
+  },
+
   /* ───── Giao hàng ───── */
   {
     key: "shippedOrders",
@@ -454,6 +478,22 @@ export const MARKETING_METRICS: MarketingMetricSpec[] = [
     num: "returnedOrders",
     den: "finishedOrders",
     direction: "DOWN",
+  },
+  {
+    key: "projectedDeliveryRate",
+    label: "TL GTC ước tính",
+    group: "DELIVERY",
+    unit: "PERCENT",
+    meaning: "Nếu số đơn ĐANG ĐI về đích theo tỷ lệ của chính mã nó, thì cả ngày này giao thành công bao nhiêu phần trăm. Khác `Tỷ lệ giao TC` ở chỗ nó KHÔNG bỏ đơn đang đi ra khỏi mẫu số.",
+    numerator: "đơn giao thành công + Σ(đơn đang đi × tỷ lệ của mã)",
+    denominator: "đơn đã kết thúc + đơn đang đi",
+    source: `${ORDER_SOURCE}; ${ESTIMATE_NOTE}`,
+    timing: "Đọc ở thời điểm xem — đơn đang đi đổi trạng thái thì con số này đổi theo.",
+    nullRule: "Chưa dựng được bản đồ tỷ lệ ⇒ `—`. Ngày không có đơn nào ⇒ `—`.",
+    num: "projectedDeliveredOrders",
+    den: "maturityBase",
+    direction: "UP",
+    estimated: true,
   },
   {
     key: "maturity",
@@ -585,6 +625,38 @@ export const MARKETING_METRICS: MarketingMetricSpec[] = [
     direction: "UP",
   },
   {
+    key: "projectedContributionProfit",
+    label: "LN góp ước tính",
+    group: "PROFIT",
+    unit: "VND",
+    meaning:
+      "DT thực ƯỚC TÍNH − giá vốn ƯỚC TÍNH − cước ĐÃ PHÁT SINH − chi quảng cáo. Ngày mới, cột 'Lợi nhuận góp sau QC' luôn âm vì tiền quảng cáo đã tiêu hết mà hàng chưa tới tay ai; ô này trả lời câu hỏi thật sự đang được hỏi — chạy tiếp hay cắt.",
+    numerator: null,
+    denominator: null,
+    source: `cộng từ các cột trên; ${ESTIMATE_NOTE}`,
+    timing: "Theo đơn + theo ngày chi.",
+    nullRule:
+      "Chi quảng cáo chưa biết, hoặc chưa dựng được bản đồ tỷ lệ ⇒ `—`. LƯU Ý HƯỚNG SAI: cước ở đây là số ĐÃ PHÁT SINH — phí hoàn của đơn đang đi chưa có trong đó, nên ô này LẠC QUAN đúng bằng phần phí hoàn chưa tới.",
+    direction: "UP",
+    estimated: true,
+  },
+  {
+    key: "projectedRoas",
+    label: "ROAS ước tính",
+    group: "PROFIT",
+    unit: "RATIO",
+    meaning: "DT thực ước tính ÷ chi quảng cáo. So được với điểm hoà vốn ngay trong ngày, không phải đợi đơn về hết.",
+    numerator: "doanh thu thực ước tính",
+    denominator: "chi quảng cáo",
+    source: `DELIVERED_REVENUE + phần dự phóng ÷ ad_spends; ${ESTIMATE_NOTE}`,
+    timing: "Trong ngày.",
+    nullRule: "Chưa chi đồng nào ⇒ `—`.",
+    num: "projectedDeliveredRevenue",
+    den: "adSpend",
+    direction: "UP",
+    estimated: true,
+  },
+  {
     key: "profitPerOrder",
     label: "LN / đơn",
     group: "PROFIT",
@@ -648,6 +720,15 @@ export const MARKETING_METRICS: MarketingMetricSpec[] = [
 
 export const MARKETING_METRIC_BY_KEY: Record<string, MarketingMetricSpec> = Object.fromEntries(MARKETING_METRICS.map((m) => [m.key, m]));
 
+/**
+ * KHOÁ CỘNG ĐƯỢC KHÔNG CÓ CỘT RIÊNG nhưng vẫn được làm tử/mẫu số của một ô tỷ lệ.
+ *
+ * Khai ở đây, một lần: bài kiểm hợp đồng cột đọc CHÍNH danh sách này. Trước đây nó được gõ lại
+ * trong thân bài kiểm, nên thêm một khoá nền là sửa hai chỗ — và quên một chỗ thì bài kiểm đỏ vì
+ * một lý do không liên quan gì tới điều nó đang bảo vệ.
+ */
+export const MARKETING_BASE_ONLY_KEYS = ["finishedOrders", "maturityBase", "projectedDeliveredOrders", "projectedCogs"] as const;
+
 /** Khoá các ô dạng TỶ LỆ — hàng tổng phải tính lại từ `num`/`den`, không được cộng rồi chia trung bình. */
 export const MARKETING_RATIO_KEYS = MARKETING_METRICS.filter((m) => m.num && m.den).map((m) => m.key);
 
@@ -668,9 +749,9 @@ export const MARKETING_VIEW_LABEL: Record<MarketingView, string> = {
 };
 
 export const MARKETING_VIEW_COLUMNS: Record<MarketingView, string[]> = {
-  basic: ["adSpend", "messages", "orders", "posRevenue", "deliveredRevenue", "deliveredOrders", "contributionProfit", "margin", "maturity"],
-  marketing: ["adSpend", "messages", "costPerMessage", "orders", "units", "unitsPerOrder", "closeRate", "costPerOrder", "posRevenue", "revenuePerOrder", "roasPos", "roasDelivered", "deliveryRate", "maturity"],
-  finance: ["adSpend", "orders", "posRevenue", "deliveredRevenue", "deliveredOrders", "cogs", "cogsRatio", "shippingCost", "operatingCost", "contributionProfit", "netProfit", "margin", "adsOnDeliveredRevenue", "maturity"],
+  basic: ["adSpend", "messages", "orders", "posRevenue", "deliveredRevenue", "projectedDeliveredRevenue", "deliveredOrders", "contributionProfit", "projectedContributionProfit", "margin", "maturity"],
+  marketing: ["adSpend", "messages", "costPerMessage", "orders", "units", "unitsPerOrder", "closeRate", "costPerOrder", "posRevenue", "revenuePerOrder", "roasPos", "roasDelivered", "projectedRoas", "deliveryRate", "projectedDeliveryRate", "maturity"],
+  finance: ["adSpend", "orders", "posRevenue", "deliveredRevenue", "projectedDeliveredRevenue", "deliveredOrders", "cogs", "cogsRatio", "shippingCost", "operatingCost", "contributionProfit", "projectedContributionProfit", "netProfit", "margin", "adsOnDeliveredRevenue", "maturity"],
   full: MARKETING_METRICS.map((m) => m.key),
 };
 

@@ -80,6 +80,25 @@ export function MarketingKpis({ data }: { data: MarketingDaily }) {
       hint: "Doanh thu thực − giá vốn − cước/phí − chi quảng cáo. Lọc được theo mọi chiều.",
       ...changeNote("contributionProfit", t, p, chin, chinPrev),
     },
+    /*
+      THẺ ƯỚC TÍNH KHÔNG CÓ MŨI TÊN VÀ KHÔNG CÓ MÀU.
+
+      Mũi tên so kỳ trước trên một con số ước tính là so hai lần đoán với nhau: mỗi kỳ có một tỷ lệ
+      chín khác nhau nên phần dự phóng chiếm tỷ trọng khác nhau, và chênh lệch đọc ra sẽ nói về độ
+      trễ giao hàng chứ không nói về kinh doanh. Tô màu thì làm nó trông như thẻ đã đo bên cạnh.
+    */
+    {
+      label: "Doanh thu thực ước tính",
+      value: vnd(t.projectedDeliveredRevenue),
+      note: "gồm phần đơn đang đi đã cân theo tỷ lệ",
+      hint: MARKETING_METRIC_BY_KEY.projectedDeliveredRevenue.meaning,
+    },
+    {
+      label: "Lợi nhuận góp ước tính",
+      value: vnd(t.projectedContributionProfit),
+      note: "suy đoán — không phải kết quả",
+      hint: MARKETING_METRIC_BY_KEY.projectedContributionProfit.nullRule,
+    },
     { label: `Margin — ${nhanTien}`, value: pct(ratioOf("margin", t as unknown as Record<string, unknown>)), ...changeNote("margin", t, p, chin, chinPrev) },
   ];
 
@@ -102,6 +121,20 @@ export function MarketingKpis({ data }: { data: MarketingDaily }) {
         columns={4}
         items={tiles.map((x) => ({ label: x.label, value: x.value, note: x.note, hint: x.hint, tone: x.tone ?? "default" }))}
       />
+
+      {/*
+        CĂN CỨ CỦA CÁC Ô ƯỚC TÍNH ĐỨNG NGAY DƯỚI CHÚNG.
+
+        Một con số ước tính không đi kèm ĐỘ PHỦ thì đọc y hệt một con số đo được. Dòng này trả lời
+        "bao nhiêu mã đang dùng số đo thật, bao nhiêu mã đang dùng tỷ lệ khai ở Giả định".
+      */}
+      {data.rateBasis ? (
+        <p className="text-[11px] text-muted-foreground">
+          Ô có nhãn <span className="text-amber-600 dark:text-amber-400">ƯT</span> dùng thang bậc tỷ lệ giao thành công: ghi đè tay → số đo từng đơn của chính mã → lịch sử 90 ngày của mã → tỷ lệ khai ở
+          Giả định ({formatPercent(data.rateBasis.fallbackDeliveryRate)}). Độ phủ trong kỳ: {data.rateBasis.coverage.projected ?? 0} mã theo số đo · {data.rateBasis.coverage.history ?? 0} mã theo lịch sử ·{" "}
+          {data.rateBasis.coverage.override ?? 0} mã ghi đè tay · {data.rateBasis.coverage.default ?? 0} mã theo tỷ lệ khai.
+        </p>
+      ) : null}
 
       {data.warnings.length ? (
         <div className="space-y-1 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">

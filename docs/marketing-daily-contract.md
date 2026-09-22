@@ -55,6 +55,41 @@ khoá chân lý thứ hai — hai bên sẽ đồng ý hôm nay và lệch nhau 
   nên **bật bất kỳ bộ lọc chiều nào ⇒ ô này là `—` (CHƯA BIẾT)**. Tuyệt đối không rơi về lợi nhuận
   góp và càng không phải 0.
 
+### Cột thứ ba: lợi nhuận góp **ƯỚC TÍNH** (22/09/2026)
+
+Hai cột trên đều đọc **đơn đã có kết cục**. Đơn của hôm nay chưa ai biết có giao được không, nên
+`deliveredRevenue` của một ngày mới gần bằng 0 trong khi tiền quảng cáo đã tiêu đủ — bảng vì thế
+**ngày nào cũng âm**, và một bảng ngày nào cũng âm thì không ai đọc nó để quyết định nữa.
+
+- **DT thực ước tính** = DT thực (đo được) + Σ(DT đơn đang đi × tỷ lệ giao TC của mã trong đơn).
+- **TL GTC ước tính** = (giao TC + Σ đơn đang đi × tỷ lệ) ÷ (đã kết thúc + đang đi).
+  Mẫu số **khác** `Tỷ lệ giao TC`: ô kia bỏ đơn đang đi ra khỏi cả tử lẫn mẫu, ô này giữ chúng lại.
+- **LN góp ước tính** = DT ước tính − giá vốn ước tính − **cước đã phát sinh** − chi QC.
+- **ROAS ước tính** = DT ước tính ÷ chi QC.
+
+Tỷ lệ lấy từ **thang bậc chung** `lib/constants/delivery-rate.ts` — cùng hàm mà Báo cáo lợi nhuận
+danh nghĩa dùng, không có bản thứ hai:
+
+| bậc | điều kiện | vì sao xếp ở đó |
+| --- | --- | --- |
+| `override` | chủ shop gõ tỷ lệ cho mã ở Giả định | một QUYẾT ĐỊNH, không phải ước lượng |
+| `projected` | hợp đồng `PROJECTED_GTC_V3` **và** mã đã có ≥ 1 đơn đi tới kết cục | chưa đơn nào kết thúc thì con số là xác suất **mượn** của mã khác (Đầm Q005, 21/09/2026: giao 0 · hoàn 0 · đang giao 62 mà ô in 37,5%) |
+| `history` | tỷ lệ hoàn 90 ngày của mã, ≥ `minFinishedOrders` đơn đã kết thúc | số đo thật, cửa sổ rộng hơn |
+| `default` | `profit.assumptions.defaultReturnRate` (hiện 40 ⇒ **GTC 60%**) | bậc cuối, không một quan sát nào của chính mã đứng sau |
+
+Ba điều khoá lại:
+
+- **Ước tính KHÔNG BAO GIỜ nhỏ hơn số đo** — nó là số đo CỘNG phần dự phóng. Nhỏ hơn nghĩa là phép
+  nhân tỷ lệ đã chạm vào cả đơn đã có kết cục.
+- **Hết đơn đang đi ⇒ ước tính bằng đúng số đo.** Không còn gì để dự báo.
+- **Không tô màu, không xếp hạng, luôn mang nhãn `ƯT`** (AGENTS.md mục 8.6). Độ phủ thang bậc
+  (bao nhiêu mã theo số đo · bao nhiêu mã theo tỷ lệ khai) in ngay dưới dải KPI.
+
+**Hướng sai đã biết:** cước là số **đã phát sinh**; phí hoàn của đơn đang đi chưa có trong đó, nên
+ô này **lạc quan** đúng bằng phần phí hoàn chưa tới. Dự phóng nó cần thêm hai giả định nữa (cước
+gửi, cước hoàn) vào một báo cáo vốn khai là "không có định nghĩa tiền nào của riêng nó" — nên nó
+được **nói ra** thay vì được vá.
+
 ## 4. Độ chín — đọc trước khi đọc lợi nhuận
 
 `maturity = (giao TC + hoàn) ÷ (giao TC + hoàn + đang đi)`. Đơn **huỷ không nằm** trong phân số.
@@ -111,6 +146,15 @@ ngã ngũ. Hai hệ quả, cả hai đều đã được xử lý:
 3. **Chi phí vận hành khi có bộ lọc** ⇒ `—` (mục 3).
 4. **Chiều không có số chi** (adset · mẩu QC · fanpage · nguồn đơn) ⇒ `—`; Facebook chỉ trả chi
    tiêu ở cấp chiến dịch/ngày, và **không** chia đều tiền chiến dịch xuống.
+5. **Chiều CÓ số chi nhưng nguồn chưa biết tới nhóm này** ⇒ `—`. Biên quan sát ở mục 1 trả lời
+   "đồng bộ đã chạy tới ngày nào"; nó **không** trả lời được "nhóm này có được khai trong bảng chi
+   tiêu không". Để nó trả lời thay là lỗi đã xảy ra trên Bóc tách theo MKTer: đơn được quy kết bằng
+   **ảnh chụp phân công fanpage** (`order_attributions`), còn tiền quảng cáo đi bằng **ánh xạ chiến
+   dịch → marketer** (`ad_spends.marketer_id`). Marketer chưa có chiến dịch nào được khai in `0 ₫`
+   chi QC — ROAS đẹp, lợi nhuận góp dương — còn toàn bộ tiền thật dồn vào dòng "Chưa quy kết", và
+   dòng đó lỗ nặng. **Cả hai con số đều sai**, và không ô nào nói rằng có gì chưa biết.
+   Hai ô trống trông giống hệt nhau nhưng đưa người đọc đi hai nơi: "đồng bộ chưa tới" ⇒ đợi;
+   "chưa khai ánh xạ" ⇒ đi khai, đợi bao lâu cũng không có số. Nên chúng là **hai câu cảnh báo**.
 
 Luật này đi tới tận CSV: ô chưa biết xuất ra chuỗi rỗng. Tệp CSV rời khỏi ERP mà không mang theo
 tooltip nào, nên một số 0 ở đó sẽ sống mãi như một phép đo thật.
@@ -207,6 +251,10 @@ và lý do được in ra.
 - **Không** chia chi phí cố định cho một chiến dịch.
 - **Không** đặt ngưỡng đạt/không đạt trong mã nguồn, kể cả trong màu của một ô.
 - **Không** để AI sinh ra một con số tài chính.
+- **Không** thay cột đo được bằng cột ước tính. Ước tính đứng **cạnh**, không tô màu, có nhãn — và
+  cột đo được vẫn là cột đối soát được với Báo cáo lợi nhuận.
+- **Không** dựng một tỷ lệ giao thành công riêng cho báo cáo này. Thang bậc ở
+  `lib/constants/delivery-rate.ts` là bản duy nhất, dùng chung với Báo cáo lợi nhuận danh nghĩa.
 
 ## 13. Hiệu năng — bốn lần đo, và hai lần chẩn đoán sai
 

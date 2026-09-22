@@ -35,6 +35,13 @@ export function MarketingBreakdown({ data }: { data: Breakdown }) {
   return (
     <div className="space-y-2">
       {!data.spendGrain ? <p className="px-4 pt-3 text-[11px] text-amber-600 dark:text-amber-400">{MARKETING_DIMENSION_NO_SPEND_HINT}</p> : null}
+      {data.spendUnknown.length ? (
+        <p className="px-4 pt-3 text-[11px] text-amber-600 dark:text-amber-400">
+          Chưa khai chiến dịch nào ở bảng chi tiêu cho {data.spendUnknown.length} nhóm ({data.spendUnknown.slice(0, 4).join(" · ")}
+          {data.spendUnknown.length > 4 ? "…" : ""}), nên Chi QC · ROAS · CPQC/đơn · LN góp của họ là <b>CHƯA BIẾT</b> (—), KHÔNG phải 0. Đơn được quy kết bằng ảnh chụp phân công FANPAGE, còn tiền quảng
+          cáo đi bằng ánh xạ CHIẾN DỊCH → marketer — khai ánh xạ ấy ở trang Quảng cáo → Ghép chiến dịch thì cột tiền mới có số.
+        </p>
+      ) : null}
       <div className="overflow-x-auto">
         <Table className="text-xs">
           <TableHeader>
@@ -46,9 +53,9 @@ export function MarketingBreakdown({ data }: { data: Breakdown }) {
               <TableHead className="text-right">CPQC/đơn</TableHead>
               <TableHead className="text-right">DT thực</TableHead>
               <TableHead className="text-right">Giao TC</TableHead>
-              <TableHead className="text-right">Tỷ lệ giao</TableHead>
+              <TableHead className="text-right">Tỷ lệ giao<div className="text-[10px] font-normal text-muted-foreground">đo · ước tính</div></TableHead>
               <TableHead className="text-right">ROAS thực</TableHead>
-              <TableHead className="text-right">LN góp</TableHead>
+              <TableHead className="text-right">LN góp<div className="text-[10px] font-normal text-muted-foreground">đo · ước tính</div></TableHead>
               <TableHead className="text-right">Độ chín</TableHead>
             </TableRow>
           </TableHeader>
@@ -71,11 +78,21 @@ export function MarketingBreakdown({ data }: { data: Breakdown }) {
                   <TableCell className="text-right tabular-nums">{(() => { const v = ratioOf("costPerOrder", rec); return v === null ? MISSING_TEXT : formatVND(v); })()}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatVND(r.deliveredRevenue)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(r.deliveredOrders)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{(() => { const v = ratioOf("deliveryRate", rec); return v === null ? MISSING_TEXT : formatPercent(v); })()}</TableCell>
+                  {/* HAI TẦNG THAY VÌ HAI CỘT: đo được ở trên, ước tính ở dưới — bảng không phình thêm một cột nào. */}
+                  <TableCell className="text-right tabular-nums">
+                    <div>{(() => { const v = ratioOf("deliveryRate", rec); return v === null ? MISSING_TEXT : formatPercent(v); })()}</div>
+                    <div className="text-[10px] text-muted-foreground">
+                      ƯT {(() => { const v = ratioOf("projectedDeliveryRate", rec); return v === null ? MISSING_TEXT : formatPercent(v); })()}
+                    </div>
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{roas === null ? MISSING_TEXT : Math.round(roas * 100) / 100}</TableCell>
                   {/* Chỉ tô màu dòng ĐÃ NGÃ NGŨ — tô một dòng còn 80% đơn đang đi là khẳng định một điều chưa xảy ra. */}
-                  <TableCell className={cn("text-right font-medium tabular-nums", mature && r.contributionProfit !== null ? (r.contributionProfit < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400") : "")}>
-                    {r.contributionProfit === null ? MISSING_TEXT : formatVND(r.contributionProfit)}
+                  <TableCell className="text-right font-medium tabular-nums">
+                    <div className={cn(mature && r.contributionProfit !== null ? (r.contributionProfit < 0 ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400") : "")}>
+                      {r.contributionProfit === null ? MISSING_TEXT : formatVND(r.contributionProfit)}
+                    </div>
+                    {/* Ước tính KHÔNG tô màu: phần lớn giá trị của nó là một tỷ lệ chưa xảy ra. */}
+                    <div className="text-[10px] font-normal text-muted-foreground">ƯT {r.projectedContributionProfit === null ? MISSING_TEXT : formatVND(r.projectedContributionProfit)}</div>
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground">{MATURITY_LABEL[r.maturity]}</TableCell>
                 </TableRow>

@@ -46,8 +46,17 @@ const SUCCESS = sql`${ORDER_OUTCOME} = 'DELIVERED'`;
  * cột `filter (where …)`. Báo cáo lợi nhuận có 11 cột như vậy ⇒ mỗi đơn bị tính kết quả 8 lần và
  * tính giá vốn 3 lần. Gói vào bảng dẫn xuất (kèm rào `OUTCOME_FENCE`) thì mỗi đơn tính đúng một lần.
  * Đây là đổi hình dạng truy vấn, không đổi công thức — khoá bằng tests/metric-shape-consistency.test.ts.
+ *
+ * ─── `deliveryRate`: TỶ LỆ GIAO THÀNH CÔNG ƯỚC TÍNH CỦA ĐƠN (0–1), chỉ khi nơi gọi truyền vào ───
+ *
+ * Nó nằm ở ĐÂY chứ không ở một bảng dẫn xuất thứ hai vì một lý do đo được: cột ƯỚC TÍNH phải đứng
+ * cạnh cột ĐO ĐƯỢC trên cùng một dòng, cùng population, cùng định nghĩa doanh thu (`revenue`) và
+ * giá vốn (`cogs`). Dựng một truy vấn riêng cho phần ước tính là mở đường cho hai cột cạnh nhau
+ * đếm hai tập đơn khác nhau — và không ô nào trên màn hình nói ra điều đó.
+ *
+ * Không truyền ⇒ cột là `NULL`, và mọi phép cộng lên nó ra `NULL`: CHƯA BIẾT, không phải 0.
  */
-function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null, extra?: SQL) {
+function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null, extra?: SQL, deliveryRate?: SQL) {
   return db
     .select({
       orderId: schema.orders.id,
@@ -71,6 +80,7 @@ function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, f
         RA nó, thay vì hai báo cáo lệch nhau mà không ai giải thích được.
       */
       duplicate: sql<boolean>`exists (select 1 from order_attributions oa where oa.order_id = ${schema.orders.id} and oa.status = 'DUPLICATE')`.as("order_duplicate"),
+      deliveryRate: sql<number | null>`${deliveryRate ?? sql`null::numeric`}`.as("projected_delivery_rate"),
     })
     .from(schema.orders)
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
@@ -94,8 +104,8 @@ function orderFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, f
  * `extra` là vị ngữ CHỈ ĐƯỢC PHÉP THU HẸP tập đơn. Truyền vào một vị ngữ mở rộng (một `or` với
  * điều kiện ngoài population) là phá population, và số sẽ không còn khớp Báo cáo lợi nhuận nữa.
  */
-export function pnlFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null, extra?: SQL) {
-  const base = orderFacts(db, basis, from, to, extra);
+export function pnlFacts(db: Awaited<ReturnType<typeof getDb>>, basis: ReportBasis, from: Date | null, to: Date | null, extra?: SQL, deliveryRate?: SQL) {
+  const base = orderFacts(db, basis, from, to, extra, deliveryRate);
   return { base, predicates: facts(base) };
 }
 

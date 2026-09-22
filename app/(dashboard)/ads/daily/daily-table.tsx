@@ -38,6 +38,14 @@ import { cn } from "@/lib/utils";
 
 function toneFor(spec: MarketingMetricSpec, value: number | null, mature: boolean): string {
   if (value === null) return "text-muted-foreground";
+  /*
+    Ô ƯỚC TÍNH KHÔNG BAO GIỜ ĐƯỢC TÔ MÀU.
+
+    Phần lớn giá trị của nó đến từ một tỷ lệ chưa xảy ra — với mã chưa có lịch sử thì đó THUẦN TUÝ
+    là con số khai ở Giả định. Tô xanh một ô như vậy là làm nó trông y hệt ô bên cạnh vốn đã đo
+    được, và khi ấy nhãn "ước tính" không còn cứu được ai (AGENTS.md mục 8.6).
+  */
+  if (spec.estimated) return "";
   // KHÔNG KẾT LUẬN KHI CHƯA NGÃ NGŨ: ngày mới luôn trông như đang lỗ vì tiền đã tiêu còn hàng chưa tới.
   if (!mature) return "";
   if (spec.direction === "CONTEXT") return "";
@@ -69,10 +77,16 @@ function HeaderCell({ spec }: { spec: MarketingMetricSpec }) {
     <TableHead className="whitespace-nowrap text-right text-[11px]">
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="cursor-help border-b border-dotted border-muted-foreground/50">{spec.label}</span>
+          <span className={cn("cursor-help border-b border-dotted border-muted-foreground/50", spec.estimated && "italic")}>
+            {spec.label}
+            {spec.estimated ? <span className="ml-0.5 align-super text-[9px] text-amber-600 dark:text-amber-400">ƯT</span> : null}
+          </span>
         </TooltipTrigger>
         <TooltipContent className="max-w-sm space-y-1 text-left text-xs">
-          <p className="font-medium">{spec.label}</p>
+          <p className="font-medium">
+            {spec.label}
+            {spec.estimated ? <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-normal text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">ước tính</span> : null}
+          </p>
           <p>{spec.meaning}</p>
           {spec.numerator ? (
             <p>
@@ -215,9 +229,9 @@ export function MarketingDailyTable({ data, view }: { data: MarketingDaily; view
                       đọc y hệt một khoản lỗ đã chốt. Dấu sao + chú thích ngay dưới bảng biến nó
                       thành "phần đã ghi nhận tới lúc này", đúng thứ nó thật sự là.
                     */
-                    const dangGhiNhan = !mature && c.group === "PROFIT" && v !== null;
+                    const dangGhiNhan = !mature && c.group === "PROFIT" && !c.estimated && v !== null;
                     return (
-                      <TableCell key={c.key} className={cn("whitespace-nowrap text-right tabular-nums", toneFor(c, v, mature))}>
+                      <TableCell key={c.key} className={cn("whitespace-nowrap text-right tabular-nums", toneFor(c, v, mature), c.estimated && "text-muted-foreground")}>
                         {renderValue(c, v)}
                         {dangGhiNhan ? <span className="text-muted-foreground" title="Đang ghi nhận — chưa phải kết quả cuối của ngày này">*</span> : null}
                       </TableCell>

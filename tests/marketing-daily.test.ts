@@ -5,7 +5,7 @@ import { getSettingJson } from "@/lib/settings";
 import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { calibrate } from "@/scripts/marketing-calibrate";
-import { MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf, type MaturityState } from "@/lib/constants/marketing-daily";
+import { MARKETING_BASE_ONLY_KEYS, MARKETING_METRICS, MARKETING_METRIC_BY_KEY, MARKETING_VIEW_COLUMNS, MATURITY, maturityState, ratioOf, type MaturityState } from "@/lib/constants/marketing-daily";
 import { MARKETING_DIAGNOSIS, MARKETING_FINDING_ACTIONS, MARKETING_FINDING_KINDS, MARKETING_FINDING_OWNER, MARKETING_FINDING_WHY, findingDedupeKey } from "@/lib/constants/marketing-diagnosis";
 import { METRIC_BINDINGS } from "@/lib/constants/metric-bindings";
 import { canTargetPerson } from "@/lib/constants/metric-registry";
@@ -14,6 +14,7 @@ import { MARKETING_TARGET_METRICS } from "@/lib/queries/marketing-targets";
 import { baselineOf, diagnose, lossStreakOf, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
 import { digestLines, runMarketingDigest, settledLines } from "@/lib/marketing/digest";
 import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter, type MarketingDailyBase } from "@/lib/queries/marketing-daily";
+import { resolveDeliveryRate } from "@/lib/constants/delivery-rate";
 import { getDailyBreakdown } from "@/lib/queries/reports";
 import type { Period } from "@/lib/search-params";
 
@@ -55,7 +56,9 @@ export function testMarketingMetricContract() {
     // Ô TỶ LỆ phải khai CẢ tử lẫn mẫu — thiếu một vế thì hàng tổng không tính lại được và sẽ
     // âm thầm rơi về trung bình phần trăm.
     if (m.numerator) assert.ok(m.num && m.den, `${m.key}: đã khai tử số thì phải khai khoá num/den để hàng tổng tính lại được`);
-    if (m.num) assert.ok(MARKETING_METRIC_BY_KEY[m.num] || ["finishedOrders", "maturityBase"].includes(m.num), `${m.key}: khoá tử số ${m.num} không tồn tại`);
+    const baseOnly = MARKETING_BASE_ONLY_KEYS as readonly string[];
+    if (m.num) assert.ok(MARKETING_METRIC_BY_KEY[m.num] || baseOnly.includes(m.num), `${m.key}: khoá tử số ${m.num} không tồn tại`);
+    if (m.den) assert.ok(MARKETING_METRIC_BY_KEY[m.den] || baseOnly.includes(m.den), `${m.key}: khoá mẫu số ${m.den} không tồn tại`);
   }
   // Mọi bộ cột chỉ được dùng khoá có thật.
   for (const [view, keys] of Object.entries(MARKETING_VIEW_COLUMNS)) {
@@ -295,6 +298,10 @@ export function testMarketingDigestLines() {
     operatingCost: null,
     contributionProfit: null,
     netProfit: null,
+    projectedDeliveredRevenue: null,
+    projectedCogs: null,
+    projectedDeliveredOrders: null,
+    projectedContributionProfit: null,
     maturity: "NO_ORDERS",
   };
   const lines = digestLines("2026-09-18", { key: "", label: "Toàn shop", totals, findings: [] }, null, "");
@@ -403,6 +410,10 @@ export function testMarketingAiContext() {
     operatingCost: null,
     contributionProfit: null,
     netProfit: null,
+    projectedDeliveredRevenue: null,
+    projectedCogs: null,
+    projectedDeliveredOrders: null,
+    projectedContributionProfit: null,
   };
   const ctx = buildAiContext({ scopeLabel: "Toàn shop", periodLabel: "30 ngày", basisLabel: "cohort", totals, baseline: null, findings: [], warnings: ["cảnh báo cũ"] });
 
@@ -656,9 +667,156 @@ export async function testMarketingBreakdownConservation() {
     assert.equal(row.units, t.units, `nhóm ${row.label}: số lượng sản phẩm`);
     assert.equal(row.adSpend, t.adSpend, `nhóm ${row.label}: chi quảng cáo`);
     assert.equal(row.contributionProfit, t.contributionProfit, `nhóm ${row.label}: LỢI NHUẬN GÓP`);
+    assert.equal(row.projectedDeliveredRevenue, t.projectedDeliveredRevenue, `nhóm ${row.label}: doanh thu ƯỚC TÍNH`);
+    assert.equal(row.projectedContributionProfit, t.projectedContributionProfit, `nhóm ${row.label}: LỢI NHUẬN GÓP ƯỚC TÍNH`);
     // Cả hai đường đều phải trả `null` cho lợi nhuận canonical: chi phí vận hành không chia được.
     assert.equal(row.netProfit, null, `nhóm ${row.label}: lợi nhuận canonical phải là CHƯA BIẾT`);
     assert.equal(t.netProfit, null);
+  }
+}
+
+/**
+ * ═══════════ THANG BẬC TỶ LỆ GIAO THÀNH CÔNG — BỐN BẬC, VÀ THỨ TỰ LÀ MỘT PHẦN CỦA LUẬT ═══════════
+ *
+ * Hàm THUẦN nên bài kiểm này không cần CSDL, và nó khoá đúng những chỗ đã sai một lần rồi: mô hình
+ * trả ra một con số dựa TOÀN BỘ vào xác suất mượn của mã khác (Đầm Q005, đo 21/09/2026), và lịch
+ * sử mẫu mỏng được dùng như lịch sử mẫu dày.
+ */
+export function testDeliveryRateLadder() {
+  const nen = { minFinishedOrders: 10, defaultReturnRate: 40 };
+
+  // Không quan sát nào ⇒ bậc cuối: tỷ lệ khai ở Giả định (40% hoàn ⇒ 60% giao).
+  const trong = resolveDeliveryRate({ ...nen, projectedDeliveryRate: null, projectedFinished: 0, historyReturnRate: null, historyFinished: 0 });
+  assert.equal(trong.source, "default");
+  assert.equal(trong.deliveryRate, 60);
+  assert.equal(trong.returnRate, 40);
+
+  // Lịch sử MỎNG (9 < 10) không đủ để thắng giả định: 9 đơn mà 3 đơn hoàn ra 33%, mất một đơn còn
+  // 22% — đó không phải một tỷ lệ, đó là tiếng ồn.
+  const mong = resolveDeliveryRate({ ...nen, projectedDeliveryRate: null, projectedFinished: 0, historyReturnRate: 33.3, historyFinished: 9 });
+  assert.equal(mong.source, "default");
+  assert.equal(mong.deliveryRate, 60);
+
+  const day = resolveDeliveryRate({ ...nen, projectedDeliveryRate: null, projectedFinished: 0, historyReturnRate: 25, historyFinished: 71 });
+  assert.equal(day.source, "history");
+  assert.equal(day.deliveryRate, 75);
+  assert.equal(day.finished, 71);
+
+  // MÔ HÌNH RA SỐ NHƯNG MÃ CHƯA CÓ KẾT CỤC NÀO ⇒ KHÔNG ĐƯỢC DÙNG — lỗi thật của Đầm Q005.
+  const muon = resolveDeliveryRate({ ...nen, projectedDeliveryRate: 37.5, projectedFinished: 0, historyReturnRate: null, historyFinished: 0 });
+  assert.equal(muon.source, "default", "mã chưa có đơn nào kết thúc thì 37,5% là xác suất mượn của mã khác");
+  assert.equal(muon.deliveryRate, 60);
+
+  const doDuoc = resolveDeliveryRate({ ...nen, projectedDeliveryRate: 68.4, projectedFinished: 105, historyReturnRate: 25, historyFinished: 71 });
+  assert.equal(doDuoc.source, "projected", "có số đo của chính mã thì số đo thắng lịch sử");
+  assert.equal(doDuoc.deliveryRate, 68.4);
+
+  // Ghi đè tay thắng TẤT CẢ, kể cả số đo.
+  const ghiDe = resolveDeliveryRate({ ...nen, overrideReturnRate: 10, projectedDeliveryRate: 68.4, projectedFinished: 105, historyReturnRate: 25, historyFinished: 71 });
+  assert.equal(ghiDe.source, "override");
+  assert.equal(ghiDe.deliveryRate, 90);
+  // `baseReturnRate` là BẬC LÙI, không phải kết luận — nó vẫn là lịch sử ngay cả khi ghi đè thắng.
+  assert.equal(ghiDe.baseReturnRate, 25);
+
+  // Biên: tỷ lệ ngoài [0,100] bị kẹp, không sinh ra một tỷ lệ âm hay lớn hơn 100%.
+  assert.equal(resolveDeliveryRate({ ...nen, overrideReturnRate: 140, projectedDeliveryRate: null, projectedFinished: 0, historyReturnRate: null, historyFinished: 0 }).deliveryRate, 0);
+  assert.equal(resolveDeliveryRate({ ...nen, overrideReturnRate: -5, projectedDeliveryRate: null, projectedFinished: 0, historyReturnRate: null, historyFinished: 0 }).deliveryRate, 100);
+}
+
+/**
+ * ═══════════ CỘT ƯỚC TÍNH ĐỨNG CẠNH CỘT ĐO ĐƯỢC, KHÔNG THAY NÓ ═══════════
+ *
+ * Ba tính chất phải đúng trên MỌI dòng, và cả ba đều là chỗ một bản vá vội có thể phá:
+ *
+ *  1. Ước tính KHÔNG BAO GIỜ nhỏ hơn số đo — nó là số đo CỘNG phần dự phóng của đơn đang đi. Nhỏ
+ *     hơn nghĩa là phép nhân tỷ lệ đã chạm vào cả những đơn đã có kết cục.
+ *  2. Ngày KHÔNG CÒN đơn nào đang đi thì ước tính BẰNG ĐÚNG số đo — không còn gì để dự báo.
+ *  3. Chi quảng cáo CHƯA BIẾT ⇒ lợi nhuận góp ước tính cũng CHƯA BIẾT. Trừ đi một số chưa biết
+ *     không ra một con số, và điều đó không đổi chỉ vì vế doanh thu là ước tính.
+ */
+export async function testMarketingProjectedProfit() {
+  clearMemo();
+  const data = await getMarketingDaily(ALL, "created");
+  const basis = data.rateBasis;
+  assert.ok(basis, "bảng phải nói ra căn cứ của các ô ước tính");
+  assert.ok(basis.fallbackDeliveryRate > 0 && basis.fallbackDeliveryRate <= 100, "tỷ lệ lùi phải là một tỷ lệ thật");
+
+  for (const row of data.rows) {
+    assert.notEqual(row.projectedDeliveredRevenue, null, `ngày ${row.day}: ước tính phải có số, không để trống`);
+    assert.ok((row.projectedDeliveredRevenue ?? 0) >= row.deliveredRevenue, `ngày ${row.day}: ước tính không được nhỏ hơn số đã đo`);
+    assert.ok((row.projectedDeliveredOrders ?? 0) >= row.deliveredOrders, `ngày ${row.day}: đơn giao ước tính không được nhỏ hơn đơn đã giao`);
+    if (row.pendingOrders === 0) {
+      assert.equal(row.projectedDeliveredRevenue, row.deliveredRevenue, `ngày ${row.day}: hết đơn đang đi thì không còn gì để dự báo`);
+      assert.equal(row.projectedContributionProfit, row.contributionProfit, `ngày ${row.day}: và lợi nhuận ước tính bằng đúng lợi nhuận đo được`);
+    }
+    if (row.adSpend === null) assert.equal(row.projectedContributionProfit, null, `ngày ${row.day}: chi quảng cáo chưa biết ⇒ lợi nhuận ước tính cũng chưa biết`);
+  }
+  assert.ok((data.totals.projectedDeliveredRevenue ?? 0) >= data.totals.deliveredRevenue, "hàng tổng cũng phải thoả");
+}
+
+/**
+ * ═══════════ CHI QUẢNG CÁO CỦA MỘT CHIỀU CHƯA ĐƯỢC KHAI LÀ CHƯA BIẾT, KHÔNG PHẢI 0 ═══════════
+ *
+ * Đơn được quy kết về marketer bằng ẢNH CHỤP PHÂN CÔNG FANPAGE (`order_attributions`); tiền quảng
+ * cáo được quy kết bằng ÁNH XẠ CHIẾN DỊCH → marketer (`ad_spends.marketer_id`, điền từ khai tay /
+ * bí danh trong tên chiến dịch / tài khoản quảng cáo). Hai đường khác nhau, và đường thứ hai có
+ * thể trống trong khi đường thứ nhất đầy.
+ *
+ * Bản trước lấy BIÊN QUAN SÁT TOÀN BẢNG để kết luận cho TỪNG chiều, nên marketer chưa có chiến
+ * dịch nào được khai in `0 ₫` chi quảng cáo — ROAS đẹp, lợi nhuận góp dương — còn toàn bộ tiền
+ * thật dồn vào dòng "Chưa quy kết". Cả hai con số đều sai, và không ô nào nói rằng có gì chưa biết.
+ *
+ * Bài kiểm bơm một dòng chi tiêu cho ĐÚNG MỘT nhóm rồi so hai vế trong cùng một bảng: khai rồi thì
+ * có số, chưa khai thì là `—`.
+ */
+export async function testMarketingSpendAttributionHonesty() {
+  clearMemo();
+  const db = await getDb();
+  /*
+    Đo trên chiều MÃ HÀNG vì nó có đủ CẢ HAI vế trong cùng một bảng: `ad_spends.product_id` được
+    điền bằng ánh xạ tên chiến dịch → mã, nên luôn có mã được khai và mã chưa. Chiều MKTer cùng một
+    luật, cùng một dòng mã nguồn (`spendDimensionConds`), nhưng fixture chỉ có một nhóm nên nó
+    không so được hai vế.
+  */
+  const truoc = await getMarketingBreakdown(ALL, "created", "product", {}, 50);
+  const coDon = truoc.rows.filter((r) => r.orders > 0);
+  assert.ok(coDon.length >= 2, "fixture phải có ít nhất hai mã có đơn để so được hai vế");
+  for (const r of coDon) {
+    assert.notEqual(r.adSpend, 0, `${r.label}: chưa khai chiến dịch nào mà in 0 ₫ là biến CHƯA BIẾT thành một phép đo`);
+  }
+  assert.equal(truoc.spendUnknown.length, coDon.filter((r) => r.adSpend === null).length, "danh sách nhóm chưa khai phải khớp đúng số ô trống");
+
+  const chuaKhai = coDon.filter((r) => r.adSpend === null);
+  assert.ok(chuaKhai.length >= 2, "cần ít nhất hai mã chưa khai chi tiêu");
+  // Chưa khai chi ⇒ không có mẫu số cho ROAS/CPA và không trừ được vào lợi nhuận: CẢ BA phải trống.
+  assert.equal(chuaKhai[0].contributionProfit, null, "chi quảng cáo chưa biết ⇒ lợi nhuận góp chưa biết");
+  assert.equal(chuaKhai[0].projectedContributionProfit, null, "…và lợi nhuận góp ước tính cũng vậy");
+
+  const khoa = chuaKhai[0].key;
+  const khac = chuaKhai[1].key;
+  const ngoai = "__mkt_spend_probe__";
+  await db.insert(schema.adSpends).values({
+    platform: "facebook",
+    spendDate: new Date("2026-03-15T00:00:00Z"),
+    campaign: "probe",
+    campaignId: ngoai,
+    externalKey: ngoai,
+    spend: 1_234_000,
+    productId: khoa,
+    excluded: false,
+  });
+  try {
+    clearMemo();
+    const sau = await getMarketingBreakdown(ALL, "created", "product", {}, 50);
+    const dong = sau.rows.find((r) => r.key === khoa);
+    assert.ok(dong, "mã vừa được khai chi tiêu phải còn trong bảng");
+    assert.equal(dong.adSpend, 1_234_000, "khai rồi thì chi quảng cáo phải đọc được bằng đúng số đã khai");
+    assert.notEqual(dong.contributionProfit, null, "có số chi rồi thì lợi nhuận góp tính được");
+    const conLai = sau.rows.find((r) => r.key === khac);
+    assert.equal(conLai?.adSpend, null, "mã chưa khai vẫn phải là CHƯA BIẾT — không được lây số 0 từ mã đã khai");
+  } finally {
+    await db.delete(schema.adSpends).where(sql`external_key = ${ngoai}`);
+    clearMemo();
   }
 }
 
@@ -814,6 +972,9 @@ export async function testMarketingDaily() {
   await testMarketingDailyTotals();
   await testMarketingAwaitingPickupIsPending();
   await testMarketingDailyFilterHonesty();
+  testDeliveryRateLadder();
+  await testMarketingProjectedProfit();
+  await testMarketingSpendAttributionHonesty();
   await testMarketingBreakdownConservation();
   await testMarketingDigestPreview();
   await testMarketingCalibrateTool();

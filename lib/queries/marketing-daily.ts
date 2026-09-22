@@ -11,6 +11,8 @@ import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/querie
 import { spendPeriod } from "@/lib/queries/ads-roas";
 import { metricScope } from "@/lib/queries/metrics";
 import { pnlFacts } from "@/lib/queries/reports";
+import { orderDeliveryRateSql, productDeliveryRates, rateCoverage, type ProductDeliveryRates } from "@/lib/queries/delivery-rate";
+import type { DeliveryRateSource } from "@/lib/constants/delivery-rate";
 import {
   MARKETING_BASIS_DEFAULT,
   MARKETING_DIMENSION_SPEND,
@@ -146,6 +148,24 @@ export type MarketingDailyBase = {
   operatingCost: number | null;
   contributionProfit: number | null;
   netProfit: number | null;
+  /*
+    ───────────── BỐN Ô ƯỚC TÍNH — ĐỨNG CẠNH Ô ĐO ĐƯỢC, KHÔNG THAY NÓ ─────────────
+
+    Đơn của hôm nay chưa ai biết có giao được không, nên `deliveredRevenue` của một ngày mới gần
+    bằng 0 trong khi tiền quảng cáo đã tiêu đủ — bảng vì thế ngày nào cũng âm, và một bảng ngày
+    nào cũng âm thì không ai đọc nó để quyết định nữa.
+
+    Bốn ô dưới đây trả lời câu khác: *"nếu số đơn đang đi về đích theo tỷ lệ của chính mã nó, thì
+    ngày này lãi hay lỗ?"* Tỷ lệ lấy từ THANG BẬC chung (`lib/constants/delivery-rate.ts`) — ghi
+    đè tay → số đo từng đơn → lịch sử của mã → tỷ lệ khai ở Giả định. Chúng LUÔN mang nhãn ước
+    tính và KHÔNG được tô màu (AGENTS.md mục 8.6).
+
+    `null` = chưa dựng được bản đồ tỷ lệ, hoặc chi quảng cáo chưa biết. Không bao giờ là 0.
+  */
+  projectedDeliveredRevenue: number | null;
+  projectedCogs: number | null;
+  projectedDeliveredOrders: number | null;
+  projectedContributionProfit: number | null;
 };
 
 export type MarketingDailyRow = MarketingDailyBase & {
@@ -187,6 +207,16 @@ export type MarketingDaily = {
    * `null` = chưa từng có dòng chi tiêu nào, hoặc chiều đang lọc không có số chi.
    */
   spendObservedThrough: string | null;
+  /**
+   * CĂN CỨ CỦA CÁC Ô ƯỚC TÍNH — bao nhiêu mã dùng số đo, bao nhiêu mã dùng tỷ lệ khai ở Giả định.
+   * Một con số ước tính không đi kèm độ phủ thì đọc y hệt một con số đo được.
+   */
+  rateBasis: {
+    /** Tỷ lệ giao thành công (%) dùng cho mã chưa có một quan sát nào — tỷ lệ khai ở Giả định. */
+    fallbackDeliveryRate: number;
+    coverage: Record<DeliveryRateSource, number>;
+    projectionError: string | null;
+  } | null;
   /** Vì sao một cột có thể trống — hiện thẳng trên màn hình, không để người đọc tự đoán. */
   warnings: string[];
 };
@@ -210,6 +240,10 @@ const EMPTY_BASE = (): MarketingDailyBase => ({
   operatingCost: null,
   contributionProfit: null,
   netProfit: null,
+  projectedDeliveredRevenue: null,
+  projectedCogs: null,
+  projectedDeliveredOrders: null,
+  projectedContributionProfit: null,
 });
 
 /* ═══════════════════ TỶ LỆ — MỘT ĐƯỜNG TÍNH, DÙNG CHO CẢ DÒNG LẪN HÀNG TỔNG ═══════════════════ */
@@ -228,6 +262,9 @@ function sumBases(rows: MarketingDailyBase[]): MarketingDailyBase {
     t.adSpend = addMaybe(t.adSpend, r.adSpend);
     t.messages = addMaybe(t.messages, r.messages);
     t.operatingCost = addMaybe(t.operatingCost, r.operatingCost);
+    t.projectedDeliveredRevenue = addMaybe(t.projectedDeliveredRevenue, r.projectedDeliveredRevenue);
+    t.projectedCogs = addMaybe(t.projectedCogs, r.projectedCogs);
+    t.projectedDeliveredOrders = addMaybe(t.projectedDeliveredOrders, r.projectedDeliveredOrders);
     t.orders += r.orders;
     t.units += r.units;
     t.posRevenue += r.posRevenue;
@@ -243,6 +280,7 @@ function sumBases(rows: MarketingDailyBase[]): MarketingDailyBase {
     t.shippingCost += r.shippingCost;
   }
   t.contributionProfit = profitOf(t);
+  t.projectedContributionProfit = projectedProfitOf(t);
   t.netProfit = t.operatingCost === null ? null : (t.contributionProfit === null ? null : t.contributionProfit - t.operatingCost);
   return t;
 }
@@ -258,6 +296,22 @@ function profitOf(b: MarketingDailyBase): number | null {
   return b.deliveredRevenue - b.cogs - b.shippingCost - b.adSpend;
 }
 
+/**
+ * LỢI NHUẬN GÓP ƯỚC TÍNH — cùng phép trừ, chỉ đổi hai vế doanh thu và giá vốn sang bản đã cân theo
+ * tỷ lệ giao thành công của từng mã.
+ *
+ * ─── CƯỚC CỐ Ý GIỮ NGUYÊN SỐ ĐO ĐƯỢC, VÀ ĐÓ LÀ MỘT LỰA CHỌN CÓ HƯỚNG ───
+ *
+ * Phí hoàn của đơn đang đi CHƯA phát sinh, nên nó chưa nằm trong `shippingCost`. Dự phóng nó cần
+ * thêm hai giả định nữa (cước gửi, cước hoàn) vào một tệp mà cả phần đầu khai là "không có một
+ * định nghĩa tiền nào của riêng nó". Nên ô này LẠC QUAN đúng bằng phần phí hoàn chưa phát sinh —
+ * và hợp đồng cột nói thẳng điều đó thay vì để người đọc tự phát hiện.
+ */
+function projectedProfitOf(b: MarketingDailyBase): number | null {
+  if (b.adSpend === null || b.projectedDeliveredRevenue === null || b.projectedCogs === null) return null;
+  return b.projectedDeliveredRevenue - b.projectedCogs - b.shippingCost - b.adSpend;
+}
+
 /* ═══════════════════ ĐỌC SỐ ═══════════════════ */
 
 const vnDayCol = (col: SQL) => sql<string>`to_char(${col} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`;
@@ -267,11 +321,22 @@ const vnDayCol = (col: SQL) => sql<string>`to_char(${col} at time zone 'Asia/Ho_
  * quyết định và báo cáo này) + các chiều lọc của riêng báo cáo này.
  */
 function marketingSpendScope(period: Period, f: MarketingFilters): SQL | undefined {
-  const conds: SQL[] = [spendPeriod(period.from, period.to) as SQL];
+  return and(spendPeriod(period.from, period.to) as SQL, ...spendDimensionConds(f));
+}
+
+/**
+ * CÁC VỊ NGỮ CHIỀU CỦA NGUỒN CHI TIÊU — TÁCH KHỎI KỲ, và đó là cả điểm của việc tách.
+ *
+ * Cùng bộ điều kiện này được hỏi HAI LẦN với hai ý nghĩa khác hẳn nhau:
+ *   · kèm kỳ  → "chiều này tiêu bao nhiêu trong kỳ đang xem";
+ *   · KHÔNG kèm kỳ → "nguồn chi tiêu có BIẾT tới chiều này không" (xem `spendByDay`).
+ */
+function spendDimensionConds(f: MarketingFilters): SQL[] {
+  const conds: SQL[] = [];
   if (f.marketerId) conds.push(f.marketerId === MARKETING_UNATTRIBUTED ? sql`${ads.marketerId} is null` : eq(ads.marketerId, f.marketerId));
   if (f.productId) conds.push(eq(ads.productId, f.productId));
   if (f.campaignId && f.campaignId !== MARKETING_UNATTRIBUTED) conds.push(sql`coalesce(${ads.campaignId}, ${ads.campaign}) = ${f.campaignId}`);
-  return and(...conds);
+  return conds;
 }
 
 /**
@@ -282,10 +347,15 @@ function marketingSpendScope(period: Period, f: MarketingFilters): SQL | undefin
  * không tồn tại con số chi tiêu nào để đọc. Chia đều tiền chiến dịch xuống các mẩu để bảng trông
  * đầy đủ là bịa — cùng luật với `lib/queries/ads-roas.ts`.
  */
-async function spendByDay(db: Db, period: Period, f: MarketingFilters): Promise<{ byDay: Map<string, { spend: number; messages: number }>; observedThrough: string | null } | null> {
+async function spendByDay(
+  db: Db,
+  period: Period,
+  f: MarketingFilters,
+): Promise<{ byDay: Map<string, { spend: number; messages: number }>; observedThrough: string | null; dimensionKnown: boolean } | null> {
   const noSpendDimension = Boolean(f.adsetId || f.adId || f.pageId || f.source);
   if (noSpendDimension) return null;
-  const [rows, frontier] = await Promise.all([
+  const dimConds = spendDimensionConds(f);
+  const [rows, frontier, dimSeen] = await Promise.all([
     db
       .select({
         day: vnDayCol(sql`${ads.spendDate}`),
@@ -313,10 +383,32 @@ async function spendByDay(db: Db, period: Period, f: MarketingFilters): Promise<
       trong vùng đã quan sát, và một câu `max` giới hạn theo kỳ sẽ dựng lại đúng cái bẫy cũ.
     */
     db.select({ day: vnDayCol(sql`max(${ads.spendDate})`) }).from(ads).where(eq(ads.excluded, false)),
+    /*
+      ═══ NGUỒN CHI TIÊU CÓ BIẾT TỚI CHIỀU NÀY KHÔNG — CÂU HỎI KHÁC HẲN BIÊN QUAN SÁT ═══
+
+      Biên quan sát trả lời "đồng bộ đã chạy tới ngày nào". Nó KHÔNG trả lời được "người này có
+      chiến dịch nào được khai trong bảng chi tiêu không", và bản trước đã để nó trả lời thay:
+      mọi ngày trong biên mà không có dòng nào đều thành `0 ₫`.
+
+      Hệ quả đo được trên màn hình Bóc tách theo MKTer: `ad_spends.marketer_id` chỉ được điền qua
+      ánh xạ CHIẾN DỊCH → marketer (khai tay / bí danh trong tên chiến dịch / tài khoản quảng cáo,
+      xem `lib/integrations/facebook/mapping.ts`), trong khi ĐƠN được quy kết bằng một đường hoàn
+      toàn khác — ảnh chụp phân công FANPAGE (`order_attributions`). Marketer nào chưa có chiến
+      dịch nào được khai thì mọi ngày của họ in `0 ₫` chi quảng cáo, ROAS đẹp, lợi nhuận góp dương;
+      còn toàn bộ tiền thật rơi vào dòng "Chưa quy kết" và dòng đó lỗ nặng. Cả hai con số đều sai,
+      và không ô nào trên bảng nói rằng có gì đó chưa biết.
+
+      Một dòng bất kỳ (KHÔNG giới hạn theo kỳ — chiến dịch của người ấy có thể chỉ chạy tháng
+      trước) là đủ để kết luận "nguồn có biết tới chiều này". Không dòng nào ⇒ CHƯA BIẾT, in `—`.
+    */
+    dimConds.length
+      ? db.select({ seen: sql<number>`count(*)` }).from(ads).where(and(eq(ads.excluded, false), ...dimConds))
+      : Promise.resolve([{ seen: 1 }]),
   ]);
   return {
     byDay: new Map(rows.map((r) => [r.day, { spend: Number(r.spend), messages: Number(r.messages) }])),
     observedThrough: frontier[0]?.day ?? null,
+    dimensionKnown: Number(dimSeen[0]?.seen ?? 0) > 0,
   };
 }
 
@@ -398,6 +490,10 @@ async function productDayRows(db: Db, period: Period, basis: MarketingBasis, f: 
       shippedOrders: cnt(shipped),
       cogs: money(sql`${facts.lineCogs}`, delivered),
       shippingCost: money(sql`${facts.orderShipping} * coalesce(${facts.shipShare}, 0)`, sql`(${delivered} or ${returned})`),
+      // Tiền của đơn CHƯA NGÃ NGŨ, chưa nhân tỷ lệ: lọc theo mã thì cả ngày chỉ có MỘT tỷ lệ, nên
+      // phép nhân làm ở TypeScript — rẻ hơn, và đọc ra được ngay tỷ lệ nào đã được dùng.
+      openRevenue: money(sql`${facts.lineRevenue}`, open),
+      openCogs: money(sql`${facts.lineCogs}`, open),
       dupOrders: sql<number>`count(distinct ${facts.orderId}) filter (where ${booked} and ${facts.duplicate})`,
       dupDeliveredRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${delivered} and ${facts.duplicate}), 0)`,
       dupCogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${delivered} and ${facts.duplicate}), 0)`,
@@ -408,12 +504,13 @@ async function productDayRows(db: Db, period: Period, basis: MarketingBasis, f: 
 }
 
 /** Đơn và tiền theo ngày ở grain ĐƠN — đi thẳng qua bảng dẫn xuất của Báo cáo lợi nhuận. */
-async function orderDayRows(db: Db, period: Period, basis: MarketingBasis, extra: SQL | undefined) {
-  const { base, predicates } = pnlFacts(db, basis, period.from, period.to, extra);
+async function orderDayRows(db: Db, period: Period, basis: MarketingBasis, extra: SQL | undefined, rate: SQL | undefined) {
+  const { base, predicates } = pnlFacts(db, basis, period.from, period.to, extra, rate);
   const live = sql`not ${base.duplicate}`;
   const cnt = (cond: SQL) => sql<number>`count(*) filter (where ${cond} and ${live})`;
   const money = (expr: SQL, cond: SQL) => sql<number>`coalesce(sum(${expr}) filter (where ${cond} and ${live}), 0)`;
   const ship = sql`${base.partnerFee} + ${base.returnFee} + ${base.feeMarketplace}`;
+  const openCond = sql`${base.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
   return db
     .select({
       day: base.day,
@@ -434,6 +531,17 @@ async function orderDayRows(db: Db, period: Period, basis: MarketingBasis, extra
       dupDeliveredRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${predicates.success} and ${base.duplicate}), 0)`,
       dupCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${predicates.success} and ${base.duplicate}), 0)`,
       dupShipping: sql<number>`coalesce(sum(${ship}) filter (where ${predicates.notCancelled} and ${base.duplicate}), 0)`,
+      /*
+        PHẦN ĐANG ĐI, ĐÃ CÂN THEO TỶ LỆ — cộng vào phần đã đo ở tầng TypeScript.
+
+        Cố ý KHÔNG `coalesce(..., 0)`: không truyền bản đồ tỷ lệ thì `base.deliveryRate` là `NULL`,
+        phép nhân ra `NULL`, và `sum` ra `NULL`. Bọc `coalesce` ở đây là biến CHƯA BIẾT thành 0 ngay
+        trong câu lệnh — đúng thứ mục 42 cấm. Nơi gọi biết mình có truyền tỷ lệ hay không nên nó mới
+        là chỗ được phép quyết định.
+      */
+      openProjectedRevenue: sql<number | null>`sum(${base.revenue} * ${base.deliveryRate}) filter (where ${openCond} and ${live})`,
+      openProjectedCogs: sql<number | null>`sum(${base.cogs} * ${base.deliveryRate}) filter (where ${openCond} and ${live})`,
+      openProjectedOrders: sql<number | null>`sum(${base.deliveryRate}) filter (where ${openCond} and ${live})`,
     })
     .from(base)
     .groupBy(base.day)
@@ -474,10 +582,20 @@ async function buildDays(
   period: Period,
   basis: MarketingBasis,
   filters: MarketingFilters,
-  opts: { skipUnits?: boolean } = {},
-): Promise<{ rows: MarketingDailyRow[]; spendObservedThrough: string | null }> {
+  opts: { skipUnits?: boolean; rates?: ProductDeliveryRates | null } = {},
+): Promise<{ rows: MarketingDailyRow[]; spendObservedThrough: string | null; spendDimensionKnown: boolean | null }> {
   const extra = dimensionFilter(filters);
   const filtered = hasDimensionFilter(filters);
+  const rates = opts.rates ?? null;
+  /*
+    TỶ LỆ ĐI VÀO SQL Ở ĐƯỜNG CẤP ĐƠN, ĐI VÀO TYPESCRIPT Ở ĐƯỜNG CẤP DÒNG HÀNG.
+
+    Không lọc mã ⇒ mỗi đơn có một hỗn hợp mã riêng, nên tỷ lệ phải tính TRONG câu lệnh, trên chính
+    bảng dẫn xuất của Báo cáo lợi nhuận (`orderDeliveryRateSql`). Có lọc mã ⇒ cả bảng chỉ có MỘT
+    tỷ lệ, và nhân một hằng số ở TypeScript vừa rẻ hơn vừa đọc ra được tỷ lệ nào đã dùng.
+  */
+  const rateSql = rates && !filters.productId ? orderDeliveryRateSql(rates) : undefined;
+  const productRate = rates && filters.productId ? (rates.byProduct.get(filters.productId) ?? rates.fallback).deliveryRate / 100 : null;
   /*
     ═══════════ HÀM NÀY KHÔNG MỞ GIAO DỊCH — NƠI GỌI MỚI MỞ ═══════════
 
@@ -500,7 +618,7 @@ async function buildDays(
     vòng lặp.
   */
   const [moneyRows, spend, units, allocated] = await Promise.all([
-    filters.productId ? productDayRows(db, period, basis, filters, extra) : orderDayRows(db, period, basis, extra),
+    filters.productId ? productDayRows(db, period, basis, filters, extra) : orderDayRows(db, period, basis, extra, rateSql),
     spendByDay(db, period, filters),
     filters.productId || opts.skipUnits ? Promise.resolve(null) : unitsByDay(db, period, basis, extra),
     // Chi phí vận hành phân bổ CHỈ có nghĩa ở mức toàn shop. Có bộ lọc ⇒ không đọc, và ô là `—`.
@@ -535,6 +653,21 @@ async function buildDays(
       deliveredRevenue: Number(r.dupDeliveredRevenue),
       profitDelta: Number(r.dupDeliveredRevenue) - Number(r.dupCogs) - Number(r.dupShipping),
     };
+    /*
+      ƯỚC TÍNH = PHẦN ĐÃ ĐO + PHẦN ĐANG ĐI ĐÃ CÂN THEO TỶ LỆ.
+
+      Cộng vào phần đã đo chứ không thay nó: đơn đã có kết cục thì không còn gì để dự báo, và nhân
+      tỷ lệ lên cả những đơn ấy là ghi đè một số đo bằng một con số đoán.
+    */
+    if (rates) {
+      const open =
+        "openRevenue" in r
+          ? { revenue: Number((r as { openRevenue: number }).openRevenue) * (productRate ?? 0), cogs: Number((r as { openCogs: number }).openCogs) * (productRate ?? 0), orders: row.pendingOrders * (productRate ?? 0) }
+          : { revenue: Number((r as { openProjectedRevenue: number | null }).openProjectedRevenue ?? 0), cogs: Number((r as { openProjectedCogs: number | null }).openProjectedCogs ?? 0), orders: Number((r as { openProjectedOrders: number | null }).openProjectedOrders ?? 0) };
+      row.projectedDeliveredRevenue = Math.round(row.deliveredRevenue + open.revenue);
+      row.projectedCogs = Math.round(row.cogs + open.cogs);
+      row.projectedDeliveredOrders = Math.round((row.deliveredOrders + open.orders) * 10) / 10;
+    }
   }
   if (units) for (const [day, qty] of units) get(day).units = qty;
   // Ngày chỉ có chi quảng cáo (không đơn nào) vẫn phải là một dòng: đó chính là ngày đốt tiền không ra gì.
@@ -560,21 +693,32 @@ async function buildDays(
     */
     if (spend) {
       const observed = spend.byDay.get(row.day);
-      const inWindow = spend.observedThrough !== null && row.day <= spend.observedThrough;
+      const inWindow = spend.dimensionKnown && spend.observedThrough !== null && row.day <= spend.observedThrough;
       if (observed || inWindow) {
         row.spendKnown = true;
         row.adSpend = (observed?.spend ?? 0) + (allocatedAds.get(row.day) ?? 0);
         row.messages = observed?.messages ?? 0;
       }
     }
+    /*
+      NGÀY KHÔNG CÓ ĐƠN NÀO ĐANG ĐI THÌ ƯỚC TÍNH BẰNG ĐÚNG SỐ ĐO — kể cả ngày chỉ có chi quảng cáo
+      mà không đơn nào. Để `null` ở đó là bỏ mất đúng những ngày đốt tiền không ra gì, tức là bỏ
+      mất lý do người ta mở bảng này.
+    */
+    if (rates && row.projectedDeliveredRevenue === null) {
+      row.projectedDeliveredRevenue = row.deliveredRevenue;
+      row.projectedCogs = row.cogs;
+      row.projectedDeliveredOrders = row.deliveredOrders;
+    }
     row.finishedOrders = row.deliveredOrders + row.returnedOrders;
     row.maturityBase = row.finishedOrders + row.pendingOrders;
     row.maturity = maturityState(row.finishedOrders, row.pendingOrders);
     if (!filtered && row.operatingCost === null) row.operatingCost = 0;
     row.contributionProfit = profitOf(row);
+    row.projectedContributionProfit = projectedProfitOf(row);
     row.netProfit = row.operatingCost === null || row.contributionProfit === null ? null : row.contributionProfit - row.operatingCost;
   }
-  return { rows, spendObservedThrough: spend?.observedThrough ?? null };
+  return { rows, spendObservedThrough: spend?.observedThrough ?? null, spendDimensionKnown: spend ? spend.dimensionKnown : null };
 }
 
 function rollupTotals(rows: MarketingDailyRow[]) {
@@ -612,11 +756,16 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
     mỗi lượt. Mỗi giao dịch giữ một kết nối suốt thời gian sống của nó, mà bể chỉ có 5 chỗ trên
     máy 2 nhân.
   */
+  /*
+    BẢN ĐỒ TỶ LỆ ĐỌC NGOÀI GIAO DỊCH — nó có bộ đệm riêng 90 giây và đọc những bảng khác hẳn, nên
+    giữ nó bên trong sẽ chiếm một kết nối của bể 5 chỗ lâu hơn cần thiết mà không được gì.
+  */
+  const rates = await productDeliveryRates(period);
   const [built, freshness, prevBuilt] = await chayKhongJit(db, (tx) =>
     Promise.all([
-      buildDays(tx, period, basis, filters),
+      buildDays(tx, period, basis, filters, { rates }),
       marketingFreshness(tx),
-      previous?.from ? buildDays(tx, { ...period, key: "custom", from: previous.from, to: previous.to }, basis, filters) : Promise.resolve(null),
+      previous?.from ? buildDays(tx, { ...period, key: "custom", from: previous.from, to: previous.to }, basis, filters, { rates }) : Promise.resolve(null),
     ]),
   );
   const rows = built.rows;
@@ -633,7 +782,7 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
     warnings.push(s.lastOkAt ? `${s.label}: lần đồng bộ thành công gần nhất cách đây ${s.minutesAgo} phút (ngưỡng ${s.staleMinutes} phút). Số của những ngày gần đây có thể còn thiếu.` : `${s.label}: chưa có lượt đồng bộ thành công nào được ghi nhận.`);
   }
   const unobserved = rows.filter((r) => !r.spendKnown && r.orders > 0);
-  if (unobserved.length && !(filters.adsetId || filters.adId || filters.pageId || filters.source)) {
+  if (unobserved.length && built.spendDimensionKnown !== false && !(filters.adsetId || filters.adId || filters.pageId || filters.source)) {
     /*
       NÓI THẲNG RA NGÀY NÀO CHƯA KẾT LUẬN ĐƯỢC.
 
@@ -644,6 +793,22 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
       `Nguồn chi quảng cáo mới đồng bộ tới ngày ${built.spendObservedThrough ?? "—"}. ${unobserved.length} ngày sau đó có đơn nhưng CHƯA BIẾT chi bao nhiêu, nên lợi nhuận của những ngày ấy để trống (—) thay vì chốt một con số. Báo cáo lợi nhuận coi phần chưa có là 0 nên sẽ cao hơn ở những ngày này.`,
     );
   }
+  /*
+    HAI CÂU GIẢI THÍCH CHO HAI Ô TRỐNG TRÔNG GIỐNG HỆT NHAU — và đưa người đọc đi hai nơi khác nhau.
+
+    "Đồng bộ chưa chạy tới ngày đó" ⇒ đợi, hoặc chạy lại job Facebook.
+    "Nguồn chi tiêu chưa biết tới chiều này" ⇒ đi KHAI ánh xạ; đợi bao lâu cũng không có số.
+
+    Gộp hai câu lại thành một câu "chưa có số chi" là để người đọc đi đợi một thứ không bao giờ tới.
+  */
+  if (built.spendDimensionKnown === false) {
+    warnings.push(
+      filters.marketerId
+        ? "Bảng chi quảng cáo KHÔNG có chiến dịch nào được khai cho marketer này, nên Chi QC · ROAS · CPQC/đơn · Lợi nhuận góp là CHƯA BIẾT (—) chứ không phải 0. Đơn được quy kết bằng ảnh chụp phân công FANPAGE, còn tiền quảng cáo đi bằng ánh xạ CHIẾN DỊCH → marketer — khai ánh xạ ấy ở trang Quảng cáo → Ghép chiến dịch thì cột tiền mới có số."
+        : "Bảng chi quảng cáo chưa có dòng nào được khai cho chiều đang lọc, nên Chi QC · ROAS · CPQC/đơn · Lợi nhuận góp là CHƯA BIẾT (—) chứ không phải 0. Ghép chiến dịch với mã hàng / marketer ở trang Quảng cáo thì cột tiền mới có số.",
+    );
+  }
+  if (rates.projectionError) warnings.push(`Mô hình dự báo giao thành công lỗi (${rates.projectionError}); các ô ước tính đang dùng tỷ lệ lịch sử của mã, hết lịch sử thì dùng tỷ lệ khai ở Giả định.`);
   const dupDays = rows.filter((r) => r.duplicates.orders > 0);
   if (dupDays.length) {
     const dupOrders = dupDays.reduce((s, r) => s + r.duplicates.orders, 0);
@@ -659,6 +824,7 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
     previousTotals: prevRows ? rollupTotals(prevRows) : null,
     freshness,
     spendObservedThrough: built.spendObservedThrough,
+    rateBasis: { fallbackDeliveryRate: rates.fallback.deliveryRate, coverage: rateCoverage(rates), projectionError: rates.projectionError },
     warnings,
   };
 }
@@ -733,8 +899,9 @@ export async function getMarketingBreakdown(
   dimension: MarketingDimension,
   filters: MarketingFilters = {},
   limit = 12,
-): Promise<{ dimension: MarketingDimension; spendGrain: boolean; rows: MarketingBreakdownRow[] }> {
+): Promise<{ dimension: MarketingDimension; spendGrain: boolean; rows: MarketingBreakdownRow[]; spendUnknown: string[] }> {
   const db = await getDb();
+  const rates = await productDeliveryRates(period);
   /*
     MỘT GIAO DỊCH CHO CẢ BẢNG BÓC TÁCH — khoá chiều, số lượng sản phẩm, và mọi lượt `buildDays`.
 
@@ -766,7 +933,7 @@ export async function getMarketingBreakdown(
     const rows: MarketingBreakdownRow[] = [];
     for (const k of keys) {
       const scoped: MarketingFilters = { ...filters, ...filterForDimension(dimension, k.key) };
-      const { rows: days } = await buildDays(tx, period, basis, scoped, { skipUnits: unitsByKey !== null });
+      const { rows: days } = await buildDays(tx, period, basis, scoped, { skipUnits: unitsByKey !== null, rates });
       const base = sumBases(days);
       if (unitsByKey) base.units = unitsByKey.get(k.key) ?? 0;
       rows.push({ ...base, key: k.key, label: k.label, maturity: maturityState(base.finishedOrders, base.pendingOrders), spendKnown: days.some((d) => d.spendKnown) });
@@ -779,7 +946,15 @@ export async function getMarketingBreakdown(
       if (pb === null) return -1;
       return pa - pb; // lỗ nặng nhất đứng đầu — thứ cần xử lý trước
     });
-    return { dimension, spendGrain: MARKETING_DIMENSION_SPEND[dimension], rows };
+    /*
+      NHÓM NÀO CÓ TIỀN MÀ NGUỒN CHI TIÊU KHÔNG BIẾT TỚI — nói ra bằng TÊN, không chỉ bằng một ô `—`.
+
+      Một ô trống thì người đọc đoán là "người này không chạy quảng cáo". Một câu kèm danh sách tên
+      và đường đi sửa thì họ đi sửa được. Chỉ đếm nhóm CÓ ĐƠN: nhóm không đơn, không tiền là nhóm
+      rỗng, không phải một chỗ hụt dữ liệu.
+    */
+    const spendUnknown = MARKETING_DIMENSION_SPEND[dimension] ? rows.filter((r) => r.adSpend === null && r.orders > 0).map((r) => r.label) : [];
+    return { dimension, spendGrain: MARKETING_DIMENSION_SPEND[dimension], rows, spendUnknown };
   });
 }
 
@@ -866,15 +1041,42 @@ async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimensi
   const rank = sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)`;
 
   if (dimension === "marketer") {
-    const rows = await db
-      .select({ key: sql<string | null>`(select ${oa.marketerId} from ${oa} where ${oa.orderId} = ${o.id} and ${oa.status} = 'ATTRIBUTED' limit 1)`, total: rank })
-      .from(o)
-      .where(scope)
-      .groupBy(sql`1`)
-      .orderBy(sql`2 desc`)
-      .limit(limit + 1);
+    /*
+      HAI NGUỒN KHOÁ, VÀ NGUỒN THỨ HAI LÀ THỨ BẢNG NÀY SINH RA ĐỂ TÌM.
+
+      Xếp hạng theo doanh số POS chỉ thấy người CÓ ĐƠN. Người tiêu 8 triệu quảng cáo mà không ra
+      đơn nào thì doanh số bằng 0, rơi khỏi `limit`, và biến mất khỏi đúng cái bảng có tên là
+      "lỗ ở đâu" — trong khi họ chính là câu trả lời. Nên khoá của bảng chi tiêu được GỘP THÊM,
+      không thay thế.
+    */
+    const [rows, spendKeys] = await Promise.all([
+      db
+        .select({ key: sql<string | null>`(select ${oa.marketerId} from ${oa} where ${oa.orderId} = ${o.id} and ${oa.status} = 'ATTRIBUTED' limit 1)`, total: rank })
+        .from(o)
+        .where(scope)
+        .groupBy(sql`1`)
+        .orderBy(sql`2 desc`)
+        .limit(limit + 1),
+      filters.marketerId
+        ? Promise.resolve([] as { key: string | null }[])
+        : db
+            .select({ key: sql<string | null>`${ads.marketerId}` })
+            .from(ads)
+            .where(and(marketingSpendScope(period, {}), sql`${ads.marketerId} is not null`))
+            .groupBy(sql`1`)
+            .orderBy(sql`sum(${ads.spend}) desc`)
+            .limit(limit),
+    ]);
     const names = await employeeNames();
-    return rows.map((r) => ({ key: r.key ?? MARKETING_UNATTRIBUTED, label: r.key ? marketerLabel(r.key, names) : MARKETING_UNATTRIBUTED_LABEL }));
+    const seen = new Set<string>();
+    const out: { key: string; label: string }[] = [];
+    for (const r of [...rows.map((r) => r.key), ...spendKeys.map((r) => r.key)]) {
+      const key = r ?? MARKETING_UNATTRIBUTED;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ key, label: r ? marketerLabel(r, names) : MARKETING_UNATTRIBUTED_LABEL });
+    }
+    return out;
   }
   if (dimension === "product") {
     const rows = await db
