@@ -217,6 +217,11 @@ export type AdsDecision = {
    * ĐƯỢC, không phải toàn shop.
    */
   /**
+   * Bao nhiêu phần tiền quảng cáo của kỳ có chi tiết tới cấp mẩu. Chỉ có nghĩa ở cấp `adset`/`ad`:
+   * phần còn lại nằm ở những ngày ERP mới chỉ có hạt CHIẾN DỊCH, và nó KHÔNG xuất hiện trong bảng.
+   */
+  spendDetail: SpendGrainCoverage;
+  /**
    * Độ tin cậy của toàn bảng — và mẫu số của nó là ĐƠN CÓ DẤU VẾT FACEBOOK, không phải mọi đơn.
    *
    * Sửa 22/09/2026: đơn chưa bao giờ đi qua quảng cáo (điện thoại · landing · khách cũ nhắn thẳng)
@@ -458,11 +463,27 @@ export type SpendRow = { spend: number; name: string; impressions: number; click
 async function spendByKey(period: Period, dimension: AdsDimension): Promise<Map<string, SpendRow>> {
   if (!ADS_DIMENSION_HAS_SPEND[dimension]) return new Map();
   const db = await getDb();
-  const key = dimension === "product" ? sql`${schema.adSpends.productId}` : sql`coalesce(${schema.adSpends.campaignId}, ${schema.adSpends.campaign})`;
+  /*
+    KHOÁ GỘP THEO CẤP — và hai cấp mới chỉ đọc được từ dòng ở HẠT MẨU.
+
+    Dòng hạt CHIẾN DỊCH có `adset_id`/`ad_id` là `NULL`, nên chúng tự rơi khỏi phép gộp ở hai cấp
+    dưới. Đó là hành vi ĐÚNG (không bịa ra một nhóm cho tiền không biết thuộc nhóm nào), nhưng nó
+    im lặng — nên `spendGrainCoverage` bên dưới đo phần rơi ra và giao diện phải in nó.
+  */
+  const key =
+    dimension === "product"
+      ? sql`${schema.adSpends.productId}`
+      : dimension === "adset"
+        ? sql`${schema.adSpends.adsetId}`
+        : dimension === "ad"
+          ? sql`${schema.adSpends.adId}`
+          : sql`coalesce(${schema.adSpends.campaignId}, ${schema.adSpends.campaign})`;
   const rows = await db
     .select({
       key: sql<string>`${key}`,
-      name: sql<string>`max(${schema.adSpends.campaign})`,
+      name: sql<string>`max(${
+        dimension === "adset" ? schema.adSpends.adsetName : dimension === "ad" ? schema.adSpends.adName : schema.adSpends.campaign
+      })`,
       spend: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)`,
       impressions: sql<number>`coalesce(sum(${schema.adSpends.impressions}), 0)`,
       clicks: sql<number>`coalesce(sum(${schema.adSpends.clicks}), 0)`,
@@ -484,6 +505,31 @@ async function spendByKey(period: Period, dimension: AdsDimension): Promise<Map<
     });
   }
   return map;
+}
+
+/**
+ * ───────────── BAO NHIÊU PHẦN CHI TIÊU CỦA KỲ CÓ CHI TIẾT TỚI CẤP MẨU ─────────────
+ *
+ * Lượt đồng bộ Facebook chỉ chạm N ngày gần nhất, nên ngày cũ mãi mãi ở hạt CHIẾN DỊCH và tiền của
+ * chúng KHÔNG xuất hiện ở hai cấp dưới. Một bảng cấp mẩu đọc thiếu tiền mà không nói gì thì tệ hơn
+ * một bảng rỗng: người đọc tin vào một ROAS tính trên nửa số tiền.
+ *
+ * Trả về `null` cho `pct` khi kỳ không có đồng chi tiêu nào — CHƯA ĐO ĐƯỢC, không phải 0% (mục 42).
+ */
+export type SpendGrainCoverage = { total: number; atAdGrain: number; pct: number | null };
+
+async function spendGrainCoverage(period: Period): Promise<SpendGrainCoverage> {
+  const db = await getDb();
+  const [row] = await db
+    .select({
+      total: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)`,
+      atAdGrain: sql<number>`coalesce(sum(${schema.adSpends.spend}) filter (where ${schema.adSpends.grain} = 'AD'), 0)`,
+    })
+    .from(schema.adSpends)
+    .where(spendPeriod(period.from, period.to));
+  const total = Number(row?.total ?? 0);
+  const atAdGrain = Number(row?.atAdGrain ?? 0);
+  return { total, atAdGrain, pct: total > 0 ? Math.round((atAdGrain / total) * 1000) / 10 : null };
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -704,10 +750,11 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
 
 async function decisionUncached(period: Period, dimension: AdsDimension): Promise<AdsDecision> {
   const spendKnown = ADS_DIMENSION_HAS_SPEND[dimension];
-  const [aggs, spend, coverage] = await Promise.all([
+  const [aggs, spend, coverage, spendDetail] = await Promise.all([
     dimension === "product" ? aggregateByProduct(period) : aggregateByOrder(period, dimension),
     spendByKey(period, dimension),
     adsAttributionCoverage(period.from, period.to),
+    spendGrainCoverage(period),
   ]);
 
   const rows: AdsDecisionRow[] = [];
@@ -721,8 +768,19 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
   /**
    * TIỀN ĐÃ TIÊU MÀ KHÔNG CÓ ĐƠN NÀO GẮN VÀO — vẫn phải hiện, đó là tiền đã mất dấu.
    *
-   * Chỉ có nghĩa ở cấp CÓ chi tiêu; ở cấp mẩu/nhóm, khoá không cùng không gian nên mọi chiến dịch
-   * sẽ trông như "không có đơn nào", một kết luận sai hoàn toàn.
+   * ─── VÌ SAO NHÁNH NÀY TỪNG BỊ KHOÁ Ở HAI CẤP DƯỚI, VÀ VÌ SAO NAY MỞ ─────
+   *
+   * Trước 22/09/2026 `ad_spends` chỉ có hạt CHIẾN DỊCH, nên khoá chi tiêu (mã chiến dịch) và khoá
+   * gộp đơn ở cấp mẩu/nhóm (mã mẩu / mã nhóm) **không cùng một không gian** — mọi chiến dịch sẽ
+   * trông như "không có đơn nào", một kết luận sai hoàn toàn.
+   *
+   * Nay chi tiêu ghi ở hạt MẨU, nên ở cấp mẩu khoá là `ad_id` và ở cấp nhóm là `adset_id` — đúng
+   * cùng không gian với `fb_ads.id` / `fb_ads.adset_id` mà đơn gộp theo. Nhánh này vì thế có nghĩa
+   * ở cả bốn cấp.
+   *
+   * Dòng chi tiêu của những NGÀY còn ở hạt chiến dịch mang `adset_id`/`ad_id` là `NULL`, nên chúng
+   * tự rơi khỏi phép gộp ở hai cấp dưới thay vì bịa ra một nhóm — và phần rơi ra được đếm riêng ở
+   * `spendDetail`, in ngay trên bảng.
    */
   let spendWithoutOrders = 0;
   const withoutOrders = new Set<string>();
@@ -818,6 +876,7 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
     rows,
     totals,
     pending,
+    spendDetail,
     confidence: {
       coveragePct: coverage.coveragePct,
       verdict: coverageVerdict(coverage.coveragePct, LOW_COVERAGE_PCT),

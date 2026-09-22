@@ -2,9 +2,9 @@
 
 > **Câu hỏi:** dựng được một bảng điều khiển CHUẨN tới từng chiến dịch / nhóm / mẩu quảng cáo không?
 >
-> **Trả lời ngắn:** tới **chiến dịch** thì được, và phải sửa mẫu số. Tới **nhóm** và **mẩu** thì
-> **chưa** — không phải vì công thức sai mà vì **hai nguồn dữ liệu chưa được lấy về**. Cả hai đều
-> lấy được, và mục 4 nói rõ cách.
+> **Trả lời ngắn (cập nhật 22/09 chiều):** ĐƯỢC, cả ba cấp. Hai nguồn dữ liệu còn thiếu đã lấy
+> được, và phép đo trên production xác nhận hạ hạt chi tiêu xuống cấp mẩu **không làm đổi một đồng
+> nào** (mục 4). Mẫu số cũng đã sửa (mục 5).
 >
 > Mọi con số dưới đây đo bằng ops `db-query` trên CSDL thật, cửa sổ **30 ngày**. Không con số nào
 > trong tài liệu này là ước tính.
@@ -112,8 +112,38 @@ Actions → Vận hành ERP trên VPS → ads-level-probe → arg: --days=30
 ```
 
 Chỉ khi nó nói **khớp từng ngày** thì mới được hạ hạt `ad_spends`, và khi ấy đường đi an toàn là
-*thay* dòng cấp chiến dịch bằng dòng cấp mẩu theo từng (tài khoản × ngày) trong một giao dịch —
-không bao giờ *thêm*.
+*thay* dòng cấp chiến dịch bằng dòng cấp mẩu theo từng (tài khoản × ngày) — không bao giờ *thêm*.
+
+### Kết quả: đã chạy 22/09/2026, và nó KHỚP TUYỆT ĐỐI
+
+```
+Dò chi tiêu hai cấp · 2026-08-24 → 2026-09-22 (30 ngày) · 7 tài khoản · CHỈ ĐỌC
+
+  Σ chi cấp CHIẾN DỊCH : 148.369.383 ₫ (1.793 dòng)
+  Σ chi cấp MẨU        : 148.369.383 ₫ (2.240 dòng)
+  Lệch tổng            : +0 ₫  (0%)
+  Số (tài khoản × ngày) lệch: 0
+```
+
+**Lệch 0 đồng, và 0 cặp (tài khoản × ngày) lệch** — không phải "tổng khớp còn từng ngày thì chưa
+kiểm", mà khớp ở đúng mức hạt sẽ được ghi. Hạ hạt không làm đổi một đồng nào của báo cáo lợi nhuận.
+
+Phần thứ hai của kết quả còn đáng giá hơn phần tiền:
+
+| | Sổ đang có | Thấy trong kỳ | **MỚI** |
+|---|---|---|---|
+| Mẩu quảng cáo | 186 | 1.254 | **1.146** |
+| Nhóm quảng cáo | 10 | 1.254 | **1.244** |
+| Chiến dịch | — | 1.096 | — |
+
+Vòng luẩn quẩn ở mục 3.1 bị phá: sổ mẩu và sổ nhóm được điền từ TIỀN thay vì từ ĐƠN.
+
+Thời gian: 99 giây cho 7 tài khoản × 30 ngày — đắt hơn cấp chiến dịch nhưng vẫn nằm trong ngưỡng
+của một job chạy mỗi giờ trên cửa sổ 3 ngày.
+
+> **Một điều ghi lại để người sau không tưởng là lỗi:** số mẩu và số nhóm bằng nhau đúng 1.254. Đó
+> là dữ liệu thật, không phải trùng biến — shop dựng gần như một nhóm cho mỗi mẩu. Hai con số đếm
+> trên hai tập khác nhau trong bộ dò.
 
 ---
 
@@ -175,16 +205,34 @@ Bốn điều phải giữ khi dựng:
 
 ## 7. Thứ tự việc
 
-| # | Việc | Chặn bởi |
+| # | Việc | Trạng thái |
 |---|---|---|
-| 1 | Chạy ops `ads-level-probe --days=30`, đọc kết luận | — (đã sẵn sàng sau khi deploy bản này) |
-| 2 | Sửa **mẫu số**: tách đơn không-từ-Facebook ra khỏi "chưa quy kết" (mục 5) | — làm được ngay, không cần dữ liệu mới |
-| 3 | Hạ hạt `ad_spends` xuống cấp mẩu, đối chiếu tổng chi trước/sau trên production | kết luận của bước 1 |
-| 4 | Lấy `post_id` cho các mẩu mới index được → nối lại đơn thiếu `ad_id` | bước 3 |
-| 5 | Dựng bảng điều khiển ba cấp theo mục 6 | bước 3 |
+| 1 | Chạy ops `ads-level-probe --days=30`, đọc kết luận | ✅ **đã chạy — KHỚP, lệch 0 ₫** |
+| 2 | Sửa **mẫu số**: tách đơn không-từ-Facebook ra khỏi "chưa quy kết" (mục 5) | ✅ đã gộp |
+| 3 | Hạ hạt `ad_spends` xuống cấp mẩu, đối chiếu tổng chi trước/sau trên production | ✅ dò xong (lệch 0đ) · đã dựng |
+| 4 | Lấy `post_id` cho các mẩu mới index được → nối lại đơn thiếu `ad_id` | ⏳ sau bước 3 |
+| 5 | Bảng điều khiển: chuỗi bán trước + chỉ số quảng cáo + %CPQC hai mẫu số | ✅ đã dựng · có đủ ở cả ba cấp sau bước 3 |
 
-**Không làm bước 3 trước bước 1.** Và không dựng bảng điều khiển ba cấp trước bước 3 — nó sẽ là một
-bảng đẹp với hai tab rỗng, đúng thứ chủ shop vừa bảo đừng làm.
+**Không làm bước 3 trước bước 1.**
+
+Bước 5 làm được sớm vì phần chuỗi thực hiện và chỉ số quảng cáo **không phụ thuộc hạt chi tiêu** —
+chúng đọc `orders` + `shipments` + ba cột đã nằm sẵn trong `ad_spends`. Hai tab *Nhóm* và *Mẩu* vẫn
+rỗng cho tới khi bước 3 xong, và giao diện nói thẳng điều đó thay vì hiện những ô `—` không giải
+thích.
+
+### Bước 3 sẽ đi thế nào, và nó được chặn ở đâu
+
+Cột `grain` (`CAMPAIGN` · `AD` · `MANUAL`) làm cho lời hứa "không cộng đúp" **kiểm chứng được** thay
+vì phải tin:
+
+- Hai hạt cùng tồn tại trong **BẢNG** là bình thường và bắt buộc — Facebook chỉ giữ insights khoảng
+  37 tháng và lượt đồng bộ chỉ chạm N ngày gần nhất, nên ngày cũ mãi mãi ở hạt `CAMPAIGN`.
+- Hai hạt cùng tồn tại trong **MỘT (tài khoản × ngày)** thì **không** — đó đúng là hình dạng của
+  phép cộng đúp. Đường ghi bảo đảm bằng XOÁ-RỒI-GHI trong một giao dịch.
+- Mỗi ngày còn có một **cổng đối chiếu tại chỗ**: Σ(mẩu) phải khớp tổng cấp chiến dịch của chính
+  ngày ấy; lệch quá dung sai thì **lùi về hạt `CAMPAIGN`** cho ngày đó và nêu cảnh báo. Không bao
+  giờ ghi một bức tranh nửa vời.
+- Dòng gõ tay (`grain = 'MANUAL'`) **không bao giờ** bị đường ghi xoá.
 
 ---
 
