@@ -7,7 +7,7 @@ import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREH
 import { spendPeriod } from "@/lib/queries/ads-roas";
 import { lineUnitCost } from "@/lib/queries/cogs";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
-import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
+import { ORDER_AD_ID, ORDER_ADSET_ID, ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import { adsAttributionCoverage, coverageVerdict } from "@/lib/queries/ads-attribution-coverage";
 import { LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
 import { adsRatio } from "@/lib/constants/profit";
@@ -246,20 +246,26 @@ export type AdsDecision = {
 /** Khoá gộp của từng cấp. `adset` lấy từ `fb_ads` vì đơn chỉ mang `ad_id`. */
 function groupKeyFor(dimension: AdsDimension) {
   if (dimension === "campaign") return sql`coalesce(${ORDER_CAMPAIGN_ID}, ${o.adId})`;
-  if (dimension === "ad") return sql`${o.adId}`;
-  return sql`(select fa.adset_id from fb_ads fa where fa.id = ${o.adId})`;
+  if (dimension === "ad") return sql`${ORDER_AD_ID}`;
+  return sql`${ORDER_ADSET_ID}`;
 }
 
 /**
  * ĐƠN THUỘC VỀ CẤP ĐANG XÉT.
  *
- * Cấp chiến dịch nhận cả đơn nối được qua BÀI VIẾT (Pancake chỉ gửi `ad_id` cho ~46% đơn nhưng gửi
- * `post_id` cho ~82%). Cấp mẩu/nhóm thì chỉ dùng `ad_id`: một bài có thể do nhiều mẩu chạy, chọn
- * bừa một mẩu là bịa quy kết.
+ * Cả ba cấp nhận đơn nối được qua BÀI VIẾT, nhưng mỗi cấp có điều kiện XÁC ĐỊNH riêng: bài viết chỉ
+ * nối ở cấp nào mà nó ứng với ĐÚNG MỘT nút của cấp ấy. Một bài do hai mẩu cùng chạy thì cấp mẩu là
+ * nhập nhằng (chọn bừa một mẩu là bịa quy kết) trong khi cấp chiến dịch vẫn xác định — nên ba mức
+ * tính riêng, không suy ra từ nhau.
+ *
+ * Trước 22/09/2026 hai cấp dưới chỉ đi bằng `ad_id`, và khi ấy đó là quyết định đúng: `fb_ads` chỉ
+ * có 185 dòng nên không có bài viết nào để nối. Nay sổ được điền từ TIỀN (1.254 mẩu) và bộ tra bài
+ * viết đi hỏi cả chúng, nên vế thứ hai mới có nguyên liệu.
  */
 function hasAdFor(dimension: AdsDimension) {
   if (dimension === "campaign") return sql`(${ORDER_CAMPAIGN_ID} is not null)`;
-  return sql`${o.adId} is not null and ${o.adId} <> ''`;
+  if (dimension === "ad") return sql`(${ORDER_AD_ID} is not null)`;
+  return sql`(${ORDER_ADSET_ID} is not null)`;
 }
 
 type Agg = {
