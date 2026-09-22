@@ -1,0 +1,47 @@
+    ->  Seq Scan on shipments  (cost=0.00..295.72 rows=2572 width=138) (actual time=0.033..2.351 rows=2572 loops=1)
+    ->  Hash  (cost=441.64..441.64 rows=1885 width=33) (actual time=4195.424..4195.425 rows=1792 loops=1)
+    ->  Seq Scan on orders  (cost=0.00..441.64 rows=1885 width=33) (actual time=4192.732..4194.858 rows=1792 loops=1)
+    SubPlan 3
+    Planning Time: 11.661 ms
+    Execution Time: 4665.404 ms
+  8866ms · select count(*) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = "o…
+    Aggregate  (cost=2398142.46..2398142.47 rows=1 width=64) (actual time=7982.410..7982.446 rows=1 loops=1)
+    ->  Hash Right Join  (cost=468.30..770.77 rows=1449 width=145) (actual time=7949.022..7958.374 rows=1401 loops=1)
+    Join Filter: ((NOT (SubPlan 156)) OR (shipments.id = (SubPlan 157)))
+    ->  Seq Scan on shipments  (cost=0.00..295.72 rows=2572 width=117) (actual time=0.025..1.851 rows=2572 loops=1)
+    ->  Hash  (cost=450.18..450.18 rows=1449 width=33) (actual time=7948.889..7948.890 rows=1401 loops=1)
+    ->  Seq Scan on orders  (cost=0.02..450.18 rows=1449 width=33) (actual time=7946.141..7948.370 rows=1401 loops=1)
+    SubPlan 156
+    ->  Index Scan using shipments_order_idx on shipments sh0  (cost=0.28..8.30 rows=1 width=0) (actual time=0.003..0.003 rows=0 loops=1170)
+    SubPlan 157
+    ->  Limit  (cost=8.31..8.31 rows=1 width=50) (actual time=0.033..0.033 rows=1 loops=85)
+    ->  Sort  (cost=8.31..8.31 rows=1 width=50) (actual time=0.021..0.021 rows=1 loops=85)
+    ->  Index Scan using shipments_order_idx on shipments sh  (cost=0.28..8.30 rows=1 width=50) (actual time=0.004..0.006 rows=2 loops=85)
+    SubPlan 1
+    ->  Index Scan using canonical_outcome_order_idx on canonical_order_outcome m  (cost=0.28..8.31 rows=1 width=10) (actual time=0.003..0.003 rows=1 loops=1401)
+    Planning Time: 15.085 ms
+    Execution Time: 8051.037 ms
+── TÁM CÂU LỆNH SQL CHẬM NHẤT (nguyên văn, cắt 600 ký tự) ──
+  24921ms
+  select coalesce("product_variants"."product_id", "order_items"."product_id", ''), max(coalesce("products"."name", "order_items"."product_name")), max(coalesce("products"."custom_id", '')), max(coalesce("products"."image", "order_items"."image")), count(distinct "orders"."id") filter (where "orders"."stage" not in ('CANCELLED','DELETED')), coalesce(sum("order_items"."quantity") filter (where "orders"."stage" not in ('CANCELLED','DELETED')), 0), coalesce(sum("order_items"."line_total") filter (where "orders"."stage" not in ('CANCELLED','DELETED')), 0), coalesce(sum("order_items"."quantity" * coa
+  24456ms
+  explain (analyze, buffers, timing) select coalesce("product_variants"."product_id", "order_items"."product_id", ''), max(coalesce("products"."name", "order_items"."product_name")), max(coalesce("products"."custom_id", '')), max(coalesce("products"."image", "order_items"."image")), count(distinct "orders"."id") filter (where "orders"."stage" not in ('CANCELLED','DELETED')), coalesce(sum("order_items"."quantity") filter (where "orders"."stage" not in ('CANCELLED','DELETED')), 0), coalesce(sum("order_items"."line_total") filter (where "orders"."stage" not in ('CANCELLED','DELETED')), 0), coalesce
+  9227ms
+  with don as ( select "orders"."id" as order_id, coalesce("orders"."total_price_after_discount", 0) as order_total, (select case when "shipments"."vtp_status" = $1 then $2 when "shipments"."vtp_status" = $3 then $4 when "shipments"."vtp_status" = $5 then $6 when "shipments"."vtp_status" = $7 then $8 when "shipments"."vtp_status" = $9 then $10 when "shipments"."vtp_status" = $11 then $12 when "shipments"."vtp_status" = $13 then $14 when "shipments"."vtp_status" = $15 then $16 when "shipments"."vtp_status" = $17 then $18 when "shipments"."vtp_status" = $19 then $20 when "shipments"."vtp_status" =
+  8866ms
+  select count(*) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = "orders"."id" and coalesce(m.shipment_id, '') = coalesce("shipments"."id", '') and m.logic_version = $1 -- DÒNG CŨ CŨNG PHẢI RƠI VỀ TÍNH TRỰC TIẾP, không chỉ dòng THIẾU. -- -- Bẫy tôi đã dẫm vào: nhánh dự phòng ban đầu chỉ bắt "chưa có dòng". Nhưng một dòng ĐÃ CÓ mà -- CŨ còn nguy hiểm hơn — nó im lặng phục vụ kết luận của ngày hôm qua. Trong bộ kiểm thử, -- điều đó làm phân bổ chi phí xuống mã ra 0 thay vì 700.000đ: không lỗi, không cảnh báo, chỉ -- là con số sai. -- -- Hai phép so mốc 
+  8828ms
+  select count(*) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = "orders"."id" and coalesce(m.shipment_id, '') = coalesce("shipments"."id", '') and m.logic_version = $1 -- DÒNG CŨ CŨNG PHẢI RƠI VỀ TÍNH TRỰC TIẾP, không chỉ dòng THIẾU. -- -- Bẫy tôi đã dẫm vào: nhánh dự phòng ban đầu chỉ bắt "chưa có dòng". Nhưng một dòng ĐÃ CÓ mà -- CŨ còn nguy hiểm hơn — nó im lặng phục vụ kết luận của ngày hôm qua. Trong bộ kiểm thử, -- điều đó làm phân bổ chi phí xuống mã ra 0 thay vì 700.000đ: không lỗi, không cảnh báo, chỉ -- là con số sai. -- -- Hai phép so mốc 
+  8693ms
+  select count(*) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = "orders"."id" and coalesce(m.shipment_id, '') = coalesce("shipments"."id", '') and m.logic_version = $1 -- DÒNG CŨ CŨNG PHẢI RƠI VỀ TÍNH TRỰC TIẾP, không chỉ dòng THIẾU. -- -- Bẫy tôi đã dẫm vào: nhánh dự phòng ban đầu chỉ bắt "chưa có dòng". Nhưng một dòng ĐÃ CÓ mà -- CŨ còn nguy hiểm hơn — nó im lặng phục vụ kết luận của ngày hôm qua. Trong bộ kiểm thử, -- điều đó làm phân bổ chi phí xuống mã ra 0 thay vì 700.000đ: không lỗi, không cảnh báo, chỉ -- là con số sai. -- -- Hai phép so mốc 
+  8092ms
+  select count(*) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = "orders"."id" and coalesce(m.shipment_id, '') = coalesce("shipments"."id", '') and m.logic_version = $1 -- DÒNG CŨ CŨNG PHẢI RƠI VỀ TÍNH TRỰC TIẾP, không chỉ dòng THIẾU. -- -- Bẫy tôi đã dẫm vào: nhánh dự phòng ban đầu chỉ bắt "chưa có dòng". Nhưng một dòng ĐÃ CÓ mà -- CŨ còn nguy hiểm hơn — nó im lặng phục vụ kết luận của ngày hôm qua. Trong bộ kiểm thử, -- điều đó làm phân bổ chi phí xuống mã ra 0 thay vì 700.000đ: không lỗi, không cảnh báo, chỉ -- là con số sai. -- -- Hai phép so mốc 
+  8086ms
+  select count(*) filter (where coalesce( (select m.outcome from canonical_order_outcome m where m.order_id = "orders"."id" and coalesce(m.shipment_id, '') = coalesce("shipments"."id", '') and m.logic_version = $1 -- DÒNG CŨ CŨNG PHẢI RƠI VỀ TÍNH TRỰC TIẾP, không chỉ dòng THIẾU. -- -- Bẫy tôi đã dẫm vào: nhánh dự phòng ban đầu chỉ bắt "chưa có dòng". Nhưng một dòng ĐÃ CÓ mà -- CŨ còn nguy hiểm hơn — nó im lặng phục vụ kết luận của ngày hôm qua. Trong bộ kiểm thử, -- điều đó làm phân bổ chi phí xuống mã ra 0 thay vì 700.000đ: không lỗi, không cảnh báo, chỉ -- là con số sai. -- -- Hai phép so mốc 
+===============================================
+✅ Successfully executed commands to all hosts.
+===============================================
+##[end-action id=__appleboy_ssh-action.entrypoint;outcome=success;conclusion=success;duration_ms=281581]
+Cleaning up orphan processes
+
+[exited with code 0]
