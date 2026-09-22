@@ -121,17 +121,34 @@ export function orderDeliveryRateSql(rates: ProductDeliveryRates): SQL<number> {
   const fb = sql`${rates.fallback.deliveryRate / 100}::numeric`;
   const entries = [...rates.byProduct.entries()];
   if (!entries.length) return sql<number>`${fb}`;
-  const values = sql.join(
-    entries.map(([id, r]) => sql`(${id}::text, ${r.deliveryRate / 100}::numeric)`),
-    sql`, `,
+  /*
+    ═══════════ `CASE` CHỨ KHÔNG PHẢI MỘT PHÉP NỐI `VALUES` — ĐO ĐƯỢC 22/09/2026 ═══════════
+
+    Bản đầu tra tỷ lệ bằng `left join (values …)`. Nó đọc đẹp, và nó SAI VỀ GIÁ: biểu thức này nằm
+    trong danh sách chọn của một bảng dẫn xuất, nên nó chạy MỘT LẦN CHO MỖI ĐƠN — và mỗi lần ấy
+    Postgres phải dựng lại quan hệ `values` rồi băm nó để nối. Với ~1.150 đơn của một kỳ 30 ngày,
+    nhân tiếp 13 lượt `buildDays` của bảng bóc tách, đó là ~15.000 lần dựng một bảng bảy dòng.
+
+        bóc tách theo MKTer      74ms → 248ms   (perf-probe production, trạng thái ấm)
+        bóc tách theo chiến dịch 1.195ms → 1.505ms
+
+    Bản đồ tỷ lệ chỉ có đúng NGẦN ẤY MÃ HÀNG mà shop đang bán (đo cùng ngày: 7 mã). Bảy nhánh
+    `CASE` là một phép so chuỗi tuyến tính trên một giá trị đã có sẵn trong dòng — không quan hệ
+    nào để dựng, không phép nối nào để lập kế hoạch.
+
+    Ngưỡng an toàn: danh sách mã ở đây là số mã CÓ LỊCH SỬ BÁN
+    hoặc có cohort dự báo. Nếu shop lên tới hàng nghìn mã thì `CASE` mới đáng ngờ — và lúc đó phải
+    ĐO LẠI chứ không đoán, đúng bài học ở `getMarketingBreakdown`.
+  */
+  const whens = sql.join(
+    entries.map(([id, r]) => sql`when ${id} then ${r.deliveryRate / 100}::numeric`),
+    sql` `,
   );
   return sql<number>`coalesce((
-    select sum(coalesce(mdr_i.line_total, 0) * coalesce(mdr_r.rate, ${fb}))
+    select sum(coalesce(mdr_i.line_total, 0) * (case coalesce(mdr_pv.product_id, mdr_i.product_id) ${whens} else ${fb} end))
            / nullif(sum(coalesce(mdr_i.line_total, 0)), 0)
       from order_items mdr_i
       left join product_variants mdr_pv on mdr_pv.id = mdr_i.variant_id
-      left join (values ${values}) as mdr_r(product_id, rate)
-             on mdr_r.product_id = coalesce(mdr_pv.product_id, mdr_i.product_id)
      where mdr_i.order_id = ${schema.orders.id}
   ), ${fb})`;
 }

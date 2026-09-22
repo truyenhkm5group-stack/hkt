@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { ORDER_SOURCE, ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
 import { ATTRIBUTION_FIELDS, LOW_COVERAGE_PCT, type AttributionField } from "@/lib/constants/sales-funnel";
@@ -63,7 +63,22 @@ function periodWhere(period: Period) {
 export async function getSalesFunnel(period: Period): Promise<SalesFunnel> {
   const db = await getDb();
   const where = periodWhere(period);
-  const [row] = await db
+  /*
+    ═══════════ TẮT JIT — CÙNG CHẨN ĐOÁN ĐÃ ĐO Ở `marketing-daily`, ĐO LẠI 22/09/2026 ═══════════
+
+    `EXPLAIN` trên production cho đúng dấu vân tay ấy: `Seq Scan on orders` chạm **1.997 dòng** mà
+    `actual time=27070.4..27073.9` — nghĩa là gần như TOÀN BỘ thời gian nằm ở KHỞI ĐỘNG nút đầu tiên, chứ
+    không ở việc đọc dòng. Đó là thời gian PostgreSQL gán cho phần BIÊN DỊCH JIT.
+
+    JIT bật vì chi phí ƯỚC LƯỢNG của kế hoạch lên tới hàng triệu (`cost=…2.812.184`) — con số ấy đến từ
+    các truy vấn con tương quan `ORDER_OUTCOME_FAST` và `PRIMARY_ATTEMPT` được nội tuyến lại vào
+    TỪNG cột `filter (where …)`, trong khi thực tế chỉ chạm vài nghìn dòng.
+
+    `lib/queries/marketing-daily.ts` đã trả giá và đã vá đúng chỗ này (4.048ms → 276ms). Hàm này
+    mang CÙNG hình dạng truy vấn nhưng chưa được vá, nên nó vẫn là một trong ba câu chậm nhất của
+    cả hệ thống. Cùng truy vấn, cùng kết quả — chỉ thêm một `set local jit = off`.
+  */
+  const [row] = await chayKhongJit(db, (tx) => tx
     .select({
       created: sql<number>`count(distinct ${o.id})`,
       confirmed: sql<number>`count(distinct ${o.id}) filter (where ${o.stage} not in ('NEW','WAITING'))`,
@@ -78,7 +93,7 @@ export async function getSalesFunnel(period: Period): Promise<SalesFunnel> {
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
     .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`)
     .leftJoin(schema.customers, sql`${schema.customers.id} = ${o.customerId}`)
-    .where(where);
+    .where(where));
 
   const created = Number(row?.created ?? 0);
   const confirmed = Number(row?.confirmed ?? 0);
@@ -180,7 +195,22 @@ export type FunnelBySource = {
  */
 export async function getFunnelBySource(period: Period): Promise<FunnelBySource[]> {
   const db = await getDb();
-  const rows = await db
+  /*
+    ═══════════ TẮT JIT — CÙNG CHẨN ĐOÁN ĐÃ ĐO Ở `marketing-daily`, ĐO LẠI 22/09/2026 ═══════════
+
+    `EXPLAIN` trên production cho đúng dấu vân tay ấy: `Seq Scan on orders` chạm **1.997 dòng** mà
+    `actual time=28484.8..28487.7` — nghĩa là gần như TOÀN BỘ thời gian nằm ở KHỞI ĐỘNG nút đầu tiên, chứ
+    không ở việc đọc dòng. Đó là thời gian PostgreSQL gán cho phần BIÊN DỊCH JIT.
+
+    JIT bật vì chi phí ƯỚC LƯỢNG của kế hoạch lên tới hàng triệu (`cost=…48666..1.911.906`) — con số ấy đến từ
+    các truy vấn con tương quan `ORDER_OUTCOME_FAST` và `PRIMARY_ATTEMPT` được nội tuyến lại vào
+    TỪNG cột `filter (where …)`, trong khi thực tế chỉ chạm vài nghìn dòng.
+
+    `lib/queries/marketing-daily.ts` đã trả giá và đã vá đúng chỗ này (4.048ms → 276ms). Hàm này
+    mang CÙNG hình dạng truy vấn nhưng chưa được vá, nên nó vẫn là một trong ba câu chậm nhất của
+    cả hệ thống. Cùng truy vấn, cùng kết quả — chỉ thêm một `set local jit = off`.
+  */
+  const rows = await chayKhongJit(db, (tx) => tx
     .select({
       source: sql<OrderSourceKey>`${ORDER_SOURCE}`,
       created: sql<number>`count(distinct ${o.id})`,
@@ -194,7 +224,7 @@ export async function getFunnelBySource(period: Period): Promise<FunnelBySource[
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
     .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`)
     .where(periodWhere(period))
-    .groupBy(sql`${ORDER_SOURCE}`);
+    .groupBy(sql`${ORDER_SOURCE}`));
 
   return rows
     .map((r) => {
