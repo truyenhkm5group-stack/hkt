@@ -2719,6 +2719,18 @@ export const adsDecisionLedger = pgTable(
     action: text("action").notNull(),
     /** `ACTIONABLE` · `NO_CHANGE` · `NO_OPINION` — dẫn xuất từ `action`, lưu để lọc rẻ. */
     actionClass: text("action_class").notNull(),
+    /**
+     * `ACTUAL` = kết luận đứng trên SỐ ĐO · `PROJECTED` = đứng trên lợi nhuận TẠM TÍNH.
+     *
+     * Phải nằm trong sổ chứ không tính lại lúc đọc: bàn tay ghi ngân sách gác theo trường này, và
+     * số liệu của một ngày đã qua sẽ chín thêm theo thời gian — tính lại hôm nay sẽ cho ra căn cứ
+     * KHÁC với căn cứ mà kết luận hôm ấy thật sự đứng trên. Dòng sổ là một lời khai, không phải
+     * một khung nhìn (AGENTS.md mục 21).
+     *
+     * Mặc định `ACTUAL` cho các dòng ghi TRƯỚC khi có cột này — đó đúng là cách chúng được sinh ra:
+     * luật cũ chỉ kết luận khi đã đủ độ chín. Không backfill gì khác (mục 8.8).
+     */
+    basis: text("basis").notNull().default("ACTUAL"),
     reason: text("reason").notNull().default(""),
 
     /** Kỳ dữ liệu sinh ra kết luận — đọc lại được mà không phải suy từ `decision_day`. */
@@ -2756,6 +2768,8 @@ export const adsDecisionLedger = pgTable(
     index("ads_decision_ledger_entity_idx").on(t.dimension, t.entityKey, t.decisionDay),
     index("ads_decision_ledger_day_idx").on(t.decisionDay, t.actionClass),
     check("ads_decision_ledger_class_check", sql`${t.actionClass} IN ('ACTIONABLE', 'NO_CHANGE', 'NO_OPINION')`),
+    // Danh sách ĐÓNG: một chuỗi lạ ở đây làm cổng ghi ngân sách so sánh nhầm và mở ra cho cái nó định chặn.
+    check("ads_decision_ledger_basis_check", sql`${t.basis} IN ('ACTUAL', 'PROJECTED')`),
     // Ngày phải là ngày. Một chuỗi lạ ở đây làm mọi phép so chuỗi theo thứ tự nói sai mà không gì đỏ.
     check("ads_decision_ledger_day_format_check", sql`${t.decisionDay} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`),
   ],

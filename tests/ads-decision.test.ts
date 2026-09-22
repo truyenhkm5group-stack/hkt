@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction } from "@/lib/constants/ads-decision";
+import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis } from "@/lib/constants/ads-decision";
 import { DECISION_METRIC_HINT, buildDecisionRow, decideAction, getAdsDecision } from "@/lib/queries/ads-decision";
 import type { Period } from "@/lib/search-params";
 
@@ -33,22 +33,62 @@ export async function testAdsDecision(db: Db) {
     spendKnown: true,
     spend: r.minSpend * 10,
     headroom: 2,
+    projectedHeadroom: 2,
     successRate: 90,
     maturity: 1,
     finishedOrders: r.minFinishedOrders * 5,
+    bookedOrders: r.minFinishedOrders * 5,
+    appliedDeliveryRate: 90,
     bookedRoas: 4,
     breakEvenBookedRoas: 2,
     deliveredOrders: 40,
   };
 
-  const truth: { name: string; input: Partial<typeof healthy>; expect: AdsAction }[] = [
+  const truth: { name: string; input: Partial<typeof healthy>; expect: AdsAction; basis?: DecisionBasis }[] = [
     // ── Cổng từ chối kết luận: phải chặn TRƯỚC mọi phán xét về tiền ──
     { name: "không có số chi (cấp mẩu/nhóm)", input: { spendKnown: false }, expect: "NO_SPEND_DATA" },
     { name: "chi dưới ngưỡng tối thiểu", input: { spend: r.minSpend - 1 }, expect: "INSUFFICIENT_DATA" },
-    { name: "quá ít đơn đã kết thúc", input: { finishedOrders: r.minFinishedOrders - 1 }, expect: "INSUFFICIENT_DATA" },
-    { name: "phần lớn đơn còn đang đi", input: { maturity: r.minMaturity - 0.01 }, expect: "INSUFFICIENT_DATA" },
     // Chưa đủ dữ liệu phải THẮNG cả khi con số tiền trông rất tệ — không được vội kết luận CẮT.
     { name: "lỗ nặng nhưng chưa đủ dữ liệu", input: { spend: r.minSpend - 1, headroom: 0.1 }, expect: "INSUFFICIENT_DATA" },
+
+    /*
+      ═══════════ ĐỘ CHÍN THẤP ĐỔI CĂN CỨ, KHÔNG CÒN CHẶN KẾT LUẬN ═══════════
+
+      Hai dòng đầu của khối này TRƯỚC 22/09/2026 đều trả `INSUFFICIENT_DATA`. Với mô hình BÁN
+      TRƯỚC đó là câu trả lời cho gần như MỌI dòng — đo trên production: 425/425 dòng cấp chiến
+      dịch, độ chín trung bình 0,02. Nay chúng quyết trên LỢI NHUẬN TẠM TÍNH và mang nhãn
+      `PROJECTED`.
+    */
+    { name: "chưa đủ đơn kết thúc ⇒ quyết trên tạm tính", input: { finishedOrders: r.minFinishedOrders - 1 }, expect: "SCALE", basis: "PROJECTED" },
+    { name: "phần lớn đơn còn đang đi ⇒ quyết trên tạm tính", input: { maturity: r.minMaturity - 0.01 }, expect: "SCALE", basis: "PROJECTED" },
+    // Tạm tính vẫn CẮT được: đây là vế phải của cùng một thang, không phải một chế độ "chỉ khen".
+    {
+      name: "tạm tính dưới mép cắt",
+      input: { maturity: 0, finishedOrders: 0, projectedHeadroom: r.cutBelow - 0.01 },
+      expect: "CUT",
+      basis: "PROJECTED",
+    },
+    /*
+      YÊU CẦU VỀ MẪU KHÔNG ĐƯỢC NỚI RA. Căn cứ tạm tính đếm đơn ĐÃ LÊN thay vì đã kết thúc, nhưng
+      vẫn đòi đúng ngần ấy đơn — bỏ vế này thì một dòng ba đơn cũng có ý kiến.
+    */
+    {
+      name: "chưa đủ đơn ĐÃ LÊN thì vẫn từ chối, kể cả ở căn cứ tạm tính",
+      input: { maturity: 0, finishedOrders: 0, bookedOrders: r.minFinishedOrders - 1 },
+      expect: "INSUFFICIENT_DATA",
+      basis: "PROJECTED",
+    },
+    /*
+      SỐ ĐO THẮNG SỐ ƯỚC TÍNH. Dòng đã đủ chín thì `projectedHeadroom` không được nhìn tới — nếu
+      không, một giả định lạc quan sẽ ghi đè lên kết quả đã đo được.
+    */
+    { name: "đủ chín thì bỏ qua số tạm tính", input: { headroom: 2, projectedHeadroom: 0.1 }, expect: "SCALE", basis: "ACTUAL" },
+    {
+      name: "đủ chín và lỗ thật thì cắt, dù tạm tính đẹp",
+      input: { headroom: 0.3, projectedHeadroom: 5 },
+      expect: "CUT",
+      basis: "ACTUAL",
+    },
 
     // ── Thang lợi nhuận, đo bằng khoảng cách tới điểm hoà vốn ──
     { name: "trên hoà vốn nhiều", input: { headroom: r.scaleAbove }, expect: "SCALE" },
@@ -71,11 +111,43 @@ export async function testAdsDecision(db: Db) {
     },
     // Đang lãi dày thì dù GTC thấp vẫn là SCALE — nhưng cờ `lowDelivery` phải bật để không ai bỏ sót.
     { name: "GTC thấp nhưng vẫn lãi dày", input: { successRate: r.lowSuccessRate - 1, headroom: 3 }, expect: "SCALE" },
+    /*
+      "SỬA KHÂU GIAO" LÀ MỘT KHẲNG ĐỊNH VỀ THỰC TẾ, NÊN NÓ CHỈ ĐỨNG TRÊN SỐ ĐO.
+
+      Ở căn cứ tạm tính, tỷ lệ giao thành công tính trên vài đơn đã ngã ngũ là tiếng ồn — và tệ hơn,
+      phần đang treo đã được cân bằng CHÍNH tỷ lệ ước tính, nên kết luận "khâu giao đang kém" sẽ là
+      đọc ngược lại giả định của chính mình.
+    */
+    {
+      name: "căn cứ tạm tính không được kết luận sửa khâu giao",
+      input: {
+        maturity: 0,
+        finishedOrders: 0,
+        successRate: r.lowSuccessRate - 1,
+        projectedHeadroom: 0.9,
+        bookedRoas: 4,
+        breakEvenBookedRoas: 2,
+      },
+      expect: "WATCH",
+      basis: "PROJECTED",
+    },
   ];
 
   for (const c of truth) {
     const got = decideAction({ ...healthy, ...c.input });
     assert.equal(got.action, c.expect, `quy tắc quyết định — ${c.name}: mong ${c.expect}, nhận ${got.action} (${got.reason})`);
+    if (c.basis) assert.equal(got.basis, c.basis, `${c.name}: căn cứ phải là ${c.basis}, nhận ${got.basis}`);
+    /*
+      CĂN CỨ PHẢI ĐỌC ĐƯỢC TRÊN CHÍNH LỜI GIẢI THÍCH, không chỉ nằm trong một trường dữ liệu. Chủ
+      shop đọc câu chữ, và một câu "đang lãi 158%" không nói ra rằng 158% ấy là giả định thì nó là
+      một lời khẳng định sai (AGENTS.md mục 8.6).
+    */
+    if (got.basis === "PROJECTED" && got.action !== "INSUFFICIENT_DATA" && got.action !== "NO_SPEND_DATA") {
+      assert.ok(got.reason.startsWith("[TẠM TÍNH]"), `${c.name}: lời giải thích ở căn cứ ước tính phải tự khai là ước tính — "${got.reason}"`);
+    }
+    if (got.basis === "ACTUAL") {
+      assert.ok(!got.reason.includes("TẠM TÍNH"), `${c.name}: dòng đã đủ chín không được gắn nhãn ước tính`);
+    }
     // MỌI khuyến nghị phải giải thích được, và lời giải thích phải có SỐ chứ không chỉ có chữ.
     assert.ok(got.reason.length > 20, `${c.name}: khuyến nghị phải có lời giải thích`);
     if (c.expect !== "NO_SPEND_DATA") {
@@ -112,6 +184,9 @@ export async function testAdsDecision(db: Db) {
       cash: 7_000_000,
       cogs: 4_000_000,
       shipping: 500_000,
+      openProjectedRevenue: 0,
+      openProjectedCogs: 0,
+      openProjectedOrders: 0,
     },
     "campaign",
     1_000_000,
@@ -147,9 +222,79 @@ export async function testAdsDecision(db: Db) {
     `chi đúng mức hoà vốn (${Math.round(spendAtBreakEven)}đ) thì lợi nhuận góp sau QC phải ≈ 0`,
   );
 
+  // Dòng đã đủ chín thì hai căn cứ phải TRÙNG NHAU: không có gì đang treo để mà ước tính.
+  assert.equal(row.basis, "ACTUAL");
+  assert.equal(row.appliedDeliveryRate, null, "không đơn nào đang treo ⇒ không có tỷ lệ nào được áp — null, không phải 0%");
+  assert.equal(row.projectedDeliveredRevenue, row.deliveredRevenue, "không có phần treo thì doanh thu tạm tính = doanh thu đã đo");
+  assert.equal(row.projectedProfitAfterAds, row.profitAfterAds);
+  assert.equal(row.projectedHeadroom, row.headroom);
+
+  /*
+    ═══════════ PHẦN B2 — ĐỔI CĂN CỨ ĐẢO NGƯỢC KẾT LUẬN, VÀ ĐÓ LÀ MỤC ĐÍCH ═══════════
+
+    Một chiến dịch ĐIỂN HÌNH của mô hình bán trước: 20 đơn đã lên, mới 5 đơn ngã ngũ, 15 đơn còn ở
+    xưởng hoặc trên đường. Số tiền đã VỀ mới có 4 triệu trong khi quảng cáo đã tiêu 3 triệu.
+
+      · căn cứ SỐ ĐO     → lợi nhuận góp 1.750.000đ ÷ 3.000.000đ = 0,58× hoà vốn ⇒ đọc như đang lỗ nặng
+      · căn cứ TẠM TÍNH  → 15 triệu đang treo × GTC 80% = 12 triệu sẽ về ⇒ 2,58× hoà vốn ⇒ CÒN DƯ ĐỊA
+
+    Bản trước không nói câu nào trong hai câu đó — nó trả `INSUFFICIENT_DATA` vì độ chín 25% dưới
+    ngưỡng 60%. Đúng là nó không kết luận sai; nó chỉ không kết luận, mỗi ngày, cho mọi dòng.
+
+    Con số 80% không phải tôi đặt: nó là tỷ lệ của chính mã hàng, đọc từ thang bậc đã được chủ shop
+    duyệt ngày 21/09/2026 (`lib/constants/delivery-rate.ts`) — và thang ấy TỰ chuyển sang số thật
+    khi mã đủ mẫu, nên dòng này sẽ tự rời căn cứ tạm tính mà không ai phải sửa gì.
+  */
+  const dangTreo = buildDecisionRow(
+    {
+      key: "camp-presell",
+      name: "Chiến dịch bán trước",
+      bookedOrders: 20,
+      deliveredOrders: 4,
+      returnedOrders: 1,
+      openOrders: 15,
+      notShippedOrders: 10,
+      notShippedRevenue: 10_000_000,
+      inTransitOrders: 5,
+      inTransitRevenue: 5_000_000,
+      bookedRevenue: 20_000_000,
+      deliveredRevenue: 4_000_000,
+      cash: 3_500_000,
+      cogs: 2_000_000,
+      shipping: 250_000,
+      // 15.000.000 × 80% — phép nhân đã làm trong SQL bằng tỷ lệ của từng mã.
+      openProjectedRevenue: 12_000_000,
+      openProjectedCogs: 6_000_000,
+      openProjectedOrders: 12,
+    },
+    "campaign",
+    3_000_000,
+    true,
+  );
+
+  assert.equal(dangTreo.maturity, 0.25, "5 trên 20 đơn đã ngã ngũ");
+  assert.equal(dangTreo.headroom, 0.58, "căn cứ SỐ ĐO: 1.750.000 ÷ 3.000.000");
+  assert.equal(dangTreo.projectedDeliveredRevenue, 16_000_000, "4.000.000 đã giao + 12.000.000 dự kiến về");
+  assert.equal(dangTreo.projectedProfitAfterAds, 4_750_000, "16.000.000 − 8.000.000 giá vốn − 250.000 cước − 3.000.000 quảng cáo");
+  assert.equal(dangTreo.projectedHeadroom, 2.58, "căn cứ TẠM TÍNH: 7.750.000 ÷ 3.000.000");
+  assert.equal(dangTreo.appliedDeliveryRate, 80, "tỷ lệ đã áp đọc ngược ra từ chính phép nhân: 12.000.000 ÷ 15.000.000");
+  assert.equal(dangTreo.basis, "PROJECTED");
+  assert.equal(dangTreo.action, "SCALE", "quyết theo kế hoạch: phần đang treo đủ để vượt xa hoà vốn");
+  assert.ok(
+    dangTreo.reason.includes("TẠM TÍNH") && dangTreo.reason.includes("80"),
+    `lời giải thích phải khai cả căn cứ lẫn tỷ lệ đã dùng — "${dangTreo.reason}"`,
+  );
+  /*
+    SỐ ĐO KHÔNG ĐƯỢC BỊ GHI ĐÈ. `deliveredRevenue` và `profitAfterAds` là tiền THẬT đã về; ước tính
+    sống ở những trường riêng mang chữ `projected`. Gộp hai thứ vào một cột là cách chắc chắn nhất
+    để một hôm nào đó báo cáo lợi nhuận đọc phải một con số đoán (AGENTS.md mục 8.6).
+  */
+  assert.equal(dangTreo.deliveredRevenue, 4_000_000, "doanh thu đã giao vẫn là SỐ ĐO, không được cộng phần ước tính vào");
+  assert.equal(dangTreo.profitAfterAds, -1_250_000, "lợi nhuận thật vẫn âm, và vẫn phải đọc được như vậy");
+
   // CHƯA BIẾT LÀ NULL, KHÔNG PHẢI 0.
   const noSpend = buildDecisionRow(
-    { key: "ad-1", name: "Mẩu 1", bookedOrders: 5, deliveredOrders: 4, returnedOrders: 1, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 5_000_000, deliveredRevenue: 4_000_000, cash: 3_000_000, cogs: 2_000_000, shipping: 200_000 },
+    { key: "ad-1", name: "Mẩu 1", bookedOrders: 5, deliveredOrders: 4, returnedOrders: 1, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 5_000_000, deliveredRevenue: 4_000_000, cash: 3_000_000, cogs: 2_000_000, shipping: 200_000, openProjectedRevenue: 0, openProjectedCogs: 0, openProjectedOrders: 0 },
     "ad",
     0,
     false,
@@ -165,7 +310,7 @@ export async function testAdsDecision(db: Db) {
 
   // Chưa có doanh thu giao thành công ⇒ không có biên ⇒ KHÔNG có điểm hoà vốn (không phải 0).
   const burned = buildDecisionRow(
-    { key: "camp-burn", name: "Đốt tiền", bookedOrders: 0, deliveredOrders: 0, returnedOrders: 0, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 0, deliveredRevenue: 0, cash: 0, cogs: 0, shipping: 0 },
+    { key: "camp-burn", name: "Đốt tiền", bookedOrders: 0, deliveredOrders: 0, returnedOrders: 0, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 0, deliveredRevenue: 0, cash: 0, cogs: 0, shipping: 0, openProjectedRevenue: 0, openProjectedCogs: 0, openProjectedOrders: 0 },
     "campaign",
     5_000_000,
     true,
@@ -203,6 +348,9 @@ export async function testAdsDecision(db: Db) {
       cash: 3_500_000,
       cogs: 2_000_000,
       shipping: 300_000,
+      openProjectedRevenue: 0,
+      openProjectedCogs: 0,
+      openProjectedOrders: 0,
     },
     "campaign",
     2_000_000,
@@ -251,6 +399,9 @@ export async function testAdsDecision(db: Db) {
       cash: 3_000_000,
       cogs: 2_000_000,
       shipping: 200_000,
+      openProjectedRevenue: 0,
+      openProjectedCogs: 0,
+      openProjectedOrders: 0,
     },
     "ad",
     0,

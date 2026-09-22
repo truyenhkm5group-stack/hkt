@@ -1,8 +1,9 @@
-import type { AdsAction } from "@/lib/constants/ads-decision";
+import type { AdsAction, DecisionBasis } from "@/lib/constants/ads-decision";
 import {
   ACTION_FOR_DECISION,
   ADS_WRITE_DENIAL_REASON,
   ADS_WRITE_LIMITS,
+  ALLOW_ADS_WRITE_ON_PROJECTED_BASIS,
   type AdsWriteAction,
   type AdsWriteDenial,
   type AdsWriteMode,
@@ -85,6 +86,8 @@ export type GateInput = {
   /** Người đã bấm xác nhận với một phiếu duyệt hợp lệ chưa. */
   confirmed: boolean;
   decision: AdsAction;
+  /** Khuyến nghị đứng trên SỐ ĐO hay trên lợi nhuận TẠM TÍNH. Xem `ALLOW_ADS_WRITE_ON_PROJECTED_BASIS`. */
+  basis: DecisionBasis;
   stability: Stability;
   /** Ngân sách ngày hiện tại (VND). `null` = ERP chưa đọc được ⇒ không đổi được. */
   currentBudgetVnd: number | null;
@@ -121,6 +124,15 @@ export function gateAdsWrite(input: GateInput): GateResult {
 
   const action = ACTION_FOR_DECISION[input.decision] ?? null;
   if (!action) return deny("NO_ACTION_FOR_DECISION", `Khuyến nghị đang là "${input.decision}".`);
+
+  /*
+    CĂN CỨ ĐỨNG TRƯỚC ĐỘ BỀN, VÀ ĐÓ LÀ CỐ Ý.
+
+    Độ bền hỏi "khuyến nghị này có giữ nguyên nhiều ngày không" — một câu hỏi về SỰ NHẤT QUÁN. Một
+    giả định lặp lại mười ngày vẫn là một giả định, nên nó sẽ "chín" đúng như số đo chín, và hỏi
+    câu ấy trước là để cái sai đi qua cái cổng không dành cho nó.
+  */
+  if (input.basis !== "ACTUAL" && !ALLOW_ADS_WRITE_ON_PROJECTED_BASIS) return deny("BASIS_NOT_MEASURED");
 
   if (!input.stability.ready) return deny("NOT_STABLE", input.stability.reason);
 

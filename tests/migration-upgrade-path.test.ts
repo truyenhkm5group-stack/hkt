@@ -57,6 +57,7 @@ const MOI = [
   "0108_ads_decision_ledger",
   "0109_ads_budget_changes",
   "0110_ad_spends_ad_grain",
+  "0111_ads_decision_basis",
 ] as const;
 
 /*
@@ -156,6 +157,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'ads_decision_ledger'"), 0, "bước 1: sổ quyết định quảng cáo CHƯA được có — đó là thứ 0108 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'ads_budget_changes'"), 0, "bước 1: sổ lượt ghi ngân sách CHƯA được có — đó là thứ 0109 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'ad_spends' and column_name = 'grain'"), 0, "bước 1: cột hạt chi tiêu CHƯA được có — đó là thứ 0110 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'ads_decision_ledger' and column_name = 'basis'"), 0, "bước 1: cột căn cứ CHƯA được có — đó là thứ 0111 thêm vào");
     /*
       DỮ LIỆU CHI TIÊU ĐANG CÓ TRÊN PRODUCTION, gieo TRƯỚC khi 0110 chạy.
 
@@ -274,6 +276,24 @@ export async function testMigrationUpgradePath() {
     );
     // Xoá dòng sổ quyết định KHÔNG được cuốn theo bằng chứng một lượt ghi đã xảy ra.
     await client.query(`update ads_budget_changes set ledger_id = 'up-dl1' where id = 'up-bc1'`);
+    /*
+      ─── 0111: CĂN CỨ CỦA KẾT LUẬN ───
+
+      Dòng `up-dl1` được ghi ở BƯỚC 2 bằng câu lệnh KHÔNG nhắc tới `basis` — đúng như mọi dòng đã
+      nằm sẵn trên production trước khi cột này tồn tại. Nó phải nhận `ACTUAL`, và đó không phải
+      một phép đoán: luật cũ chỉ kết luận khi đã đủ độ chín, nên `ACTUAL` là lời khai ĐÚNG về cách
+      những dòng ấy được sinh ra.
+    */
+    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id = 'up-dl1' and basis = 'ACTUAL'"), 1, "0111: dòng cũ phải nhận căn cứ ACTUAL — luật cũ chỉ kết luận khi đã đủ độ chín");
+    await assert.rejects(
+      () => client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, basis, period_from, period_to, rule_version, rule_snapshot, spend_known) values ('up-dl5', '2026-09-23', 'campaign', 'c5', 'CUT', 'ACTIONABLE', 'GUESS', '2026-09-08', '2026-09-21', 2, '{}'::jsonb, true)`),
+      () => true,
+      "0111: căn cứ lạ phải bị chặn — cổng ghi ngân sách so sánh theo đúng hai chuỗi này",
+    );
+    await client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, basis, period_from, period_to, rule_version, rule_snapshot, spend_known) values ('up-dl6', '2026-09-23', 'campaign', 'c6', 'SCALE', 'ACTIONABLE', 'PROJECTED', '2026-08-25', '2026-09-07', 2, '{}'::jsonb, true)`);
+    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id = 'up-dl6' and basis = 'PROJECTED'"), 1, "0111: căn cứ tạm tính ghi được");
+    await client.query(`delete from ads_decision_ledger where id in ('up-dl6')`);
+
     await client.query(`delete from ads_decision_ledger where id = 'up-dl1'`);
     assert.equal(await dem("select count(*)::int as n from ads_budget_changes where id = 'up-bc1' and ledger_id is null"), 1, "0109: xoá dòng sổ quyết định phải để lại lượt ghi, chỉ gỡ khoá");
 

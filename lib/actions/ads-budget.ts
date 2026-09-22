@@ -9,7 +9,7 @@ import { can, requireUser } from "@/lib/auth/session";
 import { actionToken, verifyActionToken } from "@/lib/ai/policy";
 import { ACTION_FOR_DECISION, ADS_WRITE_ACTION_LABEL, ADS_WRITE_LIMITS, type AdsWriteAction } from "@/lib/constants/ads-write";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
-import type { AdsAction } from "@/lib/constants/ads-decision";
+import type { AdsAction, DecisionBasis } from "@/lib/constants/ads-decision";
 import { brakeState, gateAdsWrite } from "@/lib/marketing/ads-write-gate";
 import { decisionStability } from "@/lib/queries/marketing-ledger";
 import {
@@ -179,6 +179,8 @@ export async function applyAdsBudgetChange(raw: ApplyAdsBudgetInput): Promise<Ap
     mode: adsWriteMode(),
     confirmed,
     decision: row.action as AdsAction,
+    // Căn cứ lấy từ DÒNG SỔ, không nhận từ client — client gửi được thì hàng rào chỉ là lời khuyên.
+    basis: row.basis as DecisionBasis,
     stability,
     currentBudgetVnd: state?.dailyBudgetVnd ?? null,
     nextBudgetVnd: input.nextBudgetVnd,

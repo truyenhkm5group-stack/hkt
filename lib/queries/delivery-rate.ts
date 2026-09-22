@@ -119,8 +119,7 @@ export function rateCoverage(rates: ProductDeliveryRates): Record<DeliveryRateSo
  */
 export function orderDeliveryRateSql(rates: ProductDeliveryRates): SQL<number> {
   const fb = sql`${rates.fallback.deliveryRate / 100}::numeric`;
-  const entries = [...rates.byProduct.entries()];
-  if (!entries.length) return sql<number>`${fb}`;
+  if (!rates.byProduct.size) return sql<number>`${fb}`;
   /*
     ═══════════ `CASE` CHỨ KHÔNG PHẢI MỘT PHÉP NỐI `VALUES` — ĐO ĐƯỢC 22/09/2026 ═══════════
 
@@ -140,15 +139,35 @@ export function orderDeliveryRateSql(rates: ProductDeliveryRates): SQL<number> {
     hoặc có cohort dự báo. Nếu shop lên tới hàng nghìn mã thì `CASE` mới đáng ngờ — và lúc đó phải
     ĐO LẠI chứ không đoán, đúng bài học ở `getMarketingBreakdown`.
   */
-  const whens = sql.join(
-    entries.map(([id, r]) => sql`when ${id} then ${r.deliveryRate / 100}::numeric`),
-    sql` `,
-  );
+  const theoMa = deliveryRateCaseSql(rates, sql<string>`coalesce(mdr_pv.product_id, mdr_i.product_id)`);
   return sql<number>`coalesce((
-    select sum(coalesce(mdr_i.line_total, 0) * (case coalesce(mdr_pv.product_id, mdr_i.product_id) ${whens} else ${fb} end))
+    select sum(coalesce(mdr_i.line_total, 0) * ${theoMa})
            / nullif(sum(coalesce(mdr_i.line_total, 0)), 0)
       from order_items mdr_i
       left join product_variants mdr_pv on mdr_pv.id = mdr_i.variant_id
      where mdr_i.order_id = ${schema.orders.id}
   ), ${fb})`;
+}
+
+/**
+ * ═══════════ TRA TỶ LỆ CHO MỘT KHOÁ MÃ HÀNG ĐÃ CÓ SẴN TRONG DÒNG ═══════════
+ *
+ * Vế `case` bên trong `orderDeliveryRateSql`, tách ra để dùng lại ở nơi khoá mã hàng **đã là một
+ * cột của dòng** — bảng quyết định quảng cáo cấp MÃ HÀNG là ví dụ: ở đó mỗi dòng đã mang đúng một
+ * mã, nên đi vòng qua trung bình có trọng số theo đơn là tính lại một thứ đã biết.
+ *
+ * Tách chứ không chép: hai nơi dựng hai vế `case` riêng là hai nguồn cho cùng một tỷ lệ, và chúng
+ * sẽ trôi xa nhau đúng lần đầu có người sửa một bên (AGENTS.md mục 15).
+ *
+ * Lý do chọn `case` thay vì `join (values …)` nằm ở chú thích của hàm trên — đã đo, không đoán.
+ */
+export function deliveryRateCaseSql(rates: ProductDeliveryRates, productKeyExpr: SQL<string>): SQL<number> {
+  const fb = sql`${rates.fallback.deliveryRate / 100}::numeric`;
+  const entries = [...rates.byProduct.entries()];
+  if (!entries.length) return sql<number>`${fb}`;
+  const whens = sql.join(
+    entries.map(([id, r]) => sql`when ${id} then ${r.deliveryRate / 100}::numeric`),
+    sql` `,
+  );
+  return sql<number>`(case ${productKeyExpr} ${whens} else ${fb} end)`;
 }

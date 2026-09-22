@@ -128,8 +128,26 @@ export const ACTION_FOR_DECISION: Record<string, AdsWriteAction | null> = {
 export type AdsWriteOutcome = "APPLIED" | "DENIED" | "FAILED";
 
 /** Vì sao một lượt xin ghi bị chặn. Mỗi lý do sửa ở một chỗ khác nên không được gộp. */
+/**
+ * ═══════════ ĐƯỢC PHÉP ĐỔI TIỀN THẬT DỰA TRÊN MỘT KHUYẾN NGHỊ TẠM TÍNH KHÔNG? ═══════════
+ *
+ * Bảng quyết định nay kết luận được cả khi đơn chưa ngã ngũ, bằng cách đổi CĂN CỨ sang lợi nhuận
+ * tạm tính (`DecisionBasis`). Đó là việc đúng cho một MÀN HÌNH: chủ shop đọc, cân nhắc, rồi quyết.
+ *
+ * Nhưng BÀN TAY thì khác. Ở đây câu hỏi không còn là "con số này có hữu ích không" mà là "có được
+ * để MÁY tiêu tiền dựa trên một giả định không". Hai câu hỏi ấy có hai câu trả lời, và gộp chúng
+ * lại là cách một hệ thống tự cho mình thêm quyền mà không ai bấm nút nào.
+ *
+ * Mặc định **KHÔNG**, và đây là hướng an toàn: khuyến nghị tạm tính vẫn hiện đủ trên màn hình, chủ
+ * shop vẫn tự đổi ngân sách trên Facebook nếu thấy đúng — chỉ đường GHI TỰ ĐỘNG là đóng.
+ *
+ * > NGƯỠNG NGHIỆP VỤ (AGENTS.md mục 7): chỉ chủ shop mới được bật, và chỉ sửa ở ĐÂY.
+ */
+export const ALLOW_ADS_WRITE_ON_PROJECTED_BASIS = false;
+
 export type AdsWriteDenial =
   | "HARD_DISABLED"
+  | "BASIS_NOT_MEASURED"
   | "MODE_OFF"
   | "NOT_CONFIRMED"
   | "NOT_STABLE"
@@ -142,6 +160,8 @@ export type AdsWriteDenial =
 
 export const ADS_WRITE_DENIAL_REASON: Record<AdsWriteDenial, string> = {
   HARD_DISABLED: "Đường ghi quảng cáo đang TẮT ở cấp máy chủ (ADS_WRITE_ENABLED). Đây là chốt ngoài cùng, không mở được từ giao diện hay từ bảng settings.",
+  BASIS_NOT_MEASURED:
+    "Khuyến nghị này đứng trên LỢI NHUẬN TẠM TÍNH (phần lớn đơn chưa ngã ngũ, phần treo được cân theo tỷ lệ giao thành công ước tính). Đủ để người đọc và quyết, chưa đủ để MÁY tự đổi tiền.",
   MODE_OFF: "Nấc quyền hạn đang OFF.",
   NOT_CONFIRMED: "Nấc COPILOT đòi người bấm xác nhận. Không có phiếu duyệt hợp lệ thì không ghi.",
   NOT_STABLE: "Khuyến nghị chưa chín: chưa giữ đủ số ngày, hoặc đổi ý quá nhiều lần, hoặc sổ quyết định chưa ghi tới hôm nay.",

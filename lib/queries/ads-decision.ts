@@ -18,7 +18,10 @@ import {
   ADS_DIMENSION_HAS_SPEND,
   type AdsAction,
   type AdsDimension,
+  type DecisionBasis,
 } from "@/lib/constants/ads-decision";
+import { deliveryRateCaseSql, orderDeliveryRateSql, productDeliveryRates, rateCoverage, type ProductDeliveryRates } from "@/lib/queries/delivery-rate";
+import type { DeliveryRateSource } from "@/lib/constants/delivery-rate";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -125,6 +128,44 @@ export type AdsDecisionRow = {
   // ── Dẫn xuất ──
   contributionBeforeAds: number;
   profitAfterAds: number;
+
+  /**
+   * ═══════════ CĂN CỨ CỦA KHUYẾN NGHỊ: ĐO ĐƯỢC, HAY THEO KẾ HOẠCH ═══════════
+   *
+   * `ACTUAL` — dòng đã có đủ đơn ngã ngũ, mọi con số tiền ở trên là SỐ ĐO.
+   * `PROJECTED` — phần lớn đơn còn đang sản xuất / đang đi, nên khuyến nghị đứng trên **lợi nhuận
+   * tạm tính**: doanh thu và giá vốn của đơn chưa ngã ngũ được cân theo tỷ lệ giao thành công ước
+   * tính của chính mã hàng đó (`lib/constants/delivery-rate.ts`).
+   *
+   * ─── VÌ SAO KHÔNG CÒN TỪ CHỐI KẾT LUẬN ───
+   *
+   * Với mô hình BÁN TRƯỚC, kết quả tiền của một đồng quảng cáo hôm nay chưa tồn tại — và sẽ không
+   * tồn tại thêm chút nào chỉ vì ERP đợi. Bản trước coi độ chín thấp là **lý do từ chối kết luận**;
+   * đo trên production 22/09/2026 thì 425/425 dòng cấp chiến dịch đều rơi vào "chưa đủ dữ liệu".
+   * Một bảng không bao giờ kết luận thì không ai mở nó lần thứ hai.
+   *
+   * Độ chín thấp chỉ nên là **lý do ĐỔI CĂN CỨ**. Khâu quảng cáo được chấm theo KẾ HOẠCH: tối ưu
+   * trên tỷ lệ giao thành công đã khai, và nếu thực tế về cao hơn thì càng tốt, thấp hơn thì đó là
+   * việc của khâu giao chứ không phải bằng chứng quảng cáo làm sai.
+   *
+   * Thang bậc tự chuyển sang SỐ THẬT khi mã có đủ mẫu (`minFinishedOrders` ở Giả định) — nên hai
+   * chế độ này không phải hai công thức, chỉ là hai đầu của cùng một thang.
+   */
+  basis: DecisionBasis;
+  /**
+   * Doanh thu giao thành công TẠM TÍNH = đã giao thật + (đang treo × tỷ lệ GTC ước tính).
+   * **Cộng vào phần đã đo, không thay nó** — cùng phép cộng với `lib/queries/marketing-daily.ts`,
+   * để hai báo cáo không nói hai con số.
+   */
+  projectedDeliveredRevenue: number;
+  projectedProfitAfterAds: number;
+  /** Khoảng cách tới hoà vốn tính trên căn cứ TẠM TÍNH. `null` khi không biết chi tiêu. */
+  projectedHeadroom: number | null;
+  /**
+   * Tỷ lệ GTC (%) thật sự đã áp cho phần đang treo của DÒNG NÀY — trung bình có trọng số theo tiền
+   * của các mã trong dòng. `null` khi dòng không có đơn nào đang treo (không có gì để ước tính).
+   */
+  appliedDeliveryRate: number | null;
   /** Tỷ lệ giao thành công (%), `null` khi chưa có đơn nào kết thúc. */
   successRate: number | null;
   /** Phần đơn đã ngã ngũ trên tổng đơn đã lên (0–1). Thấp ⇒ kết quả còn treo. */
@@ -171,9 +212,10 @@ export type AdsDecisionRow = {
    * Dùng lại `adsRatio()` của `lib/constants/profit.ts` — nơi đã dọn đúng lớp lỗi này một lần: bảng
    * lợi nhuận từng tính "CPQC / DT GTC" bằng hai mẫu số khác nhau ở hai chỗ dưới cùng một cái tên.
    *
-   * Mẫu số thứ ba (`overProjectedRevenue` — doanh thu giao ƯỚC TÍNH) cố ý KHÔNG có ở đây: nó cần
-   * xác suất giao thành công theo từng đơn, thứ bảng này không tính. Thêm một cột rỗng thì hơn là
-   * điền vào đó một con số gần đúng.
+   * Mẫu số thứ ba (doanh thu giao ƯỚC TÍNH) vẫn KHÔNG có ở đây, dù bảng nay đã tính được nó
+   * (`projectedDeliveredRevenue`). %CPQC là con số người ta đọc để so với tháng trước và so với
+   * shop khác; đổi mẫu số của nó sang một ước tính là làm đứt chuỗi so sánh ấy. Ước tính có chỗ
+   * riêng ở `projectedHeadroom`, nơi nó được khai rõ là ước tính.
    */
   adsPctOverPos: number | null;
   adsPctOverDelivered: number | null;
@@ -231,6 +273,18 @@ export type AdsDecision = {
    * phần còn lại nằm ở những ngày ERP mới chỉ có hạt CHIẾN DỊCH, và nó KHÔNG xuất hiện trong bảng.
    */
   spendDetail: SpendGrainCoverage;
+  /**
+   * NỀN TỶ LỆ GIAO THÀNH CÔNG đã dùng cho mọi con số tạm tính của bảng — **cùng hình dạng** với
+   * `rateBasis` của Báo cáo hiệu quả marketing, vì nó là cùng một bản đồ tỷ lệ.
+   *
+   * Phải in cạnh mọi con số ước tính (AGENTS.md mục 8.6): `coverage` nói bao nhiêu mã đi bằng SỐ ĐO
+   * và bao nhiêu mã đi bằng GIẢ ĐỊNH, `projectionError` nói hợp đồng dự báo có chạy được không.
+   */
+  rateBasis: {
+    fallbackDeliveryRate: number;
+    coverage: Record<DeliveryRateSource, number>;
+    projectionError: string | null;
+  };
   /**
    * Độ tin cậy của toàn bảng — và mẫu số của nó là ĐƠN CÓ DẤU VẾT FACEBOOK, không phải mọi đơn.
    *
@@ -294,6 +348,11 @@ type Agg = {
   cash: number;
   cogs: number;
   shipping: number;
+  /** Doanh thu của đơn ĐANG TREO đã cân theo tỷ lệ GTC ước tính của mã. */
+  openProjectedRevenue: number;
+  openProjectedCogs: number;
+  /** Số đơn đang treo đã cân theo tỷ lệ — số thập phân, vì nó là kỳ vọng chứ không phải phép đếm. */
+  openProjectedOrders: number;
 };
 
 function toAgg(r: Record<string, unknown>): Agg {
@@ -313,6 +372,9 @@ function toAgg(r: Record<string, unknown>): Agg {
     cash: Number(r.cash ?? 0),
     cogs: Number(r.cogs ?? 0),
     shipping: Number(r.shipping ?? 0),
+    openProjectedRevenue: Number(r.openProjectedRevenue ?? 0),
+    openProjectedCogs: Number(r.openProjectedCogs ?? 0),
+    openProjectedOrders: Number(r.openProjectedOrders ?? 0),
   };
 }
 
@@ -325,7 +387,7 @@ function toAgg(r: Record<string, unknown>): Agg {
  *
  * Đổi HÌNH DẠNG, KHÔNG đổi công thức — cùng `ORDER_OUTCOME`, cùng population, cùng trường ngày.
  */
-async function aggregateByOrder(period: Period, dimension: AdsDimension): Promise<Agg[]> {
+async function aggregateByOrder(period: Period, dimension: AdsDimension, rates: ProductDeliveryRates): Promise<Agg[]> {
   const db = await getDb();
   const facts = db
     .select({
@@ -341,6 +403,11 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension): Promis
       outcome: ORDER_OUTCOME_FAST.as("d_outcome"),
       // Mốc VẬT LÝ: hàng đã rời kho chưa. Chứng từ ĐVVC, không phải trạng thái Pancake.
       leftWarehouse: sql<boolean>`${SHIPMENT_LEFT_WAREHOUSE}`.as("d_left_warehouse"),
+      /**
+       * Tỷ lệ giao thành công ƯỚC TÍNH của đơn (0–1) — trung bình có trọng số theo `line_total` của
+       * các mã trong đơn. Dùng LẠI bộ tra của Báo cáo lợi nhuận, không viết bản thứ hai.
+       */
+      deliveryRate: sql<number>`${orderDeliveryRateSql(rates)}`.as("d_delivery_rate"),
     })
     .from(o)
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
@@ -385,6 +452,20 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension): Promis
          * cước Pancake ước tính lúc lên đơn, cộng vào là gánh tiền chưa hề chi.
          */
         shipping: sql<number>`coalesce(sum(${facts.shipping}) filter (where ${delivered} or ${returned}), 0) + coalesce(sum(${facts.returnFee}) filter (where ${returned}), 0)`,
+        /*
+          ─── PHẦN ĐANG TREO, ĐÃ CÂN THEO TỶ LỆ ───
+
+          Chỉ lọc `open`: đơn đã ngã ngũ thì không còn gì để dự báo, và nhân tỷ lệ lên chúng là ghi
+          đè một SỐ ĐO bằng một con số đoán. Cùng phép cộng với `lib/queries/marketing-daily.ts`.
+
+          CƯỚC cố ý KHÔNG có mặt ở đây. Đơn chưa gửi thì chưa có cước thật — `orders.partner_fee` chỉ
+          là ước tính của Pancake lúc lên đơn — nên lợi nhuận tạm tính đang THIẾU phần cước của đơn
+          đang treo, tức nó rộng rãi hơn sự thật một chút. Đó đúng là cách Báo cáo hiệu quả marketing
+          đang tính; thêm một ước tính cước chỉ ở đây sẽ làm hai báo cáo nói hai con số (mục 15).
+        */
+        openProjectedRevenue: sql<number>`coalesce(sum(${facts.revenue} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
+        openProjectedCogs: sql<number>`coalesce(sum(${facts.cogs} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
+        openProjectedOrders: sql<number>`coalesce(sum(${facts.deliveryRate}) filter (where ${open}), 0)`,
       })
       .from(facts)
       .groupBy(facts.key),
@@ -407,7 +488,7 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension): Promis
  * quảng cáo, còn tiền quảng cáo của mã lấy thẳng từ `ad_spends.product_id`. Lọc theo `ad_id` sẽ bỏ
  * mất phần doanh thu mà chính quảng cáo đó tạo ra nhưng Pancake không gắn mã.
  */
-async function aggregateByProduct(period: Period): Promise<Agg[]> {
+async function aggregateByProduct(period: Period, rates: ProductDeliveryRates): Promise<Agg[]> {
   const db = await getDb();
   // Giá vốn theo ĐÚNG bậc thang chung (AGENTS.md mục 13): phiếu nhập ERP gần nhất → giá vốn Pancake
   // trên đơn → giá nhập mẫu mã — tính một lần cho mỗi mẫu mã (xem variantLastCostSubquery).
@@ -427,6 +508,11 @@ async function aggregateByProduct(period: Period): Promise<Agg[]> {
       orderId: sql<string>`${o.id}`.as("p_order_id"),
       outcome: ORDER_OUTCOME_FAST.as("p_outcome"),
       leftWarehouse: sql<boolean>`${SHIPMENT_LEFT_WAREHOUSE}`.as("p_left_warehouse"),
+      /**
+       * Ở cấp này mỗi DÒNG đã mang đúng một mã hàng, nên tra thẳng tỷ lệ của mã ấy — đi vòng qua
+       * trung bình có trọng số theo đơn là tính lại một thứ đã biết, và cho số khác ở đơn nhiều mã.
+       */
+      deliveryRate: sql<number>`${deliveryRateCaseSql(rates, productKeyExpr)}`.as("p_delivery_rate"),
     })
     .from(o)
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
@@ -464,6 +550,11 @@ async function aggregateByProduct(period: Period): Promise<Agg[]> {
         cogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${delivered}), 0)`,
         // Cùng bậc thang cước như cấp chiến dịch: chỉ đơn đã giao + đơn hoàn, cộng phí hoàn của đơn hoàn.
         shipping: sql<number>`coalesce(sum((${facts.shipping} + case when ${returned} then ${facts.returnFee} else 0 end) * coalesce(${facts.shipShare}, 0)) filter (where ${delivered} or ${returned}), 0)`,
+        // Phần đang treo đã cân theo tỷ lệ — xem chú thích ở `aggregateByOrder` về việc cước không có mặt.
+        openProjectedRevenue: sql<number>`coalesce(sum(${facts.lineRevenue} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
+        openProjectedCogs: sql<number>`coalesce(sum(${facts.lineCogs} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
+        /** Tỷ lệ là HẰNG SỐ trong một nhóm (nhóm = một mã), nên `max` chỉ là cách lấy nó ra khỏi phép gộp. */
+        openProjectedOrders: sql<number>`coalesce(${countOrders(open)} * max(${facts.deliveryRate}), 0)`,
       })
       .from(facts)
       .groupBy(facts.key),
@@ -599,16 +690,40 @@ export function decideAction(input: {
   spendKnown: boolean;
   spend: number;
   headroom: number | null;
+  /** Khoảng cách tới hoà vốn tính trên lợi nhuận TẠM TÍNH — căn cứ khi đơn chưa ngã ngũ. */
+  projectedHeadroom: number | null;
   successRate: number | null;
   maturity: number;
   finishedOrders: number;
+  /** Đơn đã lên (trừ huỷ). Đây là MẪU của căn cứ tạm tính — mỗi đơn đã lên đều có một kỳ vọng. */
+  bookedOrders: number;
+  appliedDeliveryRate: number | null;
   bookedRoas: number | null;
   breakEvenBookedRoas: number | null;
   deliveredOrders: number;
-}): { action: AdsAction; reason: string; lowDelivery: boolean } {
+}): { action: AdsAction; reason: string; lowDelivery: boolean; basis: DecisionBasis } {
   const r = ADS_DECISION_RULE;
   const pct = (v: number) => `${Math.round(v * 100)}%`;
   const lowDelivery = input.successRate !== null && input.successRate < r.lowSuccessRate;
+
+  /*
+    ═══════════ ĐỘ CHÍN THẤP LÀ LÝ DO ĐỔI CĂN CỨ, KHÔNG PHẢI LÝ DO TỪ CHỐI KẾT LUẬN ═══════════
+
+    Bản trước dừng lại ở hai cổng "chưa đủ đơn kết thúc" và "chưa đủ độ chín". Với mô hình BÁN
+    TRƯỚC thì hai cổng ấy gần như luôn đóng: đo trên production 22/09/2026, **425/425** dòng cấp
+    chiến dịch đều trả `INSUFFICIENT_DATA`, độ chín trung bình 0,02. Và không cổng nào mở ra sớm
+    hơn chỉ vì ERP đợi — kết quả tiền của đồng quảng cáo hôm nay đơn giản là CHƯA TỒN TẠI.
+
+    Nên chúng thành một phép CHỌN CĂN CỨ:
+      · đủ đơn ngã ngũ  ⇒ `ACTUAL`    — quyết trên số đo;
+      · chưa đủ         ⇒ `PROJECTED` — quyết trên lợi nhuận tạm tính, tức tối ưu THEO KẾ HOẠCH.
+
+    Cái KHÔNG đổi là YÊU CẦU VỀ MẪU. Căn cứ tạm tính cần một kỳ vọng cho mỗi đơn, nên nó đòi đủ
+    `minFinishedOrders` đơn ĐÃ LÊN thay vì đã kết thúc. Bỏ luôn yêu cầu ấy thì một dòng 3 đơn cũng
+    có ý kiến — và đó lại đúng là thứ hai cổng cũ sinh ra để chặn.
+  */
+  const measured = input.finishedOrders >= r.minFinishedOrders && input.maturity >= r.minMaturity;
+  const basis: DecisionBasis = measured ? "ACTUAL" : "PROJECTED";
 
   // CỔNG 0 — không có số chi thì không có bất kỳ kết luận nào về tiền.
   if (!input.spendKnown) {
@@ -616,40 +731,43 @@ export function decideAction(input: {
       action: "NO_SPEND_DATA",
       reason: "Cấp này không có số chi quảng cáo (Facebook chỉ trả chi tiêu ở cấp chiến dịch/ngày), nên không tính được ROAS hay lợi nhuận.",
       lowDelivery,
+      basis,
     };
   }
 
-  // CỔNG 1 — quá ít tiền, hoặc quá ít đơn đã ngã ngũ.
+  // CỔNG 1 — quá ít tiền quảng cáo: chênh lệch ROAS ở đây chỉ là may rủi của vài đơn.
   if (input.spend < r.minSpend) {
     return {
       action: "INSUFFICIENT_DATA",
       reason: `Mới chi ${input.spend.toLocaleString("vi-VN")}đ, dưới mức tối thiểu ${r.minSpend.toLocaleString("vi-VN")}đ để kết luận.`,
       lowDelivery,
-    };
-  }
-  if (input.finishedOrders < r.minFinishedOrders) {
-    return {
-      action: "INSUFFICIENT_DATA",
-      reason: `Mới có ${input.finishedOrders} đơn đã kết thúc (cần ${r.minFinishedOrders}). Thêm hoặc bớt một đơn là tỷ lệ đổi hẳn.`,
-      lowDelivery,
+      basis,
     };
   }
 
-  // CỔNG 2 — phần lớn đơn còn đang đi: tiền đã tiêu nhưng KẾT QUẢ CHƯA NGÃ NGŨ.
-  if (input.maturity < r.minMaturity) {
+  // CỔNG 2 — MẪU. Cùng ngưỡng cho cả hai căn cứ, chỉ khác đếm đơn nào.
+  if (input.bookedOrders < r.minFinishedOrders) {
     return {
       action: "INSUFFICIENT_DATA",
-      reason: `Mới ${pct(input.maturity)} số đơn ngã ngũ (cần ${pct(r.minMaturity)}). Phần hoàn chưa về hết nên lợi nhuận hiện tại đang đẹp hơn sự thật.`,
+      reason: `Mới có ${input.bookedOrders} đơn đã lên (cần ${r.minFinishedOrders}). Thêm hoặc bớt một đơn là tỷ lệ đổi hẳn.`,
       lowDelivery,
+      basis,
     };
   }
 
-  const h = input.headroom;
+  const h = measured ? input.headroom : input.projectedHeadroom;
   if (h === null) {
-    return { action: "INSUFFICIENT_DATA", reason: "Không tính được khoảng cách tới điểm hoà vốn.", lowDelivery };
+    return { action: "INSUFFICIENT_DATA", reason: "Không tính được khoảng cách tới điểm hoà vốn.", lowDelivery, basis };
   }
 
   const money = h >= 1 ? `lãi ${pct(h - 1)} trên tiền quảng cáo` : `lỗ ${pct(1 - h)} trên tiền quảng cáo`;
+  /*
+    Câu mở đầu của MỌI lý do ở căn cứ tạm tính phải nói ra nó là ước tính, và nói bằng con số nào —
+    người đọc phải cãi lại được cái giả định, chứ không chỉ đọc kết luận.
+  */
+  const nen = measured
+    ? ""
+    : `[TẠM TÍNH] ${pct(input.maturity)} đơn đã ngã ngũ, phần còn lại cân theo GTC ước tính ${input.appliedDeliveryRate ?? "—"}%. `;
 
   /**
    * CỔNG 3 — QUẢNG CÁO TỐT NHƯNG GIAO KÉM.
@@ -659,6 +777,7 @@ export function decideAction(input: {
    * phải làm là chốt đơn kỹ hơn / đóng gói / đổi ĐVVC.
    */
   if (
+    measured &&
     lowDelivery &&
     h < r.scaleAbove &&
     input.bookedRoas !== null &&
@@ -669,22 +788,24 @@ export function decideAction(input: {
       action: "FIX_DELIVERY",
       reason: `Tỷ lệ giao thành công ${input.successRate}% (dưới ${r.lowSuccessRate}%) — trên đơn ĐÃ LÊN thì ROAS ${input.bookedRoas}× đã vượt hoà vốn ${input.breakEvenBookedRoas}×, nhưng phần hoàn ăn hết phần lãi (${money}). Vấn đề ở khâu giao, không phải ở quảng cáo.`,
       lowDelivery,
+      basis,
     };
   }
 
   if (h >= r.scaleAbove) {
-    return { action: "SCALE", reason: `Đang ${money}, cao hơn điểm hoà vốn ${pct(h - 1)} — còn dư địa tăng ngân sách.`, lowDelivery };
+    return { action: "SCALE", reason: `${nen}Đang ${money}, cao hơn điểm hoà vốn ${pct(h - 1)} — còn dư địa tăng ngân sách.`, lowDelivery, basis };
   }
   if (h >= 1) {
-    return { action: "HOLD", reason: `Đang ${money}: trên hoà vốn nhưng chưa đủ dày để tăng tiền (cần ${r.scaleAbove}× hoà vốn).`, lowDelivery };
+    return { action: "HOLD", reason: `${nen}Đang ${money}: trên hoà vốn nhưng chưa đủ dày để tăng tiền (cần ${r.scaleAbove}× hoà vốn).`, lowDelivery, basis };
   }
   if (h >= r.cutBelow) {
-    return { action: "WATCH", reason: `Đang ${money}, sát điểm hoà vốn. Chưa đáng cắt nhưng cũng chưa kiếm được tiền.`, lowDelivery };
+    return { action: "WATCH", reason: `${nen}Đang ${money}, sát điểm hoà vốn. Chưa đáng cắt nhưng cũng chưa kiếm được tiền.`, lowDelivery, basis };
   }
   return {
     action: "CUT",
-    reason: `Đang ${money}${input.deliveredOrders === 0 ? " và chưa có đơn nào tới tay khách" : ""} — dưới ${r.cutBelow}× điểm hoà vốn, càng chạy càng lỗ.`,
+    reason: `${nen}Đang ${money}${input.deliveredOrders === 0 && measured ? " và chưa có đơn nào tới tay khách" : ""} — dưới ${r.cutBelow}× điểm hoà vốn, càng chạy càng lỗ.`,
     lowDelivery,
+    basis,
   };
 }
 
@@ -722,16 +843,43 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
   // Khoảng cách tới hoà vốn = lợi nhuận góp trước QC ÷ tiền QC. ≥ 1 ⟺ có lãi sau quảng cáo.
   const headroom = spendKnown && spendForRatio > 0 ? round2(contributionBeforeAds / spendForRatio) : null;
 
+  /*
+    ─── CĂN CỨ TẠM TÍNH: CỘNG PHẦN ĐANG TREO ĐÃ CÂN THEO TỶ LỆ ───
+
+    Cộng vào phần đã đo, KHÔNG thay nó: đơn đã có kết cục thì không còn gì để dự báo. Cùng phép
+    cộng với `lib/queries/marketing-daily.ts`, nên hai báo cáo không nói hai con số.
+
+    CƯỚC giữ nguyên số đo (cước của đơn đã giao + đơn hoàn). Đơn đang treo chưa phát sinh cước thật,
+    và `partner_fee` chỉ là ước tính của Pancake — nên lợi nhuận tạm tính đang THIẾU vế cước tương
+    lai, tức rộng rãi hơn sự thật một chút. Nói ra ở đây thay vì lặng lẽ bù bằng một con số thứ hai.
+  */
+  const projectedDeliveredRevenue = agg.deliveredRevenue + agg.openProjectedRevenue;
+  const projectedContributionBeforeAds = projectedDeliveredRevenue - (agg.cogs + agg.openProjectedCogs) - agg.shipping;
+  const projectedProfitAfterAds = projectedContributionBeforeAds - spendForRatio;
+  const projectedHeadroom = spendKnown && spendForRatio > 0 ? round2(projectedContributionBeforeAds / spendForRatio) : null;
+  /*
+    Tỷ lệ THẬT SỰ đã áp cho dòng này, đọc ngược ra từ chính phép nhân đã làm trong SQL. Không tra
+    lại bản đồ tỷ lệ ở TypeScript: một dòng cấp chiến dịch trộn nhiều mã hàng, và trọng số của phép
+    trộn ấy là tiền — thứ chỉ SQL vừa mới biết.
+
+    Mẫu số 0 (dòng không có đơn nào đang treo) ⇒ `null` = KHÔNG CÓ GÌ ĐỂ ƯỚC TÍNH, không phải 0%.
+  */
+  const openRevenue = agg.notShippedRevenue + agg.inTransitRevenue;
+  const appliedDeliveryRate = openRevenue > 0 ? Math.round((agg.openProjectedRevenue / openRevenue) * 1000) / 10 : null;
+
   const rate = successRate(agg.deliveredOrders, agg.returnedOrders);
   const bookedRoas = spendKnown ? ratio(agg.bookedRevenue, spendForRatio) : null;
 
-  const { action, reason, lowDelivery } = decideAction({
+  const { action, reason, lowDelivery, basis } = decideAction({
     spendKnown,
     spend: spendForRatio,
     headroom,
+    projectedHeadroom,
     successRate: rate,
     maturity,
     finishedOrders: finished,
+    bookedOrders: agg.bookedOrders,
+    appliedDeliveryRate,
     bookedRoas,
     breakEvenBookedRoas,
     deliveredOrders: agg.deliveredOrders,
@@ -776,6 +924,11 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
     shippingCost: agg.shipping,
     contributionBeforeAds,
     profitAfterAds,
+    basis,
+    projectedDeliveredRevenue: Math.round(projectedDeliveredRevenue),
+    projectedProfitAfterAds: Math.round(projectedProfitAfterAds),
+    projectedHeadroom,
+    appliedDeliveryRate,
     successRate: rate,
     maturity: Math.round(maturity * 100) / 100,
     marginRate,
@@ -805,8 +958,14 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
 
 async function decisionUncached(period: Period, dimension: AdsDimension): Promise<AdsDecision> {
   const spendKnown = ADS_DIMENSION_HAS_SPEND[dimension];
+  /*
+    BẢN ĐỒ TỶ LỆ PHẢI CÓ TRƯỚC PHÉP GỘP: nó đi thẳng vào SQL (một vế `case` trong bảng dẫn xuất),
+    chứ không nhân lại ở TypeScript. Trọng số của phép trộn nhiều mã trong một dòng là TIỀN, và chỉ
+    phép gộp mới biết số tiền ấy.
+  */
+  const rates = await productDeliveryRates(period);
   const [aggs, spend, coverage, spendDetail, cha] = await Promise.all([
-    dimension === "product" ? aggregateByProduct(period) : aggregateByOrder(period, dimension),
+    dimension === "product" ? aggregateByProduct(period, rates) : aggregateByOrder(period, dimension, rates),
     spendByKey(period, dimension),
     adsAttributionCoverage(period.from, period.to),
     spendGrainCoverage(period),
@@ -863,6 +1022,10 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
             cash: 0,
             cogs: 0,
             shipping: 0,
+            // Không đơn nào ⇒ không có gì đang treo ⇒ không có gì để ước tính. Đây là 0 THẬT.
+            openProjectedRevenue: 0,
+            openProjectedCogs: 0,
+            openProjectedOrders: 0,
           },
           dimension,
           value.spend,
@@ -934,6 +1097,7 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
     totals,
     pending,
     spendDetail,
+    rateBasis: { fallbackDeliveryRate: rates.fallback.deliveryRate, coverage: rateCoverage(rates), projectionError: rates.projectionError },
     confidence: {
       coveragePct: coverage.coveragePct,
       verdict: coverageVerdict(coverage.coveragePct, LOW_COVERAGE_PCT),

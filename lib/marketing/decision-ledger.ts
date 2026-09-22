@@ -53,6 +53,8 @@ function rowToValues(row: AdsDecisionRow, decisionDay: string, periodFrom: strin
     entityName: row.name,
     action: row.action,
     actionClass: DECISION_CLASS[row.action],
+    // Căn cứ đi vào sổ CÙNG kết luận: đọc lại hôm nay sẽ ra căn cứ khác, vì dữ liệu đã chín thêm.
+    basis: row.basis,
     reason: row.reason,
     periodFrom,
     periodTo,
@@ -110,6 +112,7 @@ export async function recordDecisionLedger(options: { now?: Date; log?: (m: stri
             entityName: sql`excluded.entity_name`,
             action: sql`excluded.action`,
             actionClass: sql`excluded.action_class`,
+            basis: sql`excluded.basis`,
             reason: sql`excluded.reason`,
             periodFrom: sql`excluded.period_from`,
             periodTo: sql`excluded.period_to`,

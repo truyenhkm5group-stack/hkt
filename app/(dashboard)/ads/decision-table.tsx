@@ -6,7 +6,8 @@ import { InfoHint } from "@/components/info-hint";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { successTone } from "@/lib/constants/returns";
-import { ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_ACTION_TONE, ADS_DECISION_RULE, ADS_DIMENSION_LABEL } from "@/lib/constants/ads-decision";
+import { LEDGER_SETTLE_LAG_DAYS, LEDGER_WINDOW_DAYS } from "@/lib/constants/marketing-decision-ledger";
+import { ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_ACTION_TONE, ADS_DECISION_RULE, ADS_DIMENSION_LABEL, DECISION_BASIS_NOTE } from "@/lib/constants/ads-decision";
 import type { AdsDecisionRow } from "@/lib/queries/ads-decision";
 import type { AdsDimension } from "@/lib/constants/ads-decision";
 import type { Stability } from "@/lib/marketing/decision-stability";
@@ -147,6 +148,29 @@ function Detail({ row }: { row: AdsDecisionRow }) {
     { label: "Tiền quảng cáo", value: row.spendKnown ? formatVND(-row.spend) : "—" },
     { label: "Lợi nhuận góp SAU QC", value: <strong>{row.spendKnown ? formatVND(row.profitAfterAds) : "—"}</strong> },
   ];
+  /*
+    ─── HAI CON SỐ TẠM TÍNH ĐỨNG RIÊNG MỘT KHỐI, KHÔNG TRỘN VÀO "ĐƯỜNG ĐI CỦA TIỀN" ───
+
+    Khối trên là TIỀN ĐÃ CÓ CHỨNG TỪ, từng dòng truy nguyên được. Chen một con số đoán vào giữa nó
+    là đúng cách một báo cáo bắt đầu nói dối: vài tuần sau không ai còn nhớ dòng nào là số đo.
+
+    Khối này chỉ hiện khi dòng THẬT SỰ có phần đang treo — không có gì treo thì không có gì để ước
+    tính, và in ra một khối rỗng với hai số trùng khối trên chỉ làm loãng màn hình.
+  */
+  if (row.appliedDeliveryRate !== null) {
+    items.push(
+      {
+        label: "▸ Doanh thu giao TẠM TÍNH",
+        value: formatVND(row.projectedDeliveredRevenue),
+        hint: `Đã giao thật + (đang treo × GTC ước tính ${row.appliedDeliveryRate}%). Tỷ lệ lấy từ thang bậc của chính mã hàng — ghi đè tay → số đo từng đơn → lịch sử của mã → tỷ lệ khai ở Giả định — nên nó tự chuyển sang SỐ THẬT khi mã đủ mẫu.`,
+      },
+      {
+        label: "▸ Lợi nhuận SAU QC TẠM TÍNH",
+        value: <strong>{row.spendKnown ? formatVND(row.projectedProfitAfterAds) : "—"}</strong>,
+        hint: "Chưa trừ cước của phần đang treo: đơn chưa gửi thì chưa phát sinh cước thật, nên con số này rộng rãi hơn thực tế một chút. Cùng cách tính với Báo cáo hiệu quả marketing.",
+      },
+    );
+  }
   const ratios: { label: string; value: React.ReactNode }[] = [
     { label: "ROAS lên đơn", value: <Ratio value={row.bookedRoas} /> },
     { label: "ROAS lên đơn HOÀ VỐN", value: <Ratio value={row.breakEvenBookedRoas} /> },
@@ -224,7 +248,7 @@ function Stable({ s }: { s: Stability }) {
     <span className={cn("mt-0.5 flex items-center gap-1 text-[11px]", mau)}>
       {chu}
       <InfoHint>
-        {`${s.reason} Đọc từ SỔ QUYẾT ĐỊNH, chạy trên kỳ chuẩn 14 ngày kết thúc hôm qua — không phải kỳ đang chọn ở trên. `}
+        {`${s.reason} Đọc từ SỔ QUYẾT ĐỊNH, chạy trên kỳ chuẩn ${LEDGER_WINDOW_DAYS} ngày kết thúc ${LEDGER_SETTLE_LAG_DAYS} ngày trước — không phải kỳ đang chọn ở trên. `}
         {s.missingDays > 0 ? `Sổ thiếu ${s.missingDays} ngày trong cửa sổ: ngày thiếu là CHƯA ĐO, không phải "không đổi", nên nó cắt chuỗi. ` : ""}
         {`Đổi khuyến nghị ${s.flips} lần trong cửa sổ nhịp.`}
       </InfoHint>
@@ -402,17 +426,51 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
                         bottom={row.marginRate === null ? "—" : `biên ${formatPercent(row.marginRate * 100)}`}
                       />
                     </TableCell>
+                    {/*
+                      Ô NÀY PHẢI HIỆN CON SỐ ĐÃ DÙNG ĐỂ KẾT LUẬN, không phải con số đẹp hơn.
+
+                      Dòng quyết trên căn cứ TẠM TÍNH mà ô này in khoảng cách hoà vốn ĐO ĐƯỢC thì
+                      khuyến nghị thành ra không giải thích được: "0,58× hoà vốn" đứng cạnh chữ
+                      "TĂNG NGÂN SÁCH" đọc như một lỗi. Nên ở căn cứ tạm tính, tầng trên là số tạm
+                      tính (có dấu ≈) và tầng dưới là SỐ ĐO — để người đọc thấy cả hai và cãi lại được.
+                    */}
                     <TableCell className="text-right">
-                      <Cell
-                        top={<span className={cn("font-medium", headroomTone(row.headroom))}><Ratio value={row.headroom} /></span>}
-                        bottom={row.breakEvenDeliveredRoas === null ? "—" : `mốc ${row.breakEvenDeliveredRoas.toFixed(2)}×`}
-                      />
+                      {row.basis === "PROJECTED" ? (
+                        <Cell
+                          top={
+                            <span className={cn("font-medium italic", headroomTone(row.projectedHeadroom))}>
+                              ≈<Ratio value={row.projectedHeadroom} />
+                            </span>
+                          }
+                          bottom={row.headroom === null ? "đo: —" : `đo ${row.headroom.toFixed(2)}×`}
+                        />
+                      ) : (
+                        <Cell
+                          top={<span className={cn("font-medium", headroomTone(row.headroom))}><Ratio value={row.headroom} /></span>}
+                          bottom={row.breakEvenDeliveredRoas === null ? "—" : `mốc ${row.breakEvenDeliveredRoas.toFixed(2)}×`}
+                        />
+                      )}
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
                       <span className={cn("inline-flex items-center gap-1 font-medium", ADS_ACTION_TONE[row.action])}>
                         {ADS_ACTION_LABEL[row.action]}
                         <InfoHint>{ADS_ACTION_HINT[row.action]}</InfoHint>
                       </span>
+                      {/*
+                        CĂN CỨ ĐI CÙNG KHUYẾN NGHỊ Ở MỌI NƠI KHUYẾN NGHỊ ĐI TỚI.
+
+                        Cùng chữ "CẮT" đứng trên số đo và đứng trên ước tính không phải cùng một
+                        kết luận — và người đọc không có cách nào phân biệt nếu màn hình không nói.
+                      */}
+                      {row.basis === "PROJECTED" && row.action !== "INSUFFICIENT_DATA" && row.action !== "NO_SPEND_DATA" ? (
+                        <span className="ml-1 inline-flex items-center gap-0.5 rounded border border-dashed px-1 text-[11px] text-muted-foreground">
+                          tạm tính
+                          <InfoHint>
+                            {DECISION_BASIS_NOTE.PROJECTED}
+                            {row.appliedDeliveryRate !== null ? ` Tỷ lệ đã áp cho dòng này: ${row.appliedDeliveryRate}%.` : ""}
+                          </InfoHint>
+                        </span>
+                      ) : null}
                       {/* Cờ "giao kém" hiện ĐỘC LẬP với hành động: một dòng vẫn đáng tăng tiền mà
                           vẫn đang mất hàng ở khâu giao, và bỏ sót nó là bỏ sót tiền. */}
                       {row.lowDelivery && row.action !== "FIX_DELIVERY" ? (

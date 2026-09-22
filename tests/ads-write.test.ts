@@ -5,6 +5,7 @@ import type { AdsAction } from "@/lib/constants/ads-decision";
 import {
   ACTION_FOR_DECISION,
   ADS_WRITE_LIMITS,
+  ALLOW_ADS_WRITE_ON_PROJECTED_BASIS,
   MAX_ALLOWED_ADS_WRITE_MODE,
   clampAdsWriteMode,
 } from "@/lib/constants/ads-write";
@@ -65,6 +66,7 @@ function input(over: Partial<GateInput> = {}): GateInput {
     mode: "COPILOT",
     confirmed: true,
     decision: "SCALE",
+    basis: "ACTUAL",
     stability: { ...HEALTHY_STABILITY, action: "SCALE" },
     currentBudgetVnd: 1_000_000,
     nextBudgetVnd: 1_200_000,
@@ -141,6 +143,7 @@ export function testAdsWrite() {
     { name: "nấc OFF", over: { mode: "OFF" }, denial: "MODE_OFF" },
     { name: "phanh đang bật", over: { brake: { on: true, consecutiveWorse: 3, unmeasured: 0 } }, denial: "BRAKE_ON" },
     { name: "khuyến nghị không đẻ hành động", over: { decision: "HOLD" }, denial: "NO_ACTION_FOR_DECISION" },
+    { name: "căn cứ là ước tính", over: { basis: "PROJECTED" }, denial: "BASIS_NOT_MEASURED" },
     { name: "chưa chín", over: { stability: { ...HEALTHY_STABILITY, action: "SCALE", ready: false, blocker: "YOUNG", reason: "mới giữ 1 ngày" } }, denial: "NOT_STABLE" },
     { name: "chưa ai bấm", over: { confirmed: false }, denial: "NOT_CONFIRMED" },
     { name: "chiến dịch đã đổi hôm nay", over: { changesForCampaignToday: 1 }, denial: "CAMPAIGN_RATE_LIMIT" },
@@ -165,6 +168,23 @@ export function testAdsWrite() {
   */
   const vuaTatVuaChuaChin = gateAdsWrite(input({ hardEnabled: false, confirmed: false, stability: { ...HEALTHY_STABILITY, ready: false, blocker: "YOUNG", reason: "non" } }));
   assert.equal(!vuaTatVuaChuaChin.allow && vuaTatVuaChuaChin.denial, "HARD_DISABLED", "chốt cứng phải đứng TRƯỚC mọi chốt khác");
+
+  /*
+    ─── CĂN CỨ ĐỨNG TRƯỚC ĐỘ BỀN ───
+
+    Độ bền hỏi "khuyến nghị có giữ nguyên nhiều ngày không" — một câu hỏi về SỰ NHẤT QUÁN. Một giả
+    định lặp lại mười ngày vẫn là một giả định: nó sẽ "chín" y như số đo chín. Nên nếu hai chốt đảo
+    thứ tự, một dòng tạm tính đã chín sẽ đi qua bằng lối của cổng không dành cho nó.
+
+    Bài kiểm này cũng là chỗ khoá chính sách: `ALLOW_ADS_WRITE_ON_PROJECTED_BASIS` mặc định TẮT, nên
+    hôm nào có người bật nó thì dòng dưới đây đỏ và người ấy phải đọc lý do trước khi sửa.
+  */
+  assert.equal(ALLOW_ADS_WRITE_ON_PROJECTED_BASIS, false, "mặc định: máy KHÔNG được tự đổi tiền dựa trên một giả định — chỉ chủ shop mới bật được (AGENTS.md mục 7)");
+  const uocTinhTruocDoBen = gateAdsWrite(input({ basis: "PROJECTED", stability: { ...HEALTHY_STABILITY, action: "SCALE", ready: false, blocker: "YOUNG", reason: "non" } }));
+  assert.equal(!uocTinhTruocDoBen.allow && uocTinhTruocDoBen.denial, "BASIS_NOT_MEASURED", "căn cứ phải được hỏi TRƯỚC độ bền");
+  // Và chốt cứng vẫn thắng cả căn cứ: thứ tự chỉ nới ra chứ không bao giờ siết vào.
+  const tatVaUocTinh = gateAdsWrite(input({ hardEnabled: false, basis: "PROJECTED" }));
+  assert.equal(!tatVaUocTinh.allow && tatVaUocTinh.denial, "HARD_DISABLED");
 
   // Phanh đứng TRƯỚC cổng độ bền: một luật đang sai thì khuyến nghị "đã chín" của nó cũng không đáng tin.
   const phanhTruocDoBen = gateAdsWrite(input({ brake: { on: true, consecutiveWorse: 3, unmeasured: 1 }, stability: { ...HEALTHY_STABILITY, ready: false, blocker: "YOUNG", reason: "non" } }));
