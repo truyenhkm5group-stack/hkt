@@ -555,13 +555,26 @@ export const IS_RETURN_AWAITING_WAREHOUSE = sql`(${s.stage} = 'RETURNED'
 export const RETURN_PENDING_WAREHOUSE = sql`(${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is null)`;
 
 const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
-/** Giao thất bại, đang chờ phát lại (chưa kết thúc nhưng khả năng hoàn cao) */
-const IS_FAILED = sql`${ORDER_OUTCOME_FAST} = 'IN_TRANSIT' and ${s.stage} = 'DELIVERY_FAILED'`;
-/**
- * "ĐÃ GỬI" — danh sách khai ở `ELIGIBLE_SENT_OUTCOMES` (`lib/constants/returns.ts`), đọc lời giải
- * thích đầy đủ ở đó. `AWAITING_PICKUP` CỐ Ý không có mặt: kiện chờ ĐVVC tới lấy thì chưa rời kho.
- */
-const IS_SHIPPED = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)})`;
+
+/*
+  ═══ `IS_SHIPPED` VÀ `IS_FAILED` ĐÃ BỎ — HAI NGHĨA CỦA CHÚNG VẪN NGUYÊN, CHỈ ĐỔI CHỖ ĐỨNG ═══
+
+  Cả hai từng là vị ngữ nội tuyến lại `ORDER_OUTCOME_FAST` mỗi lần được nhắc tới, và người gọi
+  cuối cùng của chúng (`getReturnRateBySource`) nay đọc một cột kết quả đã tính sẵn trong bảng
+  dẫn xuất — cùng biểu thức, một lần cho mỗi đơn thay vì tám lần (xem giải thích dài tại đó).
+
+  Hai nghĩa đi theo, viết thẳng vào cột dùng chúng, KHÔNG được sửa rời:
+
+    "ĐÃ GỬI"   — danh sách khai ở `ELIGIBLE_SENT_OUTCOMES` (`lib/constants/returns.ts`), đọc lời
+                 giải thích đầy đủ ở đó. `AWAITING_PICKUP` CỐ Ý không có mặt: kiện chờ ĐVVC tới
+                 lấy thì chưa rời kho.
+    "THẤT BẠI" — giao hụt, đang chờ phát lại: chưa kết thúc nhưng khả năng hoàn cao. Nó là một
+                 LÁT CẮT của `IN_TRANSIT` (kèm chặng ĐVVC `DELIVERY_FAILED`), không phải một kết
+                 quả đơn riêng — cộng nó vào `IN_TRANSIT` là đếm hai lần cùng một đơn.
+
+  Giữ lại hai hằng số không ai gọi chỉ để "còn chỗ định nghĩa" là để lại hai bản của cùng một
+  luật, và bản không ai chạy sẽ trôi khỏi bản đang chạy mà không bài kiểm nào đỏ.
+*/
 
 /** Khoá gộp theo mẫu mã: id mẫu mã Pancake, hoặc SKU + tên nếu mẫu mã chưa có trong ERP */
 /**
@@ -1283,24 +1296,67 @@ export async function getReturnRateBySource(period: Period, q: string, value: Or
     const like = `%${term}%`;
     conds.push(sql`exists (select 1 from order_items oi where oi.order_id = ${o.id} and oi.is_bonus = false and (oi.sku ilike ${like} or oi.product_name ilike ${like} or oi.variation_detail ilike ${like}))`);
   }
-  const rows = await db
+  /*
+    ═══════════ TÁM CỘT GỘP ⇒ TÍNH KẾT QUẢ ĐƠN MỘT LẦN, KHÔNG PHẢI TÁM LẦN ═══════════
+
+    ĐO TRÊN PRODUCTION 22/09/2026 (`ops perf-probe` run 35716726654, kế hoạch thực thi thật):
+
+        cost=53168.88..8094319.63                            chi phí ƯỚC LƯỢNG 8,09 TRIỆU
+        Seq Scan on orders … actual time=27478.794..27482.203 rows=3182
+        SubPlan 2 … SubPlan 246, SubPlan 247
+        Execution Time: 32157,117 ms
+        31.211ms NGUỘI ↔ 30.122ms ẤM  (1x — KHÔNG nhanh lên khi đệm đầy)
+
+    Đây là câu chậm nhất của cả hệ thống SAU khi vá JIT, và nó là một loại hỏng KHÁC HẲN: lượt ấm
+    bằng đúng lượt nguội, nên không phải chuyện đệm, không phải chuyện đĩa, và kế hoạch KHÔNG có
+    khối `JIT:` nào — đây là công việc thật, làm lại đủ từ đầu mỗi lần ai mở trang.
+
+    Nguyên nhân: tám cột `filter (where …)` bên dưới, mỗi cột nội tuyến lại `ORDER_OUTCOME_FAST`
+    một lần, cộng với `ORDER_SOURCE` (một `CASE` mang `exists` trên `landing_orders`) xuất hiện cả
+    ở danh sách chọn LẪN `group by`. Postgres dựng ra 246 `SubPlan` tương quan cho một phép đếm
+    trên 3.182 đơn trả về ĐÚNG BA DÒNG.
+
+    Lời giải đã có sẵn trong chính tệp này — `getReturnRateSummary` (13 cột) và
+    `getReturnRateByVariant` (11 cột) đều đã chuyển sang bảng dẫn xuất. Hàm này là hàm cuối cùng
+    ở mức ĐƠN còn sót lại.
+
+    CÔNG THỨC VÀ CON SỐ KHÔNG ĐỔI: `outcomeColumn()` chính là `ORDER_OUTCOME_FAST`, và bốn vị từ
+    dưới đây là bản chép nguyên văn của `IS_SHIPPED` · `IS_RETURNED` · `IS_FAILED` (xem đầu tệp),
+    chỉ khác ở chỗ chúng đọc một cột đã tính sẵn thay vì tính lại. `OUTCOME_FENCE` là hàng rào
+    chặn Postgres kéo phép tính ngược vào trong — thiếu nó thì bảng dẫn xuất bị nội tuyến lại và
+    mọi thứ quay về như cũ.
+  */
+  const base = db
     .select({
-      source: ORDER_SOURCE,
-      orders: sql<number>`count(*)`,
-      shipped: sql<number>`count(*) filter (where ${IS_SHIPPED})`,
-      delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-      returned: sql<number>`count(*) filter (where ${IS_RETURNED})`,
-      inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'IN_TRANSIT')`,
-      failed: sql<number>`count(*) filter (where ${IS_FAILED})`,
-      cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'CANCELLED')`,
-      revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
-      lostRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${IS_RETURNED}), 0)`,
+      source: ORDER_SOURCE.as("order_source"),
+      revenue: o.totalPriceAfterDiscount,
+      shipmentStage: s.stage,
+      outcome: outcomeColumn(),
     })
     .from(o)
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
     .where(conds.length ? and(...conds) : undefined)
-    .groupBy(ORDER_SOURCE);
+    .offset(OUTCOME_FENCE)
+    .as("source_base");
+
+  const rows = await chayKhongJit(db, (tx) =>
+    tx
+      .select({
+        source: base.source,
+        orders: sql<number>`count(*)`,
+        shipped: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
+        delivered: sql<number>`count(*) filter (where ${base.outcome} = 'DELIVERED')`,
+        returned: sql<number>`count(*) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
+        inTransit: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT')`,
+        failed: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT' and ${base.shipmentStage} = 'DELIVERY_FAILED')`,
+        cancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
+        revenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
+        lostRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+      })
+      .from(base)
+      .groupBy(base.source),
+  );
 
   const thuTu: OrderSourceKey[] = ["FACEBOOK", "LANDING", "OTHER"];
   return rows
