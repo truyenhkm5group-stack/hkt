@@ -4,6 +4,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { MARKETER_COVERAGE_WARN_PCT, MARKETER_LINK_FIX } from "@/lib/constants/marketer-attribution";
 import { ALERT_MIN_SAMPLE, PROBLEM_LABEL, RISK_HINT, RISK_LABEL, RISK_TONE } from "@/lib/constants/return-intelligence";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { formatNumber, formatVND } from "@/lib/format";
 import type { ReturnIntelligence } from "@/lib/queries/return-intelligence";
@@ -114,8 +115,9 @@ export function ProductRiskTable({ rows, hasTarget }: { rows: ReturnIntelligence
           {" "}— đặt một mức chung cho cả shop, và mức riêng cho từng mã nếu mã đó có đặc thù.
         </p>
       ) : null}
+      <TableToolsFor tableId="hoan-canh-bao" />
       <div className={TABLE_SCROLL}>
-        <table className="w-full min-w-[880px] text-sm">
+        <table id="hoan-canh-bao" className="w-full min-w-[880px] text-sm">
           <thead className={cn(STICKY_HEAD, "text-[11.5px] uppercase tracking-wide text-muted-foreground")}>
             <tr>
               <th className="px-3 py-2 text-left font-semibold">Mã hàng</th>
@@ -198,8 +200,9 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
           </span>
         </p>
       ) : null}
+      <TableToolsFor tableId="hoan-theo-mau-ma" />
       <div className={TABLE_SCROLL}>
-        <table className="w-full min-w-[820px] text-sm">
+        <table id="hoan-theo-mau-ma" className="w-full min-w-[820px] text-sm">
           <thead className={cn(STICKY_HEAD, "text-[11.5px] uppercase tracking-wide text-muted-foreground")}>
             <tr>
               <th className="px-3 py-2 text-left font-semibold">Marketer</th>
@@ -267,8 +270,9 @@ export function CarePerformance({ care }: { care: ReturnIntelligence["care"] }) 
   }
   return (
     <div className="space-y-3">
+      <TableToolsFor tableId="hoan-theo-marketer" />
       <div className={TABLE_SCROLL}>
-        <table className="w-full min-w-[760px] text-sm">
+        <table id="hoan-theo-marketer" className="w-full min-w-[760px] text-sm">
           <thead className={cn(STICKY_HEAD, "text-[11.5px] uppercase tracking-wide text-muted-foreground")}>
             <tr>
               <th className="px-3 py-2 text-left font-semibold">Vào care từ trạng thái</th>
@@ -345,8 +349,10 @@ export function TrendSection({ trend }: { trend: ReturnIntelligence["trend"] }) 
   if (trend.points.length < 2) return <p className="p-3 text-[12px] text-muted-foreground">Chưa đủ hai mốc thời gian để vẽ xu hướng trong kỳ này.</p>;
   const max = Math.max(...trend.points.map((p) => p.eligibleSent), 1);
   return (
+    <>
+    <TableToolsFor tableId="hoan-theo-tinh" />
     <div className={TABLE_SCROLL}>
-      <table className="w-full min-w-[620px] text-sm">
+      <table id="hoan-theo-tinh" className="w-full min-w-[620px] text-sm">
         <thead className={cn(STICKY_HEAD, "text-[11.5px] uppercase tracking-wide text-muted-foreground")}>
           <tr>
             <th className="px-3 py-2 text-left font-semibold">{trend.grain === "WEEK" ? "Tuần bắt đầu" : "Ngày"}</th>
@@ -383,6 +389,7 @@ export function TrendSection({ trend }: { trend: ReturnIntelligence["trend"] }) 
         </tbody>
       </table>
     </div>
+    </>
   );
 }
 

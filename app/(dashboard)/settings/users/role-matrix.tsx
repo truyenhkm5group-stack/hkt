@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { useRouter } from "next/navigation";
 import { Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -47,8 +48,9 @@ export function RoleMatrix({ templates, canEdit }: { templates: RolePermissionMa
 
   return (
     <div className="space-y-3">
+      <TableToolsFor tableId="settings-users-role-matrix" />
       <div className={cn(TABLE_SCROLL, "rounded-lg border")}>
-        <table className="w-full text-sm">
+        <table id="settings-users-role-matrix" className="w-full text-sm">
           <thead className={cn(STICKY_HEAD, "text-[11px] font-semibold tracking-wide text-muted-foreground uppercase")}>
             <tr>
               <th className="px-3 py-2 text-left">Quyền</th>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { useRouter } from "next/navigation";
 import { History, Undo2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
@@ -206,43 +207,46 @@ export function AssignPanel({ pages, marketers, canWrite }: { pages: FanpageView
             ) : null}
 
             {showHistory ? (
-              <div className="mt-3 overflow-x-auto border-t pt-3">
-                {p.history.length ? (
-                  <table className="w-full min-w-[520px] text-[12.5px]">
-                    <thead className="text-left text-muted-foreground">
-                      <tr>
-                        <th className="py-1 pr-3 font-medium">Marketer</th>
-                        <th className="py-1 pr-3 font-medium">Từ</th>
-                        <th className="py-1 pr-3 font-medium">Đến</th>
-                        <th className="py-1 pr-3 font-medium">Ghi chú</th>
-                        <th className="py-1 font-medium" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {p.history.map((h) => (
-                        <tr key={h.id} className={cn("border-t", !h.active && "text-muted-foreground line-through")}>
-                          <td className="py-1.5 pr-3 font-medium">{h.marketerLabel}</td>
-                          <td className="py-1.5 pr-3">{formatDate(h.effectiveFrom)}</td>
-                          <td className="py-1.5 pr-3">{h.effectiveTo ? formatDate(h.effectiveTo) : <span className="text-emerald-700 dark:text-emerald-400">còn hiệu lực</span>}</td>
-                          <td className="py-1.5 pr-3">{h.note || "—"}</td>
-                          <td className="py-1.5 text-right">
-                            {canWrite && h.active ? (
-                              <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => revoke(h.id)}>
-                                <Undo2 className="size-3.5" /> Thu hồi
-                              </Button>
-                            ) : null}
-                          </td>
+              <>
+                <TableToolsFor tableId="marketing-fanpages-assign-panel" />
+                <div className="mt-3 overflow-x-auto border-t pt-3">
+                  {p.history.length ? (
+                    <table id="marketing-fanpages-assign-panel" className="w-full min-w-[520px] text-[12.5px]">
+                      <thead className="text-left text-muted-foreground">
+                        <tr>
+                          <th className="py-1 pr-3 font-medium">Marketer</th>
+                          <th className="py-1 pr-3 font-medium">Từ</th>
+                          <th className="py-1 pr-3 font-medium">Đến</th>
+                          <th className="py-1 pr-3 font-medium">Ghi chú</th>
+                          <th className="py-1 font-medium" />
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <p className="text-muted-foreground">Chưa có phân công nào cho fanpage này.</p>
-                )}
-                <p className="mt-2 text-[11.5px] text-muted-foreground">
-                  Thu hồi là <b>tắt</b> một dòng khai sai, không xoá: đơn đã quy kết bằng dòng đó vẫn truy ngược được. Sau khi sửa, bấm <b>Đối soát lại</b> ở đầu trang.
-                </p>
-              </div>
+                      </thead>
+                      <tbody>
+                        {p.history.map((h) => (
+                          <tr key={h.id} className={cn("border-t", !h.active && "text-muted-foreground line-through")}>
+                            <td className="py-1.5 pr-3 font-medium">{h.marketerLabel}</td>
+                            <td className="py-1.5 pr-3">{formatDate(h.effectiveFrom)}</td>
+                            <td className="py-1.5 pr-3">{h.effectiveTo ? formatDate(h.effectiveTo) : <span className="text-emerald-700 dark:text-emerald-400">còn hiệu lực</span>}</td>
+                            <td className="py-1.5 pr-3">{h.note || "—"}</td>
+                            <td className="py-1.5 text-right">
+                              {canWrite && h.active ? (
+                                <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => revoke(h.id)}>
+                                  <Undo2 className="size-3.5" /> Thu hồi
+                                </Button>
+                              ) : null}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="text-muted-foreground">Chưa có phân công nào cho fanpage này.</p>
+                  )}
+                  <p className="mt-2 text-[11.5px] text-muted-foreground">
+                    Thu hồi là <b>tắt</b> một dòng khai sai, không xoá: đơn đã quy kết bằng dòng đó vẫn truy ngược được. Sau khi sửa, bấm <b>Đối soát lại</b> ở đầu trang.
+                  </p>
+                </div>
+              </>
             ) : null}
           </div>
         );

@@ -1,4 +1,5 @@
 import { InfoHint } from "@/components/info-hint";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { SectionCard } from "@/components/ui-bits";
 import {
   CASE_OUTCOMES,
@@ -68,8 +69,9 @@ export async function CaseOutcomeReport({ period, basis }: { period: Period; bas
         <O nhan="Tới lúc chốt (trung vị)" so={phut(a.medians.toResolution)} phu="từ lúc mở ca tới khi ĐVVC chốt kết quả" />
       </div>
 
+      <TableToolsFor tableId="shipments-case-outcome-report" />
       <div className="mt-4 overflow-x-auto rounded-md border">
-        <table className="w-full text-[12.5px]">
+        <table id="shipments-case-outcome-report" className="w-full text-[12.5px]">
           <thead className="bg-muted/50 text-left text-muted-foreground">
             <tr>
               <th className="p-2 font-medium">Kết cục</th>

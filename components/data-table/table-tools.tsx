@@ -1,6 +1,6 @@
 "use client";
 
-import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import { ColumnResize } from "@/components/data-table/column-resize";
 import { ColumnVisibility } from "@/components/data-table/column-visibility";
 
@@ -19,4 +19,51 @@ export function TableTools({ tableRef }: { tableRef: React.RefObject<HTMLTableEl
       <ColumnVisibility tableRef={tableRef} />
     </div>
   );
+}
+
+/**
+ * ═══════════ CÙNG THANH CÔNG CỤ ẤY, CHO BẢNG KHÔNG DÙNG `<Table>` ═══════════
+ *
+ * ERP có **44 bảng viết bằng `<table>` thô** (lương, vận đơn, lý do hoàn, fanpage, nhập tệp ĐVVC…).
+ * Chúng không đi qua `components/ui/table.tsx` nên không có nút "Cột" và không có tay kéo — người
+ * dùng gặp đúng một tính năng ở chỗ này mà không gặp ở chỗ kia, và không có cách nào đoán được
+ * chỗ nào có.
+ *
+ * ─── VÌ SAO NHẬN `tableId` CHỨ KHÔNG NHẬN `ref` ───
+ *
+ * Phần lớn số bảng đó nằm trong **Server Component** (`app/(dashboard)/reports/returns/page.tsx`,
+ * `payroll/...`). Ở đó không gọi được `useRef`, nên đường "tạo ref rồi truyền xuống" chỉ dùng được
+ * sau khi đã đổi cả trang thành client — tức là một lượt viết lại lớn cho một việc nhỏ.
+ *
+ * `id` thì Server Component đặt được, và nó **tường minh**: mỗi bảng tự khai nó là bảng nào. Cố ý
+ * KHÔNG làm một bộ quét toàn trang tự tìm mọi `<table>` — quét như vậy sẽ vớ cả bảng lồng trong ô,
+ * bảng trong hộp thoại và bảng của trang in, rồi gắn nút vào những chỗ không ai muốn.
+ *
+ * Dùng:
+ *
+ *     <TableToolsFor tableId="ly-do-hoan" />
+ *     <div className={TABLE_SCROLL}>
+ *       <table id="ly-do-hoan" className="w-full min-w-[1200px] text-sm">
+ *
+ * Bảng chưa tồn tại lúc gắn (dữ liệu về sau, tab chưa mở) thì thanh công cụ KHÔNG hiện — không
+ * dựng một cái nút trỏ vào hư vô. Tìm lại mỗi khi DOM đổi.
+ */
+export function TableToolsFor({ tableId }: { tableId: string }) {
+  const [table, setTable] = useState<HTMLTableElement | null>(null);
+  const ref = useRef<HTMLTableElement | null>(null);
+  ref.current = table;
+
+  useEffect(() => {
+    const tim = () => {
+      const el = document.getElementById(tableId);
+      setTable((cu) => (cu === el ? cu : el instanceof HTMLTableElement ? el : null));
+    };
+    tim();
+    const obs = new MutationObserver(tim);
+    obs.observe(document.body, { childList: true, subtree: true });
+    return () => obs.disconnect();
+  }, [tableId]);
+
+  if (!table) return null;
+  return <TableTools tableRef={ref} />;
 }

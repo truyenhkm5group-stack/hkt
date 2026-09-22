@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Check } from "lucide-react";
 import { toast } from "sonner";
@@ -131,32 +132,35 @@ export function MigrationTable({ rows, effectiveFrom }: { rows: Row[]; effective
             ))}
 
             {r.recon ? (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-[13px]">
-                  <thead className="text-left text-muted-foreground">
-                    <tr>
-                      <th className="py-1 pr-3 font-medium">Khoản</th>
-                      <th className="py-1 pr-3 text-right font-medium">Đường cũ</th>
-                      <th className="py-1 pr-3 text-right font-medium">Máy chung</th>
-                      <th className="py-1 pr-3 text-right font-medium">Lệch</th>
-                      <th className="py-1 font-medium">Giải thích</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {r.recon.lines.map((l) => (
-                      <tr key={l.key} className={cn("border-t align-top", l.key === "net" ? "font-semibold" : "")}>
-                        <td className="py-1.5 pr-3">{l.label}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{l.old === null ? MISSING_TEXT : formatVND(l.old)}</td>
-                        <td className="py-1.5 pr-3 text-right tabular-nums">{l.next === null ? MISSING_TEXT : formatVND(l.next)}</td>
-                        <td className={cn("py-1.5 pr-3 text-right tabular-nums", l.diff ? "text-rose-700 dark:text-rose-400" : "")}>
-                          {l.diff === null ? MISSING_TEXT : l.diff === 0 ? "0 ₫" : formatVND(l.diff, { sign: true })}
-                        </td>
-                        <td className="py-1.5 text-[11px] text-muted-foreground">{l.explanation || (l.diff === 0 ? "Khớp." : "")}</td>
+              <>
+                <TableToolsFor tableId="payroll-migration-migration-table" />
+                <div className="overflow-x-auto">
+                  <table id="payroll-migration-migration-table" className="w-full min-w-[720px] text-[13px]">
+                    <thead className="text-left text-muted-foreground">
+                      <tr>
+                        <th className="py-1 pr-3 font-medium">Khoản</th>
+                        <th className="py-1 pr-3 text-right font-medium">Đường cũ</th>
+                        <th className="py-1 pr-3 text-right font-medium">Máy chung</th>
+                        <th className="py-1 pr-3 text-right font-medium">Lệch</th>
+                        <th className="py-1 font-medium">Giải thích</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {r.recon.lines.map((l) => (
+                        <tr key={l.key} className={cn("border-t align-top", l.key === "net" ? "font-semibold" : "")}>
+                          <td className="py-1.5 pr-3">{l.label}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{l.old === null ? MISSING_TEXT : formatVND(l.old)}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums">{l.next === null ? MISSING_TEXT : formatVND(l.next)}</td>
+                          <td className={cn("py-1.5 pr-3 text-right tabular-nums", l.diff ? "text-rose-700 dark:text-rose-400" : "")}>
+                            {l.diff === null ? MISSING_TEXT : l.diff === 0 ? "0 ₫" : formatVND(l.diff, { sign: true })}
+                          </td>
+                          <td className="py-1.5 text-[11px] text-muted-foreground">{l.explanation || (l.diff === 0 ? "Khớp." : "")}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             ) : (
               <p className="text-[13px] text-muted-foreground">Kỳ này không có dòng lương nào của người này ở đường cũ nên chưa đối chiếu được.</p>
             )}

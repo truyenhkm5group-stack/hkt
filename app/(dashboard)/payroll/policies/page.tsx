@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { PageHeader } from "@/components/page-header";
 import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { PolicyManager } from "@/app/(dashboard)/payroll/policies/policy-manager";
@@ -61,8 +62,9 @@ export default async function PayrollPoliciesPage() {
         title="Sổ đăng ký đầu vào"
         description="Một thành phần lương chỉ được nhân với đại lượng mà ERP THẬT SỰ đọc được. Cái nào chưa đo được thì phải nhập tay, có tên người nhập và mốc thời gian — không thay bằng một truy vấn gần đúng rồi gọi nó là số đo."
       >
+        <TableToolsFor tableId="payroll-policies-page" />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-[13px]">
+          <table id="payroll-policies-page" className="w-full min-w-[720px] text-[13px]">
             <thead className="text-left text-muted-foreground">
               <tr>
                 <th className="py-1 pr-3 font-medium">Đại lượng</th>

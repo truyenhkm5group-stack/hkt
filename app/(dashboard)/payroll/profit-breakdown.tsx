@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { ExternalLink } from "lucide-react";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { COMPENSATION_PROFIT_LABEL, COMPENSATION_PROFIT_RULES } from "@/lib/constants/compensation-profit";
@@ -105,8 +106,9 @@ export function ProfitBreakdown({
       title={`Bóc tách ${COMPENSATION_PROFIT_LABEL.toLowerCase()} — ${marketer.name}`}
       description="Mỗi dòng bấm được về chứng từ gốc. Hoa hồng KHÔNG nằm trong cơ sở này — nó được tính TỪ cơ sở, rồi trừ ở bước sau để ra lợi nhuận kế toán."
     >
+      <TableToolsFor tableId="payroll-profit-breakdown-1" />
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[720px] text-[13px]">
+        <table id="payroll-profit-breakdown-1" className="w-full min-w-[720px] text-[13px]">
           <tbody>
             {rows.map((r) => (
               <tr key={r.label} className="border-b align-top last:border-b-0">
@@ -152,59 +154,62 @@ export function ProfitBreakdown({
 
       {/* ═══ BƯỚC HAI: BÙ LỖ, RỒI MỚI TỚI TIỀN ═══ */}
       {carry ? (
-        <div className="mt-4 overflow-x-auto rounded-lg border bg-muted/30 p-3">
-          <p className="mb-2 text-[12px] font-medium">Bù lỗ lũy kế · tháng {carry.monthKey}</p>
-          <table className="w-full min-w-[520px] text-[13px]">
-            <tbody>
-              <tr className="border-b">
-                <td className="py-1.5 pr-3">Lỗ mang sang từ kỳ trước</td>
-                <td className="py-1.5 text-right tabular-nums">
-                  <Money value={carry.openingBalance} />
-                </td>
-              </tr>
-              <tr className="border-b">
-                <td className="py-1.5 pr-3">{COMPENSATION_PROFIT_LABEL} của kỳ</td>
-                <td className="py-1.5 text-right tabular-nums">
-                  <Money value={carry.realProfit} />
-                </td>
-              </tr>
-              <tr className="border-b">
-                <td className="py-1.5 pr-3">Phần lỗ cũ được bù trong kỳ</td>
-                <td className="py-1.5 text-right tabular-nums">
-                  <Money value={carry.lossApplied} />
-                </td>
-              </tr>
-              <tr className="border-b font-medium">
-                <td className="py-1.5 pr-3">Cơ sở tính hoa hồng sau bù lỗ</td>
-                <td className="py-1.5 text-right tabular-nums">
-                  <Money value={carry.commissionBase} />
-                </td>
-              </tr>
-              <tr className="border-b">
-                <td className="py-1.5 pr-3">Tỷ lệ hoa hồng</td>
-                <td className="py-1.5 text-right tabular-nums">{formatNumber(commissionPercent)}%</td>
-              </tr>
-              <tr className="border-b font-semibold">
-                <td className="py-1.5 pr-3">Hoa hồng phải trả</td>
-                <td className="py-1.5 text-right tabular-nums">
-                  <Money value={commission} />
-                </td>
-              </tr>
-              <tr>
-                <td className="py-1.5 pr-3">Lỗ chuyển sang kỳ sau</td>
-                <td className="py-1.5 text-right tabular-nums">
-                  <Money value={carry.closingBalance} />
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            {carry.commissionBase === 0
-              ? "Số dư sau bù vẫn âm nên hoa hồng bằng 0, và phần âm còn lại chuyển sang kỳ sau — con số âm KHÔNG bị xoá."
-              : "Đã bù hết lỗ cũ; hoa hồng chỉ tính trên phần lợi nhuận CÒN LẠI sau khi bù."}{" "}
-            Căn cứ số dư đầu kỳ: {carry.openingReason}
-          </p>
-        </div>
+        <>
+          <TableToolsFor tableId="payroll-profit-breakdown-2" />
+          <div className="mt-4 overflow-x-auto rounded-lg border bg-muted/30 p-3">
+            <p className="mb-2 text-[12px] font-medium">Bù lỗ lũy kế · tháng {carry.monthKey}</p>
+            <table id="payroll-profit-breakdown-2" className="w-full min-w-[520px] text-[13px]">
+              <tbody>
+                <tr className="border-b">
+                  <td className="py-1.5 pr-3">Lỗ mang sang từ kỳ trước</td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    <Money value={carry.openingBalance} />
+                  </td>
+                </tr>
+                <tr className="border-b">
+                  <td className="py-1.5 pr-3">{COMPENSATION_PROFIT_LABEL} của kỳ</td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    <Money value={carry.realProfit} />
+                  </td>
+                </tr>
+                <tr className="border-b">
+                  <td className="py-1.5 pr-3">Phần lỗ cũ được bù trong kỳ</td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    <Money value={carry.lossApplied} />
+                  </td>
+                </tr>
+                <tr className="border-b font-medium">
+                  <td className="py-1.5 pr-3">Cơ sở tính hoa hồng sau bù lỗ</td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    <Money value={carry.commissionBase} />
+                  </td>
+                </tr>
+                <tr className="border-b">
+                  <td className="py-1.5 pr-3">Tỷ lệ hoa hồng</td>
+                  <td className="py-1.5 text-right tabular-nums">{formatNumber(commissionPercent)}%</td>
+                </tr>
+                <tr className="border-b font-semibold">
+                  <td className="py-1.5 pr-3">Hoa hồng phải trả</td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    <Money value={commission} />
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-1.5 pr-3">Lỗ chuyển sang kỳ sau</td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    <Money value={carry.closingBalance} />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              {carry.commissionBase === 0
+                ? "Số dư sau bù vẫn âm nên hoa hồng bằng 0, và phần âm còn lại chuyển sang kỳ sau — con số âm KHÔNG bị xoá."
+                : "Đã bù hết lỗ cũ; hoa hồng chỉ tính trên phần lợi nhuận CÒN LẠI sau khi bù."}{" "}
+              Căn cứ số dư đầu kỳ: {carry.openingReason}
+            </p>
+          </div>
+        </>
       ) : (
         <p className="mt-3 text-[12px] text-muted-foreground">
           Sổ bù lỗ lũy kế KHÔNG áp dụng cho kỳ này (chưa bật, kỳ không phải một tháng lịch, hoặc tháng nằm trước mốc mở sổ). Đây là “không áp dụng”, khác hẳn “số dư bằng 0”.
