@@ -10,6 +10,7 @@ import { ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_ACTION_TONE, ADS_DECISION_RULE, 
 import type { AdsDecisionRow } from "@/lib/queries/ads-decision";
 import type { AdsDimension } from "@/lib/constants/ads-decision";
 import type { Stability } from "@/lib/marketing/decision-stability";
+import { AdsBudgetAction } from "@/app/(dashboard)/ads/budget-action";
 import { cn } from "@/lib/utils";
 
 /**
@@ -257,6 +258,14 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
                           {row.reason}
                         </p>
                         <Detail row={row} />
+                        {/*
+                          BÀN TAY chỉ hiện ở cấp CHIẾN DỊCH và chỉ khi khuyến nghị đã chín.
+                          Cấp mã hàng không có thực thể nào trên Facebook để đổi — một nút ở đó sẽ
+                          là nút giả, đúng thứ `work-sources.ts` đã cảnh báo.
+                        */}
+                        {dimension === "campaign" ? (
+                          <AdsBudgetAction campaignId={row.key} decision={row.action} ready={Boolean(stability?.[row.key]?.ready)} />
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ) : null}

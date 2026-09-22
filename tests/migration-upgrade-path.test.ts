@@ -55,6 +55,7 @@ const MOI = [
   "0106_session_revocation",
   "0107_agent_run_external_ref",
   "0108_ads_decision_ledger",
+  "0109_ads_budget_changes",
 ] as const;
 
 /*
@@ -152,6 +153,7 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_tasks' and column_name = 'pr_number'"), 0, "bước 1: phép chiếu PR CHƯA được có — đó là thứ 0104 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_agent_runs' and column_name = 'external_ref'"), 0, "bước 1: khoá lượt chạy đến từ máy ngoài CHƯA được có — đó là thứ 0107 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'ads_decision_ledger'"), 0, "bước 1: sổ quyết định quảng cáo CHƯA được có — đó là thứ 0108 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'ads_budget_changes'"), 0, "bước 1: sổ lượt ghi ngân sách CHƯA được có — đó là thứ 0109 thêm vào");
     /*
       Một vận đơn ĐÃ CÓ TỪ TRƯỚC 0099, mang một trạng thái Viettel Post đã dịch được. Bước 2 kiểm
       rằng migration KHÔNG dựng hộ nó một "lời khai thô": suy ngược từ `vtp_status_name` là bịa ra
@@ -234,6 +236,35 @@ export async function testMigrationUpgradePath() {
     // Sổ bắt đầu RỖNG ngoài dòng vừa gieo: KHÔNG backfill. Kết luận của quá khứ không dựng lại được
     // từ dữ liệu hôm nay — đơn hôm ấy còn treo nay đã ngã ngũ (AGENTS.md mục 8.8).
     assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id <> 'up-dl1'"), 0, "0108: migration KHÔNG được dựng hộ một dòng lịch sử nào");
+
+    /*
+      ═══ 0109: SỔ LƯỢT GHI NGÂN SÁCH — BA RÀNG BUỘC PHẢI CHẶN THẬT ═══
+
+      Sổ này là thứ duy nhất cho phép QUAY LUI một lượt đổi ngân sách, nên hình dạng của nó phải
+      đúng trước khi có đồng nào đi qua. Ràng buộc thứ ba đáng nói nhất: một dòng vừa APPLIED vừa
+      mang mã chặn là một dòng không ai đọc được, và nó làm mọi phép đếm "máy đã định làm gì" nói sai.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'ads_budget_changes'"), 1, "0109: bảng sổ lượt ghi phải có mặt");
+    await client.query(`insert into ads_budget_changes (id, change_day, campaign_id, action, outcome, decision, mode) values ('up-bc1', '2026-09-22', 'c1', 'SET_DAILY_BUDGET', 'DENIED', 'SCALE', 'COPILOT')`);
+    await assert.rejects(
+      () => client.query(`insert into ads_budget_changes (id, change_day, campaign_id, action, outcome, decision, mode) values ('up-bc2', '2026-09-22', 'c1', 'SET_DAILY_BUDGET', 'MAYBE', 'SCALE', 'COPILOT')`),
+      () => true,
+      "0109: kết quả ngoài ba giá trị đã khai phải bị CSDL từ chối",
+    );
+    await assert.rejects(
+      () => client.query(`insert into ads_budget_changes (id, change_day, campaign_id, action, outcome, decision, mode) values ('up-bc3', '2026-09-22', 'c1', 'CREATE_CAMPAIGN', 'APPLIED', 'SCALE', 'COPILOT')`),
+      () => true,
+      "0109: hành động ngoài hai hành động đã khai phải bị từ chối — không có hành động thứ ba",
+    );
+    await assert.rejects(
+      () => client.query(`insert into ads_budget_changes (id, change_day, campaign_id, action, outcome, denial, decision, mode) values ('up-bc4', '2026-09-22', 'c1', 'SET_DAILY_BUDGET', 'APPLIED', 'DAILY_CAP', 'SCALE', 'COPILOT')`),
+      () => true,
+      "0109: một dòng vừa ĐÃ ÁP vừa mang mã chặn phải bị từ chối",
+    );
+    // Xoá dòng sổ quyết định KHÔNG được cuốn theo bằng chứng một lượt ghi đã xảy ra.
+    await client.query(`update ads_budget_changes set ledger_id = 'up-dl1' where id = 'up-bc1'`);
+    await client.query(`delete from ads_decision_ledger where id = 'up-dl1'`);
+    assert.equal(await dem("select count(*)::int as n from ads_budget_changes where id = 'up-bc1' and ledger_id is null"), 1, "0109: xoá dòng sổ quyết định phải để lại lượt ghi, chỉ gỡ khoá");
 
     /*
       ═══ 0082: SỔ HÀNG HOÀN ĐƯA VÀO BẰNG CHÍNH ERP — MỘT BẢNG MỚI, KHOÁ LÀ NỘI DUNG ═══

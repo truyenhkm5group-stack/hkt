@@ -85,6 +85,27 @@ export const env = {
       return readInt("FACEBOOK_USD_VND", 25_500);
     },
   },
+  /**
+   * ───────────── CHỐT NGOÀI CÙNG CỦA ĐƯỜNG GHI QUẢNG CÁO ─────────────
+   *
+   * Đọc THẲNG từ biến môi trường và **cố ý không hợp nhất với bảng `settings`** — ghi khoá này vào
+   * CSDL là ghi vào hư không. Nó đứng TRƯỚC nấc quyền hạn, trước phiếu duyệt, trước mọi thứ.
+   *
+   * Chỉ đúng chuỗi `"true"` mở được: `1`, `yes`, `on` đều là CẤM, và không khai gì cũng là CẤM.
+   * Một cái cổng nhận nhiều cách viết "bật" là một cái cổng sẽ bật nhầm.
+   *
+   * Đây là câu trả lời cho *"có tổ hợp cấu hình nào lỡ đổi ngân sách thật không"*: không, trừ khi
+   * có người đặt đúng chuỗi ấy vào `.env` trên máy chủ rồi khởi động lại.
+   */
+  adsWrite: {
+    get enabled() {
+      return process.env.ADS_WRITE_ENABLED === "true";
+    },
+    /** `OFF` (mặc định) · `COPILOT`. `AUTO` khai ở đây cũng bị kẹp xuống — xem `MAX_ALLOWED_ADS_WRITE_MODE`. */
+    get mode() {
+      return read("ADS_WRITE_MODE", "OFF");
+    },
+  },
   /** AI Copilot. Khoá API đọc bởi chính SDK (OPENAI_API_KEY / ANTHROPIC_API_KEY) — không đi qua đây, không log. */
   ai: {
     /** `auto` (mặc định) · `openai` · `anthropic` · `off`. Chọn model ở `lib/ai/router.ts`. */
