@@ -96,10 +96,18 @@ export const DECISION_CLASS: Record<AdsAction, DecisionClass> = {
  *   · `minHeldDays` — khuyến nghị hiện tại đã giữ liên tiếp bấy nhiêu ngày;
  *   · `maxFlips`    — trong `flipWindowDays` ngày gần nhất, khuyến nghị đổi không quá bấy nhiêu lần.
  *
- * ─── ĐÂY LÀ NGƯỠNG NGHIỆP VỤ (AGENTS.md mục 7) ───
+ * ─── ĐÂY LÀ NGƯỠNG NGHIỆP VỤ, VÀ CHỦ SHOP ĐÃ CHỐT (AGENTS.md mục 7) ───
  *
- * Các con số dưới đây là **đề xuất khởi điểm chưa được chủ shop chốt**, và mã nguồn nói thẳng như
- * vậy thay vì im lặng nhận là đã chốt. Chúng chỉ sửa ở ĐÂY.
+ * Chốt ngày **22/09/2026**. Sửa chỉ ở ĐÂY, và chỉ khi chủ shop yêu cầu — kèm tăng
+ * `DECISION_RULE_VERSION`, vì đổi ngưỡng là đổi nghĩa của mọi chuỗi đã ghi.
+ *
+ * Lý lẽ của từng con số, để người sau không phải đoán:
+ *  · `CUT` đi sớm hơn `SCALE` — một dòng đang lỗ thì mỗi ngày chờ là mất thêm tiền thật, còn tăng
+ *    ngân sách là CAM KẾT thêm tiền nên đòi bằng chứng dày hơn.
+ *  · `FIX_DELIVERY` đi sớm nhất vì nó KHÔNG đụng tới ngân sách: sai thì mất một lượt kiểm tra khâu
+ *    đóng gói, không mất đồng nào.
+ *  · `maxFlips = 1` cho cả hai hành động tiền: một dòng đã đổi ý hai lần trong mười ngày là một
+ *    dòng đang nằm trên ranh giới, và cả hai phía của ranh giới ấy đều không đáng tin.
  */
 export const DECISION_STABILITY = {
   /** Cắt đang chảy máu — chờ lâu là mất thêm tiền; nhưng cắt nhầm là giết một dòng đang học. */

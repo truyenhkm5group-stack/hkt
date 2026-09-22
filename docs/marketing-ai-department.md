@@ -1,7 +1,7 @@
 # Phòng Marketing AI — đặc tả và lộ trình
 
 > **File trạng thái DUY NHẤT của phòng.** Mọi nấc cập nhật vào đây, không mở file mới.
-> Cập nhật: **22/09/2026** · **Nấc 0 đã dựng (trí nhớ); Nấc 1 trở lên chờ chủ shop quyết**
+> Cập nhật: **22/09/2026** · **Nấc 0 đã dựng (trí nhớ); chủ shop đã duyệt Nấc 1–3 (bàn tay ở nấc COPILOT)**
 >
 > Đọc kèm: `docs/ads-decision-contract.md` (hợp đồng chỉ số) · `docs/marketing-daily-contract.md` ·
 > `docs/tech-ai-room-status.md` (phòng AI đầu tiên — mọi lớp lỗi ở đó sẽ lặp lại ở đây) ·
@@ -22,7 +22,7 @@ Chủ shop yêu cầu: *"phòng Marketing AI agent có thể tự động làm v
 | 2. CHẨN ĐOÁN nguyên nhân | `lib/marketing/diagnose.ts` — phát hiện có bằng chứng, có `why` và `owner` | — |
 | 3. QUYẾT ĐỊNH từng chiến dịch | `decideAction()` — hàm THUẦN, có cổng từ chối kết luận | — |
 | 4. NHỚ đã quyết gì, có ai làm không, kết quả ra sao | **KHÔNG CÓ** (tới 22/09) | ⇒ **Nấc 0 dựng ở bản này** |
-| 5. LÀM: đổi ngân sách · tắt/bật chiến dịch | **KHÔNG CÓ ĐƯỜNG NÀO** | ⇒ **Nấc 3, cần chủ shop quyết** |
+| 5. LÀM: đổi ngân sách · tắt/bật chiến dịch | **KHÔNG CÓ ĐƯỜNG NÀO** | ⇒ **Nấc 3, chủ shop đã duyệt ở nấc COPILOT** |
 | 6. NỘI DUNG: ý tưởng, câu chữ, ảnh | `marketing_ideas` là bảng ghi tay, không nối vào vòng | ⇒ Nấc 4 |
 
 **Khâu 5 là cái trần thật, và nó không phải giới hạn của mô hình.** `lib/integrations/facebook/client.ts`
@@ -33,8 +33,13 @@ và chưa bao giờ ghi. Kho mã tự khai điều đó ở `lib/constants/work-
 > giả: người bấm tin đã xong, tiền vẫn chảy."*
 
 Nên câu trả lời trung thực cho *"tự động trong MỌI khâu"* là: **bốn khâu đầu máy làm được và bản
-này đưa khâu 4 vào chỗ; khâu 5 cần một quyết định của chủ shop mà không ai thay được** — mở quyền
-`ads_management` là cho một cỗ máy tiêu tiền thật. Xem mục 5.
+này đưa khâu 4 vào chỗ; khâu 5 là một quyết định của chủ shop mà không ai thay được** — mở quyền
+`ads_management` là cho một cỗ máy tiêu tiền thật.
+
+**Chủ shop đã quyết ngày 22/09/2026: mở, nhưng ở nấc `COPILOT` — agent ĐỀ NGHỊ, người bấm xác nhận
+thì ERP mới gọi Facebook.** Nên "không cần tôi can thiệp" đúng với khâu 1–4 và khâu 6; ở khâu 5 thì
+việc của chủ shop rút xuống còn MỘT cú bấm trên một đề nghị đã có đủ bằng chứng, thay vì tự đi đọc
+số rồi tự vào Ads Manager. Nấc `AUTO` chưa mở — xem mục 5 và mục 8.
 
 ---
 
@@ -62,7 +67,7 @@ nào đọc nó. Job ghi sổ hỏng hoàn toàn cũng không làm lệch một 
 Nấc 0  TRÍ NHỚ      sổ quyết định + độ bền                        ✅ bản này
 Nấc 1  VIỆC         khuyến nghị đã chín → hàng đợi /work          ⏳ (Nấc 0 phải có dữ liệu trước)
 Nấc 2  DIỄN ĐẠT     agent đọc sổ, viết bản tin, xếp ưu tiên       ⏳
-Nấc 3  BÀN TAY      ghi ngân sách Facebook, có trần và phanh      ⏸ CHỦ SHOP QUYẾT
+Nấc 3  BÀN TAY      ghi ngân sách Facebook, có trần và phanh      ✅ duyệt ở nấc COPILOT (người bấm)
 Nấc 4  NỘI DUNG     ý tưởng → chiến dịch → kết quả, khép vòng     ⏸
 ```
 
@@ -117,9 +122,9 @@ hai vế và phải qua cả hai:
 | `SCALE` | 4 | 1 | cam kết thêm ngân sách ⇒ đòi bằng chứng dày hơn cắt |
 | `FIX_DELIVERY` | 2 | 2 | không đụng ngân sách, rẻ khi sai ⇒ cho đi sớm hơn |
 
-> **Ba bộ số này là ĐỀ XUẤT KHỞI ĐIỂM, chưa được chủ shop chốt** (AGENTS.md mục 7). Mã nguồn nói
-> thẳng như vậy thay vì im lặng nhận là đã chốt. Sửa ở `lib/constants/marketing-decision-ledger.ts`,
-> và chỉ ở đó.
+> **Chủ shop đã chốt ba bộ số này ngày 22/09/2026** (AGENTS.md mục 7). Sửa chỉ ở
+> `lib/constants/marketing-decision-ledger.ts`, và kèm tăng `DECISION_RULE_VERSION` — đổi ngưỡng là
+> đổi nghĩa của mọi chuỗi đã ghi.
 
 ### 3.4 Bốn cách một khuyến nghị bị từ chối — và chúng khác nhau
 
@@ -192,7 +197,7 @@ nghị đã giữ 6 ngày và một khuyến nghị mới nảy hôm nay không 
 
 ---
 
-## 5. Nấc 3 — BÀN TAY ⏸ **CẦN CHỦ SHOP QUYẾT**
+## 5. Nấc 3 — BÀN TAY ✅ **CHỦ SHOP DUYỆT 22/09/2026, Ở NẤC `COPILOT`**
 
 Đây là nấc biến "trợ lý" thành "nhân viên", và là nấc duy nhất chạm tiền thật.
 
@@ -271,16 +276,16 @@ from ads_decision_ledger where dimension = 'campaign' group by 1 order by 1 desc
 
 ## 8. BLOCKED / HUMAN GATE
 
-> ### ⏸ 1 · Ngưỡng độ bền (mục 3.3)
-> Ba bộ số đang là đề xuất khởi điểm. Chủ shop chốt thì sửa ở
-> `lib/constants/marketing-decision-ledger.ts` và tăng `DECISION_RULE_VERSION`.
+### Đã chốt, không còn là gate (22/09/2026)
 
-> ### ⏸ 2 · Bật job ghi sổ (mục 3.7)
-> Một biến môi trường. Chưa bật thì Nấc 1 trở lên không có dữ liệu để đứng lên.
+- **Ngưỡng độ bền (mục 3.3)** — chủ shop lấy bộ đề xuất: CUT 3/1 · SCALE 4/1 · FIX_DELIVERY 2/2.
+- **Bật job ghi sổ (mục 3.7)** — chủ shop đồng ý gộp, deploy rồi đặt `MARKETING_LEDGER_EVERY_MINUTES`.
+- **Nấc 3 — quyền ghi Facebook: ĐƯỢC MỞ Ở NẤC `COPILOT`.** Agent ĐỀ NGHỊ, **người bấm xác nhận thì
+  ERP mới gọi Facebook**. Nấc `AUTO` (máy tự ghi, không ai bấm) **KHÔNG được mở** trong vòng này —
+  và không được tự nâng lên sau: nâng nấc là một quyết định mới của chủ shop.
 
-> ### ⏸ 3 · Nấc 3 — quyền ghi Facebook (mục 5)
-> **Quyết định của chủ shop, không ai thay được.** Mở `ads_management` là cho một cỗ máy tiêu tiền
-> thật. Tôi giữ lại và không tự làm.
+> ### ⏸ 1 · Nấc `AUTO` của bàn tay
+> Chỉ xét sau khi nấc `COPILOT` chạy đủ lâu để có SỐ ĐO về chất lượng đề nghị. Đo trước, nâng sau.
 
 ---
 
@@ -292,4 +297,4 @@ from ads_decision_ledger where dimension = 'campaign' group by 1 order by 1 desc
 | Nấc 1 — chiếu khuyến nghị đã chín vào `/work` | sổ có ít nhất `minHeldDays` ngày dữ liệu |
 | Nấc 2 — đưa độ bền vào bối cảnh AI | Nấc 1 |
 | Nấc 4 — khép vòng nội dung | Nấc 1 |
-| Nấc 3 — bàn tay | **quyết định của chủ shop** |
+| **Nấc 3 — bàn tay ở nấc COPILOT** | chủ shop đã duyệt 22/09 · cần System User token có `ads_management` |
