@@ -32,9 +32,9 @@ const pr = (o: Partial<TaskPrState>): TaskPrState => ({ prNumber: 1, prState: ""
 
 export function testTaskAdvancePure() {
   // ───────── Hai bước được phép ─────────
-  const mo = shouldAdvanceTask({ status: "BUILDING", pr: pr({ prState: "OPEN" }), nguoiVuaDoi: false });
+  const mo = shouldAdvanceTask({ status: "BUILDING", pr: pr({ prState: "OPEN" }), nguoiDoi: null });
   assert.ok(mo.advance && mo.to === "REVIEW", "có PR đang mở ⇒ BUILDING → REVIEW");
-  const gop = shouldAdvanceTask({ status: "REVIEW", pr: pr({ prState: "MERGED" }), nguoiVuaDoi: false });
+  const gop = shouldAdvanceTask({ status: "REVIEW", pr: pr({ prState: "MERGED" }), nguoiDoi: null });
   assert.ok(gop.advance && gop.to === "QA", "PR đã gộp ⇒ REVIEW → QA");
 
   /*
@@ -44,9 +44,32 @@ export function testTaskAdvancePure() {
     (vì họ biết điều gì đó máy không biết) mà thấy nó tự nhảy lại sau mười phút thì lần thứ hai họ
     sẽ tắt hẳn bộ này đi.
   */
-  const nguoiGiu = shouldAdvanceTask({ status: "BUILDING", pr: pr({ prState: "OPEN" }), nguoiVuaDoi: true });
-  assert.ok(!nguoiGiu.advance, "người vừa đổi ⇒ máy KHÔNG đẩy tiếp");
-  assert.match(nguoiGiu.reason, /NGƯỜI/, "và phải nói rõ vì sao");
+  const nguoiGiu = shouldAdvanceTask({ status: "BUILDING", pr: pr({ prState: "OPEN" }), nguoiDoi: { tu: "REVIEW", sang: "BUILDING" } });
+  assert.ok(!nguoiGiu.advance, "người vừa LẬT ĐÚNG bước này ⇒ máy KHÔNG đẩy lại");
+  assert.match(nguoiGiu.reason, /NGƯỜI vừa kéo/, "và phải nói rõ vì sao");
+
+  /*
+    ───────── NHƯNG CHỈ NHƯỜNG Ở ĐÚNG BƯỚC ĐÃ BỊ LẬT ─────────
+
+    ĐO PRODUCTION 22/09/2026 — và đây không phải một ca lẻ:
+
+        STATUS | HUMAN | NEW → TRIAGED | 21/09 15:10   ← lượt đổi gần nhất
+
+    TECH-3 có PR #94 đang MỞ, phép chiếu đã ghép đúng, bộ đẩy chạy đều và luôn SUCCESS. Nó vẫn
+    đứng yên, vì lượt đổi gần nhất là của người — xảy ra MƯỜI TIẾNG trước khi PR tồn tại.
+
+    Mọi việc thật đều bắt đầu bằng người kéo `NEW → TRIAGED`, còn máy không bao giờ tự đặt
+    `TRIAGED`. Nên câu hỏi rộng "người có vừa đổi không" làm cả Nấc 4 chưa từng nổ một lần nào.
+  */
+  const caThat = shouldAdvanceTask({ status: "TRIAGED", pr: pr({ prState: "OPEN" }), nguoiDoi: { tu: "NEW", sang: "TRIAGED" } });
+  assert.ok(caThat.advance && caThat.to === "BUILDING", "người phân loại việc KHÔNG phải là phản đối bước TRIAGED → BUILDING");
+
+  /* Người lật một bước KHÁC cũng không chặn được bước này. */
+  const latChoKhac = shouldAdvanceTask({ status: "TRIAGED", pr: pr({ prState: "OPEN" }), nguoiDoi: { tu: "QA", sang: "REVIEW" } });
+  assert.ok(latChoKhac.advance, "người lật một bước khác KHÔNG chặn bước máy đang định đi");
+
+  /* Chưa người nào đổi bao giờ ⇒ không có gì để nhường. */
+  assert.ok(shouldAdvanceTask({ status: "TRIAGED", pr: pr({ prState: "OPEN" }), nguoiDoi: null }).advance, "chưa ai đổi ⇒ máy đi tiếp");
 
   /*
     ───────── KHÚC ĐẦU CŨNG PHẢI ĐI ĐƯỢC ─────────
@@ -55,7 +78,7 @@ export function testTaskAdvancePure() {
     thẳng từ giao diện Actions nên không ai bấm nó sang BUILDING, và không luật nào nhận nó.
   */
   for (const tu of ["TRIAGED", "SPEC_READY"]) {
-    const v = shouldAdvanceTask({ status: tu, pr: pr({ prState: "OPEN" }), nguoiVuaDoi: false });
+    const v = shouldAdvanceTask({ status: tu, pr: pr({ prState: "OPEN" }), nguoiDoi: null });
     assert.ok(v.advance && v.to === "BUILDING", `${tu} + PR mở ⇒ BUILDING`);
   }
 
@@ -69,13 +92,13 @@ export function testTaskAdvancePure() {
     Một bộ tự động chỉ đúng khi nó chạy đúng nhịp là một bộ tự động sẽ sai — nó không chịu được
     một lần mất điện, một lần đổi lịch, hay một lượt chạy khởi động từ chỗ khác.
   */
-  const ketDuocGo = shouldAdvanceTask({ status: "BUILDING", pr: pr({ prState: "MERGED" }), nguoiVuaDoi: false });
+  const ketDuocGo = shouldAdvanceTask({ status: "BUILDING", pr: pr({ prState: "MERGED" }), nguoiDoi: null });
   assert.ok(ketDuocGo.advance && ketDuocGo.to === "REVIEW", "việc bị bỏ lỡ lúc PR còn mở vẫn phải đi tiếp được sau khi PR gộp");
-  assert.ok(shouldAdvanceTask({ status: "TRIAGED", pr: pr({ prState: "MERGED" }), nguoiVuaDoi: false }).advance, "TRIAGED + PR đã gộp vẫn phải nhận ra là đã có người làm");
+  assert.ok(shouldAdvanceTask({ status: "TRIAGED", pr: pr({ prState: "MERGED" }), nguoiDoi: null }).advance, "TRIAGED + PR đã gộp vẫn phải nhận ra là đã có người làm");
 
   // ───────── Chưa đủ bằng chứng ─────────
   for (const st of ["", "CLOSED"]) {
-    const v = shouldAdvanceTask({ status: "BUILDING", pr: pr({ prState: st }), nguoiVuaDoi: false });
+    const v = shouldAdvanceTask({ status: "BUILDING", pr: pr({ prState: st }), nguoiDoi: null });
     assert.ok(!v.advance, `BUILDING với PR "${st}" KHÔNG được đẩy sang REVIEW`);
   }
   /*
@@ -83,10 +106,10 @@ export function testTaskAdvancePure() {
     là tệ hơn đứng yên.
   */
   for (const tu of ["TRIAGED", "SPEC_READY"]) {
-    assert.ok(!shouldAdvanceTask({ status: tu, pr: pr({ prState: "CLOSED" }), nguoiVuaDoi: false }).advance, `${tu} + PR bị đóng bỏ ⇒ KHÔNG đẩy`);
+    assert.ok(!shouldAdvanceTask({ status: tu, pr: pr({ prState: "CLOSED" }), nguoiDoi: null }).advance, `${tu} + PR bị đóng bỏ ⇒ KHÔNG đẩy`);
   }
-  assert.ok(!shouldAdvanceTask({ status: "REVIEW", pr: pr({ prState: "OPEN" }), nguoiVuaDoi: false }).advance, "PR còn mở thì chưa qua QA");
-  assert.ok(!shouldAdvanceTask({ status: "REVIEW", pr: pr({ prState: "CLOSED" }), nguoiVuaDoi: false }).advance, "PR đóng mà KHÔNG gộp ⇒ không phải đã xong review");
+  assert.ok(!shouldAdvanceTask({ status: "REVIEW", pr: pr({ prState: "OPEN" }), nguoiDoi: null }).advance, "PR còn mở thì chưa qua QA");
+  assert.ok(!shouldAdvanceTask({ status: "REVIEW", pr: pr({ prState: "CLOSED" }), nguoiDoi: null }).advance, "PR đóng mà KHÔNG gộp ⇒ không phải đã xong review");
 
   /*
     ───────── NHỮNG TRẠNG THÁI MÁY KHÔNG BAO GIỜ TỰ ĐẶT ─────────

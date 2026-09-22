@@ -64,20 +64,30 @@ export async function advanceTasksFromGithub(): Promise<TaskAdvanceResult> {
   const suKien = await db.query.techTaskEvents.findMany({
     where: and(inArray(schema.techTaskEvents.taskId, viec.map((v) => v.id)), eq(schema.techTaskEvents.kind, "STATUS")),
     orderBy: [desc(schema.techTaskEvents.createdAt)],
-    columns: { taskId: true, actorKind: true },
+    columns: { taskId: true, actorKind: true, previousValue: true, nextValue: true },
     limit: 4000,
   });
-  const nguoiVuaDoi = new Map<string, boolean>();
+  /*
+    LƯỢT ĐỔI GẦN NHẤT CỦA NGƯỜI — giữ cả TỪ và SANG, không chỉ giữ một cờ.
+
+    Một cờ "người vừa đổi" chỉ trả lời được câu hỏi rộng, và câu rộng ấy làm bộ đẩy tê liệt với
+    mọi việc thật (xem `lib/constants/task-advance.ts`). Cần biết người đi TỪ đâu SANG đâu mới
+    biết họ có lật đúng bước máy đang định đi hay không.
+  */
+  const nguoiDoi = new Map<string, { tu: string; sang: string }>();
+  const daXet = new Set<string>();
   for (const s of suKien) {
-    // Danh sách đã sắp mới-trước, nên lần GHI ĐẦU TIÊN cho mỗi việc chính là lượt gần nhất.
-    if (!nguoiVuaDoi.has(s.taskId)) nguoiVuaDoi.set(s.taskId, s.actorKind === "HUMAN");
+    // Danh sách đã sắp mới-trước, nên lần GẶP ĐẦU TIÊN của mỗi việc chính là lượt gần nhất.
+    if (daXet.has(s.taskId)) continue;
+    daXet.add(s.taskId);
+    if (s.actorKind === "HUMAN") nguoiDoi.set(s.taskId, { tu: s.previousValue ?? "", sang: s.nextValue ?? "" });
   }
 
   for (const v of viec) {
     const pr: TaskPrState = { prNumber: v.prNumber, prState: v.prState, ciState: v.ciState, reviewState: v.reviewState, mergeState: v.mergeState };
-    const phan = shouldAdvanceTask({ status: v.status, pr, nguoiVuaDoi: nguoiVuaDoi.get(v.id) ?? false });
+    const phan = shouldAdvanceTask({ status: v.status, pr, nguoiDoi: nguoiDoi.get(v.id) ?? null });
     if (!phan.advance) {
-      if (phan.reason.includes("do NGƯỜI")) out.nguoiGiu += 1;
+      if (phan.reason.includes("NGƯỜI vừa kéo")) out.nguoiGiu += 1;
       else out.chuaDu += 1;
       continue;
     }
