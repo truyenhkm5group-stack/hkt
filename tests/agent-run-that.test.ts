@@ -148,6 +148,7 @@ const JOB = {
   taskCode: "TECH-2",
   taskTitle: "Viết tài liệu",
   taskDescription: "",
+  role: "DOCUMENTATION",
   writeGlobs: ["docs/"] as const,
   readGlobs: ["docs/", "lib/"] as const,
   baseCommit: "abc1234",

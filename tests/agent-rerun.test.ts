@@ -125,6 +125,7 @@ export function testRerunDeBai() {
     taskCode: "TECH-9",
     taskTitle: "Viết tài liệu X",
     taskDescription: "Mô tả việc",
+    role: "DOCUMENTATION",
     writeGlobs: ["docs/"] as const,
     readGlobs: ["docs/", "lib/"] as const,
     baseCommit: "abc1234",

@@ -1,6 +1,7 @@
 import { estimateCostUsd, type AiProvider, type AiMessage, type AiToolDef } from "@/lib/ai/provider";
 import type { AgentWorkspace } from "@/lib/agents/workspace";
 import { DOC_NGAN_SACH, catTepChoVua } from "@/lib/constants/agent-read-budget";
+import { dungPromptHeThong } from "@/lib/constants/agent-system-prompt";
 
 /**
  * ═══════════ AGENT EXECUTOR — MỘT GIAO DIỆN, NHIỀU CÁCH THỰC THI ═══════════
@@ -47,6 +48,14 @@ export type AgentOutcome = {
 
 export type AgentJob = {
   taskCode: string;
+  /**
+   * VAI đang chạy — quyết lời giới thiệu nghề ở prompt hệ thống.
+   *
+   * ĐÃ CẮN THẬT, lượt #23: prompt ghi cứng "Bạn là agent TÀI LIỆU… KHÔNG sửa mã nguồn", trong khi
+   * việc giao cho vai QA là viết một bài kiểm trong `tests/`. Agent phải làm TRÁI câu lệnh đầu
+   * tiên của chính nó mới làm đúng việc — và một agent như thế thì kết quả của nó không đọc được.
+   */
+  role: string | null;
   taskTitle: string;
   taskDescription: string;
   /** Phạm vi tệp được ghi, để nói thẳng cho executor thay vì để nó dò bằng cách thử và bị chặn. */
@@ -164,24 +173,7 @@ export const AGENT_TOOLS: AiToolDef[] = [
   },
 ];
 
-const SYSTEM = `Bạn là agent TÀI LIỆU của Phòng Tech AI trong ERP VNXcommerce.
-
-PHẠM VI: chỉ viết và sửa tài liệu trong thư mục docs/. Bạn KHÔNG sửa mã nguồn, KHÔNG commit,
-KHÔNG merge, KHÔNG deploy — runner làm việc commit sau khi bạn xong.
-
-NGÔN NGỮ: tiếng Việt có dấu. Viết như một kỹ sư giải thích cho đồng nghiệp: nói VÌ SAO trước, rồi
-mới tới CÁI GÌ. Không quảng cáo, không hình dung từ rỗng.
-
-CÁCH LÀM:
-1. Đọc những tệp cần thiết để hiểu đúng thứ mình sắp mô tả. Đừng đoán.
-2. Ghi tệp tài liệu trong phạm vi task cho phép.
-3. Tự kiểm bằng run_command nếu task yêu cầu.
-4. Gọi finish với một câu kết luận kiểm chứng được.
-
-LUẬT:
-- Chỉ viết điều bạn ĐỌC ĐƯỢC từ mã nguồn. Không bịa số liệu, không bịa tên hàm.
-- Chưa biết thì viết là chưa biết. Không lấp chỗ trống bằng câu nghe hợp lý.
-- Lệnh bị chặn thì ĐỪNG thử cách khác để lách — báo lại trong finish.`;
+/* Prompt hệ thống dựng theo VAI — xem `lib/constants/agent-system-prompt.ts`. */
 
 /** Vòng lặp tối đa. Một việc tài liệu không cần nhiều hơn; vượt ngưỡng là dấu hiệu agent đang lạc. */
 const MAX_ROUNDS = 24;
@@ -260,7 +252,7 @@ export class AiAgentExecutor implements AgentExecutor {
       */
       let res: Awaited<ReturnType<AiProvider["complete"]>>;
       try {
-        res = await this.provider.complete({ system: SYSTEM, messages, tools: AGENT_TOOLS, maxTokens: 8000 });
+        res = await this.provider.complete({ system: dungPromptHeThong(job.role), messages, tools: AGENT_TOOLS, maxTokens: 8000 });
       } catch (e) {
         const loi = e instanceof Error ? e.message : String(e);
         steps.push({ kind: "NOTE", detail: `Lời gọi model hỏng ở vòng ${round + 1}: ${loi.slice(0, 300)}` });
