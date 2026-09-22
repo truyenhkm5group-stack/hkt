@@ -75,6 +75,14 @@ if [ -f .env ]; then
   [ -n "${ERP_GITHUB_REPO:-}" ] && upsert_env ERP_GITHUB_REPO "${ERP_GITHUB_REPO}"
   [ -n "${ERP_GITHUB_DEPLOY_WORKFLOW:-}" ] && upsert_env ERP_GITHUB_DEPLOY_WORKFLOW "${ERP_GITHUB_DEPLOY_WORKFLOW}"
   grep -qE "^SYNC_ADS_EVERY_MINUTES=" .env || printf 'SYNC_ADS_EVERY_MINUTES="60"\n' >> .env
+  # ───────── PHÒNG MARKETING: CHỈ GHI KHI CÓ GIÁ TRỊ ─────────
+  #
+  # Ba công tắc đi bằng GitHub `vars`, và Variable chưa đặt thì biến về đây RỖNG. Ghi rỗng đè lên
+  # là lặng lẽ TẮT thứ đang chạy ở lần deploy kế tiếp — nên nhánh `[ -n ]` không phải phòng xa, nó
+  # là điều kiện để công tắc dùng được. Cùng luật đã áp cho khoá AI và SePay ngay phía trên.
+  [ -n "${MARKETING_LEDGER_EVERY_MINUTES:-}" ] && upsert_env MARKETING_LEDGER_EVERY_MINUTES "${MARKETING_LEDGER_EVERY_MINUTES}"
+  [ -n "${ADS_WRITE_ENABLED:-}" ] && upsert_env ADS_WRITE_ENABLED "${ADS_WRITE_ENABLED}"
+  [ -n "${ADS_WRITE_MODE:-}" ] && upsert_env ADS_WRITE_MODE "${ADS_WRITE_MODE}"
 else
   say "Tạo .env — nhập thông tin (Enter để dùng mặc định)"
   ask ERP_DOMAIN          "Tên miền ERP"                       "erp.vnxcommerce.com"
