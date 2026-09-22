@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { DOCUMENTATION_COMMANDS, DOCUMENTATION_READ_GLOBS } from "@/lib/constants/agent-sandbox";
 import { goiPhanHoi, checkRerun } from "@/lib/constants/agent-rerun";
 import { GATE_REPAIR, congChiPhi, dungPhanHoiCong, type KetQuaCong } from "@/lib/constants/agent-gate-repair";
+import { catDauRa } from "@/lib/constants/agent-run-error";
 import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import type { TechGateResult, TechRisk } from "@/lib/constants/tech";
 import { finishTechAgentRun, startTechAgentRun, type TechActor } from "@/lib/tech/service";
@@ -333,7 +334,7 @@ ${r.stderr}` });
         /* Tiền của lượt chạy đi theo dòng sổ — xem docblock ở `finishTechAgentRun`. */
         chiPhi: outcome.chiPhi,
         /* Câu lỗi của cổng đỏ — để đọc được NGAY TRONG ERP, không phải mở log Actions. */
-        loiCong: hong.map((h) => ({ ten: h.ten, exitCode: h.exitCode, dauRa: h.dauRa.slice(-1200) })),
+        loiCong: hong.map((h) => ({ ten: h.ten, exitCode: h.exitCode, dauRa: catDauRa(h.dauRa) })),
       },
       opts.actor,
     );
