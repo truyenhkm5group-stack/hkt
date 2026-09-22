@@ -3,11 +3,11 @@
 **Phạm vi:** Trang Vận đơn (Giao vận) — tab "Tất cả vận đơn"  
 **Nhánh:** `ai/data-quality/TECH-8-mucsqrtq`  
 **Base SHA:** 96111b59a2a23f6c4165a224c3ae05caa2c9b545  
-**Ngày kiểm tra:** 2025
+**Ngày kiểm tra:** 2026
 
 ## Tóm tắt kết quả
 
-✅ **TUÂN THỨ RÀ BUỘC**: Trang vận đơn KHÔNG tự tính kết quả đơn ngoài `ORDER_OUTCOME`. Mọi lần xác định kết quả đơn (giao thành công / hoàn) đều dùng lại đúng biểu thức `ORDER_OUTCOME` từ `lib/queries/return-rate.ts`, không có bộ luật riêng nào.
+✅ **TUÂN THỦ RÀNG BUỘC**: Trang vận đơn KHÔNG tự tính kết quả đơn ngoài `ORDER_OUTCOME`. Mọi lần xác định kết quả đơn (giao thành công / hoàn) đều dùng lại đúng biểu thức `ORDER_OUTCOME` từ `lib/queries/return-rate.ts`, không có bộ luật riêng nào.
 
 ---
 
@@ -114,6 +114,21 @@ export async function outcomeOfShipment(id: string) {
 
 ---
 
+### 6. Trang chi tiết vận đơn (shipmentDetailPage)
+
+**Tệp:** `app/(dashboard)/shipments/[id]/page.tsx`, hàm `ShipmentDetailPage()`
+
+```typescript
+// Dòng 47:
+const [outcome, dwell, nhatKy] = await Promise.all([outcomeOfShipment(s.id), getShipmentDwell(s.id), getShipmentTimeline(s.id)]);
+// Dòng 48:
+const daHoan = outcome === "RETURNED" || outcome === "RETURNED_BY_RULE";
+```
+
+**Kết luận:** ✅ Trang chi tiết vận đơn gọi `outcomeOfShipment(s.id)` để lấy kết quả đơn (mục 5), không tính lại ở phía client. Biến `daHoan` dùng kết quả từ `outcomeOfShipment()` để quyết định có hiển thị lý do hoàn hay không. Không vi phạm ràng buộc.
+
+---
+
 ## Đặc tả được tuân thủ
 
 Theo `docs/business-rules/ORDER_OUTCOME.md` và AGENTS.md mục 3:
@@ -137,6 +152,6 @@ Bản nay (nhánh hiện tại) đã sửa — tuân thủ một nguồn sự th
 
 ## Kết luận
 
-Trang vận đơn hiện tại **TUÂN THỨ RÀ BUỘC** trong AGENTS.md mục 3 và đặc tả ORDER_OUTCOME. Không có chỗ nào tự tính kết quả đơn ngoài `ORDER_OUTCOME` được chốt từ `lib/queries/return-rate.ts`.
+Trang vận đơn hiện tại **TUÂN THỦ RÀNG BUỘC** trong AGENTS.md mục 3 và đặc tả ORDER_OUTCOME. Không có chỗ nào tự tính kết quả đơn ngoài `ORDER_OUTCOME` được chốt từ `lib/queries/return-rate.ts`.
 
 Bản này có thể dùng làm nền tảng cho các phương án tối ưu ở bước sau (tối ưu không được đổi ngữ nghĩa), vì mã hiện tại đúng về nghiệp vụ.
