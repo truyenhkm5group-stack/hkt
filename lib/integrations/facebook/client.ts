@@ -36,6 +36,17 @@ export type FbCampaignInsight = {
   raw: Record<string, unknown>;
 };
 
+/**
+ * Một dòng insights ở cấp MẨU QUẢNG CÁO. Mở rộng dòng cấp chiến dịch bằng đúng bốn trường định danh
+ * — cố ý không đổi hình dạng phần còn lại, để hai cấp so sánh được với nhau bằng phép cộng.
+ */
+export type FbAdInsight = FbCampaignInsight & {
+  adId: string;
+  adName: string;
+  adsetId: string;
+  adsetName: string;
+};
+
 const THROTTLE_MS = 150;
 let lastCallAt = 0;
 
@@ -300,47 +311,87 @@ export class FacebookAdsClient {
     return [...out.values()];
   }
 
+  /**
+   * ───────────── MỘT BỘ ĐỌC INSIGHTS, HAI CẤP ─────────────
+   *
+   * Cấp `campaign` và cấp `ad` dùng CHUNG phép bóc `actions` / `action_values`. Viết hai lần là
+   * mời hai con số "tin nhắn" khác nhau tồn tại song song, và khi chúng lệch thì không ai biết cái
+   * nào đúng — đúng lớp lỗi mà `adsRatios()` đã phải đi dọn một lần ở báo cáo lợi nhuận.
+   */
+  private async insightItems(accountId: string, since: string, until: string, level: "campaign" | "ad", fields: string) {
+    const items: Record<string, unknown>[] = [];
+    const params = { level, fields: `${fields},spend,impressions,clicks,actions,action_values,date_start,date_stop`, time_increment: 1, time_range: { since, until }, limit: 500 };
+    for await (const item of this.paginate(`act_${accountId}/insights`, params)) items.push(item);
+    return items;
+  }
+
+  /**
+   * Facebook trả nhiều `action_type` chồng nhau cho cùng một sự kiện (omni_purchase, purchase,
+   * offsite_conversion.fb_pixel_purchase…): chỉ lấy MỘT loại theo thứ tự ưu tiên, không cộng dồn
+   * để khỏi nhân đôi/nhân ba.
+   */
+  private static metricsOf(item: Record<string, unknown>) {
+    const actions = asArray(item.actions).map(asRecord);
+    const values = asArray(item.action_values).map(asRecord);
+    const pick = (list: Record<string, unknown>[], patterns: RegExp[]) => {
+      for (const pattern of patterns) {
+        const found = list.filter((a) => pattern.test(str(a.action_type)));
+        if (found.length) return found.reduce((sum, a) => sum + num(a.value), 0);
+      }
+      return 0;
+    };
+    const PURCHASE = [/^omni_purchase$/, /^purchase$/, /^offsite_conversion\.fb_pixel_purchase$/, /^onsite_web_purchase$/, /^onsite_conversion\.purchase$/];
+    const MESSAGE = [/messaging_conversation_started_7d$/, /messaging_conversation_started/, /total_messaging_connection$/, /messaging_first_reply$/];
+    const LEAD = [/^onsite_conversion\.lead_grouped$/, /^lead$/, /^offsite_conversion\.fb_pixel_lead$/];
+    return {
+      date: str(item.date_start).slice(0, 10),
+      spend: num(item.spend),
+      impressions: Math.round(num(item.impressions)),
+      clicks: Math.round(num(item.clicks)),
+      messages: Math.round(pick(actions, MESSAGE)),
+      leads: Math.round(pick(actions, LEAD)),
+      purchases: Math.round(pick(actions, PURCHASE)),
+      purchaseValue: pick(values, PURCHASE),
+    };
+  }
+
   /** Insights theo ngày × chiến dịch trong khoảng [since, until] (YYYY-MM-DD, giờ tài khoản) */
   async campaignInsights(accountId: string, since: string, until: string): Promise<FbCampaignInsight[]> {
-    const rows: FbCampaignInsight[] = [];
-    const params = {
-      level: "campaign",
-      fields: "campaign_id,campaign_name,spend,impressions,clicks,actions,action_values,date_start,date_stop",
-      time_increment: 1,
-      time_range: { since, until },
-      limit: 500,
-    };
-    for await (const item of this.paginate(`act_${accountId}/insights`, params)) {
-      const actions = asArray(item.actions).map(asRecord);
-      const values = asArray(item.action_values).map(asRecord);
-      // Facebook trả nhiều action_type chồng nhau cho cùng một sự kiện (omni_purchase, purchase, offsite_conversion.fb_pixel_purchase…):
-      // chỉ lấy MỘT loại theo thứ tự ưu tiên, không cộng dồn để khỏi nhân đôi/nhân ba.
-      const pick = (list: Record<string, unknown>[], patterns: RegExp[]) => {
-        for (const pattern of patterns) {
-          const found = list.filter((a) => pattern.test(str(a.action_type)));
-          if (found.length) return found.reduce((s, a) => s + num(a.value), 0);
-        }
-        return 0;
-      };
-      const PURCHASE = [/^omni_purchase$/, /^purchase$/, /^offsite_conversion\.fb_pixel_purchase$/, /^onsite_web_purchase$/, /^onsite_conversion\.purchase$/];
-      const MESSAGE = [/messaging_conversation_started_7d$/, /messaging_conversation_started/, /total_messaging_connection$/, /messaging_first_reply$/];
-      const LEAD = [/^onsite_conversion\.lead_grouped$/, /^lead$/, /^offsite_conversion\.fb_pixel_lead$/];
-      rows.push({
-        accountId,
-        campaignId: str(item.campaign_id),
-        campaignName: str(item.campaign_name),
-        date: str(item.date_start).slice(0, 10),
-        spend: num(item.spend),
-        impressions: Math.round(num(item.impressions)),
-        clicks: Math.round(num(item.clicks)),
-        messages: Math.round(pick(actions, MESSAGE)),
-        leads: Math.round(pick(actions, LEAD)),
-        purchases: Math.round(pick(actions, PURCHASE)),
-        purchaseValue: pick(values, PURCHASE),
-        raw: item,
-      });
-    }
-    return rows;
+    const items = await this.insightItems(accountId, since, until, "campaign", "campaign_id,campaign_name");
+    return items.map((item) => ({
+      accountId,
+      campaignId: str(item.campaign_id),
+      campaignName: str(item.campaign_name),
+      ...FacebookAdsClient.metricsOf(item),
+      raw: item,
+    }));
+  }
+
+  /**
+   * ───────────── INSIGHTS THEO NGÀY × MẨU QUẢNG CÁO ─────────────
+   *
+   * Đây là cấp CHI TIẾT NHẤT mà Facebook trả tiền chi, và nó KHÔNG phải một phép phân bổ: mỗi mẩu
+   * có số chi thật của nó, cộng lại đúng bằng số của chiến dịch. Nhờ vậy cấp nhóm và cấp chiến dịch
+   * trở thành PHÉP CỘNG của cấp mẩu, thay vì ba con số rời nhau.
+   *
+   * Nó còn trả về cả cây `ad → adset → campaign` kèm TÊN cho mọi mẩu ĐÃ TIÊU TIỀN. Đo production
+   * 22/09/2026: `fb_ads` chỉ có **185 dòng** trong khi 30 ngày có **1.096 chiến dịch** tiêu tiền —
+   * vì bộ tra danh mục hiện tại chỉ hỏi những `ad_id` ĐÃ xuất hiện trong đơn, nên nó không bao giờ
+   * biết một mẩu chưa đẻ ra đơn nào. Đường này lật ngược chiều ấy: đi từ TIỀN ra, không đi từ ĐƠN ra.
+   */
+  async adInsights(accountId: string, since: string, until: string): Promise<FbAdInsight[]> {
+    const items = await this.insightItems(accountId, since, until, "ad", "ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name");
+    return items.map((item) => ({
+      accountId,
+      adId: str(item.ad_id),
+      adName: str(item.ad_name),
+      adsetId: str(item.adset_id),
+      adsetName: str(item.adset_name),
+      campaignId: str(item.campaign_id),
+      campaignName: str(item.campaign_name),
+      ...FacebookAdsClient.metricsOf(item),
+      raw: item,
+    }));
   }
 }
 

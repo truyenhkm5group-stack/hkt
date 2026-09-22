@@ -58,6 +58,7 @@ on:
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
           - meta-id-probe       # dò mã Meta trong tracking landing là ad / adset / campaign (CHỈ ĐỌC; arg: các mã, bỏ trống = lấy từ đơn còn treo)
+          - ads-level-probe     # chi tiêu cấp MẨU có cộng đúng bằng cấp CHIẾN DỊCH không (CHỈ ĐỌC; arg: "--days=30")
           - pages-debug         # dò endpoint Pancake Pages API với PANCAKE_ACCESS_TOKEN
           - phone-probe         # dò API Pancake có trả lịch sử SĐT toàn hệ thống không (nhập SĐT ở ô "arg")
           - vtp-probe           # dò API liệt kê vận đơn Viettel Post (đối tác + cổng web) với token hiện có (arg: mã vận đơn)
@@ -262,7 +263,7 @@ jobs:
 
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query"
-            DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability"
+            DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability ads-level-probe"
             DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
 
             LOP=GHI
@@ -605,6 +606,11 @@ jobs:
               phone-probe)
                 fetch_script phone-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/phone-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/phone-probe.ts "$ARG" ;;
+              ads-level-probe)
+                # CHỈ ĐỌC: hỏi Graph API chi tiêu ở CẢ HAI cấp rồi so theo từng (tài khoản × ngày).
+                # Không ghi một dòng nào vào CSDL. Phải chạy và đọc kết quả TRƯỚC khi hạ hạt ad_spends.
+                fetch_script ads-level-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/ads-level-probe.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/ads-level-probe.ts $ARG ;;
               meta-id-probe)
                 # CHỈ ĐỌC: hỏi Graph API xem từng mã là loại nút nào, thuộc tài khoản quảng cáo nào.
                 # Không ghi một dòng nào vào CSDL.
