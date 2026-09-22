@@ -15,6 +15,8 @@
  *  · Bài kiểm tự dọn dữ liệu của mình. Khe này không dọn hộ ai.
  */
 
+import { testNhanhAgentVeToiViec } from "./agent-branch-claim-ingest.test";
+
 export async function chayBaiKiemAgentTuDangKy(): Promise<void> {
   /*
     Agent thêm lời gọi của mình vào đây, mỗi bài một dòng, và thêm `import` tương ứng ở đầu tệp.
@@ -24,4 +26,5 @@ export async function chayBaiKiemAgentTuDangKy(): Promise<void> {
         …
         await testNhanhAgentVeToiViec();
   */
+  await testNhanhAgentVeToiViec();
 }
