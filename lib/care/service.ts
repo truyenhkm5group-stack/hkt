@@ -8,7 +8,7 @@ import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { careSlaHours } from "@/lib/care/sla";
 import { carrierSubstate } from "@/lib/constants/carrier-substate";
 import { ACTION_CALLS_CARRIER, BUSINESS_ACTIONS, BUSINESS_ACTION_LABEL } from "@/lib/constants/care-outcome";
-import { CARE_DECISIONS, DECISION_NEEDS_FOLLOW_UP, DECISION_NEXT_CARE_STATUS, careDecisionOf, decisionReasonCode } from "@/lib/constants/care-resolution";
+import { CARE_DECISIONS, DECISION_ENDS_TEAM_WORK, DECISION_NEEDS_FOLLOW_UP, DECISION_NEXT_CARE_STATUS, careDecisionOf, decisionReasonCode } from "@/lib/constants/care-resolution";
 import { NOT_CARE_CONDITION } from "@/lib/care/lifecycle";
 import { slaOf } from "@/lib/care/view";
 import {
@@ -575,11 +575,29 @@ export async function recordCareDecision(user: CareActor, input: z.input<typeof 
   });
 
   /*
-    HẸN XEM LẠI: "Xử lý sau" lấy đúng giờ người chọn. Hai kết quả kia đưa ca vào trạng thái CHỜ, mà
-    ca chờ không có hạn là ca biến mất khỏi "Cần care" — nên giữ hẹn đang có, không có thì lấy mặc
-    định. Người chọn giờ tay thì giờ đó thắng.
+    ═══════════ HẸN XEM LẠI — VÀ CÁI BẪY "HẸN VÀO QUÁ KHỨ" ═══════════
+
+    Bản trước: `followUpAt ?? careRow.followUpAt ?? defaultFollowUpAt(now)`. Vế giữa là chỗ hỏng.
+    "Đã hoàn" và "Phát tiếp" không nhận giờ từ màn hình, nên chúng THỪA KẾ cái hẹn đang có — mà cái
+    hẹn đang có gần như luôn ĐÃ QUÁ GIỜ (nó chính là lý do ca vừa nổi lên để người trực xử lý). Ca
+    quay về "Cần care" NGAY LẬP TỨC, mang nhãn "quá hẹn 5 giờ" ba phút sau khi vừa được xử lý xong.
+    Đo được thẳng trên màn hình chủ shop gửi 22/09/2026: bấm "Đã hoàn" lúc ~14:00, dòng in
+    "Xử lý lại 09:00 22/09/2026 · quá hẹn 5 giờ".
+
+    Chính tệp hằng số này đã khai luật ấy cho `followUpAtFrom` ("bấm sau giờ tan làm ⇒ cuối buổi
+    NGÀY MAI") kèm câu giải thích: *hẹn vào một mốc đã trôi qua là hẹn giả, ca sẽ nhảy lại vào hàng
+    đợi ngay lập tức và người trực học cách bỏ qua chính cảnh báo đó*. Đường ghi này chưa nghe theo.
+
+    Luật mới, ba nhánh rời nhau:
+      · "Đã hoàn"   ⇒ KHÔNG hẹn (`null`). Đội hết việc; chứng từ ĐVVC mới là thứ còn thiếu, và nó
+                      tới bằng webhook chứ không bằng một nhân viên mở lại ca. Xem
+                      `DECISION_ENDS_TEAM_WORK` — `careViewOf` đọc kết quả này để giữ ca ở
+                      "Đang chờ kết quả" thay vì đá về "Cần care".
+      · Người chọn giờ ⇒ giờ đó thắng, không bàn.
+      · Còn lại     ⇒ giữ cái hẹn cũ CHỈ KHI nó còn ở phía trước; đã qua thì cấp hẹn mới.
   */
-  const henXemLai = followUpAt ?? careRow.followUpAt ?? defaultFollowUpAt(now);
+  const henConHieuLuc = careRow.followUpAt && careRow.followUpAt.getTime() > now.getTime() ? careRow.followUpAt : null;
+  const henXemLai = DECISION_ENDS_TEAM_WORK[decision] ? null : (followUpAt ?? henConHieuLuc ?? defaultFollowUpAt(now));
 
   await db
     .update(schema.shipmentCare)
@@ -973,9 +991,14 @@ export async function recordBusinessAction(user: CareActor, input: z.input<typeo
   /*
     HẸN XEM LẠI MẶC ĐỊNH cho ba hành động đưa ca vào trạng thái chờ mà không có giờ: một cái hẹn không
     có giờ không phải một cái hẹn, và ca "chờ ĐVVC" không có hạn là ca biến mất khỏi Cần care.
+
+    Cái hẹn ĐANG CÓ chỉ được dùng lại khi nó CÒN Ở PHÍA TRƯỚC. Thừa kế một mốc đã trôi qua là đẩy
+    ca về "Cần care" ngay giây sau khi người vừa xử lý xong, mang nhãn "quá hẹn" — cùng một cái bẫy
+    đã cắn ở `recordCareDecision`, xem giải thích dài ở đó.
   */
   const now = new Date();
-  const henXemLai = followUpAt ?? careRow.followUpAt ?? defaultFollowUpAt(now);
+  const henConHieuLuc = careRow.followUpAt && careRow.followUpAt.getTime() > now.getTime() ? careRow.followUpAt : null;
+  const henXemLai = followUpAt ?? henConHieuLuc ?? defaultFollowUpAt(now);
 
   /* ───── Trạng thái xử lý đi tới đâu ───── */
   const sau: CareStatus =

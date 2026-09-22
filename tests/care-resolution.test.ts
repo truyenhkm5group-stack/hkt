@@ -4,9 +4,10 @@ import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { addCareNote, loadCareState, recordCareDecision, requestCarrierAction, setCareStatus, type CareActor } from "@/lib/care/service";
 import { applyCarrierEventToCare } from "@/lib/care/lifecycle";
-import { careViewOf } from "@/lib/care/view";
+import { careViewOf, slaOf, teamWorkEnded } from "@/lib/care/view";
 import {
   CARE_DECISIONS,
+  DECISION_ENDS_TEAM_WORK,
   DECISION_NEEDS_FOLLOW_UP,
   DECISION_NEEDS_REASON,
   DECISION_NEXT_CARE_STATUS,
@@ -369,6 +370,51 @@ export async function testCareResolution(db: Db) {
   assert.equal(careViewOf({ ...caCho, followUpAt: new Date(mocXet.getTime() - 1000) }, vaoHangDoi, mocXet).view, "care", "quá hẹn một giây cũng phải quay về");
   assert.equal(careViewOf({ ...caCho, followUpAt: null }, vaoHangDoi, mocXet).view, "care", "ca CHỜ mà không có giờ hẹn thì coi như đã tới hạn — hẹn không giờ không phải một cái hẹn");
 
+  /* ═══════════ CASE I · "ĐÃ HOÀN" RỜI "CẦN CARE" — CHỦ SHOP BÁO 22/09/2026 ═══════════
+
+     Triệu chứng: bấm "Đã hoàn", ghi lý do, xong — ca vẫn nằm nguyên ở "Cần care" kèm nhãn
+     "quá hẹn 5 giờ" ba phút sau khi vừa xử lý. Nhân viên vận đơn không để ý thì GỌI LẠI KHÁCH cho
+     một kiện shop đã chốt bỏ.
+
+     Hai thứ cùng gây ra, và cả hai đều phải bị khoá ở đây:
+       (1) đường ghi THỪA KẾ cái hẹn cũ — mà cái hẹn cũ chính là thứ vừa quá giờ và đẩy ca nổi lên;
+       (2) luật góc nhìn không phân biệt "chưa ai quyết gì" với "đội đã chốt bỏ".
+
+     Đây là bài kiểm về HÀNH VI NGƯỜI TRỰC NHÌN THẤY, nên nó đi qua đường ghi thật rồi đọc lại
+     bằng đúng hàm thuần mà cả máy chủ lẫn trình duyệt dùng. */
+
+  assert.deepEqual(CARE_DECISIONS.filter((r) => DECISION_ENDS_TEAM_WORK[r]), ["CARE_RETURN"], "CHỈ “Đã hoàn” kết thúc phần việc của đội — “Phát tiếp” phải quay lại xem bưu tá có đi thật không, “Xử lý sau” thì chính người trực đặt giờ");
+
+  // (1) HẸN CŨ ĐÃ QUÁ GIỜ KHÔNG ĐƯỢC THỪA KẾ. Gieo đúng cảnh trên màn hình chủ shop gửi: ca đang
+  //     mang một cái hẹn từ 5 giờ trước.
+  const henDaQua = new Date(Date.now() - 5 * 3600_000);
+  await db.update(schema.shipmentCare).set({ followUpAt: henDaQua }).where(and(eq(schema.shipmentCare.shipmentId, `${P}s1`), eq(schema.shipmentCare.active, true)));
+  const phatTiep = await recordCareDecision(nv, { shipmentId: `${P}s1`, decision: "CARE_CONTINUE_DELIVERY", note: "khách hẹn nhận chiều nay" });
+  assert.ok("ok" in phatTiep, `“Phát tiếp” phải ghi được — nhận: ${"error" in phatTiep ? phatTiep.error : ""}`);
+  const sauPhatTiep = await loadCareState(`${P}s1`);
+  assert.ok(sauPhatTiep.followUpAt !== null && sauPhatTiep.followUpAt.getTime() > Date.now(), "CASE I(1) · kết quả cần quay lại phải nhận hẹn MỚI ở phía trước — thừa kế một mốc đã trôi qua là đẩy ca về hàng đợi ngay giây sau, kèm nhãn “quá hẹn”");
+  assert.equal(careViewOf(sauPhatTiep, vaoHangDoi).view, "waiting", "“Phát tiếp” xong thì ca nằm ở “Đang chờ kết quả” cho tới giờ hẹn, không quay lại ngay");
+
+  // (2) "ĐÃ HOÀN" ⇒ KHÔNG HẸN, VÀ RỜI "CẦN CARE".
+  await db.update(schema.shipmentCare).set({ followUpAt: henDaQua }).where(and(eq(schema.shipmentCare.shipmentId, `${P}s1`), eq(schema.shipmentCare.active, true)));
+  const daHoan = await recordCareDecision(nv, { shipmentId: `${P}s1`, decision: "CARE_RETURN", reasonCode: "CUSTOMER_REFUSED", note: "khách từ chối nhận" });
+  assert.ok("ok" in daHoan, `“Đã hoàn” phải ghi được — nhận: ${"error" in daHoan ? daHoan.error : ""}`);
+  const sauDaHoan = await loadCareState(`${P}s1`);
+  assert.equal(sauDaHoan.followUpAt, null, "CASE I(2) · “Đã hoàn” KHÔNG đặt hẹn: thứ còn thiếu là chứng từ ĐVVC, nó tới bằng webhook chứ không bằng một nhân viên mở lại ca lúc 9 giờ sáng");
+  assert.ok(teamWorkEnded(sauDaHoan), "kết quả “Đã hoàn” phải đọc ra được là ĐỘI HẾT VIỆC — ba nơi (góc nhìn, SLA, chip hạn) đọc cùng một vị từ này");
+  assert.equal(careViewOf(sauDaHoan, vaoHangDoi).view, "waiting", "CASE I(2) · ca đã chốt bỏ RỜI “Cần care” — để nguyên là nhân viên gọi lại khách cho một kiện shop đã thôi cứu");
+  // Và nó KHÔNG cộng vào số vỡ hạn ở đầu trang: một con số đỏ mà bấm vào không ra dòng nào thì
+  // người xem học cách bỏ qua cả ô đó.
+  assert.equal(slaOf(vaoHangDoi, sauDaHoan, new Date()).resolveBreached, false, "CASE I(2) · đồng hồ ĐÓNG CA dừng khi đội đã chốt — ca rời hàng đợi thì không được vẫn đếm là vỡ hạn");
+
+  // NHƯNG: ca vẫn MỞ và kết quả cứu đơn vẫn CHƯA BIẾT. "Đã hoàn" là lời khai của người, không phải
+  // chứng từ — đóng đợt ở đây sẽ làm dòng hiện lại TRẮNG TRƠN ở "Chưa xử lý" (luật 60) và chốt hộ
+  // ĐVVC một kết cục chưa xảy ra (luật 56).
+  const dotSauDaHoan = await db.query.shipmentCare.findFirst({ where: and(eq(schema.shipmentCare.shipmentId, `${P}s1`), eq(schema.shipmentCare.active, true)) });
+  assert.ok(dotSauDaHoan, "CASE I(2) · đợt care vẫn phải MỞ — đóng nó là bỏ dòng khỏi phép đọc đợt đang mở, và kết quả + note biến mất khỏi màn hình");
+  assert.notEqual(dotSauDaHoan?.careOutcome, "RESCUE_FAILED", "“Đã hoàn” KHÔNG chốt kết cục cứu đơn — kết cục chỉ đọc chứng từ ĐVVC");
+  assert.equal(sauDaHoan.lastDecision?.decision, "CARE_RETURN", "và kết quả vẫn đứng trên dòng ở tab “Đang chờ kết quả”");
+
   /* ═══════════ CASE A+B · MỘT NGUỒN CHO CẢ BẢNG LẪN PANEL ═══════════
 
      Dòng ngoài bảng và panel chi tiết phải đọc CÙNG một chỗ. Dựng hai phép đọc khác nhau là mở
@@ -408,6 +454,6 @@ export async function testCareResolution(db: Db) {
   clearMemo();
 
   console.log(
-    "✓ Kết quả care ĐỘC LẬP với ĐVVC: ghi được khi ERP chưa khai API (A) · kiện chưa có mã vận đơn (B) · kiện đã kết thúc (C) · không sinh lệnh ĐVVC nào (D) · không chạm chứng từ (E) · webhook không xoá quyết định/note (F) · lệnh ĐVVC hỏng không kéo theo kết quả care (G) · tải lại còn nguyên kết quả + note + giờ hẹn (H) · lý do hoàn ghi được bằng DANH MỤC hoặc bằng CHỮ (⇒ OTHER, không phải UNKNOWN), chặn chỉ khi không có cả hai",
+    "✓ Kết quả care ĐỘC LẬP với ĐVVC: ghi được khi ERP chưa khai API (A) · kiện chưa có mã vận đơn (B) · kiện đã kết thúc (C) · không sinh lệnh ĐVVC nào (D) · không chạm chứng từ (E) · webhook không xoá quyết định/note (F) · lệnh ĐVVC hỏng không kéo theo kết quả care (G) · tải lại còn nguyên kết quả + note + giờ hẹn (H) · lý do hoàn ghi được bằng DANH MỤC hoặc bằng CHỮ (⇒ OTHER, không phải UNKNOWN), chặn chỉ khi không có cả hai · “Đã hoàn” rời “Cần care”, không hẹn lại, không đếm vỡ hạn, đợt vẫn mở và kết cục vẫn chờ chứng từ (I)",
   );
 }
