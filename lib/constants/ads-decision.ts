@@ -42,6 +42,32 @@ export const ADS_DECISION_RULE = {
   lowSuccessRate: 65,
 } as const;
 
+/**
+ * ───────────── CĂN CỨ CỦA MỘT KHUYẾN NGHỊ ─────────────
+ *
+ * Cùng một chữ `CẮT` đứng trên hai căn cứ khác nhau KHÔNG phải cùng một kết luận, nên căn cứ phải
+ * đi kèm khuyến nghị ở mọi nơi khuyến nghị đi tới: màn hình, sổ quyết định, và cổng ghi ngân sách.
+ *
+ * · `ACTUAL` — đủ đơn đã ngã ngũ; con số là SỐ ĐO.
+ * · `PROJECTED` — phần lớn đơn còn đang sản xuất hoặc đang đi; con số là **lợi nhuận tạm tính**,
+ *   dựng trên tỷ lệ giao thành công ƯỚC TÍNH của mã hàng (`lib/constants/delivery-rate.ts`).
+ *
+ * Đây là một NHÃN ĐỘ TIN CẬY, không phải một hành động — nó vuông góc với `AdsAction`, và gộp hai
+ * thứ vào một danh sách (thêm `CUT_PROJECTED`, `SCALE_PROJECTED`…) sẽ nhân đôi mọi bảng chân lý.
+ */
+export type DecisionBasis = "ACTUAL" | "PROJECTED";
+
+export const DECISION_BASIS_LABEL: Record<DecisionBasis, string> = {
+  ACTUAL: "Số thật",
+  PROJECTED: "Tạm tính",
+};
+
+export const DECISION_BASIS_NOTE: Record<DecisionBasis, string> = {
+  ACTUAL: "Đủ đơn đã ngã ngũ — doanh thu, giá vốn và lợi nhuận trên dòng này là số đo.",
+  PROJECTED:
+    "Phần lớn đơn còn đang sản xuất hoặc đang đi. Lợi nhuận ở đây là TẠM TÍNH: phần đang treo được cân theo tỷ lệ giao thành công ước tính của mã hàng. Khuyến nghị vì thế là tối ưu THEO KẾ HOẠCH — GTC thực về cao hơn thì càng tốt, thấp hơn là việc của khâu giao.",
+};
+
 /** Hành động đề xuất cho một dòng. Thứ tự này cũng là thứ tự ưu tiên xử lý trên giao diện. */
 export type AdsAction = "SCALE" | "HOLD" | "WATCH" | "CUT" | "FIX_DELIVERY" | "INSUFFICIENT_DATA" | "NO_SPEND_DATA";
 
