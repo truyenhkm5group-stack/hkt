@@ -76,6 +76,13 @@ const CAMPAIGN_AMBIGUOUS = sql`(
  * `marketer_id` ở đó chỉ khác `NULL` khi tình trạng là `ATTRIBUTED` (ràng buộc
  * `order_attribution_marketer_check`), nên không cần lọc thêm theo `status` — đơn TRÙNG và đơn
  * chưa gán được đều mang `NULL`, và đó là câu trả lời đúng của chúng.
+ *
+ * ─── VÌ SAO CÓ THÊM `landing_attributions` ───
+ *
+ * Ảnh chụp nói ĐƠN NÀY CỦA AI; nó không nói VÌ SAO một đơn landing chưa quy kết được. Hai đơn cùng
+ * nằm ở "Chưa xác định" nhưng một đơn là form không có ô tracking (sửa ở form) còn đơn kia là
+ * chiến dịch chưa có trong bảng chi tiêu (sửa ở đồng bộ quảng cáo) — gộp chúng lại thì người đọc
+ * không biết đi đâu. Bảng này một dòng một đơn nên phép nối không nhân dòng.
  */
 export function orderMarketerJoin(adId: SQL, postId: SQL, orderId: SQL): SQL {
   return sql`
@@ -83,7 +90,8 @@ export function orderMarketerJoin(adId: SQL, postId: SQL, orderId: SQL): SQL {
     left join ${POST_TO_CAMPAIGN} om_post on om_post.post_id = ${postKeySql(postId)}
     left join ${CAMPAIGN_TO_MARKETER} om_marketer on om_marketer.campaign_id = coalesce(om_ad.campaign_id, om_post.campaign_id)
     left join ${CAMPAIGN_AMBIGUOUS} om_amb on om_amb.campaign_id = coalesce(om_ad.campaign_id, om_post.campaign_id)
-    left join order_attributions om_fp on om_fp.order_id = ${orderId}`;
+    left join order_attributions om_fp on om_fp.order_id = ${orderId}
+    left join landing_attributions om_land on om_land.order_id = ${orderId}`;
 }
 
 /** Chiến dịch đã nối được của đơn (sau `orderMarketerJoin`). `NULL` = không nối được. */
@@ -98,9 +106,16 @@ export const OM_CAMPAIGN_ID = sql<string | null>`coalesce(om_ad.campaign_id, om_
  */
 export const OM_MARKETER_ID = sql<string | null>`coalesce(om_marketer.marketer_id, om_fp.marketer_id)`;
 
-/** Loại bằng chứng đã dùng — `NULL` khi không quy kết được. Hai giá trị của `MarketerEvidence`. */
+/**
+ * Loại bằng chứng đã dùng — `NULL` khi không quy kết được. Ba giá trị của `MarketerEvidence`.
+ *
+ * Ảnh chụp tách làm HAI nhãn theo `attribution_source`: đơn Messenger đi bằng fanpage, đơn landing
+ * đi bằng UTM của form. Cùng một cột `marketer_id`, hai căn cứ khác hẳn nhau và hai chỗ đi sửa
+ * khác hẳn nhau — in chung một nhãn là khẳng định một căn cứ chưa bao giờ lên tiếng.
+ */
 export const OM_EVIDENCE = sql<MarketerEvidence | null>`case
   when om_marketer.marketer_id is not null then 'AD_CAMPAIGN'
+  when om_fp.marketer_id is not null and om_fp.attribution_source = 'LANDING_UTM' then 'LANDING_UTM'
   when om_fp.marketer_id is not null then 'FANPAGE_ASSIGNMENT'
   else null end`;
 
@@ -124,11 +139,13 @@ export const OM_GROUP_KEY = sql<string>`coalesce(om_marketer.marketer_id, om_fp.
  */
 export const OM_STATE = sql<MarketerLinkState>`case
   when om_marketer.marketer_id is not null then 'RESOLVED'
+  when om_fp.marketer_id is not null and om_fp.attribution_source = 'LANDING_UTM' then 'RESOLVED_BY_LANDING'
   when om_fp.marketer_id is not null then 'RESOLVED_BY_PAGE'
   when om_amb.campaign_id is not null then 'AMBIGUOUS'
   when coalesce(om_ad.campaign_id, om_post.campaign_id) is not null then 'CAMPAIGN_NO_MARKETER'
   when om_fp.status = 'DUPLICATE' then 'DUPLICATE_ORDER'
   when om_fp.status = 'NO_ASSIGNMENT' then 'PAGE_NO_ASSIGNMENT'
+  when om_land.order_id is not null then 'LANDING_UNRESOLVED'
   else 'NO_CAMPAIGN' end`;
 
 /** Tên hiển thị của marketer. Người đã bị xoá khỏi sổ nhân sự vẫn giữ mã để không mất lịch sử. */
