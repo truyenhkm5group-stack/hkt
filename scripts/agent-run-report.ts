@@ -194,6 +194,8 @@ async function main() {
     filesChanged: ((run.filesChanged as string[] | null) ?? []).slice(0, 200),
     startedAt: run.startedAt?.toISOString(),
     endedAt: (run.endedAt ?? new Date()).toISOString(),
+    /* Tiền của lượt chạy — `null` là CHƯA ĐO ĐƯỢC, không phải 0 (mục 42). */
+    chiPhi: ((run.metadata as { chiPhi?: unknown } | null)?.chiPhi ?? null) as never,
     externalUrl,
   };
 

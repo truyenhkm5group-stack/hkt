@@ -300,7 +300,18 @@ export async function testAiCopilot(db: Db) {
     assert.ok(TIMEOUT_BY_TIER.analysis >= 300_000, "bậc phân tích chạy nền — hạn chờ phải đủ cho một lượt suy luận sâu");
     assert.ok(TIMEOUT_BY_TIER.copilot < TIMEOUT_BY_TIER.analysis, "bậc copilot có NGƯỜI đang đợi nên hạn phải ngắn hơn hẳn");
     assert.ok(TIMEOUT_BY_TIER.routine <= TIMEOUT_BY_TIER.copilot, "một lượt ping rẻ không được chờ lâu hơn một lượt trò chuyện");
-    const src = readFileSync("lib/ai/copilot.ts", "utf8") + readFileSync("lib/ai/tools/care.ts", "utf8") + readFileSync("lib/ai/tools/erp.ts", "utf8") + readFileSync("lib/actions/ai.ts", "utf8");
+    /*
+      BỎ CHÚ THÍCH TRƯỚC KHI QUÉT — một tên model trong chú thích không phải một lời gọi model.
+
+      ĐÃ CẮN THẬT 22/09/2026: docblock của `copilotStatus()` kể lại sự cố "nhãn ghi claude-opus-5
+      trong khi claude-haiku trả lời", và bộ gác này bắt đúng đoạn kể ấy. Nó chặn một thứ KHÔNG
+      thể vòng qua router, tức báo động giả — và nó dạy người viết đừng ghi lại sự cố cho rõ.
+
+      Đây là lần thứ SÁU cái bẫy chú thích cắn trong kho này, nên vá cùng một phép với các bộ quét
+      khác. Vế `(^|[^:])` giữ cho `https://` không bị cắt nhầm thành chú thích.
+    */
+    const boCT = (m: string) => m.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const src = boCT(readFileSync("lib/ai/copilot.ts", "utf8") + readFileSync("lib/ai/tools/care.ts", "utf8") + readFileSync("lib/ai/tools/erp.ts", "utf8") + readFileSync("lib/actions/ai.ts", "utf8"));
     assert.ok(!/gpt-5|claude-opus|claude-sonnet|claude-haiku/.test(src), "chuỗi model chỉ được nằm ở router / provider");
   } finally {
     delete process.env.OPENAI_API_KEY;

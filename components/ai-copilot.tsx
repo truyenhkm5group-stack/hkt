@@ -68,7 +68,7 @@ export function AiCopilot() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [status, setStatus] = useState<{ enabled: boolean; model: string; reason: string | null } | null>(null);
+  const [status, setStatus] = useState<{ enabled: boolean; model: string; modelSauHon: string; reason: string | null } | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [override, setOverride] = useState<Partial<CopilotContext> | null>(null);
@@ -79,14 +79,14 @@ export function AiCopilot() {
   const context = useMemo(() => ({ ...contextFromPath(pathname, search), ...(override ?? {}) }), [pathname, search, override]);
 
   const send = useCallback(
-    (message: string, ctx: CopilotContext) => {
+    (message: string, ctx: CopilotContext, sauHon = false) => {
       const text = message.trim();
       if (!text) return;
       setInput("");
       setTurns((t) => [...t, { role: "user", text }]);
       start(async () => {
         const history = turns.slice(-8).map((t) => ({ role: t.role, text: t.text }));
-        const r = await askCopilot({ message: text, context: ctx, history }).catch((e: unknown) => ({ interactionId: null, status: "ERROR" as const, answer: "", toolCalls: [], pendingActions: [], warnings: [], usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: null, latencyMs: 0, rounds: 0, model: "", error: e instanceof Error ? e.message : String(e) }));
+        const r = await askCopilot({ message: text, context: ctx, history, sauHon }).catch((e: unknown) => ({ interactionId: null, status: "ERROR" as const, answer: "", toolCalls: [], pendingActions: [], warnings: [], usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, costUsd: null, latencyMs: 0, rounds: 0, model: "", error: e instanceof Error ? e.message : String(e) }));
         setTurns((t) => [...t, { role: "assistant", text: r.answer || (r.error ? `Lỗi: ${r.error}` : ""), result: r }]);
       });
     },
@@ -118,7 +118,7 @@ export function AiCopilot() {
   }, [send]);
 
   useEffect(() => {
-    if (open && !status) void copilotStatus().then((s) => setStatus({ enabled: s.enabled, model: s.model, reason: s.reason })).catch(() => setStatus({ enabled: false, model: "", reason: "Không đọc được trạng thái" }));
+    if (open && !status) void copilotStatus().then((s) => setStatus({ enabled: s.enabled, model: s.model, modelSauHon: s.modelSauHon, reason: s.reason })).catch(() => setStatus({ enabled: false, model: "", modelSauHon: "", reason: "Không đọc được trạng thái" }));
   }, [open, status]);
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
@@ -266,6 +266,27 @@ export function AiCopilot() {
                     Xoá hội thoại
                   </Button>
                 ) : null}
+                {/*
+                  LỐI THOÁT KHI BẬC RẺ KHÔNG ĐỦ.
+
+                  Bậc mặc định nay là bậc rẻ (đo 22/09/2026: $0,086 → $0,0186 một câu). Hạ bậc mà
+                  KHÔNG để lại đường nâng là bắt người dùng chịu câu trả lời kém cho câu hỏi khó,
+                  và họ sẽ thôi dùng — mất nhiều hơn số tiền tiết kiệm được.
+
+                  Máy KHÔNG tự đoán câu nào khó: 68 lượt thật đều cùng một hình dạng, không tách
+                  được (xem `lib/constants/ai-budget.ts`). Người hỏi thì biết.
+                */}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-[11px]"
+                  disabled={pending || !input.trim() || status?.enabled === false}
+                  title={status?.modelSauHon ? `Hỏi lại bằng ${status.modelSauHon} — chậm hơn và tốn hơn, dùng khi câu trả lời thường chưa đủ` : "Hỏi bằng model mạnh hơn"}
+                  onClick={() => send(input, context, true)}
+                >
+                  Hỏi kỹ
+                </Button>
                 <Button type="submit" size="sm" className="h-6 px-2 text-[11px]" disabled={pending || !input.trim() || status?.enabled === false}>
                   Gửi
                 </Button>

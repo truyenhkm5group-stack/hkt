@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, Users } from "lucide-react";
 import { SectionCard } from "@/components/ui-bits";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
-import { MARKETER_COVERAGE_WARN_PCT, MARKETER_LINK_FIX } from "@/lib/constants/marketer-attribution";
+import { MARKETER_COVERAGE_WARN_PCT, MARKETER_EVIDENCE, MARKETER_EVIDENCE_HINT, MARKETER_EVIDENCE_LABEL, MARKETER_LINK_FIX, MARKETER_LINK_LABEL, MARKETER_LINK_STATES, MARKETER_RESOLVED_STATES } from "@/lib/constants/marketer-attribution";
 import { ALERT_MIN_SAMPLE, PROBLEM_LABEL, RISK_HINT, RISK_LABEL, RISK_TONE } from "@/lib/constants/return-intelligence";
 import { TableToolsFor } from "@/components/data-table/table-tools";
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
@@ -11,6 +11,11 @@ import type { ReturnIntelligence } from "@/lib/queries/return-intelligence";
 import { cn } from "@/lib/utils";
 
 const PCT = (v: number | null) => (v === null ? "—" : `${v.toFixed(1)}%`);
+
+/** Giải thích cả ba đường quy kết, dựng một lần — mỗi dòng người đều treo cùng một câu. */
+const EVIDENCE_TITLE = MARKETER_EVIDENCE.map((e) => `${MARKETER_EVIDENCE_LABEL[e]}: ${MARKETER_EVIDENCE_HINT[e]}`).join(`
+
+`);
 
 /* ═══════════════════ ĐỘ PHỦ DỮ LIỆU ═══════════════════ */
 
@@ -27,7 +32,7 @@ const PCT = (v: number | null) => (v === null ? "—" : `${v.toFixed(1)}%`);
 export function CoverageStrip({ coverage }: { coverage: ReturnIntelligence["coverage"] }) {
   const o = [
     { key: "reason", label: "Độ phủ lý do hoàn", v: coverage.reason, hint: "Đơn hoàn xác định được lý do ÷ tổng đơn hoàn. Nguồn hiện tại là CHỮ trong sự kiện Viettel Post — chưa có mã lý do có cấu trúc và chưa ai xác nhận tay ca nào." },
-    { key: "marketer", label: "Độ phủ quy kết marketer", v: coverage.marketer, hint: "Đơn nối được về một chiến dịch có đúng một người phụ trách ÷ tổng đơn trong tập. Phần còn lại nằm ở nhóm “Chưa xác định” — KHÔNG bị ép cho ai." },
+    { key: "marketer", label: "Độ phủ quy kết marketer", v: coverage.marketer, hint: "Đơn quy kết được về đúng một marketer ÷ tổng đơn trong tập — bằng chiến dịch quảng cáo, hoặc bằng fanpage người đó phụ trách TẠI MỐC ĐƠN LÊN. Phần còn lại nằm ở nhóm “Chưa xác định” — KHÔNG bị ép cho ai." },
     { key: "sku", label: "Độ phủ mã hàng", v: coverage.sku, hint: "Đơn lần được về ít nhất một mã hàng ÷ tổng đơn. Dòng hàng gõ tay không có variant_id nằm ngoài — và KHÔNG được đoán mã từ tên hàng." },
   ];
   return (
@@ -189,6 +194,13 @@ export function ProductRiskTable({ rows, hasTarget }: { rows: ReturnIntelligence
 export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntelligence["marketers"]; coverage: ReturnIntelligence["marketerCoverage"] }) {
   if (!rows.length) return <p className="p-3 text-[12px] text-muted-foreground">Kỳ này chưa có đơn nào đi tới kết quả cuối.</p>;
   const tong = rows.reduce((n, r) => n + r.finished, 0);
+  // Chỗ trống, chỉ những loại THỰC SỰ có đơn — in một dòng "0 đơn trùng" là thêm nhiễu, không thêm tin.
+  const chuaXacDinh = MARKETER_LINK_STATES.filter((st) => !MARKETER_RESOLVED_STATES.includes(st))
+    .map((state) => ({ state, n: coverage.byState[state] ?? 0 }))
+    .filter((x) => x.n > 0)
+    .sort((a, b) => b.n - a.n);
+  // Loại chỗ trống LỚN NHẤT quyết định câu "việc phải làm" ở cảnh báo — gửi người đọc đi đúng màn hình.
+  const thieuNhieuNhat = chuaXacDinh[0]?.state ?? null;
   return (
     <>
       {coverage.warn ? (
@@ -196,7 +208,45 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
           <Users className="mt-0.5 size-3.5 shrink-0" />
           <span>
             Chỉ <b>{PCT(coverage.pct)}</b> đơn quy kết được về một marketer ({formatNumber(coverage.resolved)}/{formatNumber(coverage.total)}). Bảng vẫn ĐÚNG cho phần quy kết được, nhưng phần ấy có thể không đại
-            diện cho toàn shop. {MARKETER_LINK_FIX.NO_CAMPAIGN}
+            diện cho toàn shop. {thieuNhieuNhat ? MARKETER_LINK_FIX[thieuNhieuNhat] : MARKETER_LINK_FIX.NO_CAMPAIGN}
+          </span>
+        </p>
+      ) : null}
+      {/*
+        ═══ HAI ĐƯỜNG QUY KẾT, ĐẾM RIÊNG — VÀ CHỖ TRỐNG LÀ VIỆC PHẢI LÀM ═══
+
+        Gộp hai đường thành một con số độ phủ là giấu mất điều người quản lý cần biết nhất: đơn đi
+        bằng CHIẾN DỊCH nói "tiền của ai tạo ra đơn này", đơn đi bằng FANPAGE nói "đơn rơi vào page
+        ai đang phụ trách". Hai mức chắc chắn khác nhau, nên chúng đứng cạnh nhau chứ không cộng
+        vào nhau trong một ô duy nhất.
+
+        Chỗ trống cũng vậy: mỗi loại sửa ở một màn hình khác, nên in con số kèm ĐÚNG việc phải làm.
+      */}
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-muted-foreground">
+        <span className="font-medium text-foreground">Quy kết bằng:</span>
+        {MARKETER_EVIDENCE.map((e) => (
+          <span key={e} title={MARKETER_EVIDENCE_HINT[e]} className={coverage.byEvidence[e] ? undefined : "opacity-60"}>
+            <b className="tabular-nums text-foreground">{formatNumber(coverage.byEvidence[e])}</b> {MARKETER_EVIDENCE_LABEL[e]}
+          </span>
+        ))}
+        {chuaXacDinh.map((s) => (
+          <span key={s.state} title={MARKETER_LINK_FIX[s.state]}>
+            · <b className="tabular-nums text-foreground">{formatNumber(s.n)}</b> {MARKETER_LINK_LABEL[s.state].toLowerCase()}
+          </span>
+        ))}
+      </div>
+      {/*
+        MÂU THUẪN GIỮA HAI ĐƯỜNG phải hiện, kể cả khi bằng 0 thì ẩn đi. Đo production 22/09/2026:
+        0/720 đơn mà cả hai đường cùng lên tiếng bị mâu thuẫn. Ngày con số này khác 0, nó cũng là
+        ngày bảng lương (khai thứ tự thẩm quyền NGƯỢC LẠI) bắt đầu nói khác bảng này về cùng một
+        đơn — và đó là việc mang lên hỏi chủ shop, không phải việc tự chọn một bên.
+      */}
+      {coverage.conflicts > 0 ? (
+        <p className="mb-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            <b>{formatNumber(coverage.conflicts)}</b> đơn có chiến dịch quảng cáo và fanpage phụ trách trỏ về HAI người khác nhau. Bảng này ghi cho người của CHIẾN DỊCH; bảng lương đang ghi cho người
+            của FANPAGE. Hai chỗ sẽ nói khác nhau về đúng những đơn này cho tới khi chủ shop chốt một bên.
           </span>
         </p>
       ) : null}
@@ -223,7 +273,25 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
               <tr key={m.marketerId ?? "__unresolved__"} className={m.marketerId === null ? "bg-muted/30" : undefined}>
                 <td className="px-3 py-1.5 font-medium">
                   {m.label}
-                  {m.marketerId === null ? <div className="text-[11px] text-muted-foreground">không nối được về chiến dịch có người phụ trách — KHÔNG ép cho ai</div> : null}
+                  {m.marketerId === null ? (
+                    <div className="text-[11px] text-muted-foreground">không nối được về chiến dịch, cũng không về fanpage có người phụ trách — KHÔNG ép cho ai</div>
+                  ) : (
+                    /*
+                      CĂN CỨ ĐI THEO TÊN NGƯỜI, không nằm ở một cột riêng: bảng này đã 9 cột và
+                      trần một màn hình là ~1.150px. Ô hai tầng giữ được cả hai con số mà không
+                      phải bỏ cột nào.
+                    */
+                    <div className="text-[11px] text-muted-foreground" title={EVIDENCE_TITLE}>
+                      {/*
+                        Chỉ in loại bằng chứng THỰC SỰ có đơn. Một người chỉ chạy fanpage mà dòng
+                        của họ vẫn in "0 theo UTM của landing" là ba con số cho một sự thật, và hai
+                        trong ba là nhiễu.
+                      */}
+                      {MARKETER_EVIDENCE.filter((e) => m.byEvidence[e] > 0)
+                        .map((e) => `${formatNumber(m.byEvidence[e])} ${MARKETER_EVIDENCE_LABEL[e]}`)
+                        .join(" · ")}
+                    </div>
+                  )}
                 </td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(m.finished)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700 dark:text-emerald-400">{formatNumber(m.delivered)}</td>
@@ -255,8 +323,11 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
         </table>
       </div>
       <p className="mt-2 text-[11.5px] text-muted-foreground">
-        Quy kết đi bằng <b>khoá chiến dịch</b> (đơn → ad_id / post_id → chiến dịch → người phụ trách khai ở bảng chi tiêu), <b>không dò chữ trong tên chiến dịch</b>. Chiến dịch mang hai người
-        phụ trách là nhập nhằng và đơn của nó nằm ở nhóm &ldquo;Chưa xác định&rdquo;. Con số dự báo ở bảng khác <b>không</b> được dùng để thưởng phạt — chỉ kết quả cuối.
+        Quy kết đi bằng <b>khoá</b>, không dò chữ trong tên chiến dịch hay tên page. Ba đường, xét theo thứ tự: (1) đơn → ad_id / post_id → <b>chiến dịch</b> → người phụ trách khai ở bảng chi tiêu;
+        (2) đơn → <b>fanpage</b> → người phụ trách <b>tại mốc đơn lên</b> (ảnh chụp, nên đổi người phụ trách hôm nay không viết lại báo cáo tháng trước); (3) đơn <b>landing</b> không có fanpage → ô{" "}
+        <b>UTM</b> của chính dòng form (ad_id → adset_id → campaign_id → tên chiến dịch khớp <b>tuyệt đối</b> từng ký tự). Chiến dịch mang hai người phụ trách là nhập nhằng; fanpage chưa gán người tại
+        mốc ấy, và landing có tracking nhưng chưa dẫn về ai, cũng vậy — tất cả nằm ở nhóm &ldquo;Chưa xác định&rdquo; và <b>không</b> bị ép cho ai. Con số dự báo ở bảng khác <b>không</b> được dùng để
+        thưởng phạt — chỉ kết quả cuối.
       </p>
     </>
   );

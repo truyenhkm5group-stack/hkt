@@ -1,3 +1,4 @@
+import { docChiPhiLuot, nhanChiPhi } from "@/lib/constants/agent-run-cost";
 import Link from "next/link";
 import { dispatchConfig } from "@/lib/integrations/github/dispatch";
 import { notFound } from "next/navigation";
@@ -164,6 +165,27 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
                         {formatDateTime(r.startedAt)} → {r.endedAt ? formatDateTime(r.endedAt) : "đang chạy"}
                       </span>
                     </div>
+                    {/*
+                      TIỀN CỦA LƯỢT CHẠY — hiện ngay cạnh kết quả, không giấu trong log.
+
+                      22/09/2026 chủ shop hết sạch tín dụng API và hỏi "tiền đi đâu". Không ai trả
+                      lời được: agent chạy trên máy Actions nên không có trong `ai_interactions`.
+                      Dữ liệu có mà không ai nhìn thấy thì vẫn là không đo được.
+
+                      `—` nghĩa là CHƯA ĐO ĐƯỢC (lượt trước bản vá), KHÔNG phải $0 (mục 42).
+                    */}
+                    {(() => {
+                      const c = docChiPhiLuot(r.metadata);
+                      return (
+                        <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                          <span title={c.usd === null ? "Lượt chạy này không ghi lại chi phí — chưa đo được, không phải $0" : "Tiền khoá AI cho lượt chạy này"}>
+                            tiền <span className="font-medium text-foreground">{nhanChiPhi(c)}</span>
+                          </span>
+                          {c.soVong !== null ? <span>· {c.soVong} vòng</span> : null}
+                          {r.branch ? <span>· nhánh <code className="text-[10.5px]">{r.branch}</code></span> : null}
+                        </div>
+                      );
+                    })()}
                     {r.summary ? <p className="mt-0.5 text-xs text-muted-foreground">{r.summary}</p> : null}
                     <div className="mt-1 flex flex-wrap gap-1">
                       {/* Bốn cổng đứng RIÊNG và mặc định “Chưa xác minh”. Gộp thành một ô “đã test”

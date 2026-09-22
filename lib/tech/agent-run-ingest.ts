@@ -47,6 +47,14 @@ export type AgentRunIngestInput = {
   filesChanged?: string[];
   startedAt?: Date;
   endedAt?: Date;
+  /**
+   * TIỀN CỦA LƯỢT CHẠY. `usd: null` = CHƯA ĐO ĐƯỢC, khác hẳn 0 (mục 42).
+   *
+   * Agent chạy trên máy Actions nên KHÔNG có mặt trong `ai_interactions` — sổ ấy chỉ ghi lượt gọi
+   * TRONG ERP. Không mang con số này về thì đúng thứ tiêu nhiều nhất lại là thứ duy nhất không
+   * hiện ở bất kỳ đâu, và câu hỏi "tiền đi đâu" không ai trả lời được (đã xảy ra 22/09/2026).
+   */
+  chiPhi?: { soVong: number; vao: number; ra: number; demDoc: number; demGhi: number; usd: number | null } | null;
   /** Đường dẫn tới lượt chạy bên ngoài, để người đọc mở được bằng chứng gốc. */
   externalUrl?: string;
 };
@@ -129,7 +137,7 @@ export async function ingestAgentRun(input: AgentRunIngestInput): Promise<AgentR
           bảng. Không phân biệt được thì mọi phép đo "agent chạy thế nào" trộn hai nguồn có độ tin
           cậy khác nhau — cùng lý do `tech_deployments` tách `MANUAL` khỏi `GITHUB_ACTIONS`.
         */
-        metadata: { source: "EXTERNAL_INGEST", externalRef: input.externalRef, externalUrl: (input.externalUrl ?? "").trim() || null },
+        metadata: { source: "EXTERNAL_INGEST", externalRef: input.externalRef, externalUrl: (input.externalUrl ?? "").trim() || null, chiPhi: input.chiPhi ?? null },
       })
       .returning({ id: schema.techAgentRuns.id });
 

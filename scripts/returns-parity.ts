@@ -118,14 +118,33 @@ async function tuSql(): Promise<Dong[]> {
 
 /* ───────────────────── 2 · MÁY TÍNH KẾT QUẢ ───────────────────── */
 
-async function tuMayTinh(): Promise<Dong[]> {
+type MayTinh = {
+  rows: Dong[];
+  /** Tổng ca đã kết thúc của CẢ tập lọc — mẫu số mà dòng cuối bảng marketer phải in ra đúng. */
+  finished: number;
+  /** Cộng mọi dòng marketer, kể cả nhóm "Chưa xác định". Phải bằng `finished`. */
+  tongTheoMarketer: number;
+  /** Phần quy kết được và vỡ theo ba loại bằng chứng. */
+  resolved: number;
+  byEvidence: Record<string, number>;
+  conflicts: number;
+};
+
+async function tuMayTinh(): Promise<MayTinh> {
   // Đi qua ĐÚNG hàm mà trang dùng để đọc kỳ từ URL — kỳ lệch một ngày là ba con số lệch nhau.
   const period = resolvePeriod({ period: PERIOD }, "all");
   const bc = await getReturnReasonReport({ period, basis: "SHIPPED", codes: MA });
-  return bc.products
-    .filter((p) => MA.includes(p.code))
-    .map((p) => ({ code: p.code, daGui: p.finished, giao: p.delivered, hoan: p.returned, dangChay: 0 }))
-    .sort((a, b) => a.code.localeCompare(b.code));
+  return {
+    rows: bc.products
+      .filter((p) => MA.includes(p.code))
+      .map((p) => ({ code: p.code, daGui: p.finished, giao: p.delivered, hoan: p.returned, dangChay: 0 }))
+      .sort((a, b) => a.code.localeCompare(b.code)),
+    finished: bc.finished,
+    tongTheoMarketer: bc.marketers.reduce((n, m) => n + m.finished, 0),
+    resolved: bc.marketerCoverage.resolved,
+    byEvidence: bc.marketerCoverage.byEvidence,
+    conflicts: bc.marketerCoverage.conflicts,
+  };
 }
 
 /* ───────────────────── 1 · MÀN HÌNH THẬT ───────────────────── */
@@ -140,6 +159,62 @@ const viSao: string[] = [];
 
 /** Bảng "Rủi ro theo mã hàng" CÓ trên trang không — tách hẳn khỏi việc bóc được số hay không. */
 let khoiCoMat = false;
+
+/**
+ * ═══ KHỐI MARKETER: CÓ MẶT, VÀ TỔNG CỦA NÓ BẰNG TỔNG KHÔNG CHIA ═══
+ *
+ * Bảng "Chất lượng đầu vào theo marketer" là khối MỚI NHẤT của trang (22/09/2026) và là khối dễ
+ * biến mất nhất: nó đọc ba đường quy kết, mỗi đường một phép nối, và nó nằm SAU bảng mã hàng —
+ * một lỗi ở đây để lại nguyên phần trên của trang, nên mắt thường không thấy gì lạ. Đúng kiểu hỏng
+ * mà bài này sinh ra để bắt (14/09: khối lý do hoàn tan biến trong khi trang vẫn trả HTTP 200).
+ *
+ * Bất biến đắt nhất của khối ấy: **bật chiều marketer KHÔNG được làm đổi tổng**. Dòng cuối bảng in
+ * ra con số ấy, nên so nó với `finished` của máy tính kết quả là bắt được cả hai loại hỏng cùng
+ * lúc — đơn bị đếm hai lần (một đơn thuộc hai người) và đơn bị bỏ rơi (nhóm "Chưa xác định" biến
+ * mất). `tests/return-intelligence.test.ts` đã khoá điều này ở tầng máy tính; đây là lượt kiểm duy
+ * nhất đứng TRÊN tầng render.
+ */
+type KhoiMarketer = { coMat: boolean; tong: number | null; coDaiBangChung: boolean };
+
+let khoiMarketer: KhoiMarketer = { coMat: false, tong: null, coDaiBangChung: false };
+
+const CAU_TONG = "Tổng — bằng đúng số đơn đã kết thúc khi KHÔNG chia theo marketer";
+
+function bocKhoiMarketer(html: string): KhoiMarketer {
+  if (!html.includes("Chất lượng đầu vào theo marketer")) return { coMat: false, tong: null, coDaiBangChung: false };
+  /*
+    ═══ QUÉT CẢ TRANG, VÀ KHÔNG VIẾT DẤU GẠCH VÀO BIỂU THỨC ═══
+
+    Bản đầu cắt 40.000 ký tự sau lần xuất hiện ĐẦU TIÊN của tiêu đề rồi dò trong đó. Chạy thật
+    trên production (ops returns-parity, run #1711 ngày 22/09/2026): khối CÓ MẶT, dải bằng chứng
+    CÓ, mà dòng tổng KHÔNG bóc được — tức khẳng định mạnh nhất của bài này lặng lẽ đi qua. Một
+    khẳng định không bao giờ chạy còn tệ hơn không có, vì nó trông như đã che chỗ đó.
+
+    Hai nguyên nhân, và cả hai đều đã được ghi lại ở `bocSo` mà tôi vẫn dẫm lại:
+      · Next.js nhúng payload RSC vào `<script>self.__next_f.push(...)`, nên câu tiêu đề xuất
+        hiện LẦN ĐẦU trong đoạn dữ liệu đã escape, không phải trong HTML đã render — cắt quanh
+        lần đầu là cắt trúng đoạn sai;
+      · biểu thức cũ mang `<\/td>`, và dấu gạch có escape hay không là tuỳ đoạn.
+
+    Cách chữa bỏ cả hai: duyệt MỌI lần xuất hiện của câu, rồi đọc con số ở ô `<td>` ngay sau nó.
+    Biểu thức không còn dấu gạch nào nên nó khớp được cả đoạn đã escape lẫn đoạn đã render —
+    hai chỗ ấy mang CÙNG một con số, vì đoạn escape chính là thứ dựng ra đoạn render.
+  */
+  let tong: number | null = null;
+  for (let i = html.indexOf(CAU_TONG); i >= 0 && tong === null; i = html.indexOf(CAU_TONG, i + 1)) {
+    const sau = html.slice(i + CAU_TONG.length, i + CAU_TONG.length + 400);
+    const m = /<td[^>]*>([\d.,]+)</.exec(sau);
+    if (m) tong = Number(m[1].replace(/[.,\s]/g, ""));
+  }
+  if (tong === null) viSao.push("khối marketer: thấy tiêu đề nhưng KHÔNG đọc được dòng tổng — kiểm lại câu trong intelligence-sections.tsx có đổi chữ không");
+  return {
+    coMat: true,
+    tong,
+    // Dải "Quy kết bằng: …" là nơi ba đường được đếm riêng. Mất nó thì bảng vẫn đúng số nhưng
+    // người đọc không còn phân biệt được căn cứ — và đó chính là lỗi bản 22/09 đi sửa.
+    coDaiBangChung: html.includes("Quy kết bằng:"),
+  };
+}
 
 function bocSo(html: string, code: string): { giao: number; hoan: number } | null {
   /*
@@ -213,6 +288,7 @@ async function tuManHinh(): Promise<Map<string, { giao: number; hoan: number }>>
   if (/name="password"/.test(html)) throw new Error("Nhận được MÀN ĐĂNG NHẬP chứ không phải báo cáo — phiên không hợp lệ");
   if (/Application error/.test(html)) throw new Error("Màn hình có lỗi runtime");
   khoiCoMat = html.includes("Rủi ro theo mã hàng");
+  khoiMarketer = bocKhoiMarketer(html);
   const out = new Map<string, { giao: number; hoan: number }>();
   for (const c of MA) {
     const v = bocSo(html, c);
@@ -223,9 +299,9 @@ async function tuManHinh(): Promise<Map<string, { giao: number; hoan: number }>>
 
 async function main() {
   console.log(`── ĐỐI CHIẾU BÁO CÁO HOÀN · kỳ "${PERIOD}" · mã ${MA.join(", ")} ──\n`);
-  const [sqlRows, engineRows, ui] = await Promise.all([tuSql(), tuMayTinh(), tuManHinh()]);
+  const [sqlRows, engine, ui] = await Promise.all([tuSql(), tuMayTinh(), tuManHinh()]);
   const theoMaSql = new Map(sqlRows.map((r) => [r.code, r]));
-  const theoMaEngine = new Map(engineRows.map((r) => [r.code, r]));
+  const theoMaEngine = new Map(engine.rows.map((r) => [r.code, r]));
 
   /*
     ═══ BA LOẠI KẾT LUẬN, KHÔNG GỘP LÀM MỘT ═══
@@ -258,6 +334,45 @@ async function main() {
   for (const v of viSao) console.log(`  ⚠ ${v}`);
   if (!khoiCoMat) {
     console.error('✗ BẢNG "Rủi ro theo mã hàng" KHÔNG CÓ trên trang, dù trang trả HTTP 200. Đây đúng là cách hỏng mà bài này sinh ra để bắt.');
+    process.exit(1);
+  }
+
+  /* ───────── KHỐI MARKETER ───────── */
+  console.log("");
+  if (!khoiMarketer.coMat) {
+    console.error('✗ BẢNG "Chất lượng đầu vào theo marketer" KHÔNG CÓ trên trang, dù trang trả HTTP 200.');
+    process.exit(1);
+  }
+  const bangChung = Object.entries(engine.byEvidence)
+    .map(([k, v]) => `${k} ${so(v)}`)
+    .join(" · ");
+  console.log(`marketer · máy tính: ${so(engine.finished)} đơn đã kết thúc · ${so(engine.resolved)} quy kết được (${bangChung}) · ${so(engine.conflicts)} mâu thuẫn`);
+
+  /*
+    BẤT BIẾN KHÔNG THƯƠNG LƯỢNG: bật chiều marketer KHÔNG làm đổi tổng. Kiểm ở CẢ HAI tầng —
+    máy tính và màn hình — vì hai tầng hỏng theo hai cách khác nhau: máy tính hỏng khi một đơn
+    lọt vào hai nhóm, màn hình hỏng khi một dòng (thường là nhóm "Chưa xác định") bị lọc mất lúc
+    render mà tổng vẫn cộng từ chỗ khác.
+  */
+  if (engine.tongTheoMarketer !== engine.finished) {
+    console.error(`✗ Cộng mọi dòng marketer ra ${so(engine.tongTheoMarketer)} nhưng tổng đã kết thúc là ${so(engine.finished)}. Một đơn đang bị đếm hai lần, hoặc một nhóm bị bỏ rơi.`);
+    process.exit(1);
+  }
+  const congBangChung = Object.values(engine.byEvidence).reduce((n, v) => n + v, 0);
+  if (congBangChung !== engine.resolved) {
+    console.error(`✗ Cộng ba loại bằng chứng ra ${so(congBangChung)} nhưng phần quy kết được là ${so(engine.resolved)}. Ba đường không còn là một phép CHIA.`);
+    process.exit(1);
+  }
+  if (khoiMarketer.tong === null) {
+    console.log('◦ Khối marketer CÓ MẶT nhưng chưa bóc được dòng tổng từ HTML — hạn chế của công cụ, KHÔNG phải số liệu lệch.');
+  } else if (khoiMarketer.tong !== engine.finished) {
+    console.error(`✗ Dòng tổng của bảng marketer in ${so(khoiMarketer.tong)} nhưng máy tính nói ${so(engine.finished)}. Bật chiều marketer ĐANG làm đổi tổng.`);
+    process.exit(1);
+  } else {
+    console.log(`✓ Khối marketer: có mặt · dòng tổng ${so(khoiMarketer.tong)} = tổng đã kết thúc · Σ bằng chứng = ${so(engine.resolved)} quy kết được`);
+  }
+  if (!khoiMarketer.coDaiBangChung) {
+    console.error('✗ Khối marketer có mặt nhưng MẤT dải "Quy kết bằng: …" — bảng vẫn đúng số, nhưng người đọc không còn phân biệt được đơn nào đi bằng chiến dịch, đơn nào bằng fanpage, đơn nào bằng UTM landing.');
     process.exit(1);
   }
   if (lech) {

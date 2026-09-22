@@ -1,3 +1,4 @@
+import { nhanTongChiPhi } from "@/lib/constants/agent-run-cost";
 import Link from "next/link";
 import { Activity, AlertTriangle, Bot, GitBranch, ListChecks, Rocket, ShieldCheck } from "lucide-react";
 import { TechApprovalBadge, TechDeployBadge, TechHealthBadge, TechPriorityBadge, TechRiskBadge, TechSeverityBadge, TechStatusBadge } from "@/app/(dashboard)/tech/badges";
@@ -103,7 +104,7 @@ export default async function TechPage() {
         <MetricCard
           label="Agent đang chạy"
           value={formatNumber(counts.runs.running)}
-          note={`${formatNumber(counts.agents.enabled)}/${formatNumber(counts.agents.total)} agent đang bật · ${formatNumber(counts.runs.last24h)} lượt chạy trong 24 giờ`}
+          note={`${formatNumber(counts.agents.enabled)}/${formatNumber(counts.agents.total)} agent đang bật · ${formatNumber(counts.runs.last24h)} lượt chạy trong 24 giờ · tiền ${nhanTongChiPhi({ usd: Number(counts.runs.usd24h ?? 0), chuaDoDuoc: Number(counts.runs.chuaDoDuoc24h ?? 0), soLuot: Number(counts.runs.last24h ?? 0) })}`}
           hint="Phase 1 chưa có agent nào tự chạy: sổ agent là DỮ LIỆU ĐIỀU KHIỂN. Con số này chỉ khác 0 khi có lượt chạy được ghi vào — bảng trống là trạng thái đúng, không phải thiếu dữ liệu."
           icon={Bot}
           tone="slate"
