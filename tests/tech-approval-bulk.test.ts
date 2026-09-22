@@ -213,6 +213,23 @@ export function testKyLoatGuards() {
     không được tự viết lại điều kiện.
   */
   const fetchTask = bo(readFileSync(path.join(goc, "scripts/agent-fetch-task.ts"), "utf8"));
+  const cuaDoc = bo(readFileSync(path.join(goc, "lib/tech/agent-task-read.ts"), "utf8"));
+
+  /*
+    ═══ QUYỀN CHỦ SHOP CẤP PHẢI ĐI THEO VIỆC ═══
+
+    Runner chạy trên CSDL PGlite dùng-một-lần, gieo từ `TECH_AGENT_TEMPLATES` — tức mang mức của
+    MÃ NGUỒN, không mang mức của PRODUCTION. `runner.ts` lại hỏi đúng bản cục bộ ấy.
+
+    Đo 22/09/2026: chủ shop cấp R2 cho `documentation`, TECH-12 qua đủ mọi cổng của ERP, rồi runner
+    chặn bằng "agent Tài liệu chỉ được phép R0" — câu không còn đúng ở nơi có thẩm quyền. Cờ
+    `enabled` xưa nay vẫn đi theo đường này; mức rủi ro bị bỏ quên, và chỉ một lượt chạy THẬT mới
+    lộ ra (bốn PR và mười lăm lượt đột biến trước đó đều không thấy).
+  */
+  assert.match(cuaDoc, /agentAllowedRisks: agent\?\.allowedRisks/, "cửa đọc phải gửi kèm mức chủ shop đã cấp cho vai");
+  assert.match(fetchTask, /setTechAgentRisks\(/, "bước lấy việc phải chép mức ấy sang sổ cục bộ");
+  assert.match(fetchTask, /viec\.agentAllowedRisks/, "…lấy từ gói tin production, không phải từ mẫu vai trong mã");
+
   assert.match(fetchTask, /chiSinhRaChu\(/, "bước lấy việc phải hỏi hàm luật chung, không tự chặn R2");
   assert.doesNotMatch(
     fetchTask,
@@ -220,5 +237,5 @@ export function testKyLoatGuards() {
     "KHÔNG quay lại lệnh cấm cứng — nó là bản thứ hai của một luật đã có chỗ ở",
   );
 
-  console.log("✓ Quét mã nguồn: ký loạt đi qua hàm ký từng việc (không ghi thẳng) · cùng một quyền · từ chối buộc nêu lý do · bản đã duyệt có nút áp lại · câu từ chối trỏ tới màn hình CÓ đường ghi thật · thanh đếm bằng hàm luật chung · bước lấy việc dùng CHUNG luật R2, không tự chặn");
+  console.log("✓ Quét mã nguồn: ký loạt đi qua hàm ký từng việc (không ghi thẳng) · cùng một quyền · từ chối buộc nêu lý do · bản đã duyệt có nút áp lại · câu từ chối trỏ tới màn hình CÓ đường ghi thật · thanh đếm bằng hàm luật chung · bước lấy việc dùng CHUNG luật R2 · quyền chủ shop cấp đi theo việc sang máy chạy");
 }
