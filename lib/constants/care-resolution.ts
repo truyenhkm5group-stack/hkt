@@ -238,6 +238,39 @@ export const DECISION_NEXT_CARE_STATUS: Record<CareDecision, "WAITING_CARRIER" |
 };
 
 /**
+ * ═══════════ KẾT QUẢ NÀO KẾT THÚC PHẦN VIỆC CỦA ĐỘI ═══════════
+ *
+ * Chủ shop báo 22/09/2026: ca đã bấm "Đã hoàn" vẫn nằm nguyên ở "Cần care", nhân viên vận đơn
+ * không để ý thì **gọi lại khách một lần nữa cho một kiện đã chốt bỏ**.
+ *
+ * Nguyên nhân: cả ba kết quả đều đẩy ca vào một trạng thái CHỜ kèm một GIỜ HẸN, mà hễ hẹn tới giờ
+ * là `careViewOf` kéo ca về "Cần care". Đúng với hai kết quả đầu — "Phát tiếp" phải quay lại để
+ * xem bưu tá có đi thật không, "Xử lý sau" thì chính người trực đặt giờ. SAI với "Đã hoàn": shop
+ * đã thôi cứu kiện, người mở ca ra không còn gì để làm, và thứ duy nhất còn thiếu là CHỨNG TỪ của
+ * ĐVVC — thứ đến bằng webhook, không đến bằng việc một nhân viên mở lại ca lúc 9 giờ sáng.
+ *
+ * Nên "Đã hoàn" là kết quả DUY NHẤT không có giờ hẹn: ca rời "Cần care", nằm ở "Đang chờ kết quả"
+ * cho tới khi ĐVVC chốt (`applyCarrierEventToCare` → `chotKetQua`), rồi sang "Đã xử lý".
+ *
+ * Ba điều nó KHÔNG làm, để không đọc nhầm thành một cái nút "đánh dấu xong":
+ *
+ *  · KHÔNG đóng đợt care (`active` giữ nguyên). Đóng đợt là bỏ dòng khỏi phép đọc `loadCareRows`
+ *    (chỉ lấy đợt đang mở) ⇒ kiện còn trong rổ tháp giao vận sẽ hiện lại TRẮNG TRƠN ở "Chưa xử
+ *    lý", đúng triệu chứng "mất note" của luật 60. Kết quả và note phải còn đứng trên dòng.
+ *  · KHÔNG chốt `care_outcome`. Kết cục cứu đơn chỉ đọc chứng từ ĐVVC (luật 56).
+ *  · KHÔNG giấu việc vĩnh viễn: kiện đứng im quá ngưỡng vẫn nổi lên ở hàng đợi đối chiếu
+ *    (`/shipments?view=reconcile`, luật 53) — đó là hàng đợi hỏi "ERP có đang tin một điều không
+ *    còn đúng không", câu hỏi khác hẳn "có cần gọi khách không".
+ *
+ * Đổi ý thì bấm "Phát tiếp" ngay trên dòng ở tab "Đang chờ kết quả" — nó cấp lại một giờ hẹn mới.
+ */
+export const DECISION_ENDS_TEAM_WORK: Record<CareDecision, boolean> = {
+  CARE_RETURN: true,
+  CARE_CONTINUE_DELIVERY: false,
+  CARE_FOLLOW_UP: false,
+};
+
+/**
  * Kết quả nào BẮT BUỘC có lý do theo danh mục. Chỉ "Đã hoàn": suy lý do hoàn từ chứng từ ĐVVC chỉ
  * phủ ~22% vận đơn, phần còn lại chỉ người vừa gọi khách mới biết — bỏ bước đó thì báo cáo lý do
  * hoàn rỗng vĩnh viễn và không ai lấy lại được.
