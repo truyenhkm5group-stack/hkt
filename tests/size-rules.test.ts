@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { recommendSize, resolveSizeRule, type SizeRule } from "@/lib/constants/size-engine";
+import { allKeysOf, sizePayloadSchema, type SizePayload } from "@/lib/constants/size-rules-payload";
 
 /**
  * ═══════════ BẢNG SỐ ĐO THẬT CỦA SHOP — KHOÁ PHÉP RÃ MA TRẬN ═══════════
@@ -50,6 +51,39 @@ function loadRules(): { version: string; rules: SizeRule[] } {
 
 export function testSizeRules() {
   const payload = loadRules();
+
+  /*
+    ═════════ 0. TỆP HẠT GIỐNG PHẢI NẠP ĐƯỢC BẰNG CHÍNH LƯỢC ĐỒ CỦA ĐƯỜNG GHI ═════════
+
+    Phép kiểm này đứng đầu tiên vì nó bắt được lớp lỗi đắt nhất, và lớp ấy đã xảy ra thật: kiểu
+    `SizeRule` được thêm `label` và `keys` để một bảng gán cho nhiều mã hàng, còn lược đồ nhập thì
+    không biết hai trường ấy.
+
+    Hậu quả có hai tầng, và tầng thứ hai mới đáng sợ:
+      · `.refine()` đòi `key` ⇒ tệp bị TỪ CHỐI thẳng — ồn ào, dễ thấy;
+      · nếu qua được vế đó, zod MẶC ĐỊNH CẮT BỎ khoá lạ ⇒ `keys` biến mất trên đường ghi, settings
+        nhận về những bảng không gán cho mã nào, và máy tiếp tục trả SIZE_DATA_MISSING y như lúc
+        chưa khai gì. Không lỗi, không cảnh báo, và người khai tin rằng đã xong.
+
+    Bài kiểm không chỉ hỏi "có hợp lệ không" mà còn so KẾT QUẢ SAU KHI PARSE với tệp gốc — vì
+    chính phép cắt âm thầm mới là thứ giết, và nó không làm phép parse thất bại.
+  */
+  const napThu = sizePayloadSchema.safeParse(payload);
+  assert.ok(
+    napThu.success,
+    `tệp scripts/size-rules.json KHÔNG nạp được: ${napThu.success ? "" : napThu.error.issues.map((i) => i.message).join(" · ")}`,
+  );
+  if (napThu.success) {
+    const daNap: SizePayload["rules"] = napThu.data.rules;
+    for (const goc of payload.rules) {
+      const sau = daNap.find((r) => r.version === goc.version);
+      assert.ok(sau, `bảng ${goc.version} biến mất sau khi parse`);
+      assert.deepEqual(allKeysOf(sau), allKeysOf(goc), `bảng ${goc.version}: danh sách mã hàng bị lược đồ cắt mất`);
+      assert.equal(sau.label, goc.label, `bảng ${goc.version}: tên hiển thị bị lược đồ cắt mất`);
+      assert.equal(sau.rows.length, goc.rows.length, `bảng ${goc.version}: mất dòng size sau khi parse`);
+    }
+  }
+
   const nam = payload.rules.find((r) => r.version.startsWith("nam-"));
   const nu = payload.rules.find((r) => r.version.startsWith("nu-"));
   assert.ok(nam, "phải có bảng nam");

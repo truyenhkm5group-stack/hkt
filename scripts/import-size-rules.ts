@@ -14,43 +14,12 @@
  * người — đó là hành vi đúng, không phải một chỗ cần vá cho xong.
  */
 import "dotenv/config";
-import { z } from "zod";
 import { eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
-import { FABRIC_STRETCH, SIZE_RULES_KEY, SIZE_SCOPES, recommendSize, resolveSizeRule, type SizeRule } from "@/lib/constants/size-engine";
+import { SIZE_RULES_KEY, recommendSize, resolveSizeRule, type SizeRule } from "@/lib/constants/size-engine";
+import { allKeysOf, sizePayloadSchema } from "@/lib/constants/size-rules-payload";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
-
-const rangeSchema = z
-  .tuple([z.number(), z.number()])
-  .refine(([lo, hi]) => lo <= hi, { message: "Khoảng phải là [nhỏ, lớn] — viết ngược là bảng sai" });
-
-const rowSchema = z.object({
-  size: z.string().trim().min(1, "Mỗi dòng phải có tên size"),
-  heightCm: rangeSchema.optional(),
-  weightKg: rangeSchema.optional(),
-  bustCm: rangeSchema.optional(),
-  waistCm: rangeSchema.optional(),
-  hipCm: rangeSchema.optional(),
-});
-
-const ruleSchema = z
-  .object({
-    version: z.string().trim().min(1, "Bảng phải có tên phiên bản"),
-    scope: z.enum(SIZE_SCOPES),
-    key: z.string().trim().optional(),
-    fabricStretch: z.enum(FABRIC_STRETCH).optional(),
-    rows: z.array(rowSchema).min(1, "Bảng phải có ít nhất một dòng size"),
-    note: z.string().trim().max(300).optional(),
-  })
-  .refine((rule) => rule.scope === "GLOBAL" || Boolean(rule.key), {
-    message: "Phạm vi khác GLOBAL bắt buộc có `key` (mã mẫu mã / mã sản phẩm / tên nhóm hàng)",
-  })
-  .refine((rule) => rule.rows.some((row) => row.heightCm || row.weightKg || row.bustCm || row.waistCm || row.hipCm), {
-    message: "Bảng không có một khoảng số đo nào thì không gợi ý được gì — đó không phải bảng số đo",
-  });
-
-const payloadSchema = z.object({ version: z.string().trim().min(1), rules: z.array(ruleSchema).min(1) });
 
 const TEMPLATE = {
   version: "2026-09",
@@ -102,17 +71,21 @@ async function inPrefixes(db: Awaited<ReturnType<typeof getDb>>) {
 async function sanPhamKhop(
   db: Awaited<ReturnType<typeof getDb>>,
   scope: string,
-  key: string,
+  keys: string[],
 ): Promise<{ products: string[]; sizes: string[] }> {
   const all = await db
     .select({ id: schema.products.id, code: schema.products.customId, name: schema.products.name })
     .from(schema.products)
     .where(eq(schema.products.isRemoved, false));
-  const k = key.trim().toUpperCase();
+  const ks = keys.map((k) => k.trim().toUpperCase()).filter(Boolean);
   const hit = all.filter((p2) => {
     if (scope === "GLOBAL") return true;
-    if (scope === "PRODUCT") return p2.id.toUpperCase() === k;
-    if (scope === "FAMILY") return /^([A-Za-z]{1,2})\d{3}$/.exec((p2.code ?? "").trim())?.[1]?.toUpperCase() === k;
+    // PRODUCT khớp id nội bộ HOẶC mã hàng của shop — cùng luật với `resolveSizeRule`.
+    if (scope === "PRODUCT") return ks.includes(p2.id.toUpperCase()) || ks.includes((p2.code ?? "").trim().toUpperCase());
+    if (scope === "FAMILY") {
+      const fam = /^([A-Za-z]{1,2})\d{3}$/.exec((p2.code ?? "").trim())?.[1]?.toUpperCase();
+      return Boolean(fam && ks.includes(fam));
+    }
     return false; // VARIANT tra ở bảng mẫu mã, đã có phép kiểm riêng bên trên
   });
   if (!hit.length) return { products: [], sizes: [] };
@@ -147,7 +120,7 @@ async function main() {
     process.exit(1);
   }
 
-  const parsed = payloadSchema.safeParse(parsedJson);
+  const parsed = sizePayloadSchema.safeParse(parsedJson);
   if (!parsed.success) {
     console.error("✗ Bảng số đo không hợp lệ:");
     for (const issue of parsed.error.issues) console.error(`  · ${issue.path.join(".") || "(gốc)"}: ${issue.message}`);
@@ -159,8 +132,10 @@ async function main() {
   const db = await getDb();
 
   // ĐỐI CHIẾU VỚI DỮ LIỆU THẬT: phạm vi trỏ vào mã không tồn tại là bảng sẽ không bao giờ được dùng.
-  const productKeys = payload.rules.filter((r) => r.scope === "PRODUCT").map((r) => r.key ?? "");
-  const variantKeys = payload.rules.filter((r) => r.scope === "VARIANT").map((r) => r.key ?? "");
+  // Đọc CẢ `key` lẫn `keys`: bỏ sót `keys` thì phép đối chiếu với ERP im lặng bỏ qua đúng những
+  // bảng khai theo lối mới, tức là bỏ qua tất cả.
+  const productKeys = payload.rules.filter((r) => r.scope === "PRODUCT").flatMap(allKeysOf);
+  const variantKeys = payload.rules.filter((r) => r.scope === "VARIANT").flatMap(allKeysOf);
   const warnings: string[] = [];
   if (productKeys.length) {
     const found = await db.select({ id: schema.products.id }).from(schema.products).where(inArray(schema.products.id, productKeys));
@@ -182,8 +157,9 @@ async function main() {
     có dấu hiệu nào.
   */
   for (const rule of payload.rules) {
-    if ((rule.key ?? "").includes("ĐIỀN")) {
-      console.error(`✗ Bảng ${rule.version} còn khoá giữ chỗ "${rule.key}" — điền tiền tố mã hàng thật rồi chạy lại.`);
+    const choDien = allKeysOf(rule).find((k) => k.includes("ĐIỀN"));
+    if (choDien) {
+      console.error(`✗ Bảng ${rule.version} còn khoá giữ chỗ "${choDien}" — điền mã hàng thật rồi chạy lại.`);
       console.error("  Danh sách tiền tố đang có trong ERP được in ở phần ĐỘ PHỦ bên dưới khi chạy thử một bảng hợp lệ.");
       await inPrefixes(db);
       process.exit(1);
@@ -237,10 +213,10 @@ async function main() {
     được tới bảng số đo.
   */
   for (const rule of payload.rules) {
-    const matched = await sanPhamKhop(db, rule.scope, rule.key ?? "");
+    const matched = await sanPhamKhop(db, rule.scope, allKeysOf(rule));
     const tenSize = [...new Set(rule.rows.map((r) => r.size.trim().toUpperCase()))];
     console.log(`
-  ĐỘ PHỦ bảng ${rule.version} (${rule.scope}${rule.key ? ` ${rule.key}` : ""}): ${matched.products.length} sản phẩm`);
+  ĐỘ PHỦ bảng ${rule.version} (${rule.label || rule.version} · ${rule.scope} · ${allKeysOf(rule).join(", ") || "chưa gán mã nào"}): ${matched.products.length} sản phẩm`);
     if (!matched.products.length) {
       warnings.push(`Bảng ${rule.version} KHÔNG khớp sản phẩm nào trong ERP — nó sẽ không bao giờ được dùng`);
     } else {

@@ -150,6 +150,16 @@ export default async function SalesDepartmentPage({ searchParams }: { searchPara
               <p className="mt-1">
                 Phòng chịu trách nhiệm: <b>{DEPARTMENT_LABEL[funnel.worstLeak.owner]}</b>. AI không tự đi tiếp được — số này sẽ không tự giảm.
               </p>
+              {/*
+                Thẻ nêu việc mà không dẫn tới chỗ làm việc ấy thì người đọc phải tự đi tìm, và
+                phần lớn sẽ không tìm. Chỉ dẫn khi bậc rò ĐÚNG là bậc chọn size — gắn một liên
+                kết cố định vào mọi bậc là hứa sai ở những bậc nó không sửa được gì.
+              */}
+              {funnel.worstLeak.stage === "SIZE_SELECTION" && (
+                <Link href="/ai/size-rules" className="mt-2 inline-flex items-center gap-1 font-medium text-primary hover:underline">
+                  Gán bảng số đo cho mã hàng →
+                </Link>
+              )}
             </div>
           </div>
         </Card>
