@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { eq, like } from "drizzle-orm";
+import { eq, inArray, like, asc } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { xetGhiNhanhViec } from "@/lib/constants/agent-branch-claim";
 import { ingestAgentRun } from "@/lib/tech/agent-run-ingest";
 
 /**
- * ═══════════ LỚP HÁ CHỤI LUẬT "NHÁNH AGENT VỀ TỚI DÒNG VIỆC" TRÊN CSDL THẬT ═══════════
+ * ═══════════ KHOÁ LUẬT "NHÁNH AGENT VỀ TỚI DÒNG VIỆC" TRÊN CSDL THẬT ═══════════
  *
  * `lib/constants/agent-branch-claim.ts` có bài kiểm hàm thuần `xetGhiNhanhViec()` với nhiều ca
  * lẻ. Bài này kiểm tranh chấp thực tế trên CSDL: hai lượt chạy nối tiếp trên cùng MỘT việc,
@@ -124,6 +124,7 @@ export async function testNhanhAgentVeToiViec() {
   // ─────────── KIỂM TRA CHÍNH: SỰ KIỆN BRANCH ĐÚNG HAI, KHÔNG PHẢI BA ───────────
   skBranch = await db.query.techTaskEvents.findMany({
     where: eq(schema.techTaskEvents.taskId, task.id),
+    orderBy: [asc(schema.techTaskEvents.createdAt), asc(schema.techTaskEvents.id)],
     columns: { kind: true, previousValue: true, nextValue: true, actorKind: true, createdAt: true },
   });
 
@@ -131,7 +132,7 @@ export async function testNhanhAgentVeToiViec() {
   assert.equal(
     skBranchAll.length,
     2,
-    `CHÍNH: sau cả hai lượt phải có ĐỨC HAI sự kiện BRANCH, không phải ba. Hiện có ${skBranchAll.length}`,
+    `CHÍNH: sau cả hai lượt phải có ĐÚNG HAI sự kiện BRANCH, không phải ba. Hiện có ${skBranchAll.length}`,
   );
 
   // Sự kiện BRANCH thứ nhất
@@ -168,35 +169,46 @@ export async function testNhanhAgentVeToiViec() {
 async function cleanupBranchClaimFixtures() {
   const db = await getDb();
 
-  // Xoá sự kiện trước
+  // Tìm TẤT CẢ việc, agent, lượt chạy khớp tiền tố
   const tasks = await db.query.techTasks.findMany({
     where: like(schema.techTasks.code, `${TIEN_TO}%`),
     columns: { id: true },
   });
-  if (tasks.length) {
-    await db
-      .delete(schema.techTaskEvents)
-      .where(eq(schema.techTaskEvents.taskId, tasks[0].id));
-  }
 
-  // Xoá lượt chạy
   const agents = await db.query.techAgents.findMany({
     where: like(schema.techAgents.key, `${TIEN_TO}%`),
     columns: { id: true },
   });
-  if (agents.length) {
+
+  // Xoá sự kiện của TẤT CẢ việc khớp tiền tố
+  if (tasks.length > 0) {
+    const taskIds = tasks.map((t) => t.id);
+    await db
+      .delete(schema.techTaskEvents)
+      .where(inArray(schema.techTaskEvents.taskId, taskIds));
+  }
+
+  // Xoá lượt chạy của TẤT CẢ agent khớp tiền tố
+  if (agents.length > 0) {
+    const agentIds = agents.map((a) => a.id);
     await db
       .delete(schema.techAgentRuns)
-      .where(eq(schema.techAgentRuns.agentId, agents[0].id));
+      .where(inArray(schema.techAgentRuns.agentId, agentIds));
   }
 
-  // Xoá việc
-  if (tasks.length) {
-    await db.delete(schema.techTasks).where(eq(schema.techTasks.id, tasks[0].id));
+  // Xoá TẤT CẢ việc khớp tiền tố
+  if (tasks.length > 0) {
+    const taskIds = tasks.map((t) => t.id);
+    await db
+      .delete(schema.techTasks)
+      .where(inArray(schema.techTasks.id, taskIds));
   }
 
-  // Xoá agent
-  if (agents.length) {
-    await db.delete(schema.techAgents).where(eq(schema.techAgents.id, agents[0].id));
+  // Xoá TẤT CẢ agent khớp tiền tố
+  if (agents.length > 0) {
+    const agentIds = agents.map((a) => a.id);
+    await db
+      .delete(schema.techAgents)
+      .where(inArray(schema.techAgents.id, agentIds));
   }
 }
