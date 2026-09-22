@@ -103,6 +103,10 @@ export async function testAdsDecision(db: Db) {
       deliveredOrders: 8,
       returnedOrders: 2,
       openOrders: 0,
+      notShippedOrders: 0,
+      notShippedRevenue: 0,
+      inTransitOrders: 0,
+      inTransitRevenue: 0,
       bookedRevenue: 10_000_000,
       deliveredRevenue: 8_000_000,
       cash: 7_000_000,
@@ -145,7 +149,7 @@ export async function testAdsDecision(db: Db) {
 
   // CHƯA BIẾT LÀ NULL, KHÔNG PHẢI 0.
   const noSpend = buildDecisionRow(
-    { key: "ad-1", name: "Mẩu 1", bookedOrders: 5, deliveredOrders: 4, returnedOrders: 1, openOrders: 0, bookedRevenue: 5_000_000, deliveredRevenue: 4_000_000, cash: 3_000_000, cogs: 2_000_000, shipping: 200_000 },
+    { key: "ad-1", name: "Mẩu 1", bookedOrders: 5, deliveredOrders: 4, returnedOrders: 1, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 5_000_000, deliveredRevenue: 4_000_000, cash: 3_000_000, cogs: 2_000_000, shipping: 200_000 },
     "ad",
     0,
     false,
@@ -161,7 +165,7 @@ export async function testAdsDecision(db: Db) {
 
   // Chưa có doanh thu giao thành công ⇒ không có biên ⇒ KHÔNG có điểm hoà vốn (không phải 0).
   const burned = buildDecisionRow(
-    { key: "camp-burn", name: "Đốt tiền", bookedOrders: 0, deliveredOrders: 0, returnedOrders: 0, openOrders: 0, bookedRevenue: 0, deliveredRevenue: 0, cash: 0, cogs: 0, shipping: 0 },
+    { key: "camp-burn", name: "Đốt tiền", bookedOrders: 0, deliveredOrders: 0, returnedOrders: 0, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 0, deliveredRevenue: 0, cash: 0, cogs: 0, shipping: 0 },
     "campaign",
     5_000_000,
     true,
@@ -170,6 +174,103 @@ export async function testAdsDecision(db: Db) {
   assert.equal(burned.breakEvenBookedRoas, null);
   assert.equal(burned.marginRate, null);
   assert.equal(burned.profitAfterAds, -5_000_000, "tiêu 5 triệu không ra đơn = lỗ đúng 5 triệu");
+
+  // ═══════════ CHUỖI THỰC HIỆN & CHỈ SỐ QUẢNG CÁO ═══════════
+  /*
+    HAI ĐIỀU ĐƯỢC KHOÁ Ở ĐÂY.
+
+    ① `openOrders` phải TÁCH ĐÚNG làm hai. Với mô hình bán trước, khoảng "đã chốt mà chưa rời kho"
+       là SẢN XUẤT + ĐÓNG GÓI — việc của xưởng; còn "đang trên đường" là việc của ĐVVC. Gộp lại là
+       xoá mất ranh giới giữa hai chỗ nghẽn khác nhau, và người đọc sẽ gọi nhầm phòng.
+
+    ② Chỉ số quảng cáo CHƯA BIẾT phải là `null`, KHÔNG phải 0. Một cấp không có số chi (nhóm / mẩu)
+       mà in "CPM 0đ · tỷ lệ chốt 0%" là nói ngược hẳn sự thật.
+  */
+  const chuoi = buildDecisionRow(
+    {
+      key: "camp-chuoi",
+      name: "Chuỗi",
+      bookedOrders: 10,
+      deliveredOrders: 4,
+      returnedOrders: 1,
+      openOrders: 5,
+      notShippedOrders: 3,
+      notShippedRevenue: 3_000_000,
+      inTransitOrders: 2,
+      inTransitRevenue: 2_000_000,
+      bookedRevenue: 10_000_000,
+      deliveredRevenue: 4_000_000,
+      cash: 3_500_000,
+      cogs: 2_000_000,
+      shipping: 300_000,
+    },
+    "campaign",
+    2_000_000,
+    true,
+    { impressions: 100_000, clicks: 500, messages: 200 },
+  );
+
+  assert.equal(chuoi.notShippedOrders + chuoi.inTransitOrders, chuoi.openOrders, "hai nhánh của chuỗi phải cộng đúng bằng đơn chưa ngã ngũ");
+  assert.equal(chuoi.bookedOrders, chuoi.notShippedOrders + chuoi.inTransitOrders + chuoi.deliveredOrders + chuoi.returnedOrders, "bốn mốc phải phủ hết đơn đã chốt");
+  assert.equal(chuoi.notShippedRevenue + chuoi.inTransitRevenue, 5_000_000, "tiền của hai nhánh chưa ngã ngũ phải giữ nguyên");
+
+  // Chỉ số quảng cáo: tính bằng tay được.
+  assert.equal(chuoi.impressions, 100_000);
+  assert.equal(chuoi.cpm, 20_000, "CPM = 2.000.000đ ÷ 100.000 hiển thị × 1.000");
+  assert.equal(chuoi.cpc, 4_000, "CPC = 2.000.000đ ÷ 500 click");
+  assert.equal(chuoi.costPerMessage, 10_000, "giá một tin nhắn = 2.000.000đ ÷ 200 tin");
+  assert.equal(chuoi.costPerOrder, 200_000, "giá một đơn CHỐT = 2.000.000đ ÷ 10 đơn");
+  assert.equal(chuoi.closeRate, 5, "tỷ lệ chốt = 10 đơn ÷ 200 tin = 5%");
+  assert.equal(chuoi.adsPctOverPos, 20, "%CPQC trên doanh số POS = 2tr ÷ 10tr");
+  assert.equal(chuoi.adsPctOverDelivered, 50, "%CPQC trên doanh thu giao TC = 2tr ÷ 4tr — LUÔN cao hơn, vì phần hoàn không mang về đồng nào");
+  assert.ok(
+    (chuoi.adsPctOverDelivered ?? 0) > (chuoi.adsPctOverPos ?? 0),
+    "hai mẫu số phải cho hai con số khác nhau — gộp chúng dưới một cái tên là lỗi mà adsRatios() đã phải đi dọn một lần",
+  );
+
+  /*
+    KHÔNG CÓ SỐ CHI ⇒ MỌI CHỈ SỐ QUẢNG CÁO LÀ `null`.
+
+    Kể cả khi nơi gọi lỡ truyền `metrics` xuống: `spendKnown = false` nghĩa là cấp này không có tiền,
+    và một tỷ số chia cho số tiền không tồn tại thì không phải 0 — nó là chưa biết.
+  */
+  const khongChi = buildDecisionRow(
+    {
+      key: "ad-1",
+      name: "Mẩu",
+      bookedOrders: 5,
+      deliveredOrders: 4,
+      returnedOrders: 1,
+      openOrders: 0,
+      notShippedOrders: 0,
+      notShippedRevenue: 0,
+      inTransitOrders: 0,
+      inTransitRevenue: 0,
+      bookedRevenue: 5_000_000,
+      deliveredRevenue: 4_000_000,
+      cash: 3_000_000,
+      cogs: 2_000_000,
+      shipping: 200_000,
+    },
+    "ad",
+    0,
+    false,
+    { impressions: 999, clicks: 99, messages: 9 },
+  );
+  for (const [ten, gt] of Object.entries({
+    impressions: khongChi.impressions,
+    clicks: khongChi.clicks,
+    messages: khongChi.messages,
+    cpm: khongChi.cpm,
+    cpc: khongChi.cpc,
+    costPerMessage: khongChi.costPerMessage,
+    costPerOrder: khongChi.costPerOrder,
+    closeRate: khongChi.closeRate,
+    adsPctOverPos: khongChi.adsPctOverPos,
+    adsPctOverDelivered: khongChi.adsPctOverDelivered,
+  })) {
+    assert.equal(gt, null, `${ten}: không có số chi thì phải là CHƯA BIẾT (null), không phải 0`);
+  }
 
   // ═══════════ PHẦN C — CHẠY THẬT TRÊN CSDL ═══════════
   await db.insert(schema.fbAds).values({ id: "ad-dec-1", name: "Mẩu QC quyết định", adsetId: "adset-dec-1", campaignId: "camp-dec-1", campaignName: "Chiến dịch quyết định" }).onConflictDoNothing();

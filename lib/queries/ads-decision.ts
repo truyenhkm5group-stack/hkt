@@ -3,13 +3,14 @@ import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { metricScope, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
-import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { spendPeriod } from "@/lib/queries/ads-roas";
 import { lineUnitCost } from "@/lib/queries/cogs";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import { adsAttributionCoverage, coverageVerdict } from "@/lib/queries/ads-attribution-coverage";
 import { LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
+import { adsRatio } from "@/lib/constants/profit";
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import {
   ADS_ACTION_ORDER,
@@ -83,6 +84,25 @@ export type AdsDecisionRow = {
   returnedOrders: number;
   /** Đơn CHƯA ngã ngũ: đang giao / chưa gửi / chưa có chứng từ ĐVVC. */
   openOrders: number;
+  /**
+   * ─── CHUỖI THỰC HIỆN: `openOrders` TÁCH LÀM HAI, VÀ HAI PHẦN ẤY LÀ HAI VIỆC CỦA HAI PHÒNG ───
+   *
+   * Với mô hình BÁN TRƯỚC, khoảng giữa "khách chốt" và "hàng rời kho" chính là SẢN XUẤT + ĐÓNG GÓI.
+   * Gộp nó với "đang trên đường đi" thành một cục `openOrders` là xoá mất ranh giới giữa việc của
+   * XƯỞNG và việc của ĐVVC — hai chỗ nghẽn khác nhau, hai người phải gọi khác nhau.
+   *
+   * Mốc rời kho đi bằng `SHIPMENT_LEFT_WAREHOUSE` (chứng từ ĐVVC), KHÔNG bằng trạng thái Pancake và
+   * KHÔNG bằng `ORDER_OUTCOME` — cái sau là định nghĩa theo TIỀN (AGENTS.md mục 10).
+   *
+   * Cố ý KHÔNG gọi cột này là "đang sản xuất": `production_orders` là phiếu gửi xưởng theo
+   * mã hàng × màu × size, không gắn với đơn khách nào, nên ERP không đo được "đơn này đang ở xưởng".
+   * Cái đo được là ĐÃ CHỐT MÀ CHƯA RỜI KHO, và tên cột phải nói đúng chừng ấy.
+   */
+  notShippedOrders: number;
+  notShippedRevenue: number;
+  /** Đã rời kho, chưa ngã ngũ — tiền đang nằm trên đường. */
+  inTransitOrders: number;
+  inTransitRevenue: number;
 
   // ── Tiền: ba con số khác nhau, không bao giờ gộp ──
   bookedRevenue: number;
@@ -120,6 +140,34 @@ export type AdsDecisionRow = {
   /** Chi phí quảng cáo cho MỘT khách cầm được hàng. */
   cacDelivered: number | null;
 
+  // ── Chỉ số quảng cáo thô: `null` khi cấp này không có số chi (mục 42) ──
+  impressions: number | null;
+  clicks: number | null;
+  messages: number | null;
+  /** Chi cho 1.000 lượt hiển thị. */
+  cpm: number | null;
+  /** Chi cho một lượt bấm. */
+  cpc: number | null;
+  /** Chi cho một tin nhắn — con số marketer nhìn hằng ngày. */
+  costPerMessage: number | null;
+  /** Chi cho một ĐƠN CHỐT (chưa trừ hoàn). Khác hẳn CAC giao thành công ở dưới. */
+  costPerOrder: number | null;
+  /** Tin nhắn → đơn chốt. `null` khi chưa biết số tin nhắn. */
+  closeRate: number | null;
+
+  /**
+   * ─── %CPQC CÓ HAI MẪU SỐ Ở ĐÂY, VÀ PHẢI IN RÕ ĐANG DÙNG CÁI NÀO ───
+   *
+   * Dùng lại `adsRatio()` của `lib/constants/profit.ts` — nơi đã dọn đúng lớp lỗi này một lần: bảng
+   * lợi nhuận từng tính "CPQC / DT GTC" bằng hai mẫu số khác nhau ở hai chỗ dưới cùng một cái tên.
+   *
+   * Mẫu số thứ ba (`overProjectedRevenue` — doanh thu giao ƯỚC TÍNH) cố ý KHÔNG có ở đây: nó cần
+   * xác suất giao thành công theo từng đơn, thứ bảng này không tính. Thêm một cột rỗng thì hơn là
+   * điền vào đó một con số gần đúng.
+   */
+  adsPctOverPos: number | null;
+  adsPctOverDelivered: number | null;
+
   action: AdsAction;
   /** Giải thích bằng SỐ THẬT của chính dòng này — không có câu chữ chung chung. */
   reason: string;
@@ -138,6 +186,14 @@ export type AdsDecision = {
     cashReceived: number;
     contributionBeforeAds: number;
     profitAfterAds: number;
+    /** Chuỗi thực hiện ở mức tổng — bốn mốc, bốn chứng từ, không suy ra lẫn nhau. */
+    notShippedOrders: number;
+    notShippedRevenue: number;
+    inTransitOrders: number;
+    inTransitRevenue: number;
+    returnedOrders: number;
+    /** `null` = CHƯA BIẾT số tin nhắn ở cấp này, không phải 0 tin nhắn. */
+    messages: number | null;
     /**
      * CẨN THẬN Ở CẤP MÃ HÀNG: một đơn chứa hai mã được đếm cho CẢ HAI mã, nên tổng hai dòng này
      * lớn hơn số đơn thật của kỳ. Đó là hành vi đúng cho một bảng theo mã, nhưng KHÔNG được đem
@@ -208,6 +264,10 @@ type Agg = {
   deliveredOrders: number;
   returnedOrders: number;
   openOrders: number;
+  notShippedOrders: number;
+  notShippedRevenue: number;
+  inTransitOrders: number;
+  inTransitRevenue: number;
   bookedRevenue: number;
   deliveredRevenue: number;
   cash: number;
@@ -223,6 +283,10 @@ function toAgg(r: Record<string, unknown>): Agg {
     deliveredOrders: Number(r.deliveredOrders ?? 0),
     returnedOrders: Number(r.returnedOrders ?? 0),
     openOrders: Number(r.openOrders ?? 0),
+    notShippedOrders: Number(r.notShippedOrders ?? 0),
+    notShippedRevenue: Number(r.notShippedRevenue ?? 0),
+    inTransitOrders: Number(r.inTransitOrders ?? 0),
+    inTransitRevenue: Number(r.inTransitRevenue ?? 0),
     bookedRevenue: Number(r.bookedRevenue ?? 0),
     deliveredRevenue: Number(r.deliveredRevenue ?? 0),
     cash: Number(r.cash ?? 0),
@@ -254,6 +318,8 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension): Promis
       returnFee: sql<number>`coalesce(${o.returnFee}, 0)`.as("d_return_fee"),
       cash: sql<number>`coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)`.as("d_cash"),
       outcome: ORDER_OUTCOME_FAST.as("d_outcome"),
+      // Mốc VẬT LÝ: hàng đã rời kho chưa. Chứng từ ĐVVC, không phải trạng thái Pancake.
+      leftWarehouse: sql<boolean>`${SHIPMENT_LEFT_WAREHOUSE}`.as("d_left_warehouse"),
     })
     .from(o)
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
@@ -282,6 +348,10 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension): Promis
         deliveredOrders: sql<number>`count(*) filter (where ${delivered})`,
         returnedOrders: sql<number>`count(*) filter (where ${returned})`,
         openOrders: sql<number>`count(*) filter (where ${open})`,
+        notShippedOrders: sql<number>`count(*) filter (where ${open} and not ${facts.leftWarehouse})`,
+        inTransitOrders: sql<number>`count(*) filter (where ${open} and ${facts.leftWarehouse})`,
+        notShippedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${open} and not ${facts.leftWarehouse}), 0)`,
+        inTransitRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${open} and ${facts.leftWarehouse}), 0)`,
         bookedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${booked}), 0)`,
         deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${delivered}), 0)`,
         cash: sql<number>`coalesce(sum(${facts.cash}) filter (where ${delivered}), 0)`,
@@ -335,6 +405,7 @@ async function aggregateByProduct(period: Period): Promise<Agg[]> {
       cash: sql<number>`coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)`.as("p_cash"),
       orderId: sql<string>`${o.id}`.as("p_order_id"),
       outcome: ORDER_OUTCOME_FAST.as("p_outcome"),
+      leftWarehouse: sql<boolean>`${SHIPMENT_LEFT_WAREHOUSE}`.as("p_left_warehouse"),
     })
     .from(o)
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
@@ -362,6 +433,10 @@ async function aggregateByProduct(period: Period): Promise<Agg[]> {
         deliveredOrders: countOrders(delivered),
         returnedOrders: countOrders(returned),
         openOrders: countOrders(open),
+        notShippedOrders: countOrders(sql`${open} and not ${facts.leftWarehouse}`),
+        inTransitOrders: countOrders(sql`${open} and ${facts.leftWarehouse}`),
+        notShippedRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${open} and not ${facts.leftWarehouse}), 0)`,
+        inTransitRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${open} and ${facts.leftWarehouse}), 0)`,
         bookedRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${booked}), 0)`,
         deliveredRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${delivered}), 0)`,
         cash: sql<number>`coalesce(sum(${facts.cash} * coalesce(${facts.shipShare}, 0)) filter (where ${delivered}), 0)`,
@@ -377,7 +452,10 @@ async function aggregateByProduct(period: Period): Promise<Agg[]> {
 }
 
 /** Tiền quảng cáo theo cùng khoá gộp. Cấp không có chi tiêu thì trả map RỖNG — KHÔNG chia đều. */
-async function spendByKey(period: Period, dimension: AdsDimension): Promise<Map<string, { spend: number; name: string }>> {
+/** Tiền và chỉ số thô của một khoá chi tiêu. Ba cột sau đã có sẵn trong `ad_spends`, chỉ là chưa ai đọc. */
+export type SpendRow = { spend: number; name: string; impressions: number; clicks: number; messages: number };
+
+async function spendByKey(period: Period, dimension: AdsDimension): Promise<Map<string, SpendRow>> {
   if (!ADS_DIMENSION_HAS_SPEND[dimension]) return new Map();
   const db = await getDb();
   const key = dimension === "product" ? sql`${schema.adSpends.productId}` : sql`coalesce(${schema.adSpends.campaignId}, ${schema.adSpends.campaign})`;
@@ -386,15 +464,24 @@ async function spendByKey(period: Period, dimension: AdsDimension): Promise<Map<
       key: sql<string>`${key}`,
       name: sql<string>`max(${schema.adSpends.campaign})`,
       spend: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)`,
+      impressions: sql<number>`coalesce(sum(${schema.adSpends.impressions}), 0)`,
+      clicks: sql<number>`coalesce(sum(${schema.adSpends.clicks}), 0)`,
+      messages: sql<number>`coalesce(sum(${schema.adSpends.messages}), 0)`,
     })
     .from(schema.adSpends)
     .where(spendPeriod(period.from, period.to))
     .groupBy(key);
-  const map = new Map<string, { spend: number; name: string }>();
+  const map = new Map<string, SpendRow>();
   for (const r of rows) {
     const k = String(r.key ?? "").trim();
     if (!k) continue;
-    map.set(k, { spend: Number(r.spend ?? 0), name: String(r.name ?? "") });
+    map.set(k, {
+      spend: Number(r.spend ?? 0),
+      name: String(r.name ?? ""),
+      impressions: Number(r.impressions ?? 0),
+      clicks: Number(r.clicks ?? 0),
+      messages: Number(r.messages ?? 0),
+    });
   }
   return map;
 }
@@ -504,8 +591,16 @@ export function decideAction(input: {
   };
 }
 
-/** Dựng một dòng quyết định từ số gộp + tiền quảng cáo. Tách hàm để kiểm thử được không cần CSDL. */
-export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: number, spendKnown: boolean): AdsDecisionRow {
+/**
+ * Dựng một dòng quyết định từ số gộp + tiền quảng cáo. Tách hàm để kiểm thử được không cần CSDL.
+ *
+ * `metrics` là hiển thị / click / tin nhắn của chính khoá này. **Vắng mặt nghĩa là CHƯA BIẾT**, và
+ * mọi tỷ số dẫn xuất từ nó trả `null` — không phải 0 (mục 42). Một cấp không có số chi thì cũng
+ * không có ba con số này, và in "CPM 0đ" ở đó sẽ bị đọc thành "hiển thị miễn phí".
+ */
+export type AdMetrics = { impressions: number; clicks: number; messages: number };
+
+export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: number, spendKnown: boolean, metrics?: AdMetrics): AdsDecisionRow {
   const contributionBeforeAds = agg.deliveredRevenue - agg.cogs - agg.shipping;
   const spendForRatio = spendKnown ? spend : 0;
   const profitAfterAds = contributionBeforeAds - spendForRatio;
@@ -542,6 +637,23 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
     deliveredOrders: agg.deliveredOrders,
   });
 
+  /*
+    ─── CHỈ SỐ QUẢNG CÁO: CHƯA BIẾT THÌ LÀ `null`, KHÔNG PHẢI 0 ───
+
+    `metrics` vắng mặt ⇔ cấp này không có số chi (nhóm / mẩu), nên cả ba con số thô lẫn mọi tỷ số
+    dẫn xuất đều là CHƯA BIẾT. Điền 0 vào đây sẽ cho "CPM 0đ" và "tỷ lệ chốt 0%" — hai câu nói
+    ngược hẳn sự thật.
+  */
+  const m = spendKnown ? metrics : undefined;
+  const impressions = m ? m.impressions : null;
+  const clicks = m ? m.clicks : null;
+  const messages = m ? m.messages : null;
+  const cpm = impressions !== null && impressions > 0 ? Math.round((spendForRatio / impressions) * 1000) : null;
+  const cpc = clicks !== null && clicks > 0 ? Math.round(spendForRatio / clicks) : null;
+  const costPerMessage = messages !== null && messages > 0 ? Math.round(spendForRatio / messages) : null;
+  const costPerOrder = spendKnown && agg.bookedOrders > 0 ? Math.round(spendForRatio / agg.bookedOrders) : null;
+  const closeRate = messages !== null && messages > 0 ? Math.round((agg.bookedOrders / messages) * 1000) / 10 : null;
+
   return {
     key: agg.key,
     name: agg.name,
@@ -552,6 +664,10 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
     deliveredOrders: agg.deliveredOrders,
     returnedOrders: agg.returnedOrders,
     openOrders: agg.openOrders,
+    notShippedOrders: agg.notShippedOrders,
+    notShippedRevenue: agg.notShippedRevenue,
+    inTransitOrders: agg.inTransitOrders,
+    inTransitRevenue: agg.inTransitRevenue,
     bookedRevenue: agg.bookedRevenue,
     deliveredRevenue: agg.deliveredRevenue,
     cashReceived: agg.cash,
@@ -569,6 +685,17 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
     breakEvenBookedRoas,
     headroom,
     cacDelivered: spendKnown && agg.deliveredOrders > 0 ? Math.round(spendForRatio / agg.deliveredOrders) : null,
+    impressions,
+    clicks,
+    messages,
+    cpm,
+    cpc,
+    costPerMessage,
+    costPerOrder,
+    closeRate,
+    // Dùng LẠI `adsRatio()` của báo cáo lợi nhuận — mẫu số 0 ⇒ null, không bao giờ 0%.
+    adsPctOverPos: spendKnown ? adsRatio(spendForRatio, agg.bookedRevenue) : null,
+    adsPctOverDelivered: spendKnown ? adsRatio(spendForRatio, agg.deliveredRevenue) : null,
     action,
     reason,
     lowDelivery,
@@ -587,7 +714,8 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
   const seen = new Set<string>();
   for (const agg of aggs) {
     seen.add(agg.key);
-    rows.push(buildDecisionRow(agg, dimension, spend.get(agg.key)?.spend ?? 0, spendKnown));
+    const sp = spend.get(agg.key);
+    rows.push(buildDecisionRow(agg, dimension, sp?.spend ?? 0, spendKnown, sp));
   }
 
   /**
@@ -612,6 +740,10 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
             deliveredOrders: 0,
             returnedOrders: 0,
             openOrders: 0,
+            notShippedOrders: 0,
+            notShippedRevenue: 0,
+            inTransitOrders: 0,
+            inTransitRevenue: 0,
             bookedRevenue: 0,
             deliveredRevenue: 0,
             cash: 0,
@@ -621,6 +753,7 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
           dimension,
           value.spend,
           true,
+          value,
         ),
       );
     }
@@ -636,6 +769,13 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
       profitAfterAds: t.profitAfterAds + r.profitAfterAds,
       deliveredOrders: t.deliveredOrders + r.deliveredOrders,
       bookedOrders: t.bookedOrders + r.bookedOrders,
+      notShippedOrders: t.notShippedOrders + r.notShippedOrders,
+      notShippedRevenue: t.notShippedRevenue + r.notShippedRevenue,
+      inTransitOrders: t.inTransitOrders + r.inTransitOrders,
+      inTransitRevenue: t.inTransitRevenue + r.inTransitRevenue,
+      returnedOrders: t.returnedOrders + r.returnedOrders,
+      // Cộng chỉ số thô: `null` (chưa biết) KHÔNG được cộng như 0 — giữ null cho cả tổng.
+      messages: r.messages === null ? t.messages : (t.messages ?? 0) + r.messages,
     }),
     {
       spend: 0,
@@ -646,6 +786,12 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
       profitAfterAds: 0,
       deliveredOrders: 0,
       bookedOrders: 0,
+      notShippedOrders: 0,
+      notShippedRevenue: 0,
+      inTransitOrders: 0,
+      inTransitRevenue: 0,
+      returnedOrders: 0,
+      messages: null as number | null,
     },
   );
 
