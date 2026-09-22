@@ -11,10 +11,12 @@
  * trong tệp này gọi tới `sendSalesMessage` — muốn gửi phải qua cổng `outbound.ts`, và cổng đó
  * từ chối mọi câu do AI soạn khi còn ở nấc SHADOW.
  */
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema, type Db } from "@/db";
 import { getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
+import { DEFAULT_HANDOVER_MODE, HANDOVER_MODE_KEY, parseHandoverMode, shouldEngage } from "@/lib/constants/sales-handover";
+import { getSettingValue } from "@/lib/settings";
 import { claimTask, finishTask, modelSpendLast24h, recordAiError, runsInLastHour } from "@/lib/ai-workforce/events";
 import { parseRouting, runModelStep, type ModelAttempt } from "@/lib/ai-workforce/model-router";
 import { getAgent } from "@/lib/ai-workforce/registry";
@@ -299,6 +301,34 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
   const { conversation, message } = context;
   const stageBefore = parseStage(conversation.stage);
   const stateBefore = parseSalesState(conversation.state);
+
+  /*
+    ═══════ AI CÓ PHỤ TRÁCH LƯỢT NÀY KHÔNG ═══════
+
+    Chủ shop chốt 23/09/2026: auto-reply của Meta trả câu ĐẦU, nhân sự AI vào từ lượt khách thứ
+    hai. Chốt chặn đặt Ở ĐÂY — TRƯỚC khi mở lượt chạy — vì mở lượt chạy là đã gọi mô hình và đã
+    tốn tiền cho một câu không được phép gửi.
+
+    Đếm LƯỢT KHÁCH chứ không hỏi "Meta đã trả lời chưa": auto-reply có thể không tới (ngoài giờ
+    khai, quản trị viên tắt nhầm) và ERP không có cách nào biết. Đếm tin của khách là dữ kiện
+    quan sát trực tiếp, nên nhánh sai rơi về phía TRẢ LỜI MUỘN MỘT LƯỢT, không phải im mãi mãi.
+  */
+  const [demKhach] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(schema.salesMessages)
+    .where(
+      and(
+        eq(schema.salesMessages.conversationId, conversation.id),
+        eq(schema.salesMessages.fromPage, false),
+        eq(schema.salesMessages.senderType, "CUSTOMER"),
+      ),
+    );
+  const soLuotKhach = Number(demKhach?.n ?? 0);
+  const banGiao = shouldEngage(parseHandoverMode(await getSettingValue<unknown>(HANDOVER_MODE_KEY, DEFAULT_HANDOVER_MODE)), soLuotKhach);
+  if (!banGiao.engage) {
+    await finishTask(taskId, "DONE", banGiao.reason, db);
+    return { runId: null, status: "SKIPPED", stage: stageBefore, action: "NO_ACTION", suggestedReply: "", reason: banGiao.reason };
+  }
 
   const run: RunRecorder = await startRun(
     {

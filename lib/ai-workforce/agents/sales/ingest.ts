@@ -18,7 +18,7 @@ import { getDb, schema, type Db } from "@/db";
 import { asArray, asRecord, str } from "@/lib/integrations/http";
 import { getPancakePagesClient, type PancakeMessage } from "@/lib/integrations/pancake/pages";
 import { normalize, stripHtml } from "@/lib/text";
-import { getSettingJson } from "@/lib/settings";
+import { getSettingValue } from "@/lib/settings";
 import { AD_AUTO_GREETING_PHRASES, BOT_SENDER_NAMES, BOT_SENDER_NAMES_KEY, CHAT_FIELD_MAP, SYSTEM_NOTICE_PHRASES, REQUIRED_CHAT_FIELDS, type ChatRejectReason, type IngestSource, type SenderType } from "@/lib/constants/sales-ingest";
 import { normalizePhone } from "@/lib/constants/landing";
 import { emitAndDispatch, recordAiError } from "@/lib/ai-workforce/events";
@@ -266,7 +266,7 @@ export async function upsertConversation(conversation: NormalizedConversation, d
  * mẻ ba mươi hội thoại là hàng trăm tin, và ba trăm lượt đọc settings cho cùng một câu trả lời.
  */
 export async function declaredBotNames(): Promise<string[]> {
-  const raw = await getSettingJson<unknown>(BOT_SENDER_NAMES_KEY, []);
+  const raw = await getSettingValue<unknown>(BOT_SENDER_NAMES_KEY, []);
   return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [];
 }
 

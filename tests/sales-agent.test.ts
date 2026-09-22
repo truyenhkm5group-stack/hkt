@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { AI_CONFIG_KEY } from "@/lib/constants/ai";
+import { CUSTOMER_TURNS_BEFORE_AI, DEFAULT_HANDOVER_MODE, HANDOVER_MODE_KEY, parseHandoverMode, shouldEngage } from "@/lib/constants/sales-handover";
 import { HANDOFF_REASONS, SALES_ACTIONS, SALES_STAGES, SALES_TRANSITIONS, nextStage, type SalesFacts, type SalesStage } from "@/lib/constants/sales-agent";
 import { HANDOFF_CLASS_LABEL, QUALITY_DIMENSIONS, advancesConversation, answeredMoneyQuestion, classifyHandoff, safetyFlags } from "@/lib/constants/sales-quality";
 import { UNDERSTANDING_SCHEMA, findBody, findPhone, findQuantity, ruleIsEnough, understandByRule, type Understanding } from "@/lib/ai-workforce/agents/sales/understand";
@@ -27,7 +28,7 @@ import { supportsAdaptiveThinking, supportsEffort } from "@/lib/constants/anthro
 import { SALES_AGENT } from "@/lib/ai-workforce/agents/sales/definition";
 import { parseRouting as parseRoutingCfg } from "@/lib/ai-workforce/model-router";
 import { SAFEST_HARD_LIMITS, WORKFORCE_PROVIDERS, aiEnv, getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
-import { setSettingJson } from "@/lib/settings";
+import { getSettingJson, getSettingValue, setSettingJson } from "@/lib/settings";
 import { queueStubResponse, resetStub } from "@/lib/ai-workforce/providers/stub";
 import { aiSummary, getAiRunDetail, listAiRuns, salesStageBreakdown } from "@/lib/queries/ai";
 import { getConversationTurns, listShadowTurns, shadowMetrics } from "@/lib/queries/sales-review";
@@ -80,6 +81,20 @@ function readyState(): SalesState {
 export async function testSalesAgent(db: Db) {
   registerErpTools();
   await ensureAgents(db);
+
+  /*
+    CHẾ ĐỘ BÀN GIAO KHAI RÕ Ở ĐẦU BỘ KIỂM.
+
+    Mặc định vận hành (`META_AUTO_REPLY_FIRST`) làm nhân sự AI im ở lượt khách đầu tiên — đúng
+    theo quyết định của chủ shop. Phần lớn bài kiểm dưới đây nói về RUỘT của dây chuyền (nhận
+    diện sản phẩm, giá, xác nhận) và chỉ gieo MỘT lượt khách, nên chúng cần chế độ AI-trả-lời-
+    ngay để nói về đúng thứ chúng định nói.
+
+    Khai tường minh chứ không dựa vào mặc định: một bài kiểm im lặng phụ thuộc vào cấu hình vận
+    hành sẽ đỏ vào ngày chủ shop đổi cấu hình, và người đọc sẽ không hiểu vì sao. Luật bàn giao
+    có bài kiểm riêng ở khối 9E, nơi nó tự đặt lại chế độ của mình.
+  */
+  await setSettingJson(HANDOVER_MODE_KEY, "AI_FROM_FIRST_MESSAGE");
 
   // ═════════ 1. MÁY TRẠNG THÁI — TẤT ĐỊNH VÀ ĐÓNG ═════════
 
@@ -1477,6 +1492,93 @@ export async function testSalesAgent(db: Db) {
     const m: string = routingSales.models?.[bac] ?? "";
     assert.equal(supportsEffort(m), supportsAdaptiveThinking(m), `${m}: hai năng lực phải đi cùng nhau`);
   }
+
+  /*
+    ═════════ 9E. META TRẢ CÂU ĐẦU, AI VÀO TỪ LƯỢT THỨ HAI ═════════
+
+    Chủ shop chốt 23/09/2026: auto-reply của Meta trả câu đầu; khách nhắn lại thì nhân sự AI vào
+    việc, và bot Gemini bị gỡ hẳn.
+
+    Luật đếm LƯỢT KHÁCH chứ không hỏi "Meta đã trả lời chưa" — câu ấy không kiểm chứng được:
+    auto-reply có thể không tới (ngoài giờ khai, quản trị viên tắt nhầm) và ERP không có cách nào
+    biết. Hệ quả cố ý: auto-reply hỏng thì khách nhắn lượt hai vẫn kích hoạt AI — muộn một lượt,
+    không ai bị bỏ rơi. Nhánh sai rơi về phía TRẢ LỜI MUỘN, không phải IM MÃI MÃI.
+  */
+  /*
+    TRƯỚC HẾT: CÁI BẪY LÀM HAI CẤU HÌNH GHI XONG MÀ KHÔNG BAO GIỜ CÓ HIỆU LỰC.
+
+    `getSettingJson` TRỘN giá trị đã lưu vào fallback (`{ ...fallback, ...đãLưu }`). Với object
+    cấu hình đó là tính năng. Với MẢNG hoặc CHUỖI thì phép trải cho ra `{0: "…", 1: "…"}` —
+    `Array.isArray()` false, `typeof === "string"` false, nơi gọi rơi về mặc định, và KHÔNG có
+    lỗi nào để lần theo.
+
+    Cắn thật hai lần trong ngày 23/09/2026: `ai.botSenderNames` (mảng) ghi xong mà ERP vẫn gọi
+    bot là nhân viên; `ai.handoverMode` (chuỗi) ghi xong mà dây chuyền vẫn chạy chế độ cũ.
+  */
+  await setSettingJson("kiem-thu.mang", ["Hai An Fashion"]);
+  const mangTron = await getSettingJson<unknown>("kiem-thu.mang", []);
+  assert.equal(Array.isArray(mangTron), false, "getSettingJson TRỘN mảng thành object — đây là cái bẫy, khoá lại để không ai dùng nhầm");
+  const mangDung = await getSettingValue<unknown>("kiem-thu.mang", []);
+  assert.deepEqual(mangDung, ["Hai An Fashion"], "getSettingValue phải trả về ĐÚNG thứ đã lưu");
+
+  await setSettingJson("kiem-thu.chuoi", "META_AUTO_REPLY_FIRST");
+  assert.equal(await getSettingValue<unknown>("kiem-thu.chuoi", ""), "META_AUTO_REPLY_FIRST");
+  assert.notEqual(await getSettingJson<unknown>("kiem-thu.chuoi", ""), "META_AUTO_REPLY_FIRST", "chuỗi qua getSettingJson cũng hỏng — cùng một bẫy");
+
+  assert.equal(shouldEngage("META_AUTO_REPLY_FIRST", 1).engage, false, "lượt đầu là việc của Meta");
+  assert.match(shouldEngage("META_AUTO_REPLY_FIRST", 1).reason, /Meta/, "phải nói rõ vì sao máy im — không để người đọc đoán");
+  assert.equal(shouldEngage("META_AUTO_REPLY_FIRST", 2).engage, true, "khách nhắn lại ⇒ AI vào việc");
+  assert.equal(shouldEngage("META_AUTO_REPLY_FIRST", 9).engage, true);
+  assert.equal(shouldEngage("AI_FROM_FIRST_MESSAGE", 1).engage, true, "chế độ kia thì AI trả ngay từ câu đầu");
+
+  // Giá trị lạ rơi về mặc định ĐANG VẬN HÀNH, không rơi về "AI trả lời ngay": một chuỗi gõ nhầm
+  // trong settings không được biến thành việc máy chen vào câu đầu của mọi khách.
+  assert.equal(parseHandoverMode("gõ nhầm"), DEFAULT_HANDOVER_MODE);
+  assert.equal(parseHandoverMode(null), DEFAULT_HANDOVER_MODE);
+  assert.equal(parseHandoverMode(123), DEFAULT_HANDOVER_MODE);
+  assert.equal(CUSTOMER_TURNS_BEFORE_AI[DEFAULT_HANDOVER_MODE], 2);
+
+  /*
+    VÀ TRÊN ĐƯỜNG CHẠY THẬT: lượt đầu KHÔNG được mở một lượt chạy nào.
+
+    Chốt chặn phải đứng TRƯỚC `startRun`. Mở lượt chạy rồi mới bỏ qua nghĩa là đã gọi mô hình và
+    đã tốn tiền cho một câu không được phép gửi — đúng kiểu lãng phí im lặng mà cả hệ này được
+    dựng ra để tránh.
+  */
+  await setSettingJson(HANDOVER_MODE_KEY, "META_AUTO_REPLY_FIRST");
+  const bgConv = { pageId: "page-bg", externalId: "conv-bg", pancakeCustomerId: "", customerName: "", phone: "", platform: "facebook" };
+  const bg1 = await ingestMessage(
+    bgConv,
+    { externalId: "bg-k1", text: "mẫu này bao nhiêu ạ", fromPage: false, senderType: "CUSTOMER", fromName: "", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+  );
+  const bgTask1 = await db.query.aiTasks.findFirst({ where: eq(schema.aiTasks.subjectId, bg1.conversationId) });
+  assert.ok(bgTask1, "lượt đầu vẫn TẠO VIỆC — việc bị bỏ qua ở dây chuyền, không phải không được ghi nhận");
+  const bgRun1 = await runSalesTask(bgTask1.id, { db });
+  assert.equal(bgRun1.status, "SKIPPED");
+  assert.match(bgRun1.reason, /Meta/, "lý do bỏ qua phải đọc được");
+  assert.equal(bgRun1.runId, null, "KHÔNG được mở lượt chạy — mở ra là đã tốn tiền mô hình");
+  const runsSauLuot1 = await db.query.aiRuns.findMany({ where: eq(schema.aiRuns.subjectId, bg1.conversationId) });
+  assert.equal(runsSauLuot1.length, 0, "lượt đầu không để lại lượt chạy nào");
+
+  // Khách nhắn lượt thứ hai ⇒ AI vào việc thật.
+  const bg2 = await ingestMessage(
+    bgConv,
+    { externalId: "bg-k2", text: "alo shop ơi", fromPage: false, senderType: "CUSTOMER", fromName: "", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+  );
+  assert.equal(bg2.eventEmitted, true, "lượt khách thứ hai phải phát sự kiện");
+  const bgTasks = await db.query.aiTasks.findMany({ where: eq(schema.aiTasks.subjectId, bg1.conversationId) });
+  const bgTaskMoi = bgTasks.find((t) => t.id !== bgTask1.id);
+  assert.ok(bgTaskMoi, "lượt khách thứ hai phải tạo việc mới");
+  const bgRun2 = await runSalesTask(bgTaskMoi.id, { db });
+  assert.notEqual(bgRun2.status, "SKIPPED", `lượt hai phải chạy thật, nhận: ${bgRun2.reason}`);
+  assert.ok(bgRun2.runId, "lượt hai phải mở được lượt chạy");
+
+  // Trả lại chế độ mà phần còn lại của bộ kiểm đang dựa vào.
+  await setSettingJson(HANDOVER_MODE_KEY, "AI_FROM_FIRST_MESSAGE");
 
   // ═════════ 10. VIỆC KHÔNG TỒN TẠI / NẤC OFF ═════════
 
