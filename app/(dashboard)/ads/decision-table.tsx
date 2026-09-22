@@ -41,6 +41,101 @@ function headroomTone(value: number | null) {
   return "text-rose-600 dark:text-rose-400";
 }
 
+/**
+ * ───────────── CHUỖI THỰC HIỆN THEO MÔ HÌNH BÁN TRƯỚC ─────────────
+ *
+ * Năm mốc, năm chứng từ khác nhau, KHÔNG mốc nào suy ra từ mốc nào:
+ *
+ *   chốt đơn (POS) → chưa rời kho → đang trên đường → giao thành công → tiền về
+ *
+ * Cột "chưa rời kho" cố ý KHÔNG mang tên "đang sản xuất": `production_orders` là phiếu gửi xưởng
+ * theo mã hàng × màu × size, không gắn với đơn khách nào, nên ERP không đo được "đơn này đang ở
+ * xưởng". Cái đo được là ĐÃ CHỐT MÀ CHƯA RỜI KHO — khoảng ấy gồm cả sản xuất lẫn đóng gói, và tên
+ * cột phải nói đúng chừng ấy chứ không nói hơn.
+ */
+function Chain({ row }: { row: AdsDecisionRow }) {
+  const steps: { label: string; orders: number; money: number; tone: string; hint: string }[] = [
+    {
+      label: "Chốt đơn (POS)",
+      orders: row.bookedOrders,
+      money: row.bookedRevenue,
+      tone: "text-foreground",
+      hint: "Doanh số POS — khách đã chốt, CHƯA trừ hoàn và huỷ. Đây là con số marketer nhìn thấy trước nhất, và là con số dễ bị tưởng nhầm là doanh thu nhất.",
+    },
+    {
+      label: "Chưa rời kho",
+      orders: row.notShippedOrders,
+      money: row.notShippedRevenue,
+      tone: "text-amber-600 dark:text-amber-400",
+      hint: "Đã chốt nhưng ĐVVC chưa lấy hàng — gồm cả SẢN XUẤT lẫn đóng gói. Mốc đi bằng chứng từ ĐVVC (SHIPMENT_LEFT_WAREHOUSE), không bằng trạng thái Pancake. ERP không đo được riêng khâu xưởng vì phiếu gửi xưởng theo mã hàng chứ không theo đơn.",
+    },
+    {
+      label: "Đang trên đường",
+      orders: row.inTransitOrders,
+      money: row.inTransitRevenue,
+      tone: "text-sky-600 dark:text-sky-400",
+      hint: "Đã rời kho, chưa ngã ngũ. Tiền của nhóm này CHƯA nằm trong lợi nhuận — kết quả còn treo.",
+    },
+    {
+      label: "Giao thành công",
+      orders: row.deliveredOrders,
+      money: row.deliveredRevenue,
+      tone: "text-emerald-600 dark:text-emerald-400",
+      hint: "Theo ORDER_OUTCOME: chứng từ ĐVVC trước, rồi mới tới tiền thực thu. KHÔNG suy ra từ trạng thái Pancake.",
+    },
+    {
+      label: "Hoàn",
+      orders: row.returnedOrders,
+      money: 0,
+      tone: "text-rose-600 dark:text-rose-400",
+      hint: "Gồm cả đơn hoàn theo chứng từ ĐVVC lẫn đơn hoàn theo luật doanh thu thực thu. Đơn hoàn vẫn tốn cước.",
+    },
+  ];
+  return (
+    <div>
+      <p className="mb-2 font-medium text-foreground">Chuỗi thực hiện — bán trước, thu tiền sau</p>
+      <dl className="space-y-1">
+        {steps.map((st) => (
+          <div key={st.label} className="flex items-baseline justify-between gap-3">
+            <dt className="inline-flex items-center gap-1 text-muted-foreground">
+              {st.label}
+              <InfoHint>{st.hint}</InfoHint>
+            </dt>
+            <dd className={cn("numeric whitespace-nowrap", st.tone)}>
+              {formatNumber(st.orders)} đơn{st.money > 0 ? ` · ${formatVND(st.money)}` : ""}
+            </dd>
+          </div>
+        ))}
+        <div className="flex items-baseline justify-between gap-3 border-t pt-1">
+          <dt className="inline-flex items-center gap-1 text-muted-foreground">
+            Tiền đã về
+            <InfoHint>Thực thu có CHỨNG TỪ: bảng kê ĐVVC + khách chuyển trước. Chênh với doanh thu giao thành công là tiền ĐVVC còn đang giữ.</InfoHint>
+          </dt>
+          <dd className="numeric whitespace-nowrap font-medium">{formatVND(row.cashReceived)}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * ───────────── Ô HAI TẦNG ─────────────
+ *
+ * Bảng này phải vừa MỘT MÀN HÌNH. Thêm cột thứ mười là đẩy nó qua bề rộng và người đọc phải cuộn
+ * ngang để thấy đúng cột quan trọng nhất — nên chỉ số phụ đi xuống tầng dưới của chính ô nó thuộc
+ * về, thay vì chiếm một cột riêng.
+ */
+function Cell({ top, bottom, tone }: { top: React.ReactNode; bottom?: React.ReactNode; tone?: string }) {
+  return (
+    <div className="flex flex-col items-end leading-tight">
+      <span className={cn("numeric whitespace-nowrap", tone)}>{top}</span>
+      {bottom !== undefined ? <span className="numeric whitespace-nowrap text-[11px] text-muted-foreground">{bottom}</span> : null}
+    </div>
+  );
+}
+
+const DASH = <span className="text-muted-foreground">—</span>;
+
 function Detail({ row }: { row: AdsDecisionRow }) {
   const items: { label: string; value: React.ReactNode; hint?: string }[] = [
     { label: "Doanh thu lên đơn", value: formatVND(row.bookedRevenue) },
@@ -61,10 +156,17 @@ function Detail({ row }: { row: AdsDecisionRow }) {
     { label: "Biên lợi nhuận góp", value: row.marginRate === null ? <span className="text-muted-foreground">—</span> : formatPercent(row.marginRate * 100) },
     { label: "CAC giao thành công", value: row.cacDelivered === null ? <span className="text-muted-foreground">—</span> : formatVND(row.cacDelivered) },
     { label: "Đơn chưa ngã ngũ", value: `${formatNumber(row.openOrders)} đơn` },
+    { label: "Hiển thị", value: row.impressions === null ? <span className="text-muted-foreground">—</span> : formatNumber(row.impressions) },
+    { label: "Click", value: row.clicks === null ? <span className="text-muted-foreground">—</span> : formatNumber(row.clicks) },
+    { label: "CPM (1.000 hiển thị)", value: row.cpm === null ? <span className="text-muted-foreground">—</span> : formatVND(row.cpm) },
+    { label: "CPC (một click)", value: row.cpc === null ? <span className="text-muted-foreground">—</span> : formatVND(row.cpc) },
+    { label: "%CPQC / doanh số POS", value: row.adsPctOverPos === null ? <span className="text-muted-foreground">—</span> : formatPercent(row.adsPctOverPos) },
+    { label: "%CPQC / doanh thu giao TC", value: row.adsPctOverDelivered === null ? <span className="text-muted-foreground">—</span> : formatPercent(row.adsPctOverDelivered) },
   ];
 
   return (
-    <div className="grid gap-4 bg-muted/40 px-5 py-4 text-xs md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+    <div className="grid gap-4 bg-muted/40 px-5 py-4 text-xs md:grid-cols-2 lg:grid-cols-3">
+      <Chain row={row} />
       <div>
         <p className="mb-2 font-medium text-foreground">Đường đi của tiền</p>
         <dl className="space-y-1">
@@ -156,33 +258,58 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
             <TableRow>
               <TableHead className="w-8" />
               <TableHead>{ADS_DIMENSION_LABEL[dimension]}</TableHead>
-              <TableHead className="text-right">Chi QC</TableHead>
-              <TableHead className="text-right">Đơn (giao/lên)</TableHead>
               <TableHead className="text-right whitespace-nowrap">
                 <span className="inline-flex items-center gap-1">
-                  GTC
-                  <InfoHint>Tỷ lệ giao thành công = giao thành công ÷ (giao thành công + hoàn), tính trên ĐƠN ĐÃ KẾT THÚC. Đơn đang đi không nằm ở mẫu số.</InfoHint>
-                </span>
-              </TableHead>
-              <TableHead className="text-right whitespace-nowrap">
-                <span className="inline-flex items-center gap-1">
-                  LN sau QC
+                  Chi QC · %CPQC
                   <InfoHint>
-                    Lợi nhuận góp SAU quảng cáo = doanh thu giao thành công − giá vốn − cước − tiền quảng cáo. Cố ý KHÔNG trừ chi phí cố định, thuế
-                    hay lương: những khoản đó không đổi theo việc tăng/giảm ngân sách một chiến dịch, đưa vào chỉ làm nhiễu phép so sánh.
+                    Tầng dưới là %CPQC trên DOANH SỐ POS (đơn đã chốt, chưa trừ hoàn) — mẫu số marketer nhìn hằng ngày. %CPQC trên doanh thu GIAO THÀNH
+                    CÔNG nằm trong phần mở rộng, và nó luôn cao hơn: phần hoàn không mang về đồng nào nhưng tiền quảng cáo đã tiêu rồi.
                   </InfoHint>
                 </span>
               </TableHead>
               <TableHead className="text-right whitespace-nowrap">
                 <span className="inline-flex items-center gap-1">
-                  Hoà vốn
-                  <InfoHint>ROAS GIAO THÀNH CÔNG cần đạt để hoà vốn = 1 ÷ biên lợi nhuận góp. Mỗi mã hàng một biên khác nhau, nên một ngưỡng ROAS chung cho cả shop là vô nghĩa.</InfoHint>
+                  Tin nhắn · giá/tin
+                  <InfoHint>Số tin nhắn Facebook ghi nhận cho dòng này, và chi phí cho một tin. Đây là chỉ số ĐẦU PHỄU — nó hỏng trước khi doanh thu hỏng.</InfoHint>
                 </span>
               </TableHead>
               <TableHead className="text-right whitespace-nowrap">
                 <span className="inline-flex items-center gap-1">
-                  So với hoà vốn
-                  <InfoHint>Lợi nhuận góp trước quảng cáo ÷ tiền quảng cáo. 1,00× là hoà vốn đúng bằng; 1,30× là dư 30%; 0,50× là mất một nửa số tiền đã tiêu.</InfoHint>
+                  Đơn chốt · giá/đơn
+                  <InfoHint>
+                    Số đơn khách đã chốt (doanh số POS, CHƯA trừ hoàn) và chi phí quảng cáo cho một đơn chốt. Khác hẳn CAC giao thành công trong phần mở
+                    rộng — cái sau chia cho số đơn thật sự tới tay khách, nên luôn đắt hơn.
+                  </InfoHint>
+                </span>
+              </TableHead>
+              <TableHead className="text-right whitespace-nowrap">
+                <span className="inline-flex items-center gap-1">
+                  Chuỗi giao · GTC
+                  <InfoHint>
+                    Bốn mốc của mô hình bán trước: chưa rời kho (gồm sản xuất và đóng gói) · đang trên đường · giao thành công · hoàn. Mỗi mốc một chứng
+                    từ riêng, không mốc nào suy ra từ mốc nào. Tầng dưới là tỷ lệ giao thành công, tính trên ĐƠN ĐÃ KẾT THÚC — đơn đang đi không nằm ở
+                    mẫu số. Bấm vào dòng để xem cả tiền của từng mốc.
+                  </InfoHint>
+                </span>
+              </TableHead>
+              <TableHead className="text-right whitespace-nowrap">
+                <span className="inline-flex items-center gap-1">
+                  LN sau QC · biên
+                  <InfoHint>
+                    Lợi nhuận góp SAU quảng cáo = doanh thu giao thành công − giá vốn − cước − tiền quảng cáo. Cố ý KHÔNG trừ chi phí cố định, thuế
+                    hay lương: những khoản đó không đổi theo việc tăng/giảm ngân sách một chiến dịch, đưa vào chỉ làm nhiễu phép so sánh. Tầng dưới là
+                    biên lợi nhuận góp trên doanh thu giao thành công.
+                  </InfoHint>
+                </span>
+              </TableHead>
+              <TableHead className="text-right whitespace-nowrap">
+                <span className="inline-flex items-center gap-1">
+                  So hoà vốn · mốc
+                  <InfoHint>
+                    Lợi nhuận góp trước quảng cáo ÷ tiền quảng cáo. 1,00× là hoà vốn đúng bằng; 1,30× là dư 30%; 0,50× là mất một nửa số tiền đã tiêu.
+                    Tầng dưới là ROAS GIAO THÀNH CÔNG cần đạt để hoà vốn = 1 ÷ biên lợi nhuận góp — mỗi mã hàng một biên khác nhau, nên một ngưỡng ROAS
+                    chung cho cả shop là vô nghĩa.
+                  </InfoHint>
                 </span>
               </TableHead>
               <TableHead className="whitespace-nowrap">Nên làm gì</TableHead>
@@ -204,35 +331,68 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
                     <TableCell className="max-w-[260px] truncate font-medium" title={row.name}>
                       {row.name}
                     </TableCell>
-                    <TableCell className="numeric text-right whitespace-nowrap">
-                      {row.spendKnown ? (
-                        formatVND(row.spend)
-                      ) : (
-                        <span className="text-muted-foreground" title="Facebook không cung cấp chi tiêu ở cấp này">
-                          —
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell className="numeric text-right">
-                      {formatNumber(row.deliveredOrders)}/{formatNumber(row.bookedOrders)}
-                    </TableCell>
-                    <TableCell className={cn("numeric text-right", successTone(row.successRate))}>
-                      {row.successRate === null ? "—" : `${row.successRate}%`}
-                    </TableCell>
-                    <TableCell className="numeric text-right whitespace-nowrap">
-                      {row.spendKnown ? (
-                        <span className={row.profitAfterAds >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}>
-                          {formatVND(row.profitAfterAds)}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                    <TableCell className="text-right">
+                      <Cell
+                        top={
+                          row.spendKnown ? (
+                            formatVND(row.spend)
+                          ) : (
+                            <span className="text-muted-foreground" title="Facebook không cung cấp chi tiêu ở cấp này">
+                              —
+                            </span>
+                          )
+                        }
+                        bottom={row.adsPctOverPos === null ? "—" : `${formatPercent(row.adsPctOverPos)} POS`}
+                      />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Ratio value={row.breakEvenDeliveredRoas} />
+                      <Cell
+                        top={row.messages === null ? DASH : formatNumber(row.messages)}
+                        bottom={row.costPerMessage === null ? "—" : formatVND(row.costPerMessage)}
+                      />
                     </TableCell>
-                    <TableCell className={cn("text-right font-medium", headroomTone(row.headroom))}>
-                      <Ratio value={row.headroom} />
+                    <TableCell className="text-right">
+                      <Cell top={formatNumber(row.bookedOrders)} bottom={row.costPerOrder === null ? "—" : formatVND(row.costPerOrder)} />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {/*
+                        BỐN MỐC TRÊN MỘT DÒNG, và thứ tự là thứ tự đơn hàng đi qua — không phải thứ tự
+                        độ lớn. Đọc từ trái sang là đọc đúng đường đi của một đơn.
+                      */}
+                      <Cell
+                        top={
+                          <span className="inline-flex items-center gap-1" title="chưa rời kho · đang trên đường · giao thành công · hoàn">
+                            <span className="text-amber-600 dark:text-amber-400">{formatNumber(row.notShippedOrders)}</span>
+                            <span className="text-muted-foreground/50">›</span>
+                            <span className="text-sky-600 dark:text-sky-400">{formatNumber(row.inTransitOrders)}</span>
+                            <span className="text-muted-foreground/50">›</span>
+                            <span className="text-emerald-600 dark:text-emerald-400">{formatNumber(row.deliveredOrders)}</span>
+                            <span className="text-muted-foreground/50">·</span>
+                            <span className="text-rose-600 dark:text-rose-400">{formatNumber(row.returnedOrders)}</span>
+                          </span>
+                        }
+                        bottom={<span className={successTone(row.successRate)}>{row.successRate === null ? "—" : `GTC ${row.successRate}%`}</span>}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Cell
+                        top={
+                          row.spendKnown ? (
+                            <span className={row.profitAfterAds >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}>
+                              {formatVND(row.profitAfterAds)}
+                            </span>
+                          ) : (
+                            DASH
+                          )
+                        }
+                        bottom={row.marginRate === null ? "—" : `biên ${formatPercent(row.marginRate * 100)}`}
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Cell
+                        top={<span className={cn("font-medium", headroomTone(row.headroom))}><Ratio value={row.headroom} /></span>}
+                        bottom={row.breakEvenDeliveredRoas === null ? "—" : `mốc ${row.breakEvenDeliveredRoas.toFixed(2)}×`}
+                      />
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
                       <span className={cn("inline-flex items-center gap-1 font-medium", ADS_ACTION_TONE[row.action])}>

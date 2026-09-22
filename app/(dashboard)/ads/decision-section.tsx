@@ -1,6 +1,7 @@
 import { SectionCard } from "@/components/ui-bits";
 import { InfoHint } from "@/components/info-hint";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
+import { ArrowRight } from "lucide-react";
 import { getAdsDecision, DECISION_METRIC_HINT } from "@/lib/queries/ads-decision";
 import { ADS_DIMENSION_HAS_SPEND, type AdsDimension } from "@/lib/constants/ads-decision";
 import { LEDGER_WINDOW_DAYS, vnDay } from "@/lib/constants/marketing-decision-ledger";
@@ -31,6 +32,45 @@ function Kpi({ label, value, hint, tone }: { label: string; value: string; hint:
         <InfoHint>{hint}</InfoHint>
       </p>
       <p className={cn("numeric mt-0.5 text-lg font-semibold", tone)}>{value}</p>
+    </div>
+  );
+}
+
+/**
+ * ───────────── DẢI CHUỖI BÁN TRƯỚC — ĐỌC TỪ TRÁI SANG LÀ ĐỌC ĐÚNG ĐƯỜNG ĐI CỦA MỘT ĐƠN ─────────────
+ *
+ * Bốn thẻ phía trên trả lời "đã tiêu bao nhiêu, còn lại bao nhiêu". Dải này trả lời câu khác:
+ * **tiền đang NẰM Ở ĐÂU trong chuỗi**. Với mô hình bán trước, hai câu ấy lệch nhau rất xa — doanh
+ * số POS có thể đẹp trong khi phần lớn tiền còn kẹt ở xưởng, và lợi nhuận của kỳ chưa nói gì về nó.
+ *
+ * Mỗi mốc một chứng từ riêng: rời kho theo `SHIPMENT_LEFT_WAREHOUSE` · giao thành công theo
+ * `ORDER_OUTCOME` · tiền về theo bảng kê ĐVVC. Không mốc nào suy ra từ mốc nào.
+ */
+function ChainStrip({ t }: { t: { bookedOrders: number; bookedRevenue: number; notShippedOrders: number; notShippedRevenue: number; inTransitOrders: number; inTransitRevenue: number; deliveredOrders: number; deliveredRevenue: number; returnedOrders: number; cashReceived: number } }) {
+  const steps = [
+    { label: "Chốt đơn (POS)", orders: t.bookedOrders, money: t.bookedRevenue, tone: "", hint: "Doanh số POS — khách đã chốt, CHƯA trừ hoàn và huỷ." },
+    { label: "Chưa rời kho", orders: t.notShippedOrders, money: t.notShippedRevenue, tone: "text-amber-600 dark:text-amber-400", hint: "Đã chốt nhưng ĐVVC chưa lấy hàng — gồm cả SẢN XUẤT lẫn đóng gói. ERP không đo riêng được khâu xưởng vì phiếu gửi xưởng theo mã hàng chứ không theo đơn." },
+    { label: "Đang trên đường", orders: t.inTransitOrders, money: t.inTransitRevenue, tone: "text-sky-600 dark:text-sky-400", hint: "Đã rời kho, chưa ngã ngũ. Tiền nhóm này CHƯA nằm trong lợi nhuận." },
+    { label: "Giao thành công", orders: t.deliveredOrders, money: t.deliveredRevenue, tone: "text-emerald-600 dark:text-emerald-400", hint: "Theo ORDER_OUTCOME: chứng từ ĐVVC trước, rồi mới tới tiền thực thu." },
+    { label: "Tiền đã về", orders: t.returnedOrders, money: t.cashReceived, tone: "text-foreground", hint: "Thực thu CÓ CHỨNG TỪ (bảng kê ĐVVC + chuyển trước). Số đơn in ở đây là số đơn HOÀN — chênh giữa doanh thu giao thành công và tiền đã về là tiền ĐVVC còn giữ." },
+  ];
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border bg-card px-4 py-3 sm:flex-row sm:items-stretch">
+      {steps.map((st, i) => (
+        <div key={st.label} className="flex flex-1 items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+              {st.label}
+              <InfoHint>{st.hint}</InfoHint>
+            </p>
+            <p className={cn("numeric mt-0.5 text-sm font-semibold", st.tone)}>{formatVND(st.money)}</p>
+            <p className="numeric text-[11px] text-muted-foreground">
+              {formatNumber(st.orders)} đơn{i === steps.length - 1 ? " hoàn" : ""}
+            </p>
+          </div>
+          {i < steps.length - 1 ? <ArrowRight className="hidden size-3.5 shrink-0 text-muted-foreground/40 sm:block" /> : null}
+        </div>
+      ))}
     </div>
   );
 }
@@ -70,6 +110,13 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
           tone={pendingSpend > 0 ? "text-amber-600 dark:text-amber-400" : undefined}
         />
       </div>
+
+      {/*
+        DẢI CHUỖI ĐỨNG GIỮA bốn thẻ tiền và bảng quyết định, cố ý: nó là cầu nối giữa "tổng cộng bao
+        nhiêu" và "từng dòng thế nào". Người đọc thấy tiền đang kẹt ở đâu TRƯỚC khi đi tìm dòng nào
+        gây ra chuyện đó.
+      */}
+      <ChainStrip t={d.totals} />
 
       <SectionCard
         title="Bảng quyết định quảng cáo"
