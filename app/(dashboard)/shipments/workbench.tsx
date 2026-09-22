@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
-import { addCareNote, bulkRequestCarrierAction, markCarrierManualDone, recordBusinessAction, recordCareDecision, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
+import { addCareNote, bulkRequestCarrierAction, loadCarrierJourney, markCarrierManualDone, recordBusinessAction, recordCareDecision, reopenCase, requestCarrierAction, saveCareNotePresets, setCareFollowUp, setCareOwner, setCareStatus } from "@/lib/actions/care-workbench";
 import type { BulkOutcome, BulkResult } from "@/lib/care/service";
 import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
@@ -46,6 +46,7 @@ import {
   careCodBand,
   careFacet,
   careRoundBandOf,
+  careStateFor,
   careSlaBucket,
   matchesCareFilters,
   type CareAttemptBand,
@@ -82,6 +83,7 @@ import {
   CARE_TIMELINE_KIND_LABEL,
   CARE_TIMELINE_KIND_TONE,
   careRoundAppend,
+  careRoundBand,
   type CareRoundBand,
   type CareTimelineEntry,
   type CareTimelineKind,
@@ -165,6 +167,8 @@ function themLuot(truoc: CareCase["history"], moi: { at: Date; actorId: string; 
   return {
     ...truoc,
     rounds: cong.rounds,
+    // Lượt ĐẦU chỉ được ghi một lần: nó là mốc mà hạn phản hồi đầu đo tới, không phải mốc mới nhất.
+    firstRoundAt: truoc.firstRoundAt ?? cong.lastRoundAt,
     lastRoundAt: cong.lastRoundAt,
     lastRoundActorId: cong.lastRoundActorId,
     // Vừa làm xong thì không còn "ĐVVC có tin mới sau lượt xử lý cuối": lượt cuối vừa là bây giờ.
@@ -282,8 +286,17 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
           sai với sự thật: điều kiện sinh ra việc đã hết. Máy chủ chốt điều đó, trình duyệt nghe
           theo, nếu không thì hai bên nói hai điều khác nhau ngay sau cú bấm đầu tiên.
         */
-        const { view: v, reopened } = c.inCareCondition ? careViewOf(revived, c.queueSince) : { view: "done" as const, reopened: false };
-        return { ...c, ...extra, care: revived, view: v, reopened, sla: slaOf(c.queueSince, revived, new Date(), initial.slaHours) };
+        /*
+          GÓC NHÌN VÀ HẠN XỬ LÝ ĐỌC CHIỀU CARE **KÈM LỊCH SỬ VỪA VÁ** — qua đúng `careStateFor` mà
+          máy chủ dùng. Truyền `revived` trơn thì `teamResponded` lùi về cột `first_response_at`
+          (cột được ghi ngay lúc giao việc), nên ngay sau một cú bấm, trình duyệt sẽ kết luận "đã
+          phản hồi" cho một ca mà máy chủ vừa nói là chưa — hai bên nói hai điều khác nhau đúng
+          lúc người dùng đang nhìn.
+        */
+        const sau = { ...c, ...extra, care: revived };
+        const choHan = careStateFor(sau);
+        const { view: v, reopened } = c.inCareCondition ? careViewOf(choHan, c.queueSince) : { view: "done" as const, reopened: false };
+        return { ...sau, view: v, reopened, sla: slaOf(c.queueSince, choHan, new Date(), initial.slaHours) };
       }),
     );
 
@@ -1022,6 +1035,22 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
             {c.reasonLabel}
           </span>
           {c.reopened ? <span className="rounded bg-violet-100 px-1.5 py-px text-[10.5px] font-medium text-violet-800 dark:bg-violet-950/60 dark:text-violet-300">mở lại</span> : null}
+          {/*
+            VIỆC ĐÃ NẰM TRONG TAY MÀ CHƯA AI MỞ RA.
+
+            "Chưa ai nhận" đã có chỗ của nó (ô chọn người). Nhãn này nói điều NGƯỢC LẠI và khó thấy
+            hơn nhiều: đã có người nhận rồi, nhưng chưa một lượt xử lý nào. Đo production
+            22/09/2026: 22 đợt như vậy — và cho tới bản này chúng trông y hệt một ca đang được làm,
+            vì cột "phản hồi đầu" đã được ghi ngay lúc giao việc.
+          */}
+          {c.care.owner && soLuot === 0 ? (
+            <span
+              className="rounded bg-amber-100 px-1.5 py-px text-[10.5px] font-semibold text-amber-900 dark:bg-amber-950/60 dark:text-amber-300"
+              title={`Đã giao cho ${c.care.owner.name} nhưng chưa có lượt xử lý nào: chưa gọi, chưa nhắn, chưa bấm kết quả. Giao việc không phải một lượt xử lý.`}
+            >
+              đã giao, chưa bắt đầu
+            </span>
+          ) : null}
           {c.botMessageFailure ? (
             <span className="rounded bg-amber-100 px-1.5 py-px text-[10.5px] font-semibold text-amber-900 dark:bg-amber-950/60 dark:text-amber-300" title={`${c.botMessageFailure.title}\n${c.botMessageFailure.detail}`}>
               bot không nhắn được — gọi / Zalo thủ công
@@ -1232,6 +1261,22 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
           </PopoverTrigger>
           <PopoverContent align="start" className="w-[22rem] space-y-2 p-3">
             {/*
+              NGƯỜI SẮP GÕ MỘT GHI CHÚ PHẢI BIẾT ĐÂY LÀ LƯỢT THỨ MẤY.
+
+              "Khách hẹn mai" ở lượt 1 và "khách hẹn mai" ở lượt 3 là hai tình huống khác hẳn nhau —
+              cái sau nghĩa là khách đã hẹn rồi lỡ hai lần. Trước bản này câu trả lời nằm trong ngăn
+              kéo, tức là phải đóng popover, mở ngăn kéo, đọc, quay lại. Một dòng chữ ở đây là đủ.
+
+              Chữ gợi ý lấy thẳng `CARE_ROUND_BAND_HINT` — cùng bộ chữ với chip lọc và với tooltip
+              của nút mở nhật ký, nên ba chỗ không nói ba điều khác nhau về cùng một rổ.
+            */}
+            <p className={cn("rounded bg-muted/60 px-2 py-1 text-[10.5px] leading-snug", soLuot === 0 && "text-rose-700 dark:text-rose-300")}>
+              <b>{soLuot === 0 ? "Chưa ai xử lý kiện này" : `Đây sẽ là lượt xử lý thứ ${soLuot + 1}`}</b>
+              {lichSu?.lastRoundAt ? ` · lượt trước ${formatTimeAgo(lichSu.lastRoundAt)}` : ""}
+              {" — "}
+              {CARE_ROUND_BAND_HINT[careRoundBand(soLuot)]}
+            </p>
+            {/*
               LOẠI hành động: bấm chọn loại và — nếu ô còn trống — đổ luôn nhãn vào ô, để một cú bấm
               là lưu được. Trước đây bấm chip chỉ đổi màu chip, ô vẫn trống, nút Lưu vẫn xám: người
               dùng tưởng hỏng (phản hồi chủ shop 11/09).
@@ -1390,7 +1435,7 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
         <tr className="bg-muted/30">
           <td />
           <td colSpan={6} className="px-2 pb-3 pt-1">
-            <CareTimeline history={lichSu} />
+            <CareTimeline history={lichSu} shipmentId={c.shipmentId} />
           </td>
         </tr>
       ) : null}
@@ -1407,11 +1452,69 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
  * Bỏ cái nhãn đó đi thì "Phát tiếp" (quyết định của shop) trông y hệt "Phát tiếp" (lệnh đã gửi đi),
  * và đó đúng là hai thứ mà cả hệ thống này đang cố tách ra.
  */
-function CareTimeline({ history }: { history: CareCase["history"] }) {
+function CareTimeline({ history, shipmentId }: { history: CareCase["history"]; shipmentId: string }) {
+  /*
+    ═══ HAI CỘT, KHÔNG PHẢI MỘT DANH SÁCH TRỘN ═══
+
+    Câu hỏi đắt nhất của người trực là *"ĐVVC báo lúc nào, và đội làm gì sau đó"*. Trộn hai nguồn
+    thành một dòng thời gian thì đọc xuôi rất dễ, nhưng sau vài dòng không ai còn phân biệt được
+    đâu là CHỨNG TỪ của Viettel Post và đâu là việc shop tự làm — đúng cái nhầm lẫn mà luật 47 dựng
+    ra để chống. Hai cột đứng cạnh nhau cho cùng câu trả lời mà không đánh đổi điều đó.
+
+    Hành trình ĐVVC TẢI KHI MỞ, không đi kèm hàng đợi: trang Vận đơn đã nằm trong danh sách trang
+    chậm, và cột này chỉ được mở ở vài dòng mỗi buổi.
+  */
+  const [carrier, setCarrier] = useState<{ at: Date; status: string; note: string; location: string }[] | null>(null);
+  const [carrierError, setCarrierError] = useState("");
+  useEffect(() => {
+    let huy = false;
+    loadCarrierJourney(shipmentId).then((r) => {
+      if (huy) return;
+      if ("error" in r) setCarrierError(r.error);
+      else setCarrier(r.data.map((e) => ({ ...e, at: new Date(e.at) })));
+    });
+    return () => {
+      huy = true;
+    };
+  }, [shipmentId]);
+
   if (!history) {
     // CHƯA ĐỌC ĐƯỢC ≠ CHƯA CÓ GÌ (luật 42). Không bao giờ vẽ một danh sách rỗng thay cho câu này.
     return <p className="text-[11px] text-muted-foreground">Chưa đọc được lịch sử xử lý của kiện này.</p>;
   }
+  return (
+    <div className="grid gap-x-6 gap-y-2 md:grid-cols-2">
+      <div className="space-y-1">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">Viettel Post nói gì · chứng từ</div>
+        {carrierError ? (
+          <p className="text-[11px] text-rose-600 dark:text-rose-400">{carrierError}</p>
+        ) : carrier === null ? (
+          // ĐANG ĐỌC ≠ KHÔNG CÓ. Một danh sách rỗng ở đây là một lời khẳng định sai trong nửa giây.
+          <p className="text-[11px] text-muted-foreground">Đang đọc hành trình…</p>
+        ) : carrier.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">Chưa có sự kiện nào từ Viettel Post cho kiện này.</p>
+        ) : (
+          <ol className="space-y-0.5">
+            {carrier.map((e, i) => (
+              <li key={`${e.at.toISOString()}-${i}`} className="flex flex-wrap items-baseline gap-x-2 text-[11.5px]">
+                <span className="numeric w-[7.5rem] shrink-0 text-muted-foreground">{formatDateTime(e.at)}</span>
+                <span className="font-medium">{e.status}</span>
+                {e.location ? <span className="text-muted-foreground">· {e.location}</span> : null}
+                {e.note ? <span className="min-w-0 basis-full pl-[7.5rem] text-muted-foreground">{e.note}</span> : null}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+      <div className="space-y-1">
+        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Đội làm gì · nhật ký xử lý</div>
+        <CareTeamTimeline history={history} />
+      </div>
+    </div>
+  );
+}
+
+function CareTeamTimeline({ history }: { history: NonNullable<CareCase["history"]> }) {
   if (!history.timeline.length) {
     return (
       <p className="text-[11px] text-muted-foreground">

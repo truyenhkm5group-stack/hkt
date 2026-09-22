@@ -2,7 +2,7 @@ import { CARE_SLA_SOON_FRACTION, CARE_TERMINAL_STATUSES, CARE_WAITING_STATUSES }
 import { followUpBucket, type FollowUpFilterKey, type ResolutionFilterKey } from "@/lib/constants/care-resolution";
 import { careRoundBand, type CareRoundBand } from "@/lib/constants/care-rounds";
 import type { CareCase } from "@/lib/care/contracts";
-import { DEFAULT_CARE_SLA_HOURS, teamWorkEnded, type CareSlaHours, type CareStateLike } from "@/lib/care/view";
+import { DEFAULT_CARE_SLA_HOURS, followUpStillHolds, teamResponded, teamWorkEnded, type CareSlaHours, type CareStateLike } from "@/lib/care/view";
 
 /**
  * ═══════════ MỘT LUẬT LỌC, DÙNG CHO CẢ BẢNG LẪN CON SỐ TRÊN CHIP ═══════════
@@ -49,6 +49,22 @@ export const CARE_SLA_BUCKET_HINT: Record<CareSlaBucket, string> = {
 };
 
 /**
+ * GHÉP CHIỀU CARE VỚI LỊCH SỬ THÀNH MỘT ĐẦU VÀO CHO CÁC VỊ TỪ THUẦN.
+ *
+ * `CareState` (đợt care) và `CareHistory` (ba sổ chỉ-thêm) là hai nguồn khác nhau, nhưng ba vị từ
+ * hạn xử lý cần cả hai. Ghép ở MỘT chỗ để không nơi nào quên truyền một nửa — quên `firstRoundAt`
+ * thì `teamResponded` lặng lẽ lùi về cột cũ và bản vá "giao việc không phải phản hồi" biến mất mà
+ * không ai thấy.
+ *
+ * `history` không có ⇒ CẢ HAI trường để `undefined`, tức là CHƯA ĐỌC ĐƯỢC ⇒ hành vi cũ. Không bao
+ * giờ dịch nó thành `null` (= "đã đọc, không có lượt nào"), vì đó là một khẳng định (luật 42).
+ */
+export function careStateFor(c: Pick<CareCase, "care" | "history">): CareStateLike {
+  const h = c.history;
+  return h ? { ...c.care, firstRoundAt: h.firstRoundAt, carrierNewsAfterLastRound: h.carrierNewsAfterLastRound } : c.care;
+}
+
+/**
  * KIỆN ĐANG Ở ĐÂU TRONG QUỸ THỜI GIAN CỦA NÓ.
  *
  * "Quá hạn" lấy thẳng hai cờ mà `slaOf()` đã tính — không tính lại, vì tính lại là mở đường cho
@@ -59,16 +75,22 @@ export const CARE_SLA_BUCKET_HINT: Record<CareSlaBucket, string> = {
  * làm phần mình — cùng luật tạm dừng với `slaOf`). Một ca đã đóng mà vẫn bị tô "sắp quá hạn" thì
  * người xem học cách bỏ qua màu, và cảnh báo mất tác dụng.
  */
-export function careSlaBucket(c: Pick<CareCase, "queueSince" | "care" | "sla">, now: Date, hours: CareSlaHours = DEFAULT_CARE_SLA_HOURS): CareSlaBucket {
+export function careSlaBucket(c: Pick<CareCase, "queueSince" | "care" | "sla" | "history">, now: Date, hours: CareSlaHours = DEFAULT_CARE_SLA_HOURS): CareSlaBucket {
   if (c.sla.firstResponseBreached || c.sla.resolveBreached) return "breached";
-  const care = c.care as CareStateLike;
+  const care = careStateFor(c);
   const t = now.getTime();
   const since = c.queueSince.getTime();
-  const responded = care.firstResponseAt !== null && care.firstResponseAt.getTime() >= since;
-  // Ca đã chốt "Đã hoàn" tính như ca đã đóng: `slaOf` cũng nói vậy, và hai phép tính hạn của cùng
-  // một dòng không được nói hai điều khác nhau.
+  /*
+    BA VỊ TỪ NÀY TỪNG ĐƯỢC CHÉP TAY Ở ĐÂY.
+
+    `slaOf` kết luận "vỡ hạn", hàm này kết luận "sắp vỡ hạn" — hai câu về cùng một cái hạn của
+    cùng một dòng. Bản trước mỗi bên tự viết lại `responded` và `paused`, nên bản vá 22/09/2026
+    (thôi đếm cú bấm GIAO VIỆC là một lần phản hồi) sẽ chỉ tới được một trong hai nơi, và một ca
+    hiện "bình thường" ngay cạnh con số nói nó đã quá hạn.
+  */
+  const responded = teamResponded(care, c.queueSince);
   const closed = CARE_TERMINAL_STATUSES.includes(care.status) || care.status === "ESCALATED" || teamWorkEnded(care);
-  const paused = CARE_WAITING_STATUSES.includes(care.status) && care.followUpAt !== null && care.followUpAt.getTime() > t;
+  const paused = CARE_WAITING_STATUSES.includes(care.status) && followUpStillHolds(care, now);
 
   const live: number[] = [];
   if (!responded) live.push(hours.firstResponseHours);

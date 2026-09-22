@@ -20,7 +20,7 @@ export async function CareReportSection({ period }: { period: Period }) {
   const rate = (a: number, b: number) => (b ? `${pct(a, b).toFixed(0)}%` : "—");
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {/*
           ═══ CON SỐ LỚN PHẢI TRẢ LỜI ĐÚNG CÂU NGƯỜI ĐỌC ĐANG HỎI ═══
 
@@ -44,9 +44,31 @@ export async function CareReportSection({ period }: { period: Period }) {
         <MetricCard
           label="Phản hồi đầu (trung vị)"
           value={r.firstResponse.medianHours === null ? "—" : `${r.firstResponse.medianHours} giờ`}
-          note={`${formatNumber(r.firstResponse.withinSla)}/${formatNumber(r.firstResponse.measured)} kiện trong ${formatNumber(CARE_SLA.firstResponseHours)} giờ${r.firstResponse.assignedOnly ? ` · ⚠ ${formatNumber(r.firstResponse.assignedOnly)} ca mang mốc này mà chưa có lượt xử lý nào` : ""}`}
+          note={`${formatNumber(r.firstResponse.withinSla)}/${formatNumber(r.firstResponse.measured)} ca trong ${formatNumber(CARE_SLA.firstResponseHours)} giờ${r.firstResponse.assignedOnly ? ` · ${formatNumber(r.firstResponse.assignedOnly)} ca đang mở đã giao mà chưa ai bắt đầu` : ""}`}
           tone={r.firstResponse.assignedOnly ? "amber" : "slate"}
-          hint={`Từ lúc kiện được đội mở (dòng care) tới lần đầu có người động vào. Chỉ đo kiện có dòng care trong kỳ.\n\n⚠ ĐỌC KÈM CẢNH BÁO: mốc “phản hồi đầu” được ghi NGAY LÚC GIAO VIỆC, nên một ca được giao cho ai đó mà chưa ai gọi vẫn mang mốc này và không bao giờ bị tính vỡ hạn. Con số cảnh báo bên cạnh đếm đúng những ca như vậy đang mở. Muốn trung vị này đo tốc độ CHĂM KHÁCH thay vì tốc độ BẤM GIAO VIỆC thì phải thôi ghi mốc ở đường giao việc — việc đó làm đổi số vỡ SLA của các ca đang chạy nên cần chủ shop quyết.`}
+          hint={`Từ lúc kiện vào điều kiện cần care tới LƯỢT XỬ LÝ ĐẦU TIÊN — một lần gọi / nhắn / sửa, hoặc một lần bấm kết quả.\n\nGIAO VIỆC KHÔNG TÍNH. Cột “phản hồi đầu” trong CSDL được ghi ngay lúc giao việc, nên trước bản 22/09/2026 con số này đo tốc độ BẤM GIAO VIỆC: đo production cùng ngày, 22 trong 25 ca chưa ai đụng vẫn mang mốc ấy và vì thế không bao giờ bị tính vỡ hạn. Nay phép đo đọc theo lượt xử lý thật — cột cũ giữ nguyên trong CSDL, không xoá một dòng nào.\n\nCa chưa có lượt nào nằm NGOÀI phép đo (không vào mẫu số với giá trị 0), nên mẫu số ${formatNumber(r.firstResponse.measured)} ở trên chính là độ phủ. Con số cảnh báo bên cạnh đếm ca đang mở đã có người nhận mà chưa ai bắt đầu.`}
+        />
+        {/*
+          ═══ HAI ĐỒNG HỒ, HAI CÂU HỎI — KHÔNG GỘP ═══
+
+          "Phản hồi đầu" hỏi *đội bắt đầu nhanh không*. Thẻ này hỏi *đội có bỏ ca giữa chừng
+          không*. Một đội gọi trong 20 phút rồi im ba ngày và một đội gọi sau 3 giờ rồi gọi lại mỗi
+          sáng cho ra CÙNG một con số ở thẻ bên trái — nên thẻ bên trái một mình không trả lời được
+          câu hỏi quan trọng hơn.
+
+          Mẫu dưới ngưỡng thì in "—" VÀ NÓI RA VÌ SAO (luật 63): một con số nhỏ dựng trên 3 ca
+          trông y hệt một con số dựng trên 300 ca, và không ai đi kiểm lại.
+        */}
+        <MetricCard
+          label="Độ nguội giữa hai lượt"
+          value={r.roundGap.median === null ? "—" : `${r.roundGap.median.toFixed(1)} giờ`}
+          note={
+            r.roundGap.median === null
+              ? `Chưa đủ mẫu: ${formatNumber(r.roundGap.sample)}/${formatNumber(r.roundGap.population)} ca đang mở có từ 2 lượt trở lên (cần ${formatNumber(r.roundGap.minSample)})`
+              : `${formatNumber(r.roundGap.sample)}/${formatNumber(r.roundGap.population)} ca đang mở có từ 2 lượt trở lên`
+          }
+          tone="slate"
+          hint={`Trung vị khoảng cách giữa hai LƯỢT XỬ LÝ liên tiếp, trên các ca đang mở. Trả lời câu “đội có bỏ ca giữa chừng không” — KHÁC HẲN thẻ “Phản hồi đầu” bên cạnh, thẻ đó chỉ hỏi đội bắt đầu nhanh không.\n\nMỗi ca đóng góp ĐÚNG MỘT phiếu (trung vị các khoảng của chính nó), để một ca được gọi tám lượt không lấn át bảy ca chỉ có một khoảng.\n\nCa mới có một lượt nằm NGOÀI phép đo — chưa có khoảng nào để đo, và đó không phải “độ nguội bằng 0”. Dưới ${formatNumber(r.roundGap.minSample)} ca thì KHÔNG phát biểu trung vị: một con số dựng trên vài ca trông y hệt con số dựng trên vài trăm ca.`}
         />
         <MetricCard label="Đã đóng trong kỳ" value={formatNumber(r.done.count)} note={`${formatNumber(r.done.withinSla)} trong 24 giờ · ${formatNumber(r.done.reopened)} mở lại · trung vị ${r.done.medianResolveHours === null ? "—" : `${r.done.medianResolveHours} giờ`}`} tone="slate" hint="Đội bấm Đã xong. Không đồng nghĩa kiện đã giao — cột bên phải mới nói kết cục." />
         <MetricCard label="COD cứu được sau can thiệp" value={formatVND(r.recovery.recoveredCod, { compact: true })} note={`${formatNumber(r.recovery.recoveredIntervened)}/${formatNumber(r.recovery.failedIntervened)} kiện giao hụt có người care rồi giao thành công · doanh thu ${formatVND(r.recovery.recoveredRevenue, { compact: true })}`} tone="green" hint="Kiện giao hụt trong kỳ, có ít nhất một hành động care của người SAU lần hụt và TRƯỚC kết cục, rồi ĐVVC xác nhận giao thành công. COD là tiền của kiện đó — đã tới tay khách, chưa chắc đã về tài khoản; doanh thu là giá trị đơn được cứu." />
@@ -110,11 +132,20 @@ export async function CareReportSection({ period }: { period: Period }) {
         <SectionCard title="Khối lượng đang cầm" hint="Kiện đang mở (kể cả đang chờ / escalated) theo người nhận, tính lúc này. Để chia lại việc, không phải để xếp hạng." padded={false}>
           <TableToolsFor tableId="shipments-care-report-2" />
           <div className={TABLE_SCROLL}>
-            <table id="shipments-care-report-2" className="w-full min-w-[480px] text-[12.5px]">
+            <table id="shipments-care-report-2" className="w-full min-w-[560px] text-[12.5px]">
               <thead className={cn(STICKY_HEAD, "border-b text-left text-[11px] uppercase tracking-wide text-muted-foreground")}>
                 <tr>
                   <th className="px-4 py-2">Người</th>
                   <th className="px-3 py-2 text-right">Đang mở</th>
+                  {/*
+                    CỘT NÀY TRẢ LỜI CÂU "ĐANG MỞ" KHÔNG TRẢ LỜI ĐƯỢC: việc đã nằm trong tay mà chưa
+                    ai mở ra. Một người cầm 10 việc và làm cả 10 trông y hệt một người cầm 10 việc
+                    và chưa đụng cái nào — cho tới khi có cột này. Đo 22/09/2026: 22 đợt `ASSIGNED`
+                    với 0 lượt xử lý.
+                  */}
+                  <th className="px-3 py-2 text-right" title="Việc đã giao (hoặc đã nhận) mà chưa có một lượt xử lý nào: chưa gọi, chưa nhắn, chưa bấm kết quả. Giao việc KHÔNG tính là một lượt.">
+                    Chưa bắt đầu
+                  </th>
                   <th className="px-3 py-2 text-right">Vỡ SLA</th>
                   <th className="px-3 py-2 text-right">COD đang treo</th>
                 </tr>
@@ -124,6 +155,7 @@ export async function CareReportSection({ period }: { period: Period }) {
                   <tr key={o.ownerId ?? "none"}>
                     <td className={`px-4 py-2 font-medium ${o.ownerId ? "" : "text-rose-600 dark:text-rose-400"}`}>{o.name}</td>
                     <td className="numeric px-3 py-2 text-right">{formatNumber(o.open)}</td>
+                    <td className={`numeric px-3 py-2 text-right ${o.notStarted ? "font-semibold text-amber-700 dark:text-amber-300" : "text-muted-foreground"}`}>{formatNumber(o.notStarted)}</td>
                     <td className={`numeric px-3 py-2 text-right ${o.overdue ? "font-semibold text-rose-600 dark:text-rose-400" : ""}`}>{formatNumber(o.overdue)}</td>
                     <td className="numeric px-3 py-2 text-right">{formatVND(o.money, { compact: true })}</td>
                   </tr>

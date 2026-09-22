@@ -3,7 +3,8 @@ import { getDb } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { careSlaHours } from "@/lib/care/sla";
 import type { CareBacklogGroup } from "@/lib/constants/care-rounds";
-import { getCareQueue } from "@/lib/queries/care-workbench";
+import { CARE_FIRST_ROUND_AT, getCareQueue } from "@/lib/queries/care-workbench";
+import type { CareQueue } from "@/lib/care/contracts";
 import { SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
 import type { Period } from "@/lib/search-params";
@@ -69,7 +70,7 @@ export type CareReport = {
     /** Backlog theo lý do (đang ở Cần care). */
     byReason: { reason: string; label: string; count: number; money: number }[];
     /** Backlog theo người (mọi kiện đang mở). */
-    byOwner: { ownerId: string | null; name: string; open: number; overdue: number; money: number }[];
+    byOwner: { ownerId: string | null; name: string; open: number; overdue: number; notStarted: number; money: number }[];
     /** Kiện cũ dữ liệu / thiếu dữ liệu — việc giao vận, không phải backlog care. */
     dataGaps: number;
   };
@@ -90,6 +91,11 @@ export type CareReport = {
    * trung vị kia đang đứng trên cái gì.
    */
   firstResponse: { medianHours: number | null; withinSla: number; measured: number; assignedOnly: number };
+  /**
+   * ĐỘ NGUỘI GIỮA HAI LƯỢT trên các ca ĐANG MỞ — trung vị kèm độ phủ, `null` khi mẫu dưới ngưỡng.
+   * Tính LÚC NÀY (như backlog), không theo kỳ: nó trả lời "đội có đang bỏ ca giữa chừng không".
+   */
+  roundGap: CareQueue["roundGap"];
   done: { count: number; reopened: number; medianResolveHours: number | null; withinSla: number };
   recovery: {
     failedTotal: number;
@@ -211,7 +217,7 @@ async function build(period: Period): Promise<CareReport> {
   // ── Phản hồi đầu / đóng việc theo SLA (trên bảng care) ──
   const careRows = rowsOf<{ first_hours: string | null; resolve_hours: string | null; done: boolean; reopened: boolean }>(
     await db.execute(sql`
-      select extract(epoch from (c.first_response_at - coalesce(c.opened_at, c.created_at))) / 3600 as first_hours,
+      select extract(epoch from (${CARE_FIRST_ROUND_AT} - coalesce(c.opened_at, c.created_at))) / 3600 as first_hours,
              extract(epoch from (c.done_at - coalesce(c.opened_at, c.created_at))) / 3600 as resolve_hours,
              (c.care_status in ('RESOLVED','CANCELLED') and ${between("c.done_at", period)}) as done,
              (c.reopen_count > 0) as reopened
@@ -225,6 +231,17 @@ async function build(period: Period): Promise<CareReport> {
     const m = Math.floor(s.length / 2);
     return Math.round((s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) * 10) / 10;
   };
+  /*
+    ═══ "PHẢN HỒI ĐẦU" ĐO TỚI LƯỢT XỬ LÝ THẬT, KHÔNG TỚI CÚ BẤM GIAO VIỆC ═══
+
+    Cột `shipment_care.first_response_at` được `setCareOwner` ghi ngay lúc giao việc; đo production
+    22/09/2026 thì 22/25 đợt chưa xử lý lần nào vẫn mang mốc ấy. Trung vị dựng trên cột đó đo tốc
+    độ BẤM GIAO VIỆC. Chủ shop chốt 22/09: sửa ở TẦNG ĐỌC — cột giữ nguyên, phép đo đổi nguồn sang
+    `CARE_FIRST_ROUND_AT` (bản SQL sinh đôi của `CareHistory.firstRoundAt`).
+
+    Đợt chưa có lượt nào ra `NULL` và NẰM NGOÀI phép đo, không vào mẫu số với giá trị 0 — `measured`
+    đi kèm mọi con số ở đây chính là độ phủ của nó.
+  */
   const firstHours = careRows.map((r) => (r.first_hours === null ? null : Number(r.first_hours))).filter((x): x is number => x !== null && x >= 0);
   const doneRows = careRows.filter((r) => r.done);
   const resolveHours = doneRows.map((r) => (r.resolve_hours === null ? null : Number(r.resolve_hours))).filter((x): x is number => x !== null && x >= 0);
@@ -322,6 +339,7 @@ async function build(period: Period): Promise<CareReport> {
   return {
     period,
     backlog: { care: wb.counts.care, groups: wb.backlogGroups, waiting: wb.counts.waiting, escalated: wb.counts.escalated, overdue: wb.overdue, unassigned: wb.unassigned, moneyAtRisk: wb.moneyAtRisk, byReason: wb.byReason, byOwner: wb.byOwner, dataGaps: wb.dataGaps.length },
+    roundGap: wb.roundGap,
     firstResponse: {
       medianHours: median(firstHours),
       withinSla: firstHours.filter((h) => h <= sla.firstResponseHours).length,

@@ -11,8 +11,9 @@ import { setSettingJson } from "@/lib/settings";
 import { setViettelPostClientForTests } from "@/lib/integrations/viettelpost/client";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { getCareReport } from "@/lib/queries/care-report";
-import { getCareCaseDetail, getCareEvents, getCareNotePresets, getCareQueue } from "@/lib/queries/care-workbench";
+import { CARE_FIRST_ROUND_AT, getCareCaseDetail, getCareEvents, getCareNotePresets, getCareQueue } from "@/lib/queries/care-workbench";
 import { resolvePeriod } from "@/lib/search-params";
+import { rowsOf } from "@/lib/sql-rows";
 
 /**
  * ───────────── OPERATIONAL CARE ENGINE ─────────────
@@ -117,6 +118,29 @@ export async function testCareWorkbench(db: Db) {
     "nhật ký phải mới nhất trước — người đọc hỏi “vừa rồi làm gì” trước khi hỏi “hôm kia làm gì”",
   );
   assert.equal(qSauNote.backlogGroups.UNTOUCHED.count + qSauNote.backlogGroups.WORKED_DUE.count + qSauNote.backlogGroups.WORKED_SCHEDULED.count, qSauNote.counts.care, "ba nhóm backlog là một phép BỔ: tổng phải bằng đúng số kiện cần care");
+
+  /*
+    ═══ BẢN SQL VÀ BẢN TYPESCRIPT CỦA "MỐC LƯỢT ĐẦU" PHẢI NÓI CÙNG MỘT ĐIỀU ═══
+
+    `CARE_FIRST_ROUND_AT` (SQL) chạy cho các báo cáo theo KỲ — tập đó gồm cả đợt đã đóng nên không
+    đọc lại qua `getCareQueue()` được. `CareHistory.firstRoundAt` (TS) chạy cho hàng đợi. Hai bản
+    cùng một luật, và luật viết hai lần là luật sẽ trôi — nên so từng kiện trên CÙNG dữ liệu, đúng
+    cách `tests/care-reopen.test.ts` khoá cặp TS/SQL của luật mở ca.
+  */
+  const mocSql = rowsOf<{ shipment_id: string; moc: string | null }>(
+    await db.execute(sql`select c.shipment_id, ${CARE_FIRST_ROUND_AT} as moc from shipment_care c where c.active`),
+  );
+  assert.ok(mocSql.length > 0, "phải có ít nhất một đợt đang mở để so hai bản");
+  let daSo = 0;
+  for (const r of mocSql) {
+    const tuHangDoi = qSauNote.cases.find((c) => c.shipmentId === r.shipment_id)?.history;
+    if (!tuHangDoi) continue;
+    const ts = tuHangDoi.firstRoundAt === null ? null : tuHangDoi.firstRoundAt.getTime();
+    const sqlMoc = r.moc === null ? null : new Date(r.moc).getTime();
+    assert.equal(ts, sqlMoc, `mốc lượt đầu của ${r.shipment_id}: TypeScript nói ${ts}, SQL nói ${sqlMoc}`);
+    daSo += 1;
+  }
+  assert.ok(daSo > 0, "không so được kiện nào — phép kiểm parity này đang rỗng");
 
   const later = new Date(Date.now() + 3600_000);
   const fu = await setCareFollowUp(actor, { shipmentId: "care-s1", at: later, waitingFor: "WAITING_REDELIVERY" });

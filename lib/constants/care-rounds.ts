@@ -114,6 +114,31 @@ export function careRoundAppend(
   return { rounds: gopDuoc ? truoc.rounds : truoc.rounds + 1, lastRoundAt: moi.at, lastRoundActorId: moi.actorId };
 }
 
+/**
+ * ═══════════ ĐỘ NGUỘI: BAO LÂU GIỮA HAI LƯỢT ═══════════
+ *
+ * Trả lời một câu KHÁC HẲN "phản hồi đầu". Phản hồi đầu hỏi *đội bắt đầu nhanh không*; độ nguội
+ * hỏi *đội có bỏ ca giữa chừng không*. Một đội gọi trong 20 phút rồi im ba ngày và một đội gọi sau
+ * 3 giờ rồi gọi lại mỗi buổi sáng cho ra cùng một con số ở phép đo thứ nhất.
+ *
+ * Trả về khoảng cách giữa các lượt ĐÃ GỘP (theo `CARE_ROUND_MERGE_MINUTES`), tính bằng GIỜ. Ca chỉ
+ * có một lượt trả mảng RỖNG — chưa có khoảng nào để đo, và đó KHÔNG phải "độ nguội bằng 0".
+ */
+export function careRoundGapsHours(entries: readonly { at: Date; actorId: string | null }[], mergeMinutes: number = CARE_ROUND_MERGE_MINUTES): number[] {
+  if (entries.length < 2) return [];
+  const xep = [...entries].sort((a, b) => a.at.getTime() - b.at.getTime());
+  const cua = mergeMinutes * 60_000;
+  // Mốc BẮT ĐẦU của từng lượt sau khi gộp — cùng phép gộp với `careRoundCount`, đi một vòng lặp.
+  const mocLuot: Date[] = [xep[0].at];
+  let truoc = xep[0];
+  for (let i = 1; i < xep.length; i += 1) {
+    const nay = xep[i];
+    if (!(nay.actorId === truoc.actorId && nay.at.getTime() - truoc.at.getTime() <= cua)) mocLuot.push(nay.at);
+    truoc = nay;
+  }
+  return mocLuot.slice(1).map((m, i) => (m.getTime() - mocLuot[i].getTime()) / 3_600_000);
+}
+
 /* ─────────────────────────── BĂNG LỌC ─────────────────────────── */
 
 /**

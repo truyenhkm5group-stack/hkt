@@ -3,6 +3,7 @@ import type { CareDecision } from "@/lib/constants/care-resolution";
 import type { CareBacklogGroup, CareTimelineEntry } from "@/lib/constants/care-rounds";
 import type { CarrierSubstate } from "@/lib/constants/carrier-substate";
 import type { CareSlaHours } from "@/lib/care/view";
+import type { TimingStat } from "@/lib/constants/care-timing";
 import type { CareEventAction, CareEventSource, CareReasonClass, CareReasonKey, CareStatus, CareView, CarrierActionKey, CarrierRequestStatus } from "@/lib/constants/care";
 
 /**
@@ -190,6 +191,14 @@ export type CareHistory = {
    * đã nhìn thấy*. `ASSIGN` bị loại khỏi cả hai vì giao việc là điều phối, không phải chăm sóc.
    */
   touches: number;
+  /**
+   * Mốc lượt xử lý ĐẦU TIÊN của đợt. `null` = CHƯA LƯỢT NÀO.
+   *
+   * Đây là thứ trả lời câu "đội đã phản hồi chưa" của hạn xử lý — KHÔNG phải cột
+   * `shipment_care.first_response_at`, cột đó được ghi ngay lúc GIAO VIỆC. Xem
+   * `lib/care/view.ts::teamResponded`.
+   */
+  firstRoundAt: Date | null;
   /** Mốc lượt xử lý gần nhất. `null` = CHƯA LƯỢT NÀO, không phải "lâu rồi". */
   lastRoundAt: Date | null;
   /**
@@ -227,8 +236,15 @@ export type CareQueue = {
   counts: Record<Exclude<CareView, "all">, number>;
   /** Backlog theo lý do (chỉ kiện đang ở góc nhìn Cần care). */
   byReason: { reason: CareReasonKey; label: string; count: number; money: number }[];
-  /** Backlog theo người (chỉ kiện đang mở, kể cả chờ / escalate). */
-  byOwner: { ownerId: string | null; name: string; open: number; overdue: number; money: number }[];
+  /**
+   * Backlog theo người (chỉ kiện đang mở, kể cả chờ / escalate).
+   *
+   * `notStarted` = việc ĐÃ NẰM TRONG TAY người này mà chưa có một lượt xử lý nào. Đo production
+   * 22/09/2026: **22 đợt ở trạng thái `ASSIGNED` với 0 lượt và 0 lần chạm** — việc đã giao xong
+   * rồi đứng im. Cột `open` một mình không nói được điều đó: một người cầm 10 việc và làm cả 10
+   * trông y hệt một người cầm 10 việc và chưa mở cái nào.
+   */
+  byOwner: { ownerId: string | null; name: string; open: number; overdue: number; notStarted: number; money: number }[];
   moneyAtRisk: number;
   overdue: number;
   unassigned: number;
@@ -241,6 +257,14 @@ export type CareQueue = {
    * tình huống đòi hai hành động trái ngược.
    */
   backlogGroups: Record<CareBacklogGroup, { count: number; money: number }>;
+  /**
+   * ĐỘ NGUỘI GIỮA HAI LƯỢT — trung vị KÈM ĐỘ PHỦ, `null` khi mẫu dưới ngưỡng (luật 63).
+   *
+   * Câu hỏi khác hẳn "phản hồi đầu": cái kia hỏi đội bắt đầu nhanh không, cái này hỏi đội có bỏ ca
+   * giữa chừng không. `population` là số ca đang mở, `sample` là số ca có ÍT NHẤT HAI lượt (tức là
+   * có một khoảng để đo) — chênh lệch giữa hai con số chính là thứ phải in ra.
+   */
+  roundGap: TimingStat;
   /**
    * NGƯỠNG SLA ĐANG HIỆU LỰC, đi kèm hàng đợi xuống trình duyệt. Trước bản này máy chủ đọc ghi đè
    * của chủ shop (`settings.work.sla`) còn trình duyệt tính lại bằng mặc định dựng sẵn sau mỗi
