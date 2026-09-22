@@ -89,11 +89,22 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
             lowCoverage ? "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300" : "text-muted-foreground",
           )}
         >
-          Độ phủ quy kết {formatPercent(d.confidence.coveragePct)} ({formatNumber(d.confidence.attributedOrders)}/
-          {formatNumber(d.confidence.totalOrders)} đơn nối được về quảng cáo).{" "}
-          {lowCoverage
-            ? `Dưới ngưỡng ${d.confidence.threshold}%: bảng này mô tả đúng PHẦN ĐƠN CÓ MÃ QUẢNG CÁO, không mô tả toàn shop. Phần còn lại cố ý không chia đều cho các chiến dịch.`
-            : "Đủ để kết luận ở cấp chiến dịch."}
+          Độ phủ quy kết{" "}
+          {d.confidence.coveragePct === null ? "chưa đo được" : `${formatPercent(d.confidence.coveragePct)}`} (
+          {formatNumber(d.confidence.attributedOrders)}/{formatNumber(d.confidence.attributableOrders)} đơn CÓ DẤU VẾT
+          FACEBOOK nối được về quảng cáo).{" "}
+          {d.confidence.notFromAdsOrders > 0 ? (
+            <>
+              {formatNumber(d.confidence.notFromAdsOrders)} đơn khác trong kỳ không có fanpage, bài viết hay mẩu quảng cáo nào — chúng chưa bao giờ đi
+              qua quảng cáo nên đứng NGOÀI mẫu số này.{" "}
+            </>
+          ) : null}
+          {d.confidence.coveragePct === null
+            ? "Không có đơn nào trong phạm vi để đo."
+            : lowCoverage
+              ? `Dưới ngưỡng ${d.confidence.threshold}%: bảng này mô tả đúng PHẦN ĐƠN NỐI ĐƯỢC, không mô tả toàn shop. Phần còn lại cố ý không chia đều cho các chiến dịch.`
+              : "Đủ để kết luận ở cấp chiến dịch."}{" "}
+          Đây là CẬN DƯỚI: phần chưa nối được vẫn lẫn đơn hữu cơ nhắn thẳng vào fanpage mà ERP không tách ra được.
         </p>
 
         {!hasSpend ? (

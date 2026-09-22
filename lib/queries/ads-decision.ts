@@ -160,12 +160,25 @@ export type AdsDecision = {
    * Độ tin cậy của toàn bảng. Dưới ngưỡng ⇒ giao diện phải nói rõ đây là kết luận trên PHẦN QUY KẾT
    * ĐƯỢC, không phải toàn shop.
    */
+  /**
+   * Độ tin cậy của toàn bảng — và mẫu số của nó là ĐƠN CÓ DẤU VẾT FACEBOOK, không phải mọi đơn.
+   *
+   * Sửa 22/09/2026: đơn chưa bao giờ đi qua quảng cáo (điện thoại · landing · khách cũ nhắn thẳng)
+   * từng bị tính vào mẫu số, làm độ phủ đọc ra 60,6% trong khi con số đúng là 72,5%. Xem
+   * `docs/ads-measurement-audit-2026-09-22.md` mục 5.
+   */
   confidence: {
-    coveragePct: number;
+    /** `null` = CHƯA ĐO ĐƯỢC (không có đơn nào trong phạm vi), không phải 0%. */
+    coveragePct: number | null;
     verdict: "SUFFICIENT" | "DATA_INSUFFICIENT";
     threshold: number;
     attributedOrders: number;
+    /** Mẫu số THẬT: đơn đã chốt CÓ dấu vết Facebook. */
+    attributableOrders: number;
+    /** Đơn đã chốt trong kỳ, kể cả đơn không đến từ quảng cáo — để đọc được bối cảnh. */
     totalOrders: number;
+    /** Đơn KHÔNG có dấu vết Facebook nào — đứng ngoài mẫu số, và phải nhìn thấy. */
+    notFromAdsOrders: number;
   };
 };
 
@@ -664,7 +677,9 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
       verdict: coverageVerdict(coverage.coveragePct, LOW_COVERAGE_PCT),
       threshold: LOW_COVERAGE_PCT,
       attributedOrders: coverage.uniqueDeterministic,
+      attributableOrders: coverage.attributable,
       totalOrders: coverage.total,
+      notFromAdsOrders: coverage.notFromAds,
     },
   };
 }

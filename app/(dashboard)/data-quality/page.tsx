@@ -135,13 +135,25 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
       */}
       <SectionCard
         title="Độ phủ quy kết quảng cáo — 30 ngày"
-        description={`${formatNumber(adsCoverage.uniqueDeterministic)}/${formatNumber(adsCoverage.total)} đơn quy kết được (${adsCoverage.coveragePct}%) · ${formatNumber(adsCoverage.ambiguous)} nhập nhằng · ${formatNumber(adsCoverage.unmapped)} không có gì để nối`}
+        description={`${formatNumber(adsCoverage.uniqueDeterministic)}/${formatNumber(adsCoverage.attributable)} đơn CÓ DẤU VẾT FACEBOOK quy kết được (${adsCoverage.coveragePct === null ? "chưa đo được" : `${adsCoverage.coveragePct}%`}) · ${formatNumber(adsCoverage.ambiguous)} nhập nhằng · ${formatNumber(adsCoverage.lostFacebook)} mất dấu · ${formatNumber(adsCoverage.notFromAds)} không đến từ quảng cáo (ngoài mẫu số)`}
         hint="Quy kết được = có mã quảng cáo thật, HOẶC bài viết chỉ thuộc đúng một chiến dịch. Bài chạy ở nhiều chiến dịch thì ERP GIỮ NHẬP NHẰNG, không chọn bừa — và không ngoại suy kết quả của phần quy kết được sang toàn bộ đơn."
       >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard label="Quy kết được" value={`${adsCoverage.coveragePct}%`} icon={Percent} tone={adsCoverage.coveragePct >= 80 ? "green" : "amber"} note={`${formatNumber(adsCoverage.uniqueDeterministic)} đơn có căn cứ xác định`} />
+          <MetricCard
+            label="Quy kết được"
+            value={adsCoverage.coveragePct === null ? "—" : `${adsCoverage.coveragePct}%`}
+            icon={Percent}
+            tone={adsCoverage.coveragePct === null ? "slate" : adsCoverage.coveragePct >= 80 ? "green" : "amber"}
+            note={`${formatNumber(adsCoverage.uniqueDeterministic)}/${formatNumber(adsCoverage.attributable)} đơn có dấu vết Facebook — CẬN DƯỚI, phần chưa nối vẫn lẫn đơn hữu cơ`}
+          />
           <MetricCard label="Nhập nhằng" value={formatNumber(adsCoverage.ambiguous)} icon={CircleHelp} tone="amber" note="Có bài viết nhưng bài chạy ở nhiều chiến dịch — giữ nguyên, không đoán" />
-          <MetricCard label="Không nối được" value={formatNumber(adsCoverage.unmapped)} icon={AlertTriangle} tone="slate" note="Không có mã quảng cáo lẫn bài viết" />
+          <MetricCard
+            label="Mất dấu"
+            value={formatNumber(adsCoverage.lostFacebook)}
+            icon={AlertTriangle}
+            tone="slate"
+            note={`Có fanpage/bài/mẩu nhưng không nối được. ${formatNumber(adsCoverage.notFromAds)} đơn KHÔNG đến từ quảng cáo đứng ngoài mẫu số.`}
+          />
           <MetricCard
             label="Đơn có mã theo dõi"
             value={formatNumber(adsCoverage.withTrackingCode)}
