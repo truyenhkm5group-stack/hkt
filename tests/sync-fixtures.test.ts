@@ -187,6 +187,7 @@ import { testLogisticsFreshness } from "./logistics-freshness.test";
 import { testOperatingFunnel } from "./operating-funnel.test";
 import { testMemoInflight } from "./memo-inflight.test";
 import { testCacheSemantics } from "./cache-semantics.test";
+import { testRefreshButton } from "./refresh-button.test";
 import { testUseServerExports } from "./use-server-exports.test";
 import { testSmokeCoverage } from "./smoke-coverage.test";
 import { testReturnPipeline } from "./return-pipeline.test";
@@ -1730,6 +1731,7 @@ async function main() {
   testPromisedDeliveryPure();
   await testMemoInflight();
   await testCacheSemantics();
+  await testRefreshButton();
   await testBankPipeline(db);
   testFinanceOpsPure();
   await testFinanceOpsQueries(db);
