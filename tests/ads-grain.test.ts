@@ -120,7 +120,25 @@ export function testAdsGrain() {
     Một cổng an toàn im lặng lùi về phía an toàn là một cổng KHÔNG SỬA ĐƯỢC.
   */
   assert.ok(sync.includes("ctx.summary.warning"), `${SYNC}: lùi hạt phải ra summary.warning (⇒ lượt chạy PARTIAL kèm lý do đọc được), không chỉ ra ctx.log`);
-  assert.ok(/ctx\.summary\.detail[\s\S]{0,400}hạt MẨU/.test(sync), `${SYNC}: số (tài khoản × ngày) ở mỗi hạt phải nằm trong summary.detail — đó là chỗ người đọc nhìn thấy mà không phải mở log`);
+  /*
+    ─── ĐẾM SỐ LẦN GÁN `detail`, KHÔNG CHỈ TÌM THẤY MỘT LẦN ───
+
+    Bản trước của bài kiểm này hỏi "có dòng nào gán `detail` kèm chữ hạt MẨU không" và nó XANH —
+    trong khi lần gán ấy bị một lần gán khác ở cuối hàm GHI ĐÈ, nên số liệu hạt không bao giờ tới
+    được `sync_runs`. Đo production 22/09/2026 mới thấy: `detail` in đúng câu cũ suốt hai lượt chạy
+    sau khi vá.
+
+    Một bộ gác đúng mà vô dụng còn nguy hiểm hơn không có bộ gác: nó làm người ta thôi đi kiểm.
+    Nên nay ràng buộc mạnh hơn: trong cả hàm chỉ được có ĐÚNG HAI lần gán `detail` — một câu mở đầu
+    trước vòng lặp, và một câu cuối cùng; và câu CUỐI phải mang số liệu hạt.
+  */
+  const lanGanDetail = (sync.match(/ctx\.summary\.detail = /g) ?? []).length;
+  assert.equal(lanGanDetail, 2, `${SYNC}: chỉ được gán summary.detail đúng 2 lần (mở đầu + kết luận), đang thấy ${lanGanDetail} — lần gán sau ghi đè lần trước và số liệu hạt biến mất`);
+  const ganCuoi = sync.slice(sync.lastIndexOf("ctx.summary.detail = "));
+  assert.ok(
+    ganCuoi.split("\n")[0].includes("hạt MẨU"),
+    `${SYNC}: LẦN GÁN CUỐI của summary.detail phải mang số (tài khoản × ngày) ở mỗi hạt — lần gán nào trước đó cũng bị nó ghi đè`,
+  );
 
   // Sổ mẩu KHÔNG được ghi đè `post_id` — đó là mắt xích nối đơn về chiến dịch, do job khác điền.
   const capNhat = sync.slice(sync.indexOf("async function capNhatSoMauVaNhom"));
