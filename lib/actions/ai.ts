@@ -1,5 +1,6 @@
 "use server";
 
+import { bacChoLuotHoi } from "@/lib/constants/ai-budget";
 import { z } from "zod";
 import type { CopilotConfirmResult, CopilotResult, CopilotToolInfo } from "@/lib/ai/contracts";
 import { confirmCopilotActions as confirmCore, runCopilot } from "@/lib/ai/copilot";
@@ -17,6 +18,8 @@ const askSchema = z.object({
   message: z.string().trim().min(1).max(4000),
   context: z.object({ route: z.string().max(200).default(""), entityType: z.enum(["shipment", "order", "customer", ""]).default(""), entityId: z.string().max(80).default("") }),
   history: z.array(z.object({ role: z.enum(["user", "assistant"]), text: z.string().max(8000) })).max(12).optional(),
+  /** Người hỏi bấm "Hỏi kỹ" — nâng bậc model cho riêng lượt này. Đường nâng bậc DUY NHẤT. */
+  sauHon: z.boolean().optional(),
 });
 
 export async function askCopilot(input: z.input<typeof askSchema>): Promise<CopilotResult> {
@@ -37,9 +40,35 @@ export async function confirmCopilotActions(input: z.input<typeof confirmSchema>
   return confirmCore({ user, ...parsed.data });
 }
 
-/** Cho UI: copilot có bật không và người này dùng được tool nào. */
-export async function copilotStatus(): Promise<{ enabled: boolean; provider: string; model: string; reason: string | null; tools: CopilotToolInfo[] }> {
+/**
+ * Cho UI: copilot có bật không, dùng model nào, và người này dùng được tool nào.
+ *
+ * ─── NHÃN PHẢI NÓI ĐÚNG MODEL SẼ TRẢ LỜI ───
+ *
+ * ĐÃ CẮN THẬT 22/09/2026. Chủ shop mở Copilot ở `/shipments`, nhãn góc trên ghi `claude-opus-5`.
+ * Sổ `ai_interactions` của chính câu hỏi ấy ghi:
+ *
+ *     03:14:51 | claude-haiku-4-5-20251001 | $0,018574 | OK
+ *
+ * Nhãn lấy `modelFor(name, "copilot")` — một hằng số TĨNH của bậc `copilot`, trong khi lượt hỏi
+ * thật đi bằng bậc mặc định (`routine`). Hai nơi nói hai điều, và cái người dùng nhìn thấy là
+ * cái SAI.
+ *
+ * Một con số trên màn hình không khớp thứ thật sự xảy ra thì tệ hơn không hiện gì: người đọc dùng
+ * nó để quyết định. Nhãn nay dựng từ CÙNG hàm mà lượt hỏi dùng (`bacChoLuotHoi`), nên hai nơi
+ * không thể trôi xa nhau.
+ */
+export async function copilotStatus(): Promise<{ enabled: boolean; provider: string; model: string; modelSauHon: string; reason: string | null; tools: CopilotToolInfo[] }> {
   const user = await requireUser();
   const name = resolveProviderName();
-  return { enabled: Boolean(name), provider: name ?? "", model: name ? modelFor(name, "copilot") : "", reason: aiDisabledReason(), tools: describeTools(user) };
+  const bac = bacChoLuotHoi({});
+  return {
+    enabled: Boolean(name),
+    provider: name ?? "",
+    model: name ? modelFor(name, bac) : "",
+    /** Model khi người hỏi bấm "hỏi kỹ" — để UI nói được cái nút ấy đổi sang gì. */
+    modelSauHon: name ? modelFor(name, bacChoLuotHoi({ sauHon: true })) : "",
+    reason: aiDisabledReason(),
+    tools: describeTools(user),
+  };
 }
