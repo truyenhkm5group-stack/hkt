@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { EFFORT_BY_TIER, modelFor, resolveProviderName, type AiProviderName, type AiTier } from "@/lib/ai/router";
 import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { env } from "@/lib/env";
+import { supportsAdaptiveThinking, supportsEffort } from "@/lib/constants/anthropic-capabilities";
 
 /**
  * ═══════════ LỚP PROVIDER — AI LAYER KHÔNG KHOÁ VÀO MỘT MODEL ═══════════
@@ -61,16 +62,27 @@ export class AnthropicProvider implements AiProvider {
 
   async complete(req: AiRequest): Promise<AiResponse> {
     const started = Date.now();
+    /*
+      THAM SỐ THEO NĂNG LỰC TỪNG MODEL — xem `lib/constants/anthropic-capabilities.ts`.
+
+      Bản trước gửi `thinking` và `output_config` cho MỌI model. Lượt gọi Anthropic đầu tiên trên
+      bản chạy thử (22/09/2026) trả 400 "adaptive thinking is not supported on this model" với
+      `claude-haiku-4-5` — mất trắng lượt gọi, không có phần nào chạy được.
+
+      Model chưa khai năng lực rơi vào nhánh KHÔNG gửi: thiếu `thinking` thì model vẫn trả lời,
+      chỉ kém sâu hơn; thừa `thinking` thì hỏng hoàn toàn. Rơi về phía hẹp hơn.
+    */
+    const suyLuan = supportsAdaptiveThinking(this.model);
     const res = await this.client.beta.messages.create({
       model: this.model,
       max_tokens: req.maxTokens ?? 4000,
       // Prompt hệ thống ổn định ⇒ đệm được; phần bối cảnh thay đổi nằm trong messages.
       system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
-      thinking: { type: "adaptive" },
-      output_config: { effort: this.effort },
+      ...(suyLuan ? { thinking: { type: "adaptive" as const } } : {}),
+      ...(supportsEffort(this.model) ? { output_config: { effort: this.effort } } : {}),
       // Từ chối vì chính sách ⇒ máy chủ tự chạy lại trên model dự phòng trong cùng một lần gọi.
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
+      // Đi cùng nhóm model trên: nó là tính năng của thế hệ ấy, không phải của mọi model.
+      ...(suyLuan ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
       tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Beta.BetaTool["input_schema"], strict: true })),
       messages: req.messages.map((m) => ({
         role: m.role,

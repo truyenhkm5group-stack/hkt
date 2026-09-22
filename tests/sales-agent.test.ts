@@ -23,6 +23,7 @@ import { sql } from "drizzle-orm";
 import { REVIEW_REASON_TAGS, REVIEW_REASON_TAG_META } from "@/lib/constants/sales-review-tags";
 import { z } from "zod";
 import { MODEL_USD_PRICES } from "@/lib/constants/ai-model-pricing";
+import { supportsAdaptiveThinking, supportsEffort } from "@/lib/constants/anthropic-capabilities";
 import { SALES_AGENT } from "@/lib/ai-workforce/agents/sales/definition";
 import { parseRouting as parseRoutingCfg } from "@/lib/ai-workforce/model-router";
 import { SAFEST_HARD_LIMITS, WORKFORCE_PROVIDERS, aiEnv, getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
@@ -1449,6 +1450,33 @@ export async function testSalesAgent(db: Db) {
   const giaRe = MODEL_USD_PRICES[routingSales.models!.ECONOMY!];
   const giaManh = MODEL_USD_PRICES[routingSales.models!.STRONG!];
   assert.ok(giaManh.outputUsdPerMillion > giaRe.outputUsdPerMillion, "bậc STRONG phải là mô hình đắt hơn bậc ECONOMY");
+
+  /*
+    ═════════ 9D. THAM SỐ PHẢI KHỚP NĂNG LỰC MODEL ═════════
+
+    Lượt gọi Anthropic đầu tiên trên bản chạy thử (22/09/2026) trả 400 "adaptive thinking is not
+    supported on this model" với `claude-haiku-4-5`. Lớp provider gửi `thinking` và
+    `output_config` cho MỌI model, và Haiku 4.5 không nhận cả hai.
+
+    Chuyện này nằm im nhiều tháng vì production chạy `AI_PROVIDER=openai` — nhánh Anthropic chưa
+    từng được gọi thật. Nó chỉ lộ ra đúng lúc chuyển nhân sự bán hàng sang Anthropic.
+  */
+  assert.equal(supportsAdaptiveThinking("claude-haiku-4-5"), false, "Haiku 4.5 KHÔNG nhận suy luận thích ứng — đây là ca đã 400 thật");
+  assert.equal(supportsEffort("claude-haiku-4-5"), false, "Haiku 4.5 cũng không nhận output_config.effort");
+  assert.equal(supportsAdaptiveThinking("claude-sonnet-5"), true);
+  assert.equal(supportsAdaptiveThinking("claude-opus-5"), true);
+
+  // Model lạ rơi về phía HẸP HƠN: thiếu `thinking` thì model vẫn trả lời, thừa thì 400 mất trắng.
+  assert.equal(supportsAdaptiveThinking("mo-hinh-chua-biet"), false, "chưa khai năng lực thì KHÔNG gửi tham số nâng cao");
+  assert.equal(supportsAdaptiveThinking(""), false);
+  // So khớp TRỌN VẸN — một biến thể chưa biết năng lực không được ăn theo tên gần giống.
+  assert.equal(supportsAdaptiveThinking("claude-sonnet-5-experimental"), false, "biến thể lạ không được thừa hưởng năng lực");
+
+  // Và mọi model nhân sự bán hàng thật sự chạy phải nhất quán với bảng năng lực ấy.
+  for (const bac of routingSales.tiers ?? []) {
+    const m: string = routingSales.models?.[bac] ?? "";
+    assert.equal(supportsEffort(m), supportsAdaptiveThinking(m), `${m}: hai năng lực phải đi cùng nhau`);
+  }
 
   // ═════════ 10. VIỆC KHÔNG TỒN TẠI / NẤC OFF ═════════
 
