@@ -1,5 +1,6 @@
 import { CARE_SLA_SOON_FRACTION, CARE_TERMINAL_STATUSES, CARE_WAITING_STATUSES } from "@/lib/constants/care";
 import { followUpBucket, type FollowUpFilterKey, type ResolutionFilterKey } from "@/lib/constants/care-resolution";
+import { careRoundBand, type CareRoundBand } from "@/lib/constants/care-rounds";
 import type { CareCase } from "@/lib/care/contracts";
 import { DEFAULT_CARE_SLA_HOURS, teamWorkEnded, type CareSlaHours, type CareStateLike } from "@/lib/care/view";
 
@@ -132,6 +133,21 @@ export function careAttemptBand(n: number): CareAttemptBand {
   return b?.key ?? "0";
 }
 
+/* ─────────────────────────── SỐ LƯỢT ĐÃ XỬ LÝ ─────────────────────────── */
+
+/**
+ * "ĐÃ XỬ LÝ MẤY LẦN RỒI" — luật đếm sống ở `lib/constants/care-rounds.ts`; chỗ này chỉ NỐI nó vào
+ * bộ lọc, để bàn care và báo cáo không có hai phép đếm.
+ *
+ * Kiện chưa đọc được lịch sử (`history` không có — một nơi gọi cũ của hợp đồng) rơi về 0 ở ĐÂY,
+ * và đó là lựa chọn có chủ ý: `careRoundBand(0)` là rổ "Chưa xử lý lần nào", tức là rổ khiến người
+ * ta MỞ RA XEM. Sai về phía bắt người nhìn lại thì tự sửa được; sai về phía xếp nó vào "đã xử lý 3
+ * lượt" thì không ai đi kiểm lại.
+ */
+export function careRoundBandOf(c: Pick<CareCase, "history">): CareRoundBand {
+  return careRoundBand(c.history?.rounds ?? 0);
+}
+
 /* ─────────────────────────── VỊ TỪ DÙNG CHUNG ─────────────────────────── */
 
 /** Các chiều lọc. Mỗi khoá ứng với đúng một tham số trên URL, và đúng một chiều của `matchesExcept`. */
@@ -156,9 +172,18 @@ export type CareFilters = {
   resolution: ResolutionFilterKey | "";
   /** Cái hẹn quay lại rơi vào rổ nào (quá hẹn · hôm nay · ngày mai · xa hơn · chưa hẹn). */
   followUp: FollowUpFilterKey | "";
+  /**
+   * ĐÃ XỬ LÝ MẤY LƯỢT — chiều RỜI HẲN khỏi `resolution` và `followUp`, cố ý.
+   *
+   * `resolution` nói đội đã QUYẾT gì (một trạng thái cuối cùng, ghi đè lẫn nhau); chiều này nói đội
+   * đã LÀM BAO NHIÊU LẦN (một phép đếm, chỉ tăng). "Chưa quyết định" gộp chung một kiện chưa ai mở
+   * ra với một kiện đã gọi khách hai lượt mà chưa chốt được — và đúng hai kiện đó là hai việc khác
+   * hẳn nhau vào sáng hôm sau.
+   */
+  rounds: CareRoundBand | "";
 };
 
-export const EMPTY_CARE_FILTERS: Omit<CareFilters, "view"> = { q: "", owner: "", reason: "", substate: "", sla: "", cod: "", attempts: "", sku: "", resolution: "", followUp: "" };
+export const EMPTY_CARE_FILTERS: Omit<CareFilters, "view"> = { q: "", owner: "", reason: "", substate: "", sla: "", cod: "", attempts: "", sku: "", resolution: "", followUp: "", rounds: "" };
 
 /** Các chiều có thể bị tắt khi đếm chip. `view` cố tình không nằm trong danh sách này. */
 export type CareFilterDim = Exclude<keyof CareFilters, "view">;
@@ -197,6 +222,7 @@ export function matchesCareFilters(c: CareCase, f: CareFilters, now: Date, hours
     if (f.resolution === "none" ? r !== null : r !== f.resolution) return false;
   }
   if (on("followUp") && f.followUp && followUpBucket(c.care.followUpAt, now) !== f.followUp) return false;
+  if (on("rounds") && f.rounds && careRoundBandOf(c) !== f.rounds) return false;
   if (on("sku") && !matchesSku(c, f.sku.trim().toLowerCase())) return false;
   if (on("q") && !matchesTerm(c, f.q.trim().toLowerCase())) return false;
   return true;

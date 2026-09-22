@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
 import Link from "next/link";
 import { parseAsString, useQueryStates } from "nuqs";
-import { CalendarClock, Check, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
+import { CalendarClock, Check, ChevronDown, ChevronRight, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CareDrawerHost, CareOpenButton, onCareUpdated } from "@/app/(dashboard)/shipments/care-drawer";
 import { CopyButton } from "@/components/misc";
@@ -45,6 +45,7 @@ import {
   careAttemptBand,
   careCodBand,
   careFacet,
+  careRoundBandOf,
   careSlaBucket,
   matchesCareFilters,
   type CareAttemptBand,
@@ -73,6 +74,18 @@ import {
   type CareNotePreset,
 } from "@/lib/constants/care";
 import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
+import {
+  CARE_ROUND_BANDS,
+  CARE_ROUND_BAND_HINT,
+  CARE_ROUND_MERGE_MINUTES,
+  CARE_TIMELINE_INLINE_MAX,
+  CARE_TIMELINE_KIND_LABEL,
+  CARE_TIMELINE_KIND_TONE,
+  careRoundAppend,
+  type CareRoundBand,
+  type CareTimelineEntry,
+  type CareTimelineKind,
+} from "@/lib/constants/care-rounds";
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
 import type { CareCase, CareState, CareWorkbench, CarrierRequestView } from "@/lib/queries/care-workbench";
 import { customerNameForDisplay } from "@/lib/constants/customer-name";
@@ -102,6 +115,12 @@ type Props = {
   /** Mẫu note gắn với TỪNG kết quả xử lý (`care.resolutionNotes`). */
   resolutionPresets: Record<CareDecision, string[]>;
   canManage: boolean;
+  /**
+   * KHOÁ TÀI KHOẢN của người đang mở màn hình. Chỉ dùng để cộng lượt vừa ghi bằng đúng luật gộp
+   * của máy chủ (`careRoundAppend`) — máy chủ vẫn là nơi quyết định ai đã làm gì (luật 34), đây
+   * chỉ là ảnh chụp để trình duyệt khỏi nói sai trong vài giây trước lượt dựng lại.
+   */
+  meId: string;
 };
 
 const CARRIER_MENU: CarrierActionKey[] = ["redeliver", "approve-return", "resend", "cancel"];
@@ -125,6 +144,45 @@ function gio(h: number | null) {
   return `${Math.round(h / 24)} ngày`;
 }
 
+/**
+ * ═══════════ VÁ LỊCH SỬ NGAY SAU MỘT LƯỢT VỪA GHI ═══════════
+ *
+ * Bàn care không tải lại trang sau mỗi thao tác. Thiếu hàm này thì người vừa ghi note xong nhìn
+ * thấy note của mình hiện ra NGAY BÊN TRÊN dòng chữ "Chưa xử lý lần nào" — một dòng tự mâu thuẫn
+ * với chính nó, và người dùng sẽ thôi tin cả hai nửa.
+ *
+ * Phép cộng lượt đi qua `careRoundAppend`, tức ĐÚNG luật gộp mà máy chủ dùng: không có bản sao thứ
+ * hai của cửa sổ 5 phút ở phía trình duyệt. Lượt dựng lại tiếp theo của máy chủ ghi đè bằng số đo
+ * thật — nếu hai bên lệch nhau thì lệch ở đúng một chỗ, và chỗ đó có kiểm thử.
+ *
+ * `undefined` vào thì `undefined` ra: CHƯA ĐỌC ĐƯỢC không được biến thành "1 lượt" chỉ vì vừa có
+ * một thao tác (luật 42).
+ */
+function themLuot(truoc: CareCase["history"], moi: { at: Date; actorId: string; kind: CareTimelineKind; label: string; note: string }): CareCase["history"] {
+  if (!truoc) return truoc;
+  const cong = careRoundAppend(truoc, { at: moi.at, actorId: moi.actorId });
+  const dong: CareTimelineEntry = { at: moi.at, kind: moi.kind, label: moi.label, note: moi.note, actor: "bạn", bySystem: false };
+  return {
+    ...truoc,
+    rounds: cong.rounds,
+    lastRoundAt: cong.lastRoundAt,
+    lastRoundActorId: cong.lastRoundActorId,
+    // Vừa làm xong thì không còn "ĐVVC có tin mới sau lượt xử lý cuối": lượt cuối vừa là bây giờ.
+    carrierNewsAfterLastRound: false,
+    /*
+      SỐ LẦN CHẠM ĐI THEO ĐÚNG QUYẾT ĐỊNH GỘP CỦA SỐ LƯỢT.
+
+      Mọi lượt xử lý cũng là một lần chạm, nên ghi nhận này gộp vào lượt trước thì nó cũng gộp vào
+      lần chạm trước. Cộng thẳng `+ 1` là dựng lại đúng phép ĐẾM ĐÔI mà máy chủ vừa phải bỏ: một
+      lần ghi note để lại hai dòng ở hai sổ (`care_actions` + sự kiện `NOTE`). Con số này không
+      hiện trên dòng; lượt dựng lại của máy chủ chốt nó bằng số đo thật.
+    */
+    touches: cong.rounds === truoc.rounds ? truoc.touches : truoc.touches + 1,
+    timeline: [dong, ...truoc.timeline].slice(0, CARE_TIMELINE_INLINE_MAX),
+    timelineTruncated: truoc.timelineTruncated || truoc.timeline.length + 1 > CARE_TIMELINE_INLINE_MAX,
+  };
+}
+
 function reviveState(s: CareState): CareState {
   // Server Action trả Date đã được tuần tự hoá lại thành Date ở phía client (React Flight), nhưng
   // phòng khi là chuỗi thì ép về Date để luật góc nhìn không so sánh nhầm.
@@ -146,7 +204,7 @@ const BULK_TONE: Record<BulkOutcome, string> = {
   FAILED: "text-rose-600 dark:text-rose-400",
 };
 
-export function CareWorkbenchView({ initial, view, staff, presets: initialPresets, resolutionPresets, canManage }: Props) {
+export function CareWorkbenchView({ initial, view, staff, presets: initialPresets, resolutionPresets, canManage, meId }: Props) {
   const [cases, setCases] = useState<CareCase[]>(() => initial.cases.map((c) => ({ ...c, queueSince: new Date(c.queueSince) })));
   /*
     ═══ MÁY CHỦ NÓI LẠI THÌ DANH SÁCH NGHE THEO ═══
@@ -197,11 +255,12 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
       hang: parseAsString.withDefault(""),
       ketqua: parseAsString.withDefault(""),
       hen: parseAsString.withDefault(""),
+      luot: parseAsString.withDefault(""),
     },
     { history: "replace", clearOnDefault: true },
   );
   const filters: CareFilters = useMemo(
-    () => ({ view, q: f.q, owner: f.nguoi, reason: f.lydo, substate: f.dvvc, sla: f.han as CareSlaBucket | "", cod: f.tien as CareCodBand | "", attempts: f.hut as CareAttemptBand | "", sku: f.hang, resolution: f.ketqua as ResolutionFilterKey | "", followUp: f.hen as FollowUpFilterKey | "" }),
+    () => ({ view, q: f.q, owner: f.nguoi, reason: f.lydo, substate: f.dvvc, sla: f.han as CareSlaBucket | "", cod: f.tien as CareCodBand | "", attempts: f.hut as CareAttemptBand | "", sku: f.hang, resolution: f.ketqua as ResolutionFilterKey | "", followUp: f.hen as FollowUpFilterKey | "", rounds: f.luot as CareRoundBand | "" }),
     [view, f],
   );
   const [pending, start] = useTransition();
@@ -284,11 +343,21 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
     const m = new Map(careFacet(cases, filters, "followUp", (c) => followUpBucket(c.care.followUpAt, now), now, hours));
     return FOLLOW_UP_FILTERS.map((k) => [k, m.get(k) ?? 0] as const).filter(([, n]) => n > 0);
   }, [cases, filters, now, hours]);
+  /*
+    ĐẾM THEO SỐ LƯỢT ĐÃ XỬ LÝ — cùng `careFacet`, cùng vị từ, nên con số trên chip bằng đúng số
+    dòng hiện ra khi bấm. Rổ "Chưa xử lý lần nào" GIỮ NGUYÊN kể cả khi bằng 0, khác mọi chip khác:
+    một hàng đợi không còn kiện nào chưa ai đụng là một TIN TỐT, và tin tốt biến mất khỏi màn hình
+    thì người trực không có cách nào biết mình đã dọn sạch hay bộ lọc đang hỏng.
+  */
+  const roundFacet = useMemo(() => {
+    const m = new Map(careFacet(cases, filters, "rounds", (c) => careRoundBandOf(c), now, hours));
+    return CARE_ROUND_BANDS.map((b) => [b, m.get(b.key) ?? 0] as const).filter(([b, n]) => n > 0 || b.key === "0");
+  }, [cases, filters, now, hours]);
 
   /* Đếm và gỡ bộ lọc: người lọc bốn chiều rồi thấy bảng rỗng phải có một nút để ra, không phải sửa
      đường dẫn bằng tay. `view` không nằm trong đây — nó là cái TAB, không phải bộ lọc. */
   const daLoc = Object.values(f).filter((v) => v !== "").length;
-  const xoaLoc = () => setF({ q: "", nguoi: "", lydo: "", dvvc: "", han: "", tien: "", hut: "", hang: "", ketqua: "", hen: "" });
+  const xoaLoc = () => setF({ q: "", nguoi: "", lydo: "", dvvc: "", han: "", tien: "", hut: "", hang: "", ketqua: "", hen: "", luot: "" });
 
   const queue = visible.map((c) => ({ shipmentId: c.shipmentId }));
   const moneyAtRisk = visible.reduce((a, c) => a + c.codAmount, 0);
@@ -569,6 +638,41 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
         </div>
       ) : null}
 
+      {/*
+        ═══ HÀNG THỨ NĂM: ĐÃ XỬ LÝ MẤY LƯỢT RỒI ═══
+
+        Hàng "Kết quả" ở trên nói đội đã QUYẾT gì — một trạng thái, ghi đè lẫn nhau. Hàng này nói
+        đội đã LÀM BAO NHIÊU LẦN — một phép đếm, chỉ tăng. Hai chiều rời nhau, và chỗ chúng rời
+        nhau xa nhất chính là chỗ đáng nhìn: "chưa quyết định" gộp một kiện chưa ai mở ra với một
+        kiện đã gọi khách hai lượt mà chưa chốt được, và sáng hôm sau đó là hai việc khác hẳn.
+
+        "Chưa xử lý lần nào" luôn hiện kể cả khi bằng 0 — xem `roundFacet`.
+      */}
+      {roundFacet.length ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground" title={`Một LƯỢT = một lần ghi việc đã làm (gọi / nhắn / sửa) hoặc một lần bấm kết quả. Hai ghi nhận của cùng một người trong ${CARE_ROUND_MERGE_MINUTES} phút tính là MỘT lượt. Đổi trạng thái và giao việc KHÔNG tính.`}>
+            Đã xử lý
+          </span>
+          {roundFacet.map(([b, n]) => (
+            <button
+              key={b.key}
+              type="button"
+              onClick={() => setF({ luot: f.luot === b.key ? "" : b.key })}
+              title={CARE_ROUND_BAND_HINT[b.key]}
+              className={cn(
+                "rounded-full border px-2.5 py-0.5 text-[11.5px] hover:bg-accent",
+                // Chỉ rổ "chưa ai đụng" mang màu cảnh báo, và chỉ khi nó còn kiện: đó là rổ duy
+                // nhất nói "có việc chưa ai nhìn tới". Tô màu cả năm rổ thì không rổ nào nổi lên.
+                b.key === "0" && n > 0 && "text-rose-700 dark:text-rose-300",
+                f.luot === b.key && "border-primary bg-accent font-semibold",
+              )}
+            >
+              {b.label} <span className="numeric opacity-70">{n}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {selected.size ? (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs">
           <span className="font-semibold">{selected.size} kiện đã chọn</span>
@@ -695,6 +799,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
                     resolutionPresets={resolutionPresets}
                     onPresetsChange={setPresets}
                     canManage={canManage}
+                    meId={meId}
                     checked={selected.has(c.shipmentId)}
                     onCheck={(v) =>
                       setSelected((s) => {
@@ -719,11 +824,20 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   );
 }
 
-function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, canManage, checked, onCheck, onPatch }: { c: CareCase; now: Date; staff: { id: string; name: string }[]; presets: CareNotePreset[]; resolutionPresets: Record<CareDecision, string[]>; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
+function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, canManage, meId, checked, onCheck, onPatch }: { c: CareCase; now: Date; staff: { id: string; name: string }[]; presets: CareNotePreset[]; resolutionPresets: Record<CareDecision, string[]>; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; meId: string; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
   const [pending, start] = useTransition();
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const [kind, setKind] = useState<CareActionKind>("CALLED_REACHED");
+  /*
+    NHẬT KÝ MỞ / ĐÓNG THEO TỪNG DÒNG, GIỮ TRONG DÒNG.
+
+    Không đưa lên `CareWorkbenchView`: một `Set` các dòng đang mở ở cấp trên nghĩa là mở một dòng
+    vẽ lại cả bảng. Ở đây mỗi `CaseRow` tự giữ cờ của mình, nên mở một dòng chỉ vẽ lại dòng đó.
+  */
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const lichSu = c.history;
+  const soLuot = lichSu?.rounds ?? 0;
   const [vtpOpen, setVtpOpen] = useState(false);
   const [vtpNote, setVtpNote] = useState("");
   const terminal = c.care.status === "RESOLVED" || c.care.status === "CANCELLED";
@@ -784,7 +898,11 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
         toast.error(r.error);
         return;
       }
-      onPatch(r.data, { lastCareAction: { label: CARE_ACTION_LABEL[kind], at: new Date(), byHuman: true } });
+      const at = new Date();
+      onPatch(r.data, {
+        lastCareAction: { label: CARE_ACTION_LABEL[kind], at, byHuman: true },
+        history: themLuot(lichSu, { at, actorId: meId, kind: "ACTION", label: CARE_ACTION_LABEL[kind], note }),
+      });
       setNote("");
       setNoteOpen(false);
     });
@@ -830,7 +948,7 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
         toast.error(r.error, { duration: 9000 });
         return;
       }
-      onPatch(r.data);
+      onPatch(r.data, { history: themLuot(lichSu, { at: new Date(), actorId: meId, kind: "DECISION", label: RESOLUTION_LABEL[a], note: extra.note ?? "" }) });
       toast.success(`${c.tracking} · ${RESOLUTION_LABEL[a]}`, { description: "Đã ghi kết quả xử lý. KHÔNG gửi lệnh nào sang Viettel Post và KHÔNG đổi trạng thái vận đơn.", duration: 6000 });
     });
 
@@ -872,6 +990,7 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
   const req = c.carrierRequest;
 
   return (
+    <>
     <tr className={cn("align-top hover:bg-accent/30", pending && "opacity-60")}>
       <td className="px-2 py-2">
         <input type="checkbox" aria-label="Chọn kiện" checked={checked} onChange={(e) => onCheck(e.target.checked)} />
@@ -1069,6 +1188,42 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
         ) : (
           <span className="font-medium text-rose-600 dark:text-rose-400">Chưa ai chạm</span>
         )}
+        {/*
+          ═══ "ĐÃ XỬ LÝ MẤY LƯỢT" ĐỨNG NGAY DƯỚI NOTE, VÀ MỞ RA ĐƯỢC TẠI CHỖ ═══
+
+          Note gần nhất chỉ là DÒNG CUỐI của một câu chuyện. Người trực nhận một ca lúc 2 giờ chiều
+          đọc được "khách hẹn mai" mà không biết đó là lần hẹn thứ nhất hay thứ ba — và hai tình
+          huống ấy dẫn tới hai cuộc gọi khác hẳn nhau. Trước bản này câu trả lời nằm trong ngăn kéo,
+          tức là phải rời bảng, mở, đọc, đóng, cho từng dòng một.
+
+          Con số là NÚT: bấm là mở nhật ký ngay dưới dòng, không rời bảng, không tải lại.
+        */}
+        <button
+          type="button"
+          onClick={() => setHistoryOpen((v) => !v)}
+          title={soLuot === 0 ? CARE_ROUND_BAND_HINT["0"] : `Bấm để xem ${soLuot === 1 ? "lượt" : `${soLuot} lượt`} xử lý và các lần đổi trạng thái của đợt này.`}
+          className={cn("mt-1 flex w-full items-center gap-1 rounded px-1 py-px text-left text-[10.5px] hover:bg-accent", soLuot === 0 && "font-semibold text-rose-600 dark:text-rose-400")}
+        >
+          {historyOpen ? <ChevronDown className="size-3 shrink-0" /> : <ChevronRight className="size-3 shrink-0" />}
+          {soLuot === 0 ? "Chưa xử lý lần nào" : `Đã xử lý ${soLuot} lượt`}
+          {lichSu && lichSu.lastRoundAt ? <span className="text-muted-foreground">· {formatTimeAgo(lichSu.lastRoundAt)}</span> : null}
+        </button>
+        {/*
+          ĐVVC ĐÃ NÓI THÊM KỂ TỪ LƯỢT XỬ LÝ CUỐI — cảnh báo này KHÔNG có ở đâu khác trên màn hình.
+          Ca được hẹn xem lại chiều mai vẫn nằm im tới chiều mai, kể cả khi sáng nay Viettel Post
+          báo phát hụt lần nữa: cái hẹn đứng trên một bức tranh đã cũ. Chỉ hiện khi ĐÃ có lượt xử
+          lý — chưa làm gì thì không có "kể từ lúc nào" để so.
+        */}
+        {lichSu?.carrierNewsAfterLastRound ? (
+          <div className="mt-0.5 text-[10.5px] font-medium text-amber-700 dark:text-amber-300" title="Viettel Post đã gửi tin mới sau lượt xử lý gần nhất. Đọc lại cột “VTP báo” trước khi làm theo cái hẹn đang có.">
+            ⚠ ĐVVC có tin mới sau lượt xử lý cuối
+          </div>
+        ) : null}
+        {lichSu && lichSu.previousEpisodes > 0 ? (
+          <div className="mt-0.5 text-[10.5px] text-muted-foreground" title="Kiện này đã từng vào hàng đợi care và được đóng lại trước đây. Nhật ký dưới đây chỉ của ĐỢT ĐANG MỞ — lịch sử các đợt trước ở ngăn kéo.">
+            đợt thứ {lichSu.previousEpisodes + 1} của kiện này
+          </div>
+        ) : null}
         <Popover open={noteOpen} onOpenChange={setNoteOpen}>
           <PopoverTrigger asChild>
             <button type="button" className="mt-1 inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10.5px] hover:bg-accent">
@@ -1219,7 +1374,79 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
           }}
         />
       </td>
-    </tr>
+      </tr>
+      {/*
+        ═══ NHẬT KÝ MỞ RA NGAY DƯỚI DÒNG, KHÔNG PHẢI TRONG MỘT NGĂN KÉO KHÁC ═══
+
+        Một `<tr>` phụ trải hết chiều ngang, chỉ dựng khi người dùng MỞ: đóng thì không có node nào
+        trong cây, nên một bảng ba trăm dòng không gánh ba trăm danh sách ẩn.
+
+        Dòng này CHỈ có nhật ký của ĐỘI. Hành trình Viettel Post nằm ở cột "VTP báo" và ở ngăn kéo,
+        dưới nhãn của chính nó — luật 47: lời khai của ĐVVC và kết luận của ERP không bao giờ đứng
+        chung một danh sách, vì đọc xuôi một dòng trộn thì không ai còn phân biệt được cái nào là
+        chứng từ và cái nào là việc shop tự làm.
+      */}
+      {historyOpen ? (
+        <tr className="bg-muted/30">
+          <td />
+          <td colSpan={6} className="px-2 pb-3 pt-1">
+            <CareTimeline history={lichSu} />
+          </td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * NHẬT KÝ XỬ LÝ CỦA MỘT ĐỢT — mới nhất trước, đúng thứ tự người đọc muốn: "vừa rồi làm gì" trước
+ * "hôm kia làm gì".
+ *
+ * Mỗi dòng nói rõ nó thuộc CHIỀU NÀO (`CARE_TIMELINE_KIND_LABEL`) vì bốn loại việc rất khác nhau
+ * đang đứng cạnh nhau: một cuộc gọi, một quyết định, một lần đổi trạng thái, một lệnh gửi ĐVVC.
+ * Bỏ cái nhãn đó đi thì "Phát tiếp" (quyết định của shop) trông y hệt "Phát tiếp" (lệnh đã gửi đi),
+ * và đó đúng là hai thứ mà cả hệ thống này đang cố tách ra.
+ */
+function CareTimeline({ history }: { history: CareCase["history"] }) {
+  if (!history) {
+    // CHƯA ĐỌC ĐƯỢC ≠ CHƯA CÓ GÌ (luật 42). Không bao giờ vẽ một danh sách rỗng thay cho câu này.
+    return <p className="text-[11px] text-muted-foreground">Chưa đọc được lịch sử xử lý của kiện này.</p>;
+  }
+  if (!history.timeline.length) {
+    return (
+      <p className="text-[11px] text-muted-foreground">
+        Chưa có dòng nào trong đợt này — chưa ai gọi, chưa ai ghi chú, chưa ai đổi trạng thái. Mở ngăn kéo nếu cần xem các đợt trước của kiện.
+      </p>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <ol className="space-y-0.5">
+        {history.timeline.map((e, i) => (
+          <li key={`${e.at.toISOString()}-${i}`} className="flex flex-wrap items-baseline gap-x-2 text-[11.5px]">
+            <span className="numeric w-[7.5rem] shrink-0 text-muted-foreground" title={formatDateTime(e.at)}>
+              {formatDateTime(e.at)}
+            </span>
+            <span className={cn("shrink-0 font-semibold", CARE_TIMELINE_KIND_TONE[e.kind])} title={CARE_TIMELINE_KIND_LABEL[e.kind]}>
+              {CARE_TIMELINE_KIND_LABEL[e.kind]}
+            </span>
+            <span className="font-medium">{e.label}</span>
+            {/*
+              "MÁY LÀM" VÀ "CHƯA BIẾT AI" LÀ HAI THỨ (luật 36). Một dòng của bộ đối chiếu lúc 3 giờ
+              sáng và một dòng cũ không nối được tài khoản trông giống hệt nhau nếu cả hai cùng in
+              ra một ô trống — và người đọc sẽ mặc định đó là một người nào đó.
+            */}
+            <span className="shrink-0 text-muted-foreground">· {e.bySystem ? "hệ thống" : e.actor || "chưa rõ người"}</span>
+            {e.note ? <span className="min-w-0 basis-full pl-[7.5rem] text-muted-foreground">“{e.note}”</span> : null}
+          </li>
+        ))}
+      </ol>
+      {history.timelineTruncated ? (
+        <p className="text-[10.5px] text-muted-foreground">
+          Chỉ hiện {CARE_TIMELINE_INLINE_MAX} dòng gần nhất — mở ngăn kéo để xem toàn bộ nhật ký và hành trình Viettel Post.
+        </p>
+      ) : null}
+    </div>
   );
 }
 

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { careSlaHours } from "@/lib/care/sla";
+import type { CareBacklogGroup } from "@/lib/constants/care-rounds";
 import { getCareQueue } from "@/lib/queries/care-workbench";
 import { SHIPMENT_DELIVERED, SHIPMENT_RETURNED } from "@/lib/queries/return-rate";
 import { rowsOf } from "@/lib/sql-rows";
@@ -46,7 +47,20 @@ export type CareStaffRow = {
 export type CareReport = {
   period: Period;
   backlog: {
+    /**
+     * TỔNG kiện đang ở góc nhìn "Cần care". KHÔNG phải "số case cần care": nó gộp kiện chưa ai mở
+     * ra nhìn với kiện đã gọi khách ba lượt đang chờ tới giờ hẹn. Câu trả lời cho "còn bao nhiêu
+     * case chưa được care" nằm ở `groups.UNTOUCHED` — xem `CARE_BACKLOG_GROUP_HINT`.
+     *
+     * Giữ lại con số tổng vì nó vẫn là mẫu số đúng của `overdue` / `moneyAtRisk`, và vì bỏ nó đi
+     * là làm mồ côi mọi chỗ đang đọc nó.
+     */
     care: number;
+    /**
+     * BA NHÓM CỦA `care`, cộng lại bằng đúng `care`. Đây là phép BỔ chứ không phải một bộ lọc thứ
+     * hai: không kiện nào rơi ra ngoài, không kiện nào đếm hai lần.
+     */
+    groups: Record<CareBacklogGroup, { count: number; money: number }>;
     waiting: number;
     escalated: number;
     overdue: number;
@@ -59,7 +73,23 @@ export type CareReport = {
     /** Kiện cũ dữ liệu / thiếu dữ liệu — việc giao vận, không phải backlog care. */
     dataGaps: number;
   };
-  firstResponse: { medianHours: number | null; withinSla: number; measured: number };
+  /**
+   * `assignedOnly` — CA ĐANG MỞ ĐÃ MANG MỐC "PHẢN HỒI ĐẦU" MÀ CHƯA CÓ MỘT LƯỢT XỬ LÝ NÀO.
+   *
+   * `lib/care/service.ts::setCareOwner` ghi `first_response_at` ngay lúc GIAO VIỆC. Nên một trưởng
+   * nhóm bấm giao mười ca trong hai phút làm mười ca mang mốc "đã phản hồi" trong khi chưa ai gọi
+   * một cuộc nào — đúng kịch bản luật 57 đã cấm cho `care_actions`, nhưng cột này thì chưa ai rà
+   * lại. Đo production 22/09/2026: **22 trong 25 đợt chưa xử lý lần nào vẫn có `first_response_at`**,
+   * tất cả đều đang ở `ASSIGNED` với 0 hành động và 0 lần chạm.
+   *
+   * Hệ quả: chúng KHÔNG bao giờ bị tính vỡ hạn phản hồi đầu, và trung vị ở trên đang đo tốc độ
+   * BẤM GIAO VIỆC chứ không đo tốc độ chăm khách.
+   *
+   * Con số này KHÔNG sửa trung vị — sửa nó là đổi một ngưỡng nghiệp vụ và làm đổi số vỡ SLA của
+   * các ca đang chạy, thuộc diện phải hỏi chủ shop (AGENTS mục 7). Nó ĐỨNG CẠNH để người đọc biết
+   * trung vị kia đang đứng trên cái gì.
+   */
+  firstResponse: { medianHours: number | null; withinSla: number; measured: number; assignedOnly: number };
   done: { count: number; reopened: number; medianResolveHours: number | null; withinSla: number };
   recovery: {
     failedTotal: number;
@@ -291,8 +321,15 @@ async function build(period: Period): Promise<CareReport> {
 
   return {
     period,
-    backlog: { care: wb.counts.care, waiting: wb.counts.waiting, escalated: wb.counts.escalated, overdue: wb.overdue, unassigned: wb.unassigned, moneyAtRisk: wb.moneyAtRisk, byReason: wb.byReason, byOwner: wb.byOwner, dataGaps: wb.dataGaps.length },
-    firstResponse: { medianHours: median(firstHours), withinSla: firstHours.filter((h) => h <= sla.firstResponseHours).length, measured: firstHours.length },
+    backlog: { care: wb.counts.care, groups: wb.backlogGroups, waiting: wb.counts.waiting, escalated: wb.counts.escalated, overdue: wb.overdue, unassigned: wb.unassigned, moneyAtRisk: wb.moneyAtRisk, byReason: wb.byReason, byOwner: wb.byOwner, dataGaps: wb.dataGaps.length },
+    firstResponse: {
+      medianHours: median(firstHours),
+      withinSla: firstHours.filter((h) => h <= sla.firstResponseHours).length,
+      measured: firstHours.length,
+      // Đếm trên ĐÚNG tập kiện đang mở của hàng đợi — không thêm một truy vấn, và không thêm một
+      // định nghĩa "lượt xử lý" thứ hai: `history.rounds` là con số bàn care đang hiện.
+      assignedOnly: wb.cases.filter((c) => c.view !== "done" && c.care.firstResponseAt !== null && (c.history?.rounds ?? 0) === 0).length,
+    },
     done: { count: doneRows.length, reopened: careRows.filter((r) => r.reopened).length, medianResolveHours: median(resolveHours), withinSla: resolveHours.filter((h) => h <= sla.resolveHours).length },
     recovery,
     redelivery,

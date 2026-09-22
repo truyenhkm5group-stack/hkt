@@ -1,5 +1,6 @@
 import type { BusinessAction } from "@/lib/constants/care-outcome";
 import type { CareDecision } from "@/lib/constants/care-resolution";
+import type { CareBacklogGroup, CareTimelineEntry } from "@/lib/constants/care-rounds";
 import type { CarrierSubstate } from "@/lib/constants/carrier-substate";
 import type { CareSlaHours } from "@/lib/care/view";
 import type { CareEventAction, CareEventSource, CareReasonClass, CareReasonKey, CareStatus, CareView, CarrierActionKey, CarrierRequestStatus } from "@/lib/constants/care";
@@ -149,6 +150,18 @@ export type CareCase = {
   reopened: boolean;
   lastCareAction: { label: string; at: Date; byHuman: boolean } | null;
   /**
+   * ĐỘI ĐÃ LÀM GÌ VỚI KIỆN NÀY, MẤY LƯỢT — xem `lib/constants/care-rounds.ts`.
+   *
+   * ĐỌC RA lúc xem từ ba sổ chỉ-thêm (`care_actions` · `care_decisions` · `care_case_events`),
+   * KHÔNG phải một cột lưu song song: một cột thứ hai giữ cùng một sự thật là tự nhận lấy câu hỏi
+   * "hai chỗ lệch nhau thì tin chỗ nào", và nó giữ mãi câu trả lời của lần chạy đầu tiên khi nhân
+   * viên bổ sung một dòng hành động của hôm qua.
+   *
+   * Optional vì hợp đồng này cấm đổi hình dạng cũ. Nơi gọi cũ không truyền thì là CHƯA ĐỌC ĐƯỢC,
+   * và màn hình phải nói đúng như vậy — KHÔNG được in ra "0 lượt" (luật 42).
+   */
+  history?: CareHistory;
+  /**
    * Bot nhắn khách sau giao hụt KHÔNG thành công (không có hội thoại Pancake, ngoài 24h, thiếu token).
    * Kết luận này trước đây chỉ nằm trong một dòng `cs_cases` miền giao vận mà không hàng đợi nào hiện
    * — tức là không ai, người lẫn máy, đã chạm tới khách. Bàn care là nơi phải thấy nó.
@@ -158,6 +171,49 @@ export type CareCase = {
   /** Rút gọn: có gửi thẳng API được không. Chi tiết từng hành động ở `getCareCaseDetail().capabilities`. */
   carrierCapability: "API" | "MANUAL";
   view: Exclude<CareView, "all">;
+};
+
+/**
+ * ═══════════ LỊCH SỬ XỬ LÝ CỦA ĐỢT ĐANG HIỂN THỊ ═══════════
+ *
+ * Khoá theo ĐỢT (`shipment_care.id`), không theo kiện: kiện hỏng lần hai là một đợt mới, và ba
+ * lượt gọi của đợt trước KHÔNG được hiện lên như thể đợt này đã được chăm ba lần. Số đợt đã đóng
+ * trước đó vẫn đọc được ở `previousEpisodes` — mất nó thì một kiện hỏng lần thứ ba trông y hệt một
+ * kiện vừa vào hàng đợi lần đầu.
+ */
+export type CareHistory = {
+  /** Số LƯỢT XỬ LÝ của đợt này — `careRoundCount` ở `lib/constants/care-rounds.ts`. */
+  rounds: number;
+  /**
+   * Số lần có NGƯỜI CHẠM vào ca (đổi trạng thái · đặt hẹn · ghi note · bấm kết quả). Đếm RIÊNG,
+   * KHÔNG gộp với `rounds` — luật 57: gộp lại thì không phân biệt được *đội đã làm việc* với *đội
+   * đã nhìn thấy*. `ASSIGN` bị loại khỏi cả hai vì giao việc là điều phối, không phải chăm sóc.
+   */
+  touches: number;
+  /** Mốc lượt xử lý gần nhất. `null` = CHƯA LƯỢT NÀO, không phải "lâu rồi". */
+  lastRoundAt: Date | null;
+  /**
+   * KHOÁ TÀI KHOẢN của người làm lượt cuối (luật 34). Đi cùng `lastRoundAt` để trình duyệt cộng
+   * thêm một lượt vừa ghi bằng ĐÚNG luật gộp của máy chủ (`careRoundAppend`) — không có bản sao
+   * thứ hai của phép gộp ở phía client. `null` = máy, hoặc dòng cũ chưa nối được tài khoản.
+   */
+  lastRoundActorId: string | null;
+  /**
+   * ĐVVC ĐÃ NÓI THÊM ĐIỀU GÌ KỂ TỪ LƯỢT XỬ LÝ CUỐI.
+   *
+   * Người trực gọi khách lúc 9 giờ rồi hẹn xem lại chiều mai; 10 giờ Viettel Post báo phát hụt lần
+   * nữa. Lượt xử lý kia đứng trên một bức tranh đã cũ, nhưng cái hẹn vẫn giữ ca nằm im tới chiều
+   * mai. Cờ này là thứ DUY NHẤT trên dòng nói ra điều đó.
+   *
+   * `false` khi chưa có lượt xử lý nào — chưa làm gì thì không có "kể từ lúc nào" để so.
+   */
+  carrierNewsAfterLastRound: boolean;
+  /** Số đợt care ĐÃ ĐÓNG trước đợt đang hiển thị, cùng kiện. */
+  previousEpisodes: number;
+  /** Nhật ký rút gọn, MỚI NHẤT TRƯỚC, tối đa `CARE_TIMELINE_INLINE_MAX` dòng. */
+  timeline: CareTimelineEntry[];
+  /** `timeline` đã bị cắt bớt ⇒ TUYỆT ĐỐI không đếm các dòng đang hiện rồi gọi đó là tổng. */
+  timelineTruncated: boolean;
 };
 
 /**
@@ -176,6 +232,15 @@ export type CareQueue = {
   moneyAtRisk: number;
   overdue: number;
   unassigned: number;
+  /**
+   * "CÒN TREO" BỔ RA BA CON SỐ — xem `CARE_BACKLOG_GROUP_HINT`.
+   *
+   * Tổng ba nhóm bằng đúng `counts.care`: đây là một phép BỔ, không phải một bộ lọc thứ hai, nên
+   * không kiện nào rơi ra ngoài và không kiện nào bị đếm hai lần. Trước bản này chỉ có `counts.care`,
+   * và nó gộp kiện chưa ai mở ra nhìn với kiện đã gọi khách ba lượt đang chờ tới giờ hẹn — hai
+   * tình huống đòi hai hành động trái ngược.
+   */
+  backlogGroups: Record<CareBacklogGroup, { count: number; money: number }>;
   /**
    * NGƯỠNG SLA ĐANG HIỆU LỰC, đi kèm hàng đợi xuống trình duyệt. Trước bản này máy chủ đọc ghi đè
    * của chủ shop (`settings.work.sla`) còn trình duyệt tính lại bằng mặc định dựng sẵn sau mỗi

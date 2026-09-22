@@ -7,7 +7,7 @@ import { CARE_WORKFLOW_LABEL } from "@/lib/constants/care-outcome";
 import { CARE_DECISIONS, RESOLUTION_LABEL } from "@/lib/constants/care-resolution";
 import { WORK_DAY_START_HOUR } from "@/lib/constants/care-resolution";
 import { NO_CUSTOMER_NAME_LABEL, customerNameForDisplay, isPlaceholderCustomerName } from "@/lib/constants/customer-name";
-import { careAttemptBand, matchesCareFilters } from "@/lib/care/filters";
+import { EMPTY_CARE_FILTERS, careAttemptBand, matchesCareFilters, type CareFilters } from "@/lib/care/filters";
 import { careViewOf } from "@/lib/care/view";
 import { applyCarrierEventToCare } from "@/lib/care/lifecycle";
 import { recordCareDecision, type CareActor } from "@/lib/care/service";
@@ -248,7 +248,8 @@ export async function testShipmentsQaFixes(db: Db) {
 
   /* ═══════════ 13 · BỘ LỌC KẾT QUẢ ĐỌC ĐÚNG QUYẾT ĐỊNH ĐANG CÓ ═══════════ */
 
-  const loc = { view: "done", q: "", owner: "", reason: "", substate: "", sla: "", cod: "", attempts: "", sku: "", resolution: "CARE_CONTINUE_DELIVERY", followUp: "" } as const;
+  // Dựng từ hằng số ĐANG CHẠY: thêm một chiều lọc mới không được làm bài kiểm này đỏ vì thiếu một ô.
+  const loc: CareFilters = { ...EMPTY_CARE_FILTERS, view: "done", resolution: "CARE_CONTINUE_DELIVERY" };
   assert.equal(matchesCareFilters(sauQuyet!, loc, new Date(), q.slaHours), true, "kiện vừa ghi “Phát tiếp” phải lọt bộ lọc “Phát tiếp”");
   assert.equal(matchesCareFilters(sauQuyet!, { ...loc, resolution: "none" }, new Date(), q.slaHours), false, "đã quyết rồi thì KHÔNG phải “chưa quyết định”");
 

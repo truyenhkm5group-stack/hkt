@@ -4,6 +4,8 @@ import { MetricCard } from "@/components/metric-card";
 <TableToolsFor tableId="shipments-care-report-1" />
 import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { SectionCard } from "@/components/ui-bits";
+import { CARE_SLA } from "@/lib/constants/care";
+import { CARE_BACKLOG_GROUP_HINT, CARE_ROUND_MERGE_MINUTES } from "@/lib/constants/care-rounds";
 import { formatNumber, formatVND, pct } from "@/lib/format";
 import { getCareReport } from "@/lib/queries/care-report";
 import type { Period } from "@/lib/search-params";
@@ -19,8 +21,33 @@ export async function CareReportSection({ period }: { period: Period }) {
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Backlog cần care" value={formatNumber(r.backlog.care)} note={`${formatNumber(r.backlog.overdue)} vỡ SLA · ${formatNumber(r.backlog.unassigned)} chưa ai nhận · COD treo ${formatVND(r.backlog.moneyAtRisk, { compact: true })}`} tone={r.backlog.overdue ? "rose" : "amber"} hint="Kiện đang trong điều kiện cần người, tính lúc này (không theo kỳ). Chờ kết quả và Escalated đếm riêng ở tab." />
-        <MetricCard label="Phản hồi đầu (trung vị)" value={r.firstResponse.medianHours === null ? "—" : `${r.firstResponse.medianHours} giờ`} note={`${formatNumber(r.firstResponse.withinSla)}/${formatNumber(r.firstResponse.measured)} kiện trong 2 giờ`} tone="slate" hint="Từ lúc kiện được đội mở (dòng care) tới lần đầu có người động vào. Chỉ đo kiện có dòng care trong kỳ." />
+        {/*
+          ═══ CON SỐ LỚN PHẢI TRẢ LỜI ĐÚNG CÂU NGƯỜI ĐỌC ĐANG HỎI ═══
+
+          Trước bản này thẻ in `backlog.care` — TỔNG kiện đang ở góc nhìn "Cần care" — dưới nhãn
+          "Backlog cần care". Chủ shop đọc nó là "còn bấy nhiêu case chưa được care", nhưng trong
+          đó có cả kiện đã gọi khách ba lượt và đang chờ tới giờ hẹn. Đội trông như không làm gì
+          trong khi họ đã làm ba lượt, và con số càng chăm chỉ càng không chịu giảm.
+
+          Nay con số lớn là CHƯA AI ĐỤNG — nhóm duy nhất trả lời đúng câu đó. Hai nhóm còn lại
+          đứng ngay dưới, không bị giấu: chúng vẫn là việc (hoặc sẽ là việc), chỉ không phải cùng
+          một việc. Tổng ba nhóm bằng đúng `backlog.care`, và dòng cuối in ra tổng ấy để không ai
+          phải nghi ngờ rằng một nhóm đã bị bỏ quên.
+        */}
+        <MetricCard
+          label="Chưa ai đụng"
+          value={formatNumber(r.backlog.groups.UNTOUCHED.count)}
+          note={`+${formatNumber(r.backlog.groups.WORKED_DUE.count)} đã xử lý, tới lượt lại · +${formatNumber(r.backlog.groups.WORKED_SCHEDULED.count)} đã xử lý, đang trong hẹn — tổng ${formatNumber(r.backlog.care)} kiện còn trong điều kiện care · ${formatNumber(r.backlog.overdue)} vỡ SLA · COD treo ${formatVND(r.backlog.moneyAtRisk, { compact: true })}`}
+          tone={r.backlog.groups.UNTOUCHED.count ? "rose" : "green"}
+          hint={`${CARE_BACKLOG_GROUP_HINT.UNTOUCHED}\n\nĐã xử lý, tới lượt lại: ${CARE_BACKLOG_GROUP_HINT.WORKED_DUE}\n\nĐã xử lý, đang trong hẹn: ${CARE_BACKLOG_GROUP_HINT.WORKED_SCHEDULED}\n\nMột LƯỢT XỬ LÝ = một lần người ghi việc đã làm (gọi / nhắn / sửa) hoặc bấm một kết quả (Đã hoàn / Phát tiếp / Xử lý sau); hai ghi nhận của cùng một người trong ${CARE_ROUND_MERGE_MINUTES} phút tính là MỘT lượt. Đổi trạng thái và giao việc KHÔNG tính — chúng là “chạm vào”, không phải “đã xử lý”. Tính lúc này, không theo kỳ.`}
+        />
+        <MetricCard
+          label="Phản hồi đầu (trung vị)"
+          value={r.firstResponse.medianHours === null ? "—" : `${r.firstResponse.medianHours} giờ`}
+          note={`${formatNumber(r.firstResponse.withinSla)}/${formatNumber(r.firstResponse.measured)} kiện trong ${formatNumber(CARE_SLA.firstResponseHours)} giờ${r.firstResponse.assignedOnly ? ` · ⚠ ${formatNumber(r.firstResponse.assignedOnly)} ca mang mốc này mà chưa có lượt xử lý nào` : ""}`}
+          tone={r.firstResponse.assignedOnly ? "amber" : "slate"}
+          hint={`Từ lúc kiện được đội mở (dòng care) tới lần đầu có người động vào. Chỉ đo kiện có dòng care trong kỳ.\n\n⚠ ĐỌC KÈM CẢNH BÁO: mốc “phản hồi đầu” được ghi NGAY LÚC GIAO VIỆC, nên một ca được giao cho ai đó mà chưa ai gọi vẫn mang mốc này và không bao giờ bị tính vỡ hạn. Con số cảnh báo bên cạnh đếm đúng những ca như vậy đang mở. Muốn trung vị này đo tốc độ CHĂM KHÁCH thay vì tốc độ BẤM GIAO VIỆC thì phải thôi ghi mốc ở đường giao việc — việc đó làm đổi số vỡ SLA của các ca đang chạy nên cần chủ shop quyết.`}
+        />
         <MetricCard label="Đã đóng trong kỳ" value={formatNumber(r.done.count)} note={`${formatNumber(r.done.withinSla)} trong 24 giờ · ${formatNumber(r.done.reopened)} mở lại · trung vị ${r.done.medianResolveHours === null ? "—" : `${r.done.medianResolveHours} giờ`}`} tone="slate" hint="Đội bấm Đã xong. Không đồng nghĩa kiện đã giao — cột bên phải mới nói kết cục." />
         <MetricCard label="COD cứu được sau can thiệp" value={formatVND(r.recovery.recoveredCod, { compact: true })} note={`${formatNumber(r.recovery.recoveredIntervened)}/${formatNumber(r.recovery.failedIntervened)} kiện giao hụt có người care rồi giao thành công · doanh thu ${formatVND(r.recovery.recoveredRevenue, { compact: true })}`} tone="green" hint="Kiện giao hụt trong kỳ, có ít nhất một hành động care của người SAU lần hụt và TRƯỚC kết cục, rồi ĐVVC xác nhận giao thành công. COD là tiền của kiện đó — đã tới tay khách, chưa chắc đã về tài khoản; doanh thu là giá trị đơn được cứu." />
       </div>
