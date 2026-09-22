@@ -365,8 +365,6 @@ jobs:
                 docker exec erp-app npm run --silent sync -- vtp-import --days="$DAYS" ;;
               sync-facebook-ads)
                 docker exec erp-app npm run --silent sync -- facebook-ads --days="$DAYS" ;;
-              sync-facebook-ads)
-                docker exec erp-app npm run --silent sync -- facebook-ads --days="$DAYS" ;;
               check-integrations)
                 docker exec erp-app npm run --silent check:integrations ;;
               seed-employees)

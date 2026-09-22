@@ -641,6 +641,46 @@ export function testEnvsChuyenDuXuong() {
   );
 }
 
+/**
+ * ═══════════ MỘT THAO TÁC ops CHỈ ĐƯỢC CÓ MỘT NHÁNH `case` ═══════════
+ *
+ * SỰ CỐ THẬT 22/09/2026: `sync-facebook-ads` có **hai** nhánh giống hệt nhau. Nhánh thứ hai không
+ * bao giờ chạy — `case` trong shell dừng ở nhánh khớp đầu tiên.
+ *
+ * Bản sao giống hệt thì vô hại. Điều nguy hiểm là ngày có người **sửa nhánh thứ hai**: họ đọc mã,
+ * thấy đúng dòng mình cần đổi, sửa nó, chạy thử, và thao tác vẫn hành xử y như cũ. Không gì đỏ,
+ * không gì báo — chỉ có một bản vá không bao giờ có hiệu lực. Đó là lớp lỗi đắt nhất trong tệp này
+ * vì nó tiêu thời gian của người sửa chứ không tiêu thời gian của máy.
+ *
+ * Danh sách thao tác ở đầu tệp (`options:`) cũng phải không trùng: hai mục cùng tên trong một
+ * `choice` là hai dòng giống nhau trong danh sách sổ xuống, và người bấm không biết chọn cái nào.
+ */
+export function testOpsKhongTrungNhanh() {
+  const yml = readFileSync(".github/workflows/ops-vps.yml", "utf8");
+
+  // Nhánh `case`: đúng 14 dấu cách rồi tên thao tác rồi `)`.
+  const nhanh = [...yml.matchAll(/^ {14}([a-z0-9-]+)\)$/gm)].map((m) => m[1]);
+  assert.ok(nhanh.length > 30, `đọc hụt nhánh case (chỉ thấy ${nhanh.length}) — biểu thức không còn khớp hình dạng tệp`);
+  const trungNhanh = nhanh.filter((x, i) => nhanh.indexOf(x) !== i);
+  assert.deepEqual(
+    [...new Set(trungNhanh)],
+    [],
+    `Thao tác ops có HAI nhánh case: ${[...new Set(trungNhanh)].join(", ")}. Nhánh thứ hai không bao giờ chạy — người sửa nó sẽ mất buổi chiều để hiểu vì sao bản vá không có hiệu lực.`,
+  );
+
+  // Danh sách lựa chọn ở đầu tệp.
+  const muc = [...yml.matchAll(/^ {10}- ([a-z0-9-]+)\b/gm)].map((m) => m[1]);
+  assert.ok(muc.length > 30, `đọc hụt danh sách thao tác (chỉ thấy ${muc.length})`);
+  const trungMuc = muc.filter((x, i) => muc.indexOf(x) !== i);
+  assert.deepEqual([...new Set(trungMuc)], [], `Danh sách thao tác có mục trùng: ${[...new Set(trungMuc)].join(", ")}`);
+
+  // Mọi nhánh phải có mặt trong danh sách — một nhánh không ai chọn được là mã chết.
+  const khongChonDuoc = [...new Set(nhanh)].filter((n) => !muc.includes(n));
+  assert.deepEqual(khongChonDuoc, [], `Nhánh case không có trong danh sách lựa chọn (không ai bấm tới được): ${khongChonDuoc.join(", ")}`);
+
+  console.log(`✓ Thao tác ops: ${new Set(nhanh).size} nhánh case · không nhánh nào trùng · không mục nào trùng · mọi nhánh đều chọn được`);
+}
+
 export function testOpsConcurrency() {
   testKhongDungConcurrencyLamHangDoi();
   testKhoiKhoaOps();
@@ -648,6 +688,7 @@ export function testOpsConcurrency() {
   testKhoaChayThat();
   testTenCheckBatBuoc();
   testEnvsChuyenDuXuong();
+  testOpsKhongTrungNhanh();
 }
 
 if (process.argv[1] && process.argv[1].endsWith("ops-concurrency.test.ts")) testOpsConcurrency();
