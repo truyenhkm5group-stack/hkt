@@ -523,7 +523,7 @@ export async function planTechProposalAction(input: unknown): Promise<TechResult
   return { ok: true, id: ghi.id, status: ghi.status, tasks: res.ok ? res.plan.tasks.length : 0 };
 }
 
-export async function approveTechProposalAction(input: unknown): Promise<TechResult<{ created: number; skipped: number }>> {
+export async function approveTechProposalAction(input: unknown): Promise<TechResult<{ created: number; skipped: number; daGan: number; khongGan: string[]; ganBu: number }>> {
   const user = await nguoiQuanTri();
   if (!user) return { error: KHONG_QUYEN };
   let data: z.infer<typeof deXuatSchema> & { note?: string };
@@ -541,12 +541,28 @@ export async function approveTechProposalAction(input: unknown): Promise<TechRes
     action: "TECH_PROPOSAL_APPROVED",
     entity: "TECH_PROPOSAL",
     entityId: data.proposalId,
-    after: { created: res.created, skipped: res.skipped, tasks: res.tasks.map((t) => ({ code: t.code, suggested: t.suggestedRisk, applied: t.appliedRisk })) },
+    after: { created: res.created, skipped: res.skipped, tasks: res.tasks.map((t) => ({ code: t.code, suggested: t.suggestedRisk, applied: t.appliedRisk, vai: t.agentKey, lyDoKhongGan: t.lyDoKhongGan })) },
     reason: "Chủ shop duyệt kế hoạch AI CTO — việc thật được tạo, mức rủi ro do máy xếp lại",
   });
   lamMoi();
   revalidatePath("/tech/cto");
-  return { ok: true, created: res.created, skipped: res.skipped };
+  /*
+    BA CON SỐ VỀ NGƯỜI NHẬN, TÁCH NHAU.
+
+    "Đã gán" là việc CTO giao được; "vai thiếu" là khoá trỏ hụt phải đi tạo vai; "vai chưa đủ mức"
+    là việc đã có chủ nhưng đứng ở cổng giao. Ba thứ sửa ở ba chỗ khác nhau, gộp thành một câu
+    "có vấn đề" là đẩy người đọc đi sửa nhầm chỗ (mục 55).
+  */
+  return {
+    ok: true,
+    created: res.created,
+    skipped: res.skipped,
+    daGan: res.tasks.filter((t) => t.agentKey).length,
+    /* Câu lý do nguyên văn, không gộp — mỗi loại sửa ở một chỗ khác (mục 55). */
+    khongGan: [...res.tasks, ...res.ganBu].filter((t) => t.lyDoKhongGan).map((t) => `${t.code}: ${t.lyDoKhongGan}`),
+    /* Việc của lượt áp TRƯỚC nay mới có chủ — đếm riêng, vì nó trả lời một câu hỏi khác. */
+    ganBu: res.ganBu.filter((t) => t.agentKey).length,
+  };
 }
 
 export async function rejectTechProposalAction(input: unknown): Promise<TechResult> {

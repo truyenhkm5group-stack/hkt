@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { DISPATCHABLE_STATUSES } from "@/lib/constants/agent-dispatch";
+import type { TechTaskStatus } from "@/lib/constants/tech";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
@@ -7,7 +9,7 @@ import { CTO_MAX_OUTPUT_TOKENS, parseCtoPlan, type CtoPlan } from "@/lib/constan
 import { promptCoSecretKhong, runCtoPlanning } from "@/lib/agents/cto";
 import { NGUONG_KHONG_STREAM, RETRIES_BY_TIER, type AiProvider, type AiResponse } from "@/lib/ai/provider";
 import { approveProposal, createProposal, rejectProposal, supersedeOpenProposals } from "@/lib/tech/proposal";
-import { createTechTask, type TechActor } from "@/lib/tech/service";
+import { assignTechTaskAgent, createTechTask, type TechActor } from "@/lib/tech/service";
 
 /**
  * ═══════════ AI CTO CHỈ ĐƯỢC ĐỀ NGHỊ ═══════════
@@ -69,6 +71,22 @@ function keHoach(over: Partial<CtoPlan> = {}): CtoPlan {
 export async function testCtoProposal() {
   const db = await getDb();
 
+  /*
+    ═══ GIEO HAI VAI CÓ THẬT ═══
+
+    `tech_agents` không được gieo sẵn trong bộ kiểm, mà đường áp kế hoạch tra vai BẰNG KHOÁ. Không
+    gieo thì mọi việc rơi vào nhánh "vai không có thật" và phần đang đo biến mất — bài kiểm xanh vì
+    một lý do khác hẳn thứ nó định đo.
+
+    `qa` khai `R0/R1` ĐÚNG như mẫu vai thật: hai việc trong bản kế hoạch đều thuộc module SHIPMENTS
+    nên MÁY xếp chúng lên R2, và đó là ca "gán được nhưng vai chưa đủ mức" — ca có thật, không dựng.
+  */
+  await db.insert(schema.techAgents).values([
+    { key: "qa", name: "QA", role: "QA", enabled: true, allowedRisks: ["R0", "R1"] },
+    { key: "backend", name: "Backend", role: "BACKEND", enabled: true, allowedRisks: ["R0", "R1"] },
+    { key: "devops", name: "DevOps", role: "DEVOPS_SRE", enabled: true, allowedRisks: ["R0", "R1"] },
+  ]);
+
   const mucTieu = await createTechTask(
     { title: "Đánh giá và đề xuất cải thiện tốc độ trang vận đơn", description: "Trang mở chậm khi nhiều vận đơn.", taskType: "PERFORMANCE", module: "SHIPMENTS", priority: "P2", source: "OWNER" },
     NGUOI,
@@ -106,6 +124,51 @@ export async function testCtoProposal() {
   assert.ok(t1 && t2, "cả hai dòng đề xuất phải nối được tới việc thật");
   assert.deepEqual(t2!.dependsOn, [t1!.id], "T2 phụ thuộc T1 bằng id THẬT — `T1` là khoá cục bộ, không tra được ở đâu khác");
   assert.equal(t1!.parentTaskId, sourceTaskId, "việc con treo dưới đúng mục tiêu gốc");
+
+  /* ═════════ 3b · VAI CTO CHỌN PHẢI ĐI THEO VIỆC ═════════
+
+     ĐÃ ĐO PRODUCTION 22/09/2026: bản kế hoạch của AI CTO có `suggested_agent_key` ở **9/9** việc
+     (`architect` · `data` · `frontend` · `data-quality` · `devops` · `qa` · `documentation`), và
+     **9/9** việc tạo ra đều `agent_id = NULL`. Lời gọi `createTechTask()` không truyền `agentId`,
+     nên cột ấy bị đánh rơi đúng chín lần.
+
+     Hậu quả không phải thẩm mỹ: màn hình `/tech/cto` VẪN hiện cột "vai đề xuất", nên chủ shop đọc
+     bản kế hoạch thấy việc đã có người nhận, rồi mở việc ra thì nó vô chủ — và cổng giao việc trả
+     "chưa gán agent nào". Câu hỏi *"có AI CTO mà sao vẫn phải tự giao việc"* có đáp án ở đúng đó. */
+  /*
+    HAI VIỆC NÀY THUỘC MODULE SHIPMENTS ⇒ MÁY xếp lên R2, mà `qa`/`backend` chỉ được cấp R0/R1.
+
+    `assignTechTaskAgent` TỪ CHỐI — và đó đúng là ý định: chú thích của chính nó gọi tên đường đi
+    vòng, *"không lách bằng cách giao bừa"*. Truyền `agentId` thẳng vào `createTechTask()` sẽ đi
+    vòng qua cả ba hàng rào của nó (vai có thật · vai đang BẬT · vai được cấp đúng mức), nên đường
+    áp kế hoạch KHÔNG được làm thế, dù ngắn hơn một dòng.
+
+    Việc để trống, và LÝ DO phải nói ra ngay lúc áp — chứ không để chủ shop phát hiện bằng cách
+    bấm cổng giao rồi đọc câu từ chối, lúc ấy họ đã tưởng việc có chủ suốt từ khi duyệt kế hoạch.
+  */
+  assert.equal(t1!.risk, "R2", "tiền đề: máy xếp việc module SHIPMENTS lên R2");
+
+  /*
+    ─── VIỆC SINH RA TỪ BẢN KẾ HOẠCH ĐÃ DUYỆT KHÔNG CÒN LÀ "CHƯA AI PHÂN LOẠI" ───
+
+    `TRIAGED` đọc ra là "đã xác định mức ưu tiên, mức rủi ro và module bị chạm" — việc này có đủ cả
+    ba theo cấu trúc, cộng một con người vừa duyệt cả bản. Để ở `NEW` là nói sai về việc, VÀ chặn
+    luôn cổng giao (`DISPATCHABLE_STATUSES` không nhận `NEW`).
+
+    Đo 22/09/2026: cả chín việc TECH-4…TECH-12 đều đang `NEW` — nên kể cả khi đã gán vai và đã ký
+    duyệt thì chúng vẫn không giao được.
+  */
+  assert.equal(t1!.status, "TRIAGED", "việc từ kế hoạch đã duyệt phải ở ĐÃ PHÂN LOẠI, không phải MỚI");
+  assert.ok(DISPATCHABLE_STATUSES.includes(t1!.status as TechTaskStatus), "…và đó đúng là điều kiện cổng giao việc đòi");
+  const vetPl = await db.query.techTaskEvents.findMany({ where: eq(schema.techTaskEvents.taskId, t1!.id) });
+  assert.ok(
+    vetPl.some((e) => e.nextValue === "TRIAGED"),
+    "lượt phân loại phải vào nhật ký việc — không đổi trạng thái lén",
+  );
+  assert.equal(t1!.agentId, null, "vai chưa được cấp R2 thì KHÔNG gán — hàng rào của `assignTechTaskAgent` giữ nguyên");
+  const bcT1 = "ok" in duyet ? duyet.tasks.find((x) => x.key === "T1") : undefined;
+  assert.equal(bcT1?.agentKey, "", "không gán được thì không khai là đã gán");
+  assert.match(bcT1?.lyDoKhongGan ?? "", /R2/, "…và lý do phải nói rõ vướng ở mức rủi ro nào");
 
   /* ═════════ 4 · MỨC RỦI RO ĐƯỢC MÁY XẾP LẠI — AI KHÔNG ÉP ĐƯỢC ═════════ */
   //
@@ -154,6 +217,121 @@ export async function testCtoProposal() {
   assert.equal(viecLuong?.risk, "R2");
   assert.equal(viecLuong?.approvalRequired, true, "R2 ⇒ vẫn phải có chủ shop ký, y như mọi việc R2 khác");
   assert.equal(viecLuong?.approvalStatus, "PENDING", "…và nó đang CHỜ ký, không phải đã ký sẵn");
+
+  /*
+    ─── VAI HỢP LỆ VỚI LƯỢC ĐỒ NHƯNG KHÔNG CÓ TRONG SỔ `tech_agents` ───
+
+    Hai danh sách khác nhau: lược đồ kế hoạch duyệt khoá theo `TECH_AGENT_TEMPLATES` (hằng số trong
+    mã), còn việc thật gán theo DÒNG trong bảng `tech_agents`. Một khoá qua được lược đồ vẫn có thể
+    không có dòng nào — vai bị xoá, hoặc một bản triển khai chưa gieo đủ.
+
+    Khi đó: để TRỐNG và nói ra. Tuyệt đối KHÔNG dò một vai "gần giống" — gán việc cho nhầm người là
+    đúng thứ AGENTS.md mục 35 cấm, và một khoá trỏ hụt của AI không phải bằng chứng về ý định của nó.
+  */
+  const pThieuVai = await createProposal({
+    sourceTaskId,
+    agentId: null,
+    agentKey: "ai-cto",
+    provider: "anthropic",
+    model: "claude-opus-5",
+    plan: keHoach({
+      tasks: [
+        {
+          key: "TV",
+          title: "Ghi lại kết quả đo vào tài liệu bàn giao",
+          description: "Chép bảng thời gian truy vấn vào docs.",
+          taskType: "DOCS",
+          module: "PLATFORM",
+          suggestedPriority: "P2",
+          suggestedRisk: "R0",
+          riskExplanation: "Chỉ viết chữ.",
+          // Vai có trong mẫu nhưng KHÔNG có dòng nào trong `tech_agents` của bộ kiểm.
+          suggestedAgent: "devops",
+          dependsOn: [],
+          acceptanceCriteria: ["Tài liệu có bảng số"],
+          expectedScope: ["docs/perf/"],
+          needsHumanDecision: false,
+          humanDecisionNote: "",
+        },
+        {
+          key: "TH",
+          title: "Ghi chú vận hành cho lượt đo tiếp theo",
+          description: "Chép các bước đã chạy vào docs.",
+          taskType: "DOCS",
+          module: "PLATFORM",
+          suggestedPriority: "P3",
+          suggestedRisk: "R0",
+          riskExplanation: "Chỉ viết chữ.",
+          // Vai CÓ trong `TECH_AGENT_TEMPLATES` (nên qua được lược đồ) nhưng KHÔNG có dòng nào
+          // trong `tech_agents` của bộ kiểm — đúng ca khoá trỏ hụt.
+          suggestedAgent: "incident",
+          dependsOn: [],
+          acceptanceCriteria: ["Có ghi chú"],
+          expectedScope: ["docs/perf/"],
+          needsHumanDecision: false,
+          humanDecisionNote: "",
+        },
+      ],
+    }),
+  });
+  const duyetThieu = await approveProposal({ proposalId: "ok" in pThieuVai ? pThieuVai.id : "" }, NGUOI);
+  assert.ok("ok" in duyetThieu, "vẫn duyệt được — một vai trỏ hụt không được làm hỏng cả lượt áp");
+  const apTV = "ok" in duyetThieu ? duyetThieu.tasks.find((x) => x.key === "TV") : null;
+  const apTH = "ok" in duyetThieu ? duyetThieu.tasks.find((x) => x.key === "TH") : null;
+
+  /* ─── CA GÁN ĐƯỢC: vai có thật, đang bật, và được cấp đúng mức máy xếp ─── */
+  const viecTV = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, apTV!.taskId), with: { agent: { columns: { key: true } } } });
+  assert.equal(viecTV?.risk, "R1", "tiền đề: DOCS + PLATFORM ⇒ máy xếp R1");
+  assert.equal(viecTV?.agent?.key, "devops", "vai CTO chọn PHẢI đi theo việc — đây chính là 9/9 lần bị đánh rơi trên production");
+  assert.equal(apTV?.agentKey, "devops", "và kết quả áp nói ra đã gán ai");
+  assert.equal(apTV?.lyDoKhongGan, "", "gán xong thì không có lý do gì để nêu");
+
+  /*
+    Lượt gán phải để lại VẾT: một sự kiện `ASSIGN` trong nhật ký việc. Ghi thẳng cột `agent_id`
+    thì cột đổi mà không ai trả lời được "ai giao việc này cho vai đó".
+  */
+  const vet = await db.query.techTaskEvents.findMany({ where: eq(schema.techTaskEvents.taskId, apTV!.taskId) });
+  assert.ok(
+    vet.some((e) => e.kind === "ASSIGN" && e.nextValue === "devops"),
+    "lượt gán theo kế hoạch phải vào nhật ký việc, không ghi lén thẳng cột",
+  );
+
+  /* ─── CA KHOÁ TRỎ HỤT: để TRỐNG và nói ra ─── */
+  assert.equal(apTH?.agentKey, "", "không gán được ai");
+  assert.match(apTH?.lyDoKhongGan ?? "", /incident/, "…và phải NÓI RA khoá vai nào trỏ hụt, không im lặng");
+  const viecTH = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, apTH!.taskId) });
+  assert.equal(viecTH?.agentId, null, "việc để TRỐNG — KHÔNG dò một vai gần giống (mục 35)");
+
+  /*
+    ═══ LƯỢT ÁP LẠI BẮT KỊP PHẦN CÒN THIẾU — VÀ KHÔNG BAO GIỜ ĐÈ LÊN NGƯỜI ═══
+
+    Chín việc TECH-4…TECH-12 trên production đã được tạo TRƯỚC bản vá này, nên nhánh idempotent bỏ
+    qua chúng mãi mãi. Chỉ vá đường tạo mới thì bản vá cứu kế hoạch TƯƠNG LAI còn chín việc đang
+    nằm trên bảng thì vô chủ vĩnh viễn — sửa xong mà hôm nay không ai dùng được gì.
+
+    Nhưng bắt kịp KHÔNG được biến thành đè: nếu người đã gán tay một vai khác ý CTO, lượt áp lại
+    phải im lặng đi qua. Lựa chọn của người thắng, luôn luôn.
+  */
+  assert.equal(viecTH?.agentId, null, "tiền đề: việc TH đang vô chủ");
+  await db.insert(schema.techAgents).values({ key: "incident", name: "Sự cố", role: "INCIDENT", enabled: true, allowedRisks: ["R0", "R1"] });
+
+  /* Người gán TAY một vai KHÁC với ý CTO cho việc TV (CTO chọn `devops`). */
+  const vaiIn = await db.query.techAgents.findFirst({ where: eq(schema.techAgents.key, "incident") });
+  await assignTechTaskAgent({ taskId: apTV!.taskId, agentId: vaiIn!.id, note: "chủ shop đổi ý" }, NGUOI);
+
+  const apLai = await approveProposal({ proposalId: "ok" in pThieuVai ? pThieuVai.id : "" }, NGUOI);
+  assert.ok("ok" in apLai, "áp lại được");
+  assert.equal("ok" in apLai ? apLai.created : -1, 0, "không tạo lại việc nào — phép idempotent giữ nguyên");
+
+  const buTH = "ok" in apLai ? apLai.ganBu.find((x) => x.code === viecTH!.code) : null;
+  assert.equal(buTH?.agentKey, "incident", "việc đang vô chủ nay gán được vì vai đã có trong sổ");
+  const viecTHSau = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, apTH!.taskId), with: { agent: { columns: { key: true } } } });
+  assert.equal(viecTHSau?.agent?.key, "incident", "…và việc thật đã có chủ");
+
+  const buTV = "ok" in apLai ? apLai.ganBu.find((x) => x.code === viecTV!.code) : null;
+  assert.equal(buTV, undefined, "việc ĐÃ CÓ CHỦ không được đụng tới — máy không cãi người, kể cả khi người chọn khác ý CTO");
+  const viecTVSau = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, apTV!.taskId), with: { agent: { columns: { key: true } } } });
+  assert.equal(viecTVSau?.agent?.key, "incident", "vai NGƯỜI gán tay vẫn còn nguyên, KHÔNG bị kéo về ý CTO");
 
   /* ═════════ 5 · DUYỆT HAI LẦN KHÔNG TẠO HAI BỘ VIỆC ═════════ */
   const soViec = (await db.query.techTasks.findMany()).length;
