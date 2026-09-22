@@ -222,3 +222,18 @@ export function maskPhone(phone: string) {
   if (!phone) return "";
   return phone.length > 6 ? `${phone.slice(0, 3)}***${phone.slice(-3)}` : phone;
 }
+
+/**
+ * Giờ:phút:giây theo giờ Việt Nam. Ghép tay từ `formatToParts` vì cùng lý do với `vnShortStamp`:
+ * cùng một mốc, hai bản ICU khác nhau in ra hai chuỗi khác nhau.
+ *
+ * Dùng cho nhãn "số liệu tải lúc …" — ở đó GIÂY là phần có nghĩa: người dùng bấm làm mới hai lần
+ * cách nhau vài chục giây và cần thấy mốc đã đổi.
+ */
+export function vnClock(value: string | Date | null | undefined) {
+  const date = toDate(value);
+  if (!date) return MISSING_TEXT;
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: VN_TZ, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("hour")}:${get("minute")}:${get("second")}`;
+}
