@@ -88,8 +88,15 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   const data = await getMarketingDaily(period, args.basis, filters);
 
   /* ── 1. BẢNG THEO NGÀY ── */
-  const head = ["NGÀY", "ChiQC", "TinNhắn", "Đơn", "SP", "DT POS", "DT thực", "GiáVốn", "Cước+phí", "LN góp", "Margin", "CPA", "ROAS", "Giao", "Hoàn", "ĐangĐi", "ĐộChín"];
-  const w = [10, 11, 7, 5, 5, 12, 12, 11, 9, 11, 7, 8, 5, 5, 5, 6, 7];
+  /*
+    HAI CỘT ƯT ĐỨNG NGAY CẠNH HAI CỘT ĐO ĐƯỢC — cố ý, không xếp xuống cuối bảng.
+
+    Công cụ này tồn tại để trả lời "con số trên màn hình từ đâu ra". Ngày chưa chín, cột đo được
+    luôn âm còn cột ước tính thì không; đặt chúng cách nhau tám cột là bắt người đọc tự ghép, và
+    ghép sai một dòng thì kết luận ngược hẳn.
+  */
+  const head = ["NGÀY", "ChiQC", "TinNhắn", "Đơn", "SP", "DT POS", "DT thực", "DT thựcƯT", "GiáVốn", "Cước+phí", "LN góp", "LN gópƯT", "Margin", "CPA", "ROAS", "Giao", "Hoàn", "ĐangĐi", "ĐộChín", "GTCƯT"];
+  const w = [10, 11, 7, 5, 5, 12, 12, 12, 11, 9, 11, 11, 7, 8, 5, 5, 5, 6, 7, 7];
   log("\n" + head.map((h, i) => h.padStart(w[i])).join(" "));
   for (const r of data.rows) {
     const rec = r as unknown as Record<string, unknown>;
@@ -101,9 +108,11 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
       num(r.units),
       vnd(r.posRevenue),
       vnd(r.deliveredRevenue),
+      vnd(r.projectedDeliveredRevenue),
       vnd(r.cogs),
       vnd(r.shippingCost),
       vnd(r.contributionProfit),
+      vnd(r.projectedContributionProfit),
       pct(ratioOf("margin", rec)),
       vnd(ratioOf("costPerOrder", rec)),
       rat(ratioOf("roasDelivered", rec)),
@@ -111,17 +120,25 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
       num(r.returnedOrders),
       num(r.pendingOrders),
       pct(ratioOf("maturity", rec)),
+      pct(ratioOf("projectedDeliveryRate", rec)),
     ];
     log(cells.map((c, i) => String(c).padStart(w[i])).join(" "));
   }
   const t = data.totals as unknown as Record<string, unknown>;
   log("-".repeat(120));
   log(
-    ["TỔNG", vnd(data.totals.adSpend), num(data.totals.messages), num(data.totals.orders), num(data.totals.units), vnd(data.totals.posRevenue), vnd(data.totals.deliveredRevenue), vnd(data.totals.cogs), vnd(data.totals.shippingCost), vnd(data.totals.contributionProfit), pct(ratioOf("margin", t)), vnd(ratioOf("costPerOrder", t)), rat(ratioOf("roasDelivered", t)), num(data.totals.deliveredOrders), num(data.totals.returnedOrders), num(data.totals.pendingOrders), pct(ratioOf("maturity", t))]
+    ["TỔNG", vnd(data.totals.adSpend), num(data.totals.messages), num(data.totals.orders), num(data.totals.units), vnd(data.totals.posRevenue), vnd(data.totals.deliveredRevenue), vnd(data.totals.projectedDeliveredRevenue), vnd(data.totals.cogs), vnd(data.totals.shippingCost), vnd(data.totals.contributionProfit), vnd(data.totals.projectedContributionProfit), pct(ratioOf("margin", t)), vnd(ratioOf("costPerOrder", t)), rat(ratioOf("roasDelivered", t)), num(data.totals.deliveredOrders), num(data.totals.returnedOrders), num(data.totals.pendingOrders), pct(ratioOf("maturity", t)), pct(ratioOf("projectedDeliveryRate", t))]
       .map((c, i) => String(c).padStart(w[i]))
       .join(" "),
   );
   log(`\nĐộ chín tổng: ${MATURITY_LABEL[data.totals.maturity]} · biên quan sát chi tiêu: ${data.spendObservedThrough ?? "—"}`);
+  if (data.rateBasis) {
+    const c = data.rateBasis.coverage;
+    log(
+      `Căn cứ cột ƯT: tỷ lệ lùi ${data.rateBasis.fallbackDeliveryRate}% · độ phủ ${c.projected} mã theo số đo · ${c.history} theo lịch sử · ${c.override} ghi đè tay · ${c.default} theo tỷ lệ khai` +
+        (data.rateBasis.projectionError ? ` · LỖI MÔ HÌNH: ${data.rateBasis.projectionError}` : ""),
+    );
+  }
   for (const wr of data.warnings) log(`  ⚠ ${wr}`);
 
   /* ── 2. ĐỐI CHIẾU VỚI BÁO CÁO LỢI NHUẬN CANONICAL ── */
