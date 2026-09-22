@@ -1,5 +1,6 @@
 import { AlertTriangle, Ruler } from "lucide-react";
 import { AssignForm } from "@/app/(dashboard)/ai/size-rules/assign-form";
+import { ChartEditor } from "@/app/(dashboard)/ai/size-rules/chart-editor";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { requirePermission } from "@/lib/auth/session";
@@ -52,6 +53,16 @@ export default async function SizeRulesPage() {
                   Đang áp cho {formatNumber(c.assigned)} mã hàng
                 </div>
               </div>
+            </div>
+            {/*
+              Sửa một khoảng số đo là đổi size của MỌI mã hàng đang dùng bảng này. Nhắc ngay cạnh
+              chỗ sửa, không giấu trong dấu ⓘ — người sắp gõ một con số mới là người cần biết.
+            */}
+            <p className="mt-3 border-t border-border pt-2 text-xs text-muted-foreground">
+              Sửa ở đây đổi size cho cả {formatNumber(c.assigned)} mã hàng đang dùng bảng này.
+            </p>
+            <div className="mt-2">
+              <ChartEditor chartVersion={c.version} chartLabel={c.label} initialRows={c.rows_} usesHeight={c.usesHeight} />
             </div>
           </Card>
         ))}

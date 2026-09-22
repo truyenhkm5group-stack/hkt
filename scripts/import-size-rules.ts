@@ -18,7 +18,7 @@ import { eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ensureMigrated } from "@/db/migrate";
 import { SIZE_RULES_KEY, recommendSize, resolveSizeRule, type SizeRule } from "@/lib/constants/size-engine";
-import { allKeysOf, sizePayloadSchema } from "@/lib/constants/size-rules-payload";
+import { allKeysOf, sizePayloadSchema, sizeRuleWarnings } from "@/lib/constants/size-rules-payload";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 
 const TEMPLATE = {
@@ -190,34 +190,10 @@ async function main() {
     ấy sẽ ra AMBIGUOUS và bị chuyển người — an toàn, nhưng im lặng. In ra ĐÚNG khoảng bị chồng để
     người khai quyết định, thay vì tự sửa hộ: 180cm nên là M hay L là quyết định của shop.
   */
-  const DIMS = ["heightCm", "weightKg", "bustCm", "waistCm", "hipCm"] as const;
-  const giao = (a?: [number, number], b?: [number, number]): [number, number] | null => {
-    // Chiều không ràng buộc ở một bên = bên đó phủ mọi giá trị, nên vẫn giao nhau.
-    if (!a && !b) return null;
-    if (!a || !b) return a ?? b ?? null;
-    const lo = Math.max(a[0], b[0]);
-    const hi = Math.min(a[1], b[1]);
-    return lo <= hi ? [lo, hi] : null;
-  };
+  // Cảnh báo của một bảng dùng CHUNG với màn hình sửa (`lib/constants/size-rules-payload.ts`).
+  // Hai bộ kiểm khác nhau cho cùng một bảng là cách chắc chắn để hai nơi nói hai điều khác nhau.
   for (const rule of payload.rules) {
-    for (let i = 0; i < rule.rows.length; i += 1) {
-      for (let j = i + 1; j < rule.rows.length; j += 1) {
-        const a = rule.rows[i];
-        const b = rule.rows[j];
-        if (a.size === b.size) continue; // cùng size thì chồng nhau vô hại
-        const parts: string[] = [];
-        let chongMoiChieu = true;
-        for (const k of DIMS) {
-          if (!a[k] && !b[k]) continue;
-          const g = giao(a[k], b[k]);
-          if (!g) { chongMoiChieu = false; break; }
-          parts.push(`${k} ${g[0]}–${g[1]}`);
-        }
-        if (chongMoiChieu && parts.length) {
-          warnings.push(`Bảng ${rule.version}: size ${a.size} và ${b.size} chồng nhau tại ${parts.join(" · ")} — mọi khách rơi vào đó sẽ bị chuyển người (AMBIGUOUS)`);
-        }
-      }
-    }
+    for (const w of sizeRuleWarnings({ version: rule.version, rows: rule.rows })) warnings.push(`Bảng ${rule.version}: ${w}`);
   }
 
   /*

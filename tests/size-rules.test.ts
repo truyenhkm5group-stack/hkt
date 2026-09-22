@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { recommendSize, resolveSizeRule, type SizeRule } from "@/lib/constants/size-engine";
-import { allKeysOf, sizePayloadSchema, type SizePayload } from "@/lib/constants/size-rules-payload";
+import { allKeysOf, sizePayloadSchema, sizeRuleWarnings, type SizePayload } from "@/lib/constants/size-rules-payload";
 import { renderTemplate } from "@/lib/ai-workforce/agents/sales/generate";
 import { EMPTY_SALES_STATE } from "@/lib/ai-workforce/agents/sales/state";
 
@@ -292,6 +292,29 @@ export function testSizeRules() {
   // thể không quay lại.
   const cauThuong = renderTemplate({ ...nen, sizeAdvice: recommendSize(nu, { weightKg: 45 }) });
   assert.ok(!/ôm/.test(cauThuong), "số đo rõ ràng thì trả lời thẳng, không hỏi thêm");
+
+  /*
+    ═════════ 8. MỘT BỘ CẢNH BÁO, DÙNG CHUNG CHO SCRIPT NHẬP VÀ MÀN HÌNH SỬA ═════════
+
+    Hai bộ kiểm khác nhau cho cùng một bảng là cách chắc chắn để màn hình nói "sạch" trong khi
+    script nói "có vấn đề", và người dùng tin cái nào thuận tay hơn. Chuyện ấy đã xảy ra một lần
+    trong chính tính năng này (lược đồ nhập lệch khỏi kiểu dữ liệu), nên phép kiểm đi cùng lược đồ.
+  */
+  const canhBaoNu = sizeRuleWarnings({ version: nu.version, rows: nu.rows });
+  assert.equal(canhBaoNu.length, 2, `bảng nữ có đúng hai chỗ chồng ranh giới (50kg, 56kg), nhận: ${canhBaoNu.join(" | ")}`);
+  assert.ok(canhBaoNu.every((w) => /size lớn hơn/.test(w)), "cảnh báo phải nói rõ hệ quả: khách rơi vào đó được lấy size lớn hơn");
+
+  // Khoảng viết ngược là lỗi thật, không phải chuyện phong cách.
+  assert.ok(
+    sizeRuleWarnings({ version: "x", rows: [{ size: "M", weightKg: [60, 40] }] }).some((w) => /viết ngược/.test(w)),
+    "khoảng lộn đầu đuôi phải bị bắt",
+  );
+  // Hai dòng cùng size chồng nhau là bình thường (bảng nam có nhiều dải chiều cao cùng size).
+  assert.deepEqual(
+    sizeRuleWarnings({ version: "x", rows: [{ size: "M", weightKg: [40, 60] }, { size: "M", weightKg: [50, 70] }] }),
+    [],
+    "cùng một size thì chồng nhau vô hại — bảng nam dựa vào điều đó",
+  );
 
   console.log(
     `✓ Bảng số đo thật: ma trận nam ${CAO.length}×${NANG.length} rã đúng từng ô (${oDung} ô có size · ${oHetSize} ô HẾT SIZE ⇒ chuyển người) · rơi ranh giới (1m80 · 50kg · 56kg) ⇒ NÂNG size lớn hơn và nhớ size đã bỏ qua`,

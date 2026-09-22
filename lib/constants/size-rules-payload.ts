@@ -77,3 +77,68 @@ export const sizePayloadSchema = z.object({
 });
 
 export type SizePayload = z.infer<typeof sizePayloadSchema>;
+
+/** Các chiều số đo một bảng có thể ràng buộc. */
+const DIMS = ["heightCm", "weightKg", "bustCm", "waistCm", "hipCm"] as const;
+type Dim = (typeof DIMS)[number];
+type Row = { size: string } & Partial<Record<Dim, [number, number]>>;
+
+const DIM_LABEL: Record<Dim, string> = {
+  heightCm: "chiều cao",
+  weightKg: "cân nặng",
+  bustCm: "vòng ngực",
+  waistCm: "vòng eo",
+  hipCm: "vòng mông",
+};
+
+function giao(a?: [number, number], b?: [number, number]): [number, number] | null {
+  if (!a && !b) return null;
+  if (!a || !b) return (a ?? b) ?? null; // chiều không ràng buộc ở một bên = phủ mọi giá trị
+  const lo = Math.max(a[0], b[0]);
+  const hi = Math.min(a[1], b[1]);
+  return lo <= hi ? [lo, hi] : null;
+}
+
+/**
+ * CẢNH BÁO CỦA MỘT BẢNG — MỘT BẢN, DÙNG CHUNG cho script nhập và cho màn hình sửa.
+ *
+ * Hai bộ kiểm khác nhau cho cùng một bảng là cách chắc chắn để màn hình nói "sạch" trong khi
+ * script nói "có vấn đề", và người dùng tin cái nào thuận tay hơn. Đây đã là lỗi thật một lần
+ * trong chính tính năng này (lược đồ nhập lệch khỏi kiểu dữ liệu), nên phép kiểm đi cùng lược đồ.
+ *
+ * CHỒNG KHOẢNG KHÔNG CÒN LÀ LỖI kể từ khi có luật nâng size ở ranh giới — nó chỉ là điều người
+ * sửa bảng nên biết: những khách rơi vào đó sẽ được lấy size lớn hơn, chứ không phải bị bỏ rơi.
+ * HÀM THUẦN.
+ */
+export function sizeRuleWarnings(rule: { version: string; rows: Row[] }): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < rule.rows.length; i += 1) {
+    for (let j = i + 1; j < rule.rows.length; j += 1) {
+      const a = rule.rows[i];
+      const b = rule.rows[j];
+      if (a.size === b.size) continue; // cùng size thì chồng nhau vô hại
+      const parts: string[] = [];
+      let chongMoiChieu = true;
+      for (const k of DIMS) {
+        if (!a[k] && !b[k]) continue;
+        const g = giao(a[k], b[k]);
+        if (!g) {
+          chongMoiChieu = false;
+          break;
+        }
+        parts.push(`${DIM_LABEL[k]} ${g[0]}–${g[1]}`);
+      }
+      if (chongMoiChieu && parts.length) {
+        out.push(`size ${a.size} và ${b.size} chồng nhau tại ${parts.join(" · ")} — khách rơi vào đó sẽ được lấy size lớn hơn`);
+      }
+    }
+  }
+  // Khoảng lộn đầu đuôi lọt qua lược đồ chỉ khi ai đó dựng dòng bằng tay; kiểm lại cho chắc.
+  for (const r of rule.rows) {
+    for (const k of DIMS) {
+      const v = r[k];
+      if (v && v[0] > v[1]) out.push(`size ${r.size}: ${DIM_LABEL[k]} viết ngược (${v[0]}–${v[1]})`);
+    }
+  }
+  return out;
+}

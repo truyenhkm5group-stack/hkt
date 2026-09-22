@@ -18,6 +18,15 @@ import { getDb, schema, type Db } from "@/db";
 import { getSettingJson } from "@/lib/settings";
 import { DEFAULT_SIZE_RULES, SIZE_RULES_KEY, resolveSizeRule, type SizeRule } from "@/lib/constants/size-engine";
 
+/** Một dòng bảng ở dạng màn hình sửa được — khoảng tách thành hai ô, `null` = chưa khai. */
+export type EditableRow = {
+  size: string;
+  heightMin: number | null;
+  heightMax: number | null;
+  weightMin: number | null;
+  weightMax: number | null;
+};
+
 export type ChartOption = {
   /** Khoá ổn định của bảng — chính là `version`, và nó là thứ được lưu khi người bấm chọn. */
   version: string;
@@ -30,6 +39,10 @@ export type ChartOption = {
   assigned: number;
   /** Bảng dùng những chiều số đo nào — quyết định máy phải hỏi khách những gì. */
   dims: string[];
+  /** Bảng có ràng buộc chiều cao không — màn hình ẩn hai cột ấy khi không dùng, cho đỡ rối. */
+  usesHeight: boolean;
+  /** Các dòng, dạng sửa được. */
+  rows_: EditableRow[];
 };
 
 export type ProductAssignment = {
@@ -121,6 +134,14 @@ export async function sizeRulesBoard(dbIn?: Db): Promise<SizeRulesBoard> {
     sizes: [...new Set(r.rows.map((x) => x.size.trim()))],
     assigned: products.filter((p) => p.chartVersion === r.version).length,
     dims: dimsOf(r),
+    usesHeight: r.rows.some((x) => x.heightCm),
+    rows_: r.rows.map((x) => ({
+      size: x.size,
+      heightMin: x.heightCm?.[0] ?? null,
+      heightMax: x.heightCm?.[1] ?? null,
+      weightMin: x.weightKg?.[0] ?? null,
+      weightMax: x.weightKg?.[1] ?? null,
+    })),
   }));
 
   return {
