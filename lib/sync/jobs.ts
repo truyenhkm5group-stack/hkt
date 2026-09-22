@@ -13,6 +13,7 @@ import { generateRecurringTasks } from "@/lib/work/service";
 import { snapshotPerformance } from "@/lib/work/performance-snapshot";
 import { runEscalationDigest } from "@/lib/work/escalation-run";
 import { runMarketingDigest } from "@/lib/marketing/digest";
+import { recordDecisionLedger } from "@/lib/marketing/decision-ledger";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { rematerializeStale } from "@/lib/queries/canonical-outcome";
 import { warmDashboard } from "@/lib/queries/warm";
@@ -47,6 +48,32 @@ import { reapStaleRuns } from "@/lib/agents/runner";
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
 export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" | "VIETTELPOST" | "FACEBOOK" | "SEPAY" | "GITHUB" | "ALL"; description: string; run: (o: JobOptions) => Promise<unknown> }> = {
+  /*
+    GHI SỔ QUYẾT ĐỊNH QUẢNG CÁO — CHỈ ĐỌC NGHIỆP VỤ, CHỈ GHI VÀO SỔ CỦA CHÍNH NÓ.
+
+    Job này không đổi một con số tiền nào và không gửi gì đi. Nó chạy `decideAction()` trên KỲ CHUẨN
+    (14 ngày, kết thúc hôm qua) rồi chép kết luận vào `ads_decision_ledger` — trí nhớ mà cả người
+    lẫn agent cần để biết ERP có đang đổi ý xoành xoạch không.
+
+    Chạy dày là AN TOÀN và có chủ ý: khoá duy nhất (ngày quyết định, chiều, mục) biến mọi lượt sau
+    trong cùng ngày thành CẬP NHẬT. Lượt chạy thứ 48 trong ngày không đẻ thêm một dòng nào. Chạy dày
+    là để không BỎ LỠ một ngày khi máy chủ khởi động lại — mà một ngày bỏ lỡ thì mất hẳn: kết luận
+    của hôm ấy không dựng lại được từ dữ liệu hôm nay (AGENTS.md mục 8.8).
+  */
+  "marketing-decision-ledger": {
+    label: "Ghi sổ quyết định quảng cáo",
+    source: "ALL",
+    description:
+      "CHỈ ĐỌC nghiệp vụ: chạy bộ quyết định SCALE/HOLD/WATCH/CUT trên kỳ chuẩn (14 ngày, kết thúc hôm qua) rồi chép kết luận kèm bằng chứng vào sổ `ads_decision_ledger`. Không đổi con số tiền nào, không gửi tin nào. Khoá tự nhiên theo NGÀY nên chạy lại trong ngày chỉ cập nhật, không đẻ dòng mới.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "marketing-decision-ledger", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await recordDecisionLedger({ log: (m) => ctx.log(m) });
+        ctx.summary.imported = r.written.reduce((a, w) => a + w.rows, 0);
+        const canLam = r.written.reduce((a, w) => a + w.actionable, 0);
+        ctx.summary.detail = `ngày ${r.decisionDay} · kỳ ${r.periodFrom}→${r.periodTo} · luật v${r.ruleVersion} · ${canLam} dòng cần làm`;
+        return r;
+      }),
+  },
   "marketing-digest": {
     label: "Bản tin hiệu quả marketing hằng ngày",
     source: "ALL",

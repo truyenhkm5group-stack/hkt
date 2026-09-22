@@ -9,6 +9,8 @@ import { successTone } from "@/lib/constants/returns";
 import { ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_ACTION_TONE, ADS_DECISION_RULE, ADS_DIMENSION_LABEL } from "@/lib/constants/ads-decision";
 import type { AdsDecisionRow } from "@/lib/queries/ads-decision";
 import type { AdsDimension } from "@/lib/constants/ads-decision";
+import type { Stability } from "@/lib/marketing/decision-stability";
+import { AdsBudgetAction } from "@/app/(dashboard)/ads/budget-action";
 import { cn } from "@/lib/utils";
 
 /**
@@ -99,7 +101,36 @@ function Detail({ row }: { row: AdsDecisionRow }) {
   );
 }
 
-export function AdsDecisionTable({ rows, dimension }: { rows: AdsDecisionRow[]; dimension: AdsDimension }) {
+
+/**
+ * ───────────── ĐỘ BỀN: TẦNG THỨ HAI CỦA Ô "NÊN LÀM GÌ", KHÔNG PHẢI MỘT CỘT MỚI ─────────────
+ *
+ * Bảng này đã chín cột. Cột thứ mười đẩy nó qua bề rộng màn hình và người đọc phải cuộn ngang để
+ * thấy đúng cái cột quan trọng nhất — nên độ bền đi vào ngay dưới khuyến nghị, chỗ nó thuộc về.
+ *
+ * ─── VÀ NÓ NÓI VỀ MỘT KỲ KHÁC VỚI PHẦN CÒN LẠI CỦA DÒNG ───
+ *
+ * Mọi con số bên trái tính trên kỳ NGƯỜI DÙNG đang chọn. Độ bền đọc từ sổ, và sổ chỉ tồn tại trên
+ * KỲ CHUẨN (14 ngày, kết thúc hôm qua). Hai kỳ khác nhau đứng cạnh nhau thì phải nói ra, nếu không
+ * người đọc sẽ tin "giữ 4 ngày" là nói về tháng họ đang xem.
+ */
+function Stable({ s }: { s: Stability }) {
+  if (s.heldDays === 0) return null;
+  const mau = s.ready ? "text-emerald-600 dark:text-emerald-400" : s.blocker === "STALE" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground";
+  const chu = s.blocker === "NOT_ACTIONABLE" ? `giữ ${s.heldDays} ngày` : s.ready ? `đã chín · giữ ${s.heldDays} ngày` : `chưa chín · giữ ${s.heldDays} ngày`;
+  return (
+    <span className={cn("mt-0.5 flex items-center gap-1 text-[11px]", mau)}>
+      {chu}
+      <InfoHint>
+        {`${s.reason} Đọc từ SỔ QUYẾT ĐỊNH, chạy trên kỳ chuẩn 14 ngày kết thúc hôm qua — không phải kỳ đang chọn ở trên. `}
+        {s.missingDays > 0 ? `Sổ thiếu ${s.missingDays} ngày trong cửa sổ: ngày thiếu là CHƯA ĐO, không phải "không đổi", nên nó cắt chuỗi. ` : ""}
+        {`Đổi khuyến nghị ${s.flips} lần trong cửa sổ nhịp.`}
+      </InfoHint>
+    </span>
+  );
+}
+
+export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDecisionRow[]; dimension: AdsDimension; stability?: Record<string, Stability> }) {
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
@@ -216,6 +247,7 @@ export function AdsDecisionTable({ rows, dimension }: { rows: AdsDecisionRow[]; 
                           giao kém
                         </span>
                       ) : null}
+                      {stability?.[row.key] ? <Stable s={stability[row.key]} /> : null}
                     </TableCell>
                   </TableRow>
                   {isOpen ? (
@@ -226,6 +258,14 @@ export function AdsDecisionTable({ rows, dimension }: { rows: AdsDecisionRow[]; 
                           {row.reason}
                         </p>
                         <Detail row={row} />
+                        {/*
+                          BÀN TAY chỉ hiện ở cấp CHIẾN DỊCH và chỉ khi khuyến nghị đã chín.
+                          Cấp mã hàng không có thực thể nào trên Facebook để đổi — một nút ở đó sẽ
+                          là nút giả, đúng thứ `work-sources.ts` đã cảnh báo.
+                        */}
+                        {dimension === "campaign" ? (
+                          <AdsBudgetAction campaignId={row.key} decision={row.action} ready={Boolean(stability?.[row.key]?.ready)} />
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ) : null}

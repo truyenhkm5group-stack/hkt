@@ -25,7 +25,7 @@ import { getDb, schema } from "@/db";
 import { classifyTechRisk } from "@/lib/constants/tech-risk";
 import type { CtoPlan } from "@/lib/constants/cto-proposal";
 import type { TechModule, TechPriority, TechRisk, TechTaskType } from "@/lib/constants/tech";
-import { createTechTask, type TechActor, type TechResult } from "@/lib/tech/service";
+import { assignTechTaskAgent, createTechTask, setTechTaskStatus, type TechActor, type TechResult } from "@/lib/tech/service";
 
 export type ProposalStatus = "DRAFT" | "READY_FOR_REVIEW" | "APPROVED" | "REJECTED" | "SUPERSEDED";
 
@@ -117,7 +117,31 @@ function chanAgent(viec: string): { error: string } {
 export type ApplyResult = {
   created: number;
   skipped: number;
-  tasks: { key: string; taskId: string; code: string; suggestedRisk: TechRisk; appliedRisk: TechRisk; riskChanged: boolean }[];
+  tasks: {
+    key: string;
+    taskId: string;
+    code: string;
+    suggestedRisk: TechRisk;
+    appliedRisk: TechRisk;
+    riskChanged: boolean;
+    /** Vai CTO chọn và ĐÃ GÁN được. Rỗng ⇒ xem `lyDoKhongGan`. */
+    agentKey: string;
+    /**
+     * Vì sao KHÔNG gán được — rỗng nghĩa là gán xong (hoặc CTO không chọn ai).
+     *
+     * Mỗi lý do sửa ở một chỗ khác nhau, nên chúng phải tách nhau (mục 55): khoá trỏ hụt thì đi
+     * tạo vai; vai chưa đủ mức thì cấp quyền ở `/tech/agents` hoặc đổi vai.
+     */
+    lyDoKhongGan: string;
+  }[];
+
+  /**
+   * Việc đã tạo từ lượt áp TRƯỚC và nay mới gán được vai — hoặc vẫn chưa gán được, kèm lý do.
+   *
+   * Tách khỏi `tasks` vì `tasks` nói về việc VỪA TẠO. Gộp hai thứ lại thì con số "đã tạo bao nhiêu"
+   * và "đã giao bao nhiêu" dính vào nhau, và không ai đọc lại được lượt áp nào làm gì.
+   */
+  ganBu: { code: string; agentKey: string; lyDoKhongGan: string }[];
 };
 
 /**
@@ -154,7 +178,75 @@ export async function approveProposal(
   });
   if (rows.length === 0) return { error: "Bản đề xuất không có việc nào để tạo." };
 
-  const out: ApplyResult = { created: 0, skipped: 0, tasks: [] };
+  const out: ApplyResult = { created: 0, skipped: 0, tasks: [], ganBu: [] };
+
+  /*
+    ═══════════ VAI CTO CHỌN PHẢI ĐI THEO VIỆC ═══════════
+
+    Đo production 22/09/2026 trên chính bản kế hoạch của AI CTO: **9/9 việc đều có
+    `suggested_agent_key`** — `architect` · `data` · `frontend` · `data-quality` · `devops` · `qa`
+    · `documentation` — và **9/9 việc tạo ra đều `agent_id = NULL`**. Lời gọi `createTechTask()`
+    bên dưới không truyền `agentId`, nên cột ấy bị đánh rơi đúng chín lần.
+
+    Hậu quả không phải chuyện thẩm mỹ: màn hình `/tech/cto` VẪN hiện cột "vai đề xuất", nên chủ
+    shop đọc bản kế hoạch thấy việc đã có người nhận, rồi mở việc ra thì nó vô chủ — và cổng giao
+    việc trả về "chưa gán agent nào". Câu hỏi *"có AI CTO mà sao vẫn phải tự giao việc"* có đáp án
+    ở đúng dòng này: CTO đã giao, lời giao rơi giữa đường.
+
+    ─── BA NHÁNH, VÀ KHÔNG NHÁNH NÀO ĐOÁN ───
+
+    · khoá trỏ tới một vai CÓ THẬT ⇒ GÁN.
+    · khoá trỏ tới một vai KHÔNG CÓ ⇒ để TRỐNG và nói ra. Tuyệt đối không dò vai "gần giống":
+      gán một việc cho nhầm người là đúng thứ AGENTS.md mục 35 cấm, và một khoá sai của AI không
+      phải bằng chứng về ý định của nó.
+    · gán được nhưng vai CHƯA ĐƯỢC CẤP mức MÁY vừa xếp ⇒ VẪN GÁN, và nói ra. Bỏ trống ở đây là
+      giấu mất lựa chọn của CTO; gán rồi nêu cảnh báo thì chủ shop thấy ngay việc phải làm (cấp
+      mức cho vai, hoặc đổi vai) thay vì phải bấm thử cổng giao mới biết.
+
+    MỨC RỦI RO VẪN KHÔNG DO AI QUYẾT — `createTechTask()` tự gọi `classifyTechRisk()` như cũ, và
+    bản này không truyền `riskOverride`. Chỗ này chỉ trả lại NGƯỜI NHẬN, không trả lại quyền xếp mức.
+  */
+  const dsVai = await db.query.techAgents.findMany({ columns: { id: true, key: true } });
+  const vaiTheoKhoa = new Map(dsVai.map((a) => [a.key, a.id]));
+
+  /**
+   * Gán vai CTO chọn cho một việc vừa tạo — ĐI QUA `assignTechTaskAgent`, KHÔNG ghi thẳng cột.
+   *
+   * Hàm dịch vụ ấy đã giữ ba hàng rào: vai phải có thật · vai phải đang BẬT · vai phải được cấp
+   * đúng mức rủi ro của việc. Chú thích của chính nó gọi tên đường đi vòng: *"không lách bằng cách
+   * giao bừa"*. Truyền `agentId` thẳng vào `createTechTask()` là đi vòng qua đủ cả ba — nên không
+   * làm thế, dù nó ngắn hơn một dòng. Một luật có hai bản thì bản lỏng hơn là bản thật.
+   *
+   * Phần thưởng đi kèm: lượt gán để lại một sự kiện `ASSIGN` trong nhật ký việc, nên câu hỏi "ai
+   * giao việc này cho vai đó" có câu trả lời tra được.
+   */
+  /**
+   * Đưa việc ra khỏi `NEW` — vì bản kế hoạch ĐÃ LÀ lượt phân loại.
+   *
+   * `TRIAGED` đọc ra là *"Đã xác định mức ưu tiên, mức rủi ro và module bị chạm"*
+   * (`TECH_TASK_STATUS_HINT`). Một việc sinh ra từ bản kế hoạch có đủ CẢ BA theo cấu trúc: ưu tiên
+   * lấy từ `suggestedPriority`, module lấy từ `module`, mức rủi ro do `classifyTechRisk()` xếp.
+   * Cộng thêm một con người vừa đọc và duyệt cả bản. Nên `NEW` — "chưa ai phân loại" — là trạng
+   * thái NÓI SAI về việc, và nó chặn luôn cổng giao việc (`DISPATCHABLE_STATUSES` không nhận `NEW`).
+   *
+   * Đo 22/09/2026: cả chín việc TECH-4…TECH-12 đều đang `NEW`, nên kể cả khi đã gán vai và đã ký
+   * duyệt thì chúng vẫn không giao được — chủ shop phải bấm phân loại thêm chín lần, cho một thông
+   * tin mà bản kế hoạch đã nói đủ.
+   *
+   * KHÔNG đụng tới việc đã rời `NEW`: ở đó đã có người quyết, và máy không cãi người.
+   */
+  async function thoiLaViecMoi(taskId: string): Promise<void> {
+    await setTechTaskStatus({ taskId, to: "TRIAGED", note: "Phân loại theo bản kế hoạch AI CTO đã được chủ shop duyệt." }, actor);
+  }
+
+  async function ganTheoKeHoach(taskId: string, khoaVai: string): Promise<string> {
+    if (!khoaVai) return "";
+    const id = vaiTheoKhoa.get(khoaVai);
+    /* Khoá trỏ hụt ⇒ để TRỐNG. Không dò một vai "gần giống" — gán nhầm người là mục 35. */
+    if (!id) return `khoá vai “${khoaVai}” không có trong sổ agent`;
+    const v = await assignTechTaskAgent({ taskId, agentId: id, note: `Vai do AI CTO chọn trong bản kế hoạch (khoá “${khoaVai}”).` }, actor);
+    return "error" in v ? v.error : "";
+  }
   /** khoá đề xuất → id việc thật, để nối `dependsOn` sau khi đã tạo đủ. */
   const theoKhoa = new Map<string, string>();
 
@@ -163,6 +255,38 @@ export async function approveProposal(
       // Đã tạo ở một lượt áp trước — KHÔNG tạo lại. Đây là toàn bộ phép idempotent.
       theoKhoa.set(r.key, r.appliedTaskId);
       out.skipped += 1;
+
+      /*
+        ═══ LƯỢT ÁP LẠI BẮT KỊP PHẦN CÒN THIẾU ═══
+
+        Chín việc TECH-4…TECH-12 đã được tạo TRƯỚC bản vá này, nên `applied_task_id` của chúng đã
+        ghi và nhánh idempotent ở trên bỏ qua chúng mãi mãi. Nếu chỉ vá đường tạo mới thì bản vá
+        cứu được kế hoạch TƯƠNG LAI còn chín việc đang nằm trên bảng thì vô chủ vĩnh viễn — tức là
+        sửa xong mà hôm nay không ai dùng được gì.
+
+        Không cần một nút mới: đường này VỐN cho bấm lại (trạng thái `APPROVED` được phép chạy lại,
+        xem docblock ở trên), và đó đúng là chỗ để bắt kịp.
+
+        HAI ĐIỀU KIỆN, VÀ ĐIỀU KIỆN ĐẦU LÀ THỨ QUAN TRỌNG NHẤT:
+
+         · việc phải ĐANG VÔ CHỦ. Máy KHÔNG cãi người: nếu ai đó đã gán tay một vai khác với ý CTO,
+           lượt áp lại tuyệt đối không được đè lên. Lựa chọn của người thắng, luôn luôn.
+         · lượt gán vẫn đi qua `assignTechTaskAgent`, nên ba hàng rào của nó giữ nguyên ở đây y như
+           ở đường tạo mới. Đây không phải một lượt backfill âm thầm (mục 8.8): nó do NGƯỜI bấm, nó
+           để lại sự kiện `ASSIGN`, và nó báo cáo từng việc ra màn hình.
+      */
+      if (r.suggestedAgentKey) {
+        const cu = await db.query.techTasks.findFirst({
+          where: eq(schema.techTasks.id, r.appliedTaskId),
+          columns: { id: true, code: true, agentId: true, status: true },
+        });
+        if (cu && !cu.agentId) {
+          const lyDo = await ganTheoKeHoach(cu.id, r.suggestedAgentKey);
+          out.ganBu.push({ code: cu.code, agentKey: lyDo ? "" : r.suggestedAgentKey, lyDoKhongGan: lyDo });
+        }
+        /* Chỉ nhấc khỏi `NEW`; việc đã đi tiếp thì có người quyết rồi (`setTechTaskStatus` tự chặn). */
+        if (cu?.status === "NEW") await thoiLaViecMoi(cu.id);
+      }
       continue;
     }
     const res = await createTechTask(
@@ -181,6 +305,9 @@ export async function approveProposal(
     );
     if (!("ok" in res)) return { error: `Không tạo được việc “${r.title}”: ${res.error}` };
 
+    const lyDo = await ganTheoKeHoach(res.id, r.suggestedAgentKey);
+    await thoiLaViecMoi(res.id);
+
     theoKhoa.set(r.key, res.id);
     await db
       .update(schema.techProposalTasks)
@@ -195,6 +322,12 @@ export async function approveProposal(
       appliedRisk: res.risk,
       // Hai con số lệch nhau là tín hiệu đáng xem: AI đoán một đằng, máy xếp một nẻo.
       riskChanged: r.suggestedRisk !== res.risk,
+      agentKey: lyDo ? "" : r.suggestedAgentKey,
+      /*
+        Nói ra NGAY LÚC ÁP, chứ không để chủ shop phát hiện bằng cách bấm cổng giao rồi đọc câu
+        từ chối — lúc ấy họ đã tưởng việc có chủ suốt từ khi duyệt kế hoạch.
+      */
+      lyDoKhongGan: lyDo,
     });
   }
 

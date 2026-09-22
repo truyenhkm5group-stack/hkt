@@ -79,6 +79,7 @@ import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNan
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { testPhanhTienAi, testPhanhTienAiGuards } from "./ai-budget.test";
 import { testTienLuotChay, testTienLuotChayGuards } from "./agent-run-cost.test";
+import { testLoiCongDocDuoc, testLoiCongGuards } from "./agent-run-error.test";
 import { testNhanModelNoiThat } from "./nhan-model-noi-that.test";
 import { chayBaiKiemAgentTuDangKy } from "./agent-tu-dang-ky.test";
 import { testKheDangKyAgent, testKhongCoBaiKiemMoCoi, testPromptTheoVai } from "./dang-ky-bai-kiem.test";
@@ -202,6 +203,8 @@ import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
 import { testAdsDecision } from "./ads-decision.test";
+import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
+import { testAdsWrite } from "./ads-write.test";
 import { testAuditTrail } from "./audit-trail.test";
 import { testColumnResize } from "./column-resize.test";
 import { testFormatNullSafety } from "./format-null-safety.test";
@@ -1637,6 +1640,8 @@ async function main() {
   await testAdsRoas(db);
   await testMarketingDaily();
   await testAdsDecision(db);
+  await testMarketingDecisionLedger();
+  testAdsWrite();
   await testAdsAttribution(db);
   await testAdsAnomaly(db);
   await testAdsIdentity(db);
@@ -2029,6 +2034,8 @@ async function main() {
   testLoiGoiHongVanGiuTien();
   testTienLuotChay();
   testTienLuotChayGuards();
+  testLoiCongDocDuoc();
+  testLoiCongGuards();
   testPhanhTienAi();
   testPhanhTienAiGuards();
   testNhanModelNoiThat();

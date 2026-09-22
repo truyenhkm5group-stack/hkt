@@ -39,6 +39,7 @@ import {
   type TechTaskType,
 } from "@/lib/constants/tech";
 import { TECH_RISK_RULE_BY_KEY } from "@/lib/constants/tech-risk";
+import { CAU_CHUA_GHI, coCongDo, docLoiCong } from "@/lib/constants/agent-run-error";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import { getTechTask } from "@/lib/queries/tech";
 import { listEnabledTechAgents } from "@/lib/queries/tech-agents";
@@ -155,7 +156,9 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
               <EmptyState title="Chưa có lượt chạy nào" description="Phase 1 chưa có máy thi hành: lượt chạy được ghi vào bằng tay hoặc bởi Phase 2." />
             ) : (
               <ul className="divide-y divide-hairline">
-                {runs.map((r) => (
+                {runs.map((r) => {
+                  const loi = docLoiCong(r.metadata, coCongDo(r));
+                  return (
                   <li key={r.id} className="py-2.5 text-sm">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-medium">
@@ -196,8 +199,26 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
                       <TechGateBadge label="build" result={r.buildResult as TechGateResult} />
                     </div>
                     {r.error ? <p className="mt-1 text-xs text-destructive">{r.error}</p> : null}
+                    {/* Câu lỗi thật của cổng đỏ. Trước bản vá 22/09 người xem chỉ thấy huy hiệu
+                        ĐỎ rồi phải rời ERP mở log Actions — tức chủ shop không có đường đi tới. */}
+                    {loi.kind === "CHUA_GHI" ? <p className="mt-1 text-xs text-muted-foreground">{CAU_CHUA_GHI}</p> : null}
+                    {loi.kind === "CO" ? (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-xs text-destructive">Câu lỗi của {loi.ds.length} cổng đỏ</summary>
+                        {loi.ds.map((h) => (
+                          <div key={h.ten} className="mt-1.5">
+                            <p className="text-[11px] font-medium">
+                              {h.ten}
+                              {h.exitCode === null ? "" : ` · thoát ${h.exitCode}`}
+                            </p>
+                            <pre className="mt-0.5 overflow-x-auto whitespace-pre-wrap break-words rounded bg-muted p-2 text-[11px] leading-snug">{h.dauRa}</pre>
+                          </div>
+                        ))}
+                      </details>
+                    ) : null}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </SectionCard>

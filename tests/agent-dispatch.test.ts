@@ -11,6 +11,7 @@ import {
   canDispatchTask,
   checkDispatchQuota,
 } from "@/lib/constants/agent-dispatch";
+import { TECH_AGENT_TEMPLATES } from "@/lib/constants/tech";
 import { __setDispatchFetchForTests, dispatchAgentRun, dispatchConfig } from "@/lib/integrations/github/dispatch";
 import { dispatchTaskToAgent } from "@/lib/tech/dispatch-service";
 
@@ -30,40 +31,108 @@ const TIEN_TO = "disp-";
 /* ═════════════ 1 · LUẬT THUẦN ═════════════ */
 
 export function testDispatchPure() {
-  const hopLe = { code: "T-1", risk: "R0", status: "TRIAGED", approvalRequired: false, approvalStatus: "NOT_REQUIRED", agentKey: "documentation" };
-  assert.ok(canDispatchTask(hopLe).ok, "việc R0 đã phân loại, có agent, không cần duyệt ⇒ giao được");
+  const hopLe = {
+    code: "T-1",
+    risk: "R0",
+    status: "TRIAGED",
+    approvalRequired: false,
+    approvalStatus: "NOT_REQUIRED",
+    agentKey: "documentation",
+    agentAllowedRisks: ["R0", "R1"],
+    agentWriteGlobs: ["docs/"],
+  };
+  assert.ok(canDispatchTask(hopLe).ok, "việc R0 đã phân loại, có agent được cấp R0, không cần duyệt ⇒ giao được");
 
-  // ───────── R2 KHÔNG BAO GIỜ ─────────
-  const r2 = canDispatchTask({ ...hopLe, risk: "R2" });
-  assert.ok(!r2.ok && r2.code === "RISK", "R2 không bao giờ mở cho agent");
-  assert.ok(!r2.ok && /R2/.test(r2.reason), "lý do phải nói rõ mức rủi ro");
+  /*
+    ───────── CHƯA GÁN AGENT ĐỨNG TRƯỚC MỌI CÂU HỎI KHÁC ─────────
+    Mọi phép kiểm phía sau đều hỏi VỀ VAI ĐƯỢC GÁN. Chưa có vai thì câu trả lời hữu ích là "gán
+    agent đi", không phải một câu về phạm vi ghi của một vai chưa tồn tại.
+  */
+  const chuaGan = { ...hopLe, agentKey: null, agentAllowedRisks: null, agentWriteGlobs: null };
+  const khongAgent = canDispatchTask(chuaGan);
+  assert.ok(!khongAgent.ok && khongAgent.code === "NO_AGENT", "chưa gán agent thì không giao được");
+  const r2ChuaGan = canDispatchTask({ ...chuaGan, risk: "R2", approvalRequired: true, approvalStatus: "APPROVED" });
+  assert.ok(!r2ChuaGan.ok && r2ChuaGan.code === "NO_AGENT", "việc R2 chưa gán ai cũng phải trả lời 'gán agent', không phải một câu về phạm vi ghi");
+
+  /* ═══════════ CỬA HẸP CHO R2 — BA ĐIỀU KIỆN, KHÔNG CÁI NÀO TỰ BẬT ═══════════
+
+     Đo 22/09/2026: 9/9 việc AI CTO đề xuất đều R2 (phần lớn chỉ vì luật `CARRIER_TRUTH` khai
+     `modules: ["SHIPMENTS"]`, tức MỌI việc thuộc module ấy, kể cả việc chỉ ĐO). Lệnh cấm cũ làm
+     cả chín nằm im vĩnh viễn, và làm nút "Phê duyệt" của chủ shop thành một nút không tác dụng —
+     nhánh APPROVAL nằm SAU phép kiểm rủi ro nên không bao giờ tới được. */
+
+  const r2 = { ...hopLe, risk: "R2", approvalRequired: true, approvalStatus: "APPROVED" };
+
+  const chuaCap = canDispatchTask(r2);
+  assert.ok(!chuaCap.ok && chuaCap.code === "AGENT_RISK", "vai chưa được cấp R2 ⇒ ĐÓNG, kể cả khi việc đã được chủ shop duyệt");
+
+  const rongQua = canDispatchTask({ ...r2, agentAllowedRisks: ["R0", "R1", "R2"], agentWriteGlobs: ["docs/", "tests/"] });
+  assert.ok(!rongQua.ok && rongQua.code === "SCOPE", "R2 KHÔNG mở cho vai ghi được `tests/`: một bài kiểm không phải chữ, nó là khẳng định CHẶN DEPLOY (mục 0)");
+
+  const duBa = { ...r2, agentAllowedRisks: ["R0", "R1", "R2"], agentWriteGlobs: ["docs/"] };
+  assert.ok(canDispatchTask(duBa).ok, "đủ ba điều kiện — vai được cấp R2 · chỉ ghi ra chữ · chủ shop đã ký — thì mở");
+
+  /*
+    CHỮ KÝ CHỦ SHOP LÀ CỔNG CỨNG, VÀ ĐÂY LÀ LẦN ĐẦU NÓ TỚI ĐƯỢC.
+    Trước bản này nhánh APPROVAL là mã CHẾT trên dữ liệu thật: `approvalRequired` bật ⟺ `risk = R2`
+    (cả hai đường ghi), mà R2 bị loại ở phép kiểm đầu tiên.
+  */
+  for (const st of ["PENDING", "REJECTED", "NOT_REQUIRED", ""]) {
+    const v = canDispatchTask({ ...duBa, approvalStatus: st });
+    assert.ok(!v.ok && v.code === "APPROVAL", `việc R2 đang "${st}" thì không giao được — NOT_REQUIRED khi cờ đang bật là mâu thuẫn, và mâu thuẫn rơi về phía hẹp`);
+  }
+
+  /* Phạm vi ghi RỖNG hay CHƯA KHAI là CHƯA BIẾT — phải rơi về phía hẹp (mục 31). */
+  for (const pv of [[], null]) {
+    const v = canDispatchTask({ ...duBa, agentWriteGlobs: pv });
+    assert.ok(!v.ok && v.code === "SCOPE", `phạm vi ghi ${JSON.stringify(pv)} là CHƯA BIẾT, không phải "an toàn vì chẳng ghi được gì"`);
+  }
+
+  /*
+    ───────── KHÔNG MẪU VAI NÀO ĐƯỢC KHAI SẴN R2 ─────────
+
+    Đây là thứ giữ cho cửa hẹp ĐÓNG. Mở nó phải là một thao tác của NGƯỜI, trên MỘT vai cụ thể,
+    ở `/tech/agents` — không phải một dòng nằm sẵn trong mã mà không ai nhớ đã thêm lúc nào.
+  */
+  for (const t of TECH_AGENT_TEMPLATES) {
+    assert.ok(!t.allowedRisks.includes("R2"), `mẫu vai \`${t.key}\` khai sẵn R2 — cửa hẹp phải do người mở cho từng vai, không mở sẵn trong mã`);
+  }
+
+  /*
+    MỨC KHAI RIÊNG CHO VAI ÁP CHO CẢ R0/R1, KHÔNG CHỈ R2.
+    `runner.ts` đã hỏi câu này từ trước, nhưng hỏi SAU khi dispatch đã đi — tức sau khi đã tiêu một
+    suất hạn mức và phút Actions thật. Hỏi ở đây không nới thêm gì, chỉ trả lời sớm hơn.
+  */
+  const r1KhongCap = canDispatchTask({ ...hopLe, risk: "R1", agentAllowedRisks: ["R0"] });
+  assert.ok(!r1KhongCap.ok && r1KhongCap.code === "AGENT_RISK", "vai chỉ được cấp R0 thì không nhận việc R1 — và biết điều đó TRƯỚC khi tiêu một suất");
+
+  /* Mức lạ rơi về phía hẹp, không rơi về phía cho qua. */
+  for (const la of ["R3", "r2", "", "ALL"]) {
+    const v = canDispatchTask({ ...hopLe, risk: la });
+    assert.ok(!v.ok && v.code === "RISK", `mức lạ "${la}" phải bị từ chối`);
+  }
 
   /*
     `NEW` KHÔNG giao được: việc chưa ai phân loại thì chưa ai hiểu nó là gì, và giao cho máy một
     việc chưa hiểu là cách nhanh nhất để có một PR không ai muốn đọc.
   */
-  for (const s of ["NEW", "DONE", "REVIEW", "BLOCKED"]) {
-    const v = canDispatchTask({ ...hopLe, status: s });
-    assert.ok(!v.ok && v.code === "STATUS", `trạng thái ${s} không giao được`);
+  for (const st of ["NEW", "DONE", "REVIEW", "BLOCKED"]) {
+    const v = canDispatchTask({ ...hopLe, status: st });
+    assert.ok(!v.ok && v.code === "STATUS", `trạng thái ${st} không giao được`);
   }
 
-  /*
-    ───────── PHÊ DUYỆT LÀ CỔNG CỨNG, VÀ DỮ LIỆU TỰ MÂU THUẪN RƠI VỀ PHÍA HẸP ─────────
-    `approvalRequired = true` mà `approvalStatus = NOT_REQUIRED` là một mâu thuẫn; nó phải là
-    KHÔNG, không phải là cho qua.
-  */
-  for (const st of ["PENDING", "REJECTED", "NOT_REQUIRED", ""]) {
-    const v = canDispatchTask({ ...hopLe, approvalRequired: true, approvalStatus: st });
-    assert.ok(!v.ok && v.code === "APPROVAL", `cần duyệt mà đang "${st}" thì không giao được`);
-  }
-  assert.ok(canDispatchTask({ ...hopLe, approvalRequired: true, approvalStatus: "APPROVED" }).ok, "đã duyệt thì giao được");
-
-  const khongAgent = canDispatchTask({ ...hopLe, agentKey: null });
-  assert.ok(!khongAgent.ok && khongAgent.code === "NO_AGENT", "chưa gán agent thì không giao được");
-
-  /* Bốn lý do phải PHÂN BIỆT ĐƯỢC — gộp thành một "không giao được" là đẩy người đọc đi sửa nhầm chỗ. */
-  const ma = new Set([r2, canDispatchTask({ ...hopLe, status: "NEW" }), canDispatchTask({ ...hopLe, approvalRequired: true, approvalStatus: "PENDING" }), khongAgent].map((v) => (v.ok ? "ok" : v.code)));
-  assert.equal(ma.size, 4, "bốn tình huống phải cho bốn mã lý do khác nhau");
+  /* Sáu lý do phải PHÂN BIỆT ĐƯỢC — gộp thành một "không giao được" là đẩy người đọc đi sửa nhầm chỗ (mục 55). */
+  const ma = new Set(
+    [
+      canDispatchTask({ ...hopLe, risk: "R3" }),
+      canDispatchTask({ ...hopLe, status: "NEW" }),
+      canDispatchTask({ ...duBa, approvalStatus: "PENDING" }),
+      khongAgent,
+      chuaCap,
+      rongQua,
+    ].map((v) => (v.ok ? "ok" : v.code)),
+  );
+  assert.equal(ma.size, 6, "sáu tình huống phải cho sáu mã lý do khác nhau — mỗi cái sửa ở một chỗ khác");
 
   /* ───────── HẠN MỨC: đúng trần, hơn trần, và biên dưới ───────── */
   assert.ok(checkDispatchQuota(0, 0).ok);
@@ -72,6 +141,8 @@ export function testDispatchPure() {
   assert.ok(!checkDispatchQuota(0, DISPATCH_QUOTA.perDay).ok, "chạm trần ngày cũng hết");
   const con = checkDispatchQuota(1, 1);
   assert.ok(con.ok && con.conLaiGio === DISPATCH_QUOTA.perHour - 1 && con.conLaiNgay === DISPATCH_QUOTA.perDay - 1, "phải nói còn bao nhiêu suất");
+
+  console.log("✓ Giao việc: cửa hẹp R2 cần ĐỦ BA (vai được cấp · chỉ ghi ra chữ · chủ shop ký) · không mẫu vai nào khai sẵn R2 · sáu lý do tách nhau");
 }
 
 /* ═════════════ 2 · CỬA GHI GITHUB ═════════════ */
@@ -162,7 +233,12 @@ export async function testDispatchService() {
     const [u] = await db.insert(schema.users).values({ email: `${TIEN_TO}a@shop.vn`, name: "disp", passwordHash: "x", role: "ADMIN" }).returning({ id: schema.users.id });
     const actor = { id: u.id, email: `${TIEN_TO}a@shop.vn`, name: "disp" };
     const [ag] = await db.insert(schema.techAgents).values({ key: `${TIEN_TO}doc`, name: "disp-doc", role: "DOCUMENTATION", enabled: true, allowedRisks: ["R0"] }).returning({ id: schema.techAgents.id });
-    const [agTat] = await db.insert(schema.techAgents).values({ key: `${TIEN_TO}tat`, name: "disp-tat", role: "QA", enabled: false }).returning({ id: schema.techAgents.id });
+    /*
+      Vai này phải HỢP LỆ ở mọi mặt trừ cờ `enabled` — nếu không, bài kiểm bên dưới xanh vì một lý
+      do khác (vai chưa khai mức nào) và cổng `enabled` không còn được đo. Trước khi cổng mức-theo-
+      vai được hỏi ở tầng dispatch, `allowedRisks` bỏ trống ở đây không lộ ra; nay thì có.
+    */
+    const [agTat] = await db.insert(schema.techAgents).values({ key: `${TIEN_TO}tat`, name: "disp-tat", role: "QA", enabled: false, allowedRisks: ["R0"] }).returning({ id: schema.techAgents.id });
     await db.insert(schema.techTasks).values({ code: "DISP-1", title: "disp-viec", status: "TRIAGED", risk: "R0", agentId: ag.id });
     await db.insert(schema.techTasks).values({ code: "DISP-2", title: "disp-vai-tat", status: "TRIAGED", risk: "R0", agentId: agTat.id });
 
@@ -255,6 +331,24 @@ export function testDispatchSourceGuards() {
   const disp = bo(readFileSync(path.join(goc, "lib/integrations/github/dispatch.ts"), "utf8"));
   const client = bo(readFileSync(path.join(goc, "lib/integrations/github/client.ts"), "utf8"));
   const svc = bo(readFileSync(path.join(goc, "lib/tech/dispatch-service.ts"), "utf8"));
+  const doc = bo(readFileSync(path.join(goc, "lib/tech/agent-task-read.ts"), "utf8"));
+
+  /*
+    ═══ PHẠM VI GHI PHẢI LẤY TỪ SỔ VAI, KHÔNG GÕ TAY ═══
+
+    Cửa hẹp R2 đứng trên đúng một khẳng định: "vai này chỉ ghi ra chữ". Nếu nơi gọi gõ thẳng
+    `["docs/"]` thay vì hỏi `writeGlobsForRole(agent.role)`, thì cổng nói một đằng còn agent thi
+    hành một nẻo — và cái sai ấy không lộ ra ở hành vi, chỉ lộ ở diff. Nên khoá ở mức mã nguồn.
+
+    HAI nơi, vì cả hai đều là đường vào: nút giao việc, và cửa đọc mà agent gọi từ máy Actions.
+    Một bản lỏng hơn ở một trong hai chỗ thì bản lỏng hơn là bản thật.
+  */
+  for (const [ten, m] of [["dispatch-service", svc], ["agent-task-read", doc]] as const) {
+    assert.match(m, /agentWriteGlobs:\s*agent\s*\?\s*writeGlobsForRole\(/, `${ten} phải lấy phạm vi ghi từ sổ vai`);
+    assert.match(m, /agentAllowedRisks:\s*agent\s*\?\s*agent\.allowedRisks/, `${ten} phải đọc mức khai riêng của vai từ sổ agent`);
+    assert.doesNotMatch(m, /agentWriteGlobs:\s*\[/, `${ten} KHÔNG được gõ tay danh sách phạm vi — cổng sẽ nói một đằng, thi hành một nẻo`);
+  }
+
 
   /*
     ───────── CLIENT ĐỌC VẪN PHẢI CHỈ-ĐỌC ─────────

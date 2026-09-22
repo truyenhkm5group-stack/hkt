@@ -67,8 +67,84 @@ export const DISPATCH_QUOTA = {
   perDay: 20,
 } as const;
 
-/** Mức rủi ro agent được phép nhận. `R2` KHÔNG BAO GIỜ — giữ nguyên từ Phase 1. */
+/**
+ * Mức rủi ro mở cho MỌI agent, không cần khai gì thêm.
+ *
+ * `R2` KHÔNG nằm ở đây, và không bao giờ nằm ở đây: nó chỉ đi qua CỬA HẸP bên dưới, và cửa ấy
+ * không bao giờ tự mở cho một vai nào.
+ */
 export const DISPATCHABLE_RISKS: readonly TechRisk[] = ["R0", "R1"];
+
+/**
+ * ═══════════ CỬA HẸP CHO R2 — VÀ VÌ SAO NÓ PHẢI TỒN TẠI ═══════════
+ *
+ * ─── ĐÃ ĐO 22/09/2026: HAI CỔNG CỦA CHỦ SHOP CHƯA BAO GIỜ CHẠY ĐƯỢC ───
+ *
+ * Cả hai đường ghi việc (`createTechTask` và đường đè mức rủi ro) đều đặt
+ * `approvalRequired = (risk === "R2")` — một BẤT BIẾN, không phải trùng hợp. Mà `canDispatchTask`
+ * loại `R2` ở phép kiểm ĐẦU TIÊN. Hệ quả: nhánh `APPROVAL` phía sau KHÔNG BAO GIỜ tới được trên
+ * dữ liệu thật. Chủ shop bấm "Phê duyệt" bao nhiêu lần cũng không mở được việc cho agent, và màn
+ * hình vẫn hiện một nút trông như có tác dụng.
+ *
+ * Cổng thứ hai cũng vậy: `tech_agents.allowed_risks` khai riêng cho TỪNG agent và chủ shop sửa
+ * được ở `/tech/agents`, nhưng `runner.ts` chỉ đọc nó SAU khi dispatch đã đi qua — nên với R2 nó
+ * cũng không bao giờ được hỏi tới.
+ *
+ * Một cổng không bao giờ tới được thì không phải một cổng chặt; nó là một cổng KHÔNG TỒN TẠI,
+ * cộng thêm một nút nói dối người bấm.
+ *
+ * ─── VÌ SAO MỞ CỬA NÀY KHÔNG LÀM YẾU HÀNG RÀO ───
+ *
+ * Đo cùng ngày: 9/9 việc AI CTO đề xuất (TECH-4…TECH-12) đều là R2, phần lớn chỉ vì luật
+ * `CARRIER_TRUTH` khai `modules: ["SHIPMENTS"]` — tức MỌI việc thuộc module ấy đều R2, kể cả
+ * "Đo baseline phía trình duyệt" vốn không ghi một dòng mã nào. Cả chín nằm im vĩnh viễn.
+ *
+ * Nhưng hàng rào THẬT không nằm ở mức rủi ro, nó nằm ở PHẠM VI GHI: `NEVER_WRITE` (kiểm TRƯỚC sổ
+ * vai) chặn `lib/actions/` · `lib/auth/` · `db/` · `drizzle/` · `.github/` · `scripts/` ·
+ * `lib/agents/` · `lib/tech/` · `app/api/`, còn `WRITE_GLOBS_BY_ROLE` cho vai rộng nhất đúng
+ * `docs/` + `tests/`. Nghĩa là KHÔNG vai nào — kể cả vai chưa tồn tại — chạm nổi một dòng của
+ * `lib/queries/return-rate.ts` hay `lib/constants/returns.ts`. Đúng những thứ mà mười ba luật R2
+ * sinh ra để bảo vệ đều đã nằm ngoài tầm với theo CẤU TRÚC.
+ *
+ * Nên lệnh cấm R2 đang khoá thêm một cánh cửa đã hàn chết, và cái giá là cả phòng đứng im.
+ *
+ * ─── BA ĐIỀU KIỆN, PHẢI ĐỦ CẢ BA, KHÔNG CÁI NÀO TỰ BẬT ───
+ *
+ *  1. **Vai được khai riêng mức `R2`** trong `tech_agents.allowed_risks`. Mười hai mẫu vai trong
+ *     `TECH_AGENT_TEMPLATES` khai `R0` hoặc `R0/R1` — KHÔNG mẫu nào có `R2`. Nên sau bản này,
+ *     không agent nào đang chạy nhận thêm được một việc nào: phải có một người vào `/tech/agents`
+ *     và cấp cho MỘT vai cụ thể.
+ *  2. **Phạm vi ghi của vai chỉ SINH RA CHỮ** (`PHAM_VI_CHI_SINH_CHU`). Xem docblock của nó.
+ *  3. **Chủ shop đã ký duyệt** chính việc đó — nhánh `APPROVAL`, nay lần đầu tới được.
+ *
+ * Kết quả ròng: cổng tại lúc giao việc NHIỀU HƠN trước chứ không ít hơn. Trước bản này, một việc
+ * R1 đi thẳng qua mà KHÔNG ai hỏi vai ấy được phép mức nào hay ghi được vào đâu — hai câu hỏi đó
+ * mãi tới `runner.ts` mới được hỏi, sau khi đã tốn một lượt dispatch và phút Actions thật.
+ */
+
+/**
+ * PHẠM VI GHI CHỈ SINH RA CHỮ — danh sách ĐÓNG.
+ *
+ * `docs/` là chữ cho NGƯỜI đọc: sai thì người đọc thấy sai, và không một con số nào trên màn hình
+ * đổi theo.
+ *
+ * `tests/` KHÔNG nằm đây, dù vai QA ghi được nó. Một bài kiểm không phải chữ — nó là một KHẲNG
+ * ĐỊNH CHẶN DEPLOY, và một khẳng định sai trong vùng tiền thì ghim luôn cái sai ấy thành luật
+ * (AGENTS.md mục 0: *"Không được sửa giá trị kỳ vọng của chúng để CI xanh"*). Với một việc R2,
+ * agent được phép viết ra LỜI, không được phép viết ra thứ PHÁN QUYẾT.
+ */
+export const PHAM_VI_CHI_SINH_CHU: readonly string[] = ["docs/"];
+
+/**
+ * Phạm vi ghi này có chỉ sinh ra chữ không — HÀM THUẦN.
+ *
+ * Rỗng ⇒ `false`. Một danh sách rỗng nghĩa là CHƯA BIẾT vai ấy ghi được gì, và "chưa biết" phải
+ * rơi về phía HẸP HƠN (cùng luật với mục 31), không phải về phía "chẳng ghi được gì nên an toàn".
+ */
+export function chiSinhRaChu(globs: readonly string[] | null | undefined): boolean {
+  if (!globs || globs.length === 0) return false;
+  return globs.every((g) => PHAM_VI_CHI_SINH_CHU.includes(g));
+}
 
 /**
  * Trạng thái việc mà giao cho agent là HỢP LÝ.
@@ -85,20 +161,69 @@ export type DispatchTask = {
   approvalRequired: boolean;
   approvalStatus: string;
   agentKey: string | null;
+  /**
+   * Mức rủi ro khai riêng cho AGENT ĐƯỢC GÁN (`tech_agents.allowed_risks`). `null` = chưa gán ai.
+   *
+   * `runner.ts` đã hỏi câu này từ trước, nhưng hỏi SAU khi dispatch đã đi — tức sau khi đã tốn một
+   * lượt và phút Actions thật. Hỏi lại ở đây không nới thêm gì, nó chỉ trả lời sớm hơn.
+   */
+  agentAllowedRisks: readonly string[] | null;
+  /** Phạm vi ghi của VAI agent được gán (`writeGlobsForRole`). `null` = chưa gán ai. */
+  agentWriteGlobs: readonly string[] | null;
 };
 
-export type DispatchVerdict = { ok: true } | { ok: false; code: "RISK" | "STATUS" | "APPROVAL" | "NO_AGENT"; reason: string };
+export type DispatchVerdict =
+  | { ok: true }
+  | { ok: false; code: "RISK" | "STATUS" | "APPROVAL" | "NO_AGENT" | "AGENT_RISK" | "SCOPE"; reason: string };
 
 /**
  * Việc này giao cho agent được không — HÀM THUẦN, không đọc CSDL.
  *
- * Trả về LÝ DO cụ thể chứ không phải một `false`: người bấm nút cần biết phải làm gì tiếp (hạ rủi
- * ro? xin duyệt? phân loại việc? gán agent?), và bốn việc ấy khác hẳn nhau.
+ * Trả về LÝ DO cụ thể chứ không phải một `false`: người bấm nút cần biết phải làm gì tiếp, và sáu
+ * việc phải làm ấy khác hẳn nhau (hạ rủi ro · xin duyệt · phân loại việc · gán agent · cấp mức cho
+ * vai · đổi vai khác). Gộp thành một câu "không giao được" là đẩy người đọc đi sửa nhầm chỗ
+ * (AGENTS.md mục 55).
  */
 export function canDispatchTask(task: DispatchTask): DispatchVerdict {
-  if (!DISPATCHABLE_RISKS.includes(task.risk as TechRisk)) {
-    return { ok: false, code: "RISK", reason: `Việc ${task.code} ở mức ${task.risk}; agent chỉ nhận ${DISPATCHABLE_RISKS.join(" · ")}. R2 không bao giờ mở cho agent.` };
+  /*
+    CHƯA GÁN AGENT ĐỨNG ĐẦU — không phải vì nó nặng nhất, mà vì MỌI câu hỏi phía sau đều là câu
+    hỏi VỀ VAI ĐƯỢC GÁN: vai ấy được phép mức nào, vai ấy ghi được vào đâu. Chưa có vai thì chưa
+    trả lời được, và trả lời bừa là chọn giữa "khoá nhầm một việc hợp lệ" và "mở nhầm một việc
+    không hợp lệ" — cả hai đều sai, nên không đoán.
+  */
+  if (!task.agentKey) {
+    return { ok: false, code: "NO_AGENT", reason: `Việc ${task.code} chưa gán agent nào — giao cho ai thì phải nói rõ.` };
   }
+
+  if (!DISPATCHABLE_RISKS.includes(task.risk as TechRisk)) {
+    /* Mức lạ (không phải R0/R1/R2) rơi về phía hẹp, không rơi về phía cho qua. */
+    if (task.risk !== "R2") {
+      return { ok: false, code: "RISK", reason: `Việc ${task.code} ở mức lạ \`${task.risk}\`; agent chỉ nhận ${DISPATCHABLE_RISKS.join(" · ")}, hoặc R2 qua cửa hẹp.` };
+    }
+    /*
+      CỬA HẸP CHO R2 — điều kiện PHẠM VI GHI. Hai điều kiện còn lại (vai được cấp mức, chủ shop đã
+      ký) nằm ở hai phép kiểm riêng bên dưới, để mỗi cái hỏng cho ra một câu trả lời khác nhau.
+    */
+    if (!chiSinhRaChu(task.agentWriteGlobs)) {
+      return {
+        ok: false,
+        code: "SCOPE",
+        reason: `Việc ${task.code} ở mức R2. R2 chỉ mở cho vai CHỈ GHI RA CHỮ (${PHAM_VI_CHI_SINH_CHU.join(" · ")}); vai \`${task.agentKey}\` ghi được ${task.agentWriteGlobs?.join(" · ") || "(chưa khai)"}. Một bài kiểm không phải chữ — nó là khẳng định chặn deploy.`,
+      };
+    }
+  }
+
+  /*
+    MỨC KHAI RIÊNG CHO VAI — cổng của CHỦ SHOP, ở `/tech/agents`.
+
+    Không mẫu vai nào trong `TECH_AGENT_TEMPLATES` khai `R2`. Nên nhánh này là thứ giữ cho cửa hẹp
+    ở trên đóng cho tới khi có một NGƯỜI mở nó cho MỘT vai cụ thể.
+  */
+  if (!(task.agentAllowedRisks ?? []).includes(task.risk)) {
+    const daKhai = task.agentAllowedRisks?.join(" · ") || "(chưa khai mức nào)";
+    return { ok: false, code: "AGENT_RISK", reason: `Vai \`${task.agentKey}\` chỉ được phép ${daKhai}, không có ${task.risk}. Cấp mức cho vai ở /tech/agents, hoặc giao cho vai khác.` };
+  }
+
   if (!DISPATCHABLE_STATUSES.includes(task.status as TechTaskStatus)) {
     return { ok: false, code: "STATUS", reason: `Việc ${task.code} đang ở ${task.status}; chỉ giao được khi ${DISPATCHABLE_STATUSES.join(" · ")}. Việc chưa phân loại thì chưa ai hiểu nó là gì.` };
   }
@@ -108,12 +233,11 @@ export function canDispatchTask(task: DispatchTask): DispatchVerdict {
     `approvalRequired` được máy xếp lúc tính rủi ro; nếu nó bật thì phải có `APPROVED`. `PENDING`
     và `REJECTED` đều là KHÔNG — và `NOT_REQUIRED` khi cờ đang bật là một mâu thuẫn, nên cũng
     KHÔNG: dữ liệu tự mâu thuẫn thì rơi về phía hẹp hơn, không rơi về phía cho qua.
+
+    Nhánh này TRƯỚC BẢN NÀY KHÔNG BAO GIỜ TỚI ĐƯỢC trên dữ liệu thật (xem docblock cửa hẹp).
   */
   if (task.approvalRequired && task.approvalStatus !== "APPROVED") {
     return { ok: false, code: "APPROVAL", reason: `Việc ${task.code} cần người duyệt (đang ${task.approvalStatus || "chưa có"}).` };
-  }
-  if (!task.agentKey) {
-    return { ok: false, code: "NO_AGENT", reason: `Việc ${task.code} chưa gán agent nào — giao cho ai thì phải nói rõ.` };
   }
   return { ok: true };
 }
