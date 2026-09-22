@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { useRouter } from "next/navigation";
 import { CheckSquare, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -178,8 +179,9 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
           </Button>
         </div>
       ) : null}
+      <TableToolsFor tableId="expenses-campaign-mapping" />
       <div className={cn(TABLE_SCROLL, "rounded-lg border")}>
-        <table className="w-full text-sm">
+        <table id="expenses-campaign-mapping" className="w-full text-sm">
           <thead className={cn(STICKY_HEAD, "text-[11px] font-semibold tracking-wide text-muted-foreground uppercase")}>
             <tr>
               {canWrite ? (

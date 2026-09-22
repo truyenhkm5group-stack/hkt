@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { VtpImportForm } from "@/app/(dashboard)/import-vtp/import-form";
 import { BatchHistory } from "@/app/(dashboard)/import-vtp/batch-history";
 import { PageHeader } from "@/components/page-header";
@@ -75,30 +76,33 @@ export default async function ImportVtpPage() {
         </div>
 
         {listCoverage.ranges.length ? (
-          <div className="mt-4 overflow-x-auto rounded-md border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 text-left">
-                <tr>
-                  <th className="p-2 font-medium">Xuất danh sách vận đơn từ ngày</th>
-                  <th className="p-2 font-medium">Đến ngày</th>
-                  <th className="p-2 text-right font-medium">Thiếu trạng thái</th>
-                  <th className="p-2 text-right font-medium">Thiếu mã vận đơn</th>
-                  <th className="p-2 text-right font-medium">COD khai báo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {listCoverage.ranges.map((r) => (
-                  <tr key={`${r.from}-${r.to}`} className="border-t">
-                    <td className="numeric p-2 font-medium">{formatDate(r.from)}</td>
-                    <td className="numeric p-2 font-medium">{formatDate(r.to)}</td>
-                    <td className="numeric p-2 text-right">{r.noStatus ? formatNumber(r.noStatus) : <span className="text-muted-foreground">—</span>}</td>
-                    <td className="numeric p-2 text-right">{r.noCode ? formatNumber(r.noCode) : <span className="text-muted-foreground">—</span>}</td>
-                    <td className="numeric p-2 text-right">{formatVND(r.cod)}</td>
+          <>
+            <TableToolsFor tableId="import-vtp-page" />
+            <div className="mt-4 overflow-x-auto rounded-md border">
+              <table id="import-vtp-page" className="w-full text-sm">
+                <thead className="bg-muted/50 text-left">
+                  <tr>
+                    <th className="p-2 font-medium">Xuất danh sách vận đơn từ ngày</th>
+                    <th className="p-2 font-medium">Đến ngày</th>
+                    <th className="p-2 text-right font-medium">Thiếu trạng thái</th>
+                    <th className="p-2 text-right font-medium">Thiếu mã vận đơn</th>
+                    <th className="p-2 text-right font-medium">COD khai báo</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {listCoverage.ranges.map((r) => (
+                    <tr key={`${r.from}-${r.to}`} className="border-t">
+                      <td className="numeric p-2 font-medium">{formatDate(r.from)}</td>
+                      <td className="numeric p-2 font-medium">{formatDate(r.to)}</td>
+                      <td className="numeric p-2 text-right">{r.noStatus ? formatNumber(r.noStatus) : <span className="text-muted-foreground">—</span>}</td>
+                      <td className="numeric p-2 text-right">{r.noCode ? formatNumber(r.noCode) : <span className="text-muted-foreground">—</span>}</td>
+                      <td className="numeric p-2 text-right">{formatVND(r.cod)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         ) : (
           <p className="mt-3 text-sm text-muted-foreground">Mọi vận đơn đều đã có mã và trạng thái từ Viettel Post.</p>
         )}

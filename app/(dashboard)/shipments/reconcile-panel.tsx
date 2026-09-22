@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { Copy, ExternalLink, FileUp, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -176,8 +177,9 @@ export function ReconcilePanel({ queue, nguong, canAdmin }: { queue: ReconcileQu
         ) : null}
       </div>
 
+      <TableToolsFor tableId="shipments-reconcile-panel" />
       <div className="overflow-x-auto rounded-xl border">
-        <table className="w-full text-[12.5px]">
+        <table id="shipments-reconcile-panel" className="w-full text-[12.5px]">
           <thead className="bg-muted/50 text-left text-muted-foreground">
             <tr>
               <th className="w-8 px-2 py-2" />

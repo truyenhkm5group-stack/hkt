@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
@@ -109,8 +110,9 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
             )
           }
         >
+          <TableToolsFor tableId="payroll-payslip-page" />
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-[13px]">
+            <table id="payroll-payslip-page" className="w-full min-w-[560px] text-[13px]">
               <tbody>
                 {engine && "components" in engine && engine.components.length ? (
                   <>

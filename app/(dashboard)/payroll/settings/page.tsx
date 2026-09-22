@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { PageHeader } from "@/components/page-header";
 import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { PayrollSettingsForm } from "@/app/(dashboard)/payroll/settings/settings-form";
@@ -59,8 +60,9 @@ export default async function PayrollSettingsPage({ searchParams }: { searchPara
         title={`Khoản nào nằm trong “${COMPENSATION_PROFIT_LABEL}”`}
         description="Lời khai của kho mã, chỉ để ĐỌC. Không có nút nào ở đây — cho sửa nó trên màn hình là mở đường để ai đó loại một khoản chi thật ra khỏi cơ sở trả tiền bằng một lượt bấm."
       >
+        <TableToolsFor tableId="payroll-settings-page" />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-[13px]">
+          <table id="payroll-settings-page" className="w-full min-w-[720px] text-[13px]">
             <thead className="text-left text-muted-foreground">
               <tr>
                 <th className="py-1 pr-3 font-medium">Khoản chi</th>

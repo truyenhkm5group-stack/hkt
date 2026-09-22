@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { PageHeader } from "@/components/page-header";
 import { QueueViewTabs } from "@/components/queue-view-tabs";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
@@ -99,81 +100,84 @@ export default async function DwellPage() {
         {rows.length === 0 ? (
           <EmptyState title="Không kiện nào đang theo dõi" description="Mọi vận đơn đều đã tới chặng kết thúc." className="m-4" />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] text-[12.5px]">
-              <thead className="border-b bg-muted/30 text-left text-[11.5px] uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Mức</th>
-                  <th className="px-4 py-2 font-medium">Vận đơn</th>
-                  <th className="px-4 py-2 font-medium">Chặng hiện tại</th>
-                  <th className="px-4 py-2 font-medium">Vào chặng lúc</th>
-                  <th className="px-4 py-2 font-medium">Tuổi chặng</th>
-                  <th className="px-4 py-2 font-medium">ĐVVC im lặng</th>
-                  <th className="px-4 py-2 font-medium">Hạn</th>
-                  <th className="px-4 py-2 font-medium">Phòng</th>
-                  <th className="px-4 py-2 font-medium">COD treo</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {rows.slice(0, 300).map((r) => (
-                  <tr key={r.shipmentId} className="align-top">
-                    <td className="px-4 py-2">
-                      <span
-                        className={cn(
-                          "inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold",
-                          r.level ? DWELL_LEVEL_TONE[r.level] : "border border-dashed bg-muted/40 text-muted-foreground",
-                        )}
-                        title={r.unrated ? DWELL_UNRATED_HINT[r.unrated] : undefined}
-                      >
-                        {r.level ? DWELL_LEVEL_LABEL[r.level] : r.unrated ? DWELL_UNRATED_LABEL[r.unrated] : MISSING_TEXT}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">
-                      {r.orderId ? (
-                        <Link href={`/orders/${r.orderId}`} className="font-medium hover:underline">
-                          {r.tracking}
-                        </Link>
-                      ) : (
-                        <span className="font-medium">{r.tracking}</span>
-                      )}
-                      <span className="block text-[11.5px] text-muted-foreground">
-                        {r.orderSystemId ? `#${r.orderSystemId} · ` : ""}
-                        {r.customer || MISSING_TEXT} · {r.phone || MISSING_TEXT}
-                        {r.careOpen ? <span className="ml-1 text-emerald-700 dark:text-emerald-400">· đang có người care</span> : null}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">
-                      {r.stageLabel}
-                      {r.rawStatus ? <span className="block text-[11.5px] text-muted-foreground">ĐVVC: {r.rawStatus}</span> : null}
-                    </td>
-                    <td className="px-4 py-2">
-                      {/* CHƯA BIẾT in ra dấu gạch, KHÔNG in thành một mốc giả. */}
-                      {r.stageSince ? formatDateTime(r.stageSince) : MISSING_TEXT}
-                      {r.sinceBasis ? <span className="block text-[11.5px] text-muted-foreground">{DWELL_BASIS_LABEL[r.sinceBasis]}</span> : null}
-                    </td>
-                    <td className="px-4 py-2 numeric">
-                      {r.statusAgeHours === null ? MISSING_TEXT : r.statusAgeLabel}
-                      {r.eventsInRun > 1 ? (
-                        <span className="block text-[11.5px] text-muted-foreground">{formatNumber(r.eventsInRun)} tin cùng chặng</span>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-2 numeric text-muted-foreground">{r.lastCarrierUpdateAt ? formatTimeAgo(r.lastCarrierUpdateAt) : MISSING_TEXT}</td>
-                    <td className="px-4 py-2 numeric">
-                      {r.slaHours === null ? <span className="text-muted-foreground">không đặt hạn</span> : `${r.slaHours} giờ`}
-                      {r.slaBreached === true ? <span className="block text-[11.5px] font-semibold text-rose-600 dark:text-rose-400">quá hạn</span> : null}
-                    </td>
-                    <td className="px-4 py-2">
-                      {r.teamLabel}
-                      {r.divergence ? (
-                        <span className="block text-[11.5px] text-amber-700 dark:text-amber-400">{DIVERGENCE_LABEL[r.divergence]}</span>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-2 numeric">{formatVND(r.codAmount)}</td>
+          <>
+            <TableToolsFor tableId="operations-dwell-page" />
+            <div className="overflow-x-auto">
+              <table id="operations-dwell-page" className="w-full min-w-[1000px] text-[12.5px]">
+                <thead className="border-b bg-muted/30 text-left text-[11.5px] uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">Mức</th>
+                    <th className="px-4 py-2 font-medium">Vận đơn</th>
+                    <th className="px-4 py-2 font-medium">Chặng hiện tại</th>
+                    <th className="px-4 py-2 font-medium">Vào chặng lúc</th>
+                    <th className="px-4 py-2 font-medium">Tuổi chặng</th>
+                    <th className="px-4 py-2 font-medium">ĐVVC im lặng</th>
+                    <th className="px-4 py-2 font-medium">Hạn</th>
+                    <th className="px-4 py-2 font-medium">Phòng</th>
+                    <th className="px-4 py-2 font-medium">COD treo</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y">
+                  {rows.slice(0, 300).map((r) => (
+                    <tr key={r.shipmentId} className="align-top">
+                      <td className="px-4 py-2">
+                        <span
+                          className={cn(
+                            "inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold",
+                            r.level ? DWELL_LEVEL_TONE[r.level] : "border border-dashed bg-muted/40 text-muted-foreground",
+                          )}
+                          title={r.unrated ? DWELL_UNRATED_HINT[r.unrated] : undefined}
+                        >
+                          {r.level ? DWELL_LEVEL_LABEL[r.level] : r.unrated ? DWELL_UNRATED_LABEL[r.unrated] : MISSING_TEXT}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        {r.orderId ? (
+                          <Link href={`/orders/${r.orderId}`} className="font-medium hover:underline">
+                            {r.tracking}
+                          </Link>
+                        ) : (
+                          <span className="font-medium">{r.tracking}</span>
+                        )}
+                        <span className="block text-[11.5px] text-muted-foreground">
+                          {r.orderSystemId ? `#${r.orderSystemId} · ` : ""}
+                          {r.customer || MISSING_TEXT} · {r.phone || MISSING_TEXT}
+                          {r.careOpen ? <span className="ml-1 text-emerald-700 dark:text-emerald-400">· đang có người care</span> : null}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        {r.stageLabel}
+                        {r.rawStatus ? <span className="block text-[11.5px] text-muted-foreground">ĐVVC: {r.rawStatus}</span> : null}
+                      </td>
+                      <td className="px-4 py-2">
+                        {/* CHƯA BIẾT in ra dấu gạch, KHÔNG in thành một mốc giả. */}
+                        {r.stageSince ? formatDateTime(r.stageSince) : MISSING_TEXT}
+                        {r.sinceBasis ? <span className="block text-[11.5px] text-muted-foreground">{DWELL_BASIS_LABEL[r.sinceBasis]}</span> : null}
+                      </td>
+                      <td className="px-4 py-2 numeric">
+                        {r.statusAgeHours === null ? MISSING_TEXT : r.statusAgeLabel}
+                        {r.eventsInRun > 1 ? (
+                          <span className="block text-[11.5px] text-muted-foreground">{formatNumber(r.eventsInRun)} tin cùng chặng</span>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-2 numeric text-muted-foreground">{r.lastCarrierUpdateAt ? formatTimeAgo(r.lastCarrierUpdateAt) : MISSING_TEXT}</td>
+                      <td className="px-4 py-2 numeric">
+                        {r.slaHours === null ? <span className="text-muted-foreground">không đặt hạn</span> : `${r.slaHours} giờ`}
+                        {r.slaBreached === true ? <span className="block text-[11.5px] font-semibold text-rose-600 dark:text-rose-400">quá hạn</span> : null}
+                      </td>
+                      <td className="px-4 py-2">
+                        {r.teamLabel}
+                        {r.divergence ? (
+                          <span className="block text-[11.5px] text-amber-700 dark:text-amber-400">{DIVERGENCE_LABEL[r.divergence]}</span>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-2 numeric">{formatVND(r.codAmount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
         {rows.length > 300 ? (

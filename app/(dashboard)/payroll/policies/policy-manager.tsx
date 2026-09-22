@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { TableToolsFor } from "@/components/data-table/table-tools";
 import { useRouter } from "next/navigation";
 import { Copy, Plus, Rocket, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -254,8 +255,9 @@ function PolicyCard({ policy, editing, onToggleEdit }: { policy: PolicyView; edi
         </Button>
       }
     >
+      <TableToolsFor tableId="payroll-policies-policy-manager" />
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-[13px]">
+        <table id="payroll-policies-policy-manager" className="w-full min-w-[640px] text-[13px]">
           <thead className="text-left text-muted-foreground">
             <tr>
               <th className="py-1 pr-3 font-medium">Phiên bản</th>
