@@ -223,6 +223,18 @@ export async function techOverviewCounts() {
         running: sql<number>`count(*) filter (where ${schema.techAgentRuns.status} = 'RUNNING')`,
         failed24h: sql<number>`count(*) filter (where ${schema.techAgentRuns.status} = 'FAILED' and ${schema.techAgentRuns.startedAt} >= ${homNay})`,
         last24h: sql<number>`count(*) filter (where ${schema.techAgentRuns.startedAt} >= ${homNay})`,
+        /*
+          TIỀN 24 GIỜ QUA — cận dưới, và nói ra mình là cận dưới.
+
+          22/09/2026: chủ shop hết sạch tín dụng API và hỏi "tiền đi đâu". Không màn hình nào trả
+          lời được. Tiền nay nằm ở `metadata.chiPhi`, nhưng dữ liệu có mà không ai nhìn thấy thì
+          vẫn là không đo được.
+
+          Lượt chạy TRƯỚC bản vá không có khoá ấy — chúng được ĐẾM RIÊNG chứ không cộng thành 0,
+          nếu không phòng này trông như miễn phí (mục 42, và không backfill — mục 8.8).
+        */
+        usd24h: sql<string>`coalesce(sum((${schema.techAgentRuns.metadata} #>> '{chiPhi,usd}')::numeric) filter (where ${schema.techAgentRuns.startedAt} >= ${homNay}), 0)`,
+        chuaDoDuoc24h: sql<number>`count(*) filter (where ${schema.techAgentRuns.startedAt} >= ${homNay} and (${schema.techAgentRuns.metadata} #>> '{chiPhi,usd}') is null)`,
       })
       .from(schema.techAgentRuns),
     db
@@ -253,7 +265,7 @@ export async function techOverviewCounts() {
       total: so(task?.total),
     },
     agents: { enabled: so(agent?.enabled), busy: so(agent?.busy), total: so(agent?.total) },
-    runs: { running: so(run?.running), failed24h: so(run?.failed24h), last24h: so(run?.last24h) },
+    runs: { running: so(run?.running), failed24h: so(run?.failed24h), last24h: so(run?.last24h), usd24h: Number(run?.usd24h ?? 0), chuaDoDuoc24h: so(run?.chuaDoDuoc24h) },
     deployments: { today: so(deploy?.today), failedToday: so(deploy?.failedToday), lastAt: deploy?.lastAt ? new Date(deploy.lastAt) : null },
     incidents: { open: so(incident?.open), sev01: so(incident?.sev01) },
   };
