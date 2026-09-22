@@ -250,7 +250,17 @@ export async function testAdsDecision(db: Db) {
     assert.equal(d.totals.deliveredRevenue, d.rows.reduce((t, x) => t + x.deliveredRevenue, 0), `${dimension}: tổng doanh thu giao TC phải bằng tổng các dòng`);
     assert.equal(d.totals.profitAfterAds, d.rows.reduce((t, x) => t + x.profitAfterAds, 0), `${dimension}: tổng lợi nhuận sau QC phải bằng tổng các dòng`);
     // Độ tin cậy phải luôn đi kèm — bảng không được im lặng về việc mình chỉ mô tả phần quy kết được.
-    assert.ok(d.confidence.coveragePct >= 0 && d.confidence.coveragePct <= 100, `${dimension}: độ phủ phải là phần trăm hợp lệ`);
+    assert.ok(
+      d.confidence.coveragePct === null || (d.confidence.coveragePct >= 0 && d.confidence.coveragePct <= 100),
+      `${dimension}: độ phủ phải là phần trăm hợp lệ hoặc null (CHƯA ĐO ĐƯỢC, không phải 0)`,
+    );
+    // Mẫu số phải là ĐƠN CÓ DẤU VẾT FACEBOOK, và nó không bao giờ lớn hơn tổng đơn.
+    assert.ok(d.confidence.attributableOrders <= d.confidence.totalOrders, `${dimension}: mẫu số quy kết không được lớn hơn tổng đơn`);
+    assert.equal(
+      d.confidence.attributableOrders + d.confidence.notFromAdsOrders,
+      d.confidence.totalOrders,
+      `${dimension}: đơn trong mẫu số cộng đơn ngoài quảng cáo phải bằng tổng đơn`,
+    );
     assert.ok(["SUFFICIENT", "DATA_INSUFFICIENT"].includes(d.confidence.verdict));
     assert.ok(d.pending.spendInsufficientData >= 0 && d.pending.spendWithoutOrders >= 0);
   }
