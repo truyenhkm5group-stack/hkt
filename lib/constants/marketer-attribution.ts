@@ -18,7 +18,7 @@
  * Hai mắt xích đầu đã có sẵn ở `lib/queries/ads-attribution-link.ts` và được ROAS dùng — tệp này
  * KHÔNG viết lại chúng, chỉ nối thêm mắt xích thứ ba.
  *
- * ─── ĐƯỜNG THỨ HAI: FANPAGE, VÀ VÌ SAO NÓ PHẢI CÓ MẶT ───
+ * ─── ĐƯỜNG THỨ HAI VÀ THỨ BA: FANPAGE VÀ LANDING, VÌ SAO CHÚNG PHẢI CÓ MẶT ───
  *
  * Đo production 22/09/2026 trên 1.782 đơn ĐÃ KẾT THÚC: đường quảng cáo nói được **720 đơn (40,4%)**
  * — 1.031 đơn không mang `ad_id` và cũng không có `post_id` nối về đúng một chiến dịch. Đó không
@@ -34,6 +34,21 @@
  * Nó phủ **1.727/1.782 đơn (96,9%)**. Tệp này KHÔNG tự tra sổ phân công: nó đọc ẢNH CHỤP, vì ảnh
  * chụp là hàm của (page, MỐC ĐƠN LÊN) chứ không phải (page, HÔM NAY) — đổi người phụ trách hôm nay
  * không được viết lại báo cáo tháng trước (`lib/constants/fanpage-attribution.ts`, luật bất biến 1).
+ *
+ * Trong 1.727 đơn ấy có **131 đơn KHÔNG đi bằng fanpage**: đơn LANDING không mang `page_id` nên
+ * chúng được quy kết bằng **UTM tracking** của chính dòng form (`lib/constants/landing-attribution.ts`:
+ * `ad_id` → `adset_id` → `campaign_id` → tên chiến dịch KHỚP TUYỆT ĐỐI). Đo 22/09/2026 trên đơn đã
+ * kết thúc: 106 đơn khớp bằng tên chiến dịch, 20 bằng `adset_id`, 5 bằng `ad_id`.
+ *
+ * `order_attributions.attribution_source` phân biệt hai thứ đó, và tệp này PHẢI đọc nó. Gộp chúng
+ * dưới một nhãn là in "131 đơn theo fanpage phụ trách" cho 131 đơn mà fanpage chưa bao giờ nói một
+ * lời nào — một câu sai, và sai theo hướng làm người đọc tin vào một căn cứ không tồn tại. Hai
+ * nguồn cũng sửa ở hai chỗ khác nhau: fanpage sửa ở sổ phân công, landing sửa ở ô tracking của
+ * form và ở sổ quảng cáo.
+ *
+ * Thứ tự giữa FANPAGE và LANDING KHÔNG được quyết ở đây: `rebuildFanpageAttribution` đã chọn trước
+ * (đơn có `page_id` thật thì chứng từ Pancake mạnh hơn mọi suy luận từ tracking), và mỗi đơn chỉ
+ * có ĐÚNG MỘT dòng ảnh chụp. Nên hai nguồn ấy không bao giờ cùng lên tiếng ở tệp này.
  *
  * ─── THỨ TỰ THẨM QUYỀN, VÀ CON SỐ NÓI RẰNG NÓ HIẾM KHI QUAN TRỌNG ───
  *
@@ -80,17 +95,20 @@ export const MARKETER_UNRESOLVED_LABEL = "Chưa xác định";
  * vào fanpage ai đang phụ trách lúc nó lên". Cả hai đều là KHAI BÁO của chủ shop đi bằng KHOÁ —
  * không đường nào dò chữ trong tên chiến dịch hay tên page.
  */
-export const MARKETER_EVIDENCE = ["AD_CAMPAIGN", "FANPAGE_ASSIGNMENT"] as const;
+export const MARKETER_EVIDENCE = ["AD_CAMPAIGN", "FANPAGE_ASSIGNMENT", "LANDING_UTM"] as const;
 export type MarketerEvidence = (typeof MARKETER_EVIDENCE)[number];
 
 export const MARKETER_EVIDENCE_LABEL: Record<MarketerEvidence, string> = {
   AD_CAMPAIGN: "theo chiến dịch quảng cáo",
   FANPAGE_ASSIGNMENT: "theo fanpage phụ trách",
+  LANDING_UTM: "theo UTM của landing",
 };
 
 export const MARKETER_EVIDENCE_HINT: Record<MarketerEvidence, string> = {
   AD_CAMPAIGN: "Đơn mang ad_id (hoặc post_id thuộc đúng một chiến dịch) → chiến dịch → người phụ trách khai ở bảng chi tiêu quảng cáo.",
   FANPAGE_ASSIGNMENT: "Đơn phát sinh trên một fanpage đã có người phụ trách TẠI MỐC ĐƠN LÊN, đọc từ ảnh chụp order_attributions — không phải người phụ trách hôm nay.",
+  LANDING_UTM:
+    "Đơn landing không có fanpage, nên quy kết đi bằng ô tracking của chính dòng form: ad_id → adset_id → campaign_id → tên chiến dịch KHỚP TUYỆT ĐỐI (từng ký tự) với bảng chi tiêu. Khớp tuyệt đối là một KHOÁ, không phải dò chữ.",
 };
 
 /**
@@ -98,30 +116,39 @@ export const MARKETER_EVIDENCE_HINT: Record<MarketerEvidence, string> = {
  *
  * Đổi thứ tự ở đây là đổi cho mọi báo cáo đi qua `orderMarketerJoin()` cùng lúc, và phải có chủ
  * shop chốt (AGENTS.md mục 7). Xem khối đầu tệp về chỗ bảng lương đang khai ngược lại.
+ *
+ * `FANPAGE_ASSIGNMENT` và `LANDING_UTM` đứng cạnh nhau ở đây cho ĐỦ danh sách, nhưng chúng KHÔNG
+ * bao giờ tranh nhau tại tệp này: mỗi đơn có đúng một dòng `order_attributions`, và việc chọn giữa
+ * hai nguồn ấy đã xong ở `rebuildFanpageAttribution` (page thật thắng tracking). Chỗ duy nhất có
+ * thể có hai tiếng nói cùng lúc là QUẢNG CÁO vs ẢNH CHỤP.
  */
-export const MARKETER_EVIDENCE_ORDER: readonly MarketerEvidence[] = ["AD_CAMPAIGN", "FANPAGE_ASSIGNMENT"];
+export const MARKETER_EVIDENCE_ORDER: readonly MarketerEvidence[] = ["AD_CAMPAIGN", "FANPAGE_ASSIGNMENT", "LANDING_UTM"];
 
 export const MARKETER_LINK_STATES = [
   "RESOLVED",
   "RESOLVED_BY_PAGE",
+  "RESOLVED_BY_LANDING",
   "NO_CAMPAIGN",
   "CAMPAIGN_NO_MARKETER",
   "AMBIGUOUS",
   "PAGE_NO_ASSIGNMENT",
+  "LANDING_UNRESOLVED",
   "DUPLICATE_ORDER",
 ] as const;
 export type MarketerLinkState = (typeof MARKETER_LINK_STATES)[number];
 
-/** Hai tình trạng ghi được tên một người. Mọi tình trạng còn lại hiện dưới nhãn "Chưa xác định". */
-export const MARKETER_RESOLVED_STATES: readonly MarketerLinkState[] = ["RESOLVED", "RESOLVED_BY_PAGE"];
+/** Ba tình trạng ghi được tên một người. Mọi tình trạng còn lại hiện dưới nhãn "Chưa xác định". */
+export const MARKETER_RESOLVED_STATES: readonly MarketerLinkState[] = ["RESOLVED", "RESOLVED_BY_PAGE", "RESOLVED_BY_LANDING"];
 
 export const MARKETER_LINK_LABEL: Record<MarketerLinkState, string> = {
   RESOLVED: "Quy kết được — theo chiến dịch quảng cáo",
   RESOLVED_BY_PAGE: "Quy kết được — theo fanpage phụ trách",
+  RESOLVED_BY_LANDING: "Quy kết được — theo UTM của landing",
   NO_CAMPAIGN: "Không nối được về chiến dịch, cũng không có fanpage",
   CAMPAIGN_NO_MARKETER: "Chiến dịch chưa khai marketer phụ trách",
   AMBIGUOUS: "Chiến dịch có nhiều marketer — nhập nhằng",
   PAGE_NO_ASSIGNMENT: "Fanpage chưa gán marketer tại mốc đơn lên",
+  LANDING_UNRESOLVED: "Đơn landing — tracking chưa dẫn về được marketer nào",
   DUPLICATE_ORDER: "Đơn bị nhập lại — cố ý không quy kết cho ai",
 };
 
@@ -129,12 +156,15 @@ export const MARKETER_LINK_LABEL: Record<MarketerLinkState, string> = {
 export const MARKETER_LINK_FIX: Record<MarketerLinkState, string> = {
   RESOLVED: "",
   RESOLVED_BY_PAGE: "",
+  RESOLVED_BY_LANDING: "",
   NO_CAMPAIGN:
     "Đơn không có ad_id, không có post_id nối được về đúng một chiến dịch, và Pancake cũng không gửi page_id (đơn nhập tay, đơn landing, nguồn khác). Chạy đồng bộ Facebook (job facebook-ad-index) để bổ sung mối nối bài viết → chiến dịch.",
   CAMPAIGN_NO_MARKETER: "Chiến dịch đã nối được nhưng chưa ai khai người phụ trách. Khai ở Quảng cáo → Ghép chiến dịch với marketer.",
   AMBIGUOUS: "Cùng một chiến dịch đang mang hai marketer khác nhau trong bảng chi tiêu. Chọn một người ở Quảng cáo → Ghép chiến dịch, hoặc tách chiến dịch.",
   PAGE_NO_ASSIGNMENT:
     "Đơn có fanpage nhưng tại MỐC ĐƠN LÊN chưa ai được phân công page đó. Gán ở Marketing → Fanpage → Gán fanpage → marketer, và lùi mốc hiệu lực về ngày đơn đầu tiên của page.",
+  LANDING_UNRESOLVED:
+    "Đơn có dòng landing nhưng ô tracking chưa dẫn về được một marketer. LÝ DO CỤ THỂ nằm ở Marketing → Fanpage (form thiếu ô tracking · chiến dịch chưa có trong bảng chi tiêu · nhóm quảng cáo chưa tra về ERP · chiến dịch chưa khai người phụ trách) — mỗi lý do sửa một chỗ khác nhau, nên đi đọc lý do trước khi sửa.",
   DUPLICATE_ORDER:
     "Đơn này được kết luận là một lần đặt bị nhập lại, nên quy kết cố ý để trống (xem Marketing → Fanpage). Sai thì sửa ở đó, KHÔNG ép tên vào đây.",
 };

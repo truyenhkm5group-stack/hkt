@@ -12,6 +12,11 @@ import { cn } from "@/lib/utils";
 
 const PCT = (v: number | null) => (v === null ? "—" : `${v.toFixed(1)}%`);
 
+/** Giải thích cả ba đường quy kết, dựng một lần — mỗi dòng người đều treo cùng một câu. */
+const EVIDENCE_TITLE = MARKETER_EVIDENCE.map((e) => `${MARKETER_EVIDENCE_LABEL[e]}: ${MARKETER_EVIDENCE_HINT[e]}`).join(`
+
+`);
+
 /* ═══════════════════ ĐỘ PHỦ DỮ LIỆU ═══════════════════ */
 
 /**
@@ -220,7 +225,7 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-muted-foreground">
         <span className="font-medium text-foreground">Quy kết bằng:</span>
         {MARKETER_EVIDENCE.map((e) => (
-          <span key={e} title={MARKETER_EVIDENCE_HINT[e]}>
+          <span key={e} title={MARKETER_EVIDENCE_HINT[e]} className={coverage.byEvidence[e] ? undefined : "opacity-60"}>
             <b className="tabular-nums text-foreground">{formatNumber(coverage.byEvidence[e])}</b> {MARKETER_EVIDENCE_LABEL[e]}
           </span>
         ))}
@@ -276,10 +281,15 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
                       trần một màn hình là ~1.150px. Ô hai tầng giữ được cả hai con số mà không
                       phải bỏ cột nào.
                     */
-                    <div className="text-[11px] text-muted-foreground" title={`${MARKETER_EVIDENCE_HINT.AD_CAMPAIGN}
-
-${MARKETER_EVIDENCE_HINT.FANPAGE_ASSIGNMENT}`}>
-                      {formatNumber(m.byEvidence.AD_CAMPAIGN)} {MARKETER_EVIDENCE_LABEL.AD_CAMPAIGN} · {formatNumber(m.byEvidence.FANPAGE_ASSIGNMENT)} {MARKETER_EVIDENCE_LABEL.FANPAGE_ASSIGNMENT}
+                    <div className="text-[11px] text-muted-foreground" title={EVIDENCE_TITLE}>
+                      {/*
+                        Chỉ in loại bằng chứng THỰC SỰ có đơn. Một người chỉ chạy fanpage mà dòng
+                        của họ vẫn in "0 theo UTM của landing" là ba con số cho một sự thật, và hai
+                        trong ba là nhiễu.
+                      */}
+                      {MARKETER_EVIDENCE.filter((e) => m.byEvidence[e] > 0)
+                        .map((e) => `${formatNumber(m.byEvidence[e])} ${MARKETER_EVIDENCE_LABEL[e]}`)
+                        .join(" · ")}
                     </div>
                   )}
                 </td>
@@ -313,10 +323,11 @@ ${MARKETER_EVIDENCE_HINT.FANPAGE_ASSIGNMENT}`}>
         </table>
       </div>
       <p className="mt-2 text-[11.5px] text-muted-foreground">
-        Quy kết đi bằng <b>khoá</b>, không dò chữ trong tên chiến dịch hay tên page. Hai đường, xét theo thứ tự: (1) đơn → ad_id / post_id → <b>chiến dịch</b> → người phụ trách khai ở bảng chi tiêu;
-        (2) đơn → <b>fanpage</b> → người phụ trách <b>tại mốc đơn lên</b> (ảnh chụp, nên đổi người phụ trách hôm nay không viết lại báo cáo tháng trước). Chiến dịch mang hai người phụ trách là nhập
-        nhằng; fanpage chưa gán người tại mốc ấy cũng vậy — cả hai nằm ở nhóm &ldquo;Chưa xác định&rdquo; và <b>không</b> bị ép cho ai. Con số dự báo ở bảng khác <b>không</b> được dùng để thưởng phạt
-        — chỉ kết quả cuối.
+        Quy kết đi bằng <b>khoá</b>, không dò chữ trong tên chiến dịch hay tên page. Ba đường, xét theo thứ tự: (1) đơn → ad_id / post_id → <b>chiến dịch</b> → người phụ trách khai ở bảng chi tiêu;
+        (2) đơn → <b>fanpage</b> → người phụ trách <b>tại mốc đơn lên</b> (ảnh chụp, nên đổi người phụ trách hôm nay không viết lại báo cáo tháng trước); (3) đơn <b>landing</b> không có fanpage → ô{" "}
+        <b>UTM</b> của chính dòng form (ad_id → adset_id → campaign_id → tên chiến dịch khớp <b>tuyệt đối</b> từng ký tự). Chiến dịch mang hai người phụ trách là nhập nhằng; fanpage chưa gán người tại
+        mốc ấy, và landing có tracking nhưng chưa dẫn về ai, cũng vậy — tất cả nằm ở nhóm &ldquo;Chưa xác định&rdquo; và <b>không</b> bị ép cho ai. Con số dự báo ở bảng khác <b>không</b> được dùng để
+        thưởng phạt — chỉ kết quả cuối.
       </p>
     </>
   );
