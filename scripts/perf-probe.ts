@@ -274,6 +274,40 @@ async function main() {
   const all = resolvePeriod({ period: "all" }, "all");
 
   // Đo TRUNG TÂM ĐIỀU KHIỂN TRƯỚC trang chủ: trang chủ gọi nó bên trong, nên đo sau là đo đệm.
+  /*
+    ═══ HAI CÔNG CỤ COPILOT ĐƯỢC DÙNG NHIỀU NHẤT — ĐO TRƯỚC MỌI THỨ KHÁC ═══
+
+    ĐO THẬT 22/09/2026 từ sổ `ai_interactions`, 7 ngày gần nhất:
+
+        công cụ                  lượt   TB      max
+        get_care_queue_summary     76   12,9s   64,1s
+        get_data_freshness         49   16,8s   63,3s
+
+    Đây là ĐỘ TRỄ NGƯỜI DÙNG THẬT CHỊU: mọi câu hỏi Copilot đều chờ ít nhất chừng ấy. Câu hỏi của
+    chủ shop lúc 03:14 mất 63,2 giây.
+
+    Cả hai hàm ĐÃ có `memo()` (30s và 60s) — nên đây không phải chuyện thiếu đệm, mà là bản thân
+    truy vấn nặng. Probe xoá đệm trước mỗi phép đo nên nó dựng lại đúng điều kiện lần gọi ĐẦU,
+    tức đúng thứ người dùng gặp khi đệm vừa hết hạn.
+
+    Đo TRƯỚC mọi thứ khác vì hàng đợi care là thứ được hỏi nhiều nhất trong ngày.
+  */
+  const care = await import("@/lib/queries/care-workbench");
+  await timed("/shipments (công cụ AI)", "getCareQueue", () => care.getCareQueue());
+  const fresh = await import("@/lib/queries/logistics-freshness");
+  await timed("/shipments (công cụ AI)", "getLogisticsFreshness", () => fresh.getLogisticsFreshness());
+
+  /*
+    PHỄU BÁN HÀNG — 34,4 giây lúc máy RẢNH, và là trang duy nhất ĐỔ khi máy bận (deploy #392:
+    hết kết nối CSDL). Khác hai hàm trên: bốn hàm này KHÔNG có `memo()` ở bất cứ tầng nào.
+  */
+  const funnel = await import("@/lib/queries/sales-funnel");
+  await timed("/reports/funnel", "getSalesFunnel", () => funnel.getSalesFunnel(month));
+  await timed("/reports/funnel", "getAttributionCoverage", () => funnel.getAttributionCoverage(month));
+  await timed("/reports/funnel", "getFunnelBySource", () => funnel.getFunnelBySource(month));
+  const staff = await import("@/lib/queries/staff-performance");
+  await timed("/reports/funnel", "getStaffPerformance", () => staff.getStaffPerformance(month, "sellerName"));
+
   const tower = await import("@/lib/queries/control-tower");
   await timed("/ (thành phần)", "getControlTower", () => tower.getControlTower());
 
