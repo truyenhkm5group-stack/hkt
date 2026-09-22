@@ -64,6 +64,34 @@ export const POST_TO_CAMPAIGN = sql`(
 )`;
 
 /**
+ * ───────────── BÀI VIẾT → NHÓM, VÀ BÀI VIẾT → MẨU ─────────────
+ *
+ * Cùng một luật với `POST_TO_CAMPAIGN`, chỉ đổi mức: chỉ nối khi bài viết ứng với **đúng một**
+ * nhóm (hoặc đúng một mẩu). Bài được nhiều nhóm chạy thì ở cấp nhóm là NHẬP NHẰNG — nhưng cấp
+ * chiến dịch của nó vẫn có thể xác định, và đó là lý do ba mức phải tính riêng chứ không suy ra
+ * từ nhau.
+ *
+ * Trước 22/09/2026 hai mức này không tồn tại, và hai cấp dưới chỉ đi bằng `ad_id`. Khi ấy điều đó
+ * hợp lý: `fb_ads` chỉ có 185 dòng nên chẳng có gì để nối. Nay sổ được điền từ TIỀN (1.254 mẩu),
+ * và bộ tra bài viết đi hỏi cả những mẩu ấy — nên hai mức này mới có nguyên liệu để chạy.
+ */
+export const POST_TO_ADSET = sql`(
+  select fa.post_id, min(fa.adset_id) as adset_id
+  from fb_ads fa
+  where fa.post_id is not null and fa.post_id ~ '^[0-9]{5,}$' and fa.adset_id is not null
+  group by fa.post_id
+  having count(distinct fa.adset_id) = 1
+)`;
+
+export const POST_TO_AD = sql`(
+  select fa.post_id, min(fa.id) as ad_id
+  from fb_ads fa
+  where fa.post_id is not null and fa.post_id ~ '^[0-9]{5,}$'
+  group by fa.post_id
+  having count(distinct fa.id) = 1
+)`;
+
+/**
  * CHIẾN DỊCH CỦA MỘT ĐƠN, theo thứ tự thẩm quyền:
  *  1. `ad_id` do Pancake gửi → chiến dịch của mẩu đó (bằng chứng trực tiếp nhất);
  *  2. `post_id` → chiến dịch, chỉ khi bài đó chỉ thuộc MỘT chiến dịch;
@@ -72,6 +100,22 @@ export const POST_TO_CAMPAIGN = sql`(
 export const ORDER_CAMPAIGN_ID = sql<string | null>`coalesce(
   (select fa.campaign_id from fb_ads fa where fa.id = ${o.adId}),
   (select p.campaign_id from ${POST_TO_CAMPAIGN} p where p.post_id = ${ORDER_POST_KEY})
+)`;
+
+/**
+ * NHÓM và MẨU của một đơn — cùng bậc thang thẩm quyền với chiến dịch.
+ *
+ * Cả hai là phép BỔ SUNG thuần: vế đầu giữ nguyên hành vi cũ (đi bằng `ad_id`), vế sau chỉ chen
+ * vào khi vế đầu trả `NULL`. Không đơn nào đang quy kết được bị đổi quy kết.
+ */
+export const ORDER_ADSET_ID = sql<string | null>`coalesce(
+  (select fa.adset_id from fb_ads fa where fa.id = ${o.adId}),
+  (select p.adset_id from ${POST_TO_ADSET} p where p.post_id = ${ORDER_POST_KEY})
+)`;
+
+export const ORDER_AD_ID = sql<string | null>`coalesce(
+  nullif(${o.adId}, ''),
+  (select p.ad_id from ${POST_TO_AD} p where p.post_id = ${ORDER_POST_KEY})
 )`;
 
 /** Đơn nối được về chiến dịch bằng bài viết (không phải bằng ad_id). */

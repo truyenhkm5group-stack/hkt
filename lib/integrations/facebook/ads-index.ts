@@ -3,7 +3,7 @@
  * → ghi nhận đơn, doanh thu cho đúng marketer (theo quy tắc nhận diện marketer của chiến dịch), kể cả khi nhiều người chạy chung một fanpage.
  * Chỉ tra các ad_id chưa có trong bảng (hoặc tra lại sau 7 ngày với ad thiếu), mỗi lô 50 id.
  */
-import { and, gte, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { env } from "@/lib/env";
 import { getFacebookAdsClient } from "@/lib/integrations/facebook/client";
@@ -20,6 +20,8 @@ import { staleMemo } from "@/lib/cache";
 export type AdIndexResult = {
   /** Mã quảng cáo phân biệt, hợp lệ, xuất hiện trong đơn của kỳ xét. */
   eligible: number;
+  /** Mẩu đã có trong sổ (đến từ chi tiêu) nhưng CHƯA có bài viết — nguồn ứng viên thứ hai. */
+  fromSpend: number;
   /** Đã có trong danh mục và không cần tra lại. */
   alreadyIndexed: number;
   /** Cần tra vì thiếu mối nối bài viết. */
@@ -35,9 +37,18 @@ export type AdIndexResult = {
   errors: string[];
 };
 
+/**
+ * Trần số mẩu hỏi bài viết trong MỘT lượt, cho nguồn ứng viên "đến từ chi tiêu".
+ *
+ * `getAdsByIds` gom 50 mã mỗi lời gọi, nên 300 là 6 lời gọi — đủ nhỏ để không đụng hạn mức khi
+ * chạy cạnh các job khác, đủ lớn để 1.146 mẩu tồn đọng cạn trong khoảng bốn lượt. Đây là trần KỸ
+ * THUẬT (nhịp gọi API), không phải ngưỡng nghiệp vụ.
+ */
+const POST_LINK_BATCH = 300;
+
 /** Tra Facebook cho các ad_id trong đơn N ngày gần đây chưa có trong fb_ads */
 export async function syncFacebookAdIndex(options: { days?: number; log?: (m: string) => void } = {}): Promise<AdIndexResult> {
-  const result: AdIndexResult = { eligible: 0, alreadyIndexed: 0, needPostLink: 0, candidates: 0, fetched: 0, resolved: 0, withoutPostLink: 0, missing: 0, invalid: 0, errors: [] };
+  const result: AdIndexResult = { eligible: 0, fromSpend: 0, alreadyIndexed: 0, needPostLink: 0, candidates: 0, fetched: 0, resolved: 0, withoutPostLink: 0, missing: 0, invalid: 0, errors: [] };
   const log = options.log ?? (() => undefined);
   if (!env.facebook.accessToken) {
     result.errors.push("Chưa cấu hình FACEBOOK_ACCESS_TOKEN");
@@ -78,8 +89,48 @@ export async function syncFacebookAdIndex(options: { days?: number; log?: (m: st
       ),
     );
   const knownSet = new Set(known.map((k) => k.id));
-  const todo = wanted.filter((id) => !knownSet.has(id));
+  const todoTuDon = wanted.filter((id) => !knownSet.has(id));
   result.alreadyIndexed = knownSet.size;
+
+  /**
+   * ───────────── NGUỒN ỨNG VIÊN THỨ HAI: MẨU ĐẾN TỪ CHI TIÊU ─────────────
+   *
+   * Từ 22/09/2026 `ad_spends` ghi ở hạt MẨU, nên `fb_ads` được điền từ TIỀN — đo lượt đầu: **1.146
+   * mẩu mới** (186 → 1.254). Nhưng insights KHÔNG trả `effective_object_story_id`, nên tất cả
+   * chúng vào sổ với `post_id` rỗng.
+   *
+   * Và chúng sẽ **ở mãi như vậy**: danh sách `wanted` ở trên chỉ lấy `ad_id` XUẤT HIỆN TRONG ĐƠN,
+   * nên một mẩu chưa đẻ ra đơn không bao giờ được hỏi bài viết — trong khi bài viết chính là thứ
+   * DUY NHẤT nối được những đơn mà Pancake không gửi `ad_id` (đo 22/09: **286 đơn** nguồn Facebook
+   * mất dấu hoàn toàn). Vòng luẩn quẩn đóng lại ở đúng chỗ này.
+   *
+   * ─── XẾP THEO TIỀN, KHÔNG XẾP THEO NGÀY ───
+   *
+   * Hỏi 1.146 mẩu một lượt là 23 lời gọi API và một cú đập vào hạn mức. Nên mỗi lượt chỉ hỏi
+   * `POST_LINK_BATCH` mẩu, và hỏi **mẩu tiêu nhiều tiền nhất trước**: quy kết của một mẩu 5 triệu
+   * đáng hơn quy kết của một mẩu 20 nghìn, và số lượt chạy thì như nhau. Sau mỗi lượt `fetched_at`
+   * cập nhật nên mẩu đã hỏi không quay lại — hàng đợi tự cạn thay vì quay vòng.
+   */
+  const spendRecent = db
+    .select({ adId: schema.adSpends.adId, chi: sql<number>`sum(${schema.adSpends.spend})`.as("chi") })
+    .from(schema.adSpends)
+    .where(and(isNotNull(schema.adSpends.adId), gte(schema.adSpends.spendDate, since)))
+    .groupBy(schema.adSpends.adId)
+    .as("chi_gan_day");
+
+  const tuChiTieu = await db
+    .select({ id: schema.fbAds.id })
+    .from(schema.fbAds)
+    .leftJoin(spendRecent, eq(spendRecent.adId, schema.fbAds.id))
+    .where(and(sql`${schema.fbAds.postId} is null`, sql`${schema.fbAds.missing} = false`, lt(schema.fbAds.fetchedAt, retryBefore)))
+    .orderBy(sql`coalesce(${spendRecent.chi}, 0) desc`)
+    .limit(POST_LINK_BATCH);
+  const tuDonSet = new Set(todoTuDon);
+  const themTuChiTieu = tuChiTieu.map((r) => r.id).filter((id) => !tuDonSet.has(id));
+  result.fromSpend = themTuChiTieu.length;
+
+  // Ứng viên từ ĐƠN đứng trước: chúng mở khoá quy kết ngay lập tức, còn nhóm kia mở khoá về sau.
+  const todo = [...todoTuDon, ...themTuChiTieu];
   result.candidates = todo.length;
   const [{ thieuNoi }] = await db
     .select({ thieuNoi: sql<number>`count(*) filter (where ${schema.fbAds.postId} is null and ${schema.fbAds.missing} = false)` })
@@ -103,7 +154,9 @@ export async function syncFacebookAdIndex(options: { days?: number; log?: (m: st
   const mapping = await loadAdsMapping();
   result.resolved = infos.filter((i) => !i.missing && i.campaignId && resolveMarketer(i.campaignId, i.campaignName, i.accountId, mapping)).length;
   if (result.fetched > 0) staleMemo();
-  log(`Tra ${todo.length} ad_id: ${result.fetched} có chiến dịch, ${result.missing} không tra được, ${result.resolved} nhận diện được marketer`);
+  log(
+    `Tra ${todo.length} ad_id (${todoTuDon.length} từ đơn · ${result.fromSpend} từ chi tiêu): ${result.fetched} có chiến dịch, ${result.missing} không tra được, ${result.resolved} nhận diện được marketer`,
+  );
   return result;
 }
 

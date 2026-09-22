@@ -3,6 +3,8 @@ import { sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { getAttributionLinkReport } from "@/lib/queries/ads-attribution-link";
+import { getAdsDecision } from "@/lib/queries/ads-decision";
+import { clearMemo } from "@/lib/cache";
 import { getAdsRoas } from "@/lib/queries/ads-roas";
 
 const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
@@ -80,11 +82,54 @@ export async function testAdsAttributionLink(db: Db) {
   assert.ok(linked.ceiling >= linked.coverageAfter, "trần lý thuyết không thể thấp hơn độ phủ đạt được");
   assert.ok(linked.coverageAfter >= 0 && linked.coverageAfter <= 100, "độ phủ phải trong 0–100");
 
+  /*
+    ───────── 6. BA MỨC NỐI QUA BÀI VIẾT LÀ BA PHÉP TÍNH RIÊNG ─────────
+
+    Đây là tính chất dễ bị "đơn giản hoá" nhất, và đơn giản hoá nó là bịa quy kết.
+
+    Một bài do HAI mẩu cùng chạy nhưng cả hai ở CÙNG một nhóm: cấp mẩu là NHẬP NHẰNG (chọn bừa một
+    mẩu là gán doanh thu cho sai chỗ), trong khi cấp NHÓM và cấp CHIẾN DỊCH vẫn xác định. Nếu ba
+    mức được suy ra từ nhau thì hoặc mất phần nối được ở cấp nhóm, hoặc bịa ra một mẩu ở cấp mẩu.
+
+    Fixture ở mục 1 đúng là hình dạng ấy — thêm `adset_id` cho hai mẩu là đủ để kiểm.
+  */
+  await db.update(schema.fbAds).set({ adsetId: "set-kt-1" }).where(sql`${schema.fbAds.id} in ('999000001','999000002')`);
+  await db.update(schema.orders).set({ postId: `${PAGE}_${POST}` }).where(sql`${schema.orders.id} = ${order.id}`);
+  clearMemo();
+
+  const theoNhom = await getAdsDecision(ALL, "adset");
+  assert.ok(
+    theoNhom.rows.some((r) => r.key === "set-kt-1"),
+    "bài viết ứng với ĐÚNG MỘT nhóm phải nối được ở cấp NHÓM — kể cả khi nó do hai mẩu cùng chạy",
+  );
+
+  clearMemo();
+  const theoMau = await getAdsDecision(ALL, "ad");
+  assert.ok(
+    !theoMau.rows.some((r) => r.key === "999000001" || r.key === "999000002"),
+    "bài do HAI mẩu cùng chạy phải để NHẬP NHẰNG ở cấp mẩu — chọn bừa một mẩu là gán doanh thu cho sai chỗ",
+  );
+
+  /*
+    Và khi bài chỉ do MỘT mẩu chạy thì cấp mẩu nối được. Đây là phần mở ra nhờ sổ mẩu được điền từ
+    TIỀN (1.254 mẩu thay vì 185) — trước bản ấy gần như không bài nào có mẩu để nối.
+  */
+  const POST_SOLO = "990000000000000009";
+  await db
+    .insert(schema.fbAds)
+    .values({ id: "999000005", name: "QC một mình", adsetId: "set-kt-2", campaignId: "camp-kt-2", campaignName: "CD 2", postId: POST_SOLO, storyId: `123_${POST_SOLO}` })
+    .onConflictDoNothing();
+  await db.update(schema.orders).set({ postId: `${PAGE}_${POST_SOLO}` }).where(sql`${schema.orders.id} = ${order.id}`);
+  clearMemo();
+  const soloMau = await getAdsDecision(ALL, "ad");
+  assert.ok(soloMau.rows.some((r) => r.key === "999000005"), "bài do ĐÚNG MỘT mẩu chạy phải nối được tới tận cấp mẩu");
+
   // Dọn sạch để không đổi số của khối kiểm thử khác.
-  await db.delete(schema.fbAds).where(sql`${schema.fbAds.id} in ('999000001','999000002','999000003','999000004')`);
+  clearMemo();
+  await db.delete(schema.fbAds).where(sql`${schema.fbAds.id} in ('999000001','999000002','999000003','999000004','999000005')`);
   await db.update(schema.orders).set({ postId: before[0].postId }).where(sql`${schema.orders.id} = ${order.id}`);
 
   console.log(
-    `✓ Nối quy kết qua bài viết: độ phủ ${linked.coverageBefore}% → ${linked.coverageAfter}% (trần ${linked.ceiling}%) · bài do nhiều chiến dịch chạy giữ nguyên NHẬP NHẰNG · không ghi ngược vào bảng đơn`,
+    `✓ Nối quy kết qua bài viết: độ phủ ${linked.coverageBefore}% → ${linked.coverageAfter}% (trần ${linked.ceiling}%) · ba mức tính RIÊNG (một bài hai mẩu cùng nhóm: nối được ở cấp nhóm, nhập nhằng ở cấp mẩu) · không ghi ngược vào bảng đơn`,
   );
 }
