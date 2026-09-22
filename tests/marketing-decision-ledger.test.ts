@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { ADS_DECISION_RULE, type AdsAction } from "@/lib/constants/ads-decision";
 import {
+  LEDGER_SETTLE_LAG_DAYS,
   DECISION_CLASS,
   DECISION_RULE_VERSION,
   DECISION_STABILITY,
@@ -48,8 +49,20 @@ export async function testMarketingDecisionLedger() {
   const b = ledgerPeriod(new Date("2026-09-22T03:00:00Z"));
   assert.deepEqual(a, b, "ledgerPeriod phải THUẦN — cùng now ra cùng kết quả");
   assert.equal(a.decisionDay, "2026-09-22");
-  assert.equal(a.period.toKey, "2026-09-21", "kỳ chuẩn kết thúc ở NGÀY HÔM QUA: hôm nay chưa đóng");
-  assert.equal(a.period.fromKey, "2026-09-08");
+  /*
+    KỲ CHUẨN LÙI 15 NGÀY, KHÔNG KẾT THÚC Ở HÔM QUA.
+
+    Đường cong độ chín đo trên production 22/09/2026: đơn tuổi 0–6 ngày mới ngã ngũ 8,2%, tuổi 7–13
+    là 28,9%, phải tới tuổi 14–20 mới lên 83,5%. Cửa sổ "1–14 ngày tuổi" của bản đầu vì thế có độ
+    chín ~18%, trong khi `decideAction` đòi 60% — và lượt ghi sổ đầu tiên cho 425/425 dòng cấp chiến
+    dịch đều INSUFFICIENT_DATA.
+
+    Kéo cửa sổ về gần hôm nay là làm sổ rỗng nghĩa; đó là lý do con số này không phải một lựa chọn
+    thẩm mỹ.
+  */
+  assert.equal(a.period.toKey, "2026-09-07", "kỳ chuẩn phải kết thúc D−15 để cohort đủ chín");
+  assert.equal(a.period.fromKey, "2026-08-25");
+  assert.equal(dayDiff(a.period.toKey!, a.decisionDay), LEDGER_SETTLE_LAG_DAYS, "khoảng lùi phải đúng LEDGER_SETTLE_LAG_DAYS");
   assert.equal(dayDiff(a.period.fromKey!, a.period.toKey!) + 1, LEDGER_WINDOW_DAYS, "cửa sổ phải đúng LEDGER_WINDOW_DAYS ngày");
 
   // Hai lượt chạy khác giờ TRONG CÙNG NGÀY phải cho cùng một ngày ghi sổ — nếu không, khoá duy nhất
@@ -78,6 +91,7 @@ export async function testMarketingDecisionLedger() {
   const snap = decisionRuleSnapshot();
   assert.equal(snap.version, DECISION_RULE_VERSION);
   assert.equal(snap.windowDays, LEDGER_WINDOW_DAYS);
+  assert.equal(snap.settleLagDays, LEDGER_SETTLE_LAG_DAYS, "ảnh chụp phải mang cả khoảng lùi — đổi kỳ là đổi tập dữ liệu sinh ra kết luận");
   assert.equal(snap.cutBelow, ADS_DECISION_RULE.cutBelow, "ảnh chụp phải mang ĐÚNG ngưỡng đang chạy, không phải bản chép tay");
 
   // ═══════════ PHẦN C — HẠNG HÀNH ĐỘNG ═══════════
