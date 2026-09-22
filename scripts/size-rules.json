@@ -13,9 +13,17 @@
     "'HẾT SIZE' KHÔNG khai thành dòng — thiếu dòng thì máy trả OUT_OF_RANGE và chuyển người.",
     "",
     "BẢNG NỮ chỉ khai CÂN NẶNG. Hai cột 'Ngực'/'Eo' trong ảnh là THÔNG SỐ CỦA SẢN PHẨM (mỗi size",
-    "một con số), không phải khoảng số đo người mặc — chúng nằm ở 'note' để nhân viên tư vấn."
+    "một con số), không phải khoảng số đo người mặc — chúng nằm ở 'note' để nhân viên tư vấn.",
+    "",
+    "HAI CHỖ BẢNG NỮ KHÁC ẢNH SHOP GỬI, và cả hai đều do ERP là nơi đặt được hàng:",
+    "· Ảnh ghi XXL, ERP lưu mẫu mã là 2XL — cùng một size. Lấy tên của ERP, vì máy gợi ý ra một",
+    "  tên không có mẫu mã nào mang nó thì bước chốt mẫu mã không tìm thấy, và hội thoại chết ở",
+    "  một chỗ khác hẳn chứ không báo lỗi ở đây.",
+    "· Dòng 3XL (72-79kg) CỐ Ý không khai: đo trên danh mục đồng bộ 22/09/2026 (7 sản phẩm, 58",
+    "  mẫu mã) không mẫu mã nào tên 3XL. Không khai thì máy trả OUT_OF_RANGE và chuyển người —",
+    "  đúng cách đã làm với ô HẾT SIZE của bảng nam. Khi shop nhập 3XL thì thêm lại một dòng."
   ],
-  "version": "2026-09-22c",
+  "version": "2026-09-22d",
   "rules": [
     {
       "version": "nam-2026-09-22",
@@ -293,7 +301,7 @@
       ]
     },
     {
-      "version": "nu-2026-09-22",
+      "version": "nu-2026-09-22b",
       "label": "Bảng nữ",
       "scope": "PRODUCT",
       "keys": [
@@ -304,7 +312,7 @@
         "Q004",
         "Q005"
       ],
-      "note": "Thông số SẢN PHẨM theo size (ngực/eo, cm): M 85/68 · L 90/74 · XL 95/80 · XXL 100/86 · 3XL 105/92. Đây là số đo của áo, không phải của người mặc — chỉ dùng để tư vấn.",
+      "note": "Thông số SẢN PHẨM theo size (ngực/eo cm): M 85/68 · L 90/74 · XL 95/80 · 2XL 100/86. Đây là số đo của áo, không phải của người mặc.",
       "rows": [
         {
           "size": "M",
@@ -328,17 +336,10 @@
           ]
         },
         {
-          "size": "XXL",
+          "size": "2XL",
           "weightKg": [
             64,
             71
-          ]
-        },
-        {
-          "size": "3XL",
-          "weightKg": [
-            72,
-            79
           ]
         }
       ]

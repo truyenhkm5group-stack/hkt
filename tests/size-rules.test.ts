@@ -155,8 +155,14 @@ export function testSizeRules() {
   assert.equal(recommendSize(nu, { weightKg: 45 }).size, "M");
   assert.equal(recommendSize(nu, { weightKg: 53 }).size, "L");
   assert.equal(recommendSize(nu, { weightKg: 60 }).size, "XL");
-  assert.equal(recommendSize(nu, { weightKg: 67 }).size, "XXL");
-  assert.equal(recommendSize(nu, { weightKg: 75 }).size, "3XL");
+  assert.equal(recommendSize(nu, { weightKg: 67 }).size, "2XL", "ERP lưu mẫu mã là 2XL — bảng phải gọi đúng tên đặt được hàng");
+  /*
+    3XL CỐ Ý KHÔNG KHAI. Bảng shop gửi có dòng 72-79kg → 3XL, nhưng không mẫu mã nào trong ERP
+    mang tên đó (đo trên danh mục vừa đồng bộ, 7 sản phẩm · 58 mẫu mã). Khai nó vào thì máy kết
+    luận "3XL" rất tự tin, rồi bước chốt mẫu mã không tìm thấy — hội thoại chết ở một chỗ khác
+    hẳn. Không khai thì máy nói "ngoài bảng" và chuyển người, đúng như với ô HẾT SIZE của bảng nam.
+  */
+  assert.equal(recommendSize(nu, { weightKg: 75 }).code, "OUT_OF_RANGE", "72-79kg chưa có hàng — chuyển người, không gợi ý size không bán được");
 
   // Chỉ cần cân nặng — KHÔNG được đòi thêm số đo mà bảng không dùng.
   assert.equal(recommendSize(nu, { weightKg: 45 }).code, "OK", "bảng nữ không được đòi chiều cao");
@@ -173,8 +179,8 @@ export function testSizeRules() {
 
   // Khe giữa hai bảng: 63→XL, 64→XXL. Không được có khoảng trống ở đây.
   assert.equal(recommendSize(nu, { weightKg: 63 }).size, "XL");
-  assert.equal(recommendSize(nu, { weightKg: 64 }).size, "XXL");
-  assert.equal(recommendSize(nu, { weightKg: 85 }).code, "OUT_OF_RANGE", "nặng hơn 79kg chưa có trong bảng nữ");
+  assert.equal(recommendSize(nu, { weightKg: 64 }).size, "2XL");
+  assert.equal(recommendSize(nu, { weightKg: 85 }).code, "OUT_OF_RANGE", "nặng hơn bảng thì chuyển người");
 
   /*
     ═════════ 5. PHẠM VI CHƯA KHAI THÌ BẢNG KHÔNG BAO GIỜ ĐƯỢC DÙNG ═════════
