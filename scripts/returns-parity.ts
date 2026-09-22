@@ -178,21 +178,41 @@ type KhoiMarketer = { coMat: boolean; tong: number | null; coDaiBangChung: boole
 
 let khoiMarketer: KhoiMarketer = { coMat: false, tong: null, coDaiBangChung: false };
 
+const CAU_TONG = "Tổng — bằng đúng số đơn đã kết thúc khi KHÔNG chia theo marketer";
+
 function bocKhoiMarketer(html: string): KhoiMarketer {
-  const i = html.indexOf("Chất lượng đầu vào theo marketer");
-  if (i < 0) return { coMat: false, tong: null, coDaiBangChung: false };
-  const doan = html.slice(i, i + 40_000);
+  if (!html.includes("Chất lượng đầu vào theo marketer")) return { coMat: false, tong: null, coDaiBangChung: false };
   /*
-    ĐỌC CHÍNH CÂU CỦA DÒNG TỔNG, không đếm ô theo vị trí — cùng lý do đã ghi ở `bocSo`: bảng này
-    có 9 cột và mọi ô số đều mang `tabular-nums`, nên dò theo thứ tự cột là mong manh.
+    ═══ QUÉT CẢ TRANG, VÀ KHÔNG VIẾT DẤU GẠCH VÀO BIỂU THỨC ═══
+
+    Bản đầu cắt 40.000 ký tự sau lần xuất hiện ĐẦU TIÊN của tiêu đề rồi dò trong đó. Chạy thật
+    trên production (ops returns-parity, run #1711 ngày 22/09/2026): khối CÓ MẶT, dải bằng chứng
+    CÓ, mà dòng tổng KHÔNG bóc được — tức khẳng định mạnh nhất của bài này lặng lẽ đi qua. Một
+    khẳng định không bao giờ chạy còn tệ hơn không có, vì nó trông như đã che chỗ đó.
+
+    Hai nguyên nhân, và cả hai đều đã được ghi lại ở `bocSo` mà tôi vẫn dẫm lại:
+      · Next.js nhúng payload RSC vào `<script>self.__next_f.push(...)`, nên câu tiêu đề xuất
+        hiện LẦN ĐẦU trong đoạn dữ liệu đã escape, không phải trong HTML đã render — cắt quanh
+        lần đầu là cắt trúng đoạn sai;
+      · biểu thức cũ mang `<\/td>`, và dấu gạch có escape hay không là tuỳ đoạn.
+
+    Cách chữa bỏ cả hai: duyệt MỌI lần xuất hiện của câu, rồi đọc con số ở ô `<td>` ngay sau nó.
+    Biểu thức không còn dấu gạch nào nên nó khớp được cả đoạn đã escape lẫn đoạn đã render —
+    hai chỗ ấy mang CÙNG một con số, vì đoạn escape chính là thứ dựng ra đoạn render.
   */
-  const m = /Tổng — bằng đúng số đơn đã kết thúc khi KHÔNG chia theo marketer<\/td>\s*<td[^>]*>([\d.,]+)</.exec(doan);
+  let tong: number | null = null;
+  for (let i = html.indexOf(CAU_TONG); i >= 0 && tong === null; i = html.indexOf(CAU_TONG, i + 1)) {
+    const sau = html.slice(i + CAU_TONG.length, i + CAU_TONG.length + 400);
+    const m = /<td[^>]*>([\d.,]+)</.exec(sau);
+    if (m) tong = Number(m[1].replace(/[.,\s]/g, ""));
+  }
+  if (tong === null) viSao.push("khối marketer: thấy tiêu đề nhưng KHÔNG đọc được dòng tổng — kiểm lại câu trong intelligence-sections.tsx có đổi chữ không");
   return {
     coMat: true,
-    tong: m ? Number(m[1].replace(/[.,\s]/g, "")) : null,
+    tong,
     // Dải "Quy kết bằng: …" là nơi ba đường được đếm riêng. Mất nó thì bảng vẫn đúng số nhưng
     // người đọc không còn phân biệt được căn cứ — và đó chính là lỗi bản 22/09 đi sửa.
-    coDaiBangChung: doan.includes("Quy kết bằng:"),
+    coDaiBangChung: html.includes("Quy kết bằng:"),
   };
 }
 
