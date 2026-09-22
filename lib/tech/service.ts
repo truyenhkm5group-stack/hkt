@@ -574,6 +574,14 @@ export async function finishTechAgentRun(
      * ở đó. Nghĩa là đúng thứ tiêu nhiều nhất lại là thứ duy nhất không hiện ở bất kỳ đâu.
      */
     chiPhi?: { soVong: number; vao: number; ra: number; demDoc: number; demGhi: number; usd: number | null };
+    /**
+     * CÂU LỖI CỦA CỔNG ĐỎ — để đọc được NGAY TRONG ERP.
+     *
+     * Trước đây sổ chỉ ghi "Có cổng kiểm thử ĐỎ." và bốn huy hiệu cổng. Người xem biết `typecheck`
+     * đỏ nhưng KHÔNG biết đỏ vì gì, nên vẫn phải mở log GitHub Actions — tức phải rời ERP, và phải
+     * có quyền vào kho. Câu lỗi thật là thứ duy nhất trả lời được "sửa cái gì".
+     */
+    loiCong?: { ten: string; exitCode: number | null; dauRa: string }[];
   },
   actor: TechActor,
 ): Promise<TechResult> {
@@ -597,7 +605,7 @@ export async function finishTechAgentRun(
       buildResult: input.buildResult ?? "UNKNOWN",
       filesChanged: input.filesChanged ?? [],
       error: input.error?.trim().slice(0, 4000) ?? "",
-      metadata: { ...((run.metadata as Record<string, unknown>) ?? {}), chiPhi: input.chiPhi ?? null },
+      metadata: { ...((run.metadata as Record<string, unknown>) ?? {}), chiPhi: input.chiPhi ?? null, loiCong: input.loiCong?.length ? input.loiCong : null },
     })
     .where(eq(schema.techAgentRuns.id, input.runId));
 

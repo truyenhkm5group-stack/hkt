@@ -262,7 +262,7 @@ ${r.stderr}` });
       return hong;
     };
 
-    const hong = await chayCong();
+    let hong = await chayCong();
 
     /*
       ═══ MỘT LƯỢT SỬA NGAY TRONG LƯỢT CHẠY — xem `lib/constants/agent-gate-repair.ts` ═══
@@ -284,7 +284,13 @@ ${r.stderr}` });
         steps: [...outcome.steps, { kind: "NOTE", detail: `Cổng đỏ (${hong.map((h) => h.ten).join(", ")}) — đưa lỗi lại cho agent sửa một lần.` }, ...lan2.steps],
         chiPhi: congChiPhi(outcome.chiPhi, lan2.chiPhi),
       };
-      await chayCong();
+      /*
+        GÁN LẠI, KHÔNG CHỈ CHẠY LẠI.
+
+        `hong` được dùng tiếp để GHI VÀO SỔ câu lỗi cuối cùng. Chạy lại cổng mà không gán lại thì
+        sổ mang câu lỗi của lượt TRƯỚC khi sửa — một bản ghi nói sai về thứ vừa xảy ra.
+      */
+      hong = await chayCong();
     }
 
     const filesChanged = await ws.changedFiles();
@@ -326,6 +332,8 @@ ${r.stderr}` });
         error: outcome.error ?? (congDo ? "Có cổng kiểm thử ĐỎ." : ""),
         /* Tiền của lượt chạy đi theo dòng sổ — xem docblock ở `finishTechAgentRun`. */
         chiPhi: outcome.chiPhi,
+        /* Câu lỗi của cổng đỏ — để đọc được NGAY TRONG ERP, không phải mở log Actions. */
+        loiCong: hong.map((h) => ({ ten: h.ten, exitCode: h.exitCode, dauRa: h.dauRa.slice(-1200) })),
       },
       opts.actor,
     );
