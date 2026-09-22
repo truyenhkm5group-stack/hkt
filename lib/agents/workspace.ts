@@ -343,6 +343,25 @@ export async function soCommitCuaAgent(repoRoot: string, branch: string, base: s
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+/**
+ * Những tệp lượt trước đã để lại trên nhánh — để ĐỀ BÀI nói ra được thứ đã có.
+ *
+ * Đọc từ chính git, không từ sổ: trên máy Actions, `tech_agent_runs` là CSDL dựng mới mỗi lượt nên
+ * nó luôn rỗng (cùng bài học với `soCommitCuaAgent` ngay trên). Nhánh git là thứ DUY NHẤT sống sót
+ * qua các lượt chạy trên máy dùng-một-lần.
+ *
+ * `null` = git không trả lời được. Đó là CHƯA BIẾT, KHÔNG phải "không có tệp nào": in ra "lượt
+ * trước tạo 0 tệp" khi thật ra không đọc được là một lời nói dối (AGENTS.md mục 42).
+ */
+export async function tepCuaNhanh(repoRoot: string, branch: string, base: string): Promise<string[] | null> {
+  const r = await rawGit(repoRoot, ["diff", "--name-only", `${base}...${branch}`]);
+  if (!r.ok) return null;
+  return r.stdout
+    .split("\n")
+    .map((d) => d.trim())
+    .filter(Boolean);
+}
+
 export async function dinhNhanh(repoRoot: string, branch: string): Promise<string | null> {
   /*
     HAI CHỖ PHẢI HỎI, THEO ĐÚNG THỨ TỰ NÀY.
