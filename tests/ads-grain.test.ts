@@ -109,6 +109,19 @@ export function testAdsGrain() {
   */
   assert.ok(/fetchAdInsights\([\s\S]{0,400}\.catch\(/.test(sync), "lỗi ở cấp mẩu phải rơi về mảng rỗng, không được ném lên làm hỏng cả tài khoản");
 
+  /*
+    ─── PHÁN QUYẾT HẠT PHẢI NÓI RA ĐƯỢC, KHÔNG CHỈ GHI VÀO `ctx.log` ───
+
+    Đo production 22/09/2026, lượt chạy đầu tiên sau khi hạ hạt: 19/35 chiến dịch của hôm ấy vẫn ở
+    hạt CHIẾN DỊCH và KHÔNG AI TRA ĐƯỢC VÌ SAO. `runSyncJob` chỉ giữ 5 DÒNG CUỐI của `ctx.log`, và
+    chỉ đổ chúng vào `sync_runs.error` khi lượt chạy có `warning` — với 7 tài khoản × 3 ngày thì lý
+    do bị đẩy ra ngoài cửa sổ trước khi ai kịp đọc.
+
+    Một cổng an toàn im lặng lùi về phía an toàn là một cổng KHÔNG SỬA ĐƯỢC.
+  */
+  assert.ok(sync.includes("ctx.summary.warning"), `${SYNC}: lùi hạt phải ra summary.warning (⇒ lượt chạy PARTIAL kèm lý do đọc được), không chỉ ra ctx.log`);
+  assert.ok(/ctx\.summary\.detail[\s\S]{0,400}hạt MẨU/.test(sync), `${SYNC}: số (tài khoản × ngày) ở mỗi hạt phải nằm trong summary.detail — đó là chỗ người đọc nhìn thấy mà không phải mở log`);
+
   // Sổ mẩu KHÔNG được ghi đè `post_id` — đó là mắt xích nối đơn về chiến dịch, do job khác điền.
   const capNhat = sync.slice(sync.indexOf("async function capNhatSoMauVaNhom"));
   assert.ok(!capNhat.includes("postId:"), "cập nhật sổ mẩu KHÔNG được đụng post_id — insights không trả nó, ghi NULL đè lên là xoá mắt xích nối đơn");
