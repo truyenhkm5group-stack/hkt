@@ -66,7 +66,7 @@ export type TokenUsage = { inputTokens: number; outputTokens: number; cacheReadI
  * Đơn giá khai theo VND cho MỘT TRIỆU token, giống cách các nhà cung cấp niêm yết.
  */
 export function estimateCostVnd(provider: string, model: string, usage: TokenUsage, pricing: Record<string, ModelPrice>): number | null {
-  const price = pricing[`${provider}:${model}`] ?? pricing[model];
+  const price = lookupPrice(provider, model, pricing);
   if (!price) return null;
   if (usage.cacheReadInputTokens > 0 && price.cachedReadVndPerMillion === undefined) return null;
   if (usage.cacheWriteInputTokens > 0 && price.cacheWriteVndPerMillion === undefined) return null;
@@ -77,6 +77,31 @@ export function estimateCostVnd(provider: string, model: string, usage: TokenUsa
     (usage.cacheWriteInputTokens / 1_000_000) * (price.cacheWriteVndPerMillion ?? 0);
   // Tiền trong ERP là số nguyên VND; làm tròn lên để không bao giờ báo rẻ hơn thực tế.
   return Math.ceil(vnd);
+}
+
+/**
+ * TRA ĐƠN GIÁ CHO TÊN MODEL MÀ API BÁO VỀ.
+ *
+ * Bảng giá khai theo tên HỌ (`claude-haiku-4-5`) vì đó là thứ người ta đọc trong bảng giá công bố
+ * và là thứ khai trong cấu hình. Nhưng API trả về tên CÓ HẬU TỐ NGÀY BẢN —
+ * `claude-haiku-4-5-20251001` — và bộ định tuyến cố ý ghi lại tên API báo chứ không ghi tên đã
+ * yêu cầu, vì hai thứ có thể khác nhau khi nhà cung cấp đổi bản.
+ *
+ * Hai điều đúng ấy cộng lại thành một lỗ: tra thẳng thì trượt, và chi phí là NULL ở MỌI lượt gọi.
+ * Đo 23/09/2026 sau khi đã khai bảng giá theo tỷ giá Vietcombank: 692/1.108 lượt vẫn CHƯA BIẾT,
+ * tổng tính được vẫn 0 ₫ — bảng giá đúng, tên model đúng, mà không gặp nhau.
+ *
+ * Nên chỉ gỡ ĐÚNG hậu tố ngày `-YYYYMMDD` ở cuối, không khớp tiền tố mờ: khớp mờ sẽ để một biến
+ * thể chưa ai khai giá thừa hưởng đơn giá của một model khác, tức là bịa ra một con số tiền.
+ */
+export function lookupPrice(provider: string, model: string, pricing: Record<string, ModelPrice>): ModelPrice | undefined {
+  const ho = model.replace(/-\d{8}$/, "");
+  return (
+    pricing[`${provider}:${model}`] ??
+    pricing[model] ??
+    pricing[`${provider}:${ho}`] ??
+    pricing[ho]
+  );
 }
 
 export type ModelAttempt = {

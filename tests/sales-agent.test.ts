@@ -26,7 +26,7 @@ import { z } from "zod";
 import { MODEL_USD_PRICES } from "@/lib/constants/ai-model-pricing";
 import { supportsAdaptiveThinking, supportsEffort } from "@/lib/constants/anthropic-capabilities";
 import { SALES_AGENT } from "@/lib/ai-workforce/agents/sales/definition";
-import { parseRouting as parseRoutingCfg } from "@/lib/ai-workforce/model-router";
+import { estimateCostVnd, lookupPrice, parseRouting as parseRoutingCfg } from "@/lib/ai-workforce/model-router";
 import { SAFEST_HARD_LIMITS, WORKFORCE_PROVIDERS, aiEnv, getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
 import { getSettingJson, getSettingValue, setSettingJson } from "@/lib/settings";
 import { queueStubResponse, resetStub } from "@/lib/ai-workforce/providers/stub";
@@ -1600,6 +1600,34 @@ export async function testSalesAgent(db: Db) {
 
   // Trả lại chế độ mà phần còn lại của bộ kiểm đang dựa vào.
   await setSettingJson(HANDOVER_MODE_KEY, "AI_FROM_FIRST_MESSAGE");
+
+  /*
+    ═════════ 9F. TÊN MODEL API BÁO VỀ CÓ HẬU TỐ NGÀY BẢN ═════════
+
+    Bảng giá khai theo tên HỌ (`claude-haiku-4-5`) — đó là thứ ghi trong bảng giá công bố và
+    trong cấu hình. API trả về tên CÓ NGÀY BẢN (`claude-haiku-4-5-20251001`), và bộ định tuyến cố
+    ý ghi lại tên API báo chứ không ghi tên đã yêu cầu.
+
+    Hai điều đúng ấy cộng lại thành một lỗ: tra thẳng thì trượt, chi phí NULL ở MỌI lượt gọi. Đo
+    23/09/2026 SAU KHI đã khai bảng giá theo tỷ giá Vietcombank: 692/1.108 lượt vẫn CHƯA BIẾT,
+    tổng tính được vẫn 0 ₫ — bảng giá đúng, tên model đúng, mà không gặp nhau.
+  */
+  const bangGia = { "claude-haiku-4-5": { inputVndPerMillion: 26_210, outputVndPerMillion: 131_050 } };
+  assert.ok(lookupPrice("erp:anthropic", "claude-haiku-4-5-20251001", bangGia), "tên có ngày bản phải tra được về họ");
+  assert.ok(lookupPrice("erp:anthropic", "claude-haiku-4-5", bangGia), "tên họ vẫn tra được như cũ");
+
+  // KHỚP MỜ THÌ KHÔNG: một biến thể chưa ai khai giá không được thừa hưởng đơn giá của model khác
+  // — đó là bịa ra một con số tiền, đúng thứ luật 42 cấm.
+  assert.equal(lookupPrice("erp:anthropic", "claude-haiku-4-5-turbo", bangGia), undefined, "hậu tố KHÔNG phải ngày thì không gỡ");
+  assert.equal(lookupPrice("erp:anthropic", "claude-sonnet-5-20251001", bangGia), undefined, "họ khác thì vẫn CHƯA BIẾT");
+
+  const tien = estimateCostVnd("erp:anthropic", "claude-haiku-4-5-20251001", { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 }, bangGia);
+  assert.equal(tien, 26_210, "một triệu token vào phải ra đúng đơn giá");
+  assert.equal(
+    estimateCostVnd("erp:anthropic", "mo-hinh-la", { inputTokens: 1_000, outputTokens: 0, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 }, bangGia),
+    null,
+    "model chưa khai giá vẫn phải là CHƯA BIẾT, không phải 0",
+  );
 
   // ═════════ 10. VIỆC KHÔNG TỒN TẠI / NẤC OFF ═════════
 
