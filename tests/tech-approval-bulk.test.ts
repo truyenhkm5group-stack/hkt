@@ -182,7 +182,43 @@ export function testKyLoatGuards() {
   /* Giao diện ký loạt phải ĐẾM bằng đúng hàm luật, không chép lại điều kiện. */
   const thanh = bo(readFileSync(path.join(goc, "app/(dashboard)/tech/tasks/bulk-approve.tsx"), "utf8"));
   assert.match(thanh, /xetLoatKy\(/, "thanh thao tác phải đếm bằng hàm luật chung");
+  /*
+    ═══ MỖI QUYẾT ĐỊNH MỘT TẬP RIÊNG ═══
+
+    Bản đầu tính danh sách ĐÚNG MỘT LẦN với `"APPROVED"` rồi lấy nó chặn CẢ HAI nút. Chín việc đã
+    ký duyệt hết ⇒ danh sách rỗng ⇒ cả thanh biến mất, kể cả nút Từ chối — trong khi
+    `decideTechApproval()` vẫn cho đổi ý. Chủ shop tích chọn được chín dòng mà không thấy nút nào,
+    và báo lại đúng như vậy (22/09/2026).
+
+    Lượt đột biến ĐB14 SỐNG SÓT lần đầu vì chưa có khẳng định nào khoá tính chất này — tức bản vá
+    có thể bị gỡ lại bất cứ lúc nào mà không ai biết.
+  */
+  assert.match(thanh, /nhom\("REJECTED"\)/, "nút Từ chối phải có tập riêng, tính bằng chính hàm luật với quyết định của nó");
+  assert.match(thanh, /nhom\("APPROVED"\)/, "…và nút Duyệt cũng vậy");
+  assert.doesNotMatch(thanh, /canTuChoi = canDuyet/, "KHÔNG được dùng chung một tập cho hai nút — đó đúng là lỗi làm cả thanh biến mất");
+  assert.match(thanh, /Duyệt \{canDuyet\.length\}/, "mỗi nút mang SỐ CỦA CHÍNH NÓ");
+  assert.match(thanh, /Từ chối \{canTuChoi\.length\}/, "…kể cả nút Từ chối");
+
   assert.doesNotMatch(thanh, /approvalStatus === "PENDING"/, "KHÔNG chép lại điều kiện: bản đầu lọc PENDING nên nút nói 3 mà máy chủ ký 4");
 
-  console.log("✓ Quét mã nguồn: ký loạt đi qua hàm ký từng việc (không ghi thẳng) · cùng một quyền · từ chối buộc nêu lý do · bản đã duyệt có nút áp lại · câu từ chối trỏ tới màn hình CÓ đường ghi thật · thanh đếm bằng hàm luật chung");
+  /*
+    ═══ LUẬT R2 CHỈ CÓ MỘT BẢN ═══
+
+    `scripts/agent-fetch-task.ts` từng chặn CỨNG mọi việc R2 bằng một dòng riêng. Khi cổng giao
+    việc đổi sang cửa hẹp, bản sao ấy không đổi theo — và vì nó CHẶT hơn nên nó thắng. Đo
+    22/09/2026: TECH-12 đi qua đủ mọi cổng của ERP, lấy được việc từ production, rồi chết ở đúng
+    dòng đó. Cả dây chuyền đứng lại vì một bản sao bị bỏ quên.
+
+    Khoá ở mức mã nguồn: nơi nào quyết định "R2 có đi tiếp được không" thì phải hỏi `chiSinhRaChu()`,
+    không được tự viết lại điều kiện.
+  */
+  const fetchTask = bo(readFileSync(path.join(goc, "scripts/agent-fetch-task.ts"), "utf8"));
+  assert.match(fetchTask, /chiSinhRaChu\(/, "bước lấy việc phải hỏi hàm luật chung, không tự chặn R2");
+  assert.doesNotMatch(
+    fetchTask,
+    /risk === "R2"\)\s*\{\s*console\.error\("✗ DỪNG: R2 không bao giờ/,
+    "KHÔNG quay lại lệnh cấm cứng — nó là bản thứ hai của một luật đã có chỗ ở",
+  );
+
+  console.log("✓ Quét mã nguồn: ký loạt đi qua hàm ký từng việc (không ghi thẳng) · cùng một quyền · từ chối buộc nêu lý do · bản đã duyệt có nút áp lại · câu từ chối trỏ tới màn hình CÓ đường ghi thật · thanh đếm bằng hàm luật chung · bước lấy việc dùng CHUNG luật R2, không tự chặn");
 }
