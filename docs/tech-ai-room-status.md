@@ -369,6 +369,82 @@ sách thì TỪ CHỐI có lý do chứ không trả chuỗi rỗng. Lời gọi
 KÈM số tiền đã cộng được.
 
 ---
+## Đêm 21→22/09 — chạy tự chủ, bốn lượt, bốn lớp
+
+Chủ shop giao chạy tự chủ 7 giờ, chỉ giữ lại một cổng: **chữ ký duyệt PR**. Nút *Khởi động lượt
+chạy agent* thì không cần người — gọi thẳng workflow kèm mã việc, đúng đường mà ERP gọi.
+
+| Lượt | Agent đi tới đâu | Lớp lộ ra | Vá ở |
+|---|---|---|---|
+| #21 | nhận đúng TECH-3 qua cửa đọc có khoá | workflow ghi cứng **vai** (`--agent documentation`) và mẫu tên nhánh | #85 ✅ |
+| #22 | đúng vai QA, nhánh `ai/qa/…` | **trần ngữ cảnh** 205.844 > 200.000 token · và phép đo tiền bị ngoại lệ cuốn đi | #87 ✅ |
+| #23 | **viết xong bài kiểm**, chạy đủ 4 cổng · $0,2719 | không **đăng ký** được bài kiểm (bộ chạy chính nằm trong `NEVER_WRITE`) | #90 ⏳ |
+| #24 | viết 2 tệp, 18 vòng · $0,3024 | không **thấy** lỗi cổng của chính mình | #90 ⏳ |
+
+**Không lớp nào là giới hạn của model.** Cả bốn đều là thứ hạ tầng dựng thiếu, và ba trong bốn
+cùng MỘT hình dạng: *một sự thật của VIỆC bị thay bằng một hằng số viết sẵn*, và hằng số ấy đúng
+đúng một lần — cho vai đầu tiên từng chạy.
+
+| Lượt | Thứ bị giấu hoặc bịa trong đề bài |
+|---|---|
+| trước #13 | nhánh và commit nền |
+| #17 | phạm vi **ĐỌC** |
+| #21 | **VAI** và mẫu tên nhánh |
+| #23 | **NGHỀ** trong prompt hệ thống |
+
+### Cái giá, và cái bản vá cuối xoá đi
+
+Lượt #23 và #24 tốn **$0,57** và không đưa một dòng nào vào kho — cả hai vì cùng một lý do: cổng
+chạy SAU khi agent gọi `finish`, nên nó chưa từng nhìn thấy lỗi của chính mình. Nay cổng đỏ thì
+agent được sửa **một lần ngay trong lượt chạy**, trên chính tệp nó vừa viết. Một vòng sửa vài xu;
+một lượt vứt đi $0,30.
+
+### Hai lần bộ gác bắt đúng người dựng nó
+
+· `repo-integrity` bắt ví dụ minh hoạ trong chú thích của tôi ⇒ vá ở mức LỚP (bỏ chú thích trước
+  khi quét), vì đây là lần thứ **năm** cái bẫy chú thích cắn trong kho này.
+· Rồi nó bắt **chính fixture của bản vá ấy** — chuỗi mẫu viết thẳng một `import`. Nay ghép từ biến.
+
+Cả hai lần chỉ đỏ **sau khi commit**, vì bài kiểm đọc từ KHO chứ không đọc đĩa. AGENTS.md mục 9
+nói trước điều đó; đêm nay nó tự chứng minh hai lần.
+
+· `agent-scopes` bắt tôi thêm một vùng cấm mà quên ca kiểm cho nó.
+
+### Xác minh trên PRODUCTION, không phải trên ảnh chụp
+
+Đo 22/09/2026 bằng `db-query`:
+
+```
+ code   | status  |         nhanh         | pr | so_luot | sk_branch
+--------+---------+-----------------------+----+---------+-----------
+ TECH-3 | TRIAGED | ai/qa/TECH-3-mubjc3n2 |  0 |       3 |         3
+ TECH-2 | TRIAGED | (rỗng)                |  0 |       6 |         0
+```
+
+Ba điều được xác minh cùng lúc:
+
+· **Nhánh về tới dòng việc** — khúc 2 của nửa VỀ chạy thật.
+· **Luật "lượt mới thắng" đúng** — nhánh đang là của lượt #24 (`mubjc3n2`), đã thay nhánh lượt
+  #22 (`mubfsts5`). Đúng `xetGhiNhanhViec`: nhánh agent cũ bị thay, nhánh NGƯỜI khai thì không.
+· **Không backfill lén** — TECH-2 vẫn RỖNG dù có 6 lượt chạy, vì mọi lượt của nó xảy ra TRƯỚC khi
+  bản vá tồn tại (mục 8.8). Quá khứ không được viết lại cho đẹp.
+
+`pr = 0` cũng đúng: chưa lượt nào qua được cổng nên chưa PR nào được mở. **Khúc 3 (tự mở PR) và
+khúc 4 (việc tự đi tiếp) vẫn CHƯA từng chạy** — không được ghi là đã xong.
+### Đã đo, chưa sửa — chờ chủ shop quyết
+
+`/reports/funnel` **34,4 giây** (máy rảnh). Nguyên nhân xác định: `lib/queries/sales-funnel.ts` và
+`lib/queries/staff-performance.ts` có **0 lời gọi `memo()`**, trang cũng không đệm ở tầng nào khác
+— 4 phép tổng hợp nặng chạy lại nguyên vẹn mỗi lần mở. So với `ads-roas.ts` dùng `memo(…, 90_000)`
+đúng như AGENTS.md mục 2 quy định.
+
+Đệm **sửa được**: lần mở thứ hai trở đi gần như tức thì, và trang thôi đập vào 5 kết nối của pool
+— đó là thứ làm nó ĐỔ khi máy bận. Đệm **không sửa được**: lần mở đầu vẫn 34 giây.
+
+KHÔNG tự sửa khi chủ shop vắng mặt: nó chạm truy vấn tiền, phải đối chiếu trước/sau trên production
+(mục 6.5).
+
+---
 ## NEXT
 
 | Việc | Phụ thuộc |

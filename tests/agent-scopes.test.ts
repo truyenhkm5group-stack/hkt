@@ -104,6 +104,8 @@ export function testHangRaoTuyetDoi() {
     "tests/care-reopen.test.ts",
     "tests/test-hygiene.test.ts",
     "tests/agent-scopes.test.ts",
+    /* Sàn của bánh cóc đăng ký bài kiểm — agent hạ được sàn thì bánh cóc không còn là bánh cóc. */
+    "lib/constants/agent-test-registry.ts",
   ];
   for (const f of cam) {
     assert.ok(matchesNeverWrite(f), `ca kiểm "${f}" phải nằm trong NEVER_WRITE, nếu không nó đang đo nhầm hàng rào`);

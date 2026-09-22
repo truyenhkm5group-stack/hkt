@@ -60,6 +60,8 @@ export const NEVER_WRITE: readonly string[] = [
   "lib/constants/agent-sandbox.ts",
   "lib/constants/agent-scopes.ts",
   "lib/constants/agent-test-guard.ts",
+  /* Sàn của bánh cóc đăng ký bài kiểm — hạ được sàn thì bánh cóc không còn là bánh cóc. */
+  "lib/constants/agent-test-registry.ts",
   /*
     `lib/agents/` — RUNNER VÀ EXECUTOR, tức nơi hàng rào được ÁP LÊN.
 
