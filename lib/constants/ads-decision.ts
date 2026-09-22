@@ -62,7 +62,8 @@ export const ADS_ACTION_HINT: Record<AdsAction, string> = {
   CUT: `ROAS thấp hơn điểm hoà vốn quá ${Math.round((1 - ADS_DECISION_RULE.cutBelow) * 100)}%: càng chạy càng lỗ. Cắt hoặc làm lại từ đầu.`,
   FIX_DELIVERY: `Quảng cáo ra đơn tốt nhưng tỷ lệ giao thành công dưới ${ADS_DECISION_RULE.lowSuccessRate}%. Tiền mất ở khâu giao, không phải ở quảng cáo — cắt quảng cáo là chữa sai bệnh.`,
   INSUFFICIENT_DATA: `Chưa đủ căn cứ: cần ít nhất ${ADS_DECISION_RULE.minSpend.toLocaleString("vi-VN")}đ chi quảng cáo và ${ADS_DECISION_RULE.minFinishedOrders} đơn đã kết thúc. Kết luận lúc này là đoán.`,
-  NO_SPEND_DATA: "Facebook chỉ trả số chi ở cấp CHIẾN DỊCH/ngày, nên cấp này không có tiền chi. Không có tiền thì không có ROAS, không có lợi nhuận, và do đó không có khuyến nghị về tiền.",
+  NO_SPEND_DATA:
+    "Dòng này không có số chi quảng cáo trong kỳ. Hoặc mẩu/nhóm không tiêu đồng nào, hoặc kỳ đang xem rơi vào những ngày ERP mới chỉ có chi tiết ở cấp CHIẾN DỊCH (xem dòng độ phủ chi tiết ngay trên bảng). Không có tiền thì không có ROAS, không có lợi nhuận, và do đó không có khuyến nghị về tiền.",
 };
 
 export const ADS_ACTION_TONE: Record<AdsAction, string> = {
@@ -97,14 +98,27 @@ export const ADS_DIMENSION_LABEL: Record<AdsDimension, string> = {
 };
 
 /**
- * Cấp nào CÓ số chi quảng cáo. Bảng `ad_spends` không có cột `adset_id` lẫn `ad_id` — Facebook
- * Insights được đồng bộ ở cấp chiến dịch/ngày, còn mã hàng thì ghép được từ tên chiến dịch.
- * Hai cấp còn lại chỉ có ĐƠN. Chia đều tiền chiến dịch xuống nhóm/mẩu sẽ làm tổng khớp trong khi
- * từng dòng đều sai, nên cố ý KHÔNG chia.
+ * ───────────── CẤP NÀO CÓ SỐ CHI QUẢNG CÁO ─────────────
+ *
+ * CẢ BỐN, từ 22/09/2026. Trước đó `ad_spends` chỉ có hạt CHIẾN DỊCH × NGÀY nên hai cấp dưới mang
+ * `NO_SPEND_DATA` — và chia đều tiền chiến dịch xuống chúng bị cấm, vì chia đều làm tổng khớp
+ * trong khi từng dòng đều sai.
+ *
+ * Nay `ad_spends` ghi ở hạt MẨU × NGÀY, nên cấp nhóm và cấp chiến dịch là **PHÉP CỘNG** của cấp
+ * mẩu chứ không phải phép chia. Đo trên production trước khi đổi (ops `ads-level-probe`, 30 ngày,
+ * 7 tài khoản): Σ cấp mẩu = Σ cấp chiến dịch = **148.369.383 ₫**, lệch **0 ₫**, và **0** cặp
+ * (tài khoản × ngày) lệch.
+ *
+ * ─── NHƯNG NGÀY CŨ VẪN Ở HẠT CHIẾN DỊCH ───
+ *
+ * Lượt đồng bộ chỉ chạm N ngày gần nhất, nên mọi ngày ngoài cửa sổ ấy mãi mãi không có chi tiết cấp
+ * mẩu. Cờ này chỉ nói "cấp ấy CÓ THỂ có tiền"; **bao nhiêu phần của kỳ thật sự có** thì đọc ở
+ * `AdsDecision.spendDetail`, và giao diện phải in ra. Bật cờ mà không in độ phủ là hứa một thứ chỉ
+ * đúng với những kỳ gần đây.
  */
 export const ADS_DIMENSION_HAS_SPEND: Record<AdsDimension, boolean> = {
   campaign: true,
   product: true,
-  adset: false,
-  ad: false,
+  adset: true,
+  ad: true,
 };

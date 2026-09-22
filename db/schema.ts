@@ -2645,10 +2645,48 @@ export const adSpends = pgTable(
     excluded: boolean("excluded").notNull().default(false),
     /** Marketer phụ trách chiến dịch (id nhân sự trong cấu hình lương) */
     marketerId: text("marketer_id"),
+
+    /**
+     * ───────── HẠT CỦA DÒNG NÀY, VÀ VÌ SAO NÓ PHẢI ĐƯỢC KHAI RA ─────────
+     *
+     * `CAMPAIGN` = một dòng cho mỗi (chiến dịch × ngày) — hạt gốc từ 2025.
+     * `AD`       = một dòng cho mỗi (mẩu × ngày); cấp nhóm và cấp chiến dịch khi ấy là PHÉP CỘNG
+     *              của các dòng này, không phải một phép chia.
+     * `MANUAL`   = người gõ tay ở trang Chi phí.
+     *
+     * Hai hạt CÙNG TỒN TẠI trong bảng là bình thường và bắt buộc: Facebook chỉ giữ insights khoảng
+     * 37 tháng và lượt đồng bộ chỉ chạm N ngày gần nhất, nên ngày cũ mãi mãi ở hạt `CAMPAIGN`. Điều
+     * PHẢI giữ là **một (tài khoản × ngày) chỉ có MỘT hạt**: trộn hai hạt trong cùng một ngày là
+     * cộng đúp toàn bộ chi phí quảng cáo của ngày ấy, tức làm sai mọi con số lợi nhuận và lương
+     * cùng lúc. `lib/integrations/facebook/sync.ts` bảo đảm điều đó bằng XOÁ-RỒI-GHI trong một
+     * giao dịch, và `tests/ads-grain.test.ts` khoá lại ở mức mã nguồn.
+     *
+     * Mọi phép `sum(spend)` đang có KHÔNG cần đổi: tổng của các dòng cấp mẩu đúng bằng dòng cấp
+     * chiến dịch mà chúng thay thế — đó chính là điều `ads-level-probe` đi đo trước khi bật.
+     */
+    grain: text("grain").notNull().default("CAMPAIGN"),
+    /** Chỉ có ở hạt `AD`. `NULL` ở hạt `CAMPAIGN` nghĩa là CHƯA BIẾT, không phải "không có nhóm". */
+    adsetId: text("adset_id"),
+    adsetName: text("adset_name").notNull().default(""),
+    adId: text("ad_id"),
+    adName: text("ad_name").notNull().default(""),
+
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("ad_spends_platform_date_idx").on(t.platform, t.spendDate), index("ad_spends_date_idx").on(t.spendDate), uniqueIndex("ad_spends_external_key_uq").on(t.externalKey), index("ad_spends_product_idx").on(t.productId), index("ad_spends_marketer_idx").on(t.marketerId)],
+  (t) => [
+    index("ad_spends_platform_date_idx").on(t.platform, t.spendDate),
+    index("ad_spends_date_idx").on(t.spendDate),
+    uniqueIndex("ad_spends_external_key_uq").on(t.externalKey),
+    index("ad_spends_product_idx").on(t.productId),
+    index("ad_spends_marketer_idx").on(t.marketerId),
+    index("ad_spends_adset_idx").on(t.adsetId, t.spendDate),
+    index("ad_spends_ad_idx").on(t.adId, t.spendDate),
+    check("ad_spends_grain_check", sql`${t.grain} IN ('CAMPAIGN', 'AD', 'MANUAL')`),
+    // Hạt `AD` mà không có mã mẩu là một dòng tự mâu thuẫn — nó sẽ rơi khỏi mọi phép gộp cấp mẩu
+    // trong khi vẫn được cộng vào tổng, tức mất dấu tiền ở đúng cấp vừa dựng ra để nhìn thấy nó.
+    check("ad_spends_ad_grain_check", sql`${t.grain} <> 'AD' OR ${t.adId} IS NOT NULL`),
+  ],
 );
 
 /**

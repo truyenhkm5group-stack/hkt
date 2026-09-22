@@ -56,6 +56,7 @@ const MOI = [
   "0107_agent_run_external_ref",
   "0108_ads_decision_ledger",
   "0109_ads_budget_changes",
+  "0110_ad_spends_ad_grain",
 ] as const;
 
 /*
@@ -154,6 +155,16 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'tech_agent_runs' and column_name = 'external_ref'"), 0, "bước 1: khoá lượt chạy đến từ máy ngoài CHƯA được có — đó là thứ 0107 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'ads_decision_ledger'"), 0, "bước 1: sổ quyết định quảng cáo CHƯA được có — đó là thứ 0108 thêm vào");
     assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'ads_budget_changes'"), 0, "bước 1: sổ lượt ghi ngân sách CHƯA được có — đó là thứ 0109 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'ad_spends' and column_name = 'grain'"), 0, "bước 1: cột hạt chi tiêu CHƯA được có — đó là thứ 0110 thêm vào");
+    /*
+      DỮ LIỆU CHI TIÊU ĐANG CÓ TRÊN PRODUCTION, gieo TRƯỚC khi 0110 chạy.
+
+      Một dòng đồng bộ (có `external_key`) và một dòng GÕ TAY (không có). Bước 2 kiểm rằng migration
+      khai đúng hạt cho CẢ HAI mà không đụng một đồng nào — nếu nó lỡ đổi `spend`, mọi báo cáo lợi
+      nhuận và lương đổi số cùng lúc.
+    */
+    await client.query(`insert into ad_spends (id, platform, campaign, spend, spend_date, external_key, account_id, campaign_id) values ('up-as1', 'Facebook', 'CD A', 1234567, now(), 'fb:acc:camp:2026-09-20', 'acc', 'camp')`);
+    await client.query(`insert into ad_spends (id, platform, campaign, spend, spend_date) values ('up-as2', 'Facebook', 'Gõ tay', 500000, now())`);
     /*
       Một vận đơn ĐÃ CÓ TỪ TRƯỚC 0099, mang một trạng thái Viettel Post đã dịch được. Bước 2 kiểm
       rằng migration KHÔNG dựng hộ nó một "lời khai thô": suy ngược từ `vtp_status_name` là bịa ra
@@ -265,6 +276,30 @@ export async function testMigrationUpgradePath() {
     await client.query(`update ads_budget_changes set ledger_id = 'up-dl1' where id = 'up-bc1'`);
     await client.query(`delete from ads_decision_ledger where id = 'up-dl1'`);
     assert.equal(await dem("select count(*)::int as n from ads_budget_changes where id = 'up-bc1' and ledger_id is null"), 1, "0109: xoá dòng sổ quyết định phải để lại lượt ghi, chỉ gỡ khoá");
+
+    /*
+      ═══ 0110: HẠT CHI TIÊU QUẢNG CÁO — KHAI ĐÚNG, VÀ KHÔNG ĐỤNG MỘT ĐỒNG NÀO ═══
+
+      `ad_spends` là nguồn thẩm quyền của tiền quảng cáo ở mọi báo cáo lợi nhuận và lương. Migration
+      này chỉ THÊM cột; điều phải chứng minh là nó không làm đổi `spend` của dòng nào, và nó khai
+      đúng hạt cho cả dòng đồng bộ lẫn dòng gõ tay.
+    */
+    assert.equal(await dem("select count(*)::int as n from ad_spends where id = 'up-as1' and spend = 1234567 and grain = 'CAMPAIGN'"), 1, "0110: dòng đồng bộ giữ nguyên tiền và nhận hạt CAMPAIGN");
+    assert.equal(await dem("select count(*)::int as n from ad_spends where id = 'up-as2' and spend = 500000 and grain = 'MANUAL'"), 1, "0110: dòng GÕ TAY (external_key rỗng) phải nhận hạt MANUAL — đường ghi không bao giờ được xoá nó");
+    // Hạt lạ bị CSDL chặn: một giá trị ngoài ba hạt đã khai sẽ lọt qua mọi phép lọc và âm thầm cộng đúp.
+    await assert.rejects(
+      () => client.query(`insert into ad_spends (id, platform, campaign, spend, spend_date, grain) values ('up-as3', 'Facebook', 'X', 1, now(), 'ADSET')`),
+      () => true,
+      "0110: hạt ngoài ba giá trị đã khai phải bị CSDL từ chối",
+    );
+    // Hạt AD mà không có mã mẩu là dòng tự mâu thuẫn — rơi khỏi mọi phép gộp cấp mẩu nhưng vẫn vào tổng.
+    await assert.rejects(
+      () => client.query(`insert into ad_spends (id, platform, campaign, spend, spend_date, grain) values ('up-as4', 'Facebook', 'X', 1, now(), 'AD')`),
+      () => true,
+      "0110: hạt AD bắt buộc phải có ad_id",
+    );
+    await client.query(`insert into ad_spends (id, platform, campaign, spend, spend_date, grain, ad_id, adset_id) values ('up-as5', 'Facebook', 'X', 1, now(), 'AD', 'ad-1', 'set-1')`);
+    assert.equal(await dem("select count(*)::int as n from ad_spends where id = 'up-as5' and grain = 'AD'"), 1, "0110: hạt AD kèm mã mẩu thì ghi được");
 
     /*
       ═══ 0082: SỔ HÀNG HOÀN ĐƯA VÀO BẰNG CHÍNH ERP — MỘT BẢNG MỚI, KHOÁ LÀ NỘI DUNG ═══

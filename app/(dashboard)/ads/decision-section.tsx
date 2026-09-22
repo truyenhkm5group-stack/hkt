@@ -154,11 +154,18 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
           Đây là CẬN DƯỚI: phần chưa nối được vẫn lẫn đơn hữu cơ nhắn thẳng vào fanpage mà ERP không tách ra được.
         </p>
 
-        {!hasSpend ? (
+        {/*
+          ĐỘ PHỦ CHI TIẾT CẤP MẨU — chỉ nói ở hai cấp dưới, vì chỉ ở đó nó mới đổi cách đọc bảng.
+
+          Lượt đồng bộ Facebook chỉ chạm N ngày gần nhất, nên ngày cũ mãi mãi ở hạt CHIẾN DỊCH và
+          tiền của chúng KHÔNG xuất hiện ở cấp nhóm / cấp mẩu. Một bảng đọc thiếu tiền mà im lặng
+          thì tệ hơn một bảng rỗng: người đọc tin vào một ROAS tính trên nửa số tiền.
+        */}
+        {(dimension === "adset" || dimension === "ad") && d.spendDetail.pct !== null && d.spendDetail.pct < 100 ? (
           <p className="border-b bg-sky-50 px-5 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-            Cấp này KHÔNG có số chi quảng cáo: Facebook Insights chỉ đồng bộ ở cấp chiến dịch/ngày. Không có tiền thì không có ROAS, không có lợi
-            nhuận và do đó không có khuyến nghị về tiền — bảng xếp theo doanh thu giao thành công để thấy nhóm/mẩu nào thật sự đưa được hàng tới
-            tay khách. Cố ý KHÔNG chia đều tiền chiến dịch xuống đây: chia đều làm tổng khớp trong khi từng dòng đều sai.
+            Mới {formatPercent(d.spendDetail.pct)} tiền quảng cáo của kỳ có chi tiết tới cấp mẩu ({formatVND(d.spendDetail.atAdGrain)} /{" "}
+            {formatVND(d.spendDetail.total)}). Phần còn lại nằm ở những ngày ERP chỉ có số chi ở cấp CHIẾN DỊCH, và nó KHÔNG có mặt trong bảng này —
+            cố ý, vì chia đều tiền chiến dịch xuống nhóm/mẩu sẽ làm tổng khớp trong khi từng dòng đều sai. Xem ở tab Chiến dịch để có đủ tiền của kỳ.
           </p>
         ) : null}
 
