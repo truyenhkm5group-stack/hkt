@@ -11,6 +11,8 @@ import { audit } from "@/lib/audit";
 import type { SessionUser } from "@/lib/auth/session";
 import { can } from "@/lib/auth/session";
 import { aiDisabledReason } from "@/lib/ai/router";
+import { bacChoLuotHoi, xetTranNgay } from "@/lib/constants/ai-budget";
+import { tienAiHomNay, tranNgayUsd } from "@/lib/ai/budget";
 
 /**
  * ═══════════ VÒNG LẶP COPILOT — ERP TRUTH → TYPED TOOLS → AI ═══════════
@@ -61,9 +63,34 @@ export type RunCopilotInput = CopilotRequest & { user: SessionUser; provider?: A
 export async function runCopilot(input: RunCopilotInput): Promise<CopilotResult> {
   const started = Date.now();
   const now = input.now ?? new Date();
-  const provider = input.provider === undefined ? getAiProvider() : input.provider;
+  /*
+    BẬC MẶC ĐỊNH LÀ BẬC RẺ — xem `lib/constants/ai-budget.ts`.
+
+    Đo 22/09/2026: 68 lượt thật ở `/shipments`, mọi lượt THÀNH CÔNG đều cùng một hình dạng (2 vòng,
+    đều gọi công cụ, câu hỏi ~115 ký tự). Không tách được khó/dễ từ lịch sử, nên máy KHÔNG đoán:
+    rẻ là mặc định, và NGƯỜI HỎI nâng bậc khi họ thấy cần.
+  */
+  const bac = bacChoLuotHoi({ sauHon: input.sauHon });
+  const provider = input.provider === undefined ? getAiProvider(bac) : input.provider;
   const base: Omit<CopilotResult, "status" | "answer"> = { interactionId: null, toolCalls: [], pendingActions: [], warnings: [], usage: EMPTY_USAGE, costUsd: null, latencyMs: 0, rounds: 0, model: provider?.model ?? "" };
   if (!provider) return { ...base, status: "DISABLED", answer: `AI chưa được cấu hình trên máy chủ này (${aiDisabledReason() ?? "chưa có khoá API"}).`, error: "AI_DISABLED" };
+
+  /*
+    ═══ PHANH TRẦN NGÀY — chặn TRƯỚC khi gọi model, không phải cảnh báo sau ═══
+
+    Ngày 22/09/2026 khoá API hết sạch tín dụng giữa một lượt chạy, và không màn hình nào trong ERP
+    nói được "hôm nay AI đã tiêu bao nhiêu". Một cảnh báo chỉ có tác dụng khi có người đang nhìn;
+    phần lớn lượt gọi đắt nhất lại xảy ra lúc không ai nhìn.
+
+    Không đọc được sổ ⇒ CHO PHÉP gọi kèm cảnh báo: chặn vì không đo được là biến một lỗi đọc sổ
+    thành một lần ERP mất trí nhớ (mục 42 — chưa biết không phải là đã vượt trần).
+  */
+  const [daTieu, tran] = await Promise.all([tienAiHomNay(now), tranNgayUsd()]);
+  const vTran = xetTranNgay({ daTieu: daTieu.usd, tran });
+  if (!vTran.choPhep) return { ...base, status: "REFUSED", answer: vTran.ly, error: "AI_BUDGET_EXCEEDED" };
+  const canhBaoTran: string[] = [];
+  if (daTieu.usd === null) canhBaoTran.push("Không đọc được sổ chi phí AI — lượt này KHÔNG được tính vào trần ngày.");
+  else if (daTieu.chuaDoDuoc > 0) canhBaoTran.push(`${daTieu.chuaDoDuoc} lượt gọi hôm nay chưa định giá được — số đã tiêu ($${daTieu.usd.toFixed(4)}) là CẬN DƯỚI.`);
 
   const message = clip(input.message.trim(), COPILOT_LIMITS.maxPromptChars);
   if (!message) return { ...base, status: "ERROR", answer: "", error: "Câu hỏi trống" };
@@ -78,7 +105,7 @@ export async function runCopilot(input: RunCopilotInput): Promise<CopilotResult>
 
   const toolCalls: CopilotToolCall[] = [];
   const pending: CopilotPendingAction[] = [];
-  const warnings: string[] = [];
+  const warnings: string[] = [...canhBaoTran];
   let usage = EMPTY_USAGE;
   let rounds = 0;
   let answer = "";

@@ -29,6 +29,14 @@ export type CopilotRequest = {
   context: CopilotContext;
   /** Các lượt trước trong cùng cuộc trò chuyện (chỉ văn bản; tool call không lặp lại). Tối đa 12 lượt. */
   history?: CopilotHistoryTurn[];
+  /**
+   * NGƯỜI HỎI yêu cầu trả lời KỸ hơn — nâng bậc model cho riêng lượt này.
+   *
+   * Đây là đường nâng bậc DUY NHẤT. Phép đo 22/09/2026 trên 68 lượt thật cho thấy mọi lượt thành
+   * công đều cùng một hình dạng (2 vòng, đều gọi công cụ), nên máy KHÔNG có căn cứ nào để tự đoán
+   * câu nào khó. Người hỏi thì biết.
+   */
+  sauHon?: boolean;
 };
 
 export type CopilotToolKind = "read" | "write";
