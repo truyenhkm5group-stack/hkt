@@ -566,6 +566,14 @@ export async function finishTechAgentRun(
     buildResult?: TechGateResult;
     filesChanged?: string[];
     error?: string;
+    /**
+     * TIỀN CỦA LƯỢT CHẠY — `usd: null` nghĩa là CHƯA ĐO ĐƯỢC, khác hẳn 0 (mục 42).
+     *
+     * Ngày 22/09/2026 chủ shop hết sạch tín dụng API và không ai trả lời được tiền đi đâu. Sổ
+     * `ai_interactions` chỉ ghi lượt gọi TRONG ERP; agent chạy trên máy Actions nên KHÔNG có mặt
+     * ở đó. Nghĩa là đúng thứ tiêu nhiều nhất lại là thứ duy nhất không hiện ở bất kỳ đâu.
+     */
+    chiPhi?: { soVong: number; vao: number; ra: number; demDoc: number; demGhi: number; usd: number | null };
   },
   actor: TechActor,
 ): Promise<TechResult> {
@@ -589,6 +597,7 @@ export async function finishTechAgentRun(
       buildResult: input.buildResult ?? "UNKNOWN",
       filesChanged: input.filesChanged ?? [],
       error: input.error?.trim().slice(0, 4000) ?? "",
+      metadata: { ...((run.metadata as Record<string, unknown>) ?? {}), chiPhi: input.chiPhi ?? null },
     })
     .where(eq(schema.techAgentRuns.id, input.runId));
 

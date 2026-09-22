@@ -324,6 +324,8 @@ ${r.stderr}` });
         buildResult: gates.build,
         filesChanged,
         error: outcome.error ?? (congDo ? "Có cổng kiểm thử ĐỎ." : ""),
+        /* Tiền của lượt chạy đi theo dòng sổ — xem docblock ở `finishTechAgentRun`. */
+        chiPhi: outcome.chiPhi,
       },
       opts.actor,
     );
