@@ -1,5 +1,5 @@
 import { and, sql, type SQL } from "drizzle-orm";
-import { getDb } from "@/db";
+import { chayKhongJit, getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import {
@@ -161,8 +161,28 @@ async function taiKho(): Promise<Corpus> {
     }
     for (const k of shipments) k.productCode = maTheoKien.get(k.id) ?? null;
 
+    /*
+      ═══════════ CÂU CHẬM THỨ HAI CỦA CẢ HỆ THỐNG — CÙNG DẤU VÂN TAY JIT ═══════════
+
+      ĐO TRÊN PRODUCTION 22/09/2026 (`ops perf-probe`, kế hoạch thực thi thật của chính câu này):
+
+          cost=472.81..986586.79                              chi phí ƯỚC LƯỢNG 986.586
+          Seq Scan on orders … actual time=2439.414..2441.700 rows=3182
+
+      Quét 3.182 dòng của `orders` mất 2,3 ms — cùng bảng đó ở nhánh khác của CHÍNH kế hoạch này
+      quét xong trong 1,9 ms (`Seq Scan on shipments … actual time=0.024..1.872`). 2.439 ms còn
+      lại là thời gian đứng chờ TRƯỚC dòng đầu tiên, tức giờ biên dịch.
+
+      Chi phí ước lượng lại đến từ `ORDER_OUTCOME_FAST` + `PRIMARY_ATTEMPT` — mười mấy `SubPlan`
+      tương quan trong kế hoạch, phần lớn mang `never executed`: Postgres TRẢ TIỀN BIÊN DỊCH cho
+      những nhánh nó không hề chạy.
+
+      `offset 0` ở dưới là hàng rào tối ưu hoá CỐ Ý (chặn Postgres kéo `where k.outcome in (…)`
+      vào trong và tính biểu thức kết quả nhiều lần) — giữ nguyên, nó không liên quan tới JIT.
+    */
     const donRows = rowsOf<{ inserted_at: unknown; outcome: string }>(
-      await db.execute(sql`
+      await chayKhongJit(db, (tx) =>
+        tx.execute(sql`
         select k.inserted_at, k.outcome
           from (
             select "orders"."inserted_at" as inserted_at, ${ORDER_OUTCOME_FAST} as outcome
@@ -173,6 +193,7 @@ async function taiKho(): Promise<Corpus> {
           ) k
          where k.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')
       `),
+      ),
     );
     const orders = donRows.flatMap((r) => {
       const insertedAt = toDate(r.inserted_at);

@@ -1,5 +1,5 @@
 import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { adsRatio, adsRatios, type AdsRatios } from "@/lib/constants/profit";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { memo, periodKey } from "@/lib/cache";
@@ -149,18 +149,47 @@ export type ProductReturnHistory = { productId: string; finished: number; return
 export async function productReturnHistory(windowDays: number): Promise<Map<string, ProductReturnHistory>> {
   const db = await getDb();
   const since = new Date(Date.now() - windowDays * 86_400_000);
-  const rows = await db
-    .select({
-      productId: sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`,
-      finished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
-      returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
-    })
-    .from(i)
-    .innerJoin(o, eq(o.id, i.orderId))
-    .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    .leftJoin(pv, eq(pv.id, i.variantId))
-    .where(and(gte(o.insertedAt, since), eq(i.isBonus, false)))
-    .groupBy(sql`1`);
+  /*
+    ═══════════ CÂU CHẬM NHẤT CỦA CẢ HỆ THỐNG — VÀ 98% THỜI GIAN LÀ BIÊN DỊCH ═══════════
+
+    ĐO TRÊN PRODUCTION 22/09/2026 (`ops perf-probe`, kế hoạch thực thi thật của chính câu này):
+
+        cost=1300.84..2033735.80        chi phí ƯỚC LƯỢNG 2 triệu (ngưỡng bật JIT: 100.000)
+        Buffers: shared hit=28055       đọc 100% từ đệm — KHÔNG chạm đĩa một lần nào
+        JIT: Functions: 357
+             Optimization 3111 ms · Emission 2524 ms · Total 5766,034 ms
+        Execution Time: 5876,015 ms     ⇒ biên dịch chiếm 98,1%
+
+    Dấu vân tay nằm ngay ở nút đáy: `Seq Scan on order_items … actual time=5731.966..5733.397
+    rows=3302`. Quét 3.302 dòng mất 1,4 ms; 5.731 ms còn lại là thời gian ĐỨNG CHỜ trước khi dòng
+    đầu tiên ra — chỗ PostgreSQL tính giờ biên dịch JIT.
+
+    Chi phí ước lượng 2 triệu KHÔNG đến từ khối lượng dữ liệu (3.302 dòng, 8 mã hàng). Nó đến từ
+    `ORDER_OUTCOME_FAST` và `PRIMARY_ATTEMPT` — hai truy vấn con tương quan bị nội tuyến lại vào
+    TỪNG cột `filter (where …)`. Cùng hình dạng đã cắn `marketing-daily` (4.048ms → 276ms),
+    `sales-funnel` và `staff-performance`; đây là tệp thứ tư mang nó.
+
+    VÌ SAO CHỈ MỘT CÂU MÀ SỬA ĐƯỢC NHIỀU MÀN HÌNH: `productReturnHistory` nằm dưới
+    `productDeliveryRates` (đệm 90 giây, dùng chung), nên LƯỢT ĐẦU của Báo cáo lợi nhuận danh
+    nghĩa, `/ads/daily` và mọi bảng bóc tách marketing đều trả đúng khoản 5,7 giây này.
+
+    Không tắt JIT toàn máy chủ — `set local` chỉ sống trong giao dịch này (xem `chayKhongJit`).
+    Cùng truy vấn, cùng kết quả, cùng thứ tự.
+  */
+  const rows = await chayKhongJit(db, (tx) =>
+    tx
+      .select({
+        productId: sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`,
+        finished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+        returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
+      })
+      .from(i)
+      .innerJoin(o, eq(o.id, i.orderId))
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+      .leftJoin(pv, eq(pv.id, i.variantId))
+      .where(and(gte(o.insertedAt, since), eq(i.isBonus, false)))
+      .groupBy(sql`1`),
+  );
   const map = new Map<string, ProductReturnHistory>();
   for (const r of rows) {
     const finished = Number(r.finished);

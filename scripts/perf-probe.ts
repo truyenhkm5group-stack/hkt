@@ -419,6 +419,83 @@ async function main() {
   const motNgay = resolvePeriod({ period: "yesterday" }, "yesterday");
   await timed("/ads/daily", "marketingDaily 1 ngày", () => md.getMarketingDaily(motNgay, "created", {}));
 
+  /*
+    ═══════════ NĂM MÀN HÌNH CHẬM CHƯA TỪNG CÓ MỘT PHÉP ĐO NÀO ═══════════
+
+    Smoke test của deploy 22/09/2026 (`48918cec`, 76/76 đạt) in ra 20 màn hình vượt ngưỡng 2 giây.
+    Bốn trang nặng nhất đã có mặt ở trên; số còn lại thì chưa ai đo bao giờ, nên mọi câu nói về
+    chúng tới giờ đều là phỏng đoán:
+
+        /reports/returns                       61,8s
+        /data-quality?issue=unlinked-shipment  34,6s
+        /cod?recon=stale                       28,7s
+        /customers                             23,2s
+        /work/okr                              22,0s
+        /payroll                               13,7s
+        /inventory/returns                      9,2s
+
+    ─── VÌ SAO `/reports/returns` ĐO Ở 90 NGÀY, KHÔNG PHẢI 30 ───
+
+    Trang khai `defaultPeriod: "90d"`, nên người mở trang KHÔNG hề thấy con số 30 ngày. Đo ở 30
+    ngày rồi kết luận về một trang chạy 90 ngày là tự cho mình một bài dễ hơn bài thật — và với
+    báo cáo này, 90 ngày là gần ba lần số dòng. Hai phép đo của trang ấy đã có ở trên vẫn giữ
+    nguyên mốc 30 ngày để so được với lịch sử; năm phép đo thêm ở đây chạy ĐÚNG mốc của trang.
+
+    ─── VÀ VÌ SAO ĐO ĐỦ CẢ MƯỜI HÀM CỦA TRANG ĐÓ ───
+
+    `/reports/returns` chờ MƯỜI truy vấn (bảy ở lượt một, ba ở lượt hai) rồi mới vẽ được ký tự đầu
+    tiên. Trước bản này chỉ hai trong mười được đo, nên tám hàm còn lại có thể đang giữ phần lớn
+    của 61,8 giây mà không ai biết. Một trang chậm mà chỉ đo 20% số hàm của nó thì con số đo được
+    không trả lời được câu hỏi nào.
+  */
+  const ret90 = resolvePeriod({ period: "90d" }, "90d");
+  const rr2 = await import("@/lib/queries/return-rate");
+  await timed("/reports/returns", "getReturnRateSummary 90d", () => rr2.getReturnRateSummary(ret90, ""));
+  await timed("/reports/returns", "getReturnRateByVariant 90d", () =>
+    rr2.getReturnRateByVariant({ period: ret90, q: "", minShipped: 0, sort: "returned", dir: "desc", page: 1, pageSize: 50 }),
+  );
+  await timed("/reports/returns", "getReturnRateBySource 90d", () => rr2.getReturnRateBySource(ret90, ""));
+  await timed("/reports/returns", "getReturnRateByTier 90d", () => rr2.getReturnRateByTier(ret90, ""));
+  const logi = await import("@/lib/queries/logistics");
+  await timed("/reports/returns", "logisticsPerformance 90d", () => logi.logisticsPerformance(ret90));
+  const rrr = await import("@/lib/queries/return-reason-report");
+  await timed("/reports/returns", "getReturnReasonReport 90d", () => rrr.getReturnReasonReport({ period: ret90 }));
+  const ri = await import("@/lib/queries/return-intelligence");
+  /*
+    Nơi gọi thật truyền `reasonReport` đã dựng sẵn để khỏi dựng lần hai. Ở đây CỐ Ý không truyền:
+    con số cần biết là chi phí ĐẦY ĐỦ của hàm này, còn phần dùng chung đã được đo riêng ngay trên.
+    Truyền vào sẽ đo một hàm rẻ hơn hàm đang chạy trên production ở nhánh drilldown.
+  */
+  await timed("/reports/returns", "getReturnIntelligence 90d", () => ri.getReturnIntelligence({ period: ret90, previous: previousPeriod(ret90), basis: "SHIPPED" }));
+
+  const dqi = await import("@/lib/queries/data-quality-issues");
+  await timed("/data-quality", "getDataQualityIssues", () => dqi.getDataQualityIssues());
+
+  /*
+    `/customers` khai `defaultPeriod: "all"` và bắn BA truy vấn song song trên cùng bộ lọc. Đo cả
+    ba: nếu chi phí chia đều thì việc phải làm là dựng chung một tập nền, còn nếu dồn vào một hàm
+    thì đó là một câu lệnh phải sửa — hai kết luận khác nhau, và không đoán được từ con số trang.
+  */
+  const cus = await import("@/lib/queries/customers");
+  const cusParams = { page: 1, pageSize: 50, sort: "lastOrderAt", dir: "desc" as const, q: "", filters: {}, period: all };
+  await timed("/customers", "listCustomers", () => cus.listCustomers(cusParams));
+  await timed("/customers", "customerFacets", () => cus.customerFacets(cusParams));
+  await timed("/customers", "customerSummary", () => cus.customerSummary(cusParams));
+
+  const okr = await import("@/lib/queries/okr");
+  const quy = okr.currentQuarter();
+  const bsc = await import("@/lib/queries/bsc");
+  await timed("/work/okr", "listObjectives", () => okr.listObjectives({ period: quy, includeDraft: true }, month));
+  await timed("/work/okr", "getScorecard", () => bsc.getScorecard({ scope: "COMPANY", departmentId: null, period: quy }, month));
+
+  const pay = await import("@/lib/queries/payroll");
+  await timed("/payroll", "getPayrollReport profit1", () => pay.getPayrollReport(month, "profit1"));
+
+  const insp = await import("@/lib/returns/inspection");
+  await timed("/inventory/returns", "listPendingInspections", () => insp.listPendingInspections());
+  const uni = await import("@/lib/returns/unidentified");
+  await timed("/inventory/returns", "listUnidentifiedReturns", () => uni.listUnidentifiedReturns({}));
+
   results.sort((a, b) => b.ms - a.ms);
   console.log("\n── THỜI GIAN TỪNG TRUY VẤN (chậm nhất trước) ──");
   // IN CẢ PHẦN TÁCH CSDL / ỨNG DỤNG: "chậm" chưa sửa được gì, phải biết thời gian nằm ở Postgres
