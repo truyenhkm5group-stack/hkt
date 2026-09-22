@@ -1,0 +1,188 @@
+{
+  "label": "baseline-T1-example",
+  "scale": 1,
+  "rounds": 3,
+  "seedMs": 2450,
+  "node": "v22.0.0",
+  "engine": "PGlite (Postgres 16 → WASM, một luồng)",
+  "measuredAt": "2026-09-21T10:30:00.000Z",
+  "rows": {
+    "orders": 1147,
+    "shipments": 1302,
+    "customers": 487,
+    "variants": 71,
+    "products": 24,
+    "warehouses": 1
+  },
+  "results": [
+    {
+      "page": "Tổng quan (Dashboard)",
+      "coldMs": 145.3,
+      "warmMs": 48.2,
+      "p50Ms": 145.3,
+      "p95Ms": 172.1,
+      "queries": 18,
+      "dbMs": 132,
+      "rows": 247,
+      "payloadKb": 45.2,
+      "slowest": [
+        {
+          "sql": "SELECT s.id, s.stage, COUNT(*) as cnt FROM shipments s GROUP BY s.id, s.stage",
+          "count": 1,
+          "ms": 45,
+          "rows": 47
+        },
+        {
+          "sql": "SELECT o.id, SUM(COALESCE(s.cod_amount, 0)) FROM orders o LEFT JOIN shipments s ...",
+          "count": 1,
+          "ms": 38,
+          "rows": 1147
+        }
+      ]
+    },
+    {
+      "page": "Báo cáo lợi nhuận (Profit)",
+      "coldMs": 856.3,
+      "warmMs": 125.4,
+      "p50Ms": 856.3,
+      "p95Ms": 923.1,
+      "queries": 38,
+      "dbMs": 801,
+      "rows": 1523,
+      "payloadKb": 245.6,
+      "slowest": [
+        {
+          "sql": "SELECT o.id, o.items FROM orders o ... CASE WHEN s.stage='DELIVERED' THEN ... GROUP BY o.id",
+          "count": 1,
+          "ms": 523,
+          "rows": 1147
+        },
+        {
+          "sql": "SELECT product_id, SUM(qty) as sold FROM order_items ... GROUP BY product_id",
+          "count": 1,
+          "ms": 187,
+          "rows": 71
+        },
+        {
+          "sql": "SELECT id, cost FROM stock_receipts WHERE kind='RECEIPT' ORDER BY created_at DESC",
+          "count": 1,
+          "ms": 91,
+          "rows": 156
+        }
+      ]
+    },
+    {
+      "page": "Đơn hàng (Orders)",
+      "coldMs": 312.5,
+      "warmMs": 89.3,
+      "p50Ms": 312.5,
+      "p95Ms": 358.7,
+      "queries": 26,
+      "dbMs": 285,
+      "rows": 1147,
+      "payloadKb": 512.4,
+      "slowest": [
+        {
+          "sql": "SELECT o.* FROM orders o ... ORDER BY o.inserted_at DESC LIMIT 50",
+          "count": 1,
+          "ms": 178,
+          "rows": 50
+        },
+        {
+          "sql": "SELECT o.stage, COUNT(*) FROM orders o GROUP BY o.stage",
+          "count": 1,
+          "ms": 84,
+          "rows": 8
+        }
+      ]
+    },
+    {
+      "page": "Vận đơn (Shipments)",
+      "coldMs": 421.8,
+      "warmMs": 112.6,
+      "p50Ms": 421.8,
+      "p95Ms": 468.2,
+      "queries": 31,
+      "dbMs": 389,
+      "rows": 1302,
+      "payloadKb": 634.2,
+      "slowest": [
+        {
+          "sql": "SELECT s.*, o.* FROM shipments s LEFT JOIN orders o ON s.order_id = o.id ... ORDER BY s.vtp_status_date DESC",
+          "count": 1,
+          "ms": 267,
+          "rows": 1302
+        },
+        {
+          "sql": "SELECT s.stage, COUNT(*) FROM shipments s GROUP BY s.stage",
+          "count": 1,
+          "ms": 78,
+          "rows": 7
+        }
+      ]
+    },
+    {
+      "page": "Quảng cáo (Ads)",
+      "coldMs": 523.7,
+      "warmMs": 156.2,
+      "p50Ms": 523.7,
+      "p95Ms": 587.3,
+      "queries": 42,
+      "dbMs": 489,
+      "rows": 2145,
+      "payloadKb": 789.3,
+      "slowest": [
+        {
+          "sql": "SELECT * FROM fb_ads WHERE period >= ... ORDER BY spend DESC",
+          "count": 1,
+          "ms": 234,
+          "rows": 1200
+        },
+        {
+          "sql": "SELECT o.*, oa.fanpage_id FROM orders o LEFT JOIN order_attributions oa ...",
+          "count": 1,
+          "ms": 167,
+          "rows": 1147
+        }
+      ]
+    },
+    {
+      "page": "Sản phẩm & tồn kho (Products)",
+      "coldMs": 267.4,
+      "warmMs": 76.8,
+      "p50Ms": 267.4,
+      "p95Ms": 301.2,
+      "queries": 22,
+      "dbMs": 241,
+      "rows": 71,
+      "payloadKb": 234.5,
+      "slowest": [
+        {
+          "sql": "SELECT pv.*, SUM(vs.quantity) as stock FROM product_variants pv LEFT JOIN variant_stocks vs ...",
+          "count": 1,
+          "ms": 145,
+          "rows": 71
+        }
+      ]
+    },
+    {
+      "page": "GTC theo mẫu mã",
+      "coldMs": 389.2,
+      "warmMs": 98.4,
+      "p50Ms": 389.2,
+      "p95Ms": 425.6,
+      "queries": 28,
+      "dbMs": 354,
+      "rows": 71,
+      "payloadKb": 156.7,
+      "slowest": [
+        {
+          "sql": "SELECT o.*, s.* FROM orders o LEFT JOIN shipments s ... WHERE ORDER_OUTCOME = 'DELIVERED' OR 'RETURNED'",
+          "count": 1,
+          "ms": 234,
+          "rows": 1147
+        }
+      ]
+    }
+  ]
+}
