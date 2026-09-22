@@ -80,6 +80,7 @@ import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReco
 import { testPhanhTienAi, testPhanhTienAiGuards } from "./ai-budget.test";
 import { testTienLuotChay, testTienLuotChayGuards } from "./agent-run-cost.test";
 import { testLoiCongDocDuoc, testLoiCongGuards } from "./agent-run-error.test";
+import { testKyLoat, testKyLoatGuards } from "./tech-approval-bulk.test";
 import { testNhanModelNoiThat } from "./nhan-model-noi-that.test";
 import { chayBaiKiemAgentTuDangKy } from "./agent-tu-dang-ky.test";
 import { testKheDangKyAgent, testKhongCoBaiKiemMoCoi, testPromptTheoVai } from "./dang-ky-bai-kiem.test";
@@ -2036,6 +2037,8 @@ async function main() {
   testTienLuotChayGuards();
   testLoiCongDocDuoc();
   testLoiCongGuards();
+  testKyLoat();
+  testKyLoatGuards();
   testPhanhTienAi();
   testPhanhTienAiGuards();
   testNhanModelNoiThat();

@@ -1,5 +1,5 @@
 import { Bot } from "lucide-react";
-import { AgentEnableSwitch, SeedAgentsButton } from "@/app/(dashboard)/tech/agents/agent-controls";
+import { AgentEnableSwitch, SeedAgentsButton, AgentRiskPicker } from "@/app/(dashboard)/tech/agents/agent-controls";
 import { TechNav } from "@/app/(dashboard)/tech/tech-nav";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
@@ -73,7 +73,8 @@ export default async function TechAgentsPage() {
                     <p className="mt-0.5 max-w-md text-[11.5px] leading-5 text-muted-foreground">{a.description}</p>
                   </TableCell>
                   <TableCell className="align-top text-xs">
-                    <div>Rủi ro: {a.allowedRisks.length ? a.allowedRisks.join(" · ") : <span className="text-muted-foreground">— chưa khai</span>}</div>
+                    <div className="mb-1">Rủi ro được phép:</div>
+                    <AgentRiskPicker agentId={a.id} name={a.name} allowedRisks={a.allowedRisks} />
                     <div className="mt-0.5 text-muted-foreground">
                       {[a.canCode ? "viết mã" : "", a.canReview ? "review" : "", a.canRunProdRead ? "đọc production" : ""].filter(Boolean).join(" · ") || "chỉ đọc hàng đợi"}
                     </div>

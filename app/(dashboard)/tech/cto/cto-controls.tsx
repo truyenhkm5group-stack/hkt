@@ -2,15 +2,28 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Loader2, Sparkles, X } from "lucide-react";
+import { Check, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
 import { approveTechProposalAction, planTechProposalAction, rejectTechProposalAction } from "@/lib/actions/tech";
 import { Button } from "@/components/ui/button";
 
 /**
- * Ba nút, và KHÔNG có nút thứ tư.
+ * Bốn nút — và nút thứ tư KHÔNG phải một lượt duyệt thứ hai.
  *
- * Cố ý không có "áp tất cả" hay "chạy luôn": mỗi bản kế hoạch phải được một con người đọc rồi bấm
- * duyệt, và phép duyệt đó là đường DUY NHẤT biến đề xuất thành việc thật.
+ * Cố ý vẫn không có "áp tất cả" hay "chạy luôn": mỗi bản kế hoạch phải được một con người đọc rồi
+ * bấm duyệt, và phép duyệt đó là đường DUY NHẤT biến đề xuất thành việc thật.
+ *
+ * ─── VÌ SAO CÓ NÚT "ÁP LẠI" ───
+ *
+ * `approveProposal()` xưa nay VẪN chạy lại được trên bản đã `APPROVED` — cố ý, cho trường hợp một
+ * lượt áp hỏng giữa chừng và mới tạo được vài việc. Nhưng màn hình chỉ hiện nút khi bản còn
+ * `READY_FOR_REVIEW`, nên khả năng ấy chưa bao giờ với tới được.
+ *
+ * Đã cắn thật 22/09/2026: bản vá cho phép lượt áp lại GÁN VAI và PHÂN LOẠI phần còn thiếu (chín
+ * việc `TECH-4…TECH-12` tạo trước bản vá nên vô chủ và kẹt ở `NEW`) — rồi chủ shop mở màn hình ra
+ * và **không thấy nút nào để bấm**. Một tính năng không có đường chạm tới thì bằng không có.
+ *
+ * Nút này KHÔNG ký thêm lần nào: bản đã duyệt vẫn là đã duyệt, việc đã tạo KHÔNG tạo lại
+ * (`applied_task_id` chặn), và nó chỉ chạm những việc ĐANG VÔ CHỦ hoặc đang `NEW`.
  */
 function Bao({ v }: { v: { ok: boolean; text: string } | null }) {
   if (!v) return null;
@@ -46,7 +59,7 @@ export function PlanButton({ taskId, label }: { taskId: string; label?: string }
   );
 }
 
-export function ApproveButton({ proposalId, count }: { proposalId: string; count: number }) {
+export function ApproveButton({ proposalId, count, apLai }: { proposalId: string; count: number; apLai?: boolean }) {
   const [dang, batDau] = useTransition();
   const [bao, setBao] = useState<{ ok: boolean; text: string } | null>(null);
   const [note, setNote] = useState("");
@@ -56,7 +69,7 @@ export function ApproveButton({ proposalId, count }: { proposalId: string; count
       <input
         value={note}
         onChange={(e) => setNote(e.target.value)}
-        placeholder="Ghi chú khi duyệt (tuỳ chọn)"
+        placeholder={apLai ? "Ghi chú khi áp lại (tuỳ chọn)" : "Ghi chú khi duyệt (tuỳ chọn)"}
         className="w-full rounded-lg border bg-background px-3 py-1.5 text-sm"
       />
       <Button
@@ -84,9 +97,15 @@ export function ApproveButton({ proposalId, count }: { proposalId: string; count
           })
         }
       >
-        {dang ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />}
-        Phê duyệt kế hoạch ({count} việc)
+        {dang ? <Loader2 className="size-4 animate-spin" /> : apLai ? <RefreshCw className="size-4" /> : <Check className="size-4" />}
+        {apLai ? "Áp lại — gán vai và phân loại phần còn thiếu" : `Phê duyệt kế hoạch (${count} việc)`}
       </Button>
+      {apLai ? (
+        <p className="text-[11px] text-muted-foreground">
+          Không ký thêm lần nào: việc đã tạo KHÔNG tạo lại, và chỉ những việc đang vô chủ hoặc đang
+          “Mới” được chạm tới.
+        </p>
+      ) : null}
       <Bao v={bao} />
     </div>
   );
