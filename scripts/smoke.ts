@@ -117,6 +117,7 @@ const ROUTES = [
     gửi thì lá chắn này là nơi đầu tiên biết.
   */
   "/ai",
+  "/ai/department",
   "/ai/copilot",
   "/ai/review",
   "/ai/ad-map",

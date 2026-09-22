@@ -169,6 +169,7 @@ import { testLoginThrottle } from "./login-throttle.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
 import { testAiPlatform } from "./ai-platform.test";
 import { testSalesAgent } from "./sales-agent.test";
+import { testSalesDepartment } from "./sales-department.test";
 import { testSalesCopilot } from "./sales-copilot.test";
 import { testProductResolver } from "./product-resolver.test";
 import { testFanpageSales } from "./fanpage-sales.test";
@@ -1644,6 +1645,7 @@ async function main() {
 
   await testAiPlatform(db);
   await testSalesAgent(db);
+  await testSalesDepartment(db);
   await testSalesCopilot(db);
   await testProductResolver(db);
   await testFanpageSales(db);

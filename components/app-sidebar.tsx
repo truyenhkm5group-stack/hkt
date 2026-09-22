@@ -13,6 +13,7 @@ import {
   ClipboardCheck,
   Factory,
   FileSpreadsheet,
+  GaugeCircle,
   HandCoins,
   Headset,
   HeartHandshake,
@@ -141,6 +142,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       // và mọi nút trên đó đều đòi `ai:send`. Cho người chỉ có `ai:view` vào đây là mở hội thoại
       // thật của khách cho một người không làm gì được với chúng, rồi để họ nhìn một hàng đợi toàn
       // nút bấm không nổi. Màn hình quan sát của họ là `/ai/review`.
+      { href: "/ai/department", label: "Phòng Sales AI", icon: GaugeCircle, permission: "ai:view" },
       { href: "/ai/copilot", label: "Hàng đợi trợ lý bán hàng", icon: ClipboardCheck, permission: "ai:send" },
       { href: "/ai/review", label: "Soát & chấm tay", icon: ClipboardCheck, permission: "ai:view" },
       { href: "/ai/fanpage", label: "Cấu hình fanpage", icon: ClipboardCheck, permission: "ai:view" },
