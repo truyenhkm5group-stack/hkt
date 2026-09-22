@@ -922,6 +922,42 @@ export async function testSalesAgent(db: Db) {
   assert.equal(echo.eventEmitted, false, "tin của shop KHÔNG được tạo việc — nếu không con bot sẽ tự nói chuyện với chính nó");
   assert.match(echo.reason, /vòng lặp/);
 
+  /*
+    ═════════ 6C-BIS. MỘT MÂU THUẪN ĐANG SỐNG LÀ MỘT DÒNG, KHÔNG PHẢI MỘT DÒNG MỖI VÒNG ═════════
+
+    Đo production 22/09/2026: bốn tin nhắn sinh ra 17.962 dòng `ai_errors` — 4.571 dòng cho MỘT
+    tin. Cửa sổ đọc chồng lấn đọc lại cùng tin ấy mỗi 45 giây, lần nào cũng phát hiện lại đúng
+    mâu thuẫn đã biết, và lần nào cũng ghi thêm một dòng. Chú thích ở nơi gọi ghi "Ghi lại MỘT
+    lần" nhưng không có gì thực thi câu ấy.
+
+    Bài kiểm này khoá HAI tính chất, và tính chất thứ hai quan trọng ngang tính chất thứ nhất:
+      · đọc lại nhiều lần ⇒ vẫn ĐÚNG MỘT dòng;
+      · số lần gặp KHÔNG bị vứt đi — nó phân biệt một trục trặc thoáng qua với một mâu thuẫn
+        đang sống, và người đọc cần nó để biết có phải đi sửa hay không.
+  */
+  const tinTrung = { ...parsed.message, externalId: "msg-1-khac-ma" };
+  const lanDau = await ingestMessage(parsed.conversation, tinTrung, "test", db, "WEBHOOK");
+  assert.equal(lanDau.duplicate, true, "cùng vân tay nội dung mà khác mã ⇒ nhận ra là trùng chéo kênh");
+
+  const demDong = async () =>
+    (await db.query.aiErrors.findMany({
+      where: and(eq(schema.aiErrors.scope, "INGEST"), eq(schema.aiErrors.subjectId, first.conversationId)),
+    })).filter((r) => r.message.startsWith("Hai đường nạp đánh mã khác nhau"));
+
+  const sauLanDau = await demDong();
+  assert.equal(sauLanDau.length, 1, "mâu thuẫn mới ⇒ ghi đúng một dòng");
+  assert.equal(Number((sauLanDau[0].detail as Record<string, unknown>)?.seen), 1, "lần đầu gặp thì đếm là 1");
+
+  // Ba vòng nạp nữa trên ĐÚNG tin ấy — đây chính là cái cửa sổ chồng lấn 45 giây trong đời thật.
+  for (let i = 0; i < 3; i += 1) await ingestMessage(parsed.conversation, tinTrung, "test", db, "WEBHOOK");
+  const sauBaVong = await demDong();
+  assert.equal(sauBaVong.length, 1, "đọc lại ba lần nữa vẫn phải là MỘT dòng — đây là lỗi đã đẻ ra 4.571 dòng");
+  assert.equal(Number((sauBaVong[0].detail as Record<string, unknown>)?.seen), 4, "số lần gặp phải được đếm, không được vứt đi");
+  assert.ok(
+    typeof (sauBaVong[0].detail as Record<string, unknown>)?.lastSeenAt === "string",
+    "phải biết lần gặp CUỐI là lúc nào — một mâu thuẫn ngừng tái diễn khác hẳn một mâu thuẫn đang sống",
+  );
+
   // ═════════ 6D. NỐI CÂU NHÂN VIÊN THEO LƯỢT — KHÔNG GIẢ ĐỊNH MỘT-ĐỔI-MỘT ═════════
   //
   // Nhân viên hay trả lời một lượt khách bằng ba bốn tin liền; đôi khi không trả lời tin nào;
@@ -1287,6 +1323,68 @@ export async function testSalesAgent(db: Db) {
   assert.notEqual(noisyRuns[0].status, "FAILED", "mô hình trả rác là tình huống lường trước, không phải sự cố hệ thống");
   const noisyConversation = await db.query.salesConversations.findFirst({ where: eq(schema.salesConversations.id, noisy.conversationId) });
   assert.equal(noisyConversation?.stage, "HUMAN_TAKEOVER", "không hiểu được khách thì chuyển người, không đoán bừa");
+
+  /*
+    ═════════ 9B. TRẦN CHI PHÍ PHẢI THỰC SỰ CHẶN — VÀ PHẢI BIẾT KHI NÓ KHÔNG ĐO ĐƯỢC ═════════
+
+    `dailyCostCapVnd` từng được KHAI ở `AiFeatureFlags`, được bộ làm sạch cấu hình đọc, được hai
+    bộ kiểm thử dựng trong fixture — và KHÔNG một dòng nào đọc nó trước khi gọi mô hình. Một cái
+    trần chỉ tồn tại trong kiểu dữ liệu là một cái trần không có.
+
+    Nhánh thứ hai dưới đây mới là nhánh đắt. `cost_vnd` là NULL với mọi mô hình chưa khai đơn giá
+    (đo 22/09/2026: 660/1.065 lượt), nên tổng "đo được" là 0 ₫ và một cái trần so với 0 sẽ KHÔNG
+    BAO GIỜ nổ. Một cái trần không bao giờ nổ tệ hơn không có trần: nó làm người vận hành tin
+    rằng có ai đó đang canh. Chưa đo được thì DỪNG và nói vì sao — rơi về phía HẸP HƠN.
+  */
+  const capConv = { pageId: "page-tran", externalId: "conv-tran", pancakeCustomerId: "", customerName: "", phone: "", platform: "facebook" };
+  const capIngest = await ingestMessage(
+    capConv,
+    { externalId: "msg-tran", text: "mẫu này bao nhiêu tiền ạ", fromPage: false, senderType: "CUSTOMER", fromName: "", sentAt: new Date(), hasAttachment: false, attachmentCount: 0, raw: {} },
+    "test",
+    db,
+  );
+  const capTask = await db.query.aiTasks.findFirst({ where: eq(schema.aiTasks.subjectId, capIngest.conversationId) });
+  assert.ok(capTask, "phải có việc để thử trần");
+
+  // Một lượt gọi mô hình CHƯA ĐỊNH GIÁ ĐƯỢC trong 24 giờ qua.
+  await db.insert(schema.aiModelCalls).values({ provider: "erp:openai", model: "mo-hinh-chua-khai-gia", tier: "ECONOMY", step: "understand", inputTokens: 100, outputTokens: 50, costVnd: null });
+
+  await setSettingJson(AI_CONFIG_KEY, { dailyCostCapVnd: 50_000 });
+  const chuaDoDuoc = await runSalesTask(capTask.id, { db });
+  assert.equal(chuaDoDuoc.status, "SKIPPED", "có trần mà chưa định giá được thì DỪNG, không chạy tiếp");
+  assert.match(chuaDoDuoc.reason, /CHƯA ĐỊNH GIÁ ĐƯỢC/, "phải nói rõ vì sao dừng — 'chưa đo được' khác hẳn 'đã chạm trần'");
+  const runsSauKhiChan = await db.query.aiRuns.findMany({ where: eq(schema.aiRuns.subjectId, capIngest.conversationId) });
+  assert.equal(runsSauKhiChan.length, 0, "chặn ở trần thì KHÔNG được mở một lượt chạy — mở ra là đã trả tiền rồi");
+
+  /*
+    Khai đủ giá ⇒ trần đo được.
+
+    Phải định giá MỌI lượt gọi còn treo trong cửa sổ 24 giờ, không chỉ lượt vừa chèn: các khối
+    kiểm thử phía trên đã gọi nhà cung cấp `stub` với bảng giá rỗng, nên chúng để lại những dòng
+    `cost_vnd = NULL` thật. Chỉ định giá một dòng thì nhánh "chưa đo được" vẫn đúng và nổ trước —
+    đúng như mã sản xuất phải làm, và đó chính là điều bài kiểm này vừa chứng minh ở lượt trên.
+  */
+  await db.update(schema.aiModelCalls).set({ costVnd: 0, pricingVersion: "kiem-thu" }).where(sql`${schema.aiModelCalls.costVnd} is null`);
+  await db.update(schema.aiModelCalls).set({ costVnd: 60_000, pricingVersion: "kiem-thu" }).where(eq(schema.aiModelCalls.model, "mo-hinh-chua-khai-gia"));
+  const chamTran = await runSalesTask(capTask.id, { db });
+  assert.equal(chamTran.status, "SKIPPED", "đã tiêu 60.000 ₫ trên trần 50.000 ₫ thì dừng");
+  assert.match(chamTran.reason, /chạm trần/, "chạm trần phải nói là chạm trần, không đội lốt lỗi khác");
+
+  /*
+    Trần = 0 nghĩa là CHƯA KHAI TRẦN, không phải "cấm tiêu" — nhánh này phải đứng ngoài hoàn toàn.
+
+    Phải trả việc về PENDING trước: hai lượt trên đã `finishTask(FAILED)`, mà `claimTask` chỉ nhận
+    việc PENDING. Không đặt lại thì lượt này trượt vì "việc đã có tiến trình khác nhận" và bài kiểm
+    sẽ XANH mà không chứng minh được điều nó định chứng minh — một bài kiểm xanh nhờ nhầm lẫn còn
+    tệ hơn không có bài kiểm.
+  */
+  await db.update(schema.aiTasks).set({ status: "PENDING", finishedAt: null, lastError: null }).where(eq(schema.aiTasks.id, capTask.id));
+  await setSettingJson(AI_CONFIG_KEY, { dailyCostCapVnd: 0 });
+  const khongTran = await runSalesTask(capTask.id, { db });
+  assert.notEqual(khongTran.status, "SKIPPED", "trần 0 là CHƯA KHAI, không được biến thành cấm chạy");
+
+  await db.delete(schema.aiModelCalls).where(eq(schema.aiModelCalls.model, "mo-hinh-chua-khai-gia"));
+  await setSettingJson(AI_CONFIG_KEY, {});
 
   // ═════════ 10. VIỆC KHÔNG TỒN TẠI / NẤC OFF ═════════
 

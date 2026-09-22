@@ -15,7 +15,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema, type Db } from "@/db";
 import { getAiSettings, type AiSettings } from "@/lib/ai-workforce/config";
-import { claimTask, finishTask, recordAiError, runsInLastHour } from "@/lib/ai-workforce/events";
+import { claimTask, finishTask, modelSpendLast24h, recordAiError, runsInLastHour } from "@/lib/ai-workforce/events";
 import { parseRouting, runModelStep, type ModelAttempt } from "@/lib/ai-workforce/model-router";
 import { getAgent } from "@/lib/ai-workforce/registry";
 import { startRun, type RunRecorder } from "@/lib/ai-workforce/runs";
@@ -236,9 +236,46 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
   const recent = await runsInLastHour(db);
   if (recent >= settings.maxRunsPerHour) {
     await finishTask(taskId, "FAILED", `Vượt trần ${settings.maxRunsPerHour} lượt/giờ`, db);
-    await recordAiError({ scope: "PIPELINE", agentKey: "sales", message: `Vượt trần ${settings.maxRunsPerHour} lượt chạy mỗi giờ — dừng để không tạo vòng lặp tốn tiền` }, db);
+    // `once`: chạm trần là một TÌNH TRẠNG, không phải 386 sự việc khác nhau (đo 22/09/2026).
+    // Số lần chạm vẫn còn ở `detail.seen`, nên vẫn biết được trần đang bị ép tới mức nào.
+    await recordAiError({ scope: "PIPELINE", agentKey: "sales", message: `Vượt trần ${settings.maxRunsPerHour} lượt chạy mỗi giờ — dừng để không tạo vòng lặp tốn tiền`, once: true }, db);
     return { runId: null, status: "SKIPPED", stage: "NEW_LEAD", action: "NO_ACTION", suggestedReply: "", reason: "Vượt trần lượt chạy mỗi giờ" };
   }
+  /*
+    TRẦN CHI PHÍ MỖI NGÀY — trước đây được KHAI mà chưa bao giờ được THI HÀNH.
+
+    `dailyCostCapVnd` có trong `AiFeatureFlags`, có trong bộ làm sạch cấu hình, có trong fixture
+    của hai bộ kiểm thử — và không một dòng nào đọc nó trước khi gọi mô hình. Một cái trần chỉ
+    tồn tại trong kiểu dữ liệu là một cái trần không có.
+
+    Hai nhánh, vì có HAI tình huống khác hẳn nhau:
+      · đo được và đã chạm trần  ⇒ DỪNG;
+      · CHƯA ĐỊNH GIÁ ĐƯỢC       ⇒ cũng DỪNG, và nói rõ vì sao.
+
+    Nhánh thứ hai là nhánh quan trọng. Chưa khai đơn giá thì `cost_vnd` là NULL ở mọi lượt, tổng
+    đo được là 0 ₫, và một cái trần so với 0 sẽ không bao giờ nổ — hệ thống gọi mô hình không giới
+    hạn trong khi màn hình báo "chưa tiêu gì". Đó đúng là điều đã xảy ra: 660/1.065 lượt CHƯA BIẾT
+    chi phí (đo 22/09/2026). Chủ shop đặt một cái trần nghĩa là đã yêu cầu được bảo vệ; không đo
+    được mà vẫn chạy tiếp là lặng lẽ bỏ qua yêu cầu ấy. Rơi về phía HẸP HƠN, đúng luật của kho mã.
+
+    Trần bằng 0 = CHƯA KHAI TRẦN (không phải "cấm tiêu"), nên nhánh này đứng ngoài hoàn toàn.
+  */
+  if (settings.dailyCostCapVnd > 0) {
+    const chiTieu = await modelSpendLast24h(db);
+    if (chiTieu.unpricedCalls > 0) {
+      const ly = `Có trần ${settings.dailyCostCapVnd} ₫/ngày nhưng ${chiTieu.unpricedCalls} lượt gọi mô hình trong 24 giờ qua CHƯA ĐỊNH GIÁ ĐƯỢC — chưa khai đơn giá cho mô hình đang chạy, nên trần không kiểm chứng được. Khai settings["ai.pricing"] rồi chạy lại.`;
+      await finishTask(taskId, "FAILED", ly, db);
+      await recordAiError({ scope: "PIPELINE", agentKey: "sales", message: ly, once: true }, db);
+      return { runId: null, status: "SKIPPED", stage: "NEW_LEAD", action: "NO_ACTION", suggestedReply: "", reason: ly };
+    }
+    if (chiTieu.vnd >= settings.dailyCostCapVnd) {
+      const ly = `Đã tiêu ${chiTieu.vnd} ₫ trong 24 giờ qua, chạm trần ${settings.dailyCostCapVnd} ₫ — dừng cho tới khi chủ shop nâng trần`;
+      await finishTask(taskId, "FAILED", ly, db);
+      await recordAiError({ scope: "PIPELINE", agentKey: "sales", message: ly, once: true }, db);
+      return { runId: null, status: "SKIPPED", stage: "NEW_LEAD", action: "NO_ACTION", suggestedReply: "", reason: ly };
+    }
+  }
+
   if (!(await claimTask(taskId, db))) {
     return { runId: null, status: "SKIPPED", stage: "NEW_LEAD", action: "NO_ACTION", suggestedReply: "", reason: "Việc đã được tiến trình khác nhận" };
   }

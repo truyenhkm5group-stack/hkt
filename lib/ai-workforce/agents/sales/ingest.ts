@@ -280,6 +280,11 @@ export async function ingestMessage(
   if (twin && twin.externalId !== message.externalId) {
     // Ghi lại MỘT lần để chủ shop biết hai đường đang đánh mã khác nhau — im lặng thì ánh xạ sai
     // sẽ sống mãi.
+    //
+    // `once` là thứ THỰC THI chữ "MỘT lần" ở câu trên. Thiếu nó, cửa sổ đọc chồng lấn gặp lại
+    // đúng mâu thuẫn này mỗi 45 giây và ghi thêm một dòng: đo 22/09/2026 ra 4.571 dòng cho MỘT
+    // tin nhắn. Số lần gặp vẫn được đếm trong `detail.seen`, nên vẫn phân biệt được một trục
+    // trặc thoáng qua với một mâu thuẫn đang sống.
     await recordAiError(
       {
         scope: "INGEST",
@@ -287,6 +292,7 @@ export async function ingestMessage(
         subjectType: "CONVERSATION",
         subjectId: conversationId,
         message: `Hai đường nạp đánh mã khác nhau cho cùng một tin: ${twin.ingestSource}=${twin.externalId} vs ${ingestSource}=${message.externalId}`,
+        once: true,
       },
       conn,
     );

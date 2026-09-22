@@ -136,22 +136,91 @@ export async function recordAiError(params: {
   subjectType?: string;
   subjectId?: string;
   detail?: unknown;
+  /**
+   * MỘT QUAN SÁT LẶP LẠI KHÔNG ĐƯỢC ĐẺ RA MỘT DÒNG MỚI.
+   *
+   * Đo production 22/09/2026: bốn tin nhắn sinh ra **17.962 dòng** lỗi "hai đường nạp đánh mã
+   * khác nhau" — 4.571 dòng cho MỘT tin. Nguyên nhân: cửa sổ đọc chồng lấn đọc lại cùng tin ấy
+   * mỗi 45 giây, và lần nào cũng phát hiện lại đúng một mâu thuẫn đã biết rồi ghi thêm một dòng.
+   * Chú thích ở nơi gọi đã ghi "Ghi lại MỘT lần" nhưng không có gì thực thi điều đó.
+   *
+   * Một bảng lỗi mà 99,98% số dòng nói về bốn sự việc là một bảng không ai mở lần thứ hai, và
+   * con số "18.000 lỗi" đọc lên như một hệ thống đang sụp đổ trong khi sự thật là bốn tin nhắn.
+   *
+   * `once: true` ⇒ khoá tự nhiên là (phạm vi · đối tượng · nguyên văn thông báo). Đã có dòng ấy
+   * thì KHÔNG ghi thêm — chỉ đếm thêm một lần gặp vào `detail`, y hệt cách `emitAiEvent` đếm
+   * `deliveryCount` và cách `storeWebhook` xử lý các lần thử lại của Viettel Post.
+   *
+   * Số lần gặp KHÔNG bị vứt đi: nó là thứ phân biệt "một trục trặc thoáng qua" với "một mâu
+   * thuẫn đang sống", và người đọc cần nó để biết có phải đi sửa hay không.
+   */
+  once?: boolean;
 }, db?: Db) {
   try {
     const conn = db ?? (await getDb());
     const scope = (AI_ERROR_SCOPES as readonly string[]).includes(params.scope) ? params.scope : "PIPELINE";
+    const message = params.message.slice(0, 2000);
+    const subjectId = params.subjectId ?? "";
+
+    if (params.once) {
+      const daCo = await conn.query.aiErrors.findFirst({
+        where: and(eq(schema.aiErrors.scope, scope), eq(schema.aiErrors.subjectId, subjectId), eq(schema.aiErrors.message, message)),
+        columns: { id: true, detail: true },
+      });
+      if (daCo) {
+        const cu = (daCo.detail ?? {}) as Record<string, unknown>;
+        const lanDaGap = Number(cu.seen);
+        await conn
+          .update(schema.aiErrors)
+          .set({ detail: { ...cu, seen: (Number.isFinite(lanDaGap) ? lanDaGap : 1) + 1, lastSeenAt: new Date().toISOString() } })
+          .where(eq(schema.aiErrors.id, daCo.id));
+        return;
+      }
+    }
+
     await conn.insert(schema.aiErrors).values({
       scope,
       agentKey: params.agentKey ?? "",
       runId: params.runId ?? null,
       subjectType: params.subjectType ?? "",
-      subjectId: params.subjectId ?? "",
-      message: params.message.slice(0, 2000),
-      detail: (params.detail ?? null) as object | null,
+      subjectId,
+      message,
+      detail: (params.once
+        ? { ...((params.detail ?? {}) as Record<string, unknown>), seen: 1, lastSeenAt: new Date().toISOString() }
+        : (params.detail ?? null)) as object | null,
     });
   } catch {
     // im lặng: một lỗi khi ghi lỗi không được kéo theo việc chính
   }
+}
+
+/**
+ * CHI TIÊU MÔ HÌNH TRONG 24 GIỜ QUA — và SỐ LƯỢT KHÔNG ĐỊNH GIÁ ĐƯỢC, đứng cạnh nhau.
+ *
+ * Hai con số phải đi CÙNG NHAU, vì một mình con số tiền là một lời nói dối có thể chứng minh:
+ * `cost_vnd` là `NULL` với mọi lượt gọi mà bảng giá chưa khai mô hình ấy, và `sum()` của toàn
+ * `NULL` trả về `NULL` → quy thành 0 → một cái trần đọc "đã tiêu 0đ" trong khi thực tế vừa gọi
+ * mô hình 660 lượt.
+ *
+ * Đo production 22/09/2026: **660/1.065 lượt chạy có chi phí CHƯA BIẾT**, tổng "đã tính" là 0 ₫
+ * — vì bảng giá chỉ khai `claude-*` trong khi hệ thống chạy `gpt-5.6-*`. Một cái trần dựng trên
+ * con số ấy sẽ KHÔNG BAO GIỜ nổ, và một cái trần không bao giờ nổ tệ hơn không có trần: nó làm
+ * người vận hành tin rằng có ai đó đang canh.
+ *
+ * Nên hàm này không trả về một con số. Nó trả về cả phần ĐO ĐƯỢC lẫn phần MÙ, và người gọi phải
+ * xử lý phần mù một cách tường minh.
+ */
+export async function modelSpendLast24h(db?: Db): Promise<{ vnd: number; unpricedCalls: number }> {
+  const conn = db ?? (await getDb());
+  const since = new Date(Date.now() - 86_400_000);
+  const [row] = await conn
+    .select({
+      vnd: sql<number>`coalesce(sum(${schema.aiModelCalls.costVnd}), 0)`,
+      unpriced: sql<number>`count(*) filter (where ${schema.aiModelCalls.costVnd} is null)`,
+    })
+    .from(schema.aiModelCalls)
+    .where(gte(schema.aiModelCalls.createdAt, since));
+  return { vnd: Number(row?.vnd ?? 0), unpricedCalls: Number(row?.unpriced ?? 0) };
 }
 
 /** Số lượt chạy trong một giờ qua — dùng để chặn vòng lặp tốn tiền. */
