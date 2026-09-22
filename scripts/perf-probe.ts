@@ -358,6 +358,47 @@ async function main() {
   await timed("/ads", "adsRoas toàn kỳ", () => ads.getAdsRoas(all, "campaign"));
 
   /*
+    ═══════ BẢNG QUYẾT ĐỊNH QUẢNG CÁO — THỨ ĐẮT NHẤT CỦA `/ads`, VÀ CHƯA TỪNG ĐƯỢC ĐO ═══════
+
+    `/ads` là màn hình chậm nhất của cả hệ thống tính tới 22/09/2026, và nó chậm gấp đôi trong
+    đúng MỘT lượt deploy. Đo bằng smoke test qua bốn bản liên tiếp:
+
+        48918cec   26,7s
+        fd6dd489   58,9s   ← lượt này sửa `lib/queries/ads-decision.ts` (+160 dòng cột gộp mới)
+        cd1c061d   60,2s
+        04fc955f   45,2s · 41,7s (hai mẫu, cùng bản mã)
+
+    Bước nhảy nằm gọn ở `fd6dd489`. Nhưng `getAdsDecision` KHÔNG có trong bộ đo này, nên câu nói
+    ấy mới chỉ là suy luận từ MỐC THỜI GIAN — và thứ duy nhất của `/ads` đang được đo (`adsRoas`,
+    0,3–1,4 giây) không giải thích nổi 40 giây. Suy từ mốc thời gian sang nguyên nhân là đúng cái
+    bẫy tệp này sinh ra để chặn, nên: đo đã.
+
+    Hàm đã dùng khuôn mẫu rẻ (bảng dẫn xuất + `OUTCOME_FENCE` + `chayKhongJit`) — nếu nó vẫn đắt
+    thì nguyên nhân KHÔNG nằm ở hình dạng truy vấn, và đoán thêm một vòng nữa là phí công.
+
+    Đo hai chiều vì chúng đi qua HAI bảng dẫn xuất khác nhau: `campaign` (chiều mặc định của
+    trang) dùng `ads_decision_facts`, còn `product` dùng `ads_product_facts` — bảng có thêm một
+    `window function` chia cước theo dòng hàng. Hai con số tách được "giá của bảng quyết định"
+    khỏi "giá của riêng chiều mã hàng".
+
+    `decisionStability` đo riêng vì trang gọi nó SAU `getAdsDecision` theo chuỗi, không song song:
+    thời gian của nó cộng THẲNG vào thời gian người dùng ngồi chờ.
+  */
+  const adsDec = await import("@/lib/queries/ads-decision");
+  await timed("/ads", "getAdsDecision campaign", () => adsDec.getAdsDecision(month, "campaign"));
+  await timed("/ads", "getAdsDecision product", () => adsDec.getAdsDecision(month, "product"));
+  const ledger = await import("@/lib/queries/marketing-ledger");
+  const { vnDay } = await import("@/lib/constants/marketing-decision-ledger");
+  await timed("/ads", "decisionStability campaign", async () => {
+    const d = await adsDec.getAdsDecision(month, "campaign");
+    return ledger.decisionStability(
+      "campaign",
+      d.rows.map((r) => r.key),
+      vnDay(new Date()),
+    );
+  });
+
+  /*
     ═══════ /ads/daily — ĐO TỪNG CHẶNG, KHÔNG ĐO CẢ TRANG ═══════
 
     Trang này đã bị chẩn đoán sai HAI LẦN vì đọc con số tổng rồi suy ra nguyên nhân (xem
