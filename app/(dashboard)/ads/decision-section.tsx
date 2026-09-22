@@ -90,6 +90,8 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
   const daChin = Object.values(stability).filter((s) => s.ready).length;
   const hasSpend = ADS_DIMENSION_HAS_SPEND[dimension];
   const lowCoverage = d.confidence.verdict === "DATA_INSUFFICIENT";
+  // Chỉ dòng THẬT SỰ có khuyến nghị mới dùng tới một tỷ lệ; dòng bị từ chối kết luận thì không.
+  const soDongTamTinh = d.rows.filter((r) => r.basis === "PROJECTED" && r.action !== "INSUFFICIENT_DATA" && r.action !== "NO_SPEND_DATA").length;
   const pendingSpend = d.pending.spendInsufficientData + d.pending.spendWithoutOrders;
 
   return (
@@ -118,6 +120,11 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
       */}
       <ChainStrip t={d.totals} />
 
+      {/*
+        Chỉ đếm dòng THẬT SỰ có khuyến nghị: dòng bị từ chối kết luận vẫn mang căn cứ PROJECTED
+        (căn cứ là thuộc tính của dữ liệu, không phải của kết luận), nhưng nó không dùng tới tỷ lệ
+        nào cả — gộp chúng vào sẽ thổi con số lên và làm dải cảnh báo mất trọng lượng.
+      */}
       <SectionCard
         title="Bảng quyết định quảng cáo"
         description={`${period.label} · ${formatNumber(d.rows.length)} dòng · bấm vào dòng để xem đường đi của tiền`}
@@ -166,6 +173,33 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
             Mới {formatPercent(d.spendDetail.pct)} tiền quảng cáo của kỳ có chi tiết tới cấp mẩu ({formatVND(d.spendDetail.atAdGrain)} /{" "}
             {formatVND(d.spendDetail.total)}). Phần còn lại nằm ở những ngày ERP chỉ có số chi ở cấp CHIẾN DỊCH, và nó KHÔNG có mặt trong bảng này —
             cố ý, vì chia đều tiền chiến dịch xuống nhóm/mẩu sẽ làm tổng khớp trong khi từng dòng đều sai. Xem ở tab Chiến dịch để có đủ tiền của kỳ.
+          </p>
+        ) : null}
+
+        {/*
+          ═══════════ CĂN CỨ TỶ LỆ GTC — BẮT BUỘC ĐỨNG CẠNH MỌI CON SỐ TẠM TÍNH ═══════════
+
+          Dòng nào chưa đủ đơn ngã ngũ thì khuyến nghị của nó đứng trên LỢI NHUẬN TẠM TÍNH, tức
+          trên một tỷ lệ giao thành công lấy từ thang bậc (AGENTS.md mục 68). Thang ấy có bậc là
+          SỐ ĐO của chính mã, và có bậc là MỤC TIÊU khai chung ở Giả định — hai thứ khác hẳn nhau
+          về cách sửa khi sai, nên độ phủ phải in ra chứ không nằm trong một dấu ⓘ.
+
+          Chỉ hiện khi bảng THẬT SỰ có dòng tạm tính: không dòng nào dùng tới tỷ lệ thì dải này chỉ
+          là một câu chữ làm loãng màn hình.
+        */}
+        {soDongTamTinh > 0 ? (
+          <p className="border-b px-5 py-2 text-xs text-muted-foreground">
+            <b>{formatNumber(soDongTamTinh)}</b> dòng đang quyết trên <b>lợi nhuận tạm tính</b> — phần đơn chưa ngã ngũ được cân theo tỷ lệ giao thành
+            công của thang bậc. Độ phủ trong kỳ: <b>{d.rateBasis.coverage.projected ?? 0}</b> mã theo số đo từng đơn ·{" "}
+            <b>{d.rateBasis.coverage.history ?? 0}</b> mã theo lịch sử của chính mã · <b>{d.rateBasis.coverage.override ?? 0}</b> mã ghi đè tay ·{" "}
+            <b>{d.rateBasis.coverage.default ?? 0}</b> mã theo MỤC TIÊU {formatPercent(d.rateBasis.fallbackDeliveryRate)}.{" "}
+            {(d.rateBasis.coverage.default ?? 0) > 0 ? (
+              <>
+                Mã chạy theo mục tiêu thì lợi nhuận tạm tính của nó đọc là <b>&ldquo;theo kế hoạch&rdquo;</b>, không phải &ldquo;sẽ về ngần ấy&rdquo; —
+                mục tiêu không đạt là việc của khâu vận hành, không phải bằng chứng mô hình sai. Sửa mục tiêu ở Báo cáo → Giả định.{" "}
+              </>
+            ) : null}
+            {d.rateBasis.projectionError ? <b>Mô hình dự báo lỗi ({d.rateBasis.projectionError}) — mọi mã đã lùi về lịch sử / mục tiêu.</b> : null}
           </p>
         ) : null}
 
