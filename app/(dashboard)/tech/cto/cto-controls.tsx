@@ -67,7 +67,19 @@ export function ApproveButton({ proposalId, count }: { proposalId: string; count
             setBao(null);
             const r = await approveTechProposalAction({ proposalId, note: note || undefined });
             if ("error" in r) setBao({ ok: false, text: r.error });
-            else setBao({ ok: true, text: `Đã tạo ${r.created} việc thật${r.skipped ? ` · bỏ qua ${r.skipped} việc đã tạo từ lượt trước` : ""}. Mức rủi ro do MÁY xếp lại.` });
+            else
+              setBao({
+                ok: true,
+                text: [
+                  `Đã tạo ${r.created} việc thật${r.skipped ? ` · bỏ qua ${r.skipped} việc đã tạo từ lượt trước` : ""}`,
+                  `CTO giao được ${r.daGan}/${r.created} việc`,
+                  r.ganBu ? `${r.ganBu} việc của lượt áp trước nay mới có chủ` : "",
+                  r.khongGan.length ? `CHƯA CÓ CHỦ: ${r.khongGan.join(" | ")}` : "",
+                  "Mức rủi ro do MÁY xếp lại.",
+                ]
+                  .filter(Boolean)
+                  .join(" · "),
+              });
             router.refresh();
           })
         }
