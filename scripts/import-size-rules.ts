@@ -138,9 +138,25 @@ async function main() {
   const variantKeys = payload.rules.filter((r) => r.scope === "VARIANT").flatMap(allKeysOf);
   const warnings: string[] = [];
   if (productKeys.length) {
-    const found = await db.select({ id: schema.products.id }).from(schema.products).where(inArray(schema.products.id, productKeys));
-    const missing = productKeys.filter((k) => !found.some((f) => f.id === k));
-    for (const key of missing) warnings.push(`Phạm vi PRODUCT trỏ vào mã sản phẩm không có trong ERP: ${key}`);
+    /*
+      TRA CẢ ID NỘI BỘ LẪN MÃ HÀNG — `resolveSizeRule` khớp cả hai, nên phép kiểm phải hỏi cả hai.
+
+      Bản trước chỉ so với `products.id`, nên mọi khoá khai bằng MÃ HÀNG ("Q004") đều bị báo là
+      không tồn tại. Lượt chạy thử 22/09/2026 in ra đúng lúc bảy dòng "không có trong ERP" ngay
+      bên dưới một khối ĐỘ PHỦ nói rằng sáu sản phẩm đã khớp — hai con số cùng một lượt chạy nói
+      ngược nhau. Một cảnh báo sai làm người đọc thôi tin mọi cảnh báo còn lại, kể cả cảnh báo
+      thật nằm ngay cạnh nó.
+    */
+    const found = await db
+      .select({ id: schema.products.id, code: schema.products.customId })
+      .from(schema.products);
+    const co = new Set<string>();
+    for (const f of found) {
+      co.add(f.id.toLowerCase());
+      if (f.code) co.add(f.code.trim().toLowerCase());
+    }
+    const missing = productKeys.filter((k) => !co.has(k.trim().toLowerCase()));
+    for (const key of missing) warnings.push(`Phạm vi PRODUCT trỏ vào mã hàng không có trong ERP: ${key}`);
   }
   if (variantKeys.length) {
     const found = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(inArray(schema.productVariants.id, variantKeys));
@@ -263,7 +279,14 @@ async function main() {
     waistCm: probe.waistCm ? (probe.waistCm[0] + probe.waistCm[1]) / 2 : null,
     hipCm: probe.hipCm ? (probe.hipCm[0] + probe.hipCm[1]) / 2 : null,
   };
-  const check = recommendSize(resolveSizeRule(payload.rules, { productId: first.key, variantId: first.key, family: first.key }), sample);
+  // Dò bằng KHOÁ ĐẦU TIÊN THẬT của bảng. Dùng `first.key` (nay thường rỗng vì đã chuyển sang
+  // `keys`) thì phép dò luôn trượt và luôn báo "bảng nhiều khả năng có lỗi" — một cảnh báo luôn
+  // nổ là một cảnh báo không ai đọc.
+  const khoaDau = allKeysOf(first)[0] ?? "";
+  const check = recommendSize(
+    resolveSizeRule(payload.rules, { productId: khoaDau, productCode: khoaDau, variantId: khoaDau, family: khoaDau }),
+    sample,
+  );
   console.log(`\nChạy thử giữa dải size ${probe.size}: ra ${check.code}${check.size ? ` → ${check.size}` : ""} (${check.reason})`);
   if (check.code !== "OK") warnings.push(`Số đo giữa dải của chính size ${probe.size} mà không ra OK — bảng nhiều khả năng có lỗi`);
 
