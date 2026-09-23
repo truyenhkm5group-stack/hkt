@@ -44,6 +44,11 @@ export const RERUN_RULE = {
   maxRunsPerTask: 3,
   /** Cắt ngắn phản hồi review. Đủ cho một bình luận review thật, không đủ để nuốt cả cửa sổ ngữ cảnh. */
   maxFeedbackChars: 4000,
+  /**
+   * Phản hồi quá ngắn thì agent không biết sửa gì — và một lượt chạy tốn tiền thật. "sửa lại" hay
+   * "chưa đúng" không phải một phản hồi review; một câu nói rõ chỗ sai thì dài hơn mức này.
+   */
+  minFeedbackChars: 30,
 } as const;
 
 export type RerunVerdict = { ok: true; branch: string } | { ok: false; code: "BAD_BRANCH" | "TOO_MANY_RUNS"; reason: string };

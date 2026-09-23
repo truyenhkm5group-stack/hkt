@@ -1,3 +1,4 @@
+import { RERUN_RULE } from "@/lib/constants/agent-rerun";
 import { DISPATCHABLE_WORKFLOWS, DISPATCH_REF, laMaViecHopLe } from "@/lib/constants/agent-dispatch";
 import { GithubError, githubConfig, maskToken } from "@/lib/integrations/github/client";
 
@@ -83,7 +84,20 @@ export type DispatchResult = { ok: true; workflow: string; ref: string } | { ok:
  * tuyệt đối không được ghi một id bịa ra. Muốn biết lượt chạy nào thì đọc lại danh sách run —
  * một câu hỏi khác, của một hàm khác.
  */
-export async function dispatchAgentRun(input: { workflow: string; gates: string; taskCode?: string }): Promise<DispatchResult> {
+export async function dispatchAgentRun(input: {
+  workflow: string;
+  gates: string;
+  taskCode?: string;
+  /**
+   * Chạy lại trên nhánh ĐÃ CÓ, kèm phản hồi review — vòng "review → agent sửa".
+   *
+   * Nhánh do nơi gọi đọc từ SỔ VIỆC, không bao giờ từ trình duyệt; ở đây chỉ kiểm hình dạng lần
+   * cuối vì tên nhánh đi thẳng vào lệnh `git` trên máy runner.
+   */
+  rerunBranch?: string;
+  /** Phản hồi review. Đi vào ô `inputs` CÔNG KHAI của workflow — nơi gọi phải cảnh báo người gõ. */
+  feedback?: string;
+}): Promise<DispatchResult> {
   /*
     DANH SÁCH ĐÓNG KIỂM Ở ĐÂY, KHÔNG Ở NƠI GỌI.
 
@@ -101,6 +115,27 @@ export async function dispatchAgentRun(input: { workflow: string; gates: string;
   */
   if (input.taskCode !== undefined && !laMaViecHopLe(input.taskCode)) {
     return { ok: false, kind: "FORBIDDEN", detail: `“${input.taskCode}” không phải một mã việc (dạng TECH-12). Ô inputs của workflow là CÔNG KHAI — chỉ mã việc được đi qua đó.` };
+  }
+  /*
+    LƯỢT SỬA: nhánh và phản hồi đi CÙNG NHAU hoặc không đi.
+
+    Nhánh mà không có phản hồi là chạy lại mù — agent làm lại đúng việc cũ. Phản hồi mà không có
+    nhánh là mở một nhánh MỚI và bỏ PR cũ chết ở đó. Cả hai đều là lỗi của nơi gọi, chặn ở đây.
+  */
+  const coNhanh = input.rerunBranch !== undefined;
+  const coPhanHoi = input.feedback !== undefined;
+  if (coNhanh !== coPhanHoi) {
+    return { ok: false, kind: "FORBIDDEN", detail: "Lượt sửa cần CẢ nhánh lẫn phản hồi review — thiếu một trong hai thì hoặc là chạy lại mù, hoặc là mở nhánh mới và bỏ PR cũ." };
+  }
+  if (coNhanh) {
+    const b = (input.rerunBranch ?? "").trim();
+    if (!b.startsWith("ai/") || !/^[A-Za-z0-9/_.-]+$/.test(b) || b.includes("..") || b.endsWith("/")) {
+      return { ok: false, kind: "FORBIDDEN", detail: `Tên nhánh “${b}” không hợp lệ cho một lượt sửa — tên nhánh đi thẳng vào lệnh git trên máy runner.` };
+    }
+    const n = (input.feedback ?? "").trim().length;
+    if (n < RERUN_RULE.minFeedbackChars || n > RERUN_RULE.maxFeedbackChars) {
+      return { ok: false, kind: "FORBIDDEN", detail: `Phản hồi review phải dài ${RERUN_RULE.minFeedbackChars}–${RERUN_RULE.maxFeedbackChars} ký tự (đang ${n}).` };
+    }
   }
   const cfg = dispatchConfig();
   if (!cfg.configured || !cfg.repo) return { ok: false, kind: "NOT_CONFIGURED", detail: cfg.reason ?? "Chưa cấu hình." };
@@ -122,7 +157,14 @@ export async function dispatchAgentRun(input: { workflow: string; gates: string;
           "Content-Type": "application/json",
         },
         // `ref` là HẰNG SỐ, không phải tham số — xem `DISPATCH_REF`.
-        body: JSON.stringify({ ref: DISPATCH_REF, inputs: input.taskCode ? { gates: input.gates, task: input.taskCode } : { gates: input.gates } }),
+        body: JSON.stringify({
+          ref: DISPATCH_REF,
+          inputs: {
+            gates: input.gates,
+            ...(input.taskCode ? { task: input.taskCode } : {}),
+            ...(coNhanh ? { rerun_branch: (input.rerunBranch ?? "").trim(), feedback: (input.feedback ?? "").trim() } : {}),
+          },
+        }),
         signal: controller.signal,
         cache: "no-store",
       });

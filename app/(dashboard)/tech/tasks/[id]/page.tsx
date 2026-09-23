@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { TechApprovalBadge, TechDeployBadge, TechGateBadge, TechPriorityBadge, TechRiskBadge, TechSeverityBadge, TechStatusBadge } from "@/app/(dashboard)/tech/badges";
 import { TechNav } from "@/app/(dashboard)/tech/tech-nav";
 import { TechTaskActions } from "@/app/(dashboard)/tech/tasks/[id]/task-actions";
+import { RequestFix } from "@/app/(dashboard)/tech/tasks/[id]/request-fix";
 import { RunVerdict } from "@/app/(dashboard)/tech/tasks/[id]/run-verdict";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, EmptyState, SectionCard } from "@/components/ui-bits";
@@ -255,6 +256,18 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
                 verified={Boolean(task.productionVerifiedAt)}
                 agents={agents.map((a) => ({ id: a.id, key: a.key, name: a.name, allowedRisks: a.allowedRisks }))}
               />
+              {/*
+                VÒNG REVIEW → AGENT SỬA, TỪ CHÍNH ERP.
+
+                Chỉ hiện khi việc đã có nhánh (tức đã có lượt chạy để sửa), đã gán agent, và đang
+                ở chỗ review xong: "Chờ review" hoặc "QA". Trước 23/09/2026 vòng này chỉ chạy được
+                bằng script trên máy CTO; chủ shop không tự đóng được vòng review.
+              */}
+              {task.branch && task.agentId && ["REVIEW", "QA", "BUILDING"].includes(task.status) && dispatchConfig().configured ? (
+                <div className="mt-3 border-t pt-3">
+                  <RequestFix taskCode={task.code} branch={task.branch} soLuot={runs.length} />
+                </div>
+              ) : null}
             </SectionCard>
           ) : null}
 
