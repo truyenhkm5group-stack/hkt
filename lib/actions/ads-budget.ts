@@ -7,11 +7,11 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { actionToken, verifyActionToken } from "@/lib/ai/policy";
-import { ACTION_FOR_DECISION, ADS_WRITE_ACTION_LABEL, ADS_WRITE_LIMITS, type AdsWriteAction } from "@/lib/constants/ads-write";
+import { ACTION_FOR_DECISION, ADS_WRITE_ACTION_LABEL, ADS_WRITE_DENIAL_REASON, ADS_WRITE_LIMITS, type AdsWriteAction } from "@/lib/constants/ads-write";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import type { AdsAction, DecisionBasis } from "@/lib/constants/ads-decision";
-import { brakeState, gateAdsWrite } from "@/lib/marketing/ads-write-gate";
-import { decisionStability } from "@/lib/queries/marketing-ledger";
+import { brakeState, gateAdsWrite, subjectDetail, subjectFreshness } from "@/lib/marketing/ads-write-gate";
+import { decisionStability, spendAroundWindow } from "@/lib/queries/marketing-ledger";
 import {
   adsWriteDisabledReason,
   adsWriteHardEnabled,
@@ -127,10 +127,22 @@ export async function proposeAdsBudgetChange(campaignId: string): Promise<AdsPro
   const disabled = adsWriteDisabledReason();
   if (disabled) return { ...base, blocked: disabled };
   if (!action) return { ...base, blocked: `Khuyến nghị "${row.action}" không đẻ ra hành động ngân sách nào.` };
-  if (!stability?.ready) return { ...base, blocked: stability?.reason ?? "Chưa đo được độ bền của khuyến nghị." };
 
+  /*
+    CHIẾN DỊCH TRƯỚC, ĐỘ BỀN SAU — CÙNG THỨ TỰ VỚI `gateAdsWrite`.
+
+    Hỏi Facebook trước khi hỏi độ bền tốn thêm một lượt gọi cho những đề nghị chưa chín. Đổi lại,
+    người bấm nghe được câu đúng: "chiến dịch này đã chạy lại từ 20/09" quan trọng hơn hẳn "khuyến
+    nghị mới giữ 2 ngày" — câu sau hứa rằng đợi thêm một ngày là bấm được, trong khi không phải.
+  */
   const state = await readCampaignState(campaignId).catch(() => null);
+  const quanh = await spendAroundWindow(campaignId, row.periodFrom, row.periodTo);
+  const subject = { status: state?.status ?? null, spendInWindowVnd: quanh.inWindow, spendAfterWindowVnd: quanh.afterWindow };
+  const tuoi = subjectFreshness(subject);
+  if (!tuoi.ok) return { ...base, blocked: `${ADS_WRITE_DENIAL_REASON[tuoi.denial]} ${subjectDetail(subject)}`.trim() };
   if (!state) return { ...base, blocked: "Không đọc được trạng thái chiến dịch từ Facebook." };
+
+  if (!stability?.ready) return { ...base, blocked: stability?.reason ?? "Chưa đo được độ bền của khuyến nghị." };
 
   const next =
     action === "PAUSE_CAMPAIGN" || state.dailyBudgetVnd === null
@@ -172,6 +184,7 @@ export async function applyAdsBudgetChange(raw: ApplyAdsBudgetInput): Promise<Ap
   const confirmed = verifyActionToken(input.token, user.id, TOOL, tokenPayload(input));
 
   const state = await readCampaignState(input.campaignId).catch(() => null);
+  const quanh = await spendAroundWindow(input.campaignId, row.periodFrom, row.periodTo);
   const brake = brakeState(await brakeObservations().catch(() => []));
 
   const gate = gateAdsWrite({
@@ -181,6 +194,8 @@ export async function applyAdsBudgetChange(raw: ApplyAdsBudgetInput): Promise<Ap
     decision: row.action as AdsAction,
     // Căn cứ lấy từ DÒNG SỔ, không nhận từ client — client gửi được thì hàng rào chỉ là lời khuyên.
     basis: row.basis as DecisionBasis,
+    // Trạng thái SỐNG từ Facebook và tiền sau kỳ — đọc ở máy chủ ngay lúc bấm, không tin client.
+    subject: { status: state?.status ?? null, spendInWindowVnd: quanh.inWindow, spendAfterWindowVnd: quanh.afterWindow },
     stability,
     currentBudgetVnd: state?.dailyBudgetVnd ?? null,
     nextBudgetVnd: input.nextBudgetVnd,

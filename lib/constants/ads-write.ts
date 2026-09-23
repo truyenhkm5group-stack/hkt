@@ -147,6 +147,9 @@ export const ALLOW_ADS_WRITE_ON_PROJECTED_BASIS = false;
 
 export type AdsWriteDenial =
   | "HARD_DISABLED"
+  | "SUBJECT_UNREADABLE"
+  | "SUBJECT_NOT_RUNNING"
+  | "SUBJECT_CHANGED"
   | "BASIS_NOT_MEASURED"
   | "MODE_OFF"
   | "NOT_CONFIRMED"
@@ -160,6 +163,11 @@ export type AdsWriteDenial =
 
 export const ADS_WRITE_DENIAL_REASON: Record<AdsWriteDenial, string> = {
   HARD_DISABLED: "Đường ghi quảng cáo đang TẮT ở cấp máy chủ (ADS_WRITE_ENABLED). Đây là chốt ngoài cùng, không mở được từ giao diện hay từ bảng settings.",
+  SUBJECT_UNREADABLE: "Không đọc được trạng thái hiện tại của chiến dịch trên Facebook, hoặc không đọc được số chi sau kỳ kết luận. CHƯA BIẾT chiến dịch đang thế nào thì không ghi.",
+  SUBJECT_NOT_RUNNING:
+    "Chiến dịch KHÔNG còn chạy trên Facebook. Kết luận nói về một lần chạy đã kết thúc: tăng ngân sách cho nó không làm nó chạy lại, và tạm dừng nó thì nó đã dừng sẵn rồi.",
+  SUBJECT_CHANGED:
+    "Chiến dịch đã tiêu SAU kỳ kết luận nhiều hơn TRONG kỳ ấy — tức phần tiền chưa ai đo đã lớn hơn phần tiền sinh ra kết luận. Kết luận đang nói về một lần chạy khác với lần chạy mà nút này sẽ tác động.",
   BASIS_NOT_MEASURED:
     "Khuyến nghị này đứng trên LỢI NHUẬN TẠM TÍNH (phần lớn đơn chưa ngã ngũ, phần treo được cân theo tỷ lệ giao thành công ước tính). Đủ để người đọc và quyết, chưa đủ để MÁY tự đổi tiền.",
   MODE_OFF: "Nấc quyền hạn đang OFF.",
