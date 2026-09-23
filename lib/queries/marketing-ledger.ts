@@ -105,3 +105,35 @@ export async function spendAroundWindow(campaignKey: string, periodFrom: string,
     return { inWindow: 0, afterWindow: null };
   }
 }
+
+/**
+ * ───────── ỨNG VIÊN: CHIẾN DỊCH NÀO CỦA MÃ NÀY CÓ THỂ ĐANG CHẠY ─────────
+ *
+ * Đây là phép LỌC ỨNG VIÊN, không phải phép thử sự thật. Nó chỉ trả lời "nên hỏi Facebook về chiến
+ * dịch nào", để một cú bấm không phải gọi API cho hàng trăm chiến dịch đã tắt từ tháng trước. Câu
+ * "chiến dịch còn chạy không" do Facebook trả lời (`status === "ACTIVE"`) ở `subjectFreshness`.
+ *
+ * Nên `NGAY_UNG_VIEN` rộng rãi cố ý: bỏ sót một chiến dịch đang chạy thì nó nằm ngoài kế hoạch mà
+ * không ai biết; lấy thừa một chiến dịch đã tắt thì Facebook tự loại nó, và kế hoạch in ra lý do.
+ */
+const NGAY_UNG_VIEN = 7;
+
+export async function productCampaignCandidates(productId: string): Promise<{ campaignId: string; name: string; spend: number }[]> {
+  const db = await getDb();
+  const khoa = sql`coalesce(${schema.adSpends.campaignId}, ${schema.adSpends.campaign})`;
+  const rows = await db
+    .select({ campaignId: sql<string>`${khoa}`, name: sql<string>`max(${schema.adSpends.campaign})`, spend: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
+    .from(schema.adSpends)
+    .where(
+      and(
+        eq(schema.adSpends.excluded, false),
+        eq(schema.adSpends.productId, productId),
+        sql`${schema.adSpends.spendDate}::date >= current_date - ${NGAY_UNG_VIEN}`,
+        // Chỉ dòng CÓ mã chiến dịch thật: dòng gõ tay mang tên chiến dịch làm khoá thì Facebook không tra được.
+        sql`${schema.adSpends.campaignId} is not null`,
+      ),
+    )
+    .groupBy(khoa)
+    .having(sql`sum(${schema.adSpends.spend}) > 0`);
+  return rows.map((r) => ({ campaignId: String(r.campaignId), name: r.name ?? "", spend: Number(r.spend) })).sort((a, b) => b.spend - a.spend);
+}

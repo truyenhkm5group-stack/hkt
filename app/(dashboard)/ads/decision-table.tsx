@@ -21,6 +21,7 @@ import type { AdsDecisionRow } from "@/lib/queries/ads-decision";
 import type { AdsDimension } from "@/lib/constants/ads-decision";
 import type { Stability } from "@/lib/marketing/decision-stability";
 import { AdsBudgetAction } from "@/app/(dashboard)/ads/budget-action";
+import { ProductBudgetPlanAction } from "@/app/(dashboard)/ads/product-budget-plan";
 import { cn } from "@/lib/utils";
 
 /**
@@ -544,6 +545,13 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
                         */}
                         {dimension === "campaign" ? (
                           <AdsBudgetAction campaignId={row.key} decision={row.action} ready={Boolean(stability?.[row.key]?.ready)} />
+                        ) : null}
+                        {/*
+                          BÀN TAY CẤP MÃ — nơi kết luận thật sự dùng được. Cấp chiến dịch thường nói
+                          về một chiến dịch đã tắt (6/8 đo ngày 23/09/2026); mã hàng thì sống lâu.
+                        */}
+                        {dimension === "product" ? (
+                          <ProductBudgetPlanAction productId={row.key} productName={row.name} decision={row.action} ready={Boolean(stability?.[row.key]?.ready)} />
                         ) : null}
                       </TableCell>
                     </TableRow>
