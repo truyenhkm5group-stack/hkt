@@ -624,7 +624,7 @@ if (errorElement) {
 | **Request count** | 1 (page load) + 1 (filter change) = 2+ per session |
 | **Cache** | No explicit cache (dynamic rendering) |
 | **Refetch type** | Full page (toàn bộ `<OrdersTable>` re-mount) |
-| **Payload** | ~185KB HTML (gzip) per response |
+| **Payload** | Chưa đo được `/orders` cụ thể; dữ liệu production từ tệp `docs/perf/TECH-6-TECH-9-so-do-tho-2026-09-23.md` chỉ liệt kê: `/shipments` 1.333 kB · `/ads` 5.840 kB · `/landing` 2.911 kB · `/inventory/returns` 1.622 kB |
 | **TTFB** | Có thể 100–200ms+ (tùy database query) |
 
 ### Optimize Ideas (Tương Lai)
