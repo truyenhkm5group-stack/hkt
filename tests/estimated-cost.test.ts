@@ -122,7 +122,15 @@ function tepMaNguon(goc: string): string[] {
 /** Giá dự tính chỉ được bật ở tab Lợi nhuận danh nghĩa — mọi chỗ khác (lương, quảng cáo, AI) không truyền công tắc. */
 function testOnlyNominalTabEnablesEstimates() {
   const goc = process.cwd();
-  const choPhep = new Set(["app/(dashboard)/reports/nominal-tab.tsx", "lib/queries/payroll.ts"]);
+  /*
+    `marketer-daily-nominal.ts` — bảng "Bóc tách theo MKTer" ở /ads/daily. NGOẠI LỆ DUY NHẤT trong
+    khu quảng cáo, chủ shop chốt 23/09/2026 sau khi đo trên production: 522 sản phẩm bán ra trong
+    30 ngày chưa có giá vốn, và tính với giá dự tính thì LN ròng của shop lệch −150,7% (lãi thành
+    lỗ). Bảng dùng để chia ngân sách quảng cáo cho từng người mà trừ 0 ₫ giá vốn là đúng cái bẫy
+    luật 2 muốn chặn, chỉ theo chiều ngược lại. Bảng ấy KHÔNG đi vào lương và mang nhãn "dự tính".
+    Mọi chỗ khác của khu quảng cáo (bảng quyết định, ROAS, AI) vẫn bị cấm như cũ.
+  */
+  const choPhep = new Set(["app/(dashboard)/reports/nominal-tab.tsx", "lib/queries/payroll.ts", "lib/queries/marketer-daily-nominal.ts"]);
   for (const p of [...tepMaNguon(path.join(goc, "app")), ...tepMaNguon(path.join(goc, "lib"))]) {
     const rel = path.relative(goc, p).split(path.sep).join("/");
     const src = readFileSync(p, "utf8");
