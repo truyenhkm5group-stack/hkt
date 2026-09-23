@@ -14,7 +14,7 @@ import { MARKETING_TARGET_METRICS } from "@/lib/queries/marketing-targets";
 import { baselineOf, diagnose, lossStreakOf, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
 import { digestLines, runMarketingDigest, settledLines } from "@/lib/marketing/digest";
 import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter, type MarketingDailyBase } from "@/lib/queries/marketing-daily";
-import { blendDeliveryRate, parseDeliveryRateOverride, resolveDeliveryRate } from "@/lib/constants/delivery-rate";
+import { blendDeliveryRate, deliveryRateCoverageParts, DELIVERY_RATE_SOURCE_LABEL, DELIVERY_RATE_SOURCES, parseDeliveryRateOverride, resolveDeliveryRate, type DeliveryRateSource } from "@/lib/constants/delivery-rate";
 import { DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
 import { getDailyBreakdown } from "@/lib/queries/reports";
 import type { Period } from "@/lib/search-params";
@@ -827,6 +827,35 @@ export function testDeliveryRateLadder() {
   // Co ngót không có số đo thì KHÔNG bịa ra một mức.
   assert.equal(blendDeliveryRate({ measuredDeliveryRate: null, finished: 5, anchorDeliveryRate: 60, anchorWeight: 10 }), null);
   assert.equal(blendDeliveryRate({ measuredDeliveryRate: 80, finished: 0, anchorDeliveryRate: 60, anchorWeight: 10 }), null);
+
+  /*
+    ═══ ĐỘ PHỦ PHẢI CỘNG ĐỦ SỐ MÃ, KỂ CẢ BẬC VỪA THÊM ═══
+
+    Ba màn hình từng gõ tay bốn bậc vào câu chữ. Thêm `blended` ngày 23/09/2026 và cả ba im lặng bỏ
+    nó ra — đo thật trên production ngay sau lượt deploy đầu: dòng độ phủ in 6 mã trong khi shop có
+    7 mã đang chạy. Không lỗi, không cảnh báo, chỉ là một con số không bằng thực tế.
+
+    Bài này khoá ở mức HỢP ĐỒNG: `total` phải cộng MỌI bậc trong sổ khai, và mỗi bậc có mã phải xuất
+    hiện trong câu. Duyệt theo `DELIVERY_RATE_SOURCE_LABEL` chứ không theo một danh sách gõ lại —
+    thêm bậc thứ sáu mà quên sổ đăng ký thì chính dòng này đỏ.
+  */
+  const moiBac = Object.keys(DELIVERY_RATE_SOURCE_LABEL) as DeliveryRateSource[];
+  assert.deepEqual([...DELIVERY_RATE_SOURCES].sort(), [...moiBac].sort(), "thứ tự in độ phủ phải phủ ĐỦ mọi bậc của sổ nhãn");
+
+  const dem = Object.fromEntries(moiBac.map((s, i) => [s, i + 1])) as Record<DeliveryRateSource, number>;
+  const phu = deliveryRateCoverageParts(dem);
+  assert.equal(
+    phu.total,
+    moiBac.reduce((a, s) => a + dem[s], 0),
+    "tổng độ phủ phải cộng đủ mọi bậc — thiếu một bậc là in ra ít mã hơn số mã đang chạy",
+  );
+  for (const s of moiBac) assert.ok(phu.parts.some((x) => x.source === s), `${s}: bậc có mã mà không có mặt trong câu độ phủ`);
+
+  // Bậc 0 mã bị bỏ khỏi câu cho gọn, nhưng KHÔNG được biến mất khỏi tổng.
+  const thua = deliveryRateCoverageParts({ projected: 3, blended: 0 });
+  assert.equal(thua.parts.length, 1);
+  assert.equal(thua.total, 3);
+  assert.equal(deliveryRateCoverageParts({}).total, 0, "không mã nào ⇒ 0, và không nhánh nào ném lỗi");
 }
 
 /**

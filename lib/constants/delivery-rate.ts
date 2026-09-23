@@ -91,6 +91,31 @@ export const DELIVERY_RATE_SOURCE_LABEL: Record<DeliveryRateSource, string> = {
   default: "Tỷ lệ khai ở Giả định",
 };
 
+/** Thứ tự in ĐỘ PHỦ — mạnh nhất trước. Mọi bậc phải có mặt; kiểu `satisfies` chặn ở mức biên dịch. */
+export const DELIVERY_RATE_SOURCES = ["projected", "history", "blended", "override", "default"] as const satisfies readonly DeliveryRateSource[];
+
+/**
+ * ═══════════ ĐỘ PHỦ DỰNG TỪ SỔ KHAI, KHÔNG GÕ TAY TỪNG BẬC ═══════════
+ *
+ * Ba màn hình (`/ads/daily`, khối khuyến nghị của `/ads`, và `scripts/marketing-calibrate.ts`)
+ * từng gõ thẳng bốn bậc vào câu chữ. Ngày 23/09/2026 thang bậc có thêm `blended` và cả ba chỗ ấy
+ * im lặng bỏ nó ra: dòng độ phủ in **6 mã trên tổng 7** — đo thật trên production ngay sau lượt
+ * deploy đầu tiên của bậc mới.
+ *
+ * Một dòng độ phủ thiếu mất một bậc còn tệ hơn không có dòng nào: nó vẫn cộng ra một con số, chỉ
+ * là con số ấy không bằng số mã đang chạy, và không ô nào nói rằng có gì đã bị bỏ ra ngoài.
+ *
+ * Nên câu chữ DẪN XUẤT từ `DELIVERY_RATE_SOURCES`. Hàm THUẦN; bậc 0 mã bị bỏ khỏi câu cho gọn,
+ * nhưng `total` luôn cộng đủ MỌI bậc để nơi gọi đối chiếu được với số mã thật.
+ */
+export function deliveryRateCoverageParts(coverage: Partial<Record<DeliveryRateSource, number>>): {
+  parts: { source: DeliveryRateSource; label: string; count: number }[];
+  total: number;
+} {
+  const parts = DELIVERY_RATE_SOURCES.map((source) => ({ source, label: DELIVERY_RATE_SOURCE_LABEL[source], count: coverage[source] ?? 0 }));
+  return { parts: parts.filter((p) => p.count > 0), total: parts.reduce((a, p) => a + p.count, 0) };
+}
+
 /* ═══════════════════ GHI ĐÈ TAY: MỘT KÊNH, HAI TUỔI THỌ ═══════════════════ */
 
 /**

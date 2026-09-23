@@ -1,3 +1,4 @@
+import { deliveryRateCoverageParts } from "@/lib/constants/delivery-rate";
 import { SectionCard } from "@/components/ui-bits";
 import { InfoHint } from "@/components/info-hint";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
@@ -222,9 +223,15 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
         {soDongTamTinh > 0 ? (
           <p className="border-b px-5 py-2 text-xs text-muted-foreground">
             <b>{formatNumber(soDongTamTinh)}</b> dòng đang quyết trên <b>lợi nhuận tạm tính</b> — phần đơn chưa ngã ngũ được cân theo tỷ lệ giao thành
-            công của thang bậc. Độ phủ trong kỳ: <b>{d.rateBasis.coverage.projected ?? 0}</b> mã theo số đo từng đơn ·{" "}
-            <b>{d.rateBasis.coverage.history ?? 0}</b> mã theo lịch sử của chính mã · <b>{d.rateBasis.coverage.override ?? 0}</b> mã ghi đè tay ·{" "}
-            <b>{d.rateBasis.coverage.default ?? 0}</b> mã theo MỤC TIÊU {formatPercent(d.rateBasis.fallbackDeliveryRate)}.{" "}
+            công của thang bậc. Độ phủ trong kỳ: <b>{deliveryRateCoverageParts(d.rateBasis.coverage).total}</b> mã —{" "}
+            {deliveryRateCoverageParts(d.rateBasis.coverage).parts.map((x, i) => (
+              <span key={x.source}>
+                {i ? " · " : ""}
+                <b>{x.count}</b> {x.label.toLowerCase()}
+                {x.source === "default" ? ` (MỤC TIÊU ${formatPercent(d.rateBasis!.fallbackDeliveryRate)})` : ""}
+              </span>
+            ))}
+            .{" "}
             {(d.rateBasis.coverage.default ?? 0) > 0 ? (
               <>
                 Mã chạy theo mục tiêu thì lợi nhuận tạm tính của nó đọc là <b>&ldquo;theo kế hoạch&rdquo;</b>, không phải &ldquo;sẽ về ngần ấy&rdquo; —
