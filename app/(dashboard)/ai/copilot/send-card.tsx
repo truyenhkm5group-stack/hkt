@@ -31,9 +31,13 @@ export type SendCardProps = {
   stale: string | null;
   humanTakeover: boolean;
   canRelease: boolean;
+  /** MÁY tự rút lui (khoá người rỗng) — khác hẳn "một nhân viên đang cầm". */
+  machineHandoff: boolean;
+  /** Lý do máy rút, viết ra thành câu — để người bấm biết trả lại cho máy có nghĩa gì. */
+  handoffReasonText: string;
 };
 
-export function SendCard({ conversationId, suggestionId, suggestedReply, stale, humanTakeover, canRelease }: SendCardProps) {
+export function SendCard({ conversationId, suggestionId, suggestedReply, stale, humanTakeover, canRelease, machineHandoff, handoffReasonText }: SendCardProps) {
   const [text, setText] = useState(suggestedReply);
   const [rejecting, setRejecting] = useState(false);
   const [pending, start] = useTransition();
@@ -45,6 +49,62 @@ export function SendCard({ conversationId, suggestionId, suggestedReply, stale, 
       if ("error" in result) toast.error(result.error);
       else toast.success(thanhCong);
     });
+
+  /*
+    ═══════ MÁY ĐÃ RÚT LUI, CHƯA AI NHẬN — ĐÂY LÀ MỘT VIỆC, KHÔNG PHẢI MỘT NGÕ CỤT ═══════
+
+    Trước bản này, cả hai trạng thái của `human_takeover_at` đổ vào một nhánh: thẻ hiện câu
+    "Nhân viên đang cầm hội thoại này" rồi "Chỉ người đang cầm việc mới trả lại được" — **và
+    không một cái nút nào**. Mà khoá người thì rỗng: chẳng có nhân viên nào cầm. Màn hình nói về
+    một người không tồn tại, và người đang ngồi trước nó không làm được gì.
+
+    Chủ shop mở ra ngày 23/09/2026: "Tôi không biết phải làm gì tiếp với cái này?" Băng đỏ phía
+    trên còn bảo bấm "Tự nhận việc" — nút ấy nằm ở nhánh kia, tức là một lời hướng dẫn trỏ vào
+    thứ không có trên màn hình.
+
+    HAI LỐI RA, VÀ LỐI THỨ NHẤT LÀ LỐI ĐÚNG TRONG HẦU HẾT TRƯỜNG HỢP.
+
+    Máy rút vì một cái CỚ, và phần lớn cớ ấy nay đã hết (bảng số đo đã khai, danh mục đã đồng bộ).
+    Trả lại cho máy thì nó đọc lại hội thoại bằng dữ liệu HÔM NAY và soạn một bản nháp. Cớ nào còn
+    đúng thì nó rút tiếp — tự sửa, không cần ai phán đoán hộ.
+
+    Lối thứ hai là tự nhận việc: khách này cần người thật, trả lời thẳng trên Pancake.
+  */
+  if (humanTakeover && machineHandoff) {
+    return (
+      <div className="space-y-2 rounded-lg border border-amber-500/50 bg-amber-50 p-3 dark:bg-amber-950/40">
+        <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">
+          Máy đã rút lui và CHƯA AI NHẬN việc này — nên nó đang đứng im, không phải đang được xử lý.
+        </p>
+        {handoffReasonText ? <p className="text-[11px] text-amber-700 dark:text-amber-300">Máy rút vì: {handoffReasonText}</p> : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="sm"
+            disabled={pending}
+            onClick={() =>
+              chay(async () => {
+                // Trả lại rồi XẾP VIỆC SOẠN LẠI. Chỉ trả lại thì cờ tắt mà không có bản nháp nào —
+                // dây chuyền chỉ sinh việc khi khách nhắn tin MỚI, nên nút này sẽ trông như không
+                // làm gì cả.
+                const tra = await releaseConversation({ conversationId });
+                if ("error" in tra) return tra;
+                return regenerateSuggestion({ conversationId });
+              }, "Đã trả lại cho máy và xếp việc soạn lại — tải lại sau ít giây để xem bản nháp")
+            }
+          >
+            Cho máy soạn lại
+          </Button>
+          <Button size="sm" variant="outline" disabled={pending} onClick={() => chay(() => takeoverConversation({ conversationId }), "Đã nhận việc")}>
+            Tôi tự trả lời khách này
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          “Cho máy soạn lại” là lối ra thường đúng: máy đọc lại bằng dữ liệu hôm nay. Cớ nào còn đúng thì nó rút tiếp — nó tự
+          kiểm, không cần đoán hộ.
+        </p>
+      </div>
+    );
+  }
 
   if (humanTakeover) {
     return (

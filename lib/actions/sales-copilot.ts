@@ -11,7 +11,7 @@ import { getAgent } from "@/lib/ai-workforce/registry";
 import { sendSalesMessage } from "@/lib/ai-workforce/agents/sales/outbound";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { modeAtLeast } from "@/lib/constants/ai";
-import { COPILOT_MAX_REPLY_CHARS, COPILOT_REJECT_REASONS, COPILOT_SUGGESTION_TTL_MINUTES, editDistance } from "@/lib/constants/sales-copilot";
+import { COPILOT_MAX_REPLY_CHARS, COPILOT_REJECT_REASONS, COPILOT_SUGGESTION_TTL_MINUTES, canReleaseTakeover, editDistance } from "@/lib/constants/sales-copilot";
 import { copilotPageAllowed } from "@/lib/queries/sales-copilot";
 
 export type ActionResult<T = unknown> = ({ ok: true } & T) | { error: string };
@@ -371,10 +371,24 @@ export async function takeoverConversation(input: unknown): Promise<ActionResult
 }
 
 /**
- * TRẢ LẠI CHO MÁY — chỉ người ĐANG CẦM hoặc người có quyền cấu hình mới trả được.
+ * TRẢ LẠI CHO MÁY.
  *
- * Nếu ai cũng trả lại được thì cờ "đang do người xử lý" không còn nghĩa: một người đang gõ dở câu
- * trả lời cho khách có thể bị người khác bật máy lên nói chen vào.
+ * ─── HAI TRẠNG THÁI DƯỚI MỘT CÁI CỜ ───
+ *
+ * `human_takeover_at` bật lên theo HAI đường khác hẳn nhau, và luật cũ chỉ viết cho một:
+ *
+ *   · NGƯỜI bấm "Tự nhận việc"  ⇒ `takeover_by_user_id` CÓ giá trị. Một người đang gõ dở câu trả
+ *     lời cho khách, và nếu ai cũng trả lại được thì họ bị người khác bật máy lên nói chen vào.
+ *     Luật cũ đúng ở đây, giữ nguyên.
+ *   · MÁY gọi `conversation.handoff` ⇒ `takeover_by_user_id` NULL. **Không ai đang cầm cả.**
+ *
+ * Luật cũ áp cho cả hai, nên ở trường hợp thứ hai nó bảo vệ một người KHÔNG TỒN TẠI: hội thoại
+ * kẹt cứng, không ai trả lại được, và trên màn hình thì hiện đúng một câu "Chỉ người đang cầm
+ * việc mới trả lại được". Chủ shop mở ra ngày 23/09/2026 và nói "tôi không biết phải làm gì tiếp
+ * với cái này" — đúng, vì không có gì để làm. Đây là 295 hội thoại, không phải một.
+ *
+ * Nên: không ai cầm ⇒ ai có `ai:send` cũng trả lại được. Chốt chặn giữ nguyên cho đúng cái nó
+ * sinh ra để giữ.
  */
 export async function releaseConversation(input: unknown): Promise<ActionResult> {
   const parsed = convSchema.safeParse(input);
@@ -383,8 +397,7 @@ export async function releaseConversation(input: unknown): Promise<ActionResult>
   if (!cua.ok) return { error: cua.error };
   const { conversation, user } = cua;
   if (!conversation.humanTakeoverAt) return { error: "Hội thoại này không ở trạng thái người đang cầm" };
-  const laChuViec = conversation.takeoverByUserId === user.id;
-  if (!laChuViec && !can(user, "ai:manage")) {
+  if (!canReleaseTakeover({ takeoverByUserId: conversation.takeoverByUserId, userId: user.id, canManage: can(user, "ai:manage") })) {
     return { error: "Chỉ người đang cầm việc (hoặc người có quyền cấu hình nhân sự AI) mới trả lại cho máy được" };
   }
 

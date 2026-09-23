@@ -242,3 +242,27 @@ export function pancakeConversationUrl(pageId: string, conversationExternalId: s
   if (!pageId.trim() || !conversationExternalId.trim()) return null;
   return `https://pancake.vn/${pageId}?c_id=${conversationExternalId}`;
 }
+
+/**
+ * ═══════════ AI TRẢ LẠI HỘI THOẠI CHO MÁY ĐƯỢC ═══════════
+ *
+ * `human_takeover_at` bật lên theo HAI đường, và chúng cần hai luật khác nhau:
+ *
+ *   · NGƯỜI bấm "Tự nhận việc"      ⇒ `takeoverByUserId` CÓ giá trị. Người ấy có thể đang gõ dở
+ *     một câu cho khách; ai cũng bật máy lên được thì máy nói chen vào giữa. Chặn — trừ chính họ
+ *     và người có quyền cấu hình.
+ *   · MÁY gọi `conversation.handoff` ⇒ `takeoverByUserId` NULL. **KHÔNG AI CẦM CẢ.**
+ *
+ * Luật cũ áp một mệnh đề cho cả hai, nên ở trường hợp thứ hai nó bảo vệ một người KHÔNG TỒN TẠI:
+ * 295 hội thoại kẹt cứng, và màn hình hiện đúng một câu "Chỉ người đang cầm việc mới trả lại
+ * được" — không kèm một cái nút nào. Chủ shop mở ra ngày 23/09/2026: "tôi không biết phải làm gì
+ * tiếp với cái này."
+ *
+ * Tách thành hàm THUẦN để bài kiểm chạm được vào nó: cái ngõ cụt ấy là một mệnh đề `if` sai, và
+ * một mệnh đề `if` chôn trong Server Action thì không bài kiểm nào với tới mà không dựng cả phiên
+ * đăng nhập.
+ */
+export function canReleaseTakeover(p: { takeoverByUserId: string | null; userId: string; canManage: boolean }): boolean {
+  if (!p.takeoverByUserId) return true; // máy tự rút — không có ai để bảo vệ
+  return p.takeoverByUserId === p.userId || p.canManage;
+}

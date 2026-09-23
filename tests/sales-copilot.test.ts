@@ -13,6 +13,7 @@ import {
   COPILOT_REJECT_REASONS,
   COPILOT_TERMINAL_ACTIONS,
   PILOT_REVIEWED_TURNS_TARGET,
+  canReleaseTakeover,
   editDistance,
   isMeaningfulEdit,
 } from "@/lib/constants/sales-copilot";
@@ -637,6 +638,37 @@ export async function testSalesCopilot(db: Db) {
   assert.equal(theMay?.machineHandoff, true, "thẻ phải mang cờ máy-xin-người-vào");
   assert.equal(theMay?.handoffRequestReason, "SIZE_DATA_MISSING", "lý do máy chuyển việc phải đọc được trên thẻ");
   assert.equal(hangGiao.find((r) => r.conversationId === "conv-thuong")?.machineHandoff, false, "hội thoại thường KHÔNG mang cờ ấy");
+
+  /*
+    ═══ THẺ MÁY-ĐÃ-RÚT PHẢI CÓ LỐI RA ═══
+
+    Cờ `human_takeover_at` bật lên theo hai đường và chỉ một đường có người thật đứng sau. Luật
+    trả-lại-cho-máy cũ áp một mệnh đề cho cả hai, nên nó bảo vệ một người KHÔNG TỒN TẠI: 295 hội
+    thoại kẹt cứng, màn hình hiện "Chỉ người đang cầm việc mới trả lại được" và KHÔNG một cái nút
+    nào (đo 23/09/2026, chủ shop báo "không biết phải làm gì tiếp với cái này").
+
+    Ba dòng dưới đây là ba tình huống thật, và dòng đầu là dòng đã hỏng.
+  */
+  assert.equal(
+    canReleaseTakeover({ takeoverByUserId: null, userId: "ai-do", canManage: false }),
+    true,
+    "MÁY tự rút ⇒ không ai cầm ⇒ ai có ai:send cũng trả lại được — nếu không thì hội thoại kẹt vĩnh viễn",
+  );
+  assert.equal(
+    canReleaseTakeover({ takeoverByUserId: nguoiThat.id, userId: "nguoi-khac", canManage: false }),
+    false,
+    "NGƯỜI THẬT đang cầm ⇒ người khác KHÔNG được bật máy lên nói chen vào giữa lúc họ đang gõ",
+  );
+  assert.equal(
+    canReleaseTakeover({ takeoverByUserId: nguoiThat.id, userId: nguoiThat.id, canManage: false }),
+    true,
+    "chính người đang cầm thì trả lại được",
+  );
+  assert.equal(
+    canReleaseTakeover({ takeoverByUserId: nguoiThat.id, userId: "nguoi-khac", canManage: true }),
+    true,
+    "người có quyền cấu hình gỡ kẹt được",
+  );
 
   // Và nó đứng ĐẦU: máy đã sàng một lượt rồi, nên nó không phải xếp hàng theo giờ như người khác.
   assert.equal(hangGiao[0]?.conversationId, "conv-may-giao", "việc máy kêu cứu phải nằm đầu hàng đợi");

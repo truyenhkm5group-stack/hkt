@@ -119,9 +119,9 @@ export default async function CopilotPage() {
           */}
           {row.machineHandoff ? (
             <p className="rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100">
-              <span className="font-semibold">Máy đã chuyển việc này cho người</span>
-              {row.handoffRequestReason ? <> · lý do: {HANDOFF_REASON_LABEL[row.handoffRequestReason as HandoffReason] ?? row.handoffRequestReason}</> : null}
-              {" "}— chưa ai nhận. Bấm <span className="font-semibold">Tự nhận việc</span> để ghi tên mình vào, hoặc trả lời ngay.
+              <span className="font-semibold">Máy đã rút lui — chưa ai nhận việc này.</span>
+              {row.handoffRequestReason ? <> Lý do: {HANDOFF_REASON_LABEL[row.handoffRequestReason as HandoffReason] ?? row.handoffRequestReason}.</> : null}{" "}
+              Hai lối ra nằm ngay dưới câu máy soạn.
             </p>
           ) : null}
 
@@ -165,6 +165,10 @@ export default async function CopilotPage() {
               stale={row.stale}
               humanTakeover={Boolean(row.humanTakeoverAt)}
               canRelease={row.takeoverByUserId === user?.id}
+              machineHandoff={row.machineHandoff}
+              handoffReasonText={
+                row.handoffRequestReason ? HANDOFF_REASON_LABEL[row.handoffRequestReason as HandoffReason] ?? row.handoffRequestReason : ""
+              }
             />
           </div>
 
