@@ -25,6 +25,7 @@ import { getDb, schema } from "@/db";
 import { kiemHangRaoBaiKiem, moTaViPham } from "@/lib/constants/agent-test-guard";
 import { ensureMigrated } from "@/db/migrate";
 import { writeGlobsForRole } from "@/lib/constants/agent-scopes";
+import { inVetBuoc, type VetBuoc } from "@/lib/constants/agent-steps";
 
 /**
  * ═══════════ PHẠM VI CHO PHÉP ĐỌC TỪ SỔ VAI, KHÔNG GHI CỨNG MỘT TÊN TỆP ═══════════
@@ -135,6 +136,15 @@ async function main() {
   console.log(`commit        ${run.resultCommit || "(không có)"}`);
   console.log(`tệp (sổ)      ${tepTheoSo.join(", ") || "(không)"}`);
   console.log(`tệp (git)     ${tepTheoGit.join(", ") || "(không)"}`);
+  /*
+    HÌNH DẠNG LƯỢT CHẠY — dòng trả lời "24 vòng ấy nó làm gì".
+
+    Lượt chạy #45 (TECH-6) đốt 24 vòng · $0,7681 · 132.870 token đầu ra và KHÔNG giao gì. Khối
+    này khi ấy in ra đúng ba dòng dùng được: FAILED, "chưa gọi finish", và tên một tệp. Không đủ
+    để biết nên sửa gì, nên tôi dựng một giả thuyết và không chứng minh được nó.
+  */
+  const vet = (run.metadata as { vetBuoc?: VetBuoc } | null)?.vetBuoc;
+  console.log(`hình dạng     ${vet ? inVetBuoc(vet) : "(lượt chạy này chạy trước khi sổ ghi vết — CHƯA ĐO ĐƯỢC, không phải không làm gì)"}`);
   console.log(`cổng          typecheck=${run.typecheckResult} lint=${run.lintResult} test=${run.testResult} build=${run.buildResult}`);
   console.log(`lệnh đã chạy  ${run.testsRun || "(không)"}`);
   console.log(`tóm tắt       ${(run.summary || "").slice(0, 400)}`);
