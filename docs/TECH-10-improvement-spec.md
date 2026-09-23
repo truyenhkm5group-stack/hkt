@@ -316,12 +316,15 @@ Cập nhật bảng này mỗi khi `canonical_order_outcome` thay đổi (via tr
 
 | Thứ tự | Phương án | Effort (ngày) | Cải thiện | Rủi ro | Ưu tiên | Ghi chú |
 |---|---|---|---|---|---|---|
-| 1 | **Giảm payload /ads** | 3–4 | 60% | Thấp | NGAY | Rõ ràng, hiệu quả tức thì |
-| 2 | **Cursor-based pagination** | 3–4 | 30–40% | Trung | T+1 TUẦN | UX thay đổi, cần product approval |
-| 3 | **Computation pushdown** | 3–4 | 99% (profit) | Thấp | T+1 TUẦN | Chỉ cải `/profit`, không chạm trang khác |
-| 4 | **Loại bỏ N+1 (SubPlan)** | 4–5 | < 5% | Cao | T+2 TUẦN | Cần đo lại BÊN TRONG chayKhongJit; rủi cao |
-| 5 | **Cache memo 5–15 phút** | 1,5–2 | 90% (nếu trafic cao) | Trung | T+2 TUẦN | CHƯA ĐO độ trễ memo hit; phụ thuộc trafic |
-| 6 | **Fact table (migration)** | 7–10 | 90% | Rất cao | KHÔNG LÀM NGAY | Cuối cùng, cần reviewer senior |
+| 1 | **ĐO LẠI trên đúng đường ứng dụng** | 0,5–1 | — *(không sửa mã)* | Thấp | NGAY | EXPLAIN bên trong `chayKhongJit`, giữ nguyên văn đủ kế hoạch, trung vị 3–5 lượt. Quyết định mọi dòng dưới |
+| 2 | **Giảm payload /ads** | 3–4 | CHƯA ĐO ĐƯỢC | Thấp | SAU KHI ĐO | Xem đính chính ở mục phương án: kích thước payload KHÔNG giải thích được thời gian thân của `/ads` |
+| 3 | **Cursor-based pagination** | 3–4 | 30–40% *(ƯỚC TÍNH)* | Trung | SAU KHI ĐO | UX thay đổi, cần product approval |
+| 4 | **Computation pushdown** | 3–4 | 99% (profit) *(ƯỚC TÍNH)* | Thấp | SAU KHI ĐO | Chỉ cải `/profit`, không chạm trang khác |
+| 5 | **Loại bỏ N+1 (SubPlan)** | 4–5 | < 5% | Cao | SAU KHI ĐO | Cần đo lại BÊN TRONG chayKhongJit; rủi cao |
+| 6 | **Cache memo 5–15 phút** | 1,5–2 | 90% (nếu trafic cao) *(ƯỚC TÍNH)* | Trung | SAU KHI ĐO | CHƯA ĐO độ trễ memo hit; phụ thuộc trafic |
+| 7 | **Fact table (migration)** | 7–10 | 90% *(ƯỚC TÍNH)* | Rất cao | KHÔNG LÀM NGAY | Cuối cùng, cần reviewer senior |
+
+> **Đính chính của CTO (người, không phải agent), 23/09/2026.** Bản agent xếp "Giảm payload `/ads`" ở #1 — NGAY, với lập luận *"thời gian thân giảm tuyến tính theo payload"*. Chính số đo production bác lập luận ấy: `/shipments` nặng **1.333 kB** mà chỉ **545 ms**; cùng tốc độ thì `/ads` **5.840 kB** chỉ mất khoảng **2,4 s**, không phải **22,5 s** đo được (`docs/perf/TECH-6-smoke-tho-2026-09-23.txt`). Tức là kích thước KHÔNG giải thích được thời gian — phần lớn nằm ở chỗ khác, và chưa ai đo ra chỗ nào. Hạ nó xuống sau bước đo; nhãn "tức thì" được bỏ. Hàng #1 mới không hứa phần trăm nào: nó là việc đo, và kết quả của nó quyết định cả bảng.
 
 ---
 
