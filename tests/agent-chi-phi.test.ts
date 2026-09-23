@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { AiAgentExecutor } from "@/lib/agents/executor";
 import { AGENT_LOOP_TIMEOUT_MS, TIER_MAC_DINH, tierForRole } from "@/lib/constants/agent-model";
+import { thoiGianThucThi, trungVi } from "@/lib/constants/perf-explain";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
 import { TIMEOUT_BY_TIER, estimateCostUsd, giaCuaModel, khoaGiaKhop } from "@/lib/ai/provider";
 import type { AiProvider } from "@/lib/ai/provider";
@@ -252,3 +253,53 @@ export function testTranChoTachKhoiBac() {
 
   console.log(`✓ Trần chờ vòng lặp agent ${AGENT_LOOP_TIMEOUT_MS / 1000}s tách khỏi bậc routine ${TIMEOUT_BY_TIER.routine / 1000}s · runner truyền thật · trần chờ nằm trong khoá nhớ`);
 }
+
+/* ═════════════ PHÉP ĐO JIT BẬT / JIT TẮT — HAI PHÉP TÍNH PHẢI ĐÚNG TRƯỚC KHI CHẠY TRÊN PRODUCTION ═════════════ */
+
+export function testPhepDoJit() {
+  /*
+    `scripts/perf-probe.ts` chỉ chạy được trên Postgres thật có JIT — PGlite không có JIT, máy
+    này không có Postgres. Không tách hai phép tính này ra thì lần chạy đầu trên production là lần
+    kiểm đầu tiên, và một trung vị sai đi thẳng vào tệp chứng từ `docs/perf/`.
+  */
+  assert.equal(trungVi([]), null, "không lượt nào ⇒ CHƯA ĐO ĐƯỢC, không phải 0");
+  assert.equal(trungVi([7]), 7);
+  assert.equal(trungVi([9, 1, 5]), 5, "lẻ ⇒ phần tử giữa SAU KHI SẮP");
+  /*
+    CHẴN ⇒ trung bình hai phần tử giữa. Lấy `xs[n/2]` là lấy phần tử lệch về phía LỚN — với bốn
+    lượt [1, 2, 8, 9] nó ra 8 thay vì 5, gần gấp đôi.
+  */
+  assert.equal(trungVi([9, 1, 8, 2]), 5, "chẵn ⇒ trung bình HAI phần tử giữa, không phải phần tử lệch về phía lớn");
+  const goc = [3, 1, 2];
+  trungVi(goc);
+  assert.deepEqual(goc, [3, 1, 2], "không được sắp lại mảng GỐC của người gọi");
+
+  assert.equal(thoiGianThucThi(["Planning Time: 15.085 ms", "Execution Time: 8051.037 ms"]), 8051.037);
+  assert.equal(thoiGianThucThi(["    Execution Time: 26 ms"]), 26, "số nguyên, có thụt đầu dòng — vẫn đọc được");
+  assert.equal(thoiGianThucThi(["Seq Scan on orders", "Planning Time: 1 ms"]), null, "thiếu dòng Execution Time ⇒ null, KHÔNG phải 0 (mục 42)");
+  assert.equal(thoiGianThucThi([]), null);
+  /* Planning Time đứng TRƯỚC không được đọc nhầm thành thời gian thực thi. */
+  assert.equal(thoiGianThucThi(["Planning Time: 999 ms", "Execution Time: 12.5 ms"]), 12.5, "không được đọc nhầm Planning Time");
+
+  /*
+    VÀ SCRIPT PHẢI ĐO CẢ HAI ĐIỀU KIỆN, XEN KẼ, VỚI ĐÚNG CÂU `chayKhongJit` PHÁT RA.
+
+    Đo một phía thì không trả lời được "JIT góp bao nhiêu" — đúng câu tệp chứng từ đang ghi
+    CHƯA ĐO ĐƯỢC. Và câu tắt JIT phải là ĐÚNG câu của `chayKhongJit`, nếu không phép đo lại đo
+    một điều kiện thứ ba không ai dùng.
+  */
+  const goc2 = path.resolve(__dirname, "..");
+  const probe = readFileSync(path.join(goc2, "scripts/perf-probe.ts"), "utf8");
+  const dbIndex = readFileSync(path.join(goc2, "db/index.ts"), "utf8");
+  assert.ok(dbIndex.includes('"set local jit = off"'), "chayKhongJit phải còn phát đúng câu này — nếu đổi, phép đo phải đổi theo");
+  assert.ok(probe.includes('await c.query("set local jit = off")'), "probe phải tắt JIT bằng ĐÚNG câu chayKhongJit phát ra");
+  assert.ok(probe.includes("chayMotLuot(cauLenh, false)") && probe.includes("chayMotLuot(cauLenh, true)"), "probe phải đo CẢ HAI điều kiện");
+  const iBat = probe.indexOf("chayMotLuot(cauLenh, false)");
+  const iTat = probe.indexOf("chayMotLuot(cauLenh, true)");
+  const iVong = probe.lastIndexOf("for (let k = 0; k < LUOT; k += 1)", iBat);
+  assert.ok(iVong > 0 && iVong < iBat && iBat < iTat, "hai điều kiện phải chạy XEN KẼ trong CÙNG một vòng — chạy hết một bên rồi mới sang bên kia thì độ trôi của tải dồn lên một phía");
+  assert.ok(probe.includes('c.query("rollback")'), "mỗi lượt phải rollback để `set local` không rò sang lượt sau");
+
+  console.log("✓ Phép đo JIT bật / JIT tắt: trung vị đúng cả chẵn lẫn lẻ, không sắp mảng gốc · thiếu thời gian ⇒ null, không 0 · probe đo CẢ HAI điều kiện XEN KẼ, bằng đúng câu chayKhongJit phát ra, mỗi lượt rollback");
+}
+
