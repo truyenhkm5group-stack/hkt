@@ -631,6 +631,24 @@ export type ProjectedCounts = {
   activeByState: ActiveBreakdown;
   /** Đơn đang giao mà mô hình KHÔNG dự báo được (trạng thái chưa đủ mẫu) — NGOÀI ước tính. */
   unmodelledActive: number;
+  /**
+   * ═══ TỬ SỐ CHIA ĐÔI THEO CĂN CỨ: CỦA CHÍNH MÃ, HAY MƯỢN CỦA MÃ KHÁC ═══
+   *
+   * `lookup.of()` đã trả về `basis` cho TỪNG đơn đang chạy — bậc `PRODUCT_*` là quan sát của chính
+   * mã, bậc `GLOBAL_*` là xác suất học từ toàn shop. Trước 23/09/2026 giá trị ấy bị vứt đi ngay sau
+   * khi dùng, nên không màn hình nào trả lời được câu *"con số này có bao nhiêu phần là của mã
+   * đang xem?"*.
+   *
+   * Đo production 23/09/2026, Đầm Q005 sau khi vừa đủ chín (10 đơn kết thúc): ô in **36,2%**, tử
+   * số 37,6 trong đó **29,6 là xác suất mượn** — 79%. Mã có 8/10 đơn giao được vẫn bị chấm bằng
+   * tỷ lệ nền của shop, chỉ vì `MIN_CELL_SAMPLE` đòi 10 quan sát cho MỖI ô (trạng thái × tuổi
+   * kiện) và 10 đơn kết thúc không đủ cho một ô nào.
+   *
+   * Hai trường này KHÔNG đổi một phép tính nào ở đây — chúng chỉ ghi lại căn cứ, để thang bậc
+   * (`resolveDeliveryRate`) từ chối gọi một con số 79% đi mượn là "số đo của chính mã".
+   */
+  projectedFromOwn: number;
+  projectedFromGlobal: number;
   /** Đơn huỷ — không ở tử số lẫn mẫu số; đếm riêng để tổng đơn khớp trang khác. */
   cancelled: number;
   /** Đơn có vận đơn nhưng không một dấu vết ĐVVC nào (`UNKNOWN`) — ngoài cohort, đếm riêng. */
@@ -713,6 +731,8 @@ function accMoi(): Acc {
     active: 0,
     activeByState: {},
     unmodelledActive: 0,
+    projectedFromOwn: 0,
+    projectedFromGlobal: 0,
     cancelled: 0,
     unknown: 0,
     pending: 0,
@@ -832,6 +852,9 @@ function canMotDon(
         acc.unmodelledActive += 1;
         acc.unmodelledRevenue += don.revenue;
       } else {
+        // Bậc `PRODUCT_*` là quan sát của CHÍNH MÃ; `GLOBAL_*` là mượn. `NONE` không tới được đây.
+        if (tra.basis === "PRODUCT_STATE_AGE" || tra.basis === "PRODUCT_STATE") acc.projectedFromOwn += tra.p;
+        else acc.projectedFromGlobal += tra.p;
         acc.projectedDelivered += tra.p;
         acc.projectedDeliveredRevenue += don.revenue * tra.p;
         acc.projectedCogs += don.cogs * tra.p;

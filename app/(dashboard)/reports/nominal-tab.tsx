@@ -81,7 +81,9 @@ const NHAN_NGUON: Record<NominalRow["returnRateSource"], (r: NominalRow) => stri
     máy tự đo. Thiếu vế cuối thì chủ shop không biết con số này sẽ đứng yên tới bao giờ.
   */
   blended: (r) =>
-    `${formatNumber(r.rateOwnFinished)}/${formatNumber(r.rateMatureAt)} đơn kết thúc · co ngót về ${(100 - r.baseReturnRate).toFixed(0)}% khai${r.measuredDeliveryRate === null ? "" : ` · mã đang ở ${r.measuredDeliveryRate.toFixed(1)}%`}${choLay(r)}`,
+    r.blendReason === "MOSTLY_BORROWED"
+      ? `${formatNumber(r.rateOwnFinished)} đơn kết thúc · mô hình mượn ${r.borrowedShare === null ? "phần lớn" : `${Math.round(r.borrowedShare * 100)}%`} số của mã khác nên KHÔNG dùng${r.measuredDeliveryRate === null ? "" : ` · mã đang ở ${r.measuredDeliveryRate.toFixed(1)}%`}${choLay(r)}`
+      : `${formatNumber(r.rateOwnFinished)}/${formatNumber(r.rateMatureAt)} đơn kết thúc · co ngót về ${(100 - r.baseReturnRate).toFixed(0)}% khai${r.measuredDeliveryRate === null ? "" : ` · mã đang ở ${r.measuredDeliveryRate.toFixed(1)}%`}${choLay(r)}`,
   history: (r) => `lịch sử ${formatNumber(r.historyFinished)} đơn · ước tính theo tỷ lệ`,
   // GIẢ ĐỊNH phải tự khai là giả định, kèm CON SỐ đang dùng — "mặc định" không nói được nó là bao nhiêu.
   default: (r) => `giả định ${(100 - r.baseReturnRate).toFixed(0)}% GTC (Giả định) · chưa đo được${choLay(r)}`,
@@ -96,6 +98,16 @@ function moTaUocTinh(r: NominalRow): string {
     return `${dem} — CHƯA ĐO ĐƯỢC: mã này chưa có đơn nào rời kho trong kỳ${r.projection.awaitingPickup ? ` (${formatNumber(r.projection.awaitingPickup)} đơn đã có mã vận đơn nhưng ĐVVC chưa cầm hàng)` : ""}. Không có mẫu số thì không có tỷ lệ — “—” KHÔNG phải 0%`;
   if (r.returnRateSource === "unmeasured")
     return `${dem} — CHƯA ĐO ĐƯỢC: phần đang giao ở trạng thái chưa đủ mẫu quá lớn, không lùi về giả định. DT GTC ƯT chỉ gồm phần đã dự báo được; ${formatVND(r.unmodelledRevenue, { compact: true })} doanh số nằm ngoài ước tính`;
+  if (r.returnRateSource === "blended" && r.blendReason === "MOSTLY_BORROWED")
+    return (
+      `${dem} — MÔ HÌNH CHƯA BIẾT GÌ VỀ MÃ NÀY. Mã đã đủ ${formatNumber(r.rateOwnFinished)} đơn kết thúc, nhưng ` +
+      `${r.borrowedShare === null ? "phần lớn" : `${Math.round(r.borrowedShare * 100)}%`} tử số dự báo là xác suất MƯỢN của mã khác: ` +
+      `hợp đồng ${PROJECTED_GTC_VERSION} đòi 10 quan sát cho MỖI ô (trạng thái ĐVVC × tuổi kiện), và mã này chưa đủ ở ô nào. ` +
+      `Nên con số in ra là SỐ ĐO CỦA CHÍNH MÃ${r.measuredDeliveryRate === null ? "" : ` (${r.measuredDeliveryRate.toFixed(1)}% trên ${formatNumber(r.rateOwnFinished)} đơn)`} ` +
+      `co ngót về tỷ lệ khai ở Giả định (${(100 - r.baseReturnRate).toFixed(0)}%), KHÔNG phải tỷ lệ nền của toàn shop. ` +
+      `Đây là giới hạn của MÔ HÌNH, không phải của thời gian — đợi thêm đơn không làm nó tự hết; ` +
+      `muốn chốt một con số thì đặt tay ở bảng “Mã mới · chưa đủ căn cứ”. Tiền = Doanh số POS × tỷ lệ.`
+    );
   if (r.returnRateSource === "blended")
     return (
       `${dem} — MÃ CHƯA CHÍN: mới ${formatNumber(r.rateOwnFinished)}/${formatNumber(r.rateMatureAt)} đơn của chính mã đi tới kết cục, chưa đủ để máy tự đo. ` +

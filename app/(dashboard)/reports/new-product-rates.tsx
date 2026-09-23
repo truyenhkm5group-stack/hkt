@@ -38,8 +38,17 @@ export function NewProductRates({
   assumptions: ProfitAssumptions;
   canWrite: boolean;
 }) {
-  // Mã chưa chín VÀ đã bán được gì đó trong kỳ. Mã 0 đơn không phải việc phải làm, nó là một dòng trống.
-  const chuaChin = rows.filter((r) => !r.rateMature && r.orders > 0).sort((a, b) => b.salesAfterDiscount - a.salesAfterDiscount);
+  /*
+    LỌC THEO NGUỒN, KHÔNG THEO ĐỘ CHÍN.
+
+    Bản đầu lọc `!rateMature`. Nhưng một mã có thể ĐÃ CHÍN mà con số của nó vẫn chưa đo được — đo
+    23/09/2026: Đầm Q005 vừa chạm 10 đơn kết thúc thì rời bảng này, trong khi 79% tử số của nó vẫn
+    đi mượn. Câu hỏi bảng này trả lời là *"con số đang hiện có phải một số đo không"*, và câu trả
+    lời ấy nằm ở `returnRateSource`, không nằm ở số đơn.
+  */
+  const chuaChin = rows
+    .filter((r) => r.orders > 0 && (r.returnRateSource === "blended" || r.returnRateSource === "default"))
+    .sort((a, b) => b.salesAfterDiscount - a.salesAfterDiscount);
   if (!chuaChin.length) return null;
 
   const tongDoanhSo = chuaChin.reduce((a, r) => a + r.salesAfterDiscount, 0);
@@ -47,14 +56,20 @@ export function NewProductRates({
   return (
     <SectionCard
       title="Mã mới · chưa đủ căn cứ để máy tự đo"
-      description={`${formatNumber(chuaChin.length)} mã · ${formatVND(tongDoanhSo, { compact: true })} doanh số POS đang được tính bằng một tỷ lệ CHƯA ĐO ĐƯỢC. Đặt tay ở cột cuối; con số tự nhường chỗ cho số đo khi mã đủ ${formatNumber(assumptions.minFinishedOrders)} đơn kết thúc.`}
+      description={`${formatNumber(chuaChin.length)} mã · ${formatVND(tongDoanhSo, { compact: true })} doanh số POS đang được tính bằng một tỷ lệ CHƯA ĐO ĐƯỢC. Đặt tay ở cột cuối; con số tự nhường chỗ cho số đo ngay khi mô hình đo được mã ấy bằng dữ liệu của chính nó.`}
       hint={
         <>
           <p>
-            Một mã vào bảng này khi số đơn ĐÃ KẾT THÚC của chính nó chưa đạt {formatNumber(assumptions.minFinishedOrders)} —
-            ngưỡng <code>minFinishedOrders</code> khai ở Giả định. Dưới ngưỡng đó, tỷ lệ của mã KHÔNG được lấy từ tỷ lệ nền
-            của toàn shop: tỷ lệ nền là bình quân có trọng số theo số đơn, nên mã bán chạy nhất và hoàn nhiều nhất quyết định
-            gần hết con số, và mọi mã mới thừa hưởng vấn đề của nó.
+            Một mã vào bảng này khi con số của nó CHƯA PHẢI MỘT SỐ ĐO, vì một trong hai lý do. <b>Chưa chín</b>: số đơn đã kết
+            thúc của chính mã chưa đạt {formatNumber(assumptions.rateMatureMinFinished)} — cột “Độ chín” đếm ngược.{" "}
+            <b>Mô hình còn mượn</b>: mã đủ đơn rồi, nhưng phần lớn tử số dự báo vẫn là xác suất học từ mã khác, vì hợp đồng
+            đòi 10 quan sát cho MỖI ô (trạng thái ĐVVC × tuổi kiện) và mã chưa đủ ở ô nào. Vế sau KHÔNG tự hết theo thời
+            gian như vế trước.
+          </p>
+          <p>
+            Cả hai trường hợp, tỷ lệ của mã KHÔNG được lấy từ tỷ lệ nền của toàn shop: tỷ lệ nền là bình quân có trọng số
+            theo số đơn, nên mã bán chạy nhất và hoàn nhiều nhất quyết định gần hết con số, và mọi mã mới thừa hưởng vấn đề
+            của nó.
           </p>
           <p>
             Thay vào đó máy CO NGÓT số đo của chính mã về tỷ lệ khai ở Giả định
@@ -113,7 +128,14 @@ export function NewProductRates({
                     <div>
                       {formatNumber(r.rateOwnFinished)}/{formatNumber(r.rateMatureAt)}
                     </div>
-                    <div className="text-[10.5px] text-muted-foreground">{conThieu ? `còn ${formatNumber(conThieu)} đơn nữa` : "đủ ở lượt tính sau"}</div>
+                    {/* ĐỢI THÊM ĐƠN và MÔ HÌNH CHƯA ĐỦ Ô là hai việc phải làm khác nhau — không gộp một câu. */}
+                    <div className="text-[10.5px] text-muted-foreground">
+                      {r.blendReason === "MOSTLY_BORROWED"
+                        ? `đủ đơn · mô hình mượn ${r.borrowedShare === null ? "phần lớn" : `${Math.round(r.borrowedShare * 100)}%`}`
+                        : conThieu
+                          ? `còn ${formatNumber(conThieu)} đơn nữa`
+                          : "đủ ở lượt tính sau"}
+                    </div>
                   </TableCell>
                   <TableCell className="numeric text-right">
                     <div className="font-semibold text-muted-foreground">{r.deliveryRate === null ? "—" : `${r.deliveryRate.toFixed(1)}%`}</div>
