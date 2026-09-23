@@ -20,7 +20,12 @@ export default async function ProductionOrderPage({ params }: { params: Promise<
       <PageHeader
         eyebrow="Kho"
         title={`${o.code} · ${o.productCode ? `${o.productCode} · ` : ""}${o.productName}`}
-        description={`${formatNumber(o.totalQty)} sản phẩm${o.unitCost ? ` · ~${formatVND(o.totalQty * o.unitCost)}` : ""} · tạo ${formatDateTime(o.createdAt)} bởi ${o.createdBy}${o.sentAt ? ` · gửi xưởng ${formatDateTime(o.sentAt)}` : ""}`}
+        /*
+          BA MỐC ĐỨNG CẠNH NHAU THÌ ĐỘ TRỄ ĐỌC ĐƯỢC BẰNG MẮT: gửi xưởng → hẹn → nhận thật.
+          Lệnh đã nhận từ TRƯỚC bản 23/09/2026 không có mốc nhận, và câu chữ nói thẳng điều đó thay vì
+          để trống — trống thì người đọc tưởng chưa nhận (AGENTS.md mục 42).
+        */
+        description={`${formatNumber(o.totalQty)} sản phẩm${o.unitCost ? ` · ~${formatVND(o.totalQty * o.unitCost)}` : ""} · tạo ${formatDateTime(o.createdAt)} bởi ${o.createdBy}${o.sentAt ? ` · gửi xưởng ${formatDateTime(o.sentAt)}` : ""}${o.dueDate ? ` · hẹn ${formatDateTime(o.dueDate)}` : ""}${o.receivedAt ? ` · KHO NHẬN ${formatDateTime(o.receivedAt)}${o.receivedBy ? ` (${o.receivedBy})` : ""}` : o.status === "RECEIVED" ? " · đã nhận, không có mốc (lệnh cũ)" : ""}`}
         actions={<div className="flex items-center gap-2"><span className={cn("rounded px-2 py-0.5 text-xs font-semibold", PRODUCTION_STATUS_TONE[o.status])}>{PRODUCTION_STATUS_LABEL[o.status]}</span><Link href="/inventory/planning/orders" className="text-sm text-primary hover:underline">Danh sách</Link></div>}
       />
       <OrderActions id={o.id} status={o.status} text={text} canWrite={can(user, "planning:write")} />

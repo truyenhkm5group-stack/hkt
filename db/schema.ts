@@ -372,6 +372,20 @@ export const productionOrders = pgTable(
     note: text("note").notNull().default(""),
     dueDate: ts("due_date"),
     sentAt: ts("sent_at"),
+    /*
+      MỐC NHẬN THẬT — cái thiếu làm không đo được "xưởng giao trễ mấy ngày".
+
+      Trước 23/09/2026 bảng này có mốc HẸN (`due_date`) và mốc GỬI (`sent_at`), còn lúc hàng về thì
+      `status` đổi sang `RECEIVED` mà KHÔNG ghi thời điểm. Nên hai câu hỏi khác hẳn nhau — "hết hàng
+      vì bán nhanh" và "hết hàng vì xưởng giao trễ" — cùng hiện ra là một dòng cảnh báo tồn kho.
+
+      Chủ shop chốt quy trình: KHO là người bấm, và bấm LÚC ĐẾM XONG (không phải lúc xe tới cổng).
+      Vì thế mốc này là lời khai của người đếm, không phải một sự kiện tự suy ra.
+    */
+    receivedAt: ts("received_at"),
+    /** Khoá tài khoản người bấm (AGENTS.md mục 34) — cột chữ bên dưới chỉ là ảnh chụp tên để đọc. */
+    receivedByUserId: text("received_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    receivedBy: text("received_by").notNull().default(""),
     createdBy: text("created_by").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

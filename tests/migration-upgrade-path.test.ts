@@ -62,6 +62,7 @@ const MOI = [
   "0112_agent_run_blocked",
   "0113_production_department",
   "0114_department_sort_order",
+  "0115_production_received_at",
 ] as const;
 
 /*
