@@ -136,6 +136,12 @@ export async function RescueReportSection({ period, raw = {} }: { period: Period
         />
       </section>
 
+      {tong.falseReopenExcluded ? (
+        <p className="rounded-lg border border-dashed px-3 py-2 text-[12px] text-muted-foreground">
+          {formatNumber(tong.falseReopenExcluded)} đợt là <b>bản sao do lỗi mở ca cũ</b> (bộ đối chiếu từng dựng lại ca đã xong cho đúng tình trạng ĐVVC cũ, đã vá 18/09) — không tính ở bất kỳ con số nào trên trang này, kể cả hiệu suất từng người. Đợt mở lại mà có sự kiện ĐVVC xen giữa vẫn được tính.
+        </p>
+      ) : null}
+
       {tong.unattributed ? (
         <p className="rounded-lg border border-dashed px-3 py-2 text-[12px] text-muted-foreground">
           {formatNumber(tong.unattributed)} ca <b>không đủ chứng cứ để kết luận</b> — ca lịch sử chưa nối được về người hoặc về chứng từ. Chúng nằm ngoài mọi tỷ lệ và không tính vào hiệu suất của ai.
