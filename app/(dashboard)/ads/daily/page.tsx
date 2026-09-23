@@ -5,13 +5,15 @@ import { SectionCard } from "@/components/ui-bits";
 import { ScopeDenied } from "@/components/scope-denied";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { MARKETING_BASIS_LABEL, MARKETING_BASIS_QUESTION, MARKETING_DIMENSION_LABEL, MARKETING_DIMENSIONS, MARKETING_VIEWS, type MarketingBasis, type MarketingDimension, type MarketingView } from "@/lib/constants/marketing-daily";
-import { getMarketingBreakdown, getMarketingDaily, type MarketingFilters } from "@/lib/queries/marketing-daily";
+import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter, type MarketingFilters } from "@/lib/queries/marketing-daily";
+import { getMarketerDailyNominal } from "@/lib/queries/marketer-daily-nominal";
 import { previousPeriod, resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { MarketingDailyTable } from "./daily-table";
 import { MarketingDailyFilters } from "./daily-filters";
 import { MarketingDailyChart } from "./daily-chart";
 import { MarketingKpis } from "./daily-kpis";
 import { MarketingBreakdown } from "./breakdown";
+import { MarketerNominalBreakdown, type ProfitKind } from "./marketer-nominal";
 import { MarketingFindings } from "./findings";
 import { AdsTabs } from "@/app/(dashboard)/ads/ads-tabs";
 
@@ -90,7 +92,7 @@ export default async function MarketingDailyPage({ searchParams }: { searchParam
       </Suspense>
 
       <Suspense fallback={<Skeleton className="h-72 rounded-xl" />}>
-        <BreakdownBlock period={period} basis={basis} dimension={dimension} filters={filters} />
+        <BreakdownBlock raw={raw} period={period} basis={basis} dimension={dimension} filters={filters} />
       </Suspense>
     </div>
   );
@@ -132,7 +134,62 @@ async function FindingsBlock({ period, basis, filters }: { period: ReturnType<ty
   return <MarketingFindings data={data} />;
 }
 
-async function BreakdownBlock({ period, basis, dimension, filters }: { period: ReturnType<typeof resolvePeriod>; basis: MarketingBasis; dimension: MarketingDimension; filters: MarketingFilters }) {
+/** Chuỗi truy vấn giữ nguyên mọi tham số đang có (kỳ, mốc, bộ cột…), chỉ đổi những khoá được nêu. */
+function withParams(raw: SearchParams, patch: Record<string, string | null>): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(raw)) if (typeof v === "string" && v && !(k in patch)) q.set(k, v);
+  for (const [k, v] of Object.entries(patch)) if (v) q.set(k, v);
+  const s = q.toString();
+  return s ? `/ads/daily?${s}` : "/ads/daily";
+}
+
+async function BreakdownBlock({ raw, period, basis, dimension, filters }: { raw: SearchParams; period: ReturnType<typeof resolvePeriod>; basis: MarketingBasis; dimension: MarketingDimension; filters: MarketingFilters }) {
+  /*
+    ═══ BÓC TÁCH THEO MKTER ĐI THEO BÁO CÁO LỢI NHUẬN, KHÔNG THEO BẢNG NGÀY PHÍA TRÊN ═══
+
+    Chủ shop chốt 23/09/2026: số đơn · doanh thu · lợi nhuận của từng MKT phải là số ƯỚC TÍNH của
+    Báo cáo lợi nhuận danh nghĩa, và phải xem được TỪNG NGÀY. Bảng cũ dựng trên bộ máy của trang này
+    (doanh thu đo được + phần đang đi, cước đo được) nên in một con số khác hẳn báo cáo kia cho cùng
+    một người. Các chiều khác (mã hàng, chiến dịch, adset…) vẫn đi đường cũ — báo cáo lợi nhuận
+    không có số ở những grain ấy để mà chia.
+
+    Đang lọc theo một chiều thì cũng đi đường cũ: báo cáo lợi nhuận không có "lợi nhuận của chiến
+    dịch X chia theo marketer", và chia chi phí toàn shop cho một lát cắt là bịa (mục 14).
+  */
+  if (dimension === "marketer" && !hasDimensionFilter(filters)) {
+    const data = await getMarketerDailyNominal(period);
+    const kind: ProfitKind = raw.mkp === "gross" ? "gross" : "net";
+    const periodQuery = period.key === "month" ? "" : `&period=${period.key}${period.key === "custom" ? `&from=${period.fromKey ?? ""}&to=${period.toKey ?? ""}` : ""}`;
+    return (
+      <SectionCard
+        title="Bóc tách theo MKTer — đơn · doanh thu · lợi nhuận ước tính từng ngày"
+        description="Số ước tính theo đúng Báo cáo lợi nhuận danh nghĩa, chia xuống từng đơn theo ngày đơn lên."
+        hint={
+          <>
+            <p className="mb-2">
+              Mỗi mã hàng lấy NGUYÊN con số của Báo cáo lợi nhuận danh nghĩa (DT GTC ước tính, giá vốn, cước theo tỷ lệ giao/hoàn, vận hành, rủi ro tồn kho, thuế), rồi chia xuống từng đơn của mã: đơn đã
+              giao mang trọn doanh thu, đơn hoàn mang 0, đơn đang đi mang đúng xác suất giao được của trạng thái nó đang ở. Vì vậy cộng mọi ô ra đúng số của báo cáo — dòng &ldquo;Khớp&rdquo; phía dưới in phép
+              đối chiếu ấy.
+            </p>
+            <p className="mb-2">
+              Đơn thuộc về MKTer theo CÙNG thứ tự của bảng &ldquo;Lợi nhuận danh nghĩa theo Marketer&rdquo;: người phụ trách fanpage tại lúc đơn lên → page gán tay → ad_id → chia theo tỷ trọng QC trên mã / chủ
+              mã. Chi QC đọc thẳng bảng chi tiêu theo ngày chi.
+            </p>
+            <p>LN ròng ở đây là TRƯỚC khi chia % chủ mã — phần chia ấy là chuyện lương, xem ở Báo cáo lợi nhuận. Ô ước tính không tô màu: ngày mới phần lớn còn đang đi.</p>
+          </>
+        }
+        padded={false}
+      >
+        <MarketerNominalBreakdown
+          data={data}
+          kind={kind}
+          hrefFor={(key) => withParams(raw, { marketer: key, dim: "product", mkp: null })}
+          kindHref={(k) => withParams(raw, { mkp: k === "net" ? null : k })}
+          reportHref={`/reports?tab=nominal${periodQuery}`}
+        />
+      </SectionCard>
+    );
+  }
   const bd = await getMarketingBreakdown(period, basis, dimension, filters);
   return (
     <SectionCard

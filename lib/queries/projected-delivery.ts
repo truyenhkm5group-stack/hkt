@@ -849,6 +849,41 @@ function canMotDon(
   }
 }
 
+/**
+ * PHẦN GIAO ĐƯỢC CỦA MỘT ĐƠN — đúng phép cân `canMotDon` dùng cho TIỀN, trả về một con số thay vì
+ * cộng vào bộ tích luỹ: đã giao = 1 · hoàn / huỷ / chưa rõ = 0 · còn trong kho shop = P(chưa rời kho)
+ * · đang chạy = P(trạng thái con của nó). `null` = đơn NGOÀI ước tính (trạng thái chưa đủ mẫu) —
+ * tiền của nó nằm ở `unmodelledRevenue`, không phải 0 đồng giao được.
+ *
+ * Dùng làm CĂN CỨ CHIA con số theo mã của Báo cáo lợi nhuận xuống từng đơn (bảng ngày × marketer
+ * ở `lib/queries/marketer-daily-nominal.ts`). Nó chỉ quyết định tiền rơi vào NGÀY nào, không quyết
+ * định tổng: tổng vẫn là số của báo cáo. Đổi phân loại ở `canMotDon` thì phải đổi ở đây cùng lượt.
+ */
+export function orderDeliveryShare(don: { outcome: string; con: string; productCode: string | null; ageHours: number | null }, lookup: ProbabilityLookup): number | null {
+  const outcome = don.outcome as OrderOutcome;
+  switch (outcome) {
+    case "DELIVERED":
+      return 1;
+    case "RETURNED":
+    case "RETURNED_BY_RULE":
+    case "CANCELLED":
+    case "UNKNOWN":
+      return 0;
+    case "NOT_SHIPPED":
+    case "AWAITING_PICKUP":
+      return lookup.of(NOT_SHIPPED_STATE).p;
+    case "IN_TRANSIT": {
+      const con = don.con as CarrierSubstate;
+      return isModelledSubstate(con) ? lookup.of(con, { productCode: don.productCode, ageHours: don.ageHours }).p : null;
+    }
+    default: {
+      const chuaKhai: never = outcome;
+      void chuaKhai;
+      return 0;
+    }
+  }
+}
+
 function chotAcc(a: Acc): ProjectedCounts {
   const ketThuc = a.deliveredActual + a.failedActual;
   return {

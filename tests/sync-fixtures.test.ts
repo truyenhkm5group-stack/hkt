@@ -204,6 +204,7 @@ import { testAccessControl } from "./access-control.test";
 import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
+import { testMarketerDailyNominal } from "./marketer-daily-nominal.test";
 import { testAdsDecision } from "./ads-decision.test";
 import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
 import { testAdsWrite } from "./ads-write.test";
@@ -1646,6 +1647,7 @@ async function main() {
   await testPreshipRisk(db);
   await testAdsRoas(db);
   await testMarketingDaily();
+  await testMarketerDailyNominal();
   await testAdsDecision(db);
   await testMarketingDecisionLedger();
   testAdsWrite();
