@@ -1006,8 +1006,13 @@ export async function getProjectedDeliveryMetrics(
       nhận `count(distinct …) over (…)`, và các dòng của cùng một đơn đã nằm sẵn trong tay sau vòng
       gộp bên dưới — đếm ở đó vừa đúng vừa không tốn thêm một lượt quét nào.
     */
+    /*
+      TẮT JIT — cùng hình dạng với câu doanh số của Báo cáo lợi nhuận danh nghĩa (`ORDER_OUTCOME` +
+      trạng thái con ĐVVC + mốc bàn giao, toàn truy vấn con tương quan). `perf-probe` production
+      23/09/2026: câu này 18,3 giây trên kỳ 30 ngày chỉ ~1.500 đơn. Kết quả không đổi.
+    */
     const rows = rowsOf<{ order_id: string; key: string | null; code: string | null; name: string | null; line_total: string | number; line_qty: string | number; line_cogs: string | number; cogs_unknown_qty: string | number; order_total: string | number; outcome: string; con: string; age_hours: string | number | null; product_code: string | null }>(
-      await db.execute(sql`
+      await chayKhongJit(db, (tx) => tx.execute(sql`
         with don as (
           select "orders"."id" as order_id,
                  coalesce("orders"."total_price_after_discount", 0) as order_total,
@@ -1033,7 +1038,7 @@ export async function getProjectedDeliveryMetrics(
           left join "product_variants" on "product_variants"."id" = "order_items"."variant_id"
           left join "products" on "products"."id" = coalesce("product_variants"."product_id", "order_items"."product_id")
          group by d.order_id, d.order_total, d.con, d.outcome, d.age_hours, ${khoa}, ${ma}, ${ten}
-      `),
+      `)),
     );
 
     const theoMa = new Map<string, Acc & { key: string; code: string; name: string }>();
