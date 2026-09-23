@@ -37,6 +37,16 @@ import { cn } from "@/lib/utils";
 export const metadata = { title: "Vận đơn & care" };
 
 /**
+ * Đổi mốc lọc mà GIỮ kỳ đang chọn. Bản trước dựng lại đường dẫn từ đầu nên bấm "Theo ngày chốt"
+ * khi đang xem "Hôm nay" là quay về 30 ngày mặc định — hai con số cạnh nhau nói về hai kỳ khác nhau.
+ */
+function hrefKyLoc(raw: SearchParams, basis: PeriodBasis): string {
+  const q = new URLSearchParams({ view: "report", basis });
+  for (const k of ["period", "from", "to"]) if (typeof raw[k] === "string") q.set(k, raw[k] as string);
+  return `/shipments?${q.toString()}`;
+}
+
+/**
  * ═══════════ VẬN ĐƠN & CARE = BÀN LÀM VIỆC, KHÔNG PHẢI TRANG LIỆT KÊ ═══════════
  *
  * Mặc định mở "Cần care": chỉ kiện đang cần người. Vận đơn bình thường tra ở "Tất cả vận đơn".
@@ -149,7 +159,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
             {PERIOD_BASES.map((b) => (
               <NavLink
                 key={b}
-                href={`/shipments?view=report&basis=${b}`}
+                href={hrefKyLoc(raw, b)}
                 className={cn(
                   "rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors",
                   basis === b ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground",
@@ -163,7 +173,7 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
             <CaseOutcomeReport period={resolvePeriod(raw, "30d")} basis={basis} />
           </Suspense>
           <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
-            <RescueReportSection period={resolvePeriod(raw, "30d")} />
+            <RescueReportSection period={resolvePeriod(raw, "30d")} raw={raw} />
           </Suspense>
           <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>
             <CareReportSection period={resolvePeriod(raw, "30d")} />

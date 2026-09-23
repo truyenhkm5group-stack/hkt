@@ -80,6 +80,13 @@ const MIEN_TRU: Record<string, string> = {
     dán nhầm mã đã huỷ sang trang Viettel Post rồi báo khách là "không tra ra đơn".
   */
   "lib/queries/cs.ts": "grain trả về là CASE; phép nối cố ý nhân dòng để liệt kê mọi lần gửi rồi gộp lại trong TS — không cộng tiền, không đếm đơn",
+  /*
+    Danh sách bấm vào ô hiệu suất care (`listCareCases`): grain là ĐỢT CHĂM SÓC, và phép nối đi
+    từ `shipment_care.shipment_id` tới ĐÚNG kiện của đợt — không mở rộng từ đơn, nên mỗi đợt ra
+    đúng một dòng. Không cộng tiền: COD chỉ để hiện cạnh từng kiện. KHÔNG được thêm
+    `PRIMARY_ATTEMPT`: lần gửi thứ hai của một đơn có đợt chăm sóc thật, và nó đã được đếm ở ô số.
+  */
+  "lib/queries/care-performance.ts": "grain là ĐỢT CHĂM SÓC, nối theo shipment_care.shipment_id tới đúng kiện của đợt — một đợt một dòng, không cộng tiền",
 };
 
 /** Nối `orders → shipments` ở mọi cách viết đang dùng trong kho (Drizzle builder và SQL thô). */

@@ -6,8 +6,12 @@ import { STICKY_HEAD, TABLE_SCROLL } from "@/lib/constants/table-ux";
 import { BUSINESS_ACTIONS, BUSINESS_ACTION_LABEL, CARE_OUTCOME_HINT, CARE_OUTCOME_LABEL } from "@/lib/constants/care-outcome";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { formatNumber } from "@/lib/format";
-import { getCarePerformanceByPic, getCarePerformanceByProduct, getRescueSummary } from "@/lib/queries/care-performance";
-import type { Period } from "@/lib/search-params";
+import Link from "next/link";
+import { Suspense } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { RescueCaseList } from "@/app/(dashboard)/shipments/rescue-case-list";
+import { CARE_CASE_BUCKETS, getCarePerformanceByPic, getCarePerformanceByProduct, getRescueSummary, type CareCaseBucket } from "@/lib/queries/care-performance";
+import type { Period, SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
 /**
@@ -59,8 +63,46 @@ function Gio({ phut, mau, nguong, xungDot = 0 }: { phut: number | null; mau: num
   );
 }
 
-export async function RescueReportSection({ period }: { period: Period }) {
+/** Tham số URL của ô đang mở: `caNguoi` = id tài khoản hoặc `none` (Chưa nối được người), `caO` = ô. */
+const KHONG_NGUOI = "none";
+
+/**
+ * Đường dẫn giữ NGUYÊN kỳ lọc đang xem (period / from / to / basis) và chỉ đổi ô đang mở. Mất kỳ
+ * lọc khi bấm là danh sách ra theo kỳ mặc định — số dòng không còn bằng con số vừa bấm.
+ */
+function hrefO(raw: SearchParams, o: { owner: string | null; bucket: CareCaseBucket } | null): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(raw)) {
+    if (k === "caNguoi" || k === "caO" || v === undefined) continue;
+    for (const x of Array.isArray(v) ? v : [v]) q.append(k, x);
+  }
+  if (o) {
+    q.set("caNguoi", o.owner ?? KHONG_NGUOI);
+    q.set("caO", o.bucket);
+  }
+  return `/shipments?${q.toString()}${o ? "#ds-ca" : ""}`;
+}
+
+/** Một con số bấm được. 0 thì không có gì để mở — in số, không in liên kết. */
+function So({ n, href, className, dangMo }: { n: number; href: string; className?: string; dangMo: boolean }) {
+  if (!n) return <span className={className}>{formatNumber(n)}</span>;
+  return (
+    <Link href={href} className={cn("numeric underline decoration-dotted underline-offset-2 hover:decoration-solid", dangMo && "rounded bg-accent px-1 decoration-solid", className)}>
+      {formatNumber(n)}
+    </Link>
+  );
+}
+
+export async function RescueReportSection({ period, raw = {} }: { period: Period; raw?: SearchParams }) {
   const [tong, theoNguoi, theoMa] = await Promise.all([getRescueSummary(period), getCarePerformanceByPic(period), getCarePerformanceByProduct(period)]);
+
+  const caNguoi = typeof raw.caNguoi === "string" ? raw.caNguoi : null;
+  const caO = typeof raw.caO === "string" && (CARE_CASE_BUCKETS as readonly string[]).includes(raw.caO) ? (raw.caO as CareCaseBucket) : null;
+  const dong = caNguoi && caO ? theoNguoi.find((r) => (r.userId ?? KHONG_NGUOI) === caNguoi) : undefined;
+  const o = (r: (typeof theoNguoi)[number], bucket: CareCaseBucket) => ({
+    href: hrefO(raw, { owner: r.userId, bucket }),
+    dangMo: dong === r && caO === bucket,
+  });
 
   return (
     <div className="space-y-4">
@@ -117,7 +159,12 @@ export async function RescueReportSection({ period }: { period: Period }) {
                 <th className="px-2.5 py-2 text-right font-semibold">Cứu trực tiếp</th>
                 <th className="px-2.5 py-2 text-right font-semibold">Cứu bằng đổi</th>
                 <th className="px-2.5 py-2 text-right font-semibold">Không cứu được</th>
-                <th className="px-2.5 py-2 text-right font-semibold" title="Ca chưa có kết cục — KHÔNG thưởng phạt trên nhóm này">Đang treo</th>
+                <th
+                  className="px-2.5 py-2 text-right font-semibold"
+                  title="Đợt chăm sóc mà Viettel Post CHƯA báo kết cục cuối, tính tới cuối kỳ — gồm cả ca mở từ các kỳ trước và ca nhân viên đã đóng. KHÁC “Cần care”: Cần care đếm KIỆN đang cần người làm ngay; đây đếm ĐỢT chưa có câu trả lời cứu được hay không. Bấm vào số để xem từng ca và lý do. KHÔNG thưởng phạt trên nhóm này."
+                >
+                  Đang treo
+                </th>
                 <th className="px-2.5 py-2 text-right font-semibold">Tỷ lệ cứu</th>
                 <th className="px-2.5 py-2 text-right font-semibold" title="Trung vị từ lúc MỞ ca tới lần đầu có NGƯỜI CHẠM VÀO: nhận ca, đổi trạng thái, ghi note. Trung vị chứ không phải trung bình — một ca treo ba tuần kéo trung bình đi mà không nói gì về ngày làm việc bình thường.">Chạm đầu</th>
                 <th className="px-2.5 py-2 text-right font-semibold" title="Trung vị tới lần đầu có HÀNH ĐỘNG NGHIỆP VỤ gửi sang ĐVVC (phát tiếp · đổi địa chỉ · thu hồi). Hai cột cố ý tách nhau: chạm vào một ca không có nghĩa là đã làm gì với kiện hàng.">Hành động đầu</th>
@@ -132,11 +179,22 @@ export async function RescueReportSection({ period }: { period: Period }) {
                   <tr key={r.userId ?? "none"} className="border-b last:border-0 hover:bg-accent/30">
                     <td className={cn("px-2.5 py-2 font-medium", !r.userId && "text-muted-foreground italic")}>{r.name}</td>
                     <td className="numeric px-2.5 py-2 text-right">{formatNumber(r.assigned)}</td>
-                    <td className="numeric px-2.5 py-2 text-right font-semibold">{formatNumber(r.finished)}</td>
-                    <td className="numeric px-2.5 py-2 text-right text-emerald-700 dark:text-emerald-400">{formatNumber(r.direct)}</td>
-                    <td className="numeric px-2.5 py-2 text-right text-sky-700 dark:text-sky-400">{formatNumber(r.exchange)}</td>
-                    <td className="numeric px-2.5 py-2 text-right text-rose-700 dark:text-rose-400">{formatNumber(r.failed)}</td>
-                    <td className="numeric px-2.5 py-2 text-right text-muted-foreground">{formatNumber(r.pending)}</td>
+                    <td className="numeric px-2.5 py-2 text-right font-semibold"><So n={r.finished} {...o(r, "FINISHED")} /></td>
+                    <td className="numeric px-2.5 py-2 text-right text-emerald-700 dark:text-emerald-400"><So n={r.direct} {...o(r, "RESCUED_DIRECT")} /></td>
+                    <td className="numeric px-2.5 py-2 text-right text-sky-700 dark:text-sky-400"><So n={r.exchange} {...o(r, "RESCUED_EXCHANGE")} /></td>
+                    <td className="numeric px-2.5 py-2 text-right text-rose-700 dark:text-rose-400"><So n={r.failed} {...o(r, "RESCUE_FAILED")} /></td>
+                    <td className="numeric px-2.5 py-2 text-right text-muted-foreground">
+                      <So n={r.pending} {...o(r, "PENDING")} />
+                      {/*
+                        Ca lịch sử chưa có kết luận không có cột riêng, và trước đây biến mất hẳn: một
+                        người cầm 4 ca như vậy hiện ra với toàn số 0. Tầng hai của ô, bấm được.
+                      */}
+                      {r.unattributed ? (
+                        <div className="whitespace-nowrap text-[10.5px]" title="Ca lịch sử chưa có kết luận (không đủ chứng cứ) — nằm ngoài mọi tỷ lệ. Bấm để xem.">
+                          +<So n={r.unattributed} {...o(r, "UNATTRIBUTED")} /> lịch sử
+                        </div>
+                      ) : null}
+                    </td>
                     <td className="px-2.5 py-2 text-right"><Ty value={r.directRate} mau={r.direct + r.failed} /></td>
                     <td className="px-2.5 py-2 text-right"><Gio phut={r.medianFirstTouchMin} mau={r.touchSample} nguong={r.timingMinSample} xungDot={r.touchInconsistent} /></td>
                     <td className="px-2.5 py-2 text-right"><Gio phut={r.medianFirstActionMin} mau={r.actionSample} nguong={r.timingMinSample} xungDot={r.actionInconsistent} /></td>
@@ -154,6 +212,12 @@ export async function RescueReportSection({ period }: { period: Period }) {
           </table>
         </div>
       </SectionCard>
+
+      {dong && caO ? (
+        <Suspense key={`${caNguoi}:${caO}`} fallback={<Skeleton className="h-48 rounded-xl" />}>
+          <RescueCaseList period={period} ownerId={dong.userId} ownerName={dong.name} bucket={caO} closeHref={hrefO(raw, null)} />
+        </Suspense>
+      ) : null}
 
       <SectionCard
         title="Hiệu suất chăm sóc theo mã hàng"
