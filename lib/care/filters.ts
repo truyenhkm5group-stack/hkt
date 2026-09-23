@@ -1,4 +1,5 @@
 import { CARE_SLA_SOON_FRACTION, CARE_TERMINAL_STATUSES, CARE_WAITING_STATUSES } from "@/lib/constants/care";
+import { CARE_DATE_KEYS, matchesCareDate, parseCareDateFilter, type CareDateFilter, type CareDateKey } from "@/lib/constants/care-dates";
 import { followUpBucket, type FollowUpFilterKey, type ResolutionFilterKey } from "@/lib/constants/care-resolution";
 import { careRoundBand, type CareRoundBand } from "@/lib/constants/care-rounds";
 import type { CareCase } from "@/lib/care/contracts";
@@ -203,9 +204,36 @@ export type CareFilters = {
    * hẳn nhau vào sáng hôm sau.
    */
   rounds: CareRoundBand | "";
-};
+} & /**
+ * BỐN CHIỀU THỜI GIAN — giá trị THÔ y như trên URL (`YYYY-MM-DD..YYYY-MM-DD`, hở một đầu cũng
+ * được, hoặc `none` cho nhóm chưa có mốc). Giải mã bằng `parseCareDateFilter`, sổ đăng ký ở
+ * `lib/constants/care-dates.ts`.
+ *
+ * Giữ dạng CHUỖI ở đây, không giữ `Date` đã giải mã, vì `CareFilters` phải so sánh được bằng
+ * `===` trong `useMemo` của trình duyệt: hai `Date` cùng giá trị là hai đối tượng khác nhau nên
+ * bảng sẽ dựng lại mỗi lượt vẽ.
+ */
+Record<CareDateKey, string>;
 
-export const EMPTY_CARE_FILTERS: Omit<CareFilters, "view"> = { q: "", owner: "", reason: "", substate: "", sla: "", cod: "", attempts: "", sku: "", resolution: "", followUp: "", rounds: "" };
+const KHONG_LOC_NGAY = Object.fromEntries(CARE_DATE_KEYS.map((k) => [k, ""])) as Record<CareDateKey, string>;
+
+export const EMPTY_CARE_FILTERS: Omit<CareFilters, "view"> = { q: "", owner: "", reason: "", substate: "", sla: "", cod: "", attempts: "", sku: "", resolution: "", followUp: "", rounds: "", ...KHONG_LOC_NGAY };
+
+/**
+ * ĐỆM GIẢI MÃ KHOẢNG NGÀY — vẫn là một hàm THUẦN, chỉ là không dựng lại cùng một `Date` vài nghìn
+ * lần. `matchesCareFilters` chạy một lượt cho bảng và một lượt cho MỖI chiều chip, nên với hàng
+ * đợi vài trăm kiện thì cùng một chuỗi `"2026-09-01..2026-09-20"` được giải mã hàng chục nghìn
+ * lần. Khoá là chính chuỗi thô, nên đệm không bao giờ trả lời cho một câu hỏi khác.
+ */
+const DEM_NGAY = new Map<string, CareDateFilter | null>();
+function locNgay(raw: string): CareDateFilter | null {
+  if (DEM_NGAY.has(raw)) return DEM_NGAY.get(raw) ?? null;
+  const f = parseCareDateFilter(raw);
+  // Trần để một trình duyệt mở cả ngày không tích chuỗi rác: bộ lọc thực tế chỉ có vài giá trị sống.
+  if (DEM_NGAY.size > 200) DEM_NGAY.clear();
+  DEM_NGAY.set(raw, f);
+  return f;
+}
 
 /** Các chiều có thể bị tắt khi đếm chip. `view` cố tình không nằm trong danh sách này. */
 export type CareFilterDim = Exclude<keyof CareFilters, "view">;
@@ -247,6 +275,21 @@ export function matchesCareFilters(c: CareCase, f: CareFilters, now: Date, hours
   if (on("rounds") && f.rounds && careRoundBandOf(c) !== f.rounds) return false;
   if (on("sku") && !matchesSku(c, f.sku.trim().toLowerCase())) return false;
   if (on("q") && !matchesTerm(c, f.q.trim().toLowerCase())) return false;
+  /*
+    BỐN MỐC THỜI GIAN, BỐN CHIỀU RỜI NHAU.
+
+    Cố ý KHÔNG gộp hai mốc Viettel Post ("đổi trạng thái" và "tin cuối") thành một ô: một kiện có
+    thể vừa có tin sáng nay vừa đứng nguyên một chỗ mười một ngày, và đúng nhóm đó là nhóm đắt
+    tiền nhất (AGENTS.md mục 54). Lý lẽ đầy đủ ở `lib/constants/care-dates.ts`.
+
+    Kiện chưa có mốc KHÔNG lọt qua một bộ lọc khoảng ngày — chưa biết thì chưa nằm trong khoảng
+    nào. Màn hình đếm riêng nhóm ấy và cho bấm thẳng vào (`CARE_DATE_UNKNOWN`), thay vì để nó im
+    lặng biến mất.
+  */
+  for (const k of CARE_DATE_KEYS) {
+    if (!on(k)) continue;
+    if (!matchesCareDate(c.dates?.[k] ?? null, locNgay(f[k]))) return false;
+  }
   return true;
 }
 

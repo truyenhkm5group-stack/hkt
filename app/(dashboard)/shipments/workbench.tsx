@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
 import Link from "next/link";
 import { parseAsString, useQueryStates } from "nuqs";
-import { CalendarClock, Check, ChevronDown, ChevronRight, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
+import { CalendarClock, CalendarRange, Check, ChevronDown, ChevronRight, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CareDrawerHost, CareOpenButton, onCareUpdated } from "@/app/(dashboard)/shipments/care-drawer";
 import { CopyButton } from "@/components/misc";
@@ -33,6 +33,15 @@ import {
   type FollowUpFilterKey,
   type ResolutionFilterKey,
 } from "@/lib/constants/care-resolution";
+import {
+  CARE_DATES,
+  CARE_DATE_KEYS,
+  CARE_DATE_PROBLEM_LABEL,
+  CARE_DATE_UNKNOWN,
+  careDateValue,
+  parseCareDateFilter,
+  type CareDateKey,
+} from "@/lib/constants/care-dates";
 import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
 import { careViewOf, slaOf, teamWorkEnded } from "@/lib/care/view";
 import {
@@ -88,7 +97,7 @@ import {
   type CareTimelineEntry,
   type CareTimelineKind,
 } from "@/lib/constants/care-rounds";
-import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
+import { formatDateTime, formatNumber, formatTimeAgo, formatVND, vnShortStamp } from "@/lib/format";
 import type { CareCase, CareState, CareWorkbench, CarrierRequestView } from "@/lib/queries/care-workbench";
 import { customerNameForDisplay } from "@/lib/constants/customer-name";
 import { VtpTrackingLink } from "@/components/vtp-tracking-link";
@@ -260,11 +269,37 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
       ketqua: parseAsString.withDefault(""),
       hen: parseAsString.withDefault(""),
       luot: parseAsString.withDefault(""),
+      /*
+        BỐN MỐC THỜI GIAN. Tên tham số đọc thẳng từ sổ đăng ký (`CARE_DATES[k].param`) chứ không gõ
+        lại: gõ lại là mở đường cho đường dẫn và bộ lọc nói hai tên khác nhau, và một đường dẫn gửi
+        cho đồng nghiệp sẽ mở ra một danh sách khác.
+      */
+      [CARE_DATES.orderCreated.param]: parseAsString.withDefault(""),
+      [CARE_DATES.carrierStageSince.param]: parseAsString.withDefault(""),
+      [CARE_DATES.carrierLastEvent.param]: parseAsString.withDefault(""),
+      [CARE_DATES.erpLastTouch.param]: parseAsString.withDefault(""),
     },
     { history: "replace", clearOnDefault: true },
   );
   const filters: CareFilters = useMemo(
-    () => ({ view, q: f.q, owner: f.nguoi, reason: f.lydo, substate: f.dvvc, sla: f.han as CareSlaBucket | "", cod: f.tien as CareCodBand | "", attempts: f.hut as CareAttemptBand | "", sku: f.hang, resolution: f.ketqua as ResolutionFilterKey | "", followUp: f.hen as FollowUpFilterKey | "", rounds: f.luot as CareRoundBand | "" }),
+    () => ({
+      view,
+      q: f.q,
+      owner: f.nguoi,
+      reason: f.lydo,
+      substate: f.dvvc,
+      sla: f.han as CareSlaBucket | "",
+      cod: f.tien as CareCodBand | "",
+      attempts: f.hut as CareAttemptBand | "",
+      sku: f.hang,
+      resolution: f.ketqua as ResolutionFilterKey | "",
+      followUp: f.hen as FollowUpFilterKey | "",
+      rounds: f.luot as CareRoundBand | "",
+      orderCreated: f[CARE_DATES.orderCreated.param],
+      carrierStageSince: f[CARE_DATES.carrierStageSince.param],
+      carrierLastEvent: f[CARE_DATES.carrierLastEvent.param],
+      erpLastTouch: f[CARE_DATES.erpLastTouch.param],
+    }),
     [view, f],
   );
   const [pending, start] = useTransition();
@@ -370,7 +405,36 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   /* Đếm và gỡ bộ lọc: người lọc bốn chiều rồi thấy bảng rỗng phải có một nút để ra, không phải sửa
      đường dẫn bằng tay. `view` không nằm trong đây — nó là cái TAB, không phải bộ lọc. */
   const daLoc = Object.values(f).filter((v) => v !== "").length;
-  const xoaLoc = () => setF({ q: "", nguoi: "", lydo: "", dvvc: "", han: "", tien: "", hut: "", hang: "", ketqua: "", hen: "", luot: "" });
+  const xoaLoc = () => setF(Object.fromEntries(Object.keys(f).map((k) => [k, ""])));
+
+  /*
+    ═══ BAO NHIÊU KIỆN RƠI KHỎI BỘ LỌC VÌ CHƯA CÓ MỐC ═══
+
+    Lọc theo một khoảng ngày thì kiện CHƯA CÓ mốc ấy không lọt — đúng, nhưng nó không được im lặng
+    biến mất (cùng luật với `carrier_handoff_at`, mục 41). Đếm ở đây bằng CHÍNH vị từ của bảng với
+    chiều đó bị tắt, nên con số luôn bằng số kiện sẽ hiện thêm nếu bấm "chưa có mốc".
+  */
+  const thieuMoc = useMemo(() => {
+    const m = {} as Record<CareDateKey, number>;
+    for (const k of CARE_DATE_KEYS) {
+      const loc = parseCareDateFilter(filters[k]);
+      m[k] = loc?.kind === "RANGE" ? cases.filter((c) => !c.dates?.[k] && matchesCareFilters(c, { ...filters, [k]: "" }, now, hours)).length : 0;
+    }
+    return m;
+  }, [cases, filters, now, hours]);
+
+  /** Bốn giá trị lọc ngày, gom lại để truyền xuống popover và dựng chip. */
+  const locNgay = useMemo(() => Object.fromEntries(CARE_DATE_KEYS.map((k) => [k, filters[k]])) as Record<CareDateKey, string>, [filters]);
+
+  /*
+    MỐC ĐANG LỌC PHẢI HIỆN RA TRÊN TỪNG DÒNG. Một bộ lọc mà người dùng không kiểm lại được là một
+    bộ lọc họ sẽ thôi tin sau lần đầu nghi ngờ — và ở bàn này, nghi ngờ đúng thường xuyên hơn.
+    Chỉ hiện mốc ĐANG lọc, nên bảng không dài thêm một dòng nào khi chưa ai lọc.
+  */
+  const ngayHien = useMemo(() => CARE_DATE_KEYS.filter((k) => locNgay[k]), [locNgay]);
+
+  /** Bộ lọc ngày người dùng gõ mà máy không đọc được — phải NÓI RA, không được lặng lẽ bỏ qua. */
+  const ngayHong = CARE_DATE_KEYS.map((k) => [k, parseCareDateFilter(filters[k])] as const).filter((x): x is [CareDateKey, { kind: "INVALID"; raw: string; problem: keyof typeof CARE_DATE_PROBLEM_LABEL }] => x[1]?.kind === "INVALID");
 
   const queue = visible.map((c) => ({ shipmentId: c.shipmentId }));
   const moneyAtRisk = visible.reduce((a, c) => a + c.codAmount, 0);
@@ -506,8 +570,67 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
               </option>
             ))}
           </select>
+          <BoLocNgay values={locNgay} missing={thieuMoc} onChange={(k, v) => setF({ [CARE_DATES[k].param]: v })} />
         </span>
       </div>
+
+      {/*
+        ═══ BỘ LỌC NGÀY ĐANG BẬT PHẢI ĐỌC ĐƯỢC MÀ KHÔNG CẦN MỞ POPOVER ═══
+
+        Một bộ lọc giấu trong popover là một bộ lọc người ta quên đã bật, rồi đọc con số ở dải tóm
+        tắt như thể nó nói về cả hàng đợi. Chip ở đây nói rõ đang lọc mốc nào, và bấm vào là gỡ.
+      */}
+      {CARE_DATE_KEYS.some((k) => locNgay[k]) || ngayHong.length ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Mốc</span>
+          {CARE_DATE_KEYS.filter((k) => locNgay[k]).map((k) => {
+            const d = parseCareDateFilter(locNgay[k]);
+            const chu =
+              d?.kind === "UNKNOWN_ONLY"
+                ? CARE_DATES[k].unknownLabel
+                : d?.kind === "RANGE"
+                  ? `${d.fromKey ? vnNgay(d.fromKey) : "…"} → ${d.toKey ? vnNgay(d.toKey) : "…"}`
+                  : "không đọc được";
+            return (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setF({ [CARE_DATES[k].param]: "" })}
+                title={`${CARE_DATES[k].question}
+
+Nguồn: ${CARE_DATES[k].source}
+
+Bấm để bỏ bộ lọc này.`}
+                className="inline-flex items-center gap-1 rounded-full border border-primary bg-accent px-2.5 py-0.5 text-[11.5px] font-medium hover:bg-accent/70"
+              >
+                {CARE_DATES[k].short}: {chu}
+                <Trash2 className="size-3 opacity-60" />
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {/* CHUỖI LỌC HỎNG: nói ra, KHÔNG âm thầm bỏ qua — bảng ngắn đi mà không ai biết vì sao là tệ hơn. */}
+      {ngayHong.map(([k, d]) => (
+        <p key={k} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11.5px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          <b>{CARE_DATES[k].label}</b>: {CARE_DATE_PROBLEM_LABEL[d.problem]} (“{d.raw}”). Danh sách dưới đây <b>chưa</b> lọc theo mốc này.
+        </p>
+      ))}
+
+      {/*
+        KIỆN RƠI KHỎI BỘ LỌC VÌ CHƯA CÓ MỐC — in ra cạnh bảng, kèm lối vào xem chúng.
+        Chưa biết không được biến mất im lặng (mục 41, mục 42).
+      */}
+      {CARE_DATE_KEYS.filter((k) => thieuMoc[k] > 0).map((k) => (
+        <p key={k} className="text-[11.5px] text-muted-foreground">
+          {formatNumber(thieuMoc[k])} kiện khác nằm ngoài bộ lọc <b>{CARE_DATES[k].label}</b> vì {CARE_DATES[k].unknownLabel.toLowerCase()} —{" "}
+          <button type="button" onClick={() => setF({ [CARE_DATES[k].param]: CARE_DATE_UNKNOWN })} className="underline underline-offset-2 hover:text-foreground">
+            xem riêng nhóm này
+          </button>
+          .
+        </p>
+      ))}
 
       {reasons.length > 1 ? (
         <div className="flex flex-wrap gap-1.5">
@@ -807,6 +930,7 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
                     key={c.shipmentId}
                     c={c}
                     now={now}
+                    ngayHien={ngayHien}
                     staff={staff}
                     presets={presets}
                     resolutionPresets={resolutionPresets}
@@ -837,7 +961,106 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   );
 }
 
-function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, canManage, meId, checked, onCheck, onPatch }: { c: CareCase; now: Date; staff: { id: string; name: string }[]; presets: CareNotePreset[]; resolutionPresets: Record<CareDecision, string[]>; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; meId: string; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
+/** `2026-09-01` → `01/09/2026`. Chỉ đổi cách đọc, không đổi múi giờ: chuỗi này vốn đã là ngày VN. */
+function vnNgay(key: string): string {
+  const [y, m, d] = key.split("-");
+  return y && m && d ? `${d}/${m}/${y}` : key;
+}
+
+/**
+ * ═══════════ BỐN MỐC THỜI GIAN, BỐN Ô LỌC RIÊNG ═══════════
+ *
+ * Nằm trong popover vì bốn khoảng ngày là tám ô nhập — bày hết ra thanh lọc thì bảng bị đẩy xuống
+ * dưới màn hình, đúng thứ bàn làm việc này không chịu được. Bù lại, mốc nào ĐANG BẬT đều có một
+ * chip ngoài thanh lọc, nên không ai lọc nhầm mà không biết.
+ *
+ * KHÔNG gộp "đổi trạng thái" với "tin VTP cuối" thành một ô cho gọn: đó là hai đồng hồ, và một
+ * kiện có thể vừa có tin sáng nay vừa đứng nguyên một chỗ mười một ngày (AGENTS.md mục 54).
+ */
+function BoLocNgay({ values, missing, onChange }: { values: Record<CareDateKey, string>; missing: Record<CareDateKey, number>; onChange: (k: CareDateKey, v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const dangBat = CARE_DATE_KEYS.filter((k) => values[k]).length;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className={cn("h-7 gap-1 px-2 text-xs", dangBat && "border-primary bg-accent font-semibold")}>
+          <CalendarRange className="size-3.5" /> Mốc thời gian
+          {dangBat ? <span className="numeric rounded bg-muted px-1 text-[10.5px]">{dangBat}</span> : null}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-[420px] space-y-3 p-3 text-xs">
+        <div>
+          <p className="font-semibold">Lọc theo mốc thời gian</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            Bốn mốc độc lập, không suy ra lẫn nhau. Ngày tính theo giờ Việt Nam, và cả hai đầu đều <b>bao gồm</b> ngày đã chọn.
+          </p>
+        </div>
+        {CARE_DATE_KEYS.map((k) => {
+          const spec = CARE_DATES[k];
+          const d = parseCareDateFilter(values[k]);
+          const chuaCo = d?.kind === "UNKNOWN_ONLY";
+          const fromKey = d?.kind === "RANGE" ? d.fromKey : "";
+          const toKey = d?.kind === "RANGE" ? d.toKey : "";
+          return (
+            <div key={k} className="space-y-1 border-t pt-2 first:border-t-0 first:pt-0">
+              <div className="flex items-center gap-1">
+                <span className="font-medium">{spec.label}</span>
+                <InfoHint>
+                  {spec.question}
+                  <br />
+                  <br />
+                  <b>Nguồn:</b> {spec.source}
+                  <br />
+                  <br />
+                  <b>Chưa có mốc:</b> {spec.unknownLabel}. {spec.unknownHint}
+                </InfoHint>
+                {values[k] ? (
+                  <button type="button" onClick={() => onChange(k, "")} className="ml-auto text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground">
+                    Bỏ lọc
+                  </button>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <input
+                  type="date"
+                  value={fromKey}
+                  disabled={chuaCo}
+                  onChange={(e) => onChange(k, careDateValue(e.target.value, toKey))}
+                  className="h-7 rounded-md border bg-background px-1.5 text-xs disabled:opacity-40"
+                  aria-label={`${spec.label}: từ ngày`}
+                />
+                <span className="text-muted-foreground">→</span>
+                <input
+                  type="date"
+                  value={toKey}
+                  disabled={chuaCo}
+                  onChange={(e) => onChange(k, careDateValue(fromKey, e.target.value))}
+                  className="h-7 rounded-md border bg-background px-1.5 text-xs disabled:opacity-40"
+                  aria-label={`${spec.label}: đến ngày`}
+                />
+                {/*
+                  NHÓM CHƯA CÓ MỐC LÀ MỘT RỔ RIÊNG, BẤM ĐƯỢC. Nếu nó chỉ là "thứ bị khoảng ngày loại
+                  ra" thì nó không tồn tại trên màn hình — mà đó thường là nhóm phải đi tra đầu tiên.
+                */}
+                <button
+                  type="button"
+                  onClick={() => onChange(k, chuaCo ? "" : CARE_DATE_UNKNOWN)}
+                  title={`${spec.unknownLabel}. ${spec.unknownHint}`}
+                  className={cn("rounded-full border border-dashed px-2 py-0.5 text-[11px] hover:bg-accent", chuaCo && "border-solid border-primary bg-accent font-semibold")}
+                >
+                  Chưa có mốc
+                </button>
+              </div>
+              {missing[k] > 0 ? <p className="text-[10.5px] text-muted-foreground">{formatNumber(missing[k])} kiện chưa có mốc này nên không lọt qua khoảng ngày trên.</p> : null}
+            </div>
+          );
+        })}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function CaseRow({ c, now, ngayHien, staff, presets, resolutionPresets, onPresetsChange, canManage, meId, checked, onCheck, onPatch }: { c: CareCase; now: Date; ngayHien: CareDateKey[]; staff: { id: string; name: string }[]; presets: CareNotePreset[]; resolutionPresets: Record<CareDecision, string[]>; onPresetsChange: (p: CareNotePreset[]) => void; canManage: boolean; meId: string; checked: boolean; onCheck: (v: boolean) => void; onPatch: (care: CareState, extra?: Partial<CareCase>) => void }) {
   const [pending, start] = useTransition();
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -1065,6 +1288,18 @@ function CaseRow({ c, now, staff, presets, resolutionPresets, onPresetsChange, c
         <div className="mt-0.5 text-[11px] text-muted-foreground" title={c.nextAction}>
           Nên: {c.nextAction.length > 70 ? `${c.nextAction.slice(0, 70)}…` : c.nextAction}
         </div>
+        {/* Chỉ các mốc ĐANG lọc — để kiểm lại bộ lọc ngay trên dòng. `—` là CHƯA BIẾT, không phải hôm nay. */}
+        {ngayHien.length ? (
+          <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10.5px] text-muted-foreground">
+            {ngayHien.map((k) => (
+              <span key={k} title={`${CARE_DATES[k].question}
+
+Nguồn: ${CARE_DATES[k].source}`}>
+                {CARE_DATES[k].short}: {c.dates?.[k] ? vnShortStamp(c.dates[k]) : <span title={CARE_DATES[k].unknownLabel}>—</span>}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </td>
       <td className="px-2 py-2">
         {/* Tên Pancake điền hộ ("Khách hàng 0984107775") KHÔNG được bày như một cái tên đã biết —
