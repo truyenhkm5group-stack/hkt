@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { DEPARTMENT_CODES, DEPARTMENT_ORDER } from "@/lib/constants/departments";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -59,6 +60,7 @@ const MOI = [
   "0110_ad_spends_ad_grain",
   "0111_ads_decision_basis",
   "0112_agent_run_blocked",
+  "0113_production_department",
 ] as const;
 
 /*
@@ -930,13 +932,15 @@ export async function testMigrationUpgradePath() {
     // Kiện đã có đợt đóng nay mở được đợt mới — điều mà cờ sai đã chặn ở chỉ mục duy nhất từng phần.
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, episode_no) values ('up-care-3', 'up-s9', 'NEW', 'PENDING', 2)`);
 
-    // Bảy phòng ban mặc định phải có mặt, nếu không hàng đợi mở lên lần đầu sẽ rỗng.
+    /*
+      TÁM phòng ban mặc định phải có mặt, nếu không hàng đợi mở lên lần đầu sẽ rỗng.
+
+      0110 thêm phòng Sản xuất và đổi `sort_order` để hai phòng đầu phễu đứng cạnh nhau. Bài kiểm so
+      với `DEPARTMENT_ORDER` chứ không gõ lại danh sách: gõ lại là mở đường cho CSDL và mã nguồn nói
+      hai thứ tự khác nhau, và không màn hình nào báo.
+    */
     const phong = await client.query<{ code: string }>("select code from departments order by sort_order");
-    assert.deepEqual(
-      phong.rows.map((r) => r.code),
-      ["SALES", "LOGISTICS", "WAREHOUSE", "MARKETING", "FINANCE", "MANAGEMENT", "HR"],
-      "bảy phòng ban mặc định phải được gieo, đúng thứ tự hiển thị",
-    );
+    assert.deepEqual(phong.rows.map((r) => r.code), DEPARTMENT_ORDER, "tám phòng ban mặc định phải được gieo, đúng thứ tự hiển thị của mã nguồn");
 
     // CHỈ CỘNG THÊM: dữ liệu nghiệp vụ có từ trước phải nguyên vẹn.
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and status = 'OPEN'"), 1, "case CSKH có từ trước không được đụng tới");
@@ -1474,7 +1478,9 @@ export async function testMigrationUpgradePath() {
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });
-    assert.equal(await dem("select count(*)::int as n from departments"), 7, "chạy lại migration KHÔNG được gieo thêm phòng ban lần hai");
+    // Số phòng lấy TỪ SỔ trong mã nguồn, không gõ lại: tách một phòng mới thì con số này tự đúng,
+    // còn gõ tay thì bài kiểm đỏ vì một lý do chẳng liên quan tới tính idempotent nó đang đo.
+    assert.equal(await dem("select count(*)::int as n from departments"), DEPARTMENT_CODES.length, "chạy lại migration KHÔNG được gieo thêm phòng ban lần hai");
     assert.equal(await dem("select count(*)::int as n from metric_targets where id not like 'up-mt%'"), 0, "chạy lại migration KHÔNG được sinh đích nào");
     // …và cũng KHÔNG được đụng tới đích đã có: hai dòng bài này gieo phải còn nguyên cả tầng lẫn số.
     assert.equal(await dem("select count(*)::int as n from metric_targets where (id = 'up-mt1' and scope = 'COMPANY' and target = 65) or (id = 'up-mt2' and scope = 'PRODUCT' and scope_ref = 'Q004' and target = 55)"), 2, "chạy lại migration KHÔNG được sửa đích đã đặt");

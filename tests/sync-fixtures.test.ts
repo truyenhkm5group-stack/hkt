@@ -230,6 +230,7 @@ import { testCareDateFilters } from "./care-date-filters.test";
 import { testProductNotes } from "./product-notes.test";
 import { testSmokeTiming } from "./smoke-timing.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
+import { testDepartmentMap } from "./department-map.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
@@ -1689,6 +1690,7 @@ async function main() {
   testSmokeTiming();
   testUiConsistency();
   testNavigationCoverage();
+  testDepartmentMap();
   testLoadingUxContract();
   testDrilldownContract();
   testAlertConfig();

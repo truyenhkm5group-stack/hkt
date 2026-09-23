@@ -102,6 +102,7 @@ export function testHangRaoTuyetDoi() {
     "tests/cost-allocation.test.ts",
     "tests/product-notes.test.ts",
     "tests/care-reopen.test.ts",
+    "tests/department-map.test.ts",
     "tests/test-hygiene.test.ts",
     "tests/agent-scopes.test.ts",
     /* Sàn của bánh cóc đăng ký bài kiểm — agent hạ được sàn thì bánh cóc không còn là bánh cóc. */

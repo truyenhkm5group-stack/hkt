@@ -518,6 +518,31 @@ deploy dừng, không phải cảnh báo.
     nhiêu mã theo tỷ lệ khai). Vế nào CỐ Ý không dự phóng (cước — phí hoàn của đơn đang đi chưa
     phát sinh) thì hợp đồng cột phải NÓI RA hướng sai, không vá bằng thêm một giả định.
 
+69. **BẢN ĐỒ MÀN HÌNH LÀ MỘT SỔ KHAI, VÀ BẢNG NĂNG LỰC AI KHÔNG ĐƯỢC KHAI KHỐNG**
+    (`lib/constants/department-modules.ts` · `lib/constants/department-ai.ts` ·
+    `docs/department-module-map.md`): mỗi module thuộc ĐÚNG MỘT phòng và phải khai `why` — phòng mà
+    QUYẾT ĐỊNH của họ sinh ra từ trang đó. Danh sách ấy KHÔNG được sống trong
+    `components/app-sidebar.tsx` nữa: nó từng là một mảng trong một client component, nên hai lá chắn
+    phủ tuyến phải đọc lại mã nguồn bằng biểu thức chính quy — một cách canh im lặng hẹp lại mỗi lần
+    ai đó đổi cách viết. Tệp thanh bên nay chỉ giữ BẢNG ICON (`Record<ModuleHref, …>` nên thiếu một
+    mục là lỗi biên dịch) và cách vẽ; `tests/department-map.test.ts` chặn mọi khai báo quyền lọt lại
+    vào đó. **Phòng không sở hữu màn hình nào phải khai VÌ SAO và khai CHỖ VIỆC CỦA HỌ ĐANG NẰM** —
+    một ô rỗng trên bản đồ đọc như "phòng này không làm gì".
+
+    **SỞ HỮU MÀN HÌNH ≠ NHẬN VIỆC.** Phòng `PRODUCTION` sở hữu ba màn hình đặt hàng từ 23/09/2026
+    nhưng nhóm việc cùng tên VẪN route về `WAREHOUSE`, vì một phòng chưa có thành viên mà đã nhận
+    việc thì việc rơi vào hàng đợi không ai mở. Chỗ lệch kiểu đó phải nằm ở
+    `TEAM_DEPARTMENT_DIVERGENCE` kèm lý do — không khai thì một ngày có người "sửa hộ" và việc biến
+    mất. Chuyển thật sự làm bằng ghi đè `work.ownership`, KHÔNG cần deploy.
+
+    **Thang AI năm nấc** (ĐO → CHẨN ĐOÁN → ĐỀ NGHỊ → VÀO VIỆC → BÀN TAY) thứ tự không đảo được, và
+    ba luật giữ nó khỏi thành bản nguyện vọng: (a) nấc khai "đang chạy" phải trỏ tới TỆP CÓ THẬT,
+    bài kiểm mở từng tệp; (b) nấc chưa xong phải khai thiếu ĐÚNG CÁI GÌ, câu chung chung bị chặn ở
+    mức mã nguồn; (c) không nấc nào được "đang chạy" khi một nấc thấp hơn còn `NONE` — bàn tay không
+    có lý lẽ đứng sau là thứ đáng sợ nhất, không phải một thành tích. `NONE` CỐ Ý (AI không ghi vào
+    tiền và tồn kho — `RISK_FLOOR`) phải phân biệt được với `NONE` chưa làm. Mức tự chủ `AUTO` đòi
+    đặc tả và NGÀY chủ shop quyết mở; hôm nay không phòng nào ở mức đó.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và

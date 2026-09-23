@@ -14,6 +14,7 @@ import { CRM_SEGMENT_ACTION, CRM_SEGMENT_LABEL, CRM_SEGMENT_ORDER, CRM_SEGMENT_T
 import { AREA_LABEL, AREA_TONE, CONFIDENCE_LABEL, type RecommendationArea } from "@/lib/constants/recommendation";
 import { ADS_ANOMALY_LABEL, type AdsAnomalyKind } from "@/lib/constants/ads-anomaly";
 import { ATTRIBUTION_FIELDS } from "@/lib/constants/sales-funnel";
+import { NAV_MODULES } from "@/lib/constants/department-modules";
 import { orderStageEnum, shipmentStageEnum, codStatusEnum } from "@/db/schema";
 
 /**
@@ -162,12 +163,17 @@ export function testUiConsistency() {
  * cờ bấm một nút trên trang khác, hoặc gõ tay đường dẫn. Một tính năng không có lối vào thì với
  * người dùng nó không tồn tại, và công sức làm ra nó bằng không.
  *
- * Bài kiểm này so DANH SÁCH ROUTE THẬT trong `app/(dashboard)` với danh sách `href` trong menu.
+ * Bài kiểm này so DANH SÁCH ROUTE THẬT trong `app/(dashboard)` với sổ khai module.
  * Route động (`[id]`) và trang chi tiết cố ý không vào menu — vào được từ danh sách cha.
+ *
+ * ĐỌC SỔ KHAI BẰNG `import`, KHÔNG QUÉT MÃ NGUỒN NỮA (23/09/2026). Bản trước đọc
+ * `components/app-sidebar.tsx` rồi bắt `href:\s*"..."` bằng biểu thức chính quy — và biểu thức đó
+ * bắt luôn mọi chuỗi `href` khác trong tệp, kể cả một `href` nằm trong ví dụ ở chú thích. Nay danh
+ * sách module là một mảng có kiểu (`lib/constants/department-modules.ts`): đọc nó là đọc đúng thứ
+ * thanh menu đang vẽ, không phải một hình chiếu gần đúng của nó.
  */
 export function testNavigationCoverage() {
-  const sidebar = readFileSync("components/app-sidebar.tsx", "utf8");
-  const linked = new Set([...sidebar.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1]));
+  const linked = new Set<string>(NAV_MODULES.map((m) => m.href));
 
   /** Trang CỐ Ý không có trong menu, kèm lý do — thêm vào đây phải nêu được vì sao. */
   const INTENTIONALLY_UNLINKED: Record<string, string> = {
