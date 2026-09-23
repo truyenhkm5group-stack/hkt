@@ -32,7 +32,29 @@ const DUONG = process.argv.find((a) => a.startsWith("--path="))?.slice(7) || "/a
  * Nên sau mỗi lần sửa một NÚT, phải hỏi được một câu rất cụ thể: chữ trên nút ấy có thật sự nằm
  * trong HTML máy chủ vừa giao, ở đúng trạng thái dữ liệu THẬT hay không.
  */
-const PHAI_CO = process.argv.filter((a) => a.startsWith("--find=")).map((a) => a.slice(7)).filter(Boolean);
+function docChuoiCanTim(argv: string[]): string[] {
+  /*
+    GOM LẠI CÁC MẨU BỊ SHELL CẮT THEO DẤU CÁCH.
+
+    Thao tác ops chạy `script.ts ${ARG}` không có nháy kép, nên `--find=Cho máy soạn lại` tới đây
+    thành BỐN đối số. Bản đầu tiên chỉ đọc mẩu thứ nhất và in "✓ Cho — xuất hiện 18 lần": một
+    phép kiểm ĐẠT trong khi nó đo nhầm thứ. Đó đúng là cái bẫy mà phép kiểm này sinh ra để chặn,
+    nên nó không được phép mắc.
+
+    Luật: sau `--find=`, nuốt tiếp mọi đối số cho tới đối số kế tiếp bắt đầu bằng `--`.
+  */
+  const ra: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (!argv[i].startsWith("--find=")) continue;
+    const mau = [argv[i].slice(7)];
+    while (i + 1 < argv.length && !argv[i + 1].startsWith("--")) mau.push(argv[++i]);
+    const chuoi = mau.join(" ").trim();
+    if (chuoi) ra.push(chuoi);
+  }
+  return ra;
+}
+
+const PHAI_CO = docChuoiCanTim(process.argv);
 
 async function main() {
   if (process.env.AI_STAGING !== "1" || process.env.AI_ALLOW_AUTO_SEND !== "false") {
