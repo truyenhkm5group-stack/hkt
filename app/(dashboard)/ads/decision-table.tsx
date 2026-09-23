@@ -7,7 +7,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { successTone } from "@/lib/constants/returns";
 import { LEDGER_SETTLE_LAG_DAYS, LEDGER_WINDOW_DAYS } from "@/lib/constants/marketing-decision-ledger";
-import { ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_ACTION_TONE, ADS_DECISION_RULE, ADS_DIMENSION_LABEL, DECISION_BASIS_NOTE } from "@/lib/constants/ads-decision";
+import {
+  ADS_ACTION_HINT,
+  ADS_ACTION_LABEL,
+  ADS_ACTION_TONE,
+  ADS_DECISION_RULE,
+  ADS_DIMENSION_LABEL,
+  ADS_SPEND_CLASS_HINT,
+  ADS_SPEND_CLASS_LABEL,
+  DECISION_BASIS_NOTE,
+} from "@/lib/constants/ads-decision";
 import type { AdsDecisionRow } from "@/lib/queries/ads-decision";
 import type { AdsDimension } from "@/lib/constants/ads-decision";
 import type { Stability } from "@/lib/marketing/decision-stability";
@@ -491,6 +500,22 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
                         trong một mã lãi vẫn sẽ mượn chữ "còn dư địa", và người đọc phải thấy được
                         rằng câu ấy nói về cái mã chứ không nói về dòng này.
                       */}
+                      {/*
+                        CHI PHÍ TEST KHÔNG ĐI MƯỢN, VÀ KHÔNG PHẢI MỘT CHỖ TRỐNG.
+
+                        Nó cố ý không thuộc mã nào. Dán chữ "chưa đủ dữ liệu" lên nó là mời người
+                        đi sửa một thứ không hỏng — và đó đúng là lời khuyên sai tôi suýt đưa
+                        (khai mã cho 318 chiến dịch test).
+                      */}
+                      {row.spendClass === "TEST" || row.spendClass === "UNCLASSIFIED" ? (
+                        <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <CornerDownRight className="size-3 shrink-0" />
+                          <span className={cn(row.spendClass === "UNCLASSIFIED" && "text-amber-600 dark:text-amber-400")}>
+                            {ADS_SPEND_CLASS_LABEL[row.spendClass]}
+                          </span>
+                          <InfoHint>{ADS_SPEND_CLASS_HINT[row.spendClass]}</InfoHint>
+                        </span>
+                      ) : null}
                       {row.inherited ? (
                         <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
                           <CornerDownRight className="size-3 shrink-0" />

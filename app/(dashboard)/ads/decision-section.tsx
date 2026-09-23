@@ -189,14 +189,22 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
           chưa nối được về mã (đi khai mã cho chiến dịch) · mã cũng chưa kết luận (đợi dữ liệu).
           Gộp lại thành một con số "chưa đủ dữ liệu" là đúng thứ đã giấu 45,7 triệu suốt hai ngày.
         */}
-        {dimension === "campaign" && (d.inheritedCoverage.rows > 0 || d.inheritedCoverage.unlinkedRows > 0) ? (
+        {dimension === "campaign" && (d.inheritedCoverage.rows > 0 || d.inheritedCoverage.unlinkedRows > 0 || d.inheritedCoverage.testRows > 0) ? (
           <p className="border-b px-5 py-2 text-xs text-muted-foreground">
             <b>{formatNumber(d.inheritedCoverage.rows)}</b> chiến dịch không tự kết luận được nhưng <b>mượn được kết luận của mã hàng</b> (
             {formatVND(d.inheritedCoverage.spend)} tiền quảng cáo) — câu mượn hiện ngay dưới khuyến nghị của dòng, kèm tên mã.{" "}
+            {d.inheritedCoverage.testRows > 0 ? (
+              <>
+                <b>{formatNumber(d.inheritedCoverage.testRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.testSpend)}) là <b>chi phí test</b> fanpage /
+                mẫu mới — KHÔNG thuộc mã nào một cách cố ý, nên không mượn và cũng không phải chỗ thiếu dữ liệu. Nó có câu hỏi riêng: đốt bao nhiêu vào
+                test, và có cái nào ra được thành mã bán.{" "}
+              </>
+            ) : null}
             {d.inheritedCoverage.unlinkedRows > 0 ? (
               <>
-                <b>{formatNumber(d.inheritedCoverage.unlinkedRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.unlinkedSpend)}) chưa nối được về mã
-                nào — sửa được bằng cách khai mã hàng cho chiến dịch ở màn Chi phí quảng cáo.{" "}
+                <b>{formatNumber(d.inheritedCoverage.unlinkedRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.unlinkedSpend)}) <b>chưa phân loại</b> —
+                không nhận ra mã trong tên và cũng không khai là test. ERP KHÔNG đoán; đây là việc cần người: khai mã, hoặc đánh dấu là chi phí test, ở
+                màn Chi phí quảng cáo.{" "}
               </>
             ) : null}
             {d.inheritedCoverage.productSilentRows > 0 ? (

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis } from "@/lib/constants/ads-decision";
+import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis, spendClassOf } from "@/lib/constants/ads-decision";
 import { DECISION_METRIC_HINT, buildDecisionRow, decideAction, getAdsDecision, inheritVerdict } from "@/lib/queries/ads-decision";
 import type { Period } from "@/lib/search-params";
 
@@ -365,6 +365,32 @@ export async function testAdsDecision(db: Db) {
   ]) {
     assert.equal(r.inherited, null, "không mượn được thì KHÔNG dựng một câu rỗng — null, không phải một đối tượng trống");
   }
+
+  /*
+    ═══════════ CHI PHÍ TEST KHÔNG PHẢI MỘT CHỖ TRỐNG ═══════════
+
+    `resolveCampaign` phân biệt được `test` với `none`, nhưng `ad_spends` chỉ lưu `product_id` nên
+    cả hai cùng thành NULL — và xuống tới bảng quyết định chúng đội chung một chữ "chưa đủ dữ liệu".
+
+    Đo production 23/09/2026, 387 chiến dịch không nối được về mã (11.165.022 ₫):
+      318 dòng · 7.457.012 ₫ mang chữ TEST · 62 dòng · 3.617.087 ₫ không test không mã · 7 dòng bộ ghép trượt
+
+    Gộp lại sinh ra một lời khuyên SAI: "khai mã cho 387 chiến dịch" — tức gán mã hàng cho 318
+    chiến dịch test, một việc bịa đặt.
+  */
+  assert.equal(spendClassOf("auto", "prod-1", false), "PRODUCT");
+  assert.equal(spendClassOf("test", null, false), "TEST");
+  assert.equal(spendClassOf("none", null, false), "UNCLASSIFIED", "không khớp mã VÀ không phải test ⇒ cần người, khác hẳn chi phí test");
+  assert.equal(spendClassOf("manual", null, false), "TEST", "người khai tay mà không có mã nghĩa là họ đã nói 'đây là chi phí test'");
+  assert.equal(spendClassOf("auto", "prod-1", true), "EXCLUDED", "đã loại khỏi phép tính thì thắng mọi nhánh khác");
+  assert.notEqual(spendClassOf("test", null, false), spendClassOf("none", null, false), "hai thứ này KHÔNG được gộp — đó là cả điểm của phép phân loại");
+
+  // Chi phí test KHÔNG đi mượn: gán cho một phép thử fanpage điểm hoà vốn của một mã bán là đo sai thứ.
+  const testKhongMuon = inheritVerdict("INSUFFICIENT_DATA", "prod-1", maLai, "TEST");
+  assert.equal(testKhongMuon.bucket, "TEST");
+  assert.equal(testKhongMuon.inherited, null, "chi phí test không mượn kết luận của mã, kể cả khi nối được về một mã");
+  // Chưa phân loại thì VẪN mượn được nếu nối được — nó chỉ thiếu NHÃN, không thiếu bằng chứng.
+  assert.equal(inheritVerdict("INSUFFICIENT_DATA", "prod-1", maLai, "UNCLASSIFIED").bucket, "INHERITED");
 
   // CHƯA BIẾT LÀ NULL, KHÔNG PHẢI 0.
   const noSpend = buildDecisionRow(
