@@ -1,3 +1,4 @@
+import { chuoiSach, type ChuoiSach, type LuotChoChuoi, type ReviewVerdict } from "@/lib/constants/agent-clean-streak";
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { TECH_AGENT_ROLES, TECH_RUN_SORTABLE, type TechAgentRole } from "@/lib/constants/tech";
@@ -89,6 +90,31 @@ export function techRunWhere(params: ListParams) {
   }
   const defined = conds.filter((c): c is SQL => Boolean(c));
   return defined.length ? and(...defined) : undefined;
+}
+
+/**
+ * Chuỗi "lượt chạy sạch" hiện tại của TỪNG agent — tiêu chí mở nấc tiếp theo, thành một con số.
+ *
+ * Luật đếm sống ở `lib/constants/agent-clean-streak.ts` (hàm thuần); ở đây chỉ đọc sổ và chia theo
+ * agent. Lượt chạy mỗi agent là vài chục dòng, nên đọc hết rồi đếm ở TypeScript thay vì viết lại
+ * luật ấy bằng SQL — hai bản của một luật là hai luật (xem sổ ghi nhớ "luật có bản sao").
+ */
+export async function chuoiSachTheoAgent(): Promise<Map<string, ChuoiSach>> {
+  const db = await getDb();
+  const r = schema.techAgentRuns;
+  const rows = await db
+    .select({ id: r.id, agentId: r.agentId, taskId: r.taskId, branch: r.branch, status: r.status, startedAt: r.startedAt, reviewVerdict: r.reviewVerdict })
+    .from(r);
+  const theoAgent = new Map<string, LuotChoChuoi[]>();
+  for (const x of rows) {
+    if (!x.agentId) continue;
+    const ds = theoAgent.get(x.agentId) ?? [];
+    ds.push({ id: x.id, taskId: x.taskId, branch: x.branch, status: x.status, startedAt: x.startedAt, reviewVerdict: (x.reviewVerdict as ReviewVerdict | null) ?? null });
+    theoAgent.set(x.agentId, ds);
+  }
+  const kq = new Map<string, ChuoiSach>();
+  for (const [id, ds] of theoAgent) kq.set(id, chuoiSach(ds));
+  return kq;
 }
 
 export async function listTechAgentRuns(params: ListParams) {

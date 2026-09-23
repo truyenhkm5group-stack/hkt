@@ -5569,6 +5569,19 @@ export const techAgentRuns = pgTable(
     filesChanged: jsonb("files_changed").$type<string[]>().notNull().default([]),
     error: text("error").notNull().default(""),
     metadata: jsonb("metadata"),
+    /*
+      PHÁN QUYẾT CỦA NGƯỜI REVIEW — cơ sở của chuỗi "lượt chạy sạch" (lib/constants/agent-clean-streak.ts).
+
+      `NULL` = CHƯA REVIEW, không phải "sạch" và không phải "có lỗi" (AGENTS.md mục 42). Bốn cổng
+      xanh KHÔNG đồng nghĩa với sạch: cổng bắt được thứ hỏng, không bắt được thứ sai — nên chỉ một
+      người đã đọc mới ghi được cột này.
+
+      Quy kết bằng KHOÁ tài khoản (mục 34). Không backfill (mục 8.8): không ai biết lượt cũ nào sạch.
+    */
+    reviewVerdict: text("review_verdict"),
+    reviewNote: text("review_note").notNull().default(""),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: ts("reviewed_at"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -5578,6 +5591,10 @@ export const techAgentRuns = pgTable(
     /* Chép hai lần KHÔNG đẻ hai dòng — bảo đảm ở CSDL, xem chú thích của `external_ref`. */
     uniqueIndex("tech_agent_runs_external_ref_uq").on(t.externalRef),
     check("tech_agent_runs_status_check", sql`${t.status} IN ('RUNNING','SUCCEEDED','FAILED','CANCELLED','BLOCKED')`),
+    /* Danh sách ĐÓNG (mục 30): chuỗi lạ buộc mã phải đoán giữa "sạch" và "có lỗi". */
+    check("tech_agent_runs_review_verdict_check", sql`${t.reviewVerdict} IS NULL OR ${t.reviewVerdict} IN ('SACH','CO_LOI')`),
+    /* Có phán quyết thì phải biết AI và KHI NÀO. Một phán quyết không chủ là một phán quyết không ai chịu. */
+    check("tech_agent_runs_review_attrib_check", sql`${t.reviewVerdict} IS NULL OR ${t.reviewedAt} IS NOT NULL`),
     check("tech_agent_runs_typecheck_check", sql`${t.typecheckResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
     check("tech_agent_runs_lint_check", sql`${t.lintResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
     check("tech_agent_runs_test_check", sql`${t.testResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),

@@ -4,6 +4,7 @@ import path from "node:path";
 import { AiAgentExecutor } from "@/lib/agents/executor";
 import { AGENT_LOOP_TIMEOUT_MS, TIER_MAC_DINH, tierForRole } from "@/lib/constants/agent-model";
 import { thoiGianThucThi, trungVi } from "@/lib/constants/perf-explain";
+import { chuoiSach, danhDauLuotSua, NGUONG_MO_QA, type LuotChoChuoi } from "@/lib/constants/agent-clean-streak";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
 import { TIMEOUT_BY_TIER, estimateCostUsd, giaCuaModel, khoaGiaKhop } from "@/lib/ai/provider";
 import type { AiProvider } from "@/lib/ai/provider";
@@ -301,5 +302,84 @@ export function testPhepDoJit() {
   assert.ok(probe.includes('c.query("rollback")'), "mỗi lượt phải rollback để `set local` không rò sang lượt sau");
 
   console.log("✓ Phép đo JIT bật / JIT tắt: trung vị đúng cả chẵn lẫn lẻ, không sắp mảng gốc · thiếu thời gian ⇒ null, không 0 · probe đo CẢ HAI điều kiện XEN KẼ, bằng đúng câu chayKhongJit phát ra, mỗi lượt rollback");
+}
+
+/* ═════════════ CHUỖI LƯỢT CHẠY SẠCH — MỖI LUẬT ĐẾM LÀ MỘT QUYẾT ĐỊNH ═════════════ */
+
+export function testChuoiSach() {
+  /* Mốc dựng TƯƠNG ĐỐI, không ghim ngày tuyệt đối (AGENTS.md mục 50). */
+  const goc = Date.now();
+  let n = 0;
+  const luot = (status: string, reviewVerdict: LuotChoChuoi["reviewVerdict"], phutTruoc: number, taskId = `t${++n}`, branch = `ai/x/${n}`): LuotChoChuoi => ({
+    id: `r${n}-${phutTruoc}`,
+    taskId,
+    branch,
+    status,
+    startedAt: new Date(goc - phutTruoc * 60_000),
+    reviewVerdict,
+  });
+
+  assert.deepEqual(chuoiSach([]), { chuoi: 0, choReview: 0, dungVi: "HET_LICH_SU", datNguong: false }, "không lịch sử ⇒ 0, và nói rõ là hết lịch sử");
+
+  const namSach = [1, 2, 3, 4, 5].map((i) => luot("SUCCEEDED", "SACH", i * 10));
+  assert.equal(chuoiSach(namSach).chuoi, NGUONG_MO_QA);
+  assert.equal(chuoiSach(namSach).datNguong, true, "đủ ngưỡng thì phải nói là đủ — từ CÙNG một hằng số màn hình đọc");
+
+  /*
+    CHƯA REVIEW KHÔNG PHẢI SẠCH, CŨNG KHÔNG PHẢI 0.
+    Lượt mới nhất chưa ai đọc: đếm RIÊNG, chuỗi tính từ dưới nó. In chuỗi thành 0 chỉ vì lượt mới
+    nhất chưa review là biến CHƯA BIẾT thành một con số (mục 42).
+  */
+  const choDauHang = chuoiSach([luot("SUCCEEDED", null, 1), luot("SUCCEEDED", "SACH", 10), luot("SUCCEEDED", "SACH", 20)]);
+  assert.equal(choDauHang.choReview, 1, "lượt mới nhất chưa review ⇒ đếm vào 'chờ review'");
+  assert.equal(choDauHang.chuoi, 2, "và chuỗi vẫn tính từ các lượt ĐÃ review bên dưới");
+
+  /* Nhưng một lượt chưa review ở GIỮA thì cắt: không ai chứng minh được đoạn liên tiếp ấy. */
+  const lungChung = chuoiSach([luot("SUCCEEDED", "SACH", 1), luot("SUCCEEDED", null, 10), luot("SUCCEEDED", "SACH", 20)]);
+  assert.equal(lungChung.chuoi, 1);
+  assert.equal(lungChung.dungVi, "CHUA_REVIEW_O_GIUA");
+
+  const coLoi = chuoiSach([luot("SUCCEEDED", "SACH", 1), luot("SUCCEEDED", "CO_LOI", 10), luot("SUCCEEDED", "SACH", 20)]);
+  assert.equal(coLoi.chuoi, 1);
+  assert.equal(coLoi.dungVi, "CO_LOI", "một lượt có lỗi cắt chuỗi");
+
+  const hong = chuoiSach([luot("SUCCEEDED", "SACH", 1), luot("FAILED", null, 10), luot("SUCCEEDED", "SACH", 20)]);
+  assert.equal(hong.chuoi, 1);
+  assert.equal(hong.dungVi, "HONG", "một lượt hỏng cắt chuỗi");
+
+  /*
+    KHÔNG PHẠT LỐI RA TRUNG THỰC. BLOCKED = agent khai không làm được (`khong_lam_duoc`). Nếu nó
+    cắt chuỗi thì hệ thống thưởng cho việc CỐ làm thay vì nói thật — đúng điều lượt chạy TECH-5 #39
+    đã làm khi bịa số. CANCELLED là bị cắt từ bên ngoài; RUNNING chưa xong.
+  */
+  const boQua = chuoiSach([
+    luot("SUCCEEDED", "SACH", 1),
+    luot("BLOCKED", null, 5),
+    luot("CANCELLED", null, 7),
+    luot("RUNNING", null, 8),
+    luot("SUCCEEDED", "SACH", 10),
+  ]);
+  assert.equal(boQua.chuoi, 2, "BLOCKED / CANCELLED / RUNNING không cộng, cũng KHÔNG cắt chuỗi");
+
+  /*
+    LƯỢT SỬA KHÔNG TÍNH. Cùng việc, cùng nhánh, đã có lượt trước ⇒ đó là làm theo chỉ dẫn review,
+    không phải giao được việc sạch. Tính nó thì một việc có lỗi, sửa ba lần, ra ba lượt "sạch".
+  */
+  const dau = luot("SUCCEEDED", "CO_LOI", 30, "viec-A", "ai/x/A");
+  const sua1 = luot("SUCCEEDED", "SACH", 20, "viec-A", "ai/x/A");
+  const sua2 = luot("SUCCEEDED", "SACH", 10, "viec-A", "ai/x/A");
+  const thoiPhong = chuoiSach([sua2, sua1, dau]);
+  assert.equal(thoiPhong.chuoi, 0, "hai lượt sửa 'sạch' KHÔNG được thổi chuỗi lên từ một việc có lỗi");
+  assert.equal(thoiPhong.dungVi, "CO_LOI", "chuỗi dừng ở chính lượt đầu có lỗi");
+
+  /* Lượt sửa suy theo MỐC THỜI GIAN, không theo thứ tự mảng. */
+  const sua = danhDauLuotSua([sua2, dau, sua1]);
+  assert.ok(!sua.has(dau.id), "lượt SỚM NHẤT trên nhánh là lượt đầu, dù đứng giữa mảng");
+  assert.ok(sua.has(sua1.id) && sua.has(sua2.id));
+  /* Thiếu căn cứ thì không kết luận: nhánh hay việc rỗng KHÔNG bị coi là lượt sửa. */
+  const khongNhanh = [luot("SUCCEEDED", "SACH", 2, "viec-B", ""), luot("SUCCEEDED", "SACH", 1, "viec-B", "")];
+  assert.equal(danhDauLuotSua(khongNhanh).size, 0, "nhánh rỗng ⇒ không đủ căn cứ để gọi là lượt sửa");
+
+  console.log(`✓ Chuỗi lượt chạy sạch: ngưỡng ${NGUONG_MO_QA} từ một hằng số · chưa review đếm riêng, không in thành 0 · chưa review ở giữa cắt chuỗi · có lỗi / hỏng cắt · BLOCKED/CANCELLED không phạt · lượt sửa không thổi phồng được chuỗi · lượt sửa suy theo mốc thời gian`);
 }
 

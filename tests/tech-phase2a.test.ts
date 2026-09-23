@@ -21,7 +21,7 @@ import { WORK_SOURCE_SPEC, authorityOf } from "@/lib/constants/work-sources";
 import { __setGithubFetchForTests, githubConfig } from "@/lib/integrations/github/client";
 import { syncGithubDeployments, verifyDeployments } from "@/lib/integrations/github/deployments";
 import { adaptTechTasks } from "@/lib/queries/work-adapters";
-import { createTechTask, decideTechApproval, overrideTechTaskRisk, recordTechDeployment, seedTechAgents, setTechAgentEnabled, setTechTaskStatus, startTechAgentRun, updateTechDeployment, type TechActor } from "@/lib/tech/service";
+import { createTechTask, decideTechApproval, overrideTechTaskRisk, recordTechDeployment, seedTechAgents, setTechAgentEnabled, setTechRunVerdict, setTechTaskStatus, startTechAgentRun, type TechActor, updateTechDeployment } from "@/lib/tech/service";
 
 import { runAgentOnTask } from "@/lib/agents/runner";
 import { classifyProviderError } from "@/scripts/agent-runner-check";
@@ -789,6 +789,41 @@ export async function testAgentRunner() {
   for (const truong of ["ly_do", "can_gi"]) {
     assert.ok(batBuoc.includes(truong), `${truong} phải BẮT BUỘC — một lời từ chối không kèm lý do và lối ra thì người đọc không làm gì được với nó`);
   }
+
+  // ───────── 4.6d PHÁN QUYẾT REVIEW: CHỈ NGƯỜI, CHỈ LƯỢT ĐÃ GIAO, "CÓ LỖI" PHẢI NÓI LỖI GÌ ─────────
+  /*
+    Cơ sở của chuỗi "lượt chạy sạch". Mỗi chặn dưới đây là một cách tự khen hoặc một phán quyết
+    không ai học được gì — và cả hai đều làm con số trên /tech/agents thành trang trí.
+  */
+  const tuCham = await setTechRunVerdict({ runId: ok.runId!, verdict: "SACH" }, may);
+  assert.ok("error" in tuCham, "agent KHÔNG được tự chấm lượt chạy của mình là sạch");
+  const la = await setTechRunVerdict({ runId: ok.runId!, verdict: "TOT_LAM" }, nguoi);
+  assert.ok("error" in la, "phán quyết ngoài danh sách đóng phải bị từ chối");
+  const loiTrong = await setTechRunVerdict({ runId: ok.runId!, verdict: "CO_LOI", note: "sai" }, nguoi);
+  assert.ok("error" in loiTrong, "'có lỗi' mà không nói lỗi gì thì không ai học được gì — phải bị từ chối");
+  const chamHong = await setTechRunVerdict({ runId: rDo.runId!, verdict: "SACH" }, nguoi);
+  assert.ok("error" in chamHong, "lượt HỎNG không chấm 'sạch' được — nó đã tự cắt chuỗi");
+  const chamChan = await setTechRunVerdict({ runId: rKhongLam.runId!, verdict: "SACH" }, nguoi);
+  assert.ok("error" in chamChan, "lượt BLOCKED là lời khai không làm được, không phải một lần giao hàng để chấm");
+
+  const dung = await setTechRunVerdict({ runId: ok.runId!, verdict: "SACH" }, nguoi);
+  assert.ok("ok" in dung, `người chấm lượt đã giao phải ghi được — ${"error" in dung ? dung.error : ""}`);
+  const daCham = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, ok.runId!) });
+  assert.equal(daCham?.reviewVerdict, "SACH");
+  assert.ok(daCham?.reviewedAt, "có phán quyết thì phải có MỐC ghi");
+
+  /*
+    RÀNG BUỘC Ở CSDL, không chỉ ở dịch vụ: một đường ghi thứ hai (script, migration, tay) cũng
+    không được để lại một phán quyết lạ hay một phán quyết không mốc.
+  */
+  await assert.rejects(
+    db.update(schema.techAgentRuns).set({ reviewVerdict: "TOT_LAM", reviewedAt: new Date() }).where(eq(schema.techAgentRuns.id, ok.runId!)),
+    "CSDL phải từ chối phán quyết ngoài danh sách đóng",
+  );
+  await assert.rejects(
+    db.update(schema.techAgentRuns).set({ reviewVerdict: "SACH", reviewedAt: null }).where(eq(schema.techAgentRuns.id, ok.runId!)),
+    "CSDL phải từ chối một phán quyết không có mốc ghi — phán quyết không chủ là phán quyết không ai chịu",
+  );
 
   // ───────── 4.7 AGENT KHÔNG GHI ĐƯỢC NGOÀI PHẠM VI ─────────
   const idNgoai = await taoViec("p2a-runner: thử ghi ngoài phạm vi");
