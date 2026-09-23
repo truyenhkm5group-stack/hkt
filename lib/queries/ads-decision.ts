@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { metricScope, successRate } from "@/lib/queries/metrics";
+import { metricScope, realizedShippingSql, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { spendPeriod } from "@/lib/queries/ads-roas";
@@ -445,13 +445,10 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension, rates: 
         cash: sql<number>`coalesce(sum(${facts.cash}) filter (where ${delivered}), 0)`,
         cogs: sql<number>`coalesce(sum(${facts.cogs}) filter (where ${delivered}), 0)`,
         /**
-         * CƯỚC THEO ĐÚNG BẬC THANG SỰ THẬT TÀI CHÍNH (financial-truth.ts, docs/metrics-contract.md):
-         * cước của đơn ĐÃ GIAO và đơn HOÀN, cộng phí hoàn của đơn hoàn. Đơn hoàn vẫn tốn cước — đó
-         * chính là phần làm biên lợi nhuận tụt, bỏ ra sẽ cho điểm hoà vốn đẹp hơn sự thật. Nhưng
-         * đơn HUỶ / chưa gửi / đang đi thì CHƯA có cước thật: `orders.partner_fee` ở đó chỉ là
-         * cước Pancake ước tính lúc lên đơn, cộng vào là gánh tiền chưa hề chi.
+         * CƯỚC ĐÃ THỰC SỰ PHÁT SINH — định nghĩa và bằng chứng ở `realizedShippingSql`.
+         * Trước 23/09/2026 công thức này được gõ lại ở ba nơi và MỘT trong ba nơi ấy sai.
          */
-        shipping: sql<number>`coalesce(sum(${facts.shipping}) filter (where ${delivered} or ${returned}), 0) + coalesce(sum(${facts.returnFee}) filter (where ${returned}), 0)`,
+        shipping: realizedShippingSql({ shipping: facts.shipping, returnFee: facts.returnFee, outcome: facts.outcome }),
         /*
           ─── PHẦN ĐANG TREO, ĐÃ CÂN THEO TỶ LỆ ───
 
@@ -548,8 +545,8 @@ async function aggregateByProduct(period: Period, rates: ProductDeliveryRates): 
         deliveredRevenue: sql<number>`coalesce(sum(${facts.lineRevenue}) filter (where ${delivered}), 0)`,
         cash: sql<number>`coalesce(sum(${facts.cash} * coalesce(${facts.shipShare}, 0)) filter (where ${delivered}), 0)`,
         cogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${delivered}), 0)`,
-        // Cùng bậc thang cước như cấp chiến dịch: chỉ đơn đã giao + đơn hoàn, cộng phí hoàn của đơn hoàn.
-        shipping: sql<number>`coalesce(sum((${facts.shipping} + case when ${returned} then ${facts.returnFee} else 0 end) * coalesce(${facts.shipShare}, 0)) filter (where ${delivered} or ${returned}), 0)`,
+        // CÙNG một hàm với cấp chiến dịch, chỉ thêm CĂN CỨ PHÂN BỔ: tỷ trọng doanh thu dòng trong đơn.
+        shipping: realizedShippingSql({ shipping: facts.shipping, returnFee: facts.returnFee, outcome: facts.outcome, share: facts.shipShare }),
         // Phần đang treo đã cân theo tỷ lệ — xem chú thích ở `aggregateByOrder` về việc cước không có mặt.
         openProjectedRevenue: sql<number>`coalesce(sum(${facts.lineRevenue} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
         openProjectedCogs: sql<number>`coalesce(sum(${facts.lineCogs} * ${facts.deliveryRate}) filter (where ${open}), 0)`,

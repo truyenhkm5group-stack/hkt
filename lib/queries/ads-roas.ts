@@ -1,7 +1,7 @@
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { metricScope, successRate } from "@/lib/queries/metrics";
+import { metricScope, realizedShippingSql, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
@@ -140,6 +140,7 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
       revenue: sql<number>`${o.totalPriceAfterDiscount}`.as("f_revenue"),
       cogs: sql<number>`${orderCogsFast()}`.as("f_cogs"),
       shipping: sql<number>`coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)`.as("f_shipping"),
+      returnFee: sql<number>`coalesce(${o.returnFee}, 0)`.as("f_return_fee"),
       cash: sql<number>`coalesce(nullif(${s.codCollected}, 0), 0) + coalesce(${o.prepaid}, 0) + coalesce(${o.transferMoney}, 0)`.as("f_cash"),
       outcome: ORDER_OUTCOME_FAST.as("f_outcome"),
     })
@@ -173,7 +174,19 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
       deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${fDelivered}), 0)`,
       returnedOrders: sql<number>`count(*) filter (where ${fReturned})`,
       deliveredCogs: sql<number>`coalesce(sum(${facts.cogs}) filter (where ${fDelivered}), 0)`,
-      shipping: sql<number>`coalesce(sum(${facts.shipping}), 0)`,
+      /*
+        ─── CƯỚC CỦA MỌI ĐƠN LÀ SAI, VÀ NÓ ĐÃ SAI TRÊN CÙNG MỘT MÀN HÌNH VỚI CÂU ĐÚNG ───
+
+        Bản trước cộng `sum(shipping)` KHÔNG lọc — tức gánh cả cước của đơn huỷ, đơn chưa gửi và
+        đơn đang đi, nơi `orders.partner_fee` mới chỉ là ước tính của Pancake. Đo production
+        23/09/2026 trên 30 ngày: dư **5.976.000 ₫** (12.974.112 so với 6.998.112 đúng, tức +85%)
+        trên 45/139 dòng. Khối này nằm NGAY DƯỚI bảng quyết định ở `/ads`, nên cùng một chiến dịch
+        hiện hai con số lợi nhuận góp cách nhau một cú cuộn chuột.
+
+        Và nó còn BỎ QUÊN phí hoàn. Hôm nay `orders.return_fee` toàn 0 nên vế ấy chưa cắn, nhưng
+        ngày nó được điền thì thiếu vế này làm mọi đơn hoàn trông rẻ hơn thật.
+      */
+      shipping: realizedShippingSql({ shipping: facts.shipping, returnFee: facts.returnFee, outcome: facts.outcome }),
       cash: sql<number>`coalesce(sum(${facts.cash}) filter (where ${fDelivered}), 0)`,
     })
     .from(facts)
