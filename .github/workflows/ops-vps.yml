@@ -92,6 +92,7 @@ on:
           - ai-staging-job       # chạy MỘT job đồng bộ trong BẢN CHẠY THỬ (arg: tên job, vd "vcb-rate")
           - ai-staging-reclassify # phân loại lại người gửi cho tin ĐÃ NẠP (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - ai-staging-readiness  # CHỈ ĐỌC: đi từng cửa giữa "khách nhắn" và "bản nháp trong hàng đợi", cửa nào đóng thì in câu lệnh mở nó
+          - ai-staging-drafts     # CHỈ ĐỌC: in ra CẶP tin khách → câu máy định đáp (arg: "--max=12") để chấm chất lượng bằng mắt
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
@@ -1278,6 +1279,13 @@ jobs:
                 cd /opt/vnx-ai-staging
                 fetch_staging_script ai-reclassify-senders.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-reclassify-senders.ts'
                 docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-reclassify-senders.ts ${ARG:-} ;;
+
+              ai-staging-drafts)
+                # CHỈ ĐỌC. Không soạn thêm câu nào, không gọi mô hình — muốn có câu MỚI thì chạy
+                # ai-staging-shadow trước. Tách hai việc để đọc lại kết quả không tốn thêm đồng nào.
+                cd /opt/vnx-ai-staging
+                fetch_staging_script ai-staging-drafts.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-drafts.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-staging-drafts.ts ${ARG:-} ;;
 
               ai-staging-readiness)
                 # CHỈ ĐỌC. Không tạo việc, không gọi mô hình, không gửi tin, không đổi cấu hình —
