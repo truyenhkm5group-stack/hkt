@@ -632,7 +632,7 @@ async function stockByProduct(): Promise<Map<string, StockSnapshot>> {
 const TON_CHUA_BIET: StockSnapshot = { qty: 0, value: 0, known: false, inTransitQty: 0, awaitingReturnQty: 0 };
 
 /** Lợi nhuận danh nghĩa theo mã hàng: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − quảng cáo */
-async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, value: OrderValueFilter, includeAds: boolean, withEstimatedCost: boolean): Promise<NominalReport> {
+async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, value: OrderValueFilter, includeAds: boolean, withEstimatedCost: boolean, withStock: boolean): Promise<NominalReport> {
   const locGiaTri = orderValueWhereSql(value);
   const dangLoc = orderValueActive(value);
   const db = await getDb();
@@ -653,7 +653,9 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
   const [history, purchases, stocks] = await Promise.all([
     productReturnHistory(assumptions.returnRateWindowDays),
     purchaseByProduct(period),
-    stockByProduct(),
+    // Không đọc tồn ⇒ bản đồ RỖNG ⇒ mọi mã rơi về `TON_CHUA_BIET` (`stockKnown = false`, in "—"),
+    // không bao giờ thành 0 cái. Xem tham số `withStock` ở `getNominalProfitReport`.
+    withStock ? stockByProduct() : Promise.resolve(new Map<string, StockSnapshot>()),
   ]);
   // Khoá theo `product_id` — ĐÚNG khoá `coalesce(pv.product_id, order_items.product_id)` của bảng này,
   // không theo mã hàng (`custom_id` có thể trống hoặc trùng).
@@ -1312,10 +1314,22 @@ export async function getNominalProfitReport(
    * không tham số nên không bao giờ nhận một giá vốn đoán.
    */
   withEstimatedCost = false,
+  /**
+   * ĐỌC TỒN KHO HAY KHÔNG. Mặc định CÓ — mọi đường gọi cũ giữ nguyên.
+   *
+   * Tồn kho ở đây chỉ nuôi các ô GHI CHÚ (giá trị tồn, rủi ro CÒN TREO, "nhập − giao TC"); không
+   * một đồng nào của nó đi vào lợi nhuận — rủi ro tồn kho trừ vào kỳ đi theo GIÁ VỐN HÀNG BÁN RA
+   * (mục 14). Nhưng `stockByProduct` quét toàn bộ lịch sử dòng hàng và là câu ĐẮT NHẤT của báo
+   * cáo: `perf-probe` production 23/09/2026 đo **5,1–6,5 giây** trên tổng 8,1s nguội của kỳ 30 ngày.
+   *
+   * Bảng bóc tách MKTer theo ngày (`lib/queries/marketer-daily-nominal.ts`) chỉ dùng các khoản
+   * tiền, nên nó tắt cờ này. Tắt thì tồn là CHƯA BIẾT (`stockKnown = false`), không phải 0.
+   */
+  withStock = true,
 ): Promise<NominalReport> {
-  // Bộ lọc giá trị đơn, công tắc quảng cáo VÀ giá dự tính đều đổi kết quả ⇒ đều phải vào khoá cache (§2).
-  return memo(`getNominalProfitReport:${basis}:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}:${withEstimatedCost ? "gvdt" : "thuc"}`, 120000, () =>
-    getNominalProfitReportUncached(period, basis, value, includeAds, withEstimatedCost),
+  // Bộ lọc giá trị đơn, công tắc quảng cáo, giá dự tính VÀ việc đọc tồn đều đổi kết quả ⇒ đều phải vào khoá cache (§2).
+  return memo(`getNominalProfitReport:${basis}:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}:${withEstimatedCost ? "gvdt" : "thuc"}:${withStock ? "ton" : "khongton"}`, 120000, () =>
+    getNominalProfitReportUncached(period, basis, value, includeAds, withEstimatedCost, withStock),
   );
 }
 

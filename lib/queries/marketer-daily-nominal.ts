@@ -13,6 +13,7 @@ import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
 import { listEmployees, loadPayrollConfig } from "@/lib/queries/payroll";
 import { getNominalProfitReport, type NominalRow } from "@/lib/queries/profit-nominal";
+import { NO_ORDER_VALUE_FILTER } from "@/lib/constants/order-value";
 import { getProbabilityLookup, orderDeliveryShare } from "@/lib/queries/projected-delivery";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
@@ -122,6 +123,12 @@ export type MarketerDailyNominal = {
   /** Doanh số theo CĂN CỨ quy kết — để thấy bao nhiêu phần đi bằng ảnh chụp, bao nhiêu phải đoán theo QC. */
   attribution: Record<"snapshot" | "page" | "ad" | "fallback" | "none", number>;
   assumptions: { shipFeeDelivered: number; shipFeeReturned: number; otherCostPercentOfAds: number; taxPercent: number };
+  /**
+   * Số sản phẩm bán ra CHƯA CÓ GIÁ VỐN (không phiếu nhập, không giá Pancake) — ở bảng này chúng
+   * trừ 0 ₫ giá vốn, còn tab Lợi nhuận danh nghĩa lấp bằng giá dự tính. Đây là chênh lệch DUY
+   * NHẤT được phép giữa hai nơi, và màn hình phải nói ra.
+   */
+  unknownCostQty: number;
   warnings: string[];
 };
 
@@ -322,7 +329,16 @@ type Slot = {
 
 async function getMarketerDailyNominalUncached(period: Period): Promise<MarketerDailyNominal> {
   const [nominal, lines, spend, lookup, employees, config] = await Promise.all([
-    getNominalProfitReport(period, "ORDERED"),
+    /*
+      HAI CỜ, CẢ HAI TẮT, CÓ LÝ DO:
+        · giá vốn DỰ TÍNH — TẮT. Luật 2 của `lib/constants/estimated-cost.ts` (và
+          `tests/estimated-cost.test.ts` khoá ở mức mã nguồn): chỉ tab Lợi nhuận danh nghĩa được
+          thấy một giá vốn đoán, QUẢNG CÁO thì không. Hệ quả nói ra ở `unknownCostQty` + cảnh
+          báo: mã chưa có giá nhập đang trừ 0 ₫ giá vốn ở đây, nên lợi nhuận CAO hơn tab ấy.
+        · TỒN KHO — TẮT. Không đồng nào của nó vào lợi nhuận, và nó là 5,1–6,5s trên 8,1s nguội
+          của báo cáo (perf-probe production 23/09/2026). Xem `withStock`.
+    */
+    getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true, false, false),
     readLines(period),
     readSpend(period),
     getProbabilityLookup(),
@@ -551,6 +567,11 @@ async function getMarketerDailyNominalUncached(period: Period): Promise<Marketer
   if (lateDays.length) {
     warnings.push(`Nguồn chi quảng cáo mới đồng bộ tới ngày ${spend.observedThrough ?? "—"}. ${lateDays.length} ngày sau đó có đơn nhưng CHƯA BIẾT chi bao nhiêu, nên lợi nhuận của những ngày ấy để trống thay vì chốt một con số; hàng tổng chỉ cộng lợi nhuận của những ngày đã có số chi.`);
   }
+  if (nominal.totals.cogsUnknownQty > 0) {
+    warnings.push(
+      `${nominal.totals.cogsUnknownQty.toLocaleString("vi-VN")} sản phẩm bán ra CHƯA CÓ GIÁ VỐN (không phiếu nhập, không giá Pancake) nên đang trừ 0 ₫ giá vốn ở bảng này — lợi nhuận của những mã ấy đang CAO hơn thực tế. Tab Lợi nhuận danh nghĩa lấp chỗ này bằng giá vốn dự tính; khu quảng cáo cố ý không dùng giá đoán. Lập phiếu nhập có đơn giá thì cả hai nơi cùng về số thật.`,
+    );
+  }
   if (nominal.totals.projectionError) warnings.push(`Mô hình dự báo giao thành công lỗi (${nominal.totals.projectionError}); Báo cáo lợi nhuận đang tính mọi mã theo tỷ lệ, và bảng này chia đúng theo con số ấy.`);
 
   return {
@@ -566,6 +587,7 @@ async function getMarketerDailyNominalUncached(period: Period): Promise<Marketer
     },
     attribution,
     assumptions: { shipFeeDelivered: a.shipFeeDeliveredUsed, shipFeeReturned: a.shipFeeReturnedUsed, otherCostPercentOfAds: Number(a.otherCostPercentOfAds ?? 0), taxPercent: Number(a.taxPercent ?? 0) },
+    unknownCostQty: nominal.totals.cogsUnknownQty,
     warnings,
   };
 }
