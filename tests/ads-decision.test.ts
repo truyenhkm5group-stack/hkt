@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis, spendClassOf } from "@/lib/constants/ads-decision";
+import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis, isConclusive, rowsToRender, spendClassOf } from "@/lib/constants/ads-decision";
 import { DECISION_METRIC_HINT, buildDecisionRow, decideAction, getAdsDecision, inheritVerdict } from "@/lib/queries/ads-decision";
 import type { Period } from "@/lib/search-params";
 
@@ -391,6 +391,54 @@ export async function testAdsDecision(db: Db) {
   assert.equal(testKhongMuon.inherited, null, "chi phí test không mượn kết luận của mã, kể cả khi nối được về một mã");
   // Chưa phân loại thì VẪN mượn được nếu nối được — nó chỉ thiếu NHÃN, không thiếu bằng chứng.
   assert.equal(inheritVerdict("INSUFFICIENT_DATA", "prod-1", maLai, "UNCLASSIFIED").bucket, "INHERITED");
+
+  /*
+    ═══════════ BẢNG VẼ BAO NHIÊU DÒNG — KHÔNG KHUYẾN NGHỊ NÀO ĐƯỢC RƠI KHỎI MÀN HÌNH ═══════════
+
+    Đo 23/09/2026: `/ads` nặng 6.768 kB vì bảng VẼ đủ 742 dòng, hơn 600 dòng trong đó là "chưa đủ
+    dữ liệu". Nay máy chủ chỉ gửi phần cần đọc — nhưng cắt một khuyến nghị CẮT khỏi màn hình là đúng
+    thứ bảng này sinh ra để chặn, nên dòng có kết luận KHÔNG BAO GIỜ bị cắt.
+  */
+  const dong = (action: AdsAction, k: number) => ({ action, key: `r${k}` });
+  const hon = [
+    ...Array.from({ length: 5 }, (_, k) => dong("CUT", k)),
+    ...Array.from({ length: 200 }, (_, k) => dong("INSUFFICIENT_DATA", 100 + k)),
+  ];
+  const chon = rowsToRender(hon, false, 80);
+  assert.equal(chon.shown.length, 80, "trần hiển thị 80 dòng");
+  assert.equal(chon.shown.filter((r) => r.action === "CUT").length, 5, "mọi dòng có kết luận đều hiện");
+  assert.equal(chon.shown.length + chon.hidden.length, hon.length, "không dòng nào biến mất — hoặc hiện, hoặc được đếm là đang ẩn");
+  assert.ok(chon.hidden.every((r) => r.action === "INSUFFICIENT_DATA"), "chỉ dòng CHƯA có kết luận mới bị ẩn");
+
+  // Thứ tự đầu vào được giữ nguyên — bảng đã xếp theo việc cần làm và số tiền.
+  assert.deepEqual(
+    chon.shown.map((r) => r.key).slice(0, 7),
+    ["r0", "r1", "r2", "r3", "r4", "r100", "r101"],
+    "giữ nguyên thứ tự bảng vốn có",
+  );
+
+  /*
+    NGÀY CÓ NHIỀU KHUYẾN NGHỊ HƠN TRẦN: tất cả vẫn phải hiện. Trần là con số hiển thị, không phải
+    một giới hạn trên số việc cần làm.
+  */
+  const nhieuViec = Array.from({ length: 120 }, (_, k) => dong(k % 2 ? "SCALE" : "CUT", k));
+  const chonNhieu = rowsToRender([...nhieuViec, ...Array.from({ length: 50 }, (_, k) => dong("INSUFFICIENT_DATA", 500 + k))], false, 80);
+  assert.equal(chonNhieu.shown.filter((r) => r.action !== "INSUFFICIENT_DATA").length, 120, "120 khuyến nghị thì 120 dòng hiện, dù vượt trần 80");
+  assert.equal(chonNhieu.shown.length, 120, "đã chạm trần bằng khuyến nghị thì không lấp thêm dòng chưa đủ dữ liệu");
+
+  /*
+    KHÔNG DỰA VÀO PHÉP SẮP XẾP. Nếu một ngày ai đó đổi thứ tự bảng và khuyến nghị nằm cuối, nó vẫn
+    phải hiện — hàm giữ mọi dòng có kết luận dù chúng nằm ở đâu.
+  */
+  const cuoiBang = [...Array.from({ length: 200 }, (_, k) => dong("INSUFFICIENT_DATA", k)), dong("CUT", 999)];
+  assert.ok(rowsToRender(cuoiBang, false, 80).shown.some((r) => r.key === "r999"), "khuyến nghị nằm cuối bảng vẫn phải hiện");
+
+  // `all` = vẽ hết.
+  assert.equal(rowsToRender(hon, true, 80).shown.length, hon.length);
+  assert.equal(rowsToRender(hon, true, 80).hidden.length, 0);
+  // NO_SPEND_DATA cũng là "chưa có kết luận" — không được giữ chỗ như một khuyến nghị.
+  assert.equal(isConclusive("NO_SPEND_DATA"), false);
+  assert.equal(isConclusive("WATCH"), true, "THEO DÕI là một kết luận thật");
 
   // CHƯA BIẾT LÀ NULL, KHÔNG PHẢI 0.
   const noSpend = buildDecisionRow(

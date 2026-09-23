@@ -266,7 +266,20 @@ function Stable({ s }: { s: Stability }) {
   );
 }
 
-export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDecisionRow[]; dimension: AdsDimension; stability?: Record<string, Stability> }) {
+export function AdsDecisionTable({
+  rows,
+  dimension,
+  stability,
+  hiddenCount = 0,
+  showAllHref,
+}: {
+  rows: AdsDecisionRow[];
+  dimension: AdsDimension;
+  stability?: Record<string, Stability>;
+  /** Số dòng máy chủ KHÔNG gửi xuống. Ô tìm kiếm chỉ tìm trong phần đã gửi, nên phải nói ra điều đó. */
+  hiddenCount?: number;
+  showAllHref?: string;
+}) {
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
@@ -283,7 +296,7 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={`Tìm ${ADS_DIMENSION_LABEL[dimension].toLowerCase()}…`}
+          placeholder={hiddenCount > 0 ? `Tìm trong ${rows.length} dòng đang hiện…` : `Tìm ${ADS_DIMENSION_LABEL[dimension].toLowerCase()}…`}
           className="h-8 w-full max-w-xs rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         />
       </div>
@@ -562,7 +575,23 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
             {!filtered.length ? (
               <TableRow>
                 <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
-                  Không có dòng nào khớp.
+                  {/*
+                    Tìm không thấy trong phần ĐANG HIỆN khác hẳn "không tồn tại": dòng cần tìm có thể
+                    nằm trong phần máy chủ chưa gửi xuống. Nói "không có dòng nào khớp" ở đó là một
+                    câu sai trông rất chắc chắn.
+                  */}
+                  {hiddenCount > 0 ? (
+                    <>
+                      Không có dòng nào khớp trong {rows.length} dòng đang hiện.{" "}
+                      {showAllHref ? (
+                        <a className="font-medium text-foreground underline underline-offset-2" href={showAllHref}>
+                          Hiện tất cả để tìm trong {rows.length + hiddenCount} dòng
+                        </a>
+                      ) : null}
+                    </>
+                  ) : (
+                    "Không có dòng nào khớp."
+                  )}
                 </TableCell>
               </TableRow>
             ) : null}
