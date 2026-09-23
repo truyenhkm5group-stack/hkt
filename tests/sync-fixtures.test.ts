@@ -75,7 +75,7 @@ import { testCauNoiVanGiuHangRao, testChuPrKhongLoNoiDungViec, testDieuKienMoPr,
 import { testMaViecLaMaProduction, testVaiAgentTheoViec, testNhacFinishDungMotLan, testPhamViDocTuSoVai } from "./agent-run-that.test";
 import { testBanKhaiGanLai, testGanLaiSourceGuards } from "./agent-run-reattach.test";
 import { testScriptDayChuyenPhaiThoat } from "./script-phai-thoat.test";
-import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo } from "./agent-chi-phi.test";
+import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo, testTranChoTachKhoiBac } from "./agent-chi-phi.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { testPhanhTienAi, testPhanhTienAiGuards } from "./ai-budget.test";
 import { testTienLuotChay, testTienLuotChayGuards } from "./agent-run-cost.test";
@@ -2054,6 +2054,7 @@ async function main() {
   testPhanhTienAiGuards();
   testNhanModelNoiThat();
   testBacModelTheoVai();
+  testTranChoTachKhoiBac();
   testTraGiaTheoTienTo();
   testDemHoiThoai();
   testKhongNangBacAmTham();

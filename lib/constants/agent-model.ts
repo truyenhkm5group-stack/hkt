@@ -43,3 +43,29 @@ export function tierForRole(role: string | null | undefined): AiTier {
   if (!role) return TIER_MAC_DINH;
   return TIER_BY_ROLE[role as TechAgentRole] ?? TIER_MAC_DINH;
 }
+
+/**
+ * ═══════════ TRẦN CHỜ MỘT LƯỢT GỌI TRONG VÒNG LẶP AGENT ═══════════
+ *
+ * Tách khỏi `TIMEOUT_BY_TIER` có chủ đích. Bậc model trả lời "việc này đáng bao nhiêu tiền";
+ * hằng số này trả lời "chờ MỘT lượt gọi bao lâu thì bỏ". Buộc hai câu ấy vào một núm là thứ đã
+ * giết hai lượt chạy: chọn model rẻ (đúng) kéo theo trần chờ 60 giây (sai cho hình dạng này).
+ *
+ * ĐO THẬT (TECH-6, lượt chạy #41, 23/09/2026):
+ *
+ *     vòng 1–3  xong bình thường
+ *     vòng 4    đệm đọc 98.734 · đệm ghi 58.039  ⇒  Request timed out
+ *     kết quả   $0,0891 · 4 vòng · 0 tệp giao về
+ *
+ * Ngữ cảnh của một vòng lặp agent PHÌNH THEO SỐ TỆP ĐÃ ĐỌC, nên lượt gọi cuối luôn là lượt nặng
+ * nhất — đúng lượt mà trần 60 giây cắt. Đó là lý do lỗi TÁI LẬP ĐƯỢC chứ không ngẫu nhiên, và là
+ * lý do nó luôn xảy ra SAU khi đã tiêu tiền cho ba vòng trước.
+ *
+ * 5 phút, KHÔNG phải 10: `RETRIES_BY_TIER.routine = 2` nên SDK còn thử lại, và job Actions có
+ * trần 60 phút. Ba lượt × 5 phút vẫn nằm gọn trong `MAX_ROUNDS` mà không biến một lượt chạy hỏng
+ * thành một giờ chờ.
+ *
+ * KHÔNG nâng `TIMEOUT_BY_TIER.routine`: bậc ấy còn phục vụ phân loại và tóm tắt trong ERP, nơi
+ * chờ 5 phút cho một câu trả lời hai chữ là một màn hình treo trước mắt người dùng.
+ */
+export const AGENT_LOOP_TIMEOUT_MS = 300_000;

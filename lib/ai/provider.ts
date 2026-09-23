@@ -252,7 +252,8 @@ export class FakeProvider implements AiProvider {
   }
 }
 
-const cached = new Map<AiTier, AiProvider>();
+/* Khoá là `<bậc>:<trần chờ>` — xem `getAiProvider`: hai câu hỏi khác nhau, hai vế của khoá. */
+const cached = new Map<string, AiProvider>();
 let override: AiProvider | null | undefined;
 
 /** Provider cho một bậc việc — chọn theo `lib/ai/router.ts`. `null` = AI chưa cấu hình. */
@@ -307,17 +308,40 @@ export const TIMEOUT_BY_TIER: Record<AiTier, number> = {
   analysis: 600_000,
 };
 
-export function getAiProvider(tier: AiTier = "copilot"): AiProvider | null {
+/**
+ * ═══════════ BẬC CHỌN MODEL; TRẦN CHỜ LÀ MỘT QUYẾT ĐỊNH KHÁC ═══════════
+ *
+ * Bậc trả lời "việc này đáng dùng model nào" — một quyết định về TIỀN, và
+ * `lib/constants/agent-model.ts` đã cân nhắc nó kỹ. `TIMEOUT_BY_TIER` trả lời một câu HOÀN TOÀN
+ * KHÁC: "chờ MỘT lượt gọi bao lâu thì bỏ". Trước 23/09/2026 hai câu ấy đi chung một núm, nên
+ * chọn model rẻ kéo theo trần chờ 60 giây — và vòng lặp agent thừa hưởng nó.
+ *
+ * ĐO THẬT (việc TECH-6, lượt chạy #41): vòng 1–3 xong bình thường; tới vòng 4 ngữ cảnh đã là
+ * **98.734 token đệm đọc + 58.039 đệm ghi**, lượt gọi vượt 60 giây và chết bằng
+ * `Request timed out`. Lượt chạy tính $0,0891, bốn vòng, và giao về KHÔNG một tệp nào. Cùng dấu
+ * vân tay với lượt chạy lại của TECH-7 — thứ tôi từng gọi nhầm là "nhất thời".
+ *
+ * Trần chờ 60 giây được đặt cho việc mà bậc `routine` sinh ra để làm: phân loại một câu, tóm tắt
+ * một đoạn — vài nghìn token, trả lời trong vài giây. Một vòng lặp agent mang cả trăm nghìn token
+ * ngữ cảnh KHÔNG phải hình dạng đó. Đây không phải "nâng trần cho dễ thở": đây là thôi áp một
+ * ngưỡng được đo cho việc A lên việc B.
+ *
+ * `hanChoMs` NẰM TRONG KHOÁ NHỚ. Thiếu vế đó thì lượt gọi nào tới trước sẽ quyết định trần chờ
+ * cho mọi lượt sau trong cùng tiến trình — và bản vá này sẽ im lặng mất tác dụng ở đúng những
+ * lần có một lượt `routine` chạy trước.
+ */
+export function getAiProvider(tier: AiTier = "copilot", opts?: { hanChoMs?: number }): AiProvider | null {
   if (override !== undefined) return override;
-  const hit = cached.get(tier);
+  const hanCho = opts?.hanChoMs ?? TIMEOUT_BY_TIER[tier];
+  const khoa = `${tier}:${hanCho}`;
+  const hit = cached.get(khoa);
   if (hit) return hit;
   const name = resolveProviderName();
   if (!name) return null;
   const effort = (env.ai.effort as "low" | "medium" | "high") || EFFORT_BY_TIER[tier];
   const model = modelFor(name, tier);
-  const hanCho = TIMEOUT_BY_TIER[tier];
   const p: AiProvider = name === "openai" ? new OpenAiProvider(model, effort, undefined, hanCho) : new AnthropicProvider(model, effort, hanCho, RETRIES_BY_TIER[tier]);
-  cached.set(tier, p);
+  cached.set(khoa, p);
   return p;
 }
 /** Chỉ cho kiểm thử: ép một provider (hoặc `null` = tắt); `undefined` = bỏ ép. */
