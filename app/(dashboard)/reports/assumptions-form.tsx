@@ -7,7 +7,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { clearDeliveryRateOverride, setDeliveryRateOverride } from "@/lib/actions/delivery-rate-override";
 import { saveProfitAssumptions } from "@/lib/actions/report-settings";
+import { parseDeliveryRateOverride, OVERRIDE_MODE_LABEL } from "@/lib/constants/delivery-rate";
 import type { ProfitAssumptions } from "@/lib/constants/profit";
 
 type Props = {
@@ -35,6 +37,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
     defaultDeliveryRate: String(Math.round((100 - assumptions.defaultReturnRate) * 10) / 10),
     returnRateWindowDays: String(assumptions.returnRateWindowDays),
     minFinishedOrders: String(assumptions.minFinishedOrders),
+    rateMatureMinFinished: String(assumptions.rateMatureMinFinished ?? 10),
     inventoryRiskPercent: String(assumptions.inventoryRiskPercent ?? 10),
     taxPercent: String(assumptions.taxPercent ?? 1.5),
     otherCostPercentOfAds: String(assumptions.otherCostPercentOfAds ?? 1.1),
@@ -58,6 +61,7 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
         defaultReturnRate: Math.min(100, Math.max(0, 100 - num(form.defaultDeliveryRate, 70))),
         returnRateWindowDays: Math.round(num(form.returnRateWindowDays, 90)),
         minFinishedOrders: Math.round(num(form.minFinishedOrders, 10)),
+        rateMatureMinFinished: Math.round(num(form.rateMatureMinFinished, 10)),
         overrides: assumptions.overrides,
         inventoryRiskPercent: num(form.inventoryRiskPercent, 10),
         taxPercent: num(form.taxPercent, 1.5),
@@ -244,6 +248,20 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
             />
           </div>
           <div className="space-y-1">
+            <Label title="Mốc ĐỦ CHÍN: mã có đủ ngần này đơn đã có kết cục của chính nó thì máy được TỰ ĐO nó — mỗi đơn đang giao cân theo xác suất của trạng thái Viettel Post nó đang ở. Chưa đủ thì mã nằm ở bảng “Mã mới · chưa đủ căn cứ” và tỷ lệ của nó là số đo của chính mã CO NGÓT về tỷ lệ khai ở trên (không bao giờ mượn tỷ lệ nền của toàn shop). Con số này cũng là TRỌNG SỐ của mốc neo khi co ngót: để 10 nghĩa là mốc neo nặng bằng 10 đơn. KHÁC với “Đơn kết thúc tối thiểu” ở trên — ô kia gác một tỷ lệ thô, ô này gác một mô hình có điều kiện hoá nên cần ít bằng chứng thô hơn.">
+              Đơn kết thúc để máy tự đo (mốc đủ chín)
+            </Label>
+            <Input
+              type="number"
+              inputMode="numeric"
+              min={1}
+              value={form.rateMatureMinFinished}
+              onChange={(e) =>
+                setForm({ ...form, rateMatureMinFinished: e.target.value })
+              }
+            />
+          </div>
+          <div className="space-y-1">
             <Label title="Tỷ lệ giá trị lô hàng cuối cùng sẽ mất vì lỗi, tồn lâu phải xả, thất thoát. Ghi vào lãi lỗ THEO HÀNG BÁN RA từng kỳ (không ném trọn vào kỳ nhập hàng); bán hết lô thì tổng đúng bằng % × giá trị lô.">Rủi ro tồn kho (% giá trị lô hàng, ghi dần theo hàng bán ra)</Label>
             <Input
               type="number"
@@ -294,103 +312,113 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
   );
 }
 
-/** Ghi đè tỷ lệ GIAO THÀNH CÔNG ước tính cho một mã hàng (lưu dưới dạng tỷ lệ hoàn = 100 − GTC) */
+/**
+ * Ghi đè tỷ lệ GIAO THÀNH CÔNG ước tính cho một mã hàng.
+ *
+ * ─── HAI THỨ ĐÃ SỬA Ở ĐÂY, 23/09/2026 ───
+ *
+ * 1. **Không gửi cả bản giả định nữa.** Bản trước gọi `saveProfitAssumptions` với đúng 6 trường,
+ *    mà lược đồ của nó có `.default()` ở 9 trường còn lại — nên mỗi lần đặt tỷ lệ cho MỘT mã là
+ *    một lần `fixedCostMonthly` về 5.000.000 ₫, `taxPercent` về 1,5, `inventoryRiskPercent` về 10…
+ *    im lặng. Nay đi qua `setDeliveryRateOverride`, đường ghi đọc bản giả định ở MÁY CHỦ và chỉ
+ *    thay đúng một khoá.
+ * 2. **Bắt buộc ghi LÝ DO.** Một con số đặt tay không có lý do thì sáu tuần sau không ai dám gỡ nó.
+ */
 export function ReturnRateOverride({
   productId,
   assumptions,
   current,
   source,
   canWrite,
+  mature,
 }: {
   productId: string;
   assumptions: ProfitAssumptions;
   current: number;
   source: string;
   canWrite: boolean;
+  /** Mã đã đủ chín chưa — quyết định ghi đè TẠM có còn hiệu lực không, và câu chữ in ra. */
+  mature?: boolean;
 }) {
-  const [value, setValue] = useState(
-    assumptions.overrides[productId] !== undefined
-      ? String(Math.round((100 - assumptions.overrides[productId]) * 10) / 10)
-      : "",
-  );
+  const daDat = parseDeliveryRateOverride(assumptions.overrides?.[productId]);
+  const [value, setValue] = useState(daDat ? String(Math.round((100 - daDat.returnRate) * 10) / 10) : "");
+  const [reason, setReason] = useState(daDat?.reason ?? "");
+  const [giuMai, setGiuMai] = useState(daDat?.mode === "PERMANENT");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   if (!canWrite)
     return (
       <span className="text-xs text-muted-foreground">
-        {source === "override"
-          ? "đang ghi đè"
-          : source === "history"
-            ? "theo lịch sử"
-            : "mặc định"}
+        {source === "override" ? "đang ghi đè" : source === "blended" ? "co ngót về tỷ lệ khai" : source === "history" ? "theo lịch sử" : source === "projected" ? "số đo theo từng đơn" : "tỷ lệ khai"}
       </span>
     );
-  const save = (override: string) =>
+
+  const luu = () =>
     startTransition(async () => {
-      const overrides = { ...assumptions.overrides };
-      if (override.trim() === "") delete overrides[productId];
-      else overrides[productId] = Math.min(100, Math.max(0, 100 - Number(override)));
-      const {
-        shipFeeDelivered,
-        shipFeeReturned,
-        defaultReturnRate,
-        returnRateWindowDays,
-        minFinishedOrders,
-      } = assumptions;
-      const result = await saveProfitAssumptions({
-        shipFeeDelivered,
-        shipFeeReturned,
-        defaultReturnRate,
-        returnRateWindowDays,
-        minFinishedOrders,
-        overrides,
+      const result = await setDeliveryRateOverride({
+        productId,
+        deliveryRate: Math.min(100, Math.max(0, Number(value))),
+        reason: reason.trim(),
+        mode: giuMai ? "PERMANENT" : "UNTIL_MATURE",
       });
       if ("error" in result) toast.error(result.error);
       else {
-        toast.success(
-          override.trim() === ""
-            ? "Đã bỏ ghi đè, dùng tỷ lệ lịch sử"
-            : `Đã đặt tỷ lệ giao thành công ${override}%`,
-        );
+        toast.success(`Đã đặt tỷ lệ giao thành công ${value}% — ${OVERRIDE_MODE_LABEL[giuMai ? "PERMANENT" : "UNTIL_MATURE"].toLowerCase()}`);
         router.refresh();
       }
     });
+
+  const go = () =>
+    startTransition(async () => {
+      const result = await clearDeliveryRateOverride(productId);
+      if ("error" in result) toast.error(result.error);
+      else {
+        setValue("");
+        setReason("");
+        toast.success("Đã bỏ đặt tay — mã quay về thang bậc tự động");
+        router.refresh();
+      }
+    });
+
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="text-muted-foreground">Ghi đè tỷ lệ giao thành công (%)</span>
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <span className="text-muted-foreground">Đặt tỷ lệ giao thành công (%)</span>
       <Input
         type="number"
         inputMode="decimal"
         min={0}
         max={100}
         step={1}
-        className="numeric h-8 w-24"
+        className="numeric h-8 w-20"
         placeholder={current.toFixed(1)}
         value={value}
         onChange={(e) => setValue(e.target.value)}
       />
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={() => save(value)}
-        disabled={pending}
-      >
+      <Input
+        type="text"
+        className="h-8 w-56"
+        placeholder="Vì sao đặt con số này?"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <label className="flex items-center gap-1 text-muted-foreground" title="Bỏ trống: con số này TỰ NHƯỜNG CHỖ cho số đo khi mã đủ đơn kết thúc. Tick: giữ mãi, đè lên cả số đo thật — cần người thứ hai duyệt.">
+        <input type="checkbox" checked={giuMai} onChange={(e) => setGiuMai(e.target.checked)} />
+        giữ cả khi đã chín
+      </label>
+      <Button type="button" size="sm" variant="outline" onClick={luu} disabled={pending || value.trim() === "" || reason.trim().length < 3}>
         {pending ? <Loader2 className="size-4 animate-spin" /> : null} Lưu
       </Button>
-      {assumptions.overrides[productId] !== undefined ? (
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={() => {
-            setValue("");
-            save("");
-          }}
-          disabled={pending}
-        >
-          Bỏ ghi đè
+      {daDat ? (
+        <Button type="button" size="sm" variant="ghost" onClick={go} disabled={pending}>
+          Bỏ đặt tay
         </Button>
+      ) : null}
+      {daDat ? (
+        <span className="text-muted-foreground">
+          {OVERRIDE_MODE_LABEL[daDat.mode]}
+          {daDat.mode === "UNTIL_MATURE" && mature ? " — mã ĐÃ CHÍN nên con số này đang nhường chỗ cho số đo" : ""}
+          {daDat.setBy ? ` · ${daDat.setBy}` : ""}
+        </span>
       ) : null}
     </div>
   );

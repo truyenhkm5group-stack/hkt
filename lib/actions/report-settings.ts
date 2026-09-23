@@ -19,7 +19,29 @@ const schema = z.object({
   returnRateWindowDays: z.number().int().min(7).max(730),
   defaultReturnRate: z.number().min(0).max(100),
   minFinishedOrders: z.number().int().min(1).max(10_000),
-  overrides: z.record(z.string(), z.number().min(0).max(100)),
+  rateMatureMinFinished: z.number().int().min(1).max(10_000).default(DEFAULT_PROFIT_ASSUMPTIONS.rateMatureMinFinished),
+  /*
+    HAI DẠNG, VÌ KHO `settings` ĐANG CÓ CẢ HAI. Số trần là dòng lưu trước 23/09/2026 (nghĩa: giữ
+    vĩnh viễn); bản khai là dòng mới, có lý do và tự nhường chỗ khi mã đủ chín. Thu hẹp lược đồ về
+    một dạng sẽ làm lượt lưu kế tiếp **xoá sạch** mọi ghi đè dạng kia — zod loại bỏ thứ nó không
+    nhận, và ở đây nó im lặng.
+
+    Đặt tay tỷ lệ cho MỘT mã đi qua `lib/actions/delivery-rate-override.ts`; đường này chỉ cần nhận
+    lại `overrides` nguyên vẹn để biểu mẫu Giả định không làm rơi mất chúng.
+  */
+  overrides: z.record(
+    z.string(),
+    z.union([
+      z.number().min(0).max(100),
+      z.object({
+        returnRate: z.number().min(0).max(100),
+        mode: z.enum(["PERMANENT", "UNTIL_MATURE"]).optional(),
+        reason: z.string().optional(),
+        setAt: z.string().nullable().optional(),
+        setBy: z.string().nullable().optional(),
+      }),
+    ]),
+  ),
   // MỘT mặc định duy nhất (`DEFAULT_PROFIT_ASSUMPTIONS`): trước đây ở đây ghi 5 trong khi hằng số
   // ghi 10 — hai nơi nói hai số, và giá trị nào thắng tuỳ vào việc biểu mẫu có gửi trường này hay không.
   inventoryRiskPercent: z.number().min(0).max(100).default(DEFAULT_PROFIT_ASSUMPTIONS.inventoryRiskPercent),

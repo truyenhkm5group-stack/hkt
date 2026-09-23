@@ -1,7 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import { schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { resolveDeliveryRate, type DeliveryRateSource, type ResolvedDeliveryRate } from "@/lib/constants/delivery-rate";
+import { parseDeliveryRateOverride, resolveDeliveryRate, type DeliveryRateSource, type ResolvedDeliveryRate } from "@/lib/constants/delivery-rate";
 import { productReturnHistory, resolveAssumptions } from "@/lib/queries/profit-nominal";
 import { getProjectedDeliveryMetrics } from "@/lib/queries/projected-delivery";
 import type { Period } from "@/lib/search-params";
@@ -46,9 +46,11 @@ async function productDeliveryRatesUncached(period: Period): Promise<ProductDeli
   const fallback = resolveDeliveryRate({
     projectedDeliveryRate: null,
     projectedFinished: 0,
+    measuredDeliveryRate: null,
     historyReturnRate: null,
     historyFinished: 0,
     minFinishedOrders: assumptions.minFinishedOrders,
+        matureMinFinished: assumptions.rateMatureMinFinished,
     defaultReturnRate: assumptions.defaultReturnRate,
   });
 
@@ -63,12 +65,14 @@ async function productDeliveryRatesUncached(period: Period): Promise<ProductDeli
     byProduct.set(
       key,
       resolveDeliveryRate({
-        overrideReturnRate: assumptions.overrides[key],
+        override: parseDeliveryRateOverride(assumptions.overrides[key]),
         projectedDeliveryRate: p?.projectedRate ?? null,
         projectedFinished: p ? p.deliveredActual + p.failedActual : 0,
+        measuredDeliveryRate: p?.actualRate ?? null,
         historyReturnRate: h?.rate ?? null,
         historyFinished: h?.finished ?? 0,
         minFinishedOrders: assumptions.minFinishedOrders,
+        matureMinFinished: assumptions.rateMatureMinFinished,
         defaultReturnRate: assumptions.defaultReturnRate,
       }),
     );
@@ -79,12 +83,14 @@ async function productDeliveryRatesUncached(period: Period): Promise<ProductDeli
     byProduct.set(
       key,
       resolveDeliveryRate({
-        overrideReturnRate: assumptions.overrides[key],
+        override: parseDeliveryRateOverride(assumptions.overrides[key]),
         projectedDeliveryRate: null,
         projectedFinished: 0,
+        measuredDeliveryRate: null,
         historyReturnRate: null,
         historyFinished: 0,
         minFinishedOrders: assumptions.minFinishedOrders,
+        matureMinFinished: assumptions.rateMatureMinFinished,
         defaultReturnRate: assumptions.defaultReturnRate,
       }),
     );
@@ -99,7 +105,7 @@ export async function productDeliveryRates(period: Period): Promise<ProductDeliv
 
 /** Bao nhiêu phần của bản đồ là SỐ ĐO thật, bao nhiêu là giả định — in cạnh mọi con số ước tính. */
 export function rateCoverage(rates: ProductDeliveryRates): Record<DeliveryRateSource, number> {
-  const out: Record<DeliveryRateSource, number> = { override: 0, projected: 0, history: 0, default: 0 };
+  const out: Record<DeliveryRateSource, number> = { override: 0, projected: 0, blended: 0, history: 0, default: 0 };
   for (const r of rates.byProduct.values()) out[r.source] += 1;
   return out;
 }

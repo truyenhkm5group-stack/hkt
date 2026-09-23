@@ -1,3 +1,5 @@
+import type { StoredDeliveryRateOverride } from "@/lib/constants/delivery-rate";
+
 /** Giả định dùng cho báo cáo lợi nhuận danh nghĩa theo mã hàng (lưu trong settings: profit.assumptions) */
 export type ProfitAssumptions = {
   /** Cước gửi ĐVVC cho MỌI đơn gửi đi, kể cả đơn sau đó hoàn (đ) — 0 = tự tính bình quân 90 ngày từ dữ liệu */
@@ -63,8 +65,35 @@ export type ProfitAssumptions = {
    * lệ khai chung. Bốn mã lớn vẫn đi bằng số đo của mình, hai mã mới vẫn chưa có gì để đo.
    */
   minFinishedOrders: number;
-  /** Ghi đè tỷ lệ hoàn (%) theo productId */
-  overrides: Record<string, number>;
+  /**
+   * ═══════════ MỐC "ĐỦ CHÍN": KHI NÀO MÁY ĐƯỢC TỰ ĐO MỘT MÃ ═══════════
+   *
+   * Mã có đủ ngần này đơn ĐÃ CÓ KẾT CỤC của chính nó thì bậc `projected` được chạy — tức mỗi đơn
+   * đang giao được cân theo xác suất của trạng thái ĐVVC nó đang ở. Chưa đủ thì mã nằm ở bảng
+   * **"Mã mới · chưa đủ căn cứ"** và tỷ lệ của nó là số đo của CHÍNH MÃ co ngót về `defaultReturnRate`.
+   *
+   * Con số này cũng là TRỌNG SỐ của mốc neo khi co ngót — cùng một câu hỏi thì cùng một con số.
+   *
+   * ─── VÌ SAO KHÔNG DÙNG CHUNG `minFinishedOrders` ───
+   *
+   * Hai ngưỡng gác hai thứ khác nhau. `minFinishedOrders` (chủ shop để 50) gác một TỶ LỆ THÔ:
+   * "giao ÷ đã kết thúc" trong 90 ngày, không có gì đỡ, nên nó phải đòi nhiều bằng chứng.
+   * `rateMatureMinFinished` (chủ shop chốt 10 ngày 23/09/2026) gác một MÔ HÌNH CÓ ĐIỀU KIỆN HOÁ,
+   * thứ còn đọc được cả những đơn đang chạy. Ép cả hai về một con số là bắt chủ shop chọn một giá
+   * trị cho hai quyết định trái chiều: để 10 thì tỷ lệ thô của một mã 12 đơn được tin; để 50 thì
+   * một mã 20 đơn đã kết thúc vẫn bị coi là "chưa biết gì".
+   *
+   * Sửa được ở **Báo cáo → Giả định**, không cần deploy.
+   */
+  rateMatureMinFinished: number;
+  /**
+   * Ghi đè tỷ lệ hoàn theo `productId`.
+   *
+   * Hai dạng cùng tồn tại và `parseDeliveryRateOverride` đọc cả hai: **số trần** là mọi dòng đã lưu
+   * trước 23/09/2026 (nghĩa: giữ vĩnh viễn), **bản khai** là dòng mới — có lý do, có người đặt, và
+   * mặc định TỰ NHƯỜNG CHỖ cho số đo khi mã đủ chín. Dòng cũ không bị đổi nghĩa và không backfill.
+   */
+  overrides: Record<string, StoredDeliveryRateOverride>;
   /** Dự phòng rủi ro tồn kho (% trên TỔNG giá trị hàng nhập trong kỳ theo phiếu nhập): hàng lỗi, tồn lâu phải xả, thất thoát */
   inventoryRiskPercent: number;
   /** Dự trù thuế (% doanh thu GTC ước tính) */
@@ -90,6 +119,7 @@ export const DEFAULT_PROFIT_ASSUMPTIONS: ProfitAssumptions = {
   defaultReturnRate: 45,
   // Chủ shop chốt 22/09/2026: "giao 50 đơn có trạng thái" là mốc tuân theo số thật. Xem chú thích ở kiểu.
   minFinishedOrders: 50,
+  rateMatureMinFinished: 10,
   overrides: {},
   inventoryRiskPercent: 10,
   taxPercent: 1.5,
