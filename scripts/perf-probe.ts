@@ -354,6 +354,18 @@ async function main() {
   const ads = await import("@/lib/queries/ads-roas");
   // Kỳ MẶC ĐỊNH của trang (30 ngày) và kỳ TOÀN BỘ — chênh nhau bao nhiêu cho biết chi phí đi theo
   // lượng dữ liệu hay theo số câu truy vấn.
+  /*
+    LN DANH NGHĨA NGUỘI 37,1 GIÂY (perf-audit, production 23/09/2026) — và từ #165 nó nằm dưới cả
+    bảng bóc tách MKTer của /ads/daily. Phép chia ngày × MKTer chỉ tốn 0,5s khi báo cáo đã trong
+    đệm, nên chỗ phải sửa nằm BÊN TRONG báo cáo. Đo từng phần con xuất ra được để thấy câu nào.
+  */
+  const nominal = await import("@/lib/queries/profit-nominal");
+  await timed("/reports?tab=nominal", "getNominalProfitReport 30 ngày", () => nominal.getNominalProfitReport(month, "ORDERED"));
+  await timed("/reports?tab=nominal", "resolveAssumptions", () => nominal.resolveAssumptions());
+  await timed("/reports?tab=nominal", "productReturnHistory 90 ngày", () => nominal.productReturnHistory(90));
+  await timed("/reports?tab=nominal", "purchaseByProduct 30 ngày", () => nominal.purchaseByProduct(month));
+  const projected = await import("@/lib/queries/projected-delivery");
+  await timed("/reports?tab=nominal", "getProjectedDeliveryMetrics ORDERED 30 ngày", () => projected.getProjectedDeliveryMetrics(month, "ORDERED", "PRODUCT"));
   await timed("/ads", "adsRoas 30 ngày", () => ads.getAdsRoas(month, "campaign"));
   await timed("/ads", "adsRoas toàn kỳ", () => ads.getAdsRoas(all, "campaign"));
 
