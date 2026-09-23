@@ -14,6 +14,7 @@
  *
  * Chạy: docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/perf-probe.ts
  */
+import { thoiGianThucThi, trungVi } from "@/lib/constants/perf-explain";
 import "dotenv/config";
 import { resolvePeriod } from "@/lib/search-params";
 import { clearMemo } from "@/lib/cache";
@@ -169,6 +170,9 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
     });
   }
 }
+
+/** Số lượt EXPLAIN mỗi điều kiện JIT. 3 là tối thiểu để có trung vị; mỗi lượt chạy thật một câu vài giây trên production. */
+const LUOT_EXPLAIN = 3;
 
 async function main() {
   // Bọc `Pool.query` NGAY ĐẦU, trước khi bất kỳ truy vấn nào chạy. Đặt ở mức mô-đun thì cần
@@ -607,43 +611,101 @@ async function main() {
   }
 
   /*
-    ═══ EXPLAIN ANALYZE CHO BA CÂU CHẬM NHẤT ═══
+    ═══ EXPLAIN ANALYZE CHO BA CÂU CHẬM NHẤT — DƯỚI CẢ HAI ĐIỀU KIỆN JIT ═══
 
     "Câu này 10 giây" chưa sửa được gì. Kế hoạch thực thi mới nói được VÌ SAO: quét tuần tự hay
     dùng chỉ mục, chạy MỘT lần hay chạy lại cho từng dòng (loops), đọc bao nhiêu khối đệm.
 
-    Chạy ngay tại đây trên đúng câu vừa đo, với đúng tham số của nó — không chép tay, không dựng
-    lại. Chỉ ĐỌC: EXPLAIN ANALYZE có chạy thật nhưng đây đều là select.
+    ─── BẢN CŨ ĐO NHẦM ĐƯỜNG (sửa 23/09/2026) ───
+
+    Bản trước chạy `explain` thẳng trên bể kết nối, NGOÀI mọi giao dịch — tức JIT BẬT. Ứng dụng
+    thì chạy các báo cáo này bên trong `chayKhongJit()` (`db/index.ts`): `begin; set local jit =
+    off; …`. Hai điều kiện khác nhau, và con số của bản cũ đi thẳng vào tệp chứng từ
+    `docs/perf/TECH-5-so-do-tho-2026-09-22.md`. Việc TECH-10 dựng ưu tiên số 1 của nó lên con số
+    ấy, và tệp chứng từ không cảnh báo (đã vá ở PR #174).
+
+    Sửa đúng không phải là chuyển sang JIT tắt rồi thôi. Câu hỏi thật là "JIT góp BAO NHIÊU", và
+    chỉ trả lời được khi đo CẢ HAI — cùng câu, cùng tham số, cùng lúc.
+
+    ─── THIẾT KẾ PHÉP ĐO ───
+
+    · Hai điều kiện: JIT MẶC ĐỊNH (giữ để so được với lịch sử) và JIT TẮT — lặp lại ĐÚNG câu lệnh
+      `chayKhongJit` phát ra, không một câu nào khác.
+    · XEN KẼ bật–tắt–bật–tắt… chứ không chạy hết một bên rồi mới sang bên kia. Máy 2 nhân đang
+      phục vụ người thật, tải lên xuống theo phút; xen kẽ để độ trôi của tải rơi đều lên cả hai.
+    · Mỗi điều kiện ${LUOT_EXPLAIN} lượt, lấy TRUNG VỊ và in đủ từng lượt. Một mẫu trên máy này không
+      nói được gì (`/payroll/payslip` từng đo 333 ms / 5.873 ms / 1.723 ms — lệch 18 lần).
+    · Mỗi lượt trong giao dịch RIÊNG, kết thúc bằng `rollback`: đây là select, nhưng rollback bảo
+      đảm `set local` không rò sang lượt sau trên cùng kết nối.
+    · Câu chậm nhất in kế hoạch ĐẦY ĐỦ của lượt JIT tắt, KHÔNG cắt. Tệp toàn văn ngày 22/09 bị cắt
+      còn 47 dòng và mất đúng khối `JIT:` — đó là lý do câu hỏi JIT phải ghi CHƯA ĐO ĐƯỢC.
+
+    Chỉ ĐỌC: EXPLAIN ANALYZE có chạy thật, nhưng đây đều là select, trong giao dịch bị rollback.
   */
   {
+    const LUOT = LUOT_EXPLAIN;
+    type Client = { query: (t: string) => Promise<{ rows?: Record<string, string>[] }>; release: () => void };
     const pg = (await import("pg")).default as unknown as {
-      Pool: new (o: { connectionString: string; max: number }) => { query: (t: string) => Promise<unknown>; end: () => Promise<void> };
+      Pool: new (o: { connectionString: string; max: number }) => { connect: () => Promise<Client>; end: () => Promise<void> };
     };
     const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL ?? "", max: 1 });
-    console.log("\n── KẾ HOẠCH THỰC THI CỦA BA CÂU CHẬM NHẤT ──");
-    for (const c of chamNhat.slice(0, 3)) {
+    const chayMotLuot = async (cauLenh: string, jitTat: boolean): Promise<string[]> => {
+      const c = await pool.connect();
       try {
-        const r = (await pool.query(`explain (analyze, buffers, timing) ${nhungThamSo(c.full, c.params)}`)) as { rows?: Record<string, string>[] };
-        const dong = (r.rows ?? []).map((x) => String(Object.values(x)[0]));
-        // Chỉ in nút ĐẮT hoặc chạy lại nhiều lần — bản kế hoạch đầy đủ dài hàng trăm dòng.
-        const dangChuY = dong.filter((l) => /loops=[2-9]|loops=\d\d|actual time=\d{3,}|Seq Scan|SubPlan|shared read/.test(l));
-        console.log(`\n  ${c.ms}ms · ${c.sql.slice(0, 110)}…`);
-        /*
-          CÂU CHẬM NHẤT IN KẾ HOẠCH ĐẦY ĐỦ, KHÔNG LỌC.
+        await c.query("begin");
+        // ĐÚNG câu mà `chayKhongJit` phát ra — không thêm, không bớt.
+        if (jitTat) await c.query("set local jit = off");
+        const r = await c.query(`explain (analyze, buffers, timing) ${cauLenh}`);
+        return (r.rows ?? []).map((x) => String(Object.values(x)[0]));
+      } finally {
+        await c.query("rollback").catch(() => undefined);
+        c.release();
+      }
+    };
+    const thoiGian = thoiGianThucThi;
 
-          Bản lọc bỏ sót đúng thứ cần: một nút `SubPlan` in ra tiêu đề mà không in dòng con, nên
-          không biết nó tốn bao nhiêu. Đã mất một vòng chẩn đoán vì chỗ này — thấy "SubPlan 3" trần
-          trụi rồi phải đoán. Câu chậm nhất thì in đủ; các câu sau vẫn lọc cho gọn.
-        */
-        if (chamNhat.indexOf(c) === 0) {
-          console.log("    ── kế hoạch ĐẦY ĐỦ (câu chậm nhất) ──");
-          console.log(dong.map((l) => `    ${l.slice(0, 220)}`).join("\n"));
-        } else {
-          console.log(dangChuY.slice(0, 14).map((l) => `    ${l.trim().slice(0, 190)}`).join("\n") || "    (không nút nào đáng chú ý)");
+    console.log(`\n── KẾ HOẠCH THỰC THI CỦA BA CÂU CHẬM NHẤT · JIT BẬT vs JIT TẮT · ${LUOT} lượt mỗi bên, xen kẽ ──`);
+    for (const c of chamNhat.slice(0, 3)) {
+      const cauLenh = nhungThamSo(c.full, c.params);
+      const bat: number[] = [];
+      const tat: number[] = [];
+      let keHoachTat: string[] = [];
+      let khoiJit: string[] = [];
+      try {
+        for (let k = 0; k < LUOT; k += 1) {
+          const dBat = await chayMotLuot(cauLenh, false);
+          const tb = thoiGian(dBat);
+          if (tb !== null) bat.push(tb);
+          // Khối `JIT:` chỉ xuất hiện khi JIT bật và thật sự biên dịch — giữ lại một bản để in.
+          if (!khoiJit.length) {
+            const iJ = dBat.findIndex((x) => x.trim().startsWith("JIT:"));
+            if (iJ >= 0) khoiJit = dBat.slice(iJ, iJ + 6);
+          }
+          const dTat = await chayMotLuot(cauLenh, true);
+          const tt = thoiGian(dTat);
+          if (tt !== null) tat.push(tt);
+          keHoachTat = dTat;
         }
-        for (const l of dong) if (l.startsWith("Execution Time") || l.startsWith("Planning Time")) console.log(`    ${l}`);
       } catch (e) {
         console.log(`\n  ${c.ms}ms — không EXPLAIN được: ${e instanceof Error ? e.message : String(e)}`);
+        continue;
+      }
+      const mBat = trungVi(bat);
+      const mTat = trungVi(tat);
+      console.log(`\n  ${c.ms}ms trong lượt đo đường ứng dụng · ${c.sql.slice(0, 110)}…`);
+      console.log(`    JIT MẶC ĐỊNH  trung vị ${mBat === null ? "CHƯA ĐO ĐƯỢC" : `${mBat.toFixed(1)} ms`}  [${bat.map((x) => x.toFixed(1)).join(" · ")}]`);
+      console.log(`    JIT TẮT       trung vị ${mTat === null ? "CHƯA ĐO ĐƯỢC" : `${mTat.toFixed(1)} ms`}  [${tat.map((x) => x.toFixed(1)).join(" · ")}]`);
+      if (mBat !== null && mTat !== null && mBat > 0) {
+        const gop = mBat - mTat;
+        console.log(`    ⇒ phần chênh khi tắt JIT: ${gop.toFixed(1)} ms (${((gop / mBat) * 100).toFixed(0)} % của thời gian JIT bật)`);
+      } else {
+        console.log("    ⇒ phần chênh khi tắt JIT: CHƯA ĐO ĐƯỢC (thiếu một trong hai phía)");
+      }
+      if (khoiJit.length) console.log(khoiJit.map((l) => `    ${l.slice(0, 200)}`).join("\n"));
+      else console.log("    (lượt JIT bật không in khối JIT: — tức JIT không biên dịch câu này)");
+      if (chamNhat.indexOf(c) === 0) {
+        console.log("    ── kế hoạch ĐẦY ĐỦ, lượt JIT TẮT cuối cùng, KHÔNG cắt ──");
+        console.log(keHoachTat.map((l) => `    ${l}`).join("\n"));
       }
     }
     await pool.end().catch(() => undefined);
