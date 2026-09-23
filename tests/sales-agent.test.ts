@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
@@ -1627,6 +1628,32 @@ export async function testSalesAgent(db: Db) {
     estimateCostVnd("erp:anthropic", "mo-hinh-la", { inputTokens: 1_000, outputTokens: 0, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 }, bangGia),
     null,
     "model chưa khai giá vẫn phải là CHƯA BIẾT, không phải 0",
+  );
+
+  /*
+    ═════════ 9G. LƯỢT VÁ DÙNG ĐÚNG BỘ PHÂN LOẠI CỦA ĐƯỜNG GHI ═════════
+
+    Bản vá nhận diện máy chỉ áp cho tin nạp MỚI — `ingestMessage` chống trùng theo mã tin nên tin
+    cũ không bao giờ được đọc lại. Đo 23/09/2026 sau khi khai tên máy: `PAGE_BOT` = 192 (tin mới)
+    trong khi `PAGE_HUMAN` vẫn đứng nguyên 4.749 (tin cũ).
+
+    Lượt vá PHẢI gọi `classifySender()` — đúng hàm của đường ghi — chứ không viết một luật thứ hai
+    bằng SQL. Luật 66 đã trả giá cho đúng chuyện đó với bộ dịch trạng thái Viettel Post: hai bản
+    luật trôi xa nhau, và bản chặt hơn thắng ở một nửa dữ liệu.
+
+    Bài kiểm quét MÃ NGUỒN ĐÃ VÀO KHO, không đọc đĩa (luật ở `tests/repo-integrity.test.ts`).
+  */
+  const nguonVa = execSync("git show HEAD:scripts/ai-reclassify-senders.ts", { encoding: "utf8" });
+  assert.match(nguonVa, /classifySender\(/, "lượt vá phải gọi chính bộ phân loại của đường ghi");
+  assert.match(nguonVa, /declaredBotNames\(/, "và phải đọc tên máy do shop khai, không ghi cứng");
+  assert.ok(
+    !/sender_type\s*=\s*case|when .* then 'PAGE_BOT'/i.test(nguonVa),
+    "KHÔNG được dựng lại luật phân loại bằng SQL — đó là bản luật thứ hai",
+  );
+  assert.match(nguonVa, /--apply/, "mặc định phải là CHẠY THỬ");
+  assert.ok(
+    !/update\s+sales_conversations|human_takeover_at\s*=/i.test(nguonVa),
+    "lượt vá KHÔNG được đụng tới trạng thái hội thoại — human_takeover_at là quyết định có thật",
   );
 
   // ═════════ 10. VIỆC KHÔNG TỒN TẠI / NẤC OFF ═════════

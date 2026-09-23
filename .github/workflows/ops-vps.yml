@@ -90,6 +90,7 @@ on:
           - ai-staging-size-rules # nạp BẢNG SỐ ĐO (scripts/size-rules.json) — MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi
           - ai-staging-setting   # ghi MỘT khoá cấu hình vào settings của BẢN CHẠY THỬ (arg: "<khoá> <json>")
           - ai-staging-job       # chạy MỘT job đồng bộ trong BẢN CHẠY THỬ (arg: tên job, vd "vcb-rate")
+          - ai-staging-reclassify # phân loại lại người gửi cho tin ĐÃ NẠP (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
@@ -1269,6 +1270,13 @@ jobs:
                 # Vietcombank chẳng hạn) phải gọi tay ở đây mới có mặt.
                 cd /opt/vnx-ai-staging
                 docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T app npm run --silent sync -- ${ARG:-} ;;
+
+              ai-staging-reclassify)
+                # Bản vá nhận diện máy chỉ áp cho tin nạp MỚI (chống trùng theo mã tin), nên tin cũ
+                # giữ nguyên nhãn sai. MẶC ĐỊNH CHẠY THỬ; "--apply" trong ô arg mới ghi.
+                cd /opt/vnx-ai-staging
+                fetch_staging_script ai-reclassify-senders.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-reclassify-senders.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-reclassify-senders.ts ${ARG:-} ;;
 
               ai-staging-report)
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
