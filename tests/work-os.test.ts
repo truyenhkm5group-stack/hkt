@@ -520,6 +520,35 @@ export async function testWorkOs(db: Db) {
   // Nguồn quá hạn phải được NÊU TÊN, không im lặng biến mất — giao diện dựa vào `failed` để cảnh báo.
   assert.ok(Array.isArray(nhanh.failed), "`failed` luôn là danh sách, kể cả khi rỗng");
 
+  /* ═══════════ 19b · HÀNG ĐỢI NGƯỜI KHÔNG ĐƯỢC LỎNG HƠN BÀN TAY MÁY ═══════════ */
+  /*
+    Bàn tay ghi ngân sách đòi khuyến nghị giữ nguyên mấy ngày liền mới được động vào tiền. Hàng đợi
+    người thì trước nay nhận dòng ngay hôm nó xuất hiện lần đầu — nên MÁY thận trọng hơn NGƯỜI,
+    đúng ngược chiều với lẽ thường.
+
+    Hai hàm dưới đây là chỗ sửa, và chúng THUẦN nên kiểm được bằng bảng chân lý thay vì quét chuỗi.
+  */
+  const { haMotBac, benCau } = await import("@/lib/queries/work-adapters");
+
+  assert.equal(haMotBac("URGENT"), "HIGH");
+  assert.equal(haMotBac("HIGH"), "NORMAL");
+  assert.equal(haMotBac("NORMAL"), "LOW");
+  // ĐÁY KHÔNG RƠI TIẾP: chưa chín hai lần vẫn là một việc, không phải không-việc.
+  assert.equal(haMotBac("LOW"), "LOW", "đã ở mức thấp nhất thì giữ nguyên — không có mức nào dưới nữa");
+
+  const benMau = { action: "CUT" as const, heldDays: 3, flips: 0, missingDays: 0, staleDays: 0, ready: true, blocker: null, reason: "giữ 3 ngày" };
+  assert.ok(benCau(benMau)!.includes("3 ngày"), "dòng đã chín phải nói ra nó đã giữ bao nhiêu ngày");
+  assert.ok(!benCau(benMau)!.includes("CHƯA CHÍN"));
+  const chuaChin = { ...benMau, heldDays: 1, ready: false, blocker: "YOUNG" as const, reason: "mới giữ 1 ngày" };
+  assert.ok(benCau(chuaChin)!.startsWith("CHƯA CHÍN"), "dòng chưa chín phải tự khai ngay từ đầu câu");
+  assert.ok(benCau(chuaChin)!.includes("mới giữ 1 ngày"), "và phải mang LÝ DO của chính nó, không phải một câu chung");
+  /*
+    KHÔNG CÓ SỔ KHÁC VỚI CHƯA CHÍN. Chiến dịch có mặt ở bảng 30 ngày mà chưa có dòng sổ nào thì ERP
+    CHƯA ĐO, không phải "đã đo và thấy dao động" (AGENTS.md mục 39). Thêm một câu phỏng đoán vào đó
+    là biến một khoảng trống dữ liệu thành một lời khẳng định.
+  */
+  assert.equal(benCau(null), null, "chưa có sổ thì không nói gì thêm — chưa đo khác hẳn chưa ổn định");
+
   /* ═══════════ 20 · HOÃN PHẢI Ở TƯƠNG LAI ═══════════ */
   const hoanSai = await snoozeWork(csKey, T(5), linh);
   assert.ok("error" in hoanSai, "hẹn về quá khứ là vô nghĩa, phải bị từ chối");
@@ -727,8 +756,11 @@ export async function testWorkOs(db: Db) {
     "số người chưa có phòng ban phải khớp với dữ liệu thật — đây là việc chặn nhân viên dùng được hàng đợi",
   );
   /*
-    `ADS_DECISION` CỐ Ý chỉ có nút MỞ: ERP đọc Facebook Ads chứ không ghi, nên một nút "Tạm dừng"
-    ở đây sẽ là nút giả. Báo cáo sẵn sàng phải NÊU RA điều đó.
+    `ADS_DECISION` CỐ Ý chỉ có nút MỞ — và từ 22/09/2026 lý do đã đổi: ERP nay GHI được sang
+    Facebook (`lib/integrations/facebook/ads-write.ts`). Cái không đặt lên một dòng hàng đợi được
+    là QUY TRÌNH: đề nghị → phiếu duyệt ký HMAC → áp. Một nút bấm-một-phát phải bỏ bước đầu, tức bỏ
+    luôn thứ làm phiếu duyệt có nghĩa. Báo cáo sẵn sàng vẫn phải NÊU RA rằng nguồn này chưa xử lý
+    xong được tại chỗ.
 
     Và đếm phải là nút RIÊNG của nguồn gọi Server Action của miền — không đếm bốn nút chung của lớp
     công việc, vì nguồn nào cũng có chúng. Bản đầu của báo cáo này đếm cả nút chung và kết luận
