@@ -1,5 +1,6 @@
 "use server";
 
+import { RERUN_RULE } from "@/lib/constants/agent-rerun";
 import { REVIEW_VERDICTS } from "@/lib/constants/agent-clean-streak";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
@@ -745,6 +746,57 @@ const giaoAgentSchema = z.object({
   */
   gates: z.enum(["typecheck,lint,test,build", "typecheck,lint", "typecheck"]).default("typecheck,lint,test,build"),
 });
+
+const yeuCauSuaSchema = z.object({
+  taskCode: z.string().min(1).max(40),
+  feedback: z.string().trim().min(RERUN_RULE.minFeedbackChars).max(RERUN_RULE.maxFeedbackChars),
+  /* Cổng là danh sách ĐÓNG — dùng lại ĐÚNG luật của `giaoAgentSchema`, không viết luật thứ hai. */
+  gates: giaoAgentSchema.shape.gates,
+  /*
+    KHÔNG có ô `branch`, CỐ Ý. Nhánh đọc từ SỔ VIỆC ở tầng dịch vụ: tên nhánh đi thẳng vào lệnh
+    `git` trên máy runner, và một ô trình duyệt gửi lên là một đường để chỉ agent sang nhánh khác.
+    `.strict()` bên dưới làm một trường lạ bị TỪ CHỐI chứ không bị lặng lẽ bỏ qua.
+  */
+}).strict();
+
+/**
+ * "Giao lại cho agent sửa" — chủ shop tự đóng vòng review từ ERP.
+ *
+ * Trước 23/09/2026 vòng review → agent sửa chỉ chạy được bằng một script trên máy của CTO. ERP
+ * chỉ giao được lượt đầu, nên mỗi lần review tìm ra lỗi, người ta phải nhờ ai đó chạy script.
+ *
+ * Đi qua ĐÚNG `dispatchTaskToAgent` — cùng hạn mức, cùng cổng giao việc, cùng kiểm vai đang bật,
+ * cùng trần số lượt mỗi việc. Dòng audit dùng CÙNG `DISPATCH_AUDIT_ACTION`, vì nó cũng là sổ đếm
+ * hạn mức: một lượt sửa tiêu tiền thật y như một lượt đầu.
+ */
+export async function requestAgentFixAction(input: unknown): Promise<TechResult<{ taskCode: string; agentKey: string; conLaiGio: number }>> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  let data: z.infer<typeof yeuCauSuaSchema>;
+  try {
+    data = yeuCauSuaSchema.parse(input);
+  } catch (e) {
+    return { error: loi(e, "Dữ liệu không hợp lệ") };
+  }
+  const res = await dispatchTaskToAgent({
+    taskCode: data.taskCode,
+    gates: data.gates,
+    actor: { id: user.id, email: user.email, name: user.name },
+    rerun: { feedback: data.feedback },
+  });
+  if (!res.ok) return { error: res.reason };
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: DISPATCH_AUDIT_ACTION,
+    entity: "TECH_TASK",
+    entityId: res.taskId,
+    after: { taskCode: res.taskCode, agentKey: res.agentKey, workflow: res.workflow, ref: res.ref, gates: data.gates, laLuotSua: true },
+    reason: `Giao lại cho agent sửa theo review · còn ${res.conLaiGio}/giờ, ${res.conLaiNgay}/ngày`,
+  });
+  lamMoi();
+  return { ok: true, taskCode: res.taskCode, agentKey: res.agentKey, conLaiGio: res.conLaiGio };
+}
 
 /**
  * GIAO MỘT VIỆC TECH CHO AGENT — lần đầu tiên một màn hình nghiệp vụ khởi động một tiến trình

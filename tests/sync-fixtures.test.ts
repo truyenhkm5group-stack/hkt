@@ -86,7 +86,7 @@ import { chayBaiKiemAgentTuDangKy } from "./agent-tu-dang-ky.test";
 import { testKheDangKyAgent, testKhongCoBaiKiemMoCoi, testPromptTheoVai } from "./dang-ky-bai-kiem.test";
 import { testSuaCongTrongLuot } from "./sua-cong-trong-luot.test";
 import { testLoiGoiHongVanGiuTien, testNganSachDocTep } from "./agent-read-budget.test";
-import { cleanupViecDiTiepFixtures, testDispatchKemMaViec, testIngestGhiNhanhViec, testNhanhVeToiViecPure, testViecDiTiepGuards } from "./viec-di-tiep.test";
+import { cleanupViecDiTiepFixtures, testDispatchKemMaViec, testGiaoLaiSuaTuErp, testIngestGhiNhanhViec, testNhanhVeToiViecPure, testViecDiTiepGuards } from "./viec-di-tiep.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
@@ -1969,6 +1969,7 @@ async function main() {
   await cleanupTaskAdvanceFixtures();
   /* NỬA SAU DÂY CHUYỀN — dispatch mang mã việc, nhánh về tới dòng việc. Tự dọn bằng tiền tố `VDT-`/`vdt-`. */
   await testDispatchKemMaViec();
+  await testGiaoLaiSuaTuErp();
   await testIngestGhiNhanhViec();
   await cleanupViecDiTiepFixtures();
   /*
