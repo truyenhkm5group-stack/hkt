@@ -94,7 +94,8 @@ export function classifySender(input: {
   botNames?: readonly string[];
 }): SenderType {
   if (!input.fromPage) return "CUSTOMER";
-  if (input.fromAgent || isBotName(input.fromName, input.botNames ?? [])) return "PAGE_BOT";
+  // Cờ tường minh của nền tảng: không cần đoán gì thêm.
+  if (input.fromAgent) return "PAGE_BOT";
 
   /*
     THÔNG BÁO CỦA NỀN TẢNG — nhận ra bằng HAI dấu hiệu độc lập, mỗi cái đủ để kết luận.
@@ -111,6 +112,23 @@ export function classifySender(input: {
   if (tenKhach && normalize(input.fromName).trim() === tenKhach) return "PAGE_SYSTEM";
   // ③ Lời chào tự động của quảng cáo click-to-message.
   if (AD_AUTO_GREETING_PHRASES.some((p) => noiDung.includes(p))) return "PAGE_SYSTEM";
+
+  /*
+    TÊN MÁY XÉT SAU THÔNG BÁO NỀN TẢNG, KHÔNG TRƯỚC.
+
+    Bot của shop trả lời dưới tên fanpage, nhưng THÔNG BÁO CỦA FACEBOOK cũng mang đúng tên ấy.
+    Đặt phép kiểm tên máy lên trước thì mọi thông báo nền tảng cũng thành "máy của shop".
+
+    Lượt chạy thử phân loại lại ngày 23/09/2026 bắt đúng điều đó trước khi nó kịp ghi: ngoài
+    4.749 tin `PAGE_HUMAN → PAGE_BOT` (đúng ý), nó còn định đổi **1.008 tin `PAGE_SYSTEM →
+    PAGE_BOT`** — tức xoá mất ranh giới giữa "Facebook tự sinh" và "shop tự động trả lời".
+
+    Hai thứ ấy sửa ở hai nơi khác nhau: thông báo nền tảng thì không ai sửa được, còn câu bot của
+    shop thì tắt bot là hết. Gộp lại là mất khả năng phân biệt, và mất im lặng.
+
+    Phép kiểm nội dung ở trên là bằng chứng DƯƠNG và hẹp; tên máy là phép rơi về cuối cùng.
+  */
+  if (isBotName(input.fromName, input.botNames ?? [])) return "PAGE_BOT";
 
   // Tin của shop không rõ tên người gửi: KHÔNG đoán là nhân viên. Đoán sai theo hướng đó sẽ
   // tính một tin máy thành "câu nhân viên trả lời" và mọi phép đo đối chiếu đều lệch.

@@ -960,6 +960,33 @@ export async function testSalesAgent(db: Db) {
     "PAGE_BOT",
     "shop khai rồi thì phải nhận ra là máy",
   );
+  /*
+    THÔNG BÁO NỀN TẢNG VẪN LÀ THÔNG BÁO NỀN TẢNG, DÙ MANG TÊN MÁY ĐÃ KHAI.
+
+    Bot của shop trả lời dưới tên fanpage, nhưng thông báo của Facebook cũng mang đúng tên ấy.
+    Lượt chạy thử phân loại lại 23/09/2026 bắt được điều này TRƯỚC khi nó kịp ghi: ngoài 4.749 tin
+    `PAGE_HUMAN → PAGE_BOT` (đúng ý), nó còn định đổi 1.008 tin `PAGE_SYSTEM → PAGE_BOT`.
+
+    Hai thứ sửa ở hai nơi: thông báo nền tảng thì không ai sửa được, câu bot của shop thì tắt bot
+    là hết. Gộp lại là mất khả năng phân biệt, và mất trong im lặng.
+  */
+  assert.equal(
+    classifySender({
+      fromPage: true,
+      fromName: "Hải An Fashion",
+      text: "Chị Mai đã trả lời một quảng cáo.",
+      customerName: "Chị Mai",
+      botNames: ["Hải An Fashion"],
+    }),
+    "PAGE_SYSTEM",
+    "thông báo nền tảng phải thắng phép kiểm tên máy — bằng chứng nội dung hẹp hơn và mạnh hơn",
+  );
+  // Tin phía shop mang ĐÚNG tên khách vẫn là thông báo nền tảng, kể cả khi tên máy đã khai.
+  assert.equal(
+    classifySender({ fromPage: true, fromName: "Chị Mai", text: "x", customerName: "Chị Mai", botNames: ["Chị Mai"] }),
+    "PAGE_SYSTEM",
+  );
+
   // Khớp TRỌN VẸN, không khớp một phần: khai "Hải An Fashion" không được nuốt một nhân viên tên khác.
   assert.equal(
     classifySender({ fromPage: true, fromName: "Hải An Fashion Trang", text: "x", botNames: ["Hải An Fashion"] }),
