@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { AiAgentExecutor } from "@/lib/agents/executor";
-import { TIER_MAC_DINH, tierForRole } from "@/lib/constants/agent-model";
+import { AGENT_LOOP_TIMEOUT_MS, TIER_MAC_DINH, tierForRole } from "@/lib/constants/agent-model";
 import { MODEL_BY_TIER } from "@/lib/ai/router";
-import { estimateCostUsd, giaCuaModel, khoaGiaKhop } from "@/lib/ai/provider";
+import { TIMEOUT_BY_TIER, estimateCostUsd, giaCuaModel, khoaGiaKhop } from "@/lib/ai/provider";
 import type { AiProvider } from "@/lib/ai/provider";
 
 /**
@@ -181,7 +181,15 @@ export function testKhongNangBacAmTham() {
   const cli = readFileSync(path.join(goc, "scripts/agent-run.ts"), "utf8");
   const than = cli.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
-  assert.ok(/getAiProvider\(bac\)/.test(than), "runner phải lấy bậc từ VAI, không gõ cứng");
+  /*
+    `bac` PHẢI LÀ THAM SỐ ĐẦU — và từ 23/09/2026 lời gọi còn mang tham số thứ hai (trần chờ), nên
+    chốt cũ ghim đúng `getAiProvider(bac)` không còn khớp. Nới đúng một dấu phẩy, và siết lại vế
+    thật sự cần canh: KHÔNG bậc nào được gõ cứng, kể cả bậc rẻ — gõ cứng `"routine"` ở đây làm sổ
+    `TIER_BY_ROLE` thành trang trí, và ngày một vai cần model mạnh hơn thì không ai thấy vì sao nó
+    vẫn chạy bằng model yếu.
+  */
+  assert.ok(/getAiProvider\(bac[,)]/.test(than), "runner phải lấy bậc từ VAI, không gõ cứng");
+  assert.ok(!/getAiProvider\("[a-z]+"/.test(than), "KHÔNG được gõ cứng BẤT KỲ bậc nào trong đường chạy agent — kể cả bậc rẻ");
   assert.ok(!/getAiProvider\("copilot"\)|getAiProvider\("analysis"\)/.test(than), "KHÔNG được gõ cứng bậc đắt trong đường chạy agent");
   assert.ok(/tierForRole/.test(than), "phải đi qua sổ khai bậc theo vai");
   // Và tiền phải được in ra — một con số không ai thấy là một con số không ai dùng.
@@ -194,4 +202,53 @@ export function testKhongNangBacAmTham() {
   */
   assert.ok(than.includes("if (res.chiPhi) {"), "nhánh in tiền phải được canh bằng chính `res.chiPhi`");
   assert.ok(/tiền: \$\{gia\}/.test(than) || than.includes("`  tiền:"), "và phải thật sự in ra một dòng tiền");
+}
+
+/* ═════════════ TRẦN CHỜ KHÔNG ĐI THEO BẬC MODEL ═════════════ */
+
+export function testTranChoTachKhoiBac() {
+  const goc = path.resolve(__dirname, "..");
+
+  /*
+    HAI CÂU HỎI, HAI HẰNG SỐ.
+
+    Bậc trả lời "việc này đáng dùng model nào" — quyết định về TIỀN. Trần chờ trả lời "chờ MỘT
+    lượt gọi bao lâu thì bỏ". Trước 23/09/2026 chúng đi chung một núm, và cái giá đo được ở việc
+    TECH-6 (lượt chạy #41): vòng 1–3 xong, vòng 4 mang 98.734 token đệm đọc vượt trần 60 giây và
+    chết bằng `Request timed out` — $0,0891 đã tiêu, 0 tệp giao về.
+  */
+  assert.ok(
+    AGENT_LOOP_TIMEOUT_MS > TIMEOUT_BY_TIER.routine,
+    "vòng lặp agent phải có trần chờ RỘNG HƠN bậc routine — ngữ cảnh của nó phình theo số tệp đã đọc, nên lượt gọi cuối luôn nặng nhất",
+  );
+
+  /*
+    VÀ BẬC `routine` KHÔNG ĐƯỢC BỊ NỚI THEO. Nó còn phục vụ phân loại / tóm tắt trong ERP, nơi
+    chờ 5 phút cho một câu trả lời hai chữ là một màn hình treo trước mắt người dùng. Cách sửa dễ
+    nhất mà SAI là nâng `TIMEOUT_BY_TIER.routine` — khẳng định này khoá chiều ấy lại.
+  */
+  assert.ok(TIMEOUT_BY_TIER.routine <= 60_000, "không được nới trần chờ của bậc routine để chữa cho vòng lặp agent — đó là hai việc khác nhau");
+
+  /*
+    ĐƯỜNG NỐI PHẢI CÒN. Hằng số đúng mà nơi gọi không truyền nó thì bản vá nằm nguyên trong mã và
+    mất sạch tác dụng — đúng lớp lỗi đã bắt được ở ĐB19 lượt trước ("hàm đúng, đường nối đứt").
+  */
+  const runner = readFileSync(path.join(goc, "scripts/agent-run.ts"), "utf8");
+  assert.ok(runner.includes("hanChoMs: AGENT_LOOP_TIMEOUT_MS"), "runner phải truyền trần chờ của vòng lặp agent NGAY trong lời gọi getAiProvider");
+
+  /*
+    TRẦN CHỜ NẰM TRONG KHOÁ NHỚ.
+
+    Thiếu vế này thì lượt gọi nào tới TRƯỚC quyết định trần chờ cho mọi lượt sau trong cùng tiến
+    trình: một lượt `routine` của ERP chạy trước là agent nhận lại đúng provider 60 giây, và bản
+    vá im lặng mất tác dụng ở đúng những lần khó tìm nhất.
+  */
+  const prov = readFileSync(path.join(goc, "lib/ai/provider.ts"), "utf8");
+  const than = prov.slice(prov.indexOf("export function getAiProvider"));
+  assert.ok(!than.includes("cached.get(tier)"), "khoá nhớ KHÔNG được chỉ là bậc — trần chờ phải nằm trong khoá");
+  const iHanCho = than.indexOf("hanCho");
+  const iTra = than.indexOf("cached.get(");
+  assert.ok(iHanCho > 0 && iTra > 0 && iHanCho < iTra, "trần chờ phải được tính TRƯỚC khi tra bộ nhớ, nếu không nó không vào được khoá");
+
+  console.log(`✓ Trần chờ vòng lặp agent ${AGENT_LOOP_TIMEOUT_MS / 1000}s tách khỏi bậc routine ${TIMEOUT_BY_TIER.routine / 1000}s · runner truyền thật · trần chờ nằm trong khoá nhớ`);
 }

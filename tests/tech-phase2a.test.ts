@@ -538,6 +538,32 @@ export async function testAgentRunner() {
   assert.equal(rDo.gates.typecheck, "FAILED", "exit code THẬT quyết định cổng, không phải lời khai của agent");
   assert.equal(rDo.resultCommit, null, "cổng đỏ thì KHÔNG có commit nào");
 
+  // ───────── 4.5b TỆP TRONG THƯ MỤC MỚI PHẢI ĐƯỢC ĐẾM TỪNG TỆP ─────────
+  /*
+    `git status --porcelain` mặc định GỘP một thư mục chưa theo dõi thành một dòng `docs/xyz/`.
+    Đo ở việc TECH-6 (lượt chạy #42): agent tạo `docs/baselines/BASELINE-TEMPLATE.json`, sổ ghi
+    `docs/baselines/`, git sau commit thấy tên tệp đầy đủ — bước nghiệm thu đánh KHÔNG ĐẠT một
+    lượt chạy đã làm xong việc.
+
+    Lỗi chỉ lộ ra đúng lần agent tạo một THƯ MỤC MỚI, nên nó nằm im qua mọi lượt chạy trước. Bài
+    kiểm này dựng đúng tình huống ấy.
+  */
+  const idThuMuc = await taoViec("p2a-runner: agent tạo thư mục mới");
+  const ghiThuMucMoi = new ScriptedExecutor(async (job) => {
+    job.workspace.writeFile("docs/moi/a.md", "# a\n");
+    job.workspace.writeFile("docs/moi/b.md", "# b\n");
+    return { summary: "Đã ghi hai tệp trong một thư mục mới.", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
+  });
+  const rThuMuc = await runAgentOnTask({ taskId: idThuMuc, agentKey: "documentation", executor: ghiThuMucMoi, repoRoot: repo, baseCommit: base, actor: may, gates: ["typecheck"] });
+  assert.equal(rThuMuc.status, "SUCCEEDED", `phải chạy xong — ${rThuMuc.reason ?? ""}`);
+  assert.deepEqual(
+    [...rThuMuc.filesChanged].sort(),
+    ["docs/moi/a.md", "docs/moi/b.md"],
+    "phải đếm TỪNG TỆP — gộp thành `docs/moi/` là ghi sai vết kiểm toán, và làm bước nghiệm thu đánh trượt một lượt chạy đã xong việc",
+  );
+  const runThuMuc = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, rThuMuc.runId!) });
+  assert.deepEqual([...(runThuMuc?.filesChanged ?? [])].sort(), ["docs/moi/a.md", "docs/moi/b.md"], "và sổ phải giữ đúng danh sách ấy");
+
   // ───────── 4.6b AGENT KHAI KHÔNG LÀM ĐƯỢC ⇒ BLOCKED, KHÔNG COMMIT, KHÔNG CHẠY CỔNG ─────────
   /*
     Lượt chạy #39 (việc TECH-5, 22/09/2026) nhận một đề bài đòi ĐO PRODUCTION, thứ máy Actions
