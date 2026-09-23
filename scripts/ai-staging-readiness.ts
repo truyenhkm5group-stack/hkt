@@ -184,12 +184,50 @@ async function main() {
     Number(pl?.human ?? 0) === 0 ? undefined : "ops ai-staging-reclassify, arg: --apply",
   );
 
-  // ───── 8. HỘI THOẠI ĐANG BỊ CHẶN VÌ NGƯỜI ĐANG CẦM ─────
-  const [cam] = await db
-    .select({ n: sql<number>`count(*)` })
+  /*
+    ───── 8. HỘI THOẠI BỊ CHẶN VÌ "NGƯỜI ĐANG CẦM" — HỎI CỜ ẤY DO ĐÂU MÀ CÓ ─────
+
+    Lượt đo đầu in "208 cuộc — đúng luật" và câu đó ru ngủ. Mẻ chạy ngầm 23/09/2026 cho thấy
+    **9/12 hội thoại có tin khách thật đều dừng ở đúng cửa này**, và dòng "NGƯỜI" của chúng là
+    một THÔNG BÁO NỀN TẢNG ("X đã trả lời một quảng cáo"), không phải câu của ai cả.
+
+    Cờ ấy là DI SẢN: hồi ERP còn xếp toàn bộ 4.749 tin phía shop là NGƯỜI, mọi hội thoại có bot
+    Gemini trả lời đều bị đánh dấu "người đang cầm". Phân loại đã vá (PAGE_HUMAN nay là 0) nhưng
+    lượt vá CỐ Ý không chạm `human_takeover_at` — đoán hộ một quyết định bàn giao là việc không
+    được làm (luật 35). Hệ quả: cờ còn nguyên, và nó DÍNH — khách nhắn ngày mai trong đúng những
+    cuộc ấy vẫn không có bản nháp nào.
+
+    Nên cửa này phải tách ba, vì ba nhóm có ba cách xử lý khác hẳn:
+      · NGƯỜI THẬT bấm nhận việc   ⇒ đúng luật, không đụng tới;
+      · máy đặt cờ, page CÒN tin người ⇒ CHƯA RÕ, phải xem từng cuộc;
+      · máy đặt cờ, page KHÔNG còn tin nào của người ⇒ bằng chứng sinh ra cờ KHÔNG CÒN TỒN TẠI.
+  */
+  const [chan] = await db
+    .select({
+      tong: sql<number>`count(*)`,
+      nguoiThat: sql<number>`count(*) filter (where ${schema.salesConversations.takeoverByUserId} is not null)`,
+      mayDat: sql<number>`count(*) filter (where ${schema.salesConversations.takeoverByUserId} is null)`,
+      mayDatKhongConChungCu: sql<number>`count(*) filter (
+        where ${schema.salesConversations.takeoverByUserId} is null
+          and not exists (
+            select 1 from sales_messages m
+            where m.conversation_id = ${schema.salesConversations.id}
+              and m.sender_type = 'PAGE_HUMAN'
+          )
+      )`,
+    })
     .from(schema.salesConversations)
     .where(sql`${schema.salesConversations.humanTakeoverAt} is not null`);
-  ghi("8. Hội thoại người đang cầm", "SAN_SANG", `${cam?.n ?? 0} cuộc — AI im ở những cuộc này (đúng luật). Cuộc MỚI không bị ảnh hưởng.`);
+  const moCoi = Number(chan?.mayDatKhongConChungCu ?? 0);
+  ghi(
+    "8. Hội thoại người đang cầm",
+    moCoi > 0 ? "CHUA" : "SAN_SANG",
+    `tổng ${chan?.tong ?? 0} · NGƯỜI THẬT bấm nhận ${chan?.nguoiThat ?? 0} · máy đặt cờ ${chan?.mayDat ?? 0}` +
+      (moCoi > 0 ? ` · trong đó ${moCoi} cuộc KHÔNG CÒN một tin nào của người ⇒ cờ là di sản của lần phân loại sai đã vá` : ""),
+    moCoi > 0
+      ? `${moCoi} cuộc này sẽ IM LẶNG cả với tin khách MỚI — cần chủ shop duyệt một lượt gỡ cờ (chỉ nhóm máy tự đặt, không đụng cuộc người thật cầm)`
+      : undefined,
+  );
 
   // ───── 9. BẢNG SỐ ĐO ─────
   const bang = await getSettingValue<unknown>("ai.sizeRules", null);
