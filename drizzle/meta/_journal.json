@@ -792,6 +792,13 @@
       "when": 1789994488245,
       "tag": "0113_production_department",
       "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "7",
+      "when": 1789998088245,
+      "tag": "0114_department_sort_order",
+      "breakpoints": true
     }
   ]
 }
