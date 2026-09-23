@@ -95,6 +95,13 @@ Tệp toàn văn `TECH-5-perf-probe-raw-2026-09-22.txt` chỉ có **47 dòng, đ
 `JIT:` nào. Nên **từ các tệp này không xác định được JIT góp bao nhiêu** vào `7.948 ms` — có thể phần
 lớn, có thể không đáng kể. Đó là **CHƯA ĐO ĐƯỢC**, không phải "không có JIT".
 
+> **ĐÃ ĐO — 23/09/2026, sau khi viết mục trên.** Xem `docs/perf/JIT-bat-tat-2026-09-23.md`: với
+> đúng hình dạng câu này (`count(*) filter (where … canonical_order_outcome …)`), đo xen kẽ JIT
+> bật / JIT tắt, trung vị 3 lượt mỗi bên — JIT bật **8.425 ms**, JIT tắt **43 ms**, tức **99 %**
+> thời gian là Postgres biên dịch câu lệnh. Câu hỏi "JIT góp bao nhiêu" thôi là CHƯA ĐO ĐƯỢC cho
+> hình dạng này. Lượt đo ấy cũng tìm ra một chỗ đường ứng dụng THẬT chạy nó mà không tắt JIT
+> (`lib/queries/metric-resolver.ts`) — đã sửa.
+
 **Hệ quả cho người dùng tệp này:**
 
 1. Đừng dựng ưu tiên tối ưu trên riêng các thời gian EXPLAIN ở đây. Chúng chỉ ra **hình dạng** kế
