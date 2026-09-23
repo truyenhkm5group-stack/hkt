@@ -108,9 +108,22 @@ const results: {
  * Lượt đo đầu tiên đã lấp đệm cho các lượt sau: `getControlTower` từng ra 0ms chỉ vì trang chủ vừa
  * gọi nó xong. Không xoá thì bảng xếp hạng nói dối, và ta đi sửa nhầm hàm.
  */
+/**
+ * ═══════ CÂU CHẬM BÊN TRONG MỘT HÀM TRỌNG ĐIỂM ═══════
+ *
+ * Danh sách "tám câu chậm nhất" là của CẢ lượt đo, nên một hàm 8,6 giây rải trên 22 câu lệnh
+ * (Báo cáo lợi nhuận danh nghĩa, đo 23/09/2026 sau khi đã tắt JIT hai câu lớn) bị các trang có
+ * một câu 16 giây che mất hoàn toàn — không biết phải sửa câu nào. Hàm khớp mẫu dưới đây được ghi
+ * lại MỌI câu từ 50ms trở lên trong lượt NGUỘI, in thành một mục riêng.
+ */
+const TRONG_DIEM = /getNominalProfitReport|getMarketerDailyNominal/;
+let cauTrongHam: { ms: number; sql: string }[] | null = null;
+const cauTheoHam = new Map<string, { ms: number; sql: string }[]>();
+
 async function timed(page: string, fn: string, run: () => Promise<unknown>) {
   clearMemo();
   lapHienTai = new Map();
+  cauTrongHam = TRONG_DIEM.test(fn) ? [] : null;
   const dbBefore = dbMs;
   const callsBefore = dbCalls;
   const rowsBefore = dbRows;
@@ -121,6 +134,8 @@ async function timed(page: string, fn: string, run: () => Promise<unknown>) {
   try {
     const out = await run();
     const ms = Date.now() - t0;
+    if (cauTrongHam) cauTheoHam.set(fn, [...cauTrongHam].sort((a, b) => b.ms - a.ms).slice(0, 15));
+    cauTrongHam = null;
 
     /*
       LƯỢT THỨ HAI: ĐỆM CÒN NGUYÊN.
@@ -184,6 +199,36 @@ async function main() {
     const original = pg.Pool.prototype.query;
 
     /*
+      CÂU TRONG GIAO DỊCH KHÔNG ĐI QUA `Pool.query`.
+
+      `chayKhongJit` mở giao dịch trên một kết nối riêng rồi gọi `client.query` — nên mọi câu đã
+      được tắt JIT đều VÔ HÌNH với bộ đếm bên dưới. Mục "câu chậm bên trong hàm trọng điểm" cần
+      thấy cả hai đường, nên nó bọc `Client.query` (đường chung của cả pool lẫn giao dịch). Chỉ
+      mục ấy đọc lớp bọc này: `Pool.query` gọi xuống `Client.query`, đếm cả hai vào `dbMs` là đếm
+      trùng.
+    */
+    {
+      const client = (pg as unknown as { Client: { prototype: { query: (...args: unknown[]) => unknown } } }).Client.prototype;
+      const goc = client.query;
+      client.query = function boc(...args: unknown[]) {
+        const out = goc.apply(this, args as never);
+        const cau = cauTrongHam;
+        const text = typeof args[0] === "string" ? args[0] : String((args[0] as { text?: string } | undefined)?.text ?? "");
+        if (cau && text && out && typeof (out as Promise<unknown>).then === "function") {
+          const t0 = Date.now();
+          (out as Promise<unknown>).then(
+            () => {
+              const ms = Date.now() - t0;
+              if (ms >= 50) cau.push({ ms, sql: text.replace(/\s+/g, " ").trim().slice(0, 180) });
+            },
+            () => undefined,
+          );
+        }
+        return out;
+      };
+    }
+
+    /*
       ĐO THỜI GIAN XẾP HÀNG XIN KẾT NỐI.
 
       `Pool.query` bên trong gọi `Pool.connect`. Bọc `connect` thì đo được đúng phần mà đồng hồ của
@@ -224,6 +269,9 @@ async function main() {
      * chẩn đoán trước đều phải đoán, và đoán sai hai lần. Bộ đo phải tự trả lời câu đó.
      */
     const ghiCham = (sqlText: string, ms: number, params: unknown[] = []) => {
+      // Đường POOL (không giao dịch). Đường giao dịch do lớp bọc `Client.query` ở trên ghi — `Pool.query`
+      // gọi xuống client ở dạng callback nên lớp bọc kia không thấy nó, hai nguồn không trùng nhau.
+      if (cauTrongHam && ms >= 50) cauTrongHam.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 180) });
       if (ms < 200) return;
       // Giữ NGUYÊN VĂN đầy đủ + tham số để lát nữa chạy EXPLAIN ANALYZE trên đúng câu đó.
       chamNhat.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 600), full: sqlText, params });
@@ -365,6 +413,8 @@ async function main() {
   */
   const nominal = await import("@/lib/queries/profit-nominal");
   await timed("/reports?tab=nominal", "getNominalProfitReport 30 ngày", () => nominal.getNominalProfitReport(month, "ORDERED"));
+  const mdn = await import("@/lib/queries/marketer-daily-nominal");
+  await timed("/ads/daily", "getMarketerDailyNominal 30 ngày", () => mdn.getMarketerDailyNominal(month));
   await timed("/reports?tab=nominal", "resolveAssumptions", () => nominal.resolveAssumptions());
   await timed("/reports?tab=nominal", "productReturnHistory 90 ngày", () => nominal.productReturnHistory(90));
   await timed("/reports?tab=nominal", "purchaseByProduct 30 ngày", () => nominal.purchaseByProduct(month));
@@ -709,6 +759,12 @@ async function main() {
       }
     }
     await pool.end().catch(() => undefined);
+  }
+
+  console.log("\n── CÂU CHẬM BÊN TRONG TỪNG HÀM TRỌNG ĐIỂM (lượt nguội, từ 50ms) ──");
+  for (const [fn, cau] of cauTheoHam) {
+    console.log(`\n  ${fn}: ${cau.length ? "" : "(không câu nào từ 50ms)"}`);
+    for (const c of cau) console.log(`    ${String(c.ms).padStart(6)}ms  ${c.sql}`);
   }
 
   console.log("\n── TÁM CÂU LỆNH SQL CHẬM NHẤT (nguyên văn, cắt 600 ký tự) ──");
