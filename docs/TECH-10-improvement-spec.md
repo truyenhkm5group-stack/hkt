@@ -1,6 +1,6 @@
 # TECH-10 · Đặc tả cải thiện xếp theo chi phí/lợi ích
 
-**Phạm vi:** T2–T6 · Ghi ngày 2026-09-24  
+**Phạm vi:** T2–T6 · Ghi ngày 2026-09-24 · Sửa 2026-09-25  
 **Số đo:** Từ production 22–23/09/2026, thử nghiệm local 09/09/2026  
 **Tiêu chí:** Mỗi phương án nêu rõ % cải thiện dự tính, chi phí dev (ngày), rủi ro, tệp thay đổi, và ràng buộc hợp đồng  
 
@@ -9,6 +9,8 @@
 ## Tóm tắt tình hình
 
 **Nguyên nhân chậm:** Năm trong tám truy vấn chậm nhất production là một hình dạng: gộp `orders` + `shipments` rồi lặp lại hàng loạt SubPlan kiểm tra `canonical_order_outcome` và `shipment_events` mà không có JOIN chính. Thực thi plan chạy hơn 7.9 giây chỉ để duyệt một bảng `orders` có 1.401 dòng (docs/perf/TECH-5-so-do-tho-2026-09-22.md).
+
+**Ghi chú quan trọng:** Con số 7.948 ms trong tệp TECH-5 là đo từ ngoài `chayKhongJit` — không phải điều kiện đường người dùng đi thực tế. Tệp cũng ghi: "Chênh lệch ấy không giải thích được bằng việc đọc dòng." Nên phần ưu tiên phía dưới đã được thay đổi để tránh dựa vào con số này.
 
 **Hệ quả:**
 - `/data-quality?issue=unlinked-shipment` mất **53,98 giây**, trong đó **53,1 giây** chờ dữ liệu
@@ -79,7 +81,7 @@ Giải pháp: Dùng con trỏ (cursor-based) — hiển thị "Xem thêm" thay v
 
 ### Ước lượng cải thiện
 
-- **Count query**: loại bỏ 8,6 giây cho từng lần load (**ƯỚC TÍNH** dựa trên TECH-5 measurement của SubPlan loops)
+- **Count query**: loại bỏ 8,6 giây cho từng lần load (**ƯỚC TÍNH** dựa trên TECH-5 measurement)
 - **Thời gian tải trang** → giảm **30–40%** (ƯỚC TÍNH, nếu COUNT là 8,6s trên tổng 24s)
 - **Scale tốt hơn:** ở scale 100× vẫn chỉ `LIMIT N+1` (~10ms), không tăng với kích thước
 
@@ -109,56 +111,20 @@ Giải pháp: Dùng con trỏ (cursor-based) — hiển thị "Xem thêm" thay v
 
 ---
 
-## Phương án 3: Thêm index trên `orders.stage` + `shipments.order_id`
+## Phương án 3: Loại bỏ N+1 queries — gộp SubPlan vào JOIN chính
 
 ### Vì sao
 
-TECH-7 chỉ ra `Seq Scan on orders` mất 7,9 giây dù chỉ 1.401 dòng. Lý do: bảng có Filter `stage in (...)` trên column không có index. `orders_stage_inserted_idx` tồn tại nhưng là **composite index** `(stage, inserted_at)`, và khi WHERE clause không dùng `inserted_at` trước thì planner có thể bỏ qua index ấy.
+Kế hoạch thực thi hiện có **157 SubPlan** (docs/perf/explain-before.txt). Mỗi SubPlan là `Index Scan` ở mức **0,003 ms**, nên chúng **không phải là chỗ tốn thời gian** (docs/perf/TECH-5-so-do-tho-2026-09-22.md, phần "BỔ SUNG 23/09/2026").
 
-Giải pháp: Thêm index riêng `CREATE INDEX orders_stage_idx ON orders (stage)` để planner bắt buộc dùng.
+**Sửa từ phiên bản cũ:** Lần trước tôi tính "157 × 0,003 ms ≈ 6 s tiết kiệm" — **sai toán học** (157 × 0,003 ms = 0,47 ms). Ngay cả dùng 4.802 loops tối đa trong kế hoạch cũng chỉ ≈ 4,8 ms × 0,003 ms = 14 ms. Vì SubPlan đã chỉ là 0,003 ms, loại bỏ chúng **không thể cải thiện gì đáng kể** về thời gian.
 
-### Ước lượng cải thiện
-
-- **Seq Scan → Index Scan:** 7,9 s → ~0,2–0,5 s (40× nhanh hơn) — dựa trên so sánh Seq Scan on orders (7.948 ms) vs Index Scan trên `shipment_events` (0.003 ms) trong explain-before.txt
-- **Tổng thời gian truy vấn**: 8,6 s → ~1–2 s (giảm **75%**)
-- Phụ thuộc vào cache warm — nếu index trong cache thì ~0,1 s
-
-### Chi phí
-
-- **Dev:** 0,5 ngày (write migration với `CREATE INDEX CONCURRENTLY`)
-- **Testing:** 0,25 ngày (chạy EXPLAIN, kiểm tra planner dùng index)
-- **Deploy:** Cần chạy `CREATE INDEX CONCURRENTLY` trong khung giờ yên (không lock bảng)
-- **Total:** 1 ngày
-
-### Rủi ro
-
-- **Trung bình** — Index làm chậm INSERT/UPDATE `orders` một chút (~1–2%)
-- **Lợi ích > chi phí** vì SELECT này chạy hằng ngày, INSERT ít hơn
-
-### Tệp chạm
-
-- `db/migrations/202X_XX_XX_add_orders_stage_index.ts` (NEW)
-
-### Trạng thái hợp đồng
-
-✓ **Không đổi** — chỉ là tối ưu cơ sở dữ liệu, không sửa API
-
----
-
-## Phương án 4: Loại bỏ N+1 queries — gộp SubPlan vào JOIN chính
-
-### Vì sao
-
-Kế hoạch thực thi hiện có **157 SubPlan** (docs/perf/explain-before.txt), trong đó:
-- **SubPlan 156** chạy 1.170 lần: `SELECT EXISTS (... shipments_order_idx ...)`
-- **SubPlan 157** chạy 85 lần: `LIMIT 1 ORDER BY stage DESC, attempt_no DESC` (tìm shipment "DELIVERED" đầu tiên)
-
-Mỗi SubPlan này lặp lại 1–10k lần. Giải pháp: Viết lại query dùng `LEFT JOIN` + `DISTINCT ON` thay vì SubPlan, hoặc dùng window function `ROW_NUMBER()` để chỉ lấy vận đơn tốt nhất mỗi lần.
+Lý do chậm nằm ở chỗ khác: filter biểu thức `CASE` dài trên từng dòng `orders` (1.401 dòng mất 7.948 ms), không phải SubPlan. **Phương án này hạ xuống ưu tiên thấp hơn** vì căn cứ cũ không đứng.
 
 ### Ước lượng cải thiện
 
-- **SubPlan loops giảm từ 4.802 → 1** (một lần) — từ explain-before.txt
-- **Thời gian execution:** 8,6 s → ~0,5–1 s (cải **85%**) — ƯỚC TÍNH dựa trên nếu loại bỏ 157 SubPlan mà mỗi lần 0,003 ms thì ~6 s tiết kiệm, cộng chi phí JOIN thêm
+- **KHÔNG CÓ SỐ ĐO CHÍNH XÁC** cho phần rút gọn SubPlan. Nếu loại bỏ được, tiết kiệm chỉ ≈ 14 ms tối đa (chưa đo).
+- **Khả năng cải thiện thực tế: < 5%** — đo lại yêu cầu EXPLAIN BÊN TRONG chayKhongJit
 
 ### Chi phí
 
@@ -184,7 +150,7 @@ Mỗi SubPlan này lặp lại 1–10k lần. Giải pháp: Viết lại query d
 
 ---
 
-## Phương án 5: Chuyển tính toán xuống SQL (computation pushdown) — tính `order_cogs`, `product_facts` ở database
+## Phương án 4: Chuyển tính toán xuống SQL (computation pushdown) — tính `order_cogs`, `product_facts` ở database
 
 ### Vì sao
 
@@ -213,7 +179,7 @@ GROUP BY o.id;
 ### Ước lượng cải thiện
 
 - **1.000 query → 1 query**: 1.000 × 0,3 s → 0,5 s
-- **Tiết kiệm:** 300 s → 0,5 s = **99% giảm** — ƯỚC TÍNH dựa trên pattern N+1 điển hình
+- **Tiết kiệm:** 300 s → 0,5 s = **99% giảm** — (**ƯỚC TÍNH** dựa trên pattern N+1 điển hình)
 - Trang `/profit` hoặc báo cáo: từ **10–15 s → 0,5–1 s**
 
 ### Chi phí
@@ -239,33 +205,37 @@ GROUP BY o.id;
 
 ---
 
-## Phương án 6: Cache ngắn hạn (5–15 phút) cho bảng "chất lượng dữ liệu"
+## Phương án 5: Cache ngắn hạn (5–15 phút) dùng memo cho bảng "chất lượng dữ liệu"
 
 ### Vì sao
 
-Trang `/data-quality` hiển thị các check một lần (hoặc ít khi), nhưng mỗi lần load vẫn chạy query 8,6 giây. Giải pháp: Cache kết quả 5–15 phút, dùng `stale-while-revalidate` để refresh lặng lẽ.
+Trang `/data-quality` hiển thị các check một lần (hoặc ít khi), nhưng mỗi lần load vẫn chạy query 8,6 giây. ERP dùng hàm `memo()` (lib/cache.ts) — cache trong tiến trình với stale-while-revalidate, không dùng Redis.
+
+Giải pháp: Dùng `memo()` để cache kết quả 5–15 phút:
 
 ```typescript
 // app/actions/data-quality.ts
-const cachedResult = await redis.get('data-quality-checks');
-if (cachedResult) {
-  return JSON.parse(cachedResult);
+import { memo } from '@/lib/cache';
+
+export async function fetchDataQuality() {
+  return memo('data-quality-checks', 5 * 60_000, async () => {
+    return await db.query(/* 8,6 giây */);
+  });
 }
-const result = await db.query(/* 8,6 giây */);
-await redis.setex('data-quality-checks', 300, JSON.stringify(result)); // 5 phút
-return result;
 ```
 
 ### Ước lượng cải thiện
 
 - **Lần thứ nhất:** 8,6 s (không cache)
-- **Lần 2–k (trong 5 phút):** ~0,01 s (từ Redis) — ƯỚC TÍNH dựa trên latency Redis điển hình
-- **Trung bình trên người dùng nhiều:** giảm **90%+**
-- **Rủi ro:** Thông tin không real-time, cách 5 phút
+- **Lần 2–k (trong 5 phút):** ~0,01 ms (từ đệm tiến trình)
+- **Trên người dùng nhiều:** giảm **99%+** (nếu trafic cao)
+- **RỦI RO THỰC:** Nếu trafic thấp (< 1 lần/5 phút), mỗi lần vẫn chờ 8,6 s → **không cải thiện**
+
+**CHƯA ĐO ĐƯỢC:** Chưa có số đo độ trễ của `memo()` khi cache hit. Câu lệnh này bảo đó chỉ là ~0,01 ms, nhưng cần xác thực trên production.
 
 ### Chi phí
 
-- **Dev:** 1–2 ngày (thêm cache layer, handle invalidation khi có INSERT/UPDATE)
+- **Dev:** 1–2 ngày (wrap query bằng `memo()`, handle invalidation khi có INSERT/UPDATE)
 - **Testing:** 0,5 ngày
 - **Total:** 1,5–2 ngày
 
@@ -273,12 +243,13 @@ return result;
 
 - **Thấp–Trung** — nếu invalidation tốt
 - Rủi ro cao nếu quên invalidate cache khi dữ liệu thay đổi
+- Cần ghi rõ TTL: 5 phút có lợi gì nếu trafic chỉ 1 lần/giờ?
 
 ### Tệp chạm
 
-- `app/actions/data-quality.ts` (thêm Redis wrapper)
-- `lib/cache.ts` (NEW — cache helper)
-- `lib/redis.ts` (kiểm tra config)
+- `app/actions/data-quality.ts` (wrap `memo()`)
+- `lib/cache.ts` (already exists — không cần đổi)
+- `app/cron/invalidate-checks.ts` (NEW — invalidate khi dữ liệu đổi)
 
 ### Trạng thái hợp đồng
 
@@ -286,7 +257,7 @@ return result;
 
 ---
 
-## Phương án 7: Migration — bảng fact table denormalized (rủi ro cao, cần review riêng)
+## Phương án 6: Migration — bảng fact table denormalized (rủi ro cao, cần review riêng)
 
 ### Vì sao
 
@@ -311,7 +282,7 @@ Cập nhật bảng này mỗi khi `canonical_order_outcome` thay đổi (via tr
 ### Ước lượng cải thiện
 
 - **Join phức tạp → Index Scan đơn giản**: 8,6 s → ~0,2 s
-- **Tổng trang:** 24 s → 2–3 s (giảm **90%**) — ƯỚC TÍNH
+- **Tổng trang:** 24 s → 2–3 s (giảm **90%**) — (**ƯỚC TÍNH**)
 
 ### Chi phí
 
@@ -345,41 +316,12 @@ Cập nhật bảng này mỗi khi `canonical_order_outcome` thay đổi (via tr
 
 | Thứ tự | Phương án | Effort (ngày) | Cải thiện | Rủi ro | Ưu tiên | Ghi chú |
 |---|---|---|---|---|---|---|
-| 1 | **Thêm index orders.stage** | 1 | 75% | Thấp | NGAY | Deploy trong 1 ngày, hiệu quả tức thì |
-| 2 | **Loại bỏ N+1 (SubPlan)** | 4–5 | 85% | Cao | T+1 TUẦN | Cần TECH-7 verify logic |
-| 3 | **Giảm payload /ads** | 3–4 | 60% | Thấp | T+1 TUẦN | Bổ sung nếu /ads vẫn chậm |
-| 4 | **Cursor-based pagination** | 3–4 | 30–40% | Trung | T+2 TUẦN | UX thay đổi, cần product approval |
-| 5 | **Computation pushdown** | 3–4 | 99% (profit) | Thấp | T+3 TUẦN | Chỉ cải `/profit`, không chạm trang khác |
-| 6 | **Cache 5–15 phút** | 1,5–2 | 90% (cache hit) | Trung | T+3 TUẦN | Nhanh triển khai, lợi ích nếu trafic cao |
-| 7 | **Fact table (migration)** | 7–10 | 90% | Rất cao | KHÔNG LÀM NGAY | Cuối cùng, cần reviewer senior |
-
----
-
-## Lộ trình T2–T6 (khuyến nghị)
-
-### Tuần 1 (T2–T3)
-
-1. **TECH-3** (Phương án 3): Thêm index `orders.stage` — 1 ngày
-   - PR, deploy, monitor production
-   
-2. **TECH-7** analyze (song song): Xác nhận logic N+1, viết lại query draft
-
-### Tuần 2 (T4–T5)
-
-3. **TECH-11** (Phương án 4): Loại bỏ N+1 — 4–5 ngày
-   - Sửa `/data-quality`, `/cod`, `/customers`
-   - Regression test
-   
-4. **TECH-12** (Phương án 1): Fact table `/ads` — 3–4 ngày (song parallel nếu có bandwidth)
-
-### Tuần 3 (T6+)
-
-5. **TECH-13** (Phương án 5): Cursor pagination hoặc Computation pushdown — 3–4 ngày
-6. **TECH-14** (Phương án 6): Cache layer — 1,5–2 ngày
-
-### Chưa chỉ định
-
-7. **Phương án 7 (Fact table migration)**: Dành nếu sau T1–T3 vẫn cần cải thêm 30% nữa
+| 1 | **Giảm payload /ads** | 3–4 | 60% | Thấp | NGAY | Rõ ràng, hiệu quả tức thì |
+| 2 | **Cursor-based pagination** | 3–4 | 30–40% | Trung | T+1 TUẦN | UX thay đổi, cần product approval |
+| 3 | **Computation pushdown** | 3–4 | 99% (profit) | Thấp | T+1 TUẦN | Chỉ cải `/profit`, không chạm trang khác |
+| 4 | **Loại bỏ N+1 (SubPlan)** | 4–5 | < 5% | Cao | T+2 TUẦN | Cần đo lại BÊN TRONG chayKhongJit; rủi cao |
+| 5 | **Cache memo 5–15 phút** | 1,5–2 | 90% (nếu trafic cao) | Trung | T+2 TUẦN | CHƯA ĐO độ trễ memo hit; phụ thuộc trafic |
+| 6 | **Fact table (migration)** | 7–10 | 90% | Rất cao | KHÔNG LÀM NGAY | Cuối cùng, cần reviewer senior |
 
 ---
 
@@ -395,13 +337,12 @@ Cập nhật bảng này mỗi khi `canonical_order_outcome` thay đổi (via tr
 
 ### Hợp đồng API (API CONTRACT)
 
-- **Phương án 1–5, 7:** Cấu trúc JSON trả về không đổi → ✓ Hợp đồng giữ nguyên
+- **Phương án 1, 3–6:** Cấu trúc JSON trả về không đổi → ✓ Hợp đồng giữ nguyên
 - **Phương án 2 (Cursor pagination):** Loại bỏ `totalCount`, thêm `hasNext` → ⚠ Cần product approval
 
 ### Ràng buộc migration
 
-- **Phương án 3:** `CREATE INDEX CONCURRENTLY` — không lock table
-- **Phương án 7:** Cần trigger + backfill — rủi ro cao, cần test staging trước 2 tuần
+- **Phương án 6:** Cần trigger + backfill — rủi ro cao, cần test staging trước 2 tuần
 
 ---
 
@@ -410,11 +351,12 @@ Cập nhật bảng này mỗi khi `canonical_order_outcome` thay đổi (via tr
 | Dữ liệu | Tệp |
 |---|---|
 | Truy vấn chậm nhất | docs/perf/TECH-5-perf-probe-raw-2026-09-22.txt |
-| Plan phân tích | docs/perf/explain-before.txt |
+| Plan phân tích + BỔ SUNG 23/09/2026 | docs/perf/TECH-5-so-do-tho-2026-09-22.md |
+| Explain bên ngoài chayKhongJit | docs/perf/explain-before.txt |
 | Số đo smoke production | docs/perf/TECH-6-TECH-9-so-do-tho-2026-09-23.md |
 | So sánh trước/sau (scale 1) | docs/perf/before-scale1.json, after-scale1.json |
 | So sánh trước/sau (scale 4) | docs/perf/before-scale4.json, after-scale4.json |
 
 ---
 
-**Lập bởi:** Phòng Tech AI · Ngày 2026-09-24
+**Lập bởi:** Phòng Tech AI · Ngày 2026-09-24 · Sửa 2026-09-25
