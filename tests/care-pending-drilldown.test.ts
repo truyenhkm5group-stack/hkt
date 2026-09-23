@@ -79,7 +79,9 @@ export async function testCarePendingDrilldown(db: Db) {
   // 2 · A đã đóng, ĐVVC đã giao nhưng đợt chưa chốt (lỗi CARRIER_FINISHED)
   await gieo(db, "f", { stage: "DELIVERED", vtpStatus: 501, vtpStatusName: "Phát thành công" }, [{ ownerId: A, doneAt: gio(30) }]);
   // 3 · kiện có hai đợt, CHƯA kết thúc: đợt 1 (A) chờ chốt cùng kiện, đợt 2 đang mở chưa ai nhận
-  await gieo(db, "s", { vtpStatus: 506, vtpStatusName: "Tồn - khách nghỉ" }, [{ ownerId: A, doneAt: gio(40) }, { active: true, careStatus: "NEW" }]);
+  // Đợt 2 mở SAU lúc đợt 1 đóng — một lần mở lại THẬT. Mở trước lúc đóng mà không có sự kiện ĐVVC
+  // xen giữa là bản sao do lỗi cũ (luật 62) và bị loại khỏi mọi con số — không phải thứ bài này đo.
+  await gieo(db, "s", { vtpStatus: 506, vtpStatusName: "Tồn - khách nghỉ" }, [{ ownerId: A, doneAt: gio(40) }, { active: true, careStatus: "NEW", openedAt: gio(30) }]);
   // 4 · đã chốt, A cầm lúc chốt
   await gieo(db, "d", { stage: "DELIVERED", vtpStatus: 501 }, [{ careOutcome: "RESCUED_DIRECT", ownerId: A, ownerAtResolution: A, outcomeAt: gio(5) }]);
   // 5 · ca lịch sử chưa kết luận, A cầm — trước đây biến mất khỏi bảng

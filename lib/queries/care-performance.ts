@@ -7,6 +7,7 @@ import { TIMING_MIN_SAMPLE } from "@/lib/constants/care-timing";
 import { CARE_OUTCOMES, OUTCOME_IS_FINAL, rescueRates, type CareOutcome, type RescueCounts } from "@/lib/constants/care-outcome";
 import type { Period } from "@/lib/search-params";
 import type { ShipmentStage } from "@/db/schema";
+import { laBanSaoCuSql } from "@/lib/care/reopen-sql";
 import { diagnosePending, type PendingDiagnosis, type QueueView } from "@/lib/care/pending-diagnosis";
 import { getCareQueue } from "@/lib/queries/care-workbench";
 
@@ -66,6 +67,8 @@ export type RescueSummary = RescueCounts & {
   finished: number;
   /** Ca mở trong kỳ — trả lời câu hỏi KHỐI LƯỢNG, khác hẳn con số hiệu suất. */
   openedInPeriod: number;
+  /** Đợt là bản sao do lỗi mở ca cũ (luật 62) — nằm ngoài MỌI con số ở đây, đếm riêng để in ra. */
+  falseReopenExcluded: number;
 };
 
 /** Kỳ áp lên mốc nào. Hai câu hỏi khác nhau nên UI phải nói rõ đang đọc cái nào. */
@@ -98,19 +101,34 @@ const MAU_THUAN = (cot: SQL) =>
   sql`${cot} is not null and ca.opened_at is not null and ${cot} < ca.opened_at - make_interval(mins => ${CLOCK_SKEW_TOLERANCE_MIN})`;
 
 /** Đợt đóng vì không phải điều kiện care (`NOT_CARE_CONDITION`) nằm ngoài mọi thống kê cứu đơn. */
-const LA_CA_CARE = or(isNull(sc.resolution), sql`${sc.resolution} <> ${NOT_CARE_CONDITION}`);
+const KHONG_BI_LOAI = or(isNull(sc.resolution), sql`${sc.resolution} <> ${NOT_CARE_CONDITION}`)!;
+
+/*
+  ═══ BẢN SAO DO LỖI MỞ CA CŨ KHÔNG PHẢI MỘT CA (luật 62) ═══
+
+  Trang kiểm tra ca đã loại `FALSE_REOPEN_LEGACY` khỏi mẫu số từ 18/09, nhưng bảng hiệu suất người
+  thì chưa — nên cùng một kiện được đếm nhiều lần cạnh tên nhân viên. PKE1517808423 (đo production
+  23/09/2026): 4 đợt, cả 4 "Không cứu được", trong đó đợt 3 và 4 là bản sao do bộ đối chiếu dựng
+  lại vô cớ ngày 16/09. Một kiện hoàn thành bốn lần thất bại của đội.
+
+  Chỉ loại `FALSE_REOPEN_LEGACY` (mốc không mới hơn lúc đóng VÀ không có sự kiện ĐVVC xen giữa).
+  `REOPEN_UNVERIFIED` VẪN đếm. Số đợt bị loại được đếm riêng (`falseReopenExcluded`) và in ra màn
+  hình — loại mà không nói là giấu (luật 45).
+*/
+const BAN_SAO_CU = laBanSaoCuSql({ shipmentId: sc.shipmentId, episodeNo: sc.episodeNo, openedAt: sc.openedAt, createdAt: sc.createdAt });
+const LA_CA_CARE = and(KHONG_BI_LOAI, sql`not ${BAN_SAO_CU}`)!;
 
 const KET_CUC_CUOI = (CARE_OUTCOMES as readonly CareOutcome[]).filter((o) => OUTCOME_IS_FINAL[o]);
 
 /** Ca ĐÃ CHỐT trong kỳ (theo `outcome_at`). */
-function daChotTrongKy(period: Period): SQL {
-  return and(LA_CA_CARE, inArray(sc.careOutcome, KET_CUC_CUOI), ...trongKy("OUTCOME", period))!;
+function daChotTrongKy(period: Period, laCa: SQL = LA_CA_CARE): SQL {
+  return and(laCa, inArray(sc.careOutcome, KET_CUC_CUOI), ...trongKy("OUTCOME", period))!;
 }
 
 /** Ca CHƯA CHỐT tính tới cuối kỳ: mở trước cuối kỳ, kết cục rỗng hoặc sau cuối kỳ. */
-function chuaChotCuoiKy(period: Period): SQL {
+function chuaChotCuoiKy(period: Period, laCa: SQL = LA_CA_CARE): SQL {
   return and(
-    LA_CA_CARE,
+    laCa,
     or(isNull(sc.careOutcome), inArray(sc.careOutcome, (CARE_OUTCOMES as readonly CareOutcome[]).filter((o) => !OUTCOME_IS_FINAL[o]))),
     period.to ? lte(sc.openedAt, period.to) : undefined,
     period.to ? or(isNull(sc.outcomeAt), gt(sc.outcomeAt, period.to)) : isNull(sc.outcomeAt),
@@ -118,8 +136,13 @@ function chuaChotCuoiKy(period: Period): SQL {
 }
 
 /** Tập ca của báo cáo hiệu suất: đã chốt trong kỳ ∪ chưa chốt tính tới cuối kỳ. */
-function tapCaHieuSuat(period: Period): SQL {
-  return or(daChotTrongKy(period), chuaChotCuoiKy(period))!;
+function tapCaHieuSuat(period: Period, laCa: SQL = LA_CA_CARE): SQL {
+  return or(daChotTrongKy(period, laCa), chuaChotCuoiKy(period, laCa))!;
+}
+
+/** Đợt của cùng tập kỳ nhưng là BẢN SAO do lỗi cũ — bị loại, và phải đếm được để in ra. */
+function banSaoTrongKy(period: Period): SQL {
+  return and(tapCaHieuSuat(period, KHONG_BI_LOAI), BAN_SAO_CU)!;
 }
 
 /**
@@ -151,8 +174,20 @@ export async function getRescueSummary(period: Period, basis: CareTimeBasis = "O
       .select({ n: sql<number>`count(*)::int` })
       .from(sc)
       .where(and(LA_CA_CARE, ...trongKy("OPENED", period)));
+    const banSao = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(sc)
+      .where(banSaoTrongKy(period));
     const t = rescueRates(c);
-    return { ...c, total: basis === "OUTCOME" ? t.finished : total, directRate: t.direct, rateWithExchange: t.withExchange, finished: t.finished, openedInPeriod: Number(mo[0]?.n ?? 0) };
+    return {
+      ...c,
+      total: basis === "OUTCOME" ? t.finished : total,
+      directRate: t.direct,
+      rateWithExchange: t.withExchange,
+      finished: t.finished,
+      openedInPeriod: Number(mo[0]?.n ?? 0),
+      falseReopenExcluded: Number(banSao[0]?.n ?? 0),
+    };
   });
 }
 
