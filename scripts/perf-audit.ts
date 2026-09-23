@@ -64,9 +64,45 @@ async function main() {
   await getNominalProfitReport(D30, "ORDERED");
   results.push(await time("/ads/daily · bóc tách MKTer (30 ngày, LN danh nghĩa đã trong đệm)", () => getMarketerDailyNominal(D30)));
 
+  /*
+    ═══════════ /ads: THỜI GIAN VÀ DUNG LƯỢNG TỪNG KHỐI ═══════════
+
+    Smoke 23/09/2026: `/ads` 18,4 s · 6.768 kB — đầu phản hồi 221 ms, thân 18,1 s. Đầu phản hồi
+    nhanh mà thân chậm nghĩa là trang ĐANG STREAM các ranh giới `Suspense`; và 6,7 MB thì không thể
+    là tiền của câu SQL — nó là dữ liệu được đẩy xuống trình duyệt. Nên đo CẢ HAI cho từng khối: bao
+    lâu, và kết quả nặng bao nhiêu byte khi tuần tự hoá.
+
+    Byte ở đây là `JSON.stringify` của kết quả truy vấn — xấp xỉ phần mà khối ấy đẩy xuống client
+    (một client component nhận nguyên mảng dòng thì mảng ấy vào cả payload RSC lẫn HTML dựng sẵn).
+    Đủ để biết khối nào nặng, không đủ để cộng lại ra đúng 6.768 kB.
+
+    Kỳ là THÁNG, đúng mặc định của trang (`resolvePeriod(raw, "month")`), không phải toàn bộ.
+  */
+  const { getAdsDecision } = await import("@/lib/queries/ads-decision");
+  const { getAdsAttributionAudit } = await import("@/lib/queries/ads-attribution");
+  const { getAdsPerformance } = await import("@/lib/queries/ads-performance");
+  const THANG = resolvePeriod({}, "month");
+  const kichThuoc: { label: string; ms: number; kb: number; dong: number | null }[] = [];
+  const doKhoi = async (label: string, run: () => Promise<unknown>) => {
+    clearMemo();
+    const started = Date.now();
+    const kq = await run();
+    const ms = Date.now() - started;
+    const kb = Math.round(Buffer.byteLength(JSON.stringify(kq) ?? "", "utf8") / 1024);
+    const rows = (kq as { rows?: unknown[] } | null)?.rows;
+    kichThuoc.push({ label, ms, kb, dong: Array.isArray(rows) ? rows.length : null });
+    results.push({ label, ms });
+  };
+  await doKhoi("/ads · bảng quyết định (chiến dịch)", () => getAdsDecision(THANG, "campaign"));
+  await doKhoi("/ads · bảng quyết định (mã hàng)", () => getAdsDecision(THANG, "product"));
+  await doKhoi("/ads · ROAS theo kết quả đơn", () => getAdsRoas(THANG, "campaign"));
+  await doKhoi("/ads · độ phủ quy kết", () => getAdsAttributionAudit(THANG));
+  await doKhoi("/ads · hiệu quả theo marketer (khối cuối trang)", () => getAdsPerformance(THANG));
+
   results.sort((a, b) => b.ms - a.ms);
   const total = results.reduce((t, r) => t + r.ms, 0);
-  console.log(JSON.stringify({ tong_ms: total, cham_nhat: results }, null, 2));
+  kichThuoc.sort((a, b) => b.kb - a.kb);
+  console.log(JSON.stringify({ tong_ms: total, cham_nhat: results, ads_theo_khoi: kichThuoc }, null, 2));
 }
 
 main().then(() => process.exit(0)).catch((error) => {
