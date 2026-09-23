@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { checkWritePath } from "@/lib/constants/agent-sandbox";
+import { checkReadPath, checkWritePath } from "@/lib/constants/agent-sandbox";
 import { NEVER_WRITE, TEST_NEU_LAM_VI_DU, WRITE_GLOBS_BY_ROLE, writeGlobsForRole } from "@/lib/constants/agent-scopes";
 import { demKhangDinh, kiemHangRaoBaiKiem, moTaViPham } from "@/lib/constants/agent-test-guard";
 import { TECH_AGENT_ROLES } from "@/lib/constants/tech";
@@ -106,6 +106,8 @@ export function testHangRaoTuyetDoi() {
     "tests/agent-scopes.test.ts",
     /* Sàn của bánh cóc đăng ký bài kiểm — agent hạ được sàn thì bánh cóc không còn là bánh cóc. */
     "lib/constants/agent-test-registry.ts",
+    /* Sổ chứng từ số đo production — xem `testVungSoDoChiDocDuoc` ngay dưới. */
+    "docs/perf/TECH-5-so-do-tho-2026-09-22.md",
   ];
   for (const f of cam) {
     assert.ok(matchesNeverWrite(f), `ca kiểm "${f}" phải nằm trong NEVER_WRITE, nếu không nó đang đo nhầm hàng rào`);
@@ -136,6 +138,43 @@ export function testHangRaoTuyetDoi() {
   }
 
   testBaiKiemKhoaLuatNgoaiTamVoi();
+}
+
+/* ═════════════ 2b · SỔ CHỨNG TỪ SỐ ĐO: ĐỌC ĐƯỢC, GHI KHÔNG ═════════════ */
+
+export function testVungSoDoChiDocDuoc() {
+  const soDo = "docs/perf/TECH-5-so-do-tho-2026-09-22.md";
+  const thatSu = writeGlobsForRole("DOCUMENTATION");
+
+  /*
+    ĐO ĐÚNG HÀNG RÀO NÀO ĐANG CHẶN.
+
+    Phạm vi thật của vai tài liệu là `docs/`, và `docs/perf/x` KHỚP nó. Nên nếu đường dẫn này bị
+    chặn thì thứ duy nhất chặn được là `NEVER_WRITE` — không có cách nào nhầm sang `writeGlobs`.
+    Khẳng định dưới nói ra điều đó thành lời thay vì để người đọc tự suy.
+  */
+  assert.ok(thatSu.some((g) => soDo.startsWith(g)), "docs/perf/ phải khớp phạm vi ghi của vai tài liệu — nếu không, bài này đang đo nhầm hàng rào");
+  assert.ok(!checkWritePath(soDo, thatSu).allowed, "agent KHÔNG được ghi vào sổ chứng từ số đo");
+  assert.ok(!checkWritePath("docs/perf/baseline-T1-example.json", thatSu).allowed, "kể cả một tệp MỚI trong thư mục ấy (đúng tệp bịa của lượt #39)");
+
+  /*
+    VÀ THỨ CÒN LẠI CỦA `docs/` VẪN GHI ĐƯỢC.
+
+    Hàng rào này hẹp có chủ đích. Cách "sửa" dễ nhất mà sai là đẩy cả `docs/` vào vùng cấm — khi
+    ấy agent tài liệu không còn việc gì làm được. Khẳng định này khoá chiều ấy lại.
+  */
+  assert.ok(checkWritePath("docs/TECH-5-phan-tich.md", thatSu).allowed, "phân tích vẫn ghi được ở docs/");
+  assert.ok(checkWritePath("docs/perfume/abc.md", thatSu).allowed, "chỉ chặn ĐÚNG thư mục docs/perf/, không chặn tên bắt đầu giống nó");
+
+  /*
+    ĐỌC THÌ PHẢI ĐƯỢC — nếu không, hàng rào này biến việc "đọc số đo rồi phân tích" thành bất khả
+    thi, và agent chỉ còn đúng một đường để có số: bịa. Cấm ghi mà cấm luôn đọc là làm nặng thêm
+    chính cái lỗi nó sinh ra để chặn.
+  */
+  assert.ok(checkReadPath(soDo).allowed, "agent PHẢI đọc được số đo — cấm đọc là ép nó bịa");
+  assert.ok(checkReadPath("docs/perf/TECH-5-perf-probe-raw-2026-09-22.txt").allowed, "kể cả bản thô");
+
+  console.log("✓ Sổ chứng từ `docs/perf/`: agent ĐỌC được, GHI thì không (chặn bởi NEVER_WRITE, không phải bởi phạm vi vai) · phần còn lại của docs/ vẫn mở");
 }
 
 /* ═════════════ 3 · KHÔNG LÀM XANH CỔNG BẰNG CÁCH XOÁ KHẲNG ĐỊNH ═════════════ */
