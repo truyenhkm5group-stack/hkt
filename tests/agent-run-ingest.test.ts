@@ -46,7 +46,23 @@ export function testAgentIngestPure() {
     đi dọn. Mở một cửa để tự sinh việc cho cái chổi là ngược.
   */
   assert.ok(!(INGESTABLE_STATUSES as readonly string[]).includes("RUNNING"), "RUNNING không được nằm trong danh sách chép về");
-  assert.deepEqual([...INGESTABLE_STATUSES], ["SUCCEEDED", "FAILED", "CANCELLED"]);
+  /*
+    NỚI DANH SÁCH NGÀY 23/09/2026 — `BLOCKED`, và đây là một QUYẾT ĐỊNH, không phải một lần sửa
+    cho CI xanh (AGENTS.md mục 0).
+
+    Cửa chép sổ nhận lượt chạy ĐÃ KẾT THÚC. `BLOCKED` là một cách kết thúc: agent chạy xong và
+    kết luận việc không thuộc môi trường của nó. Để nó ngoài danh sách nghĩa là đúng những lượt
+    chạy nói lên "đề bài sai" lại không bao giờ tới được production — chỗ duy nhất người sửa đề
+    bài đang nhìn.
+
+    Tính chất mà khẳng định này thật sự canh vẫn nguyên: `RUNNING` ở dòng trên, và nó vẫn bị
+    loại. Danh sách được phép DÀI ra khi có một cách kết thúc mới; nó không được phép nhận một
+    trạng thái CHƯA kết thúc.
+  */
+  assert.deepEqual([...INGESTABLE_STATUSES], ["SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED"]);
+  for (const st of INGESTABLE_STATUSES) {
+    assert.notEqual(st, "RUNNING", "mọi trạng thái chép về được phải là một trạng thái ĐÃ KẾT THÚC");
+  }
 
   // ───────── 1.2 Khoá tự nhiên: `attempt` NẰM TRONG khoá ─────────
   const l1 = agentRunExternalRef("github", "123456", "1");

@@ -606,7 +606,19 @@ export const TECH_AGENT_TEMPLATES: readonly TechAgentTemplate[] = [
 
 /* ═════════════════════ LƯỢT CHẠY CỦA AGENT ═════════════════════ */
 
-export const TECH_RUN_STATUSES = ["RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"] as const;
+/**
+ * NĂM TRẠNG THÁI, VÀ `BLOCKED` KHÔNG PHẢI MỘT KIỂU THẤT BẠI.
+ *
+ * `FAILED` = agent đã làm và không ra kết quả ⇒ đi sửa MÃ. `CANCELLED` = có thứ bên ngoài cắt
+ * ngang ⇒ không có gì phải sửa. `BLOCKED` = việc này KHÔNG LÀM ĐƯỢC trong môi trường của agent
+ * ⇒ đi sửa ĐỀ BÀI hoặc MÔI TRƯỜNG. Ba cách sửa khác nhau, nên phải là ba nhãn (AGENTS.md mục 55).
+ *
+ * Trước 23/09/2026 `BLOCKED` chỉ tồn tại ở lớp gọi (`RunnerResult.status`) và rơi vào sổ dưới
+ * nhãn `CANCELLED`. Nghĩa là mọi lượt chạy bị chặn — thiếu khoá API, sai quyền, việc bị nâng
+ * rủi ro giữa chừng — đều đọc ra là "đã huỷ", và người xem sổ không có cách nào biết hệ thống
+ * đang từ chối làm việc gì.
+ */
+export const TECH_RUN_STATUSES = ["RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED"] as const;
 export type TechRunStatus = (typeof TECH_RUN_STATUSES)[number];
 
 export const TECH_RUN_STATUS_LABEL: Record<TechRunStatus, string> = {
@@ -614,6 +626,7 @@ export const TECH_RUN_STATUS_LABEL: Record<TechRunStatus, string> = {
   SUCCEEDED: "Xong",
   FAILED: "Thất bại",
   CANCELLED: "Đã huỷ",
+  BLOCKED: "Không làm được ở đây",
 };
 
 /**

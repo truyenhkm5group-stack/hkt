@@ -25,7 +25,9 @@ import { createTechTask, decideTechApproval, overrideTechTaskRisk, recordTechDep
 
 import { runAgentOnTask } from "@/lib/agents/runner";
 import { classifyProviderError } from "@/scripts/agent-runner-check";
+import { AGENT_TOOLS, AiAgentExecutor } from "@/lib/agents/executor";
 import type { AgentExecutor, AgentJob, AgentOutcome } from "@/lib/agents/executor";
+import type { AiProvider } from "@/lib/ai/provider";
 
 /**
  * ═══════════ PHASE 2A — ĐỌC DEPLOY THẬT, CHIẾU VIỆC TECH, CHẠY AGENT ĐẦU TIÊN ═══════════
@@ -472,7 +474,7 @@ export async function testAgentRunner() {
   };
   const ghiDoc = new ScriptedExecutor(async (job) => {
     job.workspace.writeFile("docs/p2a-agent.md", "# Tài liệu do agent viết\n\nMột dòng.\n");
-    return { summary: "Đã ghi docs/p2a-agent.md.", steps: [], finished: true, error: null, chiPhi: KHONG_TON };
+    return { summary: "Đã ghi docs/p2a-agent.md.", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
   });
 
   // ───────── 4.2 AGENT ĐANG TẮT thì KHÔNG chạy ─────────
@@ -486,7 +488,7 @@ export async function testAgentRunner() {
 
   // ───────── 4.3 CHƯA CÓ KHOÁ API ⇒ BLOCKED, KHÔNG giả vờ thành công ─────────
   const idChuaCauHinh = await taoViec("p2a-runner: chưa cấu hình executor");
-  const rChua = await runAgentOnTask({ taskId: idChuaCauHinh, agentKey: "documentation", executor: new ScriptedExecutor(async () => ({ summary: "", steps: [], finished: true, error: null, chiPhi: KHONG_TON }), false), repoRoot: repo, baseCommit: base, actor: may });
+  const rChua = await runAgentOnTask({ taskId: idChuaCauHinh, agentKey: "documentation", executor: new ScriptedExecutor(async () => ({ summary: "", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON }), false), repoRoot: repo, baseCommit: base, actor: may });
   assert.equal(rChua.status, "BLOCKED");
   assert.ok(rChua.reason?.includes("CHƯA CẤU HÌNH"), "thiếu khoá phải nói thẳng, không được coi là xong");
 
@@ -536,6 +538,126 @@ export async function testAgentRunner() {
   assert.equal(rDo.gates.typecheck, "FAILED", "exit code THẬT quyết định cổng, không phải lời khai của agent");
   assert.equal(rDo.resultCommit, null, "cổng đỏ thì KHÔNG có commit nào");
 
+  // ───────── 4.6b AGENT KHAI KHÔNG LÀM ĐƯỢC ⇒ BLOCKED, KHÔNG COMMIT, KHÔNG CHẠY CỔNG ─────────
+  /*
+    Lượt chạy #39 (việc TECH-5, 22/09/2026) nhận một đề bài đòi ĐO PRODUCTION, thứ máy Actions
+    không chạm được. Không có lối ra nào mang nghĩa "không làm được ở đây", nên nó gọi `finish`
+    kèm một tệp số tự nghĩ ra. Khối này khoá lối ra ấy lại.
+
+    Điểm phải đo là agent vẫn GHI TỆP trước khi nhận ra: bản nháp dở KHÔNG được vào kho, nếu không
+    lối ra trung thực lại đẻ ra đúng thứ rác mà nó sinh ra để chặn.
+  */
+  /*
+    CÂY RIÊNG VỚI CỔNG LUÔN XANH — ĐỂ ĐỘT BIẾN "DỜI PHÉP KIỂM XUỐNG SAU" THẬT SỰ COMMIT ĐƯỢC.
+
+    Nếu cổng ĐỎ thì runner bỏ qua bước commit vì một lý do KHÁC, và khẳng định "nhánh còn trỏ vào
+    base" sẽ xanh mà không chứng minh gì — đúng cái bẫy đã làm đột biến ấy sống sót lần đầu.
+  */
+  const repoChan = repoTam();
+  const baseChan = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoChan, encoding: "utf8" }).trim();
+  const idKhongLam = await taoViec("p2a-runner: việc đòi đo production");
+  const boCuoc = new ScriptedExecutor(async (job) => {
+    job.workspace.writeFile("docs/p2a-nhap-do.md", "# bản nháp dở dang\n");
+    return {
+      summary: "",
+      steps: [],
+      finished: true,
+      khongLamDuoc: { lyDo: "Đề bài đòi số đo production; máy chạy dùng CSDL rỗng dùng-một-lần.", canGi: "Một tệp số đo đã có sẵn trong kho." },
+      error: null,
+      chiPhi: KHONG_TON,
+    };
+  });
+  const rKhongLam = await runAgentOnTask({ taskId: idKhongLam, agentKey: "documentation", executor: boCuoc, repoRoot: repoChan, baseCommit: baseChan, actor: may, gates: ["typecheck", "lint"] });
+  assert.equal(rKhongLam.status, "BLOCKED", "agent khai không làm được ⇒ BLOCKED, KHÔNG phải FAILED");
+  /*
+    ĐO BẰNG DẤU VẾT THẬT, KHÔNG ĐỌC ĐỐI TƯỢNG TRẢ VỀ.
+
+    Bản đầu của khối này khẳng định `rKhongLam.resultCommit === null` và `gates.typecheck ===
+    "UNKNOWN"`. Cả hai XANH kể cả khi phép kiểm bị dời xuống SAU cổng và SAU commit — vì nhánh
+    BLOCKED dựng kết quả từ `rong` (giá trị rỗng), nên hai trường ấy luôn rỗng bất kể chuyện gì
+    đã thật sự xảy ra. Đột biến "dời phép kiểm xuống cuối" SỐNG SÓT.
+
+    Hai khẳng định dưới đo thứ KHÔNG nói dối được: nhánh git trỏ vào đâu, và lệnh cổng có chạy
+    hay không (nó để lại một tệp dấu ở thư mục tạm CHUNG, nên tiến trình con ghi được và bài kiểm
+    đọc được).
+  */
+  assert.equal(rKhongLam.resultCommit, null, "bản nháp dở KHÔNG được vào kho");
+  const troVao = execFileSync("git", ["rev-parse", rKhongLam.branch!], { cwd: repoChan, encoding: "utf8" }).trim();
+  assert.equal(troVao, baseChan, "nhánh phải còn trỏ đúng base — một commit ở đây là bản nháp dở đã lọt vào kho");
+  /*
+    "KHÔNG CHẠY CỔNG" ĐO BẰNG THỨ TỰ TRONG MÃ NGUỒN, KHÔNG ĐO BẰNG DẤU VẾT.
+
+    Đã thử đo bằng dấu vết — một script cổng ghi tệp mốc ở thư mục tạm — và nó KHÔNG đáng tin trên
+    máy Windows: lệnh không chạy được vì lý do của hệ điều hành, tệp mốc không xuất hiện, và khẳng
+    định xanh mà chẳng chứng minh gì. Đúng lớp lỗi AGENTS.md mục 65 gọi tên: bài kiểm đang đo CÁI
+    MÁY chứ không đo mã nguồn.
+
+    Thứ tự trong mã đọc được như nhau trên mọi nền, và nó chính là tính chất cần khoá — cùng kỹ
+    thuật `tests/agent-scopes.test.ts` dùng để ghim "NEVER_WRITE kiểm TRƯỚC writeGlobs".
+  */
+  const maRunner = readFileSync(path.join(process.cwd(), "lib/agents/runner.ts"), "utf8");
+  const thanRunner = maRunner.replace(/\/\*[\s\S]*?\*\//g, "");
+  const iKhai = thanRunner.indexOf("outcome.khongLamDuoc");
+  const iCong = thanRunner.indexOf("const canChay = opts.gates");
+  const iCommit = thanRunner.indexOf("await ws.commit(");
+  assert.ok(iKhai > 0 && iCong > 0 && iCommit > 0, "phải đọc được cả ba mốc trong runner");
+  assert.ok(iKhai < iCong, "phép kiểm lời khai phải đứng TRƯỚC vòng chạy cổng — bốn cổng đo CÂY LÀM VIỆC nên chúng xanh đều cho một lượt chạy chẳng giao gì");
+  assert.ok(iKhai < iCommit, "và TRƯỚC bước commit — bản nháp dở không phải sản phẩm bàn giao");
+  assert.ok(rKhongLam.reason?.includes("KHÔNG LÀM ĐƯỢC"), "lý do phải đọc ra được là không làm được, không phải một câu lỗi chung");
+  assert.ok(rKhongLam.reason?.includes("cần:"), "và phải nói CẦN GÌ — một lời từ chối không kèm lối ra thì người đọc không làm gì được với nó");
+  /*
+    CỔNG KHÔNG CHẠY, và điều đó phải đọc ra được. Bốn cổng đo CÂY LÀM VIỆC nên chúng xanh đều cho
+    một lượt chạy chẳng giao gì — in bốn dấu ✓ cạnh một lượt chạy không làm được việc là đúng thứ
+    AGENTS.md mục 65 gọi là dấu ✓ thay cho một câu trung thực.
+  */
+  assert.equal(rKhongLam.gates.typecheck, "UNKNOWN", "cổng KHÔNG được chạy cho lượt chạy bị chặn — và CHƯA CHẠY phải in ra là CHƯA XÁC MINH");
+  assert.equal(rKhongLam.gates.lint, "UNKNOWN");
+  const runChan = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, rKhongLam.runId!) });
+  assert.equal(runChan?.status, "BLOCKED", "sổ phải ghi BLOCKED — gộp vào CANCELLED là giấu mất việc phải sửa ĐỀ BÀI");
+  assert.equal(runChan?.error, "", "không phải một lỗi: đây là lượt chạy làm đúng việc của nó");
+  assert.ok((runChan?.summary ?? "").includes("cần:"), "sổ phải giữ lại CẦN GÌ, không chỉ giữ lời từ chối");
+
+  // ───────── 4.6c EXECUTOR THẬT: lời gọi công cụ PHẢI biến thành lời khai ─────────
+  /*
+    KHỐI 4.6b DÙNG `ScriptedExecutor`, TỨC LÀ NÓ BỎ QUA HẲN EXECUTOR THẬT.
+
+    Nó chứng minh runner TÔN TRỌNG `khongLamDuoc`, nhưng không chứng minh có gì từng ĐẶT giá trị
+    ấy vào. Đột biến "executor nuốt lời khai của agent" (`khongLamDuoc = null` ngay trong nhánh
+    xử lý) SỐNG SÓT qua cả bộ kiểm thử — hàng rào đúng, đường nối đứt, và bài kiểm không thấy.
+
+    Khối này nối lại đúng đoạn còn hở: một provider GIẢ trả về lời gọi công cụ `khong_lam_duoc`,
+    chạy qua `AiAgentExecutor` THẬT, rồi qua runner THẬT, rồi vào sổ THẬT.
+  */
+  const nhaCungCapGia: AiProvider = {
+    name: "gia",
+    model: "gia-1",
+    schemaDialect: "anthropic",
+    async complete() {
+      return {
+        content: [{ type: "tool_use" as const, id: "t1", name: "khong_lam_duoc", input: { ly_do: "Đề bài đòi đo production; máy này có CSDL rỗng.", can_gi: "Một tệp số đo có sẵn trong kho." } }],
+        stopReason: "tool_use" as const,
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        model: "gia-1",
+        latencyMs: 1,
+      };
+    },
+  };
+  const idThat = await taoViec("p2a-runner: executor thật khai không làm được");
+  const rThat = await runAgentOnTask({ taskId: idThat, agentKey: "documentation", executor: new AiAgentExecutor(nhaCungCapGia), repoRoot: repo, baseCommit: base, actor: may, gates: ["typecheck"] });
+  assert.equal(rThat.status, "BLOCKED", "lời gọi công cụ của model phải đi hết đường tới trạng thái BLOCKED");
+  assert.ok(rThat.reason?.includes("CSDL rỗng"), "LÝ DO của model phải tới được người đọc, không bị thay bằng một câu chung");
+  assert.ok(rThat.reason?.includes("tệp số đo"), "và CẦN GÌ cũng vậy");
+  const runThat = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, rThat.runId!) });
+  assert.equal(runThat?.status, "BLOCKED");
+
+  /* Và công cụ phải THẬT SỰ được chào ra cho model — không khai thì model không gọi được. */
+  const congCu = AGENT_TOOLS.find((t) => t.name === "khong_lam_duoc");
+  assert.ok(congCu, "AGENT_TOOLS phải có lối ra khong_lam_duoc");
+  const batBuoc = (congCu!.inputSchema as { required?: string[] }).required ?? [];
+  for (const truong of ["ly_do", "can_gi"]) {
+    assert.ok(batBuoc.includes(truong), `${truong} phải BẮT BUỘC — một lời từ chối không kèm lý do và lối ra thì người đọc không làm gì được với nó`);
+  }
+
   // ───────── 4.7 AGENT KHÔNG GHI ĐƯỢC NGOÀI PHẠM VI ─────────
   const idNgoai = await taoViec("p2a-runner: thử ghi ngoài phạm vi");
   const ghiBay = new ScriptedExecutor(async (job) => {
@@ -544,7 +666,7 @@ export async function testAgentRunner() {
     const c = job.workspace.writeFile(".env", "STOLEN=1");
     const d = job.workspace.readFile(".env");
     assert.ok(!a.ok && !b.ok && !c.ok && !d.ok, "cả bốn đường phải bị chặn");
-    return { summary: "Đã thử và bị chặn.", steps: [], finished: true, error: null, chiPhi: KHONG_TON };
+    return { summary: "Đã thử và bị chặn.", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
   });
   const rNgoai = await runAgentOnTask({ taskId: idNgoai, agentKey: "documentation", executor: ghiBay, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
   assert.equal(rNgoai.resultCommit, null, "không ghi được gì thì không có commit");
@@ -566,7 +688,7 @@ export async function testAgentRunner() {
     job.workspace.writeFile("docs/p2a-nang.md", "# nội dung\n");
     // Người đè mức rủi ro NGAY TRONG LÚC agent đang làm — đúng kịch bản đặc tả đòi.
     await overrideTechTaskRisk({ taskId: idNang, risk: "R2", reason: "Chủ shop phát hiện tài liệu này mô tả cách tính lương" }, nguoi);
-    return { summary: "Đã ghi xong.", steps: [], finished: true, error: null, chiPhi: KHONG_TON };
+    return { summary: "Đã ghi xong.", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
   });
   const rNang = await runAgentOnTask({ taskId: idNang, agentKey: "documentation", executor: nangGiuaChung, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
   assert.equal(rNang.status, "BLOCKED", "việc bị nâng lên R2 giữa chừng thì phải dừng");
@@ -619,7 +741,7 @@ export async function testPhase2aBarriers() {
   const base = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
   const ghiDoc = new ScriptedExecutor(async (job) => {
     job.workspace.writeFile("docs/p2a-rao-can.md", "# Thử\n");
-    return { summary: "Đã ghi.", steps: [], finished: true, error: null, chiPhi: KHONG_TON };
+    return { summary: "Đã ghi.", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
   });
   const taoViec = async (title: string, taskType: Parameters<typeof createTechTask>[0]["taskType"], module: Parameters<typeof createTechTask>[0]["module"]) => {
     const r = await createTechTask({ title, description: "p2a-rao-can", taskType, module, priority: "P3", source: "OWNER" }, nguoi);
@@ -675,7 +797,7 @@ export async function testPhase2aBarriers() {
       assert.ok("blocked" in r && r.reason.length > 10, `RÀO 5: từ chối \`${argv[0]}\` phải nói được vì sao`);
       daThu.push(argv[0]);
     }
-    return { summary: "Đã thử và bị chặn hết.", steps: [], finished: true, error: null, chiPhi: KHONG_TON };
+    return { summary: "Đã thử và bị chặn hết.", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
   });
   const rLenh = await runAgentOnTask({ taskId: vLenh.id, agentKey: "documentation", executor: thuLenhCam, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
   assert.equal(daThu.length, 7, "RÀO 5: cả bảy lệnh đều phải đi qua hàng rào");
@@ -688,7 +810,7 @@ export async function testPhase2aBarriers() {
       assert.ok(!job.workspace.writeFile(p, "x").ok, `RÀO 6: KHÔNG ghi được \`${p}\``);
     }
     assert.ok(!job.workspace.readFile(".env").ok, "RÀO 6: KHÔNG đọc được .env");
-    return { summary: "Đã thử và bị chặn hết.", steps: [], finished: true, error: null, chiPhi: KHONG_TON };
+    return { summary: "Đã thử và bị chặn hết.", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
   });
   const rGhi = await runAgentOnTask({ taskId: vGhi.id, agentKey: "documentation", executor: thuGhiNgoai, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
   assert.deepEqual(rGhi.filesChanged, [], "RÀO 6: không tệp nào đổi");
@@ -700,7 +822,7 @@ export async function testPhase2aBarriers() {
   const nangGiuaChung = new ScriptedExecutor(async (job) => {
     job.workspace.writeFile("docs/p2a-rao-can.md", "# đã viết xong\n");
     await overrideTechTaskRisk({ taskId: vNang.id, risk: "R2", reason: "Chủ shop phát hiện việc này chạm tới cách tính lương" }, nguoi);
-    return { summary: "Xong.", steps: [], finished: true, error: null, chiPhi: KHONG_TON };
+    return { summary: "Xong.", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
   });
   const rNang = await runAgentOnTask({ taskId: vNang.id, agentKey: "documentation", executor: nangGiuaChung, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
   assert.equal(rNang.status, "BLOCKED", "RÀO 4: quyền được xét LẠI lúc sắp commit, không chỉ lúc bắt đầu");

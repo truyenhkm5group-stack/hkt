@@ -29,7 +29,7 @@
  */
 
 /** Trạng thái được phép chép về. `RUNNING` **không** nằm ở đây — xem khối trên. */
-export const INGESTABLE_STATUSES = ["SUCCEEDED", "FAILED", "CANCELLED"] as const;
+export const INGESTABLE_STATUSES = ["SUCCEEDED", "FAILED", "CANCELLED", "BLOCKED"] as const;
 export type IngestableStatus = (typeof INGESTABLE_STATUSES)[number];
 
 export const AGENT_INGEST = {
