@@ -26,6 +26,8 @@ import { registerErpTools } from "@/lib/ai-workforce/tools/erp";
 import { checkContextualConfirmation } from "@/lib/ai-workforce/agents/sales/confirm";
 import { decide, type SalesDecision } from "@/lib/ai-workforce/agents/sales/decide";
 import { generateSystemPrompt, guardGeneratedText, nextStepKey, renderOrderReview, renderTemplate, type GenerationContext } from "@/lib/ai-workforce/agents/sales/generate";
+import { STYLE_EXAMPLES_MAX, styleExamplesBlock } from "@/lib/constants/copilot-learning";
+import { styleExamples } from "@/lib/queries/copilot-learning";
 import { bumpAsk, confirmationFingerprint, parseSalesState, parseStage, type SalesState } from "@/lib/ai-workforce/agents/sales/state";
 import { mergeUnderstanding, ruleIsEnough, understandByRule, understandSystemPrompt, UNDERSTANDING_SCHEMA, type Understanding } from "@/lib/ai-workforce/agents/sales/understand";
 import { resolveProduct, type ProductResolution } from "@/lib/ai-workforce/agents/sales/resolve-product";
@@ -507,10 +509,35 @@ export async function runSalesTask(taskId: string, options: { db?: Db; settings?
 
     // Mô hình chỉ được mời viết lại khi có gì để viết, và chỉ được đổi CÁCH NÓI.
     if (fallback && settings.modelCallsEnabled && decisionDeCham.action !== "NO_ACTION" && decisionDeCham.action !== "HANDOFF_HUMAN") {
+      /*
+        HỌC GIỌNG TỪ CHỖ SHOP ĐÃ SỬA — VÀ CHỈ GIỌNG.
+
+        Vài cặp "máy viết / shop sửa thành" gần nhất được đưa lại làm ví dụ. CHỈ những cặp mà dữ
+        kiện không đổi (`WORDING`) mới vào đây. Cặp nào shop thêm một con số, một size hay một lời
+        hứa là một chỗ ERP CÒN THIẾU — dạy mô hình bằng chúng là dạy đúng cái `guardGeneratedText()`
+        đang cấm, và dạy bằng ví dụ thì hiệu quả hơn hẳn một dòng lời dặn cấm đoán. Chúng đi vào
+        hàng đợi việc phải sửa, xem `lib/constants/copilot-learning.ts`.
+
+        VÍ DỤ ĐI VÀO TIN NGƯỜI DÙNG, KHÔNG VÀO PROMPT HỆ THỐNG: prompt hệ thống đứng yên thì đệm
+        được, và đệm là thứ giữ hoá đơn thấp. Nhét mấy cặp thay đổi theo ngày vào đó là làm rỗng
+        đệm của MỌI lượt, mỗi ngày — đắt hơn nhiều so với cái lợi của việc học giọng.
+
+        Đọc hỏng thì soạn như cũ: mất một chút giọng văn còn hơn mất cả lượt trả lời.
+      */
+      let viDuGiong = "";
+      try {
+        viDuGiong = styleExamplesBlock(await styleExamples(conversation.pageId, STYLE_EXAMPLES_MAX, db));
+      } catch (error) {
+        await recordAiError(
+          { scope: "MODEL", agentKey: "sales", runId: run.id, subjectType: "CONVERSATION", subjectId: conversation.id, message: `Không đọc được ví dụ giọng văn: ${error instanceof Error ? error.message.slice(0, 160) : "lỗi không rõ"}`, once: true },
+          db,
+        );
+      }
+
       const routed = await runModelStep({
         step: "generate",
         system: generateSystemPrompt(),
-        messages: [{ role: "user", content: `Câu nháp:\n${fallback}\n\nTin của khách:\n${message.text.slice(0, 500)}` }],
+        messages: [{ role: "user", content: `Câu nháp:\n${fallback}\n\nTin của khách:\n${message.text.slice(0, 500)}${viDuGiong}` }],
         schema: GENERATED_SCHEMA,
         routing: parseRouting(agent.definition.routing),
         settings,

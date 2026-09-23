@@ -171,6 +171,7 @@ import { testAiPlatform } from "./ai-platform.test";
 import { testSalesAgent } from "./sales-agent.test";
 import { testSalesDepartment } from "./sales-department.test";
 import { testSizeRules } from "./size-rules.test";
+import { testCopilotLearning } from "./copilot-learning.test";
 import { testSalesFunnelRehearsal } from "./sales-funnel-rehearsal.test";
 import { testVcbRate } from "./vcb-rate.test";
 import { testSalesCopilot } from "./sales-copilot.test";
@@ -1650,6 +1651,7 @@ async function main() {
   await testSalesAgent(db);
   await testSalesDepartment(db);
   testSizeRules();
+  testCopilotLearning();
   testSalesFunnelRehearsal();
   testVcbRate();
   await testSalesCopilot(db);

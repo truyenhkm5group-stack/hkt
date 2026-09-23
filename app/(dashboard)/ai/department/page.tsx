@@ -8,7 +8,10 @@ import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { FUNNEL_AUTONOMY_LABEL } from "@/lib/constants/sales-ai-funnel";
 import { AUTONOMY_GATES, DEMOTION_REASON_LABEL, type DemotionReason } from "@/lib/constants/sales-autonomy";
 import { requirePermission } from "@/lib/auth/session";
-import { formatNumber, formatVND } from "@/lib/format";
+import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { EDIT_KIND_LABEL, EDIT_KINDS } from "@/lib/constants/copilot-learning";
+import { learningSummary } from "@/lib/queries/copilot-learning";
+import { copilotPages } from "@/lib/queries/sales-copilot";
 import { salesDepartmentReport } from "@/lib/queries/sales-economics";
 
 export const metadata = { title: "Phòng Sales AI" };
@@ -23,6 +26,7 @@ export default async function SalesDepartmentPage({ searchParams }: { searchPara
   const sp = await searchParams;
   const days = Math.min(Math.max(Number(sp.days) || 30, 1), 365);
   const { funnel, economics, autonomy } = await salesDepartmentReport(days);
+  const hoc = await learningSummary(await copilotPages(), days);
 
   const biPhanh = autonomy.verdict.demotedBy.length > 0;
 
@@ -259,6 +263,77 @@ export default async function SalesDepartmentPage({ searchParams }: { searchPara
           </div>
         </Card>
       )}
+
+      {/* ───── HỌC TỪ CHỖ SHOP SỬA ───── */}
+      <Card className="p-4">
+        <h2 className="font-semibold">Học từ chỗ shop sửa</h2>
+        <p className="mb-3 text-sm text-muted-foreground">
+          Mỗi lần bấm gửi đều lưu câu máy soạn và câu thật sự gửi. Chúng được phân loại LÚC ĐỌC — không cột mới, không backfill — nên sửa cách phân
+          loại là mọi dòng cũ tự đúng lại. Chỉ nhóm <b>Sửa cách nói</b> được đưa lại cho mô hình làm ví dụ: nhóm <b>Sửa dữ kiện</b> là chỗ ERP còn
+          thiếu, và dạy mô hình bằng chúng là dạy nó đúng cái lưới chặn đang cấm.
+        </p>
+        <div className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+          <div>
+            Lượt đã gửi: <b className="tabular-nums">{formatNumber(hoc.total)}</b>
+          </div>
+          <div>
+            Gửi nguyên văn: <b className="tabular-nums">{pctText(hoc.sentAsIsRate)}</b>{" "}
+            <span className="text-muted-foreground">(chưa có lượt nào thì là “—”, không phải 0%)</span>
+          </div>
+          {EDIT_KINDS.map((k) => (
+            <div key={k}>
+              {EDIT_KIND_LABEL[k]}: <b className="tabular-nums">{formatNumber(hoc.byKind[k])}</b>
+            </div>
+          ))}
+          <div>
+            Ví dụ đang dạy mô hình: <b className="tabular-nums">{formatNumber(hoc.styleExamplesUsed)}</b>
+          </div>
+        </div>
+
+        {hoc.factGaps.length > 0 ? (
+          <div className="mt-4 border-t border-border pt-3">
+            <h3 className="text-sm font-semibold">
+              {formatNumber(hoc.factGaps.length)} lần shop phải tự nói thứ máy không có — đây là việc phải sửa trong ERP
+            </h3>
+            <p className="mb-2 text-sm text-muted-foreground">
+              Danh sách này cố ý KHÔNG bị cắt ngắn: mỗi dòng là một câu hỏi “vì sao ERP không tự nói được điều này”, và phần bị cắt thì không bao giờ
+              có ai đi sửa.
+            </p>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-muted-foreground">
+                  <tr className="border-b border-border">
+                    <th className="py-1 pr-3 font-medium">Lúc</th>
+                    <th className="py-1 pr-3 font-medium">Shop thêm vào</th>
+                    <th className="py-1 pr-3 font-medium">Shop bỏ đi</th>
+                    <th className="py-1 font-medium">Câu máy soạn → câu shop gửi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hoc.factGaps.map((g, i) => (
+                    <tr key={`${g.conversationId}-${i}`} className="border-b border-border/60 align-top">
+                      <td className="py-1.5 pr-3 whitespace-nowrap text-muted-foreground">{formatDateTime(g.at)}</td>
+                      <td className="py-1.5 pr-3 font-medium text-amber-700 dark:text-amber-400">{g.added.join(", ") || "—"}</td>
+                      <td className="py-1.5 pr-3 text-muted-foreground">{g.removed.join(", ") || "—"}</td>
+                      <td className="py-1.5">
+                        <span className="text-muted-foreground line-through">{g.suggested}</span>
+                        <br />
+                        <span>{g.final}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-3 border-t border-border pt-3 text-sm text-muted-foreground">
+            {hoc.total === 0
+              ? "Chưa có lượt gửi nào để học. Bật bộ nạp sống và duyệt vài câu ở hàng đợi trợ lý trước."
+              : "Chưa lần nào shop phải thêm một con số hay một size máy không có — ERP đang nói đủ."}
+          </p>
+        )}
+      </Card>
 
       {/* ───── SÁU CỔNG ───── */}
       <Card className="p-4">
