@@ -109,6 +109,48 @@ trong 500 dòng log gần nhất" **không** giống "không liên quan", nên t
 
 ---
 
+## Bổ sung · bể kết nối CSDL — 23/09/2026 **08:25 UTC** (15:25 giờ Việt Nam)
+
+**Khung giờ KHÁC hẳn phần trên.** Mọi số ở các mục trước đo lúc 04:09–04:12 UTC khi máy bão hoà;
+phép đo này chạy lúc 08:25 UTC, **ngay sau khi một lượt deploy vừa kết thúc** — tức một lúc YÊN.
+Hai khung giờ khác nhau thì không đặt cạnh nhau mà so được.
+
+Đo bằng `ops db-query` (chỉ đọc) trên `pg_stat_activity`, lượt chạy `35837055400`:
+
+| Trạng thái kết nối | Số |
+|---|---|
+| `active` | **2** |
+| `idle` | **1** |
+| **Tổng đang mở** | **3** |
+
+| Trần | Giá trị | Khai ở đâu |
+|---|---|---|
+| Bể của ứng dụng | **5** | `db/index.ts` — `PGPOOL_MAX` đè được, không cần deploy |
+| Hết bể thì sao | **ném lỗi sau 15 giây** | `connectionTimeoutMillis`, KHÔNG chờ vô hạn |
+| `max_connections` của Postgres | **100** | `pg_settings` |
+
+### Con số này trả lời được gì, và KHÔNG trả lời được gì
+
+**Trả lời được:** bể kết nối không cạn **về mặt cấu trúc** — 3 trên 5, và 3 trên 100 của Postgres.
+Và nếu nó từng cạn thì đã có lỗi trong log, vì bể cạn ném lỗi chứ không treo im lặng; 7 dòng lỗi
+tìm được ở phần trên **không dòng nào** nói về kết nối.
+
+**KHÔNG trả lời được:** bể có cạn vào GIỜ CAO ĐIỂM không. Đề bài TECH-9 hỏi đúng *"trong khung giờ
+người dùng than chậm"*, và phép đo này chạy lúc yên. Một ảnh chụp lúc 15:25 không nói được gì về
+lúc 11:09 — muốn biết thì phải lấy mẫu **lặp lại trong đúng khung giờ ấy**.
+
+### Vì sao tôi vẫn không đề xuất nâng bể
+
+`db/index.ts` ghi sẵn căn cứ, đo 10/09/2026: VPS **2 nhân**, trang chủ bắn **181 truy vấn** cùng
+lúc. Với `max: 10`, mười tiến trình tranh 2 nhân — mỗi câu 300 ms thành **9 giây**, và tổng thời
+gian **TĂNG**. Thêm luồng không làm nhanh hơn khi CPU đã bão hoà, nó chỉ chia nhỏ cùng một lượng
+CPU rồi cộng thêm chi phí chuyển ngữ cảnh.
+
+Khớp với số ở đầu tệp này: `load 3,77` trên 2 nhân, `erp-db` **107,57 %** CPU. **Chỗ nghẽn là CPU,
+không phải số kết nối.**
+
+---
+
 ## Những gì tệp này KHÔNG kết luận
 
 - **Không** nói vì sao thân chậm. Tỷ lệ đầu-phản-hồi / thân chỉ ra thời gian nằm ở phần chờ dữ
@@ -124,20 +166,6 @@ trong 500 dòng log gần nhất" **không** giống "không liên quan", nên t
 ---
 
 ## Nguồn
-
-Toàn văn phần smoke nằm ở `docs/perf/TECH-6-smoke-tho-2026-09-23.txt` cùng thư mục — **81 dòng,
-đủ 59 tuyến**, để đọc lại số gốc mà không phải tin bảng tóm tắt ở trên.
-
-Tệp ấy đã LỌC trước khi vào kho: log gốc còn có dòng Caddy mang **địa chỉ IP thật của người dùng**
-và tiêu đề cookie. Kho mã này PUBLIC (AGENTS.md mục 5).
-
-**Vì sao thêm tệp thô, sau khi bản tóm tắt đã có:** bảng "Mười trang chậm nhất" ở trên CỐ Ý chỉ
-liệt kê trang chậm, nên `/orders` — nhanh, 203 ms — chỉ có mặt ở dòng văn xuôi và **không kèm
-kích thước phản hồi**. Ngày 23/09 tôi đưa cho agent con số `/orders 276 kB` trong một lượt phản
-hồi review; agent TỪ CHỐI dùng nó, và nó đúng: con số ấy không có trong tệp nó được chỉ tới. Nó
-nằm ở đầu ra thô mà tôi chưa bao giờ đưa vào kho.
-
-Một con số chỉ dùng được khi nó ĐỌC LẠI ĐƯỢC. Tệp thô này làm cả 59 tuyến trích dẫn được.
 
 Lượt chạy `ops verify` số **35817182554**. Toàn văn đầu ra nằm trong log của lượt chạy ấy trên
 GitHub Actions.
