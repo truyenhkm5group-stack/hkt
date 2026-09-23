@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { Boxes, CircleDollarSign, ExternalLink, Shirt, ShoppingBag, Warehouse } from "lucide-react";
+import { AlertTriangle, Boxes, ExternalLink, Shirt, ShoppingBag, Warehouse } from "lucide-react";
 import { ProductSalesChart } from "@/components/charts/product-sales-chart";
 import { MetricCard } from "@/components/metric-card";
 import { JsonViewer } from "@/components/misc";
@@ -12,8 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { env } from "@/lib/env";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
-import { findProductIdByVariant, getProductDetail } from "@/lib/queries/products";
+import { findProductIdByVariant, getProductDetail, type ProductDetail } from "@/lib/queries/products";
 import { getProductMatrix } from "@/lib/queries/product-intelligence";
+import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE, type PlanStatus } from "@/lib/constants/planning";
 import { successTone } from "@/lib/constants/returns";
 import { resolvePeriod } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -23,10 +24,16 @@ import { listProductNotes } from "@/lib/queries/product-notes";
 
 export const metadata = { title: "Chi tiết sản phẩm" };
 
-function stockTone(remain: number) {
-  if (remain <= 0) return "text-destructive";
-  if (remain <= 5) return "text-amber-600 dark:text-amber-400";
-  return "";
+/** Ngày dạng YYYY-MM-DD (hạn đặt hàng của `computePlan`) → dd/mm/yyyy. */
+function fmtDateKey(key: string | null) {
+  if (!key) return "—";
+  const [y, m, d] = key.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+/** Hạn đặt đã qua: in "đã quá hạn đặt", không giấu (xem `reorderByDate`). */
+function isPast(key: string) {
+  return new Date(`${key}T00:00:00Z`).getTime() < Date.now();
 }
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -38,7 +45,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
     if (productId) redirect(`/products/${productId}`);
     notFound();
   }
-  const { totals, warehouses } = product;
+  const { totals } = product;
   // Ma trận Màu × Size — chỉ dựng khi mã hàng thật sự có nhiều màu/size, mã một biến thể thì rối.
   const matrixPeriod = resolvePeriod({}, "90d");
   const [matrix, ghiChu] = await Promise.all([getProductMatrix(id, matrixPeriod), listProductNotes(id)]);
@@ -70,12 +77,48 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         }
       />
 
+      {/*
+        Ba thẻ đầu đọc SỔ KHO ERP (nhập − đã xuất qua ĐVVC), không đọc Pancake. Thẻ thứ ba là cái
+        nhân viên đặt hàng cần: thiếu bao nhiêu, phải đặt bao nhiêu, hạn chót ngày nào.
+      */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Tồn khả dụng" value={formatNumber(totals.remain)} note={`Tồn thực tế ${formatNumber(totals.actual)} · ${formatNumber(product.variants.filter((v) => v.remainQuantity <= 5 && !v.isRemoved).length)} mẫu mã tồn ≤ 5`} icon={Boxes} tone={totals.remain <= 0 ? "rose" : "blue"} />
-        <MetricCard label="Giá trị tồn kho" value={formatVND(totals.stockValue, { compact: true })} note="Tồn khả dụng × giá nhập gần nhất" icon={Warehouse} tone="primary" />
-        <MetricCard label="Bán 30 ngày" value={formatNumber(totals.sold30)} note={`90 ngày: ${formatNumber(totals.sold90)} sản phẩm · ${formatNumber(totals.orders90)} đơn`} icon={ShoppingBag} tone="green" />
-        <MetricCard label="Doanh thu 90 ngày" value={formatVND(totals.revenue90, { compact: true })} note="Tiền hàng lên đơn, không tính đơn huỷ" icon={CircleDollarSign} tone="amber" />
+        <MetricCard
+          label="Nhập / đã xuất"
+          value={`${formatNumber(totals.receiptIn)} / ${formatNumber(totals.shipped)}`}
+          note={[
+            `Nhập mới ${formatNumber(totals.receiptIn)}`,
+            totals.returnIn ? `tái nhập hoàn ${formatNumber(totals.returnIn)}` : null,
+            totals.adjust ? `điều chỉnh ${totals.adjust > 0 ? "+" : ""}${formatNumber(totals.adjust)}` : null,
+            totals.manualOut ? `xuất tay ${formatNumber(totals.manualOut)}` : null,
+            `xuất qua ĐVVC ${formatNumber(totals.shipped)}`,
+          ].filter(Boolean).join(" · ")}
+          icon={Warehouse}
+          tone="primary"
+        />
+        <MetricCard
+          label="Tồn thực tế (sổ kho)"
+          value={formatNumber(totals.actual)}
+          note={`Chờ xuất ${formatNumber(totals.committed)} · khả dụng ${formatNumber(totals.available)} · giá trị ${formatVND(totals.stockValue, { compact: true })}${totals.unknownStock ? ` · ${formatNumber(totals.unknownStock)} mẫu mã chưa có phiếu nhập, không cộng vào` : ""}`}
+          icon={Boxes}
+          tone={totals.available <= 0 ? "rose" : "blue"}
+        />
+        <MetricCard
+          label="Còn thiếu / cần đặt"
+          value={totals.needOrder || totals.shortage ? `${formatNumber(totals.shortage)} / ${formatNumber(totals.suggested)}` : "Đủ hàng"}
+          note={
+            totals.needOrder || totals.shortage
+              ? `${formatNumber(totals.needOrder)} mẫu mã cần đặt${totals.reorderBy ? ` · ${isPast(totals.reorderBy) ? "đã quá hạn đặt" : "đặt trước"} ${fmtDateKey(totals.reorderBy)}` : ""}${totals.orderCost ? ` · ${formatVND(totals.orderCost, { compact: true })}` : ""}`
+              : totals.unknownStock
+                ? `${formatNumber(totals.unknownStock)} mẫu mã chưa tính được — cần lập phiếu nhập`
+                : "Không mẫu mã nào hết trước khi lô mới kịp về"
+          }
+          icon={AlertTriangle}
+          tone={totals.shortage > 0 || (totals.reorderBy && isPast(totals.reorderBy)) ? "rose" : totals.needOrder ? "amber" : "green"}
+        />
+        <MetricCard label="Bán 30 ngày" value={formatNumber(totals.sold30)} note={`90 ngày: ${formatNumber(totals.sold90)} sp · ${formatNumber(totals.orders90)} đơn · ${formatVND(totals.revenue90, { compact: true })} tiền hàng (không tính đơn huỷ)`} icon={ShoppingBag} tone="green" />
       </section>
+
+      <VariantStockSection product={product} />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
         <div className="space-y-5">
@@ -126,92 +169,6 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               </div>
             </SectionCard>
           ) : null}
-
-          <SectionCard title={`Mẫu mã (${formatNumber(product.variants.length)})`} description="Tồn kho theo từng kho · số chờ giao / đang hoàn lấy từ Pancake" padded={false}>
-            <div className="overflow-x-auto">
-              <Table className="min-w-[760px]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Mẫu mã</TableHead>
-                    <TableHead className="text-right">Giá bán</TableHead>
-                    <TableHead className="text-right">Giá vốn</TableHead>
-                    <TableHead className="text-right">Tồn KD</TableHead>
-                    <TableHead className="text-right">Tồn TT</TableHead>
-                    {warehouses.map((w) => (
-                      <TableHead key={w.id} className="text-right">
-                        {w.name}
-                      </TableHead>
-                    ))}
-                    <TableHead className="text-right">Bán 30 ngày</TableHead>
-                    <TableHead className="text-right">Giá trị tồn</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {product.variants.length ? (
-                    product.variants.map((v) => {
-                      const hidden = v.isHidden || v.isLocked || v.isRemoved;
-                      return (
-                        <TableRow key={v.id} className={cn(hidden && "opacity-60")}>
-                          <TableCell>
-                            <div className="flex items-center gap-3">
-                              {v.images[0] || image ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={v.images[0] || image || ""} alt="" className="size-9 shrink-0 rounded-md border object-cover" />
-                              ) : (
-                                <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground"><Shirt className="size-4" /></span>
-                              )}
-                              <div className="min-w-0">
-                                <p className="font-mono text-xs font-semibold">
-                                  {v.sku || "—"}
-                                  {hidden ? <span className="ml-2 rounded bg-muted px-1 font-sans text-[10px] font-semibold text-muted-foreground">{v.isRemoved ? "Đã xoá" : v.isLocked ? "Khoá" : "Ẩn"}</span> : null}
-                                </p>
-                                <p className="text-xs text-muted-foreground">{[v.color, v.size].filter(Boolean).join(" / ") || v.detail || "—"}</p>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right font-semibold"><Money value={v.retailPrice} /></TableCell>
-                          <TableCell className="text-right text-muted-foreground"><Money value={v.lastImportedPrice} /></TableCell>
-                          <TableCell className={cn("numeric text-right text-base font-bold", stockTone(v.remainQuantity))}>{formatNumber(v.remainQuantity)}</TableCell>
-                          <TableCell className="numeric text-right text-muted-foreground">{formatNumber(v.actualRemainQuantity)}</TableCell>
-                          {warehouses.map((w) => {
-                            const s = v.stocks.find((x) => x.warehouseId === w.id);
-                            return (
-                              <TableCell key={w.id} className="text-right">
-                                {s ? (
-                                  <>
-                                    <span className={cn("numeric font-semibold", stockTone(s.remainQuantity))}>{formatNumber(s.remainQuantity)}</span>
-                                    {s.pendingQuantity > 0 || s.returningQuantity > 0 ? (
-                                      <div className="text-[10.5px] text-muted-foreground">
-                                        {s.pendingQuantity > 0 ? `chờ giao ${s.pendingQuantity}` : ""}
-                                        {s.pendingQuantity > 0 && s.returningQuantity > 0 ? " · " : ""}
-                                        {s.returningQuantity > 0 ? `hoàn ${s.returningQuantity}` : ""}
-                                      </div>
-                                    ) : null}
-                                  </>
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">—</span>
-                                )}
-                              </TableCell>
-                            );
-                          })}
-                          <TableCell className={cn("numeric text-right font-semibold", v.sold30 === 0 && "text-muted-foreground")}>{formatNumber(v.sold30)}</TableCell>
-                          <TableCell className="text-right text-muted-foreground"><Money value={v.stockValue} /></TableCell>
-                        </TableRow>
-                      );
-                    })
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={7 + warehouses.length} className="h-24 text-center text-sm text-muted-foreground">Sản phẩm chưa có mẫu mã.</TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 border-t px-5 py-3 text-xs text-muted-foreground">
-              <span>Tổng tồn khả dụng <span className="numeric font-semibold text-foreground">{formatNumber(totals.remain)}</span> · thực tế <span className="numeric font-semibold text-foreground">{formatNumber(totals.actual)}</span></span>
-              <span>Giá trị tồn <span className="numeric font-semibold text-foreground">{formatVND(totals.stockValue)}</span></span>
-            </div>
-          </SectionCard>
 
           <SectionCard title="Đơn hàng gần đây" description="10 đơn mới nhất có chứa sản phẩm này" actions={<Link href={`/orders?q=${encodeURIComponent(product.name)}&period=all`} className="text-xs font-semibold text-primary hover:underline">Tìm trong đơn hàng</Link>} padded={false}>
             {product.recentOrders.length ? (
@@ -353,5 +310,190 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         </div>
       </div>
     </div>
+  );
+}
+
+type VariantRow = ProductDetail["variants"][number];
+
+/**
+ * Tình trạng in ra cho một mẫu mã — đúng `status` của `computePlan`, trừ hai trường hợp:
+ * mẫu mã đứng yên (tồn 0, không bán, không đơn chờ) in "Không bán" chứ không in "Hết hàng" — cùng
+ * luật `isPlanRowActive` mà trang Kế hoạch SX dùng để bỏ chúng khỏi danh sách; và mẫu mã ĐÃ XOÁ
+ * không còn hàng thì không có tình trạng nào để báo.
+ */
+function variantStatus(v: VariantRow): PlanStatus | null {
+  if (!v.ledger) return null;
+  if (v.isRemoved && !v.erpStock && !v.ledger.committed) return null;
+  return v.active ? v.ledger.status : "IDLE";
+}
+
+/**
+ * TỒN KHO THEO MẪU MÃ — sổ kho ERP + cảnh báo đặt hàng, đặt NGOÀI lưới hai cột để bảng dùng hết
+ * chiều ngang (~1.150px) mà không phải kéo ngang.
+ *
+ *   Nhập (phiếu kho) − Đã xuất qua ĐVVC = Tồn thực tế
+ *   Tồn thực tế − Chờ xuất (đã chốt đơn, còn trong kho) = Khả dụng
+ *   Còn thiếu = max(0, −Khả dụng) — đơn đã hứa khách mà kho không đủ hàng để xuất
+ *   Cần đặt / hạn đặt = `computePlan`, cùng bộ máy với trang Kế hoạch SX
+ */
+function VariantStockSection({ product }: { product: ProductDetail }) {
+  const { totals, warehouses } = product;
+  const a = product.planning.assumptions;
+  const image = product.image || product.variants.find((v) => v.images[0])?.images[0] || null;
+  const warehouseName = new Map(warehouses.map((w) => [w.id, w.name]));
+  return (
+    <SectionCard
+      title={`Tồn kho theo mẫu mã (${formatNumber(product.variants.length)})`}
+      description="Sổ kho ERP: nhập theo phiếu kho, xuất theo vận đơn Viettel Post — số Pancake chỉ để đối chiếu"
+      hint={
+        <>
+          <b>Tồn thực tế</b> = tổng phiếu kho (nhập mới + tái nhập hàng hoàn + điều chỉnh − xuất tay) − số đã rời kho qua ĐVVC. Hàng hoàn chỉ quay lại tồn khi kho lập phiếu tái nhập với số đếm thực tế.{" "}
+          <b>Khả dụng</b> = tồn thực tế − hàng đã chốt đơn còn nằm trong kho chờ xuất. <b>Còn thiếu</b> = số đã hứa khách mà kho không đủ hàng để xuất.{" "}
+          <b>Cần đặt</b> tính như trang Kế hoạch SX: tốc độ bán {a.velocityWindowDays} ngày × (thời gian sản xuất {a.leadTimeDays} ngày + muốn đủ bán {a.coverDays} ngày) + tồn an toàn {a.safetyDays} ngày − (khả dụng + hàng sắp hoàn về kho).
+          Mẫu mã chưa có phiếu nhập thì tồn là CHƯA BIẾT, không phải 0.
+        </>
+      }
+      actions={
+        <>
+          <Link href="/inventory/receipts" className="text-xs font-semibold text-primary hover:underline">Lập phiếu nhập</Link>
+          <Link href="/inventory/planning" className="text-xs font-semibold text-primary hover:underline">Kế hoạch SX</Link>
+        </>
+      }
+      padded={false}
+    >
+      <div className="overflow-x-auto">
+        <Table className="min-w-[1040px]">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Mẫu mã</TableHead>
+              <TableHead className="text-right">Giá bán · vốn · trị giá tồn</TableHead>
+              <TableHead className="text-right">Nhập kho</TableHead>
+              <TableHead className="text-right">Đã xuất</TableHead>
+              <TableHead className="text-right">Tồn thực tế</TableHead>
+              <TableHead className="text-right">Chờ xuất</TableHead>
+              <TableHead className="text-right">Khả dụng</TableHead>
+              <TableHead className="text-right">Còn thiếu</TableHead>
+              <TableHead>Cảnh báo đặt hàng</TableHead>
+              <TableHead className="text-right" title="Không tính đơn huỷ, đơn hoàn, hàng tặng — đúng số trang Kế hoạch SX dùng">Bán ròng 30n</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {product.variants.length ? (
+              product.variants.map((v) => {
+                const hidden = v.isHidden || v.isLocked || v.isRemoved;
+                const l = v.ledger;
+                const status = variantStatus(v);
+                const pancakeTitle = v.stocks.length
+                  ? v.stocks.map((s) => `${warehouseName.get(s.warehouseId) ?? s.warehouse?.name ?? "Kho"}: tồn ${s.remainQuantity}${s.pendingQuantity ? ` · chờ giao ${s.pendingQuantity}` : ""}${s.returningQuantity ? ` · đang hoàn ${s.returningQuantity}` : ""}`).join("\n")
+                  : "Pancake chưa có tồn theo kho cho mẫu mã này";
+                return (
+                  <TableRow key={v.id} className={cn(hidden && "opacity-60", status === "OUT" && "bg-rose-50/40 dark:bg-rose-950/10", status === "CRITICAL" && "bg-orange-50/40 dark:bg-orange-950/10")}>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        {v.images[0] || image ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={v.images[0] || image || ""} alt="" className="size-9 shrink-0 rounded-md border object-cover" />
+                        ) : (
+                          <span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground"><Shirt className="size-4" /></span>
+                        )}
+                        <div className="min-w-0">
+                          <p className="font-mono text-xs font-semibold">
+                            {v.sku || "—"}
+                            {hidden ? <span className="ml-2 rounded bg-muted px-1 font-sans text-[10px] font-semibold text-muted-foreground">{v.isRemoved ? "Đã xoá" : v.isLocked ? "Khoá" : "Ẩn"}</span> : null}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{[v.color, v.size].filter(Boolean).join(" / ") || v.detail || "—"}</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Money value={v.retailPrice} className="font-semibold" />
+                      <div className="text-[11px] text-muted-foreground">vốn <Money value={l?.unitCost ?? v.lastImportedPrice} /></div>
+                      <div className="text-[11px] text-muted-foreground" title="Tồn thực tế ERP × giá vốn">tồn {v.erpStock === null ? "—" : <Money value={v.stockValue} />}</div>
+                    </TableCell>
+                    {/* NHẬP: phiếu nhập hàng mới là số chính; tái nhập / điều chỉnh / xuất tay là các vế còn lại của tổng phiếu kho. */}
+                    <TableCell className="numeric text-right" title={l ? `${formatNumber(l.receiptDocs)} phiếu nhập hàng · tổng ròng mọi phiếu kho ${formatNumber(l.received)}` : undefined}>
+                      {l && l.receiptDocs > 0 ? <span className="font-semibold">{formatNumber(l.receiptIn)}</span> : <span className="text-xs text-muted-foreground" title="Chưa có phiếu nhập hàng nào trong ERP — không phải nhập 0 cái">—</span>}
+                      {l?.returnIn ? <div className="text-[10.5px] text-muted-foreground">+{formatNumber(l.returnIn)} hoàn về</div> : null}
+                      {l?.adjust ? <div className="text-[10.5px] text-muted-foreground">{l.adjust > 0 ? "+" : ""}{formatNumber(l.adjust)} kiểm kê</div> : null}
+                      {l?.manualOut ? <div className="text-[10.5px] text-muted-foreground">−{formatNumber(l.manualOut)} xuất tay</div> : null}
+                    </TableCell>
+                    {/* ĐÃ XUẤT: hàng rời kho theo xác nhận lấy hàng của Viettel Post — không theo tiền, không theo Pancake. */}
+                    <TableCell className="numeric text-right">
+                      <span className="font-semibold">{formatNumber(l?.shipped ?? null)}</span>
+                      {l?.inTransit ? <div className="text-[10.5px] text-muted-foreground" title="Đã rời kho, vận đơn chưa kết thúc">đang đi {formatNumber(l.inTransit)}</div> : null}
+                      {l?.awaitingReturn ? <div className="text-[10.5px] text-muted-foreground" title="Đã xác định hoàn, kho chưa lập phiếu tái nhập — chưa cộng lại vào tồn">chờ hoàn {formatNumber(l.awaitingReturn)}</div> : null}
+                    </TableCell>
+                    <TableCell className="numeric text-right">
+                      {v.erpStock === null ? (
+                        <span className="inline-block text-[11px] leading-tight whitespace-normal text-muted-foreground">Chưa có<br />phiếu nhập</span>
+                      ) : (
+                        <span className={cn("text-base font-bold", v.erpStock < 0 && "text-destructive")}>{formatNumber(v.erpStock)}</span>
+                      )}
+                      <div className={cn("text-[10.5px] text-muted-foreground", v.erpStock !== null && v.remainQuantity !== v.erpStock && "text-amber-700 dark:text-amber-400")} title={pancakeTitle}>
+                        Pancake {formatNumber(v.remainQuantity)}
+                      </div>
+                    </TableCell>
+                    <TableCell className={cn("numeric text-right", !l?.committed && "text-muted-foreground")}>{formatNumber(l?.committed ?? null)}</TableCell>
+                    <TableCell className={cn("numeric text-right font-semibold", v.available !== null && v.available <= 0 && "text-destructive")}>{formatNumber(v.available)}</TableCell>
+                    <TableCell className="numeric text-right">
+                      {v.shortage === null ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : v.shortage > 0 ? (
+                        <span className="font-bold text-destructive" title="Đơn đã chốt mà kho không đủ hàng để xuất">{formatNumber(v.shortage)}</span>
+                      ) : (
+                        <span className="text-muted-foreground">0</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="w-[200px] min-w-[200px] text-xs whitespace-normal">
+                      {status ? <span className={cn("inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold", PLAN_STATUS_TONE[status])}>{status === "UNKNOWN" ? "Chưa có phiếu nhập" : PLAN_STATUS_LABEL[status]}</span> : <span className="text-muted-foreground">—</span>}
+                      {l && l.suggested > 0 ? (
+                        <div className="mt-0.5">
+                          <span className="font-bold" title={l.moqApplied ? `Nhu cầu thật là ${formatNumber(l.suggestedBeforeMoq)}, nâng lên vì xưởng nhận từ ${formatNumber(l.suggested)} cái` : undefined}>
+                            Đặt {formatNumber(l.suggested)}
+                            {l.moqApplied ? <span className="ml-0.5 font-normal text-muted-foreground">(tối thiểu)</span> : null}
+                          </span>
+                          {l.reorderByDate ? (
+                            <span className={cn(" ml-1", isPast(l.reorderByDate) ? "font-semibold text-rose-600 dark:text-rose-400" : "text-muted-foreground")} title={`Phải đặt trước ngày này để lô mới về kịp (thời gian sản xuất ${l.leadTimeDays} ngày)`}>
+                              {isPast(l.reorderByDate) ? "· đã quá hạn " : "· trước "}
+                              {fmtDateKey(l.reorderByDate)}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {l && l.stockKnown && l.velocity > 0 ? (
+                        <div className="text-[10.5px] text-muted-foreground" title={l.velocityTrimmed ? `Đã bỏ một ngày đột biến (${formatNumber(l.peakDayQty)} cái) khỏi tốc độ bán` : undefined}>
+                          bán {l.velocity.toFixed(1).replace(".", ",")}/ngày{l.velocityTrimmed ? "*" : ""}
+                          {l.daysOfCover !== null ? ` · còn ${formatNumber(Math.floor(l.daysOfCover))} ngày` : ""}
+                          {l.incoming ? <span className="block" title="Ước lượng hàng quay lại kho (chờ hoàn + phần đang đi ước bị hoàn), đã trừ khỏi số cần đặt">+{formatNumber(l.incoming)} sắp hoàn về kho</span> : null}
+                        </div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className={cn("numeric text-right font-semibold", !l?.sold30 && "text-muted-foreground")}>{formatNumber(l?.sold30 ?? null)}</TableCell>
+                  </TableRow>
+                );
+              })
+            ) : (
+              <TableRow>
+                <TableCell colSpan={10} className="h-24 text-center text-sm text-muted-foreground">Sản phẩm chưa có mẫu mã.</TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t px-5 py-3 text-xs text-muted-foreground">
+        <span>
+          Nhập <span className="numeric font-semibold text-foreground">{formatNumber(totals.receiptIn)}</span>
+          {" · "}đã xuất <span className="numeric font-semibold text-foreground">{formatNumber(totals.shipped)}</span>
+          {" · "}tồn thực tế <span className="numeric font-semibold text-foreground">{formatNumber(totals.actual)}</span>
+          {" · "}khả dụng <span className="numeric font-semibold text-foreground">{formatNumber(totals.available)}</span>
+          {" · "}còn thiếu <span className={cn("numeric font-semibold", totals.shortage > 0 ? "text-destructive" : "text-foreground")}>{formatNumber(totals.shortage)}</span>
+          {" · "}cần đặt <span className="numeric font-semibold text-foreground">{formatNumber(totals.suggested)}</span>
+          {totals.unknownStock ? <> · <span className="font-semibold text-foreground">{formatNumber(totals.unknownStock)}</span> mẫu mã chưa có phiếu nhập (không cộng vào tổng)</> : null}
+        </span>
+        <span>
+          Giá trị tồn <span className="numeric font-semibold text-foreground">{formatVND(totals.stockValue)}</span> · Pancake ghi tồn {formatNumber(totals.pancakeRemain)} (đối chiếu)
+        </span>
+      </div>
+    </SectionCard>
   );
 }

@@ -2,7 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { computePlan, DEFAULT_PLANNING, PLANNING_KEY, type PlanningAssumptions, type PlanOutput, type PlanStatus } from "@/lib/constants/planning";
-import { LAST_RECEIPT_COST, erpStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { LAST_RECEIPT_COST, erpStockExpr, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { getSettingJson } from "@/lib/settings";
 
@@ -33,6 +33,26 @@ export type PlanRow = PlanOutput & {
   committed: number;
   inTransit: number;
   awaitingReturn: number;
+  /**
+   * CÁC VẾ CỦA SỔ KHO — cùng phép gộp với cột `stock`, để màn hình in được "vì sao ra số tồn này"
+   * mà không phải hỏi một truy vấn thứ hai (hai truy vấn là hai lúc đọc, và hai lúc đọc có thể lệch).
+   *   stock = received − shipped;  received = receiptIn + returnIn + adjust − manualOut
+   */
+  received: number;
+  /** Nhập hàng mới (phiếu RECEIPT). */
+  receiptIn: number;
+  /** Tái nhập hàng hoàn — số kho ĐẾM THỰC TẾ (phiếu RETURN). */
+  returnIn: number;
+  /** Điều chỉnh sau kiểm kê, có dấu (phiếu ADJUSTMENT). */
+  adjust: number;
+  /** Xuất tay không qua ĐVVC, số dương (phiếu ISSUE). */
+  manualOut: number;
+  /** ĐÃ XUẤT qua ĐVVC — `SHIPMENT_LEFT_WAREHOUSE`, không theo tiền, không theo Pancake. */
+  shipped: number;
+  /** Hàng hoàn đã lập phiếu nhưng đếm thiếu so với số đã xuất (hụt / hỏng). */
+  shrinkage: number;
+  /** Số phiếu NHẬP HÀNG đã có — 0 ⇒ `stockKnown = false`. */
+  receiptDocs: number;
   sold7: number;
   sold30: number;
   soldInWindow: number;
@@ -122,7 +142,7 @@ function peakDaySubquery(db: Awaited<ReturnType<typeof getDb>>, days: number) {
  *
  * `scripts/explain-stock.ts` gọi đúng hàm này.
  */
-export function buildPlanRowsQuery(db: Awaited<ReturnType<typeof getDb>>, a: PlanningAssumptions) {
+export function buildPlanRowsQuery(db: Awaited<ReturnType<typeof getDb>>, a: PlanningAssumptions, productId?: string) {
   const sales = variantSalesSubquery(db);
   const receipts = variantReceiptsSubquery(db);
   const d7 = demandSubquery(db, 7, "d7");
@@ -147,6 +167,13 @@ export function buildPlanRowsQuery(db: Awaited<ReturnType<typeof getDb>>, a: Pla
       awaitingReturn: sql<number>`coalesce(${sales.awaitingReturn}, 0)`,
       returnHandled: sql<number>`coalesce(${sales.returnHandled}, 0)`,
       returnRestocked: sql<number>`coalesce(${receipts.returnIn}, 0)`,
+      received: sql<number>`coalesce(${receipts.received}, 0)`,
+      receiptIn: sql<number>`coalesce(${receipts.receiptIn}, 0)`,
+      adjust: sql<number>`coalesce(${receipts.adjust}, 0)`,
+      manualOut: sql<number>`coalesce(${receipts.manualOut}, 0)`,
+      shipped: sql<number>`coalesce(${sales.shipped}, 0)`,
+      shrinkage: stockShrinkageExpr(sales, receipts),
+      receiptDocs: sql<number>`coalesce(${receipts.receiptDocs}, 0)`,
       delivered: sql<number>`coalesce(${sales.delivered}, 0)`,
       returned: sql<number>`coalesce(${sales.returned}, 0)`,
       sold7: sql<number>`coalesce(${d7.qty}, 0)`,
@@ -164,8 +191,85 @@ export function buildPlanRowsQuery(db: Awaited<ReturnType<typeof getDb>>, a: Pla
     .leftJoin(d30, eq(d30.variantId, pv.id))
     .leftJoin(dw, eq(dw.variantId, pv.id))
     .leftJoin(peak, eq(peak.variantId, pv.id))
-    .where(sql`${pv.isRemoved} = false and ${p.isRemoved} = false`)
+    // Một mã hàng (trang chi tiết sản phẩm) thì lấy CẢ mẫu mã đã xoá: hàng của mẫu mã đã xoá vẫn
+    // nằm trong kho cho tới khi có phiếu xuất, và trang chi tiết là nơi duy nhất người ta nhìn thấy nó.
+    .where(productId ? eq(pv.productId, productId) : sql`${pv.isRemoved} = false and ${p.isRemoved} = false`)
     .orderBy(asc(p.name), asc(pv.sku));
+}
+
+/**
+ * Mẫu mã CÓ VIỆC: có bán, có tồn, có đơn chờ xuất, có đề xuất đặt, hoặc chưa biết tồn.
+ * Mẫu mã tồn 0 không bán thì `computePlan` vẫn trả `OUT` (khả dụng ≤ 0) — nhưng đó là mẫu mã đã
+ * ngừng, không phải mẫu mã đứt hàng; cảnh báo nó là dạy nhân viên bỏ qua cảnh báo.
+ */
+export function isPlanRowActive(r: Pick<PlanRow, "sold30" | "stock" | "committed" | "suggested" | "status">) {
+  return r.sold30 > 0 || r.stock !== 0 || r.committed > 0 || r.suggested > 0 || r.status === "UNKNOWN";
+}
+
+type PlanQueryRow = Awaited<ReturnType<typeof buildPlanRowsQuery>>[number];
+
+/** Hai tỷ lệ TOÀN SHOP mà từng dòng kế hoạch cần — mẫu từng mẫu mã quá nhỏ để tự đứng. */
+type ShopRates = { returnRecoveryRate: number; shopReturnRate: number };
+
+function shopRates(rows: PlanQueryRow[]): ShopRates {
+  // Tỷ lệ nhập lại được kho: hàng hoàn đã lập phiếu tái nhập ÷ hàng hoàn đã xử lý, tính trên toàn
+  // shop (mẫu từng mẫu mã quá nhỏ). Chưa có dữ liệu thì coi như về đủ — đó là mặc định vật lý.
+  const tongHoanDaXuLy = rows.reduce((t, r) => t + Number(r.returnHandled ?? 0), 0);
+  const tongHoanDaNhapLai = rows.reduce((t, r) => t + Number(r.returnRestocked ?? 0), 0);
+  const returnRecoveryRate = tongHoanDaXuLy > 0 ? Math.min(1, tongHoanDaNhapLai / tongHoanDaXuLy) : 1;
+  // Tỷ lệ hoàn để ước phần hàng đang ở ngoài sẽ quay về: dùng số của chính mẫu mã khi đủ mẫu,
+  // không đủ thì dùng số toàn shop.
+  const tongGiao = rows.reduce((t, r) => t + Number(r.delivered ?? 0), 0);
+  const tongHoan = rows.reduce((t, r) => t + Number(r.returned ?? 0), 0);
+  const shopReturnRate = tongGiao + tongHoan > 0 ? tongHoan / (tongGiao + tongHoan) : 0;
+  return { returnRecoveryRate, shopReturnRate };
+}
+
+/**
+ * MỘT dòng câu lệnh → MỘT dòng kế hoạch. Trang Kế hoạch SX và trang chi tiết sản phẩm đều đi qua
+ * đây, nên một mẫu mã không thể "sắp thiếu" ở trang này mà "đủ hàng" ở trang kia.
+ */
+function toPlanRow(r: PlanQueryRow, a: PlanningAssumptions, rates: ShopRates, countIncoming: boolean): PlanRow {
+  const leadTimeDays = a.leadTimeOverrides[r.productId] ?? a.leadTimeDays;
+  const ketThuc = Number(r.delivered ?? 0) + Number(r.returned ?? 0);
+  const returnRate = ketThuc >= MIN_RETURN_RATE_SAMPLE ? Number(r.returned ?? 0) / ketThuc : rates.shopReturnRate;
+  const plan = computePlan({ stock: Number(r.stock ?? 0), stockKnown: Boolean(r.stockKnown), committed: Number(r.committed ?? 0), soldInWindow: Number(r.soldInWindow ?? 0), windowDays: Math.max(1, a.velocityWindowDays), leadTimeDays, coverDays: a.coverDays, safetyDays: a.safetyDays, roundTo: Math.max(1, a.roundTo), peakDayQty: Number(r.peakDayQty ?? 0), minOrderQty: a.minOrderQtyOverrides?.[r.productId] ?? a.minOrderQty, inTransit: Number(r.inTransit ?? 0), awaitingReturn: Number(r.awaitingReturn ?? 0), returnRate, returnRecoveryRate: rates.returnRecoveryRate, countIncoming });
+  const unitCost = Number(r.unitCost ?? 0);
+  return {
+    ...plan,
+    variantId: r.variantId,
+    productId: r.productId,
+    productName: r.productName,
+    productCode: r.productCode ?? "",
+    image: r.image,
+    sku: r.sku,
+    color: r.color,
+    size: r.size,
+    stock: Number(r.stock ?? 0),
+    stockKnown: Boolean(r.stockKnown),
+    pancakeStock: Number(r.pancakeStock ?? 0),
+    committed: Number(r.committed ?? 0),
+    inTransit: Number(r.inTransit ?? 0),
+    awaitingReturn: Number(r.awaitingReturn ?? 0),
+    received: Number(r.received ?? 0),
+    receiptIn: Number(r.receiptIn ?? 0),
+    returnIn: Number(r.returnRestocked ?? 0),
+    adjust: Number(r.adjust ?? 0),
+    manualOut: Number(r.manualOut ?? 0),
+    shipped: Number(r.shipped ?? 0),
+    shrinkage: Number(r.shrinkage ?? 0),
+    receiptDocs: Number(r.receiptDocs ?? 0),
+    sold7: Number(r.sold7 ?? 0),
+    sold30: Number(r.sold30 ?? 0),
+    soldInWindow: Number(r.soldInWindow ?? 0),
+    delivered: Number(r.delivered ?? 0),
+    returned: Number(r.returned ?? 0),
+    peakDayQty: Number(r.peakDayQty ?? 0),
+    leadTimeDays,
+    unitCost,
+    retailPrice: Number(r.retailPrice ?? 0),
+    orderCost: plan.suggested * unitCost,
+  };
 }
 
 async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanReport> {
@@ -178,53 +282,10 @@ async function getReplenishmentPlanUncached(opt: PlanOptions): Promise<PlanRepor
   // chênh lệch là thời gian biên dịch. Xem `chayKhongJit`.
   const rows = await chayKhongJit(db, (tx) => buildPlanRowsQuery(tx, a));
 
-  // Tỷ lệ nhập lại được kho: hàng hoàn đã lập phiếu tái nhập ÷ hàng hoàn đã xử lý, tính trên toàn
-  // shop (mẫu từng mẫu mã quá nhỏ). Chưa có dữ liệu thì coi như về đủ — đó là mặc định vật lý.
-  const tongHoanDaXuLy = rows.reduce((t, r) => t + Number(r.returnHandled ?? 0), 0);
-  const tongHoanDaNhapLai = rows.reduce((t, r) => t + Number(r.returnRestocked ?? 0), 0);
-  const returnRecoveryRate = tongHoanDaXuLy > 0 ? Math.min(1, tongHoanDaNhapLai / tongHoanDaXuLy) : 1;
-  // Tỷ lệ hoàn để ước phần hàng đang ở ngoài sẽ quay về: dùng số của chính mẫu mã khi đủ mẫu,
-  // không đủ thì dùng số toàn shop.
-  const tongGiao = rows.reduce((t, r) => t + Number(r.delivered ?? 0), 0);
-  const tongHoan = rows.reduce((t, r) => t + Number(r.returned ?? 0), 0);
-  const shopReturnRate = tongGiao + tongHoan > 0 ? tongHoan / (tongGiao + tongHoan) : 0;
-
-  const planRows: PlanRow[] = rows.map((r) => {
-    const leadTimeDays = a.leadTimeOverrides[r.productId] ?? a.leadTimeDays;
-    const ketThuc = Number(r.delivered ?? 0) + Number(r.returned ?? 0);
-    const returnRate = ketThuc >= MIN_RETURN_RATE_SAMPLE ? Number(r.returned ?? 0) / ketThuc : shopReturnRate;
-    const plan = computePlan({ stock: Number(r.stock ?? 0), stockKnown: Boolean(r.stockKnown), committed: Number(r.committed ?? 0), soldInWindow: Number(r.soldInWindow ?? 0), windowDays: Math.max(1, a.velocityWindowDays), leadTimeDays, coverDays: a.coverDays, safetyDays: a.safetyDays, roundTo: Math.max(1, a.roundTo), peakDayQty: Number(r.peakDayQty ?? 0), minOrderQty: a.minOrderQtyOverrides?.[r.productId] ?? a.minOrderQty, inTransit: Number(r.inTransit ?? 0), awaitingReturn: Number(r.awaitingReturn ?? 0), returnRate, returnRecoveryRate, countIncoming });
-    const unitCost = Number(r.unitCost ?? 0);
-    return {
-      ...plan,
-      variantId: r.variantId,
-      productId: r.productId,
-      productName: r.productName,
-      productCode: r.productCode ?? "",
-      image: r.image,
-      sku: r.sku,
-      color: r.color,
-      size: r.size,
-      stock: Number(r.stock ?? 0),
-      stockKnown: Boolean(r.stockKnown),
-      pancakeStock: Number(r.pancakeStock ?? 0),
-      committed: Number(r.committed ?? 0),
-      inTransit: Number(r.inTransit ?? 0),
-      awaitingReturn: Number(r.awaitingReturn ?? 0),
-      sold7: Number(r.sold7 ?? 0),
-      sold30: Number(r.sold30 ?? 0),
-      soldInWindow: Number(r.soldInWindow ?? 0),
-      delivered: Number(r.delivered ?? 0),
-      returned: Number(r.returned ?? 0),
-      peakDayQty: Number(r.peakDayQty ?? 0),
-      leadTimeDays,
-      unitCost,
-      retailPrice: Number(r.retailPrice ?? 0),
-      orderCost: plan.suggested * unitCost,
-    };
-  });
-  // bỏ mẫu mã không bán, không tồn, không đặt
-  const active = planRows.filter((r) => r.sold30 > 0 || r.stock !== 0 || r.committed > 0 || r.suggested > 0 || r.status === "UNKNOWN");
+  const rates = shopRates(rows);
+  const { returnRecoveryRate, shopReturnRate } = rates;
+  const planRows: PlanRow[] = rows.map((r) => toPlanRow(r, a, rates, countIncoming));
+  const active = planRows.filter(isPlanRowActive);
   const byProduct = new Map<string, PlanReport["products"][number]>();
   for (const r of active) {
     const g = byProduct.get(r.productId) ?? { productId: r.productId, productName: r.productName, productCode: r.productCode, image: r.image, rows: [], suggested: 0, orderCost: 0, worst: "IDLE" as PlanStatus };
@@ -251,3 +312,23 @@ export async function getReplenishmentPlan(opt: PlanOptions = {}) {
   const khoa = `${opt.coverDays ?? "mac-dinh"}:${opt.countIncoming === false ? "khong-tinh-hoan" : "tinh-hoan"}`;
   return memo(`getReplenishmentPlan:${khoa}`, 120000, () => getReplenishmentPlanUncached(opt));
 }
+
+/**
+ * TỒN KHO + CẢNH BÁO ĐẶT HÀNG CỦA MỘT MÃ HÀNG — cho trang chi tiết sản phẩm.
+ *
+ * Số tồn đọc TƯƠI (không đệm): nhân viên vừa lập phiếu nhập rồi mở trang sản phẩm thì phải thấy
+ * ngay. Chỉ bộ giả định và hai tỷ lệ toàn shop (hoàn, nhập lại được) lấy từ bản kế hoạch đã đệm —
+ * chúng đổi theo tuần chứ không theo phút, và tính lại chúng là quét cả shop cho một mã hàng.
+ *
+ * Trả về MỌI mẫu mã của mã hàng, kể cả mẫu mã đứng yên mà bản kế hoạch toàn shop lọc bỏ — trang
+ * chi tiết phải in đủ từng dòng; dòng không có việc gì thì in "không bán", không biến mất.
+ */
+export async function getProductStockPlan(productId: string) {
+  const [shop, db] = await Promise.all([getReplenishmentPlan(), getDb()]);
+  const a = shop.assumptions;
+  const rows = await chayKhongJit(db, (tx) => buildPlanRowsQuery(tx, a, productId));
+  const rates: ShopRates = { returnRecoveryRate: shop.used.returnRecoveryRate, shopReturnRate: shop.used.shopReturnRate };
+  return { assumptions: a, used: shop.used, rows: rows.map((r) => toPlanRow(r, a, rates, shop.used.countIncoming)) };
+}
+
+export type ProductStockPlan = Awaited<ReturnType<typeof getProductStockPlan>>;
