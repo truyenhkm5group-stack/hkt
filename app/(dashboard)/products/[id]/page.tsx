@@ -104,16 +104,23 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         />
         <MetricCard
           label="Còn thiếu / cần đặt"
-          value={totals.needOrder || totals.shortage ? `${formatNumber(totals.shortage)} / ${formatNumber(totals.suggested)}` : "Đủ hàng"}
+          // "Đủ hàng" chỉ khi KHÔNG còn gì chưa biết: đơn chờ xuất trên mẫu mã chưa có phiếu nhập thì
+          // ERP không biết đủ hay thiếu — in "—" và nói ra số đó, không in "Đủ hàng".
+          value={totals.needOrder || totals.shortage ? `${formatNumber(totals.shortage)} / ${formatNumber(totals.suggested)}` : totals.committedUnknown ? "—" : "Đủ hàng"}
           note={
-            totals.needOrder || totals.shortage
-              ? `${formatNumber(totals.needOrder)} mẫu mã cần đặt${totals.reorderBy ? ` · ${isPast(totals.reorderBy) ? "đã quá hạn đặt" : "đặt trước"} ${fmtDateKey(totals.reorderBy)}` : ""}${totals.orderCost ? ` · ${formatVND(totals.orderCost, { compact: true })}` : ""}`
-              : totals.unknownStock
-                ? `${formatNumber(totals.unknownStock)} mẫu mã chưa tính được — cần lập phiếu nhập`
-                : "Không mẫu mã nào hết trước khi lô mới kịp về"
+            [
+              totals.needOrder || totals.shortage
+                ? `${formatNumber(totals.needOrder)} mẫu mã cần đặt${totals.reorderBy ? ` · ${isPast(totals.reorderBy) ? "đã quá hạn đặt" : "đặt trước"} ${fmtDateKey(totals.reorderBy)}` : ""}${totals.orderCost ? ` · ${formatVND(totals.orderCost, { compact: true })}` : ""}`
+                : null,
+              totals.committedUnknown
+                ? `${formatNumber(totals.committedUnknown)} cái chờ xuất trên mẫu mã chưa có phiếu nhập — chưa biết đủ hay thiếu`
+                : totals.unknownStock
+                  ? `${formatNumber(totals.unknownStock)} mẫu mã chưa tính được — cần lập phiếu nhập`
+                  : null,
+            ].filter(Boolean).join(" · ") || "Không mẫu mã nào hết trước khi lô mới kịp về"
           }
           icon={AlertTriangle}
-          tone={totals.shortage > 0 || (totals.reorderBy && isPast(totals.reorderBy)) ? "rose" : totals.needOrder ? "amber" : "green"}
+          tone={totals.shortage > 0 || (totals.reorderBy && isPast(totals.reorderBy)) ? "rose" : totals.needOrder || totals.committedUnknown ? "amber" : "green"}
         />
         <MetricCard label="Bán 30 ngày" value={formatNumber(totals.sold30)} note={`90 ngày: ${formatNumber(totals.sold90)} sp · ${formatNumber(totals.orders90)} đơn · ${formatVND(totals.revenue90, { compact: true })} tiền hàng (không tính đơn huỷ)`} icon={ShoppingBag} tone="green" />
       </section>
@@ -446,6 +453,11 @@ function VariantStockSection({ product }: { product: ProductDetail }) {
                     </TableCell>
                     <TableCell className="w-[200px] min-w-[200px] text-xs whitespace-normal">
                       {status ? <span className={cn("inline-block rounded px-1.5 py-0.5 text-[11px] font-semibold", PLAN_STATUS_TONE[status])}>{status === "UNKNOWN" ? "Chưa có phiếu nhập" : PLAN_STATUS_LABEL[status]}</span> : <span className="text-muted-foreground">—</span>}
+                      {l && !l.stockKnown && l.committed > 0 ? (
+                        <div className="mt-0.5 font-semibold text-amber-700 dark:text-amber-400" title="Đơn đã chốt đang chờ xuất, nhưng ERP chưa có phiếu nhập nào của mẫu mã này nên không biết kho có đủ hàng không">
+                          {formatNumber(l.committed)} cái chờ xuất — lập phiếu nhập để biết đủ hay thiếu
+                        </div>
+                      ) : null}
                       {l && l.suggested > 0 ? (
                         <div className="mt-0.5">
                           <span className="font-bold" title={l.moqApplied ? `Nhu cầu thật là ${formatNumber(l.suggestedBeforeMoq)}, nâng lên vì xưởng nhận từ ${formatNumber(l.suggested)} cái` : undefined}>
@@ -488,7 +500,7 @@ function VariantStockSection({ product }: { product: ProductDetail }) {
           {" · "}khả dụng <span className="numeric font-semibold text-foreground">{formatNumber(totals.available)}</span>
           {" · "}còn thiếu <span className={cn("numeric font-semibold", totals.shortage > 0 ? "text-destructive" : "text-foreground")}>{formatNumber(totals.shortage)}</span>
           {" · "}cần đặt <span className="numeric font-semibold text-foreground">{formatNumber(totals.suggested)}</span>
-          {totals.unknownStock ? <> · <span className="font-semibold text-foreground">{formatNumber(totals.unknownStock)}</span> mẫu mã chưa có phiếu nhập (không cộng vào tổng)</> : null}
+          {totals.unknownStock ? <> · <span className="font-semibold text-foreground">{formatNumber(totals.unknownStock)}</span> mẫu mã chưa có phiếu nhập (không cộng vào tổng){totals.committedUnknown ? <>, đang có <span className="font-semibold text-amber-700 dark:text-amber-400">{formatNumber(totals.committedUnknown)}</span> cái chờ xuất</> : null}</> : null}
         </span>
         <span>
           Giá trị tồn <span className="numeric font-semibold text-foreground">{formatVND(totals.stockValue)}</span> · Pancake ghi tồn {formatNumber(totals.pancakeRemain)} (đối chiếu)

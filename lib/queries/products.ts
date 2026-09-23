@@ -587,6 +587,13 @@ export async function getProductDetail(id: string) {
     orderCost: sumLedger((r) => r.orderCost),
     /** Mẫu mã CÒN BÁN mà chưa có phiếu nhập — tồn của chúng không nằm trong các tổng trên. */
     unknownStock: variants.filter((v) => !v.isRemoved && v.ledger && !v.ledger.stockKnown).length,
+    /**
+     * Đơn ĐÃ CHỐT, còn chờ xuất, trên mẫu mã CHƯA có phiếu nhập. Không phải "còn thiếu" (ERP không
+     * biết kho có bao nhiêu), nhưng cũng không được biến mất khỏi thẻ cảnh báo: đo production
+     * 23/09/2026, mã Q005 có 53 cái chờ xuất nằm trên 5 mẫu mã chưa có phiếu nhập — nhiều hơn cả
+     * 47 cái thiếu đã biết. Cộng nó vào "còn thiếu" là bịa; im lặng về nó là giấu.
+     */
+    committedUnknown: variants.reduce((t, v) => t + (v.ledger && !v.ledger.stockKnown ? v.ledger.committed : 0), 0),
     needOrder: needOrder.length,
     /** Hạn đặt sớm nhất trong các mẫu mã cần đặt (YYYY-MM-DD) — quá khứ là đã muộn. */
     reorderBy: reorderDates[0] ?? null,
