@@ -2,7 +2,20 @@
 
 **Ngày:** 22–23/09/2026  
 **Kho mã:** base `b314a1d5de6e5fefa05d4277f21667bd870619d5`  
-**Phương pháp:** Quét mã nguồn (BẰNG CHỨNG từ ghi chú và metrics), chạy `npm run bench:explain` để xác nhận
+**Phương pháp:** Quét mã nguồn — các khối nhận xét mang số đo `ops perf-probe` từ production 22/09/2026, chép nguyên văn.
+**KHÔNG chạy lệnh đo nào:** `bench:explain` không nằm trong bộ lệnh cho phép của vai này, và CSDL của lượt chạy là PGlite rỗng nên nó cũng không có gì để đo.
+
+---
+
+## Nguồn số đo
+
+| Tệp | Chứa gì |
+|---|---|
+| `docs/perf/TECH-5-so-do-tho-2026-09-22.md` | Ba con số đặt cạnh nhau: `Seq Scan on shipments` 2.572 dòng / **1,9 ms** ↔ `Seq Scan on orders` 1.401 dòng / **7.948 ms** |
+| `docs/perf/TECH-5-perf-probe-raw-2026-09-22.txt` | Toàn văn đầu ra `ops perf-probe` |
+| `docs/perf/explain-before.txt` | Kế hoạch `EXPLAIN (ANALYZE, BUFFERS)` đầy đủ, gồm các `SubPlan` được nhắc dưới đây |
+
+Ba tệp ấy là **chứng từ**; tài liệu này là **suy luận** đặt trên chúng. Hai thứ nằm ở hai chỗ có chủ đích.
 
 ---
 
@@ -11,7 +24,7 @@
 ### Cách phát hiện
 
 1. **Quét ghi chú trong mã nguồn** — các tác giả đã để lại `EXPLAIN ANALYZE` trong nhận xét, kèm mốc thời gian và chi phí từ **production 22/09/2026**.
-2. **Xác nhận bằng công cụ `npm run bench:explain`** — script này bắt câu SQL thật của ứng dụng, chạy `EXPLAIN (ANALYZE, BUFFERS)` và in kế hoạch.
+2. **Đối chiếu với kế hoạch thực thi đã lưu** — `docs/perf/explain-before.txt` giữ toàn văn `EXPLAIN (ANALYZE, BUFFERS)` của lượt đo, và `docs/perf/TECH-5-so-do-tho-2026-09-22.md` giữ bản tóm tắt ba con số. Những nguyên nhân KHÔNG có mặt ở hai nguồn ấy được để nguyên là **giả thuyết chưa xác nhận** — xem mục III.
 3. **Phân loại theo nguyên nhân** — mỗi nguyên nhân phải có bằng chứng cụ thể từ execution plan hoặc từ mã.
 
 ### Tóm tắt nguyên nhân phát hiện
@@ -28,7 +41,7 @@
 
 ### 1️⃣ Truy vấn: Tỷ lệ giao thành công theo nguồn (`getReturnRateBySource`)
 
-**Tệp:** `lib/queries/return-rate.ts:845–910`  
+**Tệp:** `lib/queries/return-rate.ts:1299–1318` (tại base `b314a1d5`)  
 **Hàm:** `getReturnRateBySource(period, q, value)`
 
 #### Nguyên nhân
@@ -43,7 +56,7 @@ coalesce(
 )
 ```
 
-Khi Postgres nội tuyến biểu thức này vào 8 cột gộp riêng (`count(*) filter (where …)`), nó tạo ra **246 SubPlan** (xem nhận xét tại dòng 863):
+Khi Postgres nội tuyến biểu thức này vào 8 cột gộp riêng (`count(*) filter (where …)`), nó tạo ra **246 SubPlan** (xem nhận xét tại **dòng 1299–1310**):
 
 ```
 cos
@@ -56,7 +69,7 @@ Mỗi SubPlan chạy lại để mỗi dòng trong `orders` (3.182 dòng) → **
 
 #### Bằng chứng từ mã
 
-Nhận xét tại **dòng 844–858** (`lib/queries/return-rate.ts`):
+Nhận xét tại **dòng 1299–1310** (`lib/queries/return-rate.ts`, base `b314a1d5`):
 
 ```
 ĐO TRÊN PRODUCTION 22/09/2026 (`ops perf-probe` run 35716726654, kế hoạch thực thi thật):
@@ -68,7 +81,7 @@ Nhận xét tại **dòng 844–858** (`lib/queries/return-rate.ts`):
     31.211ms NGUỘI ↔ 30.122ms ẨM  (1x — KHÔNG nhanh lên khi đệm đầy)
 ```
 
-Nhận xét tại **dòng 859–874** giải thích lý do JIT không giúp:
+Nhận xét tại **dòng 1082–1090** giải thích lý do JIT không giúp:
 
 > Đây là câu chậm nhất của cả hệ thống SAU khi vá JIT, và nó là một loại hỏng **KHÁC HẲN**: lượt ấm bằng đúng lượt nguội, nên không phải chuyện đệm, không phải chuyện đĩa, và kế hoạch **KHÔNG có khối `JIT:`** nào — đây là công việc thật, làm lại đủ từ đầu mỗi lần ai mở trang.
 
@@ -324,7 +337,7 @@ Các nguyên nhân còn lại cần chạy `npm run bench:explain` trên toàn b
 
 ## VI. Tài liệu tham khảo
 
-- `lib/queries/return-rate.ts:800–920` — Đánh giá chi tiết từng nguyên nhân
+- `lib/queries/return-rate.ts:1082–1318` (base `b314a1d5`) — hai khối nhận xét mang số đo production
 - `lib/queries/products.ts:160–190` — Giải thích JIT chậm
 - `scripts/bench/explain.ts` — Công cụ chạy EXPLAIN ANALYZE tự động
 - `tests/metric-shape-consistency.test.ts` — Kiểm thử không đổi con số, chỉ đổi hình dạng
