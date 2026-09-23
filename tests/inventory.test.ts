@@ -171,10 +171,20 @@ export async function testInventory(db: Db) {
   // số tồn tuỳ trang mở, và trang nhân viên đặt hàng nhìn kỹ nhất lại là trang nói sai.
   // Tình huống thật của mã Q005 (đo 23/09/2026): đơn ĐÃ CHỐT chờ xuất trên mẫu mã CHƯA có phiếu
   // nhập. Gieo tạm cho dq-var, dọn lại ở cuối mục này để không đổi tổng của các mục sau.
-  await db.insert(schema.orders).values({ id: "ton-cho-xuat-dq", stage: "CONFIRMED", insertedAt: new Date() });
-  await db.insert(schema.orderItems).values({ id: "ton-cho-xuat-dq-i1", orderId: "ton-cho-xuat-dq", variantId: "dq-var", quantity: 4 });
+  // Đơn thứ hai CHƯA CÓ DÒNG VẬN ĐƠN NÀO — đo 23/09/2026: 105 đơn CONFIRMED · 108 món như vậy từng
+  // rơi khỏi "chờ xuất" vì `not NULL` = NULL (xem RESERVED_IN_WAREHOUSE).
+  const choXuatTruoc = (await productRow("dq-var")).reserved;
+  await db.insert(schema.orders).values([
+    { id: "ton-cho-xuat-dq", stage: "CONFIRMED", insertedAt: new Date() },
+    { id: "ton-cho-xuat-dq-2", stage: "CONFIRMED", insertedAt: new Date() },
+  ]);
+  await db.insert(schema.orderItems).values([
+    { id: "ton-cho-xuat-dq-i1", orderId: "ton-cho-xuat-dq", variantId: "dq-var", quantity: 4 },
+    { id: "ton-cho-xuat-dq-i2", orderId: "ton-cho-xuat-dq-2", variantId: "dq-var", quantity: 3 },
+  ]);
   await db.insert(schema.shipments).values({ id: "ton-cho-xuat-dq-s1", orderId: "ton-cho-xuat-dq", stage: "PENDING" });
   clearMemo();
+  assert.equal((await productRow("dq-var")).reserved, choXuatTruoc + 4 + 3, "chờ xuất phải đếm CẢ đơn đã chốt có vận đơn chưa lấy (4) LẪN đơn đã chốt chưa tạo vận đơn (3)");
   const { rows: dsSanPham } = await listProducts(allParams(), 200);
   for (const variantId of ["rr-var", "dq-var"]) {
     const dong = dsSanPham.find((r) => r.id === variantId);
@@ -225,7 +235,9 @@ export async function testInventory(db: Db) {
   }
   await db.delete(schema.shipments).where(eq(schema.shipments.id, "ton-cho-xuat-dq-s1"));
   await db.delete(schema.orderItems).where(eq(schema.orderItems.id, "ton-cho-xuat-dq-i1"));
+  await db.delete(schema.orderItems).where(eq(schema.orderItems.id, "ton-cho-xuat-dq-i2"));
   await db.delete(schema.orders).where(eq(schema.orders.id, "ton-cho-xuat-dq"));
+  await db.delete(schema.orders).where(eq(schema.orders.id, "ton-cho-xuat-dq-2"));
   clearMemo();
   // Bài kiểm trên chỉ bắt được việc đọc nhầm Pancake nếu số Pancake KHÁC số sổ kho ở fixture.
   const rrDong = dsSanPham.find((r) => r.id === "rr-var");

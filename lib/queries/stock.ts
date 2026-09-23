@@ -50,8 +50,15 @@ const QTY = sql<number>`${oi.quantity}`;
 /**
  * Đã chốt đơn nhưng CHƯA rời kho: hàng còn trong kho nhưng đã hứa cho khách.
  * Gồm đơn đã xác nhận/đang đóng/chờ chuyển và cả vận đơn đã tạo mã mà bưu tá chưa lấy.
+ *
+ * `coalesce(…, false)` KHÔNG phải trang trí. Đơn CHƯA CÓ DÒNG VẬN ĐƠN NÀO thì phép nối trái cho
+ * `shipments.*` = NULL, `SHIPMENT_LEFT_WAREHOUSE` = `false or NULL` = NULL, và `not NULL` = NULL —
+ * bộ lọc gộp coi NULL là "không", nên đúng những đơn mới chốt, chưa kịp tạo mã (hàng CHẮC CHẮN còn
+ * trong kho) lại rơi khỏi "chờ xuất". Đo production 23/09/2026: 105 đơn CONFIRMED · 108 món ·
+ * 17 mẫu mã rơi như vậy (100 đơn trong 14 ngày gần nhất) ⇒ khả dụng bị báo DƯ 108 món, "còn thiếu"
+ * và đề xuất đặt bị báo THIẾU tương ứng. Chưa có vận đơn nghĩa là CHƯA rời kho, không phải "chưa biết".
  */
-const RESERVED_IN_WAREHOUSE = sql`(not ${SHIPMENT_LEFT_WAREHOUSE}
+const RESERVED_IN_WAREHOUSE = sql`(not coalesce(${SHIPMENT_LEFT_WAREHOUSE}, false)
   and ${o.stage} in ('CONFIRMED','PACKING','READY_TO_SHIP','SHIPPED'))`;
 
 /** Hàng đã rời kho và đang trên đường (chưa kết thúc) — nằm ngoài kho, chưa biết về hay không. */
