@@ -40,6 +40,7 @@ import { COPILOT_PAGES_KEY, COPILOT_SUGGESTION_TTL_MINUTES } from "@/lib/constan
 import { declaredBotNames } from "@/lib/ai-workforce/agents/sales/ingest";
 import { getSettingValue } from "@/lib/settings";
 import { learningSummary } from "@/lib/queries/copilot-learning";
+import { RECOVERY_CLASSES, RECOVERY_CLASS_LABEL, classifyTakeover, type RecoveryClass } from "@/lib/constants/takeover-recovery";
 
 /**
  * `CHUA_BIET` tách hẳn khỏi `CHUA`, và đó không phải chuyện chữ nghĩa: "cửa này đóng" dẫn người
@@ -185,70 +186,44 @@ async function main() {
   );
 
   /*
-    ───── 8. HỘI THOẠI BỊ CHẶN VÌ "NGƯỜI ĐANG CẦM" — HỎI CỜ ẤY DO ĐÂU MÀ CÓ ─────
+    ───── 8. HỘI THOẠI AI ĐÃ RÚT LUI ─────
 
     Lượt đo đầu in "208 cuộc — đúng luật" và câu đó ru ngủ. Mẻ chạy ngầm 23/09/2026 cho thấy
-    **9/12 hội thoại có tin khách thật đều dừng ở đúng cửa này**, và dòng "NGƯỜI" của chúng là
-    một THÔNG BÁO NỀN TẢNG ("X đã trả lời một quảng cáo"), không phải câu của ai cả.
+    **9/12 hội thoại có tin khách thật đều dừng ở đúng cửa này**, và cờ ấy DÍNH: khách nhắn ngày
+    mai trong đúng những cuộc ấy vẫn không có bản nháp nào.
 
-    Cờ ấy là DI SẢN: hồi ERP còn xếp toàn bộ 4.749 tin phía shop là NGƯỜI, mọi hội thoại có bot
-    Gemini trả lời đều bị đánh dấu "người đang cầm". Phân loại đã vá (PAGE_HUMAN nay là 0) nhưng
-    lượt vá CỐ Ý không chạm `human_takeover_at` — đoán hộ một quyết định bàn giao là việc không
-    được làm (luật 35). Hệ quả: cờ còn nguyên, và nó DÍNH — khách nhắn ngày mai trong đúng những
-    cuộc ấy vẫn không có bản nháp nào.
+    Một giả thuyết của tôi đã bị chính số liệu bác bỏ: tôi tưởng cờ là di sản của lần phân loại
+    người gửi sai. Bảng lý do cho thấy KHÔNG MỘT CUỘC NÀO mang cớ ấy. Phân loại nhóm nay đi theo
+    sổ đăng ký `lib/constants/takeover-recovery.ts`, không theo phỏng đoán.
 
-    Nên cửa này phải tách ba, vì ba nhóm có ba cách xử lý khác hẳn:
-      · NGƯỜI THẬT bấm nhận việc   ⇒ đúng luật, không đụng tới;
-      · máy đặt cờ, page CÒN tin người ⇒ CHƯA RÕ, phải xem từng cuộc;
-      · máy đặt cờ, page KHÔNG còn tin nào của người ⇒ bằng chứng sinh ra cờ KHÔNG CÒN TỒN TẠI.
+    Chỉ nhóm `CAUSE_GONE` mới làm cửa này đỏ: đó là những cuộc máy làm được mà đang bị khoá.
+    `CAUSE_UNVERIFIED` in ra như một việc phải ĐO, không phải một việc phải gỡ — và
+    `CAUSE_STANDS` thì không bao giờ là việc phải làm.
   */
-  const [chan] = await db
-    .select({
-      tong: sql<number>`count(*)`,
-      nguoiThat: sql<number>`count(*) filter (where ${schema.salesConversations.takeoverByUserId} is not null)`,
-      mayDat: sql<number>`count(*) filter (where ${schema.salesConversations.takeoverByUserId} is null)`,
-      mayDatKhongConChungCu: sql<number>`count(*) filter (
-        where ${schema.salesConversations.takeoverByUserId} is null
-          and not exists (
-            select 1 from sales_messages m
-            where m.conversation_id = ${schema.salesConversations.id}
-              and m.sender_type = 'PAGE_HUMAN'
-          )
-      )`,
-    })
+  const cuocRut = await db
+    .select({ ly: schema.salesConversations.takeoverReason, boiUser: schema.salesConversations.takeoverByUserId })
     .from(schema.salesConversations)
     .where(sql`${schema.salesConversations.humanTakeoverAt} is not null`);
-  /*
-    LÝ DO LƯU KÈM LÀ THỨ DUY NHẤT TÁCH ĐƯỢC HAI NGUYÊN NHÂN.
 
-    Chỉ có HAI đường đặt cờ này: nhân viên bấm "nhận việc" (`sales-copilot.ts`, có
-    `takeover_by_user_id`), và CHÍNH AI gọi `conversation.handoff` (`tools/erp.ts`, kèm một câu
-    lý do). Cả 295 cuộc đều thuộc đường thứ hai — nên câu hỏi không phải "ai cầm" mà là **AI rút
-    lui vì cớ gì**:
-
-      · rút vì tưởng có người đang trả lời  ⇒ cái cớ ấy KHÔNG CÒN (phân loại đã vá), gỡ được;
-      · rút vì hỏi ba lần không ai đáp, vì khách khiếu nại, vì mặc cả giá ⇒ cái cớ VẪN ĐÚNG,
-        gỡ là ném máy trở lại đúng chỗ nó đã tự biết là không nên ở.
-
-    Gộp hai nhóm rồi gỡ hết là cách nhanh nhất để máy nói chen vào một cuộc đang căng.
-  */
-  const lyDo = await db
-    .select({ ly: schema.salesConversations.takeoverReason, n: sql<number>`count(*)` })
-    .from(schema.salesConversations)
-    .where(sql`${schema.salesConversations.humanTakeoverAt} is not null`)
-    .groupBy(schema.salesConversations.takeoverReason)
-    .orderBy(sql`count(*) desc`)
-    .limit(12);
-
-  const moCoi = Number(chan?.mayDatKhongConChungCu ?? 0);
+  const nhom = new Map<RecoveryClass, number>(RECOVERY_CLASSES.map((k) => [k, 0]));
+  const theoLyDo = new Map<string, number>();
+  let nguoiThat = 0;
+  for (const c of cuocRut) {
+    if (c.boiUser) {
+      nguoiThat += 1;
+      continue; // người thật bấm nhận việc — không thuộc phép phân loại này
+    }
+    const kq = classifyTakeover(c.ly);
+    nhom.set(kq.klass, (nhom.get(kq.klass) ?? 0) + 1);
+    theoLyDo.set(c.ly || "(không ghi lý do)", (theoLyDo.get(c.ly || "(không ghi lý do)") ?? 0) + 1);
+  }
+  const goDuoc = nhom.get("CAUSE_GONE") ?? 0;
   ghi(
-    "8. Hội thoại người đang cầm",
-    moCoi > 0 ? "CHUA" : "SAN_SANG",
-    `tổng ${chan?.tong ?? 0} · NGƯỜI THẬT bấm nhận ${chan?.nguoiThat ?? 0} · máy đặt cờ ${chan?.mayDat ?? 0}` +
-      (moCoi > 0 ? ` · trong đó ${moCoi} cuộc KHÔNG CÒN một tin nào của người ⇒ cờ là di sản của lần phân loại sai đã vá` : ""),
-    moCoi > 0
-      ? `${moCoi} cuộc này sẽ IM LẶNG cả với tin khách MỚI — cần chủ shop duyệt một lượt gỡ cờ (chỉ nhóm máy tự đặt, không đụng cuộc người thật cầm)`
-      : undefined,
+    "8. Hội thoại AI đã rút lui",
+    goDuoc > 0 ? "CHUA" : "SAN_SANG",
+    `tổng ${cuocRut.length} · NGƯỜI THẬT bấm nhận ${nguoiThat} · AI tự rút ${cuocRut.length - nguoiThat}` +
+      ` ⇒ cớ đã hết ${goDuoc} · chưa chứng minh ${nhom.get("CAUSE_UNVERIFIED") ?? 0} · cớ vẫn đúng ${nhom.get("CAUSE_STANDS") ?? 0}`,
+    goDuoc > 0 ? `${goDuoc} cuộc máy LÀM ĐƯỢC mà đang bị khoá — cần chủ shop duyệt một lượt gỡ cờ CHỈ cho nhóm này` : undefined,
   );
 
   // ───── 9. BẢNG SỐ ĐO ─────
@@ -324,12 +299,18 @@ async function main() {
     if (c.lamGi) console.log(`      → ${c.lamGi}`);
   }
 
-  if (lyDo.length) {
-    console.log("");
-    console.log("──────────────── AI RÚT LUI VÌ CỚ GÌ (cửa 8) ────────────────");
-    for (const l of lyDo) console.log(`  ${String(l.n).padStart(4)}× ${l.ly || "(không ghi lý do)"}`);
-    console.log("  Chỉ nhóm rút vì TƯỞNG CÓ NGƯỜI ĐANG TRẢ LỜI mới gỡ được — cái cớ ấy không còn.");
-    console.log("  Nhóm rút vì khách khiếu nại / mặc cả / hỏi mãi không đáp: cớ VẪN ĐÚNG, giữ nguyên.");
+  console.log("");
+  console.log("──────────────── AI RÚT LUI VÌ CỚ GÌ (cửa 8) ────────────────");
+  for (const k of RECOVERY_CLASSES) {
+    const cua8 = [...theoLyDo.entries()].filter(([ly]) => classifyTakeover(ly).klass === k).sort((a, b) => b[1] - a[1]);
+    if (!cua8.length) continue;
+    console.log(`  ▸ ${RECOVERY_CLASS_LABEL[k]}`);
+    for (const [ly, n] of cua8) {
+      console.log(`      ${String(n).padStart(4)}× ${ly}`);
+      const kq = classifyTakeover(ly);
+      console.log(`            ${kq.vi}`);
+      if (kq.cach) console.log(`            ĐỂ CHẮC: ${kq.cach}`);
+    }
   }
 
   const dong = cua.filter((c) => c.verdict === "CHUA");
