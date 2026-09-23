@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
@@ -12,7 +12,8 @@ import { sendSalesMessage } from "@/lib/ai-workforce/agents/sales/outbound";
 import { getPancakePagesClient } from "@/lib/integrations/pancake/pages";
 import { modeAtLeast } from "@/lib/constants/ai";
 import { COPILOT_MAX_REPLY_CHARS, COPILOT_REJECT_REASONS, COPILOT_SUGGESTION_TTL_MINUTES, canReleaseTakeover, editDistance } from "@/lib/constants/sales-copilot";
-import { copilotPageAllowed } from "@/lib/queries/sales-copilot";
+import { copilotPageAllowed, copilotPages } from "@/lib/queries/sales-copilot";
+import { classifyTakeover } from "@/lib/constants/takeover-recovery";
 
 export type ActionResult<T = unknown> = ({ ok: true } & T) | { error: string };
 
@@ -429,6 +430,39 @@ export async function releaseConversation(input: unknown): Promise<ActionResult>
   return { ok: true };
 }
 
+/**
+ * XẾP MỘT VIỆC SOẠN LẠI — một đường ghi, dùng chung cho nút từng thẻ lẫn nút gỡ kẹt hàng loạt.
+ *
+ * Hai bản sao của đoạn này là hai chỗ để chúng trôi xa nhau: khoá chống trùng khác nhau một chữ
+ * là bấm hai lần đẻ ra hai việc, và mỗi việc thừa là một lượt gọi mô hình mất tiền.
+ *
+ * Trả `false` khi KHÔNG xếp được (chưa có nhân sự, hoặc hội thoại chưa có tin nào của khách để
+ * đọc lại) — người gọi quyết định nói gì với người bấm.
+ */
+async function queueRegenerate(conversationId: string, db: Awaited<ReturnType<typeof getDb>>): Promise<boolean> {
+  const tinCuoi = await db.query.salesMessages.findFirst({
+    where: and(eq(schema.salesMessages.conversationId, conversationId), eq(schema.salesMessages.fromPage, false)),
+    orderBy: [desc(schema.salesMessages.sentAt)],
+  });
+  if (!tinCuoi) return false;
+  const agent = await getAgent("sales", await getAiSettings());
+  if (!agent) return false;
+  // Khoá chống trùng theo (hội thoại · tin cuối): bấm hai lần liên tiếp không xếp hai việc giống hệt.
+  await db
+    .insert(schema.aiTasks)
+    .values({
+      agentId: agent.id,
+      kind: "SALES_REPLY",
+      subjectType: "sales_conversation",
+      subjectId: conversationId,
+      status: "PENDING",
+      payload: { messageId: tinCuoi.id, reason: "COPILOT_REGENERATE" },
+      dedupeKey: `copilot-regen:${conversationId}:${tinCuoi.id}`,
+    })
+    .onConflictDoNothing();
+  return true;
+}
+
 /** SOẠN LẠI — xếp một việc cho dây chuyền đọc lại hội thoại. KHÔNG gửi gì. */
 export async function regenerateSuggestion(input: unknown): Promise<ActionResult> {
   const parsed = convSchema.safeParse(input);
@@ -437,24 +471,7 @@ export async function regenerateSuggestion(input: unknown): Promise<ActionResult
   if (!cua.ok) return { error: cua.error };
 
   const db = await getDb();
-  const tinCuoi = await db.query.salesMessages.findFirst({
-    where: and(eq(schema.salesMessages.conversationId, parsed.data.conversationId), eq(schema.salesMessages.fromPage, false)),
-    orderBy: [desc(schema.salesMessages.sentAt)],
-  });
-  if (!tinCuoi) return { error: "Hội thoại chưa có tin nào của khách để máy đọc lại" };
-
-  const agent = await getAgent("sales", await getAiSettings());
-  if (!agent) return { error: "Không tìm thấy nhân sự bán hàng trong sổ đăng ký" };
-  // Khoá chống trùng riêng cho mỗi lần bấm: bấm hai lần liên tiếp không xếp hai việc giống hệt.
-  await db.insert(schema.aiTasks).values({
-    agentId: agent.id,
-    kind: "SALES_REPLY",
-    subjectType: "sales_conversation",
-    subjectId: parsed.data.conversationId,
-    status: "PENDING",
-    payload: { messageId: tinCuoi.id, reason: "COPILOT_REGENERATE" },
-    dedupeKey: `copilot-regen:${parsed.data.conversationId}:${tinCuoi.id}`,
-  }).onConflictDoNothing();
+  if (!(await queueRegenerate(parsed.data.conversationId, db))) return { error: "Không tìm thấy nhân sự bán hàng trong sổ đăng ký" };
   await db.insert(schema.salesCopilotActions).values({
     conversationId: parsed.data.conversationId,
     pageId: cua.conversation.pageId,
@@ -467,3 +484,83 @@ export async function regenerateSuggestion(input: unknown): Promise<ActionResult
   return { ok: true };
 }
 
+
+/**
+ * ═══════════ GỠ KẸT HÀNG LOẠT — CHỈ NHÓM CỚ ĐÃ CHỨNG MINH LÀ HẾT ═══════════
+ *
+ * Đo bản chạy thử 23/09/2026: 295 hội thoại mang cờ "người đang cầm", 0 cuộc do người thật bấm
+ * nhận. Tất cả đều là máy tự gọi `conversation.handoff`, mỗi lần kèm một câu lý do. Bấm gỡ từng
+ * thẻ là đúng cho vài cuộc; ở 295 cuộc thì nó là một bức tường và không ai đi hết.
+ *
+ * ─── VÌ SAO KHÔNG CÓ NÚT "DỌN SẠCH" ───
+ *
+ * Ba nhóm cớ trông giống hệt nhau trong CSDL mà hệ quả ngược nhau (`takeover-recovery.ts`). Gỡ
+ * nhóm `CAUSE_STANDS` là ném máy trở lại giữa một cuộc khiếu nại hoặc một cuộc mặc cả giá — đúng
+ * chỗ nó đã tự biết là không nên ở. Gỡ nhóm `CAUSE_UNVERIFIED` là một phỏng đoán mặc áo thao tác.
+ *
+ * Nên hàm này chỉ chạm `CAUSE_GONE`, và nó TỰ PHÂN LOẠI LẠI trên máy chủ. KHÔNG nhận danh sách
+ * hội thoại từ trình duyệt: một danh sách gửi lên là một danh sách sửa được, và lúc đó cái chốt
+ * an toàn nằm ở phía người gọi chứ không nằm ở đây.
+ *
+ * ─── TRẢ LẠI RỒI PHẢI XẾP VIỆC SOẠN LẠI ───
+ *
+ * Chỉ tắt cờ thì không có bản nháp nào xuất hiện: dây chuyền chỉ sinh việc khi khách nhắn tin
+ * MỚI. Nút sẽ trông như không làm gì, và lần sau không ai bấm nữa.
+ */
+export async function unstickResolvedHandoffs(): Promise<ActionResult<{ goDuoc: number; boQua: number }>> {
+  const user = await requireUser();
+  if (!can(user, "ai:send")) return { error: "Không có quyền thao tác trên hàng đợi nhân sự AI" };
+
+  const db = await getDb();
+  const pages = await copilotPages(db);
+  if (!pages.length) return { error: "Chưa khai page thí điểm nào" };
+
+  const dsCuoc = await db
+    .select({
+      id: schema.salesConversations.id,
+      pageId: schema.salesConversations.pageId,
+      ly: schema.salesConversations.takeoverReason,
+      boiUser: schema.salesConversations.takeoverByUserId,
+    })
+    .from(schema.salesConversations)
+    .where(
+      and(
+        inArray(schema.salesConversations.pageId, pages),
+        sql`${schema.salesConversations.humanTakeoverAt} is not null`,
+        sql`${schema.salesConversations.takeoverByUserId} is null`,
+      ),
+    );
+
+  const goDuoc = dsCuoc.filter((c) => classifyTakeover(c.ly).klass === "CAUSE_GONE");
+  if (!goDuoc.length) return { ok: true, goDuoc: 0, boQua: dsCuoc.length };
+
+  for (const c of goDuoc) {
+    // Mỗi cuộc một dòng sổ thao tác: gỡ hàng loạt vẫn phải truy được từng cuộc về ai bấm, lúc nào.
+    await db
+      .update(schema.salesConversations)
+      .set({ humanTakeoverAt: null, takeoverByUserId: null, takeoverReason: "", stage: "QUALIFIED" })
+      .where(eq(schema.salesConversations.id, c.id));
+    await db.insert(schema.salesCopilotActions).values({
+      conversationId: c.id,
+      pageId: c.pageId,
+      action: "RELEASE",
+      note: `Gỡ kẹt hàng loạt — cớ cũ đã hết: ${c.ly}`.slice(0, 500),
+      sendStatus: "NONE",
+      actorUserId: user.id,
+      actorName: user.name || user.email || "",
+    });
+    await queueRegenerate(c.id, db);
+  }
+
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "ai.copilot.unstick_bulk",
+    entity: "sales_conversations",
+    entityId: `${goDuoc.length} hội thoại`,
+    after: { goDuoc: goDuoc.length, boQua: dsCuoc.length - goDuoc.length, lyDo: [...new Set(goDuoc.map((c) => c.ly))] },
+    reason: AUDIT_REASON,
+  });
+  revalidatePath("/ai/copilot");
+  return { ok: true, goDuoc: goDuoc.length, boQua: dsCuoc.length - goDuoc.length };
+}

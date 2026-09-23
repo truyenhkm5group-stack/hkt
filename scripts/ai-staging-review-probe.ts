@@ -22,6 +22,18 @@ const GOC = process.env.TEST_BASE_URL ?? "http://127.0.0.1:3000";
 /** Trang cần dò. Mặc định là trang soát; truyền `--path=/ai/fanpage` để dò trang khác. */
 const DUONG = process.argv.find((a) => a.startsWith("--path="))?.slice(7) || "/ai/review";
 
+/**
+ * CHUỖI PHẢI CÓ MẶT TRÊN TRANG — `--find=Cho máy soạn lại` (nhiều lần cũng được).
+ *
+ * Bài kiểm xanh KHÔNG chứng minh người dùng chạm tới được. Ngày 23/09/2026 một thẻ trên hàng đợi
+ * hiện đúng một câu "Chỉ người đang cầm việc mới trả lại được" mà không kèm một cái nút nào —
+ * typecheck sạch, lint sạch, `npm test` in TẤT CẢ KIỂM THỬ ĐẠT, và chủ shop thì không làm được gì.
+ *
+ * Nên sau mỗi lần sửa một NÚT, phải hỏi được một câu rất cụ thể: chữ trên nút ấy có thật sự nằm
+ * trong HTML máy chủ vừa giao, ở đúng trạng thái dữ liệu THẬT hay không.
+ */
+const PHAI_CO = process.argv.filter((a) => a.startsWith("--find=")).map((a) => a.slice(7)).filter(Boolean);
+
 async function main() {
   if (process.env.AI_STAGING !== "1" || process.env.AI_ALLOW_AUTO_SEND !== "false") {
     throw new Error("KHÔNG PHẢI CONTAINER BẢN CHẠY THỬ — dừng.");
@@ -68,6 +80,17 @@ async function main() {
   console.log(`  tổng số thẻ <button>   : ${soNut}`);
 
   console.log("");
+  if (PHAI_CO.length) {
+    console.log("───────── 1b. CHỮ TRÊN NÚT CÓ THẬT SỰ RA TỚI TRANG KHÔNG ─────────");
+    let thieu = 0;
+    for (const chu of PHAI_CO) {
+      const co = html.includes(chu);
+      if (!co) thieu += 1;
+      console.log(`  ${co ? "✓" : "✗"} "${chu}"${co ? ` — xuất hiện ${html.split(chu).length - 1} lần` : " — KHÔNG CÓ trong HTML máy chủ giao"}`);
+    }
+    if (thieu) console.log(`  ⛔ ${thieu} chuỗi KHÔNG ra tới trang — tính năng không có đường bấm.`);
+  }
+
   console.log("───────── 2. TRANG KHAI NHỮNG TỆP JS NÀO ─────────");
   const duong = [...new Set([...html.matchAll(/(?:src|href)="(\/_next\/static\/[^"]+)"/g)].map((m) => m[1]))];
   console.log(`  ${duong.length} tệp tĩnh được khai trong HTML`);

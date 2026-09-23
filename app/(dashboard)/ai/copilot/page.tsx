@@ -14,6 +14,8 @@ import { copilotKpi, copilotPages, copilotQueue, firstHumanSend, ingestStatus, p
 import { modeAtLeast } from "@/lib/constants/ai";
 import { AutoRefresh } from "@/app/(dashboard)/ai/copilot/auto-refresh";
 import { PilotPanel } from "@/app/(dashboard)/ai/copilot/pilot-panel";
+import { UnstickAll } from "@/app/(dashboard)/ai/copilot/unstick-all";
+import { RECOVERY_CLASS_LABEL, classifyTakeover } from "@/lib/constants/takeover-recovery";
 
 export const metadata = { title: "Hàng đợi trợ lý AI" };
 
@@ -51,6 +53,32 @@ export default async function CopilotPage() {
     pilotStatus(),
     safetyBoard(),
   ]);
+
+  /*
+    ═══════ HAI LOẠI VIỆC, HAI NHÓM — VÌ CHÚNG ĐÒI HAI THAO TÁC KHÁC HẲN ═══════
+
+    `copilotQueue` xếp "máy đã rút lui" lên ĐẦU (bậc 0). Luật ấy viết khi rút lui còn nghĩa là
+    "máy đã sàng một lượt và việc này cần người nhất". Đo 23/09/2026: 295 cuộc đang mang cờ rút
+    lui, phần lớn rút vì một cớ NAY ĐÃ HẾT — chúng không gấp, chúng KẸT.
+
+    Hệ quả là thứ chủ shop nhìn thấy đầu tiên: một thẻ không bấm được gì. Việc làm xong trong năm
+    giây thì nằm dưới, khuất màn hình.
+
+    Tách hai nhóm chứ KHÔNG đổi thứ tự. Đổi thứ tự sẽ dìm cả những cuộc rút lui vì khách KHIẾU
+    NẠI — người thật đang chờ, và đó mới là việc gấp nhất trên màn hình.
+
+      · CHỜ BẠN DUYỆT  — có bản nháp, đọc rồi bấm. Việc rõ ràng.
+      · MÁY ĐÃ RÚT LUI — không có bản nháp, cần một QUYẾT ĐỊNH.
+
+    Trong nhóm hai, cớ VẪN ĐÚNG đứng trước (người thật đang chờ), cớ đã hết đứng sau (một cú bấm
+    là hết kẹt). Phân loại đọc từ `takeover-recovery.ts`, không đoán lại.
+  */
+  const choDuyet = queue.filter((r) => !r.machineHandoff);
+  const rutLui = queue
+    .filter((r) => r.machineHandoff)
+    .map((row) => ({ row, kq: classifyTakeover(row.handoffRequestReason ?? "") }))
+    .sort((x, y) => (x.kq.klass === "CAUSE_STANDS" ? 0 : 1) - (y.kq.klass === "CAUSE_STANDS" ? 0 : 1));
+  const goDuoc = rutLui.filter((x) => x.kq.klass === "CAUSE_GONE").length;
 
   return (
     <div className="space-y-4">
@@ -90,128 +118,44 @@ export default async function CopilotPage() {
         </Card>
       ) : null}
 
-      {queue.map((row) => (
-        <Card key={row.conversationId} className="space-y-3 p-4">
+      {choDuyet.length ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold">
+            Chờ bạn duyệt{" "}
+            <span className="font-normal text-muted-foreground">· {formatNumber(choDuyet.length)} khách · máy đã soạn sẵn, đọc rồi bấm</span>
+          </h2>
+          {choDuyet.map((row) => (
+            <TheViec key={row.conversationId} row={row} userId={user?.id ?? null} />
+          ))}
+        </section>
+      ) : null}
+
+      {rutLui.length ? (
+        <section className="space-y-3">
+          <h2 className="text-sm font-semibold">
+            Máy đã rút lui{" "}
+            <span className="font-normal text-muted-foreground">
+              · {formatNumber(rutLui.length)} khách · KHÔNG có bản nháp, cần bạn quyết một việc
+            </span>
+          </h2>
           {/*
-            HÀNG ĐẦU CHỈ GIỮ THỨ ĐỔI ĐƯỢC VIỆC NGƯỜI ĐỌC SẼ LÀM.
+            GỠ KẸT HÀNG LOẠT — CHỈ cho nhóm cớ đã CHỨNG MINH là hết.
 
-            Trước đây hàng này có bảy nhãn: tên khách, nguồn, nấc hội thoại, tên sản phẩm, số phút
-            chờ, mã page, và một liên kết. Năm trong bảy cái ấy là trạng thái nội bộ — chúng không
-            đổi câu trả lời, chúng chỉ chiếm chỗ của hai cái có đổi. Chúng xuống khối "Vì sao máy
-            soạn thế này" ở cuối thẻ.
+            Bấm từng thẻ là đúng cho vài cuộc; ở 295 cuộc thì nó là một bức tường. Nhưng "dọn cho
+            sạch" cả 295 là ném máy trở lại giữa những cuộc khiếu nại và mặc cả giá — nên nút này
+            không bao giờ chạm tới hai nhóm kia, và máy chủ TỰ phân loại lại chứ không nhận một
+            danh sách nào từ trình duyệt.
           */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="text-base font-semibold">{row.customerName || "(chưa có tên)"}</span>
-            {row.waitedMinutes === null ? null : (
-              <Badge tone={row.waitedMinutes > 60 ? "hot" : undefined}>chờ {row.waitedMinutes} phút</Badge>
-            )}
-            {/*
-              MÁY ĐÃ KÊU CỨU — nhãn này đổi cách đọc cả thẻ: máy đọc xong rồi tự nhận là mình không
-              xử lý được, nên thẻ này cần một người NHẤT trong cả hàng đợi.
-            */}
-            {row.machineHandoff ? <Badge tone="hot">AI cần người xử lý</Badge> : null}
-            {row.productName ? null : <Badge tone="warn">chưa nhận ra sản phẩm</Badge>}
-          </div>
-
-          {/*
-            LÝ DO MÁY XIN NGƯỜI VÀO, viết ra thành câu. Một nhãn đỏ không nói người trực phải làm
-            gì; lý do thì có — thiếu bảng số đo là việc khác hẳn với khách hỏi một chuyện phức tạp.
-          */}
-          {row.machineHandoff ? (
-            <p className="rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100">
-              <span className="font-semibold">Máy đã rút lui — chưa ai nhận việc này.</span>
-              {row.handoffRequestReason ? <> Lý do: {HANDOFF_REASON_LABEL[row.handoffRequestReason as HandoffReason] ?? row.handoffRequestReason}.</> : null}{" "}
-              Hai lối ra nằm ngay dưới câu máy soạn.
-            </p>
-          ) : null}
-
-          {/* ─── 1. KHÁCH NÓI GÌ ─── chiếm hết bề ngang, vì đây là thứ phải đọc trước tiên. */}
-          <div>
-            <p className="mb-1 text-xs font-medium text-muted-foreground">
-              Khách nhắn{row.customerMessageAt ? ` · ${formatDateTime(row.customerMessageAt)}` : ""}
-            </p>
-            <p className="whitespace-pre-wrap rounded-lg bg-muted/60 p-3 text-sm">{row.customerMessage || "(không có nội dung)"}</p>
-          </div>
-
-          {/*
-            CẢNH BÁO ĐỨNG TRÊN Ô SOẠN, KHÔNG NẰM DƯỚI.
-
-            Người trực đọc từ trên xuống rồi bấm. Một dòng "chưa có bảng số đo" đặt dưới nút Gửi là
-            một dòng không ai đọc. Máy đã bị chặn không đoán; chỗ này để NGƯỜI biết mình đang bấm
-            trong lúc thiếu gì — và hệ thống ghi lại việc đó.
-          */}
-          {row.warnings.length ? (
-            <div className="space-y-0.5 rounded border border-amber-500/60 bg-amber-50 p-2 dark:bg-amber-950/40">
-              {row.warnings.map((w) => (
-                <p key={w} className="text-[11px] font-semibold text-amber-800 dark:text-amber-200">
-                  ⚠ {COPILOT_WARNING_LABEL[w] ?? w}
-                </p>
-              ))}
-              <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                Chị/anh vẫn sửa tay rồi gửi được — hệ thống ghi lại là đã gửi trong lúc thiếu dữ kiện này.
-              </p>
+          {goDuoc > 0 ? <UnstickAll soCuoc={goDuoc} /> : null}
+          {rutLui.map(({ row, kq }) => (
+            <div key={row.conversationId} className="space-y-1">
+              <p className="text-[11px] text-muted-foreground">{RECOVERY_CLASS_LABEL[kq.klass]}</p>
+              <TheViec row={row} userId={user?.id ?? null} />
             </div>
-          ) : null}
+          ))}
+        </section>
+      ) : null}
 
-          {/* ─── 2. MÁY SOẠN GÌ, VÀ NÚT GỬI ─── */}
-          <div>
-            <p className="mb-1 text-xs font-medium text-muted-foreground">
-              Máy soạn{row.suggestedAt ? ` · ${formatDateTime(row.suggestedAt)}` : ""}
-            </p>
-            <SendCard
-              conversationId={row.conversationId}
-              suggestionId={row.suggestionId}
-              suggestedReply={row.suggestedReply}
-              stale={row.stale}
-              humanTakeover={Boolean(row.humanTakeoverAt)}
-              canRelease={row.takeoverByUserId === user?.id}
-              machineHandoff={row.machineHandoff}
-              handoffReasonText={
-                row.handoffRequestReason ? HANDOFF_REASON_LABEL[row.handoffRequestReason as HandoffReason] ?? row.handoffRequestReason : ""
-              }
-            />
-          </div>
-
-          {/*
-            ─── 3. CON SỐ CÂU ẤY DỰA VÀO ─── ở lại ngoài, KHÔNG gấp vào.
-
-            Đây là ranh giới của lần dọn này, và nó không nằm ở "nhiều chữ hay ít chữ". Con số thì
-            người đọc KHÔNG tự kiểm được từ câu chữ — giá 499.000 ₫ đúng hay sai thì nhìn câu không
-            biết. Giấu chúng đi là bắt người bấm TIN bản nháp, đúng thứ nấc trợ lý sinh ra để tránh.
-
-            Còn mã ý định, tên hành động, điểm tin cậy, nấc hội thoại, mã page: chúng nói về máy,
-            không nói về khách, và không đổi câu trả lời. Chúng xuống khối gấp bên dưới.
-          */}
-          <FactList facts={row.facts} />
-
-          <details className="text-[11px]">
-            <summary className="cursor-pointer text-muted-foreground">Vì sao máy soạn thế này</summary>
-            <div className="mt-1 space-y-0.5 border-t border-border/60 pt-1">
-              <p>Ý định: {row.intents.length ? row.intents.join(", ") : "—"}</p>
-              <p>
-                Việc máy chọn: {SALES_ACTION_LABEL[row.action as SalesAction] ?? (row.action || "—")} · tin cậy{" "}
-                {row.confidence === null ? "—" : row.confidence}
-              </p>
-              {row.decisionReason ? <p className="text-muted-foreground">{row.decisionReason}</p> : null}
-              {row.missing.length ? <p>Còn thiếu để lên đơn: {row.missing.join(", ")}</p> : null}
-              {row.handoffReason ? (
-                <p className="font-semibold text-amber-700 dark:text-amber-300">
-                  Chuyển người: {HANDOFF_REASON_LABEL[row.handoffReason as HandoffReason] ?? row.handoffReason}
-                  {row.handoffReason === "SIZE_DATA_MISSING" ? " — ERP chưa có bảng số đo, máy KHÔNG đoán size" : ""}
-                </p>
-              ) : null}
-              <EntityList entities={row.entities} />
-              <p className="text-muted-foreground">
-                Nguồn {row.sourceType || "?"} · nấc {SALES_STAGE_LABEL[row.stage as SalesStage] ?? row.stage}
-                {row.productName ? ` · ${row.productName}` : ""} · page {row.pageId}
-              </p>
-              <Link href={`/ai/review?conversation=${row.conversationId}`} className="inline-block underline">
-                xem lượt chạy đầy đủ
-              </Link>
-            </div>
-          </details>
-        </Card>
-      ))}
       {/*
         Bảng giám sát xuống CUỐI và gấp lại. Xem chú thích đầu `pilot-panel.tsx`: không con số nào
         trong đó sai, chúng chỉ trả lời câu hỏi của một vai khác với vai đang mở màn hình này.
@@ -301,6 +245,132 @@ function TinhTrang({
         <AutoRefresh seconds={20} />
       </div>
     </div>
+  );
+}
+
+/** MỘT THẺ VIỆC. Dùng chung cho cả hai nhóm — hai bản sao là hai chỗ để chúng trôi xa nhau. */
+function TheViec({ row, userId }: { row: Awaited<ReturnType<typeof copilotQueue>>[number]; userId: string | null }) {
+  return (
+      <Card key={row.conversationId} className="space-y-3 p-4">
+        {/*
+          HÀNG ĐẦU CHỈ GIỮ THỨ ĐỔI ĐƯỢC VIỆC NGƯỜI ĐỌC SẼ LÀM.
+
+          Trước đây hàng này có bảy nhãn: tên khách, nguồn, nấc hội thoại, tên sản phẩm, số phút
+          chờ, mã page, và một liên kết. Năm trong bảy cái ấy là trạng thái nội bộ — chúng không
+          đổi câu trả lời, chúng chỉ chiếm chỗ của hai cái có đổi. Chúng xuống khối "Vì sao máy
+          soạn thế này" ở cuối thẻ.
+        */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-base font-semibold">{row.customerName || "(chưa có tên)"}</span>
+          {row.waitedMinutes === null ? null : (
+            <Badge tone={row.waitedMinutes > 60 ? "hot" : undefined}>chờ {row.waitedMinutes} phút</Badge>
+          )}
+          {/*
+            MÁY ĐÃ KÊU CỨU — nhãn này đổi cách đọc cả thẻ: máy đọc xong rồi tự nhận là mình không
+            xử lý được, nên thẻ này cần một người NHẤT trong cả hàng đợi.
+          */}
+          {row.machineHandoff ? <Badge tone="hot">AI cần người xử lý</Badge> : null}
+          {row.productName ? null : <Badge tone="warn">chưa nhận ra sản phẩm</Badge>}
+        </div>
+
+        {/*
+          LÝ DO MÁY XIN NGƯỜI VÀO, viết ra thành câu. Một nhãn đỏ không nói người trực phải làm
+          gì; lý do thì có — thiếu bảng số đo là việc khác hẳn với khách hỏi một chuyện phức tạp.
+        */}
+        {row.machineHandoff ? (
+          <p className="rounded border border-rose-300 bg-rose-50 p-2 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-100">
+            <span className="font-semibold">Máy đã rút lui — chưa ai nhận việc này.</span>
+            {row.handoffRequestReason ? <> Lý do: {HANDOFF_REASON_LABEL[row.handoffRequestReason as HandoffReason] ?? row.handoffRequestReason}.</> : null}{" "}
+            Hai lối ra nằm ngay dưới câu máy soạn.
+          </p>
+        ) : null}
+
+        {/* ─── 1. KHÁCH NÓI GÌ ─── chiếm hết bề ngang, vì đây là thứ phải đọc trước tiên. */}
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">
+            Khách nhắn{row.customerMessageAt ? ` · ${formatDateTime(row.customerMessageAt)}` : ""}
+          </p>
+          <p className="whitespace-pre-wrap rounded-lg bg-muted/60 p-3 text-sm">{row.customerMessage || "(không có nội dung)"}</p>
+        </div>
+
+        {/*
+          CẢNH BÁO ĐỨNG TRÊN Ô SOẠN, KHÔNG NẰM DƯỚI.
+
+          Người trực đọc từ trên xuống rồi bấm. Một dòng "chưa có bảng số đo" đặt dưới nút Gửi là
+          một dòng không ai đọc. Máy đã bị chặn không đoán; chỗ này để NGƯỜI biết mình đang bấm
+          trong lúc thiếu gì — và hệ thống ghi lại việc đó.
+        */}
+        {row.warnings.length ? (
+          <div className="space-y-0.5 rounded border border-amber-500/60 bg-amber-50 p-2 dark:bg-amber-950/40">
+            {row.warnings.map((w) => (
+              <p key={w} className="text-[11px] font-semibold text-amber-800 dark:text-amber-200">
+                ⚠ {COPILOT_WARNING_LABEL[w] ?? w}
+              </p>
+            ))}
+            <p className="text-[11px] text-amber-700 dark:text-amber-300">
+              Chị/anh vẫn sửa tay rồi gửi được — hệ thống ghi lại là đã gửi trong lúc thiếu dữ kiện này.
+            </p>
+          </div>
+        ) : null}
+
+        {/* ─── 2. MÁY SOẠN GÌ, VÀ NÚT GỬI ─── */}
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">
+            Máy soạn{row.suggestedAt ? ` · ${formatDateTime(row.suggestedAt)}` : ""}
+          </p>
+          <SendCard
+            conversationId={row.conversationId}
+            suggestionId={row.suggestionId}
+            suggestedReply={row.suggestedReply}
+            stale={row.stale}
+            humanTakeover={Boolean(row.humanTakeoverAt)}
+            canRelease={row.takeoverByUserId === userId}
+            machineHandoff={row.machineHandoff}
+            handoffReasonText={
+              row.handoffRequestReason ? HANDOFF_REASON_LABEL[row.handoffRequestReason as HandoffReason] ?? row.handoffRequestReason : ""
+            }
+          />
+        </div>
+
+        {/*
+          ─── 3. CON SỐ CÂU ẤY DỰA VÀO ─── ở lại ngoài, KHÔNG gấp vào.
+
+          Đây là ranh giới của lần dọn này, và nó không nằm ở "nhiều chữ hay ít chữ". Con số thì
+          người đọc KHÔNG tự kiểm được từ câu chữ — giá 499.000 ₫ đúng hay sai thì nhìn câu không
+          biết. Giấu chúng đi là bắt người bấm TIN bản nháp, đúng thứ nấc trợ lý sinh ra để tránh.
+
+          Còn mã ý định, tên hành động, điểm tin cậy, nấc hội thoại, mã page: chúng nói về máy,
+          không nói về khách, và không đổi câu trả lời. Chúng xuống khối gấp bên dưới.
+        */}
+        <FactList facts={row.facts} />
+
+        <details className="text-[11px]">
+          <summary className="cursor-pointer text-muted-foreground">Vì sao máy soạn thế này</summary>
+          <div className="mt-1 space-y-0.5 border-t border-border/60 pt-1">
+            <p>Ý định: {row.intents.length ? row.intents.join(", ") : "—"}</p>
+            <p>
+              Việc máy chọn: {SALES_ACTION_LABEL[row.action as SalesAction] ?? (row.action || "—")} · tin cậy{" "}
+              {row.confidence === null ? "—" : row.confidence}
+            </p>
+            {row.decisionReason ? <p className="text-muted-foreground">{row.decisionReason}</p> : null}
+            {row.missing.length ? <p>Còn thiếu để lên đơn: {row.missing.join(", ")}</p> : null}
+            {row.handoffReason ? (
+              <p className="font-semibold text-amber-700 dark:text-amber-300">
+                Chuyển người: {HANDOFF_REASON_LABEL[row.handoffReason as HandoffReason] ?? row.handoffReason}
+                {row.handoffReason === "SIZE_DATA_MISSING" ? " — ERP chưa có bảng số đo, máy KHÔNG đoán size" : ""}
+              </p>
+            ) : null}
+            <EntityList entities={row.entities} />
+            <p className="text-muted-foreground">
+              Nguồn {row.sourceType || "?"} · nấc {SALES_STAGE_LABEL[row.stage as SalesStage] ?? row.stage}
+              {row.productName ? ` · ${row.productName}` : ""} · page {row.pageId}
+            </p>
+            <Link href={`/ai/review?conversation=${row.conversationId}`} className="inline-block underline">
+              xem lượt chạy đầy đủ
+            </Link>
+          </div>
+        </details>
+      </Card>
   );
 }
 
