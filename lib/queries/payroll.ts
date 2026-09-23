@@ -1240,10 +1240,20 @@ export type NominalMarketerProduct = {
  * lọc, nên lương giữ nguyên. Lọc một lát cắt đơn rồi tính lương trên đó là sai bản chất (AGENTS
  * mục 16: lương cố định đi theo THỜI GIAN).
  */
-export async function getNominalMarketerBreakdown(period: Period, value: OrderValueFilter = NO_ORDER_VALUE_FILTER, includeAds = true): Promise<{ rows: NominalMarketerRow[]; unattributed: number; shopRetained: number; ownerSharePct: number; pagesMapped: number; pagesTotal: number }> {
-  return memo(`nominalByMarketer:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}`, 120_000, async () => {
+export async function getNominalMarketerBreakdown(
+  period: Period,
+  value: OrderValueFilter = NO_ORDER_VALUE_FILTER,
+  includeAds = true,
+  /**
+   * Cùng công tắc với bảng theo mã đứng NGAY TRÊN nó: tab Lợi nhuận danh nghĩa bật giá vốn dự tính
+   * thì bảng marketer cũng phải đứng trên cùng giá vốn ấy, nếu không hai bảng trên một trang nói
+   * hai con số lợi nhuận cho cùng một mã. `getPayrollReport` / `getMarketerReport` không đi qua đây.
+   */
+  withEstimatedCost = false,
+): Promise<{ rows: NominalMarketerRow[]; unattributed: number; shopRetained: number; ownerSharePct: number; pagesMapped: number; pagesTotal: number }> {
+  return memo(`nominalByMarketer:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}:${withEstimatedCost ? "gvdt" : "thuc"}`, 120_000, async () => {
     const db = await getDb();
-    const [nominal, employees, config, byPage] = await Promise.all([getNominalProfitReport(period, "ORDERED", value, includeAds), listEmployees(), loadPayrollConfig(), salesByProductPage(period, "confirmed")]);
+    const [nominal, employees, config, byPage] = await Promise.all([getNominalProfitReport(period, "ORDERED", value, includeAds, withEstimatedCost), listEmployees(), loadPayrollConfig(), salesByProductPage(period, "confirmed")]);
     const ads = schema.adSpends;
     const spendRows = await db
       .select({ marketerId: ads.marketerId, productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })

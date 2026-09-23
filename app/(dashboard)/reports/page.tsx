@@ -48,6 +48,7 @@ import {
 } from "@/lib/queries/reports";
 import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 import { parseAdsIncluded, parseOrderValue } from "@/lib/constants/order-value";
+import { parseTargetMargin } from "@/lib/constants/estimated-cost";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Báo cáo lợi nhuận" };
@@ -185,12 +186,14 @@ export default async function ReportsPage({
   // rơi về mặc định và nói một con số khác bảng cha.
   const giaTriDon = parseOrderValue(raw);
   const tinhCPQC = parseAdsIncluded(raw);
+  // Biên LN người xem gõ để tính trần CPQC — không có mặc định (AGENTS.md mục 38).
+  const bienMucTieu = parseTargetMargin(param(raw, "bien"));
   /*
     BỘ LỌC PHẢI SỐNG QUA MỌI ĐƯỜNG DẪN TRONG TRANG. `tabQuery` là chuỗi đi kèm mọi liên kết
     drilldown (mở một mã, đổi tab); bỏ `vmin`/`vmax`/`ads` ra khỏi nó là bấm vào một dòng thì bộ
     lọc lặng lẽ biến mất và bảng chi tiết nói về một tập đơn khác bảng vừa bấm.
   */
-  const locQuery = `${giaTriDon.min !== null ? `&vmin=${giaTriDon.min}` : ""}${giaTriDon.max !== null ? `&vmax=${giaTriDon.max}` : ""}${tinhCPQC ? "" : "&ads=0"}`;
+  const locQuery = `${giaTriDon.min !== null ? `&vmin=${giaTriDon.min}` : ""}${giaTriDon.max !== null ? `&vmax=${giaTriDon.max}` : ""}${tinhCPQC ? "" : "&ads=0"}${bienMucTieu === null ? "" : `&bien=${bienMucTieu}`}`;
   const tabQuery = `tab=${tab}${periodQuery}${mocNominal === "ORDERED" ? "" : `&moc=${mocNominal}`}${locQuery}`;
   const basis = parseBasis(param(raw, "basis"));
   const report = await getProfitReport(period, basis);
@@ -297,6 +300,7 @@ export default async function ReportsPage({
           basis={mocNominal}
           value={giaTriDon}
           includeAds={tinhCPQC}
+          targetMargin={bienMucTieu}
         />
       ) : null}
       {tab === "pnl" ? (

@@ -689,6 +689,12 @@ export type ProjectedCounts = {
   projectedQty: number;
   /** Số sản phẩm không biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn bị tính là 0. */
   cogsUnknownQty: number;
+  /**
+   * Phần của `cogsUnknownQty` ước tính GIAO TỚI TAY KHÁCH — cân CÙNG một phép cân với
+   * `projectedQty`. Đây là số sản phẩm mà giá vốn DỰ TÍNH (`lib/constants/estimated-cost.ts`) được
+   * nhân vào; KHÔNG làm tròn, vì nó còn nhân với đơn giá.
+   */
+  projectedUnknownQty: number;
 };
 
 export type ProjectedProductRow = ProjectedCounts & {
@@ -748,6 +754,7 @@ function accMoi(): Acc {
     projectedCogs: 0,
     projectedQty: 0,
     cogsUnknownQty: 0,
+    projectedUnknownQty: 0,
   };
 }
 
@@ -761,7 +768,7 @@ function accMoi(): Acc {
  * Hàm này KHÔNG đụng tới `eligibleSent`, `active` hay `projectedDelivered`: tiền và tỷ lệ GTC là
  * hai chiều riêng (đặc tả §1), và một kiện chưa rời kho không nằm trong tỷ lệ nào.
  */
-function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number; qty: number }, lookup: ProbabilityLookup): boolean {
+function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number; qty: number; cogsUnknownQty: number }, lookup: ProbabilityLookup): boolean {
   const tra = lookup.of(NOT_SHIPPED_STATE);
   if (tra.p === null) {
     acc.unmodelledRevenue += don.revenue;
@@ -770,6 +777,7 @@ function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number; qty:
   acc.projectedDeliveredRevenue += don.revenue * tra.p;
   acc.projectedCogs += don.cogs * tra.p;
   acc.projectedQty += don.qty * tra.p;
+  acc.projectedUnknownQty += don.cogsUnknownQty * tra.p;
   return true;
 }
 
@@ -821,6 +829,7 @@ function canMotDon(
       acc.projectedDeliveredRevenue += don.revenue;
       acc.projectedCogs += don.cogs;
       acc.projectedQty += don.qty;
+      acc.projectedUnknownQty += don.cogsUnknownQty;
       return;
     case "RETURNED":
     case "RETURNED_BY_RULE":
@@ -859,6 +868,7 @@ function canMotDon(
         acc.projectedDeliveredRevenue += don.revenue * tra.p;
         acc.projectedCogs += don.cogs * tra.p;
         acc.projectedQty += don.qty * tra.p;
+        acc.projectedUnknownQty += don.cogsUnknownQty * tra.p;
       }
       return;
     }

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { guardSecondApproval } from "@/lib/actions/approvals";
 import { audit } from "@/lib/audit";
+import { clearMemo } from "@/lib/cache";
 import { can, requireUser } from "@/lib/auth/session";
 import { parseDeliveryRateOverride, type StoredDeliveryRateOverride } from "@/lib/constants/delivery-rate";
 import { DEFAULT_PROFIT_ASSUMPTIONS, PROFIT_ASSUMPTIONS_KEY, type ProfitAssumptions } from "@/lib/constants/profit";
@@ -89,6 +90,8 @@ export async function setDeliveryRateOverride(input: unknown): Promise<{ ok: tru
     entityId: `${PROFIT_ASSUMPTIONS_KEY}#${productId}`,
     detail: { productId, before: before.overrides?.[productId] ?? null, after: entry },
   });
+  // Báo cáo được nhớ đệm 120 giây; người vừa bấm lưu phải thấy ngay tỷ lệ mới.
+  clearMemo();
   revalidatePath("/reports");
   return { ok: true };
 }
@@ -129,6 +132,8 @@ export async function clearDeliveryRateOverride(productId: string): Promise<{ ok
     entityId: `${PROFIT_ASSUMPTIONS_KEY}#${productId}`,
     detail: { productId, before: cu, after: null },
   });
+  // Báo cáo được nhớ đệm 120 giây; người vừa bấm lưu phải thấy ngay tỷ lệ mới.
+  clearMemo();
   revalidatePath("/reports");
   return { ok: true };
 }

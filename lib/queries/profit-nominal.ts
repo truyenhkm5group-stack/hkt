@@ -15,6 +15,7 @@ import { parseDeliveryRateOverride, resolveDeliveryRate, type DeliveryRateOverri
 import { getProjectedDeliveryMetrics, type BacktestSummary } from "@/lib/queries/projected-delivery";
 import { NO_ORDER_VALUE_FILTER, orderValueActive, orderValueKey, orderValueMatches, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { ESTIMATED_COST_KEY, parseEstimatedCosts, type EstimatedCost, type EstimatedCostMap } from "@/lib/constants/estimated-cost";
 
 const o = schema.orders;
 const s = schema.shipments;
@@ -245,8 +246,20 @@ export type NominalRow = {
   unmodelledRevenue: number;
   /** Giá vốn có biết không: `false` khi có sản phẩm không phiếu nhập, không giá Pancake — giá vốn đang bị tính 0. */
   cogsKnown: boolean;
-  /** Số sản phẩm bán ra không biết giá vốn. */
+  /** Số sản phẩm bán ra KHÔNG có giá vốn THẬT (không phiếu nhập, không giá Pancake) — kể cả phần đã được lấp bằng giá dự tính. */
   cogsUnknownQty: number;
+  /**
+   * Số sản phẩm vẫn CHƯA BIẾT giá vốn sau khi đã lấp giá dự tính — `0` khi mã có giá dự tính.
+   * `cogsKnown` = (số này bằng 0).
+   */
+  cogsUncoveredQty: number;
+  /** Giá vốn dự tính chủ shop đặt cho mã (chỉ khi báo cáo được gọi với `withEstimatedCost`). `null` = không có / không áp. */
+  estimatedCost: EstimatedCost | null;
+  /**
+   * PHẦN của `expectedCogs` đến từ giá DỰ TÍNH, không phải chứng từ — tách riêng để màn hình dán
+   * nhãn được (AGENTS.md mục 8.6). `0` khi không có giá dự tính.
+   */
+  expectedCogsEstimated: number;
   /** Giá trị hàng nhập có biết không: `false` khi phiếu nhập trong kỳ có dòng không ghi đơn giá. */
   purchaseCostKnown: boolean;
   /** Tỷ lệ hoàn lịch sử / mặc định dùng cho phần đơn chưa có kết quả (%) */
@@ -437,6 +450,12 @@ export type NominalReport = {
     unmodelledRevenue: number;
     cogsKnown: boolean;
     cogsUnknownQty: number;
+    /** Σ sản phẩm vẫn chưa biết giá vốn sau khi đã lấp giá dự tính. */
+    cogsUncoveredQty: number;
+    /** Σ phần giá vốn đến từ giá DỰ TÍNH (đã nằm trong `expectedCogs`). */
+    expectedCogsEstimated: number;
+    /** Số mã đang dùng giá vốn dự tính (có sản phẩm thật sự được lấp). */
+    estimatedCostProducts: number;
     purchaseCostKnown: boolean;
     operatingExpenses: number;
     rescued: number;
@@ -480,14 +499,23 @@ export type NominalReport = {
  * không cộng phí hoàn của đơn nào) — và dòng mang nguồn `unmeasured` để màn hình nói rõ.
  */
 function applyAssumptions(
-  base: { orders: number; items: number; grossSales: number; cogsFull: number; adSpend: number },
+  base: { orders: number; items: number; grossSales: number; cogsFull: number; adSpend: number; cogsUnknownQty?: number },
   rate: number | null,
   a: ResolvedAssumptions,
-  orderLevel?: { revenue: number; cogs: number; qty: number } | null,
+  orderLevel?: { revenue: number; cogs: number; qty: number; unknownQty?: number } | null,
+  /** Giá vốn dự tính / sp cho phần sản phẩm CHƯA có giá thật — xem `lib/constants/estimated-cost.ts`. */
+  estimatedUnitCost: number | null = null,
 ) {
   const r = rate === null ? 0 : Math.min(Math.max(rate, 0), 100) / 100;
   const expectedRevenue = orderLevel ? orderLevel.revenue : Math.round(base.grossSales * (1 - r));
-  const expectedCogs = orderLevel ? orderLevel.cogs : Math.round(base.cogsFull * (1 - r));
+  /*
+    GIÁ DỰ TÍNH ĐI ĐÚNG ĐƯỜNG CỦA SỐ LƯỢNG: nhánh hợp đồng nhân với số sản phẩm-chưa-có-giá ĐÃ CÂN
+    theo từng đơn (`projectedUnknownQty`), nhánh "theo tỷ lệ" nhân với số ấy × TL GTC. Không nhân
+    với `expectedQty` của cả mã: mã có mẫu mã đã có phiếu nhập thì phần đó đã mang giá thật.
+  */
+  const soChuaCoGia = orderLevel ? (orderLevel.unknownQty ?? 0) : (base.cogsUnknownQty ?? 0) * (1 - r);
+  const expectedCogsEstimated = estimatedUnitCost && estimatedUnitCost > 0 ? Math.round(soChuaCoGia * estimatedUnitCost) : 0;
+  const expectedCogs = (orderLevel ? orderLevel.cogs : Math.round(base.cogsFull * (1 - r))) + expectedCogsEstimated;
   /*
     SỐ SẢN PHẨM GIAO THÀNH CÔNG ƯỚC TÍNH đi ĐÚNG cùng một đường với tiền: cân theo từng đơn ở
     nhánh hợp đồng, nhân tỷ lệ ở nhánh "ước tính theo tỷ lệ". Không được suy ra từ `expectedCogs`
@@ -497,7 +525,7 @@ function applyAssumptions(
   const expectedQty = orderLevel ? orderLevel.qty : Math.round(base.items * (1 - r));
   const shipCost = Math.round(base.orders * ((1 - r) * a.shipFeeDeliveredUsed + r * a.shipFeeReturnedUsed));
   const expectedProfit = expectedRevenue - expectedCogs - shipCost - base.adSpend;
-  return { expectedRevenue, expectedCogs, expectedQty, shipCost, expectedProfit, margin: expectedRevenue ? (expectedProfit / expectedRevenue) * 100 : null };
+  return { expectedRevenue, expectedCogs, expectedCogsEstimated, expectedQty, shipCost, expectedProfit, margin: expectedRevenue ? (expectedProfit / expectedRevenue) * 100 : null };
 }
 
 /** Hàng nhập trong kỳ theo phiếu nhập (kind RECEIPT, số lượng dương) gộp theo mã */
@@ -604,11 +632,13 @@ async function stockByProduct(): Promise<Map<string, StockSnapshot>> {
 const TON_CHUA_BIET: StockSnapshot = { qty: 0, value: 0, known: false, inTransitQty: 0, awaitingReturnQty: 0 };
 
 /** Lợi nhuận danh nghĩa theo mã hàng: đơn lên trong kỳ × (1 − tỷ lệ hoàn ước tính) − giá vốn − vận chuyển − quảng cáo */
-async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, value: OrderValueFilter, includeAds: boolean): Promise<NominalReport> {
+async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, value: OrderValueFilter, includeAds: boolean, withEstimatedCost: boolean): Promise<NominalReport> {
   const locGiaTri = orderValueWhereSql(value);
   const dangLoc = orderValueActive(value);
   const db = await getDb();
   const assumptions = await resolveAssumptions();
+  // Chỉ đọc khi được hỏi: mọi đường gọi khác (lương, marketer, AI) giữ nguyên giá vốn 0 ₫ = chưa biết.
+  const giaDuTinh: EstimatedCostMap = withEstimatedCost ? await getEstimatedCosts() : {};
   /*
     MỘT NGUỒN cho tỷ lệ / doanh thu GTC ước tính — xem lib/constants/projected-delivery.ts.
     LỖI LÀ LỖI: hợp đồng hỏng thì bảng vẫn dựng được (tiền theo tỷ lệ lịch sử, có nhãn) nhưng lỗi
@@ -812,7 +842,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
     .filter((r) => r.productId)
     .map((r) => {
       const alloc = allocByProduct.get(r.productId) ?? { ordersWeighted: 0, salesAfterDiscount: 0 };
-      const base = { orders: Number(r.orders), items: Number(r.items), grossSales: Number(r.grossSales), cogsFull: Number(r.cogsFull), adSpend: adByProduct.get(r.productId) ?? 0, ordersWeighted: alloc.ordersWeighted, salesAfterDiscount: Math.round(alloc.salesAfterDiscount) };
+      const base = { orders: Number(r.orders), items: Number(r.items), grossSales: Number(r.grossSales), cogsFull: Number(r.cogsFull), cogsUnknownQty: Number(r.cogsUnknownQty ?? 0), adSpend: adByProduct.get(r.productId) ?? 0, ordersWeighted: alloc.ordersWeighted, salesAfterDiscount: Math.round(alloc.salesAfterDiscount) };
       const h = history.get(r.productId);
       /*
         ═══ TỶ LỆ VÀ TIỀN GTC ƯỚC TÍNH LẤY TỪ HỢP ĐỒNG CHUNG, KHÔNG TỰ TRỘN Ở ĐÂY ═══
@@ -853,7 +883,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       const baseReturnRate = bac.baseReturnRate;
       const returnRateSource: NominalRow["returnRateSource"] = bac.source;
       const returnRate: number | null = bac.returnRate;
-      let orderLevel: { revenue: number; cogs: number; qty: number } | null = null;
+      let orderLevel: { revenue: number; cogs: number; qty: number; unknownQty: number } | null = null;
       if (bac.source === "projected" && duBao) {
         /*
           ĐO ĐƯỢC THÌ DÙNG SỐ ĐO — tỷ lệ của hợp đồng, và TIỀN cân theo TỪNG ĐƠN.
@@ -879,7 +909,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
           định. Q004 (105 đơn kết thúc), Q002 (1.138), Q003 (474) giữ nguyên số đo; Q001 vốn đã ở
           nhánh lịch sử (71 đơn) nên không đổi.
         */
-        orderLevel = { revenue: duBao.projectedDeliveredRevenue, cogs: duBao.projectedCogs, qty: duBao.projectedQty };
+        orderLevel = { revenue: duBao.projectedDeliveredRevenue, cogs: duBao.projectedCogs, qty: duBao.projectedQty, unknownQty: duBao.projectedUnknownQty };
       }
       /*
         ═══════════ CHƯA ĐO ĐƯỢC THÌ RƠI VỀ TỶ LỆ ĐÃ KHAI, KHÔNG PHẢI VỀ MỘT Ô TRỐNG ═══════════
@@ -908,8 +938,11 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         `orderLevel` để `null` là cố ý: tiền khi đó = Doanh số POS × TL GTC, cùng một tỷ lệ với ô
         bên cạnh. Trộn tiền-cân-theo-đơn với tỷ lệ-giả-định là tái lập đúng cái mâu thuẫn trên.
       */
-      const calc = applyAssumptions(base, returnRate, assumptions, orderLevel);
-      const cogsUnknownQty = Number(r.cogsUnknownQty ?? 0);
+      const cogsUnknownQty = base.cogsUnknownQty;
+      // Giá dự tính chỉ có nghĩa khi mã THẬT SỰ có sản phẩm chưa có giá — mã đã đủ phiếu nhập thì
+      // con số đặt tay đứng sang một bên, và dòng không mang nhãn "dự tính" nào.
+      const duTinh = cogsUnknownQty > 0 ? (giaDuTinh[r.productId] ?? null) : null;
+      const calc = applyAssumptions(base, returnRate, assumptions, orderLevel, duTinh?.unitCost ?? null);
       const pur = purchases.get(r.productId);
       return {
         productId: r.productId,
@@ -924,8 +957,10 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         projection: duBao && orderLevel ? { eligibleSent: duBao.eligibleSent, active: duBao.active, unmodelledActive: duBao.unmodelledActive, pending: duBao.pending, pendingUnmodelled: duBao.pendingUnmodelled, awaitingPickup: duBao.awaitingPickup, unmodelledRevenue: duBao.unmodelledRevenue, finished: duBao.deliveredActual + duBao.failedActual } : null,
         revenueBasis: (orderLevel ? "ORDER_LEVEL" : "RATE") as NominalRow["revenueBasis"],
         unmodelledRevenue: orderLevel && duBao ? duBao.unmodelledRevenue : 0,
-        cogsKnown: cogsUnknownQty === 0,
+        cogsKnown: cogsUnknownQty === 0 || duTinh !== null,
         cogsUnknownQty,
+        cogsUncoveredQty: duTinh ? 0 : cogsUnknownQty,
+        estimatedCost: duTinh,
         purchaseCostKnown: pur ? pur.costKnown : true,
         baseReturnRate,
         historyFinished: h?.finished ?? 0,
@@ -980,8 +1015,8 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       productId: pid, productName: pur.name || pid, code: pur.code, image: null, orders: 0, ordersWeighted: 0, items: 0, grossSales: 0, salesAfterDiscount: 0, adSpend: adByProduct.get(pid) ?? 0,
       // Mã CHƯA CÓ ĐƠN: không có tỷ lệ nào để in — `null`, không phải 100% (không giao đơn nào thì không "giao thành công 100%").
       ads: adsRatios({ adSpend: adByProduct.get(pid) ?? 0, posSales: 0, deliveredRevenueActual: 0, projectedDeliveredRevenue: 0 }),
-      returnRate: null, deliveryRate: null, returnRateSource: "unmeasured" as const, projection: null, revenueBasis: "RATE" as const, unmodelledRevenue: 0, cogsKnown: true, cogsUnknownQty: 0, purchaseCostKnown: pur.costKnown,
-      baseReturnRate: 0, historyFinished: 0, rateMature: false, rateOwnFinished: 0, rateOverride: null, rateMatureAt: assumptions.rateMatureMinFinished, measuredDeliveryRate: null, borrowedShare: null, blendReason: null, expectedRevenue: 0, expectedCogs: 0, expectedQty: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
+      returnRate: null, deliveryRate: null, returnRateSource: "unmeasured" as const, projection: null, revenueBasis: "RATE" as const, unmodelledRevenue: 0, cogsKnown: true, cogsUnknownQty: 0, cogsUncoveredQty: 0, estimatedCost: null, purchaseCostKnown: pur.costKnown,
+      baseReturnRate: 0, historyFinished: 0, rateMature: false, rateOwnFinished: 0, rateOverride: null, rateMatureAt: assumptions.rateMatureMinFinished, measuredDeliveryRate: null, borrowedShare: null, blendReason: null, expectedRevenue: 0, expectedCogs: 0, expectedCogsEstimated: 0, expectedQty: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
       delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
       // Chưa bán được gì trong kỳ ⇒ chưa giải phóng đồng dự phòng nào vào lãi lỗ; rủi ro của lô
       // nằm nguyên ở phần CÒN TREO trên hàng tồn.
@@ -1056,6 +1091,9 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       ordersWithRate: t.ordersWithRate + (r.returnRate === null ? 0 : r.orders),
       unmodelledRevenue: t.unmodelledRevenue + r.unmodelledRevenue,
       cogsUnknownQty: t.cogsUnknownQty + r.cogsUnknownQty,
+      cogsUncoveredQty: t.cogsUncoveredQty + r.cogsUncoveredQty,
+      expectedCogsEstimated: t.expectedCogsEstimated + r.expectedCogsEstimated,
+      estimatedCostProducts: t.estimatedCostProducts + (r.expectedCogsEstimated > 0 ? 1 : 0),
       purchaseUnknown: t.purchaseUnknown + (r.purchaseCostKnown ? 0 : 1),
       rescued: t.rescued + r.rescued,
       packingCost: t.packingCost + r.packingCost,
@@ -1076,7 +1114,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       purchaseQty: t.purchaseQty + r.purchaseQty,
       purchaseCost: t.purchaseCost + r.purchaseCost,
     }),
-    { orders: 0, ordersWeighted: 0, salesAfterDiscount: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, expectedQty: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, ordersWithRate: 0, unmodelledRevenue: 0, cogsUnknownQty: 0, purchaseUnknown: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, inventoryRisk: 0, inventoryRiskOnPurchase: 0, stockValue: 0, stockQty: 0, stockUnknown: 0, outInTransitQty: 0, outAwaitingReturnQty: 0, inventoryRiskPending: 0, failed: 0, pending: 0, tax: 0, otherCost: 0, purchaseQty: 0, purchaseCost: 0 },
+    { orders: 0, ordersWeighted: 0, salesAfterDiscount: 0, items: 0, grossSales: 0, adSpend: 0, expectedRevenue: 0, expectedCogs: 0, expectedQty: 0, shipCost: 0, expectedProfit: 0, delivered: 0, returned: 0, inTransit: 0, actualRevenue: 0, weightedReturn: 0, ordersWithRate: 0, unmodelledRevenue: 0, cogsUnknownQty: 0, cogsUncoveredQty: 0, expectedCogsEstimated: 0, estimatedCostProducts: 0, purchaseUnknown: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, inventoryRisk: 0, inventoryRiskOnPurchase: 0, stockValue: 0, stockQty: 0, stockUnknown: 0, outInTransitQty: 0, outAwaitingReturnQty: 0, inventoryRiskPending: 0, failed: 0, pending: 0, tax: 0, otherCost: 0, purchaseQty: 0, purchaseCost: 0 },
   );
   const adSpendAll = totals.adSpend + unmatchedAdSpend;
   const otherCostAll = totals.otherCost + Math.round(unmatchedAdSpend * otherPct);
@@ -1142,8 +1180,11 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       adsOverDeliveredRevenue: adsRatio(adSpendAll, totals.actualRevenue),
       pendingOrders: mucDon?.pending ?? 0,
       unmodelledRevenue: totals.unmodelledRevenue,
-      cogsKnown: totals.cogsUnknownQty === 0,
+      cogsKnown: totals.cogsUncoveredQty === 0,
       cogsUnknownQty: totals.cogsUnknownQty,
+      cogsUncoveredQty: totals.cogsUncoveredQty,
+      expectedCogsEstimated: totals.expectedCogsEstimated,
+      estimatedCostProducts: totals.estimatedCostProducts,
       purchaseCostKnown: totals.purchaseUnknown === 0,
       operatingExpenses,
       rescued: totals.rescued,
@@ -1179,6 +1220,8 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
 export type NominalDailyRow = {
   day: string; orders: number; items: number; grossSales: number; adSpend: number;
   expectedRevenue: number; expectedCogs: number;
+  /** Phần giá vốn của ngày đến từ giá DỰ TÍNH (đã nằm trong `expectedCogs`). */
+  expectedCogsEstimated: number;
   /** Số sản phẩm giao thành công ước tính của ngày — đo được cả khi giá vốn chưa biết. */
   expectedQty: number;
   shipCost: number; expectedProfit: number; margin: number | null; cpo: number | null; delivered: number; returned: number;
@@ -1193,7 +1236,15 @@ export type NominalDailyRow = {
 };
 
 /** Bảng theo ngày của một mã hàng (giống sheet báo cáo mẫu): đơn, SP, CPQC, doanh số, DT ước tính, giá vốn, VC, lợi nhuận, margin */
-export async function getNominalDailyForProduct(productId: string, period: Period, returnRate: number, assumptions: ResolvedAssumptions, basis: TimeBasis = "ORDERED"): Promise<NominalDailyRow[]> {
+export async function getNominalDailyForProduct(
+  productId: string,
+  period: Period,
+  returnRate: number,
+  assumptions: ResolvedAssumptions,
+  basis: TimeBasis = "ORDERED",
+  /** Giá vốn dự tính của mã (đúng con số dòng cha đang dùng) — `null` = không áp. */
+  estimatedUnitCost: number | null = null,
+): Promise<NominalDailyRow[]> {
   const db = await getDb();
   /*
     NGÀY CỦA MỘT DÒNG PHẢI LÀ NGÀY CỦA CHÍNH MỐC ĐANG LỌC.
@@ -1239,10 +1290,10 @@ export async function getNominalDailyForProduct(productId: string, period: Perio
     .sort()
     .map((d) => {
       const sr = salesMap.get(d);
-      const base = { orders: Number(sr?.orders ?? 0), items: Number(sr?.items ?? 0), grossSales: Number(sr?.grossSales ?? 0), cogsFull: Number(sr?.cogsFull ?? 0), adSpend: adMap.get(d) ?? 0 };
-      const calc = applyAssumptions(base, returnRate, assumptions);
       const cogsUnknownQty = Number(sr?.cogsUnknownQty ?? 0);
-      return { day: d, ...base, ...calc, cogsKnown: cogsUnknownQty === 0, cogsUnknownQty, cpo: base.orders ? base.adSpend / base.orders : null, delivered: Number(sr?.delivered ?? 0), returned: Number(sr?.returned ?? 0) };
+      const base = { orders: Number(sr?.orders ?? 0), items: Number(sr?.items ?? 0), grossSales: Number(sr?.grossSales ?? 0), cogsFull: Number(sr?.cogsFull ?? 0), cogsUnknownQty, adSpend: adMap.get(d) ?? 0 };
+      const calc = applyAssumptions(base, returnRate, assumptions, null, estimatedUnitCost);
+      return { day: d, ...base, ...calc, cogsKnown: cogsUnknownQty === 0 || (estimatedUnitCost ?? 0) > 0, cogsUnknownQty, cpo: base.orders ? base.adSpend / base.orders : null, delivered: Number(sr?.delivered ?? 0), returned: Number(sr?.returned ?? 0) };
     });
 }
 
@@ -1255,9 +1306,20 @@ export async function getNominalProfitReport(
   basis: TimeBasis = "ORDERED",
   value: OrderValueFilter = NO_ORDER_VALUE_FILTER,
   includeAds = true,
+  /**
+   * Lấp sản phẩm chưa có giá vốn bằng giá DỰ TÍNH chủ shop đặt (`lib/constants/estimated-cost.ts`).
+   * MẶC ĐỊNH TẮT: chỉ tab Lợi nhuận danh nghĩa bật. Lương, báo cáo marketer, trợ lý AI gọi hàm này
+   * không tham số nên không bao giờ nhận một giá vốn đoán.
+   */
+  withEstimatedCost = false,
 ): Promise<NominalReport> {
-  // Bộ lọc giá trị đơn VÀ công tắc quảng cáo đều đổi kết quả ⇒ đều phải vào khoá cache (§2).
-  return memo(`getNominalProfitReport:${basis}:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}`, 120000, () =>
-    getNominalProfitReportUncached(period, basis, value, includeAds),
+  // Bộ lọc giá trị đơn, công tắc quảng cáo VÀ giá dự tính đều đổi kết quả ⇒ đều phải vào khoá cache (§2).
+  return memo(`getNominalProfitReport:${basis}:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}:${withEstimatedCost ? "gvdt" : "thuc"}`, 120000, () =>
+    getNominalProfitReportUncached(period, basis, value, includeAds, withEstimatedCost),
   );
+}
+
+/** Giá vốn dự tính đang lưu, theo `productId`. Dòng hỏng bị bỏ, không thành 0 ₫. */
+export async function getEstimatedCosts(): Promise<EstimatedCostMap> {
+  return parseEstimatedCosts(await getSettingJson<Record<string, unknown>>(ESTIMATED_COST_KEY, {}));
 }
