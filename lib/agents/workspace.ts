@@ -157,6 +157,22 @@ export class AgentWorkspace {
 
   /** Tệp đang đổi so với base — ĐO từ git, không hỏi agent. */
   /**
+   * Tên các tệp trong sổ chứng từ số đo (`docs/perf/`) của CHÍNH cây làm việc này.
+   *
+   * Đọc từ đĩa, không đoán: đề bài kể tên tệp nào thì tệp ấy phải mở được. `[]` khi thư mục
+   * không tồn tại — và nơi gọi in ra KHÔNG GÌ CẢ, vì một khối rỗng dạy agent rằng thư mục ấy
+   * vô dụng.
+   *
+   * Dùng `git ls-files` chứ không đọc thư mục: tệp chưa vào kho không phải chứng từ của ai, và
+   * một cây làm việc bẩn không được đổi nội dung đề bài.
+   */
+  async tepSoChungTu(): Promise<string[]> {
+    const r = await rawGit(this.root, ["ls-files", "docs/perf/"]);
+    if (!r.ok) return [];
+    return r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  }
+
+  /**
    * Tệp agent đã đổi — TỪNG TỆP, không phải từng thư mục.
    *
    * `-uall` KHÔNG phải một lá cờ cho đẹp. Mặc định `git status --porcelain` GỘP một thư mục chưa

@@ -1,5 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { khoiSoChungTu } from "@/lib/constants/agent-evidence";
 import { DOCUMENTATION_COMMANDS, DOCUMENTATION_READ_GLOBS } from "@/lib/constants/agent-sandbox";
 import { goiPhanHoi, checkRerun } from "@/lib/constants/agent-rerun";
 import { GATE_REPAIR, congChiPhi, dungPhanHoiCong, type KetQuaCong } from "@/lib/constants/agent-gate-repair";
@@ -222,11 +223,19 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
     /* Cây làm việc đã dựng; giữ một tham chiếu KHÔNG null để lượt sửa dùng lại đúng cây ấy. */
     const cay = ws;
     /** Dựng đề bài MỘT chỗ — lượt sửa phải nhận y hệt lượt đầu, chỉ khác phần phản hồi. */
+    /*
+      SỔ CHỨNG TỪ ĐI VÀO ĐỀ BÀI, KHÔNG ĐỂ AGENT TỰ TÌM.
+
+      Bộ công cụ CỐ Ý không có `list_directory`, nên agent không tự liệt kê được thư mục — nó chỉ
+      thấy đề bài. Ba lượt chạy liên tiếp (TECH-5 · TECH-7 · TECH-6) trích tệp số đo ĐÚNG 0 LẦN
+      trong khi tệp nằm sẵn trong cây chúng đọc. Xem `lib/constants/agent-evidence.ts`.
+    */
+    const soChungTu = await cay.tepSoChungTu();
     const deBai = (phanHoi: string) => ({
       taskCode: task.code,
       role: agent.role,
       taskTitle: task.title,
-      taskDescription: task.description,
+      taskDescription: task.description + khoiSoChungTu(soChungTu),
       writeGlobs: phamViGhi,
       readGlobs: DOCUMENTATION_READ_GLOBS,
       feedback: phanHoi,

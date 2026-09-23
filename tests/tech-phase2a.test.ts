@@ -538,6 +538,45 @@ export async function testAgentRunner() {
   assert.equal(rDo.gates.typecheck, "FAILED", "exit code THẬT quyết định cổng, không phải lời khai của agent");
   assert.equal(rDo.resultCommit, null, "cổng đỏ thì KHÔNG có commit nào");
 
+  // ───────── 4.5c ĐỀ BÀI PHẢI KỂ TÊN SỔ CHỨNG TỪ SỐ ĐO ─────────
+  /*
+    Ba lượt chạy liên tiếp (TECH-5 · TECH-7 · TECH-6) trích tệp số đo ĐÚNG 0 LẦN, trong khi tệp
+    nằm sẵn trong cây chúng đọc. Bộ công cụ cố ý không có `list_directory`, nên agent không tự
+    liệt kê được thư mục — nó chỉ thấy đề bài.
+
+    Khối này đo ĐƯỜNG NỐI, không đo hàm thuần: hàm `khoiSoChungTu` đúng mà runner không gọi thì
+    bản vá nằm nguyên trong mã và mất sạch tác dụng (đúng lớp lỗi ĐB19 và ĐB-F đã bắt được).
+  */
+  const repoChungTu = repoTam();
+  execFileSync("mkdir", ["-p", path.join(repoChungTu, "docs", "perf")]);
+  writeFileSync(path.join(repoChungTu, "docs", "perf", "so-do-that-2026-09-23.md"), "# số đo\n");
+  execFileSync("git", ["add", "-A"], { cwd: repoChungTu });
+  execFileSync("git", ["-c", "user.email=t@t.local", "-c", "user.name=T", "commit", "-q", "-m", "chung-tu"], { cwd: repoChungTu });
+  const baseChungTu = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoChungTu, encoding: "utf8" }).trim();
+
+  let deBaiThay = "";
+  const bat = new ScriptedExecutor(async (job) => {
+    deBaiThay = job.taskDescription;
+    return { summary: "đã đọc đề bài", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
+  });
+  const idChungTu = await taoViec("p2a-runner: đề bài phải kể tên sổ chứng từ");
+  await runAgentOnTask({ taskId: idChungTu, agentKey: "documentation", executor: bat, repoRoot: repoChungTu, baseCommit: baseChungTu, actor: may, gates: [] });
+  assert.ok(deBaiThay.includes("docs/perf/so-do-that-2026-09-23.md"), "đề bài phải KỂ TÊN tệp chứng từ có thật — agent không trích được thứ nó không biết là có");
+  assert.ok(/CHƯA ĐO ĐƯỢC/.test(deBaiThay), "và phải nói rõ: không có số thì viết CHƯA ĐO ĐƯỢC, không ước lượng");
+
+  /*
+    VÀ KHÔNG CÓ CHỨNG TỪ THÌ KHÔNG IN GÌ. Một khối rỗng ("sổ chứng từ: (không có)") dạy agent
+    rằng thư mục ấy vô dụng — tệ hơn im lặng.
+  */
+  let deBaiRong = "";
+  const bat2 = new ScriptedExecutor(async (job) => {
+    deBaiRong = job.taskDescription;
+    return { summary: "đã đọc", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
+  });
+  const idRong = await taoViec("p2a-runner: kho chưa có chứng từ nào");
+  await runAgentOnTask({ taskId: idRong, agentKey: "documentation", executor: bat2, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
+  assert.ok(!/SỐ ĐO PRODUCTION ĐÃ CÓ SẴN/.test(deBaiRong), "kho không có chứng từ thì đề bài KHÔNG được in khối ấy");
+
   // ───────── 4.5b TỆP TRONG THƯ MỤC MỚI PHẢI ĐƯỢC ĐẾM TỪNG TỆP ─────────
   /*
     `git status --porcelain` mặc định GỘP một thư mục chưa theo dõi thành một dòng `docs/xyz/`.
