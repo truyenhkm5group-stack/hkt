@@ -36,8 +36,8 @@ import {
   HANDOVER_MODE_LABEL,
   parseHandoverMode,
 } from "@/lib/constants/sales-handover";
-import { COPILOT_PAGES_KEY } from "@/lib/constants/sales-copilot";
-import { BOT_SENDER_NAMES_KEY } from "@/lib/constants/sales-ingest";
+import { COPILOT_PAGES_KEY, COPILOT_SUGGESTION_TTL_MINUTES } from "@/lib/constants/sales-copilot";
+import { declaredBotNames } from "@/lib/ai-workforce/agents/sales/ingest";
 import { getSettingValue } from "@/lib/settings";
 import { learningSummary } from "@/lib/queries/copilot-learning";
 
@@ -131,27 +131,30 @@ async function main() {
 
     Mốc đọc gần nhất là bằng chứng DUY NHẤT bộ nạp còn sống. Container "Up" chỉ nói tiến trình
     chưa chết, không nói vòng lặp còn quay — hai điều đó đã từng khác nhau.
+
+    Đọc ĐÚNG bảng mà bộ nạp ghi (`sales_ingest_cursors` qua `schema`), không viết một câu SQL đoán
+    tên bảng: lượt chạy 23/09/2026 đã đo bằng một tên bảng không tồn tại, `catch` nuốt lỗi, và cửa
+    quan trọng nhất in ra "chưa đo được" trong khi bộ nạp đang chạy bình thường. Một phép đo sai
+    tên nguồn thì im lặng y hệt một hệ thống hỏng.
+
+    Phân biệt `lastRunAt` (vòng gần nhất, KỂ CẢ vòng hỏng) với `lastOkAt` (vòng CHẠY ĐƯỢC): quay
+    đều mà vòng nào cũng hỏng thì vẫn là đứng im, chỉ khác là đứng im ồn ào.
   */
-  const napRows = await db
-    .execute(
-      sql`select page_id::text as page, max(last_poll_at)::text as vong, max(consecutive_failures) as hong, max(last_error) as loi
-          from ai_live_ingest_state group by page_id`,
-    )
-    .catch(() => null);
-  const rows = (napRows?.rows ?? []) as Record<string, unknown>[];
-  if (!rows.length) {
-    ghi("6. Bộ nạp tin sống", "CHUA_BIET", "chưa có mốc đọc nào trong CSDL", "ops ai-staging-live-ingest, arg: --on --seconds=45");
+  const conTro = await db.select().from(schema.salesIngestCursors);
+  if (!conTro.length) {
+    ghi("6. Bộ nạp tin sống", "CHUA", "chưa có con trỏ nạp nào ⇒ bộ nạp chưa chạy lần nào", "ops ai-staging-live-ingest, arg: --on --seconds=45");
   } else {
-    for (const r of rows) {
-      const vong = r.vong ? new Date(String(r.vong)) : null;
-      const phut = vong && !Number.isNaN(vong.getTime()) ? Math.round((Date.now() - vong.getTime()) / 60_000) : null;
+    for (const c of conTro) {
+      const phut = (t: Date | null) => (t ? Math.round((Date.now() - new Date(t).getTime()) / 60_000) : null);
+      const quay = phut(c.lastRunAt);
+      const chay = phut(c.lastOkAt);
+      const song = chay !== null && chay <= 5;
       ghi(
-        `6. Bộ nạp · page ${r.page}`,
-        phut === null ? "CHUA_BIET" : phut <= 5 ? "SAN_SANG" : "CHUA",
-        phut === null
-          ? "chưa quay vòng nào"
-          : `vòng gần nhất ${phut} phút trước · hỏng liên tiếp ${r.hong ?? 0}${r.loi ? ` · ${String(r.loi).slice(0, 80)}` : ""}`,
-        phut !== null && phut <= 5 ? undefined : "ops ai-staging-live-ingest, arg: --on --seconds=45",
+        `6. Bộ nạp · page ${c.pageId}`,
+        song ? "SAN_SANG" : "CHUA",
+        `vòng gần nhất ${quay === null ? "chưa có" : `${quay} phút trước`} · vòng CHẠY ĐƯỢC ${chay === null ? "chưa có" : `${chay} phút trước`}` +
+          ` · hỏng liên tiếp ${c.consecutiveErrors}${c.lastError ? ` · ${c.lastError.slice(0, 90)}` : ""}`,
+        song ? undefined : "ops ai-staging-live-ingest, arg: --on --seconds=45",
       );
     }
   }
@@ -170,8 +173,10 @@ async function main() {
     })
     .from(schema.salesMessages)
     .where(eq(schema.salesMessages.fromPage, true));
-  const tenMayRaw = await getSettingValue<string[]>(BOT_SENDER_NAMES_KEY, []);
-  const tenMay = Array.isArray(tenMayRaw) ? tenMayRaw : [];
+  // Đọc bằng CHÍNH hàm dây chuyền dùng. `getSettingValue` thô trả về `{0:"..."}` cho một mảng đã
+  // lưu (cả đường đọc lẫn đường ghi của `settings` đều trộn giá trị vào một object), nên đọc thô ở
+  // đây in ra "(chưa khai)" trong khi cấu hình có thật — đúng cái bẫy `readNameList` sinh ra để đỡ.
+  const tenMay = await declaredBotNames();
   ghi(
     "7. Phân loại người gửi",
     Number(pl?.human ?? 0) === 0 ? "SAN_SANG" : "CHUA",
@@ -210,14 +215,33 @@ async function main() {
     .where(gte(schema.aiTasks.createdAt, new Date(Date.now() - 86_400_000)));
   ghi("11. Việc 24 giờ qua", "SAN_SANG", `đang chờ ${viec?.cho ?? 0} · hỏng ${viec?.hong ?? 0}`);
 
-  // ───── 12. HÀNG ĐỢI NHÁP ─────
+  /*
+    ───── 12. HÀNG ĐỢI NHÁP: BAO NHIÊU CÁI BẤM GỬI ĐƯỢC ─────
+
+    Đếm tổng số bản nháp chờ duyệt là một con số dễ đọc nhầm theo hướng lạc quan. Cổng gửi từ chối
+    mọi câu soạn quá `COPILOT_SUGGESTION_TTL_MINUTES` phút — một câu cũ trả lời một cuộc hội thoại
+    không còn tồn tại. Lượt đo đầu tiên 23/09/2026 cho 1.111 bản nháp "chờ duyệt", và gần như toàn
+    bộ là của các mẻ chạy ngầm nhiều ngày trước: mở hàng đợi ra thì không bấm được cái nào.
+
+    Nên hai con số, không phải một. Con số thứ hai mới trả lời được câu "bây giờ tôi có việc để
+    làm không".
+  */
+  const hanNhap = new Date(Date.now() - COPILOT_SUGGESTION_TTL_MINUTES * 60_000);
   const [nhap] = await db
     .select({
       chua: sql<number>`count(*) filter (where ${schema.salesSuggestions.sent} = false)`,
+      conHan: sql<number>`count(*) filter (where ${schema.salesSuggestions.sent} = false and ${schema.salesSuggestions.createdAt} >= ${hanNhap})`,
       daGui: sql<number>`count(*) filter (where ${schema.salesSuggestions.sent} = true)`,
     })
     .from(schema.salesSuggestions);
-  ghi("12. Hàng đợi bản nháp", "SAN_SANG", `chờ duyệt ${nhap?.chua ?? 0} · đã gửi ${nhap?.daGui ?? 0}`);
+  const conHan = Number(nhap?.conHan ?? 0);
+  const quaHan = Number(nhap?.chua ?? 0) - conHan;
+  ghi(
+    "12. Hàng đợi bản nháp",
+    "SAN_SANG",
+    `bấm gửi được NGAY: ${conHan} · quá ${COPILOT_SUGGESTION_TTL_MINUTES} phút nên cổng gửi sẽ từ chối: ${quaHan} · đã gửi ${nhap?.daGui ?? 0}`,
+    quaHan > 0 ? `${quaHan} bản nháp cũ là DI SẢN của các mẻ chạy ngầm — chúng tự hết nghĩa, không phải việc phải làm` : undefined,
+  );
 
   // ───── 13. VÒNG HỌC ─────
   const hoc = await learningSummary(dsPage, 30, db);
