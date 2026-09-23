@@ -36,7 +36,8 @@ function testDiagnosePure() {
   assert.equal(diagnosePending({ ...coBan, queueView: "escalated" }), "QUEUE_ESCALATED");
   assert.equal(diagnosePending({ ...coBan, queueView: "done" }), "QUEUE_DONE");
   assert.equal(diagnosePending({ ...coBan, queueView: null }), "OUT_OF_QUEUE");
-  assert.equal(diagnosePending({ ...coBan, latestEpisodeNo: 2 }), "SUPERSEDED", "có đợt mới hơn ⇒ đợt này không còn đường chốt");
+  assert.equal(diagnosePending({ ...coBan, latestEpisodeNo: 2 }), "SUPERSEDED", "đợt cũ trên kiện CHƯA kết thúc ⇒ chờ chốt cùng kiện");
+  assert.equal(PENDING_DIAGNOSIS_IS_DEFECT.SUPERSEDED, false, "đợt cũ chờ kiện kết thúc không phải lỗi — không được tô đỏ");
   assert.equal(diagnosePending({ ...coBan, stage: "DELIVERED", vtpStatus: 501, vtpStatusName: "Phát thành công" }), "CARRIER_FINISHED", "ĐVVC đã giao mà đợt chưa chốt");
   assert.equal(diagnosePending({ ...coBan, stage: "RETURNING", vtpStatus: 515, vtpStatusName: "Bưu cục phát duyệt hoàn" }), "CARRIER_FINISHED", "đã DUYỆT hoàn là hết cửa — lẽ ra đã chốt");
   /*
@@ -48,8 +49,8 @@ function testDiagnosePure() {
   assert.equal(diagnosePending({ ...coBan, stage: "RETURNING", vtpStatus: 505, vtpStatusName: "Yêu cầu chuyển hoàn", queueView: "waiting" }), "QUEUE_WAITING", "505 mới là ĐỀ NGHỊ hoàn — chưa phải kết cục");
   assert.equal(diagnosePending({ ...coBan, stage: "RETURNED", vtpStatus: 504, vtpStatusName: "Hoàn thành công", hasReplacement: true }), "AWAITING_EXCHANGE", "kiện gốc hoàn mà có đơn đổi ⇒ vòng đời cố ý chờ");
   assert.equal(diagnosePending({ ...coBan, stage: "DELIVERED", vtpStatus: 501, hasReplacement: true }), "CARRIER_FINISHED", "kiện gốc ĐÃ GIAO thì đơn đổi không phải lý do để chờ");
-  // Thứ tự: đợt bị bỏ quên là lỗi MẠNH nhất, kể cả khi ĐVVC cũng đã kết thúc.
-  assert.equal(diagnosePending({ ...coBan, latestEpisodeNo: 3, stage: "DELIVERED", vtpStatus: 501 }), "SUPERSEDED");
+  // Thứ tự: kiện ĐÃ kết thúc mà đợt còn treo là lỗi, dù đó là đợt cũ hay đợt mới nhất.
+  assert.equal(diagnosePending({ ...coBan, latestEpisodeNo: 3, stage: "DELIVERED", vtpStatus: 501 }), "CARRIER_FINISHED");
   assert.equal(PENDING_DIAGNOSIS_IS_DEFECT.QUEUE_WAITING, false, "chờ kết quả không phải lỗi — không được tô đỏ");
   assert.equal(PENDING_DIAGNOSIS_IS_DEFECT.OUT_OF_QUEUE, false);
 }
@@ -77,7 +78,7 @@ export async function testCarePendingDrilldown(db: Db) {
   await gieo(db, "q", { vtpStatus: 506, vtpStatusName: "Tồn - khách nghỉ" }, [{ active: true, careStatus: "IN_PROGRESS", ownerId: A }]);
   // 2 · A đã đóng, ĐVVC đã giao nhưng đợt chưa chốt (lỗi CARRIER_FINISHED)
   await gieo(db, "f", { stage: "DELIVERED", vtpStatus: 501, vtpStatusName: "Phát thành công" }, [{ ownerId: A, doneAt: gio(30) }]);
-  // 3 · kiện có hai đợt: đợt 1 bị bỏ quên (A), đợt 2 đang mở chưa ai nhận
+  // 3 · kiện có hai đợt, CHƯA kết thúc: đợt 1 (A) chờ chốt cùng kiện, đợt 2 đang mở chưa ai nhận
   await gieo(db, "s", { vtpStatus: 506, vtpStatusName: "Tồn - khách nghỉ" }, [{ ownerId: A, doneAt: gio(40) }, { active: true, careStatus: "NEW" }]);
   // 4 · đã chốt, A cầm lúc chốt
   await gieo(db, "d", { stage: "DELIVERED", vtpStatus: 501 }, [{ careOutcome: "RESCUED_DIRECT", ownerId: A, ownerAtResolution: A, outcomeAt: gio(5) }]);
@@ -99,7 +100,7 @@ export async function testCarePendingDrilldown(db: Db) {
 
   const a = bang.find((r) => r.userId === A);
   assert.ok(a, "người A phải có dòng");
-  assert.equal(a.pending, 3, "A đang giữ 3 đợt chưa chốt: trong hàng đợi · đã đóng mà ĐVVC đã giao · đợt bị bỏ quên");
+  assert.equal(a.pending, 3, "A đang giữ 3 đợt chưa chốt: trong hàng đợi · đã đóng mà ĐVVC đã giao · đợt cũ của kiện hai đợt");
   assert.equal(a.unattributed, 1, "ca lịch sử của A phải được đếm, không biến mất");
 
   const treo = await listCareCases(ky(), { ownerId: A, bucket: "PENDING" });
@@ -107,7 +108,7 @@ export async function testCarePendingDrilldown(db: Db) {
   assert.equal(lyDo.f, "CARRIER_FINISHED");
   assert.equal(lyDo.s, "SUPERSEDED");
   assert.ok(lyDo.q?.startsWith("QUEUE_") || lyDo.q === "OUT_OF_QUEUE", "mỗi ca treo nói đúng vì sao nó treo");
-  assert.equal(treo.rows.find((r) => r.shipmentId === `${P}s`)?.latestEpisodeNo, 2, "dòng bị bỏ quên phải biết đợt mới nhất của kiện");
+  assert.equal(treo.rows.find((r) => r.shipmentId === `${P}s`)?.latestEpisodeNo, 2, "dòng đợt cũ phải biết đợt mới nhất của kiện");
 
   // Đợt 2 chưa ai nhận thuộc "Chưa nối được người", KHÔNG thuộc A.
   const khong = await listCareCases(ky(), { ownerId: null, bucket: "PENDING" });
