@@ -218,6 +218,28 @@ async function main() {
     })
     .from(schema.salesConversations)
     .where(sql`${schema.salesConversations.humanTakeoverAt} is not null`);
+  /*
+    LÝ DO LƯU KÈM LÀ THỨ DUY NHẤT TÁCH ĐƯỢC HAI NGUYÊN NHÂN.
+
+    Chỉ có HAI đường đặt cờ này: nhân viên bấm "nhận việc" (`sales-copilot.ts`, có
+    `takeover_by_user_id`), và CHÍNH AI gọi `conversation.handoff` (`tools/erp.ts`, kèm một câu
+    lý do). Cả 295 cuộc đều thuộc đường thứ hai — nên câu hỏi không phải "ai cầm" mà là **AI rút
+    lui vì cớ gì**:
+
+      · rút vì tưởng có người đang trả lời  ⇒ cái cớ ấy KHÔNG CÒN (phân loại đã vá), gỡ được;
+      · rút vì hỏi ba lần không ai đáp, vì khách khiếu nại, vì mặc cả giá ⇒ cái cớ VẪN ĐÚNG,
+        gỡ là ném máy trở lại đúng chỗ nó đã tự biết là không nên ở.
+
+    Gộp hai nhóm rồi gỡ hết là cách nhanh nhất để máy nói chen vào một cuộc đang căng.
+  */
+  const lyDo = await db
+    .select({ ly: schema.salesConversations.takeoverReason, n: sql<number>`count(*)` })
+    .from(schema.salesConversations)
+    .where(sql`${schema.salesConversations.humanTakeoverAt} is not null`)
+    .groupBy(schema.salesConversations.takeoverReason)
+    .orderBy(sql`count(*) desc`)
+    .limit(12);
+
   const moCoi = Number(chan?.mayDatKhongConChungCu ?? 0);
   ghi(
     "8. Hội thoại người đang cầm",
@@ -300,6 +322,14 @@ async function main() {
   for (const c of cua) {
     console.log(`  ${DAU[c.verdict]} ${c.ten}: ${c.thay}`);
     if (c.lamGi) console.log(`      → ${c.lamGi}`);
+  }
+
+  if (lyDo.length) {
+    console.log("");
+    console.log("──────────────── AI RÚT LUI VÌ CỚ GÌ (cửa 8) ────────────────");
+    for (const l of lyDo) console.log(`  ${String(l.n).padStart(4)}× ${l.ly || "(không ghi lý do)"}`);
+    console.log("  Chỉ nhóm rút vì TƯỞNG CÓ NGƯỜI ĐANG TRẢ LỜI mới gỡ được — cái cớ ấy không còn.");
+    console.log("  Nhóm rút vì khách khiếu nại / mặc cả / hỏi mãi không đáp: cớ VẪN ĐÚNG, giữ nguyên.");
   }
 
   const dong = cua.filter((c) => c.verdict === "CHUA");
