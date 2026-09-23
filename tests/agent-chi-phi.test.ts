@@ -383,3 +383,28 @@ export function testChuoiSach() {
   console.log(`✓ Chuỗi lượt chạy sạch: ngưỡng ${NGUONG_MO_QA} từ một hằng số · chưa review đếm riêng, không in thành 0 · chưa review ở giữa cắt chuỗi · có lỗi / hỏng cắt · BLOCKED/CANCELLED không phạt · lượt sửa không thổi phồng được chuỗi · lượt sửa suy theo mốc thời gian`);
 }
 
+/* ═════════════ CÂU KẾT QUẢ ĐƠN CỦA BỘ TÍNH CHỈ SỐ PHẢI TẮT JIT ═════════════ */
+
+export function testMetricResolverTatJit() {
+  /*
+    Đo production 23/09/2026 (run 35873756396): `outcomeAggregate` JIT bật 8.425 ms, JIT tắt 43 ms —
+    99 % là biên dịch. Tệp này từng vắng mặt khỏi danh sách tệp dùng `chayKhongJit`, nên trang
+    /work/okr chờ ~20 giây, và câu ấy bị gọi 5 lần mỗi lượt tải.
+
+    PGlite KHÔNG có JIT, nên bộ kiểm thử không quan sát được hành vi — chỉ canh được mã nguồn. Phép
+    canh cắt ĐÚNG thân hàm `outcomeAggregate` chứ không quét cả tệp: một `chayKhongJit` ở hàm bên
+    cạnh không được làm chốt này xanh.
+  */
+  const goc3 = path.resolve(__dirname, "..");
+  const ma = readFileSync(path.join(goc3, "lib/queries/metric-resolver.ts"), "utf8");
+  const dau = ma.indexOf("async function outcomeAggregate(");
+  assert.ok(dau > 0, "phải còn hàm outcomeAggregate");
+  const cuoi = ma.indexOf("\n}\n", dau);
+  const than = ma.slice(dau, cuoi);
+  assert.ok(cuoi > dau && than.length < 3000, "phải cắt được thân hàm — nếu không, phép canh đang quét nhầm cả tệp");
+  assert.ok(than.includes("chayKhongJit(db,"), "câu kết quả đơn của bộ tính chỉ số PHẢI chạy trong chayKhongJit — đo được 99 % thời gian là JIT biên dịch");
+  assert.ok(!/\bawait\s+db\s*\.select\(/.test(than), "và KHÔNG được còn một lời gọi db.select trần bên trong thân hàm");
+
+  console.log("✓ Bộ tính chỉ số: câu kết quả đơn chạy trong chayKhongJit (JIT bật 8.425 ms → tắt 43 ms, đo production)");
+}
+
