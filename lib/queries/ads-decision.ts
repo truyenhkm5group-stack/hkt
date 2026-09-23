@@ -1,7 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { metricScope, realizedShippingSql, successRate } from "@/lib/queries/metrics";
+import { metricScope, openShippingSql, realizedShippingSql, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { spendPeriod } from "@/lib/queries/ads-roas";
@@ -156,8 +156,16 @@ export type AdsDecisionRow = {
    * Doanh thu giao thành công TẠM TÍNH = đã giao thật + (đang treo × tỷ lệ GTC ước tính).
    * **Cộng vào phần đã đo, không thay nó** — cùng phép cộng với `lib/queries/marketing-daily.ts`,
    * để hai báo cáo không nói hai con số.
+   *
+   * Riêng CƯỚC thì bảng này đi xa hơn `marketing-daily`: nó dự phóng cả cước của phần đang treo
+   * (xem `projectedProfitAfterAds`). Cố ý khác, vì đây là bảng RA QUYẾT ĐỊNH TIÊU TIỀN — một khoản
+   * chi chắc chắn sẽ tới mà không có mặt sẽ làm khuyến nghị lạc quan một chiều.
    */
   projectedDeliveredRevenue: number;
+  /**
+   * Lợi nhuận góp sau quảng cáo TẠM TÍNH. Trừ cả cước dự phóng của phần đang treo — đã cộng doanh
+   * thu tương lai thì phải trừ chi phí tương lai của đúng phần ấy (chủ shop chốt 23/09/2026).
+   */
   projectedProfitAfterAds: number;
   /** Khoảng cách tới hoà vốn tính trên căn cứ TẠM TÍNH. `null` khi không biết chi tiêu. */
   projectedHeadroom: number | null;
@@ -351,6 +359,10 @@ type Agg = {
   /** Doanh thu của đơn ĐANG TREO đã cân theo tỷ lệ GTC ước tính của mã. */
   openProjectedRevenue: number;
   openProjectedCogs: number;
+  /**
+   * Cước SẼ phát sinh của phần đang treo. KHÔNG nhân tỷ lệ: cước mất cả khi giao được lẫn khi hoàn.
+   */
+  openProjectedShipping: number;
   /** Số đơn đang treo đã cân theo tỷ lệ — số thập phân, vì nó là kỳ vọng chứ không phải phép đếm. */
   openProjectedOrders: number;
 };
@@ -374,6 +386,7 @@ function toAgg(r: Record<string, unknown>): Agg {
     shipping: Number(r.shipping ?? 0),
     openProjectedRevenue: Number(r.openProjectedRevenue ?? 0),
     openProjectedCogs: Number(r.openProjectedCogs ?? 0),
+    openProjectedShipping: Number(r.openProjectedShipping ?? 0),
     openProjectedOrders: Number(r.openProjectedOrders ?? 0),
   };
 }
@@ -455,13 +468,14 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension, rates: 
           Chỉ lọc `open`: đơn đã ngã ngũ thì không còn gì để dự báo, và nhân tỷ lệ lên chúng là ghi
           đè một SỐ ĐO bằng một con số đoán. Cùng phép cộng với `lib/queries/marketing-daily.ts`.
 
-          CƯỚC cố ý KHÔNG có mặt ở đây. Đơn chưa gửi thì chưa có cước thật — `orders.partner_fee` chỉ
-          là ước tính của Pancake lúc lên đơn — nên lợi nhuận tạm tính đang THIẾU phần cước của đơn
-          đang treo, tức nó rộng rãi hơn sự thật một chút. Đó đúng là cách Báo cáo hiệu quả marketing
-          đang tính; thêm một ước tính cước chỉ ở đây sẽ làm hai báo cáo nói hai con số (mục 15).
+          CƯỚC CŨNG ĐƯỢC DỰ PHÓNG, nhưng KHÔNG nhân tỷ lệ — xem `openShippingSql`. Chủ shop chốt
+          23/09/2026: đã dự phóng doanh thu của phần đang treo thì phải dự phóng cả chi phí của
+          đúng phần ấy. Bản trước chỉ cộng doanh thu, và đo được nó làm lợi nhuận tạm tính lạc quan
+          **5.789.000 ₫ / 30 ngày** — đủ để đổi một khuyến nghị từ CẮT thành TĂNG NGÂN SÁCH.
         */
         openProjectedRevenue: sql<number>`coalesce(sum(${facts.revenue} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
         openProjectedCogs: sql<number>`coalesce(sum(${facts.cogs} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
+        openProjectedShipping: openShippingSql({ shipping: facts.shipping, outcome: facts.outcome }),
         openProjectedOrders: sql<number>`coalesce(sum(${facts.deliveryRate}) filter (where ${open}), 0)`,
       })
       .from(facts)
@@ -547,9 +561,10 @@ async function aggregateByProduct(period: Period, rates: ProductDeliveryRates): 
         cogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${delivered}), 0)`,
         // CÙNG một hàm với cấp chiến dịch, chỉ thêm CĂN CỨ PHÂN BỔ: tỷ trọng doanh thu dòng trong đơn.
         shipping: realizedShippingSql({ shipping: facts.shipping, returnFee: facts.returnFee, outcome: facts.outcome, share: facts.shipShare }),
-        // Phần đang treo đã cân theo tỷ lệ — xem chú thích ở `aggregateByOrder` về việc cước không có mặt.
+        // Phần đang treo — xem chú thích ở `aggregateByOrder`. Cước dùng CÙNG căn cứ phân bổ với cước đã phát sinh.
         openProjectedRevenue: sql<number>`coalesce(sum(${facts.lineRevenue} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
         openProjectedCogs: sql<number>`coalesce(sum(${facts.lineCogs} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
+        openProjectedShipping: openShippingSql({ shipping: facts.shipping, outcome: facts.outcome, share: facts.shipShare }),
         /** Tỷ lệ là HẰNG SỐ trong một nhóm (nhóm = một mã), nên `max` chỉ là cách lấy nó ra khỏi phép gộp. */
         openProjectedOrders: sql<number>`coalesce(${countOrders(open)} * max(${facts.deliveryRate}), 0)`,
       })
@@ -856,12 +871,21 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
     Cộng vào phần đã đo, KHÔNG thay nó: đơn đã có kết cục thì không còn gì để dự báo. Cùng phép
     cộng với `lib/queries/marketing-daily.ts`, nên hai báo cáo không nói hai con số.
 
-    CƯỚC giữ nguyên số đo (cước của đơn đã giao + đơn hoàn). Đơn đang treo chưa phát sinh cước thật,
-    và `partner_fee` chỉ là ước tính của Pancake — nên lợi nhuận tạm tính đang THIẾU vế cước tương
-    lai, tức rộng rãi hơn sự thật một chút. Nói ra ở đây thay vì lặng lẽ bù bằng một con số thứ hai.
+    CƯỚC CŨNG ĐƯỢC CỘNG, VÀ KHÔNG NHÂN TỶ LỆ.
+
+    Doanh thu chỉ về khi giao được nên nó nhân GTC; cước thì mất cả hai đường — giao được tốn cước
+    đi, hoàn tốn cước đi cộng cước về. Nhân GTC vào cước là giả định đơn hoàn được miễn cước.
+
+    Bản trước chỉ cộng doanh thu tương lai mà bỏ chi phí tương lai của đúng những đơn ấy. Đo
+    production 23/09/2026: lợi nhuận tạm tính lạc quan **5.789.000 ₫ / 30 ngày** — với biên mỏng,
+    ngần ấy đủ để đổi một khuyến nghị từ CẮT thành TĂNG NGÂN SÁCH. Chủ shop chốt sửa cùng ngày.
+
+    CÒN THIẾU, và nói ra thay vì lặng lẽ bù: phí hoàn của đơn đang treo. `orders.return_fee` chỉ
+    tồn tại sau khi hoàn thật, nên nhân nó với tỷ lệ hoàn là nhân với một ô trống.
   */
   const projectedDeliveredRevenue = agg.deliveredRevenue + agg.openProjectedRevenue;
-  const projectedContributionBeforeAds = projectedDeliveredRevenue - (agg.cogs + agg.openProjectedCogs) - agg.shipping;
+  const projectedContributionBeforeAds =
+    projectedDeliveredRevenue - (agg.cogs + agg.openProjectedCogs) - (agg.shipping + agg.openProjectedShipping);
   const projectedProfitAfterAds = projectedContributionBeforeAds - spendForRatio;
   const projectedHeadroom = spendKnown && spendForRatio > 0 ? round2(projectedContributionBeforeAds / spendForRatio) : null;
   /*
@@ -1032,6 +1056,7 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
             // Không đơn nào ⇒ không có gì đang treo ⇒ không có gì để ước tính. Đây là 0 THẬT.
             openProjectedRevenue: 0,
             openProjectedCogs: 0,
+            openProjectedShipping: 0,
             openProjectedOrders: 0,
           },
           dimension,
