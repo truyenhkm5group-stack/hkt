@@ -83,7 +83,7 @@ function xetChung(f: EligibilityFacts, choPhep: CarrierSubstate[], nhan: string)
       ok: true,
       callsApi: false,
       code: "MANUAL_ONLY",
-      reason: "Tài khoản API của ERP không sở hữu vận đơn này (vận đơn do Pancake tạo thuộc tài khoản Viettel Post khác). Lệnh gửi lên sẽ bị từ chối — làm tay trên viettelpost.vn rồi bấm “Đã làm tay” để ERP ghi vết.",
+      reason: "API Viettel Post không trả về vận đơn này cho tài khoản của shop, nên lệnh gửi lên sẽ bị từ chối. Vẫn LÀM ĐƯỢC trên viettelpost.vn (web thấy đủ đơn) — làm tay rồi bấm “Đã làm tay” để ERP ghi vết.",
       substate,
     };
   return { ok: true, callsApi: true, code: "OK", reason: `Gửi thẳng lên Viettel Post; chỉ coi là thành công khi sự kiện hành trình xác nhận.`, substate };

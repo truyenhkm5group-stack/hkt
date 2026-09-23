@@ -245,7 +245,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
         what: "`requestCarrierAction` gọi thật `order/UpdateOrder` của Viettel Post (phát tiếp · duyệt hoàn · gửi lại · huỷ · sửa người nhận), idempotent theo kiện + hành động + ngày.",
         evidence: ["lib/care/service.ts", "lib/care/carrier-capabilities.ts"],
         missing:
-          "Đo 11/09/2026: 565/565 kiện trả `PERMISSION_MISSING` — vận đơn do Pancake tạo thuộc tài khoản Viettel Post KHÁC, nên đường ghi có thật nhưng thực tế mọi lượt rơi về `MANUAL_REQUIRED` (làm tay trên viettelpost.vn, ERP ghi vết). Mở được bằng credential ĐVVC sở hữu các kiện đó, không bằng sửa mã.",
+          "Đo 11/09/2026: 565/565 kiện trả `PERMISSION_MISSING` — API Viettel Post không trả về vận đơn nào cho tài khoản của shop, nên mọi lượt rơi về `MANUAL_REQUIRED` (làm tay trên viettelpost.vn, ERP ghi vết). NGUYÊN NHÂN CHƯA BIẾT: đo lại 23/09 cho thấy CÙNG tài khoản ấy thấy đủ 598 đơn trên web, và webhook của chính VTP gửi đúng mã mà API trả rỗng. Đang chờ Viettel Post trả lời; không tự động hoá đường web (AGENTS.md mục 5).",
       },
     },
   },

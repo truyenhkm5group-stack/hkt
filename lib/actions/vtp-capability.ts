@@ -137,10 +137,10 @@ export async function kiemTraQuyenTraCuuVtp(): Promise<CapabilityCheck> {
       : sampled === 0
         ? "Chưa có vận đơn nào trong ERP để thử. Kết quả CHƯA BIẾT, không phải 'không đọc được'."
         : found === 0
-          ? `Tài khoản API đăng nhập được nhưng KHÔNG thấy vận đơn nào trong ${sampled} kiện mới nhất của shop. Đây là PHẠM VI TÀI KHOẢN, không phải lỗi lần gọi: vận đơn do Pancake tạo thuộc một tài khoản Viettel Post khác. Với chúng, webhook + nhập tệp là toàn bộ nguồn tin.`
+          ? `Tài khoản API đăng nhập được nhưng KHÔNG thấy vận đơn nào trong ${sampled} kiện mới nhất của shop. Đây KHÔNG phải lỗi lần gọi, và CŨNG KHÔNG phải "sai tài khoản": đo 23/09/2026 cho thấy CÙNG tài khoản ấy nhìn thấy đủ vận đơn trên viettelpost.vn. Vì sao API trả rỗng thì Viettel Post chưa trả lời. Cho tới khi có câu trả lời, webhook + nhập tệp là toàn bộ nguồn tin của những kiện này.`
           : found === sampled
             ? `Tài khoản API đọc được cả ${sampled}/${sampled} kiện trong mẫu. Có thể bật lại đối chiếu định kỳ qua API cho toàn bộ vận đơn.`
-            : `Tài khoản API đọc được ${found}/${sampled} kiện trong mẫu. Một phần vận đơn thuộc tài khoản khác — kiểm tra xem ERP và Pancake có đang dùng chung một tài khoản không.`;
+            : `Tài khoản API đọc được ${found}/${sampled} kiện trong mẫu. Một phần vận đơn API không thấy — ghi lại mẫu này rồi hỏi Viettel Post, đừng suy ra nguyên nhân từ con số.`;
 
   // Lượt dò tiêu request của tài khoản thật và nói ra danh tính (đã che) của nó, nên nó phải có vết.
   await audit({
