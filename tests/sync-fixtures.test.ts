@@ -128,6 +128,7 @@ import { testAdsAttributionLink } from "./ads-attribution-link.test";
 import { testAdsIdentity } from "./ads-identity.test";
 import { testProductVerdict } from "./product-verdict.test";
 import { testInventoryForecast } from "./inventory-forecast.test";
+import { testPlanExplain } from "./plan-explain.test";
 import { testInventoryDecision } from "./inventory-decision.test";
 import { testReturnInspection } from "./return-inspection.test";
 import { testReturnUnidentified } from "./return-unidentified.test";
@@ -1765,6 +1766,7 @@ async function main() {
   await testEntityTimeline(db);
   await testInventory(db);
   await testInventoryForecast(db);
+  testPlanExplain();
   await testSlowMoving(db);
   await testInventoryDecision(db);
   await testCodReconciliation();
