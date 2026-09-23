@@ -169,6 +169,12 @@ export async function testInventory(db: Db) {
   // ───────── 7b. Trang CHI TIẾT sản phẩm đọc sổ kho ERP, không đọc Pancake ─────────
   // Bản trước in `remainQuantity` của Pancake dưới nhãn "Tồn KD / Tồn TT" — cùng một mẫu mã có hai
   // số tồn tuỳ trang mở, và trang nhân viên đặt hàng nhìn kỹ nhất lại là trang nói sai.
+  // Tình huống thật của mã Q005 (đo 23/09/2026): đơn ĐÃ CHỐT chờ xuất trên mẫu mã CHƯA có phiếu
+  // nhập. Gieo tạm cho dq-var, dọn lại ở cuối mục này để không đổi tổng của các mục sau.
+  await db.insert(schema.orders).values({ id: "ton-cho-xuat-dq", stage: "CONFIRMED", insertedAt: new Date() });
+  await db.insert(schema.orderItems).values({ id: "ton-cho-xuat-dq-i1", orderId: "ton-cho-xuat-dq", variantId: "dq-var", quantity: 4 });
+  await db.insert(schema.shipments).values({ id: "ton-cho-xuat-dq-s1", orderId: "ton-cho-xuat-dq", stage: "PENDING" });
+  clearMemo();
   const { rows: dsSanPham } = await listProducts(allParams(), 200);
   for (const variantId of ["rr-var", "dq-var"]) {
     const dong = dsSanPham.find((r) => r.id === variantId);
@@ -208,7 +214,19 @@ export async function testInventory(db: Db) {
     const bietTon = chiTiet.variants.filter((x) => x.erpStock !== null);
     assert.equal(chiTiet.totals.actual, bietTon.reduce((t, x) => t + (x.erpStock ?? 0), 0), "tổng tồn thực tế chỉ cộng mẫu mã đã có phiếu nhập");
     assert.equal(chiTiet.totals.shipped, chiTiet.variants.reduce((t, x) => t + (x.ledger?.shipped ?? 0), 0), "tổng đã xuất = cộng từng mẫu mã");
+    // Chờ xuất trên mẫu mã chưa có phiếu nhập: tách riêng, KHÔNG cộng vào "còn thiếu" (không biết
+    // kho có bao nhiêu) nhưng cũng không được biến mất khỏi thẻ cảnh báo.
+    assert.equal(chiTiet.totals.committedUnknown, chiTiet.variants.reduce((t, x) => t + (x.ledger && !x.ledger.stockKnown ? x.ledger.committed : 0), 0), "chờ xuất trên mẫu mã chưa có phiếu nhập = cộng đúng các mẫu mã đó");
+    assert.equal(chiTiet.totals.shortage, chiTiet.variants.reduce((t, x) => t + (x.shortage ?? 0), 0), "còn thiếu chỉ cộng mẫu mã đã biết tồn");
+    if (variantId === "dq-var") {
+      assert.ok(l.committed >= 4, "fixture: đơn đã chốt của dq-var phải nằm trong chờ xuất");
+      assert.ok(chiTiet.totals.committedUnknown >= 4, "chờ xuất trên mẫu mã chưa có phiếu nhập phải hiện ra ở tổng, không biến mất");
+    }
   }
+  await db.delete(schema.shipments).where(eq(schema.shipments.id, "ton-cho-xuat-dq-s1"));
+  await db.delete(schema.orderItems).where(eq(schema.orderItems.id, "ton-cho-xuat-dq-i1"));
+  await db.delete(schema.orders).where(eq(schema.orders.id, "ton-cho-xuat-dq"));
+  clearMemo();
   // Bài kiểm trên chỉ bắt được việc đọc nhầm Pancake nếu số Pancake KHÁC số sổ kho ở fixture.
   const rrDong = dsSanPham.find((r) => r.id === "rr-var");
   assert.ok(rrDong && rrDong.remainQuantity !== rrDong.erpStock, "fixture: tồn Pancake của rr-var phải khác sổ kho, nếu không bài kiểm 7b không phân biệt được hai nguồn");
