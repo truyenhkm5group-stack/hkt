@@ -79,8 +79,8 @@ export function MarketerNominalBreakdown({ data, kind, hrefFor, kindHref, report
       <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 pt-3 text-[11px] text-muted-foreground">
         <span>
           Khớp <Link href={reportHref} className="underline">Báo cáo lợi nhuận danh nghĩa</Link> cùng kỳ
-          {/* Tab ấy lấp giá vốn DỰ TÍNH, khu quảng cáo thì không — nói ra thay vì để một dấu ✓ hứa quá. */}
-          {data.unknownCostQty > 0 ? " (giá vốn thật, CHƯA lấp giá dự tính — xem cảnh báo phía trên)" : ""}:
+          {/* Cùng giá vốn dự tính với tab ấy — nói ra phần dự tính để dấu ✓ không che mất nó. */}
+          {data.estimatedCogs.amount > 0 ? <> (giá vốn gồm <b>{formatVND(data.estimatedCogs.amount, { compact: true })} dự tính</b> cho {data.estimatedCogs.products} mã)</> : null}:
         </span>
         <Recon label="DT GTC ƯT" ours={rc.expectedRevenue.ours} report={rc.expectedRevenue.report} />
         <Recon label="LN danh nghĩa" ours={rc.expectedProfit.ours} report={rc.expectedProfit.report} />

@@ -114,15 +114,18 @@ function testFinishCell() {
 async function testReconcilesWithNominalReport() {
   clearMemo();
   /*
-    ĐỐI CHIẾU VỚI BÁO CÁO ĐỌC ĐỦ TỒN KHO (giá vốn dự tính TẮT — khu quảng cáo không được thấy giá
-    đoán, xem `tests/estimated-cost.test.ts`). Bảng MKTer tắt tồn kho cho nhanh; cặp khẳng định
-    ngay dưới chứng minh việc ấy không đổi một đồng lợi nhuận nào.
+    ĐỐI CHIẾU VỚI ĐÚNG BỘ CỜ CỦA TAB "LỢI NHUẬN DANH NGHĨA" (giá vốn dự tính BẬT, tồn kho ĐỌC) —
+    thứ chủ shop nhìn thấy (ngoại lệ chốt 23/09/2026, xem `tests/estimated-cost.test.ts`). Bảng
+    MKTer tắt tồn kho cho nhanh; cặp khẳng định ngay dưới chứng minh việc ấy không đổi một đồng.
   */
   const [data, report, noStock] = await Promise.all([
     getMarketerDailyNominal(ALL),
-    getNominalProfitReport(ALL, "ORDERED", NO_ORDER_VALUE_FILTER, true, false),
-    getNominalProfitReport(ALL, "ORDERED", NO_ORDER_VALUE_FILTER, true, false, false),
+    getNominalProfitReport(ALL, "ORDERED", NO_ORDER_VALUE_FILTER, true, true),
+    getNominalProfitReport(ALL, "ORDERED", NO_ORDER_VALUE_FILTER, true, true, false),
   ]);
+  // Phần dự tính phải được NÓI RA, không tan vào tổng giá vốn (AGENTS.md mục 8.6).
+  assert.equal(data.estimatedCogs.amount, report.totals.expectedCogsEstimated, "phần giá vốn dự tính phải bằng đúng con số của tab");
+  assert.equal(data.unknownCostQty, report.totals.cogsUncoveredQty, "số sản phẩm vẫn chưa có giá vốn nào phải bằng đúng tab");
   for (const k of ["expectedRevenue", "expectedCogs", "shipCost", "expectedProfit", "netProfit", "inventoryRisk", "tax"] as const) {
     assert.equal(noStock.totals[k], report.totals[k], `bỏ đọc tồn kho KHÔNG được đổi ${k} — tồn chỉ là ô ghi chú, không vào lợi nhuận`);
   }

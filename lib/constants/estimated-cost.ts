@@ -17,6 +17,10 @@
  *   2. CHỈ BÁO CÁO LỢI NHUẬN DANH NGHĨA đọc nó (`getNominalProfitReport(…, withEstimatedCost)`,
  *      mặc định TẮT). Bảng lương, báo cáo marketer, dòng tiền thực, sổ kho, tồn kho đều không đọc:
  *      một con số đoán không được đi vào tiền của ai (AGENTS.md mục 7) hay vào chứng từ nào.
+ *      NGOẠI LỆ DUY NHẤT (chủ shop chốt 23/09/2026): bảng "Bóc tách theo MKTer" ở /ads/daily
+ *      (`lib/queries/marketer-daily-nominal.ts`) đọc giá dự tính, vì nó phải nói CÙNG con số với
+ *      tab Lợi nhuận danh nghĩa — đo production: 522 sản phẩm/30 ngày chưa có giá vốn, trừ 0 ₫ thì
+ *      LN ròng lệch −150,7% (lãi thành lỗ). Bảng ấy không vào lương và mang nhãn "dự tính".
  *   3. LƯU Ở KHOÁ RIÊNG (`profit.estimatedCosts`), không trong `profit.assumptions`: lược đồ của
  *      `saveProfitAssumptions` bỏ mọi trường nó không biết, nên để chung là mỗi lần sửa khối Giả
  *      định thì toàn bộ giá dự tính biến mất, im lặng.
