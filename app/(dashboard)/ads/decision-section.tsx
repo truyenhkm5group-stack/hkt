@@ -4,7 +4,7 @@ import { InfoHint } from "@/components/info-hint";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { ArrowRight } from "lucide-react";
 import { getAdsDecision, DECISION_METRIC_HINT } from "@/lib/queries/ads-decision";
-import { ADS_DIMENSION_HAS_SPEND, type AdsDimension } from "@/lib/constants/ads-decision";
+import { ADS_DIMENSION_HAS_SPEND, rowsToRender, type AdsDimension } from "@/lib/constants/ads-decision";
 import { LEDGER_WINDOW_DAYS, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { decisionStability } from "@/lib/queries/marketing-ledger";
 import type { Stability } from "@/lib/marketing/decision-stability";
@@ -76,8 +76,19 @@ function ChainStrip({ t }: { t: { bookedOrders: number; bookedRevenue: number; n
   );
 }
 
-export async function AdsDecisionSection({ period, dimension }: { period: Period; dimension: AdsDimension }) {
+export async function AdsDecisionSection({
+  period,
+  dimension,
+  showAll = false,
+  showAllHref = "?dong=tatca",
+}: {
+  period: Period;
+  dimension: AdsDimension;
+  showAll?: boolean;
+  showAllHref?: string;
+}) {
   const d = await getAdsDecision(period, dimension);
+  const { shown: dongVe, hidden: dongAn } = rowsToRender(d.rows, showAll);
   /*
     ─── ĐỘ BỀN ĐỌC TỪ SỔ, VÀ SỔ CÓ THỂ RỖNG ───
 
@@ -272,7 +283,25 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
           )}
         </p>
 
-        <AdsDecisionTable rows={d.rows} dimension={dimension} stability={stability} />
+        <AdsDecisionTable rows={dongVe} dimension={dimension} stability={stability} hiddenCount={dongAn.length} showAllHref={showAllHref} />
+        {/*
+          PHẦN ẨN PHẢI NÓI RA NÓ LÀ GÌ VÀ BAO NHIÊU TIỀN.
+
+          Cắt dòng mà không nói là giấu việc. Nên dải này in số dòng đang ẩn, tổng tiền chi của chúng, và
+          lối mở hết — người đọc biết chính xác mình đang không nhìn thấy gì. Và nó chỉ ẩn dòng CHƯA có
+          kết luận: mọi khuyến nghị đều đã ở trên.
+        */}
+        {dongAn.length > 0 ? (
+          <p className="border-t px-5 py-2 text-xs text-muted-foreground">
+            Đang hiện <b>{formatNumber(dongVe.length)}</b>/{formatNumber(d.rows.length)} dòng. <b>{formatNumber(dongAn.length)}</b> dòng còn lại (tổng chi{" "}
+            {formatVND(dongAn.reduce((t, r) => t + r.spend, 0))}) đều chưa có kết luận và động tới ít tiền hơn các dòng ở trên — mọi khuyến nghị đã hiện
+            đủ.{" "}
+            <a className="font-medium text-foreground underline underline-offset-2" href={showAllHref}>
+              Hiện tất cả {formatNumber(d.rows.length)} dòng
+            </a>{" "}
+            (trang sẽ nặng hơn nhiều).
+          </p>
+        ) : null}
 
         <div className="border-t px-5 py-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">Phần chưa kết luận được (hiện riêng, không chia đều):</p>

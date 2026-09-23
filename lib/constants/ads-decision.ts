@@ -150,6 +150,59 @@ export type InheritedVerdict = {
   reason: string;
 };
 
+/**
+ * ═══════════ BẢNG VẼ BAO NHIÊU DÒNG — VÀ VÌ SAO KHÔNG VẼ HẾT ═══════════
+ *
+ * Đo production 23/09/2026: `/ads` 18,4 s · **6.768 kB**. `perf-audit` theo từng khối cho thấy dữ liệu
+ * thô của bảng quyết định chỉ 902 KB cho 742 dòng — phần còn lại của 6,7 MB là HTML: bảng là client
+ * component nên nhận và VẼ đủ 742 dòng, mỗi dòng nhiều ô hai tầng, nhãn và chú thích. Trong khi hơn
+ * 600 dòng trong số ấy là "chưa đủ dữ liệu".
+ *
+ * Nên máy chủ chỉ gửi xuống những dòng cần đọc: MỌI dòng có kết luận thật (không bao giờ bị cắt),
+ * rồi lấp tới `ADS_TABLE_ROW_CAP` bằng các dòng còn lại theo đúng thứ tự bảng vốn có (động tới
+ * nhiều tiền hơn đứng trước). Không dòng nào biến mất: bảng in số dòng đang ẩn, số tiền của chúng,
+ * và một lối "Hiện tất cả".
+ *
+ * Đây là con số HIỂN THỊ, không phải ngưỡng nghiệp vụ: sổ quyết định, hàng đợi `/work` và mọi con số
+ * tổng vẫn đọc đủ từng dòng.
+ */
+export const ADS_TABLE_ROW_CAP = 80;
+
+/** Dòng có kết luận THẬT — không bao giờ bị cắt khỏi bảng. */
+export function isConclusive(action: AdsAction): boolean {
+  return action !== "INSUFFICIENT_DATA" && action !== "NO_SPEND_DATA";
+}
+
+/**
+ * Chọn dòng để VẼ. Hàm THUẦN, giữ nguyên thứ tự đầu vào. `all` = vẽ hết.
+ *
+ * Trần chỉ áp lên dòng CHƯA có kết luận. Dòng có kết luận luôn được giữ, không tính vào trần: một
+ * ngày có 100 dòng cần hành động thì cả 100 phải hiện, dù vượt trần hiển thị — cắt một khuyến nghị
+ * CẮT khỏi màn hình là đúng thứ bảng này sinh ra để chặn.
+ */
+export function rowsToRender<T extends { action: AdsAction }>(rows: T[], all: boolean, cap = ADS_TABLE_ROW_CAP): { shown: T[]; hidden: T[] } {
+  if (all) return { shown: rows, hidden: [] };
+  const coKetLuan = rows.filter((r) => isConclusive(r.action)).length;
+  /*
+    Bảng đã xếp dòng có kết luận lên đầu, nhưng hàm này KHÔNG dựa vào điều đó: nó giữ mọi dòng có
+    kết luận dù chúng nằm ở đâu, rồi mới lấp chỗ trống bằng các dòng còn lại theo thứ tự cũ. Một ngày
+    ai đó đổi phép sắp xếp thì khuyến nghị vẫn không rơi khỏi màn hình.
+  */
+  // Chỗ còn lại cho dòng CHƯA có kết luận — hết chỗ thì không lấp nữa, nhưng dòng có kết luận vẫn giữ.
+  const conCho = Math.max(0, cap - coKetLuan);
+  const shown: T[] = [];
+  const hidden: T[] = [];
+  let lap = 0;
+  for (const r of rows) {
+    if (isConclusive(r.action)) shown.push(r);
+    else if (lap < conCho) {
+      shown.push(r);
+      lap += 1;
+    } else hidden.push(r);
+  }
+  return { shown, hidden };
+}
+
 /** Hành động đề xuất cho một dòng. Thứ tự này cũng là thứ tự ưu tiên xử lý trên giao diện. */
 export type AdsAction = "SCALE" | "HOLD" | "WATCH" | "CUT" | "FIX_DELIVERY" | "INSUFFICIENT_DATA" | "NO_SPEND_DATA";
 
