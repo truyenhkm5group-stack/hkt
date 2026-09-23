@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import Link from "next/link";
 import { CircleDollarSign, Megaphone, ShoppingBag, Target, TrendingUp } from "lucide-react";
 import { CampaignMapping } from "@/app/(dashboard)/expenses/campaign-mapping";
@@ -20,7 +22,7 @@ import { MetricCard } from "@/components/metric-card";
 import { SectionCard } from "@/components/ui-bits";
 import { formatNumber, formatVND } from "@/lib/format";
 import { AD_FILTER_NONE, AD_FILTER_TEST, AD_SORTABLE, adDailyByPlatform, adFacets, adSummary, listAdSpends } from "@/lib/queries/expenses";
-import { parseListParams, type Period, type SearchParams } from "@/lib/search-params";
+import { hrefWith, parseListParams, type Period, type SearchParams } from "@/lib/search-params";
 
 function change(current: number, previous: number | null | undefined) {
   if (previous === null || previous === undefined || previous === 0) return null;
@@ -32,10 +34,26 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
   // Bảng ghép chiến dịch render MỌI chiến dịch trong kỳ nên nặng nhất trang (đo được 1,86 MB HTML).
   // Đây là việc thỉnh thoảng mới làm, không phải thứ nhìn mỗi lần vào trang — chỉ nạp khi mở.
   const moGhep = raw.ghep === "1";
-  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees, accounts, perf, billing, alertCfg] = await Promise.all([
+  /*
+    ═══════════ KHỐI HIỆU QUẢ THEO MARKETER CŨNG CHỈ NẠP KHI MỞ ═══════════
+
+    Cùng lý lẽ với bảng ghép ngay trên. `perf-audit` 23/09/2026: `getAdsPerformance` mất 8,6 s —
+    vì nó gọi `getMarketerReport`, tức chạy trọn Báo cáo lợi nhuận danh nghĩa (đo riêng 8,7 s) cùng
+    bộ máy phân bổ lương. Nó từng nằm CHUNG `Promise.all` với mọi thứ khác, nên cả tab phải đợi
+    8,6 s của nó — kể cả bảng chi tiêu vốn chỉ cần chưa tới một giây.
+
+    Không sửa ruột báo cáo ấy ở đây: đó là bộ máy lương + lợi nhuận, và một phiên khác đang tối ưu
+    đúng nó. Việc của tab này là thôi bắt MỖI lần mở trang phải trả 8,6 s cho một khối nằm cuối
+    trang mà không phải lần nào cũng xem — và trên một máy chủ 2 nhân đang tắc vì deploy, 8,6 s
+    tính toán mỗi lượt xem là thứ ai cũng phải trả.
+
+    Mở khối ra thì nó chạy trong ranh giới Suspense RIÊNG, nên phần còn lại của tab không phải đợi.
+  */
+  const moHieuQua = raw.hieuqua === "1";
+  const [{ rows, total, pageCount }, facets, summary, daily, campaigns, products, mapping, employees, accounts, billing, alertCfg] = await Promise.all([
     listAdSpends(params), adFacets(params), adSummary(period, params.filters), adDailyByPlatform(period, params.filters),
     moGhep ? listCampaignsForMapping(period, params.filters) : Promise.resolve([]),
-    listProductsForMapping(), loadAdsMapping(), listEmployees(), listAdAccounts(), getAdsPerformance(period), listAdAccountBilling(), loadAlertConfig(),
+    listProductsForMapping(), loadAdsMapping(), listEmployees(), listAdAccounts(), listAdAccountBilling(), loadAlertConfig(),
   ]);
   const prev = summary.previous;
   const fb = integrationStatus().facebook;
@@ -107,7 +125,27 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
         </div>
       </div>
 
-      <AdsPerformancePanel perf={perf} periodLabel={period.label} />
+      {moHieuQua ? (
+        <div id="hieu-qua-marketer" className="scroll-mt-20">
+          <Suspense fallback={<Skeleton className="h-72 rounded-xl" />}>
+            <AdsPerformanceLoader period={period} />
+          </Suspense>
+        </div>
+      ) : (
+        <SectionCard
+          title="Hiệu quả theo marketer"
+          description="Chi quảng cáo, đơn, doanh thu và lợi nhuận theo từng marketer và từng mã hàng. Nạp khi mở vì nó chạy trọn Báo cáo lợi nhuận danh nghĩa cùng bộ máy phân bổ lương — khoảng 9 giây mỗi lần."
+          actions={
+            <Button asChild size="sm" variant="outline">
+              <Link href={`${hrefWith(raw, "hieuqua", "1")}#hieu-qua-marketer`}>Xem hiệu quả theo marketer</Link>
+            </Button>
+          }
+        >
+          <p className="text-xs text-muted-foreground">
+            Bảng quyết định ở đầu trang đã có lợi nhuận góp sau quảng cáo theo chiến dịch và theo mã hàng. Khối này thêm phần PHÂN BỔ theo người.
+          </p>
+        </SectionCard>
+      )}
 
       <SectionCard
         padded={false}
@@ -136,7 +174,7 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
           <CampaignMapping rows={campaigns} products={products} aliases={mapping.aliases} marketers={activeMarketers.map((e) => ({ id: e.id, name: e.shortName || e.name }))} canWrite={canWrite} periodLabel={period.label} />
         ) : (
           <Button asChild variant="outline" size="sm">
-            <Link href="?ghep=1">Mở bảng ghép chiến dịch</Link>
+            <Link href={hrefWith(raw, "ghep", "1")}>Mở bảng ghép chiến dịch</Link>
           </Button>
         )}
       </SectionCard>
@@ -144,4 +182,10 @@ export async function AdsTab({ raw, period, canWrite, canManageEmployees }: { ra
       <AdSpendsTable rows={rows} pageCount={pageCount} total={total} canWrite={canWrite} />
     </div>
   );
+}
+
+/** Nạp khối hiệu quả theo marketer TRONG ranh giới Suspense riêng — phần còn lại của tab không phải đợi nó. */
+async function AdsPerformanceLoader({ period }: { period: Period }) {
+  const perf = await getAdsPerformance(period);
+  return <AdsPerformancePanel perf={perf} periodLabel={period.label} />;
 }

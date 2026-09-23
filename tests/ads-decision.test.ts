@@ -4,7 +4,7 @@ import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis, isConclusive, rowsToRender, spendClassOf } from "@/lib/constants/ads-decision";
 import { DECISION_METRIC_HINT, buildDecisionRow, decideAction, getAdsDecision, inheritVerdict } from "@/lib/queries/ads-decision";
-import type { Period } from "@/lib/search-params";
+import { hrefWith, type Period } from "@/lib/search-params";
 
 const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
 
@@ -432,6 +432,20 @@ export async function testAdsDecision(db: Db) {
   */
   const cuoiBang = [...Array.from({ length: 200 }, (_, k) => dong("INSUFFICIENT_DATA", k)), dong("CUT", 999)];
   assert.ok(rowsToRender(cuoiBang, false, 80).shown.some((r) => r.key === "r999"), "khuyến nghị nằm cuối bảng vẫn phải hiện");
+
+  /*
+    LỐI "HIỆN TẤT CẢ" / "XEM HIỆU QUẢ THEO MARKETER" PHẢI GIỮ NGUYÊN KỲ ĐANG XEM. Một liên kết viết
+    cứng `?ghep=1` từng đưa người bấm về tháng hiện tại — con số trong khối vừa mở nói về một kỳ
+    khác với phần còn lại của trang, và không ô nào báo điều đó.
+  */
+  const url = new URLSearchParams(hrefWith({ period: "custom", from: "2026-09-01", to: "2026-09-15", cap: "product", platform: ["FACEBOOK", "TIKTOK"], hieuqua: "0", rong: undefined }, "hieuqua", "1").slice(1));
+  assert.equal(url.get("period"), "custom", "giữ kỳ");
+  assert.equal(url.get("from"), "2026-09-01");
+  assert.equal(url.get("to"), "2026-09-15");
+  assert.equal(url.get("cap"), "product", "giữ cấp đang xem");
+  assert.deepEqual(url.getAll("platform"), ["FACEBOOK", "TIKTOK"], "giữ bộ lọc nhiều giá trị");
+  assert.deepEqual(url.getAll("hieuqua"), ["1"], "khoá được đặt THAY giá trị cũ, không nhân đôi");
+  assert.equal(url.has("rong"), false, "tham số undefined không thành chuỗi 'undefined'");
 
   // `all` = vẽ hết.
   assert.equal(rowsToRender(hon, true, 80).shown.length, hon.length);

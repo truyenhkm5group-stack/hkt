@@ -10,20 +10,9 @@ import { can,  } from "@/lib/auth/session";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { ADS_DIMENSION_LABEL, type AdsDimension } from "@/lib/constants/ads-decision";
-import { resolvePeriod, type SearchParams } from "@/lib/search-params";
+import { hrefWith, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Quảng cáo" };
-
-/** Đường dẫn giữ NGUYÊN mọi tham số đang có (kỳ · cấp · …) rồi đặt thêm một khoá. */
-function hrefWith(raw: SearchParams, key: string, value: string): string {
-  const q = new URLSearchParams();
-  for (const [k, v] of Object.entries(raw)) {
-    if (k === key || v === undefined) continue;
-    for (const x of Array.isArray(v) ? v : [v]) q.append(k, x);
-  }
-  q.set(key, value);
-  return `?${q.toString()}`;
-}
 
 function isDimension(value: string): value is AdsDimension {
   // Object.hasOwn: `in` nhận cả khoá kế thừa (?dim=toString) rồi làm vỡ trang ở bảng quyết định.
