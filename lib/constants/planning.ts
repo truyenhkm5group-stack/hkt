@@ -20,6 +20,19 @@ export type PlanningAssumptions = {
   minOrderQtyOverrides: Record<string, number>;
   /** Ghi đè thời gian sản xuất theo mã hàng (productId → ngày) */
   leadTimeOverrides: Record<string, number>;
+  /**
+   * KHO TÁI NHẬP HÀNG HOÀN TRONG BAO NHIÊU NGÀY sau khi hàng về tới shop — MỤC TIÊU VẬN HÀNH do chủ
+   * shop đặt, không phải số đo.
+   *
+   * Vì sao không đo: ngày 23/09/2026, toàn bộ 606 kiện tái nhập trong 60 ngày qua được làm trong
+   * ĐÚNG MỘT NGÀY (tuần 14/09) — kho chưa tái nhập đều đặn, nên "trung vị 30,8 ngày" chỉ mô tả một
+   * lần nhập bù. Phần ĐO được là ĐVVC trả hàng về shop (trung vị 7,7 ngày, 685 kiện) — cộng với số
+   * này ra độ trễ hoàn dùng để trừ hàng hoàn của đơn tương lai khỏi số cần đặt.
+   *
+   * Kho chậm hơn con số này thì đề xuất sẽ THIẾU — lời diễn giải luôn in kịch bản "kho không tái
+   * nhập kịp" để người đặt thấy số đặt tối đa.
+   */
+  restockDays: number;
 };
 
 export const PLANNING_KEY = "inventory.planning";
@@ -33,6 +46,7 @@ export const DEFAULT_PLANNING: PlanningAssumptions = {
   minOrderQty: 0,
   minOrderQtyOverrides: {},
   leadTimeOverrides: {},
+  restockDays: 2,
 };
 
 /**
@@ -102,7 +116,15 @@ export type PlanInput = {
   stockKnown?: boolean;
   /** Đã chốt nhưng chưa gửi (đơn xác nhận / đóng gói / chờ lấy) */
   committed: number;
-  /** Số lượng bán ròng (không huỷ, không hoàn) trong cửa sổ tốc độ */
+  /**
+   * Số cái RỜI KHO theo đơn đã chốt trong cửa sổ tốc độ — GỘP: không tính đơn huỷ, NHƯNG tính cả
+   * đơn đang giao lẫn đơn đã hoàn, và cả hàng tặng (hàng tặng cũng rời kho).
+   *
+   * Trước 23/09/2026 đây là số "ròng" nửa vời: đơn ĐÃ hoàn bị loại, đơn ĐANG giao thì tính đủ. Với
+   * mã đang chạy, phần lớn đơn 14 ngày gần nhất còn đang giao, nên con số ấy vừa không phải gộp vừa
+   * không phải ròng. Phần hàng quay về nay được trừ TƯỜNG MINH bằng tỷ lệ hoàn (`returnRate`) và
+   * độ trễ hoàn (`returnLagDays`) — một chỗ, có tên, in ra được trong lời diễn giải.
+   */
   soldInWindow: number;
   windowDays: number;
   leadTimeDays: number;
@@ -113,8 +135,22 @@ export type PlanInput = {
   inTransit?: number;
   /** Hàng CHỜ HOÀN VỀ: đã xác định phải quay lại kho, kho chưa lập phiếu tái nhập. */
   awaitingReturn?: number;
-  /** Tỷ lệ hoàn thực tế (0–1) — dùng để ước phần hàng đang ở ngoài sẽ quay về kho. */
+  /**
+   * Tỷ lệ hoàn (0–1) của MÃ HÀNG = 1 − tỷ lệ giao thành công theo thang bậc chung
+   * (`lib/constants/delivery-rate.ts`, AGENTS.md mục 68). Dùng cho CẢ HAI việc: ước hàng đang ở
+   * ngoài sẽ quay về, VÀ trừ phần hàng của chính các đơn tương lai sẽ hoàn về kịp bán lại.
+   */
   returnRate?: number;
+  /**
+   * ĐỘ TRỄ HOÀN (ngày): từ lúc hàng rời kho tới lúc kho tái nhập được hàng hoàn — trung vị ĐO trên
+   * dữ liệu thật. Đơn gửi đi trong N ngày tới chỉ có hàng hoàn QUAY VỀ KỊP nếu nó đi sớm hơn
+   * `N − returnLagDays` ngày.
+   *
+   * `null`/không khai = CHƯA ĐO ĐƯỢC ⇒ KHÔNG trừ hàng hoàn của đơn tương lai (phía thận trọng: có
+   * thể đặt dư một chút, nhưng không bao giờ đặt thiếu vì trông chờ hàng hoàn chưa ai chứng minh là
+   * sẽ về kịp).
+   */
+  returnLagDays?: number | null;
   /** Tỷ lệ hàng hoàn thực sự nhập lại được kho (0–1), tính từ phiếu tái nhập đã đếm. */
   returnRecoveryRate?: number;
   /** Có trừ hàng sắp về khỏi lượng cần đặt không (mặc định có). */
@@ -160,13 +196,28 @@ export type PlanOutput = {
   supply: number;
   /** Số ngày còn bán được nếu tính cả hàng sắp về. */
   daysOfCoverWithIncoming: number | null;
+  /**
+   * Tốc độ HAO KHO RÒNG (cái/ngày) = tốc độ gửi đi × (1 − tỷ lệ hoàn × tỷ lệ nhập lại được): phần
+   * mỗi cái gửi đi thật sự mất khỏi kho. Chỉ áp dụng SAU độ trễ hoàn — trước đó kho hao theo tốc độ
+   * gửi đi, vì hàng hoàn chưa kịp về.
+   */
+  netVelocity: number;
+  /**
+   * Số cái được TRỪ khỏi mục tiêu vì hàng của chính các đơn gửi đi trong kỳ kế hoạch sẽ hoàn về
+   * kịp bán lại. 0 khi chưa đo được độ trễ hoàn. Làm tròn XUỐNG — không trừ nửa cái hàng chưa về.
+   */
+  futureReturnCredit: number;
 };
 
 /**
- * Thuật toán đặt hàng:
+ * Thuật toán đặt hàng (chủ shop yêu cầu 23/09/2026: phải tính theo GTC và tỷ lệ hoàn để không đặt
+ * dư rồi tồn không bán hết):
  *
- *   đặt = (nhu cầu trong thời gian SX + nhu cầu số ngày muốn đủ bán + tồn an toàn) − nguồn cung
- *   nguồn cung = tồn khả dụng + hàng sắp quay lại kho
+ *   g            = tốc độ GỬI ĐI (đơn đã chốt, không huỷ — gồm cả đơn đang giao / đã hoàn)
+ *   cần có       = g × (SX + muốn đủ bán) + g × an toàn − hàng hoàn của CHÍNH các đơn ấy về kịp
+ *   hàng hoàn về kịp = g × tỷ lệ hoàn × tỷ lệ nhập lại được × max(0, SX + đủ bán + an toàn − độ trễ hoàn)
+ *   đặt          = cần có − nguồn cung
+ *   nguồn cung   = tồn khả dụng + hàng sắp quay lại kho
  *
  * HÀNG SẮP QUAY LẠI KHO là hàng đã rời kho nhưng sẽ về: đơn chờ hoàn về (đã xác định hoàn, kho
  * chưa lập phiếu tái nhập) và một phần hàng đang ở ngoài (vận đơn chưa kết thúc, ước theo tỷ lệ
@@ -186,18 +237,37 @@ export function computePlan(i: PlanInput, today = new Date()): PlanOutput {
   const supply = available + incoming;
   // Không biết tồn thì KHÔNG đề xuất đặt hàng: đề xuất dựa trên dữ liệu bịa còn tệ hơn không đề xuất.
   const v = computeVelocity(i.soldInWindow, i.windowDays, i.peakDayQty ?? 0);
+  /*
+    HAO KHO RÒNG. Trong mỗi cái gửi đi, phần `tyLeHoan` quay về và `tyLeNhapLai` của phần ấy bán lại
+    được — nên thứ thật sự mất khỏi kho là `1 − tyLeHoan × tyLeNhapLai`. Nhưng hàng hoàn chỉ về SAU
+    `returnLagDays` ngày: trước mốc đó kho hao theo tốc độ gửi đi đầy đủ.
+  */
+  const lag = i.returnLagDays !== null && i.returnLagDays !== undefined && Number.isFinite(i.returnLagDays) && i.returnLagDays >= 0 ? i.returnLagDays : null;
+  const netVelocity = v.velocity * (1 - tyLeHoan * tyLeNhapLai);
+  /** Số ngày `x` cái hàng đủ bán: hao đủ tốc độ tới độ trễ hoàn, sau đó hao theo tốc độ ròng. */
+  const coverOf = (x: number): number | null => {
+    if (v.velocity <= 0) return null;
+    if (lag === null || x <= v.velocity * lag) return x / v.velocity;
+    return netVelocity > 0 ? lag + (x - v.velocity * lag) / netVelocity : null;
+  };
   if (i.stockKnown === false) {
     return { available, velocity: v.velocity, rawVelocity: v.rawVelocity, velocityTrimmed: v.trimmed,
       daysOfCover: null, stockOutDate: null, reorderByDate: null, leadTimeDemand: 0,
       safetyStock: 0, target: 0, shortage: 0, suggested: 0, suggestedBeforeMoq: 0, moqApplied: false, status: "UNKNOWN",
-      incomingFromReturns, incomingFromTransit, incoming, supply, daysOfCoverWithIncoming: null };
+      incomingFromReturns, incomingFromTransit, incoming, supply, daysOfCoverWithIncoming: null, netVelocity, futureReturnCredit: 0 };
   }
   const velocity = v.velocity;
-  const daysOfCover = velocity > 0 ? Math.max(0, available) / velocity : null;
-  const daysOfCoverWithIncoming = velocity > 0 ? Math.max(0, supply) / velocity : null;
+  const daysOfCover = coverOf(Math.max(0, available));
+  const daysOfCoverWithIncoming = coverOf(Math.max(0, supply));
   const leadTimeDemand = Math.ceil(velocity * i.leadTimeDays);
   const safetyStock = Math.ceil(velocity * i.safetyDays);
-  const target = Math.ceil(velocity * (i.leadTimeDays + i.coverDays)) + safetyStock;
+  /*
+    PHẦN HOÀN CỦA CHÍNH CÁC ĐƠN TƯƠNG LAI. Kỳ kế hoạch dài `L + C + S` ngày; đơn gửi đi trong
+    `L + C + S − lag` ngày đầu có hàng hoàn về kịp để bán lại trong kỳ. Làm tròn XUỐNG.
+  */
+  const horizon = i.leadTimeDays + i.coverDays + i.safetyDays;
+  const futureReturnCredit = lag === null ? 0 : Math.floor(velocity * tyLeHoan * tyLeNhapLai * Math.max(0, horizon - lag) + 1e-9);
+  const target = Math.max(0, Math.ceil(velocity * (i.leadTimeDays + i.coverDays)) + safetyStock - futureReturnCredit);
   const shortage = Math.max(0, -available);
   let suggested = Math.max(0, target - supply);
   if (i.roundTo > 1 && suggested > 0) suggested = Math.ceil(suggested / i.roundTo) * i.roundTo;
@@ -222,7 +292,7 @@ export function computePlan(i: PlanInput, today = new Date()): PlanOutput {
   const reorderByDate = stockOutDate ? new Date(new Date(`${stockOutDate}T00:00:00Z`).getTime() - i.leadTimeDays * 86_400_000).toISOString().slice(0, 10) : null;
   return { available, velocity, rawVelocity: v.rawVelocity, velocityTrimmed: v.trimmed, daysOfCover, stockOutDate, reorderByDate,
     leadTimeDemand, safetyStock, target, shortage, suggested, suggestedBeforeMoq, moqApplied, status,
-    incomingFromReturns, incomingFromTransit, incoming, supply, daysOfCoverWithIncoming };
+    incomingFromReturns, incomingFromTransit, incoming, supply, daysOfCoverWithIncoming, netVelocity, futureReturnCredit };
 }
 
 function clamp01(v: number) {

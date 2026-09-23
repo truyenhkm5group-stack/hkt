@@ -91,13 +91,6 @@ export const inventoryColumns: ColumnDef<InventoryListRow, unknown>[] = [
     },
   },
   {
-    id: "remainQuantity",
-    accessorKey: "remainQuantity",
-    header: "Tồn sau",
-    meta: { align: "right" },
-    cell: ({ row }) => <span className="numeric font-semibold">{formatNumber(row.original.remainQuantity)}</span>,
-  },
-  {
     id: "avgPrice",
     header: "Giá vốn TB",
     enableSorting: false,

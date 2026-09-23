@@ -196,7 +196,6 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
                             <p className="text-xs text-muted-foreground">
                               {item.variationDetail || "—"}
                               {item.sku ? <span className="ml-2 font-mono">{item.sku}</span> : null}
-                              {item.variant ? <span className="ml-2">· tồn {item.variant.remainQuantity}</span> : null}
                               {item.returnQuantity ? <span className="ml-2 text-rose-600">· hoàn {item.returnQuantity}</span> : null}
                             </p>
                           </div>

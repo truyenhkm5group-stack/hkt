@@ -36,6 +36,7 @@ export function PlanningForm({ assumptions, products, canWrite }: { assumptions:
         <span>Tồn an toàn <b>{assumptions.safetyDays} ngày</b> bán</span>
         {assumptions.roundTo > 1 ? <span>Làm tròn bội số <b>{assumptions.roundTo}</b></span> : null}
         {assumptions.minOrderQty > 1 ? <span>Xưởng nhận từ <b>{assumptions.minOrderQty}</b> cái</span> : null}
+        <span>Kho tái nhập hàng hoàn trong <b>{assumptions.restockDays} ngày</b></span>
         {canWrite ? (
           <Button type="button" variant="outline" size="sm" className="ml-auto" onClick={() => setOpen((v) => !v)}>
             <Settings2 className="size-4" /> {open ? "Đóng" : "Sửa giả định"}
@@ -52,6 +53,8 @@ export function PlanningForm({ assumptions, products, canWrite }: { assumptions:
             <div className="space-y-1"><Label>Làm tròn bội số</Label><Input type="number" min={1} value={form.roundTo} onChange={(e) => setForm({ ...form, roundTo: num(e.target.value, 1) })} /></div>
             {/* Mức đặt tối thiểu của xưởng: đề xuất 5 cái trong khi xưởng chỉ nhận từ 50 là con số không đặt được. */}
             <div className="space-y-1"><Label>Xưởng nhận từ (cái)</Label><Input type="number" min={0} value={form.minOrderQty} onChange={(e) => setForm({ ...form, minOrderQty: num(e.target.value, 0) })} /></div>
+            {/* Mục tiêu vận hành của kho — càng nhanh thì hàng hoàn càng sớm thành hàng bán được và càng phải đặt ít. */}
+            <div className="space-y-1"><Label>Kho tái nhập hàng hoàn trong (ngày)</Label><Input type="number" min={0} value={form.restockDays} onChange={(e) => setForm({ ...form, restockDays: num(e.target.value, 2) })} /></div>
           </div>
           <div>
             <Label className="mb-1 block">Thời gian SX riêng theo mã hàng (để trống = dùng chung)</Label>
@@ -65,7 +68,7 @@ export function PlanningForm({ assumptions, products, canWrite }: { assumptions:
             </div>
           </div>
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">Đề xuất đặt = tốc độ bán × (thời gian SX + số ngày đủ bán) + tồn an toàn − (tồn ERP − đơn đã chốt chưa gửi). Tốc độ bán = số lượng bán ròng (không huỷ, không hoàn) trong cửa sổ ÷ số ngày.</p>
+            <p className="text-xs text-muted-foreground">Đề xuất đặt = tốc độ gửi đi × (thời gian SX + số ngày đủ bán + ngày an toàn) − hàng hoàn của chính các đơn ấy về kịp bán lại − (khả dụng + hàng hoàn đang về). Tốc độ gửi đi = số cái của đơn đã chốt (không huỷ) trong cửa sổ ÷ số ngày. Tỷ lệ hoàn theo tỷ lệ giao thành công của mã; độ trễ hoàn = ĐVVC trả hàng về (đo tự động) + số ngày kho tái nhập ở trên.</p>
             <Button type="button" size="sm" onClick={save} disabled={pending}>{pending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} Lưu</Button>
           </div>
         </div>

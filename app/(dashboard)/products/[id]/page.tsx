@@ -15,6 +15,9 @@ import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { findProductIdByVariant, getProductDetail, type ProductDetail } from "@/lib/queries/products";
 import { getProductMatrix } from "@/lib/queries/product-intelligence";
 import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE, type PlanStatus } from "@/lib/constants/planning";
+import { explainPlan, fmtDateKey, type PlanExplanation } from "@/lib/constants/plan-explain";
+import { DELIVERY_RATE_SOURCE_LABEL } from "@/lib/constants/delivery-rate";
+import { STOCK_RECEIPT_KIND_LABEL, type StockReceiptKind } from "@/lib/validation/stock";
 import { successTone } from "@/lib/constants/returns";
 import { resolvePeriod } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -23,13 +26,6 @@ import { ProductNotes } from "@/app/(dashboard)/products/[id]/product-notes";
 import { listProductNotes } from "@/lib/queries/product-notes";
 
 export const metadata = { title: "Chi tiết sản phẩm" };
-
-/** Ngày dạng YYYY-MM-DD (hạn đặt hàng của `computePlan`) → dd/mm/yyyy. */
-function fmtDateKey(key: string | null) {
-  if (!key) return "—";
-  const [y, m, d] = key.split("-");
-  return `${d}/${m}/${y}`;
-}
 
 /** Hạn đặt đã qua: in "đã quá hạn đặt", không giấu (xem `reorderByDate`). */
 function isPast(key: string) {
@@ -67,7 +63,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         description={`${product.categories.length ? `${product.categories.join(", ")} · ` : ""}${formatNumber(product.variants.length)} mẫu mã (${formatNumber(totals.selling)} đang bán) · đồng bộ ${formatDateTime(product.syncedAt)}`}
         actions={
           <>
-            <SyncButton job="pancake-products" label="Đồng bộ sản phẩm & tồn kho" />
+            <SyncButton job="pancake-products" label="Đồng bộ sản phẩm từ Pancake" />
             <Button asChild variant="outline" size="sm">
               <a href={pancakeUrl} target="_blank" rel="noreferrer">
                 <ExternalLink className="size-4" /> Mở trên Pancake
@@ -126,6 +122,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <VariantStockSection product={product} />
+
+      <OrderAdviceSection product={product} />
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)]">
         <div className="space-y-5">
@@ -284,32 +282,37 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             />
           </SectionCard>
 
-          <SectionCard title="Nhật ký kho gần đây" description="30 giao dịch mới nhất của các mẫu mã" actions={<Link href={`/inventory?q=${encodeURIComponent(product.name)}&period=all`} className="text-xs font-semibold text-primary hover:underline">Xem tất cả</Link>} padded={false}>
-            {product.histories.length ? (
+          {/*
+            PHIẾU KHO ERP — chứng từ đứng sau cột "Nhập kho". Trước đây chỗ này in nhật ký tồn của
+            Pancake kèm "tồn sau", mà tồn Pancake âm ở cả 12/12 mẫu mã của Q005 (đo 23/09/2026).
+          */}
+          <SectionCard title="Phiếu kho gần đây" description="30 dòng phiếu kho mới nhất của các mẫu mã — nguồn của số Nhập kho" actions={<Link href="/inventory/receipts" className="text-xs font-semibold text-primary hover:underline">Nhập hàng & kiểm kê</Link>} padded={false}>
+            {product.receiptLog.length ? (
               <ul className="max-h-[520px] divide-y overflow-y-auto">
-                {product.histories.map((h) => (
+                {product.receiptLog.map((h) => (
                   <li key={h.id} className="flex items-center gap-3 px-5 py-2.5 text-sm">
                     <span className={cn("numeric w-12 shrink-0 text-right font-bold", h.quantity > 0 ? "text-success" : h.quantity < 0 ? "text-destructive" : "text-muted-foreground")}>{h.quantity > 0 ? `+${formatNumber(h.quantity)}` : formatNumber(h.quantity)}</span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-xs font-medium">
-                        <span className="font-mono">{h.variant?.sku || "—"}</span>
-                        {h.variant?.color || h.variant?.size ? <span className="ml-1.5 text-muted-foreground">{[h.variant.color, h.variant.size].filter(Boolean).join(" / ")}</span> : null}
+                        <span className="font-mono">{h.sku || "—"}</span>
+                        {h.color || h.size ? <span className="ml-1.5 text-muted-foreground">{[h.color, h.size].filter(Boolean).join(" / ")}</span> : null}
                       </p>
                       <p className="truncate text-[11px] text-muted-foreground">
-                        {h.type || h.tableName || "—"}
-                        {h.warehouse ? ` · ${h.warehouse.name}` : ""}
-                        {h.editorName ? ` · ${h.editorName}` : ""}
+                        {STOCK_RECEIPT_KIND_LABEL[h.kind as StockReceiptKind] ?? h.kind}
+                        {h.reference ? ` · ${h.reference}` : ""}
+                        {h.supplier ? ` · ${h.supplier}` : ""}
+                        {h.createdBy ? ` · ${h.createdBy}` : ""}
                       </p>
                     </div>
                     <div className="shrink-0 text-right text-[11px] text-muted-foreground">
-                      <p>{formatDateTime(h.insertedAt)}</p>
-                      <p>tồn sau <span className="numeric font-semibold text-foreground">{formatNumber(h.remainQuantity)}</span></p>
+                      <p>{formatDateTime(h.receivedAt)}</p>
+                      {h.unitCost ? <p>giá nhập <Money value={h.unitCost} /></p> : null}
                     </div>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="px-5 py-4 text-sm text-muted-foreground">Chưa có nhật ký kho cho sản phẩm này. Bấm “Đồng bộ nhật ký kho” ở trang Nhật ký kho.</p>
+              <p className="px-5 py-4 text-sm text-muted-foreground">Chưa có phiếu kho nào cho mã hàng này — tồn kho chưa tính được. Lập phiếu nhập ở trang Nhập hàng & kiểm kê.</p>
             )}
           </SectionCard>
 
@@ -344,19 +347,18 @@ function variantStatus(v: VariantRow): PlanStatus | null {
  *   Cần đặt / hạn đặt = `computePlan`, cùng bộ máy với trang Kế hoạch SX
  */
 function VariantStockSection({ product }: { product: ProductDetail }) {
-  const { totals, warehouses } = product;
+  const { totals } = product;
   const a = product.planning.assumptions;
   const image = product.image || product.variants.find((v) => v.images[0])?.images[0] || null;
-  const warehouseName = new Map(warehouses.map((w) => [w.id, w.name]));
   return (
     <SectionCard
       title={`Tồn kho theo mẫu mã (${formatNumber(product.variants.length)})`}
-      description="Sổ kho ERP: nhập theo phiếu kho, xuất theo vận đơn Viettel Post — số Pancake chỉ để đối chiếu"
+      description="Sổ kho ERP: nhập theo phiếu kho, xuất theo vận đơn Viettel Post"
       hint={
         <>
           <b>Tồn thực tế</b> = tổng phiếu kho (nhập mới + tái nhập hàng hoàn + điều chỉnh − xuất tay) − số đã rời kho qua ĐVVC. Hàng hoàn chỉ quay lại tồn khi kho lập phiếu tái nhập với số đếm thực tế.{" "}
           <b>Khả dụng</b> = tồn thực tế − hàng đã chốt đơn còn nằm trong kho chờ xuất. <b>Còn thiếu</b> = số đã hứa khách mà kho không đủ hàng để xuất.{" "}
-          <b>Cần đặt</b> tính như trang Kế hoạch SX: tốc độ bán {a.velocityWindowDays} ngày × (thời gian sản xuất {a.leadTimeDays} ngày + muốn đủ bán {a.coverDays} ngày) + tồn an toàn {a.safetyDays} ngày − (khả dụng + hàng sắp hoàn về kho).
+          <b>Cần đặt</b> tính như trang Kế hoạch SX, diễn giải từng bước ở khối “Đề xuất đặt hàng” bên dưới: tốc độ gửi đi {a.velocityWindowDays} ngày × (sản xuất {a.leadTimeDays} + đủ bán {a.coverDays} + an toàn {a.safetyDays} ngày) − hàng hoàn về kịp bán lại (theo GTC của mã) − (khả dụng + hàng hoàn đang về).
           Mẫu mã chưa có phiếu nhập thì tồn là CHƯA BIẾT, không phải 0.
         </>
       }
@@ -390,9 +392,6 @@ function VariantStockSection({ product }: { product: ProductDetail }) {
                 const hidden = v.isHidden || v.isLocked || v.isRemoved;
                 const l = v.ledger;
                 const status = variantStatus(v);
-                const pancakeTitle = v.stocks.length
-                  ? v.stocks.map((s) => `${warehouseName.get(s.warehouseId) ?? s.warehouse?.name ?? "Kho"}: tồn ${s.remainQuantity}${s.pendingQuantity ? ` · chờ giao ${s.pendingQuantity}` : ""}${s.returningQuantity ? ` · đang hoàn ${s.returningQuantity}` : ""}`).join("\n")
-                  : "Pancake chưa có tồn theo kho cho mẫu mã này";
                 return (
                   <TableRow key={v.id} className={cn(hidden && "opacity-60", status === "OUT" && "bg-rose-50/40 dark:bg-rose-950/10", status === "CRITICAL" && "bg-orange-50/40 dark:bg-orange-950/10")}>
                     <TableCell>
@@ -436,9 +435,6 @@ function VariantStockSection({ product }: { product: ProductDetail }) {
                       ) : (
                         <span className={cn("text-base font-bold", v.erpStock < 0 && "text-destructive")}>{formatNumber(v.erpStock)}</span>
                       )}
-                      <div className={cn("text-[10.5px] text-muted-foreground", v.erpStock !== null && v.remainQuantity !== v.erpStock && "text-amber-700 dark:text-amber-400")} title={pancakeTitle}>
-                        Pancake {formatNumber(v.remainQuantity)}
-                      </div>
                     </TableCell>
                     <TableCell className={cn("numeric text-right", !l?.committed && "text-muted-foreground")}>{formatNumber(l?.committed ?? null)}</TableCell>
                     <TableCell className={cn("numeric text-right font-semibold", v.available !== null && v.available <= 0 && "text-destructive")}>{formatNumber(v.available)}</TableCell>
@@ -503,9 +499,146 @@ function VariantStockSection({ product }: { product: ProductDetail }) {
           {totals.unknownStock ? <> · <span className="font-semibold text-foreground">{formatNumber(totals.unknownStock)}</span> mẫu mã chưa có phiếu nhập (không cộng vào tổng){totals.committedUnknown ? <>, đang có <span className="font-semibold text-amber-700 dark:text-amber-400">{formatNumber(totals.committedUnknown)}</span> cái chờ xuất</> : null}</> : null}
         </span>
         <span>
-          Giá trị tồn <span className="numeric font-semibold text-foreground">{formatVND(totals.stockValue)}</span> · Pancake ghi tồn {formatNumber(totals.pancakeRemain)} (đối chiếu)
+          Giá trị tồn <span className="numeric font-semibold text-foreground">{formatVND(totals.stockValue)}</span>
         </span>
       </div>
+    </SectionCard>
+  );
+}
+
+type AdviceItem = { v: VariantRow; e: PlanExplanation };
+
+/**
+ * ĐỀ XUẤT ĐẶT HÀNG — mỗi số đặt kèm LỜI GIẢI từng bước và các KỊCH BẢN, để người đặt hàng thấy số
+ * đó từ đâu ra và sai giả định nào thì đổi bao nhiêu (chủ shop yêu cầu 23/09/2026).
+ *
+ * Không có phép tính nào ở đây: số đặt là `computePlan`, lời giải là `explainPlan` đọc lại chính
+ * đầu vào + đầu ra ấy, nên khối này không thể nói một con số khác với bảng phía trên hay với trang
+ * Kế hoạch SX.
+ *
+ * Chỉ liệt kê mẫu mã CÓ VIỆC: sẽ hết / đang thiếu / sắp thiếu, hoặc chưa có phiếu nhập mà đang có
+ * đơn chờ xuất. Mẫu mã đủ hàng không cần lời giải — nó chỉ làm loãng những dòng cần quyết định.
+ */
+function OrderAdviceSection({ product }: { product: ProductDetail }) {
+  const used = product.planning.used;
+  const items: AdviceItem[] = product.variants
+    .filter((v) => {
+      const l = v.ledger;
+      if (!l || v.isRemoved) return false;
+      if (!l.stockKnown) return l.committed > 0;
+      return v.active && (l.suggested > 0 || l.status === "OUT" || l.status === "CRITICAL" || l.status === "LOW");
+    })
+    .map((v) => {
+      const l = v.ledger!;
+      return { v, e: explainPlan(l.input, l, { deliveryRate: l.deliveryRate, deliverySource: l.deliverySource, vtpReturnLagDays: l.vtpReturnLagDays, restockDays: used.restockDays }) };
+    })
+    .sort((x, y) => Number(y.e.known) - Number(x.e.known) || (y.v.ledger?.suggested ?? 0) - (x.v.ledger?.suggested ?? 0));
+  const first = product.variants.find((v) => v.ledger)?.ledger ?? null;
+  const tongDat = items.reduce((t, x) => t + (x.v.ledger?.suggested ?? 0), 0);
+  const tongTien = items.reduce((t, x) => t + (x.v.ledger?.orderCost ?? 0), 0);
+  return (
+    <SectionCard
+      id="de-xuat-dat-hang"
+      title="Đề xuất đặt hàng"
+      description={
+        items.length
+          ? `${formatNumber(items.length)} mẫu mã cần quyết định · đề xuất tổng ${formatNumber(tongDat)} cái${tongTien ? ` · ${formatVND(tongTien, { compact: true })} theo giá nhập gần nhất` : ""}`
+          : "Không mẫu mã nào cần đặt lúc này"
+      }
+      hint={
+        <>
+          <b>Cần có</b> = tốc độ gửi đi × (sản xuất + đủ bán + an toàn) − hàng hoàn của CHÍNH các đơn ấy về kịp bán lại. <b>Đặt</b> = cần có − (khả dụng + hàng hoàn đang về). Tốc độ gửi đi tính trên đơn đã chốt (không huỷ), gồm cả đơn đang giao và đơn đã hoàn — phần quay về được trừ tường minh theo <b>tỷ lệ giao thành công của mã</b> (cùng thang bậc với Báo cáo lợi nhuận) và tỷ lệ hàng hoàn bán lại được. Hàng hoàn chỉ tính là về kịp nếu đơn gửi đi trước khi hết kỳ ít nhất <b>độ trễ hoàn</b> = ĐVVC trả về ({used.vtpReturnLagDays === null ? "chưa đo được" : `${formatNumber(used.vtpReturnLagDays)} ngày, đo`}) + kho tái nhập ({formatNumber(used.restockDays)} ngày, Giả định ở trang Kế hoạch SX).
+        </>
+      }
+      actions={<Link href="/inventory/planning" className="text-xs font-semibold text-primary hover:underline">Sửa giả định</Link>}
+      padded={false}
+    >
+      {first ? (
+        <p className="border-b px-5 py-2.5 text-xs text-muted-foreground">
+          Căn cứ chung của mã: <b className="text-foreground">GTC {formatNumber(first.deliveryRate)}%</b> ({DELIVERY_RATE_SOURCE_LABEL[first.deliverySource].toLowerCase()}) · hàng hoàn bán lại được <b className="text-foreground">{formatNumber(Math.round((first.input.returnRecoveryRate ?? 1) * 1000) / 10)}%</b> · độ trễ hoàn <b className="text-foreground">{first.input.returnLagDays === null || first.input.returnLagDays === undefined ? "chưa đo được" : `${formatNumber(first.input.returnLagDays)} ngày`}</b> · sản xuất {formatNumber(first.leadTimeDays)} ngày · đủ bán {formatNumber(first.input.coverDays)} ngày · an toàn {formatNumber(first.input.safetyDays)} ngày
+        </p>
+      ) : null}
+      {items.length ? (
+        <div className="divide-y">
+          {items.map(({ v, e }, idx) => {
+            const l = v.ledger!;
+            const status = e.known ? l.status : "UNKNOWN";
+            return (
+              <details key={v.id} open={idx < 3} className="group px-5 py-3">
+                <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-4 gap-y-1">
+                  <span className="w-40 shrink-0">
+                    <span className="block font-mono text-xs font-semibold">{v.sku || "—"}</span>
+                    <span className="block text-xs text-muted-foreground">{[v.color, v.size].filter(Boolean).join(" / ") || v.detail || "—"}</span>
+                  </span>
+                  <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap", PLAN_STATUS_TONE[status])}>{status === "UNKNOWN" ? "Chưa có phiếu nhập" : PLAN_STATUS_LABEL[status]}</span>
+                  <span className="w-24 shrink-0 text-right">
+                    {e.known ? <span className={cn("numeric text-lg font-bold", l.suggested > 0 ? "text-foreground" : "text-muted-foreground")}>Đặt {formatNumber(l.suggested)}</span> : <span className="text-xs text-muted-foreground">Chưa tính được</span>}
+                  </span>
+                  <span className="min-w-0 flex-1 text-sm">{e.summary}</span>
+                  <span className="text-xs text-primary group-open:hidden">Xem vì sao</span>
+                </summary>
+                <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+                  <div className="space-y-2">
+                    <ul className="space-y-0.5 text-xs text-muted-foreground">
+                      {e.basis.map((b) => <li key={b}>• {b}</li>)}
+                    </ul>
+                    {e.steps.length ? (
+                      <table className="w-full text-sm">
+                        <tbody>
+                          {e.steps.map((st) => (
+                            <tr key={st.key} className={cn(st.op === "=" && "border-t font-semibold")}>
+                              <td className="w-6 py-1 pr-1 text-center font-mono text-muted-foreground">{st.op}</td>
+                              <td className="py-1 pr-2">
+                                {st.label}
+                                <span className="block text-[11px] font-normal text-muted-foreground">{st.detail}</span>
+                              </td>
+                              <td className="numeric w-16 py-1 text-right">{formatNumber(st.qty)}</td>
+                            </tr>
+                          ))}
+                          <tr className="border-t-2 font-bold">
+                            <td className="py-1.5 text-center">⇒</td>
+                            <td className="py-1.5">Đề xuất đặt</td>
+                            <td className="numeric py-1.5 text-right text-base">{formatNumber(l.suggested)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    ) : null}
+                  </div>
+                  <div className="space-y-3">
+                    {e.scenarios.length ? (
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-muted-foreground">
+                            <th className="py-1 text-left font-medium">Nếu…</th>
+                            <th className="py-1 text-right font-medium">Đặt</th>
+                            <th className="py-1 text-right font-medium">Hết hàng ~</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {e.scenarios.map((sc) => (
+                            <tr key={sc.key} className={cn(sc.key === "BASE" && "font-semibold")}>
+                              <td className="py-1">{sc.label}</td>
+                              <td className="numeric py-1 text-right">{formatNumber(sc.suggested)}</td>
+                              <td className="py-1 text-right text-muted-foreground">{sc.stockOutDate ? fmtDateKey(sc.stockOutDate) : "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : null}
+                    {e.notes.length ? (
+                      <ul className="space-y-1 text-xs text-muted-foreground">
+                        {e.notes.map((nt) => <li key={nt} className="rounded-md bg-muted/50 px-2 py-1">{nt}</li>)}
+                      </ul>
+                    ) : null}
+                  </div>
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="px-5 py-4 text-sm text-muted-foreground">Hàng đang có cộng hàng hoàn sắp về đủ bán qua thời gian sản xuất, số ngày muốn đủ bán và dự phòng — không mẫu mã nào cần đặt thêm.</p>
+      )}
     </SectionCard>
   );
 }

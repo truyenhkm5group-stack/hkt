@@ -469,7 +469,7 @@ export async function getProductDetail(id: string) {
   const since30 = new Date(Date.now() - 30 * 86_400_000);
   const since90 = new Date(Date.now() - 90 * 86_400_000);
 
-  const [[sales], soldByVariant, dailyRows, histories, recentOrders, warehouses, stockPlan] = await Promise.all([
+  const [[sales], soldByVariant, dailyRows, receiptLog, recentOrders, warehouses, stockPlan] = await Promise.all([
     db
       .select({
         sold30: sql<number>`coalesce(sum(case when ${schema.orders.insertedAt} >= ${since30} then ${schema.orderItems.quantity} else 0 end), 0)`,
@@ -499,13 +499,32 @@ export async function getProductDetail(id: string) {
       .where(and(itemMatch, notCancelled, gte(schema.orders.insertedAt, since30)))
       .groupBy(sql`1`)
       .orderBy(sql`1`),
+    /*
+      PHIẾU KHO ERP GẦN ĐÂY — chứng từ đứng sau cột "Nhập kho". Thay cho nhật ký tồn của Pancake
+      (tồn Pancake âm ở cả 12/12 mẫu mã của Q005, đo 23/09/2026): một dòng "tồn sau −29" không giúp
+      ai quyết định gì, còn một phiếu nhập có số, ngày, nhà cung cấp và người lập thì truy được.
+    */
     variantIds.length
-      ? db.query.inventoryHistories.findMany({
-          where: inArray(schema.inventoryHistories.variantId, variantIds),
-          orderBy: [desc(schema.inventoryHistories.insertedAt)],
-          limit: 30,
-          with: { variant: { columns: { id: true, sku: true, color: true, size: true } }, warehouse: { columns: { name: true } } },
-        })
+      ? db
+          .select({
+            id: schema.stockReceiptItems.id,
+            kind: schema.stockReceipts.kind,
+            receivedAt: schema.stockReceipts.receivedAt,
+            reference: schema.stockReceipts.reference,
+            supplier: schema.stockReceipts.supplier,
+            createdBy: schema.stockReceipts.createdBy,
+            quantity: schema.stockReceiptItems.quantity,
+            unitCost: schema.stockReceiptItems.unitCost,
+            sku: pv.sku,
+            color: pv.color,
+            size: pv.size,
+          })
+          .from(schema.stockReceiptItems)
+          .innerJoin(schema.stockReceipts, eq(schema.stockReceipts.id, schema.stockReceiptItems.receiptId))
+          .innerJoin(pv, eq(pv.id, schema.stockReceiptItems.variantId))
+          .where(inArray(schema.stockReceiptItems.variantId, variantIds))
+          .orderBy(desc(schema.stockReceipts.receivedAt), desc(schema.stockReceipts.createdAt))
+          .limit(30)
       : Promise.resolve([]),
     db.query.orders.findMany({
       where: exists(sql`(select 1 from ${schema.orderItems} oi where oi.order_id = ${schema.orders.id} and (${variantIds.length ? sql`oi.variant_id in ${variantIds} or ` : sql``}oi.product_id = ${product.id}))`),
@@ -597,8 +616,6 @@ export async function getProductDetail(id: string) {
     needOrder: needOrder.length,
     /** Hạn đặt sớm nhất trong các mẫu mã cần đặt (YYYY-MM-DD) — quá khứ là đã muộn. */
     reorderBy: reorderDates[0] ?? null,
-    /** Tồn trên Pancake — CHỈ để đối chiếu, không dùng ra quyết định. */
-    pancakeRemain: variants.reduce((s, v) => s + v.remainQuantity, 0),
     stockValue: variants.reduce((s, v) => s + v.stockValue, 0),
     sold30: Number(sales?.sold30 ?? 0),
     sold90: Number(sales?.sold90 ?? 0),
@@ -608,7 +625,7 @@ export async function getProductDetail(id: string) {
   };
 
   // Một đơn có thể nhiều lần gửi — chọn lần ĐẠI DIỆN bằng đúng luật `PRIMARY_ATTEMPT` mà cột tiền dùng.
-  return { ...product, variants, totals, planning: { assumptions: stockPlan.assumptions, used: stockPlan.used }, daily, histories, recentOrders: recentOrders.map((d) => ({ ...d, shipment: vanDonDaiDien(d.attempts) })), warehouses };
+  return { ...product, variants, totals, planning: { assumptions: stockPlan.assumptions, used: stockPlan.used }, daily, receiptLog, recentOrders: recentOrders.map((d) => ({ ...d, shipment: vanDonDaiDien(d.attempts) })), warehouses };
 }
 
 export type ProductDetail = NonNullable<Awaited<ReturnType<typeof getProductDetail>>>;
