@@ -6,6 +6,9 @@ import { rowsOf } from "@/lib/sql-rows";
 import { TIMING_MIN_SAMPLE } from "@/lib/constants/care-timing";
 import { CARE_OUTCOMES, OUTCOME_IS_FINAL, rescueRates, type CareOutcome, type RescueCounts } from "@/lib/constants/care-outcome";
 import type { Period } from "@/lib/search-params";
+import type { ShipmentStage } from "@/db/schema";
+import { diagnosePending, type PendingDiagnosis, type QueueView } from "@/lib/care/pending-diagnosis";
+import { getCareQueue } from "@/lib/queries/care-workbench";
 
 /**
  * ═══════════ TỶ LỆ CỨU ĐƠN, HIỆU SUẤT NGƯỜI, HIỆU SUẤT MÃ HÀNG ═══════════
@@ -119,6 +122,16 @@ function tapCaHieuSuat(period: Period): SQL {
   return or(daChotTrongKy(period), chuaChotCuoiKy(period))!;
 }
 
+/**
+ * NGƯỜI MÀ MỘT CA ĐƯỢC QUY VỀ — một biểu thức, dùng cho cả con số lẫn danh sách bấm vào con số.
+ *
+ * Ca đã chốt → người cầm ca LÚC CHỐT (`owner_at_resolution`). Ca chưa chốt → người ĐANG cầm, để
+ * cột "Đang treo" của mỗi người nói đúng khối việc họ đang giữ. Danh sách từng lọc theo riêng
+ * `owner_at_resolution`: ca treo luôn rỗng cột đó, nên bấm vào "đang treo" của một người sẽ ra
+ * DANH SÁCH RỖNG, còn "Chưa nối được người" lại ra MỌI ca treo của cả đội.
+ */
+const UID_QUY_KET = sql`coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end)`;
+
 /** Tổng quan tỷ lệ cứu đơn của cả shop. */
 export async function getRescueSummary(period: Period, basis: CareTimeBasis = "OUTCOME"): Promise<RescueSummary> {
   return memo(`rescue-summary:${basis}:${period.from?.toISOString() ?? "-"}:${period.to?.toISOString() ?? "-"}`, 90_000, async () => {
@@ -218,7 +231,7 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
     const ketQua = rowsOf<{ user_id: string | null; name: string; outcome: string | null; n: number }>(
       await db.execute(sql`
         with ca as (
-          select coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end) as uid,
+          select ${UID_QUY_KET} as uid,
                  ${sc.careOutcome} as outcome
             from ${sc}
            where ${tapCaHieuSuat(period)}
@@ -240,7 +253,7 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
     const thoiGian = rowsOf<{ user_id: string | null; p_touch: number | null; p_action: number | null; p_resolve: number | null; n_touch: number; n_action: number; n_resolve: number; n_touch_xung_dot: number; n_action_xung_dot: number }>(
       await db.execute(sql`
         with ca as (
-          select coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end) as uid,
+          select ${UID_QUY_KET} as uid,
                  ${sc.firstActionAt} as first_action_at, ${sc.firstResponseAt} as first_touch_at,
                  ${sc.openedAt} as opened_at, ${sc.outcomeAt} as outcome_at
             from ${sc}
@@ -448,28 +461,109 @@ export async function getCarePerformanceByProduct(period: Period): Promise<Produ
   });
 }
 
-/** Danh sách ca của một người / một mã — để bấm vào con số là mở ra đúng những ca đã sinh ra nó. */
-export async function listCareCases(period: Period, filter: { ownerId?: string | null; outcome?: CareOutcome; limit?: number } = {}) {
+/**
+ * Ô nào của bảng hiệu suất người đang được bấm. `FINISHED` = cột "Đã chốt" (ba kết cục cuối gộp lại);
+ * `UNATTRIBUTED` = ca lịch sử chưa có kết luận — bảng không có cột riêng cho nó nên trước đây nó
+ * biến mất hẳn (một người cầm 4 ca như vậy hiện ra với toàn số 0).
+ */
+export const CARE_CASE_BUCKETS = ["FINISHED", "RESCUED_DIRECT", "RESCUED_EXCHANGE", "RESCUE_FAILED", "PENDING", "UNATTRIBUTED"] as const;
+export type CareCaseBucket = (typeof CARE_CASE_BUCKETS)[number];
+
+function dieuKienO(bucket: CareCaseBucket): SQL {
+  if (bucket === "FINISHED") return inArray(sc.careOutcome, KET_CUC_CUOI);
+  // Cùng phép quy của `cong()`: mọi giá trị ngoài bộ kết cục — kể cả NULL — là "không đủ chứng cứ".
+  if (bucket === "UNATTRIBUTED") return or(isNull(sc.careOutcome), sql`${sc.careOutcome} not in ${CARE_OUTCOMES.filter((o) => o !== "UNATTRIBUTED")}`)!;
+  return eq(sc.careOutcome, bucket);
+}
+
+export type CareCaseListRow = {
+  id: string;
+  shipmentId: string;
+  tracking: string | null;
+  episodeNo: number;
+  latestEpisodeNo: number;
+  active: boolean;
+  careStatus: string;
+  careOutcome: string | null;
+  ownerName: string | null;
+  openedAt: Date | null;
+  doneAt: Date | null;
+  outcomeAt: Date | null;
+  stage: ShipmentStage;
+  vtpStatus: number | null;
+  vtpStatusName: string | null;
+  vtpStatusDate: Date | null;
+  codAmount: number | null;
+  /** Chỉ có với ca chưa chốt: vì sao nó còn treo. */
+  diagnosis: PendingDiagnosis | null;
+};
+
+/**
+ * Danh sách ca đứng sau MỘT ô của bảng hiệu suất người — bấm vào con số là ra đúng những ca đã sinh
+ * ra nó. Cùng tập ca (`tapCaHieuSuat`), cùng phép quy người (`UID_QUY_KET`), cùng phép phân ô
+ * (`cong`) với `getCarePerformanceByPic`, nên số dòng BẰNG con số trên ô. `ownerId = null` là dòng
+ * "Chưa nối được người".
+ */
+export async function listCareCases(period: Period, filter: { ownerId: string | null; bucket: CareCaseBucket; limit?: number }): Promise<{ rows: CareCaseListRow[]; total: number }> {
   const db = await getDb();
-  const dk: (SQL | undefined)[] = [tapCaHieuSuat(period)];
-  if (filter.ownerId !== undefined) dk.push(filter.ownerId === null ? sql`${sc.ownerAtResolution} is null` : eq(sc.ownerAtResolution, filter.ownerId));
-  if (filter.outcome) dk.push(eq(sc.careOutcome, filter.outcome));
-  return db
-    .select({
-      id: sc.id,
-      shipmentId: sc.shipmentId,
-      tracking: sc.trackingNumber,
-      episodeNo: sc.episodeNo,
-      entryCarrierState: sc.entryCarrierState,
-      careOutcome: sc.careOutcome,
-      finalCarrierState: sc.finalCarrierState,
-      openedAt: sc.openedAt,
-      outcomeAt: sc.outcomeAt,
-      ownerName: schema.users.name,
-    })
-    .from(sc)
-    .leftJoin(schema.users, eq(schema.users.id, sc.ownerAtResolution))
-    .where(dk.length ? and(...dk) : undefined)
-    .orderBy(desc(sc.outcomeAt))
-    .limit(filter.limit ?? 200);
+  const dk = and(tapCaHieuSuat(period), dieuKienO(filter.bucket), filter.ownerId === null ? sql`${UID_QUY_KET} is null` : sql`${UID_QUY_KET} = ${filter.ownerId}`);
+  const s = schema.shipments;
+  const [rows, dem] = await Promise.all([
+    db
+      .select({
+        id: sc.id,
+        shipmentId: sc.shipmentId,
+        tracking: sql<string | null>`coalesce(${s.vtpOrderNumber}, ${sc.trackingNumber})`,
+        episodeNo: sc.episodeNo,
+        latestEpisodeNo: sql<number>`(select max(n.episode_no) from shipment_care n where n.shipment_id = ${sc.shipmentId})::int`,
+        active: sc.active,
+        careStatus: sc.careStatus,
+        careOutcome: sc.careOutcome,
+        replacementShipmentId: sc.replacementShipmentId,
+        ownerName: schema.users.name,
+        openedAt: sc.openedAt,
+        doneAt: sc.doneAt,
+        outcomeAt: sc.outcomeAt,
+        stage: s.stage,
+        vtpStatus: s.vtpStatus,
+        vtpStatusName: s.vtpStatusName,
+        vtpStatusDate: s.vtpStatusDate,
+        codAmount: s.codAmount,
+      })
+      .from(sc)
+      .innerJoin(s, eq(s.id, sc.shipmentId))
+      .leftJoin(schema.users, sql`${schema.users.id} = ${UID_QUY_KET}`)
+      .where(dk)
+      .orderBy(desc(sql`coalesce(${sc.outcomeAt}, ${sc.openedAt})`))
+      .limit(filter.limit ?? 300),
+    db.select({ n: sql<number>`count(*)::int` }).from(sc).where(dk),
+  ]);
+  /*
+    Kiện đang ở tab nào: hỏi CHÍNH hàng đợi (đệm 30 giây), không suy lại. Chỉ cần khi danh sách có
+    ca chưa chốt — ô đã chốt không có gì để chẩn đoán. Kiện rơi vào mục "thiếu dữ liệu" không thuộc
+    tab nào nên để `null`.
+  */
+  const canHangDoi = filter.bucket === "PENDING" || filter.bucket === "UNATTRIBUTED";
+  const tab = new Map<string, QueueView>();
+  if (canHangDoi) for (const c of (await getCareQueue()).cases) tab.set(c.shipmentId, c.view);
+  return {
+    total: Number(dem[0]?.n ?? 0),
+    rows: rows.map(({ replacementShipmentId, ...r }) => ({
+      ...r,
+      latestEpisodeNo: Number(r.latestEpisodeNo ?? r.episodeNo),
+      codAmount: r.codAmount === null ? null : Number(r.codAmount),
+      diagnosis:
+        r.careOutcome !== null && KET_CUC_CUOI.includes(r.careOutcome as CareOutcome)
+          ? null
+          : diagnosePending({
+              episodeNo: r.episodeNo,
+              latestEpisodeNo: Number(r.latestEpisodeNo ?? r.episodeNo),
+              stage: r.stage,
+              vtpStatus: r.vtpStatus,
+              vtpStatusName: r.vtpStatusName,
+              hasReplacement: replacementShipmentId !== null,
+              queueView: tab.get(r.shipmentId) ?? null,
+            }),
+    })),
+  };
 }
