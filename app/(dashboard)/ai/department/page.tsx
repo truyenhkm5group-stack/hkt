@@ -117,6 +117,31 @@ export default async function SalesDepartmentPage({ searchParams }: { searchPara
           icon={Coins}
           tone="slate"
         />
+        {/*
+          TỶ LỆ CHỐT LÀ NỀN SO SÁNH, KHÔNG PHẢI THÀNH TÍCH CỦA AI.
+
+          Nối bằng `orders.conversation_id` của Pancake — khoá thật, không phải quy kết theo SĐT.
+          Nhưng hội thoại CÓ đơn không có nghĩa hội thoại ấy TẠO RA đơn, và càng không phải công
+          của nhân sự AI khi nó chưa gửi một tin nào. Nhãn phải nói ra điều đó ngay trên thẻ.
+        */}
+        <MetricCard
+          label="Tỷ lệ hội thoại có đơn"
+          value={pctText(economics.conversionRate)}
+          note={
+            economics.ordersAfterAiReply > 0
+              ? `${formatNumber(economics.conversationsWithOrder)} hội thoại · ${formatNumber(economics.ordersAfterAiReply)} sau khi AI gửi`
+              : `${formatNumber(economics.conversationsWithOrder)} hội thoại — NỀN của bên đang trả lời khách, AI chưa gửi tin nào`
+          }
+          icon={GaugeCircle}
+          tone="slate"
+          hint={
+            <p>
+              Nối hội thoại với đơn bằng mã hội thoại Pancake mang sẵn trên đơn — khoá thật, không phải quy kết theo số điện thoại (một khách
+              nhắn ba lần rồi đặt một đơn sẽ đếm thành ba). Đây là <b>liên đới</b>, không phải nhân quả: hội thoại có đơn không có nghĩa hội
+              thoại ấy tạo ra đơn. Khi nhân sự AI chưa gửi tin nào thì con số này là <b>nền so sánh</b> — thứ bên đang trả lời khách đạt được.
+            </p>
+          }
+        />
         <MetricCard
           label="Tiền mô hình đã tiêu"
           value={economics.unpricedCalls > 0 ? "—" : formatVND(economics.spendVnd)}

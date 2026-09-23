@@ -144,10 +144,20 @@ export async function salesFunnel(days = 30, dbIn?: Db): Promise<FunnelReport> {
 
 // ───────────────────────── 2. CHI PHÍ ─────────────────────────
 
-/** Vì sao một con số tiền là CHƯA BIẾT. Rỗng = biết. Hai lý do khác nhau ⇒ hai việc khác nhau. */
+/** Vì sao một con số tiền là CHƯA BIẾT. Rỗng = biết. Mỗi lý do dẫn tới một việc khác nhau. */
 export const COST_UNKNOWN_REASON = {
   NO_DENOMINATOR: "Chưa có đơn nào — chi phí mỗi đơn chưa tồn tại, không phải bằng 0",
   UNPRICED: "Có lượt gọi mô hình chưa khai đơn giá — tổng chi phí chưa biết, nên không chia được",
+  /*
+    LÝ DO THỨ BA, VÀ NÓ LÀ LÝ DO ĐANG ĐÚNG.
+
+    Có đơn, có giá — mà vẫn không chia được, vì nhân sự AI CHƯA GỬI CHO KHÁCH MỘT TIN NÀO. Đơn
+    trên những hội thoại ấy do người / bot cũ chốt; chia tiền mô hình cho chúng là nhận công của
+    người khác, và con số ra sẽ trông rất đẹp.
+
+    Đo 23/09/2026: 20/612 hội thoại đã nạp có đơn, 0 tin do nhân sự AI gửi.
+  */
+  AI_SENT_NOTHING: "Nhân sự AI chưa gửi tin nào cho khách — đơn trên các hội thoại này không phải công của nó",
 } as const;
 
 export type UnitEconomics = {
@@ -161,7 +171,25 @@ export type UnitEconomics = {
   outputTokens: number;
   conversations: number;
   suggestions: number;
-  /** Đơn nháp máy đã tạo trong kỳ — mẫu số của "chi phí mỗi đơn". */
+  /**
+   * HỘI THOẠI CÓ ĐƠN — nối bằng `orders.conversation_id` của Pancake.
+   *
+   * Đây là KHOÁ THẬT, không phải phép quy kết theo số điện thoại: Pancake mang sẵn mã hội thoại
+   * trên đơn (2.538/3.213 đơn có mã, đo 23/09/2026). Quy kết theo SĐT thì một khách nhắn ba lần
+   * rồi đặt một đơn sẽ đếm thành ba, và không có cách nào biết cuộc nào dẫn tới đơn.
+   *
+   * NHƯNG NÓ LÀ LIÊN ĐỚI, KHÔNG PHẢI NHÂN QUẢ. Hội thoại có đơn không có nghĩa hội thoại ấy tạo
+   * ra đơn — càng đúng lúc này, khi nhân sự AI chưa gửi cho khách một tin nào.
+   */
+  conversationsWithOrder: number;
+  /** Tỷ lệ hội thoại dẫn tới đơn — NỀN của bên đang trả lời khách hôm nay. `null` khi mẫu số rỗng. */
+  conversionRate: number | null;
+  /**
+   * Đơn trên hội thoại mà nhân sự AI THẬT SỰ đã gửi tin — mẫu số DUY NHẤT hợp lệ của "chi phí
+   * mỗi đơn". Đọc từ SỔ THAO TÁC (`sales_copilot_actions`), không suy từ một cờ nào.
+   */
+  ordersAfterAiReply: number;
+  /** Đơn nháp do CHÍNH nhân sự AI tạo trên POS. Quyền này đang cấm nên hiện luôn là 0. */
   draftOrders: number;
   /** VND cho một hội thoại máy đã xử lý. `null` = chưa biết. */
   costPerConversation: number | null;
@@ -195,12 +223,35 @@ export async function salesUnitEconomics(days = 30, dbIn?: Db): Promise<UnitEcon
     `),
   );
 
-  const [dem] = rowsOf<{ hoi_thoai: string; don: string }>(
+  /*
+    NỐI HỘI THOẠI VỚI ĐƠN BẰNG KHOÁ CỦA PANCAKE.
+
+    `sales_conversations.order_id` chỉ được điền khi CHÍNH nhân sự AI tạo đơn — mà quyền ấy đang
+    cấm, nên cột đó vĩnh viễn rỗng và mọi phép chia theo nó không bao giờ ra số. Khoá dùng được là
+    `orders.conversation_id`: Pancake mang sẵn mã hội thoại trên đơn.
+
+    `ordersAfterAiReply` đếm hẹp hơn hẳn — chỉ hội thoại mà sổ thao tác ghi nhận một lượt GỬI thật
+    (`SEND` / `EDIT_SEND`). Đó là mẫu số duy nhất hợp lệ cho "chi phí mỗi đơn": chia tiền mô hình
+    cho đơn mà nhân sự AI không hề nói một câu nào là nhận công của người khác.
+  */
+  const [dem] = rowsOf<{ hoi_thoai: string; co_don: string; don_sau_khi_ai_gui: string; don_ai_tao: string }>(
     await db.execute(sql`
-      select count(*)::text                                                              as hoi_thoai,
-             count(*) filter (where ${schema.salesConversations.orderId} is not null)::text as don
-      from ${schema.salesConversations}
-      where ${schema.salesConversations.createdAt} >= ${tu}
+      select
+        count(*)::text as hoi_thoai,
+        count(*) filter (where exists (
+          select 1 from orders o
+          where o.conversation_id = c.external_id and coalesce(o.page_id, '') = c.page_id
+        ))::text as co_don,
+        count(*) filter (where exists (
+          select 1 from orders o
+          where o.conversation_id = c.external_id and coalesce(o.page_id, '') = c.page_id
+        ) and exists (
+          select 1 from sales_copilot_actions a
+          where a.conversation_id = c.id and a.action in ('SEND', 'EDIT_SEND')
+        ))::text as don_sau_khi_ai_gui,
+        count(*) filter (where c.order_id is not null)::text as don_ai_tao
+      from sales_conversations c
+      where c.created_at >= ${tu}
     `),
   );
 
@@ -214,7 +265,9 @@ export async function salesUnitEconomics(days = 30, dbIn?: Db): Promise<UnitEcon
   const spendVnd = Number(tien?.vnd ?? 0);
   const unpricedCalls = Number(tien?.unpriced ?? 0);
   const conversations = Number(dem?.hoi_thoai ?? 0);
-  const draftOrders = Number(dem?.don ?? 0);
+  const conversationsWithOrder = Number(dem?.co_don ?? 0);
+  const ordersAfterAiReply = Number(dem?.don_sau_khi_ai_gui ?? 0);
+  const draftOrders = Number(dem?.don_ai_tao ?? 0);
   const suggestions = Number(goiY?.n ?? 0);
 
   // Tử số mù ⇒ mọi phép chia là CHƯA BIẾT, kể cả khi mẫu số đẹp.
@@ -230,15 +283,26 @@ export async function salesUnitEconomics(days = 30, dbIn?: Db): Promise<UnitEcon
     outputTokens: Number(tien?.ra ?? 0),
     conversations,
     suggestions,
+    conversationsWithOrder,
+    conversionRate: conversations > 0 ? conversationsWithOrder / conversations : null,
+    ordersAfterAiReply,
     draftOrders,
     costPerConversation: chia(conversations),
     costPerSuggestion: chia(suggestions),
-    costPerOrder: chia(draftOrders),
+    /*
+      MẪU SỐ LÀ ĐƠN SAU KHI AI ĐÃ GỬI, KHÔNG PHẢI MỌI ĐƠN.
+
+      Chia tiền mô hình cho mọi hội thoại có đơn sẽ ra một con số rất đẹp và hoàn toàn sai: những
+      đơn ấy do bên đang trả lời khách chốt, nhân sự AI chưa nói một câu nào.
+    */
+    costPerOrder: chia(ordersAfterAiReply),
     costPerOrderUnknownBecause: !doDuoc
       ? COST_UNKNOWN_REASON.UNPRICED
-      : draftOrders === 0
-        ? COST_UNKNOWN_REASON.NO_DENOMINATOR
-        : "",
+      : ordersAfterAiReply > 0
+        ? ""
+        : conversationsWithOrder > 0
+          ? COST_UNKNOWN_REASON.AI_SENT_NOTHING
+          : COST_UNKNOWN_REASON.NO_DENOMINATOR,
   };
 }
 

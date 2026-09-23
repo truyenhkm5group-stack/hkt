@@ -210,6 +210,36 @@ export async function testSalesDepartment(db: Db) {
 
   await db.delete(schema.aiModelCalls).where(eq(schema.aiModelCalls.model, "mo-hinh-chua-khai-gia-kt"));
 
+  /*
+    ═════════ 4B. MẪU SỐ CỦA "CHI PHÍ MỖI ĐƠN" LÀ ĐƠN SAU KHI AI ĐÃ GỬI ═════════
+
+    `sales_conversations.order_id` chỉ được điền khi CHÍNH nhân sự AI tạo đơn trên POS — quyền ấy
+    đang cấm, nên cột đó vĩnh viễn rỗng và phép chia theo nó KHÔNG BAO GIỜ ra số. Khoá dùng được
+    là `orders.conversation_id`: Pancake mang sẵn mã hội thoại trên đơn (2.538/3.213 đơn có mã,
+    đo 23/09/2026).
+
+    Nhưng nối được KHÔNG có nghĩa chia được. Đo cùng ngày: 20/612 hội thoại đã nạp có đơn, và
+    **0 tin do nhân sự AI gửi**. Chia tiền mô hình cho 20 đơn ấy ra một con số rất đẹp và hoàn
+    toàn sai — chúng do bên đang trả lời khách chốt.
+
+    Nên mẫu số hẹp hơn hẳn: chỉ hội thoại mà SỔ THAO TÁC ghi nhận một lượt gửi thật.
+  */
+  const ktDon = await salesUnitEconomics(3650, db);
+  assert.equal(ktDon.draftOrders, 0, "quyền tạo đơn đang cấm — cột này phải là 0, và đó là lý do nó không dùng làm mẫu số được");
+  assert.ok(ktDon.conversationsWithOrder >= 0);
+  assert.ok(
+    ktDon.ordersAfterAiReply <= ktDon.conversationsWithOrder,
+    "đơn sau khi AI gửi luôn là tập CON của hội thoại có đơn — lớn hơn nghĩa là đang đếm nhầm",
+  );
+  if (ktDon.conversations === 0) assert.equal(ktDon.conversionRate, null, "mẫu số rỗng ⇒ tỷ lệ là CHƯA BIẾT, không phải 0%");
+
+  // AI chưa gửi tin nào mà vẫn có đơn ⇒ lý do phải là AI_SENT_NOTHING, KHÔNG phải "chưa có đơn".
+  // Hai câu ấy đưa người đọc đi hai nơi: một cái là đi bán hàng, cái kia là đi bật đường gửi.
+  if (ktDon.unpricedCalls === 0 && ktDon.conversationsWithOrder > 0 && ktDon.ordersAfterAiReply === 0) {
+    assert.equal(ktDon.costPerOrderUnknownBecause, COST_UNKNOWN_REASON.AI_SENT_NOTHING);
+    assert.equal(ktDon.costPerOrder, null);
+  }
+
   // ═════════ 5. PHỄU ĐẾM NGƯỢC, VÀ NHÁNH RẼ ĐỨNG NGOÀI ═════════
   const phieu = await salesFunnel(3650, db);
   assert.equal(phieu.rows.length, SALES_FUNNEL.length);
