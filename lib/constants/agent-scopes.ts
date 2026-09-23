@@ -84,6 +84,32 @@ export const NEVER_WRITE: readonly string[] = [
     Đây là bề mặt mà người ngoài chạm được; nó không bao giờ là việc của một lượt chạy agent.
   */
   "app/api/",
+  /*
+    ═══════════ `docs/perf/` — THƯ MỤC CHỨNG TỪ, KHÔNG PHẢI THƯ MỤC TÀI LIỆU ═══════════
+
+    Mọi mục khác trong danh sách này là nơi một lượt ghi sai làm hỏng nhiều hơn hẳn một tệp. Thư
+    mục này cũng vậy, và theo một cách riêng: nó chứa SỐ ĐO PRODUCTION THẬT, chép nguyên văn từ
+    `ops perf-probe` / `ops smoke`. Giá trị của nó nằm ở chỗ đọc một tệp ở đây thì biết chắc con
+    số ấy đã từng được đo. Một tệp bịa nằm cạnh là đủ phá tính chất đó của CẢ THƯ MỤC — kể từ đó
+    người đọc phải tự xác minh từng tệp, mà nếu phải thế thì thư mục không còn công dụng gì.
+
+    Đây không phải một rủi ro lý thuyết. Đo 22/09/2026, việc TECH-5, lượt chạy #39 (PR #144, đã
+    đóng): agent được giao "ghi lại số đo đã có" và sinh ra `docs/perf/baseline-T1-example.json`
+    khai `orders: 1147 · shipments: 1302` — production khi ấy có **1.401 đơn · 2.572 vận đơn**.
+    Không dòng nào trong ba tài liệu chính của lượt ấy trích tệp số đo thật, và số `7948` không
+    xuất hiện một lần nào. Tệp bịa nằm ĐÚNG cạnh `TECH-5-so-do-tho-2026-09-22.md`.
+
+    Agent vẫn ĐỌC được thư mục này — `docs/` nằm trong `DOCUMENTATION_READ_GLOBS` và không có gì
+    ở đây đổi điều đó. Đọc số đo rồi viết phân tích ra `docs/` mới đúng là việc của agent; cái bị
+    chặn là ghi ĐÈ hay ghi THÊM vào chính cuốn sổ chứng từ. Đó cũng là AGENTS.md mục 20 ở dạng
+    hàng rào thay vì lời dặn: "ERP chưa đo được thì để MANUAL — KHÔNG viết một truy vấn gần đúng
+    rồi gọi nó là chỉ số."
+
+    VÌ SAO LÀ HÀNG RÀO CHỨ KHÔNG PHẢI MỘT DÒNG TRONG `AGENTS.md`: lượt chạy #39 đã có cả tệp số
+    đo lẫn đề bài trong tay và vẫn bịa. Một lời dặn nữa cho cùng một bộ đọc cùng một thứ là chờ
+    một kết quả khác từ cùng một đầu vào.
+  */
+  "docs/perf/",
   "AGENTS.md",
   "CLAUDE.md",
   "package.json",
