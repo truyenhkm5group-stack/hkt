@@ -639,7 +639,23 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
   // lấn, khoản một lần vẫn ghi trọn vào ngày phát sinh. Xem lib/queries/cost-allocation.ts.
   const PID = sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`;
   const [sales, adRows, perOrder, operating] = await Promise.all([
-    db
+    /*
+      ═══ TẮT JIT CHO CÂU DOANH SỐ THEO MÃ — 24,96 TRÊN 25,2 GIÂY LÀ BIÊN DỊCH ═══
+
+      `perf-probe` trên production 23/09/2026 (kế hoạch thực thi thật của chính câu này, kỳ 30 ngày):
+
+          JIT: Functions: 1003
+               Timing: Optimization 14.225 ms · Emission 10.488 ms · Total 24.960 ms
+          Execution Time: 25.206 ms   ⇒ biên dịch chiếm 99%
+          Seq Scan on order_items … actual time=24826..24829 rows=3378   ← 3 ms quét, 24,8 s đứng chờ
+
+      Cùng dấu vân tay với `productReturnHistory` ngay trên: sáu cột `filter (where ORDER_OUTCOME…)`
+      nội tuyến truy vấn con tương quan vào từng cột, đẩy chi phí ƯỚC LƯỢNG lên 2,3 triệu trong khi
+      thật chỉ chạm 1.572 dòng. Từ #165 câu này nằm dưới cả bảng bóc tách MKTer của `/ads/daily`,
+      nên báo cáo nguội mất 37–61 giây ở CẢ HAI trang. Cùng truy vấn, cùng kết quả — chỉ bỏ biên dịch.
+    */
+    chayKhongJit(db, (tx) =>
+      tx
       .select({
         productId: PID,
         productName: sql<string>`max(coalesce(${p.name}, ${i.productName}))`,
@@ -669,6 +685,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       // Bộ lọc GIÁ TRỊ ĐƠN đọc tổng tiền của CẢ ĐƠN: một đơn vào trọn vẹn hoặc ra trọn vẹn.
       .where(and(eq(i.isBonus, false), inArray(o.stage, [...CONFIRMED_STAGES]), ...(locGiaTri ? [sql.raw(locGiaTri)] : []), ...periodCond(period.from, period.to, basis)))
       .groupBy(sql`1`),
+    ),
     db
       .select({ productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
       .from(ads)
