@@ -65,6 +65,56 @@ async function main() {
   results.push(await time("/ads/daily · bóc tách MKTer (30 ngày, LN danh nghĩa đã trong đệm)", () => getMarketerDailyNominal(D30)));
 
   /*
+    ═══════════ ĐỐI CHIẾU BÓC TÁCH MKTER VỚI BÁO CÁO LỢI NHUẬN — TRÊN DỮ LIỆU THẬT ═══════════
+
+    Bài kiểm khoá "Σ ô = báo cáo" trên fixture; đây là cùng phép đối chiếu trên production, để
+    không phải đợi ai đăng nhập mở màn hình mới biết số thật có khớp không.
+
+    KHO PUBLIC, LOG ACTIONS AI CŨNG ĐỌC ĐƯỢC: chỉ in ĐỘ LỆCH, SỐ ĐẾM và PHẦN TRĂM. Không in tên người,
+    không in doanh thu hay lợi nhuận tuyệt đối. Marketer in dưới dạng MKT#1, MKT#2… theo thứ tự cột.
+  */
+  {
+    const { NO_ORDER_VALUE_FILTER } = await import("@/lib/constants/order-value");
+    const { getNominalMarketerBreakdown } = await import("@/lib/queries/payroll");
+    const md = await getMarketerDailyNominal(D30);
+    const [tab, cu] = await Promise.all([
+      // Tab "Lợi nhuận danh nghĩa" bật giá vốn dự tính — khoảng lệch này là phần khu quảng cáo cố ý không dùng.
+      getNominalProfitReport(D30, "ORDERED", NO_ORDER_VALUE_FILTER, true, true),
+      // Bảng marketer bên Báo cáo, CÙNG cờ với bảng MKTer (không giá dự tính) để so táo với táo.
+      getNominalMarketerBreakdown(D30, NO_ORDER_VALUE_FILTER, true, false),
+    ]);
+    const pct = (a: number, b: number) => (b ? Math.round(((a - b) / Math.abs(b)) * 1000) / 10 : null);
+    const cuTheoId = new Map(cu.rows.map((r) => [r.marketerId ?? "__unattributed__", r]));
+    const tongDoanhSo = Object.values(md.attribution).reduce((t, v) => t + v, 0);
+    console.log(
+      JSON.stringify(
+        {
+          doi_chieu_bo_tach_mkter: {
+            lech_dt_uoc_tinh_dong: md.reconcile.expectedRevenue.ours - md.reconcile.expectedRevenue.report,
+            lech_ln_danh_nghia_dong: md.reconcile.expectedProfit.ours - md.reconcile.expectedProfit.report,
+            lech_ln_rong_dong: md.reconcile.netProfit.ours - md.reconcile.netProfit.report,
+            tong_don_la_so_nguyen: Math.abs(md.total.orders - Math.round(md.total.orders)) < 1e-6,
+            so_ngay: md.days.length,
+            so_mkter: md.marketers.length,
+            mkter_chua_ghep_chien_dich: md.marketers.filter((m) => !m.spendMapped && m.total.orders > 0).length,
+            san_pham_chua_co_gia_von: md.unknownCostQty,
+            ln_rong_tab_gia_du_tinh_lech_phan_tram: pct(tab.totals.netProfit, md.reconcile.netProfit.report),
+            quy_ket_doanh_so_phan_tram: Object.fromEntries(Object.entries(md.attribution).map(([k, v]) => [k, tongDoanhSo ? Math.round((v / tongDoanhSo) * 1000) / 10 : null])),
+            // So với bảng "LN danh nghĩa theo Marketer": cân theo TỪNG ĐƠN vs tỷ trọng CẢ KỲ — lệch nhỏ là đúng thiết kế.
+            so_voi_bang_marketer_bao_cao: md.marketers.map((m, i) => {
+              const c = cuTheoId.get(m.key);
+              return { mkt: `MKT#${i + 1}`, chua_ghep: !m.spendMapped, lech_don_phan_tram: c ? pct(m.total.orders, c.attributedOrders) : null, lech_dt_uoc_tinh_phan_tram: c ? pct(m.total.expectedRevenue, c.attributedRevenue) : null };
+            }),
+            canh_bao: md.warnings.length,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
+  /*
     ═══════════ /ads: THỜI GIAN VÀ DUNG LƯỢNG TỪNG KHỐI ═══════════
 
     Smoke 23/09/2026: `/ads` 18,4 s · 6.768 kB — đầu phản hồi 221 ms, thân 18,1 s. Đầu phản hồi
