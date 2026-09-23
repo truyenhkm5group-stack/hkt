@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lte, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema, type Db } from "@/db";
+import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { toDate } from "@/lib/format";
@@ -100,8 +100,18 @@ export async function listCustomers(params: ListParams) {
   const sortExpr = sortMap[params.sort] ?? eff.lastOrderAt;
   const orderBy = params.dir === "asc" ? sql`${sortExpr} asc nulls first` : sql`${sortExpr} desc nulls last`;
 
+  /*
+    TẮT JIT — ĐO ĐƯỢC (ops perf-probe run 35889901709, 23/09/2026): câu lấy danh sách này, JIT bật
+    7.463 ms [7.600 · 7.163 · 7.463], JIT tắt 100 ms [97 · 100 · 113] ⇒ 99 % là Postgres BIÊN DỊCH câu
+    lệnh. Đường ứng dụng thật đo được 8.262 ms (`listCustomers`, trang /customers).
+
+    Câu ĐẾM bên cạnh KHÔNG được EXPLAIN riêng — nói thẳng. Nó dùng ĐÚNG cùng phép nối, cùng bảng
+    tổng hợp `agg` mang biểu thức kết quả đơn, và hai câu chạy SONG SONG: trang chờ câu CHẬM HƠN.
+    Chỉ tắt JIT câu đã đo thì câu đếm vẫn giữ trang ở ~7 giây và bản vá không có tác dụng gì thấy
+    được. `chayKhongJit` không đổi kết quả, nên bọc cả hai; mỗi câu một giao dịch riêng để giữ song song.
+  */
   const [rows, [{ total }]] = await Promise.all([
-    db
+    chayKhongJit(db, (tx) => tx
       .select({
         id: c.id,
         name: c.name,
@@ -124,8 +134,8 @@ export async function listCustomers(params: ListParams) {
       .where(where)
       .orderBy(orderBy, asc(c.name), asc(c.id))
       .limit(params.pageSize)
-      .offset((params.page - 1) * params.pageSize),
-    db.select({ total: count() }).from(c).leftJoin(agg, eq(agg.customerId, c.id)).where(where),
+      .offset((params.page - 1) * params.pageSize)),
+    chayKhongJit(db, (tx) => tx.select({ total: count() }).from(c).leftJoin(agg, eq(agg.customerId, c.id)).where(where)),
   ]);
 
   const ids = rows.map((r) => r.id);

@@ -31,7 +31,7 @@
  * từng mã. Số đơn nhiều mã được in ra để người đọc biết tổng theo mã lớn hơn tổng thật bao nhiêu.
  */
 import { and, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import { OM_CONFLICT, OM_EVIDENCE, OM_MARKETER_ID, OM_STATE, orderMarketerJoin, summarizeMarketerCoverage } from "@/lib/queries/order-marketer";
 import { MARKETER_EVIDENCE, MARKETER_UNRESOLVED, type MarketerCoverage, type MarketerEvidence, type MarketerLinkState } from "@/lib/constants/marketer-attribution";
@@ -249,6 +249,17 @@ async function baseRows(f: ReasonFilter) {
   }
   const locSauCung = veMarketer.length ? sql` and (${sql.join(veMarketer, sql` or `)})` : locMarketer ? sql` and false` : sql``;
 
+  /*
+    TẮT JIT — ĐO ĐƯỢC, KHÔNG ĐOÁN (ops perf-probe run 35889901709, 23/09/2026, sau deploy 50787a47).
+
+    Câu này, cùng tham số, xen kẽ JIT bật / JIT tắt, trung vị 3 lượt mỗi bên:
+        JIT bật   4.034 ms   [4.943 · 4.034 · 3.934]
+        JIT tắt   183 ms     [201 · 157 · 183]        ⇒ 95 % là Postgres BIÊN DỊCH câu lệnh.
+    Trên đường ứng dụng thật nó đo được 12.435 ms và 10.847 ms — hai lượt gọi, vì
+    `getReturnIntelligence` (/reports/returns) gọi lại `getReturnReasonReport`. Tệp này từng vắng mặt
+    khỏi danh sách tệp dùng `chayKhongJit`. Không đổi KẾT QUẢ — JIT chỉ đổi cách thực thi.
+    Xem docs/perf/JIT-bat-tat-2026-09-23.md.
+  */
   const rows = rowsOf<{
     order_id: string;
     shipment_id: string | null;
@@ -260,7 +271,7 @@ async function baseRows(f: ReasonFilter) {
     marketer_conflict: boolean;
     revenue: string | number;
   }>(
-    await db.execute(sql`
+    await chayKhongJit(db, (tx) => tx.execute(sql`
       select b.order_id, b.shipment_id, b.outcome, b.basis_at, b.marketer_id, b.marketer_evidence, b.marketer_state, b.marketer_conflict, b.revenue
         from (
           select "orders"."id" as order_id,
@@ -284,7 +295,7 @@ async function baseRows(f: ReasonFilter) {
           mở đường cho hai con số "đã gửi" cùng tồn tại trên một màn hình.
        */
        where b.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')${locSauCung}
-    `),
+    `)),
   );
 
   return {

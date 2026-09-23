@@ -66,9 +66,6 @@ dồn **71 giây** thời gian CSDL cho một lượt tải trang.
 
 | Hàm | Thời gian | Tệp |
 |---|---|---|
-| `getReturnIntelligence 90d` | 12.910 ms | `return-intelligence.ts` |
-| `listCustomers` | 8.910 ms | `customers.ts` |
-| `getReturnReasonReport 90d` | 4.979 ms | `return-reason-report.ts` |
 | `codSettlementSummary` | 3.555 ms | `cod-settlement.ts` |
 
 **Đây là TƯƠNG QUAN, không phải phép đo.** Chậm + thiếu `chayKhongJit` + cùng hình dạng biểu thức
@@ -79,10 +76,48 @@ hôm nay.
 
 ---
 
+## Lượt đo thứ hai — SAU bản vá OKR, 23/09/2026 (run `35889901709`, production `50787a47`)
+
+### Bản vá OKR có tác dụng
+
+| Hàm (`/work/okr`) | Trước | Sau |
+|---|---|---|
+| `getScorecard` | 19.967 ms · CSDL cộng dồn 71.065 ms | **2.536 ms** · CSDL 6.652 ms |
+| `listObjectives` | 11.428 ms | **3.575 ms** |
+
+Cả hai rời khỏi nhóm chậm nhất. Phần còn lại (~2,5 s) không phải JIT — chưa đo nó là gì.
+
+### Hai ứng viên đã đo — không còn là tương quan
+
+Khi các câu OKR rời top 3, câu chậm tiếp theo tự nổi lên và được EXPLAIN bật/tắt:
+
+| Câu (hàm) | Đường ứng dụng thật | JIT bật | JIT tắt | Do JIT |
+|---|---|---|---|---|
+| `baseRows` (`return-reason-report.ts`), lượt 1 | 12.435 ms | 4.034 ms `[4.943 · 4.034 · 3.934]` | **183 ms** `[201 · 157 · 183]` | **95 %** |
+| `baseRows`, lượt 2 | 10.847 ms | 3.974 ms `[3.881 · 3.974 · 4.269]` | **182 ms** `[182 · 175 · 183]` | **95 %** |
+| `listCustomers` (`customers.ts`) | 8.262 ms | 7.463 ms `[7.600 · 7.163 · 7.463]` | **100 ms** `[97 · 100 · 113]` | **99 %** |
+
+`baseRows` được gọi hai lần vì `getReturnIntelligence` (`/reports/returns`, hàm chậm nhất sau
+bản vá OKR: 17.685 ms) gọi lại `getReturnReasonReport`. Một bản vá sửa cả hai trang.
+
+→ Đã sửa: `baseRows` và `listCustomers` chạy trong `chayKhongJit`.
+
+**Một điều phải nói rõ:** trong `listCustomers`, câu ĐẾM chạy song song với câu danh sách KHÔNG
+được EXPLAIN riêng. Nó dùng đúng cùng phép nối và cùng bảng tổng hợp; và vì trang chờ câu chậm
+hơn, tắt JIT riêng câu đã đo thì trang không nhanh lên. Nên cả hai được bọc — câu đếm là suy từ
+hình dạng, không phải từ số đo.
+
+### Còn trong sổ ứng viên — vẫn chưa đo
+
+`codSettlementSummary` (`/cod`) và `customerFacets` / `customerSummary` (`/customers`) — cùng thiếu
+`chayKhongJit`, chưa lọt top 3 để được EXPLAIN. Chờ lượt đo sau.
+
+---
+
 ## Những gì tệp này KHÔNG kết luận
 
 - **Không** nói trang nào sẽ nhanh bao nhiêu sau bản vá. Đo lại sau deploy mới biết.
-- **Không** nói JIT là nguyên nhân của các trang chậm khác (`/cod`, `/customers`, `/data-quality`…).
-  Chúng nằm ở bảng ứng viên, chưa đo.
+- **Không** nói JIT là nguyên nhân của các trang chậm CHƯA ĐO (`/cod`, `/data-quality`, `customerFacets`…).
+  `/customers` (câu danh sách) và `/reports/returns` đã đo ở lượt thứ hai; phần còn lại vẫn ở sổ ứng viên.
 - **Không** đề xuất tắt JIT cho toàn CSDL. `chayKhongJit` tắt theo TỪNG giao dịch — có chủ đích:
   câu ngắn chạy nhiều lần có thể hưởng lợi từ JIT, và chưa ai đo điều ngược lại.

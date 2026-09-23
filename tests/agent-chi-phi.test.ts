@@ -387,24 +387,38 @@ export function testChuoiSach() {
 
 export function testMetricResolverTatJit() {
   /*
-    Đo production 23/09/2026 (run 35873756396): `outcomeAggregate` JIT bật 8.425 ms, JIT tắt 43 ms —
-    99 % là biên dịch. Tệp này từng vắng mặt khỏi danh sách tệp dùng `chayKhongJit`, nên trang
-    /work/okr chờ ~20 giây, và câu ấy bị gọi 5 lần mỗi lượt tải.
+    MỖI DÒNG LÀ MỘT CHỖ ĐÃ ĐO RỒI MỚI SỬA — không phải một danh sách "nên tắt JIT".
 
-    PGlite KHÔNG có JIT, nên bộ kiểm thử không quan sát được hành vi — chỉ canh được mã nguồn. Phép
-    canh cắt ĐÚNG thân hàm `outcomeAggregate` chứ không quét cả tệp: một `chayKhongJit` ở hàm bên
-    cạnh không được làm chốt này xanh.
+    Đo production 23/09/2026 bằng perf-probe (JIT bật / JIT tắt, xen kẽ, trung vị 3 lượt):
+      outcomeAggregate  8.425 ms → 43 ms   (99 %)   run 35873756396
+      baseRows          4.034 ms → 183 ms  (95 %)   run 35889901709
+      listCustomers     7.463 ms → 100 ms  (99 %)   run 35889901709
+
+    PGlite KHÔNG có JIT, nên bộ kiểm thử không quan sát được hành vi — chỉ canh được mã nguồn. Mỗi
+    dòng cắt ĐÚNG thân hàm của nó: một `chayKhongJit` ở hàm bên cạnh không được làm chốt này xanh.
+    Thêm một dòng vào bảng này chỉ khi đã có số đo — xem docs/perf/JIT-bat-tat-2026-09-23.md.
   */
   const goc3 = path.resolve(__dirname, "..");
-  const ma = readFileSync(path.join(goc3, "lib/queries/metric-resolver.ts"), "utf8");
-  const dau = ma.indexOf("async function outcomeAggregate(");
-  assert.ok(dau > 0, "phải còn hàm outcomeAggregate");
-  const cuoi = ma.indexOf("\n}\n", dau);
-  const than = ma.slice(dau, cuoi);
-  assert.ok(cuoi > dau && than.length < 3000, "phải cắt được thân hàm — nếu không, phép canh đang quét nhầm cả tệp");
-  assert.ok(than.includes("chayKhongJit(db,"), "câu kết quả đơn của bộ tính chỉ số PHẢI chạy trong chayKhongJit — đo được 99 % thời gian là JIT biên dịch");
-  assert.ok(!/\bawait\s+db\s*\.select\(/.test(than), "và KHÔNG được còn một lời gọi db.select trần bên trong thân hàm");
+  const DA_DO: { tep: string; ham: string; soLan: number }[] = [
+    { tep: "lib/queries/metric-resolver.ts", ham: "async function outcomeAggregate(", soLan: 1 },
+    { tep: "lib/queries/return-reason-report.ts", ham: "async function baseRows(", soLan: 1 },
+    /* Câu danh sách (đã đo) + câu đếm chạy song song với nó — trang chờ câu chậm hơn. */
+    { tep: "lib/queries/customers.ts", ham: "export async function listCustomers(", soLan: 2 },
+  ];
+  for (const d of DA_DO) {
+    const ma = readFileSync(path.join(goc3, d.tep), "utf8");
+    const dau = ma.indexOf(d.ham);
+    assert.ok(dau >= 0, `${d.tep}: phải còn hàm ${d.ham}`);
+    const cuoi = ma.indexOf("\n}\n", dau);
+    const than = ma.slice(dau, cuoi);
+    assert.ok(cuoi > dau && than.length < 12000, `${d.tep}: phải cắt được thân hàm — nếu không, phép canh đang quét nhầm cả tệp`);
+    const n = than.split("chayKhongJit(db,").length - 1;
+    assert.ok(n >= d.soLan, `${d.tep} · ${d.ham}: cần ${d.soLan} câu chạy trong chayKhongJit, thấy ${n} — đã đo được JIT là phần lớn thời gian`);
+  }
+  const ma1 = readFileSync(path.join(goc3, "lib/queries/metric-resolver.ts"), "utf8");
+  const than1 = ma1.slice(ma1.indexOf("async function outcomeAggregate("), ma1.indexOf("\n}\n", ma1.indexOf("async function outcomeAggregate(")));
+  assert.ok(!/\bawait\s+db\s*\.select\(/.test(than1), "và KHÔNG được còn một lời gọi db.select trần bên trong outcomeAggregate");
 
-  console.log("✓ Bộ tính chỉ số: câu kết quả đơn chạy trong chayKhongJit (JIT bật 8.425 ms → tắt 43 ms, đo production)");
+  console.log(`✓ Tắt JIT ở ${DA_DO.length} chỗ ĐÃ ĐO: outcomeAggregate 8.425→43 ms · baseRows 4.034→183 ms · listCustomers 7.463→100 ms — mỗi chốt cắt đúng thân hàm`);
 }
 
