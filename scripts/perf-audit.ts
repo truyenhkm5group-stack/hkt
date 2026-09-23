@@ -8,7 +8,7 @@
  */
 import { ensureMigrated } from "@/db/migrate";
 import { clearMemo } from "@/lib/cache";
-import type { Period } from "@/lib/search-params";
+import { resolvePeriod, type Period } from "@/lib/search-params";
 
 const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
 
@@ -30,6 +30,10 @@ async function main() {
   const { getIntegrationHealth } = await import("@/lib/queries/integration-health");
   const { scanReconciliation } = await import("@/lib/sync/consistency");
   const { getReplenishmentPlan } = await import("@/lib/queries/planning");
+  const { getMarketingDaily } = await import("@/lib/queries/marketing-daily");
+  const { getNominalProfitReport } = await import("@/lib/queries/profit-nominal");
+  const { getMarketerDailyNominal } = await import("@/lib/queries/marketer-daily-nominal");
+  const D30 = resolvePeriod({}, "30d");
 
   const results: { label: string; ms: number }[] = [];
   const measure = async (label: string, run: () => Promise<unknown>) => {
@@ -48,6 +52,17 @@ async function main() {
   await measure("ROAS quảng cáo", () => getAdsRoas(ALL));
   await measure("Sức khoẻ tích hợp", () => getIntegrationHealth());
   await measure("Kế hoạch sản xuất", () => getReplenishmentPlan());
+  /*
+    /ads/daily TÁCH BA PHẦN (23/09/2026: trang từ 1,3–11s lên 17s sau khi bóc tách MKTer chuyển
+    sang số của Báo cáo lợi nhuận). Phần thứ ba đo khi LN danh nghĩa ĐÃ nằm trong đệm, để tách
+    chi phí của riêng phép chia ngày × MKTer khỏi chi phí của báo cáo nó đọc.
+  */
+  await measure("/ads/daily · bảng theo ngày (30 ngày)", () => getMarketingDaily(D30, "created", {}, null));
+  await measure("/ads/daily · LN danh nghĩa theo mã (30 ngày)", () => getNominalProfitReport(D30, "ORDERED"));
+  await measure("/ads/daily · bóc tách MKTer (30 ngày, nguội)", () => getMarketerDailyNominal(D30));
+  clearMemo();
+  await getNominalProfitReport(D30, "ORDERED");
+  results.push(await time("/ads/daily · bóc tách MKTer (30 ngày, LN danh nghĩa đã trong đệm)", () => getMarketerDailyNominal(D30)));
 
   results.sort((a, b) => b.ms - a.ms);
   const total = results.reduce((t, r) => t + r.ms, 0);
