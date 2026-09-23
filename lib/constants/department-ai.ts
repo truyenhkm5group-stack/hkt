@@ -308,10 +308,10 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       },
       DIAGNOSE: {
         status: "PARTIAL",
-        what: "Nhận ra mẫu sắp hết trong khi vẫn đang bán tốt, và mẫu đã bỏ vốn mà không bán được.",
-        evidence: ["lib/constants/inventory-decision.ts", "lib/constants/slow-moving.ts"],
+        what: "Nhận ra mẫu sắp hết trong khi vẫn đang bán tốt, và mẫu đã bỏ vốn mà không bán được. Thời gian giao của xưởng suy được bằng cách ghép lô đặt với phiếu nhập kho — phép ghép CỐ Ý chặt, cùng một mẫu có hai lô thì nó khai NHẬP NHẰNG chứ không bốc một cái.",
+        evidence: ["lib/constants/inventory-decision.ts", "lib/constants/slow-moving.ts", "lib/queries/purchasing.ts"],
         missing:
-          "Chưa đọc được ĐỘ TIN của từng xưởng. `production_orders` có `due_date` và `sent_at` nhưng KHÔNG có mốc NHẬN THẬT — `status` đổi sang `RECEIVED` mà không ghi thời điểm — nên không tính được xưởng trễ bao nhiêu ngày. Vì thế máy không phân biệt được 'hết hàng vì bán nhanh' với 'hết hàng vì xưởng giao trễ', hai nguyên nhân cần hai cách xử lý khác nhau. Cần thêm cột mốc nhận và `supplier` chuẩn hoá.",
+          "Từ 23/09/2026 `production_orders` ĐÃ CÓ mốc nhận thật (`received_at`, do KHO bấm lúc đếm xong, kèm khoá tài khoản). Nhưng chưa đo được ngay: lệnh cũ CỐ Ý không backfill (mục 35) nên mẫu bắt đầu từ 0 và cần vài tuần; và `production_orders.supplier` vẫn là Ô CHỮ TỰ DO, nên độ tin quy về TỪNG xưởng còn là phép nối yếu (mục 39) cho tới khi có danh mục nhà cung cấp.",
       },
       PROPOSE: {
         status: "BUILT",

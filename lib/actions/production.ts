@@ -7,7 +7,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { matrixTotals, PRODUCTION_STATUS } from "@/lib/constants/production";
+import { matrixTotals, PRODUCTION_STATUS, shouldStampReceipt } from "@/lib/constants/production";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
@@ -90,13 +90,44 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
   return { ok: true, id: rowId as string, code };
 }
 
+/**
+ * ═══════════ ĐỔI TRẠNG THÁI LỆNH SẢN XUẤT — VÀ GHI MỐC NHẬN THẬT ═══════════
+ *
+ * `RECEIVED` nay ghi thêm BA thứ: lúc nào, ai bấm (khoá tài khoản), và tên người đó để đọc. Mốc này
+ * là cái duy nhất trả lời được "xưởng giao trễ mấy ngày" — trước đây trạng thái đổi mà không để lại
+ * thời điểm, nên cảnh báo hết hàng không phân biệt nổi bán nhanh với xưởng trễ.
+ *
+ * ─── BẤM HAI LẦN KHÔNG ĐƯỢC DỜI MỐC ───
+ *
+ * Cùng một bài học với `setCareStatus` (AGENTS.md mục 61): một cú bấm đúp — hoặc một lần trình duyệt
+ * gửi lại — từng đẩy `done_at` về lúc bấm lần hai. Ở đây hậu quả nặng hơn vì mốc này ĐI THẲNG vào
+ * phép đo độ trễ của nhà cung cấp: bấm lại sau ba ngày sẽ làm xưởng trông như giao trễ thêm ba ngày.
+ *
+ * Nên `received_at` chỉ ghi khi nó còn TRỐNG. Lời khai đầu tiên là lời khai thật; lần bấm sau không
+ * xoá được nó, và cũng không ném lỗi vào mặt người dùng.
+ *
+ * TÊN NGƯỜI ĐỌC TỪ MÁY CHỦ, không nhận từ client (mục 34) — client gửi tên khác với khoá thì dòng dữ
+ * liệu nói một đằng còn quy kết một nẻo.
+ */
 export async function setProductionStatus(id: string, status: string): Promise<Result> {
   const user = await requireUser();
   if (!can(user, "planning:write")) return { error: "Không có quyền" };
   if (!(PRODUCTION_STATUS as readonly string[]).includes(status)) return { error: "Trạng thái không hợp lệ" };
   const db = await getDb();
-  await db.update(schema.productionOrders).set({ status, sentAt: status === "SENT" ? new Date() : undefined, updatedAt: new Date() }).where(eq(schema.productionOrders.id, id));
-  await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_ORDER_STATUS", entity: "PRODUCTION_ORDER", entityId: id, detail: { status } });
+  const truoc = await db.query.productionOrders.findFirst({ where: eq(schema.productionOrders.id, id), columns: { receivedAt: true } });
+  const ghiMocNhan = shouldStampReceipt(status, truoc?.receivedAt);
+  await db
+    .update(schema.productionOrders)
+    .set({
+      status,
+      sentAt: status === "SENT" ? new Date() : undefined,
+      receivedAt: ghiMocNhan ? new Date() : undefined,
+      receivedByUserId: ghiMocNhan ? user.id : undefined,
+      receivedBy: ghiMocNhan ? user.name || user.email : undefined,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.productionOrders.id, id));
+  await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_ORDER_STATUS", entity: "PRODUCTION_ORDER", entityId: id, detail: { status, ghiMocNhan } });
   revalidatePath("/inventory/planning/orders");
   revalidatePath(`/inventory/planning/orders/${id}`);
   return { ok: true };

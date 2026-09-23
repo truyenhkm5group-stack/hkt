@@ -79,3 +79,23 @@ export function matrixAsText(o: { productCode: string; productName: string; code
   if (o.note) lines.push(`Ghi chú: ${o.note}`);
   return lines.join("\n");
 }
+
+/**
+ * ═══════════ CÓ GHI MỐC NHẬN CHO LƯỢT BẤM NÀY KHÔNG ═══════════
+ *
+ * Hàm THUẦN, để bảng chân lý kiểm được mà không cần dựng cả phiên đăng nhập.
+ *
+ * Chỉ ghi khi CHUYỂN SANG `RECEIVED` và mốc còn TRỐNG. Hai vế đều cần thiết:
+ *
+ *  · Thiếu vế thứ nhất thì mọi lần đổi trạng thái (kể cả `CANCELLED`) cũng đóng dấu một mốc nhận.
+ *  · Thiếu vế thứ hai thì một cú bấm đúp — hoặc một lần trình duyệt gửi lại — DỜI mốc về lúc bấm
+ *    lần sau. Cùng lớp lỗi với `setCareStatus` (AGENTS.md mục 61), nhưng hậu quả nặng hơn: mốc này
+ *    đi thẳng vào phép đo độ trễ của xưởng, nên bấm lại sau ba ngày làm xưởng trông như giao trễ
+ *    thêm ba ngày, và không ai đọc lại được vì con số vẫn "hợp lý".
+ *
+ * Lời khai ĐẦU TIÊN là lời khai thật. Bấm lại không xoá được nó, và cũng không ném lỗi vào mặt
+ * người dùng — chỉ lặng lẽ không ghi thêm.
+ */
+export function shouldStampReceipt(status: string, receivedAt: Date | string | null | undefined): boolean {
+  return status === "RECEIVED" && !receivedAt;
+}
