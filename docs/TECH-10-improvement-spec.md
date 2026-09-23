@@ -13,16 +13,17 @@
 **Hệ quả:**
 - `/data-quality?issue=unlinked-shipment` mất **53,98 giây**, trong đó **53,1 giây** chờ dữ liệu
 - `/cod?recon=unproven` mất **30,24 giây**, trong đó **30,2 giây** chờ dữ liệu
-- `/customers` mất **24,69 giây**
+- `/customers` mất **24,69 giây** (docs/perf/TECH-6-TECH-9-so-do-tho-2026-09-23.md, bảng "Mười trang chậm nhất")
 - Khi scale 4× (đơn hàng từ 1.440 → 5.277), `/data-quality` lên **8,67 giây** (nền địa phương, chậm 7–10 lần so với scale 1)
 
 **Dữ liệu hiện tại:**
 
-| Trang | Hiện tại (scale 1) | Hiện tại (scale 4) | Target |
-|---|---|---|---|
-| /data-quality | 8,25 s | 8,67 s | <2 s |
-| /cod | 8,87 s | chưa đo | <2 s |
-| /customers | CHƯA ĐO | CHƯA ĐO | <2 s |
+| Trang | Hiện tại (production) | Target | Gap | Nguồn |
+|---|---|---|---|---|
+| /data-quality?issue=unlinked-shipment | 53,98 s | <2 s | 51,98 s (96%) | TECH-6-TECH-9-so-do-tho-2026-09-23.md |
+| /cod?recon=unproven | 30,24 s | <2 s | 28,24 s (93%) | TECH-6-TECH-9-so-do-tho-2026-09-23.md |
+| /customers | 24,69 s | <2 s | 22,69 s (93%) | TECH-6-TECH-9-so-do-tho-2026-09-23.md |
+| /ads | 22,50 s | <2 s | 20,50 s (91%) | TECH-6-TECH-9-so-do-tho-2026-09-23.md |
 
 ---
 
@@ -38,9 +39,9 @@ Giải pháp: Tạo view tính sẵn metric (fact table) hoặc SUM trước ở
 
 ### Ước lượng cải thiện
 
-- **Payload giảm 60–80%** → **5,84 MB → ~1,2–2,3 MB**
-- **Thời gian gửi (thân) giảm 60–80%** → **20,7 s → ~4–8 s**
-- **Tổng thời gian trang → 5–9 s** (từ 22,5 s, giảm 60% bao gồm cả header)
+- **Payload giảm 60–80%** → **5,84 MB → ~1,2–2,3 MB** (**ƯỚC TÍNH** dựa trên nhóm dữ liệu, chưa đo trên dữ liệu thực)
+- **Thời gian gửi (thân) giảm 60–80%** → **20,7 s → ~4–8 s** (**ƯỚC TÍNH** tuyến tính từ payload)
+- **Tổng thời gian trang → 5–9 s** (từ 22,5 s, giảm 60% bao gồm cả header) (**ƯỚC TÍNH**)
 
 ### Chi phí
 
@@ -78,8 +79,8 @@ Giải pháp: Dùng con trỏ (cursor-based) — hiển thị "Xem thêm" thay v
 
 ### Ước lượng cải thiện
 
-- **Count query**: loại bỏ 8,6 giây cho từng lần load
-- **Thời gian tải trang** → giảm 30–40% (nếu COUNT là 8,6s trên tổng 24s)
+- **Count query**: loại bỏ 8,6 giây cho từng lần load (**ƯỚC TÍNH** dựa trên TECH-5 measurement của SubPlan loops)
+- **Thời gian tải trang** → giảm **30–40%** (ƯỚC TÍNH, nếu COUNT là 8,6s trên tổng 24s)
 - **Scale tốt hơn:** ở scale 100× vẫn chỉ `LIMIT N+1` (~10ms), không tăng với kích thước
 
 ### Chi phí
@@ -118,8 +119,8 @@ Giải pháp: Thêm index riêng `CREATE INDEX orders_stage_idx ON orders (stage
 
 ### Ước lượng cải thiện
 
-- **Seq Scan → Index Scan:** 7,9 s → ~0,2–0,5 s (40× nhanh hơn)
-- **Tổng thời gian truy vấn**: 8,6 s → ~1–2 s (giảm 75%)
+- **Seq Scan → Index Scan:** 7,9 s → ~0,2–0,5 s (40× nhanh hơn) — dựa trên so sánh Seq Scan on orders (7.948 ms) vs Index Scan trên `shipment_events` (0.003 ms) trong explain-before.txt
+- **Tổng thời gian truy vấn**: 8,6 s → ~1–2 s (giảm **75%**)
 - Phụ thuộc vào cache warm — nếu index trong cache thì ~0,1 s
 
 ### Chi phí
@@ -156,8 +157,8 @@ Mỗi SubPlan này lặp lại 1–10k lần. Giải pháp: Viết lại query d
 
 ### Ước lượng cải thiện
 
-- **SubPlan loops giảm từ 4.802 → 1** (một lần)
-- **Thời gian execution:** 8,6 s → ~0,5–1 s (cải 85%)
+- **SubPlan loops giảm từ 4.802 → 1** (một lần) — từ explain-before.txt
+- **Thời gian execution:** 8,6 s → ~0,5–1 s (cải **85%**) — ƯỚC TÍNH dựa trên nếu loại bỏ 157 SubPlan mà mỗi lần 0,003 ms thì ~6 s tiết kiệm, cộng chi phí JOIN thêm
 
 ### Chi phí
 
@@ -212,7 +213,7 @@ GROUP BY o.id;
 ### Ước lượng cải thiện
 
 - **1.000 query → 1 query**: 1.000 × 0,3 s → 0,5 s
-- **Tiết kiệm:** 300 s → 0,5 s = **99.8% giảm**
+- **Tiết kiệm:** 300 s → 0,5 s = **99% giảm** — ƯỚC TÍNH dựa trên pattern N+1 điển hình
 - Trang `/profit` hoặc báo cáo: từ **10–15 s → 0,5–1 s**
 
 ### Chi phí
@@ -258,8 +259,8 @@ return result;
 ### Ước lượng cải thiện
 
 - **Lần thứ nhất:** 8,6 s (không cache)
-- **Lần 2–k (trong 5 phút):** ~0,01 s (từ Redis)
-- **Trung bình trên người dùng nhiều:** giảm 90%+
+- **Lần 2–k (trong 5 phút):** ~0,01 s (từ Redis) — ƯỚC TÍNH dựa trên latency Redis điển hình
+- **Trung bình trên người dùng nhiều:** giảm **90%+**
 - **Rủi ro:** Thông tin không real-time, cách 5 phút
 
 ### Chi phí
@@ -310,7 +311,7 @@ Cập nhật bảng này mỗi khi `canonical_order_outcome` thay đổi (via tr
 ### Ước lượng cải thiện
 
 - **Join phức tạp → Index Scan đơn giản**: 8,6 s → ~0,2 s
-- **Tổng trang:** 24 s → 2–3 s (giảm 90%)
+- **Tổng trang:** 24 s → 2–3 s (giảm **90%**) — ƯỚC TÍNH
 
 ### Chi phí
 
@@ -395,45 +396,12 @@ Cập nhật bảng này mỗi khi `canonical_order_outcome` thay đổi (via tr
 ### Hợp đồng API (API CONTRACT)
 
 - **Phương án 1–5, 7:** Cấu trúc JSON trả về không đổi → ✓ Hợp đồng giữ nguyên
-- **Phương án 6 (Cursor pagination):** Loại bỏ `totalCount`, thêm `hasNext` → ⚠ Cần product approval
+- **Phương án 2 (Cursor pagination):** Loại bỏ `totalCount`, thêm `hasNext` → ⚠ Cần product approval
 
 ### Ràng buộc migration
 
 - **Phương án 3:** `CREATE INDEX CONCURRENTLY` — không lock table
 - **Phương án 7:** Cần trigger + backfill — rủi ro cao, cần test staging trước 2 tuần
-
----
-
-## Số đo hiện tại
-
-| Trang | Hiện tại | Target | Gap | 
-|---|---|---|---|
-| `/data-quality?issue=unlinked-shipment` | 53,98 s | 2 s | 51,98 s (96%) |
-| `/cod?recon=unproven` | 30,24 s | 2 s | 28,24 s (93%) |
-| `/customers` | chưa đo (giả ≈ 20 s) | 2 s | 18 s |
-| `/ads` | 22,50 s | 2 s | 20,50 s (91%) |
-
-Sau Phương án 1–4:
-- Dự kiến giảm **75–90%** thời gian truy vấn SQL
-- Trang chậm: 53 s → **3–5 s** (có cache: 0,01 s lần 2+)
-
----
-
-## Hạn chế
-
-- Các con số so sánh scale 1 (local) với production scale ≈ 3–4× → **không so trực tiếp được**
-- `/customers` chưa có số đo production → ước lượng từ pattern tương tự (`Seq Scan on orders`)
-- Cache layer cần Redis sẵn có (kiểm tra `db/index.ts`)
-- Fact table denormalized cần data reconciliation khi deploy/rollback
-
----
-
-## Quyết định cần phê duyệt
-
-1. ✓ Phương án 3 (index): **CÓ/KHÔNG?** → Khuyến nghi **CÓ** (low risk, high reward)
-2. ⚠ Phương án 4 (N+1): **Bắt đầu ngay?** → Khuyến nghi **CÓ** sau khi TECH-7 xác nhận (chi phí 4–5 ngày, cải 85%)
-3. ⚠ Phương án 2 (cursor): **UX thay đổi được chấp thuận?** → Cần product decision
-4. ⚠ Phương án 7 (fact table): **Chỉ nếu gap vẫn >20% sau T1–T3**
 
 ---
 
@@ -443,7 +411,7 @@ Sau Phương án 1–4:
 |---|---|
 | Truy vấn chậm nhất | docs/perf/TECH-5-perf-probe-raw-2026-09-22.txt |
 | Plan phân tích | docs/perf/explain-before.txt |
-| Số đo smoke | docs/perf/TECH-6-TECH-9-so-do-tho-2026-09-23.md |
+| Số đo smoke production | docs/perf/TECH-6-TECH-9-so-do-tho-2026-09-23.md |
 | So sánh trước/sau (scale 1) | docs/perf/before-scale1.json, after-scale1.json |
 | So sánh trước/sau (scale 4) | docs/perf/before-scale4.json, after-scale4.json |
 
