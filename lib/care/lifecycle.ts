@@ -154,23 +154,36 @@ async function chotKetQua(db: Db, target: CareRow, ketCuc: KetCuc, p: { substate
     */
     return { ...KHONG_LAM_GI, careCaseId: target.id, reason: "kiện gốc quay về nhưng có đơn đổi đang chạy — chờ kết cục của đơn đổi" };
   }
+  /*
+    ═══ KẾT CỤC CÓ TRƯỚC KHI ĐỢT MỞ THÌ KHÔNG PHẢI KẾT QUẢ CỦA ĐỢT ĐÓ ═══
+
+    Đo production 23/09/2026: 3 đợt mở ngày 12/09 trên kiện Viettel Post đã giao từ 07–10/09.
+    Chốt chúng là "Cứu được" là GÁN CÔNG NGƯỢC THỜI GIAN (luật 56): kiện tới tay khách trước khi có
+    ca nào để cứu. Ca mở trên thông tin cũ không phải một lần cứu đơn — nó rời mọi tỷ lệ như đợt
+    không phải điều kiện care, và nhật ký nói rõ vì sao. Việc người đã làm vẫn nằm nguyên ở
+    `care_actions` (luật 60), không mất gì.
+
+    So sánh CHẶT (`<`): mốc bằng nhau là cùng một lượt ghi, không phải "trước".
+  */
+  const truocKhiMo = ketCuc.logistics !== "NOT_CARE" && target.openedAt !== null && p.occurredAt.getTime() < target.openedAt.getTime();
+  const kc: KetCuc = truocKhiMo ? { outcome: null, logistics: "NOT_CARE" } : ketCuc;
   const daDong = CARE_TERMINAL_STATUSES.includes(target.careStatus as CareStatus);
-  const nextStatus: CareStatus = daDong ? (target.careStatus as CareStatus) : ketCuc.logistics === "NOT_CARE" ? "CANCELLED" : "RESOLVED";
+  const nextStatus: CareStatus = daDong ? (target.careStatus as CareStatus) : kc.logistics === "NOT_CARE" ? "CANCELLED" : "RESOLVED";
   const [ghi] = await db
     .update(schema.shipmentCare)
     .set({
       active: false,
       careStatus: nextStatus,
-      careOutcome: ketCuc.outcome,
-      resolution: ketCuc.logistics === "NOT_CARE" ? NOT_CARE_CONDITION : target.resolution,
+      careOutcome: kc.outcome,
+      resolution: kc.logistics === "NOT_CARE" ? NOT_CARE_CONDITION : target.resolution,
       finalCarrierState: p.substate,
-      finalLogisticsOutcome: ketCuc.logistics === "NOT_CARE" ? null : ketCuc.logistics,
-      outcomeAt: ketCuc.logistics === "NOT_CARE" ? null : p.occurredAt,
+      finalLogisticsOutcome: kc.logistics === "NOT_CARE" ? null : kc.logistics,
+      outcomeAt: kc.logistics === "NOT_CARE" ? null : p.occurredAt,
       doneAt: sql`coalesce(${schema.shipmentCare.doneAt}, ${p.occurredAt})`,
       followUpAt: null,
       // Người CHỊU TRÁCH NHIỆM kết quả = người đang cầm ca lúc chốt. Chưa ai nhận thì để NULL:
       // không đổ kết quả cho một người chỉ vì họ từng chạm vào ca.
-      ownerAtResolution: ketCuc.logistics === "NOT_CARE" ? null : target.ownerId,
+      ownerAtResolution: kc.logistics === "NOT_CARE" ? null : target.ownerId,
       updatedBy: "SYSTEM",
       updatedAt: new Date(),
     })
@@ -181,17 +194,18 @@ async function chotKetQua(db: Db, target: CareRow, ketCuc: KetCuc, p: { substate
   await ghiSuKien(db, {
     shipmentId: target.shipmentId,
     source: "SYSTEM",
-    action: ketCuc.logistics === "NOT_CARE" ? "CANCEL" : "RESOLVE",
-    note:
-      ketCuc.logistics === "NOT_CARE"
+    action: kc.logistics === "NOT_CARE" ? "CANCEL" : "RESOLVE",
+    note: truocKhiMo
+      ? `ĐVVC đã báo “${p.statusName ?? p.substate}” lúc ${p.occurredAt.toISOString()}, TRƯỚC khi đợt được mở — kiện đã kết thúc khi chưa có ca nào để cứu, không tính kết quả`
+      : kc.logistics === "NOT_CARE"
         ? `ĐVVC báo “${p.statusName ?? p.substate}” trước khi rời kho — đợt không phải điều kiện cần care, không tính kết quả`
         : `ĐVVC báo “${p.statusName ?? p.substate}” — chốt kết quả theo chứng từ`,
     previousStatus: target.careStatus,
     nextStatus,
-    payload: { substate: p.substate, outcome: ketCuc.outcome, resolution: ketCuc.logistics === "NOT_CARE" ? NOT_CARE_CONDITION : null, auto: true, via: p.source, occurredAt: p.occurredAt.toISOString() },
+    payload: { substate: p.substate, outcome: kc.outcome, ...(truocKhiMo ? { carrierEndedBeforeOpen: true } : {}), resolution: kc.logistics === "NOT_CARE" ? NOT_CARE_CONDITION : null, auto: true, via: p.source, occurredAt: p.occurredAt.toISOString() },
   });
-  if (ketCuc.logistics === "NOT_CARE") return { ...KHONG_LAM_GI, dismissed: true, careCaseId: target.id, reason: `huỷ trước khi rời kho — ${NOT_CARE_CONDITION}` };
-  return { opened: false, resolved: true, dismissed: false, careCaseId: target.id, outcome: ketCuc.outcome, reason: `ĐVVC báo ${p.substate}` };
+  if (kc.logistics === "NOT_CARE") return { ...KHONG_LAM_GI, dismissed: true, careCaseId: target.id, reason: truocKhiMo ? `ĐVVC kết thúc trước khi đợt mở — ${NOT_CARE_CONDITION}` : `huỷ trước khi rời kho — ${NOT_CARE_CONDITION}` };
+  return { opened: false, resolved: true, dismissed: false, careCaseId: target.id, outcome: kc.outcome, reason: `ĐVVC báo ${p.substate}` };
 }
 
 /** Đóng đợt máy mở, chưa ai động vào, vì kiện không (còn) trong điều kiện cần care. Không phải kết quả. */
@@ -548,7 +562,20 @@ export async function reconcileCareCoverage(db: Db, now = new Date(), scope: { s
     if (res.opened) out.opened += 1;
   }
 
-  /* (b) + (c): đợt đang mở, đối chiếu với ảnh chụp kiện */
+  /*
+    (b) + (c): đợt đang mở, đối chiếu với ảnh chụp kiện.
+
+    ═══ (c) PHẢI QUÉT CẢ ĐỢT NGƯỜI ĐÃ ĐÓNG ═══
+
+    Vế (c) sinh ra để chốt "đợt còn treo PENDING trên kiện đã kết thúc", nhưng câu truy vấn chỉ
+    lấy đợt `active = true`. Nhân viên bấm "Đã xong" làm `active = false` mà kết quả vẫn PENDING
+    (đúng thiết kế — chỉ chứng từ ĐVVC chốt được), nên nếu gói tin kết cục đi một đường không qua
+    `applyCarrierEventToCare`, đợt ấy treo VĨNH VIỄN. Đo production 23/09/2026: 3 đợt đã đóng từ
+    16/09 trên kiện Viettel Post đã giao — vẫn đếm là "Đang treo" của một nhân viên.
+
+    Đợt đã đóng chỉ được xét ở vế CHỐT (kiện đã kết thúc / đã duyệt hoàn); vế (b) — tự đóng vì
+    không phải điều kiện care — vẫn chỉ dành cho đợt đang mở.
+  */
   const dangMo = await db
     .select({
       care: schema.shipmentCare,
@@ -561,7 +588,15 @@ export async function reconcileCareCoverage(db: Db, now = new Date(), scope: { s
     })
     .from(schema.shipmentCare)
     .innerJoin(schema.shipments, eq(schema.shipments.id, schema.shipmentCare.shipmentId))
-    .where(and(eq(schema.shipmentCare.active, true), eq(schema.shipmentCare.careOutcome, "PENDING"), scope.shipmentIds?.length ? inArray(schema.shipments.id, scope.shipmentIds) : undefined));
+    .where(
+      and(
+        or(eq(schema.shipmentCare.active, true), inArray(schema.shipments.stage, [...CARE_TERMINAL_STAGES, "RETURNING"])),
+        eq(schema.shipmentCare.careOutcome, "PENDING"),
+        scope.shipmentIds?.length ? inArray(schema.shipments.id, scope.shipmentIds) : undefined,
+      ),
+    )
+    // Đợt cũ trước: khi một kiện có nhiều đợt cùng chờ, thứ tự chốt ổn định giữa các lượt chạy.
+    .orderBy(schema.shipmentCare.shipmentId, schema.shipmentCare.episodeNo);
   out.scanned += dangMo.length;
   for (const r of dangMo) {
     const stage = r.stage;
@@ -595,7 +630,8 @@ export async function reconcileCareCoverage(db: Db, now = new Date(), scope: { s
       if (res.resolved) out.settled += 1;
       continue;
     }
-    if (stage === "RETURNING" || !chuaAiDongVao(r.care)) continue;
+    // Đợt người đã đóng chỉ vào đây để CHỐT; không bao giờ đi tiếp xuống vế tự đóng (b).
+    if (!r.care.active || stage === "RETURNING" || !chuaAiDongVao(r.care)) continue;
     const chungTu: LeftWarehouseEvidence = { left: Boolean(r.daRoiKho), since: r.roiKhoTuLuc ? new Date(r.roiKhoTuLuc) : null };
     if (careEntryFor(substate, chungTu.left).enters || !moTruocKhiRoiKho(r.care, chungTu)) continue;
     const res = await dongViKhongCanCare(db, r.care, { substate, reason: "đợt mở khi hàng còn trong kho (mã 102 trước mốc lấy hàng) — chưa bao giờ là điều kiện cần care", source: "RECONCILE", at: now });
