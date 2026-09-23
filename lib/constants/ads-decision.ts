@@ -90,6 +90,59 @@ export const DECISION_BASIS_NOTE: Record<DecisionBasis, string> = {
  *  3. **Không mở đường cho bàn tay.** Cổng ghi ngân sách đọc `action` của chính dòng, và `action`
  *     không đổi. Máy vẫn không được tiêu tiền dựa trên bằng chứng của một thực thể khác.
  */
+/**
+ * ═══════════ TIỀN KHÔNG THUỘC MÃ NÀO: HAI THỨ KHÁC HẲN NHAU, KHÔNG PHẢI MỘT ═══════════
+ *
+ * `resolveCampaign()` phân biệt được `test` (tên chiến dịch mang chữ TEST, hoặc người khai tay) với
+ * `none` (không khớp mã nào và cũng không phải test). Nhưng `ad_spends` chỉ lưu `product_id`, nên
+ * cả hai cùng thành `NULL` — và xuống tới bảng quyết định chúng đội chung một chữ "chưa đủ dữ liệu".
+ *
+ * Đo production 23/09/2026 trên kỳ chuẩn, 387 chiến dịch không nối được về mã (11.165.022 ₫):
+ *
+ *     318 dòng · 7.457.012 ₫ (66,8%)  tên mang chữ TEST  ⇒ CHI PHÍ TEST, đúng như nó là
+ *      62 dòng · 3.617.087 ₫ (32,4%)  không test, không mã ⇒ CHƯA PHÂN LOẠI, cần người
+ *       7 dòng ·    90.923 ₫  (0,8%)  tên CÓ mã mà không nối được ⇒ bộ ghép trượt
+ *
+ * Gộp ba thứ ấy lại sinh ra một lời khuyên sai mà tôi đã suýt đưa: *"khai mã cho 387 chiến dịch"* —
+ * tức bảo người ta gán mã hàng cho 318 chiến dịch test, một việc bịa đặt.
+ *
+ * ─── CHI PHÍ TEST KHÔNG ĐƯỢC CHẤM BẰNG ROAS ───
+ *
+ * Nó không thiếu dữ liệu; nó có một câu hỏi KHÁC: *"tháng này đốt bao nhiêu vào test, và có cái nào
+ * ra được thành mã bán không"*. Đòi nó đạt điểm hoà vốn như một chiến dịch bán hàng là đo sai thứ.
+ *
+ * ─── VÌ SAO ĐỌC RA LÚC XEM, KHÔNG THÊM CỘT ───
+ *
+ * Phân loại là hàm của LUẬT (`ads.campaignMap`, bí danh, sổ mã hàng) chứ không phải một sự kiện đã
+ * xảy ra. Người sửa bảng ghép thì câu trả lời phải đổi NGAY — cùng lý lẽ đã áp cho kết cục ca chăm
+ * sóc (mục 56) và cho phân loại đợt care (mục 62). Thêm cột là mời một lượt backfill và một con số
+ * cũ đi phục vụ luật mới.
+ */
+export type AdsSpendClass = "PRODUCT" | "TEST" | "UNCLASSIFIED" | "EXCLUDED";
+
+export const ADS_SPEND_CLASS_LABEL: Record<AdsSpendClass, string> = {
+  PRODUCT: "Bán hàng",
+  TEST: "Chi phí test",
+  UNCLASSIFIED: "Chưa phân loại",
+  EXCLUDED: "Đã loại khỏi phép tính",
+};
+
+export const ADS_SPEND_CLASS_HINT: Record<AdsSpendClass, string> = {
+  PRODUCT: "Chiến dịch chạy cho một mã hàng cụ thể — chấm được bằng ROAS và điểm hoà vốn.",
+  TEST: "Chi phí thử fanpage / mẫu quảng cáo mới, KHÔNG thuộc mã hàng nào. Đây không phải chỗ thiếu dữ liệu: nó có câu hỏi riêng — đốt bao nhiêu vào test, và có cái nào ra được thành mã bán. Đòi nó đạt hoà vốn như một chiến dịch bán hàng là đo sai thứ.",
+  UNCLASSIFIED:
+    "Không nhận ra mã hàng trong tên, và cũng không khai là test. ERP KHÔNG đoán — đây là việc cần người: khai mã cho chiến dịch, hoặc đánh dấu nó là chi phí test, ở màn Chi phí quảng cáo.",
+  EXCLUDED: "Người đã khai loại chiến dịch này khỏi phép tính.",
+};
+
+/** Phân loại SUY RA từ nguồn ghép của `resolveCampaign` — không phải một danh sách thứ hai. */
+export function spendClassOf(source: "manual" | "alias" | "auto" | "test" | "none", productId: string | null, excluded: boolean): AdsSpendClass {
+  if (excluded) return "EXCLUDED";
+  if (productId) return "PRODUCT";
+  // `manual` mà không có mã nghĩa là người đã khai tay "đây là chi phí test" (`testCost`).
+  return source === "test" || source === "manual" ? "TEST" : "UNCLASSIFIED";
+}
+
 export type InheritedVerdict = {
   productKey: string;
   productName: string;

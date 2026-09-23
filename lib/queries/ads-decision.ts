@@ -5,6 +5,8 @@ import { metricScope, openShippingSql, realizedShippingSql, successRate } from "
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { spendPeriod } from "@/lib/queries/ads-roas";
+import { loadAdsMapping, resolveCampaign } from "@/lib/integrations/facebook/mapping";
+import { loadProductCodeIndex } from "@/lib/integrations/facebook/sync";
 import { lineUnitCost } from "@/lib/queries/cogs";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { ORDER_AD_ID, ORDER_ADSET_ID, ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
@@ -18,8 +20,10 @@ import {
   ADS_DIMENSION_HAS_SPEND,
   type AdsAction,
   type AdsDimension,
+  type AdsSpendClass,
   type DecisionBasis,
   type InheritedVerdict,
+  spendClassOf,
 } from "@/lib/constants/ads-decision";
 import { deliveryRateCaseSql, orderDeliveryRateSql, productDeliveryRates, rateCoverage, type ProductDeliveryRates } from "@/lib/queries/delivery-rate";
 import type { DeliveryRateSource } from "@/lib/constants/delivery-rate";
@@ -238,6 +242,14 @@ export type AdsDecisionRow = {
    * chiến dịch chưa nối được về mã nào · mã của nó cũng chưa kết luận được.
    */
   inherited: InheritedVerdict | null;
+  /**
+   * TIỀN NÀY LÀ LOẠI GÌ — chỉ có nghĩa ở cấp CHIẾN DỊCH, `null` ở ba cấp kia.
+   *
+   * Tách `TEST` khỏi `UNCLASSIFIED` là cả điểm của trường này: cả hai đều không thuộc mã hàng nào
+   * nên trước đây cùng đội một chữ "chưa đủ dữ liệu", trong khi một cái là **đúng như nó phải thế**
+   * còn cái kia là **việc cần người làm**. Xem `AdsSpendClass`.
+   */
+  spendClass: AdsSpendClass | null;
   /** Giải thích bằng SỐ THẬT của chính dòng này — không có câu chữ chung chung. */
   reason: string;
   /** Dấu hiệu phụ, hiện thành nhãn cạnh hành động. */
@@ -314,6 +326,9 @@ export type AdsDecision = {
     /** Nối được, nhưng chính mã ấy cũng chưa kết luận được. */
     productSilentRows: number;
     productSilentSpend: number;
+    /** CHI PHÍ TEST — không phải chỗ trống, và không đi mượn. Có câu hỏi riêng của nó. */
+    testRows: number;
+    testSpend: number;
   };
   rateBasis: {
     fallbackDeliveryRate: number;
@@ -1011,8 +1026,9 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
     action,
     reason,
     lowDelivery,
-    // Gắn ở `decisionUncached` sau khi đã có kết luận cấp mã hàng — dựng dòng thì chưa biết gì về mã.
+    // Hai trường dưới gắn ở `decisionUncached`: dựng dòng thì chưa biết gì về mã hàng lẫn bảng ghép.
     inherited: null,
+    spendClass: null,
   };
 }
 
@@ -1025,15 +1041,17 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
  *
  *  · `OWN`            — dòng tự kết luận được, không mượn gì. KHÔNG BAO GIỜ đè lên kết luận của nó.
  *  · `INHERITED`      — mượn được của mã hàng.
- *  · `UNLINKED`       — chưa nối được về mã nào. SỬA ĐƯỢC: khai mã cho chiến dịch.
+ *  · `TEST`           — chi phí thử fanpage/mẫu mới. KHÔNG phải chỗ trống, và không đi mượn.
+ *  · `UNLINKED`       — chưa nối được về mã nào và cũng không khai là test. SỬA ĐƯỢC, cần người.
  *  · `PRODUCT_SILENT` — nối được, nhưng mã cũng chưa kết luận. Đợi dữ liệu, không sửa tay được.
  */
-export type InheritBucket = "OWN" | "INHERITED" | "UNLINKED" | "PRODUCT_SILENT";
+export type InheritBucket = "OWN" | "INHERITED" | "TEST" | "UNLINKED" | "PRODUCT_SILENT";
 
 export function inheritVerdict(
   ownAction: AdsAction,
   productId: string | undefined,
   productVerdict: { key: string; name: string; action: AdsAction; reason: string } | undefined,
+  spendClass: AdsSpendClass | null = null,
 ): { bucket: InheritBucket; inherited: InheritedVerdict | null } {
   /*
     CHỈ dòng `INSUFFICIENT_DATA` mới mượn. `NO_SPEND_DATA` thì KHÔNG: ở đó ERP không đọc được cả số
@@ -1041,6 +1059,14 @@ export function inheritVerdict(
     cũng là kết luận thật — đè lên chúng là thay một câu ĐÚNG bằng một câu chung chung hơn.
   */
   if (ownAction !== "INSUFFICIENT_DATA") return { bucket: "OWN", inherited: null };
+  /*
+    CHI PHÍ TEST KHÔNG PHẢI MỘT CHỖ TRỐNG, NÊN NÓ KHÔNG ĐI MƯỢN.
+
+    Nó không thuộc mã hàng nào một cách CỐ Ý. Cho nó mượn kết luận của một mã là gán cho một phép
+    thử fanpage cái điểm hoà vốn của một mã bán hàng — hai câu hỏi khác nhau. Đo 23/09/2026:
+    318 dòng · 7.457.012 ₫ nằm ở nhóm này, tức 2/3 phần tiền trước nay bị gọi nhầm là "thiếu dữ liệu".
+  */
+  if (spendClass === "TEST") return { bucket: "TEST", inherited: null };
   if (!productId) return { bucket: "UNLINKED", inherited: null };
   if (!productVerdict || productVerdict.action === "INSUFFICIENT_DATA" || productVerdict.action === "NO_SPEND_DATA") {
     return { bucket: "PRODUCT_SILENT", inherited: null };
@@ -1176,14 +1202,31 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
     (lùi 15 ngày) nên trộn vào đây sẽ cho một màn hình mà hai nửa nói về hai khoảng thời gian khác
     nhau — thứ AGENTS.md mục 58 cấm.
   */
-  const inheritedCoverage = { rows: 0, spend: 0, unlinkedRows: 0, unlinkedSpend: 0, productSilentRows: 0, productSilentSpend: 0 };
+  const inheritedCoverage = { rows: 0, spend: 0, unlinkedRows: 0, unlinkedSpend: 0, productSilentRows: 0, productSilentSpend: 0, testRows: 0, testSpend: 0 };
   if (dimension === "campaign") {
-    const [link, theoMa] = await Promise.all([campaignProductLink(period), getAdsDecision(period, "product")]);
+    /*
+      PHÂN LOẠI ĐỌC RA LÚC XEM, KHÔNG ĐỌC TỪ MỘT CỘT ĐÃ LƯU.
+
+      `ad_spends` chỉ giữ `product_id`, nên "test" và "chưa phân loại" cùng thành `NULL` ở đó. Bảng
+      ghép (`ads.campaignMap`, bí danh, sổ mã hàng) mới là thứ biết phân biệt — và nó đổi được bất
+      cứ lúc nào, nên câu trả lời phải tính lại mỗi lượt đọc (mục 56 · 62).
+    */
+    const [link, theoMa, mapping, codeIndex] = await Promise.all([
+      campaignProductLink(period),
+      getAdsDecision(period, "product"),
+      loadAdsMapping(),
+      loadProductCodeIndex(),
+    ]);
     const verdictOf = new Map(theoMa.rows.map((r) => [r.key, r]));
     for (const row of rows) {
-      const { bucket, inherited } = inheritVerdict(row.action, link.get(row.key), verdictOf.get(link.get(row.key) ?? ""));
+      const r = resolveCampaign(row.key, row.name, mapping, codeIndex);
+      row.spendClass = spendClassOf(r.source, link.get(row.key) ?? r.productId, r.excluded);
+      const { bucket, inherited } = inheritVerdict(row.action, link.get(row.key), verdictOf.get(link.get(row.key) ?? ""), row.spendClass);
       if (bucket === "OWN") continue;
-      if (bucket === "UNLINKED") {
+      if (bucket === "TEST") {
+        inheritedCoverage.testRows += 1;
+        inheritedCoverage.testSpend += row.spend;
+      } else if (bucket === "UNLINKED") {
         inheritedCoverage.unlinkedRows += 1;
         inheritedCoverage.unlinkedSpend += row.spend;
       } else if (bucket === "PRODUCT_SILENT") {
