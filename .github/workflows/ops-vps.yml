@@ -91,6 +91,7 @@ on:
           - ai-staging-setting   # ghi MỘT khoá cấu hình vào settings của BẢN CHẠY THỬ (arg: "<khoá> <json>")
           - ai-staging-job       # chạy MỘT job đồng bộ trong BẢN CHẠY THỬ (arg: tên job, vd "vcb-rate")
           - ai-staging-reclassify # phân loại lại người gửi cho tin ĐÃ NẠP (mặc định CHẠY THỬ; arg "--apply" mới ghi)
+          - ai-staging-readiness  # CHỈ ĐỌC: đi từng cửa giữa "khách nhắn" và "bản nháp trong hàng đợi", cửa nào đóng thì in câu lệnh mở nó
           - ai-staging-catalog    # kéo DANH MỤC SẢN PHẨM từ Pancake POS vào CSDL bản chạy thử (chỉ đọc từ Pancake)
           - ai-staging-page-token # (tuỳ chọn) sinh page_access_token phạm vi hẹp cho MỘT page (arg = PAGE_ID)
           - ai-staging-ingest     # nạp TAY hội thoại của page đã khai (arg: "--hours=24 --max=20 [--dry-run]")
@@ -1277,6 +1278,17 @@ jobs:
                 cd /opt/vnx-ai-staging
                 fetch_staging_script ai-reclassify-senders.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-reclassify-senders.ts'
                 docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-reclassify-senders.ts ${ARG:-} ;;
+
+              ai-staging-readiness)
+                # CHỈ ĐỌC. Không tạo việc, không gọi mô hình, không gửi tin, không đổi cấu hình —
+                # một lượt kiểm tra sẵn sàng mà tự sửa dữ liệu thì lần chạy thứ hai đo một hệ
+                # thống khác lần đầu.
+                #
+                # Script lấy từ KHO MÃ chứ không nằm trong ảnh, nên sửa phép đo không cần dựng lại
+                # ảnh: đẩy commit rồi chạy lại là đủ.
+                cd /opt/vnx-ai-staging
+                fetch_staging_script ai-staging-readiness.ts | docker exec -i vnx-ai-staging-app sh -c 'cat > /app/scripts/ai-staging-readiness.ts'
+                docker compose -f docker-compose.staging.yml --env-file .env.staging exec -T app npx tsx --tsconfig tsconfig.json scripts/ai-staging-readiness.ts ;;
 
               ai-staging-report)
                 curl -fsSL -H "Accept: application/vnd.github.raw" -H "Cache-Control: no-cache" \
