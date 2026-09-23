@@ -51,7 +51,12 @@ người giao vận làm cả ngày ở trang chuyên biệt, người khác ch�
 
 ## 3. Đề xuất — CẦN CHỦ SHOP QUYẾT
 
-### Đ1. Gom nhóm "Vận hành" theo phòng ban thay vì theo module
+### Đ1. Gom nhóm "Vận hành" theo phòng ban thay vì theo module — ✅ ĐÃ THỰC HIỆN 23/09/2026
+
+> Chủ shop chốt ngày 23/09/2026: gom theo phòng ban, và **tách thêm phòng Sản xuất** (phòng thứ tám).
+> Thực hiện ở `lib/constants/department-modules.ts`; thanh bên, hai lá chắn phủ tuyến và breadcrumb
+> nay đọc chung sổ khai đó. Chi tiết: `docs/department-module-map.md`.
+> Phần văn bản dưới đây giữ nguyên làm ghi chép đề xuất gốc.
 
 Hiện nhóm này trộn việc của ba phòng (CSKH, marketing, kinh doanh). Đề xuất tách:
 
@@ -72,7 +77,7 @@ gần như mọi thao tác đều có màn hình chuyên biệt. **Đề xuất:
 quyết; nếu gần 0 thì chuyển thành tab của `Nhập hàng & kiểm kê`, **không xoá** — nó là đường truy
 vết cuối cùng khi một con số tồn kho sai.
 
-### Đ3. `Tỷ lệ giao thành công` (`/reports/returns`) nằm ở nhóm "Kho & giao vận"
+### Đ3. `Tỷ lệ giao thành công` (`/reports/returns`) nằm ở nhóm "Kho & giao vận" — giữ, nay thuộc phòng Giao vận
 
 Nó là một **báo cáo**, và mọi báo cáo khác nằm ở nhóm Tài chính. Đặt ở đây vì người giao vận dùng
 nó hằng ngày. **Đề xuất:** giữ nguyên, đây là quyết định đúng dù trông lệch.

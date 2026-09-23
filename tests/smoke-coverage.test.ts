@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { NAV_MODULES } from "@/lib/constants/department-modules";
 
 /**
  * ═══════════ MỌI TUYẾN TRÊN THANH ĐIỀU HƯỚNG PHẢI ĐƯỢC SMOKE PHỦ ═══════════
@@ -48,11 +49,13 @@ const MIEN_TRU: Record<string, string> = Object.fromEntries(Object.entries(PHAN_
 const goc = path.resolve(__dirname, "..");
 
 export function testSmokeCoverage() {
-  const sidebar = fs.readFileSync(path.join(goc, "components/app-sidebar.tsx"), "utf8");
   const smoke = fs.readFileSync(path.join(goc, "scripts/smoke.ts"), "utf8");
 
-  const tuyen = [...new Set([...sidebar.matchAll(/href: "(\/[^"]*)"/g)].map((m) => m[1]))];
-  assert.ok(tuyen.length > 25, `đọc hụt thanh điều hướng (chỉ thấy ${tuyen.length} tuyến) — biểu thức dò hỏng?`);
+  // Đọc SỔ KHAI module, không quét mã nguồn thanh bên (23/09/2026): một biểu thức chính quy trên một
+  // client component im lặng hẹp lại mỗi lần ai đó đổi cách viết, và lá chắn này sinh ra để chống
+  // đúng kiểu im lặng đó.
+  const tuyen = [...new Set(NAV_MODULES.map((m) => m.href as string))];
+  assert.ok(tuyen.length > 25, `đọc hụt sổ khai module (chỉ thấy ${tuyen.length} tuyến) — sổ bị xoá bớt?`);
 
   // Chỉ lấy phần đường dẫn: smoke có thể phủ `/cod?recon=stale`, và như thế là đã phủ `/cod`.
   const daPhu = new Set([...smoke.matchAll(/^\s*"(\/[^"]*)",/gm)].map((m) => m[1].split("?")[0]));
