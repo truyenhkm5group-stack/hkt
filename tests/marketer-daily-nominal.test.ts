@@ -5,6 +5,7 @@ import { chiaTheoCanCu, fallbackShares, finishCell, getMarketerDailyNominal, typ
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { orderDeliveryShare, type ProbabilityLookup } from "@/lib/queries/projected-delivery";
 import { NOT_SHIPPED_STATE } from "@/lib/constants/projected-delivery";
+import { NO_ORDER_VALUE_FILTER } from "@/lib/constants/order-value";
 import type { Period } from "@/lib/search-params";
 
 const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
@@ -112,7 +113,20 @@ function testFinishCell() {
  */
 async function testReconcilesWithNominalReport() {
   clearMemo();
-  const [data, report] = await Promise.all([getMarketerDailyNominal(ALL), getNominalProfitReport(ALL, "ORDERED")]);
+  /*
+    ĐỐI CHIẾU VỚI BÁO CÁO ĐỌC ĐỦ TỒN KHO (giá vốn dự tính TẮT — khu quảng cáo không được thấy giá
+    đoán, xem `tests/estimated-cost.test.ts`). Bảng MKTer tắt tồn kho cho nhanh; cặp khẳng định
+    ngay dưới chứng minh việc ấy không đổi một đồng lợi nhuận nào.
+  */
+  const [data, report, noStock] = await Promise.all([
+    getMarketerDailyNominal(ALL),
+    getNominalProfitReport(ALL, "ORDERED", NO_ORDER_VALUE_FILTER, true, false),
+    getNominalProfitReport(ALL, "ORDERED", NO_ORDER_VALUE_FILTER, true, false, false),
+  ]);
+  for (const k of ["expectedRevenue", "expectedCogs", "shipCost", "expectedProfit", "netProfit", "inventoryRisk", "tax"] as const) {
+    assert.equal(noStock.totals[k], report.totals[k], `bỏ đọc tồn kho KHÔNG được đổi ${k} — tồn chỉ là ô ghi chú, không vào lợi nhuận`);
+  }
+  assert.ok(noStock.rows.every((r) => !r.stockKnown), "không đọc tồn ⇒ tồn là CHƯA BIẾT (stockKnown = false), không phải 0 cái");
   assert.ok(data.total.orders > 0, "fixture phải có đơn — nếu không, cổng này không kiểm được gì");
   assert.equal(data.reconcile.expectedRevenue.report, report.totals.expectedRevenue);
   assert.equal(data.reconcile.expectedRevenue.ours, report.totals.expectedRevenue, "Σ DT GTC ƯT mọi ô phải bằng ĐÚNG Báo cáo lợi nhuận");
