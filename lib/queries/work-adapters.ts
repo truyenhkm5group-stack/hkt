@@ -5,13 +5,16 @@ import { CS_STATUSES, type CsStatus } from "@/lib/constants/cs";
 import { csDomainOf, isBotAssignee } from "@/lib/constants/cs-domain";
 import { departmentOfTeam, type DepartmentCode } from "@/lib/constants/departments";
 import { actionsOf, ALERT_KINDS_OWNED_ELSEWHERE, ALERT_STATUS_TO_WORK, assigneeAuthorityOf, CARE_STATUS_TO_WORK, CS_STATUS_TO_WORK, sourceOfAlert, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
-import { MONEY_UNKNOWN, WORK_TAG_MACHINE_HELD, workKey, type WorkItem, type WorkMoney, type WorkPriority, type WorkStatus } from "@/lib/constants/work";
+import { MONEY_UNKNOWN, WORK_PRIORITIES, WORK_TAG_MACHINE_HELD, workKey, type WorkItem, type WorkMoney, type WorkPriority, type WorkStatus } from "@/lib/constants/work";
 import { departmentFor } from "@/lib/constants/work-ownership";
 import { slaDueAt } from "@/lib/constants/work-sla";
 import { getWorkConfig, type WorkConfig } from "@/lib/queries/work-config";
 import { getActionQueue } from "@/lib/queries/action-queue";
 import { ADS_ACTION_LABEL } from "@/lib/constants/ads-decision";
 import { getAdsDecision } from "@/lib/queries/ads-decision";
+import { decisionStability } from "@/lib/queries/marketing-ledger";
+import { vnDay } from "@/lib/constants/marketing-decision-ledger";
+import type { Stability } from "@/lib/marketing/decision-stability";
 import { getCareQueue } from "@/lib/queries/care-workbench";
 import { getFulfillmentBottleneckQueue } from "@/lib/queries/fulfillment-bottleneck";
 import { getDuplicateOrderQueue } from "@/lib/queries/order-duplicate";
@@ -486,6 +489,30 @@ export async function adaptBank(now: Date): Promise<WorkItem[]> {
 /* ═══════════════════ 5 · QUYẾT ĐỊNH QUẢNG CÁO ═══════════════════ */
 
 /**
+ * Hạ ĐÚNG MỘT BẬC trên thang bốn mức, và không bao giờ xuống dưới đáy.
+ *
+ * Không nhân điểm với một hệ số: điểm là thứ so sánh được giữa các NGUỒN việc khác nhau, bóp méo
+ * nó ở một nguồn làm hỏng phép xếp hạng của cả hàng đợi. Mức ưu tiên thì đúng là thứ để nói
+ * "cái này đọc sau" mà không đụng tới cách đo.
+ */
+export function haMotBac(p: WorkPriority): WorkPriority {
+  const i = WORK_PRIORITIES.indexOf(p);
+  return WORK_PRIORITIES[Math.min(i + 1, WORK_PRIORITIES.length - 1)];
+}
+
+/**
+ * Câu nói về độ chín, gắn vào cuối phần tóm tắt. `null` khi không có gì đáng nói thêm.
+ *
+ * Dòng CHƯA có sổ (`NO_HISTORY`) cũng phải nói ra: nó KHÁC "đã theo dõi và thấy chưa ổn định" —
+ * một cái là chưa đo, cái kia là đã đo và kết quả dao động (AGENTS.md mục 39).
+ */
+export function benCau(b: Stability | null): string | null {
+  if (!b) return null;
+  if (b.ready) return `Khuyến nghị đã giữ ${b.heldDays} ngày liền — đủ chín để hành động.`;
+  return `CHƯA CHÍN: ${b.reason}`;
+}
+
+/**
  * Chỉ những dòng có hành động KHÁC "giữ nguyên". `getAdsDecision` đã tính hết; ở đây chỉ lọc và
  * đổi hình dạng.
  *
@@ -497,28 +524,63 @@ export async function adaptAdsDecisions(now: Date): Promise<WorkItem[]> {
   const period = resolvePeriod({ period: "30d" }, "30d");
   const decision = await getAdsDecision(period, "campaign");
   const from = period.from ?? new Date(now.getTime() - 30 * 24 * HOUR);
-  return decision.rows
+  const canDecide = decision.rows.filter((r) => r.action === "CUT" || r.action === "SCALE" || r.action === "FIX_DELIVERY");
+  /*
+    ═══════════ ĐỘ BỀN ĐỌC TỪ SỔ, VÌ HÀNG ĐỢI KHÔNG ĐƯỢC LỎNG HƠN BÀN TAY ═══════════
+
+    Bàn tay ghi ngân sách đòi khuyến nghị phải GIỮ NGUYÊN mấy ngày liền mới được động vào tiền
+    (`DECISION_STABILITY`). Hàng đợi người thì trước nay nhận dòng ngay hôm nó xuất hiện lần đầu —
+    nên MÁY thận trọng hơn NGƯỜI, đúng ngược chiều với lẽ thường. Một khuyến nghị đổi ý vào ngày
+    mai đã kịp tốn của ai đó một lượt mở Facebook.
+
+    Cố ý KHÔNG lọc bỏ dòng chưa chín: "chưa đủ ngày" khác hẳn "không đáng làm" (AGENTS.md mục 39),
+    và giấu nó đi là giấu việc. Nó vẫn vào hàng đợi, nhưng mang nhãn và bị hạ điểm.
+
+    Sổ chạy trên KỲ CHUẨN còn bảng này chạy trên 30 ngày, nên một chiến dịch có thể có mặt ở đây mà
+    chưa có dòng sổ nào. Khi ấy `stabilityOf` trả `NO_HISTORY` — chưa biết, không phải chưa chín.
+  */
+  const stability = await decisionStability("campaign", canDecide.map((r) => r.key), vnDay(now)).catch(() => new Map<string, Stability>());
+  return canDecide
     /*
-      CHỈ dòng CẦN NGƯỜI QUYẾT. `HOLD`/`WATCH` là "giữ nguyên, thỉnh thoảng nhìn" — không phải việc.
-      `INSUFFICIENT_DATA`/`NO_SPEND_DATA` cũng KHÔNG: chúng nói dữ liệu chưa đủ để kết luận, và biến
-      một khoảng trống dữ liệu thành một việc phải làm là bắt người đi xử lý thứ không xử lý được.
+      Phép lọc "chỉ dòng CẦN NGƯỜI QUYẾT" đã làm ở `canDecide` phía trên. `HOLD`/`WATCH` là "giữ
+      nguyên, thỉnh thoảng nhìn" — không phải việc. `INSUFFICIENT_DATA`/`NO_SPEND_DATA` cũng KHÔNG:
+      chúng nói dữ liệu chưa đủ để kết luận, và biến một khoảng trống dữ liệu thành một việc phải
+      làm là bắt người đi xử lý thứ không xử lý được.
     */
-    .filter((r) => r.action === "CUT" || r.action === "SCALE" || r.action === "FIX_DELIVERY")
     .map((r) => {
-      const atRisk = r.spendKnown ? Math.max(0, -r.profitAfterAds) : null;
+      const ben = stability.get(r.key) ?? null;
+      const tamTinh = r.basis === "PROJECTED";
+      /*
+        ─── TIỀN PHẢI ĐỌC TỪ CÙNG MỘT CĂN CỨ ĐÃ SINH RA KHUYẾN NGHỊ ───
+
+        Dòng tạm tính được kết luận trên `projectedProfitAfterAds`; in `profitAfterAds` (số đo) vào
+        ô tiền của nó là để hàng đợi nói một đằng còn lý do nói một nẻo. Với mô hình bán trước,
+        chênh lệch giữa hai con số ấy là cả phần hàng đang đi — không phải sai số làm tròn.
+      */
+      const loi = tamTinh ? r.projectedProfitAfterAds : r.profitAfterAds;
+      const atRisk = r.spendKnown ? Math.max(0, -loi) : null;
       const score = caseScore({ severity: r.action === "CUT" ? "critical" : "warning", ageHours: hoursSince(from, now.getTime()), amount: atRisk, type: "ADS_ANOMALY" });
       return {
         key: workKey("ADS_DECISION", `campaign:${r.key}`),
         sourceType: "ADS_DECISION",
         sourceKey: `campaign:${r.key}`,
         kind: r.action,
-        title: `${ADS_ACTION_LABEL[r.action]} · ${r.name}`,
-        summary: r.reason,
+        // Nhãn căn cứ nằm trong TIÊU ĐỀ, không chỉ trong thẻ: danh sách việc đọc theo tiêu đề, và
+        // "CẮT" đứng trên số đo với "CẮT" đứng trên giả định không phải cùng một việc.
+        title: `${ADS_ACTION_LABEL[r.action]}${tamTinh ? " (tạm tính)" : ""} · ${r.name}`,
+        summary: benCau(ben) ? `${r.reason} ${benCau(ben)}` : r.reason,
         department: "MARKETING" as DepartmentCode,
         assignee: null,
         status: "NEW" as WorkStatus,
         statusAuthority: "SOURCE" as const,
-        priority: priorityOf(score),
+        /*
+          CHƯA CHÍN THÌ HẠ MỘT BẬC, KHÔNG XOÁ.
+
+          Điểm vẫn tính từ tiền và tuổi như mọi nguồn khác — thứ bị hạ là mức ƯU TIÊN, tức thứ
+          quyết định ai nhìn thấy nó trước. Một khuyến nghị mới ra đời hôm nay vẫn đáng đọc, chỉ
+          chưa đáng bỏ việc đang làm để chạy theo.
+        */
+        priority: ben && !ben.ready ? haMotBac(priorityOf(score)) : priorityOf(score),
         score,
         createdAt: from,
         startedAt: null,
@@ -534,9 +596,21 @@ export async function adaptAdsDecisions(now: Date): Promise<WorkItem[]> {
           nhiêu. `null`, không phải 0 — đây đúng là tình huống mà AGENTS.md mục 0.3 nói tới.
         */
         money: r.spendKnown
-          ? { atRisk, recoverable: null, confidence: "ESTIMATED" as const, basis: "Lỗ sau quảng cáo của kỳ 30 ngày (getAdsDecision)" }
+          ? {
+              atRisk,
+              recoverable: null,
+              confidence: "ESTIMATED" as const,
+              basis: tamTinh
+                ? `Lỗ sau quảng cáo TẠM TÍNH của kỳ 30 ngày — phần đơn chưa ngã ngũ cân theo GTC ${r.appliedDeliveryRate ?? "—"}% (getAdsDecision)`
+                : "Lỗ sau quảng cáo của kỳ 30 ngày (getAdsDecision)",
+            }
           : MONEY_UNKNOWN,
-        tags: [r.action, ...(r.lowDelivery ? ["LOW_DELIVERY"] : [])],
+        tags: [
+          r.action,
+          ...(tamTinh ? ["TAM_TINH"] : []),
+          ...(ben && !ben.ready ? ["CHUA_CHIN"] : []),
+          ...(r.lowDelivery ? ["LOW_DELIVERY"] : []),
+        ],
         evidence: { source: "Màn quyết định quảng cáo", detail: r.reason },
         blockedReason: "",
         creationSource: "AUTO" as const,

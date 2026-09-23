@@ -218,8 +218,19 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     businessEntity: "CAMPAIGN",
     slaHours: CASE_SLA_HOURS.ADS_ANOMALY,
     outcomeAttributable: true,
-    // CỐ Ý chỉ có nút MỞ. ERP đọc Facebook Ads chứ không ghi (`lib/integrations/facebook/*` không
-    // có hàm bật/tắt), nên một nút "Tạm dừng" ở đây sẽ là nút giả: người bấm tin đã xong, tiền vẫn chảy.
+    /*
+      CỐ Ý chỉ có nút MỞ — nhưng LÝ DO đã đổi, và chép lại lý do cũ là nói sai.
+
+      Trước 22/09/2026 ERP chỉ ĐỌC Facebook Ads, nên một nút "Tạm dừng" ở đây là nút giả. Nay
+      `lib/integrations/facebook/ads-write.ts` ghi được thật.
+
+      Đường ghi ấy KHÔNG đặt được lên một dòng hàng đợi, vì nó là quy trình HAI BƯỚC có phiếu duyệt
+      ký HMAC: bước ĐỀ NGHỊ đọc ngân sách hiện tại rồi phát một phiếu gắn với (người · công cụ ·
+      đúng số tiền ấy), bước ÁP tính lại chữ ký ở máy chủ. Một nút bấm-một-phát trên hàng đợi sẽ
+      phải bỏ bước đầu, tức bỏ luôn thứ làm cho phiếu duyệt có nghĩa.
+
+      Nên hàng đợi đưa người sang ĐÚNG chỗ có bàn tay, và `ADS_OPEN` là hành động thật của nó.
+    */
     actions: ["ADS_OPEN"],
   },
   INVENTORY_EXCEPTION: {
