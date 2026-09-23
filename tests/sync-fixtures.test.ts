@@ -226,6 +226,7 @@ import { testCsCustomerQueue } from "./cs-customer-queue.test";
 import { testCareUiContrast } from "./care-ui-contrast.test";
 import { testCareFilters } from "./care-filters.test";
 import { testCareRounds } from "./care-rounds.test";
+import { testCareDateFilters } from "./care-date-filters.test";
 import { testProductNotes } from "./product-notes.test";
 import { testSmokeTiming } from "./smoke-timing.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
@@ -1683,6 +1684,7 @@ async function main() {
   testCareUiContrast();
   testCareFilters();
   testCareRounds();
+  testCareDateFilters();
   await testProductNotes(db);
   testSmokeTiming();
   testUiConsistency();

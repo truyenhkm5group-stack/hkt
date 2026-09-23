@@ -1,4 +1,5 @@
 import type { BusinessAction } from "@/lib/constants/care-outcome";
+import type { CareDates } from "@/lib/constants/care-dates";
 import type { CareDecision } from "@/lib/constants/care-resolution";
 import type { CareBacklogGroup, CareTimelineEntry } from "@/lib/constants/care-rounds";
 import type { CarrierSubstate } from "@/lib/constants/carrier-substate";
@@ -171,6 +172,17 @@ export type CareCase = {
   carrierRequest: CarrierRequestView | null;
   /** Rút gọn: có gửi thẳng API được không. Chi tiết từng hành động ở `getCareCaseDetail().capabilities`. */
   carrierCapability: "API" | "MANUAL";
+  /**
+   * BỐN MỐC THỜI GIAN ĐỘC LẬP — xem `lib/constants/care-dates.ts`.
+   *
+   * Mỗi mốc là `Date | null`, và `null` luôn có nghĩa CHƯA BIẾT (mỗi mốc thiếu vì một lý do khác
+   * nhau, khai ở `CARE_DATES[k].unknownLabel`). Tuyệt đối không nơi nào được lùi về một mốc khác
+   * để lấp chỗ: hai mốc VTP ở đây khác nhau đúng ở chỗ một cái ĐỨNG YÊN khi cái kia nhảy.
+   *
+   * Optional vì hợp đồng này cấm đổi hình dạng cũ — nơi gọi cũ không truyền thì coi như chưa biết
+   * cả bốn, và bộ lọc theo khoảng ngày sẽ không nhận chúng (đúng: chưa biết thì chưa lọt).
+   */
+  dates?: CareDates;
   view: Exclude<CareView, "all">;
 };
 

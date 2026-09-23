@@ -68,6 +68,24 @@ export async function testCareWorkbench(db: Db) {
   assert.equal(s1.care.status, "NEW");
   assert.ok(s1.sla.firstResponseBreached, "giao hụt 5 giờ chưa ai phản hồi ⇒ vỡ SLA phản hồi đầu");
   assert.equal(s1.carrierCapability, "MANUAL");
+
+  /*
+    ═══ BỐN MỐC THỜI GIAN ĐI CÙNG DÒNG, VÀ CHÚNG KHÔNG PHẢI MỘT ═══
+
+    So với CHÍNH các mốc đã gieo (cùng `gio()`), không so với một ngày tuyệt đối: bài kiểm phải đo
+    mã nguồn chứ không đo hôm nay là thứ mấy (mục 50, 65). Dung sai một phút cho lượt ghi.
+  */
+  const gan = (a: Date | null | undefined, b: Date, ten: string) => {
+    assert.ok(a, `${ten}: phải có mốc, không được là CHƯA BIẾT`);
+    assert.ok(Math.abs(a.getTime() - b.getTime()) < 60_000, `${ten}: lệch ${Math.round((a.getTime() - b.getTime()) / 1000)}s so với mốc đã gieo`);
+  };
+  gan(s1.dates?.orderCreated, gio(48), "ngày tạo đơn đọc từ orders.inserted_at");
+  gan(s1.dates?.carrierStageSince, gio(5), "mốc đổi sang chặng hiện tại");
+  gan(s1.dates?.carrierLastEvent, gio(5), "tin ĐVVC cuối");
+  assert.equal(s1.dates?.erpLastTouch, null, "chưa ai thao tác ⇒ CHƯA BIẾT, không phải lúc dựng dòng");
+  const s6 = q.dataGaps.find((c) => c.shipmentId === "care-s6");
+  assert.equal(s6?.dates?.carrierLastEvent, null, "kiện chưa từng có tin ⇒ mốc tin cuối là CHƯA BIẾT");
+  assert.equal(s6?.dates?.carrierStageSince, null, "không có chứng từ mang chặng hiện tại ⇒ KHÔNG lùi về ngày tạo vận đơn để lấp chỗ");
   assert.ok(!q.cases.some((c) => c.shipmentId === "care-s2"), "kiện đang giao bình thường KHÔNG vào hàng đợi (quiet)");
   assert.ok(!q.cases.some((c) => c.shipmentId === "care-s6") && q.dataGaps.some((c) => c.shipmentId === "care-s6"), "kiện thiếu dữ liệu nằm ở dataGaps — dữ liệu cũ không phải kiện hỏng");
   assert.ok(q.byReason.some((r) => r.reason === "DELIVERY_FAILED" || r.reason === "NO_CONTACT" || r.reason === "AWAITING_REDELIVERY"), "backlog theo lý do");
@@ -96,6 +114,7 @@ export async function testCareWorkbench(db: Db) {
   assert.equal(s1SauGiao?.history?.rounds, 0, "GIAO VIỆC không phải một lượt xử lý (luật 57) — dù nó đã ghi mốc phản hồi đầu");
   assert.equal(s1SauGiao?.history?.touches, 0, "giao việc cũng không phải một lần CHẠM: một trưởng nhóm giao 50 ca không làm 50 ca được xử lý");
   assert.equal(qSauGiao.backlogGroups.UNTOUCHED.count, qSauGiao.counts.care, "chưa ai làm gì thì mọi kiện cần care đều thuộc nhóm CHƯA AI ĐỤNG");
+  assert.equal(s1SauGiao?.dates?.erpLastTouch, null, "mới chỉ GIAO VIỆC ⇒ mốc tác động ERP vẫn là CHƯA BIẾT (cùng luật với hai khẳng định trên)");
 
   const nt = await addCareNote(actor, { shipmentId: "care-s1", note: "Khách hẹn mai 9h", kind: "RESCHEDULED" });
   assert.ok("ok" in nt && nt.ok && nt.data.status === "IN_PROGRESS" && nt.data.lastNote === "Khách hẹn mai 9h", "note ⇒ đang xử lý");
@@ -269,6 +288,7 @@ export async function testCareWorkbench(db: Db) {
 
   clearMemo();
   q = await getCareQueue();
+  assert.ok(q.cases.find((c) => c.shipmentId === "care-s1")?.dates?.erpLastTouch, "đã ghi note / đổi trạng thái ⇒ phải có mốc tác động ERP");
   console.log(
     `✓ Care engine: ${q.counts.care} cần care · ${q.dataGaps.length} thiếu dữ liệu tách riêng · vòng đời theo bảng chuyển · ${events.length} sự kiện chỉ-thêm · ĐVVC: làm tay / ACKNOWLEDGED→SUCCESS theo sự kiện / retry hữu hạn / UNSUPPORTED · báo cáo attribution chặt`,
   );

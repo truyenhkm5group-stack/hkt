@@ -26,6 +26,8 @@ import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-d
 import { botMessageFailuresByShipment } from "@/lib/queries/cs";
 import { BUCKET_BY_KEY, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
+import { STAGE_SINCE_SQL } from "@/lib/constants/shipment-status-age";
+import type { CareDates } from "@/lib/constants/care-dates";
 import { env } from "@/lib/env";
 import { getDeliveryTower, type TowerRow } from "@/lib/queries/delivery-tower";
 import { getShipmentQuickView } from "@/lib/queries/shipment-quickview";
@@ -168,18 +170,38 @@ async function loadLatestRequests(shipmentIds: string[]): Promise<Map<string, Ca
   );
 }
 
+type QueueFact = {
+  failedAt: Date | null;
+  lastAt: Date | null;
+  createdAt: Date;
+  capability: string;
+  vtpOrderNumber: string | null;
+  failedAttempts: number;
+  /** Mốc kiện ĐỔI sang chặng hiện tại. `null` = chưa có chứng từ nào mang chặng đó. */
+  stageSince: Date | null;
+  /** `orders.inserted_at` — mốc ĐƠN lên Pancake. `null` = vận đơn chưa ghép được với đơn. */
+  orderCreatedAt: Date | null;
+};
+
 /** Mốc vào hàng đợi + năng lực API, một lượt cho cả tập kiện. */
-async function loadQueueFacts(shipmentIds: string[]): Promise<Map<string, { failedAt: Date | null; lastAt: Date | null; createdAt: Date; capability: string; vtpOrderNumber: string | null; failedAttempts: number }>> {
+async function loadQueueFacts(shipmentIds: string[]): Promise<Map<string, QueueFact>> {
   if (!shipmentIds.length) return new Map();
   const db = await getDb();
-  const rows = rowsOf<{ id: string; failed_at: string | null; last_at: string | null; created_at: string; capability: string; vtp_order_number: string | null; failed_attempts: number }>(
+  const rows = rowsOf<{ id: string; failed_at: string | null; last_at: string | null; created_at: string; capability: string; vtp_order_number: string | null; failed_attempts: number; stage_since: string | null; order_created_at: string | null }>(
     await db.execute(sql`
-      select s.id,
-             s.created_at,
-             s.tracking_capability as capability,
-             nullif(s.vtp_order_number, '') as vtp_order_number,
-             (select max(e.occurred_at) from shipment_events e where e.shipment_id = s.id and e.normalized_stage = 'DELIVERY_FAILED') as failed_at,
-             (select max(e.occurred_at) from shipment_events e where e.shipment_id = s.id) as last_at,
+      select shipments.id,
+             shipments.created_at,
+             shipments.tracking_capability as capability,
+             nullif(shipments.vtp_order_number, '') as vtp_order_number,
+             o.inserted_at as order_created_at,
+             /*
+               MỐC ĐỔI TRẠNG THÁI dùng lại ĐÚNG biểu thức của màn hình tuổi chặng — không viết luật
+               thứ hai bằng SQL ở đây. Nó bắt buộc gọi bảng bằng TÊN ĐẦY ĐỦ "shipments", nên truy
+               vấn này cố ý KHÔNG đặt bí danh cho bảng (bí danh ⇒ "missing FROM-clause entry").
+             */
+             ${sql.raw(STAGE_SINCE_SQL)} as stage_since,
+             (select max(e.occurred_at) from shipment_events e where e.shipment_id = shipments.id and e.normalized_stage = 'DELIVERY_FAILED') as failed_at,
+             (select max(e.occurred_at) from shipment_events e where e.shipment_id = shipments.id) as last_at,
              /*
                SỐ LẦN PHÁT HỤT — MỘT phép đếm cho cả hàng đợi, và là ĐÚNG phép đếm mà panel chi tiết
                dùng (lib/queries/shipment-quickview.ts). Trước bản 19/09/2026 mỗi nguồn dòng tự
@@ -191,12 +213,66 @@ async function loadQueueFacts(shipmentIds: string[]): Promise<Map<string, { fail
                Đếm theo CHẶNG ĐÃ CHUẨN HOÁ, không dò chữ: ĐVVC đổi một chữ là phép dò chữ lặng lẽ
                trả về 0.
              */
-             (select count(*) from shipment_events e where e.shipment_id = s.id and e.normalized_stage = 'DELIVERY_FAILED')::int as failed_attempts
-        from shipments s
-       where s.id in ${shipmentIds}
+             (select count(*) from shipment_events e where e.shipment_id = shipments.id and e.normalized_stage = 'DELIVERY_FAILED')::int as failed_attempts
+        from shipments
+        left join orders o on o.id = shipments.order_id
+       where shipments.id in ${shipmentIds}
     `),
   );
-  return new Map(rows.map((r) => [r.id, { failedAt: r.failed_at ? new Date(r.failed_at) : null, lastAt: r.last_at ? new Date(r.last_at) : null, createdAt: new Date(r.created_at), capability: r.capability, vtpOrderNumber: r.vtp_order_number, failedAttempts: Number(r.failed_attempts ?? 0) }]));
+  return new Map(
+    rows.map((r) => [
+      r.id,
+      {
+        failedAt: r.failed_at ? new Date(r.failed_at) : null,
+        lastAt: r.last_at ? new Date(r.last_at) : null,
+        createdAt: new Date(r.created_at),
+        capability: r.capability,
+        vtpOrderNumber: r.vtp_order_number,
+        failedAttempts: Number(r.failed_attempts ?? 0),
+        stageSince: r.stage_since ? new Date(r.stage_since) : null,
+        orderCreatedAt: r.order_created_at ? new Date(r.order_created_at) : null,
+      },
+    ]),
+  );
+}
+
+/**
+ * ═══════════ LẦN CUỐI CÓ NGƯỜI THAO TÁC TRÊN CA, TRONG ERP ═══════════
+ *
+ * Gộp hai nguồn, cùng bộ điều kiện mà `lib/queries/care-case-audit.ts` dùng cho mốc ĐẦU TIÊN
+ * (mục 57) — hai báo cáo nói về "người động vào" thì phải đứng trên cùng một định nghĩa:
+ *
+ *  · `care_actions` — việc chăm sóc không cần bàn cãi (gọi · nhắn · sửa địa chỉ · báo bưu cục).
+ *  · `care_case_events` với `source <> 'SYSTEM'` và `action <> 'ASSIGN'` — rộng hơn: đổi trạng
+ *    thái, ghi note, gửi lệnh ĐVVC. GIAO VIỆC bị loại, vì một trưởng nhóm bấm giao 50 ca trong ba
+ *    phút sẽ làm 50 ca trông như vừa được xử lý, và bộ lọc "chưa ai đụng tới từ ba ngày nay" —
+ *    đúng câu hỏi bộ lọc này sinh ra để trả lời — sẽ trả về rỗng.
+ *
+ * Trả về mốc MUỘN NHẤT trên cả vòng đời kiện; việc cắt theo ĐỢT đang hiển thị làm ở nơi gọi, bằng
+ * một phép so duy nhất: mốc cũ hơn lúc mở đợt ⇒ đợt này CHƯA AI ĐỘNG VÀO. Đúng và rẻ, vì nếu mốc
+ * muộn nhất còn cũ hơn lúc mở đợt thì mọi mốc khác cũng vậy.
+ */
+async function loadErpTouch(shipmentIds: string[]): Promise<Map<string, Date>> {
+  if (!shipmentIds.length) return new Map();
+  const db = await getDb();
+  const rows = rowsOf<{ shipment_id: string; at: string }>(
+    await db.execute(sql`
+      select x.shipment_id, max(x.at) as at
+        from (
+          select a.shipment_id, a.created_at as at
+            from care_actions a
+           where a.shipment_id in ${shipmentIds}
+          union all
+          select e.shipment_id, e.created_at as at
+            from care_case_events e
+           where e.shipment_id in ${shipmentIds}
+             and e.source <> 'SYSTEM'
+             and e.action <> 'ASSIGN'
+        ) x
+       group by x.shipment_id
+    `),
+  );
+  return new Map(rows.map((r) => [r.shipment_id, new Date(r.at)]));
 }
 
 /**
@@ -537,11 +613,12 @@ async function buildQueue(): Promise<CareQueue> {
   const doneOnlyIds = doneRows.map((r) => r.care.shipmentId).filter((id) => !towerIds.has(id) && !wrongInfo.some((w) => w.shipment_id === id));
 
   const allIds = [...towerIds, ...wrongInfo.map((w) => w.shipment_id), ...doneOnlyIds];
-  const [careMap, reqMap, facts, productMap, doneShipments] = await Promise.all([
+  const [careMap, reqMap, facts, productMap, erpTouch, doneShipments] = await Promise.all([
     loadCareRows(allIds),
     loadLatestRequests(allIds),
     loadQueueFacts(allIds),
     loadProducts(allIds),
+    loadErpTouch(allIds),
     doneOnlyIds.length
       ? db
           .select({
@@ -592,9 +669,32 @@ async function buildQueue(): Promise<CareQueue> {
     return f?.failedAt ?? f?.lastAt ?? fallback ?? f?.createdAt ?? now;
   };
 
+  /*
+    ═══ BỐN MỐC THỜI GIAN CỦA MỘT DÒNG — DỰNG Ở ĐÚNG MỘT CHỖ ═══
+
+    Ba nguồn dòng (tháp giao vận · case sai thông tin · kiện đã đóng) đi qua cùng hàm này, nên
+    không nguồn nào có thể mang một mốc riêng. Lý lẽ từng mốc ở `lib/constants/care-dates.ts`.
+
+    `erpLastTouch` cắt theo ĐỢT đang hiển thị: thao tác của đợt TRƯỚC không được tính sang đợt này
+    (mục 59 — một đợt mới là một việc mới). Không có đợt care nào ⇒ không có mốc nào để so ⇒ mọi
+    thao tác đã ghi đều thuộc về kiện này, nên vẫn tính.
+  */
+  const datesOf = (shipmentId: string): CareDates => {
+    const f = facts.get(shipmentId);
+    const c = careMap.get(shipmentId);
+    const chamVao = erpTouch.get(shipmentId) ?? null;
+    const moDot = c?.openedAt ?? c?.createdAt ?? null;
+    return {
+      orderCreated: f?.orderCreatedAt ?? null,
+      carrierStageSince: f?.stageSince ?? null,
+      carrierLastEvent: f?.lastAt ?? null,
+      erpLastTouch: chamVao && (!moDot || chamVao.getTime() >= moDot.getTime()) ? chamVao : null,
+    };
+  };
+
   const all: CareCase[] = [];
   const push = (
-    base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier" | "products" | "vtpOrderNumber"> & {
+    base: Omit<CareCase, "care" | "sla" | "view" | "reopened" | "carrierRequest" | "carrierCapability" | "reasonClass" | "carrier" | "products" | "dates" | "vtpOrderNumber"> & {
       carrier: Omit<CareCase["carrier"], "trackingCapability" | "substate" | "substateLabel">;
       /*
         ═══ TƯ CÁCH HÀNG ĐỢI ĐI THEO ĐIỀU KIỆN CARE, KHÔNG THEO CỜ `active` CỦA ĐỢT ═══
@@ -670,6 +770,7 @@ async function buildQueue(): Promise<CareQueue> {
         đông nhất và quan trọng nhất của hàng đợi.
       */
       history: hist,
+      dates: datesOf(base.shipmentId),
       reasonClass: REASON_CLASS[base.reason],
       care,
       reopened,
