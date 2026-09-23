@@ -125,5 +125,19 @@ trong 500 dòng log gần nhất" **không** giống "không liên quan", nên t
 
 ## Nguồn
 
+Toàn văn phần smoke nằm ở `docs/perf/TECH-6-smoke-tho-2026-09-23.txt` cùng thư mục — **81 dòng,
+đủ 59 tuyến**, để đọc lại số gốc mà không phải tin bảng tóm tắt ở trên.
+
+Tệp ấy đã LỌC trước khi vào kho: log gốc còn có dòng Caddy mang **địa chỉ IP thật của người dùng**
+và tiêu đề cookie. Kho mã này PUBLIC (AGENTS.md mục 5).
+
+**Vì sao thêm tệp thô, sau khi bản tóm tắt đã có:** bảng "Mười trang chậm nhất" ở trên CỐ Ý chỉ
+liệt kê trang chậm, nên `/orders` — nhanh, 203 ms — chỉ có mặt ở dòng văn xuôi và **không kèm
+kích thước phản hồi**. Ngày 23/09 tôi đưa cho agent con số `/orders 276 kB` trong một lượt phản
+hồi review; agent TỪ CHỐI dùng nó, và nó đúng: con số ấy không có trong tệp nó được chỉ tới. Nó
+nằm ở đầu ra thô mà tôi chưa bao giờ đưa vào kho.
+
+Một con số chỉ dùng được khi nó ĐỌC LẠI ĐƯỢC. Tệp thô này làm cả 59 tuyến trích dẫn được.
+
 Lượt chạy `ops verify` số **35817182554**. Toàn văn đầu ra nằm trong log của lượt chạy ấy trên
 GitHub Actions.
