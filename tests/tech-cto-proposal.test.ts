@@ -793,9 +793,32 @@ export async function testCtoProposal() {
   /* ───── dọn ───── */
   await db.delete(schema.techProposalTasks);
   await db.delete(schema.techProposals);
+  /*
+    ═══ ĐỀ BÀI DO AI CTO SINH RA KHÔNG ĐƯỢC BẢO AI KẾT LUẬN TỪ SỰ VẮNG MẶT ═══
+
+    Prompt đã có luật "KHI THIẾU DỮ LIỆU: đưa vào questions" — luật ấy áp cho CHÍNH AI CTO. Nó
+    KHÔNG cấm AI CTO viết một đề bài bảo agent kết luận từ chỗ không tìm thấy gì, và chỗ hở ấy đã
+    cắn thật.
+
+    Việc TECH-9 (23/09/2026): đề bài do AI CTO sinh ra nói "nếu không có bằng chứng thì ghi thẳng
+    là không liên quan". Agent làm ĐÚNG lời dặn và giao về một mục mang tiêu đề "KHÔNG LIÊN QUAN",
+    trong khi thân mục tự nói nó chỉ đọc được 500 dòng log. Lỗi ở LỜI DẶN, không ở agent — nên
+    bản vá phải nằm ở nơi lời dặn được sinh ra.
+
+    Bài kiểm này quét PROMPT, không quét đề bài sinh ra. Một bộ dò câu chữ trong đề bài sẽ là đúng
+    thứ `AGENTS.md` mục 45 gọi là heuristic yếu: nó bắt được vài cách viết và bỏ sót vô số cách
+    khác, rồi người ta tin nó. Prompt thì đọc được, và xoá một luật khỏi prompt là một diff nhìn
+    thấy được.
+  */
+  const promptCto = readFileSync(path.join(goc, "lib/agents/cto.ts"), "utf8");
+  const heThong = promptCto.slice(promptCto.indexOf("const HE_THONG"), promptCto.indexOf("function moTaVai"));
+  assert.ok(/KẾT LUẬN TỪ SỰ VẮNG MẶT/.test(heThong), "prompt AI CTO phải cấm viết đề bài kết luận từ sự vắng mặt");
+  assert.ok(/CHƯA TÌM THẤY BẰNG CHỨNG/.test(heThong), "và phải nêu ra kết quả đúng thay thế");
+  assert.ok(/PHẠM VI/.test(heThong), "tiêu chí nghiệm thu phải đòi PHẠM VI đã tìm — một câu có/không không nói được chỗ nào chưa ai tới");
+
   await db.delete(schema.techTasks);
 
   console.log(
-    "✓ AI CTO chế độ đề xuất: lập kế hoạch KHÔNG tạo việc thật · agent không duyệt/không từ chối · người duyệt thì việc tạo qua dịch vụ và phụ thuộc nối bằng id thật · AI nói R0 cho việc lương thì MÁY vẫn xếp R2 và vẫn chờ ký · duyệt hai lần không nhân đôi · bản từ chối/bị thay thế/nháp không áp được · JSON hỏng, vai lạ, module lạ, phụ thuộc vòng đều bị từ chối · prompt không mang bí mật (cả tên lẫn giá trị) · ĐÚNG MỘT lượt sửa khi sai hợp đồng, và KHÔNG sửa khi model chưa trả lời · câu trả lời bị cắt KHÔNG bị in ra thành lỗi JSON · quá tải/sai khoá/hết tín dụng là ba câu khác nhau · lượt dài đi bằng streaming · không đường ghi thứ hai vào tech_tasks · giao diện không có nút chạy tất cả · không vai nào merge/deploy/ghi production",
+    "✓ AI CTO chế độ đề xuất: lập kế hoạch KHÔNG tạo việc thật · agent không duyệt/không từ chối · người duyệt thì việc tạo qua dịch vụ và phụ thuộc nối bằng id thật · AI nói R0 cho việc lương thì MÁY vẫn xếp R2 và vẫn chờ ký · duyệt hai lần không nhân đôi · bản từ chối/bị thay thế/nháp không áp được · JSON hỏng, vai lạ, module lạ, phụ thuộc vòng đều bị từ chối · prompt không mang bí mật (cả tên lẫn giá trị) · ĐÚNG MỘT lượt sửa khi sai hợp đồng, và KHÔNG sửa khi model chưa trả lời · câu trả lời bị cắt KHÔNG bị in ra thành lỗi JSON · quá tải/sai khoá/hết tín dụng là ba câu khác nhau · lượt dài đi bằng streaming · không đường ghi thứ hai vào tech_tasks · giao diện không có nút chạy tất cả · không vai nào merge/deploy/ghi production · đề bài sinh ra KHÔNG được bảo ai kết luận từ sự vắng mặt",
   );
 }
