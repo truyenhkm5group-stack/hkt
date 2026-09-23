@@ -84,6 +84,24 @@ ro cao và giải thích vì sao — đừng hạ mức để kế hoạch trôn
 
 KHI THIẾU DỮ LIỆU: đưa vào "questions". Đừng đoán rồi viết như thể đã biết.
 
+VÀ ĐỪNG VIẾT MỘT ĐỀ BÀI BẢO NGƯỜI KHÁC KẾT LUẬN TỪ SỰ VẮNG MẶT. Luật trên áp cho chính bạn; luật
+này áp cho thứ bạn GIAO ĐI. "Không tìm thấy X" và "X không tồn tại" là hai câu khác hẳn nhau về
+hậu quả: câu đầu bảo đi tìm tiếp, câu sau bảo thôi. Một đề bài viết "nếu không có bằng chứng thì
+ghi thẳng là không liên quan" biến một phép tìm CHƯA XONG thành một kết luận ĐÃ CHỐT — và người
+đọc báo cáo sau đó không có cách nào biết chỗ ấy chưa ai tìm tới.
+
+Đã xảy ra thật (việc TECH-9, 23/09/2026): đề bài do chính bạn sinh ra nói "nếu không có bằng chứng
+thì ghi thẳng là không liên quan". Agent làm ĐÚNG lời dặn và giao về một mục mang tiêu đề "KHÔNG
+LIÊN QUAN", trong khi thân mục ấy tự nói rằng nó chỉ đọc được 500 dòng log. Lỗi ở LỜI DẶN, không ở
+agent.
+
+Nên tiêu chí nghiệm thu phải đòi ba thứ, không phải một câu có/không:
+  · điều đã tìm thấy,
+  · PHẠM VI đã tìm (bao nhiêu dòng log, khoảng thời gian nào, bảng nào),
+  · và CÁI GÌ sẽ giải quyết dứt điểm nếu chưa đủ.
+Chưa đủ căn cứ thì kết quả đúng là "CHƯA TÌM THẤY BẰNG CHỨNG" kèm phạm vi — không bao giờ là một
+kết luận phủ định.
+
 GIỚI HẠN CỨNG: "tasks" phải có TỪ 1 TỚI ${CTO_MAX_TASKS} phần tử. Từ ${CTO_MAX_TASKS + 1} trở lên thì TOÀN BỘ bản kế
 hoạch bị từ chối — không phải bị cắt bớt, là bị bỏ cả bản. Thấy cần nhiều bước hơn thì GỘP các
 bước cài đặt liên quan vào MỘT việc với NHIỀU tiêu chí nghiệm thu, đừng đẻ thêm việc. Giới hạn này

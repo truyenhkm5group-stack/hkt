@@ -1,3 +1,4 @@
+import { deliveryRateCoverageParts } from "@/lib/constants/delivery-rate";
 import { SectionCard } from "@/components/ui-bits";
 import { InfoHint } from "@/components/info-hint";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
@@ -177,6 +178,38 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
         ) : null}
 
         {/*
+          ═══════════ BẰNG CHỨNG DỪNG Ở ĐÂU — VÀ BAO NHIÊU TIỀN ĐANG ĐỨNG SAU CHỖ DỪNG ẤY ═══════════
+
+          Đo production 23/09/2026: 619 chiến dịch trong một cửa sổ 14 ngày, và trong nhóm đủ tiền
+          thì chiến dịch nhiều đơn nhất cũng chỉ có 3 đơn — cổng mẫu (10) không bao giờ mở, nên
+          45.726.057 ₫ không nhận được kết luận nào. Cùng dữ liệu ấy ở cấp MÃ HÀNG: 3/4 mã có
+          khuyến nghị, phủ 99,8% tiền.
+
+          Dải này nói ba con số RIÊNG vì mỗi cái sửa ở một chỗ khác: mượn được (đã có câu trả lời) ·
+          chưa nối được về mã (đi khai mã cho chiến dịch) · mã cũng chưa kết luận (đợi dữ liệu).
+          Gộp lại thành một con số "chưa đủ dữ liệu" là đúng thứ đã giấu 45,7 triệu suốt hai ngày.
+        */}
+        {dimension === "campaign" && (d.inheritedCoverage.rows > 0 || d.inheritedCoverage.unlinkedRows > 0) ? (
+          <p className="border-b px-5 py-2 text-xs text-muted-foreground">
+            <b>{formatNumber(d.inheritedCoverage.rows)}</b> chiến dịch không tự kết luận được nhưng <b>mượn được kết luận của mã hàng</b> (
+            {formatVND(d.inheritedCoverage.spend)} tiền quảng cáo) — câu mượn hiện ngay dưới khuyến nghị của dòng, kèm tên mã.{" "}
+            {d.inheritedCoverage.unlinkedRows > 0 ? (
+              <>
+                <b>{formatNumber(d.inheritedCoverage.unlinkedRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.unlinkedSpend)}) chưa nối được về mã
+                nào — sửa được bằng cách khai mã hàng cho chiến dịch ở màn Chi phí quảng cáo.{" "}
+              </>
+            ) : null}
+            {d.inheritedCoverage.productSilentRows > 0 ? (
+              <>
+                <b>{formatNumber(d.inheritedCoverage.productSilentRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.productSilentSpend)}) nối được
+                nhưng chính mã ấy cũng chưa kết luận được — chỗ này đợi thêm dữ liệu, không sửa bằng tay được.{" "}
+              </>
+            ) : null}
+            Kết luận mượn nói về CẢ MÃ, không phải riêng chiến dịch — và nó KHÔNG mở đường cho bàn tay đổi ngân sách.
+          </p>
+        ) : null}
+
+        {/*
           ═══════════ CĂN CỨ TỶ LỆ GTC — BẮT BUỘC ĐỨNG CẠNH MỌI CON SỐ TẠM TÍNH ═══════════
 
           Dòng nào chưa đủ đơn ngã ngũ thì khuyến nghị của nó đứng trên LỢI NHUẬN TẠM TÍNH, tức
@@ -190,9 +223,15 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
         {soDongTamTinh > 0 ? (
           <p className="border-b px-5 py-2 text-xs text-muted-foreground">
             <b>{formatNumber(soDongTamTinh)}</b> dòng đang quyết trên <b>lợi nhuận tạm tính</b> — phần đơn chưa ngã ngũ được cân theo tỷ lệ giao thành
-            công của thang bậc. Độ phủ trong kỳ: <b>{d.rateBasis.coverage.projected ?? 0}</b> mã theo số đo từng đơn ·{" "}
-            <b>{d.rateBasis.coverage.history ?? 0}</b> mã theo lịch sử của chính mã · <b>{d.rateBasis.coverage.override ?? 0}</b> mã ghi đè tay ·{" "}
-            <b>{d.rateBasis.coverage.default ?? 0}</b> mã theo MỤC TIÊU {formatPercent(d.rateBasis.fallbackDeliveryRate)}.{" "}
+            công của thang bậc. Độ phủ trong kỳ: <b>{deliveryRateCoverageParts(d.rateBasis.coverage).total}</b> mã —{" "}
+            {deliveryRateCoverageParts(d.rateBasis.coverage).parts.map((x, i) => (
+              <span key={x.source}>
+                {i ? " · " : ""}
+                <b>{x.count}</b> {x.label.toLowerCase()}
+                {x.source === "default" ? ` (MỤC TIÊU ${formatPercent(d.rateBasis!.fallbackDeliveryRate)})` : ""}
+              </span>
+            ))}
+            .{" "}
             {(d.rateBasis.coverage.default ?? 0) > 0 ? (
               <>
                 Mã chạy theo mục tiêu thì lợi nhuận tạm tính của nó đọc là <b>&ldquo;theo kế hoạch&rdquo;</b>, không phải &ldquo;sẽ về ngần ấy&rdquo; —

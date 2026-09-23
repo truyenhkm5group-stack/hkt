@@ -1,0 +1,196 @@
+{
+  "date": "2026-09-24T00:00:00Z",
+  "environment": {
+    "branch": "ai/frontend/TECH-6-mudq6e2k",
+    "commit": "65547ab1dfc85edd0a5dfe4892038faaae17265e",
+    "nodeVersion": "v22.0.0",
+    "browserVersion": "Chrome 128.0.0.0",
+    "platform": "darwin (macOS) / linux / win32",
+    "appUrl": "http://localhost:3000",
+    "databaseBackend": "pglite (embedded) or postgresql"
+  },
+  "measurements": [
+    {
+      "id": "orders-initial-load",
+      "scenario": "page-load-first-time",
+      "page": "/orders",
+      "query_params": {
+        "period": "month",
+        "pageSize": 20,
+        "sort": "created_at",
+        "dir": "desc"
+      },
+      "description": "Tải trang /orders lần đầu, cache disabled",
+      "run": 1,
+      "metrics": {
+        "ttfb_ms": null,
+        "fcp_ms": null,
+        "lcp_ms": null,
+        "dcl_ms": null,
+        "load_ms": null,
+        "html_size_gzip_bytes": null,
+        "html_size_raw_bytes": null,
+        "total_http_requests": null,
+        "cls": null,
+        "time_to_first_row_ms": null,
+        "time_to_last_row_ms": null,
+        "first_interactive_ms": null
+      },
+      "network": {
+        "encoding": null,
+        "cache_control_header": null,
+        "etag": null,
+        "throttle_profile": "none (or 3G, 4G)"
+      },
+      "notes": "Ghi lại từ DevTools Network tab > thời gian > Waiting (TTFB), Performance tab > Metrics"
+    },
+    {
+      "id": "orders-filter-change",
+      "scenario": "filter-change-period",
+      "page": "/orders",
+      "filter_change": {
+        "from": "period=month",
+        "to": "period=week"
+      },
+      "description": "Đổi bộ lọc từ tháng sang tuần trên trang đã load",
+      "run": 1,
+      "metrics": {
+        "time_to_update_ms": null,
+        "requests_sent": null,
+        "requests_type": null,
+        "request_size_gzip_bytes": null,
+        "cache_hit": false,
+        "dom_reflow_time_ms": null,
+        "final_row_count": null
+      },
+      "network": {
+        "throttle_profile": "none"
+      },
+      "observations": {
+        "full_page_reload": null,
+        "partial_update": null,
+        "loading_indicator_shown": null,
+        "data_revalidation": null
+      },
+      "notes": "Network tab > bấm Clear > bấm filter > đếm requests mới"
+    },
+    {
+      "id": "orders-sort-change",
+      "scenario": "sort-change-created-at",
+      "page": "/orders",
+      "sort_change": {
+        "from": "created_at,asc",
+        "to": "created_at,desc"
+      },
+      "description": "Đổi sắp xếp (ascending → descending)",
+      "run": 1,
+      "metrics": {
+        "time_to_update_ms": null,
+        "requests_sent": null,
+        "server_recalculation": null,
+        "client_side_sort": null
+      },
+      "notes": "Quan sát Network tab xem có server request không, hay client sort"
+    },
+    {
+      "id": "orders-pagination",
+      "scenario": "page-change",
+      "page": "/orders",
+      "pagination": {
+        "from": "page=1&pageSize=20",
+        "to": "page=2&pageSize=20"
+      },
+      "description": "Chuyển từ trang 1 sang trang 2",
+      "run": 1,
+      "metrics": {
+        "time_to_load_ms": null,
+        "requests_sent": null,
+        "scroll_behavior": null
+      },
+      "notes": "Xem có auto-scroll tới top hay smooth scroll"
+    },
+    {
+      "id": "returns-report-load",
+      "scenario": "page-load-report",
+      "page": "/reports/returns",
+      "query_params": {
+        "period": "month"
+      },
+      "description": "Tải trang báo cáo GTC (/reports/returns)",
+      "run": 1,
+      "metrics": {
+        "ttfb_ms": null,
+        "lcp_ms": null,
+        "html_size_gzip_bytes": null,
+        "total_requests": null,
+        "cache_ttl_seconds": null
+      },
+      "notes": "Báo cáo có cache 60s, nên lần đầu chậm hơn, lần 2 nhanh hơn"
+    },
+    {
+      "id": "shipments-list-load",
+      "scenario": "page-load-shipments",
+      "page": "/shipments",
+      "query_params": {
+        "pageSize": 20
+      },
+      "description": "Tải trang danh sách vận đơn",
+      "run": 1,
+      "metrics": {
+        "ttfb_ms": null,
+        "lcp_ms": null,
+        "html_size_gzip_bytes": null,
+        "total_requests": null
+      },
+      "notes": "So sánh với orders, xem trang nào nặng hơn"
+    }
+  ],
+  "client_server_boundary": {
+    "server_components": [
+      {
+        "path": "app/(dashboard)/orders/page.tsx",
+        "reason": "Đọc searchParams, gọi getOrdersList() từ lib/queries/orders, trả HTML + dữ liệu"
+      },
+      {
+        "path": "app/(dashboard)/reports/returns/page.tsx",
+        "reason": "Server component, tính toán ORDER_OUTCOME logic phức tạp ở server"
+      }
+    ],
+    "client_components": [
+      {
+        "path": "app/(dashboard)/orders/orders-table.tsx",
+        "uses_client": true,
+        "reason": "Wrapper bảng, nhận dữ liệu qua props, gọi router.push() khi filter thay đổi"
+      },
+      {
+        "path": "components/data-table/data-table.tsx",
+        "uses_client": true,
+        "reason": "Bảng chung TanStack Table, quản lý state URL qua nuqs"
+      }
+    ],
+    "data_flow": "page.tsx (Server) --props--> OrdersTable (Client) --nuqs--> URL change --> page.tsx re-render"
+  },
+  "summary": {
+    "average_ttfb_ms": null,
+    "average_lcp_ms": null,
+    "average_payload_kb": null,
+    "average_requests_per_page_load": null,
+    "average_time_to_filter_update_ms": null,
+    "total_measurements": null,
+    "slowest_scenario": null,
+    "fastest_scenario": null,
+    "recommendations": [
+      "Nếu TTFB > 200ms: thêm database indexes, cache query (memo), lazy load components",
+      "Nếu LCP > 500ms: virtual scrolling, pagination nhỏ hơn (10-15), code splitting",
+      "Nếu payload > 300KB: GraphQL (thinned responses), enable Brotli compression, dedup shared data",
+      "Nếu requests > 5: batch requests, Server Actions caching, lazy load chunks",
+      "Nếu CLS > 0.1: fixed header, stable grid layout, skeleton loading"
+    ]
+  },
+  "notes": {
+    "how_to_fill": "Dùng Chrome DevTools Network tab + Performance tab để ghi các giá trị null thành con số thực tế",
+    "minimum_runs": 3,
+    "cache_behavior": "Lần đầu: disable cache. Lần 2-3: cache bật (mô phỏng user reload)",
+    "next_steps": "Sau khi có baseline, tối ưu hóa dựa vào recommendations, sau đó đo lại để so sánh"
+  }
+}

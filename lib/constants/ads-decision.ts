@@ -68,6 +68,35 @@ export const DECISION_BASIS_NOTE: Record<DecisionBasis, string> = {
     "Phần lớn đơn còn đang sản xuất hoặc đang đi. Lợi nhuận ở đây là TẠM TÍNH: phần đang treo được cân theo tỷ lệ giao thành công ước tính của mã hàng. Khuyến nghị vì thế là tối ưu THEO KẾ HOẠCH — GTC thực về cao hơn thì càng tốt, thấp hơn là việc của khâu giao.",
 };
 
+/**
+ * ═══════════ KẾT LUẬN MƯỢN CỦA MÃ HÀNG, KHI CHIẾN DỊCH KHÔNG TỰ KẾT LUẬN ĐƯỢC ═══════════
+ *
+ * Đo production 23/09/2026: shop chạy **619 chiến dịch trong một cửa sổ 14 ngày**, và trong nhóm
+ * đủ tiền (≥ 300K) thì chiến dịch nhiều đơn nhất cũng chỉ có **3 đơn**. Cổng mẫu đòi 10, nên nó
+ * không bao giờ mở — **45.726.057 ₫ (63% tiền quảng cáo) không nhận được một kết luận nào**.
+ *
+ * Cùng ngày, cùng dữ liệu, ở cấp MÃ HÀNG: 3/4 mã có khuyến nghị, phủ **99,8%** tiền.
+ *
+ * Bằng chứng tồn tại — chỉ là nó không tồn tại ở độ mịn CHIẾN DỊCH. Nên dòng chiến dịch không tự
+ * kết luận được sẽ MƯỢN kết luận của mã hàng nó đang chạy, và nói rõ là mượn.
+ *
+ * ─── BA ĐIỀU KẾT LUẬN MƯỢN KHÔNG ĐƯỢC LÀM ───
+ *
+ *  1. **Không thay kết luận của chính dòng.** `action` vẫn là `INSUFFICIENT_DATA` — vì đó là sự
+ *     thật về CHIẾN DỊCH này. Kết luận mượn là một trường RIÊNG.
+ *  2. **Không phân biệt được chiến dịch tốt với chiến dịch xấu trong cùng một mã.** Nó nói về cả
+ *     mã. Một chiến dịch dở nằm trong một mã lãi vẫn sẽ mượn chữ "còn dư địa" — và người đọc phải
+ *     thấy được điều đó, nên nhãn luôn mang TÊN MÃ chứ không chỉ mang chữ.
+ *  3. **Không mở đường cho bàn tay.** Cổng ghi ngân sách đọc `action` của chính dòng, và `action`
+ *     không đổi. Máy vẫn không được tiêu tiền dựa trên bằng chứng của một thực thể khác.
+ */
+export type InheritedVerdict = {
+  productKey: string;
+  productName: string;
+  action: AdsAction;
+  reason: string;
+};
+
 /** Hành động đề xuất cho một dòng. Thứ tự này cũng là thứ tự ưu tiên xử lý trên giao diện. */
 export type AdsAction = "SCALE" | "HOLD" | "WATCH" | "CUT" | "FIX_DELIVERY" | "INSUFFICIENT_DATA" | "NO_SPEND_DATA";
 
