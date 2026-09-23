@@ -1,3 +1,4 @@
+import { DO_DAI_TOI_THIEU_GHI_CHU_LOI, REVIEW_VERDICTS, type ReviewVerdict } from "@/lib/constants/agent-clean-streak";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import {
@@ -540,6 +541,47 @@ export async function setTechAgentRisks(
 
   await db.update(schema.techAgents).set({ allowedRisks: sau }).where(eq(schema.techAgents.id, input.agentId));
   return { ok: true, truoc, sau };
+}
+
+/**
+ * GHI PHÁN QUYẾT REVIEW CHO MỘT LƯỢT CHẠY — cơ sở của chuỗi "lượt chạy sạch".
+ *
+ * Chỉ NGƯỜI ghi được: "sạch" nghĩa là có người đã đọc và không tìm ra gì phải sửa. Một agent tự
+ * chấm lượt chạy của mình là sạch thì cả phép đếm thành tự khen.
+ *
+ * Chỉ lượt `SUCCEEDED`: lượt hỏng đã tự cắt chuỗi, và lượt `BLOCKED` là một lời khai trung thực,
+ * không phải một lần giao hàng để mà chấm.
+ *
+ * "Có lỗi" phải nói lỗi GÌ. Một phán quyết không kèm lý do thì lần sau không ai học được gì từ nó.
+ *
+ * Được sửa phán quyết — review có thể tìm ra lỗi muộn. Người ghi và mốc ghi luôn là của lần ghi
+ * cuối cùng, và người ấy lấy từ PHIÊN, không nhận từ client (AGENTS.md mục 34).
+ */
+export async function setTechRunVerdict(
+  input: { runId: string; verdict: string; note?: string },
+  actor: TechActor,
+): Promise<TechResult> {
+  if (actor.kind !== "HUMAN") return { error: "Chỉ người mới ghi được phán quyết review — agent không tự chấm lượt chạy của mình." };
+  if (!(REVIEW_VERDICTS as readonly string[]).includes(input.verdict)) {
+    return { error: `Phán quyết không hợp lệ. Chỉ nhận: ${REVIEW_VERDICTS.join(" · ")}.` };
+  }
+  const verdict = input.verdict as ReviewVerdict;
+  const note = (input.note ?? "").trim();
+  if (verdict === "CO_LOI" && note.length < DO_DAI_TOI_THIEU_GHI_CHU_LOI) {
+    return { error: "Ghi \"có lỗi\" thì phải nói lỗi gì (ít nhất một câu) — một phán quyết không kèm lý do thì lần sau không ai học được gì." };
+  }
+
+  const db = await getDb();
+  const run = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, input.runId) });
+  if (!run) return { error: "Không tìm thấy lượt chạy này." };
+  if (run.status !== "SUCCEEDED") {
+    return { error: `Chỉ chấm được lượt đã giao xong. Lượt này đang ở trạng thái ${run.status} — lượt hỏng đã tự cắt chuỗi, lượt BLOCKED là lời khai không làm được, không phải một lần giao hàng.` };
+  }
+  await db
+    .update(schema.techAgentRuns)
+    .set({ reviewVerdict: verdict, reviewNote: note, reviewedByUserId: actor.id, reviewedAt: new Date() })
+    .where(eq(schema.techAgentRuns.id, input.runId));
+  return { ok: true };
 }
 
 export async function setTechAgentEnabled(input: { agentId: string; enabled: boolean }, actor: TechActor): Promise<TechResult> {

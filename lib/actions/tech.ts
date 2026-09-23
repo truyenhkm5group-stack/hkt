@@ -1,5 +1,6 @@
 "use server";
 
+import { REVIEW_VERDICTS } from "@/lib/constants/agent-clean-streak";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
@@ -18,27 +19,7 @@ import {
   TECH_TASK_STATUSES,
   TECH_TASK_TYPES,
 } from "@/lib/constants/tech";
-import {
-  addTechTaskNote,
-  assignTechTaskAgent,
-  createTechIncident,
-  createTechTask,
-  decideTechApproval,
-  linkTechIncidentToTask,
-  overrideTechTaskRisk,
-  recordTechDeployment,
-  seedTechAgents,
-  setTechAgentEnabled,
-  setTechAgentRisks,
-  setTechIncidentStatus,
-  setTechTaskBranch,
-  setTechTaskPriority,
-  setTechTaskStatus,
-  updateTechDeployment,
-  verifyTechTaskOnProduction,
-  type TechActor,
-  type TechResult,
-} from "@/lib/tech/service";
+import { addTechTaskNote, assignTechTaskAgent, createTechIncident, createTechTask, decideTechApproval, linkTechIncidentToTask, overrideTechTaskRisk, recordTechDeployment, seedTechAgents, setTechAgentEnabled, setTechAgentRisks, setTechIncidentStatus, setTechRunVerdict, setTechTaskBranch, setTechTaskPriority, setTechTaskStatus, type TechActor, type TechResult, updateTechDeployment, verifyTechTaskOnProduction } from "@/lib/tech/service";
 
 /**
  * ───────────── SERVER ACTION CỦA PHÒNG TECH ─────────────
@@ -410,6 +391,43 @@ export async function seedTechAgentsAction(): Promise<TechResult<{ created: numb
 }
 
 const batTatSchema = z.object({ agentId: z.string().min(1), enabled: z.boolean() });
+
+const phanQuyetSchema = z.object({
+  runId: z.string().min(1),
+  verdict: z.enum(REVIEW_VERDICTS),
+  note: z.string().max(2000).optional(),
+  /* Để làm mới đúng trang chi tiết việc đang mở — không bắt người bấm tải lại. */
+  taskId: z.string().min(1).optional(),
+});
+
+/**
+ * Ghi phán quyết review cho một lượt chạy agent. Người ghi lấy từ PHIÊN (`nguoiQuanTri`), không
+ * nhận từ client — mục 34: client gửi tên khác với khoá thì dữ liệu nói một đằng quy kết một nẻo.
+ */
+export async function setTechRunVerdictAction(input: unknown): Promise<TechResult> {
+  const user = await nguoiQuanTri();
+  if (!user) return { error: KHONG_QUYEN };
+  let data: z.infer<typeof phanQuyetSchema>;
+  try {
+    data = phanQuyetSchema.parse(input);
+  } catch (e) {
+    return { error: loi(e, "Dữ liệu không hợp lệ") };
+  }
+  const res = await setTechRunVerdict({ runId: data.runId, verdict: data.verdict, note: data.note }, actorOf(user));
+  if ("error" in res) return res;
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "TECH_RUN_VERDICT",
+    entity: "TECH_AGENT_RUN",
+    entityId: data.runId,
+    after: { verdict: data.verdict },
+    reason: data.note,
+  });
+  revalidatePath("/tech/agents");
+  if (data.taskId) revalidatePath(`/tech/tasks/${data.taskId}`);
+  return { ok: true };
+}
 
 export async function setTechAgentEnabledAction(input: unknown): Promise<TechResult> {
   const user = await nguoiQuanTri();

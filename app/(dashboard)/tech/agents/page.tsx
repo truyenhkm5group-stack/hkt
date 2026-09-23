@@ -7,7 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { can, requirePermission } from "@/lib/auth/session";
 import { TECH_AGENT_ROLE_LABEL, TECH_AGENT_STATUS_LABEL, TECH_AGENT_TEMPLATES, type TechAgentRole, type TechAgentStatus } from "@/lib/constants/tech";
 import { formatNumber, formatTimeAgo } from "@/lib/format";
-import { listTechAgents, orphanTechRunCount, techAgentRoleCoverage } from "@/lib/queries/tech-agents";
+import { chuoiSachTheoAgent, listTechAgents, orphanTechRunCount, techAgentRoleCoverage } from "@/lib/queries/tech-agents";
+import { DUNG_VI_LABEL, NGUONG_MO_QA } from "@/lib/constants/agent-clean-streak";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Sổ agent AI" };
@@ -15,7 +16,7 @@ export const metadata = { title: "Sổ agent AI" };
 export default async function TechAgentsPage() {
   const user = await requirePermission("tech:view");
   const canManage = can(user, "tech:manage");
-  const [agents, coverage, orphan] = await Promise.all([listTechAgents(), techAgentRoleCoverage(), orphanTechRunCount()]);
+  const [agents, coverage, orphan, chuoi] = await Promise.all([listTechAgents(), techAgentRoleCoverage(), orphanTechRunCount(), chuoiSachTheoAgent()]);
   const thieu = coverage.filter((c) => !c.has);
 
   return (
@@ -90,6 +91,28 @@ export default async function TechAgentsPage() {
                       {formatNumber(a.totalRuns)} lượt chạy
                       {a.failedRuns ? ` · ${formatNumber(a.failedRuns)} lỗi` : ""}
                     </div>
+                    {/*
+                      CHUỖI LƯỢT CHẠY SẠCH — tiêu chí mở nấc tiếp theo, thành một con số.
+
+                      Trước 23/09/2026 "5 lượt chạy sạch liên tiếp" chỉ là một câu chú thích trong
+                      mã; không ai đếm. "Sạch" là phán quyết của NGƯỜI review, không phải của cổng —
+                      cổng bắt được thứ hỏng, không bắt được thứ sai. Lượt chờ review đếm RIÊNG,
+                      không in thành 0 (mục 42).
+                    */}
+                    {(() => {
+                      const c = chuoi.get(a.id);
+                      if (!c) return null;
+                      return (
+                        <div className="mt-0.5" title={`Chuỗi ${DUNG_VI_LABEL[c.dungVi]}. Lượt sửa theo review không tính; lượt BLOCKED (agent khai không làm được) không cắt chuỗi.`}>
+                          {/* KHÔNG tô màu khi chạm ngưỡng: bật vai QA là quyết định của chủ shop, và một ô
+                              xanh là màn hình quyết hộ (AGENTS.md mục 38 — không ngưỡng nào đổi màu ô). */}
+                          <span className="font-medium">
+                            chuỗi sạch {formatNumber(c.chuoi)}/{NGUONG_MO_QA}
+                          </span>
+                          {c.choReview ? <span className="text-muted-foreground"> · {formatNumber(c.choReview)} chờ review</span> : null}
+                        </div>
+                      );
+                    })()}
                     <div className="text-muted-foreground">
                       {/* CHƯA TỪNG chạy khác hẳn “chạy lúc 0 giờ”. */}
                       {a.lastRunAt ? `Gần nhất ${formatTimeAgo(a.lastRunAt)}` : "Chưa từng chạy"}

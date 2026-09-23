@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { TechApprovalBadge, TechDeployBadge, TechGateBadge, TechPriorityBadge, TechRiskBadge, TechSeverityBadge, TechStatusBadge } from "@/app/(dashboard)/tech/badges";
 import { TechNav } from "@/app/(dashboard)/tech/tech-nav";
 import { TechTaskActions } from "@/app/(dashboard)/tech/tasks/[id]/task-actions";
+import { RunVerdict } from "@/app/(dashboard)/tech/tasks/[id]/run-verdict";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
@@ -40,6 +41,7 @@ import {
 } from "@/lib/constants/tech";
 import { TECH_RISK_RULE_BY_KEY } from "@/lib/constants/tech-risk";
 import { CAU_CHUA_GHI, coCongDo, docLoiCong } from "@/lib/constants/agent-run-error";
+import { danhDauLuotSua, type ReviewVerdict } from "@/lib/constants/agent-clean-streak";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import { getTechTask } from "@/lib/queries/tech";
 import { listEnabledTechAgents } from "@/lib/queries/tech-agents";
@@ -156,7 +158,12 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
               <EmptyState title="Chưa có lượt chạy nào" description="Phase 1 chưa có máy thi hành: lượt chạy được ghi vào bằng tay hoặc bởi Phase 2." />
             ) : (
               <ul className="divide-y divide-hairline">
-                {runs.map((r) => {
+                {(() => {
+                  /* Lượt SỬA = cùng việc, cùng nhánh, đã có lượt trước — suy ra lúc đọc, không thêm cột. */
+                  const luotSua = danhDauLuotSua(
+                    runs.map((x) => ({ id: x.id, taskId: x.taskId, branch: x.branch, status: x.status, startedAt: x.startedAt, reviewVerdict: (x.reviewVerdict as ReviewVerdict | null) ?? null })),
+                  );
+                  return runs.map((r) => {
                   const loi = docLoiCong(r.metadata, coCongDo(r));
                   return (
                   <li key={r.id} className="py-2.5 text-sm">
@@ -198,6 +205,11 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
                       <TechGateBadge label="test" result={r.testResult as TechGateResult} />
                       <TechGateBadge label="build" result={r.buildResult as TechGateResult} />
                     </div>
+                    {/* Phán quyết review — nguồn của chuỗi "lượt chạy sạch" trên /tech/agents. Chỉ lượt đã
+                        giao xong mới chấm được; lượt hỏng đã tự cắt chuỗi. */}
+                    {canManage && r.status === "SUCCEEDED" ? (
+                      <RunVerdict runId={r.id} taskId={task.id} verdict={(r.reviewVerdict as ReviewVerdict | null) ?? null} note={r.reviewNote} laLuotSua={luotSua.has(r.id)} />
+                    ) : null}
                     {r.error ? <p className="mt-1 text-xs text-destructive">{r.error}</p> : null}
                     {/* Câu lỗi thật của cổng đỏ. Trước bản vá 22/09 người xem chỉ thấy huy hiệu
                         ĐỎ rồi phải rời ERP mở log Actions — tức chủ shop không có đường đi tới. */}
@@ -218,7 +230,8 @@ export default async function TechTaskDetailPage({ params }: { params: Promise<{
                     ) : null}
                   </li>
                   );
-                })}
+                  });
+                })()}
               </ul>
             )}
           </SectionCard>
