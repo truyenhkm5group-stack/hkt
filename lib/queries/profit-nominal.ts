@@ -272,6 +272,10 @@ export type NominalRow = {
    * mượn — nó đứng cạnh `deliveryRate` để người đọc so được ước tính với thực tế.
    */
   measuredDeliveryRate: number | null;
+  /** Phần tử số dự báo ĐI MƯỢN của mã khác (0–1). `null` = chưa đo được. */
+  borrowedShare: number | null;
+  /** Vì sao rơi xuống bậc co ngót — `IMMATURE` (đợi thêm đơn) hay `MOSTLY_BORROWED` (mô hình chưa biết mã này). */
+  blendReason: "IMMATURE" | "MOSTLY_BORROWED" | null;
   expectedRevenue: number;
   expectedCogs: number;
   /**
@@ -821,6 +825,8 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         projectedDeliveryRate: duBao?.projectedRate ?? null,
         projectedFinished: duBao ? duBao.deliveredActual + duBao.failedActual : 0,
         measuredDeliveryRate: duBao?.actualRate ?? null,
+        projectedBorrowed: duBao?.projectedFromGlobal ?? null,
+        projectedOwnWeight: duBao?.projectedFromOwn ?? null,
         historyReturnRate: h?.rate ?? null,
         historyFinished: h?.finished ?? 0,
         minFinishedOrders: assumptions.minFinishedOrders,
@@ -911,6 +917,8 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         rateOverride: ghiDe,
         rateMatureAt: assumptions.rateMatureMinFinished,
         measuredDeliveryRate: duBao?.actualRate ?? null,
+        borrowedShare: bac.borrowedShare,
+        blendReason: bac.blendReason,
         ...calc,
         cpo: base.orders ? base.adSpend / base.orders : null,
         revenuePerOrder: base.orders ? calc.expectedRevenue / base.orders : null,
@@ -956,7 +964,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       // Mã CHƯA CÓ ĐƠN: không có tỷ lệ nào để in — `null`, không phải 100% (không giao đơn nào thì không "giao thành công 100%").
       ads: adsRatios({ adSpend: adByProduct.get(pid) ?? 0, posSales: 0, deliveredRevenueActual: 0, projectedDeliveredRevenue: 0 }),
       returnRate: null, deliveryRate: null, returnRateSource: "unmeasured" as const, projection: null, revenueBasis: "RATE" as const, unmodelledRevenue: 0, cogsKnown: true, cogsUnknownQty: 0, purchaseCostKnown: pur.costKnown,
-      baseReturnRate: 0, historyFinished: 0, rateMature: false, rateOwnFinished: 0, rateOverride: null, rateMatureAt: assumptions.rateMatureMinFinished, measuredDeliveryRate: null, expectedRevenue: 0, expectedCogs: 0, expectedQty: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
+      baseReturnRate: 0, historyFinished: 0, rateMature: false, rateOwnFinished: 0, rateOverride: null, rateMatureAt: assumptions.rateMatureMinFinished, measuredDeliveryRate: null, borrowedShare: null, blendReason: null, expectedRevenue: 0, expectedCogs: 0, expectedQty: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
       delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
       // Chưa bán được gì trong kỳ ⇒ chưa giải phóng đồng dự phòng nào vào lãi lỗ; rủi ro của lô
       // nằm nguyên ở phần CÒN TREO trên hàng tồn.

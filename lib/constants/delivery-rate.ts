@@ -46,18 +46,30 @@
  *   1. `override` GIỮ VĨNH VIỄN — chủ shop gõ tay và khai rõ là giữ kể cả khi mã đã chín. Đây là
  *                    một QUYẾT ĐỊNH, không phải ước lượng, nên nó thắng mọi số đo.
  *   2. `projected` — hợp đồng `PROJECTED_GTC_V3`: mỗi đơn đang chạy cân theo xác suất của CHÍNH
- *                    trạng thái ĐVVC nó đang ở. CHỈ dùng khi mã ĐÃ CHÍN, tức số đơn của chính mã
- *                    đi tới kết cục đạt `matureMinFinished`. Cổng cũ là "ít nhất MỘT đơn" và nó
- *                    chặn được đúng một ca (0 đơn, đo 21/09/2026: Q005 in 37,5% khi `giao 0 ·
- *                    hoàn 0 · đang giao 62`) rồi thả lọt mọi ca 1–9 đơn.
+ *                    trạng thái ĐVVC nó đang ở. Đòi HAI điều kiện, không phải một:
+ *                      (a) mã ĐÃ CHÍN — số đơn của chính mã đi tới kết cục đạt `matureMinFinished`;
+ *                      (b) TỬ SỐ CHỦ YẾU LÀ CỦA CHÍNH MÃ — phần đi mượn không quá `MAX_BORROWED_SHARE`.
+ *                    Vế (b) là chỗ hai bản vá trước đều trượt. Cổng đầu tiên là "ít nhất MỘT đơn";
+ *                    nó chặn đúng một ca (0 đơn, đo 21/09/2026: Q005 in 37,5% khi `giao 0 · hoàn 0 ·
+ *                    đang giao 62`) rồi thả lọt mọi ca 1–9 đơn. Cổng thứ hai nâng lên 10 đơn; đo
+ *                    lại chiều 23/09/2026, Q005 vừa chạm 10 đơn kết thúc (giao 8 · hoàn 2) là lập
+ *                    tức quay về bậc này và in **36,2%** — vì `MIN_CELL_SAMPLE` đòi 10 quan sát cho
+ *                    MỖI ô (trạng thái × tuổi kiện), mà 10 đơn kết thúc không đủ cho một ô nào, nên
+ *                    94 đơn đang chạy vẫn cân bằng xác suất toàn shop. Tử số 37,6 có 29,6 đi mượn —
+ *                    **79%**. Đếm đơn không trả lời được câu hỏi này; chỉ đếm CHÍNH TỬ SỐ mới trả
+ *                    lời được.
  *   3. `history`   — tỷ lệ hoàn thật của mã trong `returnRateWindowDays` ngày gần nhất, khi số đơn
  *                    đã kết thúc đạt `minFinishedOrders` (ngưỡng RIÊNG, cao hơn: một tỷ lệ thô
  *                    không có mô hình đỡ nên nó đòi nhiều bằng chứng hơn).
  *   4. `override` TẠM TỚI KHI CHÍN — chủ shop đặt tay cho một mã mới. Nó NHƯỜNG CHỖ cho bậc 2/3
  *                    ngay khi mã đủ chín (chủ shop chốt 23/09/2026: *"tự chuyển sang số đo khi đủ
  *                    chín"*), nên nó không bao giờ hoá thành một con số bị bỏ quên.
- *   5. `blended`   — mã CHƯA CHÍN mà đã có ít nhất một đơn kết thúc: **co ngót** giữa số đo của
- *                    CHÍNH MÃ và mốc neo, KHÔNG BAO GIỜ là tỷ lệ nền của shop. Xem `blendDeliveryRate`.
+ *   5. `blended`   — mã đã có ít nhất một đơn kết thúc nhưng bậc 2 không nhận, vì MỘT TRONG HAI lý
+ *                    do: chưa chín (`IMMATURE`), hoặc chín rồi mà tử số chủ yếu đi mượn
+ *                    (`MOSTLY_BORROWED`). Cả hai đều dẫn tới cùng một phép: **co ngót** giữa số đo
+ *                    của CHÍNH MÃ và mốc neo, KHÔNG BAO GIỜ là tỷ lệ nền của shop. Màn hình phải in
+ *                    ĐÚNG lý do — "đợi thêm đơn" và "mô hình chưa biết gì về mã này" là hai việc
+ *                    phải làm khác nhau. Xem `blendDeliveryRate`.
  *   6. `default`   — tỷ lệ khai ở Giả định (`defaultReturnRate`). YẾU NHẤT, và là bậc duy nhất
  *                    không có một quan sát nào của chính mã đứng sau.
  *
@@ -71,9 +83,9 @@ export type DeliveryRateSource = "override" | "projected" | "blended" | "history
 /**
  * Bậc nào là SỐ ĐO của chính mã, bậc nào là quyết định / ước lượng. Dùng để quyết định có tô màu.
  *
- * `blended` đứng ở phía KHÔNG ĐO ĐƯỢC dù nó có dữ liệu thật của mã bên trong: phần lớn con số vẫn
- * là mốc neo (xem `blendDeliveryRate` — mốc neo luôn nặng hơn 50% ở mọi mã còn nằm ở bậc này), nên
- * tô màu nó là tô màu một giả định.
+ * `blended` đứng ở phía KHÔNG ĐO ĐƯỢC dù nó có dữ liệu thật của mã bên trong: hoặc mốc neo đang
+ * nặng hơn số đo (mã chưa chín), hoặc mô hình đã thừa nhận phần lớn tử số của nó đi mượn
+ * (`MOSTLY_BORROWED`). Cả hai trường hợp, tô màu nó là tô màu một thứ chưa ai đo.
  */
 export const DELIVERY_RATE_MEASURED: Record<DeliveryRateSource, boolean> = {
   override: false,
@@ -90,6 +102,23 @@ export const DELIVERY_RATE_SOURCE_LABEL: Record<DeliveryRateSource, string> = {
   history: "Lịch sử của mã",
   default: "Tỷ lệ khai ở Giả định",
 };
+
+/**
+ * ═══════════ TRẦN CỦA PHẦN ĐI MƯỢN TRONG MỘT CON SỐ GỌI LÀ "SỐ ĐO" ═══════════
+ *
+ * Một nửa. Không phải một con số đẹp mà là ĐỊNH NGHĨA: nhãn `projected` đọc là *"số đo theo từng
+ * đơn của chính mã"*, nên nó chỉ đúng khi phần lớn tử số thật sự đến từ mã đang xem. Quá nửa đi
+ * mượn thì câu ấy sai, và một con số sai nhãn còn nguy hiểm hơn một ô trống — nó được tô màu, được
+ * xếp hạng, và không ai đi kiểm lại.
+ *
+ * Cùng một ngưỡng với `blendDeliveryRate` (mốc neo nặng hơn một nửa thì bậc ấy cũng không được gọi
+ * là số đo). Hai chỗ trả lời cùng một câu hỏi nên chúng dùng chung một lằn ranh.
+ *
+ * Đo production 23/09/2026 với ngưỡng này: chỉ Đầm Q005 đổi phe (79% mượn). Q004 mượn nhiều nhất
+ * trong nhóm còn lại và vẫn dưới 25%, vì mã nào đã có vài trăm đơn kết thúc thì các ô theo mã của
+ * nó đủ mẫu và bậc `PRODUCT_*` tự thắng.
+ */
+export const MAX_BORROWED_SHARE = 0.5;
 
 /** Thứ tự in ĐỘ PHỦ — mạnh nhất trước. Mọi bậc phải có mặt; kiểu `satisfies` chặn ở mức biên dịch. */
 export const DELIVERY_RATE_SOURCES = ["projected", "history", "blended", "override", "default"] as const satisfies readonly DeliveryRateSource[];
@@ -203,8 +232,11 @@ export function parseDeliveryRateOverride(raw: StoredDeliveryRateOverride | null
  *    đây chính là chỗ thang bậc cũ gãy (Q006 in 55%, Q005 in 35,9%).
  *  · `n` tăng ⇒ trôi dần về số đo thật của mã. Mã tốt tự leo lên, mã xấu tự tụt xuống, không cần ai
  *    can thiệp.
- *  · Bậc này chỉ chạy khi `n < k`, nên **mốc neo luôn giữ hơn 50% trọng số**. Đó là lý do `blended`
- *    KHÔNG được xếp vào nhóm "đo được": con số vẫn chủ yếu là một giả định.
+ *  · Với mã CHƯA CHÍN thì `n < k`, nên **mốc neo giữ hơn 50% trọng số**. Mã đã chín mà rơi xuống đây
+ *    vì `MOSTLY_BORROWED` thì `n >= k` và số đo của chính mã nặng hơn — đúng như nó phải thế, vì lúc
+ *    ấy mã có thật sự nhiều bằng chứng, chỉ là mô hình theo trạng thái chưa dùng được. Cả hai đường
+ *    đều KHÔNG được xếp vào nhóm "đo được": một bên mốc neo lấn, bên kia mô hình vừa tự nhận là
+ *    chưa biết gì về mã này.
  *
  * ─── VÌ SAO KHÔNG DÙNG THẲNG SỐ ĐO CỦA MÃ (5/6 = 83,3%) ───
  *
@@ -269,6 +301,13 @@ export type DeliveryRateInput = {
   /** Số đơn CỦA CHÍNH MÃ đã đi tới kết cục trong cohort mô hình. */
   projectedFinished: number;
   /**
+   * Phần tử số dự báo đi MƯỢN của mã khác (xác suất bậc `GLOBAL_*`), và phần đến từ CHÍNH MÃ
+   * (bậc `PRODUCT_*`). `null` = hợp đồng không nói được — khi ấy coi như KHÔNG kết luận được là
+   * số đo, vì không chứng minh được điều ngược lại (rơi về phía HẸP HƠN).
+   */
+  projectedBorrowed?: number | null;
+  projectedOwnWeight?: number | null;
+  /**
    * Tỷ lệ GIAO THÀNH CÔNG (%) THẬT của chính mã trên `projectedFinished` đơn đó — `actualRate` của
    * hợp đồng. Đây là thứ được co ngót; nó KHÔNG chứa một chút xác suất mượn nào.
    */
@@ -315,6 +354,15 @@ export type ResolvedDeliveryRate = {
   /** Số đơn đã kết thúc của chính mã trong cohort mô hình — vạch tiến tới ngưỡng chín. */
   ownFinished: number;
   /**
+   * VÌ SAO rơi xuống bậc co ngót. `null` khi không ở bậc ấy.
+   *  · `IMMATURE`        — chưa đủ đơn kết thúc. Việc phải làm: ĐỢI, hoặc đặt tay.
+   *  · `MOSTLY_BORROWED` — đủ đơn rồi nhưng mô hình vẫn đang trả lời bằng số của mã khác. Việc
+   *                        phải làm: KHÁC HẲN — đây là giới hạn của mô hình, không phải của thời gian.
+   */
+  blendReason: "IMMATURE" | "MOSTLY_BORROWED" | null;
+  /** Phần đi mượn của tử số dự báo (0–1). `null` = chưa đo được. In cạnh mọi con số `projected`. */
+  borrowedShare: number | null;
+  /**
    * Tỷ lệ HOÀN NỀN — bậc `history` nếu đủ mẫu, không thì `default`. Đây là con số sẽ được dùng nếu
    * ghi đè tay và số đo đều vắng mặt; màn hình Giả định in nó để chủ shop thấy bậc lùi là bao nhiêu.
    * KHÔNG làm tròn: nó là đầu vào hiển thị, không phải kết luận.
@@ -326,6 +374,17 @@ export type ResolvedDeliveryRate = {
  * Thang bậc, chạy đúng thứ tự trên. Trả về TỶ LỆ HOÀN lẫn TỶ LỆ GIAO để nơi gọi không phải tự lấy
  * phần bù — hai phép trừ ở hai tệp là hai cơ hội để một chỗ làm tròn khác chỗ kia.
  */
+/**
+ * Số đơn ĐÃ GIAO THẬT của mã, suy từ tỷ lệ đo được và số đơn đã kết thúc. Dùng để dựng mẫu số của
+ * phần-đi-mượn mà không cần nơi gọi truyền thêm một trường nữa (hai đường truyền cùng một sự thật
+ * là hai cơ hội để chúng lệch nhau).
+ */
+function deliveredOf(i: DeliveryRateInput): number {
+  const n = Math.max(0, i.projectedFinished);
+  if (!n || i.measuredDeliveryRate === null || !Number.isFinite(i.measuredDeliveryRate)) return 0;
+  return (clampPct(i.measuredDeliveryRate) / 100) * n;
+}
+
 export function resolveDeliveryRate(i: DeliveryRateInput): ResolvedDeliveryRate {
   const nguongChin = Math.max(1, i.matureMinFinished);
   const nguongLichSu = Math.max(1, i.minFinishedOrders);
@@ -340,9 +399,22 @@ export function resolveDeliveryRate(i: DeliveryRateInput): ResolvedDeliveryRate 
 
   const baseReturnRate = i.historyReturnRate !== null && chinTheoLichSu ? i.historyReturnRate : i.defaultReturnRate;
 
-  const ra = (returnRate: number, source: DeliveryRateSource, finished: number): ResolvedDeliveryRate => {
+  /*
+    PHẦN ĐI MƯỢN của tử số dự báo. Tử số = đơn đã giao THẬT + phần của chính mã + phần mượn; hai
+    vế đầu đều là bằng chứng của mã đang xem, nên mẫu số của tỷ lệ này là cả ba.
+
+    Hợp đồng không nói được (`null`) ⇒ coi như 1 (mượn hết): mọi nhánh lỗi phải rơi về phía HẸP
+    HƠN, và ở đây "hẹp hơn" nghĩa là KHÔNG dán nhãn số đo cho thứ chưa chứng minh được.
+  */
+  const muon = i.projectedBorrowed;
+  const cuaMinh = i.projectedOwnWeight;
+  const tuSo = ownFinished > 0 || (muon ?? 0) > 0 || (cuaMinh ?? 0) > 0 ? deliveredOf(i) + (cuaMinh ?? 0) + (muon ?? 0) : 0;
+  const borrowedShare = muon === undefined || muon === null ? null : tuSo > 0 ? Math.min(1, muon / tuSo) : 0;
+  const tuSoChuYeuDiMuon = borrowedShare === null ? true : borrowedShare > MAX_BORROWED_SHARE;
+
+  const ra = (returnRate: number, source: DeliveryRateSource, finished: number, blendReason: ResolvedDeliveryRate["blendReason"] = null): ResolvedDeliveryRate => {
     const rr = round1(clampPct(returnRate));
-    return { deliveryRate: round1(100 - rr), returnRate: rr, source, finished, mature, ownFinished, baseReturnRate };
+    return { deliveryRate: round1(100 - rr), returnRate: rr, source, finished, mature, ownFinished, baseReturnRate, blendReason, borrowedShare };
   };
 
   const ov = i.override ?? null;
@@ -350,8 +422,14 @@ export function resolveDeliveryRate(i: DeliveryRateInput): ResolvedDeliveryRate 
   // ── 1. Ghi đè GIỮ VĨNH VIỄN: thắng mọi số đo ──
   if (ov && ov.mode === "PERMANENT") return ra(ov.returnRate, "override", 0);
 
-  // ── 2. Mã ĐÃ CHÍN: máy tự đo, và ghi đè tạm tự nhường chỗ ──
-  if (chinTheoDuBao && i.projectedDeliveryRate !== null) return ra(100 - i.projectedDeliveryRate, "projected", ownFinished);
+  /*
+    ── 2. Mã ĐÃ CHÍN **VÀ** tử số chủ yếu là của chính nó: máy tự đo ──
+
+    Vế thứ hai không phải một phép kiểm tra thêm cho chắc: thiếu nó thì Q005 vừa chạm 10 đơn kết
+    thúc là lập tức in lại 36,2% — đúng con số chủ shop đã bác bỏ, chỉ khác là lần này nó mang nhãn
+    "số đo theo từng đơn" và được tô màu.
+  */
+  if (chinTheoDuBao && i.projectedDeliveryRate !== null && !tuSoChuYeuDiMuon) return ra(100 - i.projectedDeliveryRate, "projected", ownFinished);
   if (chinTheoLichSu && i.historyReturnRate !== null) return ra(i.historyReturnRate, "history", i.historyFinished);
 
   // ── 3. Mã CHƯA CHÍN: chủ shop đã đặt tay thì nghe chủ shop ──
@@ -364,7 +442,7 @@ export function resolveDeliveryRate(i: DeliveryRateInput): ResolvedDeliveryRate 
     anchorDeliveryRate: 100 - i.defaultReturnRate,
     anchorWeight: nguongChin,
   });
-  if (coNgot !== null) return ra(100 - coNgot, "blended", ownFinished);
+  if (coNgot !== null) return ra(100 - coNgot, "blended", ownFinished, chinTheoDuBao ? "MOSTLY_BORROWED" : "IMMATURE");
 
   // ── 5. Chưa một quan sát nào của chính mã ──
   return ra(i.defaultReturnRate, "default", 0);

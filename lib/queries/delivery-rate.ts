@@ -69,6 +69,8 @@ async function productDeliveryRatesUncached(period: Period): Promise<ProductDeli
         projectedDeliveryRate: p?.projectedRate ?? null,
         projectedFinished: p ? p.deliveredActual + p.failedActual : 0,
         measuredDeliveryRate: p?.actualRate ?? null,
+        projectedBorrowed: p?.projectedFromGlobal ?? null,
+        projectedOwnWeight: p?.projectedFromOwn ?? null,
         historyReturnRate: h?.rate ?? null,
         historyFinished: h?.finished ?? 0,
         minFinishedOrders: assumptions.minFinishedOrders,
