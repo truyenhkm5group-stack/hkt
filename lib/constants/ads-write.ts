@@ -145,8 +145,35 @@ export type AdsWriteOutcome = "APPLIED" | "DENIED" | "FAILED";
  */
 export const ALLOW_ADS_WRITE_ON_PROJECTED_BASIS = false;
 
+/**
+ * ═══════════ BÀN TAY Ở CẤP MÃ HÀNG ═══════════
+ *
+ * Đo production 23/09/2026: 6/8 khuyến nghị hành động ở cấp CHIẾN DỊCH nói về chiến dịch đã tắt,
+ * vì shop chạy ~619 chiến dịch mỗi 14 ngày còn bằng chứng tiền cần 15 ngày để chín. Cấp MÃ HÀNG
+ * thì không có vấn đề ấy — mã sống lâu hơn chiến dịch rất nhiều. Chủ shop chốt cùng ngày: kết luận
+ * ở cấp mã, áp lên các chiến dịch ĐANG CHẠY của mã.
+ *
+ * ─── VÌ SAO "CẮT" Ở CẤP MÃ LÀ HẠ NGÂN SÁCH, KHÔNG PHẢI TẠM DỪNG ───
+ *
+ * Ở cấp chiến dịch, CẮT = tạm dừng một chiến dịch. Ở cấp mã, nếu vẫn giữ nghĩa ấy thì một cú bấm
+ * tắt MỌI quảng cáo của một mã — với Đầm Q002 (337 đơn trong kỳ) là tắt dòng doanh thu chính.
+ * Hạ dần từng bước (`proposeStepPct`) cho cùng hướng đi mà để lại đường lui, và trần dịch chuyển
+ * trong ngày vẫn giữ tổng số tiền bị đổi trong giới hạn.
+ */
+export type AdsWriteLevel = "campaign" | "product";
+
+/** Ở cấp mã, cả TĂNG lẫn CẮT đều là đặt lại ngân sách ngày — chỉ khác CHIỀU. */
+export const PRODUCT_ACTION_FOR_DECISION: Record<string, AdsWriteAction | undefined> = {
+  SCALE: "SET_DAILY_BUDGET",
+  CUT: "SET_DAILY_BUDGET",
+};
+
+/** Chiều bắt buộc của ngân sách mới so với ngân sách hiện tại, theo khuyến nghị. */
+export const BUDGET_DIRECTION: Record<string, "UP" | "DOWN" | undefined> = { SCALE: "UP", CUT: "DOWN" };
+
 export type AdsWriteDenial =
   | "HARD_DISABLED"
+  | "DIRECTION_MISMATCH"
   | "SUBJECT_UNREADABLE"
   | "SUBJECT_NOT_RUNNING"
   | "SUBJECT_CHANGED"
@@ -163,6 +190,8 @@ export type AdsWriteDenial =
 
 export const ADS_WRITE_DENIAL_REASON: Record<AdsWriteDenial, string> = {
   HARD_DISABLED: "Đường ghi quảng cáo đang TẮT ở cấp máy chủ (ADS_WRITE_ENABLED). Đây là chốt ngoài cùng, không mở được từ giao diện hay từ bảng settings.",
+  DIRECTION_MISMATCH:
+    "Ngân sách mới đi NGƯỢC chiều khuyến nghị (tăng khi khuyến nghị bảo cắt, hoặc ngược lại). Phiếu duyệt đã khoá đúng con số, nên tình huống này chỉ xảy ra khi có gì đó sai ở đường tính — chặn chứ không ghi.",
   SUBJECT_UNREADABLE: "Không đọc được trạng thái hiện tại của chiến dịch trên Facebook, hoặc không đọc được số chi sau kỳ kết luận. CHƯA BIẾT chiến dịch đang thế nào thì không ghi.",
   SUBJECT_NOT_RUNNING:
     "Chiến dịch KHÔNG còn chạy trên Facebook. Kết luận nói về một lần chạy đã kết thúc: tăng ngân sách cho nó không làm nó chạy lại, và tạm dừng nó thì nó đã dừng sẵn rồi.",

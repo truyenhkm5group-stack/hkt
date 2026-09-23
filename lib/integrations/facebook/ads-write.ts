@@ -1,4 +1,5 @@
 import { and, eq, gte, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { getDb, schema } from "@/db";
 import { env } from "@/lib/env";
 import { IntegrationError, fetchJson } from "@/lib/integrations/http";
@@ -205,29 +206,48 @@ export async function campaignChangesToday(campaignId: string, changeDay: string
 }
 
 /**
- * Quan sát cho PHANH: các lượt ĐÃ ÁP gần nhất, kèm lợi nhuận lúc bấm và lợi nhuận đo lại về sau.
+ * Quan sát cho PHANH: các QUYẾT ĐỊNH đã áp gần nhất, kèm lợi nhuận lúc bấm và lợi nhuận đo lại về sau.
  *
- * "Đo lại về sau" lấy từ dòng sổ quyết định MỚI NHẤT của cùng chiến dịch, và chỉ khi nó cách lượt
- * đổi ít nhất `settleDays` ngày — trước mốc đó thì đơn của lượt đổi chưa ngã ngũ, và so sớm là so
- * với một con số đang đẹp hơn sự thật. Chưa tới mốc ⇒ `profitAfter = null` ⇒ CHƯA ĐO (mục 42).
+ * "Đo lại về sau" lấy từ dòng sổ quyết định MỚI NHẤT của CÙNG THỰC THỂ đã sinh ra quyết định, và chỉ
+ * khi nó cách lượt đổi ít nhất `settleDays` ngày — trước mốc đó thì đơn của lượt đổi chưa ngã ngũ,
+ * và so sớm là so với một con số đang đẹp hơn sự thật. Chưa tới mốc ⇒ `profitAfter = null` ⇒ CHƯA
+ * ĐO (mục 42).
+ *
+ * ─── HAI LỖI SẼ CÓ NẾU BÀN TAY LÊN CẤP MÃ MÀ PHANH ĐỂ NGUYÊN ───
+ *
+ *  1. **So lệch cấp.** `profitBefore` là lợi nhuận của dòng sổ đã dùng — với quyết định cấp mã, đó
+ *     là lợi nhuận CẢ MÃ. Bản trước tra `profitAfter` cố định ở `dimension = 'campaign'`, tức so lợi
+ *     nhuận cả mã với lợi nhuận MỘT chiến dịch: một phép so không có nghĩa, và nó gần như chắc chắn
+ *     ra "xấu đi" vì một chiến dịch nhỏ hơn cả mã. Nay đi theo `ledger_id` về đúng dòng sổ gốc, rồi
+ *     tra lại trên CÙNG cấp, CÙNG thực thể.
+ *  2. **Đếm một quyết định thành N lần.** Một cú bấm cấp mã ghi N dòng (mỗi chiến dịch đang chạy một
+ *     dòng), cùng `ledger_id`, cùng ngày. Đếm từng dòng thì một quyết định sai làm phanh thấy N lượt
+ *     "xấu đi liên tiếp" — Đầm Q004 có 12 chiến dịch, nên chỉ MỘT lần bấm đã vượt ngưỡng phanh 3 lượt.
+ *     Nên gom theo (ngày, `ledger_id`): một quyết định là một quan sát.
+ *
+ * Dòng cũ không có `ledger_id` rơi về cách cũ (cấp chiến dịch, chính chiến dịch ấy), và mỗi dòng
+ * là một quyết định riêng — đúng như chúng đã được ghi.
  */
 export async function brakeObservations(settleDays = 7, limit = 10) {
   const db = await getDb();
   const ledger = schema.adsDecisionLedger;
+  const goc = alias(ledger, "ledger_goc");
+  const khoaQuyetDinh = sql`coalesce(${changes.ledgerId}, ${changes.id})`;
   const rows = await db
-    .select({
+    .selectDistinctOn([changes.changeDay, khoaQuyetDinh], {
       changedAt: changes.changeDay,
       profitBefore: changes.profitBefore,
       profitAfter: sql<number | null>`(
         select l.profit_after_ads from ${ledger} l
-        where l.dimension = 'campaign' and l.entity_key = ${changes.campaignId}
+        where l.dimension = coalesce(${goc.dimension}, 'campaign')
+          and l.entity_key = coalesce(${goc.entityKey}, ${changes.campaignId})
           and (l.decision_day::date - ${changes.changeDay}::date) >= ${settleDays}
         order by l.decision_day desc limit 1
       )`,
     })
     .from(changes)
+    .leftJoin(goc, eq(goc.id, changes.ledgerId))
     .where(and(eq(changes.outcome, "APPLIED"), gte(changes.changeDay, sql`to_char(now() - interval '60 days', 'YYYY-MM-DD')`)))
-    .orderBy(sql`${changes.changeDay} desc`)
-    .limit(limit);
-  return rows.map((r) => ({ changedAt: r.changedAt, profitBefore: r.profitBefore, profitAfter: r.profitAfter }));
+    .orderBy(sql`${changes.changeDay} desc`, khoaQuyetDinh);
+  return rows.slice(0, limit).map((r) => ({ changedAt: r.changedAt, profitBefore: r.profitBefore, profitAfter: r.profitAfter }));
 }

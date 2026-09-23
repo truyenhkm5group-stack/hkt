@@ -6,6 +6,9 @@ import {
   ALLOW_ADS_WRITE_ON_PROJECTED_BASIS,
   type AdsWriteAction,
   type AdsWriteDenial,
+  type AdsWriteLevel,
+  BUDGET_DIRECTION,
+  PRODUCT_ACTION_FOR_DECISION,
   type AdsWriteMode,
 } from "@/lib/constants/ads-write";
 import type { Stability } from "@/lib/marketing/decision-stability";
@@ -112,11 +115,26 @@ export type SubjectState = {
   spendAfterWindowVnd: number | null;
 };
 
-export function subjectFreshness(s: SubjectState): { ok: true } | { ok: false; denial: AdsWriteDenial } {
-  if (s.status === null || s.spendAfterWindowVnd === null) return { ok: false, denial: "SUBJECT_UNREADABLE" };
+export function subjectFreshness(s: SubjectState, level: AdsWriteLevel = "campaign"): { ok: true } | { ok: false; denial: AdsWriteDenial } {
+  if (s.status === null) return { ok: false, denial: "SUBJECT_UNREADABLE" };
   if (s.status !== "ACTIVE") return { ok: false, denial: "SUBJECT_NOT_RUNNING" };
+  /*
+    "CHẠY LẠI" CHỈ CÓ NGHĨA Ở CẤP CHIẾN DỊCH.
+
+    Ở cấp mã, kết luận nói về MÃ HÀNG, còn chiến dịch nhận hành động thường là chiến dịch MỚI — chưa
+    có một đồng nào trong kỳ kết luận. So "tiền sau kỳ > tiền trong kỳ" ở đó thì luôn luôn đúng, và
+    phép kiểm sẽ chặn mọi thứ vì một lý do sai. Một mã hàng không "chạy lại": nó chạy liên tục bằng
+    những chiến dịch thay nhau, và đó chính là lý do bàn tay chuyển lên cấp mã.
+  */
+  if (level === "product") return { ok: true };
+  if (s.spendAfterWindowVnd === null) return { ok: false, denial: "SUBJECT_UNREADABLE" };
   if (s.spendAfterWindowVnd > s.spendInWindowVnd) return { ok: false, denial: "SUBJECT_CHANGED" };
   return { ok: true };
+}
+
+/** Hành động mà một khuyến nghị đẻ ra, THEO CẤP. Một bảng duy nhất cho mỗi cấp, không suy diễn thêm. */
+export function actionFor(decision: AdsAction, level: AdsWriteLevel): AdsWriteAction | null {
+  return (level === "product" ? PRODUCT_ACTION_FOR_DECISION[decision] : ACTION_FOR_DECISION[decision]) ?? null;
 }
 
 export type GateInput = {
@@ -131,6 +149,12 @@ export type GateInput = {
   basis: DecisionBasis;
   /** Chiến dịch hôm nay còn là thứ mà kết luận đã nhìn thấy không. Xem `subjectFreshness`. */
   subject: SubjectState;
+  /**
+   * Kết luận đến từ cấp nào. `campaign` = kết luận của CHÍNH chiến dịch này; `product` = kết luận
+   * của MÃ HÀNG mà chiến dịch này đang chạy. Hai cấp dịch cùng một chữ ra hai hành động khác nhau
+   * (xem `actionFor`), và hỏi hai câu về độ tươi khác nhau (xem `subjectFreshness`).
+   */
+  level: AdsWriteLevel;
   stability: Stability;
   /** Ngân sách ngày hiện tại (VND). `null` = ERP chưa đọc được ⇒ không đổi được. */
   currentBudgetVnd: number | null;
@@ -174,7 +198,7 @@ export function gateAdsWrite(input: GateInput): GateResult {
   if (input.mode === "OFF") return deny("MODE_OFF");
   if (input.brake.on) return deny("BRAKE_ON", `(${input.brake.consecutiveWorse} lượt xấu liên tiếp, ${input.brake.unmeasured} lượt chưa đo được)`);
 
-  const action = ACTION_FOR_DECISION[input.decision] ?? null;
+  const action = actionFor(input.decision, input.level);
   if (!action) return deny("NO_ACTION_FOR_DECISION", `Khuyến nghị đang là "${input.decision}".`);
 
   /*
@@ -183,7 +207,7 @@ export function gateAdsWrite(input: GateInput): GateResult {
     Nếu thứ mà kết luận nói tới đã tắt, hoặc đã thành một lần chạy khác, thì hỏi tiếp kết luận ấy
     đứng trên căn cứ gì hay giữ được bao lâu là vô nghĩa — nó đang mô tả một vật không còn ở đó.
   */
-  const tuoi = subjectFreshness(input.subject);
+  const tuoi = subjectFreshness(input.subject, input.level);
   if (!tuoi.ok) return deny(tuoi.denial, subjectDetail(input.subject));
 
   /*
@@ -211,6 +235,18 @@ export function gateAdsWrite(input: GateInput): GateResult {
   if (input.currentBudgetVnd === null || input.nextBudgetVnd === null) {
     return deny("STEP_TOO_BIG", "Chưa đọc được ngân sách hiện tại nên không tính được biên độ — CHƯA BIẾT thì không ghi.");
   }
+  /*
+    CHIỀU PHẢI KHỚP KHUYẾN NGHỊ.
+
+    Phiếu duyệt đã khoá đúng con số nên client không đổi được chiều. Nhưng cổng là lớp cuối cùng
+    trước tiền thật, và một lỗi ở ĐƯỜNG TÍNH (không phải ở client) vẫn có thể đưa ra "tăng" cho một
+    khuyến nghị "cắt". Một phép so rẻ tiền ở đây biến lỗi ấy thành một dòng DENIED thay vì một lượt
+    tiêu tiền theo hướng ngược.
+  */
+  const chieu = BUDGET_DIRECTION[input.decision];
+  if (chieu === "UP" && !(input.nextBudgetVnd > input.currentBudgetVnd)) return deny("DIRECTION_MISMATCH");
+  if (chieu === "DOWN" && !(input.nextBudgetVnd < input.currentBudgetVnd)) return deny("DIRECTION_MISMATCH");
+
   if (input.nextBudgetVnd < ADS_WRITE_LIMITS.minDailyBudgetVnd) return deny("BELOW_MIN_BUDGET");
 
   const delta = input.nextBudgetVnd - input.currentBudgetVnd;
@@ -223,4 +259,86 @@ export function gateAdsWrite(input: GateInput): GateResult {
   }
 
   return { allow: true, action, deltaVnd: delta };
+}
+
+/**
+ * ═══════════ KẾ HOẠCH CẤP MÃ: MỘT QUYẾT ĐỊNH, NHIỀU CHIẾN DỊCH ═══════════
+ *
+ * Hàm THUẦN — không đọc Facebook, không đọc CSDL. Nhận trạng thái ĐÃ ĐỌC của từng chiến dịch, trả về
+ * từng dòng được hay bị chặn, kèm lý do. Đường đề nghị và đường áp gọi CHUNG hàm này, nên hai bước
+ * không thể lệch nhau vì hai luật.
+ *
+ * ─── TRẦN TRONG NGÀY PHẢI CỘNG DỒN QUA CẢ LÔ ───
+ *
+ * `gateAdsWrite` kiểm từng chiến dịch với `shiftedTodayVnd` — số tiền đã dịch chuyển hôm nay. Gọi nó
+ * N lần với CÙNG một con số thì mỗi chiến dịch đều tưởng mình là chiến dịch đầu tiên, và trần 2 triệu
+ * thành trần 2 triệu × N. Nên dòng sau phải thấy phần mà các dòng TRƯỚC nó trong cùng lô đã chiếm.
+ *
+ * Thứ tự là thứ tự `targets` truyền vào — nơi gọi xếp theo tiền chi giảm dần, nên khi chạm trần thì
+ * phần bị cắt là những chiến dịch nhỏ nhất.
+ */
+export type PlanTarget = {
+  campaignId: string;
+  name: string;
+  /** Trạng thái Facebook trả về; `null` = không đọc được. */
+  status: string | null;
+  currentBudgetVnd: number | null;
+  changesToday: number;
+};
+
+export type PlanRow = PlanTarget & {
+  nextBudgetVnd: number | null;
+  allow: boolean;
+  denial: AdsWriteDenial | null;
+  reason: string;
+  deltaVnd: number;
+};
+
+/** Ngân sách mới theo một bước, ĐÚNG chiều của khuyến nghị. `null` = không tính được (chưa biết ngân sách hiện tại). */
+export function nextBudgetFor(currentVnd: number | null, decision: AdsAction): number | null {
+  if (currentVnd === null) return null;
+  const chieu = BUDGET_DIRECTION[decision];
+  if (!chieu) return null;
+  const heSo = chieu === "UP" ? 1 + ADS_WRITE_LIMITS.proposeStepPct : 1 - ADS_WRITE_LIMITS.proposeStepPct;
+  return Math.round(currentVnd * heSo);
+}
+
+export function planProductBudget(i: {
+  hardEnabled: boolean;
+  mode: AdsWriteMode;
+  confirmed: boolean;
+  decision: AdsAction;
+  basis: DecisionBasis;
+  stability: Stability;
+  brake: BrakeState;
+  shiftedTodayVnd: number;
+  targets: PlanTarget[];
+  /** Ngân sách đích đã khoá trong phiếu duyệt — đường ÁP truyền vào; đường ĐỀ NGHỊ để trống để tự tính. */
+  lockedNext?: Map<string, number | null>;
+}): PlanRow[] {
+  let daDoi = 0;
+  return i.targets.map((t) => {
+    const next = i.lockedNext ? (i.lockedNext.get(t.campaignId) ?? null) : nextBudgetFor(t.currentBudgetVnd, i.decision);
+    const g = gateAdsWrite({
+      hardEnabled: i.hardEnabled,
+      mode: i.mode,
+      confirmed: i.confirmed,
+      decision: i.decision,
+      basis: i.basis,
+      // Ở cấp mã, "chạy lại" không có nghĩa (xem `subjectFreshness`), nên hai vế tiền không tham gia.
+      subject: { status: t.status, spendInWindowVnd: 0, spendAfterWindowVnd: 0 },
+      level: "product",
+      stability: i.stability,
+      currentBudgetVnd: t.currentBudgetVnd,
+      nextBudgetVnd: next,
+      shiftedTodayVnd: i.shiftedTodayVnd + daDoi,
+      changesForCampaignToday: t.changesToday,
+      brake: i.brake,
+    });
+    if (g.allow) {
+      daDoi += Math.abs(g.deltaVnd);
+      return { ...t, nextBudgetVnd: next, allow: true, denial: null, reason: "", deltaVnd: g.deltaVnd };
+    }
+    return { ...t, nextBudgetVnd: next, allow: false, denial: g.denial, reason: g.reason, deltaVnd: 0 };
+  });
 }
