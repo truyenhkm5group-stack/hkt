@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { ChevronRight, TriangleAlert } from "lucide-react";
+import { ChevronRight, CornerDownRight, TriangleAlert } from "lucide-react";
 import { InfoHint } from "@/components/info-hint";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
@@ -480,6 +480,28 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
                         </span>
                       ) : null}
                       {stability?.[row.key] ? <Stable s={stability[row.key]} /> : null}
+                      {/*
+                        KẾT LUẬN MƯỢN ĐỨNG DƯỚI, KHÔNG THAY CHỖ.
+
+                        Dòng vẫn nói "Chưa đủ dữ liệu" — đó là sự thật về CHIẾN DỊCH này. Câu dưới
+                        nói một sự thật khác: mã hàng nó đang chạy thì đã có câu trả lời. Đặt hai
+                        câu chồng nhau là để người đọc thấy CHÍNH XÁC bằng chứng dừng ở đâu.
+
+                        Tên mã luôn đi kèm, không bao giờ chỉ có mỗi chữ: một chiến dịch dở nằm
+                        trong một mã lãi vẫn sẽ mượn chữ "còn dư địa", và người đọc phải thấy được
+                        rằng câu ấy nói về cái mã chứ không nói về dòng này.
+                      */}
+                      {row.inherited ? (
+                        <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <CornerDownRight className="size-3 shrink-0" />
+                          <span>
+                            Mã <b>{row.inherited.productName}</b>: {ADS_ACTION_LABEL[row.inherited.action]}
+                          </span>
+                          <InfoHint>
+                            {`Chiến dịch này chưa đủ dữ liệu để tự kết luận, nhưng MÃ HÀNG nó đang chạy thì có. Đây là kết luận của cả mã "${row.inherited.productName}", không phải của riêng chiến dịch này — một chiến dịch dở trong một mã lãi vẫn sẽ mượn chữ tốt. Lý do của mã: ${row.inherited.reason}`}
+                          </InfoHint>
+                        </span>
+                      ) : null}
                     </TableCell>
                   </TableRow>
                   {isOpen ? (

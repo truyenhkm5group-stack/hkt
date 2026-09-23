@@ -3,7 +3,7 @@ import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis } from "@/lib/constants/ads-decision";
-import { DECISION_METRIC_HINT, buildDecisionRow, decideAction, getAdsDecision } from "@/lib/queries/ads-decision";
+import { DECISION_METRIC_HINT, buildDecisionRow, decideAction, getAdsDecision, inheritVerdict } from "@/lib/queries/ads-decision";
 import type { Period } from "@/lib/search-params";
 
 const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
@@ -307,6 +307,64 @@ export async function testAdsDecision(db: Db) {
   assert.equal(dangTreo.deliveredRevenue, 4_000_000, "doanh thu đã giao vẫn là SỐ ĐO, không được cộng phần ước tính vào");
   assert.equal(dangTreo.profitAfterAds, -1_250_000, "lợi nhuận thật vẫn âm, và vẫn phải đọc được như vậy");
   assert.equal(dangTreo.shippingCost, 250_000, "cột cước vẫn là SỐ ĐO — phần dự phóng sống trong lợi nhuận tạm tính, không được trộn vào đây");
+
+  /*
+    ═══════════ PHẦN B3 — MƯỢN KẾT LUẬN CỦA MÃ HÀNG, VÀ BA ĐIỀU NÓ KHÔNG ĐƯỢC LÀM ═══════════
+
+    Đo production 23/09/2026: shop chạy **619 chiến dịch trong một cửa sổ 14 ngày**, và trong nhóm
+    đủ tiền (≥300K) thì chiến dịch nhiều đơn nhất cũng chỉ có **3 đơn** — cổng mẫu đòi 10 nên nó
+    không bao giờ mở, và **45.726.057 ₫ (63% tiền quảng cáo) không nhận được kết luận nào**. Cùng
+    ngày, cùng dữ liệu, ở cấp MÃ HÀNG: 3/4 mã có khuyến nghị, phủ 99,8% tiền.
+
+    Bằng chứng tồn tại — chỉ không tồn tại ở độ mịn CHIẾN DỊCH.
+  */
+  const maLai = { key: "prod-1", name: "Đầm Q002", action: "SCALE" as const, reason: "lãi dày" };
+
+  // Mượn được: dòng không tự kết luận, mã thì có.
+  const muon = inheritVerdict("INSUFFICIENT_DATA", "prod-1", maLai);
+  assert.equal(muon.bucket, "INHERITED");
+  assert.equal(muon.inherited?.action, "SCALE");
+  assert.equal(muon.inherited?.productName, "Đầm Q002", "tên mã BẮT BUỘC đi kèm — một chiến dịch dở trong một mã lãi vẫn mượn chữ tốt, người đọc phải thấy câu ấy nói về cái gì");
+
+  /*
+    KHÔNG ĐÈ LÊN KẾT LUẬN CỦA CHÍNH DÒNG. `HOLD` và `WATCH` là kết luận THẬT, không phải khoảng
+    trống — thay chúng bằng kết luận của cả mã là đổi một câu đúng lấy một câu chung chung hơn.
+  */
+  for (const tuKetLuan of ["SCALE", "HOLD", "WATCH", "CUT", "FIX_DELIVERY"] as const) {
+    const r = inheritVerdict(tuKetLuan, "prod-1", maLai);
+    assert.equal(r.bucket, "OWN", `${tuKetLuan}: dòng tự kết luận được thì không mượn gì`);
+    assert.equal(r.inherited, null);
+  }
+
+  /*
+    `NO_SPEND_DATA` CŨNG KHÔNG MƯỢN, và đây là chỗ dễ nhầm nhất: nó TRÔNG như một khoảng trống dữ
+    liệu. Nhưng ở đó ERP không đọc được cả số chi, nên gắn một kết luận về TIỀN vào đấy là nói về
+    thứ mình không nhìn thấy.
+  */
+  assert.equal(inheritVerdict("NO_SPEND_DATA", "prod-1", maLai).bucket, "OWN", "không có số chi thì không mượn kết luận về tiền");
+
+  /*
+    BA NGẢ "KHÔNG MƯỢN ĐƯỢC" PHẢI TÁCH NHAU, vì mỗi cái sửa ở một chỗ khác. Gộp thành một nhãn
+    "chưa đủ dữ liệu" là đúng thứ đã giấu 45,7 triệu (AGENTS.md mục 39 · mục 45).
+  */
+  assert.equal(inheritVerdict("INSUFFICIENT_DATA", undefined, maLai).bucket, "UNLINKED", "chưa nối được về mã — SỬA ĐƯỢC bằng cách khai mã cho chiến dịch");
+  assert.equal(inheritVerdict("INSUFFICIENT_DATA", "prod-1", undefined).bucket, "PRODUCT_SILENT", "mã không có dòng nào — khác hẳn chưa nối được");
+  assert.equal(
+    inheritVerdict("INSUFFICIENT_DATA", "prod-1", { ...maLai, action: "INSUFFICIENT_DATA" }).bucket,
+    "PRODUCT_SILENT",
+    "mã cũng chưa kết luận được — mượn một câu 'chưa đủ dữ liệu' thì vô nghĩa",
+  );
+  assert.equal(
+    inheritVerdict("INSUFFICIENT_DATA", "prod-1", { ...maLai, action: "NO_SPEND_DATA" }).bucket,
+    "PRODUCT_SILENT",
+    "mã không có số chi thì cũng không cho mượn được gì",
+  );
+  for (const r of [
+    inheritVerdict("INSUFFICIENT_DATA", undefined, maLai),
+    inheritVerdict("INSUFFICIENT_DATA", "prod-1", undefined),
+  ]) {
+    assert.equal(r.inherited, null, "không mượn được thì KHÔNG dựng một câu rỗng — null, không phải một đối tượng trống");
+  }
 
   // CHƯA BIẾT LÀ NULL, KHÔNG PHẢI 0.
   const noSpend = buildDecisionRow(
