@@ -11,7 +11,7 @@ import { getSettingJson } from "@/lib/settings";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 import { CARRIER_HANDOFF_AT_SQL, FINAL_OUTCOME_AT_SQL, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { distributeProportionally, inventoryRiskExposure, inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
-import { resolveDeliveryRate } from "@/lib/constants/delivery-rate";
+import { parseDeliveryRateOverride, resolveDeliveryRate, type DeliveryRateOverride } from "@/lib/constants/delivery-rate";
 import { getProjectedDeliveryMetrics, type BacktestSummary } from "@/lib/queries/projected-delivery";
 import { NO_ORDER_VALUE_FILTER, orderValueActive, orderValueKey, orderValueMatches, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
@@ -226,10 +226,12 @@ export type NominalRow = {
    * `projected`  — hợp đồng `PROJECTED_GTC_V3`: mỗi đơn cân theo xác suất của CHÍNH trạng thái ĐVVC nó đang ở.
    * `unmeasured` — mô hình có cohort nhưng CHƯA ĐO ĐƯỢC (phần ngoài ước tính quá lớn / chưa đủ mẫu).
    *                KHÔNG lùi về lịch sử hay giả định: một con số đoán trông y hệt con số đo được.
+   * `blended`    — mã CHƯA CHÍN: số đo của CHÍNH MÃ co ngót về tỷ lệ khai ở Giả định.
+   *                KHÔNG mượn tỷ lệ nền toàn shop — xem `lib/constants/delivery-rate.ts`.
    * `history`    — tỷ lệ hoàn lịch sử của mã — chỉ khi mã KHÔNG có đơn nào trong cohort mô hình.
    * `default`    — giả định chung của shop; yếu nhất, cùng điều kiện với `history`.
    */
-  returnRateSource: "override" | "projected" | "unmeasured" | "history" | "default";
+  returnRateSource: "override" | "projected" | "blended" | "unmeasured" | "history" | "default";
   /** Xuất xứ con số ước tính — để màn hình nói ra thay vì để người đọc đoán. */
   projection: { eligibleSent: number; active: number; unmodelledActive: number; pending: number; pendingUnmodelled: number; awaitingPickup: number; unmodelledRevenue: number;
     /** Đơn CỦA CHÍNH MÃ đã đi tới kết cục trong cohort — thước đo con số kia dựa trên bao nhiêu sự thật. */
@@ -250,6 +252,26 @@ export type NominalRow = {
   /** Tỷ lệ hoàn lịch sử / mặc định dùng cho phần đơn chưa có kết quả (%) */
   baseReturnRate: number;
   historyFinished: number;
+  /**
+   * Mã đã đủ chín để máy tự đo chưa — số đơn đã kết thúc của CHÍNH MÃ đạt `minFinishedOrders`.
+   * `false` ⇒ dòng thuộc bảng "Mã mới · chưa đủ căn cứ", nơi chủ shop đặt tay được tỷ lệ.
+   */
+  rateMature: boolean;
+  /** Số đơn đã kết thúc của chính mã trong cohort — vạch tiến tới ngưỡng chín. */
+  rateOwnFinished: number;
+  /** Ghi đè tay đang áp cho mã này (đã chuẩn hoá). `null` = không có. */
+  rateOverride: DeliveryRateOverride | null;
+  /**
+   * Bao nhiêu đơn kết thúc thì mã được coi là CHÍN (`minFinishedOrders` đang khai ở Giả định).
+   * Đi kèm dòng chứ không để màn hình tự đọc lại giả định: hai nơi cùng nói "đủ mấy đơn" mà nói
+   * hai số là cách chắc chắn để nhãn in ra không khớp với phép tính vừa chạy.
+   */
+  rateMatureAt: number;
+  /**
+   * TỶ LỆ GTC THẬT của chính mã trên đơn đã kết thúc (%). Đây là số đo thô, KHÔNG chứa xác suất
+   * mượn — nó đứng cạnh `deliveryRate` để người đọc so được ước tính với thực tế.
+   */
+  measuredDeliveryRate: number | null;
   expectedRevenue: number;
   expectedCogs: number;
   /**
@@ -793,13 +815,16 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         báo cáo thứ hai cần đúng thang bậc ấy thì chỉ còn đường chép, và hai bản chép có ngày trả
         lời khác nhau về cùng một mã trong khi cả hai màn hình đều nói "tỷ lệ giao thành công".
       */
+      const ghiDe = parseDeliveryRateOverride(assumptions.overrides[r.productId]);
       const bac = resolveDeliveryRate({
-        overrideReturnRate: assumptions.overrides[r.productId],
+        override: ghiDe,
         projectedDeliveryRate: duBao?.projectedRate ?? null,
         projectedFinished: duBao ? duBao.deliveredActual + duBao.failedActual : 0,
+        measuredDeliveryRate: duBao?.actualRate ?? null,
         historyReturnRate: h?.rate ?? null,
         historyFinished: h?.finished ?? 0,
         minFinishedOrders: assumptions.minFinishedOrders,
+        matureMinFinished: assumptions.rateMatureMinFinished,
         defaultReturnRate: assumptions.defaultReturnRate,
       });
       const baseReturnRate = bac.baseReturnRate;
@@ -821,9 +846,11 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
           đâu ra? Nó ở lịch sử của Q002/Q003/Q004 — và ba mã ấy lệch nhau từ 26% tới 49%, nên con
           số mượn KHÔNG nói được gì về mã mới.
 
-          Nay phải có ít nhất MỘT đơn của chính mã đi tới kết cục thì hợp đồng mới được dùng; và
-          nhãn in kèm SỐ ĐƠN ĐÃ KẾT THÚC để một mã mới có 3 đơn kết thúc trông khác hẳn một mã có
-          500. Chưa có kết cục nào ⇒ rơi về lịch sử 90 ngày của mã, hết lịch sử mới tới tỷ lệ khai.
+          CỔNG "ÍT NHẤT MỘT ĐƠN" ĐÃ KHÔNG ĐỦ — chủ shop đo lại 23/09/2026: Q005 có **6** đơn kết
+          thúc (5 giao được) nên lọt cổng, nhưng 99/105 đơn còn đang chạy vẫn cân bằng xác suất
+          toàn shop ⇒ ô in **35,9%** trong khi chính mã đang ở 5/6. Nay cổng là `minFinishedOrders`
+          đơn đã kết thúc; chưa đủ thì mã đi xuống bậc `blended` — CO NGÓT số đo của chính mã về
+          tỷ lệ khai ở Giả định, không bao giờ mượn tỷ lệ nền của shop nữa.
 
           Đo cùng ngày: Q005 và Q006 có 0 đơn kết thúc trong 90 ngày ⇒ cả hai về 60% khai ở Giả
           định. Q004 (105 đơn kết thúc), Q002 (1.138), Q003 (474) giữ nguyên số đo; Q001 vốn đã ở
@@ -879,6 +906,11 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         purchaseCostKnown: pur ? pur.costKnown : true,
         baseReturnRate,
         historyFinished: h?.finished ?? 0,
+        rateMature: bac.mature,
+        rateOwnFinished: bac.ownFinished,
+        rateOverride: ghiDe,
+        rateMatureAt: assumptions.rateMatureMinFinished,
+        measuredDeliveryRate: duBao?.actualRate ?? null,
         ...calc,
         cpo: base.orders ? base.adSpend / base.orders : null,
         revenuePerOrder: base.orders ? calc.expectedRevenue / base.orders : null,
@@ -924,7 +956,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       // Mã CHƯA CÓ ĐƠN: không có tỷ lệ nào để in — `null`, không phải 100% (không giao đơn nào thì không "giao thành công 100%").
       ads: adsRatios({ adSpend: adByProduct.get(pid) ?? 0, posSales: 0, deliveredRevenueActual: 0, projectedDeliveredRevenue: 0 }),
       returnRate: null, deliveryRate: null, returnRateSource: "unmeasured" as const, projection: null, revenueBasis: "RATE" as const, unmodelledRevenue: 0, cogsKnown: true, cogsUnknownQty: 0, purchaseCostKnown: pur.costKnown,
-      baseReturnRate: 0, historyFinished: 0, expectedRevenue: 0, expectedCogs: 0, expectedQty: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
+      baseReturnRate: 0, historyFinished: 0, rateMature: false, rateOwnFinished: 0, rateOverride: null, rateMatureAt: assumptions.rateMatureMinFinished, measuredDeliveryRate: null, expectedRevenue: 0, expectedCogs: 0, expectedQty: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
       delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
       // Chưa bán được gì trong kỳ ⇒ chưa giải phóng đồng dự phòng nào vào lãi lỗ; rủi ro của lô
       // nằm nguyên ở phần CÒN TREO trên hàng tồn.

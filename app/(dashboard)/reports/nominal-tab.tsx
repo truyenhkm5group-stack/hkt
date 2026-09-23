@@ -33,6 +33,8 @@ import {
 } from "@/lib/queries/profit-nominal";
 import type { Period } from "@/lib/search-params";
 import { DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
+import { NewProductRates } from "@/app/(dashboard)/reports/new-product-rates";
+import { DELIVERY_RATE_MEASURED } from "@/lib/constants/delivery-rate";
 import { PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
 import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { successTone } from "@/lib/constants/returns";
@@ -74,6 +76,12 @@ const NHAN_NGUON: Record<NominalRow["returnRateSource"], (r: NominalRow) => stri
         ? `chưa gửi đơn nào${choLay(r)}`
         : `chưa đo được · ${formatNumber(r.projection.unmodelledActive)}/${formatNumber(r.projection.active)} đang giao ngoài ước tính${choLay(r)}`
       : "chưa đo được",
+  /*
+    CO NGÓT phải tự khai ĐỦ BA THỨ: số đo thật của chính mã, mốc neo, và còn bao nhiêu đơn nữa thì
+    máy tự đo. Thiếu vế cuối thì chủ shop không biết con số này sẽ đứng yên tới bao giờ.
+  */
+  blended: (r) =>
+    `${formatNumber(r.rateOwnFinished)}/${formatNumber(r.rateMatureAt)} đơn kết thúc · co ngót về ${(100 - r.baseReturnRate).toFixed(0)}% khai${r.measuredDeliveryRate === null ? "" : ` · mã đang ở ${r.measuredDeliveryRate.toFixed(1)}%`}${choLay(r)}`,
   history: (r) => `lịch sử ${formatNumber(r.historyFinished)} đơn · ước tính theo tỷ lệ`,
   // GIẢ ĐỊNH phải tự khai là giả định, kèm CON SỐ đang dùng — "mặc định" không nói được nó là bao nhiêu.
   default: (r) => `giả định ${(100 - r.baseReturnRate).toFixed(0)}% GTC (Giả định) · chưa đo được${choLay(r)}`,
@@ -88,6 +96,14 @@ function moTaUocTinh(r: NominalRow): string {
     return `${dem} — CHƯA ĐO ĐƯỢC: mã này chưa có đơn nào rời kho trong kỳ${r.projection.awaitingPickup ? ` (${formatNumber(r.projection.awaitingPickup)} đơn đã có mã vận đơn nhưng ĐVVC chưa cầm hàng)` : ""}. Không có mẫu số thì không có tỷ lệ — “—” KHÔNG phải 0%`;
   if (r.returnRateSource === "unmeasured")
     return `${dem} — CHƯA ĐO ĐƯỢC: phần đang giao ở trạng thái chưa đủ mẫu quá lớn, không lùi về giả định. DT GTC ƯT chỉ gồm phần đã dự báo được; ${formatVND(r.unmodelledRevenue, { compact: true })} doanh số nằm ngoài ước tính`;
+  if (r.returnRateSource === "blended")
+    return (
+      `${dem} — MÃ CHƯA CHÍN: mới ${formatNumber(r.rateOwnFinished)}/${formatNumber(r.rateMatureAt)} đơn của chính mã đi tới kết cục, chưa đủ để máy tự đo. ` +
+      `Con số này là SỐ ĐO CỦA CHÍNH MÃ${r.measuredDeliveryRate === null ? "" : ` (${r.measuredDeliveryRate.toFixed(1)}% trên ${formatNumber(r.rateOwnFinished)} đơn)`} co ngót về tỷ lệ khai ở Giả định ` +
+      `(${(100 - r.baseReturnRate).toFixed(0)}%), trọng số mốc neo = ${formatNumber(r.rateMatureAt)} đơn. ` +
+      `KHÔNG dùng tỷ lệ nền của toàn shop: một mã hoàn nhiều sẽ kéo tụt dự tính của mọi mã mới. ` +
+      `Đủ ${formatNumber(r.rateMatureAt)} đơn kết thúc thì máy tự chuyển sang số đo. Tiền = Doanh số POS × tỷ lệ.`
+    );
   if (r.returnRateSource === "history") return `${dem} — mô hình chưa dự báo được cho mã này, dùng tỷ lệ hoàn LỊCH SỬ thật của mã (${formatNumber(r.historyFinished)} đơn đã kết thúc); tiền = Doanh số POS × tỷ lệ`;
   return `${dem} — mã chưa có đơn nào kết thúc nên KHÔNG có tỷ lệ đo được. Đang dùng tỷ lệ GTC khai ở Giả định (${(100 - r.baseReturnRate).toFixed(0)}%) để còn ước lượng được lợi nhuận và margin; tiền = Doanh số POS × tỷ lệ. Đây là GIẢ ĐỊNH — đổi con số ở khối Giả định phía trên là cả cột đổi theo.`;
 }
@@ -100,7 +116,12 @@ function moTaUocTinh(r: NominalRow): string {
  * đã đo, và đó là cách nhanh nhất để người đọc tin vào thứ chưa ai đo.
  */
 function OTyLe({ r }: { r: NominalRow }) {
-  const doDuoc = r.returnRateSource !== "default";
+  /*
+    ĐỌC TỪ SỔ KHAI (`DELIVERY_RATE_MEASURED`) thay vì so chuỗi tại chỗ. Phép so cũ (`!== "default"`)
+    tô màu cả `override` lẫn `unmeasured`, và sẽ tô luôn `blended` khi bậc ấy ra đời — tức tô một
+    con số mà mốc neo đang chiếm hơn nửa trọng số. Thêm một bậc ở sổ khai nay là đủ.
+  */
+  const doDuoc = r.returnRateSource !== "unmeasured" && DELIVERY_RATE_MEASURED[r.returnRateSource];
   return (
     <>
       <span className={cn("numeric font-semibold", doDuoc ? successTone(r.deliveryRate) : "text-muted-foreground")}>
@@ -654,6 +675,8 @@ export async function NominalTab({
         </div>
       </SectionCard>
 
+      <NewProductRates rows={report.rows} assumptions={report.assumptions} canWrite={canWrite} />
+
       {selected ? (
         <div id="ma-hang">
           <SectionCard
@@ -667,6 +690,7 @@ export async function NominalTab({
                   current={selected.deliveryRate ?? Math.round((100 - selected.baseReturnRate) * 10) / 10}
                   source={selected.returnRateSource}
                   canWrite={canWrite}
+                  mature={selected.rateMature}
                 />
                 <Button asChild variant="ghost" size="sm">
                   <Link href={`/reports?${tabQuery}`}>Đóng</Link>

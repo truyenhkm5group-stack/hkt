@@ -317,6 +317,26 @@ export async function testScoringUsesOrderOutcome(db: Db) {
 /* ───── 5 · Bảng lợi nhuận: tiền cân theo đơn, chưa đo được thì in "—", tổng = hợp đồng ───── */
 export async function testNominalParityWithActiveOrders() {
   const ky = { from: gio(24 * 30), to: new Date(), key: "30d", label: "30 ngày" } as never;
+
+  /*
+    ═══ HẠ NGƯỠNG CHÍN CHO ĐÚNG KHỐI NÀY, VÀ NÓI RA VÌ SAO ═══
+
+    Bài này khoá một bất biến rất hẹp: *khi bảng lợi nhuận ĐANG chạy trên bậc `projected`, nó phải
+    in ĐÚNG con số của hợp đồng, kể cả khi trong cohort có đơn đang giao*. Muốn vào được bậc ấy thì
+    mã phải ĐỦ CHÍN (`rateMatureMinFinished`, chủ shop để 10 từ 23/09/2026).
+
+    Fixture ở đây cố ý nhỏ — vài đơn mỗi mã, để mỗi mã nói được một chuyện — nên nếu giữ ngưỡng
+    thật thì mọi mã rơi xuống bậc co ngót và bài kiểm thôi chạm vào thứ nó sinh ra để canh.
+
+    Hạ ngưỡng xuống 1 chứ KHÔNG phóng to fixture, vì fixture này DÙNG CHUNG với bốn khối khác: thêm
+    đơn vào đây là đổi tổng của tất cả chúng. Ngưỡng là một tham số nghiệp vụ sửa được không cần
+    deploy, nên chỉnh nó trong một khối kiểm thử là dùng đúng cái cần dùng — và trả lại ngay sau đó.
+  */
+  const { getSettingJson, setSettingJson } = await import("@/lib/settings");
+  const { PROFIT_ASSUMPTIONS_KEY } = await import("@/lib/constants/profit");
+  const giaDinhCu = await getSettingJson<Record<string, unknown>>(PROFIT_ASSUMPTIONS_KEY, {});
+  await setSettingJson(PROFIT_ASSUMPTIONS_KEY, { ...giaDinhCu, rateMatureMinFinished: 1 });
+
   clearMemo();
   const { getNominalProfitReport } = await import("@/lib/queries/profit-nominal");
   const bao = await getNominalProfitReport(ky);
@@ -466,6 +486,10 @@ export async function testNominalParityWithActiveOrders() {
   assert.ok(bao.rows.some((r) => r.productId === `${P}p-W`), "trong khi ở mốc NGÀY TẠO ĐƠN thì dòng ấy PHẢI có — nếu không, hai vế trên không chứng minh được gì");
   assert.equal(theoMa.get(`${P}p-W`)!.awaitingPickup, 3, "ở mốc NGÀY TẠO ĐƠN chúng có mặt, trong rổ riêng");
   assert.equal(theoMa.get(`${P}p-W`)!.projectedRate, null, "và ở cả hai mốc đều KHÔNG sinh ra một tỷ lệ nào");
+
+  // Trả lại đúng trạng thái cũ: khối khác đọc chung cấu hình này.
+  await setSettingJson(PROFIT_ASSUMPTIONS_KEY, giaDinhCu);
+  clearMemo();
 }
 
 /* ───── 6 · Thử ngược chạy trên CSDL, không lộ trạng thái cuối ───── */
