@@ -6,9 +6,13 @@ import { EMPTY_CARE_FILTERS, matchesCareFilters, type CareFilters } from "@/lib/
 import {
   CARE_DATES,
   CARE_DATE_KEYS,
+  CARE_DATE_PRESETS,
   CARE_DATE_PROBLEM_LABEL,
   CARE_DATE_UNKNOWN,
+  careDatePresetOf,
+  careDatePresetValue,
   careDateValue,
+  describeCareDateFilter,
   matchesCareDate,
   parseCareDateFilter,
   type CareDateKey,
@@ -249,7 +253,77 @@ export function testCareDateFilters() {
   const audit = readFileSync(path.join(process.cwd(), "lib", "queries", "care-case-audit.ts"), "utf8");
   assert.ok(audit.includes("e.source <> 'SYSTEM' and e.action <> 'ASSIGN'"), "sổ gốc của luật này đã đổi — hai nơi phải sửa cùng nhau");
 
+  /* ═══════════ 8 · NẤC CHỌN NHANH: LỆCH MỘT NGÀY LÀ CHỖ DỄ SAI NHẤT ═══════════
+
+     "7 ngày" phải là BẢY ngày kể cả hôm nay, tức lùi SÁU. Đặt tên theo con số người dùng đọc trên
+     nhãn rồi lùi đúng con số ấy là ra TÁM ngày — một lỗi không ai nhìn thấy bằng mắt.
+
+     `todayKey` truyền từ ngoài nên bài kiểm này đo HÀM, không đo hôm nay là ngày mấy (mục 50, 65). */
+
+  const HOM_NAY = "2026-09-23";
+
+  assert.equal(careDatePresetValue("today", HOM_NAY), "2026-09-23..2026-09-23", "hôm nay = đúng một ngày");
+  assert.equal(careDatePresetValue("7d", HOM_NAY), "2026-09-17..2026-09-23", "7 ngày = lùi 6, tính cả hôm nay");
+  assert.equal(careDatePresetValue("30d", HOM_NAY), "2026-08-25..2026-09-23", "30 ngày phải qua được mốc đầu tháng");
+
+  // Số ngày ĐẾM RA từ khoảng phải bằng đúng con số trên nhãn — không tin vào phép trừ viết tay.
+  for (const nac of CARE_DATE_PRESETS) {
+    const d = parseCareDateFilter(careDatePresetValue(nac.key, HOM_NAY));
+    assert.equal(d?.kind, "RANGE", `nấc ${nac.key} phải dựng ra một khoảng đọc được`);
+    if (d?.kind !== "RANGE" || !d.from || !d.to) continue;
+    /*
+      ĐẾM NGÀY BẰNG ĐÚNG CÂU NGƯỜI DÙNG ĐỌC, không bằng một phép trừ viết riêng ở đây. Bản đầu của
+      bài kiểm này trừ `to - from` rồi cộng 1 và báo "Hôm nay" ra 2 ngày — vì `to` là 23:59:59.999
+      nên hiệu là 0,99 ngày chứ không phải 0. Phép trừ ấy SAI, còn mã nguồn thì đúng: một bài kiểm
+      tự dựng phép đo riêng là tự tạo ra một nguồn sự thật thứ hai để rồi bắt nhầm mã nguồn.
+    */
+    const mota = describeCareDateFilter(d);
+    assert.ok(mota.endsWith(`· ${nac.days + 1} ngày`), `nấc "${nac.label}": câu xác nhận nói “${mota}”, nhãn hứa ${nac.days + 1} ngày`);
+    // Khoảng phải ÔM lấy hôm nay và không lấn sang ngày mai.
+    assert.equal(matchesCareDate(new Date(`${HOM_NAY}T10:00:00+07:00`), d), true, `nấc ${nac.key} phải bắt được hôm nay`);
+    assert.equal(matchesCareDate(new Date("2026-09-24T00:00:00+07:00"), d), false, `nấc ${nac.key} không được lấn sang ngày mai`);
+  }
+
+  // Tô sáng đúng MỘT nấc, và khoảng tự gõ thì không nấc nào sáng.
+  for (const nac of CARE_DATE_PRESETS) {
+    assert.equal(careDatePresetOf(careDatePresetValue(nac.key, HOM_NAY), HOM_NAY), nac.key);
+  }
+  assert.equal(careDatePresetOf("2026-09-12..2026-09-15", HOM_NAY), null, "khoảng tự chọn KHÔNG được tô sáng một nấc nào");
+  assert.equal(careDatePresetOf("", HOM_NAY), null);
+  assert.equal(careDatePresetOf(CARE_DATE_UNKNOWN, HOM_NAY), null, "“chưa có mốc” là một rổ khác, không phải một nấc thời gian");
+  // Nấc dựng hôm qua KHÔNG được sáng khi hôm nay đã sang ngày mới — nếu không, chip nói một đằng và bảng lọc một nẻo.
+  assert.equal(careDatePresetOf(careDatePresetValue("7d", "2026-09-22"), HOM_NAY), null);
+
+  /* ═══════════ 9 · CÂU XÁC NHẬN IN THEO ĐỊNH DẠNG VIỆT NAM ═══════════
+
+     Ô `<input type="date">` in theo định dạng của MÁY, nên người dùng không tự kiểm được mình vừa
+     chọn mùng 1 tháng 9 hay mùng 9 tháng 1. Dòng này là chỗ duy nhất họ đọc lại được. */
+
+  assert.equal(describeCareDateFilter(parseCareDateFilter("2026-09-01..2026-09-23")), "01/09/2026 → 23/09/2026 · 23 ngày");
+  assert.equal(describeCareDateFilter(parseCareDateFilter("2026-09-10..2026-09-10")), "10/09/2026 → 10/09/2026 · 1 ngày", "một ngày là 1, không phải 0");
+  assert.equal(describeCareDateFilter(parseCareDateFilter("2026-09-01..")), "từ 01/09/2026 trở đi");
+  assert.equal(describeCareDateFilter(parseCareDateFilter("..2026-09-23")), "tới hết 23/09/2026");
+  assert.equal(describeCareDateFilter(parseCareDateFilter(CARE_DATE_UNKNOWN)), "", "rổ chưa-có-mốc không phải một khoảng ngày nên không có câu khoảng");
+  assert.equal(describeCareDateFilter(parseCareDateFilter("2026-09-20..2026-09-01")), "", "khoảng hỏng KHÔNG được in ra như một khoảng hợp lệ");
+  assert.equal(describeCareDateFilter(null), "");
+  // Qua mốc chuyển tháng: phép đếm ngày không được dựa vào trừ số trong cùng một tháng.
+  assert.equal(describeCareDateFilter(parseCareDateFilter("2026-08-25..2026-09-23")), "25/08/2026 → 23/09/2026 · 30 ngày");
+
+  /* ═══════════ 10 · CÂU GIẢI THÍCH NGẮN LUÔN HIỆN, KHÔNG NẰM SAU MỘT CÚ BẤM ═══════════ */
+
+  for (const k of CARE_DATE_KEYS) {
+    const h = CARE_DATES[k].hint;
+    assert.ok(h.length > 15 && h.length <= 60, `mốc ${k}: câu ngắn dài ${h.length} ký tự — quá dài thì nó xuống dòng và đẩy ô ngày ra khỏi tầm mắt`);
+  }
+  /*
+    BỐN CÂU NGẮN PHẢI KHÁC NHAU TỪNG ĐÔI MỘT — nhất là hai mốc VTP, vì phân biệt chúng đúng là cả
+    lý do câu ngắn tồn tại. (Khẳng định "câu ngắn khác câu dài" đã bị bỏ: `as const` làm hai kiểu
+    không giao nhau nên TypeScript chứng minh được nó luôn đúng — một khẳng định không bao giờ đỏ
+    thì không đo gì.)
+  */
+  assert.equal(new Set(CARE_DATE_KEYS.map((k) => CARE_DATES[k].hint)).size, CARE_DATE_KEYS.length, "hai mốc mang cùng một câu giải thích thì người dùng không có cách nào chọn đúng");
+
   console.log(
-    `✓ Bốn mốc thời gian của bàn care: sổ đăng ký kín (${CARE_DATE_KEYS.length} mốc, tham số không trùng) · biên ngày theo giờ VN bao gồm cả hai đầu · CHƯA BIẾT là rổ riêng và không lọt khoảng · chuỗi lọc hỏng KHÔNG cắt dữ liệu · hai đồng hồ VTP tách rời (kiện có tin hôm nay vẫn bị bắt vì đứng yên từ 12/09) · 16 cặp chéo chứng minh bốn chiều không đọc nhầm ô của nhau · đường đọc tác động ERP loại giao việc và loại máy`,
+    `✓ Bốn mốc thời gian của bàn care: sổ đăng ký kín (${CARE_DATE_KEYS.length} mốc, tham số không trùng) · biên ngày theo giờ VN bao gồm cả hai đầu · CHƯA BIẾT là rổ riêng và không lọt khoảng · chuỗi lọc hỏng KHÔNG cắt dữ liệu · hai đồng hồ VTP tách rời (kiện có tin hôm nay vẫn bị bắt vì đứng yên từ 12/09) · 16 cặp chéo chứng minh bốn chiều không đọc nhầm ô của nhau · đường đọc tác động ERP loại giao việc và loại máy · ${CARE_DATE_PRESETS.length} nấc chọn nhanh đếm đúng số ngày trên nhãn và ôm đúng hôm nay · câu xác nhận in theo định dạng Việt Nam`,
   );
 }

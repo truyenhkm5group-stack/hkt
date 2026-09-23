@@ -36,9 +36,13 @@ import {
 import {
   CARE_DATES,
   CARE_DATE_KEYS,
+  CARE_DATE_PRESETS,
   CARE_DATE_PROBLEM_LABEL,
   CARE_DATE_UNKNOWN,
+  careDatePresetOf,
+  careDatePresetValue,
   careDateValue,
+  describeCareDateFilter,
   parseCareDateFilter,
   type CareDateKey,
 } from "@/lib/constants/care-dates";
@@ -97,7 +101,7 @@ import {
   type CareTimelineEntry,
   type CareTimelineKind,
 } from "@/lib/constants/care-rounds";
-import { formatDateTime, formatNumber, formatTimeAgo, formatVND, vnShortStamp } from "@/lib/format";
+import { formatDateTime, formatNumber, formatTimeAgo, formatVND, todayVN, vnShortStamp } from "@/lib/format";
 import type { CareCase, CareState, CareWorkbench, CarrierRequestView } from "@/lib/queries/care-workbench";
 import { customerNameForDisplay } from "@/lib/constants/customer-name";
 import { VtpTrackingLink } from "@/components/vtp-tracking-link";
@@ -980,6 +984,12 @@ function vnNgay(key: string): string {
 function BoLocNgay({ values, missing, onChange }: { values: Record<CareDateKey, string>; missing: Record<CareDateKey, number>; onChange: (k: CareDateKey, v: string) => void }) {
   const [open, setOpen] = useState(false);
   const dangBat = CARE_DATE_KEYS.filter((k) => values[k]).length;
+  /*
+    MỘT "HÔM NAY" CHO CẢ LƯỢT VẼ. Gọi `todayVN()` bên trong từng chip thì mười hai lời gọi có thể
+    rơi hai bên nửa đêm, và hai chip cạnh nhau sẽ dựng hai khoảng lệch một ngày. Tính một lần ở đây
+    là đủ: popover mở trong vài giây, còn lượt vẽ sau đã lấy lại ngày mới.
+  */
+  const homNay = todayVN();
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -988,73 +998,108 @@ function BoLocNgay({ values, missing, onChange }: { values: Record<CareDateKey, 
           {dangBat ? <span className="numeric rounded bg-muted px-1 text-[10.5px]">{dangBat}</span> : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[420px] space-y-3 p-3 text-xs">
-        <div>
+      <PopoverContent align="end" className="max-h-[70vh] w-[440px] overflow-y-auto p-0 text-xs">
+        <div className="sticky top-0 z-10 border-b bg-popover px-3 py-2.5">
           <p className="font-semibold">Lọc theo mốc thời gian</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Bốn mốc độc lập, không suy ra lẫn nhau. Ngày tính theo giờ Việt Nam, và cả hai đầu đều <b>bao gồm</b> ngày đã chọn.
+            Bốn mốc độc lập, không suy ra lẫn nhau. Ngày theo giờ Việt Nam, cả hai đầu đều <b>bao gồm</b>.
           </p>
         </div>
-        {CARE_DATE_KEYS.map((k) => {
-          const spec = CARE_DATES[k];
-          const d = parseCareDateFilter(values[k]);
-          const chuaCo = d?.kind === "UNKNOWN_ONLY";
-          const fromKey = d?.kind === "RANGE" ? d.fromKey : "";
-          const toKey = d?.kind === "RANGE" ? d.toKey : "";
-          return (
-            <div key={k} className="space-y-1 border-t pt-2 first:border-t-0 first:pt-0">
-              <div className="flex items-center gap-1">
-                <span className="font-medium">{spec.label}</span>
-                <InfoHint>
-                  {spec.question}
-                  <br />
-                  <br />
-                  <b>Nguồn:</b> {spec.source}
-                  <br />
-                  <br />
-                  <b>Chưa có mốc:</b> {spec.unknownLabel}. {spec.unknownHint}
-                </InfoHint>
-                {values[k] ? (
-                  <button type="button" onClick={() => onChange(k, "")} className="ml-auto text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground">
-                    Bỏ lọc
+        <div className="divide-y">
+          {CARE_DATE_KEYS.map((k) => {
+            const spec = CARE_DATES[k];
+            const d = parseCareDateFilter(values[k]);
+            const chuaCo = d?.kind === "UNKNOWN_ONLY";
+            const fromKey = d?.kind === "RANGE" ? d.fromKey : "";
+            const toKey = d?.kind === "RANGE" ? d.toKey : "";
+            const nacDangBat = careDatePresetOf(values[k], homNay);
+            const moTa = describeCareDateFilter(d);
+            return (
+              <div key={k} className="space-y-1.5 px-3 py-2.5">
+                <div className="flex items-center gap-1">
+                  <span className="font-medium">{spec.label}</span>
+                  <InfoHint>
+                    {spec.question}
+                    <br />
+                    <br />
+                    <b>Nguồn:</b> {spec.source}
+                    <br />
+                    <br />
+                    <b>Chưa có mốc:</b> {spec.unknownLabel}. {spec.unknownHint}
+                  </InfoHint>
+                  {values[k] ? (
+                    <button type="button" onClick={() => onChange(k, "")} className="ml-auto text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground">
+                      Bỏ lọc
+                    </button>
+                  ) : null}
+                </div>
+                {/* CÂU PHÂN BIỆT KHÔNG NẰM SAU MỘT CÚ BẤM: ai không mở ⓘ vẫn phải chọn đúng mốc. */}
+                <p className="text-[10.5px] leading-snug text-muted-foreground">{spec.hint}</p>
+                <div className="flex flex-wrap items-center gap-1">
+                  {CARE_DATE_PRESETS.map((nac) => (
+                    <button
+                      key={nac.key}
+                      type="button"
+                      onClick={() => onChange(k, nacDangBat === nac.key ? "" : careDatePresetValue(nac.key, homNay))}
+                      className={cn("rounded-full border px-2 py-0.5 text-[11px] hover:bg-accent", nacDangBat === nac.key && "border-primary bg-accent font-semibold")}
+                    >
+                      {nac.label}
+                    </button>
+                  ))}
+                  {/*
+                    NHÓM CHƯA CÓ MỐC LÀ MỘT RỔ RIÊNG, BẤM ĐƯỢC. Nếu nó chỉ là "thứ bị khoảng ngày
+                    loại ra" thì nó không tồn tại trên màn hình — mà đó thường là nhóm phải đi tra
+                    đầu tiên (đo production 23/09/2026: 396/445 kiện chưa ai động vào).
+                  */}
+                  <button
+                    type="button"
+                    onClick={() => onChange(k, chuaCo ? "" : CARE_DATE_UNKNOWN)}
+                    title={`${spec.unknownLabel}. ${spec.unknownHint}`}
+                    className={cn("rounded-full border border-dashed px-2 py-0.5 text-[11px] hover:bg-accent", chuaCo && "border-solid border-primary bg-accent font-semibold")}
+                  >
+                    Chưa có mốc
                   </button>
-                ) : null}
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <input
-                  type="date"
-                  value={fromKey}
-                  disabled={chuaCo}
-                  onChange={(e) => onChange(k, careDateValue(e.target.value, toKey))}
-                  className="h-7 rounded-md border bg-background px-1.5 text-xs disabled:opacity-40"
-                  aria-label={`${spec.label}: từ ngày`}
-                />
-                <span className="text-muted-foreground">→</span>
-                <input
-                  type="date"
-                  value={toKey}
-                  disabled={chuaCo}
-                  onChange={(e) => onChange(k, careDateValue(fromKey, e.target.value))}
-                  className="h-7 rounded-md border bg-background px-1.5 text-xs disabled:opacity-40"
-                  aria-label={`${spec.label}: đến ngày`}
-                />
+                </div>
+                {/* Ô ngày tuỳ chọn vẫn ở lại: nấc nhanh trả lời câu hay gặp, không thay câu hiếm. */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <label className="flex items-center gap-1 text-[10.5px] text-muted-foreground">
+                    Từ
+                    <input
+                      type="date"
+                      value={fromKey}
+                      max={toKey || undefined}
+                      disabled={chuaCo}
+                      onChange={(e) => onChange(k, careDateValue(e.target.value, toKey))}
+                      className="h-7 rounded-md border bg-background px-1.5 text-xs text-foreground disabled:opacity-40"
+                      aria-label={`${spec.label}: từ ngày`}
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 text-[10.5px] text-muted-foreground">
+                    đến
+                    <input
+                      type="date"
+                      value={toKey}
+                      min={fromKey || undefined}
+                      disabled={chuaCo}
+                      onChange={(e) => onChange(k, careDateValue(fromKey, e.target.value))}
+                      className="h-7 rounded-md border bg-background px-1.5 text-xs text-foreground disabled:opacity-40"
+                      aria-label={`${spec.label}: đến ngày`}
+                    />
+                  </label>
+                </div>
                 {/*
-                  NHÓM CHƯA CÓ MỐC LÀ MỘT RỔ RIÊNG, BẤM ĐƯỢC. Nếu nó chỉ là "thứ bị khoảng ngày loại
-                  ra" thì nó không tồn tại trên màn hình — mà đó thường là nhóm phải đi tra đầu tiên.
+                  IN LẠI BẰNG ĐỊNH DẠNG VIỆT NAM. Ô `<input type="date">` hiện theo định dạng của
+                  MÁY (`mm/dd/yyyy` trên máy locale Mỹ), nên người dùng chọn "09/01" mà không có
+                  cách nào biết mình vừa chọn mùng 1 tháng 9 hay mùng 9 tháng 1. Dòng này để sai là
+                  thấy ngay, thay vì thấy qua một bảng kết quả khó hiểu.
                 */}
-                <button
-                  type="button"
-                  onClick={() => onChange(k, chuaCo ? "" : CARE_DATE_UNKNOWN)}
-                  title={`${spec.unknownLabel}. ${spec.unknownHint}`}
-                  className={cn("rounded-full border border-dashed px-2 py-0.5 text-[11px] hover:bg-accent", chuaCo && "border-solid border-primary bg-accent font-semibold")}
-                >
-                  Chưa có mốc
-                </button>
+                {moTa ? <p className="text-[10.5px] font-medium">{moTa}</p> : null}
+                {chuaCo ? <p className="text-[10.5px] text-muted-foreground">Chỉ hiện kiện {spec.unknownLabel.toLowerCase()}.</p> : null}
+                {missing[k] > 0 ? <p className="text-[10.5px] text-muted-foreground">{formatNumber(missing[k])} kiện chưa có mốc này nên không lọt qua khoảng ngày trên.</p> : null}
               </div>
-              {missing[k] > 0 ? <p className="text-[10.5px] text-muted-foreground">{formatNumber(missing[k])} kiện chưa có mốc này nên không lọt qua khoảng ngày trên.</p> : null}
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </PopoverContent>
     </Popover>
   );

@@ -1,4 +1,4 @@
-import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
+import { addDays, vnEndOfDay, vnStartOfDay } from "@/lib/format";
 
 /**
  * ═══════════ BỐN MỐC THỜI GIAN CỦA MỘT CA CARE — BỐN CÂU HỎI KHÁC NHAU ═══════════
@@ -73,6 +73,14 @@ export type CareDateSpec = {
   label: string;
   /** Nhãn ngắn cho chip đang bật. */
   short: string;
+  /**
+   * MỘT DÒNG, LUÔN HIỆN NGAY DƯỚI NHÃN — không nằm sau một cú bấm.
+   *
+   * Thứ người dùng cần biết trước khi chọn là HAI MỐC VTP KHÁC NHAU CHỖ NÀO. Chôn điều đó trong ⓘ
+   * nghĩa là ai không bấm sẽ chọn nhầm mốc và không bao giờ biết mình đã chọn nhầm. Câu dài (nguồn,
+   * nghĩa của ô trống) vẫn ở ⓘ vì nó chỉ cần khi có người thắc mắc.
+   */
+  hint: string;
   /** CÂU HỎI mốc này trả lời — in ra ⓘ, để không ai phải đoán hai mốc VTP khác nhau chỗ nào. */
   question: string;
   /** NGUỒN SỰ THẬT tới mức cột / biểu thức. Không có câu này thì con số không tra ngược được. */
@@ -87,6 +95,7 @@ export const CARE_DATES = {
     param: "ngaydon",
     label: "Ngày tạo đơn",
     short: "tạo đơn",
+    hint: "Mốc của ĐƠN trên Pancake, không phải của vận đơn.",
     question: "Đơn hàng lên Pancake lúc nào — mốc của ĐƠN, không phải của vận đơn.",
     source: "orders.inserted_at (Pancake trả UTC, mapper đã đổi; hiển thị theo giờ VN)",
     unknownLabel: "Vận đơn chưa ghép được với đơn",
@@ -97,6 +106,7 @@ export const CARE_DATES = {
     param: "ngaytt",
     label: "Ngày đổi trạng thái (VTP)",
     short: "đổi trạng thái",
+    hint: "Kiện ĐỨNG YÊN ở trạng thái hiện tại từ bao giờ.",
     question:
       "Kiện ĐỔI sang trạng thái đang hiển thị từ lúc nào. Mười tin “phân công bưu tá” liên tiếp KHÔNG làm mốc này nhảy — nó trả lời “kiện đứng yên ở đây từ bao giờ”.",
     source: "lib/constants/shipment-status-age.ts::STAGE_SINCE_SQL — sự kiện sớm nhất trong loạt liền kề cuối cùng mang đúng shipments.stage",
@@ -108,6 +118,7 @@ export const CARE_DATES = {
     param: "ngaytin",
     label: "Ngày VTP báo tin cuối",
     short: "tin VTP cuối",
+    hint: "Lần cuối ERP NGHE ĐƯỢC TIN, kể cả tin không đổi gì.",
     question:
       "Lần cuối ERP nghe được MỘT TIN nào đó từ Viettel Post, kể cả tin không đổi trạng thái. Đây là đồng hồ ĐỘ TƯƠI — nó trả lời “ERP có còn biết kiện ở đâu không”.",
     source: "max(shipment_events.occurred_at) — mốc của ĐVVC, không phải mốc ERP ghi dòng",
@@ -118,6 +129,7 @@ export const CARE_DATES = {
     param: "ngaytd",
     label: "Ngày tác động cuối (ERP)",
     short: "tác động ERP",
+    hint: "Lần cuối có NGƯỜI thao tác. Giao việc không tính.",
     question:
       "Lần cuối có NGƯỜI thao tác trên ca này trong ERP: ghi hành động chăm sóc, đổi trạng thái, ghi note, gửi lệnh sang ĐVVC. Giao việc (ASSIGN) và thao tác của MÁY không tính.",
     source:
@@ -174,6 +186,69 @@ export function parseCareDateFilter(raw: string | null | undefined): CareDateFil
   // So bằng chuỗi được vì `YYYY-MM-DD` xếp theo từ điển trùng với xếp theo thời gian.
   if (fromKey && toKey && fromKey > toKey) return { kind: "INVALID", raw: v, problem: "REVERSED" };
   return { kind: "RANGE", fromKey, toKey, from: fromKey ? vnStartOfDay(fromKey) : null, to: toKey ? vnEndOfDay(toKey) : null };
+}
+
+/**
+ * ═══════════ NẤC CHỌN NHANH — MỘT CÚ BẤM THAY CHO HAI LẦN MỞ LỊCH ═══════════
+ *
+ * Chọn một khoảng ngày bằng hai ô `<input type="date">` là bốn thao tác: mở lịch, chọn, mở lịch,
+ * chọn — và ô ngày của trình duyệt in theo ĐỊNH DẠNG CỦA MÁY (`mm/dd/yyyy` trên máy locale Mỹ),
+ * nên người Việt còn phải dừng lại đọc xem ô nào là ngày ô nào là tháng. Với câu hỏi hay gặp nhất
+ * ở bàn care — "mấy hôm nay" — thì bốn thao tác ấy là ba thao tác thừa.
+ *
+ * `days` = SỐ NGÀY LÙI VỀ TÍNH CẢ HÔM NAY: `0` là hôm nay, `6` là bảy ngày gần đây. Đặt tên theo
+ * số ngày người dùng thấy trên nhãn thì `7 ngày` phải lùi 6 — một chỗ lệch một đơn vị rất dễ trôi
+ * qua mắt, nên nó được khoá bằng kiểm thử chứ không bằng sự cẩn thận.
+ *
+ * Hai ô ngày tuỳ chọn VẪN ở lại bên dưới: nấc nhanh trả lời câu hay gặp, không thay cho câu hiếm
+ * ("từ 12/09 tới 15/09"). Bỏ ô tuỳ chọn là đổi một bộ lọc đầy đủ lấy một bộ lọc tiện.
+ */
+export const CARE_DATE_PRESETS = [
+  { key: "today", label: "Hôm nay", days: 0 },
+  { key: "7d", label: "7 ngày", days: 6 },
+  { key: "30d", label: "30 ngày", days: 29 },
+] as const;
+export type CareDatePreset = (typeof CARE_DATE_PRESETS)[number]["key"];
+
+/**
+ * Chuỗi lọc của một nấc nhanh. Hàm THUẦN: `todayKey` truyền từ ngoài (`todayVN()`), không đọc đồng
+ * hồ bên trong — nhờ vậy bài kiểm ghim được một ngày mà không phụ thuộc hôm nay là ngày mấy, và
+ * mọi nấc trong cùng một lượt vẽ đứng trên CÙNG một "hôm nay" (đổi ngày lúc nửa đêm không làm hai
+ * chip cạnh nhau tính theo hai ngày khác nhau).
+ */
+export function careDatePresetValue(preset: CareDatePreset, todayKey: string): string {
+  const p = CARE_DATE_PRESETS.find((x) => x.key === preset);
+  if (!p) return "";
+  return careDateValue(addDays(todayKey, -p.days), todayKey);
+}
+
+/** Nấc nhanh nào đang khớp với chuỗi lọc hiện tại — để tô sáng đúng một chip. `null` = khoảng tự chọn. */
+export function careDatePresetOf(raw: string, todayKey: string): CareDatePreset | null {
+  return CARE_DATE_PRESETS.find((p) => careDatePresetValue(p.key, todayKey) === raw)?.key ?? null;
+}
+
+/**
+ * Câu xác nhận đọc được cho khoảng đang lọc — `01/09/2026 → 23/09/2026 · 23 ngày`.
+ *
+ * Nó tồn tại vì ô `<input type="date">` in theo định dạng của MÁY: người dùng gõ `09/01` rồi không
+ * có cách nào biết mình vừa chọn mùng 1 tháng 9 hay mùng 9 tháng 1. Dòng này in lại bằng định dạng
+ * Việt Nam, nên sai là thấy ngay chứ không phải thấy qua một bảng kết quả khó hiểu.
+ */
+export function describeCareDateFilter(f: CareDateFilter | null): string {
+  if (!f) return "";
+  if (f.kind === "UNKNOWN_ONLY") return "";
+  if (f.kind === "INVALID") return "";
+  const doc = (key: string) => {
+    const [y, m, d] = key.split("-");
+    return `${d}/${m}/${y}`;
+  };
+  if (f.fromKey && f.toKey) {
+    const songay = Math.round((vnStartOfDay(f.toKey).getTime() - vnStartOfDay(f.fromKey).getTime()) / 86_400_000) + 1;
+    return `${doc(f.fromKey)} → ${doc(f.toKey)} · ${songay} ngày`;
+  }
+  if (f.fromKey) return `từ ${doc(f.fromKey)} trở đi`;
+  if (f.toKey) return `tới hết ${doc(f.toKey)}`;
+  return "";
 }
 
 /** Dựng lại chuỗi URL từ hai ô ngày. Rỗng cả hai ⇒ chuỗi rỗng ⇒ không lọc. */
