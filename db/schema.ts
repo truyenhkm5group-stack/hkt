@@ -5508,7 +5508,13 @@ export const techAgentRuns = pgTable(
     startedAt: ts("started_at").notNull().defaultNow(),
     /** `NULL` = ĐANG CHẠY (hoặc đã chết mà không ai đóng). Không phải "chạy 0 giây". */
     endedAt: ts("ended_at"),
-    /** `RUNNING` · `SUCCEEDED` · `FAILED` · `CANCELLED`. */
+    /**
+     * `RUNNING` · `SUCCEEDED` · `FAILED` · `CANCELLED` · `BLOCKED`.
+     *
+     * `BLOCKED` = lượt chạy KHÔNG LÀM ĐƯỢC việc này ở môi trường của nó (thiếu khoá API, sai
+     * quyền, hoặc chính agent khai đề bài đòi thứ máy dùng-một-lần không có). Nó KHÔNG phải một
+     * kiểu thất bại: `FAILED` bảo đi sửa MÃ, `BLOCKED` bảo đi sửa ĐỀ BÀI hoặc MÔI TRƯỜNG.
+     */
     status: text("status").notNull().default("RUNNING"),
     branch: text("branch").notNull().default(""),
     /**
@@ -5557,7 +5563,7 @@ export const techAgentRuns = pgTable(
     index("tech_agent_runs_started_idx").on(t.startedAt),
     /* Chép hai lần KHÔNG đẻ hai dòng — bảo đảm ở CSDL, xem chú thích của `external_ref`. */
     uniqueIndex("tech_agent_runs_external_ref_uq").on(t.externalRef),
-    check("tech_agent_runs_status_check", sql`${t.status} IN ('RUNNING','SUCCEEDED','FAILED','CANCELLED')`),
+    check("tech_agent_runs_status_check", sql`${t.status} IN ('RUNNING','SUCCEEDED','FAILED','CANCELLED','BLOCKED')`),
     check("tech_agent_runs_typecheck_check", sql`${t.typecheckResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
     check("tech_agent_runs_lint_check", sql`${t.lintResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
     check("tech_agent_runs_test_check", sql`${t.testResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),

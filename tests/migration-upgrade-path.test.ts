@@ -58,6 +58,7 @@ const MOI = [
   "0109_ads_budget_changes",
   "0110_ad_spends_ad_grain",
   "0111_ads_decision_basis",
+  "0112_agent_run_blocked",
 ] as const;
 
 /*

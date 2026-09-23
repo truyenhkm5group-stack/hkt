@@ -251,6 +251,23 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
       return { ...rong, status: "BLOCKED", runId, branch, reason: ly };
     }
 
+    /* ───────── 10b. AGENT TỰ KHAI KHÔNG LÀM ĐƯỢC — đóng sổ là BLOCKED, KHÔNG chạy cổng ─────────
+       Bốn cổng đo CÂY LÀM VIỆC, không đo việc có được làm hay không: chúng xanh đều cho một cây
+       chẳng đổi gì. Chạy chúng ở đây chỉ tốn vài phút để in ra bốn dấu ✓ cạnh một lượt chạy
+       không giao được gì — đúng kiểu "dấu ✓ thay cho một câu trung thực" mà AGENTS.md mục 65 cấm.
+
+       Và KHÔNG commit. Thứ agent ghi trước lúc nhận ra mình không làm được là bản nháp dở, không
+       phải sản phẩm bàn giao; đưa nó vào kho là đúng cái lỗi lượt chạy này vừa tránh được. */
+    if (outcome.khongLamDuoc) {
+      const { lyDo, canGi } = outcome.khongLamDuoc;
+      const ly = `Agent báo KHÔNG LÀM ĐƯỢC ở môi trường này: ${lyDo} — cần: ${canGi}`;
+      await finishTechAgentRun(
+        { runId, status: "BLOCKED", summary: ly, error: "", filesChanged: await ws.changedFiles(), chiPhi: outcome.chiPhi },
+        opts.actor,
+      );
+      return { ...rong, status: "BLOCKED", runId, branch, reason: ly };
+    }
+
     /* ───────── 11. BỐN CỔNG — đo bằng EXIT CODE, không hỏi agent ───────── */
     const canChay = opts.gates ?? ["typecheck", "lint"];
     const gates = { typecheck: KHONG_CHAY, lint: KHONG_CHAY, test: KHONG_CHAY, build: KHONG_CHAY } as RunnerResult["gates"];

@@ -612,7 +612,7 @@ export async function startTechAgentRun(
 export async function finishTechAgentRun(
   input: {
     runId: string;
-    status: "SUCCEEDED" | "FAILED" | "CANCELLED";
+    status: "SUCCEEDED" | "FAILED" | "CANCELLED" | "BLOCKED";
     summary?: string;
     resultCommit?: string;
     testsRun?: string;

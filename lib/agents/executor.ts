@@ -32,6 +32,14 @@ export type AgentOutcome = {
   steps: AgentStep[];
   /** Agent tự nhận là đã xong hay bỏ cuộc. Runner KHÔNG tin nó để chấm cổng — cổng đo bằng exit code. */
   finished: boolean;
+  /**
+   * Agent TỰ KHAI không làm được việc này ở đây. `null` = không khai gì.
+   *
+   * Tách khỏi `error`: `error` là lượt chạy hỏng, cái này là lượt chạy CHẠY ĐÚNG và kết luận rằng
+   * việc không thuộc về môi trường này. Runner đọc nó TRƯỚC khi nghĩ tới commit — thứ agent đã
+   * ghi trước lúc nhận ra không phải một sản phẩm bàn giao.
+   */
+  khongLamDuoc: { lyDo: string; canGi: string } | null;
   error: string | null;
   /**
    * TIỀN CỦA LƯỢT CHẠY NÀY — cộng dồn qua mọi vòng.
@@ -142,10 +150,10 @@ export interface AgentExecutor {
 /* ═════════════════════ BỘ CÔNG CỤ ═════════════════════ */
 
 /**
- * Bốn công cụ, không hơn.
+ * Năm công cụ, không hơn.
  *
  * KHÔNG có `git_commit`, `git_push`, `list_directory`, `search`. Mỗi công cụ thêm vào là một bề
- * mặt phải canh; bốn cái này đủ để đọc, sửa tài liệu và tự kiểm.
+ * mặt phải canh; năm cái này đủ để đọc, sửa tài liệu, tự kiểm, và NÓI RA khi không làm được.
  */
 export const AGENT_TOOLS: AiToolDef[] = [
   {
@@ -165,6 +173,44 @@ export const AGENT_TOOLS: AiToolDef[] = [
     name: "run_command",
     description: "Chạy một lệnh trong danh sách cho phép. Truyền dạng mảng đã tách, ví dụ [\"npm\",\"run\",\"typecheck\"]. Không có shell: không dùng được &&, |, ; hay $().",
     inputSchema: { type: "object", properties: { argv: { type: "array", items: { type: "string" } } }, required: ["argv"], additionalProperties: false },
+  },
+  {
+    /*
+      LỐI RA TRUNG THỰC — thứ KHÔNG có cho tới 23/09/2026, và sự vắng mặt của nó tốn một lượt chạy.
+
+      Trước bản này `finish` là lối ra DUY NHẤT, và nó có nghĩa "đã xong". Một agent nhận việc
+      không làm được trong môi trường của mình chỉ còn hai đường, và cả hai đều là nói dối:
+
+        · gọi `finish` với một thứ TRÔNG GIỐNG câu trả lời, hoặc
+        · im lặng cho tới khi hết vòng, và lượt chạy đọc ra là "agent chưa gọi finish".
+
+      Việc TECH-5 (lượt chạy #39, 22/09/2026) đi đúng đường thứ nhất: đề bài đòi "CHẠY các kịch
+      bản ở T1 và ghi số đo phía máy chủ", mà agent chạy trên máy GitHub Actions với CSDL PGlite
+      dùng-một-lần nên không chạm được production. Nó giao về một kế hoạch đi đo, kèm
+      `docs/perf/baseline-T1-example.json` khai `orders: 1147 · shipments: 1302` — production có
+      1.401 đơn · 2.572 vận đơn. Không con số nào trong tệp ấy đến từ một phép đo.
+
+      Đó là phản ứng HỢP LÝ với một hệ thống không có chỗ nào nhận câu "tôi không làm được ở
+      đây". AGENTS.md mục 65 đã viết đúng luật này cho bài kiểm — *"in CHƯA ĐO ĐƯỢC, một câu
+      trung thực, KHÔNG phải một dấu ✓"* — nhưng agent thì chưa có ô nào để in câu ấy vào.
+
+      Công cụ này KHÔNG phải nút bỏ cuộc. Nó đòi nói ra THIẾU GÌ, và lượt chạy đóng lại thành
+      `BLOCKED` chứ không phải `FAILED`: sổ đọc ra là "đi sửa đề bài", không phải "đi sửa mã".
+    */
+    name: "khong_lam_duoc",
+    description:
+      "Báo việc này KHÔNG LÀM ĐƯỢC trong môi trường của lượt chạy này (ví dụ: đề bài đòi đo dữ liệu production, "
+      + "mà agent chạy trên máy dùng-một-lần không nối được production). Dùng nó thay vì đoán, thay vì viết một "
+      + "tệp ví dụ có số tự nghĩ ra, và thay vì im lặng cho hết vòng. Một con số bịa tốn nhiều hơn một lượt chạy dừng sớm.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ly_do: { type: "string", description: "Vì sao không làm được, nói bằng thứ kiểm chứng được (đã thử gì, chặn ở đâu)." },
+        can_gi: { type: "string", description: "Cần gì để làm được: một tệp số đo có sẵn, một quyền, hay một đề bài khác." },
+      },
+      required: ["ly_do", "can_gi"],
+      additionalProperties: false,
+    },
   },
   {
     name: "finish",
@@ -213,7 +259,7 @@ export class AiAgentExecutor implements AgentExecutor {
 
   async run(job: AgentJob): Promise<AgentOutcome> {
     const steps: AgentStep[] = [];
-    if (!this.provider) return { summary: "", steps, finished: false, error: this.available().reason, chiPhi: { soVong: 0, vao: 0, ra: 0, demDoc: 0, demGhi: 0, usd: 0 } };
+    if (!this.provider) return { summary: "", steps, finished: false, khongLamDuoc: null, error: this.available().reason, chiPhi: { soVong: 0, vao: 0, ra: 0, demDoc: 0, demGhi: 0, usd: 0 } };
 
     const messages: AiMessage[] = [
       {
@@ -230,6 +276,7 @@ export class AiAgentExecutor implements AgentExecutor {
 
     let summary = "";
     let finished = false;
+    let khongLamDuoc: AgentOutcome["khongLamDuoc"] = null;
     const chiPhi = { soVong: 0, vao: 0, ra: 0, demDoc: 0, demGhi: 0, usd: null as number | null };
     let usdCong = 0;
     let doDuocGia = true;
@@ -256,7 +303,7 @@ export class AiAgentExecutor implements AgentExecutor {
       } catch (e) {
         const loi = e instanceof Error ? e.message : String(e);
         steps.push({ kind: "NOTE", detail: `Lời gọi model hỏng ở vòng ${round + 1}: ${loi.slice(0, 300)}` });
-        return { summary, steps, finished: false, error: loi, chiPhi: chotChiPhi() };
+        return { summary, steps, finished: false, khongLamDuoc: null, error: loi, chiPhi: chotChiPhi() };
       }
       messages.push({ role: "assistant", content: res.content });
 
@@ -301,12 +348,26 @@ export class AiAgentExecutor implements AgentExecutor {
           continue;
         }
         steps.push({ kind: "NOTE", detail: text.slice(0, 500) });
-        return { summary: summary || text.slice(0, 1000), steps, finished: false, error: "Agent dừng mà không gọi finish (đã nhắc một lần).", chiPhi: chotChiPhi() };
+        return { summary: summary || text.slice(0, 1000), steps, finished: false, khongLamDuoc: null, error: "Agent dừng mà không gọi finish (đã nhắc một lần).", chiPhi: chotChiPhi() };
       }
 
       const results: AiMessage["content"] = [];
       for (const call of calls) {
         const input = (call.input ?? {}) as Record<string, unknown>;
+        if (call.name === "khong_lam_duoc") {
+          const lyDo = String(input.ly_do ?? "").slice(0, 1000);
+          const canGi = String(input.can_gi ?? "").slice(0, 1000);
+          khongLamDuoc = { lyDo, canGi };
+          /*
+            `finished = true` để vòng lặp dừng SẠCH: lượt chạy này không phải "hết vòng mà chưa
+            gọi finish". Nhưng runner phân biệt được hai thứ vì `khongLamDuoc` khác `null`, và nó
+            đọc trường ấy TRƯỚC — nên không nhánh nào coi đây là đã xong.
+          */
+          finished = true;
+          steps.push({ kind: "BLOCKED", detail: `Agent tự khai KHÔNG LÀM ĐƯỢC: ${lyDo} — cần: ${canGi}` });
+          results.push({ type: "tool_result", toolUseId: call.id, content: "Đã ghi nhận. Lượt chạy sẽ đóng lại là BLOCKED." });
+          continue;
+        }
         if (call.name === "finish") {
           summary = String(input.summary ?? "").slice(0, 2000);
           finished = true;
@@ -361,6 +422,6 @@ export class AiAgentExecutor implements AgentExecutor {
       messages.push({ role: "user", content: results });
     }
 
-    return { summary, steps, finished, error: finished ? null : "Hết số vòng cho phép mà agent chưa gọi finish.", chiPhi: chotChiPhi() };
+    return { summary, steps, finished, khongLamDuoc, error: finished ? null : "Hết số vòng cho phép mà agent chưa gọi finish.", chiPhi: chotChiPhi() };
   }
 }
