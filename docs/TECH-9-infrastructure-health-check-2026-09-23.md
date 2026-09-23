@@ -20,7 +20,7 @@ Người dùng than chậm trong khung giờ cao điểm. TECH-9 phải xác min
 
 **Dữ liệu từ:** `docs/perf/TECH-6-TECH-9-so-do-tho-2026-09-23.md`
 
-Lúc `ops verify` chạy (04:09–04:12 Việt Nam), máy đang tổn thương vì thiếu tài nguyên:
+Lúc `ops verify` chạy (11:09–11:12 giờ Việt Nam), máy đang tổn thương vì thiếu tài nguyên:
 
 | Chỉ số | Giá trị | Kết luận |
 |---|---|---|
@@ -124,7 +124,7 @@ không thấy.
 
 ---
 
-### 5. DEPLOY FAILED `82817d71d853` — KHÔNG LIÊN QUAN
+### 5. DEPLOY FAILED `82817d71d853` — CHƯA TÌM THẤY BẰNG CHỨNG
 
 **Dữ liệu từ:**
 - Commit hiện tại trên production: `9b9c0a06` (từ `/api/health` report)
@@ -136,7 +136,12 @@ không thấy.
 - `/api/health` trả `ok: true` → không có trạng thái bất thường từ lần deploy trước
 
 **Kết luận:** **Lần deploy FAILED `82817d71d853` không để lại bằng chứng nào trong trạng thái production
-hiện tại.** Dấu hiệu ngoài (lỗi Server Action, context canceled) không nối được với deploy cũ ấy.
+hiện tại.**
+
+**Tại sao "chưa tìm thấy bằng chứng" khác với "không liên quan":** Chưa tìm thấy bằng chứng có nghĩa
+cần tiếp tục tìm (xem log đầy đủ, kiểm tra các trạng thái khác). Không liên quan có nghĩa vấn đề và
+nguyên nhân không có liên kết nào. Dấu hiệu ngoài (lỗi Server Action, context canceled) không nối được
+với deploy cũ ấy, nhưng vì log chỉ 500 dòng nên không thể kết luận chắc chắn.
 
 ---
 
@@ -148,7 +153,7 @@ hiện tại.** Dấu hiệu ngoài (lỗi Server Action, context canceled) khô
 | **Connection pool tắc?** | Chưa đo | Cần chạy `SELECT * FROM pg_stat_activity` |
 | **Cold start bao nhiêu?** | Tối ưu rồi, từ **113s → 3,4s** (33x) | `before/after-scale10.json` |
 | **Job trùng giờ cao điểm?** | Chưa phát hiện bằng chứng | 500 dòng log gần nhất không có trigger |
-| **Deploy cũ để lại gì?** | Không liên quan | Commit hiện tại là `9b9c0a06`, containers healthy |
+| **Deploy cũ để lại gì?** | Chưa tìm thấy bằng chứng | Log 500 dòng không đủ, containers healthy |
 
 ---
 
@@ -158,7 +163,7 @@ hiện tại.** Dấu hiệu ngoài (lỗi Server Action, context canceled) khô
 2. ✅ Dùng dữ liệu từ `before-scale10.json` và `after-scale10.json` để so sánh cold start trước/sau
 3. ✅ Ghi thẳng "chưa đo được" cho connection pool thay vì ước lượng
 4. ✅ Ghi thẳng "chưa phát hiện bằng chứng" cho job thay vì nói "không chạy trùng"
-5. ✅ Ghi thẳng "không liên quan" cho deploy cũ vì không tìm được link giữa lỗi hiện tại và deploy ấy
+5. ✅ Ghi thẳng "chưa tìm thấy bằng chứng" cho deploy cũ vì log chỉ 500 dòng, không đủ để kết luận
 
 ---
 
