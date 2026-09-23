@@ -9,7 +9,7 @@ import {
   MAX_ALLOWED_ADS_WRITE_MODE,
   clampAdsWriteMode,
 } from "@/lib/constants/ads-write";
-import { BRAKE_OFF, brakeState, gateAdsWrite, type GateInput } from "@/lib/marketing/ads-write-gate";
+import { BRAKE_OFF, brakeState, gateAdsWrite, subjectFreshness, type GateInput } from "@/lib/marketing/ads-write-gate";
 import type { Stability } from "@/lib/marketing/decision-stability";
 
 /**
@@ -67,6 +67,7 @@ function input(over: Partial<GateInput> = {}): GateInput {
     confirmed: true,
     decision: "SCALE",
     basis: "ACTUAL",
+    subject: { status: "ACTIVE", spendInWindowVnd: 2_000_000, spendAfterWindowVnd: 500_000 },
     stability: { ...HEALTHY_STABILITY, action: "SCALE" },
     currentBudgetVnd: 1_000_000,
     nextBudgetVnd: 1_200_000,
@@ -144,6 +145,15 @@ export function testAdsWrite() {
     { name: "phanh đang bật", over: { brake: { on: true, consecutiveWorse: 3, unmeasured: 0 } }, denial: "BRAKE_ON" },
     { name: "khuyến nghị không đẻ hành động", over: { decision: "HOLD" }, denial: "NO_ACTION_FOR_DECISION" },
     { name: "căn cứ là ước tính", over: { basis: "PROJECTED" }, denial: "BASIS_NOT_MEASURED" },
+    { name: "chiến dịch đã tắt", over: { subject: { status: "PAUSED", spendInWindowVnd: 2_000_000, spendAfterWindowVnd: 0 } }, denial: "SUBJECT_NOT_RUNNING" },
+    { name: "chiến dịch đã lưu trữ", over: { subject: { status: "ARCHIVED", spendInWindowVnd: 2_000_000, spendAfterWindowVnd: 0 } }, denial: "SUBJECT_NOT_RUNNING" },
+    {
+      name: "chiến dịch đã chạy lại",
+      over: { subject: { status: "ACTIVE", spendInWindowVnd: 1_825_871, spendAfterWindowVnd: 4_439_115 } },
+      denial: "SUBJECT_CHANGED",
+    },
+    { name: "không đọc được Facebook", over: { subject: { status: null, spendInWindowVnd: 2_000_000, spendAfterWindowVnd: 0 } }, denial: "SUBJECT_UNREADABLE" },
+    { name: "không đọc được tiền sau kỳ", over: { subject: { status: "ACTIVE", spendInWindowVnd: 2_000_000, spendAfterWindowVnd: null } }, denial: "SUBJECT_UNREADABLE" },
     { name: "chưa chín", over: { stability: { ...HEALTHY_STABILITY, action: "SCALE", ready: false, blocker: "YOUNG", reason: "mới giữ 1 ngày" } }, denial: "NOT_STABLE" },
     { name: "chưa ai bấm", over: { confirmed: false }, denial: "NOT_CONFIRMED" },
     { name: "chiến dịch đã đổi hôm nay", over: { changesForCampaignToday: 1 }, denial: "CAMPAIGN_RATE_LIMIT" },
@@ -185,6 +195,47 @@ export function testAdsWrite() {
   // Và chốt cứng vẫn thắng cả căn cứ: thứ tự chỉ nới ra chứ không bao giờ siết vào.
   const tatVaUocTinh = gateAdsWrite(input({ hardEnabled: false, basis: "PROJECTED" }));
   assert.equal(!tatVaUocTinh.allow && tatVaUocTinh.denial, "HARD_DISABLED");
+
+  /*
+    ═══════════ KẾT LUẬN CÒN NÓI VỀ ĐÚNG CÁI MÀ NÚT NÀY SẼ TÁC ĐỘNG KHÔNG ═══════════
+
+    Đo production 23/09/2026 trên 8 dòng có khuyến nghị hành động: 6/8 đã TẮT từ 05–09/09 (4 dòng
+    trong số đó đang được khuyên TĂNG NGÂN SÁCH), và dòng cuối — dòng tôi đã định đưa chủ shop
+    bấm, lần đầu bàn tay chạm vào tiền thật — khuyên CẮT trong khi chiến dịch đã CHẠY LẠI từ 20/09
+    và tiêu 4.439.115 ₫ sau kỳ, gấp 2,43 lần 1.825.871 ₫ mà kết luận dựa vào.
+
+    Không hàng rào nào trước đây hỏi câu này. Tất cả đều hỏi về KẾT LUẬN, không cái nào hỏi về
+    CHIẾN DỊCH. Ca "đã chạy lại" ở bảng trên là đúng số của dòng ấy.
+  */
+
+  // RANH GIỚI LÀ 1,0 VÀ NÓ PHẢI ĐỨNG ĐÚNG CHỖ: bằng nhau vẫn được, vượt một đồng thì không.
+  assert.equal(subjectFreshness({ status: "ACTIVE", spendInWindowVnd: 1_000_000, spendAfterWindowVnd: 1_000_000 }).ok, true, "tiền sau kỳ BẰNG tiền trong kỳ vẫn là cùng một lần chạy");
+  assert.equal(subjectFreshness({ status: "ACTIVE", spendInWindowVnd: 1_000_000, spendAfterWindowVnd: 1_000_001 }).ok, false, "vượt một đồng là phần chưa ai đo đã lớn hơn phần sinh ra kết luận");
+
+  /*
+    CHƯA ĐỌC ĐƯỢC KHÁC VỚI KHÔNG CHI GÌ. `spendAfterWindowVnd = 0` là một chiến dịch đứng yên sau
+    kỳ — hợp lệ. `null` là ERP không biết — phải chặn. Gộp `null` vào 0 là thả qua đúng lúc không
+    biết gì (AGENTS.md mục 42).
+  */
+  assert.equal(subjectFreshness({ status: "ACTIVE", spendInWindowVnd: 1_000_000, spendAfterWindowVnd: 0 }).ok, true, "không chi gì sau kỳ là một sự thật, không phải một chỗ trống");
+  assert.equal(subjectFreshness({ status: "ACTIVE", spendInWindowVnd: 1_000_000, spendAfterWindowVnd: null }).ok, false, "không biết đã chi gì sau kỳ thì không ghi");
+
+  // CHIẾN DỊCH ĐỨNG TRƯỚC KẾT LUẬN: một chiến dịch đã tắt thì hỏi căn cứ hay độ bền là vô nghĩa.
+  const tatVaUocTinhChuaChin = gateAdsWrite(
+    input({
+      subject: { status: "PAUSED", spendInWindowVnd: 2_000_000, spendAfterWindowVnd: 0 },
+      basis: "PROJECTED",
+      stability: { ...HEALTHY_STABILITY, action: "SCALE", ready: false, blocker: "YOUNG", reason: "non" },
+    }),
+  );
+  assert.equal(!tatVaUocTinhChuaChin.allow && tatVaUocTinhChuaChin.denial, "SUBJECT_NOT_RUNNING", "trạng thái chiến dịch phải được hỏi TRƯỚC căn cứ và độ bền");
+  // Nhưng chốt cứng vẫn thắng tất cả.
+  const tatCungVaTat = gateAdsWrite(input({ hardEnabled: false, subject: { status: "PAUSED", spendInWindowVnd: 0, spendAfterWindowVnd: 0 } }));
+  assert.equal(!tatCungVaTat.allow && tatCungVaTat.denial, "HARD_DISABLED");
+
+  // Lý do chặn phải mang SỐ của chính chiến dịch — cãi lại được, không chỉ đọc được.
+  const chayLai = gateAdsWrite(input({ subject: { status: "ACTIVE", spendInWindowVnd: 1_825_871, spendAfterWindowVnd: 4_439_115 } }));
+  assert.ok(!chayLai.allow && chayLai.reason.includes("2.43"), `lý do phải nói ra gấp bao nhiêu lần — "${!chayLai.allow ? chayLai.reason : ""}"`);
 
   // Phanh đứng TRƯỚC cổng độ bền: một luật đang sai thì khuyến nghị "đã chín" của nó cũng không đáng tin.
   const phanhTruocDoBen = gateAdsWrite(input({ brake: { on: true, consecutiveWorse: 3, unmeasured: 1 }, stability: { ...HEALTHY_STABILITY, ready: false, blocker: "YOUNG", reason: "non" } }));

@@ -78,6 +78,47 @@ export function brakeState(observations: WriteOutcomeObservation[]): BrakeState 
   return { on: consecutiveWorse >= ADS_WRITE_LIMITS.brakeConsecutiveWorse, consecutiveWorse, unmeasured };
 }
 
+/**
+ * ═══════════ KẾT LUẬN CÒN NÓI VỀ ĐÚNG CÁI MÀ NÚT NÀY SẼ TÁC ĐỘNG KHÔNG ═══════════
+ *
+ * Mọi hàng rào khác hỏi về KẾT LUẬN: nó có đứng trên số đo không, có giữ nguyên đủ lâu không. Không
+ * hàng rào nào hỏi về CHIẾN DỊCH: nó có còn là thứ mà kết luận đã nhìn thấy không.
+ *
+ * Và với shop này đó là câu hỏi quyết định. Kỳ chuẩn lùi 15 ngày để số tiền kịp chín (mô hình bán
+ * trước), trong khi shop chạy 619 chiến dịch mỗi 14 ngày — một chiến dịch thường chết trước khi bằng
+ * chứng về nó kịp chín. Đo production 23/09/2026 trên 8 dòng có khuyến nghị hành động:
+ *
+ *     6/8 đã TẮT từ 05–09/09 — trong đó 4 dòng đang được khuyên TĂNG NGÂN SÁCH
+ *     QA4_Q002_13/08_Linh Tây Luxury_V1: khuyên CẮT, nhưng đã CHẠY LẠI từ 20/09 và tiêu
+ *         4.439.115 ₫ sau kỳ, gấp 2,43 lần 1.825.871 ₫ mà kết luận dựa vào
+ *
+ * Dòng cuối là dòng tôi đã định đưa chủ shop bấm — lần đầu tiên bàn tay chạm vào tiền thật.
+ *
+ * ─── HAI CÂU HỎI, KHÔNG CÓ NGƯỠNG TỰ ĐẶT ───
+ *
+ *  · **Nó còn chạy không?** Hỏi thẳng Facebook (`status === "ACTIVE"`), không suy từ số chi. Trạng
+ *    thái sống là chứng cứ; "mấy ngày không chi" là một ngưỡng phải bịa ra.
+ *  · **Nó có còn là lần chạy đã được đo không?** Tiền SAU kỳ lớn hơn tiền TRONG kỳ ⇒ phần chưa ai
+ *    đo đã lớn hơn phần sinh ra kết luận. Ranh giới 1,0 không phải một lựa chọn thẩm mỹ: nó là điểm
+ *    mà "kết luận nói về chiến dịch này" thôi đúng hơn "kết luận nói về một chiến dịch khác".
+ *
+ * CHƯA BIẾT ⇒ không ghi, cùng luật với ngân sách hiện tại chưa đọc được.
+ */
+export type SubjectState = {
+  /** Trạng thái Facebook trả về. `null` = không đọc được. */
+  status: string | null;
+  spendInWindowVnd: number;
+  /** Chi SAU ngày cuối kỳ kết luận. `null` = không đọc được. */
+  spendAfterWindowVnd: number | null;
+};
+
+export function subjectFreshness(s: SubjectState): { ok: true } | { ok: false; denial: AdsWriteDenial } {
+  if (s.status === null || s.spendAfterWindowVnd === null) return { ok: false, denial: "SUBJECT_UNREADABLE" };
+  if (s.status !== "ACTIVE") return { ok: false, denial: "SUBJECT_NOT_RUNNING" };
+  if (s.spendAfterWindowVnd > s.spendInWindowVnd) return { ok: false, denial: "SUBJECT_CHANGED" };
+  return { ok: true };
+}
+
 export type GateInput = {
   /** `ADS_WRITE_ENABLED` đọc THẲNG từ biến môi trường. Chốt ngoài cùng. */
   hardEnabled: boolean;
@@ -88,6 +129,8 @@ export type GateInput = {
   decision: AdsAction;
   /** Khuyến nghị đứng trên SỐ ĐO hay trên lợi nhuận TẠM TÍNH. Xem `ALLOW_ADS_WRITE_ON_PROJECTED_BASIS`. */
   basis: DecisionBasis;
+  /** Chiến dịch hôm nay còn là thứ mà kết luận đã nhìn thấy không. Xem `subjectFreshness`. */
+  subject: SubjectState;
   stability: Stability;
   /** Ngân sách ngày hiện tại (VND). `null` = ERP chưa đọc được ⇒ không đổi được. */
   currentBudgetVnd: number | null;
@@ -102,6 +145,15 @@ export type GateInput = {
 export type GateResult =
   | { allow: true; action: AdsWriteAction; deltaVnd: number }
   | { allow: false; denial: AdsWriteDenial; reason: string };
+
+/** Câu kèm theo, bằng số của chính chiến dịch — lý do chặn phải cãi lại được, không chỉ đọc được. */
+export function subjectDetail(s: SubjectState): string {
+  if (s.status === null) return "";
+  if (s.status !== "ACTIVE") return `(Facebook báo: ${s.status}.)`;
+  if (s.spendAfterWindowVnd === null) return "";
+  const ratio = s.spendInWindowVnd > 0 ? (s.spendAfterWindowVnd / s.spendInWindowVnd).toFixed(2) : "∞";
+  return `(Sau kỳ: ${s.spendAfterWindowVnd.toLocaleString("vi-VN")}đ · trong kỳ: ${s.spendInWindowVnd.toLocaleString("vi-VN")}đ · gấp ${ratio} lần.)`;
+}
 
 function deny(denial: AdsWriteDenial, extra = ""): GateResult {
   return { allow: false, denial, reason: extra ? `${ADS_WRITE_DENIAL_REASON[denial]} ${extra}` : ADS_WRITE_DENIAL_REASON[denial] };
@@ -124,6 +176,15 @@ export function gateAdsWrite(input: GateInput): GateResult {
 
   const action = ACTION_FOR_DECISION[input.decision] ?? null;
   if (!action) return deny("NO_ACTION_FOR_DECISION", `Khuyến nghị đang là "${input.decision}".`);
+
+  /*
+    CHIẾN DỊCH TRƯỚC, KẾT LUẬN SAU.
+
+    Nếu thứ mà kết luận nói tới đã tắt, hoặc đã thành một lần chạy khác, thì hỏi tiếp kết luận ấy
+    đứng trên căn cứ gì hay giữ được bao lâu là vô nghĩa — nó đang mô tả một vật không còn ở đó.
+  */
+  const tuoi = subjectFreshness(input.subject);
+  if (!tuoi.ok) return deny(tuoi.denial, subjectDetail(input.subject));
 
   /*
     CĂN CỨ ĐỨNG TRƯỚC ĐỘ BỀN, VÀ ĐÓ LÀ CỐ Ý.
