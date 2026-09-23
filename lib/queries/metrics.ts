@@ -1,8 +1,8 @@
-import { and, eq, gte, inArray, lte, sql, type SQL } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
-import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
+import { FINISHED_OUTCOMES_SQL, OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
@@ -186,7 +186,7 @@ export type OrderMetricFacts = ReturnType<typeof orderMetricFacts>;
 /** Bộ cột gộp đọc trên bảng dẫn xuất — bản sao 1:1 của các hằng số nội tuyến ở trên. */
 export function factMetrics(base: OrderMetricFacts) {
   const delivered = sql`${base.outcome} = 'DELIVERED'`;
-  const returned = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const returned = sql`${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const booked = sql`${base.outcome} <> 'CANCELLED'`;
   return {
     isDelivered: delivered,
@@ -203,4 +203,33 @@ export function factMetrics(base: OrderMetricFacts) {
     deliveredRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${delivered}), 0)`,
     deliveredCogs: sql<number>`coalesce(sum(${base.cogs}) filter (where ${delivered}), 0)`,
   };
+}
+
+/**
+ * ═══════════ CƯỚC ĐÃ THỰC SỰ PHÁT SINH — MỘT ĐỊNH NGHĨA, BA CHỖ DÙNG ═══════════
+ *
+ * Cước của đơn ĐÃ NGÃ NGŨ (giao thành công + hoàn), cộng phí hoàn của đơn hoàn.
+ *
+ * ─── HAI VẾ, VÀ CẢ HAI ĐỀU ĐÃ SAI Ở ĐÂU ĐÓ ───
+ *
+ * **Đơn huỷ / chưa gửi / đang đi KHÔNG tính cước.** Ở đó `orders.partner_fee` chỉ là cước Pancake
+ * ƯỚC TÍNH lúc lên đơn — cộng vào là gánh một khoản tiền chưa hề chi. Đo production 23/09/2026
+ * trên 30 ngày: `lib/queries/ads-roas.ts` cộng cước của MỌI đơn và vì thế tính dư **5.976.000 ₫**
+ * trên 45/139 dòng (6.998.112 ₫ đúng so với 12.974.112 ₫ — dư 85%), dòng lệch nhiều nhất 812.000 ₫.
+ * Nó nằm ngay DƯỚI bảng quyết định trên cùng màn hình `/ads`, nên cùng một chiến dịch hiện hai con
+ * số lợi nhuận góp khác nhau cách nhau một cú cuộn chuột.
+ *
+ * **Đơn hoàn VẪN tốn cước, và còn tốn thêm phí hoàn.** Đó chính là phần làm biên lợi nhuận tụt; bỏ
+ * ra sẽ cho điểm hoà vốn đẹp hơn sự thật.
+ *
+ * `share` là CĂN CỨ PHÂN BỔ khi dòng hẹp hơn đơn (cấp mã hàng: tỷ trọng `line_total` trong đơn) —
+ * khai rõ rồi mới nhân, đúng AGENTS.md mục 14. Bỏ trống ⇒ nhân 1, tức cả đơn thuộc về một dòng.
+ *
+ * Hai danh sách kết quả đơn SINH RA từ `OUTCOME_GROUP`, không gõ tay — xem `lib/constants/truth.ts`.
+ */
+export function realizedShippingSql(cols: { shipping: SQL<number> | SQLWrapper; returnFee: SQL<number> | SQLWrapper; outcome: SQL<string> | SQLWrapper; share?: SQL<number> | SQLWrapper }): SQL<number> {
+  const phanBo = cols.share ? sql`coalesce(${cols.share}, 0)` : sql`1`;
+  return sql<number>`coalesce(sum(
+    (${cols.shipping} + case when ${cols.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}) then ${cols.returnFee} else 0 end) * ${phanBo}
+  ) filter (where ${cols.outcome} in (${sql.raw(FINISHED_OUTCOMES_SQL)})), 0)`;
 }

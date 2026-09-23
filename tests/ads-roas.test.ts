@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { Db } from "@/db";
 import { schema } from "@/db";
+import { eq, sql } from "drizzle-orm";
 import { clearMemo } from "@/lib/cache";
 import { ROAS_HINT, ROAS_LABEL, getAdsRoas } from "@/lib/queries/ads-roas";
 import type { Period } from "@/lib/search-params";
@@ -18,6 +19,36 @@ export async function testAdsRoas(db: Db) {
   // một giao thành công có tiền thực thu, một hoàn.
   await db.insert(schema.fbAds).values({ id: "ad-roas-1", name: "Mẩu QC A", campaignId: "camp-roas-1", campaignName: "Chiến dịch ROAS" }).onConflictDoNothing();
   await db.insert(schema.adSpends).values({ platform: "FACEBOOK", campaign: "Chiến dịch ROAS", campaignId: "camp-roas-1", spend: 1_000_000, spendDate: new Date("2026-09-01T00:00:00Z"), createdBy: "test" });
+  /*
+    ─── ĐƠN THỨ BA LÀ CẢ BÀI KIỂM: ĐANG ĐI, NHƯNG PANCAKE ĐÃ GHI SẴN MỘT KHOẢN CƯỚC ───
+
+    `orders.partner_fee` được điền lúc LÊN ĐƠN, không phải lúc gửi hàng. Đơn chưa ngã ngũ vì thế
+    mang một con số cước mà shop chưa hề chi đồng nào — và với mô hình BÁN TRƯỚC thì đó là phần lớn
+    đơn của mọi kỳ.
+
+    Bản trước của `getAdsRoas` cộng `sum(shipping)` KHÔNG lọc nên gánh trọn khoản ấy. Đo production
+    23/09/2026, 30 ngày, đúng population của truy vấn: cước đúng **6.947.112 ₫** so với
+    **12.804.112 ₫** đang in ra — dư **5.857.000 ₫ (+84%)** trên 45/87 dòng, dòng lệch nhiều nhất
+    778.000 ₫. Và **98,8%** phần dư ấy đến từ ĐƠN ĐANG TREO, chỉ 68.000 ₫ từ đơn huỷ theo ĐVVC.
+
+    CỐ Ý dùng đơn ĐANG TREO chứ không phải đơn huỷ-Pancake: `metricScope` đã loại đơn huỷ-Pancake
+    khỏi population từ đầu, nên một ảnh chụp bằng đơn huỷ sẽ XANH kể cả với công thức sai — tôi đã
+    viết đúng cái ảnh chụp vô dụng ấy trước khi kiểm đột biến bắt được.
+
+    Khối này nằm ngay DƯỚI bảng quyết định trên cùng màn hình `/ads`, nên cùng một chiến dịch hiện
+    hai con số lợi nhuận góp cách nhau một cú cuộn chuột.
+  */
+  await db.insert(schema.orders).values({
+    id: "roas-order-treo",
+    // Trong `CONFIRMED_STAGES` nên NẰM TRONG population; không có vận đơn nên chưa ngã ngũ.
+    stage: "SHIPPED",
+    adId: "ad-roas-1",
+    cod: 1_000_000,
+    totalPriceAfterDiscount: 1_000_000,
+    prepaid: 0,
+    partnerFee: 500_000,
+    insertedAt: new Date("2026-09-02T00:00:00Z"),
+  });
   for (const [i, spec] of [
     { stage: "DELIVERED", collected: 900_000, total: 1_000_000, code: "ROAS-OK" },
     { stage: "RETURNED", collected: 0, total: 1_000_000, code: "ROAS-HOAN" },
@@ -44,16 +75,47 @@ export async function testAdsRoas(db: Db) {
   const camp = r.rows.find((row) => row.key === "camp-roas-1");
   assert.ok(camp, "chiến dịch có đơn gắn ad_id phải xuất hiện trong bảng");
   assert.equal(camp.spend, 1_000_000);
-  assert.equal(camp.bookedOrders, 2, "hai đơn đều tính vào doanh thu lên đơn");
+  assert.equal(camp.bookedOrders, 3, "cả ba đơn (giao TC · hoàn · đang treo) đều tính vào doanh thu lên đơn — chỉ đơn huỷ mới bị loại");
   assert.equal(camp.deliveredOrders, 1, "chỉ một đơn tới tay khách");
-  assert.equal(camp.bookedRevenue, 2_000_000);
+  assert.equal(camp.bookedRevenue, 3_000_000);
   assert.equal(camp.deliveredRevenue, 1_000_000, "đơn hoàn KHÔNG được tính vào doanh thu giao thành công");
   assert.equal(camp.cashReceived, 900_000, "tiền về là số THỰC THU có chứng từ, không phải COD khai báo");
-  assert.equal(camp.orderRoas, 2, "ROAS lên đơn = 2.000.000 ÷ 1.000.000");
+  assert.equal(camp.orderRoas, 3, "ROAS lên đơn = 3.000.000 ÷ 1.000.000");
   assert.equal(camp.deliveredRoas, 1, "ROAS giao thành công = 1.000.000 ÷ 1.000.000");
   assert.equal(camp.cashRoas, 0.9, "ROAS tiền về = 900.000 ÷ 1.000.000");
   assert.ok(camp.contributionRoas !== null && camp.contributionRoas < camp.cashRoas, "ROAS lợi nhuận góp phải thấp nhất — đã trừ giá vốn, cước và chính tiền QC");
   assert.equal(camp.successRate, 50, "GTC của chiến dịch = 1 giao TC ÷ 2 đơn đã kết thúc");
+
+  /*
+    ───────── 0b. CƯỚC CHỈ TÍNH TRÊN ĐƠN ĐÃ NGÃ NGŨ ─────────
+
+    Hai đơn đã ngã ngũ, mỗi đơn cước 30.000 ⇒ 60.000. Đơn huỷ mang `partner_fee` 500.000 của
+    Pancake và phải nằm NGOÀI — nếu nó lọt vào, lợi nhuận góp tụt đúng nửa triệu và màn hình `/ads`
+    lại nói hai con số ở hai khối cách nhau một cú cuộn chuột.
+
+    Khẳng định bằng LỢI NHUẬN GÓP chứ không bằng một cột cước, vì lợi nhuận góp mới là thứ đi lên
+    màn hình và đi vào ROAS.
+  */
+  /*
+    Bài kiểm chỉ có nghĩa nếu đơn huỷ THẬT SỰ nằm trong dữ liệu — nếu lệnh gieo hỏng, khẳng định
+    dưới đây vẫn xanh mà không chứng minh gì. `bookedOrders` KHÔNG dùng làm phép dò được: nó cố ý
+    loại đơn huỷ (đó đúng là hành vi cần có), nên phải hỏi thẳng bảng.
+  */
+  const soDonTreo = await db.select({ n: sql<number>`count(*)::int` }).from(schema.orders).where(eq(schema.orders.id, "roas-order-treo"));
+  assert.equal(Number(soDonTreo[0].n), 1, "đơn đang treo phải có trong dữ liệu, nếu không phép kiểm cước bên dưới là rỗng nghĩa");
+  /*
+    `contribution` ở đây là SAU tiền quảng cáo: doanh thu giao TC − giá vốn − cước − chi QC.
+    Fixture không có dòng hàng nên giá vốn 0, nên con số nói thẳng về vế CƯỚC:
+
+        1.000.000 − 0 − 60.000 − 1.000.000 = −60.000
+
+    Bản cũ cho **−560.000**: nó gánh thêm 500.000 cước ước tính của đơn ĐANG TREO.
+  */
+  assert.equal(
+    camp.contribution,
+    camp.deliveredRevenue - 60_000 - camp.spend,
+    "lợi nhuận góp chỉ trừ cước của HAI đơn đã ngã ngũ (2 × 30.000); cước ước tính 500.000 của đơn ĐANG TREO là tiền chưa hề chi",
+  );
 
   // ───────── 1. Bốn mức ROAS phải giảm dần theo đúng bản chất ─────────
   for (const row of r.rows) {

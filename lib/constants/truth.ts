@@ -223,6 +223,23 @@ export const OPEN_OUTCOMES = (Object.keys(OUTCOME_GROUP) as OrderOutcome[]).filt
 export const OPEN_OUTCOMES_SQL = OPEN_OUTCOMES.map((x) => `'${x}'`).join(",");
 
 /**
+ * ═══════════ ĐƠN ĐÃ NGÃ NGŨ, VÀ ĐƠN ĐÃ HOÀN — CÙNG MỘT LỜI KHAI, THÊM HAI DẠNG SQL ═══════════
+ *
+ * Cùng lý do với `OPEN_OUTCOMES_SQL` ở trên: `OUTCOME_GROUP` là lời khai duy nhất, nên mọi vị ngữ
+ * SQL phải SINH RA từ nó. Hai danh sách này tồn tại vì phép tính CƯỚC cần đúng chúng — cước chỉ
+ * phát sinh thật ở đơn đã ngã ngũ, và phí hoàn chỉ ở đơn hoàn.
+ */
+export const FINISHED_OUTCOMES_SQL = (Object.keys(OUTCOME_GROUP) as OrderOutcome[])
+  .filter((o) => isFinishedOutcome(o))
+  .map((x) => `'${x}'`)
+  .join(",");
+
+export const RETURNED_OUTCOMES_SQL = (Object.keys(OUTCOME_GROUP) as OrderOutcome[])
+  .filter((o) => OUTCOME_GROUP[o] === "RETURNED")
+  .map((x) => `'${x}'`)
+  .join(",");
+
+/**
  * ───────── Bằng chứng TIỀN ─────────
  * Ghi thành hằng số để không ai phải đoán "trường này có tính là tiền thật không".
  * Đặc tả `ORDER_OUTCOME.md` mục 8.

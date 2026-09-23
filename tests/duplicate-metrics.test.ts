@@ -160,6 +160,68 @@ export function testDuplicateMetrics() {
       "Giải pháp: chọn MỘT định nghĩa là 'khoá chân lý', các chỗ khác nhập từ đó.",
   );
 
+  /*
+    ═══════════ CƯỚC ĐÃ PHÁT SINH: MỘT HÀM, KHÔNG CÓ BẢN CHÉP THỨ TƯ ═══════════
+
+    Phép quét tên ở trên bắt được chỉ số trùng TÊN. Nó KHÔNG bắt được thứ đã cắn thật ngày
+    23/09/2026: ba nơi cùng cộng cước, mỗi nơi một biểu thức SQL viết tay, và một trong ba sai —
+    `lib/queries/ads-roas.ts` cộng `sum(shipping)` không lọc nên gánh cả cước của đơn ĐANG TREO,
+    nơi `orders.partner_fee` mới chỉ là ước tính của Pancake lúc lên đơn.
+
+    Đo production 30 ngày, đúng population của truy vấn: 12.804.112 ₫ thay vì 6.947.112 ₫ — dư
+    5.857.000 ₫ (+84%) trên 45/87 dòng, và 98,8% phần dư đến từ đơn đang treo. Khối ấy nằm ngay
+    DƯỚI bảng quyết định trên cùng màn hình `/ads`, nên cùng một chiến dịch hiện hai con số lợi
+    nhuận góp cách nhau một cú cuộn chuột.
+
+    Nên luật ở đây là về HÌNH DẠNG chứ không về tên: không tệp nào được tự cộng `sum(<cước>)` nữa —
+    đi qua `realizedShippingSql`. Thêm một chỗ tính cước là thêm một cơ hội để ba màn hình nói ba số.
+  */
+  /*
+    MIỄN TRỪ PHẢI KHAI LÝ DO, KHÔNG PHẢI MỘT DANH SÁCH TÊN.
+
+    Ba tệp dưới đây cộng một thứ TRÔNG GIỐNG cước nhưng là khái niệm khác. Miễn trừ im lặng sẽ biến
+    phép quét này thành thứ ai cũng thêm tên vào cho CI xanh.
+  */
+  const MIEN_TRU_CUOC: Record<string, string> = {
+    // Chi phí ĐƯỢC GHI NHẬN của công ty, thẩm quyền là bảng kê ĐVVC (AGENTS.md mục 15/18) — không
+    // phải lợi nhuận góp của một chiến dịch, và population của nó là cả shop chứ không riêng đơn QC.
+    "cost-engine.ts": "Chi phí ghi nhận theo thẩm quyền, không phải cước của một dòng quảng cáo.",
+    // Cước CHIỀU HOÀN của một kiện đang trên đường về — một khoản khác, có sổ riêng.
+    "return-pipeline.ts": "Cước chiều hoàn của pipeline hàng về, không phải cước của đơn bán.",
+    /*
+      CHƯA GỘP ĐƯỢC, VÀ ĐÂY LÀ MỘT CÂU HỎI CÒN MỞ chứ không phải một lời tha bổng.
+
+      `marketing-daily` lọc ĐÚNG population (`delivered or returned`) nên nó KHÔNG mang lỗi của
+      `ads-roas`. Nhưng nó định nghĩa cước là `partner_fee + return_fee + fee_marketplace` — tức
+      ước tính của Pancake — trong khi hai chỗ kia lấy cước THẬT trên vận đơn
+      (`shipments.shipping_fee`) rồi mới lùi về `partner_fee`. Hai định nghĩa ấy có thể ra hai con
+      số cho cùng một chiến dịch ở `/ads` và `/ads/daily`.
+
+      Chưa sửa ở đây vì sửa là ĐỔI SỐ của một báo cáo khác, và phải đo trước/sau trên production
+      rồi mới đổi (AGENTS.md mục 6.5). Ghi ra để nó không trôi mất.
+    */
+    "marketing-daily.ts": "Dùng partner_fee thay cước thật trên vận đơn — CÒN NGỜ, cần đo trước/sau rồi mới gộp.",
+  };
+
+  const thuMucTruyVan = path.join(__dirname, "..", "lib", "queries");
+  const tuCongCuoc: string[] = [];
+  for (const ten of fs.readdirSync(thuMucTruyVan).filter((f) => f.endsWith(".ts"))) {
+    // `metrics.ts` LÀ nguồn — nó được phép chứa công thức.
+    if (ten === "metrics.ts" || ten in MIEN_TRU_CUOC) continue;
+    const src = fs.readFileSync(path.join(thuMucTruyVan, ten), "utf8");
+    if (src.includes("realizedShippingSql")) continue;
+    for (const m of src.matchAll(/sum\(([^)]*[Ss]hipping[^)]*)\)/g)) {
+      tuCongCuoc.push(`lib/queries/${ten}: sum(${m[1].trim()})`);
+    }
+  }
+  assert.deepEqual(
+    tuCongCuoc,
+    [],
+    "Có tệp tự cộng cước bằng SQL viết tay thay vì gọi realizedShippingSql():\n" +
+      tuCongCuoc.join("\n") +
+      "\n\nCước chỉ phát sinh ở đơn ĐÃ NGÃ NGŨ, và đơn hoàn còn tốn thêm phí hoàn. Ba nơi từng gõ lại công thức này và MỘT nơi sai.",
+  );
+
   const knownCount = dups.filter(({ normalized }) =>
     KNOWN_DUPLICATES.has(normalized),
   ).length;
