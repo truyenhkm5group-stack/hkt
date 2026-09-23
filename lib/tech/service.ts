@@ -638,6 +638,13 @@ export async function finishTechAgentRun(
      * có quyền vào kho. Câu lỗi thật là thứ duy nhất trả lời được "sửa cái gì".
      */
     loiCong?: { ten: string; exitCode: number | null; dauRa: string }[];
+    /**
+     * HÌNH DẠNG LƯỢT CHẠY — đọc mấy lần, ghi mấy lần, vào tệp nào, bao nhiêu byte.
+     *
+     * KHÔNG phải nội dung: kho mã PUBLIC, và nội dung đã nằm ở PR. Đây là thứ duy nhất trả lời
+     * "24 vòng ấy nó làm gì" khi một lượt chạy đốt tiền rồi hỏng (xem `lib/constants/agent-steps.ts`).
+     */
+    vetBuoc?: unknown;
   },
   actor: TechActor,
 ): Promise<TechResult> {
@@ -661,7 +668,7 @@ export async function finishTechAgentRun(
       buildResult: input.buildResult ?? "UNKNOWN",
       filesChanged: input.filesChanged ?? [],
       error: input.error?.trim().slice(0, 4000) ?? "",
-      metadata: { ...((run.metadata as Record<string, unknown>) ?? {}), chiPhi: input.chiPhi ?? null, loiCong: input.loiCong?.length ? input.loiCong : null },
+      metadata: { ...((run.metadata as Record<string, unknown>) ?? {}), chiPhi: input.chiPhi ?? null, loiCong: input.loiCong?.length ? input.loiCong : null, vetBuoc: input.vetBuoc ?? null },
     })
     .where(eq(schema.techAgentRuns.id, input.runId));
 

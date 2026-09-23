@@ -28,6 +28,7 @@ import { classifyProviderError } from "@/scripts/agent-runner-check";
 import { AGENT_TOOLS, AiAgentExecutor } from "@/lib/agents/executor";
 import type { AgentExecutor, AgentJob, AgentOutcome } from "@/lib/agents/executor";
 import type { AiProvider } from "@/lib/ai/provider";
+import { inVetBuoc, tomTatBuoc } from "@/lib/constants/agent-steps";
 
 /**
  * ═══════════ PHASE 2A — ĐỌC DEPLOY THẬT, CHIẾU VIỆC TECH, CHẠY AGENT ĐẦU TIÊN ═══════════
@@ -537,6 +538,72 @@ export async function testAgentRunner() {
   assert.equal(rDo.status, "FAILED");
   assert.equal(rDo.gates.typecheck, "FAILED", "exit code THẬT quyết định cổng, không phải lời khai của agent");
   assert.equal(rDo.resultCommit, null, "cổng đỏ thì KHÔNG có commit nào");
+
+  // ───────── 4.5d LƯỢT CHẠY PHẢI ĐỂ LẠI VẾT: ĐỌC/GHI/BYTE ─────────
+  /*
+    Lượt chạy #45 (TECH-6) đốt 24 vòng · $0,7681 · 132.870 token đầu ra và KHÔNG giao gì. Khối
+    bằng chứng in ra đúng ba dòng dùng được — FAILED, "chưa gọi finish", tên một tệp. Không dòng
+    nào nói agent đã đọc gì hay ghi bao nhiêu lần, nên tôi dựng một giả thuyết hợp lý và KHÔNG
+    chứng minh được nó. Một giả thuyết không kiểm được thì không đáng để sửa mã theo.
+
+    Khối này khoá cả hai nửa: hàm gom vết, VÀ đường nối từ runner vào sổ.
+  */
+  assert.deepEqual(tomTatBuoc([]), { doc: 0, ghi: 0, lenh: 0, chan: 0, ghiChu: 0, theoTep: [] }, "không bước nào ⇒ vết rỗng, không phải thiếu trường");
+  const vetThu = tomTatBuoc([
+    { kind: "READ", path: "a.md", ok: true, detail: "10 ký tự" },
+    { kind: "WRITE", path: "docs/x.md", ok: true, detail: "đã ghi 1200 ký tự" },
+    { kind: "WRITE", path: "docs/x.md", ok: true, detail: "đã ghi 1300 ký tự" },
+    { kind: "WRITE", path: "docs/y.md", ok: true, detail: "đã ghi 40 ký tự" },
+    { kind: "COMMAND", command: "npm run lint", ok: true, exitCode: 0, detail: "" },
+    { kind: "BLOCKED", detail: "lệnh ngoài danh sách" },
+  ]);
+  assert.equal(vetThu.doc, 1);
+  assert.equal(vetThu.ghi, 3);
+  assert.equal(vetThu.lenh, 1);
+  assert.equal(vetThu.chan, 1);
+  /*
+    GHI CÙNG MỘT TỆP HAI LẦN PHẢI GOM LẠI, VÀ BYTE PHẢI CỘNG.
+
+    `write_file` GHI ĐÈ toàn bộ tệp, nên "sửa một dòng" và "viết lại cả tệp" đều là MỘT lượt ghi.
+    Chỉ đếm lượt thì hai việc ấy không phân biệt được — số byte mới phân biệt được, và nó là con
+    số duy nhất cho biết một lượt chạy có đang viết lại cùng một thứ nhiều lần hay không.
+  */
+  assert.deepEqual(vetThu.theoTep[0], { path: "docs/x.md", luotGhi: 2, tongByte: 2500 }, "hai lượt ghi cùng tệp phải gom, và byte phải CỘNG");
+  assert.ok(inVetBuoc(vetThu).includes("docs/x.md (2× · 2500 byte)"), "dòng in ra phải đọc được ngay, không phải JSON");
+  assert.ok(inVetBuoc(tomTatBuoc([])).includes("không ghi tệp nào"), "vết rỗng phải NÓI RA là rỗng, không in một dòng trống");
+
+  /*
+    ĐƯỜNG NỐI: bước GHI của executor phải MANG số ký tự, nếu không cột byte luôn bằng 0 và cả
+    phép đo này thành trang trí. Đây đúng chỗ đã đứt hai lần trước (ĐB19, ĐB-F).
+  */
+  const maExec = readFileSync(path.join(process.cwd(), "lib/agents/executor.ts"), "utf8");
+  assert.ok(maExec.includes("đã ghi ${noiDung.length} ký tự"), "bước GHI phải ghi lại SỐ KÝ TỰ, không chỉ chữ 'đã ghi'");
+  /*
+    VÀ VẾT PHẢI THẬT SỰ NẰM TRONG SỔ — đo BẰNG SỔ, không quét mã nguồn.
+
+    Bản đầu của khẳng định này hỏi mã nguồn có chứa `vetBuoc: tomTatBuoc(outcome.steps)` không.
+    Chuỗi ấy có ở BA nhánh trả về, nên đột biến gỡ nó khỏi MỘT nhánh vẫn xanh — chốt canh sự CÓ
+    MẶT của một dòng chữ, không canh đường đi của dữ liệu. Đột biến "gom vết nhưng không lưu"
+    SỐNG SÓT.
+
+    Dòng dưới chạy runner thật rồi đọc lại sổ: vết phải có, và phải kể đúng tệp agent đã ghi.
+  */
+  const idVet = await taoViec("p2a-runner: lượt chạy phải để lại vết");
+  /*
+    Executor riêng, KHAI BƯỚC như executor thật làm. `ghiDoc` trả `steps: []` nên nó không đo
+    được đường nối đang xét ở đây — runner có mang vết vào sổ hay không.
+  */
+  const ghiCoVet = new ScriptedExecutor(async (job) => {
+    job.workspace.writeFile("docs/p2a-agent.md", "# Tài liệu do agent viết\n\nMột dòng.\n");
+    return { summary: "Đã ghi.", steps: [{ kind: "WRITE" as const, path: "docs/p2a-agent.md", ok: true, detail: "đã ghi 42 ký tự" }], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
+  });
+  const rVet = await runAgentOnTask({ taskId: idVet, agentKey: "documentation", executor: ghiCoVet, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
+  const runVet = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, rVet.runId!) });
+  const vetTrongSo = (runVet?.metadata as { vetBuoc?: { ghi: number; theoTep: { path: string; tongByte: number }[] } } | null)?.vetBuoc;
+  assert.ok(vetTrongSo, "sổ PHẢI giữ vết bước — gom mà không lưu thì bằng không gom");
+  assert.equal(vetTrongSo!.ghi, 1, "một lượt ghi phải đếm là một");
+  assert.equal(vetTrongSo!.theoTep[0]?.path, "docs/p2a-agent.md", "và phải kể đúng tệp");
+  assert.ok((vetTrongSo!.theoTep[0]?.tongByte ?? 0) > 0, "byte phải > 0 — cột byte bằng 0 là cả phép đo thành trang trí");
 
   // ───────── 4.5c ĐỀ BÀI PHẢI KỂ TÊN SỔ CHỨNG TỪ SỐ ĐO ─────────
   /*

@@ -399,8 +399,17 @@ export class AiAgentExecutor implements AgentExecutor {
           continue;
         }
         if (call.name === "write_file") {
-          const r = job.workspace.writeFile(String(input.path ?? ""), String(input.content ?? ""));
-          steps.push({ kind: "WRITE", path: String(input.path ?? ""), ok: r.ok, detail: r.ok ? "đã ghi" : r.reason });
+          const noiDung = String(input.content ?? "");
+          const r = job.workspace.writeFile(String(input.path ?? ""), noiDung);
+          /*
+            SỐ KÝ TỰ ĐI KÈM BƯỚC GHI — không phải để đẹp sổ.
+
+            `write_file` GHI ĐÈ TOÀN BỘ tệp, nên "sửa một dòng" và "viết lại cả tệp 660 dòng" đều
+            là MỘT lượt ghi. Chỉ đếm lượt thì hai việc ấy không phân biệt được, và đó đúng là câu
+            hỏi không trả lời được khi lượt chạy #45 đốt 24 vòng mà không giao gì
+            (`lib/constants/agent-steps.ts`).
+          */
+          steps.push({ kind: "WRITE", path: String(input.path ?? ""), ok: r.ok, detail: r.ok ? `đã ghi ${noiDung.length} ký tự` : r.reason });
           results.push({ type: "tool_result", toolUseId: call.id, content: r.ok ? `Đã ghi ${r.path}.` : r.reason, isError: !r.ok });
           continue;
         }
