@@ -167,7 +167,7 @@ function Detail({ row }: { row: AdsDecisionRow }) {
       {
         label: "▸ Lợi nhuận SAU QC TẠM TÍNH",
         value: <strong>{row.spendKnown ? formatVND(row.projectedProfitAfterAds) : "—"}</strong>,
-        hint: "Chưa trừ cước của phần đang treo: đơn chưa gửi thì chưa phát sinh cước thật, nên con số này rộng rãi hơn thực tế một chút. Cùng cách tính với Báo cáo hiệu quả marketing.",
+        hint: "Đã trừ CẢ cước dự phóng của phần đang treo — đã cộng doanh thu tương lai thì phải trừ chi phí tương lai của đúng phần ấy. Cước không nhân tỷ lệ giao thành công: hàng hoàn vẫn tốn cước đi. Vế còn thiếu: phí hoàn của đơn đang treo, vì nó chỉ tồn tại sau khi hoàn thật.",
       },
     );
   }

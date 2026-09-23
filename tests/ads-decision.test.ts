@@ -186,6 +186,7 @@ export async function testAdsDecision(db: Db) {
       shipping: 500_000,
       openProjectedRevenue: 0,
       openProjectedCogs: 0,
+      openProjectedShipping: 0,
       openProjectedOrders: 0,
     },
     "campaign",
@@ -265,6 +266,8 @@ export async function testAdsDecision(db: Db) {
       // 15.000.000 × 80% — phép nhân đã làm trong SQL bằng tỷ lệ của từng mã.
       openProjectedRevenue: 12_000_000,
       openProjectedCogs: 6_000_000,
+      // 15 đơn đang treo × 30.000 cước. KHÔNG nhân 80%: cước mất cả khi giao được lẫn khi hoàn.
+      openProjectedShipping: 450_000,
       openProjectedOrders: 12,
     },
     "campaign",
@@ -275,8 +278,20 @@ export async function testAdsDecision(db: Db) {
   assert.equal(dangTreo.maturity, 0.25, "5 trên 20 đơn đã ngã ngũ");
   assert.equal(dangTreo.headroom, 0.58, "căn cứ SỐ ĐO: 1.750.000 ÷ 3.000.000");
   assert.equal(dangTreo.projectedDeliveredRevenue, 16_000_000, "4.000.000 đã giao + 12.000.000 dự kiến về");
-  assert.equal(dangTreo.projectedProfitAfterAds, 4_750_000, "16.000.000 − 8.000.000 giá vốn − 250.000 cước − 3.000.000 quảng cáo");
-  assert.equal(dangTreo.projectedHeadroom, 2.58, "căn cứ TẠM TÍNH: 7.750.000 ÷ 3.000.000");
+  /*
+    ─── CHI PHÍ TƯƠNG LAI ĐI CÙNG DOANH THU TƯƠNG LAI ───
+
+    16.000.000 − 8.000.000 giá vốn − (250.000 cước đã phát sinh + 450.000 cước sẽ phát sinh)
+                − 3.000.000 quảng cáo = 4.300.000
+
+    Bản trước cho 4.750.000: nó cộng doanh thu của 15 đơn đang treo mà bỏ cước của đúng 15 đơn ấy.
+    Đo production 23/09/2026 thì chỗ bỏ sót đó đáng 5.789.000 ₫ / 30 ngày.
+
+    Và cước KHÔNG nhân 80%: 450.000 chứ không phải 360.000. Hàng hoàn vẫn tốn cước đi — nhân tỷ lệ
+    giao thành công vào cước là giả định đơn hoàn được miễn cước.
+  */
+  assert.equal(dangTreo.projectedProfitAfterAds, 4_300_000, "trừ cả cước dự phóng của phần đang treo");
+  assert.equal(dangTreo.projectedHeadroom, 2.43, "căn cứ TẠM TÍNH: 7.300.000 ÷ 3.000.000");
   assert.equal(dangTreo.appliedDeliveryRate, 80, "tỷ lệ đã áp đọc ngược ra từ chính phép nhân: 12.000.000 ÷ 15.000.000");
   assert.equal(dangTreo.basis, "PROJECTED");
   assert.equal(dangTreo.action, "SCALE", "quyết theo kế hoạch: phần đang treo đủ để vượt xa hoà vốn");
@@ -291,10 +306,11 @@ export async function testAdsDecision(db: Db) {
   */
   assert.equal(dangTreo.deliveredRevenue, 4_000_000, "doanh thu đã giao vẫn là SỐ ĐO, không được cộng phần ước tính vào");
   assert.equal(dangTreo.profitAfterAds, -1_250_000, "lợi nhuận thật vẫn âm, và vẫn phải đọc được như vậy");
+  assert.equal(dangTreo.shippingCost, 250_000, "cột cước vẫn là SỐ ĐO — phần dự phóng sống trong lợi nhuận tạm tính, không được trộn vào đây");
 
   // CHƯA BIẾT LÀ NULL, KHÔNG PHẢI 0.
   const noSpend = buildDecisionRow(
-    { key: "ad-1", name: "Mẩu 1", bookedOrders: 5, deliveredOrders: 4, returnedOrders: 1, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 5_000_000, deliveredRevenue: 4_000_000, cash: 3_000_000, cogs: 2_000_000, shipping: 200_000, openProjectedRevenue: 0, openProjectedCogs: 0, openProjectedOrders: 0 },
+    { key: "ad-1", name: "Mẩu 1", bookedOrders: 5, deliveredOrders: 4, returnedOrders: 1, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 5_000_000, deliveredRevenue: 4_000_000, cash: 3_000_000, cogs: 2_000_000, shipping: 200_000, openProjectedRevenue: 0, openProjectedCogs: 0, openProjectedShipping: 0, openProjectedOrders: 0 },
     "ad",
     0,
     false,
@@ -310,7 +326,7 @@ export async function testAdsDecision(db: Db) {
 
   // Chưa có doanh thu giao thành công ⇒ không có biên ⇒ KHÔNG có điểm hoà vốn (không phải 0).
   const burned = buildDecisionRow(
-    { key: "camp-burn", name: "Đốt tiền", bookedOrders: 0, deliveredOrders: 0, returnedOrders: 0, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 0, deliveredRevenue: 0, cash: 0, cogs: 0, shipping: 0, openProjectedRevenue: 0, openProjectedCogs: 0, openProjectedOrders: 0 },
+    { key: "camp-burn", name: "Đốt tiền", bookedOrders: 0, deliveredOrders: 0, returnedOrders: 0, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 0, deliveredRevenue: 0, cash: 0, cogs: 0, shipping: 0, openProjectedRevenue: 0, openProjectedCogs: 0, openProjectedShipping: 0, openProjectedOrders: 0 },
     "campaign",
     5_000_000,
     true,
@@ -350,6 +366,7 @@ export async function testAdsDecision(db: Db) {
       shipping: 300_000,
       openProjectedRevenue: 0,
       openProjectedCogs: 0,
+      openProjectedShipping: 0,
       openProjectedOrders: 0,
     },
     "campaign",
@@ -401,6 +418,7 @@ export async function testAdsDecision(db: Db) {
       shipping: 200_000,
       openProjectedRevenue: 0,
       openProjectedCogs: 0,
+      openProjectedShipping: 0,
       openProjectedOrders: 0,
     },
     "ad",
