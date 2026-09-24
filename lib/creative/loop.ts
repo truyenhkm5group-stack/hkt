@@ -6,8 +6,12 @@ import { applyKills, publishApprovedBatches, type CreativeDeps, type KillReport,
 import { sendCreativeNotice, vnClock, type CreativeNotice } from "@/lib/creative/notify";
 import { markMoqNotified, moqNotice, runDesignMoq, unnotifiedMoq, type DesignMoqReport } from "@/lib/creative/moq";
 import { markProposalsNotified, unnotifiedProposals } from "@/lib/creative/scale";
+import { drawManualGen, type DrawManualGenDeps, type DrawManualGenSummary } from "@/lib/creative/manual-gen";
+import { assignOpenBatchNames, refreshNamingTemplate, type TemplateReader } from "@/lib/creative/naming";
+import { readTemplateAd } from "@/lib/integrations/facebook/ads-write";
+import { env } from "@/lib/env";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
-import { CREATIVE_HARD_LIMITS, CREATIVE_VERDICT_LABEL, SCALE_KIND_LABEL, type CreativeVerdict } from "@/lib/constants/creative-loop";
+import { CREATIVE_HARD_LIMITS, CREATIVE_VERDICT_LABEL, MANUAL_GEN, SCALE_KIND_LABEL, type CreativeVerdict } from "@/lib/constants/creative-loop";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 
 /**
@@ -27,7 +31,11 @@ import { vnDay } from "@/lib/constants/marketing-decision-ledger";
  *  3c. **MOQ thiết kế mới** (§5h) — thiết kế đủ 50 đơn ⇒ NHÁP lệnh sản xuất + MỘT tin báo. Chạy ở MỌI lượt
  *     kể cả khi vòng đang TẮT: đơn của khách vẫn về dù vòng không đăng mẫu mới, và nháp không tiêu đồng
  *     nào, không gửi xưởng.
- *  4. **Dựng lô ngày mai** — chậm nhất, đứng cuối.
+ *  4. **Dựng lô ngày mai** — chậm nhất.
+ *  5. **Tên chiến dịch / nhóm / quảng cáo** (§5i) — đọc lại cài đặt nhóm mẫu (một lời GET, có đệm) rồi điền
+ *     tên mặc định cho mẫu của lô chưa duyệt. Đứng SAU bước dựng để mẫu vừa có ảnh được đặt tên ngay.
+ *  6. **Vẽ nốt ảnh gen tay** (§5i) — tối đa `MANUAL_GEN.drawPerTick` ảnh mà lượt `after()` của nút bấm để dở.
+ *     Đứng CUỐI: lô hằng ngày được dùng trần ảnh trước. Chạy cả khi vòng TẮT (việc người đã bấm).
  *
  * Một bước hỏng KHÔNG chặn bước khác: lỗi đi vào `warnings` và lượt vẫn chạy tiếp. Bước đăng hỏng
  * mà chặn luôn bước tắt là để một lỗi tải ảnh giữ cho các mẫu đắt tiếp tục chảy tiền.
@@ -35,6 +43,9 @@ import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 
 export type LoopTickDeps = {
   build?: BuildBatchDeps;
+  /** Đọc mẩu mẫu để đặt tên nhóm. `null` ⇒ không đọc. Bỏ trống ⇒ `readTemplateAd` thật NẾU có token Facebook. */
+  namingReader?: TemplateReader | null;
+  manualGen?: DrawManualGenDeps;
   write?: CreativeDeps;
   notify?: (n: CreativeNotice) => Promise<unknown>;
   evaluate?: Parameters<typeof evaluateCreatives>[2];
@@ -49,6 +60,10 @@ export type LoopTickResult = {
   build: BuildBatchSummary | null;
   /** Thiết kế vừa đủ MOQ ở lượt này (§5h) — nháp đã dựng hoặc lệnh có sẵn đã nối. */
   moq: DesignMoqReport[];
+  /** Số mẫu vừa được điền tên theo khuôn (§5i). */
+  named: number;
+  /** Lượt vẽ nốt ảnh gen tay (§5i). `null` = không có gì để vẽ / bước lỗi. */
+  manualGen: DrawManualGenSummary | null;
   warnings: string[];
 };
 
@@ -69,7 +84,7 @@ export async function expireOverdueBatches(db: Db, now: Date): Promise<{ id: str
 export async function runCreativeLoopTick(db: Db, now: Date = new Date(), deps: LoopTickDeps = {}): Promise<LoopTickResult> {
   const notify = deps.notify ?? sendCreativeNotice;
   const warnings: string[] = [];
-  const out: LoopTickResult = { enabled: false, expired: [], published: [], evaluation: null, kills: [], build: null, moq: [], warnings };
+  const out: LoopTickResult = { enabled: false, expired: [], published: [], evaluation: null, kills: [], build: null, moq: [], named: 0, manualGen: null, warnings };
   const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
       return await fn();
@@ -183,6 +198,17 @@ export async function runCreativeLoopTick(db: Db, now: Date = new Date(), deps: 
       }
     }
   }
+
+  // 5. Tên theo khuôn (§5i) — không gọi mạng nếu không có token / không ai tiêm bộ đọc.
+  const reader = deps.namingReader === undefined ? (env.facebook.accessToken ? readTemplateAd : null) : deps.namingReader;
+  if (reader) {
+    const msgTpl = await step("đọc nhóm mẫu để đặt tên", () => refreshNamingTemplate(db, config, now, reader));
+    if (msgTpl && msgTpl.startsWith("Không")) warnings.push(msgTpl);
+  }
+  out.named = (await step("đặt tên bài", () => assignOpenBatchNames(db, now))) ?? 0;
+
+  // 6. Vẽ nốt ảnh gen tay (§5i).
+  out.manualGen = await step("vẽ nốt gen tay", () => drawManualGen(db, { ...deps.manualGen, limit: deps.manualGen?.limit ?? MANUAL_GEN.drawPerTick, now: deps.manualGen?.now ?? now, config }));
 
   return out;
 }

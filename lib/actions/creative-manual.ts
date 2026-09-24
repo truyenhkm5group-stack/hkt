@@ -6,6 +6,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { addManualVariant } from "@/lib/creative/manual";
+import { assignBatchNames } from "@/lib/creative/naming";
 import { priceWarnings } from "@/lib/creative/copy-edit";
 import { loadProductBrief } from "@/lib/queries/creative-plan";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
@@ -46,6 +47,8 @@ export async function addManualCreative(input: unknown): Promise<Result<{ batchD
     new Date(),
   );
   if (!r.ok) return { error: r.error };
+  // Tên chiến dịch / nhóm / quảng cáo theo khuôn (§5i) — điền ngay để người thấy tên sẽ đăng.
+  await assignBatchNames(db, r.batchId, new Date());
 
   // Giá trong câu chữ khác giá ERP: KHÔNG chặn (người viết có thể đang chạy giá khuyến mãi) nhưng
   // phải nói ra — câu chữ máy viết thì bị ép đúng giá, câu chữ người viết thì người tự chịu.

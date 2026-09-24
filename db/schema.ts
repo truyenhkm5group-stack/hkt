@@ -3080,11 +3080,33 @@ export const creativeVariants = pgTable(
      * của chính mã (chủ shop 24/09/2026). `NULL` = ô dùng luật chung của lô. Phiếu duyệt khoá cả cột này.
      */
     rulesSnapshot: jsonb("rules_snapshot").$type<Record<string, unknown>>(),
+    /**
+     * TÊN chiến dịch · nhóm · quảng cáo sẽ đăng (chủ shop 25/09/2026, §5i). Máy điền theo khuôn mặc định,
+     * người sửa được trước khi duyệt; cả ba nằm trong phiếu duyệt. Rỗng = mẫu của lô cũ (tên `VM <ngày> #<ô>`).
+     */
+    campaignName: text("campaign_name").notNull().default(""),
+    adsetName: text("adset_name").notNull().default(""),
+    adName: text("ad_name").notNull().default(""),
+    /** Số thứ tự của bài trong NGÀY ĐĂNG (một lô mỗi ngày) — duy nhất trong lô. `NULL` = chưa đặt tên. */
+    nameSeq: integer("name_seq"),
+    /**
+     * CHIẾN DỊCH RIÊNG của bài (mỗi bài một chiến dịch, §5i). `NULL` = chưa tạo, hoặc mẫu của lô cũ đăng
+     * vào chiến dịch test chung. Có id mà mẫu chưa `LIVE` ⇒ chiến dịch vẫn TẮT.
+     */
+    fbCampaignId: text("fb_campaign_id"),
+    /**
+     * Bước ghi Facebook ĐANG GỬI (ghi NGAY TRƯỚC lời gọi, xoá cùng giao dịch lưu id). Còn chữ ở đây lúc lượt
+     * sau đọc ⇒ lời gọi trước có thể đã tạo đối tượng mà phản hồi rơi mất ⇒ KHÔNG gửi lại (cùng lý do
+     * `creative_scale_drafts.copy_attempted_at`).
+     */
+    fbPendingStep: text("fb_pending_step").notNull().default(""),
+    fbPendingAt: ts("fb_pending_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("creative_variants_batch_slot_uq").on(t.batchId, t.slot),
+    uniqueIndex("creative_variants_batch_name_seq_uq").on(t.batchId, t.nameSeq).where(sql`${t.nameSeq} IS NOT NULL`),
     index("creative_variants_design_idx").on(t.designConceptId),
     uniqueIndex("creative_variants_fb_ad_uq").on(t.fbAdId),
     index("creative_variants_status_idx").on(t.status),
@@ -3129,7 +3151,10 @@ export const creativeFbActions = pgTable(
   (t) => [
     index("creative_fb_actions_day_idx").on(t.actionDay, t.action, t.outcome),
     index("creative_fb_actions_variant_idx").on(t.variantId, t.createdAt),
-    check("creative_fb_actions_action_check", sql`${t.action} IN ('UPLOAD_IMAGE', 'CREATE_CREATIVE', 'CREATE_ADSET', 'CREATE_AD', 'PAUSE_ADSET', 'EXTEND_ADSET')`),
+    check(
+      "creative_fb_actions_action_check",
+      sql`${t.action} IN ('UPLOAD_IMAGE', 'CREATE_CREATIVE', 'CREATE_ADSET', 'CREATE_AD', 'PAUSE_ADSET', 'EXTEND_ADSET', 'CREATE_CAMPAIGN', 'ACTIVATE_CAMPAIGN', 'COPY_SCALE_CAMPAIGN', 'CREATE_SCALE_CREATIVE', 'SET_SCALE_AD_CREATIVE', 'SET_SCALE_BUDGET', 'ACTIVATE_SCALE', 'PAUSE_SCALE')`,
+    ),
     check("creative_fb_actions_outcome_check", sql`${t.outcome} IN ('APPLIED', 'DENIED', 'FAILED')`),
     check("creative_fb_actions_denial_check", sql`${t.outcome} <> 'APPLIED' OR ${t.denial} = ''`),
     check("creative_fb_actions_day_format_check", sql`${t.actionDay} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`),
@@ -3320,6 +3345,81 @@ export const creativeScaleDrafts = pgTable(
     // "Đang chạy" phải có bản sao và dấu duyệt của người — không có chứng từ thì không phải đang chạy.
     check("creative_scale_drafts_active_check", sql`${t.status} NOT IN ('ACTIVE', 'PAUSED') OR (${t.fbCampaignId} IS NOT NULL AND ${t.approvedAt} IS NOT NULL)`),
     check("creative_scale_drafts_draft_check", sql`${t.status} <> 'DRAFT' OR (${t.fbCampaignId} IS NOT NULL AND ${t.fbAdId} IS NOT NULL AND ${t.fbCreativeId} IS NOT NULL AND ${t.dailyBudgetVnd} IS NOT NULL)`),
+  ],
+);
+
+/**
+ * GEN ẢNH BẰNG TAY (chủ shop 25/09/2026, `docs/creative-loop.md` §5i): một LƯỢT = một cú bấm "Gen ảnh" —
+ * người chọn ảnh sản phẩm thật (+ tuỳ chọn quảng cáo cũ của shop cùng mã) và ý tưởng tự do; máy vẽ
+ * `MANUAL_GEN.imagesPerRun` ảnh vào khu "Kết quả gen tay" (KHÔNG vào lô). Ảnh được người duyệt mới được
+ * soạn câu chữ + tên và đưa vào lô chờ duyệt đăng. Chi phí vẽ tính vào CÙNG trần ảnh / ngày với lô.
+ */
+export const creativeManualGens = pgTable(
+  "creative_manual_gens",
+  {
+    id: id(),
+    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    /** Ảnh sản phẩm THẬT làm gốc — bắt buộc (ranh giới 3). */
+    productPhotoSourceId: text("product_photo_source_id").references(() => creativeSources.id, { onDelete: "set null" }),
+    /** Quảng cáo cũ của shop (`OWN_AD`, cùng mã) làm tham chiếu bố cục — tuỳ chọn. */
+    ownAdSourceId: text("own_ad_source_id").references(() => creativeSources.id, { onDelete: "set null" }),
+    idea: text("idea").notNull().default(""),
+    requested: integer("requested").notNull(),
+    model: text("model").notNull(),
+    size: text("size").notNull(),
+    quality: text("quality").notNull(),
+    /** Vì sao một phần không được vẽ ngay lúc bấm (chạm trần). Rỗng = xin đủ. */
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("creative_manual_gens_created_idx").on(t.createdAt)],
+);
+
+/** Một ẢNH của lượt gen tay: câu lệnh · gen · ảnh · duyệt / loại · câu chữ + tên · mẫu đã vào lô. */
+export const creativeManualGenImages = pgTable(
+  "creative_manual_gen_images",
+  {
+    id: id(),
+    genId: text("gen_id")
+      .notNull()
+      .references(() => creativeManualGens.id),
+    seq: integer("seq").notNull(),
+    /** Bộ gen ĐỦ sáu khoá — máy học được từ bài này như mọi mẫu. */
+    genes: jsonb("genes").$type<Record<string, string>>().notNull(),
+    prompt: text("prompt").notNull().default(""),
+    /** `ManualGenImageStatus`. */
+    status: text("status").notNull().default("PLANNED"),
+    imageId: text("image_id").references(() => creativeImages.id, { onDelete: "set null" }),
+    /** USD dạng chuỗi; `""` = CHƯA BIẾT (cùng quy ước `creative_variants.gen_cost_usd`). */
+    costUsd: text("cost_usd").notNull().default(""),
+    error: text("error").notNull().default(""),
+    claimedAt: ts("claimed_at"),
+    drawnAt: ts("drawn_at"),
+    headline: text("headline").notNull().default(""),
+    primaryText: text("primary_text").notNull().default(""),
+    captionModel: text("caption_model").notNull().default(""),
+    captionError: text("caption_error").notNull().default(""),
+    /** QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN (mục 34); tên là ảnh chụp do máy chủ đọc. */
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    reviewedByName: text("reviewed_by_name").notNull().default(""),
+    reviewedAt: ts("reviewed_at"),
+    rejectReason: text("reject_reason").notNull().default(""),
+    /** Mẫu (ô của lô) mà ảnh đã được đưa vào. */
+    variantId: text("variant_id").references(() => creativeVariants.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("creative_manual_gen_images_gen_seq_uq").on(t.genId, t.seq),
+    index("creative_manual_gen_images_status_idx").on(t.status),
+    index("creative_manual_gen_images_image_idx").on(t.imageId),
+    check("creative_manual_gen_images_status_check", sql`${t.status} IN ('PLANNED', 'DRAWING', 'GENERATED', 'GEN_FAILED', 'APPROVED', 'REJECTED', 'PROMOTED')`),
+    // "Có ảnh" mà không có điểm ảnh là một khẳng định không có chứng từ.
+    check("creative_manual_gen_images_image_check", sql`${t.status} NOT IN ('GENERATED', 'APPROVED', 'PROMOTED') OR ${t.imageId} IS NOT NULL`),
+    check("creative_manual_gen_images_promoted_check", sql`${t.status} <> 'PROMOTED' OR ${t.variantId} IS NOT NULL`),
   ],
 );
 

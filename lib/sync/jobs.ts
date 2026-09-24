@@ -74,7 +74,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Vòng mẫu quảng cáo",
     source: "ALL",
     description:
-      "Một lượt của vòng mẫu: đánh dấu lô quá hạn duyệt, đăng lô đã duyệt (trong trần 20 mẫu × 200.000đ — chủ shop 24/09), chấm mẫu đang chạy và tắt mẫu phạm luật tắt của lô, rồi dựng + sinh ảnh cho lô ngày mai (dừng ở Chờ duyệt). Lũy đẳng — chạy lại không đẻ lô thứ hai.",
+      "Một lượt của vòng mẫu: đánh dấu lô quá hạn duyệt, đăng lô đã duyệt (trong trần 20 mẫu × 200.000đ — chủ shop 24/09), chấm mẫu đang chạy và tắt mẫu phạm luật tắt của lô, rồi dựng + sinh ảnh cho lô ngày mai (dừng ở Chờ duyệt), đặt tên chiến dịch / nhóm / quảng cáo theo khuôn và vẽ nốt ảnh gen tay. Lũy đẳng — chạy lại không đẻ lô thứ hai.",
     run: (o) =>
       runSyncJob({ source: "ERP", job: "creative-loop", trigger: o.trigger, actor: o.actor }, async (ctx) => {
         const r = await runCreativeLoopTick(await getDb(), new Date());
@@ -88,6 +88,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
           r.evaluation ? `chấm ${r.evaluation.judged} · thắng mới ${r.evaluation.newWins.length} · tắt ${r.kills.filter((k) => k.ok).length}` : "",
           r.build?.batchDay ? `lô ${r.build.batchDay}: ${r.build.status ?? "—"} (+${r.build.generated} ảnh)` : r.build?.skippedReason ?? "",
           r.build?.imageBatch ?? "",
+          r.named ? `đặt tên ${r.named} bài` : "",
+          r.manualGen && (r.manualGen.drawn || r.manualGen.failed) ? `gen tay: vẽ ${r.manualGen.drawn} · lỗi ${r.manualGen.failed}` : "",
         ].filter(Boolean).join(" · ");
         if (r.warnings.length) ctx.summary.warning = r.warnings.slice(0, 5).join(" | ");
         return r;

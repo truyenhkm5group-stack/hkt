@@ -5,6 +5,8 @@ import {
   IMAGE_MODES,
   IMAGE_QUALITIES,
   IMAGE_SIZES,
+  CAMPAIGN_NAME_MAX_CHARS,
+  MANUAL_GEN,
   MANUAL_UPLOAD_SOURCE_KINDS,
   normalizeCreativeConfig,
   type ConfigProblem,
@@ -124,6 +126,55 @@ export const variantCopyInputSchema = z
 export type VariantCopyInput = z.infer<typeof variantCopyInputSchema>;
 
 export const creativeSourceToggleSchema = z.object({ id: z.string().trim().min(1, "Thiếu mã nguồn ảnh"), active: z.boolean() }).strict();
+
+// ───────────────────────────── TÊN BÀI · CHỌN BÀI · GEN TAY (chủ shop 25/09/2026, §5i) ─────────────────────────────
+
+/** Một tên chiến dịch / nhóm / quảng cáo. Để TRỐNG = dùng tên mặc định theo khuôn (lượt vòng mẫu điền lại). */
+const nameField = (what: string) => z.string().trim().max(CAMPAIGN_NAME_MAX_CHARS, `Tên ${what} tối đa ${CAMPAIGN_NAME_MAX_CHARS} ký tự`).default("");
+
+/** SỬA TÊN chiến dịch · nhóm · quảng cáo của một bài trước khi duyệt lô. */
+export const variantNamesInputSchema = z
+  .object({ variantId: z.string().trim().min(1, "Thiếu mã mẫu"), campaignName: nameField("chiến dịch"), adsetName: nameField("nhóm quảng cáo"), adName: nameField("quảng cáo") })
+  .strict();
+
+export type VariantNamesInputParsed = z.infer<typeof variantNamesInputSchema>;
+
+/** TÍCH CHỌN nhiều bài của lô chờ duyệt rồi loại / giữ. */
+export const variantSelectionSchema = z
+  .object({
+    batchId: z.string().trim().min(1, "Thiếu mã lô"),
+    variantIds: z.array(z.string().trim().min(1)).min(1, "Chưa chọn bài nào").max(200),
+    mode: z.enum(["REJECT_SELECTED", "KEEP_SELECTED"]),
+    reason: z.string().trim().max(1000).default(""),
+  })
+  .strict();
+
+/** Bấm "Gen ảnh": ảnh sản phẩm thật (bắt buộc) + quảng cáo cũ cùng mã (tuỳ chọn) + ý tưởng tự do (tuỳ chọn). */
+export const manualGenStartSchema = z
+  .object({
+    productPhotoSourceId: z.string().trim().min(1, "Chọn ảnh sản phẩm thật làm gốc"),
+    ownAdSourceId: z.string().trim().max(200).default(""),
+    idea: z.string().trim().max(MANUAL_GEN.ideaMaxChars, `Ý tưởng tối đa ${MANUAL_GEN.ideaMaxChars} ký tự`).default(""),
+  })
+  .strict();
+
+/** Duyệt / loại một ảnh gen tay. */
+export const manualGenReviewSchema = z
+  .object({ imageId: z.string().trim().min(1, "Thiếu mã ảnh"), decision: z.enum(["APPROVE", "REJECT"]), reason: z.string().trim().max(1000).default("") })
+  .strict();
+
+/** Đưa một ảnh gen tay đã duyệt vào lô — câu chữ cùng trần với mẫu tự làm, ba tên sửa được. */
+export const manualGenPromoteSchema = z
+  .object({
+    imageId: z.string().trim().min(1, "Thiếu mã ảnh"),
+    headline: z.string().trim().max(VARIANT_COPY_LIMITS.headlineMaxChars, `Tiêu đề tối đa ${VARIANT_COPY_LIMITS.headlineMaxChars} ký tự`).default(""),
+    primaryText: z.string().trim().min(1, "Nhập nội dung chính của bài quảng cáo").max(VARIANT_COPY_LIMITS.primaryTextMaxChars, `Nội dung chính tối đa ${VARIANT_COPY_LIMITS.primaryTextMaxChars} ký tự`),
+    campaignName: nameField("chiến dịch"),
+    adsetName: nameField("nhóm quảng cáo"),
+    adName: nameField("quảng cáo"),
+    predictedSeq: z.number().int().positive().nullable().default(null),
+  })
+  .strict();
 
 /**
  * Công tắc "Chạy mockup hằng ngày" trên thẻ nguồn (tab Nguồn ảnh). `kind = SOURCE` ⇒ id nguồn `OWN_AD`;

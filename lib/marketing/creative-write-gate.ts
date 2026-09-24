@@ -29,7 +29,7 @@ import {
  *
  *   HARD_DISABLED → MODE_OFF → CONFIG_INCOMPLETE
  *   → NOT_APPROVED → APPROVAL_MISMATCH (tạo · tiêu thêm)
- *   → WRONG_CAMPAIGN → NOT_OUR_AD (tắt · tiêu thêm) → TOO_LATE (tạo)
+ *   → WRONG_CAMPAIGN → NOT_OUR_AD (tắt · tiêu thêm · bật chiến dịch riêng) → TOO_LATE (tạo)
  *   → OVER_VARIANT_BUDGET → OVER_BATCH_SIZE → OVER_DAILY_CAP (tạo, khi mẫu chưa có nhóm)
  *   → NO_KILL_RULE (máy tắt theo luật) → NOT_PROMISING → OVER_EXTENSION_CAP (tiêu thêm)
  *
@@ -70,6 +70,12 @@ export type CreativeGateInput = {
   targetCampaignId: string | null;
   /** Chiến dịch của mẩu mẫu (chỉ xét khi tạo). `null` = không đọc được ⇒ không chứng minh được ⇒ chặn. */
   templateCampaignId: string | null;
+  /**
+   * CHIẾN DỊCH RIÊNG mà vòng đã tạo cho CHÍNH mẫu này (mỗi bài một chiến dịch, §5i) — đọc từ
+   * `creative_variants.fb_campaign_id`. Tạo nhóm vào đúng chiến dịch này là hợp lệ như vào chiến dịch
+   * test; bật chiến dịch CHỈ được với đúng id này. Vắng / `null` = mẫu chưa có chiến dịch riêng.
+   */
+  ownCampaignId?: string | null;
   /** Tắt / tiêu thêm: nhóm này có trong `creative_variants` (do vòng tạo) không. */
   ourAdset: boolean;
   now: Date;
@@ -97,7 +103,11 @@ export type CreativeGateInput = {
 
 export type CreativeGateResult = { ok: true } | { ok: false; denial: CreativeWriteDenial; reason: string };
 
-const CREATE_ACTIONS: readonly CreativeWriteAction[] = ["UPLOAD_IMAGE", "CREATE_CREATIVE", "CREATE_ADSET", "CREATE_AD"];
+/**
+ * Hành động TẠO của đường đăng. `CREATE_CAMPAIGN` (chiến dịch riêng, TẮT) và `ACTIVATE_CAMPAIGN` (công tắc
+ * tổng, bước cuối) đứng chung nhóm: cùng đòi lô đã duyệt + digest khớp, cùng bị chặn sau giờ chạy.
+ */
+const CREATE_ACTIONS: readonly CreativeWriteAction[] = ["UPLOAD_IMAGE", "CREATE_CREATIVE", "CREATE_CAMPAIGN", "CREATE_ADSET", "CREATE_AD", "ACTIVATE_CAMPAIGN"];
 
 export function isCreateAction(a: CreativeWriteAction): boolean {
   return CREATE_ACTIONS.includes(a);
@@ -145,14 +155,19 @@ export function gateCreativeWrite(i: CreativeGateInput): CreativeGateResult {
     máy tạo sẽ chép đúng đối tượng của chiến dịch ấy — nên câu thứ hai quan trọng ngang câu thứ nhất.
   */
   if (i.action === "CREATE_ADSET" && i.targetCampaignId === null) return deny("WRONG_CAMPAIGN", "(Không biết lượt tạo nhóm nhắm vào chiến dịch nào.)");
-  if (i.targetCampaignId !== null && i.targetCampaignId !== i.testCampaignId) {
-    return deny("WRONG_CAMPAIGN", `(Nhắm vào ${i.targetCampaignId}, chiến dịch test là ${i.testCampaignId}.)`);
+  // Chiến dịch RIÊNG của chính mẫu này (mỗi bài một chiến dịch, §5i) đứng ngang chiến dịch test.
+  const own = i.ownCampaignId ?? null;
+  const ourCampaign = own !== null && own !== "" && i.targetCampaignId === own;
+  if (i.targetCampaignId !== null && i.targetCampaignId !== i.testCampaignId && !ourCampaign) {
+    return deny("WRONG_CAMPAIGN", `(Nhắm vào ${i.targetCampaignId}, chiến dịch test là ${i.testCampaignId}${own ? `, chiến dịch riêng của bài là ${own}` : ""}.)`);
   }
   if (tao && i.templateCampaignId !== i.testCampaignId) {
     return deny("WRONG_CAMPAIGN", i.templateCampaignId === null ? "(Không đọc được mẩu mẫu thuộc chiến dịch nào.)" : `(Mẩu mẫu nằm ở chiến dịch ${i.templateCampaignId}.)`);
   }
 
   if ((tat || them) && !i.ourAdset) return deny("NOT_OUR_AD");
+  // Bật: chỉ đúng chiến dịch riêng vòng đã tạo cho chính mẫu này — không bao giờ chiến dịch test chung.
+  if (i.action === "ACTIVATE_CAMPAIGN" && !ourCampaign) return deny("NOT_OUR_AD", "(Chỉ bật được chiến dịch riêng vòng mẫu đã tạo cho chính bài này.)");
 
   // Đăng sau giờ chạy là chạy một khung ngắn hơn khung đã duyệt: số đo không so được với cả lô.
   if (tao && i.now.getTime() >= i.startAt.getTime()) return deny("TOO_LATE");

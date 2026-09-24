@@ -12,6 +12,8 @@ import { gateCreativeWritePrefix } from "@/lib/marketing/creative-write-gate";
 import { approvalDigest, batchTicket, verifyBatchTicket } from "@/lib/creative/approval";
 import { describeRule } from "@/lib/creative/judge";
 import { batchApprovalContent, batchConfig, committedTestSpendForDay, pauseCreativeVariant } from "@/lib/creative/publish";
+import { applyVariantSelectionCore } from "@/lib/creative/selection";
+import { variantSelectionSchema } from "@/lib/validation/creative";
 
 /**
  * ═══════════ BÀN TAY CỦA VÒNG MẪU — NHỮNG CÚ BẤM CỦA NGƯỜI ═══════════
@@ -109,6 +111,10 @@ export async function proposeBatchApproval(batchId: string): Promise<BatchApprov
     blockers.push(`${CREATIVE_WRITE_DENIAL_REASON.OVER_DAILY_CAP} (Sổ đã ghi ${daCamKet.toLocaleString("vi-VN")}đ cho ngày ${b.batchDay}.)`);
   }
   if (content.variants.length > tran) warnings.push(`Lô có ${content.variants.length} mẫu nhưng chỉ ${tran} mẫu đầu (theo ô) được đăng — gạt bớt để tự chọn.`);
+  // Mỗi bài một chiến dịch (§5i): người duyệt phải biết tiền không còn chảy vào MỘT chiến dịch test chung.
+  warnings.push(`Mỗi bài được đăng thành MỘT chiến dịch riêng (TẮT tới bước cuối) → 1 nhóm (${formatVnd(budgetPerVariantVnd)} trọn đời, tự dừng ở giờ kết thúc) → 1 quảng cáo, với đúng tên đang hiện trên từng bài. Cài đặt nhóm chép từ mẩu mẫu trong chiến dịch test ${config.testCampaignId || "—"}.`);
+  const khongTen = content.variants.filter((v) => !v.names || (!v.names.campaign && !v.names.adset && !v.names.ad)).length;
+  if (khongTen > 0) warnings.push(`${khongTen} bài chưa có tên theo khuôn — sẽ đăng với tên "VM <ngày> #<ô>". Lượt vòng mẫu kế tiếp điền tên; mở lại hộp duyệt sau đó để khoá đúng tên.`);
   if (config.killRules.length === 0) warnings.push("Lô chưa có luật tắt: máy sẽ KHÔNG tự tắt mẫu nào, mỗi mẫu chạy hết ngân sách rồi tự dừng.");
 
   return {
@@ -222,6 +228,37 @@ export async function rejectBatch(raw: z.infer<typeof rejectBatchSchema>): Promi
   await audit({ userId: user.id, userEmail: user.email, action: "CREATIVE_BATCH_REJECTED", entity: "CREATIVE_BATCH", entityId: b.id, before: { status: b.status }, after: { status: "REJECTED" }, reason });
   revalidatePath(PATH);
   return { ok: true };
+}
+
+function formatVnd(n: number): string {
+  return `${Math.round(n).toLocaleString("vi-VN")}đ`;
+}
+
+/**
+ * TÍCH CHỌN NHIỀU BÀI rồi "Loại các bài đã chọn" / "Giữ các bài đã chọn" (§5i). Bài bị loại không đăng,
+ * không tiêu tiền; tập bài giữ lại là tập bài trong digest ⇒ phiếu đã phát tự vô hiệu. Luật ở
+ * `lib/creative/selection.ts`. Quyền `ideas:write` như gạt một mẫu.
+ */
+export async function applyVariantSelection(raw: unknown): Promise<{ ok: true; rejected: number; restored: number; kept: number } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write")) return { error: "Không có quyền" };
+  const parsed = variantSelectionSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Đầu vào không hợp lệ" };
+  const d = parsed.data;
+  const db = await getDb();
+  const r = await applyVariantSelectionCore(db, { batchId: d.batchId, variantIds: d.variantIds, mode: d.mode, reason: d.reason || (d.mode === "REJECT_SELECTED" ? "Loại theo lựa chọn" : "Không nằm trong các bài được giữ") }, { id: user.id }, new Date());
+  if (!r.ok) return { error: r.error };
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "CREATIVE_VARIANT_SELECTION",
+    entity: "CREATIVE_BATCH",
+    entityId: d.batchId,
+    after: { mode: d.mode, selected: d.variantIds, rejected: r.rejected, restored: r.restored, kept: r.kept },
+    reason: `${d.mode === "REJECT_SELECTED" ? "Loại" : "Giữ"} ${d.variantIds.length} bài đã chọn — lô ${r.batchDay}; phiếu duyệt đã phát (nếu có) mất hiệu lực.`,
+  });
+  revalidatePath(PATH);
+  return { ok: true, rejected: r.rejected.length, restored: r.restored.length, kept: r.kept };
 }
 
 const rejectVariantSchema = z.object({ variantId: z.string().min(1), reason: z.string().trim().max(1000).default("") });

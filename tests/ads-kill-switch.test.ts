@@ -9,6 +9,8 @@ import {
   createAd,
   createAdCreative,
   createTestAdset,
+  createTestCampaign,
+  activateTestCampaign,
   extendAdset,
   pauseAdset,
   readAdsKillSwitch,
@@ -117,6 +119,8 @@ export async function testAdsKillSwitchDb(db: Db) {
       ["tạo bài", () => createAdCreative("act_123", { name: "n", objectStorySpec: { page_id: "1" } })],
       ["tạo nhóm", () => createTestAdset("act_123", { name: "n", campaignId: "c", lifetimeBudgetMinor: 200000, startTime: new Date(Date.now() + 3_600_000), endTime: new Date(Date.now() + 90_000_000), template })],
       ["tạo mẩu", () => createAd("act_123", { name: "n", adsetId: "a", creativeId: "cr" })],
+      ["tạo chiến dịch riêng (§5i)", () => createTestCampaign("act_123", { name: "n", template: { objective: "OUTCOME_ENGAGEMENT", buyingType: null, specialAdCategories: [], dailyBudgetMinor: null, lifetimeBudgetMinor: null } })],
+      ["bật chiến dịch riêng (§5i)", () => activateTestCampaign("1234567")],
       ["tiêu thêm", () => extendAdset("a", { lifetimeBudgetMinor: 400000, endTime: new Date(Date.now() + 90_000_000) })],
     ];
     for (const [ten, f] of tao) await assert.rejects(f(), /đường ghi quảng cáo đang đóng/, `${ten}: công tắc kéo thì phải bị chặn`);

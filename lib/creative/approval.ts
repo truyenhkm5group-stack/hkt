@@ -9,7 +9,7 @@ import type { CreativeRule } from "@/lib/constants/creative-loop";
  * tới `số mẫu × ngân sách` — nên lần bấm ấy phải gắn chặt với ĐÚNG nội dung đã hiện trên màn hình.
  *
  * `approvalDigest` là sha256 của: ngày chạy · khung giờ · ngân sách mỗi mẫu · bộ luật tắt · và với
- * mỗi mẫu: id · băm ẢNH · câu chữ · tiêu đề · LUẬT RIÊNG của ô (ô mockup chấm theo lịch sử của mã — chủ
+ * mỗi mẫu: id · băm ẢNH · câu chữ · tiêu đề · TÊN chiến dịch / nhóm / quảng cáo (§5i) · LUẬT RIÊNG của ô (ô mockup chấm theo lịch sử của mã — chủ
  * shop 24/09/2026: lượt duyệt là cho phép máy tắt theo ĐÚNG các luật ấy, nên chúng nằm trong phiếu).
  * Ô không có luật riêng thì khoá `rules` VẮNG MẶT (không phải `null`) — phiếu của lô cũ tính lại vẫn khớp. Đổi một ký tự câu chữ, tráo một tấm ảnh, nâng ngân sách,
  * dời khung giờ hay sửa một luật tắt SAU khi duyệt ⇒ digest khác ⇒ máy KHÔNG đăng
@@ -33,6 +33,12 @@ export type ApprovalVariant = {
   headline: string;
   /** `creative_variants.rules_snapshot` (JSON thô). `null` / thiếu = ô dùng luật chung của lô. */
   rules?: Record<string, unknown> | null;
+  /**
+   * Tên chiến dịch · nhóm · quảng cáo sẽ đăng (chủ shop 25/09/2026, §5i). Cả ba rỗng / thiếu = mẫu của lô
+   * cũ (tên `VM <ngày> #<ô>`) ⇒ khoá `names` VẮNG khỏi digest — phiếu của lô cũ tính lại vẫn khớp. Sửa một
+   * tên SAU khi duyệt ⇒ digest đổi ⇒ phiếu cũ vô hiệu, như câu chữ.
+   */
+  names?: { campaign: string; adset: string; ad: string } | null;
 };
 
 export type ApprovalContent = {
@@ -44,6 +50,10 @@ export type ApprovalContent = {
   variants: ApprovalVariant[];
 };
 
+function hasNames(n: ApprovalVariant["names"]): n is { campaign: string; adset: string; ad: string } {
+  return !!n && (n.campaign !== "" || n.adset !== "" || n.ad !== "");
+}
+
 export function approvalDigest(c: ApprovalContent): string {
   const payload = {
     batchDay: c.batchDay,
@@ -53,7 +63,7 @@ export function approvalDigest(c: ApprovalContent): string {
     killRules: c.killRules,
     variants: [...c.variants]
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      .map((v) => ({ id: v.id, imageSha256: v.imageSha256, primaryText: v.primaryText, headline: v.headline, ...(v.rules ? { rules: v.rules } : {}) })),
+      .map((v) => ({ id: v.id, imageSha256: v.imageSha256, primaryText: v.primaryText, headline: v.headline, ...(v.rules ? { rules: v.rules } : {}), ...(hasNames(v.names) ? { names: v.names } : {}) })),
   };
   return createHash("sha256").update(stableStringify(payload)).digest("hex");
 }
