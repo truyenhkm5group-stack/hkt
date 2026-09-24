@@ -352,6 +352,68 @@ export function testKhongCoKyTuDieuKhienTrongMaNguon() {
   );
 }
 
+/* ═════════════ 7 · `import()` ĐỘNG NHẬN URL, KHÔNG NHẬN ĐƯỜNG DẪN ═════════════ */
+
+/**
+ * `await import(path.resolve("x.js"))` trên Linux ra `import("/…/x.js")` — tình cờ hợp lệ. Trên
+ * Windows ra `import("C:\…\x.js")`, và bộ nạp ESM đọc "c:" là LƯỢC ĐỒ URL ⇒
+ * `ERR_UNSUPPORTED_ESM_URL_SCHEME`. Cắn thật 24/09/2026: `tests/chatbot.test.ts` làm `npm test`
+ * dừng giữa chừng trên máy Windows, CI Linux vẫn xanh — đúng lớp lỗi của mục 65.
+ *
+ * Luật: đường dẫn dựng lúc chạy đưa vào `import()` phải qua `pathToFileURL(...).href`. Bộ dò là hàm
+ * THUẦN để tự kiểm được trên mẫu hỏng thật (đột biến dựng sẵn bên dưới).
+ */
+const IMPORT_DUONG_DAN_THO = /\bimport\(\s*(?:path\.(?:resolve|join)\(|resolve\(|join\(|process\.cwd\(\)|__dirname|__filename)/;
+
+export function importDuongDanTho(ma: string): string[] {
+  return boChuThich(ma)
+    .split("\n")
+    .filter((dong) => IMPORT_DUONG_DAN_THO.test(dong))
+    .map((dong) => dong.trim().slice(0, 120));
+}
+
+function tepCoTheImportDong(thuMuc: string): string[] {
+  const ra: string[] = [];
+  const di = (d: string) => {
+    for (const m of readdirSync(path.join(goc, d), { withFileTypes: true })) {
+      const con = `${d}/${m.name}`;
+      if (m.isDirectory()) {
+        if (m.name !== "node_modules") di(con);
+      } else if (/\.(ts|tsx|mjs|js)$/.test(m.name)) {
+        ra.push(con);
+      }
+    }
+  };
+  di(thuMuc);
+  return ra;
+}
+
+export function testImportDongQuaFileUrl() {
+  // Tự kiểm bộ dò: bắt đúng dạng đã cắn, tha đúng dạng đã sửa. Mẫu ghép từ hai mảnh để chính tệp
+  // này không tự khớp khi bộ quét đi qua nó.
+  const I = "import" + "(";
+  assert.equal(importDuongDanTho(`const m = await ${I}path.resolve("chatbot/src/erp-import.js"));`).length, 1, "bộ dò phải bắt dạng đã cắn thật");
+  assert.equal(importDuongDanTho(`await ${I}path.join(goc, "x.mjs"))`).length, 1, "bộ dò phải bắt cả path.join");
+  assert.equal(importDuongDanTho(`await ${I}pathToFileURL(path.resolve("x.js")).href)`).length, 0, "dạng qua pathToFileURL là dạng đúng");
+  assert.equal(importDuongDanTho(`await ${I}"@/lib/x")`).length, 0, "chuỗi hằng không phải đường dẫn tuyệt đối");
+  assert.equal(importDuongDanTho(`// ${I}path.resolve("x.js")`).length, 0, "đoạn chú thích giải thích cái bẫy không phải cái bẫy");
+
+  const pham: string[] = [];
+  let quet = 0;
+  for (const thuMuc of ["tests", "scripts"]) {
+    for (const tep of tepCoTheImportDong(thuMuc)) {
+      quet += 1;
+      for (const dong of importDuongDanTho(readFileSync(path.join(goc, tep), "utf8"))) pham.push(`${tep}: ${dong}`);
+    }
+  }
+  assert.ok(quet > 100, `phải quét được tests/ và scripts/, mới thấy ${quet} tệp`);
+  assert.deepEqual(
+    pham,
+    [],
+    "import() nhận URL, không nhận đường dẫn — bọc bằng pathToFileURL(...).href, nếu không Windows gặp ERR_UNSUPPORTED_ESM_URL_SCHEME còn CI Linux vẫn xanh",
+  );
+}
+
 export function testTestHygiene() {
   testKhongCoKyTuDieuKhien();
   testKhongCoKyTuDieuKhienTrongMaNguon();
@@ -362,7 +424,8 @@ export function testTestHygiene() {
   testCiChayHaiCheDo();
   testThieuCongCuNoiThang();
   testKhongDoiHangRaoLayMauXanh();
+  testImportDongQuaFileUrl();
   console.log(
-    "✓ Vệ sinh bài kiểm (mục 65): không ký tự điều khiển lọt vào mã nguồn · LF ghim ở tầng kho · đường dẫn chuẩn hoá · không so BẰNG với mốc đọc lại đồng hồ · mọi bài đọc môi trường đều có lý do · CI chạy 2 chế độ bằng token GIẢ · thiếu công cụ thì nói CHƯA ĐO ĐƯỢC chứ không ✓ · hàng rào agent không bị đổi để lấy màu xanh",
+    "✓ Vệ sinh bài kiểm (mục 65): không ký tự điều khiển lọt vào mã nguồn · LF ghim ở tầng kho · đường dẫn chuẩn hoá · không so BẰNG với mốc đọc lại đồng hồ · mọi bài đọc môi trường đều có lý do · CI chạy 2 chế độ bằng token GIẢ · thiếu công cụ thì nói CHƯA ĐO ĐƯỢC chứ không ✓ · hàng rào agent không bị đổi để lấy màu xanh · import() động đi qua file URL",
   );
 }

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { sql } from "drizzle-orm";
 import type { Db } from "@/db";
+import { schema } from "@/db";
+import { OPEN_OUTCOMES } from "@/lib/constants/truth";
+import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { ATTRIBUTION_FIELDS, LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
 import { getAttributionCoverage, getFunnelBySource, getSalesFunnel } from "@/lib/queries/sales-funnel";
 
@@ -11,8 +15,22 @@ const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fr
  * Điều phải khoá: phễu KHÔNG được phình ra ở giữa, bước cuối dùng lại đúng công thức kết quả đơn,
  * và mọi chỉ số chia theo người phải kèm độ phủ.
  */
+/**
+ * Đếm đơn theo `ORDER_OUTCOME` trên ĐÚNG population của phễu và bảng hiệu suất (mọi đơn, mỗi đơn
+ * một dòng qua `PRIMARY_ATTEMPT`) — để đối chiếu ô "chưa kết thúc" với tập `OPEN_OUTCOMES`.
+ */
+export async function demDonTheoKetQua(db: Db): Promise<Record<string, number>> {
+  const o = schema.orders;
+  const s = schema.shipments;
+  const rows = await db
+    .select({ outcome: sql<string>`${ORDER_OUTCOME_FAST}`, n: sql<number>`count(distinct ${o.id})` })
+    .from(o)
+    .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`)
+    .groupBy(sql`1`);
+  return Object.fromEntries(rows.map((r) => [r.outcome, Number(r.n)]));
+}
+
 export async function testSalesFunnel(db: Db) {
-  void db;
   const funnel = await getSalesFunnel(ALL);
 
   // ───────── 1. Phễu phải THU HẸP, không phình ─────────
@@ -45,6 +63,18 @@ export async function testSalesFunnel(db: Db) {
   const created = funnel.stages[0].count;
   const delivered = funnel.stages.find((s) => s.key === "delivered")?.count ?? 0;
   assert.ok(delivered + funnel.unfinished + funnel.cancelled <= created, "các nhóm kết quả không được vượt tổng đơn");
+
+  // "Chưa kết thúc" = ĐÚNG tập `OPEN_OUTCOMES`, kể cả đơn chờ bưu tá tới lấy. Trước 24/09/2026 ô
+  // này đếm bộ ba chép tay `'IN_TRANSIT','UNKNOWN','NOT_SHIPPED'`: đơn `AWAITING_PICKUP` rơi khỏi
+  // ô chưa kết thúc mà cũng không nằm ở giao / hoàn / huỷ — biến mất khỏi phễu.
+  const theoKetQua = await demDonTheoKetQua(db);
+  const choLay = theoKetQua.AWAITING_PICKUP ?? 0;
+  assert.ok(choLay > 0, "fixture phải có đơn AWAITING_PICKUP, nếu không khẳng định dưới đây không kiểm được gì");
+  assert.equal(
+    funnel.unfinished,
+    OPEN_OUTCOMES.reduce((t, k) => t + (theoKetQua[k] ?? 0), 0),
+    `ô "chưa kết thúc" của phễu phải đếm đủ tập OPEN_OUTCOMES — gồm ${choLay} đơn chờ bưu tá tới lấy`,
+  );
 
   // ───────── 4. Độ phủ gán người: có số, và biết khi nào số đó không đáng tin ─────────
   const coverage = await getAttributionCoverage(ALL);

@@ -205,6 +205,13 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   const adConds = [eq(schema.adSpends.excluded, false), gte(schema.adSpends.spendDate, period.from as Date), lte(schema.adSpends.spendDate, period.to as Date)];
   if (args.marketer) adConds.push(eq(schema.adSpends.marketerId, args.marketer));
   if (args.product) adConds.push(eq(schema.adSpends.productId, args.product));
+  /*
+    Tin nhắn = `greatest(messages, leads)` là CỐ Ý, không phải một định nghĩa thứ hai: đó đúng là
+    định nghĩa của báo cáo đang được đối chiếu (`lib/queries/marketing-daily.ts::spendByDay`) và của
+    sổ chỉ số (`lib/constants/marketing-daily.ts`, key `messages`: "lấy giá trị lớn hơn giữa tin
+    nhắn và lead"). Đọc `messages` trần ở đây thì mọi ngày có lead > tin nhắn đều báo BUG giả.
+    "Không qua phép biến đổi nào" ở câu cảnh báo dưới nghĩa là không biến đổi NGOÀI công thức này.
+  */
   const [adRow] = await db
     .select({ spend: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)`, messages: sql<number>`coalesce(sum(greatest(${schema.adSpends.messages}, ${schema.adSpends.leads})), 0)`, ngay: sql<number>`count(distinct to_char(${schema.adSpends.spendDate} at time zone 'Asia/Ho_Chi_Minh','YYYY-MM-DD'))` })
     .from(schema.adSpends)

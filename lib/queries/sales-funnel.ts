@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ORDER_SOURCE, ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
 import { ATTRIBUTION_FIELDS, LOW_COVERAGE_PCT, type AttributionField } from "@/lib/constants/sales-funnel";
 import type { Period } from "@/lib/search-params";
@@ -85,7 +86,7 @@ export async function getSalesFunnel(period: Period): Promise<SalesFunnel> {
       shipped: sql<number>`count(distinct ${o.id}) filter (where ${SHIPMENT_LEFT_WAREHOUSE})`,
       delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
       cancelled: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'CANCELLED')`,
-      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','UNKNOWN','NOT_SHIPPED'))`,
+      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
       deliveredCustomers: sql<number>`count(distinct ${o.customerId}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
       repeatCustomers: sql<number>`count(distinct ${o.customerId}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${schema.customers.succeedOrderCount}, 0) > 1)`,
     })
@@ -217,7 +218,7 @@ export async function getFunnelBySource(period: Period): Promise<FunnelBySource[
       confirmed: sql<number>`count(distinct ${o.id}) filter (where ${o.stage} not in ('NEW','WAITING'))`,
       shipped: sql<number>`count(distinct ${o.id}) filter (where ${SHIPMENT_LEFT_WAREHOUSE})`,
       delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','UNKNOWN','NOT_SHIPPED'))`,
+      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
       deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
     })
     .from(o)

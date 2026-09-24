@@ -51,7 +51,7 @@ trở lên, sai lệch này nhỏ; ở kỳ vài ngày thì KHÔNG được dùn
 | `bookedOrders` | `count(*) filter (outcome <> 'CANCELLED')` | |
 | `deliveredOrders` | `count(*) filter (outcome = 'DELIVERED')` | |
 | `returnedOrders` | `count(*) filter (outcome in ('RETURNED','RETURNED_BY_RULE'))` | Hai mã LUÔN gộp |
-| `openOrders` | `count(*) filter (outcome in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN'))` | Chưa ngã ngũ |
+| `openOrders` | `count(*) filter (outcome in (OPEN_OUTCOMES_SQL))` | Chưa ngã ngũ — danh sách sinh từ `OUTCOME_GROUP` (`lib/constants/truth.ts`), gồm cả `AWAITING_PICKUP` |
 | `bookedRevenue` | `sum(total_price_after_discount) filter (booked)` | |
 | `deliveredRevenue` | `sum(total_price_after_discount) filter (delivered)` | **Doanh thu chuẩn của màn này** |
 | `cashReceived` | `sum(cod_collected + prepaid + transfer_money) filter (delivered)` | Tiền CÓ CHỨNG TỪ |

@@ -2,8 +2,20 @@ import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type S
 import { getDb, schema } from "@/db";
 import type { ListParams } from "@/lib/search-params";
 import { CUSTOMER_OUTCOMES, type CustomerOutcome } from "@/lib/constants/outreach-segment";
+import { OPEN_OUTCOMES } from "@/lib/constants/truth";
 
 export const OUTREACH_SORTABLE = ["createdAt", "lastActivityAt", "sentAt", "nextAt"];
+
+/**
+ * "Đang chạy" của KHÁCH = "chưa ngã ngũ" của ĐƠN (`OPEN_OUTCOMES`) TRỪ `UNKNOWN`. Cố ý không phải
+ * nguyên tập: đơn `UNKNOWN` là có vận đơn mà KHÔNG có chứng từ ĐVVC nào, đúng nghĩa nhãn khách
+ * "Chưa xác định — thiếu chứng từ", nên nó đi về nhóm `UNKNOWN` chứ không được gọi là "Đang giao".
+ * Sinh ra từ hằng số để một kết quả "đang chạy" mới (như `AWAITING_PICKUP` ngày 13/09/2026) tự
+ * đi theo, không phải một bản chép tay thứ hai.
+ */
+const DANG_CHAY_SQL = OPEN_OUTCOMES.filter((o) => o !== "UNKNOWN")
+  .map((o) => `'${o}'`)
+  .join(",");
 
 /**
  * ═══ KẾT QUẢ LOGISTICS CỦA KHÁCH — ĐỌC LẠI `ORDER_OUTCOME`, KHÔNG TÍNH LẠI ═══
@@ -21,7 +33,7 @@ const KET_QUA_KHACH = sql<string>`(
   select case
     when k.outcome = 'DELIVERED' then 'DELIVERED'
     when k.outcome in ('RETURNED','RETURNED_BY_RULE') then 'RETURNED'
-    when k.outcome in ('IN_TRANSIT','NOT_SHIPPED','AWAITING_PICKUP') then 'PENDING'
+    when k.outcome in (${sql.raw(DANG_CHAY_SQL)}) then 'PENDING'
     else 'UNKNOWN'
   end
   from canonical_order_outcome k

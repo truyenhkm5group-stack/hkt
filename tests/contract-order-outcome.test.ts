@@ -313,5 +313,88 @@ export async function testOrderOutcomeContract(db: Db) {
   const soCongThuc = (nguon.match(/export const ORDER_OUTCOME\b/g) ?? []).length;
   assert.equal(soCongThuc, 1, "chỉ được có ĐÚNG MỘT công thức ORDER_OUTCOME trong toàn kho mã");
 
+  testOpenOutcomesKhongChepTay();
+
   console.log(`✓ Contract kết quả đơn: ${seq} tình huống khoá đúng đặc tả (tiền không suy ra giao hàng · ranh giới 50K/100K · chiều hoàn · UNKNOWN≠0 · CHỜ LẤY HÀNG≠đang giao≠chưa gửi · tồn kho)`);
+}
+
+/**
+ * ═══════════ "CHƯA NGÃ NGŨ" — BẮT BẢN CHÉP TAY THEO TẬP, Ở MỌI THỨ TỰ VÀ MỌI ĐỘ THIẾU ═══════════
+ *
+ * Khối kiểm ở trên (`OPEN_LITERAL`) khớp đúng MỘT thứ tự chữ: `'IN_TRANSIT','NOT_SHIPPED','UNKNOWN'`.
+ * Ba bản chép viết theo thứ tự `'IN_TRANSIT','UNKNOWN','NOT_SHIPPED'` sống sót qua nó tới
+ * 24/09/2026 — `lib/queries/sales-funnel.ts` (hai chỗ) và `lib/queries/staff-performance.ts` — và
+ * cả ba thiếu `AWAITING_PICKUP`: đơn chờ bưu tá tới lấy rơi khỏi ô "chưa kết thúc" của phễu bán
+ * hàng và của bảng hiệu suất nhân sự, trong khi cũng không nằm ở ô giao / hoàn / huỷ nào. Một bản
+ * thứ tư viết PHẦN BÙ (`not in ('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')`, ở
+ * `lib/queries/profit-cash-bridge.ts`) đúng hôm nay nhưng là một chỗ nữa phải nhớ sửa.
+ *
+ * Luật của bộ dò — chỉ xét danh sách mà MỌI phần tử đều là một `OrderOutcome` (danh sách chặng vận
+ * đơn mang `PICKED_UP` / `PENDING`… nên tự rơi ra ngoài):
+ *   · `in (…)` gồm TOÀN giá trị chưa ngã ngũ và có ít nhất 3 giá trị ⇒ bản chép, ĐỦ hay THIẾU;
+ *   · `not in (…)` đúng bằng PHẦN BÙ của tập chưa ngã ngũ ⇒ bản chép viết ngược.
+ * Hai giá trị lẻ (`'IN_TRANSIT','NOT_SHIPPED'`) có thể là một câu hỏi khác, nên không bắt.
+ *
+ * Tập và phần bù đều SINH từ `OUTCOME_GROUP` lúc chạy, không gõ lại ở đây.
+ */
+const DS_CHUOI_HANG = /\b(not\s+)?in\s*\(\s*((?:'[A-Za-z_]+'|"[A-Za-z_]+")(?:\s*,\s*(?:'[A-Za-z_]+'|"[A-Za-z_]+"))*)\s*,?\s*\)/gi;
+
+/** Miễn trừ — mỗi dòng phải nói vì sao đó KHÔNG phải một bản chép tập "chưa ngã ngũ". Hiện trống. */
+const MIEN_TRU_CHUA_NGA_NGU: Record<string, string> = {};
+
+export function banChepChuaNgaNgu(ma: string): string[] {
+  const vuTru = new Set(Object.keys(OUTCOME_GROUP));
+  const mo = new Set<string>(OPEN_OUTCOMES);
+  const phanBu = [...vuTru].filter((k) => !mo.has(k)).sort().join(",");
+  const ra: string[] = [];
+  for (const m of ma.matchAll(DS_CHUOI_HANG)) {
+    const giaTri = [...new Set([...m[2].matchAll(/['"]([A-Za-z_]+)['"]/g)].map((x) => x[1]))];
+    if (!giaTri.every((v) => vuTru.has(v))) continue;
+    const phu = Boolean(m[1]);
+    if (!phu && giaTri.length >= 3 && giaTri.every((v) => mo.has(v))) ra.push(m[0].replace(/\s+/g, " "));
+    if (phu && [...giaTri].sort().join(",") === phanBu) ra.push(m[0].replace(/\s+/g, " "));
+  }
+  return ra;
+}
+
+export function testOpenOutcomesKhongChepTay() {
+  // Tự kiểm bộ dò trên đúng những dạng đã lọt thật — đột biến dựng sẵn, không cần sửa mã để thử.
+  const phaiBat = [
+    "x in ('IN_TRANSIT','UNKNOWN','NOT_SHIPPED')", // sales-funnel · staff-performance, tới 24/09/2026
+    "x in ('IN_TRANSIT','NOT_SHIPPED','UNKNOWN')", // bộ ba cũ của marketing-daily · metrics · ads-decision
+    "x IN (\n  'UNKNOWN', 'AWAITING_PICKUP',\n  'NOT_SHIPPED', 'IN_TRANSIT'\n)", // đủ bốn, xuống dòng, chữ hoa
+    "x in ('IN_TRANSIT','NOT_SHIPPED','AWAITING_PICKUP')", // thiếu UNKNOWN
+    "x not in ('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')", // phần bù — profit-cash-bridge
+    'x in ("NOT_SHIPPED","IN_TRANSIT","UNKNOWN")', // nháy kép
+  ];
+  for (const mau of phaiBat) assert.ok(banChepChuaNgaNgu(mau).length > 0, `bộ dò phải bắt bản chép 'chưa ngã ngũ': ${mau}`);
+  const phaiTha = [
+    "x in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')", // "đã gửi" — tập khác
+    "x in ('RETURNED','RETURNED_BY_RULE')",
+    "x not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')", // nhu cầu hàng: chưa ngã ngũ + đã giao, câu khác
+    "s.stage in ('PENDING','PICKED_UP','IN_TRANSIT','OUT_FOR_DELIVERY','DELIVERY_FAILED','RETURNING')", // chặng vận đơn
+    "x in ('IN_TRANSIT','NOT_SHIPPED')", // hai giá trị lẻ
+    "x in (OPEN_OUTCOMES_SQL)", // dạng đúng
+  ];
+  for (const mau of phaiTha) assert.deepEqual(banChepChuaNgaNgu(mau), [], `bộ dò KHÔNG được bắt nhầm: ${mau}`);
+
+  const tepMa = execFileSync("git", ["ls-files", "lib", "app", "components", "scripts"], { encoding: "utf8" })
+    .split("\n")
+    .filter((f) => /\.(ts|tsx)$/.test(f));
+  const docTep = (f: string) => {
+    try {
+      return readFileSync(f, "utf8");
+    } catch {
+      return ""; // tệp đã xoá trên đĩa mà chưa commit — không có mã để chép
+    }
+  };
+  const viPham = tepMa
+    .filter((f) => !(f in MIEN_TRU_CHUA_NGA_NGU))
+    .flatMap((f) => banChepChuaNgaNgu(docTep(f)).map((d) => `${f}: ${d}`));
+  assert.deepEqual(viPham, [], `gõ lại tập 'chưa ngã ngũ' (đủ, thiếu, hay viết ngược thành phần bù) — dùng OPEN_OUTCOMES_SQL (lib/constants/truth.ts): ${viPham.join(" · ")}`);
+  for (const [f, lyDo] of Object.entries(MIEN_TRU_CHUA_NGA_NGU)) {
+    assert.ok(lyDo.trim().length > 20, `${f}: miễn trừ phải nói rõ lý do`);
+    assert.ok(banChepChuaNgaNgu(docTep(f)).length > 0, `${f}: miễn trừ đã hết tác dụng — xoá dòng miễn trừ`);
+  }
+  assert.ok(tepMa.length > 200, `phải quét được toàn bộ kho mã, chỉ thấy ${tepMa.length} tệp`);
 }

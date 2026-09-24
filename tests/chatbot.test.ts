@@ -16,6 +16,7 @@ import { execSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const KEY_PATTERNS = [/\bEAA[A-Za-z0-9]{40,}/, /AIza[0-9A-Za-z_-]{20,}/, /sk-[A-Za-z0-9_-]{20,}/];
 
@@ -77,7 +78,10 @@ export async function testChatbotImportGuards() {
   process.env.BOT_ENV_FILE = path.join(dir, "bot.env");
   process.env.SYSTEM_PROMPT_FILE = path.join(dir, "system.md");
   try {
-    const mod = (await import(path.resolve("chatbot/src/erp-import.js"))) as {
+    // `import()` nhận URL, không nhận đường dẫn: trên Windows "C:\…" bị đọc thành URL mang lược đồ
+    // "c:" ⇒ ERR_UNSUPPORTED_ESM_URL_SCHEME, bộ kiểm dừng giữa chừng. CI Linux xanh vì "/…" tình cờ
+    // hợp lệ (AGENTS.md mục 65). `pathToFileURL` cho cùng một URL file:// trên mọi nền.
+    const mod = (await import(pathToFileURL(path.resolve("chatbot/src/erp-import.js")).href)) as {
       importFiles: (files: Record<string, string>) => string[];
     };
     assert.throws(() => mod.importFiles({ "../../etc/passwd": "x" }), /Khong nhan tep/, "tên lạ (kể cả đường dẫn đi ngược) bị từ chối");

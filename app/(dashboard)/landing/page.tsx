@@ -16,7 +16,9 @@ import { param, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const dynamic = "force-dynamic";
 
-const OUTCOMES: (OrderOutcome | "NONE")[] = ["NONE", "NOT_SHIPPED", "UNKNOWN", "IN_TRANSIT", "DELIVERED", "RETURNED", "RETURNED_BY_RULE", "CANCELLED"];
+// Sinh từ `OUTCOME_LABEL` (bản khai đủ mọi kết quả): danh sách chép tay cũ thiếu `AWAITING_PICKUP`,
+// nên bộ lọc không chọn được "Chờ ĐVVC lấy hàng" dù truy vấn và thẻ đếm đều đã biết nó.
+const OUTCOMES: (OrderOutcome | "NONE")[] = ["NONE", ...(Object.keys(OUTCOME_LABEL) as OrderOutcome[])];
 const FLAGS = [
   { value: "DUP", label: "Trùng SĐT" },
   { value: "RISK", label: "Khách rủi ro" },

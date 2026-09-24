@@ -444,7 +444,9 @@ export const MARKETING_METRICS: MarketingMetricSpec[] = [
     meaning: "Đơn chưa có kết quả cuối — chính là phần làm con số lợi nhuận của ngày chưa ngã ngũ.",
     numerator: null,
     denominator: null,
-    source: "ORDER_OUTCOME ∈ (IN_TRANSIT, NOT_SHIPPED, UNKNOWN)",
+    // Trỏ tới hằng số, không liệt kê lại: bản liệt kê cũ dừng ở bộ ba của trước 13/09/2026 (thiếu
+    // AWAITING_PICKUP) trong khi truy vấn đã đọc OPEN_OUTCOMES_SQL.
+    source: "ORDER_OUTCOME ∈ OPEN_OUTCOMES (lib/constants/truth.ts — sinh ra từ OUTCOME_GROUP)",
     timing: "Đọc ở thời điểm xem báo cáo.",
     nullRule: "0 là 0.",
     direction: "CONTEXT",
