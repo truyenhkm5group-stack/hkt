@@ -393,7 +393,12 @@ export const productionOrders = pgTable(
     /** Ảnh mẫu theo màu: { color, url } */
     images: jsonb("images").$type<{ color: string; url: string }[]>().notNull().default(sql`'[]'::jsonb`),
     totalQty: integer("total_qty").notNull().default(0),
-    unitCost: integer("unit_cost").notNull().default(0),
+    /**
+     * Giá gia công / nhập mỗi sản phẩm. `NULL` = CHƯA BIẾT (nháp máy dựng khi thiết kế mới đủ MOQ không có căn
+     * cứ giá — `docs/creative-loop.md` §5h, mục 42). Đường lập tay vẫn ghi 0 khi bỏ trống ô; mọi chỗ đọc coi
+     * 0 và `NULL` đều là "chưa nhập", `sum()` bỏ qua `NULL`.
+     */
+    unitCost: integer("unit_cost").default(0),
     /** ẢNH CHỤP tên xưởng lúc ghi. Khoá thật là `supplier_id` (`NULL` = lô cũ / chưa chọn trong danh mục). */
     supplier: text("supplier").notNull().default(""),
     supplierId: text("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
@@ -3202,11 +3207,24 @@ export const designConcepts = pgTable(
     /** Người đánh dấu "đưa vào sản xuất" (mục 34). Máy không bao giờ đặt trạng thái ấy. */
     productionByUserId: text("production_by_user_id").references(() => users.id, { onDelete: "set null" }),
     productionAt: ts("production_at"),
+    /**
+     * MOQ (§5h): lệnh sản xuất nối với thiết kế — nháp máy dựng khi đủ `DESIGN_MOQ.minOrders` đơn, hoặc lệnh
+     * người đã lập sẵn cho đúng mã TK. Người xoá nháp ⇒ `NULL`, nhưng `moq_reached_at` vẫn giữ nên máy KHÔNG
+     * dựng lại (xoá nháp là một quyết định).
+     */
+    productionOrderId: text("production_order_id").references(() => productionOrders.id, { onDelete: "set null" }),
+    /** Mốc máy thấy đủ MOQ và dựng / nối lệnh — khoá lũy đẳng "một thiết kế một nháp". */
+    moqReachedAt: ts("moq_reached_at"),
+    /** Tin báo đủ MOQ đã gửi được (hoặc sổ chống lặp nói đã gửi). */
+    moqNotifiedAt: ts("moq_notified_at"),
+    /** Căn cứ lúc dựng (`DesignMoqSnapshot`): số đơn theo từng đường đếm, số lượng biết / chưa biết. */
+    moqSnapshot: jsonb("moq_snapshot").$type<Record<string, unknown>>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("design_concepts_code_uq").on(t.code),
+    uniqueIndex("design_concepts_production_order_uq").on(t.productionOrderId).where(sql`${t.productionOrderId} IS NOT NULL`),
     index("design_concepts_status_idx").on(t.status, t.createdAt),
     check("design_concepts_status_check", sql`${t.status} IN ('DRAFT', 'TESTING', 'WIN', 'LOSE', 'PRODUCTION')`),
     check("design_concepts_code_check", sql`${t.code} ~ '^TK-[0-9]{6}-[0-9]{2,}$'`),
