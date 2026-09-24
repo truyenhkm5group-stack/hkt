@@ -4,6 +4,7 @@ import { OWN_AD_IMPORT, classifyOwnAd, type OwnAdMetrics, type OwnAdReason } fro
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { vnStartOfDay } from "@/lib/format";
 import { variantMetrics } from "@/lib/queries/creative-loop";
+import { AD_MESSAGES } from "@/lib/queries/ads-roas";
 
 /**
  * ═══════════ VÒNG MẪU — ỨNG VIÊN "QUẢNG CÁO CŨ CỦA SHOP" (CHỈ ĐỌC) ═══════════
@@ -77,6 +78,8 @@ export async function listOwnAdCandidates(db: Db, opts: { now: Date; winOrdersAb
     if (opts.adIds.length === 0) return { rows: [], scanned: 0, since };
     conds.push(inArray(ads.adId, opts.adIds));
   }
+  // Sàng trước bằng CÙNG định nghĩa tin nhắn mà variantMetrics dùng để chấm ở dưới (AD_MESSAGES):
+  // sàng bằng cột trần thì mẩu 0 hội thoại mà đủ lead bị loại trước khi được chấm.
   const pool = await db
     .select({
       adId: sql<string>`${ads.adId}`,
@@ -90,7 +93,7 @@ export async function listOwnAdCandidates(db: Db, opts: { now: Date; winOrdersAb
     .from(ads)
     .where(and(...conds))
     .groupBy(ads.adId)
-    .having(sql`max(${ads.spendDate}) >= ${vnStartOfDay(since).toISOString()}::timestamptz and coalesce(sum(${ads.messages}), 0) >= ${OWN_AD_IMPORT.minMessages}`);
+    .having(sql`max(${ads.spendDate}) >= ${vnStartOfDay(since).toISOString()}::timestamptz and coalesce(sum(${AD_MESSAGES}), 0) >= ${OWN_AD_IMPORT.minMessages}`);
 
   if (pool.length === 0) return { rows: [], scanned: 0, since };
   const ids = pool.map((r) => String(r.adId));
