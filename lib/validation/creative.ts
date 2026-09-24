@@ -100,6 +100,23 @@ export const manualCreativeInputSchema = z
 
 export type ManualCreativeInput = z.infer<typeof manualCreativeInputSchema>;
 
+/**
+ * SỬA CÂU CHỮ của một mẫu trước khi duyệt lô (tab Duyệt lô). Cùng trần với câu chữ máy viết và mẫu tự
+ * làm: tiêu đề ≤ 40 (được để trống — bài ảnh không có ô tiêu đề), nội dung chính 1…500. Hai trần này
+ * đọc từ MỘT chỗ để ô đếm ký tự trên màn hình và máy chủ không nói hai con số khác nhau.
+ */
+export const VARIANT_COPY_LIMITS = { headlineMaxChars: 40, primaryTextMaxChars: 500 } as const;
+
+export const variantCopyInputSchema = z
+  .object({
+    variantId: z.string().trim().min(1, "Thiếu mã mẫu"),
+    headline: z.string().trim().max(VARIANT_COPY_LIMITS.headlineMaxChars, `Tiêu đề tối đa ${VARIANT_COPY_LIMITS.headlineMaxChars} ký tự`).default(""),
+    primaryText: z.string().trim().min(1, "Nhập nội dung chính của bài quảng cáo").max(VARIANT_COPY_LIMITS.primaryTextMaxChars, `Nội dung chính tối đa ${VARIANT_COPY_LIMITS.primaryTextMaxChars} ký tự`),
+  })
+  .strict();
+
+export type VariantCopyInput = z.infer<typeof variantCopyInputSchema>;
+
 export const creativeSourceToggleSchema = z.object({ id: z.string().trim().min(1, "Thiếu mã nguồn ảnh"), active: z.boolean() }).strict();
 
 // ───────────────────────────── CẤU HÌNH ─────────────────────────────

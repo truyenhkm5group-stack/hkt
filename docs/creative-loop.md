@@ -131,6 +131,26 @@ Chủ shop vẽ mẫu trên web ChatGPT / Grok (gói tháng, không có API cho 
 Tệp: `lib/creative/manual.ts` (đường ghi duy nhất) · `lib/actions/creative-manual.ts` · form ở tab Duyệt lô ·
 `drizzle/0118_creative_manual_variants.sql` · `tests/creative-manual.test.ts`.
 
+## 5c. Câu chữ theo ảnh + soạn trước khi duyệt (chủ shop yêu cầu 24/09/2026)
+
+*"Duyệt ảnh xong cần có phần soạn các thông tin sẵn để sẵn sàng đăng bài, đăng camp ads như tiêu đề,
+content (AI suggest luôn sao cho phù hợp với ảnh đã sinh ra và được duyệt)."*
+
+- `writer.ts` viết câu chữ TRƯỚC khi có ảnh ⇒ chỉ là NHÁP. Ngay sau khi ảnh được lưu, `captionFromImage()`
+  (`lib/creative/caption.ts`, OpenAI Responses + `input_image`, route `creative.caption`) NHÌN ảnh và viết
+  lại tiêu đề + nội dung chính. Luật giá y như `writer.ts`: sai ⇒ viết lại một lần ⇒ vẫn sai thì bỏ con số giá.
+- Viết theo ảnh hỏng ⇒ GIỮ câu nháp, mẫu vẫn `GENERATED`; lý do ở `gen_error` (tiền tố `CAPTION_FALLBACK_PREFIX`)
+  và thẻ mẫu nói ra. Không có cột mới.
+- Tab Duyệt lô: mỗi mẫu `GENERATED` hiện khối **Sẵn sàng đăng** (xem trước bài như trên Facebook — tên fanpage
+  theo cấu hình chụp của lô, đọc từ sổ `fanpages`) và nút **Soạn câu chữ**: sửa tay (đếm ký tự 40/500), hoặc
+  **AI gợi ý theo ảnh** (2–3 phương án, không tự lưu). Mẫu tự làm dùng được như mẫu máy.
+- Sửa được khi lô chưa duyệt (`PLANNED`/`PENDING_APPROVAL`) và còn hạn — điều kiện nằm TRONG câu `UPDATE`.
+  Câu chữ nằm trong digest ⇒ **sửa câu chữ ⇒ cần bấm duyệt lại** (phiếu đã phát tự vô hiệu). Giá khác ERP
+  chỉ cảnh báo. Quyền `ideas:write`; nhật ký ghi trước/sau.
+
+Tệp: `lib/creative/{caption,copy-edit}.ts` · `lib/actions/creative-copy.ts` · `copy-editor.tsx` ·
+`AdPreview` trong `variant-bits.tsx` · `tests/creative-copy.test.ts`.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |
