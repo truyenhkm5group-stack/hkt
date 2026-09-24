@@ -3005,6 +3005,9 @@ export const creativeVariants = pgTable(
     status: text("status").notNull().default("PLANNED"),
     rejectReason: text("reject_reason").notNull().default(""),
     rejectedByUserId: text("rejected_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Người tải mẫu TỰ LÀM (mục 34). `NULL` = mẫu do máy lập. Tên là ảnh chụp do máy chủ đọc. */
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
 
     fbImageHash: text("fb_image_hash").notNull().default(""),
     fbCreativeId: text("fb_creative_id").notNull().default(""),
@@ -3030,7 +3033,7 @@ export const creativeVariants = pgTable(
     index("creative_variants_status_idx").on(t.status),
     index("creative_variants_product_idx").on(t.productId),
     index("creative_variants_library_idx").on(t.libraryAt),
-    check("creative_variants_mode_check", sql`${t.mode} IN ('EXPLOIT', 'EXPLORE')`),
+    check("creative_variants_mode_check", sql`${t.mode} IN ('EXPLOIT', 'EXPLORE', 'MANUAL')`),
     check("creative_variants_status_check", sql`${t.status} IN ('PLANNED', 'GENERATED', 'GEN_FAILED', 'REJECTED', 'LIVE', 'PAUSED', 'ENDED', 'PUBLISH_FAILED')`),
     // "Đang chạy" mà không có mẩu QC nào là một khẳng định không có chứng từ.
     check("creative_variants_live_check", sql`${t.status} NOT IN ('LIVE', 'PAUSED', 'ENDED') OR ${t.fbAdId} IS NOT NULL`),

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   CREATIVE_SOURCE_KINDS,
+  GENE_LABEL,
+  GENE_VOCAB,
   normalizeCreativeConfig,
   type ConfigProblem,
   type CreativeLoopConfig,
@@ -62,6 +64,41 @@ export const creativeSourceInputSchema = z
   });
 
 export type CreativeSourceInput = z.infer<typeof creativeSourceInputSchema>;
+
+/**
+ * MẪU TỰ LÀM — người tải một mẫu hoàn chỉnh (ảnh + câu chữ) vào lô gần nhất còn hạn duyệt.
+ *
+ * Sáu gen BẮT BUỘC: mẫu không có gen thì không dạy được máy điều gì (thống kê gen bỏ qua nó). Mã hàng
+ * BẮT BUỘC: không có mã thì đơn của mẫu không nối được về sản phẩm, và mẫu thắng không làm cha được.
+ * Tiêu đề ≤ 40 và câu chữ ≤ 500 — cùng trần với câu chữ máy viết (`lib/creative/writer.ts`).
+ */
+const geneField = <K extends keyof typeof GENE_VOCAB>(key: K) => z.enum(GENE_VOCAB[key], { message: `Chọn ${GENE_LABEL[key].toLowerCase()}` });
+
+export const manualCreativeInputSchema = z
+  .object({
+    productId: z.string().trim().min(1, "Chọn mã hàng của mẫu"),
+    primaryText: z.string().trim().min(1, "Nhập nội dung chính của bài quảng cáo").max(500, "Nội dung chính tối đa 500 ký tự"),
+    headline: z.string().trim().max(40, "Tiêu đề tối đa 40 ký tự").default(""),
+    note: z.string().trim().max(300, "Ghi chú tối đa 300 ký tự").default(""),
+    genes: z
+      .object({
+        angle: geneField("angle"),
+        scene: geneField("scene"),
+        model: geneField("model"),
+        composition: geneField("composition"),
+        textOverlay: geneField("textOverlay"),
+        palette: geneField("palette"),
+      })
+      .strict(),
+    imageBase64: z
+      .string()
+      .min(1, "Chưa chọn ảnh mẫu")
+      .max(IDEA_IMAGE_MAX_BASE64, "Ảnh quá lớn — thu nhỏ trước khi tải lên")
+      .regex(BASE64, "Dữ liệu ảnh không hợp lệ"),
+  })
+  .strict();
+
+export type ManualCreativeInput = z.infer<typeof manualCreativeInputSchema>;
 
 export const creativeSourceToggleSchema = z.object({ id: z.string().trim().min(1, "Thiếu mã nguồn ảnh"), active: z.boolean() }).strict();
 

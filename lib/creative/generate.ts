@@ -14,7 +14,8 @@ import {
   type SlotMode,
 } from "@/lib/constants/creative-loop";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
-import { planBatch } from "@/lib/creative/plan";
+import { isManualSeed } from "@/lib/creative/manual";
+import { planBatch, type PlannedSlot } from "@/lib/creative/plan";
 import { batchDayToBuild, batchWindow } from "@/lib/creative/schedule";
 import { describeSource, type SourceDescriber } from "@/lib/creative/vision";
 import { writeVariantCopy, type CopyWriter } from "@/lib/creative/writer";
@@ -110,6 +111,65 @@ async function describePending(db: Db, describe: SourceDescriber): Promise<numbe
   return ok;
 }
 
+/** Ô máy lập ⇒ dòng `creative_variants` PLANNED. Dùng chung cho lô mới và lô dựng sẵn bởi mẫu tự làm. */
+function plannedRows(batchId: string, slots: PlannedSlot[]) {
+  return slots.map((s) => ({
+    batchId,
+    slot: s.slot,
+    mode: s.mode,
+    productId: s.productId,
+    productPhotoSourceId: s.productPhotoSourceId,
+    inspirationSourceId: s.inspirationSourceId,
+    parentVariantId: s.parentVariantId,
+    genes: s.genes as Record<string, string>,
+    genesVersion: GENE_VOCAB_VERSION,
+    mutatedGene: s.mutatedGene ?? "",
+    why: s.why,
+    status: "PLANNED" as const,
+  }));
+}
+
+/**
+ * Lô đã được MẪU TỰ LÀM dựng sẵn (`plan.manualSeed`, chưa có `slots`) ⇒ máy chỉ lập PHẦN CÒN THIẾU:
+ * `batchSize + extraCandidates − số mẫu tự làm`. Không đụng mẫu của người, không đổi số ô của nó
+ * (ô máy lập 1…n, ô tự làm 1001+).
+ *
+ * Chỉ điền MỘT lần: điều kiện "plan còn là bản dựng sẵn" nằm trong WHERE, nên hai lượt chạy chồng
+ * không lập hai lần.
+ */
+async function fillManualSeed(db: Db, batch: BatchRow, cfg: CreativeLoopConfig): Promise<BatchRow> {
+  const v = schema.creativeVariants;
+  const [c] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(v)
+    .where(and(eq(v.batchId, batch.id), eq(v.mode, "MANUAL"), eq(v.status, "GENERATED")));
+  const need = Math.max(0, cfg.batchSize + cfg.extraCandidates - Number(c?.n ?? 0));
+  const inputs = await loadPlanInputs(db, batch.batchDay, cfg);
+  const plan = planBatch({ ...inputs, slotCount: need });
+  const filled = await db.transaction(async (tx) => {
+    const [u] = await tx
+      .update(schema.creativeBatches)
+      .set({
+        plan: { ...plan, manualSeed: true } as unknown as Record<string, unknown>,
+        slotCount: sql`${schema.creativeBatches.slotCount} + ${plan.slots.length}`,
+        configSnapshot: cfg as unknown as Record<string, unknown>,
+        status: plan.slots.length > 0 ? "PLANNED" : batch.status,
+      })
+      .where(
+        and(
+          eq(schema.creativeBatches.id, batch.id),
+          sql`${schema.creativeBatches.plan} ->> 'manualSeed' = 'true' and not (${schema.creativeBatches.plan} ? 'slots')`,
+          sql`${schema.creativeBatches.status} in ('PLANNED', 'PENDING_APPROVAL')`,
+        ),
+      )
+      .returning();
+    if (!u) return null;
+    if (plan.slots.length) await tx.insert(v).values(plannedRows(batch.id, plan.slots));
+    return u;
+  });
+  return filled ?? (await batchByDay(db, batch.batchDay)) ?? batch;
+}
+
 async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): Promise<{ batch: BatchRow; created: boolean } | { batch: null; emptyReasons: string[] }> {
   const plan = planBatch(await loadPlanInputs(db, batchDay, cfg));
   /*
@@ -138,24 +198,7 @@ async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): P
       .onConflictDoNothing({ target: schema.creativeBatches.batchDay })
       .returning();
     if (!b) return null;
-    if (plan.slots.length) {
-      await tx.insert(schema.creativeVariants).values(
-        plan.slots.map((s) => ({
-          batchId: b.id,
-          slot: s.slot,
-          mode: s.mode,
-          productId: s.productId,
-          productPhotoSourceId: s.productPhotoSourceId,
-          inspirationSourceId: s.inspirationSourceId,
-          parentVariantId: s.parentVariantId,
-          genes: s.genes as Record<string, string>,
-          genesVersion: GENE_VOCAB_VERSION,
-          mutatedGene: s.mutatedGene ?? "",
-          why: s.why,
-          status: "PLANNED",
-        })),
-      );
-    }
+    if (plan.slots.length) await tx.insert(schema.creativeVariants).values(plannedRows(b.id, plan.slots));
     return b;
   });
   if (created) return { batch: created, created: true };
@@ -315,6 +358,10 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
   if (day) {
     summary.batchDay = day;
     batch = await batchByDay(db, day);
+    if (batch && isManualSeed(batch.plan) && ["PLANNED", "PENDING_APPROVAL"].includes(batch.status)) {
+      summary.described = await describePending(db, describe);
+      batch = await fillManualSeed(db, batch, cfg);
+    }
     if (!batch) {
       summary.described = await describePending(db, describe);
       const r = await createBatch(db, day, cfg);

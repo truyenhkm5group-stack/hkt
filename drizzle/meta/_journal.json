@@ -820,6 +820,13 @@
       "when": 1790001808245,
       "tag": "0117_creative_loop",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1790001868245,
+      "tag": "0118_creative_manual_variants",
+      "breakpoints": true
     }
   ]
 }

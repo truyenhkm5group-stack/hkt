@@ -9,6 +9,7 @@ import {
   type CreativeRule,
   type CreativeSourceKind,
   type CreativeVerdict,
+  type SlotMode,
   type VariantStatus,
 } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
@@ -238,7 +239,7 @@ export type VariantCard = {
   id: string;
   batchId: string;
   slot: number;
-  mode: "EXPLOIT" | "EXPLORE";
+  mode: SlotMode;
   productId: string | null;
   productName: string | null;
   productPhotoSourceId: string | null;
@@ -425,7 +426,7 @@ function toVariantCard(r: VariantJoined): VariantCard {
     id: v.id,
     batchId: v.batchId,
     slot: v.slot,
-    mode: v.mode === "EXPLOIT" ? "EXPLOIT" : "EXPLORE",
+    mode: v.mode === "EXPLOIT" || v.mode === "MANUAL" ? v.mode : "EXPLORE",
     productId: v.productId,
     productName: r.productName ?? null,
     productPhotoSourceId: v.productPhotoSourceId,
