@@ -5,7 +5,9 @@ import { ConfigForm } from "@/app/(dashboard)/marketing/creatives/config-form";
 import { SectionCard } from "@/components/ui-bits";
 import { CREATIVE_WRITE_DENIAL_REASON } from "@/lib/constants/creative-loop";
 import { formatDateTime, formatNumber } from "@/lib/format";
-import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
+import { AdsKillSwitchCard } from "@/app/(dashboard)/marketing/creatives/kill-switch";
+import { ADS_KILL_SOURCE_LABEL } from "@/lib/constants/ads-kill-switch";
+import { adsWriteDisabledReason, readAdsKillSwitch } from "@/lib/integrations/facebook/ads-write";
 import { creativeSourceCounts, listCreativeProductOptions, readCreativeConfig } from "@/lib/queries/creative-sources";
 import { cn } from "@/lib/utils";
 
@@ -19,8 +21,8 @@ type Check = { level: Level; label: string; detail: ReactNode };
 const ICON: Record<Level, typeof CheckCircle2> = { OK: CheckCircle2, BLOCK: XCircle, WARN: CircleAlert, UNKNOWN: CircleHelp };
 const TONE: Record<Level, string> = { OK: "text-success", BLOCK: "text-destructive", WARN: "text-warning", UNKNOWN: "text-muted-foreground" };
 
-export async function ConfigTab({ canManage }: { canManage: boolean }) {
-  const [state, counts, products] = await Promise.all([readCreativeConfig(), creativeSourceCounts(), listCreativeProductOptions()]);
+export async function ConfigTab({ canManage, canKill }: { canManage: boolean; canKill: boolean }) {
+  const [state, counts, products, kill] = await Promise.all([readCreativeConfig(), creativeSourceCounts(), listCreativeProductOptions(), readAdsKillSwitch()]);
   const { config, problems } = state;
   const writeReason = adsWriteDisabledReason();
   const thieu = problems.filter((p) => p.field !== "rules");
@@ -45,6 +47,11 @@ export async function ConfigTab({ canManage }: { canManage: boolean }) {
       level: writeReason ? "BLOCK" : "OK",
       label: "Đường ghi quảng cáo (máy chủ)",
       detail: writeReason ?? "Đang mở. Mọi lượt ghi vẫn phải qua phiếu duyệt lô (nấc COPILOT).",
+    },
+    {
+      level: kill.killed ? "BLOCK" : "OK",
+      label: "Công tắc tắt khẩn cấp (settings ads.write.kill)",
+      detail: kill.killed ? `${ADS_KILL_SOURCE_LABEL[kill.source]}. ${kill.reason ?? ""}` : `${ADS_KILL_SOURCE_LABEL[kill.source]} — đường ghi đi theo chốt env và phiếu duyệt.`,
     },
     {
       level: "UNKNOWN",
@@ -94,6 +101,7 @@ export async function ConfigTab({ canManage }: { canManage: boolean }) {
 
   return (
     <div className="space-y-4">
+      <AdsKillSwitchCard state={kill} canEngage={canKill} canRelease={canManage} />
       <SectionCard
         title="Còn thiếu gì để vòng chạy thật"
         description={chan ? `${formatNumber(chan)} điều kiện đang chặn — vòng chưa đăng được mẫu nào.` : "Không còn điều kiện nào chặn ở phía ERP."}

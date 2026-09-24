@@ -84,9 +84,10 @@ mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của 
 Cấu hình (`settings` khoá `creative.config`) chỉ LÀM HẸP được, không nới. Trần tiền theo ngày đếm
 trên SỔ `creative_fb_actions` (lượt đã áp), không đếm trên cấu hình.
 
-Ba lớp chặn tiêu quá, độc lập nhau: **(a)** cổng thuần từ chối trước khi gọi · **(b)** ngân sách TRỌN
+Bốn lớp chặn tiêu quá, độc lập nhau: **(a)** cổng thuần từ chối trước khi gọi · **(b)** ngân sách TRỌN
 ĐỜI + `end_time` trên chính Facebook — ERP có chết cũng không tiêu quá · **(c)** chốt cứng env đọc lại
-ngay trước lời gọi mạng.
+ngay trước lời gọi mạng · **(d)** công tắc tắt khẩn cấp `ads.write.kill` đọc lại ngay trước MỖI lời gọi
+ghi, không cần deploy (§9).
 
 ## 4. Chấm mẫu (`judgeVariant`, hàm thuần)
 
@@ -181,3 +182,51 @@ Tệp: `lib/creative/manual.ts` (đường ghi duy nhất) · `lib/actions/creat
 - ⏸ Luật tắt / luật giữ — chủ shop tự điền (đã nói 24/09).
 - ⏸ Quyền: duyệt lô và tiêu thêm đang dùng lại `expenses:write` (giống bàn tay Nấc 3). Một quyền riêng
   hẹp hơn là đổi vai trò (mục 7) ⇒ chủ shop quyết.
+
+## 9. Vận hành: công tắc tắt khẩn cấp đường ghi quảng cáo
+
+`ADS_WRITE_ENABLED` tắt được mọi thứ nhưng là biến môi trường: đổi phải deploy lại, 15–20 phút. Công
+tắc khẩn cấp đóng đường ghi trong vài giây. Luật: `lib/constants/ads-kill-switch.ts`; chốt đọc ở ĐÚNG
+MỘT chỗ — `graphPost()` trong `lib/integrations/facebook/ads-write.ts`, ngay trước lời gọi mạng, không
+đệm. Kiểm thử: `tests/ads-kill-switch.test.ts` (kéo ⇒ 0 lời gọi ghi ra mạng; lỗi đọc ⇒ chặn).
+
+**Kéo công tắc** (một trong hai cách, có hiệu lực ở lời gọi Facebook KẾ TIẾP):
+
+- Màn hình `/marketing/creatives` → tab **Đang chạy** hoặc **Cấu hình** → ô *Công tắc tắt khẩn cấp* →
+  ghi lý do → bấm. Quyền: `expenses:write` (người duyệt lô) hoặc `settings:manage`.
+- Ops, không cần giao diện: workflow **ops-vps** → `set-setting` với arg (GIỮ dấu nháy đơn — lệnh
+  đi qua `sh -c`; lý do không được chứa dấu nháy đơn):
+  `ads.write.kill '{"killed":true,"reason":"<vì sao>","by":"ops","at":"<giờ>"}'`.
+  `set-setting` GỘP vào giá trị cũ, nên luôn ghi đủ `by`/`at` để không giữ lại tên người bấm trước.
+
+**Nhả công tắc:** màn hình (chỉ `settings:manage` — nhả là cho máy tiêu tiền tiếp), hoặc ops
+`set-setting` arg `ads.write.kill '{"killed":false,"reason":"<vì sao>","by":"ops","at":"<giờ>"}'`. Mọi lượt bấm trên màn hình ghi nhật
+ký (`ADS_WRITE_KILL_ENGAGE` / `ADS_WRITE_KILL_RELEASE`) kèm người, lúc, lý do.
+
+**Khi công tắc KÉO, cái gì bị chặn, cái gì vẫn đi:**
+
+| Lời gọi | Kéo công tắc |
+|---|---|
+| Tải ảnh · tạo bài · tạo nhóm · tạo mẩu | CHẶN |
+| Tiêu thêm (đặt lại ngân sách trọn đời) | CHẶN |
+| Đổi ngân sách ngày chiến dịch — kể cả HẠ | CHẶN |
+| Tạm dừng nhóm / chiến dịch (`status = PAUSED`, không kèm trường nào khác) | **VẪN ĐI** |
+
+Vì sao tạm dừng vẫn đi: người kéo công tắc muốn TIỀN NGỪNG CHẢY. Nhóm test đã tạo vẫn tiêu tới
+`end_time`, và luật tắt sớm là thứ duy nhất của ERP dừng được chúng — chặn nó là giữ tiền chảy đúng
+lúc cần nó dừng. Tạm dừng đảo ngược được bằng một cú bấm trong Ads Manager; tiền đã tiêu thì không.
+Phân loại đọc từ CHÍNH các trường sẽ gửi đi (đúng một trường `status` = `PAUSED`), không từ một cờ nơi
+gọi khai. Hạ ngân sách ngày vẫn bị chặn vì cổng không tự kiểm được chiều mà không gọi Facebook, và một
+lỗi đơn vị (đồng ↔ xu) trông y hệt một lượt hạ.
+
+Muốn chặn cả tạm dừng (ví dụ nghi chính luật tắt đang tắt nhầm) ⇒ đóng `ADS_WRITE_ENABLED` (chậm hơn,
+tuyệt đối).
+
+**Mọi nhánh lỗi rơi về ĐÓNG:** không đọc được CSDL, JSON hỏng, `"killed"` không phải đúng `true`/`false`
+(chuỗi `"false"`, `0`, thiếu trường) ⇒ coi như đang kéo. Không có dòng nào = chưa ai kéo = mở.
+
+**Lô đang chờ đăng khi công tắc kéo:** lượt đăng ghi một dòng `DENIED · KILL_SWITCH` vào sổ và dừng
+TRƯỚC mọi lời gọi Facebook — lô giữ nguyên ĐÃ DUYỆT, mẫu giữ nguyên, không thành `PUBLISH_FAILED`. Nhả
+trước giờ chạy ⇒ lượt kế tiếp đăng tiếp; quá giờ ⇒ lô hết hạn, không đồng nào được chi.
+
+Công tắc chỉ LÀM HẸP: `{"killed":false}` không mở được đường ghi khi `ADS_WRITE_ENABLED` đang tắt.

@@ -53,13 +53,13 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
       {tab === "duyet" ? (
         <ApproveTab pending={pending} batchId={param(raw, "lo") || null} canApprove={can(user, "expenses:write")} canEdit={can(user, "ideas:write")} />
       ) : tab === "dang-chay" ? (
-        <LiveTab canWrite={can(user, "expenses:write")} />
+        <LiveTab canWrite={can(user, "expenses:write")} canKill={can(user, "expenses:write") || can(user, "settings:manage")} canRelease={can(user, "settings:manage")} />
       ) : tab === "thu-vien" ? (
         <LibraryTab />
       ) : tab === "hoc" ? (
         <LearningTab />
       ) : tab === "cau-hinh" ? (
-        <ConfigTab canManage={can(user, "settings:manage")} />
+        <ConfigTab canManage={can(user, "settings:manage")} canKill={can(user, "expenses:write") || can(user, "settings:manage")} />
       ) : (
         <SourcesTab params={parseListParams(raw, { filterKeys: ["loai", "bat"], defaultPageSize: 24, defaultPeriod: "all", sortable: [] })} canWrite={can(user, "ideas:write")} />
       )}
