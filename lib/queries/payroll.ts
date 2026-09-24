@@ -227,15 +227,24 @@ export async function salesByProductPage(period: Period, mode: "confirmed" | "de
       chính nó. Bảng phẳng nay chỉ còn là nguồn LẤP CHỖ cho đơn chưa có ảnh chụp.
     */
     const oa = schema.orderAttributions;
-    const rows = await db
-      .select({ productId: productKey, pageId: o.pageId, adId: o.adId, snapshotMarketerId: oa.marketerId, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
-      .from(i)
-      .innerJoin(o, eq(o.id, i.orderId))
-      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .leftJoin(pv, eq(pv.id, i.variantId))
-      .leftJoin(oa, eq(oa.orderId, o.id))
-      .where(and(eq(i.isBonus, false), ...(mode === "confirmed" ? [inArray(o.stage, [...CONFIRMED_STAGES])] : []), ...periodConds(o.insertedAt, period)))
-      .groupBy(sql`1`, o.pageId, o.adId, oa.marketerId);
+    /*
+      JIT TẮT CHO ĐÚNG CÂU NÀY — đo production 24/09/2026 (ops perf-probe, đường chạy thật của ứng
+      dụng): 5.388–7.705 ms, và CÙNG câu ấy khi tắt JIT chỉ còn 31–36 ms (EXPLAIN 3 lượt xen kẽ mỗi
+      bên: 99–100 % thời gian là Postgres biên dịch biểu thức kết quả đơn cho từng dòng). Câu này
+      nằm dưới `/ads` (getAdsPerformance, getMarketerReport) và bảng lương. Không đổi một dấu nào
+      của câu lệnh — xem `chayKhongJit`.
+    */
+    const rows = await chayKhongJit(db, (tx) =>
+      tx
+        .select({ productId: productKey, pageId: o.pageId, adId: o.adId, snapshotMarketerId: oa.marketerId, value: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${cond}), 0)` })
+        .from(i)
+        .innerJoin(o, eq(o.id, i.orderId))
+        .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+        .leftJoin(pv, eq(pv.id, i.variantId))
+        .leftJoin(oa, eq(oa.orderId, o.id))
+        .where(and(eq(i.isBonus, false), ...(mode === "confirmed" ? [inArray(o.stage, [...CONFIRMED_STAGES])] : []), ...periodConds(o.insertedAt, period)))
+        .groupBy(sql`1`, o.pageId, o.adId, oa.marketerId),
+    );
     // ad_id → marketer (chiến dịch tạo ra đơn). CHỈ lấp chỗ khi fanpage không nói được gì.
     const adMap = await adMarketerMap(rows.map((r) => r.adId).filter((x): x is string => Boolean(x)));
     const map = new Map<string, PageBucket[]>();
