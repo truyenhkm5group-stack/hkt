@@ -384,12 +384,15 @@ export function testKhoaSaoLuuChayThat() {
       'exec 8>"$T/that/erp-readonly-db.lock"; flock -x 8',
       'exec 9>"$T/that/erp-lifecycle.lock"; flock -s 9',
       'echo "@@DUNGLAI"',
-      'timeout 20 bash -c \'source "$0"; set +e; giu_khoa 8 "$KHOA_DOC_DB" -x 2 >/dev/null && echo ok8; giu_khoa 9 "$KHOA_VONG_DOI" -s 2 >/dev/null && echo ok9\' "$S"',
+      // Script truyền qua $1, KHÔNG qua $0: `bash -c '…' "$S"` đặt $0 = đường dẫn script, trùng
+      // BASH_SOURCE[0], nên chốt cuối tệp tưởng mình đang được GỌI, chạy `main` không tham số và thoát 2
+      // trước khi tới giu_khoa — hai khối dưới in ra rỗng (chỉ lộ trên Linux, Windows không có flock).
+      'timeout 20 bash -c \'source "$1"; set +e; giu_khoa 8 "$KHOA_DOC_DB" -x 2 >/dev/null && echo ok8; giu_khoa 9 "$KHOA_VONG_DOI" -s 2 >/dev/null && echo ok9\' _ "$S"',
       'exec 8>&- 9>&-',
       // Một tiến trình KHÁC cầm khoá đọc nặng ⇒ phải HẾT GIỜ, không lách qua.
       '( flock -x "$T/that/erp-readonly-db.lock" sleep 6 ) & sleep 1',
       'echo "@@HETGIO"',
-      'timeout 20 bash -c \'source "$0"; set +e; giu_khoa 8 "$KHOA_DOC_DB" -x 1 >/dev/null; echo $?\' "$S"',
+      'timeout 20 bash -c \'source "$1"; set +e; giu_khoa 8 "$KHOA_DOC_DB" -x 1 >/dev/null; echo $?\' _ "$S"',
       // Lượt sao lưu thứ hai tới khi lượt đầu còn giữ FD 7 ⇒ thoát 75 NGAY, không ghi trạng thái.
       '( flock -x "$T/that/erp-backup.lock" sleep 6 ) & sleep 1',
       'echo "@@CHONG"',
