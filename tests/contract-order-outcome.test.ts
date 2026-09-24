@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
@@ -271,11 +271,31 @@ export async function testOrderOutcomeContract(db: Db) {
 
   // Và KHÔNG tệp nào được gõ lại danh sách ấy. Quét mã ĐÃ VÀO KHO (`git ls-files`) chứ không quét
   // đĩa, để bài kiểm đỏ ngay trên máy người viết thay vì đợi tới CI.
-  const LITERAL = /in\s*\(\s*'IN_TRANSIT'\s*,\s*'DELIVERED'\s*,\s*'RETURNED'\s*,\s*'RETURNED_BY_RULE'\s*\)/;
-  const tepMa = execFileSync("git", ["ls-files", "lib", "app", "components", "scripts"], { encoding: "utf8" })
+  //
+  // SO TẬP, KHÔNG SO CHUỖI. Bản trước khớp đúng MỘT thứ tự (`'IN_TRANSIT','DELIVERED',…`), nên ba
+  // bản chép tay viết theo thứ tự khác (`'DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT'` ở
+  // marketing-daily · payroll · return-reason-report) sống sót qua bài kiểm tới 24/09/2026. Nay
+  // mọi `in (...)` chỉ gồm chuỗi hằng được đọc ra thành TẬP rồi so với tập của hằng số.
+  const tepMa = execFileSync("git", ["ls-files", "lib", "app", "components", "scripts", "chatbot"], { encoding: "utf8" })
     .split("\n")
-    .filter((f) => /\.(ts|tsx)$/.test(f));
-  const viPham = tepMa.filter((f) => LITERAL.test(readFileSync(f, "utf8")));
+    .filter((f) => /\.(ts|tsx|js|mjs)$/.test(f) && existsSync(f));
+  const DANH_SACH_HANG = /\bin\s*\(\s*('[A-Za-z_]+'(?:\s*,\s*'[A-Za-z_]+')*)\s*\)/gi;
+  const tapCua = (values: readonly string[]) => [...new Set(values)].sort().join(",");
+  const cacTapTrong = (src: string) => [...src.matchAll(DANH_SACH_HANG)].map((m) => tapCua([...m[1].matchAll(/'([A-Za-z_]+)'/g)].map((x) => x[1])));
+  const goLaiTap = (values: readonly string[]) => {
+    const dich = tapCua(values);
+    return tepMa.filter((f) => cacTapTrong(readFileSync(f, "utf8")).includes(dich));
+  };
+  // Tự kiểm bộ dò trên chính các dạng đã từng lọt: mọi thứ tự, xuống dòng, chữ IN hoa.
+  for (const mau of [
+    "x in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')",
+    "x in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')",
+    "x IN (\n  'RETURNED_BY_RULE', 'IN_TRANSIT',\n  'RETURNED', 'DELIVERED'\n)",
+  ]) {
+    assert.ok(cacTapTrong(mau).includes(tapCua(ELIGIBLE_SENT_OUTCOMES)), `bộ dò phải bắt được bản chép tay ở mọi thứ tự: ${mau}`);
+  }
+  assert.ok(!cacTapTrong("x in ('DELIVERED','RETURNED','RETURNED_BY_RULE')").includes(tapCua(ELIGIBLE_SENT_OUTCOMES)), "tập KHÁC (thiếu IN_TRANSIT) là một câu hỏi khác, không phải bản chép");
+  const viPham = goLaiTap(ELIGIBLE_SENT_OUTCOMES);
   assert.deepEqual(viPham, [], `gõ lại danh sách 'đã gửi' — dùng ELIGIBLE_SENT_SQL (lib/constants/returns.ts) thay vì chép: ${viPham.join(", ")}`);
   assert.ok(tepMa.length > 200, `phải quét được toàn bộ kho mã, chỉ thấy ${tepMa.length} tệp`);
 
@@ -301,8 +321,10 @@ export async function testOrderOutcomeContract(db: Db) {
 
   // Không tệp nào được gõ lại — kể cả bản ĐỦ BỐN GIÁ TRỊ: một bản chép đang đúng hôm nay vẫn là
   // một chỗ phải nhớ sửa vào lần thêm kết quả tiếp theo, và đó chính là cách 50 đơn kia rơi ra.
+  // Cùng bộ dò theo TẬP. Bản chép thiếu một giá trị (bộ ba cũ) vẫn có thể lọt — nó là một tập khác,
+  // và việc bắt nó cần biết ý định của từng câu, không phải một phép so chuỗi.
   const OPEN_LITERAL = /in\s*\(\s*'IN_TRANSIT'\s*,\s*'NOT_SHIPPED'\s*,\s*'UNKNOWN'/;
-  const viPhamOpen = tepMa.filter((f) => OPEN_LITERAL.test(readFileSync(f, "utf8")));
+  const viPhamOpen = [...new Set([...goLaiTap(OPEN_OUTCOMES), ...tepMa.filter((f) => OPEN_LITERAL.test(readFileSync(f, "utf8")))])];
   assert.deepEqual(viPhamOpen, [], `gõ lại danh sách 'chưa ngã ngũ' — dùng OPEN_OUTCOMES_SQL (lib/constants/truth.ts) thay vì chép: ${viPhamOpen.join(", ")}`);
 
   // ───────── Chống trôi: chỉ MỘT công thức, và nguồn phải trỏ về đặc tả ─────────
