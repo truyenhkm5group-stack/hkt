@@ -39,7 +39,7 @@
  */
 import { COMPENSATION_PROFIT_RULES, COMPENSATION_PROFIT_LABEL } from "@/lib/constants/compensation-profit";
 import type { CostComponent } from "@/lib/constants/cost-authority";
-import { OPERATING_COMPONENTS, getRecognizedCosts, type CostEngineWarning } from "@/lib/queries/cost-engine";
+import { OPERATING_COMPONENTS, getRecognizedCosts, type CostEngineWarning, type LogisticsAdjustmentTotal } from "@/lib/queries/cost-engine";
 import type { Period } from "@/lib/search-params";
 
 /** Một khoản bị loại khỏi cơ sở, kèm mức tin cậy — ước tính KHÔNG được đi im lặng. */
@@ -60,6 +60,15 @@ export type CompensationBasisCost = {
   payrollCovered: boolean;
   exclusions: BasisExclusion[];
   warnings: CostEngineWarning[];
+  /**
+   * Cước / phí hoàn gõ tay khai `MANUAL_ADJUSTMENT` kèm lý do — NGUYÊN VĂN từ
+   * `getRecognizedCosts().logisticsAdjustment`, không tự đọc bảng Chi phí lần thứ hai (luật 18).
+   *
+   * KHÔNG thuộc `amount` (khối vận hành): nó là thành phần Cước / Phí hoàn, nên cơ sở tính lương
+   * trừ nó ở cột VẬN CHUYỂN (`lib/queries/payroll.ts::productEconomics`). Nó cũng không phải thù
+   * lao biến đổi nên không có gì để loại — đứng trong cơ sở như mọi chi phí thật khác.
+   */
+  logisticsAdjustment: LogisticsAdjustmentTotal;
 };
 
 /**
@@ -121,6 +130,7 @@ export async function getOperatingCostForCompensationBasis(period: Period): Prom
     payrollCovered,
     exclusions,
     warnings: costs.warnings,
+    logisticsAdjustment: costs.logisticsAdjustment,
   };
 }
 

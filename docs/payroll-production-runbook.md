@@ -387,6 +387,90 @@ Xuất CSV từ `/payroll`. Kiểm:
 - dòng cuối tệp nói rõ nguồn số là **BẢN TÍNH SỐNG** (vì chưa kỳ nào đóng băng);
 - cột "Thực nhận" của người chưa gán chính sách để **trống** — trống nghĩa là không áp dụng.
 
+### 3.8 Cước / phí hoàn điều chỉnh tay vào cơ sở tính lương (bổ sung 25/09/2026)
+
+Bản này ĐỔI SỐ TIỀN của kỳ chưa khoá — khác hẳn nguyên tắc "không một con số nào đổi" ở mục 0 — và
+chủ shop đã quyết như vậy. Chi tiết: `docs/profit-cost-allocation-contract.md` Phần 5, mục "Bảng
+lương". Phiên bản phép tính `PAYROLL_CALC_VERSION` 2 → 3.
+
+**Hướng số đổi (chỉ kỳ CHƯA KHOÁ — `DRAFT` · `CALCULATED` · `UNDER_REVIEW` · `APPROVED`):**
+
+- Lợi nhuận tính lương toàn shop **GIẢM đúng** tổng cước / phí hoàn gõ tay khai "Điều chỉnh thủ công"
+  kèm lý do, phân bổ vào kỳ (khoản một lần theo ngày phát sinh, khoản theo kỳ theo số ngày chồng lấn)
+  — đúng bằng độ giảm lợi nhuận ròng của Báo cáo lợi nhuận cùng kỳ. Không bao giờ tăng.
+- Thưởng theo **% lợi nhuận tổng** giảm đúng *khoản điều chỉnh × tỷ lệ* (khi lợi nhuận còn dương;
+  lợi nhuận đã ≤ 0 thì thưởng vẫn 0, không âm).
+- Thưởng theo **% lợi nhuận cá nhân** giảm theo phần khoản điều chỉnh chia về các mã người ấy được quy
+  kết (chia theo SỐ ĐƠN ĐÃ GỬI của mã, rồi theo tỷ trọng quy kết như cước vận đơn) × tỷ lệ.
+- Cơ sở **dòng tiền** (không dùng để chốt): mẫu số "LN1 toàn shop" giảm nên hệ số quy đổi đổi theo —
+  hướng của từng người không suy ra được, xem thẳng màn hình.
+- Khoản gõ tay KHÔNG khai điều chỉnh vẫn bị loại (trùng vận đơn): không đổi một đồng.
+
+**Kỳ ĐÃ KHOÁ (`LOCKED` · `PAID` · `FINAL` cũ): không đổi một đồng.** Màn hình, CSV, phiếu lương đọc
+ảnh chụp. Nếu kỳ ấy có khoản điều chỉnh thì phần chênh hiện ở khối **đề xuất điều chỉnh** — người
+quyết có trả bù / trừ ở kỳ sau hay không, máy không tự sửa. Kỳ `CALCULATED`/`UNDER_REVIEW`/`APPROVED`
+đã có ảnh chụp cũ: bấm "tính lại" trước khi duyệt/khoá để ảnh mang phép tính số 3.
+
+**Đo trước / sau (CHỈ ĐỌC, `db-query`, mỗi ô một câu, chỉ số tổng hợp — không dòng dữ liệu người):**
+
+Ô A — khoản điều chỉnh có lý do phân bổ vào **tháng lịch hiện hành** (kỳ lương mặc định của `/payroll`),
+cùng công thức phân bổ với engine. Tổng cột `trong_ky` = độ giảm dự kiến của lợi nhuận tính lương tháng này:
+
+```sql
+with k as (
+  select date_trunc('month', now() at time zone 'Asia/Ho_Chi_Minh')::date as d0,
+         (date_trunc('month', now() at time zone 'Asia/Ho_Chi_Minh') + interval '1 month' - interval '1 day')::date as d1
+), r as (
+  select d0, d1, (d0::timestamp at time zone 'Asia/Ho_Chi_Minh') as t0,
+         ((d1 + 1)::timestamp at time zone 'Asia/Ho_Chi_Minh') - interval '1 millisecond' as t1
+    from k
+), x as (
+  select e.category::text as nhom, e.amount, (length(trim(coalesce(e.reason, ''))) > 0) as co_ly_do,
+         (e.allocation_method = 'PERIOD_PRORATA' and e.period_start is not null and e.period_end is not null) as theo_ky,
+         (e.period_start at time zone 'Asia/Ho_Chi_Minh')::date as ps, (e.period_end at time zone 'Asia/Ho_Chi_Minh')::date as pe,
+         r.d0, r.d1
+    from expenses e cross join r
+   where e.category::text in ('SHIPPING', 'RETURN_FEE') and e.cost_source = 'MANUAL_ADJUSTMENT'
+     and case when e.allocation_method = 'PERIOD_PRORATA' and e.period_start is not null and e.period_end is not null
+              then e.period_end >= r.t0 and e.period_start <= r.t1
+              else e.occurred_at between r.t0 and r.t1 end
+), y as (
+  select nhom, co_ly_do, d0,
+         case when not theo_ky then amount
+              else greatest(0,
+                (case when least(pe, d1) - ps + 1 <= 0 then 0
+                      when least(pe, d1) - ps + 1 >= pe - ps + 1 then amount
+                      else round(amount::numeric * (least(pe, d1) - ps + 1) / (pe - ps + 1)) end)
+              - (case when greatest(ps, d0) - ps <= 0 then 0
+                      when greatest(ps, d0) - ps >= pe - ps + 1 then amount
+                      else round(amount::numeric * (greatest(ps, d0) - ps) / (pe - ps + 1)) end))
+         end as phan_bo
+    from x
+)
+select to_char(min(d0), 'YYYY-MM') as thang, nhom, co_ly_do, count(*) as so_khoan, sum(phan_bo)::bigint as trong_ky
+  from y group by nhom, co_ly_do order by nhom, co_ly_do
+```
+
+Ô B — kỳ lương ĐÃ KHOÁ có khoản điều chỉnh chạm vào (những kỳ này KHÔNG đổi số; chỉ hiện đề xuất
+điều chỉnh). `tong_tien_tho` là tổng khoản chưa phân bổ theo ngày — chỉ để biết cỡ:
+
+```sql
+select p.period_key, p.status, p.calc_version, count(e.id) as so_khoan, coalesce(sum(e.amount), 0)::bigint as tong_tien_tho
+  from payroll_periods p
+  left join expenses e
+    on e.category::text in ('SHIPPING', 'RETURN_FEE') and e.cost_source = 'MANUAL_ADJUSTMENT'
+   and case when e.allocation_method = 'PERIOD_PRORATA' and e.period_start is not null and e.period_end is not null
+            then e.period_end >= p.period_start and e.period_start <= p.period_end
+            else e.occurred_at between p.period_start and p.period_end end
+ where p.status in ('FINAL', 'LOCKED', 'PAID')
+ group by p.period_key, p.status, p.calc_version
+ order by p.period_key
+```
+
+Sau deploy: mở `/payroll` tháng hiện hành, ô "Lợi nhuận tính lương" phải thấp hơn số trước deploy
+đúng Σ `trong_ky` của Ô A (các chứng từ khác không đổi trong lúc đo), và chú giải ⓘ của ô ấy in
+"VC … (gồm N khoản điều chỉnh tay có lý do …)".
+
 ---
 
 ## 4. QUAY ĐẦU (ROLLBACK)

@@ -37,8 +37,12 @@ export const PAYROLL_EMPLOYEES_KEY = "payroll.employees";
  *
  * 2 = bản 14/09/2026: lương cứng chia theo SỐ NGÀY của kỳ (trước đó chép nguyên lương tháng), quy
  * kết marketer đi bằng ảnh chụp fanpage theo mốc đơn lên, và CHƯA BIẾT thôi in ra thành 0.
+ *
+ * 3 = bản 25/09/2026: cột vận chuyển của cơ sở tính lương cộng cước / phí hoàn gõ tay khai
+ * `MANUAL_ADJUSTMENT` kèm lý do (lấy từ engine, chia theo số đơn gửi của mã) — như mọi báo cáo lợi
+ * nhuận. Kỳ chốt bằng số 2 đọc ảnh chụp của nó, không tính lại.
  */
-export const PAYROLL_CALC_VERSION = 2;
+export const PAYROLL_CALC_VERSION = 3;
 
 /**
  * KHOÁ TỰ NHIÊN CỦA MỘT KỲ LƯƠNG — đọc được bằng mắt, và ổn định.

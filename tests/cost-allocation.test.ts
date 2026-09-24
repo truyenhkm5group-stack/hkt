@@ -13,8 +13,10 @@ import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import { getMarketingDaily } from "@/lib/queries/marketing-daily";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { clearMemo } from "@/lib/cache";
-import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
+import { PAYROLL_CALC_VERSION, PAYROLL_EMPLOYEES_KEY, payrollPeriodKey } from "@/lib/constants/payroll";
+import { getMarketerReport, getPayrollReport } from "@/lib/queries/payroll";
 import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
+import { buildPayrollSnapshot, getPayrollPeriodState, payrollDrift } from "@/lib/queries/payroll-period";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 import type { Period } from "@/lib/search-params";
 
@@ -127,6 +129,7 @@ export async function testCostAllocation(db: Db) {
 
   await testOperatingCostByDayAuthority(db);
   await testLogisticsAdjustmentOnePath(db);
+  await testPayrollLogisticsAdjustment(db);
 
   // ══ RỦI RO TỒN KHO: driver là HÀNG BÁN RA, không phải hàng nhập ══
   // Bối cảnh chủ shop nêu: mã Q002 nhập 200 triệu, dự phòng 10% = 20 triệu, tuần chỉ bán 100/1.000 đơn.
@@ -407,6 +410,7 @@ async function testLogisticsAdjustmentOnePath(db: Db) {
     const truth = await getFinancialTruth(ky);
     const mkt = await getMarketingDaily(ky, "created");
     const nominal = await getNominalProfitReport(ky);
+    const luong = (await getMarketerReport(ky, "profit1")).totals;
     const dong = (key: string) => truth.waterfall.find((l) => l.key === key)?.amount ?? Number.NaN;
     return {
       engine,
@@ -417,6 +421,7 @@ async function testLogisticsAdjustmentOnePath(db: Db) {
       truth: { dieuChinh: dong("shipping_adjustment"), contribution: truth.contribution, estimatedProfit: truth.estimatedProfit },
       mkt: { cuoc: mkt.totals.shippingCost, rows: mkt.rows, warnings: mkt.warnings },
       nominal: { shipCost: nominal.totals.shipCost, rowsShip: nominal.rows.reduce((t, r) => t + r.shipCost, 0), expectedProfit: nominal.totals.expectedProfit, netProfit: nominal.totals.netProfit, adj: nominal.totals.logisticsAdjustment },
+      luong: { profit: luong.profit, shipping: luong.shipping, adj: luong.logisticsAdjustment, adjCount: luong.logisticsAdjustmentCount, chuaChia: luong.logisticsAdjustmentUnallocated },
     };
   };
   const tong = (m: Map<string, number>) => [...m.values()].reduce((t, v) => t + v, 0);
@@ -448,6 +453,8 @@ async function testLogisticsAdjustmentOnePath(db: Db) {
   assert.equal(s1.truth.estimatedProfit, s0.truth.estimatedProfit, "(1) Sự thật tài chính không đổi");
   assert.equal(s1.mkt.cuoc, s0.mkt.cuoc, "(1) marketing theo ngày: cột cước không đổi");
   assert.equal(s1.nominal.netProfit, s0.nominal.netProfit, "(1) lợi nhuận danh nghĩa không đổi");
+  assert.equal(s1.luong.profit, s0.luong.profit, "(1) lợi nhuận tính lương không đổi — khoản trùng vận đơn không được trừ lần hai");
+  assert.equal(s1.luong.adj, 0, "(1) bảng lương: khoản không khai điều chỉnh KHÔNG phải điều chỉnh");
   const loai = new Map(s1.theoNgay.excluded.map((x) => [`${x.category}:${x.rule}`, x]));
   assert.equal(loai.get("SHIPPING:DUPLICATE_LOGISTICS_COST_SOURCE")?.amount, 30_000, "(1) khoản cước trùng phải được NÊU RA");
   assert.equal(loai.get("RETURN_FEE:DUPLICATE_LOGISTICS_COST_SOURCE")?.amount, 20_000, "(1) khoản phí hoàn trùng phải được NÊU RA");
@@ -515,6 +522,14 @@ async function testLogisticsAdjustmentOnePath(db: Db) {
   assert.equal(s2.nominal.rowsShip, s2.nominal.shipCost, "(2) danh nghĩa: phần điều chỉnh đã chia hết cho các mã — Σ các mã = dòng tổng");
   assert.equal(s1.nominal.netProfit - s2.nominal.netProfit, 520_000, "(2) danh nghĩa: lợi nhuận ròng giảm đúng khoản điều chỉnh");
 
+  // Cơ sở tính lương: cùng khoản, cùng nguồn (engine), cùng độ giảm với Báo cáo lợi nhuận — trước đây bỏ sót.
+  assert.equal(s2.luong.adj, s2.engine.logisticsAdjustment.amount, "(2) bảng lương đọc khoản điều chỉnh từ ENGINE, không tự đọc bảng Chi phí");
+  assert.equal(s2.luong.adjCount, 3);
+  assert.equal(s2.luong.shipping - s1.luong.shipping, 520_000, "(2) bảng lương: cột vận chuyển tăng đúng 520.000");
+  assert.equal(s1.luong.profit - s2.luong.profit, s1.pnl.netProfit - s2.pnl.netProfit, "(2) lợi nhuận tính lương giảm ĐÚNG bằng độ giảm lợi nhuận ròng của Báo cáo lợi nhuận");
+  assert.equal(s1.luong.profit - s2.luong.profit, 520_000, "(2) và bằng đúng khoản điều chỉnh — không hơn (hai lần), không kém (bỏ sót)");
+  assert.equal(s2.luong.chuaChia, 0, "(2) kỳ có đơn gửi ⇒ khoản điều chỉnh chia hết xuống mã");
+
   // ══ Tuần 01–07/10: chỉ 7/31 khoản theo kỳ, khoản một lần 08/10 và phí hoàn 12/10 nằm NGOÀI ══
   clearMemo();
   const [tuanEngine, tuanBc] = [await getRecognizedCosts(TUAN), await getProfitReport(TUAN, "created")];
@@ -524,6 +539,151 @@ async function testLogisticsAdjustmentOnePath(db: Db) {
 
   await donDep();
   console.log(
-    "✓ Cước / phí hoàn điều chỉnh tay đi MỘT đường (engine): khoản không khai điều chỉnh bị loại và được nêu ra, không đổi một đồng · khoản có lý do đổi pnl() / theo ngày / marketing / dòng tiền / sự thật tài chính / danh nghĩa ĐÚNG bằng số engine báo · rải theo phương thức phân bổ của từng khoản, Σ ngày = tổng kỳ",
+    "✓ Cước / phí hoàn điều chỉnh tay đi MỘT đường (engine): khoản không khai điều chỉnh bị loại và được nêu ra, không đổi một đồng · khoản có lý do đổi pnl() / theo ngày / marketing / dòng tiền / sự thật tài chính / danh nghĩa / lợi nhuận tính lương ĐÚNG bằng số engine báo · rải theo phương thức phân bổ của từng khoản, Σ ngày = tổng kỳ",
+  );
+}
+
+/**
+ * ═══════ BẢNG LƯƠNG TRỪ CƯỚC ĐIỀU CHỈNH — CHỈ Ở KỲ CHƯA KHOÁ ═══════
+ *
+ * Trước bản này cơ sở tính lương là báo cáo DUY NHẤT còn bỏ sót cước / phí hoàn gõ tay khai
+ * `MANUAL_ADJUSTMENT` kèm lý do: lợi nhuận tính lương cao hơn sự thật đúng bằng khoản ấy, và thưởng
+ * theo % lợi nhuận cao theo. Sửa nó là đổi số tiền trả người, nên bộ này khoá HAI chiều:
+ *
+ *  · KỲ MỞ (11/2027): lợi nhuận tính lương giảm ĐÚNG khoản điều chỉnh, bằng độ giảm của Báo cáo lợi
+ *    nhuận; thưởng theo % lợi nhuận tổng giảm ĐÚNG khoản ấy × tỷ lệ; khoản gõ tay không khai điều
+ *    chỉnh không đổi một đồng.
+ *  · KỲ ĐÃ KHOÁ (12/2027): thêm khoản điều chỉnh SAU ngày khoá ⇒ ảnh chụp KHÔNG đổi một đồng; phần
+ *    chênh chỉ hiện ở ĐỀ XUẤT ĐIỀU CHỈNH, đúng bằng khoản ấy (và × tỷ lệ ở tổng lương).
+ *
+ * Doanh thu lớn (20 triệu/tháng) để lợi nhuận tính lương DƯƠNG sau chi phí cố định giả định — ở kỳ
+ * lỗ thì thưởng bằng 0 cả trước lẫn sau, và bài kiểm không phân biệt được "đã trừ" với "bỏ sót".
+ */
+async function testPayrollLogisticsAdjustment(db: Db) {
+  const MO: Period = { key: "custom", from: d("2027-11-01"), to: dEnd("2027-11-30"), label: "Tháng 11/2027", fromKey: "2027-11-01", toKey: "2027-11-30" };
+  const KHOA: Period = { key: "custom", from: d("2027-12-01"), to: dEnd("2027-12-31"), label: "Tháng 12/2027", fromKey: "2027-12-01", toKey: "2027-12-31" };
+  const khoaKy = payrollPeriodKey(KHOA.from, KHOA.to);
+  assert.ok(khoaKy, "kỳ có mốc đầu/cuối phải có khoá");
+  const donDep = async () => {
+    await db.delete(schema.payrollPeriods).where(sql`${schema.payrollPeriods.periodKey} = ${khoaKy}`);
+    await db.delete(schema.expenses).where(sql`${schema.expenses.id} like 'pl-%'`);
+    await db.delete(schema.shipments).where(sql`${schema.shipments.id} like 'pl-%'`);
+    await db.delete(schema.orders).where(sql`${schema.orders.id} like 'pl-%'`);
+    clearMemo();
+  };
+  const nhanSuTruocDo = await getSettingJson<unknown>(PAYROLL_EMPLOYEES_KEY, null);
+  await donDep();
+  // 10% lợi nhuận tổng, không lương cứng ⇒ tổng lương = đúng 10% lợi nhuận tính lương (khi dương).
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, {
+    list: [{ id: "pl-emp-1", name: "Nhân sự kiểm thử cước", shortName: "KTC", department: "Quản lý", aliases: [], accountIds: [], userEmail: "", fixed: 0, percentTotal: 10, percentPersonal: 0, percentRevenue: 0, active: true, note: "" }],
+  });
+
+  const donGiao = (id: string, ngay: string, maVanDon: string) => ({
+    order: { id, insertedAt: d(ngay), stage: "DELIVERED" as const, status: 3, totalPriceAfterDiscount: 20_000_000, partnerFee: 30_000, returnFee: 0, cod: 20_000_000 },
+    item: { id: `${id}-item`, orderId: id, productId: "pl-product", productName: "Mã kiểm thử lương cước", quantity: 1, unitPrice: 20_000_000, lineTotal: 20_000_000 },
+    ship: { id: `${id}-ship`, orderId: id, vtpOrderNumber: maVanDon, stage: "DELIVERED" as const, shippingFee: 30_000, codAmount: 20_000_000, codCollected: 20_000_000, codStatus: "RECONCILED" as const, deliveredAt: d(ngay) },
+  });
+  const nov = donGiao("pl-order-nov", "2027-11-10", "PL0000000011");
+  const dec = donGiao("pl-order-dec", "2027-12-10", "PL0000000012");
+  await db.insert(schema.orders).values([nov.order, dec.order]);
+  await db.insert(schema.orderItems).values([nov.item, dec.item]);
+  await db.insert(schema.shipments).values([nov.ship, dec.ship]);
+
+  const chup = async (ky: Period) => {
+    clearMemo();
+    const [luong, bc, engine] = [await getPayrollReport(ky, "profit1"), await getProfitReport(ky, "created"), await getRecognizedCosts(ky)];
+    const dong = luong.lines.find((l) => l.employee.id === "pl-emp-1");
+    return { luong, dong, pnl: bc.current, engine };
+  };
+
+  /* ══ KỲ MỞ ══ */
+  const m0 = await chup(MO);
+  assert.ok(m0.luong.totalProfit > 2_000_000, `tiền đề: lợi nhuận tính lương tháng 11 phải DƯƠNG đủ lớn để thưởng phân biệt được (${m0.luong.totalProfit})`);
+  assert.equal(m0.dong?.bonusTotal, Math.round(m0.luong.totalProfit * 0.1), "tiền đề: thưởng = 10% lợi nhuận tổng");
+
+  // Khoản gõ tay KHÔNG khai điều chỉnh: trùng vận đơn ⇒ bị loại, không đổi một đồng.
+  await db.insert(schema.expenses).values({ id: "pl-ship-dup", category: "SHIPPING", description: "Cước tháng 11 gõ tay (trùng vận đơn)", amount: 500_000, occurredAt: d("2027-11-12"), costSource: "MANUAL" });
+  const m1 = await chup(MO);
+  assert.equal(m1.luong.totalProfit, m0.luong.totalProfit, "kỳ mở: khoản trùng vận đơn không được trừ vào lợi nhuận tính lương");
+  assert.equal(m1.luong.totalSalary, m0.luong.totalSalary, "kỳ mở: và không đổi lương");
+
+  // Khoản ĐIỀU CHỈNH có lý do: một cước, một phí hoàn.
+  await db.insert(schema.expenses).values([
+    { id: "pl-ship-adj", category: "SHIPPING", description: "Đền bù kiện vỡ", amount: 1_000_000, occurredAt: d("2027-11-15"), costSource: "MANUAL_ADJUSTMENT", reason: "Đền bù cho khách, không thuộc vận đơn nào" },
+    { id: "pl-ret-adj", category: "RETURN_FEE", description: "Phí lưu kho hàng hoàn", amount: 200_000, occurredAt: d("2027-11-18"), costSource: "MANUAL_ADJUSTMENT", reason: "ĐVVC thu riêng, không nằm trên bảng kê" },
+  ]);
+  const m2 = await chup(MO);
+  assert.equal(m2.engine.logisticsAdjustment.amount, 1_200_000, "engine: 1.000.000 cước + 200.000 phí hoàn điều chỉnh");
+  assert.equal(m2.luong.marketers.totals.logisticsAdjustment, m2.engine.logisticsAdjustment.amount, "kỳ mở: bảng lương đọc khoản điều chỉnh từ ENGINE");
+  assert.equal(m2.luong.marketers.totals.logisticsAdjustmentCount, 2);
+  assert.equal(m1.luong.totalProfit - m2.luong.totalProfit, 1_200_000, "kỳ mở: lợi nhuận tính lương giảm ĐÚNG khoản điều chỉnh");
+  assert.equal(
+    m1.luong.totalProfit - m2.luong.totalProfit,
+    m1.pnl.netProfit - m2.pnl.netProfit,
+    "kỳ mở: lợi nhuận tính lương và Báo cáo lợi nhuận giảm CÙNG một khoản — hai nơi không được nói hai số",
+  );
+  assert.equal(m2.luong.marketers.totals.shipping - m1.luong.marketers.totals.shipping, 1_200_000, "kỳ mở: cột vận chuyển của bảng lương tăng đúng khoản điều chỉnh");
+  assert.equal(
+    m2.luong.marketers.products.reduce((t, p) => t + p.shipping, 0) + m2.luong.marketers.totals.logisticsAdjustmentUnallocated,
+    m2.luong.marketers.totals.shipping,
+    "kỳ mở: Σ vận chuyển các mã + phần chưa chia = cột tổng — không đồng nào rơi ngoài",
+  );
+  assert.equal(m2.luong.marketers.totals.logisticsAdjustmentUnallocated, 0, "kỳ mở: có đơn gửi ⇒ chia hết xuống mã");
+  assert.equal((m1.dong?.bonusTotal ?? 0) - (m2.dong?.bonusTotal ?? 0), 120_000, "kỳ mở: thưởng 10% lợi nhuận tổng giảm ĐÚNG 1.200.000 × 10%");
+  assert.equal((m1.luong.totalSalary ?? 0) - (m2.luong.totalSalary ?? 0), 120_000, "kỳ mở: tổng lương giảm đúng khoản điều chỉnh × tỷ lệ");
+
+  // Kỳ 15–18/11: có hai khoản điều chỉnh nhưng KHÔNG có đơn nào ⇒ không có căn cứ chia xuống mã.
+  // Khoản ấy phải ở lại CẤP SHOP và vẫn bị trừ — không được lặng lẽ biến khỏi lợi nhuận tính lương.
+  const KHONG_DON: Period = { key: "custom", from: d("2027-11-15"), to: dEnd("2027-11-18"), label: "15–18/11/2027", fromKey: "2027-11-15", toKey: "2027-11-18" };
+  clearMemo();
+  const trong = (await getMarketerReport(KHONG_DON, "profit1")).totals;
+  assert.equal(trong.logisticsAdjustment, 1_200_000, "kỳ không đơn: engine vẫn báo đủ khoản điều chỉnh");
+  assert.equal(trong.logisticsAdjustmentUnallocated, 1_200_000, "kỳ không đơn: toàn bộ khoản ở lại cấp shop");
+  assert.ok(trong.shipping >= 1_200_000, "kỳ không đơn: cột vận chuyển tổng vẫn gồm khoản ấy");
+  const khongDonMaHang = (await getMarketerReport(KHONG_DON, "profit1")).products.reduce((t, p) => t + p.profit, 0);
+  assert.equal(
+    trong.profit,
+    khongDonMaHang - trong.testSpend - trong.sharedUnallocated - trong.logisticsAdjustmentUnallocated,
+    "kỳ không đơn: lợi nhuận shop = Σ lợi nhuận các mã − QC test − chi phí chung chưa chia − cước điều chỉnh chưa chia",
+  );
+
+  /* ══ KỲ ĐÃ KHOÁ ══ */
+  const k0 = await chup(KHOA);
+  assert.ok(k0.luong.totalProfit > 2_000_000, "tiền đề: lợi nhuận tính lương tháng 12 dương");
+  const anh = buildPayrollSnapshot(k0.luong, KHOA, khoaKy!);
+  assert.equal(anh.calcVersion, PAYROLL_CALC_VERSION);
+  const bayGio = new Date();
+  await db.insert(schema.payrollPeriods).values({
+    periodKey: khoaKy!,
+    periodStart: KHOA.from!,
+    periodEnd: KHOA.to!,
+    basis: "profit1",
+    status: "LOCKED",
+    snapshot: anh,
+    calcVersion: PAYROLL_CALC_VERSION,
+    finalizedAt: bayGio,
+    approvedAt: bayGio,
+    lockedAt: bayGio,
+  });
+  // Chứng từ về SAU ngày khoá: một khoản cước điều chỉnh có lý do rơi vào tháng 12.
+  await db.insert(schema.expenses).values({ id: "pl-ship-adj-dec", category: "SHIPPING", description: "Cước chuyến gom hàng tháng 12", amount: 800_000, occurredAt: d("2027-12-20"), costSource: "MANUAL_ADJUSTMENT", reason: "Chuyến gom hàng không gắn vận đơn" });
+  clearMemo();
+  const trangThai = await getPayrollPeriodState(KHOA, "profit1");
+  assert.equal(trangThai.frozen, true, "kỳ khoá là kỳ đóng băng");
+  assert.equal(trangThai.snapshot?.totalProfit, k0.luong.totalProfit, "KỲ ĐÃ KHOÁ: lợi nhuận tính lương của ảnh chụp KHÔNG đổi một đồng");
+  assert.equal(trangThai.snapshot?.totalSalary, k0.luong.totalSalary, "KỲ ĐÃ KHOÁ: tổng lương KHÔNG đổi một đồng");
+  assert.equal(trangThai.snapshot?.lines.find((l) => l.employeeId === "pl-emp-1")?.salary, k0.dong?.salary, "KỲ ĐÃ KHOÁ: dòng lương của từng người KHÔNG đổi");
+  // Bản tính sống đã đổi — và phần chênh PHẢI hiện ra như đề xuất điều chỉnh, đúng số.
+  const k1 = await chup(KHOA);
+  assert.equal(k0.luong.totalProfit - k1.luong.totalProfit, 800_000, "bản tính sống của tháng 12 đã trừ khoản mới");
+  const chenh = payrollDrift(trangThai.snapshot!, k1.luong);
+  assert.equal(chenh.find((c) => c.field === "totalProfit")?.diff, -800_000, "đề xuất điều chỉnh nêu đúng −800.000 lợi nhuận tính lương");
+  assert.equal(chenh.find((c) => c.field === "totalSalary")?.diff, -80_000, "và đúng −80.000 tổng lương (800.000 × 10%) — người quyết có sửa hay không, máy không tự sửa");
+
+  await donDep();
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, nhanSuTruocDo ?? { list: [] });
+  clearMemo();
+  console.log(
+    "✓ Bảng lương trừ cước / phí hoàn điều chỉnh tay có lý do: kỳ mở — lợi nhuận tính lương giảm đúng khoản engine báo, bằng độ giảm của Báo cáo lợi nhuận, thưởng giảm đúng khoản × tỷ lệ; khoản không khai điều chỉnh không đổi một đồng · kỳ đã khoá — ảnh chụp không đổi một đồng, phần chênh chỉ hiện ở đề xuất điều chỉnh",
   );
 }
