@@ -182,5 +182,14 @@ export async function testWebhookHardening() {
     assert.ok(!/request\.(text|json|arrayBuffer)\(\)/.test(src), `${tep} phải đọc body qua readBodyCapped, không đọc trần`);
     assert.ok(src.includes("readBodyCapped("), `${tep} phải dùng readBodyCapped`);
   }
-  console.log("✓ webhook: trần body (content-length + luồng) · 401/413/429 đúng lúc · bí mật header kiểm trước khi đọc · Caddyfile khớp hằng số và che bí mật trong log");
+
+  // Deploy phải làm Caddy ĐỌC LẠI Caddyfile (bind mount một tệp + `up -d` không đụng caddy), và phải
+  // kiểm cú pháp TRƯỚC khi restart — tệp sai mà vẫn restart là tắt cả trang.
+  const cai = readFileSync("scripts/install-vps.sh", "utf8");
+  const iValidate = cai.indexOf("caddy validate --config /etc/caddy/Caddyfile");
+  const iRestart = cai.indexOf("$COMPOSE restart caddy");
+  assert.ok(iValidate > 0, "install-vps.sh phải kiểm Caddyfile bằng `caddy validate` trước khi nạp");
+  assert.ok(iRestart > iValidate, "install-vps.sh phải restart caddy SAU khi validate đạt");
+  assert.ok(cai.includes('warn "Deploy KHÔNG đạt: $CADDY_LOI"'), "Caddyfile sai phải làm lượt deploy báo đỏ");
+  console.log("✓ webhook: trần body (content-length + luồng) · 401/413/429 đúng lúc · bí mật header kiểm trước khi đọc · Caddyfile khớp hằng số và che bí mật trong log · deploy nạp lại Caddyfile sau khi validate");
 }
