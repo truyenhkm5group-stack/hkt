@@ -15,6 +15,7 @@ import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { findProductIdByVariant, getProductDetail, type ProductDetail } from "@/lib/queries/products";
 import { getProductMatrix } from "@/lib/queries/product-intelligence";
 import { PLAN_STATUS_LABEL, PLAN_STATUS_TONE, type PlanStatus } from "@/lib/constants/planning";
+import { buildStockSizeMatrix } from "@/lib/inventory/size-matrix";
 import { explainPlan, fmtDateKey, type PlanExplanation } from "@/lib/constants/plan-explain";
 import { DELIVERY_RATE_SOURCE_LABEL } from "@/lib/constants/delivery-rate";
 import { STOCK_RECEIPT_KIND_LABEL, type StockReceiptKind } from "@/lib/validation/stock";
@@ -130,6 +131,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
           <SectionCard title="Bán ra theo ngày" description="Số lượng bán trong 30 ngày qua (không tính đơn huỷ/xoá)">
             <ProductSalesChart data={product.daily} />
           </SectionCard>
+
+          <StockSizeMatrix variants={product.variants} />
 
           {matrix ? (
             <SectionCard
@@ -335,6 +338,65 @@ function variantStatus(v: VariantRow): PlanStatus | null {
   if (!v.ledger) return null;
   if (v.isRemoved && !v.erpStock && !v.ledger.committed) return null;
   return v.active ? v.ledger.status : "IDLE";
+}
+
+/**
+ * ═══════════ TỒN THEO MÀU × SIZE (giao diện Bento) ═══════════
+ *
+ * Cùng những con số của bảng "Tồn kho theo mẫu mã" bên dưới, chỉ XẾP LẠI theo màu × size để thấy
+ * ngay size nào sắp hết — luật gom ô ở `lib/inventory/size-matrix.ts` (hàm thuần, có kiểm thử).
+ * Khác ma trận "Hiệu quả" (chỉ có ô cho mẫu mã ĐÃ BÁN trong kỳ): ở đây mọi mẫu mã còn bán đều có
+ * ô, kể cả mẫu mã tồn mà không bán được cái nào — đó chính là vốn đọng.
+ */
+function StockSizeMatrix({ variants }: { variants: VariantRow[] }) {
+  const mt = buildStockSizeMatrix(variants.map((v) => ({ id: v.id, sku: v.sku ?? "", color: v.color, size: v.size, available: v.available, erpStock: v.erpStock, isRemoved: v.isRemoved, status: variantStatus(v) })));
+  if (!mt) return null;
+  const mau = mt.colors;
+  const size = mt.sizes;
+  const o = mt.cell;
+  return (
+    <SectionCard
+      title="Tồn theo Màu × Size"
+      hint="Số to là KHẢ DỤNG BÁN (tồn thực tế − đã chốt đơn chưa xuất); số nhỏ là tồn thực tế. Màu ô theo mức cảnh báo của Kế hoạch SX. Cùng số với bảng Tồn kho theo mẫu mã bên dưới. Chưa có phiếu nhập thì tồn là CHƯA BIẾT, không phải 0."
+      padded={false}
+    >
+      <div className="overflow-x-auto p-3">
+        <table className="w-full min-w-[420px] border-separate border-spacing-1.5 text-center">
+          <thead>
+            <tr>
+              <th className="text-left text-[11.5px] font-semibold text-muted-foreground">Màu \ Size</th>
+              {size.map((sz) => (
+                <th key={sz} className="text-[12px] font-bold">{sz}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {mau.map((m) => (
+              <tr key={m}>
+                <td className="whitespace-nowrap pr-2 text-left text-[12.5px] font-medium">{m}</td>
+                {size.map((sz) => {
+                  const c = o(m, sz);
+                  if (!c) return <td key={sz} className="text-xs text-muted-foreground">·</td>;
+                  return (
+                    <td key={sz} title={`${c.skus}${c.status ? ` · ${c.status === "UNKNOWN" ? "Chưa có phiếu nhập" : PLAN_STATUS_LABEL[c.status]}` : ""}`} className={cn("rounded-xl px-2 py-2", c.status ? PLAN_STATUS_TONE[c.status] : "bg-muted")}>
+                      {c.available === null ? (
+                        <span className="block text-[11px] leading-tight">Chưa có<br />phiếu nhập</span>
+                      ) : (
+                        <>
+                          <span className="numeric block text-[17px] font-extrabold leading-5">{formatNumber(c.available)}</span>
+                          <span className="numeric block text-[10.5px] opacity-75">tồn {formatNumber(c.erpStock)}</span>
+                        </>
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SectionCard>
+  );
 }
 
 /**

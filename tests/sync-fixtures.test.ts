@@ -253,6 +253,8 @@ import { testCareUiContrast } from "./care-ui-contrast.test";
 import { testCareFilters } from "./care-filters.test";
 import { testCareRounds } from "./care-rounds.test";
 import { testCareDateFilters } from "./care-date-filters.test";
+import { testPhraseFilter } from "./phrase-filter.test";
+import { testSizeMatrix } from "./size-matrix.test";
 import { testProductNotes } from "./product-notes.test";
 import { testSmokeTiming } from "./smoke-timing.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
@@ -1751,6 +1753,8 @@ async function main() {
   testCareFilters();
   testCareRounds();
   testCareDateFilters();
+  testPhraseFilter();
+  testSizeMatrix();
   await testProductNotes(db);
   testSmokeTiming();
   testUiConsistency();
