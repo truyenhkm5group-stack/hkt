@@ -215,12 +215,10 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   log(`  báo cáo: ${vnd(data.totals.adSpend)}đ · ${num(data.totals.messages)} tin nhắn`);
   if (data.totals.adSpend !== null && data.totals.adSpend !== nguonSpend) {
     /*
-      Khoản chi nhóm QUẢNG CÁO gõ tay ở bảng Chi phí được PHÂN BỔ theo ngày và cộng vào cột chi
-      quảng cáo — đúng cách `getDailyBreakdown` cộng. Nên chênh lệch dương là giải thích được.
+      Khoản chi nhóm QUẢNG CÁO gõ tay ở bảng Chi phí KHÔNG còn được cộng vào cột chi quảng cáo (sổ
+      thẩm quyền — AGENTS.md mục 15): tài khoản QC là nguồn duy nhất. Nên mọi chênh lệch là lỗi.
     */
-    const chenh = data.totals.adSpend - nguonSpend;
-    if (chenh > 0 && !coLoc) add("ATTRIBUTION", "Chi quảng cáo", vnd(nguonSpend), vnd(data.totals.adSpend), `Chênh +${vnd(chenh)}đ là khoản chi nhóm Quảng cáo gõ tay ở bảng Chi phí, đã phân bổ theo ngày — cùng cách Báo cáo lợi nhuận cộng.`);
-    else add("BUG", "Chi quảng cáo", vnd(nguonSpend), vnd(data.totals.adSpend), "Chi quảng cáo không khớp nguồn có thẩm quyền và không giải thích được bằng khoản phân bổ.");
+    add("BUG", "Chi quảng cáo", vnd(nguonSpend), vnd(data.totals.adSpend), "Chi quảng cáo không khớp nguồn có thẩm quyền (ad_spends) — không còn khoản gõ tay nào được phép cộng thêm.");
   }
   if (data.totals.messages !== null && data.totals.messages !== nguonMsg) {
     add("BUG", "Tin nhắn", String(nguonMsg), num(data.totals.messages), "Tin nhắn phải đọc thẳng từ ad_spends, không qua phép biến đổi nào.");

@@ -254,9 +254,12 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
   const returnFee = Number(orderRow?.returnFee ?? 0);
   const adSpend = Number(adsRow?.amount ?? 0);
   const operating = Number(opsRow?.amount ?? 0);
+  // Cước / phí hoàn gõ tay khai ĐIỀU CHỈNH có lý do — engine đã tính vào thành phần Cước; trước đây
+  // bậc thang này bỏ sót nó. Lấy từ engine, không tự đọc bảng Chi phí.
+  const logisticsAdjustment = opsRow.logisticsAdjustment.amount;
   const missingCogsOrders = Number(orderRow?.missingCogsOrders ?? 0);
 
-  const contribution = deliveredRevenue - deliveredCogs - shippingDelivered - shippingReturned - returnFee - adSpend;
+  const contribution = deliveredRevenue - deliveredCogs - shippingDelivered - shippingReturned - returnFee - logisticsAdjustment - adSpend;
   const estimatedProfit = contribution - operating;
 
   const statementCount = Number(batchRow?.count ?? 0);
@@ -300,6 +303,14 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
       note: `Chi phí của ${Number(orderRow?.returnedOrders ?? 0)} đơn hoàn: hàng đi rồi về, tiền không thu được nhưng cước vẫn mất.`,
     },
     {
+      key: "shipping_adjustment",
+      label: "− Cước / phí hoàn điều chỉnh tay",
+      amount: -logisticsAdjustment,
+      known: true,
+      precision: "period_only",
+      note: `${opsRow.logisticsAdjustment.count} khoản khai “Điều chỉnh thủ công” kèm lý do ở bảng Chi phí (đền bù, phí ngoại lệ, cước chuyến gom hàng) — tiền thật không gắn được vận đơn nào. Khoản gõ tay không khai điều chỉnh bị loại vì trùng cước theo vận đơn.`,
+    },
+    {
       key: "ads",
       label: "− Chi quảng cáo",
       amount: -adSpend,
@@ -336,7 +347,8 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
   ];
 
   const realizedBlockedBy = statementCount === 0 ? "Kỳ này chưa có bảng kê Viettel Post nào — chưa có chứng từ để nói tiền đã về bao nhiêu." : null;
-  const realizedProfit = realizedBlockedBy ? null : cashReceived + prepaid - operating - adSpend;
+  // Bảng kê chỉ trừ cước của vận đơn; khoản điều chỉnh nằm ngoài vận đơn nên phải trừ riêng.
+  const realizedProfit = realizedBlockedBy ? null : cashReceived + prepaid - operating - logisticsAdjustment - adSpend;
 
   return {
     period,

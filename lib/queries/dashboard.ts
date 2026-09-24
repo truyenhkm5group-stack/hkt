@@ -235,7 +235,9 @@ async function getDashboardDataUncached(period: Period) {
     tests/metrics-contract.test.ts) và bằng đúng hai dòng đầu của bậc thang.
   */
   const line = (key: string) => Math.abs(financial.waterfall.find((l) => l.key === key)?.amount ?? 0);
-  const shipping = line("shipping_out");
+  // Khoản cước / phí hoàn điều chỉnh tay có lý do (dòng riêng của bậc thang) gộp vào cước ở đây —
+  // thiếu nó thì thẻ này lại nói một con số khác bậc thang cùng kỳ.
+  const shipping = line("shipping_out") + line("shipping_adjustment");
   const returnFee = line("shipping_return");
   // Giá vốn LẤY TỪ CHÍNH `orderKpis` — cùng population, cùng bộ lọc với doanh thu giao thành công.
   // Trước đây đây là một truy vấn riêng THIẾU bộ lọc đơn đã xác nhận, nên lợi nhuận ước tính lấy

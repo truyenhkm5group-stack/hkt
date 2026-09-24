@@ -28,7 +28,25 @@ export type CashReport = {
   cashIn: { codPaidToBank: number; codPaidCount: number; prepaid: number; prepaidOrders: number; prepaidOnReturned: number; total: number };
   /** Bảng kê Viettel Post trong kỳ (theo ngày đối soát): tiền COD gộp, cước/dư nợ đã trừ, tiền thu về */
   statements: { count: number; codGross: number; feeTotal: number; net: number; shipmentsLinked: number };
-  cashOut: { purchases: number; purchaseReceipts: number; shippingDelivered: number; shippingReturned: number; returnFees: number; shippingStatement: number; shippingMode: "statement" | "estimate"; adSpend: number; operating: number; total: number };
+  cashOut: {
+    purchases: number;
+    purchaseReceipts: number;
+    shippingDelivered: number;
+    shippingReturned: number;
+    returnFees: number;
+    shippingStatement: number;
+    shippingMode: "statement" | "estimate";
+    /**
+     * Cước / phí hoàn gõ tay khai ĐIỀU CHỈNH có lý do (Profit Engine). Luôn trừ, ở cả hai chế độ:
+     * khoản ấy theo định nghĩa KHÔNG gắn được vận đơn nào nên không nằm trên bảng kê, cũng không
+     * nằm trong ước tính theo đơn.
+     */
+    logisticsAdjustment: number;
+    logisticsAdjustmentCount: number;
+    adSpend: number;
+    operating: number;
+    total: number;
+  };
   net: number;
   pending: {
     codCollectedWaiting: number;
@@ -148,13 +166,17 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
     returnFees: Number(orderRows?.returnFees ?? 0),
     shippingStatement: statements.feeTotal,
     shippingMode: (statements.feeTotal > 0 ? "statement" : "estimate") as "statement" | "estimate",
+    logisticsAdjustment: expenseRows.logisticsAdjustment.amount,
+    logisticsAdjustmentCount: expenseRows.logisticsAdjustment.count,
     adSpend: Number(adRows?.amount ?? 0),
     operating: expenseRows.amount,
     total: 0,
   };
-  // Cước đã bị Viettel Post trừ ngay trên bảng kê (tiền vào là số thực nhận) → không trừ lần nữa; chỉ dùng ước tính khi kỳ chưa có bảng kê
+  // Cước đã bị Viettel Post trừ ngay trên bảng kê (tiền vào là số thực nhận) → không trừ lần nữa; chỉ dùng ước tính khi kỳ chưa có bảng kê.
+  // Khoản ĐIỀU CHỈNH có lý do thì trừ ở cả hai chế độ — nó nằm ngoài vận đơn lẫn bảng kê. Trước đây
+  // báo cáo này bỏ sót nó trong khi Profit Engine tính nó vào thành phần Cước.
   const shippingOut = cashOut.shippingMode === "statement" ? 0 : cashOut.shippingDelivered + cashOut.shippingReturned + cashOut.returnFees;
-  cashOut.total = cashOut.purchases + shippingOut + cashOut.adSpend + cashOut.operating;
+  cashOut.total = cashOut.purchases + shippingOut + cashOut.logisticsAdjustment + cashOut.adSpend + cashOut.operating;
   return {
     cashIn,
     statements,

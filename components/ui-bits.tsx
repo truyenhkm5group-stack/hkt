@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { InfoHint } from "@/components/info-hint";
+import { MISSING_HINT, MISSING_TEXT } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** Khối thông tin nhãn/giá trị dùng trong trang chi tiết */
@@ -59,8 +60,21 @@ export function EmptyState({ title, description, action, icon: Icon, className }
   );
 }
 
+/**
+ * In một số tiền. `null` / `undefined` / `NaN` là CHƯA BIẾT ⇒ `—` (AGENTS.md mục 42), KHÔNG phải
+ * `0 ₫`: bản cũ viết `Number(value ?? 0)` — đúng mặc định ẩn mà `lib/format.ts` đã bỏ — nên phiếu
+ * lương còn thành phần chưa biết in "Thực nhận 0 ₫", và ô "CP vận hành/đơn" của kỳ chưa có đơn nào
+ * in "0 ₫". Nơi nào `null` thật sự nghĩa là KHÔNG thì viết `?? 0` tại chỗ gọi.
+ */
 export function Money({ value, className, compact, sign }: { value: number | null | undefined; className?: string; compact?: boolean; sign?: boolean }) {
-  const n = Number(value ?? 0);
+  const n = value === null || value === undefined || (typeof value === "string" && (value as string).trim() === "") ? NaN : Number(value);
+  if (!Number.isFinite(n)) {
+    return (
+      <span className={cn("numeric text-muted-foreground", className)} title={MISSING_HINT}>
+        {MISSING_TEXT}
+      </span>
+    );
+  }
   const formatted = compact
     ? (() => {
         const abs = Math.abs(n);
