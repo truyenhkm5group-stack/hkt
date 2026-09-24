@@ -40,6 +40,7 @@ import { orderCogsFast } from "@/lib/queries/cogs";
 import { getRecognizedPayrollCost, type PayrollRecognition } from "@/lib/queries/payroll-cost";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
+import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
 const e = schema.expenses;
 const o = schema.orders;
@@ -234,8 +235,8 @@ async function build(period: Period): Promise<RecognizedCosts> {
         .where(and(...periodConds(o.insertedAt, period.from, period.to)));
       const [ship] = await tx
         .select({
-          shipping: sql<number>`coalesce(sum(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')), 0)`,
-          returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+          shipping: sql<number>`coalesce(sum(coalesce(nullif(${s.shippingFee}, 0), ${o.partnerFee}, 0)) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTCOMES_SQL)})), 0)`,
+          returnFee: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
         })
         .from(o)
         .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))

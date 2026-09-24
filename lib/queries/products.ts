@@ -92,6 +92,7 @@ function sold30Subquery(db: Db) {
     .innerJoin(schema.orders, eq(schema.orderItems.orderId, schema.orders.id))
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
     .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, schema.orders.id), PRIMARY_ATTEMPT))
+    // Nhu cầu = KHÔNG huỷ, KHÔNG hoàn (tức chưa ngã ngũ + đã giao) — tập khác RETURNED/FINISHED, cố ý liệt kê.
     .where(and(gte(schema.orders.insertedAt, since), notInArray(schema.orders.stage, ["CANCELLED", "DELETED"]), sql`${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')`))
     .groupBy(schema.orderItems.variantId)
     .as("sold30");

@@ -4,6 +4,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { metricScope, realizedShippingSql, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import type { Period } from "@/lib/search-params";
 
@@ -98,6 +99,22 @@ export function spendPeriod(from: Date | null, to: Date | null) {
   return and(...conds);
 }
 
+/**
+ * ───────────── TIN NHẮN QUẢNG CÁO CỦA MỘT DÒNG `ad_spends` — MỘT ĐỊNH NGHĨA ─────────────
+ *
+ * Sổ chỉ số (`lib/constants/marketing-daily.ts`, khoá `messages`): "lấy giá trị lớn hơn giữa tin
+ * nhắn và lead". Hai cột không phải hai cách đếm cùng một thứ mà là hai NGUỒN ghi khác nhau:
+ *  · dòng Facebook: `messages` = hội thoại bắt đầu; `leads` = `messages || lead` (sync.ts) — nên
+ *    `greatest` bằng số hội thoại, và rơi về số lead biểu mẫu chỉ khi mẩu không có hội thoại nào;
+ *  · dòng GÕ TAY (`createAdSpend`): `messages` luôn 0, người nhập ghi vào `leads`.
+ * Đọc `messages` trần thì dòng gõ tay mang TIỀN mà không mang tin nhắn: chi/tin nhắn phình lên,
+ * tỷ lệ chốt tụt xuống — cùng một chiến dịch, `/ads` và báo cáo marketing theo ngày nói hai số.
+ *
+ * Mọi phép cộng tin nhắn quảng cáo đi qua biểu thức này: `coalesce(sum(${AD_MESSAGES}), 0)`.
+ * `tests/ads-decision.test.ts` quét mã nguồn để không ai đọc lại cột trần.
+ */
+export const AD_MESSAGES = sql<number>`greatest(${schema.adSpends.messages}, ${schema.adSpends.leads})`;
+
 async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> {
   const db = await getDb();
   // Chi tiêu CHỈ tồn tại ở cấp chiến dịch. Xem docs/ads-attribution-audit.md.
@@ -153,7 +170,7 @@ async function roasUncached(period: Period, level: RoasLevel): Promise<AdsRoas> 
     .as("ads_facts");
 
   const fDelivered = sql`${facts.outcome} = 'DELIVERED'`;
-  const fReturned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const fReturned = sql`${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const fBooked = sql`${facts.outcome} <> 'CANCELLED'`;
 
   /*

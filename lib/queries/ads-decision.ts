@@ -4,7 +4,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { metricScope, openShippingSql, realizedShippingSql, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
-import { spendPeriod } from "@/lib/queries/ads-roas";
+import { AD_MESSAGES, spendPeriod } from "@/lib/queries/ads-roas";
 import { loadAdsMapping, resolveCampaign } from "@/lib/integrations/facebook/mapping";
 import { loadProductCodeIndex } from "@/lib/integrations/facebook/sync";
 import { lineUnitCost } from "@/lib/queries/cogs";
@@ -13,7 +13,7 @@ import { ORDER_AD_ID, ORDER_ADSET_ID, ORDER_CAMPAIGN_ID } from "@/lib/queries/ad
 import { adsAttributionCoverage, coverageVerdict } from "@/lib/queries/ads-attribution-coverage";
 import { LOW_COVERAGE_PCT } from "@/lib/constants/sales-funnel";
 import { adsRatio } from "@/lib/constants/profit";
-import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
+import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import {
   ADS_ACTION_ORDER,
   ADS_DECISION_RULE,
@@ -473,7 +473,7 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension, rates: 
     .as("ads_decision_facts");
 
   const delivered = sql`${facts.outcome} = 'DELIVERED'`;
-  const returned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const returned = sql`${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const booked = sql`${facts.outcome} <> 'CANCELLED'`;
   const open = sql`${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
 
@@ -578,7 +578,7 @@ async function aggregateByProduct(period: Period, rates: ProductDeliveryRates): 
     .as("ads_product_facts");
 
   const delivered = sql`${facts.outcome} = 'DELIVERED'`;
-  const returned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const returned = sql`${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const booked = sql`${facts.outcome} <> 'CANCELLED'`;
   const open = sql`${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
   /** ĐẾM ĐƠN, KHÔNG ĐẾM DÒNG: một đơn hai mã hàng vẫn là MỘT đơn của mỗi mã. */
@@ -648,7 +648,7 @@ async function spendByKey(period: Period, dimension: AdsDimension): Promise<Map<
       spend: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)`,
       impressions: sql<number>`coalesce(sum(${schema.adSpends.impressions}), 0)`,
       clicks: sql<number>`coalesce(sum(${schema.adSpends.clicks}), 0)`,
-      messages: sql<number>`coalesce(sum(${schema.adSpends.messages}), 0)`,
+      messages: sql<number>`coalesce(sum(${AD_MESSAGES}), 0)`,
     })
     .from(schema.adSpends)
     .where(spendPeriod(period.from, period.to))

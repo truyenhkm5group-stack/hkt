@@ -421,6 +421,7 @@ async function backtestUncached(daysBack: number): Promise<DecisionBacktest> {
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+    // Nhu cầu = KHÔNG huỷ, KHÔNG hoàn (tức chưa ngã ngũ + đã giao) — tập khác RETURNED/FINISHED, cố ý liệt kê.
     .where(sql`${o.insertedAt} < ${horizonEnd} and ${oi.isBonus} = false and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')`)
     .groupBy(oi.variantId);
 

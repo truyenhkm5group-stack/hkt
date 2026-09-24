@@ -125,6 +125,7 @@ export async function getRecoveryRates(): Promise<Map<CaseType, RecoveryRate>> {
            and n.kind in ${kinds}
            -- Đơn còn đang đi CHƯA ngã ngũ. Xếp nó vào "không cứu được" là kết tội sớm và kéo tỷ lệ
            -- xuống một cách giả tạo, đúng lúc người vận hành cần con số này nhất.
+           -- Tập ĐÃ CHỐT = đã ngã ngũ + HUỶ, rộng hơn FINISHED_OUTCOMES (không có huỷ) — cố ý liệt kê.
            and m.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')
          group by n.kind
       `),

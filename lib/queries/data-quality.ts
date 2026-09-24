@@ -7,6 +7,7 @@ import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { RETURN_RULE } from "@/lib/constants/returns";
 import { ORDER_COGS } from "@/lib/queries/cogs";
 import { HAS_CASH_PROOF, IS_PANCAKE_DECLARED_ONLY, IS_RETURN_NOT_RECEIVED, IS_STATUS_CONFLICT, IS_VTP_LOW_CASH, ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED, OUTCOME_FENCE, PRIMARY_ATTEMPT, VERIFIED_CASH } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
 
 const o = schema.orders;
@@ -88,7 +89,7 @@ export async function dataQualitySummary(period: Period) {
         .select({
           total: sql<number>`count(*) filter (where ${V} <> 'CANCELLED')`,
           delivered: sql<number>`count(*) filter (where ${V} = 'DELIVERED')`,
-          returned: sql<number>`count(*) filter (where ${V} in ('RETURNED','RETURNED_BY_RULE'))`,
+          returned: sql<number>`count(*) filter (where ${V} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
           inTransit: sql<number>`count(*) filter (where ${V} = 'IN_TRANSIT')`,
           unverified: sql<number>`count(*) filter (where ${V} = 'UNVERIFIED')`,
           notShipped: sql<number>`count(*) filter (where ${V} = 'NOT_SHIPPED')`,
@@ -107,7 +108,7 @@ export async function dataQualitySummary(period: Period) {
 
           mismatch: sql<number>`count(*) filter (where ${L} <> ${V})`,
           legacyDelivered: sql<number>`count(*) filter (where ${L} = 'DELIVERED')`,
-          legacyReturned: sql<number>`count(*) filter (where ${L} in ('RETURNED','RETURNED_BY_RULE'))`,
+          legacyReturned: sql<number>`count(*) filter (where ${L} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
           marketingRiskRevenue: sql<number>`coalesce(sum(${facts.declaredRevenue}) filter (where ${L} = 'DELIVERED' and ${V} <> 'DELIVERED'), 0)`,
         })
         .from(facts);

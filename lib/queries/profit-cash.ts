@@ -2,6 +2,7 @@ import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { COD_COLLECTABLE, ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 
@@ -76,6 +77,7 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
   const PREPAID_TOTAL = sql`(${o.prepaid} + ${o.transferMoney} + ${o.cash})`;
   /** Mốc tiền khách thực trả — xem chú thích `CashReport.cashIn`. */
   const prepaidPaidAt = o.insertedAt;
+  // Tập ĐÃ CHỐT = đã ngã ngũ + HUỶ, rộng hơn FINISHED_OUTCOMES_SQL (không có huỷ) — cố ý liệt kê.
   const FINAL_OUTCOMES = sql`('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')`;
   const b = schema.codBatches;
   const [[batchRows], [orderRows], [prepaidRows], [prepaidBalance], [purchases], [adRows], expenseRows, codWaiting, codTransit] = await Promise.all([
@@ -98,21 +100,21 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
     chayKhongJit(db, (tx) => tx
       .select({
         shippingDelivered: sql<number>`coalesce(sum(${FEE}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
-        shippingReturned: sql<number>`coalesce(sum(${FEE}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
-        returnFees: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+        shippingReturned: sql<number>`coalesce(sum(${FEE}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
+        returnFees: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
         delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-        returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`,
+        returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
       })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(and(sql`${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`, between(finishedAt, period.from, period.to)))),
+      .where(and(sql`${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTCOMES_SQL)})`, between(finishedAt, period.from, period.to)))),
     // TIỀN TRẢ TRƯỚC theo NGÀY TIỀN VỀ, không theo ngày kết thúc đơn. Đơn huỷ bị loại: Pancake vẫn
     // giữ số trả trước trên đơn huỷ nhưng không có chứng từ tiền đã về, nên không được tính là tiền vào.
     chayKhongJit(db, (tx) => tx
       .select({
         prepaid: sql<number>`coalesce(sum(${PREPAID_TOTAL}), 0)`,
         prepaidOrders: sql<number>`count(*)`,
-        prepaidOnReturned: sql<number>`coalesce(sum(${PREPAID_TOTAL}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+        prepaidOnReturned: sql<number>`coalesce(sum(${PREPAID_TOTAL}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
       })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))

@@ -3,6 +3,7 @@ import { chayKhongJit, getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { COD_OVERDUE_DAYS, type SettlementStatus } from "@/lib/constants/cod";
 import { ORDER_OUTCOME_FAST } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -55,7 +56,8 @@ const SO_CHUNG_TU = sql`
  */
 const TINH_TRANG = sql<SettlementStatus>`case
   when coalesce(shipments.cod_amount, 0) <= 0 then 'KHONG_PHAI_TRA'
-  when shipments.stage = 'DELIVERED' and ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE') then 'GIAO_NHUNG_HOAN'
+  when shipments.stage = 'DELIVERED' and ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}) then 'GIAO_NHUNG_HOAN'
+  -- Tập "không phải trả" = HOÀN + HUỶ — rộng hơn RETURNED_OUTCOMES, cố ý liệt kê ở đây.
   when ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE','CANCELLED') then 'KHONG_PHAI_TRA'
   -- CHƯA BIẾT gì về chiều giao hàng thì KHÔNG được ghi thành khoản Viettel Post đang nợ: đòi tiền
   -- một đơn mà ERP còn không chứng minh được đã gửi đi là tạo ra nợ ảo. Phải nằm TRƯỚC các nhánh

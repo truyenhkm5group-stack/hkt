@@ -5,6 +5,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { metricScope } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 
@@ -170,7 +171,7 @@ async function financialTruthUncached(period: Period): Promise<FinancialTruth> {
     .as("truth_facts");
 
   const isDelivered = sql`${facts.outcome} = 'DELIVERED'`;
-  const isReturned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const isReturned = sql`${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const isBooked = sql`${facts.outcome} <> 'CANCELLED'`;
 
   /*

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 
 const oi = schema.orderItems;
@@ -69,7 +70,7 @@ const OUT_IN_TRANSIT = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.stage} in ('PICKE
  * Gồm đơn hoàn (theo kết quả đơn) và đơn huỷ sau khi đã xuất — chủ shop yêu cầu xử lý như hàng hoàn.
  */
 const OUT_AWAITING_RETURN = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.returnReceivedAt} is null
-  and ((${OUTCOME_JOINED} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is null) or ${s.stage} in ('RETURNING','RETURNED','CANCELLED') or ${o.stage} in ('CANCELLED','DELETED'))
+  and ((${OUTCOME_JOINED} in (${sql.raw(RETURNED_OUTCOMES_SQL)}) and ${s.returnReceivedAt} is null) or ${s.stage} in ('RETURNING','RETURNED','CANCELLED') or ${o.stage} in ('CANCELLED','DELETED'))
   and not ${VTP_DESTROYED})`;
 
 /** Hàng hoàn kho ĐÃ xử lý (đã có phiếu tái nhập) — dùng để đối chiếu với số thực nhập, ra phần hụt. */
@@ -101,7 +102,7 @@ export function variantSalesSubquery(db: Db, onlyVariantIds?: string[]) {
       /** Giao thành công theo TIỀN (ORDER_OUTCOME) — chỉ để đối chiếu, KHÔNG dùng tính tồn. */
       delivered: sql<number>`coalesce(sum(${QTY}) filter (where ${OUTCOME_JOINED} = 'DELIVERED'), 0)`.as("sold_delivered"),
       /** Hoàn theo kết quả đơn — chỉ để đối chiếu. */
-      returned: sql<number>`coalesce(sum(${QTY}) filter (where ${OUTCOME_JOINED} in ('RETURNED','RETURNED_BY_RULE')), 0)`.as("sold_returned"),
+      returned: sql<number>`coalesce(sum(${QTY}) filter (where ${OUTCOME_JOINED} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`.as("sold_returned"),
     })
     .from(oi)
     .innerJoin(o, eq(o.id, oi.orderId))

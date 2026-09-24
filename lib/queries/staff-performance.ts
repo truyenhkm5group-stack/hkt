@@ -2,6 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
 import type { Period } from "@/lib/search-params";
 
@@ -104,7 +105,7 @@ async function staffPerformanceUncached(period: Period, field: AttributionField)
   const from = period.from ? sql`${o.insertedAt} >= ${period.from.toISOString()}::timestamptz` : sql`true`;
   const to = period.to ? sql`${o.insertedAt} <= ${period.to.toISOString()}::timestamptz` : sql`true`;
   const isDelivered = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`;
-  const isReturned = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
+  const isReturned = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
 
   /*
     ═══════════ TẮT JIT — CÙNG CHẨN ĐOÁN ĐÃ ĐO Ở `marketing-daily`, ĐO LẠI 22/09/2026 ═══════════
@@ -128,7 +129,7 @@ async function staffPerformanceUncached(period: Period, field: AttributionField)
       confirmed: sql<number>`count(distinct ${o.id}) filter (where ${o.stage} not in ('NEW','WAITING'))`,
       delivered: sql<number>`count(distinct ${o.id}) filter (where ${isDelivered})`,
       returned: sql<number>`count(distinct ${o.id}) filter (where ${isReturned})`,
-      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','UNKNOWN','NOT_SHIPPED'))`,
+      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
       bookedRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${o.stage} not in ('NEW','WAITING')), 0)`,
       deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${isDelivered}), 0)`,
       cogs: sql<number>`coalesce(sum(${o.cogs}) filter (where ${isDelivered} and ${o.cogs} is not null), 0)`,

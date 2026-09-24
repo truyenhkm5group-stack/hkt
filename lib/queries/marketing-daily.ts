@@ -11,10 +11,11 @@ import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
-import { spendPeriod } from "@/lib/queries/ads-roas";
+import { AD_MESSAGES, spendPeriod } from "@/lib/queries/ads-roas";
 import { metricScope } from "@/lib/queries/metrics";
 import { pnlFacts } from "@/lib/queries/reports";
 import { orderDeliveryRateSql, productDeliveryRates, rateCoverage, type ProductDeliveryRates } from "@/lib/queries/delivery-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { DeliveryRateSource } from "@/lib/constants/delivery-rate";
 import {
   MARKETING_BASIS_DEFAULT,
@@ -363,7 +364,7 @@ async function spendByDay(
       .select({
         day: vnDayCol(sql`${ads.spendDate}`),
         spend: sql<number>`coalesce(sum(${ads.spend}), 0)`,
-        messages: sql<number>`coalesce(sum(greatest(${ads.messages}, ${ads.leads})), 0)`,
+        messages: sql<number>`coalesce(sum(${AD_MESSAGES}), 0)`,
       })
       .from(ads)
       .where(marketingSpendScope(period, f))
@@ -471,7 +472,7 @@ async function productDayRows(db: Db, period: Period, basis: MarketingBasis, f: 
     .as("md_product_facts");
 
   const delivered = sql`${facts.outcome} = 'DELIVERED'`;
-  const returned = sql`${facts.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const returned = sql`${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const booked = sql`${facts.outcome} <> 'CANCELLED'`;
   const open = sql`${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
   const shipped = sql`${facts.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)})`;

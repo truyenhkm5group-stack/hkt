@@ -15,6 +15,7 @@ import { parseDeliveryRateOverride, resolveDeliveryRate, type DeliveryRateOverri
 import { getProjectedDeliveryMetrics, type BacktestSummary } from "@/lib/queries/projected-delivery";
 import { NO_ORDER_VALUE_FILTER, orderValueActive, orderValueKey, orderValueMatches, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
+import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ESTIMATED_COST_KEY, parseEstimatedCosts, type EstimatedCost, type EstimatedCostMap } from "@/lib/constants/estimated-cost";
 
 const o = schema.orders;
@@ -25,7 +26,7 @@ const p = schema.products;
 const ads = schema.adSpends;
 
 const NOT_CANCELLED = sql`${o.stage} not in ('CANCELLED','DELETED')`;
-const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
+const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
 
 /**
  * ═══════════ MỐC COHORT LÀ MỘT LỰA CHỌN CÓ TÊN, KHÔNG PHẢI MỘT HẰNG SỐ ═══════════
@@ -181,7 +182,7 @@ export async function productReturnHistory(windowDays: number): Promise<Map<stri
     tx
       .select({
         productId: sql<string>`coalesce(${pv.productId}, ${i.productId}, '')`,
-        finished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+        finished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTCOMES_SQL)}))`,
         returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
       })
       .from(i)

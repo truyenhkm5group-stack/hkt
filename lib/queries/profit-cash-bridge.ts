@@ -4,6 +4,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { getCashflowStatement } from "@/lib/queries/cashflow-statement";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -110,7 +111,9 @@ async function vonLuuDong(dauKy: Date | null, cuoiKy: Date | null) {
     .as("wc_facts");
 
   const daGiao = sql`${facts.outcome} = 'DELIVERED'`;
-  const chuaXong = sql`${facts.outcome} not in ('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')`;
+  // "Chưa xong" = chưa ngã ngũ: đọc đúng danh sách sinh ra từ `OUTCOME_GROUP`, không viết lại phần bù
+  // của nó bằng tay (thêm một kết quả kết thúc mới thì phần bù chép tay lặng lẽ đếm nó là đang chạy).
+  const chuaXong = sql`${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
   /** Tới hết mốc `at`; `null` nghĩa là không chặn (dùng cho kỳ "Toàn bộ"). */
   const den = (col: SQL, at: Date | null) => (at ? sql`${col} <= ${at}` : sql`true`);
 
