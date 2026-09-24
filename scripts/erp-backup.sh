@@ -15,6 +15,8 @@
 #   erp-backup.sh status                       in trạng thái — KHÔNG in một dòng dữ liệu nào
 #   erp-backup.sh restore-drill                khôi phục bản mới nhất vào container TẠM rồi đếm dòng
 #   erp-backup.sh install-cron                 cài /etc/cron.d/erp-backup (install-vps.sh gọi mỗi lần deploy)
+#   erp-backup.sh configure-offsite            dựng cấu hình Google Drive + crypt từ Secrets/Variables mà
+#                                              deploy truyền xuống (install-vps.sh gọi mỗi lần deploy)
 #
 # Trạng thái máy đọc được nằm ở $BACKUP_DIR/status/*.json. ERP mount thư mục đó CHỈ-ĐỌC và hiện
 # lên trang Kết nối dữ liệu + Phòng Tech (lib/queries/backup-status.ts) — thất bại phải lộ ra chỗ
@@ -53,6 +55,16 @@ LOCK_DIR="${ERP_LOCK_DIR:-/var/lock}"
 TEP_CRON="${ERP_CRON_FILE:-/etc/cron.d/erp-backup}"
 TEP_LOGROTATE="${ERP_LOGROTATE_FILE:-/etc/logrotate.d/erp-backup}"
 TEP_LOG="${ERP_BACKUP_LOG:-/var/log/erp-backup.log}"
+# Cấu hình nơi lưu ngoài máy (token Google Drive, mật khẩu crypt) — tệp RIÊNG, KHÔNG phải .env của ERP:
+# compose nạp .env vào môi trường container app/scheduler (`env_file`), tức khoá Drive và mật khẩu
+# giải mã mọi bản sao lưu sẽ nằm trong một tiến trình web không bao giờ cần tới chúng. Tệp này nằm
+# NGOÀI cây mã (/root/erp) để không lệnh git nào chạm tới, thư mục 700, tệp 600.
+TEP_NGOAI_MAY="${ERP_BACKUP_OFFSITE_ENV:-/root/.config/erp-backup/offsite.env}"
+# Tên hai remote rclone dựng từ Secrets: `gdrive` (Google Drive, gốc = thư mục chủ shop chọn) và
+# `gcrypt` (crypt bọc `gdrive:erp-backup`). Mọi bản đẩy đi qua `gcrypt:` — Drive chỉ thấy byte mã hoá.
+REMOTE_DRIVE="gdrive"
+REMOTE_CRYPT="gcrypt"
+THU_MUC_TREN_DRIVE="erp-backup"
 
 # Ổ khoá: DÙNG CHUNG với ops-vps.yml (xem khối "HÀNG ĐỢI NẰM TRÊN MÁY CHỦ" ở đầu tệp đó).
 #   FD 7  erp-backup.lock           chống chạy chồng giữa các lượt sao lưu — KHÔNG CHỜ (-n)
@@ -103,25 +115,55 @@ chuan_bi_thu_muc() {
   chmod 755 "$STATUS_DIR"
 }
 
-# Đọc cấu hình ngoài máy từ .env của ERP — CHỈ các khoá trong danh sách trắng, không `source` cả tệp
-# (.env chứa mọi secret của ERP; nạp hết vào môi trường của pg_dump/rclone là mở rộng bán kính vô cớ).
-# Biến đã có sẵn trong môi trường thì thắng.
-nap_cau_hinh() {
-  local tep="$ERP_DIR/.env" dong khoa gia_tri
+# Đọc cấu hình ngoài máy — CHỈ các khoá trong danh sách trắng, không `source` cả tệp (.env chứa mọi
+# secret của ERP; nạp hết vào môi trường của pg_dump/rclone là mở rộng bán kính vô cớ).
+# Thứ tự thắng: biến đã có sẵn trong môi trường → tệp ngoài máy do deploy dựng → .env (khai tay kiểu cũ).
+#
+# Khoá mang đuôi `_B64` được GIẢI MÃ base64 rồi nạp dưới tên bỏ đuôi, và bản thân khoá `_B64` không
+# bao giờ được export. Lý do: token OAuth là JSON (`"`, `{`, `/`, `+`, `=` …) — ghi thô vào một dòng
+# KEY=VALUE thì mỗi trình đọc (sed, dotenv, vòng đọc này) có một luật trích dẫn riêng, và một luật
+# lệch là một token hỏng im lặng. Base64 chỉ có [A-Za-z0-9+/=]: không ai phải trích dẫn gì.
+nap_tu_tep() { # $1=tệp
+  local tep="$1" dong khoa gia_tri
   [ -f "$tep" ] || return 0
   while IFS= read -r dong || [ -n "$dong" ]; do
+    dong="${dong%$'\r'}"
     case "$dong" in
       BACKUP_OFFSITE_REMOTE=* | RCLONE_CONFIG_*=*) ;;
       *) continue ;;
     esac
     khoa="${dong%%=*}"
     [[ "$khoa" =~ ^[A-Z0-9_]+$ ]] || continue
-    [ -z "${!khoa:-}" ] || continue
     gia_tri="${dong#*=}"
     gia_tri="${gia_tri#\"}"
     gia_tri="${gia_tri%\"}"
+    case "$khoa" in
+      *_B64)
+        khoa="${khoa%_B64}"
+        [ -z "${!khoa:-}" ] || continue
+        if ! gia_tri="$(printf '%s' "$gia_tri" | base64 -d 2>/dev/null)" || [ -z "$gia_tri" ]; then
+          loi "không giải mã được ${khoa}_B64 trong $tep — bỏ qua khoá này (không in giá trị)."
+          continue
+        fi
+        ;;
+      *) [ -z "${!khoa:-}" ] || continue ;;
+    esac
     export "$khoa=$gia_tri"
   done < "$tep"
+}
+
+nap_cau_hinh() {
+  nap_tu_tep "$TEP_NGOAI_MAY"
+  nap_tu_tep "$ERP_DIR/.env"
+}
+
+# Nối remote với đường con: `gcrypt:` + `daily` ⇒ `gcrypt:daily` (KHÔNG phải `gcrypt:/daily` — với
+# remote không kèm thư mục, dấu `/` đầu biến đường tương đối thành đường tuyệt đối ở vài backend).
+noi_duong() { # $1=remote $2=đường con
+  case "$1" in
+    *:) printf '%s%s' "$1" "$2" ;;
+    *) printf '%s/%s' "${1%/}" "$2" ;;
+  esac
 }
 
 # ═══════════════ KHOÁ ═══════════════
@@ -289,7 +331,7 @@ day_ngoai_may() { # $1=thư mục con $2...=tệp cục bộ
   fi
   for f in "$@"; do
     [ -f "$f" ] || continue
-    dich="${remote%/}/$sub/$(basename "$f")"
+    dich="$(noi_duong "$remote" "$sub/$(basename "$f")")"
     if ! timeout "$TRAN_LENH_GIAY" rclone copyto --retries 3 "$f" "$dich" 2>"$STATUS_DIR/.rclone.err"; then
       OFFSITE_STATE="FAILED"
       OFFSITE_REASON="rclone copyto lỗi cho $(basename "$f"): $(tail -n 1 "$STATUS_DIR/.rclone.err" 2>/dev/null || true)"
@@ -312,9 +354,11 @@ day_ngoai_may() { # $1=thư mục con $2...=tệp cục bộ
   OFFSITE_STATE="OK"
   OFFSITE_REASON=""
   # Dọn theo TUỔI, suy từ đúng hằng số giữ lại ở trên (+1 ngày đệm).
-  timeout 900 rclone delete "${remote%/}/daily" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
-  timeout 900 rclone delete "${remote%/}/weekly" --min-age "$((GIU_BAN_TUAN * 7 + 1))d" 2>/dev/null || true
-  timeout 900 rclone delete "${remote%/}/manual" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
+  # Google Drive: tệp xoá đi vào THÙNG RÁC (Drive tự dọn sau 30 ngày) — một lệnh xoá nhầm vẫn cứu được,
+  # đổi lại thùng rác chiếm thêm dung lượng (docs/backup-restore.md mục 5 có con số).
+  timeout 900 rclone delete "$(noi_duong "$remote" daily)" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
+  timeout 900 rclone delete "$(noi_duong "$remote" weekly)" --min-age "$((GIU_BAN_TUAN * 7 + 1))d" 2>/dev/null || true
+  timeout 900 rclone delete "$(noi_duong "$remote" manual)" --min-age "$((GIU_BAN_NGAY + 1))d" 2>/dev/null || true
 }
 
 # ═══════════════ DỮ LIỆU BOT CHAT ═══════════════
@@ -515,6 +559,26 @@ cmd_status() {
     echo "CHƯA CÓ BẢN SAO NGOÀI MÁY — chưa khai BACKUP_OFFSITE_REMOTE (xem docs/backup-restore.md, HUMAN GATE)."
   else
     echo "Remote: ${BACKUP_OFFSITE_REMOTE%%:*}: · rclone: $(command -v rclone >/dev/null 2>&1 && rclone version 2>/dev/null | head -n 1 || echo 'CHƯA CÀI')"
+    # Chỉ in thứ KHÔNG bí mật: thư mục Drive, có mã hoá hay không, có token hay không — không in giá trị.
+    if [ -n "${RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID:-}" ]; then
+      echo "Google Drive: thư mục $RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID · token: $([ -n "${RCLONE_CONFIG_GDRIVE_TOKEN:-}" ] && echo có || echo THIẾU) · mã hoá crypt: $([ -n "${RCLONE_CONFIG_GCRYPT_PASSWORD:-}" ] && echo có || echo KHÔNG) · cấu hình: $TEP_NGOAI_MAY"
+    fi
+    if command -v rclone >/dev/null 2>&1; then
+      local sub ds tep_loi
+      tep_loi="$(mktemp)"
+      for sub in daily weekly manual; do
+        # Tên tệp chỉ là mốc ngày giờ (crypt giải tên ở phía này) — không có dữ liệu nào trong đó.
+        if ds="$(timeout 120 rclone lsf --format "sp" --separator " " "$(noi_duong "$BACKUP_OFFSITE_REMOTE" "$sub")" 2>"$tep_loi")"; then
+          echo "ngoài máy $sub/: $(printf '%s' "$ds" | grep -c . || true) tệp (kích thước byte · tên)"
+          [ -z "$ds" ] || printf '%s\n' "$ds" | sed 's/^/  /'
+        elif grep -qi 'directory not found' "$tep_loi"; then
+          echo "ngoài máy $sub/: chưa có (thư mục tạo ở lượt đẩy đầu tiên vào đó)"
+        else
+          echo "ngoài máy $sub/: KHÔNG ĐỌC ĐƯỢC — $(tail -n 1 "$tep_loi")"
+        fi
+      done
+      rm -f "$tep_loi"
+    fi
   fi
 }
 
@@ -663,8 +727,112 @@ $PHUT_CRON * * * * root ERP_DIR=$ERP_DIR ERP_BACKUP_DIR=$BACKUP_DIR /bin/bash $E
   nap_cau_hinh
   if [ -n "${BACKUP_OFFSITE_REMOTE:-}" ] && ! command -v rclone >/dev/null 2>&1; then
     bao "đã khai BACKUP_OFFSITE_REMOTE — cài rclone"
-    if command -v apt-get >/dev/null 2>&1; then apt-get install -y -qq rclone || loi "cài rclone thất bại — bản ngoài máy sẽ báo FAILED"; fi
+    # Danh sách gói có thể cũ (máy chỉ `apt-get update` khi cài cron lần đầu): hỏng lần đầu thì cập
+    # nhật danh sách rồi thử lại, thay vì báo FAILED tới lần deploy sau.
+    if command -v apt-get >/dev/null 2>&1; then
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rclone \
+        || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rclone; } \
+        || loi "cài rclone thất bại — bản ngoài máy sẽ báo FAILED"
+    fi
   fi
+}
+
+# ═══════════════ LỆNH: configure-offsite — GOOGLE DRIVE + CRYPT TỪ SECRETS ═══════════════
+#
+# Deploy truyền xuống (deploy-vps.yml → install-vps.sh → đây), KHÔNG ai SSH vào gõ `rclone config`:
+#   RCLONE_GDRIVE_TOKEN       Secret   — JSON token do `rclone authorize "drive"` in ra
+#   RCLONE_CRYPT_PASSWORD     Secret   — mật khẩu crypt ĐÃ `rclone obscure`
+#   RCLONE_CRYPT_PASSWORD2    Secret   — (tuỳ chọn) salt, cũng đã obscure
+#   BACKUP_GDRIVE_FOLDER_ID   Variable — ID thư mục Drive chủ shop chọn (không bí mật, không ghi cứng
+#                                        vào mã: đổi thư mục không phải deploy mã)
+#
+# ĐỦ BA thứ bắt buộc ⇒ ghi lại NGUYÊN tệp $TEP_NGOAI_MAY (tạm → mv, 600). THIẾU một ⇒ KHÔNG ghi gì
+# mới, tệp cũ (nếu có) giữ nguyên, và nói rõ THIẾU CÁI GÌ. Đây là khoá lưu trữ, không phải công tắc
+# chi tiền: xoá nhầm một Secret không được làm mất đường sao lưu đang chạy.
+#
+# KHÔNG BAO GIỜ in giá trị token / mật khẩu — log Actions của kho PUBLIC ai cũng đọc được. Chỉ in độ dài.
+# Không bao giờ làm đổ deploy: cấu hình sai thì trang Kết nối dữ liệu vẫn báo đỏ/vàng ở mục Sao lưu.
+
+# Chuẩn hoá thứ chủ shop dán vào Secret thành đúng MỘT dòng JSON token. Chấp nhận: JSON trần; JSON
+# kèm hai dòng mũi tên "Paste the following… --->" / "<---End paste"; xuống dòng CRLF của Windows;
+# hoặc một khối base64 của JSON (rclone vài bản in dạng này). JSON không chứa được xuống dòng thô
+# trong chuỗi, nên bỏ CR/LF không bao giờ làm đổi nghĩa token. Trả 1 khi không thấy refresh_token.
+chuan_hoa_token() { # $1=giá trị Secret → in JSON một dòng
+  local s d
+  s="$(printf '%s' "$1" | tr -d '\r\n')"
+  if [[ "$s" != *"{"* ]]; then
+    d="$(printf '%s' "$s" | tr -d ' \t' | tr '_-' '/+')"
+    while [ $(( ${#d} % 4 )) -ne 0 ]; do d="$d="; done
+    s="$(printf '%s' "$d" | base64 -d 2>/dev/null | tr -d '\r\n' || true)"
+  fi
+  [[ "$s" == *"{"*"}"* ]] || return 1
+  s="{${s#*\{}"
+  s="${s%\}*}}"
+  [[ "$s" == *'"refresh_token"'* ]] || return 1
+  printf '%s' "$s"
+}
+
+cmd_configure_offsite() {
+  local token="${RCLONE_GDRIVE_TOKEN:-}" mk mk2 thu_muc thieu="" json b64 noi_dung cu tam thu_muc_tep
+  mk="$(printf '%s' "${RCLONE_CRYPT_PASSWORD:-}" | tr -d '\r\n\t ')"
+  mk2="$(printf '%s' "${RCLONE_CRYPT_PASSWORD2:-}" | tr -d '\r\n\t ')"
+  thu_muc="$(printf '%s' "${BACKUP_GDRIVE_FOLDER_ID:-}" | tr -d '\r\n\t ')"
+  [ -n "$token" ] || thieu="${thieu:+$thieu ·} RCLONE_GDRIVE_TOKEN (Secret)"
+  [ -n "$mk" ] || thieu="${thieu:+$thieu ·} RCLONE_CRYPT_PASSWORD (Secret)"
+  [ -n "$thu_muc" ] || thieu="${thieu:+$thieu ·} BACKUP_GDRIVE_FOLDER_ID (Variable)"
+
+  if [ -n "$thieu" ]; then
+    if [ -z "$token$mk$thu_muc" ]; then
+      bao "Google Drive: chưa khai Secret/Variable nào — không đổi cấu hình ngoài máy$( [ -f "$TEP_NGOAI_MAY" ] && printf ' (tệp hiện có giữ nguyên)' )."
+    else
+      printf '::warning::[sao-lưu] Google Drive: THIẾU%s — KHÔNG ghi cấu hình mới%s. Khai đủ cả ba rồi deploy lại (docs/backup-restore.md mục 5).\n' \
+        "$thieu" "$( [ -f "$TEP_NGOAI_MAY" ] && printf ', cấu hình cũ giữ nguyên' )"
+    fi
+    return 0
+  fi
+  if ! [[ "$thu_muc" =~ ^[A-Za-z0-9_-]{10,200}$ ]]; then
+    printf '::warning::[sao-lưu] Google Drive: BACKUP_GDRIVE_FOLDER_ID không giống một ID thư mục Drive (chỉ gồm chữ, số, - và _; lấy phần sau /folders/ trong đường dẫn) — KHÔNG ghi cấu hình mới.\n'
+    return 0
+  fi
+  if ! [[ "$mk" =~ ^[A-Za-z0-9_-]{22,}$ ]] || { [ -n "$mk2" ] && ! [[ "$mk2" =~ ^[A-Za-z0-9_-]{22,}$ ]]; }; then
+    printf '::warning::[sao-lưu] Google Drive: mật khẩu crypt không giống chuỗi đã `rclone obscure` (%s ký tự) — KHÔNG ghi cấu hình mới. Dán đúng chuỗi obscure, không dán mật khẩu gốc.\n' "${#mk}"
+    return 0
+  fi
+  if ! json="$(chuan_hoa_token "$token")"; then
+    printf '::warning::[sao-lưu] Google Drive: RCLONE_GDRIVE_TOKEN (%s ký tự) không chứa JSON token có refresh_token — KHÔNG ghi cấu hình mới. Dán đúng dòng {...} mà `rclone authorize "drive"` in ra.\n' "${#token}"
+    return 0
+  fi
+  b64="$(printf '%s' "$json" | base64 | tr -d '\r\n')"
+
+  noi_dung="# Sinh bởi scripts/erp-backup.sh configure-offsite ở mỗi lần deploy — ĐỪNG sửa tay, lần deploy sau ghi đè.
+# Nguồn: GitHub Secrets RCLONE_GDRIVE_TOKEN / RCLONE_CRYPT_PASSWORD[2] + Variable BACKUP_GDRIVE_FOLDER_ID.
+# Token lưu base64 (đuôi _B64) — erp-backup.sh giải mã lúc nạp. Xem docs/backup-restore.md.
+BACKUP_OFFSITE_REMOTE=$REMOTE_CRYPT:
+RCLONE_CONFIG_${REMOTE_DRIVE^^}_TYPE=drive
+RCLONE_CONFIG_${REMOTE_DRIVE^^}_SCOPE=drive
+RCLONE_CONFIG_${REMOTE_DRIVE^^}_ROOT_FOLDER_ID=$thu_muc
+RCLONE_CONFIG_${REMOTE_DRIVE^^}_TOKEN_B64=$b64
+RCLONE_CONFIG_${REMOTE_CRYPT^^}_TYPE=crypt
+RCLONE_CONFIG_${REMOTE_CRYPT^^}_REMOTE=$REMOTE_DRIVE:$THU_MUC_TREN_DRIVE
+RCLONE_CONFIG_${REMOTE_CRYPT^^}_PASSWORD=$mk"
+  [ -z "$mk2" ] || noi_dung="$noi_dung
+RCLONE_CONFIG_${REMOTE_CRYPT^^}_PASSWORD2=$mk2"
+  noi_dung="$noi_dung
+RCLONE_CONFIG_${REMOTE_CRYPT^^}_FILENAME_ENCRYPTION=standard"
+
+  thu_muc_tep="$(dirname "$TEP_NGOAI_MAY")"
+  mkdir -p "$thu_muc_tep"
+  chmod 700 "$thu_muc_tep"
+  cu="$(cat "$TEP_NGOAI_MAY" 2>/dev/null || true)"
+  if [ "$cu" = "$noi_dung" ]; then
+    bao "Google Drive: cấu hình không đổi ($TEP_NGOAI_MAY) — thư mục $thu_muc, remote $REMOTE_CRYPT: (crypt) → $REMOTE_DRIVE:$THU_MUC_TREN_DRIVE"
+    return 0
+  fi
+  tam="$TEP_NGOAI_MAY.tam.$$"
+  ( umask 077; printf '%s\n' "$noi_dung" > "$tam" )
+  chmod 600 "$tam"
+  mv -f "$tam" "$TEP_NGOAI_MAY"
+  bao "Google Drive: đã ghi $TEP_NGOAI_MAY (600) — thư mục $thu_muc, remote $REMOTE_CRYPT: (crypt) → $REMOTE_DRIVE:$THU_MUC_TREN_DRIVE · token ${#json} ký tự · mật khẩu crypt ${#mk} ký tự$( [ -z "$mk2" ] || printf ' · salt %s ký tự' "${#mk2}" ) (không in giá trị)"
 }
 
 main() {
@@ -684,7 +852,8 @@ main() {
     status) cmd_status ;;
     restore-drill) cmd_restore_drill ;;
     install-cron) cmd_install_cron ;;
-    *) echo "Dùng: $0 run [--trigger=ops|manual] | cron | status | restore-drill | install-cron" >&2; exit 2 ;;
+    configure-offsite) cmd_configure_offsite ;;
+    *) echo "Dùng: $0 run [--trigger=ops|manual] | cron | status | restore-drill | install-cron | configure-offsite" >&2; exit 2 ;;
   esac
 }
 
