@@ -295,7 +295,7 @@ npm run dev                     # http://localhost:3000
 npm run typecheck && npm run lint
 npm test                        # tests/sync-fixtures.test.ts trên PGlite — phải in "TẤT CẢ KIỂM THỬ ĐẠT"
 npm run build                   # production build (bắt buộc trước khi push nếu chạm client/server boundary)
-npm run db:generate             # tạo migration Drizzle sau khi sửa db/schema.ts (KHÔNG sửa tay SQL đã có)
+# KHÔNG chạy `npm run db:generate` (ảnh chụp drizzle chỉ tới 0032) — migration viết tay, xem AGENTS.md mục 4
 npm run db:migrate · npm run db:seed · npm run seed:demo · npm run scheduler · npm run sync -- <job>
 ```
 Docker local: `docker compose up` (xem README). Deploy: GitHub → Actions → **Deploy ERP to VPS** → Run workflow trên `main` (chỉ `workflow_dispatch`, ~7 phút). Vận hành từ xa: Actions → **Vận hành ERP trên VPS** (`ops-vps.yml`) với action `db-query` (SQL chỉ đọc, mỗi lần 1 câu lệnh — CTE không dùng được qua nhiều câu; cast `::text` khi so sánh enum), `run-job`, `set-setting`, `logs`, `backup`, `restart`, …
@@ -367,7 +367,7 @@ Mọi module trong bảng tính năng của `README.md`: Tổng quan · Đơn h�
 7. Kho / Tài chính tách nhóm menu; Chi phí vận hành và Quảng cáo là hai module riêng.
 8. Landing page: near-realtime bằng job 1 phút + refresh 30 s, không dùng Google API key.
 9. Không tự điền dữ liệu khách cũ vào đơn mới — chỉ gợi ý.
-10. Mọi thao tác VPS qua `ops-vps.yml`; `db-query` chỉ đọc; scripts lấy từ GitHub Contents API (không dùng raw CDN vì cache).
+10. Mọi thao tác VPS qua `ops-vps.yml`; `db-query` chỉ đọc (role `erp_ro`) và kết quả là hiện vật MÃ HOÁ, không in ra log — `docs/ops-doc-ket-qua.md`; scripts lấy từ GitHub Contents API (không dùng raw CDN vì cache).
 11. Không dùng tài khoản Facebook cá nhân của chủ shop (chỉ System User token).
 
 ## 15. Việc nên làm tiếp (ưu tiên giảm dần)
@@ -388,7 +388,7 @@ Mọi module trong bảng tính năng của `README.md`: Tổng quan · Đơn h�
 - `lib/constants/returns.ts::RETURN_RULE` — ngưỡng do chủ shop quy định.
 - `lib/integrations/viettelpost/statement.ts` — `expandSheetRange`, `legBaseCode` (regex lười), thứ tự `mapVtpStatusText`; `statement-db.ts` — thứ tự ghép leg trước, không hạ trạng thái COD.
 - `lib/integrations/pancake/webhook.ts` & `viettelpost` webhook — idempotent, không để dữ liệu cũ đè dữ liệu mới.
-- `db/schema.ts` + `drizzle/*.sql` — chỉ thêm migration mới bằng `npm run db:generate`; không sửa migration đã chạy trên production.
+- `db/schema.ts` + `drizzle/*.sql` — chỉ thêm migration mới, VIẾT TAY idempotent (không dùng `npm run db:generate`, xem AGENTS.md mục 4); không sửa migration đã chạy trên production.
 - `components/data-table/data-table.tsx` — dùng chung 30 bảng; sửa phải chạy `npm run build` và thử trên ít nhất một bảng gom nhóm và một bảng thường.
 - `.github/workflows/*.yml`, `scripts/bootstrap.sh`, `install-vps.sh` — chạm vào là ảnh hưởng deploy/production; YAML từng vỡ vì thụt lề.
 - `lib/auth/permissions.ts` — thay đổi làm mất quyền người dùng thật.

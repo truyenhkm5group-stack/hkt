@@ -70,8 +70,9 @@ export function testPayrollReconcileScript() {
     "hôm nay không gọi" là thứ chỉ đúng cho tới lần sửa sau.
 
     Nên chỗ dựa không phải phép quét, mà là `default_transaction_read_only=on` đặt ngay ở gói khởi
-    tạo kết nối: CHÍNH POSTGRES từ chối mọi INSERT/UPDATE/DELETE/DDL, bất kể mã nào chạy. Đây là
-    cùng cơ chế mà thao tác `db-query` của kho mã này vẫn dùng để tra production.
+    tạo kết nối: CHÍNH POSTGRES từ chối mọi INSERT/UPDATE/DELETE/DDL, bất kể mã nào chạy. (Thao tác
+    `db-query` đi xa hơn một bậc từ 24/09/2026: role `erp_ro` không có quyền ghi, nên cờ ấy chỉ còn là
+    lớp thứ hai — `scripts/ops-erp-ro-role.sql`.)
   */
   {
     // Cờ phải được bật TRƯỚC mọi import chạm tới `@/db` — đặt trong `main()` là quá muộn, bể kết
