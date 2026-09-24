@@ -270,7 +270,8 @@ async function dropBatch(db: Db, batchDay: string) {
 export async function testCreativeGenerate(db: Db) {
   const startedAt = new Date();
   const batchDay = shiftDay(vnDay(startedAt), 1);
-  const baseCfg = { ...DEFAULT_CREATIVE_CONFIG, batchSize: 5, extraCandidates: 1, exploreShare: 0.5 };
+  // Đường GỌI NGAY (hành vi trước 24/09/2026) — đường Batch có khối kiểm riêng: tests/creative-image-batch.test.ts.
+  const baseCfg = { ...DEFAULT_CREATIVE_CONFIG, batchSize: 5, extraCandidates: 1, exploreShare: 0.5, imageMode: "SYNC" as const };
   const w = batchWindow(batchDay, baseCfg);
   // 14:01 giờ VN của HÔM NAY — cùng ngày Việt Nam với `created_at` mà CSDL sắp ghi.
   const now = new Date(w.buildFrom.getTime() + 60_000);

@@ -11,7 +11,22 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { ProductSearch, productLabel } from "@/app/(dashboard)/marketing/creatives/product-search";
 import { saveCreativeConfig } from "@/lib/actions/creative-config";
-import { RULE_METRICS, RULE_METRIC_LABEL, normalizeCreativeConfig, type CreativeLoopConfig, type CreativeRule, type RuleOp } from "@/lib/constants/creative-loop";
+import {
+  IMAGE_MODES,
+  IMAGE_MODE_LABEL,
+  IMAGE_QUALITIES,
+  IMAGE_QUALITY_LABEL,
+  IMAGE_SIZES,
+  IMAGE_SIZE_LABEL,
+  RULE_METRICS,
+  RULE_METRIC_LABEL,
+  estimateImageUsd,
+  imageModelBatchSupport,
+  normalizeCreativeConfig,
+  type CreativeLoopConfig,
+  type CreativeRule,
+  type RuleOp,
+} from "@/lib/constants/creative-loop";
 import { formatNumber, formatVND } from "@/lib/format";
 import type { ProductOption } from "@/lib/queries/creative-sources";
 import { CONFIG_FIELD_LABEL, CONFIG_NUMERIC_FIELDS, numericBounds, validateCreativeConfigInput, type ClampNote, type ConfigNumericField } from "@/lib/validation/creative";
@@ -37,6 +52,8 @@ type Draft = {
   imageModel: string;
   imageSize: CreativeLoopConfig["imageSize"];
   imageQuality: CreativeLoopConfig["imageQuality"];
+  imageMode: CreativeLoopConfig["imageMode"];
+  fallbackImageQuality: CreativeLoopConfig["fallbackImageQuality"];
   focusProductIds: string[];
   nums: Record<ConfigNumericField, string>;
   killRules: RuleRow[];
@@ -65,6 +82,8 @@ function toDraft(c: CreativeLoopConfig): Draft {
     imageModel: c.imageModel,
     imageSize: c.imageSize,
     imageQuality: c.imageQuality,
+    imageMode: c.imageMode,
+    fallbackImageQuality: c.fallbackImageQuality,
     focusProductIds: c.focusProductIds,
     nums,
     killRules: c.killRules.map(ruleToRow),
@@ -94,6 +113,8 @@ function toPayload(d: Draft) {
     imageModel: d.imageModel,
     imageSize: d.imageSize,
     imageQuality: d.imageQuality,
+    imageMode: d.imageMode,
+    fallbackImageQuality: d.fallbackImageQuality,
   };
 }
 
@@ -108,6 +129,39 @@ function rowIssue(r: RuleRow): string | null {
   const m = numOrNull(r.minSpendVnd);
   if (m === null || !Number.isFinite(m) || m < 0) thieu.push("sàn chi (≥ 0)");
   return thieu.length ? `Thiếu ${thieu.join(", ")}` : "Dòng này không đọc được";
+}
+
+const usd = (n: number) => `${n.toLocaleString("vi-VN", { maximumFractionDigits: 3 })} USD`;
+
+/**
+ * Giá ƯỚC TÍNH theo đúng bản nháp đang gõ — đọc từ `estimateImageUsd` của hợp đồng, không gõ lại con số
+ * nào. Số ô một lô = số mẫu đăng + số sinh dư (đã kẹp như lúc lưu).
+ */
+function ImageCostEstimate({ draft, payload }: { draft: Draft; payload: Record<string, unknown> }) {
+  const c = normalizeCreativeConfig(payload).config;
+  const slots = c.batchSize + c.extraCandidates;
+  const one = estimateImageUsd(c.imageModel, c.imageQuality, c.imageSize, c.imageMode);
+  const sync = estimateImageUsd(c.imageModel, c.imageQuality, c.imageSize, "SYNC");
+  const rescue = estimateImageUsd(c.imageModel, c.fallbackImageQuality, c.imageSize, "SYNC");
+  const lot = Math.round(one * slots * 1000) / 1000;
+  const support = imageModelBatchSupport(draft.imageModel.trim());
+  return (
+    <div className="space-y-1 rounded-md border bg-muted/30 px-3 py-2 text-[12.5px]">
+      <p>
+        Ước tính một ảnh <b className="numeric">{usd(one)}</b>
+        {c.imageMode === "BATCH" ? <> qua Batch (gọi ngay {usd(sync)})</> : null} · một lô {slots} ảnh ≈ <b className={cn("numeric", lot > c.imageDailyCapUsd && "text-warning")}>{usd(lot)}</b> / trần ngày {usd(c.imageDailyCapUsd)}
+        {c.imageMode === "BATCH" ? <> · vẽ nốt ở chất lượng {IMAGE_QUALITY_LABEL[c.fallbackImageQuality].toLowerCase()}: {usd(rescue)} / ảnh</> : null}
+      </p>
+      {lot > c.imageDailyCapUsd ? <p className="text-warning">Một lô vượt trần ngày — máy chỉ vẽ số ô vừa trần, các ô còn lại thành “Sinh ảnh lỗi” kèm lý do.</p> : null}
+      {c.imageMode === "BATCH" && support === false ? (
+        <p className="text-warning">
+          Trang mô hình trên developers.openai.com (đọc 24/09/2026) ghi {draft.imageModel.trim()} KHÔNG hỗ trợ Batch. Máy vẫn gửi thử; OpenAI từ chối thì vẽ ngay bằng gọi ngay ở chất lượng{" "}
+          {IMAGE_QUALITY_LABEL[c.fallbackImageQuality].toLowerCase()}.
+        </p>
+      ) : null}
+      {support === null ? <p className="text-muted-foreground">Mô hình này chưa có trong bảng giá — ước tính theo mô hình đắt nhất của bảng (chặn sớm hơn, không muộn hơn).</p> : null}
+    </div>
+  );
 }
 
 const MONEY_FIELDS = new Set<ConfigNumericField>(["budgetPerVariantVnd"]);
@@ -389,33 +443,68 @@ export function ConfigForm({ config, products, canManage }: { config: CreativeLo
         </div>
       </Group>
 
-      <Group title="Sinh ảnh" hint="Giá mỗi ảnh là ƯỚC TÍNH theo bảng giá công bố, dùng để chặn trước khi gọi; chi phí thật ghi theo số OpenAI trả về. Ảnh của mẫu bị loại được giữ một thời gian cho người xem lại, rồi xoá điểm ảnh — gen và số đo vẫn giữ để máy học.">
+      <Group title="Sinh ảnh" hint="Giá mỗi ảnh là ƯỚC TÍNH theo bảng giá token công bố, dùng để chặn trước khi gọi; chi phí thật ghi theo số OpenAI trả về. Batch: cả lô gửi một lần lúc dựng lô, rẻ 50%; tới giờ vẽ nốt mà chưa xong thì máy huỷ phần còn lại và vẽ bằng gọi ngay ở chất lượng vẽ nốt, vẫn trong trần ngày. Ảnh của mẫu bị loại được giữ một thời gian cho người xem lại, rồi xoá điểm ảnh — gen và số đo vẫn giữ để máy học.">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <TextField id="cfg-model" label={CONFIG_FIELD_LABEL.imageModel} value={draft.imageModel} onChange={set("imageModel")} disabled={disabled} />
           <div className="space-y-1">
             <Label htmlFor="cfg-size" className="text-[12.5px]">
               {CONFIG_FIELD_LABEL.imageSize}
             </Label>
-            <select id="cfg-size" className={cn(box, "w-full")} value={draft.imageSize} disabled={disabled} onChange={(e) => set("imageSize")(e.target.value === "1024x1536" ? "1024x1536" : "1024x1024")}>
-              <option value="1024x1024">Vuông 1024×1024</option>
-              <option value="1024x1536">Dọc 1024×1536</option>
+            <select id="cfg-size" className={cn(box, "w-full")} value={draft.imageSize} disabled={disabled} onChange={(e) => set("imageSize")(IMAGE_SIZES.find((x) => x === e.target.value) ?? draft.imageSize)}>
+              {IMAGE_SIZES.map((x) => (
+                <option key={x} value={x}>
+                  {IMAGE_SIZE_LABEL[x]}
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1">
             <Label htmlFor="cfg-q" className="text-[12.5px]">
               {CONFIG_FIELD_LABEL.imageQuality}
             </Label>
-            <select id="cfg-q" className={cn(box, "w-full")} value={draft.imageQuality} disabled={disabled} onChange={(e) => set("imageQuality")(e.target.value === "low" || e.target.value === "high" ? e.target.value : "medium")}>
-              <option value="low">Thấp</option>
-              <option value="medium">Vừa</option>
-              <option value="high">Cao</option>
+            <select id="cfg-q" className={cn(box, "w-full")} value={draft.imageQuality} disabled={disabled} onChange={(e) => set("imageQuality")(IMAGE_QUALITIES.find((x) => x === e.target.value) ?? draft.imageQuality)}>
+              {IMAGE_QUALITIES.map((x) => (
+                <option key={x} value={x}>
+                  {IMAGE_QUALITY_LABEL[x]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="cfg-mode" className="text-[12.5px]">
+              {CONFIG_FIELD_LABEL.imageMode}
+            </Label>
+            <select id="cfg-mode" className={cn(box, "w-full")} value={draft.imageMode} disabled={disabled} onChange={(e) => set("imageMode")(IMAGE_MODES.find((x) => x === e.target.value) ?? draft.imageMode)}>
+              {IMAGE_MODES.map((x) => (
+                <option key={x} value={x}>
+                  {IMAGE_MODE_LABEL[x]}
+                </option>
+              ))}
             </select>
           </div>
         </div>
+        {draft.imageMode === "BATCH" ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {nf("batchFallbackHourVn", "giờ")}
+            <div className="space-y-1">
+              <Label htmlFor="cfg-fq" className="text-[12.5px]">
+                {CONFIG_FIELD_LABEL.fallbackImageQuality}
+              </Label>
+              <select id="cfg-fq" className={cn(box, "w-full")} value={draft.fallbackImageQuality} disabled={disabled} onChange={(e) => set("fallbackImageQuality")(IMAGE_QUALITIES.find((x) => x === e.target.value) ?? draft.fallbackImageQuality)}>
+                {IMAGE_QUALITIES.map((x) => (
+                  <option key={x} value={x}>
+                    {IMAGE_QUALITY_LABEL[x]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : null}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {nf("imageDailyCapUsd", "USD")}
           {nf("loserImageRetentionDays", "ngày")}
         </div>
+        <ImageCostEstimate draft={draft} payload={payload} />
       </Group>
 
       <Group title="Bộ luật chấm mẫu">

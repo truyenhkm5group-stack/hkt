@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { ConfigForm } from "@/app/(dashboard)/marketing/creatives/config-form";
 import { SectionCard } from "@/components/ui-bits";
-import { CREATIVE_WRITE_DENIAL_REASON } from "@/lib/constants/creative-loop";
+import { CREATIVE_WRITE_DENIAL_REASON, IMAGE_MODE_LABEL, IMAGE_QUALITY_LABEL, IMAGE_SIZE_LABEL, estimateImageUsd, imageModelBatchSupport } from "@/lib/constants/creative-loop";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
 import { creativeSourceCounts, listCreativeProductOptions, readCreativeConfig } from "@/lib/queries/creative-sources";
@@ -25,6 +25,13 @@ export async function ConfigTab({ canManage }: { canManage: boolean }) {
   const writeReason = adsWriteDisabledReason();
   const thieu = problems.filter((p) => p.field !== "rules");
   const luatHong = problems.filter((p) => p.field === "rules");
+  // Giá ước tính đọc từ hợp đồng (`estimateImageUsd`) — không gõ lại con số nào.
+  const oAnh = config.batchSize + config.extraCandidates;
+  const giaAnh = estimateImageUsd(config.imageModel, config.imageQuality, config.imageSize, config.imageMode);
+  const giaLo = Math.round(giaAnh * oAnh * 1000) / 1000;
+  const giaVeNot = estimateImageUsd(config.imageModel, config.fallbackImageQuality, config.imageSize);
+  const batchDoc = imageModelBatchSupport(config.imageModel);
+  const usd = (n: number) => `${n.toLocaleString("vi-VN", { maximumFractionDigits: 3 })} USD`;
 
   const checks: Check[] = [
     {
@@ -83,6 +90,20 @@ export async function ConfigTab({ canManage }: { canManage: boolean }) {
       level: config.keepRules.length ? "OK" : "WARN",
       label: "Luật giữ",
       detail: config.keepRules.length ? `${formatNumber(config.keepRules.length)} luật.` : "Chưa khai — máy không kết luận mẫu nào hứa hẹn hay bị loại (chỉ THẮNG khi vượt ngưỡng đơn).",
+    },
+    {
+      level: giaLo > config.imageDailyCapUsd || (config.imageMode === "BATCH" && batchDoc === false) ? "WARN" : "OK",
+      label: `Sinh ảnh: ${config.imageModel} · ${IMAGE_QUALITY_LABEL[config.imageQuality].toLowerCase()} · ${IMAGE_SIZE_LABEL[config.imageSize]} · ${IMAGE_MODE_LABEL[config.imageMode]}`,
+      detail: (
+        <>
+          Ước tính {usd(giaAnh)} / ảnh · một lô {formatNumber(oAnh)} ảnh ≈ {usd(giaLo)} / trần ngày {usd(config.imageDailyCapUsd)}
+          {config.imageMode === "BATCH" ? ` · Batch chưa xong lúc ${config.batchFallbackHourVn}:00 thì vẽ nốt ở chất lượng ${IMAGE_QUALITY_LABEL[config.fallbackImageQuality].toLowerCase()} (${usd(giaVeNot)} / ảnh).` : "."}
+          {config.imageMode === "BATCH" && batchDoc === false
+            ? ` Trang mô hình của OpenAI (đọc 24/09/2026) ghi ${config.imageModel} KHÔNG hỗ trợ Batch — máy vẫn gửi thử, OpenAI từ chối thì vẽ ngay bằng gọi ngay ở chất lượng vẽ nốt.`
+            : ""}
+          {giaLo > config.imageDailyCapUsd ? " Một lô vượt trần ngày — chỉ số ô vừa trần được vẽ." : ""}
+        </>
+      ),
     },
     {
       level: config.enabled ? "OK" : "BLOCK",
