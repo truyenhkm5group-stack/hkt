@@ -69,6 +69,20 @@ Client vá dòng bằng `CareState` trả về + `careViewOf` / `slaOf`; không 
 
 Xem `docs/vtp-capability-matrix.md`. Không bao giờ ghi thành công trước khi ĐVVC xác nhận bằng sự kiện.
 
+**Lệnh làm tay khép bằng webhook (24/09/2026).** Viettel Post không cấp API cho shop, nên gần như mọi
+lệnh là `MANUAL_REQUIRED` → `MANUAL_DONE`. `settleCarrierRequests` đóng dấu `confirmed_at` cho cả lệnh
+làm tay khi một sự kiện ĐVVC (leg-aware) mang chặng trong `CARRIER_ACTION_CONFIRM_STAGES`, xảy ra
+KHÔNG SỚM HƠN lúc lập lệnh. Ba điều cố ý:
+
+- `status` KHÔNG đổi: nó là lời khai của người, `confirmed_at` là chứng từ ĐVVC.
+- Lệnh lập trước bản này được **suy ra lúc đọc** (`derivedManualConfirmations`, chỉ sự kiện `VTP_*`),
+  không backfill cột.
+- Nhãn nói "ĐVVC đã sang chặng lệnh xin", không nói "làm tay thành công" — ĐVVC tự phục hồi được.
+
+Phán quyết hiển thị (`lib/constants/carrier-manual.ts`): đã xác minh · đang chờ · quá
+`MANUAL_CONFIRM_WAIT_HOURS` (đề xuất khởi điểm 24 giờ, chủ shop chưa chốt) · không xác minh được (lệnh
+sửa người nhận / COD không sinh chặng). Lệnh làm tay mang nội dung soạn sẵn để chép sang viettelpost.vn.
+
 ## 7. Báo cáo (`CareReport`)
 
 Backlog (theo lý do, theo người, dataGaps riêng) · phản hồi đầu · đóng trong SLA · mở lại · giao hụt →

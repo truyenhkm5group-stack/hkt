@@ -163,6 +163,7 @@ import { testBankPipeline } from "./bank-pipeline.test";
 import { testFinanceOpsPure, testFinanceOpsQueries } from "./finance-ops.test";
 import { testAutomationLadderPure, testAutomationLadderQueries, testFbTokenScopes } from "./automation-ladder.test";
 import { testPackingWavesPure, testPackingWavesQueries } from "./packing-waves.test";
+import { testCarrierManualDb, testCarrierManualPure } from "./carrier-manual.test";
 import { testActionWiring } from "./action-wiring.test";
 import {
   testKpiCohortUsesHandoffDate,
@@ -1869,6 +1870,8 @@ async function main() {
   await testVtpHealth(db);
   await testVtpCapability(db);
   await testCareWorkbench(db);
+  testCarrierManualPure();
+  await testCarrierManualDb(db);
   await testAiCopilot(db);
   testCodPaymentStatement();
   await testVtpImportLimits();

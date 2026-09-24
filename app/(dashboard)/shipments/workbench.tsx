@@ -102,6 +102,7 @@ import {
   type CareTimelineKind,
 } from "@/lib/constants/care-rounds";
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND, todayVN, vnShortStamp } from "@/lib/format";
+import { ManualRequestVerdict } from "./manual-request-verdict";
 import type { CareCase, CareState, CareWorkbench, CarrierRequestView } from "@/lib/queries/care-workbench";
 import { customerNameForDisplay } from "@/lib/constants/customer-name";
 import { VtpTrackingLink } from "@/components/vtp-tracking-link";
@@ -1609,12 +1610,13 @@ Nguồn: ${CARE_DATES[k].source}`}>
                 Đã làm tay
               </button>
             ) : null}
+            <ManualRequestVerdict req={req} className="mt-0.5" />
           </div>
         ) : null}
         {canManage ? (
           <Popover open={vtpOpen} onOpenChange={setVtpOpen}>
             <PopoverTrigger asChild>
-              <button type="button" className="inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10.5px] hover:bg-accent" title={c.carrierCapability === "API" ? "Gửi thẳng lên Viettel Post bằng tài khoản đối tác" : "Tài khoản API không sở hữu kiện này — ERP ghi yêu cầu và bạn làm tay trên viettelpost.vn"}>
+              <button type="button" className="inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10.5px] hover:bg-accent" title={c.carrierCapability === "API" ? "Gửi thẳng lên Viettel Post bằng tài khoản đối tác" : "Không gửi thẳng được — ERP ghi yêu cầu, soạn sẵn nội dung, bạn làm tay trên viettelpost.vn; webhook tự xác minh"}>
                 <Truck className="size-3" /> Xử lý
                 <span className={cn("rounded px-1", c.carrierCapability === "API" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300" : "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300")}>
                   {c.carrierCapability === "API" ? "API" : "làm tay"}
@@ -1625,7 +1627,7 @@ Nguồn: ${CARE_DATES[k].source}`}>
               <p className="text-[11px] text-muted-foreground">
                 {c.carrierCapability === "API"
                   ? "Yêu cầu gửi thẳng lên Viettel Post. Chỉ được coi là THÀNH CÔNG khi sự kiện hành trình xác nhận."
-                  : "Tài khoản API của ERP không sở hữu kiện này (vận đơn Pancake tạo). ERP ghi yêu cầu là PHẢI LÀM TAY; làm trên viettelpost.vn rồi bấm “Đã làm tay”."}
+                  : "Viettel Post không cấp API cho shop. ERP ghi yêu cầu là PHẢI LÀM TAY và soạn sẵn nội dung để chép; làm trên viettelpost.vn rồi bấm “Đã làm tay”. Webhook tự xác minh khi kiện sang chặng lệnh xin."}
               </p>
               <Textarea value={vtpNote} onChange={(e) => setVtpNote(e.target.value)} placeholder="Ghi chú cho bưu cục (tuỳ chọn)" className="min-h-[48px] text-[12px]" />
               {/*

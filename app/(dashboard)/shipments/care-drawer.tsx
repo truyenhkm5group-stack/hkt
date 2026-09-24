@@ -28,6 +28,7 @@ import { CARE_ACTION_KINDS, CARE_ACTION_LABEL, type CareActionKind } from "@/lib
 import { RETURN_REASON_LABEL, type ReturnReason } from "@/lib/constants/return-reason";
 import { getViettelPostTrackingUrl } from "@/lib/constants/viettelpost";
 import { formatDateTime, formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
+import { ManualRequestVerdict } from "./manual-request-verdict";
 import { cn } from "@/lib/utils";
 
 /**
@@ -743,7 +744,7 @@ export function CareDrawer({
                   ) : null}
                   {/* Lệnh gần nhất và ĐVVC trả lời gì — không có dòng này thì "vì sao 400" không tra lại được. */}
                   {data.carrierRequests.length ? (
-                    <p className="mt-2 text-[11.5px]">
+                    <div className="mt-2 text-[11.5px]">
                       <span className={cn("rounded px-1.5 py-px text-[10.5px] font-medium", CARRIER_REQUEST_TONE[data.carrierRequests[0].status as CarrierRequestStatus])}>
                         {CARRIER_ACTION_LABEL[data.carrierRequests[0].actionKey]}: {CARRIER_REQUEST_LABEL[data.carrierRequests[0].status as CarrierRequestStatus]}
                       </span>
@@ -752,7 +753,8 @@ export function CareDrawer({
                         · {data.carrierRequests[0].actor || "không rõ người"} · {formatDateTime(data.carrierRequests[0].at)}
                         {data.carrierRequests[0].error ? ` · ${data.carrierRequests[0].error}` : ""}
                       </span>
-                    </p>
+                      <ManualRequestVerdict req={data.carrierRequests[0]} className="mt-1" />
+                    </div>
                   ) : null}
                 </div>
               ) : null}

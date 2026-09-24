@@ -251,10 +251,10 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       },
       ACT: {
         status: "PARTIAL",
-        what: "`requestCarrierAction` gọi thật `order/UpdateOrder` của Viettel Post (phát tiếp · duyệt hoàn · gửi lại · huỷ · sửa người nhận), idempotent theo kiện + hành động + ngày.",
-        evidence: ["lib/care/service.ts", "lib/care/carrier-capabilities.ts"],
+        what: "`requestCarrierAction` gọi thật `order/UpdateOrder` khi có quyền; không có thì ghi lệnh LÀM TAY kèm nội dung soạn sẵn để chép sang viettelpost.vn. Vòng làm tay KHÉP BẰNG WEBHOOK: sự kiện ĐVVC đúng chặng · đúng chiều · sau lúc lập lệnh đóng dấu `confirmed_at` (lệnh cũ suy ra lúc đọc, không backfill); quá 24 giờ chưa thấy thì báo đi kiểm lại.",
+        evidence: ["lib/care/service.ts", "lib/care/carrier-capabilities.ts", "lib/care/carrier-requests.ts", "lib/constants/carrier-manual.ts"],
         missing:
-          "Viettel Post KHÔNG cấp API cho tài khoản shop — chỉ có webhook (chủ shop xác nhận 24/09/2026). Đo cùng ngày: tra cứu vận đơn trả HTTP 403, 2.815/2.873 vận đơn là `WEBHOOK_ONLY`; trước đó 11/09 là 565/565 `PERMISSION_MISSING`. Nên mọi lệnh phát tiếp · duyệt hoàn · sửa người nhận rơi về `MANUAL_REQUIRED`: làm tay trên viettelpost.vn, ERP ghi vết. Không tự động hoá đường web (AGENTS.md mục 5). Việc còn làm được ở phía ERP là SOẠN SẴN nội dung yêu cầu cho người làm tay, không phải gọi API.",
+          "Viettel Post KHÔNG cấp API cho tài khoản shop — chỉ có webhook (chủ shop xác nhận 24/09/2026). Đo cùng ngày: tra cứu vận đơn trả HTTP 403, 2.815/2.873 vận đơn là `WEBHOOK_ONLY`; trước đó 11/09 là 565/565 `PERMISSION_MISSING`. Nên mọi lệnh phát tiếp · duyệt hoàn · sửa người nhận rơi về `MANUAL_REQUIRED`: làm tay trên viettelpost.vn, ERP ghi vết. Không tự động hoá đường web (AGENTS.md mục 5), nên bước BẤM vẫn là của người. Phía ERP đã soạn sẵn nội dung và dùng webhook để xác minh; lệnh sửa người nhận / COD không sinh chặng nào nên webhook KHÔNG xác minh được — vẫn phải kiểm trên web.",
       },
     },
   },
