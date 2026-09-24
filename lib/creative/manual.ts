@@ -22,13 +22,27 @@ import { batchWindow } from "@/lib/creative/schedule";
  * hàng thì đơn không nối được về sản phẩm.
  */
 
+const OPEN_STATUSES: readonly string[] = ["PLANNED", "PENDING_APPROVAL"];
+
 /**
- * Lô gần nhất CÒN HẠN DUYỆT: hôm nay nếu chưa qua hạn duyệt của lô hôm nay, không thì ngày mai.
- * Hàm thuần — không đọc đồng hồ ngoài `now`.
+ * Lô gần nhất CÒN NHẬN MẪU: hôm nay nếu chưa qua hạn duyệt của lô hôm nay VÀ lô hôm nay còn mở (chưa có,
+ * đang dựng hoặc đang chờ duyệt), không thì ngày mai. Hàm thuần — không đọc đồng hồ ngoài `now`.
+ *
+ * `todayStatus` là trạng thái lô HÔM NAY (`null` = chưa có lô). Thiếu vế này thì 02:19 sáng, lô hôm nay đã
+ * DUYỆT, nút "Đưa vào lô" vẫn trỏ vào lô hôm nay rồi báo "chỉ thêm được mẫu vào lô đang dựng hoặc đang chờ
+ * duyệt" — người bấm không có đường nào đi tiếp (chủ shop gặp 25/09/2026). Lô đã duyệt thì bài mới sang
+ * lô ngày mai, không mở lại lô đã duyệt: mở lại là huỷ phiếu duyệt của những bài người đã xem xong.
  */
-export function manualTargetDay(now: Date, cfg: Pick<CreativeLoopConfig, "startHourVn" | "testDays" | "approvalLeadMinutes" | "genHourVn">): string {
+export function manualTargetDay(now: Date, cfg: Pick<CreativeLoopConfig, "startHourVn" | "testDays" | "approvalLeadMinutes" | "genHourVn">, todayStatus: string | null = null): string {
   const today = vnDay(now);
-  return now < batchWindow(today, cfg).approvalDeadline ? today : shiftDay(today, 1);
+  const todayOpen = todayStatus === null || OPEN_STATUSES.includes(todayStatus);
+  return todayOpen && now < batchWindow(today, cfg).approvalDeadline ? today : shiftDay(today, 1);
+}
+
+/** `manualTargetDay` với trạng thái lô hôm nay đọc từ CSDL — đường dùng chung của đường ghi và màn hình. */
+export async function resolveManualTargetDay(db: Db, now: Date, cfg: Pick<CreativeLoopConfig, "startHourVn" | "testDays" | "approvalLeadMinutes" | "genHourVn">): Promise<string> {
+  const [row] = await db.select({ status: schema.creativeBatches.status }).from(schema.creativeBatches).where(eq(schema.creativeBatches.batchDay, vnDay(now))).limit(1);
+  return manualTargetDay(now, cfg, row?.status ?? null);
 }
 
 /**
@@ -53,8 +67,6 @@ export type ManualVariantInput = { productId: string; genes: Genes; primaryText:
 export type ManualActor = { id: string; name: string };
 
 export type AddManualResult = { ok: true; variantId: string; batchId: string; batchDay: string; slot: number; createdBatch: boolean } | { ok: false; error: string };
-
-const OPEN_STATUSES: readonly string[] = ["PLANNED", "PENDING_APPROVAL"];
 
 type BatchRow = typeof schema.creativeBatches.$inferSelect;
 type VariantInsert = typeof schema.creativeVariants.$inferInsert;
@@ -82,7 +94,7 @@ export type ManualVariantRow = {
  * mẫu tự làm → cấp ô 1001+ → chèn mẫu `GENERATED`. Trả `{ ok: false, error }` cho lỗi nghiệp vụ — không ném.
  */
 export async function insertManualVariant(db: Db, row: ManualVariantRow, cfg: CreativeLoopConfig, actor: ManualActor, now: Date): Promise<AddManualResult> {
-  const day = manualTargetDay(now, cfg);
+  const day = await resolveManualTargetDay(db, now, cfg);
   const w = batchWindow(day, cfg);
   const b = schema.creativeBatches;
   const v = schema.creativeVariants;

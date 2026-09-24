@@ -24,7 +24,7 @@ import {
 } from "@/lib/constants/creative-loop";
 import { CAPTION_FALLBACK_PREFIX } from "@/lib/creative/caption";
 import { describeRule } from "@/lib/creative/judge";
-import { manualTargetDay, publishOrder } from "@/lib/creative/manual";
+import { publishOrder, resolveManualTargetDay } from "@/lib/creative/manual";
 import { batchWindow } from "@/lib/creative/schedule";
 import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
 import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
@@ -500,7 +500,7 @@ export async function ApproveTab({ pending, batchId, canApprove, canEdit }: { pe
     pending ? fanpageDisplayName(db, pending.config.pageId) : Promise.resolve(null),
   ]);
   // Lô mà mẫu tự làm sẽ vào: lô gần nhất CÒN hạn duyệt — cùng hàm với đường ghi (`lib/creative/manual.ts`).
-  const manualDay = manualTargetDay(now, current.config);
+  const manualDay = await resolveManualTargetDay(db, now, current.config);
   const manualDeadline = batchWindow(manualDay, current.config).approvalDeadline;
 
   return (
