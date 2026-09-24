@@ -31,6 +31,7 @@ import { approvalDigest, type ApprovalContent } from "@/lib/creative/approval";
 import { sha256Hex } from "@/lib/creative/images";
 import { describeRule } from "@/lib/creative/judge";
 import { buildObjectStorySpec } from "@/lib/creative/story-spec";
+import { publishOrder } from "@/lib/creative/manual";
 
 /**
  * ═══════════ ĐĂNG LÔ ĐÃ DUYỆT · TẮT THEO LUẬT — BÀN TAY CỦA VÒNG MẪU ═══════════
@@ -280,7 +281,8 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
     logAction(exec, { ...x, actionDay: b.batchDay, batchId: b.id, actor: machine, mode });
 
   const variants = await loadVariants(db, b.id);
-  const pending = variants.filter((v) => v.status === "GENERATED");
+  // Mẫu TỰ LÀM đăng trước ô máy lập — trần số mẫu cắt ở cuối danh sách (`publishOrder`).
+  const pending = publishOrder(variants.filter((v) => v.status === "GENERATED"));
 
   /*
     QUÁ GIỜ CHẠY THÌ KHÔNG ĐĂNG, VÀ LÔ PHẢI RỜI TRẠNG THÁI "ĐÃ DUYỆT".

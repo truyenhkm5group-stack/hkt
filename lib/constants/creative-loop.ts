@@ -223,7 +223,20 @@ export const VARIANT_STATUS_LABEL: Record<VariantStatus, string> = {
   PUBLISH_FAILED: "Đăng lỗi",
 };
 
-export type SlotMode = "EXPLOIT" | "EXPLORE";
+/**
+ * `EXPLOIT` · `EXPLORE` — ô do máy lập (`planBatch`).
+ * `MANUAL`  — mẫu NGƯỜI tự làm (vd vẽ trên web ChatGPT/Grok) rồi tải vào lô: không qua máy viết và máy
+ *             sinh ảnh, nhưng đi qua ĐÚNG cổng duyệt · đăng · chấm · học như mẫu máy làm.
+ */
+export type SlotMode = "EXPLOIT" | "EXPLORE" | "MANUAL";
+
+export const SLOT_MODE_LABEL: Record<SlotMode, string> = { EXPLOIT: "Khai thác", EXPLORE: "Thăm dò", MANUAL: "Tự làm" };
+
+/**
+ * Ô của mẫu tự làm đánh số từ đây (1001, 1002…), tách hẳn khỏi dải ô máy lập (1…13): hai đường ghi
+ * vào cùng một lô không bao giờ tranh nhau một số ô (khoá `(batch_id, slot)`).
+ */
+export const MANUAL_SLOT_BASE = 1000;
 
 // ───────────────────────────── LUẬT CHẤM ─────────────────────────────
 

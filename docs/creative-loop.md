@@ -116,6 +116,21 @@ Lập lô: 60% ô **khai thác** (biến thể của mẫu thắng/hứa hẹn, 
 nên chiến thắng), 40% ô **thăm dò** (nguồn cảm hứng ít dùng nhất, gen thiếu chọn bằng lấy mẫu Thompson
 — giá trị chưa thử tự được thử, giá trị đã thua nhiều lần tự bị bỏ, không cần xoá dữ liệu).
 
+## 5b. Mẫu tự làm (chủ shop yêu cầu 24/09/2026)
+
+Chủ shop vẽ mẫu trên web ChatGPT / Grok (gói tháng, không có API cho máy) và tải vào lô:
+
+- Vào **lô gần nhất còn hạn duyệt** (`manualTargetDay`): trước 5:30 là lô hôm nay, sau đó là lô ngày mai.
+- Lô chưa có ⇒ dựng sẵn "Chờ duyệt" (`plan.manualSeed`). Tới 14:00 máy chỉ lập **phần còn thiếu**:
+  `batchSize + extraCandidates − số mẫu tự làm`; ô máy đánh số 1…n, ô tự làm 1001+.
+- **Đăng trước** ô máy lập (`publishOrder`); trần 10 mẫu/lô không đổi — mẫu tự làm chiếm chỗ ô máy.
+- Không qua máy viết / máy vẽ. Bắt buộc mã hàng + sáu gen (không có gen thì máy không học được gì từ mẫu).
+- Câu chữ ghi giá khác giá ERP ⇒ cảnh báo, không chặn. Người tải được quy kết bằng khoá tài khoản (mục 34).
+- Vẫn qua MỘT lượt duyệt lô; thêm mẫu sau khi mở hộp duyệt làm phiếu cũ mất hiệu lực (digest đổi).
+
+Tệp: `lib/creative/manual.ts` (đường ghi duy nhất) · `lib/actions/creative-manual.ts` · form ở tab Duyệt lô ·
+`drizzle/0118_creative_manual_variants.sql` · `tests/creative-manual.test.ts`.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |

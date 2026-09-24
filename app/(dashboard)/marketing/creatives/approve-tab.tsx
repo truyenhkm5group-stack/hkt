@@ -2,6 +2,7 @@ import Link from "next/link";
 import { CalendarClock, History, ShieldAlert } from "lucide-react";
 import { ApproveBatchButton, RejectBatchButton, RejectVariantButton } from "@/app/(dashboard)/marketing/creatives/batch-actions";
 import { Countdown, ExpandText } from "@/app/(dashboard)/marketing/creatives/creative-bits";
+import { ManualForm } from "@/app/(dashboard)/marketing/creatives/manual-form";
 import { GeneChips, ModeChip, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { StatStrip } from "@/components/stat-tile";
 import { DescriptionList, EmptyState, SectionCard } from "@/components/ui-bits";
@@ -18,6 +19,9 @@ import {
   type VariantStatus,
 } from "@/lib/constants/creative-loop";
 import { describeRule } from "@/lib/creative/judge";
+import { manualTargetDay } from "@/lib/creative/manual";
+import { batchWindow } from "@/lib/creative/schedule";
+import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
 import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
 import { formatDate, formatDateTime, formatNumber, formatVND, vnShortStamp } from "@/lib/format";
 import { getBatchDetail, listRecentBatches, readCurrentCreativeConfig, type BatchDetail, type BatchSummary, type PendingBatch, type VariantCard } from "@/lib/queries/creative-loop";
@@ -387,10 +391,28 @@ function BatchDetailBlock({ d }: { d: BatchDetail }) {
 export async function ApproveTab({ pending, batchId, canApprove, canEdit }: { pending: PendingBatch | null; batchId: string | null; canApprove: boolean; canEdit: boolean }) {
   const db = await getDb();
   const now = new Date();
-  const [recent, detail, current] = await Promise.all([listRecentBatches(db, 14), batchId ? getBatchDetail(db, batchId, now) : Promise.resolve(null), pending ? Promise.resolve(null) : readCurrentCreativeConfig(db)]);
+  const [recent, detail, current, products] = await Promise.all([
+    listRecentBatches(db, 14),
+    batchId ? getBatchDetail(db, batchId, now) : Promise.resolve(null),
+    readCurrentCreativeConfig(db),
+    canEdit ? listCreativeProductOptions() : Promise.resolve([]),
+  ]);
+  // Lô mà mẫu tự làm sẽ vào: lô gần nhất CÒN hạn duyệt — cùng hàm với đường ghi (`lib/creative/manual.ts`).
+  const manualDay = manualTargetDay(now, current.config);
+  const manualDeadline = batchWindow(manualDay, current.config).approvalDeadline;
 
   return (
     <div className="space-y-4">
+      {canEdit ? (
+        <SectionCard
+          title="Mẫu tự làm"
+          description={`Mẫu anh/chị tự vẽ (ChatGPT, Grok trên web…) vào lô ${manualDay} — hạn duyệt ${vnShortStamp(manualDeadline)}. Được đăng trước mẫu máy vẽ, và vẫn qua lượt duyệt lô.`}
+          actions={<ManualForm products={products} targetDay={manualDay} deadlineLabel={vnShortStamp(manualDeadline)} />}
+          padded={false}
+        >
+          <span className="sr-only">Tải mẫu tự làm vào lô gần nhất còn hạn duyệt</span>
+        </SectionCard>
+      ) : null}
       {pending ? (
         <PendingBlock pending={pending} now={now} canApprove={canApprove} canEdit={canEdit} />
       ) : (
@@ -399,11 +421,9 @@ export async function ApproveTab({ pending, batchId, canApprove, canEdit }: { pe
             icon={CalendarClock}
             title="Không có lô nào chờ duyệt"
             description={
-              current
-                ? current.config.enabled
-                  ? `Máy dựng lô cho ngày mai lúc ${current.config.genHourVn}:00 (giờ Việt Nam) và báo khi lô sẵn sàng. Hạn duyệt là ${current.config.approvalLeadMinutes} phút trước giờ chạy ${current.config.startHourVn}:00.`
-                  : "Vòng mẫu đang TẮT trong cấu hình — máy không dựng lô mới. Bật ở tab Cấu hình & luật."
-                : undefined
+              current.config.enabled
+                ? `Máy dựng lô cho ngày mai lúc ${current.config.genHourVn}:00 (giờ Việt Nam) và báo khi lô sẵn sàng. Hạn duyệt là ${current.config.approvalLeadMinutes} phút trước giờ chạy ${current.config.startHourVn}:00.`
+                : "Vòng mẫu đang TẮT trong cấu hình — máy không dựng lô mới. Bật ở tab Cấu hình & luật."
             }
           />
         </SectionCard>

@@ -1,5 +1,5 @@
 import { ImageOff } from "lucide-react";
-import { GENE_KEYS, GENE_LABEL, GENE_VALUE_LABEL, type GeneKey } from "@/lib/constants/creative-loop";
+import { GENE_KEYS, GENE_LABEL, GENE_VALUE_LABEL, SLOT_MODE_LABEL, type GeneKey, type SlotMode } from "@/lib/constants/creative-loop";
 import { cn } from "@/lib/utils";
 
 /**
@@ -39,10 +39,10 @@ export function GeneChips({ genes, mutated, className }: { genes: Record<string,
   );
 }
 
-export const MODE_LABEL = { EXPLOIT: "Khai thác", EXPLORE: "Thăm dò" } as const;
+export const MODE_LABEL = SLOT_MODE_LABEL;
 
 /** Chế độ ô + câu "vì sao" máy chọn ô này (hover). */
-export function ModeChip({ mode, why }: { mode: "EXPLOIT" | "EXPLORE"; why: string }) {
+export function ModeChip({ mode, why }: { mode: SlotMode; why: string }) {
   return (
     <span className="rounded bg-background/90 px-1.5 py-0.5 text-[10.5px] font-semibold" title={why || undefined}>
       {MODE_LABEL[mode]}
