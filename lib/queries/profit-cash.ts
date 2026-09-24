@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { COD_COLLECTABLE, ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import type { Period } from "@/lib/search-params";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
@@ -75,7 +75,9 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
       })
       .from(b)
       .where(between(b.receivedAt, period.from, period.to)),
-    db
+    // TẮT JIT (ba câu kết quả đơn dưới đây): ORDER_OUTCOME_FAST ở cả cột lẫn WHERE, câu số dư quét
+    // TOÀN BỘ đơn tới cuối kỳ — họ câu đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+    chayKhongJit(db, (tx) => tx
       .select({
         shippingDelivered: sql<number>`coalesce(sum(${FEE}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
         shippingReturned: sql<number>`coalesce(sum(${FEE}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
@@ -85,10 +87,10 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
       })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(and(sql`${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`, between(finishedAt, period.from, period.to))),
+      .where(and(sql`${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`, between(finishedAt, period.from, period.to)))),
     // TIỀN TRẢ TRƯỚC theo NGÀY TIỀN VỀ, không theo ngày kết thúc đơn. Đơn huỷ bị loại: Pancake vẫn
     // giữ số trả trước trên đơn huỷ nhưng không có chứng từ tiền đã về, nên không được tính là tiền vào.
-    db
+    chayKhongJit(db, (tx) => tx
       .select({
         prepaid: sql<number>`coalesce(sum(${PREPAID_TOTAL}), 0)`,
         prepaidOrders: sql<number>`count(*)`,
@@ -96,13 +98,13 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
       })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(and(sql`${PREPAID_TOTAL} > 0`, sql`${ORDER_OUTCOME_FAST} <> 'CANCELLED'`, between(prepaidPaidAt, period.from, period.to))),
+      .where(and(sql`${PREPAID_TOTAL} > 0`, sql`${ORDER_OUTCOME_FAST} <> 'CANCELLED'`, between(prepaidPaidAt, period.from, period.to)))),
     // SỐ DƯ TRẢ TRƯỚC tính tới cuối kỳ: tiền đã về của đơn chưa kết thúc.
-    db
+    chayKhongJit(db, (tx) => tx
       .select({ amount: sql<number>`coalesce(sum(${PREPAID_TOTAL}), 0)`, count: sql<number>`count(*)` })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(and(sql`${PREPAID_TOTAL} > 0`, sql`${ORDER_OUTCOME_FAST} not in ${FINAL_OUTCOMES}`, between(prepaidPaidAt, null, period.to))),
+      .where(and(sql`${PREPAID_TOTAL} > 0`, sql`${ORDER_OUTCOME_FAST} not in ${FINAL_OUTCOMES}`, between(prepaidPaidAt, null, period.to)))),
     db
       .select({ amount: sql<number>`coalesce(sum(${schema.stockReceipts.totalCost}), 0)`, count: sql<number>`count(*)` })
       .from(schema.stockReceipts)

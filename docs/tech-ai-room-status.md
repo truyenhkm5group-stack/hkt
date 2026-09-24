@@ -444,6 +444,10 @@ khúc 4 (việc tự đi tiếp) vẫn CHƯA từng chạy** — không được
 KHÔNG tự sửa khi chủ shop vắng mặt: nó chạm truy vấn tiền, phải đối chiếu trước/sau trên production
 (mục 6.5).
 
+**24/09/2026 — chủ shop đã quyết LÀM.** Nhánh `claude/trang-cham-jit`: bốn hàm có `memo()` 120 s
+(khoá: kỳ; bảng nhân sự thêm vai), hai khối `conversion-funnel` tắt JIT. Lần mở đầu vẫn là chi phí
+thật — số trước/sau chờ lượt đo sau deploy, lệnh ở docs/perf/vong-va-2026-09-24.md.
+
 ---
 ## NEXT
 
