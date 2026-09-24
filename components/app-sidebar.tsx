@@ -88,6 +88,7 @@ const MODULE_ICON: Record<ModuleHref, typeof LayoutDashboard> = {
   "/landing": FileSpreadsheet,
   "/customers": Users,
   "/outreach": HeartHandshake,
+  "/chatbot": Bot,
   "/ads": Megaphone,
   "/ideas": Lightbulb,
   "/marketing/creatives": Images,

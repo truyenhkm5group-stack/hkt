@@ -115,6 +115,13 @@ export const NAV_MODULES = [
     permission: "outreach:view",
     why: "Nhắn lại cho khách cũ là bán hàng, dù nó chạy bằng chiến dịch. Marketing mua khách MỚI; đây là khách đã có.",
   },
+  {
+    href: "/chatbot",
+    label: "Bot chat bán hàng",
+    zone: "SALES",
+    permission: "cs:config",
+    why: "Bot trả lời và chốt đơn THAY nhân viên bán hàng trên fanpage — cài đặt của nó là kịch bản bán hàng của phòng này.",
+  },
 
   // ───────────────── MARKETING ─────────────────
   {

@@ -18,6 +18,8 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      // Bot chat: dự án Node thuần riêng (ESM, không TS), có bộ selftest riêng — `npm run selftest` trong chatbot/.
+      "chatbot/**",
     ],
   },
 ];

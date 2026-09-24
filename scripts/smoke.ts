@@ -167,6 +167,7 @@ const ROUTES = [
   // không có chỗ nào kiểm được trên bản chạy thật.
   "/cs?view=theo-case",
   "/outreach",
+  "/chatbot",
   "/landing",
   "/ideas",
   "/marketing/creatives",

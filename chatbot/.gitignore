@@ -1,0 +1,9 @@
+# Khoa that va du lieu van hanh KHONG BAO GIO vao kho (kho public).
+.env
+*.env
+!.env.example
+data/
+node_modules/
+dist/
+out/
+desktop/

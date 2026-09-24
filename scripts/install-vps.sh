@@ -197,6 +197,15 @@ if grep -qE "^ERP_BRANCH_NAME=" .env; then sed -i -E "s|^ERP_BRANCH_NAME=.*|ERP_
 ' "$ERP_COMMIT_REF" >> .env; fi
 say "Phiên bản triển khai: $ERP_COMMIT_REF @ $ERP_COMMIT_SHA"
 
+# Bot chat (container erp-chatbot): khoá nội bộ ERP ↔ bot sinh MỘT lần trên máy, không đi qua GitHub.
+# Có rồi thì giữ nguyên — đổi khoá giữa chừng làm trang Bot chat mất kết nối tới bot đang chạy.
+grep -qE "^CHATBOT_ADMIN_TOKEN=" .env || printf 'CHATBOT_ADMIN_TOKEN="%s"\n' "$(rand 24)" >> .env
+# Phiên bản mã bot = mã cây thư mục chatbot/: chỉ khi nó đổi thì compose mới dựng lại container bot.
+# Ghi vào .env (compose đọc nó khi thay biến) để MỌI lệnh compose sau này — kể cả thao tác ops — thấy
+# cùng một giá trị, không phải chỉ lượt deploy này.
+CHATBOT_REV="$(git rev-parse --short=12 HEAD:chatbot 2>/dev/null || echo unknown)"
+if grep -qE "^CHATBOT_REV=" .env; then sed -i -E "s|^CHATBOT_REV=.*|CHATBOT_REV=\"$CHATBOT_REV\"|" .env; else printf 'CHATBOT_REV="%s"\n' "$CHATBOT_REV" >> .env; fi
+
 say "Build và khởi chạy (lần đầu mất 3–6 phút)"
 
 # CSDL lên trước, rồi ĐỒNG BỘ mật khẩu role với .env.
