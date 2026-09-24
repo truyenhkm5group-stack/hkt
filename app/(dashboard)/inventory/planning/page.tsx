@@ -42,8 +42,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
       <PageHeader
         eyebrow="Kho"
         title="Kế hoạch đặt hàng sản xuất"
-        description="Cảnh báo thiếu hàng và lượng cần đặt cho từng mẫu mã"
-        hint={<>Lượng cần đặt = tốc độ bán × (thời gian sản xuất + số ngày muốn đủ bán) + tồn an toàn − nguồn cung. <b>Nguồn cung</b> gồm tồn khả dụng ERP (đã trừ đơn đã chốt chưa gửi) và hàng sắp quay lại kho: đơn chờ hoàn về cộng phần hàng đang ở ngoài ước bị hoàn, nhân với tỷ lệ hàng hoàn thực sự nhập lại được kho. Số ngày muốn đủ bán chọn ngay dưới đây. Mẫu mã hết hàng trước khi sản xuất xong lên chuông cảnh báo và nhóm Lark.</>}
+        hint={<><p>Cảnh báo thiếu hàng và lượng cần đặt cho từng mẫu mã.</p><p className="mt-1.5">Lượng cần đặt = tốc độ bán × (thời gian sản xuất + số ngày muốn đủ bán) + tồn an toàn − nguồn cung. <b>Nguồn cung</b> gồm tồn khả dụng ERP (đã trừ đơn đã chốt chưa gửi) và hàng sắp quay lại kho: đơn chờ hoàn về cộng phần hàng đang ở ngoài ước bị hoàn, nhân với tỷ lệ hàng hoàn thực sự nhập lại được kho. Số ngày muốn đủ bán chọn ngay dưới đây. Mẫu mã hết hàng trước khi sản xuất xong lên chuông cảnh báo và nhóm Lark.</p><p className="mt-1.5">Số liệu chính xác khi: (1) phiếu nhập / kiểm kê đầu kỳ đã nhập đủ trên ERP và kho lập phiếu tái nhập cho hàng hoàn về; (2) trạng thái vận đơn Viettel Post được cập nhật (webhook hoặc nhập danh sách vận đơn) để phân biệt giao thật / hoàn / đang giao; (3) giá nhập ghi trên phiếu.</p></>}
         actions={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline" size="sm">
@@ -64,13 +63,13 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
       <PlanningForm assumptions={report.assumptions} products={products} canWrite={canWrite} />
       <CoverPicker coverDays={used.coverDays} macDinh={report.assumptions.coverDays} countIncoming={used.countIncoming} />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Hết hàng / âm tồn" value={formatNumber(sm.out)} note="Tồn khả dụng ≤ đơn đã chốt — cần sản xuất gấp" icon={AlertTriangle} tone={sm.out ? "rose" : "slate"} />
-        <MetricCard label="Hết trước khi SX xong" value={formatNumber(sm.critical)} note={`Số ngày còn bán được < thời gian SX (${report.assumptions.leadTimeDays} ngày)`} icon={Factory} tone={sm.critical ? "amber" : "slate"} />
-        <MetricCard label="Sắp thiếu" value={formatNumber(sm.low)} note="Còn bán được dưới thời gian SX + tồn an toàn" icon={PackageSearch} tone={sm.low ? "amber" : "slate"} />
+        <MetricCard label="Hết hàng / âm tồn" value={formatNumber(sm.out)} hint="Tồn khả dụng ≤ đơn đã chốt — cần sản xuất gấp" icon={AlertTriangle} tone={sm.out ? "rose" : "slate"} />
+        <MetricCard label="Hết trước khi SX xong" value={formatNumber(sm.critical)} hint={`Số ngày còn bán được < thời gian SX (${report.assumptions.leadTimeDays} ngày)`} icon={Factory} tone={sm.critical ? "amber" : "slate"} />
+        <MetricCard label="Sắp thiếu" value={formatNumber(sm.low)} hint="Còn bán được dưới thời gian SX + tồn an toàn" icon={PackageSearch} tone={sm.low ? "amber" : "slate"} />
         <MetricCard
           label="Chưa tính được tồn"
           value={formatNumber(sm.unknown)}
-          note="Chưa có phiếu nhập trong ERP — KHÔNG đề xuất đặt cho các mẫu mã này"
+          hint="Chưa có phiếu nhập trong ERP — KHÔNG đề xuất đặt cho các mẫu mã này"
           icon={PackageSearch}
           tone={sm.unknown ? "amber" : "slate"}
         />
@@ -221,9 +220,6 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
       {/* Đối trọng: bảng trên nói chỗ cần đổ thêm tiền, bảng này nói chỗ tiền đang nằm chết. */}
       <SlowMovingSection />
       {report.products.length === 0 ? <SectionCard><p className="py-6 text-center text-sm text-muted-foreground">Chưa có mẫu mã nào có tồn hoặc bán trong 30 ngày. Nhập phiếu nhập / kiểm kê ở “Nhập hàng & kiểm kê” trước.</p></SectionCard> : null}
-      <p className="text-xs text-muted-foreground">
-        Số liệu chính xác khi: (1) phiếu nhập / kiểm kê đầu kỳ đã nhập đủ trên ERP và kho lập phiếu tái nhập cho hàng hoàn về; (2) trạng thái vận đơn Viettel Post được cập nhật (webhook hoặc nhập danh sách vận đơn) để phân biệt giao thật / hoàn / đang giao; (3) giá nhập ghi trên phiếu.
-      </p>
     </div>
   );
 }

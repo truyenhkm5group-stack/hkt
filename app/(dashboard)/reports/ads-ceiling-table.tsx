@@ -1,4 +1,5 @@
 import { EstimatedCostControl, RateOverridePopover, TargetMarginControl } from "@/app/(dashboard)/reports/estimated-cost-control";
+import { DataWarnings } from "@/components/data-warnings";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DELIVERY_RATE_SOURCE_LABEL } from "@/lib/constants/delivery-rate";
@@ -99,9 +100,18 @@ export function AdsCeilingTable({
   return (
     <SectionCard
       title="Bàn dự tính · giá vốn · tỷ lệ GTC · trần CPQC"
-      description={`${formatNumber(rows.length)} mã có đơn · ${chuaGia ? `${formatNumber(chuaGia)} mã còn sản phẩm CHƯA BIẾT giá vốn (đang tính 0 ₫ — lợi nhuận và trần CPQC của chúng đang cao hơn thật)` : "mọi mã đều đã có giá vốn thật hoặc dự tính"}${t.estimatedCostProducts ? ` · ${formatNumber(t.estimatedCostProducts)} mã dùng giá dự tính (${formatVND(t.expectedCogsEstimated, { compact: true })} giá vốn)` : ""}. Trần CPQC = mức quảng cáo tối đa để mã còn hoà vốn / còn giữ được biên bạn gõ.`}
+      description={
+        <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          {`${formatNumber(rows.length)} mã có đơn${t.estimatedCostProducts ? ` · ${formatNumber(t.estimatedCostProducts)} mã dùng giá dự tính (${formatVND(t.expectedCogsEstimated, { compact: true })} giá vốn)` : ""}`}
+          <DataWarnings items={chuaGia ? [`${formatNumber(chuaGia)} mã còn sản phẩm CHƯA BIẾT giá vốn (đang tính 0 ₫ — lợi nhuận và trần CPQC của chúng đang cao hơn thật)`] : []} />
+        </span>
+      }
       hint={
         <>
+          <p className="mb-2">
+            Trần CPQC = mức quảng cáo tối đa để mã còn hoà vốn / còn giữ được biên bạn gõ.
+            {chuaGia ? "" : " Mọi mã đều đã có giá vốn thật hoặc dự tính."}
+          </p>
           <p>
             <b>Trần CPQC</b> = (LN danh nghĩa + CPQC + CP khác) ÷ (1 + {o}% CP khác theo QC) — tức toàn bộ số tiền mã làm ra sau giá
             vốn, vận chuyển, vận hành, rủi ro tồn kho, thuế, trước khi trả quảng cáo. Có biên mục tiêu m% thì trừ thêm m% × DT GTC ước

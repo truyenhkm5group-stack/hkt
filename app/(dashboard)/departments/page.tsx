@@ -59,9 +59,9 @@ export default async function DepartmentMapPage() {
       <PageHeader
         eyebrow="Bộ máy"
         title="Bản đồ phòng ban & AI"
-        description="Phòng nào sở hữu màn hình nào, phòng nào có bao nhiêu người, và agent của từng phòng đang làm được tới nấc nào."
         hint={
           <>
+            <p className="mb-1">Phòng nào sở hữu màn hình nào, phòng nào có bao nhiêu người, và agent của từng phòng đang làm được tới nấc nào.</p>
             Hai sổ khai dựng nên trang này: <code>lib/constants/department-modules.ts</code> (mỗi module thuộc đúng một phòng, kèm lý do) và{" "}
             <code>lib/constants/department-ai.ts</code> (năm nấc tự động hoá, mỗi nấc phải chỉ ra tệp mã nguồn đang chạy). Bài kiểm{" "}
             <code>tests/department-map.test.ts</code> mở từng tệp bằng chứng, nên một ô xanh không khai khống được. Thanh menu bên trái đọc cùng sổ, nên bản đồ này
@@ -78,8 +78,9 @@ export default async function DepartmentMapPage() {
             Thang tự động hoá của từng phòng
           </span>
         }
-        description="Năm nấc, thứ tự không đảo được. Đưa chuột vào một ô để đọc máy đang làm gì ở nấc đó — hoặc thiếu đúng cái gì."
         hint={
+          <>
+          <p className="mb-1">Năm nấc, thứ tự không đảo được. Đưa chuột vào một ô để đọc máy đang làm gì ở nấc đó — hoặc thiếu đúng cái gì.</p>
           <ul className="list-disc space-y-1 pl-4">
             {AI_RUNGS.map((r) => (
               <li key={r}>
@@ -91,6 +92,7 @@ export default async function DepartmentMapPage() {
               cuối luôn chỉ vào nấc THẤP NHẤT còn dở.
             </li>
           </ul>
+          </>
         }
         contentClassName="p-0"
       >
@@ -189,23 +191,25 @@ export default async function DepartmentMapPage() {
       {/* ───────────── BẢN ĐỒ MÀN HÌNH ───────────── */}
       <SectionCard
         title="Màn hình thuộc phòng nào"
-        description="Mỗi module có đúng một chủ. Dòng chữ nhỏ là lý do phòng đó sở hữu nó, chứ không phải phòng bên cạnh."
+        hint="Mỗi module có đúng một chủ. Dấu ⓘ cạnh mỗi module là lý do phòng đó sở hữu nó, chứ không phải phòng bên cạnh."
       >
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {MODULE_GROUPS.map((g) => (
             <div key={g.zone} className="rounded-lg border bg-surface-sunken/30 p-3">
-              <div className="mb-2 flex items-baseline justify-between gap-2">
-                <h3 className="text-[13px] font-bold">{g.label}</h3>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="flex items-center gap-1 text-[13px] font-bold">
+                  {g.label}
+                  <InfoHint>{g.hint}</InfoHint>
+                </h3>
                 <span className="text-[11px] text-muted-foreground">{g.items.length} màn hình</span>
               </div>
-              <p className="mb-2 text-[11px] leading-4 text-muted-foreground">{g.hint}</p>
               <ul className="flex flex-col gap-2">
                 {g.items.map((m) => (
-                  <li key={m.href}>
+                  <li key={m.href} className="flex items-center gap-1">
                     <Link href={m.href} className="text-[13px] font-medium text-primary underline-offset-2 hover:underline">
                       {m.label}
                     </Link>
-                    <p className="text-[11px] leading-4 text-muted-foreground">{m.why}</p>
+                    <InfoHint>{m.why}</InfoHint>
                   </li>
                 ))}
               </ul>
@@ -217,13 +221,13 @@ export default async function DepartmentMapPage() {
         <div className="mt-4 flex flex-col gap-3">
           {DEPARTMENT_ORDER.filter((d) => NO_MODULE_REASON[d]).map((d) => (
             <div key={d} className="rounded-lg border border-dashed p-3">
-              <div className="mb-1 flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <Badge variant="outline" className={cn("text-[11px]", DEPARTMENT_TONE[d])}>
                   {DEPARTMENT_LABEL[d]}
                 </Badge>
                 <span className="text-[13px] font-semibold">Chưa có màn hình riêng</span>
+                <InfoHint>{NO_MODULE_REASON[d]}</InfoHint>
               </div>
-              <p className="text-xs leading-5 text-muted-foreground">{NO_MODULE_REASON[d]}</p>
             </div>
           ))}
         </div>
@@ -237,12 +241,12 @@ export default async function DepartmentMapPage() {
             Sở hữu màn hình ≠ nhận việc
           </span>
         }
-        description="Hai chiều tách nhau, và chỗ lệch nào cũng phải có lý do đọc được."
+        hint="Hai chiều tách nhau, và chỗ lệch nào cũng phải có lý do đọc được."
       >
         <ul className="flex flex-col gap-3">
           {TEAM_DEPARTMENT_DIVERGENCE.map((d) => (
             <li key={d.team} className="rounded-lg border p-3 text-xs leading-5">
-              <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[13px] font-semibold">
+              <div className="flex flex-wrap items-center gap-1.5 text-[13px] font-semibold">
                 <span>Việc nhóm {d.team}</span>
                 <span className="text-muted-foreground">→ hàng đợi phòng</span>
                 <Badge variant="outline" className={cn("text-[11px]", DEPARTMENT_TONE[d.routedTo])}>
@@ -252,8 +256,8 @@ export default async function DepartmentMapPage() {
                 <Badge variant="outline" className={cn("text-[11px]", DEPARTMENT_TONE[d.modulesOwnedBy])}>
                   {DEPARTMENT_LABEL[d.modulesOwnedBy]}
                 </Badge>
+                <InfoHint>{d.why}</InfoHint>
               </div>
-              <p className="text-muted-foreground">{d.why}</p>
             </li>
           ))}
         </ul>

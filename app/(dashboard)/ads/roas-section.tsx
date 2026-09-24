@@ -1,4 +1,5 @@
 import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
@@ -40,17 +41,24 @@ export async function RoasSection({ period, level = "campaign" }: { period: Peri
           ? `${period.label} · ${formatNumber(r.rows.length)} mẩu quảng cáo · doanh thu giao thành công ${formatVND(r.totals.deliveredRevenue)}`
           : `${period.label} · chi ${formatVND(r.totals.spend)} · lợi nhuận góp ${formatVND(r.totals.contribution)}`
       }
-      hint="Bốn mức ROAS trả lời bốn câu hỏi khác nhau và luôn giảm dần: lên đơn → giao thành công → tiền về → lợi nhuận góp. Chỗ tụt nhiều nhất chính là vấn đề cần sửa. Cấp mẩu quảng cáo KHÔNG có chi tiêu riêng nên không có ROAS ở cấp đó — xem docs/ads-attribution-audit.md."
+      hint={
+        <>
+          <p>
+            Bốn mức ROAS trả lời bốn câu hỏi khác nhau và luôn giảm dần: lên đơn → giao thành công → tiền về → lợi nhuận góp. Chỗ tụt nhiều nhất chính là
+            vấn đề cần sửa. Cấp mẩu quảng cáo KHÔNG có chi tiêu riêng nên không có ROAS ở cấp đó — xem docs/ads-attribution-audit.md.
+          </p>
+          {byAd ? (
+            <p className="mt-1">
+              Facebook chỉ cho ERP số chi tiêu theo CHIẾN DỊCH/ngày, nên ở cấp mẩu quảng cáo không có tiền chi và do đó không có ROAS/CAC. Bảng này xếp
+              theo doanh thu GIAO THÀNH CÔNG: mẩu nào thật sự đưa được hàng tới tay khách thì đứng trước. Cố ý KHÔNG chia đều tiền chiến dịch cho các mẩu
+              — chia đều làm tổng khớp trong khi từng dòng đều sai.
+            </p>
+          ) : null}
+        </>
+      }
       actions={<RoasLevelTabs current={level} />}
       padded={false}
     >
-      {byAd ? (
-        <p className="border-b bg-sky-50 px-5 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-          Facebook chỉ cho ERP số chi tiêu theo CHIẾN DỊCH/ngày, nên ở cấp mẩu quảng cáo không có tiền chi và do đó không có
-          ROAS/CAC. Bảng này xếp theo doanh thu GIAO THÀNH CÔNG: mẩu nào thật sự đưa được hàng tới tay khách thì đứng trước.
-          Cố ý KHÔNG chia đều tiền chiến dịch cho các mẩu — chia đều làm tổng khớp trong khi từng dòng đều sai.
-        </p>
-      ) : null}
       <div className="overflow-x-auto">
         <Table className="min-w-[1080px]">
           <TableHeader>
@@ -100,15 +108,26 @@ export async function RoasSection({ period, level = "campaign" }: { period: Peri
           </TableBody>
         </Table>
       </div>
-      <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-        <p className="font-medium text-foreground">Phần KHÔNG quy kết được (cố ý không chia đều cho các chiến dịch):</p>
-        <ul className="mt-1 space-y-0.5">
-          <li>
-            {formatNumber(r.unmapped.ordersWithoutAd)} đơn không có ad_id · doanh thu {formatVND(r.unmapped.revenueWithoutAd)} — không biết đến từ quảng cáo nào.
-          </li>
-          {r.unmapped.ordersWithUnknownAd ? <li>{formatNumber(r.unmapped.ordersWithUnknownAd)} đơn có ad_id nhưng chưa tra được mẩu quảng cáo trên Facebook.</li> : null}
-          {r.unmapped.spendWithoutOrders ? <li>{formatVND(r.unmapped.spendWithoutOrders)} tiền quảng cáo của chiến dịch không có đơn nào gắn vào.</li> : null}
-        </ul>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-5 py-2 text-xs text-muted-foreground">
+        <span className="inline-flex items-center gap-1 font-medium text-foreground">
+          Phần KHÔNG quy kết được
+          <InfoHint>
+            <p>Cố ý không chia đều cho các chiến dịch.</p>
+            <ul className="mt-1 space-y-0.5">
+              <li>
+                {formatNumber(r.unmapped.ordersWithoutAd)} đơn không có ad_id · doanh thu {formatVND(r.unmapped.revenueWithoutAd)} — không biết đến từ quảng cáo
+                nào.
+              </li>
+              {r.unmapped.ordersWithUnknownAd ? <li>{formatNumber(r.unmapped.ordersWithUnknownAd)} đơn có ad_id nhưng chưa tra được mẩu quảng cáo trên Facebook.</li> : null}
+              {r.unmapped.spendWithoutOrders ? <li>{formatVND(r.unmapped.spendWithoutOrders)} tiền quảng cáo của chiến dịch không có đơn nào gắn vào.</li> : null}
+            </ul>
+          </InfoHint>
+        </span>
+        <span className="numeric">
+          {formatNumber(r.unmapped.ordersWithoutAd)} đơn không có ad_id · {formatVND(r.unmapped.revenueWithoutAd)}
+        </span>
+        {r.unmapped.ordersWithUnknownAd ? <span className="numeric">· {formatNumber(r.unmapped.ordersWithUnknownAd)} đơn ad_id chưa tra được</span> : null}
+        {r.unmapped.spendWithoutOrders ? <span className="numeric">· {formatVND(r.unmapped.spendWithoutOrders)} chi không có đơn</span> : null}
       </div>
     </SectionCard>
   );
@@ -129,29 +148,51 @@ export async function AdsCoverageSection({ period }: { period: Period }) {
   return (
     <SectionCard
       title="Độ phủ quy kết — đọc trước khi tin con số ROAS"
-      description={`${formatPercent(ceiling.coverage * 100)} đơn trong kỳ có mã quảng cáo. Đây là TRẦN của mọi chỉ số ROAS ở trên.`}
-      hint="Quy kết không nối được thì KHÔNG chia đều cho các chiến dịch — chia đều làm tổng khớp trong khi từng dòng đều sai. Ba cấp phân tích không có dữ liệu được nêu tên ở cuối khối này để không ai mất công đi tìm rồi tự dựng số thay thế."
+      description={`${formatPercent(ceiling.coverage * 100)} đơn trong kỳ có mã quảng cáo`}
+      hint={
+        <>
+          <p>Đây là TRẦN của mọi chỉ số ROAS ở trên.</p>
+          <p className="mt-1">
+            Quy kết không nối được thì KHÔNG chia đều cho các chiến dịch — chia đều làm tổng khớp trong khi từng dòng đều sai. Ba cấp phân tích không có dữ
+            liệu được nêu tên ngay dưới đây để không ai mất công đi tìm rồi tự dựng số thay thế.
+          </p>
+          <p className="mt-1 font-medium">Ba cấp KHÔNG phân tích được (nêu tên để không ai đi tìm):</p>
+          <ul className="mt-0.5 space-y-0.5">
+            {audit.unavailableLevels.map((l) => (
+              <li key={l.level}>
+                <span className="font-medium">{l.level}</span> — {l.reason}
+              </li>
+            ))}
+          </ul>
+        </>
+      }
+      actions={
+        <DataWarnings
+          align="end"
+          items={[low ? `Độ phủ dưới ${LOW_COVERAGE_PCT}%: bảng ROAS ở trên mô tả đúng phần đơn có mã quảng cáo, KHÔNG mô tả toàn shop.` : null]}
+        />
+      }
       padded={false}
     >
-      {low ? (
-        <p className="border-b bg-amber-50 px-5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-          Độ phủ dưới {LOW_COVERAGE_PCT}%: bảng ROAS ở trên mô tả đúng phần đơn có mã quảng cáo, KHÔNG mô tả toàn shop.
-        </p>
-      ) : null}
       <div className="overflow-x-auto">
-        <Table className="min-w-[720px]">
+        <Table className="min-w-[480px]">
           <TableHeader>
             <TableRow>
               <TableHead>Mắt xích</TableHead>
               <TableHead className="text-right">Nối được</TableHead>
               <TableHead className="text-right">Độ phủ</TableHead>
-              <TableHead>Phần còn lại là gì</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {audit.rows.map((r) => (
               <TableRow key={r.key}>
-                <TableCell className="font-medium">{r.label}</TableCell>
+                {/* "Phần còn lại là gì" là câu chữ, không phải số — nằm trong ⓘ cạnh tên mắt xích. */}
+                <TableCell className="font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    {r.label}
+                    {r.note ? <InfoHint>{r.note}</InfoHint> : null}
+                  </span>
+                </TableCell>
                 <TableCell className="text-right tabular-nums">
                   {formatNumber(r.matched)} / {formatNumber(r.total)}
                   <span className="ml-1 text-xs text-muted-foreground">{r.unit === "spend" ? "dòng chi" : "đơn"}</span>
@@ -159,21 +200,10 @@ export async function AdsCoverageSection({ period }: { period: Period }) {
                 <TableCell className={cn("text-right tabular-nums", r.total > 0 && r.coverage * 100 < LOW_COVERAGE_PCT && "font-semibold text-amber-600 dark:text-amber-400")}>
                   {r.total > 0 ? formatPercent(r.coverage * 100) : "—"}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">{r.note}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </div>
-      <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-        <p className="font-medium text-foreground">Ba cấp KHÔNG phân tích được (nêu tên để không ai đi tìm):</p>
-        <ul className="mt-1 space-y-0.5">
-          {audit.unavailableLevels.map((l) => (
-            <li key={l.level}>
-              <span className="font-medium">{l.level}</span> — {l.reason}
-            </li>
-          ))}
-        </ul>
       </div>
     </SectionCard>
   );

@@ -66,8 +66,12 @@ export function WarehousePeople({ rows, unattributed, days, slaHours }: { rows: 
           <Users className="size-4" /> Người đếm hàng hoàn · {days} ngày
         </span>
       }
-      description="Đo đoạn ĐẾM — đoạn NHẬN chưa quy kết được theo người"
-      hint={`Đúng hạn = đếm xong trong ${slaHours} giờ kể từ lúc ghi nhận kiện đã về — cùng một phép đo với thẻ điểm phòng ban, nên hai màn hình không nói hai con số.`}
+      hint={
+        <>
+          <p>Đo đoạn ĐẾM — đoạn NHẬN chưa quy kết được theo người.</p>
+          <p className="mt-1">{`Đúng hạn = đếm xong trong ${slaHours} giờ kể từ lúc ghi nhận kiện đã về — cùng một phép đo với thẻ điểm phòng ban, nên hai màn hình không nói hai con số.`}</p>
+        </>
+      }
     >
       <div className="overflow-x-auto">
         <Table className="min-w-[720px]">
@@ -104,11 +108,14 @@ export function WarehousePeople({ rows, unattributed, days, slaHours }: { rows: 
             ))}
             {unattributed ? (
               <TableRow className="bg-muted/40">
-                <TableCell className="text-muted-foreground">Chưa quy kết được về tài khoản</TableCell>
-                <TableCell className="text-right numeric text-muted-foreground">{formatNumber(unattributed)}</TableCell>
-                <TableCell colSpan={4} className="text-[11.5px] text-muted-foreground">
-                  Lượt đếm không có khoá tài khoản — không đoán người cho dòng lịch sử, nên chúng không vào thẻ điểm của ai.
+                <TableCell className="text-muted-foreground">
+                  <span className="inline-flex items-center gap-1">
+                    Chưa quy kết được về tài khoản
+                    <InfoHint>Lượt đếm không có khoá tài khoản — không đoán người cho dòng lịch sử, nên chúng không vào thẻ điểm của ai.</InfoHint>
+                  </span>
                 </TableCell>
+                <TableCell className="text-right numeric text-muted-foreground">{formatNumber(unattributed)}</TableCell>
+                <TableCell colSpan={4} />
               </TableRow>
             ) : null}
           </TableBody>

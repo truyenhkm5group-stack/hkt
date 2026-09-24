@@ -26,14 +26,20 @@ export async function SlowMovingSection() {
         <SectionCard
           title={`${formatNumber(pendingReturns.count)} kiện hàng hoàn chờ kiểm đếm`}
           description={`${formatNumber(pendingReturns.items)} món · khoảng ${Math.round(pendingReturns.value).toLocaleString("vi-VN")}đ vốn đang NẰM NGOÀI SỔ${pendingReturns.stale ? ` · ${formatNumber(pendingReturns.stale)} kiện quá 30 ngày` : ""}`}
-          hint="Hàng hoàn KHÔNG tự vào tồn khi Viettel Post báo đã hoàn — chỉ phiếu tái nhập với số ĐẾM THỰC TẾ mới cộng tồn. Cho tới lúc đó, số hàng này có thật trong kho nhưng ERP không đếm, nên bảng đề xuất sản xuất ở trên đang đặt THỪA đúng bằng lượng đó. Giá trị quy theo giá nhập gần nhất; mẫu mã chưa có giá nhập không được tính vào."
+          hint={
+            <>
+              <p>
+                Hàng hoàn KHÔNG tự vào tồn khi Viettel Post báo đã hoàn — chỉ phiếu tái nhập với số ĐẾM THỰC TẾ mới cộng tồn. Cho tới lúc đó, số hàng này có thật trong kho nhưng ERP không đếm, nên bảng đề xuất sản xuất ở trên đang đặt THỪA đúng bằng lượng đó. Giá trị quy theo giá nhập gần nhất; mẫu mã chưa có giá nhập không được tính vào.
+              </p>
+              <p className="mt-1.5">Đếm thực tế rồi lập phiếu — phần đếm thiếu sẽ hiện ra thành hàng hụt thay vì bị giấu.</p>
+            </>
+          }
         >
           <p className="text-sm">
             Xác nhận hàng loạt ở{" "}
             <Link href="/data-quality?issue=return-not-received" className="font-semibold text-primary hover:underline">
               Chất lượng dữ liệu → Hàng hoàn chưa về kho
             </Link>
-            . Đếm thực tế rồi lập phiếu — phần đếm thiếu sẽ hiện ra thành hàng hụt thay vì bị giấu.
           </p>
         </SectionCard>
       ) : null}

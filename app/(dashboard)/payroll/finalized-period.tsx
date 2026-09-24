@@ -1,4 +1,6 @@
 import { Lock } from "lucide-react";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PAYROLL_BASIS_SHORT, PAYROLL_CALC_VERSION, type PayrollBasis } from "@/lib/constants/payroll";
@@ -35,21 +37,41 @@ export function FinalizedPeriodTable({ state, basis, drift }: { state: PayrollPe
           <span>
             · {formatDateTime(state.finalizedAt)}
             {state.finalizedByEmail ? ` · ${state.finalizedByEmail}` : ""} · cơ sở {PAYROLL_BASIS_SHORT[basis]} · phiên bản phép tính {state.calcVersion ?? "?"}
+            {state.note ? ` · Ghi chú lúc chốt: “${state.note}”` : ""}
           </span>
+          <InfoHint label="Kỳ đã chốt đọc từ đâu">
+            <p>
+              Mọi con số dưới đây đọc từ ẢNH CHỤP lúc chốt, KHÔNG tính lại. Đổi tỷ lệ thưởng, đổi người phụ trách fanpage hay nhập thêm phiếu kho về sau đều
+              không làm đổi kỳ này — đó là điều khiến một kỳ đã trả tiền giữ nguyên được câu trả lời của nó.
+            </p>
+            {drift.length ? null : (
+              <p className="mt-1">
+                Tính lại theo dữ liệu hôm nay ra ĐÚNG con số đã chốt — chưa có chứng từ nào phát sinh sau ngày chốt làm đổi kỳ này.
+              </p>
+            )}
+          </InfoHint>
+          {/*
+            RANH GIỚI PHẢI NÓI RA. Các khối phân tích bên dưới (lợi nhuận theo mã hàng, chi tiết theo
+            marketer) tính SỐNG mỗi lần mở — chúng KHÔNG nằm trong ảnh chụp. Để chúng đứng ngay dưới một
+            bảng đã chốt mà không nói gì là mời người đọc tưởng cả trang đều bất biến, rồi một hôm thấy
+            số đổi và mất tin vào chính bảng lương ở trên.
+          */}
+          <DataWarnings
+            items={[
+              doiCongThuc ? (
+                <>
+                  <b>Kỳ này được chốt bằng phiên bản phép tính {state.calcVersion}, kho mã hiện ở {PAYROLL_CALC_VERSION}.</b> Con số của nó vẫn đúng với luật lúc ấy — nhưng
+                  đừng so thẳng với một kỳ chốt bằng phiên bản khác: hai kỳ đứng trên hai công thức, không phải trên một xu hướng.
+                </>
+              ) : null,
+              <>
+                Các khối phân tích bên dưới (lợi nhuận theo mã hàng · chi tiết theo marketer) <b>tính sống</b> theo dữ liệu hôm nay và KHÔNG thuộc ảnh chụp của kỳ
+                đã chốt. Chúng ở lại để đối chiếu; con số của kỳ nằm ở bảng trên.
+              </>,
+            ]}
+          />
         </div>
-        <p className="mt-1 text-[12px] leading-5">
-          Mọi con số dưới đây đọc từ ẢNH CHỤP lúc chốt, KHÔNG tính lại. Đổi tỷ lệ thưởng, đổi người phụ trách fanpage hay nhập thêm phiếu kho về sau đều
-          không làm đổi kỳ này — đó là điều khiến một kỳ đã trả tiền giữ nguyên được câu trả lời của nó.
-          {state.note ? ` Ghi chú lúc chốt: “${state.note}”.` : ""}
-        </p>
       </div>
-
-      {doiCongThuc ? (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-          <b>Kỳ này được chốt bằng phiên bản phép tính {state.calcVersion}, kho mã hiện ở {PAYROLL_CALC_VERSION}.</b> Con số của nó vẫn đúng với luật lúc ấy — nhưng
-          đừng so thẳng với một kỳ chốt bằng phiên bản khác: hai kỳ đứng trên hai công thức, không phải trên một xu hướng.
-        </div>
-      ) : null}
 
       <SectionCard
         title={`Bảng lương đã chốt · ${snap.period.key}`}
@@ -130,7 +152,7 @@ export function FinalizedPeriodTable({ state, basis, drift }: { state: PayrollPe
       {drift.length ? (
         <SectionCard
           title="Chênh lệch phát sinh SAU khi chốt"
-          description="Tính lại theo dữ liệu hôm nay và so với ảnh chụp. Kỳ đã chốt KHÔNG bị viết lại — đây là đề xuất để chủ shop quyết, không phải một lượt sửa."
+          hint="Tính lại theo dữ liệu hôm nay và so với ảnh chụp. Kỳ đã chốt KHÔNG bị viết lại — đây là đề xuất để chủ shop quyết, không phải một lượt sửa."
         >
           <div className="overflow-x-auto">
             <Table className="min-w-[640px]">
@@ -167,22 +189,7 @@ export function FinalizedPeriodTable({ state, basis, drift }: { state: PayrollPe
             </Table>
           </div>
         </SectionCard>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          Tính lại theo dữ liệu hôm nay ra ĐÚNG con số đã chốt — chưa có chứng từ nào phát sinh sau ngày chốt làm đổi kỳ này.
-        </p>
-      )}
-
-      {/*
-        RANH GIỚI PHẢI NÓI RA. Các khối phân tích bên dưới (lợi nhuận theo mã hàng, chi tiết theo
-        marketer) tính SỐNG mỗi lần mở — chúng KHÔNG nằm trong ảnh chụp. Để chúng đứng ngay dưới một
-        bảng đã chốt mà không nói gì là mời người đọc tưởng cả trang đều bất biến, rồi một hôm thấy
-        số đổi và mất tin vào chính bảng lương ở trên.
-      */}
-      <p className="text-[11.5px] leading-5 text-muted-foreground">
-        Các khối phân tích bên dưới (lợi nhuận theo mã hàng · chi tiết theo marketer) <b>tính sống</b> theo dữ liệu hôm nay và KHÔNG thuộc ảnh chụp của kỳ
-        đã chốt. Chúng ở lại để đối chiếu; con số của kỳ nằm ở bảng trên.
-      </p>
+      ) : null}
     </div>
   );
 }

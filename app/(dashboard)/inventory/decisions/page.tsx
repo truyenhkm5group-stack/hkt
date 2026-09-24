@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, Coins, Factory, PackageSearch, Wallet } from "lucide-react";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { Money, SectionCard } from "@/components/ui-bits";
@@ -34,10 +36,15 @@ export default async function InventoryDecisionsPage() {
       <PageHeader
         eyebrow="Kho"
         title="Quyết định vốn tồn kho"
-        description="Với từng mẫu mã: đặt thêm (cần bao nhiêu vốn), giữ nguyên, hay xả để giải phóng vốn"
         hint={
           <>
-            Bộ máy này KHÔNG đo lại gì cả — nó ghép các con số đã có: tồn/tốc độ/số nên đặt của <b>Kế hoạch đặt hàng SX</b>, lần bán cuối của bảng <b>hàng bán chậm</b>, và <b>đơn sản xuất đã gửi xưởng</b> (thứ kế hoạch SX không trừ) — rồi ra MỘT kết luận cho mỗi mẫu mã kèm lý do và mức tin cậy. Tiền vốn tính theo GIÁ NHẬP; thiếu giá nhập thì hiện &quot;chưa có giá nhập&quot;, không phải 0đ. Trang CHỈ ĐỀ XUẤT: không tự tạo đơn sản xuất, không tự sửa tồn kho.
+            <p>Với từng mẫu mã: đặt thêm (cần bao nhiêu vốn), giữ nguyên, hay xả để giải phóng vốn.</p>
+            <p className="mt-1.5">
+              Bộ máy này KHÔNG đo lại gì cả — nó ghép các con số đã có: tồn/tốc độ/số nên đặt của <b>Kế hoạch đặt hàng SX</b>, lần bán cuối của bảng <b>hàng bán chậm</b>, và <b>đơn sản xuất đã gửi xưởng</b> (thứ kế hoạch SX không trừ) — rồi ra MỘT kết luận cho mỗi mẫu mã kèm lý do và mức tin cậy. Tiền vốn tính theo GIÁ NHẬP; thiếu giá nhập thì hiện &quot;chưa có giá nhập&quot;, không phải 0đ. Trang CHỈ ĐỀ XUẤT: không tự tạo đơn sản xuất, không tự sửa tồn kho.
+            </p>
+            <p className="mt-1.5">
+              Nguồn số: tồn/tốc độ/số nên đặt = Kế hoạch đặt hàng SX (sổ kho + sự kiện Viettel Post, kết quả đơn theo ORDER_OUTCOME) · giá nhập = phiếu nhập gần nhất · cam kết xưởng = đơn sản xuất ĐÃ GỬI. Trang chỉ đề xuất — tạo đơn đặt hàng ở &quot;Kế hoạch đặt hàng SX → Tạo bảng chốt&quot;.
+            </p>
           </>
         }
         actions={
@@ -54,28 +61,25 @@ export default async function InventoryDecisionsPage() {
 
       <div
         className={cn(
-          "flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px]",
+          "flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border px-4 py-2.5 text-[13px]",
           report.dataGate.state === "DATA_INSUFFICIENT"
             ? "border-amber-300/70 bg-amber-50/60 dark:border-amber-900/60 dark:bg-amber-950/20"
             : "border-sky-300/70 bg-sky-50/60 dark:border-sky-900/60 dark:bg-sky-950/20",
         )}
       >
-        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-        <div className="space-y-1">
-          <p>
-            <b>{report.dataGate.state === "DATA_INSUFFICIENT" ? "DỮ LIỆU CHƯA ĐỦ" : "BETA"}</b> — trang chỉ để tham khảo, <b>không phải căn cứ đặt hàng</b>. Mỗi đề xuất
-            đặt/xả phải được người quyết định đối chiếu với Kế hoạch SX và thực tế xưởng; ERP không tự tạo đơn sản xuất và không tự sửa tồn.
-          </p>
-          {report.dataGate.reasons.length ? (
-            <ul className="list-disc pl-5 text-muted-foreground">
-              {report.dataGate.reasons.map((r) => (
-                <li key={r}>{r}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-muted-foreground">Nền dữ liệu đủ để đọc; chuyển khỏi BETA khi chủ shop đã đối chiếu một chu kỳ đặt hàng thật với đề xuất ở đây.</p>
-          )}
-        </div>
+        <AlertTriangle className="size-4 shrink-0" />
+        <p>
+          <b>{report.dataGate.state === "DATA_INSUFFICIENT" ? "DỮ LIỆU CHƯA ĐỦ" : "BETA"}</b> — trang chỉ để tham khảo, <b>không phải căn cứ đặt hàng</b>.
+        </p>
+        <DataWarnings
+          tone={report.dataGate.state === "DATA_INSUFFICIENT" ? "danger" : "warn"}
+          items={[
+            "Mỗi đề xuất đặt/xả phải được người quyết định đối chiếu với Kế hoạch SX và thực tế xưởng; ERP không tự tạo đơn sản xuất và không tự sửa tồn.",
+            ...(report.dataGate.reasons.length
+              ? report.dataGate.reasons
+              : ["Nền dữ liệu đủ để đọc; chuyển khỏi BETA khi chủ shop đã đối chiếu một chu kỳ đặt hàng thật với đề xuất ở đây."]),
+          ]}
+        />
       </div>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -98,8 +102,8 @@ export default async function InventoryDecisionsPage() {
         <MetricCard
           label="Nguy cơ hết hàng"
           value={formatNumber(report.byDecision.STOCKOUT_RISK)}
-          note={sm.grossImpactEstimate ? `Ước mất ~${formatVND(sm.grossImpactEstimate, { compact: true })} lãi gộp nếu không đặt (ƯỚC TÍNH)` : "Mẫu hết hoặc hết trước khi lô mới về"}
-          hint="Mẫu đã hết hàng hoặc sẽ hết trước khi sản xuất kịp. Ước lãi gộp mất = tốc độ bán × số ngày trống hàng × (giá bán − giá nhập) × tỷ lệ giao thành công — chỉ tính khi biết cả giá bán lẫn giá nhập, và LUÔN là ước tính."
+          note={sm.grossImpactEstimate ? `Ước mất ~${formatVND(sm.grossImpactEstimate, { compact: true })} lãi gộp nếu không đặt (ƯỚC TÍNH)` : undefined}
+          hint="Mẫu hết hoặc hết trước khi lô mới về. Mẫu đã hết hàng hoặc sẽ hết trước khi sản xuất kịp. Ước lãi gộp mất = tốc độ bán × số ngày trống hàng × (giá bán − giá nhập) × tỷ lệ giao thành công — chỉ tính khi biết cả giá bán lẫn giá nhập, và LUÔN là ước tính."
           icon={AlertTriangle}
           tone={report.byDecision.STOCKOUT_RISK ? "rose" : "slate"}
         />
@@ -113,9 +117,12 @@ export default async function InventoryDecisionsPage() {
         />
       </section>
 
-      <p className="text-xs text-muted-foreground">
-        Độ phủ dữ liệu: tồn tính được {cov.stockKnownPct}% mẫu mã · sổ kho đủ {report.used.minHistoryDays} ngày ở {cov.historyKnownPct}% · giá nhập có ở {cov.costKnownPct}% · tỷ lệ hoàn đủ mẫu riêng ở {cov.returnRateOwnPct}% (còn lại dùng số toàn shop {Math.round(report.used.shopReturnRate * 100)}%) · thời gian sản xuất khai riêng ở {cov.leadTimeOverridePct}% (còn lại dùng giả định chung {report.used.leadTimeDays} ngày). {formatNumber(report.holdCount)} mẫu mã đang ổn định (giữ nguyên) không hiện trong bảng.
-      </p>
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        Độ phủ dữ liệu
+        <InfoHint>
+          Độ phủ dữ liệu: tồn tính được {cov.stockKnownPct}% mẫu mã · sổ kho đủ {report.used.minHistoryDays} ngày ở {cov.historyKnownPct}% · giá nhập có ở {cov.costKnownPct}% · tỷ lệ hoàn đủ mẫu riêng ở {cov.returnRateOwnPct}% (còn lại dùng số toàn shop {Math.round(report.used.shopReturnRate * 100)}%) · thời gian sản xuất khai riêng ở {cov.leadTimeOverridePct}% (còn lại dùng giả định chung {report.used.leadTimeDays} ngày). {formatNumber(report.holdCount)} mẫu mã đang ổn định (giữ nguyên) không hiện trong bảng.
+        </InfoHint>
+      </div>
 
       {GROUP_ORDER.map((kind) => {
         const rows = report.rows.filter((r) => r.decision === kind);
@@ -124,7 +131,7 @@ export default async function InventoryDecisionsPage() {
           <SectionCard
             key={kind}
             title={`${DECISION_LABEL[kind]} — ${formatNumber(rows.length)} mẫu mã`}
-            description={DECISION_ACTION[kind]}
+            hint={DECISION_ACTION[kind]}
             padded={false}
           >
             <div className="overflow-x-auto">
@@ -227,9 +234,6 @@ export default async function InventoryDecisionsPage() {
         </ul>
       </SectionCard>
 
-      <p className="text-xs text-muted-foreground">
-        Nguồn số: tồn/tốc độ/số nên đặt = Kế hoạch đặt hàng SX (sổ kho + sự kiện Viettel Post, kết quả đơn theo ORDER_OUTCOME) · giá nhập = phiếu nhập gần nhất · cam kết xưởng = đơn sản xuất ĐÃ GỬI. Trang chỉ đề xuất — tạo đơn đặt hàng ở &quot;Kế hoạch đặt hàng SX → Tạo bảng chốt&quot;.
-      </p>
     </div>
   );
 }

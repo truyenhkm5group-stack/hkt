@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { MARKETING_DIMENSION_NO_SPEND_HINT, MATURITY_LABEL, ratioOf } from "@/lib/constants/marketing-daily";
 import { MISSING_TEXT, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import type { getMarketingBreakdown } from "@/lib/queries/marketing-daily";
@@ -34,13 +36,23 @@ export function MarketingBreakdown({ data }: { data: Breakdown }) {
 
   return (
     <div className="space-y-2">
-      {!data.spendGrain ? <p className="px-4 pt-3 text-[11px] text-amber-600 dark:text-amber-400">{MARKETING_DIMENSION_NO_SPEND_HINT}</p> : null}
-      {data.spendUnknown.length ? (
-        <p className="px-4 pt-3 text-[11px] text-amber-600 dark:text-amber-400">
-          Chưa khai chiến dịch nào ở bảng chi tiêu cho {data.spendUnknown.length} nhóm ({data.spendUnknown.slice(0, 4).join(" · ")}
-          {data.spendUnknown.length > 4 ? "…" : ""}), nên Chi QC · ROAS · CPQC/đơn · LN góp của họ là <b>CHƯA BIẾT</b> (—), KHÔNG phải 0. Đơn được quy kết bằng ảnh chụp phân công FANPAGE, còn tiền quảng
-          cáo đi bằng ánh xạ CHIẾN DỊCH → marketer — khai ánh xạ ấy ở trang Quảng cáo → Ghép chiến dịch thì cột tiền mới có số.
-        </p>
+      {/* Cảnh báo dữ liệu thu về MỘT nhãn ⚠ — không biến mất (mục 42 / 67), chỉ thôi chiếm chỗ. */}
+      {!data.spendGrain || data.spendUnknown.length ? (
+        <div className="px-4 pt-3">
+          <DataWarnings
+            items={[
+              !data.spendGrain ? MARKETING_DIMENSION_NO_SPEND_HINT : null,
+              data.spendUnknown.length ? (
+                <>
+                  Chưa khai chiến dịch nào ở bảng chi tiêu cho {data.spendUnknown.length} nhóm ({data.spendUnknown.slice(0, 4).join(" · ")}
+                  {data.spendUnknown.length > 4 ? "…" : ""}), nên Chi QC · ROAS · CPQC/đơn · LN góp của họ là <b>CHƯA BIẾT</b> (—), KHÔNG phải 0. Đơn được quy
+                  kết bằng ảnh chụp phân công FANPAGE, còn tiền quảng cáo đi bằng ánh xạ CHIẾN DỊCH → marketer — khai ánh xạ ấy ở trang Quảng cáo → Ghép
+                  chiến dịch thì cột tiền mới có số.
+                </>
+              ) : null,
+            ]}
+          />
+        </div>
       ) : null}
       <div className="overflow-x-auto">
         <Table className="text-xs">
@@ -53,9 +65,19 @@ export function MarketingBreakdown({ data }: { data: Breakdown }) {
               <TableHead className="text-right">CPQC/đơn</TableHead>
               <TableHead className="text-right">DT thực</TableHead>
               <TableHead className="text-right">Giao TC</TableHead>
-              <TableHead className="text-right">Tỷ lệ giao<div className="text-[10px] font-normal text-muted-foreground">đo · ước tính</div></TableHead>
+              <TableHead className="text-right">
+                <span className="inline-flex items-center gap-1">
+                  Tỷ lệ giao
+                  <InfoHint>Tầng trên: đo · tầng dưới (ƯT): ước tính.</InfoHint>
+                </span>
+              </TableHead>
               <TableHead className="text-right">ROAS thực</TableHead>
-              <TableHead className="text-right">LN góp<div className="text-[10px] font-normal text-muted-foreground">đo · ước tính</div></TableHead>
+              <TableHead className="text-right">
+                <span className="inline-flex items-center gap-1">
+                  LN góp
+                  <InfoHint>Tầng trên: đo · tầng dưới (ƯT): ước tính.</InfoHint>
+                </span>
+              </TableHead>
               <TableHead className="text-right">Độ chín</TableHead>
             </TableRow>
           </TableHeader>

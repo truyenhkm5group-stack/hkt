@@ -13,6 +13,8 @@ import {
   EmployeeDialog,
 } from "@/app/(dashboard)/payroll/employee-dialog";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { MetricCard } from "@/components/metric-card";
 import { FinanceNav } from "@/components/finance-nav";
 import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
@@ -164,6 +166,14 @@ export default async function PayrollPage({
         eyebrow="Tài chính"
         title="Lương & hoa hồng"
         description={`${period.label} · ${PAYROLL_BASIS_NAME[basis]} (${PAYROLL_BASIS_LABEL[basis].toLowerCase()}) · ${formatNumber(lines.length)} nhân sự đang làm việc`}
+        hint={
+          <p>
+            Ví dụ cơ chế: Trần Anh Quân 35% lợi nhuận tổng → nhập <b>% lợi nhuận tổng = 35</b>. Hồ Minh Hiếu 30% lợi nhuận cá nhân →{" "}
+            <b>% lợi nhuận cá nhân = 30</b>, bí danh <span className="font-mono">HIEU, HIEU_HM</span>, tài khoản QC mặc định{" "}
+            <span className="font-mono">HIEU.HM 01</span>. Lê Việt Nhật 25% → <span className="font-mono">NHAT_LV, NHAT</span>, tài khoản{" "}
+            <span className="font-mono">Nhật LV</span>.
+          </p>
+        }
         actions={
           <div className="flex items-center gap-2">
             {/* Xuất ĐÚNG bảng đang xem: `qs` mang y nguyên kỳ và cơ sở lợi nhuận của màn hình. */}
@@ -222,13 +232,18 @@ export default async function PayrollPage({
           },
         ]}
         resultLabel={
-          basis === "cash"
+          <span className="inline-flex items-center gap-1">
+            Cách tính cơ sở lợi nhuận
+            <InfoHint label="Cách tính cơ sở lợi nhuận">
+          {basis === "cash"
             ? report.cashRatio === null
               ? `Dòng tiền thực: lợi nhuận tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ. ${report.cashRatioReason ?? ""}`
               : `Dòng tiền thực: lợi nhuận tổng = tiền vào (COD về theo bảng kê + trả trước) − tiền ra trong kỳ; lợi nhuận cá nhân = phần cá nhân ở cơ sở “${PAYROLL_BASIS_NAME.profit1}” × ${report.cashRatio.toFixed(2)} (dòng tiền ${formatVND(report.totalProfit, { compact: true })} ÷ ${formatVND(report.marketers.totals.profit, { compact: true })}) — đây là phép QUY ĐỔI THEO TỶ TRỌNG, không phải lợi nhuận đo được của từng người.`
             : basis === "nominal"
               ? "Danh nghĩa: đơn lên trong kỳ × tỷ lệ giao thành công ước tính (GTC = COD thực > 100K) − giá vốn − vận chuyển − QC; chưa phải tiền thật về."
-              : `${PAYROLL_BASIS_LABEL[basis]}. Đơn & doanh thu của mã ghi nhận cho marketer theo FANPAGE phát sinh đơn (page chưa gán → theo tỷ trọng QC). Chủ mã chịu tồn kho & giá vốn, hưởng X% LN đơn của mình; người chạy cùng hưởng Y% LN đơn mình tạo, phần còn lại về chủ mã (khai báo ở trên). Chi phí vận hành đã nhập và chi phí cố định (giả định ở Báo cáo lợi nhuận) phân bổ theo tỷ trọng doanh thu GTC; đóng hàng và nhân viên vận đơn tính theo số đơn gửi của từng mã.`
+              : `${PAYROLL_BASIS_LABEL[basis]}. Đơn & doanh thu của mã ghi nhận cho marketer theo FANPAGE phát sinh đơn (page chưa gán → theo tỷ trọng QC). Chủ mã chịu tồn kho & giá vốn, hưởng X% LN đơn của mình; người chạy cùng hưởng Y% LN đơn mình tạo, phần còn lại về chủ mã (khai báo ở trên). Chi phí vận hành đã nhập và chi phí cố định (giả định ở Báo cáo lợi nhuận) phân bổ theo tỷ trọng doanh thu GTC; đóng hàng và nhân viên vận đơn tính theo số đơn gửi của từng mã.`}
+            </InfoHint>
+          </span>
         }
       />
 
@@ -242,13 +257,20 @@ export default async function PayrollPage({
         căn cứ trả tiền cho người.
       */}
       {!PAYROLL_BASIS_ELIGIBILITY[basis].eligible ? (
-        <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive-foreground dark:text-destructive">
-          <b>Cơ sở “{PAYROLL_BASIS_SHORT[basis]}” KHÔNG dùng để chốt lương được.</b>{" "}
-          <span className="text-muted-foreground">{PAYROLL_BASIS_ELIGIBILITY[basis].why}</span>{" "}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive-foreground dark:text-destructive">
+          <b>Cơ sở “{PAYROLL_BASIS_SHORT[basis]}” KHÔNG dùng để chốt lương được.</b>
+          <DataWarnings
+            tone="danger"
+            items={[
+              PAYROLL_BASIS_ELIGIBILITY[basis].why,
+              <>
+                Cơ sở “{PAYROLL_BASIS_NAME.profit1}” — {PAYROLL_BASIS_ELIGIBILITY.profit1.why}
+              </>,
+            ]}
+          />
           <Link href={`/payroll?${new URLSearchParams({ ...Object.fromEntries(new URLSearchParams(qs)), basis: "profit1" }).toString()}`} className="font-medium underline">
             Xem ở cơ sở “{PAYROLL_BASIS_NAME.profit1}”
-          </Link>{" "}
-          <span className="text-muted-foreground">— {PAYROLL_BASIS_ELIGIBILITY.profit1.why}</span>
+          </Link>
         </div>
       ) : null}
 
@@ -264,21 +286,23 @@ export default async function PayrollPage({
       */}
       {canManage && !daChot ? (
         blockers.length ? (
-          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/30">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive-foreground dark:text-destructive">
             <b>Chưa đủ căn cứ để chốt kỳ này.</b>
-            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted-foreground">
-              {blockers.map((b) => (
-                <li key={`${b.code}-${b.message.slice(0, 40)}`}>{b.message}</li>
+            <DataWarnings
+              tone="danger"
+              label={`${formatNumber(blockers.length)} việc còn thiếu`}
+              items={blockers.map((b) => (
+                <span key={`${b.code}-${b.message.slice(0, 40)}`}>{b.message}</span>
               ))}
-            </ul>
+            />
           </div>
         ) : periodState.key ? (
-          <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-sm dark:border-emerald-900/60 dark:bg-emerald-950/30">
-            <b>Đủ căn cứ để chốt kỳ này.</b>{" "}
-            <span className="text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm dark:border-emerald-900/60 dark:bg-emerald-950/30">
+            <b>Đủ căn cứ để chốt kỳ này.</b>
+            <InfoHint label="Vì sao đủ căn cứ">
               Mọi con số dùng để trả tiền đều đã tính được, không khoản chi nào đang nằm ngoài phép tính
               {report.lines.some((l) => l.carry) ? ", và số dư lỗ đầu kỳ của từng người đã xác lập" : ""}.
-            </span>
+            </InfoHint>
           </div>
         ) : null
       ) : null}
@@ -291,23 +315,27 @@ export default async function PayrollPage({
         chưa khai email thì chính họ KHÔNG xem được dòng của mình. Người quản trị là người sửa được
         việc đó, nên nhắc ở đây, cạnh chỗ sửa, chứ không để họ tự phát hiện qua một lời phàn nàn.
       */}
-      {canManage && chuaNoiTaiKhoan.length ? (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-          <b>{formatNumber(chuaNoiTaiKhoan.length)}/{formatNumber(report.lines.length)} nhân sự chưa khai “Email đăng nhập ERP”</b> —{" "}
-          {chuaNoiTaiKhoan.map((l) => l.employee.shortName || l.employee.name).join(", ")}. Người chỉ có quyền “Lương: xem của mình” sẽ thấy bảng rỗng cho
-          tới khi có email, vì ERP khớp bằng KHOÁ TÀI KHOẢN chứ không so tên (hai người trùng tên mà so tên là đọc được lương của nhau). Bấm sửa từng
-          người ở cột cuối bảng để khai.
-        </div>
-      ) : null}
-
-      {report.cashRatioReason ? (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-          <b>Lợi nhuận cá nhân của kỳ này chưa tính được ở cơ sở dòng tiền.</b> {report.cashRatioReason}
-        </div>
-      ) : null}
+      <DataWarnings
+        items={[
+          canManage && chuaNoiTaiKhoan.length ? (
+            <>
+              <b>{formatNumber(chuaNoiTaiKhoan.length)}/{formatNumber(report.lines.length)} nhân sự chưa khai “Email đăng nhập ERP”</b> —{" "}
+              {chuaNoiTaiKhoan.map((l) => l.employee.shortName || l.employee.name).join(", ")}. Người chỉ có quyền “Lương: xem của mình” sẽ thấy bảng rỗng cho
+              tới khi có email, vì ERP khớp bằng KHOÁ TÀI KHOẢN chứ không so tên (hai người trùng tên mà so tên là đọc được lương của nhau). Bấm sửa từng
+              người ở cột cuối bảng để khai.
+            </>
+          ) : null,
+          report.cashRatioReason ? (
+            <>
+              <b>Lợi nhuận cá nhân của kỳ này chưa tính được ở cơ sở dòng tiền.</b> {report.cashRatioReason}
+            </>
+          ) : null,
+          !viewAll && !lines.length ? "Chưa khớp được nhân sự nào với tài khoản của bạn — nhờ quản trị khai báo email đăng nhập trong hồ sơ nhân sự." : null,
+        ]}
+      />
       {!viewAll ? (
-        <div className="rounded-xl border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
-          Bạn đang xem <b>lương & lợi nhuận của riêng mình</b>{lines.length ? ` (${lines.map((l) => l.employee.shortName || l.employee.name).join(", ")})` : ""}. {lines.length ? "" : "Chưa khớp được nhân sự nào với tài khoản của bạn — nhờ quản trị khai báo email đăng nhập trong hồ sơ nhân sự."}
+        <div className="rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+          Bạn đang xem <b>lương & lợi nhuận của riêng mình</b>{lines.length ? ` (${lines.map((l) => l.employee.shortName || l.employee.name).join(", ")})` : ""}.
         </div>
       ) : null}
       {viewAll ? <ProductOwnersForm config={report.marketers.config} products={products} pages={(await pagesForConfig).map((p) => ({ pageId: p.pageId, name: p.name, orders: p.orders, sales: p.sales }))} marketers={lines.filter((l) => l.employee.department === "Marketing").map((l) => ({ id: l.employee.id, name: l.employee.shortName || l.employee.name }))} canWrite={canManage} /> : null}
@@ -324,14 +352,16 @@ export default async function PayrollPage({
               {formatVND(report.totalProfit, { compact: true })}
             </span>
           }
-          note={`${PAYROLL_BASIS_SHORT[basis]} · DT GTC ${formatVND(m.totals.revenue, { compact: true })} − QC ${formatVND(m.totals.adSpend + m.totals.testSpend, { compact: true })} − giá vốn ${formatVND(m.totals.cogs, { compact: true })} − VC ${formatVND(m.totals.shipping, { compact: true })} − vận hành ${formatVND(m.totals.operating, { compact: true })} (đã nhập ${formatVND(m.totals.operatingEntered, { compact: true })} + cố định ${formatVND(m.totals.fixedCost, { compact: true })} · ${m.totals.months} tháng + đóng hàng & NV vận đơn ${formatVND(m.totals.perOrderOps, { compact: true })})`}
+          note={PAYROLL_BASIS_SHORT[basis]}
+          hint={`${PAYROLL_BASIS_SHORT[basis]} · DT GTC ${formatVND(m.totals.revenue, { compact: true })} − QC ${formatVND(m.totals.adSpend + m.totals.testSpend, { compact: true })} − giá vốn ${formatVND(m.totals.cogs, { compact: true })} − VC ${formatVND(m.totals.shipping, { compact: true })} − vận hành ${formatVND(m.totals.operating, { compact: true })} (đã nhập ${formatVND(m.totals.operatingEntered, { compact: true })} + cố định ${formatVND(m.totals.fixedCost, { compact: true })} · ${m.totals.months} tháng + đóng hàng & NV vận đơn ${formatVND(m.totals.perOrderOps, { compact: true })})`}
           icon={TrendingUp}
           tone={report.totalProfit >= 0 ? "green" : "rose"}
         />
         <MetricCard
           label="Tổng lương kỳ"
           value={totalSalary === null ? "—" : formatVND(totalSalary, { compact: true })}
-          note={`${formatNumber(lines.length)} người · lương cứng ${fixedTotal === null ? "—" : formatVND(fixedTotal, { compact: true })} (${fixedNote})`}
+          note={`${formatNumber(lines.length)} người · lương cứng ${fixedTotal === null ? "—" : formatVND(fixedTotal, { compact: true })}`}
+          hint={`Lương cứng ${fixedNote}.`}
           icon={HandCoins}
           tone="primary"
         />
@@ -345,19 +375,23 @@ export default async function PayrollPage({
           value={formatVND(report.paid.amount, { compact: true })}
           note={
             viewAll
-              ? `${formatNumber(report.paid.count)} khoản chi nhóm “Lương”, theo NGÀY PHÁT SINH · ${
-                  totalSalary === null ? "chưa so được với phải trả (một phần chưa biết)" : `phải trả ${formatVND(totalSalary, { compact: true })} · chênh ${formatVND(report.paid.amount - totalSalary, { compact: true })}`
-                } · toàn shop, KHÔNG tách được theo người`
-              : "Con số toàn shop — ERP chưa tách được tiền đã trả theo từng người."
+              ? `${formatNumber(report.paid.count)} khoản chi nhóm “Lương” · ${
+                  totalSalary === null ? "chưa so được với phải trả" : `phải trả ${formatVND(totalSalary, { compact: true })} · chênh ${formatVND(report.paid.amount - totalSalary, { compact: true })}`
+                } · toàn shop`
+              : "Con số toàn shop"
           }
-          hint={`Tiền lương THẬT SỰ ra khỏi túi trong kỳ: tổng khoản chi nhóm “Lương” ở bảng Chi phí, đọc theo NGÀY PHÁT SINH thô (không qua phép phân bổ theo kỳ). Đây là chiều khác hẳn “phải trả” — lương tháng 8 trả ngày 05/09 là tiền ra của tháng 9 nhưng là chi phí của tháng 8. ${report.paid.missingWhat}`}
+          hint={`${
+            viewAll
+              ? `Theo NGÀY PHÁT SINH · toàn shop, KHÔNG tách được theo người${totalSalary === null ? " · chưa so được với phải trả (một phần chưa biết)" : ""}.`
+              : "Con số toàn shop — ERP chưa tách được tiền đã trả theo từng người."
+          } Tiền lương THẬT SỰ ra khỏi túi trong kỳ: tổng khoản chi nhóm “Lương” ở bảng Chi phí, đọc theo NGÀY PHÁT SINH thô (không qua phép phân bổ theo kỳ). Đây là chiều khác hẳn “phải trả” — lương tháng 8 trả ngày 05/09 là tiền ra của tháng 9 nhưng là chi phí của tháng 8. ${report.paid.missingWhat}`}
           icon={Banknote}
           tone="slate"
         />
         <MetricCard
           label="Chi phí QC test"
           value={formatVND(m.nominal.unmatchedAdSpend, { compact: true })}
-          note="Quảng cáo không thuộc mã nào, trừ vào lợi nhuận tổng và cá nhân"
+          hint="Quảng cáo không thuộc mã nào, trừ vào lợi nhuận tổng và cá nhân"
           icon={Megaphone}
           tone="amber"
         />
@@ -366,9 +400,10 @@ export default async function PayrollPage({
           value={formatVND(unassigned.spend, { compact: true })}
           note={
             unassigned.spend
-              ? `${formatNumber(unassigned.campaigns)} chiến dịch — gán ở module Quảng cáo (cuối trang)`
+              ? `${formatNumber(unassigned.campaigns)} chiến dịch`
               : "Tất cả chiến dịch đã có marketer"
           }
+          hint={unassigned.spend ? "Gán ở module Quảng cáo (cuối trang)." : undefined}
           icon={AlertTriangle}
           tone={unassigned.spend ? "rose" : "slate"}
         />
@@ -392,7 +427,23 @@ export default async function PayrollPage({
       {viewAll && report.marketers.attributionCoverage.total > 0 ? (
         <SectionCard
           title="Doanh thu chia cho marketer bằng căn cứ nào"
-          description="Doanh thu GIAO THÀNH CÔNG của kỳ, tách theo nguồn đã dùng để quyết định ai được tính. Bốn nhóm cộng lại bằng tổng đem chia."
+          hint="Doanh thu GIAO THÀNH CÔNG của kỳ, tách theo nguồn đã dùng để quyết định ai được tính. Bốn nhóm cộng lại bằng tổng đem chia."
+          actions={
+            report.marketers.attributionCoverage.legacyPage > 0 ? (
+              <DataWarnings
+                align="end"
+                items={[
+                  <>
+                    Còn {formatVND(report.marketers.attributionCoverage.legacyPage)} đi bằng bảng gán phẳng.{" "}
+                    <Link href="/marketing/fanpages?tab=assign" className="underline">
+                      Khai mốc hiệu lực cho các fanpage ấy
+                    </Link>{" "}
+                    rồi chạy “Đối soát lại” để phần này chuyển sang ảnh chụp.
+                  </>,
+                ]}
+              />
+            ) : null
+          }
         >
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
             {(
@@ -405,62 +456,54 @@ export default async function PayrollPage({
             ).map(([label, value, hint, tone]) => (
               <div key={label} className="rounded-lg border p-3">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-[11.5px] font-medium">{label}</span>
+                  <span className="inline-flex items-center gap-1 text-[11.5px] font-medium">
+                    {label}
+                    <InfoHint>{hint}</InfoHint>
+                  </span>
                   <span className={cn("numeric text-sm font-semibold", tone === "emerald" && "text-success", tone === "amber" && "text-amber-600 dark:text-amber-400")}>
                     {formatVND(value, { compact: true })}
                   </span>
                 </div>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  {report.marketers.attributionCoverage.total > 0 ? `${Math.round((value / report.marketers.attributionCoverage.total) * 100)}% · ` : ""}
-                  {hint}
-                </p>
+                {report.marketers.attributionCoverage.total > 0 ? (
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">{`${Math.round((value / report.marketers.attributionCoverage.total) * 100)}%`}</p>
+                ) : null}
               </div>
             ))}
           </div>
-          {report.marketers.attributionCoverage.legacyPage > 0 ? (
-            <p className="mt-3 text-[11.5px] leading-5 text-amber-700 dark:text-amber-400">
-              Còn {formatVND(report.marketers.attributionCoverage.legacyPage)} đi bằng bảng gán phẳng.{" "}
-              <Link href="/marketing/fanpages?tab=assign" className="underline">
-                Khai mốc hiệu lực cho các fanpage ấy
-              </Link>{" "}
-              rồi chạy “Đối soát lại” để phần này chuyển sang ảnh chụp.
-            </p>
-          ) : null}
         </SectionCard>
       ) : null}
 
       {viewAll && report.marketers.costWarnings.length ? (
         <SectionCard
           title="Lợi nhuận này đã trừ đủ chi phí chưa?"
-          description="Lời khai của máy chi phí (lib/queries/cost-engine.ts) về nguồn từng khoản — lấy nguyên văn, bảng lương không tự đánh giá lại."
+          hint={
+            <>
+              <p>Lời khai của máy chi phí (lib/queries/cost-engine.ts) về nguồn từng khoản — lấy nguyên văn, bảng lương không tự đánh giá lại.</p>
+              <p className="mt-1">
+                Chi phí nhân sự trong lợi nhuận đang lấy từ{" "}
+                <b>{report.marketers.payrollCovered ? "bảng Lương (lương cứng, chia theo số ngày của kỳ)" : "khoản chi nhóm “Lương” ở bảng Chi phí"}</b>. Hai nguồn
+                không bao giờ được cộng cả hai — xem chi tiết ở{" "}
+                <Link href="/expenses?tab=bao-cao" className="underline">
+                  Chi phí → Báo cáo
+                </Link>
+                .
+              </p>
+            </>
+          }
         >
-          <ul className="space-y-3">
-            {report.marketers.costWarnings.map((w) => (
-              <li
-                key={w.rule}
-                className={cn(
-                  "rounded-lg border px-3 py-2.5",
-                  w.severity === "high" ? "border-destructive/30 bg-destructive/5" : "border-amber-400/40 bg-amber-50 dark:bg-amber-950/30",
-                )}
-              >
-                <p className="text-[13px] font-semibold">{w.title}</p>
-                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{w.detail}</p>
-                <p className="mt-1 text-xs leading-5">
+          <DataWarnings
+            tone={report.marketers.costWarnings.some((w) => w.severity === "high") ? "danger" : "warn"}
+            items={report.marketers.costWarnings.map((w) => (
+              <div key={w.rule}>
+                <p className="font-semibold">{w.title}</p>
+                <p className="text-muted-foreground">{w.detail}</p>
+                <p>
                   <span className="font-medium">Nên làm gì: </span>
                   {w.action}
                 </p>
-              </li>
+              </div>
             ))}
-          </ul>
-          <p className="mt-3 text-[11.5px] leading-5 text-muted-foreground">
-            Chi phí nhân sự trong lợi nhuận đang lấy từ{" "}
-            <b>{report.marketers.payrollCovered ? "bảng Lương (lương cứng, chia theo số ngày của kỳ)" : "khoản chi nhóm “Lương” ở bảng Chi phí"}</b>. Hai nguồn
-            không bao giờ được cộng cả hai — xem chi tiết ở{" "}
-            <Link href="/expenses?tab=bao-cao" className="underline">
-              Chi phí → Báo cáo
-            </Link>
-            .
-          </p>
+          />
         </SectionCard>
       ) : null}
 
@@ -469,8 +512,12 @@ export default async function PayrollPage({
       {daChot ? null : (
       <SectionCard
         title="Bảng lương"
-        description="Lương cứng cộng thưởng theo lợi nhuận và doanh thu."
-        hint="Lương = lương cứng + % lợi nhuận tổng + % lợi nhuận cá nhân + % doanh thu cá nhân · thưởng chỉ tính khi lợi nhuận dương"
+        hint={
+          <>
+            <p>Lương cứng cộng thưởng theo lợi nhuận và doanh thu.</p>
+            <p className="mt-1">Lương = lương cứng + % lợi nhuận tổng + % lợi nhuận cá nhân + % doanh thu cá nhân · thưởng chỉ tính khi lợi nhuận dương</p>
+          </>
+        }
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -714,7 +761,8 @@ export default async function PayrollPage({
       {lines.some((l) => l.carry) ? (
         <SectionCard
           title="Bù trừ lỗ lũy kế theo tháng"
-          description={`Lợi nhuận âm của tháng trước được bù hết trước khi tính hoa hồng. Tiền phải trả không bao giờ âm; cột “HH có dấu” vẫn hiện số âm để theo dõi. Tháng ${lines.find((l) => l.carry)?.carry?.monthKey ?? ""}.`}
+          description={`Tháng ${lines.find((l) => l.carry)?.carry?.monthKey ?? ""}`}
+          hint="Lợi nhuận âm của tháng trước được bù hết trước khi tính hoa hồng. Tiền phải trả không bao giờ âm; cột “HH có dấu” vẫn hiện số âm để theo dõi."
           padded={false}
         >
           <div className="overflow-x-auto">
@@ -779,7 +827,7 @@ export default async function PayrollPage({
 
       <SectionCard
         title={`Lợi nhuận theo mã hàng · ${PAYROLL_BASIS_SHORT[basis]}`}
-        description={basis === "profit2" ? "Doanh thu GTC − QC − giá vốn TỔNG hàng nhập trong kỳ (phiếu nhập) − vận chuyển − vận hành (đã nhập + cố định phân bổ theo doanh thu, đóng hàng + NV vận đơn theo đơn gửi). Chủ mã chịu toàn bộ giá vốn hàng nhập." : "Doanh thu GTC − QC − giá vốn hàng giao thành công − vận chuyển (kể cả đơn hoàn) − vận hành (đã nhập + cố định phân bổ theo doanh thu, đóng hàng + NV vận đơn theo đơn gửi)."}
+        hint={basis === "profit2" ? "Doanh thu GTC − QC − giá vốn TỔNG hàng nhập trong kỳ (phiếu nhập) − vận chuyển − vận hành (đã nhập + cố định phân bổ theo doanh thu, đóng hàng + NV vận đơn theo đơn gửi). Chủ mã chịu toàn bộ giá vốn hàng nhập." : "Doanh thu GTC − QC − giá vốn hàng giao thành công − vận chuyển (kể cả đơn hoàn) − vận hành (đã nhập + cố định phân bổ theo doanh thu, đóng hàng + NV vận đơn theo đơn gửi)."}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -827,7 +875,7 @@ export default async function PayrollPage({
 
       <SectionCard
         title="Lợi nhuận cá nhân theo marketer"
-        description={`Doanh thu GTC − vận chuyển − chi phí phân bổ${basis === "profit2" ? "" : " − giá vốn hàng giao TC"} của mỗi mã chia theo tỷ trọng tiền QC; trừ QC của chính mình${basis === "profit2" ? " và toàn bộ giá vốn hàng nhập của mã mình phụ trách" : ""}; người đẩy chéo trích ${m.config.ownerSharePct}% lợi nhuận cho chủ mã; QC test trừ vào người chạy. Bấm tên để xem theo mã.`}
+        hint={`Doanh thu GTC − vận chuyển − chi phí phân bổ${basis === "profit2" ? "" : " − giá vốn hàng giao TC"} của mỗi mã chia theo tỷ trọng tiền QC; trừ QC của chính mình${basis === "profit2" ? " và toàn bộ giá vốn hàng nhập của mã mình phụ trách" : ""}; người đẩy chéo trích ${m.config.ownerSharePct}% lợi nhuận cho chủ mã; QC test trừ vào người chạy. Bấm tên để xem theo mã.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -965,7 +1013,8 @@ export default async function PayrollPage({
           />
           <SectionCard
             title={`${selectedMarketer.name} · theo mã hàng`}
-            description={`Lợi nhuận cá nhân ${formatVND(selectedMarketer.personalProfit)} = LN trước QC phân bổ ${formatVND(selectedMarketer.attributedProfitBeforeAds)} − QC mã hàng ${formatVND(selectedMarketer.adSpend)} − giá vốn chịu ${formatVND(selectedMarketer.cogsCharged)} + % chủ mã nhận ${formatVND(selectedMarketer.ownerBonusReceived)} − % chia cho chủ mã ${formatVND(selectedMarketer.ownerBonusPaid)} − QC test ${formatVND(selectedMarketer.testSpend)}`}
+            description={`Lợi nhuận cá nhân ${formatVND(selectedMarketer.personalProfit)}`}
+            hint={`Lợi nhuận cá nhân ${formatVND(selectedMarketer.personalProfit)} = LN trước QC phân bổ ${formatVND(selectedMarketer.attributedProfitBeforeAds)} − QC mã hàng ${formatVND(selectedMarketer.adSpend)} − giá vốn chịu ${formatVND(selectedMarketer.cogsCharged)} + % chủ mã nhận ${formatVND(selectedMarketer.ownerBonusReceived)} − % chia cho chủ mã ${formatVND(selectedMarketer.ownerBonusPaid)} − QC test ${formatVND(selectedMarketer.testSpend)}`}
             actions={
               <Button asChild variant="ghost" size="sm">
                 <Link href={`/payroll?${qs}`}>Đóng</Link>
@@ -1057,19 +1106,6 @@ export default async function PayrollPage({
           </SectionCard>
         </div>
       ) : null}
-      <div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-3.5 text-[13px] text-muted-foreground">
-        <Banknote className="mt-0.5 size-4 shrink-0" />
-        <div>
-          Ví dụ cơ chế: Trần Anh Quân 35% lợi nhuận tổng → nhập{" "}
-          <b className="text-foreground">% lợi nhuận tổng = 35</b>. Hồ Minh Hiếu
-          30% lợi nhuận cá nhân →{" "}
-          <b className="text-foreground">% lợi nhuận cá nhân = 30</b>, bí danh{" "}
-          <span className="font-mono">HIEU, HIEU_HM</span>, tài khoản QC mặc
-          định <span className="font-mono">HIEU.HM 01</span>. Lê Việt Nhật 25% →{" "}
-          <span className="font-mono">NHAT_LV, NHAT</span>, tài khoản{" "}
-          <span className="font-mono">Nhật LV</span>.
-        </div>
-      </div>
     </div>
   );
 }

@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { SectionCard } from "@/components/ui-bits";
+import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { Button } from "@/components/ui/button";
 import { ReasonGroupTable } from "@/app/(dashboard)/reports/returns/reason-group-table";
 import { REASON_CONFIDENCE_LABEL, RETURN_REASON_GROUP_LABEL, RETURN_REASON_LABEL, type ReturnReason, type ReturnReasonGroup } from "@/lib/constants/return-reason";
@@ -63,22 +65,29 @@ function ReasonCoveragePanel({ report }: { report: ReturnReasonReport }) {
       <div className="grid gap-2 sm:grid-cols-3">
         {o.map((x) => (
           <div key={x.key} className={cn("rounded-md border px-3 py-2", x.mau)}>
-            <div className="text-[11px] font-medium uppercase tracking-wide opacity-80">{REASON_COVERAGE_LABEL[x.key]}</div>
+            <div className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide opacity-80">
+              {REASON_COVERAGE_LABEL[x.key]}
+              <InfoHint className="normal-case">{REASON_COVERAGE_ACTION[x.key]}</InfoHint>
+            </div>
             <div className="mt-0.5 flex items-baseline gap-1.5">
               <span className="text-lg font-semibold tabular-nums">{formatPercent(pctOrNull(x.n, mau))}</span>
               <span className="text-xs tabular-nums opacity-80">{formatNumber(x.n)} / {formatNumber(mau)} đơn hoàn</span>
             </div>
-            <div className="mt-1 text-[11px] leading-snug opacity-90">{REASON_COVERAGE_ACTION[x.key]}</div>
           </div>
         ))}
       </div>
-      {phuThap ? (
-        <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-200">
-          Độ phủ lý do mới {formatPercent(c.pct)} — <strong>một nhóm lý do hiện 0 KHÔNG có nghĩa là không có trường hợp nào</strong>. Ca của nhóm đó có thể đang nằm trong{" "}
-          {formatNumber(c.unknown)} đơn chưa xác định. Chỉ so sánh các nhóm với nhau khi độ phủ đã đủ cao; trước đó, dùng bảng này để biết CẦN ĐI HỎI ĐÂU chứ chưa phải để kết luận
-          nguyên nhân nào lớn nhất.
-        </p>
-      ) : null}
+      <DataWarnings
+        tone="danger"
+        items={[
+          phuThap ? (
+            <span key="do-phu-thap">
+              Độ phủ lý do mới {formatPercent(c.pct)} — <strong>một nhóm lý do hiện 0 KHÔNG có nghĩa là không có trường hợp nào</strong>. Ca của nhóm đó có thể đang nằm trong{" "}
+              {formatNumber(c.unknown)} đơn chưa xác định. Chỉ so sánh các nhóm với nhau khi độ phủ đã đủ cao; trước đó, dùng bảng này để biết CẦN ĐI HỎI ĐÂU chứ chưa phải để kết luận
+              nguyên nhân nào lớn nhất.
+            </span>
+          ) : null,
+        ]}
+      />
     </div>
   );
 }
@@ -106,8 +115,13 @@ export async function ReturnReasonSection({
 
   if (!bc.finished) {
     return (
-      <SectionCard title="Phân tích lý do hoàn" description="Kỳ này chưa có đơn nào đi tới kết quả cuối.">
-        <p className="text-xs text-muted-foreground">Đơn đang giao, đơn huỷ và đơn chưa rõ kết quả không nằm trong mẫu số — không ở tử, không ở mẫu.</p>
+      <SectionCard
+        title="Phân tích lý do hoàn"
+        description="Kỳ này chưa có đơn nào đi tới kết quả cuối."
+        hint="Đơn đang giao, đơn huỷ và đơn chưa rõ kết quả không nằm trong mẫu số — không ở tử, không ở mẫu."
+        padded={false}
+      >
+        {null}
       </SectionCard>
     );
   }
@@ -135,7 +149,22 @@ export async function ReturnReasonSection({
       <SectionCard
         title="Phân tích lý do hoàn"
         description={`${formatNumber(bc.returned)} đơn hoàn / ${formatNumber(bc.finished)} đơn có kết quả cuối · tỷ lệ hoàn ${formatPercent(bc.returnRate)} · GTC ${formatPercent(bc.successRate)} · trên ${formatNumber(bc.eligibleSent)} kiện đã gửi`}
-        hint={`Mẫu số là đơn ĐÃ CÓ KẾT QUẢ CUỐI (giao thành công · hoàn · hoàn theo luật). Đơn đang giao, đơn huỷ, đơn 'shop huỷ lấy', đơn 'lấy không thành công' và vận đơn chiều về (…1P1) đều KHÔNG nằm trong tử lẫn mẫu — đúng hợp đồng ORDER_OUTCOME đang chạy, không tính lại ở đây. Kỳ lọc theo ${TIME_BASIS_LABEL[bc.basis].toUpperCase()}.${bc.missingBasis ? ` ${bc.missingBasis} ca không có mốc này nên nằm ngoài kỳ — KHÔNG bị gán bừa một ngày khác.` : ""}`}
+        hint={
+          <>
+            <p className="mb-2">{`Mẫu số là đơn ĐÃ CÓ KẾT QUẢ CUỐI (giao thành công · hoàn · hoàn theo luật). Đơn đang giao, đơn huỷ, đơn 'shop huỷ lấy', đơn 'lấy không thành công' và vận đơn chiều về (…1P1) đều KHÔNG nằm trong tử lẫn mẫu — đúng hợp đồng ORDER_OUTCOME đang chạy, không tính lại ở đây. Kỳ lọc theo ${TIME_BASIS_LABEL[bc.basis].toUpperCase()}.${bc.missingBasis ? ` ${bc.missingBasis} ca không có mốc này nên nằm ngoài kỳ — KHÔNG bị gán bừa một ngày khác.` : ""}`}</p>
+            <p>
+              <strong>Chưa xác định được không phải là một lý do</strong>; nó là chỗ dữ liệu còn thiếu. Cột{" "}
+              <strong>Tỷ trọng trên hoàn</strong> tính trên {formatNumber(bc.reasonCoverage.known)} đơn ĐÃ BIẾT lý do (cộng lại đúng 100%); cột <strong>Tỷ lệ trên đã gửi</strong> tính trên cả{" "}
+              {formatNumber(bc.eligibleSent)} kiện đã bàn giao ĐVVC — hai mẫu số cho hai câu hỏi khác nhau.{" "}
+              {/* Cách xếp nhóm là CÁCH NHÌN, sửa được — nói ra ngay cạnh bảng chứ không để người đọc tưởng nó cố định. */}
+              Thấy một lý do bị xếp nhầm nhóm?{" "}
+              <Link className="underline underline-offset-2" href="/work/settings#nhom-ly-do-hoan">
+                Xếp lại ở Công việc → Cấu hình
+              </Link>
+              {" "}— báo cáo đổi ngay và <strong>không một dòng lịch sử nào bị sửa</strong>.
+            </p>
+          </>
+        }
         padded={false}
       >
         <div className="p-3">
@@ -148,18 +177,6 @@ export async function ReturnReasonSection({
             đó nằm cuối trang thì người đọc đã kịp kết luận từ bảng phía trên rồi.
           */}
           <ReasonCoveragePanel report={bc} />
-
-          <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
-            <strong>Chưa xác định được không phải là một lý do</strong>; nó là chỗ dữ liệu còn thiếu. Cột{" "}
-            <strong>Tỷ trọng trên hoàn</strong> tính trên {formatNumber(bc.reasonCoverage.known)} đơn ĐÃ BIẾT lý do (cộng lại đúng 100%); cột <strong>Tỷ lệ trên đã gửi</strong> tính trên cả{" "}
-            {formatNumber(bc.eligibleSent)} kiện đã bàn giao ĐVVC — hai mẫu số cho hai câu hỏi khác nhau.{" "}
-            {/* Cách xếp nhóm là CÁCH NHÌN, sửa được — nói ra ngay cạnh bảng chứ không để người đọc tưởng nó cố định. */}
-            Thấy một lý do bị xếp nhầm nhóm?{" "}
-            <Link className="underline underline-offset-2" href="/work/settings#nhom-ly-do-hoan">
-              Xếp lại ở Công việc → Cấu hình
-            </Link>
-            {" "}— báo cáo đổi ngay và <strong>không một dòng lịch sử nào bị sửa</strong>.
-          </p>
 
           {/*
             BẢNG HAI TẦNG: nhóm lý do mở sẵn, lý do chi tiết xổ ra khi bấm.
@@ -233,8 +250,13 @@ export async function ReturnReasonSection({
 
           <SectionCard
             title={`Vận đơn hoàn vì ${tenTangTren}${openProduct ? ` — mã ${openProduct}` : ""}`}
-            description={`${formatNumber(drilldown.length)} vận đơn · giữ nguyên mọi bộ lọc đang bật (kỳ · mốc · mã hàng · marketer). Tối đa 300 dòng.`}
-            hint="Danh sách này dựng từ CHÍNH tập ca mà bảng phía trên đã đếm — không có truy vấn thứ hai, nên số dòng ở đây bằng đúng con số trên bảng."
+            description={`${formatNumber(drilldown.length)} vận đơn · tối đa 300 dòng`}
+            hint={
+              <>
+                <p className="mb-2">Danh sách này dựng từ CHÍNH tập ca mà bảng phía trên đã đếm — không có truy vấn thứ hai, nên số dòng ở đây bằng đúng con số trên bảng.</p>
+                <p>Giữ nguyên mọi bộ lọc đang bật (kỳ · mốc · mã hàng · marketer). Tối đa 300 dòng.</p>
+              </>
+            }
             actions={
               openProduct ? (
                 <Button asChild variant="ghost" size="sm">
@@ -322,8 +344,15 @@ export async function ReturnReasonSection({
 
       <SectionCard
         title="Hoàn theo mã hàng"
-        description={bc.multiSkuOrders ? `${formatNumber(bc.multiSkuOrders)} đơn có nhiều mã hàng — được đếm cho MỌI mã, nên cộng cột "đơn có kết quả" sẽ lớn hơn tổng thật đúng bằng phần đó.` : "Mỗi đơn thuộc đúng một mã hàng trong kỳ này."}
-        hint="Một đơn nhiều mã hàng mà bị hoàn thì KHÔNG có gì trong dữ liệu nói mã nào gây hoàn. Đơn đó được tính cho cả hai mã (cả hai đều bị ảnh hưởng) và lý do của nó xếp vào nhóm 'lý do khác' thay vì gán bừa cho một mã."
+        description={bc.multiSkuOrders ? `${formatNumber(bc.multiSkuOrders)} đơn có nhiều mã hàng` : "Mỗi đơn thuộc đúng một mã hàng trong kỳ này."}
+        hint={
+          <>
+            <p className={bc.multiSkuOrders ? "mb-2" : undefined}>
+              Một đơn nhiều mã hàng mà bị hoàn thì KHÔNG có gì trong dữ liệu nói mã nào gây hoàn. Đơn đó được tính cho cả hai mã (cả hai đều bị ảnh hưởng) và lý do của nó xếp vào nhóm &apos;lý do khác&apos; thay vì gán bừa cho một mã.
+            </p>
+            {bc.multiSkuOrders ? <p>{`${formatNumber(bc.multiSkuOrders)} đơn có nhiều mã hàng — được đếm cho MỌI mã, nên cộng cột "đơn có kết quả" sẽ lớn hơn tổng thật đúng bằng phần đó.`}</p> : null}
+          </>
+        }
         padded={false}
       >
         <TableToolsFor tableId="ly-do-hoan-theo-ma" />

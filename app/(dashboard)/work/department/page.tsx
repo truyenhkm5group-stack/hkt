@@ -81,8 +81,14 @@ export default async function DepartmentWorkPage({ searchParams }: { searchParam
       <PageHeader
         eyebrow="Công việc"
         title={crossDept ? "Phòng nào đang kẹt?" : `Việc của ${DEPARTMENT_LABEL[dept]}`}
-        description={crossDept ? "Sức khoẻ từng phòng, rồi bấm vào phòng để xem hàng đợi của phòng đó." : "Toàn bộ việc đang mở của phòng, kèm tải theo người."}
-        hint="Sức khoẻ KHÔNG tính bằng số lượng việc: một phòng 200 việc đúng hạn đang chạy tốt, một phòng 12 việc mà 8 việc quá hạn thì đang kẹt. Thước đo là TỶ LỆ QUÁ HẠN (≥30% = kẹt, ≥10% = cần để mắt) và SỐ VIỆC BỊ CHẶN (≥5 = kẹt) — hai thứ nói được rằng công việc không chảy."
+        hint={
+          <>
+            <p>{crossDept ? "Sức khoẻ từng phòng, rồi bấm vào phòng để xem hàng đợi của phòng đó." : "Toàn bộ việc đang mở của phòng, kèm tải theo người."}</p>
+            <p className="mt-1">
+              Sức khoẻ KHÔNG tính bằng số lượng việc: một phòng 200 việc đúng hạn đang chạy tốt, một phòng 12 việc mà 8 việc quá hạn thì đang kẹt. Thước đo là TỶ LỆ QUÁ HẠN (≥30% = kẹt, ≥10% = cần để mắt) và SỐ VIỆC BỊ CHẶN (≥5 = kẹt) — hai thứ nói được rằng công việc không chảy.
+            </p>
+          </>
+        }
       />
 
       {cockpit ? (
@@ -172,7 +178,7 @@ export default async function DepartmentWorkPage({ searchParams }: { searchParam
 
       <SectionCard
         title="Tải theo người"
-        description="Số việc đứng cạnh ĐỘ KHÓ trung bình — 10 ca khó không được đọc thấp hơn 100 ca tầm thường."
+        hint="Số việc đứng cạnh ĐỘ KHÓ trung bình — 10 ca khó không được đọc thấp hơn 100 ca tầm thường."
         padded={false}
       >
         {queue.workload.length ? (

@@ -1,6 +1,8 @@
 import { AlertTriangle, Filter, TrendingDown, Users } from "lucide-react";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { PageHeader } from "@/components/page-header";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -56,30 +58,28 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
       <PageHeader
         eyebrow="Báo cáo"
         title="Phễu bán hàng & hiệu suất nhân sự"
-        description="Từ đơn được tạo tới tiền thật đã bán được, và ai làm ra phần nào."
-        hint="Phễu tính theo NGÀY TẠO ĐƠN, không theo ngày xảy ra từng bước — nếu mỗi bước đếm theo ngày riêng thì bước sau có thể lớn hơn bước trước và cái hình vẽ ra không còn là cái phễu. Đơn còn đang chạy được đếm riêng, KHÔNG tính là thất bại. Phần TRƯỚC ĐƠN (khách nhắn → được trả lời → cho SĐT → cho địa chỉ) nằm ở khối riêng ngay dưới, và cố ý KHÔNG nối vào phễu đơn vì mẫu số khác nhau về bản chất — xem docs/revenue-conversion-contract.md."
+        hint="Từ đơn được tạo tới tiền thật đã bán được, và ai làm ra phần nào. Phễu tính theo NGÀY TẠO ĐƠN, không theo ngày xảy ra từng bước — nếu mỗi bước đếm theo ngày riêng thì bước sau có thể lớn hơn bước trước và cái hình vẽ ra không còn là cái phễu. Đơn còn đang chạy được đếm riêng, KHÔNG tính là thất bại. Phần TRƯỚC ĐƠN (khách nhắn → được trả lời → cho SĐT → cho địa chỉ) nằm ở khối riêng ngay dưới, và cố ý KHÔNG nối vào phễu đơn vì mẫu số khác nhau về bản chất — xem docs/revenue-conversion-contract.md."
       />
 
       <DataTableToolbar period={{ defaultKey: "30d" }} />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Đơn được tạo" value={formatNumber(created)} note="Toàn bộ đơn phát sinh trong kỳ" icon={Users} tone="slate" />
+        <MetricCard label="Đơn được tạo" value={formatNumber(created)} hint="Toàn bộ đơn phát sinh trong kỳ" icon={Users} tone="slate" />
         <MetricCard label="Giao thành công" value={formatNumber(delivered)} note={`${pct(created > 0 ? delivered / created : null)} số đơn đã tạo`} icon={TrendingDown} tone={delivered > 0 ? "green" : "slate"} />
         <MetricCard
           label="Còn đang chạy"
           value={formatNumber(funnel.unfinished)}
-          note="Chưa biết kết quả — KHÔNG tính là thất bại. Kỳ đang chạy luôn có nhiều đơn ở đây."
+          hint="Chưa biết kết quả — KHÔNG tính là thất bại. Kỳ đang chạy luôn có nhiều đơn ở đây."
           icon={Filter}
           tone={funnel.unfinished ? "amber" : "slate"}
         />
-        <MetricCard label="Đơn huỷ" value={formatNumber(funnel.cancelled)} note="Rời phễu, không phải thất bại giao vận" icon={AlertTriangle} tone={funnel.cancelled ? "rose" : "slate"} />
+        <MetricCard label="Đơn huỷ" value={formatNumber(funnel.cancelled)} hint="Rời phễu, không phải thất bại giao vận" icon={AlertTriangle} tone={funnel.cancelled ? "rose" : "slate"} />
       </section>
 
       {/* ───────── PHỄU ───────── */}
       <SectionCard
         title="Năm bước đo được"
-        description="Mỗi bước kèm tỷ lệ so với bước liền trước và mẫu số của nó."
-        hint="Bước 'đã rời kho' dùng mốc lấy hàng của Viettel Post chứ không dùng trạng thái Pancake: Pancake nói 'đã gửi' khi người bán bấm nút, còn hàng rời kho là một sự kiện của đơn vị vận chuyển. Bước 'giao thành công' dùng lại đúng công thức kết quả đơn của toàn ERP."
+        hint="Mỗi bước kèm tỷ lệ so với bước liền trước và mẫu số của nó. Bước 'đã rời kho' dùng mốc lấy hàng của Viettel Post chứ không dùng trạng thái Pancake: Pancake nói 'đã gửi' khi người bán bấm nút, còn hàng rời kho là một sự kiện của đơn vị vận chuyển. Bước 'giao thành công' dùng lại đúng công thức kết quả đơn của toàn ERP."
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -117,8 +117,7 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
       {/* ───────── THEO KÊNH ───────── */}
       <SectionCard
         title="Chuyển đổi theo kênh đặt hàng"
-        description="Tỷ lệ giao thành công của từng kênh, mẫu số là đơn ĐÃ RỜI KHO."
-        hint="Kênh nào cũng không chịu trách nhiệm cho đơn chưa từng gửi đi, nên mẫu số là đơn đã rời kho chứ không phải tổng đơn. Gộp chung các kênh thành một con số trung bình sẽ không mô tả đúng kênh nào cả."
+        hint="Tỷ lệ giao thành công của từng kênh, mẫu số là đơn ĐÃ RỜI KHO. Kênh nào cũng không chịu trách nhiệm cho đơn chưa từng gửi đi, nên mẫu số là đơn đã rời kho chứ không phải tổng đơn. Gộp chung các kênh thành một con số trung bình sẽ không mô tả đúng kênh nào cả."
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -162,16 +161,22 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
       {/* ───────── HIỆU SUẤT NHÂN SỰ ───────── */}
       <SectionCard
         title={`Hiệu suất theo ${roleMeta?.label.toLowerCase() ?? "người phụ trách"}`}
-        description={`Độ phủ gán người ${formatPercent(staff.coverage * 100)}${staff.lowCoverage ? ` — DƯỚI ${LOW_COVERAGE_PCT}%, mọi so sánh dưới đây chỉ nói về phần đơn có gán` : ""}`}
+        description={
+          <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            {`Độ phủ gán người ${formatPercent(staff.coverage * 100)}`}
+            <DataWarnings
+              items={[
+                staff.lowCoverage ? `DƯỚI ${LOW_COVERAGE_PCT}%, mọi so sánh dưới đây chỉ nói về phần đơn có gán` : null,
+                staff.lowCoverage ? `Chỉ ${formatPercent(staff.coverage * 100)} số đơn trong kỳ có gán ${roleMeta?.label.toLowerCase()}. Bảng dưới mô tả đúng phần đó, không mô tả toàn shop.` : null,
+                staff.cogsCoverage < 1 ? `Chỉ ${formatPercent(staff.cogsCoverage * 100)} đơn giao thành công tra được giá vốn — cột Đóng góp để trống ở nơi chưa biết, không điền 0.` : null,
+              ]}
+            />
+          </span>
+        }
         hint="Xếp theo DOANH THU GIAO THÀNH CÔNG, không theo số đơn: người lên 100 đơn mà hoàn 70 kém hơn người lên 50 đơn giao trót lọt cả 50. Tỷ lệ tính trên đơn ĐÃ KẾT THÚC, nên người vừa nhận đơn hôm qua không bị tính là đã thất bại. Đơn không gán được cho ai nằm ở dòng 'Chưa gán' cuối bảng, KHÔNG bị chia đều cho nhân viên."
         actions={<RoleTabs current={role} />}
         padded={false}
       >
-        {staff.lowCoverage ? (
-          <p className="border-b bg-amber-50 px-5 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-            Chỉ {formatPercent(staff.coverage * 100)} số đơn trong kỳ có gán {roleMeta?.label.toLowerCase()}. Bảng dưới mô tả đúng phần đó, không mô tả toàn shop.
-          </p>
-        ) : null}
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
@@ -199,7 +204,7 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
                   <TableRow key={r.name} className={cn(r.unassigned && "text-muted-foreground")}>
                     <TableCell className="font-medium">
                       {r.name}
-                      {r.unassigned ? <span className="ml-1 text-xs">· không gán được, không chia đều</span> : null}
+                      {r.unassigned ? <InfoHint className="ml-1 align-middle">không gán được, không chia đều</InfoHint> : null}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.orders)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.delivered)}</TableCell>
@@ -215,11 +220,6 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
             </TableBody>
           </Table>
         </div>
-        {staff.cogsCoverage < 1 ? (
-          <p className="border-t px-5 py-2 text-xs text-muted-foreground">
-            Chỉ {formatPercent(staff.cogsCoverage * 100)} đơn giao thành công tra được giá vốn — cột Đóng góp để trống ở nơi chưa biết, không điền 0.
-          </p>
-        ) : null}
       </SectionCard>
 
       {/* ───────── CHUYỂN ĐỔI THEO CHIỀU ───────── */}
@@ -234,8 +234,17 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
       {/* ───────── ĐỘ PHỦ GÁN NGƯỜI ───────── */}
       <SectionCard
         title="Độ phủ gán người"
-        description="Bao nhiêu phần trăm đơn trong kỳ có ghi từng vai."
-        hint="Năm vai KHÔNG thay thế được cho nhau. Chỉ 'người đổi trạng thái' có kèm mốc thời gian, nên chỉ nó trả lời được 'ai xác nhận đơn, lúc nào'. Không có độ phủ thì người xử lý 10 trên 100 đơn trông y hệt người xử lý 10 trên 1.000 đơn."
+        hint={
+          <>
+            <p className="mb-2">Bao nhiêu phần trăm đơn trong kỳ có ghi từng vai.</p>
+            <p className="mb-2">
+              Năm vai KHÔNG thay thế được cho nhau. Chỉ &apos;người đổi trạng thái&apos; có kèm mốc thời gian, nên chỉ nó trả lời được &apos;ai xác nhận đơn, lúc nào&apos;. Không có độ phủ thì người xử lý 10 trên 100 đơn trông y hệt người xử lý 10 trên 1.000 đơn.
+            </p>
+            <p>
+              Đơn không gán được luôn hiện thành dòng &ldquo;{UNASSIGNED_LABEL}&rdquo;, không bao giờ chia đều cho nhân viên: chia đều làm tổng khớp trong khi từng người đều sai.
+            </p>
+          </>
+        }
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -262,9 +271,6 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
             </TableBody>
           </Table>
         </div>
-        <p className="border-t px-5 py-2 text-xs text-muted-foreground">
-          Đơn không gán được luôn hiện thành dòng &ldquo;{UNASSIGNED_LABEL}&rdquo;, không bao giờ chia đều cho nhân viên: chia đều làm tổng khớp trong khi từng người đều sai.
-        </p>
       </SectionCard>
     </div>
   );

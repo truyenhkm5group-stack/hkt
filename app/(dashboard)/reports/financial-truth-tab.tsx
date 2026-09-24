@@ -1,4 +1,5 @@
 import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { MetricCard } from "@/components/metric-card";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
@@ -24,49 +25,59 @@ export async function FinancialTruthTab({ period }: { period: Period }) {
           value={<Money value={f.revenue.booked} />}
           icon={ShoppingBag}
           tone="primary"
-          note={`${formatNumber(f.revenue.bookedOrders)} đơn khách đã chốt — chưa nói gì về việc giao được hay thu được tiền`}
+          note={`${formatNumber(f.revenue.bookedOrders)} đơn khách đã chốt`}
+          hint="Chưa nói gì về việc giao được hay thu được tiền."
         />
         <MetricCard
           label="Doanh thu GIAO THÀNH CÔNG"
           value={<Money value={f.revenue.delivered} />}
           icon={PackageCheck}
           tone="blue"
-          note={`${formatNumber(f.revenue.deliveredOrders)} đơn tới tay khách · ${formatVND(f.revenue.returned)} của ${formatNumber(f.revenue.returnedOrders)} đơn hoàn không bao giờ về`}
+          note={`${formatNumber(f.revenue.deliveredOrders)} đơn tới tay khách · hoàn ${formatVND(f.revenue.returned)} (${formatNumber(f.revenue.returnedOrders)} đơn)`}
+          hint={`${formatVND(f.revenue.returned)} của ${formatNumber(f.revenue.returnedOrders)} đơn hoàn không bao giờ về.`}
         />
         <MetricCard
           label="TIỀN THỰC NHẬN"
           value={<Money value={f.cash.total} />}
           icon={Wallet}
           tone="green"
-          note={`Bảng kê ${formatVND(f.cash.received)} + khách chuyển trước ${formatVND(f.cash.prepaid)} — đây mới là tiền trong tài khoản`}
+          note={`Bảng kê ${formatVND(f.cash.received)} + khách chuyển trước ${formatVND(f.cash.prepaid)}`}
+          hint="Đây mới là tiền trong tài khoản."
         />
         <MetricCard
           label="COD Viettel Post đang cầm"
           value={<Money value={f.cod.collected} />}
           icon={Truck}
           tone="amber"
-          note={`${formatNumber(f.cod.collectedCount)} vận đơn ĐVVC khai đã thu — lời khai, chưa phải chứng từ`}
+          note={`${formatNumber(f.cod.collectedCount)} vận đơn ĐVVC khai đã thu`}
+          hint="Lời khai, chưa phải chứng từ."
         />
         <MetricCard
           label="COD đã đối soát"
           value={<Money value={f.cod.reconciled} />}
           icon={HandCoins}
           tone="blue"
-          note={`${formatNumber(f.cod.reconciledCount)} vận đơn hai bên đã chốt số, chờ chuyển khoản`}
+          note={`${formatNumber(f.cod.reconciledCount)} vận đơn`}
+          hint="Vận đơn hai bên đã chốt số, chờ chuyển khoản."
         />
         <MetricCard
           label="Giao xong mà chưa thấy tiền"
           value={<Money value={f.cod.outstanding} />}
           icon={Banknote}
           tone="rose"
-          note={`${formatNumber(f.cod.outstandingCount)} đơn giao thành công chưa có đồng nào trên bảng kê`}
+          note={`${formatNumber(f.cod.outstandingCount)} đơn giao thành công`}
+          hint="Đơn giao thành công chưa có đồng nào trên bảng kê."
         />
       </div>
 
       <SectionCard
         title="Bậc thang lợi nhuận"
-        description="Từ doanh thu giao thành công xuống lợi nhuận, mỗi bậc ghi rõ độ chính xác."
-        hint="Dòng ghi 'Chỉ có ở mức kỳ' là chi phí không phân bổ về từng đơn được. Chia nhỏ chúng ra theo đơn là bịa ra độ chính xác không có thật."
+        hint={
+          <>
+            <p className="mb-2">Từ doanh thu giao thành công xuống lợi nhuận, mỗi bậc ghi rõ độ chính xác.</p>
+            <p>Dòng ghi &apos;Chỉ có ở mức kỳ&apos; là chi phí không phân bổ về từng đơn được. Chia nhỏ chúng ra theo đơn là bịa ra độ chính xác không có thật.</p>
+          </>
+        }
       >
         <div className="overflow-x-auto">
           <Table>
@@ -75,13 +86,17 @@ export async function FinancialTruthTab({ period }: { period: Period }) {
                 <TableHead>Khoản mục</TableHead>
                 <TableHead className="text-right">Số tiền</TableHead>
                 <TableHead>Độ chính xác</TableHead>
-                <TableHead>Ghi chú</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {f.waterfall.map((line) => (
                 <TableRow key={line.key} className={cn(line.subtotal && "bg-muted/40 font-semibold")}>
-                  <TableCell className={cn(line.subtotal && "font-semibold")}>{line.label}</TableCell>
+                  <TableCell className={cn(line.subtotal && "font-semibold")}>
+                    <span className="inline-flex items-center gap-1">
+                      {line.label}
+                      {line.note ? <InfoHint>{line.note}</InfoHint> : null}
+                    </span>
+                  </TableCell>
                   <TableCell className={cn("numeric text-right whitespace-nowrap", line.amount < 0 && "text-destructive")}>
                     {formatVND(line.amount)}
                     {line.known ? null : <span className="ml-1 text-[11px] text-amber-600 dark:text-amber-400">(thiếu dữ liệu)</span>}
@@ -92,7 +107,6 @@ export async function FinancialTruthTab({ period }: { period: Period }) {
                       <InfoHint>{PRECISION_HINT[line.precision]}</InfoHint>
                     </span>
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{line.note}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -102,27 +116,33 @@ export async function FinancialTruthTab({ period }: { period: Period }) {
 
       <SectionCard
         title="Lợi nhuận ước tính so với lợi nhuận thực nhận"
-        description="Hai con số khác nhau về bản chất, không phải hai cách làm tròn."
-        hint="Ước tính đi theo ĐƠN trong kỳ; thực nhận đi theo TIỀN đã về tài khoản. Chênh lệch chủ yếu là phần Viettel Post còn giữ."
+        hint={
+          <>
+            <p className="mb-2">Hai con số khác nhau về bản chất, không phải hai cách làm tròn.</p>
+            <p>Ước tính đi theo ĐƠN trong kỳ; thực nhận đi theo TIỀN đã về tài khoản. Chênh lệch chủ yếu là phần Viettel Post còn giữ.</p>
+          </>
+        }
       >
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-xl border p-4">
-            <p className="text-[13px] text-muted-foreground">Lợi nhuận ƯỚC TÍNH (theo đơn trong kỳ)</p>
+            <p className="flex items-center gap-1 text-[13px] text-muted-foreground">
+              Lợi nhuận ƯỚC TÍNH (theo đơn trong kỳ)
+              <InfoHint>Lợi nhuận góp {formatVND(f.contribution)} trừ chi phí vận hành.</InfoHint>
+            </p>
             <p className={cn("numeric mt-1 text-2xl font-bold", f.estimatedProfit < 0 && "text-destructive")}>{formatVND(f.estimatedProfit)}</p>
-            <p className="mt-1 text-xs text-muted-foreground">Lợi nhuận góp {formatVND(f.contribution)} trừ chi phí vận hành.</p>
           </div>
           <div className="rounded-xl border p-4">
-            <p className="text-[13px] text-muted-foreground">Lợi nhuận THỰC NHẬN (theo dòng tiền)</p>
+            <p className="flex items-center gap-1 text-[13px] text-muted-foreground">
+              Lợi nhuận THỰC NHẬN (theo dòng tiền)
+              {f.realizedProfit === null ? null : <InfoHint>Tiền thực nhận trừ chi quảng cáo và chi phí vận hành trong kỳ.</InfoHint>}
+            </p>
             {f.realizedProfit === null ? (
               <>
                 <p className="mt-1 text-2xl font-bold text-muted-foreground">Chưa xác minh</p>
-                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">{f.realizedBlockedBy}</p>
+                <DataWarnings className="mt-1" items={[f.realizedBlockedBy]} />
               </>
             ) : (
-              <>
-                <p className={cn("numeric mt-1 text-2xl font-bold", f.realizedProfit < 0 && "text-destructive")}>{formatVND(f.realizedProfit)}</p>
-                <p className="mt-1 text-xs text-muted-foreground">Tiền thực nhận trừ chi quảng cáo và chi phí vận hành trong kỳ.</p>
-              </>
+              <p className={cn("numeric mt-1 text-2xl font-bold", f.realizedProfit < 0 && "text-destructive")}>{formatVND(f.realizedProfit)}</p>
             )}
           </div>
         </div>

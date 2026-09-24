@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { PayrollTabs } from "@/app/(dashboard)/payroll/tabs";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
+import { InfoHint } from "@/components/info-hint";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { can, requireUser } from "@/lib/auth/session";
 import { canOpenPayroll, payrollLineVisible, resolvePayrollScope } from "@/lib/auth/payroll-scope";
@@ -98,6 +99,9 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
         <SectionCard
           title={`${line.employee.name}${line.employee.shortName ? ` · ${line.employee.shortName}` : ""}`}
           description={`${line.employee.department} · kỳ ${period.label}`}
+          hint={`Phiếu này đọc từ CÙNG một phép tính với bảng lương và tệp xuất — không có công thức riêng nào ở đây.${
+            state.frozen ? " Kỳ đã khoá nên con số lấy từ ảnh chụp lúc khoá, kể cả khi chính sách hôm nay đã đổi." : " Kỳ chưa khoá nên con số còn đổi theo dữ liệu nguồn."
+          }`}
           actions={
             state.frozen ? (
               <span className="rounded bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200">
@@ -185,11 +189,11 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
             </table>
           </div>
 
-          <p className="mt-3 text-[11px] text-muted-foreground">
-            Phiếu này đọc từ CÙNG một phép tính với bảng lương và tệp xuất — không có công thức riêng nào ở đây.
-            {state.frozen ? " Kỳ đã khoá nên con số lấy từ ảnh chụp lúc khoá, kể cả khi chính sách hôm nay đã đổi." : " Kỳ chưa khoá nên con số còn đổi theo dữ liệu nguồn."}
-            {line.carry ? ` Bù lỗ lũy kế tháng ${line.carry.monthKey}: lỗ đầu kỳ ${formatVND(line.carry.openingBalance)}, chuyển sang kỳ sau ${formatVND(line.carry.closingBalance)}.` : ""}
-          </p>
+          {line.carry ? (
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              {`Bù lỗ lũy kế tháng ${line.carry.monthKey}: lỗ đầu kỳ ${formatVND(line.carry.openingBalance)}, chuyển sang kỳ sau ${formatVND(line.carry.closingBalance)}.`}
+            </p>
+          ) : null}
         </SectionCard>
       )}
     </div>
@@ -208,8 +212,10 @@ function StatutoryRow({ statutory }: { statutory: { amount: number | null; label
   return (
     <tr className="border-b">
       <td className="py-1.5 pr-3">
-        Khấu trừ theo luật (thuế TNCN · BHXH · BHYT · BHTN)
-        <span className="ml-2 text-[11px] text-muted-foreground">{statutory.hint}</span>
+        <span className="inline-flex items-center gap-1">
+          Khấu trừ theo luật (thuế TNCN · BHXH · BHYT · BHTN)
+          <InfoHint>{statutory.hint}</InfoHint>
+        </span>
       </td>
       <td className="py-1.5 text-right tabular-nums">
         {statutory.amount === null ? (

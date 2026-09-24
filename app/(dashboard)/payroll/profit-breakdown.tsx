@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { TableToolsFor } from "@/components/data-table/table-tools";
 import { ExternalLink } from "lucide-react";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { COMPENSATION_PROFIT_LABEL, COMPENSATION_PROFIT_RULES } from "@/lib/constants/compensation-profit";
 import { MISSING_TEXT, formatNumber, formatVND } from "@/lib/format";
@@ -104,7 +106,21 @@ export function ProfitBreakdown({
   return (
     <SectionCard
       title={`Bóc tách ${COMPENSATION_PROFIT_LABEL.toLowerCase()} — ${marketer.name}`}
-      description="Mỗi dòng bấm được về chứng từ gốc. Hoa hồng KHÔNG nằm trong cơ sở này — nó được tính TỪ cơ sở, rồi trừ ở bước sau để ra lợi nhuận kế toán."
+      hint="Mỗi dòng bấm được về chứng từ gốc. Hoa hồng KHÔNG nằm trong cơ sở này — nó được tính TỪ cơ sở, rồi trừ ở bước sau để ra lợi nhuận kế toán."
+      actions={
+        lech !== 0 ? (
+          <DataWarnings
+            tone="danger"
+            align="end"
+            items={[
+              <>
+                Bảng bóc tách cộng ra {formatVND(congLai)} nhưng máy tính ra {formatVND(marketer.personalProfit)} — lệch {formatVND(lech)}. Một khoản đã vào phép tính mà chưa có dòng ở đây; đừng tin bảng này
+                cho tới khi lệch về 0.
+              </>,
+            ]}
+          />
+        ) : null
+      }
     >
       <TableToolsFor tableId="payroll-profit-breakdown-1" />
       <div className="overflow-x-auto">
@@ -113,8 +129,10 @@ export function ProfitBreakdown({
             {rows.map((r) => (
               <tr key={r.label} className="border-b align-top last:border-b-0">
                 <td className="py-1.5 pr-3">
-                  <span className="font-medium">{r.label}</span>
-                  <div className="text-[11px] text-muted-foreground">{r.why}</div>
+                  <span className="inline-flex items-center gap-1 font-medium">
+                    {r.label}
+                    <InfoHint>{r.why}</InfoHint>
+                  </span>
                 </td>
                 <td className="w-40 py-1.5 pr-3 text-right tabular-nums">
                   <span className={cn(r.sign === -1 && (r.value ?? 0) !== 0 ? "text-rose-700 dark:text-rose-400" : "")}>
@@ -145,19 +163,20 @@ export function ProfitBreakdown({
         </table>
       </div>
 
-      {lech !== 0 ? (
-        <p className="mt-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-[12px] text-destructive">
-          Bảng bóc tách cộng ra {formatVND(congLai)} nhưng máy tính ra {formatVND(marketer.personalProfit)} — lệch {formatVND(lech)}. Một khoản đã vào phép tính mà chưa có dòng ở đây; đừng tin bảng này
-          cho tới khi lệch về 0.
-        </p>
-      ) : null}
-
       {/* ═══ BƯỚC HAI: BÙ LỖ, RỒI MỚI TỚI TIỀN ═══ */}
       {carry ? (
         <>
           <TableToolsFor tableId="payroll-profit-breakdown-2" />
           <div className="mt-4 overflow-x-auto rounded-lg border bg-muted/30 p-3">
-            <p className="mb-2 text-[12px] font-medium">Bù lỗ lũy kế · tháng {carry.monthKey}</p>
+            <p className="mb-2 flex items-center gap-1 text-[12px] font-medium">
+              Bù lỗ lũy kế · tháng {carry.monthKey}
+              <InfoHint>
+                {carry.commissionBase === 0
+                  ? "Số dư sau bù vẫn âm nên hoa hồng bằng 0, và phần âm còn lại chuyển sang kỳ sau — con số âm KHÔNG bị xoá."
+                  : "Đã bù hết lỗ cũ; hoa hồng chỉ tính trên phần lợi nhuận CÒN LẠI sau khi bù."}{" "}
+                Căn cứ số dư đầu kỳ: {carry.openingReason}
+              </InfoHint>
+            </p>
             <table id="payroll-profit-breakdown-2" className="w-full min-w-[520px] text-[13px]">
               <tbody>
                 <tr className="border-b">
@@ -202,17 +221,14 @@ export function ProfitBreakdown({
                 </tr>
               </tbody>
             </table>
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              {carry.commissionBase === 0
-                ? "Số dư sau bù vẫn âm nên hoa hồng bằng 0, và phần âm còn lại chuyển sang kỳ sau — con số âm KHÔNG bị xoá."
-                : "Đã bù hết lỗ cũ; hoa hồng chỉ tính trên phần lợi nhuận CÒN LẠI sau khi bù."}{" "}
-              Căn cứ số dư đầu kỳ: {carry.openingReason}
-            </p>
           </div>
         </>
       ) : (
-        <p className="mt-3 text-[12px] text-muted-foreground">
-          Sổ bù lỗ lũy kế KHÔNG áp dụng cho kỳ này (chưa bật, kỳ không phải một tháng lịch, hoặc tháng nằm trước mốc mở sổ). Đây là “không áp dụng”, khác hẳn “số dư bằng 0”.
+        <p className="mt-3 flex items-center gap-1 text-[12px] text-muted-foreground">
+          Bù lỗ lũy kế: không áp dụng
+          <InfoHint>
+            Sổ bù lỗ lũy kế KHÔNG áp dụng cho kỳ này (chưa bật, kỳ không phải một tháng lịch, hoặc tháng nằm trước mốc mở sổ). Đây là “không áp dụng”, khác hẳn “số dư bằng 0”.
+          </InfoHint>
         </p>
       )}
     </SectionCard>

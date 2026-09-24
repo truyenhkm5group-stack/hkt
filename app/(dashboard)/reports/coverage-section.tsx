@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, ShieldCheck } from "lucide-react";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { SectionCard } from "@/components/ui-bits";
 import { COGS_QUALITY_LABEL, COGS_QUALITY_NOTE, getCogsCoverage } from "@/lib/queries/cogs-quality";
 import { COVERAGE_ACTION_LABEL, getProfitCoverage } from "@/lib/queries/profit-coverage";
@@ -23,8 +25,12 @@ export async function ProfitCoverageSection({ period }: { period: Period }) {
   return (
     <SectionCard
       title="Lợi nhuận này dựa trên dữ liệu đầy đủ tới đâu"
-      description="Năm thành phần đo riêng, không gộp thành một điểm."
-      hint="Phần trăm thấp KHÔNG có nghĩa là số sai — nó có nghĩa là phần đó chưa kiểm chứng được. Chưa biết khác không, và không bao giờ được làm tròn thành 0."
+      hint={
+        <>
+          <p className="mb-2">Năm thành phần đo riêng, không gộp thành một điểm.</p>
+          <p>Phần trăm thấp KHÔNG có nghĩa là số sai — nó có nghĩa là phần đó chưa kiểm chứng được. Chưa biết khác không, và không bao giờ được làm tròn thành 0.</p>
+        </>
+      }
       padded={false}
     >
       <div className="divide-y">
@@ -34,8 +40,8 @@ export async function ProfitCoverageSection({ period }: { period: Period }) {
               <div className="flex items-center gap-2 text-sm font-medium">
                 <ShieldCheck className={cn("size-4 shrink-0", c.pct === null ? "text-muted-foreground" : c.pct >= 0.8 ? "text-emerald-600" : c.pct >= 0.5 ? "text-amber-600" : "text-rose-600")} />
                 {c.label}
+                <InfoHint>{c.hauQua}</InfoHint>
               </div>
-              <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">{c.hauQua}</p>
             </div>
 
             <div className="w-[150px] shrink-0">
@@ -72,25 +78,29 @@ export async function ProfitCoverageSection({ period }: { period: Period }) {
 
       {/* ── BA HẠNG GIÁ VỐN: phần nào của lợi nhuận dựa trên chứng từ, phần nào là suy ngược ── */}
       <div className="border-t bg-muted/30 px-4 py-3">
-        <div className="text-sm font-medium">Giá vốn của {formatNumber(cogs.deliveredOrders)} đơn đã giao đến từ đâu</div>
+        <div className="flex flex-wrap items-center gap-1.5 text-sm font-medium">
+          Giá vốn của {formatNumber(cogs.deliveredOrders)} đơn đã giao đến từ đâu
+          <InfoHint>
+            <b>Cách sửa:</b> {cogs.huongSua}
+          </InfoHint>
+          <DataWarnings items={cogs.notRecognized ? [`${formatNumber(cogs.notRecognized)} đơn đã giao chưa chốt được giá vốn — chạy lại job “Dựng lại kết quả đơn đã tính sẵn”.`] : []} />
+        </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-3">
           {cogs.rows.map((r) => (
             <div key={r.quality} className="rounded-lg border bg-card p-2.5">
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[12.5px] font-medium">{COGS_QUALITY_LABEL[r.quality]}</span>
+                <span className="inline-flex items-center gap-1 text-[12.5px] font-medium">
+                  {COGS_QUALITY_LABEL[r.quality]}
+                  <InfoHint>{COGS_QUALITY_NOTE[r.quality]}</InfoHint>
+                </span>
                 <span className="numeric text-sm font-semibold">{formatPercent(r.share * 100)}</span>
               </div>
               <div className="mt-0.5 text-[11.5px] text-muted-foreground">
                 {formatNumber(r.orders)} đơn · {formatVND(r.amount)}
               </div>
-              <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{COGS_QUALITY_NOTE[r.quality]}</p>
             </div>
           ))}
         </div>
-        <p className="mt-2 text-[12px] text-muted-foreground">
-          <b className="text-foreground">Cách sửa:</b> {cogs.huongSua}
-          {cogs.notRecognized ? ` · ${formatNumber(cogs.notRecognized)} đơn đã giao chưa chốt được giá vốn — chạy lại job “Dựng lại kết quả đơn đã tính sẵn”.` : ""}
-        </p>
       </div>
     </SectionCard>
   );

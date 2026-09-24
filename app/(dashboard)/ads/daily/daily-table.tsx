@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoHint } from "@/components/info-hint";
 import {
   MARKETING_GROUP_LABEL,
   MARKETING_METRICS,
@@ -151,7 +152,16 @@ export function MarketingDailyTable({ data, view }: { data: MarketingDaily; view
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-3">
-        <div className="text-xs text-muted-foreground">{data.rows.length} ngày</div>
+        <div className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+          {data.rows.length} ngày
+          {/* Chú thích của dấu sao — nằm trong ⓘ, không in dưới bảng. Một ký hiệu không có chú giải là một ký hiệu bị bỏ qua. */}
+          {data.rows.some((r) => r.maturity === "TOO_EARLY" || r.maturity === "PARTIAL") ? (
+            <InfoHint>
+              * Ngày chưa ngã ngũ: các số ở nhóm lợi nhuận là phần ĐÃ GHI NHẬN tới lúc này, chưa phải kết quả cuối — đơn còn trên đường chưa biết giao được
+              hay hoàn. Di chuột lên cột ngày để xem còn bao nhiêu đơn đang đi.
+            </InfoHint>
+          ) : null}
+        </div>
         <div className="flex items-center gap-1.5">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -256,13 +266,6 @@ export function MarketingDailyTable({ data, view }: { data: MarketingDaily; view
           </tfoot>
         </Table>
       </div>
-      {/* Chú thích của dấu sao. Một ký hiệu không có chú giải là một ký hiệu bị bỏ qua. */}
-      {data.rows.some((r) => r.maturity === "TOO_EARLY" || r.maturity === "PARTIAL") ? (
-        <p className="text-[11px] text-muted-foreground">
-          * Ngày chưa ngã ngũ: các số ở nhóm lợi nhuận là phần ĐÃ GHI NHẬN tới lúc này, chưa phải kết quả cuối — đơn còn trên đường chưa biết giao được hay hoàn. Di chuột lên cột ngày để xem còn
-          bao nhiêu đơn đang đi.
-        </p>
-      ) : null}
     </div>
   );
 }

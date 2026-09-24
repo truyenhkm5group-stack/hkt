@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { TableToolsFor } from "@/components/data-table/table-tools";
+import { DataWarnings } from "@/components/data-warnings";
 import { PageHeader } from "@/components/page-header";
 import { QueueViewTabs } from "@/components/queue-view-tabs";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
@@ -43,10 +44,10 @@ export default async function DwellPage() {
       <PageHeader
         eyebrow="Giao vận"
         title="Vận đơn đứng yên quá lâu"
-        description="Đo từ lúc kiện VÀO chặng hiện tại — đồng hồ này không bị đặt lại bởi một sự kiện cùng chặng."
         hint={
           <>
-            <p>
+            <p>Đo từ lúc kiện VÀO chặng hiện tại — đồng hồ này không bị đặt lại bởi một sự kiện cùng chặng.</p>
+            <p className="mt-1.5">
               <b>Tuổi chặng</b> = bây giờ − lúc kiện vào chặng hiện tại, lấy từ sự kiện sớm nhất của loạt liền kề cuối mang đúng chặng
               đó. Mười lần &quot;phân công bưu tá&quot; vẫn là mười lần đứng yên, và cột này nói đúng như vậy.
             </p>
@@ -88,14 +89,18 @@ export default async function DwellPage() {
               </span>
             ) : null,
           )}
+          {rot > 0 ? (
+            <DataWarnings
+              className="self-center"
+              items={[
+                <>
+                  <b>{formatNumber(rot)} kiện nằm NGOÀI phép đo</b> vì chưa có sự kiện nào mang chặng hiện tại của chúng. Con số ở trên là của{" "}
+                  {formatNumber(summary.tracked - rot)} kiện còn lại — nói ra để không ai đọc nhầm nó thành &quot;cả kho đều ổn&quot;.
+                </>,
+              ]}
+            />
+          ) : null}
         </div>
-
-        {rot > 0 ? (
-          <p className="border-b bg-muted/20 px-5 py-2 text-[12px] text-muted-foreground">
-            <b>{formatNumber(rot)} kiện nằm NGOÀI phép đo</b> vì chưa có sự kiện nào mang chặng hiện tại của chúng. Con số ở trên là của{" "}
-            {formatNumber(summary.tracked - rot)} kiện còn lại — nói ra để không ai đọc nhầm nó thành &quot;cả kho đều ổn&quot;.
-          </p>
-        ) : null}
 
         {rows.length === 0 ? (
           <EmptyState title="Không kiện nào đang theo dõi" description="Mọi vận đơn đều đã tới chặng kết thúc." className="m-4" />
@@ -189,8 +194,14 @@ export default async function DwellPage() {
       {summary.breached > 0 ? (
         <SectionCard
           title="Việc phải làm"
-          description="Theo chặng VÀ theo trạng thái con của ĐVVC. Việc của từng kiện cụ thể thì ghi thêm ở trang Vận đơn & care."
-          hint="Một chặng có thể chứa nhiều việc của nhiều phòng — “Chờ lấy hàng” gộp cả kiện ĐVVC đang giữ ở khâu xử lý, kiện bưu tá chưa tới lấy, kiện của đơn đã huỷ và kiện có chặng mâu thuẫn với chứng từ. Gộp chúng vào một dòng là giao nhầm việc cho ba phòng."
+          hint={
+            <>
+              <p>Theo chặng VÀ theo trạng thái con của ĐVVC. Việc của từng kiện cụ thể thì ghi thêm ở trang Vận đơn &amp; care.</p>
+              <p className="mt-1.5">
+                Một chặng có thể chứa nhiều việc của nhiều phòng — “Chờ lấy hàng” gộp cả kiện ĐVVC đang giữ ở khâu xử lý, kiện bưu tá chưa tới lấy, kiện của đơn đã huỷ và kiện có chặng mâu thuẫn với chứng từ. Gộp chúng vào một dòng là giao nhầm việc cho ba phòng.
+              </p>
+            </>
+          }
         >
           <ul className="space-y-2 text-[12.5px]">
             {/*

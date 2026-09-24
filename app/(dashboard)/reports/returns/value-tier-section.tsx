@@ -1,5 +1,6 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Money, SectionCard } from "@/components/ui-bits";
+import { DataWarnings } from "@/components/data-warnings";
 import { formatNumber } from "@/lib/format";
 import { successTone } from "@/lib/constants/returns";
 import { MIN_TIER_SAMPLE, type OrderValueTierReport } from "@/lib/queries/return-rate";
@@ -35,14 +36,29 @@ export function ValueTierSection({ report, basis }: { report: OrderValueTierRepo
   return (
     <SectionCard
       title="Tỷ lệ giao thành công theo bậc giá trị đơn"
-      description="Đơn càng rẻ thì khách nhận hàng nhiều hơn hay ít hơn — số liệu của chính shop, không phải cảm giác."
       hint={
         <>
-          Giá trị đơn = <b>tiền hàng khách phải trả sau giảm giá, chưa gồm cước</b>, lấy theo CẢ ĐƠN. Các bậc không chồng nhau nên cộng lại bằng tổng đơn có giá trị. Bậc dưới{" "}
-          {MIN_TIER_SAMPLE} đơn đã kết thúc hiện &ldquo;—&rdquo;: đó là <b>chưa đủ dữ liệu</b>, không phải 0%.{" "}
-          <b>Bảng này không chứng minh nhân quả</b> — đơn rẻ thường là mã khác, khách khác, vùng khác. Nó nói &ldquo;có đáng thử không&rdquo;; phép thử thật là hạ giá MỘT mã rồi so chính mã đó
-          trước / sau. Lọc theo {TIME_BASIS_LABEL[basis].toLowerCase()}; bộ lọc giá trị đơn ở đầu trang KHÔNG áp vào bảng này (bảng này chính là phép phân bậc).
+          <p className="mb-2">
+            Giá trị đơn = <b>tiền hàng khách phải trả sau giảm giá, chưa gồm cước</b>, lấy theo CẢ ĐƠN. Các bậc không chồng nhau nên cộng lại bằng tổng đơn có giá trị. Bậc dưới{" "}
+            {MIN_TIER_SAMPLE} đơn đã kết thúc hiện &ldquo;—&rdquo;: đó là <b>chưa đủ dữ liệu</b>, không phải 0%.{" "}
+            <b>Bảng này không chứng minh nhân quả</b> — đơn rẻ thường là mã khác, khách khác, vùng khác. Nó nói &ldquo;có đáng thử không&rdquo;; phép thử thật là hạ giá MỘT mã rồi so chính mã đó
+            trước / sau. Lọc theo {TIME_BASIS_LABEL[basis].toLowerCase()}; bộ lọc giá trị đơn ở đầu trang KHÔNG áp vào bảng này (bảng này chính là phép phân bậc).
+          </p>
+          <p>Đơn càng rẻ thì khách nhận hàng nhiều hơn hay ít hơn — số liệu của chính shop, không phải cảm giác.</p>
         </>
+      }
+      actions={
+        unknownValueOrders ? (
+          <DataWarnings
+            align="end"
+            items={[
+              <span key="khong-gia-tri">
+                {formatNumber(unknownValueOrders)} đơn KHÔNG khai được giá trị (tổng tiền bằng 0) nên nằm ngoài mọi bậc. Chúng không bị nhét vào bậc thấp nhất — một đơn không có giá là{" "}
+                <b>chưa biết</b>, không phải &ldquo;đơn 0đ&rdquo;.
+              </span>,
+            ]}
+          />
+        ) : undefined
       }
       padded={false}
     >
@@ -114,12 +130,6 @@ export function ValueTierSection({ report, basis }: { report: OrderValueTierRepo
           </TableBody>
         </Table>
       </div>
-      {unknownValueOrders ? (
-        <p className="border-t px-3 py-2 text-[11.5px] text-amber-700 dark:text-amber-300">
-          {formatNumber(unknownValueOrders)} đơn KHÔNG khai được giá trị (tổng tiền bằng 0) nên nằm ngoài mọi bậc. Chúng không bị nhét vào bậc thấp nhất — một đơn không có giá là{" "}
-          <b>chưa biết</b>, không phải &ldquo;đơn 0đ&rdquo;.
-        </p>
-      ) : null}
     </SectionCard>
   );
 }

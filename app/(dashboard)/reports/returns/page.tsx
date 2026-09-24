@@ -8,6 +8,8 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { OrderOutcomeBadge, OrderStageBadge } from "@/components/status-badge";
 import { Money, SectionCard } from "@/components/ui-bits";
+import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RETURN_RULE, SUCCESS_RATE_OK, successTone } from "@/lib/constants/returns";
@@ -241,10 +243,14 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
         ]}
         extraResetKeys={["vmin", "vmax"]}
         resultLabel={
-          <>
-            {formatNumber(total)} mã hàng · bấm vào một dòng để xem danh sách đơn
-            {dangLocGiaTri ? <span className="ml-1 font-semibold text-primary">· đang lọc {orderValueLabel(giaTriDon).toLowerCase()} (tiền hàng sau giảm giá, chưa gồm cước)</span> : null}
-          </>
+          <span className="inline-flex flex-wrap items-center gap-1">
+            {formatNumber(total)} mã hàng
+            {dangLocGiaTri ? <span className="font-semibold text-primary">· đang lọc {orderValueLabel(giaTriDon).toLowerCase()}</span> : null}
+            <InfoHint>
+              <p>Bấm vào một dòng để xem danh sách đơn.</p>
+              {dangLocGiaTri ? <p className="mt-2">Giá trị đơn: tiền hàng sau giảm giá, chưa gồm cước.</p> : null}
+            </InfoHint>
+          </span>
         }
       >
         <OrderValueFilterControl value={giaTriDon} />
@@ -264,10 +270,13 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
         CHÍNH LÀ phép phân bậc, lọc nó thì chỉ còn một dòng.
       */}
       {dangLocGiaTri ? (
-        <p className="-mt-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-[12px] leading-5">
-          <b>{orderValueLabel(giaTriDon)}</b> — mọi khối trên trang (tổng quan, theo mã hàng, theo nguồn đơn, lý do hoàn, chăm sóc &amp; cứu đơn, hiệu suất giao vận) đều tính trên đúng tập đơn
-          này: tiền hàng sau giảm giá của CẢ ĐƠN nằm trong khoảng, chưa gồm cước. Riêng bảng &ldquo;theo bậc giá trị đơn&rdquo; luôn hiện đủ các bậc — nó chính là phép phân bậc.
-          {basis !== "ORDERED" ? " Kiện không gắn đơn nào (vận đơn chiều hoàn) không có giá trị đơn để xét nên nằm ngoài bộ lọc." : ""}
+        <p className="-mt-2 flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-[12px] leading-5">
+          <b>{orderValueLabel(giaTriDon)}</b>
+          <InfoHint>
+            Mọi khối trên trang (tổng quan, theo mã hàng, theo nguồn đơn, lý do hoàn, chăm sóc &amp; cứu đơn, hiệu suất giao vận) đều tính trên đúng tập đơn
+            này: tiền hàng sau giảm giá của CẢ ĐƠN nằm trong khoảng, chưa gồm cước. Riêng bảng &ldquo;theo bậc giá trị đơn&rdquo; luôn hiện đủ các bậc — nó chính là phép phân bậc.
+            {basis !== "ORDERED" ? " Kiện không gắn đơn nào (vận đơn chiều hoàn) không có giá trị đơn để xét nên nằm ngoài bộ lọc." : ""}
+          </InfoHint>
         </p>
       ) : null}
 
@@ -280,7 +289,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       */}
       <p className="-mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
         <span className="rounded bg-muted px-1.5 py-0.5 font-medium text-foreground">Đang tính theo: {TIME_BASIS_LABEL[basis]}</span>
-        <span title={TIME_BASIS_QUESTION[basis]}>{TIME_BASIS_QUESTION[basis]}</span>
+        <InfoHint>{TIME_BASIS_QUESTION[basis]}</InfoHint>
         {codes?.length ? <span className="rounded bg-muted px-1.5 py-0.5 font-medium text-foreground">Mã hàng: {codes.join(", ")}</span> : null}
         {marketerIds?.length ? <span className="rounded bg-muted px-1.5 py-0.5 font-medium text-foreground">Marketer: {marketerIds.length} người</span> : null}
       </p>
@@ -305,10 +314,11 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
               Viettel Post tạo vận đơn chiều hoàn, hoặc doanh thu bị sửa sau khi giao, thì tính là hoàn. Khi đã biết chắc số tiền: dưới 50K là hoàn, 50K–100K là không thành công.
               <br />
               <b>Giao thành công là kết luận GIAO HÀNG, không phải kết luận tiền</b> — tiền chỉ ghi nhận khi có chứng từ ở Đối soát COD.
+              <br />
+              Đơn có doanh thu COD thực &gt; {formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })} (tiền thực thu / đã về; hoặc đã chuyển khoản trước).
             </>
           }
           value={formatNumber(summary.delivered)}
-          note={`Đơn có doanh thu COD thực > ${formatVND(RETURN_RULE.maxCodForFakeDelivery, { compact: true })} (tiền thực thu / đã về; hoặc đã chuyển khoản trước)`}
           icon={PackageCheck}
           tone="green"
         />
@@ -321,7 +331,12 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
         />
         <MetricCard
           label="Tỷ lệ giao thành công"
-          hint={`Thực tế = giao thành công ÷ (giao thành công + không thành công) theo ORDER_OUTCOME — đơn đang giao KHÔNG ở mẫu số. Ước tính (${pj?.version ?? "hợp đồng chung"}) = (đã giao thật + Σ đơn đang giao × xác suất giao được của trạng thái ĐVVC nó đang ở) ÷ (đã gửi − đơn ngoài ước tính). Cùng hợp đồng với thẻ cùng tên ở Báo cáo lợi nhuận; khác mốc thời gian thì khác cohort. Nhãn tin cậy đến từ thử ngược trên vận đơn đã kết thúc.`}
+          hint={
+            <>
+              <p className="mb-2">{`Thực tế = giao thành công ÷ (giao thành công + không thành công) theo ORDER_OUTCOME — đơn đang giao KHÔNG ở mẫu số. Ước tính (${pj?.version ?? "hợp đồng chung"}) = (đã giao thật + Σ đơn đang giao × xác suất giao được của trạng thái ĐVVC nó đang ở) ÷ (đã gửi − đơn ngoài ước tính). Cùng hợp đồng với thẻ cùng tên ở Báo cáo lợi nhuận; khác mốc thời gian thì khác cohort. Nhãn tin cậy đến từ thử ngược trên vận đơn đã kết thúc.`}</p>
+              <p>{duKienNote}</p>
+            </>
+          }
           value={
             <span className="inline-flex flex-wrap items-center gap-2">
               <span className={successTone(summary.successRate)}>{summary.successRate === null ? "—" : `${summary.successRate.toFixed(1)}%`}</span>
@@ -333,7 +348,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
               ) : null}
             </span>
           }
-          note={`${duKienNote}${worst ? ` · thấp nhất ${worst.sku || worst.productName} ${(worst.successRate ?? 0).toFixed(1)}%` : ""}`}
+          note={worst ? `thấp nhất ${worst.sku || worst.productName} ${(worst.successRate ?? 0).toFixed(1)}%` : undefined}
           icon={Percent}
           tone={summary.successRate !== null && summary.successRate < SUCCESS_RATE_OK ? "rose" : summary.successRate !== null ? "green" : "slate"}
         />
@@ -342,25 +357,51 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       {/* ĐỘ PHỦ DỮ LIỆU ĐỨNG NGAY DƯỚI KPI: mọi con số bên dưới chỉ đúng bằng phần dữ liệu đã thu. */}
       <CoverageStrip coverage={intel.coverage} />
 
+      {/*
+        CẢNH BÁO DỮ LIỆU CỦA CẢ TRANG — thu thành MỘT nhãn "⚠ n lưu ý dữ liệu", trỏ chuột mới hiện
+        nguyên văn (chủ shop chốt 24/09/2026). Riêng lỗi mô hình vẫn giữ MỘT dòng ngắn nhìn thấy:
+        đó là cảnh báo con số ước tính KHÔNG DÙNG ĐƯỢC, không phải một lưu ý.
+      */}
       {loiUocTinh ? (
-        <div role="alert" className="flex items-start gap-3 rounded-xl border border-rose-300 bg-rose-50 p-3.5 text-[13px] text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>
-            <b>Mô hình ước tính không chạy được</b> — đây là LỖI, không phải thiếu dữ liệu. Các ô ước tính trên trang đang trống vì thế. Chi tiết: <code className="text-xs">{loiUocTinh}</code>
-          </span>
+        <div role="alert" className="flex items-center gap-2 text-[13px] text-rose-700 dark:text-rose-300">
+          <AlertTriangle className="size-4 shrink-0" />
+          <b>Mô hình ước tính không chạy được</b>
         </div>
       ) : null}
 
-      {summary.finishedNoVtp > 0 ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-rose-300 bg-rose-50 p-3 text-[13px] text-rose-900 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-100">
-          <AlertTriangle className="size-4 shrink-0" />
-          <span>
-            <b>{formatNumber(summary.finishedNoVtp)}</b> / {formatNumber(summary.delivered + summary.returned)} đơn giao / hoàn trong kỳ <b>chưa có trạng thái Viettel Post thật</b> (đang tính theo trạng
-            thái Pancake vì tài khoản API Viettel Post không tra được vận đơn tạo qua Pancake). Đơn giao thành công đã được tính theo <b>COD thực thu &gt; 100K</b> nên không phụ thuộc trạng thái này.
-          </span>
-          <Button asChild size="sm" variant="outline" className="ml-auto">
-            <Link href="/cod?import=orders">Nhập danh sách vận đơn VTP</Link>
-          </Button>
+      {loiUocTinh || summary.finishedNoVtp > 0 || summary.provisional ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <DataWarnings
+            tone={loiUocTinh || summary.finishedNoVtp > 0 ? "danger" : "warn"}
+            items={[
+              loiUocTinh ? (
+                <span key="loi">
+                  <b>Mô hình ước tính không chạy được</b> — đây là LỖI, không phải thiếu dữ liệu. Các ô ước tính trên trang đang trống vì thế. Chi tiết: <code className="text-xs">{loiUocTinh}</code>
+                </span>
+              ) : null,
+              summary.finishedNoVtp > 0 ? (
+                <span key="no-vtp">
+                  <b>{formatNumber(summary.finishedNoVtp)}</b> / {formatNumber(summary.delivered + summary.returned)} đơn giao / hoàn trong kỳ <b>chưa có trạng thái Viettel Post thật</b> (đang tính theo trạng
+                  thái Pancake vì tài khoản API Viettel Post không tra được vận đơn tạo qua Pancake). Đơn giao thành công đã được tính theo <b>COD thực thu &gt; 100K</b> nên không phụ thuộc trạng thái này.
+                </span>
+              ) : null,
+              summary.provisional ? (
+                <span key="tam-tinh">
+                  {formatNumber(summary.provisional)} đơn đang được xếp loại bằng <strong>số tạm tính</strong> (Viettel Post báo đã giao nhưng chưa có chứng từ bảng kê). Tiền của các đơn này có thể về ở kỳ bảng
+                  kê sau; số sẽ tự chính xác khi anh nhập bảng kê ở{" "}
+                  <Link className="underline underline-offset-2" href="/import-vtp">
+                    Bổ sung danh sách vận đơn
+                  </Link>
+                  .
+                </span>
+              ) : null,
+            ]}
+          />
+          {summary.finishedNoVtp > 0 ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href="/cod?import=orders">Nhập danh sách vận đơn VTP</Link>
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -452,8 +493,14 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       {/* RỦI RO THEO MÃ HÀNG — chấm bằng ĐÍCH trong metric_targets, không bằng một hằng số trong code. */}
       <IntelSection
         title="Rủi ro theo mã hàng"
-        description="Mỗi mã một dòng: lô hàng đã gửi, tỷ lệ đã đo, tỷ lệ dự kiến, xu hướng so kỳ trước, và lớp vấn đề quyết định việc này đi tới phòng nào."
-        hint="Nhãn đánh giá đọc ĐÍCH của chỉ số Tỷ lệ giao thành công trong sổ đích (metric_targets), không có ngưỡng nào ghi cứng trong mã. Chưa đặt đích ⇒ hiện thực tế và KHÔNG kết luận. Lớp vấn đề suy từ LÝ DO của từng ca, không suy từ con số — mã hoàn nhiều mà lý do toàn 'không liên lạc được' là vấn đề giao vận, không phải vấn đề sản phẩm."
+        hint={
+          <>
+            <p className="mb-2">
+              Nhãn đánh giá đọc ĐÍCH của chỉ số Tỷ lệ giao thành công trong sổ đích (metric_targets), không có ngưỡng nào ghi cứng trong mã. Chưa đặt đích ⇒ hiện thực tế và KHÔNG kết luận. Lớp vấn đề suy từ LÝ DO của từng ca, không suy từ con số — mã hoàn nhiều mà lý do toàn &apos;không liên lạc được&apos; là vấn đề giao vận, không phải vấn đề sản phẩm.
+            </p>
+            <p>Mỗi mã một dòng: lô hàng đã gửi, tỷ lệ đã đo, tỷ lệ dự kiến, xu hướng so kỳ trước, và lớp vấn đề quyết định việc này đi tới phòng nào.</p>
+          </>
+        }
       >
         <ProductRiskTable rows={intel.products} hasTarget={intel.hasTarget} />
       </IntelSection>
@@ -470,11 +517,13 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       {/* ═════════ C. GTC THEO NGUỒN ĐƠN ═════════ */}
       <SectionCard
         title="Tỷ lệ giao thành công theo nguồn đơn"
-        description="Khách đến từ chat fanpage hay từ landing page thì giao thành công khác nhau thế nào."
         hint={
           <>
-            Dùng nguyên công thức kết quả đơn của toàn ERP, chỉ thêm chiều phân tách là nguồn đơn — không có cách tính thứ hai cho &ldquo;giao thành công&rdquo; hay &ldquo;hoàn&rdquo;. Mỗi đơn thuộc
-            đúng một nguồn nên cộng các dòng lại bằng tổng toàn shop. <b>Đơn có mặt ở cả hai kênh</b> (khách vừa chat vừa điền form) ghi cho nơi khách đặt TRƯỚC. Tỷ lệ tính trên đơn ĐÃ KẾT THÚC.
+            <p className="mb-2">
+              Dùng nguyên công thức kết quả đơn của toàn ERP, chỉ thêm chiều phân tách là nguồn đơn — không có cách tính thứ hai cho &ldquo;giao thành công&rdquo; hay &ldquo;hoàn&rdquo;. Mỗi đơn thuộc
+              đúng một nguồn nên cộng các dòng lại bằng tổng toàn shop. <b>Đơn có mặt ở cả hai kênh</b> (khách vừa chat vừa điền form) ghi cho nơi khách đặt TRƯỚC. Tỷ lệ tính trên đơn ĐÃ KẾT THÚC.
+            </p>
+            <p>Khách đến từ chat fanpage hay từ landing page thì giao thành công khác nhau thế nào.</p>
           </>
         }
         padded={false}
@@ -499,8 +548,10 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
               {theoNguon.map((r) => (
                 <TableRow key={r.source}>
                   <TableCell>
-                    <span className={cn("rounded px-1.5 py-0.5 text-[11.5px] font-semibold whitespace-nowrap", ORDER_SOURCE_TONE[r.source])}>{ORDER_SOURCE_LABEL[r.source]}</span>
-                    <div className="mt-1 max-w-[240px] text-[11px] leading-4 text-muted-foreground">{ORDER_SOURCE_HINT[r.source]}</div>
+                    <span className="inline-flex items-center gap-1">
+                      <span className={cn("rounded px-1.5 py-0.5 text-[11.5px] font-semibold whitespace-nowrap", ORDER_SOURCE_TONE[r.source])}>{ORDER_SOURCE_LABEL[r.source]}</span>
+                      <InfoHint>{ORDER_SOURCE_HINT[r.source]}</InfoHint>
+                    </span>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(r.orders)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(r.shipped)}</TableCell>
@@ -557,8 +608,14 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       {/* CHẤT LƯỢNG ĐẦU VÀO THEO MARKETER — cùng tập ca với bảng lý do, nên tổng không đổi khi bật chiều này. */}
       <IntelSection
         title="Chất lượng đầu vào theo marketer"
-        description="Không phải CPQC rẻ hay đắt — mà đơn người đó mang về có tới được tay khách hay không."
-        hint="Quy kết đi bằng khoá chiến dịch (đơn → ad_id / post_id → chiến dịch → người phụ trách khai ở bảng chi tiêu), KHÔNG dò chữ trong tên chiến dịch. Cộng mọi dòng — kể cả nhóm 'Chưa xác định' — bằng đúng số đơn đã kết thúc khi không chia theo marketer."
+        hint={
+          <>
+            <p className="mb-2">
+              Quy kết đi bằng khoá chiến dịch (đơn → ad_id / post_id → chiến dịch → người phụ trách khai ở bảng chi tiêu), KHÔNG dò chữ trong tên chiến dịch. Cộng mọi dòng — kể cả nhóm &apos;Chưa xác định&apos; — bằng đúng số đơn đã kết thúc khi không chia theo marketer.
+            </p>
+            <p>Không phải CPQC rẻ hay đắt — mà đơn người đó mang về có tới được tay khách hay không.</p>
+          </>
+        }
       >
         <MarketerQualityTable rows={intel.marketers} coverage={intel.marketerCoverage} />
       </IntelSection>
@@ -566,19 +623,28 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       {/* ═════════ D. HIỆU SUẤT GIAO VẬN ═════════ */}
       <SectionCard
         title="Hiệu suất giao vận"
-        description="Tính theo mốc thời gian của từng sự kiện Viettel Post — chỉ số GIAO VẬN, không phải kết quả đơn."
-        hint="Tính từ mốc thời gian của từng sự kiện Viettel Post, không từ trạng thái hiện tại. Vận đơn chưa kết thúc KHÔNG bị tính là giao thất bại. Ô đầu tiên đếm SỰ KIỆN phát thành công của ĐVVC (kể cả 501 chiều hoàn, kể cả kiện thu 30.000đ) nên nó KHÔNG phải tỷ lệ giao thành công của ERP — con số đó ở thẻ đầu trang, theo ORDER_OUTCOME."
+        hint={
+          <>
+            <p className="mb-2">
+              Tính từ mốc thời gian của từng sự kiện Viettel Post, không từ trạng thái hiện tại. Vận đơn chưa kết thúc KHÔNG bị tính là giao thất bại. Ô đầu tiên đếm SỰ KIỆN phát thành công của ĐVVC (kể cả 501 chiều hoàn, kể cả kiện thu 30.000đ) nên nó KHÔNG phải tỷ lệ giao thành công của ERP — con số đó ở thẻ đầu trang, theo ORDER_OUTCOME.
+            </p>
+            <p>Tính theo mốc thời gian của từng sự kiện Viettel Post — chỉ số GIAO VẬN, không phải kết quả đơn.</p>
+          </>
+        }
       >
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-xl border p-3.5">
-            <p className="text-[13px] font-medium text-muted-foreground" title="Đếm sự kiện phát thành công của Viettel Post trong hành trình — kể cả 501 chiều hoàn. Không phải kết quả đơn.">
+            <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
               {SUCCESS_RATE_TERMINAL_LABEL}
+              <InfoHint>
+                <p className="mb-2">Đếm sự kiện phát thành công của Viettel Post trong hành trình — kể cả 501 chiều hoàn. Không phải kết quả đơn.</p>
+                <p>
+                  {logistics.successRateAll === null ? "—" : `${logistics.successRateAll}%`} nếu tính trên cả {formatNumber(logistics.tracked)} vận đơn có hành trình ({formatNumber(logistics.inFlight)} còn đang đi).
+                </p>
+              </InfoHint>
             </p>
             <p className="numeric mt-1 text-2xl font-bold">{logistics.successRateTerminal === null ? "—" : `${logistics.successRateTerminal}%`}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              trên {formatNumber(logistics.terminal)} vận đơn ĐÃ KẾT THÚC · {logistics.successRateAll === null ? "—" : `${logistics.successRateAll}%`} nếu tính trên cả {formatNumber(logistics.tracked)} vận
-              đơn có hành trình ({formatNumber(logistics.inFlight)} còn đang đi)
-            </p>
+            <p className="mt-1 text-xs text-muted-foreground">trên {formatNumber(logistics.terminal)} vận đơn ĐÃ KẾT THÚC</p>
           </div>
           <div className="rounded-xl border p-3.5">
             <p className="text-[13px] font-medium text-muted-foreground">Phát thành công ngay lần đầu</p>
@@ -586,8 +652,14 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
             <p className="mt-1 text-xs text-muted-foreground">
               trên {formatNumber(logistics.firstAttemptSample)} vận đơn đã giao
               {logistics.failureEvidence < logistics.firstAttemptSample * 0.05 ? (
-                <span className="block text-warning">
-                  Chỉ {formatNumber(logistics.failureEvidence)} vận đơn có ghi nhận phát thất bại trong hành trình — tệp danh sách vận đơn chỉ mang trạng thái CUỐI nên con số này đang cao hơn thực tế.
+                <span className="mt-1 block">
+                  <DataWarnings
+                    items={[
+                      <span key="phat-lan-dau">
+                        Chỉ {formatNumber(logistics.failureEvidence)} vận đơn có ghi nhận phát thất bại trong hành trình — tệp danh sách vận đơn chỉ mang trạng thái CUỐI nên con số này đang cao hơn thực tế.
+                      </span>,
+                    ]}
+                  />
                 </span>
               ) : (
                 <span> · {formatNumber(logistics.failureEvidence)} vận đơn có ghi nhận phát thất bại</span>
@@ -602,10 +674,13 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
             </p>
           </div>
           <div className="rounded-xl border p-3.5">
-            <p className="text-[13px] font-medium text-muted-foreground">Thời gian giao</p>
+            <p className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
+              Thời gian giao
+              <InfoHint>Tính từ lúc lấy hàng.</InfoHint>
+            </p>
             <p className="numeric mt-1 text-2xl font-bold">{logistics.deliveryHours.p50 === null ? "—" : `${logistics.deliveryHours.p50}h`}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              từ lúc lấy hàng · chậm nhất trong 10% xấu nhất {logistics.deliveryHours.p90 === null ? "—" : `${logistics.deliveryHours.p90}h`} · {formatNumber(logistics.deliveryHours.sample)} vận đơn
+              trung vị · chậm nhất trong 10% xấu nhất {logistics.deliveryHours.p90 === null ? "—" : `${logistics.deliveryHours.p90}h`} · {formatNumber(logistics.deliveryHours.sample)} vận đơn
             </p>
           </div>
         </div>
@@ -621,9 +696,9 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
         */}
         {pj && pj.byState.length ? (
           <div className="mt-3">
-            <p className="mb-1.5 text-[12.5px] font-medium">
+            <p className="mb-1.5 flex items-center gap-1.5 text-[12.5px] font-medium">
               Chưa kết thúc: {formatNumber(pj.active)} đơn, tách theo trạng thái Viettel Post
-              <span className="ml-1 font-normal text-muted-foreground">— mỗi nhóm mang xác suất giao được của riêng nó, học từ vận đơn đã kết thúc</span>
+              <InfoHint>Mỗi nhóm mang xác suất giao được của riêng nó, học từ vận đơn đã kết thúc.</InfoHint>
             </p>
             <div className="flex flex-wrap gap-2">
               {pj.byState.map((x) => (
@@ -645,7 +720,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
           <div className="mt-3 flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-[13px]">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
             <div>
-              <b>Vận đơn kẹt</b> — chưa kết thúc và đã lâu không có tin mới từ Viettel Post: <b>{formatNumber(logistics.stuck24h)}</b> quá 24h · <b>{formatNumber(logistics.stuck48h)}</b> quá 48h ·{" "}
+              <b>Vận đơn kẹt</b> <InfoHint className="align-middle">Chưa kết thúc và đã lâu không có tin mới từ Viettel Post.</InfoHint>: <b>{formatNumber(logistics.stuck24h)}</b> quá 24h · <b>{formatNumber(logistics.stuck48h)}</b> quá 48h ·{" "}
               <b>{formatNumber(logistics.stuck72h)}</b> quá 72h.
               <Link className="ml-2 text-primary underline underline-offset-2" href="/shipments?final=open">
                 Xem vận đơn chưa kết thúc
@@ -667,25 +742,20 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
         </div>
       </IntelSection>
 
-      {summary.provisional ? (
-        <div role="note" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-          {formatNumber(summary.provisional)} đơn đang được xếp loại bằng <strong>số tạm tính</strong> (Viettel Post báo đã giao nhưng chưa có chứng từ bảng kê). Tiền của các đơn này có thể về ở kỳ bảng
-          kê sau; số sẽ tự chính xác khi anh nhập bảng kê ở{" "}
-          <Link className="underline underline-offset-2" href="/import-vtp">
-            Bổ sung danh sách vận đơn
-          </Link>
-          .
-        </div>
-      ) : null}
-
       {/* ═════════ E. PHÂN TÍCH LÝ DO HOÀN ═════════ */}
       <ReturnReasonSection report={reasonReport} filter={reasonFilter} hrefWith={hrefWith} openReason={openReason} openGroup={openGroup} openProduct={openProduct} />
 
       {/* ═════════ F. CHĂM SÓC & CỨU ĐƠN ═════════ */}
       <IntelSection
         title="Chăm sóc kiện và tỷ lệ cứu đơn"
-        description="Kiện vào hàng đợi chăm sóc từ trạng thái nào, có ai cầm không, bao lâu mới có thao tác đầu tiên, và cuối cùng có cứu được không."
-        hint="CHỈ ca đã ngã ngũ mới dùng để chấm người — ca còn treo đếm riêng vì kết cục của nó chưa tồn tại. Và kết quả giao hàng do ĐVVC đồng quyết định, nên đây là KẾT QUẢ CHUNG, đọc làm bối cảnh chứ không phải điểm cá nhân. Con số dự báo không bao giờ dùng để thưởng phạt."
+        hint={
+          <>
+            <p className="mb-2">
+              CHỈ ca đã ngã ngũ mới dùng để chấm người — ca còn treo đếm riêng vì kết cục của nó chưa tồn tại. Và kết quả giao hàng do ĐVVC đồng quyết định, nên đây là KẾT QUẢ CHUNG, đọc làm bối cảnh chứ không phải điểm cá nhân. Con số dự báo không bao giờ dùng để thưởng phạt.
+            </p>
+            <p>Kiện vào hàng đợi chăm sóc từ trạng thái nào, có ai cầm không, bao lâu mới có thao tác đầu tiên, và cuối cùng có cứu được không.</p>
+          </>
+        }
       >
         <CarePerformance care={intel.care} />
       </IntelSection>
@@ -694,8 +764,15 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
       <div id="can-chu-y">
         <IntelSection
           title="Cần chú ý"
-          description={`Tối đa ${intel.actions.length} việc — mỗi dòng mang con số và cỡ mẫu đã dựng nên nó, và một phòng ban nhận việc.`}
-          hint="Cảnh báo chỉ xuất hiện khi ĐỦ MẪU: mã hàng cần ít nhất 20 đơn đã kết thúc, marketer cần 30. Đây là câu hỏi 'đã đủ quan sát để nói chưa', khác hẳn câu hỏi 'bao nhiêu thì gọi là kém' — cái sau nằm ở đích chỉ số. Nút tạo việc giao cho PHÒNG BAN, không gán cho một cá nhân: máy không biết hôm nay ai nghỉ."
+          description={`Tối đa ${intel.actions.length} việc`}
+          hint={
+            <>
+              <p className="mb-2">
+                Cảnh báo chỉ xuất hiện khi ĐỦ MẪU: mã hàng cần ít nhất 20 đơn đã kết thúc, marketer cần 30. Đây là câu hỏi &apos;đã đủ quan sát để nói chưa&apos;, khác hẳn câu hỏi &apos;bao nhiêu thì gọi là kém&apos; — cái sau nằm ở đích chỉ số. Nút tạo việc giao cho PHÒNG BAN, không gán cho một cá nhân: máy không biết hôm nay ai nghỉ.
+              </p>
+              <p>Mỗi dòng mang con số và cỡ mẫu đã dựng nên nó, và một phòng ban nhận việc.</p>
+            </>
+          }
         >
           <ActionBoard actions={intel.actions} periodLabel={params.period.label} />
         </IntelSection>

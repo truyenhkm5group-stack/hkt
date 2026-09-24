@@ -189,8 +189,12 @@ export default async function ReturnInspectionPage({
       <PageHeader
         eyebrow="Kho"
         title="Kiểm đếm hàng hoàn"
-        description="Bắn mã → kiện nhảy lên đầu → một chạm ra kết luận. Hàng hoàn CHỈ vào lại tồn khi có người đếm thực tế."
-        hint="Ghi nhận kiện đã về là một việc; đếm được bao nhiêu món còn bán được là việc khác. ERP không bao giờ tự cộng hàng hoàn vào tồn."
+        hint={
+          <>
+            <p>Bắn mã → kiện nhảy lên đầu → một chạm ra kết luận. Hàng hoàn CHỈ vào lại tồn khi có người đếm thực tế.</p>
+            <p className="mt-1">Ghi nhận kiện đã về là một việc; đếm được bao nhiêu món còn bán được là việc khác. ERP không bao giờ tự cộng hàng hoàn vào tồn.</p>
+          </>
+        }
       />
 
       {/*
@@ -250,8 +254,7 @@ export default async function ReturnInspectionPage({
         <MetricCard
           label="Chờ kho nhận"
           value={formatNumber(bang.awaitingArrival)}
-          note="ĐVVC đã trả về shop, chưa ai bấm “đã nhận”"
-          hint="Cùng một điều kiện với bảng “Chờ kho nhận” bên dưới và nút xác nhận hàng loạt: vận đơn Viettel Post đã trả xong (504, hoặc phát thành công chiều hoàn), kho chưa bấm nhận. Vận đơn chiều về (mã gốc + 1P1) cũng được tính khi vận đơn chiều đi chưa tự nằm trong danh sách."
+          hint="ĐVVC đã trả về shop, chưa ai bấm “đã nhận”. Cùng một điều kiện với bảng “Chờ kho nhận” bên dưới và nút xác nhận hàng loạt: vận đơn Viettel Post đã trả xong (504, hoặc phát thành công chiều hoàn), kho chưa bấm nhận. Vận đơn chiều về (mã gốc + 1P1) cũng được tính khi vận đơn chiều đi chưa tự nằm trong danh sách."
           icon={Timer}
           tone={bang.awaitingArrival ? "amber" : "green"}
         />
@@ -281,25 +284,22 @@ export default async function ReturnInspectionPage({
         <MetricCard
           label="Hỏng"
           value={formatNumber(bang.damaged)}
-          note="Về tới nơi nhưng không bán lại được"
+          hint="Về tới nơi nhưng không bán lại được"
           icon={PackageX}
           tone={bang.damaged ? "rose" : "slate"}
         />
         <MetricCard
           label="Thiếu / mất"
           value={formatNumber(bang.missing)}
-          note="Đếm hụt so với số ERP đã xuất"
+          hint="Đếm hụt so với số ERP đã xuất"
           icon={TriangleAlert}
           tone={bang.missing ? "rose" : "slate"}
         />
         <MetricCard
           label="Không đúng hàng"
           value={formatNumber(bang.wrongItem)}
-          note={
-            hao
-              ? `Tổng ${formatNumber(hao)} kiện không vào lại tồn`
-              : "Khách trả về món khác"
-          }
+          note={hao ? `Tổng ${formatNumber(hao)} kiện không vào lại tồn` : undefined}
+          hint="Khách trả về món khác"
           icon={ScanLine}
           tone={bang.wrongItem ? "amber" : "slate"}
         />

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DataWarnings } from "@/components/data-warnings";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Money } from "@/components/ui-bits";
 import { BANK_ACCOUNT_STATUS_TONE } from "@/lib/constants/bank";
@@ -88,10 +89,17 @@ export function AccountsPanel({ cash }: { cash: CashPosition }) {
         </TableBody>
       </Table>
       {cash.unknownAccounts > 0 ? (
-        <p className="border-t px-5 py-2.5 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">Tổng tiền ở trên là CẬN DƯỚI.</span> {formatNumber(cash.unknownAccounts)} tài khoản chưa bao giờ có số dư từ ngân hàng nên không
-          được cộng vào — cộng dồn từ 0 sẽ cho ra một con số trông thuyết phục mà hoàn toàn bịa.
-        </p>
+        <div className="flex flex-wrap items-center gap-2 border-t px-5 py-2.5 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Tổng tiền ở trên là CẬN DƯỚI.</span>
+          <DataWarnings
+            items={[
+              <>
+                {formatNumber(cash.unknownAccounts)} tài khoản chưa bao giờ có số dư từ ngân hàng nên không được cộng vào — cộng dồn từ 0 sẽ cho ra một con số
+                trông thuyết phục mà hoàn toàn bịa.
+              </>,
+            ]}
+          />
+        </div>
       ) : null}
     </div>
   );

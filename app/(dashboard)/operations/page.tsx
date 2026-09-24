@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Banknote, CircleHelp, Clock, UserX } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { QueueViewTabs } from "@/components/queue-view-tabs";
 import { MetricCard } from "@/components/metric-card";
 import { CareEffectivenessSection } from "@/app/(dashboard)/operations/care-section";
@@ -103,14 +105,14 @@ export default async function OperationsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Điều hành theo khâu"
-        description="Đang kẹt ở đâu · việc nào làm ngay · ai phụ trách · thu về được bao nhiêu."
+        hint="Đang kẹt ở đâu · việc nào làm ngay · ai phụ trách · thu về được bao nhiêu."
         actions={<QueueViewTabs active="stages" />}
       />
 
       {cockpit ? (
         <SectionCard
           title="Phòng nào đang kẹt"
-          description="Cùng hàng đợi, nhìn theo NGƯỜI CHỊU TRÁCH NHIỆM thay vì theo khâu."
+          hint="Cùng hàng đợi, nhìn theo NGƯỜI CHỊU TRÁCH NHIỆM thay vì theo khâu."
           actions={
             <Link href="/work/department" className="text-xs font-medium text-primary hover:underline">
               Mở buồng lái phòng ban <ArrowRight className="inline size-3" />
@@ -146,23 +148,26 @@ export default async function OperationsPage() {
         <MetricCard
           label="Tiền đang treo"
           value={formatVND(health.totalAtRisk)}
-          note="Số thật từ đơn và vận đơn — không nhân hệ số nào"
-          hint="Đây là tổng giá trị đơn / COD nằm trong các việc chưa xử lý. Nó KHÔNG phải khoản lỗ: một phần vẫn về đích. Phần ước tính thu hồi để riêng, không gộp vào con số này."
+          hint="Số thật từ đơn và vận đơn — không nhân hệ số nào. Đây là tổng giá trị đơn / COD nằm trong các việc chưa xử lý. Nó KHÔNG phải khoản lỗ: một phần vẫn về đích. Phần ước tính thu hồi để riêng, không gộp vào con số này."
           icon={Banknote}
           tone={health.totalAtRisk > 0 ? "rose" : "slate"}
         />
         <MetricCard
           label="Ước tính thu hồi"
           value={health.totalRecoverable === null ? "Chưa đo được" : formatVND(health.totalRecoverable)}
-          note={estimator.note}
-          hint="Ước tính chỉ bật khi có đủ ca ĐÃ ĐƯỢC NGƯỜI XỬ LÝ để đo tỷ lệ thật. Nhân tiền treo với một hệ số phỏng đoán sẽ ra một con số trông như tiền thật mà không kiểm chứng được."
+          hint={
+            <>
+              <p>{estimator.note}</p>
+              <p className="mt-1.5">Ước tính chỉ bật khi có đủ ca ĐÃ ĐƯỢC NGƯỜI XỬ LÝ để đo tỷ lệ thật. Nhân tiền treo với một hệ số phỏng đoán sẽ ra một con số trông như tiền thật mà không kiểm chứng được.</p>
+            </>
+          }
           icon={CircleHelp}
           tone="slate"
         />
         <MetricCard
           label="Việc chưa ai nhận"
           value={formatNumber(health.byTeam.reduce((a, t) => a + t.unassigned, 0))}
-          note="Việc không có chủ là việc sẽ trôi"
+          hint="Việc không có chủ là việc sẽ trôi"
           icon={UserX}
           tone={health.byTeam.some((t) => t.unassigned > 0) ? "amber" : "green"}
         />
@@ -176,16 +181,19 @@ export default async function OperationsPage() {
         trước cả câu "đang kẹt ở đâu".
       */}
       {health.logistics.note ? (
-        <div className="flex flex-wrap items-start gap-3 rounded-xl border border-amber-300/70 bg-amber-50/60 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/20">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" />
-          <div className="min-w-[260px] flex-1">
-            <div className="text-[13.5px] font-semibold">
-              Trạng thái vận đơn đang cũ · {formatNumber(health.logistics.stale)}/{formatNumber(health.logistics.inFlight)} kiện đang chạy quá ngưỡng im lặng của chặng
-              {health.logistics.critical > 0 ? <span className="ml-1 font-normal">({formatNumber(health.logistics.critical)} cũ nghiêm trọng)</span> : null}
-            </div>
-            <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{health.logistics.note}</p>
-          </div>
-          <Link href={health.logistics.href} className="shrink-0 rounded-lg border bg-card px-2.5 py-1.5 text-[12px] font-medium hover:bg-accent">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-300/70 bg-amber-50/60 px-4 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/20">
+          <AlertTriangle className="size-4 shrink-0 text-amber-700 dark:text-amber-300" />
+          <span className="text-[13.5px] font-semibold">Trạng thái vận đơn đang cũ</span>
+          <DataWarnings
+            items={[
+              <>
+                {formatNumber(health.logistics.stale)}/{formatNumber(health.logistics.inFlight)} kiện đang chạy quá ngưỡng im lặng của chặng
+                {health.logistics.critical > 0 ? <span className="ml-1">({formatNumber(health.logistics.critical)} cũ nghiêm trọng)</span> : null}
+              </>,
+              health.logistics.note,
+            ]}
+          />
+          <Link href={health.logistics.href} className="ml-auto shrink-0 rounded-lg border bg-card px-2.5 py-1.5 text-[12px] font-medium hover:bg-accent">
             Kết nối dữ liệu
           </Link>
         </div>
@@ -194,8 +202,12 @@ export default async function OperationsPage() {
       {/* ───────── A. ĐANG KẸT Ở ĐÂU ───────── */}
       <SectionCard
         title="A · Đang kẹt ở đâu"
-        description="Từng khâu của dòng chảy, theo thứ tự hàng đi. Màu thanh nói tuổi việc: xanh là mới, đỏ là để quá ba ngày."
-        hint="Khâu 'Chưa đo được' KHÔNG có nghĩa là đang khoẻ — nghĩa là chưa có nguồn dữ liệu hoặc chưa có luật phát hiện nào cho khâu đó. Xem ghi chú nguồn của từng khâu."
+        hint={
+          <>
+            <p>Từng khâu của dòng chảy, theo thứ tự hàng đi. Màu thanh nói tuổi việc: xanh là mới, đỏ là để quá ba ngày.</p>
+            <p className="mt-1.5">Khâu &apos;Chưa đo được&apos; KHÔNG có nghĩa là đang khoẻ — nghĩa là chưa có nguồn dữ liệu hoặc chưa có luật phát hiện nào cho khâu đó. Xem ghi chú nguồn của từng khâu.</p>
+          </>
+        }
         padded={false}
       >
         <ul className="divide-y">
@@ -233,9 +245,14 @@ export default async function OperationsPage() {
                         giữa {gio(s.medianAgeHours)} · p90 {gio(s.p90AgeHours)} · cũ nhất {s.oldestLabel}
                       </span>
                       {s.impact.moneyAtRisk > 0 ? <span className="numeric font-semibold">{formatVND(s.impact.moneyAtRisk)}</span> : null}
+                      {/* TIỀN Ở KHÂU NÀY NGHĨA LÀ GÌ — không nói thì mỗi người hiểu một kiểu và cộng nhầm. */}
+                      {s.moneyMeaning ? <InfoHint align="end">{s.moneyMeaning}</InfoHint> : null}
                     </>
                   ) : (
-                    <span className="text-muted-foreground">{SOURCE_NOTE[s.sourceStatus] ?? "không có việc tồn"}</span>
+                    <span className="inline-flex items-center gap-1 text-muted-foreground">
+                      {SOURCE_NOTE[s.sourceStatus] ?? "không có việc tồn"}
+                      {s.sourceStatus !== "HEALTHY" && s.sourceNote ? <InfoHint align="end">{s.sourceNote}</InfoHint> : null}
+                    </span>
                   )}
                 </div>
               </div>
@@ -243,13 +260,9 @@ export default async function OperationsPage() {
               {s.backlog > 0 ? (
                 <div className="mt-2 space-y-1.5">
                   <AgingBar stage={s} />
-                  {/* TIỀN Ở KHÂU NÀY NGHĨA LÀ GÌ — không nói thì mỗi người hiểu một kiểu và cộng nhầm. */}
-                  <p className="text-[11.5px] leading-snug text-muted-foreground">{s.moneyMeaning}</p>
                   {/* VIỆC NÊN LÀM ngay trên thẻ nút thắt: thấy tắc mà không biết làm gì thì thẻ này vô dụng. */}
                   {s.nextAction ? <p className="text-[11.5px] font-medium leading-snug">→ {s.nextAction}</p> : null}
                 </div>
-              ) : s.sourceStatus !== "HEALTHY" ? (
-                <p className="mt-1.5 text-[11.5px] leading-snug text-muted-foreground">{s.sourceNote}</p>
               ) : null}
             </li>
           ))}
@@ -259,7 +272,7 @@ export default async function OperationsPage() {
       {/* ───────── B. VIỆC NÀO CẦN LÀM NGAY ───────── */}
       <SectionCard
         title="B · Việc nào cần làm ngay"
-        description="Xếp theo tiền đang treo, không theo thứ tự phát hiện. Mỗi dòng nói rõ phải làm gì, không chỉ báo là có vấn đề."
+        hint="Xếp theo tiền đang treo, không theo thứ tự phát hiện. Mỗi dòng nói rõ phải làm gì, không chỉ báo là có vấn đề."
         padded={false}
       >
         {viecGap.length === 0 ? (
@@ -297,7 +310,7 @@ export default async function OperationsPage() {
 
       <div className="grid gap-5 lg:grid-cols-2">
         {/* ───────── C. AI PHỤ TRÁCH ───────── */}
-        <SectionCard title="C · Ai phụ trách" description="Tải việc theo bộ phận. Cột 'chưa ai nhận' quan trọng hơn tổng số việc." padded={false}>
+        <SectionCard title="C · Ai phụ trách" hint="Tải việc theo bộ phận. Cột 'chưa ai nhận' quan trọng hơn tổng số việc." padded={false}>
           {health.byTeam.length === 0 ? (
             <EmptyState title="Không bộ phận nào đang có việc tồn" className="m-4" />
           ) : (
@@ -323,21 +336,25 @@ export default async function OperationsPage() {
         {/* ───────── D. THU VỀ ĐƯỢC BAO NHIÊU ───────── */}
         <SectionCard
           title="D · Xử lý thì thu về bao nhiêu"
-          description="Tiền đang treo là SỰ THẬT. Ước tính thu hồi là ƯỚC TÍNH. Hai dòng riêng, không bao giờ gộp."
+          hint="Tiền đang treo là SỰ THẬT. Ước tính thu hồi là ƯỚC TÍNH. Hai dòng riêng, không bao giờ gộp."
         >
           <dl className="space-y-3 text-sm">
             <div className="flex items-baseline justify-between gap-3 rounded-lg border bg-muted/30 px-3 py-2.5">
               <dt>
-                <div className="font-semibold">Tiền đang treo</div>
-                <div className="text-[11.5px] text-muted-foreground">Đếm từ đơn và vận đơn có thật</div>
+                <div className="flex items-center gap-1.5 font-semibold">
+                  Tiền đang treo
+                  <InfoHint>Đếm từ đơn và vận đơn có thật</InfoHint>
+                </div>
               </dt>
               <dd className="numeric shrink-0 text-lg font-bold">{formatVND(health.totalAtRisk)}</dd>
             </div>
 
             <div className="flex items-baseline justify-between gap-3 rounded-lg border border-dashed px-3 py-2.5">
               <dt>
-                <div className="font-semibold">Ước tính thu hồi</div>
-                <div className="text-[11.5px] leading-snug text-muted-foreground">{estimator.note}</div>
+                <div className="flex items-center gap-1.5 font-semibold">
+                  Ước tính thu hồi
+                  <InfoHint>{estimator.note}</InfoHint>
+                </div>
               </dt>
               <dd className="numeric shrink-0 text-lg font-bold text-muted-foreground">
                 {health.totalRecoverable === null ? "chưa đo được" : formatVND(health.totalRecoverable)}
@@ -350,19 +367,28 @@ export default async function OperationsPage() {
             */}
             <div className="rounded-lg border px-3 py-2.5">
               <div className="flex items-baseline justify-between gap-3">
-                <dt className="font-semibold">7 ngày qua · người xử lý</dt>
+                <dt className="flex items-center gap-1.5 font-semibold">
+                  7 ngày qua · người xử lý
+                  <InfoHint>
+                    {bang.closedByPeople === 0 ? (
+                      <>
+                        Chưa việc nào được người bấm đóng ({formatNumber(bang.closedAutomatically)} việc tự đóng vì điều kiện hết — không phải công của ai). Mỗi lần bấm
+                        XONG là một mẫu để đo &quot;xử lý thì thu về bao nhiêu&quot;.
+                      </>
+                    ) : (
+                      <>Đây là số ĐO ĐƯỢC từ kết quả đơn, không phải ước tính.</>
+                    )}
+                  </InfoHint>
+                </dt>
                 <dd className="numeric shrink-0 font-bold">{formatNumber(bang.closedByPeople)} việc</dd>
               </div>
               <p className="mt-1 text-[11.5px] leading-snug text-muted-foreground">
                 {bang.closedByPeople === 0 ? (
-                  <>
-                    Chưa việc nào được người bấm đóng ({formatNumber(bang.closedAutomatically)} việc tự đóng vì điều kiện hết — không phải công của ai). Mỗi lần bấm
-                    XONG là một mẫu để đo &quot;xử lý thì thu về bao nhiêu&quot;.
-                  </>
+                  <>{formatNumber(bang.closedAutomatically)} việc tự đóng</>
                 ) : (
                   <>
                     Mang theo <b className="numeric">{formatVND(bang.valueHandled)}</b>, trong đó <b className="numeric">{formatVND(bang.recoveredValue)}</b> đã về đích
-                    ({formatNumber(bang.deliveredCases)} đơn giao thành công). Đây là số ĐO ĐƯỢC từ kết quả đơn, không phải ước tính.
+                    ({formatNumber(bang.deliveredCases)} đơn giao thành công).
                   </>
                 )}
               </p>
@@ -399,13 +425,14 @@ export default async function OperationsPage() {
             </div>
 
             {health.unestimatedAtRisk > 0 ? (
-              <p className="flex gap-2 rounded-lg bg-muted/40 px-3 py-2 text-[12px] leading-snug text-muted-foreground">
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                <span>
-                  <b className="numeric">{formatVND(health.unestimatedAtRisk)}</b> nằm ở loại việc chưa có cách đo &quot;cứu được bao nhiêu&quot; — ví dụ COD quá hạn
-                  (cứu được nghĩa là tiền về, kết quả đơn không nói gì) hay hàng hoàn chờ đếm (cứu được nghĩa là hàng vào lại tồn).
-                </span>
-              </p>
+              <DataWarnings
+                items={[
+                  <>
+                    <b className="numeric">{formatVND(health.unestimatedAtRisk)}</b> nằm ở loại việc chưa có cách đo &quot;cứu được bao nhiêu&quot; — ví dụ COD quá hạn
+                    (cứu được nghĩa là tiền về, kết quả đơn không nói gì) hay hàng hoàn chờ đếm (cứu được nghĩa là hàng vào lại tồn).
+                  </>,
+                ]}
+              />
             ) : null}
           </dl>
         </SectionCard>

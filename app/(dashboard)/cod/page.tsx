@@ -8,6 +8,7 @@ import { UrlPagination } from "@/components/data-table/url-pagination";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
 import { FinanceNav } from "@/components/finance-nav";
+import { InfoHint } from "@/components/info-hint";
 import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
 import { SyncButton } from "@/components/sync-button";
@@ -233,7 +234,12 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
         period={{ defaultKey: "all" }}
         resultLabel={
           <>
-            {formatNumber(danhSach.total)} vận đơn · {SETTLEMENT_HINT[tinhTrang as SettlementStatus] ?? "toàn bộ vận đơn có thu hộ"}
+            {formatNumber(danhSach.total)} vận đơn
+            {SETTLEMENT_HINT[tinhTrang as SettlementStatus] ? (
+              <InfoHint className="ml-1 align-middle">{SETTLEMENT_HINT[tinhTrang as SettlementStatus]}</InfoHint>
+            ) : (
+              " · toàn bộ vận đơn có thu hộ"
+            )}
           </>
         }
       />
@@ -299,8 +305,12 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
       {thieu.length ? (
         <SectionCard
           title="Ngày phát chưa được bảng kê nào chi trả"
-          description="Đơn giao thành công trong khoảng ngày này mà không dòng bảng kê nào nhắc tới."
-          hint="Suy từ dữ liệu thật chứ không từ lịch trả tiền của Viettel Post. Hoặc Viettel Post chưa trả kỳ đó, hoặc thư bảng kê của kỳ đó chưa về ERP — đối chiếu với bảng bên dưới để biết kỳ nào còn thiếu."
+          hint={
+            <>
+              <p>Đơn giao thành công trong khoảng ngày này mà không dòng bảng kê nào nhắc tới.</p>
+              <p className="mt-1.5">Suy từ dữ liệu thật chứ không từ lịch trả tiền của Viettel Post. Hoặc Viettel Post chưa trả kỳ đó, hoặc thư bảng kê của kỳ đó chưa về ERP — đối chiếu với bảng bên dưới để biết kỳ nào còn thiếu.</p>
+            </>
+          }
           padded={false}
         >
           <div className="overflow-x-auto">
@@ -330,10 +340,10 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
 
       <SectionCard
         title="Bảng kê Viettel Post nhận qua email"
-        description={`${formatNumber(bangKe.length)} bảng kê · mỗi bảng kê là một lần Viettel Post chuyển tiền`}
+        description={`${formatNumber(bangKe.length)} bảng kê`}
         hint={
           <>
-            Thư “BẢNG KÊ ĐỐI SOÁT THANH TOÁN” về hòm thư shop được đẩy thẳng vào ERP. Ba số tổng lấy
+            Mỗi bảng kê là một lần Viettel Post chuyển tiền. Thư “BẢNG KÊ ĐỐI SOÁT THANH TOÁN” về hòm thư shop được đẩy thẳng vào ERP. Ba số tổng lấy
             từ phần <b>KẾT LUẬN ĐỐI SOÁT</b> in trong chính tệp: tiền COD phải trả − cước phải thu =
             còn lại phải thanh toán. <b>Chưa ghép</b> là dòng bảng kê có mã vận đơn mà ERP chưa có
             vận đơn đó — tiền có thật nhưng chưa truy nguyên được về đơn nào.

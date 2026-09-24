@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { formatPercent, formatVND, pctOrNull } from "@/lib/format";
 import type { MarketerDailyNominal, NominalCell } from "@/lib/queries/marketer-daily-nominal";
 import { cn } from "@/lib/utils";
@@ -69,28 +71,39 @@ export function MarketerNominalBreakdown({ data, kind, hrefFor, kindHref, report
 
   return (
     <div className="space-y-3">
-      {data.warnings.map((w) => (
-        <p key={w} className="px-4 pt-3 text-[11px] text-amber-600 dark:text-amber-400">
-          {w}
-        </p>
-      ))}
-
-      {/* ─── ĐỐI CHIẾU IN RA MÀN HÌNH: người đọc tự kiểm được bảng này có khớp Báo cáo lợi nhuận không ─── */}
-      <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 pt-3 text-[11px] text-muted-foreground">
-        <span>
-          Khớp <Link href={reportHref} className="underline">Báo cáo lợi nhuận danh nghĩa</Link> cùng kỳ
-          {/* Cùng giá vốn dự tính với tab ấy — nói ra phần dự tính để dấu ✓ không che mất nó. */}
-          {data.estimatedCogs.amount > 0 ? <> (giá vốn gồm <b>{formatVND(data.estimatedCogs.amount, { compact: true })} dự tính</b> cho {data.estimatedCogs.products} mã)</> : null}:
+      {/*
+        ─── ĐỐI CHIẾU IN RA MÀN HÌNH: người đọc tự kiểm được bảng này có khớp Báo cáo lợi nhuận không ───
+        Kết quả đối chiếu (số + ✓ / lệch) là SỐ LIỆU nên đứng ngoài; câu chữ về mốc và giả định vào ⓘ,
+        cảnh báo dữ liệu (kể cả phần giá vốn dự tính) vào nhãn ⚠.
+      */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-3 text-[11px] text-muted-foreground">
+        <span className="inline-flex items-center gap-1">
+          Khớp <Link href={reportHref} className="underline">Báo cáo lợi nhuận danh nghĩa</Link>:
         </span>
         <Recon label="DT GTC ƯT" ours={rc.expectedRevenue.ours} report={rc.expectedRevenue.report} />
         <Recon label="LN danh nghĩa" ours={rc.expectedProfit.ours} report={rc.expectedProfit.report} />
         <Recon label="LN ròng" ours={rc.netProfit.ours} report={rc.netProfit.report} />
+        <InfoHint>
+          <p className="mb-1">Đối chiếu với Báo cáo lợi nhuận danh nghĩa cùng kỳ — rê chuột lên từng con số để xem số của bảng này và số của báo cáo.</p>
+          <p>
+            Mốc: <b>ngày đơn lên</b> (đổi mốc phía trên không đổi bảng này). Cước ƯT {formatVND(data.assumptions.shipFeeDelivered)}/đơn giao ·{" "}
+            {formatVND(data.assumptions.shipFeeReturned)}/đơn hoàn · thuế {data.assumptions.taxPercent}% DT · CP khác {data.assumptions.otherCostPercentOfAds}% QC.
+            Quy kết doanh số: ảnh chụp fanpage {attrPct(data.attribution.snapshot)} · page gán tay {attrPct(data.attribution.page)} · ad_id{" "}
+            {attrPct(data.attribution.ad)} · chia theo QC/chủ mã {attrPct(data.attribution.fallback)} · không ai {attrPct(data.attribution.none)}.
+          </p>
+        </InfoHint>
+        <DataWarnings
+          items={[
+            ...data.warnings,
+            /* Cùng giá vốn dự tính với tab ấy — nói ra phần dự tính để dấu ✓ không che mất nó. */
+            data.estimatedCogs.amount > 0 ? (
+              <>
+                Giá vốn gồm <b>{formatVND(data.estimatedCogs.amount, { compact: true })} dự tính</b> cho {data.estimatedCogs.products} mã.
+              </>
+            ) : null,
+          ]}
+        />
       </div>
-      <p className="px-4 text-[11px] text-muted-foreground">
-        Mốc: <b>ngày đơn lên</b> (đổi mốc phía trên không đổi bảng này). Cước ƯT {formatVND(data.assumptions.shipFeeDelivered)}/đơn giao · {formatVND(data.assumptions.shipFeeReturned)}/đơn hoàn · thuế{" "}
-        {data.assumptions.taxPercent}% DT · CP khác {data.assumptions.otherCostPercentOfAds}% QC. Quy kết doanh số: ảnh chụp fanpage {attrPct(data.attribution.snapshot)} · page gán tay {attrPct(data.attribution.page)} · ad_id{" "}
-        {attrPct(data.attribution.ad)} · chia theo QC/chủ mã {attrPct(data.attribution.fallback)} · không ai {attrPct(data.attribution.none)}.
-      </p>
 
       {/* ─── KHỐI 1: CẢ KỲ, MỖI NGƯỜI MỘT DÒNG ─── */}
       <div className="overflow-x-auto">
@@ -98,23 +111,24 @@ export function MarketerNominalBreakdown({ data, kind, hrefFor, kindHref, report
           <TableHeader>
             <TableRow>
               <TableHead className="min-w-[150px]">MKTer</TableHead>
+              {/* Chú thích tầng dưới của từng cột nằm trong ⓘ — ô hai tầng bên dưới là số liệu, giữ nguyên. */}
               <TableHead className="text-right">
-                Chi QC<div className="text-[10px] font-normal text-muted-foreground">tin nhắn</div>
+                <HeadHint label="Chi QC" hint="Tầng dưới: tin nhắn" />
               </TableHead>
               <TableHead className="text-right">
-                Đơn<div className="text-[10px] font-normal text-muted-foreground">giao · hoàn · đang đi</div>
+                <HeadHint label="Đơn" hint="Tầng dưới: giao · hoàn · đang đi" />
               </TableHead>
               <TableHead className="text-right">
-                Doanh số<div className="text-[10px] font-normal text-muted-foreground">CPQC/đơn</div>
+                <HeadHint label="Doanh số" hint="Tầng dưới: CPQC/đơn" />
               </TableHead>
               <TableHead className="text-right">
-                DT GTC ƯT<div className="text-[10px] font-normal text-muted-foreground">% doanh số</div>
+                <HeadHint label="DT GTC ƯT" hint="Tầng dưới: % doanh số" />
               </TableHead>
               <TableHead className="text-right">
-                LN danh nghĩa ƯT<div className="text-[10px] font-normal text-muted-foreground">DT − GV − cước − QC</div>
+                <HeadHint label="LN danh nghĩa ƯT" hint="DT − GV − cước − QC" />
               </TableHead>
               <TableHead className="text-right">
-                LN ròng ƯT<div className="text-[10px] font-normal text-muted-foreground">− vận hành · rủi ro · thuế · CP khác</div>
+                <HeadHint label="LN ròng ƯT" hint="LN danh nghĩa − vận hành · rủi ro · thuế · CP khác" />
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -129,8 +143,9 @@ export function MarketerNominalBreakdown({ data, kind, hrefFor, kindHref, report
 
       {/* ─── KHỐI 2: MỖI NGÀY, TỪNG NGƯỜI ─── */}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline px-4 pt-3">
-        <div className="text-xs font-semibold">
-          Từng ngày × MKTer <span className="font-normal text-muted-foreground">— mỗi ô: đơn · DT GTC ƯT / {kindLabel} / chi QC</span>
+        <div className="inline-flex items-center gap-1 text-xs font-semibold">
+          Từng ngày × MKTer
+          <InfoHint>Mỗi ô: đơn · DT GTC ƯT / {kindLabel} / chi QC</InfoHint>
         </div>
         <div className="flex gap-1 text-[11px]">
           {(["net", "gross"] as const).map((k) => (
@@ -192,6 +207,15 @@ export function MarketerNominalBreakdown({ data, kind, hrefFor, kindHref, report
         </Table>
       </div>
     </div>
+  );
+}
+
+function HeadHint({ label, hint }: { label: string; hint: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {label}
+      <InfoHint align="end">{hint}</InfoHint>
+    </span>
   );
 }
 

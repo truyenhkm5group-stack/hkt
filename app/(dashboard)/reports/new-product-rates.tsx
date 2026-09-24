@@ -56,9 +56,13 @@ export function NewProductRates({
   return (
     <SectionCard
       title="Mã mới · chưa đủ căn cứ để máy tự đo"
-      description={`${formatNumber(chuaChin.length)} mã · ${formatVND(tongDoanhSo, { compact: true })} doanh số POS đang được tính bằng một tỷ lệ CHƯA ĐO ĐƯỢC. Đặt tay ở cột cuối; con số tự nhường chỗ cho số đo ngay khi mô hình đo được mã ấy bằng dữ liệu của chính nó.`}
+      description={`${formatNumber(chuaChin.length)} mã · ${formatVND(tongDoanhSo, { compact: true })} doanh số POS`}
       hint={
         <>
+          <p className="mb-2">
+            Doanh số POS này đang được tính bằng một tỷ lệ CHƯA ĐO ĐƯỢC. Đặt tay ở cột cuối; con số tự nhường chỗ cho số đo ngay khi
+            mô hình đo được mã ấy bằng dữ liệu của chính nó.
+          </p>
           <p>
             Một mã vào bảng này khi con số của nó CHƯA PHẢI MỘT SỐ ĐO, vì một trong hai lý do. <b>Chưa chín</b>: số đơn đã kết
             thúc của chính mã chưa đạt {formatNumber(assumptions.rateMatureMinFinished)} — cột “Độ chín” đếm ngược.{" "}

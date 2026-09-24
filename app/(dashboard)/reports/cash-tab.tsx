@@ -5,6 +5,8 @@ import {
   Hourglass,
 } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
+import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { Money, SectionCard } from "@/components/ui-bits";
 import {
   Table,
@@ -23,7 +25,10 @@ export async function CashTab({ period }: { period: Period }) {
   const r = await getCashProfitReport(period);
   const lines: {
     label: string;
+    /** Chi tiết / cách tính — hiện trong dấu ⓘ cạnh nhãn, không in thẳng ra màn hình. */
     note: string;
+    /** Lưu ý dữ liệu của dòng — thu vào nhãn "⚠ n lưu ý dữ liệu". */
+    warn?: string[];
     value: number;
     kind: "in" | "out" | "total";
   }[] = [
@@ -31,7 +36,8 @@ export async function CashTab({ period }: { period: Period }) {
       label: "COD Viettel Post đã về ngân hàng (thực nhận)",
       note: r.statements.count
         ? `${formatNumber(r.statements.count)} bảng kê đối soát trong kỳ: tiền COD ${formatVND(r.statements.codGross)} − cước/dư nợ ${formatVND(r.statements.feeTotal)} · ${formatNumber(r.statements.shipmentsLinked)} vận đơn đã ghép chi tiết (Đối soát COD → Bảng kê Viettel Post)`
-        : "Chưa có bảng kê / đợt nhận tiền nào trong kỳ — nhập ở Đối soát COD → Bảng kê Viettel Post",
+        : "",
+      warn: r.statements.count ? [] : ["Chưa có bảng kê / đợt nhận tiền nào trong kỳ — nhập ở Đối soát COD → Bảng kê Viettel Post"],
       value: r.cashIn.codPaidToBank,
       kind: "in",
     },
@@ -39,8 +45,8 @@ export async function CashTab({ period }: { period: Period }) {
       label: "Khách thanh toán trước / chuyển khoản",
       note:
         `${formatNumber(r.cashIn.prepaidOrders)} đơn có tiền trả trước, ghi theo NGÀY TIỀN THỰC TRẢ (lúc lên đơn), không đợi giao` +
-        (r.cashIn.prepaidOnReturned ? ` · trong đó ${formatVND(r.cashIn.prepaidOnReturned, { compact: true })} thuộc đơn đã hoàn — có thể phải trả lại khách` : "") +
         (r.pending.prepaidUnallocated ? ` · số dư trả trước của ${formatNumber(r.pending.prepaidUnallocatedCount)} đơn chưa kết thúc: ${formatVND(r.pending.prepaidUnallocated, { compact: true })} (chưa vào lợi nhuận kỳ nào)` : ""),
+      warn: r.cashIn.prepaidOnReturned ? [`Trong đó ${formatVND(r.cashIn.prepaidOnReturned, { compact: true })} thuộc đơn đã hoàn — có thể phải trả lại khách`] : [],
       value: r.cashIn.prepaid,
       kind: "in",
     },
@@ -118,7 +124,7 @@ export async function CashTab({ period }: { period: Period }) {
               {formatVND(r.net, { compact: true })}
             </span>
           }
-          note="Tiền thực vào − tiền thực ra trong kỳ"
+          hint="Tiền thực vào − tiền thực ra trong kỳ"
           icon={Banknote}
           tone={r.net >= 0 ? "primary" : "rose"}
         />
@@ -136,7 +142,17 @@ export async function CashTab({ period }: { period: Period }) {
 
       <SectionCard
         title="Dòng tiền thực"
-        description={`${period.label} · tiền được gán vào kỳ theo ngày thực nhận / thực chi, không theo ngày lên đơn`}
+        description={period.label}
+        hint={
+          <>
+            <p className="mb-2">Tiền được gán vào kỳ theo ngày thực nhận / thực chi, không theo ngày lên đơn.</p>
+            <p>
+              COD chỉ tính khi được đánh dấu “Đã về ngân hàng” trong Đối soát COD.
+              Nếu chưa đối soát, tiền vào sẽ thấp hơn thực tế; mục “Tiền chưa về”
+              cho biết phần đang chờ.
+            </p>
+          </>
+        }
         padded={false}
       >
         <Table className="min-w-[640px]">
@@ -158,12 +174,11 @@ export async function CashTab({ period }: { period: Period }) {
                 <TableCell
                   className={cn("py-2.5", l.kind !== "total" && "pl-6")}
                 >
-                  <div>{l.label}</div>
-                  {l.note ? (
-                    <div className="text-[11px] font-normal text-muted-foreground">
-                      {l.note}
-                    </div>
-                  ) : null}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {l.label}
+                    {l.note ? <InfoHint>{l.note}</InfoHint> : null}
+                    {l.warn ? <DataWarnings items={l.warn} /> : null}
+                  </div>
                 </TableCell>
                 <TableCell className="text-right">
                   <Money
@@ -181,11 +196,6 @@ export async function CashTab({ period }: { period: Period }) {
             ))}
           </TableBody>
         </Table>
-        <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-          COD chỉ tính khi được đánh dấu “Đã về ngân hàng” trong Đối soát COD.
-          Nếu chưa đối soát, tiền vào sẽ thấp hơn thực tế; mục “Tiền chưa về”
-          cho biết phần đang chờ.
-        </div>
       </SectionCard>
     </div>
   );

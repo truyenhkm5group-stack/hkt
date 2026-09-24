@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowDownRight, ArrowUpRight, Landmark, Minus, ReceiptText, Users } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
+import { DataWarnings } from "@/components/data-warnings";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatNumber, formatVND } from "@/lib/format";
@@ -71,6 +72,29 @@ export async function ExpenseReportTab({ period }: { period: Period }) {
         title="Chi phí theo nhóm"
         description={`${period.label} · so với kỳ trước cùng độ dài`}
         hint="Cột 'Biến động' là lý do bảng này tồn tại: mức chi thì trang Danh sách đã nói, còn thứ đáng quyết định là khoản nào đang TĂNG. Ô '—' ở cột phần trăm nghĩa là kỳ trước bằng 0 nên KHÔNG so được — 'tăng 100%' hay 'tăng ∞%' đều là bịa."
+        /*
+          ───── Cảnh báo của cost-engine ─────
+          Trước đây là một khối riêng cuối trang; nay thu về MỘT nhãn ⚠ ngay trên bảng chi phí mà
+          chúng nói tới. Nội dung lấy lại NGUYÊN VĂN từ cost-engine, không tự đánh giá lại — rê chuột
+          để đọc đủ tiêu đề · chi tiết · việc nên làm. Có cảnh báo mức cao ⇒ nhãn đỏ.
+        */
+        actions={
+          <DataWarnings
+            align="end"
+            tone={r.warnings.some((w) => w.severity === "high") ? "danger" : "warn"}
+            label={r.warnings.length ? `${r.warnings.length} cảnh báo nguồn chi phí` : undefined}
+            items={r.warnings.map((w) => (
+              <div key={w.rule}>
+                <p className="font-semibold">{w.title}</p>
+                <p className="mt-0.5 text-muted-foreground">{w.detail}</p>
+                <p className="mt-1">
+                  <span className="font-medium">Nên làm gì: </span>
+                  {w.action}
+                </p>
+              </div>
+            ))}
+          />
+        }
         padded={false}
       >
         {!r.byCategory.length ? (
@@ -132,8 +156,16 @@ export async function ExpenseReportTab({ period }: { period: Period }) {
       {/* ───── Tiền thật ra theo ngày ───── */}
       <SectionCard
         title="Tiền thật đã ra theo ngày"
-        description="Theo ngày ngân hàng ghi — KHÁC cơ sở với bảng theo nhóm ở trên"
-        hint="Cố ý dùng tiền thật thay vì chi phí đã phân bổ: một đường 'chi phí phân bổ theo ngày' thì PHẲNG theo thiết kế (tiền thuê chia đều mỗi ngày) nên không phát hiện được gì. Đường tiền thật có đỉnh, và đỉnh là thứ cần nhìn. Chuyển nội bộ, trả nợ gốc, rút vốn bị loại — chúng làm tài khoản vơi đi nhưng không phải chi phí."
+        hint={
+          <>
+            <p className="mb-1">Theo ngày ngân hàng ghi — KHÁC cơ sở với bảng theo nhóm ở trên.</p>
+            <p>
+              Cố ý dùng tiền thật thay vì chi phí đã phân bổ: một đường &lsquo;chi phí phân bổ theo ngày&rsquo; thì PHẲNG theo thiết kế (tiền thuê chia đều
+              mỗi ngày) nên không phát hiện được gì. Đường tiền thật có đỉnh, và đỉnh là thứ cần nhìn. Chuyển nội bộ, trả nợ gốc, rút vốn bị loại — chúng
+              làm tài khoản vơi đi nhưng không phải chi phí.
+            </p>
+          </>
+        }
         padded={false}
       >
         {!r.hasBankData ? (
@@ -193,23 +225,7 @@ export async function ExpenseReportTab({ period }: { period: Period }) {
         </SectionCard>
       ) : null}
 
-      {/* ───── Cảnh báo của cost-engine ───── */}
-      {r.warnings.length ? (
-        <SectionCard title="Cảnh báo về nguồn chi phí" description="Của cost-engine — lấy lại nguyên văn, không tự đánh giá lại">
-          <ul className="space-y-3">
-            {r.warnings.map((w) => (
-              <li key={w.rule} className={cn("rounded-lg border px-3 py-2.5", w.severity === "high" ? "border-destructive/30 bg-destructive/5" : "border-warning/40 bg-warning/5")}>
-                <p className="text-[13px] font-semibold">{w.title}</p>
-                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">{w.detail}</p>
-                <p className="mt-1 text-xs leading-5">
-                  <span className="font-medium">Nên làm gì: </span>
-                  {w.action}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
-      ) : null}
+      {/* Cảnh báo của cost-engine: nằm ở nhãn ⚠ trên "Chi phí theo nhóm" (xem ở trên). */}
     </div>
   );
 }

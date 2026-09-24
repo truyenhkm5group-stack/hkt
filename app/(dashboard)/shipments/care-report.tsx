@@ -168,8 +168,12 @@ export async function CareReportSection({ period }: { period: Period }) {
 
       <SectionCard
         title="Theo nhân viên"
-        description="Xếp theo COD cứu được, không theo số lần bấm."
-        hint="Cứu được = kiện giao hụt người này can thiệp rồi giao thành công. Hoàn sau care = can thiệp rồi vẫn hoàn. Vỡ SLA = kiện đang cầm mà quá 2 giờ chưa phản hồi. Bấm tên để mở danh sách kiện của người đó."
+        hint={
+          <>
+            <p className="mb-2">Cứu được = kiện giao hụt người này can thiệp rồi giao thành công. Hoàn sau care = can thiệp rồi vẫn hoàn. Vỡ SLA = kiện đang cầm mà quá 2 giờ chưa phản hồi. Bấm tên để mở danh sách kiện của người đó.</p>
+            <p>Xếp theo COD cứu được, không theo số lần bấm.</p>
+          </>
+        }
         padded={false}
       >
         {r.staff.length === 0 ? (

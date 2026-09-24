@@ -1,5 +1,7 @@
 import { CircleAlert, CircleCheck, Target, TriangleAlert } from "lucide-react";
 import { SectionCard } from "@/components/ui-bits";
+import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { MARKETING_DIAGNOSIS } from "@/lib/constants/marketing-diagnosis";
 import { CELL_STATUS_LABEL } from "@/lib/metrics/scorecard";
 import { TARGET_SCOPE_LABEL } from "@/lib/constants/metric-registry";
@@ -62,8 +64,16 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
   return (
     <SectionCard
       title={`Chẩn đoán ngày ${last.day}`}
-      description={baseline ? `So với trung bình ${baselineRows.length} ngày liền trước` : "Chưa đủ ngày để dựng nền so sánh — chỉ hiện những phát hiện không cần nền"}
-      hint="Mỗi phát hiện là một TỔ HỢP chỉ số, không phải một chỉ số riêng lẻ: 'CPA tăng' một mình không nói được phải sửa ở khâu quảng cáo hay khâu chốt đơn. Ngưỡng lên tiếng nằm ở lib/constants/marketing-diagnosis.ts và không đụng tới một công thức tiền nào."
+      description={baseline ? `So với trung bình ${baselineRows.length} ngày liền trước` : "Chưa đủ ngày để dựng nền so sánh"}
+      hint={
+        <>
+          {baseline ? null : <p className="mb-2">Chưa đủ ngày để dựng nền so sánh — chỉ hiện những phát hiện không cần nền.</p>}
+          <p>
+            Mỗi phát hiện là một TỔ HỢP chỉ số, không phải một chỉ số riêng lẻ: &lsquo;CPA tăng&rsquo; một mình không nói được phải sửa ở khâu quảng cáo
+            hay khâu chốt đơn. Ngưỡng lên tiếng nằm ở lib/constants/marketing-diagnosis.ts và không đụng tới một công thức tiền nào.
+          </p>
+        </>
+      }
     >
       {findings.length === 0 ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -109,9 +119,11 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
 
       {targets.cells.length ? (
         <div className="mt-4 border-t pt-3">
-          <p className="mb-2 flex items-center gap-1.5 text-xs font-medium">
+          <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs font-medium">
             <Target className="size-3.5" /> So với đích đã đặt
-          </p>
+            {/* Vì sao tầng hẹp KHÔNG áp được — vẫn nói ra (nhãn ⚠), vì im lặng ở đây làm chủ shop tin là đích cá nhân đang chạy. */}
+            <DataWarnings items={targets.notes.map((n) => n.text)} />
+          </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {targets.cells.map((t) => (
               <div key={t.cellKey} className="rounded-lg border p-2 text-xs">
@@ -136,18 +148,15 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
               </div>
             ))}
           </div>
-          {/* Vì sao tầng hẹp KHÔNG áp được — in ra, vì im lặng ở đây làm chủ shop tin là đích cá nhân đang chạy. */}
-          {targets.notes.map((n) => (
-            <p key={n.text} className="mt-2 text-[11px] text-muted-foreground">
-              ⓘ {n.text}
-            </p>
-          ))}
         </div>
       ) : (
-        <p className="mt-4 border-t pt-3 text-xs text-muted-foreground">
-          Chưa ai đặt đích cho CPQC/đơn, ROAS, tỷ lệ chốt, margin, tỷ lệ giao thành công hay tỷ lệ hoàn. ERP cố ý KHÔNG tự nghĩ ra một ngưỡng — đặt đích ở màn hình Mục tiêu (năm tầng: công ty →
-          phòng ban → chức danh → người → mã hàng, tầng hẹp đè tầng rộng), rồi mỗi ô ở đây sẽ tự chấm theo đích đó. ROAS hoà vốn khai ở ô &ldquo;ngưỡng đỏ&rdquo; của chính chỉ số ROAS, không phải
-          một chỉ số thứ hai.
+        <p className="mt-4 flex items-center gap-1.5 border-t pt-3 text-xs text-muted-foreground">
+          <Target className="size-3.5" /> Chưa đặt đích
+          <InfoHint>
+            Chưa ai đặt đích cho CPQC/đơn, ROAS, tỷ lệ chốt, margin, tỷ lệ giao thành công hay tỷ lệ hoàn. ERP cố ý KHÔNG tự nghĩ ra một ngưỡng — đặt đích
+            ở màn hình Mục tiêu (năm tầng: công ty → phòng ban → chức danh → người → mã hàng, tầng hẹp đè tầng rộng), rồi mỗi ô ở đây sẽ tự chấm theo đích
+            đó. ROAS hoà vốn khai ở ô &ldquo;ngưỡng đỏ&rdquo; của chính chỉ số ROAS, không phải một chỉ số thứ hai.
+          </InfoHint>
         </p>
       )}
 

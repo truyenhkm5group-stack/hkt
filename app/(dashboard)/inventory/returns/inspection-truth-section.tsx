@@ -34,8 +34,12 @@ export function InspectionTruthSection({ truth }: { truth: InspectionTruth }) {
           ) : null}
         </span>
       }
-      description={COVERAGE_VERDICT_WHY[truth.coverage.verdict]}
-      hint={`Một món chỉ được tính là "đã kiểm" khi có dòng kết luận RIÊNG cho nó. Kiện có phiếu tái nhập mà không có dòng món nào thì điều kiện từng món là CHƯA BIẾT — phiếu nói hàng đã vào tồn, không nói ai đã nhìn nó. Ngưỡng đủ căn cứ: ${QUALITY_COVERAGE_MIN_PCT}%.`}
+      hint={
+        <>
+          <p>{COVERAGE_VERDICT_WHY[truth.coverage.verdict]}</p>
+          <p className="mt-1">{`Một món chỉ được tính là "đã kiểm" khi có dòng kết luận RIÊNG cho nó. Kiện có phiếu tái nhập mà không có dòng món nào thì điều kiện từng món là CHƯA BIẾT — phiếu nói hàng đã vào tồn, không nói ai đã nhìn nó. Ngưỡng đủ căn cứ: ${QUALITY_COVERAGE_MIN_PCT}%.`}</p>
+        </>
+      }
     >
       <StatStrip
         columns={4}
@@ -50,8 +54,7 @@ export function InspectionTruthSection({ truth }: { truth: InspectionTruth }) {
           {
             label: "Món chưa ai kết luận",
             value: formatNumber(truth.items.unknown),
-            note: "đã vào tồn nhưng chưa xem riêng",
-            hint: "Những món này vào lại tồn dựa trên một kết luận ở mức CẢ KIỆN. Chúng KHÔNG được coi là hàng tốt — chỉ là chưa ai xem.",
+            hint: "Đã vào tồn nhưng chưa xem riêng. Những món này vào lại tồn dựa trên một kết luận ở mức CẢ KIỆN. Chúng KHÔNG được coi là hàng tốt — chỉ là chưa ai xem.",
             icon: CircleHelp,
             tone: truth.items.unknown ? "amber" : "green",
           },
@@ -133,13 +136,15 @@ function EvidenceCard({ label, parcels, total, why, tone }: { label: string; par
       )}
     >
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[12.5px] font-medium">{label}</span>
+        <span className="inline-flex items-center gap-1 text-[12.5px] font-medium">
+          {label}
+          <InfoHint>{why}</InfoHint>
+        </span>
         <b className="numeric text-lg">{formatNumber(parcels)}</b>
       </div>
       <p className="mt-0.5 text-[11px] text-muted-foreground">
         {total > 0 ? `${((parcels / total) * 100).toFixed(0)}% số kiện` : "—"}
       </p>
-      <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{why}</p>
     </div>
   );
 }
@@ -161,8 +166,22 @@ export function RecoveredValueSection({ truth }: { truth: InspectionTruth }) {
           <Wallet className="size-4" /> Giá trị hàng đã thu hồi
         </span>
       }
-      description="Chỉ tính phần BIẾT giá vốn, lấy từ phiếu nhập kho gần nhất"
-      hint="Đây là con số ĐỌC, không phải bút toán: bản này không ghi một dòng kế toán nào. Giá vốn không bao giờ lấy từ giá bán hay doanh thu — đó là lấy thứ khách trả làm thứ shop bỏ ra."
+      hint={
+        <>
+          <p>Chỉ tính phần BIẾT giá vốn, lấy từ phiếu nhập kho gần nhất.</p>
+          <p className="mt-1">
+            Đây là con số ĐỌC, không phải bút toán: bản này không ghi một dòng kế toán nào. Giá vốn không bao giờ lấy từ giá bán hay doanh thu — đó là lấy thứ khách trả làm thứ shop bỏ ra.
+          </p>
+          <p className="mt-1">
+            <b>Chưa tính giá trị thất thoát.</b> Nó cần điều kiện CUỐI CÙNG của từng món, mà hôm nay {formatNumber(truth.items.unknown)} món chưa ai kết luận riêng —
+            nhân một con số giá vốn với một điều kiện chưa biết thì ra một khoản lỗ chưa ai chứng minh được.
+          </p>
+          <p className="mt-1">
+            Khi độ phủ chứng cứ đủ, phần này sẽ hiện giá trị của hàng kết luận KHÔNG bán lại được. Bản phát hành này cố ý dừng ở chỗ đọc số — không ghi bút toán
+            kế toán nào.
+          </p>
+        </>
+      }
     >
       <StatStrip
         columns={3}
@@ -177,8 +196,8 @@ export function RecoveredValueSection({ truth }: { truth: InspectionTruth }) {
           {
             label: "Chưa biết giá vốn",
             value: formatNumber(truth.cost.unknownQty),
-            note: duGiaVon ? "mọi mẫu mã đều tra được giá" : "món KHÔNG được ước lượng thành tiền",
-            hint: "Món không tra được giá vốn nằm ngoài tổng tiền bên trái. Cộng chúng vào với giá 0đ sẽ làm tổng trông đầy đủ trong khi nó thiếu đúng bằng phần này.",
+            note: duGiaVon ? "mọi mẫu mã đều tra được giá" : undefined,
+            hint: "Món KHÔNG được ước lượng thành tiền. Món không tra được giá vốn nằm ngoài tổng tiền bên trái. Cộng chúng vào với giá 0đ sẽ làm tổng trông đầy đủ trong khi nó thiếu đúng bằng phần này.",
             icon: CircleHelp,
             tone: duGiaVon ? "green" : "amber",
           },
@@ -191,14 +210,6 @@ export function RecoveredValueSection({ truth }: { truth: InspectionTruth }) {
           },
         ]}
       />
-      <p className="mt-2 text-[11.5px] text-muted-foreground">
-        <b>Chưa tính giá trị thất thoát.</b> Nó cần điều kiện CUỐI CÙNG của từng món, mà hôm nay {formatNumber(truth.items.unknown)} món chưa ai kết luận riêng —
-        nhân một con số giá vốn với một điều kiện chưa biết thì ra một khoản lỗ chưa ai chứng minh được.
-        <InfoHint>
-          Khi độ phủ chứng cứ đủ, phần này sẽ hiện giá trị của hàng kết luận KHÔNG bán lại được. Bản phát hành này cố ý dừng ở chỗ đọc số — không ghi bút toán
-          kế toán nào.
-        </InfoHint>
-      </p>
     </SectionCard>
   );
 }
