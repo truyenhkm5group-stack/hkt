@@ -176,7 +176,8 @@ Chạy dày là an toàn và có chủ ý: khoá duy nhất `(ngày quyết đ�
 trong ngày thành CẬP NHẬT — lượt thứ 48 không đẻ thêm một dòng nào. Chạy dày là để **không bỏ lỡ
 một ngày** khi máy chủ khởi động lại, và một ngày bỏ lỡ thì mất hẳn.
 
-Chạy tay một lượt: ops `run-job` với `arg = marketing-decision-ledger`.
+Chạy tay một lượt: ops `run-job` với `arg = marketing-decision-ledger`. *(Từ 24/09/2026 kết quả
+`run-job` đi dạng mã hoá; log còn tên job, trạng thái và bốn con số đếm — `docs/ops-doc-ket-qua.md`.)*
 
 ---
 

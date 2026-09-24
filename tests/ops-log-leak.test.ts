@@ -238,26 +238,148 @@ export function testDbQueryChiDocVaMaHoa() {
 
 /* ═════════════ DANH SÁCH MÃ HOÁ KHỚP HAI CHIỀU · FAIL-CLOSED · HIỆN VẬT 1 NGÀY ═════════════ */
 
+/**
+ * PHẦN BÙ CỦA `OPS_THAO_TAC_MA_HOA`: mọi thao tác KHÔNG mã hoá, mỗi cái một câu "đã rà script, nó
+ * in gì". Danh sách PHẢI mã hoá chỉ khai ở MỘT chỗ — biến env của ops-vps.yml; bảng này không lặp
+ * lại nó mà phủ phần còn lại, để một thao tác MỚI (hay một thao tác bị gỡ khỏi danh sách mã hoá)
+ * không lọt ra ngoài cả hai mà không ai nói gì. Rà ngày 24/09/2026 — bảng người đọc:
+ * docs/security-2026-09-24-ops-log-leak.md mục 6. "Mã vận đơn / mã đơn / tiền theo dòng" là định
+ * danh GIÁN TIẾP: tra ngược cần quyền vào ERP hoặc tài khoản Viettel Post, và không mang tên / SĐT /
+ * địa chỉ — ghi nhận ở rủi ro còn lại, không mã hoá.
+ */
+const KHONG_MA_HOA_DA_RA: Record<string, string> = {
+  status: "trạng thái container + /api/health",
+  perf: "CPU/RAM, thời gian phản hồi, tên bảng + số dòng",
+  disk: "dung lượng ổ đĩa, ảnh Docker",
+  "docker-prune": "tên ảnh Docker, dung lượng",
+  logs: "log ứng dụng đi qua che_log (email, IP, SĐT, token)",
+  "sync-pancake-all": "scripts/sync.ts: JSON kết quả job pancake-* — chỉ số đếm; lỗi từng đơn vào sync_runs, không in",
+  "sync-pancake-orders": "như sync-pancake-all",
+  "sync-vtp-tracking": "scripts/sync.ts: số đếm + mã trạng thái VTP chưa dịch",
+  "sync-vtp-import": "như sync-vtp-tracking",
+  "sync-facebook-ads": "scripts/sync.ts: số dòng chi tiêu theo tài khoản QC",
+  "import-bank-ledger": "số dòng / tổng tiền theo trạng thái và nhóm chi phí; nội dung chuyển khoản không in (ô arg đã che)",
+  "bank-ledger-prune": "số dòng xoá + tổng tiền",
+  "import-vtp-statements": "số bảng kê, tạo / cập nhật, tổng tiền",
+  "vtp-statements-autolink": "mã bảng kê, ngày đối soát, tổng COD — không có người",
+  "vtp-rebuild-state": "số đếm + ≤ 10 mã vận đơn kèm chặng (định danh gián tiếp)",
+  "cod-rebuild": "số đếm + ≤ 20 mã vận đơn kèm COD và tên tệp bảng kê (định danh gián tiếp)",
+  "cod-status-repair": "số đếm + tổng COD theo trạng thái",
+  "vtp-return-status-repair": "≤ 10 mã vận đơn kèm trạng thái VTP + chặng; tổng theo chặng",
+  "agent-run-reattach": "mã lượt chạy agent, nhánh, mã việc",
+  "vtp-replay-files": "tên tệp + số đếm; `--explain` (SĐT người nhận) bị TỪ CHỐI — dùng vtp-replay-explain",
+  "vtp-retry-webhooks": "mã vận đơn + lỗi xử lý gói tin (≤ 160 ký tự)",
+  "explain-stock": "kế hoạch EXPLAIN, không in tham số",
+  "outcome-explain": "mã vận đơn / đơn, trạng thái VTP, tiền COD từng dòng — không tên / SĐT / địa chỉ",
+  "kpi-snapshot": "tổng toàn shop",
+  smoke: "đường dẫn màn hình + thời gian",
+  verify: "dịch vụ, tài nguyên, đĩa, smoke; dòng log lỗi đi qua che_log",
+  "session-verify": "email quản trị ĐÃ CHE; phiếu phiên in 6 + 4 ký tự",
+  "session-revoke-e2e": "email tài khoản QA ĐÃ CHE; mã HTTP",
+  "perf-probe": "thời gian truy vấn, câu SQL có tham số là ngày / bộ lọc",
+  "perf-audit": "thời gian từng màn hình; marketer ẩn danh MKT#n",
+  "outcome-parity": "≤ 10 mã đơn / vận đơn kèm kết quả + giá vốn",
+  "returns-parity": "mã hàng + số đếm",
+  "reason-backfill": "số đếm theo nguồn",
+  "reason-coverage": "mã hàng + số đếm, id vận đơn nội bộ",
+  "cogs-drift": "≤ 10 mã đơn kèm giá vốn nay / lúc giao",
+  "profit-verify": "tổng lợi nhuận toàn shop ở 3 kỳ",
+  "marketing-calibrate": "bảng theo NGÀY toàn shop; `--explain` (từng đơn + tên người chốt) bị TỪ CHỐI — dùng marketing-explain",
+  "set-setting": "khoá + số trường; JSON không in (ô arg đã che)",
+  "meta-id-probe": "mã Meta, tên chiến dịch / nhóm QC (đối tượng kinh doanh), số đơn",
+  "ads-level-probe": "tên tài khoản QC + chi tiêu theo ngày",
+  "pages-debug": "220 ký tự đầu phản hồi /pages (danh sách fanpage), token đã bỏ",
+  "vtp-capability": "danh tính tài khoản API VTP ĐÃ CHE (mục 55); số đếm",
+  "vtp-import-preview": "tên tệp, mã vận đơn + trạng thái VTP từng dòng mẫu",
+  "vtp-web-probe": "HTML / JS công khai của viettelpost.vn",
+  "cs-cleanup": "số đếm",
+  "cs-rule-update": "số đếm + ≤ 3 lỗi quét (id hội thoại, tên fanpage)",
+  "care-waiting-reconcile": "mã vận đơn, trạng thái care, giờ xem lại — note đi vào setCareStatus, không in",
+  backup: "tên tệp dump",
+  restart: "health",
+  "rotate-webhook-secrets": "health; secret mới không in",
+  "apply-ai-env": "độ dài khoá; check-integrations --ai chỉ in meta (không in câu trả lời)",
+  "apply-sepay-env": "độ dài secret; mã HTTP của gói tin thử tổng hợp",
+  "apply-tech-github-env": "độ dài token; check-integrations --github in danh tính ĐÃ CHE",
+  "apply-agent-env": "job riêng: độ dài khoá; check-integrations --agent-identity in danh tính ĐÃ CHE",
+  "sepay-verify": "mã giao dịch SePay, tổng sổ",
+  "sepay-reconcile": "mã tham chiếu ngân hàng + số tiền mâu thuẫn — không nội dung chuyển khoản",
+  "sepay-schedule": "số phút của lịch",
+  "ai-check": "chỉ meta: độ dài câu trả lời, id vận đơn thử, note kiểm thử tổng hợp",
+};
+
+/** Thao tác trong `options:` của workflow_dispatch. */
+function danhSachThaoTac(src: string): string[] {
+  const i = src.indexOf("        options:\n");
+  const j = src.indexOf("      days:", i);
+  assert.ok(i > 0 && j > i, "không đọc được danh sách options của workflow_dispatch");
+  return [...src.slice(i, j).matchAll(/^ {10}- ([a-z0-9-]+)/gm)].map((x) => x[1]!);
+}
+
+/** Danh sách mã hoá — khai DUY NHẤT ở env mức workflow của ops-vps.yml. */
+function danhSachMaHoa(src: string): Set<string> {
+  const m = /^ {2}OPS_THAO_TAC_MA_HOA: "([^"]+)"$/m.exec(src);
+  assert.ok(m, "phải khai OPS_THAO_TAC_MA_HOA ở env mức workflow");
+  return new Set(m![1]!.trim().split(/\s+/));
+}
+
+/**
+ * Dòng CHẠY một lệnh trong container mà đầu ra có thể tới log: `docker exec …` / `$C exec …`, trừ
+ * dòng chép script (`sh -c 'cat > /app/scripts/…'` — không in gì) và dòng đổ hết ra /dev/null.
+ */
+const dongChayLenh = (d: string) =>
+  /(\bdocker exec|\$C exec)\b/.test(d) && !/sh -c 'cat > \/app\/scripts\//.test(d) && !/>\s*\/dev\/null/.test(d);
+
+export function testPhanLoaiDuThaoTac() {
+  const src = doc(OPS);
+  const thaoTac = danhSachThaoTac(src);
+  assert.ok(thaoTac.length > 50, `danh sách thao tác đọc được quá ngắn (${thaoTac.length})`);
+  const maHoa = danhSachMaHoa(src);
+  const khongLot = thaoTac.filter((a) => !maHoa.has(a) && !(a in KHONG_MA_HOA_DA_RA));
+  assert.deepEqual(
+    khongLot,
+    [],
+    `Thao tác chưa được phân loại — hoặc thêm vào OPS_THAO_TAC_MA_HOA (in dữ liệu cá nhân: tên, SĐT, địa chỉ, email, lương, số tài khoản, nội dung chat / note), hoặc rà script rồi khai một dòng ở KHONG_MA_HOA_DA_RA:\n${khongLot.join("\n")}`,
+  );
+  const ca2 = [...maHoa].filter((a) => a in KHONG_MA_HOA_DA_RA);
+  assert.deepEqual(ca2, [], `Thao tác vừa nằm trong danh sách mã hoá vừa khai "không mã hoá": ${ca2.join(", ")}`);
+  const thua = Object.keys(KHONG_MA_HOA_DA_RA).filter((a) => !thaoTac.includes(a));
+  assert.deepEqual(thua, [], `KHONG_MA_HOA_DA_RA có thao tác không còn trong options: ${thua.join(", ")}`);
+  const maHoaLa = [...maHoa].filter((a) => !thaoTac.includes(a));
+  assert.deepEqual(maHoaLa, [], `OPS_THAO_TAC_MA_HOA có thao tác không có trong options: ${maHoaLa.join(", ")}`);
+  console.log(`✓ Phân loại đủ ${thaoTac.length} thao tác: ${maHoa.size} mã hoá · ${Object.keys(KHONG_MA_HOA_DA_RA).length} đã rà chỉ in số tổng hợp · 0 thao tác lọt`);
+}
+
 export function testDanhSachMaHoa() {
   const src = doc(OPS);
   const s = scriptOps();
-  const m = /^ {2}OPS_THAO_TAC_MA_HOA: "([^"]+)"$/m.exec(src);
-  assert.ok(m, "phải khai OPS_THAO_TAC_MA_HOA ở env mức workflow");
-  const khai = new Set(m![1]!.trim().split(/\s+/));
+  const khai = danhSachMaHoa(src);
 
   const nhanh = cacNhanh(s);
   const goi = new Set([...nhanh].filter(([, than]) => /\bma_hoa_ket_qua\b/.test(than)).map(([ten]) => ten));
   assert.deepEqual([...khai].sort(), [...goi].sort(), "OPS_THAO_TAC_MA_HOA phải KHỚP đúng các nhánh gọi ma_hoa_ket_qua — lệch một bên là hoặc thiếu chứng chỉ, hoặc bản mã không ai lấy về");
-  for (const a of ["db-query", "vtp-debug", "phone-probe"]) assert.ok(khai.has(a), `${a} trả dữ liệu khách hàng — phải nằm trong danh sách mã hoá`);
 
-  // Trong nhánh mã hoá, MỌI lệnh chạy thật phải đi qua ma_hoa_ket_qua (lệnh `cat > …` chép script thì không in gì).
+  // Trong nhánh mã hoá, MỌI lệnh chạy trong container phải đi qua ma_hoa_ket_qua — không chỉ lệnh
+  // `npx tsx` (seed-employees và run-job chạy bằng `npm run`).
   for (const a of goi) {
-    const lenh = nhanh
-      .get(a)!
-      .split("\n")
-      .filter((d) => /\bnpx tsx\b|\bpsql\b.*erp_ro/.test(d));
+    const lenh = nhanh.get(a)!.split("\n").filter(dongChayLenh);
     assert.ok(lenh.length > 0, `${a}: không đọc được lệnh chạy`);
     for (const d of lenh) assert.match(d, /\bma_hoa_ket_qua\b/, `${a}: lệnh in kết quả KHÔNG qua ma_hoa_ket_qua: ${d.trim()}`);
+  }
+
+  // Chế độ in dữ liệu cá nhân của một thao tác "tổng hợp" đi bằng thao tác mã hoá RIÊNG; thao tác
+  // gốc phải TỪ CHỐI cờ ấy — nếu không, thói quen cũ in bản rõ ngay trong nhánh không mã hoá.
+  for (const [goc, rieng, co] of [
+    ["marketing-calibrate", "marketing-explain", "--explain"],
+    ["vtp-replay-files", "vtp-replay-explain", "--explain"],
+  ] as const) {
+    const than = nhanh.get(goc);
+    assert.ok(than, `phải có nhánh ${goc}`);
+    const i = than!.search(new RegExp(`case "\\$ARG" in\\s*\\n\\s*\\*${co}\\*\\)`));
+    assert.ok(i >= 0, `${goc}: phải từ chối ${co} (chế độ ấy thuộc ${rieng}, có mã hoá)`);
+    assert.match(than!.slice(i, than!.indexOf("esac", i)), /exit \d+/, `${goc}: gặp ${co} phải DỪNG`);
+    assert.ok(i < than!.search(/\bnpx tsx\b/), `${goc}: từ chối ${co} TRƯỚC khi chạy script`);
+    assert.ok(khai.has(rieng), `${rieng} phải nằm trong danh sách mã hoá`);
   }
 
   // Log ứng dụng đi qua che_log (email, IP, SĐT), không chỉ che khoá webhook như bản cũ.
@@ -304,7 +426,60 @@ export function testDanhSachMaHoa() {
     const noi = readFileSync(path.join("deploy", t), "utf8");
     assert.ok(!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(noi), `deploy/${t} chứa khoá riêng — kho này PUBLIC`);
   }
-  console.log(`✓ Mã hoá: ${khai.size} thao tác khớp hai chiều · fail-closed ở cả máy Actions lẫn máy chủ · không in bản rõ · hiện vật 1 ngày`);
+  console.log(`✓ Mã hoá: ${khai.size} thao tác khớp hai chiều · mọi lệnh chạy trong nhánh mã hoá qua ma_hoa_ket_qua · 2 chế độ --explain tách thành thao tác mã hoá · fail-closed ở cả máy Actions lẫn máy chủ · không in bản rõ · hiện vật 1 ngày`);
+}
+
+/* ═════════════ KÊNH TÓM TẮT: TIỀN TỐ DUY NHẤT, CHỈ SỐ ĐẾM ═════════════ */
+
+const TIEN_TO_TOM_TAT = "[ops:tom-tat] ";
+
+/**
+ * Trường của MỘT NGƯỜI — không bao giờ được đi qua kênh tóm tắt. Danh sách chặn này thô và cố ý
+ * thô: nó bắt lỗi dễ mắc nhất (dán `${r.name}` vào một dòng tóm tắt), không thay cho người review.
+ */
+const TRUONG_CA_NHAN = /\b(name|ten|shortName|phone|sdt|email|title|note|last_note|truoc_note|uploadedBy|billFullName|customerName|owner_name|receiverPhone|seller|aliases|accountIds|percent[A-Za-z]*|employeeName)\b/;
+
+/** Script mà một nhánh ops chạy: `scripts/<x>.ts`, hoặc qua `npm run` (seed:employees, sync). */
+function scriptCuaNhanh(than: string): string[] {
+  const kq = new Set<string>();
+  for (const m of than.matchAll(/scripts\/([a-z0-9-]+\.ts)/g)) kq.add(`scripts/${m[1]}`);
+  if (/npm run --silent seed:employees\b/.test(than)) kq.add("scripts/seed-employees.ts");
+  if (/npm run --silent sync\b/.test(than)) kq.add("scripts/sync.ts");
+  return [...kq];
+}
+
+export function testKenhTomTat() {
+  const s = scriptOps();
+  const ham = hamShell(s, "ma_hoa_ket_qua");
+  const dongTt = ham.split("\n").find((d) => d.includes("_tt=\"$(grep"));
+  assert.ok(dongTt, "ma_hoa_ket_qua phải có kênh tóm tắt đọc dòng mang tiền tố");
+  assert.ok(dongTt!.includes("'^\\[ops:tom-tat\\] '"), `kênh tóm tắt phải lọc đúng tiền tố ${JSON.stringify(TIEN_TO_TOM_TAT)} ở ĐẦU dòng`);
+  assert.match(dongTt!, /\|\s*che_log\b/, "dòng tóm tắt vẫn phải đi qua che_log");
+  assert.match(dongTt!, /head -n \d+/, "kênh tóm tắt phải có trần số dòng");
+  assert.ok(ham.indexOf("openssl cms -encrypt") < ham.indexOf("_tt=\"$(grep"), "chỉ in tóm tắt SAU khi đã mã hoá xong");
+
+  const src = doc(OPS);
+  const nhanh = cacNhanh(s);
+  let soScript = 0;
+  let soDong = 0;
+  for (const a of danhSachMaHoa(src)) {
+    for (const f of scriptCuaNhanh(nhanh.get(a) ?? "")) {
+      const ts = readFileSync(f, "utf8").replace(/\r\n/g, "\n");
+      if (!ts.includes("ops:tom-tat")) continue;
+      soScript += 1;
+      for (const m of ts.matchAll(/\[ops:tom-tat\][^`"']?/g)) {
+        assert.equal(m[0], "[ops:tom-tat] ", `${f}: tiền tố kênh tóm tắt phải đúng ${JSON.stringify(TIEN_TO_TOM_TAT)} (kể cả dấu cách)`);
+      }
+      for (const [i, d] of ts.split("\n").entries()) {
+        if (/^\s*(\/\/|\*|\/\*)/.test(d)) continue;
+        if (!/\btomTat\(|\[ops:tom-tat\]/.test(d)) continue;
+        soDong += 1;
+        assert.ok(!TRUONG_CA_NHAN.test(d), `${f}:${i + 1} đưa một trường của NGƯỜI vào kênh tóm tắt (ra log công khai): ${d.trim()}`);
+      }
+    }
+  }
+  assert.ok(soScript >= 8, `kênh tóm tắt dùng ở quá ít script (${soScript}) — đọc hụt nhánh?`);
+  console.log(`✓ Kênh tóm tắt: tiền tố duy nhất "${TIEN_TO_TOM_TAT.trim()}", đọc SAU khi mã hoá, qua che_log, có trần · ${soScript} script / ${soDong} dòng tóm tắt không mang trường của người`);
 }
 
 /* ═════════════ QUYỀN GITHUB_TOKEN · GHIM ACTION · (d) KHÔNG `${{ inputs.* }}` TRONG `run:` ═════════════ */
@@ -536,6 +711,40 @@ export function testHamShellChayThat() {
     assert.ok(!r2.ra.includes("0912345678"), "thiếu chứng chỉ không được lùi về in bản rõ");
     assert.match(r2.ra, /docs\/ops-doc-ket-qua\.md/, "thông báo phải trỏ tới tài liệu");
 
+    // 2b. KÊNH TÓM TẮT: chỉ dòng script tự đánh dấu ra log, vẫn qua che_log, không thành lệnh
+    //     workflow; dòng không đánh dấu (kể cả chứa chữ "tom-tat" ở giữa) nằm lại trong bản mã.
+    const lenhTt = [
+      "echo '[ops:tom-tat] ĐÃ ÁP DỤNG: 12/14 case đóng mềm'",
+      `echo '${PII} (chi tiết một người)'`,
+      "echo '  [ops:tom-tat] thụt lề thì KHÔNG phải kênh tóm tắt: Trần Thị Bí Mật'",
+      "echo 'ghi chú [ops:tom-tat] giữa dòng cũng không: Lê Văn Kín'",
+      "echo '[ops:tom-tat] lỡ tay: khách 0912345678 · ban.hang@shop.vn'",
+      "echo '[ops:tom-tat] ::add-mask::abc'",
+    ].join("; ");
+    const r2b = chay(`ma_hoa_ket_qua bash -c "$LENH_GIA"`, { OPS_RESULT_CERT_B64: certB64, LENH_GIA: lenhTt, ARG: "" });
+    assert.equal(r2b.ma, 0, r2b.ra);
+    assert.match(r2b.ra, /ĐÃ ÁP DỤNG: 12\/14 case đóng mềm/, `dòng tóm tắt phải ra log:\n${r2b.ra}`);
+    for (const bi of ["Nguyễn Văn Khách", "Trần Thị Bí Mật", "Lê Văn Kín", "0912345678", "ban.hang@shop.vn"]) {
+      assert.ok(!r2b.ra.includes(bi), `kênh tóm tắt không được để lọt "${bi}":\n${r2b.ra}`);
+    }
+    assert.ok(!r2b.ra.split("\n").some((d) => /^\s*::/.test(d)), `dòng tóm tắt không được thành lệnh workflow (::…):\n${r2b.ra}`);
+    const ro2b = execFileSync("openssl", ["cms", "-decrypt", "-binary", "-inform", "DER", "-in", banMa, "-inkey", p("k.key")], { encoding: "utf8", env: moiTruongSach({}) });
+    assert.ok(ro2b.includes("0912345678") && ro2b.includes("Nguyễn Văn Khách"), "bản mã vẫn giữ nguyên mọi dòng, kể cả dòng tóm tắt");
+    rmSync(banMa);
+
+    // 2c. trap EXIT của nhánh gọi (returns-hmt dọn bản sao bảng tính bằng nó) KHÔNG bị nuốt: chạy
+    //     đúng một lần khi thoát — cả khi lệnh thành công, lẫn khi thiếu chứng chỉ (dừng sớm).
+    const dauDon = p("don-dep-ngoai");
+    for (const [cert, maKyVong] of [[certB64, 0], ["", 78]] as const) {
+      rmSync(dauDon, { force: true });
+      const r = chay(`trap 'echo don >> "${dauDon}"' EXIT; ma_hoa_ket_qua bash -c "echo x"; echo SAU`, { OPS_RESULT_CERT_B64: cert, ARG: "" });
+      assert.equal(r.ma, maKyVong, r.ra);
+      assert.equal(existsSync(dauDon) ? readFileSync(dauDon, "utf8") : "", "don\n", `trap EXIT của nhánh gọi phải chạy đúng MỘT lần (chứng chỉ ${cert ? "có" : "thiếu"}):\n${r.ra}`);
+      if (cert) assert.match(r.ra, /SAU/, "hàm phải trả quyền lại cho nhánh gọi");
+      rmSync(banMa, { force: true });
+    }
+    assert.deepEqual(banRoConSot(p("t")), [], "bản rõ phải bị xoá");
+
     // 3. chay_voi_arg: tách cờ đúng; ký tự lạ ⇒ dừng, không chạy; không nở glob.
     const r3 = chay(`chay_voi_arg printf '[%s]'`, { ARG: "--from 2026-09-01 --to=2026-09-30 --apply" });
     assert.equal(r3.ra, "[--from][2026-09-01][--to=2026-09-30][--apply]", `tách cờ sai: ${r3.ra}`);
@@ -559,7 +768,7 @@ export function testHamShellChayThat() {
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
-  console.log("✓ Hàm shell chạy thật: bản rõ không ra log, bản mã giải được · thiếu chứng chỉ ⇒ dừng, lệnh không chạy · chay_voi_arg chặn 10 dạng chèn · che_log che email/IP/SĐT/token");
+  console.log("✓ Hàm shell chạy thật: bản rõ không ra log, bản mã giải được · thiếu chứng chỉ ⇒ dừng, lệnh không chạy · kênh tóm tắt chỉ nhận dòng đánh dấu, vẫn che SĐT/email, không thành lệnh workflow · trap EXIT của nhánh gọi còn nguyên · chay_voi_arg chặn 10 dạng chèn · che_log che email/IP/SĐT/token");
 }
 
 export async function testOpsLogLeak() {
@@ -568,7 +777,9 @@ export async function testOpsLogLeak() {
   testCheArgChayThat();
   testKhongChenLenh();
   testDbQueryChiDocVaMaHoa();
+  testPhanLoaiDuThaoTac();
   testDanhSachMaHoa();
+  testKenhTomTat();
   testWorkflowKhongTiemInputs();
   await testRoleChiDocChayThat();
   testHamShellChayThat();

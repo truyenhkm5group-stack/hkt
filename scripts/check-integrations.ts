@@ -19,12 +19,27 @@ import { githubConfig, listRecentDeployRuns, testConnection as testGithubConnect
 import { getDb, schema } from "@/db";
 import { resolvePermissions } from "@/lib/auth/permissions";
 
-const ok = (msg: string) => console.log(`  ✓ ${msg}`);
-const bad = (msg: string) => console.log(`  ✗ ${msg}`);
+/*
+  KÊNH TÓM TẮT CỦA THAO TÁC OPS. Thao tác `check-integrations` in mẫu đơn (TÊN khách), mẫu hội thoại
+  (TÊN khách) và chủ tài khoản Viettel Post (tên + SĐT) ⇒ qua workflow "Vận hành ERP trên VPS" toàn
+  bộ kết quả được MÃ HOÁ. Chỉ dòng mang tiền tố `[ops:tom-tat] ` ra log công khai: tiêu đề mục và
+  kết luận ✓ / ✗ của từng kết nối (log vẫn che SĐT / email / token trong chúng). Dòng `info` — nơi
+  có mẫu dữ liệu — KHÔNG BAO GIỜ đi qua kênh này. Không import tiền tố: ops lấy script từ `main`
+  nhưng `lib/` từ ảnh đang chạy.
+*/
+const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
+const section = (muc: string) => {
+  console.log("");
+  tomTat(`▶ ${muc}`);
+};
+const ok = (msg: string) => tomTat(`  ✓ ${msg}`);
+const bad = (msg: string) => tomTat(`  ✗ ${msg}`);
 const info = (msg: string) => console.log(`    ${msg}`);
+/** Hướng dẫn cố định (không mang dữ liệu) — người vận hành cần thấy ngay cạnh dấu ✗. */
+const huongDan = (msg: string) => tomTat(`    ${msg}`);
 
 async function checkPancake() {
-  console.log("\n▶ Pancake POS");
+  section("Pancake POS");
   if (!env.pancake.apiKey || !env.pancake.shopId) {
     bad("Chưa có PANCAKE_API_KEY / PANCAKE_SHOP_ID trong .env");
     return null;
@@ -40,7 +55,7 @@ async function checkPancake() {
     }
   } catch (error) {
     bad(`Không gọi được /shops: ${error instanceof Error ? error.message : String(error)}`);
-    info("Kiểm tra lại API key (Cấu hình → Nâng cao → Kết nối bên thứ 3 → Webhook/API → API Key) và kết nối mạng.");
+    huongDan("Kiểm tra lại API key (Cấu hình → Nâng cao → Kết nối bên thứ 3 → Webhook/API → API Key) và kết nối mạng.");
     return null;
   }
   try {
@@ -92,7 +107,7 @@ async function checkPancake() {
 }
 
 async function checkViettelPost(sampleOrderNumber: string | null) {
-  console.log("\n▶ Viettel Post");
+  section("Viettel Post");
   const client = new ViettelPostClient();
   if (!client.configured) {
     bad("Chưa có VIETTELPOST_API_KEY (hoặc VIETTELPOST_USERNAME/PASSWORD) trong .env");
@@ -105,8 +120,8 @@ async function checkViettelPost(sampleOrderNumber: string | null) {
     if (result.inventories.length) info(`Kho gửi hàng: ${result.inventories.map((i) => `${i.name} (${i.id})`).join(", ")}`);
   } catch (error) {
     bad(`Không lấy được token: ${error instanceof Error ? error.message : String(error)}`);
-    info("Token bí mật lấy tại https://viettelpost.vn/cau-hinh-tai-khoan → Thêm mới token → Sao chép token (xác thực OTP).");
-    info("Nếu vẫn lỗi, điền VIETTELPOST_USERNAME / VIETTELPOST_PASSWORD (tài khoản đối tác) để dùng cách Login → ownerconnect.");
+    huongDan("Token bí mật lấy tại https://viettelpost.vn/cau-hinh-tai-khoan → Thêm mới token → Sao chép token (xác thực OTP).");
+    huongDan("Nếu vẫn lỗi, điền VIETTELPOST_USERNAME / VIETTELPOST_PASSWORD (tài khoản đối tác) để dùng cách Login → ownerconnect.");
     return;
   }
   if (sampleOrderNumber) {
@@ -117,7 +132,7 @@ async function checkViettelPost(sampleOrderNumber: string | null) {
     } catch (error) {
       bad(`Tra cứu vận đơn lỗi: ${error instanceof Error ? error.message : String(error)}`);
     }
-  } else info("Không có mã vận đơn Viettel Post nào trong đơn Pancake gần đây để tra cứu thử.");
+  } else huongDan("Không có mã vận đơn Viettel Post nào trong đơn Pancake gần đây để tra cứu thử.");
   try {
     const to = new Date();
     const from = new Date(to.getTime() - 7 * 86_400_000);
@@ -129,7 +144,7 @@ async function checkViettelPost(sampleOrderNumber: string | null) {
 }
 
 async function checkPancakePages() {
-  console.log("\n▶ Pancake Pages (chat)");
+  section("Pancake Pages (chat)");
   if (!env.pancake.pagesAccessToken) {
     bad("Chưa có PANCAKE_ACCESS_TOKEN trong .env");
     return;
@@ -153,7 +168,7 @@ async function checkPancakePages() {
 }
 
 async function checkFacebook() {
-  console.log("\n▶ Facebook Ads");
+  section("Facebook Ads");
   if (!env.facebook.accessToken) {
     bad("Chưa có FACEBOOK_ACCESS_TOKEN trong .env (Business Settings → System Users → Generate token, quyền ads_read + business_management)");
     return;
@@ -173,7 +188,7 @@ async function checkFacebook() {
     }
   } catch (error) {
     bad(`Facebook lỗi: ${error instanceof Error ? error.message : String(error)}`);
-    info("Token hết hạn (mã 190) → tạo token System User mới, không đặt thời hạn. Thiếu quyền → thêm ads_read, business_management.");
+    huongDan("Token hết hạn (mã 190) → tạo token System User mới, không đặt thời hạn. Thiếu quyền → thêm ads_read, business_management.");
   }
 }
 
@@ -184,7 +199,7 @@ async function checkFacebook() {
  * chứa tên / SĐT khách.
  */
 async function checkAi() {
-  console.log("\n▶ AI Copilot");
+  section("AI Copilot");
   const provider = resolveProviderName();
   if (!provider) {
     bad(`Chưa cấu hình: ${aiDisabledReason()}`);
@@ -227,7 +242,7 @@ async function checkAi() {
  * DANH TÍNH TOKEN IN Ở DẠNG ĐÃ CHE. Log Actions của kho PUBLIC này ai cũng đọc được.
  */
 async function checkGithub() {
-  console.log("\n▶ GitHub Actions (sổ deploy Phòng Tech AI)");
+  section("GitHub Actions (sổ deploy Phòng Tech AI)");
   const cfg = githubConfig();
   if (!cfg.configured) {
     bad(`Chưa cấu hình: ${cfg.reason}`);
@@ -273,7 +288,7 @@ async function checkGithub() {
  * Kho này PUBLIC và log Actions ai cũng đọc được.
  */
 async function checkAgentIdentity() {
-  console.log("\n▶ Danh tính GitHub của coding agent (erp-agent)");
+  section("Danh tính GitHub của coding agent (erp-agent)");
   const r = await testAgentGithubIdentity();
   // BA tình huống, ba cách sửa khác nhau. Gộp thành "kết nối thất bại" là đẩy người đọc đi sai chỗ.
   if (r.status === "NOT_CONFIGURED") {

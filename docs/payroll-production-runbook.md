@@ -81,6 +81,12 @@ docker exec erp-app npm run payroll:reconcile -- --from 2026-09-01 --to 2026-09-
 Thêm `--json bao-cao.json` hoặc `--csv bao-cao.csv` để lấy tệp đính kèm. Thêm `--employee <id>` để
 soi một người.
 
+Chạy qua thao tác ops **`payroll-reconcile`** (Actions → *Vận hành ERP trên VPS*): từ 24/09/2026 bảng
+TỪNG NGƯỜI (tên, lương, hoa hồng) **không in ra log** — kho public. Log chỉ còn kỳ đối chiếu, bảng
+đếm trạng thái, phép chứng minh không ghi và kết luận cổng; bảng từng người nằm trong hiện vật
+`ket-qua-ma-hoa-<RUN_ID>`, giải mã theo `docs/ops-doc-ket-qua.md`. Chưa có chứng chỉ người nhận thì
+thao tác từ chối chạy.
+
 Script **không** `insert`, **không** `update`, **không** `delete`, **không** gán chính sách,
 **không** khoá kỳ.
 

@@ -37,6 +37,13 @@ import { rowsOf } from "@/lib/sql-rows";
 
 const apply = process.argv.slice(2).includes("--apply");
 
+/**
+ * KÊNH TÓM TẮT CỦA THAO TÁC OPS. Qua workflow "Vận hành ERP trên VPS", kết quả của script này được
+ * MÃ HOÁ (danh sách từng đợt kèm note tự do nhân viên đã viết); chỉ dòng mang tiền tố dưới đây được
+ * in ra log công khai — tức CHỈ con số đếm, không bao giờ một note.
+ */
+const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
+
 type Dot = {
   id: string;
   shipment_id: string;
@@ -95,10 +102,10 @@ async function main() {
   const dongDuoc = ungVien.filter((r) => !r.co_nguoi_lam);
   const phaiHoi = ungVien.filter((r) => r.co_nguoi_lam);
 
-  console.log(`═══ CA BỊ DỰNG LẠI VÔ CỚ ${apply ? "(CHẾ ĐỘ GHI)" : "(CHẠY THỬ — thêm --apply để ghi)"} ═══`);
-  console.log(`ứng viên            : ${ungVien.length}`);
-  console.log(`đóng được (máy mở, chưa ai làm gì): ${dongDuoc.length}`);
-  console.log(`phải để người quyết (đã có người làm): ${phaiHoi.length}`);
+  tomTat(`═══ CA BỊ DỰNG LẠI VÔ CỚ ${apply ? "(CHẾ ĐỘ GHI)" : "(CHẠY THỬ — thêm --apply để ghi)"} ═══`);
+  tomTat(`ứng viên            : ${ungVien.length}`);
+  tomTat(`đóng được (máy mở, chưa ai làm gì): ${dongDuoc.length}`);
+  tomTat(`phải để người quyết (đã có người làm): ${phaiHoi.length}`);
 
   for (const r of ungVien) {
     console.log(
@@ -109,7 +116,7 @@ async function main() {
   }
 
   if (!apply || !dongDuoc.length) {
-    console.log(apply ? "\nKhông có đợt nào để đóng." : "\nChưa ghi gì. Thêm --apply để đóng các đợt thừa.");
+    tomTat(apply ? "Không có đợt nào để đóng." : "Chưa ghi gì. Thêm --apply để đóng các đợt thừa.");
     process.exit(0);
   }
 
@@ -148,8 +155,8 @@ async function main() {
     });
   }
 
-  console.log(`\nĐã đóng ${daDong}/${dongDuoc.length} đợt thừa, mỗi đợt kèm một mốc SYSTEM_CORRECTION.`);
-  if (phaiHoi.length) console.log(`${phaiHoi.length} đợt có người đã làm việc trên đó — KHÔNG đụng tới, xem danh sách "!" ở trên.`);
+  tomTat(`Đã đóng ${daDong}/${dongDuoc.length} đợt thừa, mỗi đợt kèm một mốc SYSTEM_CORRECTION.`);
+  if (phaiHoi.length) tomTat(`${phaiHoi.length} đợt có người đã làm việc trên đó — KHÔNG đụng tới, xem danh sách "!" trong bản mã.`);
   process.exit(0);
 }
 

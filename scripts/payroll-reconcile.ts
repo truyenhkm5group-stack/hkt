@@ -86,6 +86,14 @@ function arg(name: string): string | null {
 
 const tien = (v: number | null) => (v === null ? "—" : v.toLocaleString("vi-VN"));
 
+/**
+ * KÊNH TÓM TẮT CỦA THAO TÁC OPS. Qua workflow "Vận hành ERP trên VPS", toàn bộ kết quả của script
+ * này (lương từng người kèm tên) được MÃ HOÁ; chỉ dòng mang tiền tố dưới đây được in ra log công
+ * khai. Vì thế CHỈ dòng đếm / kết luận đi qua đây — không bao giờ tên hay số tiền của một người.
+ * Tiền tố viết lại tại chỗ (không import): ops lấy script từ `main` nhưng `lib/` từ ảnh đang chạy.
+ */
+const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
+
 async function main() {
   const from = arg("from");
   const to = arg("to");
@@ -123,12 +131,12 @@ async function main() {
   const key = payrollPeriodKey(period.from, period.to);
   const coHoatDong = hasActivity(chon.activity);
 
-  console.log(`Kỳ đối chiếu: ${key}`);
+  tomTat(`Kỳ đối chiếu: ${key}`);
   if (chon.tried.length > 1 || !coHoatDong) {
-    console.log(`Đã thử: ${chon.tried.map((t) => `${t.label} ${t.hasActivity ? "CÓ dữ liệu" : "rỗng"}`).join(" · ")}`);
+    tomTat(`Đã thử: ${chon.tried.map((t) => `${t.label} ${t.hasActivity ? "CÓ dữ liệu" : "rỗng"}`).join(" · ")}`);
   }
-  console.log("Hoạt động nguồn của kỳ:");
-  for (const k of ACTIVITY_SOURCES) console.log(`   ${ACTIVITY_LABEL[k].padEnd(30)} ${(chon.activity[k] ?? 0).toLocaleString("vi-VN")}`);
+  tomTat("Hoạt động nguồn của kỳ:");
+  for (const k of ACTIVITY_SOURCES) tomTat(`   ${ACTIVITY_LABEL[k].padEnd(30)} ${(chon.activity[k] ?? 0).toLocaleString("vi-VN")}`);
   if (!coHoatDong) {
     console.log("\n⚠ KỲ NÀY KHÔNG CÓ MỘT NGUỒN SỐ NÀO KHÁC 0.");
     console.log("  Mọi kết luận “khớp” trên kỳ ấy là RỖNG NGHĨA: hai phép tính cùng ra 0 trên dữ liệu rỗng");
@@ -291,10 +299,10 @@ async function main() {
     console.log("");
   }
 
-  console.log("═══ TỔNG KẾT ═══");
-  console.log(`${rows.length} nhân sự · ${coLech} người có lệch ở dòng thực nhận · ${chuaGiaiThich} người còn lệch CHƯA giải thích được.`);
+  tomTat("═══ TỔNG KẾT ═══");
+  tomTat(`${rows.length} nhân sự · ${coLech} người có lệch ở dòng thực nhận · ${chuaGiaiThich} người còn lệch CHƯA giải thích được.`);
   const dem = tallyStatuses(trangThai);
-  for (const k of Object.keys(dem) as ReconStatus[]) console.log(`   ${RECON_STATUS_LABEL[k].padEnd(36)} ${dem[k]}`);
+  for (const k of Object.keys(dem) as ReconStatus[]) tomTat(`   ${RECON_STATUS_LABEL[k].padEnd(36)} ${dem[k]}`);
   if (chuaGiaiThich > 0) {
     console.log("\nKHÔNG kích hoạt chính sách cho những người còn lệch chưa rõ nguyên nhân — trừ khi đó là một");
     console.log("sửa ĐÚNG có chủ ý, và khi ấy phải ghi lý do ở màn hình Xem trước chuyển đổi để nó vào nhật ký.");
@@ -308,20 +316,23 @@ async function main() {
   */
   const anhSau = await payrollTableSnapshot();
   const lechBang = diffSnapshots(anhTruoc, anhSau);
-  console.log("\n═══ CHỨNG MINH KHÔNG GHI DỮ LIỆU ═══");
+  console.log("");
+  tomTat("═══ CHỨNG MINH KHÔNG GHI DỮ LIỆU ═══");
   if (lechBang.length === 0) {
-    console.log(`Ảnh đếm ${Object.keys(anhTruoc).length} bảng lương TRƯỚC = SAU. Không một dòng nào được thêm, kể cả nhật ký.`);
+    tomTat(`Ảnh đếm ${Object.keys(anhTruoc).length} bảng lương TRƯỚC = SAU. Không một dòng nào được thêm, kể cả nhật ký.`);
   } else {
-    console.log("⚠ CÓ BẢNG ĐỔI SỐ DÒNG — lượt đối chiếu này KHÔNG dùng làm căn cứ được:");
-    for (const l of lechBang) console.log(`   ${l}`);
+    tomTat("⚠ CÓ BẢNG ĐỔI SỐ DÒNG — lượt đối chiếu này KHÔNG dùng làm căn cứ được:");
+    // Tên bảng + số dòng trước → sau: không có dữ liệu của người nào.
+    for (const l of lechBang) tomTat(`   ${l}`);
   }
 
   /* ═══ KẾT LUẬN CỔNG ═══ */
   const ket = gateVerdict({ environmentOk: true, periodHasActivity: coHoatDong, statuses: trangThai });
-  console.log("\n═══ KẾT LUẬN CỔNG ĐỐI CHIẾU ═══");
-  console.log(`${ket.verdict}`);
-  console.log(`${ket.why}`);
-  if (lechBang.length > 0) console.log("NHƯNG ảnh đếm bảng đã đổi — xem khối trên, kết luận ở trên KHÔNG có hiệu lực.");
+  console.log("");
+  tomTat("═══ KẾT LUẬN CỔNG ĐỐI CHIẾU ═══");
+  tomTat(`${ket.verdict}`);
+  tomTat(`${ket.why}`);
+  if (lechBang.length > 0) tomTat("NHƯNG ảnh đếm bảng đã đổi — xem khối trên, kết luận ở trên KHÔNG có hiệu lực.");
   // Dấu hiệu đọc bảng: `!` = lệch chưa giải thích được · `~` = lệch có lý do · `?` = một bên chưa biết.
   console.log("\nDấu:  ! lệch chưa giải thích được   ~ lệch có lý do   ? một bên CHƯA BIẾT (không so được)");
 

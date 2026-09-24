@@ -472,12 +472,19 @@ async function explainDay(day: string, filters: MarketingFilters, basis: Marketi
     );
   }
 
+  /*
+    KÊNH TÓM TẮT CỦA THAO TÁC OPS `marketing-explain`: bảng từng đơn ở trên mang TÊN người chốt nên
+    qua workflow "Vận hành ERP trên VPS" nó được MÃ HOÁ; chỉ dòng mang tiền tố `[ops:tom-tat] ` —
+    phép cộng của cả ngày và kết luận KHỚP — ra log công khai.
+  */
+  const tomTat = (s: string) => log(`[ops:tom-tat] ${s}`);
   log("-".repeat(120));
-  log(`Cộng lại từ chính các dòng trên (ĐÃ loại ${soTrung} đơn trùng):`);
-  log(`  giao thành công ${soGiao} đơn · hoàn ${soHoan} đơn`);
-  log(`  doanh thu thực  ${vnd(dtGiao)}`);
-  log(`  giá vốn         ${vnd(giaVon)}`);
-  log(`  lãi gộp         ${vnd(dtGiao - giaVon)}   (chưa trừ cước/phí và chi quảng cáo — hai khoản đó KHÔNG ở mức đơn)`);
+  tomTat(`GIẢI THÍCH NGÀY ${day} · mốc ${MARKETING_BASIS_LABEL[basis]} · ${rows.length} đơn trong population`);
+  tomTat(`Cộng lại từ chính các dòng trên (ĐÃ loại ${soTrung} đơn trùng):`);
+  tomTat(`  giao thành công ${soGiao} đơn · hoàn ${soHoan} đơn`);
+  tomTat(`  doanh thu thực  ${vnd(dtGiao)}`);
+  tomTat(`  giá vốn         ${vnd(giaVon)}`);
+  tomTat(`  lãi gộp         ${vnd(dtGiao - giaVon)}   (chưa trừ cước/phí và chi quảng cáo — hai khoản đó KHÔNG ở mức đơn)`);
 
   /*
     ĐỐI CHIẾU NGAY TẠI CHỖ. Một bảng chi tiết mà không tự chứng minh nó cộng lại bằng ô trên màn
@@ -487,8 +494,8 @@ async function explainDay(day: string, filters: MarketingFilters, basis: Marketi
   const bang = await getMarketingDaily(period, basis, filters);
   const khop = bang.totals.deliveredRevenue === dtGiao && bang.totals.deliveredOrders === soGiao;
   log("-".repeat(120));
-  log(`Bảng theo ngày nói: giao ${bang.totals.deliveredOrders} đơn · doanh thu thực ${vnd(bang.totals.deliveredRevenue)}`);
-  log(khop ? "✓ KHỚP — các dòng trên cộng lại đúng bằng ô trên màn hình." : "✗ KHÔNG KHỚP — đây là lỗi, không phải sai số. Báo ngay.");
+  tomTat(`Bảng theo ngày nói: giao ${bang.totals.deliveredOrders} đơn · doanh thu thực ${vnd(bang.totals.deliveredRevenue)}`);
+  tomTat(khop ? "✓ KHỚP — các dòng trên cộng lại đúng bằng ô trên màn hình." : "✗ KHÔNG KHỚP — đây là lỗi, không phải sai số. Báo ngay.");
   return khop;
 }
 

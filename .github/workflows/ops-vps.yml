@@ -35,6 +35,7 @@ on:
           - vtp-return-status-repair # vá chặng đã lưu của dòng tệp mang cờ "Trả hàng" — vận đơn đang hoàn bị ghi "Chờ xử lý" (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - agent-run-reattach   # gắn lại lượt chạy agent về đúng việc theo BẢN KHAI ở ô arg (mặc định CHẠY THỬ; "--apply" mới ghi)
           - vtp-replay-files     # nhập lại các tệp Viettel Post đã lưu (mặc định CHỈ LIỆT KÊ; arg "--apply")
+          - vtp-replay-explain   # vì sao dòng tệp Viettel Post đã lưu không ghép được vận đơn — kết quả MÃ HOÁ (chỉ đọc; arg "--like=<phần tên tệp>")
           - vtp-statement-peek   # xem bố cục thật của tệp bảng kê đã lưu (arg: phần tên tệp)
           - vtp-retry-webhooks   # xử lý lại gói tin Viettel Post chưa ghép/chưa xử lý được
           - vtp-manual-verify    # chứng từ ĐVVC chủ shop chép tay cho lịch sử (mặc định CHẠY THỬ; arg "--apply")
@@ -54,7 +55,8 @@ on:
           - reason-coverage     # độ phủ lý do hoàn: máy tính báo cáo = MÀN HÌNH THẬT (chỉ đọc)
           - cogs-drift          # giá vốn lịch sử có tự đổi không: so giá vốn hôm nay với giá vốn TẠI THỜI ĐIỂM giao (chỉ đo)
           - profit-verify       # kiểm chứng Báo cáo lợi nhuận ở 3 khoảng kỳ (phân bổ chi phí, hai tỷ lệ QC)
-          - marketing-calibrate # đối chiếu Hiệu quả quảng cáo theo NGÀY với báo cáo lợi nhuận chuẩn + nguồn QC (chỉ đọc; arg: "--from=2026-09-01 --to=2026-09-14 [--marketer=..] [--product=..]" · hoặc "--explain=2026-09-08" để liệt kê TỪNG ĐƠN tạo ra con số của một ngày)
+          - marketing-calibrate # đối chiếu Hiệu quả quảng cáo theo NGÀY với báo cáo lợi nhuận chuẩn + nguồn QC (chỉ đọc; arg: "--from=2026-09-01 --to=2026-09-14 [--marketer=..] [--product=..]")
+          - marketing-explain   # liệt kê TỪNG ĐƠN tạo ra con số marketing của một ngày — kết quả MÃ HOÁ (chỉ đọc; arg: "--explain=2026-09-08 [--marketer=..] [--product=..]")
           - set-setting         # ghi cấu hình JSON vào settings (arg: "<khoá> <json> [--test-lark]")
           - run-job             # chạy một job đồng bộ / cảnh báo (arg: "alerts" | "cs-chat --hours=48" | "vtp-tracking" …)
           - meta-id-probe       # dò mã Meta trong tracking landing là ad / adset / campaign (CHỈ ĐỌC; arg: các mã, bỏ trống = lấy từ đơn còn treo)
@@ -104,14 +106,20 @@ permissions:
 # ═══════════ THAO TÁC TRẢ DỮ LIỆU KHÁCH HÀNG ⇒ KẾT QUẢ MÃ HOÁ, KHÔNG IN RA LOG ═══════════
 #
 # Kho này PUBLIC: log của mọi lượt chạy ai cũng đọc được. Các thao tác dưới đây in ra bản ghi
-# thật (SĐT, tên, địa chỉ khách, phản hồi thô của Viettel Post / Pancake). Kết quả của chúng được
+# thật (SĐT, tên, địa chỉ khách, phản hồi thô của Viettel Post / Pancake; tên, lương, % lợi nhuận
+# của nhân viên; note tự do nhân viên viết). Kết quả của chúng được
 # MÃ HOÁ TRÊN MÁY CHỦ bằng chứng chỉ `deploy/ops-result-recipient.crt`, lấy về thành hiện vật giữ
 # 1 ngày, và chỉ người giữ khoá riêng mở được — xem docs/ops-doc-ket-qua.md.
 #
 # Danh sách này phải KHỚP với các nhánh gọi `ma_hoa_ket_qua` trong script SSH bên dưới;
-# `tests/ops-log-leak.test.ts` khoá hai chiều.
+# `tests/ops-log-leak.test.ts` khoá hai chiều. Đây là NƠI KHAI DUY NHẤT: mọi thao tác KHÔNG có tên
+# ở đây phải có một dòng "đã rà, chỉ in số tổng hợp — vì sao" trong bài kiểm ấy, nên thao tác mới
+# không lọt ra ngoài cả hai (bảng phân loại: docs/security-2026-09-24-ops-log-leak.md mục 6).
+#
+# Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
+# script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "db-query vtp-debug phone-probe vtp-probe vtp-statement-peek"
+  OPS_THAO_TAC_MA_HOA: "db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -363,7 +371,8 @@ jobs:
             #
             # Chạy LỆNH (stdin đi thẳng vào nó), gom stdout+stderr vào một tệp trong RAM (/dev/shm),
             # MÃ HOÁ bằng chứng chỉ người nhận rồi xoá bản rõ. Log chỉ nhận: mã thoát, số dòng, số
-            # dòng dữ liệu psql, kích thước + sha256 của bản MÃ, và dòng lỗi đầu tiên ĐÃ CHE. Bản mã
+            # dòng dữ liệu psql, kích thước + sha256 của bản MÃ, dòng lỗi đầu tiên ĐÃ CHE, và các dòng
+            # script TỰ đánh dấu `[ops:tom-tat] ` (kênh tóm tắt, cũng qua che_log). Bản mã
             # nằm ở $OPS_OUT_DIR/<run_id>.p7m (root, 600) cho bước sau lấy về làm hiện vật 1 ngày.
             #
             # KHÔNG CÓ CHỨNG CHỈ ⇒ TỪ CHỐI CHẠY (fail-closed). Không bao giờ lùi về in bản rõ: một
@@ -376,7 +385,14 @@ jobs:
               fi
               _mh="$(mktemp -d /dev/shm/erp-ops.XXXXXX 2>/dev/null || mktemp -d)"
               chmod 700 "$_mh"
-              trap 'rm -rf "$_mh"' EXIT
+              # GIỮ trap EXIT của nhánh gọi (returns-hmt dọn bản sao bảng tính bằng nó): bản rõ bị xoá
+              # VÀ việc dọn của nhánh vẫn chạy khi thoát giữa chừng; hết hàm thì trả lại trap cũ.
+              # `trap -p` tự đặt nháy cho lệnh cũ; `_lay_trap` bóc đúng lệnh ấy ra (đối số thứ 2).
+              _lay_trap() { _trap_cu="${2:-}"; }
+              _trap_cu=""
+              _p="$(trap -p EXIT 2>/dev/null || true)"
+              if [ -n "$_p" ]; then eval "_lay_trap ${_p#trap }"; fi
+              trap 'rm -rf "$_mh"; eval "$_trap_cu"' EXIT
               printf '%s' "$OPS_RESULT_CERT_B64" | base64 -d > "$_mh/nguoi-nhan.crt"
               _rc=0
               { echo "# run=$RUN_ID action=$ACTION lúc $(date -u +%FT%TZ)"; "$@"; } > "$_mh/ket-qua.txt" 2>&1 || _rc=$?
@@ -402,9 +418,21 @@ jobs:
               echo "  mã thoát: $_rc · $_dong dòng văn bản · psql: ${_khoi:-0} khối kết quả, tổng ${_tong:-0} dòng dữ liệu"
               echo "  bản mã: $(wc -c < "$OPS_OUT_DIR/$RUN_ID.p7m" | tr -d ' ') byte · sha256 $(sha256sum "$OPS_OUT_DIR/$RUN_ID.p7m" | cut -c1-16)…"
               if [ -n "$_loi" ]; then echo "  lỗi đầu tiên (đã che): $_loi"; fi
+              # ─── KÊNH TÓM TẮT: thứ DUY NHẤT của bản rõ được ra log ───
+              # Chỉ dòng mà SCRIPT tự đánh dấu bằng tiền tố `[ops:tom-tat] ` (con số tổng hợp mà người
+              # vận hành cần thấy ngay: "đã đóng 12 case", "kết luận cổng"). Không đánh dấu thì không
+              # ra — mặc định là KÍN. Vẫn đi qua `che_log` (SĐT, email, IP, token) và bị cắt: một
+              # dòng tóm tắt lỡ mang dữ liệu khách thì phần bị lộ nhỏ nhất có thể. Bản mã vẫn giữ
+              # nguyên các dòng này. `::` bị tách ra để một dòng tóm tắt không thành lệnh workflow
+              # (`::add-mask::`, `::stop-commands::`) của runner.
+              _tt="$(grep -E '^\[ops:tom-tat\] ' "$_mh/ket-qua.txt" | sed -E -e 's/^\[ops:tom-tat\] //' -e 's/::/: :/g' | che_log | head -n 60 | cut -c1-300 || true)"
+              if [ -n "$_tt" ]; then
+                echo "── Tóm tắt do script tự khai (kênh [ops:tom-tat], đã che) ──"
+                printf '%s\n' "$_tt" | sed 's/^/  /'
+              fi
               echo "  Tải hiện vật \"ket-qua-ma-hoa-$RUN_ID\" (giữ 1 ngày) rồi giải mã theo docs/ops-doc-ket-qua.md."
               rm -rf "$_mh"
-              trap - EXIT
+              if [ -n "$_trap_cu" ]; then trap "$_trap_cu" EXIT; else trap - EXIT; fi
               return "$_rc"
             }
 
@@ -441,7 +469,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability ads-level-probe"
-            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
+            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
 
             LOP=GHI
             case "$ARG" in
@@ -547,9 +575,15 @@ jobs:
               sync-facebook-ads)
                 docker exec erp-app npm run --silent sync -- facebook-ads --days="$DAYS" ;;
               check-integrations)
-                docker exec erp-app npm run --silent check:integrations ;;
+                # In 5 đơn mẫu (TÊN khách), 2 hội thoại mẫu (TÊN khách) và chủ tài khoản Viettel Post
+                # (tên + SĐT) ⇒ MÃ HOÁ. Log còn tiêu đề mục và ✓ / ✗ từng kết nối (kênh tóm tắt).
+                # Lấy script từ main như apply-ai-env đã làm, để kênh tóm tắt có ngay không chờ deploy.
+                fetch_script check-integrations.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/check-integrations.ts'
+                ma_hoa_ket_qua docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/check-integrations.ts ;;
               seed-employees)
-                docker exec erp-app npm run --silent seed:employees -- "$ARG" ;;
+                # In từng người: tên, bí danh, tài khoản QC, % lợi nhuận ⇒ MÃ HOÁ. Log chỉ còn
+                # dòng tóm tắt (số người thêm / cập nhật, số chiến dịch ghép lại).
+                ma_hoa_ket_qua docker exec erp-app npm run --silent seed:employees -- "$ARG" ;;
               import-bank-ledger)
                 # luôn dùng bản script mới nhất trên GitHub; dữ liệu đi qua stdin, không in ra log
                 fetch_script import-bank-ledger.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/import-bank-ledger.ts'
@@ -566,8 +600,27 @@ jobs:
               marketing-calibrate)
                 # CHỈ ĐỌC. In bảng theo ngày rồi tự đối chiếu với báo cáo lợi nhuận chuẩn, nguồn chi
                 # quảng cáo và kết quả vận đơn; thoát khác 0 khi có phát hiện xếp loại BUG.
+                #
+                # Bảng theo ngày chỉ có SỐ TỔNG HỢP nên đi thẳng ra log. `--explain` thì liệt kê TỪNG
+                # ĐƠN kèm tên người chốt ⇒ nó là một thao tác riêng (`marketing-explain`) đi qua
+                # `ma_hoa_ket_qua`; ở đây bị từ chối, để không ai lỡ in bản rõ bằng thói quen cũ.
+                case "$ARG" in
+                  *--explain*)
+                    echo "::error::--explain liệt kê từng đơn kèm tên người chốt — dùng thao tác marketing-explain (kết quả mã hoá, xem docs/ops-doc-ket-qua.md). KHÔNG chạy."
+                    exit 64 ;;
+                esac
                 fetch_script marketing-calibrate.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/marketing-calibrate.ts'
                 chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/marketing-calibrate.ts ;;
+              marketing-explain)
+                # CHỈ ĐỌC. `marketing-calibrate --explain=<ngày>`: liệt kê TỪNG ĐƠN (mã đơn, doanh thu,
+                # người chốt) tạo ra con số của một ngày ⇒ MÃ HOÁ. Log chỉ còn phép cộng và KHỚP/KHÔNG.
+                case "$ARG" in
+                  *--explain=*) ;;
+                  *) echo "::error::marketing-explain cần arg \"--explain=YYYY-MM-DD [--marketer=..] [--product=..]\" (nhận ${#ARG} ký tự)."; exit 64 ;;
+                esac
+                fetch_script marketing-calibrate.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/marketing-calibrate.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/marketing-calibrate.ts ;;
               perf-audit)
                 # ═══ ĐO ĐÚNG THỨ NGƯỜI DÙNG CHỜ, KHÔNG PHẢI THỨ CÔNG CỤ ĐO CHẠY ═══
                 #
@@ -589,7 +642,9 @@ jobs:
                 # có bằng chứng quảng cáo trỏ về ĐÚNG MỘT marketer — KHÔNG đụng đơn, vận đơn hay tiền.
                 # Idempotent: chỉ tạo cho page chưa có phân công còn hiệu lực.
                 fetch_script fanpage-evidence-backfill.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/fanpage-evidence-backfill.ts'
-                chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/fanpage-evidence-backfill.ts ;;
+                # Bảng page → TÊN marketer ⇒ MÃ HOÁ; log còn số page theo kết luận + số phân công.
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/fanpage-evidence-backfill.ts ;;
               outcome-parity)
                 # Mặc định CHỈ ĐO. "--apply" dựng lại bảng dẫn xuất — KHÔNG đụng đơn, vận đơn, sự
                 # kiện hay tiền; đây không phải backfill dữ liệu nghiệp vụ.
@@ -600,13 +655,17 @@ jobs:
                 # "--apply" đóng các đợt thừa mà CHƯA AI làm gì trên đó, mỗi đợt kèm một mốc
                 # SYSTEM_CORRECTION. KHÔNG xoá dòng nào, KHÔNG đụng đợt đã có người làm việc.
                 fetch_script care-false-reopen-repair.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/care-false-reopen-repair.ts'
-                chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/care-false-reopen-repair.ts ;;
+                # Danh sách từng đợt kèm NOTE TỰ DO nhân viên đã viết ⇒ MÃ HOÁ; log còn dòng đếm.
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/care-false-reopen-repair.ts ;;
               care-outcome-before-open)
                 # MẶC ĐỊNH CHẠY THỬ: liệt kê ca đã chốt mà kết cục ĐVVC có TRƯỚC lúc mở ca (gán công
                 # ngược thời gian). "--apply" đưa chúng về NOT_CARE_CONDITION, kèm mốc
                 # SYSTEM_CORRECTION ghi lại giá trị cũ. KHÔNG xoá dòng nào.
                 fetch_script care-outcome-before-open-repair.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/care-outcome-before-open-repair.ts'
-                chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/care-outcome-before-open-repair.ts ;;
+                # Từng đợt kèm TÊN nhân viên được quy kết quả cứu đơn ⇒ MÃ HOÁ; log còn dòng đếm.
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/care-outcome-before-open-repair.ts ;;
               reason-backfill)
                 # MẶC ĐỊNH CHẠY THỬ: in ra đúng những gì sẽ ghi, theo từng nguồn. "--apply" mới ghi,
                 # và ghi được chạy lại nhiều lần vì khoá chống trùng là NỘI DUNG chứ không phải số
@@ -762,8 +821,21 @@ jobs:
                 fetch_script agent-run-reattach.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/agent-run-reattach.ts'
                 chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/agent-run-reattach.ts ;;
               vtp-replay-files)
+                # Liệt kê / phát lại chỉ in tên tệp và con số. `--explain` in từng dòng chưa ghép được
+                # kèm SĐT NGƯỜI NHẬN ⇒ nó là thao tác riêng `vtp-replay-explain` (mã hoá); ở đây từ chối.
+                case "$ARG" in
+                  *--explain*)
+                    echo "::error::--explain in SĐT người nhận của từng dòng — dùng thao tác vtp-replay-explain (kết quả mã hoá, xem docs/ops-doc-ket-qua.md). KHÔNG chạy."
+                    exit 64 ;;
+                esac
                 fetch_script vtp-replay-files.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-replay-files.ts'
                 chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-replay-files.ts ;;
+              vtp-replay-explain)
+                # CHỈ ĐỌC. `vtp-replay-files --explain [--like=…]`: vì sao dòng tệp Viettel Post không
+                # ghép được — mỗi dòng kèm SĐT người nhận ⇒ MÃ HOÁ. Log còn số dòng / số chưa ghép mỗi tệp.
+                fetch_script vtp-replay-files.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-replay-files.ts'
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-replay-files.ts --explain ;;
               vtp-statement-peek)
                 fetch_script vtp-statement-peek.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-statement-peek.ts'
                 # In NGUYÊN DÒNG của bảng kê COD (mã vận đơn, người nhận, tiền) ⇒ kết quả MÃ HOÁ.
@@ -776,7 +848,9 @@ jobs:
                 chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-retry-webhooks.ts ;;
               vtp-manual-verify)
                 fetch_script vtp-manual-verify.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-manual-verify.ts'
-                chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-manual-verify.ts ;;
+                # JSON kết quả có SĐT khách đối chiếu + ghi chú của chủ shop ⇒ MÃ HOÁ; log còn dòng đếm.
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-manual-verify.ts ;;
               explain-stock)
                 fetch_script explain-stock.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/explain-stock.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/explain-stock.ts ;;
@@ -808,7 +882,14 @@ jobs:
                 fi ;;
               run-job)
                 # arg: "<job> [--cờ=giá-trị …]" — tách thành argv SAU khi soát ký tự, không qua `sh -c`.
-                chay_voi_arg docker exec erp-app npm run --silent sync -- ;;
+                #
+                # Job là BẤT KỲ job nào của lib/sync/jobs.ts, và vài job in dữ liệu cá nhân
+                # (`landing-sheet preview=1` in dòng mẫu của sheet: tên, địa chỉ khách;
+                # `marketing-digest` trả tên marketer) ⇒ MÃ HOÁ CẢ THAO TÁC, không dựa vào danh sách
+                # job "an toàn" — job thêm sau quên khai sẽ rơi về phía KÍN. Log còn: tên job, trạng
+                # thái, bốn con số đếm (kênh tóm tắt của scripts/sync.ts).
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npm run --silent sync -- ;;
               vtp-web-probe)
                 fetch_script vtp-web-probe.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-web-probe.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-web-probe.ts "$ARG" ;;
@@ -870,7 +951,9 @@ jobs:
                 if [ -z "$HMT_LOCAL" ] && [ -z "${HMT_WORKBOOK_URL:-}" ]; then
                   echo "Nguồn: bản tải lên qua ERP (CSDL production)"
                   fetch_script hmt-return-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/hmt-return-reconcile.ts'
-                  docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts $HMT_FLAGS
+                  # Kết quả có tên / email người tải tệp và ví dụ từng dòng của sổ viết tay ⇒ MÃ HOÁ;
+                  # log còn băm tệp + bảng tổng hợp + số đã ghi (kênh tóm tắt).
+                  ma_hoa_ket_qua docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts $HMT_FLAGS
                   exit 0
                 fi
                 TMP="$(mktemp -d)"
@@ -901,7 +984,7 @@ jobs:
                 echo "Bảng tính: $(wc -c < "$TMP/hmt.xlsx") byte · sha256 $(sha256sum "$TMP/hmt.xlsx" | cut -c1-16)…"
                 docker cp "$TMP/hmt.xlsx" erp-app:/tmp/hmt-reconcile.xlsx
                 fetch_script hmt-return-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/hmt-return-reconcile.ts'
-                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts --file /tmp/hmt-reconcile.xlsx $HMT_FLAGS
+                ma_hoa_ket_qua docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/hmt-return-reconcile.ts --file /tmp/hmt-reconcile.xlsx $HMT_FLAGS
                 if [ -n "$HMT_LOCAL" ] && [ "$HMT_FLAGS" = "--apply" ]; then
                   echo ""
                   echo "▸ Đã ghi xong. Bản sao tạm trong container đã xoá. Tệp gốc vẫn nằm ở $HMT_LOCAL —"
@@ -1018,7 +1101,9 @@ jobs:
                     exit 1 ;;
                 esac
                 fetch_script payroll-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/payroll-reconcile.ts'
-                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/payroll-reconcile.ts $ARG ;;
+                # In lương, hoa hồng, cơ sở lợi nhuận của TỪNG NGƯỜI kèm tên ⇒ MÃ HOÁ. Log chỉ còn
+                # kỳ đối chiếu, bảng đếm trạng thái, phép chứng minh không ghi và kết luận cổng.
+                ma_hoa_ket_qua docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/payroll-reconcile.ts $ARG ;;
               backup)
                 mkdir -p /root/backups
                 $C exec -T db pg_dump -U erp erp | gzip > "/root/backups/erp-$(date +%F-%H%M).sql.gz"
@@ -1143,7 +1228,10 @@ jobs:
                 # nào. Truyền `--apply` ở ô "arg" mới đóng mềm. Máy chỉ đóng case mà CHỨNG TỪ nghiệp vụ
                 # nói rõ điều kiện không còn VÀ chưa ai cầm; case có người chạm vào thì để người quyết.
                 fetch_script cs-stale.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cs-stale.ts'
-                chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cs-stale.ts ;;
+                # 20 "mẫu thật" là TIÊU ĐỀ case — mang tên khách, có loại mang cả SĐT ⇒ MÃ HOÁ. Log
+                # chỉ còn các bảng đếm (kết luận, theo loại, đã áp dụng). Soát arg TRƯỚC khi mã hoá.
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cs-stale.ts ;;
               sepay-schedule)
                 # Bật / tắt lịch đối chiếu định kỳ. `AGENTS.md` mục 7: đổi lịch scheduler phải do chủ
                 # shop quyết, nên nó là một thao tác TƯỜNG MINH chứ không phải mặc định trong mã.

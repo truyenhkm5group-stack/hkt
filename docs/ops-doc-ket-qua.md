@@ -1,17 +1,23 @@
 # Đọc kết quả thao tác vận hành có dữ liệu khách hàng
 
 Áp dụng cho workflow **Vận hành ERP trên VPS** (`.github/workflows/ops-vps.yml`), các thao tác
-trong biến `OPS_THAO_TAC_MA_HOA`: hôm nay là `db-query`, `vtp-debug`, `phone-probe`, `vtp-probe`,
-`vtp-statement-peek`.
+trong biến `OPS_THAO_TAC_MA_HOA` — danh sách đầy đủ và lý do từng cái ở
+`docs/security-2026-09-24-ops-log-leak.md` mục 6. Ngày 24/09/2026 gồm: `db-query`, `vtp-debug`,
+`phone-probe`, `vtp-probe`, `vtp-statement-peek`, `payroll-reconcile`, `seed-employees`,
+`marketing-explain`, `cs-stale`, `check-integrations`, `run-job`, `vtp-replay-explain`,
+`vtp-manual-verify`, `returns-hmt`, `care-false-reopen`, `care-outcome-before-open`,
+`fanpage-evidence-backfill`.
 
 Kho mã này **PUBLIC**: log của mọi lượt chạy ai cũng đọc được. Kết quả của các thao tác trên có
-SĐT, tên, địa chỉ khách, nên nó **không bao giờ in ra log**. Máy chủ mã hoá kết quả bằng chứng chỉ
+SĐT, tên, địa chỉ khách, hoặc tên / lương / note của nhân viên, nên nó **không bao giờ in ra log**.
+Máy chủ mã hoá kết quả bằng chứng chỉ
 công khai trong kho (`deploy/ops-result-recipient.crt`), máy Actions lấy **bản mã** về thành hiện
 vật `ket-qua-ma-hoa-<RUN_ID>` giữ **1 ngày**, và chỉ người giữ **khoá riêng** mở được.
 
 Log chỉ còn: mã thoát, số dòng văn bản, số khối và tổng số dòng kết quả của psql, kích thước +
-sha256 của bản mã, và dòng lỗi đầu tiên **đã che** (mọi thứ trong nháy, mọi dãy ≥ 4 chữ số, mọi
-email). Muốn biết lỗi đầy đủ thì giải mã — lỗi gốc nằm trong bản mã.
+sha256 của bản mã, dòng lỗi đầu tiên **đã che** (mọi thứ trong nháy, mọi dãy ≥ 4 chữ số, mọi
+email), và **khối tóm tắt** (mục 7) nếu script có khai. Muốn biết lỗi đầy đủ thì giải mã — lỗi gốc
+nằm trong bản mã.
 
 > **Chưa có chứng chỉ ⇒ các thao tác trên TỪ CHỐI chạy** (bước "Kiểm chứng chỉ người nhận" đỏ).
 > Không có đường lùi về in bản rõ. Làm mục 1 một lần là mở lại được.
@@ -70,7 +76,9 @@ dispatch đầu tiên sau khi gộp vào `main` — không cần deploy.
 
 1. Actions → **Vận hành ERP trên VPS** → Run workflow → chọn thao tác, dán SQL/tham số vào `arg`.
 2. Đợi xong. Trong log bước SSH có khối `── Kết quả ĐÃ MÃ HOÁ ──` với số dòng và
-   `sha256 xxxxxxxxxxxxxxxx…` của bản mã.
+   `sha256 xxxxxxxxxxxxxxxx…` của bản mã, rồi (nếu script có khai) khối
+   `── Tóm tắt do script tự khai ──` — đủ để biết lượt chạy thử / lượt ghi ra bao nhiêu mà chưa cần
+   giải mã (mục 7).
 3. Trang tóm tắt của lượt chạy → mục **Artifacts** → tải `ket-qua-ma-hoa-<RUN_ID>` (cần đăng nhập
    GitHub; hiện vật tự xoá sau 1 ngày). Hoặc, nếu máy có `gh`:
 
@@ -121,3 +129,35 @@ thời gian hiện vật còn sống thì coi như đã lộ — ghi vào sổ s
 | `Error decrypting CMS … no recipient matches` | Giải mã bằng khoá không khớp chứng chỉ của lượt đó — so dấu vân tay trong log. |
 | Không có hiện vật, log ghi *Máy chủ không có bản mã* | Thao tác dừng trước khi chạy (lỗi khoá, SQL có `\`, ô arg rỗng) — đọc log bước SSH. |
 | `permission denied for table …` trong kết quả `db-query` | `erp_ro` chỉ ĐỌC được; câu có ghi bị chặn là đúng thiết kế. Ghi dữ liệu production chỉ qua job / action của ứng dụng (AGENTS.md mục 4). |
+| `marketing-calibrate` / `vtp-replay-files` đỏ: *--explain … dùng thao tác …* | Chế độ `--explain` in dữ liệu cá nhân nên đã tách thành `marketing-explain` / `vtp-replay-explain` (có mã hoá). Chạy thao tác ấy, arg giữ nguyên. |
+| `run-job` / `seed-employees` không có khối tóm tắt | Hai thao tác này chạy script từ ẢNH đang phục vụ; dòng tóm tắt có từ lần deploy sau 24/09/2026. Trước đó giải mã để đọc. |
+
+## 7. Kênh tóm tắt — thứ duy nhất của bản rõ được ra log
+
+Một thao tác trong danh sách mã hoá vẫn có thể cần cho người vận hành thấy NGAY một con số —
+"đã đóng 12 case", "kết luận cổng: RECONCILIATION_PASS", "✓ Pancake POS". Script in dòng ấy với
+tiền tố **`[ops:tom-tat] `** ở ĐẦU dòng (kể cả dấu cách):
+
+```ts
+const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
+tomTat(`Đã đóng ${kq.closed}/${kq.planned} case`);
+```
+
+Sau khi mã hoá xong, `ma_hoa_ket_qua` lấy đúng các dòng ấy (bỏ tiền tố), cho qua `che_log` (SĐT,
+email, IP, token bị che), tách `::` để chúng không thành lệnh workflow, cắt 300 ký tự / 60 dòng,
+và in dưới khối `── Tóm tắt do script tự khai ──`. Dòng không đánh dấu thì KHÔNG ra log — mặc
+định là kín. Bản mã vẫn giữ nguyên mọi dòng, kể cả dòng tóm tắt.
+
+Luật cho người viết script:
+
+- **Chỉ con số đếm, tổng, nhãn trạng thái, kết luận.** Không bao giờ tên, SĐT, email, địa chỉ,
+  tiêu đề case, note, lương / % của một người. `tests/ops-log-leak.test.ts` đỏ khi một dòng tóm
+  tắt nhắc tới các trường như `name`, `phone`, `title`, `note`, `employeeName`… — nhưng đó chỉ là
+  lưới thô, không thay người review.
+- Viết tiền tố **tại chỗ** trong script, không import từ `lib/`: ops lấy script từ `main` còn
+  `lib/` từ ảnh đang chạy, nên một tệp `lib/` mới làm script chết `MODULE_NOT_FOUND` cho tới lần
+  deploy sau.
+- Thao tác MỚI in dữ liệu cá nhân: thêm tên vào `OPS_THAO_TAC_MA_HOA`, bọc lệnh chạy bằng
+  `ma_hoa_ket_qua` (soát ô arg bằng `kiem_arg` TRƯỚC), rồi cập nhật bảng mục 6 của tài liệu sự cố.
+  Thao tác mới chỉ in số tổng hợp: khai một dòng lý do ở `KHONG_MA_HOA_DA_RA` trong bài kiểm.
+  Thiếu cả hai thì bài kiểm đỏ.

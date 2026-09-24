@@ -216,6 +216,12 @@ async function main() {
       detail: { batch: BATCH, requested: RECORDS.length, found, created, evidenceNew, evidenceExisting, trackings: RECORDS.map((r) => r.tracking) } });
   }
 
+  // KÊNH TÓM TẮT CỦA THAO TÁC OPS: qua workflow "Vận hành ERP trên VPS" bản JSON dưới đây (có SĐT
+  // đối chiếu, ghi chú của chủ shop) được MÃ HOÁ; chỉ dòng mang tiền tố `[ops:tom-tat] ` ra log
+  // công khai — tức CHỈ con số đếm.
+  console.log(
+    `[ops:tom-tat] ${apply ? "ĐÃ GHI" : "CHẠY THỬ"} lô ${BATCH}: yêu cầu ${RECORDS.length} · vận đơn đã có ${found} · tạo mới ${created} · chứng cứ mới ${evidenceNew} · chứng cứ đã có ${evidenceExisting}`,
+  );
   console.log(JSON.stringify({
     che_do: apply ? "ĐÃ GHI" : "CHẠY THỬ",
     lo: BATCH,
