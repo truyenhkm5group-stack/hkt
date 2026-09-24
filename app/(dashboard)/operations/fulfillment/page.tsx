@@ -31,7 +31,7 @@ export default async function FulfillmentBottleneckPage() {
       <PageHeader
         eyebrow="Vận hành"
         title="Nút thắt trước khi rời kho"
-        description="Đơn đã chốt nhưng chưa thật sự đi giao: thiếu dữ liệu, chưa có vận đơn, ĐVVC chưa nhận, hoặc chưa lấy hàng."
+        description="Đơn đã chốt nhưng chưa thật sự đi giao: thiếu dữ liệu, kho không đủ hàng, chưa có vận đơn, ĐVVC chưa nhận, hoặc chưa lấy hàng."
         hint={
           <>
             <p>
@@ -53,6 +53,13 @@ export default async function FulfillmentBottleneckPage() {
           <p className="text-[13px]">Không đọc được dữ liệu nút thắt fulfillment — có thể CSDL đang thiếu bảng/cột cần thiết. Thử tải lại trang.</p>
         </div>
       ) : (
+        <>
+        {!queue.stockCheckOk ? (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-300/70 bg-amber-50/60 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-950/20">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" />
+            <p className="text-[13px]">Không đọc được sổ kho lúc này — chưa tách được đơn <b>chờ hàng</b> khỏi đơn <b>chưa gửi</b>. Đơn chưa có vận đơn tạm hiện là &quot;chưa có vận đơn&quot;; kiểm tra tồn trước khi đóng gói.</p>
+          </div>
+        ) : null}
         <SectionCard
           title={`${formatNumber(queue.total)} đơn đang kẹt`}
           description={`${formatVND(queue.moneyAtRisk)} đang treo · ${formatNumber(queue.breached)} trễ hạn${queue.total ? ` · đo lúc ${formatDateTime(queue.measuredAt)}` : ""}`}
@@ -67,6 +74,15 @@ export default async function FulfillmentBottleneckPage() {
                   {r.breached ? <span className="ml-1 text-rose-600 dark:text-rose-400">{formatNumber(r.breached)} trễ</span> : null}
                 </span>
               ))}
+            </div>
+          ) : null}
+          {queue.byReason.some((r) => r.reason === "OUT_OF_STOCK") ? (
+            <div className="border-b px-5 py-2 text-[12px] text-muted-foreground">
+              Đơn <b>kho không đủ hàng</b> là việc CSKH báo khách; đặt xưởng theo mẫu mã xem ở{" "}
+              <Link href="/inventory/shortage" className="font-medium text-primary hover:underline">
+                Thiếu hàng giao đơn
+              </Link>
+              .
             </div>
           ) : null}
 
@@ -119,6 +135,7 @@ export default async function FulfillmentBottleneckPage() {
             </ul>
           )}
         </SectionCard>
+        </>
       )}
     </div>
   );

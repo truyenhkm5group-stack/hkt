@@ -89,7 +89,7 @@ export default async function DepartmentMapPage() {
             ))}
             <li className="pt-1">
               Nấc BÀN TAY mà không có nấc ĐỀ NGHỊ là một cỗ máy không có lý lẽ; nấc VÀO VIỆC mà không có nấc ĐO là một hàng đợi không ai kiểm được. Vì thế cột
-              cuối luôn chỉ vào nấc THẤP NHẤT còn dở.
+              cuối luôn chỉ vào nấc THẤP NHẤT còn dở — bỏ qua nấc &quot;cố ý đóng&quot; (AI không được ghi vào tiền, tồn kho, hay thay người ra quyết định).
             </li>
           </ul>
           </>
@@ -155,10 +155,17 @@ export default async function DepartmentMapPage() {
                         <TableCell key={r} className="align-top text-center">
                           {/* Chi tiết đi vào `title`: bảng chín cột phải vừa một màn hình. */}
                           <span
-                            title={`${AI_RUNG_LABEL[r]} — ${AI_STATUS_LABEL[st.status]}: ${st.what}${st.missing ? ` | Thiếu: ${st.missing}` : ""}`}
-                            className={cn("inline-block rounded-md px-1.5 py-0.5 text-[11px] font-semibold", AI_STATUS_TONE[st.status])}
+                            title={
+                              st.closedByDesign
+                                ? `${AI_RUNG_LABEL[r]} — Cố ý đóng: ${st.missing ?? st.what}`
+                                : `${AI_RUNG_LABEL[r]} — ${AI_STATUS_LABEL[st.status]}: ${st.what}${st.missing ? ` | Thiếu: ${st.missing}` : ""}`
+                            }
+                            className={cn(
+                              "inline-block rounded-md px-1.5 py-0.5 text-[11px] font-semibold",
+                              st.closedByDesign ? "border border-dashed text-muted-foreground" : AI_STATUS_TONE[st.status],
+                            )}
                           >
-                            {AI_STATUS_SHORT[st.status]}
+                            {st.closedByDesign ? "Cố ý đóng" : AI_STATUS_SHORT[st.status]}
                           </span>
                         </TableCell>
                       );
@@ -172,7 +179,13 @@ export default async function DepartmentMapPage() {
                     */}
                     <TableCell className="max-w-[300px] align-top text-xs leading-5 whitespace-normal">
                       {next === null ? (
-                        <span className="font-semibold text-emerald-700 dark:text-emerald-400">Đủ năm nấc — {cover.built}/{cover.total} đang chạy</span>
+                        cover.closed > 0 ? (
+                          <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                            Đủ mọi nấc được phép — {cover.built}/{cover.total} đang chạy, {cover.closed} cố ý đóng
+                          </span>
+                        ) : (
+                          <span className="font-semibold text-emerald-700 dark:text-emerald-400">Đủ năm nấc — {cover.built}/{cover.total} đang chạy</span>
+                        )
                       ) : (
                         <span title={spec.rungs[next].missing} className="line-clamp-3">
                           <span className="font-semibold">{AI_RUNG_LABEL[next]}</span>

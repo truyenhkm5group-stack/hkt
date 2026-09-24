@@ -16,7 +16,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { BANK_GROUP_SPEC, BANK_GROUPS, type BankGroup } from "@/lib/constants/bank";
-import { codMatchStatus, matchEmployeeByText, type FinanceOpsCodStatus } from "@/lib/constants/finance-ops";
+import { codMatchStatus, matchEmployeeByText, rankBankExceptions, type FinanceOpsCodStatus } from "@/lib/constants/finance-ops";
 import { matchInternalTransferPairs, type InternalTransferTxn } from "@/lib/integrations/bank/internal-transfer";
 import { getMatchOverview } from "@/lib/queries/bank-match";
 import { expenseUnpaidCond } from "@/lib/queries/expense-payment";
@@ -72,14 +72,55 @@ const TXN_COLUMNS = {
 
 export type EmployeeSuggestion = { id: string; name: string } | null;
 
-/** Giao dịch CHƯA phân loại — cả hai chiều tiền. Tiền ra thêm gợi ý nhân sự nếu tên/bí danh khớp. */
-export async function unclassifiedBankRows(limit = 100): Promise<(QueueBankTxnRow & { employeeSuggestion: EmployeeSuggestion })[]> {
+export type UnclassifiedBankRow = QueueBankTxnRow & { employeeSuggestion: EmployeeSuggestion };
+
+/**
+ * Trần số dòng được CHẤM ĐIỂM trong một lượt. Chấm điểm cần cả tập (điểm là hàm của tiền VÀ tuổi,
+ * không có một cột SQL nào sắp theo nó được mà không chép công thức vào SQL), nên lượt đầu chỉ đọc
+ * ba cột nhẹ. Vượt trần thì `truncated` nói ra — không cắt im lặng.
+ */
+export const UNCLASSIFIED_SCAN_CAP = 20_000;
+
+export type UnclassifiedBankQueue = {
+  rows: UnclassifiedBankRow[];
+  /** Tổng số dòng chưa phân loại (không bị trần). */
+  total: number;
+  /** `true` = có hơn `UNCLASSIFIED_SCAN_CAP` dòng; thứ tự chỉ đúng trong phần đã đọc. */
+  truncated: boolean;
+};
+
+/**
+ * Giao dịch CHƯA phân loại — cả hai chiều tiền, xếp theo `rankBankExceptions` (tiền đang treo ×
+ * số ngày treo, xem `lib/constants/finance-ops.ts`). Tiền ra thêm gợi ý nhân sự nếu tên/bí danh khớp.
+ *
+ * `order: "recent"` giữ thứ tự cũ (mới nhất trước) cho nơi cần quét theo thời gian chứ không theo
+ * mức ưu tiên — hiện là gợi ý lương theo bí danh.
+ */
+export async function unclassifiedBankQueue(limit = 100, opts: { now?: Date; order?: "priority" | "recent" } = {}): Promise<UnclassifiedBankQueue> {
   const db = await getDb();
-  const [rows, employees] = await Promise.all([
-    db.select(TXN_COLUMNS).from(b).where(eq(b.accountingGroup, "UNCLASSIFIED")).orderBy(desc(b.txnAt)).limit(limit),
+  const now = opts.now ?? new Date();
+  const [light, [countRow], employees] = await Promise.all([
+    opts.order === "recent"
+      ? db.select({ id: b.id, amount: b.amount, txnAt: b.txnAt }).from(b).where(eq(b.accountingGroup, "UNCLASSIFIED")).orderBy(desc(b.txnAt)).limit(limit)
+      : // Vượt trần thì phần bị bỏ là các khoản NHỎ NHẤT — không phải các khoản cũ nhất, vốn đã chạm trần tuổi.
+        db.select({ id: b.id, amount: b.amount, txnAt: b.txnAt }).from(b).where(eq(b.accountingGroup, "UNCLASSIFIED")).orderBy(desc(sql`abs(${b.amount})`), b.id).limit(UNCLASSIFIED_SCAN_CAP),
+    db.select({ n: sql<number>`count(*)` }).from(b).where(eq(b.accountingGroup, "UNCLASSIFIED")),
     listEmployees(),
   ]);
-  return rows.map((r) => ({ ...r, employeeSuggestion: r.amount < 0 ? matchEmployeeByText(`${r.counterparty} ${r.description}`, employees) : null }));
+  const picked = (opts.order === "recent" ? light : rankBankExceptions(light, now)).slice(0, limit);
+  const full = picked.length ? await db.select(TXN_COLUMNS).from(b).where(inArray(b.id, picked.map((r) => r.id))) : [];
+  const byId = new Map(full.map((r) => [r.id, r]));
+  const rows = picked
+    .map((p) => byId.get(p.id))
+    // Dòng vừa được phân loại giữa hai lượt đọc thì không còn ở lượt hai — bỏ, không hiện nửa dòng.
+    .filter((r): r is QueueBankTxnRow => r !== undefined)
+    .map((r) => ({ ...r, employeeSuggestion: r.amount < 0 ? matchEmployeeByText(`${r.counterparty} ${r.description}`, employees) : null }));
+  const total = Number(countRow?.n ?? 0);
+  return { rows, total, truncated: total > UNCLASSIFIED_SCAN_CAP };
+}
+
+export async function unclassifiedBankRows(limit = 100, opts: { now?: Date; order?: "priority" | "recent" } = {}): Promise<UnclassifiedBankRow[]> {
+  return (await unclassifiedBankQueue(limit, opts)).rows;
 }
 
 export type ExpenseNoPaymentRow = { id: string; description: string; amount: number; occurredAt: Date; category: string; reference: string };
@@ -140,7 +181,8 @@ export async function payrollUnmatched(limit = 100): Promise<PayrollQueueRow[]> 
   const db = await getDb();
   const [classified, unclassified] = await Promise.all([
     db.select(TXN_COLUMNS).from(b).where(and(inArray(b.accountingGroup, PAYROLL_GROUPS), eq(b.linkedType, ""))).orderBy(desc(b.txnAt)).limit(limit),
-    unclassifiedBankRows(limit),
+    // Gợi ý lương quét theo THỜI GIAN (lương trả theo kỳ), không theo mức ưu tiên tiền.
+    unclassifiedBankRows(limit, { order: "recent" }),
   ]);
   const a: PayrollQueueRow[] = classified.map((r) => ({ ...r, reason: "CLASSIFIED_NOT_LINKED", employeeSuggestion: null }));
   const bRows: PayrollQueueRow[] = unclassified.filter((r) => r.employeeSuggestion).map((r) => ({ ...r, reason: "ALIAS_MATCH" }));

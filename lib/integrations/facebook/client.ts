@@ -143,6 +143,18 @@ export class FacebookAdsClient {
     return { ok: true, userName: str(me.name), userId: str(me.id), businessName: str(business.name), accounts };
   }
 
+  /**
+   * Token đang chạy mang những quyền gì — `GET /me/permissions`, CHỈ ĐỌC. Kết luận nằm ở hàm thuần
+   * `assessFbScopes` (`lib/constants/fb-token-scopes.ts`); hàm này chỉ đổi hình dạng câu trả lời.
+   */
+  async getPermissions(): Promise<{ permission: string; status: string }[]> {
+    const r = await this.get("me/permissions");
+    return asArray(r.data)
+      .map((x) => asRecord(x))
+      .map((x) => ({ permission: str(x.permission), status: str(x.status) }))
+      .filter((x) => x.permission);
+  }
+
   /** Tất cả tài khoản quảng cáo của BM: sở hữu (owned) + được cấp quyền (client) */
   async listAdAccounts(): Promise<FbAdAccount[]> {
     const fields = "id,account_id,name,currency,account_status";
@@ -255,6 +267,30 @@ export class FacebookAdsClient {
           missing: false,
         });
       }
+    }
+    return out;
+  }
+
+  /**
+   * ĐỌC nội dung quảng cáo (ảnh + câu chữ) của MỘT mẩu — cho việc nhập quảng cáo cũ của shop làm
+   * nguồn ảnh của vòng mẫu (`lib/creative/import.ts`). Chỉ GET; trả nguyên bản ghi để hàm thuần
+   * `pickOwnAdContent()` bóc, vì hình dạng `object_story_spec` đổi theo loại quảng cáo.
+   */
+  async getAdCreativeContent(adId: string): Promise<Record<string, unknown>> {
+    if (!/^\d{5,}$/.test(adId.trim())) throw new IntegrationError(`Facebook: mã quảng cáo không hợp lệ (${adId})`, 400);
+    return this.get(adId.trim(), { fields: "name,account_id,creative{id,image_url,image_hash,thumbnail_url,body,title,object_type,video_id,object_story_spec,asset_feed_spec}" });
+  }
+
+  /** ĐỌC địa chỉ ảnh gốc theo `image_hash` trong thư viện ảnh của tài khoản. Hash không tra được ⇒ vắng khỏi kết quả. */
+  async getAdImageUrls(accountId: string, hashes: string[]): Promise<Record<string, string>> {
+    const account = accountId.trim().replace(/^act_/, "");
+    const clean = [...new Set(hashes.map((h) => h.trim()).filter(Boolean))];
+    if (!/^\d{5,}$/.test(account) || clean.length === 0) return {};
+    const out: Record<string, string> = {};
+    for await (const item of this.paginate(`act_${account}/adimages`, { hashes: clean, fields: "hash,url" })) {
+      const hash = str(item.hash);
+      const url = str(item.url);
+      if (hash && url) out[hash] = url;
     }
     return out;
   }

@@ -20,6 +20,7 @@ import { getFulfillmentBottleneckQueue } from "@/lib/queries/fulfillment-bottlen
 import { getDuplicateOrderQueue } from "@/lib/queries/order-duplicate";
 import { DUPLICATE_VERDICT_LABEL } from "@/lib/constants/order-duplicate";
 import { unclassifiedBankRows } from "@/lib/queries/finance-ops";
+import { bankExceptionScore } from "@/lib/constants/finance-ops";
 import { resolvePeriod } from "@/lib/search-params";
 
 /**
@@ -442,12 +443,15 @@ export async function adaptDuplicateOrders(now: Date): Promise<WorkItem[]> {
 /* ═══════════════════ 4 · DÒNG TIỀN CHƯA PHÂN LOẠI ═══════════════════ */
 
 export async function adaptBank(now: Date): Promise<WorkItem[]> {
-  const rows = await unclassifiedBankRows(300);
-  const t = now.getTime();
+  /*
+    300 dòng ĐÁNG XỬ LÝ NHẤT, không phải 300 dòng MỚI NHẤT: `unclassifiedBankRows` xếp theo đúng
+    công thức của trang Kế toán (`rankBankExceptions`), nên khi tồn vượt 300 thì phần bị cắt là các
+    khoản nhỏ và mới — không phải khoản lớn và cũ nhất như trước 24/09/2026.
+  */
+  const rows = await unclassifiedBankRows(300, { now });
   return rows.map((r) => {
-    const ageHours = hoursSince(r.txnAt, t);
     const abs = Math.abs(r.amount);
-    const score = caseScore({ severity: "warning", ageHours, amount: abs, type: "DATA_ERROR" });
+    const score = bankExceptionScore(r.amount, r.txnAt, now);
     return {
       key: workKey("BANK_EXCEPTION", r.id),
       sourceType: "BANK_EXCEPTION",

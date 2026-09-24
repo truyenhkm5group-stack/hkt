@@ -41,6 +41,8 @@ Ba điều tôi (người dựng) suy ra từ các câu chốt, cần chủ shop
 14:00 hôm trước  LẬP LÔ   planBatch()  — 10 + 3 ô dự phòng, hạt giống = ngày chạy (chạy lại ra đúng lô cũ)
                  VIẾT     LLM viết câu lệnh ảnh (EN) + câu chữ + tiêu đề (VI) cho từng ô
                  SINH     gpt-image SỬA ảnh sản phẩm THẬT theo câu lệnh — không vẽ sản phẩm từ con số 0
+                          (mặc định gửi cả lô qua Batch API, rẻ 50% — §5e)
+02:00            VẼ NỐT   Batch còn chưa xong ⇒ huỷ, ô thiếu ảnh vẽ bằng gọi ngay ở chất lượng vừa (§5e)
                  ⇒ lô "Chờ duyệt", báo Lark/Telegram
 tối / sáng sớm   NGƯỜI    xem 13 ảnh, gạt ảnh không ưng, bấm DUYỆT CẢ LÔ (thấy rõ tổng tiền, khung giờ, luật tắt)
 05:30            HẠN      chưa duyệt ⇒ lô "Quá hạn", KHÔNG một đồng nào được chi
@@ -55,9 +57,13 @@ mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của 
 
 1. **Mô hình không quyết định.** Chọn gen, chấm mẫu, tắt mẫu đều là hàm thuần có kiểm thử. LLM chỉ
    VIẾT câu chữ cho một bản giao việc đã được chọn, và viết bản tin học từ một bảng đã được đếm.
-2. **Điểm ảnh gửi sang máy SINH ảnh chỉ là ảnh của shop:** ảnh sản phẩm thật (`PRODUCT_PHOTO`) và ảnh
-   mẫu thắng/hứa hẹn của chính shop. Ảnh SPY / tay / R&D chỉ được một mô hình ĐỌC ảnh xem và rút ra
-   gen + mô tả chữ. Chép ảnh người khác là rủi ro bản quyền và là lý do Facebook khoá tài khoản.
+2. **Điểm ảnh gửi sang máy SINH ảnh chỉ là ảnh của shop:** ảnh sản phẩm thật (`PRODUCT_PHOTO`), ảnh
+   mẫu thắng/hứa hẹn của vòng, và ảnh **quảng cáo cũ của shop** (`OWN_AD`, §5c) — cùng một lý do: đó là
+   quảng cáo CỦA SHOP đã chạy trên tài khoản của shop. `OWN_AD` chỉ vào được bằng nút nhập theo `ad_id`
+   (form tải tay không nhận loại này, CSDL bắt buộc `fb_ad_id`), đi sang máy sinh ảnh dưới nhãn
+   `OWN_VARIANT`, và chỉ khi nó gắn ĐÚNG mã hàng của ảnh sản phẩm trong ô. Ảnh SPY / tay / R&D chỉ được
+   một mô hình ĐỌC ảnh xem và rút ra gen + mô tả chữ — kể cả khi chúng gắn đúng mã. Chép ảnh người khác
+   là rủi ro bản quyền và là lý do Facebook khoá tài khoản.
 3. **Mọi ô có ảnh sản phẩm thật làm gốc.** Quảng cáo ra một chiếc váy không có trong kho thì đơn nào
    cũng thành đơn hoàn — tiền quảng cáo mua về tỷ lệ hoàn.
 4. **Một cửa ghi Facebook.** Mọi lời gọi ghi nằm trong `lib/integrations/facebook/ads-write.ts`, qua
@@ -116,6 +122,109 @@ Lập lô: 60% ô **khai thác** (biến thể của mẫu thắng/hứa hẹn, 
 nên chiến thắng), 40% ô **thăm dò** (nguồn cảm hứng ít dùng nhất, gen thiếu chọn bằng lấy mẫu Thompson
 — giá trị chưa thử tự được thử, giá trị đã thua nhiều lần tự bị bỏ, không cần xoá dữ liệu).
 
+## 5b. Mẫu tự làm (chủ shop yêu cầu 24/09/2026)
+
+Chủ shop vẽ mẫu trên web ChatGPT / Grok (gói tháng, không có API cho máy) và tải vào lô:
+
+- Vào **lô gần nhất còn hạn duyệt** (`manualTargetDay`): trước 5:30 là lô hôm nay, sau đó là lô ngày mai.
+- Lô chưa có ⇒ dựng sẵn "Chờ duyệt" (`plan.manualSeed`). Tới 14:00 máy chỉ lập **phần còn thiếu**:
+  `batchSize + extraCandidates − số mẫu tự làm`; ô máy đánh số 1…n, ô tự làm 1001+.
+- **Đăng trước** ô máy lập (`publishOrder`); trần 10 mẫu/lô không đổi — mẫu tự làm chiếm chỗ ô máy.
+- Không qua máy viết / máy vẽ. Bắt buộc mã hàng + sáu gen (không có gen thì máy không học được gì từ mẫu).
+- Câu chữ ghi giá khác giá ERP ⇒ cảnh báo, không chặn. Người tải được quy kết bằng khoá tài khoản (mục 34).
+- Vẫn qua MỘT lượt duyệt lô; thêm mẫu sau khi mở hộp duyệt làm phiếu cũ mất hiệu lực (digest đổi).
+
+Tệp: `lib/creative/manual.ts` (đường ghi duy nhất) · `lib/actions/creative-manual.ts` · form ở tab Duyệt lô ·
+`drizzle/0118_creative_manual_variants.sql` · `tests/creative-manual.test.ts`.
+
+## 5c. Nhập nguồn ảnh có sẵn (chủ shop yêu cầu 24/09/2026)
+
+*"Lấy luôn những ảnh mẫu win và những ảnh mẫu có chỉ số tốt (giá tin nhắn < 4.000đ) để làm nguồn ảnh
+ban đầu, từ đó sinh thêm ảnh biến thể mẫu test mới."* Và tab Nguồn ảnh không bắt tải tay ảnh sản phẩm
+mà Pancake đã có.
+
+- **Nhập ảnh sản phẩm từ Pancake** — mỗi mã `not is_removed` có `products.image` ⇒ một nguồn
+  `PRODUCT_PHOTO` (`title` = tên mã, `source_url` = URL ảnh). Lũy đẳng theo (mã, URL); ảnh lỗi mang lý
+  do, không làm hỏng cả lượt; tối đa `PANCAKE_PHOTO_IMPORT_MAX` ảnh một lượt bấm.
+- **Nhập mẫu thắng / mẫu tốt từ Facebook** — HAI bước. Xem trước (chỉ đọc CSDL): mẩu có chi hạt `AD`
+  trong 60 ngày, tin nhắn cả đời ≥ 5, và THẮNG (đơn chốt vượt `winOrdersAbove`) hoặc TỐT (chi / tin nhắn
+  cả đời < 4.000đ, đã chi ≥ 50.000đ) — số đo qua ĐÚNG `variantMetrics()` của vòng, không điều kiện kết
+  quả đơn thứ hai. Nhập (tối đa 30 / lượt): máy chủ KIỂM LẠI ngưỡng, đọc ảnh + câu chữ qua Graph CHỈ-GET
+  (`image_url` → `link_data.picture` / `photo_data.url` → `image_hash` tra `adimages`), video / băng
+  chuyền / quảng cáo động bị bỏ kèm lý do; lũy đẳng theo `fb_ad_id`. Mã hàng = mã chiếm nhiều dòng đơn
+  nhất trong các đơn mang `ad_id` (bỏ quà tặng) → không có thì `ad_spends.product_id` → không có nữa thì
+  để trống và NÓI RA (nguồn ấy chưa làm mẫu cha được).
+- **Dùng vào đâu.** `OWN_AD` đủ sáu gen + có mã có ảnh thật ⇒ MẪU CHA của ô khai thác (THẮNG nếu lúc nhập
+  là mẫu thắng, không thì HỨA HẸN; xếp theo đơn / chi như mẫu của vòng), ô con ghi nguồn vào
+  `inspiration_source_id`. Gen chưa đủ ⇒ nguồn cảm hứng đứng TRƯỚC spy / tay / R&D. Câu chữ của nó đi vào
+  `loadWinningExamples` (xen kẽ với mẫu thắng của vòng) để máy viết học giọng văn đã bán được. Gen của
+  nguồn mới được đọc ở lượt chạy sau như mọi nguồn (`describePending`).
+
+Tệp: `lib/creative/import.ts` (đường ghi) · `lib/queries/creative-own-ads.ts` (xem trước, chỉ đọc) ·
+`lib/actions/creative-import.ts` · `app/(dashboard)/marketing/creatives/import-buttons.tsx` ·
+`drizzle/0119_creative_own_ads.sql` · `tests/creative-import.test.ts`.
+
+## 5d. Câu chữ theo ảnh + soạn trước khi duyệt (chủ shop yêu cầu 24/09/2026)
+
+*"Duyệt ảnh xong cần có phần soạn các thông tin sẵn để sẵn sàng đăng bài, đăng camp ads như tiêu đề,
+content (AI suggest luôn sao cho phù hợp với ảnh đã sinh ra và được duyệt)."*
+
+- `writer.ts` viết câu chữ TRƯỚC khi có ảnh ⇒ chỉ là NHÁP. Ngay sau khi ảnh được lưu, `captionFromImage()`
+  (`lib/creative/caption.ts`, OpenAI Responses + `input_image`, route `creative.caption`) NHÌN ảnh và viết
+  lại tiêu đề + nội dung chính. Luật giá y như `writer.ts`: sai ⇒ viết lại một lần ⇒ vẫn sai thì bỏ con số giá.
+- Viết theo ảnh hỏng ⇒ GIỮ câu nháp, mẫu vẫn `GENERATED`; lý do ở `gen_error` (tiền tố `CAPTION_FALLBACK_PREFIX`)
+  và thẻ mẫu nói ra. Không có cột mới.
+- Tab Duyệt lô: mỗi mẫu `GENERATED` hiện khối **Sẵn sàng đăng** (xem trước bài như trên Facebook — tên fanpage
+  theo cấu hình chụp của lô, đọc từ sổ `fanpages`) và nút **Soạn câu chữ**: sửa tay (đếm ký tự 40/500), hoặc
+  **AI gợi ý theo ảnh** (2–3 phương án, không tự lưu). Mẫu tự làm dùng được như mẫu máy.
+- Sửa được khi lô chưa duyệt (`PLANNED`/`PENDING_APPROVAL`) và còn hạn — điều kiện nằm TRONG câu `UPDATE`.
+  Câu chữ nằm trong digest ⇒ **sửa câu chữ ⇒ cần bấm duyệt lại** (phiếu đã phát tự vô hiệu). Giá khác ERP
+  chỉ cảnh báo. Quyền `ideas:write`; nhật ký ghi trước/sau.
+
+Tệp: `lib/creative/{caption,copy-edit}.ts` · `lib/actions/creative-copy.ts` · `copy-editor.tsx` ·
+`AdPreview` trong `variant-bits.tsx` · `tests/creative-copy.test.ts`.
+
+## 5e. Mô hình ảnh và đường Batch
+
+> **Đang chạy (chủ shop chốt lần hai 24/09/2026): `gpt-image-2.5-sunburst`, chất lượng VỪA, khổ 4:5, GỌI
+> NGAY (`imageMode = SYNC`), trần 2 USD/ngày** — ước ~1,1 USD / lô 13 ảnh. Lần chốt đầu là "Cao + Batch"
+> nhưng tài liệu mô hình của OpenAI ghi sunburst **không nhận Batch**. Đường Batch dưới đây vẫn nằm trong
+> mã và bật được ở tab Cấu hình cho mô hình nhận nó (vd `gpt-image-2`, ~1,4 USD / lô ở mức cao).
+
+
+- **Khi bật Batch** (`imageMode = BATCH`, mô hình nhận Batch): chất lượng do cấu hình · khổ dọc 4:5 `1088x1360` (bảng tin Facebook; hai
+  cạnh bội số 16) · vẽ nốt lúc `batchFallbackHourVn = 2` ở `fallbackImageQuality = medium`.
+  Trần `maxImageUsdPerDay = 2` KHÔNG đổi. `SYNC` giữ nguyên hành vi cũ (gọi ngay từng ảnh).
+- **Giá là ƯỚC TÍNH, một bảng:** `IMAGE_MODEL_TOKEN_PRICE_PER_MTOK` (USD / 1 triệu token, developers.openai.com
+  pricing đọc 24/09/2026) × số token ước tính (bảng token đầu ra theo chất lượng của gpt-image-1, quy theo diện
+  tích; 1.000 token chữ + 3 ảnh × 1.500 token đầu vào) × 0,5 khi đi Batch. Mô hình lạ ⇒ tính theo mô hình đắt
+  nhất. Ghi chi phí sau khi gọi cũng đọc ĐÚNG bảng ấy (`imageEditCostUsd`, × 0,5 cho dòng Batch). Một lô 13 ảnh
+  cao 4:5 qua Batch ≈ 1,4 USD; gọi ngay cả lô ở mức cao ≈ 2,8 USD (vượt trần — lý do vẽ nốt hạ về mức vừa ≈ 1,1 USD).
+- **Lượt dựng lô:** viết câu chữ cho MỌI ô `PLANNED`, kiểm trần NGÀY theo giá Batch (ô vượt trần ⇒ `GEN_FAILED`
+  có lý do), gom điểm ảnh qua `gatherPixels` (đường duy nhất), tải ảnh tham chiếu lên Files API (`purpose:
+  "vision"`) — `assertPixelSafe` chạy lại trước byte đầu tiên VÀ khi dựng từng dòng JSONL — rồi tạo MỘT lô
+  (`/v1/batches`, `endpoint: "/v1/images/edits"`, `completion_window: "24h"`), mỗi dòng `custom_id` = id mẫu,
+  thân JSON `images: [{ file_id }]`. Trạng thái nằm ở `creative_batches.plan.imageBatch` (không migration).
+- **Lũy đẳng:** pha `SUBMITTING` được ghi TRƯỚC lời gọi, có điều kiện "chưa có `imageBatch`". Lượt gửi đứt giữa
+  chừng KHÔNG gửi lại (có thể trả tiền hai lần) — tới mốc vẽ nốt thì bỏ và vẽ bằng gọi ngay.
+- **Giữ chỗ trong trần:** lô đã gửi mà chưa về ảnh giữ chỗ (`reservedImageSpend`) cho tới khi dừng.
+- **Kết quả:** `completed` ⇒ ảnh lưu + câu chữ theo ảnh (y đường gọi ngay) + `GENERATED`; dòng lỗi ⇒ `GEN_FAILED`
+  CHỈ khi lô có ít nhất một dòng ra ảnh. Lô huỷ / hết hạn / hỏng, hoặc không dòng nào ra ảnh ⇒ ô ở lại để vẽ nốt.
+- **Vẽ nốt:** tới `imageBatchFallbackAt()` (2:00 ngày chạy) mà lô còn chạy ⇒ huỷ; đợi OpenAI báo đã huỷ (nhận
+  cả dòng đã xong) tối đa 30 phút, rồi vẽ ô còn thiếu bằng gọi ngay ở `medium`, dùng lại câu lệnh đã viết.
+  OpenAI từ chối lô ngay lúc gửi ⇒ vẽ nốt NGAY (đợi tới 2:00 không đổi được kết quả).
+- **Báo:** tóm tắt `buildBatch().imageBatch` đi vào `sync_runs.detail` của job `creative-loop`. Tin "chờ duyệt"
+  vẫn chỉ bắn khi lô sang `PENDING_APPROVAL`.
+
+> **Mâu thuẫn tài liệu cần chủ shop biết:** trang mô hình `gpt-image-2.5-sunburst` (và `-flare`) trên
+> developers.openai.com ghi **"Batch · v1/batch · Not supported"** (đọc 24/09/2026), và trang giá chưa niêm yết giá
+> Batch cho hai mô hình này; `gpt-image-2` và `gpt-image-1` ghi "Supported". Máy vẫn gửi thử (tài liệu của mô
+> hình mới có thể đi sau API) — bị từ chối thì vẽ ngay bằng gọi ngay ở `medium` và tab Cấu hình cảnh báo. Muốn
+> đúng "Cao + Batch" thì đổi mô hình sang `gpt-image-2` (cùng giá token, Batch được hỗ trợ).
+
+Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `lib/creative/generate.ts` ·
+`lib/constants/creative-loop.ts` (giá) · `tests/creative-image-batch.test.ts`.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |
@@ -147,6 +256,9 @@ nên chiến thắng), 40% ô **thăm dò** (nguồn cảm hứng ít dùng nh�
   tiêu tiền, nhưng ERP không biết nó). Tên nhóm mang ngày lô + số ô để tra tay.
 - Các hàm ghi mới chưa từng chạy trên Facebook thật — lượt đầu nên là MỘT lô nhỏ (`batchSize` 2–3).
 - Chi phí đọc ảnh / viết chữ bằng model OpenAI in "CHƯA BIẾT" vì bảng giá AI của kho chỉ có Claude.
+- Đường Batch ảnh (§5e) chưa từng gọi OpenAI thật: tên trường lấy từ tài liệu, kiểm thử chạy trên OpenAI giả.
+  Số token mỗi ảnh của gpt-image-2.x là ước tính (OpenAI chưa công bố bảng) — đối chiếu `gen_cost_usd` thật
+  sau lô đầu.
 
 ## 7. Chủ shop còn phải làm gì để vòng CHẠY THẬT
 
@@ -157,7 +269,8 @@ nên chiến thắng), 40% ô **thăm dò** (nguồn cảm hứng ít dùng nh�
 | Điền `creative.config`: fanpage · tài khoản · chiến dịch test · mẩu mẫu · **luật tắt · luật giữ** | ngưỡng là quyết định kinh doanh (mục 38) |
 | Đặt `ADS_WRITE_ENABLED=true`, `ADS_WRITE_MODE=COPILOT`, `CREATIVE_LOOP_EVERY_MINUTES=10` ở **GitHub Variables** rồi deploy (xoá Variable = TẮT ở lần deploy sau; gõ tay vào `.env` trên VPS sẽ bị đè); `OPENAI_API_KEY` phải có | đổi lịch và mở đường ghi là việc của chủ shop (mục 7) |
 | Bật `enabled` ở tab Cấu hình | công tắc mềm của vòng |
-| Tải lên **ảnh sản phẩm thật** cho các mã muốn test | máy không sinh mẫu cho sản phẩm nó không nhìn thấy |
+| Bấm **Nhập ảnh sản phẩm từ Pancake** (hoặc tải tay ảnh sản phẩm thật) cho các mã muốn test | máy không sinh mẫu cho sản phẩm nó không nhìn thấy |
+| Bấm **Nhập mẫu thắng / mẫu tốt từ Facebook** (token hiện có `ads_read` là đủ — chỉ GET) | chọn mẩu nào làm mẫu cha là việc của người |
 | Chốt ba con số "đề xuất" ở §3 | ngưỡng tiền |
 
 ## 8. BLOCKED / HUMAN GATE

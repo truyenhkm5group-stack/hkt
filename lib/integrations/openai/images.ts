@@ -1,4 +1,4 @@
-import { PIXEL_SAFE_SOURCE_KINDS, type ImageQuality, type ImageSize } from "@/lib/constants/creative-loop";
+import { IMAGE_BATCH_PRICE_FACTOR, IMAGE_MODEL_TOKEN_PRICE_PER_MTOK, PIXEL_SAFE_EDIT_LABEL, PIXEL_SAFE_SOURCE_KINDS, imagePriceKeyOf, type ImageMode, type ImageQuality, type ImageSize } from "@/lib/constants/creative-loop";
 import { env } from "@/lib/env";
 
 /**
@@ -10,7 +10,8 @@ import { env } from "@/lib/env";
  * ─── HÀNG RÀO Ở RANH GIỚI HÀM (đặc tả `docs/creative-loop.md` §2, ranh giới 2) ───
  *
  * Điểm ảnh gửi sang máy SINH ảnh chỉ được là ảnh CỦA SHOP: ảnh sản phẩm thật (`PRODUCT_PHOTO`) và
- * ảnh mẫu của chính shop (`OWN_VARIANT`). Ảnh SPY / tay / R&D không bao giờ tới đây. Kiểu TypeScript
+ * ảnh của chính shop (`OWN_VARIANT` — mẫu cha của vòng, HOẶC quảng cáo cũ của shop nguồn `OWN_AD`).
+ * Ảnh SPY / tay / R&D không bao giờ tới đây. Kiểu TypeScript
  * đã nói điều đó, nhưng kiểu biến mất lúc chạy — một `as` ở nơi gọi là đủ để lọt. Nên hàm KIỂM LẠI
  * từng ảnh lúc chạy và NÉM LỖI trước khi dựng một byte nào của yêu cầu.
  *
@@ -25,8 +26,14 @@ import { env } from "@/lib/env";
 
 export const OPENAI_IMAGES_EDIT_URL = "https://api.openai.com/v1/images/edits";
 
-/** Loại ảnh được gửi điểm ảnh — dẫn xuất từ hợp đồng, cộng ảnh mẫu của chính shop. */
-export const IMAGE_EDIT_ALLOWED_KINDS = [...PIXEL_SAFE_SOURCE_KINDS, "OWN_VARIANT"] as const;
+/**
+ * NHÃN ảnh được gửi điểm ảnh: ảnh sản phẩm thật + ảnh của chính shop. Mọi loại nguồn trong
+ * `PIXEL_SAFE_SOURCE_KINDS` quy về đúng hai nhãn này qua `PIXEL_SAFE_EDIT_LABEL` (`PRODUCT_PHOTO` giữ
+ * nhãn, `OWN_AD` đi dưới nhãn `OWN_VARIANT`) — `tests/creative-loop.test.ts` khoá phép quy ấy. Nhãn
+ * nguồn thô (`OWN_AD`, `SPY`…) tới đây là bị chặn: chỉ `gatherPixels()` đặt nhãn, sau khi kiểm loại
+ * trong CSDL.
+ */
+export const IMAGE_EDIT_ALLOWED_KINDS = [...new Set([...PIXEL_SAFE_SOURCE_KINDS.flatMap((k) => PIXEL_SAFE_EDIT_LABEL[k] ?? []), "OWN_VARIANT"])] as readonly string[];
 export type ImageEditKind = "PRODUCT_PHOTO" | "OWN_VARIANT";
 
 export type ImageEditInputImage = { kind: ImageEditKind; bytes: Uint8Array; contentType: string };
@@ -66,37 +73,25 @@ export type ImageEditDeps = {
 export const IMAGE_EDIT_TIMEOUT_MS = 180_000;
 
 /** gpt-image nhận tối đa 16 ảnh đầu vào. */
-const MAX_INPUT_IMAGES = 16;
+export const MAX_INPUT_IMAGES = 16;
 
 /**
- * ═══ BẢNG GIÁ TOKEN — ƯỚC TÍNH, KHÔNG PHẢI HOÁ ĐƠN ═══
+ * ═══ CHI PHÍ THEO TOKEN — ƯỚC TÍNH, KHÔNG PHẢI HOÁ ĐƠN ═══
  *
- * Nguồn: trang giá công bố của OpenAI cho `gpt-image-1` (USD / 1 triệu token): chữ đầu vào $5,
- * ảnh đầu vào $10, ảnh đầu ra $40. Bảng GIÁ MỘT ẢNH dùng để CHẶN TRƯỚC khi gọi nằm ở hợp đồng
- * (`estimateImageUsd`); bảng này dùng để ghi chi phí SAU khi gọi, theo đúng số token OpenAI đếm.
+ * Bảng giá theo mô hình nằm ở MỘT chỗ: `IMAGE_MODEL_TOKEN_PRICE_PER_MTOK` của hợp đồng vòng mẫu
+ * (`lib/constants/creative-loop.ts`, nguồn ghi ở đó). Hàm này dùng lại đúng bảng ấy để ghi chi phí SAU
+ * khi gọi, theo số token OpenAI đếm; `estimateImageUsd` dùng cùng bảng để CHẶN TRƯỚC khi gọi.
  *
- * Model không có trong bảng ⇒ `null` (CHƯA BIẾT), không đoán — cập nhật bảng khi có giá niêm yết.
- * Chỉ khớp đúng tên hoặc tên kèm hậu tố NGÀY (`gpt-image-1-2025…`): `gpt-image-1-mini` là một model
- * khác với giá khác, khớp theo tiền tố trần sẽ tính nhầm giá.
+ * Mô hình không có trong bảng ⇒ `null` (CHƯA BIẾT), không đoán — cập nhật bảng khi có giá niêm yết.
+ * Đi Batch ⇒ × `IMAGE_BATCH_PRICE_FACTOR`.
  */
-export const GPT_IMAGE_TOKEN_PRICE_PER_MTOK: Record<string, { textInput: number; imageInput: number; imageOutput: number }> = {
-  "gpt-image-1": { textInput: 5, imageInput: 10, imageOutput: 40 },
-};
-
-function priceKeyOf(model: string): string | null {
-  for (const k of Object.keys(GPT_IMAGE_TOKEN_PRICE_PER_MTOK)) {
-    if (model === k || new RegExp(`^${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-\\d{4}`).test(model)) return k;
-  }
-  return null;
-}
-
-export function imageEditCostUsd(model: string, usage: ImageEditUsage | null): number | null {
+export function imageEditCostUsd(model: string, usage: ImageEditUsage | null, mode: ImageMode = "SYNC"): number | null {
   if (!usage) return null;
-  const k = priceKeyOf(model);
+  const k = imagePriceKeyOf(model);
   if (!k) return null;
-  const p = GPT_IMAGE_TOKEN_PRICE_PER_MTOK[k];
+  const p = IMAGE_MODEL_TOKEN_PRICE_PER_MTOK[k];
   const usd = (usage.textInputTokens * p.textInput + usage.imageInputTokens * p.imageInput + usage.outputTokens * p.imageOutput) / 1_000_000;
-  return Math.round(usd * 1_000_000) / 1_000_000;
+  return Math.round(usd * (mode === "BATCH" ? IMAGE_BATCH_PRICE_FACTOR : 1) * 1_000_000) / 1_000_000;
 }
 
 function num(x: unknown): number | null {
@@ -202,18 +197,27 @@ export async function editImage(input: ImageEditInput, deps: ImageEditDeps = {})
     throw new Error(`OpenAI từ chối sinh ảnh (HTTP ${res.status})${msg ? `: ${msg}` : ""}.`);
   }
 
-  let body: { data?: { b64_json?: unknown }[]; usage?: unknown };
+  let body: unknown;
   try {
-    body = (await res.json()) as typeof body;
+    body = await res.json();
   } catch {
     throw new Error("OpenAI trả về phản hồi không phải JSON.");
   }
-  const b64 = body.data?.[0]?.b64_json;
+  return decodeImageEditBody(body, input.model, "SYNC");
+}
+
+/**
+ * Đọc thân phản hồi của `/v1/images/edits` — dùng chung cho gọi ngay và cho từng dòng kết quả Batch
+ * (`response.body` của dòng Batch có đúng hình dạng này). Ném lỗi tiếng Việt khi không có ảnh JPEG.
+ */
+export function decodeImageEditBody(raw: unknown, model: string, mode: ImageMode): ImageEditResult {
+  const body = (raw && typeof raw === "object" ? raw : {}) as { data?: { b64_json?: unknown }[]; usage?: unknown };
+  const b64 = Array.isArray(body.data) ? body.data[0]?.b64_json : undefined;
   if (typeof b64 !== "string" || !b64) throw new Error("OpenAI không trả về ảnh nào.");
   const bytes = new Uint8Array(Buffer.from(b64, "base64"));
   if (!isJpeg(bytes)) throw new Error("Ảnh OpenAI trả về không phải JPEG.");
   const usage = parseImageUsage(body.usage);
-  return { bytes, contentType: "image/jpeg", usage, costUsd: imageEditCostUsd(input.model, usage) };
+  return { bytes, contentType: "image/jpeg", usage, costUsd: imageEditCostUsd(model, usage, mode) };
 }
 
 /** Kiểu để TIÊM: kiểm thử truyền một bản giả cùng hình dạng, không gọi mạng. */

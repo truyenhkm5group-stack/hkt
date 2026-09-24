@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import {
@@ -11,13 +11,18 @@ import {
   parseGenes,
   type BatchStatus,
   type CreativeLoopConfig,
+  type Genes,
   type SlotMode,
 } from "@/lib/constants/creative-loop";
+import { CAPTION_FALLBACK_PREFIX, captionFromImage, type VariantCaptioner } from "@/lib/creative/caption";
+import { IMAGE_BATCH_CANCEL_GRACE_MINUTES, RESERVING_PHASES, describeImageBatch, emptyImageBatchState, parseImageBatchState, type ImageBatchState } from "@/lib/creative/image-batch";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
-import { planBatch } from "@/lib/creative/plan";
-import { batchDayToBuild, batchWindow } from "@/lib/creative/schedule";
+import { isManualSeed } from "@/lib/creative/manual";
+import { planBatch, type PlannedSlot } from "@/lib/creative/plan";
+import { batchDayToBuild, batchWindow, imageBatchFallbackAt } from "@/lib/creative/schedule";
 import { describeSource, type SourceDescriber } from "@/lib/creative/vision";
 import { writeVariantCopy, type CopyWriter } from "@/lib/creative/writer";
+import { IMAGE_EDITS_BATCH_ENDPOINT, imageEditBatchLine, isBatchTerminal, openAiBatchClient, parseImageBatchResults, uploadEditReferences, type ImageBatchClient, type ImageBatchLineResult, type OpenAiBatch } from "@/lib/integrations/openai/batch";
 import { editImage, type ImageEditClient, type ImageEditInputImage } from "@/lib/integrations/openai/images";
 import { loadPlanInputs, loadProductBrief, loadWinningExamples } from "@/lib/queries/creative-plan";
 
@@ -35,16 +40,39 @@ import { loadPlanInputs, loadProductBrief, loadWinningExamples } from "@/lib/que
  *
  * ─── ĐƯỜNG ĐIỂM ẢNH (ranh giới 2 + 3 của vòng mẫu) ───
  *
- * `gatherPixels()` là chỗ DUY NHẤT trong tệp này đọc điểm ảnh, và nó chỉ nhận HAI khoá: nguồn ảnh
- * sản phẩm thật của ô và mẫu cha. Nguồn cảm hứng (spy / tay / R&D) không có đường nào tới đây — chỉ
- * `vision_summary` của nó đi vào người viết câu chữ. `tests/creative-generate.test.ts` quét mã nguồn
- * để giữ điều đó, và `editImage()` kiểm lại loại ảnh lúc chạy.
+ * `gatherPixels()` là chỗ DUY NHẤT trong tệp này đọc điểm ảnh, và nó chỉ nhận BA khoá: nguồn ảnh
+ * sản phẩm thật của ô, mẫu cha, và nguồn QUẢNG CÁO CŨ CỦA SHOP (`ownAdSourceId`). Khoá thứ ba được
+ * điền từ `inspiration_source_id` của ô, nhưng điểm ảnh chỉ được đọc khi LOẠI đọc lại từ CSDL đúng là
+ * `OWN_AD` VÀ nguồn ấy gắn đúng mã hàng của ảnh sản phẩm — spy / tay / R&D đi qua khoá này cũng không
+ * lấy được một byte nào, chỉ `vision_summary` của chúng đi vào người viết câu chữ.
+ * `tests/creative-generate.test.ts` quét mã nguồn để giữ điều đó, và `editImage()` kiểm lại nhãn ảnh lúc chạy.
  *
  * ─── TRẦN NGÀY ───
  *
  * Trước MỖI ảnh: số ảnh đã sinh hôm nay (giờ VN) ≤ `CREATIVE_HARD_LIMITS.maxImagesPerDay` và tổng
  * USD + ước tính ảnh này ≤ `cfg.imageDailyCapUsd`. Chạm trần ⇒ mọi mẫu còn `PLANNED` của lô thành
  * `GEN_FAILED` với lý do nói rõ trần nào — lô đi tiếp tới duyệt với số ảnh đã có, không treo.
+ *
+ * ─── HAI CÁCH GỬI YÊU CẦU VẼ (`imageMode`, chủ shop chốt 24/09/2026 "Cao + Batch, giữ 2 USD") ───
+ *
+ * `SYNC`  — gọi ngay từng ảnh, tối đa `GEN_PER_TICK` ảnh một lượt (hành vi cũ, giữ nguyên).
+ * `BATCH` — lượt dựng lô viết câu chữ cho MỌI ô `PLANNED`, kiểm trần NGÀY theo giá Batch, rồi gửi MỘT lô
+ *           Batch (`custom_id` = id mẫu). Các lượt sau đọc trạng thái; `completed` ⇒ lưu ảnh + viết câu chữ
+ *           theo ảnh y như đường gọi ngay. Tới `imageBatchFallbackAt()` (2:00 ngày chạy) mà lô Batch còn
+ *           chưa xong ⇒ huỷ, và ô nào còn thiếu ảnh được VẼ NỐT bằng gọi ngay ở `fallbackImageQuality`, vẫn
+ *           trong trần ngày. Gửi Batch hỏng ngay (OpenAI từ chối) ⇒ vẽ nốt NGAY, không đợi tới 2:00: đợi
+ *           không đổi được kết quả, chỉ bớt thời gian cho người duyệt. Trạng thái lô Batch: `image-batch.ts`.
+ *
+ * Tiền của lô Batch đã gửi mà chưa về ảnh GIỮ CHỖ trong trần ngày (`reservedImageSpend`) — một lượt
+ * vẽ nốt không được tiêu phần tiền mà lô Batch có thể vẫn đang tiêu.
+ *
+ * ─── CÂU CHỮ VIẾT LẠI THEO ẢNH ───
+ *
+ * `writer.ts` viết câu chữ TRƯỚC khi có ảnh (nó cần câu lệnh ảnh), nên câu ấy chỉ là NHÁP. Ngay sau
+ * khi ảnh được lưu, `captionFromImage()` NHÌN chính ảnh ấy và viết lại tiêu đề + nội dung chính.
+ * Điểm ảnh đi vào đó là ĐẦU RA của máy vẽ (đang nằm trong bộ nhớ) — không đọc lại CSDL, nên
+ * `gatherPixels()` vẫn là chỗ duy nhất đọc điểm ảnh. Viết lại hỏng ⇒ GIỮ câu nháp, mẫu vẫn
+ * `GENERATED`, lý do nằm ở `gen_error` (bắt đầu bằng `CAPTION_FALLBACK_PREFIX`) để màn hình nói ra.
  */
 
 /** Số mẫu sinh tối đa trong MỘT tick. */
@@ -56,6 +84,10 @@ export type BuildBatchDeps = {
   imageClient?: ImageEditClient;
   writer?: CopyWriter;
   describe?: SourceDescriber;
+  /** Viết lại câu chữ theo ảnh vừa sinh. Bỏ trống ⇒ `captionFromImage` (OpenAI thật). */
+  caption?: VariantCaptioner;
+  /** Files + Batch API. Bỏ trống ⇒ OpenAI thật (`OPENAI_API_KEY`). */
+  batchClient?: ImageBatchClient;
   now?: Date;
   perTick?: number;
 };
@@ -73,6 +105,8 @@ export type BuildBatchSummary = {
   described: number;
   status: BatchStatus | null;
   skippedReason: string | null;
+  /** Lô Batch ảnh đang ở đâu (`imageMode = BATCH`) — một câu cho `sync_runs.detail`. */
+  imageBatch: string | null;
 };
 
 type BatchRow = typeof schema.creativeBatches.$inferSelect;
@@ -110,6 +144,65 @@ async function describePending(db: Db, describe: SourceDescriber): Promise<numbe
   return ok;
 }
 
+/** Ô máy lập ⇒ dòng `creative_variants` PLANNED. Dùng chung cho lô mới và lô dựng sẵn bởi mẫu tự làm. */
+function plannedRows(batchId: string, slots: PlannedSlot[]) {
+  return slots.map((s) => ({
+    batchId,
+    slot: s.slot,
+    mode: s.mode,
+    productId: s.productId,
+    productPhotoSourceId: s.productPhotoSourceId,
+    inspirationSourceId: s.inspirationSourceId,
+    parentVariantId: s.parentVariantId,
+    genes: s.genes as Record<string, string>,
+    genesVersion: GENE_VOCAB_VERSION,
+    mutatedGene: s.mutatedGene ?? "",
+    why: s.why,
+    status: "PLANNED" as const,
+  }));
+}
+
+/**
+ * Lô đã được MẪU TỰ LÀM dựng sẵn (`plan.manualSeed`, chưa có `slots`) ⇒ máy chỉ lập PHẦN CÒN THIẾU:
+ * `batchSize + extraCandidates − số mẫu tự làm`. Không đụng mẫu của người, không đổi số ô của nó
+ * (ô máy lập 1…n, ô tự làm 1001+).
+ *
+ * Chỉ điền MỘT lần: điều kiện "plan còn là bản dựng sẵn" nằm trong WHERE, nên hai lượt chạy chồng
+ * không lập hai lần.
+ */
+async function fillManualSeed(db: Db, batch: BatchRow, cfg: CreativeLoopConfig): Promise<BatchRow> {
+  const v = schema.creativeVariants;
+  const [c] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(v)
+    .where(and(eq(v.batchId, batch.id), eq(v.mode, "MANUAL"), eq(v.status, "GENERATED")));
+  const need = Math.max(0, cfg.batchSize + cfg.extraCandidates - Number(c?.n ?? 0));
+  const inputs = await loadPlanInputs(db, batch.batchDay, cfg);
+  const plan = planBatch({ ...inputs, slotCount: need });
+  const filled = await db.transaction(async (tx) => {
+    const [u] = await tx
+      .update(schema.creativeBatches)
+      .set({
+        plan: { ...plan, manualSeed: true } as unknown as Record<string, unknown>,
+        slotCount: sql`${schema.creativeBatches.slotCount} + ${plan.slots.length}`,
+        configSnapshot: cfg as unknown as Record<string, unknown>,
+        status: plan.slots.length > 0 ? "PLANNED" : batch.status,
+      })
+      .where(
+        and(
+          eq(schema.creativeBatches.id, batch.id),
+          sql`${schema.creativeBatches.plan} ->> 'manualSeed' = 'true' and not (${schema.creativeBatches.plan} ? 'slots')`,
+          sql`${schema.creativeBatches.status} in ('PLANNED', 'PENDING_APPROVAL')`,
+        ),
+      )
+      .returning();
+    if (!u) return null;
+    if (plan.slots.length) await tx.insert(v).values(plannedRows(batch.id, plan.slots));
+    return u;
+  });
+  return filled ?? (await batchByDay(db, batch.batchDay)) ?? batch;
+}
+
 async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): Promise<{ batch: BatchRow; created: boolean } | { batch: null; emptyReasons: string[] }> {
   const plan = planBatch(await loadPlanInputs(db, batchDay, cfg));
   /*
@@ -138,24 +231,7 @@ async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): P
       .onConflictDoNothing({ target: schema.creativeBatches.batchDay })
       .returning();
     if (!b) return null;
-    if (plan.slots.length) {
-      await tx.insert(schema.creativeVariants).values(
-        plan.slots.map((s) => ({
-          batchId: b.id,
-          slot: s.slot,
-          mode: s.mode,
-          productId: s.productId,
-          productPhotoSourceId: s.productPhotoSourceId,
-          inspirationSourceId: s.inspirationSourceId,
-          parentVariantId: s.parentVariantId,
-          genes: s.genes as Record<string, string>,
-          genesVersion: GENE_VOCAB_VERSION,
-          mutatedGene: s.mutatedGene ?? "",
-          why: s.why,
-          status: "PLANNED",
-        })),
-      );
-    }
+    if (plan.slots.length) await tx.insert(schema.creativeVariants).values(plannedRows(b.id, plan.slots));
     return b;
   });
   if (created) return { batch: created, created: true };
@@ -186,12 +262,13 @@ export async function imageSpendToday(db: Db, now: Date, unpricedUsd: number): P
 }
 
 /**
- * ĐƯỜNG ĐIỂM ẢNH DUY NHẤT của đường sinh. Chỉ nhận nguồn ảnh sản phẩm thật và mẫu cha — xem đầu tệp.
+ * ĐƯỜNG ĐIỂM ẢNH DUY NHẤT của đường sinh. Chỉ nhận nguồn ảnh sản phẩm thật, mẫu cha và nguồn quảng cáo
+ * cũ của shop — xem đầu tệp.
  */
-async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; parentVariantId: string | null }): Promise<ImageEditInputImage[]> {
+async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; parentVariantId: string | null; ownAdSourceId: string | null }): Promise<ImageEditInputImage[]> {
   if (!ref.productPhotoSourceId) throw new Error("Ô không có ảnh sản phẩm thật làm gốc.");
   const [photo] = await db
-    .select({ kind: schema.creativeSources.kind, imageId: schema.creativeSources.imageId })
+    .select({ kind: schema.creativeSources.kind, imageId: schema.creativeSources.imageId, productId: schema.creativeSources.productId })
     .from(schema.creativeSources)
     .where(eq(schema.creativeSources.id, ref.productPhotoSourceId))
     .limit(1);
@@ -206,6 +283,20 @@ async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; 
     const parentPixels = parent?.imageId ? await readCreativeImage(db, parent.imageId) : null;
     // Ảnh mẫu cha đã mất thì ô vẫn sinh được từ ảnh sản phẩm — mất tham chiếu bố cục, không mất sản phẩm.
     if (parentPixels) out.push({ kind: "OWN_VARIANT", bytes: new Uint8Array(parentPixels.bytes), contentType: parentPixels.contentType });
+  }
+
+  if (ref.ownAdSourceId) {
+    const [ownAd] = await db
+      .select({ kind: schema.creativeSources.kind, imageId: schema.creativeSources.imageId, productId: schema.creativeSources.productId })
+      .from(schema.creativeSources)
+      .where(eq(schema.creativeSources.id, ref.ownAdSourceId))
+      .limit(1);
+    // Kiểm lại LOẠI lúc đọc: khoá này điền từ một cột trỏ được tới MỌI loại nguồn. Chỉ quảng cáo cũ CỦA
+    // SHOP được gửi điểm ảnh, và chỉ khi nó quảng cáo ĐÚNG mã của ảnh sản phẩm — bố cục của một chiếc
+    // váy khác làm tham chiếu là mời máy vẽ lẫn hai sản phẩm.
+    const allowed = ownAd && ownAd.kind === "OWN_AD" && ownAd.imageId && ownAd.productId !== null && ownAd.productId === photo.productId;
+    const ownAdPixels = allowed && ownAd.imageId ? await readCreativeImage(db, ownAd.imageId) : null;
+    if (ownAdPixels) out.push({ kind: "OWN_VARIANT", bytes: new Uint8Array(ownAdPixels.bytes), contentType: ownAdPixels.contentType });
   }
   return out;
 }
@@ -230,48 +321,337 @@ async function markFailed(db: Db, id: string, error: string, extra: Partial<Vari
   return rows.length > 0;
 }
 
-async function generateOne(db: Db, variant: VariantRow, cfg: CreativeLoopConfig, deps: { imageClient: ImageEditClient; writer: CopyWriter; now: Date }): Promise<boolean> {
+/** Cộng hai chi phí USD dạng chuỗi của cột; một vế CHƯA BIẾT ⇒ tổng CHƯA BIẾT (`""`), không phải vế kia. */
+function sumCostText(a: number | null, b: number | null): string {
+  return a === null || b === null ? "" : (a + b).toFixed(6);
+}
+
+type ProductBrief = NonNullable<Awaited<ReturnType<typeof loadProductBrief>>>;
+type WrittenCopy = { imagePrompt: string; primaryText: string; headline: string; model: string; costUsd: number | null };
+type Prepared = { genes: Genes; product: ProductBrief; winningExamples: Awaited<ReturnType<typeof loadWinningExamples>>; copy: WrittenCopy; written: Partial<VariantRow> };
+
+/**
+ * Bước chung của hai đường vẽ: kiểm ô, đọc mã hàng, VIẾT câu chữ nháp + câu lệnh ảnh. Ô đã được viết ở
+ * lượt gửi Batch (còn `PLANNED`, đã có câu lệnh) thì DÙNG LẠI — vẽ nốt không trả tiền viết lần hai, và
+ * ảnh vẽ nốt đi theo đúng câu lệnh đã gửi. Hỏng ⇒ `GEN_FAILED` có lý do, trả `null`.
+ */
+async function prepareVariant(db: Db, variant: VariantRow, deps: { writer: CopyWriter; now: Date }): Promise<Prepared | null> {
   const genes = parseGenes(variant.genes);
   const precheck = !genes ? "Bộ gen của ô hỏng — không viết được câu lệnh." : !variant.productId ? "Ô không còn gắn mã hàng." : null;
   const product = !precheck && variant.productId ? await loadProductBrief(db, variant.productId) : null;
   if (!genes || !variant.productId || !product) {
     await markFailed(db, variant.id, precheck ?? "Không tìm thấy mã hàng của ô.");
-    return false;
+    return null;
   }
 
-  let copy: Awaited<ReturnType<CopyWriter>>;
-  try {
-    copy = await deps.writer(
-      {
-        genes,
-        mode: variant.mode as SlotMode,
-        why: variant.why,
-        product: { name: product.name, code: product.code, priceVnd: product.priceVnd },
-        inspirationSummary: await inspirationSummaryOf(db, variant.inspirationSourceId),
-        winningExamples: await loadWinningExamples(db, variant.productId),
-      },
-      { now: deps.now, entityId: variant.id },
-    );
-  } catch (e) {
-    await markFailed(db, variant.id, `Viết câu chữ lỗi: ${errText(e)}`);
-    return false;
+  const winningExamples = await loadWinningExamples(db, variant.productId);
+  let copy: WrittenCopy;
+  if (variant.imagePrompt.trim() && variant.writerModel) {
+    copy = { imagePrompt: variant.imagePrompt, primaryText: variant.primaryText, headline: variant.headline, model: variant.writerModel, costUsd: variant.writerCostUsd === "" ? null : Number(variant.writerCostUsd) };
+  } else {
+    try {
+      copy = await deps.writer(
+        {
+          genes,
+          mode: variant.mode as SlotMode,
+          why: variant.why,
+          product: { name: product.name, code: product.code, priceVnd: product.priceVnd },
+          inspirationSummary: await inspirationSummaryOf(db, variant.inspirationSourceId),
+          winningExamples,
+        },
+        { now: deps.now, entityId: variant.id },
+      );
+    } catch (e) {
+      await markFailed(db, variant.id, `Viết câu chữ lỗi: ${errText(e)}`);
+      return null;
+    }
   }
   const written = { imagePrompt: copy.imagePrompt, primaryText: copy.primaryText, headline: copy.headline, writerModel: copy.model, writerCostUsd: copy.costUsd === null ? "" : copy.costUsd.toFixed(6) };
+  return { genes, product, winningExamples, copy, written };
+}
 
+/**
+ * Ảnh đã có (và đã tốn tiền) ⇒ lưu, viết lại câu chữ THEO ẢNH, chuyển mẫu sang `GENERATED`. Dùng chung cho
+ * gọi ngay và cho từng dòng kết quả Batch. Từ đây mọi lỗi của lượt viết lại chỉ làm mất phần "theo ảnh",
+ * không làm mất mẫu. Lỗi lưu ảnh thì NÉM — nơi gọi quyết định.
+ */
+async function saveGenerated(db: Db, variant: VariantRow, prep: Prepared, out: { bytes: Uint8Array; contentType: string; costUsd: number | null }, genModel: string, deps: { caption: VariantCaptioner; now: Date }): Promise<boolean> {
+  const { copy, product, genes, winningExamples, written } = prep;
+  const stored = await storeCreativeImage(db, out.bytes);
+  let captioned: { primaryText: string; headline: string; writerModel: string; writerCostUsd: string } | null = null;
+  let captionError = "";
   try {
-    const images = await gatherPixels(db, { productPhotoSourceId: variant.productPhotoSourceId, parentVariantId: variant.parentVariantId });
+    const cap = await deps.caption(
+      db,
+      { image: { bytes: out.bytes, contentType: out.contentType }, product: { name: product.name, code: product.code, priceVnd: product.priceVnd }, genes, draft: { headline: copy.headline, primaryText: copy.primaryText }, winningExamples, options: 1 },
+      { now: deps.now, entityId: variant.id },
+    );
+    if (cap.ok) captioned = { primaryText: cap.primaryText, headline: cap.headline, writerModel: `${copy.model} → ${cap.model}`, writerCostUsd: sumCostText(copy.costUsd, cap.costUsd) };
+    else captionError = cap.error;
+  } catch (e) {
+    captionError = errText(e);
+  }
+  const rows = await db
+    .update(schema.creativeVariants)
+    .set({ ...written, ...(captioned ?? {}), imageId: stored.id, genModel, genCostUsd: out.costUsd === null ? "" : out.costUsd.toFixed(6), genError: captioned ? "" : `${CAPTION_FALLBACK_PREFIX}${captionError}`.slice(0, 1000), status: "GENERATED" })
+    .where(and(eq(schema.creativeVariants.id, variant.id), eq(schema.creativeVariants.status, "PLANNED")))
+    .returning({ id: schema.creativeVariants.id });
+  return rows.length > 0;
+}
+
+async function generateOne(db: Db, variant: VariantRow, cfg: CreativeLoopConfig, deps: { imageClient: ImageEditClient; writer: CopyWriter; caption: VariantCaptioner; now: Date }): Promise<boolean> {
+  const prep = await prepareVariant(db, variant, deps);
+  if (!prep) return false;
+  const { copy, written } = prep;
+  try {
+    const images = await gatherPixels(db, { productPhotoSourceId: variant.productPhotoSourceId, parentVariantId: variant.parentVariantId, ownAdSourceId: variant.inspirationSourceId });
     const out = await deps.imageClient({ model: cfg.imageModel, prompt: copy.imagePrompt, images, size: cfg.imageSize, quality: cfg.imageQuality });
-    const stored = await storeCreativeImage(db, out.bytes);
-    const rows = await db
-      .update(schema.creativeVariants)
-      .set({ ...written, imageId: stored.id, genModel: cfg.imageModel, genCostUsd: out.costUsd === null ? "" : out.costUsd.toFixed(6), genError: "", status: "GENERATED" })
-      .where(and(eq(schema.creativeVariants.id, variant.id), eq(schema.creativeVariants.status, "PLANNED")))
-      .returning({ id: schema.creativeVariants.id });
-    return rows.length > 0;
+    return await saveGenerated(db, variant, prep, out, cfg.imageModel, deps);
   } catch (e) {
     await markFailed(db, variant.id, `Sinh ảnh lỗi: ${errText(e)}`, written);
     return false;
   }
+}
+
+// ───────────────────────────── ĐƯỜNG BATCH ─────────────────────────────
+
+/**
+ * Tiền + số ảnh đang GIỮ CHỖ bởi các lô Batch đã gửi mà chưa về ảnh. Chỉ lô còn `PLANNED` và còn hạn
+ * duyệt: lô đã hết hạn không bao giờ được đọc lại, để nó giữ chỗ là khoá trần của mọi ngày sau.
+ */
+export async function reservedImageSpend(db: Db, now: Date): Promise<{ usd: number; images: number }> {
+  const b = schema.creativeBatches;
+  const [r] = await db
+    .select({
+      usd: sql<string>`coalesce(sum(nullif(${b.plan} -> 'imageBatch' ->> 'reservedUsd', '')::numeric), 0)`,
+      images: sql<number>`coalesce(sum(nullif(${b.plan} -> 'imageBatch' ->> 'reservedImages', '')::numeric), 0)::int`,
+    })
+    .from(b)
+    .where(and(eq(b.status, "PLANNED"), gt(b.approvalDeadline, now), sql`${b.plan} -> 'imageBatch' ->> 'phase' in ('SUBMITTING', 'SUBMITTED', 'CANCELLING')`));
+  return { usd: Number(r?.usd ?? 0), images: Number(r?.images ?? 0) };
+}
+
+/** Ghi trạng thái lô Batch vào `plan.imageBatch`. `claim` ⇒ chỉ ghi khi CHƯA có (chống gửi hai lô). */
+async function writeImageBatchState(db: Db, batchId: string, state: ImageBatchState, claim = false): Promise<boolean> {
+  const b = schema.creativeBatches;
+  const rows = await db
+    .update(b)
+    .set({ plan: sql`${b.plan} || jsonb_build_object('imageBatch', ${JSON.stringify(state)}::jsonb)` })
+    .where(and(eq(b.id, batchId), ...(claim ? [eq(b.status, "PLANNED"), sql`not (${b.plan} ? 'imageBatch')`] : [])))
+    .returning({ id: b.id });
+  return rows.length > 0;
+}
+
+/** Dọn tệp trên OpenAI — nuốt lỗi: tệp còn sót không làm hỏng ảnh đã về. */
+async function cleanupFiles(client: ImageBatchClient, ids: (string | null)[]): Promise<void> {
+  for (const id of ids) if (id) await client.deleteFile(id).catch(() => undefined);
+}
+
+type BatchCtx = { at: Date; writer: CopyWriter; caption: VariantCaptioner; client: ImageBatchClient; summary: BuildBatchSummary };
+
+/**
+ * Gửi lô Batch: kiểm trần NGÀY theo giá Batch (ô vượt trần ⇒ `GEN_FAILED` có lý do), giữ chỗ bằng
+ * `SUBMITTING`, viết câu chữ, gom điểm ảnh qua `gatherPixels` (đường điểm ảnh duy nhất), tải ảnh tham
+ * chiếu (hàng rào `assertPixelSafe` chạy lại trong `uploadEditReferences` + `imageEditBatchLine`), tạo lô.
+ * Trả `null` khi không còn ô nào để gửi hoặc lượt khác đã giữ chỗ trước.
+ */
+async function submitImageBatch(db: Db, batch: BatchRow, snap: CreativeLoopConfig, capUsd: number, ctx: BatchCtx): Promise<ImageBatchState | null> {
+  const v = schema.creativeVariants;
+  const { at, summary, client } = ctx;
+  const todo = await db.select().from(v).where(and(eq(v.batchId, batch.id), eq(v.status, "PLANNED"))).orderBy(asc(v.slot));
+  if (todo.length === 0) return null;
+
+  const unit = estimateImageUsd(snap.imageModel, snap.imageQuality, snap.imageSize, "BATCH");
+  const spent = await imageSpendToday(db, at, estimateImageUsd(snap.imageModel, snap.imageQuality, snap.imageSize));
+  const reserved = await reservedImageSpend(db, at);
+  const byCount = CREATIVE_HARD_LIMITS.maxImagesPerDay - spent.images - reserved.images;
+  const byUsd = Math.floor((capUsd - spent.usd - reserved.usd) / unit + 1e-9);
+  const allow = Math.max(0, Math.min(todo.length, byCount, byUsd));
+  const kept = todo.slice(0, allow);
+  const over = todo.slice(allow);
+  if (over.length) {
+    const capReason =
+      byCount < todo.length && byCount <= byUsd
+        ? `Chạm trần ${CREATIVE_HARD_LIMITS.maxImagesPerDay} ảnh sinh / ngày (đã sinh ${spent.images}, đang chờ Batch ${reserved.images}) — lô Batch chỉ gửi ${allow} ô.`
+        : `Chạm trần chi sinh ảnh ${capUsd} USD / ngày (đã chi ~${spent.usd.toFixed(3)} USD, đang chờ Batch ~${reserved.usd.toFixed(3)} USD, mỗi ảnh qua Batch ước tính ${unit} USD) — lô Batch chỉ gửi ${allow} ô.`;
+    const rows = await db
+      .update(v)
+      .set({ status: "GEN_FAILED", genError: capReason })
+      .where(and(inArray(v.id, over.map((x) => x.id)), eq(v.status, "PLANNED")))
+      .returning({ id: v.id });
+    summary.capped += rows.length;
+    summary.failed += rows.length;
+  }
+  if (kept.length === 0) return null;
+
+  const nowIso = at.toISOString();
+  let state: ImageBatchState = { ...emptyImageBatchState({ model: snap.imageModel, quality: snap.imageQuality, size: snap.imageSize }), claimedAt: nowIso, variantIds: kept.map((x) => x.id), reservedUsd: Math.round(kept.length * unit * 1e6) / 1e6, reservedImages: kept.length };
+  if (!(await writeImageBatchState(db, batch.id, state, true))) return null;
+
+  const lines: string[] = [];
+  const included: string[] = [];
+  const cache = new Map<string, string>();
+  let sendError = "";
+  for (const variant of kept) {
+    const prep = await prepareVariant(db, variant, { writer: ctx.writer, now: at });
+    if (!prep) {
+      summary.failed += 1;
+      continue;
+    }
+    // Câu chữ nháp + câu lệnh lưu NGAY (mẫu vẫn PLANNED): lượt đọc kết quả và lượt vẽ nốt dùng lại đúng chúng.
+    await db.update(v).set(prep.written).where(and(eq(v.id, variant.id), eq(v.status, "PLANNED")));
+    let images: ImageEditInputImage[];
+    try {
+      images = await gatherPixels(db, { productPhotoSourceId: variant.productPhotoSourceId, parentVariantId: variant.parentVariantId, ownAdSourceId: variant.inspirationSourceId });
+    } catch (e) {
+      await markFailed(db, variant.id, `Sinh ảnh lỗi: ${errText(e)}`, prep.written);
+      summary.failed += 1;
+      continue;
+    }
+    try {
+      const refs = await uploadEditReferences(client, images, cache);
+      lines.push(imageEditBatchLine({ customId: variant.id, model: snap.imageModel, prompt: prep.copy.imagePrompt, images: refs, size: snap.imageSize, quality: snap.imageQuality }));
+      included.push(variant.id);
+    } catch (e) {
+      // Lỗi tải lên là lỗi của ĐƯỜNG GỬI, không phải của ô: dừng gửi, cả lô vẽ nốt bằng gọi ngay.
+      sendError = errText(e);
+      break;
+    }
+  }
+  const fileIds = [...cache.values()];
+
+  if (!sendError && lines.length === 0) {
+    state = { ...state, phase: "SETTLED", settledAt: nowIso, variantIds: [], reservedUsd: 0, reservedImages: 0, error: "Không ô nào đủ điều kiện gửi Batch." };
+  } else if (!sendError) {
+    try {
+      const input = await client.uploadFile({ purpose: "batch", filename: `creative-${batch.batchDay}-${batch.id.slice(0, 8)}.jsonl`, bytes: new TextEncoder().encode(`${lines.join("\n")}\n`), contentType: "application/jsonl" });
+      fileIds.push(input.id);
+      const ob = await client.createBatch({ inputFileId: input.id, endpoint: IMAGE_EDITS_BATCH_ENDPOINT, metadata: { creative_batch_id: batch.id, batch_day: batch.batchDay } });
+      state = { ...state, phase: "SUBMITTED", openaiBatchId: ob.id, openaiStatus: ob.status, submittedAt: nowIso, checkedAt: nowIso, variantIds: included, fileIds, reservedUsd: Math.round(included.length * unit * 1e6) / 1e6, reservedImages: included.length };
+    } catch (e) {
+      sendError = errText(e);
+    }
+  }
+  if (sendError) {
+    state = { ...state, phase: "FAILED", fileIds, variantIds: included, reservedUsd: 0, reservedImages: 0, settledAt: nowIso, error: `${sendError} — vẽ nốt ngay bằng gọi ngay.` };
+    await cleanupFiles(client, fileIds);
+  }
+  await writeImageBatchState(db, batch.id, state);
+  return state;
+}
+
+/**
+ * Lô Batch đã dừng ở OpenAI (`completed` · `failed` · `expired` · `cancelled`) ⇒ nối từng dòng về ô.
+ *
+ *  · Dòng có ảnh ⇒ `saveGenerated` (lưu ảnh + câu chữ theo ảnh), chi phí theo `usage` × giá Batch.
+ *  · Dòng lỗi ⇒ `GEN_FAILED` CHỈ khi lô `completed` VÀ có ít nhất một dòng ra ảnh. Lô huỷ / hết hạn / hỏng,
+ *    hoặc `completed` mà KHÔNG dòng nào ra ảnh (dấu hiệu mô hình không nhận Batch, không phải lỗi của
+ *    từng ô) ⇒ ô ở lại `PLANNED` để vẽ nốt bằng gọi ngay.
+ *  · Ô không có dòng nào ⇒ ở lại `PLANNED`, vẽ nốt.
+ */
+async function settleImageBatch(db: Db, state: ImageBatchState, info: OpenAiBatch, ctx: BatchCtx): Promise<ImageBatchState> {
+  const { client, summary, at } = ctx;
+  const results: ImageBatchLineResult[] = [];
+  for (const fid of [info.outputFileId, info.errorFileId]) if (fid) results.push(...parseImageBatchResults(await client.fileContent(fid), state.model, "BATCH"));
+  const mine = new Set(state.variantIds);
+  const byId = new Map<string, ImageBatchLineResult>();
+  for (const r of results) if (mine.has(r.customId) && byId.get(r.customId)?.ok !== true) byId.set(r.customId, r);
+  const anyOk = [...byId.values()].some((r) => r.ok);
+  const lineErrorsAreFinal = info.status === "completed" && anyOk;
+
+  const v = schema.creativeVariants;
+  const planned = state.variantIds.length ? await db.select().from(v).where(and(inArray(v.id, state.variantIds), eq(v.status, "PLANNED"))).orderBy(asc(v.slot)) : [];
+  let generated = 0;
+  let failed = 0;
+  for (const variant of planned) {
+    const r = byId.get(variant.id);
+    if (r?.ok) {
+      const prep = await prepareVariant(db, variant, { writer: ctx.writer, now: at });
+      if (!prep) {
+        failed += 1;
+        continue;
+      }
+      try {
+        if (await saveGenerated(db, variant, prep, r.image, state.model, { caption: ctx.caption, now: at })) generated += 1;
+      } catch (e) {
+        await markFailed(db, variant.id, `Lưu ảnh Batch lỗi: ${errText(e)}`, prep.written);
+        failed += 1;
+      }
+    } else if (r && !r.ok && lineErrorsAreFinal) {
+      if (await markFailed(db, variant.id, `OpenAI Batch báo lỗi dòng này: ${r.error}`)) failed += 1;
+    }
+  }
+  summary.generated += generated;
+  summary.failed += failed;
+  const firstLineError = results.find((r): r is Extract<ImageBatchLineResult, { ok: false }> => !r.ok)?.error ?? "";
+  const why = info.errors.length ? info.errors.join(" · ").slice(0, 300) : firstLineError;
+  await cleanupFiles(client, [...state.fileIds, info.outputFileId, info.errorFileId]);
+  return { ...state, phase: "SETTLED", openaiStatus: info.status, settledAt: at.toISOString(), reservedUsd: 0, reservedImages: 0, generated, failed, error: anyOk ? "" : `Không dòng nào ra ảnh${why ? ` (${why})` : ""}.` };
+}
+
+/** Một lượt của lô Batch đang giữ chỗ: đọc trạng thái, xong thì nối kết quả, tới mốc vẽ nốt thì huỷ. */
+async function pollImageBatch(db: Db, batch: BatchRow, snap: CreativeLoopConfig, state: ImageBatchState, ctx: BatchCtx): Promise<ImageBatchState> {
+  const { at, client } = ctx;
+  const fallbackAt = imageBatchFallbackAt(batch.batchDay, snap);
+  const nowIso = at.toISOString();
+  const abandon = (from: ImageBatchState, why: string): ImageBatchState => ({ ...from, phase: "ABANDONED", reservedUsd: 0, reservedImages: 0, settledAt: nowIso, error: why });
+  let next: ImageBatchState = state;
+
+  if (state.phase === "SUBMITTING" || !state.openaiBatchId) {
+    if (at >= fallbackAt) next = abandon(state, "Lượt gửi Batch trước đứt giữa chừng — không biết OpenAI đã nhận lô hay chưa nên KHÔNG gửi lại; tới mốc vẽ nốt nên vẽ bằng gọi ngay.");
+  } else {
+    let info: OpenAiBatch | null = null;
+    try {
+      info = await client.retrieveBatch(state.openaiBatchId);
+    } catch (e) {
+      next = { ...state, error: `Đọc trạng thái lô Batch lỗi: ${errText(e)}` };
+    }
+    if (info) {
+      next = { ...state, openaiStatus: info.status, checkedAt: nowIso, error: "" };
+      if (isBatchTerminal(info.status)) {
+        try {
+          next = await settleImageBatch(db, next, info, ctx);
+        } catch (e) {
+          next = { ...next, error: `Đọc kết quả lô Batch lỗi: ${errText(e)}` };
+        }
+      } else if (state.phase === "SUBMITTED" && at >= fallbackAt) {
+        try {
+          const c = await client.cancelBatch(state.openaiBatchId);
+          next = { ...next, phase: "CANCELLING", openaiStatus: c.status, cancelRequestedAt: nowIso };
+        } catch (e) {
+          next = { ...next, phase: "CANCELLING", cancelRequestedAt: nowIso, error: `Huỷ lô Batch lỗi: ${errText(e)}` };
+        }
+      }
+    }
+    // Đã qua mốc vẽ nốt mà lô vẫn giữ chỗ quá lâu (đang huỷ, hoặc không đọc được OpenAI) ⇒ bỏ, vẽ nốt.
+    const since = Date.parse(next.cancelRequestedAt || fallbackAt.toISOString());
+    if (RESERVING_PHASES.includes(next.phase) && at >= fallbackAt && at.getTime() >= since + IMAGE_BATCH_CANCEL_GRACE_MINUTES * 60_000) {
+      next = abandon(next, `Quá ${IMAGE_BATCH_CANCEL_GRACE_MINUTES} phút sau mốc vẽ nốt mà lô Batch chưa dừng${next.error ? ` (${next.error})` : ""} — bỏ, vẽ nốt bằng gọi ngay.`);
+    }
+  }
+  if (next !== state) await writeImageBatchState(db, batch.id, next);
+  return next;
+}
+
+/**
+ * Chế độ BATCH của một lượt. Trả `true` khi các ô còn `PLANNED` phải được VẼ NỐT bằng gọi ngay ngay trong
+ * lượt này (lô Batch đã dừng / gửi hỏng / đã qua mốc vẽ nốt mà chưa từng gửi).
+ */
+async function runBatchMode(db: Db, batch: BatchRow, snap: CreativeLoopConfig, capUsd: number, ctx: BatchCtx): Promise<boolean> {
+  let state = parseImageBatchState(batch.plan);
+  if (!state) {
+    if (ctx.at >= imageBatchFallbackAt(batch.batchDay, snap)) {
+      ctx.summary.imageBatch = "Batch ảnh: lô dựng sau mốc vẽ nốt — không gửi Batch, vẽ bằng gọi ngay.";
+      return true;
+    }
+    state = await submitImageBatch(db, batch, snap, capUsd, ctx);
+    // Không còn ô nào để gửi (hết trần / hết ô), hoặc lượt khác vừa giữ chỗ: đọc lại cái đang có.
+    if (!state) state = parseImageBatchState((await batchByDay(db, batch.batchDay))?.plan);
+  } else if (RESERVING_PHASES.includes(state.phase)) {
+    state = await pollImageBatch(db, batch, snap, state, ctx);
+  }
+  ctx.summary.imageBatch = describeImageBatch(state, snap.fallbackImageQuality) || ctx.summary.imageBatch;
+  return !state || !RESERVING_PHASES.includes(state.phase);
 }
 
 /** Hết `PLANNED` ⇒ chốt trạng thái lô. Có điều kiện `status = 'PLANNED'` để không đè lên lượt duyệt. */
@@ -304,8 +684,9 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
   const imageClient = deps.imageClient ?? editImage;
   const writer = deps.writer ?? writeVariantCopy;
   const describe = deps.describe ?? ((d: Db, id: string) => describeSource(d, id, { now: at }));
+  const caption: VariantCaptioner = deps.caption ?? captionFromImage;
   const perTick = Math.max(1, Math.min(deps.perTick ?? GEN_PER_TICK, CREATIVE_HARD_LIMITS.maxImagesPerDay));
-  const summary: BuildBatchSummary = { batchDay: null, batchId: null, created: false, generated: 0, failed: 0, capped: 0, described: 0, status: null, skippedReason: null };
+  const summary: BuildBatchSummary = { batchDay: null, batchId: null, created: false, generated: 0, failed: 0, capped: 0, described: 0, status: null, skippedReason: null, imageBatch: null };
 
   const cfg = await readConfig(db);
   if (!cfg.enabled) return { ...summary, skippedReason: "Vòng mẫu đang TẮT (creative.config.enabled = false)." };
@@ -315,6 +696,10 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
   if (day) {
     summary.batchDay = day;
     batch = await batchByDay(db, day);
+    if (batch && isManualSeed(batch.plan) && ["PLANNED", "PENDING_APPROVAL"].includes(batch.status)) {
+      summary.described = await describePending(db, describe);
+      batch = await fillManualSeed(db, batch, cfg);
+    }
     if (!batch) {
       summary.described = await describePending(db, describe);
       const r = await createBatch(db, day, cfg);
@@ -341,8 +726,19 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
 
   // Cấu hình ẢNH đọc từ ảnh chụp của lô: đổi cấu hình giữa chừng không làm một lô mang hai kiểu ảnh.
   const snap = normalizeCreativeConfig(batch.configSnapshot).config;
-  const unitUsd = estimateImageUsd(snap.imageModel, snap.imageQuality, snap.imageSize);
   const capUsd = Math.min(cfg.imageDailyCapUsd, snap.imageDailyCapUsd, CREATIVE_HARD_LIMITS.maxImageUsdPerDay);
+
+  // BATCH: gửi / đọc lô Batch. Chưa tới lúc vẽ nốt ⇒ dừng ở đây; tới lúc ⇒ vẽ nốt ở chất lượng dự phòng.
+  let draw = snap;
+  if (snap.imageMode === "BATCH") {
+    const goSync = await runBatchMode(db, batch, snap, capUsd, { at, writer, caption, client: deps.batchClient ?? openAiBatchClient(), summary });
+    if (!goSync) {
+      summary.status = await settleBatch(db, batch.id);
+      return summary;
+    }
+    draw = { ...snap, imageQuality: snap.fallbackImageQuality };
+  }
+  const unitUsd = estimateImageUsd(draw.imageModel, draw.imageQuality, draw.imageSize);
 
   const todo = await db
     .select()
@@ -353,9 +749,11 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
 
   for (const variant of todo) {
     const spent = await imageSpendToday(db, at, unitUsd);
+    // Lô Batch khác còn đang giữ chỗ (vd lô của ngày khác) — phần tiền ấy chưa được tiêu nhưng sẽ tiêu.
+    const reserved = await reservedImageSpend(db, at);
     let capReason: string | null = null;
-    if (spent.images + 1 > CREATIVE_HARD_LIMITS.maxImagesPerDay) capReason = `Chạm trần ${CREATIVE_HARD_LIMITS.maxImagesPerDay} ảnh sinh / ngày (đã sinh ${spent.images}).`;
-    else if (spent.usd + unitUsd > capUsd) capReason = `Chạm trần chi sinh ảnh ${capUsd} USD / ngày (đã chi ~${spent.usd.toFixed(3)} USD, ảnh tiếp theo ước tính ${unitUsd} USD).`;
+    if (spent.images + reserved.images + 1 > CREATIVE_HARD_LIMITS.maxImagesPerDay) capReason = `Chạm trần ${CREATIVE_HARD_LIMITS.maxImagesPerDay} ảnh sinh / ngày (đã sinh ${spent.images}${reserved.images ? `, đang chờ Batch ${reserved.images}` : ""}).`;
+    else if (spent.usd + reserved.usd + unitUsd > capUsd) capReason = `Chạm trần chi sinh ảnh ${capUsd} USD / ngày (đã chi ~${spent.usd.toFixed(3)} USD${reserved.usd ? `, đang chờ Batch ~${reserved.usd.toFixed(3)} USD` : ""}, ảnh tiếp theo ước tính ${unitUsd} USD).`;
     if (capReason) {
       const rows = await db
         .update(schema.creativeVariants)
@@ -368,7 +766,7 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
     }
     let ok = false;
     try {
-      ok = await generateOne(db, variant, snap, { imageClient, writer, now: at });
+      ok = await generateOne(db, variant, draw, { imageClient, writer, caption, now: at });
     } catch (e) {
       // Lỗi ngoài dự kiến (đọc CSDL…) của MỘT mẫu không được chặn các mẫu còn lại.
       await markFailed(db, variant.id, `Lỗi khi dựng mẫu: ${errText(e)}`).catch(() => false);
