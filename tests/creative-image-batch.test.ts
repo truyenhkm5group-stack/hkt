@@ -217,7 +217,7 @@ function testContract() {
   assert.equal(imageBatchFallbackAt(day, d).toISOString(), new Date("2030-01-10T02:00:00+07:00").toISOString());
   assert.equal(imageBatchFallbackAt(day, { ...d, batchFallbackHourVn: 22 }).toISOString(), new Date("2030-01-09T22:00:00+07:00").toISOString());
   assert.ok(imageBatchFallbackAt(day, { ...d, batchFallbackHourVn: 6 }) < batchWindow(day, d).approvalDeadline, "không bao giờ là mốc sau hạn duyệt");
-  console.log("✓ Vòng mẫu · Batch ảnh — hợp đồng: sunburst · cao · 4:5 · Batch · vẽ nốt 2:00 ở mức vừa · trần 2 USD giữ nguyên · giá một bảng, Batch 50%, mô hình lạ tính giá đắt nhất");
+  console.log("✓ Vòng mẫu · Batch ảnh — hợp đồng: sunburst · vừa · 4:5 · gọi ngay (Batch bật được cho mô hình nhận nó, vẽ nốt 2:00 ở mức vừa) · trần 2 USD giữ nguyên · giá một bảng, Batch 50%, mô hình lạ tính giá đắt nhất");
 }
 
 // ───────────────────────────── (b) client ─────────────────────────────
@@ -326,7 +326,8 @@ export async function testCreativeImageBatch(db: Db) {
 
   const startedAt = new Date();
   const batchDay = shiftDay(vnDay(startedAt), 1);
-  const baseCfg = { ...DEFAULT_CREATIVE_CONFIG, enabled: true, batchSize: 3, extraCandidates: 1, exploreShare: 0.5 };
+  // Khối này kiểm ĐƯỜNG BATCH ⇒ khai tường minh, không dựa vào mặc định (mặc định là gọi ngay từ khi chủ shop chốt lại).
+  const baseCfg = { ...DEFAULT_CREATIVE_CONFIG, enabled: true, batchSize: 3, extraCandidates: 1, exploreShare: 0.5, imageMode: "BATCH" as const, imageQuality: "high" as const };
   const w = batchWindow(batchDay, baseCfg);
   // 14:01 giờ VN của HÔM NAY — cùng ngày Việt Nam với `created_at` mà CSDL sắp ghi (trần ngày đếm trên nó).
   const now = new Date(w.buildFrom.getTime() + 60_000);
