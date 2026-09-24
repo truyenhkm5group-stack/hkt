@@ -146,7 +146,7 @@ Nơi khai DUY NHẤT của danh sách mã hoá là `OPS_THAO_TAC_MA_HOA` (ops-vp
 đã rà và để in trần — nằm ở `KHONG_MA_HOA_DA_RA` trong `tests/ops-log-leak.test.ts`, mỗi thao tác
 một câu lý do; thao tác nằm ngoài cả hai làm bài kiểm đỏ.
 
-### 6a. MÃ HOÁ (17) — kết quả chỉ đi dạng bản mã; log còn khối đếm + kênh tóm tắt
+### 6a. MÃ HOÁ (18) — kết quả chỉ đi dạng bản mã; log còn khối đếm + kênh tóm tắt
 
 | Thao tác | In gì (bản rõ, nay chỉ trong bản mã) | Log công khai còn |
 |---|---|---|
@@ -167,6 +167,7 @@ một câu lý do; thao tác nằm ngoài cả hai làm bài kiểm đỏ.
 | `care-false-reopen` | từng đợt kèm note tự do nhân viên viết | tóm tắt: số ứng viên / đóng được / phải hỏi, số đã đóng |
 | `care-outcome-before-open` | từng đợt kèm TÊN nhân viên được quy kết quả cứu đơn | tóm tắt: số đợt, số đã sửa |
 | `fanpage-evidence-backfill` | bảng page → TÊN marketer | tóm tắt: số page theo kết luận, số phân công tạo / bỏ qua |
+| `cod-statement-audit` *(thêm 25/09/2026)* | không in dữ liệu cá nhân — mọi dòng đều qua kênh tóm tắt; bọc mã hoá để phần in thêm (nếu có) không ra log | tóm tắt: số theo tab /cod, quá hạn theo ngày giao, đợt tiền VTP (ngày · số tiền · số bảng kê) so với tệp đã nhận, các lần nhập tệp (loại tệp · số dòng · lỗi đã che), sổ chứng từ, nhịp tim script Gmail |
 
 Hai thao tác gốc giữ nguyên chế độ tổng hợp và **từ chối** cờ in dữ liệu cá nhân (exit 64):
 `marketing-calibrate --explain`, `vtp-replay-files --explain`.

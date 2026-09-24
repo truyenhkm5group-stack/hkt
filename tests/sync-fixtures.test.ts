@@ -4,6 +4,7 @@
  */
 import "./setup-env";
 import { testCodReconciliation } from "./cod-reconciliation.test";
+import { testCodStatementAudit } from "./cod-statement-audit.test";
 import { testIdeas } from "./ideas.test";
 import { testPermissions } from "./permissions.test";
 import { testOrderSource } from "./order-source.test";
@@ -1832,6 +1833,7 @@ async function main() {
   await testSlowMoving(db);
   await testInventoryDecision(db);
   await testCodReconciliation();
+  await testCodStatementAudit();
   await testOrderSource();
   testDuplicateEvidencePure();
   await testFanpageAttribution();
