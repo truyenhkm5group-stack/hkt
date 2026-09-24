@@ -543,6 +543,21 @@ deploy dừng, không phải cảnh báo.
     tiền và tồn kho — `RISK_FLOOR`) phải phân biệt được với `NONE` chưa làm. Mức tự chủ `AUTO` đòi
     đặc tả và NGÀY chủ shop quyết mở; hôm nay không phòng nào ở mức đó.
 
+70. **ĐƠN CHỜ HÀNG LÀ KẾT QUẢ PHÂN BỔ, KHÔNG PHẢI `khả dụng < 0`** (`lib/constants/stock-shortage.ts`):
+    tồn thực tế của sổ kho được PHÂN cho dòng đơn đã chốt còn trong kho (`RESERVED_IN_WAREHOUSE`,
+    không vị ngữ thứ hai) theo thứ tự lên đơn — đơn hẹn giao xa xếp CUỐI — để trả lời "ĐƠN NÀO chờ",
+    thứ mà số thiếu theo mẫu không trả lời được. Hàm THUẦN, ổn định. Tồn CHƯA BIẾT (chưa có phiếu
+    nhập) KHÔNG thành "thiếu" và KHÔNG thành "đủ"; tồn Pancake chỉ gợi ý KIỂM ĐẾM, không vào phép
+    phân bổ. Đề xuất đặt = Kế hoạch SX − hàng đã đặt xưởng qua `suggestedNetOfOpenPo` (một phép trừ
+    cho mọi trang). Hàng đợi fulfillment tách `OUT_OF_STOCK` (CSKH báo khách) khỏi `NOT_YET_SHIPPED`
+    (kho đóng gói); phần đặt xưởng đi theo MẪU MÃ, không nhân theo đơn. Tin Lark là MỘT bảng cho cả
+    shop, chống đổ tin bằng `decideShortageDigest` (mới / nặng thêm, bảng buổi sáng, tin "đã đủ"),
+    chạy trong job `alerts` có sẵn — không thêm lịch. Ba nút trên tin (link mở ERP, vì Custom Bot
+    không nhận được lượt bấm): **Đã đặt rồi** thôi nhắc tới khi thiếu VƯỢT mức lúc bấm · **Sẽ đặt
+    thêm** vẫn nhắc · **Không đặt nữa** thôi nhắc hẳn. Tắt nhắc KHÔNG giấu việc: mẫu vẫn trên trang,
+    đơn chờ vẫn ở hàng đợi CSKH; quyết định mang `users.id` do máy chủ đọc, và hai loại đầu tự rơi
+    khi đợt thiếu kết thúc.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và
