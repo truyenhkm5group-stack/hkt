@@ -81,6 +81,12 @@ export async function CashTab({ period }: { period: Period }) {
           },
         ]),
     {
+      label: "(–) Cước / phí hoàn điều chỉnh tay",
+      note: `${formatNumber(r.cashOut.logisticsAdjustmentCount)} khoản khai “Điều chỉnh thủ công” kèm lý do ở bảng Chi phí (đền bù, phí ngoại lệ…) — không nằm trên vận đơn hay bảng kê nên luôn trừ`,
+      value: r.cashOut.logisticsAdjustment,
+      kind: "out",
+    },
+    {
       label: "(–) Chi phí quảng cáo",
       note: "Facebook Ads tự động + nhập tay, theo ngày chi",
       value: r.cashOut.adSpend,

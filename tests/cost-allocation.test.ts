@@ -7,7 +7,11 @@ import { schema } from "@/db";
 import { allocateExpenseToRange, distributeProportionally, inclusiveDays, inventoryRiskExposure, inventoryRiskOnSold, type AllocatableExpense } from "@/lib/constants/cost-allocation";
 import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
 import { getOperatingCost, getOperatingCostByDay, getRecognizedCosts } from "@/lib/queries/cost-engine";
-import { getDailyBreakdown } from "@/lib/queries/reports";
+import { getDailyBreakdown, getProfitReport } from "@/lib/queries/reports";
+import { getCashProfitReport } from "@/lib/queries/profit-cash";
+import { getFinancialTruth } from "@/lib/queries/financial-truth";
+import { getMarketingDaily } from "@/lib/queries/marketing-daily";
+import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { clearMemo } from "@/lib/cache";
 import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
 import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
@@ -122,6 +126,7 @@ export async function testCostAllocation(db: Db) {
   await db.delete(schema.expenses).where(sql`${schema.expenses.id} in ('ca-rent','ca-oneoff')`);
 
   await testOperatingCostByDayAuthority(db);
+  await testLogisticsAdjustmentOnePath(db);
 
   // ══ RỦI RO TỒN KHO: driver là HÀNG BÁN RA, không phải hàng nhập ══
   // Bối cảnh chủ shop nêu: mã Q002 nhập 200 triệu, dự phòng 10% = 20 triệu, tuần chỉ bán 100/1.000 đơn.
@@ -311,7 +316,11 @@ async function testOperatingCostByDayAuthority(db: Db) {
   assert.equal(loai.get("ADS:EXCLUDED_BY_AUTHORITY"), 700_000, "A. khoản ADS gõ tay phải được NÊU RA là bị loại, không biến mất im lặng");
   assert.equal(loai.get("PURCHASE:EXCLUDED_BY_AUTHORITY"), 5_000_000, "A. khoản trả xưởng phải được nêu ra là bị loại");
   assert.equal(loai.get("SHIPPING:DUPLICATE_LOGISTICS_COST_SOURCE"), 40_000, "A. cước gõ tay không khai điều chỉnh phải được nêu ra là trùng vận đơn");
-  assert.deepEqual(ngay.logisticsAdjustment, { amount: 150_000, count: 1 }, "A. khoản điều chỉnh cước có lý do: tách riêng, không vào khối vận hành, không bị vứt");
+  assert.deepEqual(
+    { amount: ngay.logisticsAdjustment.amount, count: ngay.logisticsAdjustment.count, cuoc: ngay.logisticsAdjustment.shipping.amount, phiHoan: ngay.logisticsAdjustment.returnFee.amount },
+    { amount: 150_000, count: 1, cuoc: 150_000, phiHoan: 0 },
+    "A. khoản điều chỉnh cước có lý do: tách riêng, không vào khối vận hành, không bị vứt",
+  );
   ngay = await doiChieu(TUAN, "A. tuần 01–07/06");
   assert.equal(tong(ngay.byDay), 700_000, "A. tuần = 7/30 tiền thuê; ADS / PURCHASE / cước gõ tay trong tuần đều không cộng");
 
@@ -346,5 +355,175 @@ async function testOperatingCostByDayAuthority(db: Db) {
   await donDep();
   console.log(
     "✓ Chi phí theo ngày đi qua SỔ THẨM QUYỀN: Σ các ngày = getOperatingCost() ở tháng / tuần / kỳ vắt tháng, cả khi bảng Lương chưa và đã cầm quyền · ADS / PURCHASE / cước trùng vận đơn gõ tay không vào ngày nào và được NÊU RA · chi QC theo ngày chỉ đọc tài khoản QC · lương cứng theo thời gian, phần dư hoa hồng theo ngày ghi sổ",
+  );
+}
+
+/**
+ * ═══════ CƯỚC / PHÍ HOÀN ĐIỀU CHỈNH TAY: MỘT ĐƯỜNG (ENGINE), MỌI BÁO CÁO CÙNG MỘT SỐ ═══════
+ *
+ * Trước bản này Profit Engine tính khoản `MANUAL_ADJUSTMENT` có lý do vào thành phần Cước, còn
+ * `pnl()`, bảng theo ngày, dòng tiền, bậc thang Sự thật tài chính và lợi nhuận danh nghĩa đều chỉ
+ * cộng cước theo đơn — nên chúng khớp NHAU vì cùng THIẾU khoản ấy. Đối chiếu từng báo cáo với chính
+ * nó thì không bao giờ thấy.
+ *
+ * Cách đo: chụp mọi báo cáo ba lần trên cùng kỳ — (0) chỉ có đơn + vận đơn; (1) thêm khoản cước /
+ * phí hoàn gõ tay KHÔNG khai điều chỉnh; (2) thêm khoản ĐIỀU CHỈNH có lý do. (0)→(1) phải KHÔNG đổi
+ * một đồng nào (trùng vận đơn, bị loại và được NÊU RA). (1)→(2) phải đổi ĐÚNG bằng khoản điều chỉnh
+ * mà engine báo — không hơn (cộng hai lần), không kém (bỏ sót).
+ *
+ * Tháng 10/2027 (31 ngày), không fixture nào khác đụng tới.
+ */
+async function testLogisticsAdjustmentOnePath(db: Db) {
+  const KY: Period = { key: "custom", from: d("2027-10-01"), to: dEnd("2027-10-31"), label: "Tháng 10/2027", fromKey: "2027-10-01", toKey: "2027-10-31" };
+  const TUAN: Period = { key: "custom", from: d("2027-10-01"), to: dEnd("2027-10-07"), label: "Tuần 1 tháng 10/2027", fromKey: "2027-10-01", toKey: "2027-10-07" };
+  const donDep = async () => {
+    await db.delete(schema.expenses).where(sql`${schema.expenses.id} like 'lc-%'`);
+    await db.delete(schema.shipments).where(sql`${schema.shipments.id} like 'lc-%'`);
+    await db.delete(schema.orders).where(sql`${schema.orders.id} like 'lc-%'`);
+    clearMemo();
+  };
+  await donDep();
+
+  // Đơn GIAO THÀNH CÔNG có cước thật 30.000 và đơn HOÀN có cước 25.000 + phí hoàn 20.000, cùng kỳ.
+  await db.insert(schema.orders).values([
+    { id: "lc-order-giao", insertedAt: d("2027-10-05"), stage: "DELIVERED", status: 3, totalPriceAfterDiscount: 600_000, partnerFee: 30_000, returnFee: 0, cod: 600_000 },
+    { id: "lc-order-hoan", insertedAt: d("2027-10-06"), stage: "RETURNED", status: 6, totalPriceAfterDiscount: 400_000, partnerFee: 25_000, returnFee: 20_000, cod: 400_000 },
+  ]);
+  await db.insert(schema.orderItems).values([
+    { id: "lc-item-giao", orderId: "lc-order-giao", productId: "lc-product", productName: "Mã kiểm thử cước", quantity: 1, unitPrice: 600_000, lineTotal: 600_000 },
+    { id: "lc-item-hoan", orderId: "lc-order-hoan", productId: "lc-product", productName: "Mã kiểm thử cước", quantity: 1, unitPrice: 400_000, lineTotal: 400_000 },
+  ]);
+  await db.insert(schema.shipments).values([
+    { id: "lc-ship-giao", orderId: "lc-order-giao", vtpOrderNumber: "LC0000000001", stage: "DELIVERED", shippingFee: 30_000, codAmount: 600_000, codCollected: 600_000, codStatus: "RECONCILED", deliveredAt: d("2027-10-07") },
+    { id: "lc-ship-hoan", orderId: "lc-order-hoan", vtpOrderNumber: "LC0000000002", stage: "RETURNED", shippingFee: 0, codAmount: 400_000, codCollected: 0, codStatus: "PENDING", returnedAt: d("2027-10-12") },
+  ]);
+
+  const chup = async (ky: Period) => {
+    clearMemo();
+    const engine = await getRecognizedCosts(ky);
+    const theoNgay = await getOperatingCostByDay(ky, db);
+    const bc = await getProfitReport(ky, "created");
+    const cash = await getCashProfitReport(ky);
+    const truth = await getFinancialTruth(ky);
+    const mkt = await getMarketingDaily(ky, "created");
+    const nominal = await getNominalProfitReport(ky);
+    const dong = (key: string) => truth.waterfall.find((l) => l.key === key)?.amount ?? Number.NaN;
+    return {
+      engine,
+      theoNgay,
+      pnl: bc.current,
+      daily: bc.daily,
+      cash,
+      truth: { dieuChinh: dong("shipping_adjustment"), contribution: truth.contribution, estimatedProfit: truth.estimatedProfit },
+      mkt: { cuoc: mkt.totals.shippingCost, rows: mkt.rows, warnings: mkt.warnings },
+      nominal: { shipCost: nominal.totals.shipCost, rowsShip: nominal.rows.reduce((t, r) => t + r.shipCost, 0), expectedProfit: nominal.totals.expectedProfit, netProfit: nominal.totals.netProfit, adj: nominal.totals.logisticsAdjustment },
+    };
+  };
+  const tong = (m: Map<string, number>) => [...m.values()].reduce((t, v) => t + v, 0);
+
+  // ══ (0) Chỉ có đơn + vận đơn ══
+  const s0 = await chup(KY);
+  assert.equal(s0.engine.logisticsAdjustment.amount, 0, "(0) chưa có khoản điều chỉnh nào");
+  assert.equal(s0.pnl.shipping, 55_000, "(0) cước theo đơn = 30.000 + 25.000");
+  assert.equal(s0.pnl.returnFee, 20_000, "(0) phí hoàn ghi trên đơn");
+
+  // ══ (1) Cước / phí hoàn gõ tay KHÔNG khai điều chỉnh — trùng vận đơn ⇒ KHÔNG được đổi một đồng nào ══
+  await db.insert(schema.expenses).values([
+    { id: "lc-ship-dup", category: "SHIPPING", description: "Cước tháng 10 gõ tay (trùng vận đơn)", amount: 30_000, occurredAt: d("2027-10-07"), costSource: "MANUAL" },
+    { id: "lc-ret-dup", category: "RETURN_FEE", description: "Phí hoàn gõ tay (trùng vận đơn)", amount: 20_000, occurredAt: d("2027-10-12"), costSource: "MANUAL" },
+  ]);
+  // "Điều chỉnh" mà KHÔNG có lý do không lọt được vào CSDL — nên "không lý do" chỉ có một nghĩa: khoản thường, bị loại.
+  await assert.rejects(
+    async () => {
+      await db.insert(schema.expenses).values({ id: "lc-adj-no-reason", category: "SHIPPING", description: "Điều chỉnh không lý do", amount: 99_000, occurredAt: d("2027-10-09"), costSource: "MANUAL_ADJUSTMENT", reason: "  " });
+    },
+    "CSDL phải chặn khoản điều chỉnh không kèm lý do (expenses_adjustment_reason_check)",
+  );
+  const s1 = await chup(KY);
+  assert.equal(s1.engine.logisticsAdjustment.amount, 0, "(1) khoản gõ tay không khai điều chỉnh KHÔNG phải điều chỉnh");
+  assert.equal(s1.engine.components.SHIPPING.amount, s0.engine.components.SHIPPING.amount, "(1) engine: cước không đổi — khoản trùng bị loại");
+  assert.equal(s1.engine.components.RETURN_COST.amount, s0.engine.components.RETURN_COST.amount, "(1) engine: phí hoàn không đổi — khoản trùng bị loại");
+  for (const k of ["shipping", "returnFee", "netProfit"] as const) assert.equal(s1.pnl[k], s0.pnl[k], `(1) pnl().${k} không đổi vì khoản trùng vận đơn`);
+  assert.equal(s1.cash.cashOut.total, s0.cash.cashOut.total, "(1) dòng tiền: tiền ra không đổi");
+  assert.equal(s1.truth.estimatedProfit, s0.truth.estimatedProfit, "(1) Sự thật tài chính không đổi");
+  assert.equal(s1.mkt.cuoc, s0.mkt.cuoc, "(1) marketing theo ngày: cột cước không đổi");
+  assert.equal(s1.nominal.netProfit, s0.nominal.netProfit, "(1) lợi nhuận danh nghĩa không đổi");
+  const loai = new Map(s1.theoNgay.excluded.map((x) => [`${x.category}:${x.rule}`, x]));
+  assert.equal(loai.get("SHIPPING:DUPLICATE_LOGISTICS_COST_SOURCE")?.amount, 30_000, "(1) khoản cước trùng phải được NÊU RA");
+  assert.equal(loai.get("RETURN_FEE:DUPLICATE_LOGISTICS_COST_SOURCE")?.amount, 20_000, "(1) khoản phí hoàn trùng phải được NÊU RA");
+  const canhBao = s1.engine.warnings.find((w) => w.rule === "DUPLICATE_LOGISTICS_COST_SOURCE");
+  assert.equal(canhBao?.amount, 50_000, "(1) engine nêu đúng số tiền bị loại");
+  assert.equal(canhBao?.count, 2);
+
+  // ══ (2) Khoản ĐIỀU CHỈNH có lý do: một lần, một theo kỳ, một phí hoàn ══
+  await db.insert(schema.expenses).values([
+    { id: "lc-ship-adj", category: "SHIPPING", description: "Đền bù kiện vỡ", amount: 150_000, occurredAt: d("2027-10-08"), costSource: "MANUAL_ADJUSTMENT", reason: "Đền bù cho khách, không thuộc vận đơn nào" },
+    // Theo kỳ: 310.000 cho 31 ngày ⇒ đúng 10.000 mỗi ngày (luật 14: chi phí theo thời gian chia theo số ngày).
+    { id: "lc-ship-adj-ky", category: "SHIPPING", description: "Thuê xe gom hàng cả tháng", amount: 310_000, occurredAt: d("2027-10-01"), allocationMethod: "PERIOD_PRORATA", periodStart: d("2027-10-01"), periodEnd: dEnd("2027-10-31"), costSource: "MANUAL_ADJUSTMENT", reason: "Cước chuyến gom hàng, không gắn vận đơn" },
+    { id: "lc-ret-adj", category: "RETURN_FEE", description: "Phí lưu kho hàng hoàn", amount: 60_000, occurredAt: d("2027-10-12"), costSource: "MANUAL_ADJUSTMENT", reason: "ĐVVC thu riêng, không nằm trên bảng kê" },
+  ]);
+  const s2 = await chup(KY);
+
+  // Engine — nguồn DUY NHẤT: cước điều chỉnh vào Cước, phí hoàn điều chỉnh vào Phí hoàn (không lẫn nhau).
+  assert.deepEqual(s2.engine.logisticsAdjustment, { shipping: 460_000, returnFee: 60_000, amount: 520_000, count: 3 }, "(2) engine: 150.000 + 310.000 cước, 60.000 phí hoàn, 3 khoản");
+  assert.equal(s2.engine.components.SHIPPING.amount - s1.engine.components.SHIPPING.amount, 460_000, "(2) engine: thành phần Cước tăng đúng phần cước điều chỉnh");
+  assert.equal(s2.engine.components.RETURN_COST.amount - s1.engine.components.RETURN_COST.amount, 60_000, "(2) engine: phí hoàn điều chỉnh vào thành phần Phí hoàn, KHÔNG vào Cước");
+  assert.equal(s2.engine.operatingTotal, s1.engine.operatingTotal, "(2) engine: khoản điều chỉnh cước KHÔNG vào khối vận hành");
+
+  // Theo ngày: rải đúng phương thức phân bổ, Σ = engine tới từng đồng.
+  const adj = s2.theoNgay.logisticsAdjustment;
+  assert.equal(tong(adj.shipping.byDay), s2.engine.logisticsAdjustment.shipping, "(2) Σ cước điều chỉnh theo ngày = engine");
+  assert.equal(tong(adj.returnFee.byDay), s2.engine.logisticsAdjustment.returnFee, "(2) Σ phí hoàn điều chỉnh theo ngày = engine");
+  assert.equal(adj.count, 3);
+  assert.equal(adj.shipping.byDay.get("2027-10-08"), 150_000 + 10_000, "(2) khoản một lần nằm trọn ngày phát sinh, cộng phần của khoản theo kỳ");
+  assert.equal(adj.shipping.byDay.get("2027-10-20"), 10_000, "(2) khoản theo kỳ: mỗi ngày đúng 10.000, kể cả ngày không có đơn");
+  assert.equal(adj.shipping.byDay.size, 31, "(2) khoản theo kỳ: CẢ 31 ngày đều gánh phần của mình");
+  assert.equal(adj.returnFee.byDay.get("2027-10-12"), 60_000);
+  assert.ok(!s2.theoNgay.excluded.some((x) => x.amount === 150_000 || x.amount === 310_000 || x.amount === 60_000), "(2) khoản điều chỉnh không bị nêu nhầm là bị loại");
+
+  // Bảng kết quả kinh doanh `pnl()`: đổi ĐÚNG bằng khoản điều chỉnh, và bằng thành phần của engine.
+  assert.equal(s2.pnl.shipping - s1.pnl.shipping, 460_000, "(2) pnl(): cước tăng đúng phần điều chỉnh — trước đây bỏ sót");
+  assert.equal(s2.pnl.returnFee - s1.pnl.returnFee, 60_000, "(2) pnl(): phí hoàn tăng đúng phần điều chỉnh");
+  assert.equal(s1.pnl.netProfit - s2.pnl.netProfit, 520_000, "(2) pnl(): lợi nhuận ròng giảm ĐÚNG 520.000 — không hơn (hai lần), không kém (bỏ sót)");
+  assert.equal(s2.pnl.logisticsAdjustment, 520_000);
+  assert.equal(s2.pnl.shipping, s2.engine.components.SHIPPING.amount, "(2) pnl() và engine: cùng một con số cước (fixture: mọi đơn đã gửi đều có kết cục)");
+  assert.equal(s2.pnl.returnFee, s2.engine.components.RETURN_COST.amount, "(2) pnl() và engine: cùng một con số phí hoàn");
+
+  // Báo cáo theo ngày: Σ các ngày = pnl() tới từng đồng, ở cả ba cột.
+  const sumDaily = (k: "shipping" | "returnFee" | "netProfit") => s2.daily.reduce((t, r) => t + r[k], 0);
+  assert.equal(sumDaily("shipping"), s2.pnl.shipping, "(2) theo ngày: Σ cước = pnl()");
+  assert.equal(sumDaily("returnFee"), s2.pnl.returnFee, "(2) theo ngày: Σ phí hoàn = pnl()");
+  assert.equal(sumDaily("netProfit"), s2.pnl.netProfit, "(2) theo ngày: Σ lợi nhuận ròng = pnl()");
+  assert.equal(s2.daily.find((r) => r.day === "2027-10-20")?.shipping, 10_000, "(2) theo ngày: ngày không có đơn vẫn gánh phần cước theo kỳ");
+
+  // Hiệu quả marketing theo ngày (toàn shop): cột cước gồm khoản điều chỉnh, và không còn câu cảnh báo tạm.
+  assert.equal(s2.mkt.cuoc - s1.mkt.cuoc, 520_000, "(2) marketing theo ngày: cột cước + phí hoàn tăng đúng 520.000");
+  assert.equal(s2.mkt.cuoc, s2.pnl.shipping + s2.pnl.returnFee + s2.pnl.marketplaceFee, "(2) marketing theo ngày = Báo cáo lợi nhuận");
+  assert.ok(!s2.mkt.warnings.some((w) => w.includes("khai ĐIỀU CHỈNH có lý do")), "(2) câu cảnh báo 'không nằm trong cột' đã hết đúng — phải gỡ");
+
+  // Dòng tiền: tiền ra tăng đúng khoản điều chỉnh (không nằm trên vận đơn, cũng không trên bảng kê).
+  assert.equal(s2.cash.cashOut.logisticsAdjustment, 520_000);
+  assert.equal(s2.cash.cashOut.total - s1.cash.cashOut.total, 520_000, "(2) dòng tiền: tiền ra tăng đúng khoản điều chỉnh");
+
+  // Sự thật tài chính: dòng riêng, và lợi nhuận góp / ước tính giảm đúng bằng nó.
+  assert.equal(s2.truth.dieuChinh, -520_000, "(2) bậc thang: dòng điều chỉnh mang dấu âm, đúng số");
+  assert.equal(s1.truth.contribution - s2.truth.contribution, 520_000, "(2) bậc thang: lợi nhuận góp giảm đúng khoản điều chỉnh");
+
+  // Lợi nhuận danh nghĩa: cột cước (ước tính) cộng khoản điều chỉnh (thật), Σ các mã = dòng tổng.
+  assert.equal(s2.nominal.adj.amount, 520_000);
+  assert.equal(s2.nominal.shipCost - s1.nominal.shipCost, 520_000, "(2) danh nghĩa: cước tăng đúng khoản điều chỉnh");
+  assert.equal(s2.nominal.rowsShip, s2.nominal.shipCost, "(2) danh nghĩa: phần điều chỉnh đã chia hết cho các mã — Σ các mã = dòng tổng");
+  assert.equal(s1.nominal.netProfit - s2.nominal.netProfit, 520_000, "(2) danh nghĩa: lợi nhuận ròng giảm đúng khoản điều chỉnh");
+
+  // ══ Tuần 01–07/10: chỉ 7/31 khoản theo kỳ, khoản một lần 08/10 và phí hoàn 12/10 nằm NGOÀI ══
+  clearMemo();
+  const [tuanEngine, tuanBc] = [await getRecognizedCosts(TUAN), await getProfitReport(TUAN, "created")];
+  assert.deepEqual(tuanEngine.logisticsAdjustment, { shipping: 70_000, returnFee: 0, amount: 70_000, count: 1 }, "tuần: 7 ngày × 10.000 của khoản theo kỳ");
+  assert.equal(tuanBc.current.shipping, 55_000 + 70_000, "tuần: pnl() = cước hai đơn trong tuần + 70.000 điều chỉnh");
+  assert.equal(tuanBc.daily.reduce((t, r) => t + r.shipping, 0), tuanBc.current.shipping, "tuần: Σ theo ngày = pnl()");
+
+  await donDep();
+  console.log(
+    "✓ Cước / phí hoàn điều chỉnh tay đi MỘT đường (engine): khoản không khai điều chỉnh bị loại và được nêu ra, không đổi một đồng · khoản có lý do đổi pnl() / theo ngày / marketing / dòng tiền / sự thật tài chính / danh nghĩa ĐÚNG bằng số engine báo · rải theo phương thức phân bổ của từng khoản, Σ ngày = tổng kỳ",
   );
 }

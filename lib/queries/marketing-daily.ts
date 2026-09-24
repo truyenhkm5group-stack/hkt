@@ -683,6 +683,18 @@ async function buildDays(
     const row = get(day);
     row.operatingCost = (row.operatingCost ?? 0) + amount;
   }
+  /*
+    CƯỚC / PHÍ HOÀN ĐIỀU CHỈNH CÓ LÝ DO — cùng đường, cùng ngày với `getDailyBreakdown`.
+
+    Chỉ ở mức TOÀN SHOP, như chi phí vận hành: khoản đền bù / cước chuyến gom hàng không gắn được
+    đơn nào, nên không có căn cứ chia xuống một marketer / mã / chiến dịch. Có bộ lọc thì cột cước chỉ
+    còn cước của chính các đơn trong lát cắt — đúng nghĩa "chi phí giao nhận của chính đơn đó".
+  */
+  if (allocated) {
+    for (const part of [allocated.logisticsAdjustment.shipping, allocated.logisticsAdjustment.returnFee]) {
+      for (const [day, amount] of part.byDay) get(day).shippingCost += amount;
+    }
+  }
 
   const rows = [...map.values()].sort((a, b) => a.day.localeCompare(b.day));
   for (const row of rows) {
@@ -829,11 +841,6 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
       x.rule === "EXCLUDED_BY_AUTHORITY"
         ? `${x.count} khoản chi nhóm “${EXPENSE_CATEGORY_LABEL[x.category]}” gõ tay ở bảng Chi phí (${x.amount.toLocaleString("vi-VN")} ₫ trong kỳ) KHÔNG được cộng: nguồn có thẩm quyền của nhóm này là ${COST_SOURCE_LABEL[COST_AUTHORITY[EXPENSE_CATEGORY_ECONOMIC[x.category]]]}, cộng thêm là trừ hai lần cùng một đồng.`
         : `${x.count} khoản “${EXPENSE_CATEGORY_LABEL[x.category]}” gõ tay (${x.amount.toLocaleString("vi-VN")} ₫) KHÔNG được cộng vì trùng cước theo vận đơn. Khoản ngoại lệ thật thì đổi nguồn thành “Điều chỉnh thủ công” kèm lý do.`,
-    );
-  }
-  if (built.opex && built.opex.logisticsAdjustment.amount > 0) {
-    warnings.push(
-      `${built.opex.logisticsAdjustment.count} khoản cước / phí hoàn khai ĐIỀU CHỈNH có lý do (${built.opex.logisticsAdjustment.amount.toLocaleString("vi-VN")} ₫) thuộc thành phần Cước của Profit Engine, không nằm trong cột chi phí vận hành theo ngày ở đây.`,
     );
   }
 

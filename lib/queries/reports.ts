@@ -138,6 +138,8 @@ export type PnlLines = {
   lostShipping: number;
   adOrders: number;
   adRevenue: number;
+  /** Phần của `shipping` + `returnFee` là cước / phí hoàn điều chỉnh tay có lý do (Profit Engine). */
+  logisticsAdjustment: number;
 };
 
 async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Promise<PnlLines> {
@@ -177,8 +179,18 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
   const adsExpense = 0;
   const revenue = Number(o?.revenue ?? 0);
   const cogs = Number(o?.cogs ?? 0);
-  const shipping = Number(o?.shipping ?? 0);
-  const returnFee = Number(o?.returnFee ?? 0);
+  /*
+    CƯỚC / PHÍ HOÀN = theo từng đơn + khoản ĐIỀU CHỈNH có lý do, lấy từ Profit Engine.
+
+    Bản trước chỉ cộng `partner_fee` / `return_fee` của đơn, nên khoản đền bù / phí ngoại lệ / cước
+    chuyến gom hàng mà người dùng khai `MANUAL_ADJUSTMENT` kèm lý do — tiền THẬT mà engine đã tính vào
+    thành phần Cước (AGENTS.md mục 18) — không bị trừ ở bảng này, và lợi nhuận ròng cao hơn sự thật
+    đúng bằng khoản ấy. Khoản gõ tay KHÔNG khai điều chỉnh vẫn bị loại (trùng vận đơn) — ở engine,
+    không phải ở đây.
+  */
+  const adjust = expenseRows.logisticsAdjustment;
+  const shipping = Number(o?.shipping ?? 0) + adjust.shipping;
+  const returnFee = Number(o?.returnFee ?? 0) + adjust.returnFee;
   const marketplaceFee = Number(o?.marketplaceFee ?? 0);
   const adSpend = Number(ads?.spend ?? 0) + adsExpense;
   const grossProfit = revenue - cogs;
@@ -202,6 +214,7 @@ async function pnl(from: Date | null, to: Date | null, basis: ReportBasis): Prom
     lostShipping: Number(o?.lostShipping ?? 0),
     adOrders: Number(ads?.orders ?? 0),
     adRevenue: Number(ads?.revenue ?? 0),
+    logisticsAdjustment: adjust.amount,
   };
 }
 
@@ -294,6 +307,10 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
   // Chi quảng cáo CHỈ đọc từ tài khoản quảng cáo (vòng trên) — cùng cách `pnl()` cộng. Khoản nhóm
   // Quảng cáo gõ tay ở bảng Chi phí từng bị cộng thêm ở đây: cùng một đồng bị trừ hai lần.
   for (const [day, amount] of expenseRows.byDay) get(day).operating += amount;
+  // Cước / phí hoàn ĐIỀU CHỈNH có lý do vào đúng cột của chúng, rải theo phương thức phân bổ của từng
+  // khoản — cùng tập khoản mà `pnl()` cộng, nên Σ các ngày của hai cột này = hai dòng ấy của tổng kỳ.
+  for (const [day, amount] of expenseRows.logisticsAdjustment.shipping.byDay) get(day).shipping += amount;
+  for (const [day, amount] of expenseRows.logisticsAdjustment.returnFee.byDay) get(day).returnFee += amount;
   const rows = [...map.values()].sort((a, b) => a.day.localeCompare(b.day));
   for (const row of rows) {
     row.grossProfit = row.revenue - row.cogs;

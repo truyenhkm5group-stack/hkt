@@ -604,7 +604,8 @@ Bài kiểm không bắt được vì cổng mã nguồn (`tests/cost-allocation
   - Phần nhóm Lương vượt lương cứng (thành phần Hoa hồng) rải theo NGÀY của chính các khoản đã ghi,
     không chia đều theo lịch (luật 16).
 - Phần bị loại được **NÊU RA**, không biến mất: hàm trả `excluded` (`EXCLUDED_BY_AUTHORITY` /
-  `DUPLICATE_LOGISTICS_COST_SOURCE`) và `logisticsAdjustment`; trang marketing in thành câu cảnh báo,
+  `DUPLICATE_LOGISTICS_COST_SOURCE`) và `logisticsAdjustment` (nay được cộng vào cột cước — xem
+  mục "Cước / phí hoàn điều chỉnh tay" bên dưới); trang marketing in phần bị loại thành câu cảnh báo,
   tab Báo cáo tổng hợp hiện `CostQualityPanel` (đã có luật `EXCLUDED_BY_AUTHORITY`).
 - Cột "Chi quảng cáo" theo ngày ở cả hai báo cáo chỉ còn đọc `ad_spends` — cùng cách `pnl()` đã làm.
 
@@ -617,12 +618,60 @@ tháng, tuần và kỳ vắt tháng 30→31 ngày, cả khi bảng Lương **ch
 của `getDailyBreakdown` với chính bảng `ad_spends`. `tests/marketing-daily.test.ts` thêm hai chốt
 đối chiếu với engine và `ad_spends` thay vì chỉ với `getDailyBreakdown`.
 
-## Còn ngoài phạm vi (nói thẳng)
+## Cước / phí hoàn điều chỉnh tay — một đường cho mọi báo cáo (bổ sung 24/09/2026)
 
-`reports.ts::pnl()` (Bảng kết quả kinh doanh tổng hợp) lấy cước từ `orders.partner_fee`, không cộng
-khoản cước `MANUAL_ADJUSTMENT` mà engine xếp vào thành phần Cước. Bản cũ theo ngày vô tình cộng nó
-(sai chỗ: vào vận hành); nay theo ngày khớp tổng kỳ và cả hai cùng thiếu khoản này — trang marketing
-nói ra con số ấy bằng một câu cảnh báo. Hợp nhất cước của Báo cáo tổng hợp với engine là việc riêng.
+### Lỗi
+
+Luật 18: cước / phí hoàn gõ tay chỉ được tính khi khai `cost_source = 'MANUAL_ADJUSTMENT'` kèm lý do
+(CSDL bắt buộc lý do — `expenses_adjustment_reason_check`). Profit Engine làm đúng: cộng khoản ấy vào
+thành phần Cước. Nhưng mọi báo cáo tự lấy cước theo đơn đều **bỏ sót** nó, nên chúng khớp NHAU vì
+cùng THIẾU — đối chiếu báo cáo này với báo cáo kia không bao giờ thấy:
+
+| Báo cáo | Cước lấy từ | Khoản điều chỉnh có lý do (trước) |
+|---|---|---|
+| Bảng kết quả kinh doanh `reports.ts::pnl()` | `orders.partner_fee` / `return_fee` | **bỏ sót** |
+| Báo cáo theo ngày `getDailyBreakdown` (+ CSV) | như trên | **bỏ sót** (bản trước nữa: cộng nhầm vào vận hành) |
+| Hiệu quả marketing theo ngày | như trên | **bỏ sót**, chỉ in một câu cảnh báo |
+| Dòng tiền `profit-cash.ts` | bảng kê / ước tính theo đơn | **bỏ sót** |
+| Sự thật tài chính (+ thẻ Tổng quan) | vận đơn / `partner_fee` | **bỏ sót** |
+| Lợi nhuận danh nghĩa `profit-nominal.ts` | giả định × số đơn | **bỏ sót** |
+| Engine `getRecognizedCosts` | vận đơn + điều chỉnh | tính, nhưng phí hoàn điều chỉnh bị xếp vào **Cước** |
+
+### Sửa
+
+- Engine khai MỘT mệnh đề `logisticsAdjustmentCond(component)` (nhóm dẫn xuất từ sổ thẩm quyền) dùng
+  cho cả tổng kỳ lẫn bản theo ngày. Khoản nhóm `SHIPPING` vào thành phần Cước, nhóm `RETURN_FEE` vào
+  Phí hoàn. `getRecognizedCosts()` / `getOperatingCost()` trả thêm `logisticsAdjustment`
+  `{ shipping, returnFee, amount, count }` — KHÔNG thuộc khối vận hành.
+- `getOperatingCostByDay()` rải từng khoản điều chỉnh bằng ĐÚNG phương thức phân bổ của nó (khoản một
+  lần vào ngày phát sinh; `PERIOD_PRORATA` chia theo số ngày) thành `logisticsAdjustment.shipping.byDay`
+  / `.returnFee.byDay`. Σ các ngày = tổng kỳ tới từng đồng.
+- Báo cáo nào tự lấy cước theo đơn thì CỘNG khoản này từ engine, không tự đọc bảng Chi phí:
+  `pnl()` (cột Phí vận chuyển / Phí hoàn), bảng theo ngày (cùng hai cột), marketing theo ngày (cột
+  Cước + phí hoàn, **chỉ khi không lọc** — khoản không gắn đơn nào nên không có căn cứ chia xuống một
+  marketer / mã; câu cảnh báo tạm đã gỡ), dòng tiền (dòng riêng, trừ ở CẢ hai chế độ bảng kê / ước
+  tính — khoản ấy không nằm trên vận đơn lẫn bảng kê), Sự thật tài chính (dòng bậc thang
+  `shipping_adjustment`; thẻ Tổng quan gộp vào ô cước), danh nghĩa (chia vào cột Vận chuyển của từng
+  mã theo SỐ ĐƠN, largest remainder; không chia được thì đứng ở dòng tổng như CPQC chưa quy kết).
+- Khoản cùng nhóm KHÔNG khai điều chỉnh vẫn bị loại (trùng vận đơn) và được nêu ra như cũ
+  (`DUPLICATE_LOGISTICS_COST_SOURCE`).
+
+### Kiểm thử
+
+`tests/cost-allocation.test.ts::testLogisticsAdjustmentOnePath` (tháng 10/2027) chụp mọi báo cáo
+ba lần: (0) chỉ đơn + vận đơn có cước thật; (1) thêm cước / phí hoàn gõ tay KHÔNG khai điều chỉnh —
+KHÔNG đổi một đồng, được nêu ra, và CSDL từ chối "điều chỉnh" không lý do; (2) thêm ba khoản điều
+chỉnh (một lần 150.000, theo kỳ 310.000/31 ngày, phí hoàn 60.000) — mọi báo cáo đổi ĐÚNG 520.000,
+`pnl()` = thành phần của engine, Σ theo ngày = `pnl()` ở cả tháng lẫn tuần (7 × 10.000).
+
+### Còn ngoài phạm vi (nói thẳng)
+
+- **Bảng lương, cơ sở "mô hình"** (`payroll.ts`) chia cước theo dòng hàng từ vận đơn và KHÔNG cộng
+  khoản điều chỉnh. Cộng nó vào là đổi số tiền trả người — quyết định của chủ shop (AGENTS.md mục 7),
+  không làm ở lượt này. Cơ sở "danh nghĩa" và "dòng tiền" của bảng lương đọc lại hai báo cáo trên nên
+  đã gồm khoản này từ nay (kỳ đã chốt đọc ảnh chụp, không đổi).
+- Kịch bản `/reports/scenario` nhân cả khoản điều chỉnh theo đòn bẩy % cước — khoản ấy là cố định;
+  sai lệch nhỏ, chưa tách.
 
 ## Đo trước / sau trên production (CHỈ ĐỌC, một câu một ô, chỉ số tổng hợp)
 
@@ -691,3 +740,34 @@ select to_char(occurred_at at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM') as thang,
  group by 1, 2, 3
  order by 1, 2, 3
 ```
+
+**Ô 4 — cước / phí hoàn gõ tay theo tháng: có / không khai điều chỉnh, có / không lý do**
+(chỉ số tổng hợp, không một dòng dữ liệu khách nào):
+
+```sql
+select to_char(occurred_at at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM') as thang,
+       category::text as nhom,
+       cost_source as nguon,
+       (length(trim(reason)) > 0) as co_ly_do,
+       case when cost_source = 'MANUAL_ADJUSTMENT' then 'TINH' else 'LOAI_TRUNG_VAN_DON' end as xu_ly,
+       count(*) filter (where allocation_method = 'PERIOD_PRORATA') as so_khoan_theo_ky,
+       count(*) as so_khoan,
+       sum(amount)::bigint as tong_tien
+  from expenses
+ where category::text in ('SHIPPING', 'RETURN_FEE')
+ group by 1, 2, 3, 4, 5
+ order by 1, 2, 3, 4
+```
+
+Đọc kết quả:
+
+- Dòng `xu_ly = TINH` (luôn `co_ly_do = true` — CSDL chặn điều chỉnh không lý do) là phần mà TRƯỚC
+  bản này `pnl()`, bảng theo ngày, marketing theo ngày, dòng tiền, Sự thật tài chính và lợi nhuận danh
+  nghĩa **bỏ sót**. SAU deploy, với một tháng trọn: cột Phí vận chuyển của Bảng kết quả kinh doanh
+  tăng đúng Σ `tong_tien` của dòng `SHIPPING / TINH`, cột Phí hoàn tăng đúng Σ của dòng
+  `RETURN_FEE / TINH`, và Lợi nhuận ròng giảm đúng tổng hai số ấy (khoản `so_khoan_theo_ky > 0` thì
+  lấy phần đã phân bổ ở Ô 2, dòng nhóm × `MANUAL_ADJUSTMENT`).
+- Dòng `LOAI_TRUNG_VAN_DON` không được đổi con số nào, trước lẫn sau — chúng đứng ở cảnh báo
+  `DUPLICATE_LOGISTICS_COST_SOURCE`.
+- Không có dòng `TINH` nào ⇒ bản sửa không đổi một đồng nào trên production; đó là một kết quả đo
+  được, không phải "chưa biết".
