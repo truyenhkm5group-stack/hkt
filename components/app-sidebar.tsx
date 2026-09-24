@@ -91,6 +91,7 @@ const groups: { label: string; items: NavItem[] }[] = [
       { href: "/landing", label: "Đơn landing page", icon: FileSpreadsheet, permission: "landing:view" },
       { href: "/customers", label: "Khách hàng", icon: Users, permission: "customers:view" },
       { href: "/outreach", label: "Chăm sóc & bán chéo", icon: HeartHandshake, permission: "outreach:view" },
+      { href: "/chatbot", label: "Bot chat bán hàng", icon: Bot, permission: "cs:config" },
       { href: "/ads", label: "Quảng cáo", icon: Megaphone, permission: "expenses:view" },
       { href: "/ideas", label: "Ý tưởng marketing", icon: Lightbulb, permission: "ideas:view" },
       { href: "/marketing/fanpages", label: "Fanpage & quy kết MKT", icon: Flag, permission: "reports:nominal" },

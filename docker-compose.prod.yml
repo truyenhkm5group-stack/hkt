@@ -49,6 +49,39 @@ services:
     depends_on:
       - app
 
+  chatbot:
+    # Bot chat bán hàng Pancake + Gemini (trước chạy trên máy Windows bằng Pancake Bot Manager).
+    # Mã nguồn gắn CHỈ-ĐỌC từ ./chatbot; khoá (.env) và dữ liệu (cài đặt page, trạng thái tin) nằm
+    # ở volume `chatbot_data`, nạp qua trang Bot chat của ERP — kho public nên không có khoá nào ở đây.
+    # Không mở cổng ra Internet: bot tự quét tin (poll), ERP nói chuyện với nó qua mạng nội bộ.
+    image: node:22-alpine
+    container_name: erp-chatbot
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "erp-entry.mjs"]
+    environment:
+      TZ: Asia/Ho_Chi_Minh
+      PORT: "3456"
+      DATA_DIR: /data
+      BOT_ENV_FILE: /data/bot.env
+      SYSTEM_PROMPT_FILE: /data/system.md
+      # Khoá nội bộ ERP ↔ bot, install-vps.sh tự sinh vào .env của ERP. Rỗng ⇒ bot từ chối mọi lượt
+      # quản trị từ xa (phía hẹp hơn), không phải mở toang.
+      ADMIN_TOKEN: ${CHATBOT_ADMIN_TOKEN:-}
+      # Đổi khi mã trong ./chatbot đổi ⇒ compose dựng lại container; deploy ERP khác không làm bot khởi động lại.
+      CHATBOT_REV: ${CHATBOT_REV:-unknown}
+    volumes:
+      - ./chatbot:/app:ro
+      - chatbot_data:/data
+    expose:
+      - "3456"
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3456/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   caddy:
     image: caddy:2-alpine
     container_name: erp-caddy
@@ -68,5 +101,6 @@ services:
 
 volumes:
   erp_pgdata:
+  chatbot_data:
   caddy_data:
   caddy_config:

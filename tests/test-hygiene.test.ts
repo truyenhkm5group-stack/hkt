@@ -125,6 +125,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/ops-concurrency.test.ts":
     "Truyền biến xuống tiến trình bash con để dựng tình huống khoá — đầu vào của kịch bản đang đo; và dùng process.platform để nói CHƯA ĐO ĐƯỢC, không để bỏ qua một khẳng định.",
   "tests/test-hygiene.test.ts": "Chính bài này.",
+  "tests/chatbot.test.ts":
+    "ĐẶT DATA_DIR / BOT_ENV_FILE / SYSTEM_PROMPT_FILE trỏ vào thư mục tạm để bộ nạp cấu hình của bot ghi vào đó thay vì vào máy, rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của hàm đang đo, không phải điều kiện của kết luận.",
   "tests/ai-incident-watch.test.ts":
     "Ép AI_PROVIDER=anthropic để resolveProviderName() có câu trả lời xác định, rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của bộ canh đang đo (nó hỏi nhà cung cấp nào đang dùng), không phải điều kiện của kết luận.",
   "tests/viec-di-tiep.test.ts":

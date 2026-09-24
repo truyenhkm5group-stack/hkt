@@ -1,0 +1,20 @@
+{
+  "name": "pancake-gemini-bot",
+  "version": "1.0.0",
+  "description": "Bot tra loi khach hang tu dong: Pancake (pages.fm) webhook + Google Gemini",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node src/server.js",
+    "app": "cd desktop && npx electron .",
+    "dev": "node --watch src/server.js",
+    "test:gemini": "node scripts/test-gemini.js",
+    "test:openai": "node scripts/test-openai.js",
+    "test:pancake": "node scripts/test-pancake.js",
+    "test:pos": "node scripts/test-pos.js",
+    "chat": "node scripts/chat-local.js",
+    "simulate": "node scripts/simulate-webhook.js",
+    "selftest": "node scripts/check-ui.js && node scripts/selftest.js"
+  }
+}

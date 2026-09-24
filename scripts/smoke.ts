@@ -163,6 +163,7 @@ const ROUTES = [
   // không có chỗ nào kiểm được trên bản chạy thật.
   "/cs?view=theo-case",
   "/outreach",
+  "/chatbot",
   "/landing",
   "/ideas",
   // QUY KẾT FANPAGE → MARKETER. Ba tab đọc ba đường khác nhau trên cùng ảnh chụp `order_attributions`,

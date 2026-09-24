@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pancake Bot Manager</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2714%27 fill=%27%234a90d9%27/%3E%3Ctext x=%2716%27 y=%2721%27 font-size=%2716%27 text-anchor=%27middle%27 fill=%27white%27 font-family=%27sans-serif%27%3EP%3C/text%3E%3C/svg%3E">
+<style>
+  :root{--bg:#0f1318;--panel:#161c24;--panel2:#1d2530;--line:#2a3441;--text:#e6edf3;--muted:#8a9bb0;--acc:#4a90d9;--ok:#3fb950;--warn:#d29922;--err:#f85149;--radius:10px}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;height:100vh;display:flex;overflow:hidden}
+  a{color:var(--acc)}
+  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:7px 12px;border-radius:8px}
+  button:hover{border-color:var(--acc)}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#fff}
+  button.danger{border-color:var(--err);color:var(--err)}
+  button:disabled{opacity:.5;cursor:default}
+  input,select,textarea{font:inherit;background:#0b0f14;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 10px;width:100%}
+  textarea{min-height:120px;resize:vertical;line-height:1.45}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px}
+  .card h3{margin:0 0 10px;font-size:14px}
+  .muted{color:var(--muted)}
+  .small{font-size:12px}
+  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:11px;border:1px solid var(--line);color:var(--muted)}
+  .pill.ok{color:var(--ok);border-color:var(--ok)} .pill.warn{color:var(--warn);border-color:var(--warn)} .pill.err{color:var(--err);border-color:var(--err)}
+  /* sidebar */
+  #side{width:270px;background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column}
+  #side .head{padding:14px 16px;border-bottom:1px solid var(--line);font-weight:600}
+  #side .head .small{font-weight:400}
+  #pages{flex:1;overflow:auto;padding:8px}
+  .pg{padding:10px 12px;border-radius:8px;cursor:pointer;display:flex;gap:10px;align-items:center}
+  .pg:hover{background:var(--panel2)} .pg.active{background:var(--panel2);outline:1px solid var(--acc)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+  .dot.on{background:var(--ok)} .dot.dry{background:var(--warn)}
+  .pg .n{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pg .c{font-size:11px;color:var(--muted)}
+  #globalnav{border-top:1px solid var(--line);padding:8px}
+  /* main */
+  #main{flex:1;display:flex;flex-direction:column;min-width:0}
+  #top{padding:12px 20px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center;background:var(--panel)}
+  #top h2{margin:0;font-size:16px;flex:1}
+  #tabs{display:flex;gap:4px;padding:8px 20px 0;border-bottom:1px solid var(--line);background:var(--panel)}
+  #tabs button{border:none;border-bottom:2px solid transparent;border-radius:0;background:none;color:var(--muted);padding:8px 12px}
+  #tabs button.active{color:#fff;border-bottom-color:var(--acc)}
+  #content{flex:1;overflow:auto;padding:16px 20px}
+  .switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+  .switch input{width:auto}
+  .stat{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+  .stat div{background:var(--panel2);border-radius:8px;padding:10px}
+  .stat b{font-size:20px;display:block}
+  pre{white-space:pre-wrap;word-break:break-word;background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:420px;overflow:auto;font-size:12px}
+  /* chat */
+  .chat{display:flex;flex-direction:column;height:calc(100vh - 210px)}
+  .msgs{flex:1;overflow:auto;padding:10px;background:#0b0f14;border:1px solid var(--line);border-radius:8px}
+  .m{max-width:70%;padding:8px 12px;border-radius:12px;margin:6px 0;white-space:pre-wrap;word-break:break-word}
+  .m.u{background:#243447;margin-left:auto} .m.b{background:var(--panel2)} .m .meta{font-size:11px;color:var(--muted);margin-top:4px}
+  .m img{max-width:200px;border-radius:8px;display:block;margin-top:6px}
+  .convs{display:grid;grid-template-columns:320px 1fr;gap:12px;height:calc(100vh - 210px)}
+  .convlist{overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+  .cv{padding:10px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+  .cv:hover,.cv.active{background:var(--panel2)}
+  .cv .s{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .log{font-family:ui-monospace,Consolas,monospace;font-size:12px}
+  .log .warn{color:var(--warn)} .log .error{color:var(--err)} .log .debug{color:var(--muted)}
+  #toast{position:fixed;right:20px;bottom:20px;background:var(--panel2);border:1px solid var(--line);padding:10px 14px;border-radius:8px;display:none;max-width:420px}
+  table{width:100%;border-collapse:collapse;font-size:13px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top} th{color:var(--muted);font-weight:500}
+  .diff{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .hint{font-size:12px;color:var(--muted);margin-top:4px}
+  #nav_assistant{border:1px solid var(--acc);margin-bottom:6px}
+  .act{display:inline-block;font-size:11px;padding:2px 8px;border-radius:99px;margin:4px 4px 0 0;border:1px solid var(--line);background:#0b0f14;color:var(--muted)}
+  .act.ok{border-color:var(--ok);color:var(--ok)} .act.err{border-color:var(--err);color:var(--err)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+  .chips button{font-size:12px;padding:4px 10px}
+</style>
+</head>
+<body>
+<div id="side">
+  <div class="head">Pancake Bot Manager<div class="small muted" id="gstatus">đang tải…</div></div>
+  <div id="pages"></div>
+  <div id="globalnav">
+    <div class="pg" data-view="assistant" id="nav_assistant">🤖 <span class="n"><b>Trợ lý AI</b><div class="c">Ra lệnh cho bot bằng tiếng Việt</div></span></div>
+    <div class="pg" data-view="prompt">📝 <span class="n">Prompt chung</span></div>
+    <div class="pg" data-view="catalog">🛍️ <span class="n">Sản phẩm (POS)</span></div>
+    <div class="pg" data-view="cho" id="nav_cho">⏰ <span class="n">Khách đang chờ<span id="cho_badge" class="pill warn" style="display:none;margin-left:6px"></span></span></div>
+    <div class="pg" data-view="audit">🧾 <span class="n">Đối chiếu đơn POS</span></div>
+    <div class="pg" data-view="logs">📜 <span class="n">Nhật ký bot</span></div>
+  </div>
+</div>
+<div id="main">
+  <div id="top"><h2 id="title">…</h2><span id="topinfo" class="muted small" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"></span><button onclick="refreshAll()">↻ Làm mới</button></div>
+  <div id="tabs"></div>
+  <div id="content"></div>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// Pancake tra ve gio UTC khong co "Z" -> them Z de hien dung gio VN
+const fmtTime = (t) => (t ? new Date(typeof t === "string" && !/[zZ]$|[+-]\d\d:?\d\d$/.test(t) && /^\d{4}-\d\d-\d\dT/.test(t) ? t + "Z" : t).toLocaleString("vi-VN") : "—");
+// Thu nho anh (max 1600px, JPEG) truoc khi gui de nhe va nhanh
+function shrinkImage(file, max = 1600) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file); const img = new Image();
+    img.onload = () => { const k = Math.min(1, max / Math.max(img.width, img.height)); const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); const dataUrl = c.toDataURL("image/jpeg", 0.85); URL.revokeObjectURL(url); resolve({ mimeType: "image/jpeg", data: dataUrl.split(",")[1], url: dataUrl }); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("file không phải ảnh")); };
+    img.src = url;
+  });
+}
+// markdown toi gian cho tin cua tro ly: **dam**, gach dau dong, xuong dong
+const md = (t) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/^\s*[*\-]\s+/gm, "• ").replace(/^#{1,6}\s+/gm, "");
+let STATE = null, view = { kind: "page", id: null, tab: "settings" }, models = [];
+const testChat = {}; // pageId -> history
+
+// Token truy cap tu xa (khi bot chay tren VPS): lay tu ?token=... roi nho lai trong trinh duyet
+let ADMIN_TOKEN = "";
+try {
+  const q = new URLSearchParams(location.search).get("token");
+  if (q) { localStorage.setItem("adminToken", q); history.replaceState(null, "", location.pathname); }
+  ADMIN_TOKEN = localStorage.getItem("adminToken") || "";
+} catch {}
+// Khi mo qua ERP (/api/chatbot/admin), moi API di qua cung tien to do: ERP kiem tra dang nhap + quyen
+// roi moi chuyen tiep sang bot kem ADMIN_TOKEN. Mo truc tiep /admin tren may bot thi BASE = "".
+const BASE = location.pathname.replace(/\/admin\/?$/, "");
+const withToken = (url) => (ADMIN_TOKEN ? url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(ADMIN_TOKEN) : url);
+async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (ADMIN_TOKEN) headers["x-admin-token"] = ADMIN_TOKEN;
+  const r = await fetch(BASE + path, { headers, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.statusText);
+  return d;
+}
+function toast(msg, ms = 3000) { const t = $("#toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._t); t._t = setTimeout(() => (t.style.display = "none"), ms); }
+function pageOf(id) { return STATE?.pages.find((p) => p.id === id); }
+
+async function refreshAll() {
+  try { await api("/api/refresh", { method: "POST" }); } catch (e) { toast("Làm mới lỗi: " + e.message); }
+  await refreshState();
+  const missing = STATE.pages.filter((p) => !p.pauseTagId).map((p) => p.name || p.id);
+  toast(missing.length ? `Đã làm mới. Page chưa có tag "${STATE.global.pauseTagName || "BOT OFF"}": ${missing.join(", ")}` : "Đã làm mới. Tất cả page đã có tag tắt bot ✓", 6000);
+}
+async function refreshState() {
+  STATE = await api("/api/state");
+  const g = STATE.global;
+  $("#gstatus").innerHTML = `${STATE.pages.length} page · ${esc(g.model)} · ${g.poll ? "poll " + g.pollIntervalSec + "s" : "webhook"}<br><button id="g_dry" class="${g.dryRun ? "" : "primary"}" style="margin-top:6px;padding:4px 10px;font-size:12px" title="${g.dryRun ? "Bot đang CHỈ LOG, không gửi tin cho khách. Bấm để bắt đầu gửi thật." : "Bot ĐANG GỬI THẬT cho khách. Bấm để chuyển về chỉ log."}">${g.dryRun ? "⏸ Chỉ log (không gửi)" : "🟢 Đang gửi thật"}</button>`;
+  $("#g_dry").onclick = async () => {
+    const turnOn = !g.dryRun;
+    const msg = turnOn ? "Chuyển về CHỈ LOG? Bot sẽ ngừng gửi tin cho khách trên mọi page." : "BẬT GỬI THẬT? Bot sẽ tự động trả lời khách trên mọi page đang bật (trừ page bật dry run riêng).";
+    if (!confirm(msg)) return;
+    try { await api("/api/global", { method: "POST", body: { dryRun: turnOn } }); toast(turnOn ? "Đã chuyển về chỉ log" : "Bot đang gửi thật cho khách"); await refreshState(); } catch (e) { toast("Lỗi: " + e.message); }
+  };
+  renderSidebar();
+  if (view.kind === "page" && (!view.id || !pageOf(view.id))) { view.id = STATE.pages[0]?.id; if (!view.id) view = { kind: "addpage" }; }
+  render();
+}
+function renderSidebar() {
+  $("#pages").innerHTML = STATE.pages.map((p) => {
+    const e = p.effective, t = p.stats.today;
+    const dot = !e.enabled ? "" : e.dryRun ? "dry" : "on";
+    return `<div class="pg ${view.kind === "page" && view.id === p.id ? "active" : ""}" data-page="${p.id}">
+      <span class="dot ${dot}"></span><span class="n">${esc(p.name || p.id)}<div class="c">${!e.enabled ? "Đang tắt" : e.dryRun ? "Chỉ log (dry run)" : "Đang chạy"} · hôm nay ${t.replies || 0} trả lời${t.handoffs ? ", " + t.handoffs + " chuyển NV" : ""}</div></span></div>`;
+  }).join("") + `<div class="pg ${view.kind === "addpage" ? "active" : ""}" id="nav_addpage" style="margin-top:6px;border:1px dashed var(--line);color:var(--muted)">＋ <span class="n">Thêm page<div class="c">Dán token API Pancake</div></span></div>`;
+  document.querySelectorAll("#pages .pg[data-page]").forEach((el) => (el.onclick = () => { view = { kind: "page", id: el.dataset.page, tab: view.kind === "page" ? view.tab : "settings" }; render(); renderSidebar(); }));
+  $("#nav_addpage").onclick = () => { view = { kind: "addpage" }; render(); renderSidebar(); };
+  document.querySelectorAll("#globalnav .pg").forEach((el) => { el.classList.toggle("active", view.kind === el.dataset.view); el.onclick = () => { view = { kind: el.dataset.view }; render(); renderSidebar(); }; });
+}
+
+const TABS = [["settings", "Cài đặt"], ["ai", "🤖 Trò chuyện với AI"], ["chat", "Chat thử"], ["convs", "Hội thoại"], ["care", "💌 Chăm sóc khách"], ["follow", "🎯 Bám khách"], ["history", "Lịch sử bot"]];
+function render() {
+  if (view.kind !== "page") { $("#tabs").innerHTML = ""; return renderGlobal(); }
+  const p = pageOf(view.id); if (!p) return;
+  $("#title").textContent = p.name || p.id;
+  const tagName = esc(STATE.global.pauseTagName || "BOT OFF");
+  const tagHelp = `Tag này dùng để tắt bot cho TỪNG KHÁCH và để bot tự gắn khi chuyển nhân viên. Tạo trong Pancake: mở page → Cài đặt → Thẻ hội thoại → thêm thẻ tên đúng ${tagName} → quay lại đây bấm Làm mới.`;
+  const on = p.settings.enabled !== false;
+  const dry = p.effective.dryRun;
+  const toggle = `<button id="pg_toggle" class="${on ? "primary" : ""}" style="padding:5px 12px;margin-right:10px" title="${on ? "Bot đang BẬT trên page này. Bấm để tắt." : "Bot đang TẮT trên page này. Bấm để bật."}">${on ? "🟢 Bot: BẬT" : "⏸ Bot: TẮT"}</button>${on && dry ? '<span class="pill warn" title="Bot chạy nhưng chỉ ghi log, không gửi tin (dry run)">chỉ log</span> · ' : ""}`;
+  $("#topinfo").innerHTML = toggle + (p.pauseTagId
+    ? `ID ${p.id} · tag tắt bot: <span class="pill ok">có</span>`
+    : `ID ${p.id} · <span class="pill warn" style="cursor:help" title="${tagHelp}">chưa có tag "${tagName}" (di chuột để xem cách tạo)</span>`);
+  $("#pg_toggle").onclick = async (ev) => {
+    ev.target.disabled = true;
+    try {
+      await api(`/api/pages/${p.id}/settings`, { method: "PUT", body: { enabled: !on } });
+      toast(!on ? `Đã BẬT bot cho ${p.name || p.id}` : `Đã TẮT bot cho ${p.name || p.id}`);
+      await refreshState();
+    } catch (e) { toast("Lỗi: " + e.message); }
+  };
+  $("#tabs").innerHTML = TABS.map(([k, l]) => `<button class="${view.tab === k ? "active" : ""}" data-tab="${k}">${l}</button>`).join("");
+  document.querySelectorAll("#tabs button").forEach((b) => (b.onclick = () => { view.tab = b.dataset.tab; render(); }));
+  ({ settings: renderSettings, ai: (pg) => renderAssistant(pg), chat: renderChat, convs: renderConvs, care: renderCare, follow: renderFollow, history: renderHistory })[view.tab](p);
+}
+
+/* ---------- Cài đặt ---------- */
+function renderSettings(p) {
+  const s = p.settings, g = STATE.global, st = p.stats;
+  $("#content").innerHTML = `
+  <div class="card"><h3>Hoạt động (7 ngày)</h3><div class="stat">
+    <div><b>${st.last7.replies}</b><span class="muted">bot đã trả lời</span></div>
+    <div><b>${st.last7.handoffs}</b><span class="muted">chuyển nhân viên</span></div>
+    <div><b>${st.last7.skippedStaff}</b><span class="muted">nhường nhân viên</span></div>
+    <div><b>${st.last7.orders || 0}</b><span class="muted">đơn ghi vào POS</span></div>
+    <div><b class="small" style="font-size:13px;margin-top:4px">${fmtTime(st.lastActivity)}</b><span class="muted">hoạt động cuối</span></div></div></div>
+  <div class="card"><h3>Tên page</h3>
+    <div class="row"><div style="flex:1"><label>Tên hiển thị (trống = dùng tên thật từ Pancake${p.pancakeName ? ": <b>" + esc(p.pancakeName) + "</b>" : ""})</label><input id="f_displayName" value="${esc(s.displayName || "")}" placeholder="${esc(p.pancakeName || p.name || "")}"></div></div>
+    <div class="hint">Tên này hiện trong app và được bot dùng khi giới thiệu shop ({{SHOP_NAME}} trong prompt).</div>
+  </div>
+  <div class="card"><h3>Bật/tắt</h3>
+    <div class="row" style="gap:28px">
+      <label class="switch"><input type="checkbox" id="f_enabled" ${s.enabled !== false ? "checked" : ""}> Bot trả lời trên page này</label>
+      <label class="switch"><input type="checkbox" id="f_dryRun" ${s.dryRun ? "checked" : ""}> Chỉ log, không gửi (dry run riêng page)</label>
+      <label class="switch"><input type="checkbox" id="f_sendProductImages" ${(s.sendProductImages ?? g.sendProductImages) ? "checked" : ""}> Gửi ảnh sản phẩm</label>
+      <label class="switch" title="Khi bot chốt đơn xong: tự ghi sản phẩm, SĐT, địa chỉ (đã chuẩn hoá tỉnh/huyện/xã) vào đơn nháp POS. Không bao giờ xác nhận đơn."><input type="checkbox" id="f_orderSync" ${(s.orderSync ?? g.orderSync) ? "checked" : ""}> Tự ghi đơn nháp vào POS khi chốt</label>
+    </div>
+    <div class="row" style="margin-top:10px"><span>Bình luận dưới bài viết:</span>
+      <select id="f_commentMode" style="width:auto">
+        <option value="" ${!s.commentMode ? "selected" : ""}>Theo mặc định chung (${{ off: "không trả lời", public: "trả lời công khai", inbox: "nhắn riêng + câu công khai" }[g.commentMode] || g.commentMode})</option>
+        <option value="off" ${s.commentMode === "off" ? "selected" : ""}>Không trả lời bình luận</option>
+        <option value="public" ${s.commentMode === "public" ? "selected" : ""}>Trả lời công khai ngắn (mời inbox)</option>
+        <option value="inbox" ${s.commentMode === "inbox" ? "selected" : ""}>Nhắn riêng vào inbox (báo giá đầy đủ) + câu công khai "shop đã nhắn tin"</option>
+      </select></div>
+    <div class="hint">Chế độ "nhắn riêng": khách bình luận → bot trả lời công khai "${esc(g.commentPublicText.replace("{name}", " (tên khách)"))}" và gửi vào Messenger của khách khối báo giá + ảnh mẫu + xin chiều cao cân nặng theo kịch bản; khách trả lời trong inbox thì bot tiếp tục như bình thường. Câu công khai sửa ở COMMENT_PUBLIC_TEXT trong .env.</div>
+    ${g.dryRun ? '<div class="hint">⚠ Chế độ CHỈ LOG chung đang bật nên mọi page đều không gửi tin. Bấm nút "Chỉ log" ở góc trên bên trái để bật gửi thật.</div>' : ""}
+  </div>
+  <div class="card"><h3>Hướng dẫn riêng cho page này</h3>
+    <div class="hint">Được ghép vào cuối prompt chung và ưu tiên hơn. Ví dụ: cách xưng hô, địa chỉ cửa hàng, ưu đãi riêng, mẫu chủ lực, câu chào. Dùng tab "AI điều chỉnh" để AI viết giúp.</div>
+    <textarea id="f_extraPrompt" style="min-height:180px" placeholder="- Xưng em, gọi khách là chị.&#10;- Địa chỉ cửa hàng: ...&#10;- Page này chuyên đầm linen, ưu tiên giới thiệu Q003, Q004.">${esc(s.extraPrompt || "")}</textarea>
+  </div>
+  <div class="card"><h3>Nâng cao</h3><div class="grid2">
+    <div><label>Model AI (trống = ${esc(g.model)})</label><select id="f_model"><option value="">(mặc định ${esc(g.model)})</option>${models.map((m) => `<option ${s.model === m ? "selected" : ""}>${m}</option>`).join("")}</select></div>
+    <div><label>Temperature (0 = chắc chắn, 1 = sáng tạo; trống = mặc định)</label><input id="f_temperature" type="number" step="0.1" min="0" max="1" value="${s.temperature ?? ""}"></div>
+    <div><label>Im lặng bao nhiêu phút sau khi nhân viên thật trả lời (trống = ${g.humanTakeoverMinutes}; 0 = bot luôn trả lời, chỉ bỏ qua khi nhân viên đã trả lời tin đó rồi)</label><input id="f_humanTakeoverMinutes" type="number" min="0" value="${s.humanTakeoverMinutes ?? ""}"></div>
+    <div><label>Bot bắt đầu trả lời từ tin thứ mấy của khách (trống = ${g.minCustomerMessages})</label><input id="f_minCustomerMessages" type="number" min="1" max="10" value="${s.minCustomerMessages ?? ""}"><div class="hint">Đặt 2 nếu Pancake đã tự động trả lời tin đầu (gửi ảnh, báo giá): bot sẽ im ở tin đầu và vào từ tin thứ 2, không đè lên nhau.</div></div>
+  </div></div>
+  <div class="row"><button class="primary" id="save">💾 Lưu cài đặt</button><button id="viewPrompt">Xem prompt đầy đủ bot đang dùng</button><span class="muted small">Lưu là có hiệu lực ngay, không cần khởi động lại.</span></div>
+  <pre id="fullPrompt" style="display:none;margin-top:12px"></pre>
+  <div class="card" style="margin-top:12px"><h3>Kết nối Pancake</h3>
+    <div class="row"><span class="muted small">Page ID ${esc(p.id)} · ${p.source === "app" ? "thêm bằng cách dán token trong app (lưu ở data/pages_tokens.json)" : "khai báo trong file .env (PANCAKE_PAGES_JSON)"}</span>
+      <button id="pg_retoken" title="Dán token mới cho page này (khi token cũ hết hạn hoặc bị đổi)">🔑 Đổi token</button>
+      ${p.source === "app" ? '<button class="danger" id="pg_remove">🗑 Gỡ page khỏi bot</button>' : ""}</div>
+  </div>`;
+  $("#pg_retoken").onclick = () => { view = { kind: "addpage", prefillId: p.id, prefillName: p.pancakeName || p.name || "" }; render(); renderSidebar(); };
+  const rm = $("#pg_remove"); if (rm) rm.onclick = async () => {
+    if (!confirm(`Gỡ page "${p.name || p.id}" khỏi bot? Bot sẽ ngừng đọc và trả lời tin trên page này. Cài đặt riêng (hướng dẫn, tên) vẫn được giữ trong data/pages.json.`)) return;
+    try { await api(`/api/pages/${p.id}`, { method: "DELETE" }); toast("Đã gỡ page " + (p.name || p.id)); view = { kind: "page", id: null, tab: "settings" }; await refreshState(); } catch (e) { toast("Lỗi: " + e.message, 6000); }
+  };
+  if (!models.length) api("/api/models").then((d) => { models = d.models; if (view.tab === "settings") renderSettings(pageOf(view.id)); }).catch(() => {});
+  $("#save").onclick = async () => {
+    const body = { displayName: $("#f_displayName").value, enabled: $("#f_enabled").checked, dryRun: $("#f_dryRun").checked, commentMode: $("#f_commentMode").value, orderSync: $("#f_orderSync").checked, sendProductImages: $("#f_sendProductImages").checked,
+      extraPrompt: $("#f_extraPrompt").value, model: $("#f_model").value, temperature: $("#f_temperature").value === "" ? null : Number($("#f_temperature").value), humanTakeoverMinutes: $("#f_humanTakeoverMinutes").value === "" ? null : Number($("#f_humanTakeoverMinutes").value), minCustomerMessages: $("#f_minCustomerMessages").value === "" ? null : Number($("#f_minCustomerMessages").value) };
+    try { await api(`/api/pages/${p.id}/settings`, { method: "PUT", body }); toast("Đã lưu cài đặt cho " + (p.name || p.id)); await refreshState(); } catch (e) { toast("Lỗi: " + e.message); }
+  };
+  $("#viewPrompt").onclick = async () => { const d = await api(`/api/pages/${p.id}/prompt`); const pre = $("#fullPrompt"); pre.textContent = d.text; pre.style.display = "block"; };
+}
+
+/* ---------- Chat thử ---------- */
+function renderChat(p) {
+  const h = (testChat[p.id] ||= []);
+  $("#content").innerHTML = `<div class="chat"><div class="hint" style="margin-bottom:8px">Chat với bot của page này y như khách (dùng đúng prompt + sản phẩm POS hiện tại). Không đụng tới Pancake.</div>
+    <div class="msgs" id="msgs"></div>
+    <div class="row" style="margin-top:8px"><input id="chat_in" placeholder="Nhập tin như khách hàng… (Enter để gửi)" style="flex:1"><button class="primary" id="chat_send">Gửi</button><button id="chat_reset">Xoá</button></div></div>`;
+  const draw = () => { $("#msgs").innerHTML = h.map((m) => `<div class="m ${m.role === "user" ? "u" : "b"}">${esc(m.text)}${m.images?.length ? m.images.map((u) => `<img src="${esc(u)}">`).join("") : ""}${m.meta ? `<div class="meta">${esc(m.meta)}</div>` : ""}</div>`).join("") || '<div class="muted">Chưa có tin nào.</div>'; $("#msgs").scrollTop = 1e9; };
+  draw();
+  const send = async () => {
+    const t = $("#chat_in").value.trim(); if (!t) return; $("#chat_in").value = ""; h.push({ role: "user", text: t }); draw(); $("#chat_send").disabled = true;
+    try { const d = await api(`/api/pages/${p.id}/test-chat`, { method: "POST", body: { history: h.map(({ role, text }) => ({ role, text })) } });
+      h.push({ role: "model", text: d.text, images: d.imageUrls, meta: `${d.usage?.totalTokenCount || "?"} tokens${d.handoff ? " · [HANDOFF] chuyển nhân viên" : ""}${d.imageRefs?.length ? " · ảnh: " + d.imageRefs.join(", ") : ""}` });
+    } catch (e) { h.push({ role: "model", text: "Lỗi: " + e.message }); } finally { $("#chat_send").disabled = false; draw(); $("#chat_in").focus(); }
+  };
+  $("#chat_send").onclick = send; $("#chat_in").onkeydown = (e) => { if ((e.key === "Enter" || e.keyCode === 13) && !e.isComposing) { e.preventDefault(); send(); } };
+  $("#chat_reset").onclick = () => { h.length = 0; draw(); };
+  $("#chat_in").focus();
+}
+
+/* ---------- Hội thoại thật ---------- */
+function renderConvs(p) {
+  $("#content").innerHTML = `<div class="row" style="margin-bottom:10px">
+      <span>Tin khách chưa được trả lời trong</span>
+      <select id="cu_hours" style="width:auto"><option value="3">3 giờ</option><option value="6" selected>6 giờ</option><option value="12">12 giờ</option><option value="24">24 giờ</option><option value="48">48 giờ</option></select>
+      <button id="cu_scan">🔎 Đếm thử</button><button class="primary" id="cu_run">📥 Cho bot trả lời nốt</button>
+      <label class="switch"><input type="checkbox" id="cu_all"> Tất cả page đang bật</label>
+      <span id="cu_stat" class="muted small"></span>
+    </div>
+    <div class="convs"><div class="convlist" id="convlist"><div class="muted" style="padding:12px">Đang tải…</div></div><div id="convdetail" class="chat"><div class="muted">Chọn một hội thoại bên trái.</div></div></div>`;
+  const catchup = async (dryScan) => {
+    const btn = dryScan ? $("#cu_scan") : $("#cu_run");
+    btn.disabled = true;
+    $("#cu_stat").textContent = dryScan ? "Đang đếm…" : "Đang quét và trả lời…";
+    try {
+      const r = await api("/api/catchup", { method: "POST", body: { pageId: $("#cu_all").checked ? "" : p.id, hours: Number($("#cu_hours").value), dryScan } });
+      const per = (r.pages || []).filter((x) => x.queued > 0).map((x) => `${x.name}: ${x.queued}${x.note ? " (bot tắt)" : ""}`).join(" · ");
+      $("#cu_stat").textContent = dryScan ? `Có ${r.waiting || 0} khách đang chờ${per ? " — " + per : ""}` : `Đã cho bot trả lời ${r.queued} hội thoại${per ? " — " + per : ""}`;
+      if (!dryScan) setTimeout(() => renderConvs(p), 8000);
+    } catch (e) { $("#cu_stat").textContent = "Lỗi: " + e.message; } finally { btn.disabled = false; }
+  };
+  $("#cu_scan").onclick = () => catchup(true);
+  $("#cu_run").onclick = () => catchup(false);
+  api(`/api/pages/${p.id}/conversations`).then((d) => {
+    $("#convlist").innerHTML = d.conversations.map((c) => `<div class="cv" data-id="${esc(c.id)}"><div class="row" style="justify-content:space-between"><b>${esc(c.customer)}</b><span class="small muted">${fmtTime(c.updatedAt)}</span></div><div class="s">${c.lastBy === "page" ? "↩ " : ""}${esc(c.snippet)}</div>${c.paused ? '<span class="pill warn">bot tắt</span>' : ""}${c.tags.length ? `<span class="small muted"> ${esc(c.tags.slice(0, 3).join(", "))}</span>` : ""}</div>`).join("") || '<div class="muted" style="padding:12px">Không có hội thoại.</div>';
+    document.querySelectorAll(".cv").forEach((el) => (el.onclick = () => { document.querySelectorAll(".cv").forEach((x) => x.classList.remove("active")); el.classList.add("active"); openConv(p, el.dataset.id, d.conversations.find((c) => c.id === el.dataset.id)); }));
+  }).catch((e) => ($("#convlist").innerHTML = `<div class="muted" style="padding:12px">Lỗi: ${esc(e.message)}</div>`));
+}
+async function openConv(p, cid, meta) {
+  const box = $("#convdetail"); box.innerHTML = '<div class="muted">Đang tải…</div>';
+  try {
+    const d = await api(`/api/pages/${p.id}/conversations/${encodeURIComponent(cid)}/messages`);
+    box.innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:8px"><b>${esc(d.customer)}</b><div class="row">${d.canInbox === false ? '<span class="pill err">ngoài cửa sổ 24h</span>' : ""}<button id="cv_sync" title="Trích xuất đơn đã chốt trong hội thoại này và ghi vào đơn nháp POS">🧾 Ghi đơn vào POS</button><button id="cv_pause">${meta?.paused ? "▶ Bật lại bot cho khách này" : "⏸ Tắt bot cho khách này"}</button></div></div>
+      <div class="msgs" id="cvmsgs">${d.messages.map((m) => `<div class="m ${m.from === "customer" ? "u" : "b"}">${esc(m.text) || '<i class="muted">[đính kèm]</i>'}${m.images.map((u) => `<img src="${esc(u)}">`).join("")}<div class="meta">${m.from === "customer" ? esc(m.by) : m.bot ? "🤖 bot" : m.automated ? "⚙ tự động" : "👤 " + esc(m.by || "page")} · ${fmtTime(m.at)}</div></div>`).join("")}</div>
+      <div class="row" style="margin-top:8px"><input id="cv_in" placeholder="Nhân viên trả lời thủ công (gửi thật qua Pancake; có thể chèn [[IMG:Q004:Đỏ]] để kèm ảnh)…" style="flex:1"><button class="primary" id="cv_send">Gửi</button></div>`;
+    $("#cvmsgs").scrollTop = 1e9;
+    $("#cv_in").onkeydown = (e) => { if ((e.key === "Enter" || e.keyCode === 13) && !e.isComposing) { e.preventDefault(); $("#cv_send").click(); } };
+    $("#cv_send").onclick = async () => { const t = $("#cv_in").value.trim(); if (!t || !confirm("Gửi tin này cho khách?")) return; try { await api(`/api/pages/${p.id}/conversations/${encodeURIComponent(cid)}/send`, { method: "POST", body: { text: t } }); toast("Đã gửi"); openConv(p, cid, meta); } catch (e) { toast("Lỗi: " + e.message); } };
+    $("#cv_sync").onclick = async (ev) => { ev.target.disabled = true; ev.target.textContent = "⏳ Đang ghi…"; try { const r = await api(`/api/pages/${p.id}/conversations/${encodeURIComponent(cid)}/sync-order`, { method: "POST" }); toast(r.status === "skipped" ? "Chưa ghi: " + r.reason : r.summary, 9000); } catch (e) { toast("Lỗi: " + e.message); } finally { ev.target.disabled = false; ev.target.textContent = "🧾 Ghi đơn vào POS"; } };
+    $("#cv_pause").onclick = async () => { try { await api(`/api/pages/${p.id}/conversations/${encodeURIComponent(cid)}/pause`, { method: "POST", body: { paused: !meta?.paused } }); toast(meta?.paused ? "Đã bật lại bot" : "Đã tắt bot cho hội thoại này"); renderConvs(p); } catch (e) { toast("Lỗi: " + e.message); } };
+  } catch (e) { box.innerHTML = `<div class="muted">Lỗi: ${esc(e.message)}</div>`; }
+}
+
+/* ---------- Chăm sóc khách chưa mua (gửi hàng loạt) ---------- */
+const careState = {}; // pageId -> { list, selected, text }
+function renderCare(p) {
+  const st = (careState[p.id] ||= { list: [], selected: new Set(), text: localStorage.getItem("careText_" + p.id) || "Dạ em chào chị {name} ạ ❤️ Hôm trước chị có ghé xem đầm bên em, nay shop đang giảm 40% chỉ trong hôm nay. Chị cho em xin số điện thoại và chiều cao cân nặng để em giữ ưu đãi và tư vấn size cho mình nhé!" });
+  $("#content").innerHTML = `
+  <div class="card"><h3>1. Quét khách</h3>
+    <div class="row">
+      <span>Khoảng thời gian</span>
+      <select id="care_mode" style="width:auto"><option value="days">N ngày gần nhất</option><option value="range">Chọn từ ngày đến ngày</option></select>
+      <select id="care_days" style="width:auto"><option value="1">24 giờ</option><option value="3">3 ngày</option><option value="7" selected>7 ngày</option><option value="14">14 ngày</option><option value="30">30 ngày</option><option value="60">60 ngày</option></select>
+      <span id="care_range" style="display:none" class="row"><span>Từ ngày</span><input type="date" id="care_from" style="width:auto"><span>đến hết ngày</span><input type="date" id="care_to" style="width:auto"></span>
+    </div>
+    <div class="hint" id="care_rangehint" style="display:none"></div>
+    <div class="row" style="margin-top:8px">
+      <span>Tin cuối / tên khách chứa</span><input id="care_kw" placeholder="ví dụ: giá, size, Q004" style="width:180px">
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label class="switch"><input type="checkbox" id="care_nophone" checked> Chỉ khách chưa có số điện thoại</label>
+      <label class="switch"><input type="checkbox" id="care_custlast"> Chỉ khách nhắn cuối (page chưa trả lời)</label>
+      <button class="primary" id="care_scan">🔍 Quét</button><span id="care_scanstat" class="muted small"></span>
+    </div>
+    <div class="hint">Lọc theo thời gian khách nhắn cuối, tính theo giờ Việt Nam, giống cột thời gian trên Pancake. Quét tối đa 7.200 hội thoại gần nhất. Khách đã nhận tin hàng loạt trong 14 ngày sẽ được đánh dấu và tự bỏ qua khi gửi.</div>
+  </div>
+  <div class="card"><h3>2. Chọn khách <span id="care_count" class="muted small"></span></h3>
+    <div class="row" style="margin-bottom:6px"><button id="care_all">Chọn tất cả</button><button id="care_none">Bỏ chọn</button><span class="muted small" id="care_selcount"></span></div>
+    <div style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px"><table id="care_table"><tr><th></th><th>Khách</th><th>Tin cuối</th><th>Lúc</th><th>Ghi chú</th></tr><tr><td colspan="5" class="muted">Chưa quét.</td></tr></table></div>
+  </div>
+  <div class="card"><h3>3. Nội dung tin</h3>
+    <textarea id="care_text" style="min-height:110px">${esc(st.text)}</textarea>
+    <div class="hint">{name} = tên khách (từ cuối), {fullname} = tên đầy đủ. Có thể kèm ảnh: [[IMG:Q004]] hoặc [[IMG:ALL]]. Tin dài tự cắt. Không markdown.</div>
+    <div class="row" style="margin-top:8px"><span>Tốc độ</span><select id="care_rate" style="width:auto"><option value="10">10 tin/phút (an toàn)</option><option value="20" selected>20 tin/phút</option><option value="40">40 tin/phút</option></select>
+      <button id="care_test">📤 Gửi thử cho 1 khách đầu tiên đã chọn</button><button class="primary" id="care_send">🚀 Gửi cho tất cả khách đã chọn</button><button class="danger" id="care_stop">⏹ Dừng</button></div>
+    ${STATE.global.dryRun ? '<div class="hint">⚠ Đang ở chế độ CHỈ LOG: gửi hàng loạt sẽ chỉ ghi log, không gửi thật. Bấm nút "Chỉ log" ở góc trên bên trái để bật gửi thật.</div>' : ""}
+  </div>
+  <div class="card"><h3>4. Tiến độ</h3><div id="care_progress" class="muted">Chưa gửi.</div></div>`;
+  const drawTable = () => {
+    const rows = st.list.map((c, i) => `<tr><td><input type="checkbox" data-i="${i}" ${st.selected.has(c.id) ? "checked" : ""} ${c.paused ? "disabled" : ""}></td><td>${esc(c.customer)}</td><td class="small muted">${esc(c.snippet)}</td><td class="small muted">${fmtTime(c.updatedAt)}</td><td class="small">${c.paused ? '<span class="pill warn">bot tắt</span>' : ""}${c.sentBefore ? '<span class="pill">đã gửi ' + fmtTime(c.sentBefore) + "</span>" : ""}${c.lastBy === "customer" ? '<span class="pill ok">khách nhắn cuối</span>' : ""}</td></tr>`).join("");
+    $("#care_table").innerHTML = `<tr><th></th><th>Khách</th><th>Tin cuối</th><th>Lúc</th><th>Ghi chú</th></tr>${rows || '<tr><td colspan="5" class="muted">Không có khách nào khớp bộ lọc.</td></tr>'}`;
+    $("#care_count").textContent = st.list.length ? `(${st.list.length} khách)` : "";
+    $("#care_selcount").textContent = `đã chọn ${st.selected.size}`;
+    document.querySelectorAll("#care_table input[type=checkbox]").forEach((cb) => (cb.onchange = () => { const c = st.list[Number(cb.dataset.i)]; cb.checked ? st.selected.add(c.id) : st.selected.delete(c.id); $("#care_selcount").textContent = `đã chọn ${st.selected.size}`; }));
+  };
+  drawTable();
+  // Ngay theo gio VN: input type=date luon co dang yyyy-mm-dd du may hien thi kieu nao
+  const vnDayMs = (ymd, endOfDay) => new Date(`${ymd}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}+07:00`).getTime();
+  const dmy = (ymd) => { const [y, m, d] = String(ymd).split("-"); return `${d}/${m}/${y}`; };
+  const ymdVN = (ms) => new Date(ms + 7 * 3600e3).toISOString().slice(0, 10);
+  const careHint = () => {
+    const f = $("#care_from").value, t = $("#care_to").value;
+    $("#care_rangehint").textContent = f && t ? `Quét khách nhắn từ 00:00 ngày ${dmy(f)} đến 23:59 ngày ${dmy(t)} (giờ Việt Nam).` : "Chọn cả ngày bắt đầu và ngày kết thúc.";
+  };
+  $("#care_mode").onchange = () => {
+    const r = $("#care_mode").value === "range";
+    $("#care_range").style.display = r ? "flex" : "none";
+    $("#care_rangehint").style.display = r ? "" : "none";
+    $("#care_days").style.display = r ? "none" : "";
+    if (r && !$("#care_from").value) { $("#care_from").value = ymdVN(Date.now() - 7 * 864e5); $("#care_to").value = ymdVN(Date.now()); }
+    careHint();
+  };
+  $("#care_from").oninput = $("#care_to").oninput = careHint;
+  $("#care_scan").onclick = async () => {
+    $("#care_scanstat").textContent = "Đang quét…"; $("#care_scan").disabled = true;
+    try {
+      const q = new URLSearchParams({ noPhone: $("#care_nophone").checked ? 1 : 0, customerLast: $("#care_custlast").checked ? 1 : 0, keyword: $("#care_kw").value.trim() });
+      if ($("#care_mode").value === "range") {
+        const f = $("#care_from").value, t = $("#care_to").value || ymdVN(Date.now());
+        if (!f) throw new Error("Chưa chọn ngày bắt đầu");
+        q.set("from", Math.min(vnDayMs(f, false), vnDayMs(t, false)));
+        q.set("to", Math.max(vnDayMs(t, true), vnDayMs(f, true)));
+        q.set("days", 60);
+      } else q.set("days", $("#care_days").value);
+      const d = await api(`/api/pages/${p.id}/broadcast/scan?` + q.toString());
+      st.list = d.conversations; st.selected = new Set(d.conversations.filter((c) => !c.paused && !c.sentBefore).map((c) => c.id));
+      $("#care_scanstat").textContent = `${d.total} khách · ${dmy(ymdVN(Date.parse(d.from)))} → ${dmy(ymdVN(Date.parse(d.to)))}${d.keyword ? ` · chứa "${d.keyword}"` : ""} · đã quét ${d.scanned} hội thoại${d.truncated ? " (chạm giới hạn, có thể còn khách cũ hơn)" : ""}`; drawTable();
+    } catch (e) { $("#care_scanstat").textContent = "Lỗi: " + e.message; } finally { $("#care_scan").disabled = false; }
+  };
+  $("#care_all").onclick = () => { st.selected = new Set(st.list.filter((c) => !c.paused).map((c) => c.id)); drawTable(); };
+  $("#care_none").onclick = () => { st.selected = new Set(); drawTable(); };
+  $("#care_text").oninput = () => { st.text = $("#care_text").value; try { localStorage.setItem("careText_" + p.id, st.text); } catch {} };
+  let poll = null;
+  const showProgress = (s) => {
+    if (!s.running && !s.total) return ($("#care_progress").textContent = "Chưa gửi.");
+    const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
+    $("#care_progress").innerHTML = `<div>${s.running ? "⏳ Đang gửi" : "✅ Xong"}${s.dryRun ? " (chỉ log)" : ""}: ${s.done}/${s.total} · gửi ${s.sent} · bỏ qua ${s.skipped} · lỗi ${s.failed} · ${s.perMinute} tin/phút</div><div style="height:8px;background:#0b0f14;border-radius:4px;margin:6px 0"><div style="height:8px;width:${pct}%;background:var(--acc);border-radius:4px"></div></div>${s.errors?.length ? `<div class="small muted">${s.errors.map(esc).join("<br>")}</div>` : ""}`;
+    if (!s.running && poll) { clearInterval(poll); poll = null; }
+  };
+  const startPoll = () => { if (poll) clearInterval(poll); poll = setInterval(() => api(`/api/pages/${p.id}/broadcast/status`).then(showProgress).catch(() => {}), 2000); };
+  api(`/api/pages/${p.id}/broadcast/status`).then((s) => { showProgress(s); if (s.running) startPoll(); }).catch(() => {});
+  const start = async (ids) => {
+    const text = $("#care_text").value.trim(); if (!text) return toast("Nhập nội dung tin trước");
+    if (!ids.length) return toast("Chưa chọn khách nào");
+    if (!confirm(`Gửi tin cho ${ids.length} khách của ${p.name || p.id}?${STATE.global.dryRun ? " (đang CHỈ LOG, sẽ không gửi thật)" : ""}`)) return;
+    try { const s = await api(`/api/pages/${p.id}/broadcast/start`, { method: "POST", body: { ids, text, perMinute: Number($("#care_rate").value) } }); showProgress(s); startPoll(); } catch (e) { toast("Lỗi: " + e.message); }
+  };
+  $("#care_test").onclick = () => start([...st.selected].slice(0, 1));
+  $("#care_send").onclick = () => start([...st.selected]);
+  $("#care_stop").onclick = async () => { try { showProgress(await api(`/api/pages/${p.id}/broadcast/stop`, { method: "POST" })); toast("Đã dừng"); } catch (e) { toast("Lỗi: " + e.message); } };
+}
+
+/* ---------- Bám khách chưa chốt (sales agent) ---------- */
+const followState = {}; // pageId -> { list, selected }
+const STAGE_LABELS = {
+  phone_no_order: "Có SĐT, chưa chốt", objection: "Chê giá / cân nhắc", size_no_phone: "Đã cho số đo, chưa SĐT",
+  quoted_no_phone: "Đã báo giá, chưa SĐT", viewed_only: "Xem ảnh rồi im", cold: "Chỉ hỏi qua",
+  refused: "Khách từ chối", ordered: "Đã chốt đơn", waiting: "Đang chờ shop trả lời",
+};
+const STAGE_PICK = ["phone_no_order", "objection", "size_no_phone", "quoted_no_phone", "viewed_only", "cold"];
+
+function renderFollow(p) {
+  const st = (followState[p.id] ||= { list: [], selected: new Set() });
+  const s = p.settings;
+  const chon = String(s.followupStages || "").split(/[,|\s]+/).filter(Boolean);
+  $("#content").innerHTML = `
+  <div class="card"><h3>1. Cài đặt bám khách</h3>
+    <div class="row">
+      <label class="switch"><input type="checkbox" id="fu_on" ${s.followupEnabled ? "checked" : ""}> Cho phép bám khách page này</label>
+      <label class="switch"><input type="checkbox" id="fu_auto" ${s.followupAuto ? "checked" : ""}> Tự động bám theo lịch (không cần bấm nút)</label>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span>Bám tối đa</span><input id="fu_max" type="number" min="1" max="5" value="${Number(s.followupMaxTouches) || 3}" style="width:60px"><span>lần / khách</span>
+      <span style="margin-left:12px">Mốc im lặng (giờ)</span><input id="fu_delays" value="${esc(s.followupDelays || "20,72,168")}" placeholder="20,72,168" style="width:120px">
+      <span style="margin-left:12px">Tối đa</span><input id="fu_limit" type="number" min="1" max="500" value="${Number(s.followupDailyLimit) || 50}" style="width:70px"><span>tin/ngày</span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span>Giờ yên tĩnh: không nhắn từ</span><input id="fu_qf" type="number" min="0" max="23" value="${Number(s.followupQuietFrom ?? 21)}" style="width:60px"><span>h đến</span><input id="fu_qt" type="number" min="0" max="23" value="${Number(s.followupQuietTo ?? 8)}" style="width:60px"><span>h (giờ VN)</span>
+    </div>
+    <div class="row" style="margin-top:8px;flex-wrap:wrap">
+      <span>Chỉ bám các giai đoạn:</span>
+      ${STAGE_PICK.map((k) => `<label class="switch"><input type="checkbox" class="fu_stage" value="${k}" ${!chon.length || chon.includes(k) ? "checked" : ""}> ${STAGE_LABELS[k]}</label>`).join("")}
+    </div>
+    <div style="margin-top:8px"><span class="muted small">Yêu cầu riêng cho tin bám (tuỳ chọn)</span>
+      <textarea id="fu_extra" style="min-height:60px" placeholder="ví dụ: nhắc khách lấy 2 chiếc được miễn ship">${esc(s.followupExtra || "")}</textarea></div>
+    <div class="row" style="margin-top:8px"><button class="primary" id="fu_save">💾 Lưu cài đặt</button>
+      <span class="muted small">Hôm nay đã bám ${p.stats?.followupToday || 0} tin.</span></div>
+    <div class="hint">Agent chỉ nhắn khi: shop là người nhắn cuối, khách im đủ lâu theo mốc, chưa bám quá số lần, ngoài giờ yên tĩnh, chưa chốt đơn và khách chưa từ chối. Mỗi tin được AI soạn riêng theo hội thoại của khách đó, rồi mới qua các chốt chặn giá / chống chốt đơn / chống trùng tin.</div>
+  </div>
+  <div class="card"><h3>2. Quét &amp; phân loại khách</h3>
+    <div class="row">
+      <span>Trong</span><select id="fu_days" style="width:auto"><option value="7">7 ngày</option><option value="14">14 ngày</option><option value="30" selected>30 ngày</option><option value="60">60 ngày</option><option value="90">90 ngày</option></select>
+      <label class="switch"><input type="checkbox" id="fu_onlyel" checked> Chỉ hiện khách đủ điều kiện bám</label>
+      <button class="primary" id="fu_scan">🔍 Quét</button><span id="fu_scanstat" class="muted small"></span>
+    </div>
+    <div class="hint">Quét chậm hơn tab Chăm sóc khách vì phải đọc tin nhắn từng hội thoại để phân loại. Không tốn tiền AI ở bước này.</div>
+  </div>
+  <div class="card"><h3>3. Danh sách <span id="fu_count" class="muted small"></span></h3>
+    <div class="row" style="margin-bottom:6px"><button id="fu_all">Chọn tất cả đủ điều kiện</button><button id="fu_none">Bỏ chọn</button><span class="muted small" id="fu_selcount"></span></div>
+    <div style="max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px"><table id="fu_table"><tr><th></th><th>Khách</th><th>Giai đoạn</th><th>Im lặng</th><th>Đã bám</th><th>Ghi chú</th><th></th></tr><tr><td colspan="7" class="muted">Chưa quét.</td></tr></table></div>
+    <div id="fu_preview" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--line);border-radius:8px"></div>
+  </div>
+  <div class="card"><h3>4. Chạy</h3>
+    <div class="row"><span>Tốc độ</span><select id="fu_rate" style="width:auto"><option value="3">3 tin/phút (an toàn)</option><option value="6" selected>6 tin/phút</option><option value="12">12 tin/phút</option></select>
+      <button class="primary" id="fu_start">🎯 Bám tất cả khách đã chọn</button><button class="danger" id="fu_stop">⏹ Dừng</button></div>
+    ${STATE.global.dryRun ? '<div class="hint">⚠ Đang ở chế độ CHỈ LOG: agent sẽ soạn tin và ghi log nhưng không gửi thật. Rất hợp để chạy thử lần đầu.</div>' : '<div class="hint">⚠ Đang GỬI THẬT. Lần đầu nên bật "Chỉ log" ở góc trên bên trái để xem agent soạn gì trước.</div>'}
+    <div id="fu_progress" class="muted" style="margin-top:8px">Chưa chạy.</div>
+  </div>`;
+
+  const drawTable = () => {
+    const rows = st.list.map((c, i) => `<tr><td><input type="checkbox" data-i="${i}" ${st.selected.has(c.id) ? "checked" : ""} ${c.eligible ? "" : "disabled"}></td>
+      <td>${esc(c.customer)}</td><td class="small">${esc(c.stageLabel || c.stage)}</td><td class="small muted">${c.quietHours}h</td>
+      <td class="small muted">${c.touches} lần${c.lastFollowupAt ? " · " + fmtTime(c.lastFollowupAt) : ""}</td>
+      <td class="small">${c.eligible ? `<span class="pill ok">bám lần ${c.touch}</span>` : `<span class="pill">${esc(c.reason)}</span>`}${c.hasPhone ? '<span class="pill">có SĐT</span>' : ""}</td>
+      <td><button data-prev="${i}" class="small">Xem thử</button></td></tr>`).join("");
+    $("#fu_table").innerHTML = `<tr><th></th><th>Khách</th><th>Giai đoạn</th><th>Im lặng</th><th>Đã bám</th><th>Ghi chú</th><th></th></tr>${rows || '<tr><td colspan="7" class="muted">Không có khách nào.</td></tr>'}`;
+    $("#fu_count").textContent = st.list.length ? `(${st.list.length} khách, ${st.list.filter((c) => c.eligible).length} đủ điều kiện)` : "";
+    $("#fu_selcount").textContent = `đã chọn ${st.selected.size}`;
+    document.querySelectorAll("#fu_table input[type=checkbox]").forEach((cb) => (cb.onchange = () => { const c = st.list[Number(cb.dataset.i)]; cb.checked ? st.selected.add(c.id) : st.selected.delete(c.id); $("#fu_selcount").textContent = `đã chọn ${st.selected.size}`; }));
+    document.querySelectorAll("#fu_table button[data-prev]").forEach((b) => (b.onclick = () => preview(st.list[Number(b.dataset.prev)], b)));
+  };
+  drawTable();
+
+  const preview = async (c, btn) => {
+    const box = $("#fu_preview");
+    box.style.display = "";
+    box.innerHTML = `<div class="muted">Đang soạn tin cho ${esc(c.customer)}…</div>`;
+    if (btn) btn.disabled = true;
+    try {
+      const r = await api(`/api/pages/${p.id}/followup/preview`, { method: "POST", body: { conversationId: c.id, force: true } });
+      box.innerHTML = r.skip
+        ? `<div><b>${esc(c.customer)}</b> · <span class="pill warn">bỏ qua</span> ${esc(r.reason || "")}</div>`
+        : `<div><b>${esc(c.customer)}</b> · ${esc(r.stageLabel || "")} · bám lần ${r.touch}</div><div style="margin-top:6px;white-space:pre-wrap">${esc(r.text)}</div><div class="hint">Đây chỉ là bản xem thử, chưa gửi cho khách.</div>`;
+    } catch (e) { box.innerHTML = `<div class="muted">Lỗi: ${esc(e.message)}</div>`; }
+    finally { if (btn) btn.disabled = false; }
+  };
+
+  $("#fu_save").onclick = async () => {
+    const stages = [...document.querySelectorAll(".fu_stage")].filter((x) => x.checked).map((x) => x.value);
+    const body = {
+      followupEnabled: $("#fu_on").checked, followupAuto: $("#fu_auto").checked,
+      followupMaxTouches: Number($("#fu_max").value) || 3, followupDelays: $("#fu_delays").value.trim(),
+      followupDailyLimit: Number($("#fu_limit").value) || 50,
+      followupQuietFrom: Number($("#fu_qf").value), followupQuietTo: Number($("#fu_qt").value),
+      followupExtra: $("#fu_extra").value.trim(),
+      followupStages: stages.length === STAGE_PICK.length ? "" : stages.join(","),
+    };
+    try { await api(`/api/pages/${p.id}/settings`, { method: "PUT", body }); toast("Đã lưu"); await refreshState(); } catch (e) { toast("Lỗi: " + e.message); }
+  };
+
+  $("#fu_scan").onclick = async () => {
+    $("#fu_scanstat").textContent = "Đang quét…"; $("#fu_scan").disabled = true;
+    try {
+      const q = new URLSearchParams({ days: $("#fu_days").value, onlyEligible: $("#fu_onlyel").checked ? 1 : 0 });
+      const d = await api(`/api/pages/${p.id}/followup/scan?` + q.toString());
+      st.list = d.conversations; st.selected = new Set(d.conversations.filter((c) => c.eligible).map((c) => c.id));
+      $("#fu_scanstat").textContent = `${d.total} khách · ${d.eligible} đủ điều kiện · đã quét ${d.scanned} hội thoại${d.truncated ? " (chạm giới hạn)" : ""} · hôm nay đã bám ${d.sentToday}/${d.config.dailyLimit}`;
+      drawTable();
+    } catch (e) { $("#fu_scanstat").textContent = "Lỗi: " + e.message; } finally { $("#fu_scan").disabled = false; }
+  };
+  $("#fu_all").onclick = () => { st.selected = new Set(st.list.filter((c) => c.eligible).map((c) => c.id)); drawTable(); };
+  $("#fu_none").onclick = () => { st.selected = new Set(); drawTable(); };
+
+  let poll = null;
+  const showProgress = (s) => {
+    if (!s.running && !s.total) return ($("#fu_progress").textContent = "Chưa chạy.");
+    const pct = s.total ? Math.round((s.done / s.total) * 100) : 0;
+    $("#fu_progress").innerHTML = `<div>${s.running ? "⏳ Đang bám" : "✅ Xong"}${s.dryRun ? " (chỉ log)" : ""}: ${s.done}/${s.total} · gửi ${s.sent} · bỏ qua ${s.skipped} · lỗi ${s.failed}</div>
+      <div style="height:8px;background:#0b0f14;border-radius:4px;margin:6px 0"><div style="height:8px;width:${pct}%;background:var(--acc);border-radius:4px"></div></div>
+      ${s.log?.length ? `<div class="small" style="white-space:pre-wrap">${s.log.map(esc).join("\n")}</div>` : ""}
+      ${s.errors?.length ? `<div class="small muted">${s.errors.map(esc).join("<br>")}</div>` : ""}`;
+    if (!s.running && poll) { clearInterval(poll); poll = null; }
+  };
+  const startPoll = () => { if (poll) clearInterval(poll); poll = setInterval(() => api(`/api/pages/${p.id}/followup/status`).then(showProgress).catch(() => {}), 2000); };
+  api(`/api/pages/${p.id}/followup/status`).then((s) => { showProgress(s); if (s.running) startPoll(); }).catch(() => {});
+
+  $("#fu_start").onclick = async () => {
+    const ids = [...st.selected];
+    if (!ids.length) return toast("Chưa chọn khách nào");
+    if (!p.settings.followupEnabled) return toast('Bật "Cho phép bám khách page này" và lưu trước đã');
+    if (!confirm(`Bám ${ids.length} khách của ${p.name || p.id}?${STATE.global.dryRun ? " (đang CHỈ LOG, sẽ không gửi thật)" : " (SẼ GỬI THẬT)"}`)) return;
+    try { const s = await api(`/api/pages/${p.id}/followup/start`, { method: "POST", body: { ids, perMinute: Number($("#fu_rate").value) } }); showProgress(s); startPoll(); } catch (e) { toast("Lỗi: " + e.message); }
+  };
+  $("#fu_stop").onclick = async () => { try { showProgress(await api(`/api/pages/${p.id}/followup/stop`, { method: "POST" })); toast("Đã dừng"); } catch (e) { toast("Lỗi: " + e.message); } };
+}
+
+/* ---------- Lịch sử bot ---------- */
+async function renderHistory(p) {
+  $("#content").innerHTML = '<div class="muted">Đang tải…</div>';
+  const d = await api(`/api/pages/${p.id}`);
+  $("#content").innerHTML = `<div class="card"><h3>30 lần bot xử lý gần nhất</h3><table><tr><th>Lúc</th><th>Khách</th><th>Khách hỏi</th><th>Bot trả lời</th><th></th></tr>${d.recent.map((r) => `<tr><td class="small muted">${fmtTime(r.at)}</td><td>${esc(r.customerName)}</td><td>${esc(r.question)}</td><td>${esc(r.reply)}</td><td>${r.dryRun ? '<span class="pill warn">chỉ log</span>' : ""}${r.handoff ? '<span class="pill">chuyển NV</span>' : ""}</td></tr>`).join("") || '<tr><td colspan="5" class="muted">Chưa có.</td></tr>'}</table></div>`;
+}
+
+/* ---------- Global views ---------- */
+const assistantChats = {}; // key ("global" | pageId) -> { contents, msgs }
+const chatOf = (key) => (assistantChats[key] ||= { contents: [], msgs: [] });
+const SUGGEST = ["Tình hình các page hôm nay thế nào?", "Tắt bot cho page Moda Bella", "Cho tất cả page xưng em, gọi khách là chị", "Page Hoa Trà: khi khách hỏi địa chỉ thì trả lời 12 Nguyễn Trãi, Hà Nội", "Đổi phí ship thành 25k, miễn ship từ 400k", "Thử xem bot Linh Tây trả lời câu 'còn size L không' ra sao", "Đổi model của tất cả page sang gemini-3.5-flash", "Có lỗi gì trong nhật ký không?"];
+const SUGGEST_PAGE = ["Bot đang chat với khách thế nào?", "Phân tích hội thoại gần đây và đề xuất cải thiện", "Xưng em, gọi khách là chị", "Trả lời ngắn gọn hơn, tối đa 2 câu", "Khi khách hỏi địa chỉ thì trả lời: [địa chỉ]", "Thử hỏi bot: còn size L không?", "Tắt bot page này", "Xem hướng dẫn riêng hiện tại"];
+function renderAssistant(page) {
+  const assistant = chatOf(page ? page.id : "global");
+  const chips = page ? SUGGEST_PAGE : SUGGEST;
+  if (!page) { $("#title").textContent = "Trợ lý AI"; $("#topinfo").textContent = "Nói bằng tiếng Việt, trợ lý tự đọc/sửa cài đặt bot. Việc lớn (prompt chung, gửi tin cho khách) sẽ hỏi lại trước khi làm."; }
+  $("#content").innerHTML = `<div class="chat">${page ? `<div class="hint" style="margin-bottom:8px">Trò chuyện với AI để xem và điều chỉnh cách bot của <b>${esc(page.name || page.id)}</b> giao tiếp với khách. AI tự đọc hội thoại, sửa hướng dẫn, thử bot… Việc lớn sẽ hỏi lại trước khi làm.</div>` : ""}<div class="chips" id="as_chips">${chips.map((t) => `<button>${esc(t)}</button>`).join("")}</div>
+    <div class="msgs" id="as_msgs"></div>
+    <div id="as_attach" class="row" style="margin-top:6px;gap:6px"></div>
+    <div class="row" style="margin-top:8px"><button id="as_img" title="Gửi ảnh (chụp màn hình hội thoại, lỗi, sản phẩm…). Cũng có thể dán Ctrl+V hoặc kéo thả ảnh vào đây">📎 Ảnh</button><input type="file" id="as_file" accept="image/*" multiple style="display:none"><input id="as_in" placeholder="Ví dụ: tắt bot page Hoa Trà, cho page Linh Tây gọi khách là chị, đổi phí ship thành 25k… (Enter để gửi, Ctrl+V để dán ảnh)" style="flex:1"><button class="primary" id="as_send">Gửi</button><button id="as_reset">Cuộc trò chuyện mới</button></div></div>`;
+  const pendingImgs = []; // {mimeType, data(base64), url}
+  const drawAttach = () => { $("#as_attach").innerHTML = pendingImgs.map((im, i) => `<span style="position:relative;display:inline-block"><img src="${im.url}" style="height:56px;border-radius:6px;border:1px solid var(--line)"><button data-i="${i}" style="position:absolute;top:-6px;right:-6px;padding:0 5px;font-size:11px;border-radius:99px">✕</button></span>`).join("") + (pendingImgs.length ? '<span class="muted small">Ảnh sẽ gửi kèm tin tiếp theo</span>' : ""); document.querySelectorAll("#as_attach button").forEach((b) => (b.onclick = () => { pendingImgs.splice(Number(b.dataset.i), 1); drawAttach(); })); };
+  const addFiles = async (files) => { for (const f of files) { if (!f.type.startsWith("image/")) continue; try { pendingImgs.push(await shrinkImage(f)); } catch (e) { toast("Không đọc được ảnh: " + e.message); } } drawAttach(); };
+  $("#as_img").onclick = () => $("#as_file").click();
+  $("#as_file").onchange = (e) => { addFiles([...e.target.files]); e.target.value = ""; };
+  document.onpaste = (e) => { const fs = [...(e.clipboardData?.items || [])].filter((it) => it.type.startsWith("image/")).map((it) => it.getAsFile()); if (fs.length) { e.preventDefault(); addFiles(fs); } };
+  const box = $("#content"); box.ondragover = (e) => { e.preventDefault(); }; box.ondrop = (e) => { e.preventDefault(); addFiles([...(e.dataTransfer?.files || [])]); };
+  const draw = () => { $("#as_msgs").innerHTML = assistant.msgs.map((m) => `<div class="m ${m.role === "user" ? "u" : "b"}">${m.images?.length ? m.images.map((u) => `<img src="${u}" style="max-width:220px;border-radius:8px;display:block;margin-bottom:6px">`).join("") : ""}${m.role === "user" ? esc(m.text) : md(m.text)}${m.actions?.length ? "<div>" + m.actions.map((a) => `<span class="act ${a.ok ? "ok" : "err"}" title="${esc(a.ok ? a.result : a.error)}">${a.ok ? "✓" : "✗"} ${esc(a.name)}${a.args?.page ? " · " + esc(a.args.page) : ""}</span>`).join("") + "</div>" : ""}</div>`).join("") || `<div class="muted">${page ? `Xin chào! Mình là trợ lý cho page ${esc(page.name || page.id)}. Hỏi mình bot đang chat thế nào, hoặc bảo mình chỉnh cách bot nói chuyện với khách.` : "Xin chào! Mình là trợ lý quản trị bot. Bạn muốn chỉnh gì cho bot? Có thể bấm gợi ý phía trên."}</div>`; $("#as_msgs").scrollTop = 1e9; };
+  draw();
+  const send = async (preset) => {
+    let t = (preset || $("#as_in").value).trim(); if (!t && !pendingImgs.length) return; $("#as_in").value = "";
+    if (t.includes("[địa chỉ]")) { $("#as_in").value = t; return toast("Sửa [địa chỉ] thành địa chỉ thật rồi gửi"); }
+    const imgs = pendingImgs.splice(0); drawAttach();
+    if (!t) t = "Xem ảnh này giúp mình, có gì cần khắc phục hoặc cải thiện cho bot không?";
+    const parts = [...imgs.map((im) => ({ inline_data: { mime_type: im.mimeType, data: im.data } })), { text: t }];
+    assistant.msgs.push({ role: "user", text: t, images: imgs.map((im) => im.url) }); assistant.contents.push({ role: "user", parts }); draw();
+    $("#as_send").disabled = true; assistant.msgs.push({ role: "model", text: "⏳ đang xử lý…" }); draw();
+    try { const d = await api("/api/assistant/chat", { method: "POST", body: { contents: assistant.contents, pageId: page ? page.id : undefined } });
+      assistant.msgs.pop(); assistant.msgs.push({ role: "model", text: d.text || "(đã thực hiện)", actions: d.actions }); assistant.contents = d.contents;
+      if (d.actions?.some((a) => a.ok && /update|set_|append|remove|apply|refresh|pause/.test(a.name))) api("/api/state").then((s) => { STATE = s; renderSidebar(); });
+    } catch (e) { assistant.msgs.pop(); assistant.msgs.push({ role: "model", text: "Lỗi: " + e.message }); }
+    finally { $("#as_send").disabled = false; draw(); $("#as_in").focus(); }
+  };
+  $("#as_send").onclick = () => send(); $("#as_in").onkeydown = (e) => { if ((e.key === "Enter" || e.keyCode === 13) && !e.isComposing) { e.preventDefault(); send(); } };
+  $("#as_reset").onclick = () => { assistant.msgs.length = 0; assistant.contents = []; draw(); };
+  document.querySelectorAll("#as_chips button").forEach((b) => (b.onclick = () => send(b.textContent)));
+  $("#as_in").focus();
+}
+
+/* ---------- Thêm page bằng token Pancake ---------- */
+// Doc thu page id trong Page Access Token (JWT) de dien san, khong doc duoc thi thoi
+function pageIdFromToken(token) {
+  try {
+    const parts = String(token || "").trim().split(".");
+    if (parts.length < 2) return "";
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+    for (const k of ["page_id", "pageId", "pid", "fb_page_id", "id", "sub"]) if (/^\d{5,}$/.test(String(payload[k] ?? ""))) return String(payload[k]);
+  } catch {}
+  return "";
+}
+function renderAddPage() {
+  $("#title").textContent = view.prefillId ? "Đổi token cho page " + view.prefillId : "Thêm page vào bot";
+  $("#topinfo").textContent = "Không cần sửa .env, không cần khởi động lại. Token được kiểm tra với Pancake trước khi lưu.";
+  $("#content").innerHTML = `
+  <div class="card"><h3>Cách 1 · Dán Page Access Token của page</h3>
+    <div class="hint">Lấy token trong Pancake: mở page → <b>Cài đặt</b> → <b>Công cụ</b> (hoặc "Ứng dụng / API") → <b>Page Access Token</b> → Tạo/Copy. Token đúng có dạng <code>eyJ…</code> rất dài. Token Facebook dạng <code>EAA…</code> KHÔNG dùng được.</div>
+    <label>Page Access Token</label><textarea id="ap_token" style="min-height:90px;font-family:ui-monospace,Consolas,monospace;font-size:12px" placeholder="eyJhbGciOi…"></textarea>
+    <div class="grid2">
+      <div><label>Page ID (dãy số, tự điền nếu đọc được từ token)</label><input id="ap_id" placeholder="1115433011652980" value="${esc(view.prefillId || "")}"></div>
+      <div><label>Tên hiển thị (tuỳ chọn, trống = lấy tên thật từ Pancake)</label><input id="ap_name" placeholder="Ví dụ: Hải An Luxury CS4" value="${esc(view.prefillName || "")}"></div>
+    </div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="ap_add">✅ Kiểm tra token &amp; thêm page</button><span id="ap_status" class="muted small"></span></div>
+    <div class="hint">Sau khi thêm, bot chỉ trả lời các tin MỚI từ lúc này; tin cũ trên page không bị trả lời hàng loạt. Page mới mặc định BẬT và theo chế độ chỉ log/gửi thật chung.</div>
+  </div>
+  <div class="card"><h3>Cách 2 · Dán User Access Token để chọn nhiều page một lần</h3>
+    <div class="hint">Lấy trong Pancake: góc phải trên → <b>Cài đặt cá nhân</b> → <b>Access token</b>. App sẽ liệt kê các page tài khoản này quản lý, bạn tích chọn rồi app tự sinh Page Access Token cho từng page. User token KHÔNG được lưu lại.</div>
+    <div class="row"><input id="ap_user" placeholder="User Access Token…" style="flex:1;font-family:ui-monospace,Consolas,monospace;font-size:12px"><button id="ap_lookup">🔍 Liệt kê page</button></div>
+    <div id="ap_list" style="margin-top:10px"></div>
+  </div>`;
+  const status = (t, err) => { const s = $("#ap_status"); s.textContent = t; s.style.color = err ? "var(--err)" : ""; };
+  $("#ap_token").oninput = () => { const id = pageIdFromToken($("#ap_token").value); if (id && !$("#ap_id").value) $("#ap_id").value = id; };
+  $("#ap_add").onclick = async (ev) => {
+    const token = $("#ap_token").value.trim(), pageId = $("#ap_id").value.trim(), name = $("#ap_name").value.trim();
+    if (!token) return status("Chưa dán token", true);
+    if (!/^\d{5,}$/.test(pageId)) return status("Page ID phải là dãy số (xem trên địa chỉ page trong Pancake: pages.fm/<PAGE ID>/…)", true);
+    ev.target.disabled = true; status("⏳ Đang kiểm tra token với Pancake…");
+    try {
+      const r = await api("/api/pages", { method: "POST", body: { pageId, token, name } });
+      toast(`${r.isNew ? "Đã thêm" : "Đã cập nhật token"} page ${r.name || pageId} (${r.conversations} hội thoại hiện có)`, 6000);
+      view = { kind: "page", id: pageId, tab: "settings" }; await refreshState();
+    } catch (e) { status("✗ " + e.message, true); ev.target.disabled = false; }
+  };
+  $("#ap_lookup").onclick = async (ev) => {
+    const userToken = $("#ap_user").value.trim(); if (!userToken) return toast("Chưa dán User Access Token");
+    ev.target.disabled = true; $("#ap_list").innerHTML = '<span class="muted">⏳ Đang lấy danh sách page…</span>';
+    try {
+      const d = await api("/api/pages/lookup", { method: "POST", body: { userToken } });
+      if (!d.pages.length) { $("#ap_list").innerHTML = '<span class="muted">Tài khoản này không quản lý page nào (hoặc token sai).</span>'; return; }
+      $("#ap_list").innerHTML = `<table><tr><th></th><th>Page</th><th>ID</th><th>Nền tảng</th><th>Trạng thái</th></tr>${d.pages.map((x) => `<tr><td><input type="checkbox" class="ap_pick" data-id="${esc(x.id)}" data-name="${esc(x.name)}" ${x.added ? "" : "checked"} style="width:auto"></td><td>${esc(x.name)}</td><td class="small muted">${esc(x.id)}</td><td class="small muted">${esc(x.platform)}</td><td>${x.added ? '<span class="pill ok">đã có trong bot</span>' : ""}</td></tr>`).join("")}</table>
+        <div class="row" style="margin-top:10px"><button class="primary" id="ap_addsel">➕ Thêm các page đã chọn</button><span id="ap_selstatus" class="muted small"></span></div>`;
+      $("#ap_addsel").onclick = async (ev2) => {
+        const picks = [...document.querySelectorAll(".ap_pick:checked")]; if (!picks.length) return toast("Chưa chọn page nào");
+        ev2.target.disabled = true; $("#ap_selstatus").textContent = `⏳ Đang sinh token và thêm ${picks.length} page…`;
+        try {
+          const names = Object.fromEntries(picks.map((c) => [c.dataset.id, c.dataset.name]));
+          const r = await api("/api/pages/from-user", { method: "POST", body: { userToken, pageIds: picks.map((c) => c.dataset.id), names } });
+          const ok = r.results.filter((x) => x.ok), bad = r.results.filter((x) => !x.ok);
+          $("#ap_selstatus").innerHTML = `${ok.length ? "✓ Đã thêm: " + esc(ok.map((x) => x.name || x.id).join(", ")) : ""}${bad.length ? `<div style="color:var(--err)">✗ Lỗi: ${esc(bad.map((x) => x.id + " (" + x.error + ")").join("; "))}</div>` : ""}`;
+          toast(`Đã thêm ${ok.length}/${r.results.length} page`, 6000);
+          await api("/api/state").then((s) => { STATE = s; renderSidebar(); });
+          if (ok.length && !bad.length) { view = { kind: "page", id: ok[0].id, tab: "settings" }; render(); renderSidebar(); }
+        } catch (e) { $("#ap_selstatus").textContent = "✗ " + e.message; } finally { ev2.target.disabled = false; }
+      };
+    } catch (e) { $("#ap_list").innerHTML = `<span style="color:var(--err)">✗ ${esc(e.message)}</span>`; } finally { ev.target.disabled = false; }
+  };
+  $("#ap_token").focus();
+}
+
+async function renderGlobal() {
+  const c = $("#content");
+  if (view.kind === "addpage") return renderAddPage();
+  if (view.kind === "assistant") return renderAssistant();
+  if (view.kind === "prompt") {
+    $("#title").textContent = "Prompt chung (prompts/system.md)"; $("#topinfo").textContent = "Áp dụng cho tất cả page. {{SHOP_NAME}} = tên page, {{CATALOG}} = sản phẩm POS.";
+    const d = await api("/api/prompt");
+    c.innerHTML = `<div class="card"><textarea id="gp" style="min-height:calc(100vh - 260px);font-family:ui-monospace,Consolas,monospace;font-size:13px">${esc(d.text)}</textarea><div class="row" style="margin-top:8px"><button class="primary" id="gp_save">💾 Lưu</button><span class="muted small">Có hiệu lực ngay cho tin nhắn tiếp theo. Bản cũ lưu ở data/system.md.bak. Muốn AI sửa: vào page bất kỳ → tab "AI điều chỉnh" → chọn "Sửa prompt chung".</span></div></div>`;
+    $("#gp_save").onclick = async () => { try { await api("/api/prompt", { method: "PUT", body: { text: $("#gp").value } }); toast("Đã lưu prompt chung"); } catch (e) { toast("Lỗi: " + e.message); } };
+  } else if (view.kind === "catalog") {
+    $("#title").textContent = "Sản phẩm đồng bộ từ Pancake POS"; $("#topinfo").textContent = "";
+    const d = await api("/api/catalog");
+    c.innerHTML = `<div class="row" style="margin-bottom:12px"><span class="muted">${d.enabled ? `${d.products.length} sản phẩm · cập nhật ${fmtTime(d.updatedAt)}` : "Chưa cấu hình POS_SHOP_ID / POS_API_KEY trong .env"}</span>${d.enabled ? '<button id="cat_refresh">↻ Đồng bộ ngay</button>' : ""}</div>
+      <div class="card"><table><tr><th>Mã</th><th>Tên</th><th>Giá</th><th>Thuộc tính</th><th>Biến thể</th><th>Ảnh</th></tr>${d.products.map((p) => `<tr><td>${esc(p.code)}</td><td>${esc(p.name)}${p.note ? `<div class="small muted">${esc(p.note)}</div>` : ""}</td><td>${p.price.min.toLocaleString("vi-VN")}${p.price.max !== p.price.min ? " – " + p.price.max.toLocaleString("vi-VN") : ""}đ</td><td class="small">${Object.entries(p.attributes).map(([k, v]) => `${esc(k)}: ${esc(v.join(", "))}`).join("<br>")}</td><td class="small">${p.variations.length} (${p.variations.filter((v) => v.available).length} đặt được)</td><td>${p.images.slice(0, 3).map((u) => `<img src="${esc(u)}" style="height:48px;border-radius:6px;margin-right:4px">`).join("")}</td></tr>`).join("")}</table></div>
+      <div class="card"><h3>Đoạn text bot "học" từ POS</h3><pre>${esc(d.text)}</pre></div>`;
+    const b = $("#cat_refresh"); if (b) b.onclick = async () => { b.disabled = true; try { await api("/api/catalog/refresh", { method: "POST" }); toast("Đã đồng bộ"); renderGlobal(); } catch (e) { toast("Lỗi: " + e.message); b.disabled = false; } };
+  } else if (view.kind === "cho") {
+    return renderCho();
+  } else if (view.kind === "audit") {
+    return renderAudit();
+  } else if (view.kind === "logs") {
+    $("#title").textContent = "Nhật ký bot (trực tiếp)"; $("#topinfo").textContent = "";
+    const d = await api("/api/logs");
+    c.innerHTML = `<div class="card log" id="logbox" style="max-height:calc(100vh - 170px);overflow:auto">${d.logs.map(logLine).join("")}</div>`;
+    $("#logbox").scrollTop = 1e9;
+  }
+}
+let choTimer = null;
+async function renderCho() {
+  clearInterval(choTimer);
+  $("#title").textContent = "Khách đang chờ trả lời";
+  $("#topinfo").textContent = "";
+  $("#content").innerHTML = `
+  <div class="card">
+    <div class="row">
+      <span>Khách nhắn trong</span>
+      <select id="cho_gio" style="width:auto"><option value="2">2 giờ</option><option value="6" selected>6 giờ</option><option value="24">24 giờ</option><option value="48">48 giờ</option></select>
+      <button id="cho_lammoi">↻ Kiểm tra lại</button>
+      <button class="primary" id="cho_repall">📥 Cho bot trả lời hết</button>
+      <label class="switch"><input type="checkbox" id="cho_auto" checked> Tự kiểm tra mỗi 30 giây</label>
+      <span id="cho_stat" class="muted small"></span>
+    </div>
+    <div class="hint">Danh sách khách đã nhắn mà CHƯA AI trả lời (cả bot lẫn nhân viên). Hệ thống cũng tự trả lời bù khi khách chờ quá 2 phút, mục này để chị soát lại cho chắc.</div>
+  </div>
+  <div class="card"><div id="cho_list" class="muted">Đang kiểm tra…</div></div>`;
+  const quet = async () => {
+    try {
+      const d = await api("/api/catchup", { method: "POST", body: { hours: Number($("#cho_gio").value), dryScan: true, max: 200, deep: false } });
+      window._cho = d;
+      const n = d.waiting || 0;
+      $("#cho_stat").textContent = n ? `${n} khách đang chờ` : "Không có khách nào đang chờ ✔";
+      const b = $("#cho_badge");
+      if (b) { b.textContent = n || ""; b.style.display = n ? "" : "none"; }
+      drawCho(d);
+    } catch (e) { $("#cho_stat").textContent = "Lỗi: " + e.message; }
+  };
+  $("#cho_lammoi").onclick = quet;
+  $("#cho_gio").onchange = quet;
+  $("#cho_repall").onclick = async () => {
+    $("#cho_repall").disabled = true;
+    try { const r = await api("/api/catchup", { method: "POST", body: { hours: Number($("#cho_gio").value), max: 200, deep: false } }); toast(`Đã cho bot trả lời ${r.queued} hội thoại`); setTimeout(quet, 6000); }
+    catch (e) { toast("Lỗi: " + e.message); } finally { $("#cho_repall").disabled = false; }
+  };
+  $("#cho_auto").onchange = () => { clearInterval(choTimer); if ($("#cho_auto").checked) choTimer = setInterval(quet, 30000); };
+  await quet();
+  choTimer = setInterval(quet, 30000);
+}
+function choLau(iso) {
+  const phut = Math.max(0, Math.round((Date.now() - Date.parse(/[zZ]$|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z")) / 60000));
+  if (phut < 60) return `${phut} phút`;
+  const gio = Math.floor(phut / 60);
+  return gio < 24 ? `${gio} giờ ${phut % 60} phút` : `${Math.floor(gio / 24)} ngày`;
+}
+function drawCho(d) {
+  const box = $("#cho_list");
+  if (!box) return;
+  const items = (d.items || []).slice().sort((a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt));
+  if (!items.length) return (box.className = "muted", box.innerHTML = "Không có khách nào đang chờ. 🎉");
+  box.className = "";
+  box.innerHTML = `<table><tr><th>Chờ</th><th>Page</th><th>Khách</th><th>Tin cuối</th><th></th></tr>${items.map((x) => {
+    const lau = choLau(x.updatedAt);
+    const gap = Date.now() - Date.parse(/[zZ]$/.test(x.updatedAt) ? x.updatedAt : x.updatedAt + "Z");
+    const mau = gap > 10 * 60000 ? "var(--err)" : gap > 2 * 60000 ? "var(--warn)" : "inherit";
+    return `<tr><td style="color:${mau};white-space:nowrap"><b>${lau}</b></td><td class="small">${esc(x.pageName)}</td><td>${esc(x.customer)}</td><td class="small muted">${esc(x.snippet)}</td><td><button data-rep="${esc(x.pageId)}|${esc(x.conversationId)}">Trả lời ngay</button></td></tr>`;
+  }).join("")}</table>`;
+  box.querySelectorAll("[data-rep]").forEach((b) => {
+    b.onclick = async () => {
+      const [pid, cid] = b.dataset.rep.split("|");
+      b.disabled = true;
+      try { await api(`/api/pages/${pid}/conversations/${encodeURIComponent(cid)}/reply-now`, { method: "POST" }); b.textContent = "Đã gửi bot"; }
+      catch (e) { toast("Lỗi: " + e.message); b.disabled = false; }
+    };
+  });
+}
+
+let auditTimer = null;
+async function renderAudit() {
+  clearInterval(auditTimer);
+  $("#title").textContent = "Đối chiếu địa chỉ đơn POS với tin nhắn khách";
+  $("#topinfo").textContent = "";
+  const pages = (STATE?.pages || []).map((p) => `<option value="${esc(p.id)}">${esc(p.displayName || p.name)}</option>`).join("");
+  $("#content").innerHTML = `
+  <div class="card"><h3>1. Chọn đơn để soát</h3>
+    <div class="row">
+      <span>Trạng thái</span><select id="au_status" style="width:auto"><option value="1" selected>Đã xác nhận</option><option value="0">Mới</option><option value="2">Đã gửi hàng</option><option value="11">Chờ hàng</option><option value="12">Đang đóng hàng</option></select>
+      <span>Đơn tạo trong</span><select id="au_days" style="width:auto"><option value="1">24 giờ</option><option value="3">3 ngày</option><option value="7" selected>7 ngày</option><option value="14">14 ngày</option><option value="30">30 ngày</option></select>
+      <span>Page</span><select id="au_page" style="width:auto"><option value="">Tất cả</option>${pages}</select>
+      <span>Tối đa</span><select id="au_max" style="width:auto"><option>50</option><option selected>100</option><option>200</option><option>500</option></select>
+      <button class="primary" id="au_run">🔍 Soát đơn</button><button id="au_stop">■ Dừng</button>
+    </div>
+    <div class="hint">So địa chỉ ghi trên đơn với tỉnh/huyện/xã đang chọn của đơn, và với địa chỉ khách nhắn trong Messenger. Chỉ báo lệch ở cấp tỉnh/huyện/xã; hai đơn vị cũ đã gộp thành một xã mới thì không tính là lệch.</div>
+    <div id="au_prog" class="muted small" style="margin-top:8px"></div>
+  </div>
+  <div class="card"><h3>2. Kết quả <span id="au_sum" class="muted small"></span></h3>
+    <div class="row"><label class="switch"><input type="checkbox" id="au_onlybad" checked> Chỉ hiện đơn lệch</label><button id="au_fixall">🛠 Sửa tất cả đơn lệch</button></div>
+    <div id="au_list" style="margin-top:10px" class="muted">Chưa soát lần nào.</div>
+  </div>`;
+  $("#au_run").onclick = async () => {
+    try {
+      await api("/api/audit/start", { method: "POST", body: { days: Number($("#au_days").value), status: Number($("#au_status").value), pageId: $("#au_page").value, maxOrders: Number($("#au_max").value) } });
+      pollAudit();
+    } catch (e) { toast("Lỗi: " + e.message); }
+  };
+  $("#au_stop").onclick = () => api("/api/audit/stop", { method: "POST" }).catch(() => {});
+  $("#au_onlybad").onchange = () => drawAudit(window._audit || { results: [] });
+  $("#au_fixall").onclick = async () => {
+    const bad = (window._audit?.results || []).filter((r) => r.verdict === "lech" && r.proposed);
+    if (!bad.length) return toast("Không có đơn nào để sửa");
+    $("#au_fixall").disabled = true;
+    let ok = 0, fail = 0;
+    for (const r of bad) { try { await api("/api/audit/fix", { method: "POST", body: { orderId: r.orderId } }); ok++; } catch (e) { fail++; toast(`#${r.orderId}: ${e.message}`); } }
+    toast(`Đã sửa ${ok} đơn${fail ? ", lỗi " + fail : ""}`);
+    $("#au_fixall").disabled = false;
+    pollAudit();
+  };
+  pollAudit();
+}
+async function pollAudit() {
+  const tick = async () => {
+    let d;
+    try { d = await api("/api/audit/status"); } catch { return; }
+    window._audit = d;
+    $("#au_prog").textContent = d.running ? `Đang soát ${d.done}/${d.total}… ${d.current || ""}${d.useAI === false ? " (đang dùng danh mục địa chỉ, không gọi AI)" : ""}` : d.total ? `Xong ${d.done}/${d.total} đơn.` : "";
+    $("#au_sum").textContent = d.total ? `${d.mismatched} lệch · ${d.checked} khớp · ${d.skipped} chưa rõ` : "";
+    drawAudit(d);
+    if (!d.running) clearInterval(auditTimer);
+  };
+  clearInterval(auditTimer);
+  await tick();
+  auditTimer = setInterval(tick, 2000);
+}
+function drawAudit(d) {
+  const box = $("#au_list");
+  if (!box) return;
+  const onlyBad = $("#au_onlybad")?.checked;
+  const list = (d.results || []).filter((r) => (onlyBad ? r.verdict === "lech" : true));
+  if (!list.length) return (box.innerHTML = d.results?.length ? "Không có đơn nào lệch trong nhóm đã soát." : "Chưa soát lần nào.");
+  box.className = "";
+  box.innerHTML = list.map((r) => {
+    const badge = r.verdict === "lech" ? '<span class="pill warn">lệch</span>' : r.verdict === "da_sua" ? '<span class="pill ok">đã sửa</span>' : r.verdict === "khop" ? '<span class="pill ok">khớp</span>' : '<span class="pill">chưa rõ</span>';
+    const diffs = (r.diffs || []).map((x) => `<div><b>${esc(x.field)}</b>: đơn đang để <b style="color:var(--err)">${esc(x.order)}</b>, đúng ra là <b style="color:var(--ok)">${esc(x.chat)}</b></div>`).join("");
+    return `<div class="card" style="margin:0 0 10px">
+      <div class="row" style="justify-content:space-between"><b>Đơn #${esc(r.orderId)} · ${esc(r.customer)} · ${esc(r.phone)}</b><span>${badge} <span class="small muted">${esc(r.pageName)} · ${fmtTime(r.insertedAt)}</span></span></div>
+      <div class="small" style="margin-top:6px">Trên đơn: ${esc(r.orderAddress)}</div>
+      ${r.chatAddress ? `<div class="small muted">Nguồn đối chiếu (${esc(r.source || "")}): ${esc(r.chatAddress)}</div>` : ""}
+      ${diffs ? `<div class="small" style="margin-top:6px">${diffs}</div>` : ""}
+      ${r.proposed ? `<div class="small" style="margin-top:6px">Sẽ ghi thành: <b>${esc(r.proposed.fullAddress)}</b></div>` : ""}
+      ${r.note ? `<div class="small muted" style="margin-top:4px">${esc(r.note)}</div>` : ""}
+      ${r.verdict === "lech" && r.proposed ? `<div class="row" style="margin-top:8px"><button class="primary" data-fix="${esc(r.orderId)}">🛠 Sửa đơn này</button></div>` : ""}
+    </div>`;
+  }).join("");
+  box.querySelectorAll("[data-fix]").forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try { const r = await api("/api/audit/fix", { method: "POST", body: { orderId: b.dataset.fix } }); toast(r.dryRun ? "Chế độ chỉ log: " + r.summary : "Đã sửa đơn #" + r.orderId); pollAudit(); }
+      catch (e) { toast("Lỗi: " + e.message); b.disabled = false; }
+    };
+  });
+}
+function logLine(e) { return `<div class="${e.level}">${esc(e.ts.slice(11, 19))} ${esc(e.msg)}</div>`; }
+// live log + auto refresh sidebar
+try { const es = new EventSource(withToken(BASE + "/api/events")); es.onmessage = (ev) => { const e = JSON.parse(ev.data); const box = $("#logbox"); if (box) { box.insertAdjacentHTML("beforeend", logLine(e)); box.scrollTop = 1e9; } if (/Bot ->|HANDOFF|Cap nhat cai dat/.test(e.msg)) clearTimeout(window._rs), (window._rs = setTimeout(() => api("/api/state").then((s) => { STATE = s; renderSidebar(); }), 1500)); }; } catch {}
+refreshState().catch((e) => ($("#content").innerHTML = `<div class="card">Không kết nối được bot: ${esc(e.message)}</div>`));
+</script>
+</body>
+</html>
