@@ -602,23 +602,30 @@ export type StockSnapshot = {
  */
 async function stockByProduct(): Promise<Map<string, StockSnapshot>> {
   const db = await getDb();
-  const salesAgg = variantSalesSubquery(db);
-  const receiptsAgg = variantReceiptsSubquery(db);
-  const unitCost = sql<number>`coalesce(nullif(${LAST_RECEIPT_COST}, 0), ${pv.lastImportedPrice}, 0)`;
-  const rows = await db
-    .select({
-      productId: pv.productId,
-      qty: sql<number>`coalesce(sum(greatest(${erpStockExpr(salesAgg, receiptsAgg)}, 0)) filter (where ${stockKnownExpr(receiptsAgg)}), 0)`,
-      value: sql<number>`coalesce(sum(greatest(${erpStockExpr(salesAgg, receiptsAgg)}, 0) * ${unitCost}) filter (where ${stockKnownExpr(receiptsAgg)}), 0)`,
-      knownVariants: sql<number>`count(*) filter (where ${stockKnownExpr(receiptsAgg)})`,
-      inTransitQty: sql<number>`coalesce(sum(coalesce(${salesAgg.inTransit}, 0)), 0)`,
-      awaitingReturnQty: sql<number>`coalesce(sum(coalesce(${salesAgg.awaitingReturn}, 0)), 0)`,
-    })
-    .from(pv)
-    .leftJoin(salesAgg, eq(salesAgg.variantId, pv.id))
-    .leftJoin(receiptsAgg, eq(receiptsAgg.variantId, pv.id))
-    .where(eq(pv.isRemoved, false))
-    .groupBy(pv.productId);
+  /*
+    JIT TẮT — đo production 24/09/2026 (ops perf-probe): câu này 4.908 ms trong `getNominalProfitReport`.
+    Nó dựng trên đúng phép gộp `vsales` mà `lib/queries/stock.ts` đã đo 8.578 ms → 26 ms khi tắt JIT;
+    trang Kế hoạch SX và bảng thiếu hàng đã bọc từ trước, riêng chỗ này sót.
+  */
+  const rows = await chayKhongJit(db, (tx) => {
+    const salesAgg = variantSalesSubquery(tx);
+    const receiptsAgg = variantReceiptsSubquery(tx);
+    const unitCost = sql<number>`coalesce(nullif(${LAST_RECEIPT_COST}, 0), ${pv.lastImportedPrice}, 0)`;
+    return tx
+      .select({
+        productId: pv.productId,
+        qty: sql<number>`coalesce(sum(greatest(${erpStockExpr(salesAgg, receiptsAgg)}, 0)) filter (where ${stockKnownExpr(receiptsAgg)}), 0)`,
+        value: sql<number>`coalesce(sum(greatest(${erpStockExpr(salesAgg, receiptsAgg)}, 0) * ${unitCost}) filter (where ${stockKnownExpr(receiptsAgg)}), 0)`,
+        knownVariants: sql<number>`count(*) filter (where ${stockKnownExpr(receiptsAgg)})`,
+        inTransitQty: sql<number>`coalesce(sum(coalesce(${salesAgg.inTransit}, 0)), 0)`,
+        awaitingReturnQty: sql<number>`coalesce(sum(coalesce(${salesAgg.awaitingReturn}, 0)), 0)`,
+      })
+      .from(pv)
+      .leftJoin(salesAgg, eq(salesAgg.variantId, pv.id))
+      .leftJoin(receiptsAgg, eq(receiptsAgg.variantId, pv.id))
+      .where(eq(pv.isRemoved, false))
+      .groupBy(pv.productId);
+  });
   return new Map(
     rows
       .filter((r) => r.productId)

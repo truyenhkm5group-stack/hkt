@@ -203,6 +203,18 @@ export function rowsToRender<T extends { action: AdsAction }>(rows: T[], all: bo
   return { shown, hidden };
 }
 
+/**
+ * Dòng ĐÃ CHÍN luôn phải được gửi xuống bảng, kể cả khi `rowsToRender` xếp nó vào phần ẩn.
+ *
+ * "Đã chín" đọc từ SỔ quyết định (giữ nguyên N ngày), còn `rowsToRender` giữ dòng theo kết luận
+ * HÔM NAY — hai tập không trùng tuyệt đối. Nút Bàn tay chỉ hiện trên dòng đã chín, nên một dòng chín
+ * bị ẩn là một nút bấm được mà không ai nhìn thấy (chủ shop báo 24/09/2026: "không thấy Bàn tay").
+ * Thứ tự: phần đang hiện giữ nguyên, dòng chín bị ẩn nối vào cuối — không xáo lại bảng.
+ */
+export function keepRipeRows<T extends { key: string }>(r: { shown: T[]; hidden: T[] }, ripe: Set<string>): { shown: T[]; hidden: T[] } {
+  return { shown: [...r.shown, ...r.hidden.filter((x) => ripe.has(x.key))], hidden: r.hidden.filter((x) => !ripe.has(x.key)) };
+}
+
 /** Hành động đề xuất cho một dòng. Thứ tự này cũng là thứ tự ưu tiên xử lý trên giao diện. */
 export type AdsAction = "SCALE" | "HOLD" | "WATCH" | "CUT" | "FIX_DELIVERY" | "INSUFFICIENT_DATA" | "NO_SPEND_DATA";
 
