@@ -210,7 +210,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       {canConfig ? (
         <SectionCard title="Cấu hình cảnh báo · Lark Suite / Telegram" description="Nơi nhận cảnh báo và ngưỡng thời gian coi là quá hạn."
  hint="Lark: thêm Custom Bot vào nhóm nhân viên vận đơn rồi dán Webhook URL. Telegram: tạo bot qua @BotFather. Ngưỡng thời gian chỉnh theo quy trình của shop.">
-          <AlertConfigForm config={{ ...config, telegramBotToken: "", larkSecret: "" }} hasToken={Boolean(config.telegramBotToken)} hasLarkSecret={Boolean(config.larkSecret)} />
+          <AlertConfigForm config={{ ...config, telegramBotToken: "", larkSecret: "", larkInventorySecret: "" }} hasToken={Boolean(config.telegramBotToken)} hasLarkSecret={Boolean(config.larkSecret)} hasLarkInventorySecret={Boolean(config.larkInventorySecret)} />
         </SectionCard>
       ) : null}
 
