@@ -301,7 +301,7 @@ export async function testCreativeEvaluate(db: Db) {
     assert.equal(win3.libraryOrders, 4, "số đơn lúc vào thư viện không bị ghi đè");
     const vWin3 = (await verdicts()).find((x) => x.variantId === `${P}v-win`);
     assert.equal(vWin3?.verdict, "WIN", "3 đơn không còn vượt ngưỡng 3 — nhưng mẫu đã vào thư viện thì không tự rơi ra");
-    assert.ok((vWin3?.reasons ?? []).some((x) => x.includes("Hiện còn 3 đơn chốt")), "màn hình phải nói số đơn hiện tại đã tụt");
+    assert.ok((vWin3?.reasons ?? []).some((x) => x.includes("Hiện đếm được 3 đơn chốt")), "màn hình phải nói số đơn hiện tại đã tụt");
     assert.equal((vWin3?.metrics as Record<string, unknown>).bookedOrders, 3, "sổ phán quyết mang số đơn HIỆN TẠI");
     const [learn3] = await db.select().from(L).where(eq(L.learningDay, learningDay));
     assert.equal(learn3.narrative, "", "bảng đã đổi mà bản tin viết hỏng ⇒ rỗng, không giữ bản tin của bảng cũ");
