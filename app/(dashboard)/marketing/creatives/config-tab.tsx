@@ -7,6 +7,8 @@ import { CREATIVE_WRITE_DENIAL_REASON, IMAGE_MODE_LABEL, IMAGE_QUALITY_LABEL, IM
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
 import { creativeSourceCounts, listCreativeProductOptions, readCreativeConfig } from "@/lib/queries/creative-sources";
+import { FB_WRITE_SCOPE } from "@/lib/constants/fb-token-scopes";
+import { getFbTokenScopes } from "@/lib/queries/fb-token-scopes";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,7 +22,7 @@ const ICON: Record<Level, typeof CheckCircle2> = { OK: CheckCircle2, BLOCK: XCir
 const TONE: Record<Level, string> = { OK: "text-success", BLOCK: "text-destructive", WARN: "text-warning", UNKNOWN: "text-muted-foreground" };
 
 export async function ConfigTab({ canManage }: { canManage: boolean }) {
-  const [state, counts, products] = await Promise.all([readCreativeConfig(), creativeSourceCounts(), listCreativeProductOptions()]);
+  const [state, counts, products, scopes] = await Promise.all([readCreativeConfig(), creativeSourceCounts(), listCreativeProductOptions(), getFbTokenScopes()]);
   const { config, problems } = state;
   const writeReason = adsWriteDisabledReason();
   const thieu = problems.filter((p) => p.field !== "rules");
@@ -54,9 +56,22 @@ export async function ConfigTab({ canManage }: { canManage: boolean }) {
       detail: writeReason ?? "Đang mở. Mọi lượt ghi vẫn phải qua phiếu duyệt lô (nấc COPILOT).",
     },
     {
+      // Hỏi thẳng Facebook (`/me/permissions`). `UNKNOWN` khi không hỏi được — không tô đỏ oan, không tô xanh khống.
+      level: scopes.state === "READY" ? "OK" : scopes.state === "MISSING" ? "BLOCK" : "UNKNOWN",
+      label: `Token có quyền ${FB_WRITE_SCOPE}`,
+      detail: (
+        <>
+          {scopes.reason}
+          {scopes.granted.length ? ` Quyền đang có: ${scopes.granted.join(", ")}.` : ""}
+          {scopes.declined.length ? ` Bị từ chối: ${scopes.declined.join(", ")}.` : ""}
+        </>
+      ),
+    },
+    {
+      // Phân quyền TÀI SẢN trong Business Manager không nằm trong phạm vi token — Graph API `/me/permissions` không trả lời câu này.
       level: "UNKNOWN",
-      label: "Token có quyền ads_management + tạo quảng cáo cho fanpage",
-      detail: "ERP chưa tự kiểm được quyền của token — lượt đăng đầu tiên sẽ trả lời. Lúc dựng vòng mẫu (24/09/2026) token của shop mới có ads_read — xem docs/creative-loop.md §7.",
+      label: "Fanpage đã giao quyền “Tạo quảng cáo” cho System User",
+      detail: "ERP không đọc được phân quyền tài sản trong Business Manager — lượt đăng đầu tiên mới trả lời. Kiểm tay: Cài đặt doanh nghiệp → Người dùng hệ thống → Tài sản được chỉ định.",
     },
     {
       level: counts.productsWithPhoto ? "OK" : "BLOCK",
