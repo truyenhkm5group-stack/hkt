@@ -8,9 +8,12 @@
  * phụ của việc chạy một lệnh xem thử.
  */
 import "dotenv/config";
+import { sql } from "drizzle-orm";
+import { getDb } from "@/db";
 import { CS_KIND_LABEL } from "@/lib/constants/cs";
 import { RECONCILE_REASONS, RECONCILE_REASON_LABEL } from "@/lib/cs/reconcile-order-created";
 import { applyStaleReconciliation, staleReport, STALE_VERDICTS, STALE_VERDICT_LABEL } from "@/lib/cs/stale";
+import { rowsOf } from "@/lib/sql-rows";
 
 /**
  * KÊNH TÓM TẮT CỦA THAO TÁC OPS. Qua workflow "Vận hành ERP trên VPS", kết quả của script này được
@@ -20,8 +23,50 @@ import { applyStaleReconciliation, staleReport, STALE_VERDICTS, STALE_VERDICT_LA
  */
 const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
 
+/**
+ * BẢN ĐỒ TRÁCH NHIỆM — mỗi case đang mở đứng ở đâu trong vòng đời kiện hàng.
+ *
+ * Câu hỏi "case này của Vận đơn hay của CSKH" trả lời bằng CHỨNG TỪ: đơn của case (gắn thẳng, hoặc
+ * đơn sinh ra từ chính hội thoại) và lần gửi của đơn đó — lần đang chạy nếu có, không thì lần mới
+ * nhất. Chỉ ĐẾM, không mẫu: tiêu đề case mang tên khách.
+ */
+async function banDoTrachNhiem() {
+  const db = await getDb();
+  const rows = rowsOf<{ kind: string; tinh_trang: string; n: number }>(
+    await db.execute(sql`
+      with don as (
+        select c.kind,
+               coalesce(c.order_id, (
+                 select o2.id from orders o2
+                  where coalesce(c.conversation_id, '') <> '' and o2.conversation_id = c.conversation_id
+                    and o2.stage not in ('CANCELLED','DELETED')
+                  order by o2.inserted_at desc limit 1)) as don_id
+          from cs_cases c
+         where c.status in ('OPEN','IN_PROGRESS')
+      )
+      select d.kind,
+             case when d.don_id is null then 'CHƯA GẮN ĐƠN'
+                  when k.id is null then 'CHƯA CÓ KIỆN · POS ' || coalesce(o.stage::text, '?')
+                  when k.is_final then 'KIỆN ĐÃ CHỐT · ' || k.stage::text
+                  else 'KIỆN ĐANG CHẠY · ' || k.stage::text end as tinh_trang,
+             count(*)::int as n
+        from don d
+        left join orders o on o.id = d.don_id
+        left join lateral (
+          select s.id, s.stage, s.is_final from shipments s
+           where s.order_id = d.don_id
+           order by s.is_final asc, s.created_at desc limit 1
+        ) k on true
+       group by 1, 2
+       order by 1, 3 desc`),
+  );
+  tomTat("═══ BẢN ĐỒ TRÁCH NHIỆM: loại case × tình trạng kiện (case đang mở) ═══");
+  for (const r of rows) tomTat(`  ${String(r.n).padStart(5)}  ${(CS_KIND_LABEL[r.kind as keyof typeof CS_KIND_LABEL] ?? r.kind).padEnd(34)} ${r.tinh_trang}`);
+}
+
 async function main() {
   const apply = process.argv.includes("--apply");
+  await banDoTrachNhiem();
   const bc = await staleReport(20);
   console.log("");
   tomTat(`═══ HÀNG ĐỢI CSKH ĐANG MỞ: ${bc.openTotal} case ═══`);
