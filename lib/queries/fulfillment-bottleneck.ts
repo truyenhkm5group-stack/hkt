@@ -120,7 +120,7 @@ export type FulfillmentBottleneckQueue = {
 };
 
 /** Trường nào thiếu / sai khiến ERP KHÔNG THỂ tạo vận đơn — cùng tín hiệu với ORDER_INCOMPLETE / ORDER_ADDRESS_NOT_NORMALIZED (lib/alerts/rules.ts), tính lại trực tiếp thay vì đọc qua notifications. */
-function dataBlockReason(r: Row): string | null {
+export function dataBlockReason(r: Pick<Row, "bill_phone" | "ship_address" | "ship_province">): string | null {
   const missing: string[] = [];
   if (!r.bill_phone) missing.push("số điện thoại");
   if (!r.ship_address) missing.push("địa chỉ");

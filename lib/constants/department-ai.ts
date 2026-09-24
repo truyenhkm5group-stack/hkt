@@ -263,7 +263,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
   WAREHOUSE: {
     zone: "WAREHOUSE",
     name: null,
-    home: null,
+    home: "/inventory/packing",
     autonomy: "READ_ONLY",
     autonomyWhy: "`RISK_FLOOR.inventory = \"forbidden\"`: AI không có một tool ghi nào vào tồn kho. Hàng vào tồn CHỈ bằng phiếu kho của người đếm thật.",
     spec: null,
@@ -281,9 +281,9 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       },
       PROPOSE: {
         status: "PARTIAL",
-        what: "Xếp thứ tự kiện hoàn cần mở đếm trước; nhận ra hàng chậm bán để đề nghị xả; mẫu ERP báo thiếu mà sổ kho âm hoặc Pancake báo còn đủ thì đề nghị KIỂM ĐẾM trước khi ai đặt sản xuất.",
-        evidence: ["lib/returns/receive-queue.ts", "lib/constants/slow-moving.ts", "lib/constants/stock-shortage.ts"],
-        missing: "Chưa có đề nghị cho hai việc tốn người nhất của kho: (a) gom đơn theo mẫu mã để đóng gói một lượt, (b) vị trí xếp hàng trong kho. Cả hai cần dữ liệu ERP CHƯA CÓ — không có bảng vị trí kệ, không có mốc thời gian đóng gói từng đơn.",
+        what: "Xếp thứ tự kiện hoàn cần mở đếm trước; nhận ra hàng chậm bán để đề nghị xả; mẫu ERP báo thiếu mà sổ kho âm hoặc Pancake báo còn đủ thì đề nghị KIỂM ĐẾM trước khi ai đặt sản xuất; và GOM ĐƠN ĐỦ HÀNG theo mẫu mã (từ 24/09/2026): một phiếu lấy hàng tổng cho cả kho, các lượt đơn giống hệt nhau để đóng liền tay, đơn lẻ theo thứ tự ai lên trước.",
+        evidence: ["lib/returns/receive-queue.ts", "lib/constants/slow-moving.ts", "lib/constants/stock-shortage.ts", "lib/constants/packing-waves.ts", "lib/queries/packing-waves.ts"],
+        missing: "Chưa có đề nghị VỊ TRÍ xếp hàng trong kho (mẫu bán chạy để gần bàn đóng gói): ERP không có bảng vị trí kệ. Và chưa ĐO được gom đơn tiết kiệm bao nhiêu công — không có mốc thời gian đóng gói từng đơn (Pancake chỉ ghi lúc đổi trạng thái).",
       },
       DISPATCH: {
         status: "BUILT",
