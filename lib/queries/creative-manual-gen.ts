@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { MANUAL_GEN, PIXEL_SAFE_SOURCE_KINDS, normalizeCreativeConfig, type ManualGenImageStatus } from "@/lib/constants/creative-loop";
-import { manualTargetDay } from "@/lib/creative/manual";
+import { resolveManualTargetDay } from "@/lib/creative/manual";
 import { manualGenCapacityNow } from "@/lib/creative/manual-gen";
 import { defaultNames, loadNamingContext, nextNameSeq, type DefaultNames } from "@/lib/creative/naming";
 import { batchWindow } from "@/lib/creative/schedule";
@@ -145,7 +145,7 @@ export async function listPixelSafeSourceOptions(db: Db): Promise<PixelSourceOpt
 /** Toàn bộ dữ liệu của khu gen tay cho tab Duyệt lô. */
 export async function loadManualGenPanel(db: Db, now: Date): Promise<ManualGenPanel> {
   const { config } = await readCurrentCreativeConfig(db);
-  const targetDay = manualTargetDay(now, config);
+  const targetDay = await resolveManualTargetDay(db, now, config);
   const [batch] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.batchDay, targetDay)).limit(1);
   const namingCfg = batch ? normalizeCreativeConfig(batch.configSnapshot).config : config;
   const [runs, sources, capacity, ctx, predictedSeq, pageName] = await Promise.all([
