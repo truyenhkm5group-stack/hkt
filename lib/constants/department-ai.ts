@@ -266,7 +266,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
     autonomy: "READ_ONLY",
     autonomyWhy: "`RISK_FLOOR.inventory = \"forbidden\"`: AI không có một tool ghi nào vào tồn kho. Hàng vào tồn CHỈ bằng phiếu kho của người đếm thật.",
     spec: null,
-    measuredAt: "2026-09-23",
+    measuredAt: "2026-09-24",
     rungs: {
       MEASURE: {
         status: "BUILT",
@@ -275,13 +275,13 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       },
       DIAGNOSE: {
         status: "BUILT",
-        what: "Cảnh báo sắp hết / đã hết theo tốc độ bán 30 ngày; đơn đã chốt còn nằm trong kho được tách theo bốn lý do tắc.",
-        evidence: ["lib/constants/alerts.ts", "lib/constants/fulfillment-bottleneck.ts"],
+        what: "Cảnh báo sắp hết / đã hết theo tốc độ bán 30 ngày; đơn đã chốt còn nằm trong kho được tách theo năm lý do tắc, trong đó tồn thực tế được PHÂN cho đơn lên trước để tách đơn đóng gói được ngay khỏi đơn đang chờ hàng.",
+        evidence: ["lib/constants/alerts.ts", "lib/constants/fulfillment-bottleneck.ts", "lib/constants/stock-shortage.ts"],
       },
       PROPOSE: {
         status: "PARTIAL",
-        what: "Xếp thứ tự kiện hoàn cần mở đếm trước; nhận ra hàng chậm bán để đề nghị xả.",
-        evidence: ["lib/returns/receive-queue.ts", "lib/constants/slow-moving.ts"],
+        what: "Xếp thứ tự kiện hoàn cần mở đếm trước; nhận ra hàng chậm bán để đề nghị xả; mẫu ERP báo thiếu mà sổ kho âm hoặc Pancake báo còn đủ thì đề nghị KIỂM ĐẾM trước khi ai đặt sản xuất.",
+        evidence: ["lib/returns/receive-queue.ts", "lib/constants/slow-moving.ts", "lib/constants/stock-shortage.ts"],
         missing: "Chưa có đề nghị cho hai việc tốn người nhất của kho: (a) gom đơn theo mẫu mã để đóng gói một lượt, (b) vị trí xếp hàng trong kho. Cả hai cần dữ liệu ERP CHƯA CÓ — không có bảng vị trí kệ, không có mốc thời gian đóng gói từng đơn.",
       },
       DISPATCH: {
@@ -304,9 +304,9 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
   PRODUCTION: {
     zone: "PRODUCTION",
     name: null,
-    home: null,
+    home: "/inventory/shortage",
     autonomy: "READ_ONLY",
-    autonomyWhy: "Chưa có tool ghi nào. Lệnh đặt hàng sản xuất do người tạo trên `/inventory/planning/orders/new`.",
+    autonomyWhy: "Chưa có tool ghi nào. Lệnh đặt hàng sản xuất do người tạo trên `/inventory/planning/orders/new`; bảng thiếu hàng chỉ ĐỀ XUẤT và dẫn link tới đó.",
     spec: "docs/inventory-forecast-contract.md",
     measuredAt: "2026-09-24",
     rungs: {
@@ -338,8 +338,8 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       */
       DISPATCH: {
         status: "PARTIAL",
-        what: "Mẫu đã hết, hoặc sẽ hết trước khi lô mới kịp sản xuất xong, thành việc `INVENTORY_EXCEPTION` trong `/work` (hạn 48–72 giờ), dựng thẳng từ `getReplenishmentPlan()` kèm số đề xuất đặt.",
-        evidence: ["lib/alerts/rules.ts", "lib/constants/work-sources.ts", "lib/constants/work-ownership.ts"],
+        what: "Mẫu đã hết, hoặc sẽ hết trước khi lô mới kịp sản xuất xong, thành việc `INVENTORY_EXCEPTION` trong `/work` (hạn 48–72 giờ), dựng thẳng từ `getReplenishmentPlan()` kèm số đề xuất đặt. Đơn đã chốt thiếu hàng tự ĐI TÌM NGƯỜI: bảng mẫu thiếu (mã · màu · size · thiếu · đơn chờ · chờ lâu nhất · đã đặt xưởng · đề xuất đặt · việc cần làm) gửi Lark nhóm Kho/Sản xuất khi phát sinh hoặc nặng thêm và mỗi sáng; đơn chờ hàng vào hàng đợi fulfillment cho CSKH báo khách.",
+        evidence: ["lib/alerts/rules.ts", "lib/constants/work-sources.ts", "lib/constants/work-ownership.ts", "lib/alerts/stock-shortage-digest.ts", "lib/constants/stock-shortage.ts"],
         missing:
           "Việc mặc định vào hàng đợi phòng KHO (`TEAM_DEPARTMENT.PRODUCTION = WAREHOUSE`, lý do ở `TEAM_DEPARTMENT_DIVERGENCE`: lúc tách phòng Sản xuất chưa có ai). Khi phòng Sản xuất đã có người phụ trách đặt hàng, chủ shop chuyển hai khoá `INVENTORY_EXCEPTION:STOCKOUT_RISK` và `INVENTORY_EXCEPTION:LOW_STOCK_RISK` sang Sản xuất ở Công việc → Cấu hình → Luật việc. Không cần deploy — đây là quyết định tổ chức, không phải việc lập trình.",
       },

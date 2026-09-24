@@ -14,9 +14,11 @@ import { hashSeed, seededRandom, thompsonPick, type GeneStat } from "@/lib/creat
  *
  *  · `EXPLOIT` — biến thể của một mẫu THẮNG / HỨA HẸN: giữ nguyên mã hàng và năm gen, đổi ĐÚNG MỘT
  *    gen. Đổi một gen mỗi lần là cách duy nhất để biết cái gì làm nên chiến thắng — đổi ba gen cùng
- *    lúc thì mẫu con thắng hay thua cũng không dạy được gì.
- *  · `EXPLORE` — ý mới: một nguồn cảm hứng (spy · tay · R&D) ít được dùng nhất, gen đọc từ nguồn ấy,
- *    gen còn thiếu chọn bằng Thompson.
+ *    lúc thì mẫu con thắng hay thua cũng không dạy được gì. Mẫu cha là một mẫu của vòng
+ *    (`variantId`) HOẶC một quảng cáo cũ của shop (`ownAdSourceId`, nguồn `OWN_AD` đủ sáu gen + có mã
+ *    hàng) — ô con của nguồn ấy ghi nó vào `inspirationSourceId`.
+ *  · `EXPLORE` — ý mới: một nguồn cảm hứng ít được dùng nhất, gen đọc từ nguồn ấy, gen còn thiếu chọn
+ *    bằng Thompson. Quảng cáo cũ của shop chưa đủ gen đứng TRƯỚC spy · tay · R&D: nó đã bán được.
  *
  * Chưa có mẫu tốt nào ⇒ toàn bộ lô là THĂM DÒ. Đó là đúng: khai thác một thứ chưa tồn tại là bịa.
  *
@@ -38,13 +40,18 @@ export type PlanProduct = {
 export type PlanInspiration = {
   sourceId: string;
   kind: Exclude<CreativeSourceKind, "PRODUCT_PHOTO">;
+  /** Nhãn ngắn cho câu "vì sao" (tên quảng cáo cũ…). */
+  label?: string;
   productId: string | null;
   genes: Partial<Genes>;
   usedCount: number;
 };
 
 export type PlanParent = {
-  variantId: string;
+  /** Mẫu cha là một mẫu của vòng. Cha là quảng cáo cũ của shop ⇒ `null` và `ownAdSourceId` có giá trị. */
+  variantId: string | null;
+  /** Mẫu cha là nguồn `OWN_AD` (quảng cáo cũ của shop đủ sáu gen + có mã hàng). */
+  ownAdSourceId?: string | null;
   productId: string;
   genes: Genes;
   verdict: "WIN" | "PROMISING";
@@ -84,10 +91,15 @@ export type BatchPlan = { slots: PlannedSlot[]; shortfall: PlanShortfall | null 
 
 const MAX_DEDUP_ATTEMPTS = 6;
 
+/** Khoá ổn định của một mẫu cha — mẫu của vòng hoặc nguồn quảng cáo cũ. */
+export function parentKey(p: Pick<PlanParent, "variantId" | "ownAdSourceId">): string {
+  return p.variantId ?? `src:${p.ownAdSourceId ?? ""}`;
+}
+
 /** Xếp mẫu cha: THẮNG trước, rồi đơn trên mỗi triệu chi (mẫu chưa có chi đứng sau), rồi id cho ổn định. */
 export function rankParents(parents: PlanParent[]): PlanParent[] {
   const eff = (p: PlanParent) => (p.spendVnd && p.spendVnd > 0 ? p.bookedOrders / (p.spendVnd / 1_000_000) : -1);
-  return [...parents].sort((a, b) => (a.verdict === b.verdict ? 0 : a.verdict === "WIN" ? -1 : 1) || eff(b) - eff(a) || a.variantId.localeCompare(b.variantId));
+  return [...parents].sort((a, b) => (a.verdict === b.verdict ? 0 : a.verdict === "WIN" ? -1 : 1) || eff(b) - eff(a) || parentKey(a).localeCompare(parentKey(b)));
 }
 
 export function planBatch(input: PlanInput): BatchPlan {
@@ -103,7 +115,9 @@ export function planBatch(input: PlanInput): BatchPlan {
   const parents = rankParents(input.parents.filter((p) => photoOf.has(p.productId)));
   const exploitCount = parents.length > 0 ? Math.round(input.slotCount * (1 - input.exploreShare)) : 0;
   const products = [...input.products].sort((a, b) => a.recentTests - b.recentTests || a.productId.localeCompare(b.productId));
-  const inspirations = [...input.inspirations].sort((a, b) => a.usedCount - b.usedCount || a.sourceId.localeCompare(b.sourceId));
+  // Quảng cáo cũ của shop (chưa đủ gen để làm mẫu cha) đứng trước: nó đã bán được, spy / tay / R&D thì chưa.
+  const ownFirst = (x: PlanInspiration) => (x.kind === "OWN_AD" ? 0 : 1);
+  const inspirations = [...input.inspirations].sort((a, b) => ownFirst(a) - ownFirst(b) || a.usedCount - b.usedCount || a.sourceId.localeCompare(b.sourceId));
 
   const accept = (s: Omit<PlannedSlot, "slot">): boolean => {
     const sig = geneSignature(s.productId, s.genes);
@@ -118,7 +132,8 @@ export function planBatch(input: PlanInput): BatchPlan {
   // ─── KHAI THÁC ───
   for (let i = 0; i < exploitCount; i += 1) {
     const parent = parents[i % parents.length];
-    const start = hashSeed(`${input.batchDay}:${parent.variantId}:${i}`) % GENE_KEYS.length;
+    const start = hashSeed(`${input.batchDay}:${parentKey(parent)}:${i}`) % GENE_KEYS.length;
+    const fromOwnAd = parent.variantId === null;
     let placed = false;
     for (let attempt = 0; attempt < MAX_DEDUP_ATTEMPTS && !placed; attempt += 1) {
       const key = GENE_KEYS[(start + attempt) % GENE_KEYS.length];
@@ -127,12 +142,15 @@ export function planBatch(input: PlanInput): BatchPlan {
         mode: "EXPLOIT",
         productId: parent.productId,
         productPhotoSourceId: photoOf.get(parent.productId) as string,
-        inspirationSourceId: null,
+        // Cha là quảng cáo cũ ⇒ ghi nguồn vào `inspirationSourceId` (đường điểm ảnh đọc lại LOẠI của nó).
+        inspirationSourceId: fromOwnAd ? (parent.ownAdSourceId ?? null) : null,
         parentVariantId: parent.variantId,
         parentImageId: parent.imageId,
         genes,
         mutatedGene: key,
-        why: `Biến thể của mẫu ${parent.verdict === "WIN" ? "THẮNG" : "hứa hẹn"} (${parent.bookedOrders} đơn) — chỉ đổi ${key}.`,
+        why: fromOwnAd
+          ? `Biến thể của quảng cáo cũ của shop — ${parent.verdict === "WIN" ? "mẫu THẮNG" : "chỉ số tốt"} (${parent.bookedOrders} đơn) — chỉ đổi ${key}.`
+          : `Biến thể của mẫu ${parent.verdict === "WIN" ? "THẮNG" : "hứa hẹn"} (${parent.bookedOrders} đơn) — chỉ đổi ${key}.`,
       });
     }
     if (!placed) dupSkips += 1;
@@ -161,7 +179,11 @@ export function planBatch(input: PlanInput): BatchPlan {
         parentImageId: null,
         genes,
         mutatedGene: null,
-        why: insp ? `Ý mới từ nguồn ${insp.kind} (đã dùng ${insp.usedCount} lần).` : "Ý mới — chưa có nguồn cảm hứng nào, gen chọn hoàn toàn theo thống kê.",
+        why: insp
+          ? insp.kind === "OWN_AD"
+            ? `Ý mới từ quảng cáo cũ của shop${insp.label ? ` «${insp.label}»` : ""} (chưa đủ gen để làm mẫu cha; đã dùng ${insp.usedCount} lần).`
+            : `Ý mới từ nguồn ${insp.kind} (đã dùng ${insp.usedCount} lần).`
+          : "Ý mới — chưa có nguồn cảm hứng nào, gen chọn hoàn toàn theo thống kê.",
       });
     }
     if (!placed) dupSkips += 1;

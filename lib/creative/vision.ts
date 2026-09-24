@@ -64,19 +64,19 @@ export function visionJsonSchema(): Record<string, unknown> {
   };
 }
 
-type ResponsesBody = {
+export type ResponsesBody = {
   model?: unknown;
   output?: { type?: unknown; content?: { type?: unknown; text?: unknown }[] }[];
   usage?: { input_tokens?: unknown; output_tokens?: unknown; input_tokens_details?: { cached_tokens?: unknown } };
 };
 
-function usageOf(body: ResponsesBody): AiUsage {
+export function usageOf(body: ResponsesBody): AiUsage {
   const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : 0);
   const cached = n(body.usage?.input_tokens_details?.cached_tokens);
   return { inputTokens: Math.max(0, n(body.usage?.input_tokens) - cached), outputTokens: n(body.usage?.output_tokens), cacheReadTokens: cached, cacheWriteTokens: 0 };
 }
 
-function outputText(body: ResponsesBody): string {
+export function outputText(body: ResponsesBody): string {
   const parts: string[] = [];
   for (const item of body.output ?? []) {
     if (item.type !== "message") continue;

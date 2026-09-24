@@ -16,6 +16,8 @@ import { adSpendByProduct, getProductIntelligence } from "@/lib/queries/product-
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { searchEntities } from "@/lib/queries/search";
 import { getSlowMoving } from "@/lib/queries/slow-moving";
+import { getStockShortage } from "@/lib/queries/stock-shortage";
+import { SHORTAGE_ACTION_LABEL, waitingOrderDetail } from "@/lib/constants/stock-shortage";
 import { resolvePeriod, type PeriodKey } from "@/lib/search-params";
 
 /**
@@ -159,6 +161,53 @@ export const getInventoryRisksTool = defineTool({
   },
 });
 
+/**
+ * Đơn đã chốt đang CHỜ HÀNG: phân tồn thực tế cho đơn lên trước, mẫu nào thiếu, đơn nào chờ, ai
+ * phải làm gì. Cùng hàm với trang `/inventory/shortage` và tin Lark — không tự tính lại.
+ */
+export const getStockShortageTool = defineTool({
+  name: "get_stock_shortage",
+  label: "Thiếu hàng giao đơn",
+  description:
+    "Đơn đã chốt còn trong kho mà KHÔNG đủ hàng để giao: theo mẫu mã (mã, màu, size, thiếu bao nhiêu, bao nhiêu đơn chờ, chờ lâu nhất, đã đặt xưởng bao nhiêu và hạn, đề xuất đặt thêm, việc cần làm: kho kiểm đếm / giục xưởng / đặt sản xuất) và theo đơn (đơn nào chờ, thiếu gì, mẫu cùng size còn hàng để đề nghị khách đổi). Tồn chưa có phiếu nhập là CHƯA BIẾT, không tính là thiếu. Chỉ đọc.",
+  kind: "read",
+  riskClass: "general",
+  permission: "planning:view",
+  policy: "auto",
+  input: z.object({ limit: z.number().int().min(1).max(50) }),
+  run: async (_ctx, { limit }) => {
+    const s = await getStockShortage();
+    const byVariant = new Map(s.variants.map((v) => [v.variantId, v]));
+    const waiting = [...s.orders.values()].filter((o) => o.state === "WAITING_STOCK").sort((a, b) => a.insertedAt.getTime() - b.insertedAt.getTime());
+    return {
+      measuredAt: iso(s.measuredAt),
+      totals: s.totals,
+      urgentAfterHours: s.urgentAfterHours,
+      variants: s.variants.slice(0, limit).map((r) => ({
+        productCode: r.productCode,
+        product: r.productName,
+        color: r.color,
+        size: r.size,
+        shortQty: r.shortQty,
+        waitingOrders: r.waitingOrders,
+        oldestWaitHours: Math.round(r.oldestWaitHours),
+        onHandErp: r.onHand,
+        reserved: r.reserved,
+        pancakeStock: r.pancakeStock,
+        openPoQty: r.openPoQty,
+        openPoDueAt: iso(r.openPoDueAt),
+        proposeQty: r.proposeQty,
+        action: SHORTAGE_ACTION_LABEL[r.action],
+        actionText: r.actionText,
+        team: r.team,
+        decision: r.decision ? { decision: r.decision.decision, by: r.decision.byName, at: r.decision.at, shortQtyAtDecision: r.decision.shortQtyAtDecision } : null,
+        mutedOnLark: r.muted,
+      })),
+      waitingOrders: waiting.slice(0, limit).map((o) => ({ orderId: o.orderId, systemId: o.systemId, customer: o.customer, value: o.value, insertedAt: iso(o.insertedAt), detail: waitingOrderDetail(o, byVariant, s.measuredAt) })),
+    };
+  },
+});
+
 export const getProductPerformanceTool = defineTool({
   name: "get_product_performance",
   label: "Hiệu quả sản phẩm",
@@ -284,5 +333,5 @@ export const reopenCaseTool = defineTool({
 });
 
 export function registerErpTools() {
-  return [searchCustomerTool, getCustomerHistoryTool, getOrderContextTool, getProfitSummaryTool, getCashPositionTool, getInventoryRisksTool, getProductPerformanceTool, getOwnerBriefTool, getMorningPrioritiesTool, resolveCaseTool, reopenCaseTool];
+  return [searchCustomerTool, getCustomerHistoryTool, getOrderContextTool, getProfitSummaryTool, getCashPositionTool, getInventoryRisksTool, getStockShortageTool, getProductPerformanceTool, getOwnerBriefTool, getMorningPrioritiesTool, resolveCaseTool, reopenCaseTool];
 }

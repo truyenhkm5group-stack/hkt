@@ -1,5 +1,6 @@
 import type { CaseTeam } from "@/lib/constants/action-queue";
 import { FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
+import { WAITING_STOCK_NEXT_ACTION } from "@/lib/constants/stock-shortage";
 
 /**
  * ═══════════ NÚT THẮT FULFILLMENT NỘI BỘ: TỪ "ĐÃ CHỐT" TỚI "RỜI KHO" ═══════════
@@ -18,6 +19,14 @@ import { FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
  *   1. DATA_BLOCKED            — đơn đã chốt nhưng thiếu SĐT/địa chỉ hoặc địa chỉ chưa chuẩn hoá,
  *                                 nên KHÔNG THỂ tạo vận đơn được (đây là "lỗi data khiến fulfillment
  *                                 không tiếp tục được").
+ *   1b. OUT_OF_STOCK           — đơn đã chốt, dữ liệu đủ, chưa có vận đơn, và sổ kho KHÔNG ĐỦ HÀNG
+ *                                 cho nó sau khi phân bổ cho các đơn lên trước (`allocateStock`,
+ *                                 lib/constants/stock-shortage.ts). Thêm 24/09/2026: trước đó đơn này
+ *                                 rơi vào NOT_YET_SHIPPED với lời dặn "hàng còn nguyên trong kho, chỉ
+ *                                 thiếu thao tác" — kho đi tìm hàng không tồn tại, còn khách thì không
+ *                                 ai báo. Việc thuộc CSKH (báo khách / đề nghị đổi / huỷ); phần SẢN
+ *                                 XUẤT đi theo MẪU MÃ ở cảnh báo `STOCK_LOW`, không nhân theo từng đơn.
+ *                                 Tồn CHƯA BIẾT (mẫu chưa có phiếu nhập) KHÔNG rơi vào đây.
  *   2. NOT_YET_SHIPPED         — đơn đã chốt, dữ liệu đủ, nhưng CHƯA có vận đơn nào ("confirmed
  *                                 nhưng chưa xử lý" / "chưa có shipment" — cùng một trạng thái CSDL).
  *   3. AWAITING_CARRIER_ACCEPT — đã tạo vận đơn (có mã) nhưng CHƯA thấy một sự kiện nào của Viettel
@@ -29,11 +38,12 @@ import { FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
  * và mỗi case tự khai `sla.breached`; lọc/đếm theo cờ đó trả lời đúng câu "đơn nào đang chờ quá SLA"
  * mà không cần một nhánh phân loại giả song song với ba nhánh còn lại.
  */
-export const FULFILLMENT_BLOCK_REASONS = ["DATA_BLOCKED", "NOT_YET_SHIPPED", "AWAITING_CARRIER_ACCEPT", "AWAITING_PICKUP"] as const;
+export const FULFILLMENT_BLOCK_REASONS = ["DATA_BLOCKED", "OUT_OF_STOCK", "NOT_YET_SHIPPED", "AWAITING_CARRIER_ACCEPT", "AWAITING_PICKUP"] as const;
 export type FulfillmentBlockReason = (typeof FULFILLMENT_BLOCK_REASONS)[number];
 
 export const BOTTLENECK_REASON_LABEL: Record<FulfillmentBlockReason, string> = {
   DATA_BLOCKED: "Thiếu dữ liệu · chưa tạo được vận đơn",
+  OUT_OF_STOCK: "Đã chốt · kho không đủ hàng",
   NOT_YET_SHIPPED: "Đã chốt · chưa có vận đơn",
   AWAITING_CARRIER_ACCEPT: "Đã tạo vận đơn · ĐVVC chưa xác nhận nhận đơn",
   AWAITING_PICKUP: "ĐVVC đã nhận đơn · bưu tá chưa tới lấy hàng",
@@ -41,7 +51,8 @@ export const BOTTLENECK_REASON_LABEL: Record<FulfillmentBlockReason, string> = {
 
 export const BOTTLENECK_NEXT_ACTION: Record<FulfillmentBlockReason, string> = {
   DATA_BLOCKED: "Gọi khách xác nhận lại SĐT / địa chỉ, chọn TAY tỉnh-xã trên Pancake rồi mới tạo vận đơn. Không đoán hộ khách.",
-  NOT_YET_SHIPPED: "Đóng gói và tạo vận đơn Viettel Post ngay — đơn đã chốt, hàng còn nguyên trong kho, chỉ thiếu thao tác.",
+  OUT_OF_STOCK: WAITING_STOCK_NEXT_ACTION,
+  NOT_YET_SHIPPED: "Đóng gói và tạo vận đơn Viettel Post ngay — đơn đã chốt, sổ kho đã phân đủ hàng cho đơn này, chỉ thiếu thao tác.",
   AWAITING_CARRIER_ACCEPT: "Kiểm tra lại trên Viettel Post xem đơn đã vào hệ thống chưa; nếu không thấy, tạo lại vận đơn hoặc gọi tổng đài ĐVVC.",
   AWAITING_PICKUP: "Giục bưu tá tới lấy hàng, hoặc tự mang ra bưu cục gần nhất — vận đơn đã có mã nhưng hàng vẫn đang nằm trong kho.",
 };
@@ -50,6 +61,9 @@ export const BOTTLENECK_NEXT_ACTION: Record<FulfillmentBlockReason, string> = {
 export const BOTTLENECK_TEAM: Record<FulfillmentBlockReason, CaseTeam> = {
   // Cần gọi khách xác nhận lại thông tin — việc của CSKH, giống ORDER_INCOMPLETE / ORDER_ADDRESS_NOT_NORMALIZED.
   DATA_BLOCKED: "CS",
+  // Kho không có hàng để gói: người làm được việc NGAY là CSKH (báo khách, đề nghị đổi, huỷ). Phần
+  // đặt xưởng thuộc phòng Sản xuất nhưng đi theo MẪU MÃ (STOCK_LOW), không nhân lên theo từng đơn.
+  OUT_OF_STOCK: "CS",
   // Hàng còn nguyên trong kho, chỉ thiếu thao tác đóng gói / tạo vận đơn — việc của kho.
   NOT_YET_SHIPPED: "WAREHOUSE",
   AWAITING_CARRIER_ACCEPT: "WAREHOUSE",
@@ -69,6 +83,8 @@ export const BOTTLENECK_TEAM: Record<FulfillmentBlockReason, CaseTeam> = {
 const NOT_YET_SHIPPED_SLA_HOURS = 24;
 export const BOTTLENECK_SLA_HOURS: Record<FulfillmentBlockReason, number> = {
   DATA_BLOCKED: NOT_YET_SHIPPED_SLA_HOURS,
+  // Khách đã chốt mua mà chưa ai báo là hết hàng: cùng hạn một ngày với "chưa gửi".
+  OUT_OF_STOCK: NOT_YET_SHIPPED_SLA_HOURS,
   NOT_YET_SHIPPED: NOT_YET_SHIPPED_SLA_HOURS,
   AWAITING_CARRIER_ACCEPT: FRESHNESS_BY_STAGE.PENDING.aging,
   AWAITING_PICKUP: FRESHNESS_BY_STAGE.PENDING.stale,

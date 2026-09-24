@@ -4,11 +4,13 @@ import {
   CREATIVE_CONFIG_KEY,
   CREATIVE_SOURCE_KINDS,
   normalizeCreativeConfig,
+  parseOwnAdMetrics,
   parsePartialGenes,
   type ConfigProblem,
   type CreativeLoopConfig,
   type CreativeSourceKind,
   type Genes,
+  type OwnAdMetrics,
 } from "@/lib/constants/creative-loop";
 
 /**
@@ -45,6 +47,11 @@ export type CreativeSourceRow = {
   createdAt: Date;
   /** Số mẫu (ô trong lô) đã dùng nguồn này làm ảnh gốc hoặc nguồn cảm hứng. */
   uses: number;
+  /** Chỉ `OWN_AD`: mẩu QC gốc, số đo chụp lúc nhập, câu chữ đã chạy. Nguồn khác: `null` / rỗng. */
+  fbAdId: string | null;
+  ownAd: OwnAdMetrics | null;
+  headline: string;
+  primaryText: string;
 };
 
 /** Rỗng = không lọc. Giá trị lạ trong URL bị bỏ, không làm rỗng danh sách. */
@@ -88,6 +95,10 @@ export async function listCreativeSources(f: SourceFilter & { page?: number; pag
         createdByName: s.createdByName,
         createdAt: s.createdAt,
         uses,
+        fbAdId: s.fbAdId,
+        metrics: s.metrics,
+        headline: s.headline,
+        primaryText: s.primaryText,
       })
       .from(s)
       .leftJoin(p, eq(p.id, s.productId))
@@ -120,6 +131,10 @@ export async function listCreativeSources(f: SourceFilter & { page?: number; pag
       createdByName: r.createdByName,
       createdAt: r.createdAt,
       uses: Number(r.uses ?? 0),
+      fbAdId: r.fbAdId,
+      ownAd: r.kind === "OWN_AD" ? parseOwnAdMetrics(r.metrics) : null,
+      headline: r.headline,
+      primaryText: r.primaryText,
     })),
   };
 }
