@@ -341,7 +341,9 @@ export async function testPayrollCarryover(db: Db) {
 
     Quét mã nguồn ĐÃ VÀO KHO, không đọc đĩa — cùng cách `tests/repo-integrity.test.ts` làm.
   */
-  const nguon = execSync("git show HEAD:lib/actions/payroll-period.ts", { encoding: "utf8" });
+  // Từ 25/09/2026 phép tính + khoá tên nằm ở LÕI DÙNG CHUNG (người bấm và lương tự động đi cùng cửa);
+  // server action chỉ còn kiểm quyền rồi gọi vào đây. Quét đúng tệp đang giữ khoá.
+  const nguon = execSync("git show HEAD:lib/payroll/run-service.ts", { encoding: "utf8" });
   const viTriKhoa = nguon.indexOf("pg_advisory_xact_lock");
   // Dấu hiệu của phép kiểm chồng lấn. Từ bản vòng đời, nó lọc theo TẬP đã đóng băng
   // (`FINAL` cũ + `LOCKED` + `PAID`) chứ không còn so bằng với một chuỗi — hai bản NHÁP chồng lấn

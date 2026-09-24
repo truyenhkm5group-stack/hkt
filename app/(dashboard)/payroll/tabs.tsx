@@ -19,6 +19,7 @@ export function PayrollTabs({ canManage }: { canManage: boolean }) {
     { href: "/payroll/runs", label: "Lịch sử kỳ" },
     ...(canManage
       ? [
+          { href: "/payroll/autopilot", label: "Trả lương tự động" },
           { href: "/payroll/policies", label: "Chính sách lương" },
           { href: "/payroll/assignments", label: "Phân công & gán chính sách" },
           { href: "/payroll/adjustments", label: "Đầu vào & điều chỉnh" },

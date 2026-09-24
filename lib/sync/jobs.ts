@@ -46,6 +46,7 @@ import { runTaskAdvanceWatch } from "@/lib/tech/task-advance-watch";
 import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
+import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
@@ -421,6 +422,21 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       const r = await runEscalationDigest();
       return { ok: true, ...r };
     },
+  },
+  "payroll-autopilot": {
+    label: "Lương tự động",
+    source: "ALL",
+    description:
+      "Mỗi giờ: khớp tiền ra trong sổ ngân hàng với lệnh chuyển lương, khép kỳ đã trả đủ theo sao kê. Khi công tắc lương tự động BẬT: từ 09:00 ngày 01 quyết toán kỳ trước nữa, tính & gửi phiếu kỳ trước vào hộp thư từng người, báo chủ shop khi đủ trả lời, nhắc duyệt từ ngày 13 và nhắc chuyển từ ngày 15. " +
+      "KHÔNG BAO GIỜ duyệt, khoá, hay khai “đã trả” khi chưa có dòng sao kê. Chạy lại vô hại: mọi tin nhắn và dòng lệnh đều có khoá chống trùng ở CSDL. Đặc tả: docs/payroll-autopilot.md.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "payroll-autopilot", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await runPayrollAutopilot();
+        ctx.summary.imported = r.did.length;
+        ctx.summary.skipped = r.notes.length;
+        ctx.summary.detail = [`kỳ ${r.monthKey}`, ...r.did, ...r.notes].join(" · ").slice(0, 900);
+        return r;
+      }),
   },
   "work-recurrence": {
     label: "Sinh việc định kỳ",

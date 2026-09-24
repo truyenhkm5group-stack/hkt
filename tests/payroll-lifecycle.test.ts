@@ -117,13 +117,22 @@ export function testPayrollLifecycle() {
     `APPROVED` — hai chữ ký cho một kỳ, và không ai biết cái nào có hiệu lực. Đọc lại BÊN TRONG
     khoá là thứ chặn nó; đọc trước khi vào giao dịch thì không.
   */
-  const nguon = execSync("git show HEAD:lib/actions/payroll-run.ts", { encoding: "utf8" });
+  /*
+    Từ 25/09/2026 khoá tên + đọc lại trong khoá nằm ở LÕI DÙNG CHUNG `lib/payroll/run-service.ts`
+    (lương tự động đi cùng cửa ấy), còn quyền + người thứ hai ở lại server action. Quét CẢ HAI tệp:
+    lõi phải giữ khoá, cửa của người phải giữ quyền — và lõi phải tự chặn máy làm việc của người.
+  */
+  const nguon = execSync("git show HEAD:lib/payroll/run-service.ts", { encoding: "utf8" });
+  const cua = execSync("git show HEAD:lib/actions/payroll-run.ts", { encoding: "utf8" });
   const viTriKhoa = nguon.indexOf("pg_advisory_xact_lock");
   const viTriDocLai = nguon.indexOf("Đọc LẠI bên trong khoá");
   assert.ok(viTriKhoa > 0, "lượt chuyển trạng thái phải cầm một khoá TÊN");
   assert.ok(viTriDocLai > viTriKhoa, "và phải đọc lại trạng thái SAU khi đã cầm khoá");
-  assert.ok(nguon.includes('can(user, spec.permission)'), "máy chủ phải kiểm quyền — nút ẩn không phải một lớp bảo vệ");
-  assert.ok(nguon.includes("guardSecondApproval"), "ba việc nguy hiểm phải đi qua cổng người thứ hai");
+  assert.ok(cua.includes('can(user, spec.permission)'), "máy chủ phải kiểm quyền — nút ẩn không phải một lớp bảo vệ");
+  assert.ok(cua.includes("guardSecondApproval"), "ba việc nguy hiểm phải đi qua cổng người thứ hai");
+  assert.ok(cua.indexOf("guardSecondApproval") < cua.indexOf("transitionPayrollRunAs("), "cổng người thứ hai phải đứng TRƯỚC lượt ghi");
+  assert.ok(/actor\.id === null && !MACHINE_RUN_ACTIONS\.includes\(action\)/.test(nguon), "lõi phải tự chặn MÁY làm việc của người (duyệt · khoá · mở khoá · đánh dấu trả)");
+  assert.ok(!/^"use server"/.test(nguon.trimStart()), "lõi KHÔNG được là server action — nó không kiểm quyền nên không được gọi thẳng từ trình duyệt");
 
   // ─────────── 9. TỆP XUẤT KHÔNG ĐƯỢC TỰ TÍNH LẠI ───────────
   /*

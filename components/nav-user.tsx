@@ -1,6 +1,7 @@
 "use client";
 
-import { LogOut, Moon, Sun, Monitor } from "lucide-react";
+import Link from "next/link";
+import { LogOut, Moon, ReceiptText, Sun, Monitor } from "lucide-react";
 import { useTheme } from "next-themes";
 import type { Role } from "@/db/schema";
 import { logoutAction } from "@/lib/actions/auth";
@@ -41,6 +42,13 @@ export function NavUser({ user }: { user: { name: string; email: string; role: R
           <p className="text-sm font-semibold">{user.name}</p>
           <p className="text-xs text-muted-foreground">{ROLE_LABEL[user.role]} · {user.email}</p>
         </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {/* Mọi tài khoản đều thấy: phiếu lương gửi riêng từng người, cổng là quyền sở hữu phiếu. */}
+        <DropdownMenuItem asChild>
+          <Link href="/my-payslip">
+            <ReceiptText className="size-4" /> Phiếu lương của tôi
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs text-muted-foreground">Giao diện</DropdownMenuLabel>
         <DropdownMenuItem onClick={() => setTheme("light")}>

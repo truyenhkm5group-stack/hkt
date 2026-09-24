@@ -51,6 +51,14 @@ const JOBS = [
   */
   { job: "work-recurrence", every: minutes("WORK_RECURRENCE_EVERY_MINUTES", 15), offset: 9 },
   /*
+    LƯƠNG TỰ ĐỘNG — 60 phút/lần (chủ shop cho phép thêm job 25/09/2026).
+
+    Bản thân job tự biết giờ: trước 09:00 ngày 01 nó không tính gì, và mọi tin nhắn / dòng lệnh có
+    khoá chống trùng ở CSDL, nên chạy mỗi giờ chỉ tốn một lượt đọc khi không có việc. Khớp tiền ra với
+    lệnh chuyển chạy CẢ KHI công tắc tắt — đó là đọc chứng từ ngân hàng, không phải quyết định thay ai.
+  */
+  { job: "payroll-autopilot", every: minutes("PAYROLL_AUTOPILOT_EVERY_MINUTES", 60), offset: 17 },
+  /*
     LEO THANG SLA — 30 phút/lần, và nó là job ĐỌC.
 
     Nó không đổi mức ưu tiên của việc nào (mức leo thang được tính lúc đọc, xem

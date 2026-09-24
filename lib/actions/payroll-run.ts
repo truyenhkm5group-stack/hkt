@@ -18,13 +18,16 @@
  * Hai yêu cầu "duyệt" gửi cùng lúc đều đọc trạng thái `UNDER_REVIEW` rồi cùng ghi `APPROVED` —
  * hai chữ ký cho một kỳ, và không ai biết cái nào có hiệu lực. `pg_advisory_xact_lock` xếp hàng
  * chúng lại; chốt lương là việc mỗi tháng một lần nên xếp hàng ở đây không tốn gì.
+ *
+ * Từ 25/09/2026 khoá tên + đọc lại trong khoá nằm ở LÕI DÙNG CHUNG `lib/payroll/run-service.ts`,
+ * vì lương tự động phải đi đúng cửa này cho hai bước nó được phép (tính · chuyển soát). Tệp này giữ
+ * phần chỉ có nghĩa khi có một NGƯỜI bấm: quyền, lý do bắt buộc, cổng người thứ hai.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { guardSecondApproval } from "@/lib/actions/approvals";
-import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import {
@@ -35,9 +38,9 @@ import {
   type PayrollRunAction,
 } from "@/lib/constants/payroll-lifecycle";
 import { PAYROLL_BASES, PAYROLL_BASIS_SHORT, type PayrollBasis } from "@/lib/constants/payroll";
-import { monthKeyOf } from "@/lib/constants/payroll-carryover";
+import { transitionPayrollRunAs } from "@/lib/payroll/run-service";
 
-export type RunActionResult = { ok: true; status: string } | { error: string };
+export type RunActionResult = { ok: true; status: string; sideEffects: string[] } | { error: string };
 
 const schemaIn = z.object({
   periodKey: z.string().regex(/^\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}$/, "Khoá kỳ không hợp lệ"),
@@ -95,96 +98,15 @@ export async function movePayrollRun(input: unknown): Promise<RunActionResult> {
     if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
   }
 
-  const luc = new Date();
-  const ketQua = await db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('erp:payroll-run:' || ${`${periodKey}:${basis}`}))`);
-    // Đọc LẠI bên trong khoá: trạng thái có thể đã đổi giữa lượt đọc ở trên và lượt ghi này.
-    const [again] = await tx.select({ status: p.status }).from(p).where(and(eq(p.periodKey, periodKey), eq(p.basis, basis))).limit(1);
-    const now = normalizePayrollStatus(again?.status);
-    if (!canTransition(now, action)) {
-      return { error: `Kỳ vừa đổi sang trạng thái “${now}” (một người khác vừa thao tác) nên “${spec.label}” không còn hợp lệ. Mở lại trang để xem trạng thái mới.` } as const;
-    }
-
-    /*
-      MỘT LƯỢT MỞ KHOÁ PHẢI XOÁ CHỮ KÝ DUYỆT.
-
-      Mở khoá đưa kỳ về `APPROVED`, nhưng chữ ký cũ được ký trên một con số CÓ THỂ SẮP ĐỔI. Giữ
-      nguyên `approved_by` là để một người mang tiếng đã duyệt thứ họ chưa từng nhìn thấy. Nên mở
-      khoá giữ nguyên mốc duyệt cũ để tra lịch sử, nhưng trạng thái phải đi qua vòng soát lại —
-      bảng chuyển trạng thái đã ép điều đó: `APPROVED` chỉ đi tiếp được khi có người bấm `LOCK`.
-    */
-    const set: Record<string, unknown> = { status: spec.to, updatedAt: luc, statusReason: spec.requiresReason ? reason : "" };
-    if (action === "APPROVE") {
-      set.approvedAt = luc;
-      set.approvedBy = user.id;
-    }
-    /*
-      TRẢ LẠI ĐỂ SỬA THÌ CHỮ KÝ DUYỆT PHẢI BIẾN MẤT.
-
-      Giữ `approved_by` trên một kỳ vừa bị trả về là để màn hình in "đã duyệt bởi X" cạnh một con
-      số mà chính X vừa nói là sai. Lịch sử của lượt duyệt ấy KHÔNG mất — nó nằm trong nhật ký,
-      cùng với lý do trả lại.
-    */
-    if (action === "REJECT") {
-      set.approvedAt = null;
-      set.approvedBy = null;
-    }
-    if (action === "LOCK") {
-      set.lockedAt = luc;
-      set.lockedBy = user.id;
-    }
-    if (action === "UNLOCK") {
-      // Giữ `locked_at` cũ để tra được "kỳ này từng khoá lúc nào"; ràng buộc CHECK chỉ đòi nó khi
-      // trạng thái là LOCKED/PAID, nên để lại không vi phạm gì.
-      set.lockedAt = null;
-      set.lockedBy = null;
-    }
-    if (action === "MARK_PAID") {
-      set.paidAt = luc;
-      set.paidBy = user.id;
-    }
-    await tx.update(p).set(set).where(and(eq(p.periodKey, periodKey), eq(p.basis, basis)));
-
-    /*
-      ═══ SỔ LỖ LŨY KẾ THÀNH CHÍNH THỨC ĐÚNG LÚC KHOÁ, KHÔNG SỚM HƠN ═══
-
-      Số dư mang sang là một NGHĨA VỤ. Đóng băng nó ở bước TÍNH là khẳng định một nghĩa vụ dựa
-      trên con số còn sửa được — và tháng sau sẽ đọc số dư ấy như thể đã có người duyệt. Nên nó ở
-      trạng thái NHÁP suốt vòng soát, và chỉ thành `FINAL` khi kỳ đóng băng.
-
-      Chiều ngược lại cũng phải đúng: MỞ KHOÁ đưa sổ về NHÁP. Không hạ thì tháng sau tiếp tục đọc
-      một số dư "đã chốt" của một kỳ vừa được mở ra để sửa.
-    */
-    const c = schema.marketerProfitCarryover;
-    const thangCuaKy = monthKeyOf(new Date(`${periodKey.slice(0, 10)}T00:00:00+07:00`));
-    if (action === "LOCK") {
-      await tx
-        .update(c)
-        .set({ status: "FINAL", finalizedAt: luc, finalizedBy: user.id, updatedAt: luc })
-        .where(and(eq(c.monthKey, thangCuaKy), eq(c.status, "DRAFT")));
-    }
-    if (action === "UNLOCK") {
-      await tx
-        .update(c)
-        .set({ status: "DRAFT", finalizedAt: null, finalizedBy: null, updatedAt: luc })
-        .where(and(eq(c.monthKey, thangCuaKy), eq(c.status, "FINAL")));
-    }
-    return { ok: true, from: now } as const;
-  });
-  if ("error" in ketQua && ketQua.error) return { error: ketQua.error };
-
-  await audit({
-    userId: user.id,
-    userEmail: user.email,
-    action: spec.auditAction,
-    entity: "PAYROLL_PERIOD",
-    entityId: `${periodKey}:${basis}`,
-    before: { status: current },
-    after: { status: spec.to },
-    reason: reason || undefined,
-    detail: { periodKey, basis, action },
-  });
+  /*
+    KHOÁ TÊN, ĐỌC LẠI TRONG KHOÁ, BẢNG CHUYỂN TRẠNG THÁI và NHẬT KÝ nằm ở lõi dùng chung
+    (`lib/payroll/run-service.ts`) — máy tự động đi CÙNG cửa ấy cho hai bước nó được phép.
+    Phần ở trên (quyền · lý do · người thứ hai) chỉ có nghĩa khi có một NGƯỜI đang bấm.
+  */
+  const r = await transitionPayrollRunAs({ id: user.id, email: user.email }, { periodKey, basis, action, reason });
+  if ("error" in r) return r;
   revalidatePath("/payroll");
   revalidatePath("/payroll/runs");
-  return { ok: true, status: spec.to };
+  revalidatePath("/payroll/autopilot");
+  return { ok: true, status: r.status, sideEffects: r.sideEffects };
 }

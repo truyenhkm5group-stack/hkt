@@ -94,6 +94,7 @@ import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, t
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
 import { testPayrollPeriod } from "./payroll-period.test";
+import { testPayrollAutopilotFlow, testPayrollAutopilotPure } from "./payroll-autopilot.test";
 import { testWorkforce } from "./workforce.test";
 import { testNoAutoReassignOnOrgChange, testNoEmptyValueSelect, testOneMembershipReadPath, testOrgMembership } from "./org-membership.test";
 import { testMetricConfidenceIsAFunction, testPeriodKeys, testSnapshotImmutability } from "./performance-provenance.test";
@@ -2083,6 +2084,8 @@ async function main() {
   testPositionGrantsNothing();
   testRoleBuilderCannotEscalate();
   await testPayrollPeriod(db);
+  testPayrollAutopilotPure();
+  await testPayrollAutopilotFlow(db);
   testEveryScopedRouteIsGuarded();
   testPayrollOwnLineNeedsAccountKey();
   testPayrollAuthorization();

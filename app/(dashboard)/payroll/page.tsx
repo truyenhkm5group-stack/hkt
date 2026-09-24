@@ -643,7 +643,8 @@ export default async function PayrollPage({
                           <Money value={l.fixed} className={l.fixed ? "" : "text-muted-foreground"} />
                           {l.fixedMonthly && l.fixed !== l.fixedMonthly ? (
                             <div className="text-[11px] text-muted-foreground">
-                              {formatVND(l.fixedMonthly, { compact: true })}/tháng × {formatNumber(report.fixedBasis.days)} ngày
+                              {formatVND(l.fixedMonthly, { compact: true })}/tháng × {formatNumber(l.employmentClip ? l.employmentClip.days : report.fixedBasis.days)} ngày
+                              {l.employmentClip ? ` (làm ${l.employmentClip.from} → ${l.employmentClip.to})` : ""}
                             </div>
                           ) : null}
                         </>
@@ -674,6 +675,11 @@ export default async function PayrollPage({
                     </TableCell>
                     <TableCell className="text-right">
                       {l.salary === null ? <span className="text-xs text-muted-foreground">—</span> : <Money value={l.salary} className="text-base font-bold" />}
+                      {l.legacyAdjustments && l.legacyAdjustments.total !== 0 ? (
+                        <div className="text-[11px] text-muted-foreground" title={l.legacyAdjustments.items.map((a) => `${a.label}: ${formatVND(a.amount)}`).join(" · ")}>
+                          gồm điều chỉnh {formatVND(l.legacyAdjustments.total, { compact: true })}
+                        </div>
+                      ) : null}
                     </TableCell>
                     {canManage ? (
                       <TableCell>

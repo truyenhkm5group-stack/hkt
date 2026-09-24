@@ -5558,6 +5558,111 @@ export const payrollAdjustments = pgTable(
   ],
 );
 
+/**
+ * ═══ HỘP THƯ CÁ NHÂN (migration 0126) ═══
+ *
+ * `notifications` là hàng đợi CHUNG của cả shop. Phiếu lương là tin của MỘT người — không được nằm
+ * trong hàng đợi chung và không được gửi vào nhóm Lark. Mỗi dòng thuộc đúng một tài khoản.
+ */
+export const userMessages = pgTable(
+  "user_messages",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** PAYSLIP_SENT · PAYSLIP_PAID · PAYROLL_READY · PAYROLL_DISPUTE · PAYROLL_BLOCKED · PAYROLL_PAYDAY */
+    kind: text("kind").notNull(),
+    title: text("title").notNull(),
+    body: text("body").notNull().default(""),
+    href: text("href").notNull().default(""),
+    /** Khoá chống gửi trùng — job chạy mỗi giờ, một tin chỉ được đẻ ra một lần. */
+    dedupeKey: text("dedupe_key").notNull(),
+    createdAt: createdAt(),
+    readAt: ts("read_at"),
+  },
+  (t) => [uniqueIndex("user_messages_dedupe_uq").on(t.dedupeKey), index("user_messages_inbox_idx").on(t.userId, t.readAt, t.createdAt)],
+);
+
+/**
+ * ═══ PHIẾU LƯƠNG ĐÃ GỬI VÀ LỜI XÁC NHẬN (migration 0126) ═══
+ *
+ * Một dòng = một người trong MỘT LƯỢT GỬI (`round` = `payroll_periods.calc_runs` lúc gửi). "Hết hạn
+ * không trả lời" KHÔNG ghi vào đây — nó tính lúc đọc từ `deadline_at` (`confirmationState`).
+ */
+export const payrollConfirmations = pgTable(
+  "payroll_confirmations",
+  {
+    id: id(),
+    periodKey: text("period_key").notNull(),
+    basis: text("basis").notNull(),
+    round: integer("round").notNull(),
+    employeeId: text("employee_id").notNull(),
+    employeeName: text("employee_name").notNull().default(""),
+    /** Máy chủ khớp email hồ sơ ↔ tài khoản. `NULL` = chưa nối được tài khoản nên không gửi được. */
+    recipientUserId: text("recipient_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Thực nhận lúc gửi (ảnh chụp). */
+    amount: integer("amount"),
+    /** PENDING · CONFIRMED · DISPUTED */
+    status: text("status").notNull().default("PENDING"),
+    sentAt: ts("sent_at").notNull(),
+    deadlineAt: ts("deadline_at").notNull(),
+    respondedAt: ts("responded_at"),
+    respondedBy: text("responded_by").references(() => users.id, { onDelete: "set null" }),
+    /** Lý do khiếu nại (bắt buộc khi DISPUTED) hoặc lời nhắn kèm xác nhận. */
+    note: text("note").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("payroll_confirmations_uq").on(t.periodKey, t.basis, t.round, t.employeeId),
+    index("payroll_confirmations_recipient_idx").on(t.recipientUserId, t.sentAt),
+    check("payroll_confirmations_status_check", sql`${t.status} IN ('PENDING', 'CONFIRMED', 'DISPUTED')`),
+    check("payroll_confirmations_response_check", sql`(${t.status} = 'PENDING') = (${t.respondedAt} IS NULL)`),
+    check("payroll_confirmations_dispute_check", sql`${t.status} <> 'DISPUTED' OR length(trim(${t.note})) >= 3`),
+  ],
+);
+
+/**
+ * ═══ LỆNH CHUYỂN LƯƠNG (migration 0126) ═══
+ *
+ * Một dòng = một người trong một kỳ đã KHOÁ. Tài khoản nhận CHỤP LẠI lúc lập. "Đã trả" chỉ có khi một
+ * dòng sao kê chứng minh tiền đã đi (`bank_txn_id`) — AGENTS.md mục 8.7.
+ */
+export const payrollPayoutLines = pgTable(
+  "payroll_payout_lines",
+  {
+    id: id(),
+    periodKey: text("period_key").notNull(),
+    basis: text("basis").notNull(),
+    employeeId: text("employee_id").notNull(),
+    employeeName: text("employee_name").notNull().default(""),
+    amount: integer("amount").notNull(),
+    bankBin: text("bank_bin").notNull().default(""),
+    bankName: text("bank_name").notNull().default(""),
+    accountNumber: text("account_number").notNull().default(""),
+    accountName: text("account_name").notNull().default(""),
+    transferNote: text("transfer_note").notNull(),
+    accountChanged: boolean("account_changed").notNull().default(false),
+    /** PENDING · PAID · CANCELLED */
+    status: text("status").notNull().default("PENDING"),
+    bankTxnId: text("bank_txn_id").references(() => bankTransactions.id, { onDelete: "set null" }),
+    paidAt: ts("paid_at"),
+    matchedBy: text("matched_by").notNull().default(""),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("payroll_payout_lines_uq").on(t.periodKey, t.basis, t.employeeId),
+    uniqueIndex("payroll_payout_lines_note_uq").on(t.transferNote),
+    uniqueIndex("payroll_payout_lines_txn_uq").on(t.bankTxnId).where(sql`${t.bankTxnId} IS NOT NULL`),
+    check("payroll_payout_lines_amount_check", sql`${t.amount} > 0`),
+    check("payroll_payout_lines_status_check", sql`${t.status} IN ('PENDING', 'PAID', 'CANCELLED')`),
+    check("payroll_payout_lines_paid_check", sql`${t.status} <> 'PAID' OR (${t.paidAt} IS NOT NULL AND ${t.bankTxnId} IS NOT NULL)`),
+  ],
+);
+
 export const departmentsRelations = relations(departments, ({ one, many }) => ({
   lead: one(users, { fields: [departments.leadUserId], references: [users.id] }),
   members: many(departmentMembers),

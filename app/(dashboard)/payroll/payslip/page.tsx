@@ -176,6 +176,20 @@ export default async function PayslipPage({ searchParams }: { searchParams: Prom
                       <td className="py-1.5 pr-3">Hoa hồng % doanh thu cá nhân</td>
                       <td className="py-1.5 text-right tabular-nums">{formatVND(line.bonusRevenue)}</td>
                     </tr>
+                    {/* Điều chỉnh (tạm ứng, thưởng, quyết toán kỳ trước…) — kỳ đã khoá đọc từ ảnh chụp. */}
+                    {((snapLine ? snapLine.legacyAdjustments : line.legacyAdjustments)?.items ?? []).map((a, i) => (
+                      <tr key={`adj-${i}`} className="border-b">
+                        <td className="py-1.5 pr-3">
+                          <span className="inline-flex items-center gap-1">
+                            {a.label}
+                            {a.reason ? <InfoHint>{a.reason}</InfoHint> : null}
+                          </span>
+                        </td>
+                        <td className={cn("py-1.5 text-right tabular-nums", a.amount < 0 ? "text-rose-700 dark:text-rose-400" : "")}>
+                          <Money value={a.amount} sign />
+                        </td>
+                      </tr>
+                    ))}
                     <StatutoryRow statutory={statutory} />
                     <tr className="border-t-2">
                       <td className="py-2 pr-3 text-right font-semibold">Thực nhận</td>
