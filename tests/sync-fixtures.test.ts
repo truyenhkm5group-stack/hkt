@@ -159,7 +159,7 @@ import { testFastPathWiring } from "./fast-path-wiring.test";
 import { testBankMatch } from "./bank-match.test";
 import { testBankPipeline } from "./bank-pipeline.test";
 import { testFinanceOpsPure, testFinanceOpsQueries } from "./finance-ops.test";
-import { testAutomationLadderPure, testAutomationLadderQueries } from "./automation-ladder.test";
+import { testAutomationLadderPure, testAutomationLadderQueries, testFbTokenScopes } from "./automation-ladder.test";
 import { testActionWiring } from "./action-wiring.test";
 import {
   testKpiCohortUsesHandoffDate,
@@ -1787,6 +1787,7 @@ async function main() {
   await testFinanceOpsQueries(db);
   testAutomationLadderPure();
   await testAutomationLadderQueries(db);
+  await testFbTokenScopes();
   await testApproval(db);
   await testMultiAttemptMoney(db);
   await testCashflow(db);

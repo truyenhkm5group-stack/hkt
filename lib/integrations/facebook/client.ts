@@ -143,6 +143,18 @@ export class FacebookAdsClient {
     return { ok: true, userName: str(me.name), userId: str(me.id), businessName: str(business.name), accounts };
   }
 
+  /**
+   * Token đang chạy mang những quyền gì — `GET /me/permissions`, CHỈ ĐỌC. Kết luận nằm ở hàm thuần
+   * `assessFbScopes` (`lib/constants/fb-token-scopes.ts`); hàm này chỉ đổi hình dạng câu trả lời.
+   */
+  async getPermissions(): Promise<{ permission: string; status: string }[]> {
+    const r = await this.get("me/permissions");
+    return asArray(r.data)
+      .map((x) => asRecord(x))
+      .map((x) => ({ permission: str(x.permission), status: str(x.status) }))
+      .filter((x) => x.permission);
+  }
+
   /** Tất cả tài khoản quảng cáo của BM: sở hữu (owned) + được cấp quyền (client) */
   async listAdAccounts(): Promise<FbAdAccount[]> {
     const fields = "id,account_id,name,currency,account_status";
