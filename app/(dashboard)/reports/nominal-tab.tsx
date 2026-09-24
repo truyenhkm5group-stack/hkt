@@ -440,7 +440,7 @@ export async function NominalTab({
           label="Chi phí ngoài hàng · QC · vận chuyển"
           hint={`Gồm: vận hành ${formatVND(t.opexTotal, { compact: true })} + rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} + thuế ${formatVND(t.tax, { compact: true })} + CP khác ${formatVND(t.otherCost, { compact: true })}`}
           value={formatVND(t.otherCostsTotal, { compact: true })}
-          note={`${formatVND(t.opexPerOrder ?? 0)}/đơn lên · ${formatVND(t.opexPerDelivered ?? 0)}/đơn GTC ước tính`}
+          note={`${formatVND(t.opexPerOrder)}/đơn lên · ${formatVND(t.opexPerDelivered)}/đơn GTC ước tính`}
           icon={TrendingUp}
           tone="amber"
         />
@@ -666,7 +666,7 @@ export async function NominalTab({
                       <Money value={r.opexTotal} className="text-muted-foreground" />
                     </OKep>
                     <OKep sub={r.opexPerDelivered === null ? "sau hoàn —" : <>sau hoàn {formatVND(r.opexPerDelivered, { compact: true })}</>}>
-                      <Money value={r.opexPerOrder ?? 0} className="text-muted-foreground" />
+                      <Money value={r.opexPerOrder} className="text-muted-foreground" />
                     </OKep>
                     <OKep sub={r.inventoryRiskPending ? <span title="Rủi ro của hàng CÒN TRONG KHO — chưa trừ vào lợi nhuận kỳ này, sẽ được ghi dần khi hàng bán ra">còn treo {formatVND(r.inventoryRiskPending, { compact: true })}</span> : null}>
                       <TienCoTheChuaBiet value={r.inventoryRisk} known={r.cogsKnown} reason="Chưa biết giá vốn hàng bán ⇒ chưa tính được dự phòng rủi ro (không phải rủi ro = 0)" className="text-muted-foreground" />
@@ -733,7 +733,7 @@ export async function NominalTab({
                     <Money value={t.opexTotal} />
                   </OKep>
                   <OKep sub={t.opexPerDelivered === null ? "sau hoàn —" : <>sau hoàn {formatVND(t.opexPerDelivered, { compact: true })}</>}>
-                    <Money value={t.opexPerOrder ?? 0} />
+                    <Money value={t.opexPerOrder} />
                   </OKep>
                   <OKep sub={t.inventoryRiskPending ? <span title={`Rủi ro của hàng còn trong kho (${formatVND(t.stockValue, { compact: true })} giá trị tồn) — chưa trừ vào lợi nhuận kỳ này`}>còn treo {formatVND(t.inventoryRiskPending, { compact: true })}</span> : null}>
                     <TienCoTheChuaBiet value={t.inventoryRisk} known={t.cogsKnown} reason="Có sản phẩm chưa biết giá vốn ⇒ dự phòng rủi ro chưa tính đủ" />
