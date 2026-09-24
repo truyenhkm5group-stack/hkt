@@ -215,6 +215,7 @@ import { testCreativeEvaluate } from "./creative-evaluate.test";
 import { testCreativeWrite, testCreativeWriteDb } from "./creative-write.test";
 import { testCreativeLoopTick } from "./creative-loop-tick.test";
 import { testCreativeScreens } from "./creative-screens.test";
+import { testCreativeScreens2 } from "./creative-screens-2.test";
 import { testAdsLevelProbe } from "./ads-level-probe.test";
 import { testAdsGrain } from "./ads-grain.test";
 import { testAuditTrail } from "./audit-trail.test";
@@ -1669,6 +1670,7 @@ async function main() {
   await testCreativeWriteDb(db);
   await testCreativeLoopTick(db);
   testCreativeScreens();
+  testCreativeScreens2();
   await testAdsBrakeByDecision(db);
   testAdsLevelProbe();
   testAdsGrain();
