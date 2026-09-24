@@ -23,6 +23,7 @@ import { CS_CASE_SLA_HOURS, isBotAssignee } from "@/lib/constants/cs-domain";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { formatDateTime, formatTimeAgo, vnShortStamp } from "@/lib/format";
 import type { CsCaseRow, CsCaseShipment } from "@/lib/queries/cs";
+import { StaleHintChip } from "@/app/(dashboard)/cs/stale-hint";
 import type { ShipmentStage } from "@/db/schema";
 import { cn } from "@/lib/utils";
 
@@ -159,6 +160,7 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                   <div className="flex items-center gap-1.5">
                     <span className="font-semibold">{CS_KIND_LABEL[r.kind as CsKind] ?? r.kind}</span>
                     {r.domain === "LOGISTICS" ? <span className="rounded bg-sky-100 px-1 py-0.5 text-[10px] font-medium text-sky-800 dark:bg-sky-950/60 dark:text-sky-300">Vận đơn</span> : null}
+                    {isClosed(status) ? null : <StaleHintChip hint={r.staleHint} />}
                   </div>
                   <div className="truncate text-sm text-muted-foreground" title={r.title}>{r.title}</div>
                   {/*

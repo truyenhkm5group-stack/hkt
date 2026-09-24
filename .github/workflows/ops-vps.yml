@@ -37,6 +37,7 @@ on:
           - vtp-replay-files     # nhập lại các tệp Viettel Post đã lưu (mặc định CHỈ LIỆT KÊ; arg "--apply")
           - vtp-replay-explain   # vì sao dòng tệp Viettel Post đã lưu không ghép được vận đơn — kết quả MÃ HOÁ (chỉ đọc; arg "--like=<phần tên tệp>")
           - vtp-statement-peek   # xem bố cục thật của tệp bảng kê đã lưu (arg: phần tên tệp)
+          - cod-statement-audit  # vì sao /cod quá hạn nhiều: quá hạn theo ngày giao, tiền VTP đã về vs tệp bảng kê đã nhận (CHỈ ĐỌC; arg "--days=N")
           - vtp-retry-webhooks   # xử lý lại gói tin Viettel Post chưa ghép/chưa xử lý được
           - vtp-manual-verify    # chứng từ ĐVVC chủ shop chép tay cho lịch sử (mặc định CHẠY THỬ; arg "--apply")
           - explain-stock       # EXPLAIN ANALYZE truy vấn sổ kho — kế hoạch thực thi của câu chậm nhất
@@ -121,7 +122,7 @@ permissions:
 # Thao tác trong danh sách mà cần cho người vận hành thấy NGAY một con số ("đã đóng 12 case") thì
 # script tự in dòng ấy với tiền tố `[ops:tom-tat] ` — kênh tóm tắt duy nhất ra log (qua che_log).
 env:
-  OPS_THAO_TAC_MA_HOA: "db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill"
+  OPS_THAO_TAC_MA_HOA: "db-query vtp-debug phone-probe vtp-probe vtp-statement-peek payroll-reconcile seed-employees marketing-explain cs-stale check-integrations run-job vtp-replay-explain vtp-manual-verify returns-hmt care-false-reopen care-outcome-before-open fanpage-evidence-backfill cod-statement-audit"
 
 # ═══════════ HÀNG ĐỢI NẰM TRÊN MÁY CHỦ, KHÔNG NẰM Ở GITHUB ═══════════
 #
@@ -471,7 +472,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query backup-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability ads-level-probe"
-            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek returns-hmt ai-check backup restore-drill"
+            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate marketing-explain payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-replay-explain vtp-manual-verify vtp-statement-peek cod-statement-audit returns-hmt ai-check backup restore-drill"
 
             LOP=GHI
             case "$ARG" in
@@ -838,6 +839,14 @@ jobs:
                 fetch_script vtp-replay-files.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-replay-files.ts'
                 kiem_arg
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/vtp-replay-files.ts --explain ;;
+              cod-statement-audit)
+                # CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db). Trả lời "vì sao tab Quá
+                # hạn của /cod đông": quá hạn theo NGÀY GIAO, đợt tiền Viettel Post đã chuyển (sao kê)
+                # so với tệp bảng kê ERP đã nhận, các lần nhập tệp, sổ chứng từ, nhịp tim script Gmail.
+                fetch_script cod-statement-audit.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/cod-statement-audit.ts'
+                # Mọi dòng là SỐ TỔNG HỢP qua kênh tóm tắt; vẫn MÃ HOÁ để phần in thêm (nếu có) không ra log.
+                kiem_arg
+                ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/cod-statement-audit.ts ;;
               vtp-statement-peek)
                 fetch_script vtp-statement-peek.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/vtp-statement-peek.ts'
                 # In NGUYÊN DÒNG của bảng kê COD (mã vận đơn, người nhận, tiền) ⇒ kết quả MÃ HOÁ.

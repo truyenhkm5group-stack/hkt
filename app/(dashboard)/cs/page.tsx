@@ -189,6 +189,7 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
                 dueAt: c.dueAt ? c.dueAt.toISOString() : null,
                 slaBucket: c.slaBucket,
                 chatUrl: c.chatUrl,
+                staleHint: c.staleHint,
               })),
             }))}
           />
