@@ -21,7 +21,7 @@ export const PLAN_RECENT_TEST_DAYS = 30;
 /** Số ngày nhìn lại khi chống trùng chữ ký (mã + bộ gen). */
 export const PLAN_DEDUP_DAYS = 14;
 
-function vnMidnight(day: string): Date {
+export function vnMidnight(day: string): Date {
   return new Date(`${day}T00:00:00+07:00`);
 }
 

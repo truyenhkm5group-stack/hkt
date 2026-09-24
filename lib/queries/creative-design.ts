@@ -13,10 +13,13 @@ import {
   type DesignDna,
   type DesignStatus,
 } from "@/lib/constants/creative-loop";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { shiftDay } from "@/lib/constants/marketing-decision-ledger";
 import type { DesignParent, DesignPlanInput, DnaObservation } from "@/lib/creative/design";
 import { dnaStats } from "@/lib/creative/design";
+import { AD_MESSAGES } from "@/lib/queries/ads-roas";
 import { variantMetrics } from "@/lib/queries/creative-loop";
+import { vnMidnight } from "@/lib/queries/creative-plan";
 import { CONFIRMED_ORDER } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 
@@ -36,10 +39,6 @@ import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/querie
  * Mốc cửa sổ tính lùi từ 00:00 giờ Việt Nam của NGÀY LÔ, không từ đồng hồ lúc gọi — chạy lại cùng lô
  * ra cùng đầu vào.
  */
-
-function vnMidnight(day: string): Date {
-  return new Date(`${day}T00:00:00+07:00`);
-}
 
 export type ProductSellScore = {
   productId: string;
@@ -85,7 +84,7 @@ export async function productSellScores(db: Db, asOf: Date, days: number = DESIG
       .select({
         productId: sql<string>`${facts.productId}`,
         delivered: sql<number>`count(distinct ${facts.orderId}) filter (where ${facts.outcome} = 'DELIVERED')`,
-        returned: sql<number>`count(distinct ${facts.orderId}) filter (where ${facts.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
+        returned: sql<number>`count(distinct ${facts.orderId}) filter (where ${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
       })
       .from(facts)
       .groupBy(facts.productId),
@@ -98,7 +97,7 @@ export async function productSellScores(db: Db, asOf: Date, days: number = DESIG
 
   const ads = schema.adSpends;
   const spendRows = await db
-    .select({ productId: sql<string>`${ads.productId}`, spend: sql<number>`coalesce(sum(${ads.spend}), 0)`, messages: sql<number>`coalesce(sum(${ads.messages}), 0)` })
+    .select({ productId: sql<string>`${ads.productId}`, spend: sql<number>`coalesce(sum(${ads.spend}), 0)`, messages: sql<number>`coalesce(sum(${AD_MESSAGES}), 0)` })
     .from(ads)
     .where(and(eq(ads.grain, "AD"), eq(ads.excluded, false), isNotNull(ads.productId), gte(ads.spendDate, since), lt(ads.spendDate, asOf)))
     .groupBy(ads.productId);
@@ -137,7 +136,7 @@ export async function productAdCostHistory(db: Db, productIds: readonly string[]
       adId: sql<string>`${ads.adId}`,
       productId: sql<string | null>`min(${ads.productId})`,
       spend: sql<number>`coalesce(sum(${ads.spend}), 0)`,
-      messages: sql<number>`coalesce(sum(${ads.messages}), 0)`,
+      messages: sql<number>`coalesce(sum(${AD_MESSAGES}), 0)`,
     })
     .from(ads)
     .where(and(eq(ads.grain, "AD"), eq(ads.excluded, false), isNotNull(ads.adId), gte(ads.spendDate, since), lt(ads.spendDate, asOf), or(...conds)))
