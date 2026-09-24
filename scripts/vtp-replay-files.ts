@@ -50,8 +50,11 @@ async function main() {
       if (detected.kind !== "ORDER_LIST") continue;
       const matches = await matchVtpOrderList(detected.rows);
       const chuaGhep = matches.filter((m) => !m.shipmentId);
-      console.log(`
-${f.filename}: ${matches.length} dòng · ${chuaGhep.length} dòng CHƯA ghép được`);
+      // KÊNH TÓM TẮT CỦA THAO TÁC OPS `vtp-replay-explain`: các dòng chi tiết bên dưới mang SĐT người
+      // nhận nên qua workflow "Vận hành ERP trên VPS" chúng được MÃ HOÁ; chỉ dòng mang tiền tố
+      // `[ops:tom-tat] ` (tên tệp + hai con số đếm) ra log công khai.
+      console.log("");
+      console.log(`[ops:tom-tat] ${f.filename}: ${matches.length} dòng · ${chuaGhep.length} dòng CHƯA ghép được`);
       for (const m of chuaGhep.slice(0, 40)) {
         console.log([m.trackingCode, m.orderCode, m.receiverPhone ?? "-", m.cod ?? "-", m.statusText,
           m.mapped.stage, m.matchIssue ?? "(không có ứng viên nào)"].join(" | "));

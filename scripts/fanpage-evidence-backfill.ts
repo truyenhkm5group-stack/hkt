@@ -11,6 +11,13 @@ import { backfillAssignmentsFromEvidence, EVIDENCE_VERDICT_LABEL } from "@/lib/a
 import { getDb, schema } from "@/db";
 import { sql } from "drizzle-orm";
 
+/**
+ * KÊNH TÓM TẮT CỦA THAO TÁC OPS. Qua workflow "Vận hành ERP trên VPS", kết quả của script này (bảng
+ * page → TÊN marketer) được MÃ HOÁ; chỉ dòng mang tiền tố dưới đây được in ra log công khai — tức
+ * CHỈ con số đếm, không bao giờ một cái tên.
+ */
+const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
+
 async function main() {
   const apply = process.argv.includes("--apply");
   const db = await getDb();
@@ -43,9 +50,13 @@ async function main() {
       ].join(" | "),
     );
   }
-  console.log(`\n${apply ? "Đã tạo" : "Sẽ tạo"}: ${result.created} phân công · bỏ qua: ${result.skipped} page (không đủ bằng chứng hoặc đã có phân công).`);
-  if (!apply) console.log("Chạy lại với --apply để ghi thật.\n");
-  else console.log("Chạy job `fanpage-attribution` (hoặc bấm Đối soát lại) để áp cho các đơn.\n");
+  console.log("");
+  const theoKetLuan = new Map<string, number>();
+  for (const p of result.pages) theoKetLuan.set(EVIDENCE_VERDICT_LABEL[p.verdict], (theoKetLuan.get(EVIDENCE_VERDICT_LABEL[p.verdict]) ?? 0) + 1);
+  tomTat(`${result.pages.length} page đã xét: ${[...theoKetLuan].map(([k, v]) => `${k} ${v}`).join(" · ") || "—"}`);
+  tomTat(`${apply ? "Đã tạo" : "Sẽ tạo"}: ${result.created} phân công · bỏ qua: ${result.skipped} page (không đủ bằng chứng hoặc đã có phân công).`);
+  if (!apply) tomTat("Chạy lại với --apply để ghi thật.");
+  else tomTat("Chạy job `fanpage-attribution` (hoặc bấm Đối soát lại) để áp cho các đơn.");
 }
 
 main().then(

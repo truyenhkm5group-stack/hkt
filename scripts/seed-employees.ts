@@ -9,10 +9,19 @@ import { reapplyAdsMapping } from "@/lib/integrations/facebook/mapping";
 import { listEmployees } from "@/lib/queries/payroll";
 import { setSettingJson } from "@/lib/settings";
 
+/**
+ * KÊNH TÓM TẮT CỦA THAO TÁC OPS. Qua workflow "Vận hành ERP trên VPS", kết quả của script này (tên,
+ * bí danh, tài khoản QC, % lợi nhuận TỪNG NGƯỜI) được MÃ HOÁ; chỉ dòng mang tiền tố dưới đây được
+ * in ra log công khai — tức CHỈ con số đếm, không bao giờ một cái tên.
+ */
+const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
+
 async function main() {
   const input = JSON.parse(process.argv[2] ?? "[]") as Partial<Employee>[];
   if (!Array.isArray(input) || !input.length) throw new Error("Truyền một mảng JSON nhân sự");
   const list = await listEmployees();
+  let soThem = 0;
+  let soCapNhat = 0;
   for (const e of input) {
     if (!e.name) throw new Error("Thiếu name");
     const key = (e.shortName ?? e.name).toLowerCase();
@@ -31,13 +40,19 @@ async function main() {
       active: e.active ?? existing?.active ?? true,
       note: e.note ?? existing?.note ?? "",
     };
-    if (existing) list.splice(list.indexOf(existing), 1, merged);
-    else list.push(merged);
+    if (existing) {
+      list.splice(list.indexOf(existing), 1, merged);
+      soCapNhat += 1;
+    } else {
+      list.push(merged);
+      soThem += 1;
+    }
     console.log(`${existing ? "Cập nhật" : "Thêm"}: ${merged.name} (${merged.shortName}) · bí danh ${merged.aliases.join(", ") || "—"} · TK ${merged.accountIds.join(", ") || "—"} · ${merged.percentTotal}% LN tổng · ${merged.percentPersonal}% LN cá nhân`);
   }
   await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list });
+  tomTat(`Đã khai ${input.length} nhân sự: thêm ${soThem} · cập nhật ${soCapNhat} · danh sách còn ${list.length} người`);
   const r = await reapplyAdsMapping();
-  console.log(`Áp lại ghép marketer: ${r.campaigns} chiến dịch, ${r.changed} dòng thay đổi`);
+  tomTat(`Áp lại ghép marketer: ${r.campaigns} chiến dịch, ${r.changed} dòng thay đổi`);
   process.exit(0);
 }
 

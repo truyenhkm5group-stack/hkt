@@ -30,6 +30,13 @@ import { rowsOf } from "@/lib/sql-rows";
 
 const apply = process.argv.slice(2).includes("--apply");
 
+/**
+ * KÊNH TÓM TẮT CỦA THAO TÁC OPS. Qua workflow "Vận hành ERP trên VPS", kết quả của script này được
+ * MÃ HOÁ (từng đợt kèm TÊN nhân viên được quy công cứu / không cứu được); chỉ dòng mang tiền tố dưới
+ * đây được in ra log công khai — tức CHỈ con số đếm, không bao giờ một cái tên.
+ */
+const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
+
 type Dot = {
   id: string;
   shipment_id: string;
@@ -59,8 +66,8 @@ async function main() {
     `),
   );
 
-  console.log(`═══ CA CHỐT NGƯỢC THỜI GIAN ${apply ? "(CHẾ ĐỘ GHI)" : "(CHẠY THỬ — thêm --apply để ghi)"} ═══`);
-  console.log(`số đợt: ${ds.length}`);
+  tomTat(`═══ CA CHỐT NGƯỢC THỜI GIAN ${apply ? "(CHẾ ĐỘ GHI)" : "(CHẠY THỬ — thêm --apply để ghi)"} ═══`);
+  tomTat(`số đợt: ${ds.length}`);
   for (const r of ds) {
     console.log(
       `  · ${r.tracking ?? r.shipment_id} đợt#${r.episode_no} ${r.care_outcome} (quy về ${r.owner_name ?? "—"})` +
@@ -68,7 +75,7 @@ async function main() {
     );
   }
   if (!apply || !ds.length) {
-    console.log(apply ? "\nKhông có đợt nào để sửa." : "\nChưa ghi gì. Thêm --apply để sửa.");
+    tomTat(apply ? "Không có đợt nào để sửa." : "Chưa ghi gì. Thêm --apply để sửa.");
     process.exit(0);
   }
 
@@ -111,7 +118,7 @@ async function main() {
       },
     });
   }
-  console.log(`\nĐã sửa ${daSua}/${ds.length} đợt, mỗi đợt kèm một mốc SYSTEM_CORRECTION ghi lại giá trị cũ.`);
+  tomTat(`Đã sửa ${daSua}/${ds.length} đợt, mỗi đợt kèm một mốc SYSTEM_CORRECTION ghi lại giá trị cũ.`);
   process.exit(0);
 }
 

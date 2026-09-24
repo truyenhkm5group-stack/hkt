@@ -342,6 +342,7 @@ import { getAdsPerformance } from "@/lib/queries/ads-performance";
 import { listLandingOrders, listLandingProductOptions } from "@/lib/queries/landing";
 import { recheckAllLanding, refreshLandingChecks } from "@/lib/landing/sheet";
 import { previousOrderHint } from "@/lib/queries/order-hints";
+import { testOpsLogLeak } from "./ops-log-leak.test";
 
 async function main() {
   await ensureMigrated();
@@ -2177,6 +2178,7 @@ async function main() {
   testMigrationNumberUnique();
   testDuplicateMetrics();
   testLogisticsStatusBoundary();
+  await testOpsLogLeak();
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 

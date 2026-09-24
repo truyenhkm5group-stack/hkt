@@ -36,6 +36,13 @@ function arg(name: string): string | undefined {
 
 const n = (v: number) => v.toLocaleString("vi-VN");
 
+/**
+ * KÊNH TÓM TẮT CỦA THAO TÁC OPS. Qua workflow "Vận hành ERP trên VPS", kết quả của script này được
+ * MÃ HOÁ (tên / email người tải tệp, ví dụ từng dòng của sổ viết tay); chỉ dòng mang tiền tố dưới
+ * đây được in ra log công khai — tức CHỈ băm của tệp và các con số tổng hợp.
+ */
+const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
+
 function inNguon(wb: HmtWorkbook) {
   console.log(`\n═══ KIỂM ĐẾM NGUỒN · ${wb.label} ═══`);
   const la = unknownSheetNames(wb.sheetNames);
@@ -71,12 +78,13 @@ function inKeHoach(plan: HmtPlan) {
   }
 
   const c = plan.combined;
-  console.log(`\n═══ TỔNG HỢP ═══`);
-  console.log(`   dòng món ${n(c.itemRows)} · kiện khác nhau ${n(c.uniqueShipments)}`);
-  console.log(`   SẼ GHI NHẬN ĐÃ VỀ KHO: ${n(c.wouldReceiveShipments)} kiện · ${n(c.wouldReceiveItemRows)} dòng món · ${n(c.wouldReceiveUnits)} món`);
-  console.log(`   → vào hàng đợi ĐẾM: ${n(c.inspectionCandidates)} kiện (TỒN KHO KHÔNG ĐỔI — chờ người kho đếm)`);
-  console.log(`   GIỮ NGUYÊN: ${n(c.untouchedRows)} dòng`);
-  for (const st of HMT_MATCH_STATUSES) if (c.byStatus[st]) console.log(`     ${st.padEnd(20)} ${String(n(c.byStatus[st])).padStart(6)}  ${HMT_MATCH[st].label}`);
+  console.log("");
+  tomTat(`═══ TỔNG HỢP ═══`);
+  tomTat(`   dòng món ${n(c.itemRows)} · kiện khác nhau ${n(c.uniqueShipments)}`);
+  tomTat(`   SẼ GHI NHẬN ĐÃ VỀ KHO: ${n(c.wouldReceiveShipments)} kiện · ${n(c.wouldReceiveItemRows)} dòng món · ${n(c.wouldReceiveUnits)} món`);
+  tomTat(`   → vào hàng đợi ĐẾM: ${n(c.inspectionCandidates)} kiện (TỒN KHO KHÔNG ĐỔI — chờ người kho đếm)`);
+  tomTat(`   GIỮ NGUYÊN: ${n(c.untouchedRows)} dòng`);
+  for (const st of HMT_MATCH_STATUSES) if (c.byStatus[st]) tomTat(`     ${st.padEnd(20)} ${String(n(c.byStatus[st])).padStart(6)}  ${HMT_MATCH[st].label}`);
 
   const cov = plan.coverage;
   console.log(`\n═══ ĐỘ PHỦ so với "${HMT_SHEETS.TRACKING_INDEX.name}" ═══`);
@@ -129,7 +137,7 @@ async function main() {
   const nguon = await nguonTep();
   console.log(`\n═══ TỆP NGUỒN ═══`);
   console.log(`   ${nguon.origin === "DB" ? "tải lên qua ERP" : "tệp trên máy chủ"}: ${nguon.filename}`);
-  console.log(`   ${n(nguon.bytes)} byte · SHA-256 ${nguon.sha256}`);
+  tomTat(`Tệp nguồn: ${n(nguon.bytes)} byte · SHA-256 ${nguon.sha256}`);
   if (nguon.origin === "DB") console.log(`   người tải: ${nguon.uploadedBy || "—"} · lúc ${nguon.uploadedAt ? nguon.uploadedAt.toISOString() : "—"}`);
 
   const wb = readHmtWorkbook(nguon.buffer, label);
@@ -145,18 +153,19 @@ async function main() {
   }
 
   if (!apply) {
-    console.log(`\n▸ CHẠY THỬ — chưa ghi gì. Đọc kỹ hai bảng trên rồi chạy lại kèm --apply.`);
+    tomTat(`▸ CHẠY THỬ — chưa ghi gì. Đọc kỹ hai bảng trên rồi chạy lại kèm --apply.`);
     return;
   }
 
   const kq = await applyHmtReconciliation(plan, systemActor(HMT_SOURCE));
   // Đánh dấu bản này ĐÃ ĐƯỢC DÙNG — màn hình phân biệt "vừa tải lên, chưa đối soát" với "đã đối soát".
   if (nguon.origin === "DB") await markHmtWorkbookUsed(nguon.sha256);
-  console.log(`\n═══ ĐÃ GHI ═══`);
-  console.log(`   kiện ghi nhận đã về kho: ${n(kq.shipmentsReceived)} (dòng món ${n(kq.itemRowsWritten)} · ${n(kq.unitsWritten)} món)`);
-  console.log(`   dòng chứng cứ mới: ${n(kq.provenanceRows)} · bỏ qua vì đã ghi lần trước: ${n(kq.duplicateWrites)}`);
-  console.log(`   kiện vào hàng đợi đếm: ${n(kq.inspectionCandidates)} — TỒN KHO CHƯA ĐỔI`);
-  console.log(`\n▸ Chạy lại lệnh này ở chế độ chạy thử: số MATCHED phải về 0.`);
+  console.log("");
+  tomTat(`═══ ĐÃ GHI ═══`);
+  tomTat(`   kiện ghi nhận đã về kho: ${n(kq.shipmentsReceived)} (dòng món ${n(kq.itemRowsWritten)} · ${n(kq.unitsWritten)} món)`);
+  tomTat(`   dòng chứng cứ mới: ${n(kq.provenanceRows)} · bỏ qua vì đã ghi lần trước: ${n(kq.duplicateWrites)}`);
+  tomTat(`   kiện vào hàng đợi đếm: ${n(kq.inspectionCandidates)} — TỒN KHO CHƯA ĐỔI`);
+  tomTat(`▸ Chạy lại lệnh này ở chế độ chạy thử: số MATCHED phải về 0.`);
 }
 
 main()

@@ -595,6 +595,13 @@ export function testEnvsChuyenDuXuong() {
   const buoc: { ten: string; khaiBao: string[]; chuyenXuong: Set<string> }[] = [];
   for (let i = 0; i < dong.length; i += 1) {
     if (!/^ {8}env:\s*$/.test(dong[i]!)) continue;
+    /* CHỈ bước SSH. Bước `run:` thường (lấy bản mã về, kiểm chứng chỉ) cũng có `env:` nhưng không
+       có `with.envs` — quét nó thì bộ đọc trượt sang `with:` của bước KẾ TIẾP và báo lỗi giả. */
+    let dauBuoc = i;
+    while (dauBuoc > 0 && !/^ {6}- /.test(dong[dauBuoc]!)) dauBuoc -= 1;
+    let cuoiBuoc = i + 1;
+    while (cuoiBuoc < dong.length && !/^ {6}- /.test(dong[cuoiBuoc]!) && !/^ {0,4}\S/.test(dong[cuoiBuoc]!)) cuoiBuoc += 1;
+    if (!dong.slice(dauBuoc, cuoiBuoc).some((d) => /uses:\s*appleboy\/ssh-action@/.test(d))) continue;
     let k = i + 1;
     const khaiBao: string[] = [];
     for (; k < dong.length && !/^ {8}with:\s*$/.test(dong[k]!); k += 1) {
@@ -612,7 +619,7 @@ export function testEnvsChuyenDuXuong() {
       if (t > k + 40) break;
     }
     assert.ok(envs, `bước SSH ở dòng ${i + 1} phải có \`envs:\`; thiếu nó thì KHÔNG biến nào xuống được máy chủ`);
-    const ten = [...dong.slice(Math.max(0, i - 60), i)].reverse().find((d) => /^ {2}[\w-]+:\s*$/.test(d))?.trim().replace(":", "") ?? `dòng ${i + 1}`;
+    const ten = [...dong.slice(0, i)].reverse().find((d) => /^ {2}[\w-]+:\s*$/.test(d))?.trim().replace(":", "") ?? `dòng ${i + 1}`;
     buoc.push({ ten, khaiBao, chuyenXuong: new Set(envs!.split(",").map((x) => x.trim()).filter(Boolean)) });
   }
   assert.ok(buoc.length >= 2, `phải thấy ít nhất 2 bước SSH (ops + agent-env), thấy ${buoc.length}`);

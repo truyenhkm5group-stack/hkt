@@ -134,7 +134,8 @@ trước khi viết bất kỳ dòng mã nào.
 2. **Deploy `main`** — Actions → *Deploy ERP to VPS* → nhánh `main`. Workflow tự chạy `tsc` + `npm test`
    như điều kiện chặn. Đây là bước sửa số kỳ tháng 8 (−9 đơn · −4.566.000đ), cần chủ shop bấm.
 3. **Sau khi deploy xanh**, chạy ops `vtp-manual-verify` **không tham số** (chạy thử) rồi
-   `--apply`. Lô có định danh riêng nên rollback được độc lập.
+   `--apply`. Lô có định danh riêng nên rollback được độc lập. *(Từ 24/09/2026 JSON kết quả — có
+   SĐT khách — chỉ nằm trong hiện vật mã hoá; log còn dòng đếm. `docs/ops-doc-ket-qua.md`.)*
 4. **Đối chiếu lại một số**: `PKE1484463365` — tệp xuất của Viettel Post ghi thu hộ **30.000đ**,
    giao diện web ghi **474.000đ**. Script đang dùng số 474.000 theo bản chủ shop xác minh.
 5. **Xác nhận hai mã chép tay**: `PKE14844634301P1` và `PKE14844634303` không tồn tại trong tệp xuất

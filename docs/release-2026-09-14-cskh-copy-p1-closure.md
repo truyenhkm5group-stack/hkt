@@ -291,7 +291,8 @@ công bố dữ liệu, và nó thuộc về chủ shop, không thuộc về m�
 
 Sau đó: Actions → "Vận hành ERP trên VPS" → `returns-hmt`, ô `arg` **để trống** ⇒ chạy thử và in
 đủ bảng kiểm đếm nguồn + bảng phân loại + ví dụ từng nhóm lỗi. Chỉ khi hai bảng đó đúng mới chạy
-lại với `arg = --apply`.
+lại với `arg = --apply`. *(Từ 24/09/2026 các bảng ấy nằm trong hiện vật mã hoá — log chỉ còn băm
+tệp + bảng TỔNG HỢP; xem `docs/ops-doc-ket-qua.md`.)*
 
 ### 7.2b KIỂM ĐẾM NGUỒN — ĐÃ ĐỌC TỆP THẬT (14/09/2026)
 
@@ -367,7 +368,8 @@ scp "Bản sao của Hàng hoàn HMT.xlsx" root@<máy chủ>:/root/hmt/
 
 rồi Actions → "Vận hành ERP trên VPS" → `returns-hmt`, ô `arg` **để trống** (chạy thử) → đọc
 bảng → chạy lại với `arg = --apply`. Lượt chạy in `sha256` của tệp để đối chiếu chạy thử và
-lượt ghi là cùng một bản.
+lượt ghi là cùng một bản. *(Từ 24/09/2026: bảng chi tiết đọc bằng cách giải mã hiện vật —
+`docs/ops-doc-ket-qua.md`; `sha256` và bảng TỔNG HỢP vẫn ở log.)*
 
 ### 7.3 Nền đối soát — đo sẵn để đọc kết quả chạy thử
 
