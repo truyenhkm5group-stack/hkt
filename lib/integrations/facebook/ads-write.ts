@@ -251,3 +251,192 @@ export async function brakeObservations(settleDays = 7, limit = 10) {
     .orderBy(sql`${changes.changeDay} desc`, khoaQuyetDinh);
   return rows.slice(0, limit).map((r) => ({ changedAt: r.changedAt, profitBefore: r.profitBefore, profitAfter: r.profitAfter }));
 }
+
+/* ═══════════════════ BÀN TAY CỦA VÒNG MẪU (Nấc 4 — NỘI DUNG) ═══════════════════
+ *
+ * Đặc tả: `docs/creative-loop.md` §2–§3. Hợp đồng: `lib/constants/creative-loop.ts`.
+ * Cổng quyết định (hàm thuần): `lib/marketing/creative-write-gate.ts`. Nơi gọi: `lib/creative/publish.ts`.
+ *
+ * Chủ shop quyết 24/09/2026: vòng mẫu được TẠO nhóm + mẩu quảng cáo BÊN TRONG chiến dịch test do
+ * người dựng, và TẮT / cho TIÊU THÊM đúng những nhóm do chính vòng ấy tạo. Mọi lời gọi ghi dưới đây
+ * đi qua CÙNG `graphPost` ở trên — tức cùng chốt cứng env đọc lại ngay trước lời gọi mạng và cùng
+ * `retries: 0`. Cửa ghi vẫn là MỘT tệp; tệp này chỉ dài thêm, không có cửa thứ hai.
+ *
+ * Như `applyAdsWrite()`, các hàm ở đây KHÔNG tự kiểm hàng rào nghiệp vụ (duyệt lô, trần tiền, chiến
+ * dịch test, nhóm của ai) — đó là việc của `gateCreativeWrite()`, và nơi gọi bắt buộc đi qua nó
+ * trước. Chúng chỉ giữ chốt cứng cấp môi trường và vài phép kiểm hình dạng rẻ tiền mà một lỗi ở
+ * đường tính không được phép vượt qua (ngân sách phải là số nguyên dương, khung giờ phải có đích).
+ */
+
+/** Quy VND về đơn vị nhỏ nhất của loại tiền tài khoản — cùng phép tính với `applyAdsWrite`, dùng `fbMinorOffset`. */
+export function vndToFbMinor(vnd: number, currency: string): number {
+  const inCurrency = currency === "VND" ? vnd : vnd / env.facebook.usdToVnd;
+  return Math.round(inCurrency * fbMinorOffset(currency));
+}
+
+/**
+ * Những trường của NHÓM quảng cáo mẫu mà vòng chép sang nhóm test. Đây là mọi thứ đòi phán đoán mà
+ * ERP không có dữ liệu để tự quyết (đối tượng, mục tiêu tối ưu, đích tin nhắn) — máy chép NGUYÊN,
+ * không sửa một trường nào. Trường Facebook không trả về thì để `null` và KHÔNG gửi đi.
+ */
+export type TemplateAdset = {
+  targeting: Record<string, unknown> | null;
+  optimizationGoal: string | null;
+  billingEvent: string | null;
+  bidStrategy: string | null;
+  /** Đơn vị nhỏ nhất của loại tiền tài khoản, chép nguyên như Facebook trả về. */
+  bidAmount: string | null;
+  promotedObject: Record<string, unknown> | null;
+  destinationType: string | null;
+  attributionSpec: unknown[] | null;
+};
+
+export type TemplateAd = {
+  adId: string;
+  /** `null` = Facebook không trả về ⇒ CHƯA BIẾT mẩu mẫu nằm ở chiến dịch nào ⇒ cổng chặn. */
+  campaignId: string | null;
+  accountId: string | null;
+  adset: TemplateAdset;
+  /** `object_story_spec` của bài quảng cáo mẫu. `null` = không đọc được. */
+  objectStorySpec: Record<string, unknown> | null;
+  /** Bài mẫu dùng quảng cáo động (`asset_feed_spec`) — vòng không chép được kiểu này. */
+  hasAssetFeed: boolean;
+};
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function asText(v: unknown): string | null {
+  if (typeof v === "string" && v !== "") return v;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return null;
+}
+
+/** ĐỌC mẩu quảng cáo mẫu (chỉ đọc — không qua chốt ghi). Gọi một lần cho cả lô. */
+export async function readTemplateAd(adId: string): Promise<TemplateAd> {
+  const rec = await graphGet(adId, {
+    fields:
+      "id,campaign_id,account_id,adset{targeting,optimization_goal,billing_event,bid_strategy,bid_amount,promoted_object,destination_type,attribution_spec},creative{object_story_spec,asset_feed_spec}",
+  });
+  const adset = asRecord(rec.adset) ?? {};
+  const creative = asRecord(rec.creative) ?? {};
+  return {
+    adId: String(rec.id ?? adId),
+    campaignId: asText(rec.campaign_id),
+    accountId: asText(rec.account_id),
+    adset: {
+      targeting: asRecord(adset.targeting),
+      optimizationGoal: asText(adset.optimization_goal),
+      billingEvent: asText(adset.billing_event),
+      bidStrategy: asText(adset.bid_strategy),
+      bidAmount: asText(adset.bid_amount),
+      promotedObject: asRecord(adset.promoted_object),
+      destinationType: asText(adset.destination_type),
+      attributionSpec: Array.isArray(adset.attribution_spec) ? (adset.attribution_spec as unknown[]) : null,
+    },
+    objectStorySpec: asRecord(creative.object_story_spec),
+    hasAssetFeed: creative.asset_feed_spec !== undefined && creative.asset_feed_spec !== null,
+  };
+}
+
+function actPath(accountId: string, edge: string) {
+  const id = accountId.replace(/^act_/, "");
+  if (!/^[0-9]+$/.test(id)) throw new IntegrationError(`Facebook: mã tài khoản quảng cáo không hợp lệ "${accountId}".`, 400);
+  return `act_${id}/${edge}`;
+}
+
+function requireId(rec: GraphRecord, what: string): string {
+  const id = asText(rec.id);
+  if (!id) throw new IntegrationError(`Facebook: ${what} không trả về id.`, 502, false, rec);
+  return id;
+}
+
+/** Tải ảnh (base64) lên thư viện ảnh của tài khoản quảng cáo. Trả về `image_hash`. */
+export async function uploadAdImage(accountId: string, base64: string): Promise<string> {
+  if (!base64) throw new IntegrationError("Facebook: ảnh rỗng — không tải lên.", 400);
+  const rec = await graphPost(actPath(accountId, "adimages"), { bytes: base64 });
+  const images = asRecord(rec.images) ?? {};
+  for (const v of Object.values(images)) {
+    const hash = asText(asRecord(v)?.hash);
+    if (hash) return hash;
+  }
+  throw new IntegrationError("Facebook: tải ảnh xong nhưng không nhận được image_hash.", 502, false, rec);
+}
+
+/**
+ * Tạo bài quảng cáo (bài ẩn trên fanpage). Sau khi tạo, ĐỌC `effective_object_story_id` — đọc hỏng
+ * thì trả chuỗi rỗng chứ không ném: bài đã tạo xong, id bài chỉ để người đọc lần tới, và ném ở đây
+ * làm nơi gọi tưởng việc tạo hỏng.
+ */
+export async function createAdCreative(
+  accountId: string,
+  input: { name: string; objectStorySpec: Record<string, unknown> },
+): Promise<{ id: string; effectiveObjectStoryId: string }> {
+  const rec = await graphPost(actPath(accountId, "adcreatives"), { name: input.name, object_story_spec: JSON.stringify(input.objectStorySpec) });
+  const id = requireId(rec, "tạo bài quảng cáo");
+  const doc = await graphGet(id, { fields: "effective_object_story_id" }).catch((): GraphRecord => ({}));
+  return { id, effectiveObjectStoryId: asText(doc.effective_object_story_id) ?? "" };
+}
+
+/**
+ * Tạo NHÓM quảng cáo test: ngân sách TRỌN ĐỜI + `end_time`.
+ *
+ * Đây là lớp chặn tiêu quá thứ hai (`docs/creative-loop.md` §3 lớp b): Facebook tự dừng ở `end_time`
+ * và không tiêu quá `lifetime_budget`, nên ERP có chết ngay sau lời gọi này thì lô vẫn không tiêu
+ * quá số tiền người đã duyệt. Vì thế hàm TỪ CHỐI mọi lời gọi thiếu một trong hai.
+ */
+export async function createTestAdset(
+  accountId: string,
+  input: { name: string; campaignId: string; lifetimeBudgetMinor: number; startTime: Date; endTime: Date; template: TemplateAdset },
+): Promise<string> {
+  if (!Number.isInteger(input.lifetimeBudgetMinor) || input.lifetimeBudgetMinor <= 0) {
+    throw new IntegrationError("Facebook: ngân sách trọn đời phải là số nguyên dương — không tạo nhóm.", 400);
+  }
+  if (!(input.endTime.getTime() > input.startTime.getTime())) throw new IntegrationError("Facebook: nhóm test phải có end_time sau start_time — không tạo nhóm.", 400);
+  const t = input.template;
+  if (!t.targeting || !t.optimizationGoal || !t.billingEvent) {
+    throw new IntegrationError("Facebook: mẩu mẫu thiếu đối tượng / mục tiêu tối ưu / sự kiện tính tiền — máy không tự đoán các trường ấy.", 400);
+  }
+  const fields: Record<string, string> = {
+    name: input.name,
+    campaign_id: input.campaignId,
+    status: "ACTIVE",
+    lifetime_budget: String(input.lifetimeBudgetMinor),
+    start_time: input.startTime.toISOString(),
+    end_time: input.endTime.toISOString(),
+    targeting: JSON.stringify(t.targeting),
+    optimization_goal: t.optimizationGoal,
+    billing_event: t.billingEvent,
+  };
+  if (t.bidStrategy) fields.bid_strategy = t.bidStrategy;
+  if (t.bidAmount) fields.bid_amount = t.bidAmount;
+  if (t.promotedObject) fields.promoted_object = JSON.stringify(t.promotedObject);
+  if (t.destinationType) fields.destination_type = t.destinationType;
+  if (t.attributionSpec) fields.attribution_spec = JSON.stringify(t.attributionSpec);
+  return requireId(await graphPost(actPath(accountId, "adsets"), fields), "tạo nhóm quảng cáo");
+}
+
+/** Tạo MẨU quảng cáo trong nhóm test, gắn bài quảng cáo đã tạo. */
+export async function createAd(accountId: string, input: { name: string; adsetId: string; creativeId: string }): Promise<string> {
+  const rec = await graphPost(actPath(accountId, "ads"), {
+    name: input.name,
+    adset_id: input.adsetId,
+    creative: JSON.stringify({ creative_id: input.creativeId }),
+    status: "ACTIVE",
+  });
+  return requireId(rec, "tạo mẩu quảng cáo");
+}
+
+/** Tắt một NHÓM quảng cáo. Chỉ làm GIẢM tiền. */
+export async function pauseAdset(adsetId: string): Promise<void> {
+  await graphPost(adsetId, { status: "PAUSED" });
+}
+
+/** "Cho tiêu thêm": đặt lại ngân sách TRỌN ĐỜI (giá trị tuyệt đối, không cộng dồn) và `end_time` mới. */
+export async function extendAdset(adsetId: string, input: { lifetimeBudgetMinor: number; endTime: Date }): Promise<void> {
+  if (!Number.isInteger(input.lifetimeBudgetMinor) || input.lifetimeBudgetMinor <= 0) {
+    throw new IntegrationError("Facebook: ngân sách trọn đời phải là số nguyên dương — không ghi.", 400);
+  }
+  await graphPost(adsetId, { lifetime_budget: String(input.lifetimeBudgetMinor), end_time: input.endTime.toISOString() });
+}

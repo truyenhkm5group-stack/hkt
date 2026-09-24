@@ -35,6 +35,12 @@ const CHUA_NOI: Record<string, string> = {
   "lib/actions/cs.ts::saveCsRules": "chưa có màn hình cấu hình luật CSKH; shop đang dùng luật mặc định",
   // Ghi chú nội bộ cho đơn landing: cột đã có, tầng hành động đã có, chưa có ô nhập trên bảng.
   "lib/actions/landing.ts::setLandingNote": "chưa có ô ghi chú trên bảng đơn landing",
+  // Vòng mẫu: năm action của lô duyệt — nợ TẠM trong lúc gói màn hình D2 đang dựng.
+  "lib/actions/creative.ts::proposeBatchApproval": "VÒNG MẪU đang dựng: nút duyệt/từ chối/tắt thuộc gói màn hình D2 (docs/creative-loop.md §6) — GỠ dòng này khi nối",
+  "lib/actions/creative.ts::approveBatch": "VÒNG MẪU đang dựng: nút duyệt/từ chối/tắt thuộc gói màn hình D2 (docs/creative-loop.md §6) — GỠ dòng này khi nối",
+  "lib/actions/creative.ts::rejectBatch": "VÒNG MẪU đang dựng: nút duyệt/từ chối/tắt thuộc gói màn hình D2 (docs/creative-loop.md §6) — GỠ dòng này khi nối",
+  "lib/actions/creative.ts::rejectVariant": "VÒNG MẪU đang dựng: nút duyệt/từ chối/tắt thuộc gói màn hình D2 (docs/creative-loop.md §6) — GỠ dòng này khi nối",
+  "lib/actions/creative.ts::pauseVariantNow": "VÒNG MẪU đang dựng: nút duyệt/từ chối/tắt thuộc gói màn hình D2 (docs/creative-loop.md §6) — GỠ dòng này khi nối",
 };
 
 const goc = path.resolve(__dirname, "..");

@@ -98,6 +98,14 @@ export const ADS_WRITE_LIMITS = {
  * khoản quảng cáo. Mọi thứ đó đều đòi phán đoán mà ERP không có dữ liệu để đưa ra, và mỗi cái là
  * một bề mặt sai mới. Hai hành động dưới đây là hai thứ DUY NHẤT mà `decideAction()` thật sự kết
  * luận được.
+ *
+ * NGOẠI LỆ DUY NHẤT — VÒNG MẪU QUẢNG CÁO (chủ shop quyết 24/09/2026, `docs/creative-loop.md` §0):
+ * vòng mẫu được tải ảnh, tạo bài quảng cáo, tạo nhóm + mẩu quảng cáo test, tắt và cho tiêu thêm —
+ * nhưng CHỈ bên trong chiến dịch test do NGƯỜI dựng, CHỈ trên nhóm do chính vòng tạo, và chép đối
+ * tượng / mục tiêu tối ưu NGUYÊN từ mẩu mẫu chứ không tự quyết. Danh sách hành động, trần tiền và mã
+ * chặn của nó nằm ở `lib/constants/creative-loop.ts` (`CREATIVE_WRITE_ACTIONS`, `CREATIVE_HARD_LIMITS`),
+ * cổng ở `lib/marketing/creative-write-gate.ts`, lời gọi vẫn ở cùng MỘT cửa ghi. Ngoại lệ ấy KHÔNG
+ * mở rộng hai hành động dưới đây: bàn tay Nấc 3 vẫn không sửa creative và không tạo gì.
  */
 export type AdsWriteAction = "SET_DAILY_BUDGET" | "PAUSE_CAMPAIGN";
 
