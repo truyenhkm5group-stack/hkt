@@ -19,6 +19,7 @@ import "dotenv/config";
 import { rmSync } from "node:fs";
 import path from "node:path";
 import { and, eq, sql } from "drizzle-orm";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
 const dir = path.join("data", `pglite-stockrule-${process.pid}`);
 rmSync(dir, { recursive: true, force: true });
@@ -147,6 +148,7 @@ async function main() {
       mota: sql<string>`${pv.detail}`,
       nhap: sql<number>`${nhap}`,
       xuatSoKho: sql<number>`${daXuat(SHIPMENT_LEFT_WAREHOUSE)}`,
+      // Luật "xuất theo tiền" CŨ đã bị thay (xem đầu tệp) — giữ nguyên văn để đo chênh lệch, không phải một tập đang dùng.
       xuatTheoTien: sql<number>`${daXuat(sql`(${ORDER_OUTCOME} in ('DELIVERED','IN_TRANSIT') or ${RETURN_PENDING_WAREHOUSE})`)}`,
     })
     .from(pv)
@@ -181,7 +183,7 @@ async function main() {
   const [kpi] = await db
     .select({
       delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'DELIVERED')`,
-      returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in ('RETURNED','RETURNED_BY_RULE'))`,
+      returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
       cancelled: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'CANCELLED')`,
       inTransit: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'IN_TRANSIT')`,
       unknown: sql<number>`count(*) filter (where ${ORDER_OUTCOME} = 'UNKNOWN')`,

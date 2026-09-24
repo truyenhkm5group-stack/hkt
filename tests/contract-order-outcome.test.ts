@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { ELIGIBLE_SENT_OUTCOMES, ELIGIBLE_SENT_SQL, OUTCOME_LABEL, RETURN_RULE } from "@/lib/constants/returns";
-import { OPEN_OUTCOMES, OPEN_OUTCOMES_SQL, OUTCOME_GROUP } from "@/lib/constants/truth";
+import { FINISHED_OUTCOMES_SQL, OPEN_OUTCOMES, OPEN_OUTCOMES_SQL, OUTCOME_GROUP, RETURNED_OUTCOMES_SQL, isFinishedOutcome } from "@/lib/constants/truth";
 import { ORDER_OUTCOME, ORDER_OUTCOME_VERIFIED } from "@/lib/queries/return-rate";
 
 /**
@@ -314,6 +314,7 @@ export async function testOrderOutcomeContract(db: Db) {
   assert.equal(soCongThuc, 1, "chỉ được có ĐÚNG MỘT công thức ORDER_OUTCOME trong toàn kho mã");
 
   testOpenOutcomesKhongChepTay();
+  testHoanVaNgaNguKhongChepTay();
 
   console.log(`✓ Contract kết quả đơn: ${seq} tình huống khoá đúng đặc tả (tiền không suy ra giao hàng · ranh giới 50K/100K · chiều hoàn · UNKNOWN≠0 · CHỜ LẤY HÀNG≠đang giao≠chưa gửi · tồn kho)`);
 }
@@ -395,6 +396,113 @@ export function testOpenOutcomesKhongChepTay() {
   for (const [f, lyDo] of Object.entries(MIEN_TRU_CHUA_NGA_NGU)) {
     assert.ok(lyDo.trim().length > 20, `${f}: miễn trừ phải nói rõ lý do`);
     assert.ok(banChepChuaNgaNgu(docTep(f)).length > 0, `${f}: miễn trừ đã hết tác dụng — xoá dòng miễn trừ`);
+  }
+  assert.ok(tepMa.length > 200, `phải quét được toàn bộ kho mã, chỉ thấy ${tepMa.length} tệp`);
+}
+
+/**
+ * ═══════════ "HOÀN" VÀ "ĐÃ NGÃ NGŨ" — BẮT BẢN CHÉP TAY THEO TẬP, KHÔNG BẮT NHẦM TẬP CHA ═══════════
+ *
+ * Cùng bài học với khối "chưa ngã ngũ" ở trên, cho hai tập còn lại mà `OUTCOME_GROUP` khai:
+ *   · HOÀN          = nhóm `RETURNED`           → `RETURNED_OUTCOMES_SQL`
+ *   · ĐÃ NGÃ NGŨ    = `SUCCESS` + `RETURNED`    → `FINISHED_OUTCOMES_SQL` (mẫu số tỷ lệ GTC)
+ * Tới 24/09/2026 hai tập này được gõ lại bằng tay ở 55 chỗ trong 26 tệp — hôm nay đúng cả, nhưng
+ * thêm một kết quả hoàn mới là một lượt sửa 55 chỗ, và đó đúng là cách 50 đơn `AWAITING_PICKUP`
+ * từng rơi khỏi độ chín.
+ *
+ * VÌ SAO SO BẰNG TẬP, KHÔNG SO "CHỨA": `('RETURNED','RETURNED_BY_RULE')` là tập con của nhiều tập
+ * KHÁC có nghĩa riêng — "đã ngã ngũ", "đã gửi", "đã chốt" (+ huỷ), "không phải trả" (+ huỷ), nhu cầu
+ * hàng (`not in` huỷ + hoàn). Bắt theo "có chứa" là báo nhầm cả loạt. Nên luật là:
+ *   · `in (…)` hoặc `not in (…)` có TẬP giá trị BẰNG ĐÚNG một trong hai tập ⇒ bản chép (mọi thứ tự,
+ *     nháy đơn/kép, xuống dòng, chữ hoa);
+ *   · `not in (…)` bằng đúng PHẦN BÙ của một trong hai tập ⇒ bản chép viết ngược;
+ *   · danh sách có `RETURNED_BY_RULE` mà THIẾU `RETURNED` ⇒ tách đôi nhóm hoàn — hai giá trị ấy luôn
+ *     đi cùng nhau (ORDER_OUTCOME.md mục 6).
+ * Chỉ xét danh sách mà MỌI phần tử là một `OrderOutcome`. Bản chép THIẾU `RETURNED_BY_RULE` (vd
+ * `('DELIVERED','RETURNED')`) KHÔNG bắt được bằng máy: chặng vận đơn dùng đúng những chữ ấy
+ * (`shipments.stage in ('DELIVERED','RETURNED','CANCELLED')`) — `RETURNED_BY_RULE` là chữ DUY NHẤT
+ * chỉ có ở kết quả đơn, nên nó là điểm neo của bộ dò.
+ *
+ * Tập đích và phần bù SINH từ `OUTCOME_GROUP` lúc chạy, không gõ lại ở đây.
+ */
+const MIEN_TRU_HOAN_NGA_NGU: Record<string, string> = {};
+
+export function banChepHoanNgaNgu(ma: string): string[] {
+  const vuTru = Object.keys(OUTCOME_GROUP) as (keyof typeof OUTCOME_GROUP)[];
+  const tap = (xs: readonly string[]) => [...new Set(xs)].sort().join(",");
+  const hoan = vuTru.filter((k) => OUTCOME_GROUP[k] === "RETURNED");
+  const ngaNgu = vuTru.filter((k) => isFinishedOutcome(k));
+  const dich = [
+    { ten: "HOÀN → RETURNED_OUTCOMES_SQL", cung: tap(hoan), bu: tap(vuTru.filter((k) => !hoan.includes(k))) },
+    { ten: "ĐÃ NGÃ NGŨ → FINISHED_OUTCOMES_SQL", cung: tap(ngaNgu), bu: tap(vuTru.filter((k) => !ngaNgu.includes(k))) },
+  ];
+  const trongVuTru = new Set<string>(vuTru);
+  const ra: string[] = [];
+  for (const m of ma.matchAll(DS_CHUOI_HANG)) {
+    const giaTri = [...new Set([...m[2].matchAll(/['"]([A-Za-z_]+)['"]/g)].map((x) => x[1]))];
+    if (!giaTri.every((v) => trongVuTru.has(v))) continue;
+    const phu = Boolean(m[1]);
+    const t = tap(giaTri);
+    const dong = m[0].replace(/\s+/g, " ");
+    for (const d of dich) {
+      if (t === d.cung) ra.push(`${dong} [${d.ten}]`);
+      if (phu && t === d.bu) ra.push(`${dong} [phần bù — ${d.ten}]`);
+    }
+    if (giaTri.length >= 2 && giaTri.includes("RETURNED_BY_RULE") && !giaTri.includes("RETURNED")) ra.push(`${dong} [tách đôi nhóm hoàn]`);
+  }
+  return ra;
+}
+
+export function testHoanVaNgaNguKhongChepTay() {
+  // Hai hằng số SQL phải là đúng hai tập sinh ra từ bảng nhóm — bộ dò dựa trên cùng lời khai ấy.
+  const tapSql = (s: string) => s.split(",").map((x) => x.replace(/'/g, "")).sort().join(",");
+  assert.equal(tapSql(RETURNED_OUTCOMES_SQL), "RETURNED,RETURNED_BY_RULE", "HOÀN = RETURNED + RETURNED_BY_RULE, luôn gộp (ORDER_OUTCOME.md mục 6)");
+  assert.equal(tapSql(FINISHED_OUTCOMES_SQL), "DELIVERED,RETURNED,RETURNED_BY_RULE", "ĐÃ NGÃ NGŨ = giao thành công + hoàn; huỷ KHÔNG vào mẫu số");
+
+  // Tự kiểm bộ dò — đột biến dựng sẵn: mỗi dạng dưới đây đã từng nằm trong kho mã.
+  const phaiBat = [
+    "x in ('RETURNED','RETURNED_BY_RULE')", // 45 chỗ tới 24/09/2026
+    "x in ('RETURNED_BY_RULE','RETURNED')", // đảo thứ tự
+    'x IN ( "RETURNED" ,\n  "RETURNED_BY_RULE" , )', // nháy kép, xuống dòng, phẩy cuối, chữ hoa
+    "x not in ('RETURNED','RETURNED_BY_RULE')", // phủ định vẫn là bản chép của cùng tập
+    "x in ('DELIVERED','RETURNED','RETURNED_BY_RULE')", // mẫu số GTC — 10 chỗ
+    "x in ('RETURNED_BY_RULE',\n 'DELIVERED', 'RETURNED')",
+    "x not in ('NOT_SHIPPED','UNKNOWN','AWAITING_PICKUP','IN_TRANSIT','CANCELLED')", // phần bù của ĐÃ NGÃ NGŨ
+    "x in ('DELIVERED','RETURNED_BY_RULE')", // tách đôi nhóm hoàn
+  ];
+  for (const mau of phaiBat) assert.ok(banChepHoanNgaNgu(mau).length > 0, `bộ dò phải bắt bản chép 'hoàn' / 'đã ngã ngũ': ${mau}`);
+  const phaiTha = [
+    "x in ('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')", // ĐÃ CHỐT = ngã ngũ + huỷ (impact · projected-delivery)
+    "x in ('RETURNED','RETURNED_BY_RULE','CANCELLED')", // "không phải trả" (cod-settlement)
+    "x not in ('CANCELLED','RETURNED','RETURNED_BY_RULE')", // nhu cầu hàng (planning · stock · slow-moving)
+    "x in ('IN_TRANSIT','DELIVERED','RETURNED','RETURNED_BY_RULE')", // "đã gửi" — hằng số riêng
+    "s.stage in ('DELIVERED','RETURNED')", // chặng vận đơn
+    "b.stage in ('DELIVERED','RETURNED','CANCELLED')", // chặng vận đơn đã chốt
+    "s.stage not in ('CANCELLED','RETURNED','DELIVERED')",
+    "chang in ('RETURNED','RETURNING')", // chữ ngoài vũ trụ kết quả đơn
+    "x = 'RETURNED_BY_RULE'", // một giá trị lẻ để bóc tách trên màn hình
+    "x in (${sql.raw(RETURNED_OUTCOMES_SQL)})", // dạng đúng
+    "o.stage not in ('CANCELLED','DELETED')", // trạng thái Pancake
+  ];
+  for (const mau of phaiTha) assert.deepEqual(banChepHoanNgaNgu(mau), [], `bộ dò KHÔNG được bắt nhầm: ${mau}`);
+
+  const tepMa = execFileSync("git", ["ls-files", "lib", "app", "components", "scripts", "chatbot"], { encoding: "utf8" })
+    .split("\n")
+    .filter((f) => /\.(ts|tsx|js|mjs)$/.test(f));
+  const docTep = (f: string) => {
+    try {
+      return readFileSync(f, "utf8");
+    } catch {
+      return ""; // tệp đã xoá trên đĩa mà chưa commit — không có mã để chép
+    }
+  };
+  const viPham = tepMa
+    .filter((f) => !(f in MIEN_TRU_HOAN_NGA_NGU))
+    .flatMap((f) => banChepHoanNgaNgu(docTep(f)).map((d) => `${f}: ${d}`));
+  assert.deepEqual(viPham, [], `gõ lại tập 'hoàn' / 'đã ngã ngũ' — dùng RETURNED_OUTCOMES_SQL / FINISHED_OUTCOMES_SQL (lib/constants/truth.ts): ${viPham.join(" · ")}`);
+  for (const [f, lyDo] of Object.entries(MIEN_TRU_HOAN_NGA_NGU)) {
+    assert.ok(lyDo.trim().length > 20, `${f}: miễn trừ phải nói rõ lý do`);
+    assert.ok(banChepHoanNgaNgu(docTep(f)).length > 0, `${f}: miễn trừ đã hết tác dụng — xoá dòng miễn trừ`);
   }
   assert.ok(tepMa.length > 200, `phải quét được toàn bộ kho mã, chỉ thấy ${tepMa.length} tệp`);
 }

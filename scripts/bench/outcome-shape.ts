@@ -15,6 +15,7 @@ import "dotenv/config";
 import { rmSync } from "node:fs";
 import path from "node:path";
 import { sql } from "drizzle-orm";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
 const args = process.argv.slice(2);
 const scale = Number((args.find((a) => a.startsWith("--scale=")) ?? "--scale=10").slice(8));
@@ -42,12 +43,12 @@ async function main() {
   const aggregates = (outcome: ReturnType<typeof sql>, qty: ReturnType<typeof sql>, total: ReturnType<typeof sql>, orderId: ReturnType<typeof sql>) => sql`
       coalesce(sum(${qty}) filter (where ${outcome} <> 'CANCELLED'), 0) as ordered_qty,
       coalesce(sum(${qty}) filter (where ${outcome} = 'DELIVERED'), 0) as delivered_qty,
-      coalesce(sum(${qty}) filter (where ${outcome} in ('RETURNED','RETURNED_BY_RULE')), 0) as returned_qty,
+      coalesce(sum(${qty}) filter (where ${outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0) as returned_qty,
       coalesce(sum(${total}) filter (where ${outcome} <> 'CANCELLED'), 0) as booked_revenue,
       coalesce(sum(${total}) filter (where ${outcome} = 'DELIVERED'), 0) as delivered_revenue,
-      coalesce(sum(${total}) filter (where ${outcome} in ('RETURNED','RETURNED_BY_RULE')), 0) as lost_revenue,
+      coalesce(sum(${total}) filter (where ${outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0) as lost_revenue,
       count(distinct ${orderId}) filter (where ${outcome} = 'DELIVERED') as delivered_orders,
-      count(distinct ${orderId}) filter (where ${outcome} in ('RETURNED','RETURNED_BY_RULE')) as returned_orders`;
+      count(distinct ${orderId}) filter (where ${outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})) as returned_orders`;
 
   const A = sql`select order_items.variant_id,
       ${aggregates(sql`(${ORDER_OUTCOME})`, sql`order_items.quantity`, sql`order_items.line_total`, sql`orders.id`)}

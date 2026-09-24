@@ -5,6 +5,7 @@
 import { and, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
 export type RiskInput = { succeed: number; returned: number; isBlock: boolean; erpDelivered?: number; erpReturned?: number };
 export type RiskConfig = { riskMinReturned: number; riskReturnRatePct: number };
@@ -35,7 +36,7 @@ export async function erpHistoryByPhone(phones: string[], excludeOrderId?: strin
       // Đọc kết quả ĐÃ VẬT CHẤT HOÁ (cùng công thức, chỉ khác lúc tính) và MỖI ĐƠN MỘT DÒNG: đơn gửi
       // lại hai lần mà nối cả hai vận đơn thì lịch sử khách hiện ra tệ gấp đôi sự thật.
       delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-      returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`,
+      returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
     })
     .from(schema.shipments)
     .innerJoin(schema.orders, and(eq(schema.orders.id, schema.shipments.orderId), PRIMARY_ATTEMPT))

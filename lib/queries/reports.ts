@@ -2,6 +2,7 @@ import { and, count, desc, eq, gte, inArray, lte, sql, sum, type SQL } from "dri
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import { lineUnitCost, orderCogsColumn } from "@/lib/queries/cogs";
 import { COD_COLLECTABLE, ORDER_OUTCOME, OUTCOME_FENCE, PRIMARY_ATTEMPT, outcomeColumn } from "@/lib/queries/return-rate";
@@ -115,7 +116,7 @@ function facts(base: ReturnType<typeof orderFacts>) {
     success: sql`${base.outcome} = 'DELIVERED'`,
     notCancelled: sql`${base.orderStage} not in ('CANCELLED','DELETED')`,
     shipped: sql`${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)})`,
-    returned: sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`,
+    returned: sql`${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`,
     cancelled: sql`${base.orderStage} in ('CANCELLED','DELETED')`,
   };
 }

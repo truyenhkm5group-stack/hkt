@@ -213,6 +213,18 @@ export async function testCreativeEvaluate(db: Db) {
     assert.equal(mw.bookedOrders, 4, "đơn huỷ và đơn NEW chưa chốt KHÔNG vào đơn chốt");
     assert.equal(mw.deliveredOrders, 1);
     assert.equal(mw.returnedOrders, 2, "hoàn = RETURNED + RETURNED_BY_RULE theo ORDER_OUTCOME");
+
+    // TIN NHẮN = greatest(messages, leads) — CÙNG định nghĩa với sổ chỉ số và với `/ads` cho cùng
+    // một mẩu. Mẩu mang lead biểu mẫu mà 0 hội thoại (đồng bộ ghi `leads = messages || lead`) giờ
+    // đếm được lead ấy; bản cũ đọc cột trần và thấy 0 — luật "tiêu X mà 0 tin nhắn" sẽ tắt nó.
+    // Dòng thêm cùng NGÀY với dòng sẵn có và không mang tiền: số ngày chi và tiền đứng nguyên.
+    await db.insert(schema.adSpends).values(spend("ad-new", dayB, 0, { messages: 0, leads: 4, externalKey: "ce-leads" }));
+    const mn = (await variantMetrics(db, [{ id: "new", fbAdId: `${P}ad-new`, startAt: startB }])).get("new");
+    assert.ok(mn);
+    assert.equal(mn.messages, 9, "5 hội thoại + 4 lead biểu mẫu của một dòng không có hội thoại");
+    assert.equal(mn.spendVnd, 150_000);
+    assert.equal(mn.spendDays, 1);
+    await db.delete(schema.adSpends).where(eq(schema.adSpends.externalKey, "ce-leads"));
     for (const k of ["nospend", "unpublished"]) {
       const x = m.get(k);
       assert.ok(x);

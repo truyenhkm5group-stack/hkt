@@ -1,7 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
-import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
+import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
 import type { Period } from "@/lib/search-params";
 
@@ -92,7 +92,7 @@ export async function getStaffPerformance(period: Period, field: AttributionFiel
   const from = period.from ? sql`${o.insertedAt} >= ${period.from.toISOString()}::timestamptz` : sql`true`;
   const to = period.to ? sql`${o.insertedAt} <= ${period.to.toISOString()}::timestamptz` : sql`true`;
   const isDelivered = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`;
-  const isReturned = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
+  const isReturned = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
 
   /*
     ═══════════ TẮT JIT — CÙNG CHẨN ĐOÁN ĐÃ ĐO Ở `marketing-daily`, ĐO LẠI 22/09/2026 ═══════════

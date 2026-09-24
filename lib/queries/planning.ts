@@ -125,7 +125,8 @@ function demandSubquery(db: Awaited<ReturnType<typeof getDb>>, days: number, ali
     .where(
       gross
         ? sql`${o.insertedAt} >= now() - (${days} || ' days')::interval and ${ORDER_OUTCOME_FAST} <> 'CANCELLED'`
-        : sql`${o.insertedAt} >= now() - (${days} || ' days')::interval and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE') and ${oi.isBonus} = false`,
+        : // Nhu cầu = KHÔNG huỷ, KHÔNG hoàn (tức chưa ngã ngũ + đã giao) — tập khác RETURNED/FINISHED, cố ý liệt kê.
+          sql`${o.insertedAt} >= now() - (${days} || ' days')::interval and ${ORDER_OUTCOME_FAST} not in ('CANCELLED','RETURNED','RETURNED_BY_RULE') and ${oi.isBonus} = false`,
     )
     .groupBy(oi.variantId)
     .as(`demand_${alias}`);

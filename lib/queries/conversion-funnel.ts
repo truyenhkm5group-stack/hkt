@@ -4,7 +4,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { PANCAKE_ORDER_STATUS } from "@/lib/constants/pancake";
 import { CONVERSION_DIMENSION_LABEL, dimensionHasUnassigned, ORDER_STEPS, type ConversionDimension, type EvidenceTier, type OrderStepKey } from "@/lib/constants/conversion";
 import { LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
-import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
+import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { successRate } from "@/lib/queries/metrics";
 import { ORDER_SOURCE, ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
@@ -402,7 +402,7 @@ export async function getConversionByDimension(
         shipmentCreated: sql<number>`count(*) filter (where ${level} >= 3)`,
         leftWarehouse: sql<number>`count(*) filter (where ${level} >= 4)`,
         delivered: sql<number>`count(*) filter (where ${level} >= 5)`,
-        returned: sql<number>`count(*) filter (where ${facts.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
+        returned: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
         unfinished: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
         deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${facts.outcome} = 'DELIVERED'), 0)`,
         confirmMed: sql<number>`percentile_cont(0.5) within group (order by ${hoursBetween(facts.insertedAt, facts.confirmedAt)})`,

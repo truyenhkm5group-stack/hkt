@@ -191,6 +191,7 @@ async function taiKho(): Promise<Corpus> {
              where ${REPORTABLE_ORDER} and "orders"."inserted_at" >= ${since}
             offset 0
           ) k
+         -- Tập ĐÃ CHỐT = đã ngã ngũ + HUỶ, rộng hơn FINISHED_OUTCOMES (không có huỷ) — cố ý liệt kê.
          where k.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')
       `),
       ),

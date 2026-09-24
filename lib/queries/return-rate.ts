@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, lte, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
-import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
+import { CARRIER_DOCUMENT_SOURCES, CARRIER_EVENT_SOURCES, FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL, sqlSourceList } from "@/lib/constants/truth";
 import { CARRIER_HANDOFF_KNOWN_SQL } from "@/lib/constants/carrier-handoff";
 import { CANONICAL_OUTCOME_VERSION } from "@/lib/constants/canonical-outcome";
 import type { VerifiedOutcome } from "@/lib/constants/data-quality";
@@ -552,9 +552,9 @@ export const IS_RETURN_AWAITING_WAREHOUSE = sql`(${s.stage} = 'RETURNED'
  * "đây là nơi định nghĩa". Đúng là nơi định nghĩa — nhưng những VỊ NGỮ DẪN XUẤT trong cùng tệp thì
  * không có lý do gì được dùng bản chậm. Miễn trừ quá rộng là chỗ lỗi chui qua.
  */
-export const RETURN_PENDING_WAREHOUSE = sql`(${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE') and ${s.returnReceivedAt} is null)`;
+export const RETURN_PENDING_WAREHOUSE = sql`(${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}) and ${s.returnReceivedAt} is null)`;
 
-const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
+const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
 
 /*
   ═══ `IS_SHIPPED` VÀ `IS_FAILED` ĐÃ BỎ — HAI NGHĨA CỦA CHÚNG VẪN NGUYÊN, CHỈ ĐỔI CHỖ ĐỨNG ═══
@@ -585,7 +585,7 @@ const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')
  * làm tham số; trước đây mỗi hàm tự khai một hằng số CÙNG TÊN, và hai bản sao của một danh sách
  * hai phần tử sẽ lệch nhau vào đúng ngày ai đó thêm một kết quả hoàn thứ ba.
  */
-const returnedAnyOf = (outcome: SQLWrapper) => sql`${outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+const returnedAnyOf = (outcome: SQLWrapper) => sql`${outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
 
 const VARIANT_KEY = sql<string>`coalesce(${i.variantId}, 'sku:' || ${i.sku} || '|' || ${i.productName} || '|' || ${i.variationDetail})`;
 
@@ -1094,15 +1094,15 @@ export async function getReturnRateSummary(period: Period, q: string, basis: Tim
       orders: sql<number>`count(*)`,
       shipped: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
       delivered: sql<number>`count(*) filter (where ${base.outcome} = 'DELIVERED')`,
-      returned: sql<number>`count(*) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
+      returned: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
       returnedByRule: sql<number>`count(*) filter (where ${base.outcome} = 'RETURNED_BY_RULE')`,
       inTransit: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT')`,
       failed: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT' and ${base.shipmentStage} = 'DELIVERY_FAILED')`,
       pending: sql<number>`count(*) filter (where ${base.outcome} = 'NOT_SHIPPED')`,
       cancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
-      lostRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+      lostRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
       // vận đơn đã kết thúc theo Pancake nhưng chưa có trạng thái Viettel Post thật (webhook / tra cứu / nhập danh sách vận đơn)
-      finishedNoVtp: sql<number>`count(*) filter (where ${base.shipmentId} is not null and ${base.vtpStatusDate} is null and ${base.outcome} in ('DELIVERED','RETURNED','RETURNED_BY_RULE'))`,
+      finishedNoVtp: sql<number>`count(*) filter (where ${base.shipmentId} is not null and ${base.vtpStatusDate} is null and ${base.outcome} in (${sql.raw(FINISHED_OUTCOMES_SQL)}))`,
       provisional: sql<number>`count(*) filter (where ${base.provisional})`,
     })
     .from(base));
@@ -1248,7 +1248,7 @@ export const SHIPMENT_COD = sql`coalesce(nullif(${s.codCollected}, 0), ${s.codAm
  * Yêu cầu FROM shipments LEFT JOIN orders.
  */
 export const SHIPMENT_DELIVERED = sql`(${ORDER_OUTCOME_FAST} = 'DELIVERED')`;
-export const SHIPMENT_RETURNED = sql`(${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`;
+export const SHIPMENT_RETURNED = sql`(${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`;
 
 /**
  * Vận đơn CÒN TIỀN COD ĐỂ THU. Vận đơn đã hoàn / huỷ thì khoản COD khai báo không bao giờ về nữa,
@@ -1347,12 +1347,12 @@ export async function getReturnRateBySource(period: Period, q: string, value: Or
         orders: sql<number>`count(*)`,
         shipped: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)}))`,
         delivered: sql<number>`count(*) filter (where ${base.outcome} = 'DELIVERED')`,
-        returned: sql<number>`count(*) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
+        returned: sql<number>`count(*) filter (where ${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
         inTransit: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT')`,
         failed: sql<number>`count(*) filter (where ${base.outcome} = 'IN_TRANSIT' and ${base.shipmentStage} = 'DELIVERY_FAILED')`,
         cancelled: sql<number>`count(*) filter (where ${base.outcome} = 'CANCELLED')`,
         revenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} = 'DELIVERED'), 0)`,
-        lostRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+        lostRevenue: sql<number>`coalesce(sum(${base.revenue}) filter (where ${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
       })
       .from(base)
       .groupBy(base.source),

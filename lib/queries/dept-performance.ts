@@ -5,6 +5,7 @@ import { CARE_SLA } from "@/lib/constants/care";
 import { DEPARTMENT_LABEL, type DepartmentCode } from "@/lib/constants/departments";
 import { DEPT_PERF } from "@/lib/constants/department-performance";
 import { rowsOf } from "@/lib/sql-rows";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { metricConfidence, rankable, type MetricConfidence, type PersonLinkage } from "@/lib/constants/metric-provenance";
 
 /**
@@ -169,7 +170,7 @@ async function salesMetrics(from: Date, to: Date): Promise<Map<string, MetricInp
           select c2.outcome
           from canonical_order_outcome c2
           where c2.order_id = o.id
-          order by (c2.outcome = 'DELIVERED') desc, (c2.outcome in ('RETURNED','RETURNED_BY_RULE')) desc
+          order by (c2.outcome = 'DELIVERED') desc, (c2.outcome in (${sql.raw(RETURNED_OUTCOMES_SQL)})) desc
           limit 1
         ) cof on true
       )
@@ -179,7 +180,7 @@ async function salesMetrics(from: Date, to: Date): Promise<Map<string, MetricInp
              count(*) filter (where conversation_id is not null)::int as with_conv,
              count(*) filter (where order_id is not null)::int as converted,
              count(*) filter (where outcome = 'DELIVERED')::int as delivered,
-             count(*) filter (where outcome in ('RETURNED','RETURNED_BY_RULE'))::int as returned,
+             count(*) filter (where outcome in (${sql.raw(RETURNED_OUTCOMES_SQL)}))::int as returned,
              coalesce(sum(order_value) filter (where outcome = 'DELIVERED'), 0) as revenue
       from ghep_don
       group by who

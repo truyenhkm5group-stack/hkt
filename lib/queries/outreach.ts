@@ -2,7 +2,7 @@ import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type S
 import { getDb, schema } from "@/db";
 import type { ListParams } from "@/lib/search-params";
 import { CUSTOMER_OUTCOMES, type CustomerOutcome } from "@/lib/constants/outreach-segment";
-import { OPEN_OUTCOMES } from "@/lib/constants/truth";
+import { FINISHED_OUTCOMES_SQL, OPEN_OUTCOMES, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
 export const OUTREACH_SORTABLE = ["createdAt", "lastActivityAt", "sentAt", "nextAt"];
 
@@ -32,7 +32,7 @@ const DANG_CHAY_SQL = OPEN_OUTCOMES.filter((o) => o !== "UNKNOWN")
 const KET_QUA_KHACH = sql<string>`(
   select case
     when k.outcome = 'DELIVERED' then 'DELIVERED'
-    when k.outcome in ('RETURNED','RETURNED_BY_RULE') then 'RETURNED'
+    when k.outcome in (${sql.raw(RETURNED_OUTCOMES_SQL)}) then 'RETURNED'
     when k.outcome in (${sql.raw(DANG_CHAY_SQL)}) then 'PENDING'
     else 'UNKNOWN'
   end
@@ -43,7 +43,7 @@ const KET_QUA_KHACH = sql<string>`(
     or (${schema.outreachTargets.customerId} is null and ${schema.outreachTargets.phone} <> '' and o2.bill_phone = ${schema.outreachTargets.phone})
   )
   -- Ưu tiên đơn ĐÃ CÓ KẾT QUẢ; trong đó lấy đơn mới nhất. Đơn đang chạy chỉ dùng khi không còn gì.
-  order by (k.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE')) desc, o2.inserted_at desc
+  order by (k.outcome in (${sql.raw(FINISHED_OUTCOMES_SQL)})) desc, o2.inserted_at desc
   limit 1
 )`;
 

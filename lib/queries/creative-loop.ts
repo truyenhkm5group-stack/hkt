@@ -18,6 +18,8 @@ import type { GeneStat } from "@/lib/creative/learn";
 import { vnStartOfDay } from "@/lib/format";
 import { CONFIRMED_ORDER } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { AD_MESSAGES } from "@/lib/queries/ads-roas";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
 /**
  * ═══════════ VÒNG MẪU QUẢNG CÁO — SỐ ĐO VÀ CÁC HÀM ĐỌC CHO MÀN HÌNH ═══════════
@@ -108,7 +110,7 @@ export async function variantMetrics(db: Db, variants: VariantMetricsInput[]): P
       spend: sql<number>`coalesce(sum(${ads.spend}), 0)`,
       impressions: sql<number>`coalesce(sum(${ads.impressions}), 0)`,
       clicks: sql<number>`coalesce(sum(${ads.clicks}), 0)`,
-      messages: sql<number>`coalesce(sum(${ads.messages}), 0)`,
+      messages: sql<number>`coalesce(sum(${AD_MESSAGES}), 0)`,
     })
     .from(ads)
     .where(and(...spendConds))
@@ -150,7 +152,7 @@ export async function variantMetrics(db: Db, variants: VariantMetricsInput[]): P
         adId: sql<string>`${facts.adId}`,
         booked: sql<number>`count(*) filter (where ${facts.outcome} <> 'CANCELLED')`,
         delivered: sql<number>`count(*) filter (where ${facts.outcome} = 'DELIVERED')`,
-        returned: sql<number>`count(*) filter (where ${facts.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
+        returned: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
       })
       .from(facts)
       .groupBy(facts.adId),
