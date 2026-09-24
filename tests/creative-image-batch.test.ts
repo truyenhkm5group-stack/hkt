@@ -167,9 +167,9 @@ class FakeOpenAi {
 function testContract() {
   const d = DEFAULT_CREATIVE_CONFIG;
   assert.equal(d.imageModel, "gpt-image-2.5-sunburst", "chủ shop chốt 24/09/2026: mô hình mạnh nhất cho sửa ảnh");
-  assert.equal(d.imageQuality, "high");
+  assert.equal(d.imageQuality, "medium", "chủ shop chốt lần hai 24/09/2026: sunburst mức vừa, gọi ngay");
   assert.equal(d.imageSize, "1088x1360", "khổ dọc 4:5 cho bảng tin Facebook");
-  assert.equal(d.imageMode, "BATCH");
+  assert.equal(d.imageMode, "SYNC", "sunburst không nhận Batch ⇒ mặc định gọi ngay");
   assert.equal(d.batchFallbackHourVn, 2);
   assert.equal(d.fallbackImageQuality, "medium");
   assert.equal(CREATIVE_HARD_LIMITS.maxImageUsdPerDay, 2, "trần 2 USD / ngày giữ nguyên");
@@ -180,7 +180,8 @@ function testContract() {
   for (const s of ["1024x1024", "1024x1536", "1088x1360"] as const) assert.equal(normalizeCreativeConfig({ imageSize: s }).config.imageSize, s);
   assert.equal(normalizeCreativeConfig({ imageSize: "4096x4096" }).config.imageSize, d.imageSize);
   assert.equal(normalizeCreativeConfig({ imageMode: "SYNC" }).config.imageMode, "SYNC");
-  assert.equal(normalizeCreativeConfig({ imageMode: "nhanh" }).config.imageMode, "BATCH");
+  assert.equal(normalizeCreativeConfig({ imageMode: "BATCH" }).config.imageMode, "BATCH");
+  assert.equal(normalizeCreativeConfig({ imageMode: "nhanh" }).config.imageMode, d.imageMode, "giá trị lạ về mặc định");
   assert.equal(normalizeCreativeConfig({ batchFallbackHourVn: 99 }).config.batchFallbackHourVn, 23);
   assert.equal(normalizeCreativeConfig({ fallbackImageQuality: "low" }).config.fallbackImageQuality, "low");
 

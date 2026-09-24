@@ -587,11 +587,13 @@ export const DEFAULT_CREATIVE_CONFIG: CreativeLoopConfig = {
   killRules: [],
   keepRules: [],
   focusProductIds: [],
-  // Chủ shop chốt 24/09/2026 "Cao + Batch, giữ 2 USD". gpt-image-1 bị OpenAI ngừng ngày 23/10/2026.
+  // Chủ shop chốt 24/09/2026 (lần hai): "Sunburst vừa, gọi ngay, giữ 2 USD". Lần đầu chọn "Cao + Batch"
+  // nhưng tài liệu OpenAI ghi sunburst KHÔNG nhận Batch (`imageModelBatchSupport`). Đường Batch vẫn giữ
+  // cho mô hình nhận nó (vd gpt-image-2) — đổi ở tab Cấu hình. gpt-image-1 bị ngừng ngày 23/10/2026.
   imageModel: "gpt-image-2.5-sunburst",
   imageSize: "1088x1360",
-  imageQuality: "high",
-  imageMode: "BATCH",
+  imageQuality: "medium",
+  imageMode: "SYNC",
   batchFallbackHourVn: 2,
   fallbackImageQuality: "medium",
   imageDailyCapUsd: 2,

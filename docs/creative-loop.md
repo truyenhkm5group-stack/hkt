@@ -85,7 +85,7 @@ mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của 
 | "Tiêu thêm" một lần bấm | 200.000đ | chủ shop 24/09 |
 | "Tiêu thêm" toàn shop / ngày | 1.000.000đ | chủ shop 24/09 |
 | Ảnh sinh / ngày | 30 | chặn vòng lặp hỏng |
-| Chi sinh ảnh / ngày | 2 USD (giữ nguyên khi chuyển sang "Cao + Batch") | chủ shop 24/09 |
+| Chi sinh ảnh / ngày | 2 USD | chủ shop 24/09 |
 
 Cấu hình (`settings` khoá `creative.config`) chỉ LÀM HẸP được, không nới. Trần tiền theo ngày đếm
 trên SỔ `creative_fb_actions` (lượt đã áp), không đếm trên cấu hình.
@@ -184,10 +184,16 @@ content (AI suggest luôn sao cho phù hợp với ảnh đã sinh ra và đư�
 Tệp: `lib/creative/{caption,copy-edit}.ts` · `lib/actions/creative-copy.ts` · `copy-editor.tsx` ·
 `AdPreview` trong `variant-bits.tsx` · `tests/creative-copy.test.ts`.
 
-## 5e. Ảnh chất lượng cao qua Batch API (chủ shop chốt 24/09/2026 "Cao + Batch, giữ 2 USD")
+## 5e. Mô hình ảnh và đường Batch
 
-- **Mặc định:** `gpt-image-2.5-sunburst` · chất lượng `high` · khổ dọc 4:5 `1088x1360` (bảng tin Facebook; hai
-  cạnh bội số 16) · `imageMode = BATCH` · vẽ nốt lúc `batchFallbackHourVn = 2` ở `fallbackImageQuality = medium`.
+> **Đang chạy (chủ shop chốt lần hai 24/09/2026): `gpt-image-2.5-sunburst`, chất lượng VỪA, khổ 4:5, GỌI
+> NGAY (`imageMode = SYNC`), trần 2 USD/ngày** — ước ~1,1 USD / lô 13 ảnh. Lần chốt đầu là "Cao + Batch"
+> nhưng tài liệu mô hình của OpenAI ghi sunburst **không nhận Batch**. Đường Batch dưới đây vẫn nằm trong
+> mã và bật được ở tab Cấu hình cho mô hình nhận nó (vd `gpt-image-2`, ~1,4 USD / lô ở mức cao).
+
+
+- **Khi bật Batch** (`imageMode = BATCH`, mô hình nhận Batch): chất lượng do cấu hình · khổ dọc 4:5 `1088x1360` (bảng tin Facebook; hai
+  cạnh bội số 16) · vẽ nốt lúc `batchFallbackHourVn = 2` ở `fallbackImageQuality = medium`.
   Trần `maxImageUsdPerDay = 2` KHÔNG đổi. `SYNC` giữ nguyên hành vi cũ (gọi ngay từng ảnh).
 - **Giá là ƯỚC TÍNH, một bảng:** `IMAGE_MODEL_TOKEN_PRICE_PER_MTOK` (USD / 1 triệu token, developers.openai.com
   pricing đọc 24/09/2026) × số token ước tính (bảng token đầu ra theo chất lượng của gpt-image-1, quy theo diện
