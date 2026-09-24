@@ -6,8 +6,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { addManualVariant } from "@/lib/creative/manual";
-import { wrongPrices } from "@/lib/creative/writer";
-import { formatVND } from "@/lib/format";
+import { priceWarnings } from "@/lib/creative/copy-edit";
 import { loadProductBrief } from "@/lib/queries/creative-plan";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 import { manualCreativeInputSchema } from "@/lib/validation/creative";
@@ -50,14 +49,7 @@ export async function addManualCreative(input: unknown): Promise<Result<{ batchD
 
   // Giá trong câu chữ khác giá ERP: KHÔNG chặn (người viết có thể đang chạy giá khuyến mãi) nhưng
   // phải nói ra — câu chữ máy viết thì bị ép đúng giá, câu chữ người viết thì người tự chịu.
-  const warnings: string[] = [];
-  if (wrongPrices(`${d.headline}\n${d.primaryText}`, product.priceVnd).length > 0) {
-    warnings.push(
-      product.priceVnd === null
-        ? "Câu chữ có ghi giá nhưng mã hàng có nhiều giá trong ERP — kiểm lại giá trước khi duyệt lô."
-        : `Câu chữ ghi giá khác giá ERP (${formatVND(product.priceVnd)}) — kiểm lại trước khi duyệt lô.`,
-    );
-  }
+  const warnings = priceWarnings(`${d.headline}\n${d.primaryText}`, product.priceVnd);
 
   await audit({
     userId: user.id,

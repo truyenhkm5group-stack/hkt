@@ -218,6 +218,7 @@ import { testCreativeWrite, testCreativeWriteDb } from "./creative-write.test";
 import { testCreativeEmptyBatch, testCreativeExtendedWindow, testCreativeLoopTick } from "./creative-loop-tick.test";
 import { testCreativeManualDb, testCreativeManualPure } from "./creative-manual.test";
 import { testCreativeImportDb, testCreativeImportPure } from "./creative-import.test";
+import { testCreativeCopyDb, testCreativeCopyPure } from "./creative-copy.test";
 import { testCreativeScreens } from "./creative-screens.test";
 import { testCreativeScreens2 } from "./creative-screens-2.test";
 import { testAdsLevelProbe } from "./ads-level-probe.test";
@@ -1679,6 +1680,8 @@ async function main() {
   await testCreativeManualDb(db);
   testCreativeImportPure();
   await testCreativeImportDb(db);
+  testCreativeCopyPure();
+  await testCreativeCopyDb(db);
   testCreativeScreens();
   testCreativeScreens2();
   await testAdsBrakeByDecision(db);

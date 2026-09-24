@@ -10,6 +10,7 @@ import { buildBatch, imageSpendToday } from "@/lib/creative/generate";
 import { sha256Hex, storeCreativeImage } from "@/lib/creative/images";
 import { batchWindow } from "@/lib/creative/schedule";
 import { describeSource } from "@/lib/creative/vision";
+import type { VariantCaptioner } from "@/lib/creative/caption";
 import { PRESERVE_PRODUCT_CLAUSE, findPriceMentions, geneDirectives, writeVariantCopy, type CopyWriter, type WriterInput } from "@/lib/creative/writer";
 import { editImage, imageEditCostUsd, parseImageUsage, type ImageEditClient, type ImageEditInputImage } from "@/lib/integrations/openai/images";
 import { loadPlanInputs } from "@/lib/queries/creative-plan";
@@ -369,12 +370,18 @@ export async function testCreativeGenerate(db: Db) {
       writerCalls.push(input);
       return { imagePrompt: "prompt", primaryText: "Câu chữ", headline: "Tiêu đề", model: "fake-writer", costUsd: null, attempts: 1, priceStripped: false };
     };
+    // Câu chữ theo ảnh: bản giả ghi lại lượt gọi — thứ tự so với lượt vẽ ảnh được kiểm ở dưới.
+    const captionCalls: { imageCallsBefore: number; draft: string }[] = [];
+    const fakeCaption: VariantCaptioner = async (_db, input) => {
+      captionCalls.push({ imageCallsBefore: imageCalls.length, draft: input.draft?.primaryText ?? "" });
+      return { ok: true, headline: "Tiêu đề theo ảnh", primaryText: "Câu chữ theo ảnh", options: [{ headline: "Tiêu đề theo ảnh", primaryText: "Câu chữ theo ảnh" }], seen: "", model: "fake-caption", costUsd: 0.001, attempts: 1, priceStripped: false };
+    };
     const described: string[] = [];
     const fakeDescribe = async (_db: Db, id: string) => {
       described.push(id);
       return { ok: false as const, error: "giả" };
     };
-    const deps = (perTick: number) => ({ imageClient: fakeClient, writer: fakeWriter, describe: fakeDescribe, perTick });
+    const deps = (perTick: number) => ({ imageClient: fakeClient, writer: fakeWriter, describe: fakeDescribe, caption: fakeCaption, perTick });
 
     // (e) TẮT ⇒ không tạo gì.
     await setConfig(db, { ...baseCfg, enabled: false });
@@ -405,7 +412,12 @@ export async function testCreativeGenerate(db: Db) {
     assert.equal(imageCalls.length, callsAfter, "(c) lô đã đủ ảnh ⇒ không sinh lại ảnh nào");
     assert.match(t3.skippedReason ?? "", /PENDING_APPROVAL/);
     assert.equal((await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.batchDay, batchDay))).length, 1, "(c) đúng MỘT lô cho một ngày");
-    assert.ok(variants.every((v) => v.status === "GENERATED" && v.imageId && v.genCostUsd === unit.toFixed(6) && v.writerModel === "fake-writer" && v.writerCostUsd === ""), "(c) mọi mẫu có ảnh, chi phí thật, chi phí viết CHƯA BIẾT = ''");
+    assert.ok(
+      variants.every((v) => v.status === "GENERATED" && v.imageId && v.genCostUsd === unit.toFixed(6) && v.writerModel === "fake-writer → fake-caption" && v.writerCostUsd === "" && v.primaryText === "Câu chữ theo ảnh" && v.genError === ""),
+      "(c) mọi mẫu có ảnh, chi phí thật, câu chữ viết lại THEO ẢNH; chi phí viết CHƯA BIẾT (một vế chưa định giá) = ''",
+    );
+    assert.equal(captionCalls.length, total, "mỗi ảnh sinh ra được viết lại câu chữ đúng một lần");
+    assert.ok(captionCalls.every((c, i) => c.imageCallsBefore === i + 1 && c.draft === "Câu chữ"), "câu chữ theo ảnh gọi SAU lượt vẽ ảnh của chính mẫu ấy, nhận câu nháp");
     assert.equal(batch.ruleVersion, 1);
     assert.equal((batch.configSnapshot as { batchSize?: number }).batchSize, 5, "cấu hình chụp nguyên vào lô");
 
