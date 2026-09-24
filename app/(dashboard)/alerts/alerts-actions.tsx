@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useTransition } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Loader2, Play, RefreshCw, Save, Send, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -252,14 +252,39 @@ export function AssignSelect({ id, users, current }: { id: string; users: { id: 
 
 /** Cấu hình cảnh báo & Telegram (Quản trị) */
 export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInventorySecret }: { config: AlertConfig; hasToken: boolean; hasLarkSecret?: boolean; hasLarkInventorySecret?: boolean }) {
-  const [form, setForm] = useState({ ...config, telegramBotToken: "", larkSecret: "", larkBillingSecret: "", larkInventorySecret: "" });
+  const initial = useMemo(() => ({ ...config, telegramBotToken: "", larkSecret: "", larkBillingSecret: "", larkInventorySecret: "" }), [config]);
+  const [form, setForm] = useState(initial);
   const [pending, startTransition] = useTransition();
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const router = useRouter();
+  /*
+    THAY ĐỔI CHƯA LƯU PHẢI NHÌN THẤY ĐƯỢC.
+
+    Sự cố 24/09/2026: chủ shop dán webhook nhóm Kho rồi bấm "Lưu cấu hình" — nhưng đó là nút của khung
+    "Bản tin marketing" ngay bên dưới. Nhật ký ghi hai lượt lưu `marketing.alerts`, `alerts.config` không
+    đổi từ 10/09, webhook mất khi trang tải lại, và không có gì báo. Nút của khung này khi ấy chỉ ghi
+    "Lưu", lẫn giữa năm nút "Gửi thử". Nay: nút mang tên khung, dải cảnh báo khi có thay đổi chưa lưu,
+    trình duyệt hỏi lại trước khi rời trang, và lượt lưu thành công để lại mốc giờ cố định.
+  */
+  const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
   const save = () =>
     startTransition(async () => {
       const r = await saveAlertConfig({ ...form, telegramBotToken: form.telegramBotToken || config.telegramBotToken, larkSecret: form.larkSecret || config.larkSecret, larkBillingSecret: form.larkBillingSecret || config.larkBillingSecret });
-      if ("error" in r) toast.error(r.error);
-      else {
+      if ("error" in r) {
+        setSaveError(r.error);
+        toast.error(r.error);
+      } else {
+        setSaveError(null);
+        setSavedAt(new Date());
         toast.success("Đã lưu cấu hình cảnh báo");
         router.refresh();
       }
@@ -292,6 +317,11 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInvent
 
   return (
     <div className="space-y-4 text-sm">
+      {dirty ? (
+        <div className="rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-[13px] text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          Khung này có thay đổi <b>CHƯA LƯU</b> — bấm <b>Lưu cấu hình cảnh báo</b> ở cuối khung. Nút lưu của khung &quot;Bản tin marketing&quot; bên dưới KHÔNG lưu khung này.
+        </div>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1 sm:col-span-2">
           <Label>Lark Suite · Webhook Custom Bot của nhóm vận đơn</Label>
@@ -313,6 +343,9 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInvent
         <div className="space-y-1">
           <Label>Lark · Webhook nhóm Kho / Sản xuất nhận bảng thiếu hàng (trống = dùng nhóm vận đơn)</Label>
           <Input value={form.larkInventoryWebhookUrl} onChange={(e) => setForm({ ...form, larkInventoryWebhookUrl: e.target.value })} placeholder="https://open.larksuite.com/open-apis/bot/v2/hook/xxxxxxxx" />
+          <p className="text-[11px] text-muted-foreground">
+            {config.larkInventoryWebhookUrl ? "Đã lưu — bảng thiếu hàng gửi vào nhóm này." : "Chưa lưu — bảng thiếu hàng đang gửi vào nhóm vận đơn."}
+          </p>
         </div>
         <div className="space-y-1">
           <Label>Lark · Signature secret nhóm Kho / Sản xuất (tuỳ chọn)</Label>
@@ -418,9 +451,11 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInvent
         </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" size="sm" onClick={save} disabled={pending}>
-          {pending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} Lưu
+        <Button type="button" size="sm" onClick={save} disabled={pending} className={dirty ? "ring-2 ring-amber-400" : undefined}>
+          {pending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />} Lưu cấu hình cảnh báo
         </Button>
+        {saveError ? <span className="text-xs font-medium text-rose-600 dark:text-rose-400">Chưa lưu: {saveError}</span> : null}
+        {savedAt && !dirty && !saveError ? <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">Đã lưu lúc {savedAt.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })}</span> : null}
         <Button type="button" size="sm" variant="outline" onClick={testLark} disabled={pending}>
           <Send className="size-4" /> Gửi thử Lark
         </Button>

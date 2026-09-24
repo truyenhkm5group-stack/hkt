@@ -256,6 +256,7 @@ import { testDepartmentMap } from "./department-map.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testStockShortageDb, testStockShortagePure } from "./stock-shortage.test";
+import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
 import { testPreshipValidationDb, testPreshipValidationPure } from "./preship-validation.test";
@@ -1949,6 +1950,7 @@ async function main() {
   // Thiếu hàng giao đơn: gieo mã `ssh-` với phiếu nhập, đơn đã chốt, lệnh xưởng; đọc lại sổ kho,
   // Kế hoạch SX và hàng đợi fulfillment; rồi TỰ DỌN sạch — đơn CONFIRMED sót lại sẽ lọt vào tổng
   // "đã chốt chưa gửi" của mọi bài phía sau.
+  testAlertsConfigForm();
   testStockShortagePure();
   await testStockShortageDb(db);
   // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
