@@ -15,8 +15,7 @@ import { schema, type Db } from "@/db";
 /** Trần kích thước một ảnh lưu vào CSDL (byte, trước base64). Ảnh gpt-image JPEG ~ 200–600 KB. */
 export const CREATIVE_IMAGE_MAX_BYTES = 6 * 1024 * 1024;
 
-const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
-export type CreativeImageType = (typeof ALLOWED_TYPES)[number];
+export type CreativeImageType = "image/jpeg" | "image/png" | "image/webp";
 
 export function sha256Hex(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
