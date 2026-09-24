@@ -6,7 +6,8 @@ trong biến `OPS_THAO_TAC_MA_HOA` — danh sách đầy đủ và lý do từng
 `phone-probe`, `vtp-probe`, `vtp-statement-peek`, `payroll-reconcile`, `seed-employees`,
 `marketing-explain`, `cs-stale`, `check-integrations`, `run-job`, `vtp-replay-explain`,
 `vtp-manual-verify`, `returns-hmt`, `care-false-reopen`, `care-outcome-before-open`,
-`fanpage-evidence-backfill`.
+`fanpage-evidence-backfill`. Ngày 25/09/2026 thêm `cod-statement-audit` (chỉ in số tổng hợp qua
+kênh tóm tắt — đọc được ngay trên log, không cần giải mã).
 
 Kho mã này **PUBLIC**: log của mọi lượt chạy ai cũng đọc được. Kết quả của các thao tác trên có
 SĐT, tên, địa chỉ khách, hoặc tên / lương / note của nhân viên, nên nó **không bao giờ in ra log**.
