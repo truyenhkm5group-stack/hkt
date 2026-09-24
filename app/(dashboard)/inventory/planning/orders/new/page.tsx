@@ -3,6 +3,7 @@ import { ProductionEditor } from "@/app/(dashboard)/inventory/planning/orders/pr
 import { PageHeader } from "@/components/page-header";
 import { requirePermission } from "@/lib/auth/session";
 import { buildMatrixForProduct } from "@/lib/queries/production";
+import { activeSupplierNames } from "@/lib/queries/suppliers";
 import type { SearchParams } from "@/lib/search-params";
 import { addDays, todayVN } from "@/lib/format";
 
@@ -26,7 +27,7 @@ export default async function NewProductionOrderPage({ searchParams }: { searchP
     <div className="space-y-5">
       <PageHeader eyebrow="Kho" title={`Bảng chốt đặt hàng · ${m.product.code ? `${m.product.code} · ` : ""}${m.product.name}`} description={`Số lượng khởi tạo theo đề xuất của ERP cho ${m.coverDays} ngày bán — sửa rồi bấm Chốt.`}
  hint={`Số lượng khởi tạo theo đề xuất của ERP: tồn khả dụng${m.countIncoming ? " cộng hàng đang ở ngoài / chờ hoàn về sắp quay lại kho" : ""}, tốc độ bán, thời gian sản xuất ${m.leadTimeDays} ngày và ${m.coverDays} ngày muốn đủ bán sau khi hàng về. Sửa từng ô rồi bấm Chốt để lưu và in / gửi xưởng.`} />
-      <ProductionEditor init={{ product: m.product, colors: m.colors, sizes: m.sizes, cells: m.cells, detail: m.detail, images: m.images, unitCost: m.unitCost, supplier: "", note: "", dueDate: due }} />
+      <ProductionEditor init={{ product: m.product, colors: m.colors, sizes: m.sizes, cells: m.cells, detail: m.detail, images: m.images, unitCost: m.unitCost, supplier: "", note: "", dueDate: due }} supplierOptions={await activeSupplierNames()} />
     </div>
   );
 }

@@ -28,7 +28,8 @@ export type EditorInit = {
   dueDate: string;
 };
 
-export function ProductionEditor({ init }: { init: EditorInit }) {
+/** `supplierOptions`: tên xưởng đang dùng trong danh mục — chỉ là GỢI Ý, máy chủ mới quyết lô thuộc xưởng nào. */
+export function ProductionEditor({ init, supplierOptions = [] }: { init: EditorInit; supplierOptions?: string[] }) {
   const [colors, setColors] = useState(init.colors);
   const [sizes, setSizes] = useState(init.sizes);
   const [cells, setCells] = useState<Record<string, number>>({ ...init.cells });
@@ -116,7 +117,7 @@ export function ProductionEditor({ init }: { init: EditorInit }) {
           </div>
         </div>
         <div className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3">
-          <div className="space-y-1"><Label>Xưởng may</Label><Input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Tên xưởng / người nhận" /></div>
+          <div className="space-y-1"><Label>Xưởng may</Label><Input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Tên xưởng / người nhận" list="xuong-goi-y" /><datalist id="xuong-goi-y">{supplierOptions.map((n) => <option key={n} value={n} />)}</datalist></div>
           <div className="space-y-1"><Label>Ngày cần hàng</Label><Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></div>
           <div className="space-y-1"><Label>Giá gia công / nhập (đ/sp)</Label><Input type="number" min={0} value={unitCost || ""} onChange={(e) => setUnitCost(Math.max(0, Number(e.target.value) || 0))} /></div>
           <div className="space-y-1 sm:col-span-3"><Label>Ghi chú cho xưởng</Label><Textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Chất liệu, yêu cầu may, đóng gói, lịch giao…" /></div>

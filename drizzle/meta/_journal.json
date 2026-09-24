@@ -848,6 +848,13 @@
       "when": 1790002048245,
       "tag": "0121_creative_scale_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1790002108245,
+      "tag": "0122_suppliers",
+      "breakpoints": true
     }
   ]
 }

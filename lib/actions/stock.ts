@@ -11,6 +11,8 @@ import { vnStartOfDay } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
 import { settleReturnsForReceipt } from "@/lib/returns/warehouse";
 import { stockReceiptSchema } from "@/lib/validation/stock";
+import { matchSupplier } from "@/lib/constants/suppliers";
+import { supplierCatalog } from "@/lib/queries/suppliers";
 
 export type ActionResult = { ok: true; id?: string } | { error: string };
 
@@ -79,6 +81,8 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
    * phải nối được về một tài khoản; một chuỗi email thì đổi email là mất dấu.
    */
   const actor: Actor = { id: user.id, label: user.name || user.email };
+  // Xưởng: khớp ĐÚNG MỘT xưởng trong danh mục ⇒ khoá + tên chuẩn do máy chủ đọc (mục 34); không thì giữ chữ gõ.
+  const xuong = data.kind === "RECEIPT" ? matchSupplier(data.supplier, (await supplierCatalog()).index) : ({ state: "EMPTY" } as const);
   const lines = items.map((i) => ({ variantId: i.variantId, quantity: i.quantity, unitCost: i.unitCost, shipmentId: i.shipmentId?.trim() || null }));
 
   // MỘT GIAO DỊCH: phiếu · dòng phiếu · đóng kiện hoàn. Phiếu ghi được mà kiện không đóng được (hay
@@ -89,7 +93,7 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
     await db.transaction(async (tx) => {
       const [receipt] = await tx
         .insert(schema.stockReceipts)
-        .values({ kind: data.kind, receivedAt: vnStartOfDay(data.receivedAt), reference: data.reference, supplier: data.supplier, note: data.note, totalQuantity, totalCost, createdBy: actor.label })
+        .values({ kind: data.kind, receivedAt: vnStartOfDay(data.receivedAt), reference: data.reference, supplier: xuong.state === "MATCHED" ? xuong.name : data.supplier, supplierId: xuong.state === "MATCHED" ? xuong.id : null, note: data.note, totalQuantity, totalCost, createdBy: actor.label })
         .returning({ id: schema.stockReceipts.id });
       receiptId = receipt.id;
       await tx.insert(schema.stockReceiptItems).values(lines.map((l) => ({ receiptId: receipt.id, ...l })));
