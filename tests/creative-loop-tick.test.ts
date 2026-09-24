@@ -6,6 +6,8 @@ import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import type { CreativeNotice } from "@/lib/creative/notify";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import type { CreativeWriter } from "@/lib/creative/publish";
+import { evaluateCreatives } from "@/lib/creative/evaluate";
+import { vnStartOfDay } from "@/lib/format";
 
 /**
  * ═══════════ VÒNG MẪU — MỘT LƯỢT ═══════════
@@ -23,6 +25,8 @@ const P = "clt-";
 const H = 3_600_000;
 
 async function cleanup(db: Db) {
+  await db.delete(schema.adSpends).where(like(schema.adSpends.adId, `${P}%`));
+  await db.delete(schema.creativeVerdicts).where(like(schema.creativeVerdicts.variantId, `${P}%`));
   await db.delete(schema.creativeFbActions).where(like(schema.creativeFbActions.batchId, `${P}%`));
   await db.delete(schema.creativeVariants).where(like(schema.creativeVariants.batchId, `${P}%`));
   await db.delete(schema.creativeBatches).where(like(schema.creativeBatches.id, `${P}%`));
@@ -104,4 +108,85 @@ export async function testCreativeLoopTick(db: Db) {
     else await db.delete(schema.settings).where(eq(schema.settings.key, CREATIVE_CONFIG_KEY));
   }
   console.log("✓ Vòng mẫu — một lượt: quá hạn ⇒ EXPIRED + báo · vòng TẮT không đăng/không dựng · vẫn chấm");
+}
+
+/**
+ * HỒI QUY: mẫu đã được "cho tiêu thêm" vẫn ĐANG CHẠY sau khung gốc của lô.
+ *
+ * Lỗi đã có thật khi ghép gói (24/09/2026): lượt chấm đọc `batch.endAt` nên chuyển mẫu sang ENDED và
+ * THÔI xét luật tắt, trong khi nhóm trên Facebook vẫn tiêu tiền tới hạn mới — tiền chảy không phanh.
+ * Hạn hiệu lực phải đọc từ sổ `EXTEND_ADSET` đã áp (`extendedEndAtOf`).
+ */
+export async function testCreativeExtendedWindow(db: Db) {
+  const now = new Date();
+  const prevLearnings = (await db.select({ id: schema.creativeLearnings.id }).from(schema.creativeLearnings)).map((r) => r.id);
+  await cleanup(db);
+  try {
+    const start = new Date(now.getTime() - 26 * H); // khung gốc 24 giờ ⇒ đã hết 2 giờ trước
+    const kill = { metric: "messages", op: "lt", value: 1, minSpendVnd: 100_000, label: "Tiêu 100K không có tin nhắn" };
+    await db.insert(schema.creativeBatches).values({
+      id: `${P}ext`,
+      batchDay: vnDay(start),
+      status: "PUBLISHED",
+      slotCount: 1,
+      startAt: start,
+      endAt: new Date(start.getTime() + 24 * H),
+      approvalDeadline: new Date(start.getTime() - 0.5 * H),
+      configSnapshot: { budgetPerVariantVnd: 200_000, killRules: [kill] },
+      ruleVersion: 1,
+      approvedAt: start,
+      approvalDigest: "x",
+    });
+    await db.insert(schema.creativeVariants).values({
+      id: `${P}v-ext`,
+      batchId: `${P}ext`,
+      slot: 1,
+      mode: "EXPLORE",
+      genes: { angle: "LIFESTYLE", scene: "CAFE", model: "NONE", composition: "SINGLE_HERO", textOverlay: "NONE", palette: "WARM" },
+      genesVersion: 1,
+      status: "LIVE",
+      fbAdsetId: `${P}as-ext`,
+      fbAdId: `${P}ad-ext`,
+      committedBudgetVnd: 400_000,
+      publishedAt: start,
+    });
+    await db.insert(schema.creativeFbActions).values({
+      actionDay: vnDay(start),
+      batchId: `${P}ext`,
+      variantId: `${P}v-ext`,
+      action: "EXTEND_ADSET",
+      outcome: "APPLIED",
+      amountVnd: 200_000,
+      request: { end_time: new Date(now.getTime() + 20 * H).toISOString() },
+      mode: "COPILOT",
+    });
+    await db.insert(schema.adSpends).values({
+      platform: "FACEBOOK",
+      campaign: "CLT test",
+      campaignId: "clt-camp",
+      grain: "AD",
+      adId: `${P}ad-ext`,
+      adsetId: `${P}as-ext`,
+      spend: 150_000,
+      impressions: 4_000,
+      clicks: 10,
+      messages: 0,
+      spendDate: vnStartOfDay(vnDay(now)),
+      createdBy: "test",
+    });
+
+    const r = await evaluateCreatives(db, now, { writeNarrative: null });
+    const [v] = await db.select({ status: schema.creativeVariants.status }).from(schema.creativeVariants).where(eq(schema.creativeVariants.id, `${P}v-ext`));
+    assert.equal(v.status, "LIVE", "đã tiêu thêm tới hạn mới ⇒ KHÔNG được chuyển ENDED theo khung gốc");
+    assert.ok(!r.ended.includes(`${P}v-ext`));
+    assert.ok(
+      r.kills.some((k) => k.variantId === `${P}v-ext`),
+      "đang tiêu tiền theo hạn đã kéo ⇒ luật tắt của lô VẪN phải bắn",
+    );
+  } finally {
+    await cleanup(db);
+    if (prevLearnings.length) await db.delete(schema.creativeLearnings).where(notInArray(schema.creativeLearnings.id, prevLearnings));
+    else await db.delete(schema.creativeLearnings).where(inArray(schema.creativeLearnings.learningDay, [vnDay(now)]));
+  }
+  console.log("✓ Vòng mẫu — mẫu đã tiêu thêm: khung hiệu lực đọc từ sổ, không ENDED sớm, luật tắt vẫn bắn");
 }

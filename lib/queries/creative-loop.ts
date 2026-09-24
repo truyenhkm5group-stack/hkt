@@ -478,6 +478,36 @@ async function variantCountsByBatch(db: Db, batchIds: string[]): Promise<Map<str
 
 const PUBLISHED_STATUSES: VariantStatus[] = ["LIVE", "PAUSED", "ENDED"];
 
+/**
+ * HẠN HIỆU LỰC của nhóm quảng cáo sau các lượt "cho tiêu thêm": `end_time` của lượt `EXTEND_ADSET`
+ * ĐÃ ÁP gần nhất trong sổ (thứ đã thật sự gửi Facebook), không có thì không có mục trong kết quả.
+ *
+ * MỌI nơi hỏi "mẫu này hết khung chưa" phải đi qua đây. Đọc hạn gốc của lô là coi một mẫu đang tiêu
+ * tiền theo hạn mới là đã dừng: lượt chấm chuyển nó sang ENDED và THÔI xét luật tắt — tiền chảy mà
+ * không còn phanh.
+ */
+export async function extendedEndAtOf(db: Db, variantIds: string[]): Promise<Map<string, Date>> {
+  const out = new Map<string, Date>();
+  if (variantIds.length === 0) return out;
+  const fa = schema.creativeFbActions;
+  const rows = await db
+    .select({ variantId: sql<string>`${fa.variantId}`, endTime: sql<string | null>`${fa.request} ->> 'end_time'` })
+    .from(fa)
+    .where(and(inArray(fa.variantId, variantIds), eq(fa.action, "EXTEND_ADSET"), eq(fa.outcome, "APPLIED")));
+  for (const r of rows) {
+    const d = r.endTime ? new Date(r.endTime) : null;
+    if (!d || !Number.isFinite(d.getTime())) continue;
+    const prev = out.get(r.variantId);
+    if (!prev || d > prev) out.set(r.variantId, d);
+  }
+  return out;
+}
+
+/** Hạn hiệu lực = muộn hơn giữa cuối khung test và hạn đã kéo. Không bao giờ SỚM hơn khung đã duyệt. */
+export function effectiveEndAt(batchEndAt: Date, extended: Date | undefined): Date {
+  return extended && extended > batchEndAt ? extended : batchEndAt;
+}
+
 /** Phán quyết SỐNG của một mẫu đã đăng — cùng bộ luật hai nguồn với lượt chấm (`evaluate.ts`). */
 export function judgeLive(card: VariantCard, batch: Pick<BatchRow, "startAt" | "endAt" | "configSnapshot">, metrics: VariantMetricsRow, current: CreativeLoopConfig, now: Date): JudgeResult {
   return judgeVariant(
@@ -496,11 +526,18 @@ export function judgeLive(card: VariantCard, batch: Pick<BatchRow, "startAt" | "
 async function judgeCards(db: Db, rows: { card: VariantCard; batch: BatchRow }[], now: Date): Promise<JudgedVariant[]> {
   if (rows.length === 0) return [];
   const { config: current } = await readCurrentCreativeConfig(db);
-  const metrics = await variantMetrics(
-    db,
-    rows.map((r) => ({ id: r.card.id, fbAdId: r.card.fbAdId, startAt: r.batch.startAt })),
-  );
-  return rows.map(({ card, batch }) => {
+  const [metrics, extended] = await Promise.all([
+    variantMetrics(
+      db,
+      rows.map((r) => ({ id: r.card.id, fbAdId: r.card.fbAdId, startAt: r.batch.startAt })),
+    ),
+    extendedEndAtOf(
+      db,
+      rows.map((r) => r.card.id),
+    ),
+  ]);
+  return rows.map(({ card, batch: b0 }) => {
+    const batch = { ...b0, endAt: effectiveEndAt(b0.endAt, extended.get(card.id)) };
     const m = metrics.get(card.id) ?? { ...UNKNOWN_METRICS };
     const j = judgeLive(card, batch, m, current, now);
     return {
@@ -766,7 +803,12 @@ export async function evaluationCandidates(db: Db, now: Date): Promise<EvaluateC
     .innerJoin(b, eq(b.id, v.batchId))
     .where(or(and(inArray(v.status, PUBLISHED_STATUSES), sql`coalesce(${v.publishedAt}, ${b.startAt}) >= ${from.toISOString()}::timestamptz`), isNotNull(v.libraryAt)))
     .orderBy(b.batchDay, v.slot);
-  return rows;
+  // Khung của TỪNG mẫu là khung hiệu lực (đã tính lượt tiêu thêm) — xem `extendedEndAtOf`.
+  const extended = await extendedEndAtOf(
+    db,
+    rows.map((r) => r.variant.id),
+  );
+  return rows.map((r) => ({ ...r, batch: { ...r.batch, endAt: effectiveEndAt(r.batch.endAt, extended.get(r.variant.id)) } }));
 }
 
 /**

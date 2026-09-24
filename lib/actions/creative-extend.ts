@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
@@ -14,7 +14,7 @@ import { judgeVariant } from "@/lib/creative/judge";
 import { REAL_CREATIVE_WRITER, batchApprovalContent, batchConfig, extendedOnDay, logAction } from "@/lib/creative/publish";
 import { formatDateTime } from "@/lib/format";
 import { adsWriteHardEnabled, adsWriteMode, vndToFbMinor } from "@/lib/integrations/facebook/ads-write";
-import { effectiveJudgeConfig, readCurrentCreativeConfig, variantMetrics } from "@/lib/queries/creative-loop";
+import { effectiveEndAt, effectiveJudgeConfig, extendedEndAtOf, readCurrentCreativeConfig, variantMetrics } from "@/lib/queries/creative-loop";
 
 /**
  * ═══════════ "CHO TIÊU THÊM" — HAI BƯỚC, KHÔNG BAO GIỜ MỘT ═══════════
@@ -74,16 +74,7 @@ function tokenPayload(i: { variantId: string; addVnd: number; newLifetimeVnd: nu
  * Đọc trên SỔ (thứ đã thật sự gửi Facebook), không trên một cột suy ra.
  */
 async function currentEndAtOf(db: Db, variantId: string, batchEndAt: Date): Promise<Date> {
-  const fa = T.creativeFbActions;
-  const [last] = await db
-    .select({ request: fa.request })
-    .from(fa)
-    .where(and(eq(fa.variantId, variantId), eq(fa.action, "EXTEND_ADSET"), eq(fa.outcome, "APPLIED")))
-    .orderBy(desc(fa.createdAt))
-    .limit(1);
-  const raw = last?.request?.end_time;
-  const d = typeof raw === "string" ? new Date(raw) : null;
-  return d && Number.isFinite(d.getTime()) && d > batchEndAt ? d : batchEndAt;
+  return effectiveEndAt(batchEndAt, (await extendedEndAtOf(db, [variantId])).get(variantId));
 }
 
 type Ctx = {

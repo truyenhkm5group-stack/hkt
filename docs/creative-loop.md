@@ -1,7 +1,8 @@
 # Vòng mẫu quảng cáo — đặc tả và trạng thái
 
 > **File trạng thái DUY NHẤT của vòng mẫu.** Đây là Nấc 4 (NỘI DUNG) của
-> `docs/marketing-ai-department.md`. Cập nhật: **24/09/2026** · nền (lược đồ + ba hàm thuần) đã dựng.
+> `docs/marketing-ai-department.md`. Cập nhật: **24/09/2026** · **ĐÃ DỰNG ĐỦ vòng** (sinh · đăng · đo ·
+> chấm · học · màn hình) — **CHƯA CHẠY THẬT**: chờ các việc của chủ shop ở §7.
 >
 > Hợp đồng mã nguồn: `lib/constants/creative-loop.ts` (mọi con số, mọi trần, từ vựng gen).
 > Hàm thuần: `lib/creative/{plan,judge,learn,schedule}.ts`. Kiểm thử: `tests/creative-loop.test.ts`.
@@ -115,16 +116,37 @@ Lập lô: 60% ô **khai thác** (biến thể của mẫu thắng/hứa hẹn, 
 nên chiến thắng), 40% ô **thăm dò** (nguồn cảm hứng ít dùng nhất, gen thiếu chọn bằng lấy mẫu Thompson
 — giá trị chưa thử tự được thử, giá trị đã thua nhiều lần tự bị bỏ, không cần xoá dữ liệu).
 
-## 6. Gói việc
+## 6. Đã dựng gì, ở đâu
 
-| Gói | Sở hữu tệp | Việc |
+| Phần | Tệp | Việc |
 |---|---|---|
-| **NỀN** ✅ | `lib/constants/creative-loop.ts` · `lib/creative/{plan,judge,learn,schedule}.ts` · `db/schema.ts` (7 bảng) · `drizzle/0117_creative_loop.sql` | hợp đồng, lược đồ, ba hàm thuần, kiểm thử |
-| **A · SINH** | `lib/creative/{images,vision,writer,generate}.ts` · `lib/integrations/openai/images.ts` · `lib/queries/creative-plan.ts` | đọc ảnh nguồn → gen; dựng lô (gom đầu vào → `planBatch` → ghi lô/mẫu); LLM viết; gpt-image sinh; trần chi/ngày; ghi `ai_interactions` |
-| **B · ĐO / CHẤM / HỌC** | `lib/queries/creative-loop.ts` · `lib/creative/evaluate.ts` | số đo từng mẫu (chi hạt AD + đơn theo `ad_id` qua `ORDER_OUTCOME_FAST`); chấm; chốt thư viện; ghi sổ phán quyết + sổ học; xoá ảnh mẫu thua sau hạn |
-| **C · BÀN TAY** | `lib/integrations/facebook/ads-write.ts` (thêm hàm) · `lib/marketing/creative-write-gate.ts` · `lib/creative/{approval,publish}.ts` · `lib/actions/creative.ts` | cổng thuần; phiếu duyệt lô; đăng; tắt theo luật; tiêu thêm (bấm) |
-| **D · MÀN HÌNH** | `app/(dashboard)/marketing/creatives/**` · `app/api/creative/images/[id]/route.ts` · `lib/actions/creative-sources.ts` · `lib/actions/creative-config.ts` | nguồn ảnh · duyệt lô · đang chạy · thư viện · học · cấu hình + bộ sửa luật |
-| **VÒNG** | `lib/creative/loop.ts` · `lib/sync/jobs.ts` · `scripts/scheduler.mjs` | một tick tất định gọi A → C → B → C; job `creative-loop`; lịch bật bằng env |
+| Nền | `lib/constants/creative-loop.ts` · `lib/creative/{plan,judge,learn,schedule,images}.ts` · 7 bảng (`drizzle/0117_creative_loop.sql`) | hợp đồng, hàm thuần, lược đồ |
+| Sinh | `lib/creative/{vision,writer,generate}.ts` · `lib/integrations/openai/images.ts` · `lib/queries/creative-plan.ts` | đọc ảnh nguồn → gen; lập lô; LLM viết (giá đúng ERP); gpt-image sửa ảnh sản phẩm thật; trần ảnh/ngày |
+| Đo / chấm / học | `lib/queries/creative-loop.ts` · `lib/creative/evaluate.ts` | chi hạt AD + đơn theo `ad_id`; chấm; chốt thư viện; sổ phán quyết + sổ học; xoá ảnh mẫu thua sau hạn |
+| Bàn tay | `lib/integrations/facebook/ads-write.ts` (thêm hàm) · `lib/marketing/creative-write-gate.ts` · `lib/creative/{approval,story-spec,publish,extend}.ts` · `lib/actions/{creative,creative-extend}.ts` | cổng thuần có thứ tự; phiếu duyệt lô; đăng; tắt theo luật; tắt tay; tiêu thêm (hai bước) |
+| Màn hình | `/marketing/creatives` — tab Duyệt lô · Đang chạy · Thư viện · Máy đã học gì · Nguồn ảnh · Cấu hình | mọi việc của người nằm ở đây |
+| Vòng | `lib/creative/{loop,notify}.ts` · job `creative-loop` · `scripts/scheduler.mjs` | một lượt tất định; tin báo Lark/Telegram |
+
+### Quyết định dựng đáng ghi lại
+
+- **Hạn hiệu lực của một mẫu đọc từ SỔ tiêu thêm** (`extendedEndAtOf`), không từ khung gốc của lô.
+  Bắt được khi ghép gói: lượt chấm từng chuyển mẫu đã tiêu thêm sang ENDED và thôi xét luật tắt
+  trong khi Facebook vẫn đang tiêu tiền. Có bài kiểm hồi quy.
+- **Luật TẮT lấy từ ảnh chụp của lô; luật GIỮ và ngưỡng THẮNG lấy từ cấu hình hiện tại.** Tắt là hành
+  động người duyệt đã cho phép trên đúng bộ luật đã thấy; chấm tốt/kém không chạm tiền nên luật điền
+  sau vẫn chấm được mẫu cũ.
+- **"Đơn chốt" = đơn đã xác nhận** (`CONFIRMED_ORDER`), cùng định nghĩa với bảng quyết định `/ads`.
+- **Phiếu tiêu thêm hết hạn sau 15 phút**; bấm lần hai sau khi đã áp thì phiếu cũ vô hiệu.
+- **Mẩu mẫu gửi tin nhắn về fanpage khác fanpage đã khai ⇒ không đăng.**
+- **Tắt vòng (`enabled = false`) vẫn CHẤM và vẫn TẮT theo luật** — chỉ không đăng / không dựng mới.
+- `focusProductIds` = CHỈ test các mã này (cả ô khai thác lẫn thăm dò).
+
+### Rủi ro còn lại (đã biết, chưa chặn được bằng mã)
+
+- Phản hồi "tạo nhóm" rơi mất sau khi Facebook đã tạo ⇒ một nhóm mồ côi ACTIVE không có mẩu (không
+  tiêu tiền, nhưng ERP không biết nó). Tên nhóm mang ngày lô + số ô để tra tay.
+- Các hàm ghi mới chưa từng chạy trên Facebook thật — lượt đầu nên là MỘT lô nhỏ (`batchSize` 2–3).
+- Chi phí đọc ảnh / viết chữ bằng model OpenAI in "CHƯA BIẾT" vì bảng giá AI của kho chỉ có Claude.
 
 ## 7. Chủ shop còn phải làm gì để vòng CHẠY THẬT
 
@@ -133,7 +155,8 @@ nên chiến thắng), 40% ô **thăm dò** (nguồn cảm hứng ít dùng nh�
 | Cấp lại System User token có **`ads_management`** + quyền **tạo quảng cáo cho fanpage** test | token hiện chỉ `ads_read` |
 | Dựng **một chiến dịch TEST** (mục tiêu Tin nhắn, ngân sách ở cấp nhóm — ABO) và **một mẩu QC mẫu** trong đó | máy không tạo chiến dịch và không tự đoán đối tượng |
 | Điền `creative.config`: fanpage · tài khoản · chiến dịch test · mẩu mẫu · **luật tắt · luật giữ** | ngưỡng là quyết định kinh doanh (mục 38) |
-| Đặt `ADS_WRITE_ENABLED=true`, `ADS_WRITE_MODE=COPILOT`, `CREATIVE_LOOP_EVERY_MINUTES=10` trên VPS | đổi lịch và mở đường ghi là việc của chủ shop (mục 7) |
+| Đặt `ADS_WRITE_ENABLED=true`, `ADS_WRITE_MODE=COPILOT`, `CREATIVE_LOOP_EVERY_MINUTES=10` trên VPS; `OPENAI_API_KEY` phải có | đổi lịch và mở đường ghi là việc của chủ shop (mục 7) |
+| Bật `enabled` ở tab Cấu hình | công tắc mềm của vòng |
 | Tải lên **ảnh sản phẩm thật** cho các mã muốn test | máy không sinh mẫu cho sản phẩm nó không nhìn thấy |
 | Chốt ba con số "đề xuất" ở §3 | ngưỡng tiền |
 
