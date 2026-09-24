@@ -11,7 +11,8 @@ import { buildConversationFunnelRow, upsertConversationFunnel, type Conversation
 import { stillPendingOrderNotCreated } from "@/lib/cs/reconcile-order-created";
 import { isOrderMaterialized } from "@/lib/constants/order-materialized";
 import { NO_FACTS, type CaseFacts } from "@/lib/constants/case-semantics";
-import { chatDedupeKey, classifyConversation, decideCase, decideWithoutModel, toRecord, type CaseCandidate, type CaseDecision, type SemanticVerdict } from "@/lib/cs/semantic-case";
+import { chatDedupeKey, decideCase, decideWithoutModel, toRecord, type CaseCandidate, type CaseDecision, type SemanticVerdict } from "@/lib/cs/semantic-case";
+import { classifyConversationCached, pruneSemanticCache } from "@/lib/cs/semantic-cache";
 import { getAiProvider } from "@/lib/ai/provider";
 import { getPancakePagesClient, type PancakeMessage } from "@/lib/integrations/pancake/pages";
 import { rowsOf } from "@/lib/sql-rows";
@@ -387,12 +388,17 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
     Một lượt quét báo "tạo 12 case" mà không nói đã bác bao nhiêu ứng viên thì không kiểm chứng
     được tầng ngữ nghĩa đang làm việc hay đang ngủ. Ba con số dưới đây có nghĩa khác hẳn nhau:
 
-     · `semanticCalls`     — số hội thoại thật sự được đọc hiểu;
+     · `semanticCalls`     — số lượt GỌI MODEL thật (mỗi lượt là tiền);
+     · `semanticCacheHits` — số hội thoại dùng lại kết luận đã trả tiền vì đầu vào không đổi
+                             (`lib/cs/semantic-cache.ts`). Tổng hai số = số hội thoại được đọc hiểu;
      · `semanticRejected`  — ứng viên bị bác (giả định · lời shop · chứng từ nói khác · chưa đủ chắc);
      · `aiOff`             — hội thoại có dấu hiệu bằng CHỮ nhưng không có tầng ngữ nghĩa để xét.
                              Đây là NỢ, không phải "sạch": chúng KHÔNG được tạo việc bằng từ khoá.
   */
   let semanticCalls = 0;
+  let semanticCacheHits = 0;
+  let phanhChan = 0;
+  let phanhLy = "";
   let boQuaNgheNghia = 0;
   let aiTat = 0;
   let needsReview = 0;
@@ -402,6 +408,7 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
     đường lui là KHÔNG TẠO VIỆC từ chữ, chứ không phải quay về luật từ khoá cũ.
   */
   const provider = getAiProvider("routine");
+  const semanticCachePruned = provider ? await pruneSemanticCache(db) : 0;
   /*
     ═══ GIỮ LẠI BẰNG CHỨNG PHỄU — KHÔNG THÊM MỘT LƯỢT GỌI API NÀO ═══
 
@@ -580,8 +587,14 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
           aiTat += 1;
         } else {
           try {
-            verdict = await classifyConversation({ customerName: conv.customerName, tags: conv.tags, candidates: ungVien, facts, messages }, provider);
-            semanticCalls += 1;
+            const r = await classifyConversationCached(db, conv.id, { customerName: conv.customerName, tags: conv.tags, candidates: ungVien, facts, messages }, provider);
+            verdict = r.verdict;
+            if (r.cached) semanticCacheHits += 1;
+            else if (r.blocked) {
+              // Chạm trần tiền AI ngày: như AI tắt — chữ không thành việc, ứng viên xác định vẫn chạy.
+              phanhChan += 1;
+              phanhLy = r.blocked;
+            } else semanticCalls += 1;
           } catch (e) {
             if (errors.length < 20) errors.push(`ngữ nghĩa (${conv.id}): ${e instanceof Error ? e.message : String(e)}`);
           }
@@ -700,8 +713,15 @@ export async function syncPancakeChatCases(options: { hours?: number; limitPerPa
     ambiguous: nhapNhang,
     /** Số dòng phễu hội thoại đã ghi — đây là MẪU SỐ mà trước đây bị ném đi mỗi lượt quét. */
     funnelSaved,
-    /** Số hội thoại đã qua tầng ngữ nghĩa. */
+    /** Số lượt gọi model THẬT — mỗi lượt là tiền. */
     semanticCalls,
+    /** Hội thoại dùng lại kết luận cũ vì đầu vào không đổi — không tốn lượt gọi nào. */
+    semanticCacheHits,
+    /** Kết luận cũ quá hạn giữ đã dọn khỏi bộ nhớ đệm trong lượt này. */
+    semanticCachePruned,
+    /** Hội thoại KHÔNG được đọc hiểu vì chạm trần tiền AI ngày — là NỢ như `aiOff`, không phải "sạch". */
+    semanticBudgetBlocked: phanhChan,
+    budgetBlockedReason: phanhLy || null,
     /** Ứng viên bị bác — giả định / lời shop / chứng từ nói khác / chưa đủ chắc. */
     semanticRejected: boQuaNgheNghia,
     /** Hội thoại có dấu hiệu bằng chữ nhưng KHÔNG có tầng ngữ nghĩa để xét ⇒ không tạo việc. */

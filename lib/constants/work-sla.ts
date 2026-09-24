@@ -100,6 +100,8 @@ export const ALERT_SLA_WHY: Record<CaseType, string> = {
   RETURNING: "Hàng đang trên đường về: không ai làm gì thay đổi được kết quả, nên đặt hạn ở đây chỉ tạo số trễ hạn giả.",
   AMBIGUOUS_ORDER_SHIPMENT_MAPPING: "Người phải quyết vận đơn thuộc đơn nào, máy cố ý không đoán — nhưng đây không phải việc có khách đang chờ.",
   ORPHAN_SHIPMENT: "Vận đơn chưa ghép được đơn nào: cần đối chiếu, không cần gấp.",
+  VTP_ORDER_LIST_DUE: "Kiện lấy hàng thất bại chỉ lộ ra qua tệp này. Thấy trong ngày còn gọi lại khách được; để qua vài ngày là khách đã huỷ.",
+  COD_STATEMENT_MISSING: "Thiếu bảng kê thì cả đợt tiền hiện là 'quá hạn chưa trả' — để lâu là có người đi đòi Viettel Post một khoản đã nhận.",
   OTHER: "Loại chưa phân định: chưa biết hậu quả của việc để trễ thì chưa được đặt một con số giả.",
 };
 

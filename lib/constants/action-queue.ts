@@ -68,6 +68,18 @@ export type CaseType =
   | "AMBIGUOUS_ORDER_SHIPMENT_MAPPING"
   /** Vận đơn có thật nhưng chưa ghép được đơn ERP nào. */
   | "ORPHAN_SHIPMENT"
+  /**
+   * Tệp "Danh sách vận đơn" Viettel Post đến hạn nhập lại. Đây là nguồn DUY NHẤT thấy trạng thái
+   * "lấy hàng thất bại" — webhook không đẩy nó — nên chưa nhập là cả nhóm kiện ấy mang nhãn trung
+   * tính "chờ lấy". Xem `lib/constants/feed-freshness.ts`.
+   */
+  | "VTP_ORDER_LIST_DUE"
+  /**
+   * Tiền COD đã về tài khoản (sao kê) mà ERP chưa có tệp bảng kê của đợt đó — hoặc đường tự nhận
+   * bảng kê qua Gmail đã im lặng. Thiếu tệp thì mọi vận đơn của đợt hiện "quá hạn chưa trả" và
+   * người đọc đi đòi một khoản tiền đã nhận.
+   */
+  | "COD_STATEMENT_MISSING"
   | "OTHER";
 
 /** Ánh xạ từ `notifications.kind` sang loại việc. Một chỗ duy nhất. */
@@ -94,6 +106,10 @@ export const KIND_TO_CASE: Record<string, CaseType> = {
   ADS_BILLING: "ADS_BILLING",
   AMBIGUOUS_MAPPING: "AMBIGUOUS_ORDER_SHIPMENT_MAPPING",
   ORPHAN_SHIPMENT: "ORPHAN_SHIPMENT",
+  VTP_ORDER_LIST_DUE: "VTP_ORDER_LIST_DUE",
+  // Hai dấu hiệu, một việc: cả hai đều nói "ERP đang thiếu bảng kê", cùng người làm, cùng chỗ sửa.
+  COD_STATEMENT_MISSING: "COD_STATEMENT_MISSING",
+  STATEMENT_MAIL_SILENT: "COD_STATEMENT_MISSING",
 };
 
 export function caseTypeOf(kind: string): CaseType {
@@ -123,6 +139,8 @@ export const CASE_TYPE_LABEL: Record<CaseType, string> = {
   ADS_BILLING: "Tài khoản quảng cáo",
   AMBIGUOUS_ORDER_SHIPMENT_MAPPING: "Chưa rõ vận đơn thuộc đơn nào",
   ORPHAN_SHIPMENT: "Vận đơn chưa ghép được đơn",
+  VTP_ORDER_LIST_DUE: "Đến hạn nhập Danh sách vận đơn VTP",
+  COD_STATEMENT_MISSING: "Tiền COD đã về · thiếu bảng kê",
   OTHER: "Khác",
 };
 
@@ -175,6 +193,10 @@ export const RECOVERABILITY: Record<CaseType, number> = {
   // Ghép đúng đơn thì số liệu đúng lại ngay, nhưng hàng thì đã xong từ lâu.
   AMBIGUOUS_ORDER_SHIPMENT_MAPPING: 0.4,
   ORPHAN_SHIPMENT: 0.4,
+  // Nhập tệp hôm nay là thấy ngay kiện lấy hỏng còn gọi lại khách được; để một tuần thì khách đã huỷ.
+  VTP_ORDER_LIST_DUE: 0.8,
+  // Tải đúng tệp là số COD đúng lại ngay — nhưng tiền thì đã về rồi, không thay đổi kết quả nào.
+  COD_STATEMENT_MISSING: 0.5,
   OTHER: 0.5,
 };
 
@@ -208,6 +230,10 @@ export const CASE_ACTION: Record<CaseType, string> = {
     "Mở Chất lượng dữ liệu, đối chiếu vận đơn với đơn theo mã tham chiếu. CHỈ xử lý khi các cách ghép cho ra kết quả khác nhau — mọi cách ghép cùng kết quả thì tổng hợp đã đúng.",
   ORPHAN_SHIPMENT:
     "Tìm đơn tương ứng theo mã tham chiếu trên Viettel Post. Vận đơn chiều hoàn KHÔNG có đơn là bình thường, không cần làm gì.",
+  VTP_ORDER_LIST_DUE:
+    "Xuất tệp Danh sách vận đơn trên viettelpost.vn rồi tải lên trang Bổ sung danh sách vận đơn, chạy thử trước. Việc tự đóng khi có lượt nhập mới.",
+  COD_STATEMENT_MISSING:
+    "Tìm thư BangKeChiCOD đúng số bảng kê trong Gmail (hoặc tải trên viettelpost.vn) rồi tải lên Đối soát COD → Bảng kê. Nếu script Gmail im lặng: mở script.google.com kiểm tra trình kích hoạt. Việc tự đóng khi ERP có tệp.",
 };
 
 /**
@@ -264,6 +290,9 @@ export const CASE_TEAM: Record<CaseType, CaseTeam> = {
   DATA_ERROR: "DATA",
   AMBIGUOUS_ORDER_SHIPMENT_MAPPING: "DATA",
   ORPHAN_SHIPMENT: "DATA",
+  // Nguồn dữ liệu tay: người xuất tệp Viettel Post là giao vận; người giữ hộp thư bảng kê là kế toán.
+  VTP_ORDER_LIST_DUE: "LOGISTICS",
+  COD_STATEMENT_MISSING: "FINANCE",
   OTHER: "DATA",
 };
 
@@ -322,6 +351,9 @@ const CUSTOMER_WAITING: Record<CaseType, number> = {
   RETURN_RECEIVED_PENDING_INSPECTION: 0,
   AMBIGUOUS_ORDER_SHIPMENT_MAPPING: 0,
   ORPHAN_SHIPMENT: 0,
+  // Không ai chờ trực tiếp — nhưng kiện lấy hỏng mà chưa ai thấy thì khách đang chờ hàng không tới.
+  VTP_ORDER_LIST_DUE: 0.4,
+  COD_STATEMENT_MISSING: 0,
   OTHER: 0,
 };
 
@@ -502,6 +534,10 @@ export const CASE_SLA_HOURS: Record<CaseType, number | null> = {
   RETURNING: null,
   AMBIGUOUS_ORDER_SHIPMENT_MAPPING: null,
   ORPHAN_SHIPMENT: null,
+  // Trong ngày làm việc: tệp của hôm nay phải vào trước khi hết ca.
+  VTP_ORDER_LIST_DUE: 8,
+  // Hai ngày: đủ để tìm lại thư / tải trên viettelpost.vn, chưa đủ để đợt sau chồng lên đợt này.
+  COD_STATEMENT_MISSING: 48,
   OTHER: null,
 };
 

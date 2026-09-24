@@ -21,5 +21,7 @@ export async function loadAlertConfig(): Promise<AlertConfig> {
     larkBillingSecret: cfg.larkBillingSecret || read("LARK_BILLING_WEBHOOK_SECRET"),
     larkInventoryWebhookUrl: cfg.larkInventoryWebhookUrl || read("LARK_INVENTORY_WEBHOOK_URL"),
     larkInventorySecret: cfg.larkInventorySecret || read("LARK_INVENTORY_WEBHOOK_SECRET"),
+    larkManagerWebhookUrl: cfg.larkManagerWebhookUrl || read("LARK_MANAGER_WEBHOOK_URL"),
+    larkManagerSecret: cfg.larkManagerSecret || read("LARK_MANAGER_WEBHOOK_SECRET"),
   };
 }

@@ -251,8 +251,22 @@ export function AssignSelect({ id, users, current }: { id: string; users: { id: 
 }
 
 /** Cấu hình cảnh báo & Telegram (Quản trị) */
-export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInventorySecret }: { config: AlertConfig; hasToken: boolean; hasLarkSecret?: boolean; hasLarkInventorySecret?: boolean }) {
-  const initial = useMemo(() => ({ ...config, telegramBotToken: "", larkSecret: "", larkBillingSecret: "", larkInventorySecret: "" }), [config]);
+export function AlertConfigForm({
+  config,
+  hasToken,
+  hasLarkSecret,
+  hasLarkBillingSecret,
+  hasLarkInventorySecret,
+  hasLarkManagerSecret,
+}: {
+  config: AlertConfig;
+  hasToken: boolean;
+  hasLarkSecret?: boolean;
+  hasLarkBillingSecret?: boolean;
+  hasLarkInventorySecret?: boolean;
+  hasLarkManagerSecret?: boolean;
+}) {
+  const initial = useMemo(() => ({ ...config, telegramBotToken: "", larkSecret: "", larkBillingSecret: "", larkInventorySecret: "", larkManagerSecret: "" }), [config]);
   const [form, setForm] = useState(initial);
   const [pending, startTransition] = useTransition();
   const [savedAt, setSavedAt] = useState<Date | null>(null);
@@ -278,7 +292,8 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInvent
   }, [dirty]);
   const save = () =>
     startTransition(async () => {
-      const r = await saveAlertConfig({ ...form, telegramBotToken: form.telegramBotToken || config.telegramBotToken, larkSecret: form.larkSecret || config.larkSecret, larkBillingSecret: form.larkBillingSecret || config.larkBillingSecret });
+      // Ô khoá bí mật để trống = GIỮ khoá đã lưu — máy chủ tự điền lại (lib/actions/alerts.ts).
+      const r = await saveAlertConfig(form);
       if ("error" in r) {
         setSaveError(r.error);
         toast.error(r.error);
@@ -330,7 +345,7 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInvent
         </div>
         <div className="space-y-1">
           <Label>Lark · Signature secret (tuỳ chọn)</Label>
-          <Input type="password" value={form.larkSecret} onChange={(e) => setForm({ ...form, larkSecret: e.target.value })} placeholder={hasLarkSecret ? "Đã lưu — nhập để thay" : "Để trống nếu không bật ký"} />
+          <Input type="password" value={form.larkSecret} onChange={(e) => setForm({ ...form, larkSecret: e.target.value })} placeholder={hasLarkSecret ? "Đã lưu — để trống là giữ nguyên" : "Để trống nếu không bật ký"} />
         </div>
         <div className="space-y-1">
           <Label>Lark · Webhook nhóm nhận cảnh báo ngưỡng thanh toán QC (trống = dùng nhóm trên)</Label>
@@ -338,7 +353,7 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInvent
         </div>
         <div className="space-y-1">
           <Label>Lark · Signature secret nhóm thanh toán (tuỳ chọn)</Label>
-          <Input type="password" value={form.larkBillingSecret} onChange={(e) => setForm({ ...form, larkBillingSecret: e.target.value })} placeholder={config.larkBillingSecret ? "Đã lưu — nhập để thay" : "Để trống nếu không bật ký"} />
+          <Input type="password" value={form.larkBillingSecret} onChange={(e) => setForm({ ...form, larkBillingSecret: e.target.value })} placeholder={hasLarkBillingSecret ? "Đã lưu — để trống là giữ nguyên" : "Để trống nếu không bật ký"} />
         </div>
         <div className="space-y-1">
           <Label>Lark · Webhook nhóm Kho / Sản xuất nhận bảng thiếu hàng (trống = dùng nhóm vận đơn)</Label>
@@ -350,6 +365,17 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInvent
         <div className="space-y-1">
           <Label>Lark · Signature secret nhóm Kho / Sản xuất (tuỳ chọn)</Label>
           <Input type="password" value={form.larkInventorySecret} onChange={(e) => setForm({ ...form, larkInventorySecret: e.target.value })} placeholder={hasLarkInventorySecret ? "Đã lưu — để trống là giữ nguyên" : "Để trống nếu không bật ký"} />
+        </div>
+        <div className="space-y-1">
+          <Label>Lark · Webhook nhóm Quản lý / chủ shop nhận bản tin sáng</Label>
+          <Input value={form.larkManagerWebhookUrl} onChange={(e) => setForm({ ...form, larkManagerWebhookUrl: e.target.value })} placeholder="https://open.larksuite.com/open-apis/bot/v2/hook/xxxxxxxx" />
+          <p className="text-[11px] text-muted-foreground">
+            {config.larkManagerWebhookUrl ? "Đã lưu — bản tin sáng gửi vào nhóm này." : "Chưa lưu — bản tin sáng KHÔNG gửi (không lùi về nhóm vận đơn)."}
+          </p>
+        </div>
+        <div className="space-y-1">
+          <Label>Lark · Signature secret nhóm Quản lý (tuỳ chọn)</Label>
+          <Input type="password" value={form.larkManagerSecret} onChange={(e) => setForm({ ...form, larkManagerSecret: e.target.value })} placeholder={hasLarkManagerSecret ? "Đã lưu — để trống là giữ nguyên" : "Để trống nếu không bật ký"} />
         </div>
         <div className="space-y-1">
           <Label>Cảnh báo khi dư nợ đạt (% ngưỡng thanh toán)</Label>
@@ -365,7 +391,7 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInvent
         </div>
         <div className="space-y-1">
           <Label>Telegram Bot Token</Label>
-          <Input type="password" value={form.telegramBotToken} onChange={(e) => setForm({ ...form, telegramBotToken: e.target.value })} placeholder={hasToken ? "Đã lưu — nhập để thay" : "123456:ABC… (tạo bot qua @BotFather)"} />
+          <Input type="password" value={form.telegramBotToken} onChange={(e) => setForm({ ...form, telegramBotToken: e.target.value })} placeholder={hasToken ? "Đã lưu — để trống là giữ nguyên" : "123456:ABC… (tạo bot qua @BotFather)"} />
         </div>
         <div className="space-y-1">
           <Label>Chat ID nhóm / người nhận</Label>
@@ -448,6 +474,15 @@ export function AlertConfigForm({ config, hasToken, hasLarkSecret, hasLarkInvent
         </label>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={form.enabled.bankAccountUnconfirmed} onCheckedChange={(v) => toggle("bankAccountUnconfirmed", v === true)} /> Tài khoản ngân hàng mới do webhook phát hiện, chưa ai xác nhận
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.vtpOrderListDue} onCheckedChange={(v) => toggle("vtpOrderListDue", v === true)} /> Đến hạn nhập tệp Danh sách vận đơn Viettel Post (nguồn duy nhất thấy &quot;lấy hàng thất bại&quot;)
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.codStatementMissing} onCheckedChange={(v) => toggle("codStatementMissing", v === true)} /> Tiền COD đã về tài khoản mà ERP chưa có bảng kê · script Gmail bảng kê im lặng
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={form.enabled.morningBrief} onCheckedChange={(v) => toggle("morningBrief", v === true)} /> Bản tin sáng cho nhóm Quản lý (ba việc đáng làm nhất, việc quá hạn, tiền đang treo)
         </label>
       </div>
       <div className="flex flex-wrap items-center gap-2">
