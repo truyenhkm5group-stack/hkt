@@ -154,16 +154,23 @@ export async function codStatementAuditLines(days: number): Promise<string[]> {
   const tepDaNhan = rowsOf<Record<string, unknown>>(await db.execute(sql`select filename from vtp_statement_files`)).map((r) => String(r.filename ?? ""));
   const nguonSo = rowsOf<Record<string, unknown>>(await db.execute(sql`select distinct source_file from cod_statement_lines`)).map((r) => String(r.source_file ?? ""));
   const coTrong = (ds: string[], so: string) => ds.some((f) => soBangKe(f) === so);
+  // Tệp "Báo cáo chi tiết bảng kê" tải tay KHÔNG in số bảng kê trong tên, nên khớp thêm bằng SỐ
+  // TIỀN: tổng "thu về" của một bảng kê trong sổ bằng đúng khoản Viettel Post chuyển cho nó.
+  const thuVe = new Set(
+    rowsOf<Record<string, unknown>>(await db.execute(sql`select coalesce(sum(net), 0) net from cod_statement_lines group by statement_key`)).map((r) => n(r.net)),
+  );
   out.push(`SAO KÊ: Viettel Post chuyển ${ck.length} đợt trong ${days} ngày · ${tien(ck.reduce((a, r) => a + n(r.amount), 0))}`);
   let thieuTep = 0;
   for (const [i, r] of ck.entries()) {
     const so = soBangKe(String(r.description ?? ""));
     const daNhan = so ? coTrong(tepDaNhan, so) : false;
-    const daVaoSo = so ? coTrong(nguonSo, so) : false;
+    const theoSo = so ? coTrong(nguonSo, so) : false;
+    const theoTien = thuVe.has(n(r.amount));
+    const daVaoSo = theoSo || theoTien;
     if (!daVaoSo) thieuTep += 1;
     if (i < TRAN.nganHang) {
       out.push(
-        `  ${r.ngay} ${tien(n(r.amount))} · bảng kê ${so ?? "không đọc được số"} · tệp: ${daNhan ? "đã nhận" : "CHƯA NHẬN"} · sổ chứng từ: ${daVaoSo ? "có" : "KHÔNG"}${r.linked_type ? "" : " · chưa đối chiếu"}`,
+        `  ${r.ngay} ${tien(n(r.amount))} · bảng kê ${so ?? "không đọc được số"} · tệp: ${daNhan ? "đã nhận" : theoTien ? "tải tay (không mang số)" : "CHƯA NHẬN"} · sổ chứng từ: ${theoSo ? "có" : theoTien ? "có (khớp số tiền thu về)" : "KHÔNG"}${r.linked_type ? "" : " · chưa đối chiếu"}`,
       );
     }
   }

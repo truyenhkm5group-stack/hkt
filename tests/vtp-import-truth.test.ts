@@ -546,3 +546,73 @@ export async function testStatementDedupAcrossFilenames() {
 
   console.log("✓ Chống trùng bảng kê: cùng ngày chốt với hai tên tệp chỉ tính một lần, tệp tải tay được lưu lại");
 }
+
+/**
+ * DANH TÍNH BẢNG KÊ = TẬP DÒNG CÓ TIỀN, KHÔNG PHẢI NGÀY PHÁT MUỘN NHẤT.
+ *
+ * Production 25/09/2026, bốn tệp "Báo cáo chi tiết bảng kê" tải tay (loại tệp không in số bảng kê):
+ *   (a) tải lại một bảng kê ĐÃ NHẬP 14/09: dòng chỉ-cước nay mang ngày phát 18/09 ⇒ khoá cũ
+ *       BK-<ngày muộn nhất> đổi từ BK-2026-09-14 sang BK-2026-09-18 ⇒ 17 vận đơn bị cộng tiền 2 lần;
+ *   (b) hai bảng kê KHÁC NHAU (30873899, 31031025) cùng kết thúc 24/09 ⇒ chung khoá BK-2026-09-24 ⇒
+ *       tệp ghi sau đè dòng của tệp trước, và tiền của một vận đơn mất hay còn tuỳ thứ tự chọn tệp.
+ * Và (c): sổ đã lỡ ghi trùng thì TẢI LẠI tệp phải tự dọn, không cần sửa tay dữ liệu production.
+ */
+export async function testStatementIdentityByCash() {
+  const { runVtpDataFileImport } = await import("@/lib/integrations/viettelpost/import-run");
+  const { previewVtpOrderListFile } = await import("@/lib/integrations/viettelpost/import-preview");
+  const { getDb, schema } = await import("@/db");
+  const { inArray } = await import("drizzle-orm");
+  const db = await getDb();
+
+  const head = "Mã vận đơn,Mã KH,Người nhận,Số điện thoại,Địa chỉ,Ngày tạo bưu phẩm,Ngày phát thành công,Tiền thu hộ(VNĐ),Tiền cước (VNĐ),Tiền thu về (VNĐ)";
+  const dongCsv = (code: string, ngay: string, cod: number, fee: number) => `${code},GLMTQY214,K,0900000099,X,01/09/2026 09:00:00,${ngay},${cod},${fee},${cod - fee}`;
+  const tep = (name: string, dong: string[]) => ({ filename: name, base64: Buffer.from([head, ...dong].join("\n"), "utf8").toString("base64") });
+  const dongCua = async (codes: string[]) =>
+    db.select().from(schema.codStatementLines).where(inArray(schema.codStatementLines.trackingCode, codes));
+  const tongTien = async (code: string) => (await dongCua([code])).reduce((a, d) => a + Number(d.cod), 0);
+
+  // (a) cùng một bảng kê, tải lại khi dòng chỉ-cước đã có ngày phát muộn hơn.
+  const lan1 = tep("Bao_cao_chi_tiet_bang_ke_14_09_2026 11_04_37.csv", [dongCsv("PKE8800000001", "10/09/2026 10:00:00", 524000, 17000), dongCsv("PKE8800000002", "14/09/2026 10:00:00", 0, 17000)]);
+  const lan2 = tep("Bao_cao_chi_tiet_bang_ke_25_09_2026 02_07_53.csv", [dongCsv("PKE8800000001", "10/09/2026 10:00:00", 524000, 17000), dongCsv("PKE8800000002", "18/09/2026 10:00:00", 0, 17000)]);
+  await runVtpDataFileImport([lan1], "nguoi-dung@shop");
+  await runVtpDataFileImport([lan2], "nguoi-dung@shop");
+  assert.equal(await tongTien("PKE8800000001"), 524000, "tải lại cùng một bảng kê không được cộng tiền lần hai (lỗi BK-2026-09-14 / BK-2026-09-18)");
+  assert.equal(new Set((await dongCua(["PKE8800000001", "PKE8800000002"])).map((d) => d.statementKey)).size, 1, "hai lần tải cùng một bảng kê phải về MỘT khoá");
+
+  // (b) hai bảng kê khác nhau cùng kết thúc một ngày; B có Z chỉ-cước, C trả tiền cho Z. Ghi C trước, B sau.
+  const C = tep("Bao_cao_chi_tiet_bang_ke_25_09_2026 02_07_37.csv", [dongCsv("PKE8800000013", "24/09/2026 10:00:00", 300000, 16500)]);
+  const B = tep("Bao_cao_chi_tiet_bang_ke_25_09_2026 02_07_43.csv", [dongCsv("PKE8800000011", "17/09/2026 10:00:00", 400000, 17000), dongCsv("PKE8800000013", "24/09/2026 11:00:00", 0, 17000)]);
+  await runVtpDataFileImport([C, B], "nguoi-dung@shop");
+  assert.equal(await tongTien("PKE8800000013"), 300000, "bảng kê ghi sau KHÔNG được đè mất tiền của bảng kê khác cùng ngày kết thúc");
+  assert.equal(await tongTien("PKE8800000011"), 400000);
+  const khoaZ = (await dongCua(["PKE8800000013"])).map((d) => d.statementKey);
+  assert.equal(new Set(khoaZ).size, 2, "hai bảng kê khác nhau phải là hai khoá — mỗi bảng kê giữ dòng của mình cho Z");
+
+  // (c) sổ đã lỡ ghi trùng theo KHOÁ NGÀY kiểu cũ — đúng tình trạng production: bản gốc dưới
+  //     BK-<ngày> (nhập trước), bản trùng dưới khoá khác mang tên tệp mới ⇒ tải lại tệp là tự dọn.
+  const cu = new Date("2026-09-14T04:00:00Z");
+  await db.insert(schema.codStatementLines).values([
+    { statementKey: "BK-2099-01-01", sourceFile: "Bao_cao_goc.csv", trackingCode: "PKE8800000021", cod: 620000, fee: 17000, net: 603000, paidDate: "2099-01-01", statementAt: cu, createdAt: cu },
+    { statementKey: "BK-2099-01-01", sourceFile: "Bao_cao_goc.csv", trackingCode: "PKE8800000022", cod: 0, fee: 17000, net: -17000, paidDate: "2099-01-01", statementAt: cu, createdAt: cu },
+    { statementKey: "BK-2099-01-05", sourceFile: "Bao_cao_trung.csv", trackingCode: "PKE8800000021", cod: 620000, fee: 17000, net: 603000, paidDate: "2099-01-01", statementAt: new Date() },
+    { statementKey: "BK-2099-01-05", sourceFile: "Bao_cao_trung.csv", trackingCode: "PKE8800000022", cod: 0, fee: 17000, net: -17000, paidDate: "2099-01-05", statementAt: new Date() },
+  ]);
+  assert.equal(await tongTien("PKE8800000021"), 1240000, "dựng lại tình trạng trùng: tiền đang bị cộng hai lần");
+  const trung = tep("Bao_cao_trung.csv", [dongCsv("PKE8800000021", "01/01/2099 10:00:00", 620000, 17000), dongCsv("PKE8800000022", "05/01/2099 10:00:00", 0, 17000)]);
+  await runVtpDataFileImport([trung], "nguoi-dung@shop");
+  assert.equal(await tongTien("PKE8800000021"), 620000, "tải lại tệp đã ghi trùng phải về đúng khoá cũ và xoá bản thừa");
+  const conLai = await dongCua(["PKE8800000021", "PKE8800000022"]);
+  assert.deepEqual([...new Set(conLai.map((d) => d.statementKey))], ["BK-2099-01-01"], "chỉ còn khoá ghi sổ sớm nhất; khoá trùng không còn dòng nào");
+
+  // Xem trước: tệp bảng kê KHÔNG phải lỗi — trả số tổng để đối chiếu với sao kê.
+  const xem = await previewVtpOrderListFile(B);
+  assert.equal(xem.kind, "STATEMENT_DETAIL");
+  assert.equal(xem.error, null, "tệp bảng kê trong hộp 'Bổ sung bảng kê' không được hiện như một lỗi");
+  assert.deepEqual(
+    { codRows: xem.statement?.codRows, net: xem.statement?.netTotal, from: xem.statement?.from, to: xem.statement?.to },
+    { codRows: 1, net: 400000 - 17000 - 17000, from: "2026-09-17", to: "2026-09-24" },
+    "xem trước bảng kê trả đúng số dòng có tiền, tiền thu về và khoảng ngày phát",
+  );
+
+  console.log("✓ Danh tính bảng kê theo tập dòng có tiền: tải lại không cộng hai lần, hai bảng kê cùng ngày không đè nhau, sổ lỡ trùng tự dọn khi tải lại, xem trước không báo lỗi giả");
+}
