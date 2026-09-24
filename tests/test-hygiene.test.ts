@@ -145,6 +145,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Đặt MEMO_INFLIGHT_TIMEOUT_MS = 40ms để cửa sổ gộp lời gọi đo được trong một bài kiểm; giữ giá trị cũ và trả lại sau.",
   "tests/tech-cto-proposal.test.ts":
     "Đặt ADMIN_PASSWORD để dựng tài khoản quản trị của tình huống, rồi trả lại giá trị cũ.",
+  "tests/webhook-hardening.test.ts":
+    "ĐẶT VIETTELPOST_WEBHOOK_SECRET (chuỗi BỊA) để route webhook có một bí mật để so, rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của route đang đo (401/413/429), không phải điều kiện của kết luận.",
 
   /* ───── ĐỌC biến, nhưng đọc ĐÚNG NGUỒN mà mã sản xuất đọc ───── */
   "tests/session-renewal.test.ts":

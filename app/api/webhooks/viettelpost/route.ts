@@ -8,19 +8,29 @@ import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
 import { staleMemo } from "@/lib/cache";
 import { applyVtpTracking } from "@/lib/integrations/viettelpost/sync";
 import { anySecretMatches } from "@/lib/auth/secret-compare";
+import { VTP_WEBHOOK_MAX_BODY_BYTES } from "@/lib/constants/webhook-limits";
+import { readBodyCapped } from "@/lib/http/body-limit";
 
 export const dynamic = "force-dynamic";
 
-function extractSecret(request: NextRequest, body: Record<string, unknown>) {
+/**
+ * Bí mật NGOÀI body (header / query) — đọc được TRƯỚC khi đụng tới body.
+ * Viettel Post chính thức gửi `{DATA, TOKEN}` nên bí mật thường nằm TRONG body (xem `bodySecrets`);
+ * đường ngoài body là cho bên chuyển tiếp không cho nhập tham số (`?token=`) hoặc gửi header.
+ */
+function outerSecrets(request: NextRequest) {
   const auth = request.headers.get("authorization") ?? "";
   const h = (name: string) => request.headers.get(name) ?? "";
   const q = (name: string) => request.nextUrl.searchParams.get(name) ?? "";
   return [
-    str(body.TOKEN, body.token, body.secret, body.SECRET),
     h("token"), h("x-token"), h("secret"), h("x-secret"), h("x-webhook-secret"), h("x-api-key"),
     auth.replace(/^(Bearer|Token)\s+/i, ""),
     q("access_token"), q("token"), q("secret"),
   ].filter(Boolean);
+}
+
+function bodySecrets(body: Record<string, unknown>) {
+  return [str(body.TOKEN, body.token, body.secret, body.SECRET)].filter(Boolean);
 }
 
 /** Tìm bản ghi hành trình Viettel Post trong body: trực tiếp {DATA}, hoặc bọc trong gói chuyển tiếp của Pancake / bên thứ ba (tối đa 4 tầng) */
@@ -43,24 +53,33 @@ function findVtpData(body: Record<string, unknown>): Record<string, unknown> {
 }
 
 export async function POST(request: NextRequest) {
-  const text = await request.text();
-  let body: Record<string, unknown>;
-  try {
-    body = asRecord(parseJsonSafeInts(text));
-  } catch {
-    return NextResponse.json({ status: 400, error: true, message: "Body không phải JSON" }, { status: 400 });
-  }
-
   const expected = env.viettelPost.webhookSecret;
   // THIẾU BÍ MẬT LÀ ĐÓNG CỬA, không phải mở toang. Trước đây `expected` rỗng ⇒ mọi POST nặc danh
   // đều được nhận và được phép TẠO vận đơn / đổi trạng thái — tức là ghi thẳng vào kết quả đơn.
   // scripts/install-vps.sh luôn sinh VIETTELPOST_WEBHOOK_SECRET khi cài, nên production không bao
   // giờ rơi vào nhánh này; máy dev không đặt biến thì vẫn chạy để thử webhook bằng tay.
+  // Kiểm TRƯỚC khi đọc body: cửa đang đóng thì không có lý do gì để nhận một byte.
   if (!expected && process.env.NODE_ENV === "production") {
     console.error("[vtp-webhook] 503 chưa cấu hình VIETTELPOST_WEBHOOK_SECRET — từ chối mọi gói tin");
     return NextResponse.json({ status: 503, error: true, message: "Chưa cấu hình tham số bí mật webhook" }, { status: 503 });
   }
-  if (expected && !anySecretMatches(extractSecret(request, body), expected)) {
+  // Bí mật ngoài body kiểm TRƯỚC; bí mật trong body (`TOKEN` — cách Viettel Post gửi) buộc phải đọc
+  // body, nên body đọc CÓ TRẦN (lib/constants/webhook-limits.ts) — trước đây đọc + parse TOÀN BỘ
+  // body của bất kỳ ai rồi mới hỏi bí mật. Trần 1 MB không làm chậm đường nóng: gói thật vài KB.
+  const outerOk = expected ? anySecretMatches(outerSecrets(request), expected) : true;
+  const read = await readBodyCapped(request, VTP_WEBHOOK_MAX_BODY_BYTES);
+  if (!read.ok) {
+    console.warn(`[vtp-webhook] 413 ${read.reason} · ua=${request.headers.get("user-agent") ?? "?"}`);
+    return NextResponse.json({ status: 413, error: true, message: read.reason }, { status: 413 });
+  }
+  let body: Record<string, unknown>;
+  try {
+    body = asRecord(parseJsonSafeInts(read.text));
+  } catch {
+    return NextResponse.json({ status: 400, error: true, message: "Body không phải JSON" }, { status: 400 });
+  }
+
+  if (expected && !outerOk && !anySecretMatches(bodySecrets(body), expected)) {
     // Gói tin bị chặn KHÔNG được ghi vào webhook_events (ai cũng POST được thì bảng sẽ phình vô
     // hạn). Nhưng im lặng hoàn toàn thì cấu hình sai secret sẽ làm mất sạch dữ liệu mà không ai
     // biết — nên để lại một dòng log tra được bằng `docker logs`.

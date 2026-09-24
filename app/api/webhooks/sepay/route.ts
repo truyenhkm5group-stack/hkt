@@ -21,6 +21,8 @@
  * `JSON.stringify` lại đối tượng đã parse sẽ đổi thứ tự khoá và khoảng trắng ⇒ chữ ký luôn sai.
  */
 import { NextResponse, type NextRequest } from "next/server";
+import { SEPAY_WEBHOOK_MAX_BODY_BYTES } from "@/lib/constants/webhook-limits";
+import { readBodyCapped } from "@/lib/http/body-limit";
 import { after } from "next/server";
 import { getDb } from "@/db";
 import { staleMemo } from "@/lib/cache";
@@ -47,8 +49,11 @@ function fail(status: number, message: string) {
 }
 
 export async function POST(request: NextRequest) {
-  // 1 ─ BYTE GỐC trước mọi thứ khác.
-  const rawBody = await request.text();
+  // 1 ─ BYTE GỐC trước mọi thứ khác — nhưng CÓ TRẦN: chữ ký cần body nên phải đọc trước khi xác
+  //     thực, và đọc không trần là để kẻ lạ bắt máy chủ cấp phát bao nhiêu cũng được (lib/constants/webhook-limits.ts).
+  const read = await readBodyCapped(request, SEPAY_WEBHOOK_MAX_BODY_BYTES);
+  if (!read.ok) return fail(413, read.reason);
+  const rawBody = read.text;
 
   // 2 ─ XÁC THỰC. Gói tin không qua được KHÔNG được lưu: ai cũng POST được thì bảng sự kiện phình
   //     vô hạn. Nhưng im lặng hoàn toàn thì cấu hình sai secret sẽ làm mất sạch dữ liệu mà không ai
