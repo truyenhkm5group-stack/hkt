@@ -353,7 +353,7 @@ export default async function PayrollPage({
             </span>
           }
           note={PAYROLL_BASIS_SHORT[basis]}
-          hint={`${PAYROLL_BASIS_SHORT[basis]} · DT GTC ${formatVND(m.totals.revenue, { compact: true })} − QC ${formatVND(m.totals.adSpend + m.totals.testSpend, { compact: true })} − giá vốn ${formatVND(m.totals.cogs, { compact: true })} − VC ${formatVND(m.totals.shipping, { compact: true })} − vận hành ${formatVND(m.totals.operating, { compact: true })} (đã nhập ${formatVND(m.totals.operatingEntered, { compact: true })} + cố định ${formatVND(m.totals.fixedCost, { compact: true })} · ${m.totals.months} tháng + đóng hàng & NV vận đơn ${formatVND(m.totals.perOrderOps, { compact: true })})`}
+          hint={`${PAYROLL_BASIS_SHORT[basis]} · DT GTC ${formatVND(m.totals.revenue, { compact: true })} − QC ${formatVND(m.totals.adSpend + m.totals.testSpend, { compact: true })} − giá vốn ${formatVND(m.totals.cogs, { compact: true })} − VC ${formatVND(m.totals.shipping, { compact: true })}${m.totals.logisticsAdjustment ? ` (gồm ${formatNumber(m.totals.logisticsAdjustmentCount)} khoản điều chỉnh tay có lý do ${formatVND(m.totals.logisticsAdjustment, { compact: true })})` : ""} − vận hành ${formatVND(m.totals.operating, { compact: true })} (đã nhập ${formatVND(m.totals.operatingEntered, { compact: true })} + cố định ${formatVND(m.totals.fixedCost, { compact: true })} · ${m.totals.months} tháng + đóng hàng & NV vận đơn ${formatVND(m.totals.perOrderOps, { compact: true })})`}
           icon={TrendingUp}
           tone={report.totalProfit >= 0 ? "green" : "rose"}
         />

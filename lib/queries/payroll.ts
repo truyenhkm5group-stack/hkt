@@ -147,6 +147,15 @@ export type MarketerReport = {
      * `Σ operatingAlloc của các mã + sharedUnallocated = operatingEntered + fixedCost + perOrderOps`.
      */
     sharedUnallocated: number;
+    /**
+     * Cước / phí hoàn gõ tay khai `MANUAL_ADJUSTMENT` kèm lý do — ĐÃ NẰM TRONG `shipping` (con số
+     * của engine, `getRecognizedCosts().logisticsAdjustment`). Nêu riêng để người đọc biết cột vận
+     * chuyển không chỉ là cước theo vận đơn.
+     */
+    logisticsAdjustment: number;
+    logisticsAdjustmentCount: number;
+    /** Phần điều chỉnh KHÔNG chia được xuống mã nào (kỳ không có đơn gửi lẫn doanh thu) — vẫn trừ ở cấp shop. */
+    logisticsAdjustmentUnallocated: number;
     months: number;
     testSpend: number;
     profit: number;
@@ -449,8 +458,32 @@ async function productEconomics(period: Period) {
   */
   const sharedAllocated = sharedParts.reduce((t, v) => t + v, 0);
   const sharedUnallocated = operatingEntered + fixedCost - sharedAllocated;
+  /*
+    ═══ CƯỚC / PHÍ HOÀN ĐIỀU CHỈNH CÓ LÝ DO — TIỀN THẬT, VÀO CỘT VẬN CHUYỂN CỦA TỪNG MÃ ═══
+
+    Cột `shipping` ở trên đọc cước TỪ VẬN ĐƠN. Khoản đền bù, phí ngoại lệ, cước chuyến gom hàng khai
+    `MANUAL_ADJUSTMENT` kèm lý do không gắn được vận đơn nào nên không nằm trong đó. Mọi báo cáo lợi
+    nhuận đã trừ nó từ 24/09/2026 (engine, `pnl()`, theo ngày, dòng tiền, sự thật tài chính, danh
+    nghĩa); cơ sở tính lương là chỗ cuối cùng còn sót — lợi nhuận tính lương CAO HƠN sự thật đúng
+    bằng khoản ấy, và thưởng theo % lợi nhuận cao theo.
+
+    Lấy từ engine qua `getOperatingCostForCompensationBasis` (không tự đọc bảng Chi phí), chia theo
+    SỐ ĐƠN ĐÃ GỬI của mã — cước đi theo đơn gửi, cùng căn cứ với đóng hàng / NV vận đơn — bằng
+    largest remainder để Σ các mã = ĐÚNG khoản của kỳ. Kỳ chưa gửi đơn nào thì chia theo doanh thu;
+    vẫn không chia được thì phần ấy ở lại CẤP SHOP (`logisticsAdjustmentUnallocated`) và vẫn bị trừ
+    khỏi lợi nhuận shop, như `sharedUnallocated` — không biến mất, không ném lên đầu ai.
+
+    KỲ ĐÃ KHOÁ không đổi: màn hình, tệp xuất và phiếu lương của kỳ `LOCKED`/`PAID` đọc ẢNH CHỤP
+    (`lib/queries/payroll-period.ts`); phần chênh do bản này sinh ra chỉ hiện ở ĐỀ XUẤT ĐIỀU CHỈNH.
+  */
+  const logisticsAdjustment = exp.logisticsAdjustment;
+  const adjustWeights = rows.some((r) => r.sentOrders > 0) ? rows.map((r) => r.sentOrders) : rows.map((r) => r.revenue);
+  const adjustParts = distributeProportionally(logisticsAdjustment.amount, adjustWeights);
+  const logisticsAdjustmentUnallocated = logisticsAdjustment.amount - adjustParts.reduce((t, v) => t + v, 0);
   return {
-    rows: rows.map((r, idx) => ({ ...r, operatingAlloc: sharedParts[idx] + r.packingCost + r.opsStaffCost })),
+    rows: rows.map((r, idx) => ({ ...r, shipping: r.shipping + adjustParts[idx], operatingAlloc: sharedParts[idx] + r.packingCost + r.opsStaffCost })),
+    /** Cước / phí hoàn điều chỉnh có lý do của kỳ (đã nằm trong `shipping` của các mã, trừ phần chưa chia). */
+    logisticsAdjustment: { amount: logisticsAdjustment.amount, count: logisticsAdjustment.count, unallocated: logisticsAdjustmentUnallocated },
     operating,
     operatingEntered,
     fixedCost,
@@ -546,7 +579,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
   };
   const products: ProductProfitLine[] = [];
   let shopRetained = 0;
-  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, sharedUnallocated: econ.sharedUnallocated, months: econ.months, testSpend: 0, profit: 0, basisExclusions: econ.basisExclusions };
+  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, sharedUnallocated: econ.sharedUnallocated, logisticsAdjustment: econ.logisticsAdjustment.amount, logisticsAdjustmentCount: econ.logisticsAdjustment.count, logisticsAdjustmentUnallocated: econ.logisticsAdjustment.unallocated, months: econ.months, testSpend: 0, profit: 0, basisExclusions: econ.basisExclusions };
   let unattributedProfit = 0;
   let unattributedRevenue = 0;
   const coverage = { snapshot: 0, legacyPage: 0, ads: 0, unmapped: 0, total: 0 };
@@ -697,6 +730,9 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
     mà không ném khoản ấy lên đầu một marketer nào.
   */
   totals.profit -= totals.sharedUnallocated;
+  // Cùng lý lẽ cho cước / phí hoàn điều chỉnh không chia được xuống mã nào: vẫn là cước của kỳ.
+  totals.shipping += totals.logisticsAdjustmentUnallocated;
+  totals.profit -= totals.logisticsAdjustmentUnallocated;
   for (const m of marketers.values()) {
     m.totalSpend = m.adSpend + m.testSpend;
     m.products.sort((a, b) => b.personalProfit - a.personalProfit);

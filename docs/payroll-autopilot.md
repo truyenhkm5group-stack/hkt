@@ -81,7 +81,7 @@ kỳ M không bao giờ bị viết lại (AGENTS.md mục 21). Chạy lại quy
 Kéo theo một sửa lỗi: khoản điều chỉnh (`payroll_adjustments`) trước đây chỉ vào lương người đã gán
 chính sách; người ở đường tính cũ nhập vào thì nằm im. Nay đường cũ cộng chúng (cùng dấu
 `PAYROLL_COMPONENT_SIGN`), ảnh chụp giữ `legacyAdjustments`, tệp CSV có cột "Điều chỉnh".
-`PAYROLL_CALC_VERSION` = 3.
+`PAYROLL_CALC_VERSION` = 3 (sau đó lên 4: cơ sở tính lương cộng cước điều chỉnh tay — xem `lib/constants/payroll.ts`).
 
 ## 3. Phiếu lương gửi riêng từng người
 

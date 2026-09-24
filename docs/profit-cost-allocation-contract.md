@@ -664,12 +664,35 @@ KHÔNG đổi một đồng, được nêu ra, và CSDL từ chối "điều ch�
 chỉnh (một lần 150.000, theo kỳ 310.000/31 ngày, phí hoàn 60.000) — mọi báo cáo đổi ĐÚNG 520.000,
 `pnl()` = thành phần của engine, Σ theo ngày = `pnl()` ở cả tháng lẫn tuần (7 × 10.000).
 
+### Bảng lương — kỳ chưa khoá trừ khoản điều chỉnh, kỳ đã khoá không đổi (bổ sung 25/09/2026)
+
+Chủ shop quyết: làm cho đúng, nhưng không đụng kỳ đã chốt.
+
+- **Lỗi.** Cơ sở tính lương "Lợi nhuận tính lương" (`profit1`, cơ sở DUY NHẤT được chốt —
+  `PAYROLL_BASIS_ELIGIBILITY`) và cơ sở "sau giá vốn hàng nhập" (`profit2`) dựng cột vận chuyển của
+  từng mã từ VẬN ĐƠN (`payroll.ts::productEconomics`) và không cộng khoản điều chỉnh. Lợi nhuận tính
+  lương cao hơn sự thật đúng bằng khoản ấy, thưởng theo % lợi nhuận cao theo. Cơ sở "danh nghĩa" và
+  "dòng tiền" đọc lại hai báo cáo đã sửa ở trên nên đã gồm khoản này từ 24/09/2026.
+- **Sửa.** `getOperatingCostForCompensationBasis()` chuyển NGUYÊN VĂN `getRecognizedCosts().logisticsAdjustment`
+  (không mệnh đề thứ hai, không đọc bảng Chi phí lần nữa). `productEconomics` chia khoản ấy vào cột
+  vận chuyển của từng mã theo **số đơn đã gửi** (cùng căn cứ với đóng hàng / NV vận đơn), largest
+  remainder; kỳ không gửi đơn nào thì theo doanh thu; vẫn không chia được thì đứng ở cấp shop
+  (`totals.logisticsAdjustmentUnallocated`) và vẫn bị trừ khỏi lợi nhuận shop. Khoản ấy đi xuống lợi
+  nhuận cá nhân theo đúng tỷ trọng quy kết của mã, như cước theo vận đơn. `PAYROLL_CALC_VERSION` 3 → 4.
+- **Kỳ đã khoá không đổi một đồng.** Cơ chế có sẵn (`lib/queries/payroll-period.ts`): kỳ `LOCKED` /
+  `PAID` (và `FINAL` cũ) đọc ẢNH CHỤP ở `payroll_periods.snapshot` — màn hình `/payroll`, tệp xuất
+  CSV, phiếu lương đều thế; bản tính sống chỉ để dựng ĐỀ XUẤT ĐIỀU CHỈNH (`payrollDrift`), người quyết
+  có sửa hay không. Sổ lỗ lũy kế lấy số dư đầu kỳ từ dòng sổ đã ghi của tháng đã chốt, không tính lại.
+  Kỳ `CALCULATED` / `UNDER_REVIEW` / `APPROVED` chưa khoá: màn hình hiện bản tính sống (đổi theo), ảnh
+  chụp chỉ đổi khi người bấm "tính lại".
+- **Kiểm thử.** `testLogisticsAdjustmentOnePath` thêm lợi nhuận tính lương vào ảnh chụp mọi báo cáo:
+  (1) không đổi, (2) giảm đúng 520.000 = độ giảm `pnl().netProfit`. `testPayrollLogisticsAdjustment`
+  (11–12/2027): kỳ mở giảm đúng 1.200.000, thưởng 10% giảm đúng 120.000, Σ vận chuyển các mã + phần
+  chưa chia = cột tổng; kỳ khoá thêm 800.000 sau ngày khoá ⇒ ảnh chụp y nguyên, đề xuất điều chỉnh nêu
+  −800.000 lợi nhuận và −80.000 tổng lương.
+
 ### Còn ngoài phạm vi (nói thẳng)
 
-- **Bảng lương, cơ sở "mô hình"** (`payroll.ts`) chia cước theo dòng hàng từ vận đơn và KHÔNG cộng
-  khoản điều chỉnh. Cộng nó vào là đổi số tiền trả người — quyết định của chủ shop (AGENTS.md mục 7),
-  không làm ở lượt này. Cơ sở "danh nghĩa" và "dòng tiền" của bảng lương đọc lại hai báo cáo trên nên
-  đã gồm khoản này từ nay (kỳ đã chốt đọc ảnh chụp, không đổi).
 - Kịch bản `/reports/scenario` nhân cả khoản điều chỉnh theo đòn bẩy % cước — khoản ấy là cố định;
   sai lệch nhỏ, chưa tách.
 
