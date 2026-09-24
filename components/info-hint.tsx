@@ -39,6 +39,7 @@ export function InfoHint({
   className,
   align = "start",
   side = "bottom",
+  trigger,
 }: {
   children: React.ReactNode;
   label?: string;
@@ -46,6 +47,11 @@ export function InfoHint({
   align?: "start" | "center" | "end";
   /** Mặc định mở XUỐNG. Chỉ đổi khi ⓘ nằm sát đáy màn hình và không có gì quan trọng ở trên. */
   side?: "top" | "right" | "bottom" | "left";
+  /**
+   * Thay dấu ⓘ bằng một nhãn khác (ví dụ "⚠ 2 lưu ý dữ liệu" — xem `DataWarnings`). Cùng cơ chế
+   * mở/đóng, cùng ba bản vá bên trên; chỉ đổi cái người dùng nhìn thấy để trỏ vào.
+   */
+  trigger?: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const hen = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,11 +112,13 @@ export function InfoHint({
           onFocus={moNgay}
           onBlur={dongTre}
           className={cn(
-            "inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            trigger
+              ? "inline-flex shrink-0 items-center gap-1 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              : "inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             className,
           )}
         >
-          <Info className="size-[13px]" />
+          {trigger ?? <Info className="size-[13px]" />}
         </button>
       </PopoverTrigger>
       <PopoverContent
