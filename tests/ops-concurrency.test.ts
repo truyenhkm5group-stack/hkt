@@ -681,6 +681,29 @@ export function testOpsKhongTrungNhanh() {
   console.log(`✓ Thao tác ops: ${new Set(nhanh).size} nhánh case · không nhánh nào trùng · không mục nào trùng · mọi nhánh đều chọn được`);
 }
 
+/* ═════════════════ MỌI LỆNH TẢI TRÊN MÁY CHỦ PHẢI CÓ TRẦN THỜI GIAN ═════════════════
+ *
+ * Sự cố 24/09/2026: deploy 5c38684b lấy khoá vòng đời rồi im lặng 35 phút — `curl … bootstrap.sh | bash`
+ * không có trần, kết nối treo là treo mãi VÀ GIỮ KHOÁ; lượt deploy kế tiếp chờ 1200 s rồi dừng. Một
+ * lệnh tải không trần đứng sau `flock` biến một lần mạng chập chờn thành hai lượt deploy mất trắng.
+ */
+export function testTaiCoTranThoiGian() {
+  let soLenh = 0;
+  for (const tep of ["deploy-vps.yml", "ops-vps.yml"]) {
+    const dong = doc(tep).split("\n");
+    dong.forEach((d, i) => {
+      const ma = d.trim();
+      if (ma.startsWith("#") || !/(^|[\s({|;])curl\s/.test(ma)) return;
+      soLenh += 1;
+      assert.ok(/--max-time\s+\d+|\s-m\s+\d+/.test(ma), `${tep}:${i + 1} — lệnh curl không có trần thời gian (--max-time / -m): ${ma.slice(0, 120)}`);
+    });
+  }
+  const deploy = doc("deploy-vps.yml");
+  assert.ok(!/bootstrap\.sh"?\s*\|\s*bash/.test(deploy), "bootstrap.sh phải tải RA TỆP rồi mới chạy — `curl | bash` chạy được nửa kịch bản khi mạng đứt giữa chừng");
+  assert.ok(soLenh >= 3, `quét được quá ít lệnh curl (${soLenh}) — biểu thức quét đã hỏng, không phải kho đã sạch`);
+  console.log(`✓ Tải trên máy chủ: ${soLenh} lệnh curl trong deploy/ops đều có trần thời gian · bootstrap tải ra tệp rồi mới chạy`);
+}
+
 export function testOpsConcurrency() {
   testKhongDungConcurrencyLamHangDoi();
   testKhoiKhoaOps();
@@ -689,6 +712,7 @@ export function testOpsConcurrency() {
   testTenCheckBatBuoc();
   testEnvsChuyenDuXuong();
   testOpsKhongTrungNhanh();
+  testTaiCoTranThoiGian();
 }
 
 if (process.argv[1] && process.argv[1].endsWith("ops-concurrency.test.ts")) testOpsConcurrency();
