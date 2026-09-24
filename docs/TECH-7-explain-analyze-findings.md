@@ -1,5 +1,7 @@
 # TECH-7: Báo cáo EXPLAIN ANALYZE — Phân tích nguyên nhân truy vấn nặng
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md` (hiệu năng: `docs/perf/TRANG-THAI.md`).**
+
 **Ngày:** 22–23/09/2026  
 **Kho mã:** base `b314a1d5de6e5fefa05d4277f21667bd870619d5`  
 **Phương pháp:** Quét mã nguồn — các khối nhận xét mang số đo `ops perf-probe` từ production 22/09/2026, chép nguyên văn.

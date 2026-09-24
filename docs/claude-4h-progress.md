@@ -1,5 +1,7 @@
 # Tiến độ phiên tự động 08/09/2026
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.**
+
 ## Phase 0 — Data Truth release
 
 | Việc | Trạng thái | Commit |

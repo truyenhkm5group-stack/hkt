@@ -134,18 +134,21 @@ Vì sao là thang bậc chứ không phải một ô "đã có AI / chưa có AI
 ĐOÁN được, QUYẾT ĐỊNH được từ lâu mà vẫn không "tự động", vì hai nấc cuối chưa nối. Một ô nhị phân
 sẽ in "chưa có AI" cho một phòng đã làm bốn phần năm việc — và chủ shop đầu tư sai chỗ.
 
-### 4.1 Đo được gì, ngày 23/09/2026
+### 4.1 Đo được gì, ngày 23/09/2026 (đối chiếu lại với mã 24/09)
+
+> Nguồn sự thật của bảng này là `lib/constants/department-ai.ts` (trang `/departments` đọc thẳng từ
+> đó). Bảng dưới là bản chép cho người đọc tài liệu — lệch nhau thì MÃ đúng, tài liệu sai.
 
 | Phòng | Đo | Chẩn đoán | Đề nghị | Vào việc | Bàn tay | Nấc đáng làm tiếp |
 |---|---|---|---|---|---|---|
 | Kinh doanh & CSKH | ✅ | ✅ | ✅ | ✅ | ◐ | **Bàn tay** — chưa trả lời được trong hội thoại đang mở |
 | Marketing | ✅ | ✅ | ✅ | ✅ | ◐ | **Bàn tay** — chờ token `ads_management` (quyết định của chủ shop) |
-| Giao vận | ✅ | ✅ | ✅ | ✅ | ◐ | **Bàn tay** — 565/565 kiện `PERMISSION_MISSING` (đo 11/09) |
+| Giao vận | ✅ | ✅ | ✅ | ✅ | ◐ | **Bàn tay** — 565/565 kiện `PERMISSION_MISSING` (đo 11/09); nguyên nhân CHƯA BIẾT (đo lại 23/09: cùng tài khoản, web thấy đủ, API trả rỗng) |
 | Kho | ✅ | ✅ | ◐ | ✅ | ⛔ cố ý | **Đề nghị** — gom đơn theo mẫu mã, vị trí xếp hàng |
-| Sản xuất | ✅ | ◐ | ✅ | ❌ | ❌ | **Chẩn đoán** — chưa đọc được độ tin của xưởng |
-| Kế toán | ✅ | ✅ | ◐ | ✅ | ⛔ cố ý | **Đề nghị** — chưa xếp hạng theo số tiền đang treo |
-| Ban điều hành | ✅ | ✅ | ◐ | ✅ | ⛔ cố ý | **Đề nghị** — chưa tự xếp hạng ba việc đáng làm nhất |
-| Nhân sự | ◐ | ◐ | ✅ | ◐ | ❌ | **Đo** — chấm công / tuyển dụng / đào tạo chưa có bảng nào |
+| Sản xuất | ✅ | ◐ | ✅ | ◐ | ✅ | **Chẩn đoán** — mốc nhận thật có từ 23/09 (`e31da932`) nhưng mẫu bắt đầu từ 0; `supplier` còn là ô chữ |
+| Kế toán | ✅ | ✅ | ✅ | ✅ | ⛔ cố ý | — đủ các nấc được phép mở (xếp tiền treo × ngày treo: `8c3ef186`, 24/09) |
+| Ban điều hành | ✅ | ✅ | ✅ | ✅ | ⛔ cố ý | — đủ các nấc được phép mở (ba việc liên phòng: `8c3ef186`, 24/09) |
+| Nhân sự | ◐ | ✅ | ✅ | ◐ | ❌ | **Đo** — chấm công / tuyển dụng / đào tạo chưa có bảng nào |
 | Hệ thống (Phòng Tech AI) | ✅ | ✅ | ✅ | ✅ | ✅ | đủ năm nấc |
 
 `⛔ cố ý` khác hẳn `❌ chưa làm`: `RISK_FLOOR` trong `lib/ai/tools/registry.ts` CẤM AI ghi vào tiền và
@@ -168,22 +171,27 @@ chủ shop quyết mở. **Hôm nay không phòng nào ở mức đó.**
 
 ## 5. Việc còn lại, theo đúng thứ tự thang bậc
 
-Ba việc dưới đây là việc LẬP TRÌNH rõ ràng, không chờ dữ liệu mới hay quyền mới:
+Ba việc dưới đây là việc LẬP TRÌNH rõ ràng, không chờ dữ liệu mới hay quyền mới — **cả ba đã khép
+ở `8c3ef186` (24/09/2026)**, giữ lại làm ghi chép:
 
-1. **Sản xuất · nấc VÀO VIỆC** — khai một `WorkSource` mới (ví dụ `PRODUCTION_ORDER_DUE`) vào
-   `lib/constants/work-sources.ts` + adapter trong `lib/queries/work-adapters.ts` + hạn ở
-   `lib/constants/work-sla.ts`. Hôm nay một mẫu tới hạn đặt không sinh dòng việc nào.
-2. **Kế toán · nấc ĐỀ NGHỊ** — điểm ưu tiên đọc số tiền + số ngày treo trong
-   `lib/queries/finance-ops.ts`. Hôm nay một dòng 50 triệu chưa phân loại xếp ngang một dòng 50 nghìn.
-3. **Ban điều hành · nấc ĐỀ NGHỊ** — một hàm thuần gom khuyến nghị của cả tám phòng rồi xếp theo
-   tiền đang treo.
+1. ~~**Sản xuất · nấc VÀO VIỆC**~~ — lời khai sai, sửa ở `8c3ef186`: mẫu tới hạn đặt ĐÃ sinh việc từ
+   trước (`STOCKOUT_RISK` / `STOCK_LOW` dựng từ `getReplenishmentPlan()`, chiếu vào `/work` qua nguồn
+   `INVENTORY_EXCEPTION`). Thêm `PRODUCTION_ORDER_DUE` sẽ là hai nguồn cùng độ mịn — cộng tiền hai
+   lần (AGENTS.md mục 19). Còn ◐ chỉ vì việc mặc định vào hàng đợi phòng KHO
+   (`TEAM_DEPARTMENT_DIVERGENCE`) cho tới khi phòng Sản xuất có người.
+2. ~~**Kế toán · nấc ĐỀ NGHỊ**~~ — dòng chưa phân loại xếp theo tiền treo × số ngày treo
+   (`lib/constants/finance-ops.ts`), một công thức cho cả `/finance-ops` và `/work`.
+3. ~~**Ban điều hành · nấc ĐỀ NGHỊ**~~ — `lib/work/morning-picks.ts` tự chọn ba việc liên phòng.
 
 Ba việc chờ thứ khác, không phải chờ người viết mã:
 
 * **Marketing · BÀN TAY** — token Facebook có quyền `ads_management` (quyết định cấp quyền).
-* **Giao vận · BÀN TAY** — credential Viettel Post sở hữu các kiện do Pancake tạo.
-* **Sản xuất · CHẨN ĐOÁN** — thêm cột mốc NHẬN THẬT trên `production_orders` (`due_date` và `sent_at`
-  đã có; `status` đổi sang `RECEIVED` mà không ghi thời điểm, nên không tính được xưởng trễ mấy ngày).
+* **Giao vận · BÀN TAY** — Viettel Post trả lời vì sao API đối tác trả rỗng cho vận đơn mà CÙNG
+  tài khoản ấy thấy đủ trên web (đo lại 23/09/2026, `docs/vtp-capability-matrix.md`). Câu cũ
+  "credential sở hữu các kiện do Pancake tạo" là suy đoán đã được rút lại ở `bb7ca91f`.
+* **Sản xuất · CHẨN ĐOÁN** — cột mốc NHẬN THẬT `production_orders.received_at` ĐÃ CÓ từ 23/09/2026
+  (`e31da932`, migration `0115`); giờ chỉ còn chờ DỮ LIỆU: lệnh cũ cố ý không backfill (mục 35) nên
+  mẫu bắt đầu từ 0, và `supplier` vẫn là ô chữ tự do.
 
 ---
 

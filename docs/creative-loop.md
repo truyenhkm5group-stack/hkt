@@ -173,7 +173,7 @@ Tệp: `lib/creative/manual.ts` (đường ghi duy nhất) · `lib/actions/creat
 | Đặt `ADS_WRITE_ENABLED=true`, `ADS_WRITE_MODE=COPILOT`, `CREATIVE_LOOP_EVERY_MINUTES=10` trên VPS; `OPENAI_API_KEY` phải có | đổi lịch và mở đường ghi là việc của chủ shop (mục 7) |
 | Bật `enabled` ở tab Cấu hình | công tắc mềm của vòng |
 | Tải lên **ảnh sản phẩm thật** cho các mã muốn test | máy không sinh mẫu cho sản phẩm nó không nhìn thấy |
-| Chốt ba con số "đề xuất" ở §3 | ngưỡng tiền |
+| ~~Chốt ba con số "đề xuất" ở §3~~ — **ĐÃ CHỐT 24/09/2026** (`b32a1fac`: 200.000đ/lượt · 1.000.000đ/ngày · 2 USD/ngày) | ngưỡng tiền |
 
 ## 8. BLOCKED / HUMAN GATE
 

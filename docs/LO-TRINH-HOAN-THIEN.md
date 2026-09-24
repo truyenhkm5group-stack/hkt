@@ -1,5 +1,12 @@
 # Rà soát ERP & lộ trình hoàn thiện
 
+> **Tài liệu lịch sử (05/09/2026) — trạng thái hiện hành xem `docs/README.md`.** Riêng dòng "Trạng thái
+> vận đơn" dưới đây đã lỗi thời: từ tháng 9 ERP tự cập nhật vận đơn qua **webhook Viettel Post** (đo
+> 16/09/2026: 2.138/2.151 vận đơn `WEBHOOK_ONLY`, AGENTS.md mục 51), tệp Danh sách vận đơn là nguồn ĐỘC
+> LẬP để đối chiếu và vá chỗ webhook hụt. API đối tác vẫn trả rỗng khi ĐỌC đơn — đo lại 23/09 cho thấy CÙNG tài khoản ấy thấy
+> đủ đơn trên web, nguyên nhân CHƯA BIẾT (`docs/vtp-capability-matrix.md`), nên đừng đọc câu "mã khách
+> GLMTQY" như một chẩn đoán đã xác minh.
+
 Cập nhật: 05/09/2026. Mục tiêu: số liệu ra quyết định (lợi nhuận, dòng tiền, tồn kho, lương) phải đúng với thực tế; phần nào chưa chắc thì ERP phải nói rõ nguồn và độ tin cậy.
 
 ## 1. Hiện trạng theo module

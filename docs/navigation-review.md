@@ -1,4 +1,4 @@
-# RÀ SOÁT ĐIỀU HƯỚNG ERP — ĐỀ XUẤT, CHƯA THỰC HIỆN
+# RÀ SOÁT ĐIỀU HƯỚNG ERP — ĐỀ XUẤT (Đ1 ĐÃ THỰC HIỆN 23/09/2026 · Đ2 CHƯA · Đ3 GIỮ NGUYÊN)
 
 > Yêu cầu mục 14 của bản Work OS: *"Không tuỳ tiện xoá module. Nếu module hiện tại ít dùng hoặc
 > duplicate: ghi proposal trước khi remove."*

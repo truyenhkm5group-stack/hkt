@@ -1,5 +1,7 @@
 # Handoff AI Copilot cho phiên UI (Claude Opus 5)
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.**
+
 Backend đã xong và có kiểm thử. **Đã có một ngăn kéo copilot toàn cục** (`components/ai-copilot.tsx`,
 gắn ở `components/site-header.tsx`, mở bằng nút ✦ / Ctrl+J / `openCopilot()`), và nút "Tóm tắt bằng
 AI" trong ngăn kéo kiện (`app/(dashboard)/shipments/care-drawer.tsx`). Redesign thì sửa trình bày

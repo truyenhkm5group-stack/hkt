@@ -1,6 +1,8 @@
 # TECH-10 · Đặc tả cải thiện xếp theo chi phí/lợi ích
 
-**Phạm vi:** T2–T6 · Ghi ngày 2026-09-24 · Sửa 2026-09-25  
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md` (hiệu năng: `docs/perf/TRANG-THAI.md`).**
+
+**Phạm vi:** T2–T6 · Ghi ngày 2026-09-23 (commit `e1aa44d2`, gộp 23/09 10:29 UTC; bản đầu ghi nhầm "2026-09-24 · Sửa 2026-09-25")  
 **Số đo:** Từ production 22–23/09/2026, thử nghiệm local 09/09/2026  
 **Tiêu chí:** Mỗi phương án nêu rõ % cải thiện dự tính, chi phí dev (ngày), rủi ro, tệp thay đổi, và ràng buộc hợp đồng  
 
@@ -362,4 +364,4 @@ Cập nhật bảng này mỗi khi `canonical_order_outcome` thay đổi (via tr
 
 ---
 
-**Lập bởi:** Phòng Tech AI · Ngày 2026-09-24 · Sửa 2026-09-25
+**Lập bởi:** Phòng Tech AI · Ngày 2026-09-23

@@ -1,5 +1,7 @@
 # Kiểm kê tiếp quản — một phiên duy nhất
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.**
+
 Ngày 09/09/2026. Từ thời điểm này chỉ **một** phiên tiếp tục làm ERP; các phiên trước coi là
 CLOSED/HANDOFF. Nguồn sự thật: kho mã + nhánh remote + CSDL production.
 

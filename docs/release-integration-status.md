@@ -1,5 +1,7 @@
 # Trạng thái tích hợp phát hành — 4 phiên làm việc song song
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.**
+
 Cập nhật: 09/09/2026, sau khi Session 1 đóng băng phạm vi.
 Vai trò người viết: **điều phối phát hành** (release coordinator). Không mở tính năng mới.
 

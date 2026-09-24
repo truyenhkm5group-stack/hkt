@@ -1,5 +1,7 @@
 # BÀN GIAO SESSION 3 — 09/09/2026
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.**
+
 > Dành cho **Release Coordinator**. Session 3 đã FREEZE: không sửa thêm mã, không deploy.
 > Mọi dữ kiện dưới đây lấy từ `git log` / `git diff`, không lấy từ trí nhớ hội thoại.
 
