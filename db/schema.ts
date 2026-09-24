@@ -2899,12 +2899,12 @@ export const creativeImages = pgTable(
   ],
 );
 
-/** Ảnh đầu vào: ảnh sản phẩm thật · tham khảo tay · spy · R&D. */
+/** Ảnh đầu vào: ảnh sản phẩm thật · quảng cáo cũ của shop · tham khảo tay · spy · R&D. */
 export const creativeSources = pgTable(
   "creative_sources",
   {
     id: id(),
-    /** `PRODUCT_PHOTO` · `MANUAL` · `SPY` · `RND` (`CreativeSourceKind`). */
+    /** `PRODUCT_PHOTO` · `OWN_AD` · `MANUAL` · `SPY` · `RND` (`CreativeSourceKind`). */
     kind: text("kind").notNull(),
     productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
     title: text("title").notNull().default(""),
@@ -2922,15 +2922,29 @@ export const creativeSources = pgTable(
     /** QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN (mục 34). `NULL` = máy tạo. */
     createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdByName: text("created_by_name").notNull().default(""),
+    /**
+     * Mẩu quảng cáo Facebook mà nguồn `OWN_AD` được nhập từ — khoá LŨY ĐẲNG (duy nhất khi có) và là
+     * danh tính "quảng cáo của chính shop": không có nó thì không phải `OWN_AD` (ràng buộc bên dưới).
+     */
+    fbAdId: text("fb_ad_id"),
+    /** Số đo lúc nhập (`OwnAdMetrics`: chi, tin nhắn, chi/tin, CTR, CPC, đơn, kỳ đo). Nguồn khác: `{}`. */
+    metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull().default({}),
+    /** Câu chữ đã chạy của quảng cáo cũ — máy viết học giọng văn đã bán được từ đây. */
+    primaryText: text("primary_text").notNull().default(""),
+    headline: text("headline").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     index("creative_sources_kind_idx").on(t.kind, t.active),
     index("creative_sources_product_idx").on(t.productId),
-    check("creative_sources_kind_check", sql`${t.kind} IN ('PRODUCT_PHOTO', 'MANUAL', 'SPY', 'RND')`),
+    uniqueIndex("creative_sources_fb_ad_uq").on(t.fbAdId).where(sql`${t.fbAdId} IS NOT NULL`),
+    check("creative_sources_kind_check", sql`${t.kind} IN ('PRODUCT_PHOTO', 'OWN_AD', 'MANUAL', 'SPY', 'RND')`),
     // Ảnh sản phẩm thật mà không biết là sản phẩm nào thì không làm gốc cho mẫu nào được.
     check("creative_sources_product_photo_check", sql`${t.kind} <> 'PRODUCT_PHOTO' OR ${t.productId} IS NOT NULL`),
+    // Quảng cáo cũ của shop PHẢI truy được về một mẩu trên tài khoản của shop — điểm ảnh của nó được gửi
+    // sang máy sinh ảnh, nên danh tính ấy không thể là một ô chọn loại trên form.
+    check("creative_sources_own_ad_check", sql`${t.kind} <> 'OWN_AD' OR ${t.fbAdId} IS NOT NULL`),
   ],
 );
 

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import {
   CREATIVE_HARD_LIMITS,
   DEFAULT_CREATIVE_CONFIG,
+  CREATIVE_SOURCE_KINDS,
   GENE_KEYS,
+  MANUAL_UPLOAD_SOURCE_KINDS,
+  PIXEL_SAFE_EDIT_LABEL,
   PIXEL_SAFE_SOURCE_KINDS,
   geneSignature,
   normalizeCreativeConfig,
@@ -16,6 +19,7 @@ import { judgeVariant, metricValue, type JudgeInput, type VariantMetrics } from 
 import { geneStats, outcomeOf, sampleBeta, seededRandom, thompsonPick, type Observation } from "@/lib/creative/learn";
 import { planBatch, type PlanInput } from "@/lib/creative/plan";
 import { batchDayToBuild, batchWindow, isApprovalOpen, isPublishOpen } from "@/lib/creative/schedule";
+import { IMAGE_EDIT_ALLOWED_KINDS } from "@/lib/integrations/openai/images";
 
 /**
  * ═══════════ VÒNG MẪU QUẢNG CÁO — BA HÀM THUẦN VÀ CÁC TRẦN ═══════════
@@ -79,8 +83,20 @@ export function testCreativeLoop() {
   assert.equal(badRule.problems.filter((p) => p.field === "rules").length, 2);
   assert.equal(normalizeCreativeConfig({ adAccountId: "act_123" }).config.adAccountId, "123", "id tài khoản không mang tiền tố act_");
 
-  // Ảnh đối thủ KHÔNG BAO GIỜ được gửi điểm ảnh sang máy sinh ảnh.
-  assert.deepEqual([...PIXEL_SAFE_SOURCE_KINDS], ["PRODUCT_PHOTO"]);
+  // Điểm ảnh sang máy sinh ảnh chỉ là ảnh CỦA SHOP: ảnh sản phẩm thật + quảng cáo cũ của shop (OWN_AD).
+  // Ảnh đối thủ / tay / R&D KHÔNG BAO GIỜ.
+  assert.deepEqual([...PIXEL_SAFE_SOURCE_KINDS], ["PRODUCT_PHOTO", "OWN_AD"]);
+  for (const k of ["SPY", "MANUAL", "RND"] as const) {
+    assert.ok(!PIXEL_SAFE_SOURCE_KINDS.includes(k), `${k} không bao giờ được gửi điểm ảnh`);
+    assert.equal(PIXEL_SAFE_EDIT_LABEL[k], undefined, `${k} không có nhãn sang máy sinh ảnh`);
+  }
+  // Mỗi loại gửi-được quy về đúng một nhãn mà editImage nhận; OWN_AD đi dưới nhãn ảnh-của-shop.
+  for (const k of PIXEL_SAFE_SOURCE_KINDS) assert.ok(IMAGE_EDIT_ALLOWED_KINDS.includes(PIXEL_SAFE_EDIT_LABEL[k] ?? ""), `${k} phải quy về một nhãn editImage nhận`);
+  assert.equal(PIXEL_SAFE_EDIT_LABEL.OWN_AD, "OWN_VARIANT");
+  assert.deepEqual([...IMAGE_EDIT_ALLOWED_KINDS].sort(), ["OWN_VARIANT", "PRODUCT_PHOTO"], "nhãn nguồn thô (OWN_AD, SPY…) không tự là nhãn hợp lệ");
+  // OWN_AD không tải tay được: danh tính "quảng cáo của shop" phải đến từ ad_id, không từ một ô chọn loại.
+  assert.ok(!(MANUAL_UPLOAD_SOURCE_KINDS as readonly string[]).includes("OWN_AD"));
+  assert.deepEqual(CREATIVE_SOURCE_KINDS.filter((k) => k !== "OWN_AD"), [...MANUAL_UPLOAD_SOURCE_KINDS]);
 
   // Gen: từ vựng đóng, giá trị lạ bị bỏ, không bị ép.
   assert.deepEqual(parsePartialGenes({ scene: "CAFE", model: "ROBOT", palette: 3 }), { scene: "CAFE" });
