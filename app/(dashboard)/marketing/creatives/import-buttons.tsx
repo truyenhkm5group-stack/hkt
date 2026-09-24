@@ -9,10 +9,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { importOwnAdsAction, importPancakeProductPhotosAction, previewOwnAdCandidatesAction } from "@/lib/actions/creative-import";
 import { OWN_AD_IMPORT, OWN_AD_REASON_LABEL } from "@/lib/constants/creative-loop";
-import type { OwnAdImportSummary } from "@/lib/creative/import";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import type { OwnAdCandidateList } from "@/lib/queries/creative-own-ads";
 import { cn } from "@/lib/utils";
+
+/** Kiểu tóm tắt lấy từ CHÍNH action — client không nhập tệp chỉ-máy-chủ `lib/creative/import`, kể cả chỉ để lấy kiểu. */
+type OwnAdImportSummary = Extract<Awaited<ReturnType<typeof importOwnAdsAction>>, { summary: unknown }>["summary"];
 
 /**
  * Hai nút nhập nguồn ảnh có sẵn ở tab Nguồn ảnh (`lib/actions/creative-import.ts`):
