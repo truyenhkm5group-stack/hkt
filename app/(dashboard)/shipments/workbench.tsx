@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
 import Link from "next/link";
-import { parseAsString, useQueryStates } from "nuqs";
+import { parseAsString, parseAsStringLiteral, useQueryState, useQueryStates } from "nuqs";
 import { CalendarClock, CalendarRange, Check, ChevronDown, ChevronRight, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
+import { CareBoard } from "@/app/(dashboard)/shipments/care-board";
 import { CareDrawerHost, CareOpenButton, onCareUpdated } from "@/app/(dashboard)/shipments/care-drawer";
 import { CopyButton } from "@/components/misc";
 import { InfoHint } from "@/components/info-hint";
@@ -307,6 +308,11 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
     }),
     [view, f],
   );
+  /*
+    KIỂU XEM (bảng / theo chặng) KHÔNG PHẢI BỘ LỌC: nó đổi cách VẼ, không đổi TẬP KIỆN. Nên nó sống
+    ở một tham số riêng, ngoài `f` — nằm trong `f` thì nút "Bỏ n bộ lọc" sẽ đếm nó và gỡ luôn nó.
+  */
+  const [kieu, setKieu] = useQueryState("kieu", parseAsStringLiteral(["bang", "chang"] as const).withDefault("bang").withOptions({ history: "replace", clearOnDefault: true }));
   const [pending, start] = useTransition();
   /** Kết quả TỪNG KIỆN của lượt gửi hàng loạt gần nhất. `null` = chưa chạy lượt nào. */
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
@@ -564,6 +570,27 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
           </button>
         ) : null}
         <span className="ml-auto flex flex-wrap items-center gap-1.5">
+          <span role="group" aria-label="Kiểu xem" className="inline-flex rounded-full bg-muted p-0.5">
+            {(
+              [
+                ["bang", "Bảng"],
+                ["chang", "Theo chặng"],
+              ] as const
+            ).map(([k, nhan]) => (
+              <button
+                key={k}
+                type="button"
+                aria-pressed={kieu === k}
+                onClick={() => {
+                  setKieu(k);
+                  setSelected(new Set());
+                }}
+                className={cn("rounded-full px-3 py-1 text-xs font-medium transition-colors", kieu === k ? "bg-ink text-ink-foreground" : "text-muted-foreground hover:text-foreground")}
+              >
+                {nhan}
+              </button>
+            ))}
+          </span>
           <input value={f.q} onChange={(e) => setF({ q: e.target.value })} placeholder="Mã · SĐT · tên · #đơn" className="h-7 w-40 rounded-md border bg-background px-2 text-xs" aria-label="Tìm theo mã vận đơn, số điện thoại, tên khách hoặc số đơn" />
           <input value={f.hang} onChange={(e) => setF({ hang: e.target.value })} placeholder="Mã hàng · mẫu mã" className="h-7 w-36 rounded-md border bg-background px-2 text-xs" aria-label="Lọc theo mã hàng hoặc mẫu mã trong kiện" />
           <select value={f.nguoi} onChange={(e) => setF({ nguoi: e.target.value })} className="h-7 rounded-md border bg-background px-1.5 text-xs" aria-label="Lọc theo người care">
@@ -897,6 +924,8 @@ Bấm để bỏ bộ lọc này.`}
         <div className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">
           {view === "care" ? "Không có kiện nào đang cần care — mọi kiện đang chạy đúng lịch hoặc đã có người theo." : `Không có kiện nào ở “${CARE_VIEW_LABEL[view]}”.`}
         </div>
+      ) : kieu === "chang" ? (
+        <CareBoard cases={visible} />
       ) : (
         <>
           <TableToolsFor tableId="shipments-workbench" />
