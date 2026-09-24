@@ -210,6 +210,7 @@ import { testAdsDecision } from "./ads-decision.test";
 import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
 import { testAdsBrakeByDecision, testAdsWrite } from "./ads-write.test";
 import { testCreativeLoop } from "./creative-loop.test";
+import { testCreativeScreens } from "./creative-screens.test";
 import { testAdsLevelProbe } from "./ads-level-probe.test";
 import { testAdsGrain } from "./ads-grain.test";
 import { testAuditTrail } from "./audit-trail.test";
@@ -1658,6 +1659,7 @@ async function main() {
   await testMarketingDecisionLedger();
   testAdsWrite();
   testCreativeLoop();
+  testCreativeScreens();
   await testAdsBrakeByDecision(db);
   testAdsLevelProbe();
   testAdsGrain();
