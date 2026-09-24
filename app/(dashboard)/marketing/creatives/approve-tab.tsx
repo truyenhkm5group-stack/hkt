@@ -4,6 +4,9 @@ import { ApproveBatchButton, RejectBatchButton, RejectVariantButton } from "@/ap
 import { Countdown, ExpandText } from "@/app/(dashboard)/marketing/creatives/creative-bits";
 import { EditCopyButton } from "@/app/(dashboard)/marketing/creatives/copy-editor";
 import { ManualForm } from "@/app/(dashboard)/marketing/creatives/manual-form";
+import { ManualGenPanel } from "@/app/(dashboard)/marketing/creatives/manual-gen-panel";
+import { EditNamesButton } from "@/app/(dashboard)/marketing/creatives/names-editor";
+import { VariantSelectCheckbox, VariantSelectionBar, VariantSelectionProvider } from "@/app/(dashboard)/marketing/creatives/variant-select";
 import { AdPreview, DnaChips, GeneChips, ModeChip, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { StatStrip } from "@/components/stat-tile";
 import { DescriptionList, EmptyState, SectionCard } from "@/components/ui-bits";
@@ -69,7 +72,25 @@ function CountChips({ counts }: { counts: Partial<Record<VariantStatus, number>>
   );
 }
 
-function VariantTile({ v, reserve, canReject, canEditCopy, pageName }: { v: VariantCard; reserve: boolean; canReject: boolean; canEditCopy: boolean; pageName: string | null }) {
+/** Ba tên sẽ đăng (§5i) — chiến dịch riêng → nhóm → quảng cáo. Rỗng = tên cũ `VM <ngày> #<ô>`. */
+function NamesBlock({ v }: { v: VariantCard }) {
+  const rows: [string, string][] = [
+    ["Chiến dịch", v.campaignName],
+    ["Nhóm", v.adsetName],
+    ["Quảng cáo", v.adName],
+  ];
+  return (
+    <div className="space-y-0.5 rounded-md border bg-muted/30 px-2 py-1 text-[11px]" title="Mỗi bài một chiến dịch riêng → 1 nhóm → 1 quảng cáo. Tên nằm trong phiếu duyệt.">
+      {rows.map(([k, val]) => (
+        <p key={k} className="truncate">
+          <span className="text-muted-foreground">{k}:</span> {val ? <span className="font-medium">{val}</span> : <span className="italic text-muted-foreground">chưa đặt — đăng với tên “VM …”</span>}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function VariantTile({ v, reserve, canReject, canEditCopy, pageName, selectable }: { v: VariantCard; reserve: boolean; canReject: boolean; canEditCopy: boolean; pageName: string | null; selectable: boolean }) {
   const loai = v.status === "REJECTED" || v.status === "GEN_FAILED";
   const sanSang = v.status === "GENERATED";
   const overlay = (
@@ -151,6 +172,7 @@ function VariantTile({ v, reserve, canReject, canEditCopy, pageName }: { v: Vari
             )}
           </p>
         ) : null}
+        {sanSang || v.campaignName ? <NamesBlock v={v} /> : null}
         <GeneChips genes={v.genes} mutated={v.mode === "EXPLOIT" ? v.mutatedGene : undefined} />
         {v.why ? <p className="line-clamp-2 text-[11px] text-muted-foreground" title={v.why}>Vì sao: {v.why}</p> : null}
         {v.status === "GEN_FAILED" ? <p className="text-[11.5px] text-destructive">Sinh lỗi: {v.genError || "không rõ lý do"}</p> : null}
@@ -158,7 +180,9 @@ function VariantTile({ v, reserve, canReject, canEditCopy, pageName }: { v: Vari
         {canEditCopy && sanSang ? (
           <EditCopyButton variantId={v.id} slot={v.slot} headline={v.headline} primaryText={v.primaryText} pageName={pageName} imageId={v.imageId} imageAvailable={v.imageAvailable} />
         ) : null}
+        {canEditCopy && sanSang ? <EditNamesButton variantId={v.id} slot={v.slot} campaignName={v.campaignName} adsetName={v.adsetName} adName={v.adName} /> : null}
         <div className="mt-auto flex items-center justify-between gap-2 border-t pt-1.5">
+          {selectable && (v.status === "GENERATED" || (v.status === "REJECTED" && v.imageAvailable)) ? <VariantSelectCheckbox variantId={v.id} label={`bài #${v.slot}`} /> : null}
           <span className="text-[11px] text-muted-foreground">{VARIANT_STATUS_LABEL[v.status]}</span>
           {canReject && REJECTABLE.includes(v.status) ? <RejectVariantButton variantId={v.id} slot={v.slot} /> : null}
         </div>
@@ -202,7 +226,8 @@ function PendingBlock({ pending, now, canApprove, canEdit, pageName }: { pending
       hint={
         <>
           Duyệt MỘT lần cho cả lô. Phiếu duyệt khoá đúng ảnh, câu chữ, ngân sách, khung giờ và luật tắt bạn đang thấy: ai đó gạt thêm một mẫu sau khi bạn mở hộp xác nhận
-          thì phiếu vô hiệu và bạn phải mở lại — sửa câu chữ của một mẫu cũng vậy: <b>sửa câu chữ ⇒ cần bấm duyệt lại</b>. Quá hạn duyệt ⇒ lô “Quá hạn”, không một đồng nào được chi. Duyệt không gọi Facebook — lượt chạy kế tiếp của vòng mới
+          thì phiếu vô hiệu và bạn phải mở lại — sửa câu chữ, sửa TÊN chiến dịch / nhóm / quảng cáo, tích loại / giữ bài cũng vậy: <b>sửa ⇒ cần bấm duyệt lại</b>. Mỗi bài
+          được đăng thành MỘT chiến dịch riêng (tắt tới bước cuối) → 1 nhóm → 1 quảng cáo. Quá hạn duyệt ⇒ lô “Quá hạn”, không một đồng nào được chi. Duyệt không gọi Facebook — lượt chạy kế tiếp của vòng mới
           đăng, và nó kiểm lại phiếu một lần nữa.
         </>
       }
@@ -278,11 +303,20 @@ function PendingBlock({ pending, now, canApprove, canEdit, pageName }: { pending
         </div>
 
         {variants.length ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {variants.map((v) => (
-              <VariantTile key={v.id} v={v} reserve={reserveIds.has(v.id)} canReject={canEdit && choDuyet} canEditCopy={canEdit && !quaHan} pageName={pageName} />
-            ))}
-          </div>
+          <VariantSelectionProvider>
+            {canEdit && choDuyet ? (
+              <VariantSelectionBar
+                batchId={b.id}
+                allIds={variants.filter((v) => v.status === "GENERATED" || (v.status === "REJECTED" && v.imageAvailable)).map((v) => v.id)}
+                disabledReason={quaHan ? "Lô đã quá hạn duyệt." : null}
+              />
+            ) : null}
+            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {variants.map((v) => (
+                <VariantTile key={v.id} v={v} reserve={reserveIds.has(v.id)} canReject={canEdit && choDuyet} canEditCopy={canEdit && !quaHan} pageName={pageName} selectable={canEdit && choDuyet && !quaHan} />
+              ))}
+            </div>
+          </VariantSelectionProvider>
         ) : (
           <EmptyState title="Lô chưa có ô nào" description="Máy đã lập lô nhưng chưa ghi ô nào — xem lỗi ở lịch sử lô bên dưới." />
         )}
@@ -496,6 +530,8 @@ export async function ApproveTab({ pending, batchId, canApprove, canEdit }: { pe
           />
         </SectionCard>
       )}
+
+      <ManualGenPanel canEdit={canEdit} />
 
       {batchId && !detail ? <EmptyState title="Không tìm thấy lô" description="Lô trong đường dẫn không còn tồn tại." /> : null}
       {detail ? <BatchDetailBlock d={detail} /> : null}

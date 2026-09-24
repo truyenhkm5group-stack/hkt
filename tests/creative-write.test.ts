@@ -107,6 +107,15 @@ export function testCreativeWrite() {
     },
     { name: "tiêu thêm số không hợp lệ", over: { action: "EXTEND_ADSET", targetCampaignId: null, ourAdset: true, promising: true, extensionVnd: 0 }, denial: "OVER_EXTENSION_CAP" },
     { name: "người tắt tay mà chưa bấm", over: { action: "PAUSE_ADSET", targetCampaignId: null, ourAdset: true, pauseKind: "HUMAN", approved: false }, denial: "NOT_APPROVED" },
+    // ── MỖI BÀI MỘT CHIẾN DỊCH (§5i) ──
+    { name: "tạo nhóm vào chiến dịch lạ dù mẫu có chiến dịch riêng", over: { targetCampaignId: "camp-cua-marketer", ownCampaignId: "camp-rieng" }, denial: "WRONG_CAMPAIGN" },
+    { name: "bật chiến dịch khi mẫu chưa có chiến dịch riêng", over: { action: "ACTIVATE_CAMPAIGN", targetCampaignId: "camp-rieng", ownCampaignId: null, variantHasAdset: true }, denial: "WRONG_CAMPAIGN" },
+    { name: "bật CHIẾN DỊCH TEST chung", over: { action: "ACTIVATE_CAMPAIGN", targetCampaignId: "camp-test", ownCampaignId: "camp-rieng", variantHasAdset: true }, denial: "NOT_OUR_AD" },
+    { name: "bật chiến dịch riêng sau giờ chạy", over: { action: "ACTIVATE_CAMPAIGN", targetCampaignId: "camp-rieng", ownCampaignId: "camp-rieng", variantHasAdset: true, now: START }, denial: "TOO_LATE" },
+    { name: "bật chiến dịch riêng khi nội dung đã đổi", over: { action: "ACTIVATE_CAMPAIGN", targetCampaignId: "camp-rieng", ownCampaignId: "camp-rieng", variantHasAdset: true, approvalMatches: false }, denial: "APPROVAL_MISMATCH" },
+    { name: "tạo chiến dịch riêng khi sổ ngày đã chạm trần", over: { action: "CREATE_CAMPAIGN", targetCampaignId: null, committedDayVnd: CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd }, denial: "OVER_DAILY_CAP" },
+    { name: "tạo chiến dịch riêng khi lô đã đủ bài", over: { action: "CREATE_CAMPAIGN", targetCampaignId: null, publishedInBatch: CREATIVE_HARD_LIMITS.maxBatchSize }, denial: "OVER_BATCH_SIZE" },
+    { name: "tạo chiến dịch riêng mà mẩu mẫu ở chiến dịch khác", over: { action: "CREATE_CAMPAIGN", targetCampaignId: null, templateCampaignId: "camp-cua-marketer" }, denial: "WRONG_CAMPAIGN" },
   ];
   for (const t of truth) {
     const r = gateCreativeWrite(gin(t.over));
@@ -125,6 +134,12 @@ export function testCreativeWrite() {
     // Tắt chỉ làm GIẢM tiền: không trần tiền nào, không giờ chạy nào chặn nó.
     { name: "tắt sau giờ chạy, sổ đã chạm trần", over: { action: "PAUSE_ADSET", targetCampaignId: null, ourAdset: true, pauseKind: "HUMAN", now: new Date(START.getTime() + 3_600_000), committedDayVnd: 9_999_999 } },
     { name: "tiêu thêm đúng trần một lượt", over: { action: "EXTEND_ADSET", targetCampaignId: null, ourAdset: true, promising: true, extensionVnd: CREATIVE_HARD_LIMITS.maxExtensionPerClickVnd } },
+    // Mỗi bài một chiến dịch (§5i): nhóm vào CHÍNH chiến dịch riêng của bài · tạo chiến dịch · bật đúng nó.
+    { name: "tạo nhóm vào chiến dịch riêng của chính bài", over: { targetCampaignId: "camp-rieng", ownCampaignId: "camp-rieng" } },
+    { name: "tạo chiến dịch riêng", over: { action: "CREATE_CAMPAIGN", targetCampaignId: null } },
+    { name: "bật chiến dịch riêng của chính bài (tiền đã tính lúc tạo nhóm)", over: { action: "ACTIVATE_CAMPAIGN", targetCampaignId: "camp-rieng", ownCampaignId: "camp-rieng", variantHasAdset: true, committedDayVnd: CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd, publishedInBatch: CREATIVE_HARD_LIMITS.maxBatchSize } },
+    { name: "tắt nhóm của bài cấu trúc mới", over: { action: "PAUSE_ADSET", targetCampaignId: null, ownCampaignId: "camp-rieng", ourAdset: true, pauseKind: "KILL_RULE", killRuleFired: true } },
+    { name: "tiêu thêm nhóm của bài cấu trúc mới", over: { action: "EXTEND_ADSET", targetCampaignId: null, ownCampaignId: "camp-rieng", ourAdset: true, promising: true, extensionVnd: 100_000 } },
   ];
   for (const t of phaiQua) assert.equal(denialOf(gin(t.over)), "OK", `${t.name}: phải qua`);
 
@@ -185,7 +200,7 @@ export function testCreativeWrite() {
   // Tắt theo luật: nhóm của ai hỏi TRƯỚC luật nào.
   assert.equal(denialOf(gin({ action: "PAUSE_ADSET", targetCampaignId: null, ourAdset: false, pauseKind: "KILL_RULE" })), "NOT_OUR_AD");
   // Chốt env thắng MỌI hành động, kể cả tắt.
-  for (const action of ["UPLOAD_IMAGE", "CREATE_CREATIVE", "CREATE_ADSET", "CREATE_AD", "PAUSE_ADSET", "EXTEND_ADSET"] as const) {
+  for (const action of ["UPLOAD_IMAGE", "CREATE_CREATIVE", "CREATE_CAMPAIGN", "CREATE_ADSET", "CREATE_AD", "ACTIVATE_CAMPAIGN", "PAUSE_ADSET", "EXTEND_ADSET"] as const) {
     assert.equal(denialOf(gin({ action, hardEnabled: false, approved: false, ourAdset: false })), "HARD_DISABLED", `${action}: chốt env phải đứng đầu`);
   }
 
@@ -276,6 +291,18 @@ export function testCreativeWrite() {
     ["gạt một mẫu", { ...noiDungLo, variants: [noiDungLo.variants[0]] }],
   ];
   for (const [ten, c] of doiMot) assert.notEqual(approvalDigest(c), goc, `đổi ${ten} ⇒ digest phải khác`);
+  // Tên chiến dịch · nhóm · quảng cáo (§5i): cả ba rỗng ⇒ khoá tên VẮNG (phiếu của lô cũ tính lại vẫn khớp);
+  // có tên ⇒ nằm trong digest, sửa một ký tự của BẤT KỲ tên nào ⇒ phiếu cũ vô hiệu.
+  const tenRong = { ...noiDungLo, variants: noiDungLo.variants.map((v) => ({ ...v, names: { campaign: "", adset: "", ad: "" } })) };
+  assert.equal(approvalDigest(tenRong), goc, "ba tên rỗng ⇒ digest y như lô cũ không có tên");
+  const TEN = { campaign: "TK_25/09_TEST_Page_1", adset: "MESS_VN_18-65+_All_autobid", ad: "Page_ảnh_1_TXT" };
+  const voiTen = (names: typeof TEN): ApprovalContent => ({ ...noiDungLo, variants: [{ ...noiDungLo.variants[0], names }, noiDungLo.variants[1]] });
+  const gocTen = approvalDigest(voiTen(TEN));
+  assert.notEqual(gocTen, goc, "có tên ⇒ tên nằm trong digest");
+  for (const k of ["campaign", "adset", "ad"] as const) {
+    assert.notEqual(approvalDigest(voiTen({ ...TEN, [k]: `${TEN[k]}x` })), gocTen, `sửa tên ${k} sau khi duyệt ⇒ digest đổi ⇒ phiếu cũ vô hiệu`);
+  }
+  assert.equal(verifyBatchTicket(batchTicket("user-1", "lo-1", gocTen), "user-1", "lo-1", approvalDigest(voiTen({ ...TEN, ad: "khac" }))), false, "sửa tên ⇒ phiếu đã phát vô hiệu");
 
   const phieu = batchTicket("user-1", "lo-1", goc);
   assert.equal(verifyBatchTicket(phieu, "user-1", "lo-1", goc), true);
@@ -314,11 +341,12 @@ const SNAPSHOT: CreativeLoopConfig = {
   killRules: [KILL],
 };
 
-function template(campaignId = TEST_CAMPAIGN): TemplateAd {
+function template(campaignId = TEST_CAMPAIGN, campaign: TemplateAd["campaign"] = { objective: "OUTCOME_ENGAGEMENT", buyingType: "AUCTION", specialAdCategories: [], dailyBudgetMinor: null, lifetimeBudgetMinor: null }): TemplateAd {
   return {
     adId: "cw-tpl-ad",
     campaignId,
     accountId: "123456789",
+    campaign,
     adset: {
       targeting: { geo_locations: { countries: ["VN"] } },
       optimizationGoal: "CONVERSATIONS",
@@ -337,14 +365,27 @@ function template(campaignId = TEST_CAMPAIGN): TemplateAd {
 let dem = 0;
 const idMoi = (loai: string) => `cw-${loai}-${++dem}-${Math.random().toString(36).slice(2, 8)}`;
 
-type WriterGia = { writer: CreativeWriter; calls: string[] };
+/** `calls` = lời gọi thật (thứ tự); `meta` = chi tiết của lời gọi (chiến dịch của nhóm, tên) để khẳng định. */
+type WriterGia = { writer: CreativeWriter; calls: string[]; meta: string[] };
 
-function writerGia(db: Db, opt: { templateCampaign?: string; createAdFails?: boolean } = {}): WriterGia {
+function writerGia(db: Db, opt: { templateCampaign?: string; createAdFails?: boolean; createAdsetFails?: boolean; activateFails?: boolean; campaign?: TemplateAd["campaign"] } = {}): WriterGia {
   const calls: string[] = [];
+  const meta: string[] = [];
   const writer: CreativeWriter = {
     readTemplateAd: async (adId) => {
       calls.push(`readTemplateAd:${adId}`);
-      return template(opt.templateCampaign);
+      return template(opt.templateCampaign, opt.campaign === undefined ? undefined : opt.campaign);
+    },
+    createTestCampaign: async (_acc, i) => {
+      calls.push(`createTestCampaign:${i.name}`);
+      return idMoi("campaign");
+    },
+    activateTestCampaign: async (id) => {
+      calls.push(`activateTestCampaign:${id}`);
+      // Công tắc tổng bật CUỐI: nhóm và mẩu phải đã nằm trong CSDL.
+      const [v] = await db.select({ adset: schema.creativeVariants.fbAdsetId, ad: schema.creativeVariants.fbAdId }).from(schema.creativeVariants).where(eq(schema.creativeVariants.fbCampaignId, id));
+      assert.ok(v?.adset && v.ad, "bật chiến dịch chỉ SAU khi nhóm + mẩu đã tạo và lưu");
+      if (opt.activateFails) throw new Error("Facebook: lỗi giả khi bật chiến dịch");
     },
     uploadAdImage: async () => {
       calls.push("uploadAdImage");
@@ -356,10 +397,14 @@ function writerGia(db: Db, opt: { templateCampaign?: string; createAdFails?: boo
     },
     createTestAdset: async (_acc, i) => {
       calls.push(`createTestAdset:${i.lifetimeBudgetMinor}`);
+      meta.push(`adsetCampaign:${i.campaignId}`);
+      meta.push(`adsetName:${i.name}`);
+      if (opt.createAdsetFails) throw new Error("Facebook: lỗi giả khi tạo nhóm");
       return idMoi("adset");
     },
     createAd: async (_acc, i) => {
       calls.push(`createAd:${i.adsetId}`);
+      meta.push(`adName:${i.name}`);
       // Id nhóm phải ĐÃ nằm trong CSDL trước khi tạo mẩu — chết ngay ở đây thì lượt sau không tạo nhóm thứ hai.
       const [v] = await db.select({ id: schema.creativeVariants.id }).from(schema.creativeVariants).where(eq(schema.creativeVariants.fbAdsetId, i.adsetId));
       assert.ok(v, "id nhóm phải được lưu vào mẫu NGAY sau khi tạo, trước bước tạo mẩu");
@@ -373,7 +418,7 @@ function writerGia(db: Db, opt: { templateCampaign?: string; createAdFails?: boo
       calls.push(`extendAdset:${id}`);
     },
   };
-  return { writer, calls };
+  return { writer, calls, meta };
 }
 
 type LoDung = { batchId: string; day: string; start: Date; end: Date; truoc: Date; sau: Date; variantIds: string[]; imageIds: string[] };
@@ -550,15 +595,27 @@ export async function testCreativeWriteDb(db: Db) {
       assert.equal(g.calls.filter((c) => c.startsWith("readTemplateAd")).length, 1);
       assert.equal(g.calls.filter((c) => c === `createTestAdset:${BUDGET}`).length, 2, "mỗi mẫu đúng MỘT nhóm, ngân sách trọn đời = ngân sách của ảnh chụp (VND không đổi đơn vị)");
       assert.equal(g.calls.filter((c) => c.startsWith("createAd:")).length, 2);
+      // MỖI BÀI MỘT CHIẾN DỊCH (§5i): 2 chiến dịch riêng, mỗi nhóm nằm trong đúng chiến dịch của bài, bật CUỐI.
+      assert.equal(g.calls.filter((c) => c.startsWith("createTestCampaign:")).length, 2, "mỗi bài đúng MỘT chiến dịch riêng");
+      assert.equal(g.calls.filter((c) => c.startsWith("activateTestCampaign:")).length, 2, "mỗi chiến dịch riêng được bật đúng MỘT lần");
+      assert.ok(!g.meta.includes(`adsetCampaign:${TEST_CAMPAIGN}`), "nhóm KHÔNG còn nằm chung chiến dịch test");
       for (const id of L.variantIds) {
         const v = await mau(db, id);
         assert.equal(v.status, "LIVE");
         assert.equal(v.committedBudgetVnd, BUDGET);
-        assert.ok(v.publishedAt && v.fbPostId && v.fbAdId && v.fbAdsetId && v.fbCreativeId && v.fbImageHash, "mọi id Facebook phải được lưu");
+        assert.ok(v.publishedAt && v.fbPostId && v.fbAdId && v.fbAdsetId && v.fbCreativeId && v.fbImageHash && v.fbCampaignId, "mọi id Facebook phải được lưu");
+        assert.equal(v.fbPendingStep, "", "dấu đang gửi được xoá cùng giao dịch lưu id");
+        assert.ok(g.meta.includes(`adsetCampaign:${v.fbCampaignId}`), "nhóm tạo trong CHÍNH chiến dịch riêng của bài");
+        // Thứ tự: tạo chiến dịch → nhóm → mẩu → bật chiến dịch (fake bật cũng tự kiểm nhóm + mẩu đã lưu).
+        const iCamp = g.calls.findIndex((c) => c.startsWith("createTestCampaign:VM"));
+        const iAct = g.calls.indexOf(`activateTestCampaign:${v.fbCampaignId}`);
+        assert.ok(iCamp >= 0 && iAct > iCamp && iAct > g.calls.indexOf(`createAd:${v.fbAdsetId}`), "chiến dịch chỉ BẬT sau khi nhóm và mẩu đã có");
       }
       assert.equal(await trangThaiLo(db, L.batchId), "PUBLISHED");
       const so = await soCuaLo(db, L.batchId);
-      assert.equal(so.length, 8, "hai mẫu × bốn bước = tám dòng sổ");
+      assert.equal(so.length, 12, "hai mẫu × sáu bước (ảnh · bài · chiến dịch · nhóm · mẩu · bật) = mười hai dòng sổ");
+      const taoCd = so.filter((r) => r.action === "CREATE_CAMPAIGN");
+      assert.ok(taoCd.every((r) => (r.request as Record<string, unknown>).status === "PAUSED" && r.amountVnd === null), "chiến dịch riêng tạo ở trạng thái TẮT, không mang tiền");
       assert.ok(so.every((r) => r.outcome === "APPLIED" && r.actorUserId === null && r.mode === "COPILOT"), "máy làm ⇒ actor_user_id NULL");
       const tien = so.filter((r) => r.action === "CREATE_ADSET");
       assert.deepEqual(tien.map((r) => r.amountVnd), [BUDGET, BUDGET], "chỉ lượt tạo nhóm mang tiền cam kết");
@@ -610,7 +667,13 @@ export async function testCreativeWriteDb(db: Db) {
       await publishApprovedBatches(db, L.truoc, { writer: g.writer, env: ON });
       assert.deepEqual(g.calls, [`readTemplateAd:${SNAPSHOT.templateAdId}`, `createAd:${adsetCu}`], "chạy tiếp đúng bước dở: chỉ tạo mẩu, KHÔNG tải ảnh / tạo bài / tạo nhóm lại");
       assert.equal((await mau(db, L.variantIds[0])).status, "LIVE");
+      assert.equal((await mau(db, L.variantIds[0])).fbCampaignId, null, "mẫu đăng dở theo cấu trúc CŨ đi tiếp đường cũ — không mọc chiến dịch riêng");
       assert.equal(await trangThaiLo(db, L.batchId), "PUBLISHED");
+      // Lô cũ vẫn TẮT được theo luật (tắt nhóm, không phụ thuộc cấu trúc).
+      const gk = writerGia(db);
+      const kq = await applyKills(db, [{ variantId: L.variantIds[0], batchId: L.batchId, adsetId: adsetCu, rule: KILL }], L.truoc, { writer: gk.writer, env: ON });
+      assert.equal(kq[0].ok, true, "mẫu cấu trúc cũ vẫn tắt được theo luật");
+      assert.deepEqual(gk.calls, [`pauseAdset:${adsetCu}`]);
     }
 
     // ── 7. TẠO MẨU HỎNG ⇒ NHÓM BỊ TẮT + PUBLISH_FAILED ──
@@ -664,8 +727,88 @@ export async function testCreativeWriteDb(db: Db) {
       assert.deepEqual((await soCuaLo(db, L.batchId)).map((r) => r.denial), ["WRONG_CAMPAIGN"]);
       await khoaLo(db, L.batchId);
     }
+
+    // ═══════════ MỖI BÀI MỘT CHIẾN DỊCH (§5i) — hỏng giữa chừng giữ id, không dựng lại, tên đi đúng chỗ ═══════════
+
+    // ── 10. TÊN ĐÃ DUYỆT ĐI ĐÚNG VÀO FACEBOOK; ngân sách nhóm 200K; chiến dịch tạo TẮT ──
+    {
+      const L = await dungLo(db, 1, false);
+      await db
+        .update(schema.creativeVariants)
+        .set({ nameSeq: 7, campaignName: "QUAN_TA_10/03_TEST_Trang Thử_7", adsetName: "MESS_VN_18-65+_All_autobid", adName: "Trang Thử_ảnh_7_TXT" })
+        .where(eq(schema.creativeVariants.id, L.variantIds[0]));
+      await duyetLo(db, L.batchId);
+      const g = writerGia(db);
+      await publishApprovedBatches(db, L.truoc, { writer: g.writer, env: ON });
+      assert.ok(g.calls.includes("createTestCampaign:QUAN_TA_10/03_TEST_Trang Thử_7"), "tên chiến dịch = tên đã duyệt");
+      assert.ok(g.meta.includes("adsetName:MESS_VN_18-65+_All_autobid") && g.meta.includes("adName:Trang Thử_ảnh_7_TXT"), "tên nhóm / quảng cáo = tên đã duyệt");
+      assert.ok(g.calls.includes(`createTestAdset:${BUDGET}`), "ngân sách NHÓM trọn đời 200.000đ như cũ");
+      const so = await soCuaLo(db, L.batchId);
+      const cd = so.find((r) => r.action === "CREATE_CAMPAIGN");
+      assert.equal((cd?.request as Record<string, unknown>).status, "PAUSED");
+      assert.equal((await mau(db, L.variantIds[0])).status, "LIVE");
+      await khoaLo(db, L.batchId);
+    }
+
+    // ── 11. TẠO NHÓM HỎNG SAU KHI ĐÃ CÓ CHIẾN DỊCH ⇒ GIỮ ID CHIẾN DỊCH (vẫn TẮT), KHÔNG BẬT, KHÔNG THỬ LẠI ──
+    {
+      const L = await dungLo(db, 1, true);
+      const g = writerGia(db, { createAdsetFails: true });
+      await publishApprovedBatches(db, L.truoc, { writer: g.writer, env: ON });
+      const v = await mau(db, L.variantIds[0]);
+      assert.equal(v.status, "PUBLISH_FAILED");
+      assert.ok(v.fbCampaignId, "id chiến dịch đã tạo phải NẰM LẠI trên mẫu để người tìm / xoá tay");
+      assert.equal(v.fbAdsetId, null);
+      assert.equal(v.fbPendingStep, "", "lỗi Facebook trả về là kết quả ĐÃ BIẾT — không để dấu đang gửi");
+      assert.ok(!g.calls.some((c) => c.startsWith("activateTestCampaign")), "không bao giờ bật chiến dịch thiếu nhóm");
+      const hong = (await soCuaLo(db, L.batchId)).find((r) => r.action === "CREATE_ADSET" && r.outcome === "FAILED");
+      assert.ok(hong?.detail.includes(v.fbCampaignId ?? "∅") && hong.detail.includes("TẮT"), "dòng sổ nói chiến dịch nào còn TẮT");
+      const g2 = writerGia(db);
+      await publishApprovedBatches(db, L.truoc, { writer: g2.writer, env: ON });
+      assert.deepEqual(g2.calls, [], "hỏng thì không tự thử lại");
+    }
+
+    // ── 12. BẬT CHIẾN DỊCH HỎNG ⇒ TẮT NHÓM (dọn dẹp) + PUBLISH_FAILED, id giữ nguyên ──
+    {
+      const L = await dungLo(db, 1, true);
+      const g = writerGia(db, { activateFails: true });
+      await publishApprovedBatches(db, L.truoc, { writer: g.writer, env: ON });
+      const v = await mau(db, L.variantIds[0]);
+      assert.equal(v.status, "PUBLISH_FAILED");
+      assert.ok(v.fbCampaignId && v.fbAdsetId && v.fbAdId, "mọi id đã tạo nằm lại trên mẫu");
+      assert.equal(g.calls.at(-1), `pauseAdset:${v.fbAdsetId}`, "bật hỏng ⇒ tắt nhóm cho chắc, chiến dịch vẫn TẮT");
+      assert.equal(await trangThaiLo(db, L.batchId), "FAILED");
+    }
+
+    // ── 13. PHẢN HỒI "TẠO CHIẾN DỊCH" RƠI MẤT (dấu đang gửi còn) ⇒ KHÔNG TẠO CHIẾN DỊCH THỨ HAI ──
+    {
+      const L = await dungLo(db, 1, true);
+      // Đúng trạng thái sau khi tiến trình chết giữa lời gọi tạo chiến dịch và lúc ghi id.
+      await db.update(schema.creativeVariants).set({ fbImageHash: "cw-hash", fbCreativeId: "cw-creative", fbPendingStep: "CREATE_CAMPAIGN", fbPendingAt: L.truoc }).where(eq(schema.creativeVariants.id, L.variantIds[0]));
+      const g = writerGia(db);
+      await publishApprovedBatches(db, L.truoc, { writer: g.writer, env: ON });
+      assert.deepEqual(g.calls, [`readTemplateAd:${SNAPSHOT.templateAdId}`], "dấu đang gửi còn ⇒ không gửi lại bước ấy, không bước nào sau nó");
+      assert.equal((await mau(db, L.variantIds[0])).status, "PUBLISH_FAILED");
+      const dong = (await soCuaLo(db, L.batchId)).find((r) => r.action === "CREATE_CAMPAIGN" && r.outcome === "FAILED");
+      assert.ok(dong?.detail.includes(`VM ${L.day} #1`), "dòng sổ nói tên để tìm chiến dịch có thể đã tạo");
+    }
+
+    // ── 14. CHIẾN DỊCH MẪU ĐỂ NGÂN SÁCH Ở CẤP CHIẾN DỊCH (CBO) ⇒ KHÔNG GHI GÌ ──
+    {
+      const L = await dungLo(db, 1, true);
+      const g = writerGia(db, { campaign: { objective: "OUTCOME_ENGAGEMENT", buyingType: "AUCTION", specialAdCategories: [], dailyBudgetMinor: 500_000, lifetimeBudgetMinor: null } });
+      const rep = await publishApprovedBatches(db, L.truoc, { writer: g.writer, env: ON });
+      assert.deepEqual(g.calls, [`readTemplateAd:${SNAPSHOT.templateAdId}`], "CBO ⇒ chỉ đọc, không tải một tấm ảnh");
+      assert.equal(rep.find((r) => r.batchId === L.batchId)?.result, "ERROR");
+      assert.match(rep.find((r) => r.batchId === L.batchId)?.detail ?? "", /CBO/);
+      // Không đọc được chiến dịch của mẩu mẫu cũng vậy.
+      const g2 = writerGia(db, { campaign: null });
+      await publishApprovedBatches(db, L.truoc, { writer: g2.writer, env: ON });
+      assert.deepEqual(g2.calls, [`readTemplateAd:${SNAPSHOT.templateAdId}`]);
+      await khoaLo(db, L.batchId);
+    }
   } finally {
     await donDep(db);
   }
-  console.log("  ✓ Đăng lô trên PGlite với cửa ghi giả: không duyệt / lệch digest / env tắt / quá giờ ⇒ 0 lời gọi · chạy lại không tạo nhóm thứ hai · mẩu hỏng ⇒ tắt nhóm · trần ngày đếm trên sổ · luật ngoài ảnh chụp không tắt được");
+  console.log("  ✓ Đăng lô trên PGlite với cửa ghi giả: không duyệt / lệch digest / env tắt / quá giờ ⇒ 0 lời gọi · chạy lại không tạo nhóm thứ hai · mẩu hỏng ⇒ tắt nhóm · trần ngày đếm trên sổ · luật ngoài ảnh chụp không tắt được · MỖI BÀI MỘT CHIẾN DỊCH (tạo TẮT → nhóm 200K → mẩu → bật cuối; hỏng giữ id, không dựng lại; CBO không ghi; tên đã duyệt đi đúng chỗ)");
 }

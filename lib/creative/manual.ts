@@ -56,24 +56,36 @@ export type AddManualResult = { ok: true; variantId: string; batchId: string; ba
 
 const OPEN_STATUSES: readonly string[] = ["PLANNED", "PENDING_APPROVAL"];
 
+type BatchRow = typeof schema.creativeBatches.$inferSelect;
+type VariantInsert = typeof schema.creativeVariants.$inferInsert;
+
 /**
- * ĐƯỜNG GHI DUY NHẤT của mẫu tự làm. Server action chỉ kiểm quyền + lược đồ rồi gọi hàm này.
- *
- * Trả `{ ok: false, error }` cho lỗi nghiệp vụ (lô đã duyệt, quá hạn, lô đã đủ mẫu tự làm) — không ném.
+ * Một mẫu NGƯỜI đưa vào lô — ảnh ĐÃ lưu (`imageId`). Dùng chung cho mẫu tự làm (tải tay) và ảnh gen tay
+ * đã duyệt (§5i): cùng lô đích, cùng dải ô 1001+, cùng trần "mẫu tự làm ≤ số mẫu/lô", cùng `mode = MANUAL`.
+ * `extra` là các cột riêng của nguồn (câu lệnh · mô hình · chi phí · ảnh sản phẩm gốc · tên đã soạn).
+ * `names(batch)` (tuỳ chọn) chạy SAU khi biết lô đích — để số thứ tự trong ngày đăng lấy theo đúng lô ấy.
  */
-export async function addManualVariant(db: Db, input: ManualVariantInput, cfg: CreativeLoopConfig, actor: ManualActor, now: Date): Promise<AddManualResult> {
+export type ManualVariantRow = {
+  productId: string;
+  genes: Genes;
+  primaryText: string;
+  headline: string;
+  why: string;
+  imageId: string;
+  genModel: string;
+  extra?: Partial<Pick<VariantInsert, "imagePrompt" | "genCostUsd" | "productPhotoSourceId" | "inspirationSourceId">>;
+  names?: (batch: BatchRow) => Promise<Pick<VariantInsert, "nameSeq" | "campaignName" | "adsetName" | "adName">>;
+};
+
+/**
+ * ĐƯỜNG GHI CHUNG: lô gần nhất còn hạn duyệt (chưa có thì dựng sẵn "Chờ duyệt") → kiểm lô còn mở + trần
+ * mẫu tự làm → cấp ô 1001+ → chèn mẫu `GENERATED`. Trả `{ ok: false, error }` cho lỗi nghiệp vụ — không ném.
+ */
+export async function insertManualVariant(db: Db, row: ManualVariantRow, cfg: CreativeLoopConfig, actor: ManualActor, now: Date): Promise<AddManualResult> {
   const day = manualTargetDay(now, cfg);
   const w = batchWindow(day, cfg);
   const b = schema.creativeBatches;
   const v = schema.creativeVariants;
-
-  // Ảnh hỏng thì dừng TRƯỚC khi dựng lô — không để lại một lô rỗng nằm ở "Chờ duyệt".
-  let stored: Awaited<ReturnType<typeof storeCreativeImage>>;
-  try {
-    stored = await storeCreativeImage(db, input.imageBytes);
-  } catch (e) {
-    return { ok: false, error: e instanceof Error && e.message ? e.message : "Không lưu được ảnh." };
-  }
 
   // Lô chưa có thì dựng sẵn. Trùng khoá (máy vừa dựng lô cùng lúc) ⇒ đọc lô đã có, không dựng lại.
   const [inserted] = await db
@@ -106,26 +118,59 @@ export async function addManualVariant(db: Db, input: ManualVariantInput, cfg: C
     .from(v)
     .where(and(eq(v.batchId, batch.id), eq(v.mode, "MANUAL")));
   const slot = Math.max(MANUAL_SLOT_BASE, Number(top?.slot ?? MANUAL_SLOT_BASE)) + 1;
+  const names = row.names ? await row.names(batch) : {};
 
   const mode: SlotMode = "MANUAL";
-  const [row] = await db
+  const [created] = await db
     .insert(v)
     .values({
       batchId: batch.id,
       slot,
       mode,
-      productId: input.productId,
-      genes: input.genes as Record<string, string>,
+      productId: row.productId,
+      genes: row.genes as Record<string, string>,
       genesVersion: GENE_VOCAB_VERSION,
-      why: input.note ? `Mẫu tự làm — ${actor.name}: ${input.note}` : `Mẫu tự làm — ${actor.name}`,
-      primaryText: input.primaryText,
-      headline: input.headline,
-      imageId: stored.id,
-      genModel: "MANUAL",
+      why: row.why,
+      primaryText: row.primaryText,
+      headline: row.headline,
+      imageId: row.imageId,
+      genModel: row.genModel,
+      ...(row.extra ?? {}),
+      ...names,
       status: "GENERATED",
       createdByUserId: actor.id,
       createdByName: actor.name,
     })
     .returning({ id: v.id });
-  return { ok: true, variantId: row.id, batchId: batch.id, batchDay: day, slot, createdBatch: Boolean(inserted) };
+  return { ok: true, variantId: created.id, batchId: batch.id, batchDay: day, slot, createdBatch: Boolean(inserted) };
+}
+
+/**
+ * ĐƯỜNG GHI DUY NHẤT của mẫu tự làm (tải tay). Server action chỉ kiểm quyền + lược đồ rồi gọi hàm này.
+ *
+ * Trả `{ ok: false, error }` cho lỗi nghiệp vụ (lô đã duyệt, quá hạn, lô đã đủ mẫu tự làm) — không ném.
+ */
+export async function addManualVariant(db: Db, input: ManualVariantInput, cfg: CreativeLoopConfig, actor: ManualActor, now: Date): Promise<AddManualResult> {
+  // Ảnh hỏng thì dừng TRƯỚC khi dựng lô — không để lại một lô rỗng nằm ở "Chờ duyệt".
+  let stored: Awaited<ReturnType<typeof storeCreativeImage>>;
+  try {
+    stored = await storeCreativeImage(db, input.imageBytes);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error && e.message ? e.message : "Không lưu được ảnh." };
+  }
+  return insertManualVariant(
+    db,
+    {
+      productId: input.productId,
+      genes: input.genes,
+      primaryText: input.primaryText,
+      headline: input.headline,
+      why: input.note ? `Mẫu tự làm — ${actor.name}: ${input.note}` : `Mẫu tự làm — ${actor.name}`,
+      imageId: stored.id,
+      genModel: "MANUAL",
+    },
+    cfg,
+    actor,
+    now,
+  );
 }

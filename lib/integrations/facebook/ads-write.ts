@@ -334,11 +334,27 @@ export type TemplateAdset = {
   attributionSpec: unknown[] | null;
 };
 
+/**
+ * Những trường của CHIẾN DỊCH chứa mẩu mẫu mà "mỗi bài một chiến dịch" (§5i) chép sang chiến dịch riêng
+ * của từng bài. Máy chép NGUYÊN, không tự chọn mục tiêu. `null` = Facebook không trả về.
+ */
+export type TemplateCampaign = {
+  objective: string | null;
+  buyingType: string | null;
+  /** Mảng mã hạng mục đặc biệt (thường rỗng). `null` = không đọc được — gửi `[]` là ĐOÁN nên chặn. */
+  specialAdCategories: string[] | null;
+  /** Ngân sách ở cấp CHIẾN DỊCH (CBO). Có ⇒ không tạo được chiến dịch riêng mà giữ trần tiền ở nhóm. */
+  dailyBudgetMinor: number | null;
+  lifetimeBudgetMinor: number | null;
+};
+
 export type TemplateAd = {
   adId: string;
   /** `null` = Facebook không trả về ⇒ CHƯA BIẾT mẩu mẫu nằm ở chiến dịch nào ⇒ cổng chặn. */
   campaignId: string | null;
   accountId: string | null;
+  /** Chiến dịch chứa mẩu mẫu. Vắng / `null` = không đọc được ⇒ không tạo được chiến dịch riêng. */
+  campaign?: TemplateCampaign | null;
   adset: TemplateAdset;
   /** `object_story_spec` của bài quảng cáo mẫu. `null` = không đọc được. */
   objectStorySpec: Record<string, unknown> | null;
@@ -356,11 +372,25 @@ function asText(v: unknown): string | null {
   return null;
 }
 
+/** Đọc khối `campaign{…}` của mẩu mẫu — hàm THUẦN. */
+export function parseTemplateCampaign(raw: unknown): TemplateCampaign | null {
+  const c = asRecord(raw);
+  if (!c) return null;
+  const cats = Array.isArray(c.special_ad_categories) ? c.special_ad_categories.filter((x): x is string => typeof x === "string") : null;
+  return {
+    objective: asText(c.objective),
+    buyingType: asText(c.buying_type),
+    specialAdCategories: cats,
+    dailyBudgetMinor: minorOf(c.daily_budget),
+    lifetimeBudgetMinor: minorOf(c.lifetime_budget),
+  };
+}
+
 /** ĐỌC mẩu quảng cáo mẫu (chỉ đọc — không qua chốt ghi). Gọi một lần cho cả lô. */
 export async function readTemplateAd(adId: string): Promise<TemplateAd> {
   const rec = await graphGet(adId, {
     fields:
-      "id,campaign_id,account_id,adset{targeting,optimization_goal,billing_event,bid_strategy,bid_amount,promoted_object,destination_type,attribution_spec},creative{object_story_spec,asset_feed_spec}",
+      "id,campaign_id,account_id,campaign{objective,buying_type,special_ad_categories,daily_budget,lifetime_budget},adset{targeting,optimization_goal,billing_event,bid_strategy,bid_amount,promoted_object,destination_type,attribution_spec},creative{object_story_spec,asset_feed_spec}",
   });
   const adset = asRecord(rec.adset) ?? {};
   const creative = asRecord(rec.creative) ?? {};
@@ -368,6 +398,7 @@ export async function readTemplateAd(adId: string): Promise<TemplateAd> {
     adId: String(rec.id ?? adId),
     campaignId: asText(rec.campaign_id),
     accountId: asText(rec.account_id),
+    campaign: parseTemplateCampaign(rec.campaign),
     adset: {
       targeting: asRecord(adset.targeting),
       optimizationGoal: asText(adset.optimization_goal),
@@ -469,6 +500,45 @@ export async function createAd(accountId: string, input: { name: string; adsetId
     status: "ACTIVE",
   });
   return requireId(rec, "tạo mẩu quảng cáo");
+}
+
+/* ═══════════════════ MỖI BÀI MỘT CHIẾN DỊCH (chủ shop chốt 25/09/2026, §5i) ═══════════════════
+ *
+ * Đặc tả: `docs/creative-loop.md` §5i. Cổng: `gateCreativeWrite` (hành động `CREATE_CAMPAIGN` ·
+ * `ACTIVATE_CAMPAIGN`). Nơi gọi: `lib/creative/publish.ts`.
+ *
+ * Chọn TẠO chiến dịch từ các trường đọc của chiến dịch chứa mẩu mẫu, KHÔNG sao chép (`/copies`): sao chép
+ * kéo theo nhóm mẫu với loại ngân sách của nó (Facebook không cho đổi ngày ↔ trọn đời trên một nhóm đã có)
+ * và cần thêm năm lời ghi sửa tên / ngân sách / khung giờ / bài / trạng thái. Tạo mới chỉ cần HAI lời ghi
+ * mới (tạo chiến dịch TẮT · bật chiến dịch); nhóm và mẩu dùng lại đúng `createTestAdset` (ngân sách TRỌN
+ * ĐỜI + `end_time`) và `createAd` ở trên — bốn lớp chặn tiêu quá giữ nguyên.
+ *
+ * Tham số Graph API (developers.facebook.com/docs/marketing-api/reference/ad-account/campaigns/, đọc
+ * 25/09/2026): `name` · `objective` · `status` · `special_ad_categories` (BẮT BUỘC, mảng — thường `[]`) ·
+ * `buying_type` (tuỳ chọn). Không gửi ngân sách ở cấp chiến dịch ⇒ ngân sách nằm ở nhóm (ABO).
+ * `POST /{campaign_id}` với `status=ACTIVE` — cùng kiểu cập nhật `setScaleStatus` dùng.
+ */
+
+/** Các trường gửi khi tạo chiến dịch riêng của một bài — hàm THUẦN để bài kiểm khoá: LUÔN `PAUSED`, không ngân sách. */
+export function testCampaignFields(name: string, tpl: TemplateCampaign): Record<string, string> {
+  if (!tpl.objective) throw new IntegrationError("Facebook: không đọc được mục tiêu (objective) của chiến dịch mẫu — máy không tự chọn mục tiêu.", 400);
+  if (tpl.specialAdCategories === null) throw new IntegrationError("Facebook: không đọc được special_ad_categories của chiến dịch mẫu — máy không đoán.", 400);
+  if (tpl.dailyBudgetMinor !== null || tpl.lifetimeBudgetMinor !== null) {
+    throw new IntegrationError("Facebook: chiến dịch mẫu đặt ngân sách ở cấp CHIẾN DỊCH (CBO) — mỗi bài một chiến dịch cần ngân sách ở cấp NHÓM (ABO) để trần 200.000đ/bài nằm trên Facebook.", 400);
+  }
+  const fields: Record<string, string> = { name, objective: tpl.objective, status: "PAUSED", special_ad_categories: JSON.stringify(tpl.specialAdCategories) };
+  if (tpl.buyingType) fields.buying_type = tpl.buyingType;
+  return fields;
+}
+
+/** Tạo CHIẾN DỊCH riêng cho một bài — LUÔN TẮT. Không tự kiểm hàng rào nghiệp vụ (xem `gateCreativeWrite`). */
+export async function createTestCampaign(accountId: string, input: { name: string; template: TemplateCampaign }): Promise<string> {
+  return requireId(await graphPost(actPath(accountId, "campaigns"), testCampaignFields(input.name, input.template)), "tạo chiến dịch");
+}
+
+/** BẬT chiến dịch riêng của một bài (công tắc tổng — bước CUỐI của đường đăng). Chỉ đúng một trường `status`. */
+export async function activateTestCampaign(campaignId: string): Promise<void> {
+  await graphPost(assertFbId(campaignId, "id chiến dịch"), { status: "ACTIVE" });
 }
 
 /** Tắt một NHÓM quảng cáo. Chỉ làm GIẢM tiền. */

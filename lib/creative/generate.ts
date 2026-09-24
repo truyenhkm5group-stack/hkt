@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { dauNgayVN } from "@/lib/ai/budget";
 import {
@@ -301,12 +301,20 @@ async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): P
   return { batch: existing, created: false };
 }
 
-/** Số ảnh đã sinh + USD đã chi cho sinh ảnh trong ngày Việt Nam chứa `now`. */
+/**
+ * Số ảnh đã sinh + USD đã chi cho sinh ảnh trong ngày Việt Nam chứa `now` — SỔ ĐẾM DUY NHẤT của trần ảnh /
+ * ngày, cho cả lô hằng ngày lẫn GEN TAY (§5i). Hai nguồn, không đếm trùng:
+ *  · ảnh của mẫu trong lô (`creative_variants`) — TRỪ ảnh đến từ gen tay (đã đếm ở vế sau, lúc được vẽ);
+ *  · ảnh gen tay (`creative_manual_gen_images`), cộng các ảnh ĐANG VẼ (chưa có điểm ảnh, đã giữ chỗ trong
+ *    ngày) theo giá ước tính — một lượt vẽ song song không được tiêu phần tiền ảnh đang vẽ sẽ tiêu.
+ * (Mẫu tự làm tải tay có `gen_cost_usd` rỗng nên vẫn tính theo giá ước tính — hành vi cũ, giữ nguyên.)
+ */
 export async function imageSpendToday(db: Db, now: Date, unpricedUsd: number): Promise<{ images: number; usd: number }> {
   const from = dauNgayVN(now);
   const to = new Date(from.getTime() + 24 * 3_600_000);
   const v = schema.creativeVariants;
   const img = schema.creativeImages;
+  const g = schema.creativeManualGenImages;
   const [r] = await db
     .select({
       images: sql<number>`count(*)::int`,
@@ -315,17 +323,33 @@ export async function imageSpendToday(db: Db, now: Date, unpricedUsd: number): P
     })
     .from(v)
     .innerJoin(img, eq(img.id, v.imageId))
-    .where(and(gte(img.createdAt, from), lt(img.createdAt, to)));
+    .where(and(gte(img.createdAt, from), lt(img.createdAt, to), sql`not exists (select 1 from ${g} where ${g.imageId} = ${v.imageId})`));
+  const [m] = await db
+    .select({
+      images: sql<number>`count(*)::int`,
+      usd: sql<string>`coalesce(sum(nullif(${g.costUsd}, '')::numeric), 0)`,
+      unpriced: sql<number>`count(*) filter (where nullif(${g.costUsd}, '') is null)::int`,
+    })
+    .from(g)
+    .leftJoin(img, eq(img.id, g.imageId))
+    .where(
+      or(
+        and(gte(img.createdAt, from), lt(img.createdAt, to)),
+        and(eq(g.status, "DRAWING"), gte(g.claimedAt, from), lt(g.claimedAt, to)),
+      ),
+    );
   // Ảnh chưa định giá được (không có `usage`) tính theo giá ƯỚC TÍNH — với một cái phanh, CHƯA BIẾT
   // phải nghiêng về phía chặn sớm, không phải phía coi như miễn phí.
-  return { images: Number(r?.images ?? 0), usd: Number(r?.usd ?? 0) + Number(r?.unpriced ?? 0) * unpricedUsd };
+  const images = Number(r?.images ?? 0) + Number(m?.images ?? 0);
+  const usd = Number(r?.usd ?? 0) + Number(m?.usd ?? 0) + (Number(r?.unpriced ?? 0) + Number(m?.unpriced ?? 0)) * unpricedUsd;
+  return { images, usd };
 }
 
 /**
  * ĐƯỜNG ĐIỂM ẢNH DUY NHẤT của đường sinh. Chỉ nhận nguồn ảnh sản phẩm thật, mẫu cha và nguồn quảng cáo
  * cũ của shop — xem đầu tệp.
  */
-async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; parentVariantId: string | null; ownAdSourceId: string | null }): Promise<ImageEditInputImage[]> {
+export async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; parentVariantId: string | null; ownAdSourceId: string | null }): Promise<ImageEditInputImage[]> {
   if (!ref.productPhotoSourceId) throw new Error("Ô không có ảnh sản phẩm thật làm gốc.");
   const [photo] = await db
     .select({ kind: schema.creativeSources.kind, imageId: schema.creativeSources.imageId, productId: schema.creativeSources.productId })

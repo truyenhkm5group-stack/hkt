@@ -10,6 +10,9 @@
 >
 > **24/09/2026 (lần hai): lô = 10 THIẾT KẾ SẢN PHẨM MỚI + 1 mockup cho mỗi mẫu thắng chủ shop chọn; trần 20
 > mẫu / 4.000.000đ mỗi ngày chạy — §5f.**
+>
+> **25/09/2026: gen ảnh bằng tay (10 ảnh / lần) · tích chọn bài · tên chiến dịch / nhóm / quảng cáo sửa được · MỖI BÀI MỘT
+> CHIẾN DỊCH — §5i.**
 
 ---
 
@@ -51,7 +54,8 @@ Ba điều tôi (người dựng) suy ra từ các câu chốt, cần chủ shop
                  ⇒ lô "Chờ duyệt", báo Lark/Telegram
 tối / sáng sớm   NGƯỜI    xem ảnh, gạt ảnh không ưng, bấm DUYỆT CẢ LÔ (thấy rõ tổng tiền, khung giờ, luật tắt + luật riêng từng ô)
 05:30            HẠN      chưa duyệt ⇒ lô "Quá hạn", KHÔNG một đồng nào được chi
-trước 06:00      ĐĂNG     mỗi mẫu: tải ảnh → bài ẩn trên fanpage → nhóm QC (trọn đời 200.000đ, 06:00→06:00) → mẩu QC
+trước 06:00      ĐĂNG     mỗi mẫu: tải ảnh → bài ẩn trên fanpage → CHIẾN DỊCH riêng (TẮT) → nhóm QC (trọn đời 200.000đ,
+                          06:00→06:00) → mẩu QC → bật chiến dịch (§5i)
 06:00 → 06:00    CHẠY     Facebook tự dừng ở end_time — ERP chết giữa chừng cũng không tiêu quá ngân sách đã duyệt
 mỗi lượt tick    ĐO+TẮT   chi cấp mẩu (ad_spends hạt AD) + đơn theo ad_id → judgeVariant() → luật tắt ⇒ tắt nhóm
 hết khung + 24h  CHẤM     WIN (> 100 đơn) ⇒ thư viện · PROMISING ⇒ đề nghị tiêu thêm · LOSE ⇒ loại, ảnh xoá sau 7 ngày
@@ -78,10 +82,12 @@ mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của 
    tham chiếu". Ô khai thác / thăm dò / tự làm giữ nguyên ranh giới 3.
 4. **Một cửa ghi Facebook.** Mọi lời gọi ghi nằm trong `lib/integrations/facebook/ads-write.ts`, qua
    cùng chốt cứng `ADS_WRITE_ENABLED` và nấc `COPILOT`. `tests/ads-write.test.ts` quét toàn kho.
-5. **Máy chỉ làm việc BÊN TRONG chiến dịch test do NGƯỜI dựng**, và chỉ đụng nhóm/mẩu do chính nó tạo.
-   Máy không tạo chiến dịch, không sửa đối tượng, không đụng quảng cáo của marketer. **Ngoại lệ duy
-   nhất, có chủ đích:** scale mẫu thắng (§5g) — máy SAO CHÉP một trong hai chiến dịch MẪU người dựng,
-   bản sao luôn TẮT, chỉ bật khi người duyệt.
+5. **Máy chỉ làm việc trong chỗ NGƯỜI cho phép**, và chỉ đụng chiến dịch / nhóm / mẩu do chính nó tạo.
+   Máy không sửa đối tượng, không đụng quảng cáo của marketer. **Hai ngoại lệ có chủ đích về tạo chiến
+   dịch:** (a) MỖI BÀI MỘT CHIẾN DỊCH (§5i, chủ shop 25/09/2026) — chiến dịch riêng của từng bài tạo từ các
+   trường của chiến dịch test (người dựng), luôn TẮT tới bước cuối, tiền vẫn ở NHÓM trọn đời 200.000đ;
+   (b) scale mẫu thắng (§5g) — máy SAO CHÉP một trong hai chiến dịch MẪU người dựng, bản sao luôn TẮT,
+   chỉ bật khi người duyệt.
 6. **Không nguồn tiền mới.** Chi đọc từ `ad_spends` hạt `AD` (đã đo khớp 0 đồng với hạt chiến dịch,
    `docs/ads-measurement-audit-2026-09-22.md` §4). Kết quả đơn đọc qua `ORDER_OUTCOME_FAST`. Không bảng
    nào của vòng mẫu được báo cáo lợi nhuận/lương đọc.
@@ -429,6 +435,105 @@ mã TK thì trình sửa lệnh không lưu được (bắt buộc chọn sản 
 (3) gửi xưởng thẳng từ nháp (không bấm Lưu) không qua cổng duyệt người thứ hai `PURCHASING_LARGE` — cổng ấy
 chỉ chạy ở `saveProductionOrder`, và giá NULL thì số tiền của cổng cũng là 0.
 
+## 5i. Gen ảnh bằng tay · tích chọn bài · tên chiến dịch · MỖI BÀI MỘT CHIẾN DỊCH (chủ shop 25/09/2026)
+
+*"Gen ảnh bằng tay (10 ảnh mỗi lần), duyệt từng ảnh, ảnh duyệt thì máy viết content + tiêu đề và gợi ý tên
+chiến dịch / nhóm / quảng cáo; tích chọn bài để đăng hay loại; sửa được tên; MỖI BÀI MỘT CHIẾN DỊCH riêng."*
+
+### Gen ảnh bằng tay (tab Duyệt lô → khối "Gen ảnh bằng tay")
+
+```
+người bấm "Gen 10 ảnh"   chọn ẢNH SẢN PHẨM THẬT (bắt buộc) + quảng cáo cũ của shop CÙNG mã (tuỳ chọn) + ý tưởng tự do
+                         ⇒ startManualGen: kiểm nguồn, kiểm trần ảnh/ngày NGAY LÚC BẤM, ghi 1 lượt + 10 dòng ảnh PLANNED
+                           (ảnh vượt trần ghi GEN_FAILED kèm lý do) — KHÔNG gọi OpenAI, trả lời ngay
+sau phản hồi (after())   drawManualGen: từng ảnh kiểm lại trần → giữ chỗ DRAWING → gatherPixels → gpt-image → GENERATED
+lượt vòng mẫu (bước 6)   vẽ nốt tối đa 4 ảnh / lượt nếu tiến trình after() chết; ảnh DRAWING quá 15 phút ⇒ GEN_FAILED, KHÔNG vẽ lại
+người Duyệt / Loại       duyệt ⇒ captionFromImage viết tiêu đề + nội dung chính theo ẢNH (luật giá như §5d); loại ⇒ không vào lô
+người "Đưa vào lô"       sửa câu chữ + ba tên ⇒ MỘT mẫu MANUAL trong lô gần nhất còn hạn duyệt (đúng đường mẫu tự làm, ô 1001+)
+```
+
+- **Mỗi lần bấm = 10 ảnh** (`MANUAL_GEN.imagesPerRun`). Mỗi ảnh một tổ hợp bối cảnh × bố cục khác nhau, đủ sáu gen trong
+  từ vựng đóng (tất định theo id lượt — `manualGenGenes`), chữ trên ảnh luôn `NONE`. Câu lệnh = ý tưởng của người + sáu chỉ
+  thị gen tất định (`geneDirectives`) + "giữ nguyên sản phẩm" (`PRESERVE_PRODUCT_CLAUSE`).
+- **Ranh giới 2 + 3 giữ nguyên:** gốc PHẢI là `PRODUCT_PHOTO` đang bật có mã hàng; tham chiếu thêm CHỈ là `OWN_AD` cùng mã.
+  Điểm ảnh đi qua ĐÚNG `gatherPixels` (nay xuất khẩu từ `generate.ts`) — spy / tay / R&D không bao giờ tới máy vẽ.
+- **Trần chi ảnh CHUNG với lô:** `imageSpendToday` là sổ đếm duy nhất, nay cộng cả ảnh gen tay (và ảnh ĐANG VẼ theo giá
+  ước tính), trừ ảnh gen tay đã vào lô để không đếm hai lần. Trần: `maxImagesPerDay` (30) và `imageDailyCapUsd` (2 USD).
+  Vượt trần ⇒ bấm vẫn được nếu còn chỗ cho ít nhất một ảnh, máy **vẽ được bao nhiêu báo bấy nhiêu** (lý do ghi trên lượt và
+  trên từng ảnh); hết hẳn ⇒ từ chối kèm lý do. Kiểm lại trước MỖI ảnh: giá thật đắt hơn ước tính thì ảnh sau bị chặn trước khi gọi.
+- **Vì sao không vẽ trong server action:** 10 ảnh gọi ngay mất 1–10 phút. Action ghi lượt rồi trả lời ngay; việc vẽ chạy
+  trong `after()` của Next (tiến trình Node trên VPS, không bị cắt như serverless), màn hình tự tải lại mỗi 8 giây khi còn ảnh
+  chờ / đang vẽ, và lượt vòng mẫu vẽ nốt. Hai đường cùng giữ chỗ bằng `UPDATE … WHERE status = 'PLANNED'` ⇒ không ảnh nào vẽ hai lần.
+- Mẫu vào lô mang `mode = 'MANUAL'` (không thêm chế độ mới): người đã CHỌN ảnh này như mẫu tự làm ⇒ đăng trước ô máy lập, cùng
+  trần "mẫu tự làm ≤ số mẫu / lô", cùng học. Nguồn phân biệt được qua `gen_model` (mô hình vẽ, khác `MANUAL`), `why` ("Gen tay — …"),
+  và `creative_manual_gen_images.variant_id`. Mẫu vào lô dùng ĐÚNG ảnh đã duyệt (không lưu bản thứ hai).
+
+### Tích chọn bài trong lô chờ duyệt
+
+Ô tích trên từng bài + thanh "Loại các bài đã chọn" / "Giữ các bài đã chọn" (`applyVariantSelection`, quyền `ideas:write`).
+Giữ = bài chọn giữ lại (bài đã loại còn ảnh thì KHÔI PHỤC), mọi bài còn lại bị loại. Chỉ khi lô `PENDING_APPROVAL` còn hạn —
+điều kiện nằm trong câu `UPDATE`. Phiếu duyệt chỉ khoá bài `GENERATED` ⇒ tập bài giữ lại CHÍNH LÀ tập bài trong digest: bài
+bị loại không đăng, không tiêu tiền; chọn / loại ⇒ phiếu đã phát vô hiệu.
+
+### Tên chiến dịch · nhóm · quảng cáo
+
+| Tên | Khuôn mặc định | Nguồn |
+|---|---|---|
+| Chiến dịch | `<Tên TKQC>_<dd/MM ngày đăng>_TEST_<tên fanpage>_<số thứ tự>` | tên TKQC: dòng chi tiêu đã đồng bộ (`ad_spends.account_name`) của tài khoản đã khai; fanpage: sổ `fanpages` (alias → name) |
+| Nhóm QC | `<Mục tiêu tối ưu>_<vị trí địa lý>_<độ tuổi>_<giới tính>_<autobid\|bidcap\|costcap>` | CÀI ĐẶT THẬT của nhóm QC mẫu, đọc qua `readTemplateAd` (chỉ GET), đệm ở `settings[creative.naming.template]` 12 giờ |
+| Quảng cáo | `<tên fanpage>_<ảnh\|video>_<số thứ tự>_TXT` | hàm đặt tên nhận loại media; hiện vòng chỉ chạy ảnh |
+
+- Bảng quy đổi mã Facebook → nhãn ngắn ở `lib/constants/creative-loop.ts` (`OPTIMIZATION_GOAL_LABEL`, `BID_STRATEGY_LABEL`,
+  `GENDER_LABEL`). **Mã lạ in NGUYÊN mã**; thiếu hẳn một phần ⇒ `?` và nói ra. Thiếu tên TKQC / fanpage ⇒ BỎ phần ấy khỏi tên
+  và cảnh báo. Chưa đọc được nhóm mẫu ⇒ tên nhóm trống ⇒ đăng với tên cũ `VM <ngày> #<ô>`.
+- **Số thứ tự** = thứ tự bài trong NGÀY ĐĂNG (một lô mỗi ngày), cấp theo thứ tự đăng, duy nhất trong lô
+  (`creative_variants.name_seq`, chỉ mục duy nhất). Không đánh lại khi một bài bị gạt — tên đã hiện cho người duyệt không tự đổi.
+- Lượt vòng mẫu (bước 5) điền tên vào ô còn TRỐNG của bài `GENERATED` thuộc lô chưa duyệt; không đè tên người đã sửa. Để trống
+  một tên = dùng lại tên mặc định. Sửa tên: nút "Sửa tên chiến dịch / nhóm / QC" trên từng bài (`saveVariantNames`, cùng điều
+  kiện với sửa câu chữ). **Ba tên nằm trong digest** (vắng khỏi digest khi cả ba rỗng — phiếu của lô cũ tính lại vẫn khớp) ⇒
+  sửa tên sau khi mở hộp duyệt ⇒ phiếu cũ vô hiệu. Hàm dựng tên là hàm THUẦN (`lib/creative/naming.ts::defaultNames`).
+
+### MỖI BÀI MỘT CHIẾN DỊCH
+
+**Chọn: TẠO chiến dịch từ các trường đọc được của chiến dịch chứa mẩu mẫu, KHÔNG sao chép bằng `/copies`.** Sao chép kéo theo nhóm
+mẫu với LOẠI ngân sách của nó (Facebook không cho đổi ngày ↔ trọn đời trên nhóm đã có), mang cả start/end cũ của nhóm mẫu, và
+cần thêm năm lời ghi mới (đổi tên chiến dịch · sửa nhóm: tên + ngân sách + khung giờ · sửa mẩu: tên + bài · bật ba cấp). Tạo mới
+chỉ cần **HAI lời ghi mới**; nhóm và mẩu dùng lại đúng `createTestAdset` (ngân sách TRỌN ĐỜI + `end_time`, chép đối tượng / tối
+ưu / giá thầu / đích tin nhắn từ nhóm mẫu) và `createAd`.
+
+```
+mỗi bài   tải ảnh → tạo bài → CREATE_CAMPAIGN  POST act_<id>/campaigns  name · objective · special_ad_categories · buying_type · status=PAUSED
+                            → CREATE_ADSET     POST act_<id>/adsets     (như cũ) campaign_id = chiến dịch RIÊNG · lifetime_budget 200.000đ · start/end_time của lô
+                            → CREATE_AD        POST act_<id>/ads        (như cũ) tên đã duyệt
+                            → ACTIVATE_CAMPAIGN POST /<campaign_id>     status=ACTIVE — công tắc tổng, bước CUỐI; chỉ tới đây mẫu mới LIVE
+```
+
+- **Tiền không đổi:** 200.000đ trọn đời ở NHÓM + `end_time`; trần lô 20 bài / 4.000.000đ đếm trên sổ; COPILOT; phiếu HMAC;
+  khung giờ lô; công tắc khẩn cấp chặn cả tạo lẫn bật chiến dịch (chỉ `status=PAUSED` còn đi). Chiến dịch mẫu để ngân sách ở
+  cấp CHIẾN DỊCH (CBO) hoặc không đọc được mục tiêu / hạng mục đặc biệt ⇒ cả lô KHÔNG ghi gì (kiểm một lần trước lời gọi ghi đầu tiên).
+- **Cổng:** `CREATE_CAMPAIGN` · `ACTIVATE_CAMPAIGN` là hành động TẠO (đòi lô đã duyệt + digest khớp + trước giờ chạy; tạo chiến
+  dịch chịu cả ba trần tiền vì nó dẫn tới một nhóm). Tạo nhóm chỉ được vào chiến dịch test HOẶC chiến dịch riêng vòng đã tạo cho
+  CHÍNH bài (`ownCampaignId`); bật chỉ được đúng chiến dịch riêng ấy (`NOT_OUR_AD` nếu khác). Mẩu mẫu vẫn phải nằm trong chiến dịch test.
+- **Hỏng giữa chừng giữ id, không dựng lại, không mồ côi âm thầm:** mỗi bước tạo chiến dịch / nhóm / mẩu ghi `fb_pending_step`
+  NGAY TRƯỚC lời gọi và xoá CÙNG giao dịch lưu id. Lượt sau thấy dấu còn ⇒ đánh `PUBLISH_FAILED` kèm TÊN để tìm tay, không gửi
+  lại. Facebook trả lỗi ⇒ `PUBLISH_FAILED`, id đã tạo (chiến dịch riêng) nằm lại trên mẫu + trong sổ, chiến dịch vẫn TẮT. Tạo mẩu
+  / bật hỏng ⇒ tắt nhóm (dọn dẹp) như cũ. Không tự thử lại.
+- **Tắt theo luật / tiêu thêm / chấm** không đổi: đều đi theo NHÓM (`fb_adset_id`) và mẩu (`fb_ad_id`), đúng cho cả hai cấu trúc.
+  Lô cũ: mẫu đã có nhóm mà không có chiến dịch riêng đi tiếp ĐƯỜNG CŨ (chỉ tạo mẩu trong chiến dịch test) — không phá dữ liệu đang chạy.
+
+Tệp: `lib/creative/{manual-gen,naming,selection}.ts` · `lib/creative/{publish,manual,generate,loop,approval}.ts` (sửa) ·
+`createTestCampaign` / `activateTestCampaign` / `testCampaignFields` trong `lib/integrations/facebook/ads-write.ts` ·
+`lib/marketing/creative-write-gate.ts` · `lib/actions/creative-manual-gen.ts` · `applyVariantSelection` (`lib/actions/creative.ts`) ·
+`saveVariantNames` (`lib/actions/creative-copy.ts`) · `lib/queries/creative-manual-gen.ts` · `manual-gen.tsx` · `manual-gen-panel.tsx` ·
+`variant-select.tsx` · `names-editor.tsx` · `drizzle/0124_creative_manual_gen_campaign_per_post.sql` · `tests/creative-manual-gen.test.ts` ·
+`tests/creative-write.test.ts` (ca 10–14).
+
+**Chờ chủ shop quyết:** (1) trần **30 ảnh / ngày** (`maxImagesPerDay`) và **2 USD / ngày** là CHUNG: ngày có lô đầy 20 ảnh (~1,7 USD) thì
+một lần bấm gen tay chỉ vẽ được ~3 ảnh — muốn đủ 10 ảnh / lần thì nâng trần (sửa mã, AGENTS.md mục 7). (2) Chiến dịch riêng
+chép mục tiêu từ chiến dịch test (thường "Tương tác / Tin nhắn") — muốn mục tiêu khác cho bài test thì đổi ở chiến dịch test.
+(3) Nếu tài khoản dùng Graph API ≥ v24 và Facebook đòi `is_adset_budget_sharing_enabled` khi tạo chiến dịch không ngân sách, lượt
+tạo chiến dịch sẽ báo lỗi rõ ràng (không mồ côi gì) — kho đang gọi v21.0.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |
@@ -473,7 +578,7 @@ chỉ chạy ở `saveProductionOrder`, và giá NULL thì số tiền của c�
 | Việc | Vì sao máy không tự làm được |
 |---|---|
 | Cấp lại System User token có **`ads_management`** + quyền **tạo quảng cáo cho fanpage** test | token hiện chỉ `ads_read` |
-| Dựng **một chiến dịch TEST** (mục tiêu Tin nhắn, ngân sách ở cấp nhóm — ABO) và **một mẩu QC mẫu** trong đó | máy không tạo chiến dịch và không tự đoán đối tượng |
+| Dựng **một chiến dịch TEST** (mục tiêu Tin nhắn, ngân sách ở cấp nhóm — ABO, **KHÔNG CBO**) và **một mẩu QC mẫu** trong đó (khuyên đúng 1 nhóm + 1 mẩu, để TẮT). Từ §5i mỗi bài thành một chiến dịch riêng chép mục tiêu / hạng mục đặc biệt / kiểu mua của chiến dịch này và chép đối tượng / tối ưu / giá thầu / địa lý / tuổi / giới tính của nhóm mẫu — tên nhóm mặc định cũng đọc từ đó | máy không tự đoán đối tượng hay mục tiêu; chiến dịch mẫu CBO ⇒ máy không đăng |
 | Điền `creative.config`: fanpage · tài khoản · chiến dịch test · mẩu mẫu · **luật tắt · luật giữ** | ngưỡng là quyết định kinh doanh (mục 38) |
 | Đặt `ADS_WRITE_ENABLED=true`, `ADS_WRITE_MODE=COPILOT`, `CREATIVE_LOOP_EVERY_MINUTES=10` ở **GitHub Variables** rồi deploy (xoá Variable = TẮT ở lần deploy sau; gõ tay vào `.env` trên VPS sẽ bị đè); `OPENAI_API_KEY` phải có | đổi lịch và mở đường ghi là việc của chủ shop (mục 7) |
 | Bật `enabled` ở tab Cấu hình | công tắc mềm của vòng |
@@ -482,6 +587,8 @@ chỉ chạy ở `saveProductionOrder`, và giá NULL thì số tiền của c�
 | Bật **Chạy mockup hằng ngày** trên thẻ các mẫu thắng muốn chạy mockup (tab Nguồn ảnh) | chọn mẫu nào chạy mockup là quyết định của chủ shop (24/09) |
 | Tạo sản phẩm trên Pancake đúng mã **TK-…** của thiết kế được duyệt (tab Thiết kế mới) | nhân viên chốt đơn thiết kế mới như hàng thường; máy không ghi vào Pancake |
 | Dựng **hai chiến dịch MẪU scale** (§5g) và dán id vào tab Cấu hình; **chốt trần tổng 5.000.000đ/ngày** các chiến dịch scale đang bật (đang là ĐỀ XUẤT) | máy chỉ sao chép, không tự dựng mục tiêu / biểu mẫu; trần tiền là quyết định kinh doanh |
+| Kiểm **tên fanpage** trong sổ fanpage (alias) và đồng bộ chi tiêu của **tài khoản QC** đã khai (để có tên TKQC trong tên chiến dịch) | tên lấy từ dữ liệu đã đồng bộ; thiếu thì phần ấy để trống và màn hình nói ra |
+| Quyết **trần ảnh chung** 30 ảnh / 2 USD mỗi ngày có đủ cho lô + gen tay 10 ảnh / lần không (§5i) | trần tiền là quyết định kinh doanh |
 | ~~Chốt ba con số "đề xuất" ở §3~~ — **ĐÃ CHỐT 24/09/2026** (`b32a1fac`: 200.000đ/lượt · 1.000.000đ/ngày · 2 USD/ngày) | ngưỡng tiền |
 
 ## 8. BLOCKED / HUMAN GATE

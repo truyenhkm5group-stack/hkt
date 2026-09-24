@@ -862,6 +862,13 @@
       "when": 1790002168245,
       "tag": "0123_creative_design_moq",
       "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "7",
+      "when": 1790002228245,
+      "tag": "0124_creative_manual_gen_campaign_per_post",
+      "breakpoints": true
     }
   ]
 }

@@ -117,6 +117,18 @@ export function testAdsWrite() {
   assert.ok(/async function graphPost[\s\S]{0,200}assertAdsWriteAllowed\(\)/.test(cuaGhi), "assertAdsWriteAllowed() phải được gọi ngay đầu graphPost, trước khi dựng request");
   assert.ok(boChuThich(cuaGhi).includes("retries: 0"), "lời gọi GHI không được tự thử lại — Graph API không nhận khoá chống trùng");
 
+  /*
+    MỖI BÀI MỘT CHIẾN DỊCH (chủ shop 25/09/2026, `docs/creative-loop.md` §5i) — HAI lời ghi mới, có chủ đích,
+    và cả hai nằm TRONG cửa ghi, đi qua `graphPost`: tạo chiến dịch (luôn `status=PAUSED`, không trường ngân
+    sách nào — tiền nằm ở NHÓM trọn đời) và bật đúng chiến dịch ấy (đúng một trường `status`). Danh sách cho
+    phép được mở RỘNG đúng hai hàm này, không nới luật chung: không tệp nào khác được chạm Graph API ghi.
+  */
+  const ghi = boChuThich(cuaGhi);
+  assert.ok(/export async function createTestCampaign[\s\S]{0,300}graphPost\(actPath\(accountId, "campaigns"\), testCampaignFields\(/.test(ghi), "tạo chiến dịch riêng phải đi qua graphPost với đúng testCampaignFields");
+  assert.ok(/export async function activateTestCampaign[\s\S]{0,200}graphPost\(assertFbId\(campaignId, "id chiến dịch"\), \{ status: "ACTIVE" \}\)/.test(ghi), "bật chiến dịch riêng = đúng một trường status qua graphPost");
+  const truongCd = ghi.slice(ghi.indexOf("export function testCampaignFields"), ghi.indexOf("export async function createTestCampaign"));
+  assert.ok(truongCd.includes('status: "PAUSED"') && !truongCd.includes("daily_budget") && !truongCd.includes("lifetime_budget: String"), "chiến dịch riêng luôn tạo TẮT và không mang ngân sách");
+
   // Chốt ngoài cùng chỉ nhận ĐÚNG chuỗi "true": `1`, `yes`, `on` đều là CẤM.
   const envSrc = boChuThich(readFileSync("lib/env.ts", "utf8"));
   assert.ok(envSrc.includes('process.env.ADS_WRITE_ENABLED === "true"'), "ADS_WRITE_ENABLED phải đọc THẲNG từ process.env và chỉ nhận đúng chuỗi \"true\"");

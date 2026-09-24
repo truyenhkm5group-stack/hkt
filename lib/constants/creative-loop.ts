@@ -542,8 +542,11 @@ export type CreativeLoopConfig = {
   /** Tài khoản quảng cáo, dạng số không kèm `act_`. */
   adAccountId: string;
   /**
-   * Chiến dịch TEST do NGƯỜI dựng sẵn trên Ads Manager. Máy chỉ tạo nhóm + mẩu BÊN TRONG chiến dịch
-   * này, và cổng từ chối mọi lượt ghi nhắm vào chiến dịch khác. Máy KHÔNG tạo chiến dịch.
+   * Chiến dịch TEST do NGƯỜI dựng sẵn trên Ads Manager, chứa MẨU QC MẪU. Từ 25/09/2026 (§5i) mỗi bài được
+   * đăng thành MỘT chiến dịch RIÊNG tạo từ các trường của chiến dịch này (mục tiêu · hạng mục đặc biệt ·
+   * kiểu mua), luôn TẮT tới bước cuối; nhóm + mẩu nằm trong chiến dịch riêng ấy. Cổng từ chối mọi lượt ghi
+   * nhắm vào chiến dịch KHÁC chiến dịch test và chiến dịch riêng vòng đã tạo cho chính bài. Mẫu đăng dở
+   * theo cấu trúc cũ (nhóm nằm trong chính chiến dịch này) đi tiếp đường cũ.
    */
   testCampaignId: string;
   /**
@@ -792,7 +795,13 @@ export const PUBLISH_REQUIRED_FIELDS: readonly (keyof CreativeLoopConfig)[] = ["
  * Hành động ghi mà vòng mẫu được làm. Đi qua ĐÚNG cửa ghi đã có (`lib/integrations/facebook/ads-write.ts`)
  * và cùng chốt cứng `ADS_WRITE_ENABLED` + nấc `COPILOT`.
  *
- * Cố ý KHÔNG có: TẠO chiến dịch từ số không · sửa đối tượng · đụng mẩu QC / chiến dịch không do vòng này tạo.
+ * Cố ý KHÔNG có: sửa đối tượng · đụng mẩu QC / chiến dịch không do vòng này tạo.
+ *
+ * MỖI BÀI MỘT CHIẾN DỊCH (chủ shop chốt 25/09/2026, `docs/creative-loop.md` §5i): `CREATE_CAMPAIGN` tạo
+ * một chiến dịch riêng cho MỘT bài, mọi trường (mục tiêu · hạng mục đặc biệt · kiểu mua) chép NGUYÊN từ
+ * chiến dịch của mẩu mẫu — luôn ở trạng thái TẮT; nhóm (ngân sách TRỌN ĐỜI + `end_time`) và mẩu tạo bên
+ * trong; `ACTIVATE_CAMPAIGN` bật công tắc tổng CUỐI CÙNG. Chiến dịch mẫu để ngân sách ở cấp chiến dịch
+ * (CBO) thì KHÔNG tạo — tiền phải nằm ở nhóm để trần 200.000đ/bài còn là trần trọn đời trên Facebook.
  *
  * NGOẠI LỆ CÓ CHỦ ĐÍCH — SCALE MẪU THẮNG (chủ shop quyết 24/09/2026, `docs/creative-loop.md` §5g): vòng
  * được tạo chiến dịch, nhưng CHỈ bằng cách SAO CHÉP một trong hai chiến dịch MẪU do NGƯỜI dựng (id khai ở
@@ -807,6 +816,8 @@ export const CREATIVE_WRITE_ACTIONS = [
   "CREATE_AD",
   "PAUSE_ADSET",
   "EXTEND_ADSET",
+  "CREATE_CAMPAIGN",
+  "ACTIVATE_CAMPAIGN",
   "COPY_SCALE_CAMPAIGN",
   "CREATE_SCALE_CREATIVE",
   "SET_SCALE_AD_CREATIVE",
@@ -823,6 +834,8 @@ export const CREATIVE_WRITE_ACTION_LABEL: Record<CreativeWriteAction, string> = 
   CREATE_AD: "Tạo mẩu quảng cáo",
   PAUSE_ADSET: "Tắt sớm",
   EXTEND_ADSET: "Cho tiêu thêm",
+  CREATE_CAMPAIGN: "Tạo chiến dịch riêng của bài (TẮT)",
+  ACTIVATE_CAMPAIGN: "Bật chiến dịch riêng của bài",
   COPY_SCALE_CAMPAIGN: "Sao chép chiến dịch mẫu scale (TẮT)",
   CREATE_SCALE_CREATIVE: "Tạo bài quảng cáo cho nháp scale",
   SET_SCALE_AD_CREATIVE: "Gắn bài mẫu thắng vào mẩu của nháp",
@@ -924,7 +937,7 @@ export const CREATIVE_WRITE_DENIAL_REASON: Record<CreativeWriteDenial, string> =
   CONFIG_INCOMPLETE: "Cấu hình vòng mẫu còn thiếu (fanpage / tài khoản / chiến dịch test / mẩu mẫu).",
   NOT_APPROVED: "Lô chưa được người duyệt. Nấc COPILOT: không có phiếu duyệt thì không ghi.",
   APPROVAL_MISMATCH: "Nội dung mẫu đã đổi SAU khi duyệt (ảnh, câu chữ, ngân sách hoặc khung giờ). Phiếu duyệt khoá đúng thứ người đã xem.",
-  WRONG_CAMPAIGN: "Lượt ghi nhắm vào một chiến dịch KHÁC chiến dịch test đã khai. Máy chỉ được làm việc bên trong chiến dịch test.",
+  WRONG_CAMPAIGN: "Lượt ghi nhắm vào một chiến dịch KHÁC chiến dịch test đã khai và khác chiến dịch riêng vòng mẫu vừa tạo cho chính bài này. Máy chỉ được làm việc trong hai chỗ ấy.",
   NOT_OUR_AD: "Nhóm/mẩu này không do vòng mẫu tạo. Máy không được đụng vào quảng cáo của người.",
   OVER_VARIANT_BUDGET: `Ngân sách một mẫu vượt trần ${CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd.toLocaleString("vi-VN")}đ.`,
   OVER_DAILY_CAP: `Tổng ngân sách test đã cam kết cho ngày chạy sẽ vượt trần ${CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd.toLocaleString("vi-VN")}đ.`,
@@ -1367,3 +1380,83 @@ export function variantRuleSet(rulesSnapshotRaw: unknown, batch: { killRules: Cr
   const r = parseVariantRules(rulesSnapshotRaw);
   return r && r.basis === "PRODUCT_HISTORY" ? { killRules: r.killRules, keepRules: r.keepRules, own: true } : { killRules: batch.killRules, keepRules: batch.keepRules, own: false };
 }
+
+// ───────────────────────────── ĐẶT TÊN CHIẾN DỊCH · NHÓM · QUẢNG CÁO (chủ shop 25/09/2026, §5i) ─────────────────────────────
+
+/**
+ * Khuôn tên MẶC ĐỊNH (người sửa được từng tên trước khi duyệt — tên nằm trong phiếu duyệt):
+ *  · Chiến dịch: `<Tên TKQC>_<dd/MM ngày đăng>_TEST_<tên fanpage>_<số thứ tự>`
+ *  · Nhóm QC:    `<Mục tiêu tối ưu>_<vị trí địa lý>_<độ tuổi>_<giới tính>_<autobid|bidcap|costcap>` — đọc từ
+ *                CÀI ĐẶT THẬT của nhóm QC mẫu trên Ads Manager (đường đọc `readTemplateAd`).
+ *  · Quảng cáo:  `<tên fanpage>_<ảnh|video>_<số thứ tự>_TXT`
+ *
+ * Bảng quy đổi mã Facebook → nhãn ngắn ở dưới. MÃ LẠ ⇒ in NGUYÊN mã (không đoán); thiếu hẳn ⇒ `?` và nói ra.
+ */
+export const NAMING_TEMPLATE_KEY = "creative.naming.template";
+
+/** Nhãn ngắn của `optimization_goal`. Không có ở đây ⇒ in nguyên mã. */
+export const OPTIMIZATION_GOAL_LABEL: Readonly<Record<string, string>> = {
+  CONVERSATIONS: "MESS",
+  MESSAGING_PURCHASE_CONVERSION: "MESSMUA",
+  MESSAGING_APPOINTMENT_CONVERSION: "MESSHEN",
+  OFFSITE_CONVERSIONS: "CONV",
+  LINK_CLICKS: "CLICK",
+  LANDING_PAGE_VIEWS: "LPV",
+  LEAD_GENERATION: "LEAD",
+  QUALITY_LEAD: "LEAD",
+  REACH: "REACH",
+  IMPRESSIONS: "IMPR",
+  POST_ENGAGEMENT: "ENG",
+  THRUPLAY: "VIEW",
+  VALUE: "VALUE",
+};
+
+/** Nhãn của `bid_strategy`. Ba mã chủ shop nêu; mã khác in nguyên. */
+export const BID_STRATEGY_LABEL: Readonly<Record<string, string>> = {
+  LOWEST_COST_WITHOUT_CAP: "autobid",
+  LOWEST_COST_WITH_BID_CAP: "bidcap",
+  COST_CAP: "costcap",
+};
+
+/** `targeting.genders`: 1 = nam, 2 = nữ; vắng / rỗng / cả hai = mọi giới tính. */
+export const GENDER_LABEL: Readonly<Record<string, string>> = { "1": "Nam", "2": "Nữ", ALL: "All" };
+
+/** Facebook trả `age_max = 65` cho "65 trở lên". */
+export const AGE_MAX_OPEN = 65;
+
+/** Loại media của quảng cáo — hiện vòng mẫu chỉ chạy ảnh, nhưng hàm đặt tên nhận cả video. */
+export type CreativeMediaKind = "IMAGE" | "VIDEO";
+export const MEDIA_NAME_LABEL: Record<CreativeMediaKind, string> = { IMAGE: "ảnh", VIDEO: "video" };
+
+/** Trần độ dài MỘT tên (ký tự) — trần của lược đồ đầu vào và của cột. */
+export const CAMPAIGN_NAME_MAX_CHARS = 255;
+
+// ───────────────────────────── GEN ẢNH BẰNG TAY (chủ shop 25/09/2026, §5i) ─────────────────────────────
+
+/**
+ * `imagesPerRun` — MỖI LẦN BẤM sinh đúng bấy nhiêu ảnh (chủ shop chốt: 10). Tính vào CÙNG trần ảnh / ngày
+ * (`maxImagesPerDay`, `imageDailyCapUsd`) với lô hằng ngày — sổ đếm chung là `imageSpendToday`.
+ * `drawPerTick` — lượt vòng mẫu vẽ nốt tối đa bấy nhiêu ảnh (lượt `after()` của nút bấm vẽ trước).
+ * `staleDrawMinutes` — ảnh "đang vẽ" quá bấy nhiêu phút ⇒ tiến trình đã chết giữa chừng ⇒ KHÔNG vẽ lại
+ * (OpenAI có thể đã tính tiền) mà đánh lỗi có lý do.
+ * `ideaMaxChars` — ô ý tưởng tự do.
+ */
+export const MANUAL_GEN = { imagesPerRun: 10, drawPerTick: 4, staleDrawMinutes: 15, ideaMaxChars: 1000 } as const;
+
+/**
+ * Vòng đời một ảnh gen tay:
+ * `PLANNED` (chờ vẽ) → `DRAWING` (đang vẽ) → `GENERATED` (chờ người duyệt ảnh) → `APPROVED` (đã duyệt,
+ * máy viết câu chữ) → `PROMOTED` (đã vào lô chờ duyệt đăng). `REJECTED` = người loại; `GEN_FAILED` = vẽ
+ * hỏng / vượt trần (lý do ở `error`).
+ */
+export const MANUAL_GEN_IMAGE_STATUSES = ["PLANNED", "DRAWING", "GENERATED", "GEN_FAILED", "APPROVED", "REJECTED", "PROMOTED"] as const;
+export type ManualGenImageStatus = (typeof MANUAL_GEN_IMAGE_STATUSES)[number];
+export const MANUAL_GEN_IMAGE_STATUS_LABEL: Record<ManualGenImageStatus, string> = {
+  PLANNED: "Chờ vẽ",
+  DRAWING: "Đang vẽ",
+  GENERATED: "Chờ duyệt ảnh",
+  GEN_FAILED: "Vẽ lỗi",
+  APPROVED: "Đã duyệt — soạn bài",
+  REJECTED: "Đã loại",
+  PROMOTED: "Đã vào lô",
+};

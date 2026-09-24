@@ -71,6 +71,7 @@ const MOI = [
   "0121_creative_scale_drafts",
   "0122_suppliers",
   "0123_creative_design_moq",
+  "0124_creative_manual_gen_campaign_per_post",
 ] as const;
 
 /*

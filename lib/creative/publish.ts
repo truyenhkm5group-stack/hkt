@@ -15,15 +15,18 @@ import {
 } from "@/lib/constants/creative-loop";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import {
+  activateTestCampaign,
   adsWriteHardEnabled,
   adsWriteMode,
   createAd,
   createAdCreative,
   createTestAdset,
+  createTestCampaign,
   extendAdset,
   pauseAdset,
   readAdsKillSwitch,
   readTemplateAd,
+  testCampaignFields,
   uploadAdImage,
   vndToFbMinor,
   type TemplateAd,
@@ -55,7 +58,17 @@ import { publishOrder } from "@/lib/creative/manual";
  *     nhóm là hai lần cam kết 200.000đ cho một mẫu).
  *  4. **Hỏng thì không tự thử lại.** Bước nào FAILED thì mẫu thành `PUBLISH_FAILED` — cùng lý do với
  *     `retries: 0` của cửa ghi: phản hồi rơi mất sau khi Facebook đã tạo nhóm thì thử lại là nhóm thứ
- *     hai. Nhóm đã tạo mà tạo mẩu hỏng thì TẮT nhóm (dọn dẹp) rồi mới đánh dấu lỗi.
+ *     hai. Nhóm đã tạo mà tạo mẩu hỏng thì TẮT nhóm (dọn dẹp) rồi mới đánh dấu lỗi. Bước TẠO chiến dịch /
+ *     nhóm / mẩu ghi `fb_pending_step` NGAY TRƯỚC lời gọi và xoá cùng giao dịch lưu id: lượt sau thấy dấu
+ *     ấy còn ⇒ tiến trình đã chết giữa lời gọi và lúc ghi ⇒ KHÔNG gửi lại, đánh lỗi kèm tên để tìm tay.
+ *
+ * ─── MỖI BÀI MỘT CHIẾN DỊCH (chủ shop chốt 25/09/2026, `docs/creative-loop.md` §5i) ───
+ *
+ * Mỗi mẫu: tải ảnh → tạo bài → tạo CHIẾN DỊCH riêng (TẮT, trường chép từ chiến dịch của mẩu mẫu) → tạo
+ * NHÓM trong đó (ngân sách TRỌN ĐỜI 200.000đ + `end_time` như cũ) → tạo MẨU → BẬT chiến dịch (công tắc
+ * tổng, bước CUỐI — chỉ tới đây mẫu mới `LIVE`). Hỏng ở bất kỳ bước nào trước khi bật ⇒ chiến dịch vẫn
+ * TẮT, không đồng nào chảy, id đã tạo nằm nguyên trên mẫu và trong sổ. Mẫu đã có nhóm mà KHÔNG có chiến
+ * dịch riêng là mẫu đăng dở theo cấu trúc CŨ (chung chiến dịch test) ⇒ đi tiếp đúng đường cũ.
  */
 
 const T = schema;
@@ -67,13 +80,15 @@ export type CreativeWriter = {
   readTemplateAd: typeof readTemplateAd;
   uploadAdImage: typeof uploadAdImage;
   createAdCreative: typeof createAdCreative;
+  createTestCampaign: typeof createTestCampaign;
   createTestAdset: typeof createTestAdset;
   createAd: typeof createAd;
+  activateTestCampaign: typeof activateTestCampaign;
   pauseAdset: typeof pauseAdset;
   extendAdset: typeof extendAdset;
 };
 
-export const REAL_CREATIVE_WRITER: CreativeWriter = { readTemplateAd, uploadAdImage, createAdCreative, createTestAdset, createAd, pauseAdset, extendAdset };
+export const REAL_CREATIVE_WRITER: CreativeWriter = { readTemplateAd, uploadAdImage, createAdCreative, createTestCampaign, createTestAdset, createAd, activateTestCampaign, pauseAdset, extendAdset };
 
 /** Chốt env ĐỌC Ở TẦNG GỌI rồi truyền vào cổng thuần. Cửa ghi thật còn đọc lại lần nữa trước lời gọi mạng. */
 export type CreativeWriteEnv = { hardEnabled: boolean; mode: AdsWriteMode };
@@ -121,7 +136,16 @@ type VariantRow = typeof T.creativeVariants.$inferSelect;
 export async function batchApprovalContent(db: Db, batch: Pick<BatchRow, "id" | "batchDay" | "startAt" | "endAt" | "configSnapshot">): Promise<ApprovalContent> {
   const cfg = batchConfig(batch.configSnapshot);
   const rows = await db
-    .select({ id: T.creativeVariants.id, primaryText: T.creativeVariants.primaryText, headline: T.creativeVariants.headline, rules: T.creativeVariants.rulesSnapshot, sha256: T.creativeImages.sha256 })
+    .select({
+      id: T.creativeVariants.id,
+      primaryText: T.creativeVariants.primaryText,
+      headline: T.creativeVariants.headline,
+      rules: T.creativeVariants.rulesSnapshot,
+      campaignName: T.creativeVariants.campaignName,
+      adsetName: T.creativeVariants.adsetName,
+      adName: T.creativeVariants.adName,
+      sha256: T.creativeImages.sha256,
+    })
     .from(T.creativeVariants)
     .leftJoin(T.creativeImages, eq(T.creativeImages.id, T.creativeVariants.imageId))
     .where(and(eq(T.creativeVariants.batchId, batch.id), inArray(T.creativeVariants.status, DIGEST_STATUSES)));
@@ -131,7 +155,7 @@ export async function batchApprovalContent(db: Db, batch: Pick<BatchRow, "id" | 
     endAt: batch.endAt,
     budgetPerVariantVnd: cfg.budgetPerVariantVnd,
     killRules: cfg.config.killRules,
-    variants: rows.map((r) => ({ id: r.id, imageSha256: r.sha256 ?? "", primaryText: r.primaryText, headline: r.headline, rules: r.rules ?? null })),
+    variants: rows.map((r) => ({ id: r.id, imageSha256: r.sha256 ?? "", primaryText: r.primaryText, headline: r.headline, rules: r.rules ?? null, names: { campaign: r.campaignName, adset: r.adsetName, ad: r.adName } })),
   };
 }
 
@@ -297,12 +321,11 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
     for (const v of pending) {
       await log({ variantId: v.id, action: nextStep(v), outcome: "DENIED", denial: "TOO_LATE", detail: CREATIVE_WRITE_DENIAL_REASON.TOO_LATE });
       report.denied += 1;
-      if (v.fbAdsetId) {
-        await pauseCreativeVariant(db, { variantId: v.id, kind: "CLEANUP", actor: machine }, now, { writer: d.writer, env: d.env });
-        await db.update(T.creativeVariants).set({ status: "PUBLISH_FAILED", updatedAt: now }).where(eq(T.creativeVariants.id, v.id));
-      }
+      if (v.fbAdsetId) await pauseCreativeVariant(db, { variantId: v.id, kind: "CLEANUP", actor: machine }, now, { writer: d.writer, env: d.env });
+      // Chiến dịch riêng đã tạo mà chưa bật thì vẫn TẮT — không đồng nào chảy; id giữ nguyên để người xoá tay.
+      if (v.fbAdsetId || v.fbCampaignId) await db.update(T.creativeVariants).set({ status: "PUBLISH_FAILED", updatedAt: now }).where(eq(T.creativeVariants.id, v.id));
     }
-    const live = variants.filter((v) => v.fbAdId).length;
+    const live = variants.filter(isOnFacebook).length;
     await db
       .update(T.creativeBatches)
       .set(
@@ -359,11 +382,16 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
     // Nhóm mẫu tối ưu tin nhắn về một fanpage KHÁC fanpage đã khai ⇒ bài đứng tên trang này mà tin nhắn
     // của khách chảy sang trang kia: tiền vẫn tiêu, đơn không ai thấy. Chặn, không đoán trang nào đúng.
     const promotedPage = typeof template.adset.promotedObject?.page_id === "string" ? template.adset.promotedObject.page_id : null;
+    // Mỗi bài một chiến dịch (§5i): chiến dịch của mẩu mẫu phải đọc được và để ngân sách ở cấp NHÓM — kiểm
+    // MỘT lần trước lời gọi ghi đầu tiên, chỉ khi còn mẫu cần chiến dịch mới (mẫu đăng dở theo cấu trúc cũ thì không).
+    const canCampaign = pending.some(needsOwnCampaign) ? campaignShapeError(template) : null;
     const thu = template.hasAssetFeed
       ? { ok: false as const, error: "Mẩu mẫu không được hỗ trợ: quảng cáo động (asset_feed_spec) — máy không đoán hình dạng quảng cáo." }
       : promotedPage && promotedPage !== config.pageId
         ? { ok: false as const, error: `Nhóm của mẩu mẫu gửi tin nhắn về fanpage ${promotedPage}, khác fanpage đã khai ${config.pageId} — sửa cấu hình hoặc chọn mẩu mẫu khác.` }
-        : buildObjectStorySpec(template.objectStorySpec, { pageId: config.pageId, imageHash: "kiem-tra", primaryText: "kiem-tra", headline: "" });
+        : canCampaign
+          ? { ok: false as const, error: canCampaign }
+          : buildObjectStorySpec(template.objectStorySpec, { pageId: config.pageId, imageHash: "kiem-tra", primaryText: "kiem-tra", headline: "" });
     if (!thu.ok) {
       await db.update(T.creativeBatches).set({ error: thu.error, updatedAt: now }).where(eq(T.creativeBatches.id, b.id));
       return { ...report, result: "ERROR", detail: thu.error };
@@ -387,7 +415,7 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
   }
 
   const all = await loadVariants(db, b.id);
-  const live = all.filter((v) => v.fbAdId).length;
+  const live = all.filter(isOnFacebook).length;
   if (live > 0) {
     await db.update(T.creativeBatches).set({ status: "PUBLISHED", publishedAt: now, updatedAt: now }).where(and(eq(T.creativeBatches.id, b.id), eq(T.creativeBatches.status, "APPROVED")));
     return { ...report, result: "PUBLISHED", detail: `Đã đăng ${live} mẫu.` };
@@ -397,15 +425,55 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
   return { ...report, result: "FAILED", detail: msg };
 }
 
-/** Bước kế tiếp của một mẫu, suy từ những id Facebook nó đã có. */
-function nextStep(v: Pick<VariantRow, "fbImageHash" | "fbCreativeId" | "fbAdsetId">): CreativeWriteAction {
-  if (!v.fbImageHash) return "UPLOAD_IMAGE";
-  if (!v.fbCreativeId) return "CREATE_CREATIVE";
-  if (!v.fbAdsetId) return "CREATE_ADSET";
-  return "CREATE_AD";
+type IdCols = Pick<VariantRow, "fbImageHash" | "fbCreativeId" | "fbCampaignId" | "fbAdsetId" | "fbAdId">;
+
+/** Mẫu đăng dở theo cấu trúc CŨ: đã có nhóm trong chiến dịch test chung, không có chiến dịch riêng. */
+export function isLegacyStructure(v: Pick<VariantRow, "fbAdsetId" | "fbCampaignId">): boolean {
+  return !!v.fbAdsetId && !v.fbCampaignId;
 }
 
-type VariantOutcome = { kind: "LIVE" } | { kind: "FAILED" } | { kind: "DENIED"; denial: CreativeWriteDenial };
+/** Mẫu còn phải TẠO chiến dịch riêng. */
+function needsOwnCampaign(v: Pick<VariantRow, "fbAdsetId" | "fbCampaignId">): boolean {
+  return !isLegacyStructure(v) && !v.fbCampaignId;
+}
+
+/** Mẫu đã thật sự lên Facebook và từng chạy (không tính mẫu đăng dở / chiến dịch chưa bật). */
+function isOnFacebook(v: Pick<VariantRow, "status">): boolean {
+  return v.status === "LIVE" || v.status === "PAUSED" || v.status === "ENDED";
+}
+
+/** Bước kế tiếp của một mẫu, suy từ những id Facebook nó đã có. Hàm thuần. */
+export function nextStep(v: IdCols): CreativeWriteAction {
+  if (!v.fbImageHash) return "UPLOAD_IMAGE";
+  if (!v.fbCreativeId) return "CREATE_CREATIVE";
+  if (needsOwnCampaign(v)) return "CREATE_CAMPAIGN";
+  if (!v.fbAdsetId) return "CREATE_ADSET";
+  if (!v.fbAdId) return "CREATE_AD";
+  return isLegacyStructure(v) ? "CREATE_AD" : "ACTIVATE_CAMPAIGN";
+}
+
+/** Chiến dịch của mẩu mẫu KHÔNG dựng được chiến dịch riêng ⇒ câu lỗi; được ⇒ `null`. Hàm thuần. */
+export function campaignShapeError(template: TemplateAd): string | null {
+  if (!template.campaign) return "Không đọc được chiến dịch của mẩu mẫu (mục tiêu, hạng mục đặc biệt) — không tạo được chiến dịch riêng cho từng bài.";
+  try {
+    testCampaignFields("kiem-tra", template.campaign);
+    return null;
+  } catch (e) {
+    return errText(e);
+  }
+}
+
+/**
+ * Tên sẽ gửi Facebook: tên người đã duyệt (§5i), rỗng ⇒ tên cũ `VM <ngày> #<ô>` (mẫu của lô trước khi có
+ * khuôn tên). Bài quảng cáo (creative) giữ tên cũ — nó không hiện ở Ads Manager cạnh chiến dịch / nhóm / mẩu.
+ */
+export function publishNames(batchDay: string, v: Pick<VariantRow, "slot" | "campaignName" | "adsetName" | "adName">): { creative: string; campaign: string; adset: string; ad: string } {
+  const legacy = `VM ${batchDay} #${v.slot}`;
+  return { creative: legacy, campaign: v.campaignName || legacy, adset: v.adsetName || legacy, ad: v.adName || legacy };
+}
+
+/** `SKIPPED` = mẫu vừa đổi trạng thái / đang có lượt khác gửi — không ghi gì, lượt sau xét lại. */
+type VariantOutcome = { kind: "LIVE" } | { kind: "FAILED" } | { kind: "SKIPPED" } | { kind: "DENIED"; denial: CreativeWriteDenial };
 
 type PublishCtx = {
   batch: BatchRow;
@@ -426,11 +494,47 @@ async function publishOneVariant(db: Db, c: PublishCtx): Promise<VariantOutcome>
   const v = { ...c.variant };
   const w = c.deps.writer;
   const account = cfg.adAccountId;
+  const names = publishNames(b.batchDay, v);
 
-  const markFailed = () => db.update(T.creativeVariants).set({ status: "PUBLISH_FAILED", updatedAt: now }).where(eq(T.creativeVariants.id, v.id));
+  const markFailed = () => db.update(T.creativeVariants).set({ status: "PUBLISH_FAILED", fbPendingStep: "", fbPendingAt: null, updatedAt: now }).where(eq(T.creativeVariants.id, v.id));
+  /** Dọn nhóm đã tạo (nếu có) rồi đánh lỗi. Chiến dịch riêng chưa bật thì vẫn TẮT — không cần lời gọi nào. */
+  const failAndCleanup = async () => {
+    if (v.fbAdsetId) await pauseCreativeVariant(db, { variantId: v.id, kind: "CLEANUP", actor: CREATIVE_LOOP_ACTOR }, now, c.deps);
+    await markFailed();
+    return { kind: "FAILED" as const };
+  };
+
+  /*
+    DẤU "ĐANG GỬI" CÒN LẠI TỪ LƯỢT TRƯỚC ⇒ KHÔNG GỬI LẠI.
+
+    Dấu được ghi NGAY TRƯỚC lời gọi tạo chiến dịch / nhóm / mẩu và xoá cùng giao dịch lưu id. Nó còn ở
+    đây nghĩa là tiến trình chết giữa lúc Facebook nhận lời gọi và lúc ERP ghi kết quả: đối tượng CÓ THỂ
+    đã tồn tại mà ERP không biết id. Gửi lại là một chiến dịch / nhóm thứ hai — nên đánh lỗi, nói tên để
+    người tìm tay trên Ads Manager (chiến dịch riêng chưa bật thì vẫn TẮT, không đồng nào chảy).
+  */
+  if (v.fbPendingStep) {
+    const step = v.fbPendingStep as CreativeWriteAction;
+    const ten = step === "CREATE_CAMPAIGN" ? names.campaign : step === "CREATE_ADSET" ? names.adset : names.ad;
+    await c.log({
+      variantId: v.id,
+      action: step,
+      outcome: "FAILED",
+      detail: `Lượt trước đã gửi "${step}" lúc ${v.fbPendingAt?.toISOString() ?? "?"} mà không ghi được kết quả — có thể Facebook đã tạo đối tượng tên "${ten}". Không gửi lại. Tìm theo tên trên Ads Manager để xoá tay${v.fbCampaignId ? ` (chiến dịch riêng ${v.fbCampaignId} vẫn TẮT)` : ""}.`,
+    });
+    return failAndCleanup();
+  }
+  /** Ghi dấu "đang gửi" — có điều kiện chưa có dấu nào, để hai lượt không cùng gửi một bước. */
+  const claim = async (step: CreativeWriteAction) => {
+    const rows = await db
+      .update(T.creativeVariants)
+      .set({ fbPendingStep: step, fbPendingAt: now, updatedAt: now })
+      .where(and(eq(T.creativeVariants.id, v.id), eq(T.creativeVariants.fbPendingStep, ""), eq(T.creativeVariants.status, "GENERATED")))
+      .returning({ id: T.creativeVariants.id });
+    return rows.length > 0;
+  };
 
   /** Cổng cho MỘT bước — đếm lại số mẫu đã đăng và tiền đã cam kết trên sổ ngay trước bước ấy. */
-  const gate = async (action: CreativeWriteAction) => {
+  const gate = async (action: CreativeWriteAction, targetCampaignId: string | null = null) => {
     const input: CreativeGateInput = {
       hardEnabled: c.deps.env.hardEnabled,
       mode: c.deps.env.mode,
@@ -439,8 +543,9 @@ async function publishOneVariant(db: Db, c: PublishCtx): Promise<VariantOutcome>
       approved: c.approved,
       approvalMatches: c.approvalMatches,
       testCampaignId: cfg.testCampaignId,
-      targetCampaignId: action === "CREATE_ADSET" ? cfg.testCampaignId : null,
+      targetCampaignId,
       templateCampaignId: c.template.campaignId,
+      ownCampaignId: v.fbCampaignId,
       ourAdset: false,
       now,
       startAt: b.startAt,
@@ -503,7 +608,7 @@ async function publishOneVariant(db: Db, c: PublishCtx): Promise<VariantOutcome>
     const g = await gate("CREATE_CREATIVE");
     if (!g.ok) return { kind: "DENIED", denial: g.denial };
     const spec = buildObjectStorySpec(c.template.objectStorySpec, { pageId: cfg.pageId, imageHash: v.fbImageHash, primaryText: v.primaryText, headline: v.headline });
-    const name = `VM ${b.batchDay} #${v.slot}`;
+    const name = names.creative;
     if (!spec.ok) {
       await c.log({ variantId: v.id, action: "CREATE_CREATIVE", outcome: "FAILED", detail: spec.error });
       await markFailed();
@@ -524,15 +629,45 @@ async function publishOneVariant(db: Db, c: PublishCtx): Promise<VariantOutcome>
     }
   }
 
-  // ── 3. Tạo nhóm test — lượt DUY NHẤT cam kết tiền ──
-  if (!v.fbAdsetId) {
-    const g = await gate("CREATE_ADSET");
+  const legacy = isLegacyStructure(v);
+
+  // ── 3. Tạo CHIẾN DỊCH riêng của bài — LUÔN TẮT (§5i). Mẫu đăng dở theo cấu trúc cũ bỏ qua bước này. ──
+  if (needsOwnCampaign(v)) {
+    const g = await gate("CREATE_CAMPAIGN");
     if (!g.ok) return { kind: "DENIED", denial: g.denial };
-    const name = `VM ${b.batchDay} #${v.slot}`;
+    const tpl = c.template.campaign;
+    const name = names.campaign;
+    if (!tpl) {
+      await c.log({ variantId: v.id, action: "CREATE_CAMPAIGN", outcome: "FAILED", detail: "Không đọc được chiến dịch của mẩu mẫu." });
+      await markFailed();
+      return { kind: "FAILED" };
+    }
+    const request = { account, name, status: "PAUSED", objective: tpl.objective, special_ad_categories: tpl.specialAdCategories, buying_type: tpl.buyingType, template_campaign_id: c.template.campaignId };
+    if (!(await claim("CREATE_CAMPAIGN"))) return { kind: "SKIPPED" };
+    try {
+      const campaignId = await w.createTestCampaign(account, { name, template: tpl });
+      await db.transaction(async (tx) => {
+        await tx.update(T.creativeVariants).set({ fbCampaignId: campaignId, fbPendingStep: "", fbPendingAt: null, updatedAt: now }).where(eq(T.creativeVariants.id, v.id));
+        await c.log({ variantId: v.id, action: "CREATE_CAMPAIGN", outcome: "APPLIED", detail: "Đã tạo chiến dịch riêng của bài — đang TẮT, chỉ bật ở bước cuối.", targetId: campaignId, request }, tx);
+      });
+      v.fbCampaignId = campaignId;
+    } catch (e) {
+      await c.log({ variantId: v.id, action: "CREATE_CAMPAIGN", outcome: "FAILED", detail: errText(e), request });
+      await markFailed();
+      return { kind: "FAILED" };
+    }
+  }
+
+  // ── 4. Tạo nhóm test — lượt DUY NHẤT cam kết tiền ──
+  if (!v.fbAdsetId) {
+    const campaignId = legacy ? cfg.testCampaignId : (v.fbCampaignId ?? "");
+    const g = await gate("CREATE_ADSET", campaignId || null);
+    if (!g.ok) return { kind: "DENIED", denial: g.denial };
+    const name = names.adset;
     const request = {
       account,
       name,
-      campaign_id: cfg.testCampaignId,
+      campaign_id: campaignId,
       lifetime_budget_vnd: c.budgetPerVariantVnd,
       lifetime_budget_minor: vndToFbMinor(c.budgetPerVariantVnd, cfg.currency),
       currency: cfg.currency,
@@ -540,10 +675,11 @@ async function publishOneVariant(db: Db, c: PublishCtx): Promise<VariantOutcome>
       end_time: b.endAt.toISOString(),
       template_ad_id: c.template.adId,
     };
+    if (!(await claim("CREATE_ADSET"))) return { kind: "SKIPPED" };
     try {
       const adsetId = await w.createTestAdset(account, {
         name,
-        campaignId: cfg.testCampaignId,
+        campaignId,
         lifetimeBudgetMinor: request.lifetime_budget_minor,
         startTime: b.startAt,
         endTime: b.endAt,
@@ -551,43 +687,62 @@ async function publishOneVariant(db: Db, c: PublishCtx): Promise<VariantOutcome>
       });
       // Id nhóm và dòng sổ cam kết tiền đi CÙNG một giao dịch: có cái này thì có cái kia.
       await db.transaction(async (tx) => {
-        await tx.update(T.creativeVariants).set({ fbAdsetId: adsetId, updatedAt: now }).where(eq(T.creativeVariants.id, v.id));
+        await tx.update(T.creativeVariants).set({ fbAdsetId: adsetId, fbPendingStep: "", fbPendingAt: null, updatedAt: now }).where(eq(T.creativeVariants.id, v.id));
         await c.log({ variantId: v.id, action: "CREATE_ADSET", outcome: "APPLIED", detail: "Đã tạo nhóm test (ngân sách trọn đời + end_time).", targetId: adsetId, amountVnd: c.budgetPerVariantVnd, request }, tx);
       });
       v.fbAdsetId = adsetId;
     } catch (e) {
-      await c.log({ variantId: v.id, action: "CREATE_ADSET", outcome: "FAILED", detail: errText(e), request });
+      await c.log({ variantId: v.id, action: "CREATE_ADSET", outcome: "FAILED", detail: `${errText(e)}${v.fbCampaignId ? ` · chiến dịch riêng ${v.fbCampaignId} vẫn TẮT` : ""}`, request });
       await markFailed();
       return { kind: "FAILED" };
     }
   }
 
-  // ── 4. Tạo mẩu ──
+  // ── 5. Tạo mẩu ──
   if (!v.fbAdId) {
     const g = await gate("CREATE_AD");
     if (!g.ok) return { kind: "DENIED", denial: g.denial };
-    const name = `VM ${b.batchDay} #${v.slot}`;
+    const name = names.ad;
     const adsetId = v.fbAdsetId ?? "";
+    const request = { account, name, adset_id: adsetId, creative_id: v.fbCreativeId };
+    if (!(await claim("CREATE_AD"))) return { kind: "SKIPPED" };
     try {
       const adId = await w.createAd(account, { name, adsetId, creativeId: v.fbCreativeId });
       await db.transaction(async (tx) => {
+        // Cấu trúc cũ: có mẩu là đang chạy. Cấu trúc mới: chiến dịch riêng còn TẮT — `LIVE` chỉ sau bước bật.
         await tx
           .update(T.creativeVariants)
-          .set({ fbAdId: adId, status: "LIVE", committedBudgetVnd: c.budgetPerVariantVnd, publishedAt: now, updatedAt: now })
+          .set(legacy ? { fbAdId: adId, fbPendingStep: "", fbPendingAt: null, status: "LIVE", committedBudgetVnd: c.budgetPerVariantVnd, publishedAt: now, updatedAt: now } : { fbAdId: adId, fbPendingStep: "", fbPendingAt: null, updatedAt: now })
           .where(eq(T.creativeVariants.id, v.id));
-        await c.log({ variantId: v.id, action: "CREATE_AD", outcome: "APPLIED", detail: "Đã tạo mẩu quảng cáo — mẫu đang chạy.", targetId: adId, request: { account, name, adset_id: adsetId, creative_id: v.fbCreativeId } }, tx);
+        await c.log({ variantId: v.id, action: "CREATE_AD", outcome: "APPLIED", detail: legacy ? "Đã tạo mẩu quảng cáo — mẫu đang chạy." : "Đã tạo mẩu quảng cáo — chờ bật chiến dịch.", targetId: adId, request }, tx);
+      });
+      v.fbAdId = adId;
+      if (legacy) return { kind: "LIVE" };
+    } catch (e) {
+      await c.log({ variantId: v.id, action: "CREATE_AD", outcome: "FAILED", detail: errText(e), request });
+      // Nhóm đã có mà mẩu không — tắt nhóm để nó không bao giờ tiêu tiền ngoài ý muốn, rồi mới báo lỗi.
+      return failAndCleanup();
+    }
+  }
+  if (legacy) return { kind: "LIVE" };
+
+  // ── 6. BẬT chiến dịch riêng — công tắc tổng, bước CUỐI ──
+  {
+    const campaignId = v.fbCampaignId ?? "";
+    const g = await gate("ACTIVATE_CAMPAIGN", campaignId || null);
+    if (!g.ok) return { kind: "DENIED", denial: g.denial };
+    try {
+      await w.activateTestCampaign(campaignId);
+      await db.transaction(async (tx) => {
+        await tx.update(T.creativeVariants).set({ status: "LIVE", committedBudgetVnd: c.budgetPerVariantVnd, publishedAt: now, updatedAt: now }).where(eq(T.creativeVariants.id, v.id));
+        await c.log({ variantId: v.id, action: "ACTIVATE_CAMPAIGN", outcome: "APPLIED", detail: "Đã bật chiến dịch riêng — mẫu đang chạy.", targetId: campaignId, request: { campaign_id: campaignId, status: "ACTIVE" } }, tx);
       });
       return { kind: "LIVE" };
     } catch (e) {
-      await c.log({ variantId: v.id, action: "CREATE_AD", outcome: "FAILED", detail: errText(e), request: { account, name, adset_id: adsetId, creative_id: v.fbCreativeId } });
-      // Nhóm đã có mà mẩu không — tắt nhóm để nó không bao giờ tiêu tiền ngoài ý muốn, rồi mới báo lỗi.
-      await pauseCreativeVariant(db, { variantId: v.id, kind: "CLEANUP", actor: CREATIVE_LOOP_ACTOR }, now, c.deps);
-      await markFailed();
-      return { kind: "FAILED" };
+      await c.log({ variantId: v.id, action: "ACTIVATE_CAMPAIGN", outcome: "FAILED", detail: `${errText(e)} · chiến dịch ${campaignId} vẫn TẮT`, request: { campaign_id: campaignId, status: "ACTIVE" } });
+      return failAndCleanup();
     }
   }
-
-  return { kind: "LIVE" };
 }
 
 // ───────────────────────────── TẮT ─────────────────────────────

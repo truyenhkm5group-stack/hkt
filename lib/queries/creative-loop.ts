@@ -301,6 +301,13 @@ export type VariantCard = {
   rules: VariantRulesSnapshot | null;
   /** Ô `DESIGN` ⇒ thiết kế mà mẩu quảng cáo. */
   design: DesignCard | null;
+  /** Tên chiến dịch · nhóm · quảng cáo sẽ đăng (§5i). Rỗng = mẫu của lô cũ (tên `VM <ngày> #<ô>`). */
+  campaignName: string;
+  adsetName: string;
+  adName: string;
+  nameSeq: number | null;
+  /** Chiến dịch RIÊNG của bài (mỗi bài một chiến dịch). `null` = chưa tạo / mẫu đăng theo cấu trúc cũ. */
+  fbCampaignId: string | null;
 };
 
 /** Thiết kế của một ô `DESIGN` — đủ để người duyệt thấy mã, DNA, mã cha, giá đề nghị. */
@@ -502,6 +509,11 @@ function toVariantCard(r: VariantJoined): VariantCard {
     designConceptId: v.designConceptId,
     rules: parseVariantRules(v.rulesSnapshot),
     design: null,
+    campaignName: v.campaignName,
+    adsetName: v.adsetName,
+    adName: v.adName,
+    nameSeq: v.nameSeq,
+    fbCampaignId: v.fbCampaignId,
   };
 }
 
