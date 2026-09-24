@@ -60,6 +60,10 @@ const BOC_THEO_HINH_DANG: { tep: string; ham: string; soLan: number }[] = [
   { tep: "lib/queries/payroll.ts", ham: "export async function salesByProductPage(", soLan: 1 },
   // /reports?tab=nominal, /ads/daily — perf-probe 24/09/2026: 4.908 ms, cùng phép gộp vsales đã đo 8.578 → 26 ms
   { tep: "lib/queries/profit-nominal.ts", ham: "async function stockByProduct(", soLan: 1 },
+  // / (trang chủ) + bản tin — perf-probe 24/09/2026: 6.723–11.087 ms đường thật, 887–1.014 ms khi tắt JIT
+  { tep: "lib/queries/fulfillment-buckets.ts", ham: "export async function getFulfillmentBuckets(", soLan: 1 },
+  // /data-quality — perf-probe 24/09/2026: 5.389 ms đường thật, 278 ms khi tắt JIT
+  { tep: "lib/cs/reconcile-order-created.ts", ham: "export async function reconcileOrderNotCreated(", soLan: 1 },
 ];
 
 const goc = path.resolve(__dirname, "..");

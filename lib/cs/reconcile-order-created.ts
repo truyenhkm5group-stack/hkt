@@ -1,6 +1,6 @@
 import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { rowsOf } from "@/lib/sql-rows";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { ORDER_MATCH_WINDOW_DAYS, ORDER_MATERIALIZED_STAGES_SQL } from "@/lib/constants/order-materialized";
 
 /**
@@ -218,7 +218,12 @@ export async function reconcileOrderNotCreated(options: { dryRun?: boolean; acto
   const db = await getDb();
   const dangMo = and(eq(c.kind, "ORDER_NOT_CREATED"), inArray(c.status, ["OPEN", "IN_PROGRESS"]));
 
-  const [dem] = await db
+  /*
+    JIT TẮT CHO RIÊNG CÂU ĐẾM (đọc) — đo production 24/09/2026 (ops perf-probe): 5.389 ms trên đường
+    thật dưới /data-quality; EXPLAIN 3 lượt xen kẽ: 4.828 ms JIT bật, 278 ms JIT tắt (94 %). Phần GHI
+    phía sau giữ nguyên đường cũ — chỉ phép đếm chạy trong giao dịch tắt JIT.
+  */
+  const [dem] = await chayKhongJit(db, (tx) => tx
     .select({
       openBefore: sql<number>`count(*)`,
       // Bậc chứng cứ xếp theo thứ tự ƯU TIÊN: một case có cả ba chỉ được đếm ở bậc mạnh nhất,
@@ -231,7 +236,7 @@ export async function reconcileOrderNotCreated(options: { dryRun?: boolean; acto
       stillPending: sql<number>`count(*) filter (where not ${CO_CHUNG_CU})`,
     })
     .from(c)
-    .where(dangMo);
+    .where(dangMo));
 
   const closed: Record<ReconcileReason, number> = {
     CONVERSATION_HAS_ORDER: Number(dem?.convHasOrder ?? 0),
