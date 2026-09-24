@@ -101,7 +101,7 @@ export const CONFIG_FIELD_LABEL: Record<Exclude<keyof CreativeLoopConfig, "killR
   exploreShare: "Tỷ lệ ô thăm dò (0 – 1)",
   winOrdersAbove: "THẮNG khi đơn chốt vượt",
   verdictSettleHours: "Đợi đơn về sau khung test (giờ)",
-  focusProductIds: "Mã hàng ưu tiên cho ô thăm dò",
+  focusProductIds: "Chỉ test các mã này (để trống = mọi mã có ảnh thật)",
   imageModel: "Mô hình sinh ảnh",
   imageSize: "Khổ ảnh",
   imageQuality: "Chất lượng ảnh",

@@ -10,6 +10,7 @@ import {
   BATCH_STATUS_LABEL,
   CREATIVE_VERDICT_LABEL,
   CREATIVE_WRITE_ACTION_LABEL,
+  PUBLISH_REQUIRED_FIELDS,
   VARIANT_STATUSES,
   VARIANT_STATUS_LABEL,
   type BatchStatus,
@@ -17,6 +18,7 @@ import {
   type VariantStatus,
 } from "@/lib/constants/creative-loop";
 import { describeRule } from "@/lib/creative/judge";
+import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
 import { formatDate, formatDateTime, formatNumber, formatVND, vnShortStamp } from "@/lib/format";
 import { getBatchDetail, listRecentBatches, readCurrentCreativeConfig, type BatchDetail, type BatchSummary, type PendingBatch, type VariantCard } from "@/lib/queries/creative-loop";
 import { cn } from "@/lib/utils";
@@ -104,6 +106,7 @@ function PendingBlock({ pending, now, canApprove, canEdit }: { pending: PendingB
   const reserveIds = new Set([...coAnh].sort((a, z) => a.slot - z.slot).slice(tran).map((v) => v.id));
   const quaHan = now.getTime() >= new Date(b.approvalDeadline).getTime();
   const choDuyet = b.status === "PENDING_APPROVAL";
+  const thieuDeDang = configProblems.filter((p) => (PUBLISH_REQUIRED_FIELDS as readonly string[]).includes(p.field));
   const lyDoKhoa = !canApprove
     ? "Cần quyền “Chi phí: ghi” để duyệt lô."
     : !choDuyet
@@ -112,7 +115,9 @@ function PendingBlock({ pending, now, canApprove, canEdit }: { pending: PendingB
         ? `Đã quá hạn duyệt lúc ${vnShortStamp(b.approvalDeadline)} — lô này sẽ không chạy, không đồng nào được chi.`
         : coAnh.length === 0
           ? "Lô chưa có mẫu nào có ảnh."
-          : null;
+          : // Duyệt một lô mà máy chắc chắn không đăng được là một cú bấm vô nghĩa — nói ra NGAY trên nút,
+            // không để người bấm chỉ biết khi hộp xác nhận đã mở.
+            (adsWriteDisabledReason() ?? (thieuDeDang.length > 0 ? `Cấu hình của lô còn thiếu: ${thieuDeDang.map((p) => p.message).join(" ")}` : null));
   const lyDoKhoaTuChoi = !canApprove ? "Cần quyền “Chi phí: ghi”." : !choDuyet ? "Chỉ từ chối được lô đang chờ duyệt." : null;
   const gat = (b.variantCounts.REJECTED ?? 0) + (b.variantCounts.GEN_FAILED ?? 0);
 

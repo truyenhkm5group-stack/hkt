@@ -1,4 +1,5 @@
 import {
+  RULE_METRIC_LABEL,
   type CreativeLoopConfig,
   type CreativeRule,
   type CreativeVerdict,
@@ -99,7 +100,7 @@ export function evalRule(m: VariantMetrics, rule: CreativeRule): { value: number
 const OP_TEXT = { gt: ">", gte: "≥", lt: "<", lte: "≤" } as const;
 
 export function describeRule(rule: CreativeRule): string {
-  return rule.label || `${rule.metric} ${OP_TEXT[rule.op]} ${rule.value.toLocaleString("vi-VN")} (sau khi chi ${rule.minSpendVnd.toLocaleString("vi-VN")}đ)`;
+  return rule.label || `${RULE_METRIC_LABEL[rule.metric]} ${OP_TEXT[rule.op]} ${rule.value.toLocaleString("vi-VN")} (sau khi chi ${rule.minSpendVnd.toLocaleString("vi-VN")}đ)`;
 }
 
 export function judgeVariant(input: JudgeInput, cfg: Pick<CreativeLoopConfig, "killRules" | "keepRules" | "winOrdersAbove" | "verdictSettleHours">, now: Date): JudgeResult {
@@ -108,7 +109,7 @@ export function judgeVariant(input: JudgeInput, cfg: Pick<CreativeLoopConfig, "k
   const out = (verdict: CreativeVerdict, reasons: string[], firedKillRule: CreativeRule | null = null): JudgeResult => ({ verdict, reasons, firedKillRule, keepChecks });
 
   if (input.libraryAt) {
-    const note = m.bookedOrders > cfg.winOrdersAbove ? [] : [`Hiện còn ${m.bookedOrders} đơn chốt (có đơn bị huỷ sau khi vào thư viện).`];
+    const note = m.bookedOrders > cfg.winOrdersAbove ? [] : [`Hiện đếm được ${m.bookedOrders} đơn chốt quy về mẫu — ít hơn lúc vào thư viện (đơn bị huỷ, đổi quy kết, hoặc chưa đồng bộ; máy không biết là cái nào).`];
     return out("WIN", [`Đã vào thư viện: vượt ${cfg.winOrdersAbove} đơn chốt.`, ...note]);
   }
   if (m.bookedOrders > cfg.winOrdersAbove) return out("WIN", [`${m.bookedOrders} đơn chốt — vượt ngưỡng ${cfg.winOrdersAbove}.`]);

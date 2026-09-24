@@ -28,7 +28,7 @@ const VERDICT_TONE: Partial<Record<CreativeVerdict, string>> = {
 
 function Hai({ top, bottom, title }: { top: React.ReactNode; bottom: React.ReactNode; title?: string }) {
   return (
-    <div className="numeric text-right leading-tight" title={title}>
+    <div className="numeric whitespace-nowrap text-right leading-tight" title={title}>
       <div className="font-medium">{top}</div>
       <div className="text-[11px] text-muted-foreground">{bottom}</div>
     </div>
