@@ -10,7 +10,9 @@ import { actionToken, verifyActionToken } from "@/lib/ai/policy";
 import { ACTION_FOR_DECISION, ADS_WRITE_ACTION_LABEL, ADS_WRITE_DENIAL_REASON, ADS_WRITE_LIMITS, type AdsWriteAction } from "@/lib/constants/ads-write";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import type { AdsAction, DecisionBasis } from "@/lib/constants/ads-decision";
-import { actionFor, brakeState, gateAdsWrite, planProductBudget, subjectDetail, subjectFreshness, type PlanRow, type PlanTarget } from "@/lib/marketing/ads-write-gate";
+import { actionFor, brakeState, gateAdsWrite, gateIntradayScale, planProductBudget, subjectDetail, subjectFreshness, type PlanRow, type PlanTarget } from "@/lib/marketing/ads-write-gate";
+import { INTRADAY_DECISION, intradayNextBudget, intradayRateCheck, intradayScaleVerdict } from "@/lib/constants/ads-intraday";
+import { appliedTodayByCampaign, getIntradayBoard } from "@/lib/queries/ads-intraday";
 import { decisionStability, productCampaignCandidates, spendAroundWindow } from "@/lib/queries/marketing-ledger";
 import {
   adsWriteDisabledReason,
@@ -481,4 +483,149 @@ export async function applyProductBudgetPlan(raw: ApplyProductPlanInput): Promis
 
   for (const path of ["/ads", "/work", "/"]) revalidatePath(path);
   return applied > 0 ? { ok: true, detail: tomTat } : { error: tomTat };
+}
+
+/* ═══════════════════ LÀN NHANH: TĂNG NGÂN SÁCH TRONG NGÀY ═══════════════════ */
+
+/**
+ * Tên tool RIÊNG: phiếu duyệt của làn nhanh không dùng được cho làn sổ quyết định, và ngược lại —
+ * hai làn đứng trên hai căn cứ khác nhau, nên một chữ ký không được đi qua cả hai.
+ */
+const TOOL_INTRADAY = "ads.budget.intraday";
+
+export type IntradayProposal = {
+  campaignId: string;
+  campaignName: string;
+  currentBudgetVnd: number | null;
+  nextBudgetVnd: number | null;
+  /** Câu căn cứ bằng số HÔM NAY — người bấm phải đọc được vì sao máy đề nghị. */
+  why: string;
+  token: string | null;
+  blocked: string | null;
+  warning: string | null;
+};
+
+const intradayApplySchema = z.object({
+  campaignId: z.string().min(1),
+  nextBudgetVnd: z.number().int(),
+  token: z.string().min(8),
+});
+
+function intradayTokenPayload(i: { campaignId: string; nextBudgetVnd: number | null }) {
+  return { campaignId: i.campaignId, nextBudgetVnd: i.nextBudgetVnd };
+}
+
+/** BƯỚC 1 — ĐỀ NGHỊ tăng trong ngày. Chỉ đọc. */
+export async function proposeIntradayScale(campaignId: string): Promise<IntradayProposal | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
+  if (!campaignId) return { error: "Thiếu mã chiến dịch" };
+
+  const board = await getIntradayBoard();
+  const row = board.rows.find((r) => r.campaignId === campaignId);
+  const base: IntradayProposal = {
+    campaignId,
+    campaignName: row?.name ?? campaignId,
+    currentBudgetVnd: null,
+    nextBudgetVnd: null,
+    why: row?.verdict.reason ?? "Chiến dịch không có số chi hay đơn chốt nào hôm nay.",
+    token: null,
+    blocked: null,
+    warning: null,
+  };
+  const disabled = adsWriteDisabledReason();
+  if (disabled) return { ...base, blocked: disabled };
+  if (!row || !row.verdict.eligible) return { ...base, blocked: `${ADS_WRITE_DENIAL_REASON.INTRADAY_NOT_ELIGIBLE} ${base.why}` };
+  if (row.rate && !row.rate.ok) return { ...base, blocked: `${ADS_WRITE_DENIAL_REASON.INTRADAY_RATE_LIMIT} ${row.rate.reason}` };
+
+  const state = await readCampaignState(campaignId).catch(() => null);
+  if (!state) return { ...base, blocked: ADS_WRITE_DENIAL_REASON.SUBJECT_UNREADABLE };
+  if (state.status !== "ACTIVE") return { ...base, blocked: `${ADS_WRITE_DENIAL_REASON.SUBJECT_NOT_RUNNING} (Facebook báo: ${state.status}.)` };
+  const next = intradayNextBudget(state.dailyBudgetVnd);
+  if (next === null) return { ...base, blocked: "Chưa đọc được ngân sách ngày hiện tại của chiến dịch." };
+
+  return {
+    ...base,
+    campaignName: state.name || base.campaignName,
+    currentBudgetVnd: state.dailyBudgetVnd,
+    nextBudgetVnd: next,
+    token: actionToken(user.id, TOOL_INTRADAY, intradayTokenPayload({ campaignId, nextBudgetVnd: next })),
+    warning: state.budgetAtAdsetLevel ? "Chiến dịch này đặt ngân sách ở CẤP NHÓM — đổi ở cấp chiến dịch sẽ không có tác dụng gì." : null,
+  };
+}
+
+/** BƯỚC 2 — ÁP. Máy chủ đọc lại MỌI thứ (số hôm nay, trạng thái, ngân sách, nhịp, phanh), rồi mới gọi Facebook. */
+export async function applyIntradayScale(raw: z.infer<typeof intradayApplySchema>): Promise<ApplyResult> {
+  const user = await requireUser();
+  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
+  const parsed = intradayApplySchema.safeParse(raw);
+  if (!parsed.success) return { error: "Đầu vào không hợp lệ" };
+  const input = parsed.data;
+
+  const now = new Date();
+  const today = vnDay(now);
+  const confirmed = verifyActionToken(input.token, user.id, TOOL_INTRADAY, intradayTokenPayload(input));
+  const board = await getIntradayBoard(now);
+  const row = board.rows.find((r) => r.campaignId === input.campaignId);
+  const verdict = row?.verdict ?? intradayScaleVerdict({ spendKnown: false, spend: 0, bookedOrders: 0, bookedRevenue: 0 });
+  // Nhịp đọc LẠI ngay lúc bấm: hai người bấm cùng lúc thì người thứ hai phải thấy lượt của người thứ nhất.
+  const moc = (await appliedTodayByCampaign([input.campaignId], today)).get(input.campaignId) ?? [];
+  const state = await readCampaignState(input.campaignId).catch(() => null);
+
+  const gate = gateIntradayScale({
+    hardEnabled: adsWriteHardEnabled(),
+    mode: adsWriteMode(),
+    confirmed,
+    brake: brakeState(await brakeObservations().catch(() => [])),
+    status: state?.status ?? null,
+    verdict,
+    rate: intradayRateCheck(moc, now),
+    currentBudgetVnd: state?.dailyBudgetVnd ?? null,
+    nextBudgetVnd: input.nextBudgetVnd,
+    shiftedTodayVnd: await shiftedToday(today),
+  });
+
+  const db = await getDb();
+  const common = {
+    changeDay: today,
+    campaignId: input.campaignId,
+    campaignName: state?.name || row?.name || input.campaignId,
+    action: "SET_DAILY_BUDGET",
+    decision: INTRADAY_DECISION,
+    ledgerId: null,
+    heldDays: 0,
+    budgetBefore: state?.dailyBudgetVnd ?? null,
+    // Làn nhanh không đứng trên lợi nhuận đã đo — để TRỐNG, không bịa một con số cho phanh so (mục 42).
+    profitBefore: null,
+    actorUserId: user.id,
+    actorEmail: user.email,
+    mode: adsWriteMode(),
+  };
+
+  if (!gate.allow) {
+    await db.insert(schema.adsBudgetChanges).values({ ...common, outcome: "DENIED", denial: gate.denial, detail: gate.reason, budgetAfter: null });
+    await audit({ userId: user.id, userEmail: user.email, action: "ADS_BUDGET_DENIED", entity: "CAMPAIGN", entityId: input.campaignId, reason: gate.reason, after: { lane: "INTRADAY", nextBudgetVnd: input.nextBudgetVnd } });
+    return { error: gate.reason };
+  }
+
+  const applied = await applyAdsWrite({ campaignId: input.campaignId, action: "SET_DAILY_BUDGET", nextBudgetVnd: input.nextBudgetVnd, currency: state?.currency ?? "VND" });
+  await db.insert(schema.adsBudgetChanges).values({
+    ...common,
+    outcome: applied.ok ? "APPLIED" : "FAILED",
+    denial: "",
+    detail: `${applied.detail} · Căn cứ trong ngày: ${verdict.reason}`,
+    budgetAfter: applied.ok ? input.nextBudgetVnd : null,
+  });
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: applied.ok ? "ADS_BUDGET_APPLIED" : "ADS_BUDGET_FAILED",
+    entity: "CAMPAIGN",
+    entityId: input.campaignId,
+    before: { dailyBudgetVnd: state?.dailyBudgetVnd ?? null, status: state?.status ?? "" },
+    after: { lane: "INTRADAY", nextBudgetVnd: input.nextBudgetVnd },
+    reason: `Tăng trong ngày · ${verdict.reason} · ${applied.detail}`,
+  });
+  for (const path of ["/ads", "/work", "/"]) revalidatePath(path);
+  return applied.ok ? { ok: true, detail: applied.detail } : { error: applied.detail };
 }

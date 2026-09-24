@@ -212,6 +212,7 @@ import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
 import { testMarketerDailyNominal } from "./marketer-daily-nominal.test";
 import { testAdsDecision } from "./ads-decision.test";
+import { testAdsIntraday } from "./ads-intraday.test";
 import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
 import { testAdsBrakeByDecision, testAdsWrite } from "./ads-write.test";
 import { testAdsKillSwitchDb, testAdsKillSwitchPure } from "./ads-kill-switch.test";
@@ -1674,6 +1675,7 @@ async function main() {
   await testMarketingDaily();
   await testMarketerDailyNominal();
   await testAdsDecision(db);
+  testAdsIntraday();
   await testMarketingDecisionLedger();
   testAdsWrite();
   testCreativeLoop();
