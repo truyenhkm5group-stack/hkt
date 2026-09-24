@@ -19,9 +19,9 @@ import { shiftDay } from "@/lib/constants/marketing-decision-ledger";
 const SENT_KEY = "creative.notified";
 
 export type CreativeNotice = {
-  kind: "READY" | "EXPIRED" | "PUBLISHED" | "KILLED" | "SCALE";
+  kind: "READY" | "EXPIRED" | "PUBLISHED" | "KILLED" | "SCALE" | "MOQ";
   batchDay: string;
-  /** Khoá chống gửi lặp thay cho ngày lô — tin nhiều-mẫu (đề nghị scale) khoá theo tập mẫu. Bắt đầu bằng ngày `YYYY-MM-DD` để sổ tự dọn sau 30 ngày. */
+  /** Khoá chống gửi lặp thay cho ngày lô — tin nhiều-mẫu (đề nghị scale) khoá theo tập mẫu, tin MOQ theo mã thiết kế. Bắt đầu bằng ngày `YYYY-MM-DD` để sổ tự dọn sau 30 ngày. */
   dedupeKey?: string;
   title: string;
   lines: string[];

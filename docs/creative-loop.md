@@ -378,6 +378,57 @@ dụng nhắn tin**, mục tiêu hiệu quả tối đa lượt mua qua tin nh�
 (2) *Khách hàng tiềm năng*: mục tiêu **Khách hàng tiềm năng** (`OUTCOME_LEADS`), biểu mẫu tức thì đã
 tạo sẵn, mẩu ảnh đơn nút đăng ký. Rồi dán hai id chiến dịch vào tab Cấu hình → "Scale mẫu thắng".
 
+## 5h. MOQ thiết kế mới — đủ 50 đơn thì máy dựng NHÁP lệnh sản xuất (chủ shop chốt 24/09/2026)
+
+*"MOQ = 50 đơn."* Thiết kế mới bán như hàng thường (COD, sản xuất sau); khi một thiết kế gom đủ
+**`DESIGN_MOQ.minOrders` = 50 ĐƠN** thì máy dựng MỘT nháp `production_orders` và gửi MỘT tin báo. Hằng số chỉ
+nằm ở `lib/constants/creative-loop.ts` (`DESIGN_MOQ`, `designMoqReached` — ranh giới `>=`).
+
+**Đếm gì.** Đếm ĐƠN, không đếm sản phẩm (khách mua 3 cái vẫn là một đơn). Đơn = population `CONFIRMED_ORDER`
+và KHÔNG huỷ theo `ORDER_OUTCOME_FAST` — đúng "đơn chốt" (`bookedOrders`) của vòng mẫu. KHÔNG dùng "giao thành
+công": thiết kế chưa sản xuất thì chưa có gì để giao. Đơn huỷ · xoá · Mới chưa chốt không tính.
+
+| Đường | Nguồn | Ghi chú |
+|---|---|---|
+| (a) `viaAd` | `orders.ad_id` ∈ `fb_ad_id` của các mẩu thuộc biến thể có `design_concept_id` | cùng đường với cột "Đơn chốt"; Pancake gửi `ad_id` cho ~3/4 đơn Facebook ⇒ đếm THIẾU, không thừa |
+| (b) `viaCode` | đơn có dòng KHÔNG PHẢI QUÀ là sản phẩm Pancake `custom_id` = mã TK (so khớp `upper(trim())`), nối qua `order_items.product_id` hoặc `variant_id → product_variants.product_id` | đường quan hệ của `lib/queries/product-code.ts`, không dò chuỗi SKU / tên |
+| **MOQ** | HỢP (a) ∪ (b) theo id đơn | đơn thấy ở cả hai đường tính MỘT lần (`both`) |
+
+**Số lượng** (`total_qty` của nháp) = tổng `quantity` các dòng mã TK, bỏ `is_bonus`. Màu / size đọc từ mẫu mã
+(`product_variants.color/size`); thiếu một trong hai ⇒ vẫn cộng vào tổng nhưng KHÔNG chia vào ma trận, kể ra ở
+`note`. Đơn chỉ thấy qua quảng cáo (`adOnly`, không có dòng mã TK — vd dòng gõ tay) ⇒ khách đặt bao nhiêu cái
+của thiết kế là CHƯA BIẾT: không cộng, không đoán từ tên hàng, kể ra ở `note`.
+
+**Nháp.** `status = 'DRAFT'` (trạng thái nháp sẵn có của trang Kế hoạch đặt hàng), mã `PO-<mã TK>`,
+`product_id` = sản phẩm Pancake mang mã (không có ⇒ `NULL`, tên "Thiết kế TK-…"), `unit_cost = NULL` (không
+căn cứ giá gia công — CHƯA BIẾT, không phải 0đ; migration bỏ NOT NULL của cột), xưởng trống, không hạn.
+`created_by` = "Máy · vòng mẫu (MOQ)". **Máy KHÔNG gửi xưởng** (`DRAFT → SENT` chỉ qua `setProductionStatus`,
+người bấm) và **KHÔNG đặt `design_concepts.status = 'PRODUCTION'`**.
+
+**Lũy đẳng.** Khoá là `design_concepts.moq_reached_at`, ghi CÙNG giao dịch với nháp (cập nhật có điều kiện
+`moq_reached_at IS NULL`). Chạy lại ⇒ không nháp thứ hai; người xoá nháp ⇒ `production_order_id` về `NULL` nhưng
+mốc còn ⇒ máy KHÔNG dựng lại (xoá nháp là một quyết định). Mã `PO-<TK>` là khoá duy nhất thứ hai ở CSDL. Người
+đã lập sẵn lệnh cho đúng mã (theo `product_code` hoặc sản phẩm Pancake mang mã, chưa huỷ) ⇒ máy NỐI vào lệnh
+ấy, không dựng thêm. Căn cứ lúc dựng lưu ở `moq_snapshot`.
+
+**Trong lượt vòng mẫu** (`runCreativeLoopTick`, bước 3c, qua `step(...)` — lỗi không chặn bước khác): chạy ở
+MỌI lượt kể cả khi vòng TẮT (đơn vẫn về; nháp không tiêu tiền, không gửi xưởng). Tin báo `kind: "MOQ"`, một tin
+MỖI thiết kế, khoá chống lặp `<ngày đủ MOQ>:<mã TK>`; gửi được (hoặc sổ nói đã gửi) thì đóng dấu
+`moq_notified_at`, hỏng thì lượt sau gửi lại.
+
+**Màn hình:** tab Thiết kế mới, cột "MOQ sản xuất": `x/50 đơn` đếm SỐNG, "mã TK a · chỉ QC b" (di chuột: số
+trùng, số lượng), link tới nháp / lệnh đang nối, hoặc "nháp đã xoá".
+
+Tệp: `lib/queries/creative-moq.ts` (đếm, chỉ đọc) · `lib/creative/moq.ts` (nháp thuần + đường ghi + tin báo) ·
+bước 3c trong `lib/creative/loop.ts` · `design-tab.tsx` · `drizzle/0122_creative_design_moq.sql` ·
+`tests/creative-moq.test.ts`.
+
+**Chờ chủ shop quyết:** (1) đơn chỉ-qua-quảng-cáo có nên tính vào MOQ không — khách thấy quảng cáo thiết kế
+nhưng có thể đã mua mã khác; hiện TÍNH (theo yêu cầu hai đường) và kể riêng. (2) nháp không có sản phẩm Pancake
+mã TK thì trình sửa lệnh không lưu được (bắt buộc chọn sản phẩm) — tạo sản phẩm Pancake đúng mã trước khi test.
+(3) gửi xưởng thẳng từ nháp (không bấm Lưu) không qua cổng duyệt người thứ hai `PURCHASING_LARGE` — cổng ấy
+chỉ chạy ở `saveProductionOrder`, và giá NULL thì số tiền của cổng cũng là 0.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |

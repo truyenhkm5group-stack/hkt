@@ -1211,6 +1211,69 @@ export function designCode(batchDay: string, n: number): string {
 
 export const DESIGN_CODE_RE = /^TK-[0-9]{6}-[0-9]{2,}$/;
 
+// ───────────────────────────── MOQ — THIẾT KẾ ĐỦ ĐƠN ⇒ NHÁP LỆNH SẢN XUẤT (§5h) ─────────────────────────────
+
+/**
+ * Chủ shop chốt 24/09/2026: thiết kế mới gom đủ **50 ĐƠN** thì máy dựng NHÁP lệnh sản xuất. Đếm ĐƠN (không
+ * đếm sản phẩm) — một khách mua 3 cái vẫn là một đơn; số lượng sản phẩm đi vào `total_qty` của nháp.
+ * Đơn = đơn ĐÃ XÁC NHẬN (`CONFIRMED_ORDER`, không huỷ theo `ORDER_OUTCOME`) — cùng định nghĩa "đơn chốt" của
+ * vòng mẫu. KHÔNG phải đơn giao thành công: hàng chưa sản xuất thì chưa giao được.
+ * Chỉ sửa ở đây, và chỉ khi chủ shop đổi (AGENTS.md mục 7).
+ */
+export const DESIGN_MOQ = { minOrders: 50 } as const;
+
+/** Đủ MOQ chưa — hàm thuần, ranh giới `>=` (50 đơn là đủ, 49 thì chưa). */
+export function designMoqReached(orders: number, minOrders: number = DESIGN_MOQ.minOrders): boolean {
+  return Number.isFinite(orders) && orders >= minOrders;
+}
+
+/**
+ * Căn cứ lúc máy dựng / nối lệnh, lưu ở `design_concepts.moq_snapshot`. Hai đường đếm khai RIÊNG:
+ *  · `viaCode` — đơn có dòng hàng (không phải quà) là sản phẩm Pancake mã = mã TK;
+ *  · `viaAd`   — đơn mang `orders.ad_id` của một mẩu QC mang thiết kế;
+ *  · `orders`  — HỢP hai tập theo id đơn (đơn thấy ở cả hai đường tính MỘT lần — `both`);
+ *  · `adOnly`  — đơn chỉ thấy qua quảng cáo, không có dòng mã TK ⇒ số lượng CHƯA BIẾT, không cộng vào tổng.
+ */
+export type DesignMoqSnapshot = {
+  minOrders: number;
+  orders: number;
+  viaCode: number;
+  viaAd: number;
+  both: number;
+  adOnly: number;
+  /** Tổng số lượng các dòng mã TK (bỏ quà) — `total_qty` của nháp. */
+  qtyKnown: number;
+  /** Phần của `qtyKnown` chưa rõ màu hoặc size — không chia vào ma trận, không đoán. */
+  qtyNoVariant: number;
+  /** Có sản phẩm Pancake mang đúng mã TK hay không. */
+  pancakeProduct: boolean;
+  /** `true` = nối vào lệnh NGƯỜI đã lập sẵn cho mã này, máy không dựng nháp. */
+  linkedExisting: boolean;
+  countedAt: string;
+};
+
+/** Đọc `moq_snapshot` (JSON không tin được). Hỏng / rỗng ⇒ `null`. */
+export function parseDesignMoqSnapshot(raw: unknown): DesignMoqSnapshot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+  const orders = n(r.orders);
+  if (orders === null) return null;
+  return {
+    minOrders: n(r.minOrders) ?? DESIGN_MOQ.minOrders,
+    orders,
+    viaCode: n(r.viaCode) ?? 0,
+    viaAd: n(r.viaAd) ?? 0,
+    both: n(r.both) ?? 0,
+    adOnly: n(r.adOnly) ?? 0,
+    qtyKnown: n(r.qtyKnown) ?? 0,
+    qtyNoVariant: n(r.qtyNoVariant) ?? 0,
+    pancakeProduct: r.pancakeProduct === true,
+    linkedExisting: r.linkedExisting === true,
+    countedAt: typeof r.countedAt === "string" ? r.countedAt : "",
+  };
+}
+
 // ───────────────────────────── ĐỌC DNA CỦA SẢN PHẨM ĐANG CÓ ─────────────────────────────
 
 /** Route ghi sổ `ai_interactions` của lượt đọc DNA. */

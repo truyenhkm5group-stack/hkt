@@ -4,6 +4,7 @@ import { buildBatch, type BuildBatchDeps, type BuildBatchSummary } from "@/lib/c
 import { evaluateCreatives, type EvaluateResult } from "@/lib/creative/evaluate";
 import { applyKills, publishApprovedBatches, type CreativeDeps, type KillReport, type PublishBatchReport } from "@/lib/creative/publish";
 import { sendCreativeNotice, vnClock, type CreativeNotice } from "@/lib/creative/notify";
+import { markMoqNotified, moqNotice, runDesignMoq, unnotifiedMoq, type DesignMoqReport } from "@/lib/creative/moq";
 import { markProposalsNotified, unnotifiedProposals } from "@/lib/creative/scale";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 import { CREATIVE_HARD_LIMITS, CREATIVE_VERDICT_LABEL, SCALE_KIND_LABEL, type CreativeVerdict } from "@/lib/constants/creative-loop";
@@ -23,6 +24,9 @@ import { vnDay } from "@/lib/constants/marketing-decision-ledger";
  *     vốn chậm vài phút mỗi tấm.
  *  3. **Chấm + tắt** — tắt là việc làm GIẢM tiền, chạy ở mọi lượt kể cả khi vòng đang TẮT: tắt vòng
  *     nghĩa là "đừng làm gì MỚI", không phải "bỏ mặc các mẫu đang tiêu tiền".
+ *  3c. **MOQ thiết kế mới** (§5h) — thiết kế đủ 50 đơn ⇒ NHÁP lệnh sản xuất + MỘT tin báo. Chạy ở MỌI lượt
+ *     kể cả khi vòng đang TẮT: đơn của khách vẫn về dù vòng không đăng mẫu mới, và nháp không tiêu đồng
+ *     nào, không gửi xưởng.
  *  4. **Dựng lô ngày mai** — chậm nhất, đứng cuối.
  *
  * Một bước hỏng KHÔNG chặn bước khác: lỗi đi vào `warnings` và lượt vẫn chạy tiếp. Bước đăng hỏng
@@ -43,6 +47,8 @@ export type LoopTickResult = {
   evaluation: EvaluateResult | null;
   kills: KillReport[];
   build: BuildBatchSummary | null;
+  /** Thiết kế vừa đủ MOQ ở lượt này (§5h) — nháp đã dựng hoặc lệnh có sẵn đã nối. */
+  moq: DesignMoqReport[];
   warnings: string[];
 };
 
@@ -63,7 +69,7 @@ export async function expireOverdueBatches(db: Db, now: Date): Promise<{ id: str
 export async function runCreativeLoopTick(db: Db, now: Date = new Date(), deps: LoopTickDeps = {}): Promise<LoopTickResult> {
   const notify = deps.notify ?? sendCreativeNotice;
   const warnings: string[] = [];
-  const out: LoopTickResult = { enabled: false, expired: [], published: [], evaluation: null, kills: [], build: null, warnings };
+  const out: LoopTickResult = { enabled: false, expired: [], published: [], evaluation: null, kills: [], build: null, moq: [], warnings };
   const step = async <T>(name: string, fn: () => Promise<T>): Promise<T | null> => {
     try {
       return await fn();
@@ -130,6 +136,21 @@ export async function runCreativeLoopTick(db: Db, now: Date = new Date(), deps: 
     })) as { sent?: boolean; skipped?: string } | undefined;
     // Kiểm thử tiêm `notify` không trả gì ⇒ coi như đã gửi.
     if (!r || r.sent || r.skipped === "đã gửi") await markProposalsNotified(db, ids, now);
+  });
+
+  // 3c. MOQ thiết kế mới (§5h) — dựng / nối lệnh, rồi MỘT tin cho MỖI thiết kế chưa báo (khoá theo mã).
+  // Gửi được (hoặc sổ chống lặp nói đã gửi) thì đóng dấu `moq_notified_at`; hỏng thì lượt sau gửi lại.
+  const moq = await step("MOQ thiết kế", () => runDesignMoq(db, now));
+  if (moq) {
+    out.moq = moq.reports;
+    warnings.push(...moq.warnings);
+  }
+  await step("báo MOQ thiết kế", async () => {
+    for (const d of await unnotifiedMoq(db)) {
+      const r = (await notify(moqNotice(d))) as { sent?: boolean; skipped?: string } | undefined;
+      // Kiểm thử tiêm `notify` không trả gì ⇒ coi như đã gửi.
+      if (!r || r.sent || r.skipped === "đã gửi") await markMoqNotified(db, [d.id], now);
+    }
   });
 
   // 4. Dựng lô ngày mai — chỉ khi vòng đang BẬT (buildBatch tự kiểm lại).

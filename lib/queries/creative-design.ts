@@ -19,6 +19,7 @@ import type { DesignParent, DesignPlanInput, DnaObservation } from "@/lib/creati
 import { dnaStats } from "@/lib/creative/design";
 import { AD_MESSAGES } from "@/lib/queries/ads-roas";
 import { variantMetrics } from "@/lib/queries/creative-loop";
+import { designMoqCounts, emptyMoqCount, type DesignMoqCount } from "@/lib/queries/creative-moq";
 import { vnMidnight } from "@/lib/queries/creative-plan";
 import { CONFIRMED_ORDER } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
@@ -352,6 +353,12 @@ export type DesignConceptRow = {
   returnedOrders: number;
   /** `null` = chưa mẩu nào có dòng chi (CHƯA BIẾT, không phải 0). */
   spendVnd: number | null;
+  /** Tiến độ MOQ (§5h) đếm SỐNG: hai đường (mã TK · ad_id) hợp theo id đơn. */
+  moq: DesignMoqCount;
+  /** Mốc máy thấy đủ MOQ — có mốc thì máy không bao giờ dựng nháp thứ hai. */
+  moqReachedAt: string | null;
+  /** Lệnh sản xuất đang nối (nháp máy dựng hoặc lệnh người lập sẵn). `null` + có mốc ⇒ người đã xoá nháp. */
+  productionOrder: { id: string; code: string; status: string } | null;
 };
 
 /** Thiết kế gần nhất (mới → cũ) + số đơn đếm qua `orders.ad_id` của các mẩu mang thiết kế. CHỈ ĐỌC. */
@@ -383,6 +390,14 @@ export async function listDesignConcepts(db: Db, limit = 100): Promise<DesignCon
   const p = schema.products;
   const prods = parentIds.length ? await db.select({ id: p.id, name: p.name, customId: p.customId }).from(p).where(inArray(p.id, parentIds)) : [];
   const labelOf = new Map(prods.map((x) => [x.id, x.customId || x.name]));
+  const moqOf = await designMoqCounts(
+    db,
+    rows.map((r) => ({ id: r.c.id, code: r.c.code })),
+  );
+  const poIds = rows.map((r) => r.c.productionOrderId).filter((x): x is string => Boolean(x));
+  const po = schema.productionOrders;
+  const pos = poIds.length ? await db.select({ id: po.id, code: po.code, status: po.status }).from(po).where(inArray(po.id, poIds)) : [];
+  const poOf = new Map(pos.map((x) => [x.id, x]));
 
   return rows.map((r) => {
     const mine = published.filter((x) => x.designConceptId === r.c.id);
@@ -418,6 +433,9 @@ export async function listDesignConcepts(db: Db, limit = 100): Promise<DesignCon
       deliveredOrders: delivered,
       returnedOrders: returned,
       spendVnd: spend,
+      moq: moqOf.get(r.c.id) ?? emptyMoqCount({ id: r.c.id, code: r.c.code }),
+      moqReachedAt: iso(r.c.moqReachedAt),
+      productionOrder: r.c.productionOrderId ? (poOf.get(r.c.productionOrderId) ?? null) : null,
     };
   });
 }

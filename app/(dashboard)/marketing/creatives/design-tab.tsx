@@ -1,10 +1,12 @@
 import { Shirt } from "lucide-react";
+import Link from "next/link";
 import { DesignProductionButton } from "@/app/(dashboard)/marketing/creatives/design-actions";
 import { DnaChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { StatStrip } from "@/components/stat-tile";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { getDb } from "@/db";
-import { DESIGN_NOVELTY, DESIGN_PARENT_RULES, DESIGN_STATUS_LABEL, type DesignStatus } from "@/lib/constants/creative-loop";
+import { DESIGN_MOQ, DESIGN_NOVELTY, DESIGN_PARENT_RULES, DESIGN_STATUS_LABEL, type DesignStatus } from "@/lib/constants/creative-loop";
+import { PRODUCTION_STATUS_LABEL } from "@/lib/constants/production";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import { listDesignConcepts, productDnaCoverage } from "@/lib/queries/creative-design";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
@@ -16,6 +18,9 @@ import { cn } from "@/lib/utils";
  * Chủ shop 24/09/2026: máy thiết kế mẫu áo / váy CHƯA TỪNG CÓ (lai DNA của mã bán tốt), quảng cáo và
  * nhận đơn như hàng thường, sản xuất sau. Bảng này trả lời: thiết kế nào đang test, đã ra bao nhiêu đơn
  * (qua `orders.ad_id` của các mẩu mang thiết kế — CHỈ ĐỌC), và cái nào đáng đưa vào sản xuất.
+ *
+ * Cột MOQ (§5h): `x/50 đơn` đếm SỐNG theo hai đường (sản phẩm Pancake mã TK · `ad_id` của mẩu), hợp theo id
+ * đơn; đủ thì máy đã dựng NHÁP lệnh sản xuất — link tới nháp. Máy không gửi xưởng.
  */
 
 const STATUS_TONE: Record<DesignStatus, string> = {
@@ -72,6 +77,9 @@ export async function DesignTab({ canEdit }: { canEdit: boolean }) {
                   <th className="px-3 py-2 font-medium">Trạng thái</th>
                   <th className="px-3 py-2 text-right font-medium">Đơn chốt · giao / hoàn</th>
                   <th className="px-3 py-2 text-right font-medium">Đã chi</th>
+                  <th className="px-3 py-2 font-medium" title={`Đủ ${DESIGN_MOQ.minOrders} đơn đã xác nhận (không huỷ) ⇒ máy dựng NHÁP lệnh sản xuất. Đơn đếm qua hai đường: dòng hàng là sản phẩm Pancake mã TK, và ad_id của mẩu QC mang thiết kế — đơn thấy ở cả hai tính một lần. Máy không gửi xưởng.`}>
+                    MOQ sản xuất
+                  </th>
                   <th className="px-3 py-2" />
                 </tr>
               </thead>
@@ -114,6 +122,30 @@ export async function DesignTab({ canEdit }: { canEdit: boolean }) {
                       )}
                     </td>
                     <td className="numeric whitespace-nowrap px-3 py-2 text-right">{formatVND(r.spendVnd)}</td>
+                    <td className="whitespace-nowrap px-3 py-2">
+                      <p className="numeric">
+                        <b>{formatNumber(r.moq.orders)}</b>
+                        <span className="text-muted-foreground">/{formatNumber(DESIGN_MOQ.minOrders)} đơn</span>
+                      </p>
+                      <div className="mt-0.5 h-1 w-20 overflow-hidden rounded bg-muted">
+                        <div className={cn("h-full", r.moq.orders >= DESIGN_MOQ.minOrders ? "bg-success" : "bg-primary")} style={{ width: `${Math.min(100, Math.round((r.moq.orders / DESIGN_MOQ.minOrders) * 100))}%` }} />
+                      </div>
+                      <p
+                        className="mt-0.5 text-[11px] text-muted-foreground"
+                        title={`${formatNumber(r.moq.viaCode)} đơn có dòng hàng mã ${r.code} · ${formatNumber(r.moq.viaAd)} đơn qua ad_id của mẩu QC · ${formatNumber(r.moq.both)} đơn trùng hai đường (tính một lần). ${r.moq.productIds.length ? `Số lượng mã TK: ${formatNumber(r.moq.qtyKnown)} sp.` : `Chưa có sản phẩm Pancake mã ${r.code}.`}`}
+                      >
+                        mã TK {formatNumber(r.moq.viaCode)} · chỉ QC {formatNumber(r.moq.adOnly)}
+                      </p>
+                      {r.productionOrder ? (
+                        <Link href={`/inventory/planning/orders/${r.productionOrder.id}`} className="text-[11px] font-medium text-primary hover:underline">
+                          {r.productionOrder.code} · {PRODUCTION_STATUS_LABEL[r.productionOrder.status] ?? r.productionOrder.status}
+                        </Link>
+                      ) : r.moqReachedAt ? (
+                        <p className="text-[11px] text-muted-foreground" title="Máy đã dựng nháp khi đủ MOQ; người đã xoá nó — máy không dựng lại.">
+                          nháp đã xoá
+                        </p>
+                      ) : null}
+                    </td>
                     <td className="whitespace-nowrap px-3 py-2 text-right">
                       <DesignProductionButton id={r.id} code={r.code} production={r.status === "PRODUCTION"} canEdit={canEdit} />
                     </td>
