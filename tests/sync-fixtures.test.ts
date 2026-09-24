@@ -211,6 +211,7 @@ import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
 import { testAdsBrakeByDecision, testAdsWrite } from "./ads-write.test";
 import { testCreativeLoop } from "./creative-loop.test";
 import { testCreativeGenerate } from "./creative-generate.test";
+import { testCreativeEvaluate } from "./creative-evaluate.test";
 import { testAdsLevelProbe } from "./ads-level-probe.test";
 import { testAdsGrain } from "./ads-grain.test";
 import { testAuditTrail } from "./audit-trail.test";
@@ -1660,6 +1661,7 @@ async function main() {
   testAdsWrite();
   testCreativeLoop();
   await testCreativeGenerate(db);
+  await testCreativeEvaluate(db);
   await testAdsBrakeByDecision(db);
   testAdsLevelProbe();
   testAdsGrain();
