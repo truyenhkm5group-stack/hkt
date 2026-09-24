@@ -27,6 +27,8 @@ const minutes = (name, fallback) => {
   ngày 12/09 phải tính trên dữ liệu như nó có ngày 12/09, và không dựng lại được từ dữ liệu hôm nay.
 */
 const marketingLedgerEvery = Number(process.env.MARKETING_LEDGER_EVERY_MINUTES) || 0;
+// Vòng mẫu quảng cáo CHI TIỀN THẬT (ảnh OpenAI, quảng cáo test) — chỉ có trong lịch khi chủ shop đặt biến này.
+const creativeLoopEvery = Number(process.env.CREATIVE_LOOP_EVERY_MINUTES) || 0;
 const sepayEvery = Number(process.env.SYNC_SEPAY_EVERY_MINUTES) || 0;
 const sepayApply = process.env.SYNC_SEPAY_APPLY === "1" ? "&apply=1" : "";
 
@@ -187,6 +189,7 @@ const JOBS = [
   // Mục này CHỈ có mặt khi chủ shop đặt SYNC_SEPAY_EVERY_MINUTES — chưa đặt thì lịch không đổi.
   ...(sepayEvery > 0 ? [{ job: "sepay-reconcile", query: `days=2${sepayApply}`, every: sepayEvery, offset: 9 }] : []),
   ...(marketingLedgerEvery > 0 ? [{ job: "marketing-decision-ledger", every: marketingLedgerEvery, offset: 14 }] : []),
+  ...(creativeLoopEvery > 0 ? [{ job: "creative-loop", every: creativeLoopEvery, offset: 3 }] : []),
 ];
 
 const DAILY = [

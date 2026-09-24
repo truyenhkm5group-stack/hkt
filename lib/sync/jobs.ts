@@ -44,6 +44,7 @@ import { runAgentRunReconcile } from "@/lib/tech/agent-run-reconcile";
 import { runTaskAdvanceWatch } from "@/lib/tech/task-advance-watch";
 import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
+import { runCreativeLoopTick } from "@/lib/creative/loop";
 
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
@@ -60,6 +61,37 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     là để không BỎ LỠ một ngày khi máy chủ khởi động lại — mà một ngày bỏ lỡ thì mất hẳn: kết luận
     của hôm ấy không dựng lại được từ dữ liệu hôm nay (AGENTS.md mục 8.8).
   */
+  /*
+    VÒNG MẪU QUẢNG CÁO — một lượt: hết hạn duyệt → đăng lô đã duyệt → chấm + tắt theo luật → dựng lô
+    ngày mai. Đặc tả: `docs/creative-loop.md`.
+
+    Job này CHI TIỀN THẬT (sinh ảnh OpenAI; và khi `ADS_WRITE_ENABLED=true` thì tạo quảng cáo test
+    trên Facebook) — nên nó KHÔNG có trong lịch mặc định: chủ shop bật bằng
+    `CREATIVE_LOOP_EVERY_MINUTES`. Tắt `creative.config.enabled` thì lượt chạy vẫn CHẤM và vẫn TẮT
+    mẫu theo luật (tắt chỉ làm giảm tiền), nhưng không đăng và không dựng gì mới.
+  */
+  "creative-loop": {
+    label: "Vòng mẫu quảng cáo",
+    source: "ALL",
+    description:
+      "Một lượt của vòng mẫu: đánh dấu lô quá hạn duyệt, đăng lô đã duyệt (trong trần 10 mẫu × 200.000đ), chấm mẫu đang chạy và tắt mẫu phạm luật tắt của lô, rồi dựng + sinh ảnh cho lô ngày mai (dừng ở Chờ duyệt). Lũy đẳng — chạy lại không đẻ lô thứ hai.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "creative-loop", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await runCreativeLoopTick(await getDb(), new Date());
+        ctx.summary.imported = r.build?.generated ?? 0;
+        ctx.summary.updated = r.published.reduce((a, p) => a + p.live, 0) + r.kills.filter((k) => k.ok).length;
+        ctx.summary.failed = (r.build?.failed ?? 0) + r.published.reduce((a, p) => a + p.failed, 0) + r.kills.filter((k) => !k.ok).length;
+        ctx.summary.detail = [
+          r.enabled ? "vòng BẬT" : "vòng TẮT (chỉ chấm + tắt)",
+          r.expired.length ? `quá hạn: ${r.expired.join(", ")}` : "",
+          r.published.length ? `đăng: ${r.published.map((p) => `${p.batchDay} ${p.live} lên`).join("; ")}` : "",
+          r.evaluation ? `chấm ${r.evaluation.judged} · thắng mới ${r.evaluation.newWins.length} · tắt ${r.kills.filter((k) => k.ok).length}` : "",
+          r.build?.batchDay ? `lô ${r.build.batchDay}: ${r.build.status ?? "—"} (+${r.build.generated} ảnh)` : r.build?.skippedReason ?? "",
+        ].filter(Boolean).join(" · ");
+        if (r.warnings.length) ctx.summary.warning = r.warnings.slice(0, 5).join(" | ");
+        return r;
+      }),
+  },
   "marketing-decision-ledger": {
     label: "Ghi sổ quyết định quảng cáo",
     source: "ALL",

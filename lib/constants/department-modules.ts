@@ -132,6 +132,13 @@ export const NAV_MODULES = [
     why: "Xưởng ý tưởng (Idea Factory): nội dung, góc tiếp cận, mẫu thử. Đầu vào của chiến dịch, nên đứng cạnh chiến dịch.",
   },
   {
+    href: "/marketing/creatives",
+    label: "Vòng mẫu QC",
+    zone: "MARKETING",
+    permission: "ideas:view",
+    why: "Vòng mẫu quảng cáo: ảnh nguồn → máy dựng lô → duyệt → test → chấm → học. Người chạy quảng cáo nạp ảnh, khai luật tắt/giữ và duyệt lô.",
+  },
+  {
     href: "/marketing/fanpages",
     label: "Fanpage & quy kết MKT",
     zone: "MARKETING",

@@ -2862,6 +2862,265 @@ export const adsBudgetChanges = pgTable(
   ],
 );
 
+// ───────────────────── Vòng mẫu quảng cáo (Nấc 4 — NỘI DUNG) ─────────────────────
+//
+// Hợp đồng, từ vựng, trần: `lib/constants/creative-loop.ts`. Đặc tả: `docs/creative-loop.md`.
+// Bảy bảng, bảy việc: ẢNH (điểm ảnh) · NGUỒN (ảnh đầu vào) · LÔ (một ngày test) · MẪU (một ô) ·
+// SỔ GHI FACEBOOK · SỔ PHÁN QUYẾT (ảnh chụp theo ngày) · SỔ HỌC (thống kê gen theo ngày).
+//
+// Không bảng nào ở đây là nguồn của tiền: chi quảng cáo vẫn là `ad_spends` (hạt `AD`), kết quả đơn
+// vẫn là `ORDER_OUTCOME`. Các bảng này chỉ nhớ MẪU NÀO là mẩu QC nào, và máy đã quyết gì.
+
+/**
+ * Điểm ảnh, lưu thẳng trong CSDL như `marketing_idea_images` — ổ đĩa của CSDL là thứ duy nhất bền
+ * qua mỗi lần deploy. Bảng riêng để mọi truy vấn danh sách không bao giờ kéo theo dữ liệu ảnh.
+ *
+ * Ảnh của mẫu bị LOẠI bị XOÁ ĐIỂM ẢNH sau hạn giữ (`data = ''`, `purged_at`), còn dòng thì ở lại:
+ * mẫu thua vẫn là một quan sát của việc học, chỉ là không cần giữ tấm ảnh nữa.
+ */
+export const creativeImages = pgTable(
+  "creative_images",
+  {
+    id: id(),
+    /** Băm của CHÍNH các byte đã nhận — không nhận băm do client gửi. */
+    sha256: text("sha256").notNull(),
+    contentType: text("content_type").notNull().default("image/jpeg"),
+    bytes: integer("bytes").notNull().default(0),
+    width: integer("width"),
+    height: integer("height"),
+    /** Base64. Rỗng khi đã xoá điểm ảnh. */
+    data: text("data").notNull().default(""),
+    purgedAt: ts("purged_at"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("creative_images_sha_idx").on(t.sha256),
+    check("creative_images_purge_check", sql`${t.purgedAt} IS NULL OR ${t.data} = ''`),
+  ],
+);
+
+/** Ảnh đầu vào: ảnh sản phẩm thật · tham khảo tay · spy · R&D. */
+export const creativeSources = pgTable(
+  "creative_sources",
+  {
+    id: id(),
+    /** `PRODUCT_PHOTO` · `MANUAL` · `SPY` · `RND` (`CreativeSourceKind`). */
+    kind: text("kind").notNull(),
+    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    title: text("title").notNull().default(""),
+    note: text("note").notNull().default(""),
+    /** Nơi lấy ảnh (bài đối thủ, thư viện quảng cáo) — để người đọc lần lại được. */
+    sourceUrl: text("source_url").notNull().default(""),
+    imageId: text("image_id").references(() => creativeImages.id, { onDelete: "set null" }),
+    /** Gen ĐỌC ĐƯỢC từ ảnh (một phần, chỉ giá trị trong từ vựng). */
+    genes: jsonb("genes").$type<Record<string, string>>().notNull().default({}),
+    /** Mô tả chữ do mô hình đọc ảnh — thứ DUY NHẤT của ảnh SPY được đi tiếp vào câu lệnh. */
+    visionSummary: text("vision_summary").notNull().default(""),
+    visionModel: text("vision_model").notNull().default(""),
+    visionAt: ts("vision_at"),
+    active: boolean("active").notNull().default(true),
+    /** QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN (mục 34). `NULL` = máy tạo. */
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("creative_sources_kind_idx").on(t.kind, t.active),
+    index("creative_sources_product_idx").on(t.productId),
+    check("creative_sources_kind_check", sql`${t.kind} IN ('PRODUCT_PHOTO', 'MANUAL', 'SPY', 'RND')`),
+    // Ảnh sản phẩm thật mà không biết là sản phẩm nào thì không làm gốc cho mẫu nào được.
+    check("creative_sources_product_photo_check", sql`${t.kind} <> 'PRODUCT_PHOTO' OR ${t.productId} IS NOT NULL`),
+  ],
+);
+
+/** Một LÔ = một ngày chạy test. Khoá tự nhiên `batch_day` ⇒ job chạy lại không đẻ lô thứ hai. */
+export const creativeBatches = pgTable(
+  "creative_batches",
+  {
+    id: id(),
+    /** Ngày CHẠY, giờ Việt Nam (`YYYY-MM-DD`). */
+    batchDay: text("batch_day").notNull(),
+    status: text("status").notNull().default("PLANNED"),
+    slotCount: integer("slot_count").notNull().default(0),
+    startAt: ts("start_at").notNull(),
+    endAt: ts("end_at").notNull(),
+    approvalDeadline: ts("approval_deadline").notNull(),
+    /** Đầu ra của `planBatch()` — các ô và phần thiếu, chụp nguyên. */
+    plan: jsonb("plan").$type<Record<string, unknown>>().notNull().default({}),
+    /** Cấu hình lúc lập lô — luật tắt/giữ và ngân sách của lô này KHÔNG đổi theo cấu hình về sau. */
+    configSnapshot: jsonb("config_snapshot").$type<Record<string, unknown>>().notNull().default({}),
+    ruleVersion: integer("rule_version").notNull(),
+    error: text("error").notNull().default(""),
+    /** Băm nội dung đã duyệt (ảnh · câu chữ · ngân sách · khung giờ · luật tắt) — phiếu duyệt khoá trên nó. */
+    approvalDigest: text("approval_digest").notNull().default(""),
+    approvedByUserId: text("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    approvedByName: text("approved_by_name").notNull().default(""),
+    approvedAt: ts("approved_at"),
+    publishedAt: ts("published_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("creative_batches_day_uq").on(t.batchDay),
+    index("creative_batches_status_idx").on(t.status),
+    check("creative_batches_status_check", sql`${t.status} IN ('PLANNED', 'PENDING_APPROVAL', 'APPROVED', 'PUBLISHED', 'EXPIRED', 'REJECTED', 'FAILED')`),
+    check("creative_batches_day_format_check", sql`${t.batchDay} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`),
+    // Không có lô nào được ĐĂNG mà không có dấu duyệt — ràng buộc ở CSDL, không chỉ ở mã.
+    check("creative_batches_approval_check", sql`${t.status} NOT IN ('APPROVED', 'PUBLISHED') OR (${t.approvedAt} IS NOT NULL AND ${t.approvalDigest} <> '')`),
+  ],
+);
+
+/** Một MẪU = một ô trong lô: bản giao việc → câu lệnh → ảnh → mẩu QC → phán quyết. */
+export const creativeVariants = pgTable(
+  "creative_variants",
+  {
+    id: id(),
+    batchId: text("batch_id")
+      .notNull()
+      .references(() => creativeBatches.id),
+    slot: integer("slot").notNull(),
+    /** `EXPLOIT` · `EXPLORE`. */
+    mode: text("mode").notNull(),
+    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    productPhotoSourceId: text("product_photo_source_id").references(() => creativeSources.id, { onDelete: "set null" }),
+    inspirationSourceId: text("inspiration_source_id").references(() => creativeSources.id, { onDelete: "set null" }),
+    parentVariantId: text("parent_variant_id").references((): AnyPgColumn => creativeVariants.id, { onDelete: "set null" }),
+    genes: jsonb("genes").$type<Record<string, string>>().notNull(),
+    genesVersion: integer("genes_version").notNull(),
+    mutatedGene: text("mutated_gene").notNull().default(""),
+    why: text("why").notNull().default(""),
+
+    imagePrompt: text("image_prompt").notNull().default(""),
+    primaryText: text("primary_text").notNull().default(""),
+    headline: text("headline").notNull().default(""),
+    writerModel: text("writer_model").notNull().default(""),
+    /** USD dạng chuỗi; `""` = CHƯA BIẾT (cùng quy ước `ai_interactions.cost_usd`). */
+    writerCostUsd: text("writer_cost_usd").notNull().default(""),
+    imageId: text("image_id").references(() => creativeImages.id, { onDelete: "set null" }),
+    genModel: text("gen_model").notNull().default(""),
+    genCostUsd: text("gen_cost_usd").notNull().default(""),
+    genError: text("gen_error").notNull().default(""),
+
+    status: text("status").notNull().default("PLANNED"),
+    rejectReason: text("reject_reason").notNull().default(""),
+    rejectedByUserId: text("rejected_by_user_id").references(() => users.id, { onDelete: "set null" }),
+
+    fbImageHash: text("fb_image_hash").notNull().default(""),
+    fbCreativeId: text("fb_creative_id").notNull().default(""),
+    /** Bài ẩn trên fanpage mà Facebook dựng từ creative (`effective_object_story_id`). */
+    fbPostId: text("fb_post_id").notNull().default(""),
+    fbAdsetId: text("fb_adset_id"),
+    fbAdId: text("fb_ad_id"),
+    /** Ngân sách trọn đời ĐÃ CAM KẾT trên Facebook (test + mọi lượt tiêu thêm). `NULL` = chưa đăng. */
+    committedBudgetVnd: integer("committed_budget_vnd"),
+    publishedAt: ts("published_at"),
+    pausedAt: ts("paused_at"),
+    pauseReason: text("pause_reason").notNull().default(""),
+    /** Vào thư viện (THẮNG) lúc nào, với bao nhiêu đơn — chốt một lần, không tự rơi ra. */
+    libraryAt: ts("library_at"),
+    libraryOrders: integer("library_orders"),
+    lostAt: ts("lost_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("creative_variants_batch_slot_uq").on(t.batchId, t.slot),
+    uniqueIndex("creative_variants_fb_ad_uq").on(t.fbAdId),
+    index("creative_variants_status_idx").on(t.status),
+    index("creative_variants_product_idx").on(t.productId),
+    index("creative_variants_library_idx").on(t.libraryAt),
+    check("creative_variants_mode_check", sql`${t.mode} IN ('EXPLOIT', 'EXPLORE')`),
+    check("creative_variants_status_check", sql`${t.status} IN ('PLANNED', 'GENERATED', 'GEN_FAILED', 'REJECTED', 'LIVE', 'PAUSED', 'ENDED', 'PUBLISH_FAILED')`),
+    // "Đang chạy" mà không có mẩu QC nào là một khẳng định không có chứng từ.
+    check("creative_variants_live_check", sql`${t.status} NOT IN ('LIVE', 'PAUSED', 'ENDED') OR ${t.fbAdId} IS NOT NULL`),
+    check("creative_variants_library_check", sql`${t.libraryAt} IS NULL OR ${t.libraryOrders} IS NOT NULL`),
+  ],
+);
+
+/**
+ * SỔ GHI FACEBOOK của vòng mẫu. Mọi lượt xin ghi vào sổ, KỂ CẢ lượt bị CHẶN — "máy đã ĐỊNH làm gì"
+ * là thông tin quý nhất khi đánh giá một cỗ máy tiêu tiền (cùng lý do với `ads_budget_changes`).
+ * Trần tiền theo ngày đếm trên sổ này, không đếm trên cấu hình.
+ */
+export const creativeFbActions = pgTable(
+  "creative_fb_actions",
+  {
+    id: id(),
+    /** Ngày CHẠY của lô mà lượt này phục vụ (`YYYY-MM-DD`) — trần theo ngày đếm trên cột này. */
+    actionDay: text("action_day").notNull(),
+    batchId: text("batch_id").references(() => creativeBatches.id),
+    variantId: text("variant_id").references(() => creativeVariants.id),
+    action: text("action").notNull(),
+    outcome: text("outcome").notNull(),
+    denial: text("denial").notNull().default(""),
+    detail: text("detail").notNull().default(""),
+    /** Id Facebook được tạo ra hoặc bị tác động. */
+    targetId: text("target_id").notNull().default(""),
+    /** Tiền được CAM KẾT bởi lượt này (tạo nhóm / tiêu thêm). `NULL` với lượt không chạm tiền. */
+    amountVnd: integer("amount_vnd"),
+    /** Các trường đã gửi, KHÔNG kèm token. */
+    request: jsonb("request").$type<Record<string, unknown>>().notNull().default({}),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorEmail: text("actor_email").notNull().default(""),
+    mode: text("mode").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("creative_fb_actions_day_idx").on(t.actionDay, t.action, t.outcome),
+    index("creative_fb_actions_variant_idx").on(t.variantId, t.createdAt),
+    check("creative_fb_actions_action_check", sql`${t.action} IN ('UPLOAD_IMAGE', 'CREATE_CREATIVE', 'CREATE_ADSET', 'CREATE_AD', 'PAUSE_ADSET', 'EXTEND_ADSET')`),
+    check("creative_fb_actions_outcome_check", sql`${t.outcome} IN ('APPLIED', 'DENIED', 'FAILED')`),
+    check("creative_fb_actions_denial_check", sql`${t.outcome} <> 'APPLIED' OR ${t.denial} = ''`),
+    check("creative_fb_actions_day_format_check", sql`${t.actionDay} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'`),
+  ],
+);
+
+/**
+ * SỔ PHÁN QUYẾT: ảnh chụp theo ngày của `judgeVariant()`. Phán quyết SỐNG luôn tính lại lúc đọc;
+ * sổ trả lời "hôm ấy máy nghĩ gì và vì sao" — kể cả khi luật về sau đổi.
+ */
+export const creativeVerdicts = pgTable(
+  "creative_verdicts",
+  {
+    id: id(),
+    verdictDay: text("verdict_day").notNull(),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => creativeVariants.id),
+    verdict: text("verdict").notNull(),
+    reasons: jsonb("reasons").$type<string[]>().notNull().default([]),
+    metrics: jsonb("metrics").$type<Record<string, unknown>>().notNull().default({}),
+    ruleVersion: integer("rule_version").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("creative_verdicts_day_variant_uq").on(t.verdictDay, t.variantId),
+    check("creative_verdicts_verdict_check", sql`${t.verdict} IN ('PENDING', 'RUNNING', 'AWAITING_ORDERS', 'KILL', 'PROMISING', 'WIN', 'LOSE', 'UNJUDGED')`),
+  ],
+);
+
+/** SỔ HỌC: thống kê gen theo ngày + bản tin mô hình viết lại (tuỳ chọn, không bao giờ chặn vòng). */
+export const creativeLearnings = pgTable(
+  "creative_learnings",
+  {
+    id: id(),
+    learningDay: text("learning_day").notNull(),
+    geneStats: jsonb("gene_stats").$type<Record<string, unknown>[]>().notNull().default([]),
+    observations: integer("observations").notNull().default(0),
+    /** Số quan sát đứng trên căn cứ TƯƠNG ĐỐI (chưa có luật giữ) — phải in cạnh mọi tỷ lệ. */
+    relativeObservations: integer("relative_observations").notNull().default(0),
+    narrative: text("narrative").notNull().default(""),
+    narrativeModel: text("narrative_model").notNull().default(""),
+    ruleVersion: integer("rule_version").notNull(),
+    genesVersion: integer("genes_version").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("creative_learnings_day_uq").on(t.learningDay)],
+);
+
 // ───────────────────── Quy kết fanpage → marketer ─────────────────────
 //
 // Hợp đồng, lý lẽ và mọi ngưỡng: `lib/constants/fanpage-attribution.ts`. Ba bảng, ba việc rời nhau:

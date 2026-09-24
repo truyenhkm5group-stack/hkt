@@ -134,6 +134,17 @@ export const env = {
     },
   },
   /**
+   * Lời gọi REST THẲNG tới OpenAI của vòng mẫu quảng cáo: sinh ảnh (`/v1/images/edits`, multipart)
+   * và đọc ảnh (`/v1/responses` kèm `input_image`) — hai hình dạng mà lớp `AiProvider` không che.
+   * Cùng khoá `OPENAI_API_KEY` với SDK. Chỉ đi vào tiêu đề `Authorization`: không log, không ghi
+   * vào sổ, không đưa vào câu lỗi.
+   */
+  openaiRest: {
+    get apiKey() {
+      return read("OPENAI_API_KEY");
+    },
+  },
+  /**
    * SePay — cổng Open Banking đẩy biến động số dư realtime về ERP.
    *
    * HMAC là đường chính (`SEPAY_WEBHOOK_SECRET`). API key chỉ là đường lùi cho lúc dựng thử: nó
