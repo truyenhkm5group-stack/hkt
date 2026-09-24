@@ -98,6 +98,32 @@ khung) → đang chạy `RUNNING` → hết khung, đợi đơn về `AWAITING_O
 **Luật trên tỷ số có mẫu số 0 không kích hoạt** (mục 42). Muốn tắt mẫu "tiêu 100K mà không có tin
 nhắn nào" thì viết luật trên SỐ ĐẾM: `{ metric: "messages", op: "lt", value: 1, minSpendVnd: 100000 }`.
 
+**"0 tin nhắn" là số ĐO ĐƯỢC, không phải CHƯA BIẾT** (điều tra 24/09/2026, không đổi mã). Câu hỏi:
+`variantMetrics` cộng `coalesce(sum(ad_spends.messages), 0)` và cột ấy `NOT NULL DEFAULT 0` — liệu
+có dòng chi tiêu nào mà số tin nhắn thật ra là *không biết* nhưng bị ghi 0, để luật "tiêu 150K mà
+0 tin nhắn" tắt nhầm mẫu? Kết luận: với tập dòng mà vòng mẫu đọc, **không có trạng thái chưa biết
+thật**. Căn cứ:
+
+- Vòng mẫu chỉ đọc dòng `grain = 'AD'` khớp `ad_id` của chính mẩu nó đăng. Dòng hạt `AD` chỉ sinh ra
+  từ `lib/integrations/facebook/sync.ts::dungDong` — dòng gõ tay (`createAdSpend`) và dòng hạt
+  chiến dịch không có `ad_id`, nên không bao giờ vào phép cộng này.
+- Mỗi dòng hạt `AD` dựng từ MỘT dòng insights mà lời gọi LUÔN xin trường `actions`
+  (`client.ts::insightItems`). Insights API của Facebook chỉ trả các `action_type` có giá trị khác 0
+  và bỏ hẳn mảng `actions` khi không có hành động nào — nên "vắng" trong một dòng đã trả về có nghĩa
+  là 0, không phải "không lấy được". Không có nhánh nào ghi `spend` mà bỏ `actions` của cùng dòng.
+- Lượt đồng bộ lỗi (hoặc cấp mẩu lỗi và lùi về hạt chiến dịch) thì KHÔNG ghi dòng hạt `AD` nào cho
+  ngày ấy ⇒ `spendVnd = null` ⇒ phán quyết đã là CHƯA BIẾT sẵn (`judge.ts`, bước 2), không có "tiền
+  có, tin nhắn 0" giả.
+- Chiến dịch không phải mục tiêu Tin nhắn: 0 vẫn là số đếm đúng (không có hội thoại nào bắt đầu);
+  vòng mẫu sao chép cài đặt nhóm từ mẩu mẫu trong chiến dịch TEST mục tiêu Tin nhắn (§7), nên luật
+  trên `messages` áp đúng loại quảng cáo. Đặt luật ấy cho một mẩu mẫu không nhắn tin là lỗi CẤU HÌNH,
+  và bằng `null` thì cũng không sửa được.
+
+Rủi ro còn lại là ĐỘ TƯƠI, không phải chỗ trống: Facebook có thể điều chỉnh số hành động vài ngày sau;
+đồng bộ ghi đè 3 ngày gần nhất mỗi lượt. Luật tắt nên kèm `minSpendVnd` đủ lớn để không kết luận trên
+vài giờ dữ liệu đầu tiên. Nếu sau này có một nguồn chi tiêu hạt `AD` KHÔNG xin `actions`, lúc ấy mới
+cần cột `messages` nhận `NULL` — và phải kèm luật chấm coi `null` là "chưa đủ căn cứ".
+
 **Đơn chốt** = đơn Pancake mang `ad_id` của mẩu, `ORDER_OUTCOME <> 'CANCELLED'`. Màn hình in cạnh nó
 số đơn giao thành công và hoàn (theo `ORDER_OUTCOME`), vì mẫu nhiều đơn mà hoàn cao vẫn là mẫu lỗ.
 
