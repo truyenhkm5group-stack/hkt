@@ -2,6 +2,8 @@ import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { carrierCapabilitiesFor } from "@/lib/care/carrier-capabilities";
+import { carrierRequestView, derivedManualConfirmations } from "@/lib/care/carrier-requests";
+import { MANUAL_STATUSES } from "@/lib/constants/carrier-manual";
 import type { CareCase, CareCaseDetail, CareEvent, CareHistory, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
 import type { BusinessAction } from "@/lib/constants/care-outcome";
 import { careDecisionOf, RESOLUTION_LABEL, type CareDecision } from "@/lib/constants/care-resolution";
@@ -21,7 +23,7 @@ import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@
 import { careSlaHours } from "@/lib/care/sla";
 import { rawMedian, timingStat } from "@/lib/constants/care-timing";
 import { careViewOf, slaOf, type CareStateLike } from "@/lib/care/view";
-import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_STATUS_LABEL, CARE_STATUSES, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus, type CarrierActionKey, type CarrierRequestStatus } from "@/lib/constants/care";
+import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_STATUS_LABEL, CARE_STATUSES, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus } from "@/lib/constants/care";
 import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
 import { botMessageFailuresByShipment } from "@/lib/queries/cs";
 import { BUCKET_BY_KEY, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
@@ -150,24 +152,31 @@ async function loadCareRows(shipmentIds: string[]): Promise<Map<string, CareRow>
   return new Map(rows.map((r) => [r.care.shipmentId, { ...r.care, ownerName: r.ownerName }]));
 }
 
-function toRequestView(r: typeof schema.carrierActionRequests.$inferSelect): CarrierRequestView {
-  return { id: r.id, actionKey: r.actionKey as CarrierActionKey, status: r.status as CarrierRequestStatus, at: r.createdAt, error: r.error, note: r.note, actor: r.actorEmail, attempts: r.attempts };
+/**
+ * Lệnh làm tay chưa có mốc xác nhận ghi sẵn ⇒ suy ra lúc đọc từ sự kiện ĐVVC (không ghi ngược —
+ * mục 8.8). Lệnh nào khác giữ nguyên cột.
+ */
+async function withDerivedConfirmations(rows: (typeof schema.carrierActionRequests.$inferSelect)[]): Promise<CarrierRequestView[]> {
+  const can = rows.filter((r) => (MANUAL_STATUSES as readonly string[]).includes(r.status) && r.confirmedAt === null);
+  const derived = can.length ? await derivedManualConfirmations(await getDb(), can) : new Map<string, Date>();
+  return rows.map((r) => carrierRequestView(r, derived.get(r.id) ?? null));
 }
 
 async function loadLatestRequests(shipmentIds: string[]): Promise<Map<string, CarrierRequestView>> {
   if (!shipmentIds.length) return new Map();
   const db = await getDb();
-  const rows = rowsOf<{ shipment_id: string; id: string; action_key: string; status: string; at: string; error: string | null; note: string; actor_email: string; attempts: number }>(
+  const latest = rowsOf<{ id: string }>(
     await db.execute(sql`
-      select distinct on (shipment_id) shipment_id, id, action_key, status, created_at as at, error, note, actor_email, attempts
+      select distinct on (shipment_id) id
         from carrier_action_requests
        where shipment_id in ${shipmentIds}
        order by shipment_id, created_at desc
     `),
-  );
-  return new Map(
-    rows.map((r) => [r.shipment_id, { id: r.id, actionKey: r.action_key as CarrierActionKey, status: r.status as CarrierRequestStatus, at: new Date(r.at), error: r.error, note: r.note, actor: r.actor_email, attempts: Number(r.attempts ?? 0) }]),
-  );
+  ).map((r) => r.id);
+  if (!latest.length) return new Map();
+  const rows = await db.select().from(schema.carrierActionRequests).where(inArray(schema.carrierActionRequests.id, latest));
+  const views = await withDerivedConfirmations(rows);
+  return new Map(rows.map((r, i) => [r.shipmentId, views[i]]));
 }
 
 type QueueFact = {
@@ -1077,7 +1086,7 @@ export async function getCareCaseDetail(shipmentId: string): Promise<CareCaseDet
       note: b.reasonNote,
       carrierResult: b.carrierResult,
     })),
-    carrierRequests: requests.map(toRequestView),
+    carrierRequests: await withDerivedConfirmations(requests),
     // Địa chỉ "làm tay trên web" dựng từ MÃ VIETTEL POST, không phải `tracking` (có thể là mã Pancake).
     capabilities: carrierCapabilitiesFor({ stage: s.stage, trackingCapability: s.trackingCapability, configured: vtpConfigured(), vtpOrderNumber: s.vtpOrderNumber }),
   };
