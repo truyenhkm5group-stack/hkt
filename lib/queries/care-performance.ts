@@ -6,6 +6,10 @@ import { rowsOf } from "@/lib/sql-rows";
 import { TIMING_MIN_SAMPLE } from "@/lib/constants/care-timing";
 import { CARE_OUTCOMES, OUTCOME_IS_FINAL, rescueRates, type CareOutcome, type RescueCounts } from "@/lib/constants/care-outcome";
 import type { Period } from "@/lib/search-params";
+import type { ShipmentStage } from "@/db/schema";
+import { laBanSaoCuSql } from "@/lib/care/reopen-sql";
+import { diagnosePending, type PendingDiagnosis, type QueueView } from "@/lib/care/pending-diagnosis";
+import { getCareQueue } from "@/lib/queries/care-workbench";
 
 /**
  * ═══════════ TỶ LỆ CỨU ĐƠN, HIỆU SUẤT NGƯỜI, HIỆU SUẤT MÃ HÀNG ═══════════
@@ -63,6 +67,8 @@ export type RescueSummary = RescueCounts & {
   finished: number;
   /** Ca mở trong kỳ — trả lời câu hỏi KHỐI LƯỢNG, khác hẳn con số hiệu suất. */
   openedInPeriod: number;
+  /** Đợt là bản sao do lỗi mở ca cũ (luật 62) — nằm ngoài MỌI con số ở đây, đếm riêng để in ra. */
+  falseReopenExcluded: number;
 };
 
 /** Kỳ áp lên mốc nào. Hai câu hỏi khác nhau nên UI phải nói rõ đang đọc cái nào. */
@@ -95,19 +101,34 @@ const MAU_THUAN = (cot: SQL) =>
   sql`${cot} is not null and ca.opened_at is not null and ${cot} < ca.opened_at - make_interval(mins => ${CLOCK_SKEW_TOLERANCE_MIN})`;
 
 /** Đợt đóng vì không phải điều kiện care (`NOT_CARE_CONDITION`) nằm ngoài mọi thống kê cứu đơn. */
-const LA_CA_CARE = or(isNull(sc.resolution), sql`${sc.resolution} <> ${NOT_CARE_CONDITION}`);
+const KHONG_BI_LOAI = or(isNull(sc.resolution), sql`${sc.resolution} <> ${NOT_CARE_CONDITION}`)!;
+
+/*
+  ═══ BẢN SAO DO LỖI MỞ CA CŨ KHÔNG PHẢI MỘT CA (luật 62) ═══
+
+  Trang kiểm tra ca đã loại `FALSE_REOPEN_LEGACY` khỏi mẫu số từ 18/09, nhưng bảng hiệu suất người
+  thì chưa — nên cùng một kiện được đếm nhiều lần cạnh tên nhân viên. PKE1517808423 (đo production
+  23/09/2026): 4 đợt, cả 4 "Không cứu được", trong đó đợt 3 và 4 là bản sao do bộ đối chiếu dựng
+  lại vô cớ ngày 16/09. Một kiện hoàn thành bốn lần thất bại của đội.
+
+  Chỉ loại `FALSE_REOPEN_LEGACY` (mốc không mới hơn lúc đóng VÀ không có sự kiện ĐVVC xen giữa).
+  `REOPEN_UNVERIFIED` VẪN đếm. Số đợt bị loại được đếm riêng (`falseReopenExcluded`) và in ra màn
+  hình — loại mà không nói là giấu (luật 45).
+*/
+const BAN_SAO_CU = laBanSaoCuSql({ shipmentId: sc.shipmentId, episodeNo: sc.episodeNo, openedAt: sc.openedAt, createdAt: sc.createdAt });
+const LA_CA_CARE = and(KHONG_BI_LOAI, sql`not ${BAN_SAO_CU}`)!;
 
 const KET_CUC_CUOI = (CARE_OUTCOMES as readonly CareOutcome[]).filter((o) => OUTCOME_IS_FINAL[o]);
 
 /** Ca ĐÃ CHỐT trong kỳ (theo `outcome_at`). */
-function daChotTrongKy(period: Period): SQL {
-  return and(LA_CA_CARE, inArray(sc.careOutcome, KET_CUC_CUOI), ...trongKy("OUTCOME", period))!;
+function daChotTrongKy(period: Period, laCa: SQL = LA_CA_CARE): SQL {
+  return and(laCa, inArray(sc.careOutcome, KET_CUC_CUOI), ...trongKy("OUTCOME", period))!;
 }
 
 /** Ca CHƯA CHỐT tính tới cuối kỳ: mở trước cuối kỳ, kết cục rỗng hoặc sau cuối kỳ. */
-function chuaChotCuoiKy(period: Period): SQL {
+function chuaChotCuoiKy(period: Period, laCa: SQL = LA_CA_CARE): SQL {
   return and(
-    LA_CA_CARE,
+    laCa,
     or(isNull(sc.careOutcome), inArray(sc.careOutcome, (CARE_OUTCOMES as readonly CareOutcome[]).filter((o) => !OUTCOME_IS_FINAL[o]))),
     period.to ? lte(sc.openedAt, period.to) : undefined,
     period.to ? or(isNull(sc.outcomeAt), gt(sc.outcomeAt, period.to)) : isNull(sc.outcomeAt),
@@ -115,9 +136,24 @@ function chuaChotCuoiKy(period: Period): SQL {
 }
 
 /** Tập ca của báo cáo hiệu suất: đã chốt trong kỳ ∪ chưa chốt tính tới cuối kỳ. */
-function tapCaHieuSuat(period: Period): SQL {
-  return or(daChotTrongKy(period), chuaChotCuoiKy(period))!;
+function tapCaHieuSuat(period: Period, laCa: SQL = LA_CA_CARE): SQL {
+  return or(daChotTrongKy(period, laCa), chuaChotCuoiKy(period, laCa))!;
 }
+
+/** Đợt của cùng tập kỳ nhưng là BẢN SAO do lỗi cũ — bị loại, và phải đếm được để in ra. */
+function banSaoTrongKy(period: Period): SQL {
+  return and(tapCaHieuSuat(period, KHONG_BI_LOAI), BAN_SAO_CU)!;
+}
+
+/**
+ * NGƯỜI MÀ MỘT CA ĐƯỢC QUY VỀ — một biểu thức, dùng cho cả con số lẫn danh sách bấm vào con số.
+ *
+ * Ca đã chốt → người cầm ca LÚC CHỐT (`owner_at_resolution`). Ca chưa chốt → người ĐANG cầm, để
+ * cột "Đang treo" của mỗi người nói đúng khối việc họ đang giữ. Danh sách từng lọc theo riêng
+ * `owner_at_resolution`: ca treo luôn rỗng cột đó, nên bấm vào "đang treo" của một người sẽ ra
+ * DANH SÁCH RỖNG, còn "Chưa nối được người" lại ra MỌI ca treo của cả đội.
+ */
+const UID_QUY_KET = sql`coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end)`;
 
 /** Tổng quan tỷ lệ cứu đơn của cả shop. */
 export async function getRescueSummary(period: Period, basis: CareTimeBasis = "OUTCOME"): Promise<RescueSummary> {
@@ -138,8 +174,20 @@ export async function getRescueSummary(period: Period, basis: CareTimeBasis = "O
       .select({ n: sql<number>`count(*)::int` })
       .from(sc)
       .where(and(LA_CA_CARE, ...trongKy("OPENED", period)));
+    const banSao = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(sc)
+      .where(banSaoTrongKy(period));
     const t = rescueRates(c);
-    return { ...c, total: basis === "OUTCOME" ? t.finished : total, directRate: t.direct, rateWithExchange: t.withExchange, finished: t.finished, openedInPeriod: Number(mo[0]?.n ?? 0) };
+    return {
+      ...c,
+      total: basis === "OUTCOME" ? t.finished : total,
+      directRate: t.direct,
+      rateWithExchange: t.withExchange,
+      finished: t.finished,
+      openedInPeriod: Number(mo[0]?.n ?? 0),
+      falseReopenExcluded: Number(banSao[0]?.n ?? 0),
+    };
   });
 }
 
@@ -218,7 +266,7 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
     const ketQua = rowsOf<{ user_id: string | null; name: string; outcome: string | null; n: number }>(
       await db.execute(sql`
         with ca as (
-          select coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end) as uid,
+          select ${UID_QUY_KET} as uid,
                  ${sc.careOutcome} as outcome
             from ${sc}
            where ${tapCaHieuSuat(period)}
@@ -240,7 +288,7 @@ export async function getCarePerformanceByPic(period: Period): Promise<PicRow[]>
     const thoiGian = rowsOf<{ user_id: string | null; p_touch: number | null; p_action: number | null; p_resolve: number | null; n_touch: number; n_action: number; n_resolve: number; n_touch_xung_dot: number; n_action_xung_dot: number }>(
       await db.execute(sql`
         with ca as (
-          select coalesce(${sc.ownerAtResolution}, case when ${sc.careOutcome} in ${KET_CUC_CUOI} then null else ${sc.ownerId} end) as uid,
+          select ${UID_QUY_KET} as uid,
                  ${sc.firstActionAt} as first_action_at, ${sc.firstResponseAt} as first_touch_at,
                  ${sc.openedAt} as opened_at, ${sc.outcomeAt} as outcome_at
             from ${sc}
@@ -448,28 +496,109 @@ export async function getCarePerformanceByProduct(period: Period): Promise<Produ
   });
 }
 
-/** Danh sách ca của một người / một mã — để bấm vào con số là mở ra đúng những ca đã sinh ra nó. */
-export async function listCareCases(period: Period, filter: { ownerId?: string | null; outcome?: CareOutcome; limit?: number } = {}) {
+/**
+ * Ô nào của bảng hiệu suất người đang được bấm. `FINISHED` = cột "Đã chốt" (ba kết cục cuối gộp lại);
+ * `UNATTRIBUTED` = ca lịch sử chưa có kết luận — bảng không có cột riêng cho nó nên trước đây nó
+ * biến mất hẳn (một người cầm 4 ca như vậy hiện ra với toàn số 0).
+ */
+export const CARE_CASE_BUCKETS = ["FINISHED", "RESCUED_DIRECT", "RESCUED_EXCHANGE", "RESCUE_FAILED", "PENDING", "UNATTRIBUTED"] as const;
+export type CareCaseBucket = (typeof CARE_CASE_BUCKETS)[number];
+
+function dieuKienO(bucket: CareCaseBucket): SQL {
+  if (bucket === "FINISHED") return inArray(sc.careOutcome, KET_CUC_CUOI);
+  // Cùng phép quy của `cong()`: mọi giá trị ngoài bộ kết cục — kể cả NULL — là "không đủ chứng cứ".
+  if (bucket === "UNATTRIBUTED") return or(isNull(sc.careOutcome), sql`${sc.careOutcome} not in ${CARE_OUTCOMES.filter((o) => o !== "UNATTRIBUTED")}`)!;
+  return eq(sc.careOutcome, bucket);
+}
+
+export type CareCaseListRow = {
+  id: string;
+  shipmentId: string;
+  tracking: string | null;
+  episodeNo: number;
+  latestEpisodeNo: number;
+  active: boolean;
+  careStatus: string;
+  careOutcome: string | null;
+  ownerName: string | null;
+  openedAt: Date | null;
+  doneAt: Date | null;
+  outcomeAt: Date | null;
+  stage: ShipmentStage;
+  vtpStatus: number | null;
+  vtpStatusName: string | null;
+  vtpStatusDate: Date | null;
+  codAmount: number | null;
+  /** Chỉ có với ca chưa chốt: vì sao nó còn treo. */
+  diagnosis: PendingDiagnosis | null;
+};
+
+/**
+ * Danh sách ca đứng sau MỘT ô của bảng hiệu suất người — bấm vào con số là ra đúng những ca đã sinh
+ * ra nó. Cùng tập ca (`tapCaHieuSuat`), cùng phép quy người (`UID_QUY_KET`), cùng phép phân ô
+ * (`cong`) với `getCarePerformanceByPic`, nên số dòng BẰNG con số trên ô. `ownerId = null` là dòng
+ * "Chưa nối được người".
+ */
+export async function listCareCases(period: Period, filter: { ownerId: string | null; bucket: CareCaseBucket; limit?: number }): Promise<{ rows: CareCaseListRow[]; total: number }> {
   const db = await getDb();
-  const dk: (SQL | undefined)[] = [tapCaHieuSuat(period)];
-  if (filter.ownerId !== undefined) dk.push(filter.ownerId === null ? sql`${sc.ownerAtResolution} is null` : eq(sc.ownerAtResolution, filter.ownerId));
-  if (filter.outcome) dk.push(eq(sc.careOutcome, filter.outcome));
-  return db
-    .select({
-      id: sc.id,
-      shipmentId: sc.shipmentId,
-      tracking: sc.trackingNumber,
-      episodeNo: sc.episodeNo,
-      entryCarrierState: sc.entryCarrierState,
-      careOutcome: sc.careOutcome,
-      finalCarrierState: sc.finalCarrierState,
-      openedAt: sc.openedAt,
-      outcomeAt: sc.outcomeAt,
-      ownerName: schema.users.name,
-    })
-    .from(sc)
-    .leftJoin(schema.users, eq(schema.users.id, sc.ownerAtResolution))
-    .where(dk.length ? and(...dk) : undefined)
-    .orderBy(desc(sc.outcomeAt))
-    .limit(filter.limit ?? 200);
+  const dk = and(tapCaHieuSuat(period), dieuKienO(filter.bucket), filter.ownerId === null ? sql`${UID_QUY_KET} is null` : sql`${UID_QUY_KET} = ${filter.ownerId}`);
+  const s = schema.shipments;
+  const [rows, dem] = await Promise.all([
+    db
+      .select({
+        id: sc.id,
+        shipmentId: sc.shipmentId,
+        tracking: sql<string | null>`coalesce(${s.vtpOrderNumber}, ${sc.trackingNumber})`,
+        episodeNo: sc.episodeNo,
+        latestEpisodeNo: sql<number>`(select max(n.episode_no) from shipment_care n where n.shipment_id = ${sc.shipmentId})::int`,
+        active: sc.active,
+        careStatus: sc.careStatus,
+        careOutcome: sc.careOutcome,
+        replacementShipmentId: sc.replacementShipmentId,
+        ownerName: schema.users.name,
+        openedAt: sc.openedAt,
+        doneAt: sc.doneAt,
+        outcomeAt: sc.outcomeAt,
+        stage: s.stage,
+        vtpStatus: s.vtpStatus,
+        vtpStatusName: s.vtpStatusName,
+        vtpStatusDate: s.vtpStatusDate,
+        codAmount: s.codAmount,
+      })
+      .from(sc)
+      .innerJoin(s, eq(s.id, sc.shipmentId))
+      .leftJoin(schema.users, sql`${schema.users.id} = ${UID_QUY_KET}`)
+      .where(dk)
+      .orderBy(desc(sql`coalesce(${sc.outcomeAt}, ${sc.openedAt})`))
+      .limit(filter.limit ?? 300),
+    db.select({ n: sql<number>`count(*)::int` }).from(sc).where(dk),
+  ]);
+  /*
+    Kiện đang ở tab nào: hỏi CHÍNH hàng đợi (đệm 30 giây), không suy lại. Chỉ cần khi danh sách có
+    ca chưa chốt — ô đã chốt không có gì để chẩn đoán. Kiện rơi vào mục "thiếu dữ liệu" không thuộc
+    tab nào nên để `null`.
+  */
+  const canHangDoi = filter.bucket === "PENDING" || filter.bucket === "UNATTRIBUTED";
+  const tab = new Map<string, QueueView>();
+  if (canHangDoi) for (const c of (await getCareQueue()).cases) tab.set(c.shipmentId, c.view);
+  return {
+    total: Number(dem[0]?.n ?? 0),
+    rows: rows.map(({ replacementShipmentId, ...r }) => ({
+      ...r,
+      latestEpisodeNo: Number(r.latestEpisodeNo ?? r.episodeNo),
+      codAmount: r.codAmount === null ? null : Number(r.codAmount),
+      diagnosis:
+        r.careOutcome !== null && KET_CUC_CUOI.includes(r.careOutcome as CareOutcome)
+          ? null
+          : diagnosePending({
+              episodeNo: r.episodeNo,
+              latestEpisodeNo: Number(r.latestEpisodeNo ?? r.episodeNo),
+              stage: r.stage,
+              vtpStatus: r.vtpStatus,
+              vtpStatusName: r.vtpStatusName,
+              hasReplacement: replacementShipmentId !== null,
+              queueView: tab.get(r.shipmentId) ?? null,
+            }),
+    })),
+  };
 }

@@ -1,3 +1,4 @@
+import { deliveryRateCoverageParts } from "@/lib/constants/delivery-rate";
 import { AlertTriangle, Clock } from "lucide-react";
 import { StatStrip } from "@/components/stat-tile";
 import { MARKETING_METRIC_BY_KEY, MATURITY_HINT, MATURITY_LABEL, ratioOf } from "@/lib/constants/marketing-daily";
@@ -131,8 +132,11 @@ export function MarketingKpis({ data }: { data: MarketingDaily }) {
       {data.rateBasis ? (
         <p className="text-[11px] text-muted-foreground">
           Ô có nhãn <span className="text-amber-600 dark:text-amber-400">ƯT</span> dùng thang bậc tỷ lệ giao thành công: ghi đè tay → số đo từng đơn của chính mã → lịch sử 90 ngày của mã → tỷ lệ khai ở
-          Giả định ({formatPercent(data.rateBasis.fallbackDeliveryRate)}). Độ phủ trong kỳ: {data.rateBasis.coverage.projected ?? 0} mã theo số đo · {data.rateBasis.coverage.history ?? 0} mã theo lịch sử ·{" "}
-          {data.rateBasis.coverage.override ?? 0} mã ghi đè tay · {data.rateBasis.coverage.default ?? 0} mã theo tỷ lệ khai.
+          Giả định ({formatPercent(data.rateBasis.fallbackDeliveryRate)}). Độ phủ trong kỳ: {deliveryRateCoverageParts(data.rateBasis.coverage).total} mã —{" "}
+          {deliveryRateCoverageParts(data.rateBasis.coverage)
+            .parts.map((x) => `${x.count} ${x.label.toLowerCase()}`)
+            .join(" · ")}
+          .
         </p>
       ) : null}
 

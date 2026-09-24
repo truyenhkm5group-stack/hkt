@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { shouldStampReceipt } from "@/lib/constants/production";
 import { inArray } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
@@ -34,8 +36,52 @@ function receiptFixture(id: string, receivedAt: Date, opts: { productIds?: strin
   return { id, supplier: opts.supplier ?? "Xưởng A", receivedAt, productIds: opts.productIds ?? ["pur-prod"] };
 }
 
+/**
+ * ═══════════ MỐC KHO NHẬN HÀNG TỪ XƯỞNG (23/09/2026) ═══════════
+ *
+ * Trước bản này `production_orders` có mốc HẸN và mốc GỬI, còn lúc hàng về chỉ đổi `status` mà không
+ * ghi thời điểm. ERP vẫn ƯỚC LƯỢNG được thời gian giao bằng cách ghép lô đặt với phiếu nhập kho
+ * (`matchProductionToReceipts` ngay trên), nhưng phép ghép ấy CỐ Ý trả "nhập nhằng" khi cùng một mẫu
+ * có hai lô — nên độ trễ của xưởng có lúc đo được, có lúc không, và không ai biết trước lúc nào.
+ *
+ * Chủ shop chốt: KHO bấm, lúc ĐẾM XONG. Đó là một LỜI KHAI trực tiếp, không phải một phép suy.
+ */
+function testMocKhoNhan() {
+  // ───── Ghi khi, và chỉ khi, chuyển sang ĐÃ NHẬN mà mốc còn trống ─────
+  assert.equal(shouldStampReceipt("RECEIVED", null), true, "lần đầu bấm 'đã nhận' phải đóng dấu mốc");
+  assert.equal(shouldStampReceipt("RECEIVED", undefined), true, "cột chưa có giá trị cũng là còn trống");
+
+  /*
+    BẤM LẦN HAI KHÔNG ĐƯỢC DỜI MỐC.
+
+    Một cú bấm đúp hay một lần trình duyệt gửi lại sẽ ghi đè mốc về lúc bấm sau — và mốc này đi THẲNG
+    vào phép đo độ trễ của xưởng, nên nó làm xưởng trông như giao trễ thêm đúng số ngày giữa hai lần
+    bấm. Con số vẫn "hợp lý" nên không ai đi kiểm lại. Cùng lớp lỗi với AGENTS.md mục 61.
+  */
+  assert.equal(shouldStampReceipt("RECEIVED", new Date("2026-09-20T02:00:00Z")), false, "đã có mốc thì lần bấm sau KHÔNG được ghi đè");
+  assert.equal(shouldStampReceipt("RECEIVED", "2026-09-20T02:00:00Z"), false, "mốc đọc ra dạng chuỗi vẫn là đã có mốc");
+
+  // ───── Trạng thái khác không bao giờ đóng dấu ─────
+  for (const s of ["DRAFT", "SENT", "CANCELLED"]) {
+    assert.equal(shouldStampReceipt(s, null), false, `trạng thái ${s} không được đóng dấu mốc nhận`);
+  }
+
+  /*
+    ĐƯỜNG GHI PHẢI ĐI QUA ĐÚNG HÀM NÀY, và phải lưu KHOÁ TÀI KHOẢN chứ không chỉ ô chữ (mục 34).
+    Quét mã nguồn vì một `receivedAt: new Date()` vô điều kiện lọt vào là lỗi không bài kiểm dữ liệu
+    nào bắt được — nó chỉ hiện ra sau vài tuần, dưới dạng một con số độ trễ sai.
+  */
+  const src = readFileSync("lib/actions/production.ts", "utf8");
+  assert.ok(src.includes("shouldStampReceipt("), "setProductionStatus phải quyết định bằng hàm thuần, không tự viết lại điều kiện");
+  assert.ok(src.includes("receivedByUserId: ghiMocNhan ? user.id"), "phải lưu khoá tài khoản người bấm, không chỉ tên");
+  assert.ok(!/receivedAt: new Date\(\)(?!\s*:)/.test(src.replace(/ghiMocNhan \? new Date\(\)/g, "")), "không được ghi mốc nhận vô điều kiện");
+
+  console.log("✓ Mốc kho nhận hàng: ghi đúng một lần, bấm lại không dời mốc, trạng thái khác không đóng dấu, đường ghi lưu khoá tài khoản");
+}
+
 export async function testPurchasing(db: Db) {
   clearMemo();
+  testMocKhoNhan();
   const base = new Date("2026-05-01T03:00:00Z");
   const plus = (days: number) => new Date(base.getTime() + days * DAY);
 

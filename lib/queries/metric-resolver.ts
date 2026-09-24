@@ -1,5 +1,5 @@
 import { and, eq, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { KR_DEFAULT_MINIMUM_SAMPLE, METRIC_BINDINGS, metricStateOf, type MetricValue } from "@/lib/constants/metric-bindings";
 import { slaStateOf } from "@/lib/constants/work";
 import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
@@ -26,9 +26,31 @@ const o = schema.orders;
 
 type Ctx = { period: Period; department?: DepartmentCode | null };
 
+/*
+  ═══ TẮT JIT CHO CÂU NÀY — ĐO ĐƯỢC, KHÔNG ĐOÁN ═══
+
+  Đo production 23/09/2026 bằng `ops perf-probe` (run 35873756396), CÙNG câu, CÙNG tham số, xen kẽ
+  JIT bật / JIT tắt, trung vị 3 lượt mỗi bên:
+
+      JIT bật (mặc định)   8.425 ms   [8.425 · 8.383 · 8.575]
+      JIT tắt              43 ms      [43 · 39 · 66]
+      khối JIT:            Functions 672 · Optimization 4.512 ms · Emission 3.668 ms
+
+  99 % thời gian là JIT BIÊN DỊCH câu lệnh, không phải chạy nó. Và câu này KHÔNG qua
+  `chayKhongJit` — tệp này vắng mặt trong danh sách 20 tệp đã tắt JIT — nên trên đường ứng dụng
+  thật nó đo được 19.945 ms (`getScorecard`, trang /work/okr), khớp với JIT bật cộng tranh chấp
+  trên máy 2 nhân, không khớp với 43 ms.
+
+  Và nó bị gọi NĂM lần mỗi lượt tải (tỷ lệ giao · tỷ lệ hoàn · doanh thu · giá vốn · biên lợi
+  nhuận), mỗi lần biên dịch lại từ đầu: `getScorecard` cộng dồn 71 giây thời gian CSDL cho một
+  trang. Năm lần gọi trùng là một lãng phí thứ hai, nhưng sau khi tắt JIT nó còn ~5 × 40 ms — gộp
+  nó lại là đổi ngữ nghĩa độ tươi để lấy ~160 ms, nên chưa làm.
+
+  `chayKhongJit` không đổi KẾT QUẢ — JIT chỉ đổi cách Postgres thực thi, không đổi thứ nó trả về.
+*/
 async function outcomeAggregate(period: Period) {
   const db = await getDb();
-  const rows = await db
+  const rows = await chayKhongJit(db, (tx) => tx
     .select({
       delivered: COUNT_DELIVERED,
       returned: COUNT_RETURNED,
@@ -39,7 +61,7 @@ async function outcomeAggregate(period: Period) {
     })
     .from(o)
     .leftJoin(schema.shipments, and(eq(schema.shipments.orderId, o.id), PRIMARY_ATTEMPT))
-    .where(metricScope(period));
+    .where(metricScope(period)));
   const r = rows[0];
   return { delivered: Number(r?.delivered ?? 0), returned: Number(r?.returned ?? 0), revenue: Number(r?.revenue ?? 0), cogs: Number(r?.cogs ?? 0), cogsKnown: Number(r?.cogsKnown ?? 0) };
 }

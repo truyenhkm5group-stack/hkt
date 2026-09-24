@@ -4,6 +4,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { toDate } from "@/lib/format";
+import { getProductStockPlan, isPlanRowActive } from "@/lib/queries/planning";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { availableStockExpr, erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, stockShrinkageExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
@@ -468,7 +469,7 @@ export async function getProductDetail(id: string) {
   const since30 = new Date(Date.now() - 30 * 86_400_000);
   const since90 = new Date(Date.now() - 90 * 86_400_000);
 
-  const [[sales], soldByVariant, dailyRows, histories, recentOrders, warehouses] = await Promise.all([
+  const [[sales], soldByVariant, dailyRows, receiptLog, recentOrders, warehouses, stockPlan] = await Promise.all([
     db
       .select({
         sold30: sql<number>`coalesce(sum(case when ${schema.orders.insertedAt} >= ${since30} then ${schema.orderItems.quantity} else 0 end), 0)`,
@@ -498,13 +499,32 @@ export async function getProductDetail(id: string) {
       .where(and(itemMatch, notCancelled, gte(schema.orders.insertedAt, since30)))
       .groupBy(sql`1`)
       .orderBy(sql`1`),
+    /*
+      PHIẾU KHO ERP GẦN ĐÂY — chứng từ đứng sau cột "Nhập kho". Thay cho nhật ký tồn của Pancake
+      (tồn Pancake âm ở cả 12/12 mẫu mã của Q005, đo 23/09/2026): một dòng "tồn sau −29" không giúp
+      ai quyết định gì, còn một phiếu nhập có số, ngày, nhà cung cấp và người lập thì truy được.
+    */
     variantIds.length
-      ? db.query.inventoryHistories.findMany({
-          where: inArray(schema.inventoryHistories.variantId, variantIds),
-          orderBy: [desc(schema.inventoryHistories.insertedAt)],
-          limit: 30,
-          with: { variant: { columns: { id: true, sku: true, color: true, size: true } }, warehouse: { columns: { name: true } } },
-        })
+      ? db
+          .select({
+            id: schema.stockReceiptItems.id,
+            kind: schema.stockReceipts.kind,
+            receivedAt: schema.stockReceipts.receivedAt,
+            reference: schema.stockReceipts.reference,
+            supplier: schema.stockReceipts.supplier,
+            createdBy: schema.stockReceipts.createdBy,
+            quantity: schema.stockReceiptItems.quantity,
+            unitCost: schema.stockReceiptItems.unitCost,
+            sku: pv.sku,
+            color: pv.color,
+            size: pv.size,
+          })
+          .from(schema.stockReceiptItems)
+          .innerJoin(schema.stockReceipts, eq(schema.stockReceipts.id, schema.stockReceiptItems.receiptId))
+          .innerJoin(pv, eq(pv.id, schema.stockReceiptItems.variantId))
+          .where(inArray(schema.stockReceiptItems.variantId, variantIds))
+          .orderBy(desc(schema.stockReceipts.receivedAt), desc(schema.stockReceipts.createdAt))
+          .limit(30)
       : Promise.resolve([]),
     db.query.orders.findMany({
       where: exists(sql`(select 1 from ${schema.orderItems} oi where oi.order_id = ${schema.orders.id} and (${variantIds.length ? sql`oi.variant_id in ${variantIds} or ` : sql``}oi.product_id = ${product.id}))`),
@@ -520,6 +540,8 @@ export async function getProductDetail(id: string) {
       },
     }),
     listWarehouses(),
+    // SỔ KHO + CẢNH BÁO ĐẶT HÀNG — cùng câu lệnh và cùng `computePlan` với trang Kế hoạch SX.
+    getProductStockPlan(product.id),
   ]);
 
   const soldMap = Object.fromEntries(soldByVariant.map((s) => [s.variantId ?? "", Number(s.qty ?? 0)]));
@@ -531,10 +553,69 @@ export async function getProductDetail(id: string) {
     daily.push({ day: key, quantity: dailyMap[key]?.quantity ?? 0, orders: dailyMap[key]?.orders ?? 0 });
   }
 
-  const variants = product.variants.map((v) => ({ ...v, sold30: soldMap[v.id] ?? 0, stockValue: Math.max(v.remainQuantity, 0) * v.lastImportedPrice }));
+  /*
+    TỒN KHO CỦA TRANG NÀY LÀ SỔ KHO ERP (AGENTS.md mục 3.10), KHÔNG PHẢI SỐ PANCAKE.
+
+    Bản trước in `remainQuantity` / `actualRemainQuantity` của Pancake dưới nhãn "Tồn KD / Tồn TT",
+    trong khi trang danh sách /products, Kế hoạch SX và cảnh báo hết hàng đều chạy theo sổ kho
+    ERP — nên cùng một mẫu mã có hai số tồn tuỳ trang mở, và trang chi tiết (nơi nhân viên đặt hàng
+    nhìn kỹ nhất) lại là trang nói sai. Số Pancake vẫn đi kèm, nhưng chỉ làm dòng ĐỐI CHIẾU.
+
+    Mẫu mã chưa có phiếu nhập: tồn / khả dụng / còn thiếu là CHƯA BIẾT (`null`), không phải 0 —
+    lấy 0 trừ số đã xuất sẽ ra một con số âm bịa ra và một cảnh báo thiếu hàng bịa ra.
+  */
+  const ledgerMap = new Map(stockPlan.rows.map((r) => [r.variantId, r]));
+  const variants = product.variants.map((v) => {
+    const ledger = ledgerMap.get(v.id) ?? null;
+    const known = Boolean(ledger?.stockKnown);
+    return {
+      ...v,
+      sold30: soldMap[v.id] ?? 0,
+      ledger,
+      /** Tồn THỰC TẾ ERP = tổng phiếu kho − đã xuất qua ĐVVC. `null` = chưa có phiếu nhập. */
+      erpStock: ledger && known ? ledger.stock : null,
+      /** KHẢ DỤNG = tồn thực tế − đã chốt đơn chưa xuất. */
+      available: ledger && known ? ledger.available : null,
+      /** CÒN THIẾU = đơn đã chốt mà kho không đủ hàng để xuất = max(0, −khả dụng). */
+      shortage: ledger && known ? ledger.shortage : null,
+      /** Mẫu mã có việc (bán / tồn / chờ xuất / cần đặt) — cùng luật lọc với trang Kế hoạch SX. */
+      active: ledger ? isPlanRowActive(ledger) : false,
+      // Giá trị tồn = tồn THỰC TẾ ERP × giá vốn — đúng công thức ô "Giá trị tồn" ở /products.
+      stockValue: ledger && known && ledger.stock > 0 ? ledger.stock * ledger.unitCost : 0,
+    };
+  });
+  const sumLedger = (pick: (r: NonNullable<(typeof variants)[number]["ledger"]>) => number) => variants.reduce((t, v) => t + (v.ledger ? pick(v.ledger) : 0), 0);
+  const sumKnown = (pick: (v: (typeof variants)[number]) => number | null) => variants.reduce((t, v) => t + (pick(v) ?? 0), 0);
+  // "Cần đặt hàng" = mẫu mã CÓ VIỆC đang hết / sẽ hết trước khi lô mới về / sắp thiếu.
+  const needOrder = variants.filter((v) => v.active && v.ledger && (v.ledger.status === "OUT" || v.ledger.status === "CRITICAL" || v.ledger.status === "LOW"));
+  const reorderDates = needOrder.map((v) => v.ledger?.reorderByDate).filter((d): d is string => Boolean(d)).sort();
   const totals = {
-    remain: variants.reduce((s, v) => s + v.remainQuantity, 0),
-    actual: variants.reduce((s, v) => s + v.actualRemainQuantity, 0),
+    /** Tồn thực tế ERP — chỉ cộng mẫu mã đã có phiếu nhập. */
+    actual: sumKnown((v) => v.erpStock),
+    available: sumKnown((v) => v.available),
+    shortage: sumKnown((v) => v.shortage),
+    committed: sumLedger((r) => r.committed),
+    receiptIn: sumLedger((r) => r.receiptIn),
+    returnIn: sumLedger((r) => r.returnIn),
+    adjust: sumLedger((r) => r.adjust),
+    manualOut: sumLedger((r) => r.manualOut),
+    shipped: sumLedger((r) => r.shipped),
+    inTransit: sumLedger((r) => r.inTransit),
+    awaitingReturn: sumLedger((r) => r.awaitingReturn),
+    suggested: sumLedger((r) => r.suggested),
+    orderCost: sumLedger((r) => r.orderCost),
+    /** Mẫu mã CÒN BÁN mà chưa có phiếu nhập — tồn của chúng không nằm trong các tổng trên. */
+    unknownStock: variants.filter((v) => !v.isRemoved && v.ledger && !v.ledger.stockKnown).length,
+    /**
+     * Đơn ĐÃ CHỐT, còn chờ xuất, trên mẫu mã CHƯA có phiếu nhập. Không phải "còn thiếu" (ERP không
+     * biết kho có bao nhiêu), nhưng cũng không được biến mất khỏi thẻ cảnh báo: đo production
+     * 23/09/2026, mã Q005 có 53 cái chờ xuất nằm trên 5 mẫu mã chưa có phiếu nhập — nhiều hơn cả
+     * 47 cái thiếu đã biết. Cộng nó vào "còn thiếu" là bịa; im lặng về nó là giấu.
+     */
+    committedUnknown: variants.reduce((t, v) => t + (v.ledger && !v.ledger.stockKnown ? v.ledger.committed : 0), 0),
+    needOrder: needOrder.length,
+    /** Hạn đặt sớm nhất trong các mẫu mã cần đặt (YYYY-MM-DD) — quá khứ là đã muộn. */
+    reorderBy: reorderDates[0] ?? null,
     stockValue: variants.reduce((s, v) => s + v.stockValue, 0),
     sold30: Number(sales?.sold30 ?? 0),
     sold90: Number(sales?.sold90 ?? 0),
@@ -544,7 +625,7 @@ export async function getProductDetail(id: string) {
   };
 
   // Một đơn có thể nhiều lần gửi — chọn lần ĐẠI DIỆN bằng đúng luật `PRIMARY_ATTEMPT` mà cột tiền dùng.
-  return { ...product, variants, totals, daily, histories, recentOrders: recentOrders.map((d) => ({ ...d, shipment: vanDonDaiDien(d.attempts) })), warehouses };
+  return { ...product, variants, totals, planning: { assumptions: stockPlan.assumptions, used: stockPlan.used }, daily, receiptLog, recentOrders: recentOrders.map((d) => ({ ...d, shipment: vanDonDaiDien(d.attempts) })), warehouses };
 }
 
 export type ProductDetail = NonNullable<Awaited<ReturnType<typeof getProductDetail>>>;

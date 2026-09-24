@@ -16,6 +16,7 @@ const schema = z.object({
   minOrderQty: z.number().int().min(0).max(100_000).default(0),
   minOrderQtyOverrides: z.record(z.string(), z.number().int().min(0).max(100_000)).default({}),
   leadTimeOverrides: z.record(z.string(), z.number().int().min(1).max(180)).default({}),
+  restockDays: z.number().int().min(0).max(60).default(2),
 });
 
 export async function savePlanningAssumptions(input: unknown): Promise<{ ok: true } | { error: string }> {

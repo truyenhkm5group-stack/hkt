@@ -85,6 +85,24 @@ export const DEPT_PERF: Record<DepartmentCode, DeptPerfSpec> = {
       },
     ],
   },
+  PRODUCTION: {
+    focus: "Đặt đúng mẫu, đúng lượng, đúng lúc: không hết hàng khi đang bán được, không để vốn nằm ở mẫu không bán.",
+    notAttributed:
+      "KHÔNG tính doanh thu cho người đặt hàng — giá và quảng cáo do phòng khác quyết. Và không tính phần hàng hoàn do bưu tá giao hỏng: phòng này chỉ chịu phần hoàn vì sai size / sai chất.",
+    metrics: [
+      { label: "Việc kế hoạch / đặt hàng đúng hẹn", availability: "MEASURED", note: "Trục Đúng hạn trên việc giao tay và việc định kỳ của phòng — phòng Sản xuất hôm nay CHƯA có nguồn việc tự động nào (xem `lib/constants/department-ai.ts`, nấc VÀO VIỆC)." },
+      {
+        label: "Chất lượng quyết định đặt hàng (hết hàng khi đang bán được / vốn chết)",
+        availability: "UNAVAILABLE",
+        note: "Đo được ở mức MẪU MÃ trên trang Kế hoạch đặt hàng, nhưng không quy được về người: `production_orders.created_by` là một Ô CHỮ, không phải `users.id` (AGENTS.md mục 34). Ghép theo tên là đoán, và đoán sai thì trừ điểm oan.",
+      },
+      {
+        label: "Xưởng giao đúng hẹn",
+        availability: "UNAVAILABLE",
+        note: "`production_orders` có `due_date` và `sent_at` nhưng KHÔNG có mốc nhận thật, nên số ngày trễ không tính được. Cần thêm cột mốc nhận trước khi nói tới chỉ số này.",
+      },
+    ],
+  },
   FINANCE: {
     focus: "Dòng tiền được phân loại hết và không có khoản nào nằm treo quá lâu.",
     notAttributed: "COD chưa về KHÔNG phải lỗi kế toán khi ĐVVC chưa lên bảng kê — trục Kết quả chỉ tính việc đã đóng được.",

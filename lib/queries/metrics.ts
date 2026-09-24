@@ -233,3 +233,28 @@ export function realizedShippingSql(cols: { shipping: SQL<number> | SQLWrapper; 
     (${cols.shipping} + case when ${cols.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}) then ${cols.returnFee} else 0 end) * ${phanBo}
   ) filter (where ${cols.outcome} in (${sql.raw(FINISHED_OUTCOMES_SQL)})), 0)`;
 }
+
+/**
+ * ═══════════ CƯỚC SẼ PHÁT SINH CỦA PHẦN ĐANG TREO ═══════════
+ *
+ * Em sinh đôi của `realizedShippingSql`, cho vế DỰ PHÓNG: cước của đơn CHƯA NGÃ NGŨ.
+ *
+ * ─── VÌ SAO KHÔNG NHÂN VỚI TỶ LỆ GIAO THÀNH CÔNG ───
+ *
+ * Doanh thu chỉ về khi giao được, nên doanh thu dự phóng phải nhân GTC. **Cước thì mất cả hai
+ * đường**: hàng giao được tốn cước đi, hàng hoàn tốn cước đi CỘNG cước về. Nhân GTC vào cước là
+ * giả định đơn hoàn được miễn cước — đúng cái làm điểm hoà vốn đẹp hơn sự thật.
+ *
+ * Giả định duy nhất ở đây: **mọi đơn đang treo rồi sẽ được gửi**. Đơn huỷ giữa chừng sẽ không tốn
+ * cước, nên con số này nhỉnh hơn thực tế một chút — lệch về phía THẬN TRỌNG, đúng hướng an toàn
+ * cho một khuyến nghị tiêu tiền. ERP chưa đo tỷ lệ huỷ-sau-khi-chốt nên không có gì để nhân vào;
+ * bịa một hệ số ở đây là thêm một giả định thứ hai để che một giả định thứ nhất.
+ *
+ * Phí hoàn của đơn đang treo CỐ Ý không dự phóng: `orders.return_fee` chỉ tồn tại sau khi hoàn
+ * thật, nên nhân nó với tỷ lệ hoàn là nhân với một ô trống. Vế này vẫn thiếu, và hợp đồng cột nói
+ * ra điều đó (AGENTS.md mục 68).
+ */
+export function openShippingSql(cols: { shipping: SQL<number> | SQLWrapper; outcome: SQL<string> | SQLWrapper; share?: SQL<number> | SQLWrapper }): SQL<number> {
+  const phanBo = cols.share ? sql`coalesce(${cols.share}, 0)` : sql`1`;
+  return sql<number>`coalesce(sum(${cols.shipping} * ${phanBo}) filter (where ${cols.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})), 0)`;
+}

@@ -372,6 +372,20 @@ export const productionOrders = pgTable(
     note: text("note").notNull().default(""),
     dueDate: ts("due_date"),
     sentAt: ts("sent_at"),
+    /*
+      MỐC NHẬN THẬT — cái thiếu làm không đo được "xưởng giao trễ mấy ngày".
+
+      Trước 23/09/2026 bảng này có mốc HẸN (`due_date`) và mốc GỬI (`sent_at`), còn lúc hàng về thì
+      `status` đổi sang `RECEIVED` mà KHÔNG ghi thời điểm. Nên hai câu hỏi khác hẳn nhau — "hết hàng
+      vì bán nhanh" và "hết hàng vì xưởng giao trễ" — cùng hiện ra là một dòng cảnh báo tồn kho.
+
+      Chủ shop chốt quy trình: KHO là người bấm, và bấm LÚC ĐẾM XONG (không phải lúc xe tới cổng).
+      Vì thế mốc này là lời khai của người đếm, không phải một sự kiện tự suy ra.
+    */
+    receivedAt: ts("received_at"),
+    /** Khoá tài khoản người bấm (AGENTS.md mục 34) — cột chữ bên dưới chỉ là ảnh chụp tên để đọc. */
+    receivedByUserId: text("received_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    receivedBy: text("received_by").notNull().default(""),
     createdBy: text("created_by").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -5555,6 +5569,19 @@ export const techAgentRuns = pgTable(
     filesChanged: jsonb("files_changed").$type<string[]>().notNull().default([]),
     error: text("error").notNull().default(""),
     metadata: jsonb("metadata"),
+    /*
+      PHÁN QUYẾT CỦA NGƯỜI REVIEW — cơ sở của chuỗi "lượt chạy sạch" (lib/constants/agent-clean-streak.ts).
+
+      `NULL` = CHƯA REVIEW, không phải "sạch" và không phải "có lỗi" (AGENTS.md mục 42). Bốn cổng
+      xanh KHÔNG đồng nghĩa với sạch: cổng bắt được thứ hỏng, không bắt được thứ sai — nên chỉ một
+      người đã đọc mới ghi được cột này.
+
+      Quy kết bằng KHOÁ tài khoản (mục 34). Không backfill (mục 8.8): không ai biết lượt cũ nào sạch.
+    */
+    reviewVerdict: text("review_verdict"),
+    reviewNote: text("review_note").notNull().default(""),
+    reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    reviewedAt: ts("reviewed_at"),
     createdAt: createdAt(),
   },
   (t) => [
@@ -5564,6 +5591,10 @@ export const techAgentRuns = pgTable(
     /* Chép hai lần KHÔNG đẻ hai dòng — bảo đảm ở CSDL, xem chú thích của `external_ref`. */
     uniqueIndex("tech_agent_runs_external_ref_uq").on(t.externalRef),
     check("tech_agent_runs_status_check", sql`${t.status} IN ('RUNNING','SUCCEEDED','FAILED','CANCELLED','BLOCKED')`),
+    /* Danh sách ĐÓNG (mục 30): chuỗi lạ buộc mã phải đoán giữa "sạch" và "có lỗi". */
+    check("tech_agent_runs_review_verdict_check", sql`${t.reviewVerdict} IS NULL OR ${t.reviewVerdict} IN ('SACH','CO_LOI')`),
+    /* Có phán quyết thì phải biết AI và KHI NÀO. Một phán quyết không chủ là một phán quyết không ai chịu. */
+    check("tech_agent_runs_review_attrib_check", sql`${t.reviewVerdict} IS NULL OR ${t.reviewedAt} IS NOT NULL`),
     check("tech_agent_runs_typecheck_check", sql`${t.typecheckResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
     check("tech_agent_runs_lint_check", sql`${t.lintResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),
     check("tech_agent_runs_test_check", sql`${t.testResult} IN ('PASSED','FAILED','SKIPPED','UNKNOWN')`),

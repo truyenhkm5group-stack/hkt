@@ -22,7 +22,7 @@ import { getDb, schema } from "@/db";
 import { AiAgentExecutor } from "@/lib/agents/executor";
 import { runAgentOnTask } from "@/lib/agents/runner";
 import { getAiProvider } from "@/lib/ai/provider";
-import { tierForRole } from "@/lib/constants/agent-model";
+import { AGENT_LOOP_TIMEOUT_MS, tierForRole } from "@/lib/constants/agent-model";
 import { aiDisabledReason } from "@/lib/ai/router";
 import { systemActor } from "@/lib/constants/actor";
 
@@ -87,7 +87,8 @@ async function main() {
   */
   const vai = await db.query.techAgents.findFirst({ where: eq(schema.techAgents.key, agentKey), columns: { role: true } });
   const bac = tierForRole(vai?.role);
-  const provider = getAiProvider(bac);
+  /* Trần chờ KHÔNG đi theo bậc — xem `AGENT_LOOP_TIMEOUT_MS`. */
+  const provider = getAiProvider(bac, { hanChoMs: AGENT_LOOP_TIMEOUT_MS });
   const executor = new AiAgentExecutor(provider, aiDisabledReason());
 
   console.log(`▶ ${task.code} · ${task.title}`);

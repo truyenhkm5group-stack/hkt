@@ -156,8 +156,45 @@ export class AgentWorkspace {
   }
 
   /** Tệp đang đổi so với base — ĐO từ git, không hỏi agent. */
+  /**
+   * Tên các tệp trong sổ chứng từ số đo (`docs/perf/`) của CHÍNH cây làm việc này.
+   *
+   * Đọc từ đĩa, không đoán: đề bài kể tên tệp nào thì tệp ấy phải mở được. `[]` khi thư mục
+   * không tồn tại — và nơi gọi in ra KHÔNG GÌ CẢ, vì một khối rỗng dạy agent rằng thư mục ấy
+   * vô dụng.
+   *
+   * Dùng `git ls-files` chứ không đọc thư mục: tệp chưa vào kho không phải chứng từ của ai, và
+   * một cây làm việc bẩn không được đổi nội dung đề bài.
+   */
+  async tepSoChungTu(): Promise<string[]> {
+    const r = await rawGit(this.root, ["ls-files", "docs/perf/"]);
+    if (!r.ok) return [];
+    return r.stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  }
+
+  /**
+   * Tệp agent đã đổi — TỪNG TỆP, không phải từng thư mục.
+   *
+   * `-uall` KHÔNG phải một lá cờ cho đẹp. Mặc định `git status --porcelain` GỘP một thư mục chưa
+   * theo dõi thành một dòng duy nhất kết thúc bằng `/`: agent tạo `docs/baselines/x.json` thì nó
+   * báo về đúng chữ `docs/baselines/`.
+   *
+   * Cái giá đã đo được (việc TECH-6, lượt chạy #42, 23/09/2026). Agent làm xong, commit thật với
+   * 5 tệp — rồi bước nghiệm thu đánh KHÔNG ĐẠT vì hai danh sách không khớp:
+   *
+   *     sổ ghi  [… , docs/baselines/]
+   *     git thấy [… , docs/baselines/BASELINE-TEMPLATE.json]
+   *
+   * Bước nghiệm thu ĐÚNG khi từ chối — nó đọc hai nguồn và chúng nói hai điều khác nhau. Sai nằm
+   * ở đây: sổ đọc cây làm việc TRƯỚC commit (tệp còn chưa theo dõi ⇒ gộp), còn git đọc SAU commit
+   * (đã theo dõi ⇒ liệt kê đủ). Cùng một sự việc, hai cách nhìn, và lỗi chỉ lộ ra đúng lần agent
+   * tạo một THƯ MỤC MỚI — nên nó nằm im qua mọi lượt chạy trước.
+   *
+   * Hệ quả nặng hơn cái lệch: `tech_agent_runs.files_changed` là VẾT KIỂM TOÁN của việc agent đã
+   * tạo ra gì. Ghi tên thư mục thay cho tên tệp là ghi sai vết, và không ai đọc lại được.
+   */
   async changedFiles(): Promise<string[]> {
-    const r = await rawGit(this.root, ["status", "--porcelain"]);
+    const r = await rawGit(this.root, ["status", "--porcelain", "-uall"]);
     if (!r.ok) return [];
     return r.stdout
       .split("\n")

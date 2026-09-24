@@ -1,0 +1,103 @@
+ops verify — phần SMOKE, toàn văn · production · 23/09/2026
+Lượt chạy GitHub Actions: 35817182554 · 04:09–04:12 UTC (11:09–11:12 giờ Việt Nam)
+
+Đây là ĐẦU RA THÔ, chép nguyên văn. Bản tóm tắt và phần đặt cạnh nhau nằm ở
+docs/perf/TECH-6-TECH-9-so-do-tho-2026-09-23.md — tệp này để đọc lại số gốc mà không phải
+tin bản tóm tắt.
+
+ĐIỀU KIỆN ĐO: máy đang BÃO HOÀ (load 3,77 trên 2 nhân · erp-db 107,57 % CPU · RAM khả dụng
+390 MB · chính lượt đo chờ khoá 95 giây). Mọi con số dưới đây là CẬN TRÊN dưới tranh chấp,
+không phải nền sạch.
+
+Ba cột đọc như sau:
+  · kB            — kích thước phản hồi
+  · đầu phản hồi  — thời gian tới byte đầu tiên
+  · thân          — thời gian còn lại để nhận hết phần mang dữ liệu
+Dòng không có "đầu phản hồi"/"thân" là dòng công cụ chỉ ghi tổng thời gian.
+
+ĐÃ LỌC TRƯỚC KHI ĐƯA VÀO KHO: log gốc của lượt chạy còn có dòng Caddy mang ĐỊA CHỈ IP THẬT
+của người dùng và tiêu đề cookie. Kho mã này PUBLIC (AGENTS.md mục 5), nên tệp này chỉ giữ
+bảng kết quả smoke — không IP, không cookie, không tên biến bí mật.
+
+────────────────────────────────────────────────────────────────────────────────
+· thêm tuyến động /import-vtp/1b27c9b3-2bef-4536-b1fe-4ac0142ed7c2 — lần nhập tệp gần nhất
+· thêm tuyến động /shipments/ea9c0ac6-ce84-4c07-8b5d-50b0317a77ae — kiện có thao tác chăm sóc của người
+· thêm tuyến động /shipments/f8bc5275-4db6-4495-8492-a4c737d2f7fd — kiện nhiều sự kiện ĐVVC nhất
+⏱ làm nóng / → HTTP 200 (896ms) — chi phí NGUỘI, không tính vào kết quả
+⚠ /ads [SLOW] 5840kB · đầu phản hồi 1803ms · thân 20.7s · CHẬM, ngưỡng 2s (22501ms)
+⚠ /ads/daily [SLOW] 359kB · đầu phản hồi 201ms · thân 1.9s · CHẬM, ngưỡng 2s (2122ms)
+⚠ /cod [SLOW] 407kB · đầu phản hồi 96ms · thân 18.2s · CHẬM, ngưỡng 2s (18263ms)
+⚠ /cod?recon=stale [SLOW] 407kB · đầu phản hồi 176ms · thân 10.6s · CHẬM, ngưỡng 2s (10742ms)
+⚠ /cod?recon=unproven [SLOW] 407kB · đầu phản hồi 91ms · thân 30.2s · CHẬM, ngưỡng 2s (30243ms)
+⚠ /cs?view=theo-case [SLOW] 666kB · CHẬM, ngưỡng 2s (2405ms)
+⚠ /customers [SLOW] 243kB · đầu phản hồi 111ms · thân 24.6s · CHẬM, ngưỡng 2s (24690ms)
+⚠ /data-quality?issue=return-not-received [SLOW] 679kB · đầu phản hồi 95ms · thân 1.9s · CHẬM, ngưỡng 2s (2037ms)
+⚠ /data-quality?issue=unlinked-shipment [SLOW] 610kB · đầu phản hồi 866ms · thân 53.1s · CHẬM, ngưỡng 2s (53979ms)
+⚠ /inventory/planning [SLOW] 731kB · đầu phản hồi 185ms · thân 1.8s · CHẬM, ngưỡng 2s (2013ms)
+⚠ /inventory/returns [SLOW] 1622kB · đầu phản hồi 121ms · thân 3.8s · CHẬM, ngưỡng 2s (3888ms)
+⚠ /landing [SLOW] 2911kB · đầu phản hồi 89ms · thân 5.2s · CHẬM, ngưỡng 2s (5300ms)
+⚠ /products [SLOW] 235kB · đầu phản hồi 96ms · thân 8.7s · CHẬM, ngưỡng 2s (8840ms)
+⚠ /reports/cashflow [SLOW] 220kB · CHẬM, ngưỡng 2s (9448ms)
+⚠ /reports/returns [SLOW] 597kB · đầu phản hồi 598ms · thân 8.8s · CHẬM, ngưỡng 2s (9425ms)
+⚠ /reports/scenario [SLOW] 185kB · đầu phản hồi 195ms · thân 3.2s · CHẬM, ngưỡng 2s (3405ms)
+⚠ /work/okr [SLOW] 189kB · đầu phản hồi 118ms · thân 26.3s · CHẬM, ngưỡng 2s (26448ms)
+⚠ /work/today [SLOW] 250kB · đầu phản hồi 237ms · thân 2.1s · CHẬM, ngưỡng 2s (2303ms)
+✓ / [SUCCESS] 257kB (201ms)
+✓ /alerts [SUCCESS] 648kB (401ms)
+✓ /audit [SUCCESS] 218kB (243ms)
+✓ /bank [SUCCESS] 498kB (364ms)
+✓ /cs [SUCCESS] 526kB (599ms)
+✓ /customers/retention [SUCCESS] 178kB (248ms)
+✓ /data-quality [SUCCESS] 413kB · đầu phản hồi 114ms · thân 1.1s (1194ms)
+✓ /expenses [SUCCESS] 194kB (251ms)
+✓ /finance [SUCCESS] 250kB (228ms)
+✓ /finance-ops [SUCCESS] 340kB · đầu phản hồi 625ms · thân 1.1s (1686ms)
+✓ /ideas [SUCCESS] 174kB (383ms)
+✓ /import-vtp [SUCCESS] 207kB (228ms)
+✓ /import-vtp/1b27c9b3-2bef-4536-b1fe-4ac0142ed7c2 [SUCCESS] 289kB (315ms)
+✓ /integrations [SUCCESS] 812kB · đầu phản hồi 99ms · thân 1.1s (1194ms)
+✓ /inventory [SUCCESS] 260kB (338ms)
+✓ /inventory/decisions [SUCCESS] 379kB (278ms)
+✓ /inventory/purchasing [SUCCESS] 195kB (624ms)
+✓ /inventory/receipts [SUCCESS] 1204kB · đầu phản hồi 114ms · thân 1.4s (1470ms)
+✓ /marketing/fanpages [SUCCESS] 191kB (244ms)
+✓ /marketing/fanpages?tab=assign [SUCCESS] 304kB (265ms)
+✓ /marketing/fanpages?tab=orders [SUCCESS] 327kB (402ms)
+✓ /operations [SUCCESS] 266kB (841ms)
+✓ /operations/dwell [SUCCESS] 1014kB (752ms)
+✓ /operations/preship [SUCCESS] 1221kB (512ms)
+✓ /orders [SUCCESS] 276kB (203ms)
+✓ /outreach [SUCCESS] 300kB (507ms)
+✓ /payroll [SUCCESS] 302kB (622ms)
+✓ /payroll/adjustments [SUCCESS] 152kB (138ms)
+✓ /payroll/assignments [SUCCESS] 168kB (153ms)
+✓ /payroll/migration [SUCCESS] 163kB (230ms)
+✓ /payroll/payslip [SUCCESS] 136kB (166ms)
+✓ /payroll/policies [SUCCESS] 155kB (183ms)
+✓ /payroll/runs [SUCCESS] 145kB (143ms)
+✓ /payroll/settings [SUCCESS] 160kB (124ms)
+✓ /products/performance [SUCCESS] 409kB (263ms)
+✓ /reports [SUCCESS] 322kB (264ms)
+✓ /reports/funnel [SUCCESS] 384kB · đầu phản hồi 83ms · thân 1.6s (1703ms)
+✓ /returns [SUCCESS] 164kB (225ms)
+✓ /settings/users [SUCCESS] 806kB (905ms)
+✓ /shipments [SUCCESS] 1333kB (545ms)
+✓ /shipments/ea9c0ac6-ce84-4c07-8b5d-50b0317a77ae [SUCCESS] 345kB (294ms)
+✓ /shipments/f8bc5275-4db6-4495-8492-a4c737d2f7fd [SUCCESS] 470kB (731ms)
+✓ /shipments?bucket=CARE_TODAY [SUCCESS] 1333kB · đầu phản hồi 72ms · thân 1.1s (1157ms)
+✓ /shipments?view=reconcile [SUCCESS] 829kB · đầu phản hồi 114ms · thân 1.7s (1766ms)
+✓ /shipments?view=report&basis=CASE_OPENED_AT [SUCCESS] 269kB (298ms)
+✓ /shipments?view=report&basis=CASE_RESOLVED_AT [SUCCESS] 270kB · đầu phản hồi 120ms · thân 1.1s (1192ms)
+✓ /tech [SUCCESS] 201kB (1265ms)
+✓ /tech/agents [SUCCESS] 203kB (535ms)
+✓ /tech/cto [SUCCESS] 239kB (1136ms)
+✓ /tech/deployments [SUCCESS] 277kB (249ms)
+✓ /tech/incidents [SUCCESS] 162kB (135ms)
+✓ /tech/tasks [SUCCESS] 245kB (601ms)
+✓ /work [SUCCESS] 141kB · đầu phản hồi 88ms · thân 1.7s (1775ms)
+✓ /work/all [SUCCESS] 1671kB · đầu phản hồi 128ms · thân 1.3s (1451ms)
+✓ /work/department [SUCCESS] 364kB (445ms)
+✓ /work/performance [SUCCESS] 231kB (554ms)
+✓ /work/review [SUCCESS] 144kB (158ms)
+✓ /work/settings [SUCCESS] 643kB · đầu phản hồi 78ms · thân 1.2s (1285ms)
+✓ ERP trả lời ok:true

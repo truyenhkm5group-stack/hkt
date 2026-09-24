@@ -77,13 +77,13 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
         <MetricCard
           label="Sắp quay về kho"
           value={formatNumber(sm.incomingUnits)}
-          note={used.countIncoming ? `Đã trừ khỏi lượng cần đặt · nhập lại được ${pct(used.returnRecoveryRate)} · tỷ lệ hoàn ${pct(used.shopReturnRate)}` : "Đang KHÔNG trừ khỏi lượng cần đặt"}
-          hint={<>Hàng đã rời kho nhưng sẽ quay lại: <b>đơn chờ hoàn về</b> (đã xác định hoàn, kho chưa lập phiếu tái nhập) cộng phần <b>hàng đang ở ngoài</b> ước bị hoàn theo tỷ lệ hoàn thực tế, cả hai nhân với tỷ lệ hàng hoàn thực sự nhập lại được kho ({pct(used.returnRecoveryRate)}, tính từ phiếu tái nhập đã đếm so với số đã xuất phải về).</>}
+          note={used.countIncoming ? `Đã trừ khỏi lượng cần đặt · nhập lại được ${pct(used.returnRecoveryRate)} · tỷ lệ hoàn theo GTC từng mã` : "Đang KHÔNG trừ khỏi lượng cần đặt"}
+          hint={<>Hàng đã rời kho nhưng sẽ quay lại: <b>đơn chờ hoàn về</b> (đã xác định hoàn, kho chưa lập phiếu tái nhập) cộng phần <b>hàng đang ở ngoài</b> ước bị hoàn theo tỷ lệ giao thành công của TỪNG MÃ (cùng thang bậc với Báo cáo lợi nhuận), cả hai nhân với tỷ lệ hàng hoàn thực sự nhập lại được kho ({pct(used.returnRecoveryRate)}, tính từ phiếu tái nhập đã đếm so với số đã xuất phải về).</>}
           icon={PackageSearch}
           tone={sm.incomingUnits ? "blue" : "slate"}
         />
         <MetricCard label="Đề xuất đặt" value={formatNumber(sm.suggestedUnits)} note={`${formatVND(sm.orderCost, { compact: true })} theo giá nhập gần nhất · đủ bán ${used.coverDays} ngày sau khi hàng về`} icon={ShoppingCart} tone="blue"
-          hint={<>Tốc độ bán × (thời gian sản xuất + {used.coverDays} ngày muốn đủ bán) + tồn an toàn − nguồn cung, trong đó nguồn cung = tồn khả dụng {used.countIncoming ? "+ hàng sắp quay về kho" : "(không tính hàng sắp về)"}. {formatNumber(sm.variants)} mẫu mã đang theo dõi; mẫu mã chưa có phiếu nhập không được đề xuất.</>} />
+          hint={<>Tốc độ gửi đi × (thời gian sản xuất + {used.coverDays} ngày muốn đủ bán + ngày an toàn) − hàng hoàn của chính các đơn ấy về kịp bán lại (theo GTC của mã; độ trễ hoàn = ĐVVC trả về {used.vtpReturnLagDays === null ? "chưa đo được" : `${formatNumber(used.vtpReturnLagDays)} ngày`} + kho tái nhập {formatNumber(used.restockDays)} ngày) − nguồn cung, trong đó nguồn cung = tồn khả dụng {used.countIncoming ? "+ hàng sắp quay về kho" : "(không tính hàng sắp về)"}. Bấm “Vì sao?” ở từng mẫu mã để xem lời giải từng bước. {formatNumber(sm.variants)} mẫu mã đang theo dõi; mẫu mã chưa có phiếu nhập không được đề xuất.</>} />
       </section>
 
       {report.products.map((g) => (
@@ -104,20 +104,19 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
           padded={false}
         >
           <div className="overflow-x-auto">
-            <Table className="min-w-[1340px]">
+            <Table className="min-w-[1260px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Mẫu mã</TableHead>
                   <TableHead className="text-right">Tồn ERP</TableHead>
-                  <TableHead className="text-right">Tồn Pancake</TableHead>
                   <TableHead className="text-right">Đã chốt chưa gửi</TableHead>
                   <TableHead className="text-right">Khả dụng</TableHead>
                   <TableHead className="text-right">Ngoài kho</TableHead>
                   <TableHead className="text-right">Sắp về</TableHead>
                   <TableHead className="text-right">Bán 7 ngày</TableHead>
-                  <TableHead className="text-right">Bán {report.assumptions.velocityWindowDays} ngày</TableHead>
+                  <TableHead className="text-right" title="Số cái của đơn đã chốt (không huỷ), gồm cả đơn đang giao và đã hoàn — căn cứ tốc độ gửi đi">Chốt {report.assumptions.velocityWindowDays} ngày</TableHead>
                   <TableHead className="text-right">Bán 30 ngày</TableHead>
-                  <TableHead className="text-right">Tốc độ / ngày</TableHead>
+                  <TableHead className="text-right" title="Tốc độ GỬI ĐI; phần hàng hoàn về được trừ riêng theo GTC của mã">Gửi đi / ngày</TableHead>
                   <TableHead className="text-right">Còn bán được</TableHead>
                   <TableHead>Dự kiến hết</TableHead>
                   <TableHead className="text-right">Bán trong lúc SX</TableHead>
@@ -131,13 +130,12 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
                 {g.rows.map((r) => (
                   <TableRow key={r.variantId} className={cn(r.status === "OUT" && "bg-rose-50/40 dark:bg-rose-950/10", r.status === "CRITICAL" && "bg-orange-50/40 dark:bg-orange-950/10")}>
                     <TableCell>
-                      <div className="font-medium">{[r.color, r.size].filter(Boolean).join(" / ") || r.sku || "—"}</div>
+                      <div className="font-medium">{[r.color, r.size].filter(Boolean).join(" / ") || r.sku || "—"} <Link href={`/products/${r.productId}#de-xuat-dat-hang`} className="ml-1 text-[11px] font-normal text-primary hover:underline">Vì sao?</Link></div>
                       <div className="font-mono text-[11px] text-muted-foreground">{r.sku}{r.leadTimeDays !== report.assumptions.leadTimeDays ? ` · SX ${r.leadTimeDays} ngày` : ""}</div>
                     </TableCell>
-                    <TableCell className={cn("text-right tabular-nums font-semibold", r.stock < 0 && "text-rose-600")}>{formatNumber(r.stock)}</TableCell>
-                    <TableCell className={cn("text-right tabular-nums text-muted-foreground", r.pancakeStock !== r.stock && "text-amber-700")} title="Tồn trên Pancake — lệch với ERP thì kiểm tra phiếu nhập / kiểm kê">{formatNumber(r.pancakeStock)}</TableCell>
+                    <TableCell className={cn("text-right tabular-nums font-semibold", r.stockKnown && r.stock < 0 && "text-rose-600")} title={r.stockKnown ? undefined : "Chưa có phiếu nhập — tồn CHƯA BIẾT, không phải số âm"}>{r.stockKnown ? formatNumber(r.stock) : "—"}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.committed)}</TableCell>
-                    <TableCell className={cn("text-right tabular-nums font-semibold", r.available <= 0 && "text-rose-600")}>{formatNumber(r.available)}</TableCell>
+                    <TableCell className={cn("text-right tabular-nums font-semibold", r.stockKnown && r.available <= 0 && "text-rose-600")}>{r.stockKnown ? formatNumber(r.available) : "—"}</TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground" title="Đang ở ngoài (vận đơn chưa kết thúc) · chờ hoàn về (đã xác định hoàn, kho chưa nhận)">
                       {formatNumber(r.inTransit)}
                       {r.awaitingReturn ? <div className="text-[11px] text-amber-700">hoàn chờ nhận {formatNumber(r.awaitingReturn)}</div> : null}
@@ -185,9 +183,10 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
                 ))}
                 {g.rows.length ? (() => {
                   const sum = (f: (r: (typeof g.rows)[number]) => number) => g.rows.reduce((t, r) => t + f(r), 0);
-                  const stock = sum((r) => r.stock);
+                  // Tồn / khả dụng chỉ cộng mẫu mã ĐÃ CÓ phiếu nhập — cộng số của mẫu mã chưa biết tồn là cộng số bịa.
+                  const stock = sum((r) => (r.stockKnown ? r.stock : 0));
                   const velocity = sum((r) => r.velocity);
-                  const available = sum((r) => r.available);
+                  const available = sum((r) => (r.stockKnown ? r.available : 0));
                   const cover = velocity > 0 ? Math.max(0, available) / velocity : null;
                   const outCount = g.rows.filter((r) => r.status === "OUT").length;
                   const critCount = g.rows.filter((r) => r.status === "CRITICAL").length;
@@ -196,7 +195,6 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
                     <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
                       <TableCell>Tổng {g.productCode || g.productName} · {g.rows.length} mẫu mã</TableCell>
                       <TableCell className={cn("text-right tabular-nums", stock < 0 && "text-rose-600")}>{formatNumber(stock)}</TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">{formatNumber(sum((r) => r.pancakeStock))}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatNumber(sum((r) => r.committed))}</TableCell>
                       <TableCell className={cn("text-right tabular-nums", available <= 0 && "text-rose-600")}>{formatNumber(available)}</TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">{formatNumber(sum((r) => r.inTransit))}{sum((r) => r.awaitingReturn) ? <div className="text-[11px] font-normal text-amber-700">hoàn chờ nhận {formatNumber(sum((r) => r.awaitingReturn))}</div> : null}</TableCell>
@@ -224,7 +222,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
       <SlowMovingSection />
       {report.products.length === 0 ? <SectionCard><p className="py-6 text-center text-sm text-muted-foreground">Chưa có mẫu mã nào có tồn hoặc bán trong 30 ngày. Nhập phiếu nhập / kiểm kê ở “Nhập hàng & kiểm kê” trước.</p></SectionCard> : null}
       <p className="text-xs text-muted-foreground">
-        Số liệu chính xác khi: (1) phiếu nhập / kiểm kê đầu kỳ đã nhập đủ trên ERP và kho lập phiếu tái nhập cho hàng hoàn về; (2) trạng thái vận đơn Viettel Post được cập nhật (webhook hoặc nhập danh sách vận đơn) để phân biệt giao thật / hoàn / đang giao; (3) giá nhập ghi trên phiếu. Cột “Tồn Pancake” để đối chiếu — lệch nhiều nghĩa là phiếu nhập trên ERP chưa khớp kho thực tế.
+        Số liệu chính xác khi: (1) phiếu nhập / kiểm kê đầu kỳ đã nhập đủ trên ERP và kho lập phiếu tái nhập cho hàng hoàn về; (2) trạng thái vận đơn Viettel Post được cập nhật (webhook hoặc nhập danh sách vận đơn) để phân biệt giao thật / hoàn / đang giao; (3) giá nhập ghi trên phiếu.
       </p>
     </div>
   );

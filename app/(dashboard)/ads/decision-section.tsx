@@ -1,9 +1,10 @@
+import { deliveryRateCoverageParts } from "@/lib/constants/delivery-rate";
 import { SectionCard } from "@/components/ui-bits";
 import { InfoHint } from "@/components/info-hint";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { ArrowRight } from "lucide-react";
 import { getAdsDecision, DECISION_METRIC_HINT } from "@/lib/queries/ads-decision";
-import { ADS_DIMENSION_HAS_SPEND, type AdsDimension } from "@/lib/constants/ads-decision";
+import { ADS_DIMENSION_HAS_SPEND, rowsToRender, type AdsDimension } from "@/lib/constants/ads-decision";
 import { LEDGER_WINDOW_DAYS, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { decisionStability } from "@/lib/queries/marketing-ledger";
 import type { Stability } from "@/lib/marketing/decision-stability";
@@ -75,8 +76,19 @@ function ChainStrip({ t }: { t: { bookedOrders: number; bookedRevenue: number; n
   );
 }
 
-export async function AdsDecisionSection({ period, dimension }: { period: Period; dimension: AdsDimension }) {
+export async function AdsDecisionSection({
+  period,
+  dimension,
+  showAll = false,
+  showAllHref = "?dong=tatca",
+}: {
+  period: Period;
+  dimension: AdsDimension;
+  showAll?: boolean;
+  showAllHref?: string;
+}) {
   const d = await getAdsDecision(period, dimension);
+  const { shown: dongVe, hidden: dongAn } = rowsToRender(d.rows, showAll);
   /*
     ─── ĐỘ BỀN ĐỌC TỪ SỔ, VÀ SỔ CÓ THỂ RỖNG ───
 
@@ -177,6 +189,46 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
         ) : null}
 
         {/*
+          ═══════════ BẰNG CHỨNG DỪNG Ở ĐÂU — VÀ BAO NHIÊU TIỀN ĐANG ĐỨNG SAU CHỖ DỪNG ẤY ═══════════
+
+          Đo production 23/09/2026: 619 chiến dịch trong một cửa sổ 14 ngày, và trong nhóm đủ tiền
+          thì chiến dịch nhiều đơn nhất cũng chỉ có 3 đơn — cổng mẫu (10) không bao giờ mở, nên
+          45.726.057 ₫ không nhận được kết luận nào. Cùng dữ liệu ấy ở cấp MÃ HÀNG: 3/4 mã có
+          khuyến nghị, phủ 99,8% tiền.
+
+          Dải này nói ba con số RIÊNG vì mỗi cái sửa ở một chỗ khác: mượn được (đã có câu trả lời) ·
+          chưa nối được về mã (đi khai mã cho chiến dịch) · mã cũng chưa kết luận (đợi dữ liệu).
+          Gộp lại thành một con số "chưa đủ dữ liệu" là đúng thứ đã giấu 45,7 triệu suốt hai ngày.
+        */}
+        {dimension === "campaign" && (d.inheritedCoverage.rows > 0 || d.inheritedCoverage.unlinkedRows > 0 || d.inheritedCoverage.testRows > 0) ? (
+          <p className="border-b px-5 py-2 text-xs text-muted-foreground">
+            <b>{formatNumber(d.inheritedCoverage.rows)}</b> chiến dịch không tự kết luận được nhưng <b>mượn được kết luận của mã hàng</b> (
+            {formatVND(d.inheritedCoverage.spend)} tiền quảng cáo) — câu mượn hiện ngay dưới khuyến nghị của dòng, kèm tên mã.{" "}
+            {d.inheritedCoverage.testRows > 0 ? (
+              <>
+                <b>{formatNumber(d.inheritedCoverage.testRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.testSpend)}) là <b>chi phí test</b> fanpage /
+                mẫu mới — KHÔNG thuộc mã nào một cách cố ý, nên không mượn và cũng không phải chỗ thiếu dữ liệu. Nó có câu hỏi riêng: đốt bao nhiêu vào
+                test, và có cái nào ra được thành mã bán.{" "}
+              </>
+            ) : null}
+            {d.inheritedCoverage.unlinkedRows > 0 ? (
+              <>
+                <b>{formatNumber(d.inheritedCoverage.unlinkedRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.unlinkedSpend)}) <b>chưa phân loại</b> —
+                không nhận ra mã trong tên và cũng không khai là test. ERP KHÔNG đoán; đây là việc cần người: khai mã, hoặc đánh dấu là chi phí test, ở
+                màn Chi phí quảng cáo.{" "}
+              </>
+            ) : null}
+            {d.inheritedCoverage.productSilentRows > 0 ? (
+              <>
+                <b>{formatNumber(d.inheritedCoverage.productSilentRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.productSilentSpend)}) nối được
+                nhưng chính mã ấy cũng chưa kết luận được — chỗ này đợi thêm dữ liệu, không sửa bằng tay được.{" "}
+              </>
+            ) : null}
+            Kết luận mượn nói về CẢ MÃ, không phải riêng chiến dịch — và nó KHÔNG mở đường cho bàn tay đổi ngân sách.
+          </p>
+        ) : null}
+
+        {/*
           ═══════════ CĂN CỨ TỶ LỆ GTC — BẮT BUỘC ĐỨNG CẠNH MỌI CON SỐ TẠM TÍNH ═══════════
 
           Dòng nào chưa đủ đơn ngã ngũ thì khuyến nghị của nó đứng trên LỢI NHUẬN TẠM TÍNH, tức
@@ -190,9 +242,15 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
         {soDongTamTinh > 0 ? (
           <p className="border-b px-5 py-2 text-xs text-muted-foreground">
             <b>{formatNumber(soDongTamTinh)}</b> dòng đang quyết trên <b>lợi nhuận tạm tính</b> — phần đơn chưa ngã ngũ được cân theo tỷ lệ giao thành
-            công của thang bậc. Độ phủ trong kỳ: <b>{d.rateBasis.coverage.projected ?? 0}</b> mã theo số đo từng đơn ·{" "}
-            <b>{d.rateBasis.coverage.history ?? 0}</b> mã theo lịch sử của chính mã · <b>{d.rateBasis.coverage.override ?? 0}</b> mã ghi đè tay ·{" "}
-            <b>{d.rateBasis.coverage.default ?? 0}</b> mã theo MỤC TIÊU {formatPercent(d.rateBasis.fallbackDeliveryRate)}.{" "}
+            công của thang bậc. Độ phủ trong kỳ: <b>{deliveryRateCoverageParts(d.rateBasis.coverage).total}</b> mã —{" "}
+            {deliveryRateCoverageParts(d.rateBasis.coverage).parts.map((x, i) => (
+              <span key={x.source}>
+                {i ? " · " : ""}
+                <b>{x.count}</b> {x.label.toLowerCase()}
+                {x.source === "default" ? ` (MỤC TIÊU ${formatPercent(d.rateBasis!.fallbackDeliveryRate)})` : ""}
+              </span>
+            ))}
+            .{" "}
             {(d.rateBasis.coverage.default ?? 0) > 0 ? (
               <>
                 Mã chạy theo mục tiêu thì lợi nhuận tạm tính của nó đọc là <b>&ldquo;theo kế hoạch&rdquo;</b>, không phải &ldquo;sẽ về ngần ấy&rdquo; —
@@ -225,7 +283,25 @@ export async function AdsDecisionSection({ period, dimension }: { period: Period
           )}
         </p>
 
-        <AdsDecisionTable rows={d.rows} dimension={dimension} stability={stability} />
+        <AdsDecisionTable rows={dongVe} dimension={dimension} stability={stability} hiddenCount={dongAn.length} showAllHref={showAllHref} />
+        {/*
+          PHẦN ẨN PHẢI NÓI RA NÓ LÀ GÌ VÀ BAO NHIÊU TIỀN.
+
+          Cắt dòng mà không nói là giấu việc. Nên dải này in số dòng đang ẩn, tổng tiền chi của chúng, và
+          lối mở hết — người đọc biết chính xác mình đang không nhìn thấy gì. Và nó chỉ ẩn dòng CHƯA có
+          kết luận: mọi khuyến nghị đều đã ở trên.
+        */}
+        {dongAn.length > 0 ? (
+          <p className="border-t px-5 py-2 text-xs text-muted-foreground">
+            Đang hiện <b>{formatNumber(dongVe.length)}</b>/{formatNumber(d.rows.length)} dòng. <b>{formatNumber(dongAn.length)}</b> dòng còn lại (tổng chi{" "}
+            {formatVND(dongAn.reduce((t, r) => t + r.spend, 0))}) đều chưa có kết luận và động tới ít tiền hơn các dòng ở trên — mọi khuyến nghị đã hiện
+            đủ.{" "}
+            <a className="font-medium text-foreground underline underline-offset-2" href={showAllHref}>
+              Hiện tất cả {formatNumber(d.rows.length)} dòng
+            </a>{" "}
+            (trang sẽ nặng hơn nhiều).
+          </p>
+        ) : null}
 
         <div className="border-t px-5 py-3 text-xs text-muted-foreground">
           <p className="font-medium text-foreground">Phần chưa kết luận được (hiện riêng, không chia đều):</p>

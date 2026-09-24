@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis } from "@/lib/constants/ads-decision";
-import { DECISION_METRIC_HINT, buildDecisionRow, decideAction, getAdsDecision } from "@/lib/queries/ads-decision";
-import type { Period } from "@/lib/search-params";
+import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis, isConclusive, rowsToRender, spendClassOf } from "@/lib/constants/ads-decision";
+import { DECISION_METRIC_HINT, buildDecisionRow, decideAction, getAdsDecision, inheritVerdict } from "@/lib/queries/ads-decision";
+import { hrefWith, type Period } from "@/lib/search-params";
 
 const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
 
@@ -186,6 +186,7 @@ export async function testAdsDecision(db: Db) {
       shipping: 500_000,
       openProjectedRevenue: 0,
       openProjectedCogs: 0,
+      openProjectedShipping: 0,
       openProjectedOrders: 0,
     },
     "campaign",
@@ -265,6 +266,8 @@ export async function testAdsDecision(db: Db) {
       // 15.000.000 × 80% — phép nhân đã làm trong SQL bằng tỷ lệ của từng mã.
       openProjectedRevenue: 12_000_000,
       openProjectedCogs: 6_000_000,
+      // 15 đơn đang treo × 30.000 cước. KHÔNG nhân 80%: cước mất cả khi giao được lẫn khi hoàn.
+      openProjectedShipping: 450_000,
       openProjectedOrders: 12,
     },
     "campaign",
@@ -275,8 +278,20 @@ export async function testAdsDecision(db: Db) {
   assert.equal(dangTreo.maturity, 0.25, "5 trên 20 đơn đã ngã ngũ");
   assert.equal(dangTreo.headroom, 0.58, "căn cứ SỐ ĐO: 1.750.000 ÷ 3.000.000");
   assert.equal(dangTreo.projectedDeliveredRevenue, 16_000_000, "4.000.000 đã giao + 12.000.000 dự kiến về");
-  assert.equal(dangTreo.projectedProfitAfterAds, 4_750_000, "16.000.000 − 8.000.000 giá vốn − 250.000 cước − 3.000.000 quảng cáo");
-  assert.equal(dangTreo.projectedHeadroom, 2.58, "căn cứ TẠM TÍNH: 7.750.000 ÷ 3.000.000");
+  /*
+    ─── CHI PHÍ TƯƠNG LAI ĐI CÙNG DOANH THU TƯƠNG LAI ───
+
+    16.000.000 − 8.000.000 giá vốn − (250.000 cước đã phát sinh + 450.000 cước sẽ phát sinh)
+                − 3.000.000 quảng cáo = 4.300.000
+
+    Bản trước cho 4.750.000: nó cộng doanh thu của 15 đơn đang treo mà bỏ cước của đúng 15 đơn ấy.
+    Đo production 23/09/2026 thì chỗ bỏ sót đó đáng 5.789.000 ₫ / 30 ngày.
+
+    Và cước KHÔNG nhân 80%: 450.000 chứ không phải 360.000. Hàng hoàn vẫn tốn cước đi — nhân tỷ lệ
+    giao thành công vào cước là giả định đơn hoàn được miễn cước.
+  */
+  assert.equal(dangTreo.projectedProfitAfterAds, 4_300_000, "trừ cả cước dự phóng của phần đang treo");
+  assert.equal(dangTreo.projectedHeadroom, 2.43, "căn cứ TẠM TÍNH: 7.300.000 ÷ 3.000.000");
   assert.equal(dangTreo.appliedDeliveryRate, 80, "tỷ lệ đã áp đọc ngược ra từ chính phép nhân: 12.000.000 ÷ 15.000.000");
   assert.equal(dangTreo.basis, "PROJECTED");
   assert.equal(dangTreo.action, "SCALE", "quyết theo kế hoạch: phần đang treo đủ để vượt xa hoà vốn");
@@ -291,10 +306,157 @@ export async function testAdsDecision(db: Db) {
   */
   assert.equal(dangTreo.deliveredRevenue, 4_000_000, "doanh thu đã giao vẫn là SỐ ĐO, không được cộng phần ước tính vào");
   assert.equal(dangTreo.profitAfterAds, -1_250_000, "lợi nhuận thật vẫn âm, và vẫn phải đọc được như vậy");
+  assert.equal(dangTreo.shippingCost, 250_000, "cột cước vẫn là SỐ ĐO — phần dự phóng sống trong lợi nhuận tạm tính, không được trộn vào đây");
+
+  /*
+    ═══════════ PHẦN B3 — MƯỢN KẾT LUẬN CỦA MÃ HÀNG, VÀ BA ĐIỀU NÓ KHÔNG ĐƯỢC LÀM ═══════════
+
+    Đo production 23/09/2026: shop chạy **619 chiến dịch trong một cửa sổ 14 ngày**, và trong nhóm
+    đủ tiền (≥300K) thì chiến dịch nhiều đơn nhất cũng chỉ có **3 đơn** — cổng mẫu đòi 10 nên nó
+    không bao giờ mở, và **45.726.057 ₫ (63% tiền quảng cáo) không nhận được kết luận nào**. Cùng
+    ngày, cùng dữ liệu, ở cấp MÃ HÀNG: 3/4 mã có khuyến nghị, phủ 99,8% tiền.
+
+    Bằng chứng tồn tại — chỉ không tồn tại ở độ mịn CHIẾN DỊCH.
+  */
+  const maLai = { key: "prod-1", name: "Đầm Q002", action: "SCALE" as const, reason: "lãi dày" };
+
+  // Mượn được: dòng không tự kết luận, mã thì có.
+  const muon = inheritVerdict("INSUFFICIENT_DATA", "prod-1", maLai);
+  assert.equal(muon.bucket, "INHERITED");
+  assert.equal(muon.inherited?.action, "SCALE");
+  assert.equal(muon.inherited?.productName, "Đầm Q002", "tên mã BẮT BUỘC đi kèm — một chiến dịch dở trong một mã lãi vẫn mượn chữ tốt, người đọc phải thấy câu ấy nói về cái gì");
+
+  /*
+    KHÔNG ĐÈ LÊN KẾT LUẬN CỦA CHÍNH DÒNG. `HOLD` và `WATCH` là kết luận THẬT, không phải khoảng
+    trống — thay chúng bằng kết luận của cả mã là đổi một câu đúng lấy một câu chung chung hơn.
+  */
+  for (const tuKetLuan of ["SCALE", "HOLD", "WATCH", "CUT", "FIX_DELIVERY"] as const) {
+    const r = inheritVerdict(tuKetLuan, "prod-1", maLai);
+    assert.equal(r.bucket, "OWN", `${tuKetLuan}: dòng tự kết luận được thì không mượn gì`);
+    assert.equal(r.inherited, null);
+  }
+
+  /*
+    `NO_SPEND_DATA` CŨNG KHÔNG MƯỢN, và đây là chỗ dễ nhầm nhất: nó TRÔNG như một khoảng trống dữ
+    liệu. Nhưng ở đó ERP không đọc được cả số chi, nên gắn một kết luận về TIỀN vào đấy là nói về
+    thứ mình không nhìn thấy.
+  */
+  assert.equal(inheritVerdict("NO_SPEND_DATA", "prod-1", maLai).bucket, "OWN", "không có số chi thì không mượn kết luận về tiền");
+
+  /*
+    BA NGẢ "KHÔNG MƯỢN ĐƯỢC" PHẢI TÁCH NHAU, vì mỗi cái sửa ở một chỗ khác. Gộp thành một nhãn
+    "chưa đủ dữ liệu" là đúng thứ đã giấu 45,7 triệu (AGENTS.md mục 39 · mục 45).
+  */
+  assert.equal(inheritVerdict("INSUFFICIENT_DATA", undefined, maLai).bucket, "UNLINKED", "chưa nối được về mã — SỬA ĐƯỢC bằng cách khai mã cho chiến dịch");
+  assert.equal(inheritVerdict("INSUFFICIENT_DATA", "prod-1", undefined).bucket, "PRODUCT_SILENT", "mã không có dòng nào — khác hẳn chưa nối được");
+  assert.equal(
+    inheritVerdict("INSUFFICIENT_DATA", "prod-1", { ...maLai, action: "INSUFFICIENT_DATA" }).bucket,
+    "PRODUCT_SILENT",
+    "mã cũng chưa kết luận được — mượn một câu 'chưa đủ dữ liệu' thì vô nghĩa",
+  );
+  assert.equal(
+    inheritVerdict("INSUFFICIENT_DATA", "prod-1", { ...maLai, action: "NO_SPEND_DATA" }).bucket,
+    "PRODUCT_SILENT",
+    "mã không có số chi thì cũng không cho mượn được gì",
+  );
+  for (const r of [
+    inheritVerdict("INSUFFICIENT_DATA", undefined, maLai),
+    inheritVerdict("INSUFFICIENT_DATA", "prod-1", undefined),
+  ]) {
+    assert.equal(r.inherited, null, "không mượn được thì KHÔNG dựng một câu rỗng — null, không phải một đối tượng trống");
+  }
+
+  /*
+    ═══════════ CHI PHÍ TEST KHÔNG PHẢI MỘT CHỖ TRỐNG ═══════════
+
+    `resolveCampaign` phân biệt được `test` với `none`, nhưng `ad_spends` chỉ lưu `product_id` nên
+    cả hai cùng thành NULL — và xuống tới bảng quyết định chúng đội chung một chữ "chưa đủ dữ liệu".
+
+    Đo production 23/09/2026, 387 chiến dịch không nối được về mã (11.165.022 ₫):
+      318 dòng · 7.457.012 ₫ mang chữ TEST · 62 dòng · 3.617.087 ₫ không test không mã · 7 dòng bộ ghép trượt
+
+    Gộp lại sinh ra một lời khuyên SAI: "khai mã cho 387 chiến dịch" — tức gán mã hàng cho 318
+    chiến dịch test, một việc bịa đặt.
+  */
+  assert.equal(spendClassOf("auto", "prod-1", false), "PRODUCT");
+  assert.equal(spendClassOf("test", null, false), "TEST");
+  assert.equal(spendClassOf("none", null, false), "UNCLASSIFIED", "không khớp mã VÀ không phải test ⇒ cần người, khác hẳn chi phí test");
+  assert.equal(spendClassOf("manual", null, false), "TEST", "người khai tay mà không có mã nghĩa là họ đã nói 'đây là chi phí test'");
+  assert.equal(spendClassOf("auto", "prod-1", true), "EXCLUDED", "đã loại khỏi phép tính thì thắng mọi nhánh khác");
+  assert.notEqual(spendClassOf("test", null, false), spendClassOf("none", null, false), "hai thứ này KHÔNG được gộp — đó là cả điểm của phép phân loại");
+
+  // Chi phí test KHÔNG đi mượn: gán cho một phép thử fanpage điểm hoà vốn của một mã bán là đo sai thứ.
+  const testKhongMuon = inheritVerdict("INSUFFICIENT_DATA", "prod-1", maLai, "TEST");
+  assert.equal(testKhongMuon.bucket, "TEST");
+  assert.equal(testKhongMuon.inherited, null, "chi phí test không mượn kết luận của mã, kể cả khi nối được về một mã");
+  // Chưa phân loại thì VẪN mượn được nếu nối được — nó chỉ thiếu NHÃN, không thiếu bằng chứng.
+  assert.equal(inheritVerdict("INSUFFICIENT_DATA", "prod-1", maLai, "UNCLASSIFIED").bucket, "INHERITED");
+
+  /*
+    ═══════════ BẢNG VẼ BAO NHIÊU DÒNG — KHÔNG KHUYẾN NGHỊ NÀO ĐƯỢC RƠI KHỎI MÀN HÌNH ═══════════
+
+    Đo 23/09/2026: `/ads` nặng 6.768 kB vì bảng VẼ đủ 742 dòng, hơn 600 dòng trong đó là "chưa đủ
+    dữ liệu". Nay máy chủ chỉ gửi phần cần đọc — nhưng cắt một khuyến nghị CẮT khỏi màn hình là đúng
+    thứ bảng này sinh ra để chặn, nên dòng có kết luận KHÔNG BAO GIỜ bị cắt.
+  */
+  const dong = (action: AdsAction, k: number) => ({ action, key: `r${k}` });
+  const hon = [
+    ...Array.from({ length: 5 }, (_, k) => dong("CUT", k)),
+    ...Array.from({ length: 200 }, (_, k) => dong("INSUFFICIENT_DATA", 100 + k)),
+  ];
+  const chon = rowsToRender(hon, false, 80);
+  assert.equal(chon.shown.length, 80, "trần hiển thị 80 dòng");
+  assert.equal(chon.shown.filter((r) => r.action === "CUT").length, 5, "mọi dòng có kết luận đều hiện");
+  assert.equal(chon.shown.length + chon.hidden.length, hon.length, "không dòng nào biến mất — hoặc hiện, hoặc được đếm là đang ẩn");
+  assert.ok(chon.hidden.every((r) => r.action === "INSUFFICIENT_DATA"), "chỉ dòng CHƯA có kết luận mới bị ẩn");
+
+  // Thứ tự đầu vào được giữ nguyên — bảng đã xếp theo việc cần làm và số tiền.
+  assert.deepEqual(
+    chon.shown.map((r) => r.key).slice(0, 7),
+    ["r0", "r1", "r2", "r3", "r4", "r100", "r101"],
+    "giữ nguyên thứ tự bảng vốn có",
+  );
+
+  /*
+    NGÀY CÓ NHIỀU KHUYẾN NGHỊ HƠN TRẦN: tất cả vẫn phải hiện. Trần là con số hiển thị, không phải
+    một giới hạn trên số việc cần làm.
+  */
+  const nhieuViec = Array.from({ length: 120 }, (_, k) => dong(k % 2 ? "SCALE" : "CUT", k));
+  const chonNhieu = rowsToRender([...nhieuViec, ...Array.from({ length: 50 }, (_, k) => dong("INSUFFICIENT_DATA", 500 + k))], false, 80);
+  assert.equal(chonNhieu.shown.filter((r) => r.action !== "INSUFFICIENT_DATA").length, 120, "120 khuyến nghị thì 120 dòng hiện, dù vượt trần 80");
+  assert.equal(chonNhieu.shown.length, 120, "đã chạm trần bằng khuyến nghị thì không lấp thêm dòng chưa đủ dữ liệu");
+
+  /*
+    KHÔNG DỰA VÀO PHÉP SẮP XẾP. Nếu một ngày ai đó đổi thứ tự bảng và khuyến nghị nằm cuối, nó vẫn
+    phải hiện — hàm giữ mọi dòng có kết luận dù chúng nằm ở đâu.
+  */
+  const cuoiBang = [...Array.from({ length: 200 }, (_, k) => dong("INSUFFICIENT_DATA", k)), dong("CUT", 999)];
+  assert.ok(rowsToRender(cuoiBang, false, 80).shown.some((r) => r.key === "r999"), "khuyến nghị nằm cuối bảng vẫn phải hiện");
+
+  /*
+    LỐI "HIỆN TẤT CẢ" / "XEM HIỆU QUẢ THEO MARKETER" PHẢI GIỮ NGUYÊN KỲ ĐANG XEM. Một liên kết viết
+    cứng `?ghep=1` từng đưa người bấm về tháng hiện tại — con số trong khối vừa mở nói về một kỳ
+    khác với phần còn lại của trang, và không ô nào báo điều đó.
+  */
+  const url = new URLSearchParams(hrefWith({ period: "custom", from: "2026-09-01", to: "2026-09-15", cap: "product", platform: ["FACEBOOK", "TIKTOK"], hieuqua: "0", rong: undefined }, "hieuqua", "1").slice(1));
+  assert.equal(url.get("period"), "custom", "giữ kỳ");
+  assert.equal(url.get("from"), "2026-09-01");
+  assert.equal(url.get("to"), "2026-09-15");
+  assert.equal(url.get("cap"), "product", "giữ cấp đang xem");
+  assert.deepEqual(url.getAll("platform"), ["FACEBOOK", "TIKTOK"], "giữ bộ lọc nhiều giá trị");
+  assert.deepEqual(url.getAll("hieuqua"), ["1"], "khoá được đặt THAY giá trị cũ, không nhân đôi");
+  assert.equal(url.has("rong"), false, "tham số undefined không thành chuỗi 'undefined'");
+
+  // `all` = vẽ hết.
+  assert.equal(rowsToRender(hon, true, 80).shown.length, hon.length);
+  assert.equal(rowsToRender(hon, true, 80).hidden.length, 0);
+  // NO_SPEND_DATA cũng là "chưa có kết luận" — không được giữ chỗ như một khuyến nghị.
+  assert.equal(isConclusive("NO_SPEND_DATA"), false);
+  assert.equal(isConclusive("WATCH"), true, "THEO DÕI là một kết luận thật");
 
   // CHƯA BIẾT LÀ NULL, KHÔNG PHẢI 0.
   const noSpend = buildDecisionRow(
-    { key: "ad-1", name: "Mẩu 1", bookedOrders: 5, deliveredOrders: 4, returnedOrders: 1, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 5_000_000, deliveredRevenue: 4_000_000, cash: 3_000_000, cogs: 2_000_000, shipping: 200_000, openProjectedRevenue: 0, openProjectedCogs: 0, openProjectedOrders: 0 },
+    { key: "ad-1", name: "Mẩu 1", bookedOrders: 5, deliveredOrders: 4, returnedOrders: 1, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 5_000_000, deliveredRevenue: 4_000_000, cash: 3_000_000, cogs: 2_000_000, shipping: 200_000, openProjectedRevenue: 0, openProjectedCogs: 0, openProjectedShipping: 0, openProjectedOrders: 0 },
     "ad",
     0,
     false,
@@ -310,7 +472,7 @@ export async function testAdsDecision(db: Db) {
 
   // Chưa có doanh thu giao thành công ⇒ không có biên ⇒ KHÔNG có điểm hoà vốn (không phải 0).
   const burned = buildDecisionRow(
-    { key: "camp-burn", name: "Đốt tiền", bookedOrders: 0, deliveredOrders: 0, returnedOrders: 0, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 0, deliveredRevenue: 0, cash: 0, cogs: 0, shipping: 0, openProjectedRevenue: 0, openProjectedCogs: 0, openProjectedOrders: 0 },
+    { key: "camp-burn", name: "Đốt tiền", bookedOrders: 0, deliveredOrders: 0, returnedOrders: 0, openOrders: 0, notShippedOrders: 0, notShippedRevenue: 0, inTransitOrders: 0, inTransitRevenue: 0, bookedRevenue: 0, deliveredRevenue: 0, cash: 0, cogs: 0, shipping: 0, openProjectedRevenue: 0, openProjectedCogs: 0, openProjectedShipping: 0, openProjectedOrders: 0 },
     "campaign",
     5_000_000,
     true,
@@ -350,6 +512,7 @@ export async function testAdsDecision(db: Db) {
       shipping: 300_000,
       openProjectedRevenue: 0,
       openProjectedCogs: 0,
+      openProjectedShipping: 0,
       openProjectedOrders: 0,
     },
     "campaign",
@@ -401,6 +564,7 @@ export async function testAdsDecision(db: Db) {
       shipping: 200_000,
       openProjectedRevenue: 0,
       openProjectedCogs: 0,
+      openProjectedShipping: 0,
       openProjectedOrders: 0,
     },
     "ad",

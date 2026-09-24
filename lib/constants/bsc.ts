@@ -65,6 +65,20 @@ export const DEFAULT_TEMPLATES: Record<DepartmentCode, { perspective: BscPerspec
     { perspective: "CUSTOMER", label: "Đơn giao thành công", metricSource: "delivered_orders", weight: 1 },
     { perspective: "LEARNING_GROWTH", label: "Độ chính xác kiểm kê (tự đo)", metricSource: "MANUAL", weight: 1 },
   ],
+  /*
+    PHÒNG SẢN XUẤT (tách 23/09/2026): chỉ có HAI chỉ số máy đọc được, và đó là sự thật đáng đọc.
+
+    Thứ đáng đo nhất của phòng này — xưởng giao đúng hẹn hay không — CHƯA ĐO ĐƯỢC: `production_orders`
+    có mốc hẹn và mốc gửi nhưng không có mốc NHẬN THẬT. Nên nó để `MANUAL`, không phải một truy vấn
+    gần đúng. `return_rate` có mặt với trọng số thấp vì hàng hoàn do sai size / sai chất là tín hiệu
+    của khâu sản xuất; phần hoàn do bưu tá thì không thuộc phòng này và thẻ điểm cá nhân đã loại.
+  */
+  PRODUCTION: [
+    { perspective: "INTERNAL_PROCESS", label: "Việc sản xuất quá hạn", metricSource: "work_overdue", weight: 2 },
+    { perspective: "FINANCIAL", label: "Lợi nhuận góp", metricSource: "delivered_contribution", weight: 2 },
+    { perspective: "CUSTOMER", label: "Tỷ lệ hoàn", metricSource: "return_rate", weight: 1 },
+    { perspective: "LEARNING_GROWTH", label: "Xưởng giao đúng hẹn (tự khai)", metricSource: "MANUAL", weight: 1 },
+  ],
   FINANCE: [
     { perspective: "INTERNAL_PROCESS", label: "Dòng tiền chưa phân loại", metricSource: "unclassified_bank_txns", weight: 3 },
     { perspective: "FINANCIAL", label: "COD đã giao mà tiền chưa về", metricSource: "cod_outstanding", weight: 2 },

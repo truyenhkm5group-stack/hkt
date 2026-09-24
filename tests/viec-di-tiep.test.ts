@@ -226,6 +226,109 @@ export function testViecDiTiepGuards() {
   console.log("✓ Quét mã nguồn: nút ERP truyền mã việc · cửa chép sổ chỉ chạm cột nhánh, qua hàm dịch vụ, không đụng trạng thái");
 }
 
+/**
+ * ═══════════ "GIAO LẠI CHO AGENT SỬA" TỪ CHÍNH ERP ═══════════
+ *
+ * Trước 23/09/2026 vòng review → agent sửa chỉ chạy được bằng script trên máy CTO; ERP chỉ giao
+ * được lượt ĐẦU. Khối này khoá ba tính chất, và tính chất thứ nhất là thứ không được phép mất:
+ *
+ *   1. NHÁNH ĐI RA TỪ SỔ VIỆC, không từ nơi gọi. Tên nhánh vào thẳng lệnh `git` trên máy runner.
+ *   2. Cổng từ chối thì trạng thái việc KHÔNG đổi — không để việc kẹt ở "Đang làm" không lượt chạy.
+ *   3. Ô công khai chỉ mang mã việc + nhánh + phản hồi; hình dạng sai bị chặn TRƯỚC khi chạm mạng.
+ */
+export async function testGiaoLaiSuaTuErp() {
+  const db = await getDb();
+  await cleanupViecDiTiepFixtures();
+  const giuToken = process.env.ERP_GITHUB_DISPATCH_TOKEN;
+  const giuRepo = process.env.ERP_GITHUB_REPO;
+  const phanHoi = "Bảng Hiện Tại ghi payload 185KB nhưng chưa ai đo — thay bằng số trong docs/perf, hoặc ghi CHƯA ĐO ĐƯỢC.";
+  try {
+    process.env.ERP_GITHUB_REPO = "vi-du/kho";
+    process.env.ERP_GITHUB_DISPATCH_TOKEN = "ghp_khoa_ghi_gia_cho_bai_kiem";
+
+    /* ───────── 3 · HÌNH DẠNG SAI BỊ CHẶN TRƯỚC KHI CHẠM MẠNG ───────── */
+    let goiMang = 0;
+    __setDispatchFetchForTests((async () => {
+      goiMang += 1;
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch);
+    const xau: Parameters<typeof dispatchAgentRun>[0][] = [
+      { workflow: "agent-run.yml", gates: "typecheck", taskCode: "VDT-9", rerunBranch: "ai/x/VDT-9-a" },
+      { workflow: "agent-run.yml", gates: "typecheck", taskCode: "VDT-9", feedback: phanHoi },
+      { workflow: "agent-run.yml", gates: "typecheck", taskCode: "VDT-9", rerunBranch: "main", feedback: phanHoi },
+      { workflow: "agent-run.yml", gates: "typecheck", taskCode: "VDT-9", rerunBranch: "ai/x/../../main", feedback: phanHoi },
+      { workflow: "agent-run.yml", gates: "typecheck", taskCode: "VDT-9", rerunBranch: "ai/x/VDT-9-a", feedback: "sửa lại" },
+    ];
+    for (const v of xau) {
+      const r = await dispatchAgentRun(v);
+      assert.ok(!r.ok && r.kind === "FORBIDDEN", `phải từ chối: nhánh=${String(v.rerunBranch)} phản hồi=${String(v.feedback).slice(0, 12)}`);
+    }
+    assert.equal(goiMang, 0, "không yêu cầu sai hình dạng nào được chạm tới mạng");
+
+    /* ───────── dựng một việc đã review xong, có nhánh ───────── */
+    const [u] = await db.insert(schema.users).values({ email: `${TIEN_TO}sua@shop.vn`, name: "vdt-sua", passwordHash: "x", role: "ADMIN" }).returning({ id: schema.users.id });
+    const [ag] = await db.insert(schema.techAgents).values({ key: `${TIEN_TO}sua`, name: "vdt-sua", role: "DOCUMENTATION", enabled: true, allowedRisks: ["R0"] }).returning({ id: schema.techAgents.id });
+    const nhanh = `ai/${TIEN_TO}sua/VDT-2-mudq6e2k`;
+    const [viec] = await db.insert(schema.techTasks).values({ code: "VDT-2", title: "vdt-da-review", status: "QA", risk: "R0", agentId: ag.id, branch: nhanh }).returning({ id: schema.techTasks.id });
+    await db.insert(schema.techAgentRuns).values({ agentId: ag.id, taskId: viec.id, status: "SUCCEEDED", branch: nhanh, startedAt: new Date(Date.now() - 3_600_000), endedAt: new Date(Date.now() - 3_000_000) });
+    const actor = { id: u.id, email: `${TIEN_TO}sua@shop.vn`, name: "vdt-sua" };
+
+    /* ───────── 1 · NHÁNH ĐI RA TỪ SỔ, KHÔNG TỪ NƠI GỌI ───────── */
+    let batDuoc: { init: RequestInit } | null = null;
+    __setDispatchFetchForTests((async (_url: string, init: RequestInit) => {
+      batDuoc = { init };
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch);
+    const ok = await dispatchTaskToAgent({ taskCode: "VDT-2", gates: "typecheck,lint", actor, rerun: { feedback: phanHoi } });
+    assert.ok(ok.ok, `việc đã review xong, có nhánh, còn lượt ⇒ phải giao sửa được: ${ok.ok ? "" : ok.reason}`);
+    const than = String((batDuoc as unknown as { init: RequestInit }).init.body);
+    const body = JSON.parse(than) as { inputs: Record<string, string> };
+    assert.equal(body.inputs.rerun_branch, nhanh, "nhánh gửi đi PHẢI là nhánh trong sổ việc — nơi gọi không có đường nào chỉ agent sang nhánh khác");
+    assert.equal(body.inputs.feedback, phanHoi);
+    assert.equal(body.inputs.task, "VDT-2");
+    assert.ok(!than.includes("vdt-da-review"), "tiêu đề việc KHÔNG được lọt vào ô inputs công khai");
+    const sau = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, viec.id), columns: { status: true } });
+    assert.equal(sau?.status, "BUILDING", "giao sửa = người quyết đưa việc về 'Đang làm' — trạng thái phải đổi");
+
+    /* ───────── 2 · CỔNG TỪ CHỐI THÌ TRẠNG THÁI KHÔNG ĐỔI ───────── */
+    goiMang = 0;
+    __setDispatchFetchForTests((async () => {
+      goiMang += 1;
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch);
+    const [khongNhanh] = await db.insert(schema.techTasks).values({ code: "VDT-3", title: "vdt-chua-nhanh", status: "QA", risk: "R0", agentId: ag.id }).returning({ id: schema.techTasks.id });
+    const r3 = await dispatchTaskToAgent({ taskCode: "VDT-3", gates: "typecheck", actor, rerun: { feedback: phanHoi } });
+    assert.ok(!r3.ok, "việc chưa có nhánh thì không có gì để sửa");
+    const s3 = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, khongNhanh.id), columns: { status: true } });
+    assert.equal(s3?.status, "QA", "bị từ chối thì việc KHÔNG được bị đẩy sang 'Đang làm'");
+
+    const nhanh4 = `ai/${TIEN_TO}sua/VDT-4-het`;
+    const [hetLuot] = await db.insert(schema.techTasks).values({ code: "VDT-4", title: "vdt-het-luot", status: "QA", risk: "R0", agentId: ag.id, branch: nhanh4 }).returning({ id: schema.techTasks.id });
+    for (let k = 0; k < 3; k += 1) {
+      await db.insert(schema.techAgentRuns).values({ agentId: ag.id, taskId: hetLuot.id, status: "SUCCEEDED", branch: nhanh4, startedAt: new Date(Date.now() - (k + 1) * 600_000), endedAt: new Date(Date.now() - (k + 1) * 600_000 + 60_000) });
+    }
+    const r4 = await dispatchTaskToAgent({ taskCode: "VDT-4", gates: "typecheck", actor, rerun: { feedback: phanHoi } });
+    assert.ok(!r4.ok && /3\/3|đề bài/.test(r4.reason), `đã đủ 3 lượt ⇒ phải từ chối và nói vì sao: ${r4.ok ? "" : r4.reason}`);
+    const s4 = await db.query.techTasks.findFirst({ where: eq(schema.techTasks.id, hetLuot.id), columns: { status: true } });
+    assert.equal(s4?.status, "QA", "hết lượt thì trạng thái cũng KHÔNG được đổi");
+    assert.equal(goiMang, 0, "hai lượt bị từ chối KHÔNG được chạm tới GitHub");
+
+    /* Và lược đồ của server action KHÔNG có ô nhánh, và từ chối trường lạ (.strict). */
+    const ma = readFileSync(path.join(process.cwd(), "lib/actions/tech.ts"), "utf8");
+    const dau = ma.indexOf("const yeuCauSuaSchema = z.object({");
+    const cuoi = ma.indexOf("}).strict();", dau);
+    assert.ok(dau > 0 && cuoi > dau, "phải có lược đồ đầu vào của 'giao lại sửa', và nó phải .strict()");
+    assert.ok(!/\bbranch\s*:/.test(ma.slice(dau, cuoi)), "lược đồ đầu vào KHÔNG được có ô `branch`");
+  } finally {
+    __setDispatchFetchForTests(null);
+    if (giuToken === undefined) delete process.env.ERP_GITHUB_DISPATCH_TOKEN;
+    else process.env.ERP_GITHUB_DISPATCH_TOKEN = giuToken;
+    if (giuRepo === undefined) delete process.env.ERP_GITHUB_REPO;
+    else process.env.ERP_GITHUB_REPO = giuRepo;
+  }
+  console.log("✓ Giao lại cho agent sửa từ ERP: nhánh đi ra từ SỔ VIỆC · cổng từ chối thì trạng thái không đổi · hình dạng sai bị chặn trước khi chạm mạng · lược đồ không có ô nhánh");
+}
+
 export async function cleanupViecDiTiepFixtures() {
   const db = await getDb();
   const viec = await db.query.techTasks.findMany({ where: like(schema.techTasks.code, "VDT-%"), columns: { id: true } });

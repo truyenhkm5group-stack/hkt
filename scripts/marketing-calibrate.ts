@@ -26,6 +26,7 @@ import "dotenv/config";
 import { getDb, schema } from "@/db";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { clearMemo } from "@/lib/cache";
+import { deliveryRateCoverageParts } from "@/lib/constants/delivery-rate";
 import { MARKETING_BASIS_LABEL, MATURITY_LABEL, ratioOf, type MarketingBasis } from "@/lib/constants/marketing-daily";
 import { CONFIRMED_STAGES } from "@/lib/constants/pancake";
 import { dimensionFilter, getMarketingDaily, type MarketingFilters } from "@/lib/queries/marketing-daily";
@@ -133,9 +134,9 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   );
   log(`\nĐộ chín tổng: ${MATURITY_LABEL[data.totals.maturity]} · biên quan sát chi tiêu: ${data.spendObservedThrough ?? "—"}`);
   if (data.rateBasis) {
-    const c = data.rateBasis.coverage;
+    const doPhu = deliveryRateCoverageParts(data.rateBasis.coverage);
     log(
-      `Căn cứ cột ƯT: tỷ lệ lùi ${data.rateBasis.fallbackDeliveryRate}% · độ phủ ${c.projected} mã theo số đo · ${c.history} theo lịch sử · ${c.override} ghi đè tay · ${c.default} theo tỷ lệ khai` +
+      `Căn cứ cột ƯT: tỷ lệ lùi ${data.rateBasis.fallbackDeliveryRate}% · độ phủ ${doPhu.total} mã — ${doPhu.parts.map((x) => `${x.count} ${x.label.toLowerCase()}`).join(" · ")}` +
         (data.rateBasis.projectionError ? ` · LỖI MÔ HÌNH: ${data.rateBasis.projectionError}` : ""),
     );
   }

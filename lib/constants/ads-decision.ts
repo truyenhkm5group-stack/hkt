@@ -68,6 +68,141 @@ export const DECISION_BASIS_NOTE: Record<DecisionBasis, string> = {
     "Phần lớn đơn còn đang sản xuất hoặc đang đi. Lợi nhuận ở đây là TẠM TÍNH: phần đang treo được cân theo tỷ lệ giao thành công ước tính của mã hàng. Khuyến nghị vì thế là tối ưu THEO KẾ HOẠCH — GTC thực về cao hơn thì càng tốt, thấp hơn là việc của khâu giao.",
 };
 
+/**
+ * ═══════════ KẾT LUẬN MƯỢN CỦA MÃ HÀNG, KHI CHIẾN DỊCH KHÔNG TỰ KẾT LUẬN ĐƯỢC ═══════════
+ *
+ * Đo production 23/09/2026: shop chạy **619 chiến dịch trong một cửa sổ 14 ngày**, và trong nhóm
+ * đủ tiền (≥ 300K) thì chiến dịch nhiều đơn nhất cũng chỉ có **3 đơn**. Cổng mẫu đòi 10, nên nó
+ * không bao giờ mở — **45.726.057 ₫ (63% tiền quảng cáo) không nhận được một kết luận nào**.
+ *
+ * Cùng ngày, cùng dữ liệu, ở cấp MÃ HÀNG: 3/4 mã có khuyến nghị, phủ **99,8%** tiền.
+ *
+ * Bằng chứng tồn tại — chỉ là nó không tồn tại ở độ mịn CHIẾN DỊCH. Nên dòng chiến dịch không tự
+ * kết luận được sẽ MƯỢN kết luận của mã hàng nó đang chạy, và nói rõ là mượn.
+ *
+ * ─── BA ĐIỀU KẾT LUẬN MƯỢN KHÔNG ĐƯỢC LÀM ───
+ *
+ *  1. **Không thay kết luận của chính dòng.** `action` vẫn là `INSUFFICIENT_DATA` — vì đó là sự
+ *     thật về CHIẾN DỊCH này. Kết luận mượn là một trường RIÊNG.
+ *  2. **Không phân biệt được chiến dịch tốt với chiến dịch xấu trong cùng một mã.** Nó nói về cả
+ *     mã. Một chiến dịch dở nằm trong một mã lãi vẫn sẽ mượn chữ "còn dư địa" — và người đọc phải
+ *     thấy được điều đó, nên nhãn luôn mang TÊN MÃ chứ không chỉ mang chữ.
+ *  3. **Không mở đường cho bàn tay.** Cổng ghi ngân sách đọc `action` của chính dòng, và `action`
+ *     không đổi. Máy vẫn không được tiêu tiền dựa trên bằng chứng của một thực thể khác.
+ */
+/**
+ * ═══════════ TIỀN KHÔNG THUỘC MÃ NÀO: HAI THỨ KHÁC HẲN NHAU, KHÔNG PHẢI MỘT ═══════════
+ *
+ * `resolveCampaign()` phân biệt được `test` (tên chiến dịch mang chữ TEST, hoặc người khai tay) với
+ * `none` (không khớp mã nào và cũng không phải test). Nhưng `ad_spends` chỉ lưu `product_id`, nên
+ * cả hai cùng thành `NULL` — và xuống tới bảng quyết định chúng đội chung một chữ "chưa đủ dữ liệu".
+ *
+ * Đo production 23/09/2026 trên kỳ chuẩn, 387 chiến dịch không nối được về mã (11.165.022 ₫):
+ *
+ *     318 dòng · 7.457.012 ₫ (66,8%)  tên mang chữ TEST  ⇒ CHI PHÍ TEST, đúng như nó là
+ *      62 dòng · 3.617.087 ₫ (32,4%)  không test, không mã ⇒ CHƯA PHÂN LOẠI, cần người
+ *       7 dòng ·    90.923 ₫  (0,8%)  tên CÓ mã mà không nối được ⇒ bộ ghép trượt
+ *
+ * Gộp ba thứ ấy lại sinh ra một lời khuyên sai mà tôi đã suýt đưa: *"khai mã cho 387 chiến dịch"* —
+ * tức bảo người ta gán mã hàng cho 318 chiến dịch test, một việc bịa đặt.
+ *
+ * ─── CHI PHÍ TEST KHÔNG ĐƯỢC CHẤM BẰNG ROAS ───
+ *
+ * Nó không thiếu dữ liệu; nó có một câu hỏi KHÁC: *"tháng này đốt bao nhiêu vào test, và có cái nào
+ * ra được thành mã bán không"*. Đòi nó đạt điểm hoà vốn như một chiến dịch bán hàng là đo sai thứ.
+ *
+ * ─── VÌ SAO ĐỌC RA LÚC XEM, KHÔNG THÊM CỘT ───
+ *
+ * Phân loại là hàm của LUẬT (`ads.campaignMap`, bí danh, sổ mã hàng) chứ không phải một sự kiện đã
+ * xảy ra. Người sửa bảng ghép thì câu trả lời phải đổi NGAY — cùng lý lẽ đã áp cho kết cục ca chăm
+ * sóc (mục 56) và cho phân loại đợt care (mục 62). Thêm cột là mời một lượt backfill và một con số
+ * cũ đi phục vụ luật mới.
+ */
+export type AdsSpendClass = "PRODUCT" | "TEST" | "UNCLASSIFIED" | "EXCLUDED";
+
+export const ADS_SPEND_CLASS_LABEL: Record<AdsSpendClass, string> = {
+  PRODUCT: "Bán hàng",
+  TEST: "Chi phí test",
+  UNCLASSIFIED: "Chưa phân loại",
+  EXCLUDED: "Đã loại khỏi phép tính",
+};
+
+export const ADS_SPEND_CLASS_HINT: Record<AdsSpendClass, string> = {
+  PRODUCT: "Chiến dịch chạy cho một mã hàng cụ thể — chấm được bằng ROAS và điểm hoà vốn.",
+  TEST: "Chi phí thử fanpage / mẫu quảng cáo mới, KHÔNG thuộc mã hàng nào. Đây không phải chỗ thiếu dữ liệu: nó có câu hỏi riêng — đốt bao nhiêu vào test, và có cái nào ra được thành mã bán. Đòi nó đạt hoà vốn như một chiến dịch bán hàng là đo sai thứ.",
+  UNCLASSIFIED:
+    "Không nhận ra mã hàng trong tên, và cũng không khai là test. ERP KHÔNG đoán — đây là việc cần người: khai mã cho chiến dịch, hoặc đánh dấu nó là chi phí test, ở màn Chi phí quảng cáo.",
+  EXCLUDED: "Người đã khai loại chiến dịch này khỏi phép tính.",
+};
+
+/** Phân loại SUY RA từ nguồn ghép của `resolveCampaign` — không phải một danh sách thứ hai. */
+export function spendClassOf(source: "manual" | "alias" | "auto" | "test" | "none", productId: string | null, excluded: boolean): AdsSpendClass {
+  if (excluded) return "EXCLUDED";
+  if (productId) return "PRODUCT";
+  // `manual` mà không có mã nghĩa là người đã khai tay "đây là chi phí test" (`testCost`).
+  return source === "test" || source === "manual" ? "TEST" : "UNCLASSIFIED";
+}
+
+export type InheritedVerdict = {
+  productKey: string;
+  productName: string;
+  action: AdsAction;
+  reason: string;
+};
+
+/**
+ * ═══════════ BẢNG VẼ BAO NHIÊU DÒNG — VÀ VÌ SAO KHÔNG VẼ HẾT ═══════════
+ *
+ * Đo production 23/09/2026: `/ads` 18,4 s · **6.768 kB**. `perf-audit` theo từng khối cho thấy dữ liệu
+ * thô của bảng quyết định chỉ 902 KB cho 742 dòng — phần còn lại của 6,7 MB là HTML: bảng là client
+ * component nên nhận và VẼ đủ 742 dòng, mỗi dòng nhiều ô hai tầng, nhãn và chú thích. Trong khi hơn
+ * 600 dòng trong số ấy là "chưa đủ dữ liệu".
+ *
+ * Nên máy chủ chỉ gửi xuống những dòng cần đọc: MỌI dòng có kết luận thật (không bao giờ bị cắt),
+ * rồi lấp tới `ADS_TABLE_ROW_CAP` bằng các dòng còn lại theo đúng thứ tự bảng vốn có (động tới
+ * nhiều tiền hơn đứng trước). Không dòng nào biến mất: bảng in số dòng đang ẩn, số tiền của chúng,
+ * và một lối "Hiện tất cả".
+ *
+ * Đây là con số HIỂN THỊ, không phải ngưỡng nghiệp vụ: sổ quyết định, hàng đợi `/work` và mọi con số
+ * tổng vẫn đọc đủ từng dòng.
+ */
+export const ADS_TABLE_ROW_CAP = 80;
+
+/** Dòng có kết luận THẬT — không bao giờ bị cắt khỏi bảng. */
+export function isConclusive(action: AdsAction): boolean {
+  return action !== "INSUFFICIENT_DATA" && action !== "NO_SPEND_DATA";
+}
+
+/**
+ * Chọn dòng để VẼ. Hàm THUẦN, giữ nguyên thứ tự đầu vào. `all` = vẽ hết.
+ *
+ * Trần chỉ áp lên dòng CHƯA có kết luận. Dòng có kết luận luôn được giữ, không tính vào trần: một
+ * ngày có 100 dòng cần hành động thì cả 100 phải hiện, dù vượt trần hiển thị — cắt một khuyến nghị
+ * CẮT khỏi màn hình là đúng thứ bảng này sinh ra để chặn.
+ */
+export function rowsToRender<T extends { action: AdsAction }>(rows: T[], all: boolean, cap = ADS_TABLE_ROW_CAP): { shown: T[]; hidden: T[] } {
+  if (all) return { shown: rows, hidden: [] };
+  const coKetLuan = rows.filter((r) => isConclusive(r.action)).length;
+  /*
+    Bảng đã xếp dòng có kết luận lên đầu, nhưng hàm này KHÔNG dựa vào điều đó: nó giữ mọi dòng có
+    kết luận dù chúng nằm ở đâu, rồi mới lấp chỗ trống bằng các dòng còn lại theo thứ tự cũ. Một ngày
+    ai đó đổi phép sắp xếp thì khuyến nghị vẫn không rơi khỏi màn hình.
+  */
+  // Chỗ còn lại cho dòng CHƯA có kết luận — hết chỗ thì không lấp nữa, nhưng dòng có kết luận vẫn giữ.
+  const conCho = Math.max(0, cap - coKetLuan);
+  const shown: T[] = [];
+  const hidden: T[] = [];
+  let lap = 0;
+  for (const r of rows) {
+    if (isConclusive(r.action)) shown.push(r);
+    else if (lap < conCho) {
+      shown.push(r);
+      lap += 1;
+    } else hidden.push(r);
+  }
+  return { shown, hidden };
+}
+
 /** Hành động đề xuất cho một dòng. Thứ tự này cũng là thứ tự ưu tiên xử lý trên giao diện. */
 export type AdsAction = "SCALE" | "HOLD" | "WATCH" | "CUT" | "FIX_DELIVERY" | "INSUFFICIENT_DATA" | "NO_SPEND_DATA";
 

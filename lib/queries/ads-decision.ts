@@ -1,10 +1,12 @@
 import { and, eq, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { metricScope, realizedShippingSql, successRate } from "@/lib/queries/metrics";
+import { metricScope, openShippingSql, realizedShippingSql, successRate } from "@/lib/queries/metrics";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 import { spendPeriod } from "@/lib/queries/ads-roas";
+import { loadAdsMapping, resolveCampaign } from "@/lib/integrations/facebook/mapping";
+import { loadProductCodeIndex } from "@/lib/integrations/facebook/sync";
 import { lineUnitCost } from "@/lib/queries/cogs";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { ORDER_AD_ID, ORDER_ADSET_ID, ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
@@ -18,7 +20,10 @@ import {
   ADS_DIMENSION_HAS_SPEND,
   type AdsAction,
   type AdsDimension,
+  type AdsSpendClass,
   type DecisionBasis,
+  type InheritedVerdict,
+  spendClassOf,
 } from "@/lib/constants/ads-decision";
 import { deliveryRateCaseSql, orderDeliveryRateSql, productDeliveryRates, rateCoverage, type ProductDeliveryRates } from "@/lib/queries/delivery-rate";
 import type { DeliveryRateSource } from "@/lib/constants/delivery-rate";
@@ -156,8 +161,16 @@ export type AdsDecisionRow = {
    * Doanh thu giao thành công TẠM TÍNH = đã giao thật + (đang treo × tỷ lệ GTC ước tính).
    * **Cộng vào phần đã đo, không thay nó** — cùng phép cộng với `lib/queries/marketing-daily.ts`,
    * để hai báo cáo không nói hai con số.
+   *
+   * Riêng CƯỚC thì bảng này đi xa hơn `marketing-daily`: nó dự phóng cả cước của phần đang treo
+   * (xem `projectedProfitAfterAds`). Cố ý khác, vì đây là bảng RA QUYẾT ĐỊNH TIÊU TIỀN — một khoản
+   * chi chắc chắn sẽ tới mà không có mặt sẽ làm khuyến nghị lạc quan một chiều.
    */
   projectedDeliveredRevenue: number;
+  /**
+   * Lợi nhuận góp sau quảng cáo TẠM TÍNH. Trừ cả cước dự phóng của phần đang treo — đã cộng doanh
+   * thu tương lai thì phải trừ chi phí tương lai của đúng phần ấy (chủ shop chốt 23/09/2026).
+   */
   projectedProfitAfterAds: number;
   /** Khoảng cách tới hoà vốn tính trên căn cứ TẠM TÍNH. `null` khi không biết chi tiêu. */
   projectedHeadroom: number | null;
@@ -221,6 +234,22 @@ export type AdsDecisionRow = {
   adsPctOverDelivered: number | null;
 
   action: AdsAction;
+  /**
+   * Kết luận MƯỢN của mã hàng mà chiến dịch này đang chạy — chỉ có mặt khi dòng KHÔNG tự kết luận
+   * được, và không bao giờ thay `action`. Xem `InheritedVerdict` để biết ba điều nó không được làm.
+   *
+   * `null` ở ba tình huống khác nhau, và màn hình phải phân biệt được: dòng đã tự kết luận được ·
+   * chiến dịch chưa nối được về mã nào · mã của nó cũng chưa kết luận được.
+   */
+  inherited: InheritedVerdict | null;
+  /**
+   * TIỀN NÀY LÀ LOẠI GÌ — chỉ có nghĩa ở cấp CHIẾN DỊCH, `null` ở ba cấp kia.
+   *
+   * Tách `TEST` khỏi `UNCLASSIFIED` là cả điểm của trường này: cả hai đều không thuộc mã hàng nào
+   * nên trước đây cùng đội một chữ "chưa đủ dữ liệu", trong khi một cái là **đúng như nó phải thế**
+   * còn cái kia là **việc cần người làm**. Xem `AdsSpendClass`.
+   */
+  spendClass: AdsSpendClass | null;
   /** Giải thích bằng SỐ THẬT của chính dòng này — không có câu chữ chung chung. */
   reason: string;
   /** Dấu hiệu phụ, hiện thành nhãn cạnh hành động. */
@@ -280,6 +309,27 @@ export type AdsDecision = {
    * Phải in cạnh mọi con số ước tính (AGENTS.md mục 8.6): `coverage` nói bao nhiêu mã đi bằng SỐ ĐO
    * và bao nhiêu mã đi bằng GIẢ ĐỊNH, `projectionError` nói hợp đồng dự báo có chạy được không.
    */
+  /**
+   * ĐỘ PHỦ CỦA KẾT LUẬN MƯỢN — chỉ có nghĩa ở cấp CHIẾN DỊCH.
+   *
+   * Ba con số vì có BA tình huống khác nhau, và gộp chúng lại là làm mất đường sửa: dòng mượn được
+   * (đã có câu trả lời) · chiến dịch chưa nối được về mã nào (đi khai `ad_spends.product_id`) ·
+   * mã của nó cũng chưa kết luận được (đợi thêm dữ liệu, không sửa được bằng tay).
+   */
+  inheritedCoverage: {
+    /** Dòng không tự kết luận được NHƯNG mượn được của mã hàng. */
+    rows: number;
+    spend: number;
+    /** Không nối được về mã nào — sửa được bằng cách khai mã cho chiến dịch. */
+    unlinkedRows: number;
+    unlinkedSpend: number;
+    /** Nối được, nhưng chính mã ấy cũng chưa kết luận được. */
+    productSilentRows: number;
+    productSilentSpend: number;
+    /** CHI PHÍ TEST — không phải chỗ trống, và không đi mượn. Có câu hỏi riêng của nó. */
+    testRows: number;
+    testSpend: number;
+  };
   rateBasis: {
     fallbackDeliveryRate: number;
     coverage: Record<DeliveryRateSource, number>;
@@ -351,6 +401,10 @@ type Agg = {
   /** Doanh thu của đơn ĐANG TREO đã cân theo tỷ lệ GTC ước tính của mã. */
   openProjectedRevenue: number;
   openProjectedCogs: number;
+  /**
+   * Cước SẼ phát sinh của phần đang treo. KHÔNG nhân tỷ lệ: cước mất cả khi giao được lẫn khi hoàn.
+   */
+  openProjectedShipping: number;
   /** Số đơn đang treo đã cân theo tỷ lệ — số thập phân, vì nó là kỳ vọng chứ không phải phép đếm. */
   openProjectedOrders: number;
 };
@@ -374,6 +428,7 @@ function toAgg(r: Record<string, unknown>): Agg {
     shipping: Number(r.shipping ?? 0),
     openProjectedRevenue: Number(r.openProjectedRevenue ?? 0),
     openProjectedCogs: Number(r.openProjectedCogs ?? 0),
+    openProjectedShipping: Number(r.openProjectedShipping ?? 0),
     openProjectedOrders: Number(r.openProjectedOrders ?? 0),
   };
 }
@@ -455,13 +510,14 @@ async function aggregateByOrder(period: Period, dimension: AdsDimension, rates: 
           Chỉ lọc `open`: đơn đã ngã ngũ thì không còn gì để dự báo, và nhân tỷ lệ lên chúng là ghi
           đè một SỐ ĐO bằng một con số đoán. Cùng phép cộng với `lib/queries/marketing-daily.ts`.
 
-          CƯỚC cố ý KHÔNG có mặt ở đây. Đơn chưa gửi thì chưa có cước thật — `orders.partner_fee` chỉ
-          là ước tính của Pancake lúc lên đơn — nên lợi nhuận tạm tính đang THIẾU phần cước của đơn
-          đang treo, tức nó rộng rãi hơn sự thật một chút. Đó đúng là cách Báo cáo hiệu quả marketing
-          đang tính; thêm một ước tính cước chỉ ở đây sẽ làm hai báo cáo nói hai con số (mục 15).
+          CƯỚC CŨNG ĐƯỢC DỰ PHÓNG, nhưng KHÔNG nhân tỷ lệ — xem `openShippingSql`. Chủ shop chốt
+          23/09/2026: đã dự phóng doanh thu của phần đang treo thì phải dự phóng cả chi phí của
+          đúng phần ấy. Bản trước chỉ cộng doanh thu, và đo được nó làm lợi nhuận tạm tính lạc quan
+          **5.789.000 ₫ / 30 ngày** — đủ để đổi một khuyến nghị từ CẮT thành TĂNG NGÂN SÁCH.
         */
         openProjectedRevenue: sql<number>`coalesce(sum(${facts.revenue} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
         openProjectedCogs: sql<number>`coalesce(sum(${facts.cogs} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
+        openProjectedShipping: openShippingSql({ shipping: facts.shipping, outcome: facts.outcome }),
         openProjectedOrders: sql<number>`coalesce(sum(${facts.deliveryRate}) filter (where ${open}), 0)`,
       })
       .from(facts)
@@ -547,9 +603,10 @@ async function aggregateByProduct(period: Period, rates: ProductDeliveryRates): 
         cogs: sql<number>`coalesce(sum(${facts.lineCogs}) filter (where ${delivered}), 0)`,
         // CÙNG một hàm với cấp chiến dịch, chỉ thêm CĂN CỨ PHÂN BỔ: tỷ trọng doanh thu dòng trong đơn.
         shipping: realizedShippingSql({ shipping: facts.shipping, returnFee: facts.returnFee, outcome: facts.outcome, share: facts.shipShare }),
-        // Phần đang treo đã cân theo tỷ lệ — xem chú thích ở `aggregateByOrder` về việc cước không có mặt.
+        // Phần đang treo — xem chú thích ở `aggregateByOrder`. Cước dùng CÙNG căn cứ phân bổ với cước đã phát sinh.
         openProjectedRevenue: sql<number>`coalesce(sum(${facts.lineRevenue} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
         openProjectedCogs: sql<number>`coalesce(sum(${facts.lineCogs} * ${facts.deliveryRate}) filter (where ${open}), 0)`,
+        openProjectedShipping: openShippingSql({ shipping: facts.shipping, outcome: facts.outcome, share: facts.shipShare }),
         /** Tỷ lệ là HẰNG SỐ trong một nhóm (nhóm = một mã), nên `max` chỉ là cách lấy nó ra khỏi phép gộp. */
         openProjectedOrders: sql<number>`coalesce(${countOrders(open)} * max(${facts.deliveryRate}), 0)`,
       })
@@ -856,12 +913,21 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
     Cộng vào phần đã đo, KHÔNG thay nó: đơn đã có kết cục thì không còn gì để dự báo. Cùng phép
     cộng với `lib/queries/marketing-daily.ts`, nên hai báo cáo không nói hai con số.
 
-    CƯỚC giữ nguyên số đo (cước của đơn đã giao + đơn hoàn). Đơn đang treo chưa phát sinh cước thật,
-    và `partner_fee` chỉ là ước tính của Pancake — nên lợi nhuận tạm tính đang THIẾU vế cước tương
-    lai, tức rộng rãi hơn sự thật một chút. Nói ra ở đây thay vì lặng lẽ bù bằng một con số thứ hai.
+    CƯỚC CŨNG ĐƯỢC CỘNG, VÀ KHÔNG NHÂN TỶ LỆ.
+
+    Doanh thu chỉ về khi giao được nên nó nhân GTC; cước thì mất cả hai đường — giao được tốn cước
+    đi, hoàn tốn cước đi cộng cước về. Nhân GTC vào cước là giả định đơn hoàn được miễn cước.
+
+    Bản trước chỉ cộng doanh thu tương lai mà bỏ chi phí tương lai của đúng những đơn ấy. Đo
+    production 23/09/2026: lợi nhuận tạm tính lạc quan **5.789.000 ₫ / 30 ngày** — với biên mỏng,
+    ngần ấy đủ để đổi một khuyến nghị từ CẮT thành TĂNG NGÂN SÁCH. Chủ shop chốt sửa cùng ngày.
+
+    CÒN THIẾU, và nói ra thay vì lặng lẽ bù: phí hoàn của đơn đang treo. `orders.return_fee` chỉ
+    tồn tại sau khi hoàn thật, nên nhân nó với tỷ lệ hoàn là nhân với một ô trống.
   */
   const projectedDeliveredRevenue = agg.deliveredRevenue + agg.openProjectedRevenue;
-  const projectedContributionBeforeAds = projectedDeliveredRevenue - (agg.cogs + agg.openProjectedCogs) - agg.shipping;
+  const projectedContributionBeforeAds =
+    projectedDeliveredRevenue - (agg.cogs + agg.openProjectedCogs) - (agg.shipping + agg.openProjectedShipping);
   const projectedProfitAfterAds = projectedContributionBeforeAds - spendForRatio;
   const projectedHeadroom = spendKnown && spendForRatio > 0 ? round2(projectedContributionBeforeAds / spendForRatio) : null;
   /*
@@ -960,7 +1026,88 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
     action,
     reason,
     lowDelivery,
+    // Hai trường dưới gắn ở `decisionUncached`: dựng dòng thì chưa biết gì về mã hàng lẫn bảng ghép.
+    inherited: null,
+    spendClass: null,
   };
+}
+
+/**
+ * ───────── MỘT DÒNG CÓ MƯỢN ĐƯỢC KẾT LUẬN KHÔNG, VÀ NẾU KHÔNG THÌ VÌ SAO ─────────
+ *
+ * Hàm THUẦN, vì đây là chỗ dễ sai nhất của cả tính năng: bốn ngả rẽ, và ba trong số đó trông giống
+ * hệt nhau trên màn hình nếu ai đó gộp chúng ("chưa đủ dữ liệu"). Gộp là đúng thứ đã giấu
+ * 45.726.057 ₫ suốt hai ngày.
+ *
+ *  · `OWN`            — dòng tự kết luận được, không mượn gì. KHÔNG BAO GIỜ đè lên kết luận của nó.
+ *  · `INHERITED`      — mượn được của mã hàng.
+ *  · `TEST`           — chi phí thử fanpage/mẫu mới. KHÔNG phải chỗ trống, và không đi mượn.
+ *  · `UNLINKED`       — chưa nối được về mã nào và cũng không khai là test. SỬA ĐƯỢC, cần người.
+ *  · `PRODUCT_SILENT` — nối được, nhưng mã cũng chưa kết luận. Đợi dữ liệu, không sửa tay được.
+ */
+export type InheritBucket = "OWN" | "INHERITED" | "TEST" | "UNLINKED" | "PRODUCT_SILENT";
+
+export function inheritVerdict(
+  ownAction: AdsAction,
+  productId: string | undefined,
+  productVerdict: { key: string; name: string; action: AdsAction; reason: string } | undefined,
+  spendClass: AdsSpendClass | null = null,
+): { bucket: InheritBucket; inherited: InheritedVerdict | null } {
+  /*
+    CHỈ dòng `INSUFFICIENT_DATA` mới mượn. `NO_SPEND_DATA` thì KHÔNG: ở đó ERP không đọc được cả số
+    chi, nên gắn một kết luận về tiền vào đấy là nói về thứ mình không nhìn thấy. Và `HOLD`/`WATCH`
+    cũng là kết luận thật — đè lên chúng là thay một câu ĐÚNG bằng một câu chung chung hơn.
+  */
+  if (ownAction !== "INSUFFICIENT_DATA") return { bucket: "OWN", inherited: null };
+  /*
+    CHI PHÍ TEST KHÔNG PHẢI MỘT CHỖ TRỐNG, NÊN NÓ KHÔNG ĐI MƯỢN.
+
+    Nó không thuộc mã hàng nào một cách CỐ Ý. Cho nó mượn kết luận của một mã là gán cho một phép
+    thử fanpage cái điểm hoà vốn của một mã bán hàng — hai câu hỏi khác nhau. Đo 23/09/2026:
+    318 dòng · 7.457.012 ₫ nằm ở nhóm này, tức 2/3 phần tiền trước nay bị gọi nhầm là "thiếu dữ liệu".
+  */
+  if (spendClass === "TEST") return { bucket: "TEST", inherited: null };
+  if (!productId) return { bucket: "UNLINKED", inherited: null };
+  if (!productVerdict || productVerdict.action === "INSUFFICIENT_DATA" || productVerdict.action === "NO_SPEND_DATA") {
+    return { bucket: "PRODUCT_SILENT", inherited: null };
+  }
+  return {
+    bucket: "INHERITED",
+    inherited: { productKey: productVerdict.key, productName: productVerdict.name, action: productVerdict.action, reason: productVerdict.reason },
+  };
+}
+
+/**
+ * ───────── CHIẾN DỊCH NÀO ĐANG CHẠY MÃ NÀO ─────────
+ *
+ * Đọc thẳng `ad_spends`: cùng bảng, cùng kỳ, cùng không gian khoá với `spendByKey` — nên bản đồ
+ * này không thể lệch khỏi phép gộp tiền ở trên.
+ *
+ * Một chiến dịch chạy nhiều mã thì lấy mã CHI NHIỀU NHẤT. Đó là một lựa chọn, không phải sự thật:
+ * kết luận mượn khi ấy nói về phần lớn tiền của chiến dịch chứ không phải toàn bộ. Chia nhỏ kết
+ * luận theo tỷ trọng sẽ cho một câu chữ không ai đọc được ("60% nên cắt, 40% nên tăng").
+ */
+async function campaignProductLink(period: Period): Promise<Map<string, string>> {
+  const db = await getDb();
+  const rows = await db
+    .select({
+      campaignKey: sql<string>`coalesce(${schema.adSpends.campaignId}, ${schema.adSpends.campaign})`,
+      productId: sql<string>`${schema.adSpends.productId}`,
+      spend: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)`,
+    })
+    .from(schema.adSpends)
+    .where(and(spendPeriod(period.from, period.to), sql`${schema.adSpends.productId} is not null`))
+    .groupBy(sql`coalesce(${schema.adSpends.campaignId}, ${schema.adSpends.campaign})`, schema.adSpends.productId);
+
+  const best = new Map<string, { productId: string; spend: number }>();
+  for (const r of rows) {
+    const key = String(r.campaignKey ?? "");
+    const pid = String(r.productId ?? "");
+    if (!key || !pid) continue;
+    const cur = best.get(key);
+    if (!cur || Number(r.spend) > cur.spend) best.set(key, { productId: pid, spend: Number(r.spend) });
+  }
+  return new Map([...best].map(([k, v]) => [k, v.productId]));
 }
 
 async function decisionUncached(period: Period, dimension: AdsDimension): Promise<AdsDecision> {
@@ -1032,6 +1179,7 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
             // Không đơn nào ⇒ không có gì đang treo ⇒ không có gì để ước tính. Đây là 0 THẬT.
             openProjectedRevenue: 0,
             openProjectedCogs: 0,
+            openProjectedShipping: 0,
             openProjectedOrders: 0,
           },
           dimension,
@@ -1041,6 +1189,54 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
           cha.get(key) ?? null,
         ),
       );
+    }
+  }
+
+  /*
+    ═══════════ MƯỢN KẾT LUẬN CỦA MÃ HÀNG CHO DÒNG KHÔNG TỰ KẾT LUẬN ĐƯỢC ═══════════
+
+    Chỉ ở cấp CHIẾN DỊCH. Ba cấp kia không cần: cấp mã hàng LÀ nguồn cho mượn, còn nhóm/mẩu nằm
+    DƯỚI chiến dịch nên mượn của mã hàng ở đó là nhảy qua hai tầng bằng chứng cùng lúc.
+
+    Kết luận cho mượn lấy trên ĐÚNG KỲ người dùng đang xem, không lấy từ sổ. Sổ chạy trên kỳ chuẩn
+    (lùi 15 ngày) nên trộn vào đây sẽ cho một màn hình mà hai nửa nói về hai khoảng thời gian khác
+    nhau — thứ AGENTS.md mục 58 cấm.
+  */
+  const inheritedCoverage = { rows: 0, spend: 0, unlinkedRows: 0, unlinkedSpend: 0, productSilentRows: 0, productSilentSpend: 0, testRows: 0, testSpend: 0 };
+  if (dimension === "campaign") {
+    /*
+      PHÂN LOẠI ĐỌC RA LÚC XEM, KHÔNG ĐỌC TỪ MỘT CỘT ĐÃ LƯU.
+
+      `ad_spends` chỉ giữ `product_id`, nên "test" và "chưa phân loại" cùng thành `NULL` ở đó. Bảng
+      ghép (`ads.campaignMap`, bí danh, sổ mã hàng) mới là thứ biết phân biệt — và nó đổi được bất
+      cứ lúc nào, nên câu trả lời phải tính lại mỗi lượt đọc (mục 56 · 62).
+    */
+    const [link, theoMa, mapping, codeIndex] = await Promise.all([
+      campaignProductLink(period),
+      getAdsDecision(period, "product"),
+      loadAdsMapping(),
+      loadProductCodeIndex(),
+    ]);
+    const verdictOf = new Map(theoMa.rows.map((r) => [r.key, r]));
+    for (const row of rows) {
+      const r = resolveCampaign(row.key, row.name, mapping, codeIndex);
+      row.spendClass = spendClassOf(r.source, link.get(row.key) ?? r.productId, r.excluded);
+      const { bucket, inherited } = inheritVerdict(row.action, link.get(row.key), verdictOf.get(link.get(row.key) ?? ""), row.spendClass);
+      if (bucket === "OWN") continue;
+      if (bucket === "TEST") {
+        inheritedCoverage.testRows += 1;
+        inheritedCoverage.testSpend += row.spend;
+      } else if (bucket === "UNLINKED") {
+        inheritedCoverage.unlinkedRows += 1;
+        inheritedCoverage.unlinkedSpend += row.spend;
+      } else if (bucket === "PRODUCT_SILENT") {
+        inheritedCoverage.productSilentRows += 1;
+        inheritedCoverage.productSilentSpend += row.spend;
+      } else {
+        row.inherited = inherited;
+        inheritedCoverage.rows += 1;
+        inheritedCoverage.spend += row.spend;
+      }
     }
   }
 
@@ -1104,6 +1300,7 @@ async function decisionUncached(period: Period, dimension: AdsDimension): Promis
     totals,
     pending,
     spendDetail,
+    inheritedCoverage,
     rateBasis: { fallbackDeliveryRate: rates.fallback.deliveryRate, coverage: rateCoverage(rates), projectionError: rates.projectionError },
     confidence: {
       coveragePct: coverage.coveragePct,

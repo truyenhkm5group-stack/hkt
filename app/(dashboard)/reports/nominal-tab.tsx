@@ -33,6 +33,10 @@ import {
 } from "@/lib/queries/profit-nominal";
 import type { Period } from "@/lib/search-params";
 import { DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
+import { NewProductRates } from "@/app/(dashboard)/reports/new-product-rates";
+import { AdsCeilingTable } from "@/app/(dashboard)/reports/ads-ceiling-table";
+import { adsCeiling } from "@/lib/constants/estimated-cost";
+import { DELIVERY_RATE_MEASURED } from "@/lib/constants/delivery-rate";
 import { PROJECTED_GTC_VERSION } from "@/lib/constants/projected-delivery";
 import { TIME_BASES, TIME_BASIS_LABEL, TIME_BASIS_QUESTION, type TimeBasis } from "@/lib/constants/report-time-basis";
 import { successTone } from "@/lib/constants/returns";
@@ -74,6 +78,14 @@ const NHAN_NGUON: Record<NominalRow["returnRateSource"], (r: NominalRow) => stri
         ? `chưa gửi đơn nào${choLay(r)}`
         : `chưa đo được · ${formatNumber(r.projection.unmodelledActive)}/${formatNumber(r.projection.active)} đang giao ngoài ước tính${choLay(r)}`
       : "chưa đo được",
+  /*
+    CO NGÓT phải tự khai ĐỦ BA THỨ: số đo thật của chính mã, mốc neo, và còn bao nhiêu đơn nữa thì
+    máy tự đo. Thiếu vế cuối thì chủ shop không biết con số này sẽ đứng yên tới bao giờ.
+  */
+  blended: (r) =>
+    r.blendReason === "MOSTLY_BORROWED"
+      ? `${formatNumber(r.rateOwnFinished)} đơn kết thúc · mô hình mượn ${r.borrowedShare === null ? "phần lớn" : `${Math.round(r.borrowedShare * 100)}%`} số của mã khác nên KHÔNG dùng${r.measuredDeliveryRate === null ? "" : ` · mã đang ở ${r.measuredDeliveryRate.toFixed(1)}%`}${choLay(r)}`
+      : `${formatNumber(r.rateOwnFinished)}/${formatNumber(r.rateMatureAt)} đơn kết thúc · co ngót về ${(100 - r.baseReturnRate).toFixed(0)}% khai${r.measuredDeliveryRate === null ? "" : ` · mã đang ở ${r.measuredDeliveryRate.toFixed(1)}%`}${choLay(r)}`,
   history: (r) => `lịch sử ${formatNumber(r.historyFinished)} đơn · ước tính theo tỷ lệ`,
   // GIẢ ĐỊNH phải tự khai là giả định, kèm CON SỐ đang dùng — "mặc định" không nói được nó là bao nhiêu.
   default: (r) => `giả định ${(100 - r.baseReturnRate).toFixed(0)}% GTC (Giả định) · chưa đo được${choLay(r)}`,
@@ -88,6 +100,24 @@ function moTaUocTinh(r: NominalRow): string {
     return `${dem} — CHƯA ĐO ĐƯỢC: mã này chưa có đơn nào rời kho trong kỳ${r.projection.awaitingPickup ? ` (${formatNumber(r.projection.awaitingPickup)} đơn đã có mã vận đơn nhưng ĐVVC chưa cầm hàng)` : ""}. Không có mẫu số thì không có tỷ lệ — “—” KHÔNG phải 0%`;
   if (r.returnRateSource === "unmeasured")
     return `${dem} — CHƯA ĐO ĐƯỢC: phần đang giao ở trạng thái chưa đủ mẫu quá lớn, không lùi về giả định. DT GTC ƯT chỉ gồm phần đã dự báo được; ${formatVND(r.unmodelledRevenue, { compact: true })} doanh số nằm ngoài ước tính`;
+  if (r.returnRateSource === "blended" && r.blendReason === "MOSTLY_BORROWED")
+    return (
+      `${dem} — MÔ HÌNH CHƯA BIẾT GÌ VỀ MÃ NÀY. Mã đã đủ ${formatNumber(r.rateOwnFinished)} đơn kết thúc, nhưng ` +
+      `${r.borrowedShare === null ? "phần lớn" : `${Math.round(r.borrowedShare * 100)}%`} tử số dự báo là xác suất MƯỢN của mã khác: ` +
+      `hợp đồng ${PROJECTED_GTC_VERSION} đòi 10 quan sát cho MỖI ô (trạng thái ĐVVC × tuổi kiện), và mã này chưa đủ ở ô nào. ` +
+      `Nên con số in ra là SỐ ĐO CỦA CHÍNH MÃ${r.measuredDeliveryRate === null ? "" : ` (${r.measuredDeliveryRate.toFixed(1)}% trên ${formatNumber(r.rateOwnFinished)} đơn)`} ` +
+      `co ngót về tỷ lệ khai ở Giả định (${(100 - r.baseReturnRate).toFixed(0)}%), KHÔNG phải tỷ lệ nền của toàn shop. ` +
+      `Đây là giới hạn của MÔ HÌNH, không phải của thời gian — đợi thêm đơn không làm nó tự hết; ` +
+      `muốn chốt một con số thì đặt tay ở bảng “Mã mới · chưa đủ căn cứ”. Tiền = Doanh số POS × tỷ lệ.`
+    );
+  if (r.returnRateSource === "blended")
+    return (
+      `${dem} — MÃ CHƯA CHÍN: mới ${formatNumber(r.rateOwnFinished)}/${formatNumber(r.rateMatureAt)} đơn của chính mã đi tới kết cục, chưa đủ để máy tự đo. ` +
+      `Con số này là SỐ ĐO CỦA CHÍNH MÃ${r.measuredDeliveryRate === null ? "" : ` (${r.measuredDeliveryRate.toFixed(1)}% trên ${formatNumber(r.rateOwnFinished)} đơn)`} co ngót về tỷ lệ khai ở Giả định ` +
+      `(${(100 - r.baseReturnRate).toFixed(0)}%), trọng số mốc neo = ${formatNumber(r.rateMatureAt)} đơn. ` +
+      `KHÔNG dùng tỷ lệ nền của toàn shop: một mã hoàn nhiều sẽ kéo tụt dự tính của mọi mã mới. ` +
+      `Đủ ${formatNumber(r.rateMatureAt)} đơn kết thúc thì máy tự chuyển sang số đo. Tiền = Doanh số POS × tỷ lệ.`
+    );
   if (r.returnRateSource === "history") return `${dem} — mô hình chưa dự báo được cho mã này, dùng tỷ lệ hoàn LỊCH SỬ thật của mã (${formatNumber(r.historyFinished)} đơn đã kết thúc); tiền = Doanh số POS × tỷ lệ`;
   return `${dem} — mã chưa có đơn nào kết thúc nên KHÔNG có tỷ lệ đo được. Đang dùng tỷ lệ GTC khai ở Giả định (${(100 - r.baseReturnRate).toFixed(0)}%) để còn ước lượng được lợi nhuận và margin; tiền = Doanh số POS × tỷ lệ. Đây là GIẢ ĐỊNH — đổi con số ở khối Giả định phía trên là cả cột đổi theo.`;
 }
@@ -100,7 +130,12 @@ function moTaUocTinh(r: NominalRow): string {
  * đã đo, và đó là cách nhanh nhất để người đọc tin vào thứ chưa ai đo.
  */
 function OTyLe({ r }: { r: NominalRow }) {
-  const doDuoc = r.returnRateSource !== "default";
+  /*
+    ĐỌC TỪ SỔ KHAI (`DELIVERY_RATE_MEASURED`) thay vì so chuỗi tại chỗ. Phép so cũ (`!== "default"`)
+    tô màu cả `override` lẫn `unmeasured`, và sẽ tô luôn `blended` khi bậc ấy ra đời — tức tô một
+    con số mà mốc neo đang chiếm hơn nửa trọng số. Thêm một bậc ở sổ khai nay là đủ.
+  */
+  const doDuoc = r.returnRateSource !== "unmeasured" && DELIVERY_RATE_MEASURED[r.returnRateSource];
   return (
     <>
       <span className={cn("numeric font-semibold", doDuoc ? successTone(r.deliveryRate) : "text-muted-foreground")}>
@@ -185,7 +220,7 @@ function chiTietVanHanh(r: { operatingAlloc: number; packingCost: number; opsSta
 }
 
 /** Một dòng của bảng hàng nhập, hoặc dòng tổng — hai chỗ dùng chung đúng một phép trừ. */
-type CoTonKho = Pick<NominalRow, "purchaseQty" | "purchaseCost" | "purchaseCostKnown" | "expectedQty" | "expectedCogs" | "cogsKnown" | "stockQty" | "stockValue" | "stockKnown" | "outInTransitQty" | "outAwaitingReturnQty">;
+type CoTonKho = Pick<NominalRow, "purchaseQty" | "purchaseCost" | "purchaseCostKnown" | "expectedQty" | "expectedCogs" | "expectedCogsEstimated" | "cogsKnown" | "stockQty" | "stockValue" | "stockKnown" | "outInTransitQty" | "outAwaitingReturnQty">;
 
 /**
  * HÀNG NHẬP − HÀNG ĐÃ TỚI TAY KHÁCH. Không kẹp về 0: số âm nghĩa là trong kỳ bán ra nhiều hơn
@@ -196,8 +231,12 @@ function conLaiUocTinh(r: CoTonKho) {
   return {
     qty: r.purchaseQty - r.expectedQty,
     cost: r.purchaseCost - r.expectedCogs,
-    /* Hiệu số chỉ biết được khi CẢ HAI vế biết — thiếu một vế thì nó là số trừ đi một ẩn số. */
-    costKnown: r.purchaseCostKnown && r.cogsKnown,
+    /*
+      Hiệu số chỉ biết được khi CẢ HAI vế biết — thiếu một vế thì nó là số trừ đi một ẩn số. Giá vốn
+      DỰ TÍNH cũng không được vào đây: đây là phép trừ giữa hai CHỨNG TỪ (phiếu nhập − hàng đã giao),
+      và một con số đặt tay trừ vào giá trị phiếu nhập cho ra một "hàng còn lại" không ai đếm được.
+    */
+    costKnown: r.purchaseCostKnown && r.cogsKnown && r.expectedCogsEstimated === 0,
   };
 }
 
@@ -223,6 +262,21 @@ function giaiThichConLai(r: CoTonKho, conLai: { qty: number }) {
   return `Hàng nhập ${formatNumber(r.purchaseQty)} − đã giao thành công (ước tính) ${formatNumber(r.expectedQty)} = ${formatNumber(conLai.qty)} sp shop còn giữ.\nHàng thật đang ở: ${cho}.${lech === null ? "" : `\nChênh với Sổ kho: ${formatNumber(lech)} sp — hàng chưa về kệ chứ không phải lỗi hiển thị.`}\nLƯU Ý: phép trừ chạy TRONG KỲ đang xem (hàng nhập theo mốc nhận hàng, hàng giao theo mốc của cohort), còn Sổ kho là số HIỆN TẠI của toàn bộ lịch sử. Hai con số chỉ so được với nhau ở kỳ “Toàn bộ”.`;
 }
 
+/**
+ * Trần CPQC hoà vốn của một dòng, in ngay dưới CPQC hiện tại để so bằng mắt — cùng MỘT hàm với bảng
+ * “Bàn dự tính” (`adsCeiling`), không có công thức thứ hai. Mã còn sản phẩm chưa biết giá vốn thì
+ * trần đang cao hơn thật, và ô nói ra điều đó thay vì in một con số trông chắc chắn.
+ */
+function TranHoaVon({ r, otherPct }: { r: NominalRow; otherPct: number }) {
+  const c = adsCeiling({ netProfit: r.netProfit, adSpend: r.adSpend, otherCost: r.otherCost, expectedRevenue: r.expectedRevenue, posSales: r.salesAfterDiscount, orders: r.orders, otherCostPercentOfAds: otherPct, targetMarginPct: null });
+  if (c.breakEven.overPosSales === null) return null;
+  return (
+    <div title={`Trần CPQC hoà vốn = (LN danh nghĩa + CPQC + CP khác) ÷ (1 + ${otherPct}%) = ${formatVND(c.breakEven.spend)} cả kỳ${r.cogsUncoveredQty ? ` — CAO HƠN THẬT vì ${formatNumber(r.cogsUncoveredQty)} sp đang tính giá vốn 0 ₫` : ""}`}>
+      {c.breakEven.spend <= 0 ? "lỗ cả khi không QC" : <>hoà vốn ≤ {c.breakEven.overPosSales.toFixed(1)}% DS{r.cogsUncoveredQty ? " ⚠" : ""}</>}
+    </div>
+  );
+}
+
 export async function NominalTab({
   period,
   productId,
@@ -231,6 +285,7 @@ export async function NominalTab({
   basis = "ORDERED",
   value = NO_ORDER_VALUE_FILTER,
   includeAds = true,
+  targetMargin = null,
 }: {
   period: Period;
   productId: string;
@@ -242,6 +297,8 @@ export async function NominalTab({
   value?: OrderValueFilter;
   /** Công tắc CPQC: `false` ⇒ CPQC hiện 0 và lợi nhuận không trừ quảng cáo. */
   includeAds?: boolean;
+  /** Biên LN người xem gõ (`?bien=`) để tính trần CPQC giữ biên — `null` = chỉ tính trần hoà vốn. */
+  targetMargin?: number | null;
 }) {
   /*
     BẢNG MARKETER CỐ Ý Ở LẠI MỐC NGÀY TẠO ĐƠN.
@@ -256,9 +313,14 @@ export async function NominalTab({
     một tiêu đề kỳ. Để một bảng lọc còn bảng kia đọc cả kỳ là đặt hai tập đơn khác nhau cạnh nhau
     mà không ai biết — rồi người đọc sẽ cộng chúng lại.
   */
+  /*
+    TAB NÀY — VÀ CHỈ TAB NÀY — BẬT GIÁ VỐN DỰ TÍNH (`lib/constants/estimated-cost.ts`). Bảng marketer
+    đứng trên cùng trang nên bật theo, để hai bảng nói cùng một lợi nhuận cho cùng một mã; bảng
+    lương và trang Quảng cáo gọi hai hàm này không tham số nên không bao giờ thấy giá đoán.
+  */
   const [report, byMarketer] = await Promise.all([
-    getNominalProfitReport(period, basis, value, includeAds),
-    getNominalMarketerBreakdown(period, value, includeAds),
+    getNominalProfitReport(period, basis, value, includeAds, true),
+    getNominalMarketerBreakdown(period, value, includeAds, true),
   ]);
   const selected = productId
     ? report.rows.find((r) => r.productId === productId)
@@ -273,6 +335,7 @@ export async function NominalTab({
         dailyRate,
         report.assumptions,
         basis,
+        selected.estimatedCost?.unitCost ?? null,
       )
     : [];
   const t = report.totals;
@@ -372,7 +435,7 @@ export async function NominalTab({
               {formatVND(t.netProfit, { compact: true })}
             </span>
           }
-          note={`Margin ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · = DT GTC ƯT − giá vốn − vận chuyển − CPQC − vận hành ${formatVND(t.opexTotal, { compact: true })} (đã nhập ${formatVND(t.operatingExpenses, { compact: true })} · ${formatNumber(report.operatingCount)} khoản, đóng hàng ${formatVND(t.packingCost, { compact: true })}, NV vận đơn ${formatVND(t.opsStaffCost, { compact: true })} · cứu ước ${formatNumber(t.rescued)} đơn, cố định ${formatVND(t.fixedCost, { compact: true })} · ${report.periodMonths} tháng) − rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} (${riskPct}% giá vốn hàng bán ${formatVND(t.expectedCogs, { compact: true })}; còn treo trên tồn ${formatVND(t.inventoryRiskPending, { compact: true })}) − thuế ${formatVND(t.tax, { compact: true })} − CP khác ${formatVND(t.otherCost, { compact: true })}${!t.cogsKnown ? ` · ${formatNumber(t.cogsUnknownQty)} sản phẩm CHƯA BIẾT giá vốn (đang tính 0đ)` : ""}`}
+          note={`Margin ${t.netMargin !== null ? `${t.netMargin.toFixed(1)}%` : "—"} · = DT GTC ƯT − giá vốn − vận chuyển − CPQC − vận hành ${formatVND(t.opexTotal, { compact: true })} (đã nhập ${formatVND(t.operatingExpenses, { compact: true })} · ${formatNumber(report.operatingCount)} khoản, đóng hàng ${formatVND(t.packingCost, { compact: true })}, NV vận đơn ${formatVND(t.opsStaffCost, { compact: true })} · cứu ước ${formatNumber(t.rescued)} đơn, cố định ${formatVND(t.fixedCost, { compact: true })} · ${report.periodMonths} tháng) − rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} (${riskPct}% giá vốn hàng bán ${formatVND(t.expectedCogs, { compact: true })}; còn treo trên tồn ${formatVND(t.inventoryRiskPending, { compact: true })}) − thuế ${formatVND(t.tax, { compact: true })} − CP khác ${formatVND(t.otherCost, { compact: true })}${t.expectedCogsEstimated ? ` · giá vốn gồm ${formatVND(t.expectedCogsEstimated, { compact: true })} DỰ TÍNH (${formatNumber(t.estimatedCostProducts)} mã chưa có giá nhập)` : ""}${!t.cogsKnown ? ` · ${formatNumber(t.cogsUncoveredQty)} sản phẩm CHƯA BIẾT giá vốn (đang tính 0đ)` : ""}`}
           icon={Wallet}
           tone={t.netProfit >= 0 ? "green" : "rose"}
         />
@@ -522,6 +585,7 @@ export async function NominalTab({
                         <>
                           <Pct value={r.ads.overPosSales} tone={false} /> DS · <Pct value={r.ads.overProjectedRevenue} tone={false} /> DT ƯT
                           {r.cpo === null ? null : <> · {formatVND(Math.round(r.cpo), { compact: true })}/đơn</>}
+                          <TranHoaVon r={r} otherPct={report.assumptions.otherCostPercentOfAds ?? 0} />
                         </>
                       }
                     >
@@ -540,8 +604,8 @@ export async function NominalTab({
                     >
                       <Money value={r.expectedRevenue} className="font-semibold" />
                     </OKep>
-                    <OKep sub={`${formatNumber(r.expectedQty)} sp`}>
-                      <TienCoTheChuaBiet value={r.expectedCogs} known={r.cogsKnown} reason={`${formatNumber(r.cogsUnknownQty)} sản phẩm chưa biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn đang bị tính 0đ nên không in ra`} className="text-muted-foreground" />
+                    <OKep sub={<>{formatNumber(r.expectedQty)} sp{r.expectedCogsEstimated ? <span title={`${formatVND(r.expectedCogsEstimated)} trong ô này là giá vốn DỰ TÍNH ${formatVND(r.estimatedCost?.unitCost ?? 0)}/sp (${r.estimatedCost?.setBy ?? "—"}) cho ${formatNumber(r.cogsUnknownQty)} sp chưa có phiếu nhập / giá Pancake — sửa ở bảng “Bàn dự tính” bên dưới`}> · gồm {formatVND(r.expectedCogsEstimated, { compact: true })} dự tính</span> : null}</>}>
+                      <TienCoTheChuaBiet value={r.expectedCogs} known={r.cogsKnown} reason={`${formatNumber(r.cogsUncoveredQty)} sản phẩm chưa biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn đang bị tính 0đ nên không in ra. Đặt giá dự tính ở bảng “Bàn dự tính” bên dưới.`} className={r.expectedCogsEstimated ? "italic text-muted-foreground" : "text-muted-foreground"} />
                     </OKep>
                     <OKep><Money value={r.shipCost} className="text-muted-foreground" /></OKep>
                     <OKep sub={chiTietVanHanh(r)}>
@@ -607,8 +671,8 @@ export async function NominalTab({
                   >
                     <Money value={t.expectedRevenue} />
                   </OKep>
-                  <OKep sub={`${formatNumber(t.expectedQty)} sp`}>
-                    <TienCoTheChuaBiet value={t.expectedCogs} known={t.cogsKnown} reason={`${formatNumber(t.cogsUnknownQty)} sản phẩm chưa biết giá vốn — tổng giá vốn đang thiếu phần đó`} />
+                  <OKep sub={<>{formatNumber(t.expectedQty)} sp{t.expectedCogsEstimated ? <> · gồm {formatVND(t.expectedCogsEstimated, { compact: true })} dự tính</> : null}</>}>
+                    <TienCoTheChuaBiet value={t.expectedCogs} known={t.cogsKnown} reason={`${formatNumber(t.cogsUncoveredQty)} sản phẩm chưa biết giá vốn — tổng giá vốn đang thiếu phần đó`} />
                   </OKep>
                   <OKep><Money value={t.shipCost} /></OKep>
                   <OKep sub={chiTietVanHanh({ operatingAlloc: t.operatingExpenses, packingCost: t.packingCost, opsStaffCost: t.opsStaffCost, fixedAlloc: t.fixedCost, rescued: t.rescued })}>
@@ -654,11 +718,15 @@ export async function NominalTab({
         </div>
       </SectionCard>
 
+      <AdsCeilingTable report={report} canWrite={canWrite} targetMargin={targetMargin} />
+
+      <NewProductRates rows={report.rows} assumptions={report.assumptions} canWrite={canWrite} />
+
       {selected ? (
         <div id="ma-hang">
           <SectionCard
             title={`${selected.productName}${selected.code ? ` (${selected.code})` : ""} · theo ngày`}
-            description={`Tỷ lệ giao thành công ước tính ${selected.deliveryRate === null ? "— (chưa đo được)" : `${selected.deliveryRate.toFixed(1)}%`} (${moTaUocTinh(selected)}) · bảng theo ngày tính theo tỷ lệ ${(100 - dailyRate).toFixed(1)}%${selected.returnRate === null ? " (tỷ lệ lịch sử của mã, vì mô hình chưa đo được)" : ""} · giá vốn ${selected.expectedQty && selected.cogsKnown ? formatVND(Math.round(selected.expectedCogs / selected.expectedQty)) : "—"}/sp`}
+            description={`Tỷ lệ giao thành công ước tính ${selected.deliveryRate === null ? "— (chưa đo được)" : `${selected.deliveryRate.toFixed(1)}%`} (${moTaUocTinh(selected)}) · bảng theo ngày tính theo tỷ lệ ${(100 - dailyRate).toFixed(1)}%${selected.returnRate === null ? " (tỷ lệ lịch sử của mã, vì mô hình chưa đo được)" : ""} · giá vốn ${selected.expectedQty && selected.cogsKnown ? formatVND(Math.round(selected.expectedCogs / selected.expectedQty)) : "—"}/sp${selected.estimatedCost ? ` (gồm giá DỰ TÍNH ${formatVND(selected.estimatedCost.unitCost)}/sp cho sản phẩm chưa có phiếu nhập)` : ""}`}
             actions={
               <div className="flex items-center gap-3">
                 <ReturnRateOverride
@@ -667,6 +735,7 @@ export async function NominalTab({
                   current={selected.deliveryRate ?? Math.round((100 - selected.baseReturnRate) * 10) / 10}
                   source={selected.returnRateSource}
                   canWrite={canWrite}
+                  mature={selected.rateMature}
                 />
                 <Button asChild variant="ghost" size="sm">
                   <Link href={`/reports?${tabQuery}`}>Đóng</Link>
@@ -825,7 +894,7 @@ export async function NominalTab({
                       <TienCoTheChuaBiet value={t.purchaseCost} known={t.purchaseCostKnown} reason="Có phiếu nhập không ghi đơn giá — tổng giá trị hàng nhập chưa biết đủ" className="text-rose-600" />
                     </OKep>
                     <OKep sub={`${formatNumber(t.expectedQty)} sp`}>
-                      <TienCoTheChuaBiet value={t.expectedCogs} known={t.cogsKnown} reason={`${formatNumber(t.cogsUnknownQty)} sản phẩm bán ra chưa biết giá vốn — tổng giá vốn đang thiếu hẳn phần đó, nên KHÔNG in ra một con số trông như đã đủ`} />
+                      <TienCoTheChuaBiet value={t.expectedCogs} known={t.cogsKnown} reason={`${formatNumber(t.cogsUncoveredQty)} sản phẩm bán ra chưa biết giá vốn — tổng giá vốn đang thiếu hẳn phần đó, nên KHÔNG in ra một con số trông như đã đủ`} />
                     </OKep>
                     <OKep sub={<>{formatNumber(conLai.qty)} sp · {nhanSoKho(t)}</>} subTitle={giaiThichConLai(t, conLai)}>
                       <TienCoTheChuaBiet value={conLai.cost} known={conLai.costKnown} reason="Một trong hai vế chưa biết ⇒ hiệu số chưa tính được" />

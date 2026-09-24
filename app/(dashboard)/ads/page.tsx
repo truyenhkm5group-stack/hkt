@@ -10,7 +10,7 @@ import { can,  } from "@/lib/auth/session";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { ADS_DIMENSION_LABEL, type AdsDimension } from "@/lib/constants/ads-decision";
-import { resolvePeriod, type SearchParams } from "@/lib/search-params";
+import { hrefWith, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Quảng cáo" };
 
@@ -62,7 +62,7 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
       <AdsTabs />
 
       {/* QUYẾT ĐỊNH — thứ người dùng mở trang để xem. Rẻ, nên chờ được. */}
-      <AdsDecisionSection period={period} dimension={dimension} />
+      <AdsDecisionSection period={period} dimension={dimension} showAll={raw.dong === "tatca"} showAllHref={hrefWith(raw, "dong", "tatca")} />
 
       {/* TRA CỨU — điền vào sau, không chặn phần trên. */}
       <Suspense fallback={<Skeleton className="h-64 rounded-xl" />}>

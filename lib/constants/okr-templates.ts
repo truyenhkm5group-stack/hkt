@@ -90,6 +90,22 @@ export const OKR_TEMPLATES: OkrTemplate[] = [
     ],
   },
 
+  /* ───── Sản xuất ─────
+     Phòng tách 23/09/2026. Mẫu này CỐ Ý chỉ có hai KR đo được bằng sổ đăng ký chỉ số: thứ đáng đo
+     nhất của phòng — xưởng giao đúng hẹn — chưa đọc được (`production_orders` không có mốc nhận
+     thật), và một KR nối vào một truy vấn gần đúng còn tệ hơn không có KR nào. Đích do người bấm
+     nhập; `suggestedTarget: null` ở KR không có mức nào hiển nhiên đúng. */
+  {
+    key: "production-capital",
+    department: "PRODUCTION",
+    title: "Đặt đúng mẫu: không hết hàng khi đang bán, không chôn vốn ở mẫu không bán",
+    description: "Hai vế của cùng một quyết định. Chỉ nhìn một vế thì hoặc mất đơn, hoặc kho đầy hàng không ai mua.",
+    krs: [
+      { title: "Tỷ lệ hoàn", metricSource: "return_rate", suggestedTarget: null, why: "Hoàn vì sai size / sai chất là tín hiệu của khâu sản xuất; đích do chủ shop đặt vì phần hoàn do bưu tá không thuộc phòng này." },
+      { title: "Việc kế hoạch quá hạn", metricSource: "work_overdue", suggestedTarget: 0, why: "Một lệnh đặt hàng trễ một tuần là một tháng thiếu hàng — và hôm nay phòng này chưa có nguồn việc tự động nào, nên đây là việc giao tay." },
+    ],
+  },
+
   /* ───── Kế toán ───── */
   {
     key: "finance-clean",

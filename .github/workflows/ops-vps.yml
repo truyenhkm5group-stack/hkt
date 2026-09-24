@@ -66,6 +66,7 @@ on:
           - vtp-import-preview  # CHẠY THỬ đọc một tệp Viettel Post đã lưu trên dữ liệu thật — chỉ đọc, không ghi vận đơn (arg: phần tên tệp)
           - vtp-web-probe       # đọc bundle JS của viettelpost.vn để tìm endpoint API trang Quản lý vận đơn
           - care-false-reopen   # dọn ca care bị dựng lại vô cớ sau khi người đã xử lý xong (MẶC ĐỊNH CHẠY THỬ; arg "--apply")
+          - care-outcome-before-open # sửa ca đã chốt kết quả mà ĐVVC kết thúc TRƯỚC lúc mở ca (MẶC ĐỊNH CHẠY THỬ; arg "--apply")
           - returns-hmt         # đối soát sổ hàng hoàn viết tay (HMT) với ERP — đọc bản TẢI LÊN QUA ERP (MẶC ĐỊNH CHẠY THỬ; arg "--apply" mới ghi)
           - cs-cleanup          # xoá case CSKH tạo nhầm từ ghi chú bot Pancake rồi quét lại
           - cs-rule-update      # đóng MỀM case sinh bởi luật cũ rồi quét lại (mặc định chỉ đếm; arg "--apply" mới ghi)
@@ -264,7 +265,7 @@ jobs:
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
             DOC_NHE="status perf disk logs db-query"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability ads-level-probe"
-            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
+            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
 
             LOP=GHI
             case "$ARG" in
@@ -420,6 +421,12 @@ jobs:
                 # SYSTEM_CORRECTION. KHÔNG xoá dòng nào, KHÔNG đụng đợt đã có người làm việc.
                 fetch_script care-false-reopen-repair.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/care-false-reopen-repair.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/care-false-reopen-repair.ts $ARG ;;
+              care-outcome-before-open)
+                # MẶC ĐỊNH CHẠY THỬ: liệt kê ca đã chốt mà kết cục ĐVVC có TRƯỚC lúc mở ca (gán công
+                # ngược thời gian). "--apply" đưa chúng về NOT_CARE_CONDITION, kèm mốc
+                # SYSTEM_CORRECTION ghi lại giá trị cũ. KHÔNG xoá dòng nào.
+                fetch_script care-outcome-before-open-repair.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/care-outcome-before-open-repair.ts'
+                docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/care-outcome-before-open-repair.ts $ARG ;;
               reason-backfill)
                 # MẶC ĐỊNH CHẠY THỬ: in ra đúng những gì sẽ ghi, theo từng nguồn. "--apply" mới ghi,
                 # và ghi được chạy lại nhiều lần vì khoá chống trùng là NỘI DUNG chứ không phải số

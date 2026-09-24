@@ -72,6 +72,53 @@ Các `SubPlan` đều là Index Scan ở mức **0,003 ms**, nên chúng cũng k
 
 ---
 
+## ⚠ BỔ SUNG 23/09/2026 — các thời gian EXPLAIN ở trên đo ĐƯỜNG CỦA CÔNG CỤ, không phải đường của người dùng
+
+**Thiếu sót của tệp này, không phải của người đọc.** Khi viết tệp ngày 22/09 tôi đã biết điều dưới
+đây mà không ghi vào. Việc TECH-10 (lượt chạy #48) dựng **ưu tiên số 1** — "thêm index
+`orders.stage`, cải thiện 75 %" — lên con số `7.948 ms` ở trên, và cái bẫy nằm sẵn trong chính tệp
+chứng từ nó được chỉ tới.
+
+**Điều kiểm được:**
+
+- `scripts/perf-probe.ts` chạy `pool.query("explain (analyze, buffers, timing) …")` **thẳng trên
+  bể kết nối**, ngoài mọi giao dịch.
+- Ứng dụng thì chạy các báo cáo này bên trong `chayKhongJit()` (`db/index.ts`), mở giao dịch với
+  `set local jit = off`. `lib/queries/return-rate.ts` gọi nó ở **6** chỗ.
+
+Tức là **thời gian EXPLAIN ở tệp này đo trong một điều kiện KHÁC với đường mà người dùng đi**: JIT
+bật ở phía công cụ đo, tắt ở phía ứng dụng.
+
+**Điều KHÔNG kiểm được — và phải nói ra:**
+
+Tệp toàn văn `TECH-5-perf-probe-raw-2026-09-22.txt` chỉ có **47 dòng, đã bị CẮT**. Nó không có khối
+`JIT:` nào. Nên **từ các tệp này không xác định được JIT góp bao nhiêu** vào `7.948 ms` — có thể phần
+lớn, có thể không đáng kể. Đó là **CHƯA ĐO ĐƯỢC**, không phải "không có JIT".
+
+> **ĐÃ ĐO — 23/09/2026, sau khi viết mục trên.** Xem `docs/perf/JIT-bat-tat-2026-09-23.md`: với
+> đúng hình dạng câu này (`count(*) filter (where … canonical_order_outcome …)`), đo xen kẽ JIT
+> bật / JIT tắt, trung vị 3 lượt mỗi bên — JIT bật **8.425 ms**, JIT tắt **43 ms**, tức **99 %**
+> thời gian là Postgres biên dịch câu lệnh. Câu hỏi "JIT góp bao nhiêu" thôi là CHƯA ĐO ĐƯỢC cho
+> hình dạng này. Lượt đo ấy cũng tìm ra một chỗ đường ứng dụng THẬT chạy nó mà không tắt JIT
+> (`lib/queries/metric-resolver.ts`) — đã sửa.
+
+**Hệ quả cho người dùng tệp này:**
+
+1. Đừng dựng ưu tiên tối ưu trên riêng các thời gian EXPLAIN ở đây. Chúng chỉ ra **hình dạng** kế
+   hoạch (Seq Scan, số `loops`, SubPlan nào chạy bao nhiêu lần) — vẫn đúng. Chúng **không** chỉ ra
+   người dùng chờ bao lâu.
+2. Người dùng chờ bao lâu thì đo bằng `ops smoke`, chạy **đúng đường ứng dụng** — xem
+   `docs/perf/TECH-6-smoke-tho-2026-09-23.txt`.
+3. Chính tệp này đã ghi ở trên: bảng `orders` **ít dòng hơn** mà chậm hơn `shipments` hàng nghìn
+   lần, nên *"chênh lệch ấy không giải thích được bằng việc đọc dòng"*. Một index giảm số dòng phải
+   đọc — tức nhắm đúng vào thứ mà dòng ấy nói **không phải** nguyên nhân.
+
+Muốn trả lời câu JIT cho dứt điểm: chạy lại EXPLAIN **trong** `chayKhongJit`, giữ **nguyên văn đầy
+đủ** kế hoạch (không cắt), và lấy trung vị 3–5 lượt — một mẫu trên máy 2 nhân đang phục vụ người
+thật không nói được gì.
+
+---
+
 ## Những gì tệp này KHÔNG kết luận
 
 - **Không** khẳng định nguyên nhân. Ba con số trên nói rằng chi phí nằm ở phép quét `orders`, nhưng

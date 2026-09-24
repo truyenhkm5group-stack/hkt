@@ -1,5 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { khoiSoChungTu } from "@/lib/constants/agent-evidence";
+import { tomTatBuoc, type VetBuoc } from "@/lib/constants/agent-steps";
 import { DOCUMENTATION_COMMANDS, DOCUMENTATION_READ_GLOBS } from "@/lib/constants/agent-sandbox";
 import { goiPhanHoi, checkRerun } from "@/lib/constants/agent-rerun";
 import { GATE_REPAIR, congChiPhi, dungPhanHoiCong, type KetQuaCong } from "@/lib/constants/agent-gate-repair";
@@ -39,6 +41,8 @@ const HEARTBEAT_EVERY_MS = 60_000;
 
 export type RunnerResult = {
   status: "SUCCEEDED" | "FAILED" | "BLOCKED";
+  /** Hình dạng lượt chạy: đọc/ghi/lệnh/bị chặn, và byte đã ghi theo tệp. Xem `lib/constants/agent-steps.ts`. */
+  vetBuoc: VetBuoc;
   runId: string | null;
   branch: string | null;
   baseCommit: string | null;
@@ -89,6 +93,8 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
   const db = await getDb();
   const rong: RunnerResult = {
     status: "BLOCKED",
+    /* Chưa chạy vòng nào ⇒ vết RỖNG, không phải thiếu trường. */
+    vetBuoc: tomTatBuoc([]),
     runId: null,
     branch: null,
     baseCommit: opts.baseCommit,
@@ -222,11 +228,19 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
     /* Cây làm việc đã dựng; giữ một tham chiếu KHÔNG null để lượt sửa dùng lại đúng cây ấy. */
     const cay = ws;
     /** Dựng đề bài MỘT chỗ — lượt sửa phải nhận y hệt lượt đầu, chỉ khác phần phản hồi. */
+    /*
+      SỔ CHỨNG TỪ ĐI VÀO ĐỀ BÀI, KHÔNG ĐỂ AGENT TỰ TÌM.
+
+      Bộ công cụ CỐ Ý không có `list_directory`, nên agent không tự liệt kê được thư mục — nó chỉ
+      thấy đề bài. Ba lượt chạy liên tiếp (TECH-5 · TECH-7 · TECH-6) trích tệp số đo ĐÚNG 0 LẦN
+      trong khi tệp nằm sẵn trong cây chúng đọc. Xem `lib/constants/agent-evidence.ts`.
+    */
+    const soChungTu = await cay.tepSoChungTu();
     const deBai = (phanHoi: string) => ({
       taskCode: task.code,
       role: agent.role,
       taskTitle: task.title,
-      taskDescription: task.description,
+      taskDescription: task.description + khoiSoChungTu(soChungTu),
       writeGlobs: phamViGhi,
       readGlobs: DOCUMENTATION_READ_GLOBS,
       feedback: phanHoi,
@@ -262,7 +276,7 @@ export async function runAgentOnTask(opts: RunnerOptions): Promise<RunnerResult>
       const { lyDo, canGi } = outcome.khongLamDuoc;
       const ly = `Agent báo KHÔNG LÀM ĐƯỢC ở môi trường này: ${lyDo} — cần: ${canGi}`;
       await finishTechAgentRun(
-        { runId, status: "BLOCKED", summary: ly, error: "", filesChanged: await ws.changedFiles(), chiPhi: outcome.chiPhi },
+        { runId, status: "BLOCKED", summary: ly, error: "", filesChanged: await ws.changedFiles(), chiPhi: outcome.chiPhi, vetBuoc: tomTatBuoc(outcome.steps) },
         opts.actor,
       );
       return { ...rong, status: "BLOCKED", runId, branch, reason: ly };
@@ -361,14 +375,14 @@ ${r.stderr}` });
         filesChanged,
         error: outcome.error ?? (congDo ? "Có cổng kiểm thử ĐỎ." : ""),
         /* Tiền của lượt chạy đi theo dòng sổ — xem docblock ở `finishTechAgentRun`. */
-        chiPhi: outcome.chiPhi,
+        chiPhi: outcome.chiPhi, vetBuoc: tomTatBuoc(outcome.steps),
         /* Câu lỗi của cổng đỏ — để đọc được NGAY TRONG ERP, không phải mở log Actions. */
         loiCong: hong.map((h) => ({ ten: h.ten, exitCode: h.exitCode, dauRa: catDauRa(h.dauRa) })),
       },
       opts.actor,
     );
 
-    return { status, runId, branch, baseCommit: opts.baseCommit, resultCommit, filesChanged, gates, summary, reason: outcome.error, chiPhi: outcome.chiPhi };
+    return { status, runId, branch, baseCommit: opts.baseCommit, resultCommit, filesChanged, gates, summary, reason: outcome.error, chiPhi: outcome.chiPhi, vetBuoc: tomTatBuoc(outcome.steps) };
   } catch (e) {
     const loi = e instanceof Error ? e.message : String(e);
     await finishTechAgentRun({ runId, status: "FAILED", summary: "Lượt chạy hỏng giữa chừng.", error: loi }, opts.actor).catch(() => undefined);

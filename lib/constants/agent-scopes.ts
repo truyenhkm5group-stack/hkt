@@ -142,6 +142,13 @@ export const NEVER_WRITE: readonly string[] = [
   "tests/cost-allocation.test.ts",
   "tests/product-notes.test.ts",
   "tests/care-reopen.test.ts",
+  /*
+    Bài kiểm của BẢN ĐỒ MÀN HÌNH (mục 69). Nó khoá hai thứ mà một lượt chạy agent rất dễ "dọn":
+    danh sách module chỉ sống ở một sổ khai, và mọi nấc AI khai "đang chạy" phải trỏ tới tệp có
+    thật. Một agent sửa được bài kiểm này thì nó tự cấp cho mình quyền khai khống năng lực của
+    chính mình.
+  */
+  "tests/department-map.test.ts",
   "tests/test-hygiene.test.ts",
   "tests/agent-scopes.test.ts",
 ];

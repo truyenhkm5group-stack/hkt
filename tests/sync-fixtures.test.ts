@@ -75,7 +75,7 @@ import { testCauNoiVanGiuHangRao, testChuPrKhongLoNoiDungViec, testDieuKienMoPr,
 import { testMaViecLaMaProduction, testVaiAgentTheoViec, testNhacFinishDungMotLan, testPhamViDocTuSoVai } from "./agent-run-that.test";
 import { testBanKhaiGanLai, testGanLaiSourceGuards } from "./agent-run-reattach.test";
 import { testScriptDayChuyenPhaiThoat } from "./script-phai-thoat.test";
-import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo } from "./agent-chi-phi.test";
+import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo, testTranChoTachKhoiBac, testPhepDoJit, testChuoiSach, testMetricResolverTatJit } from "./agent-chi-phi.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { testPhanhTienAi, testPhanhTienAiGuards } from "./ai-budget.test";
 import { testTienLuotChay, testTienLuotChayGuards } from "./agent-run-cost.test";
@@ -86,7 +86,7 @@ import { chayBaiKiemAgentTuDangKy } from "./agent-tu-dang-ky.test";
 import { testKheDangKyAgent, testKhongCoBaiKiemMoCoi, testPromptTheoVai } from "./dang-ky-bai-kiem.test";
 import { testSuaCongTrongLuot } from "./sua-cong-trong-luot.test";
 import { testLoiGoiHongVanGiuTien, testNganSachDocTep } from "./agent-read-budget.test";
-import { cleanupViecDiTiepFixtures, testDispatchKemMaViec, testIngestGhiNhanhViec, testNhanhVeToiViecPure, testViecDiTiepGuards } from "./viec-di-tiep.test";
+import { cleanupViecDiTiepFixtures, testDispatchKemMaViec, testGiaoLaiSuaTuErp, testIngestGhiNhanhViec, testNhanhVeToiViecPure, testViecDiTiepGuards } from "./viec-di-tiep.test";
 import { cleanupShipmentPickFixtures, testChonVanDonPure, testGuiLaiKhongDamKhoa, testHaiLuatKhongTroiXaNhau, testKhongCoOneTrenKhoaNgoaiKhongDuyNhat } from "./shipment-pick.test";
 import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, testTaskAdvancePure } from "./task-advance.test";
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
@@ -128,6 +128,7 @@ import { testAdsAttributionLink } from "./ads-attribution-link.test";
 import { testAdsIdentity } from "./ads-identity.test";
 import { testProductVerdict } from "./product-verdict.test";
 import { testInventoryForecast } from "./inventory-forecast.test";
+import { testPlanExplain } from "./plan-explain.test";
 import { testInventoryDecision } from "./inventory-decision.test";
 import { testReturnInspection } from "./return-inspection.test";
 import { testReturnUnidentified } from "./return-unidentified.test";
@@ -205,9 +206,10 @@ import { testAccessControl } from "./access-control.test";
 import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
+import { testMarketerDailyNominal } from "./marketer-daily-nominal.test";
 import { testAdsDecision } from "./ads-decision.test";
 import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
-import { testAdsWrite } from "./ads-write.test";
+import { testAdsBrakeByDecision, testAdsWrite } from "./ads-write.test";
 import { testAdsLevelProbe } from "./ads-level-probe.test";
 import { testAdsGrain } from "./ads-grain.test";
 import { testAuditTrail } from "./audit-trail.test";
@@ -231,6 +233,7 @@ import { testCareDateFilters } from "./care-date-filters.test";
 import { testProductNotes } from "./product-notes.test";
 import { testSmokeTiming } from "./smoke-timing.test";
 import { testNavigationCoverage, testUiConsistency } from "./ui-consistency.test";
+import { testDepartmentMap } from "./department-map.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
@@ -241,12 +244,16 @@ import { testCareStates } from "./care-states.test";
 import { testCareOs } from "./care-os.test";
 import { testCareEffect } from "./care-effect.test";
 import { testCareReopen } from "./care-reopen.test";
+import { testCarePendingDrilldown } from "./care-pending-drilldown.test";
+import { testCareSettleClosed } from "./care-settle-closed.test";
+import { testCareFalseReopenExclusion } from "./care-false-reopen-exclusion.test";
 import { testCareReturnApproval } from "./care-return-approval.test";
 import { testCareResolution } from "./care-resolution.test";
 import { testShipmentsQaFixes } from "./shipments-qa-fixes.test";
 import { testSessionRenewal } from "./session-renewal.test";
 import { testSessionRevocation } from "./session-revocation.test";
 import { testReportingParity } from "./reporting-parity.test";
+import { testEstimatedCost } from "./estimated-cost.test";
 import { testLoginThrottle } from "./login-throttle.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
 import { testAgentGithubIdentityModule } from "./agent-identity.test";
@@ -1646,9 +1653,11 @@ async function main() {
   await testPreshipRisk(db);
   await testAdsRoas(db);
   await testMarketingDaily();
+  await testMarketerDailyNominal();
   await testAdsDecision(db);
   await testMarketingDecisionLedger();
   testAdsWrite();
+  await testAdsBrakeByDecision(db);
   testAdsLevelProbe();
   testAdsGrain();
   await testAdsAttribution(db);
@@ -1690,6 +1699,7 @@ async function main() {
   testSmokeTiming();
   testUiConsistency();
   testNavigationCoverage();
+  testDepartmentMap();
   testLoadingUxContract();
   testDrilldownContract();
   testAlertConfig();
@@ -1758,6 +1768,7 @@ async function main() {
   await testEntityTimeline(db);
   await testInventory(db);
   await testInventoryForecast(db);
+  testPlanExplain();
   await testSlowMoving(db);
   await testInventoryDecision(db);
   await testCodReconciliation();
@@ -1848,6 +1859,9 @@ async function main() {
   await testCareOs(db);
   testCareEffect();
   await testCareReopen(db);
+  await testCarePendingDrilldown(db);
+  await testCareSettleClosed(db);
+  await testCareFalseReopenExclusion(db);
   // Cùng nhóm: bài "đã duyệt hoàn" dựng kiện + đợt riêng mang tiền tố `cra-` và TỰ DỌN sạch.
   await testCareReturnApproval(db);
   // Ngay sau đó: bài kết quả xử lý dựng kiện + đợt riêng mang tiền tố `cres-` và TỰ DỌN sạch, nên
@@ -1861,6 +1875,8 @@ async function main() {
   // Ngay sau đó: bài này gieo lịch sử vận đơn riêng để học xác suất, rồi TỰ DỌN sạch — đặt giữa
   // chừng thì những dòng đó lọt vào mẫu của báo cáo khác.
   await testReportingParity(db);
+  // Ngay sau đó: gieo ba mã riêng tiền tố `gvdt-` và một dòng settings giá dự tính, rồi TỰ DỌN sạch cả hai.
+  await testEstimatedCost(db);
   await testLoginThrottle();
   await testProjectedDeliveryV3(db);
   // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
@@ -1956,6 +1972,7 @@ async function main() {
   await cleanupTaskAdvanceFixtures();
   /* NỬA SAU DÂY CHUYỀN — dispatch mang mã việc, nhánh về tới dòng việc. Tự dọn bằng tiền tố `VDT-`/`vdt-`. */
   await testDispatchKemMaViec();
+  await testGiaoLaiSuaTuErp();
   await testIngestGhiNhanhViec();
   await cleanupViecDiTiepFixtures();
   /*
@@ -2055,6 +2072,10 @@ async function main() {
   testPhanhTienAiGuards();
   testNhanModelNoiThat();
   testBacModelTheoVai();
+  testTranChoTachKhoiBac();
+  testPhepDoJit();
+  testChuoiSach();
+  testMetricResolverTatJit();
   testTraGiaTheoTienTo();
   testDemHoiThoai();
   testKhongNangBacAmTham();

@@ -1,13 +1,9 @@
-import { Suspense } from "react";
-import { CircleAlert, CircleCheck, Sparkles, Target, TriangleAlert } from "lucide-react";
-import { Skeleton } from "@/components/ui/skeleton";
+import { CircleAlert, CircleCheck, Target, TriangleAlert } from "lucide-react";
 import { SectionCard } from "@/components/ui-bits";
 import { MARKETING_DIAGNOSIS } from "@/lib/constants/marketing-diagnosis";
-import { MARKETING_BASIS_LABEL } from "@/lib/constants/marketing-daily";
 import { CELL_STATUS_LABEL } from "@/lib/metrics/scorecard";
 import { TARGET_SCOPE_LABEL } from "@/lib/constants/metric-registry";
-import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot, type MarketingFinding } from "@/lib/marketing/diagnose";
-import { explainMarketing } from "@/lib/marketing/ai-explain";
+import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
 import { evaluateMarketingTargets } from "@/lib/queries/marketing-targets";
 import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { MISSING_TEXT } from "@/lib/format";
@@ -58,11 +54,8 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
   );
 
   /*
-    ĐÍCH VÀ AI ĐỌC SONG SONG, VÀ CẢ HAI ĐỀU ĐƯỢC PHÉP KHÔNG CÓ GÌ.
-
-    Chưa ai đặt đích ⇒ khối đích không hiện (không có ngưỡng mặc định — AGENTS.md mục 38).
-    Chưa cấu hình AI ⇒ khối diễn giải không hiện, và lý do vẫn in ra để không ai tưởng nó im lặng
-    vì "mọi thứ đều ổn".
+    ĐÍCH ĐƯỢC PHÉP KHÔNG CÓ GÌ: chưa ai đặt đích ⇒ khối đích không hiện (không có ngưỡng mặc
+    định — AGENTS.md mục 38).
   */
   const targets = await evaluateMarketingTargets(data.totals, data.period, data.previousTotals, data.filters);
 
@@ -159,56 +152,16 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
       )}
 
       {/*
-        DIỄN GIẢI BẰNG AI NẰM SAU RANH GIỚI `Suspense` RIÊNG — và đó là một bản vá cho lỗi của chính
-        khối này.
+        KHÔNG CÒN ĐOẠN "DIỄN GIẢI" BẰNG AI Ở ĐÂY (chủ shop chốt 24/09/2026, rà mọi trang ERP).
 
-        ĐO TRÊN PRODUCTION 19/09/2026: `/ads/daily` mất 4,7 giây ở lượt đo đầu rồi 20,3 giây ở lượt
-        sau, KHÔNG có thay đổi nào ở tầng truy vấn giữa hai lượt. Nguyên nhân: lượt đầu máy phân
-        tích không tìm thấy bất thường nào nên `explainMarketing` trả về ngay; lượt sau có phát
-        hiện, và lời gọi mô hình (bậc `analysis`) chạy NGAY TRONG lượt dựng trang.
-
-        Một trang chủ shop mở hằng ngày không được phép chờ một nhà cung cấp bên ngoài. Bảng số,
-        chẩn đoán và đích là dữ liệu của chính ERP — chúng phải hiện ngay; đoạn văn diễn giải điền
-        vào sau. Nếu mô hình chậm hay chết thì phần còn lại của trang không hề biết.
-
-        ĐO LẠI SAU KHI SỬA, cùng phép đo, máy đang rảnh (76/76 màn hình đạt, 0 lỗi):
-
-            /ads/daily  20,3s → 9,5s        (/ads cùng lượt: 21,4s)
-
-        Phần còn lại (~9,5s) là giá thật của việc quét 30 ngày `orders ⋈ shipments` kèm
-        ORDER_OUTCOME hai lượt — bảng theo ngày và bảng bóc tách — cùng họ với `/ads` và các trang
-        `/reports/*`. Đó là việc của một lượt tối ưu truy vấn riêng, không phải của khối này.
+        Nó chỉ VIẾT LẠI THÀNH VĂN đúng những gì khối này vừa in: lời nhắc hệ thống cấm mô hình tự
+        tính số và bắt nó dùng lại nguyên văn `why` / `owner` của từng phát hiện — mà bằng chứng,
+        nguyên nhân, việc phải làm và phòng xử lý đều đã có ngay phía trên, từ hàm thuần
+        `diagnose()`. Đổi lại nó gọi mô hình bậc `analysis` (đắt nhất) ngoài trần chi tiêu AI hằng
+        ngày và ngoài nhật ký `ai_interactions`, bị gọi lại mỗi lần tổng số đổi hay đồng bộ chạy, giữ
+        trang 10–15 giây, và mô tả sai phạm vi ("Toàn shop") khi đang lọc theo một chiều.
+        Ai cần hỏi thêm về số liệu thì trợ lý AI (Copilot) ở góc trên vẫn mở được từ trang này.
       */}
-      <Suspense fallback={<Skeleton className="mt-4 h-16 rounded-lg" />}>
-        <AiExplanation data={data} baseline={baseline} findings={findings} />
-      </Suspense>
     </SectionCard>
   );
-}
-
-async function AiExplanation({ data, baseline, findings }: { data: MarketingDaily; baseline: DiagnoseSnapshot | null; findings: MarketingFinding[] }) {
-  if (!findings.length) return null;
-  const ai = await explainMarketing({
-    scopeLabel: "Toàn shop",
-    periodLabel: data.period.label,
-    basisLabel: MARKETING_BASIS_LABEL[data.basis],
-    totals: data.totals,
-    baseline,
-    findings,
-    warnings: data.warnings,
-  });
-  if (ai.explanation) {
-    return (
-      <div className="mt-4 rounded-lg border border-dashed p-3">
-        <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium">
-          <Sparkles className="size-3.5" /> Diễn giải
-          {/* Nói rõ AI chỉ DIỄN GIẢI: mọi con số phía trên do máy chủ tính, không phải do mô hình. */}
-          <span className="font-normal text-muted-foreground">— viết bởi AI từ chính các con số trên, không tự tính thêm số nào</span>
-        </p>
-        <p className="whitespace-pre-line text-xs">{ai.explanation.text}</p>
-      </div>
-    );
-  }
-  // Nói ra lý do thay vì im lặng: im lặng sẽ bị đọc thành "không có gì để nói".
-  return <p className="mt-4 text-xs text-muted-foreground">Phần diễn giải bằng AI không chạy: {ai.skipped}.</p>;
 }

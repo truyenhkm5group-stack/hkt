@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { DEPARTMENT_CODES, DEPARTMENT_ORDER } from "@/lib/constants/departments";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -59,6 +60,10 @@ const MOI = [
   "0110_ad_spends_ad_grain",
   "0111_ads_decision_basis",
   "0112_agent_run_blocked",
+  "0113_production_department",
+  "0114_department_sort_order",
+  "0115_production_received_at",
+  "0116_agent_run_review_verdict",
 ] as const;
 
 /*
@@ -195,6 +200,23 @@ export async function testMigrationUpgradePath() {
     await client.query(`insert into users (id, email, name, password_hash, role) values ('up-u1', 'a@shop.vn', 'An', 'x', 'CS')`);
     await client.query(`insert into orders (id, stage, status, inserted_at, bill_full_name) values ('up-o1', 'CONFIRMED', 2, now(), 'Khách Cũ')`);
     await client.query(`insert into cs_cases (id, order_id, kind, status, title) values ('up-c1', 'up-o1', 'OTHER', 'OPEN', 'Case có từ trước')`);
+
+    /*
+      ═══ THỨ TỰ PHÒNG BAN CỦA PRODUCTION KHÔNG GIỐNG THỨ TỰ 0069 GIEO ═══
+
+      ĐO THẬT 23/09/2026 (ops db-query, lượt chạy 35829607289): cả bảy phòng trên production mang
+      `sort_order = 100` — **giá trị MẶC ĐỊNH CỦA CỘT**, không phải 10·20·30… mà 0069 gieo. Tức là
+      bảy dòng ấy không do 0069 tạo ra: chúng có trước (0069 dùng `ON CONFLICT DO NOTHING`) hoặc
+      được tạo qua màn hình cấu hình, nơi đường ghi không truyền `sort_order`.
+ 
+      Hậu quả đã xảy ra thật: các lệnh UPDATE có hàng rào của 0113 không khớp dòng nào, nên phòng
+      Sản xuất (`sort_order = 50` từ lệnh INSERT) nhảy lên ĐẦU mọi danh sách đọc thứ tự từ CSDL —
+      một phòng chưa có ai đứng trên bảy phòng đang chạy việc.
+
+      Nên bước 1 phải dựng ĐÚNG tình trạng ấy, không phải tình trạng lý tưởng của một CSDL mới. Bài
+      kiểm dựng trên dữ liệu đẹp hơn thực tế thì nó đo một thế giới không tồn tại.
+    */
+    await client.query(`update departments set sort_order = 100`);
 
     // ══ BƯỚC 2: áp migration mới lên ĐÚNG trạng thái đó ══
     writeFileSync(soFile, JSON.stringify(so, null, 2) + "\n");
@@ -930,13 +952,42 @@ export async function testMigrationUpgradePath() {
     // Kiện đã có đợt đóng nay mở được đợt mới — điều mà cờ sai đã chặn ở chỉ mục duy nhất từng phần.
     await client.query(`insert into shipment_care (id, shipment_id, care_status, care_outcome, episode_no) values ('up-care-3', 'up-s9', 'NEW', 'PENDING', 2)`);
 
-    // Bảy phòng ban mặc định phải có mặt, nếu không hàng đợi mở lên lần đầu sẽ rỗng.
+    /*
+      TÁM phòng ban mặc định phải có mặt, nếu không hàng đợi mở lên lần đầu sẽ rỗng.
+
+      0110 thêm phòng Sản xuất và đổi `sort_order` để hai phòng đầu phễu đứng cạnh nhau. Bài kiểm so
+      với `DEPARTMENT_ORDER` chứ không gõ lại danh sách: gõ lại là mở đường cho CSDL và mã nguồn nói
+      hai thứ tự khác nhau, và không màn hình nào báo.
+    */
     const phong = await client.query<{ code: string }>("select code from departments order by sort_order");
     assert.deepEqual(
       phong.rows.map((r) => r.code),
-      ["SALES", "LOGISTICS", "WAREHOUSE", "MARKETING", "FINANCE", "MANAGEMENT", "HR"],
-      "bảy phòng ban mặc định phải được gieo, đúng thứ tự hiển thị",
+      DEPARTMENT_ORDER,
+      "tám phòng ban phải có mặt và đúng thứ tự của mã nguồn — bước 1 vừa đặt cả bảng về 100 (đúng production), nên khẳng định này CHỈ xanh khi hàng rào của 0114 nhận ra 'chưa ai đặt thứ tự' và sắp lại",
     );
+
+    /*
+      ═══ VÀ VẾ NGƯỢC LẠI: SHOP ĐÃ TỰ SẮP THÌ MIGRATION KHÔNG ĐƯỢC ĐỤNG VÀO ═══
+
+      Một hàng rào chỉ được kiểm ở vế "có chạy" là một hàng rào chưa ai biết nó CHẶN được gì. Ở đây
+      chạy lại CHÍNH TỆP SQL của 0114 (đọc từ đĩa, không chép luật sang TypeScript) trên một bảng đã
+      có thứ tự do người đặt — nó phải là no-op tuyệt đối.
+
+      Drizzle sẽ không bao giờ tự chạy lại 0114 vì nó đã vào sổ, nên đây là cách duy nhất kiểm được
+      nhánh ấy; và nó cũng chính là phép kiểm tính idempotent thật của câu lệnh.
+    */
+    await client.query(`update departments set sort_order = case code when 'HR' then 5 when 'SALES' then 7 else 99 end`);
+    const sqlSapXep = readFileSync(path.join(goc, "0114_department_sort_order.sql"), "utf8");
+    await client.query(sqlSapXep);
+    const tuSap = await client.query<{ code: string; sort_order: number }>("select code, sort_order from departments order by sort_order, code");
+    assert.deepEqual(
+      tuSap.rows.map((r) => `${r.code}:${r.sort_order}`),
+      ["HR:5", "SALES:7", "FINANCE:99", "LOGISTICS:99", "MANAGEMENT:99", "MARKETING:99", "PRODUCTION:99", "WAREHOUSE:99"],
+      "thứ tự do NGƯỜI đặt phải còn nguyên — migration sắp xếp chỉ được chạy khi cả bảng còn ở đúng một giá trị mặc định",
+    );
+    // Trả lại thứ tự chuẩn cho các khẳng định sau của bài kiểm.
+    await client.query(`update departments set sort_order = 100`);
+    await client.query(sqlSapXep);
 
     // CHỈ CỘNG THÊM: dữ liệu nghiệp vụ có từ trước phải nguyên vẹn.
     assert.equal(await dem("select count(*)::int as n from cs_cases where id = 'up-c1' and status = 'OPEN'"), 1, "case CSKH có từ trước không được đụng tới");
@@ -1474,7 +1525,9 @@ export async function testMigrationUpgradePath() {
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });
-    assert.equal(await dem("select count(*)::int as n from departments"), 7, "chạy lại migration KHÔNG được gieo thêm phòng ban lần hai");
+    // Số phòng lấy TỪ SỔ trong mã nguồn, không gõ lại: tách một phòng mới thì con số này tự đúng,
+    // còn gõ tay thì bài kiểm đỏ vì một lý do chẳng liên quan tới tính idempotent nó đang đo.
+    assert.equal(await dem("select count(*)::int as n from departments"), DEPARTMENT_CODES.length, "chạy lại migration KHÔNG được gieo thêm phòng ban lần hai");
     assert.equal(await dem("select count(*)::int as n from metric_targets where id not like 'up-mt%'"), 0, "chạy lại migration KHÔNG được sinh đích nào");
     // …và cũng KHÔNG được đụng tới đích đã có: hai dòng bài này gieo phải còn nguyên cả tầng lẫn số.
     assert.equal(await dem("select count(*)::int as n from metric_targets where (id = 'up-mt1' and scope = 'COMPANY' and target = 65) or (id = 'up-mt2' and scope = 'PRODUCT' and scope_ref = 'Q004' and target = 55)"), 2, "chạy lại migration KHÔNG được sửa đích đã đặt");

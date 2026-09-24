@@ -21,13 +21,14 @@ import { WORK_SOURCE_SPEC, authorityOf } from "@/lib/constants/work-sources";
 import { __setGithubFetchForTests, githubConfig } from "@/lib/integrations/github/client";
 import { syncGithubDeployments, verifyDeployments } from "@/lib/integrations/github/deployments";
 import { adaptTechTasks } from "@/lib/queries/work-adapters";
-import { createTechTask, decideTechApproval, overrideTechTaskRisk, recordTechDeployment, seedTechAgents, setTechAgentEnabled, setTechTaskStatus, startTechAgentRun, updateTechDeployment, type TechActor } from "@/lib/tech/service";
+import { createTechTask, decideTechApproval, overrideTechTaskRisk, recordTechDeployment, seedTechAgents, setTechAgentEnabled, setTechRunVerdict, setTechTaskStatus, startTechAgentRun, type TechActor, updateTechDeployment } from "@/lib/tech/service";
 
 import { runAgentOnTask } from "@/lib/agents/runner";
 import { classifyProviderError } from "@/scripts/agent-runner-check";
 import { AGENT_TOOLS, AiAgentExecutor } from "@/lib/agents/executor";
 import type { AgentExecutor, AgentJob, AgentOutcome } from "@/lib/agents/executor";
 import type { AiProvider } from "@/lib/ai/provider";
+import { inVetBuoc, tomTatBuoc } from "@/lib/constants/agent-steps";
 
 /**
  * ═══════════ PHASE 2A — ĐỌC DEPLOY THẬT, CHIẾU VIỆC TECH, CHẠY AGENT ĐẦU TIÊN ═══════════
@@ -538,6 +539,137 @@ export async function testAgentRunner() {
   assert.equal(rDo.gates.typecheck, "FAILED", "exit code THẬT quyết định cổng, không phải lời khai của agent");
   assert.equal(rDo.resultCommit, null, "cổng đỏ thì KHÔNG có commit nào");
 
+  // ───────── 4.5d LƯỢT CHẠY PHẢI ĐỂ LẠI VẾT: ĐỌC/GHI/BYTE ─────────
+  /*
+    Lượt chạy #45 (TECH-6) đốt 24 vòng · $0,7681 · 132.870 token đầu ra và KHÔNG giao gì. Khối
+    bằng chứng in ra đúng ba dòng dùng được — FAILED, "chưa gọi finish", tên một tệp. Không dòng
+    nào nói agent đã đọc gì hay ghi bao nhiêu lần, nên tôi dựng một giả thuyết hợp lý và KHÔNG
+    chứng minh được nó. Một giả thuyết không kiểm được thì không đáng để sửa mã theo.
+
+    Khối này khoá cả hai nửa: hàm gom vết, VÀ đường nối từ runner vào sổ.
+  */
+  assert.deepEqual(tomTatBuoc([]), { doc: 0, ghi: 0, lenh: 0, chan: 0, ghiChu: 0, theoTep: [] }, "không bước nào ⇒ vết rỗng, không phải thiếu trường");
+  const vetThu = tomTatBuoc([
+    { kind: "READ", path: "a.md", ok: true, detail: "10 ký tự" },
+    { kind: "WRITE", path: "docs/x.md", ok: true, detail: "đã ghi 1200 ký tự" },
+    { kind: "WRITE", path: "docs/x.md", ok: true, detail: "đã ghi 1300 ký tự" },
+    { kind: "WRITE", path: "docs/y.md", ok: true, detail: "đã ghi 40 ký tự" },
+    { kind: "COMMAND", command: "npm run lint", ok: true, exitCode: 0, detail: "" },
+    { kind: "BLOCKED", detail: "lệnh ngoài danh sách" },
+  ]);
+  assert.equal(vetThu.doc, 1);
+  assert.equal(vetThu.ghi, 3);
+  assert.equal(vetThu.lenh, 1);
+  assert.equal(vetThu.chan, 1);
+  /*
+    GHI CÙNG MỘT TỆP HAI LẦN PHẢI GOM LẠI, VÀ BYTE PHẢI CỘNG.
+
+    `write_file` GHI ĐÈ toàn bộ tệp, nên "sửa một dòng" và "viết lại cả tệp" đều là MỘT lượt ghi.
+    Chỉ đếm lượt thì hai việc ấy không phân biệt được — số byte mới phân biệt được, và nó là con
+    số duy nhất cho biết một lượt chạy có đang viết lại cùng một thứ nhiều lần hay không.
+  */
+  assert.deepEqual(vetThu.theoTep[0], { path: "docs/x.md", luotGhi: 2, tongByte: 2500 }, "hai lượt ghi cùng tệp phải gom, và byte phải CỘNG");
+  assert.ok(inVetBuoc(vetThu).includes("docs/x.md (2× · 2500 byte)"), "dòng in ra phải đọc được ngay, không phải JSON");
+  assert.ok(inVetBuoc(tomTatBuoc([])).includes("không ghi tệp nào"), "vết rỗng phải NÓI RA là rỗng, không in một dòng trống");
+
+  /*
+    ĐƯỜNG NỐI: bước GHI của executor phải MANG số ký tự, nếu không cột byte luôn bằng 0 và cả
+    phép đo này thành trang trí. Đây đúng chỗ đã đứt hai lần trước (ĐB19, ĐB-F).
+  */
+  const maExec = readFileSync(path.join(process.cwd(), "lib/agents/executor.ts"), "utf8");
+  assert.ok(maExec.includes("đã ghi ${noiDung.length} ký tự"), "bước GHI phải ghi lại SỐ KÝ TỰ, không chỉ chữ 'đã ghi'");
+  /*
+    VÀ VẾT PHẢI THẬT SỰ NẰM TRONG SỔ — đo BẰNG SỔ, không quét mã nguồn.
+
+    Bản đầu của khẳng định này hỏi mã nguồn có chứa `vetBuoc: tomTatBuoc(outcome.steps)` không.
+    Chuỗi ấy có ở BA nhánh trả về, nên đột biến gỡ nó khỏi MỘT nhánh vẫn xanh — chốt canh sự CÓ
+    MẶT của một dòng chữ, không canh đường đi của dữ liệu. Đột biến "gom vết nhưng không lưu"
+    SỐNG SÓT.
+
+    Dòng dưới chạy runner thật rồi đọc lại sổ: vết phải có, và phải kể đúng tệp agent đã ghi.
+  */
+  const idVet = await taoViec("p2a-runner: lượt chạy phải để lại vết");
+  /*
+    Executor riêng, KHAI BƯỚC như executor thật làm. `ghiDoc` trả `steps: []` nên nó không đo
+    được đường nối đang xét ở đây — runner có mang vết vào sổ hay không.
+  */
+  const ghiCoVet = new ScriptedExecutor(async (job) => {
+    job.workspace.writeFile("docs/p2a-agent.md", "# Tài liệu do agent viết\n\nMột dòng.\n");
+    return { summary: "Đã ghi.", steps: [{ kind: "WRITE" as const, path: "docs/p2a-agent.md", ok: true, detail: "đã ghi 42 ký tự" }], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
+  });
+  const rVet = await runAgentOnTask({ taskId: idVet, agentKey: "documentation", executor: ghiCoVet, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
+  const runVet = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, rVet.runId!) });
+  const vetTrongSo = (runVet?.metadata as { vetBuoc?: { ghi: number; theoTep: { path: string; tongByte: number }[] } } | null)?.vetBuoc;
+  assert.ok(vetTrongSo, "sổ PHẢI giữ vết bước — gom mà không lưu thì bằng không gom");
+  assert.equal(vetTrongSo!.ghi, 1, "một lượt ghi phải đếm là một");
+  assert.equal(vetTrongSo!.theoTep[0]?.path, "docs/p2a-agent.md", "và phải kể đúng tệp");
+  assert.ok((vetTrongSo!.theoTep[0]?.tongByte ?? 0) > 0, "byte phải > 0 — cột byte bằng 0 là cả phép đo thành trang trí");
+
+  // ───────── 4.5c ĐỀ BÀI PHẢI KỂ TÊN SỔ CHỨNG TỪ SỐ ĐO ─────────
+  /*
+    Ba lượt chạy liên tiếp (TECH-5 · TECH-7 · TECH-6) trích tệp số đo ĐÚNG 0 LẦN, trong khi tệp
+    nằm sẵn trong cây chúng đọc. Bộ công cụ cố ý không có `list_directory`, nên agent không tự
+    liệt kê được thư mục — nó chỉ thấy đề bài.
+
+    Khối này đo ĐƯỜNG NỐI, không đo hàm thuần: hàm `khoiSoChungTu` đúng mà runner không gọi thì
+    bản vá nằm nguyên trong mã và mất sạch tác dụng (đúng lớp lỗi ĐB19 và ĐB-F đã bắt được).
+  */
+  const repoChungTu = repoTam();
+  execFileSync("mkdir", ["-p", path.join(repoChungTu, "docs", "perf")]);
+  writeFileSync(path.join(repoChungTu, "docs", "perf", "so-do-that-2026-09-23.md"), "# số đo\n");
+  execFileSync("git", ["add", "-A"], { cwd: repoChungTu });
+  execFileSync("git", ["-c", "user.email=t@t.local", "-c", "user.name=T", "commit", "-q", "-m", "chung-tu"], { cwd: repoChungTu });
+  const baseChungTu = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoChungTu, encoding: "utf8" }).trim();
+
+  let deBaiThay = "";
+  const bat = new ScriptedExecutor(async (job) => {
+    deBaiThay = job.taskDescription;
+    return { summary: "đã đọc đề bài", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
+  });
+  const idChungTu = await taoViec("p2a-runner: đề bài phải kể tên sổ chứng từ");
+  await runAgentOnTask({ taskId: idChungTu, agentKey: "documentation", executor: bat, repoRoot: repoChungTu, baseCommit: baseChungTu, actor: may, gates: [] });
+  assert.ok(deBaiThay.includes("docs/perf/so-do-that-2026-09-23.md"), "đề bài phải KỂ TÊN tệp chứng từ có thật — agent không trích được thứ nó không biết là có");
+  assert.ok(/CHƯA ĐO ĐƯỢC/.test(deBaiThay), "và phải nói rõ: không có số thì viết CHƯA ĐO ĐƯỢC, không ước lượng");
+
+  /*
+    VÀ KHÔNG CÓ CHỨNG TỪ THÌ KHÔNG IN GÌ. Một khối rỗng ("sổ chứng từ: (không có)") dạy agent
+    rằng thư mục ấy vô dụng — tệ hơn im lặng.
+  */
+  let deBaiRong = "";
+  const bat2 = new ScriptedExecutor(async (job) => {
+    deBaiRong = job.taskDescription;
+    return { summary: "đã đọc", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
+  });
+  const idRong = await taoViec("p2a-runner: kho chưa có chứng từ nào");
+  await runAgentOnTask({ taskId: idRong, agentKey: "documentation", executor: bat2, repoRoot: repo, baseCommit: base, actor: may, gates: [] });
+  assert.ok(!/SỐ ĐO PRODUCTION ĐÃ CÓ SẴN/.test(deBaiRong), "kho không có chứng từ thì đề bài KHÔNG được in khối ấy");
+
+  // ───────── 4.5b TỆP TRONG THƯ MỤC MỚI PHẢI ĐƯỢC ĐẾM TỪNG TỆP ─────────
+  /*
+    `git status --porcelain` mặc định GỘP một thư mục chưa theo dõi thành một dòng `docs/xyz/`.
+    Đo ở việc TECH-6 (lượt chạy #42): agent tạo `docs/baselines/BASELINE-TEMPLATE.json`, sổ ghi
+    `docs/baselines/`, git sau commit thấy tên tệp đầy đủ — bước nghiệm thu đánh KHÔNG ĐẠT một
+    lượt chạy đã làm xong việc.
+
+    Lỗi chỉ lộ ra đúng lần agent tạo một THƯ MỤC MỚI, nên nó nằm im qua mọi lượt chạy trước. Bài
+    kiểm này dựng đúng tình huống ấy.
+  */
+  const idThuMuc = await taoViec("p2a-runner: agent tạo thư mục mới");
+  const ghiThuMucMoi = new ScriptedExecutor(async (job) => {
+    job.workspace.writeFile("docs/moi/a.md", "# a\n");
+    job.workspace.writeFile("docs/moi/b.md", "# b\n");
+    return { summary: "Đã ghi hai tệp trong một thư mục mới.", steps: [], finished: true, khongLamDuoc: null, error: null, chiPhi: KHONG_TON };
+  });
+  const rThuMuc = await runAgentOnTask({ taskId: idThuMuc, agentKey: "documentation", executor: ghiThuMucMoi, repoRoot: repo, baseCommit: base, actor: may, gates: ["typecheck"] });
+  assert.equal(rThuMuc.status, "SUCCEEDED", `phải chạy xong — ${rThuMuc.reason ?? ""}`);
+  assert.deepEqual(
+    [...rThuMuc.filesChanged].sort(),
+    ["docs/moi/a.md", "docs/moi/b.md"],
+    "phải đếm TỪNG TỆP — gộp thành `docs/moi/` là ghi sai vết kiểm toán, và làm bước nghiệm thu đánh trượt một lượt chạy đã xong việc",
+  );
+  const runThuMuc = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, rThuMuc.runId!) });
+  assert.deepEqual([...(runThuMuc?.filesChanged ?? [])].sort(), ["docs/moi/a.md", "docs/moi/b.md"], "và sổ phải giữ đúng danh sách ấy");
+
   // ───────── 4.6b AGENT KHAI KHÔNG LÀM ĐƯỢC ⇒ BLOCKED, KHÔNG COMMIT, KHÔNG CHẠY CỔNG ─────────
   /*
     Lượt chạy #39 (việc TECH-5, 22/09/2026) nhận một đề bài đòi ĐO PRODUCTION, thứ máy Actions
@@ -657,6 +789,41 @@ export async function testAgentRunner() {
   for (const truong of ["ly_do", "can_gi"]) {
     assert.ok(batBuoc.includes(truong), `${truong} phải BẮT BUỘC — một lời từ chối không kèm lý do và lối ra thì người đọc không làm gì được với nó`);
   }
+
+  // ───────── 4.6d PHÁN QUYẾT REVIEW: CHỈ NGƯỜI, CHỈ LƯỢT ĐÃ GIAO, "CÓ LỖI" PHẢI NÓI LỖI GÌ ─────────
+  /*
+    Cơ sở của chuỗi "lượt chạy sạch". Mỗi chặn dưới đây là một cách tự khen hoặc một phán quyết
+    không ai học được gì — và cả hai đều làm con số trên /tech/agents thành trang trí.
+  */
+  const tuCham = await setTechRunVerdict({ runId: ok.runId!, verdict: "SACH" }, may);
+  assert.ok("error" in tuCham, "agent KHÔNG được tự chấm lượt chạy của mình là sạch");
+  const la = await setTechRunVerdict({ runId: ok.runId!, verdict: "TOT_LAM" }, nguoi);
+  assert.ok("error" in la, "phán quyết ngoài danh sách đóng phải bị từ chối");
+  const loiTrong = await setTechRunVerdict({ runId: ok.runId!, verdict: "CO_LOI", note: "sai" }, nguoi);
+  assert.ok("error" in loiTrong, "'có lỗi' mà không nói lỗi gì thì không ai học được gì — phải bị từ chối");
+  const chamHong = await setTechRunVerdict({ runId: rDo.runId!, verdict: "SACH" }, nguoi);
+  assert.ok("error" in chamHong, "lượt HỎNG không chấm 'sạch' được — nó đã tự cắt chuỗi");
+  const chamChan = await setTechRunVerdict({ runId: rKhongLam.runId!, verdict: "SACH" }, nguoi);
+  assert.ok("error" in chamChan, "lượt BLOCKED là lời khai không làm được, không phải một lần giao hàng để chấm");
+
+  const dung = await setTechRunVerdict({ runId: ok.runId!, verdict: "SACH" }, nguoi);
+  assert.ok("ok" in dung, `người chấm lượt đã giao phải ghi được — ${"error" in dung ? dung.error : ""}`);
+  const daCham = await db.query.techAgentRuns.findFirst({ where: eq(schema.techAgentRuns.id, ok.runId!) });
+  assert.equal(daCham?.reviewVerdict, "SACH");
+  assert.ok(daCham?.reviewedAt, "có phán quyết thì phải có MỐC ghi");
+
+  /*
+    RÀNG BUỘC Ở CSDL, không chỉ ở dịch vụ: một đường ghi thứ hai (script, migration, tay) cũng
+    không được để lại một phán quyết lạ hay một phán quyết không mốc.
+  */
+  await assert.rejects(
+    db.update(schema.techAgentRuns).set({ reviewVerdict: "TOT_LAM", reviewedAt: new Date() }).where(eq(schema.techAgentRuns.id, ok.runId!)),
+    "CSDL phải từ chối phán quyết ngoài danh sách đóng",
+  );
+  await assert.rejects(
+    db.update(schema.techAgentRuns).set({ reviewVerdict: "SACH", reviewedAt: null }).where(eq(schema.techAgentRuns.id, ok.runId!)),
+    "CSDL phải từ chối một phán quyết không có mốc ghi — phán quyết không chủ là phán quyết không ai chịu",
+  );
 
   // ───────── 4.7 AGENT KHÔNG GHI ĐƯỢC NGOÀI PHẠM VI ─────────
   const idNgoai = await taoViec("p2a-runner: thử ghi ngoài phạm vi");

@@ -14,7 +14,7 @@ import { MARKETING_TARGET_METRICS } from "@/lib/queries/marketing-targets";
 import { baselineOf, diagnose, lossStreakOf, type DiagnoseSnapshot } from "@/lib/marketing/diagnose";
 import { digestLines, runMarketingDigest, settledLines } from "@/lib/marketing/digest";
 import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter, type MarketingDailyBase } from "@/lib/queries/marketing-daily";
-import { resolveDeliveryRate } from "@/lib/constants/delivery-rate";
+import { blendDeliveryRate, deliveryRateCoverageParts, DELIVERY_RATE_SOURCE_LABEL, DELIVERY_RATE_SOURCES, MAX_BORROWED_SHARE, parseDeliveryRateOverride, resolveDeliveryRate, type DeliveryRateSource } from "@/lib/constants/delivery-rate";
 import { DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
 import { getDailyBreakdown } from "@/lib/queries/reports";
 import type { Period } from "@/lib/search-params";
@@ -714,44 +714,228 @@ export function testDeliveryRateLadder() {
   );
 
   // Các khẳng định dưới đây dùng NỀN RIÊNG để kiểm CHÍNH thang bậc, không phụ thuộc mặc định đang khai.
-  const nen = { minFinishedOrders: 10, defaultReturnRate: 40 };
+  // HAI ngưỡng riêng: `minFinishedOrders` gác bậc lịch sử (tỷ lệ thô), `matureMinFinished` gác
+  // bậc số đo theo từng đơn và cũng là trọng số mốc neo khi co ngót.
+  // HAI ngưỡng riêng: `minFinishedOrders` gác bậc lịch sử (tỷ lệ thô), `matureMinFinished` gác
+  // bậc số đo theo từng đơn và cũng là trọng số mốc neo khi co ngót.
+  //
+  // `projectedOwnWeight` khai ở NỀN: mặc định của thang bậc là KHÔNG BIẾT phần mượn ⇒ coi như
+  // mượn hết ⇒ không bậc nào được gọi là số đo. Nền này dựng ca ngược lại (tử số của chính mã)
+  // để các khẳng định về bậc `projected` đo đúng thứ chúng nói; ca đi mượn có khối riêng bên dưới.
+  const nen = { minFinishedOrders: 10, matureMinFinished: 10, defaultReturnRate: 40, projectedBorrowed: 0, projectedOwnWeight: 0 };
+  const trong0 = { projectedDeliveryRate: null, projectedFinished: 0, measuredDeliveryRate: null, historyReturnRate: null, historyFinished: 0 };
 
   // Không quan sát nào ⇒ bậc cuối: tỷ lệ khai ở Giả định (40% hoàn ⇒ 60% giao).
-  const trong = resolveDeliveryRate({ ...nen, projectedDeliveryRate: null, projectedFinished: 0, historyReturnRate: null, historyFinished: 0 });
+  const trong = resolveDeliveryRate({ ...nen, ...trong0 });
   assert.equal(trong.source, "default");
   assert.equal(trong.deliveryRate, 60);
   assert.equal(trong.returnRate, 40);
+  assert.equal(trong.mature, false, "chưa một đơn nào kết thúc thì mã CHƯA CHÍN");
 
   // Lịch sử MỎNG (9 < 10) không đủ để thắng giả định: 9 đơn mà 3 đơn hoàn ra 33%, mất một đơn còn
   // 22% — đó không phải một tỷ lệ, đó là tiếng ồn.
-  const mong = resolveDeliveryRate({ ...nen, projectedDeliveryRate: null, projectedFinished: 0, historyReturnRate: 33.3, historyFinished: 9 });
+  const mong = resolveDeliveryRate({ ...nen, ...trong0, historyReturnRate: 33.3, historyFinished: 9 });
   assert.equal(mong.source, "default");
   assert.equal(mong.deliveryRate, 60);
 
-  const day = resolveDeliveryRate({ ...nen, projectedDeliveryRate: null, projectedFinished: 0, historyReturnRate: 25, historyFinished: 71 });
+  const day = resolveDeliveryRate({ ...nen, ...trong0, historyReturnRate: 25, historyFinished: 71 });
   assert.equal(day.source, "history");
   assert.equal(day.deliveryRate, 75);
   assert.equal(day.finished, 71);
+  assert.equal(day.mature, true);
 
-  // MÔ HÌNH RA SỐ NHƯNG MÃ CHƯA CÓ KẾT CỤC NÀO ⇒ KHÔNG ĐƯỢC DÙNG — lỗi thật của Đầm Q005.
-  const muon = resolveDeliveryRate({ ...nen, projectedDeliveryRate: 37.5, projectedFinished: 0, historyReturnRate: null, historyFinished: 0 });
+  // MÔ HÌNH RA SỐ NHƯNG MÃ CHƯA CÓ KẾT CỤC NÀO ⇒ KHÔNG ĐƯỢC DÙNG — lỗi thật của Đầm Q005 (21/09/2026).
+  const muon = resolveDeliveryRate({ ...nen, ...trong0, projectedDeliveryRate: 37.5 });
   assert.equal(muon.source, "default", "mã chưa có đơn nào kết thúc thì 37,5% là xác suất mượn của mã khác");
   assert.equal(muon.deliveryRate, 60);
 
-  const doDuoc = resolveDeliveryRate({ ...nen, projectedDeliveryRate: 68.4, projectedFinished: 105, historyReturnRate: 25, historyFinished: 71 });
+  /*
+    ═══ ĐẦM Q005, 23/09/2026: 6 ĐƠN KẾT THÚC KHÔNG PHẢI "ĐÃ ĐO ĐƯỢC" ═══
+
+    Cổng cũ là "ít nhất MỘT đơn", nên Q005 (giao thật 5 · hoàn 1 · đang giao 99) lọt vào bậc
+    `projected` và ô in 35,9% — con số đó là `(5 + 99 × 0,33) / 105`, với 0,33 là tỷ lệ nền của
+    TOÀN SHOP, mà 62% khối lượng tập học ấy là của riêng Đầm Q002 (GTC 26,7%).
+
+    Nay 6 < `minFinishedOrders` ⇒ mã chưa chín ⇒ co ngót số đo của CHÍNH MÃ về tỷ lệ khai.
+  */
+  const q005 = resolveDeliveryRate({ ...nen, projectedDeliveryRate: 35.9, projectedFinished: 6, measuredDeliveryRate: 83.3, historyReturnRate: null, historyFinished: 0 });
+  assert.equal(q005.source, "blended", "6 đơn kết thúc chưa đủ chín — không được dùng số của mô hình");
+  assert.equal(q005.mature, false);
+  assert.equal(q005.ownFinished, 6);
+  // (6 × 83,3 + 10 × 60) / 16 = 68,7
+  assert.equal(q005.deliveryRate, 68.7);
+  assert.ok(q005.deliveryRate > 35.9, "số đo tốt của chính mã KHÔNG được kéo xuống dưới tỷ lệ mượn");
+
+  /*
+    ═══ THANG BẬC KHÔNG ĐƯỢC ĐI NGƯỢC CHIỀU BẰNG CHỨNG ═══
+
+    Ngày 23/09/2026 màn hình in Q006 (0 đơn kết thúc) 55,0% và Q005 (5/6 đơn giao được) 35,9%: mã
+    có bằng chứng TỐT bị chấm thấp hơn mã KHÔNG có bằng chứng nào. Đó là dấu hiệu chắc chắn rằng
+    con số không đến từ mã đang xét.
+
+    Bậc `blended` khoá tính chất này bằng cấu trúc: `n = 0` cho đúng mốc neo, và số đo của chính mã
+    chỉ kéo con số về phía nó.
+  */
+  const neo = resolveDeliveryRate({ ...nen, ...trong0 }).deliveryRate;
+  for (const n of [1, 3, 6, 9]) {
+    const tot = resolveDeliveryRate({ ...nen, ...trong0, projectedFinished: n, measuredDeliveryRate: 83.3 });
+    const xau = resolveDeliveryRate({ ...nen, ...trong0, projectedFinished: n, measuredDeliveryRate: 10 });
+    assert.equal(tot.source, "blended");
+    assert.ok(tot.deliveryRate >= neo, `n=${n}: mã giao tốt hơn mốc neo không được in thấp hơn mã chưa có bằng chứng`);
+    assert.ok(xau.deliveryRate <= neo, `n=${n}: mã giao kém hơn mốc neo không được in cao hơn mã chưa có bằng chứng`);
+    // Mốc neo luôn giữ hơn một nửa trọng số khi mã còn ở bậc này — nên đây KHÔNG phải một số đo.
+    assert.ok(tot.deliveryRate - neo < (83.3 - neo) / 2 + 0.05, `n=${n}: co ngót phải kéo về mốc neo, không nhảy thẳng tới số đo`);
+  }
+
+  // Đủ chín ⇒ máy tự đo, đúng như chủ shop chốt 23/09/2026.
+  const doDuoc = resolveDeliveryRate({ ...nen, projectedDeliveryRate: 68.4, projectedFinished: 105, measuredDeliveryRate: 70, historyReturnRate: 25, historyFinished: 71 });
   assert.equal(doDuoc.source, "projected", "có số đo của chính mã thì số đo thắng lịch sử");
   assert.equal(doDuoc.deliveryRate, 68.4);
+  assert.equal(doDuoc.mature, true);
 
-  // Ghi đè tay thắng TẤT CẢ, kể cả số đo.
-  const ghiDe = resolveDeliveryRate({ ...nen, overrideReturnRate: 10, projectedDeliveryRate: 68.4, projectedFinished: 105, historyReturnRate: 25, historyFinished: 71 });
+  // Đúng ngưỡng là ĐÃ CHÍN (>=), không phải "hơn ngưỡng".
+  const vuaDu = resolveDeliveryRate({ ...nen, projectedDeliveryRate: 50, projectedFinished: 10, measuredDeliveryRate: 90, historyReturnRate: null, historyFinished: 0 });
+  assert.equal(vuaDu.source, "projected");
+  assert.equal(vuaDu.mature, true);
+
+  /* ─── GHI ĐÈ TAY: HAI TUỔI THỌ ─── */
+
+  // Dòng CŨ trong settings là một số trần và nó có nghĩa GIỮ VĨNH VIỄN — thắng cả số đo.
+  const cu = parseDeliveryRateOverride(10);
+  assert.equal(cu?.mode, "PERMANENT", "số trần đã lưu từ trước KHÔNG được đổi nghĩa");
+  const ghiDe = resolveDeliveryRate({ ...nen, override: cu, projectedDeliveryRate: 68.4, projectedFinished: 105, measuredDeliveryRate: 70, historyReturnRate: 25, historyFinished: 71 });
   assert.equal(ghiDe.source, "override");
   assert.equal(ghiDe.deliveryRate, 90);
   // `baseReturnRate` là BẬC LÙI, không phải kết luận — nó vẫn là lịch sử ngay cả khi ghi đè thắng.
   assert.equal(ghiDe.baseReturnRate, 25);
 
+  // Dòng MỚI mặc định là TẠM: áp khi mã chưa chín…
+  const tam = parseDeliveryRateOverride({ returnRate: 20, reason: "hàng mới, theo mẫu mã tương tự" });
+  assert.equal(tam?.mode, "UNTIL_MATURE", "ghi đè mới mặc định tự nhường chỗ cho số đo");
+  const chuaChin = resolveDeliveryRate({ ...nen, override: tam, projectedDeliveryRate: 35.9, projectedFinished: 6, measuredDeliveryRate: 83.3, historyReturnRate: null, historyFinished: 0 });
+  assert.equal(chuaChin.source, "override", "mã chưa chín thì nghe chủ shop, không nghe mô hình");
+  assert.equal(chuaChin.deliveryRate, 80);
+
+  // …và TỰ NHƯỜNG khi mã đủ chín. Đây là câu chủ shop chốt 23/09/2026.
+  const daChin = resolveDeliveryRate({ ...nen, override: tam, projectedDeliveryRate: 40, projectedFinished: 30, measuredDeliveryRate: 42, historyReturnRate: null, historyFinished: 0 });
+  assert.equal(daChin.source, "projected", "đủ chín thì số đo thắng ghi đè TẠM — không giữ một con số bị bỏ quên");
+  assert.equal(daChin.deliveryRate, 40);
+
+  // Dòng hỏng KHÔNG được hoá thành một giá trị: chưa biết là chưa biết.
+  assert.equal(parseDeliveryRateOverride(undefined), null);
+  assert.equal(parseDeliveryRateOverride(Number.NaN), null);
+  assert.equal(parseDeliveryRateOverride({ returnRate: Number.NaN }), null);
+
   // Biên: tỷ lệ ngoài [0,100] bị kẹp, không sinh ra một tỷ lệ âm hay lớn hơn 100%.
-  assert.equal(resolveDeliveryRate({ ...nen, overrideReturnRate: 140, projectedDeliveryRate: null, projectedFinished: 0, historyReturnRate: null, historyFinished: 0 }).deliveryRate, 0);
-  assert.equal(resolveDeliveryRate({ ...nen, overrideReturnRate: -5, projectedDeliveryRate: null, projectedFinished: 0, historyReturnRate: null, historyFinished: 0 }).deliveryRate, 100);
+  assert.equal(resolveDeliveryRate({ ...nen, ...trong0, override: parseDeliveryRateOverride(140) }).deliveryRate, 0);
+  assert.equal(resolveDeliveryRate({ ...nen, ...trong0, override: parseDeliveryRateOverride(-5) }).deliveryRate, 100);
+
+  /*
+    ═══ ĐẦM Q005, CHIỀU 23/09/2026: ĐỦ ĐƠN KHÔNG CÓ NGHĨA LÀ ĐO ĐƯỢC ═══
+
+    Bản vá buổi sáng nâng cổng từ "ít nhất MỘT đơn" lên `matureMinFinished` = 10. Tới chiều, Q005
+    vừa chạm ĐÚNG 10 đơn kết thúc (giao 8 · hoàn 2) là lập tức quay về bậc `projected` và ô in
+    **36,2%** — đúng con số chủ shop đã bác bỏ, chỉ khác là lần này nó mang nhãn "số đo theo từng
+    đơn" và được tô màu.
+
+    Lý do: `MIN_CELL_SAMPLE` của hợp đồng đòi 10 quan sát cho MỖI ô (trạng thái ĐVVC × tuổi kiện),
+    nên 10 đơn kết thúc không đủ cho một ô nào, và 94 đơn đang chạy vẫn cân bằng xác suất toàn shop.
+    Tử số 37,6 có 29,6 đi mượn — 79%.
+
+    Bài học đứng sau bài kiểm này: **ĐẾM ĐƠN không trả lời được câu "con số này của ai"**. Chỉ đếm
+    CHÍNH TỬ SỐ mới trả lời được. Hai cổng trước đều đếm đơn, và cả hai đều trượt.
+  */
+  const q005Chieu = resolveDeliveryRate({
+    ...nen,
+    projectedDeliveryRate: 36.2,
+    projectedFinished: 10,
+    measuredDeliveryRate: 80, // 8 giao / 10 kết thúc
+    projectedBorrowed: 29.6,
+    projectedOwnWeight: 0,
+    historyReturnRate: null,
+    historyFinished: 0,
+  });
+  assert.equal(q005Chieu.mature, true, "10 đơn kết thúc là ĐÃ CHÍN — điều kiện của ca này");
+  assert.notEqual(q005Chieu.source, "projected", "đủ đơn nhưng tử số 79% đi mượn thì KHÔNG được gọi là số đo");
+  assert.equal(q005Chieu.source, "blended");
+  assert.equal(q005Chieu.blendReason, "MOSTLY_BORROWED", "lý do phải TÁCH khỏi 'chưa chín' — hai việc phải làm khác nhau");
+  assert.ok(q005Chieu.borrowedShare !== null && q005Chieu.borrowedShare > 0.75, `phần mượn đo được phải quanh 79%, đang là ${q005Chieu.borrowedShare}`);
+  // (10 × 80 + 10 × 60) / 20 = 70
+  assert.equal(q005Chieu.deliveryRate, 70);
+  assert.ok(q005Chieu.deliveryRate > 36.2, "và nó KHÔNG được rơi về đúng con số đi mượn");
+
+  // Cùng mã, cùng số đơn — nhưng tử số là của CHÍNH MÃ thì bậc số đo được chạy.
+  const q005TuMinh = resolveDeliveryRate({
+    ...nen,
+    projectedDeliveryRate: 36.2,
+    projectedFinished: 10,
+    measuredDeliveryRate: 80,
+    projectedBorrowed: 2,
+    projectedOwnWeight: 27.6,
+    historyReturnRate: null,
+    historyFinished: 0,
+  });
+  assert.equal(q005TuMinh.source, "projected", "tử số của chính mã thì mô hình được dùng — ranh giới nằm ở CĂN CỨ, không ở số đơn");
+  assert.equal(q005TuMinh.blendReason, null);
+  assert.ok(q005TuMinh.borrowedShare !== null && q005TuMinh.borrowedShare < MAX_BORROWED_SHARE);
+
+  // Ngay tại lằn ranh: đúng `MAX_BORROWED_SHARE` vẫn là số đo; hơn một chút thì không.
+  const ngay = (muon: number, cuaMinh: number) =>
+    resolveDeliveryRate({ ...nen, projectedDeliveryRate: 50, projectedFinished: 10, measuredDeliveryRate: 0, projectedBorrowed: muon, projectedOwnWeight: cuaMinh, historyReturnRate: null, historyFinished: 0 }).source;
+  assert.equal(ngay(50, 50), "projected", "đúng một nửa vẫn được — trần là 'quá nửa', không phải 'từ một nửa'");
+  assert.equal(ngay(51, 49), "blended", "quá một nửa thì thôi");
+
+  /*
+    HỢP ĐỒNG KHÔNG NÓI ĐƯỢC PHẦN MƯỢN ⇒ RƠI VỀ PHÍA HẸP HƠN.
+
+    Không chứng minh được tử số là của chính mã thì không được dán nhãn số đo. Đây là cùng một luật
+    với AGENTS.md mục 31: mọi nhánh lỗi rơi về phía HẸP HƠN, không về phía rộng rãi.
+  */
+  const chuaBiet = resolveDeliveryRate({
+    minFinishedOrders: 10,
+    matureMinFinished: 10,
+    defaultReturnRate: 40,
+    projectedDeliveryRate: 50,
+    projectedFinished: 10,
+    measuredDeliveryRate: 80,
+    historyReturnRate: null,
+    historyFinished: 0,
+  });
+  assert.equal(chuaBiet.source, "blended", "không biết phần mượn là bao nhiêu ⇒ KHÔNG khẳng định đó là số đo");
+  assert.equal(chuaBiet.borrowedShare, null, "và nói thẳng là chưa đo được, không in ra 0%");
+
+  // Co ngót không có số đo thì KHÔNG bịa ra một mức.
+  assert.equal(blendDeliveryRate({ measuredDeliveryRate: null, finished: 5, anchorDeliveryRate: 60, anchorWeight: 10 }), null);
+  assert.equal(blendDeliveryRate({ measuredDeliveryRate: 80, finished: 0, anchorDeliveryRate: 60, anchorWeight: 10 }), null);
+
+  /*
+    ═══ ĐỘ PHỦ PHẢI CỘNG ĐỦ SỐ MÃ, KỂ CẢ BẬC VỪA THÊM ═══
+
+    Ba màn hình từng gõ tay bốn bậc vào câu chữ. Thêm `blended` ngày 23/09/2026 và cả ba im lặng bỏ
+    nó ra — đo thật trên production ngay sau lượt deploy đầu: dòng độ phủ in 6 mã trong khi shop có
+    7 mã đang chạy. Không lỗi, không cảnh báo, chỉ là một con số không bằng thực tế.
+
+    Bài này khoá ở mức HỢP ĐỒNG: `total` phải cộng MỌI bậc trong sổ khai, và mỗi bậc có mã phải xuất
+    hiện trong câu. Duyệt theo `DELIVERY_RATE_SOURCE_LABEL` chứ không theo một danh sách gõ lại —
+    thêm bậc thứ sáu mà quên sổ đăng ký thì chính dòng này đỏ.
+  */
+  const moiBac = Object.keys(DELIVERY_RATE_SOURCE_LABEL) as DeliveryRateSource[];
+  assert.deepEqual([...DELIVERY_RATE_SOURCES].sort(), [...moiBac].sort(), "thứ tự in độ phủ phải phủ ĐỦ mọi bậc của sổ nhãn");
+
+  const dem = Object.fromEntries(moiBac.map((s, i) => [s, i + 1])) as Record<DeliveryRateSource, number>;
+  const phu = deliveryRateCoverageParts(dem);
+  assert.equal(
+    phu.total,
+    moiBac.reduce((a, s) => a + dem[s], 0),
+    "tổng độ phủ phải cộng đủ mọi bậc — thiếu một bậc là in ra ít mã hơn số mã đang chạy",
+  );
+  for (const s of moiBac) assert.ok(phu.parts.some((x) => x.source === s), `${s}: bậc có mã mà không có mặt trong câu độ phủ`);
+
+  // Bậc 0 mã bị bỏ khỏi câu cho gọn, nhưng KHÔNG được biến mất khỏi tổng.
+  const thua = deliveryRateCoverageParts({ projected: 3, blended: 0 });
+  assert.equal(thua.parts.length, 1);
+  assert.equal(thua.total, 3);
+  assert.equal(deliveryRateCoverageParts({}).total, 0, "không mã nào ⇒ 0, và không nhánh nào ném lỗi");
 }
 
 /**

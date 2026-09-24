@@ -820,7 +820,7 @@ export type BulkResult = {
  * ═══════════ THÀNH CÔNG MỘT PHẦN LÀ KẾT QUẢ HỢP LỆ, KHÔNG PHẢI LỖI ═══════════
  *
  * Chọn 40 kiện rồi bấm "Phát tiếp": 12 kiện đủ điều kiện, 9 kiện đã giao xong từ hôm qua, 19 kiện
- * thuộc tài khoản Viettel Post khác. Một hàm "tất cả hoặc không" sẽ hoặc bỏ cả 12 kiện làm được,
+ * mà API không trả về. Một hàm "tất cả hoặc không" sẽ hoặc bỏ cả 12 kiện làm được,
  * hoặc gửi 40 lệnh trong đó 28 chắc chắn hỏng. Cả hai đều sai.
  *
  * Nên mỗi kiện đi riêng và mang KẾT QUẢ RIÊNG:

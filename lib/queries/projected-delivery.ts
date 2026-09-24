@@ -631,6 +631,24 @@ export type ProjectedCounts = {
   activeByState: ActiveBreakdown;
   /** Đơn đang giao mà mô hình KHÔNG dự báo được (trạng thái chưa đủ mẫu) — NGOÀI ước tính. */
   unmodelledActive: number;
+  /**
+   * ═══ TỬ SỐ CHIA ĐÔI THEO CĂN CỨ: CỦA CHÍNH MÃ, HAY MƯỢN CỦA MÃ KHÁC ═══
+   *
+   * `lookup.of()` đã trả về `basis` cho TỪNG đơn đang chạy — bậc `PRODUCT_*` là quan sát của chính
+   * mã, bậc `GLOBAL_*` là xác suất học từ toàn shop. Trước 23/09/2026 giá trị ấy bị vứt đi ngay sau
+   * khi dùng, nên không màn hình nào trả lời được câu *"con số này có bao nhiêu phần là của mã
+   * đang xem?"*.
+   *
+   * Đo production 23/09/2026, Đầm Q005 sau khi vừa đủ chín (10 đơn kết thúc): ô in **36,2%**, tử
+   * số 37,6 trong đó **29,6 là xác suất mượn** — 79%. Mã có 8/10 đơn giao được vẫn bị chấm bằng
+   * tỷ lệ nền của shop, chỉ vì `MIN_CELL_SAMPLE` đòi 10 quan sát cho MỖI ô (trạng thái × tuổi
+   * kiện) và 10 đơn kết thúc không đủ cho một ô nào.
+   *
+   * Hai trường này KHÔNG đổi một phép tính nào ở đây — chúng chỉ ghi lại căn cứ, để thang bậc
+   * (`resolveDeliveryRate`) từ chối gọi một con số 79% đi mượn là "số đo của chính mã".
+   */
+  projectedFromOwn: number;
+  projectedFromGlobal: number;
   /** Đơn huỷ — không ở tử số lẫn mẫu số; đếm riêng để tổng đơn khớp trang khác. */
   cancelled: number;
   /** Đơn có vận đơn nhưng không một dấu vết ĐVVC nào (`UNKNOWN`) — ngoài cohort, đếm riêng. */
@@ -671,6 +689,12 @@ export type ProjectedCounts = {
   projectedQty: number;
   /** Số sản phẩm không biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn bị tính là 0. */
   cogsUnknownQty: number;
+  /**
+   * Phần của `cogsUnknownQty` ước tính GIAO TỚI TAY KHÁCH — cân CÙNG một phép cân với
+   * `projectedQty`. Đây là số sản phẩm mà giá vốn DỰ TÍNH (`lib/constants/estimated-cost.ts`) được
+   * nhân vào; KHÔNG làm tròn, vì nó còn nhân với đơn giá.
+   */
+  projectedUnknownQty: number;
 };
 
 export type ProjectedProductRow = ProjectedCounts & {
@@ -713,6 +737,8 @@ function accMoi(): Acc {
     active: 0,
     activeByState: {},
     unmodelledActive: 0,
+    projectedFromOwn: 0,
+    projectedFromGlobal: 0,
     cancelled: 0,
     unknown: 0,
     pending: 0,
@@ -728,6 +754,7 @@ function accMoi(): Acc {
     projectedCogs: 0,
     projectedQty: 0,
     cogsUnknownQty: 0,
+    projectedUnknownQty: 0,
   };
 }
 
@@ -741,7 +768,7 @@ function accMoi(): Acc {
  * Hàm này KHÔNG đụng tới `eligibleSent`, `active` hay `projectedDelivered`: tiền và tỷ lệ GTC là
  * hai chiều riêng (đặc tả §1), và một kiện chưa rời kho không nằm trong tỷ lệ nào.
  */
-function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number; qty: number }, lookup: ProbabilityLookup): boolean {
+function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number; qty: number; cogsUnknownQty: number }, lookup: ProbabilityLookup): boolean {
   const tra = lookup.of(NOT_SHIPPED_STATE);
   if (tra.p === null) {
     acc.unmodelledRevenue += don.revenue;
@@ -750,6 +777,7 @@ function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number; qty:
   acc.projectedDeliveredRevenue += don.revenue * tra.p;
   acc.projectedCogs += don.cogs * tra.p;
   acc.projectedQty += don.qty * tra.p;
+  acc.projectedUnknownQty += don.cogsUnknownQty * tra.p;
   return true;
 }
 
@@ -801,6 +829,7 @@ function canMotDon(
       acc.projectedDeliveredRevenue += don.revenue;
       acc.projectedCogs += don.cogs;
       acc.projectedQty += don.qty;
+      acc.projectedUnknownQty += don.cogsUnknownQty;
       return;
     case "RETURNED":
     case "RETURNED_BY_RULE":
@@ -832,10 +861,14 @@ function canMotDon(
         acc.unmodelledActive += 1;
         acc.unmodelledRevenue += don.revenue;
       } else {
+        // Bậc `PRODUCT_*` là quan sát của CHÍNH MÃ; `GLOBAL_*` là mượn. `NONE` không tới được đây.
+        if (tra.basis === "PRODUCT_STATE_AGE" || tra.basis === "PRODUCT_STATE") acc.projectedFromOwn += tra.p;
+        else acc.projectedFromGlobal += tra.p;
         acc.projectedDelivered += tra.p;
         acc.projectedDeliveredRevenue += don.revenue * tra.p;
         acc.projectedCogs += don.cogs * tra.p;
         acc.projectedQty += don.qty * tra.p;
+        acc.projectedUnknownQty += don.cogsUnknownQty * tra.p;
       }
       return;
     }
@@ -845,6 +878,41 @@ function canMotDon(
       const chuaKhai: never = outcome;
       void chuaKhai;
       acc.unknown += 1;
+    }
+  }
+}
+
+/**
+ * PHẦN GIAO ĐƯỢC CỦA MỘT ĐƠN — đúng phép cân `canMotDon` dùng cho TIỀN, trả về một con số thay vì
+ * cộng vào bộ tích luỹ: đã giao = 1 · hoàn / huỷ / chưa rõ = 0 · còn trong kho shop = P(chưa rời kho)
+ * · đang chạy = P(trạng thái con của nó). `null` = đơn NGOÀI ước tính (trạng thái chưa đủ mẫu) —
+ * tiền của nó nằm ở `unmodelledRevenue`, không phải 0 đồng giao được.
+ *
+ * Dùng làm CĂN CỨ CHIA con số theo mã của Báo cáo lợi nhuận xuống từng đơn (bảng ngày × marketer
+ * ở `lib/queries/marketer-daily-nominal.ts`). Nó chỉ quyết định tiền rơi vào NGÀY nào, không quyết
+ * định tổng: tổng vẫn là số của báo cáo. Đổi phân loại ở `canMotDon` thì phải đổi ở đây cùng lượt.
+ */
+export function orderDeliveryShare(don: { outcome: string; con: string; productCode: string | null; ageHours: number | null }, lookup: ProbabilityLookup): number | null {
+  const outcome = don.outcome as OrderOutcome;
+  switch (outcome) {
+    case "DELIVERED":
+      return 1;
+    case "RETURNED":
+    case "RETURNED_BY_RULE":
+    case "CANCELLED":
+    case "UNKNOWN":
+      return 0;
+    case "NOT_SHIPPED":
+    case "AWAITING_PICKUP":
+      return lookup.of(NOT_SHIPPED_STATE).p;
+    case "IN_TRANSIT": {
+      const con = don.con as CarrierSubstate;
+      return isModelledSubstate(con) ? lookup.of(con, { productCode: don.productCode, ageHours: don.ageHours }).p : null;
+    }
+    default: {
+      const chuaKhai: never = outcome;
+      void chuaKhai;
+      return 0;
     }
   }
 }
@@ -948,8 +1016,13 @@ export async function getProjectedDeliveryMetrics(
       nhận `count(distinct …) over (…)`, và các dòng của cùng một đơn đã nằm sẵn trong tay sau vòng
       gộp bên dưới — đếm ở đó vừa đúng vừa không tốn thêm một lượt quét nào.
     */
+    /*
+      TẮT JIT — cùng hình dạng với câu doanh số của Báo cáo lợi nhuận danh nghĩa (`ORDER_OUTCOME` +
+      trạng thái con ĐVVC + mốc bàn giao, toàn truy vấn con tương quan). `perf-probe` production
+      23/09/2026: câu này 18,3 giây trên kỳ 30 ngày chỉ ~1.500 đơn. Kết quả không đổi.
+    */
     const rows = rowsOf<{ order_id: string; key: string | null; code: string | null; name: string | null; line_total: string | number; line_qty: string | number; line_cogs: string | number; cogs_unknown_qty: string | number; order_total: string | number; outcome: string; con: string; age_hours: string | number | null; product_code: string | null }>(
-      await db.execute(sql`
+      await chayKhongJit(db, (tx) => tx.execute(sql`
         with don as (
           select "orders"."id" as order_id,
                  coalesce("orders"."total_price_after_discount", 0) as order_total,
@@ -975,7 +1048,7 @@ export async function getProjectedDeliveryMetrics(
           left join "product_variants" on "product_variants"."id" = "order_items"."variant_id"
           left join "products" on "products"."id" = coalesce("product_variants"."product_id", "order_items"."product_id")
          group by d.order_id, d.order_total, d.con, d.outcome, d.age_hours, ${khoa}, ${ma}, ${ten}
-      `),
+      `)),
     );
 
     const theoMa = new Map<string, Acc & { key: string; code: string; name: string }>();

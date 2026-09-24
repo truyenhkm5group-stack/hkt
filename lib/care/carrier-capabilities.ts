@@ -8,7 +8,7 @@ import type { CarrierCapabilityStatus, CarrierCapabilityView } from "@/lib/care/
  * Nguồn: tài liệu API đối tác Viettel Post v2 (`order/UpdateOrder` TYPE 1 duyệt · 2 duyệt chuyển
  * hoàn · 3 phát tiếp · 4 huỷ · 5 lấy lại/gửi lại · 11 xoá đơn huỷ; `order/edit` sửa người nhận /
  * SĐT / địa chỉ / thu hộ / ghi chú cho đơn CHƯA phát) và đo trên production 11/09/2026: tài khoản
- * API của ERP đọc được 0/565 vận đơn đang chạy (vận đơn Pancake tạo thuộc tài khoản khác).
+ * API của ERP đọc được 0/565 vận đơn đang chạy. NGUYÊN NHÂN CHƯA BIẾT — xem `docs/vtp-capability-matrix.md`.
  *
  * Kết luận cho từng hành động theo (API có tồn tại?) × (credential có quyền trên kiện?) × (chặng):
  *  · SUPPORTED          — API có, credential sở hữu kiện, chặng cho phép ⇒ gửi thẳng.

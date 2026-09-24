@@ -154,7 +154,7 @@ export async function testWorkOs(db: Db) {
 
   /* ═══════════ 1 · FIXTURE ═══════════ */
   const depts = await listDepartments();
-  assert.equal(depts.length, 7, "bảy phòng ban mặc định phải được gieo bởi migration");
+  assert.equal(depts.length, 8, "tám phòng ban mặc định phải được gieo bởi migration (phòng Sản xuất tách khỏi Kho 23/09/2026)");
   const sales = depts.find((d) => d.code === "SALES")!;
   const finance = depts.find((d) => d.code === "FINANCE")!;
 

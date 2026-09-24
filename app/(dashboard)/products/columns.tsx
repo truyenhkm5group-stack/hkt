@@ -158,7 +158,6 @@ export function buildProductColumns(warehouses: { id: string; name: string }[]):
             // Chưa có phiếu nhập nào ⇒ KHÔNG biết tồn. Hiện số âm bịa ra còn tệ hơn nói thẳng là chưa biết.
             <span className="text-[11px] font-semibold text-muted-foreground">Chưa có phiếu nhập</span>
           )}
-          <div className="text-[10.5px] text-muted-foreground">Pancake {formatNumber(row.original.remainQuantity)}</div>
         </div>
       ),
     },

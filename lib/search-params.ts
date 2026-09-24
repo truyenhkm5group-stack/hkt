@@ -116,3 +116,20 @@ export function parseListParams(
   }
   return { page, pageSize, sort, dir, q: param(params, "q"), filters, period: resolvePeriod(params, options.defaultPeriod ?? "all") };
 }
+
+/**
+ * Đường dẫn giữ NGUYÊN mọi tham số đang có (kỳ · cấp · bộ lọc) rồi đặt thêm một khoá.
+ *
+ * Một liên kết viết cứng kiểu `href="?ghep=1"` làm mất sạch kỳ và bộ lọc người dùng đang xem: bấm
+ * mở một khối là bị đưa về tháng hiện tại, và con số trong khối ấy nói về một kỳ khác với phần còn
+ * lại của trang.
+ */
+export function hrefWith(raw: SearchParams, key: string, value: string): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(raw)) {
+    if (k === key || v === undefined) continue;
+    for (const x of Array.isArray(v) ? v : [v]) q.append(k, x);
+  }
+  q.set(key, value);
+  return `?${q.toString()}`;
+}

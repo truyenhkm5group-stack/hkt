@@ -1,17 +1,27 @@
 "use client";
 
 import { Fragment, useMemo, useState } from "react";
-import { ChevronRight, TriangleAlert } from "lucide-react";
+import { ChevronRight, CornerDownRight, TriangleAlert } from "lucide-react";
 import { InfoHint } from "@/components/info-hint";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { successTone } from "@/lib/constants/returns";
 import { LEDGER_SETTLE_LAG_DAYS, LEDGER_WINDOW_DAYS } from "@/lib/constants/marketing-decision-ledger";
-import { ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_ACTION_TONE, ADS_DECISION_RULE, ADS_DIMENSION_LABEL, DECISION_BASIS_NOTE } from "@/lib/constants/ads-decision";
+import {
+  ADS_ACTION_HINT,
+  ADS_ACTION_LABEL,
+  ADS_ACTION_TONE,
+  ADS_DECISION_RULE,
+  ADS_DIMENSION_LABEL,
+  ADS_SPEND_CLASS_HINT,
+  ADS_SPEND_CLASS_LABEL,
+  DECISION_BASIS_NOTE,
+} from "@/lib/constants/ads-decision";
 import type { AdsDecisionRow } from "@/lib/queries/ads-decision";
 import type { AdsDimension } from "@/lib/constants/ads-decision";
 import type { Stability } from "@/lib/marketing/decision-stability";
 import { AdsBudgetAction } from "@/app/(dashboard)/ads/budget-action";
+import { ProductBudgetPlanAction } from "@/app/(dashboard)/ads/product-budget-plan";
 import { cn } from "@/lib/utils";
 
 /**
@@ -167,7 +177,7 @@ function Detail({ row }: { row: AdsDecisionRow }) {
       {
         label: "▸ Lợi nhuận SAU QC TẠM TÍNH",
         value: <strong>{row.spendKnown ? formatVND(row.projectedProfitAfterAds) : "—"}</strong>,
-        hint: "Chưa trừ cước của phần đang treo: đơn chưa gửi thì chưa phát sinh cước thật, nên con số này rộng rãi hơn thực tế một chút. Cùng cách tính với Báo cáo hiệu quả marketing.",
+        hint: "Đã trừ CẢ cước dự phóng của phần đang treo — đã cộng doanh thu tương lai thì phải trừ chi phí tương lai của đúng phần ấy. Cước không nhân tỷ lệ giao thành công: hàng hoàn vẫn tốn cước đi. Vế còn thiếu: phí hoàn của đơn đang treo, vì nó chỉ tồn tại sau khi hoàn thật.",
       },
     );
   }
@@ -256,7 +266,20 @@ function Stable({ s }: { s: Stability }) {
   );
 }
 
-export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDecisionRow[]; dimension: AdsDimension; stability?: Record<string, Stability> }) {
+export function AdsDecisionTable({
+  rows,
+  dimension,
+  stability,
+  hiddenCount = 0,
+  showAllHref,
+}: {
+  rows: AdsDecisionRow[];
+  dimension: AdsDimension;
+  stability?: Record<string, Stability>;
+  /** Số dòng máy chủ KHÔNG gửi xuống. Ô tìm kiếm chỉ tìm trong phần đã gửi, nên phải nói ra điều đó. */
+  hiddenCount?: number;
+  showAllHref?: string;
+}) {
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
@@ -273,7 +296,7 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={`Tìm ${ADS_DIMENSION_LABEL[dimension].toLowerCase()}…`}
+          placeholder={hiddenCount > 0 ? `Tìm trong ${rows.length} dòng đang hiện…` : `Tìm ${ADS_DIMENSION_LABEL[dimension].toLowerCase()}…`}
           className="h-8 w-full max-w-xs rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         />
       </div>
@@ -480,6 +503,44 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
                         </span>
                       ) : null}
                       {stability?.[row.key] ? <Stable s={stability[row.key]} /> : null}
+                      {/*
+                        KẾT LUẬN MƯỢN ĐỨNG DƯỚI, KHÔNG THAY CHỖ.
+
+                        Dòng vẫn nói "Chưa đủ dữ liệu" — đó là sự thật về CHIẾN DỊCH này. Câu dưới
+                        nói một sự thật khác: mã hàng nó đang chạy thì đã có câu trả lời. Đặt hai
+                        câu chồng nhau là để người đọc thấy CHÍNH XÁC bằng chứng dừng ở đâu.
+
+                        Tên mã luôn đi kèm, không bao giờ chỉ có mỗi chữ: một chiến dịch dở nằm
+                        trong một mã lãi vẫn sẽ mượn chữ "còn dư địa", và người đọc phải thấy được
+                        rằng câu ấy nói về cái mã chứ không nói về dòng này.
+                      */}
+                      {/*
+                        CHI PHÍ TEST KHÔNG ĐI MƯỢN, VÀ KHÔNG PHẢI MỘT CHỖ TRỐNG.
+
+                        Nó cố ý không thuộc mã nào. Dán chữ "chưa đủ dữ liệu" lên nó là mời người
+                        đi sửa một thứ không hỏng — và đó đúng là lời khuyên sai tôi suýt đưa
+                        (khai mã cho 318 chiến dịch test).
+                      */}
+                      {row.spendClass === "TEST" || row.spendClass === "UNCLASSIFIED" ? (
+                        <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <CornerDownRight className="size-3 shrink-0" />
+                          <span className={cn(row.spendClass === "UNCLASSIFIED" && "text-amber-600 dark:text-amber-400")}>
+                            {ADS_SPEND_CLASS_LABEL[row.spendClass]}
+                          </span>
+                          <InfoHint>{ADS_SPEND_CLASS_HINT[row.spendClass]}</InfoHint>
+                        </span>
+                      ) : null}
+                      {row.inherited ? (
+                        <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <CornerDownRight className="size-3 shrink-0" />
+                          <span>
+                            Mã <b>{row.inherited.productName}</b>: {ADS_ACTION_LABEL[row.inherited.action]}
+                          </span>
+                          <InfoHint>
+                            {`Chiến dịch này chưa đủ dữ liệu để tự kết luận, nhưng MÃ HÀNG nó đang chạy thì có. Đây là kết luận của cả mã "${row.inherited.productName}", không phải của riêng chiến dịch này — một chiến dịch dở trong một mã lãi vẫn sẽ mượn chữ tốt. Lý do của mã: ${row.inherited.reason}`}
+                          </InfoHint>
+                        </span>
+                      ) : null}
                     </TableCell>
                   </TableRow>
                   {isOpen ? (
@@ -498,6 +559,13 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
                         {dimension === "campaign" ? (
                           <AdsBudgetAction campaignId={row.key} decision={row.action} ready={Boolean(stability?.[row.key]?.ready)} />
                         ) : null}
+                        {/*
+                          BÀN TAY CẤP MÃ — nơi kết luận thật sự dùng được. Cấp chiến dịch thường nói
+                          về một chiến dịch đã tắt (6/8 đo ngày 23/09/2026); mã hàng thì sống lâu.
+                        */}
+                        {dimension === "product" ? (
+                          <ProductBudgetPlanAction productId={row.key} productName={row.name} decision={row.action} ready={Boolean(stability?.[row.key]?.ready)} />
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   ) : null}
@@ -507,7 +575,23 @@ export function AdsDecisionTable({ rows, dimension, stability }: { rows: AdsDeci
             {!filtered.length ? (
               <TableRow>
                 <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
-                  Không có dòng nào khớp.
+                  {/*
+                    Tìm không thấy trong phần ĐANG HIỆN khác hẳn "không tồn tại": dòng cần tìm có thể
+                    nằm trong phần máy chủ chưa gửi xuống. Nói "không có dòng nào khớp" ở đó là một
+                    câu sai trông rất chắc chắn.
+                  */}
+                  {hiddenCount > 0 ? (
+                    <>
+                      Không có dòng nào khớp trong {rows.length} dòng đang hiện.{" "}
+                      {showAllHref ? (
+                        <a className="font-medium text-foreground underline underline-offset-2" href={showAllHref}>
+                          Hiện tất cả để tìm trong {rows.length + hiddenCount} dòng
+                        </a>
+                      ) : null}
+                    </>
+                  ) : (
+                    "Không có dòng nào khớp."
+                  )}
                 </TableCell>
               </TableRow>
             ) : null}
