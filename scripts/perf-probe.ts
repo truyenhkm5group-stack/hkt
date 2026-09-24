@@ -116,7 +116,7 @@ const results: {
  * một câu 16 giây che mất hoàn toàn — không biết phải sửa câu nào. Hàm khớp mẫu dưới đây được ghi
  * lại MỌI câu từ 50ms trở lên trong lượt NGUỘI, in thành một mục riêng.
  */
-const TRONG_DIEM = /getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage/;
+const TRONG_DIEM = /getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage|dataQualitySummary|getDataQualityIssues|codSettlementSummary|listCodSettlement|customerFacets|getCashflowStatement/;
 let cauTrongHam: { ms: number; sql: string }[] | null = null;
 const cauTheoHam = new Map<string, { ms: number; sql: string }[]>();
 
@@ -351,7 +351,9 @@ async function main() {
 
   /*
     PHỄU BÁN HÀNG — 34,4 giây lúc máy RẢNH, và là trang duy nhất ĐỔ khi máy bận (deploy #392:
-    hết kết nối CSDL). Khác hai hàm trên: bốn hàm này KHÔNG có `memo()` ở bất cứ tầng nào.
+    hết kết nối CSDL). Bốn hàm này từng KHÔNG có `memo()` ở bất cứ tầng nào; từ vòng vá 24/09/2026
+    chúng đệm 120 giây (docs/perf/vong-va-2026-09-24.md) — cột ẤM của chúng phải về gần 0, còn cột
+    NGUỘI vẫn là chi phí thật của lần mở đầu.
   */
   const funnel = await import("@/lib/queries/sales-funnel");
   await timed("/reports/funnel", "getSalesFunnel", () => funnel.getSalesFunnel(month));
@@ -600,6 +602,30 @@ async function main() {
   await timed("/customers", "listCustomers", () => cus.listCustomers(cusParams));
   await timed("/customers", "customerFacets", () => cus.customerFacets(cusParams));
   await timed("/customers", "customerSummary", () => cus.customerSummary(cusParams));
+
+  /*
+    VÒNG VÁ 24/09/2026 (docs/perf/vong-va-2026-09-24.md). Các hàm dưới đây vừa chạy câu kết quả đơn
+    trong `chayKhongJit` theo HÌNH DẠNG, chưa có số đo riêng — và sáu trong số đó trước nay KHÔNG có
+    mặt trong probe, nên trang của chúng chậm mà không ai nói được câu nào. Đo ở đây cho có trước/sau.
+    Mỗi hàm theo ĐÚNG kỳ mặc định của trang mình.
+  */
+  const dqq = await import("@/lib/queries/data-quality");
+  await timed("/data-quality", "dataQualitySummary 90d", () => dqq.dataQualitySummary(ret90));
+  await timed("/data-quality", "dataQualityOrders unverified 90d", () => dqq.dataQualityOrders("unverified", ret90, 1, 50, ""));
+  await timed("/data-quality", "unlinkedShipments", () => dqq.unlinkedShipments(1, 50, "", "updatedAt", "desc"));
+  const prod = await import("@/lib/queries/products");
+  const prodParams = { ...cusParams, sort: "erpStock" };
+  await timed("/products", "productFacets", () => prod.productFacets(prodParams));
+  await timed("/products", "productSummary", () => prod.productSummary(prodParams));
+  const cashflowQ = await import("@/lib/queries/cashflow");
+  await timed("/reports/cashflow", "getCashflow (tab dự phóng)", () => cashflowQ.getCashflow());
+  const bridgeQ = await import("@/lib/queries/profit-cash-bridge");
+  await timed("/reports/cashflow", "getProfitCashBridge tháng này", () => bridgeQ.getProfitCashBridge(thangTrang));
+  const statementQ = await import("@/lib/queries/cashflow-statement");
+  await timed("/reports/cashflow", "getCashflowStatement tháng này", () => statementQ.getCashflowStatement(thangTrang));
+  const convQ = await import("@/lib/queries/conversion-funnel");
+  await timed("/reports/funnel", "getConversionFunnel", () => convQ.getConversionFunnel(month));
+  await timed("/reports/funnel", "getConversionByDimension employee", () => convQ.getConversionByDimension(month, "employee"));
 
   const okr = await import("@/lib/queries/okr");
   const quy = okr.currentQuarter();

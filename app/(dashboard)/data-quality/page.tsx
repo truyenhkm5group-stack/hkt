@@ -64,6 +64,7 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
   // NĂM TRUY VẤN ĐỘC LẬP, KHÔNG ĐỨNG CHỜ NHAU. Trước đây chúng chạy nối tiếp nên thời gian dựng
   // trang bằng TỔNG của cả năm; không cái nào cần kết quả của cái nào (nhóm vấn đề đang mở chỉ
   // phụ thuộc `issue` đọc từ URL). Số liệu không đổi một chữ số nào, chỉ hết chờ vô ích.
+  const phutHienTai = Math.floor(Date.now() / 60_000) * 60_000;
   const [summary, tower, towerDrill, drill, backlog, adsCoverage, dqIssues] = await Promise.all([
     dataQualitySummary(params.period),
     getControlTower(),
@@ -79,7 +80,9 @@ export default async function DataQualityPage({ searchParams }: { searchParams: 
     // Tồn đọng hàng hoàn chờ kho — tính trên TOÀN BỘ, không phải trang đang xem, để biết còn bao nhiêu.
     issue === "return-not-received" ? pendingReturnedForWarehouse() : Promise.resolve(null),
     // Độ phủ quy kết quảng cáo 30 ngày — chỉ số theo dõi dữ liệu MỚI có tốt lên hay không.
-    adsAttributionCoverage(new Date(Date.now() - 30 * 86_400_000), new Date()),
+    // Mốc TRÒN TỚI PHÚT: khoá đệm của hàm chứa mốc tới mili giây, nên `new Date()` trần đổi khoá mỗi
+    // lượt tải và đệm 120 giây KHÔNG BAO GIỜ trúng. Cửa sổ lùi tối đa 60 giây — nhỏ hơn độ cũ của đệm.
+    adsAttributionCoverage(new Date(phutHienTai - 30 * 86_400_000), new Date(phutHienTai)),
     getDataQualityIssues(),
   ]);
   const warehouseBacklog = backlog

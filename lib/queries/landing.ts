@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, ilike, inArray, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import type { RiskAssessment } from "@/lib/alerts/risk";
 import { memo, periodKey } from "@/lib/cache";
 import { pushBlockOf, type DuplicateHit, type LandingStatus, type PushBlock } from "@/lib/constants/landing";
@@ -121,7 +121,10 @@ function conds(f: LandingFilters): SQL[] {
 
 export async function listLandingOrders(f: LandingFilters, limit = 300): Promise<LandingRow[]> {
   const db = await getDb();
-  const rows = await db
+  // TẮT JIT: cột kết quả đơn (ORDER_OUTCOME_FAST) và — khi lọc theo kết quả — bộ lọc cùng biểu thức
+  // quét mọi dòng landing của kỳ, kèm hai truy vấn con tương quan mỗi dòng (`lastPos`, dòng hàng):
+  // hình dạng mà ước lượng chi phí vượt ngưỡng JIT dù chỉ trả 300 dòng.
+  const rows = await chayKhongJit(db, (tx) => tx
     .select({
       id: l.id,
       rowIndex: l.rowIndex,
@@ -186,7 +189,7 @@ export async function listLandingOrders(f: LandingFilters, limit = 300): Promise
     .leftJoin(p, eq(p.id, pv.productId))
     .where(and(...conds(f)))
     .orderBy(desc(sql`coalesce(${l.submittedAt}, ${l.createdAt})`))
-    .limit(limit);
+    .limit(limit));
   return rows.map((r) => ({
     ...r,
     status: r.status as LandingStatus,
@@ -220,13 +223,14 @@ export async function landingSummary(period: Period): Promise<LandingSummary> {
       .from(l)
       .where(where);
     const statusRows = await db.select({ status: l.status, n: sql<number>`count(*)` }).from(l).where(where).groupBy(l.status);
-    const outcomeRows = await db
+    // TẮT JIT: nhóm theo ORDER_OUTCOME_FAST trên mọi dòng landing của kỳ.
+    const outcomeRows = await chayKhongJit(db, (tx) => tx
       .select({ oc: sql<string>`case when ${l.orderId} is null then 'NONE' else ${ORDER_OUTCOME_FAST} end`, n: sql<number>`count(*)` })
       .from(l)
       .leftJoin(o, eq(o.id, l.orderId))
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
       .where(where)
-      .groupBy(sql`1`);
+      .groupBy(sql`1`));
     const byStatus: Record<LandingStatus, number> = { NEW: 0, CONFIRMED: 0, PUSHED: 0, CANCELLED: 0 };
     for (const r of statusRows) byStatus[r.status as LandingStatus] = Number(r.n);
     const byOutcome: Record<OrderOutcome | "NONE", number> = { NONE: 0, NOT_SHIPPED: 0, UNKNOWN: 0, AWAITING_PICKUP: 0, IN_TRANSIT: 0, DELIVERED: 0, RETURNED: 0, RETURNED_BY_RULE: 0, CANCELLED: 0 };

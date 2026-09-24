@@ -1,5 +1,5 @@
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { STAGE_SINCE_SQL } from "@/lib/constants/shipment-status-age";
 import { CARRIER_HANDOFF_AT_SQL } from "@/lib/constants/carrier-handoff";
@@ -51,13 +51,15 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
     /* ───── Vận đơn không biết vào chặng hiện tại lúc nào ─────
        CHỈ đếm trên kiện CHƯA tới chặng kết thúc: kiện đã giao xong hay đã hoàn xong thì mốc vào
        chặng không còn là việc của ai, và đếm chúng vào đây sẽ thổi con số lên bằng cả kho lịch sử. */
+    // Vị ngữ (truy vấn con tương quan vào shipment_events) đặt ở WHERE, không lặp trong hai
+    // `filter`: cùng tập dòng ⇒ cùng `count`/`max`, mỗi kiện chỉ chạy truy vấn con một lần.
     const [changStart] = await db
       .select({
-        n: sql<number>`count(*) filter (where ${sql.raw(STAGE_SINCE_SQL)} is null)`,
-        lastSeen: sql<Date | null>`max(${s.createdAt}) filter (where ${sql.raw(STAGE_SINCE_SQL)} is null)`,
+        n: sql<number>`count(*)`,
+        lastSeen: sql<Date | null>`max(${s.createdAt})`,
       })
       .from(s)
-      .where(sql`${s.stage}::text not in ('DELIVERED','RETURNED','CANCELLED')`);
+      .where(sql`${s.stage}::text not in ('DELIVERED','RETURNED','CANCELLED') and ${sql.raw(STAGE_SINCE_SQL)} is null`);
     const changStartMau = await db
       .select({ code: s.vtpOrderNumber, stage: s.stage })
       .from(s)
@@ -68,10 +70,11 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
     /* ───── Vận đơn chưa có chứng cứ ĐVVC tiếp nhận ───── */
     const [handoff] = await db
       .select({
-        n: sql<number>`count(*) filter (where ${sql.raw(CARRIER_HANDOFF_AT_SQL)} is null)`,
-        lastSeen: sql<Date | null>`max(${s.createdAt}) filter (where ${sql.raw(CARRIER_HANDOFF_AT_SQL)} is null)`,
+        n: sql<number>`count(*)`,
+        lastSeen: sql<Date | null>`max(${s.createdAt})`,
       })
-      .from(s);
+      .from(s)
+      .where(sql`${sql.raw(CARRIER_HANDOFF_AT_SQL)} is null`);
     const handoffMau = await db
       .select({ code: s.vtpOrderNumber, stage: s.stage })
       .from(s)
@@ -86,7 +89,7 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
       select count(distinct g.order_id) from shipments g
       where g.vtp_order_number = ${s.orderReference} and g.order_id is not null
     ) > 1`;
-    const [ambiguous] = await db.select({ n: sql<number>`count(*) filter (where ${mơHồ})`, lastSeen: sql<Date | null>`max(${s.createdAt}) filter (where ${mơHồ})` }).from(s);
+    const [ambiguous] = await db.select({ n: sql<number>`count(*)`, lastSeen: sql<Date | null>`max(${s.createdAt})` }).from(s).where(mơHồ);
     const ambiguousMau = await db.select({ code: s.vtpOrderNumber, ref: s.orderReference }).from(s).where(mơHồ).orderBy(desc(s.createdAt)).limit(5);
 
     /* ───── Dòng tiền chưa phân loại ───── */
@@ -96,10 +99,17 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
     const bankMau = await db.select({ ref: bt.bankRef, desc: bt.description }).from(bt).where(chuaPhanLoai).orderBy(desc(bt.txnAt)).limit(5);
 
     /* ───── Đơn đã giao mà chưa tra được giá vốn ───── */
-    const [cogs] = await db
-      .select({ n: sql<number>`count(*) filter (where ${IS_MISSING_COGS})`, lastSeen: sql<Date | null>`max(${o.insertedAt}) filter (where ${IS_MISSING_COGS})` })
+    /*
+      Vị ngữ đặt ở WHERE thay vì lặp trong hai `filter (where …)`: `IS_MISSING_COGS` mang
+      `ORDER_OUTCOME` SỐNG + giá vốn, chạy trên MỌI đơn; viết hai lần là mỗi đơn tính hai lần. Cùng
+      tập dòng ⇒ cùng kết quả (không dòng nào khớp: `count` = 0, `max` = NULL — như bản cũ).
+      TẮT JIT: cùng họ câu kết quả đơn đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+    */
+    const [cogs] = await chayKhongJit(db, (tx) => tx
+      .select({ n: sql<number>`count(*)`, lastSeen: sql<Date | null>`max(${o.insertedAt})` })
       .from(o)
-      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT));
+      .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
+      .where(IS_MISSING_COGS));
 
     /* ───── Việc chưa nối được về tài khoản ───── */
     // Ba miền, một lượt đọc mỗi miền. Cộng lại thành một con số vì câu hỏi của người quản lý là
@@ -196,7 +206,7 @@ export async function getDataQualityIssues(): Promise<DqIssueRow[]> {
       )
       where sh.id = ${ri.shipmentId}
     )`;
-    const [muMo] = await db.select({ n: sql<number>`count(*) filter (where ${khongBietHang})`, lastSeen: sql<Date | null>`max(${ri.receivedAt}) filter (where ${khongBietHang})` }).from(ri);
+    const [muMo] = await db.select({ n: sql<number>`count(*)`, lastSeen: sql<Date | null>`max(${ri.receivedAt})` }).from(ri).where(khongBietHang);
     const muMoMau = await db
       .select({ code: s.vtpOrderNumber, ref: s.orderReference })
       .from(ri)

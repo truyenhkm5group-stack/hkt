@@ -1,5 +1,5 @@
 import { and, eq, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { PANCAKE_ORDER_STATUS } from "@/lib/constants/pancake";
 import { CONVERSION_DIMENSION_LABEL, dimensionHasUnassigned, ORDER_STEPS, type ConversionDimension, type EvidenceTier, type OrderStepKey } from "@/lib/constants/conversion";
@@ -192,7 +192,10 @@ export async function getConversionFunnel(period: Period): Promise<ConversionFun
     const facts = funnelFacts(db, periodWhere(period)).as("cf_facts");
     const level = reachedLevel(facts);
 
-    const [row] = await db
+    // TẮT JIT: `funnelFacts` tính ORDER_OUTCOME_FAST + SHIPMENT_LEFT_WAREHOUSE + hai mốc tương quan
+    // cho mọi đơn của kỳ — cùng hình dạng `sales-funnel`/`marketing-daily` đã đo JIT là phần lớn
+    // thời gian. Rào `OUTCOME_FENCE` giảm số lần TÍNH, không giảm chi phí BIÊN DỊCH của kế hoạch.
+    const [row] = await chayKhongJit(db, (tx) => tx
       .select({
         total: sql<number>`count(*)`,
         lvl2: sql<number>`count(*) filter (where ${level} >= 2)`,
@@ -220,7 +223,7 @@ export async function getConversionFunnel(period: Period): Promise<ConversionFun
         deliverP90: sql<number>`percentile_cont(0.9) within group (order by ${hoursBetween(facts.pickedUpAt, facts.deliveredAt)})`,
         deliverN: sql<number>`count(${hoursBetween(facts.pickedUpAt, facts.deliveredAt)})`,
       })
-      .from(facts);
+      .from(facts));
 
     const counts: Record<OrderStepKey, number> = {
       CREATED: Number(row?.total ?? 0),
@@ -394,7 +397,8 @@ export async function getConversionByDimension(
     const level = reachedLevel(facts);
     const dim = sql`coalesce(${facts.dimKey}, '')`;
 
-    const rows = await db
+    // TẮT JIT — cùng lý do với `getConversionFunnel`: cùng bảng dẫn xuất `funnelFacts`.
+    const rows = await chayKhongJit(db, (tx) => tx
       .select({
         key: sql<string>`${dim}`,
         created: sql<number>`count(*)`,
@@ -408,7 +412,7 @@ export async function getConversionByDimension(
         confirmMed: sql<number>`percentile_cont(0.5) within group (order by ${hoursBetween(facts.insertedAt, facts.confirmedAt)})`,
       })
       .from(facts)
-      .groupBy(dim);
+      .groupBy(dim));
 
     const total = rows.reduce((t, r) => t + Number(r.created ?? 0), 0);
     const assigned = rows.filter((r) => r.key !== "").reduce((t, r) => t + Number(r.created ?? 0), 0);
