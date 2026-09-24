@@ -72,7 +72,9 @@ on:
           - cs-rule-update      # đóng MỀM case sinh bởi luật cũ rồi quét lại (mặc định chỉ đếm; arg "--apply" mới ghi)
           - care-waiting-reconcile # đối chiếu ca chăm sóc ĐANG CHỜ mà không có mốc xem lại (mặc định CHẠY THỬ; arg "--apply" mới ghi)
           - payroll-reconcile   # ĐỐI CHIẾU LƯƠNG cũ/mới trên dữ liệu production — CHỈ ĐỌC, Postgres tự chặn ghi (arg: "--from 2026-08-01 --to 2026-08-31")
-          - backup              # pg_dump vào /root/backups
+          - backup              # sao lưu NGAY bằng scripts/erp-backup.sh: CSDL (-Fc) + dữ liệu bot chat, kiểm toàn vẹn, xoay vòng, đẩy ngoài máy nếu đã khai (vào /root/backups/manual)
+          - backup-status       # trạng thái sao lưu: lịch cron, lượt gần nhất, bản trên máy, ngoài máy, ổ đĩa — KHÔNG in dữ liệu
+          - restore-drill       # DIỄN TẬP khôi phục bản mới nhất vào container Postgres TẠM (không mạng, trần RAM), đếm dòng bảng then chốt so với CSDL sống, rồi xoá container
           - restart             # khởi động lại app + scheduler
           - rotate-webhook-secrets # tạo lại secret webhook Pancake/Viettel Post trong .env rồi khởi động lại
           - apply-ai-env        # ghi OPENAI_API_KEY / ANTHROPIC_API_KEY / AI_PROVIDER từ Secrets vào .env, khởi động lại, rồi kiểm tra AI
@@ -263,9 +265,9 @@ jobs:
             }
 
             # ─── PHÂN LOẠI: mặc định là GHI, và cờ ghi đè lên tên ───
-            DOC_NHE="status perf disk logs db-query"
+            DOC_NHE="status perf disk logs db-query backup-status"
             DOC_PROBE="check-integrations vtp-debug vtp-probe vtp-web-probe phone-probe pages-debug meta-id-probe vtp-capability ads-level-probe"
-            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check"
+            DOC_NANG="verify smoke session-verify perf-probe perf-audit kpi-snapshot explain-stock outcome-explain outcome-parity returns-parity reason-coverage reason-backfill cogs-drift profit-verify marketing-calibrate payroll-reconcile fanpage-evidence-backfill care-false-reopen care-outcome-before-open care-waiting-reconcile cs-rule-update cs-stale sepay-reconcile cod-rebuild cod-status-repair vtp-return-status-repair agent-run-reattach vtp-rebuild-state vtp-replay-files vtp-manual-verify vtp-statement-peek returns-hmt ai-check backup restore-drill"
 
             LOP=GHI
             case "$ARG" in
@@ -772,9 +774,28 @@ jobs:
                 fetch_script payroll-reconcile.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/payroll-reconcile.ts'
                 docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/payroll-reconcile.ts $ARG ;;
               backup)
-                mkdir -p /root/backups
-                $C exec -T db pg_dump -U erp erp | gzip > "/root/backups/erp-$(date +%F-%H%M).sql.gz"
-                ls -lh /root/backups | tail -5 ;;
+                # ═══ MỘT LUẬT SAO LƯU, DÙNG CHUNG VỚI CRON ═══
+                # Không viết lại `pg_dump` ở đây: kiểm ổ đĩa trước, kiểm toàn vẹn sau, xoay vòng,
+                # bản ngoài máy, tệp trạng thái — tất cả nằm ở scripts/erp-backup.sh. Làn DOC_NANG:
+                # pg_dump KHÔNG ghi CSDL, nhưng là phép đọc nặng nhất ERP có (một lượt tại một thời
+                # điểm) và cần container đứng yên. Script DÙNG LẠI hai khoá này (FD 8, 9 thừa kế)
+                # thay vì xin lần hai — xin lần hai là tự chờ khoá của chính mình.
+                # Ưu tiên ĐÚNG bản cron đang chạy (/root/erp ở commit đã deploy); máy chưa có thì lấy từ main.
+                SB=/root/erp/scripts/erp-backup.sh
+                [ -f "$SB" ] || { SB="$(mktemp)"; fetch_script erp-backup.sh > "$SB"; }
+                ERP_DIR=/root/erp bash "$SB" run --trigger=ops ;;
+              backup-status)
+                # CHỈ ĐỌC tệp trạng thái + danh sách tệp + ổ đĩa. Không in một dòng dữ liệu nào.
+                SB=/root/erp/scripts/erp-backup.sh
+                [ -f "$SB" ] || { SB="$(mktemp)"; fetch_script erp-backup.sh > "$SB"; }
+                ERP_DIR=/root/erp bash "$SB" status ;;
+              restore-drill)
+                # Khôi phục bản MỚI NHẤT vào container Postgres TẠM (cùng ảnh, --network none, không
+                # cổng, trần RAM), đếm dòng bảng then chốt so với CSDL sống, xoá container. CSDL sống
+                # chỉ bị đọc `count(*)`. Máy thiếu RAM/ổ đĩa thì TỪ CHỐI chạy và nói rõ vì sao.
+                SB=/root/erp/scripts/erp-backup.sh
+                [ -f "$SB" ] || { SB="$(mktemp)"; fetch_script erp-backup.sh > "$SB"; }
+                ERP_DIR=/root/erp bash "$SB" restore-drill ;;
               rotate-webhook-secrets)
                 NEW_PK="pk_$(openssl rand -hex 16)"; NEW_VTP="vtp_$(openssl rand -hex 16)"
                 sed -i -E "s|^PANCAKE_WEBHOOK_SECRET=.*|PANCAKE_WEBHOOK_SECRET=\"$NEW_PK\"|; s|^VIETTELPOST_WEBHOOK_SECRET=.*|VIETTELPOST_WEBHOOK_SECRET=\"$NEW_VTP\"|" .env

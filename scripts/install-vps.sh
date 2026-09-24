@@ -42,13 +42,13 @@ elif command -v firewall-cmd >/dev/null 2>&1 && firewall-cmd --state >/dev/null 
 fi
 
 # ───────── 3. File .env ─────────
+# Bổ sung / cập nhật một biến trong .env (không đụng các giá trị khác). Giá trị rỗng ⇒ KHÔNG ghi gì.
+upsert_env() { # upsert_env TÊN GIÁ_TRỊ
+  [ -n "$2" ] || return 0
+  if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi
+}
 if [ -f .env ]; then
   say "Đã có .env, giữ nguyên (xoá file này nếu muốn tạo lại)"
-  # Bổ sung / cập nhật các biến mới nếu được truyền qua môi trường (không đụng các giá trị khác)
-  upsert_env() { # upsert_env TÊN GIÁ_TRỊ
-    [ -n "$2" ] || return 0
-    if grep -qE "^$1=" .env; then sed -i -E "s|^$1=.*|$1=\"$2\"|" .env; else printf '%s="%s"\n' "$1" "$2" >> .env; fi
-  }
   upsert_env FACEBOOK_ACCESS_TOKEN "${FACEBOOK_ACCESS_TOKEN:-}"
   upsert_env FACEBOOK_BUSINESS_ID "${FACEBOOK_BUSINESS_ID:-}"
   upsert_env PANCAKE_ACCESS_TOKEN "${PANCAKE_ACCESS_TOKEN:-}"
@@ -75,15 +75,13 @@ if [ -f .env ]; then
   [ -n "${ERP_GITHUB_REPO:-}" ] && upsert_env ERP_GITHUB_REPO "${ERP_GITHUB_REPO}"
   [ -n "${ERP_GITHUB_DEPLOY_WORKFLOW:-}" ] && upsert_env ERP_GITHUB_DEPLOY_WORKFLOW "${ERP_GITHUB_DEPLOY_WORKFLOW}"
   grep -qE "^SYNC_ADS_EVERY_MINUTES=" .env || printf 'SYNC_ADS_EVERY_MINUTES="60"\n' >> .env
-  # ───────── PHÒNG MARKETING: CHỈ GHI KHI CÓ GIÁ TRỊ ─────────
+  # ───────── PHÒNG MARKETING: SỔ CHỈ-ĐỌC — CHỈ GHI KHI CÓ GIÁ TRỊ ─────────
   #
-  # Ba công tắc đi bằng GitHub `vars`, và Variable chưa đặt thì biến về đây RỖNG. Ghi rỗng đè lên
-  # là lặng lẽ TẮT thứ đang chạy ở lần deploy kế tiếp — nên nhánh `[ -n ]` không phải phòng xa, nó
-  # là điều kiện để công tắc dùng được. Cùng luật đã áp cho khoá AI và SePay ngay phía trên.
+  # `MARKETING_LEDGER_EVERY_MINUTES` là lịch của một job CHỈ ĐỌC nghiệp vụ. Variable chưa đặt thì
+  # biến về đây RỖNG, và ghi rỗng đè lên là lặng lẽ tắt một sổ đang chạy — nên giữ nhánh `[ -n ]`
+  # như khoá AI và SePay ở trên. Ba công tắc GHI / CHI TIỀN thì đi luật NGƯỢC LẠI: xem khối
+  # "CÔNG TẮC AN TOÀN" ngay sau khối .env — với chúng, Variable bị xoá phải dẫn tới TẮT.
   [ -n "${MARKETING_LEDGER_EVERY_MINUTES:-}" ] && upsert_env MARKETING_LEDGER_EVERY_MINUTES "${MARKETING_LEDGER_EVERY_MINUTES}"
-  [ -n "${ADS_WRITE_ENABLED:-}" ] && upsert_env ADS_WRITE_ENABLED "${ADS_WRITE_ENABLED}"
-  [ -n "${ADS_WRITE_MODE:-}" ] && upsert_env ADS_WRITE_MODE "${ADS_WRITE_MODE}"
-  [ -n "${CREATIVE_LOOP_EVERY_MINUTES:-}" ] && upsert_env CREATIVE_LOOP_EVERY_MINUTES "${CREATIVE_LOOP_EVERY_MINUTES}"
 else
   say "Tạo .env — nhập thông tin (Enter để dùng mặc định)"
   ask ERP_DOMAIN          "Tên miền ERP"                       "erp.vnxcommerce.com"
@@ -168,6 +166,39 @@ ENV
   chmod 600 .env
   say "Đã ghi .env (chmod 600)"
 fi
+
+# ═══ CÔNG TẮC AN TOÀN — FAIL-CLOSED: VARIABLE BỊ XOÁ / RỖNG ⇒ TẮT ═══
+#
+# LỖI ĐÃ SỬA (24/09/2026): ba công tắc dưới đây từng đi chung luật "rỗng thì giữ nguyên giá trị cũ"
+# với khoá API. Hệ quả: chủ shop XOÁ Variable `ADS_WRITE_ENABLED` trên GitHub để tắt đường ghi quảng
+# cáo, deploy chạy xanh — và `.env` trên máy vẫn giữ `ADS_WRITE_ENABLED="true"`. Nút tắt không tắt.
+#
+# Với khoá API, "rỗng ⇒ giữ nguyên" là đúng: xoá nhầm một Secret không được giết tích hợp đang chạy.
+# Với công tắc MỞ ĐƯỜNG GHI hay CHI TIỀN THẬT thì phải NGƯỢC LẠI — sai về phía TẮT rẻ hơn nhiều sai
+# về phía BẬT (AGENTS.md mục 31: mọi nhánh lỗi phải rơi về phía HẸP HƠN). Variable là nơi DUY NHẤT
+# khai các công tắc này; giá trị gõ tay vào .env trên máy sẽ bị đè ở lần deploy kế tiếp.
+#
+#   ADS_WRITE_ENABLED            chốt ngoài cùng của đường ghi quảng cáo Meta    → false
+#   ADS_WRITE_MODE               nấc quyền ghi quảng cáo                         → OFF
+#   CREATIVE_LOOP_EVERY_MINUTES  vòng mẫu quảng cáo — sinh ảnh, CHI TIỀN THẬT    → 0 (không vào lịch)
+#
+# Chạy SAU cả hai nhánh (có sẵn .env / tạo mới) để lần cài đầu cũng nhận Variable, không chỉ lần sau.
+# Giá trị không phải bí mật (một chuỗi "true", một tên nấc, một con số phút) nên được in ra log.
+CONG_TAC_AN_TOAN="ADS_WRITE_ENABLED=false ADS_WRITE_MODE=OFF CREATIVE_LOOP_EVERY_MINUTES=0"
+for cap in $CONG_TAC_AN_TOAN; do
+  ten="${cap%%=*}"
+  gia_tri_tat="${cap#*=}"
+  gia_tri_moi="${!ten:-}"
+  gia_tri_cu="$(grep -E "^${ten}=" .env | tail -n 1 | cut -d= -f2- | tr -d '"' || true)"
+  if [ -z "$gia_tri_moi" ]; then
+    gia_tri_moi="$gia_tri_tat"
+    if [ -n "$gia_tri_cu" ] && [ "$gia_tri_cu" != "$gia_tri_tat" ]; then
+      warn "$ten: Variable rỗng / đã xoá ⇒ TẮT ($gia_tri_cu → $gia_tri_tat)"
+    fi
+  fi
+  upsert_env "$ten" "$gia_tri_moi"
+  say "Công tắc $ten=$gia_tri_moi"
+done
 
 # đọc lại các giá trị cần dùng bên dưới
 ERP_DOMAIN="$(grep -E '^ERP_DOMAIN=' .env | cut -d= -f2- | tr -d '"')"
@@ -370,6 +401,14 @@ for i in $(seq 1 60); do
 done
 docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true' && say "ERP đã chạy" || warn "ERP chưa phản hồi, xem log: $COMPOSE logs -f app"
 
+# ═══ SAO LƯU TỰ ĐỘNG — CÀI LỊCH Ở MỌI LẦN DEPLOY (idempotent) ═══
+# Toàn bộ luật sao lưu nằm ở scripts/erp-backup.sh; ở đây chỉ cài cron hệ thống gọi nó. KHÔNG chạy
+# một lượt sao lưu trong lúc deploy: deploy đang cầm khoá vòng đời ĐỘC QUYỀN, còn sao lưu cần khoá
+# đọc nặng trước rồi mới tới khoá vòng đời — lấy ngược thứ tự ở đây là mở đường cho bế tắc.
+# Hỏng thì cảnh báo chứ không đổ deploy: trang Kết nối dữ liệu tự báo "chưa có bản sao lưu".
+say "Cài lịch sao lưu tự động"
+bash scripts/erp-backup.sh install-cron || warn "KHÔNG cài được lịch sao lưu — xem docs/backup-restore.md. ERP sẽ báo đỏ ở mục Sao lưu dữ liệu."
+
 say "Đối chiếu sổ migration với cơ sở dữ liệu thật"
 # Migration có mốc cũ hơn mốc đã áp bị drizzle bỏ qua VĨNH VIỄN, không lỗi, không cảnh báo.
 # Bài kiểm nào dựng CSDL mới từ đầu cũng không thấy được — chỉ CSDL đã chạy mới lộ ra.
@@ -419,7 +458,7 @@ cat <<INFO
  Lệnh hữu ích:
    $COMPOSE logs -f app          # log ERP
    $COMPOSE up -d --build        # cập nhật phiên bản
-   $COMPOSE exec -T db pg_dump -U erp erp | gzip > backup-\$(date +%F).sql.gz
+   bash scripts/erp-backup.sh run  # sao lưu ngay (tự động: hằng đêm — docs/backup-restore.md)
 ════════════════════════════════════════════════════════════════
 INFO
 

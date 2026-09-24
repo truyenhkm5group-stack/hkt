@@ -1,6 +1,7 @@
 import { InfoHint } from "@/components/info-hint";
 import { AlertTriangle, CheckCircle2, Clock3, Loader2, RefreshCw, XCircle } from "lucide-react";
 import { BackfillForm } from "@/app/(dashboard)/integrations/backfill-form";
+import { BackupStatusCard } from "@/app/(dashboard)/integrations/backup-status-card";
 import { SyncRunsTable } from "@/app/(dashboard)/integrations/sync-runs-table";
 import { TestConnectionButton } from "@/app/(dashboard)/integrations/test-connection-button";
 import { WebhookEventsTable } from "@/app/(dashboard)/integrations/webhook-events-table";
@@ -378,6 +379,9 @@ export default async function IntegrationsPage({ searchParams }: { searchParams:
           Xử lý lại được cho mọi kết nối ở trên vì luồng nạp dữ liệu là idempotent: {connectors.map((c) => c.reprocessHint).find(Boolean)}
         </p>
       </SectionCard>
+
+      {/* Sao lưu chạy NGOÀI ứng dụng (cron trên VPS) — thẻ này là chỗ duy nhất trong ERP thất bại của nó lộ ra. */}
+      <BackupStatusCard />
 
       {/* ───────── Sức khoẻ Viettel Post ───────── */}
       <SectionCard

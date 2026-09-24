@@ -255,7 +255,7 @@ chín" của nó cũng không đáng tin.
 | Việc | Ai làm |
 |---|---|
 | **System User token có quyền `ads_management`** — token hiện tại chỉ đọc | chủ shop |
-| Đặt `ADS_WRITE_ENABLED=true` và `ADS_WRITE_MODE=COPILOT` trên máy chủ | chủ shop |
+| Đặt `ADS_WRITE_ENABLED=true` và `ADS_WRITE_MODE=COPILOT` ở GitHub Variables rồi deploy (xoá Variable = TẮT) | chủ shop |
 | Bật job ghi sổ (Nấc 0) và chờ đủ `minHeldDays` ngày dữ liệu | chủ shop bật, rồi tự chạy |
 | **Chốt bốn cái trần** ở mục 5.2 dòng 3 — đang là đề xuất khởi điểm (AGENTS.md mục 7) | chủ shop |
 | **Quyền**: đang dùng lại `expenses:write`. Một quyền riêng `ads:budget-write` sẽ hẹp hơn, nhưng thêm quyền là đổi vai trò (mục 7) nên chưa tự làm | chủ shop quyết |

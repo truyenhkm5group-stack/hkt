@@ -204,8 +204,11 @@ jobs:
           # ở `secrets` thì không ai ĐỌC LẠI được giá trị đang chạy — mà với công tắc thì "đang bật
           # hay tắt" chính là thứ cần tra nhất. `vars` đọc lại được, sửa được, và có lịch sử.
           #
-          # Biến TRỐNG thì `install-vps.sh` KHÔNG ghi gì (xem nhánh `[ -n ... ]`), nên một lần deploy
-          # không bao giờ vô tình tắt thứ đang chạy — kể cả khi ai đó lỡ xoá Variable.
+          # HAI LUẬT NGƯỢC NHAU, CÓ CHỦ Ý (scripts/install-vps.sh):
+          #   · MARKETING_LEDGER_EVERY_MINUTES (job chỉ đọc) — Variable TRỐNG thì KHÔNG ghi gì.
+          #   · ADS_WRITE_ENABLED · ADS_WRITE_MODE · CREATIVE_LOOP_EVERY_MINUTES (mở đường ghi / chi
+          #     tiền thật) — FAIL-CLOSED: Variable bị XOÁ hay TRỐNG ⇒ deploy ghi false / OFF / 0.
+          #     Xoá Variable là cách TẮT; giá trị gõ tay vào .env trên máy bị đè ở lần deploy sau.
           MARKETING_LEDGER_EVERY_MINUTES: ${{ vars.MARKETING_LEDGER_EVERY_MINUTES }}
           # Chốt NGOÀI CÙNG của đường ghi quảng cáo. Chỉ đúng chuỗi "true" mở được.
           ADS_WRITE_ENABLED: ${{ vars.ADS_WRITE_ENABLED }}
