@@ -5,7 +5,7 @@
  *
  * Vòng một ngày:
  *
- *   ảnh đầu vào (tay · spy · R&D · ảnh sản phẩm thật)
+ *   ảnh đầu vào (ảnh sản phẩm thật · quảng cáo cũ của shop · tay · spy · R&D)
  *     → LẬP LÔ (hàm thuần `planBatch`)       → VIẾT câu lệnh + câu chữ (LLM)
  *     → SINH ẢNH (gpt-image)                  → NGƯỜI DUYỆT MỘT LẦN CHO CẢ LÔ
  *     → ĐĂNG (bài ẩn + nhóm + mẩu QC, chạy 6:00) → ĐO (chi cấp mẩu + đơn theo `ad_id`)
@@ -21,7 +21,9 @@
  *     `planBatch()` chọn. Chọn gen nào, mẫu nào thắng, mẫu nào bị tắt đều là hàm thuần có kiểm thử
  *     (`docs/marketing-ai-department.md` §1).
  *  2. **Ảnh đối thủ không bao giờ đi vào máy sinh ảnh.** Ảnh SPY chỉ được đọc thành MÔ TẢ CHỮ (gen);
- *     điểm ảnh gửi sang OpenAI chỉ là ảnh sản phẩm THẬT của shop và ảnh mẫu thắng của CHÍNH shop.
+ *     điểm ảnh gửi sang OpenAI chỉ là ảnh CỦA SHOP: ảnh sản phẩm THẬT, ảnh mẫu thắng của vòng, và ảnh
+ *     QUẢNG CÁO CŨ của shop (`OWN_AD` — nhập thẳng từ tài khoản quảng cáo của shop theo `ad_id`, không
+ *     bao giờ tải tay). Ảnh tay / R&D cũng không: chúng có thể là ảnh chụp màn hình của bất kỳ ai.
  *     Chép lại ảnh người khác là rủi ro bản quyền và là lý do Facebook khoá tài khoản quảng cáo.
  *  3. **Ảnh sinh ra phải là sản phẩm thật.** Mọi ô trong lô bắt buộc có ảnh sản phẩm thật làm gốc
  *     (`PRODUCT_PHOTO`). Quảng cáo ra một chiếc váy không có trong kho thì đơn nào cũng thành đơn
@@ -147,28 +149,148 @@ export function geneSignature(productId: string, genes: Genes): string {
 // ───────────────────────────── NGUỒN ẢNH ĐẦU VÀO ─────────────────────────────
 
 /**
- * `PRODUCT_PHOTO` — ảnh sản phẩm THẬT của shop. Bắt buộc cho mọi ô trong lô, và là thứ DUY NHẤT
- *                   (cùng ảnh mẫu thắng của chính shop) được gửi điểm ảnh sang máy sinh ảnh.
+ * `PRODUCT_PHOTO` — ảnh sản phẩm THẬT của shop. Bắt buộc cho mọi ô trong lô: máy SỬA ảnh này.
+ * `OWN_AD`        — quảng cáo CŨ của shop đã chạy trên tài khoản của shop (mẫu thắng / mẫu tốt), nhập
+ *                   từ Facebook theo `ad_id` — KHÔNG tải tay được (lược đồ đầu vào của form không nhận
+ *                   loại này, CSDL bắt buộc `fb_ad_id`). Đủ gen + có mã hàng ⇒ làm MẪU CHA của ô khai
+ *                   thác; câu chữ của nó dạy máy viết giọng văn đã bán được.
  * `MANUAL`        — ảnh tham khảo người đưa vào.
  * `SPY`           — ảnh quảng cáo của đối thủ. CHỈ được đọc thành gen + mô tả chữ.
  * `RND`           — ảnh từ phòng R&D (mẫu mới, bản phác).
  */
-export const CREATIVE_SOURCE_KINDS = ["PRODUCT_PHOTO", "MANUAL", "SPY", "RND"] as const;
+export const CREATIVE_SOURCE_KINDS = ["PRODUCT_PHOTO", "OWN_AD", "MANUAL", "SPY", "RND"] as const;
 export type CreativeSourceKind = (typeof CREATIVE_SOURCE_KINDS)[number];
 
 export const CREATIVE_SOURCE_KIND_LABEL: Record<CreativeSourceKind, string> = {
   PRODUCT_PHOTO: "Ảnh sản phẩm thật",
+  OWN_AD: "Quảng cáo cũ của shop",
   MANUAL: "Tham khảo (tay)",
   SPY: "Đối thủ (spy)",
   RND: "R&D",
 };
 
 /**
- * Loại nguồn nào được gửi ĐIỂM ẢNH sang máy sinh ảnh. `SPY` cố ý vắng mặt — xem ranh giới 2 ở đầu
- * tệp. `MANUAL` và `RND` cũng vắng mặt: chúng có thể là ảnh chụp màn hình của bất kỳ ai, và máy
- * không phân biệt được. Chúng vẫn dạy được máy qua gen đọc ra.
+ * Một câu cho từng loại: nó DÙNG VÀO VIỆC GÌ trong vòng mẫu. Chủ shop nói 24/09/2026 "chưa hiểu logic
+ * dùng" — câu này in ở khối hướng dẫn đầu tab Nguồn ảnh và trên form tải ảnh, từ cùng một nguồn.
  */
-export const PIXEL_SAFE_SOURCE_KINDS: readonly CreativeSourceKind[] = ["PRODUCT_PHOTO"];
+export const CREATIVE_SOURCE_KIND_USE: Record<CreativeSourceKind, string> = {
+  PRODUCT_PHOTO: "Gốc bắt buộc của mọi mẫu — máy SỬA chính ảnh này theo câu lệnh. Mã nào muốn test phải có ít nhất một ảnh loại này.",
+  OWN_AD: "Mẫu cha để máy làm biến thể (giữ năm gen, đổi một) + học câu chữ đã bán được. Ảnh được gửi làm tham chiếu bố cục vì là quảng cáo của chính shop.",
+  MANUAL: "Chỉ ĐỌC thành mô tả chữ + gen để lấy ý tưởng. Điểm ảnh không gửi sang máy sinh ảnh.",
+  SPY: "Đối thủ: chỉ ĐỌC thành mô tả chữ + gen. Điểm ảnh KHÔNG BAO GIỜ gửi sang máy sinh ảnh.",
+  RND: "Chỉ ĐỌC thành mô tả chữ + gen để lấy ý tưởng. Điểm ảnh không gửi sang máy sinh ảnh.",
+};
+
+/**
+ * Loại nguồn NGƯỜI được tải tay qua form. `OWN_AD` cố ý vắng mặt: nó được gửi điểm ảnh sang máy sinh
+ * ảnh, nên danh tính "quảng cáo của chính shop" phải đến từ `ad_id` trên tài khoản của shop — một ô
+ * chọn loại trên form thì ai cũng bấm được cho một ảnh chụp quảng cáo đối thủ.
+ */
+export const MANUAL_UPLOAD_SOURCE_KINDS = ["PRODUCT_PHOTO", "MANUAL", "SPY", "RND"] as const satisfies readonly CreativeSourceKind[];
+
+/**
+ * Loại nguồn nào được gửi ĐIỂM ẢNH sang máy sinh ảnh — xem ranh giới 2 ở đầu tệp. `SPY` cố ý vắng mặt.
+ * `MANUAL` và `RND` cũng vắng mặt: chúng có thể là ảnh chụp màn hình của bất kỳ ai, và máy không phân
+ * biệt được. Chúng vẫn dạy được máy qua gen đọc ra.
+ *
+ * `OWN_AD` có mặt vì CÙNG lý do ảnh mẫu thắng của vòng được dùng: nó là quảng cáo CỦA SHOP đã chạy trên
+ * tài khoản của shop. Nó đi sang `editImage` dưới nhãn `OWN_VARIANT` (ảnh của chính shop), LUÔN kèm ảnh
+ * `PRODUCT_PHOTO` làm gốc (`assertPixelSafe`) — quảng cáo cũ chỉ là tham chiếu bố cục, không thay sản phẩm.
+ */
+export const PIXEL_SAFE_SOURCE_KINDS: readonly CreativeSourceKind[] = ["PRODUCT_PHOTO", "OWN_AD"];
+
+/**
+ * Nhãn mà từng loại nguồn gửi-được-điểm-ảnh mang khi sang `editImage` (`ImageEditKind`). Loại nào
+ * không có ở đây thì không có nhãn — và không có nhãn thì `assertPixelSafe` chặn.
+ */
+export const PIXEL_SAFE_EDIT_LABEL: Readonly<Partial<Record<CreativeSourceKind, "PRODUCT_PHOTO" | "OWN_VARIANT">>> = { PRODUCT_PHOTO: "PRODUCT_PHOTO", OWN_AD: "OWN_VARIANT" };
+
+// ───────────────────────────── NHẬP MẪU TỐT TỪ FACEBOOK ─────────────────────────────
+
+/**
+ * Ngưỡng chọn quảng cáo cũ của shop làm nguồn `OWN_AD`. Chủ shop nêu 24/09/2026: "giá tin nhắn < 4.000đ
+ * là chỉ số tốt" — lấy luôn mẫu thắng và mẫu có chỉ số tốt làm nguồn ảnh ban đầu.
+ *
+ *  · `lookbackDays` — chỉ xét mẩu có dòng chi hạt `AD` trong bấy nhiêu ngày gần nhất.
+ *  · `minMessages`  — dưới 5 tin nhắn thì "chi / tin" là may rủi, chưa phải chỉ số.
+ *  · TỐT = chi / tin nhắn CẢ ĐỜI dưới `goodCostPerMessageBelowVnd` VÀ đã chi ít nhất `goodMinSpendVnd`
+ *    (một mẩu chi 8.000đ ra 5 tin trông rẻ mà chưa chứng minh được gì).
+ *  · THẮNG = đơn chốt quy về `ad_id` VƯỢT `winOrdersAbove` của cấu hình — cùng ngưỡng với mẫu của vòng.
+ *  · `maxPerImport` — một lượt bấm nhập tối đa bấy nhiêu mẩu (mỗi mẩu 1–2 lời gọi Graph + tải một ảnh).
+ */
+export const OWN_AD_IMPORT = {
+  lookbackDays: 60,
+  minMessages: 5,
+  goodCostPerMessageBelowVnd: 4_000,
+  goodMinSpendVnd: 50_000,
+  maxPerImport: 30,
+} as const;
+
+export type OwnAdReason = "WIN" | "GOOD";
+
+export const OWN_AD_REASON_LABEL: Record<OwnAdReason, string> = { WIN: "Mẫu thắng", GOOD: "Chỉ số tốt" };
+
+/**
+ * Mẩu này có đủ điều kiện làm nguồn `OWN_AD` không — hàm thuần. Không có số chi hoặc dưới ngưỡng tin
+ * nhắn thì KHÔNG phải "tốt": CHƯA BIẾT không bao giờ được coi là rẻ (mục 42).
+ */
+export function classifyOwnAd(m: { spendVnd: number | null; messages: number | null; bookedOrders: number }, winOrdersAbove: number): OwnAdReason | null {
+  const messages = m.messages ?? 0;
+  if (messages < OWN_AD_IMPORT.minMessages) return null;
+  if (m.bookedOrders > winOrdersAbove) return "WIN";
+  if (m.spendVnd === null || m.spendVnd < OWN_AD_IMPORT.goodMinSpendVnd) return null;
+  return m.spendVnd / messages < OWN_AD_IMPORT.goodCostPerMessageBelowVnd ? "GOOD" : null;
+}
+
+/** Số đo chụp vào `creative_sources.metrics` lúc nhập một `OWN_AD`. `null` = CHƯA BIẾT, không phải 0. */
+export type OwnAdMetrics = {
+  reason: OwnAdReason | null;
+  spendVnd: number | null;
+  messages: number | null;
+  costPerMessageVnd: number | null;
+  impressions: number | null;
+  clicks: number | null;
+  ctrPct: number | null;
+  cpcVnd: number | null;
+  bookedOrders: number;
+  deliveredOrders: number;
+  returnedOrders: number;
+  /** Kỳ đo — ngày VN đầu / cuối có dòng chi hạt `AD`. */
+  periodFrom: string | null;
+  periodTo: string | null;
+  measuredAt: string | null;
+  /** Mã hàng suy từ đâu: dòng đơn mang `ad_id` · `ad_spends.product_id` · không suy được. */
+  productBasis: "ORDERS" | "AD_SPENDS" | "NONE";
+};
+
+/** Đọc `metrics` (JSON không tin được). Số hỏng ⇒ `null`, không điền 0. */
+export function parseOwnAdMetrics(raw: unknown): OwnAdMetrics {
+  const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+  const s = (x: unknown) => (typeof x === "string" && x ? x : null);
+  return {
+    reason: r.reason === "WIN" || r.reason === "GOOD" ? r.reason : null,
+    spendVnd: n(r.spendVnd),
+    messages: n(r.messages),
+    costPerMessageVnd: n(r.costPerMessageVnd),
+    impressions: n(r.impressions),
+    clicks: n(r.clicks),
+    ctrPct: n(r.ctrPct),
+    cpcVnd: n(r.cpcVnd),
+    bookedOrders: n(r.bookedOrders) ?? 0,
+    deliveredOrders: n(r.deliveredOrders) ?? 0,
+    returnedOrders: n(r.returnedOrders) ?? 0,
+    periodFrom: s(r.periodFrom),
+    periodTo: s(r.periodTo),
+    measuredAt: s(r.measuredAt),
+    productBasis: r.productBasis === "ORDERS" || r.productBasis === "AD_SPENDS" ? r.productBasis : "NONE",
+  };
+}
+
+// ───────────────────────────── NHẬP ẢNH SẢN PHẨM TỪ PANCAKE ─────────────────────────────
+
+/** Một lượt bấm "Nhập ảnh sản phẩm từ Pancake" tải tối đa bấy nhiêu ảnh; còn thiếu thì bấm lại. */
+export const PANCAKE_PHOTO_IMPORT_MAX = 40;
 
 // ───────────────────────────── VÒNG ĐỜI ─────────────────────────────
 
@@ -339,8 +461,9 @@ export const CREATIVE_HARD_LIMITS = {
   /** Số ảnh sinh tối đa trong một ngày — kể cả ảnh sinh lại. Chặn một vòng lặp hỏng đốt credit. */
   maxImagesPerDay: 30,
   /**
-   * Trần chi sinh ảnh / ngày (USD). Chủ shop chốt 24/09/2026: 2 USD — một lô 13 ảnh chất lượng vừa
-   * tốn ~0,55 USD, phần còn lại cho sinh lại. Cấu hình chỉ hạ được.
+   * Trần chi sinh ảnh / ngày (USD). Chủ shop chốt 24/09/2026: 2 USD, và GIỮ NGUYÊN khi chuyển sang
+   * "Cao + Batch": một lô 13 ảnh chất lượng cao khổ 4:5 qua Batch ƯỚC TÍNH ~1,4 USD (`estimateImageUsd`).
+   * Cấu hình chỉ hạ được.
    */
   maxImageUsdPerDay: 2,
 } as const;
@@ -349,8 +472,31 @@ export const CREATIVE_HARD_LIMITS = {
 
 export const CREATIVE_CONFIG_KEY = "creative.config";
 
-export type ImageSize = "1024x1024" | "1024x1536";
-export type ImageQuality = "low" | "medium" | "high";
+/**
+ * Khổ ảnh. Hai khổ đầu là khổ chuẩn của gpt-image; `1088x1360` là khổ DỌC 4:5 của bảng tin Facebook
+ * (chủ shop chốt 24/09/2026). Mô hình gpt-image-2.x nhận kích thước tuỳ ý khi hai cạnh là bội số 16,
+ * tỷ lệ trong 1:3–3:1 và không cạnh nào quá 3840 (developers.openai.com/api/docs/guides/image-generation,
+ * đọc 24/09/2026): 1088 = 68 × 16, 1360 = 85 × 16, 1088 / 1360 = 0,8 đúng 4:5.
+ */
+export const IMAGE_SIZES = ["1024x1024", "1024x1536", "1088x1360"] as const;
+export type ImageSize = (typeof IMAGE_SIZES)[number];
+export const IMAGE_SIZE_LABEL: Record<ImageSize, string> = { "1024x1024": "Vuông 1:1 · 1024×1024", "1024x1536": "Dọc 2:3 · 1024×1536", "1088x1360": "Dọc 4:5 · 1088×1360 (bảng tin Facebook)" };
+
+export const IMAGE_QUALITIES = ["low", "medium", "high"] as const;
+export type ImageQuality = (typeof IMAGE_QUALITIES)[number];
+export const IMAGE_QUALITY_LABEL: Record<ImageQuality, string> = { low: "Thấp", medium: "Vừa", high: "Cao" };
+
+/**
+ * Cách gửi yêu cầu vẽ ảnh.
+ *
+ * `BATCH` — gom mọi ô của lô thành MỘT lô Batch API của OpenAI (giảm 50%, OpenAI hứa xong trong 24 giờ)
+ *           ngay lúc dựng lô. Tới `batchFallbackHourVn` của ngày chạy mà còn ô chưa có ảnh ⇒ huỷ lô
+ *           Batch và vẽ nốt bằng gọi ngay ở `fallbackImageQuality`, vẫn trong trần ngày.
+ * `SYNC`  — gọi ngay từng ảnh (hành vi trước 24/09/2026).
+ */
+export const IMAGE_MODES = ["BATCH", "SYNC"] as const;
+export type ImageMode = (typeof IMAGE_MODES)[number];
+export const IMAGE_MODE_LABEL: Record<ImageMode, string> = { BATCH: "Batch (rẻ 50%, chậm)", SYNC: "Gọi ngay (giá đủ)" };
 
 export type CreativeLoopConfig = {
   /** Công tắc mềm. Job vẫn cần `CREATIVE_LOOP_EVERY_MINUTES` ở env mới có trong lịch. */
@@ -403,6 +549,15 @@ export type CreativeLoopConfig = {
   imageModel: string;
   imageSize: ImageSize;
   imageQuality: ImageQuality;
+  /** `BATCH` (mặc định) hay gọi ngay — xem `IMAGE_MODES`. */
+  imageMode: ImageMode;
+  /**
+   * Giờ Việt Nam (đêm trước giờ chạy) mà lô Batch còn chưa xong thì bị huỷ và vẽ nốt bằng gọi ngay.
+   * Là mốc `HH:00` gần nhất ĐỨNG TRƯỚC hạn duyệt — xem `imageBatchFallbackAt()`.
+   */
+  batchFallbackHourVn: number;
+  /** Chất lượng của lượt vẽ nốt bằng gọi ngay — thấp hơn để không vượt trần ngày (giá đủ, không giảm 50%). */
+  fallbackImageQuality: ImageQuality;
   imageDailyCapUsd: number;
   /** Ảnh của mẫu bị LOẠI được giữ bấy nhiêu ngày cho người xem lại, rồi xoá điểm ảnh (giữ gen + số đo). */
   loserImageRetentionDays: number;
@@ -432,9 +587,15 @@ export const DEFAULT_CREATIVE_CONFIG: CreativeLoopConfig = {
   killRules: [],
   keepRules: [],
   focusProductIds: [],
-  imageModel: "gpt-image-1",
-  imageSize: "1024x1024",
+  // Chủ shop chốt 24/09/2026 (lần hai): "Sunburst vừa, gọi ngay, giữ 2 USD". Lần đầu chọn "Cao + Batch"
+  // nhưng tài liệu OpenAI ghi sunburst KHÔNG nhận Batch (`imageModelBatchSupport`). Đường Batch vẫn giữ
+  // cho mô hình nhận nó (vd gpt-image-2) — đổi ở tab Cấu hình. gpt-image-1 bị ngừng ngày 23/10/2026.
+  imageModel: "gpt-image-2.5-sunburst",
+  imageSize: "1088x1360",
   imageQuality: "medium",
+  imageMode: "SYNC",
+  batchFallbackHourVn: 2,
+  fallbackImageQuality: "medium",
   imageDailyCapUsd: 2,
   loserImageRetentionDays: 7,
 };
@@ -508,8 +669,11 @@ export function normalizeCreativeConfig(raw: unknown): { config: CreativeLoopCon
     keepRules: rules("keepRules"),
     focusProductIds: Array.isArray(r.focusProductIds) ? (r.focusProductIds as unknown[]).map(str).filter(Boolean) : [],
     imageModel: str(r.imageModel) || d.imageModel,
-    imageSize: r.imageSize === "1024x1536" ? "1024x1536" : "1024x1024",
-    imageQuality: r.imageQuality === "low" || r.imageQuality === "high" ? r.imageQuality : "medium",
+    imageSize: IMAGE_SIZES.find((x) => x === r.imageSize) ?? d.imageSize,
+    imageQuality: IMAGE_QUALITIES.find((x) => x === r.imageQuality) ?? d.imageQuality,
+    imageMode: IMAGE_MODES.find((x) => x === r.imageMode) ?? d.imageMode,
+    batchFallbackHourVn: Math.round(num(r.batchFallbackHourVn, d.batchFallbackHourVn, 0, 23)),
+    fallbackImageQuality: IMAGE_QUALITIES.find((x) => x === r.fallbackImageQuality) ?? d.fallbackImageQuality,
     imageDailyCapUsd: num(r.imageDailyCapUsd, d.imageDailyCapUsd, 0, L.maxImageUsdPerDay),
     loserImageRetentionDays: Math.round(num(r.loserImageRetentionDays, d.loserImageRetentionDays, 0, 90)),
   };
@@ -585,16 +749,91 @@ export const CREATIVE_WRITE_DENIAL_REASON: Record<CreativeWriteDenial, string> =
 // ───────────────────────────── GIÁ SINH ẢNH ─────────────────────────────
 
 /**
- * Giá ƯỚC TÍNH một ảnh (USD) theo chất lượng × khổ, theo bảng giá công bố của OpenAI cho
- * gpt-image-1. Dùng để CHẶN TRƯỚC khi gọi; chi phí THẬT ghi theo `usage` OpenAI trả về. Model khác
- * không có trong bảng ⇒ ước tính theo mức `high` (hướng an toàn: chặn sớm hơn, không muộn hơn).
+ * ═══ BẢNG GIÁ TOKEN THEO MÔ HÌNH — MỘT BẢNG DUY NHẤT ═══
+ *
+ * USD / 1 triệu token, giá gọi ngay (không cache). Nguồn: developers.openai.com/api/docs/pricing và
+ * trang từng mô hình (`/api/docs/models/<id>`), đọc 24/09/2026. `lib/integrations/openai/images.ts`
+ * dùng lại ĐÚNG bảng này để ghi chi phí sau khi gọi — hai bảng là hai con số cho cùng một ảnh.
+ *
+ * Khớp tên: đúng tên, hoặc tên kèm hậu tố NGÀY (`gpt-image-2.5-sunburst-2026-09-08`). Không khớp theo
+ * tiền tố trần: `gpt-image-1-mini` là mô hình khác, giá khác.
  */
-export const IMAGE_PRICE_USD: Record<ImageQuality, Record<ImageSize, number>> = {
-  low: { "1024x1024": 0.011, "1024x1536": 0.016 },
-  medium: { "1024x1024": 0.042, "1024x1536": 0.063 },
-  high: { "1024x1024": 0.167, "1024x1536": 0.25 },
+export const IMAGE_MODEL_TOKEN_PRICE_PER_MTOK: Readonly<Record<string, { textInput: number; imageInput: number; imageOutput: number }>> = {
+  "gpt-image-2.5-sunburst": { textInput: 5, imageInput: 8, imageOutput: 30 },
+  "gpt-image-2.5-flare": { textInput: 5, imageInput: 8, imageOutput: 30 },
+  "gpt-image-2": { textInput: 5, imageInput: 8, imageOutput: 30 },
+  "gpt-image-1.5": { textInput: 5, imageInput: 8, imageOutput: 32 },
+  "gpt-image-1": { textInput: 5, imageInput: 10, imageOutput: 40 },
 };
 
-export function estimateImageUsd(model: string, quality: ImageQuality, size: ImageSize): number {
-  return model.startsWith("gpt-image-1") ? IMAGE_PRICE_USD[quality][size] : IMAGE_PRICE_USD.high[size];
+/**
+ * Batch API giảm 50% so với gọi ngay (developers.openai.com/api/docs/guides/batch, đọc 24/09/2026).
+ * Trang giá CHƯA niêm yết giá Batch riêng cho gpt-image-2.5-* — hệ số này là của hướng dẫn Batch chung.
+ */
+export const IMAGE_BATCH_PRICE_FACTOR = 0.5;
+
+/**
+ * Mô hình có nhận Batch không, theo bảng "Endpoints" trên trang từng mô hình (đọc 24/09/2026):
+ * `gpt-image-2.5-sunburst` và `-flare` ghi "Batch · v1/batch · Not supported"; `gpt-image-2` và
+ * `gpt-image-1` ghi "Supported". Mô hình không có ở đây là CHƯA ĐỌC (`null`), không phải "không hỗ trợ".
+ * Bảng này chỉ để MÀN HÌNH cảnh báo — đường sinh vẫn gửi thử và đọc câu trả lời THẬT của OpenAI (tài
+ * liệu của một mô hình mới có thể đi sau API); gửi hỏng thì vẽ nốt bằng gọi ngay ngay lập tức.
+ */
+export const IMAGE_MODEL_BATCH_SUPPORT: Readonly<Record<string, boolean>> = {
+  "gpt-image-2.5-sunburst": false,
+  "gpt-image-2.5-flare": false,
+  "gpt-image-2": true,
+  "gpt-image-1": true,
+};
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Khoá bảng giá của một tên mô hình, hoặc `null`. Xem luật khớp tên ở trên. */
+export function imagePriceKeyOf(model: string): string | null {
+  for (const k of Object.keys(IMAGE_MODEL_TOKEN_PRICE_PER_MTOK)) {
+    if (model === k || new RegExp(`^${escapeRegExp(k)}-\\d{4}`).test(model)) return k;
+  }
+  return null;
+}
+
+/** `true` / `false` theo tài liệu; `null` = chưa đọc được tài liệu của mô hình này. */
+export function imageModelBatchSupport(model: string): boolean | null {
+  const k = imagePriceKeyOf(model);
+  return k !== null && k in IMAGE_MODEL_BATCH_SUPPORT ? IMAGE_MODEL_BATCH_SUPPORT[k] : null;
+}
+
+/**
+ * Số token ẢNH ĐẦU RA cho khổ 1024×1024 theo chất lượng — bảng "Cost and latency" OpenAI công bố cho
+ * gpt-image-1 (low 272 · medium 1056 · high 4160). Trang của gpt-image-2.x KHÔNG công bố bảng này (đọc
+ * 24/09/2026), nên đây là ƯỚC TÍNH dùng tạm cho mọi mô hình. Khổ khác quy theo DIỆN TÍCH (bảng gốc:
+ * 1024×1536 = đúng 1,5 lần ở cả ba mức).
+ */
+export const IMAGE_OUTPUT_TOKENS_1024_SQUARE: Readonly<Record<ImageQuality, number>> = { low: 272, medium: 1056, high: 4160 };
+
+/**
+ * Phần ĐẦU VÀO của một lượt sửa ảnh — ước tính rộng tay: câu lệnh ~1.000 token chữ, tối đa 3 ảnh tham
+ * chiếu (sản phẩm · mẫu cha · quảng cáo cũ của shop) × 1.500 token ảnh. Với một cái phanh, ước tính
+ * THỪA làm chặn sớm hơn; ước tính THIẾU làm vượt trần.
+ */
+export const IMAGE_ESTIMATE_INPUT = { promptTextTokens: 1_000, references: 3, imageTokensPerReference: 1_500 } as const;
+
+export function imageOutputTokensEstimate(quality: ImageQuality, size: ImageSize): number {
+  const [w, h] = size.split("x").map(Number);
+  return Math.ceil((IMAGE_OUTPUT_TOKENS_1024_SQUARE[quality] * w * h) / (1024 * 1024));
+}
+
+/**
+ * Giá ƯỚC TÍNH một ảnh (USD) — dùng để CHẶN TRƯỚC khi gọi; chi phí THẬT ghi theo `usage` OpenAI trả về.
+ * = (token chữ × giá chữ + token ảnh vào × giá ảnh vào + token ảnh ra × giá ảnh ra) / 1 triệu,
+ * × `IMAGE_BATCH_PRICE_FACTOR` khi đi Batch. Mô hình không có trong bảng ⇒ tính theo mô hình ĐẮT NHẤT
+ * của bảng (chặn sớm hơn, không muộn hơn).
+ */
+export function estimateImageUsd(model: string, quality: ImageQuality, size: ImageSize, mode: ImageMode = "SYNC"): number {
+  const k = imagePriceKeyOf(model);
+  const p = k ? IMAGE_MODEL_TOKEN_PRICE_PER_MTOK[k] : Object.values(IMAGE_MODEL_TOKEN_PRICE_PER_MTOK).reduce((a, b) => (b.imageOutput > a.imageOutput ? b : a));
+  const inp = IMAGE_ESTIMATE_INPUT;
+  const usd = (inp.promptTextTokens * p.textInput + inp.references * inp.imageTokensPerReference * p.imageInput + imageOutputTokensEstimate(quality, size) * p.imageOutput) / 1_000_000;
+  return Math.round(usd * (mode === "BATCH" ? IMAGE_BATCH_PRICE_FACTOR : 1) * 1_000_000) / 1_000_000;
 }

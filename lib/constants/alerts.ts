@@ -9,6 +9,12 @@ export type AlertConfig = {
   /** Lark Suite: webhook nhóm nhận cảnh báo ngưỡng thanh toán tài khoản quảng cáo (trống = dùng webhook chính) */
   larkBillingWebhookUrl: string;
   larkBillingSecret: string;
+  /**
+   * Lark Suite: webhook nhóm KHO / SẢN XUẤT nhận bảng "thiếu hàng giao đơn đã chốt" (trống = dùng
+   * webhook chính). Tách nhóm vì người đặt xưởng và người đếm kho không ngồi trong nhóm vận đơn.
+   */
+  larkInventoryWebhookUrl: string;
+  larkInventorySecret: string;
   /** Cảnh báo khi dư nợ đạt N% ngưỡng thanh toán */
   billingWarnPercent: number;
   /** Đơn rủi ro: khách đã hoàn ≥ N đơn và tỷ lệ hoàn ≥ M% (theo Pancake hoặc lịch sử ERP) → báo CSKH xin cọc */
@@ -23,7 +29,7 @@ export type AlertConfig = {
   /** Hàng hoàn đã về tới shop quá N ngày mà kho chưa lập phiếu tái nhập → báo kho kiểm đếm */
   returnInspectionDays: number;
   /** Bật/tắt từng loại */
-  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean; incomplete: boolean; returnInspection: boolean; customerRecovery: boolean; adsAnomaly: boolean; cancelledButShipping: boolean; addressNotNormalized: boolean; bankAccountUnconfirmed: boolean; marketingDaily: boolean };
+  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean; incomplete: boolean; returnInspection: boolean; customerRecovery: boolean; adsAnomaly: boolean; cancelledButShipping: boolean; addressNotNormalized: boolean; bankAccountUnconfirmed: boolean; marketingDaily: boolean; stockShortage: boolean };
 };
 
 export const ALERT_CONFIG_KEY = "alerts.config";
@@ -35,6 +41,8 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   larkSecret: "",
   larkBillingWebhookUrl: "",
   larkBillingSecret: "",
+  larkInventoryWebhookUrl: "",
+  larkInventorySecret: "",
   billingWarnPercent: 80,
   riskMinReturned: 2,
   riskReturnRatePct: 40,
@@ -42,7 +50,7 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   staleDays: 4,
   lookbackDays: 14,
   returnInspectionDays: 3,
-  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true, incomplete: true, returnInspection: true, customerRecovery: true, adsAnomaly: true, cancelledButShipping: true, addressNotNormalized: true, bankAccountUnconfirmed: true, marketingDaily: true },
+  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true, incomplete: true, returnInspection: true, customerRecovery: true, adsAnomaly: true, cancelledButShipping: true, addressNotNormalized: true, bankAccountUnconfirmed: true, marketingDaily: true, stockShortage: true },
 };
 
 export const NOTIFICATION_KIND_LABEL: Record<string, string> = {

@@ -215,7 +215,7 @@ export async function testCreativeEmptyBatch(db: Db) {
     const khongDuocGoi = async () => {
       throw new Error("không được viết/sinh ảnh khi lô không có ô nào");
     };
-    const r = await buildBatch(db, at, { describe: async () => ({ ok: false, error: "bỏ qua" }), writer: khongDuocGoi, imageClient: khongDuocGoi });
+    const r = await buildBatch(db, at, { describe: async () => ({ ok: false, error: "bỏ qua" }), writer: khongDuocGoi, imageClient: khongDuocGoi, caption: khongDuocGoi });
     assert.equal(r.batchDay, day);
     assert.equal(r.batchId, null, "không có ô nào ⇒ không ghi lô");
     assert.match(r.skippedReason ?? "", /ảnh sản phẩm thật/, "lý do phải nói ra thiếu gì");

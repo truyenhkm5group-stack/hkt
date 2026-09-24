@@ -184,7 +184,22 @@ export async function readCurrentCreativeConfig(db: Db): Promise<{ config: Creat
   return normalizeCreativeConfig(raw);
 }
 
-export type JudgeConfig = Pick<CreativeLoopConfig, "killRules" | "keepRules" | "winOrdersAbove" | "verdictSettleHours">;
+/**
+ * Tên fanpage đứng tên bài quảng cáo — để khối "Sẵn sàng đăng" hiện đúng tên như Facebook sẽ hiện.
+ * Tên người đặt (`alias`) trước tên API (`name`). Chưa khai fanpage, hoặc sổ fanpage chưa biết page ấy
+ * ⇒ `null`; màn hình nói ra điều đó, không bịa một cái tên.
+ */
+export async function fanpageDisplayName(db: Db, pageId: string): Promise<string | null> {
+  if (!pageId.trim()) return null;
+  try {
+    const [row] = await db.select({ name: schema.fanpages.name, alias: schema.fanpages.alias }).from(schema.fanpages).where(eq(schema.fanpages.externalPageId, pageId.trim())).limit(1);
+    return row ? row.alias.trim() || row.name.trim() || null : null;
+  } catch {
+    return null;
+  }
+}
+
+export type JudgeConfig =Pick<CreativeLoopConfig, "killRules" | "keepRules" | "winOrdersAbove" | "verdictSettleHours">;
 
 /**
  * Bộ luật dùng để chấm MỘT mẫu — hai nguồn, cố ý:

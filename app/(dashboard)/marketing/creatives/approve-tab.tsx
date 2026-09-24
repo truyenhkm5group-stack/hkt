@@ -2,8 +2,9 @@ import Link from "next/link";
 import { CalendarClock, History, ShieldAlert } from "lucide-react";
 import { ApproveBatchButton, RejectBatchButton, RejectVariantButton } from "@/app/(dashboard)/marketing/creatives/batch-actions";
 import { Countdown, ExpandText } from "@/app/(dashboard)/marketing/creatives/creative-bits";
+import { EditCopyButton } from "@/app/(dashboard)/marketing/creatives/copy-editor";
 import { ManualForm } from "@/app/(dashboard)/marketing/creatives/manual-form";
-import { GeneChips, ModeChip, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
+import { AdPreview, GeneChips, ModeChip, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { StatStrip } from "@/components/stat-tile";
 import { DescriptionList, EmptyState, SectionCard } from "@/components/ui-bits";
 import { getDb } from "@/db";
@@ -18,13 +19,14 @@ import {
   type CreativeWriteAction,
   type VariantStatus,
 } from "@/lib/constants/creative-loop";
+import { CAPTION_FALLBACK_PREFIX } from "@/lib/creative/caption";
 import { describeRule } from "@/lib/creative/judge";
 import { manualTargetDay } from "@/lib/creative/manual";
 import { batchWindow } from "@/lib/creative/schedule";
 import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
 import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
 import { formatDate, formatDateTime, formatNumber, formatVND, vnShortStamp } from "@/lib/format";
-import { getBatchDetail, listRecentBatches, readCurrentCreativeConfig, type BatchDetail, type BatchSummary, type PendingBatch, type VariantCard } from "@/lib/queries/creative-loop";
+import { fanpageDisplayName, getBatchDetail, listRecentBatches, readCurrentCreativeConfig, type BatchDetail, type BatchSummary, type PendingBatch, type VariantCard } from "@/lib/queries/creative-loop";
 import { cn } from "@/lib/utils";
 
 /**
@@ -67,25 +69,51 @@ function CountChips({ counts }: { counts: Partial<Record<VariantStatus, number>>
   );
 }
 
-function VariantTile({ v, reserve, canReject }: { v: VariantCard; reserve: boolean; canReject: boolean }) {
+function VariantTile({ v, reserve, canReject, canEditCopy, pageName }: { v: VariantCard; reserve: boolean; canReject: boolean; canEditCopy: boolean; pageName: string | null }) {
   const loai = v.status === "REJECTED" || v.status === "GEN_FAILED";
+  const sanSang = v.status === "GENERATED";
+  const overlay = (
+    <>
+      <span className="absolute left-2 top-2 rounded bg-background/90 px-1.5 py-0.5 text-[11px] font-bold">#{v.slot}</span>
+      <span className="absolute right-2 top-2">
+        <ModeChip mode={v.mode} why={v.why} />
+      </span>
+      {reserve ? (
+        <span className="absolute bottom-2 left-2 right-2 rounded bg-background/90 px-1.5 py-0.5 text-center text-[10.5px]" title="Lô đăng tối đa số mẫu của cấu hình, theo thứ tự ô — gạt bớt để tự chọn">
+          Dự phòng — ngoài số mẫu sẽ chạy
+        </span>
+      ) : null}
+    </>
+  );
+  // Mẫu có ảnh mà câu chữ vẫn là bản nháp viết TRƯỚC khi có ảnh (lượt viết theo ảnh hỏng) — nói ra.
+  const cauNhap = sanSang && v.genError.startsWith(CAPTION_FALLBACK_PREFIX) ? v.genError.slice(CAPTION_FALLBACK_PREFIX.length) : null;
   return (
     <div className={cn("flex flex-col overflow-hidden rounded-xl border bg-card shadow-xs", loai && "opacity-60")}>
-      <div className="relative">
-        <VariantImage imageId={v.imageId} available={v.imageAvailable} alt={v.headline || `Mẫu #${v.slot}`} className="aspect-square w-full" />
-        <span className="absolute left-2 top-2 rounded bg-background/90 px-1.5 py-0.5 text-[11px] font-bold">#{v.slot}</span>
-        <span className="absolute right-2 top-2">
-          <ModeChip mode={v.mode} why={v.why} />
-        </span>
-        {reserve ? (
-          <span className="absolute bottom-2 left-2 right-2 rounded bg-background/90 px-1.5 py-0.5 text-center text-[10.5px]" title="Lô đăng tối đa số mẫu của cấu hình, theo thứ tự ô — gạt bớt để tự chọn">
-            Dự phòng — ngoài số mẫu sẽ chạy
-          </span>
-        ) : null}
-      </div>
+      {sanSang ? (
+        <div className="space-y-1 p-2 pb-0">
+          <p className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground" title="Xem trước bài quảng cáo đúng như sẽ lên Facebook: fanpage · nội dung chính · ảnh · tiêu đề · nút">
+            Sẵn sàng đăng
+          </p>
+          <AdPreview pageName={pageName} primaryText={v.primaryText} headline={v.headline} imageId={v.imageId} imageAvailable={v.imageAvailable} alt={v.headline || `Mẫu #${v.slot}`} imageOverlay={overlay} />
+        </div>
+      ) : (
+        <div className="relative">
+          <VariantImage imageId={v.imageId} available={v.imageAvailable} alt={v.headline || `Mẫu #${v.slot}`} className="aspect-square w-full" />
+          {overlay}
+        </div>
+      )}
       <div className="flex flex-1 flex-col gap-1.5 p-3">
-        <p className="line-clamp-2 text-[13px] font-semibold leading-snug">{v.headline || <span className="font-normal italic text-muted-foreground">Chưa có tiêu đề</span>}</p>
-        <ExpandText text={v.primaryText} />
+        {sanSang ? null : (
+          <>
+            <p className="line-clamp-2 text-[13px] font-semibold leading-snug">{v.headline || <span className="font-normal italic text-muted-foreground">Chưa có tiêu đề</span>}</p>
+            <ExpandText text={v.primaryText} />
+          </>
+        )}
+        {cauNhap !== null ? (
+          <p className="text-[11.5px] text-warning" title={cauNhap || undefined}>
+            Câu chữ vẫn là bản nháp viết trước khi có ảnh — AI chưa đọc được ảnh. Bấm “Soạn câu chữ” để xin gợi ý lại hoặc sửa tay.
+          </p>
+        ) : null}
         <p className="line-clamp-1 text-[11.5px] text-muted-foreground" title={v.productId ?? undefined}>
           Mã hàng: <span className="text-foreground">{v.productName ?? v.productId ?? "—"}</span>
         </p>
@@ -93,6 +121,9 @@ function VariantTile({ v, reserve, canReject }: { v: VariantCard; reserve: boole
         {v.why ? <p className="line-clamp-2 text-[11px] text-muted-foreground" title={v.why}>Vì sao: {v.why}</p> : null}
         {v.status === "GEN_FAILED" ? <p className="text-[11.5px] text-destructive">Sinh lỗi: {v.genError || "không rõ lý do"}</p> : null}
         {v.status === "REJECTED" ? <p className="text-[11.5px] text-muted-foreground">Đã gạt{v.rejectReason ? `: ${v.rejectReason}` : ""}</p> : null}
+        {canEditCopy && sanSang ? (
+          <EditCopyButton variantId={v.id} slot={v.slot} headline={v.headline} primaryText={v.primaryText} pageName={pageName} imageId={v.imageId} imageAvailable={v.imageAvailable} />
+        ) : null}
         <div className="mt-auto flex items-center justify-between gap-2 border-t pt-1.5">
           <span className="text-[11px] text-muted-foreground">{VARIANT_STATUS_LABEL[v.status]}</span>
           {canReject && REJECTABLE.includes(v.status) ? <RejectVariantButton variantId={v.id} slot={v.slot} /> : null}
@@ -102,7 +133,7 @@ function VariantTile({ v, reserve, canReject }: { v: VariantCard; reserve: boole
   );
 }
 
-function PendingBlock({ pending, now, canApprove, canEdit }: { pending: PendingBatch; now: Date; canApprove: boolean; canEdit: boolean }) {
+function PendingBlock({ pending, now, canApprove, canEdit, pageName }: { pending: PendingBatch; now: Date; canApprove: boolean; canEdit: boolean; pageName: string | null }) {
   const { batch: b, variants, config, configProblems } = pending;
   const coAnh = variants.filter((v) => v.status === "GENERATED");
   const tran = config.batchSize;
@@ -136,7 +167,7 @@ function PendingBlock({ pending, now, canApprove, canEdit }: { pending: PendingB
       hint={
         <>
           Duyệt MỘT lần cho cả lô. Phiếu duyệt khoá đúng ảnh, câu chữ, ngân sách, khung giờ và luật tắt bạn đang thấy: ai đó gạt thêm một mẫu sau khi bạn mở hộp xác nhận
-          thì phiếu vô hiệu và bạn phải mở lại. Quá hạn duyệt ⇒ lô “Quá hạn”, không một đồng nào được chi. Duyệt không gọi Facebook — lượt chạy kế tiếp của vòng mới
+          thì phiếu vô hiệu và bạn phải mở lại — sửa câu chữ của một mẫu cũng vậy: <b>sửa câu chữ ⇒ cần bấm duyệt lại</b>. Quá hạn duyệt ⇒ lô “Quá hạn”, không một đồng nào được chi. Duyệt không gọi Facebook — lượt chạy kế tiếp của vòng mới
           đăng, và nó kiểm lại phiếu một lần nữa.
         </>
       }
@@ -214,7 +245,7 @@ function PendingBlock({ pending, now, canApprove, canEdit }: { pending: PendingB
         {variants.length ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {variants.map((v) => (
-              <VariantTile key={v.id} v={v} reserve={reserveIds.has(v.id)} canReject={canEdit && choDuyet} />
+              <VariantTile key={v.id} v={v} reserve={reserveIds.has(v.id)} canReject={canEdit && choDuyet} canEditCopy={canEdit && !quaHan} pageName={pageName} />
             ))}
           </div>
         ) : (
@@ -391,11 +422,13 @@ function BatchDetailBlock({ d }: { d: BatchDetail }) {
 export async function ApproveTab({ pending, batchId, canApprove, canEdit }: { pending: PendingBatch | null; batchId: string | null; canApprove: boolean; canEdit: boolean }) {
   const db = await getDb();
   const now = new Date();
-  const [recent, detail, current, products] = await Promise.all([
+  const [recent, detail, current, products, pageName] = await Promise.all([
     listRecentBatches(db, 14),
     batchId ? getBatchDetail(db, batchId, now) : Promise.resolve(null),
     readCurrentCreativeConfig(db),
     canEdit ? listCreativeProductOptions() : Promise.resolve([]),
+    // Fanpage theo cấu hình CHỤP của lô — đúng page sẽ đứng tên bài khi lô này đăng.
+    pending ? fanpageDisplayName(db, pending.config.pageId) : Promise.resolve(null),
   ]);
   // Lô mà mẫu tự làm sẽ vào: lô gần nhất CÒN hạn duyệt — cùng hàm với đường ghi (`lib/creative/manual.ts`).
   const manualDay = manualTargetDay(now, current.config);
@@ -414,7 +447,7 @@ export async function ApproveTab({ pending, batchId, canApprove, canEdit }: { pe
         </SectionCard>
       ) : null}
       {pending ? (
-        <PendingBlock pending={pending} now={now} canApprove={canApprove} canEdit={canEdit} />
+        <PendingBlock pending={pending} now={now} canApprove={canApprove} canEdit={canEdit} pageName={pageName} />
       ) : (
         <SectionCard>
           <EmptyState

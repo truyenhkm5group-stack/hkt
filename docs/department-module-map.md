@@ -39,7 +39,7 @@ tiến độ sau đó là cảm giác. Bản này dựng **bản kiểm kê năn
 | `MARKETING` | Marketing | Quảng cáo · Ý tưởng marketing · Fanpage & quy kết MKT |
 | `LOGISTICS` | Giao vận | Vận đơn & care · Đổi / trả hàng · Tỷ lệ giao thành công |
 | `WAREHOUSE` | Kho | Sản phẩm & tồn kho · Nhập hàng & kiểm kê · Kiểm đếm hàng hoàn · Nhật ký kho |
-| `PRODUCTION` | **Sản xuất (mới)** | Kế hoạch đặt hàng SX · Quyết định vốn tồn kho · Hiệu quả mẫu mã |
+| `PRODUCTION` | **Sản xuất (mới)** | Kế hoạch đặt hàng SX · Thiếu hàng giao đơn · Quyết định vốn tồn kho · Hiệu quả mẫu mã |
 | `FINANCE` | Kế toán | Tổng quan tài chính · Đối soát COD · Sổ ngân hàng · Hàng đợi tác vụ tài chính · Chi phí vận hành · Báo cáo lợi nhuận · Dòng tiền · Lương & hoa hồng |
 | `MANAGEMENT` | Ban điều hành | Bản đồ phòng ban & AI · Chất lượng dữ liệu |
 | `HR` | Nhân sự | **không sở hữu màn hình top-level nào** — xem mục 3 |

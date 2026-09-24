@@ -1,7 +1,7 @@
 "use client";
 
 import { ImagePlus, Loader2, ShieldAlert, Upload, X } from "lucide-react";
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,23 +11,23 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ProductSearch } from "@/app/(dashboard)/marketing/creatives/product-search";
 import { createCreativeSource } from "@/lib/actions/creative-sources";
-import { CREATIVE_SOURCE_KINDS, CREATIVE_SOURCE_KIND_LABEL, PIXEL_SAFE_SOURCE_KINDS, type CreativeSourceKind } from "@/lib/constants/creative-loop";
+import { CREATIVE_SOURCE_KIND_LABEL, CREATIVE_SOURCE_KIND_USE, MANUAL_UPLOAD_SOURCE_KINDS, PIXEL_SAFE_SOURCE_KINDS } from "@/lib/constants/creative-loop";
 import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
 import type { ProductOption } from "@/lib/queries/creative-sources";
 import { creativeSourceInputSchema } from "@/lib/validation/creative";
 import { cn } from "@/lib/utils";
 
-/** Một câu cho từng loại: nó dùng vào việc gì trong vòng mẫu. */
-const KIND_USE: Record<CreativeSourceKind, string> = {
-  PRODUCT_PHOTO: "Gốc của mọi mẫu: máy SỬA ảnh này theo câu lệnh. Mã nào muốn test phải có ít nhất một ảnh loại này.",
-  MANUAL: "Chỉ được ĐỌC thành mô tả chữ + gen. Điểm ảnh không gửi sang máy sinh ảnh.",
-  SPY: "Chỉ được ĐỌC thành mô tả chữ + gen. Điểm ảnh KHÔNG BAO GIỜ gửi sang máy sinh ảnh.",
-  RND: "Chỉ được ĐỌC thành mô tả chữ + gen. Điểm ảnh không gửi sang máy sinh ảnh.",
-};
+/** Loại người được tải tay — `OWN_AD` chỉ vào qua nút nhập từ Facebook (xem `MANUAL_UPLOAD_SOURCE_KINDS`). */
+type UploadKind = (typeof MANUAL_UPLOAD_SOURCE_KINDS)[number];
+
+/** Chú thích dưới từng ô: ô ấy dùng làm gì, và MÁY có đọc nó không. */
+function FieldHint({ children }: { children: ReactNode }) {
+  return <p className="text-[11.5px] leading-snug text-muted-foreground">{children}</p>;
+}
 
 export function SourceForm({ products }: { products: ProductOption[] }) {
   const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<CreativeSourceKind>("PRODUCT_PHOTO");
+  const [kind, setKind] = useState<UploadKind>("PRODUCT_PHOTO");
   const [productId, setProductId] = useState("");
   const [title, setTitle] = useState("");
   const [note, setNote] = useState("");
@@ -125,7 +125,7 @@ export function SourceForm({ products }: { products: ProductOption[] }) {
             <div className="space-y-1.5">
               <Label>Loại ảnh</Label>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {CREATIVE_SOURCE_KINDS.map((k) => (
+                {MANUAL_UPLOAD_SOURCE_KINDS.map((k) => (
                   <button
                     key={k}
                     type="button"
@@ -137,7 +137,8 @@ export function SourceForm({ products }: { products: ProductOption[] }) {
                   </button>
                 ))}
               </div>
-              <p className={cn("text-[11.5px]", pixelSafe ? "text-muted-foreground" : "text-warning")}>{KIND_USE[kind]}</p>
+              <p className={cn("text-[11.5px]", pixelSafe ? "text-muted-foreground" : "text-warning")}>{CREATIVE_SOURCE_KIND_USE[kind]}</p>
+              <FieldHint>Quảng cáo cũ của shop không tải ở đây — dùng nút “Nhập mẫu thắng / mẫu tốt từ Facebook” (máy lấy ảnh theo mã quảng cáo thật của shop).</FieldHint>
             </div>
 
             <div className="space-y-1.5">
@@ -145,26 +146,42 @@ export function SourceForm({ products }: { products: ProductOption[] }) {
                 Mã hàng {kind === "PRODUCT_PHOTO" ? <span className="text-destructive">(bắt buộc)</span> : <span className="font-normal text-muted-foreground">(không bắt buộc)</span>}
               </Label>
               <ProductSearch id="cs-product" products={products} value={productId} onChange={setProductId} />
+              <FieldHint>
+                {kind === "PRODUCT_PHOTO"
+                  ? "Máy chỉ sinh mẫu cho mã có ảnh loại này — ảnh phải đúng mã đang bán."
+                  : "Gắn mã thì ô thăm dò dùng nguồn này sẽ test đúng mã đó; để trống thì máy chọn mã ít được test nhất."}
+              </FieldHint>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="cs-title">Tiêu đề</Label>
+                <Label htmlFor="cs-title">
+                  Tiêu đề <span className="font-normal text-muted-foreground">(không bắt buộc)</span>
+                </Label>
                 <Input id="cs-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="VD: Đầm hoa nhí – ảnh mặc thật" maxLength={200} />
+                <FieldHint>Tên để người trong đội nhận ra ảnh trên thẻ và khi tìm kiếm. Máy không dùng.</FieldHint>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="cs-url">Link nguồn</Label>
+                <Label htmlFor="cs-url">
+                  Link nguồn <span className="font-normal text-muted-foreground">(không bắt buộc)</span>
+                </Label>
                 <Input id="cs-url" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} placeholder="https://… (bài đối thủ, thư viện QC)" />
+                <FieldHint>Nơi lấy ảnh, để người đọc lần lại được. Máy không mở link này.</FieldHint>
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="cs-note">Ghi chú</Label>
+              <Label htmlFor="cs-note">
+                Ghi chú <span className="font-normal text-muted-foreground">(không bắt buộc)</span>
+              </Label>
               <Textarea id="cs-note" value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Vì sao ảnh này đáng học: bố cục, góc bán, câu chữ…" maxLength={2000} />
+              <FieldHint>Cho người trong đội đọc. Máy KHÔNG đọc ô này — máy tự xem ảnh và rút ra gen + mô tả ở lượt chạy kế tiếp.</FieldHint>
             </div>
 
             <div className="space-y-2">
-              <Label>Ảnh</Label>
+              <Label>
+                Ảnh <span className="text-destructive">(bắt buộc)</span>
+              </Label>
               <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => void chonAnh(e.target.files)} />
               {anh ? (
                 <div className="relative w-40 overflow-hidden rounded-md border">
