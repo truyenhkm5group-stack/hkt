@@ -13,11 +13,46 @@ import { DEPARTMENT_LABEL, DEPARTMENT_ORDER } from "@/lib/constants/departments"
 import { INTERVENTION_ACTION, INTERVENTION_LABEL, getManagerDay, scopeFor } from "@/lib/queries/manager-day";
 import { departmentsOfUser } from "@/lib/queries/work";
 import { autoAssignOn } from "@/lib/constants/workforce";
+import { InfoHint } from "@/components/info-hint";
+import { WORK_PRIORITY_LABEL, WORK_PRIORITY_TONE } from "@/lib/constants/work";
+import { WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
+import { OVERDUE_CAUSE_ACTION, OVERDUE_CAUSE_LABEL, OVERDUE_DIAGNOSIS_MIN, type OverdueCause, type OverdueDiagnosis } from "@/lib/work/overdue-diagnosis";
 import { formatDate, formatVND } from "@/lib/format";
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Hôm nay" };
+
+/* Hai nguyên nhân mà trưởng phòng KHÔNG tự sửa được bằng một cú giao việc thì tô đậm; còn lại để trung tính — đây là chẩn đoán phòng, không phải xếp hạng. */
+const CAUSE_TONE: Record<OverdueCause, string> = {
+  NO_STAFF: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+  NO_CAPACITY: "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300",
+  UNCLAIMED: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  CONCENTRATED: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+  SPREAD: "bg-muted text-muted-foreground",
+  TOO_FEW: "bg-muted text-muted-foreground",
+  NONE: "bg-muted text-muted-foreground",
+};
+
+function causeDetail(d: OverdueDiagnosis): string {
+  const nguon = d.topSource ? ` · nhiều nhất ở ${WORK_SOURCE_SPEC[d.topSource.source as WorkSource]?.label ?? d.topSource.source} (${d.topSource.overdue})` : "";
+  switch (d.cause) {
+    case "NO_STAFF":
+      return d.members === 0 ? "phòng chưa có thành viên" : `cả ${d.members} người đang nghỉ`;
+    case "NO_CAPACITY":
+      return `${d.unclaimed} việc chưa ai cầm, cả phòng còn ${d.freeSlots} chỗ (${d.present} người)${d.ceilingIsDefault ? " · trần mặc định, chưa khai" : ""}${nguon}`;
+    case "UNCLAIMED":
+      return `${d.overdueUnclaimed}/${d.overdue} việc quá hạn chưa ai cầm, phòng còn ${d.freeSlots} chỗ`;
+    case "CONCENTRATED":
+      return d.topHolder ? `${d.topHolder.overdue} việc quá hạn ở tay ${d.topHolder.name} (${Math.round(d.topHolder.share * 100)}% phần đã có người cầm)` : "";
+    case "SPREAD":
+      return d.present === 1 ? `phòng chỉ có 1 người có mặt, không có ai để chia${nguon}` : `rải ở nhiều người${nguon}`;
+    case "TOO_FEW":
+      return `${d.overdue} việc quá hạn — dưới ${OVERDUE_DIAGNOSIS_MIN}, đọc từng việc`;
+    default:
+      return "";
+  }
+}
 
 /**
  * ═══════ MÀN HÌNH SÁNG — 30 GIÂY ĐỂ BIẾT HÔM NAY PHẢI CHẠM VÀO CÁI GÌ ═══════
@@ -114,6 +149,67 @@ export default async function ManagerDayPage({ searchParams }: { searchParams: P
         ]}
       />
 
+      {/*
+        BA VIỆC LIÊN PHÒNG — chỉ ở chế độ toàn shop. Trong một phòng, "việc đáng làm nhất" đã là đầu
+        hàng đợi của phòng đó; khối này trả lời câu mà không hàng đợi phòng nào trả lời được.
+      */}
+      {day.morning ? (
+        <SectionCard
+          title="Ba việc đáng làm nhất sáng nay"
+          description={`Mỗi phòng một đầu việc, xếp giữa ${day.morning.departmentsWithWork} phòng đang có việc làm được ngay.`}
+          hint={
+            <>
+              <p className="mb-1">
+                Mỗi phòng góp ĐẦU VIỆC của mình (đúng thứ tự leo thang của hàng đợi phòng đó), rồi xếp giữa các phòng: mức gấp trước, cùng mức thì tiền đang treo lớn hơn
+                đứng trước. Không lấy ba việc điểm cao nhất toàn shop, vì phòng sinh nhiều việc nhất sẽ chiếm cả ba ô.
+              </p>
+              <p className="mb-1">Tiền chưa tra được không phải 0 đồng — nhưng không so được, nên nó đứng sau các việc cùng mức có số tiền, và dòng đó ghi rõ lý do.</p>
+              Việc đang chờ bên ngoài và việc đang hoãn (chưa vỡ hạn) không được xét: sáng nay không ai trong shop làm gì được với chúng. Khối này chỉ ĐỀ NGHỊ — không giao
+              việc cho ai.
+            </>
+          }
+          padded={false}
+        >
+          {day.morning.picks.length ? (
+            <ul className="divide-y">
+              {day.morning.picks.map((p) => (
+                <li key={p.item.key} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-start sm:gap-3">
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold tabular-nums">{p.rank}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline" className="text-[11px]">{p.departmentLabel}</Badge>
+                      <Badge variant="secondary" className={cn("text-[11px]", WORK_PRIORITY_TONE[p.priority])}>{p.escalation?.label ?? WORK_PRIORITY_LABEL[p.priority]}</Badge>
+                      <span className="text-[11px] text-muted-foreground">
+                        {WORK_SOURCE_SPEC[p.item.sourceType as WorkSource]?.label ?? p.item.sourceType} · đầu {p.departmentActionable} việc của phòng
+                      </span>
+                    </div>
+                    <Link href={p.item.sourceUrl || "/work/all"} className="mt-1 block truncate text-sm font-medium hover:underline" title={p.item.title}>
+                      {p.item.title}
+                    </Link>
+                    {p.item.recommendedAction ? <p className="text-xs text-foreground/80">→ {p.item.recommendedAction}</p> : null}
+                  </div>
+                  <div className="flex shrink-0 flex-col items-start gap-1 sm:items-end">
+                    <span className="whitespace-nowrap text-xs tabular-nums" title={p.item.money.basis || undefined}>
+                      {p.moneyAtRisk === null ? <span className="text-muted-foreground">chưa tra được tiền</span> : `${formatVND(p.moneyAtRisk, { compact: true })} đang treo`}
+                    </span>
+                    {p.rankedWithoutMoney ? <span className="text-[11px] text-muted-foreground">xếp sau vì chưa biết tiền</span> : null}
+                    <span className="text-[11px] text-muted-foreground">{p.item.assignee ? p.item.assignee.name : "chưa ai nhận"}</span>
+                    {canAssign ? <ReassignSelect workKey={p.item.key} current={p.item.assignee?.name ?? ""} people={nguoiNhan} /> : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyState title="Không phòng nào có việc làm được ngay" description="Mọi việc đang mở đều đang chờ bên ngoài hoặc đang hoãn." className="border-0" />
+          )}
+          {day.morning.skipped.waiting || day.morning.skipped.snoozed ? (
+            <p className="border-t px-3 py-2 text-[11px] text-muted-foreground">
+              Không xét {day.morning.skipped.waiting} việc đang chờ bên ngoài · {day.morning.skipped.snoozed} việc đang hoãn chưa tới hạn.
+            </p>
+          ) : null}
+        </SectionCard>
+      ) : null}
+
       <SectionCard
         title={`Ai quá tải, ai còn chỗ · ${day.overloaded} quá tải · còn ${day.freeSlots} chỗ trống`}
         description="Quá tải = vượt trần HOẶC quá nửa việc đang cầm đã vỡ hạn — một người 6 việc mà 4 việc quá hạn đang chìm, dù còn xa trần."
@@ -171,6 +267,65 @@ export default async function ManagerDayPage({ searchParams }: { searchParams: P
           />
         )}
       </SectionCard>
+
+      {day.diagnosis.some((d) => d.overdue > 0) ? (
+        <SectionCard
+          title="Vì sao quá hạn"
+          description="Cùng một con số quá hạn có bốn nguyên nhân, và cách sửa của cái này làm hỏng cái kia."
+          hint={
+            <>
+              <p className="mb-1">
+                <b>Phòng hết chỗ</b>: việc chưa ai cầm nhiều hơn tổng chỗ trống của mọi người đang có mặt — thiếu người (hoặc trần khai thấp hơn sức thật). <b>Còn chỗ, chưa ai
+                nhận</b>: phần lớn việc quá hạn nằm ở hàng đợi chung trong khi phòng còn chỗ — sửa bằng phân việc, không phải tuyển người. <b>Dồn ở một người</b>: phần lớn
+                việc quá hạn ở tay một người trong khi người khác còn chỗ — chia lại. <b>Chậm đều cả phòng</b>: quá hạn rải ở nhiều người — xem lại hạn hoặc quy trình.
+              </p>
+              <p className="mb-1">
+                &quot;Dồn ở một người&quot; nói việc ĐANG NẰM Ở ĐÂU, không nói ai làm kém: ERP không có dữ liệu để phân biệt người chậm với người chịu nhận việc khó.
+              </p>
+              Chỗ trống tính theo TRẦN KHAI BÁO (Cấu hình → Sức chứa). Phòng chưa khai trần riêng dùng mặc định, nên kết luận &quot;hết chỗ&quot; của phòng đó là ước tính.
+            </>
+          }
+          padded={false}
+        >
+          <div className="overflow-x-auto">
+            <Table className="min-w-[760px]">
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[140px]">Phòng</TableHead>
+                  <TableHead className="w-[80px] text-right">Quá hạn</TableHead>
+                  <TableHead className="w-[110px] text-right">Chưa ai cầm</TableHead>
+                  <TableHead className="w-[100px] text-right">Chỗ trống</TableHead>
+                  <TableHead>Nguyên nhân</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {day.diagnosis
+                  .filter((d) => d.overdue > 0)
+                  .map((d) => (
+                    <TableRow key={d.department}>
+                      <TableCell className="font-medium">{d.label}</TableCell>
+                      <TableCell className="text-right tabular-nums">{d.overdue}</TableCell>
+                      <TableCell className="text-right tabular-nums" title="Quá hạn chưa ai cầm / mọi việc đang mở chưa ai cầm">
+                        {d.overdueUnclaimed} / {d.unclaimed}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums" title={`${d.present}/${d.members} người đang có mặt`}>
+                        {d.freeSlots}
+                        {d.ceilingIsDefault ? <span className="ml-1 text-[10px] text-muted-foreground">ước tính</span> : null}
+                      </TableCell>
+                      <TableCell className="whitespace-normal">
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <Badge variant="secondary" className={cn("text-[11px]", CAUSE_TONE[d.cause])}>{OVERDUE_CAUSE_LABEL[d.cause]}</Badge>
+                          <span className="text-xs text-muted-foreground">{causeDetail(d)}</span>
+                          {OVERDUE_CAUSE_ACTION[d.cause] ? <InfoHint>{OVERDUE_CAUSE_ACTION[d.cause]}</InfoHint> : null}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </div>
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title="Năm việc cần can thiệp ngay"

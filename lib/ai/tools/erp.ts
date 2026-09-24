@@ -8,6 +8,8 @@ import { getCashflow } from "@/lib/queries/cashflow";
 import { getCustomerDetail } from "@/lib/queries/customers";
 import { getOrderTimeline } from "@/lib/queries/entity-timeline";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
+import { getManagerDay } from "@/lib/queries/manager-day";
+import { OVERDUE_CAUSE_ACTION, OVERDUE_CAUSE_LABEL } from "@/lib/work/overdue-diagnosis";
 import { getOrderDetail } from "@/lib/queries/orders";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { adSpendByProduct, getProductIntelligence } from "@/lib/queries/product-intelligence";
@@ -194,6 +196,65 @@ export const getOwnerBriefTool = defineTool({
   },
 });
 
+/*
+  BA VIỆC ĐÁNG LÀM NHẤT — ĐÚNG HÀM CỦA MÀN HÌNH `/work/today`, KHÔNG PHẢI MỘT BẢN XẾP HẠNG THỨ HAI.
+
+  Trước 24/09/2026 Copilot chỉ TRẢ LỜI khi được hỏi; "sáng nay chạm vào đâu" thì nó phải tự ghép từ
+  `get_owner_brief`, mà bản tin ấy đọc bảng cảnh báo — mù với care vận đơn, dòng tiền, quyết định
+  quảng cáo. Tool này đọc `getManagerDay(null)`: cùng danh sách việc, cùng hàm xếp liên phòng
+  (`lib/work/morning-picks.ts`), cùng chẩn đoán quá hạn (`lib/work/overdue-diagnosis.ts`).
+
+  Quyền `work:all` vì kết quả cắt ngang mọi phòng — người chỉ xem được phòng mình không được dùng
+  Copilot làm cửa sau để đọc hàng đợi phòng khác.
+*/
+export const getMorningPrioritiesTool = defineTool({
+  name: "get_morning_priorities",
+  label: "Ba việc đáng làm nhất sáng nay",
+  description:
+    "Ba việc đáng làm nhất lúc này, xếp LIÊN PHÒNG (mỗi phòng một đầu việc; mức gấp trước, cùng mức thì tiền đang treo lớn hơn trước), cùng chẩn đoán vì sao từng phòng quá hạn: hết chỗ · còn chỗ mà chưa ai nhận · dồn ở một người · chậm đều. moneyAtRisk null = CHƯA TRA ĐƯỢC, không phải 0. 'Dồn ở một người' nói việc đang nằm ở đâu, KHÔNG kết luận người đó làm kém. Chỉ đề nghị, không giao việc.",
+  kind: "read",
+  riskClass: "general",
+  permission: "work:all",
+  policy: "auto",
+  input: z.object({}),
+  run: async (ctx) => {
+    const day = await getManagerDay(null, ctx.now);
+    return {
+      departmentsWithWork: day.morning?.departmentsWithWork ?? 0,
+      skipped: day.morning?.skipped ?? { waiting: 0, snoozed: 0 },
+      picks: (day.morning?.picks ?? []).map((p) => ({
+        rank: p.rank,
+        department: p.departmentLabel,
+        source: p.item.sourceType,
+        title: p.item.title,
+        priority: p.escalation?.label ?? p.priority,
+        moneyAtRisk: p.moneyAtRisk,
+        moneyBasis: p.item.money.basis || null,
+        rankedWithoutMoney: p.rankedWithoutMoney,
+        holder: p.item.assignee?.name ?? null,
+        recommendedAction: p.item.recommendedAction,
+        url: p.item.sourceUrl,
+      })),
+      overdueDiagnosis: day.diagnosis
+        .filter((d) => d.overdue > 0)
+        .map((d) => ({
+          department: d.label,
+          cause: d.cause,
+          causeLabel: OVERDUE_CAUSE_LABEL[d.cause],
+          action: OVERDUE_CAUSE_ACTION[d.cause],
+          overdue: d.overdue,
+          overdueUnclaimed: d.overdueUnclaimed,
+          unclaimed: d.unclaimed,
+          freeSlots: d.freeSlots,
+          capacityIsEstimate: d.ceilingIsDefault,
+          topSource: d.topSource,
+        })),
+      // Nguồn nào chưa đọc được thì con số đang THIẾU phần đó — model phải nói ra, không coi là 0.
+      failedSources: day.failedSources.map((f) => f.source),
+    };
+  },
+});
+
 // ───────────────────────────── TOOL GHI — CHỈ SAU XÁC NHẬN ─────────────────────────────
 
 export const resolveCaseTool = defineTool({
@@ -223,5 +284,5 @@ export const reopenCaseTool = defineTool({
 });
 
 export function registerErpTools() {
-  return [searchCustomerTool, getCustomerHistoryTool, getOrderContextTool, getProfitSummaryTool, getCashPositionTool, getInventoryRisksTool, getProductPerformanceTool, getOwnerBriefTool, resolveCaseTool, reopenCaseTool];
+  return [searchCustomerTool, getCustomerHistoryTool, getOrderContextTool, getProfitSummaryTool, getCashPositionTool, getInventoryRisksTool, getProductPerformanceTool, getOwnerBriefTool, getMorningPrioritiesTool, resolveCaseTool, reopenCaseTool];
 }

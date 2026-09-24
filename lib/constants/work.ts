@@ -262,6 +262,19 @@ export function isMachineHeld(item: Pick<WorkItem, "tags">): boolean {
   return item.tags.includes(WORK_TAG_MACHINE_HELD);
 }
 
+/**
+ * Ai đang cầm việc này — cùng luật nhận diện với `isMine`, rút gọn về một khoá: `users.id` nếu có,
+ * không thì `name:<tên thường>` (ô chữ `cs_cases.assignee`).
+ *
+ * Sống ở đây (không ở `lib/queries/workforce.ts`) để các hàm thuần của `lib/work/*` dùng được mà
+ * không kéo `getDb` vào; `lib/queries/workforce.ts` xuất lại nên mã gọi cũ không đổi.
+ */
+export function holderKeyOf(item: Pick<WorkItem, "assignee">): string | null {
+  const a = item.assignee;
+  if (!a) return null;
+  return a.id ?? `name:${a.name.trim().toLowerCase()}`;
+}
+
 export function workKey(sourceType: string, sourceKey: string): string {
   return `${sourceType}:${sourceKey}`;
 }

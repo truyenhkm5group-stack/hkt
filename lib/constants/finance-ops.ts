@@ -11,8 +11,42 @@
  * KHÔNG viết lại luật đối khớp hay luật lương ở đây — chỉ đọc lại kết quả của nơi có thẩm quyền.
  */
 import { normalize } from "@/lib/text";
+import { caseScore } from "@/lib/constants/action-queue";
 import type { MatchConfidence } from "@/lib/integrations/bank/match";
 import type { Employee } from "@/lib/constants/payroll";
+
+/**
+ * ═══════ DÒNG TIỀN CHƯA PHÂN LOẠI: XẾP THEO TIỀN ĐANG TREO × SỐ NGÀY TREO ═══════
+ *
+ * Trước 24/09/2026 hàng đợi Kế toán xếp dòng chưa phân loại theo NGÀY GIAO DỊCH MỚI NHẤT, nên một
+ * khoản 50 triệu chưa ai gán nhóm nằm cùng thứ tự với một khoản 50 nghìn — và khi số dòng tồn vượt
+ * 300 thì `/work` cắt ĐÚNG những khoản cũ nhất (thường là khoản khó, lớn, bị né) ra khỏi hàng đợi.
+ *
+ * Đây là MỘT công thức cho cả `/finance-ops` lẫn `/work` (`adaptBank`): điểm ưu tiên chung của ERP
+ * (`caseScore`) — tiền bão hoà ở 5 triệu, tuổi bão hoà ở 7 ngày — rồi phá thế hoà bằng SỐ TIỀN
+ * TUYỆT ĐỐI. Phá thế hoà là phần quan trọng: hai khoản 5 triệu và 50 triệu cùng tuổi có CÙNG điểm
+ * (cả hai đã chạm trần), và không có bước này thì thứ tự giữa chúng là ngẫu nhiên.
+ *
+ * Số tiền là SỰ THẬT trên sao kê, không phải "tiền sắp mất": phân loại xong không thu thêm đồng nào,
+ * nó chỉ làm báo cáo đúng. Nên đây là thứ tự ĐỌC, không phải một con số giá trị của việc.
+ */
+export function bankExceptionScore(amount: number, txnAt: Date, now: Date): number {
+  const ageHours = Math.max(0, (now.getTime() - txnAt.getTime()) / 3_600_000);
+  return caseScore({ severity: "warning", ageHours, amount: Math.abs(amount), type: "DATA_ERROR" });
+}
+
+/**
+ * Xếp dòng tiền chưa phân loại: điểm cao trước → tiền lớn trước → giao dịch cũ trước → `id`.
+ *
+ * Bước cuối theo `id` để thứ tự ỔN ĐỊNH: hai lần mở trang ra cùng một danh sách, nếu không người
+ * đang làm dở dòng thứ 7 bấm làm mới thì thấy nó nhảy sang vị trí khác.
+ */
+export function rankBankExceptions<T extends { id: string; amount: number; txnAt: Date }>(rows: T[], now: Date): T[] {
+  return rows
+    .map((r) => ({ r, score: bankExceptionScore(r.amount, r.txnAt, now) }))
+    .sort((a, b) => b.score - a.score || Math.abs(b.r.amount) - Math.abs(a.r.amount) || a.r.txnAt.getTime() - b.r.txnAt.getTime() || (a.r.id < b.r.id ? -1 : a.r.id > b.r.id ? 1 : 0))
+    .map((x) => x.r);
+}
 
 export const FINANCE_OPS_COD_STATUSES = ["MATCHED", "PARTIAL", "UNMATCHED", "REVIEW"] as const;
 export type FinanceOpsCodStatus = (typeof FINANCE_OPS_COD_STATUSES)[number];

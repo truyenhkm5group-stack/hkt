@@ -11,14 +11,16 @@ import { BANK_GROUP_SPEC } from "@/lib/constants/bank";
 import { EXPENSE_CATEGORY_LABEL } from "@/lib/constants/expenses";
 import { FINANCE_OPS_COD_STATUS_HINT, FINANCE_OPS_COD_STATUS_LABEL, type FinanceOpsCodStatus } from "@/lib/constants/finance-ops";
 import { maskAccountNumber } from "@/lib/constants/bank";
-import { formatDate, formatVND } from "@/lib/format";
+import { ageLabel } from "@/lib/constants/action-queue";
+import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import {
+  UNCLASSIFIED_SCAN_CAP,
   codMatchQueue,
   expensesWithoutPayment,
   internalTransferCandidateRows,
   paymentsWithoutExpense,
   payrollUnmatched,
-  unclassifiedBankRows,
+  unclassifiedBankQueue,
   unconfirmedAccountRows,
 } from "@/lib/queries/finance-ops";
 
@@ -32,13 +34,34 @@ import {
 
 const AMOUNT_TONE = (amount: number) => (amount > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400");
 
+const SHOWN_UNCLASSIFIED = 100;
+
+function treoLabel(txnAt: Date, now: Date): string {
+  const h = Math.max(0, (now.getTime() - txnAt.getTime()) / 3_600_000);
+  return h < 1 ? "vừa vào sổ" : `treo ${ageLabel(h)}`;
+}
+
 export async function BankUnclassifiedSection({ canWrite, canExpense }: { canWrite: boolean; canExpense: boolean }) {
-  const rows = await unclassifiedBankRows(100);
+  const now = new Date();
+  const { rows, total, truncated } = await unclassifiedBankQueue(SHOWN_UNCLASSIFIED, { now });
   return (
     <SectionCard
       title="Giao dịch ngân hàng chưa phân loại"
-      description="Mỗi dòng tiền vào/ra chưa được gán nhóm kế toán."
-      hint="Phân loại KHÔNG tự tạo chi phí — chi phí chỉ được ghi nhận khi có khoản chi thật và nối chứng từ. Chuyển nội bộ và không thuộc kinh doanh không cần nối gì cả."
+      description={
+        total > rows.length
+          ? `${rows.length}/${formatNumber(total)} dòng đáng xử lý nhất — khoản lớn, treo lâu đứng trước.`
+          : "Khoản lớn, treo lâu đứng trước."
+      }
+      hint={
+        <>
+          <p className="mb-1">
+            Thứ tự theo điểm ưu tiên chung của ERP: số tiền (bão hoà ở 5 triệu) cộng số ngày treo (bão hoà ở 7 ngày), cùng điểm thì khoản lớn hơn đứng trước. Hàng đợi
+            Công việc dùng đúng thứ tự này.
+          </p>
+          {truncated ? <p className="mb-1 font-semibold">Có hơn {formatNumber(UNCLASSIFIED_SCAN_CAP)} dòng chưa phân loại — thứ tự chỉ xét phần tiền lớn nhất đã đọc được.</p> : null}
+          Phân loại KHÔNG tự tạo chi phí — chi phí chỉ được ghi nhận khi có khoản chi thật và nối chứng từ. Chuyển nội bộ và không thuộc kinh doanh không cần nối gì cả.
+        </>
+      }
       padded={false}
     >
       {rows.length === 0 ? (
@@ -50,7 +73,9 @@ export async function BankUnclassifiedSection({ canWrite, canExpense }: { canWri
               <div className="min-w-[220px] flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`numeric text-sm font-semibold ${AMOUNT_TONE(r.amount)}`}>{formatVND(r.amount, { sign: true })}</span>
-                  <span className="text-[12px] text-muted-foreground">{formatDate(r.txnAt)}</span>
+                  <span className="text-[12px] text-muted-foreground">
+                    {formatDate(r.txnAt)} · {treoLabel(r.txnAt, now)}
+                  </span>
                   {r.employeeSuggestion ? (
                     <Badge variant="outline" className="text-[10.5px] text-indigo-700 dark:text-indigo-300">
                       Có thể là lương của {r.employeeSuggestion.name}

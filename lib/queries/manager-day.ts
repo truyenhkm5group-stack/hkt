@@ -2,6 +2,8 @@ import { DEPARTMENT_LABEL, DEPARTMENT_ORDER, type DepartmentCode } from "@/lib/c
 import { slaStateOf, sumMoney, type WorkItem } from "@/lib/constants/work";
 import { WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
 import { escalationOf, sortByEscalation, type Escalation } from "@/lib/work/escalation";
+import { pickMorningWork, type MorningPicks } from "@/lib/work/morning-picks";
+import { diagnoseOverdue, type OverdueDiagnosis } from "@/lib/work/overdue-diagnosis";
 import { collectWorkItems } from "@/lib/queries/work-adapters";
 import { listOrgPeople } from "@/lib/queries/work";
 import { buildCapacity, getStaffing, holderKeyOf, type CapacityRow } from "@/lib/queries/workforce";
@@ -79,6 +81,10 @@ export type ManagerDay = {
   emptyDepartments: { department: DepartmentCode; label: string; open: number }[];
   failedSources: { source: WorkSource; error: string }[];
   cfg: StaffingConfig;
+  /** Ba việc đáng làm nhất, xếp LIÊN PHÒNG. Chỉ có ở chế độ xem toàn shop — trong một phòng thì đó đã là đầu hàng đợi. */
+  morning: MorningPicks | null;
+  /** Vì sao quá hạn, từng phòng trong phạm vi — `lib/work/overdue-diagnosis.ts`. */
+  diagnosis: OverdueDiagnosis[];
 };
 
 export function buildInterventions(items: WorkItem[], capacity: CapacityRow[], now: Date, emptyDepts: Set<DepartmentCode>): Intervention[] {
@@ -180,6 +186,8 @@ export async function getManagerDay(scope: DepartmentCode | null, now: Date = ne
     emptyDepartments,
     failedSources: failed,
     cfg,
+    morning: scope ? null : pickMorningWork(open, now),
+    diagnosis: diagnoseOverdue(open, capacity, cfg, now, scope),
   };
 }
 
