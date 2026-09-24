@@ -68,6 +68,7 @@ const MOI = [
   "0118_creative_manual_variants",
   "0119_creative_own_ads",
   "0120_creative_design_concepts",
+  "0121_creative_scale_drafts",
 ] as const;
 
 /*

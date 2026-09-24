@@ -477,6 +477,7 @@ export async function testCreativeGenerate(db: Db) {
     if (pb) {
       const pvs = await db.select({ id: schema.creativeVariants.id }).from(schema.creativeVariants).where(eq(schema.creativeVariants.batchId, pb.id));
       if (pvs.length) await db.delete(schema.creativeVerdicts).where(inArray(schema.creativeVerdicts.variantId, pvs.map((v) => v.id)));
+      if (pvs.length) await db.delete(schema.creativeScaleDrafts).where(inArray(schema.creativeScaleDrafts.variantId, pvs.map((v) => v.id)));
       await db.delete(schema.creativeVariants).where(eq(schema.creativeVariants.batchId, pb.id));
       await db.delete(schema.creativeBatches).where(eq(schema.creativeBatches.id, pb.id));
     }

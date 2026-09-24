@@ -1,5 +1,13 @@
 import type { AdsWriteMode } from "@/lib/constants/ads-write";
-import { CREATIVE_HARD_LIMITS, CREATIVE_WRITE_DENIAL_REASON, type CreativeWriteAction, type CreativeWriteDenial } from "@/lib/constants/creative-loop";
+import {
+  CREATIVE_HARD_LIMITS,
+  CREATIVE_WRITE_DENIAL_REASON,
+  SCALE_ELIGIBLE_VERDICTS,
+  type CreativeVerdict,
+  type CreativeWriteAction,
+  type CreativeWriteDenial,
+  type ScaleWriteAction,
+} from "@/lib/constants/creative-loop";
 
 /**
  * ═══════════ CỔNG GHI CỦA VÒNG MẪU — HÀM THUẦN, CÙNG TINH THẦN `gateAdsWrite` ═══════════
@@ -178,6 +186,104 @@ export function gateCreativeWrite(i: CreativeGateInput): CreativeGateResult {
     if (i.extendedTodayVnd + e > CREATIVE_HARD_LIMITS.maxDailyExtensionVnd) {
       return deny("OVER_EXTENSION_CAP", `(Hôm nay đã cho thêm ${vnd(i.extendedTodayVnd)}, trần ngày ${vnd(CREATIVE_HARD_LIMITS.maxDailyExtensionVnd)}.)`);
     }
+  }
+
+  return { ok: true };
+}
+
+/* ═══════════ CỔNG CỦA NGOẠI LỆ SCALE MẪU THẮNG (§5g) — HÀM THUẦN ═══════════
+ *
+ * Sáu hành động `*_SCALE*` không đi qua `gateCreativeWrite`: chúng không có lô, không có khung test,
+ * không có mẩu mẫu — chúng có CHIẾN DỊCH MẪU, PHÁN QUYẾT của mẫu thắng, và PHIẾU BẬT. Cùng tinh thần:
+ * không đọc CSDL, không đọc đồng hồ, không gọi mạng, không đọc env — nơi gọi truyền mọi thứ xuống.
+ *
+ * ─── THỨ TỰ CÁC CHỐT (bài kiểm `tests/creative-scale.test.ts` khoá nó) ───
+ *
+ *   HARD_DISABLED → MODE_OFF → CONFIG_INCOMPLETE → NOT_APPROVED → APPROVAL_MISMATCH (bật)
+ *   → NOT_SCALE_TEMPLATE (sao chép) → NOT_OUR_AD (mọi bước sau sao chép)
+ *   → [TẮT dừng ở đây: chỉ làm GIẢM tiền] → NOT_WINNER → SCALE_DUPLICATE (sao chép)
+ *   → OVER_SCALE_BUDGET (sao chép · đặt ngân sách · bật) → OVER_SCALE_DAILY_CAP (bật)
+ *
+ * Chốt env + nấc COPILOT đứng ĐẦU: câu trả lời cho "có tổ hợp nào lỡ bật một chiến dịch thật không"
+ * vẫn là KHÔNG ở nhánh đầu tiên. Phiếu đứng trước nguồn và tiền (chưa ai cho phép thì hỏi "sao chép gì,
+ * bao nhiêu" là vô nghĩa). Nguồn đứng trước phán quyết: sao chép nhầm một chiến dịch của marketer là
+ * lỗi nặng hơn scale một mẫu chưa đủ căn cứ.
+ */
+
+export type ScaleGateInput = {
+  /** `ADS_WRITE_ENABLED` đọc THẲNG từ biến môi trường ở tầng gọi. */
+  hardEnabled: boolean;
+  /** Nấc ĐÃ kẹp bằng `clampAdsWriteMode`. Chỉ `COPILOT` được ghi. */
+  mode: AdsWriteMode;
+  action: ScaleWriteAction;
+  /** Đã khai tài khoản QC + fanpage + chiến dịch mẫu của loại này. */
+  configComplete: boolean;
+  /**
+   * Có căn cứ cho phép chưa:
+   *  · dựng nháp (sao chép · tạo bài · gắn bài · đặt ngân sách): NGƯỜI đã bấm "Dựng nháp" (mọi thứ vẫn TẮT);
+   *  · bật: phiếu HMAC hợp lệ của CHÍNH người bấm;
+   *  · tắt: người đã bấm xác nhận.
+   */
+  approved: boolean;
+  /** Bật: chiến dịch · ngân sách · bài tính lại từ CSDL VÀ đọc lại từ Facebook khớp đúng phiếu. */
+  approvalMatches: boolean;
+  /** Sao chép: id chiến dịch sẽ bị sao chép. */
+  sourceCampaignId: string | null;
+  /** Id chiến dịch mẫu đã khai cho loại này (rỗng = chưa khai). */
+  templateCampaignId: string;
+  /** Mọi bước SAU sao chép: đối tượng nhắm tới là của bản sao đã ghi trong nháp. */
+  ourCopy: boolean;
+  /** Phán quyết SỐNG của mẫu gốc. */
+  verdict: CreativeVerdict;
+  /** Sao chép: dòng nháp này đã từng thử sao chép (có `copy_attempted_at` / id bản sao). */
+  alreadyCopied: boolean;
+  /** Sao chép: số nháp KHÁC của cùng mẫu đã thử sao chép. */
+  otherDraftsForVariant: number;
+  /** Ngân sách ngày (VND) của chiến dịch này — chưa kẹp. */
+  budgetVnd: number;
+  /** Bật: tổng ngân sách ngày của các chiến dịch scale KHÁC đang bật (`ACTIVE`). */
+  activeTotalVnd: number;
+};
+
+const SCALE_DRAFT_ACTIONS: readonly ScaleWriteAction[] = ["COPY_SCALE_CAMPAIGN", "CREATE_SCALE_CREATIVE", "SET_SCALE_AD_CREATIVE", "SET_SCALE_BUDGET"];
+
+export function isScaleDraftAction(a: ScaleWriteAction): boolean {
+  return SCALE_DRAFT_ACTIONS.includes(a);
+}
+
+export function gateScaleWrite(i: ScaleGateInput): CreativeGateResult {
+  if (!i.hardEnabled) return deny("HARD_DISABLED");
+  if (i.mode !== "COPILOT") return deny("MODE_OFF");
+  if (!i.configComplete) return deny("CONFIG_INCOMPLETE", "(Thiếu tài khoản QC / fanpage / chiến dịch mẫu của loại này.)");
+  if (!i.approved) return deny("NOT_APPROVED", i.action === "ACTIVATE_SCALE" ? "(Bật chiến dịch scale cần phiếu duyệt của chính người bấm.)" : "");
+  if (i.action === "ACTIVATE_SCALE" && !i.approvalMatches) return deny("APPROVAL_MISMATCH", "(Chiến dịch nháp, ngân sách hoặc bài quảng cáo đã khác lúc phát phiếu.)");
+
+  const copy = i.action === "COPY_SCALE_CAMPAIGN";
+  if (copy) {
+    if (!i.templateCampaignId || i.sourceCampaignId !== i.templateCampaignId) {
+      return deny("NOT_SCALE_TEMPLATE", `(Xin sao chép ${i.sourceCampaignId ?? "∅"}, mẫu đã khai ${i.templateCampaignId || "∅"}.)`);
+    }
+  } else if (!i.ourCopy) {
+    return deny("NOT_OUR_AD", "(Đối tượng này không phải bản sao do vòng mẫu dựng cho nháp scale này.)");
+  }
+
+  // TẮT chỉ làm GIẢM tiền: không phán quyết, không trần nào được giữ tiền chảy.
+  if (i.action === "PAUSE_SCALE") return { ok: true };
+
+  if (!SCALE_ELIGIBLE_VERDICTS.includes(i.verdict)) return deny("NOT_WINNER", `(Phán quyết hiện tại: ${i.verdict}.)`);
+
+  if (copy && (i.alreadyCopied || i.otherDraftsForVariant >= CREATIVE_HARD_LIMITS.maxScaleDraftsPerVariant)) {
+    return deny("SCALE_DUPLICATE", i.alreadyCopied ? "(Nháp này đã từng sao chép.)" : `(Mẫu đã có ${i.otherDraftsForVariant} nháp.)`);
+  }
+
+  if (copy || i.action === "SET_SCALE_BUDGET" || i.action === "ACTIVATE_SCALE") {
+    const b = i.budgetVnd;
+    if (!Number.isInteger(b) || b <= 0) return deny("OVER_SCALE_BUDGET", `(Ngân sách không hợp lệ: ${String(b)}.)`);
+    if (b > CREATIVE_HARD_LIMITS.maxScaleDailyBudgetVnd) return deny("OVER_SCALE_BUDGET", `(Xin ${vnd(b)}/ngày.)`);
+  }
+
+  if (i.action === "ACTIVATE_SCALE" && i.activeTotalVnd + i.budgetVnd > CREATIVE_HARD_LIMITS.maxScaleActiveDailyTotalVnd) {
+    return deny("OVER_SCALE_DAILY_CAP", `(Đang bật ${vnd(i.activeTotalVnd)}/ngày, xin thêm ${vnd(i.budgetVnd)}.)`);
   }
 
   return { ok: true };

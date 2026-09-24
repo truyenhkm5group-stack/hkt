@@ -17,6 +17,7 @@ import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { judgeVariant } from "@/lib/creative/judge";
 import { geneStats, outcomeOf, relativeBaseline, type GeneStat, type Observation } from "@/lib/creative/learn";
 import { purgeCreativeImage } from "@/lib/creative/images";
+import { proposeScale, type ScaleCandidate } from "@/lib/creative/scale";
 import {
   effectiveJudgeConfig,
   evaluationCandidates,
@@ -80,6 +81,8 @@ export type EvaluateResult = {
   ended: string[];
   /** Id mẫu vừa bị xoá điểm ảnh ở lượt này. */
   purged: string[];
+  /** Id dòng ĐỀ NGHỊ scale vừa chèn ở lượt này (mẫu THẮNG / HỨA HẸN — §5g). Không gọi Facebook. */
+  scaleProposals: string[];
   learning: { observations: number; relative: number };
   /** Cảnh báo không chặn (vd bản tin AI hỏng) — để job ghi vào `sync_runs`. */
   warnings: string[];
@@ -117,6 +120,7 @@ export async function evaluateCreatives(db: Db, now: Date, deps: EvaluateDeps = 
   const losses: string[] = [];
   const ended: string[] = [];
   const observations: Observation[] = [];
+  const scaleCandidates: ScaleCandidate[] = [];
 
   for (const { variant, batch } of candidates) {
     const m = metrics.get(variant.id) as VariantMetricsRow;
@@ -167,6 +171,8 @@ export async function evaluateCreatives(db: Db, now: Date, deps: EvaluateDeps = 
       });
 
     if (variant.designConceptId) await advanceDesignStatus(db, variant.designConceptId, j.verdict as CreativeVerdict, now);
+    // ĐỀ NGHỊ scale (§5g): chỉ chèn dòng đề nghị, không gọi Facebook — người bấm mới dựng nháp.
+    if (j.verdict === "WIN" || j.verdict === "PROMISING") scaleCandidates.push({ variantId: variant.id, batchId: batch.id, verdict: j.verdict, metrics: metricsSnapshot(m) });
 
     const genes = parseGenes(variant.genes);
     if (genes) {
@@ -182,6 +188,14 @@ export async function evaluateCreatives(db: Db, now: Date, deps: EvaluateDeps = 
     }
   }
 
+  // Đề nghị hỏng KHÔNG được làm hỏng lượt chấm (lượt chấm còn giữ phanh tắt sớm) — chỉ cảnh báo.
+  let scaleProposals: string[] = [];
+  try {
+    scaleProposals = await proposeScale(db, scaleCandidates);
+  } catch (e) {
+    warnings.push(`Đề nghị scale không ghi được: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   // ─── XOÁ ĐIỂM ẢNH MẪU THUA QUÁ HẠN ───
   // Hạn giữ là cấu hình HIỆN TẠI: nó không chạm tiền, và người vừa rút ngắn/kéo dài hạn giữ muốn nó
   // có hiệu lực cho cả mẫu cũ.
@@ -193,7 +207,7 @@ export async function evaluateCreatives(db: Db, now: Date, deps: EvaluateDeps = 
   // ─── HỌC ───
   const learning = await learn(db, day, now, observations, deps, warnings);
 
-  return { judged: candidates.length, kills, newWins, losses, ended, purged, learning, warnings };
+  return { judged: candidates.length, kills, newWins, losses, ended, purged, scaleProposals, learning, warnings };
 }
 
 /**

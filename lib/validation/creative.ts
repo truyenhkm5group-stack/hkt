@@ -154,6 +154,7 @@ export const CONFIG_NUMERIC_FIELDS = [
   "imageDailyCapUsd",
   "batchFallbackHourVn",
   "loserImageRetentionDays",
+  "scaleDailyBudgetVnd",
 ] as const satisfies readonly (keyof CreativeLoopConfig)[];
 export type ConfigNumericField = (typeof CONFIG_NUMERIC_FIELDS)[number];
 
@@ -186,7 +187,21 @@ export const CONFIG_FIELD_LABEL: Record<Exclude<keyof CreativeLoopConfig, "killR
   fallbackImageQuality: "Chất lượng khi vẽ nốt bằng gọi ngay",
   imageDailyCapUsd: "Trần chi sinh ảnh / ngày (USD)",
   loserImageRetentionDays: "Giữ ảnh mẫu bị loại (ngày)",
+  scaleTemplates: "Chiến dịch MẪU scale (ID)",
+  scaleDailyBudgetVnd: "Ngân sách ngày mỗi chiến dịch scale nháp",
 };
+
+/** Nhãn hai ô id chiến dịch mẫu scale (§5g). */
+export const SCALE_TEMPLATE_LABEL = {
+  purchaseMessagingCampaignId: "Chiến dịch MẪU · tối đa lượt mua qua tin nhắn (ID)",
+  leadsCampaignId: "Chiến dịch MẪU · khách hàng tiềm năng (ID)",
+} as const;
+
+const scaleIdText = z
+  .string()
+  .trim()
+  .max(40, "Id chiến dịch mẫu quá dài")
+  .refine((s) => s === "" || /^[0-9]{5,25}$/.test(s), "Id chiến dịch mẫu chỉ gồm chữ số (id Facebook), hoặc để trống");
 
 const finiteNumber = (field: ConfigNumericField) =>
   z.number({ message: `Ô "${CONFIG_FIELD_LABEL[field]}" phải là một con số` }).refine(Number.isFinite, `Ô "${CONFIG_FIELD_LABEL[field]}" phải là một con số`);
@@ -235,6 +250,10 @@ export const creativeConfigRawSchema = z
     fallbackImageQuality: z.enum(IMAGE_QUALITIES),
     imageDailyCapUsd: finiteNumber("imageDailyCapUsd"),
     loserImageRetentionDays: finiteNumber("loserImageRetentionDays"),
+    // Hai trường của scale (§5g) là TUỲ CHỌN để bản lưu cũ / bài kiểm cũ không vỡ — thiếu thì
+    // `normalizeCreativeConfig` điền rỗng (không scale được) và ngân sách mặc định 500.000đ.
+    scaleTemplates: z.object({ purchaseMessagingCampaignId: scaleIdText, leadsCampaignId: scaleIdText }).strict().optional(),
+    scaleDailyBudgetVnd: finiteNumber("scaleDailyBudgetVnd").optional(),
   })
   .strict();
 

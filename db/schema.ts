@@ -3213,6 +3213,68 @@ export const productDna = pgTable(
   (t) => [uniqueIndex("product_dna_product_uq").on(t.productId)],
 );
 
+/**
+ * NHÁP SCALE MẪU THẮNG (`docs/creative-loop.md` §5f). Một dòng = một (mẫu thắng, loại chiến dịch):
+ * đề nghị → nháp (bản sao chiến dịch MẪU, đang TẮT) → người duyệt ⇒ bật. Khoá duy nhất (mẫu, loại)
+ * ⇒ không bao giờ có nháp thứ hai cho cùng một cặp. Không phải nguồn tiền: chi của chiến dịch scale
+ * vẫn đọc từ `ad_spends` như mọi chiến dịch.
+ */
+export const creativeScaleDrafts = pgTable(
+  "creative_scale_drafts",
+  {
+    id: id(),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => creativeVariants.id),
+    batchId: text("batch_id").references(() => creativeBatches.id),
+    /** `PURCHASE_MESSAGING` · `LEADS` (`ScaleKind`). */
+    kind: text("kind").notNull(),
+    /** `ScaleDraftStatus`. */
+    status: text("status").notNull().default("PROPOSED"),
+    /** Phán quyết + số đo lúc máy đề nghị — để người đọc biết đề nghị đứng trên gì. */
+    proposedVerdict: text("proposed_verdict").notNull().default(""),
+    proposalMetrics: jsonb("proposal_metrics").$type<Record<string, unknown>>().notNull().default({}),
+    /** Chiến dịch MẪU đã sao chép (chụp lúc sao chép — cấu hình có thể đổi về sau). */
+    sourceCampaignId: text("source_campaign_id").notNull().default(""),
+    fbCampaignId: text("fb_campaign_id"),
+    fbAdsetId: text("fb_adset_id"),
+    fbAdId: text("fb_ad_id"),
+    fbCreativeId: text("fb_creative_id"),
+    /** `CAMPAIGN` (CBO) · `ADSET` (ABO) — đọc từ chính bản sao. Rỗng = chưa đọc. */
+    budgetLevel: text("budget_level").notNull().default(""),
+    dailyBudgetVnd: integer("daily_budget_vnd"),
+    currency: text("currency").notNull().default("VND"),
+    error: text("error").notNull().default(""),
+    /** Ghi NGAY TRƯỚC lời gọi sao chép: có mốc này mà không có id bản sao ⇒ có thể đã có bản sao mồ côi. */
+    copyAttemptedAt: ts("copy_attempted_at"),
+    /** QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN (mục 34); tên là ảnh chụp do máy chủ đọc. */
+    draftedByUserId: text("drafted_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    draftedByName: text("drafted_by_name").notNull().default(""),
+    draftedAt: ts("drafted_at"),
+    approvedByUserId: text("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    approvedByName: text("approved_by_name").notNull().default(""),
+    approvedAt: ts("approved_at"),
+    pausedAt: ts("paused_at"),
+    dismissedByUserId: text("dismissed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    dismissedAt: ts("dismissed_at"),
+    /** Tin báo "có đề nghị scale mới" đã gửi được lúc nào. */
+    notifiedAt: ts("notified_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("creative_scale_drafts_variant_kind_uq").on(t.variantId, t.kind),
+    index("creative_scale_drafts_status_idx").on(t.status),
+    check("creative_scale_drafts_kind_check", sql`${t.kind} IN ('PURCHASE_MESSAGING', 'LEADS')`),
+    check("creative_scale_drafts_status_check", sql`${t.status} IN ('PROPOSED', 'DRAFTING', 'DRAFT', 'ACTIVE', 'PAUSED', 'FAILED', 'DISMISSED')`),
+    // Trần cứng 500.000đ/ngày một chiến dịch (chủ shop 24/09/2026) — nhắc lại ở CSDL.
+    check("creative_scale_drafts_budget_check", sql`${t.dailyBudgetVnd} IS NULL OR (${t.dailyBudgetVnd} > 0 AND ${t.dailyBudgetVnd} <= 500000)`),
+    // "Đang chạy" phải có bản sao và dấu duyệt của người — không có chứng từ thì không phải đang chạy.
+    check("creative_scale_drafts_active_check", sql`${t.status} NOT IN ('ACTIVE', 'PAUSED') OR (${t.fbCampaignId} IS NOT NULL AND ${t.approvedAt} IS NOT NULL)`),
+    check("creative_scale_drafts_draft_check", sql`${t.status} <> 'DRAFT' OR (${t.fbCampaignId} IS NOT NULL AND ${t.fbAdId} IS NOT NULL AND ${t.fbCreativeId} IS NOT NULL AND ${t.dailyBudgetVnd} IS NOT NULL)`),
+  ],
+);
+
 // ───────────────────── Quy kết fanpage → marketer ─────────────────────
 //
 // Hợp đồng, lý lẽ và mọi ngưỡng: `lib/constants/fanpage-attribution.ts`. Ba bảng, ba việc rời nhau:

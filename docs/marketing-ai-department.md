@@ -238,6 +238,10 @@ trường ai đó gõ lúc nửa đêm.
 (từ `CUT`). `FIX_DELIVERY` **cố ý không** nối vào bàn tay — sửa khâu giao là việc của kho và CSKH;
 nối nó vào một nút đổi tiền là chữa sai bệnh, đúng thứ `FIX_DELIVERY` sinh ra để ngăn.
 
+> **Ngoại lệ có chủ đích (24/09/2026): scale mẫu thắng** — vòng mẫu được "tạo chiến dịch" theo đúng
+> MỘT cách: SAO CHÉP chiến dịch MẪU người dựng, bản sao TẮT, bật khi người duyệt. Bảy hàng rào ở trên
+> vẫn áp nguyên (cùng cửa ghi, cùng chốt env, cùng phiếu HMAC). Chi tiết: `docs/creative-loop.md` §5g.
+
 **Thứ tự các chốt là một phần của thiết kế**, và bài kiểm khoá nó lại: chốt cứng đứng trước tất cả,
 rồi tới phanh — vì phanh nói về SỨC KHOẺ CỦA CHÍNH LUẬT, và một luật đang sai thì khuyến nghị "đã
 chín" của nó cũng không đáng tin.
