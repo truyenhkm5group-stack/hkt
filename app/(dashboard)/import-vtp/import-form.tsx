@@ -12,7 +12,7 @@ import { importVtpDataFiles, previewVtpDataFiles, type ImportPreview, type VtpIm
 import { MAX_LIST_FILES, MAX_LIST_RAW_BYTES } from "@/lib/constants/cod";
 import { PREVIEW_VERDICT_HINT, PREVIEW_VERDICT_LABEL, PREVIEW_VERDICT_ORDER, PREVIEW_VERDICT_TONE } from "@/lib/constants/vtp-import";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
-import { formatDateTime, formatNumber, MISSING_TEXT } from "@/lib/format";
+import { formatDateTime, formatNumber, formatVND, MISSING_TEXT } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /**
@@ -283,6 +283,15 @@ function KhoiXemTruoc({ p }: { p: ImportPreview }) {
       {p.error ? (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-destructive">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {p.error}
+        </p>
+      ) : p.statement ? (
+        // Bảng kê tiền COD: chỉ số TỔNG. "Thu về" là đúng số Viettel Post chuyển vào tài khoản cho
+        // bảng kê này — người ghi đối chiếu được với sao kê ngân hàng trước khi bấm ghi.
+        <p className="mt-2 text-xs text-muted-foreground">
+          {formatNumber(p.statement.codRows)} dòng có tiền thu hộ · thu hộ {formatVND(p.statement.codTotal)} · cước{" "}
+          {formatVND(p.statement.feeTotal)} · <b className="text-foreground">thu về {formatVND(p.statement.netTotal)}</b>
+          {p.statement.from ? ` · ngày phát ${p.statement.from} → ${p.statement.to}` : ""}. Ghi vào ERP sẽ đưa tệp vào sổ chứng từ
+          tiền của trang Đối soát COD; tệp đã ghi trước đó không bị cộng lần hai.
         </p>
       ) : (
         <>

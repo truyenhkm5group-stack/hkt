@@ -748,6 +748,42 @@ export function statementKeyOf(rows: StatementDetailRow[], statementDate?: strin
   return `SHA-${createHash("sha256").update(van).digest("hex").slice(0, 20)}`;
 }
 
+/**
+ * Khoá của bảng kê ĐÃ CÓ trong sổ mà tập dòng có tiền (mã, tiền thu hộ) TRÙNG KHÍT tệp đang nhập.
+ *
+ * Trùng khít, không phải "chứa": hai đợt chi khác nhau không bao giờ có cùng tập vận đơn được chi.
+ * Tệp không có dòng nào có tiền (bảng kê chỉ-cước) thì không nhận diện được theo cách này ⇒ `null`.
+ * Nhiều khoá cùng trùng (chính là tình trạng trùng lặp cần dọn) ⇒ lấy khoá GHI SỔ SỚM NHẤT; dòng
+ * cũ của chính tệp này nằm dưới khoá khác sẽ bị bước xoá ngay sau đó dọn đi.
+ */
+async function khoaCungTapTien(matches: DetailMatch[]): Promise<string | null> {
+  const tapTep = new Map<string, number>();
+  for (const m of matches) if (m.cod > 0 && !tapTep.has(m.trackingCode)) tapTep.set(m.trackingCode, m.cod);
+  if (!tapTep.size) return null;
+  const db = await getDb();
+  const ungVien = await db
+    .select({ key: schema.codStatementLines.statementKey })
+    .from(schema.codStatementLines)
+    .where(and(inArray(schema.codStatementLines.trackingCode, [...tapTep.keys()]), sql`${schema.codStatementLines.cod} > 0`))
+    .groupBy(schema.codStatementLines.statementKey);
+  if (!ungVien.length) return null;
+  const dong = await db
+    .select({ key: schema.codStatementLines.statementKey, code: schema.codStatementLines.trackingCode, cod: schema.codStatementLines.cod, createdAt: schema.codStatementLines.createdAt })
+    .from(schema.codStatementLines)
+    .where(and(inArray(schema.codStatementLines.statementKey, ungVien.map((u) => u.key)), sql`${schema.codStatementLines.cod} > 0`));
+  const theoKhoa = new Map<string, { tap: Map<string, number>; som: number }>();
+  for (const d of dong) {
+    const g = theoKhoa.get(d.key) ?? { tap: new Map<string, number>(), som: Infinity };
+    g.tap.set(d.code, Number(d.cod));
+    g.som = Math.min(g.som, new Date(d.createdAt).getTime());
+    theoKhoa.set(d.key, g);
+  }
+  const trung = [...theoKhoa.entries()]
+    .filter(([, g]) => g.tap.size === tapTep.size && [...tapTep].every(([code, cod]) => g.tap.get(code) === cod))
+    .sort((a, b) => a[1].som - b[1].som || a[0].localeCompare(b[0]));
+  return trung[0]?.[0] ?? null;
+}
+
 export async function applyStatementDetailRows(rows: StatementDetailRow[], sourceRef: string, batchId: string | null, statementKey?: string) {
   const db = await getDb();
   const batch = batchId
@@ -759,8 +795,19 @@ export async function applyStatementDetailRows(rows: StatementDetailRow[], sourc
   const dates = rows.map((r) => r.paidDate).filter((d): d is string => Boolean(d)).sort();
   const statementAt = dates.length ? new Date(`${dates[dates.length - 1]}T00:00:00Z`) : (batch?.receivedAt ?? now);
 
-  // 1) Ghi sổ — mỗi (file, mã vận đơn) một dòng, nhập lại thì cập nhật đúng dòng đó.
-  const khoa = statementKey || statementKeyOf(rows, dates[dates.length - 1] ?? null);
+  // 1) Ghi sổ — mỗi (bảng kê, mã vận đơn) một dòng, nhập lại thì cập nhật đúng dòng đó.
+  //
+  // DANH TÍNH BẢNG KÊ = TẬP DÒNG CÓ TIỀN CỦA NÓ, không phải ngày. Bản trước lấy "ngày phát muộn
+  // nhất trong tệp" làm khoá, và hỏng theo cả hai chiều (production 25/09/2026, tệp "Báo cáo chi
+  // tiết bảng kê" tải tay — loại tệp không in số bảng kê):
+  //   · CÙNG một bảng kê tải lại sau vài ngày mang ngày muộn hơn (dòng chỉ-cước có ngày phát mới)
+  //     ⇒ khoá mới ⇒ 17 vận đơn bị cộng tiền HAI lần (BK-2026-09-14 và BK-2026-09-18 là một tệp);
+  //   · HAI bảng kê khác nhau cùng kết thúc một ngày ⇒ CHUNG khoá ⇒ tệp ghi sau đè dòng tệp trước,
+  //     kết quả tuỳ thứ tự chọn tệp (30873899 và 31031025 cùng thành BK-2026-09-24).
+  // Viettel Post chi COD của một vận đơn đúng một lần, nên tập (mã, tiền thu hộ) của các dòng có
+  // tiền nhận diện đúng một đợt chi: trùng khít một bảng kê đã có trong sổ ⇒ dùng lại khoá đó (ghi
+  // đè, không cộng lần hai); không trùng ⇒ vân tay nội dung, không bao giờ đụng khoá của tệp khác.
+  const khoa = statementKey || (await khoaCungTapTien(matches)) || statementKeyOf(rows);
   // Dòng cũ của CHÍNH tệp này nhưng mang khoá khác (nhập từ thời còn khoá theo tên file, hoặc tệp
   // đổi khoá sau khi đọc được phần kết luận) phải bỏ đi, nếu không cùng một bảng kê nằm hai chỗ.
   await db.delete(schema.codStatementLines).where(and(eq(schema.codStatementLines.sourceFile, sourceRef), sql`${schema.codStatementLines.statementKey} <> ${khoa}`));

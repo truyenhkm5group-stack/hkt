@@ -39,7 +39,7 @@ import { testPayrollReconcileContext } from "./payroll-reconcile-context.test";
 import { testPayrollPolicyEngine } from "./payroll-policy-engine.test";
 import { testPayrollProductionReadiness } from "./payroll-production-readiness.test";
 import { testPayrollAuthorization } from "./payroll-authorization.test";
-import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
+import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcrossFilenames, testStatementIdentityByCash, testVtpCodPaymentColumn, testStatementDetailMatching, testStatementLedgerOrderIndependent, testVtpFileDetection, testVtpImportLimits, testVtpImportTruth, testVtpStatementFromMail } from "./vtp-import-truth.test";
 import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
 import { testCareWorkbench } from "./care-workbench.test";
@@ -1902,6 +1902,7 @@ async function main() {
   await testCodStatusMeaning();
   await testVtpCodPaymentColumn();
   await testStatementDedupAcrossFilenames();
+  await testStatementIdentityByCash();
   await testStatementDetailMatching(db);
   // Chạy CUỐI CÙNG: bài này thêm mẫu mã và vận đơn riêng, để cuối thì không đụng tổng của bài khác.
   await testReturnInspection(db);

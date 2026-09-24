@@ -37,15 +37,22 @@ export async function testCodStatementAudit() {
   const db = await getDb();
   const SO_CO = "39990001";
   const SO_THIEU = "39990002";
+  const SO_TAI_TAY = "39990003";
   const tepCo = `BangKeChiCOD_${SO_CO}_1790000000001.xlsx`;
-  const bankIds = ["csa-bank-1", "csa-bank-2"];
+  const bankIds = ["csa-bank-1", "csa-bank-2", "csa-bank-3"];
   const nhapIds = ["csa-nhap-1"];
   const lineKey = "BK-CSA-TEST";
+  const lineKeyTay = "SHA-CSA-TAI-TAY";
   await db.insert(schema.bankTransactions).values([
     { id: bankIds[0], bankRef: "csa-ref-1", txnAt: new Date(Date.now() - 2 * 86_400_000), amount: 11268242, description: `Tong cong ty co phan Buu chinh Viet VTP GLMTQY18 180926 ${SO_CO}. TU: TONG CTY`, accountingGroup: "COD_SETTLEMENT" },
     { id: bankIds[1], bankRef: "csa-ref-2", txnAt: new Date(Date.now() - 1 * 86_400_000), amount: 7900195, description: `VTP GLMTQY23 230926 ${SO_THIEU}`, accountingGroup: "COD_SETTLEMENT" },
+    // Bảng kê tải tay từ web: tên tệp không mang số ⇒ chỉ khớp được bằng SỐ TIỀN thu về.
+    { id: bankIds[2], bankRef: "csa-ref-3", txnAt: new Date(Date.now() - 3 * 86_400_000), amount: 3250997, description: `VTP GLMTQY11 110926 ${SO_TAI_TAY}`, accountingGroup: "COD_SETTLEMENT" },
   ]);
-  await db.insert(schema.codStatementLines).values({ statementKey: lineKey, sourceFile: tepCo, trackingCode: "PKE3999000001", cod: 0, fee: 17000, net: -17000, codReported: false, statementAt: new Date() });
+  await db.insert(schema.codStatementLines).values([
+    { statementKey: lineKey, sourceFile: tepCo, trackingCode: "PKE3999000001", cod: 0, fee: 17000, net: -17000, codReported: false, statementAt: new Date() },
+    { statementKey: lineKeyTay, sourceFile: "Bao_cao_chi_tiet_bang_ke_25_09_2026 02_07_53.xlsx", trackingCode: "PKE3999000002", cod: 3268000, fee: 17003, net: 3250997, statementAt: new Date() },
+  ]);
   await db.insert(schema.vtpImportBatches).values({
     id: nhapIds[0],
     filename: "Nguyen Thi Bi Mat 0912345678.xlsx",
@@ -79,7 +86,11 @@ export async function testCodStatementAudit() {
     // Sao kê: đợt có sổ chứng từ và đợt tiền ĐÃ VỀ mà không có bảng kê.
     assert.ok(lines.some((d) => d.includes(`bảng kê ${SO_CO}`) && d.includes("sổ chứng từ: có")), "đợt có dòng sổ chứng từ phải báo 'có'");
     assert.ok(lines.some((d) => d.includes(`bảng kê ${SO_THIEU}`) && d.includes("tệp: CHƯA NHẬN") && d.includes("sổ chứng từ: KHÔNG")), "đợt chưa có tệp phải báo CHƯA NHẬN / KHÔNG");
-    assert.ok(lines.some((d) => /⇒ 1\/2 đợt tiền ĐÃ VỀ mà sổ chứng từ không có bảng kê/.test(d)), "phải đếm số đợt tiền về mà thiếu bảng kê");
+    assert.ok(
+      lines.some((d) => d.includes(`bảng kê ${SO_TAI_TAY}`) && d.includes("tải tay (không mang số)") && d.includes("sổ chứng từ: có (khớp số tiền thu về)")),
+      "bảng kê tải tay (tên tệp không mang số) phải khớp được bằng số tiền thu về",
+    );
+    assert.ok(lines.some((d) => /⇒ 1\/3 đợt tiền ĐÃ VỀ mà sổ chứng từ không có bảng kê/.test(d)), "phải đếm số đợt tiền về mà thiếu bảng kê");
 
     // Lần nhập tệp lỗi: hiện LOẠI tệp + lỗi đã che, không hiện tên tệp / người tải.
     assert.ok(lines.some((d) => d.includes("KHAC · ERROR/APPLY") && d.includes("lỗi: Không đọc được '…' — liên hệ •@•")), "lần nhập lỗi phải hiện, với câu lỗi đã che");
@@ -89,11 +100,11 @@ export async function testCodStatementAudit() {
       assert.ok(!all.includes(bi), `dòng tóm tắt lộ "${bi}"`);
     }
     assert.ok(!/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(all), "không địa chỉ email nào ra log (ký hiệu che •@• thì được)");
-    console.log(`✓ cod-statement-audit: ${lines.length} dòng tóm tắt · quá hạn ${dem.QUA_HAN} đơn khớp tab, chia theo ngày cộng lại đúng · 1/2 đợt tiền về thiếu bảng kê · 0 dữ liệu cá nhân ra log`);
+    console.log(`✓ cod-statement-audit: ${lines.length} dòng tóm tắt · quá hạn ${dem.QUA_HAN} đơn khớp tab, chia theo ngày cộng lại đúng · 1/3 đợt tiền về thiếu bảng kê (1 khớp theo số tiền) · 0 dữ liệu cá nhân ra log`);
   } finally {
     await db.delete(schema.bankTransactions).where(inArray(schema.bankTransactions.id, bankIds));
     await db.delete(schema.vtpImportBatches).where(inArray(schema.vtpImportBatches.id, nhapIds));
-    await db.delete(schema.codStatementLines).where(inArray(schema.codStatementLines.statementKey, [lineKey]));
+    await db.delete(schema.codStatementLines).where(inArray(schema.codStatementLines.statementKey, [lineKey, lineKeyTay]));
     clearMemo();
   }
 }

@@ -63,7 +63,24 @@ export type ImportPreview = {
    * khi quyết định có ghi hay không — bắt phải ghi mới biết là bắt phải đánh cược trước khi đọc.
    */
   webhookGap: WebhookGapSummary;
+  /**
+   * TỆP BẢNG KÊ TIỀN COD: chỉ số TỔNG — không xem trước từng dòng (xem chú thích của
+   * `previewVtpOrderListFile`). `null` với mọi loại tệp khác.
+   */
+  statement: StatementPreview | null;
   error: string | null;
+};
+
+/** Tổng của một tệp bảng kê — đủ để đối chiếu với khoản Viettel Post chuyển trên sao kê ngân hàng. */
+export type StatementPreview = {
+  /** Dòng có tiền thu hộ (> 0). Phần còn lại chỉ có cước. */
+  codRows: number;
+  codTotal: number;
+  feeTotal: number;
+  /** Tiền thu về = thu hộ − cước: đúng số Viettel Post chuyển vào tài khoản cho bảng kê này. */
+  netTotal: number;
+  from: string | null;
+  to: string | null;
 };
 
 export type WebhookGapSummary = {
@@ -193,14 +210,15 @@ function verdictOf(
 /**
  * Chạy thử MỘT tệp. Không ghi gì vào `shipments` / `shipment_events`.
  *
- * Tệp CHI TIẾT BẢNG KÊ (tiền thực thu) cố ý KHÔNG được xem trước ở đây: nó đi vào chiều TIỀN, có
- * sổ chứng từ riêng (`cod_statement_lines`) và luật đối soát riêng. Trộn hai màn hình xem trước là
- * mời người dùng đọc số tiền bằng con mắt đang đọc trạng thái giao.
+ * Tệp CHI TIẾT BẢNG KÊ (tiền thực thu) cố ý KHÔNG được xem trước TỪNG DÒNG ở đây: nó đi vào chiều
+ * TIỀN, có sổ chứng từ riêng (`cod_statement_lines`) và luật đối soát riêng. Trộn hai bảng xem trước
+ * là mời người dùng đọc số tiền bằng con mắt đang đọc trạng thái giao. Nó chỉ trả số TỔNG
+ * (`statement`) — và không phải lỗi: "Ghi vào ERP" vẫn ghi nó.
  */
 export async function previewVtpOrderListFile(file: { filename: string; base64: string }): Promise<ImportPreview> {
   const buffer = Buffer.from(file.base64, "base64");
   const checksum = fileChecksum(file.base64);
-  const base = { filename: file.filename, checksum, bytes: buffer.byteLength, rows: 0, counts: { ...RONG }, sample: [] as PreviewRow[], previouslyAppliedAt: null as Date | null, webhookGap: GAP_RONG() };
+  const base = { filename: file.filename, checksum, bytes: buffer.byteLength, rows: 0, counts: { ...RONG }, sample: [] as PreviewRow[], previouslyAppliedAt: null as Date | null, webhookGap: GAP_RONG(), statement: null as StatementPreview | null };
 
   let detected: DetectedVtpFile;
   try {
@@ -210,13 +228,25 @@ export async function previewVtpOrderListFile(file: { filename: string; base64: 
     return { ...base, kind: "ERROR", error: e instanceof VtpFileError || e instanceof Error ? e.message : String(e) };
   }
   if (detected.kind !== "ORDER_LIST") {
+    // KHÔNG phải lỗi: "Ghi vào ERP" vẫn ghi tệp này vào sổ chứng từ tiền. Bản trước trả một câu
+    // `error` đỏ ("nhập nó ở đây sẽ làm người đọc lẫn…") ngay trong hộp "Bổ sung bảng kê" của
+    // /cod — đúng màn hình dành cho tệp này — và người dùng tưởng tệp bị từ chối (25/09/2026).
+    // Thay bằng các con số TỔNG để đối chiếu với sao kê trước khi ghi.
+    const r = detected.rows;
+    const ngay = r.map((x) => x.paidDate).filter((d): d is string => Boolean(d)).sort();
     return {
       ...base,
       kind: "STATEMENT_DETAIL",
-      rows: detected.rows.length,
-      error:
-        "Đây là tệp CHI TIẾT BẢNG KÊ (tiền thực thu), không phải danh sách vận đơn. Tiền đi qua màn hình đối soát COD — " +
-        "nhập nó ở đây sẽ làm người đọc lẫn chiều tiền với chiều giao hàng.",
+      rows: r.length,
+      statement: {
+        codRows: r.filter((x) => x.cod > 0).length,
+        codTotal: r.reduce((a, x) => a + x.cod, 0),
+        feeTotal: r.reduce((a, x) => a + x.fee, 0),
+        netTotal: r.reduce((a, x) => a + x.net, 0),
+        from: ngay[0] ?? null,
+        to: ngay[ngay.length - 1] ?? null,
+      },
+      error: null,
     };
   }
 
