@@ -125,6 +125,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/ops-concurrency.test.ts":
     "Truyền biến xuống tiến trình bash con để dựng tình huống khoá — đầu vào của kịch bản đang đo; và dùng process.platform để nói CHƯA ĐO ĐƯỢC, không để bỏ qua một khẳng định.",
   "tests/test-hygiene.test.ts": "Chính bài này.",
+  "tests/backup.test.ts":
+    "Chỉ đọc process.platform, và chỉ theo đúng mẫu mục 65: thiếu flock TRÊN LINUX là ĐỎ, nền khác in CHƯA ĐO ĐƯỢC (không dấu ✓); bit quyền 700/755 chỉ đo chạy thật trên Linux vì NTFS dưới Git Bash không giữ bit POSIX — dòng chmod vẫn được kiểm ở mức mã nguồn trên mọi nền. Không đọc biến môi trường nào.",
   "tests/automation-ladder.test.ts":
     "XOÁ FACEBOOK_ACCESS_TOKEN để dựng đúng tình huống 'máy chưa có token' rồi trả lại nguyên trạng trong finally: kỳ vọng (UNKNOWN, không gọi mạng) là của nhánh đó, và bài không bao giờ rẽ theo việc máy đang chạy có token hay không.",
   "tests/chatbot.test.ts":

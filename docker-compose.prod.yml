@@ -32,6 +32,11 @@ services:
       PORT: "3000"
     expose:
       - "3000"
+    volumes:
+      # Trạng thái sao lưu do cron trên máy chủ ghi (scripts/erp-backup.sh). CHỈ-ĐỌC và CHỈ thư mục
+      # `status/` — bản sao lưu (dữ liệu khách hàng, khoá bot) không bao giờ lọt vào container.
+      # Đường dẫn phải khớp BACKUP_DIR mặc định của script (tests/backup.test.ts kiểm).
+      - /root/backups/status:/erp-backup-status:ro
     depends_on:
       db:
         condition: service_healthy

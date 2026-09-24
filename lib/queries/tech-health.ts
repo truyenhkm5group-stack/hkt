@@ -2,6 +2,8 @@ import { and, desc, eq, gte, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { aiDisabledReason, MODEL_BY_TIER, resolveProviderName, type AiProviderName } from "@/lib/ai/router";
 import { AI_SELFTEST_ROUTE } from "@/lib/constants/ai-selftest";
+import { formatBackupSize } from "@/lib/constants/backup";
+import { getBackupHealth } from "@/lib/queries/backup-status";
 import { HEALTH_LABEL, getIntegrationHealth, type HealthState } from "@/lib/queries/integration-health";
 import { runningVersion, type RunningVersion } from "@/lib/version";
 
@@ -302,9 +304,26 @@ function versionSignal(version: RunningVersion): TechHealthSignal {
   };
 }
 
+/**
+ * SAO LƯU. Lời khai của `scripts/erp-backup.sh` (tệp trạng thái mount chỉ-đọc), chấm bằng MỘT hàm
+ * — `evaluateBackupHealth()` — mà trang Kết nối dữ liệu cũng dùng. Không tự chấm lại ở đây.
+ */
+async function backupSignal(): Promise<TechHealthSignal> {
+  const b = await getBackupHealth();
+  return {
+    key: "backup",
+    label: "Sao lưu dữ liệu",
+    state: b.state,
+    reason: b.issues.length > 1 ? `${b.reason} (+${b.issues.length - 1} vế chưa đạt khác)` : b.reason,
+    detail: b.lastSuccess ? `${b.lastSuccess.db.file ?? "?"} · ${formatBackupSize(b.lastSuccess.db.bytes)}` : null,
+    measuredAt: b.lastSuccess?.finishedAt ?? null,
+    href: "/integrations#sao-luu",
+  };
+}
+
 export async function getTechSystemHealth(): Promise<TechSystemHealth> {
   const version = runningVersion();
-  const [db, scheduler, ai, connectors] = await Promise.all([databaseSignal(), schedulerSignal(), aiSignal(), getIntegrationHealth()]);
+  const [db, scheduler, ai, connectors, backup] = await Promise.all([databaseSignal(), schedulerSignal(), aiSignal(), getIntegrationHealth(), backupSignal()]);
 
   const ketNoi: TechHealthSignal[] = connectors.map((c) => ({
     key: `connector:${c.key}`,
@@ -316,6 +335,6 @@ export async function getTechSystemHealth(): Promise<TechSystemHealth> {
     href: "/integrations",
   }));
 
-  const signals = [versionSignal(version), db, scheduler, ...ketNoi, ai];
+  const signals = [versionSignal(version), db, scheduler, backup, ...ketNoi, ai];
   return { checkedAt: new Date(), version, signals, worst: worstHealth(signals.map((s) => s.state)) };
 }

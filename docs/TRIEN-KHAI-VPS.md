@@ -62,17 +62,18 @@ Tuỳ chọn ở tab **Variables**: `ERP_DOMAIN` (mặc định `erp.vnxcommerce
 
 Chạy: tab **Actions → Deploy ERP to VPS → Run workflow**. Chạy lại bất cứ lúc nào để cập nhật phiên bản; tick `reset_env` nếu muốn tạo lại `.env` từ Secrets.
 
-Ngoài ra workflow **Vận hành ERP trên VPS** (`.github/workflows/ops-vps.yml`) cho phép chạy từ GitHub các thao tác: xem trạng thái, xem log, đồng bộ toàn bộ Pancake, tra cứu / nhập vận đơn Viettel Post, kiểm tra API key, sao lưu, khởi động lại.
+Ngoài ra workflow **Vận hành ERP trên VPS** (`.github/workflows/ops-vps.yml`) cho phép chạy từ GitHub các thao tác: xem trạng thái, xem log, đồng bộ toàn bộ Pancake, tra cứu / nhập vận đơn Viettel Post, kiểm tra API key, sao lưu (`backup`, `backup-status`, `restore-drill`), khởi động lại.
 
 ## 3. Sau khi lên
 
 1. Mở https://erp.vnxcommerce.com → đăng nhập → *Người dùng* đổi mật khẩu, tạo tài khoản nhân viên theo vai trò.
 2. *Kết nối dữ liệu* → *Kiểm tra kết nối* (cả hai) → *Đồng bộ toàn bộ Pancake (lịch sử)* → sau đó *Trạng thái vận đơn Viettel Post* và *Nhập vận đơn từ Viettel Post*.
 3. Bật webhook Pancake và Viettel Post theo `docs/CHECKLIST-DONG-BO-REALTIME.md` (mục 3, 4).
-4. Sao lưu hằng ngày (thêm vào `crontab -e`):
-   ```
-   0 3 * * * cd /root/erp && docker compose -f docker-compose.prod.yml exec -T db pg_dump -U erp erp | gzip > /root/backup-$(date +\%F).sql.gz
-   ```
+4. Sao lưu hằng ngày **tự động** — không cần `crontab -e` nữa: mỗi lần deploy, `install-vps.sh` cài
+   `/etc/cron.d/erp-backup` (khung 02:00–05:59 giờ VN, `pg_dump -Fc` + dữ liệu bot chat, kiểm toàn vẹn,
+   giữ 7 bản ngày + 4 bản tuần). Việc DUY NHẤT còn phải làm tay là chọn nơi lưu **ngoài máy** và khai
+   rclone — xem `docs/backup-restore.md` (HUMAN GATE, cách khôi phục, diễn tập). Tình trạng sao lưu hiện ở
+   *Kết nối dữ liệu → Sao lưu dữ liệu*; ops `backup-status` / `restore-drill` để kiểm từ GitHub.
 
 ## 4. Vận hành
 
