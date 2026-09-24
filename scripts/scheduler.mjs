@@ -71,6 +71,12 @@ const JOBS = [
   */
   { job: "marketing-digest", every: minutes("MARKETING_DIGEST_EVERY_MINUTES", 30), offset: 13 },
   /*
+    BẢN TIN SÁNG — 30 phút/lần, cùng lý lẽ với bản tin marketing: sổ chống gửi lại khoá MỘT tin mỗi
+    ngày Việt Nam, và hàm tự đứng yên trước 7 giờ. Chạy dày chỉ để tin tới sớm cả khi máy chủ vừa
+    khởi động lại. Chỉ đọc + gửi Lark, không dùng AI; chưa khai webhook nhóm Quản lý thì không gửi.
+  */
+  { job: "morning-brief", every: minutes("MORNING_BRIEF_EVERY_MINUTES", 30), offset: 17 },
+  /*
     CHỤP ẢNH HIỆU SUẤT — mỗi 6 giờ, và đó là con số chọn có lý do.
 
     Job chỉ chụp kỳ ĐÃ ĐÓNG và không bao giờ ghi đè, nên chạy dày hơn không tạo thêm dòng nào:

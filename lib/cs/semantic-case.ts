@@ -13,7 +13,7 @@ import {
   type TemporalScope,
 } from "@/lib/constants/case-semantics";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
-import { getAiProvider, type AiProvider, type AiToolDef } from "@/lib/ai/provider";
+import { getAiProvider, type AiProvider, type AiResponse, type AiToolDef } from "@/lib/ai/provider";
 import { aiDisabledReason } from "@/lib/ai/router";
 import { vnShortStamp } from "@/lib/format";
 import { stripHtml } from "@/lib/text";
@@ -240,15 +240,22 @@ export function parseVerdict(input: unknown): SemanticVerdict | null {
 export async function classifyConversation(ctx: CaseContext, provider?: AiProvider | null): Promise<SemanticVerdict | null> {
   const p = provider === undefined ? getAiProvider("routine") : provider;
   if (!p) return null;
-  const res = await p.complete({
+  return (await classifyConversationWithUsage(ctx, p)).verdict;
+}
+
+/**
+ * Như `classifyConversation`, kèm phản hồi thô để nơi gọi GHI SỔ được số token và tiền của lượt
+ * gọi (`lib/cs/semantic-cache.ts`). Lượt gọi không vào sổ là lượt phanh trần tiền ngày không thấy.
+ */
+export async function classifyConversationWithUsage(ctx: CaseContext, provider: AiProvider): Promise<{ verdict: SemanticVerdict | null; response: AiResponse }> {
+  const response = await provider.complete({
     system: SEMANTIC_SYSTEM,
     messages: [{ role: "user", content: [{ type: "text", text: buildPrompt(ctx) }] }],
     tools: [SEMANTIC_TOOL],
     maxTokens: 1200,
   });
-  const call = res.content.find((b) => b.type === "tool_use" && b.name === SEMANTIC_TOOL.name);
-  if (!call || call.type !== "tool_use") return null;
-  return parseVerdict(call.input);
+  const call = response.content.find((b) => b.type === "tool_use" && b.name === SEMANTIC_TOOL.name);
+  return { verdict: call && call.type === "tool_use" ? parseVerdict(call.input) : null, response };
 }
 
 /* ════════════════════════ MỘT ĐOẠN SỰ VIỆC, MỘT VIỆC ════════════════════════ */
