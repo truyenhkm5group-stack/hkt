@@ -138,7 +138,13 @@ function cacLop(khoi: string): Record<"DOC_NHE" | "DOC_PROBE" | "DOC_NANG", stri
 
 const PHAI_LA_GHI = [
   "restart", "rotate-webhook-secrets", "apply-ai-env", "apply-sepay-env", "apply-tech-github-env",
-  "sepay-schedule", "docker-prune", "backup", "set-setting", "run-job",
+  // `backup` RỜI danh sách này ngày 24/09/2026, CÓ CHỦ Ý: nó không đổi trạng thái production nào
+  // (pg_dump đọc một ảnh chụp MVCC, chỉ ghi tệp vào /root/backups) nhưng là phép ĐỌC NẶNG nhất ERP
+  // có — nên nó ở làn DOC_NANG, cùng cặp khoá 8 → 9 với lượt cron của scripts/erp-backup.sh.
+  // Để nó ở làn GHI (khoá vòng đời ĐỘC QUYỀN) thì mỗi lượt sao lưu chặn MỌI lượt đọc vài phút, và
+  // script — vốn cần FD 8 — sẽ phải xin FD 8 SAU FD 9: đúng thứ tự ngược mà khối khoá cấm.
+  // tests/backup.test.ts khoá làn của nó.
+  "sepay-schedule", "docker-prune", "set-setting", "run-job",
   "sync-pancake-all", "sync-pancake-orders", "sync-vtp-tracking", "sync-vtp-import",
   "sync-facebook-ads", "seed-employees", "import-bank-ledger", "import-vtp-statements",
   "bank-ledger-prune", "vtp-statements-autolink", "vtp-retry-webhooks", "cs-cleanup",
