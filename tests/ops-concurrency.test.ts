@@ -468,7 +468,8 @@ export function testKhoaChayThat() {
     {
       const kq = chaySongSong(kich, [
         { action: "restart", giu: 1 },
-        { action: "backup", giu: 1, tre: 200 },
+        // `backup` từng đứng ở đây; nó đã sang làn DOC_NANG (24/09/2026) nên không còn là lệnh ghi.
+        { action: "docker-prune", giu: 1, tre: 200 },
         { action: "set-setting", giu: 1, tre: 400 },
       ]);
       for (const [i, r] of kq.entries()) {
@@ -512,16 +513,18 @@ export function testKhoaChayThat() {
     // ───────── HẾT GIỜ: DỪNG HẲN, ỒN ÀO, KHÔNG CHẠY THAO TÁC ─────────
     // "Chờ không được thì thôi chạy luôn" là cách một bản vá khoá tự vô hiệu hoá chính nó.
     {
-      // Giữ khoá bằng một tiến trình nền rồi xin với trần 1 giây.
+      // Giữ khoá bằng một tiến trình nền rồi xin với trần 1 giây. Thao tác phải là lệnh GHI (trần
+      // LOCK_WAIT_WRITE): `backup` từng đứng ở đây, nhưng nó đã sang làn DOC_NANG nên trần của nó là
+      // LOCK_WAIT_READ, khoá chia sẻ tới sau 3–4 giây và lệnh CHẠY — bài đỏ trên Linux, và chỉ ở đó.
       const nen = path.join(tmp, "giu.sh");
       writeFileSync(nen, `#!/usr/bin/env bash\nexec 9>${JSON.stringify(path.join(tmp, "locks", "erp-lifecycle.lock"))}\nflock -x 9\nsleep 4\n`);
       const raw = execFileSync("bash", ["-c",
         `bash ${JSON.stringify(nen)} & sleep 0.5; ` +
-        `LOCK_WAIT_WRITE=1 bash ${JSON.stringify(kich)} backup "" 0 2>&1; echo "MA=$?"; wait`,
+        `LOCK_WAIT_WRITE=1 bash ${JSON.stringify(kich)} restart "" 0 2>&1; echo "MA=$?"; wait`,
       ], { stdio: "pipe", encoding: "utf8" });
       assert.match(raw, /MA=75/, `hết giờ phải thoát 75:\n${raw}`);
       assert.match(raw, /::error::\[khoá\] HẾT GIỜ CHỜ/, "…và in ::error:: để GitHub làm nổi lên");
-      assert.ok(!raw.includes("CHAY backup"), "…và TUYỆT ĐỐI không chạy thao tác khi không có khoá");
+      assert.ok(!raw.includes("CHAY restart"), "…và TUYỆT ĐỐI không chạy thao tác khi không có khoá");
     }
 
     // ───────── LƯỢT ĐỌC NẶNG ĐANG XẾP HÀNG KHÔNG ĐƯỢC CẦM KHOÁ VÒNG ĐỜI ─────────
