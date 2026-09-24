@@ -121,7 +121,7 @@ export async function testCreativeManualDb(db: Db) {
       imageCalls += 1;
       return { bytes: fakeJpeg(100 + imageCalls), contentType: "image/jpeg", usage: null, costUsd: 0.04 };
     };
-    const deps = { writer, imageClient, describe: async () => ({ ok: false as const, error: "bỏ qua" }), perTick: 5 };
+    const deps = { writer, imageClient, describe: async () => ({ ok: false as const, error: "bỏ qua" }), caption: async () => ({ ok: false as const, error: "không gọi mạng trong kiểm thử" }), perTick: 5 };
     await buildBatch(db, sauGioDung, deps);
     await buildBatch(db, sauGioDung, deps); // lượt chạy lại không lập thêm
     const all = await db.select().from(schema.creativeVariants).where(eq(schema.creativeVariants.batchId, b0.id));

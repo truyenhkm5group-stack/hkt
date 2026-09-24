@@ -10,6 +10,7 @@ import { buildBatch, imageSpendToday } from "@/lib/creative/generate";
 import { sha256Hex, storeCreativeImage } from "@/lib/creative/images";
 import { batchWindow } from "@/lib/creative/schedule";
 import { describeSource } from "@/lib/creative/vision";
+import type { VariantCaptioner } from "@/lib/creative/caption";
 import { PRESERVE_PRODUCT_CLAUSE, findPriceMentions, geneDirectives, writeVariantCopy, type CopyWriter, type WriterInput } from "@/lib/creative/writer";
 import { editImage, imageEditCostUsd, parseImageUsage, type ImageEditClient, type ImageEditInputImage } from "@/lib/integrations/openai/images";
 import { loadPlanInputs } from "@/lib/queries/creative-plan";
@@ -24,7 +25,8 @@ import { loadPlanInputs } from "@/lib/queries/creative-plan";
  *  (d) chạm trần ngày ⇒ `GEN_FAILED` có lý do, lô vẫn tới `PENDING_APPROVAL` nếu có ảnh;
  *  (e) `enabled = false` ⇒ không tạo gì;
  *  (f) câu chữ sai giá bị bắt viết lại, vẫn sai thì bỏ con số giá;
- *  (g) mức mã nguồn: chỉ nguồn ảnh sản phẩm + mẫu cha dẫn tới `readCreativeImage` trong đường sinh.
+ *  (g) mức mã nguồn: chỉ nguồn ảnh sản phẩm + mẫu cha + quảng cáo cũ của shop (`OWN_AD`, kiểm LOẠI lúc
+ *      đọc) dẫn tới `readCreativeImage` trong đường sinh.
  *
  * Không gọi mạng thật, không đọc biến môi trường: mọi lời gọi OpenAI đi qua `fetch` / client TIÊM.
  * Mốc thời gian dựng từ `batchWindow()` của NGÀY MAI theo đồng hồ thật (AGENTS.md mục 50): trần
@@ -54,7 +56,8 @@ async function testEditImageBoundary() {
   const product: ImageEditInputImage = { kind: "PRODUCT_PHOTO", bytes: fakeJpeg(1), contentType: "image/jpeg" };
   const base = { model: "gpt-image-1", prompt: "a dress", size: "1024x1024" as const, quality: "medium" as const };
 
-  for (const kind of ["SPY", "MANUAL", "RND", "", "product_photo"]) {
+  // "OWN_AD" là nhãn NGUỒN, không phải nhãn ảnh: chỉ gatherPixels() đổi nó thành OWN_VARIANT sau khi kiểm loại.
+  for (const kind of ["SPY", "MANUAL", "RND", "OWN_AD", "", "product_photo"]) {
     const smuggled = { kind, bytes: fakeJpeg(2), contentType: "image/jpeg" } as unknown as ImageEditInputImage;
     await assert.rejects(() => editImage({ ...base, images: [product, smuggled] }, { apiKey: "sk-test-FAKE", fetchImpl: neverFetch }), /ranh giới 2/, `(b) loại "${kind}" phải bị chặn lúc chạy`);
   }
@@ -214,22 +217,37 @@ function testGenerateSourceGuard() {
   assert.ok(endMatch, "(g) không tìm thấy cuối hàm gatherPixels");
   const body = src.slice(start, start + endMatch.index);
   const signature = body.split(/\r?\n/)[0];
-  assert.match(signature, /ref:\s*\{\s*productPhotoSourceId: string \| null; parentVariantId: string \| null\s*\}/, "(g) gatherPixels chỉ nhận nguồn ảnh sản phẩm + mẫu cha");
-  assert.doesNotMatch(body, /inspiration/i, "(g) gatherPixels không được nhắc tới nguồn cảm hứng");
+  assert.match(
+    signature,
+    /ref:\s*\{\s*productPhotoSourceId: string \| null; parentVariantId: string \| null; ownAdSourceId: string \| null\s*\}/,
+    "(g) gatherPixels chỉ nhận nguồn ảnh sản phẩm + mẫu cha + nguồn quảng cáo cũ của shop",
+  );
+  assert.doesNotMatch(body, /inspiration/i, "(g) gatherPixels không được nhắc tới nguồn cảm hứng nói chung");
+  // Loại nguồn cấm KHÔNG được xuất hiện trong đường điểm ảnh — kể cả dưới dạng một nhánh "cho phép".
+  assert.doesNotMatch(body, /"SPY"|"MANUAL"|"RND"/, "(g) đường điểm ảnh không được nhắc tới SPY / MANUAL / RND");
+  // Khoá thứ ba chỉ mở khi LOẠI đọc lại từ CSDL đúng là OWN_AD và cùng mã hàng với ảnh sản phẩm.
+  assert.match(body, /ownAd\.kind === "OWN_AD"/, "(g) phải kiểm lại loại OWN_AD lúc đọc");
+  assert.match(body, /ownAd\.productId === photo\.productId/, "(g) quảng cáo cũ chỉ làm tham chiếu cho ĐÚNG mã của ảnh sản phẩm");
+  assert.match(body, /photo\.kind !== "PRODUCT_PHOTO"/, "(g) ảnh gốc vẫn phải là ảnh sản phẩm thật");
 
   const reads = [...src.matchAll(/readCreativeImage\(/g)].map((m) => m.index ?? 0);
-  assert.ok(reads.length >= 2, "(g) gatherPixels phải đọc ảnh sản phẩm + ảnh mẫu cha");
+  assert.equal(reads.length, 3, "(g) gatherPixels đọc đúng ba ảnh: sản phẩm · mẫu cha · quảng cáo cũ");
   for (const i of reads) assert.ok(i > start && i < start + endMatch.index, "(g) readCreativeImage chỉ được gọi bên trong gatherPixels");
 
   for (const line of src.split(/\r?\n/).filter((l) => l.includes("inspirationSourceId"))) {
-    assert.ok(/inspirationSourceId: s\.inspirationSourceId,/.test(line) || /inspirationSummaryOf\(db, variant\.inspirationSourceId\)/.test(line), `(g) nguồn cảm hứng chỉ được lưu vào ô hoặc đọc thành CHỮ: ${line.trim()}`);
+    assert.ok(
+      /inspirationSourceId: s\.inspirationSourceId,/.test(line) ||
+        /inspirationSummaryOf\(db, variant\.inspirationSourceId\)/.test(line) ||
+        /ownAdSourceId: variant\.inspirationSourceId \}\);/.test(line),
+      `(g) nguồn cảm hứng chỉ được lưu vào ô, đọc thành CHỮ, hoặc đi vào khoá OWN_AD của gatherPixels: ${line.trim()}`,
+    );
   }
   const summaryFn = src.slice(src.indexOf("async function inspirationSummaryOf("), src.indexOf("function errText("));
   assert.match(summaryFn, /visionSummary/);
   assert.doesNotMatch(summaryFn, /imageId|readCreativeImage/, "(g) nguồn cảm hứng chỉ đi tiếp bằng vision_summary");
-  assert.match(src, /const images = await gatherPixels\(db, \{ productPhotoSourceId: variant\.productPhotoSourceId, parentVariantId: variant\.parentVariantId \}\);/);
+  assert.match(src, /const images = await gatherPixels\(db, \{ productPhotoSourceId: variant\.productPhotoSourceId, parentVariantId: variant\.parentVariantId, ownAdSourceId: variant\.inspirationSourceId \}\);/);
   assert.match(src, /deps\.imageClient\(\{ model: cfg\.imageModel, prompt: copy\.imagePrompt, images, /, "(g) client ảnh chỉ nhận ảnh từ gatherPixels");
-  console.log("✓ Vòng mẫu · mức mã nguồn: chỉ ảnh sản phẩm + mẫu cha dẫn tới readCreativeImage trong đường sinh");
+  console.log("✓ Vòng mẫu · mức mã nguồn: chỉ ảnh sản phẩm + mẫu cha + quảng cáo cũ của shop (kiểm loại lúc đọc) dẫn tới readCreativeImage trong đường sinh");
 }
 
 // ───────────────────────────── (a)(c)(d)(e) buildBatch ─────────────────────────────
@@ -252,7 +270,8 @@ async function dropBatch(db: Db, batchDay: string) {
 export async function testCreativeGenerate(db: Db) {
   const startedAt = new Date();
   const batchDay = shiftDay(vnDay(startedAt), 1);
-  const baseCfg = { ...DEFAULT_CREATIVE_CONFIG, batchSize: 5, extraCandidates: 1, exploreShare: 0.5 };
+  // Đường GỌI NGAY (hành vi trước 24/09/2026) — đường Batch có khối kiểm riêng: tests/creative-image-batch.test.ts.
+  const baseCfg = { ...DEFAULT_CREATIVE_CONFIG, batchSize: 5, extraCandidates: 1, exploreShare: 0.5, imageMode: "SYNC" as const };
   const w = batchWindow(batchDay, baseCfg);
   // 14:01 giờ VN của HÔM NAY — cùng ngày Việt Nam với `created_at` mà CSDL sắp ghi.
   const now = new Date(w.buildFrom.getTime() + 60_000);
@@ -352,12 +371,18 @@ export async function testCreativeGenerate(db: Db) {
       writerCalls.push(input);
       return { imagePrompt: "prompt", primaryText: "Câu chữ", headline: "Tiêu đề", model: "fake-writer", costUsd: null, attempts: 1, priceStripped: false };
     };
+    // Câu chữ theo ảnh: bản giả ghi lại lượt gọi — thứ tự so với lượt vẽ ảnh được kiểm ở dưới.
+    const captionCalls: { imageCallsBefore: number; draft: string }[] = [];
+    const fakeCaption: VariantCaptioner = async (_db, input) => {
+      captionCalls.push({ imageCallsBefore: imageCalls.length, draft: input.draft?.primaryText ?? "" });
+      return { ok: true, headline: "Tiêu đề theo ảnh", primaryText: "Câu chữ theo ảnh", options: [{ headline: "Tiêu đề theo ảnh", primaryText: "Câu chữ theo ảnh" }], seen: "", model: "fake-caption", costUsd: 0.001, attempts: 1, priceStripped: false };
+    };
     const described: string[] = [];
     const fakeDescribe = async (_db: Db, id: string) => {
       described.push(id);
       return { ok: false as const, error: "giả" };
     };
-    const deps = (perTick: number) => ({ imageClient: fakeClient, writer: fakeWriter, describe: fakeDescribe, perTick });
+    const deps = (perTick: number) => ({ imageClient: fakeClient, writer: fakeWriter, describe: fakeDescribe, caption: fakeCaption, perTick });
 
     // (e) TẮT ⇒ không tạo gì.
     await setConfig(db, { ...baseCfg, enabled: false });
@@ -388,7 +413,12 @@ export async function testCreativeGenerate(db: Db) {
     assert.equal(imageCalls.length, callsAfter, "(c) lô đã đủ ảnh ⇒ không sinh lại ảnh nào");
     assert.match(t3.skippedReason ?? "", /PENDING_APPROVAL/);
     assert.equal((await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.batchDay, batchDay))).length, 1, "(c) đúng MỘT lô cho một ngày");
-    assert.ok(variants.every((v) => v.status === "GENERATED" && v.imageId && v.genCostUsd === unit.toFixed(6) && v.writerModel === "fake-writer" && v.writerCostUsd === ""), "(c) mọi mẫu có ảnh, chi phí thật, chi phí viết CHƯA BIẾT = ''");
+    assert.ok(
+      variants.every((v) => v.status === "GENERATED" && v.imageId && v.genCostUsd === unit.toFixed(6) && v.writerModel === "fake-writer → fake-caption" && v.writerCostUsd === "" && v.primaryText === "Câu chữ theo ảnh" && v.genError === ""),
+      "(c) mọi mẫu có ảnh, chi phí thật, câu chữ viết lại THEO ẢNH; chi phí viết CHƯA BIẾT (một vế chưa định giá) = ''",
+    );
+    assert.equal(captionCalls.length, total, "mỗi ảnh sinh ra được viết lại câu chữ đúng một lần");
+    assert.ok(captionCalls.every((c, i) => c.imageCallsBefore === i + 1 && c.draft === "Câu chữ"), "câu chữ theo ảnh gọi SAU lượt vẽ ảnh của chính mẫu ấy, nhận câu nháp");
     assert.equal(batch.ruleVersion, 1);
     assert.equal((batch.configSnapshot as { batchSize?: number }).batchSize, 5, "cấu hình chụp nguyên vào lô");
 

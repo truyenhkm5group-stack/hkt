@@ -131,7 +131,7 @@ const norm = (v: string) => v.trim().toLowerCase();
 export async function openPoQtyByVariant() {
   const db = await getDb();
   const rows = await db
-    .select({ id: po.id, productId: po.productId, cells: po.cells, totalQty: po.totalQty, unitCost: po.unitCost })
+    .select({ id: po.id, productId: po.productId, cells: po.cells, totalQty: po.totalQty, unitCost: po.unitCost, dueDate: po.dueDate })
     .from(po)
     .where(eq(po.status, "SENT"));
 
@@ -146,6 +146,8 @@ export async function openPoQtyByVariant() {
   for (const v of variants) byKey.set(`${v.productId}::${norm(v.color)}|${norm(v.size)}`, v.id);
 
   const qtyByVariant = new Map<string, number>();
+  /** Hạn xưởng giao SỚM NHẤT trong các lệnh đang mở của mẫu mã — lệnh không ghi hạn thì không góp mốc. */
+  const earliestDueByVariant = new Map<string, Date>();
   let unmappedUnits = 0;
   let units = 0;
   let capital = 0;
@@ -163,11 +165,15 @@ export async function openPoQtyByVariant() {
       const color = sep >= 0 ? key.slice(0, sep) : key;
       const size = sep >= 0 ? key.slice(sep + 1) : "";
       const variantId = row.productId ? byKey.get(`${row.productId}::${norm(color)}|${norm(size)}`) : undefined;
-      if (variantId) qtyByVariant.set(variantId, (qtyByVariant.get(variantId) ?? 0) + qty);
-      else unmappedUnits += qty;
+      if (variantId) {
+        qtyByVariant.set(variantId, (qtyByVariant.get(variantId) ?? 0) + qty);
+        const due = row.dueDate ? new Date(row.dueDate) : null;
+        const cur = earliestDueByVariant.get(variantId);
+        if (due && (!cur || due < cur)) earliestDueByVariant.set(variantId, due);
+      } else unmappedUnits += qty;
     }
   }
-  return { qtyByVariant, unmappedUnits, units, capital, capitalUnknownOrders };
+  return { qtyByVariant, earliestDueByVariant, unmappedUnits, units, capital, capitalUnknownOrders };
 }
 
 /** Tuổi mẫu mã = hôm nay − phiếu NHẬP đầu tiên. Chưa có phiếu nhập thì tuổi CHƯA BIẾT. */

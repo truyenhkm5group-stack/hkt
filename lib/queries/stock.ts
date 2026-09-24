@@ -58,7 +58,7 @@ const QTY = sql<number>`${oi.quantity}`;
  * 17 mẫu mã rơi như vậy (100 đơn trong 14 ngày gần nhất) ⇒ khả dụng bị báo DƯ 108 món, "còn thiếu"
  * và đề xuất đặt bị báo THIẾU tương ứng. Chưa có vận đơn nghĩa là CHƯA rời kho, không phải "chưa biết".
  */
-const RESERVED_IN_WAREHOUSE = sql`(not coalesce(${SHIPMENT_LEFT_WAREHOUSE}, false)
+export const RESERVED_IN_WAREHOUSE = sql`(not coalesce(${SHIPMENT_LEFT_WAREHOUSE}, false)
   and ${o.stage} in ('CONFIRMED','PACKING','READY_TO_SHIP','SHIPPED'))`;
 
 /** Hàng đã rời kho và đang trên đường (chưa kết thúc) — nằm ngoài kho, chưa biết về hay không. */

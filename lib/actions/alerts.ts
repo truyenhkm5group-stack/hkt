@@ -8,12 +8,13 @@ import { ghiBangChung } from "@/lib/evidence/record";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { sendLark } from "@/lib/alerts/lark";
+import { runStockShortageDigest } from "@/lib/alerts/stock-shortage-digest";
 import { setAdAccountThreshold } from "@/lib/integrations/facebook/billing";
 import { sendTelegram } from "@/lib/alerts/telegram";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
-import { ALERT_CONFIG_KEY } from "@/lib/constants/alerts";
-import { setSettingJson } from "@/lib/settings";
+import { ALERT_CONFIG_KEY, type AlertConfig } from "@/lib/constants/alerts";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
 
 const configSchema = z.object({
   telegramBotToken: z.string().trim().max(200),
@@ -25,6 +26,8 @@ const configSchema = z.object({
   lookbackDays: z.number().int().min(1).max(365).default(14),
   larkBillingWebhookUrl: z.string().trim().max(300).refine((v) => !v || /^https:\/\/open\.(larksuite|feishu)\.(com|cn)\/open-apis\/bot\/v2\/hook\//.test(v), "Webhook Lark phải có dạng https://open.larksuite.com/open-apis/bot/v2/hook/…").default(""),
   larkBillingSecret: z.string().trim().max(200).default(""),
+  larkInventoryWebhookUrl: z.string().trim().max(300).refine((v) => !v || /^https:\/\/open\.(larksuite|feishu)\.(com|cn)\/open-apis\/bot\/v2\/hook\//.test(v), "Webhook Lark phải có dạng https://open.larksuite.com/open-apis/bot/v2/hook/…").default(""),
+  larkInventorySecret: z.string().trim().max(200).default(""),
   billingWarnPercent: z.number().int().min(10).max(100).default(80),
   riskMinReturned: z.number().int().min(1).max(50).default(2),
   riskReturnRatePct: z.number().int().min(1).max(100).default(40),
@@ -55,6 +58,7 @@ const configSchema = z.object({
     cancelledButShipping: z.boolean().default(true),
     addressNotNormalized: z.boolean().default(true),
     bankAccountUnconfirmed: z.boolean().default(true),
+    stockShortage: z.boolean().default(true),
   }),
 });
 
@@ -63,8 +67,16 @@ export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { 
   if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
   const parsed = configSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  await setSettingJson(ALERT_CONFIG_KEY, parsed.data);
-  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: ALERT_CONFIG_KEY, detail: { ...parsed.data, telegramBotToken: parsed.data.telegramBotToken ? "***" : "", larkSecret: parsed.data.larkSecret ? "***" : "" } });
+  /*
+    KHOÁ KÝ NHÓM KHO KHÔNG BAO GIỜ ĐI XUỐNG TRÌNH DUYỆT (trang gửi chuỗi rỗng + cờ "đã lưu"), nên ô
+    trống lúc lưu nghĩa là "giữ khoá cũ", không phải "xoá khoá". Đọc lại từ settings — không từ
+    `loadAlertConfig`, vì hàm đó trộn cả biến môi trường, và ghi biến môi trường vào settings là
+    chép một secret sang chỗ thứ hai.
+  */
+  const stored = await getSettingJson<Partial<AlertConfig>>(ALERT_CONFIG_KEY, {});
+  const data = { ...parsed.data, larkInventorySecret: parsed.data.larkInventorySecret || stored.larkInventorySecret || "" };
+  await setSettingJson(ALERT_CONFIG_KEY, data);
+  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: ALERT_CONFIG_KEY, detail: { ...data, telegramBotToken: data.telegramBotToken ? "***" : "", larkSecret: data.larkSecret ? "***" : "", larkBillingSecret: data.larkBillingSecret ? "***" : "", larkInventorySecret: data.larkInventorySecret ? "***" : "" } });
   revalidatePath("/integrations");
   return { ok: true };
 }
@@ -83,6 +95,19 @@ export async function sendTestLark(): Promise<{ ok: true } | { error: string }> 
   const cfg = await loadAlertConfig();
   const result = await sendLark(cfg.larkWebhookUrl, cfg.larkSecret, "✅ VNXcommerce ERP đã kết nối Lark", [[{ text: "Cảnh báo đơn chờ xử lý, giao thất bại chờ phát lại, case CSKH sẽ gửi vào nhóm này. " }, { text: "Mở ERP", href: `${process.env.APP_URL ?? ""}/alerts` }]]);
   return result.ok ? { ok: true } : { error: result.error ?? "Gửi thất bại" };
+}
+
+/**
+ * Gửi NGAY bảng thiếu hàng hiện tại vào nhóm Lark Kho / Sản xuất — bỏ qua nhịp chống đổ tin.
+ * Chỉ đọc và gửi: không tạo lệnh sản xuất, không đổi tồn, không đổi đơn.
+ */
+export async function sendStockShortageNow(): Promise<{ ok: true; message: string } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
+  const r = await runStockShortageDigest({ force: true });
+  if (!r.sent) return { error: `Chưa gửi: ${r.error ?? r.skipped ?? "không rõ"}` };
+  await audit({ userId: user.id, userEmail: user.email, action: "STOCK_SHORTAGE_LARK", entity: "SETTINGS", entityId: "inventory.shortage.lark", detail: { variants: r.variants, waitingOrders: r.waitingOrders, via: r.via } });
+  return { ok: true, message: r.sent === "CLEARED" ? "Không có mẫu nào thiếu — đã gửi tin \"đủ hàng\"" : `Đã gửi bảng ${r.variants} mẫu thiếu · ${r.waitingOrders} đơn chờ${r.via === "post" ? " (dạng văn bản — nhóm không nhận thẻ có bảng)" : ""}` };
 }
 
 /** Chạy quy tắc cảnh báo ngay */

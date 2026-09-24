@@ -87,6 +87,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
           r.published.length ? `đăng: ${r.published.map((p) => `${p.batchDay} ${p.live} lên`).join("; ")}` : "",
           r.evaluation ? `chấm ${r.evaluation.judged} · thắng mới ${r.evaluation.newWins.length} · tắt ${r.kills.filter((k) => k.ok).length}` : "",
           r.build?.batchDay ? `lô ${r.build.batchDay}: ${r.build.status ?? "—"} (+${r.build.generated} ảnh)` : r.build?.skippedReason ?? "",
+          r.build?.imageBatch ?? "",
         ].filter(Boolean).join(" · ");
         if (r.warnings.length) ctx.summary.warning = r.warnings.slice(0, 5).join(" | ");
         return r;
