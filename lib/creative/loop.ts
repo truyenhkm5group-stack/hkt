@@ -4,8 +4,10 @@ import { buildBatch, type BuildBatchDeps, type BuildBatchSummary } from "@/lib/c
 import { evaluateCreatives, type EvaluateResult } from "@/lib/creative/evaluate";
 import { applyKills, publishApprovedBatches, type CreativeDeps, type KillReport, type PublishBatchReport } from "@/lib/creative/publish";
 import { sendCreativeNotice, vnClock, type CreativeNotice } from "@/lib/creative/notify";
+import { markProposalsNotified, unnotifiedProposals } from "@/lib/creative/scale";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
-import { CREATIVE_HARD_LIMITS } from "@/lib/constants/creative-loop";
+import { CREATIVE_HARD_LIMITS, CREATIVE_VERDICT_LABEL, SCALE_KIND_LABEL, type CreativeVerdict } from "@/lib/constants/creative-loop";
+import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 
 /**
  * ═══════════ MỘT LƯỢT CỦA VÒNG MẪU ═══════════
@@ -108,6 +110,27 @@ export async function runCreativeLoopTick(db: Db, now: Date = new Date(), deps: 
     for (const k of out.evaluation.kills) if (!k.adsetId) warnings.push(`Mẫu ${k.variantId} phạm luật tắt nhưng không có id nhóm quảng cáo — cần tắt tay trên Ads Manager.`);
     if (kills.length > 0) out.kills = (await step("tắt theo luật", () => applyKills(db, kills, now, deps.write))) ?? [];
   }
+
+  // 3b. Đề nghị scale mẫu thắng (§5f) — MỘT tin cho mọi đề nghị chưa báo. Gửi được (hoặc sổ chống lặp
+  // nói đã gửi) thì đóng dấu `notified_at`; hỏng thì lượt sau gửi lại. Không gọi Facebook.
+  await step("báo đề nghị scale", async () => {
+    const moi = await unnotifiedProposals(db);
+    if (moi.length === 0) return;
+    const ids = moi.map((m) => m.id).sort();
+    const mau = [...new Map(moi.map((m) => [`${m.batchDay}#${m.slot}`, m])).values()];
+    const r = (await notify({
+      kind: "SCALE",
+      batchDay: vnDay(now),
+      dedupeKey: `${vnDay(now)}:${ids.join(",").slice(0, 400)}`,
+      title: `Vòng mẫu: ${mau.length} mẫu đủ điều kiện SCALE — chờ người dựng nháp`,
+      lines: [
+        ...mau.slice(0, 8).map((m) => `Lô ${m.batchDay} #${m.slot} · ${CREATIVE_VERDICT_LABEL[m.verdict as CreativeVerdict] ?? m.verdict} · ${m.headline || "không tiêu đề"}`),
+        `Mỗi mẫu có hai loại nháp: ${SCALE_KIND_LABEL.PURCHASE_MESSAGING} · ${SCALE_KIND_LABEL.LEADS}. Máy chỉ dựng nháp TẮT khi người bấm; bật khi người duyệt.`,
+      ],
+    })) as { sent?: boolean; skipped?: string } | undefined;
+    // Kiểm thử tiêm `notify` không trả gì ⇒ coi như đã gửi.
+    if (!r || r.sent || r.skipped === "đã gửi") await markProposalsNotified(db, ids, now);
+  });
 
   // 4. Dựng lô ngày mai — chỉ khi vòng đang BẬT (buildBatch tự kiểm lại).
   if (config.enabled) {

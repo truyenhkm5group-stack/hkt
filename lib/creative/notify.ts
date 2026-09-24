@@ -19,8 +19,10 @@ import { shiftDay } from "@/lib/constants/marketing-decision-ledger";
 const SENT_KEY = "creative.notified";
 
 export type CreativeNotice = {
-  kind: "READY" | "EXPIRED" | "PUBLISHED" | "KILLED";
+  kind: "READY" | "EXPIRED" | "PUBLISHED" | "KILLED" | "SCALE";
   batchDay: string;
+  /** Khoá chống gửi lặp thay cho ngày lô — tin nhiều-mẫu (đề nghị scale) khoá theo tập mẫu. Bắt đầu bằng ngày `YYYY-MM-DD` để sổ tự dọn sau 30 ngày. */
+  dedupeKey?: string;
   title: string;
   lines: string[];
 };
@@ -32,7 +34,7 @@ function escapeHtml(s: string): string {
 /** Gửi một tin (Lark kênh chính + Telegram nếu có). Trả `true` nếu ít nhất một kênh nhận được. */
 export async function sendCreativeNotice(n: CreativeNotice): Promise<{ sent: boolean; skipped?: string; errors: string[] }> {
   const ledger = await getSettingJson<Record<string, string>>(SENT_KEY, {});
-  const key = `${n.kind}:${n.batchDay}`;
+  const key = `${n.kind}:${n.dedupeKey ?? n.batchDay}`;
   if (ledger[key]) return { sent: false, skipped: "đã gửi", errors: [] };
 
   const cfg = await loadAlertConfig();

@@ -217,6 +217,7 @@ import { testCreativeLoop } from "./creative-loop.test";
 import { testCreativeGenerate } from "./creative-generate.test";
 import { testCreativeEvaluate } from "./creative-evaluate.test";
 import { testCreativeWrite, testCreativeWriteDb } from "./creative-write.test";
+import { testCreativeScaleDb, testCreativeScalePure } from "./creative-scale.test";
 import { testCreativeEmptyBatch, testCreativeExtendedWindow, testCreativeLoopTick } from "./creative-loop-tick.test";
 import { testCreativeManualDb, testCreativeManualPure } from "./creative-manual.test";
 import { testCreativeImportDb, testCreativeImportPure } from "./creative-import.test";
@@ -1679,6 +1680,8 @@ async function main() {
   await testCreativeEvaluate(db);
   testCreativeWrite();
   await testCreativeWriteDb(db);
+  testCreativeScalePure();
+  await testCreativeScaleDb(db);
   testAdsKillSwitchPure();
   await testAdsKillSwitchDb(db);
   await testCreativeLoopTick(db);

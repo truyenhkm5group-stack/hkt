@@ -31,6 +31,8 @@ const H = 3_600_000;
 async function cleanup(db: Db) {
   await db.delete(schema.adSpends).where(like(schema.adSpends.adId, `${P}%`));
   await db.delete(schema.creativeVerdicts).where(like(schema.creativeVerdicts.variantId, `${P}%`));
+  // Lượt chấm chèn ĐỀ NGHỊ scale cho mẫu THẮNG / HỨA HẸN (§5f) — dọn trước khi xoá mẫu (khoá ngoại).
+  await db.delete(schema.creativeScaleDrafts).where(like(schema.creativeScaleDrafts.batchId, `${P}%`));
   await db.delete(schema.creativeFbActions).where(like(schema.creativeFbActions.batchId, `${P}%`));
   await db.delete(schema.creativeVariants).where(like(schema.creativeVariants.batchId, `${P}%`));
   await db.delete(schema.creativeBatches).where(like(schema.creativeBatches.id, `${P}%`));

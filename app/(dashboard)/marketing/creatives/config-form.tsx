@@ -29,7 +29,7 @@ import {
 } from "@/lib/constants/creative-loop";
 import { formatNumber, formatVND } from "@/lib/format";
 import type { ProductOption } from "@/lib/queries/creative-sources";
-import { CONFIG_FIELD_LABEL, CONFIG_NUMERIC_FIELDS, numericBounds, validateCreativeConfigInput, type ClampNote, type ConfigNumericField } from "@/lib/validation/creative";
+import { CONFIG_FIELD_LABEL, CONFIG_NUMERIC_FIELDS, SCALE_TEMPLATE_LABEL, numericBounds, validateCreativeConfigInput, type ClampNote, type ConfigNumericField } from "@/lib/validation/creative";
 import { cn } from "@/lib/utils";
 
 const OPS: { value: RuleOp; label: string }[] = [
@@ -55,6 +55,8 @@ type Draft = {
   imageMode: CreativeLoopConfig["imageMode"];
   fallbackImageQuality: CreativeLoopConfig["fallbackImageQuality"];
   focusProductIds: string[];
+  scalePurchaseMessagingCampaignId: string;
+  scaleLeadsCampaignId: string;
   nums: Record<ConfigNumericField, string>;
   killRules: RuleRow[];
   keepRules: RuleRow[];
@@ -85,6 +87,8 @@ function toDraft(c: CreativeLoopConfig): Draft {
     imageMode: c.imageMode,
     fallbackImageQuality: c.fallbackImageQuality,
     focusProductIds: c.focusProductIds,
+    scalePurchaseMessagingCampaignId: c.scaleTemplates.purchaseMessagingCampaignId,
+    scaleLeadsCampaignId: c.scaleTemplates.leadsCampaignId,
     nums,
     killRules: c.killRules.map(ruleToRow),
     keepRules: c.keepRules.map(ruleToRow),
@@ -110,6 +114,7 @@ function toPayload(d: Draft) {
     killRules: d.killRules.map(rowPayload),
     keepRules: d.keepRules.map(rowPayload),
     focusProductIds: d.focusProductIds,
+    scaleTemplates: { purchaseMessagingCampaignId: d.scalePurchaseMessagingCampaignId.trim(), leadsCampaignId: d.scaleLeadsCampaignId.trim() },
     imageModel: d.imageModel,
     imageSize: d.imageSize,
     imageQuality: d.imageQuality,
@@ -402,6 +407,17 @@ export function ConfigForm({ config, products, canManage }: { config: CreativeLo
           {nf("budgetPerVariantVnd", "đ")}
           {nf("testDays", "ngày")}
           {nf("winOrdersAbove", "đơn")}
+        </div>
+      </Group>
+
+      <Group
+        title="Scale mẫu thắng"
+        hint="Mẫu THẮNG / HỨA HẸN ⇒ máy đề nghị scale. Người bấm “Dựng nháp” ⇒ máy SAO CHÉP đúng chiến dịch MẪU bên dưới (mỗi chiến dịch đúng một nhóm + một mẩu, mục tiêu đặt sẵn), thay bài bằng ảnh + câu chữ của mẫu thắng, đặt ngân sách ngày — bản sao luôn TẮT. Chỉ bật khi người bấm “Duyệt chạy”. Máy không tạo chiến dịch nào khác."
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <TextField id="cfg-scale-pm" label={SCALE_TEMPLATE_LABEL.purchaseMessagingCampaignId} value={draft.scalePurchaseMessagingCampaignId} onChange={set("scalePurchaseMessagingCampaignId")} disabled={disabled} missing={false} />
+          <TextField id="cfg-scale-lead" label={SCALE_TEMPLATE_LABEL.leadsCampaignId} value={draft.scaleLeadsCampaignId} onChange={set("scaleLeadsCampaignId")} disabled={disabled} missing={false} />
+          {nf("scaleDailyBudgetVnd", "đ")}
         </div>
       </Group>
 

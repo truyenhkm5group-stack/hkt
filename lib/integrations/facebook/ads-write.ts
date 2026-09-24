@@ -483,3 +483,184 @@ export async function extendAdset(adsetId: string, input: { lifetimeBudgetMinor:
   }
   await graphPost(adsetId, { lifetime_budget: String(input.lifetimeBudgetMinor), end_time: input.endTime.toISOString() });
 }
+
+/* ═══════════════════ SCALE MẪU THẮNG — NGOẠI LỆ "SAO CHÉP CHIẾN DỊCH MẪU" (§5f) ═══════════════════
+ *
+ * Đặc tả: `docs/creative-loop.md` §5f. Cổng (hàm thuần): `gateScaleWrite` trong
+ * `lib/marketing/creative-write-gate.ts`. Nơi gọi: `lib/creative/scale.ts`.
+ *
+ * Chủ shop quyết 24/09/2026: mẫu thắng được scale bằng chiến dịch NHÁP. Đây là NGOẠI LỆ có chủ đích
+ * với hàng rào "máy không tạo chiến dịch": máy chỉ SAO CHÉP một trong hai chiến dịch MẪU do người
+ * dựng (id ở cấu hình), bản sao LUÔN TẮT, và chỉ BẬT khi người duyệt. Mọi lời gọi ghi dưới đây vẫn đi
+ * qua CÙNG `graphPost` — cùng chốt env, cùng công tắc khẩn cấp, cùng `retries: 0`.
+ *
+ * ─── THAM SỐ GRAPH API — NGUỒN ───
+ *
+ * `POST /{campaign_id}/copies` — developers.facebook.com/docs/marketing-api/reference/ad-campaign-group/copies/
+ * (đọc 24/09/2026):
+ *  · `deep_copy` (bool, mặc định false) — "Whether to copy all the child ads. Limits: the total number of
+ *    children ads to copy should not exceed 3 for a synchronous call and 51 for an asynchronous call."
+ *    Chiến dịch mẫu có ĐÚNG một mẩu (nơi gọi kiểm trước khi sao chép) nên lời gọi luôn ĐỒNG BỘ và trả
+ *    về đủ id ngay trong phản hồi.
+ *  · `status_option` (enum ACTIVE · PAUSED · INHERITED_FROM_SOURCE, mặc định PAUSED) — máy GỬI TƯỜNG MINH
+ *    `PAUSED`: không dựa vào một giá trị mặc định mà Facebook có quyền đổi.
+ *  · `rename_options` ({rename_strategy: DEEP_RENAME · ONLY_TOP_LEVEL_RENAME · NO_RENAME, rename_prefix,
+ *    rename_suffix}) — tiền tố để người trên Ads Manager nhận ra ngay bản sao của vòng mẫu.
+ *  · Trả về `{ copied_campaign_id, ad_object_ids: [{ ad_object_type, source_id, copied_id }] }`.
+ *    Không có `copied_campaign_id` (vd Facebook xử lý bất đồng bộ) ⇒ KHÔNG đoán: ném lỗi kèm nguyên
+ *    phản hồi, nơi gọi ghi FAILED và nói người tìm bản sao theo tên để xoá tay.
+ *
+ * `POST /{ad_id}` với `creative={"creative_id": …}` — developers.facebook.com/docs/marketing-api/reference/adgroup/
+ * ("Only update fields that were used during ad creation can be updated" — `creative` là trường tạo mẩu).
+ * `POST /{campaign_id | adset_id}` với `daily_budget` / `status` — cùng kiểu cập nhật mà `applyAdsWrite`
+ * và `pauseAdset` ở trên đã dùng.
+ */
+
+/** Một đối tượng trong bản sao: loại · id nguồn · id bản sao (`ad_object_ids`). */
+export type ScaleCopyObject = { type: string; sourceId: string; copiedId: string };
+
+export type CampaignCopyResult = { copiedCampaignId: string; objects: ScaleCopyObject[] };
+
+/** Id đối tượng Facebook: chỉ chữ số. Chặn một chuỗi lạ thành một đường dẫn Graph khác. */
+function assertFbId(id: string, what: string): string {
+  if (!/^[0-9]{3,30}$/.test(id)) throw new IntegrationError(`Facebook: ${what} không hợp lệ "${id}".`, 400);
+  return id;
+}
+
+/**
+ * Các trường gửi đi khi sao chép chiến dịch mẫu — hàm THUẦN để bài kiểm khoá được: `deep_copy=true`,
+ * `status_option=PAUSED` (LUÔN), đổi tên bằng tiền tố. Không trường nào khác: đối tượng, mục tiêu,
+ * tối ưu, biểu mẫu đều chép NGUYÊN từ chiến dịch mẫu người dựng.
+ */
+export function scaleCopyFields(namePrefix: string): Record<string, string> {
+  return {
+    deep_copy: "true",
+    status_option: "PAUSED",
+    rename_options: JSON.stringify({ rename_strategy: "DEEP_RENAME", rename_prefix: `${namePrefix} · `, rename_suffix: "" }),
+  };
+}
+
+/** Đọc phản hồi của `/copies`. Thiếu `copied_campaign_id` ⇒ `null` — nơi gọi không đoán. */
+export function parseCampaignCopy(rec: Record<string, unknown>): CampaignCopyResult | null {
+  const id = asText(rec.copied_campaign_id);
+  if (!id) return null;
+  const objects: ScaleCopyObject[] = [];
+  if (Array.isArray(rec.ad_object_ids)) {
+    for (const x of rec.ad_object_ids) {
+      const r = asRecord(x);
+      const type = asText(r?.ad_object_type);
+      const copiedId = asText(r?.copied_id);
+      if (type && copiedId) objects.push({ type, sourceId: asText(r?.source_id) ?? "", copiedId });
+    }
+  }
+  return { copiedCampaignId: id, objects };
+}
+
+/** SAO CHÉP chiến dịch mẫu scale — bản sao LUÔN TẮT. Không tự kiểm hàng rào nghiệp vụ (xem `gateScaleWrite`). */
+export async function copyScaleCampaign(templateCampaignId: string, input: { namePrefix: string }): Promise<CampaignCopyResult> {
+  const src = assertFbId(templateCampaignId, "id chiến dịch mẫu");
+  const rec = await graphPost(`${src}/copies`, scaleCopyFields(input.namePrefix));
+  const out = parseCampaignCopy(rec);
+  if (!out) {
+    throw new IntegrationError(
+      `Facebook: sao chép chiến dịch ${src} không trả về copied_campaign_id (có thể Facebook đang xử lý bất đồng bộ). Tìm trên Ads Manager chiến dịch có tiền tố "${input.namePrefix}" — nếu có thì nó đang TẮT, xoá tay.`,
+      502,
+      false,
+      rec,
+    );
+  }
+  return out;
+}
+
+/** Cây một chiến dịch: chiến dịch · các nhóm · các mẩu (kèm bài). Ngân sách ở ĐƠN VỊ NHỎ NHẤT của loại tiền. */
+export type CampaignTree = {
+  id: string;
+  name: string;
+  status: string;
+  objective: string | null;
+  dailyBudgetMinor: number | null;
+  lifetimeBudgetMinor: number | null;
+  adsets: { id: string; status: string; dailyBudgetMinor: number | null; lifetimeBudgetMinor: number | null; promotedPageId: string | null }[];
+  ads: { id: string; adsetId: string | null; status: string; creativeId: string | null; objectStorySpec: Record<string, unknown> | null; hasAssetFeed: boolean }[];
+  /** Facebook báo còn trang sau ở nhóm hoặc mẩu — cây KHÔNG đọc đủ, nơi gọi phải chặn. */
+  truncated: boolean;
+};
+
+function minorOf(v: unknown): number | null {
+  const t = asText(v);
+  if (t === null) return null;
+  const n = Number(t);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function edgeData(v: unknown): { rows: Record<string, unknown>[]; more: boolean } {
+  const r = asRecord(v);
+  const rows = Array.isArray(r?.data) ? (r.data as unknown[]).map((x) => asRecord(x)).filter((x): x is Record<string, unknown> => x !== null) : [];
+  const paging = asRecord(r?.paging);
+  return { rows, more: !!asText(paging?.next) };
+}
+
+/** Đọc phản hồi GET của một chiến dịch thành `CampaignTree` — hàm THUẦN. */
+export function parseCampaignTree(rec: Record<string, unknown>, fallbackId = ""): CampaignTree {
+  const adsets = edgeData(rec.adsets);
+  const ads = edgeData(rec.ads);
+  return {
+    id: asText(rec.id) ?? fallbackId,
+    name: asText(rec.name) ?? "",
+    status: asText(rec.status) ?? "",
+    objective: asText(rec.objective),
+    dailyBudgetMinor: minorOf(rec.daily_budget),
+    lifetimeBudgetMinor: minorOf(rec.lifetime_budget),
+    adsets: adsets.rows.map((a) => ({
+      id: asText(a.id) ?? "",
+      status: asText(a.status) ?? "",
+      dailyBudgetMinor: minorOf(a.daily_budget),
+      lifetimeBudgetMinor: minorOf(a.lifetime_budget),
+      promotedPageId: asText(asRecord(a.promoted_object)?.page_id),
+    })),
+    ads: ads.rows.map((a) => {
+      const cr = asRecord(a.creative) ?? {};
+      return {
+        id: asText(a.id) ?? "",
+        adsetId: asText(a.adset_id),
+        status: asText(a.status) ?? "",
+        creativeId: asText(cr.id),
+        objectStorySpec: asRecord(cr.object_story_spec),
+        hasAssetFeed: cr.asset_feed_spec !== undefined && cr.asset_feed_spec !== null,
+      };
+    }),
+    truncated: adsets.more || ads.more,
+  };
+}
+
+/** ĐỌC cây chiến dịch (chỉ đọc — không qua chốt ghi). Dùng cho chiến dịch mẫu trước khi sao chép và cho bản sao. */
+export async function readCampaignTree(campaignId: string): Promise<CampaignTree> {
+  const id = assertFbId(campaignId, "id chiến dịch");
+  const rec = await graphGet(id, {
+    fields:
+      "id,name,status,objective,daily_budget,lifetime_budget,adsets.limit(25){id,status,daily_budget,lifetime_budget,promoted_object},ads.limit(25){id,adset_id,status,creative{id,object_story_spec,asset_feed_spec}}",
+  });
+  return parseCampaignTree(rec, id);
+}
+
+/** Quy đơn vị nhỏ nhất của Facebook về VND — phép ngược của `vndToFbMinor`. */
+export function fbMinorToVnd(minor: number, currency: string): number {
+  const inCurrency = minor / fbMinorOffset(currency);
+  return Math.round(currency === "VND" ? inCurrency : inCurrency * env.facebook.usdToVnd);
+}
+
+/** Gắn bài quảng cáo (creative) vào MẨU của bản sao. */
+export async function setScaleAdCreative(adId: string, creativeId: string): Promise<void> {
+  await graphPost(assertFbId(adId, "id mẩu"), { creative: JSON.stringify({ creative_id: assertFbId(creativeId, "id bài quảng cáo") }) });
+}
+
+/** Đặt ngân sách NGÀY (giá trị tuyệt đối) cho chiến dịch (CBO) hoặc nhóm (ABO) của bản sao. */
+export async function setScaleDailyBudget(objectId: string, dailyBudgetMinor: number): Promise<void> {
+  if (!Number.isInteger(dailyBudgetMinor) || dailyBudgetMinor <= 0) throw new IntegrationError("Facebook: ngân sách ngày phải là số nguyên dương — không ghi.", 400);
+  await graphPost(assertFbId(objectId, "id chiến dịch/nhóm"), { daily_budget: String(dailyBudgetMinor) });
+}
+
+/** Bật / tắt một đối tượng của bản sao (chiến dịch · nhóm · mẩu). Chỉ đúng một trường `status`. */
+export async function setScaleStatus(objectId: string, status: "ACTIVE" | "PAUSED"): Promise<void> {
+  await graphPost(assertFbId(objectId, "id đối tượng"), { status });
+}

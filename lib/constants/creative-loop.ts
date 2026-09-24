@@ -466,6 +466,20 @@ export const CREATIVE_HARD_LIMITS = {
    * Cấu hình chỉ hạ được.
    */
   maxImageUsdPerDay: 2,
+  /**
+   * SCALE MẪU THẮNG (§5f) — ngân sách NGÀY tối đa của MỘT chiến dịch nháp do vòng sao chép.
+   * Chủ shop chốt 24/09/2026: 500.000đ/ngày mỗi chiến dịch nháp. Cấu hình chỉ hạ được.
+   */
+  maxScaleDailyBudgetVnd: 500_000,
+  /**
+   * Tổng ngân sách NGÀY của mọi chiến dịch scale ĐANG BẬT do vòng tạo (đếm trên bảng
+   * `creative_scale_drafts`, trạng thái `ACTIVE`). **ĐỀ XUẤT, CHỜ CHỦ SHOP CHỐT** (AGENTS.md mục 7):
+   * 5.000.000đ = 10 chiến dịch × 500.000đ. Chặn một chuỗi bấm "Duyệt chạy" liên tiếp thành một
+   * khoản chi ngày không ai cộng lại.
+   */
+  maxScaleActiveDailyTotalVnd: 5_000_000,
+  /** Mỗi mẫu thắng tối đa bấy nhiêu chiến dịch nháp — đúng một cho mỗi loại (`SCALE_KINDS`). */
+  maxScaleDraftsPerVariant: 2,
 } as const;
 
 // ───────────────────────────── CẤU HÌNH (settings `creative.config`) ─────────────────────────────
@@ -561,7 +575,18 @@ export type CreativeLoopConfig = {
   imageDailyCapUsd: number;
   /** Ảnh của mẫu bị LOẠI được giữ bấy nhiêu ngày cho người xem lại, rồi xoá điểm ảnh (giữ gen + số đo). */
   loserImageRetentionDays: number;
+  /**
+   * SCALE MẪU THẮNG (§5f): hai chiến dịch MẪU do NGƯỜI dựng sẵn trên Ads Manager, mỗi chiến dịch
+   * ĐÚNG một nhóm + một mẩu, mục tiêu đặt sẵn. Máy chỉ SAO CHÉP đúng hai id này — id khác bị chặn.
+   * Rỗng ⇒ loại scale ấy không dựng được nháp.
+   */
+  scaleTemplates: ScaleTemplates;
+  /** Ngân sách NGÀY đặt cho mỗi chiến dịch nháp. Chủ shop chốt 500.000đ (24/09/2026); trần `maxScaleDailyBudgetVnd`. */
+  scaleDailyBudgetVnd: number;
 };
+
+/** Id chiến dịch MẪU cho từng loại scale — xem `SCALE_KINDS`. */
+export type ScaleTemplates = { purchaseMessagingCampaignId: string; leadsCampaignId: string };
 
 /**
  * Mặc định. Mọi trường TIỀN và NGƯỠNG THẮNG lấy thẳng từ quyết định của chủ shop; hai bộ luật để
@@ -598,6 +623,8 @@ export const DEFAULT_CREATIVE_CONFIG: CreativeLoopConfig = {
   fallbackImageQuality: "medium",
   imageDailyCapUsd: 2,
   loserImageRetentionDays: 7,
+  scaleTemplates: { purchaseMessagingCampaignId: "", leadsCampaignId: "" },
+  scaleDailyBudgetVnd: CREATIVE_HARD_LIMITS.maxScaleDailyBudgetVnd,
 };
 
 /** Trường nào còn thiếu thì vòng KHÔNG ĐĂNG được — màn hình in đúng danh sách này. */
@@ -623,6 +650,16 @@ function parseRule(raw: unknown): CreativeRule | null {
   if (!metric || !op || value === null || minSpendVnd === null) return null;
   const label = str(r.label);
   return { metric, op, value, minSpendVnd, ...(label ? { label } : {}) };
+}
+
+/** Hai id mẫu scale: chỉ nhận chuỗi SỐ (id Facebook). Chuỗi lạ ⇒ rỗng — không đoán, không sửa hộ. */
+export function parseScaleTemplates(raw: unknown): ScaleTemplates {
+  const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const id = (x: unknown) => {
+    const t = str(x);
+    return /^[0-9]{5,25}$/.test(t) ? t : "";
+  };
+  return { purchaseMessagingCampaignId: id(r.purchaseMessagingCampaignId), leadsCampaignId: id(r.leadsCampaignId) };
 }
 
 /**
@@ -676,6 +713,8 @@ export function normalizeCreativeConfig(raw: unknown): { config: CreativeLoopCon
     fallbackImageQuality: IMAGE_QUALITIES.find((x) => x === r.fallbackImageQuality) ?? d.fallbackImageQuality,
     imageDailyCapUsd: num(r.imageDailyCapUsd, d.imageDailyCapUsd, 0, L.maxImageUsdPerDay),
     loserImageRetentionDays: Math.round(num(r.loserImageRetentionDays, d.loserImageRetentionDays, 0, 90)),
+    scaleTemplates: parseScaleTemplates(r.scaleTemplates),
+    scaleDailyBudgetVnd: Math.round(num(r.scaleDailyBudgetVnd, d.scaleDailyBudgetVnd, 1, L.maxScaleDailyBudgetVnd)),
   };
 
   // Tổng cam kết một ngày KHÔNG được vượt trần — kẹp số mẫu chứ không kẹp ngân sách từng mẫu, vì
@@ -699,9 +738,28 @@ export const PUBLISH_REQUIRED_FIELDS: readonly (keyof CreativeLoopConfig)[] = ["
  * Hành động ghi mà vòng mẫu được làm. Đi qua ĐÚNG cửa ghi đã có (`lib/integrations/facebook/ads-write.ts`)
  * và cùng chốt cứng `ADS_WRITE_ENABLED` + nấc `COPILOT`.
  *
- * Cố ý KHÔNG có: tạo / sửa / tắt CHIẾN DỊCH · sửa đối tượng · đụng mẩu QC không do vòng này tạo.
+ * Cố ý KHÔNG có: TẠO chiến dịch từ số không · sửa đối tượng · đụng mẩu QC / chiến dịch không do vòng này tạo.
+ *
+ * NGOẠI LỆ CÓ CHỦ ĐÍCH — SCALE MẪU THẮNG (chủ shop quyết 24/09/2026, `docs/creative-loop.md` §5f): vòng
+ * được tạo chiến dịch, nhưng CHỈ bằng cách SAO CHÉP một trong hai chiến dịch MẪU do NGƯỜI dựng (id khai ở
+ * `scaleTemplates`), bản sao LUÔN ở trạng thái TẮT (`status_option=PAUSED`), và chỉ BẬT khi người bấm
+ * "Duyệt chạy" với phiếu HMAC khoá đúng (chiến dịch nháp · ngân sách · bài quảng cáo). Sáu hành động
+ * `*_SCALE*` dưới đây là toàn bộ ngoại lệ ấy; cổng của chúng là `gateScaleWrite`.
  */
-export const CREATIVE_WRITE_ACTIONS = ["UPLOAD_IMAGE", "CREATE_CREATIVE", "CREATE_ADSET", "CREATE_AD", "PAUSE_ADSET", "EXTEND_ADSET"] as const;
+export const CREATIVE_WRITE_ACTIONS = [
+  "UPLOAD_IMAGE",
+  "CREATE_CREATIVE",
+  "CREATE_ADSET",
+  "CREATE_AD",
+  "PAUSE_ADSET",
+  "EXTEND_ADSET",
+  "COPY_SCALE_CAMPAIGN",
+  "CREATE_SCALE_CREATIVE",
+  "SET_SCALE_AD_CREATIVE",
+  "SET_SCALE_BUDGET",
+  "ACTIVATE_SCALE",
+  "PAUSE_SCALE",
+] as const;
 export type CreativeWriteAction = (typeof CREATIVE_WRITE_ACTIONS)[number];
 
 export const CREATIVE_WRITE_ACTION_LABEL: Record<CreativeWriteAction, string> = {
@@ -711,7 +769,78 @@ export const CREATIVE_WRITE_ACTION_LABEL: Record<CreativeWriteAction, string> = 
   CREATE_AD: "Tạo mẩu quảng cáo",
   PAUSE_ADSET: "Tắt sớm",
   EXTEND_ADSET: "Cho tiêu thêm",
+  COPY_SCALE_CAMPAIGN: "Sao chép chiến dịch mẫu scale (TẮT)",
+  CREATE_SCALE_CREATIVE: "Tạo bài quảng cáo cho nháp scale",
+  SET_SCALE_AD_CREATIVE: "Gắn bài mẫu thắng vào mẩu của nháp",
+  SET_SCALE_BUDGET: "Đặt ngân sách ngày cho nháp scale",
+  ACTIVATE_SCALE: "Bật chiến dịch scale (người duyệt)",
+  PAUSE_SCALE: "Tắt chiến dịch scale",
 };
+
+/** Các hành động của ngoại lệ scale — cổng riêng `gateScaleWrite`, không đi qua `gateCreativeWrite`. */
+export const SCALE_WRITE_ACTIONS = ["COPY_SCALE_CAMPAIGN", "CREATE_SCALE_CREATIVE", "SET_SCALE_AD_CREATIVE", "SET_SCALE_BUDGET", "ACTIVATE_SCALE", "PAUSE_SCALE"] as const satisfies readonly CreativeWriteAction[];
+export type ScaleWriteAction = (typeof SCALE_WRITE_ACTIONS)[number];
+
+// ───────────────────────────── SCALE MẪU THẮNG (§5f) ─────────────────────────────
+
+/**
+ * Hai loại chiến dịch scale chủ shop chọn (24/09/2026): tối đa hoá lượt MUA qua tin nhắn · khách hàng
+ * TIỀM NĂNG. Mục tiêu, đối tượng, tối ưu, biểu mẫu đều nằm trong chiến dịch MẪU người dựng — máy chép
+ * NGUYÊN, chỉ thay bài quảng cáo và ngân sách ngày.
+ */
+export const SCALE_KINDS = ["PURCHASE_MESSAGING", "LEADS"] as const;
+export type ScaleKind = (typeof SCALE_KINDS)[number];
+
+export const SCALE_KIND_LABEL: Record<ScaleKind, string> = {
+  PURCHASE_MESSAGING: "Tối đa lượt mua qua tin nhắn",
+  LEADS: "Khách hàng tiềm năng",
+};
+
+/** Khoá cấu hình của chiến dịch mẫu theo loại. */
+export const SCALE_TEMPLATE_FIELD: Record<ScaleKind, keyof ScaleTemplates> = {
+  PURCHASE_MESSAGING: "purchaseMessagingCampaignId",
+  LEADS: "leadsCampaignId",
+};
+
+/**
+ * Mục tiêu (`objective`) mà chiến dịch mẫu của từng loại PHẢI mang. Đọc lại trước khi sao chép: dán
+ * nhầm id (mẫu khách tiềm năng vào ô mua qua tin nhắn) thì chặn, không sao chép một thứ khác loại.
+ * `LEAD_GENERATION` là tên mục tiêu cũ trước bộ ODAX của Facebook.
+ */
+export const SCALE_KIND_OBJECTIVES: Record<ScaleKind, readonly string[]> = {
+  PURCHASE_MESSAGING: ["OUTCOME_SALES"],
+  LEADS: ["OUTCOME_LEADS", "LEAD_GENERATION"],
+};
+
+/** Phán quyết đủ căn cứ để ĐỀ NGHỊ scale. */
+export const SCALE_ELIGIBLE_VERDICTS: readonly CreativeVerdict[] = ["WIN", "PROMISING"];
+
+/**
+ * Vòng đời một dòng `creative_scale_drafts`:
+ *
+ * `PROPOSED`  — máy ĐỀ NGHỊ (mẫu vừa đạt THẮNG / HỨA HẸN). Chưa một lời gọi Facebook nào.
+ * `DRAFTING`  — người bấm "Dựng nháp", máy đang sao chép / thay bài / đặt ngân sách.
+ * `DRAFT`     — nháp đã dựng xong trên Facebook, đang TẮT, chờ người "Duyệt chạy".
+ * `ACTIVE`    — người đã duyệt, mẩu + nhóm + chiến dịch đã BẬT.
+ * `PAUSED`    — người tắt lại chiến dịch scale qua ERP.
+ * `FAILED`    — dựng nháp hỏng giữa chừng. Bản sao (nếu có) vẫn TẮT; id nằm ở `error` để người xoá tay.
+ * `DISMISSED` — người bấm "Bỏ qua" đề nghị.
+ */
+export const SCALE_DRAFT_STATUSES = ["PROPOSED", "DRAFTING", "DRAFT", "ACTIVE", "PAUSED", "FAILED", "DISMISSED"] as const;
+export type ScaleDraftStatus = (typeof SCALE_DRAFT_STATUSES)[number];
+
+export const SCALE_DRAFT_STATUS_LABEL: Record<ScaleDraftStatus, string> = {
+  PROPOSED: "Đề nghị",
+  DRAFTING: "Đang dựng nháp",
+  DRAFT: "Nháp — đang TẮT",
+  ACTIVE: "Đang chạy",
+  PAUSED: "Đã tắt",
+  FAILED: "Dựng nháp lỗi",
+  DISMISSED: "Đã bỏ qua",
+};
+
+/** Cấp đặt ngân sách của bản sao — đọc từ CHÍNH bản sao: chiến dịch (CBO) hay nhóm (ABO). */
+export type ScaleBudgetLevel = "CAMPAIGN" | "ADSET";
 
 export type CreativeWriteDenial =
   | "HARD_DISABLED"
@@ -728,7 +857,12 @@ export type CreativeWriteDenial =
   | "OVER_EXTENSION_CAP"
   | "NOT_PROMISING"
   | "NO_KILL_RULE"
-  | "KILL_SWITCH";
+  | "KILL_SWITCH"
+  | "NOT_SCALE_TEMPLATE"
+  | "NOT_WINNER"
+  | "SCALE_DUPLICATE"
+  | "OVER_SCALE_BUDGET"
+  | "OVER_SCALE_DAILY_CAP";
 
 export const CREATIVE_WRITE_DENIAL_REASON: Record<CreativeWriteDenial, string> = {
   HARD_DISABLED: "Đường ghi quảng cáo đang TẮT ở cấp máy chủ (ADS_WRITE_ENABLED).",
@@ -747,6 +881,11 @@ export const CREATIVE_WRITE_DENIAL_REASON: Record<CreativeWriteDenial, string> =
   NO_KILL_RULE: "Không luật tắt nào kích hoạt cho mẫu này.",
   KILL_SWITCH:
     "Công tắc tắt khẩn cấp đường ghi quảng cáo đang KÉO (settings `ads.write.kill`, hoặc không đọc được công tắc). Lô giữ nguyên trạng thái ĐÃ DUYỆT: nhả công tắc trước giờ chạy thì lượt kế tiếp đăng tiếp, quá giờ thì lô hết hạn mà không đồng nào được chi.",
+  NOT_SCALE_TEMPLATE: "Chiến dịch nguồn KHÔNG phải chiến dịch mẫu scale đã khai trong cấu hình. Máy chỉ sao chép đúng hai chiến dịch mẫu do người dựng.",
+  NOT_WINNER: "Mẫu không ở phán quyết THẮNG hoặc HỨA HẸN — không có căn cứ để scale.",
+  SCALE_DUPLICATE: `Mẫu này đã có nháp cho loại chiến dịch này, hoặc đã đủ ${CREATIVE_HARD_LIMITS.maxScaleDraftsPerVariant} nháp. Không dựng nháp thứ hai.`,
+  OVER_SCALE_BUDGET: `Ngân sách ngày của một chiến dịch scale vượt trần ${CREATIVE_HARD_LIMITS.maxScaleDailyBudgetVnd.toLocaleString("vi-VN")}đ (hoặc không hợp lệ).`,
+  OVER_SCALE_DAILY_CAP: `Tổng ngân sách ngày của các chiến dịch scale đang bật sẽ vượt trần ${CREATIVE_HARD_LIMITS.maxScaleActiveDailyTotalVnd.toLocaleString("vi-VN")}đ (ĐỀ XUẤT, chờ chủ shop chốt).`,
 };
 
 // ───────────────────────────── GIÁ SINH ẢNH ─────────────────────────────

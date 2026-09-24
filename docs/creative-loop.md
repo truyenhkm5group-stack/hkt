@@ -69,7 +69,9 @@ mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của 
 4. **Một cửa ghi Facebook.** Mọi lời gọi ghi nằm trong `lib/integrations/facebook/ads-write.ts`, qua
    cùng chốt cứng `ADS_WRITE_ENABLED` và nấc `COPILOT`. `tests/ads-write.test.ts` quét toàn kho.
 5. **Máy chỉ làm việc BÊN TRONG chiến dịch test do NGƯỜI dựng**, và chỉ đụng nhóm/mẩu do chính nó tạo.
-   Máy không tạo chiến dịch, không sửa đối tượng, không đụng quảng cáo của marketer.
+   Máy không tạo chiến dịch, không sửa đối tượng, không đụng quảng cáo của marketer. **Ngoại lệ duy
+   nhất, có chủ đích:** scale mẫu thắng (§5f) — máy SAO CHÉP một trong hai chiến dịch MẪU người dựng,
+   bản sao luôn TẮT, chỉ bật khi người duyệt.
 6. **Không nguồn tiền mới.** Chi đọc từ `ad_spends` hạt `AD` (đã đo khớp 0 đồng với hạt chiến dịch,
    `docs/ads-measurement-audit-2026-09-22.md` §4). Kết quả đơn đọc qua `ORDER_OUTCOME_FAST`. Không bảng
    nào của vòng mẫu được báo cáo lợi nhuận/lương đọc.
@@ -252,6 +254,67 @@ Tệp: `lib/creative/{caption,copy-edit}.ts` · `lib/actions/creative-copy.ts` �
 Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `lib/creative/generate.ts` ·
 `lib/constants/creative-loop.ts` (giá) · `tests/creative-image-batch.test.ts`.
 
+## 5f. Scale mẫu thắng — chiến dịch NHÁP chờ duyệt (chủ shop quyết 24/09/2026)
+
+*"Mẫu test thắng thì: scale ngân sách, scale camp, scale nhóm, chạy mục tiêu tối đa hoá lượt mua qua tin
+nhắn và khách hàng tiềm năng (tạo bản nháp chờ duyệt)."* Ngân sách đề nghị ban đầu **500.000đ/ngày mỗi
+chiến dịch nháp**. Vẫn nấc `COPILOT`: máy DỰNG nháp đang TẮT, NGƯỜI bấm duyệt thì mới BẬT.
+
+**Đây là NGOẠI LỆ có chủ đích với ranh giới §2.5 ("máy không tạo chiến dịch").** Máy chỉ được có chiến
+dịch mới bằng đúng MỘT cách: **sao chép một trong hai chiến dịch MẪU do NGƯỜI dựng** (id khai ở
+`creative.config.scaleTemplates`). Máy không tạo chiến dịch từ số không, không đổi đối tượng / mục tiêu /
+biểu mẫu — chép NGUYÊN; chỉ thay BÀI QUẢNG CÁO (ảnh + câu chữ của mẫu thắng) và NGÂN SÁCH NGÀY.
+
+Luồng:
+
+```
+lượt chấm   mẫu THẮNG / HỨA HẸN ⇒ 2 dòng PROPOSED (mua qua tin nhắn · khách tiềm năng) — 0 lời gọi Facebook
+            ⇒ MỘT tin Lark/Telegram cho các đề nghị chưa báo (đóng dấu notified_at khi gửi được)
+người bấm   "Dựng nháp" ⇒ đọc chiến dịch mẫu (đúng 1 nhóm + 1 mẩu, đúng mục tiêu, ngân sách NGÀY)
+            ⇒ POST /{mẫu}/copies  deep_copy=true · status_option=PAUSED · rename_options (tiền tố "[VM scale …]")
+            ⇒ đọc bản sao (phải TẮT; lỡ đang bật ⇒ tắt ngay, dừng) ⇒ tạo bài từ ảnh + câu chữ mẫu thắng theo khuôn
+              bài của bản sao ⇒ gắn vào mẩu (POST /{ad} creative) ⇒ đặt daily_budget ĐÚNG CẤP (CBO: chiến dịch,
+              ABO: nhóm — đọc từ bản sao) ⇒ DRAFT, vẫn TẮT
+người bấm   "Duyệt chạy" (hai bước: đề nghị → phiếu HMAC → áp) ⇒ tính lại, đọc LẠI bản sao trên Facebook
+            (ai sửa bài/ngân sách trên Ads Manager sau khi phát phiếu ⇒ không bật) ⇒ bật mẩu → nhóm → CHIẾN DỊCH cuối
+người bấm   "Tắt" (chỉ làm giảm tiền, công tắc khẩn cấp vẫn cho đi) · "Bỏ qua" đề nghị / nháp hỏng
+```
+
+| Trần / luật | Giá trị | Nguồn |
+|---|---|---|
+| Ngân sách ngày một chiến dịch scale | ≤ 500.000đ (cả CHECK ở CSDL) | chủ shop 24/09 |
+| Tổng ngân sách ngày các chiến dịch scale ĐANG BẬT (`ACTIVE`) | ≤ 5.000.000đ | **ĐỀ XUẤT, CHỜ CHỦ SHOP CHỐT** |
+| Nháp mỗi mẫu thắng | ≤ 2 (một mỗi loại); khoá duy nhất (mẫu, loại) | chủ shop 24/09 |
+| Nguồn sao chép | CHỈ hai id mẫu đã khai (khác ⇒ `NOT_SCALE_TEMPLATE`) | ngoại lệ này |
+| Căn cứ | phán quyết SỐNG `WIN` hoặc `PROMISING` (khác ⇒ `NOT_WINNER`) | §4 |
+
+Cổng `gateScaleWrite` (hàm thuần, thứ tự khoá bằng bài kiểm): `HARD_DISABLED → MODE_OFF →
+CONFIG_INCOMPLETE → NOT_APPROVED → APPROVAL_MISMATCH (bật) → NOT_SCALE_TEMPLATE (sao chép) → NOT_OUR_AD →
+[tắt dừng ở đây] → NOT_WINNER → SCALE_DUPLICATE → OVER_SCALE_BUDGET → OVER_SCALE_DAILY_CAP (bật)`.
+
+**Hỏng giữa chừng thì không có nửa nào đang chạy.** Bản sao sinh ra TẮT; mọi bước dựng nháp không bật gì;
+bước bật đi mẩu → nhóm → chiến dịch nên chiến dịch (công tắc tổng) chỉ bật khi hai bước trước đã xong. Dựng
+hỏng sau khi đã sao chép ⇒ `FAILED`, ô ghi id bản sao để người xoá tay, và KHÔNG dựng lại (mốc
+`copy_attempted_at` ghi TRƯỚC lời gọi sao chép: phản hồi rơi mất vẫn biết là có thể đã có bản sao mồ côi).
+
+Tham số Graph API (đọc 24/09/2026): `developers.facebook.com/docs/marketing-api/reference/ad-campaign-group/copies/`
+(`deep_copy` — đồng bộ khi ≤ 3 mẩu con, nên mẫu phải có đúng 1 mẩu; `status_option` ACTIVE · PAUSED ·
+INHERITED_FROM_SOURCE; `rename_options`; trả `copied_campaign_id` + `ad_object_ids`) và
+`…/reference/adgroup/` (cập nhật `creative` của mẩu). Không có `copied_campaign_id` ⇒ không đoán, ghi FAILED.
+
+Tệp: `lib/creative/scale.ts` (đường ghi) · `lib/integrations/facebook/ads-write.ts` (sáu hàm mới) ·
+`gateScaleWrite` trong `lib/marketing/creative-write-gate.ts` · `lib/queries/creative-scale.ts` ·
+`lib/actions/creative-scale.ts` · khối "Scale mẫu thắng" ở tab Đang chạy (`scale-panel.tsx`,
+`scale-actions.tsx`) · ô cấu hình ở tab Cấu hình · `drizzle/0121_creative_scale_drafts.sql` ·
+`tests/creative-scale.test.ts`.
+
+**Chủ shop phải dựng trên Ads Manager (hai chiến dịch mẫu):** mỗi chiến dịch ĐÚNG một nhóm + một mẩu, để
+TẮT; ngân sách NGÀY (CBO hoặc ABO đều được, không dùng trọn đời); fanpage của nhóm = fanpage đã khai.
+(1) *Tối đa lượt mua qua tin nhắn*: mục tiêu **Doanh số** (`OUTCOME_SALES`), vị trí chuyển đổi **Ứng
+dụng nhắn tin**, mục tiêu hiệu quả tối đa lượt mua qua tin nhắn, mẩu ảnh đơn nút "Gửi tin nhắn".
+(2) *Khách hàng tiềm năng*: mục tiêu **Khách hàng tiềm năng** (`OUTCOME_LEADS`), biểu mẫu tức thì đã
+tạo sẵn, mẩu ảnh đơn nút đăng ký. Rồi dán hai id chiến dịch vào tab Cấu hình → "Scale mẫu thắng".
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |
@@ -283,6 +346,10 @@ Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `l
   tiêu tiền, nhưng ERP không biết nó). Tên nhóm mang ngày lô + số ô để tra tay.
 - Các hàm ghi mới chưa từng chạy trên Facebook thật — lượt đầu nên là MỘT lô nhỏ (`batchSize` 2–3).
 - Chi phí đọc ảnh / viết chữ bằng model OpenAI in "CHƯA BIẾT" vì bảng giá AI của kho chỉ có Claude.
+- Scale (§5f): lời bật CHIẾN DỊCH mà phản hồi rơi mất sau khi Facebook đã bật ⇒ ERP ghi "nháp" trong khi
+  chiến dịch đang chạy (đã được người duyệt, nhưng trần tổng đang bật đếm THIẾU nó). Người tắt / đổi
+  ngân sách chiến dịch scale trực tiếp trên Ads Manager thì ERP không biết — trần tổng đếm theo bảng nháp.
+  `/copies` chưa từng gọi Facebook thật: tham số lấy từ tài liệu, kiểm thử chạy trên cửa ghi giả.
 - Đường Batch ảnh (§5e) chưa từng gọi OpenAI thật: tên trường lấy từ tài liệu, kiểm thử chạy trên OpenAI giả.
   Số token mỗi ảnh của gpt-image-2.x là ước tính (OpenAI chưa công bố bảng) — đối chiếu `gen_cost_usd` thật
   sau lô đầu.
@@ -298,6 +365,7 @@ Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `l
 | Bật `enabled` ở tab Cấu hình | công tắc mềm của vòng |
 | Bấm **Nhập ảnh sản phẩm từ Pancake** (hoặc tải tay ảnh sản phẩm thật) cho các mã muốn test | máy không sinh mẫu cho sản phẩm nó không nhìn thấy |
 | Bấm **Nhập mẫu thắng / mẫu tốt từ Facebook** (token hiện có `ads_read` là đủ — chỉ GET) | chọn mẩu nào làm mẫu cha là việc của người |
+| Dựng **hai chiến dịch MẪU scale** (§5f) và dán id vào tab Cấu hình; **chốt trần tổng 5.000.000đ/ngày** các chiến dịch scale đang bật (đang là ĐỀ XUẤT) | máy chỉ sao chép, không tự dựng mục tiêu / biểu mẫu; trần tiền là quyết định kinh doanh |
 | ~~Chốt ba con số "đề xuất" ở §3~~ — **ĐÃ CHỐT 24/09/2026** (`b32a1fac`: 200.000đ/lượt · 1.000.000đ/ngày · 2 USD/ngày) | ngưỡng tiền |
 
 ## 8. BLOCKED / HUMAN GATE

@@ -52,6 +52,8 @@ async function cleanup(db: Db) {
   const ids = (await db.select({ id: v.id }).from(v).where(like(v.id, `${P}%`))).map((r) => r.id);
   if (ids.length) {
     await db.delete(schema.creativeVerdicts).where(inArray(schema.creativeVerdicts.variantId, ids));
+    // Lượt chấm chèn ĐỀ NGHỊ scale cho mẫu THẮNG / HỨA HẸN (§5f) — dọn trước khi xoá mẫu (khoá ngoại).
+    await db.delete(schema.creativeScaleDrafts).where(inArray(schema.creativeScaleDrafts.variantId, ids));
     await db.delete(schema.creativeFbActions).where(inArray(schema.creativeFbActions.variantId, ids));
     await db.update(v).set({ parentVariantId: null }).where(inArray(v.id, ids));
     await db.delete(v).where(inArray(v.id, ids));
