@@ -194,7 +194,9 @@ export type AdsWriteDenial =
   | "DAILY_CAP"
   | "CAMPAIGN_RATE_LIMIT"
   | "BELOW_MIN_BUDGET"
-  | "BRAKE_ON";
+  | "BRAKE_ON"
+  | "INTRADAY_NOT_ELIGIBLE"
+  | "INTRADAY_RATE_LIMIT";
 
 export const ADS_WRITE_DENIAL_REASON: Record<AdsWriteDenial, string> = {
   HARD_DISABLED: "Đường ghi quảng cáo đang TẮT ở cấp máy chủ (ADS_WRITE_ENABLED). Đây là chốt ngoài cùng, không mở được từ giao diện hay từ bảng settings.",
@@ -216,4 +218,6 @@ export const ADS_WRITE_DENIAL_REASON: Record<AdsWriteDenial, string> = {
   CAMPAIGN_RATE_LIMIT: `Chiến dịch này đã đổi ${ADS_WRITE_LIMITS.maxChangesPerCampaignPerDay} lần trong 24 giờ.`,
   BELOW_MIN_BUDGET: `Sẽ hạ ngân sách xuống dưới sàn ${ADS_WRITE_LIMITS.minDailyBudgetVnd.toLocaleString("vi-VN")}đ. Muốn dừng hẳn thì tạm dừng chiến dịch, đó là một hành động khác.`,
   BRAKE_ON: `PHANH ĐANG BẬT: ${ADS_WRITE_LIMITS.brakeConsecutiveWorse} lượt đổi gần nhất đều làm lợi nhuận góp sau quảng cáo đi xuống. Đường ghi dừng cho tới khi người xem lại.`,
+  INTRADAY_NOT_ELIGIBLE: "Số của HÔM NAY chưa đạt ngưỡng tăng trong ngày chủ shop đã chốt (%CPQC trên doanh số chốt, chi tối thiểu, số đơn tối thiểu).",
+  INTRADAY_RATE_LIMIT: "Chiến dịch đã chạm nhịp tăng trong ngày (số lượt tối đa, hoặc chưa đủ khoảng cách giờ từ lượt trước).",
 };

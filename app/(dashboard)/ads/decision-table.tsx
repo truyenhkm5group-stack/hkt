@@ -282,23 +282,47 @@ export function AdsDecisionTable({
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  /*
+    CHỈ DÒNG BẤM ĐƯỢC. Nút Bàn tay chỉ có ở tab Chiến dịch và Mã hàng, và chỉ trên dòng ĐÃ CHÍN.
+    Chủ shop báo 24/09/2026 "không thấy Bàn tay": đầu bảng ghi 2/782 dòng đã chín, nhưng hai dòng
+    ấy nằm lẫn giữa 80 dòng đang hiện và không có cách nào tìm ra ngoài mở từng dòng.
+  */
+  const coBanTay = dimension === "campaign" || dimension === "product";
+  const [chiChin, setChiChin] = useState(false);
+  const soChin = useMemo(() => rows.filter((r) => stability?.[r.key]?.ready).length, [rows, stability]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
+    const theoChin = coBanTay && chiChin ? rows.filter((r) => stability?.[r.key]?.ready) : rows;
+    if (!q) return theoChin;
     // Tìm cả theo TÊN CHA: ở tab Mẩu quảng cáo, thứ người ta gõ thường là tên chiến dịch.
-    return rows.filter((r) => r.name.toLowerCase().includes(q) || r.key.toLowerCase().includes(q) || (r.parentName ?? "").toLowerCase().includes(q));
-  }, [rows, query]);
+    return theoChin.filter((r) => r.name.toLowerCase().includes(q) || r.key.toLowerCase().includes(q) || (r.parentName ?? "").toLowerCase().includes(q));
+  }, [rows, query, coBanTay, chiChin, stability]);
 
   return (
     <>
-      <div className="border-b px-5 py-2">
+      <div className="flex flex-wrap items-center gap-2 border-b px-5 py-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={hiddenCount > 0 ? `Tìm trong ${rows.length} dòng đang hiện…` : `Tìm ${ADS_DIMENSION_LABEL[dimension].toLowerCase()}…`}
           className="h-8 w-full max-w-xs rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
         />
+        {coBanTay ? (
+          <button
+            type="button"
+            onClick={() => setChiChin((v) => !v)}
+            disabled={soChin === 0 && !chiChin}
+            aria-pressed={chiChin}
+            title={soChin === 0 ? "Chưa dòng nào giữ nguyên khuyến nghị đủ số ngày — nút Bàn tay chưa hiện ở dòng nào." : "Chỉ hiện dòng đã chín — mở dòng ra là thấy ô Bàn tay."}
+            className={cn(
+              "h-8 rounded-md border px-2.5 text-xs font-medium transition-colors disabled:opacity-50",
+              chiChin ? "border-primary bg-primary text-primary-foreground" : "hover:bg-accent",
+            )}
+          >
+            Chỉ dòng bấm được ({soChin})
+          </button>
+        ) : null}
       </div>
       <div className="overflow-x-auto">
         <Table className="min-w-[1000px]">
