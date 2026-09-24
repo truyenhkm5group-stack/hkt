@@ -163,6 +163,7 @@ import { testBankPipeline } from "./bank-pipeline.test";
 import { testFinanceOpsPure, testFinanceOpsQueries } from "./finance-ops.test";
 import { testAutomationLadderPure, testAutomationLadderQueries, testFbTokenScopes } from "./automation-ladder.test";
 import { testPackingWavesPure, testPackingWavesQueries } from "./packing-waves.test";
+import { testCarrierManualDb, testCarrierManualPure } from "./carrier-manual.test";
 import { testActionWiring } from "./action-wiring.test";
 import {
   testKpiCohortUsesHandoffDate,
@@ -204,6 +205,7 @@ import { testInspectionTruth } from "./inspection-truth.test";
 import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
+import { testSuppliersPure, testSuppliersQueries } from "./suppliers.test";
 import { testCrm } from "./crm.test";
 import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
@@ -341,6 +343,7 @@ import { getAdsPerformance } from "@/lib/queries/ads-performance";
 import { listLandingOrders, listLandingProductOptions } from "@/lib/queries/landing";
 import { recheckAllLanding, refreshLandingChecks } from "@/lib/landing/sheet";
 import { previousOrderHint } from "@/lib/queries/order-hints";
+import { testOpsLogLeak } from "./ops-log-leak.test";
 
 async function main() {
   await ensureMigrated();
@@ -1814,6 +1817,8 @@ async function main() {
   await testMultiAttemptMoney(db);
   await testCashflow(db);
   await testPurchasing(db);
+  testSuppliersPure();
+  await testSuppliersQueries(db);
   await testCrm(db);
   testScenario();
   testAccessControl();
@@ -1873,6 +1878,8 @@ async function main() {
   await testVtpHealth(db);
   await testVtpCapability(db);
   await testCareWorkbench(db);
+  testCarrierManualPure();
+  await testCarrierManualDb(db);
   await testAiCopilot(db);
   testCodPaymentStatement();
   await testVtpImportLimits();
@@ -2174,6 +2181,7 @@ async function main() {
   testMigrationNumberUnique();
   testDuplicateMetrics();
   testLogisticsStatusBoundary();
+  await testOpsLogLeak();
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 

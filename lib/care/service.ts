@@ -24,12 +24,12 @@ import {
   type CareEventSource,
   type CareStatus,
   type CarrierActionKey,
-  type CarrierRequestStatus,
 } from "@/lib/constants/care";
 import { CARE_ACTION_KINDS, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { IntegrationError } from "@/lib/integrations/http";
 import { getViettelPostClient, VTP_ORDER_ACTIONS } from "@/lib/integrations/viettelpost/client";
 import { syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
+import { carrierRequestView } from "@/lib/care/carrier-requests";
 import type { CareState, CarrierRequestView } from "@/lib/care/contracts";
 
 /**
@@ -650,7 +650,7 @@ export const requestSchema = z.object({
 });
 
 function toView(r: typeof schema.carrierActionRequests.$inferSelect): CarrierRequestView {
-  return { id: r.id, actionKey: r.actionKey as CarrierActionKey, status: r.status as CarrierRequestStatus, at: r.createdAt, error: r.error, note: r.note, actor: r.actorEmail, attempts: r.attempts };
+  return carrierRequestView(r);
 }
 
 async function sleep(ms: number) {

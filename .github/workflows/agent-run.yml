@@ -152,11 +152,15 @@ jobs:
           ERP_DOMAIN: ${{ vars.ERP_DOMAIN || 'erp.vnxcommerce.com' }}
           ERP_BASE_URL: ${{ vars.ERP_BASE_URL }}
           AGENT_INGEST_SECRET: ${{ secrets.AGENT_INGEST_SECRET }}
+          # Ô người gõ đi qua BIẾN MÔI TRƯỜNG, không nội suy `${{ }}` vào thân lệnh: nội suy xảy ra
+          # TRƯỚC khi shell đọc script, nên `"; curl … #` trong ô task từng là một lệnh thứ hai.
+          CO_VIEC: ${{ inputs.task }}
+          NGUOI_BAM: ${{ github.actor }}
         run: |
-          if [ -n "${{ inputs.task }}" ]; then
-            npm run --silent agent:fetch-task -- --task "${{ inputs.task }}" --actor "github:${{ github.actor }}" | tee setup.log
+          if [ -n "${CO_VIEC:-}" ]; then
+            npm run --silent agent:fetch-task -- --task "$CO_VIEC" --actor "github:$NGUOI_BAM" | tee setup.log
           else
-            npm run --silent agent:proof-setup -- --actor "github:${{ github.actor }}" | tee setup.log
+            npm run --silent agent:proof-setup -- --actor "github:$NGUOI_BAM" | tee setup.log
           fi
           TASK_CODE="$(grep -oE '^TASK_CODE=.+' setup.log | tail -1 | cut -d= -f2)"
           if [ -z "$TASK_CODE" ]; then echo "::error::Không lấy được mã việc."; exit 1; fi
@@ -178,7 +182,7 @@ jobs:
           # MÃ VIỆC TRÊN PRODUCTION. Có ô `task` ⇒ mã vừa lấy CHÍNH LÀ mã production (script lấy
           # việc đã đổi mã của CSDL tạm về đúng nó). Không có ⇒ lượt TỰ KIỂM, để RỖNG: lượt ấy không
           # thuộc việc nào trên production, và cửa chép sổ khi ấy không gắn nó vào đâu cả.
-          if [ -n "${{ inputs.task }}" ]; then
+          if [ -n "${CO_VIEC:-}" ]; then
             echo "prod_task_code=$TASK_CODE" >> "$GITHUB_OUTPUT"
           else
             echo "prod_task_code=" >> "$GITHUB_OUTPUT"
@@ -191,12 +195,15 @@ jobs:
       # chạm tới. Vòng lặp ấy tốn tiền thật, nên nó dừng ở đây chứ không dừng ở hoá đơn.
       - name: Kiểm điều kiện chạy lại
         if: inputs.rerun_branch != '' || inputs.feedback != ''
+        env:
+          CO_VIEC: ${{ inputs.task }}
+          RERUN_BRANCH: ${{ inputs.rerun_branch }}
         run: |
-          if [ -z "${{ inputs.task }}" ]; then
+          if [ -z "${CO_VIEC:-}" ]; then
             echo "::error::Chạy lại (rerun_branch/feedback) phải kèm mã việc ở ô task — trần số lượt đếm theo VIỆC."
             exit 1
           fi
-          if [ -z "${{ inputs.rerun_branch }}" ]; then
+          if [ -z "${RERUN_BRANCH:-}" ]; then
             echo "::error::Có feedback nhưng không có rerun_branch: phản hồi review chỉ có nghĩa khi sửa tiếp trên nhánh đã mở PR."
             exit 1
           fi
@@ -212,21 +219,23 @@ jobs:
           # một dấu nháy trong phản hồi review không được phép trở thành một lệnh shell thứ hai.
           RERUN_BRANCH: ${{ inputs.rerun_branch }}
           FEEDBACK: ${{ inputs.feedback }}
+          CONG: ${{ inputs.gates }}
+          NGUOI_BAM: ${{ github.actor }}
         run: |
           if [ -n "${RERUN_BRANCH:-}" ]; then
             printenv FEEDBACK > agent-feedback.txt || : > agent-feedback.txt
             npm run --silent agent:run -- \
               --task "${{ steps.setup.outputs.task_code }}" \
               --agent "${{ steps.setup.outputs.agent_key }}" \
-              --gates "${{ inputs.gates }}" \
+              --gates "$CONG" \
               --rerun-branch "$RERUN_BRANCH" \
               --feedback-file agent-feedback.txt \
-              --feedback-author "github:${{ github.actor }}"
+              --feedback-author "github:$NGUOI_BAM"
           else
             npm run --silent agent:run -- \
               --task "${{ steps.setup.outputs.task_code }}" \
               --agent "${{ steps.setup.outputs.agent_key }}" \
-              --gates "${{ inputs.gates }}"
+              --gates "$CONG"
           fi
 
       # ═══ PHẠM VI TỆP: KIỂM BẰNG GIT, KHÔNG HỎI AGENT ═══

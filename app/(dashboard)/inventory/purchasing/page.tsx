@@ -7,8 +7,10 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { requirePermission } from "@/lib/auth/session";
-import { PURCHASING_RULE } from "@/lib/constants/purchasing";
+import { can, requirePermission } from "@/lib/auth/session";
+import { SupplierCatalog } from "@/app/(dashboard)/inventory/purchasing/supplier-catalog";
+import { listSuppliers, unmatchedSupplierNames } from "@/lib/queries/suppliers";
+import { PURCHASING_RULE, UNKNOWN_SUPPLIER } from "@/lib/constants/purchasing";
 import { formatDate, formatNumber } from "@/lib/format";
 import { getPurchasingReport } from "@/lib/queries/purchasing";
 import { cn } from "@/lib/utils";
@@ -23,10 +25,10 @@ function readWindow(raw: string | undefined): number {
 }
 
 export default async function PurchasingPage({ searchParams }: { searchParams: Promise<{ days?: string }> }) {
-  await requirePermission("planning:view");
+  const user = await requirePermission("planning:view");
   const params = await searchParams;
   const days = readWindow(params.days);
-  const r = await getPurchasingReport(days);
+  const [r, danhMuc, chuaVao] = await Promise.all([getPurchasingReport(days), listSuppliers(), unmatchedSupplierNames()]);
   const cov = r.coverage;
   const lowLeadCoverage = cov.leadCoveragePercent !== null && cov.leadCoveragePercent < PURCHASING_RULE.minLeadCoveragePercent;
 
@@ -173,8 +175,15 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
               </TableHeader>
               <TableBody>
                 {r.suppliers.map((s) => (
-                  <TableRow key={s.supplier}>
-                    <TableCell className="font-medium">{s.supplier}</TableCell>
+                  <TableRow key={s.supplierId ?? `text:${s.supplier}`}>
+                    <TableCell className="font-medium">
+                      {s.supplier}
+                      {!s.inCatalog && s.supplier !== UNKNOWN_SUPPLIER ? (
+                        <span className="ml-1.5 text-[11px] font-normal text-amber-600 dark:text-amber-400" title="Nhóm này đứng trên chữ gõ tay — thêm vào Danh mục xưởng bên dưới để gom đúng các cách gõ.">
+                          chưa vào danh mục
+                        </span>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="numeric text-right">{formatNumber(s.receipts)}</TableCell>
                     <TableCell className="numeric text-right">{formatNumber(s.receivedQty)}</TableCell>
                     <TableCell className="text-right"><Money value={s.receivedCost} /></TableCell>
@@ -303,6 +312,19 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
             <DataWarnings label={`ERP KHÔNG biết ${r.limitations.length} điều`} items={r.limitations} />
           </div>
         ) : null}
+      </SectionCard>
+
+      <SectionCard
+        title={`Danh mục xưởng · ${formatNumber(danhMuc.filter((d) => d.active).length)} đang dùng`}
+        description="Mỗi xưởng một tên, kèm các cách gõ khác — để thời gian giao và giá nhập tính đúng theo TỪNG xưởng."
+        hint="Chọn tên xưởng trong danh mục khi lập bảng đặt hàng hay phiếu nhập thì lô đó mang khoá xưởng thật. Các lô cũ gõ tay KHÔNG bị sửa: chúng được quy về xưởng lúc đọc, chỉ khi tên khớp ĐÚNG MỘT xưởng (tên hoặc tên gọi khác). Một cách gõ chỉ được thuộc về một xưởng."
+        padded={false}
+      >
+        <SupplierCatalog
+          suppliers={danhMuc.map((d) => ({ id: d.id, name: d.name, aliases: d.aliases, phone: d.phone, note: d.note, active: d.active }))}
+          unmatched={chuaVao}
+          canWrite={can(user, "planning:write")}
+        />
       </SectionCard>
     </div>
   );

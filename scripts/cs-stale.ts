@@ -12,40 +12,49 @@ import { CS_KIND_LABEL } from "@/lib/constants/cs";
 import { RECONCILE_REASONS, RECONCILE_REASON_LABEL } from "@/lib/cs/reconcile-order-created";
 import { applyStaleReconciliation, staleReport, STALE_VERDICTS, STALE_VERDICT_LABEL } from "@/lib/cs/stale";
 
+/**
+ * KÊNH TÓM TẮT CỦA THAO TÁC OPS. Qua workflow "Vận hành ERP trên VPS", kết quả của script này được
+ * MÃ HOÁ (mẫu kiểm chứng là TIÊU ĐỀ case — mang tên khách, có loại mang cả SĐT); chỉ dòng mang tiền
+ * tố dưới đây được in ra log công khai. Vì thế CHỈ bảng đếm đi qua đây — không bao giờ một mẫu.
+ * Tiền tố viết lại tại chỗ (không import): ops lấy script từ `main` nhưng `lib/` từ ảnh đang chạy.
+ */
+const tomTat = (s: string) => console.log(`[ops:tom-tat] ${s}`);
+
 async function main() {
   const apply = process.argv.includes("--apply");
   const bc = await staleReport(20);
+  console.log("");
+  tomTat(`═══ HÀNG ĐỢI CSKH ĐANG MỞ: ${bc.openTotal} case ═══`);
+  tomTat("KẾT LUẬN (không tính “chưa tạo đơn” — loại đó có máy riêng, xem dưới):");
+  for (const v of STALE_VERDICTS) tomTat(`  ${v.padEnd(14)} ${String(bc.byVerdict[v]).padStart(5)}  ${STALE_VERDICT_LABEL[v]}`);
 
-  console.log(`\n═══ HÀNG ĐỢI CSKH ĐANG MỞ: ${bc.openTotal} case ═══\n`);
-  console.log("KẾT LUẬN (không tính “chưa tạo đơn” — loại đó có máy riêng, xem dưới):");
-  for (const v of STALE_VERDICTS) console.log(`  ${v.padEnd(14)} ${String(bc.byVerdict[v]).padStart(5)}  ${STALE_VERDICT_LABEL[v]}`);
-
-  console.log("\nTHEO LOẠI:");
+  tomTat("THEO LOẠI:");
   for (const k of bc.byKind) {
     const chiTiet = STALE_VERDICTS.filter((v) => k.counts[v]).map((v) => `${v}=${k.counts[v]}`).join(" · ");
-    console.log(`  ${String(k.total).padStart(5)}  ${(CS_KIND_LABEL[k.kind] ?? k.kind).padEnd(34)} ${chiTiet}`);
+    tomTat(`  ${String(k.total).padStart(5)}  ${(CS_KIND_LABEL[k.kind] ?? k.kind).padEnd(34)} ${chiTiet}`);
   }
 
   const o = bc.orderNotCreated;
-  console.log(`\n═══ "ĐỦ THÔNG TIN · CHƯA TẠO ĐƠN": ${o.openBefore} đang mở ═══`);
-  for (const r of RECONCILE_REASONS) console.log(`  ${String(o.closed[r]).padStart(5)}  ${r.padEnd(22)} ${RECONCILE_REASON_LABEL[r]}`);
-  console.log(`  ${String(o.humanTouched).padStart(5)}  ĐÃ CÓ NGƯỜI CHẠM        — máy KHÔNG đóng hộ, để người quyết`);
-  console.log(`  ${String(o.stillPending).padStart(5)}  CÒN TREO THẬT           — chưa có chứng cứ nào nói đơn đã tồn tại`);
+  tomTat(`═══ "ĐỦ THÔNG TIN · CHƯA TẠO ĐƠN": ${o.openBefore} đang mở ═══`);
+  for (const r of RECONCILE_REASONS) tomTat(`  ${String(o.closed[r]).padStart(5)}  ${r.padEnd(22)} ${RECONCILE_REASON_LABEL[r]}`);
+  tomTat(`  ${String(o.humanTouched).padStart(5)}  ĐÃ CÓ NGƯỜI CHẠM        — máy KHÔNG đóng hộ, để người quyết`);
+  tomTat(`  ${String(o.stillPending).padStart(5)}  CÒN TREO THẬT           — chưa có chứng cứ nào nói đơn đã tồn tại`);
 
+  // MẪU = tiêu đề case (tên khách, có khi SĐT) ⇒ KHÔNG qua kênh tóm tắt: chỉ đọc được trong bản mã.
   console.log(`\n═══ MẪU ĐỂ KIỂM CHỨNG (${bc.samples.length} case máy sẽ đóng) ═══`);
   for (const s of bc.samples) console.log(`  ${s.id}  ${String(s.ageDays).padStart(3)}n  ${(CS_KIND_LABEL[s.kind] ?? s.kind).padEnd(24)} ${s.title.slice(0, 60)}\n        └─ ${s.reason}`);
   if (!bc.samples.length) console.log("  (không có case nào máy đóng được — hàng đợi đang phản ánh đúng thực tế)");
 
   if (!apply) {
-    console.log(`\nCHẠY THỬ — KHÔNG ghi một dòng nào. Thêm --apply để đóng mềm ${bc.byVerdict.AUTO_RESOLVE + o.closedTotal} case xác định.\n`);
+    tomTat(`CHẠY THỬ — KHÔNG ghi một dòng nào. Thêm --apply để đóng mềm ${bc.byVerdict.AUTO_RESOLVE + o.closedTotal} case xác định.`);
     return;
   }
   const kq = await applyStaleReconciliation({ dryRun: false, actor: "ops:cs-stale" });
-  console.log(`\n═══ ĐÃ ÁP DỤNG ═══`);
-  console.log(`  ${kq.closed}/${kq.planned} case đóng mềm (AUTO_RESOLVED, có lý do từng case)`);
-  for (const k of kq.byKind) console.log(`    · ${CS_KIND_LABEL[k.kind] ?? k.kind}: ${k.n}`);
-  console.log(`  ${kq.orderNotCreated.closedTotal} case "chưa tạo đơn" đóng theo bốn bậc chứng cứ`);
-  console.log(`  CÒN LẠI: ${kq.orderNotCreated.stillPending} case "chưa tạo đơn" còn treo thật\n`);
+  tomTat(`═══ ĐÃ ÁP DỤNG ═══`);
+  tomTat(`  ${kq.closed}/${kq.planned} case đóng mềm (AUTO_RESOLVED, có lý do từng case)`);
+  for (const k of kq.byKind) tomTat(`    · ${CS_KIND_LABEL[k.kind] ?? k.kind}: ${k.n}`);
+  tomTat(`  ${kq.orderNotCreated.closedTotal} case "chưa tạo đơn" đóng theo bốn bậc chứng cứ`);
+  tomTat(`  CÒN LẠI: ${kq.orderNotCreated.stillPending} case "chưa tạo đơn" còn treo thật`);
 }
 
 main()

@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { PURCHASING_RULE, UNKNOWN_SUPPLIER } from "@/lib/constants/purchasing";
+import { supplierGroupOf } from "@/lib/constants/suppliers";
+import { supplierCatalog } from "@/lib/queries/suppliers";
 
 /**
  * ───────────── MUA HÀNG & XƯỞNG ─────────────
@@ -94,6 +96,9 @@ export type OpenProductionOrder = {
 
 export type SupplierRow = {
   supplier: string;
+  /** Xưởng trong danh mục. `null` = nhóm này đứng trên CHỮ GÕ, chưa vào danh mục (nối yếu — mục 39). */
+  supplierId: string | null;
+  inCatalog: boolean;
   /** Đơn sản xuất đã gửi trong kỳ (mọi trạng thái sau khi gửi). */
   ordersSent: number;
   /** Đơn đã đánh dấu nhận trong kỳ. */
@@ -177,6 +182,10 @@ type PoRow = {
   code: string;
   productId: string;
   supplier: string;
+  /** Khoá xưởng trong danh mục, nếu dòng đã ghi. */
+  supplierId?: string | null;
+  /** Nhóm xưởng đã quy về (`supplierGroupOf`). Không có ⇒ so theo chữ như trước. */
+  group?: string;
   sentAt: Date;
   dueDate: Date | null;
 };
@@ -184,6 +193,7 @@ type PoRow = {
 type ReceiptRow = {
   id: string;
   supplier: string;
+  group?: string;
   receivedAt: Date;
   productIds: string[];
 };
@@ -210,8 +220,9 @@ export function matchProductionToReceipts(pos: PoRow[], receipts: ReceiptRow[]) 
       if (!r.productIds.includes(po.productId)) continue;
       const gap = r.receivedAt.getTime() - po.sentAt.getTime();
       if (gap < 0 || gap > maxLeadMs) continue;
-      const a = supplierKey(po.supplier);
-      const b = supplierKey(r.supplier);
+      // So theo XƯỞNG đã quy về danh mục khi có; không thì theo chữ như trước.
+      const a = po.group ?? supplierKey(po.supplier);
+      const b = r.group ?? supplierKey(r.supplier);
       if (a && b && a !== b) continue;
       found.push(r.id);
       poOfReceipt.set(r.id, [...(poOfReceipt.get(r.id) ?? []), po.id]);
@@ -255,6 +266,12 @@ export function matchProductionToReceipts(pos: PoRow[], receipts: ReceiptRow[]) 
 async function purchasingUncached(windowDays: number): Promise<PurchasingReport> {
   const db = await getDb();
   const from = new Date(Date.now() - windowDays * DAY_MS);
+  /*
+    DANH MỤC XƯỞNG: dòng có `supplier_id` thì theo khoá; dòng cũ thì quy về lúc ĐỌC, chỉ khi tên khớp
+    ĐÚNG MỘT xưởng (tên hoặc tên gọi khác). Không dòng nào bị sửa — xem `lib/constants/suppliers.ts`.
+  */
+  const cat = await supplierCatalog();
+  const grp = (id: unknown, raw: unknown) => supplierGroupOf({ supplierId: id ? text(id) : null, supplier: text(raw) }, cat.index, cat.byId);
   const prevFrom = new Date(from.getTime() - windowDays * DAY_MS);
 
   // ───────── 1. Cam kết đang mở: lô đã gửi xưởng, chưa đánh dấu nhận ─────────
@@ -274,7 +291,7 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
 
   const openOrders = rowsOf(
     await db.execute(sql`
-      select id, code, product_code, product_name, supplier, total_qty,
+      select id, code, product_code, product_name, supplier, supplier_id, total_qty,
              total_qty * unit_cost as committed, due_date, sent_at,
              case when due_date is not null and due_date < now()
                   then floor(extract(epoch from now() - due_date) / 86400)
@@ -289,7 +306,7 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
     code: text(r.code),
     productCode: text(r.product_code),
     productName: text(r.product_name),
-    supplier: supplierLabel(text(r.supplier)),
+    supplier: grp(r.supplier_id, r.supplier).label || UNKNOWN_SUPPLIER,
     totalQty: num(r.total_qty),
     committed: num(r.committed),
     dueDate: date(r.due_date),
@@ -300,16 +317,18 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
   // ───────── 2. Ghép lô ↔ phiếu nhập để suy thời gian giao ─────────
   const pos = rowsOf(
     await db.execute(sql`
-      select id, code, product_id, supplier, sent_at, due_date
+      select id, code, product_id, supplier, supplier_id, sent_at, due_date
       from production_orders
       where status = 'RECEIVED' and sent_at is not null and product_id is not null and sent_at >= ${from}
     `),
   )
-    .map((r) => ({
+    .map((r): Omit<PoRow, "sentAt"> & { sentAt: Date | null } => ({
       id: text(r.id),
       code: text(r.code),
       productId: text(r.product_id),
       supplier: text(r.supplier),
+      supplierId: r.supplier_id ? text(r.supplier_id) : null,
+      group: grp(r.supplier_id, r.supplier).key,
       sentAt: date(r.sent_at),
       dueDate: date(r.due_date),
     }))
@@ -317,18 +336,19 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
 
   const receipts = rowsOf(
     await db.execute(sql`
-      select r.id, r.supplier, r.received_at,
+      select r.id, r.supplier, r.supplier_id, r.received_at,
              array_agg(distinct v.product_id) as product_ids
       from stock_receipts r
       join stock_receipt_items i on i.receipt_id = r.id
       join product_variants v on v.id = i.variant_id
       where r.kind = 'RECEIPT' and i.quantity > 0 and v.product_id is not null and r.received_at >= ${from}
-      group by r.id, r.supplier, r.received_at
+      group by r.id, r.supplier, r.supplier_id, r.received_at
     `),
   )
-    .map((r) => ({
+    .map((r): Omit<ReceiptRow, "receivedAt"> & { receivedAt: Date | null } => ({
       id: text(r.id),
       supplier: text(r.supplier),
+      group: grp(r.supplier_id, r.supplier).key,
       receivedAt: date(r.received_at),
       productIds: Array.isArray(r.product_ids) ? r.product_ids.map((v) => text(v)) : [],
     }))
@@ -340,7 +360,7 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
   const receiptAgg = async (start: Date, end: Date) =>
     rowsOf(
       await db.execute(sql`
-        select r.supplier,
+        select r.supplier, r.supplier_id,
                count(distinct r.id) as receipts,
                coalesce(sum(i.quantity), 0) as qty,
                coalesce(sum(i.quantity * i.unit_cost), 0) as cost,
@@ -349,7 +369,7 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
         from stock_receipts r
         join stock_receipt_items i on i.receipt_id = r.id
         where r.kind = 'RECEIPT' and i.quantity > 0 and r.received_at >= ${start} and r.received_at < ${end}
-        group by r.supplier
+        group by r.supplier, r.supplier_id
       `),
     );
 
@@ -360,20 +380,22 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
   // ───────── 4. Cam kết và số lô theo xưởng ─────────
   const poAgg = rowsOf(
     await db.execute(sql`
-      select supplier,
+      select supplier, supplier_id,
              count(*) filter (where sent_at is not null and sent_at >= ${from}) as sent_n,
              count(*) filter (where status = 'RECEIVED' and sent_at is not null and sent_at >= ${from}) as received_n,
              coalesce(sum(total_qty * unit_cost) filter (where status = 'SENT'), 0) as committed
       from production_orders
       where status <> 'CANCELLED'
-      group by supplier
+      group by supplier, supplier_id
     `),
   );
 
   // ───────── 5. Gộp thành một dòng cho mỗi xưởng ─────────
   const rows = new Map<string, SupplierRow>();
-  const blank = (label: string): SupplierRow => ({
+  const blank = (label: string, supplierId: string | null): SupplierRow => ({
     supplier: label,
+    supplierId,
+    inCatalog: supplierId !== null,
     ordersSent: 0,
     ordersReceived: 0,
     committed: 0,
@@ -391,50 +413,67 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
     prevAvgUnitCost: null,
     unitCostChangePercent: null,
   });
-  const at = (raw: string) => {
-    const key = supplierKey(raw) || UNKNOWN_SUPPLIER;
+  /*
+    Một dòng cho mỗi XƯỞNG: các cách gõ khác nhau của cùng một xưởng trong danh mục gộp về một dòng.
+    Các bảng phụ (thời gian giao, giá) dùng đúng cùng khoá ấy qua `keyOf`.
+  */
+  const keyOf = (id: unknown, raw: string) => grp(id, raw).key || UNKNOWN_SUPPLIER;
+  const at = (id: unknown, raw: string) => {
+    const g = grp(id, raw);
+    const key = g.key || UNKNOWN_SUPPLIER;
     const found = rows.get(key);
     if (found) return found;
-    const created = blank(supplierLabel(raw));
+    const created = blank(g.label || supplierLabel(raw), g.supplierId);
     rows.set(key, created);
     return created;
   };
+  // Giá bình quân phải CỘNG DỒN qua mọi cách gõ của một xưởng rồi mới chia — chia từng cách gõ rồi ghi đè là lấy giá của cách gõ cuối cùng.
+  const giaKyNay = new Map<string, { qty: number; cost: number }>();
+  const giaKyTruoc = new Map<string, { qty: number; cost: number }>();
+  const congGia = (m: Map<string, { qty: number; cost: number }>, key: string, qty: number, cost: number) => {
+    const cur = m.get(key) ?? { qty: 0, cost: 0 };
+    m.set(key, { qty: cur.qty + qty, cost: cur.cost + cost });
+  };
 
   for (const r of poAgg) {
-    const row = at(text(r.supplier));
+    const row = at(r.supplier_id, text(r.supplier));
     row.ordersSent += num(r.sent_n);
     row.ordersReceived += num(r.received_n);
     row.committed += num(r.committed);
   }
   for (const r of curr) {
-    const row = at(text(r.supplier));
+    const row = at(r.supplier_id, text(r.supplier));
     row.receipts += num(r.receipts);
     row.receivedQty += num(r.qty);
     row.receivedCost += num(r.cost);
-    const qty = num(r.qty_costed);
-    // CHƯA BIẾT ≠ 0: không dòng nào khai giá thì để trống, không ghi giá bình quân bằng 0.
-    if (qty > 0) row.avgUnitCost = Math.round(num(r.cost_costed) / qty);
+    congGia(giaKyNay, keyOf(r.supplier_id, text(r.supplier)), num(r.qty_costed), num(r.cost_costed));
   }
   for (const r of prev) {
-    const row = at(text(r.supplier));
-    const qty = num(r.qty_costed);
-    if (qty > 0) row.prevAvgUnitCost = Math.round(num(r.cost_costed) / qty);
+    at(r.supplier_id, text(r.supplier));
+    congGia(giaKyTruoc, keyOf(r.supplier_id, text(r.supplier)), num(r.qty_costed), num(r.cost_costed));
+  }
+  for (const [key, row] of rows) {
+    // CHƯA BIẾT ≠ 0: không dòng nào khai giá thì để trống, không ghi giá bình quân bằng 0.
+    const a = giaKyNay.get(key);
+    if (a && a.qty > 0) row.avgUnitCost = Math.round(a.cost / a.qty);
+    const b = giaKyTruoc.get(key);
+    if (b && b.qty > 0) row.prevAvgUnitCost = Math.round(b.cost / b.qty);
   }
 
   const leadsBySupplier = new Map<string, number[]>();
   const onTimeBySupplier = new Map<string, { ok: number; total: number }>();
   for (const m of link.matched) {
-    const row = at(m.po.supplier);
+    const row = at(m.po.supplierId, m.po.supplier);
     row.leadMatched += 1;
-    const key = supplierKey(m.po.supplier) || UNKNOWN_SUPPLIER;
+    const key = keyOf(m.po.supplierId, m.po.supplier);
     leadsBySupplier.set(key, [...(leadsBySupplier.get(key) ?? []), m.leadDays]);
     if (m.onTime !== null) {
       const acc = onTimeBySupplier.get(key) ?? { ok: 0, total: 0 };
       onTimeBySupplier.set(key, { ok: acc.ok + (m.onTime ? 1 : 0), total: acc.total + 1 });
     }
   }
-  for (const po of link.ambiguous) at(po.supplier).leadAmbiguous += 1;
-  for (const po of link.unmatched) at(po.supplier).leadUnmatched += 1;
+  for (const po of link.ambiguous) at(po.supplierId, po.supplier).leadAmbiguous += 1;
+  for (const po of link.unmatched) at(po.supplierId, po.supplier).leadUnmatched += 1;
 
   for (const [key, row] of rows) {
     const leads = leadsBySupplier.get(key) ?? [];
@@ -465,13 +504,13 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
   const jumps = rowsOf(
     await db.execute(sql`
       with lines as (
-        select i.variant_id, i.unit_cost, r.received_at, r.supplier,
+        select i.variant_id, i.unit_cost, r.received_at, r.supplier, r.supplier_id,
                row_number() over (partition by i.variant_id order by r.received_at desc, i.id desc) as rn
         from stock_receipt_items i
         join stock_receipts r on r.id = i.receipt_id
         where r.kind = 'RECEIPT' and i.quantity > 0 and i.unit_cost > 0
       )
-      select l1.variant_id, l1.unit_cost as latest, l1.received_at as latest_at, l1.supplier,
+      select l1.variant_id, l1.unit_cost as latest, l1.received_at as latest_at, l1.supplier, l1.supplier_id,
              l2.unit_cost as previous, l2.received_at as previous_at,
              v.sku, trim(concat_ws(' · ', nullif(v.color, ''), nullif(v.size, ''))) as variant_name, p.name as product_name
       from lines l1
@@ -492,7 +531,7 @@ async function purchasingUncached(windowDays: number): Promise<PurchasingReport>
       sku: text(r.sku),
       productName: text(r.product_name),
       variantName: text(r.variant_name),
-      supplier: supplierLabel(text(r.supplier)),
+      supplier: grp(r.supplier_id, r.supplier).label || UNKNOWN_SUPPLIER,
       previousCost,
       latestCost,
       changePercent: previousCost > 0 ? Math.round(((latestCost - previousCost) / previousCost) * 1000) / 10 : 0,

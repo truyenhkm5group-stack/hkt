@@ -26,6 +26,17 @@ async function main() {
   const started = Date.now();
   const result = await runJob(job, { trigger: "MANUAL", actor: "cli", params });
   console.log(JSON.stringify(result, (_k, v) => (typeof v === "bigint" ? v.toString() : v), 2));
+  /*
+    KÊNH TÓM TẮT CỦA THAO TÁC OPS `run-job`: một job bất kỳ có thể trả / in dữ liệu khách hàng (mẫu
+    dòng của landing-sheet, tên marketer của marketing-digest), nên qua workflow "Vận hành ERP trên
+    VPS" toàn bộ kết quả trên được MÃ HOÁ. Chỉ dòng mang tiền tố dưới đây ra log công khai — và nó
+    chỉ mang TÊN JOB, TRẠNG THÁI và BỐN CON SỐ ĐẾM, không bao giờ `detail` / `warning` (chữ tự do).
+  */
+  const r = (result ?? {}) as { run?: { id?: unknown; status?: unknown }; summary?: Partial<Record<"imported" | "updated" | "skipped" | "failed", unknown>> };
+  const so = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? String(v) : "—");
+  console.log(
+    `[ops:tom-tat] ${job} · lượt ${String(r.run?.id ?? "—")} · ${String(r.run?.status ?? "—")} · nhập ${so(r.summary?.imported)} · cập nhật ${so(r.summary?.updated)} · bỏ qua ${so(r.summary?.skipped)} · lỗi ${so(r.summary?.failed)} · ${Math.round((Date.now() - started) / 1000)} giây`,
+  );
   console.log(`Xong sau ${Math.round((Date.now() - started) / 1000)} giây.`);
   process.exit(0);
 }

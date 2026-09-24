@@ -251,10 +251,10 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       },
       ACT: {
         status: "PARTIAL",
-        what: "`requestCarrierAction` gọi thật `order/UpdateOrder` của Viettel Post (phát tiếp · duyệt hoàn · gửi lại · huỷ · sửa người nhận), idempotent theo kiện + hành động + ngày.",
-        evidence: ["lib/care/service.ts", "lib/care/carrier-capabilities.ts"],
+        what: "`requestCarrierAction` gọi thật `order/UpdateOrder` khi có quyền; không có thì ghi lệnh LÀM TAY kèm nội dung soạn sẵn để chép sang viettelpost.vn. Vòng làm tay KHÉP BẰNG WEBHOOK: sự kiện ĐVVC đúng chặng · đúng chiều · sau lúc lập lệnh đóng dấu `confirmed_at` (lệnh cũ suy ra lúc đọc, không backfill); quá 24 giờ chưa thấy thì báo đi kiểm lại.",
+        evidence: ["lib/care/service.ts", "lib/care/carrier-capabilities.ts", "lib/care/carrier-requests.ts", "lib/constants/carrier-manual.ts"],
         missing:
-          "Viettel Post KHÔNG cấp API cho tài khoản shop — chỉ có webhook (chủ shop xác nhận 24/09/2026). Đo cùng ngày: tra cứu vận đơn trả HTTP 403, 2.815/2.873 vận đơn là `WEBHOOK_ONLY`; trước đó 11/09 là 565/565 `PERMISSION_MISSING`. Nên mọi lệnh phát tiếp · duyệt hoàn · sửa người nhận rơi về `MANUAL_REQUIRED`: làm tay trên viettelpost.vn, ERP ghi vết. Không tự động hoá đường web (AGENTS.md mục 5). Việc còn làm được ở phía ERP là SOẠN SẴN nội dung yêu cầu cho người làm tay, không phải gọi API.",
+          "Viettel Post KHÔNG cấp API cho tài khoản shop — chỉ có webhook (chủ shop xác nhận 24/09/2026). Đo cùng ngày: tra cứu vận đơn trả HTTP 403, 2.815/2.873 vận đơn là `WEBHOOK_ONLY`; trước đó 11/09 là 565/565 `PERMISSION_MISSING`. Nên mọi lệnh phát tiếp · duyệt hoàn · sửa người nhận rơi về `MANUAL_REQUIRED`: làm tay trên viettelpost.vn, ERP ghi vết. Không tự động hoá đường web (AGENTS.md mục 5), nên bước BẤM vẫn là của người. Phía ERP đã soạn sẵn nội dung và dùng webhook để xác minh; lệnh sửa người nhận / COD không sinh chặng nào nên webhook KHÔNG xác minh được — vẫn phải kiểm trên web.",
       },
     },
   },
@@ -319,9 +319,9 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       DIAGNOSE: {
         status: "PARTIAL",
         what: "Nhận ra mẫu sắp hết trong khi vẫn đang bán tốt, và mẫu đã bỏ vốn mà không bán được. Thời gian giao của xưởng suy được bằng cách ghép lô đặt với phiếu nhập kho — phép ghép CỐ Ý chặt, cùng một mẫu có hai lô thì nó khai NHẬP NHẰNG chứ không bốc một cái.",
-        evidence: ["lib/constants/inventory-decision.ts", "lib/constants/slow-moving.ts", "lib/queries/purchasing.ts"],
+        evidence: ["lib/constants/inventory-decision.ts", "lib/constants/slow-moving.ts", "lib/queries/purchasing.ts", "lib/constants/suppliers.ts"],
         missing:
-          "Từ 23/09/2026 `production_orders` ĐÃ CÓ mốc nhận thật (`received_at`, do KHO bấm lúc đếm xong, kèm khoá tài khoản). Nhưng chưa đo được ngay: lệnh cũ CỐ Ý không backfill (mục 35) nên mẫu bắt đầu từ 0 và cần vài tuần; và `production_orders.supplier` vẫn là Ô CHỮ TỰ DO, nên độ tin quy về TỪNG xưởng còn là phép nối yếu (mục 39) cho tới khi có danh mục nhà cung cấp.",
+          "Hai thứ ĐÃ CÓ: mốc nhận thật (`production_orders.received_at`, từ 23/09/2026) và DANH MỤC XƯỞNG (từ 24/09/2026 — lô và phiếu mới mang khoá xưởng thật; lô cũ quy về lúc đọc khi tên khớp đúng một xưởng). Còn thiếu là THỜI GIAN, không phải mã: lệnh cũ CỐ Ý không backfill (mục 35) nên thời gian giao theo mốc nhận thật cần vài tuần tích luỹ; và các tên xưởng gõ tay cũ phải được khai vào danh mục (trang Mua hàng liệt kê từng tên) thì lịch sử mới quy về đúng xưởng.",
       },
       PROPOSE: {
         status: "BUILT",

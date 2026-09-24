@@ -853,7 +853,14 @@
       "idx": 122,
       "version": "7",
       "when": 1790002108245,
-      "tag": "0122_creative_design_moq",
+      "tag": "0122_suppliers",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1790002168245,
+      "tag": "0123_creative_design_moq",
       "breakpoints": true
     }
   ]

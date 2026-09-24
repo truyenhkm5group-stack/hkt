@@ -420,7 +420,7 @@ MỖI thiết kế, khoá chống lặp `<ngày đủ MOQ>:<mã TK>`; gửi đư
 trùng, số lượng), link tới nháp / lệnh đang nối, hoặc "nháp đã xoá".
 
 Tệp: `lib/queries/creative-moq.ts` (đếm, chỉ đọc) · `lib/creative/moq.ts` (nháp thuần + đường ghi + tin báo) ·
-bước 3c trong `lib/creative/loop.ts` · `design-tab.tsx` · `drizzle/0122_creative_design_moq.sql` ·
+bước 3c trong `lib/creative/loop.ts` · `design-tab.tsx` · `drizzle/0123_creative_design_moq.sql` ·
 `tests/creative-moq.test.ts`.
 
 **Chờ chủ shop quyết:** (1) đơn chỉ-qua-quảng-cáo có nên tính vào MOQ không — khách thấy quảng cáo thiết kế

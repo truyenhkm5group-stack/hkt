@@ -161,7 +161,8 @@ chưa khai điều kiện thì KHÔNG tạo; lúc **ĐÓNG**, loại chưa khai 
 sẽ làm bảng năng suất CSKH trông như 40 lần có người gọi khách. Không xoá gì.
 
 Chạy trong job `cs-chat` (đối chiếu TRƯỚC lượt quét), và chạy tay được qua thao tác ops `cs-stale`
-(**mặc định CHẠY THỬ**; `--apply` mới ghi).
+(**mặc định CHẠY THỬ**; `--apply` mới ghi). *(Từ 24/09/2026: 20 mẫu kiểm chứng — tiêu đề case mang
+tên khách — chỉ nằm trong hiện vật mã hoá; log còn các bảng đếm. `docs/ops-doc-ket-qua.md`.)*
 
 ---
 
@@ -432,5 +433,7 @@ Báo đúng như thế thay vì làm ra vẻ đã xong.
    Màn hình hiện lại băm SHA-256 — phải là `c5616055…` thì mới đúng bản đã kiểm ở trên.
 3. Actions → *Vận hành ERP trên VPS* → `returns-hmt`, ô `arg` **để trống** (chạy thử).
 4. Đọc bảng phân loại, rồi chạy lại với `arg = --apply`.
+   *(Từ 24/09/2026: log chỉ còn băm tệp + bảng TỔNG HỢP + số đã ghi; bảng từng sheet và ví dụ từng
+   dòng nằm trong hiện vật mã hoá — `docs/ops-doc-ket-qua.md`.)*
 
 Không mật khẩu, không khoá SSH, không console máy chủ, không link công khai.

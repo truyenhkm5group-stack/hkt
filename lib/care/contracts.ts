@@ -66,6 +66,15 @@ export type CarrierRequestView = {
   actor: string;
   /** Số lần đã gọi API (retry hữu hạn). */
   attempts: number;
+  /**
+   * Mốc sự kiện ĐVVC xác nhận lệnh — CHỨNG TỪ, tách khỏi `status` (lời khai). Lệnh làm tay lập
+   * trước khi webhook được dùng để xác minh thì mốc này được SUY RA lúc đọc, không ghi ngược.
+   */
+  confirmedAt: Date | null;
+  /** Lúc người bấm "Đã làm tay" — chỉ có ở `MANUAL_DONE`. */
+  doneAt: Date | null;
+  /** Nội dung soạn sẵn để làm tay trên viettelpost.vn — chỉ có ở lệnh làm tay. */
+  copyText: string | null;
 };
 
 export type CareSlaView = {

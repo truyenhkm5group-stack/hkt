@@ -17,7 +17,9 @@ không có dòng nào, đúng như phải thế khi chưa có khoá.
 ## 0 · Đo thật trên production 18/09/2026 — GitHub đã chạy, không cần token
 
 Chạy qua `Actions → Vận hành ERP trên VPS → run-job`, arg `github-deployments --limit=20`,
-trên máy chủ **không có `ERP_GITHUB_TOKEN`**:
+trên máy chủ **không có `ERP_GITHUB_TOKEN`** *(đo 18/09; từ 24/09/2026 kết quả `run-job` đi dạng mã
+hoá — log chỉ còn trạng thái + bốn con số đếm, bảng dưới đây đọc bằng cách giải mã hiện vật:
+`docs/ops-doc-ket-qua.md`)*:
 
 | | lần 1 | lần 2 |
 | --- | --- | --- |

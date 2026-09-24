@@ -25,7 +25,7 @@ function toInt(value: string) {
 }
 
 /** Dialog lập phiếu kho (nhập mới / tái nhập hàng hoàn / xuất tay / điều chỉnh kiểm kê) cho nhiều mẫu mã cùng lúc */
-export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturns = {} }: { variants: VariantPickerRow[]; defaultKind?: StockReceiptKind; pendingReturns?: Record<string, number> }) {
+export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturns = {}, supplierOptions = [] }: { variants: VariantPickerRow[]; defaultKind?: StockReceiptKind; pendingReturns?: Record<string, number>; /** Tên xưởng trong danh mục — chỉ là GỢI Ý. */ supplierOptions?: string[] }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<StockReceiptKind>(defaultKind);
   const [receivedAt, setReceivedAt] = useState(todayVN());
@@ -141,7 +141,8 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
           </div>
           <div className="space-y-1">
 <Label>{kind === "RECEIPT" ? "Nhà cung cấp" : kind === "ISSUE" ? "Người nhận" : "Người kiểm"}</Label>
-            <Input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={kind === "RECEIPT" ? "Xưởng / chợ / NCC" : kind === "ISSUE" ? "Khách / shipper nội thành" : "Tên người kiểm kê"} />
+            <Input value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={kind === "RECEIPT" ? "Xưởng / chợ / NCC" : kind === "ISSUE" ? "Khách / shipper nội thành" : "Tên người kiểm kê"} list={kind === "RECEIPT" ? "ncc-goi-y" : undefined} />
+            {kind === "RECEIPT" ? <datalist id="ncc-goi-y">{supplierOptions.map((n) => <option key={n} value={n} />)}</datalist> : null}
           </div>
           <div className="space-y-1">
             <Label>Tham chiếu</Label>

@@ -1,4 +1,4 @@
--- Vòng mẫu: thiết kế mới đủ MOQ (chủ shop chốt 24/09/2026: 50 đơn) ⇒ máy dựng NHÁP lệnh sản xuất
+-- 0123 · Vòng mẫu: thiết kế mới đủ MOQ (chủ shop chốt 24/09/2026: 50 đơn) ⇒ máy dựng NHÁP lệnh sản xuất
 -- (docs/creative-loop.md §5h).
 --
 -- Viết tay, idempotent (AGENTS.md mục 4 — không dùng db:generate):
