@@ -14,6 +14,7 @@ import {
   type RiskSignalKey,
 } from "@/lib/constants/preship-risk";
 import { rowsOf } from "@/lib/sql-rows";
+import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
 /**
  * ═══════════ RỦI RO TRƯỚC KHI GIAO — MỘT LƯỢT CHO CẢ DANH SÁCH ═══════════
@@ -195,12 +196,12 @@ function rateCte(name: string, groupExpr: string, days: number) {
     ${name} as (
       select ${groupExpr} as k,
              count(*) filter (where co.outcome = 'DELIVERED')::int as delivered,
-             count(*) filter (where co.outcome in ('RETURNED','RETURNED_BY_RULE'))::int as returned
+             count(*) filter (where co.outcome in (${RETURNED_OUTCOMES_SQL}))::int as returned
         from canonical_order_outcome co
         join orders o2 on o2.id = co.order_id
         left join order_items oi2 on oi2.order_id = o2.id and oi2.is_bonus = false
        where o2.inserted_at >= now() - interval '${days} days'
-         and co.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE')
+         and co.outcome in (${FINISHED_OUTCOMES_SQL})
        group by 1
     )`);
 }
@@ -265,7 +266,7 @@ export async function listPreshipRisk(options: { limit?: number } = {}): Promise
                   from canonical_order_outcome co join orders oh on oh.id = co.order_id
                  where oh.id <> o.id and ${PHONE_TAIL("oh.bill_phone")} = ${PHONE_TAIL("coalesce(nullif(o.bill_phone, ''), o.ship_phone, '')")}
                    and length(${PHONE_TAIL("coalesce(nullif(o.bill_phone, ''), o.ship_phone, '')")}) = 9) as cust_delivered,
-               (select count(*) filter (where co.outcome in ('RETURNED','RETURNED_BY_RULE'))::int
+               (select count(*) filter (where co.outcome in (${sql.raw(RETURNED_OUTCOMES_SQL)}))::int
                   from canonical_order_outcome co join orders oh on oh.id = co.order_id
                  where oh.id <> o.id and ${PHONE_TAIL("oh.bill_phone")} = ${PHONE_TAIL("coalesce(nullif(o.bill_phone, ''), o.ship_phone, '')")}
                    and length(${PHONE_TAIL("coalesce(nullif(o.bill_phone, ''), o.ship_phone, '')")}) = 9) as cust_returned,

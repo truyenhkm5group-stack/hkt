@@ -15,6 +15,13 @@ import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Thiếu hàng giao đơn" };
 
+/**
+ * Số đơn chờ in ra trang — đơn chờ LÂU NHẤT trước. Danh sách đầy đủ đã có ở hàng đợi fulfillment
+ * (lý do "kho không đủ hàng"); in hết ở đây làm trang nặng theo đúng số đơn đang tắc, tức là chậm
+ * nhất đúng lúc cần mở nhanh nhất. Smoke 24/09/2026: 611 kB, 2,5 s.
+ */
+const WAITING_LIST_LIMIT = 100;
+
 const ACTION_TONE: Record<ShortageAction, string> = {
   COUNT_STOCK: "bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
   CHASE_FACTORY: "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
@@ -212,7 +219,7 @@ export default async function StockShortagePage({ searchParams }: { searchParams
           padded={false}
         >
           <ul className="divide-y">
-            {waiting.map((o) => {
+            {waiting.slice(0, WAITING_LIST_LIMIT).map((o) => {
               const hours = (now.getTime() - o.insertedAt.getTime()) / 3_600_000;
               const late = hours >= s.urgentAfterHours;
               return (
@@ -231,6 +238,15 @@ export default async function StockShortagePage({ searchParams }: { searchParams
               );
             })}
           </ul>
+          {waiting.length > WAITING_LIST_LIMIT ? (
+            <p className="border-t px-5 py-2.5 text-xs text-muted-foreground">
+              … và {formatNumber(waiting.length - WAITING_LIST_LIMIT)} đơn chờ hàng nữa (mới hơn) — danh sách đầy đủ ở{" "}
+              <Link href="/operations/fulfillment" className="font-medium text-primary hover:underline">
+                Nút thắt rời kho
+              </Link>
+              .
+            </p>
+          ) : null}
         </SectionCard>
       ) : null}
     </div>

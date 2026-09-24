@@ -1,7 +1,10 @@
 # Phòng Marketing AI — đặc tả và lộ trình
 
 > **File trạng thái DUY NHẤT của phòng.** Mọi nấc cập nhật vào đây, không mở file mới.
-> Cập nhật: **22/09/2026** · **Nấc 0 (trí nhớ) và Nấc 3 (bàn tay, nấc COPILOT) đã dựng · Nấc 1·2·4 chưa**
+> Cập nhật: **22/09/2026** (dòng này sửa 24/09) · **Nấc 0 (trí nhớ) và Nấc 3 (bàn tay, nấc COPILOT) đã dựng ·
+> Nấc 4 (vòng mẫu) đã dựng 24/09, CHƯA chạy thật — trạng thái ở `docs/creative-loop.md` · Nấc 1·2 chưa**
+> (lưu ý Nấc 1: nguồn `ADS_DECISION` đã chiếu MỌI khuyến nghị vào `/work` — dòng chưa chín bị hạ một
+> bậc và gắn nhãn chứ không bị lọc, `6d7d494a` — khác bộ lọc "chỉ `ready`" mà §4 đặc tả).
 >
 > Đọc kèm: `docs/ads-decision-contract.md` (hợp đồng chỉ số) · `docs/marketing-daily-contract.md` ·
 > `docs/tech-ai-room-status.md` (phòng AI đầu tiên — mọi lớp lỗi ở đó sẽ lặp lại ở đây) ·
@@ -68,7 +71,7 @@ Nấc 0  TRÍ NHỚ      sổ quyết định + độ bền                     
 Nấc 1  VIỆC         khuyến nghị đã chín → hàng đợi /work          ⏳ (Nấc 0 phải có dữ liệu trước)
 Nấc 2  DIỄN ĐẠT     agent đọc sổ, viết bản tin, xếp ưu tiên       ⏳
 Nấc 3  BÀN TAY      ghi ngân sách Facebook, có trần và phanh      ✅ ĐÃ DỰNG (COPILOT) · chờ token ads_management
-Nấc 4  NỘI DUNG     ảnh → mẫu → QC test → chấm → học, mỗi ngày    🚧 docs/creative-loop.md
+Nấc 4  NỘI DUNG     ảnh → mẫu → QC test → chấm → học, mỗi ngày    ✅ ĐÃ DỰNG 24/09 · chưa chạy thật · docs/creative-loop.md
 ```
 
 Thứ tự này không đảo được. Nấc 3 mà không có Nấc 0 là một cỗ máy tiêu tiền không có trí nhớ: nó sẽ
@@ -267,6 +270,31 @@ chín" của nó cũng không đáng tin.
 bấm mà bỏ qua bảy hàng rào trên là dựng một nút giả thứ hai — lần này là nút giả tiêu được tiền.
 
 ---
+
+### 5b. Làn nhanh — tăng ngân sách trong ngày (chủ shop chốt 24/09/2026)
+
+Chủ shop: *"cứ ads rẻ, chỉ số tốt là có thể quyết định tăng ngân sách, scale camp theo khung giờ được
+luôn rồi chứ không phải theo ngày nữa."* Đo production cùng ngày: sổ quyết định bắt đầu ghi 22/09 nên
+chưa dòng nào kịp "chín" (TĂNG cần giữ 4 ngày), và kết luận của sổ đứng trên kỳ lùi 15 ngày
+(27/08 → 09/09) — 586/594 chiến dịch là "chưa đủ dữ liệu".
+
+Làn nhanh không thay làn sổ quyết định — nó hỏi một câu khác, bằng số HÔM NAY:
+
+| Ngưỡng (chủ shop chốt qua bốn câu hỏi) | Giá trị |
+|---|---|
+| "Rẻ, tốt" | %CPQC hôm nay ≤ **15%** doanh số CHỐT hôm nay |
+| Mẫu tối thiểu | chi ≥ **300.000đ** và ≥ **3** đơn chốt |
+| Bước · nhịp | **+20%**/lượt · hai lượt cách ≥ **2 giờ** · tối đa **3** lượt/ngày (mọi làn cộng lại) |
+| Ai quyết | máy đề nghị, **người bấm** xác nhận (nấc `COPILOT`) |
+
+- Luật: `lib/constants/ads-intraday.ts`. Cổng: `gateIntradayScale` (`lib/marketing/ads-write-gate.ts`).
+  Số hôm nay đọc từ ĐÚNG engine của bảng quyết định (`getAdsDecision` kỳ "Hôm nay").
+- Giữ NGUYÊN mọi chốt của đường ghi: `ADS_WRITE_ENABLED`, nấc quyền, phanh, chiến dịch phải `ACTIVE`,
+  phiếu duyệt HMAC (tool riêng `ads.budget.intraday`), trần biên độ 30%/lượt, trần 2.000.000đ/ngày cả shop.
+- CHỈ TĂNG. Cắt / tạm dừng vẫn chỉ đi qua làn sổ quyết định, nơi kết luận đứng trên tiền thật.
+- Rủi ro đã biết: doanh số chốt chưa trừ hoàn. Bù bằng bước nhỏ, trần lượt, và phanh.
+- Màn hình: khối "Tăng ngân sách trong ngày" đầu trang `/ads`. Mọi lượt (kể cả bị chặn) vào
+  `ads_budget_changes` với `decision = 'SCALE_INTRADAY'`.
 
 ## 6. Nấc 4 — NỘI DUNG (đang dựng — xem `docs/creative-loop.md`)
 

@@ -5,13 +5,13 @@ import { schema, type Db } from "@/db";
 import { confirmCopilotActions, runCopilot } from "@/lib/ai/copilot";
 import { actionToken, stableStringify } from "@/lib/ai/policy";
 import { COPILOT_SYSTEM_PROMPT } from "@/lib/ai/prompt";
-import { anthropicCapsOf, ANTHROPIC_DECLARED_MODELS, AnthropicProvider, estimateCostUsd, FakeProvider, TIMEOUT_BY_TIER, type AiResponse } from "@/lib/ai/provider";
+import { anthropicCapsOf, ANTHROPIC_DECLARED_MODELS, ANTHROPIC_MAX_STRICT_TOOLS, AnthropicProvider, estimateCostUsd, FakeProvider, strictToolNames, TIMEOUT_BY_TIER, type AiResponse } from "@/lib/ai/provider";
 import { ANTHROPIC_UNSUPPORTED_KEYWORDS, findUnsupportedKeywords, toDialectSchema } from "@/lib/ai/schema-dialect";
 import { OpenAiProvider } from "@/lib/ai/providers/openai";
 import { registerCareTools } from "@/lib/ai/tools/care";
 import { registerErpTools } from "@/lib/ai/tools/erp";
 import { aiDisabledReason, MODEL_BY_TIER, modelFor, resolveProviderName } from "@/lib/ai/router";
-import { allTools, RISK_FLOOR, strictInputSchema, toolsFor } from "@/lib/ai/tools/registry";
+import { allTools, RISK_FLOOR, strictInputSchema, toProviderTools, toolsFor } from "@/lib/ai/tools/registry";
 import { resolvePermissions } from "@/lib/auth/permissions";
 import type { SessionUser } from "@/lib/auth/session";
 import { clearMemo } from "@/lib/cache";
@@ -402,6 +402,25 @@ export async function testAiCopilot(db: Db) {
       assert.equal((ids.items as Record<string, unknown>).type, "string", "schema của phần tử mảng phải còn");
       assert.equal(ids.minItems, undefined);
       assert.match(String(ids.description), /ít nhất 1 phần tử/);
+
+      /*
+        4. TRẦN 20 TOOL `strict` — bằng TOÀN BỘ sổ tool, không bằng tài khoản CSKH.
+
+        Đo production 24/09/2026: tài khoản toàn quyền thấy 21 tool, Anthropic trả `400 Too many
+        strict tools (21)` cho MỌI câu hỏi. Khối kiểm phía trên chạy bằng tài khoản CSKH (ít hơn 20
+        tool) nên không bao giờ chạm trần — đúng lý do lỗi lọt qua. Khối này gửi mọi tool không bị
+        cấm, tức ĐÚNG tập tool của người có mọi quyền, qua đường dây thật của provider.
+      */
+      const tatCaTool = toProviderTools(allTools().filter((t) => t.policy !== "forbidden"));
+      assert.ok(tatCaTool.length > ANTHROPIC_MAX_STRICT_TOOLS, `bài này chỉ có nghĩa khi sổ tool vượt trần (${tatCaTool.length} ≤ ${ANTHROPIC_MAX_STRICT_TOOLS}) — nếu không, nó xanh mà không chứng minh gì`);
+      await an.complete({ system: "kiểm trần strict", messages: [{ role: "user", content: [{ type: "text", text: "chào" }] }], tools: tatCaTool });
+      const wireAll = thayAnthropic[thayAnthropic.length - 1]!.body.tools as { name: string; strict: boolean }[];
+      assert.equal(wireAll.length, tatCaTool.length, "không tool nào bị bỏ khỏi yêu cầu — chỉ cờ strict thay đổi");
+      assert.ok(wireAll.filter((t) => t.strict).length <= ANTHROPIC_MAX_STRICT_TOOLS, `Anthropic nhận tối đa ${ANTHROPIC_MAX_STRICT_TOOLS} tool strict`);
+      for (const t of tatCaTool.filter((x) => x.kind === "write")) {
+        assert.equal(wireAll.find((w) => w.name === t.name)!.strict, true, `tool GHI ${t.name} phải luôn strict — đầu vào của nó phải khớp tuyệt đối trước khi người xác nhận`);
+      }
+      assert.deepEqual([...strictToolNames(tatCaTool)], [...strictToolNames([...tatCaTool])], "chọn tool strict phải xác định — đổi chọn giữa hai lượt là vỡ đệm prompt");
     } finally {
       if (hadKey === undefined) delete process.env.ANTHROPIC_API_KEY;
       else process.env.ANTHROPIC_API_KEY = hadKey;

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/app/login/login-form";
 import { BrandGlyph, BrandWordmark } from "@/components/brand";
+import { safeNextPath } from "@/lib/auth/safe-redirect";
 import { getSession } from "@/lib/auth/session";
 import { loginShouldStay } from "@/lib/constants/session-revocation";
 import { integrationStatus } from "@/lib/env";
@@ -21,7 +22,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     `loginShouldStay()` giữ MỌI lý do từ chối ở lại trang này. Thêm một lý do mới thì thêm vào
     danh sách ở `lib/constants/session-revocation.ts`, không sửa điều kiện ở đây.
   */
-  if (session && !loginShouldStay(params.reason)) redirect(params.next && params.next.startsWith("/") ? params.next : "/");
+  if (session && !loginShouldStay(params.reason)) redirect(safeNextPath(params.next));
   const status = integrationStatus();
 
   return (

@@ -13,6 +13,7 @@ import {
 } from "@/lib/constants/preship-risk";
 import { scorePreshipRisk, type RiskFacts } from "@/lib/queries/preship-risk";
 import { rowsOf } from "@/lib/sql-rows";
+import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -68,11 +69,11 @@ function asOfRateCte(name: string, groupExpr: string) {
     ${name} as (
       select ${groupExpr} as k,
              count(*) filter (where co.outcome = 'DELIVERED')::int as delivered,
-             count(*) filter (where co.outcome in ('RETURNED','RETURNED_BY_RULE'))::int as returned
+             count(*) filter (where co.outcome in (${RETURNED_OUTCOMES_SQL}))::int as returned
         from canonical_order_outcome co
         join orders o2 on o2.id = co.order_id
         left join order_items oi2 on oi2.order_id = o2.id and oi2.is_bonus = false
-       where co.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE')
+       where co.outcome in (${FINISHED_OUTCOMES_SQL})
          and o2.inserted_at < (select moc from moc_hoc)
        group by 1
     )`);
@@ -122,7 +123,7 @@ export async function getPreshipRiskBacktest(period: Period): Promise<RiskBackte
           select o.id, o.inserted_at
             from orders o
             join canonical_order_outcome co on co.order_id = o.id
-           where co.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE')
+           where co.outcome in (${sql.raw(FINISHED_OUTCOMES_SQL)})
              ${from} ${to}
         ),
         moc_hoc as (
@@ -156,7 +157,7 @@ export async function getPreshipRiskBacktest(period: Period): Promise<RiskBackte
                    and oh.inserted_at < o.inserted_at
                    and right(regexp_replace(oh.bill_phone, '\\D', '', 'g'), 9) = right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)
                    and length(right(regexp_replace(coalesce(nullif(o.bill_phone, ''), o.ship_phone, ''), '\\D', '', 'g'), 9)) = 9) as cust_delivered,
-               (select count(*) filter (where co2.outcome in ('RETURNED','RETURNED_BY_RULE'))::int
+               (select count(*) filter (where co2.outcome in (${sql.raw(RETURNED_OUTCOMES_SQL)}))::int
                   from canonical_order_outcome co2 join orders oh on oh.id = co2.order_id
                  where oh.id <> o.id
                    and oh.inserted_at < o.inserted_at
@@ -197,7 +198,7 @@ export async function getPreshipRiskBacktest(period: Period): Promise<RiskBackte
           left join ty_le_mau_ma tm on tm.k = mm.ten
           left join ty_le_tinh tt on tt.k = nullif(o.ship_province, '')
           left join ty_le_kenh tk on tk.k = coalesce(nullif(o.source, ''), 'Khác')
-         where co.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE')
+         where co.outcome in (${sql.raw(FINISHED_OUTCOMES_SQL)})
            -- CHỈ nửa KIỂM TRA. Đơn của nửa học đã được dùng để dựng tỷ lệ tham chiếu.
            and o.inserted_at >= (select moc from moc_hoc)
            ${from} ${to}

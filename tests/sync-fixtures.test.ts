@@ -76,6 +76,7 @@ import { testMaViecLaMaProduction, testVaiAgentTheoViec, testNhacFinishDungMotLa
 import { testBanKhaiGanLai, testGanLaiSourceGuards } from "./agent-run-reattach.test";
 import { testScriptDayChuyenPhaiThoat } from "./script-phai-thoat.test";
 import { testBacModelTheoVai, testDemHoiThoai, testDemTienLuotChay, testKhongNangBacAmTham, testTraGiaTheoTienTo, testTranChoTachKhoiBac, testPhepDoJit, testChuoiSach, testMetricResolverTatJit } from "./agent-chi-phi.test";
+import { testTrangChamTatJit } from "./trang-cham-jit.test";
 import { cleanupLedgerFixtures, testLedgerGuards, testLedgerPure, testLedgerReconcile } from "./agent-run-ledger.test";
 import { testPhanhTienAi, testPhanhTienAiGuards } from "./ai-budget.test";
 import { testTienLuotChay, testTienLuotChayGuards } from "./agent-run-cost.test";
@@ -161,6 +162,7 @@ import { testBankMatch } from "./bank-match.test";
 import { testBankPipeline } from "./bank-pipeline.test";
 import { testFinanceOpsPure, testFinanceOpsQueries } from "./finance-ops.test";
 import { testAutomationLadderPure, testAutomationLadderQueries, testFbTokenScopes } from "./automation-ladder.test";
+import { testPackingWavesPure, testPackingWavesQueries } from "./packing-waves.test";
 import { testActionWiring } from "./action-wiring.test";
 import {
   testKpiCohortUsesHandoffDate,
@@ -210,8 +212,10 @@ import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
 import { testMarketerDailyNominal } from "./marketer-daily-nominal.test";
 import { testAdsDecision } from "./ads-decision.test";
+import { testAdsIntraday } from "./ads-intraday.test";
 import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
 import { testAdsBrakeByDecision, testAdsWrite } from "./ads-write.test";
+import { testAdsKillSwitchDb, testAdsKillSwitchPure } from "./ads-kill-switch.test";
 import { testCreativeLoop } from "./creative-loop.test";
 import { testCreativeGenerate } from "./creative-generate.test";
 import { testCreativeEvaluate } from "./creative-evaluate.test";
@@ -269,6 +273,8 @@ import { testSessionRevocation } from "./session-revocation.test";
 import { testReportingParity } from "./reporting-parity.test";
 import { testEstimatedCost } from "./estimated-cost.test";
 import { testLoginThrottle } from "./login-throttle.test";
+import { testWebhookHardening } from "./webhook-hardening.test";
+import { testXlsxReader } from "./xlsx-reader.test";
 import { testProjectedDeliveryV3 } from "./projected-delivery.test";
 import { testAgentGithubIdentityModule } from "./agent-identity.test";
 import { testAgentPrBridge, testEnvironmentOnlyAgentSecrets } from "./agent-pr-bridge.test";
@@ -1670,6 +1676,7 @@ async function main() {
   await testMarketingDaily();
   await testMarketerDailyNominal();
   await testAdsDecision(db);
+  testAdsIntraday();
   await testMarketingDecisionLedger();
   testAdsWrite();
   testCreativeLoop();
@@ -1677,6 +1684,8 @@ async function main() {
   await testCreativeEvaluate(db);
   testCreativeWrite();
   await testCreativeWriteDb(db);
+  testAdsKillSwitchPure();
+  await testAdsKillSwitchDb(db);
   await testCreativeLoopTick(db);
   await testCreativeExtendedWindow(db);
   await testCreativeEmptyBatch(db);
@@ -1790,6 +1799,8 @@ async function main() {
   testAutomationLadderPure();
   await testAutomationLadderQueries(db);
   await testFbTokenScopes();
+  testPackingWavesPure();
+  await testPackingWavesQueries(db);
   await testApproval(db);
   await testMultiAttemptMoney(db);
   await testCashflow(db);
@@ -1913,6 +1924,8 @@ async function main() {
   // Ngay sau đó: gieo ba mã riêng tiền tố `gvdt-` và một dòng settings giá dự tính, rồi TỰ DỌN sạch cả hai.
   await testEstimatedCost(db);
   await testLoginThrottle();
+  await testWebhookHardening();
+  testXlsxReader();
   await testProjectedDeliveryV3(db);
   // Chạy CUỐI CÙNG: thêm đơn/vận đơn riêng cho đúng bốn tình huống của nút thắt fulfillment, đặt
   // sau mọi bài kiểm khác để không đơn nào trong số đó lọt vào tổng của báo cáo khác.
@@ -2116,6 +2129,7 @@ async function main() {
   testPhepDoJit();
   testChuoiSach();
   testMetricResolverTatJit();
+  testTrangChamTatJit();
   testTraGiaTheoTienTo();
   testDemHoiThoai();
   testKhongNangBacAmTham();

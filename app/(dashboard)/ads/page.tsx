@@ -3,6 +3,7 @@ import { AdSpendDialog } from "@/app/(dashboard)/expenses/ad-spend-dialog";
 import { AdsTab } from "@/app/(dashboard)/expenses/ads-tab";
 import { AdsCoverageSection, RoasSection } from "@/app/(dashboard)/ads/roas-section";
 import { AdsDecisionSection } from "@/app/(dashboard)/ads/decision-section";
+import { AdsIntradaySection } from "@/app/(dashboard)/ads/intraday-section";
 import { AdsTabs } from "@/app/(dashboard)/ads/ads-tabs";
 import { PageHeader } from "@/components/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -68,6 +69,11 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
       />
 
       <AdsTabs />
+
+      {/* LÀN NHANH — việc làm được NGAY, bằng số hôm nay. Tách Suspense để không giữ bảng quyết định chờ. */}
+      <Suspense fallback={<Skeleton className="h-40 rounded-xl" />}>
+        <AdsIntradaySection canWrite={canWrite} />
+      </Suspense>
 
       {/* QUYẾT ĐỊNH — thứ người dùng mở trang để xem. Rẻ, nên chờ được. */}
       <AdsDecisionSection period={period} dimension={dimension} showAll={raw.dong === "tatca"} showAllHref={hrefWith(raw, "dong", "tatca")} />

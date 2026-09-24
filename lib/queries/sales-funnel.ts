@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
+import { memo, periodKey } from "@/lib/cache";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ORDER_SOURCE, ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
 import { ATTRIBUTION_FIELDS, LOW_COVERAGE_PCT, type AttributionField } from "@/lib/constants/sales-funnel";
 import type { Period } from "@/lib/search-params";
@@ -61,6 +63,18 @@ function periodWhere(period: Period) {
  * hàng chứ không phải số đơn — `previousLabel` nói rõ điều đó thay vì để người đọc tự đoán.
  */
 export async function getSalesFunnel(period: Period): Promise<SalesFunnel> {
+  /*
+    ĐỆM 120 GIÂY — chủ shop duyệt phương án của docs/tech-ai-room-status.md ("/reports/funnel 34,4 giây:
+    0 lời gọi memo()"). Bốn phép tổng hợp của trang chạy lại nguyên vẹn mỗi lần mở; mọi khối khác của
+    cùng trang (`conversion-funnel`, `conversation-funnel`, `sales-leakage`, `preship-risk-backtest`) đã
+    đệm 60–300 giây. Khoá chứa MỌI tham số đổi kết quả (AGENTS.md mục 2): kỳ (`periodKey` — mốc đầu/cuối
+    ngày giờ VN, ổn định suốt ngày). Ghi dữ liệu thì `clearMemo`/`staleMemo` xoá hoặc làm cũ đệm
+    như mọi báo cáo khác.
+  */
+  return memo(`salesFunnel:${periodKey(period)}`, 120_000, () => salesFunnelUncached(period));
+}
+
+async function salesFunnelUncached(period: Period): Promise<SalesFunnel> {
   const db = await getDb();
   const where = periodWhere(period);
   /*
@@ -85,7 +99,7 @@ export async function getSalesFunnel(period: Period): Promise<SalesFunnel> {
       shipped: sql<number>`count(distinct ${o.id}) filter (where ${SHIPMENT_LEFT_WAREHOUSE})`,
       delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
       cancelled: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'CANCELLED')`,
-      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','UNKNOWN','NOT_SHIPPED'))`,
+      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
       deliveredCustomers: sql<number>`count(distinct ${o.customerId}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
       repeatCustomers: sql<number>`count(distinct ${o.customerId}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${schema.customers.succeedOrderCount}, 0) > 1)`,
     })
@@ -136,6 +150,11 @@ export type AttributionCoverage = {
  * quảng cáo và người tạo đơn là bốn vai khác nhau, và chỉ `editor_name` mới có mốc thời gian.
  */
 export async function getAttributionCoverage(period: Period): Promise<AttributionCoverage[]> {
+  /* Đệm 120 giây — xem chú thích trong `getSalesFunnel`; khoá: kỳ. */
+  return memo(`attributionCoverage:${periodKey(period)}`, 120_000, () => attributionCoverageUncached(period));
+}
+
+async function attributionCoverageUncached(period: Period): Promise<AttributionCoverage[]> {
   const db = await getDb();
   const where = periodWhere(period);
   const [row] = await db
@@ -194,6 +213,11 @@ export type FunnelBySource = {
  * chung thành một con số trung bình thì con số đó không mô tả đúng kênh nào cả.
  */
 export async function getFunnelBySource(period: Period): Promise<FunnelBySource[]> {
+  /* Đệm 120 giây — xem chú thích trong `getSalesFunnel`; khoá: kỳ. */
+  return memo(`funnelBySource:${periodKey(period)}`, 120_000, () => funnelBySourceUncached(period));
+}
+
+async function funnelBySourceUncached(period: Period): Promise<FunnelBySource[]> {
   const db = await getDb();
   /*
     ═══════════ TẮT JIT — CÙNG CHẨN ĐOÁN ĐÃ ĐO Ở `marketing-daily`, ĐO LẠI 22/09/2026 ═══════════
@@ -217,7 +241,7 @@ export async function getFunnelBySource(period: Period): Promise<FunnelBySource[
       confirmed: sql<number>`count(distinct ${o.id}) filter (where ${o.stage} not in ('NEW','WAITING'))`,
       shipped: sql<number>`count(distinct ${o.id}) filter (where ${SHIPMENT_LEFT_WAREHOUSE})`,
       delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in ('IN_TRANSIT','UNKNOWN','NOT_SHIPPED'))`,
+      unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
       deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
     })
     .from(o)

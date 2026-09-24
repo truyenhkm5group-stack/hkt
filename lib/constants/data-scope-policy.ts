@@ -214,7 +214,7 @@ export const SCOPE_RESOURCES: readonly ScopeResource[] = [
     label: "Kho & tồn",
     readPermissions: ["products:view"],
     writePermission: "inventory:write",
-    routes: ["/inventory", "/inventory/receipts", "/products"],
+    routes: ["/inventory", "/inventory/receipts", "/inventory/packing", "/products"],
     table: "stock_receipts",
     rowOwner: null,
     rowAssignee: null,

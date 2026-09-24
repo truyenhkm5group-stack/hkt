@@ -440,7 +440,7 @@ export async function NominalTab({
           label="Chi phí ngoài hàng · QC · vận chuyển"
           hint={`Gồm: vận hành ${formatVND(t.opexTotal, { compact: true })} + rủi ro TK ${formatVND(t.inventoryRisk, { compact: true })} + thuế ${formatVND(t.tax, { compact: true })} + CP khác ${formatVND(t.otherCost, { compact: true })}`}
           value={formatVND(t.otherCostsTotal, { compact: true })}
-          note={`${formatVND(t.opexPerOrder ?? 0)}/đơn lên · ${formatVND(t.opexPerDelivered ?? 0)}/đơn GTC ước tính`}
+          note={`${formatVND(t.opexPerOrder)}/đơn lên · ${formatVND(t.opexPerDelivered)}/đơn GTC ước tính`}
           icon={TrendingUp}
           tone="amber"
         />
@@ -543,7 +543,8 @@ export async function NominalTab({
               vốn cân cùng cách. Chỉ dòng mang nhãn “ước tính theo tỷ lệ” (ghi đè tay / lịch sử / mặc định) mới là Doanh số POS × TL GTC và Giá
               vốn = SP × giá nhập × TL GTC. Đơn ở trạng thái chưa đủ mẫu nằm NGOÀI ước tính (dòng “ngoài ƯT”). Vận chuyển = Đơn × cước gửi + Đơn
               × (1 − TL GTC) × phí hoàn về (tức Đơn × [TL GTC × cước gửi + (1 − TL GTC)
-              × cước đơn hoàn đi + về]). LN danh nghĩa = DT − giá vốn − vận chuyển
+              × cước đơn hoàn đi + về]), cộng khoản cước / phí hoàn điều chỉnh tay có lý do ở bảng Chi phí (tiền thật, chia theo số đơn của mã
+              {t.logisticsAdjustment.amount ? ` — kỳ này ${formatVND(t.logisticsAdjustment.amount)} từ ${t.logisticsAdjustment.count} khoản` : ""}). LN danh nghĩa = DT − giá vốn − vận chuyển
               − CPQC − CP vận hành đã nhập (bảng Chi phí, trừ QC & nhập hàng, phân
               bổ theo doanh số) − đóng hàng (đơn × đơn giá) − nhân viên vận đơn (đơn
               × đơn giá + đơn cứu được GTC ước theo % × thưởng) − CP cố định (tháng ×
@@ -577,7 +578,7 @@ export async function NominalTab({
                 <TableHead className="text-right" title="Tỷ lệ giao thành công ước tính = ước tính giao được ÷ (đã gửi − ngoài ước tính); đơn GTC theo ORDER_OUTCOME. “—” = chưa đo được.">TL GTC ƯT</TableHead>
                 <TableHead className="text-right" title="DT đơn đã giao thật + Σ(DT đơn đang giao × P(trạng thái)) + Σ(DT đơn chưa gửi × P(chưa gửi)) — cân theo TỪNG ĐƠN. Dòng có nhãn “ước tính theo tỷ lệ” (ghi đè / lịch sử / mặc định) mới là Doanh số POS × TL GTC. Dòng nhỏ: doanh thu trên mỗi đơn, và phần doanh số nằm NGOÀI ước tính (nếu có).">DT GTC ƯT</TableHead>
                 <TableHead className="text-right" title="Giá vốn cân theo từng đơn cùng cách với DT GTC ƯT. Dòng nhỏ: số sản phẩm giao thành công ước tính. Tiền “—” = có sản phẩm chưa biết giá vốn (không phiếu nhập, không giá Pancake); SỐ LƯỢNG vẫn đo được nên vẫn in ra.">Giá vốn</TableHead>
-                <TableHead className="text-right" title="Đơn × cước gửi + Đơn × (1 − TL GTC) × phí hoàn về. Sửa đơn giá ở khối Giả định.">Vận chuyển</TableHead>
+                <TableHead className="text-right" title="Đơn × cước gửi + Đơn × (1 − TL GTC) × phí hoàn về, + phần cước / phí hoàn điều chỉnh tay có lý do chia theo số đơn. Sửa đơn giá ở khối Giả định.">Vận chuyển</TableHead>
                 <TableHead className="text-right" title="Tổng vận hành = CP vận hành đã nhập (bảng Chi phí, trừ QC & nhập hàng, phân bổ theo doanh số POS) + đóng hàng + nhân viên vận đơn + chi phí cố định. Dòng nhỏ tách đủ bốn khoản.">Vận hành</TableHead>
                 <TableHead className="text-right" title="Mọi chi phí ngoài tiền hàng, QC, vận chuyển ÷ số đơn LÊN (trước hoàn huỷ). Dòng nhỏ: cùng các chi phí ấy ÷ số đơn GIAO THÀNH CÔNG ước tính (sau hoàn huỷ) — con số thứ hai mới là chi phí thật của một đơn thành công.">CP VH/đơn</TableHead>
                 <TableHead className="text-right" title="Dự phòng rủi ro tồn kho ghi vào kỳ = % giả định × GIÁ VỐN HÀNG BÁN RA trong kỳ. Không tính trên giá trị hàng nhập: nhập hàng là sự kiện một lần, ném trọn vào kỳ chứa nó thì tuần chỉ bán được 1/10 lô vẫn gánh đủ dự phòng cả lô. Dòng nhỏ “còn treo” là rủi ro của hàng CHƯA BÁN — chưa trừ vào lợi nhuận kỳ này. “—” = chưa biết giá vốn nên chưa tính được.">Rủi ro TK</TableHead>
@@ -666,7 +667,7 @@ export async function NominalTab({
                       <Money value={r.opexTotal} className="text-muted-foreground" />
                     </OKep>
                     <OKep sub={r.opexPerDelivered === null ? "sau hoàn —" : <>sau hoàn {formatVND(r.opexPerDelivered, { compact: true })}</>}>
-                      <Money value={r.opexPerOrder ?? 0} className="text-muted-foreground" />
+                      <Money value={r.opexPerOrder} className="text-muted-foreground" />
                     </OKep>
                     <OKep sub={r.inventoryRiskPending ? <span title="Rủi ro của hàng CÒN TRONG KHO — chưa trừ vào lợi nhuận kỳ này, sẽ được ghi dần khi hàng bán ra">còn treo {formatVND(r.inventoryRiskPending, { compact: true })}</span> : null}>
                       <TienCoTheChuaBiet value={r.inventoryRisk} known={r.cogsKnown} reason="Chưa biết giá vốn hàng bán ⇒ chưa tính được dự phòng rủi ro (không phải rủi ro = 0)" className="text-muted-foreground" />
@@ -733,7 +734,7 @@ export async function NominalTab({
                     <Money value={t.opexTotal} />
                   </OKep>
                   <OKep sub={t.opexPerDelivered === null ? "sau hoàn —" : <>sau hoàn {formatVND(t.opexPerDelivered, { compact: true })}</>}>
-                    <Money value={t.opexPerOrder ?? 0} />
+                    <Money value={t.opexPerOrder} />
                   </OKep>
                   <OKep sub={t.inventoryRiskPending ? <span title={`Rủi ro của hàng còn trong kho (${formatVND(t.stockValue, { compact: true })} giá trị tồn) — chưa trừ vào lợi nhuận kỳ này`}>còn treo {formatVND(t.inventoryRiskPending, { compact: true })}</span> : null}>
                     <TienCoTheChuaBiet value={t.inventoryRisk} known={t.cogsKnown} reason="Có sản phẩm chưa biết giá vốn ⇒ dự phòng rủi ro chưa tính đủ" />

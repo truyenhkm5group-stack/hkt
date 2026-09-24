@@ -178,6 +178,13 @@ export const NAV_MODULES = [
 
   // ───────────────── KHO ─────────────────
   {
+    href: "/inventory/packing",
+    label: "Đóng gói theo lượt",
+    zone: "WAREHOUSE",
+    permission: "products:view",
+    why: "Đóng gói là việc tốn người nhất của kho, và chỉ người đứng ở kệ mới đi lấy hàng — bày đơn đủ hàng theo cách đi kho ít vòng nhất là việc của chính họ.",
+  },
+  {
     href: "/products",
     label: "Sản phẩm & tồn kho",
     zone: "WAREHOUSE",

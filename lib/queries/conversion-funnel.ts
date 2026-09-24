@@ -1,10 +1,10 @@
 import { and, eq, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { PANCAKE_ORDER_STATUS } from "@/lib/constants/pancake";
 import { CONVERSION_DIMENSION_LABEL, dimensionHasUnassigned, ORDER_STEPS, type ConversionDimension, type EvidenceTier, type OrderStepKey } from "@/lib/constants/conversion";
 import { LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
-import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
+import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { successRate } from "@/lib/queries/metrics";
 import { ORDER_SOURCE, ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
@@ -192,7 +192,10 @@ export async function getConversionFunnel(period: Period): Promise<ConversionFun
     const facts = funnelFacts(db, periodWhere(period)).as("cf_facts");
     const level = reachedLevel(facts);
 
-    const [row] = await db
+    // TẮT JIT: `funnelFacts` tính ORDER_OUTCOME_FAST + SHIPMENT_LEFT_WAREHOUSE + hai mốc tương quan
+    // cho mọi đơn của kỳ — cùng hình dạng `sales-funnel`/`marketing-daily` đã đo JIT là phần lớn
+    // thời gian. Rào `OUTCOME_FENCE` giảm số lần TÍNH, không giảm chi phí BIÊN DỊCH của kế hoạch.
+    const [row] = await chayKhongJit(db, (tx) => tx
       .select({
         total: sql<number>`count(*)`,
         lvl2: sql<number>`count(*) filter (where ${level} >= 2)`,
@@ -220,7 +223,7 @@ export async function getConversionFunnel(period: Period): Promise<ConversionFun
         deliverP90: sql<number>`percentile_cont(0.9) within group (order by ${hoursBetween(facts.pickedUpAt, facts.deliveredAt)})`,
         deliverN: sql<number>`count(${hoursBetween(facts.pickedUpAt, facts.deliveredAt)})`,
       })
-      .from(facts);
+      .from(facts));
 
     const counts: Record<OrderStepKey, number> = {
       CREATED: Number(row?.total ?? 0),
@@ -394,7 +397,8 @@ export async function getConversionByDimension(
     const level = reachedLevel(facts);
     const dim = sql`coalesce(${facts.dimKey}, '')`;
 
-    const rows = await db
+    // TẮT JIT — cùng lý do với `getConversionFunnel`: cùng bảng dẫn xuất `funnelFacts`.
+    const rows = await chayKhongJit(db, (tx) => tx
       .select({
         key: sql<string>`${dim}`,
         created: sql<number>`count(*)`,
@@ -402,13 +406,13 @@ export async function getConversionByDimension(
         shipmentCreated: sql<number>`count(*) filter (where ${level} >= 3)`,
         leftWarehouse: sql<number>`count(*) filter (where ${level} >= 4)`,
         delivered: sql<number>`count(*) filter (where ${level} >= 5)`,
-        returned: sql<number>`count(*) filter (where ${facts.outcome} in ('RETURNED','RETURNED_BY_RULE'))`,
+        returned: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
         unfinished: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
         deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${facts.outcome} = 'DELIVERED'), 0)`,
         confirmMed: sql<number>`percentile_cont(0.5) within group (order by ${hoursBetween(facts.insertedAt, facts.confirmedAt)})`,
       })
       .from(facts)
-      .groupBy(dim);
+      .groupBy(dim));
 
     const total = rows.reduce((t, r) => t + Number(r.created ?? 0), 0);
     const assigned = rows.filter((r) => r.key !== "").reduce((t, r) => t + Number(r.created ?? 0), 0);

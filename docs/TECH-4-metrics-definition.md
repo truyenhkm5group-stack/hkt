@@ -358,6 +358,11 @@ E2E Time = Server Action + SQL + Render
 
 ## 3. Cách ghi kết quả chuẩn
 
+> **Mọi con số và kế hoạch thực thi trong mục 3 là MẪU MINH HOẠ ĐỊNH DẠNG, không phải số đo** — ngày
+> "2025-07-xx" và số dòng trong mẫu là bịa để chỉ cách ghi. Trong kho chưa có kết quả đo chuẩn nào
+> của TECH-4 (không có `docs/TECH-4-measurements/`); số đo production thật nằm ở `docs/perf/`
+> (tổng hợp: `docs/perf/TRANG-THAI.md`).
+
 ### 3.1 Bảng đơn (cho 1 kịch bản)
 
 ```markdown

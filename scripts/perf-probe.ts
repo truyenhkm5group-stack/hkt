@@ -29,7 +29,14 @@ import { clearMemo } from "@/lib/cache";
  * Bọc thẳng `Pool.query` của `pg`: mọi câu lệnh đều đi qua đó, không sót đường nào.
  */
 let dbMs = 0;
-const chamNhat: { ms: number; sql: string; full: string; params: unknown[] }[] = [];
+const chamNhat: { ms: number; sql: string; full: string; params: unknown[]; ham: string | null }[] = [];
+/**
+ * HÀM NÀO ĐANG ĐƯỢC ĐO khi một câu chậm chạy. Đo production 24/09/2026: câu chậm nhất (8.199 ms) chỉ
+ * in được 600 ký tự đầu — toàn là biểu thức kết quả đơn, không thấy `from` — nên KHÔNG định vị được
+ * nó thuộc hàm nào, và không vá được mà không đoán. Ghi tên hàm + in phần ĐUÔI câu lệnh (nơi có
+ * `from` / `where` / `group by` ngoài cùng) là đủ để lần đo sau trỏ thẳng vào dòng mã.
+ */
+let hamDangDo: string | null = null;
 let dbCalls = 0;
 let dbRows = 0;
 
@@ -116,12 +123,13 @@ const results: {
  * một câu 16 giây che mất hoàn toàn — không biết phải sửa câu nào. Hàm khớp mẫu dưới đây được ghi
  * lại MỌI câu từ 50ms trở lên trong lượt NGUỘI, in thành một mục riêng.
  */
-const TRONG_DIEM = /getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage/;
+const TRONG_DIEM = /getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage|dataQualitySummary|getDataQualityIssues|codSettlementSummary|listCodSettlement|customerFacets|getCashflowStatement/;
 let cauTrongHam: { ms: number; sql: string }[] | null = null;
 const cauTheoHam = new Map<string, { ms: number; sql: string }[]>();
 
 async function timed(page: string, fn: string, run: () => Promise<unknown>) {
   clearMemo();
+  hamDangDo = `${page} · ${fn}`;
   lapHienTai = new Map();
   cauTrongHam = TRONG_DIEM.test(fn) ? [] : null;
   const dbBefore = dbMs;
@@ -274,7 +282,7 @@ async function main() {
       if (cauTrongHam && ms >= 50) cauTrongHam.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 180) });
       if (ms < 200) return;
       // Giữ NGUYÊN VĂN đầy đủ + tham số để lát nữa chạy EXPLAIN ANALYZE trên đúng câu đó.
-      chamNhat.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 600), full: sqlText, params });
+      chamNhat.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 600), full: sqlText, params, ham: hamDangDo });
       chamNhat.sort((a, b) => b.ms - a.ms);
       chamNhat.length = Math.min(chamNhat.length, 8);
     };
@@ -351,7 +359,9 @@ async function main() {
 
   /*
     PHỄU BÁN HÀNG — 34,4 giây lúc máy RẢNH, và là trang duy nhất ĐỔ khi máy bận (deploy #392:
-    hết kết nối CSDL). Khác hai hàm trên: bốn hàm này KHÔNG có `memo()` ở bất cứ tầng nào.
+    hết kết nối CSDL). Bốn hàm này từng KHÔNG có `memo()` ở bất cứ tầng nào; từ vòng vá 24/09/2026
+    chúng đệm 120 giây (docs/perf/vong-va-2026-09-24.md) — cột ẤM của chúng phải về gần 0, còn cột
+    NGUỘI vẫn là chi phí thật của lần mở đầu.
   */
   const funnel = await import("@/lib/queries/sales-funnel");
   await timed("/reports/funnel", "getSalesFunnel", () => funnel.getSalesFunnel(month));
@@ -601,6 +611,30 @@ async function main() {
   await timed("/customers", "customerFacets", () => cus.customerFacets(cusParams));
   await timed("/customers", "customerSummary", () => cus.customerSummary(cusParams));
 
+  /*
+    VÒNG VÁ 24/09/2026 (docs/perf/vong-va-2026-09-24.md). Các hàm dưới đây vừa chạy câu kết quả đơn
+    trong `chayKhongJit` theo HÌNH DẠNG, chưa có số đo riêng — và sáu trong số đó trước nay KHÔNG có
+    mặt trong probe, nên trang của chúng chậm mà không ai nói được câu nào. Đo ở đây cho có trước/sau.
+    Mỗi hàm theo ĐÚNG kỳ mặc định của trang mình.
+  */
+  const dqq = await import("@/lib/queries/data-quality");
+  await timed("/data-quality", "dataQualitySummary 90d", () => dqq.dataQualitySummary(ret90));
+  await timed("/data-quality", "dataQualityOrders unverified 90d", () => dqq.dataQualityOrders("unverified", ret90, 1, 50, ""));
+  await timed("/data-quality", "unlinkedShipments", () => dqq.unlinkedShipments(1, 50, "", "updatedAt", "desc"));
+  const prod = await import("@/lib/queries/products");
+  const prodParams = { ...cusParams, sort: "erpStock" };
+  await timed("/products", "productFacets", () => prod.productFacets(prodParams));
+  await timed("/products", "productSummary", () => prod.productSummary(prodParams));
+  const cashflowQ = await import("@/lib/queries/cashflow");
+  await timed("/reports/cashflow", "getCashflow (tab dự phóng)", () => cashflowQ.getCashflow());
+  const bridgeQ = await import("@/lib/queries/profit-cash-bridge");
+  await timed("/reports/cashflow", "getProfitCashBridge tháng này", () => bridgeQ.getProfitCashBridge(thangTrang));
+  const statementQ = await import("@/lib/queries/cashflow-statement");
+  await timed("/reports/cashflow", "getCashflowStatement tháng này", () => statementQ.getCashflowStatement(thangTrang));
+  const convQ = await import("@/lib/queries/conversion-funnel");
+  await timed("/reports/funnel", "getConversionFunnel", () => convQ.getConversionFunnel(month));
+  await timed("/reports/funnel", "getConversionByDimension employee", () => convQ.getConversionByDimension(month, "employee"));
+
   const okr = await import("@/lib/queries/okr");
   const quy = okr.currentQuarter();
   const bsc = await import("@/lib/queries/bsc");
@@ -754,7 +788,7 @@ async function main() {
       }
       const mBat = trungVi(bat);
       const mTat = trungVi(tat);
-      console.log(`\n  ${c.ms}ms trong lượt đo đường ứng dụng · ${c.sql.slice(0, 110)}…`);
+      console.log(`\n  ${c.ms}ms trong lượt đo đường ứng dụng · hàm: ${c.ham ?? "(ngoài timed)"} · ${c.sql.slice(0, 110)}…`);
       console.log(`    JIT MẶC ĐỊNH  trung vị ${mBat === null ? "CHƯA ĐO ĐƯỢC" : `${mBat.toFixed(1)} ms`}  [${bat.map((x) => x.toFixed(1)).join(" · ")}]`);
       console.log(`    JIT TẮT       trung vị ${mTat === null ? "CHƯA ĐO ĐƯỢC" : `${mTat.toFixed(1)} ms`}  [${tat.map((x) => x.toFixed(1)).join(" · ")}]`);
       if (mBat !== null && mTat !== null && mBat > 0) {
@@ -781,7 +815,11 @@ async function main() {
 
   console.log("\n── TÁM CÂU LỆNH SQL CHẬM NHẤT (nguyên văn, cắt 600 ký tự) ──");
   if (!chamNhat.length) console.log("  (không câu lệnh nào vượt 200ms)");
-  for (const c of chamNhat) console.log(`\n  ${c.ms}ms\n  ${c.sql}`);
+  for (const c of chamNhat) {
+    const gon = c.full.replace(/\s+/g, " ").trim();
+    // Câu chậm ở đây đi thẳng qua POOL, tức là CHƯA được bọc `chayKhongJit` (câu đã bọc chạy trong giao dịch).
+    console.log(`\n  ${c.ms}ms · hàm: ${c.ham ?? "(ngoài timed)"} · ngoài chayKhongJit\n  ĐẦU: ${c.sql}\n  ĐUÔI: …${gon.slice(-500)}`);
+  }
   process.exit(0);
 }
 

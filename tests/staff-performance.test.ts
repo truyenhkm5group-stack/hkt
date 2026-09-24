@@ -5,6 +5,8 @@ import { schema } from "@/db";
 import { ATTRIBUTION_FIELDS, UNASSIGNED_LABEL } from "@/lib/constants/sales-funnel";
 import { getStaffPerformance } from "@/lib/queries/staff-performance";
 import { getSalesFunnel } from "@/lib/queries/sales-funnel";
+import { OPEN_OUTCOMES } from "@/lib/constants/truth";
+import { demDonTheoKetQua } from "./sales-funnel.test";
 
 const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
 
@@ -74,6 +76,16 @@ export async function testStaffPerformance(db: Db) {
   }
 
   const seller = await getStaffPerformance(ALL, "sellerName");
+  // ───────── 5b. "Chưa kết thúc" đếm đủ tập OPEN_OUTCOMES, kể cả đơn chờ bưu tá tới lấy ─────────
+  // Bản chép tay cũ (`'IN_TRANSIT','UNKNOWN','NOT_SHIPPED'`) bỏ sót AWAITING_PICKUP: đơn của người
+  // bán rơi khỏi mọi ô kết quả của họ.
+  const theoKetQua = await demDonTheoKetQua(db);
+  assert.ok((theoKetQua.AWAITING_PICKUP ?? 0) > 0, "fixture phải có đơn AWAITING_PICKUP để khẳng định dưới đây có răng");
+  assert.equal(
+    seller.rows.reduce((t, r) => t + r.unfinished, 0),
+    OPEN_OUTCOMES.reduce((t, k) => t + (theoKetQua[k] ?? 0), 0),
+    "cộng ô chưa kết thúc của từng người phải bằng số đơn thuộc tập OPEN_OUTCOMES",
+  );
   // ───────── 6. Có người thật thì phải tách thành nhiều dòng, và "Chưa gán" vẫn còn nguyên ─────────
   const names = seller.rows.map((r) => r.name);
   assert.ok(names.includes("Ngọc") && names.includes("Hà"), "phải tách được từng người, không gộp làm một");

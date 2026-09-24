@@ -272,7 +272,28 @@ jobs:
             if [ "$ERP_RESET_ENV" = "1" ] && [ -f /root/erp/.env ]; then mv /root/erp/.env "/root/erp/.env.bak-$(date +%s)"; fi
             # Lấy chính bản bootstrap của commit đang triển khai. Lấy theo tên nhánh thì kịch bản
             # cài đặt có thể đến từ một commit khác với mã nguồn — đúng lỗi mà bước này phải chặn.
-            curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${ERP_DEPLOY_SHA}/scripts/bootstrap.sh" | bash
+            #
+            # ── TẢI CÓ HẠN, RA TỆP, RỒI MỚI CHẠY ──
+            # Sự cố 24/09/2026: lượt deploy 5c38684b lấy khoá lúc 09:13:59 rồi IM LẶNG 35 phút tới khi
+            # SSH hết giờ. Ở lượt thường, dòng đầu của bootstrap ("▶ Cập nhật mã nguồn") hiện 0,7 s sau
+            # khoá — giữa hai mốc chỉ có lệnh tải này. Bản cũ `curl … | bash` KHÔNG có trần thời gian:
+            # kết nối tới raw.githubusercontent.com treo là treo mãi, GIỮ KHOÁ, và lượt deploy kế tiếp
+            # (424905b0) chờ đủ 1200 s rồi dừng "chưa chạm máy chủ". Hai lượt deploy mất trắng.
+            # Nay: mỗi lần thử ≤ 90 s, bốn lần, tải RA TỆP (không bao giờ chạy nửa kịch bản vì mạng
+            # đứt giữa chừng), hỏng thì DỪNG ồn ào — tiến trình thoát, nhân nhả khoá.
+            BOOT="$(mktemp /tmp/erp-bootstrap.XXXXXX)"
+            BOOT_URL="https://raw.githubusercontent.com/${{ github.repository }}/${ERP_DEPLOY_SHA}/scripts/bootstrap.sh"
+            for lan in 1 2 3 4; do
+              if curl -fsSL --connect-timeout 15 --max-time 90 -o "$BOOT" "$BOOT_URL" && [ -s "$BOOT" ]; then break; fi
+              echo "  ⚠ tải bootstrap.sh hỏng (lần $lan/4) lúc $(date -u +%FT%TZ)"
+              if [ "$lan" = "4" ]; then
+                echo "::error::Không tải được scripts/bootstrap.sh sau 4 lần (mỗi lần ≤ 90 s) — DEPLOY DỪNG, chưa đổi gì trên máy chủ."
+                exit 1
+              fi
+              sleep $((lan * 10))
+            done
+            echo "▶ Đã tải bootstrap.sh ($(wc -c < "$BOOT") byte) lúc $(date -u +%FT%TZ)"
+            bash "$BOOT"
 
       - name: Kiểm tra HTTPS từ bên ngoài
         env:

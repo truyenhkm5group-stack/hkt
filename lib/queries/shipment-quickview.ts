@@ -1,6 +1,7 @@
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { rowsOf } from "@/lib/sql-rows";
@@ -135,7 +136,7 @@ export async function getShipmentQuickView(shipmentId: string): Promise<QuickVie
     ? db
         .select({
           delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')::int`,
-          returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))::int`,
+          returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))::int`,
           tong: sql<number>`count(*)::int`,
         })
         .from(schema.orders)

@@ -394,6 +394,26 @@ fi
 $COMPOSE up -d --build
 fi
 
+# ═══ CADDYFILE ĐỔI THÌ CADDY PHẢI ĐỌC LẠI — `up -d` KHÔNG LÀM VIỆC ĐÓ ═══
+# Caddyfile gắn vào container bằng bind mount MỘT TỆP: git thay tệp bằng inode mới, container vẫn
+# giữ inode cũ, và `up -d` không dựng lại caddy vì định nghĩa dịch vụ không đổi. Kết quả: trần kích
+# thước body và lớp che bí mật trong log nằm trong kho nhưng KHÔNG có hiệu lực. `restart` gắn lại
+# đường dẫn nên đọc được tệp mới. Kiểm cú pháp TRƯỚC bằng một container tạm: tệp sai mà vẫn restart
+# là tắt cả trang; tệp sai thì Caddy cũ chạy tiếp và lượt deploy báo đỏ ở cuối.
+CADDY_SHA_FILE=/root/.erp-caddyfile.sha256
+CADDY_SHA="$(sha256sum "$ROOT/deploy/Caddyfile" | cut -d' ' -f1)"
+CADDY_LOI=""
+if [ "$(cat "$CADDY_SHA_FILE" 2>/dev/null || true)" != "$CADDY_SHA" ]; then
+  if docker run --rm -e ERP_DOMAIN="${ERP_DOMAIN:-erp.vnxcommerce.com}" \
+       -v "$ROOT/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+       caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
+    $COMPOSE restart caddy && printf '%s\n' "$CADDY_SHA" > "$CADDY_SHA_FILE" && say "Caddy đã nạp Caddyfile mới"
+  else
+    CADDY_LOI="Caddyfile mới KHÔNG hợp lệ — Caddy cũ vẫn chạy, cấu hình mới CHƯA có hiệu lực."
+    echo "::error::$CADDY_LOI"
+  fi
+fi
+
 say "Chờ ERP sẵn sàng"
 for i in $(seq 1 60); do
   if docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null | grep -q '"ok":true'; then break; fi
@@ -471,5 +491,10 @@ fi
 
 if [ "${SMOKE_FAILED:-0}" = "1" ]; then
   warn "Deploy KHÔNG đạt: smoke test có màn hình lỗi."
+  exit 1
+fi
+
+if [ -n "${CADDY_LOI:-}" ]; then
+  warn "Deploy KHÔNG đạt: $CADDY_LOI"
   exit 1
 fi

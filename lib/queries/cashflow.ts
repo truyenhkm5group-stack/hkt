@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { operatingExpenseCond } from "@/lib/queries/cost-allocation";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
@@ -91,17 +91,22 @@ async function buildCashflow(): Promise<CashflowReport> {
   const db = await getDb();
 
   // ── Tiền COD đang bị giữ: đơn ĐÃ GIAO THÀNH CÔNG mà chưa có đồng chứng từ nào ──
-  const [cod] = await db
+  //
+  // Ba cột dùng CHUNG một điều kiện (giao thành công · chưa có đồng nào) nên điều kiện ấy nằm ở
+  // WHERE, một lần mỗi đơn, thay vì nội tuyến `ORDER_OUTCOME_FAST` vào ba `filter`. Cùng tập dòng
+  // ⇒ cùng số (không dòng nào khớp: 0 · 0 · 0 như bản cũ). TẮT JIT: kết quả đơn trên MỌI đơn —
+  // họ câu đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+  const [cod] = await chayKhongJit(db, (tx) => tx
     .select({
-      amount: sql<number>`coalesce(sum(coalesce(${s.codAmount}, 0)) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0), 0)`,
-      count: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0)`,
+      amount: sql<number>`coalesce(sum(coalesce(${s.codAmount}, 0)), 0)`,
+      count: sql<number>`count(*)`,
       overdue: sql<number>`coalesce(sum(coalesce(${s.codAmount}, 0)) filter (
-        where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0
-          and coalesce(${s.deliveredAt}, ${s.updatedAt}) < now() - (${COD_OVERDUE_DAYS} * interval '1 day')), 0)`,
+        where coalesce(${s.deliveredAt}, ${s.updatedAt}) < now() - (${COD_OVERDUE_DAYS} * interval '1 day')), 0)`,
     })
     .from(o)
     // MỖI ĐƠN MỘT DÒNG: đơn nhiều lần gửi không được cộng tiền nhiều lần (xem PRIMARY_ATTEMPT).
-    .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`);
+    .leftJoin(s, sql`${s.orderId} = ${o.id} and ${PRIMARY_ATTEMPT}`)
+    .where(sql`${ORDER_OUTCOME_FAST} = 'DELIVERED' and coalesce(${s.codCollected}, 0) = 0`));
 
   // ── Nhịp chi thực tế ──
   const [ads] = await db

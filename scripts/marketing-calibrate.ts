@@ -205,6 +205,13 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   const adConds = [eq(schema.adSpends.excluded, false), gte(schema.adSpends.spendDate, period.from as Date), lte(schema.adSpends.spendDate, period.to as Date)];
   if (args.marketer) adConds.push(eq(schema.adSpends.marketerId, args.marketer));
   if (args.product) adConds.push(eq(schema.adSpends.productId, args.product));
+  /*
+    Tin nhắn = `greatest(messages, leads)` là CỐ Ý, không phải một định nghĩa thứ hai: đó đúng là
+    định nghĩa của báo cáo đang được đối chiếu (`lib/queries/marketing-daily.ts::spendByDay`) và của
+    sổ chỉ số (`lib/constants/marketing-daily.ts`, key `messages`: "lấy giá trị lớn hơn giữa tin
+    nhắn và lead"). Đọc `messages` trần ở đây thì mọi ngày có lead > tin nhắn đều báo BUG giả.
+    "Không qua phép biến đổi nào" ở câu cảnh báo dưới nghĩa là không biến đổi NGOÀI công thức này.
+  */
   const [adRow] = await db
     .select({ spend: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)`, messages: sql<number>`coalesce(sum(greatest(${schema.adSpends.messages}, ${schema.adSpends.leads})), 0)`, ngay: sql<number>`count(distinct to_char(${schema.adSpends.spendDate} at time zone 'Asia/Ho_Chi_Minh','YYYY-MM-DD'))` })
     .from(schema.adSpends)
@@ -215,12 +222,10 @@ export async function calibrate(input: CalibrateArgs, log: (s: string) => void =
   log(`  báo cáo: ${vnd(data.totals.adSpend)}đ · ${num(data.totals.messages)} tin nhắn`);
   if (data.totals.adSpend !== null && data.totals.adSpend !== nguonSpend) {
     /*
-      Khoản chi nhóm QUẢNG CÁO gõ tay ở bảng Chi phí được PHÂN BỔ theo ngày và cộng vào cột chi
-      quảng cáo — đúng cách `getDailyBreakdown` cộng. Nên chênh lệch dương là giải thích được.
+      Khoản chi nhóm QUẢNG CÁO gõ tay ở bảng Chi phí KHÔNG còn được cộng vào cột chi quảng cáo (sổ
+      thẩm quyền — AGENTS.md mục 15): tài khoản QC là nguồn duy nhất. Nên mọi chênh lệch là lỗi.
     */
-    const chenh = data.totals.adSpend - nguonSpend;
-    if (chenh > 0 && !coLoc) add("ATTRIBUTION", "Chi quảng cáo", vnd(nguonSpend), vnd(data.totals.adSpend), `Chênh +${vnd(chenh)}đ là khoản chi nhóm Quảng cáo gõ tay ở bảng Chi phí, đã phân bổ theo ngày — cùng cách Báo cáo lợi nhuận cộng.`);
-    else add("BUG", "Chi quảng cáo", vnd(nguonSpend), vnd(data.totals.adSpend), "Chi quảng cáo không khớp nguồn có thẩm quyền và không giải thích được bằng khoản phân bổ.");
+    add("BUG", "Chi quảng cáo", vnd(nguonSpend), vnd(data.totals.adSpend), "Chi quảng cáo không khớp nguồn có thẩm quyền (ad_spends) — không còn khoản gõ tay nào được phép cộng thêm.");
   }
   if (data.totals.messages !== null && data.totals.messages !== nguonMsg) {
     add("BUG", "Tin nhắn", String(nguonMsg), num(data.totals.messages), "Tin nhắn phải đọc thẳng từ ad_spends, không qua phép biến đổi nào.");

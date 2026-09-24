@@ -1,7 +1,13 @@
 # Phòng Tech AI — trạng thái
 
 > **File trạng thái DUY NHẤT.** Mọi milestone cập nhật vào đây, không mở file mới.
-> Cập nhật: **21/09/2026** · **nửa đi đã chạy trọn; nửa về vừa đo ra ba khúc đứt và đã vá**
+> Cập nhật: **21/09/2026** (mục cuối ghi 22/09) · **nửa đi đã chạy trọn; nửa về vừa đo ra ba khúc đứt và đã vá**
+>
+> **Ghi chú 24/09/2026 — tệp chưa theo kịp 23/09.** Sau lần ghi cuối, các lượt chạy agent đã tự mở
+> PR và được gộp vào `main`: TECH-4 (#133), TECH-7 (#142), TECH-9 (#158), TECH-10 (#170) — tác giả
+> commit `erp-agent-vnx[bot]`. Mục *Xác minh trên PRODUCTION* (đo 22/09) CHƯA được đo lại sau các
+> lượt ấy: số PR có về tới dòng việc hay không (khúc 3–4 của nửa VỀ) phải đo lại bằng `db-query`, tệp
+> này chưa ghi. Trạng thái sống của từng lượt: `/tech/agents`.
 
 ---
 
@@ -257,7 +263,7 @@ lời nói dối.
 
 | PR | Nội dung | Trạng thái |
 |---|---|---|
-| **#72** | Đề bài nói cả phạm vi ĐỌC (lỗi ⑥) | cổng xanh · chờ duyệt lại sau khi đồng bộ `main` |
+| #72 | Đề bài nói cả phạm vi ĐỌC (lỗi ⑥) | **đã gộp 21/09/2026** (`fb60cf3d`) |
 | #47 | *Không phải của phiên này* — nhánh cũ `claude/charming-turing-kao6lw` | không đụng vào |
 
 > **Về nhịp duyệt:** ruleset bật `strict` + `dismiss_stale_reviews_on_push` + `require_last_push_approval`.
@@ -443,6 +449,10 @@ khúc 4 (việc tự đi tiếp) vẫn CHƯA từng chạy** — không được
 
 KHÔNG tự sửa khi chủ shop vắng mặt: nó chạm truy vấn tiền, phải đối chiếu trước/sau trên production
 (mục 6.5).
+
+**24/09/2026 — chủ shop đã quyết LÀM.** Nhánh `claude/trang-cham-jit`: bốn hàm có `memo()` 120 s
+(khoá: kỳ; bảng nhân sự thêm vai), hai khối `conversion-funnel` tắt JIT. Lần mở đầu vẫn là chi phí
+thật — số trước/sau chờ lượt đo sau deploy, lệnh ở docs/perf/vong-va-2026-09-24.md.
 
 ---
 ## NEXT

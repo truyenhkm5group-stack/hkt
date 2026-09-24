@@ -3,6 +3,7 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { vanDonDaiDien } from "@/lib/constants/shipment-pick";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { toDate } from "@/lib/format";
 import type { ListParams } from "@/lib/search-params";
 
@@ -22,7 +23,7 @@ function orderAggregate(db: Db) {
       ordersErp: sql<number>`count(*) filter (where ${o.stage} not in ('CANCELLED','DELETED'))`.as("orders_erp"),
       // Giao thành công / hoàn theo KẾT QUẢ THẬT của đơn (COD thực thu), không theo trạng thái Pancake.
       succeedErp: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`.as("succeed_erp"),
-      returnedErp: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`.as("returned_erp"),
+      returnedErp: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`.as("returned_erp"),
       revenueErp: sql<number>`coalesce(sum(case when ${o.stage} not in ('CANCELLED','DELETED') then ${o.totalPriceAfterDiscount} else 0 end), 0)`.as("revenue_erp"),
       lastOrderErp: sql<Date | string | null>`max(${o.insertedAt})`.as("last_order_erp"),
     })
@@ -163,16 +164,22 @@ export async function customerFacets(params: ListParams) {
   const agg = orderAggregate(db);
   const eff = effective(agg);
   const base = customerListWhere({ ...params, filters: {} }, agg);
+  /*
+    TẮT JIT — suy từ HÌNH DẠNG, chưa EXPLAIN riêng: cả hai câu nối đúng bảng tổng hợp `agg`
+    (`ORDER_OUTCOME_FAST` trên mọi đơn có khách) mà câu danh sách `listCustomers` đã đo JIT bật
+    7.463 ms ↔ tắt 100 ms. Trang chạy chúng song song với câu danh sách, nên còn một câu chưa tắt
+    JIT là trang vẫn chờ nó. Lệnh đo sau deploy: docs/perf/vong-va-2026-09-24.md.
+  */
   const [provinces, [tiers]] = await Promise.all([
-    db
+    chayKhongJit(db, (tx) => tx
       .select({ value: c.province, count: count() })
       .from(c)
       .leftJoin(agg, eq(agg.customerId, c.id))
       .where(and(base, sql`${c.province} <> ''`))
       .groupBy(c.province)
       .orderBy(desc(count()), asc(c.province))
-      .limit(64),
-    db
+      .limit(64)),
+    chayKhongJit(db, (tx) => tx
       .select({
         repeat: sql<number>`count(*) filter (where ${eff.orders} >= 3)`,
         once: sql<number>`count(*) filter (where ${eff.orders} = 1)`,
@@ -181,7 +188,7 @@ export async function customerFacets(params: ListParams) {
       })
       .from(c)
       .leftJoin(agg, eq(agg.customerId, c.id))
-      .where(base),
+      .where(base)),
   ]);
   return {
     provinces: provinces.map((p) => ({ value: p.value, label: p.value, count: Number(p.count) })),
@@ -201,7 +208,8 @@ export async function customerSummary(params: ListParams) {
   const where = customerListWhere(params, agg);
   const newSince = params.period.from ?? new Date(Date.now() - 30 * 86_400_000);
   const newUntil = params.period.to;
-  const [row] = await db
+  // TẮT JIT — cùng lý do với `customerFacets` ngay trên: nối bảng tổng hợp `agg` mang kết quả đơn.
+  const [row] = await chayKhongJit(db, (tx) => tx
     .select({
       total: count(),
       newInPeriod: sql<number>`count(*) filter (where ${customerCreatedAt} >= ${newSince}${newUntil ? sql` and ${customerCreatedAt} <= ${newUntil}` : sql``})`,
@@ -213,7 +221,7 @@ export async function customerSummary(params: ListParams) {
     })
     .from(c)
     .leftJoin(agg, eq(agg.customerId, c.id))
-    .where(where);
+    .where(where));
   return {
     total: Number(row?.total ?? 0),
     newInPeriod: Number(row?.newInPeriod ?? 0),
@@ -240,7 +248,7 @@ export async function getCustomerDetail(id: string) {
         orders: sql<number>`count(*) filter (where ${notCancelled})`,
         allOrders: count(),
         succeed: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-        returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`,
+        returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
         cancelled: sql<number>`count(*) filter (where ${o.stage} in ('CANCELLED','DELETED'))`,
         revenue: sql<number>`coalesce(sum(case when ${notCancelled} then ${o.totalPriceAfterDiscount} else 0 end), 0)`,
         successRevenue: sql<number>`coalesce(sum(case when ${ORDER_OUTCOME_FAST} = 'DELIVERED' then ${o.totalPriceAfterDiscount} else 0 end), 0)`,

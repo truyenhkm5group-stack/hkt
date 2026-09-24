@@ -150,7 +150,8 @@ Báo cáo lợi nhuận (`profit-nominal.ts` danh nghĩa, `profit-cash.ts` tiề
 
 **Cước ĐVVC và phí hoàn lấy từ bậc thang của Sự thật tài chính** (`financial-truth.ts`): cước chỉ
 của đơn đã giao thành công và đơn hoàn (`coalesce(shipping_fee vận đơn, partner_fee đơn)`), phí hoàn
-chỉ của đơn hoàn. Trước 11/09/2026 thẻ Tổng quan tự cộng `orders.partner_fee` của MỌI đơn không huỷ
+chỉ của đơn hoàn; cộng dòng "Cước / phí hoàn điều chỉnh tay" (khoản `MANUAL_ADJUSTMENT` có lý do,
+lấy từ Profit Engine — gộp vào ô cước). Trước 11/09/2026 thẻ Tổng quan tự cộng `orders.partner_fee` của MỌI đơn không huỷ
 trong kỳ (kể cả đơn mới, đang giao) nên cùng nhãn "Lợi nhuận ước tính" ở Tổng quan và ở tab Sự thật
 tài chính là hai con số. Nay là một.
 

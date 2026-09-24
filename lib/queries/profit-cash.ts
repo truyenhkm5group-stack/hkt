@@ -1,7 +1,8 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { COD_COLLECTABLE, ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
 
@@ -28,7 +29,25 @@ export type CashReport = {
   cashIn: { codPaidToBank: number; codPaidCount: number; prepaid: number; prepaidOrders: number; prepaidOnReturned: number; total: number };
   /** Bảng kê Viettel Post trong kỳ (theo ngày đối soát): tiền COD gộp, cước/dư nợ đã trừ, tiền thu về */
   statements: { count: number; codGross: number; feeTotal: number; net: number; shipmentsLinked: number };
-  cashOut: { purchases: number; purchaseReceipts: number; shippingDelivered: number; shippingReturned: number; returnFees: number; shippingStatement: number; shippingMode: "statement" | "estimate"; adSpend: number; operating: number; total: number };
+  cashOut: {
+    purchases: number;
+    purchaseReceipts: number;
+    shippingDelivered: number;
+    shippingReturned: number;
+    returnFees: number;
+    shippingStatement: number;
+    shippingMode: "statement" | "estimate";
+    /**
+     * Cước / phí hoàn gõ tay khai ĐIỀU CHỈNH có lý do (Profit Engine). Luôn trừ, ở cả hai chế độ:
+     * khoản ấy theo định nghĩa KHÔNG gắn được vận đơn nào nên không nằm trên bảng kê, cũng không
+     * nằm trong ước tính theo đơn.
+     */
+    logisticsAdjustment: number;
+    logisticsAdjustmentCount: number;
+    adSpend: number;
+    operating: number;
+    total: number;
+  };
   net: number;
   pending: {
     codCollectedWaiting: number;
@@ -58,6 +77,7 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
   const PREPAID_TOTAL = sql`(${o.prepaid} + ${o.transferMoney} + ${o.cash})`;
   /** Mốc tiền khách thực trả — xem chú thích `CashReport.cashIn`. */
   const prepaidPaidAt = o.insertedAt;
+  // Tập ĐÃ CHỐT = đã ngã ngũ + HUỶ, rộng hơn FINISHED_OUTCOMES_SQL (không có huỷ) — cố ý liệt kê.
   const FINAL_OUTCOMES = sql`('DELIVERED','RETURNED','RETURNED_BY_RULE','CANCELLED')`;
   const b = schema.codBatches;
   const [[batchRows], [orderRows], [prepaidRows], [prepaidBalance], [purchases], [adRows], expenseRows, codWaiting, codTransit] = await Promise.all([
@@ -75,34 +95,36 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
       })
       .from(b)
       .where(between(b.receivedAt, period.from, period.to)),
-    db
+    // TẮT JIT (ba câu kết quả đơn dưới đây): ORDER_OUTCOME_FAST ở cả cột lẫn WHERE, câu số dư quét
+    // TOÀN BỘ đơn tới cuối kỳ — họ câu đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+    chayKhongJit(db, (tx) => tx
       .select({
         shippingDelivered: sql<number>`coalesce(sum(${FEE}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
-        shippingReturned: sql<number>`coalesce(sum(${FEE}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
-        returnFees: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+        shippingReturned: sql<number>`coalesce(sum(${FEE}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
+        returnFees: sql<number>`coalesce(sum(${o.returnFee}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
         delivered: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
-        returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE'))`,
+        returned: sql<number>`count(*) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
       })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(and(sql`${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`, between(finishedAt, period.from, period.to))),
+      .where(and(sql`${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTCOMES_SQL)})`, between(finishedAt, period.from, period.to)))),
     // TIỀN TRẢ TRƯỚC theo NGÀY TIỀN VỀ, không theo ngày kết thúc đơn. Đơn huỷ bị loại: Pancake vẫn
     // giữ số trả trước trên đơn huỷ nhưng không có chứng từ tiền đã về, nên không được tính là tiền vào.
-    db
+    chayKhongJit(db, (tx) => tx
       .select({
         prepaid: sql<number>`coalesce(sum(${PREPAID_TOTAL}), 0)`,
         prepaidOrders: sql<number>`count(*)`,
-        prepaidOnReturned: sql<number>`coalesce(sum(${PREPAID_TOTAL}) filter (where ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')), 0)`,
+        prepaidOnReturned: sql<number>`coalesce(sum(${PREPAID_TOTAL}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})), 0)`,
       })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(and(sql`${PREPAID_TOTAL} > 0`, sql`${ORDER_OUTCOME_FAST} <> 'CANCELLED'`, between(prepaidPaidAt, period.from, period.to))),
+      .where(and(sql`${PREPAID_TOTAL} > 0`, sql`${ORDER_OUTCOME_FAST} <> 'CANCELLED'`, between(prepaidPaidAt, period.from, period.to)))),
     // SỐ DƯ TRẢ TRƯỚC tính tới cuối kỳ: tiền đã về của đơn chưa kết thúc.
-    db
+    chayKhongJit(db, (tx) => tx
       .select({ amount: sql<number>`coalesce(sum(${PREPAID_TOTAL}), 0)`, count: sql<number>`count(*)` })
       .from(o)
       .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-      .where(and(sql`${PREPAID_TOTAL} > 0`, sql`${ORDER_OUTCOME_FAST} not in ${FINAL_OUTCOMES}`, between(prepaidPaidAt, null, period.to))),
+      .where(and(sql`${PREPAID_TOTAL} > 0`, sql`${ORDER_OUTCOME_FAST} not in ${FINAL_OUTCOMES}`, between(prepaidPaidAt, null, period.to)))),
     db
       .select({ amount: sql<number>`coalesce(sum(${schema.stockReceipts.totalCost}), 0)`, count: sql<number>`count(*)` })
       .from(schema.stockReceipts)
@@ -148,13 +170,17 @@ export async function getCashProfitReport(period: Period): Promise<CashReport> {
     returnFees: Number(orderRows?.returnFees ?? 0),
     shippingStatement: statements.feeTotal,
     shippingMode: (statements.feeTotal > 0 ? "statement" : "estimate") as "statement" | "estimate",
+    logisticsAdjustment: expenseRows.logisticsAdjustment.amount,
+    logisticsAdjustmentCount: expenseRows.logisticsAdjustment.count,
     adSpend: Number(adRows?.amount ?? 0),
     operating: expenseRows.amount,
     total: 0,
   };
-  // Cước đã bị Viettel Post trừ ngay trên bảng kê (tiền vào là số thực nhận) → không trừ lần nữa; chỉ dùng ước tính khi kỳ chưa có bảng kê
+  // Cước đã bị Viettel Post trừ ngay trên bảng kê (tiền vào là số thực nhận) → không trừ lần nữa; chỉ dùng ước tính khi kỳ chưa có bảng kê.
+  // Khoản ĐIỀU CHỈNH có lý do thì trừ ở cả hai chế độ — nó nằm ngoài vận đơn lẫn bảng kê. Trước đây
+  // báo cáo này bỏ sót nó trong khi Profit Engine tính nó vào thành phần Cước.
   const shippingOut = cashOut.shippingMode === "statement" ? 0 : cashOut.shippingDelivered + cashOut.shippingReturned + cashOut.returnFees;
-  cashOut.total = cashOut.purchases + shippingOut + cashOut.adSpend + cashOut.operating;
+  cashOut.total = cashOut.purchases + shippingOut + cashOut.logisticsAdjustment + cashOut.adSpend + cashOut.operating;
   return {
     cashIn,
     statements,

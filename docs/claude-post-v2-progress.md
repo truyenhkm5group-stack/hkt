@@ -1,5 +1,7 @@
 # Tiến độ roadmap sau V2
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.**
+
 Cập nhật 09/09/2026. **Toàn bộ 10 lô A–J đã xong VÀ ĐÃ PHÁT HÀNH.**
 
 Production đang chạy `676465a752f0` = HEAD của `main`. Ba lần deploy trong phiên (không phải một):

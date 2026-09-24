@@ -1,5 +1,7 @@
 # PERFORMANCE P0 — Tốc độ báo cáo & trải nghiệm chờ
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md` (hiệu năng: `docs/perf/TRANG-THAI.md`).**
+
 Ngày: 09/09/2026 · Vòng trước: `docs/erp-perf-audit.md` (vòng 1), `docs/erp-perf-audit-round2.md` (vòng 2).
 
 Ba việc chủ shop nêu:

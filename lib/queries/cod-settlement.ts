@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
-import { getDb } from "@/db";
+import { chayKhongJit, getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { COD_OVERDUE_DAYS, type SettlementStatus } from "@/lib/constants/cod";
 import { ORDER_OUTCOME_FAST } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -55,7 +56,8 @@ const SO_CHUNG_TU = sql`
  */
 const TINH_TRANG = sql<SettlementStatus>`case
   when coalesce(shipments.cod_amount, 0) <= 0 then 'KHONG_PHAI_TRA'
-  when shipments.stage = 'DELIVERED' and ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE') then 'GIAO_NHUNG_HOAN'
+  when shipments.stage = 'DELIVERED' and ${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)}) then 'GIAO_NHUNG_HOAN'
+  -- Tập "không phải trả" = HOÀN + HUỶ — rộng hơn RETURNED_OUTCOMES, cố ý liệt kê ở đây.
   when ${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE','CANCELLED') then 'KHONG_PHAI_TRA'
   -- CHƯA BIẾT gì về chiều giao hàng thì KHÔNG được ghi thành khoản Viettel Post đang nợ: đòi tiền
   -- một đơn mà ERP còn không chứng minh được đã gửi đi là tạo ra nợ ảo. Phải nằm TRƯỚC các nhánh
@@ -116,7 +118,8 @@ export type CodSettlementSummary = {
 export async function codSettlementSummary(period: Period): Promise<CodSettlementSummary> {
   return memo(`cod-settlement:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90_000, async () => {
     const db = await getDb();
-    const rows = rowsOf(await db.execute(sql`
+    // TẮT JIT: TINH_TRANG / PHAI_TRA nội tuyến ORDER_OUTCOME_FAST vào ~15 cột gộp trên mọi vận đơn của kỳ — họ câu đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+    const rows = rowsOf(await chayKhongJit(db, (tx) => tx.execute(sql`
       with t as (${SO_CHUNG_TU})
       select
         count(*) filter (where ${PHAI_TRA}) phai_thu_count,
@@ -140,7 +143,7 @@ export async function codSettlementSummary(period: Period): Promise<CodSettlemen
         left join orders on orders.id = shipments.order_id
         left join t on t.shipment_id = shipments.id
       where ${loc(period)}
-    `));
+    `)));
     const r = rows[0] ?? {};
 
     const cg = rowsOf(await db.execute(sql`
@@ -205,7 +208,8 @@ export async function listCodSettlement(opts: { period: Period; status?: Settlem
     : sql``;
   const theoTinhTrang = status ? sql`and ${TINH_TRANG} = ${status}` : sql``;
 
-  const list = rowsOf(await db.execute(sql`
+  // TẮT JIT: TINH_TRANG (ORDER_OUTCOME_FAST) nằm ở cột, WHERE và ORDER BY, quét mọi vận đơn có thu hộ trước khi cắt trang.
+  const list = rowsOf(await chayKhongJit(db, (tx) => tx.execute(sql`
     with t as (${SO_CHUNG_TU})
     select shipments.id, shipments.vtp_order_number, shipments.order_id, orders.system_id,
            coalesce(orders.bill_full_name, shipments.receiver_name, '') customer,
@@ -222,15 +226,16 @@ export async function listCodSettlement(opts: { period: Period; status?: Settlem
     where ${CO_THU_HO} and ${loc(opts.period)} ${theoTinhTrang} ${tim}
     order by (${TINH_TRANG} = 'QUA_HAN') desc, coalesce(shipments.delivered_at, shipments.vtp_status_date) desc nulls last
     limit ${pageSize} offset ${(page - 1) * pageSize}
-  `));
+  `)));
 
-  const total = Number(rowsOf(await db.execute(sql`
+  // TẮT JIT: câu đếm mang cùng bộ lọc TINH_TRANG với câu danh sách.
+  const total = Number(rowsOf(await chayKhongJit(db, (tx) => tx.execute(sql`
     with t as (${SO_CHUNG_TU})
     select count(*) n from shipments
       left join orders on orders.id = shipments.order_id
       left join t on t.shipment_id = shipments.id
     where ${CO_THU_HO} and ${loc(opts.period)} ${theoTinhTrang} ${tim}
-  `))[0]?.n ?? 0);
+  `)))[0]?.n ?? 0);
 
   return {
     rows: list.map((r): CodSettlementRow => ({
@@ -258,7 +263,8 @@ export async function listCodSettlement(opts: { period: Period; status?: Settlem
 /** Đếm theo từng tình trạng để hiện số trên tab. */
 export async function codSettlementCounts(period: Period): Promise<Record<SettlementStatus, number> & { ALL: number }> {
   const db = await getDb();
-  const list = rowsOf(await db.execute(sql`
+  // TẮT JIT: nhóm theo TINH_TRANG (ORDER_OUTCOME_FAST) trên mọi vận đơn có thu hộ của kỳ.
+  const list = rowsOf(await chayKhongJit(db, (tx) => tx.execute(sql`
     with t as (${SO_CHUNG_TU})
     select ${TINH_TRANG} status, count(*) n
     from shipments
@@ -266,7 +272,7 @@ export async function codSettlementCounts(period: Period): Promise<Record<Settle
       left join t on t.shipment_id = shipments.id
     where ${CO_THU_HO} and ${loc(period)}
     group by 1
-  `));
+  `)));
   const out = { ALL: 0, DA_TRA_DU: 0, TRA_THIEU: 0, CHUA_TRA: 0, QUA_HAN: 0, CHUA_GIAO: 0, GIAO_NHUNG_HOAN: 0, KHONG_PHAI_TRA: 0 } as Record<SettlementStatus, number> & { ALL: number };
   for (const r of list) {
     const key = String(r.status) as SettlementStatus;
@@ -343,7 +349,8 @@ export async function listStatementPayments(limit = 40): Promise<StatementPaymen
  */
 export async function statementGapDays(): Promise<{ from: string; to: string; shipments: number; amount: number }[]> {
   const db = await getDb();
-  const list = rowsOf(await db.execute(sql`
+  // TẮT JIT: lọc PHAI_TRA (ORDER_OUTCOME_FAST) trên TOÀN BỘ vận đơn, không giới hạn kỳ.
+  const list = rowsOf(await chayKhongJit(db, (tx) => tx.execute(sql`
     with t as (${SO_CHUNG_TU})
     select coalesce(shipments.delivered_at, shipments.vtp_status_date)::date::text ngay,
            count(*) n, coalesce(sum(shipments.cod_amount), 0) tien
@@ -353,7 +360,7 @@ export async function statementGapDays(): Promise<{ from: string; to: string; sh
     where ${PHAI_TRA} and t.cod_tra is null
       and coalesce(shipments.delivered_at, shipments.vtp_status_date) is not null
     group by 1 order by 1
-  `));
+  `)));
   const out: { from: string; to: string; shipments: number; amount: number }[] = [];
   for (const d of list) {
     const day = String(d.ngay);
@@ -389,7 +396,8 @@ export type MissingStatement = {
  */
 export async function missingStatementPeriods(): Promise<MissingStatement[]> {
   const db = await getDb();
-  const list = rowsOf(await db.execute(sql`
+  // TẮT JIT: lọc PHAI_TRA (ORDER_OUTCOME_FAST) trên TOÀN BỘ vận đơn, không giới hạn kỳ.
+  const list = rowsOf(await chayKhongJit(db, (tx) => tx.execute(sql`
     with ky as (
       -- Mỗi bảng kê phủ MỘT KHOẢNG ngày phát, không phải từng ngày rời rạc: trong khoảng đó có thể
       -- có ngày không đơn nào được chi trả, đó là Viettel Post chưa trả (xem nhóm "Quá hạn"), chứ
@@ -413,7 +421,7 @@ export async function missingStatementPeriods(): Promise<MissingStatement[]> {
     where don.ngay between bien.tu and bien.den
       and not exists (select 1 from ky where don.ngay between ky.tu and ky.den)
     order by 1
-  `));
+  `)));
   const out: MissingStatement[] = [];
   for (const d of list) {
     const day = String(d.ngay);

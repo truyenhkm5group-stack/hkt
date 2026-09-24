@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis, isConclusive, rowsToRender, spendClassOf } from "@/lib/constants/ads-decision";
+import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis, isConclusive, keepRipeRows, rowsToRender, spendClassOf } from "@/lib/constants/ads-decision";
 import { DECISION_METRIC_HINT, buildDecisionRow, decideAction, getAdsDecision, inheritVerdict } from "@/lib/queries/ads-decision";
 import { hrefWith, type Period } from "@/lib/search-params";
 
@@ -450,6 +453,20 @@ export async function testAdsDecision(db: Db) {
   // `all` = vẽ hết.
   assert.equal(rowsToRender(hon, true, 80).shown.length, hon.length);
   assert.equal(rowsToRender(hon, true, 80).hidden.length, 0);
+
+  /*
+    DÒNG ĐÃ CHÍN KHÔNG ĐƯỢC NẰM TRONG PHẦN ẨN — nút Bàn tay chỉ hiện trên dòng chín, nên một dòng
+    chín bị ẩn là một nút không ai thấy (chủ shop báo 24/09/2026: "không thấy Bàn tay").
+  */
+  const tach = rowsToRender(hon, false, 80);
+  const chinBiAn = tach.hidden[tach.hidden.length - 1];
+  assert.ok(chinBiAn, "bài này cần ít nhất một dòng ẩn để có nghĩa");
+  const giu = keepRipeRows(tach, new Set([chinBiAn.key]));
+  assert.ok(giu.shown.some((r) => r.key === chinBiAn.key), "dòng đã chín phải được gửi xuống dù rowsToRender xếp nó vào phần ẩn");
+  assert.ok(!giu.hidden.some((r) => r.key === chinBiAn.key), "một dòng không được vừa hiện vừa ẩn");
+  assert.deepEqual(giu.shown.slice(0, tach.shown.length).map((r) => r.key), tach.shown.map((r) => r.key), "phần đang hiện giữ nguyên thứ tự — không xáo lại bảng");
+  assert.equal(giu.shown.length + giu.hidden.length, hon.length, "không thêm, không mất dòng nào");
+  assert.deepEqual(keepRipeRows(tach, new Set()), tach, "không dòng nào chín thì y như cũ");
   // NO_SPEND_DATA cũng là "chưa có kết luận" — không được giữ chỗ như một khuyến nghị.
   assert.equal(isConclusive("NO_SPEND_DATA"), false);
   assert.equal(isConclusive("WATCH"), true, "THEO DÕI là một kết luận thật");
@@ -639,6 +656,51 @@ export async function testAdsDecision(db: Db) {
   assert.equal(camp.successRate, 66.7, "GTC = 2 ÷ 3 đơn đã kết thúc, giữ một chữ số thập phân như successRate()");
   // Cước của đơn đã giao (2) + đơn hoàn (1) = 90.000đ; đơn hoàn không có return_fee trong fixture.
   assert.equal(camp.shippingCost, 90_000, "cước phải tính cả trên đơn hoàn");
+
+  // ───────── TIN NHẮN = greatest(messages, leads) — CÙNG định nghĩa với sổ chỉ số ─────────
+  // Dòng GÕ TAY ghi lead vào cột `leads`, cột `messages` luôn 0. Bản cũ đọc cột trần nên chiến
+  // dịch này có 0 tin nhắn, chi/tin nhắn và tỷ lệ chốt là `null` — trong khi báo cáo marketing
+  // theo ngày (`spendByDay`) đếm 40. Dòng thêm vào không mang tiền nên các số ở trên đứng nguyên,
+  // và được gỡ ra ngay để khối sau không thấy nó.
+  assert.equal(camp.messages, 0, "trước khi có dòng lead: chiến dịch này chưa có tin nhắn nào");
+  await db.insert(schema.adSpends).values({
+    platform: "Facebook",
+    campaign: "Chiến dịch quyết định",
+    campaignId: "camp-dec-1",
+    spend: 0,
+    leads: 40,
+    spendDate: new Date("2026-09-01T00:00:00Z"),
+    createdBy: "test",
+    externalKey: "test:ads-decision:leads",
+  });
+  clearMemo();
+  const coLead = (await getAdsDecision(ALL, "campaign")).rows.find((x) => x.key === "camp-dec-1");
+  assert.ok(coLead);
+  assert.equal(coLead.spend, 2_000_000, "dòng lead không mang tiền");
+  assert.equal(coLead.messages, 40, "tin nhắn = greatest(messages, leads) — lead gõ tay phải được đếm, như spendByDay");
+  assert.equal(coLead.costPerMessage, 50_000, "2.000.000 ₫ ÷ 40 tin nhắn");
+  assert.equal(coLead.closeRate, 7.5, "3 đơn ÷ 40 tin nhắn");
+  await db.delete(schema.adSpends).where(eq(schema.adSpends.externalKey, "test:ads-decision:leads"));
+  clearMemo();
+
+  // Và không truy vấn nào được cộng lại cột trần hay tự gõ lại `greatest(...)`: MỘT biểu thức,
+  // `AD_MESSAGES` ở lib/queries/ads-roas.ts. Quét mã ĐÃ VÀO KHO.
+  const MIEN_TRU_TIN_NHAN: Record<string, string> = {
+    // Script ops lấy mã từ `main` nhưng `lib/` từ image ĐÃ DEPLOY: import một export mới là sập
+    // cho tới lần deploy sau. Công thức giữ nguyên văn và chú thích tại chỗ trỏ về định nghĩa chuẩn.
+    "scripts/marketing-calibrate.ts": "script đối chiếu chạy qua ops, không được import export mới của lib/",
+  };
+  const COT_TRAN = /sum\(\s*\$\{\s*[\w.]*\bmessages\s*\}\s*\)|greatest\(\s*\$\{\s*[\w.]*\bmessages\s*\}\s*,\s*\$\{\s*[\w.]*\bleads\s*\}\s*\)/;
+  assert.ok(COT_TRAN.test("sum(${ads.messages})") && COT_TRAN.test("sum(${schema.adSpends.messages})"), "bộ dò phải bắt cột trần");
+  assert.ok(COT_TRAN.test("greatest(${ads.messages}, ${ads.leads})"), "bộ dò phải bắt bản gõ lại của định nghĩa");
+  assert.ok(!COT_TRAN.test("sum(${AD_MESSAGES})"), "dạng đúng không được bị bắt");
+  const tepTinNhan = execFileSync("git", ["ls-files", "lib", "app", "components", "scripts"], { encoding: "utf8" })
+    .split("\n")
+    .filter((f) => /\.(ts|tsx)$/.test(f) && f !== "lib/queries/ads-roas.ts" && existsSync(f));
+  const docTinNhan = tepTinNhan.filter((f) => !(f in MIEN_TRU_TIN_NHAN) && COT_TRAN.test(readFileSync(f, "utf8")));
+  assert.deepEqual(docTinNhan, [], `cộng tin nhắn quảng cáo bằng cột trần / bản chép — dùng AD_MESSAGES (lib/queries/ads-roas.ts): ${docTinNhan.join(", ")}`);
+  for (const f of Object.keys(MIEN_TRU_TIN_NHAN)) assert.ok(COT_TRAN.test(readFileSync(f, "utf8")), `${f}: miễn trừ đã hết tác dụng — xoá dòng miễn trừ`);
+  assert.ok(readFileSync("lib/queries/ads-roas.ts", "utf8").includes("greatest(${schema.adSpends.messages}, ${schema.adSpends.leads})"), "định nghĩa chuẩn phải còn ở ads-roas.ts");
 
   // ───────── Bất biến của mọi dòng, mọi cấp ─────────
   for (const dimension of ["campaign", "product", "adset", "ad"] as const) {

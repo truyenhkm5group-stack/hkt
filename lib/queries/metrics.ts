@@ -72,11 +72,11 @@ export function metricScope(period: Period, population: MetricPopulation = "conf
 
 export const IS_DELIVERED = sql`${ORDER_OUTCOME_FAST} = 'DELIVERED'`;
 /** `RETURNED` và `RETURNED_BY_RULE` LUÔN gộp làm một trong mọi tổng hợp (đặc tả mục 6). */
-export const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in ('RETURNED','RETURNED_BY_RULE')`;
+export const IS_RETURNED = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
 export const IS_CANCELLED = sql`${ORDER_OUTCOME_FAST} = 'CANCELLED'`;
 export const IS_OPEN = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
 /** Đơn ĐÃ KẾT THÚC — mẫu số của tỷ lệ giao thành công. Đơn huỷ KHÔNG nằm trong mẫu số. */
-export const IS_FINISHED = sql`${ORDER_OUTCOME_FAST} in ('DELIVERED','RETURNED','RETURNED_BY_RULE')`;
+export const IS_FINISHED = sql`${ORDER_OUTCOME_FAST} in (${sql.raw(FINISHED_OUTCOMES_SQL)})`;
 
 // ───────────────────────── Tiền ─────────────────────────
 

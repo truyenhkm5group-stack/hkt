@@ -13,6 +13,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { SUCCESS_RATE_OK } from "@/lib/constants/returns";
 import { getMarketerReport } from "@/lib/queries/payroll";
 import type { Period } from "@/lib/search-params";
+import { AD_MESSAGES } from "@/lib/queries/ads-roas";
 
 export type PerfRating = "GOOD" | "AVERAGE" | "POOR" | "NONE";
 
@@ -90,7 +91,7 @@ async function getAdsPerformanceUncached(period: Period): Promise<AdsPerformance
       marketerId: ads.marketerId,
       productId: ads.productId,
       spend: sql<number>`coalesce(sum(${ads.spend}), 0)`,
-      messages: sql<number>`coalesce(sum(greatest(${ads.messages}, ${ads.leads})), 0)`,
+      messages: sql<number>`coalesce(sum(${AD_MESSAGES}), 0)`,
       fbOrders: sql<number>`coalesce(sum(${ads.orders}), 0)`,
       campaigns: sql<number>`count(distinct coalesce(${ads.campaignId}, ${ads.campaign}))`,
     })

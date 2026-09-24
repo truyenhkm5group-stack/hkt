@@ -16,6 +16,7 @@ import { getNominalProfitReport, type NominalRow } from "@/lib/queries/profit-no
 import { NO_ORDER_VALUE_FILTER } from "@/lib/constants/order-value";
 import { getProbabilityLookup, orderDeliveryShare } from "@/lib/queries/projected-delivery";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { AD_MESSAGES } from "@/lib/queries/ads-roas";
 import type { Period } from "@/lib/search-params";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -296,7 +297,7 @@ async function readSpend(period: Period) {
   const day = sql<string>`to_char(${ads.spendDate} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`;
   const [byDay, byProduct, frontier, mapped] = await Promise.all([
     db
-      .select({ day, marketerId: ads.marketerId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)`, messages: sql<number>`coalesce(sum(greatest(${ads.messages}, ${ads.leads})), 0)` })
+      .select({ day, marketerId: ads.marketerId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)`, messages: sql<number>`coalesce(sum(${AD_MESSAGES}), 0)` })
       .from(ads)
       .where(and(...conds))
       .groupBy(sql`1`, ads.marketerId),

@@ -2,7 +2,7 @@
 
 **Mục đích**: Xác định chính xác các kịch bản có thể lặp lại được khi đo hiệu năng trang vận đơn (`/shipments`), để các bước sau so sánh với nhau được.
 
-**Ngày chốt**: 2025-07-XX · **Phiên bản base**: a6a219c (TECH-4-mucrcyev)
+**Ngày chốt**: 2026-09-22 (bản đầu ghi nhầm "2025-07-XX") · **Phiên bản base**: a6a219c (TECH-4-mucrcyev)
 
 ---
 

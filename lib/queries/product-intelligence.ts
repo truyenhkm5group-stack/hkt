@@ -5,6 +5,7 @@ import { lineUnitCost } from "@/lib/queries/cogs";
 import { successRate } from "@/lib/queries/metrics";
 import { ORDER_SOURCE, type OrderSourceKey } from "@/lib/queries/order-source";
 import { OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
+import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { availableStockExpr, variantLastCostSubquery, variantReceiptsSubquery, variantSalesSubquery, stockKnownExpr } from "@/lib/queries/stock";
 import type { Period } from "@/lib/search-params";
 
@@ -146,7 +147,7 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
     .as("pi_base");
 
   const DELIVERED = sql`${base.outcome} = 'DELIVERED'`;
-  const RETURNED = sql`${base.outcome} in ('RETURNED','RETURNED_BY_RULE')`;
+  const RETURNED = sql`${base.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const NOT_CANCELLED = sql`${base.outcome} <> 'CANCELLED'`;
 
   /*

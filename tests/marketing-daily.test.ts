@@ -17,6 +17,7 @@ import { getMarketingBreakdown, getMarketingDaily, hasDimensionFilter, type Mark
 import { blendDeliveryRate, deliveryRateCoverageParts, DELIVERY_RATE_SOURCE_LABEL, DELIVERY_RATE_SOURCES, MAX_BORROWED_SHARE, parseDeliveryRateOverride, resolveDeliveryRate, type DeliveryRateSource } from "@/lib/constants/delivery-rate";
 import { DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
 import { getDailyBreakdown } from "@/lib/queries/reports";
+import { getOperatingCost } from "@/lib/queries/cost-engine";
 import type { Period } from "@/lib/search-params";
 
 const ALL: Period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
@@ -561,6 +562,19 @@ export async function testMarketingDailyReconciliation() {
   if (unknownSpendDays > 0) {
     assert.ok(daily.warnings.some((w) => w.includes("chi quảng cáo")), "có ngày chưa biết chi tiêu thì màn hình phải nói ra, không để người đọc tự đoán");
   }
+
+  /*
+    ĐỐI SOÁT VỚI MỘT ĐƯỜNG TÍNH KHÁC, KHÔNG PHẢI VỚI CHÍNH NÓ.
+
+    Hai báo cáo ở trên cùng gọi một hàm rải chi phí theo ngày, nên chúng luôn khớp nhau — kể cả khi
+    cả hai cùng cộng khoản ADS gõ tay chồng lên tài khoản QC (đã xảy ra tới 24/09/2026). Hai chốt
+    dưới đây so với Profit Engine và với chính bảng `ad_spends`, là những nơi sổ thẩm quyền quyết.
+  */
+  const engine = await getOperatingCost(ALL);
+  assert.equal(daily.totals.operatingCost, engine.amount, "Σ chi phí vận hành theo ngày = getOperatingCost() của cùng kỳ — qua sổ thẩm quyền, không đọc thẳng bảng Chi phí");
+  const db = await getDb();
+  const [qc] = await db.select({ v: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` }).from(schema.adSpends).where(sql`${schema.adSpends.excluded} = false`);
+  assert.equal(canonical.reduce((s, r) => s + r.adSpend, 0), Number(qc?.v ?? 0), "chi QC theo ngày của Báo cáo lợi nhuận = đúng bảng ad_spends, không cộng khoản gõ tay nhóm Quảng cáo");
 }
 
 /**
