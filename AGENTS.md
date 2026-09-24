@@ -558,6 +558,20 @@ deploy dừng, không phải cảnh báo.
     đơn chờ vẫn ở hàng đợi CSKH; quyết định mang `users.id` do máy chủ đọc, và hai loại đầu tự rơi
     khi đợt thiếu kết thúc.
 
+71. **LƯƠNG TỰ ĐỘNG: MÁY LÀM, NGƯỜI KÝ, "ĐÃ TRẢ" CHỈ BẰNG SAO KÊ** (`docs/payroll-autopilot.md`,
+    chủ shop chốt 25/09/2026: chốt số ngày 01, trả ngày 15). Máy tính kỳ, gửi phiếu, nhắc, lập lệnh
+    chuyển và khớp sao kê qua ĐÚNG lõi người bấm dùng (`lib/payroll/run-service.ts`, không phải
+    "use server"); lõi tự chặn máy ở mọi việc ngoài `CALCULATE`/`SUBMIT_REVIEW` — duyệt/khoá là chữ
+    ký. ERP KHÔNG chuyển tiền: tài khoản là cá nhân, và nút chuyển trong ERP nghĩa là ai chiếm ERP là
+    rút được tiền; ERP dựng mã VietQR tại chỗ (không gọi dịch vụ ngoài). Dòng lệnh chỉ thành "đã trả"
+    khi một dòng sao kê khớp CẢ nội dung riêng LẪN số tiền (hoặc người chọn đúng dòng sao kê); đủ dòng
+    thì kỳ tự sang `PAID` với `paid_by = NULL`. Đơn có kết cục sau ngày chốt: tháng M+2 máy tính lại
+    kỳ M bằng TỶ LỆ ĐÃ CHỐT, phần chênh thành MỘT dòng điều chỉnh "Quyết toán … — truy lĩnh/truy thu"
+    ở kỳ M+1; không viết lại ảnh chụp, không xoá dòng người nhập, sổ lỗ lũy kế ⇒ người quyết toán.
+    "Đã nghỉ" đi bằng NGÀY (`employmentWindow`) — cờ tắt không được làm mất tháng còn làm dở. Phiếu
+    lương gửi hộp thư CÁ NHÂN (`user_messages`), cổng trang nhân viên là QUYỀN SỞ HỮU phiếu; im lặng
+    quá hạn là "không phản hồi", KHÔNG phải "đã xác nhận"; tiêu đề tin và tin nhóm Lark không in số tiền.
+
 ## 4. Database
 - Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và

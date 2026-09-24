@@ -619,10 +619,15 @@ export function testPayrollProductionReadiness() {
           khoá quyền rồi mới quyết, nên là một lượt hỏi quyền đầy đủ. Đòi ĐỦ HAI THỨ — tính phạm vi
           VÀ có câu chặn dựa trên phạm vi ấy — vì một cửa tính ra phạm vi rồi không dùng nó thì vẫn
           đang mở toang.
+
+          Dạng thứ tư (25/09/2026) là CỔNG SỞ HỮU PHIẾU (`payslipOwnerGate(user, …)`): người được gửi
+          phiếu lương trả lời được ĐÚNG phiếu ấy và không gì khác. Nó hẹp hơn mọi khoá quyền lương —
+          cấp `payroll:view-own` cho cả vai trò Kho / CSKH chỉ để họ bấm "xác nhận" là mở rộng hơn thứ
+          đang cần. Và nó vẫn là một câu chặn thật: không khớp chủ phiếu thì từ chối.
         */
         assert.match(
           dau,
-          /can\(\s*user\s*,|requireManage\(\)|resolvePayrollScope\(\s*user\s*\)[\s\S]{0,400}can(?:Open|SeeAll|Administer)Payroll\(/,
+          /can\(\s*user\s*,|requireManage\(\)|resolvePayrollScope\(\s*user\s*\)[\s\S]{0,400}can(?:Open|SeeAll|Administer)Payroll\(|payslipOwnerGate\(\s*user\s*,[\s\S]{0,120}if \(!gate\.ok\) return/,
           `9. ${tep}::${ten} phải kiểm QUYỀN lương, không chỉ kiểm đã đăng nhập`,
         );
         if (laRoute) {

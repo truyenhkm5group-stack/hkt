@@ -106,6 +106,13 @@ export type PayrollSnapshot = {
      */
     carry?: PayrollLineCarrySnapshot | null;
     /**
+     * Điều chỉnh của đường tính cũ, đã mang dấu. `undefined` = ảnh chụp dựng trước khi đường cũ nhận
+     * điều chỉnh (khi ấy `salary` cũng chưa gồm chúng) — KHÁC `null` (người đi máy chung).
+     */
+    legacyAdjustments?: { items: { label: string; kind: string; amount: number; reason: string }[]; total: number } | null;
+    /** Phần kỳ thật sự làm khi bị ngày vào / ngày nghỉ cắt. `undefined` = ảnh chụp đời cũ. */
+    employmentClip?: { from: string; to: string; days: number } | null;
+    /**
      * ═══ CHI TIẾT TỪNG THÀNH PHẦN CỦA MÁY TÍNH LƯƠNG CHUNG ═══
      *
      * `null` = người này tính bằng đường cũ (bốn ô trên hồ sơ nhân sự).
@@ -170,6 +177,8 @@ export function buildPayrollSnapshot(report: PayrollReport, period: Period, key:
       bonusPersonal: l.bonusPersonal,
       bonusRevenue: l.bonusRevenue,
       salary: l.salary,
+      legacyAdjustments: l.legacyAdjustments,
+      employmentClip: l.employmentClip,
       carry: l.carry
         ? {
             monthKey: l.carry.monthKey,
