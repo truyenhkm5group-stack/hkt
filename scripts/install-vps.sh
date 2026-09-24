@@ -83,6 +83,7 @@ if [ -f .env ]; then
   [ -n "${MARKETING_LEDGER_EVERY_MINUTES:-}" ] && upsert_env MARKETING_LEDGER_EVERY_MINUTES "${MARKETING_LEDGER_EVERY_MINUTES}"
   [ -n "${ADS_WRITE_ENABLED:-}" ] && upsert_env ADS_WRITE_ENABLED "${ADS_WRITE_ENABLED}"
   [ -n "${ADS_WRITE_MODE:-}" ] && upsert_env ADS_WRITE_MODE "${ADS_WRITE_MODE}"
+  [ -n "${CREATIVE_LOOP_EVERY_MINUTES:-}" ] && upsert_env CREATIVE_LOOP_EVERY_MINUTES "${CREATIVE_LOOP_EVERY_MINUTES}"
 else
   say "Tạo .env — nhập thông tin (Enter để dùng mặc định)"
   ask ERP_DOMAIN          "Tên miền ERP"                       "erp.vnxcommerce.com"
