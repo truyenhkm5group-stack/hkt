@@ -1,5 +1,14 @@
 # Bàn giao: Bot chat bán hàng Pancake + AI → tích hợp vào ERP
 
+> **Trạng thái thật (24/09/2026, commit `e56833eb`): KHÔNG port theo mục 13.** Chủ shop cần bot
+> chạy 24/7 trên VPS và quản lý trong ERP; cách đã làm là chạy NGUYÊN mã bot (thư mục `chatbot/`,
+> 23/23 selftest vẫn đạt) thành dịch vụ `chatbot` trong `docker-compose.prod.yml`, quản lý từ trang
+> **Bot chat** (`/chatbot`) qua cửa duy nhất `/api/chatbot/[...path]` (quyền `cs:config`). Lý do:
+> chín nhóm chốt chặn ở mục 7 mỗi nhóm là một sự cố thật, viết lại theo đặc tả là cách chắc nhất để
+> chúng quay lại. Khoá (token fanpage, Gemini, POS) nằm ở volume `chatbot_data` trên VPS, không vào
+> kho mã. Mục 13 giữ nguyên làm ghi chép phương án ban đầu; các mục còn lại vẫn là đặc tả hành vi
+> của bot đang chạy.
+
 > **Cách dùng tài liệu này:** đưa nguyên file cho Claude (hoặc lập trình viên) ở dự án ERP và nói:
 > *"Đây là đặc tả bot chat bán hàng đang chạy thật. Hãy port sang ERP theo kiến trúc ở mục 13."*
 > Mọi quy tắc trong tài liệu đều rút ra từ sự cố thật khi vận hành (có ghi ngày), **không phải lý thuyết** —
@@ -285,6 +294,8 @@ tận dụng cache prompt (~90% token đầu vào được cache).
 ---
 
 ## 13. Gợi ý kiến trúc khi đưa lên ERP
+
+> *Phương án ban đầu, KHÔNG được chọn — xem khối trạng thái đầu tệp (`e56833eb`).*
 
 ### 13.1 Tách thành dịch vụ
 ```

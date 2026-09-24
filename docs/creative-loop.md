@@ -271,7 +271,7 @@ Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `l
 | Bật `enabled` ở tab Cấu hình | công tắc mềm của vòng |
 | Bấm **Nhập ảnh sản phẩm từ Pancake** (hoặc tải tay ảnh sản phẩm thật) cho các mã muốn test | máy không sinh mẫu cho sản phẩm nó không nhìn thấy |
 | Bấm **Nhập mẫu thắng / mẫu tốt từ Facebook** (token hiện có `ads_read` là đủ — chỉ GET) | chọn mẩu nào làm mẫu cha là việc của người |
-| Chốt ba con số "đề xuất" ở §3 | ngưỡng tiền |
+| ~~Chốt ba con số "đề xuất" ở §3~~ — **ĐÃ CHỐT 24/09/2026** (`b32a1fac`: 200.000đ/lượt · 1.000.000đ/ngày · 2 USD/ngày) | ngưỡng tiền |
 
 ## 8. BLOCKED / HUMAN GATE
 
