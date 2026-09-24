@@ -56,6 +56,10 @@ const BOC_THEO_HINH_DANG: { tep: string; ham: string; soLan: number }[] = [
   { tep: "lib/queries/landing.ts", ham: "export async function landingSummary(", soLan: 1 },
   // /reports/profit (tiền thật)
   { tep: "lib/queries/profit-cash.ts", ham: "export async function getCashProfitReport(", soLan: 3 },
+  // /ads + bảng lương — perf-probe 24/09/2026: 5.388–7.705 ms trên đường thật, 31–36 ms khi tắt JIT
+  { tep: "lib/queries/payroll.ts", ham: "export async function salesByProductPage(", soLan: 1 },
+  // /reports?tab=nominal, /ads/daily — perf-probe 24/09/2026: 4.908 ms, cùng phép gộp vsales đã đo 8.578 → 26 ms
+  { tep: "lib/queries/profit-nominal.ts", ham: "async function stockByProduct(", soLan: 1 },
 ];
 
 const goc = path.resolve(__dirname, "..");
