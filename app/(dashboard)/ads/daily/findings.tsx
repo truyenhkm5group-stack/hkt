@@ -8,6 +8,7 @@ import { CELL_STATUS_LABEL } from "@/lib/metrics/scorecard";
 import { TARGET_SCOPE_LABEL } from "@/lib/constants/metric-registry";
 import { baselineOf, diagnose, lossStreakOf, sortFindings, type DiagnoseSnapshot, type MarketingFinding } from "@/lib/marketing/diagnose";
 import { explainMarketing } from "@/lib/marketing/ai-explain";
+import { AiPendingRefresh } from "./ai-pending";
 import { evaluateMarketingTargets } from "@/lib/queries/marketing-targets";
 import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
 import { MISSING_TEXT } from "@/lib/format";
@@ -186,9 +187,28 @@ export async function MarketingFindings({ data }: { data: MarketingDaily }) {
   );
 }
 
+/**
+ * Chờ AI tối đa bấy nhiêu mili giây trước khi nhả trang. Đệm trúng thì AI trả trong vài mili
+ * giây nên luôn lọt; lượt gọi mô hình thật (~10 giây, xem khối chú thích phía trên) thì không.
+ */
+const AI_CHO_TOI_DA_MS = 1_500;
+const DANG_VIET = Symbol("dang-viet");
+
 async function AiExplanation({ data, baseline, findings }: { data: MarketingDaily; baseline: DiagnoseSnapshot | null; findings: MarketingFinding[] }) {
   if (!findings.length) return null;
-  const ai = await explainMarketing({
+  /*
+    ═══ TRANG KHÔNG CHỜ MÔ HÌNH — LỜI GỌI VẪN CHẠY TIẾP Ở NỀN ═══
+
+    Suspense riêng (khối chú thích trên) chỉ cho bảng HIỆN trước; luồng trả về vẫn mở tới khi mô
+    hình trả lời, nên trang chưa "xong" và smoke đo `/ads/daily` 14–16 giây (23/09/2026) trong khi
+    mọi hàm dữ liệu của trang chỉ ~3 giây nguội.
+
+    Nên đua với một đồng hồ: đệm trúng ⇒ hiện ngay; chưa có ⇒ in "đang viết" và NHẢ trang. Lời
+    gọi KHÔNG bị huỷ — `explainMarketing` tự ghi kết quả vào đệm 10 phút khi xong, và
+    `AiPendingRefresh` làm mới trang để nhặt nó. Không có lượt gọi thứ hai: lần làm mới gặp lượt
+    đang chạy trong bộ khử trùng lặp của `memo` (hoặc đệm đã có), không gọi lại mô hình.
+  */
+  const loiGoi = explainMarketing({
     scopeLabel: "Toàn shop",
     periodLabel: data.period.label,
     basisLabel: MARKETING_BASIS_LABEL[data.basis],
@@ -197,6 +217,10 @@ async function AiExplanation({ data, baseline, findings }: { data: MarketingDail
     findings,
     warnings: data.warnings,
   });
+  // `explainMarketing` tự nuốt lỗi của nhà cung cấp; `.catch` ở đây chỉ để lượt chạy nền không bao giờ thành lời hứa bị từ chối mồ côi.
+  loiGoi.catch(() => undefined);
+  const ai = await Promise.race([loiGoi, new Promise<typeof DANG_VIET>((r) => setTimeout(() => r(DANG_VIET), AI_CHO_TOI_DA_MS))]);
+  if (ai === DANG_VIET) return <AiPendingRefresh />;
   if (ai.explanation) {
     return (
       <div className="mt-4 rounded-lg border border-dashed p-3">
