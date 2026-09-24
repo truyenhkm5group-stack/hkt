@@ -76,10 +76,10 @@ mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của 
 | Ngân sách trọn đời một mẫu (khung test) | 200.000đ | chủ shop 24/09 |
 | Khung test | 1 ngày | chủ shop 24/09 |
 | Tổng cam kết test / ngày chạy | 2.000.000đ | = 10 × 200.000đ |
-| "Tiêu thêm" một lần bấm | 400.000đ | **đề xuất, chờ chốt** |
-| "Tiêu thêm" toàn shop / ngày | 2.000.000đ | **đề xuất, chờ chốt** |
+| "Tiêu thêm" một lần bấm | 200.000đ | chủ shop 24/09 |
+| "Tiêu thêm" toàn shop / ngày | 1.000.000đ | chủ shop 24/09 |
 | Ảnh sinh / ngày | 30 | chặn vòng lặp hỏng |
-| Chi sinh ảnh / ngày | 5 USD (cấu hình mặc định 3 USD) | **đề xuất, chờ chốt** |
+| Chi sinh ảnh / ngày | 2 USD | chủ shop 24/09 |
 
 Cấu hình (`settings` khoá `creative.config`) chỉ LÀM HẸP được, không nới. Trần tiền theo ngày đếm
 trên SỔ `creative_fb_actions` (lượt đã áp), không đếm trên cấu hình.
