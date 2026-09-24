@@ -100,10 +100,10 @@ export function GlobalSearch({ user }: { user: NavUserLike }) {
 
   return (
     <>
-      <Button variant="outline" size="sm" className="h-8 w-8 justify-start gap-2 px-0 text-muted-foreground sm:w-56 sm:px-3" onClick={() => setOpen(true)}>
+      <Button variant="ghost" size="sm" aria-label="Tìm kiếm" className="h-10 w-10 justify-center gap-2 rounded-full bg-muted px-0 text-muted-foreground hover:bg-muted/70 2xl:w-56 2xl:justify-start 2xl:px-4" onClick={() => setOpen(true)}>
         <Search className="size-4" />
-        <span className="hidden flex-1 text-left text-xs font-normal sm:inline">Tìm đơn, SĐT, mã vận đơn…</span>
-        <Kbd className="hidden sm:inline-flex">⌘K</Kbd>
+        <span className="hidden flex-1 text-left text-xs font-normal 2xl:inline">Tìm đơn, SĐT, mã vận đơn…</span>
+        <Kbd className="hidden 2xl:inline-flex">⌘K</Kbd>
       </Button>
       <CommandDialog open={open} onOpenChange={setOpen} title="Tìm kiếm" description="Tìm nhanh đơn hàng, vận đơn, khách hàng, sản phẩm, công việc, nhân sự">
         <CommandInput placeholder="Nhập mã đơn, số điện thoại, tên khách, mã vận đơn, tên việc, tên nhân viên…" value={query} onValueChange={setQuery} />

@@ -61,7 +61,7 @@ export function NotificationBell() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative size-8" aria-label="Thông báo">
+        <Button variant="ghost" size="icon" className="relative size-10 rounded-full" aria-label="Thông báo">
           <Bell className="size-4" />
           {unread > 0 ? <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-white">{unread > 99 ? "99+" : unread}</span> : null}
         </Button>

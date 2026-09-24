@@ -38,6 +38,7 @@ export function MetricCard({
   tone = "primary",
   size = "md",
   href,
+  emphasis = false,
   className,
 }: {
   label: string;
@@ -58,13 +59,19 @@ export function MetricCard({
   size?: "md" | "lg";
   /** Mở đúng tập dữ liệu đã sinh ra con số này. */
   href?: string;
+  /**
+   * Ô NHẤN của giao diện Bento: nền mực, chữ sáng. Mỗi màn hình dùng NHIỀU NHẤT MỘT ô như vậy — cho
+   * con số mà người đọc phải nhìn thấy đầu tiên. Hai ô nhấn là không ô nào nhấn.
+   */
+  emphasis?: boolean;
   className?: string;
 }) {
+  const soft = emphasis ? "text-ink-foreground/70" : "text-muted-foreground";
   const hasChange = typeof change === "number" && Number.isFinite(change);
   const body = (
     <>
       <div className="flex items-start justify-between gap-3">
-        <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground">
+        <p className={cn("flex items-center gap-1.5 text-[13px] font-semibold", soft)}>
           <span className="truncate">{label}</span>
           {hint ? <InfoHint>{hint}</InfoHint> : null}
         </p>
@@ -74,8 +81,8 @@ export function MetricCard({
           </span>
         ) : null}
       </div>
-      <p className={cn("numeric mt-2 font-bold tracking-tight", size === "lg" ? "text-[28px] leading-9 sm:text-[32px]" : "text-2xl sm:text-[26px]")}>{value}</p>
-      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+      <p className={cn("numeric mt-2 font-extrabold tracking-[-0.025em]", size === "lg" ? "text-[30px] leading-9 sm:text-[34px]" : "text-2xl sm:text-[27px]")}>{value}</p>
+      <div className={cn("mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs", soft)}>
         {hasChange ? (
           <span className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold", goodWhen === "neutral" ? "bg-muted text-muted-foreground" : (goodWhen === "up" ? change >= 0 : change <= 0) ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive")}>
             {change >= 0 ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
@@ -90,7 +97,8 @@ export function MetricCard({
   );
 
   const shell = cn(
-    "group/metric relative flex h-full flex-col rounded-xl border bg-card text-card-foreground shadow-[var(--shadow-card)]",
+    "group/metric relative flex h-full flex-col rounded-2xl border border-transparent shadow-[var(--shadow-card)]",
+    emphasis ? "bg-ink text-ink-foreground" : "bg-card text-card-foreground",
     size === "lg" ? "p-5 sm:p-6" : "p-5",
     className,
   );
@@ -101,12 +109,12 @@ export function MetricCard({
       href={href}
       className={cn(
         shell,
-        "transition-[border-color,box-shadow,transform] hover:border-primary/40 hover:shadow-[var(--shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        "transition-[border-color,box-shadow,transform] hover:-translate-y-0.5 hover:shadow-[var(--shadow-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
       )}
     >
       {body}
       {/* Mũi tên chỉ hiện khi rê vào: bấm được thì nói ra, nhưng không thêm nhiễu lúc đang đọc số. */}
-      <ArrowRight className="absolute bottom-4 right-4 size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover/metric:opacity-70" aria-hidden />
+      <ArrowRight className={cn("absolute bottom-4 right-4 size-3.5 opacity-0 transition-opacity group-hover/metric:opacity-70", soft)} aria-hidden />
     </Link>
   );
 }
