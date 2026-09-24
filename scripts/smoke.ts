@@ -170,6 +170,13 @@ const ROUTES = [
   "/landing",
   "/ideas",
   "/marketing/creatives",
+  // Vòng mẫu: sáu tab, mỗi tab một đường đọc riêng (lô chờ duyệt · số đo sống · thư viện · sổ học ·
+  // nguồn ảnh · cấu hình). Mặc định mở "Duyệt lô" khi có lô chờ, nên tab Nguồn ảnh cũng phải khai tường minh.
+  "/marketing/creatives?tab=duyet",
+  "/marketing/creatives?tab=dang-chay",
+  "/marketing/creatives?tab=thu-vien",
+  "/marketing/creatives?tab=hoc",
+  "/marketing/creatives?tab=nguon",
   "/marketing/creatives?tab=cau-hinh",
   // QUY KẾT FANPAGE → MARKETER. Ba tab đọc ba đường khác nhau trên cùng ảnh chụp `order_attributions`,
   // nên mở mỗi tab một lần mới phủ hết: bảng theo người · danh sách từng đơn · màn hình khai báo.

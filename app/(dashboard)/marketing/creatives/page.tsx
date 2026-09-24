@@ -1,22 +1,36 @@
+import { ApproveTab } from "@/app/(dashboard)/marketing/creatives/approve-tab";
 import { ConfigTab } from "@/app/(dashboard)/marketing/creatives/config-tab";
+import { LearningTab } from "@/app/(dashboard)/marketing/creatives/learning-tab";
+import { LibraryTab } from "@/app/(dashboard)/marketing/creatives/library-tab";
+import { LiveTab } from "@/app/(dashboard)/marketing/creatives/live-tab";
 import { SourcesTab } from "@/app/(dashboard)/marketing/creatives/sources-tab";
 import { CreativeTabs } from "@/app/(dashboard)/marketing/creatives/tabs";
 import { PageHeader } from "@/components/page-header";
+import { getDb } from "@/db";
 import { can, requirePermission } from "@/lib/auth/session";
 import { CREATIVE_HARD_LIMITS } from "@/lib/constants/creative-loop";
 import { formatNumber, formatVND } from "@/lib/format";
+import { getPendingBatch } from "@/lib/queries/creative-loop";
 import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Vòng mẫu quảng cáo" };
 
-/** Tab đã có màn hình. Tab của gói sau (duyệt lô · đang chạy · thư viện · học) thêm khi nó tồn tại. */
-const TABS = new Set(["nguon", "cau-hinh"]);
+/** Tab đã có màn hình. */
+const TABS = new Set(["duyet", "dang-chay", "thu-vien", "hoc", "nguon", "cau-hinh"]);
+
+/** Tham số chỉ tab Nguồn ảnh đọc — có chúng mà thiếu `tab` thì người ta đang mở Nguồn ảnh (link cũ). */
+const SOURCE_KEYS = ["loai", "bat", "q", "page"];
 
 export default async function CreativesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("ideas:view");
   const raw = await searchParams;
   const tabRaw = param(raw, "tab");
-  const tab = TABS.has(tabRaw) ? tabRaw : "nguon";
+  const db = await getDb();
+  // Một câu đọc rẻ quyết tab mặc định: có lô CHỜ DUYỆT thì mở thẳng vào đó — việc duy nhất có hạn chót.
+  const pending = await getPendingBatch(db);
+  const pendingApproval = pending?.batch.status === "PENDING_APPROVAL";
+  const defaultTab = pendingApproval && !SOURCE_KEYS.some((k) => param(raw, k)) ? "duyet" : "nguon";
+  const tab = TABS.has(tabRaw) ? tabRaw : defaultTab;
   const L = CREATIVE_HARD_LIMITS;
 
   return (
@@ -34,9 +48,17 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
         }
       />
 
-      <CreativeTabs active={tab} />
+      <CreativeTabs active={tab} defaultTab={defaultTab} pendingApproval={pendingApproval} />
 
-      {tab === "cau-hinh" ? (
+      {tab === "duyet" ? (
+        <ApproveTab pending={pending} batchId={param(raw, "lo") || null} canApprove={can(user, "expenses:write")} canEdit={can(user, "ideas:write")} />
+      ) : tab === "dang-chay" ? (
+        <LiveTab canWrite={can(user, "expenses:write")} />
+      ) : tab === "thu-vien" ? (
+        <LibraryTab />
+      ) : tab === "hoc" ? (
+        <LearningTab />
+      ) : tab === "cau-hinh" ? (
         <ConfigTab canManage={can(user, "settings:manage")} />
       ) : (
         <SourcesTab params={parseListParams(raw, { filterKeys: ["loai", "bat"], defaultPageSize: 24, defaultPeriod: "all", sortable: [] })} canWrite={can(user, "ideas:write")} />

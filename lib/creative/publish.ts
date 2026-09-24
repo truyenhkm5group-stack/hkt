@@ -137,7 +137,7 @@ export async function batchApprovalContent(db: Db, batch: Pick<BatchRow, "id" | 
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type Exec = Db | Tx;
 
-type LogInput = {
+export type LogInput = {
   actionDay: string;
   batchId: string | null;
   variantId: string | null;
@@ -153,7 +153,7 @@ type LogInput = {
   mode: string;
 };
 
-async function logAction(db: Exec, r: LogInput) {
+export async function logAction(db: Exec, r: LogInput) {
   if (r.outcome === "DENIED") {
     // Một lần chặn là MỘT sự kiện, dù vòng hỏi lại mười phút một lần.
     const [dup] = await db
