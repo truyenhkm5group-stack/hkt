@@ -1,5 +1,5 @@
 import { and, eq, sql, type SQL } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { getCashflowStatement } from "@/lib/queries/cashflow-statement";
 import { getFinancialTruth } from "@/lib/queries/financial-truth";
@@ -114,14 +114,16 @@ async function vonLuuDong(dauKy: Date | null, cuoiKy: Date | null) {
   /** Tới hết mốc `at`; `null` nghĩa là không chặn (dùng cho kỳ "Toàn bộ"). */
   const den = (col: SQL, at: Date | null) => (at ? sql`${col} <= ${at}` : sql`true`);
 
-  const [row] = await db
+  // TẮT JIT: bảng dẫn xuất `wc_facts` tính ORDER_OUTCOME_FAST cho MỌI đơn (không giới hạn kỳ) —
+  // họ câu đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+  const [row] = await chayKhongJit(db, (tx) => tx
     .select({
       codDau: sql<number>`coalesce(sum(${facts.cod}) filter (where ${daGiao} and ${facts.codCollected} = 0 and ${den(sql`${facts.codAt}`, dauKy)}), 0)`,
       codCuoi: sql<number>`coalesce(sum(${facts.cod}) filter (where ${daGiao} and ${facts.codCollected} = 0 and ${den(sql`${facts.codAt}`, cuoiKy)}), 0)`,
       traTruocDau: sql<number>`coalesce(sum(${facts.prepaid}) filter (where ${chuaXong} and ${den(sql`${facts.prepaidAt}`, dauKy)}), 0)`,
       traTruocCuoi: sql<number>`coalesce(sum(${facts.prepaid}) filter (where ${chuaXong} and ${den(sql`${facts.prepaidAt}`, cuoiKy)}), 0)`,
     })
-    .from(facts);
+    .from(facts));
 
   const n = (v: unknown) => Number(v ?? 0);
   return {

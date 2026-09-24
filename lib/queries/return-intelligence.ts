@@ -21,7 +21,7 @@
  *  · khối "Cần chú ý": mỗi dòng mang con số và cỡ mẫu đã dựng nên nó.
  */
 import { sql, type SQL } from "drizzle-orm";
-import { getDb } from "@/db";
+import { chayKhongJit, getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { DEPARTMENT_LABEL } from "@/lib/constants/departments";
@@ -416,6 +416,7 @@ async function careRows(period: Period, basis: TimeBasis, value: OrderValueFilte
   if (period.to) dk.push(sql`${moc} <= ${period.to}`);
   if ((period.from || period.to) && basis !== "ORDERED") dk.push(sql`${moc} is not null`);
 
+  // TẮT JIT: bảng dẫn xuất tính ORDER_OUTCOME_FAST cho mọi đơn của kỳ — cùng họ câu SQL thô với `baseRows` (return-reason-report.ts) đã đo JIT bật 4.034 ms ↔ tắt 183 ms.
   const rows = rowsOf<{
     state: string | null;
     owner_email: string | null;
@@ -425,7 +426,7 @@ async function careRows(period: Period, basis: TimeBasis, value: OrderValueFilte
     outcome: string;
     opened_at: unknown;
   }>(
-    await db.execute(sql`
+    await chayKhongJit(db, (tx) => tx.execute(sql`
       select c.entry_carrier_state as state,
              nullif(c.owner_email, '') as owner_email,
              (c.owner_id is not null) as has_owner,
@@ -441,7 +442,7 @@ async function careRows(period: Period, basis: TimeBasis, value: OrderValueFilte
            where ${sql.join(dk, sql` and `)}
           offset 0
         ) b on b.shipment_id = c.shipment_id
-    `),
+    `)),
   );
 
   const theoTrangThai = new Map<string, { cases: number; withOwner: number; withAction: number; hours: number[]; delivered: number; failed: number; pending: number }>();
@@ -541,8 +542,9 @@ async function trendPoints(period: Period, basis: TimeBasis, grain: TrendGrain, 
   if (period.to) dk.push(sql`${moc} <= ${period.to}`);
   dk.push(sql`${moc} is not null`);
 
+  // TẮT JIT: ORDER_OUTCOME_FAST + mốc bàn giao (truy vấn con tương quan) cho mọi đơn của kỳ — cùng họ câu với `baseRows` đã đo 95 % là JIT biên dịch.
   const rows = rowsOf<{ bucket: unknown; outcome: string; con: string; age_hours: string | number | null; n: string | number }>(
-    await db.execute(sql`
+    await chayKhongJit(db, (tx) => tx.execute(sql`
       select date_trunc(${grain === "WEEK" ? "week" : "day"}, b.moc) as bucket, b.outcome, b.con,
              /* Tuổi gom về rổ ngay ở SQL: rổ mới là thứ mô hình dùng, không phải từng giờ lẻ. */
              round(b.age_hours) as age_hours,
@@ -559,7 +561,7 @@ async function trendPoints(period: Period, basis: TimeBasis, grain: TrendGrain, 
         ) b
        group by 1, 2, 3, 4
        order by 1
-    `),
+    `)),
   );
 
   const theoRo = new Map<string, { eligibleSent: number; delivered: number; failed: number; active: number; projected: number; unmodelled: number }>();

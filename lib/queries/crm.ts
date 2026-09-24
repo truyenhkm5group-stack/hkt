@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { getDb } from "@/db";
+import { chayKhongJit, getDb } from "@/db";
 import { memo } from "@/lib/cache";
 import { CRM_RULE, CRM_SEGMENT_ORDER, type CrmSegment } from "@/lib/constants/crm";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
@@ -166,7 +166,8 @@ async function retentionUncached(): Promise<RetentionReport> {
 /** Mỗi khách một dòng, tính trên ĐƠN ĐÃ NHẬN. */
 async function dsKhach(db: Awaited<ReturnType<typeof getDb>>) {
   return rowsOf(
-    await db.execute(sql`
+    // TẮT JIT: `ORDER_FACTS` tính ORDER_OUTCOME_FAST cho TOÀN BỘ đơn — họ câu đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+    await chayKhongJit(db, (tx) => tx.execute(sql`
       with facts as (${ORDER_FACTS})
       select customer_id,
              count(*) as orders_n,
@@ -177,7 +178,7 @@ async function dsKhach(db: Awaited<ReturnType<typeof getDb>>) {
       from facts
       where outcome = 'DELIVERED' and customer_id is not null
       group by customer_id
-    `),
+    `)),
   ).map((r) => ({
     id: text(r.customer_id),
     orders: num(r.orders_n),
@@ -192,7 +193,8 @@ async function dsKhach(db: Awaited<ReturnType<typeof getDb>>) {
  */
 async function dsTheoDonDaDat(db: Awaited<ReturnType<typeof getDb>>) {
   return rowsOf(
-    await db.execute(sql`
+    // TẮT JIT: `ORDER_FACTS` tính ORDER_OUTCOME_FAST cho TOÀN BỘ đơn — họ câu đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+    await chayKhongJit(db, (tx) => tx.execute(sql`
       with facts as (${ORDER_FACTS}),
       per_customer as (
         select customer_id, count(*) as orders_n
@@ -202,14 +204,15 @@ async function dsTheoDonDaDat(db: Awaited<ReturnType<typeof getDb>>) {
       )
       select count(*) as buyers, count(*) filter (where orders_n >= 2) as repeat_buyers
       from per_customer
-    `),
+    `)),
   ) as { buyers: unknown; repeat_buyers: unknown }[];
 }
 
 /** Bao lâu thì khách quay lại (trung vị, chỉ trên khách ĐÃ mua lại). */
 async function dsKhoangCach(db: Awaited<ReturnType<typeof getDb>>) {
   return rowsOf(
-    await db.execute(sql`
+    // TẮT JIT: `ORDER_FACTS` tính ORDER_OUTCOME_FAST cho TOÀN BỘ đơn — họ câu đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+    await chayKhongJit(db, (tx) => tx.execute(sql`
       with facts as (${ORDER_FACTS}),
       ranked as (
         select customer_id, at,
@@ -222,7 +225,7 @@ async function dsKhoangCach(db: Awaited<ReturnType<typeof getDb>>) {
       join ranked r2 on r2.customer_id = r1.customer_id and r2.rn = 2
       where r1.rn = 1
       order by gap_days asc
-    `),
+    `)),
   ).map((r) => num(r.gap_days));
 }
 
@@ -244,7 +247,8 @@ export async function getRetentionCohorts(): Promise<CohortRow[]> {
 async function cohortsUncached(): Promise<CohortRow[]> {
   const db = await getDb();
   const cohortRows = rowsOf(
-    await db.execute(sql`
+    // TẮT JIT: `ORDER_FACTS` tính ORDER_OUTCOME_FAST cho TOÀN BỘ đơn — họ câu đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+    await chayKhongJit(db, (tx) => tx.execute(sql`
       with facts as (${ORDER_FACTS}),
       delivered as (
         select customer_id, at from facts where outcome = 'DELIVERED' and customer_id is not null
@@ -260,7 +264,7 @@ async function cohortsUncached(): Promise<CohortRow[]> {
       join first_buy f on f.customer_id = d.customer_id
       group by f.cohort, month
       order by f.cohort desc, month asc
-    `),
+    `)),
   ).map((r) => ({ cohort: text(r.cohort), month: text(r.month), customers: num(r.customers) }));
 
   const cohortNames = [...new Set(cohortRows.map((r) => r.cohort))].sort().slice(-CRM_RULE.cohortMonths);
@@ -341,12 +345,13 @@ async function finishRetention({ perCustomer, naive, medianDaysToSecond, buyers,
 
   // ───────── 7. Độ phủ: đơn giao thành công có gán khách ─────────
   const [cov] = rowsOf(
-    await db.execute(sql`
+    // TẮT JIT: `ORDER_FACTS` tính ORDER_OUTCOME_FAST cho TOÀN BỘ đơn — họ câu đã đo 95–99 % là JIT biên dịch (docs/perf/JIT-bat-tat-2026-09-23.md).
+    await chayKhongJit(db, (tx) => tx.execute(sql`
       with facts as (${ORDER_FACTS})
       select count(*) filter (where outcome = 'DELIVERED') as delivered_all,
              count(*) filter (where outcome = 'DELIVERED' and customer_id is not null) as delivered_linked
       from facts
-    `),
+    `)),
   );
   const deliveredOrders = num(cov?.delivered_all);
   const deliveredWithCustomer = num(cov?.delivered_linked);

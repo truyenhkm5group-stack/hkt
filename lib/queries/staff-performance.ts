@@ -1,5 +1,6 @@
 import { sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
+import { memo, periodKey } from "@/lib/cache";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
 import type { Period } from "@/lib/search-params";
@@ -86,6 +87,18 @@ export type StaffPerformance = {
  * khác nhau.
  */
 export async function getStaffPerformance(period: Period, field: AttributionField): Promise<StaffPerformance> {
+  /*
+    ĐỆM 120 GIÂY — chủ shop duyệt phương án của docs/tech-ai-room-status.md ("/reports/funnel 34,4 giây:
+    0 lời gọi memo()"). Bốn phép tổng hợp của trang chạy lại nguyên vẹn mỗi lần mở; mọi khối khác của
+    cùng trang (`conversion-funnel`, `conversation-funnel`, `sales-leakage`, `preship-risk-backtest`) đã
+    đệm 60–300 giây. Khoá chứa MỌI tham số đổi kết quả (AGENTS.md mục 2): kỳ (`periodKey` — mốc đầu/cuối
+    ngày giờ VN, ổn định suốt ngày) và VAI được xếp hạng (`field`) — hai vai là hai bảng khác
+    nhau. Ghi dữ liệu thì `clearMemo`/`staleMemo` xoá hoặc làm cũ đệm như mọi báo cáo khác.
+  */
+  return memo(`staffPerformance:${field}:${periodKey(period)}`, 120_000, () => staffPerformanceUncached(period, field));
+}
+
+async function staffPerformanceUncached(period: Period, field: AttributionField): Promise<StaffPerformance> {
   const db = await getDb();
   const who = columnFor(field);
   const from = period.from ? sql`${o.insertedAt} >= ${period.from.toISOString()}::timestamptz` : sql`true`;

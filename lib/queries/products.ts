@@ -262,7 +262,9 @@ export async function listProducts(params: ListParams, limit?: number) {
       .orderBy(orderBy, asc(p.name), asc(pv.sku))
       .limit(pageSize)
       .offset(limit ? 0 : (params.page - 1) * params.pageSize)),
-    db.select({ total: count() }).from(pv).innerJoin(p, eq(pv.productId, p.id)).where(where),
+    // Câu đếm chạy song song với câu danh sách; khi lọc theo tồn (`ERP_STOCK_SUB`, truy vấn con
+    // tương quan vào vận đơn cho TỪNG mẫu mã) nó mang cùng họ biểu thức sổ kho ⇒ tắt JIT luôn.
+    chayKhongJit(db, (tx) => tx.select({ total: count() }).from(pv).innerJoin(p, eq(pv.productId, p.id)).where(where)),
   ]);
 
   const ids = rows.map((r) => r.id);
@@ -344,7 +346,9 @@ async function productFacetsUncached(params: ListParams) {
       .where(and(base, sql`${schema.variantStocks.remainQuantity} > 0`))
       .groupBy(schema.variantStocks.warehouseId),
     listWarehouses(),
-    db
+    // TẮT JIT: `ERP_STOCK_SUB` (hai truy vấn con tương quan, một nối vận đơn) nội tuyến vào ba cột
+    // gộp trên mọi mẫu mã — cùng họ câu sổ kho đã đo 8.578 ms bật JIT ↔ 26 ms tắt (db/index.ts).
+    chayKhongJit(db, (tx) => tx
       .select({
         low: sql<number>`count(*) filter (where ${ERP_STOCK_SUB} between 1 and 5)`,
         out: sql<number>`count(*) filter (where ${ERP_STOCK_SUB} <= 0)`,
@@ -352,7 +356,7 @@ async function productFacetsUncached(params: ListParams) {
       })
       .from(pv)
       .innerJoin(p, eq(pv.productId, p.id))
-      .where(base),
+      .where(base)),
     db
       .select({
         selling: sql<number>`count(*) filter (where ${selling})`,
@@ -393,7 +397,9 @@ async function productSummaryUncached(params: ListParams) {
   const erpStock = erpStockExpr(sales, receipts);
   const stockKnown = stockKnownExpr(receipts);
   const unitCost = sql<number>`coalesce(${LAST_RECEIPT_COST}, ${pv.lastImportedPrice}, 0)`;
-  const [row] = await db
+  // TẮT JIT: nối ĐÚNG ba bảng dẫn xuất (`sold30` mang ORDER_OUTCOME_FAST · `vsales` · `vreceipts`)
+  // như câu danh sách của `listProducts` — họ câu đã đo 8.578 ms bật JIT ↔ 26 ms tắt (db/index.ts).
+  const [row] = await chayKhongJit(db, (tx) => tx
     .select({
       selling: sql<number>`count(*) filter (where ${selling})`,
       // "Sắp hết" / "Hết hàng" chỉ đếm mẫu mã TÍNH ĐƯỢC tồn. Mẫu mã chưa có phiếu nhập
@@ -423,7 +429,7 @@ async function productSummaryUncached(params: ListParams) {
     .leftJoin(sold, eq(sold.variantId, pv.id))
     .leftJoin(sales, eq(sales.variantId, pv.id))
     .leftJoin(receipts, eq(receipts.variantId, pv.id))
-    .where(where);
+    .where(where));
   return {
     selling: Number(row?.selling ?? 0),
     low: Number(row?.low ?? 0),
