@@ -46,8 +46,8 @@ export function testCreativeManualPure() {
   ]);
   assert.deepEqual(
     order.map((x) => x.id),
-    ["m1", "m2", "a", "b"],
-    "mẫu tự làm đăng trước, rồi theo số ô",
+    ["m1", "m2", "b", "a"],
+    "mẫu tự làm đăng trước, rồi mockup (khai thác), rồi thăm dò — cùng loại theo số ô",
   );
 
   assert.equal(isManualSeed({ manualSeed: true }), true);
@@ -82,7 +82,7 @@ export async function testCreativeManualDb(db: Db) {
   const truocGioDung = new Date(w.buildFrom.getTime() - 2 * 3_600_000); // 12:00 hôm trước
   const sauGioDung = new Date(w.buildFrom.getTime() + 3_600_000); // 15:00 hôm trước
   const [prevCfg] = await db.select().from(schema.settings).where(eq(schema.settings.key, CREATIVE_CONFIG_KEY));
-  const cfg = normalizeCreativeConfig({ enabled: true, batchSize: 3, extraCandidates: 0, focusProductIds: [`${P}prod`] }).config;
+  const cfg = normalizeCreativeConfig({ enabled: true, batchSize: 3, extraCandidates: 0, designSlots: 0, exploreSlots: 3, focusProductIds: [`${P}prod`] }).config;
 
   await cleanup(db, [day]);
   try {

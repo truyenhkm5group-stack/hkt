@@ -27,10 +27,14 @@ export async function saveCreativeConfig(input: unknown): Promise<SaveResult> {
   const user = await requireUser();
   if (!can(user, "settings:manage")) return { error: "Chỉ người có quyền “Cấu hình hệ thống khác” mới sửa được cấu hình vòng mẫu", problems: [] };
 
-  const v = validateCreativeConfigInput(input);
+  const truoc = await readCreativeConfig();
+  // Hai danh sách mockup được bật / tắt bằng công tắc ở tab Nguồn ảnh (`setDailyMockup`), không ở form
+  // này. Form không gửi chúng ⇒ GIỮ danh sách đang lưu: lưu form không được lặng lẽ tắt mockup của ai.
+  const rec = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const merged = { ...rec, mockupSourceIds: rec.mockupSourceIds ?? truoc.config.mockupSourceIds, mockupProductIds: rec.mockupProductIds ?? truoc.config.mockupProductIds };
+  const v = validateCreativeConfigInput(merged);
   if (!v.ok) return { error: v.error, problems: v.problems };
 
-  const truoc = await readCreativeConfig();
   await setSettingJson(CREATIVE_CONFIG_KEY, v.config);
   await audit({
     userId: user.id,

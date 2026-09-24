@@ -118,7 +118,7 @@ export function testCreativeWrite() {
   const phaiQua: { name: string; over: Partial<CreativeGateInput> }[] = [
     { name: "bằng đúng trần tiền ngày", over: { committedDayVnd: CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd - BUDGET } },
     // Mẫu đã có nhóm: tiền đã tính lúc tạo nhóm; bước tạo mẩu không được đếm lại dù sổ đã chạm trần.
-    { name: "tạo mẩu cho mẫu đã có nhóm", over: { action: "CREATE_AD", variantHasAdset: true, committedDayVnd: CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd, publishedInBatch: 10, targetCampaignId: null } },
+    { name: "tạo mẩu cho mẫu đã có nhóm", over: { action: "CREATE_AD", variantHasAdset: true, committedDayVnd: CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd, publishedInBatch: CREATIVE_HARD_LIMITS.maxBatchSize, targetCampaignId: null } },
     { name: "máy tắt theo luật đã kích hoạt", over: { action: "PAUSE_ADSET", targetCampaignId: null, ourAdset: true, pauseKind: "KILL_RULE", killRuleFired: true } },
     { name: "người tắt tay không cần luật", over: { action: "PAUSE_ADSET", targetCampaignId: null, ourAdset: true, pauseKind: "HUMAN" } },
     { name: "dọn nhóm đăng dở không cần luật", over: { action: "PAUSE_ADSET", targetCampaignId: null, ourAdset: true, pauseKind: "CLEANUP" } },
@@ -145,7 +145,7 @@ export function testCreativeWrite() {
     templateCampaignId: "khac",
     now: START,
     budgetPerVariantVnd: BUDGET * 5,
-    publishedInBatch: 10,
+    publishedInBatch: CREATIVE_HARD_LIMITS.maxBatchSize,
     committedDayVnd: CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd,
   };
   const suaLanLuot: { sua: Partial<CreativeGateInput>; ke: CreativeWriteDenial | "OK" }[] = [

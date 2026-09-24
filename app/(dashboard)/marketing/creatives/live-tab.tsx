@@ -1,6 +1,7 @@
 import { Activity } from "lucide-react";
 import { AdsKillSwitchCard } from "@/app/(dashboard)/marketing/creatives/kill-switch";
 import { ExtendButton, PauseNowButton } from "@/app/(dashboard)/marketing/creatives/live-actions";
+import { ScalePanel } from "@/app/(dashboard)/marketing/creatives/scale-panel";
 import { MODE_LABEL, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { StatStrip } from "@/components/stat-tile";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
@@ -65,6 +66,7 @@ export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boo
   return (
     <div className="space-y-4">
       <AdsKillSwitchCard state={kill} canEngage={canKill} canRelease={canRelease} />
+      <ScalePanel canWrite={canWrite} />
       <StatStrip
         columns={5}
         items={[

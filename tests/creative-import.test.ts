@@ -320,7 +320,8 @@ export async function testCreativeImportDb(db: Db) {
       { kind: "MANUAL", productId: `${P}prod-1`, title: `${P}manual`, imageId: manImg.id, genes: { model: "MALE" }, visionAt: realNow, visionSummary: "Ảnh tay" },
     ]);
 
-    const cfg = { ...DEFAULT_CREATIVE_CONFIG, enabled: true, batchSize: 5, extraCandidates: 3, exploreShare: 0.5, focusProductIds: [`${P}prod-1`, `${P}prod-2`] };
+    // Không ô THIẾT KẾ ở đây (khối kiểm riêng: tests/creative-design.test.ts); mockup của quảng cáo cũ THẮNG + 4 thăm dò.
+    const cfg = { ...DEFAULT_CREATIVE_CONFIG, enabled: true, batchSize: 5, extraCandidates: 3, designSlots: 0, exploreSlots: 4, mockupSourceIds: [sWin.id], focusProductIds: [`${P}prod-1`, `${P}prod-2`] };
     const inputs = await loadPlanInputs(db, batchDay, cfg);
     assert.deepEqual(inputs.products.map((x) => x.productId), [`${P}prod-1`], "prod-2 không có ảnh thật (ảnh Pancake lỗi)");
     const ownParent = inputs.parents.find((x) => x.ownAdSourceId === sWin.id);
@@ -334,7 +335,7 @@ export async function testCreativeImportDb(db: Db) {
     assert.ok(insp && insp.kind === "OWN_AD", "(4) OWN_AD thiếu gen là nguồn cảm hứng");
     assert.ok(!inputs.inspirations.some((x) => x.sourceId === sWin.id), "(4) mẫu cha không đồng thời là nguồn cảm hứng");
 
-    const plan = planBatch({ ...inputs, parents: inputs.parents.filter((x) => x.productId.startsWith(P)), inspirations: inputs.inspirations.filter((x) => x.productId === null || x.productId.startsWith(P)) });
+    const plan = planBatch({ ...inputs, exploreShare: 0.5, parents: inputs.parents.filter((x) => x.productId.startsWith(P)), inspirations: inputs.inspirations.filter((x) => x.productId === null || x.productId.startsWith(P)) });
     const exploit = plan.slots.filter((x) => x.mode === "EXPLOIT");
     assert.equal(exploit.length, 4, "8 ô × (1 − 0,5)");
     for (const x of exploit) {

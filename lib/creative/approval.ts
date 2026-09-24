@@ -9,7 +9,9 @@ import type { CreativeRule } from "@/lib/constants/creative-loop";
  * tới `số mẫu × ngân sách` — nên lần bấm ấy phải gắn chặt với ĐÚNG nội dung đã hiện trên màn hình.
  *
  * `approvalDigest` là sha256 của: ngày chạy · khung giờ · ngân sách mỗi mẫu · bộ luật tắt · và với
- * mỗi mẫu: id · băm ẢNH · câu chữ · tiêu đề. Đổi một ký tự câu chữ, tráo một tấm ảnh, nâng ngân sách,
+ * mỗi mẫu: id · băm ẢNH · câu chữ · tiêu đề · LUẬT RIÊNG của ô (ô mockup chấm theo lịch sử của mã — chủ
+ * shop 24/09/2026: lượt duyệt là cho phép máy tắt theo ĐÚNG các luật ấy, nên chúng nằm trong phiếu).
+ * Ô không có luật riêng thì khoá `rules` VẮNG MẶT (không phải `null`) — phiếu của lô cũ tính lại vẫn khớp. Đổi một ký tự câu chữ, tráo một tấm ảnh, nâng ngân sách,
  * dời khung giờ hay sửa một luật tắt SAU khi duyệt ⇒ digest khác ⇒ máy KHÔNG đăng
  * (`APPROVAL_MISMATCH`). Gạt một mẫu khỏi lô cũng làm digest đổi, nên phiếu cũ tự vô hiệu.
  *
@@ -24,7 +26,14 @@ import type { CreativeRule } from "@/lib/constants/creative-loop";
 /** Tên tool trong phiếu. Đổi chuỗi này là vô hiệu hoá mọi phiếu đang lưu hành — đó là ý muốn. */
 export const CREATIVE_BATCH_APPROVE_TOOL = "CREATIVE_BATCH_APPROVE";
 
-export type ApprovalVariant = { id: string; imageSha256: string; primaryText: string; headline: string };
+export type ApprovalVariant = {
+  id: string;
+  imageSha256: string;
+  primaryText: string;
+  headline: string;
+  /** `creative_variants.rules_snapshot` (JSON thô). `null` / thiếu = ô dùng luật chung của lô. */
+  rules?: Record<string, unknown> | null;
+};
 
 export type ApprovalContent = {
   batchDay: string;
@@ -44,7 +53,7 @@ export function approvalDigest(c: ApprovalContent): string {
     killRules: c.killRules,
     variants: [...c.variants]
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      .map((v) => ({ id: v.id, imageSha256: v.imageSha256, primaryText: v.primaryText, headline: v.headline })),
+      .map((v) => ({ id: v.id, imageSha256: v.imageSha256, primaryText: v.primaryText, headline: v.headline, ...(v.rules ? { rules: v.rules } : {}) })),
   };
   return createHash("sha256").update(stableStringify(payload)).digest("hex");
 }

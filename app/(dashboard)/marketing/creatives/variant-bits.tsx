@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Globe, ImageOff, MessageCircle } from "lucide-react";
 import { ExpandText } from "@/app/(dashboard)/marketing/creatives/creative-bits";
-import { GENE_KEYS, GENE_LABEL, GENE_VALUE_LABEL, SLOT_MODE_LABEL, type GeneKey, type SlotMode } from "@/lib/constants/creative-loop";
+import { DESIGN_DNA_KEYS, DESIGN_DNA_LABEL, DESIGN_DNA_VALUE_LABEL, GENE_KEYS, GENE_LABEL, GENE_VALUE_LABEL, SLOT_MODE_LABEL, type DesignDnaKey, type GeneKey, type SlotMode } from "@/lib/constants/creative-loop";
 import { cn } from "@/lib/utils";
 
 /**
@@ -35,6 +35,21 @@ export function GeneChips({ genes, mutated, className }: { genes: Record<string,
       {keys.map((k) => (
         <span key={k} className={cn("rounded bg-muted px-1.5 py-0.5 text-[10.5px]", k === mutated && "bg-primary/10 font-semibold text-primary")} title={k === mutated ? "Gen được ĐỔI so với mẫu cha" : undefined}>
           <span className="text-muted-foreground">{GENE_LABEL[k as GeneKey]}:</span> {GENE_VALUE_LABEL[genes[k]] ?? genes[k]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** DNA của một thiết kế / một mã bằng nhãn tiếng Việt (cổ / tay "không áp dụng" được ẩn). */
+export function DnaChips({ dna, className }: { dna: Record<string, string>; className?: string }) {
+  const keys = DESIGN_DNA_KEYS.filter((k) => dna[k] && !(dna[k] === "NONE" && (k === "neckline" || k === "sleeve")));
+  if (!keys.length) return <p className="text-[11.5px] italic text-muted-foreground">Chưa có DNA</p>;
+  return (
+    <div className={cn("flex flex-wrap gap-1", className)}>
+      {keys.map((k) => (
+        <span key={k} className="rounded bg-brand/10 px-1.5 py-0.5 text-[10.5px]">
+          <span className="text-muted-foreground">{DESIGN_DNA_LABEL[k as DesignDnaKey]}:</span> {(DESIGN_DNA_VALUE_LABEL[k as DesignDnaKey] as Record<string, string>)[dna[k]] ?? dna[k]}
         </span>
       ))}
     </div>

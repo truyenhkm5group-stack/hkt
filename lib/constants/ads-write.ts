@@ -106,6 +106,14 @@ export const ADS_WRITE_LIMITS = {
  * chặn của nó nằm ở `lib/constants/creative-loop.ts` (`CREATIVE_WRITE_ACTIONS`, `CREATIVE_HARD_LIMITS`),
  * cổng ở `lib/marketing/creative-write-gate.ts`, lời gọi vẫn ở cùng MỘT cửa ghi. Ngoại lệ ấy KHÔNG
  * mở rộng hai hành động dưới đây: bàn tay Nấc 3 vẫn không sửa creative và không tạo gì.
+ *
+ * NGOẠI LỆ THỨ HAI, CÓ CHỦ ĐÍCH — SCALE MẪU THẮNG (chủ shop quyết 24/09/2026, `docs/creative-loop.md` §5g):
+ * "tạo chiến dịch" được phép theo ĐÚNG MỘT cách — SAO CHÉP một trong hai chiến dịch MẪU do NGƯỜI dựng
+ * (id khai ở `creative.config.scaleTemplates`), bản sao LUÔN ở trạng thái TẮT (`status_option=PAUSED`),
+ * chỉ thay bài quảng cáo bằng mẫu thắng và đặt ngân sách ngày ≤ 500.000đ; BẬT chỉ khi người bấm "Duyệt
+ * chạy" với phiếu HMAC khoá đúng (chiến dịch nháp · ngân sách · bài). Máy vẫn KHÔNG tạo chiến dịch từ
+ * số không, không đổi đối tượng / mục tiêu. Hành động: `*_SCALE*` trong `CREATIVE_WRITE_ACTIONS`; cổng
+ * `gateScaleWrite`; lời gọi vẫn ở cùng MỘT cửa ghi.
  */
 export type AdsWriteAction = "SET_DAILY_BUDGET" | "PAUSE_CAMPAIGN";
 

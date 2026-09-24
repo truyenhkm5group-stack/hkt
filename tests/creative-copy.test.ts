@@ -235,7 +235,7 @@ export async function testCreativeCopyDb(db: Db) {
   const w = batchWindow(day, DEFAULT_CREATIVE_CONFIG);
   const at = new Date(w.buildFrom.getTime() + 3_600_000);
   const [prevCfg] = await db.select().from(schema.settings).where(eq(schema.settings.key, CREATIVE_CONFIG_KEY));
-  const cfg = normalizeCreativeConfig({ enabled: true, batchSize: 2, extraCandidates: 0, focusProductIds: [`${P}prod`], imageMode: "SYNC" }).config;
+  const cfg = normalizeCreativeConfig({ enabled: true, batchSize: 2, extraCandidates: 0, designSlots: 0, exploreSlots: 2, focusProductIds: [`${P}prod`], imageMode: "SYNC" }).config;
   let photoImageId: string | null = null;
 
   await cleanup(db, day);

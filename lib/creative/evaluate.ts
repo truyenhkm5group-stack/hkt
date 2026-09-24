@@ -1,4 +1,4 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { tienAiHomNay, tranNgayUsd } from "@/lib/ai/budget";
 import { estimateCostUsd, getAiProvider } from "@/lib/ai/provider";
@@ -17,6 +17,7 @@ import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { judgeVariant } from "@/lib/creative/judge";
 import { geneStats, outcomeOf, relativeBaseline, type GeneStat, type Observation } from "@/lib/creative/learn";
 import { purgeCreativeImage } from "@/lib/creative/images";
+import { proposeScale, type ScaleCandidate } from "@/lib/creative/scale";
 import {
   effectiveJudgeConfig,
   evaluationCandidates,
@@ -80,6 +81,8 @@ export type EvaluateResult = {
   ended: string[];
   /** Id mẫu vừa bị xoá điểm ảnh ở lượt này. */
   purged: string[];
+  /** Id dòng ĐỀ NGHỊ scale vừa chèn ở lượt này (mẫu THẮNG / HỨA HẸN — §5g). Không gọi Facebook. */
+  scaleProposals: string[];
   learning: { observations: number; relative: number };
   /** Cảnh báo không chặn (vd bản tin AI hỏng) — để job ghi vào `sync_runs`. */
   warnings: string[];
@@ -117,11 +120,12 @@ export async function evaluateCreatives(db: Db, now: Date, deps: EvaluateDeps = 
   const losses: string[] = [];
   const ended: string[] = [];
   const observations: Observation[] = [];
+  const scaleCandidates: ScaleCandidate[] = [];
 
   for (const { variant, batch } of candidates) {
     const m = metrics.get(variant.id) as VariantMetricsRow;
     const status = variant.status as VariantStatus;
-    const judgeCfg = effectiveJudgeConfig(batch.configSnapshot, current);
+    const judgeCfg = effectiveJudgeConfig(batch.configSnapshot, current, variant.rulesSnapshot);
     const j = judgeVariant({ status, startAt: batch.startAt, endAt: batch.endAt, libraryAt: variant.libraryAt, metrics: m }, judgeCfg, now);
 
     // LỆNH TẮT: chỉ mẫu còn LIVE và còn TRONG khung — qua `endAt` thì Facebook đã tự dừng. Luật đã
@@ -166,6 +170,10 @@ export async function evaluateCreatives(db: Db, now: Date, deps: EvaluateDeps = 
         set: { verdict: j.verdict, reasons: j.reasons, metrics: metricsSnapshot(m), ruleVersion: CREATIVE_RULE_VERSION, updatedAt: now },
       });
 
+    if (variant.designConceptId) await advanceDesignStatus(db, variant.designConceptId, j.verdict as CreativeVerdict, now);
+    // ĐỀ NGHỊ scale (§5g): chỉ chèn dòng đề nghị, không gọi Facebook — người bấm mới dựng nháp.
+    if (j.verdict === "WIN" || j.verdict === "PROMISING") scaleCandidates.push({ variantId: variant.id, batchId: batch.id, verdict: j.verdict, metrics: metricsSnapshot(m) });
+
     const genes = parseGenes(variant.genes);
     if (genes) {
       observations.push({
@@ -180,6 +188,14 @@ export async function evaluateCreatives(db: Db, now: Date, deps: EvaluateDeps = 
     }
   }
 
+  // Đề nghị hỏng KHÔNG được làm hỏng lượt chấm (lượt chấm còn giữ phanh tắt sớm) — chỉ cảnh báo.
+  let scaleProposals: string[] = [];
+  try {
+    scaleProposals = await proposeScale(db, scaleCandidates);
+  } catch (e) {
+    warnings.push(`Đề nghị scale không ghi được: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   // ─── XOÁ ĐIỂM ẢNH MẪU THUA QUÁ HẠN ───
   // Hạn giữ là cấu hình HIỆN TẠI: nó không chạm tiền, và người vừa rút ngắn/kéo dài hạn giữ muốn nó
   // có hiệu lực cho cả mẫu cũ.
@@ -191,7 +207,22 @@ export async function evaluateCreatives(db: Db, now: Date, deps: EvaluateDeps = 
   // ─── HỌC ───
   const learning = await learn(db, day, now, observations, deps, warnings);
 
-  return { judged: candidates.length, kills, newWins, losses, ended, purged, learning, warnings };
+  return { judged: candidates.length, kills, newWins, losses, ended, purged, scaleProposals, learning, warnings };
+}
+
+/**
+ * Trạng thái một THIẾT KẾ theo phán quyết của mẩu mang nó — chỉ TIẾN, không lùi, và KHÔNG BAO GIỜ chạm
+ * `PRODUCTION` (trạng thái do người đặt). Mẩu đã đăng ⇒ `TESTING`; `WIN` ⇒ `WIN` (kể cả từ `LOSE`: đơn
+ * về muộn vẫn là thắng); `KILL` / `LOSE` ⇒ `LOSE` (chưa thắng). Mỗi bước canh bằng `where`, lũy đẳng.
+ */
+async function advanceDesignStatus(db: Db, conceptId: string, verdict: CreativeVerdict, now: Date): Promise<void> {
+  const dc = schema.designConcepts;
+  const to = verdict === "WIN" ? "WIN" : verdict === "KILL" || verdict === "LOSE" ? "LOSE" : "TESTING";
+  const from = to === "WIN" ? ["DRAFT", "TESTING", "LOSE"] : to === "LOSE" ? ["DRAFT", "TESTING"] : ["DRAFT"];
+  await db
+    .update(dc)
+    .set({ status: to, updatedAt: now })
+    .where(and(eq(dc.id, conceptId), inArray(dc.status, from)));
 }
 
 /**
