@@ -64,8 +64,9 @@ async function freshVariantStock(ids: string[]) {
   if (!ids.length) return [];
   const db = await getDb();
   return chayKhongJit(db, (tx) => {
-    const sales = variantSalesSubquery(tx);
-    const receipts = variantReceiptsSubquery(tx);
+    // Gộp CHỈ các mẫu đang có đơn giữ — không gộp toàn bộ dòng đơn của shop cho vài mẫu.
+    const sales = variantSalesSubquery(tx, ids);
+    const receipts = variantReceiptsSubquery(tx, ids);
     return tx
       .select({
         variantId: pv.id,
