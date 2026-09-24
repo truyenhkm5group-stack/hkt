@@ -1,6 +1,6 @@
 import { memo } from "@/lib/cache";
 import { DEPARTMENT_CODES, type DepartmentCode } from "@/lib/constants/departments";
-import { slaStateOf, sumMoney, type WorkItem } from "@/lib/constants/work";
+import { holderKeyOf, slaStateOf, sumMoney, type WorkItem } from "@/lib/constants/work";
 import { isWorkSource, type WorkSource } from "@/lib/constants/work-sources";
 import {
   WIP_MAX,
@@ -111,12 +111,8 @@ export async function saveStaffing(next: StaffingConfig): Promise<void> {
 
 /* ═══════════════════ SỨC CHỨA ═══════════════════ */
 
-/** Ai đang cầm việc này — cùng luật nhận diện với `isMine`, rút gọn về một khoá. */
-export function holderKeyOf(item: WorkItem): string | null {
-  const a = item.assignee;
-  if (!a) return null;
-  return a.id ?? `name:${a.name.trim().toLowerCase()}`;
-}
+/** Ai đang cầm việc này — định nghĩa ở `lib/constants/work.ts`, xuất lại để mã gọi cũ không đổi. */
+export { holderKeyOf };
 
 /**
  * Bảng sức chứa của một phòng (hoặc toàn shop khi `department` rỗng).
