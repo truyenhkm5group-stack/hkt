@@ -318,16 +318,18 @@ export const CREATIVE_HARD_LIMITS = {
   maxDailyTestSpendVnd: 2_000_000,
   /**
    * Một lượt "cho tiêu thêm" (người bấm trên mẫu HỨA HẸN) được cộng tối đa bấy nhiêu.
-   * > ĐỀ XUẤT, CHỜ CHỦ SHOP CHỐT (AGENTS.md mục 7). Chủ shop mới nói "mẫu tốt thì để tiêu thêm",
-   * > chưa nói tới con số.
+   * Chủ shop chốt 24/09/2026: 200.000đ — đúng bằng MỘT ngày test nữa của một mẫu.
    */
-  maxExtensionPerClickVnd: 400_000,
-  /** Tổng tiền "tiêu thêm" được bấm trong một ngày, toàn shop. > ĐỀ XUẤT, CHỜ CHỐT. */
-  maxDailyExtensionVnd: 2_000_000,
+  maxExtensionPerClickVnd: 200_000,
+  /** Tổng tiền "tiêu thêm" được bấm trong một ngày, toàn shop. Chủ shop chốt 24/09/2026: 1.000.000đ (≤ 5 lượt). */
+  maxDailyExtensionVnd: 1_000_000,
   /** Số ảnh sinh tối đa trong một ngày — kể cả ảnh sinh lại. Chặn một vòng lặp hỏng đốt credit. */
   maxImagesPerDay: 30,
-  /** Trần chi sinh ảnh / ngày (USD). > ĐỀ XUẤT, CHỜ CHỐT. Cấu hình chỉ hạ được. */
-  maxImageUsdPerDay: 5,
+  /**
+   * Trần chi sinh ảnh / ngày (USD). Chủ shop chốt 24/09/2026: 2 USD — một lô 13 ảnh chất lượng vừa
+   * tốn ~0,55 USD, phần còn lại cho sinh lại. Cấu hình chỉ hạ được.
+   */
+  maxImageUsdPerDay: 2,
 } as const;
 
 // ───────────────────────────── CẤU HÌNH (settings `creative.config`) ─────────────────────────────
@@ -420,7 +422,7 @@ export const DEFAULT_CREATIVE_CONFIG: CreativeLoopConfig = {
   imageModel: "gpt-image-1",
   imageSize: "1024x1024",
   imageQuality: "medium",
-  imageDailyCapUsd: 3,
+  imageDailyCapUsd: 2,
   loserImageRetentionDays: 7,
 };
 
