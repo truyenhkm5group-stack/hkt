@@ -337,9 +337,14 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
       return { ...report, result: "ERROR", detail: msg };
     }
     // Hình dạng bài mẫu kiểm MỘT lần cho cả lô, trước lời gọi ghi đầu tiên: mẫu lạ thì không tải một tấm ảnh nào.
+    // Nhóm mẫu tối ưu tin nhắn về một fanpage KHÁC fanpage đã khai ⇒ bài đứng tên trang này mà tin nhắn
+    // của khách chảy sang trang kia: tiền vẫn tiêu, đơn không ai thấy. Chặn, không đoán trang nào đúng.
+    const promotedPage = typeof template.adset.promotedObject?.page_id === "string" ? template.adset.promotedObject.page_id : null;
     const thu = template.hasAssetFeed
       ? { ok: false as const, error: "Mẩu mẫu không được hỗ trợ: quảng cáo động (asset_feed_spec) — máy không đoán hình dạng quảng cáo." }
-      : buildObjectStorySpec(template.objectStorySpec, { pageId: config.pageId, imageHash: "kiem-tra", primaryText: "kiem-tra", headline: "" });
+      : promotedPage && promotedPage !== config.pageId
+        ? { ok: false as const, error: `Nhóm của mẩu mẫu gửi tin nhắn về fanpage ${promotedPage}, khác fanpage đã khai ${config.pageId} — sửa cấu hình hoặc chọn mẩu mẫu khác.` }
+        : buildObjectStorySpec(template.objectStorySpec, { pageId: config.pageId, imageHash: "kiem-tra", primaryText: "kiem-tra", headline: "" });
     if (!thu.ok) {
       await db.update(T.creativeBatches).set({ error: thu.error, updatedAt: now }).where(eq(T.creativeBatches.id, b.id));
       return { ...report, result: "ERROR", detail: thu.error };
