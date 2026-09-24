@@ -139,8 +139,8 @@ export function MarketingDailyChart({ rows }: { rows: MarketingDailyRow[] }) {
       {/*
         `connectNulls={false}` là một quyết định, không phải mặc định: ngày không có mẫu số (0 tin
         nhắn, 0 đơn kết thúc) phải để ĐỨT đoạn. Nối liền qua nó là vẽ ra một giá trị chưa từng đo.
+        Chú giải "đường đứt đoạn" nằm trong ⓘ cạnh tiêu đề "Xu hướng theo ngày" (page.tsx).
       */}
-      <p className="text-[11px] text-muted-foreground">Đường đứt đoạn = ngày chưa đo được tỷ lệ đó (mẫu số bằng 0). Cố ý không nối liền — nối là vẽ ra một giá trị chưa từng tồn tại.</p>
     </div>
   );
 }

@@ -6,6 +6,8 @@ import { PeriodFilter } from "@/components/data-table/toolbar";
 import { FinanceNav } from "@/components/finance-nav";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
@@ -70,8 +72,12 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
       <PageHeader
         eyebrow="Tài chính"
         title="Tổng quan tài chính"
-        description="Còn bao nhiêu tiền, tiền đang nằm ở đâu, và việc gì cần xử lý ngay"
-        hint="Trang này KHÔNG tự tính con số nào: nó đọc lại đúng các engine đã có thẩm quyền (ORDER_OUTCOME cho kết quả đơn, cost-engine cho chi phí, bảng kê ĐVVC cho COD, số dư ngân hàng cho tiền) rồi xếp theo thứ tự mà một người đang ra quyết định cần đọc. Vì thế mọi số ở đây luôn khớp với trang gốc của nó."
+        hint={
+          <>
+            <p>Còn bao nhiêu tiền, tiền đang nằm ở đâu, và việc gì cần xử lý ngay.</p>
+            <p className="mt-1.5">Trang này KHÔNG tự tính con số nào: nó đọc lại đúng các engine đã có thẩm quyền (ORDER_OUTCOME cho kết quả đơn, cost-engine cho chi phí, bảng kê ĐVVC cho COD, số dư ngân hàng cho tiền) rồi xếp theo thứ tự mà một người đang ra quyết định cần đọc. Vì thế mọi số ở đây luôn khớp với trang gốc của nó.</p>
+          </>
+        }
         actions={<PeriodFilter defaultKey="month" />}
       />
       <FinanceNav badges={{ overview: r.exceptions.filter((e) => e.severity === "high").length, bank: statement.unclassified.count, cod: cod.quaHan.count }} />
@@ -108,8 +114,12 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
       {/* ───────── 2. KỲ NÀY: tiền thật vào ra ───────── */}
       <SectionCard
         title={`Tiền thật vào ra · ${period.label}`}
-        description="Theo ngày ngân hàng ghi, đã loại chuyển nội bộ"
-        hint="Chuyển giữa hai tài khoản của mình bị LOẠI khỏi cả tiền vào và tiền ra: tính vào thì cùng một đồng vừa là tiền ra vừa là tiền vào, chênh lệch vẫn đúng nhưng hai con số tổng đều bị thổi phồng và người đọc tưởng shop quay vòng gấp đôi thực tế."
+        hint={
+          <>
+            <p>Theo ngày ngân hàng ghi, đã loại chuyển nội bộ.</p>
+            <p className="mt-1.5">Chuyển giữa hai tài khoản của mình bị LOẠI khỏi cả tiền vào và tiền ra: tính vào thì cùng một đồng vừa là tiền ra vừa là tiền vào, chênh lệch vẫn đúng nhưng hai con số tổng đều bị thổi phồng và người đọc tưởng shop quay vòng gấp đôi thực tế.</p>
+          </>
+        }
         actions={
           <Link href={withPeriod("/reports/cashflow")} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
             Báo cáo dòng tiền đầy đủ <ArrowRight className="size-3" />
@@ -117,12 +127,13 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
         }
       >
         {!statement.hasData ? (
-          <p className="text-sm text-muted-foreground">
-            Kỳ này <span className="font-medium text-foreground">chưa có giao dịch ngân hàng nào</span> — các số dưới đây là CHƯA NHẬP, không phải 0đ. Nhập sao kê hoặc nối SePay ở{" "}
+          <p className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+            Kỳ này <span className="font-medium text-foreground">chưa có giao dịch ngân hàng nào</span>
+            <InfoHint>Các số dưới đây là CHƯA NHẬP, không phải 0đ. Nhập sao kê hoặc nối SePay ở Sổ ngân hàng.</InfoHint>
+            ·
             <Link href="/bank?tab=nhap-sao-ke" className="font-medium text-primary hover:underline">
               Sổ ngân hàng
             </Link>
-            .
           </p>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -168,23 +179,31 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
           </div>
         )}
         {statement.integrityGap !== null && statement.integrityGap !== 0 ? (
-          <p className="mt-4 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-xs leading-5">
-            <span className="font-semibold">Sổ ngân hàng lệch {formatVND(Math.abs(statement.integrityGap))} trong kỳ.</span>{" "}
-            {statement.integrityGap > 0
-              ? "ERP cộng được NHIỀU hơn mức ngân hàng thật sự đổi — sổ đang thiếu một khoản tiền ra, hoặc thừa một dòng tiền vào (nhập sao kê hai lần)."
-              : "ERP cộng được ÍT hơn mức ngân hàng thật sự đổi — sổ đang thiếu một khoản tiền vào, hoặc thừa một dòng tiền ra."}{" "}
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-semibold">Sổ ngân hàng lệch {formatVND(Math.abs(statement.integrityGap))} trong kỳ.</span>
+            <DataWarnings
+              items={[
+                statement.integrityGap > 0
+                  ? "ERP cộng được NHIỀU hơn mức ngân hàng thật sự đổi — sổ đang thiếu một khoản tiền ra, hoặc thừa một dòng tiền vào (nhập sao kê hai lần)."
+                  : "ERP cộng được ÍT hơn mức ngân hàng thật sự đổi — sổ đang thiếu một khoản tiền vào, hoặc thừa một dòng tiền ra.",
+              ]}
+            />
             <Link href="/bank?tab=doi-chieu" className="font-medium text-primary hover:underline">
               Mở trang đối chiếu
             </Link>
-          </p>
+          </div>
         ) : null}
       </SectionCard>
 
       {/* ───────── 3. KINH DOANH ───────── */}
       <SectionCard
         title={`Kinh doanh · ${period.label}`}
-        description="Đo theo kỳ hưởng lợi ích — đơn giao trong kỳ, dù tiền về kỳ sau"
-        hint="KHÁC CƠ SỞ với khối tiền ở trên, và đó là chủ đích. Doanh thu ở đây là của đơn ĐÃ GIAO THÀNH CÔNG theo ORDER_OUTCOME (chứng từ ĐVVC trước, tiền thực thu sau) — không phải tiền đã về tài khoản. Hai khối không bao giờ bằng nhau; khối 'Lợi nhuận ≠ tiền' bên dưới giải thích vì sao."
+        hint={
+          <>
+            <p>Đo theo kỳ hưởng lợi ích — đơn giao trong kỳ, dù tiền về kỳ sau.</p>
+            <p className="mt-1.5">KHÁC CƠ SỞ với khối tiền ở trên, và đó là chủ đích. Doanh thu ở đây là của đơn ĐÃ GIAO THÀNH CÔNG theo ORDER_OUTCOME (chứng từ ĐVVC trước, tiền thực thu sau) — không phải tiền đã về tài khoản. Hai khối không bao giờ bằng nhau; khối &apos;Lợi nhuận ≠ tiền&apos; bên dưới giải thích vì sao.</p>
+          </>
+        }
         actions={
           <Link href={withPeriod("/reports")} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
             Báo cáo lợi nhuận <ArrowRight className="size-3" />
@@ -203,7 +222,7 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
           <MetricCard
             label="Lợi nhuận góp"
             value={<Money value={truth.contribution} sign />}
-            note="Sau giá vốn, cước, phí hoàn, quảng cáo — chưa trừ vận hành"
+            hint="Sau giá vốn, cước, phí hoàn, quảng cáo — chưa trừ vận hành"
             icon={TrendingUp}
             tone={truth.contribution < 0 ? "rose" : "green"}
             href={withPeriod("/reports")}
@@ -277,22 +296,28 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
           />
         </div>
         {cod.giaoNhungHoan.count > 0 ? (
-          <p className="mt-4 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 text-xs leading-5">
-            <span className="font-semibold">
-              {formatNumber(cod.giaoNhungHoan.count)} đơn Viettel Post báo &ldquo;giao thành công&rdquo; nhưng tiền thực thu dưới ngưỡng
-            </span>{" "}
-            — khai {formatVND(cod.giaoNhungHoan.khaiBao)}, thực thu {formatVND(cod.giaoNhungHoan.thucThu)}. Theo luật kết quả đơn, những đơn này là ĐƠN HOÀN.{" "}
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+            <DataWarnings
+              items={[
+                <>
+                  <span className="font-semibold">
+                    {formatNumber(cod.giaoNhungHoan.count)} đơn Viettel Post báo &ldquo;giao thành công&rdquo; nhưng tiền thực thu dưới ngưỡng
+                  </span>{" "}
+                  — khai {formatVND(cod.giaoNhungHoan.khaiBao)}, thực thu {formatVND(cod.giaoNhungHoan.thucThu)}. Theo luật kết quả đơn, những đơn này là ĐƠN HOÀN.
+                </>,
+              ]}
+            />
             <Link href={withPeriod("/reports/returns")} className="font-medium text-primary hover:underline">
               Xem tỷ lệ giao thành công
             </Link>
-          </p>
+          </div>
         ) : null}
       </SectionCard>
 
       {/* ───────── 5. LỢI NHUẬN ≠ TIỀN ───────── */}
       <SectionCard
         title="Vì sao lợi nhuận khác tiền"
-        description="Hai con số đo hai thứ khác nhau — cả hai đều đúng"
+        hint="Hai con số đo hai thứ khác nhau — cả hai đều đúng"
         actions={
           <Link href={withPeriod("/reports/cashflow?tab=doi-chieu")} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline">
             Bảng đối chiếu đầy đủ <ArrowRight className="size-3" />
@@ -301,19 +326,23 @@ export default async function FinancePage({ searchParams }: { searchParams: Prom
       >
         <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center">
           <div className="rounded-xl border bg-surface-sunken/40 p-4">
-            <p className="text-[12.5px] font-medium text-muted-foreground">Lợi nhuận ước tính</p>
+            <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground">
+              Lợi nhuận ước tính
+              <InfoHint>Theo KỲ HƯỞNG LỢI ÍCH: đơn giao trong kỳ là doanh thu của kỳ, dù tiền về kỳ sau.</InfoHint>
+            </p>
             <p className={cn("numeric mt-1 text-2xl font-bold", truth.estimatedProfit < 0 && "text-destructive")}>{formatVND(truth.estimatedProfit)}</p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">Theo KỲ HƯỞNG LỢI ÍCH: đơn giao trong kỳ là doanh thu của kỳ, dù tiền về kỳ sau.</p>
           </div>
           <div className="flex items-center justify-center text-muted-foreground">
             <span className="rounded-full border bg-card px-2 py-1 text-[11px] font-semibold">≠</span>
           </div>
           <div className="rounded-xl border bg-surface-sunken/40 p-4">
-            <p className="text-[12.5px] font-medium text-muted-foreground">Dòng tiền ròng thật</p>
+            <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground">
+              Dòng tiền ròng thật
+              <InfoHint>Theo NGÀY TIỀN ĐỘNG: tiền COD tháng này có thể là của đơn giao tháng trước.</InfoHint>
+            </p>
             <p className={cn("numeric mt-1 text-2xl font-bold", statement.hasData && statement.net < 0 && "text-destructive")}>
               {statement.hasData ? formatVND(statement.net) : "Chưa biết"}
             </p>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">Theo NGÀY TIỀN ĐỘNG: tiền COD tháng này có thể là của đơn giao tháng trước.</p>
           </div>
         </div>
       </SectionCard>

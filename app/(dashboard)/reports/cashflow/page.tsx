@@ -42,8 +42,7 @@ export default async function CashflowPage({ searchParams }: { searchParams: Pro
       <PageHeader
         eyebrow="Tài chính"
         title="Dòng tiền"
-        description="Lợi nhuận không phải tiền — trang này đo tiền"
-        hint="Một shop bán COD có thể lãi trên giấy mà vẫn hết tiền mặt: hàng đã giao nhưng Viettel Post giữ tiền cả tuần, còn tiền quảng cáo và tiền hàng thì trả ngay. Ba tab là ba cơ sở đo khác nhau (đã xảy ra / chưa xảy ra / giải thích khoảng lệch) và không bao giờ được cộng với nhau."
+        hint="Lợi nhuận không phải tiền — trang này đo tiền. Một shop bán COD có thể lãi trên giấy mà vẫn hết tiền mặt: hàng đã giao nhưng Viettel Post giữ tiền cả tuần, còn tiền quảng cáo và tiền hàng thì trả ngay. Ba tab là ba cơ sở đo khác nhau (đã xảy ra / chưa xảy ra / giải thích khoảng lệch) và không bao giờ được cộng với nhau."
         actions={tab === "du-phong" ? undefined : <PeriodFilter defaultKey="month" />}
       />
       <FinanceNav />

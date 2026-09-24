@@ -60,9 +60,9 @@ export default async function MarketingDailyPage({ searchParams }: { searchParam
       <PageHeader
         eyebrow="Marketing"
         title="Hiệu quả theo ngày"
-        description="Mỗi ngày tiêu bao nhiêu → ra bao nhiêu đơn → thu về bao nhiêu → lãi hay lỗ"
         hint={
           <>
+            <p className="mb-2">Mỗi ngày tiêu bao nhiêu → ra bao nhiêu đơn → thu về bao nhiêu → lãi hay lỗ.</p>
             <p className="mb-2">
               <strong>Mốc mặc định là NGÀY PHÁT SINH ĐƠN</strong> (cohort): đơn lên ngày 01/09 mà giao ngày 05/09 vẫn được tính vào dòng 01/09. Chỉ mốc này mới trả lời được &ldquo;10 triệu quảng cáo chạy
               ngày 01/09 cuối cùng ra kết quả gì&rdquo;.
@@ -106,13 +106,18 @@ async function MainBlock({ period, basis, view, filters }: { raw: SearchParams; 
       <SectionCard
         title="Xu hướng theo ngày"
         description={MARKETING_BASIS_LABEL[basis]}
-        hint="Đường trung bình động 7 ngày để không ra quyết định trên một ngày nhiễu. Ngày chưa ngã ngũ được vẽ mờ — số của nó chưa phải kết quả cuối."
+        hint={
+          <>
+            <p className="mb-2">Đường trung bình động 7 ngày để không ra quyết định trên một ngày nhiễu. Ngày chưa ngã ngũ được vẽ mờ — số của nó chưa phải kết quả cuối.</p>
+            <p>Đường đứt đoạn = ngày chưa đo được tỷ lệ đó (mẫu số bằng 0). Cố ý không nối liền — nối là vẽ ra một giá trị chưa từng tồn tại.</p>
+          </>
+        }
       >
         <MarketingDailyChart rows={data.rows} />
       </SectionCard>
       <SectionCard
         title="Bảng theo ngày"
-        description="Một dòng = một ngày. Hàng tổng tính lại mọi tỷ lệ từ tử số và mẫu số, không lấy trung bình phần trăm."
+        hint="Một dòng = một ngày. Hàng tổng tính lại mọi tỷ lệ từ tử số và mẫu số, không lấy trung bình phần trăm."
         padded={false}
       >
         <MarketingDailyTable data={data} view={view} />
@@ -163,9 +168,9 @@ async function BreakdownBlock({ raw, period, basis, dimension, filters }: { raw:
     return (
       <SectionCard
         title="Bóc tách theo MKTer — đơn · doanh thu · lợi nhuận ước tính từng ngày"
-        description="Số ước tính theo đúng Báo cáo lợi nhuận danh nghĩa, chia xuống từng đơn theo ngày đơn lên."
         hint={
           <>
+            <p className="mb-2">Số ước tính theo đúng Báo cáo lợi nhuận danh nghĩa, chia xuống từng đơn theo ngày đơn lên.</p>
             <p className="mb-2">
               Mỗi mã hàng lấy NGUYÊN con số của Báo cáo lợi nhuận danh nghĩa (DT GTC ước tính, giá vốn, cước theo tỷ lệ giao/hoàn, vận hành, rủi ro tồn kho, thuế), rồi chia xuống từng đơn của mã: đơn đã
               giao mang trọn doanh thu, đơn hoàn mang 0, đơn đang đi mang đúng xác suất giao được của trạng thái nó đang ở. Vì vậy cộng mọi ô ra đúng số của báo cáo — dòng &ldquo;Khớp&rdquo; phía dưới in phép
@@ -194,8 +199,15 @@ async function BreakdownBlock({ raw, period, basis, dimension, filters }: { raw:
   return (
     <SectionCard
       title={`Bóc tách theo ${MARKETING_DIMENSION_LABEL[dimension].toLowerCase()}`}
-      description="Lỗ nặng nhất đứng đầu — đó là thứ cần xử lý trước."
-      hint="Mỗi dòng đọc lại bằng ĐÚNG đường của bảng chính, nên con số ở đây không bao giờ khác con số của dòng nó bóc. Nhóm chưa quy kết luôn có mặt: giấu nó đi là làm tổng nhỏ hơn dòng gốc mà không ai giải thích được."
+      hint={
+        <>
+          <p className="mb-2">Lỗ nặng nhất đứng đầu — đó là thứ cần xử lý trước.</p>
+          <p>
+            Mỗi dòng đọc lại bằng ĐÚNG đường của bảng chính, nên con số ở đây không bao giờ khác con số của dòng nó bóc. Nhóm chưa quy kết luôn có mặt:
+            giấu nó đi là làm tổng nhỏ hơn dòng gốc mà không ai giải thích được.
+          </p>
+        </>
+      }
       padded={false}
     >
       <MarketingBreakdown data={bd} />

@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { Clock, MessageCircleOff, TrendingDown } from "lucide-react";
+import { MessageCircleOff } from "lucide-react";
 import { DimensionTabs } from "@/app/(dashboard)/reports/funnel/dimension-tabs";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -54,20 +56,30 @@ export async function PreOrderFunnelSection({ period }: { period: Period }) {
   return (
     <SectionCard
       title="Phễu trước đơn · từ hội thoại Pancake"
-      description="Khách nhắn tin → được trả lời → cho SĐT → cho địa chỉ."
-      hint="KHÔNG nối vào phễu đơn bên dưới: mẫu số ở đây là hội thoại QUÉT ĐƯỢC (cửa sổ 48 giờ, page có đơn trong 90 ngày, tối đa 200 hội thoại mỗi page mỗi lượt), không phải toàn bộ hội thoại. Nối hai mẫu số khác nhau lại là dựng ra một tỷ lệ không mô tả cái gì."
+      /*
+        ĐỘ PHỦ NÓI TRƯỚC MỌI CON SỐ — không có nó thì mọi tỷ lệ đều có thể là số bịa. Phủ chưa đủ
+        (chưa có dữ liệu / kỳ nằm ngoài khoảng đã quét / chạm trần lượt quét) thì thành nhãn lưu ý
+        luôn nhìn thấy; phủ đủ thì câu độ phủ nằm trong ⓘ.
+      */
+      description={
+        <DataWarnings
+          items={[
+            chuaCoDuLieu || !pre.coverage.periodCovered ? pre.coverage.note : null,
+            pre.coverage.truncated > 0 ? `${formatNumber(pre.coverage.truncated)} hội thoại thuộc page đã CHẠM TRẦN lượt quét — phần đếm bị cắt.` : null,
+          ]}
+        />
+      }
+      hint={
+        <>
+          <p className="mb-2">Khách nhắn tin → được trả lời → cho SĐT → cho địa chỉ.</p>
+          <p>
+            KHÔNG nối vào phễu đơn bên dưới: mẫu số ở đây là hội thoại QUÉT ĐƯỢC (cửa sổ 48 giờ, page có đơn trong 90 ngày, tối đa 200 hội thoại mỗi page mỗi lượt), không phải toàn bộ hội thoại. Nối hai mẫu số khác nhau lại là dựng ra một tỷ lệ không mô tả cái gì.
+          </p>
+          {chuaCoDuLieu || !pre.coverage.periodCovered ? null : <p className="mt-2">{pre.coverage.note}</p>}
+        </>
+      }
       padded={false}
     >
-      {/* ĐỘ PHỦ NÓI TRƯỚC MỌI CON SỐ — không có nó thì mọi tỷ lệ đều có thể là số bịa. */}
-      <p
-        className={cn(
-          "border-b px-5 py-2 text-xs",
-          chuaCoDuLieu ? "bg-muted/50 text-muted-foreground" : pre.coverage.periodCovered ? "text-muted-foreground" : "bg-warning/5 text-warning",
-        )}
-      >
-        {pre.coverage.note}
-        {pre.coverage.truncated > 0 ? ` · ${formatNumber(pre.coverage.truncated)} hội thoại thuộc page đã CHẠM TRẦN lượt quét — phần đếm bị cắt.` : ""}
-      </p>
 
       <div className="overflow-x-auto">
         <Table className="min-w-[760px]">
@@ -78,18 +90,21 @@ export async function PreOrderFunnelSection({ period }: { period: Period }) {
               <TableHead className="text-right">So với mốc trước</TableHead>
               <TableHead className="text-right">Rơi</TableHead>
               <TableHead>Bằng chứng</TableHead>
-              <TableHead>Phải đọc kèm</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {pre.markers.map((m) => (
               <TableRow key={m.key}>
-                <TableCell className="font-medium">{m.label}</TableCell>
+                <TableCell className="font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    {m.label}
+                    {m.caveat ? <InfoHint>{m.caveat}</InfoHint> : null}
+                  </span>
+                </TableCell>
                 <TableCell className="text-right tabular-nums">{m.count === null ? "—" : formatNumber(m.count)}</TableCell>
                 <TableCell className="text-right tabular-nums">{pctOrDash(m.ofPrevious)}</TableCell>
                 <TableCell className="text-right tabular-nums">{m.dropOff === null ? "—" : formatNumber(m.dropOff)}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{EVIDENCE_TIER_LABEL[m.tier]}</TableCell>
-                <TableCell className="max-w-[260px] text-xs text-muted-foreground">{m.caveat || "—"}</TableCell>
               </TableRow>
             ))}
             {/*
@@ -99,11 +114,16 @@ export async function PreOrderFunnelSection({ period }: { period: Period }) {
             */}
             {Object.entries(UNMEASURABLE_STAGES).map(([key, u]) => (
               <TableRow key={key} className="bg-muted/30">
-                <TableCell className="font-medium text-muted-foreground">{u.label}</TableCell>
-                <TableCell className="text-right font-semibold text-muted-foreground">KHÔNG ĐO ĐƯỢC</TableCell>
-                <TableCell colSpan={4} className="text-xs text-muted-foreground">
-                  {u.reason} <span className="font-medium">{u.insteadUse}</span>
+                <TableCell className="font-medium text-muted-foreground">
+                  <span className="inline-flex items-center gap-1">
+                    {u.label}
+                    <InfoHint>
+                      {u.reason} <span className="font-medium">{u.insteadUse}</span>
+                    </InfoHint>
+                  </span>
                 </TableCell>
+                <TableCell className="text-right font-semibold text-muted-foreground">KHÔNG ĐO ĐƯỢC</TableCell>
+                <TableCell colSpan={3} />
               </TableRow>
             ))}
           </TableBody>
@@ -112,27 +132,28 @@ export async function PreOrderFunnelSection({ period }: { period: Period }) {
 
       <div className="grid gap-px border-t bg-border sm:grid-cols-2 lg:grid-cols-4">
         {[
-          { label: "Chưa ai trả lời", value: pre.unanswered === null ? "—" : formatNumber(pre.unanswered), note: "Khách nhắn mà shop im lặng" },
+          { label: "Chưa ai trả lời", value: pre.unanswered === null ? "—" : formatNumber(pre.unanswered), hint: "Khách nhắn mà shop im lặng" },
           { label: "Trung vị thời gian trả lời", value: pre.medianFirstReplyMinutes === null ? "—" : `${pre.medianFirstReplyMinutes} phút`, note: `p90 ${pre.p90FirstReplyMinutes === null ? "—" : `${pre.p90FirstReplyMinutes} phút`}` },
           {
             label: "Hội thoại → đơn",
             value: pctOrDash(pre.conversionToOrder),
-            note:
-              pre.conversionToOrder === null
-                ? `Chưa công bố: cần kỳ nằm trong khoảng đã quét VÀ ≥ ${MIN_CONVERSATIONS_FOR_RATE} hội thoại`
-                : `${formatNumber(pre.converted ?? 0)} hội thoại đã thành đơn`,
+            note: pre.conversionToOrder === null ? undefined : `${formatNumber(pre.converted ?? 0)} hội thoại đã thành đơn`,
+            hint: pre.conversionToOrder === null ? `Chưa công bố: cần kỳ nằm trong khoảng đã quét VÀ ≥ ${MIN_CONVERSATIONS_FOR_RATE} hội thoại` : undefined,
           },
           {
             label: "Một SĐT nhiều đơn",
             value: pre.ambiguous === null ? "—" : formatNumber(pre.ambiguous),
             // Nhóm này KHÔNG được gộp vào "chưa có đơn": gộp là biến "không biết" thành "biết là chưa".
-            note: "KHÔNG kết luận được — đếm riêng, không gộp vào 'chưa có đơn'",
+            hint: "KHÔNG kết luận được — đếm riêng, không gộp vào 'chưa có đơn'",
           },
-        ].map((x) => (
+        ].map((x: { label: string; value: string; note?: string; hint?: string }) => (
           <div key={x.label} className="bg-card px-5 py-3">
-            <div className="text-xs text-muted-foreground">{x.label}</div>
+            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+              {x.label}
+              {x.hint ? <InfoHint>{x.hint}</InfoHint> : null}
+            </div>
             <div className="text-lg font-semibold tabular-nums">{x.value}</div>
-            <div className="text-xs text-muted-foreground">{x.note}</div>
+            {x.note ? <div className="text-xs text-muted-foreground">{x.note}</div> : null}
           </div>
         ))}
       </div>
@@ -154,7 +175,25 @@ export async function StuckStepsSection({ period }: { period: Period }) {
   return (
     <SectionCard
       title="Đơn kẹt ở bước nào"
-      description={worst && worst.dropOff > 0 ? `Chỗ rơi lớn nhất: ${worst.label} — mất ${formatNumber(worst.dropOff)} đơn.` : "Không bước nào rơi đáng kể."}
+      /*
+        KHUYẾT CHỨNG TỪ HIỆN THÀNH SỐ, KHÔNG BỊ KẸP LẶNG LẼ.
+        Một đơn "giao thành công" mà không có vận đơn nào là kết luận dựa trên trạng thái Pancake —
+        người đọc phải biết có bao nhiêu đơn như thế trước khi tin vào cột thời gian. Nay thu vào
+        nhãn lưu ý dữ liệu cạnh dòng mô tả; khoản nào bằng 0 thì không phải lưu ý.
+      */
+      description={
+        <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          {worst && worst.dropOff > 0 ? `Chỗ rơi lớn nhất: ${worst.label} — mất ${formatNumber(worst.dropOff)} đơn.` : "Không bước nào rơi đáng kể."}
+          <DataWarnings
+            items={[
+              f.evidenceGaps.deliveredWithoutShipment ? `Khuyết chứng từ trong kỳ: ${formatNumber(f.evidenceGaps.deliveredWithoutShipment)} đơn kết luận giao thành công mà KHÔNG có vận đơn nào (dựa trên trạng thái Pancake)` : null,
+              f.evidenceGaps.shipmentWithoutConfirm ? `${formatNumber(f.evidenceGaps.shipmentWithoutConfirm)} đơn có vận đơn mà Pancake còn ở trạng thái chờ` : null,
+              f.evidenceGaps.noStatusHistory ? `${formatNumber(f.evidenceGaps.noStatusHistory)} đơn không có dòng lịch sử trạng thái nào nên KHÔNG đo được thời gian xác nhận` : null,
+              f.cancelledAfterConfirm ? `${formatNumber(f.cancelledAfterConfirm)} đơn huỷ SAU khi đã rời trạng thái chờ (bước “đã xác nhận” đang gánh phần này)` : null,
+            ]}
+          />
+        </span>
+      }
       hint="Bước 'Đã tạo vận đơn' là bước phễu cũ KHÔNG có: có mã vận đơn chưa nghĩa là hàng đã ra khỏi kho (vận đơn PENDING là hàng còn trong kho), và khoảng trống đó là việc của kho. Cột thời gian là TRUNG VỊ từ bước trước tới bước này; 'đo được' cho biết bao nhiêu phần đơn có đủ cặp mốc — thiếu mốc là CHƯA BIẾT, không tính là 0 giờ."
       padded={false}
     >
@@ -169,35 +208,27 @@ export async function StuckStepsSection({ period }: { period: Period }) {
               <TableHead className="text-right">Trung vị</TableHead>
               <TableHead className="text-right">p90</TableHead>
               <TableHead className="text-right">Đo được</TableHead>
-              <TableHead>Phải đọc kèm</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {f.steps.map((s) => (
               <TableRow key={s.key} className={cn(worst && s.key === worst.key && s.dropOff > 0 && "bg-warning/5")}>
-                <TableCell className="font-medium">{s.label}</TableCell>
+                <TableCell className="font-medium">
+                  <span className="inline-flex items-center gap-1">
+                    {s.label}
+                    {s.caveat || s.timing.note ? <InfoHint>{s.caveat || s.timing.note}</InfoHint> : null}
+                  </span>
+                </TableCell>
                 <TableCell className="text-right tabular-nums">{formatNumber(s.count)}</TableCell>
                 <TableCell className="text-right tabular-nums">{s.key === "CREATED" ? "—" : pctOrDash(s.ofPrevious)}</TableCell>
                 <TableCell className="text-right tabular-nums">{s.key === "CREATED" ? "—" : formatNumber(s.dropOff)}</TableCell>
                 <TableCell className="text-right tabular-nums">{hoursOrDash(s.timing.medianHours)}</TableCell>
                 <TableCell className="text-right tabular-nums">{hoursOrDash(s.timing.p90Hours)}</TableCell>
                 <TableCell className="text-right tabular-nums text-xs text-muted-foreground">{pctOrDash(s.timing.coverage)}</TableCell>
-                <TableCell className="max-w-[280px] text-xs text-muted-foreground">{s.caveat || s.timing.note}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </div>
-      {/*
-        KHUYẾT CHỨNG TỪ HIỆN THÀNH SỐ, KHÔNG BỊ KẸP LẶNG LẼ.
-        Một đơn "giao thành công" mà không có vận đơn nào là kết luận dựa trên trạng thái Pancake —
-        người đọc phải biết có bao nhiêu đơn như thế trước khi tin vào cột thời gian.
-      */}
-      <div className="border-t px-5 py-2 text-xs text-muted-foreground">
-        Khuyết chứng từ trong kỳ: <strong>{formatNumber(f.evidenceGaps.deliveredWithoutShipment)}</strong> đơn kết luận giao thành công mà KHÔNG có vận đơn nào (dựa trên
-        trạng thái Pancake) · <strong>{formatNumber(f.evidenceGaps.shipmentWithoutConfirm)}</strong> đơn có vận đơn mà Pancake còn ở trạng thái chờ ·{" "}
-        <strong>{formatNumber(f.evidenceGaps.noStatusHistory)}</strong> đơn không có dòng lịch sử trạng thái nào nên KHÔNG đo được thời gian xác nhận ·{" "}
-        <strong>{formatNumber(f.cancelledAfterConfirm)}</strong> đơn huỷ SAU khi đã rời trạng thái chờ (bước &ldquo;đã xác nhận&rdquo; đang gánh phần này).
       </div>
     </SectionCard>
   );
@@ -211,16 +242,11 @@ export async function ConversionByDimensionSection({ period, dimension, role }: 
   return (
     <SectionCard
       title={`Chuyển đổi theo ${CONVERSION_DIMENSION_LABEL[dimension].toLowerCase()}`}
-      description="Mỗi dòng nói rõ nó đang rò ở bước nào, và rò bao nhiêu đơn."
-      hint="Cột 'Rò ở bước' tính theo SỐ ĐƠN rơi, không theo tỷ lệ: một dòng rơi 90% của 2 đơn không phải vấn đề của shop, một dòng rơi 20% của 400 đơn thì đúng là chỗ mất tiền. Mẫu số của tỷ lệ giao là đơn ĐÃ RỜI KHO. Đơn không gán được nằm ở dòng 'Chưa gán' cuối bảng, KHÔNG chia đều cho ai."
+      description={r.lowCoverage ? <DataWarnings items={[`Chỉ ${formatPercent(r.coverage * 100)} số đơn trong kỳ gán được theo chiều này. Bảng dưới mô tả đúng phần đó, không mô tả toàn shop.`]} /> : undefined}
+      hint="Mỗi dòng nói rõ nó đang rò ở bước nào, và rò bao nhiêu đơn. Cột 'Rò ở bước' tính theo SỐ ĐƠN rơi, không theo tỷ lệ: một dòng rơi 90% của 2 đơn không phải vấn đề của shop, một dòng rơi 20% của 400 đơn thì đúng là chỗ mất tiền. Mẫu số của tỷ lệ giao là đơn ĐÃ RỜI KHO. Đơn không gán được nằm ở dòng 'Chưa gán' cuối bảng, KHÔNG chia đều cho ai."
       actions={<DimensionTabs current={dimension} />}
       padded={false}
     >
-      {r.lowCoverage ? (
-        <p className="border-b bg-warning/5 px-5 py-2 text-xs text-warning">
-          Chỉ {formatPercent(r.coverage * 100)} số đơn trong kỳ gán được theo chiều này. Bảng dưới mô tả đúng phần đó, không mô tả toàn shop.
-        </p>
-      ) : null}
       <div className="overflow-x-auto">
         <Table className="min-w-[980px]">
           <TableHeader>
@@ -249,7 +275,7 @@ export async function ConversionByDimensionSection({ period, dimension, role }: 
                 <TableRow key={row.key} className={cn(row.unassigned && "text-muted-foreground")}>
                   <TableCell className="font-medium">
                     {row.label}
-                    {row.unassigned ? <span className="ml-1 text-xs">· không gán được, không chia đều</span> : null}
+                    {row.unassigned ? <InfoHint className="ml-1 align-middle">không gán được, không chia đều</InfoHint> : null}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(row.created)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(row.confirmed)}</TableCell>
@@ -287,16 +313,27 @@ export async function LeakageSection() {
   return (
     <SectionCard
       title="Rò rỉ doanh thu · việc làm được ngay"
-      description={`${formatNumber(q.cases.length)} ca còn cứu được · ${formatNumber(q.unassigned)} chưa ai nhận · ${formatNumber(q.breached)} đã quá hạn.`}
+      description={
+        <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          {`${formatNumber(q.cases.length)} ca còn cứu được · ${formatNumber(q.unassigned)} chưa ai nhận · ${formatNumber(q.breached)} đã quá hạn.`}
+          <DataWarnings
+            items={[
+              !q.conversationDataAvailable
+                ? "Ba nhóm đầu (hội thoại) chưa có số vì chưa ghi được hội thoại nào — job “Case CSKH từ hội thoại Pancake” phải chạy ít nhất một lượt. Đây là sự thật về dữ liệu, không phải lỗi hiển thị."
+                : null,
+              q.suppressed.length > 0 ? (
+                <>
+                  Đã BỎ khỏi hàng đợi: {q.suppressed.map((s) => `${formatNumber(s.count)} ca — ${s.label}`).join(" · ")}.{" "}
+                  <span className="font-medium">Mọi lần bỏ đều được đếm và nêu lý do</span> — một hàng đợi lặng lẽ bỏ ca là hàng đợi không ai kiểm chứng được.
+                </>
+              ) : null,
+            ]}
+          />
+        </span>
+      }
       hint="CHỈ ca còn cứu được: ca quá tuổi vẫn được đếm trong phễu (nó là sự thật đã xảy ra) nhưng KHÔNG vào đây — gọi lại khách nhắn 10 ngày trước không phải thu hồi doanh thu, đó là làm khách khó chịu. Hai nhóm cuối đọc lại từ Hàng đợi việc nên người nhận và hạn xử lý là CÙNG MỘT bản ghi, không phải bản sao."
       padded={false}
     >
-      {!q.conversationDataAvailable ? (
-        <p className="border-b bg-muted/50 px-5 py-2 text-xs text-muted-foreground">
-          Ba nhóm đầu (hội thoại) chưa có số vì chưa ghi được hội thoại nào — job &ldquo;Case CSKH từ hội thoại Pancake&rdquo; phải chạy ít nhất một lượt. Đây là
-          sự thật về dữ liệu, không phải lỗi hiển thị.
-        </p>
-      ) : null}
       <div className="overflow-x-auto">
         <Table className="min-w-[820px]">
           <TableHeader>
@@ -333,30 +370,29 @@ export async function LeakageSection() {
       */}
       <div className="grid gap-px border-t bg-border sm:grid-cols-3">
         <div className="bg-card px-5 py-3">
-          <div className="text-xs text-muted-foreground">Tiền treo ở đơn CÓ THẬT</div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            Tiền treo ở đơn CÓ THẬT
+            <InfoHint>Sự thật, cộng được</InfoHint>
+          </div>
           <div className="text-lg font-semibold">
             <Money value={q.actualValueAtRisk} />
           </div>
-          <div className="text-xs text-muted-foreground">Sự thật, cộng được</div>
         </div>
         <div className="bg-card px-5 py-3">
-          <div className="text-xs text-muted-foreground">Ước tính cho khách CHƯA có đơn</div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            Ước tính cho khách CHƯA có đơn
+            <InfoHint>{q.estimateBasis ?? "Chưa page nào đủ mẫu để lấy trung vị"}</InfoHint>
+          </div>
           <div className="text-lg font-semibold">{q.estimatedValueAtRisk === null ? "—" : <Money value={q.estimatedValueAtRisk} />}</div>
-          <div className="text-xs text-muted-foreground">{q.estimateBasis ?? "Chưa page nào đủ mẫu để lấy trung vị"}</div>
         </div>
         <div className="bg-card px-5 py-3">
-          <div className="text-xs text-muted-foreground">Ca chưa quy ra tiền được</div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            Ca chưa quy ra tiền được
+            <InfoHint>Khách chưa chốt mẫu mã ⇒ chưa có giá trị nào. CHƯA BIẾT, không phải 0đ.</InfoHint>
+          </div>
           <div className="text-lg font-semibold tabular-nums">{formatNumber(q.unknownValueCases)}</div>
-          <div className="text-xs text-muted-foreground">Khách chưa chốt mẫu mã ⇒ chưa có giá trị nào. CHƯA BIẾT, không phải 0đ.</div>
         </div>
       </div>
-
-      {q.suppressed.length > 0 ? (
-        <div className="border-t px-5 py-2 text-xs text-muted-foreground">
-          Đã BỎ khỏi hàng đợi: {q.suppressed.map((s) => `${formatNumber(s.count)} ca — ${s.label}`).join(" · ")}.{" "}
-          <span className="font-medium">Mọi lần bỏ đều được đếm và nêu lý do</span> — một hàng đợi lặng lẽ bỏ ca là hàng đợi không ai kiểm chứng được.
-        </div>
-      ) : null}
 
       {q.cases.length > 0 ? (
         <div className="overflow-x-auto border-t">
@@ -412,12 +448,16 @@ export async function RiskBacktestSection({ period }: { period: Period }) {
   return (
     <SectionCard
       title="Kiểm định điểm rủi ro trước khi giao"
-      description="Điểm rủi ro có THẬT SỰ tách được nhóm hoàn khỏi nhóm giao thành công trên dữ liệu của shop hay không."
-      hint="Chia theo THỜI GIAN: tỷ lệ hoàn lịch sử học từ nửa CŨ, chấm điểm cho đơn của nửa MỚI. Học và chấm trên cùng một tập là tự chấm bài của mình. Chỉ kết luận 'phân biệt được' khi nhóm rủi ro cao hoàn nhiều hơn mặt bằng ít nhất 1,3 lần VÀ biên dưới khoảng tin cậy 95% vẫn cao hơn mặt bằng — dưới mức đó thì mọi dao động ngẫu nhiên cũng thành 'có tác dụng'."
-      actions={<Badge className={cn("font-normal", tone)}>{bt.verdict}</Badge>}
+      description={<DataWarnings items={bt.limitations} label={`${bt.limitations.length} giới hạn của phép kiểm định`} />}
+      hint="Điểm rủi ro có THẬT SỰ tách được nhóm hoàn khỏi nhóm giao thành công trên dữ liệu của shop hay không. Chia theo THỜI GIAN: tỷ lệ hoàn lịch sử học từ nửa CŨ, chấm điểm cho đơn của nửa MỚI. Học và chấm trên cùng một tập là tự chấm bài của mình. Chỉ kết luận 'phân biệt được' khi nhóm rủi ro cao hoàn nhiều hơn mặt bằng ít nhất 1,3 lần VÀ biên dưới khoảng tin cậy 95% vẫn cao hơn mặt bằng — dưới mức đó thì mọi dao động ngẫu nhiên cũng thành 'có tác dụng'."
+      actions={
+        <span className="inline-flex items-center gap-1">
+          <Badge className={cn("font-normal", tone)}>{bt.verdict}</Badge>
+          <InfoHint align="end">{bt.verdictReason}</InfoHint>
+        </span>
+      }
       padded={false}
     >
-      <p className="border-b px-5 py-2 text-xs text-muted-foreground">{bt.verdictReason}</p>
       <div className="overflow-x-auto">
         <Table className="min-w-[720px]">
           <TableHeader>
@@ -458,32 +498,27 @@ export async function RiskBacktestSection({ period }: { period: Period }) {
       </div>
       <div className="grid gap-px border-t bg-border sm:grid-cols-3">
         <div className="bg-card px-5 py-3">
-          <div className="text-xs text-muted-foreground">Soát 10 đơn thì mấy đơn đáng soát</div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            Soát 10 đơn thì mấy đơn đáng soát
+            <InfoHint>Trong nhóm rủi ro cao, phần thật sự hoàn</InfoHint>
+          </div>
           <div className="text-lg font-semibold tabular-nums">{pctOrDash(bt.highPrecision)}</div>
-          <div className="text-xs text-muted-foreground">Trong nhóm rủi ro cao, phần thật sự hoàn</div>
         </div>
         <div className="bg-card px-5 py-3">
-          <div className="text-xs text-muted-foreground">Soát được bao nhiêu phần vấn đề</div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            Soát được bao nhiêu phần vấn đề
+            <InfoHint>Trong số đơn thật sự hoàn, phần bị chấm cao</InfoHint>
+          </div>
           <div className="text-lg font-semibold tabular-nums">{pctOrDash(bt.highRecall)}</div>
-          <div className="text-xs text-muted-foreground">Trong số đơn thật sự hoàn, phần bị chấm cao</div>
         </div>
         <div className="bg-card px-5 py-3">
-          <div className="text-xs text-muted-foreground">Thứ tự nhóm đúng chiều</div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            Thứ tự nhóm đúng chiều
+            <InfoHint>cao ≥ trung bình ≥ thấp về tỷ lệ hoàn</InfoHint>
+          </div>
           <div className="text-lg font-semibold">{bt.monotone ? "Có" : "Không"}</div>
-          <div className="text-xs text-muted-foreground">cao ≥ trung bình ≥ thấp về tỷ lệ hoàn</div>
         </div>
       </div>
-      <ul className="space-y-1 border-t px-5 py-3 text-xs text-muted-foreground">
-        <li className="flex items-center gap-1.5 font-medium text-foreground">
-          <Clock className="size-3.5" /> Giới hạn của chính phép kiểm định này
-        </li>
-        {bt.limitations.map((l) => (
-          <li key={l} className="flex gap-1.5">
-            <TrendingDown className="mt-0.5 size-3 shrink-0" />
-            <span>{l}</span>
-          </li>
-        ))}
-      </ul>
     </SectionCard>
   );
 }

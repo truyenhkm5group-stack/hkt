@@ -1,6 +1,7 @@
 import { deliveryRateCoverageParts } from "@/lib/constants/delivery-rate";
 import { SectionCard } from "@/components/ui-bits";
 import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { ArrowRight } from "lucide-react";
 import { getAdsDecision, DECISION_METRIC_HINT } from "@/lib/queries/ads-decision";
@@ -139,149 +140,215 @@ export async function AdsDecisionSection({
       */}
       <SectionCard
         title="Bảng quyết định quảng cáo"
-        description={`${period.label} · ${formatNumber(d.rows.length)} dòng · bấm vào dòng để xem đường đi của tiền`}
-        hint="Mỗi dòng trả lời đúng một câu: nên làm gì với dòng này, và vì sao. Khuyến nghị đi qua các cổng theo thứ tự — TỪ CHỐI KẾT LUẬN trước, kết luận sau: không có số chi ⇒ không phán về tiền; ít tiền / ít đơn đã kết thúc / phần lớn đơn còn đang đi ⇒ 'chưa đủ dữ liệu'. Ngưỡng đặt ở lib/constants/ads-decision.ts."
+        description={`${period.label} · ${formatNumber(d.rows.length)} dòng`}
+        hint={
+          <>
+            <p>
+              Mỗi dòng trả lời đúng một câu: nên làm gì với dòng này, và vì sao. Khuyến nghị đi qua các cổng theo thứ tự — TỪ CHỐI KẾT LUẬN trước, kết
+              luận sau: không có số chi ⇒ không phán về tiền; ít tiền / ít đơn đã kết thúc / phần lớn đơn còn đang đi ⇒ &lsquo;chưa đủ dữ liệu&rsquo;.
+              Ngưỡng đặt ở lib/constants/ads-decision.ts.
+            </p>
+            <p className="mt-1">Bấm vào dòng để xem đường đi của tiền.</p>
+          </>
+        }
         actions={<AdsDimensionTabs current={dimension} />}
         padded={false}
       >
         {/*
-          ĐỘ PHỦ QUY KẾT ĐỨNG NGAY TRÊN BẢNG, CỐ Ý.
-          Nếu chỉ 30% đơn nối được về quảng cáo thì mọi kết luận dưới đây nói về 30% đó, không phải
-          về toàn shop. Con số vẫn đúng; đọc nó như thể nó nói về cả shop mới là tự lừa mình.
+          ═══════════ DẢI SỐ ĐẦU BẢNG: CHỈ SỐ, LỜI GIẢI THÍCH VÀO ⓘ, CẢNH BÁO VÀO MỘT NHÃN ⚠ ═══════════
+
+          Chủ shop chốt 24/09/2026: trang báo cáo chỉ hiện số. Bốn dải chữ cũ (độ phủ quy kết · chi
+          tiết cấp mẩu · kết luận mượn · tỷ lệ tạm tính · sổ quyết định) thu về MỘT hàng số; câu chữ
+          của từng mục nằm nguyên văn trong dấu ⓘ đứng ngay cạnh nó, còn mọi câu CẢNH BÁO dữ liệu gom
+          vào một nhãn `DataWarnings` — không biến mất, chỉ thôi chiếm chỗ.
         */}
-        <p
-          className={cn(
-            "border-b px-5 py-2 text-xs",
-            lowCoverage ? "bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300" : "text-muted-foreground",
-          )}
-        >
-          Độ phủ quy kết{" "}
-          {d.confidence.coveragePct === null ? "chưa đo được" : `${formatPercent(d.confidence.coveragePct)}`} (
-          {formatNumber(d.confidence.attributedOrders)}/{formatNumber(d.confidence.attributableOrders)} đơn CÓ DẤU VẾT
-          FACEBOOK nối được về quảng cáo).{" "}
-          {d.confidence.notFromAdsOrders > 0 ? (
-            <>
-              {formatNumber(d.confidence.notFromAdsOrders)} đơn khác trong kỳ không có fanpage, bài viết hay mẩu quảng cáo nào — chúng chưa bao giờ đi
-              qua quảng cáo nên đứng NGOÀI mẫu số này.{" "}
-            </>
-          ) : null}
-          {d.confidence.coveragePct === null
-            ? "Không có đơn nào trong phạm vi để đo."
-            : lowCoverage
-              ? `Dưới ngưỡng ${d.confidence.threshold}%: bảng này mô tả đúng PHẦN ĐƠN NỐI ĐƯỢC, không mô tả toàn shop. Phần còn lại cố ý không chia đều cho các chiến dịch.`
-              : "Đủ để kết luận ở cấp chiến dịch."}{" "}
-          Đây là CẬN DƯỚI: phần chưa nối được vẫn lẫn đơn hữu cơ nhắn thẳng vào fanpage mà ERP không tách ra được.
-        </p>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-5 py-2 text-xs text-muted-foreground">
+          {/*
+            ĐỘ PHỦ QUY KẾT ĐỨNG NGAY TRÊN BẢNG, CỐ Ý.
+            Nếu chỉ 30% đơn nối được về quảng cáo thì mọi kết luận dưới đây nói về 30% đó, không phải
+            về toàn shop. Con số vẫn đúng; đọc nó như thể nó nói về cả shop mới là tự lừa mình.
+          */}
+          <span className="inline-flex items-center gap-1">
+            Độ phủ quy kết{" "}
+            <b className={cn("numeric", lowCoverage ? "text-amber-700 dark:text-amber-300" : "text-foreground")}>
+              {d.confidence.coveragePct === null ? "chưa đo được" : `${formatPercent(d.confidence.coveragePct)}`}
+            </b>
+            <span className="numeric">
+              ({formatNumber(d.confidence.attributedOrders)}/{formatNumber(d.confidence.attributableOrders)} đơn)
+            </span>
+            <InfoHint>
+              <p>
+                {formatNumber(d.confidence.attributedOrders)}/{formatNumber(d.confidence.attributableOrders)} đơn CÓ DẤU VẾT FACEBOOK nối được về quảng cáo.{" "}
+                {d.confidence.notFromAdsOrders > 0 ? (
+                  <>
+                    {formatNumber(d.confidence.notFromAdsOrders)} đơn khác trong kỳ không có fanpage, bài viết hay mẩu quảng cáo nào — chúng chưa bao
+                    giờ đi qua quảng cáo nên đứng NGOÀI mẫu số này.{" "}
+                  </>
+                ) : null}
+                {d.confidence.coveragePct === null ? "Không có đơn nào trong phạm vi để đo." : lowCoverage ? null : "Đủ để kết luận ở cấp chiến dịch."}
+              </p>
+              <p className="mt-1">Đây là CẬN DƯỚI: phần chưa nối được vẫn lẫn đơn hữu cơ nhắn thẳng vào fanpage mà ERP không tách ra được.</p>
+            </InfoHint>
+          </span>
 
-        {/*
-          ĐỘ PHỦ CHI TIẾT CẤP MẨU — chỉ nói ở hai cấp dưới, vì chỉ ở đó nó mới đổi cách đọc bảng.
+          {/*
+            ═══════════ BẰNG CHỨNG DỪNG Ở ĐÂU — VÀ BAO NHIÊU TIỀN ĐANG ĐỨNG SAU CHỖ DỪNG ẤY ═══════════
 
-          Lượt đồng bộ Facebook chỉ chạm N ngày gần nhất, nên ngày cũ mãi mãi ở hạt CHIẾN DỊCH và
-          tiền của chúng KHÔNG xuất hiện ở cấp nhóm / cấp mẩu. Một bảng đọc thiếu tiền mà im lặng
-          thì tệ hơn một bảng rỗng: người đọc tin vào một ROAS tính trên nửa số tiền.
-        */}
-        {(dimension === "adset" || dimension === "ad") && d.spendDetail.pct !== null && d.spendDetail.pct < 100 ? (
-          <p className="border-b bg-sky-50 px-5 py-2 text-xs text-sky-800 dark:bg-sky-950/40 dark:text-sky-300">
-            Mới {formatPercent(d.spendDetail.pct)} tiền quảng cáo của kỳ có chi tiết tới cấp mẩu ({formatVND(d.spendDetail.atAdGrain)} /{" "}
-            {formatVND(d.spendDetail.total)}). Phần còn lại nằm ở những ngày ERP chỉ có số chi ở cấp CHIẾN DỊCH, và nó KHÔNG có mặt trong bảng này —
-            cố ý, vì chia đều tiền chiến dịch xuống nhóm/mẩu sẽ làm tổng khớp trong khi từng dòng đều sai. Xem ở tab Chiến dịch để có đủ tiền của kỳ.
-          </p>
-        ) : null}
+            Đo production 23/09/2026: 619 chiến dịch trong một cửa sổ 14 ngày, và trong nhóm đủ tiền
+            thì chiến dịch nhiều đơn nhất cũng chỉ có 3 đơn — cổng mẫu (10) không bao giờ mở, nên
+            45.726.057 ₫ không nhận được kết luận nào. Cùng dữ liệu ấy ở cấp MÃ HÀNG: 3/4 mã có
+            khuyến nghị, phủ 99,8% tiền.
 
-        {/*
-          ═══════════ BẰNG CHỨNG DỪNG Ở ĐÂU — VÀ BAO NHIÊU TIỀN ĐANG ĐỨNG SAU CHỖ DỪNG ẤY ═══════════
-
-          Đo production 23/09/2026: 619 chiến dịch trong một cửa sổ 14 ngày, và trong nhóm đủ tiền
-          thì chiến dịch nhiều đơn nhất cũng chỉ có 3 đơn — cổng mẫu (10) không bao giờ mở, nên
-          45.726.057 ₫ không nhận được kết luận nào. Cùng dữ liệu ấy ở cấp MÃ HÀNG: 3/4 mã có
-          khuyến nghị, phủ 99,8% tiền.
-
-          Dải này nói ba con số RIÊNG vì mỗi cái sửa ở một chỗ khác: mượn được (đã có câu trả lời) ·
-          chưa nối được về mã (đi khai mã cho chiến dịch) · mã cũng chưa kết luận (đợi dữ liệu).
-          Gộp lại thành một con số "chưa đủ dữ liệu" là đúng thứ đã giấu 45,7 triệu suốt hai ngày.
-        */}
-        {dimension === "campaign" && (d.inheritedCoverage.rows > 0 || d.inheritedCoverage.unlinkedRows > 0 || d.inheritedCoverage.testRows > 0) ? (
-          <p className="border-b px-5 py-2 text-xs text-muted-foreground">
-            <b>{formatNumber(d.inheritedCoverage.rows)}</b> chiến dịch không tự kết luận được nhưng <b>mượn được kết luận của mã hàng</b> (
-            {formatVND(d.inheritedCoverage.spend)} tiền quảng cáo) — câu mượn hiện ngay dưới khuyến nghị của dòng, kèm tên mã.{" "}
-            {d.inheritedCoverage.testRows > 0 ? (
-              <>
-                <b>{formatNumber(d.inheritedCoverage.testRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.testSpend)}) là <b>chi phí test</b> fanpage /
-                mẫu mới — KHÔNG thuộc mã nào một cách cố ý, nên không mượn và cũng không phải chỗ thiếu dữ liệu. Nó có câu hỏi riêng: đốt bao nhiêu vào
-                test, và có cái nào ra được thành mã bán.{" "}
-              </>
-            ) : null}
-            {d.inheritedCoverage.unlinkedRows > 0 ? (
-              <>
-                <b>{formatNumber(d.inheritedCoverage.unlinkedRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.unlinkedSpend)}) <b>chưa phân loại</b> —
-                không nhận ra mã trong tên và cũng không khai là test. ERP KHÔNG đoán; đây là việc cần người: khai mã, hoặc đánh dấu là chi phí test, ở
-                màn Chi phí quảng cáo.{" "}
-              </>
-            ) : null}
-            {d.inheritedCoverage.productSilentRows > 0 ? (
-              <>
-                <b>{formatNumber(d.inheritedCoverage.productSilentRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.productSilentSpend)}) nối được
-                nhưng chính mã ấy cũng chưa kết luận được — chỗ này đợi thêm dữ liệu, không sửa bằng tay được.{" "}
-              </>
-            ) : null}
-            Kết luận mượn nói về CẢ MÃ, không phải riêng chiến dịch — và nó KHÔNG mở đường cho bàn tay đổi ngân sách.
-          </p>
-        ) : null}
-
-        {/*
-          ═══════════ CĂN CỨ TỶ LỆ GTC — BẮT BUỘC ĐỨNG CẠNH MỌI CON SỐ TẠM TÍNH ═══════════
-
-          Dòng nào chưa đủ đơn ngã ngũ thì khuyến nghị của nó đứng trên LỢI NHUẬN TẠM TÍNH, tức
-          trên một tỷ lệ giao thành công lấy từ thang bậc (AGENTS.md mục 68). Thang ấy có bậc là
-          SỐ ĐO của chính mã, và có bậc là MỤC TIÊU khai chung ở Giả định — hai thứ khác hẳn nhau
-          về cách sửa khi sai, nên độ phủ phải in ra chứ không nằm trong một dấu ⓘ.
-
-          Chỉ hiện khi bảng THẬT SỰ có dòng tạm tính: không dòng nào dùng tới tỷ lệ thì dải này chỉ
-          là một câu chữ làm loãng màn hình.
-        */}
-        {soDongTamTinh > 0 ? (
-          <p className="border-b px-5 py-2 text-xs text-muted-foreground">
-            <b>{formatNumber(soDongTamTinh)}</b> dòng đang quyết trên <b>lợi nhuận tạm tính</b> — phần đơn chưa ngã ngũ được cân theo tỷ lệ giao thành
-            công của thang bậc. Độ phủ trong kỳ: <b>{deliveryRateCoverageParts(d.rateBasis.coverage).total}</b> mã —{" "}
-            {deliveryRateCoverageParts(d.rateBasis.coverage).parts.map((x, i) => (
-              <span key={x.source}>
-                {i ? " · " : ""}
-                <b>{x.count}</b> {x.label.toLowerCase()}
-                {x.source === "default" ? ` (MỤC TIÊU ${formatPercent(d.rateBasis!.fallbackDeliveryRate)})` : ""}
+            Dải này nói ba con số RIÊNG vì mỗi cái sửa ở một chỗ khác: mượn được (đã có câu trả lời) ·
+            chưa nối được về mã (đi khai mã cho chiến dịch) · mã cũng chưa kết luận (đợi dữ liệu).
+            Gộp lại thành một con số "chưa đủ dữ liệu" là đúng thứ đã giấu 45,7 triệu suốt hai ngày.
+          */}
+          {dimension === "campaign" && (d.inheritedCoverage.rows > 0 || d.inheritedCoverage.unlinkedRows > 0 || d.inheritedCoverage.testRows > 0) ? (
+            <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="numeric">
+                Mượn kết luận mã: <b className="text-foreground">{formatNumber(d.inheritedCoverage.rows)}</b> chiến dịch ·{" "}
+                {formatVND(d.inheritedCoverage.spend)}
               </span>
-            ))}
-            .{" "}
-            {(d.rateBasis.coverage.default ?? 0) > 0 ? (
-              <>
-                Mã chạy theo mục tiêu thì lợi nhuận tạm tính của nó đọc là <b>&ldquo;theo kế hoạch&rdquo;</b>, không phải &ldquo;sẽ về ngần ấy&rdquo; —
-                mục tiêu không đạt là việc của khâu vận hành, không phải bằng chứng mô hình sai. Sửa mục tiêu ở Báo cáo → Giả định.{" "}
-              </>
-            ) : null}
-            {d.rateBasis.projectionError ? <b>Mô hình dự báo lỗi ({d.rateBasis.projectionError}) — mọi mã đã lùi về lịch sử / mục tiêu.</b> : null}
-          </p>
-        ) : null}
+              {d.inheritedCoverage.testRows > 0 ? (
+                <span className="numeric">
+                  Chi phí test: <b className="text-foreground">{formatNumber(d.inheritedCoverage.testRows)}</b> chiến dịch ·{" "}
+                  {formatVND(d.inheritedCoverage.testSpend)}
+                </span>
+              ) : null}
+              {d.inheritedCoverage.unlinkedRows > 0 ? (
+                <span className="numeric text-amber-700 dark:text-amber-300">
+                  Chưa phân loại: <b>{formatNumber(d.inheritedCoverage.unlinkedRows)}</b> chiến dịch · {formatVND(d.inheritedCoverage.unlinkedSpend)}
+                </span>
+              ) : null}
+              {d.inheritedCoverage.productSilentRows > 0 ? (
+                <span className="numeric">
+                  Mã chưa kết luận: <b className="text-foreground">{formatNumber(d.inheritedCoverage.productSilentRows)}</b> chiến dịch ·{" "}
+                  {formatVND(d.inheritedCoverage.productSilentSpend)}
+                </span>
+              ) : null}
+              <InfoHint>
+                <p>
+                  <b>{formatNumber(d.inheritedCoverage.rows)}</b> chiến dịch không tự kết luận được nhưng <b>mượn được kết luận của mã hàng</b> (
+                  {formatVND(d.inheritedCoverage.spend)} tiền quảng cáo) — câu mượn hiện ngay dưới khuyến nghị của dòng, kèm tên mã.
+                </p>
+                {d.inheritedCoverage.testRows > 0 ? (
+                  <p className="mt-1">
+                    <b>{formatNumber(d.inheritedCoverage.testRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.testSpend)}) là <b>chi phí test</b>{" "}
+                    fanpage / mẫu mới — KHÔNG thuộc mã nào một cách cố ý, nên không mượn và cũng không phải chỗ thiếu dữ liệu. Nó có câu hỏi riêng: đốt
+                    bao nhiêu vào test, và có cái nào ra được thành mã bán.
+                  </p>
+                ) : null}
+                {d.inheritedCoverage.productSilentRows > 0 ? (
+                  <p className="mt-1">
+                    <b>{formatNumber(d.inheritedCoverage.productSilentRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.productSilentSpend)}) nối được
+                    nhưng chính mã ấy cũng chưa kết luận được — chỗ này đợi thêm dữ liệu, không sửa bằng tay được.
+                  </p>
+                ) : null}
+                <p className="mt-1">Kết luận mượn nói về CẢ MÃ, không phải riêng chiến dịch — và nó KHÔNG mở đường cho bàn tay đổi ngân sách.</p>
+              </InfoHint>
+            </span>
+          ) : null}
 
-        {/*
-          SỔ QUYẾT ĐỊNH — TRÍ NHỚ CỦA BẢNG NÀY.
+          {/*
+            ═══════════ CĂN CỨ TỶ LỆ GTC — BẮT BUỘC ĐỨNG CẠNH MỌI CON SỐ TẠM TÍNH ═══════════
 
-          Bảng trên trả lời "lúc này nên làm gì". Sổ trả lời "ERP có đang đổi ý xoành xoạch không" —
-          câu mà một người ra quyết định cần, và là điều kiện tồn tại của bất kỳ cỗ máy tự chủ nào.
-        */}
-        <p className={cn("border-b px-5 py-2 text-xs", soDaChay ? "text-muted-foreground" : "bg-sky-50 text-sky-800 dark:bg-sky-950/40 dark:text-sky-300")}>
+            Dòng nào chưa đủ đơn ngã ngũ thì khuyến nghị của nó đứng trên LỢI NHUẬN TẠM TÍNH, tức
+            trên một tỷ lệ giao thành công lấy từ thang bậc (AGENTS.md mục 68). Thang ấy có bậc là
+            SỐ ĐO của chính mã, và có bậc là MỤC TIÊU khai chung ở Giả định — hai thứ khác hẳn nhau
+            về cách sửa khi sai, nên độ phủ phải in ra chứ không nằm trong một dấu ⓘ.
+
+            Chỉ hiện khi bảng THẬT SỰ có dòng tạm tính: không dòng nào dùng tới tỷ lệ thì dải này chỉ
+            là một câu chữ làm loãng màn hình.
+          */}
+          {soDongTamTinh > 0 ? (
+            <span className="inline-flex flex-wrap items-center gap-1">
+              <span className="numeric">
+                Tạm tính: <b className="text-foreground">{formatNumber(soDongTamTinh)}</b> dòng · độ phủ{" "}
+                <b className="text-foreground">{deliveryRateCoverageParts(d.rateBasis.coverage).total}</b> mã —{" "}
+                {deliveryRateCoverageParts(d.rateBasis.coverage).parts.map((x, i) => (
+                  <span key={x.source}>
+                    {i ? " · " : ""}
+                    <b className="text-foreground">{x.count}</b> {x.label.toLowerCase()}
+                    {x.source === "default" ? ` (MỤC TIÊU ${formatPercent(d.rateBasis.fallbackDeliveryRate)})` : ""}
+                  </span>
+                ))}
+              </span>
+              <InfoHint>
+                <p>
+                  <b>{formatNumber(soDongTamTinh)}</b> dòng đang quyết trên <b>lợi nhuận tạm tính</b> — phần đơn chưa ngã ngũ được cân theo tỷ lệ giao
+                  thành công của thang bậc.
+                </p>
+                {(d.rateBasis.coverage.default ?? 0) > 0 ? (
+                  <p className="mt-1">
+                    Mã chạy theo mục tiêu thì lợi nhuận tạm tính của nó đọc là <b>&ldquo;theo kế hoạch&rdquo;</b>, không phải &ldquo;sẽ về ngần ấy&rdquo; —
+                    mục tiêu không đạt là việc của khâu vận hành, không phải bằng chứng mô hình sai. Sửa mục tiêu ở Báo cáo → Giả định.
+                  </p>
+                ) : null}
+              </InfoHint>
+            </span>
+          ) : null}
+
+          {/*
+            SỔ QUYẾT ĐỊNH — TRÍ NHỚ CỦA BẢNG NÀY.
+
+            Bảng trên trả lời "lúc này nên làm gì". Sổ trả lời "ERP có đang đổi ý xoành xoạch không" —
+            câu mà một người ra quyết định cần, và là điều kiện tồn tại của bất kỳ cỗ máy tự chủ nào.
+          */}
           {soDaChay ? (
-            <>
-              Sổ quyết định: {formatNumber(daChin)}/{formatNumber(d.rows.length)} dòng đã chín (khuyến nghị giữ nguyên đủ số ngày và không đổi ý quá
-              số lần cho phép). Sổ chạy trên KỲ CHUẨN {LEDGER_WINDOW_DAYS} ngày kết thúc hôm qua — không phải kỳ đang chọn ở trên, nên hai con số có
-              thể nói khác nhau và cả hai đều đúng.
-            </>
+            <span className="inline-flex items-center gap-1">
+              <span className="numeric">
+                Sổ quyết định: <b className="text-foreground">{formatNumber(daChin)}</b>/{formatNumber(d.rows.length)} dòng đã chín
+              </span>
+              <InfoHint>
+                Khuyến nghị giữ nguyên đủ số ngày và không đổi ý quá số lần cho phép. Sổ chạy trên KỲ CHUẨN {LEDGER_WINDOW_DAYS} ngày kết thúc hôm qua —
+                không phải kỳ đang chọn ở trên, nên hai con số có thể nói khác nhau và cả hai đều đúng.
+              </InfoHint>
+            </span>
           ) : (
-            <>
-              Sổ quyết định CHƯA CHẠY, nên chưa đo được khuyến nghị nào ổn định hay đang nhảy qua nhảy lại. Bật bằng biến môi trường{" "}
-              <code>MARKETING_LEDGER_EVERY_MINUTES</code> (gợi ý 30) hoặc chạy tay job <code>marketing-decision-ledger</code>. Sổ không dựng lại được
-              quá khứ: mỗi ngày không chạy là một ngày mất hẳn.
-            </>
+            <span className="text-sky-700 dark:text-sky-300">Sổ quyết định: chưa chạy</span>
           )}
-        </p>
+
+          <DataWarnings
+            tone={d.rateBasis.projectionError ? "danger" : "warn"}
+            items={[
+              lowCoverage
+                ? `Độ phủ quy kết dưới ngưỡng ${d.confidence.threshold}%: bảng này mô tả đúng PHẦN ĐƠN NỐI ĐƯỢC, không mô tả toàn shop. Phần còn lại cố ý không chia đều cho các chiến dịch.`
+                : null,
+              /*
+                ĐỘ PHỦ CHI TIẾT CẤP MẨU — chỉ nói ở hai cấp dưới, vì chỉ ở đó nó mới đổi cách đọc bảng.
+
+                Lượt đồng bộ Facebook chỉ chạm N ngày gần nhất, nên ngày cũ mãi mãi ở hạt CHIẾN DỊCH và
+                tiền của chúng KHÔNG xuất hiện ở cấp nhóm / cấp mẩu. Một bảng đọc thiếu tiền mà im lặng
+                thì tệ hơn một bảng rỗng: người đọc tin vào một ROAS tính trên nửa số tiền.
+              */
+              (dimension === "adset" || dimension === "ad") && d.spendDetail.pct !== null && d.spendDetail.pct < 100 ? (
+                <>
+                  Mới {formatPercent(d.spendDetail.pct)} tiền quảng cáo của kỳ có chi tiết tới cấp mẩu ({formatVND(d.spendDetail.atAdGrain)} /{" "}
+                  {formatVND(d.spendDetail.total)}). Phần còn lại nằm ở những ngày ERP chỉ có số chi ở cấp CHIẾN DỊCH, và nó KHÔNG có mặt trong bảng này
+                  — cố ý, vì chia đều tiền chiến dịch xuống nhóm/mẩu sẽ làm tổng khớp trong khi từng dòng đều sai. Xem ở tab Chiến dịch để có đủ tiền
+                  của kỳ.
+                </>
+              ) : null,
+              dimension === "campaign" && d.inheritedCoverage.unlinkedRows > 0 ? (
+                <>
+                  <b>{formatNumber(d.inheritedCoverage.unlinkedRows)}</b> chiến dịch ({formatVND(d.inheritedCoverage.unlinkedSpend)}) <b>chưa phân loại</b> —
+                  không nhận ra mã trong tên và cũng không khai là test. ERP KHÔNG đoán; đây là việc cần người: khai mã, hoặc đánh dấu là chi phí test, ở
+                  màn Chi phí quảng cáo.
+                </>
+              ) : null,
+              soDongTamTinh > 0 && d.rateBasis.projectionError ? (
+                <b>Mô hình dự báo lỗi ({d.rateBasis.projectionError}) — mọi mã đã lùi về lịch sử / mục tiêu.</b>
+              ) : null,
+              !soDaChay ? (
+                <>
+                  Sổ quyết định CHƯA CHẠY, nên chưa đo được khuyến nghị nào ổn định hay đang nhảy qua nhảy lại. Bật bằng biến môi trường{" "}
+                  <code>MARKETING_LEDGER_EVERY_MINUTES</code> (gợi ý 30) hoặc chạy tay job <code>marketing-decision-ledger</code>. Sổ không dựng lại được
+                  quá khứ: mỗi ngày không chạy là một ngày mất hẳn.
+                </>
+              ) : null,
+            ]}
+          />
+        </div>
 
         <AdsDecisionTable rows={dongVe} dimension={dimension} stability={stability} hiddenCount={dongAn.length} showAllHref={showAllHref} />
         {/*
@@ -292,27 +359,41 @@ export async function AdsDecisionSection({
           kết luận: mọi khuyến nghị đều đã ở trên.
         */}
         {dongAn.length > 0 ? (
-          <p className="border-t px-5 py-2 text-xs text-muted-foreground">
-            Đang hiện <b>{formatNumber(dongVe.length)}</b>/{formatNumber(d.rows.length)} dòng. <b>{formatNumber(dongAn.length)}</b> dòng còn lại (tổng chi{" "}
-            {formatVND(dongAn.reduce((t, r) => t + r.spend, 0))}) đều chưa có kết luận và động tới ít tiền hơn các dòng ở trên — mọi khuyến nghị đã hiện
-            đủ.{" "}
-            <a className="font-medium text-foreground underline underline-offset-2" href={showAllHref}>
+          <p className="flex flex-wrap items-center gap-x-1 border-t px-5 py-2 text-xs text-muted-foreground">
+            <span className="numeric">
+              Đang hiện <b>{formatNumber(dongVe.length)}</b>/{formatNumber(d.rows.length)} dòng · ẩn <b>{formatNumber(dongAn.length)}</b> dòng (tổng chi{" "}
+              {formatVND(dongAn.reduce((t, r) => t + r.spend, 0))})
+            </span>
+            <InfoHint>
+              {formatNumber(dongAn.length)} dòng còn lại đều chưa có kết luận và động tới ít tiền hơn các dòng ở trên — mọi khuyến nghị đã hiện đủ. Hiện tất
+              cả thì trang sẽ nặng hơn nhiều.
+            </InfoHint>
+            <a className="ml-2 font-medium text-foreground underline underline-offset-2" href={showAllHref}>
               Hiện tất cả {formatNumber(d.rows.length)} dòng
-            </a>{" "}
-            (trang sẽ nặng hơn nhiều).
+            </a>
           </p>
         ) : null}
 
-        <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-          <p className="font-medium text-foreground">Phần chưa kết luận được (hiện riêng, không chia đều):</p>
-          <ul className="mt-1 space-y-0.5">
-            <li>
-              {formatVND(d.pending.spendInsufficientData)} chi ở các dòng chưa đủ dữ liệu — chưa đủ tiền, chưa đủ đơn đã kết thúc, hoặc phần lớn đơn
-              còn đang đi.
-            </li>
-            {d.pending.spendWithoutOrders ? <li>{formatVND(d.pending.spendWithoutOrders)} chi ở chiến dịch KHÔNG có đơn nào gắn vào — tiền đã mất dấu.</li> : null}
-            <li>{formatNumber(d.pending.openOrders)} đơn chưa ngã ngũ: kết quả tiền của chúng chưa tính vào bảng này.</li>
-          </ul>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-5 py-2 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1 font-medium text-foreground">
+            Phần chưa kết luận được
+            <InfoHint>
+              <p>Hiện riêng, không chia đều.</p>
+              <ul className="mt-1 space-y-0.5">
+                <li>
+                  {formatVND(d.pending.spendInsufficientData)} chi ở các dòng chưa đủ dữ liệu — chưa đủ tiền, chưa đủ đơn đã kết thúc, hoặc phần lớn đơn
+                  còn đang đi.
+                </li>
+                {d.pending.spendWithoutOrders ? (
+                  <li>{formatVND(d.pending.spendWithoutOrders)} chi ở chiến dịch KHÔNG có đơn nào gắn vào — tiền đã mất dấu.</li>
+                ) : null}
+                <li>{formatNumber(d.pending.openOrders)} đơn chưa ngã ngũ: kết quả tiền của chúng chưa tính vào bảng này.</li>
+              </ul>
+            </InfoHint>
+          </span>
+          <span className="numeric">{formatVND(d.pending.spendInsufficientData)} chưa đủ dữ liệu</span>
+          {d.pending.spendWithoutOrders ? <span className="numeric">· {formatVND(d.pending.spendWithoutOrders)} không có đơn</span> : null}
+          <span className="numeric">· {formatNumber(d.pending.openOrders)} đơn chưa ngã ngũ</span>
         </div>
       </SectionCard>
     </div>

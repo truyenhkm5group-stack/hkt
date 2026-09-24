@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { AlertTriangle, Users } from "lucide-react";
 import { SectionCard } from "@/components/ui-bits";
+import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { CARRIER_SUBSTATE_LABEL, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { MARKETER_COVERAGE_WARN_PCT, MARKETER_EVIDENCE, MARKETER_EVIDENCE_HINT, MARKETER_EVIDENCE_LABEL, MARKETER_LINK_FIX, MARKETER_LINK_LABEL, MARKETER_LINK_STATES, MARKETER_RESOLVED_STATES } from "@/lib/constants/marketer-attribution";
 import { ALERT_MIN_SAMPLE, PROBLEM_LABEL, RISK_HINT, RISK_LABEL, RISK_TONE } from "@/lib/constants/return-intelligence";
@@ -40,14 +41,20 @@ export function CoverageStrip({ coverage }: { coverage: ReturnIntelligence["cove
       {o.map((x) => {
         const thap = x.v.pct !== null && x.v.pct < (x.key === "marketer" ? MARKETER_COVERAGE_WARN_PCT : 70);
         return (
-          <div key={x.key} className={cn("rounded-lg border px-3 py-2", thap ? "border-amber-300 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/30" : "border-hairline")} title={x.hint}>
+          <div key={x.key} className={cn("rounded-lg border px-3 py-2", thap ? "border-amber-300 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/30" : "border-hairline")}>
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-[12px] text-muted-foreground">{x.label}</span>
+              <span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground">
+                {x.label}
+                <InfoHint>
+                  <p>{x.hint}</p>
+                  {thap ? <p className="mt-2">Độ phủ thấp — con số bên dưới chỉ đúng cho phần đã thu được.</p> : null}
+                </InfoHint>
+              </span>
               <span className={cn("numeric text-sm font-bold", thap ? "text-amber-700 dark:text-amber-300" : "")}>{PCT(x.v.pct)}</span>
             </div>
             <div className="text-[11px] text-muted-foreground">
               {formatNumber(x.v.known)} / {formatNumber(x.v.total)}
-              {thap ? " · thấp — con số bên dưới chỉ đúng cho phần đã thu được" : ""}
+              {thap ? " · thấp" : ""}
             </div>
           </div>
         );
@@ -93,14 +100,15 @@ export function ComparePeriod({ compare }: { compare: ReturnIntelligence["compar
           </div>
         </div>
       </div>
-      {compare.immatureNote ? (
-        <p className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-          <span>
-            <b>Cohort chưa chín.</b> {compare.immatureNote}
-          </span>
-        </p>
-      ) : null}
+      <DataWarnings
+        items={[
+          compare.immatureNote ? (
+            <span key="cohort">
+              <b>Cohort chưa chín.</b> {compare.immatureNote}
+            </span>
+          ) : null,
+        ]}
+      />
     </div>
   );
 }
@@ -112,13 +120,19 @@ export function ProductRiskTable({ rows, hasTarget }: { rows: ReturnIntelligence
   return (
     <>
       {!hasTarget ? (
-        <p className="mb-2 rounded-md border border-hairline bg-muted/40 px-3 py-2 text-[12px] text-muted-foreground">
-          Chưa ai đặt mục tiêu cho chỉ số <b>Tỷ lệ giao thành công</b>, nên bảng này <b>hiện thực tế và vẫn xếp hạng</b> nhưng không kết luận mã nào đạt hay không đạt. Đặt mục tiêu ở{" "}
-          <Link className="underline underline-offset-2" href="/work/settings#muc-tieu-chi-so">
-            Công việc → Cấu hình → Mục tiêu chỉ số
-          </Link>
-          {" "}— đặt một mức chung cho cả shop, và mức riêng cho từng mã nếu mã đó có đặc thù.
-        </p>
+        <div className="mb-2">
+          <DataWarnings
+            items={[
+              <span key="chua-dich">
+                Chưa ai đặt mục tiêu cho chỉ số <b>Tỷ lệ giao thành công</b>, nên bảng này <b>hiện thực tế và vẫn xếp hạng</b> nhưng không kết luận mã nào đạt hay không đạt. Đặt mục tiêu ở{" "}
+                <Link className="underline underline-offset-2" href="/work/settings#muc-tieu-chi-so">
+                  Công việc → Cấu hình → Mục tiêu chỉ số
+                </Link>
+                {" "}— đặt một mức chung cho cả shop, và mức riêng cho từng mã nếu mã đó có đặc thù.
+              </span>,
+            ]}
+          />
+        </div>
       ) : null}
       <TableToolsFor tableId="hoan-canh-bao" />
       <div className={TABLE_SCROLL}>
@@ -203,15 +217,32 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
   const thieuNhieuNhat = chuaXacDinh[0]?.state ?? null;
   return (
     <>
-      {coverage.warn ? (
-        <p className="mb-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          <Users className="mt-0.5 size-3.5 shrink-0" />
-          <span>
-            Chỉ <b>{PCT(coverage.pct)}</b> đơn quy kết được về một marketer ({formatNumber(coverage.resolved)}/{formatNumber(coverage.total)}). Bảng vẫn ĐÚNG cho phần quy kết được, nhưng phần ấy có thể không đại
-            diện cho toàn shop. {thieuNhieuNhat ? MARKETER_LINK_FIX[thieuNhieuNhat] : MARKETER_LINK_FIX.NO_CAMPAIGN}
-          </span>
-        </p>
-      ) : null}
+      {/*
+        Cảnh báo độ phủ và cảnh báo mâu thuẫn (xem chú thích bên dưới) gom vào MỘT nhãn
+        "⚠ n lưu ý dữ liệu" đứng ngay dòng "Quy kết bằng:" — nhìn thấy được, trỏ chuột mới hiện
+        nguyên văn (chủ shop chốt 24/09/2026).
+      */}
+      {(() => {
+        const canhBao = [
+          coverage.warn ? (
+            <span key="do-phu">
+              Chỉ <b>{PCT(coverage.pct)}</b> đơn quy kết được về một marketer ({formatNumber(coverage.resolved)}/{formatNumber(coverage.total)}). Bảng vẫn ĐÚNG cho phần quy kết được, nhưng phần ấy có thể không đại
+              diện cho toàn shop. {thieuNhieuNhat ? MARKETER_LINK_FIX[thieuNhieuNhat] : MARKETER_LINK_FIX.NO_CAMPAIGN}
+            </span>
+          ) : null,
+          coverage.conflicts > 0 ? (
+            <span key="mau-thuan">
+              <b>{formatNumber(coverage.conflicts)}</b> đơn có chiến dịch quảng cáo và fanpage phụ trách trỏ về HAI người khác nhau. Bảng này ghi cho người của CHIẾN DỊCH; bảng lương đang ghi cho người
+              của FANPAGE. Hai chỗ sẽ nói khác nhau về đúng những đơn này cho tới khi chủ shop chốt một bên.
+            </span>
+          ) : null,
+        ];
+        return canhBao.some(Boolean) ? (
+          <div className="mb-2">
+            <DataWarnings items={canhBao} />
+          </div>
+        ) : null;
+      })()}
       {/*
         ═══ HAI ĐƯỜNG QUY KẾT, ĐẾM RIÊNG — VÀ CHỖ TRỐNG LÀ VIỆC PHẢI LÀM ═══
 
@@ -223,7 +254,16 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
         Chỗ trống cũng vậy: mỗi loại sửa ở một màn hình khác, nên in con số kèm ĐÚNG việc phải làm.
       */}
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-muted-foreground">
-        <span className="font-medium text-foreground">Quy kết bằng:</span>
+        <span className="inline-flex items-center gap-1 font-medium text-foreground">
+          Quy kết bằng:
+          <InfoHint>
+            Quy kết đi bằng <b>khoá</b>, không dò chữ trong tên chiến dịch hay tên page. Ba đường, xét theo thứ tự: (1) đơn → ad_id / post_id → <b>chiến dịch</b> → người phụ trách khai ở bảng chi tiêu;
+            (2) đơn → <b>fanpage</b> → người phụ trách <b>tại mốc đơn lên</b> (ảnh chụp, nên đổi người phụ trách hôm nay không viết lại báo cáo tháng trước); (3) đơn <b>landing</b> không có fanpage → ô{" "}
+            <b>UTM</b> của chính dòng form (ad_id → adset_id → campaign_id → tên chiến dịch khớp <b>tuyệt đối</b> từng ký tự). Chiến dịch mang hai người phụ trách là nhập nhằng; fanpage chưa gán người tại
+            mốc ấy, và landing có tracking nhưng chưa dẫn về ai, cũng vậy — tất cả nằm ở nhóm &ldquo;Chưa xác định&rdquo; và <b>không</b> bị ép cho ai. Con số dự báo ở bảng khác <b>không</b> được dùng để
+            thưởng phạt — chỉ kết quả cuối.
+          </InfoHint>
+        </span>
         {MARKETER_EVIDENCE.map((e) => (
           <span key={e} title={MARKETER_EVIDENCE_HINT[e]} className={coverage.byEvidence[e] ? undefined : "opacity-60"}>
             <b className="tabular-nums text-foreground">{formatNumber(coverage.byEvidence[e])}</b> {MARKETER_EVIDENCE_LABEL[e]}
@@ -241,15 +281,6 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
         ngày bảng lương (khai thứ tự thẩm quyền NGƯỢC LẠI) bắt đầu nói khác bảng này về cùng một
         đơn — và đó là việc mang lên hỏi chủ shop, không phải việc tự chọn một bên.
       */}
-      {coverage.conflicts > 0 ? (
-        <p className="mb-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-          <span>
-            <b>{formatNumber(coverage.conflicts)}</b> đơn có chiến dịch quảng cáo và fanpage phụ trách trỏ về HAI người khác nhau. Bảng này ghi cho người của CHIẾN DỊCH; bảng lương đang ghi cho người
-            của FANPAGE. Hai chỗ sẽ nói khác nhau về đúng những đơn này cho tới khi chủ shop chốt một bên.
-          </span>
-        </p>
-      ) : null}
       <TableToolsFor tableId="hoan-theo-mau-ma" />
       <div className={TABLE_SCROLL}>
         <table id="hoan-theo-mau-ma" className="w-full min-w-[820px] text-sm">
@@ -272,10 +303,15 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
             {rows.map((m) => (
               <tr key={m.marketerId ?? "__unresolved__"} className={m.marketerId === null ? "bg-muted/30" : undefined}>
                 <td className="px-3 py-1.5 font-medium">
-                  {m.label}
                   {m.marketerId === null ? (
-                    <div className="text-[11px] text-muted-foreground">không nối được về chiến dịch, cũng không về fanpage có người phụ trách — KHÔNG ép cho ai</div>
+                    <span className="inline-flex items-center gap-1">
+                      {m.label}
+                      <InfoHint>Không nối được về chiến dịch, cũng không về fanpage có người phụ trách — KHÔNG ép cho ai.</InfoHint>
+                    </span>
                   ) : (
+                    m.label
+                  )}
+                  {m.marketerId !== null ? (
                     /*
                       CĂN CỨ ĐI THEO TÊN NGƯỜI, không nằm ở một cột riêng: bảng này đã 9 cột và
                       trần một màn hình là ~1.150px. Ô hai tầng giữ được cả hai con số mà không
@@ -291,7 +327,7 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
                         .map((e) => `${formatNumber(m.byEvidence[e])} ${MARKETER_EVIDENCE_LABEL[e]}`)
                         .join(" · ")}
                     </div>
-                  )}
+                  ) : null}
                 </td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(m.finished)}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-emerald-700 dark:text-emerald-400">{formatNumber(m.delivered)}</td>
@@ -315,20 +351,18 @@ export function MarketerQualityTable({ rows, coverage }: { rows: ReturnIntellige
               </tr>
             ))}
             <tr className="bg-muted/40 font-bold">
-              <td className="px-3 py-1.5">Tổng — bằng đúng số đơn đã kết thúc khi KHÔNG chia theo marketer</td>
+              <td className="px-3 py-1.5">
+                <span className="inline-flex items-center gap-1">
+                  Tổng
+                  <InfoHint>Bằng đúng số đơn đã kết thúc khi KHÔNG chia theo marketer.</InfoHint>
+                </span>
+              </td>
               <td className="px-3 py-1.5 text-right tabular-nums">{formatNumber(tong)}</td>
               <td colSpan={7} />
             </tr>
           </tbody>
         </table>
       </div>
-      <p className="mt-2 text-[11.5px] text-muted-foreground">
-        Quy kết đi bằng <b>khoá</b>, không dò chữ trong tên chiến dịch hay tên page. Ba đường, xét theo thứ tự: (1) đơn → ad_id / post_id → <b>chiến dịch</b> → người phụ trách khai ở bảng chi tiêu;
-        (2) đơn → <b>fanpage</b> → người phụ trách <b>tại mốc đơn lên</b> (ảnh chụp, nên đổi người phụ trách hôm nay không viết lại báo cáo tháng trước); (3) đơn <b>landing</b> không có fanpage → ô{" "}
-        <b>UTM</b> của chính dòng form (ad_id → adset_id → campaign_id → tên chiến dịch khớp <b>tuyệt đối</b> từng ký tự). Chiến dịch mang hai người phụ trách là nhập nhằng; fanpage chưa gán người tại
-        mốc ấy, và landing có tracking nhưng chưa dẫn về ai, cũng vậy — tất cả nằm ở nhóm &ldquo;Chưa xác định&rdquo; và <b>không</b> bị ép cho ai. Con số dự báo ở bảng khác <b>không</b> được dùng để
-        thưởng phạt — chỉ kết quả cuối.
-      </p>
     </>
   );
 }
@@ -384,7 +418,13 @@ export function CarePerformance({ care }: { care: ReturnIntelligence["care"] }) 
 
       {care.byPic.length ? (
         <div>
-          <p className="mb-1.5 text-[12px] font-medium">Theo người phụ trách</p>
+          <p className="mb-1.5 flex items-center gap-1.5 text-[12px] font-medium">
+            Theo người phụ trách
+            <InfoHint>
+              <b>Chỉ ca đã ngã ngũ mới dùng để chấm người.</b> Ca còn treo đếm riêng vì kết cục của nó chưa tồn tại — đưa vào mẫu số là chấm người bằng thứ chưa xảy ra. Và kết quả giao hàng do
+              ĐVVC đồng quyết định, nên con số này là <b>kết quả chung</b>, đọc làm bối cảnh chứ không phải điểm cá nhân.
+            </InfoHint>
+          </p>
           <div className="flex flex-wrap gap-2">
             {care.byPic.map((p) => (
               <div key={p.ownerEmail} className="rounded-lg border border-hairline px-3 py-2">
@@ -397,10 +437,6 @@ export function CarePerformance({ care }: { care: ReturnIntelligence["care"] }) 
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[11.5px] text-muted-foreground">
-            <b>Chỉ ca đã ngã ngũ mới dùng để chấm người.</b> Ca còn treo đếm riêng vì kết cục của nó chưa tồn tại — đưa vào mẫu số là chấm người bằng thứ chưa xảy ra. Và kết quả giao hàng do
-            ĐVVC đồng quyết định, nên con số này là <b>kết quả chung</b>, đọc làm bối cảnh chứ không phải điểm cá nhân.
-          </p>
         </div>
       ) : null}
     </div>
@@ -465,7 +501,7 @@ export function TrendSection({ trend }: { trend: ReturnIntelligence["trend"] }) 
 }
 
 /** Khối bọc chung để trang chính gọn lại — tiêu đề + gợi ý + nội dung, không thêm một lớp thẻ nữa. */
-export function IntelSection({ title, description, hint, children }: { title: string; description?: string; hint?: string; children: React.ReactNode }) {
+export function IntelSection({ title, description, hint, children }: { title: string; description?: React.ReactNode; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
     <SectionCard title={title} description={description} hint={hint} padded={false}>
       <div className="p-3">{children}</div>

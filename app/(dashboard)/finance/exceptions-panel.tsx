@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, CheckCircle2, CircleAlert, Info } from "lucide-react";
+import { InfoHint } from "@/components/info-hint";
 import type { FinanceException } from "@/lib/queries/finance-overview";
 import { formatNumber, formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -54,13 +55,15 @@ export function ExceptionsPanel({ exceptions }: { exceptions: FinanceException[]
   return (
     <section className="rounded-xl border bg-card shadow-[var(--shadow-card)]">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-hairline px-5 py-3">
-        <h2 className="text-[13.5px] font-bold">
-          Việc tài chính cần xử lý
-          <span className="ml-1.5 font-normal text-muted-foreground">
-            {formatNumber(exceptions.length)} mục{nang > 0 ? ` · ${formatNumber(nang)} cần xử lý ngay` : ""}
-          </span>
-        </h2>
-        <p className="text-xs text-muted-foreground">Mỗi mục dưới đây đang làm sai lệch một con số ở phần bên dưới.</p>
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-[13.5px] font-bold">
+            Việc tài chính cần xử lý
+            <span className="ml-1.5 font-normal text-muted-foreground">
+              {formatNumber(exceptions.length)} mục{nang > 0 ? ` · ${formatNumber(nang)} cần xử lý ngay` : ""}
+            </span>
+          </h2>
+          <InfoHint>Mỗi mục dưới đây đang làm sai lệch một con số ở phần bên dưới.</InfoHint>
+        </div>
       </div>
       <ul className="divide-y divide-hairline">
         {exceptions.map((e) => {

@@ -1,4 +1,5 @@
 import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { TableToolsFor } from "@/components/data-table/table-tools";
 import { SectionCard } from "@/components/ui-bits";
 import {
@@ -37,8 +38,8 @@ export async function CaseOutcomeReport({ period, basis }: { period: Period; bas
 
   if (!t.opened) {
     return (
-      <SectionCard title="Kết cục ca chăm sóc" description={`Kỳ này không có ca nào ${PERIOD_BASIS_LABEL[basis]}.`}>
-        <p className="text-sm text-muted-foreground">{PERIOD_BASIS_HINT[basis]}</p>
+      <SectionCard title="Kết cục ca chăm sóc" description={`Kỳ này không có ca nào ${PERIOD_BASIS_LABEL[basis]}.`} hint={PERIOD_BASIS_HINT[basis]} padded={false}>
+        {null}
       </SectionCard>
     );
   }
@@ -50,23 +51,34 @@ export async function CaseOutcomeReport({ period, basis }: { period: Period; bas
     <SectionCard
       title="Kết cục ca chăm sóc"
       description={`${formatNumber(t.opened)} ca ${PERIOD_BASIS_LABEL[basis]}`}
-      hint={PERIOD_BASIS_HINT[basis]}
+      hint={
+        <>
+          <p className="mb-2">{PERIOD_BASIS_HINT[basis]}</p>
+          <p className="mb-2">
+            Kỳ đang lọc {PERIOD_BASIS_LABEL[basis]}. Đổi mốc lọc sẽ ra một TẬP CA khác, không phải cùng tập với con số khác.
+          </p>
+          <p>
+            Bảng này KHÔNG xếp hạng nhân viên và không có điểm tổng. “Giao được SAU khi có người chăm” là QUAN SÁT, không phải nhân quả: người xử lý
+            chọn chăm ca nào, và thường chọn đơn to, khách quen, đơn còn cứu được.
+          </p>
+        </>
+      }
     >
       {/*
         ĐỘ PHỦ ĐỨNG TRƯỚC MỌI CON SỐ. Một trung vị tính trên 2/319 ca không phải một trung vị — và
         người đọc phải thấy điều đó trước khi thấy con số, không phải sau.
       */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <O nhan="Ca có hành động chăm sóc thật" so={`${formatNumber(t.withCareAction)}/${formatNumber(t.opened)}`} phu={`độ phủ ${formatPercent(t.firstActionCoverage * 100, 0)} — gọi · nhắn · sửa địa chỉ · báo bưu cục`} />
-        <O nhan="Ca có người động vào" so={`${formatNumber(t.touched)}/${formatNumber(t.opened)}`} phu="rộng hơn: gồm cả đổi trạng thái và ghi chú. Giao việc KHÔNG tính." />
-        <O nhan="Ca chưa ai động vào" so={formatNumber(t.untouched)} phu="không ai mở, không ai ghi, không ai gọi" xau={t.untouched > 0} />
+        <O nhan="Ca có hành động chăm sóc thật" so={`${formatNumber(t.withCareAction)}/${formatNumber(t.opened)}`} phu={`độ phủ ${formatPercent(t.firstActionCoverage * 100, 0)}`} hint="Gọi · nhắn · sửa địa chỉ · báo bưu cục." />
+        <O nhan="Ca có người động vào" so={`${formatNumber(t.touched)}/${formatNumber(t.opened)}`} hint="Rộng hơn: gồm cả đổi trạng thái và ghi chú. Giao việc KHÔNG tính." />
+        <O nhan="Ca chưa ai động vào" so={formatNumber(t.untouched)} hint="Không ai mở, không ai ghi, không ai gọi." xau={t.untouched > 0} />
         <O nhan="Ca đã chốt kết quả" so={`${formatNumber(t.resolved)}/${formatNumber(t.opened)}`} phu={`độ phủ ${formatPercent(t.outcomeCoverage * 100, 0)} theo chứng từ ĐVVC`} />
       </div>
 
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         <O nhan="Tới lúc giao người (trung vị)" so={phut(a.medians.toAssign)} phu={`mẫu tối thiểu ${a.minSample} ca`} />
-        <O nhan="Tới hành động đầu (trung vị)" so={phut(a.medians.toFirstAction)} phu="từ lúc mở ca tới hành động chăm sóc ĐẦU TIÊN" />
-        <O nhan="Tới lúc chốt (trung vị)" so={phut(a.medians.toResolution)} phu="từ lúc mở ca tới khi ĐVVC chốt kết quả" />
+        <O nhan="Tới hành động đầu (trung vị)" so={phut(a.medians.toFirstAction)} hint="Từ lúc mở ca tới hành động chăm sóc ĐẦU TIÊN." />
+        <O nhan="Tới lúc chốt (trung vị)" so={phut(a.medians.toResolution)} hint="Từ lúc mở ca tới khi ĐVVC chốt kết quả." />
       </div>
 
       <TableToolsFor tableId="shipments-case-outcome-report" />
@@ -76,14 +88,16 @@ export async function CaseOutcomeReport({ period, basis }: { period: Period; bas
             <tr>
               <th className="p-2 font-medium">Kết cục</th>
               <th className="p-2 text-right font-medium">Ca</th>
-              <th className="p-2 font-medium">Nghĩa là gì</th>
             </tr>
           </thead>
           <tbody>
             {CASE_OUTCOMES.filter((o) => a.counts[o] > 0).map((o) => (
               <tr key={o} className="border-t align-top">
                 <td className="p-2">
-                  <span className="font-medium">{CASE_OUTCOME_LABEL[o]}</span>
+                  <span className="inline-flex items-center gap-1 font-medium">
+                    {CASE_OUTCOME_LABEL[o]}
+                    <InfoHint>{CASE_OUTCOME_HINT[o]}</InfoHint>
+                  </span>
                   <span className="mt-0.5 block text-[11px] text-muted-foreground">
                     {CASE_OUTCOME_IS_FINAL[o] ? "đã ngã ngũ" : "chưa ngã ngũ — ngoài mọi tỷ lệ"}
                     {CASE_OUTCOME_HAS_HUMAN_CREDIT[o] ? " · có công của người" : ""}
@@ -92,7 +106,6 @@ export async function CaseOutcomeReport({ period, basis }: { period: Period; bas
                 <td className={cn("numeric p-2 text-right font-semibold", o === "DELIVERED_WITHOUT_MANUAL_CARE" && "text-amber-700 dark:text-amber-400")}>
                   {formatNumber(a.counts[o])}
                 </td>
-                <td className="p-2 text-[11.5px] leading-4 text-muted-foreground">{CASE_OUTCOME_HINT[o]}</td>
               </tr>
             ))}
           </tbody>
@@ -107,7 +120,31 @@ export async function CaseOutcomeReport({ period, basis }: { period: Period; bas
         care còn nói sai rất lâu sau khi lỗi đã hết. Chúng KHÔNG được đếm ở các ô phía trên.
       */}
       <div className="mt-4 rounded-lg border p-3">
-        <p className="text-[12.5px] font-medium">Đợt thứ hai trở đi: thật, bản sao, hay chưa rõ</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="flex items-center gap-1.5 text-[12.5px] font-medium">
+            Đợt thứ hai trở đi: thật, bản sao, hay chưa rõ
+            {a.reopen.falseReopenAfterFix === 0 ? (
+              <InfoHint>
+                <strong>Không có bản sao nào sinh ra sau khi luật mới chạy</strong> ({formatDateTime(a.reopen.guardLiveAt)}). Các con số “bản sao” ở trên là DI SẢN đã được vá,
+                không phải lỗi đang xảy ra.
+              </InfoHint>
+            ) : null}
+          </p>
+          {a.reopen.falseReopenAfterFix !== 0 ? (
+            <>
+              {/* Lỗi CÒN ĐANG XẢY RA: một dòng ngắn luôn nhìn thấy, chi tiết trong nhãn cảnh báo. */}
+              <span className="text-[11.5px] font-semibold text-destructive">{formatNumber(a.reopen.falseReopenAfterFix)} bản sao sinh ra SAU khi luật mới chạy</span>
+              <DataWarnings
+                tone="danger"
+                items={[
+                  <span key="ban-sao-moi">
+                    <strong>{formatNumber(a.reopen.falseReopenAfterFix)} bản sao sinh ra SAU khi luật mới chạy</strong> ({formatDateTime(a.reopen.guardLiveAt)}) — lỗi vẫn đang xảy ra, phải điều tra ngay.
+                  </span>,
+                ]}
+              />
+            </>
+          ) : null}
+        </div>
         <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {REOPEN_CLASSES.map((k) => (
             <div key={k} className="rounded-md border bg-muted/20 px-2.5 py-2" title={REOPEN_CLASS_HINT[k]}>
@@ -118,46 +155,21 @@ export async function CaseOutcomeReport({ period, basis }: { period: Period; bas
             </div>
           ))}
         </div>
-        <p
-          className={cn(
-            "mt-2 rounded-md px-2.5 py-2 text-[11.5px]",
-            a.reopen.falseReopenAfterFix === 0
-              ? "bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"
-              : "bg-destructive/10 text-destructive",
-          )}
-        >
-          {a.reopen.falseReopenAfterFix === 0 ? (
-            <>
-              <strong>Không có bản sao nào sinh ra sau khi luật mới chạy</strong> ({formatDateTime(a.reopen.guardLiveAt)}). Các con số “bản sao” ở trên là DI SẢN đã được vá,
-              không phải lỗi đang xảy ra.
-            </>
-          ) : (
-            <>
-              <strong>{formatNumber(a.reopen.falseReopenAfterFix)} bản sao sinh ra SAU khi luật mới chạy</strong> ({formatDateTime(a.reopen.guardLiveAt)}) — lỗi vẫn đang xảy ra, phải điều tra ngay.
-            </>
-          )}
-        </p>
       </div>
-
-      <p className="mt-3 flex items-start gap-2 text-[11.5px] text-muted-foreground">
-        <InfoHint>
-          Bảng này KHÔNG xếp hạng nhân viên và không có điểm tổng. “Giao được SAU khi có người chăm” là QUAN SÁT, không phải nhân quả: người xử lý
-          chọn chăm ca nào, và thường chọn đơn to, khách quen, đơn còn cứu được.
-        </InfoHint>
-        <span>
-          Kỳ đang lọc {PERIOD_BASIS_LABEL[basis]}. Đổi mốc lọc sẽ ra một TẬP CA khác, không phải cùng tập với con số khác.
-        </span>
-      </p>
     </SectionCard>
   );
 }
 
-function O({ nhan, so, phu, xau }: { nhan: string; so: React.ReactNode; phu: string; xau?: boolean }) {
+/** Ô số: `phu` là dòng DỮ LIỆU ngắn nhìn thấy; `hint` là lời giải thích, chỉ hiện khi trỏ vào ⓘ. */
+function O({ nhan, so, phu, hint, xau }: { nhan: string; so: React.ReactNode; phu?: string; hint?: React.ReactNode; xau?: boolean }) {
   return (
     <div className="rounded-xl border p-3">
-      <p className="text-[12.5px] font-medium text-muted-foreground">{nhan}</p>
+      <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground">
+        {nhan}
+        {hint ? <InfoHint>{hint}</InfoHint> : null}
+      </p>
       <p className={cn("numeric mt-1 text-xl font-bold", xau && "text-amber-700 dark:text-amber-400")}>{so}</p>
-      <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{phu}</p>
+      {phu ? <p className="mt-1 text-[11px] leading-4 text-muted-foreground">{phu}</p> : null}
     </div>
   );
 }

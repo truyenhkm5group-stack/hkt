@@ -1,3 +1,4 @@
+import { InfoHint } from "@/components/info-hint";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
@@ -118,8 +119,14 @@ export default async function OkrPage({ searchParams }: { searchParams: Promise<
       <PageHeader
         eyebrow="Mục tiêu"
         title={`OKR & thẻ điểm · ${period}`}
-        description="Objective là định tính; Key Result là định lượng. Chỉ số nối vào sổ đăng ký của ERP, không bịa."
-        hint="Key Result nối vào một chỉ số CÓ THẬT thì con số đọc sống mỗi lần mở trang. Chỉ số ERP chưa đo được thì để “Nhập tay” — và nó hiện đúng nhãn đó, chứ không giả vờ là số đo. KR chưa có số hiện “chưa đo được”, KHÔNG hiện 0%."
+        hint={
+          <>
+            <p>Objective là định tính; Key Result là định lượng. Chỉ số nối vào sổ đăng ký của ERP, không bịa.</p>
+            <p className="mt-1">
+              Key Result nối vào một chỉ số CÓ THẬT thì con số đọc sống mỗi lần mở trang. Chỉ số ERP chưa đo được thì để “Nhập tay” — và nó hiện đúng nhãn đó, chứ không giả vờ là số đo. KR chưa có số hiện “chưa đo được”, KHÔNG hiện 0%.
+            </p>
+          </>
+        }
         actions={<OkrToolbar periods={[...new Set([period, currentQuarter(), ...periods])]} period={period} departments={departments.map((d) => ({ code: d.code, name: d.name }))} canManage={can(user, "okr:manage")} />}
       />
 
@@ -187,10 +194,13 @@ export default async function OkrPage({ searchParams }: { searchParams: Promise<
             {company.perspectives.map((p) => (
               <div key={p.perspective} className="bg-background p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <Badge variant="secondary" className={cn("text-[11px]", BSC_PERSPECTIVE_TONE[p.perspective])}>{p.label}</Badge>
+                  <span className="flex items-center gap-1">
+                    <Badge variant="secondary" className={cn("text-[11px]", BSC_PERSPECTIVE_TONE[p.perspective])}>{p.label}</Badge>
+                    <InfoHint>{BSC_PERSPECTIVE_HINT[p.perspective]}</InfoHint>
+                  </span>
                   <span className={cn("text-sm font-semibold tabular-nums", p.score === null && "text-muted-foreground")}>{p.score === null ? "chưa đo được" : `${Math.round(p.score)}%`}</span>
                 </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">{BSC_PERSPECTIVE_HINT[p.perspective]}{p.coverage < 1 ? ` · đo được ${Math.round(p.coverage * 100)}% trọng số` : ""}</p>
+                {p.coverage < 1 ? <p className="mt-1 text-[11px] text-muted-foreground">{`đo được ${Math.round(p.coverage * 100)}% trọng số`}</p> : null}
                 <ul className="mt-2 space-y-1">
                   {p.metrics.map((m) => (
                     <li key={m.id} className="flex items-center justify-between gap-2 text-xs">

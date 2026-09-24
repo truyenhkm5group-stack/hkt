@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Award, ThumbsDown, ThumbsUp, TriangleAlert } from "lucide-react";
 import { SectionCard } from "@/components/ui-bits";
+import { InfoHint } from "@/components/info-hint";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { successTone } from "@/lib/constants/returns";
 import { formatNumber, formatVND } from "@/lib/format";
@@ -45,7 +46,7 @@ function PerfTable({ rows, kind, avgRoas, totals }: { rows: PerfRow[]; kind: "ma
             <TableHead className="text-right">Chi QC · tỷ trọng</TableHead>
             <TableHead className="text-right">Tin nhắn · giá/tin</TableHead>
             <TableHead className="text-right">Đơn · CPO</TableHead>
-            <TableHead className="text-right" title="Dòng trên: doanh số ĐƠN ĐÃ XÁC NHẬN (tổng tiền sau giảm) · ROAS xác nhận — cùng số với thẻ KPI. Dòng dưới: DT giao thành công ước tính · ROAS GTC — dùng để đánh giá.">Doanh số XN · ROAS<br /><span className="font-normal text-muted-foreground">DT GTC ƯT · ROAS GTC</span></TableHead>
+            <TableHead className="text-right" title="Dòng trên: doanh số ĐƠN ĐÃ XÁC NHẬN (tổng tiền sau giảm) · ROAS xác nhận — cùng số với thẻ KPI. Dòng dưới: DT giao thành công ước tính · ROAS GTC — dùng để đánh giá.">Doanh số XN · ROAS</TableHead>
             <TableHead className="text-right" title={kind === "marketer" ? "LN sau QC của phần đơn marketer tạo ra = (LN ròng ước tính + QC) của mã × tỷ trọng − QC mình chạy cho mã − QC test; biên = LN ÷ doanh số GTC ước tính phân bổ" : "LN ròng ước tính của mã (đã trừ mọi chi phí, kể cả QC); biên = LN ÷ DT GTC ước tính"}>LN sau QC · biên</TableHead>
             {kind === "product" ? <TableHead className="text-right" title="Giao thành công (COD thực > 100K) / không thành công · tỷ lệ giao thành công trên đơn đã kết thúc · dự kiến">Giao TC / không TC · TL GTC</TableHead> : <TableHead className="text-right">QC test</TableHead>}
             <TableHead>Đánh giá</TableHead>
@@ -102,8 +103,11 @@ function PerfTable({ rows, kind, avgRoas, totals }: { rows: PerfRow[]; kind: "ma
                   </TableCell>
                 )}
                 <TableCell className="max-w-[220px]">
-                  <span className={cn("rounded px-1.5 py-0.5 text-xs font-medium", rt.cls)}>{rt.label}</span>
-                  <div className="mt-1 text-[11px] leading-snug text-muted-foreground">{r.reason}</div>
+                  {/* Lý do đánh giá là câu chữ — nằm trong ⓘ cạnh nhãn, không in dưới ô. */}
+                  <span className="inline-flex items-center gap-1">
+                    <span className={cn("rounded px-1.5 py-0.5 text-xs font-medium", rt.cls)}>{rt.label}</span>
+                    {r.reason ? <InfoHint align="end">{r.reason}</InfoHint> : null}
+                  </span>
                 </TableCell>
               </TableRow>
             );
@@ -142,8 +146,12 @@ export function AdsPerformancePanel({ perf, periodLabel }: { perf: AdsPerformanc
       <SectionCard
         padded={false}
         title="Hiệu quả theo Marketer"
-        description="Đơn, doanh số và lợi nhuận sau quảng cáo chia cho từng marketer."
-        hint="Đơn = đơn đã xác nhận (không tính huỷ; đơn có nhiều mã chia đều 1/N cho các mã nên cộng lại đúng bằng số đơn đếm 1 lần) chia cho marketer theo ghi nhận của Lương: ad_id tạo đơn → fanpage → tỷ trọng tiền QC → chủ mã; đơn không gắn được ai nằm ở “Chưa gán marketer” nên tổng luôn bằng thẻ Đơn đã xác nhận (đơn landing page chỉ tính khi đã gửi POS thành đơn Pancake). Doanh số XN = tổng tiền sau giảm giá của phần đơn đó (cộng các marketer = thẻ “Doanh số đơn đã xác nhận”); DT GTC ƯT = doanh số × tỷ lệ giao thành công ước tính. LN sau QC = (LN ròng ước tính + QC) của mã × tỷ trọng − QC chính mình chạy cho mã − QC test của mình — cùng cơ sở với bảng theo mã hàng (đã trừ giá vốn, ship, đóng hàng, NV vận đơn, vận hành & cố định, rủi ro tồn, thuế), nên cộng các marketer (kể cả “Chưa gán”) = LN ròng toàn shop. Biên = LN ÷ doanh số phân bổ. (LN cá nhân để tính lương — chỉ trên đơn giao thành công và chia X% / Y% chủ mã / chạy cùng — xem ở Lương & hoa hồng.) ROAS so với trung bình toàn shop: ≥ +20% Tốt, ≤ −20% hoặc lỗ = Kém."
+        hint={
+          <>
+            <p className="mb-1">Đơn, doanh số và lợi nhuận sau quảng cáo chia cho từng marketer.</p>
+            <p>{"Đơn = đơn đã xác nhận (không tính huỷ; đơn có nhiều mã chia đều 1/N cho các mã nên cộng lại đúng bằng số đơn đếm 1 lần) chia cho marketer theo ghi nhận của Lương: ad_id tạo đơn → fanpage → tỷ trọng tiền QC → chủ mã; đơn không gắn được ai nằm ở “Chưa gán marketer” nên tổng luôn bằng thẻ Đơn đã xác nhận (đơn landing page chỉ tính khi đã gửi POS thành đơn Pancake). Doanh số XN = tổng tiền sau giảm giá của phần đơn đó (cộng các marketer = thẻ “Doanh số đơn đã xác nhận”); DT GTC ƯT = doanh số × tỷ lệ giao thành công ước tính. LN sau QC = (LN ròng ước tính + QC) của mã × tỷ trọng − QC chính mình chạy cho mã − QC test của mình — cùng cơ sở với bảng theo mã hàng (đã trừ giá vốn, ship, đóng hàng, NV vận đơn, vận hành & cố định, rủi ro tồn, thuế), nên cộng các marketer (kể cả “Chưa gán”) = LN ròng toàn shop. Biên = LN ÷ doanh số phân bổ. (LN cá nhân để tính lương — chỉ trên đơn giao thành công và chia X% / Y% chủ mã / chạy cùng — xem ở Lương & hoa hồng.) ROAS so với trung bình toàn shop: ≥ +20% Tốt, ≤ −20% hoặc lỗ = Kém."}</p>
+          </>
+        }
         actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{periodLabel} · ROAS TB {x(perf.totals.roas)}</span>}
       >
         <PerfTable rows={perf.marketers} kind="marketer" avgRoas={perf.totals.roas} totals={perf.totals} />
@@ -151,8 +159,12 @@ export function AdsPerformancePanel({ perf, periodLabel }: { perf: AdsPerformanc
       <SectionCard
         padded={false}
         title="Hiệu quả theo mã hàng"
-        description="Đơn, doanh số, lợi nhuận sau quảng cáo và tỷ lệ giao thành công theo mã hàng."
-        hint="Đơn Pancake đã xác nhận trong kỳ theo mã (đơn có nhiều mã tính cho từng mã; hàng Tổng đếm 1 lần). Doanh số XN = tổng tiền sau giảm giá phân bổ theo tiền hàng của mã (cộng các mã = thẻ KPI); DT GTC ƯT = doanh số × tỷ lệ giao thành công ước tính. LN sau QC = LN ròng ước tính của Báo cáo lợi nhuận danh nghĩa: đã trừ giá vốn, ship (đơn giao & đơn hoàn), QC, đóng hàng, nhân viên vận đơn, chi phí vận hành & cố định phân bổ, rủi ro tồn kho, thuế, chi phí khác. Giao thành công = đơn có doanh thu COD thực > 100K (không phụ thuộc trạng thái Viettel Post); không thành công = hoàn hoặc giao nhưng COD ≤ 100K. Tỷ lệ giao thành công = giao TC / (giao TC + không TC) trên đơn đã kết thúc, kèm tỷ lệ dự kiến cho đơn chưa kết thúc. Mã có tỷ lệ giao thành công < 65% được cảnh báo dù ROAS tốt."
+        hint={
+          <>
+            <p className="mb-1">Đơn, doanh số, lợi nhuận sau quảng cáo và tỷ lệ giao thành công theo mã hàng.</p>
+            <p>{"Đơn Pancake đã xác nhận trong kỳ theo mã (đơn có nhiều mã tính cho từng mã; hàng Tổng đếm 1 lần). Doanh số XN = tổng tiền sau giảm giá phân bổ theo tiền hàng của mã (cộng các mã = thẻ KPI); DT GTC ƯT = doanh số × tỷ lệ giao thành công ước tính. LN sau QC = LN ròng ước tính của Báo cáo lợi nhuận danh nghĩa: đã trừ giá vốn, ship (đơn giao & đơn hoàn), QC, đóng hàng, nhân viên vận đơn, chi phí vận hành & cố định phân bổ, rủi ro tồn kho, thuế, chi phí khác. Giao thành công = đơn có doanh thu COD thực > 100K (không phụ thuộc trạng thái Viettel Post); không thành công = hoàn hoặc giao nhưng COD ≤ 100K. Tỷ lệ giao thành công = giao TC / (giao TC + không TC) trên đơn đã kết thúc, kèm tỷ lệ dự kiến cho đơn chưa kết thúc. Mã có tỷ lệ giao thành công < 65% được cảnh báo dù ROAS tốt."}</p>
+          </>
+        }
         actions={<Link href="/reports" className="text-xs font-medium text-primary hover:underline">Xem báo cáo lợi nhuận →</Link>}
       >
         <PerfTable rows={perf.products} kind="product" avgRoas={perf.totals.roas} totals={perf.totals} />

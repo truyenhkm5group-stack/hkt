@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { ArrowDownRight, ArrowUpRight, Landmark, Scale } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CASHFLOW_SECTION_HINT } from "@/lib/constants/cashflow-sections";
 import { formatNumber, formatVND } from "@/lib/format";
-import { BALANCE_CONFIDENCE_HINT, BALANCE_CONFIDENCE_LABEL, BALANCE_CONFIDENCE_TONE } from "@/lib/queries/cash-position";
+import { BALANCE_CONFIDENCE_HINT, BALANCE_CONFIDENCE_LABEL } from "@/lib/queries/cash-position";
 import { getCashflowStatement } from "@/lib/queries/cashflow-statement";
 import type { Period } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -50,7 +52,7 @@ export async function StatementTab({ period }: { period: Period }) {
         <MetricCard
           label="Số dư đầu kỳ"
           value={r.opening === null ? <span className="text-muted-foreground">Chưa biết</span> : <Money value={r.opening} />}
-          note={r.opening === null ? "Chưa có mốc số dư nào trước ngày đầu kỳ" : BALANCE_CONFIDENCE_LABEL[r.openingConfidence]}
+          note={r.opening === null ? <DataWarnings items={["Chưa có mốc số dư nào trước ngày đầu kỳ"]} /> : BALANCE_CONFIDENCE_LABEL[r.openingConfidence]}
           hint="Số dư của giao dịch cuối cùng TRƯỚC ngày đầu kỳ. Chưa có mốc nào thì là CHƯA BIẾT — không thay bằng 0đ, vì 0đ nghĩa là tài khoản rỗng và đó là một khẳng định khác hẳn."
           icon={Landmark}
           tone="slate"
@@ -59,7 +61,7 @@ export async function StatementTab({ period }: { period: Period }) {
           label="Tiền vào"
           value={<Money value={r.moneyIn} />}
           change={pct(r.moneyIn, r.previous?.moneyIn ?? null)}
-          note="Đã loại chuyển giữa tài khoản của mình"
+          hint="Đã loại chuyển giữa tài khoản của mình"
           icon={ArrowUpRight}
           tone="green"
         />
@@ -75,6 +77,7 @@ export async function StatementTab({ period }: { period: Period }) {
           label="Số dư cuối kỳ"
           value={r.closing === null ? <span className="text-muted-foreground">Chưa biết</span> : <Money value={r.closing} />}
           note={`Dòng tiền ròng ${formatVND(r.net, { sign: true })} · ${BALANCE_CONFIDENCE_LABEL[r.closingConfidence]}`}
+          hint={`${BALANCE_CONFIDENCE_LABEL.DERIVED}: ${BALANCE_CONFIDENCE_HINT.DERIVED}`}
           icon={Scale}
           tone={r.net < 0 ? "amber" : "primary"}
         />
@@ -92,24 +95,41 @@ export async function StatementTab({ period }: { period: Period }) {
         )}
       >
         {r.integrityGap === null ? (
-          <p>
-            <span className="font-semibold">Chưa kiểm được tính liền mạch của sổ.</span> Phép kiểm cần mốc số dư ngân hàng ở CẢ hai đầu kỳ.{" "}
-            {r.opening === null ? "Chưa có mốc nào trước ngày đầu kỳ." : "Kỳ đang chọn không có biên thời gian (kỳ “Toàn bộ”)."}
+          <p className="flex flex-wrap items-center gap-1.5">
+            <span className="font-semibold">Chưa kiểm được tính liền mạch của sổ.</span>
+            <DataWarnings
+              items={[
+                <>
+                  Phép kiểm cần mốc số dư ngân hàng ở CẢ hai đầu kỳ.{" "}
+                  {r.opening === null ? "Chưa có mốc nào trước ngày đầu kỳ." : "Kỳ đang chọn không có biên thời gian (kỳ “Toàn bộ”)."}
+                </>,
+              ]}
+            />
           </p>
         ) : r.integrityGap === 0 ? (
-          <p>
-            <span className="font-semibold text-success">Sổ liền mạch.</span> {formatVND(r.opening ?? 0)} đầu kỳ {r.movementAll >= 0 ? "+" : "−"}{" "}
-            {formatVND(Math.abs(r.movementAll))} phát sinh = {formatVND(r.closing ?? 0)} cuối kỳ. Số dư ngân hàng ghi và tổng giao dịch ERP có khớp nhau tới từng đồng.
+          <p className="flex flex-wrap items-center gap-1.5">
+            <span className="font-semibold text-success">Sổ liền mạch.</span>
+            <InfoHint>
+              {formatVND(r.opening ?? 0)} đầu kỳ {r.movementAll >= 0 ? "+" : "−"} {formatVND(Math.abs(r.movementAll))} phát sinh = {formatVND(r.closing ?? 0)} cuối
+              kỳ. Số dư ngân hàng ghi và tổng giao dịch ERP có khớp nhau tới từng đồng.
+            </InfoHint>
           </p>
         ) : (
-          <p>
-            <span className="font-semibold">Sổ lệch {formatVND(Math.abs(r.integrityGap))}.</span>{" "}
-            {formatVND(r.opening ?? 0)} đầu kỳ {r.movementAll >= 0 ? "+" : "−"} {formatVND(Math.abs(r.movementAll))} phát sinh ={" "}
-            {formatVND((r.opening ?? 0) + r.movementAll)}, nhưng ngân hàng ghi cuối kỳ là {formatVND(r.closing ?? 0)}.{" "}
-            {r.integrityGap > 0
-              ? "ERP cộng được NHIỀU hơn mức ngân hàng thật sự đổi ⇒ sổ thiếu một khoản tiền RA, hoặc thừa một dòng tiền vào (nhập sao kê hai lần)."
-              : "ERP cộng được ÍT hơn mức ngân hàng thật sự đổi ⇒ sổ thiếu một khoản tiền VÀO, hoặc thừa một dòng tiền ra."}{" "}
-            Mọi con số của kỳ đang sai theo đúng chừng đó.{" "}
+          <p className="flex flex-wrap items-center gap-1.5">
+            <span className="font-semibold">Sổ lệch {formatVND(Math.abs(r.integrityGap))} — số của kỳ sai chừng đó.</span>
+            <DataWarnings
+              tone="danger"
+              items={[
+                <>
+                  {formatVND(r.opening ?? 0)} đầu kỳ {r.movementAll >= 0 ? "+" : "−"} {formatVND(Math.abs(r.movementAll))} phát sinh ={" "}
+                  {formatVND((r.opening ?? 0) + r.movementAll)}, nhưng ngân hàng ghi cuối kỳ là {formatVND(r.closing ?? 0)}.{" "}
+                  {r.integrityGap > 0
+                    ? "ERP cộng được NHIỀU hơn mức ngân hàng thật sự đổi ⇒ sổ thiếu một khoản tiền RA, hoặc thừa một dòng tiền vào (nhập sao kê hai lần)."
+                    : "ERP cộng được ÍT hơn mức ngân hàng thật sự đổi ⇒ sổ thiếu một khoản tiền VÀO, hoặc thừa một dòng tiền ra."}{" "}
+                  Mọi con số của kỳ đang sai theo đúng chừng đó.
+                </>,
+              ]}
+            />
             <Link href="/bank?tab=doi-chieu" className="font-medium text-primary hover:underline">
               Mở trang đối chiếu
             </Link>
@@ -174,11 +194,6 @@ export async function StatementTab({ period }: { period: Period }) {
           </div>
         </SectionCard>
       ))}
-
-      <p className="text-xs leading-5 text-muted-foreground">
-        <span className={cn("mr-1.5 rounded px-1.5 py-0.5 font-medium", BALANCE_CONFIDENCE_TONE.DERIVED)}>{BALANCE_CONFIDENCE_LABEL.DERIVED}</span>
-        {BALANCE_CONFIDENCE_HINT.DERIVED}
-      </p>
     </div>
   );
 }

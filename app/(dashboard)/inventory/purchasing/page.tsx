@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, CalendarClock, Factory, TrendingUp } from "lucide-react";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
@@ -33,8 +35,12 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
       <PageHeader
         eyebrow="Kho"
         title="Mua hàng & xưởng"
-        description="Tiền đang cam kết với xưởng, lô nào trễ, xưởng nào giao nhanh, giá nhập đang tăng ở đâu."
-        hint="Hai chiều tách bạch: CAM KẾT là đơn đặt xưởng (tiền dự kiến phải trả), HÀNG THẬT là phiếu nhập kho. Đặt 500 cái không có nghĩa là đã nhận 500 cái. Đơn sản xuất không có cột ngày nhận hàng, nên thời gian giao là ƯỚC TÍNH suy từ việc ghép lô đặt với phiếu nhập — chỉ ghép khi một-một, còn lại để CHƯA BIẾT."
+        hint={
+          <>
+            <p>Tiền đang cam kết với xưởng, lô nào trễ, xưởng nào giao nhanh, giá nhập đang tăng ở đâu.</p>
+            <p className="mt-1.5">Hai chiều tách bạch: CAM KẾT là đơn đặt xưởng (tiền dự kiến phải trả), HÀNG THẬT là phiếu nhập kho. Đặt 500 cái không có nghĩa là đã nhận 500 cái. Đơn sản xuất không có cột ngày nhận hàng, nên thời gian giao là ƯỚC TÍNH suy từ việc ghép lô đặt với phiếu nhập — chỉ ghép khi một-một, còn lại để CHƯA BIẾT.</p>
+          </>
+        }
         actions={
           <div className="flex items-center gap-1 rounded-lg border p-0.5">
             {PURCHASING_RULE.windowChoices.map((choice) => (
@@ -80,26 +86,22 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         <MetricCard
           label="Mẫu mã tăng giá nhập"
           value={formatNumber(r.priceJumps.length)}
-          note={`Tăng từ ${PURCHASING_RULE.priceJumpPercent}% trở lên so với lần nhập trước`}
+          hint={`Tăng từ ${PURCHASING_RULE.priceJumpPercent}% trở lên so với lần nhập trước`}
           icon={TrendingUp}
           tone={r.priceJumps.length > 0 ? "amber" : "slate"}
         />
       </section>
 
       {r.estimated.length ? (
-        <div className="rounded-xl border border-warning/40 bg-warning/8 px-4 py-3 text-xs leading-5">
-          <p className="font-semibold">Đọc trước khi tin con số</p>
-          <ul className="mt-1 space-y-0.5 text-muted-foreground">
-            {r.estimated.map((e, i) => (
-              <li key={i}>• {e}</li>
-            ))}
-          </ul>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="font-semibold">Đọc trước khi tin con số</span>
+          <DataWarnings items={r.estimated} />
         </div>
       ) : null}
 
       <SectionCard
         title="Lô đang chờ về"
-        description="Đã gửi xưởng, chưa đánh dấu nhận — quá hạn xếp lên đầu"
+        hint="Đã gửi xưởng, chưa đánh dấu nhận — quá hạn xếp lên đầu"
         padded={false}
       >
         {r.openOrders.length ? (
@@ -150,8 +152,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
 
       <SectionCard
         title="Xưởng"
-        description={`Hàng thật đã nhập trong ${days} ngày, cam kết đang mở, và thời gian giao ước tính`}
-        hint={`Thời gian giao chỉ tính trên lô ghép được một-một với phiếu nhập, và chỉ hiện khi xưởng có ít nhất ${PURCHASING_RULE.minLeadSamples} lô ghép được — vài lô lẻ không đủ để nói xưởng nào nhanh hơn.`}
+        hint={`Hàng thật đã nhập trong ${days} ngày, cam kết đang mở, và thời gian giao ước tính. Thời gian giao chỉ tính trên lô ghép được một-một với phiếu nhập, và chỉ hiện khi xưởng có ít nhất ${PURCHASING_RULE.minLeadSamples} lô ghép được — vài lô lẻ không đủ để nói xưởng nào nhanh hơn.`}
         padded={false}
       >
         {r.suppliers.length ? (
@@ -215,8 +216,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
 
       <SectionCard
         title="Giá nhập tăng"
-        description={`So với chính lần nhập trước của cùng mẫu mã, tăng từ ${PURCHASING_RULE.priceJumpPercent}%`}
-        hint="Cố ý so với lần nhập TRƯỚC của đúng mẫu mã đó, không so với bình quân toàn kho — bình quân trộn nhiều mẫu khác giá nhau nên tăng giảm ở đó không hành động được."
+        hint={`So với chính lần nhập trước của cùng mẫu mã, tăng từ ${PURCHASING_RULE.priceJumpPercent}%. Cố ý so với lần nhập TRƯỚC của đúng mẫu mã đó, không so với bình quân toàn kho — bình quân trộn nhiều mẫu khác giá nhau nên tăng giảm ở đó không hành động được.`}
         padded={false}
       >
         {r.priceJumps.length ? (
@@ -256,7 +256,7 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
         )}
       </SectionCard>
 
-      <SectionCard title="Độ phủ dữ liệu & giới hạn" description="Con số chỉ đáng tin tới mức dữ liệu nền cho phép" padded={false}>
+      <SectionCard title="Độ phủ dữ liệu & giới hạn" hint="Con số chỉ đáng tin tới mức dữ liệu nền cho phép" padded={false}>
         <div className="overflow-x-auto">
           <Table className="min-w-[620px]">
             <TableHeader>
@@ -264,45 +264,45 @@ export default async function PurchasingPage({ searchParams }: { searchParams: P
                 <TableHead>Dữ liệu nền</TableHead>
                 <TableHead className="text-right">Có</TableHead>
                 <TableHead className="text-right">Tổng</TableHead>
-                <TableHead>Thiếu thì mất gì</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableRow>
-                <TableCell className="font-medium">Đơn sản xuất ghi tên xưởng</TableCell>
+                <TableCell className="font-medium">
+                  <span className="inline-flex items-center gap-1.5">Đơn sản xuất ghi tên xưởng<InfoHint label="Thiếu thì mất gì">Thiếu thì mất gì: Không so sánh được xưởng với nhau</InfoHint></span>
+                </TableCell>
                 <TableCell className="numeric text-right">{formatNumber(cov.withSupplier)}</TableCell>
                 <TableCell className="numeric text-right">{formatNumber(cov.productionOrders)}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">Không so sánh được xưởng với nhau</TableCell>
               </TableRow>
               <TableRow>
-                <TableCell className="font-medium">Đơn sản xuất ghi hạn về</TableCell>
+                <TableCell className="font-medium">
+                  <span className="inline-flex items-center gap-1.5">Đơn sản xuất ghi hạn về<InfoHint label="Thiếu thì mất gì">Thiếu thì mất gì: Không biết lô nào trễ, không tính được đúng hạn</InfoHint></span>
+                </TableCell>
                 <TableCell className="numeric text-right">{formatNumber(cov.withDueDate)}</TableCell>
                 <TableCell className="numeric text-right">{formatNumber(cov.productionOrders)}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">Không biết lô nào trễ, không tính được đúng hạn</TableCell>
               </TableRow>
               <TableRow>
-                <TableCell className="font-medium">Đơn sản xuất có mốc gửi xưởng</TableCell>
+                <TableCell className="font-medium">
+                  <span className="inline-flex items-center gap-1.5">Đơn sản xuất có mốc gửi xưởng<InfoHint label="Thiếu thì mất gì">Thiếu thì mất gì: Không tính được thời gian giao</InfoHint></span>
+                </TableCell>
                 <TableCell className="numeric text-right">{formatNumber(cov.withSentAt)}</TableCell>
                 <TableCell className="numeric text-right">{formatNumber(cov.productionOrders)}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">Không tính được thời gian giao</TableCell>
               </TableRow>
               <TableRow>
-                <TableCell className="font-medium">Dòng phiếu nhập có khai đơn giá</TableCell>
+                <TableCell className="font-medium">
+                  <span className="inline-flex items-center gap-1.5">Dòng phiếu nhập có khai đơn giá<InfoHint label="Thiếu thì mất gì">Thiếu thì mất gì: Giá nhập bình quân và cảnh báo tăng giá mất căn cứ</InfoHint></span>
+                </TableCell>
                 <TableCell className="numeric text-right">{formatNumber(cov.receiptLinesWithCost)}</TableCell>
                 <TableCell className="numeric text-right">{formatNumber(cov.receiptLines)}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">Giá nhập bình quân và cảnh báo tăng giá mất căn cứ</TableCell>
               </TableRow>
             </TableBody>
           </Table>
         </div>
-        <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-          <p className="font-medium text-foreground">ERP KHÔNG biết những điều sau:</p>
-          <ul className="mt-1 space-y-0.5">
-            {r.limitations.map((l, i) => (
-              <li key={i}>• {l}</li>
-            ))}
-          </ul>
-        </div>
+        {r.limitations.length ? (
+          <div className="border-t px-5 py-3 text-xs">
+            <DataWarnings label={`ERP KHÔNG biết ${r.limitations.length} điều`} items={r.limitations} />
+          </div>
+        ) : null}
       </SectionCard>
     </div>
   );

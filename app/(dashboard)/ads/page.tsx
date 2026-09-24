@@ -54,8 +54,16 @@ export default async function AdsPage({ searchParams }: { searchParams: Promise<
       <PageHeader
         eyebrow="Tài chính"
         title="Quảng cáo"
-        description="Nên tăng tiền, giữ, theo dõi hay cắt — và vì sao"
-        hint="Bảng quyết định xếp theo VIỆC CẦN LÀM: cắt và sửa khâu giao đứng trước, rồi mới tới tăng ngân sách. Mỗi dòng giải thích bằng số thật của chính nó. Lợi nhuận ở đây là LỢI NHUẬN GÓP SAU QUẢNG CÁO (doanh thu giao thành công − giá vốn − cước − tiền quảng cáo), cố ý không trừ chi phí cố định và thuế vì chúng không đổi theo ngân sách một chiến dịch."
+        hint={
+          <>
+            <p>Nên tăng tiền, giữ, theo dõi hay cắt — và vì sao.</p>
+            <p className="mt-1">
+              Bảng quyết định xếp theo VIỆC CẦN LÀM: cắt và sửa khâu giao đứng trước, rồi mới tới tăng ngân sách. Mỗi dòng giải thích bằng số thật của
+              chính nó. Lợi nhuận ở đây là LỢI NHUẬN GÓP SAU QUẢNG CÁO (doanh thu giao thành công − giá vốn − cước − tiền quảng cáo), cố ý không trừ chi
+              phí cố định và thuế vì chúng không đổi theo ngân sách một chiến dịch.
+            </p>
+          </>
+        }
         actions={canWrite ? <AdSpendDialog /> : null}
       />
 

@@ -1,6 +1,8 @@
 import { deliveryRateCoverageParts } from "@/lib/constants/delivery-rate";
-import { AlertTriangle, Clock } from "lucide-react";
+import { Clock } from "lucide-react";
 import { StatStrip } from "@/components/stat-tile";
+import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { MARKETING_METRIC_BY_KEY, MATURITY_HINT, MATURITY_LABEL, ratioOf } from "@/lib/constants/marketing-daily";
 import { MISSING_TEXT, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import type { MarketingDaily, MarketingDailyBase } from "@/lib/queries/marketing-daily";
@@ -15,7 +17,7 @@ import type { MarketingDaily, MarketingDailyBase } from "@/lib/queries/marketing
  * Chưa có kỳ trước, hoặc kỳ trước bằng 0, thì KHÔNG có mũi tên. Không bịa một mốc so sánh.
  */
 
-type Tile = { label: string; value: string; note?: string; hint?: string; tone?: "default" | "green" | "rose" | "amber" };
+type Tile = { label: string; value: string; note?: string; hint?: string; compareHint?: string; tone?: "default" | "green" | "rose" | "amber" };
 
 /**
  * ═══════════ HAI KỲ CHƯA CHÍN BẰNG NHAU THÌ KHÔNG SO ĐƯỢC TIỀN ═══════════
@@ -26,14 +28,14 @@ type Tile = { label: string; value: string; note?: string; hint?: string; tone?:
  * nó hiện ra bằng một mũi tên ĐỎ, đúng thứ làm người đọc đi cắt một chiến dịch đang lãi.
  *
  * Nên nhóm tiền chỉ có mũi tên khi CẢ HAI kỳ đã ngã ngũ. Không đủ điều kiện thì không có mũi tên,
- * và lý do in ngay tại chỗ thay vì để ô trống tự nói.
+ * và TRẠNG THÁI in ngay tại chỗ thay vì để ô trống tự nói; câu lý do nằm trong ⓘ của thẻ.
  */
 const PROFIT_KEYS = new Set(["contributionProfit", "netProfit", "margin", "roasDelivered"]);
 
-function changeNote(key: string, now: MarketingDailyBase, prev: MarketingDailyBase | null, matureNow?: boolean, maturePrev?: boolean): { note?: string; tone?: Tile["tone"] } {
+function changeNote(key: string, now: MarketingDailyBase, prev: MarketingDailyBase | null, matureNow?: boolean, maturePrev?: boolean): { note?: string; compareHint?: string; tone?: Tile["tone"] } {
   if (!prev) return {};
   if (PROFIT_KEYS.has(key) && !(matureNow && maturePrev)) {
-    return { note: "chưa so được với kỳ trước — hai kỳ chưa ngã ngũ như nhau", tone: "default" };
+    return { note: "chưa so được với kỳ trước", compareHint: "Chưa so được với kỳ trước — hai kỳ chưa ngã ngũ như nhau.", tone: "default" };
   }
   const spec = MARKETING_METRIC_BY_KEY[key];
   const read = (b: MarketingDailyBase) => (spec?.num && spec.den ? ratioOf(key, b as unknown as Record<string, unknown>) : ((b as unknown as Record<string, number | null>)[key] ?? null));
@@ -91,8 +93,7 @@ export function MarketingKpis({ data }: { data: MarketingDaily }) {
     {
       label: "Doanh thu thực ước tính",
       value: vnd(t.projectedDeliveredRevenue),
-      note: "gồm phần đơn đang đi đã cân theo tỷ lệ",
-      hint: MARKETING_METRIC_BY_KEY.projectedDeliveredRevenue.meaning,
+      hint: `${MARKETING_METRIC_BY_KEY.projectedDeliveredRevenue.meaning} Gồm phần đơn đang đi đã cân theo tỷ lệ.`,
     },
     {
       label: "Lợi nhuận góp ước tính",
@@ -115,12 +116,20 @@ export function MarketingKpis({ data }: { data: MarketingDaily }) {
         <span className="text-muted-foreground">
           {formatNumber(t.finishedOrders)}/{formatNumber(t.maturityBase)} đơn đã ngã ngũ ({pct(ratioOf("maturity", t as unknown as Record<string, unknown>))}) · còn {formatNumber(t.pendingOrders)} đơn đang đi
         </span>
-        <span className="text-muted-foreground">— {MATURITY_HINT[t.maturity]}</span>
+        <InfoHint>{MATURITY_HINT[t.maturity]}</InfoHint>
+        {/* Cảnh báo dữ liệu thu về MỘT nhãn ⚠ ngay trên các thẻ tiền — không biến mất, chỉ thôi chiếm chỗ. */}
+        <DataWarnings items={data.warnings} className="ml-auto" align="end" />
       </div>
 
       <StatStrip
         columns={4}
-        items={tiles.map((x) => ({ label: x.label, value: x.value, note: x.note, hint: x.hint, tone: x.tone ?? "default" }))}
+        items={tiles.map((x) => ({
+          label: x.label,
+          value: x.value,
+          note: x.note,
+          hint: x.hint && x.compareHint ? `${x.hint} ${x.compareHint}` : (x.hint ?? x.compareHint),
+          tone: x.tone ?? "default",
+        }))}
       />
 
       {/*
@@ -129,26 +138,22 @@ export function MarketingKpis({ data }: { data: MarketingDaily }) {
         Một con số ước tính không đi kèm ĐỘ PHỦ thì đọc y hệt một con số đo được. Dòng này trả lời
         "bao nhiêu mã đang dùng số đo thật, bao nhiêu mã đang dùng tỷ lệ khai ở Giả định".
       */}
+      {/* Độ phủ là SỐ nên vẫn in (AGENTS.md mục 68); câu giải thích thang bậc vào ⓘ. */}
       {data.rateBasis ? (
-        <p className="text-[11px] text-muted-foreground">
-          Ô có nhãn <span className="text-amber-600 dark:text-amber-400">ƯT</span> dùng thang bậc tỷ lệ giao thành công: ghi đè tay → số đo từng đơn của chính mã → lịch sử 90 ngày của mã → tỷ lệ khai ở
-          Giả định ({formatPercent(data.rateBasis.fallbackDeliveryRate)}). Độ phủ trong kỳ: {deliveryRateCoverageParts(data.rateBasis.coverage).total} mã —{" "}
+        <p className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+          <span className="text-amber-600 dark:text-amber-400">ƯT</span> độ phủ: {deliveryRateCoverageParts(data.rateBasis.coverage).total} mã —{" "}
           {deliveryRateCoverageParts(data.rateBasis.coverage)
             .parts.map((x) => `${x.count} ${x.label.toLowerCase()}`)
             .join(" · ")}
-          .
+          <InfoHint>
+            Ô có nhãn ƯT dùng thang bậc tỷ lệ giao thành công: ghi đè tay → số đo từng đơn của chính mã → lịch sử 90 ngày của mã → tỷ lệ khai ở Giả định (
+            {formatPercent(data.rateBasis.fallbackDeliveryRate)}). Độ phủ trong kỳ: {deliveryRateCoverageParts(data.rateBasis.coverage).total} mã —{" "}
+            {deliveryRateCoverageParts(data.rateBasis.coverage)
+              .parts.map((x) => `${x.count} ${x.label.toLowerCase()}`)
+              .join(" · ")}
+            .
+          </InfoHint>
         </p>
-      ) : null}
-
-      {data.warnings.length ? (
-        <div className="space-y-1 rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
-          {data.warnings.map((w) => (
-            <p key={w} className="flex gap-1.5">
-              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-              <span>{w}</span>
-            </p>
-          ))}
-        </div>
       ) : null}
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">

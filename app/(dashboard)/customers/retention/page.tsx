@@ -3,6 +3,8 @@ import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CalendarRange, Repeat, Users } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
+import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -32,11 +34,29 @@ export default async function RetentionPage() {
       <PageHeader
         eyebrow="Vận hành"
         title="Giữ chân khách"
-        description="Bao nhiêu khách quay lại, quay lại sau bao lâu, và nhóm nào đang nguội đi."
         hint={
           <>
-            Khách mua lại ở đây đếm trên <b>đơn giao thành công</b>, không phải đơn đã đặt. Một khách đặt 5 đơn rồi hoàn cả 5 không phải khách trung thành — đó là khách đang gây lỗ. Ngưỡng đang dùng: còn hoạt động trong {CRM_RULE.activeDays} ngày, quá {CRM_RULE.churnedDays} ngày là đã rời bỏ, từ {CRM_RULE.loyalOrders} đơn đã nhận trở lên là trung thành.
+            <p className="mb-2">
+              Khách mua lại ở đây đếm trên <b>đơn giao thành công</b>, không phải đơn đã đặt. Một khách đặt 5 đơn rồi hoàn cả 5 không phải khách trung thành — đó là khách đang gây lỗ. Ngưỡng đang dùng: còn hoạt động trong {CRM_RULE.activeDays} ngày, quá {CRM_RULE.churnedDays} ngày là đã rời bỏ, từ {CRM_RULE.loyalOrders} đơn đã nhận trở lên là trung thành.
+            </p>
+            <p>Bao nhiêu khách quay lại, quay lại sau bao lâu, và nhóm nào đang nguội đi.</p>
           </>
+        }
+        actions={
+          /*
+            GIỚI HẠN CỦA DỮ LIỆU NỀN — trước đây là cả một thẻ "Đọc trước khi tin con số" ở cuối trang.
+            Nay thu thành MỘT nhãn "⚠ n lưu ý dữ liệu" ngay cạnh tiêu đề: vẫn luôn nhìn thấy (độ phủ gán
+            khách là trần độ tin của cả trang), trỏ chuột mới hiện nguyên văn.
+          */
+          <DataWarnings
+            align="end"
+            items={[
+              <span key="do-phu" className="font-medium">
+                Độ phủ gán khách: {pctText(cov.coveragePercent)} ({formatNumber(cov.deliveredWithCustomer)}/{formatNumber(cov.deliveredOrders)} đơn giao thành công) — đây là trần độ tin của cả trang.
+              </span>,
+              ...r.limitations.map((l, i) => <span key={i}>{l}</span>),
+            ]}
+          />
         }
       />
 
@@ -44,7 +64,8 @@ export default async function RetentionPage() {
         <MetricCard
           label="Khách đã nhận hàng"
           value={formatNumber(r.buyers)}
-          note={`Mẫu số của mọi tỷ lệ trên trang · ${formatNumber(cov.deliveredWithCustomer)}/${formatNumber(cov.deliveredOrders)} đơn giao thành công có gán khách`}
+          note={`${formatNumber(cov.deliveredWithCustomer)}/${formatNumber(cov.deliveredOrders)} đơn giao thành công có gán khách`}
+          hint="Mẫu số của mọi tỷ lệ trên trang."
           icon={Users}
           tone="blue"
         />
@@ -59,7 +80,7 @@ export default async function RetentionPage() {
         <MetricCard
           label="Bao lâu thì quay lại"
           value={r.medianDaysToSecond === null ? "—" : `${formatNumber(r.medianDaysToSecond)} ngày`}
-          note="Trung vị từ lần nhận hàng thứ nhất tới lần thứ hai · dùng để chọn thời điểm nhắn lại"
+          hint="Trung vị từ lần nhận hàng thứ nhất tới lần thứ hai · dùng để chọn thời điểm nhắn lại."
           icon={CalendarRange}
           tone="slate"
         />
@@ -67,7 +88,7 @@ export default async function RetentionPage() {
 
       <SectionCard
         title="Phân khúc khách"
-        description="Theo số đơn ĐÃ NHẬN và khoảng cách tới lần nhận gần nhất"
+        hint="Theo số đơn ĐÃ NHẬN và khoảng cách tới lần nhận gần nhất."
         padded={false}
       >
         {r.buyers ? (
@@ -80,22 +101,25 @@ export default async function RetentionPage() {
                   <TableHead className="text-right">Tỷ trọng</TableHead>
                   <TableHead className="text-right">Doanh thu đã mang lại</TableHead>
                   <TableHead className="text-right">TB / khách</TableHead>
-                  <TableHead>Nên làm gì</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {r.segments.map((s) => (
                   <TableRow key={s.segment}>
                     <TableCell>
-                      <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-semibold", CRM_SEGMENT_TONE[s.segment])}>
-                        {CRM_SEGMENT_LABEL[s.segment]}
+                      <span className="inline-flex items-center gap-1">
+                        <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-semibold", CRM_SEGMENT_TONE[s.segment])}>
+                          {CRM_SEGMENT_LABEL[s.segment]}
+                        </span>
+                        <InfoHint label="Nên làm gì">
+                          <b>Nên làm gì:</b> {CRM_SEGMENT_ACTION[s.segment]}
+                        </InfoHint>
                       </span>
                     </TableCell>
                     <TableCell className="numeric text-right font-medium">{formatNumber(s.customers)}</TableCell>
                     <TableCell className="numeric text-right">{pctText(s.share)}</TableCell>
                     <TableCell className="text-right"><Money value={s.revenue} /></TableCell>
                     <TableCell className="text-right">{s.avgValue === null ? "—" : <Money value={s.avgValue} />}</TableCell>
-                    <TableCell className="max-w-[420px] text-xs text-muted-foreground">{CRM_SEGMENT_ACTION[s.segment]}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -114,8 +138,12 @@ export default async function RetentionPage() {
 
       <SectionCard
         title="Khách nguy cơ rời bỏ"
-        description="Từng mua đều nhưng đang chững lại — xếp theo tiền đã mang lại"
-        hint="Danh sách này là ĐỀ XUẤT để người bấm, ERP không tự nhắn khách. Mở thẻ khách để xem lịch sử trước khi liên hệ."
+        hint={
+          <>
+            <p className="mb-2">Danh sách này là ĐỀ XUẤT để người bấm, ERP không tự nhắn khách. Mở thẻ khách để xem lịch sử trước khi liên hệ.</p>
+            <p>Từng mua đều nhưng đang chững lại — xếp theo tiền đã mang lại.</p>
+          </>
+        }
         padded={false}
       >
         {r.atRisk.length ? (
@@ -152,19 +180,6 @@ export default async function RetentionPage() {
         ) : (
           <EmptyState title="Không có khách nào đang ở nhóm nguy cơ" description={`Chưa khách nào từng mua từ 2 lần mà im lặng quá ${CRM_RULE.activeDays} ngày.`} />
         )}
-      </SectionCard>
-
-      <SectionCard title="Đọc trước khi tin con số" description="Giới hạn của dữ liệu nền" padded={false}>
-        <div className="px-5 py-3 text-xs leading-5 text-muted-foreground">
-          <p className="font-medium text-foreground">
-            Độ phủ gán khách: {pctText(cov.coveragePercent)} ({formatNumber(cov.deliveredWithCustomer)}/{formatNumber(cov.deliveredOrders)} đơn giao thành công) — đây là trần độ tin của cả trang.
-          </p>
-          <ul className="mt-1.5 space-y-0.5">
-            {r.limitations.map((l, i) => (
-              <li key={i}>• {l}</li>
-            ))}
-          </ul>
-        </div>
       </SectionCard>
     </div>
   );

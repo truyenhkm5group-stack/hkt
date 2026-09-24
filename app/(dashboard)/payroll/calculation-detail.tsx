@@ -1,5 +1,6 @@
 import { HelpCircle } from "lucide-react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
+import { DataWarnings } from "@/components/data-warnings";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { PAYROLL_COMPONENT_KIND_LABEL, PAYROLL_COMPONENT_SIGN, payrollInput, type PayrollComponentKind } from "@/lib/constants/payroll-components";
@@ -25,9 +26,43 @@ export function CalculationDetail({ engine, employeeName }: { engine: EmployeeEn
   return (
     <SectionCard
       title={`Chi tiết cách tính — ${employeeName}`}
+      hint="Tính bằng máy lương chung."
+      actions={
+        result.missing.length || result.problems.length || (engine.segments.length > 1 && engine.splitAcrossSegments) ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {result.missing.length ? (
+              <span className="text-[12px] font-medium text-destructive">Còn {result.missing.length} đại lượng CHƯA BIẾT</span>
+            ) : null}
+            <DataWarnings
+              tone={result.missing.length || result.problems.length ? "danger" : "warn"}
+              align="end"
+              items={[
+                ...result.problems,
+                result.missing.length ? (
+                  <div>
+                    <p className="font-medium">Còn {result.missing.length} đại lượng CHƯA BIẾT — vì thế thực nhận là “{MISSING_TEXT}”, không phải 0 ₫</p>
+                    <ul className="space-y-0.5">
+                      {result.missing.map((m, i) => (
+                        <li key={i}>
+                          <b>{m.label}</b> — {m.message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null,
+                engine.segments.length > 1 && engine.splitAcrossSegments ? (
+                  <>
+                    Doanh thu, lợi nhuận và các đại lượng nhập tay được đo cho CẢ KỲ chứ không theo đoạn, nên chúng được chia theo SỐ NGÀY của từng đoạn. Đây là một ƯỚC TÍNH — căn cứ duy nhất sẵn có khi
+                    một kỳ có nhiều đoạn.
+                  </>
+                ) : null,
+              ]}
+            />
+          </div>
+        ) : null
+      }
       description={
         <>
-          Tính bằng máy lương chung.{" "}
           {policies.length ? (
             <>
               Chính sách:{" "}
@@ -56,21 +91,7 @@ export function CalculationDetail({ engine, employeeName }: { engine: EmployeeEn
               </li>
             ))}
           </ul>
-          {engine.splitAcrossSegments ? (
-            <p className="mt-1 text-amber-700 dark:text-amber-400">
-              Doanh thu, lợi nhuận và các đại lượng nhập tay được đo cho CẢ KỲ chứ không theo đoạn, nên chúng được chia theo SỐ NGÀY của từng đoạn. Đây là một ƯỚC TÍNH — căn cứ duy nhất sẵn có khi
-              một kỳ có nhiều đoạn.
-            </p>
-          ) : null}
         </div>
-      ) : null}
-
-      {result.problems.length ? (
-        <ul className="mb-3 space-y-1 rounded-md border border-amber-300 bg-amber-50 p-2 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-          {result.problems.map((p, i) => (
-            <li key={i}>{p}</li>
-          ))}
-        </ul>
       ) : null}
 
       <TableToolsFor tableId="payroll-calculation-detail" />
@@ -163,19 +184,6 @@ export function CalculationDetail({ engine, employeeName }: { engine: EmployeeEn
           </tfoot>
         </table>
       </div>
-
-      {result.missing.length ? (
-        <div className="mt-3 space-y-1 rounded-md border border-amber-300 bg-amber-50 p-2 text-[12px] text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-          <p className="font-medium">Còn {result.missing.length} đại lượng CHƯA BIẾT — vì thế thực nhận là “{MISSING_TEXT}”, không phải 0 ₫</p>
-          <ul className="space-y-0.5">
-            {result.missing.map((m, i) => (
-              <li key={i}>
-                <b>{m.label}</b> — {m.message}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
     </SectionCard>
   );
 }

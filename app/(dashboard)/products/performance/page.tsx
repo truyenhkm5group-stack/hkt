@@ -65,8 +65,7 @@ export default async function ProductPerformancePage({ searchParams }: { searchP
       <PageHeader
         eyebrow="Sản phẩm"
         title="Hiệu quả mẫu mã × màu × size"
-        description="Mẫu nào đáng nhân bản, mẫu nào đang lỗ — xét trên sáu chiều, không chỉ số bán."
-        hint="'Bán chạy' theo số LÊN ĐƠN là con số đánh lừa: một mẫu bán 100 cái mà hoàn 60 kém hơn hẳn mẫu bán 50 hoàn 5. Nhãn 'Đáng nhân bản' đòi ĐỦ CẢ SÁU chiều — sản lượng, tỷ lệ giao thành công, doanh thu, biên lợi nhuận góp, chi quảng cáo và sức khoẻ tồn kho. Thiếu dữ liệu chiều nào thì KHÔNG phán, vì gắn nhãn bán chạy dựa trên vài chiều rồi để đặt sản xuất hàng nghìn cái là thiệt hại lớn nhất một báo cáo có thể gây ra."
+        hint="Mẫu nào đáng nhân bản, mẫu nào đang lỗ — xét trên sáu chiều, không chỉ số bán. 'Bán chạy' theo số LÊN ĐƠN là con số đánh lừa: một mẫu bán 100 cái mà hoàn 60 kém hơn hẳn mẫu bán 50 hoàn 5. Nhãn 'Đáng nhân bản' đòi ĐỦ CẢ SÁU chiều — sản lượng, tỷ lệ giao thành công, doanh thu, biên lợi nhuận góp, chi quảng cáo và sức khoẻ tồn kho. Thiếu dữ liệu chiều nào thì KHÔNG phán, vì gắn nhãn bán chạy dựa trên vài chiều rồi để đặt sản xuất hàng nghìn cái là thiệt hại lớn nhất một báo cáo có thể gây ra."
       />
 
       <DataTableToolbar
@@ -81,13 +80,13 @@ export default async function ProductPerformancePage({ searchParams }: { searchP
       />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Đáng nhân bản" value={formatNumber(count("WINNER"))} note="Đạt đủ cả sáu chiều" icon={TrendingUp} tone={count("WINNER") ? "green" : "slate"} />
-        <MetricCard label="Đang lỗ · nên dừng" value={formatNumber(count("LOSER"))} note="Lợi nhuận góp âm" icon={Undo2} tone={count("LOSER") ? "rose" : "slate"} />
-        <MetricCard label="Đáng lo" value={formatNumber(count("RISK"))} note="Hoàn cao · giao kém · tồn nằm chết" icon={Boxes} tone={count("RISK") ? "amber" : "slate"} />
+        <MetricCard label="Đáng nhân bản" value={formatNumber(count("WINNER"))} hint="Đạt đủ cả sáu chiều" icon={TrendingUp} tone={count("WINNER") ? "green" : "slate"} />
+        <MetricCard label="Đang lỗ · nên dừng" value={formatNumber(count("LOSER"))} hint="Lợi nhuận góp âm" icon={Undo2} tone={count("LOSER") ? "rose" : "slate"} />
+        <MetricCard label="Đáng lo" value={formatNumber(count("RISK"))} hint="Hoàn cao · giao kém · tồn nằm chết" icon={Boxes} tone={count("RISK") ? "amber" : "slate"} />
         <MetricCard
           label="Chưa đủ căn cứ"
           value={formatNumber(count("INSUFFICIENT_DATA"))}
-          note="Thiếu giá vốn / chi quảng cáo / phiếu nhập"
+          hint="Thiếu giá vốn / chi quảng cáo / phiếu nhập"
           icon={PackageCheck}
           tone="slate"
         />
@@ -96,7 +95,7 @@ export default async function ProductPerformancePage({ searchParams }: { searchP
       <SectionCard
         title={`${formatNumber(visible.length)} mẫu mã`}
         description={`${params.period.label} · doanh thu giao thành công ${Math.round(deliveredRevenue).toLocaleString("vi-VN")}đ · mất vì hoàn ${Math.round(lostRevenue).toLocaleString("vi-VN")}đ`}
-        hint={`Ngưỡng phân loại: sản lượng ≥ ${VERDICT_RULES.minDeliveredQty} món · giao thành công ≥ ${VERDICT_RULES.minSuccessRate}% · doanh thu ≥ ${VERDICT_RULES.minDeliveredRevenue.toLocaleString("vi-VN")}đ · biên lợi nhuận góp ≥ ${VERDICT_RULES.minContributionMarginPct}% · chi quảng cáo ≤ ${VERDICT_RULES.maxAdsCostPct}% doanh thu · tồn đủ bán ${VERDICT_RULES.healthyCoverMinDays}–${VERDICT_RULES.healthyCoverMaxDays} ngày. Rê chuột lên nhãn để xem từng chiều.`}
+        hint={`Ngưỡng phân loại: sản lượng ≥ ${VERDICT_RULES.minDeliveredQty} món · giao thành công ≥ ${VERDICT_RULES.minSuccessRate}% · doanh thu ≥ ${VERDICT_RULES.minDeliveredRevenue.toLocaleString("vi-VN")}đ · biên lợi nhuận góp ≥ ${VERDICT_RULES.minContributionMarginPct}% · chi quảng cáo ≤ ${VERDICT_RULES.maxAdsCostPct}% doanh thu · tồn đủ bán ${VERDICT_RULES.healthyCoverMinDays}–${VERDICT_RULES.healthyCoverMaxDays} ngày. Rê chuột lên nhãn để xem từng chiều. Chỉ cột phân loại được tô màu. Mọi cột số để trung tính có chủ ý: tô màu khắp bảng thì không còn chỗ nào nổi bật, và mắt sẽ đọc màu thay vì đọc số.`}
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -160,10 +159,6 @@ export default async function ProductPerformancePage({ searchParams }: { searchP
             </TableBody>
           </Table>
         </div>
-        <p className="border-t px-5 py-2 text-xs text-muted-foreground">
-          Chỉ cột phân loại được tô màu. Mọi cột số để trung tính có chủ ý: tô màu khắp bảng thì không còn chỗ nào nổi bật,
-          và mắt sẽ đọc màu thay vì đọc số.
-        </p>
       </SectionCard>
     </div>
   );

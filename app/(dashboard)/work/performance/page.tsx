@@ -1,3 +1,4 @@
+import { InfoHint } from "@/components/info-hint";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { Badge } from "@/components/ui/badge";
@@ -82,7 +83,31 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         eyebrow="Công việc"
         title="Hiệu suất"
         description={`${period.label} · ${department ? DEPARTMENT_LABEL[department] : "toàn shop"} · ${rows.length} người`}
-        hint="KHÔNG có cột điểm tổng. Sáu trục đứng riêng vì chúng nói về sáu thứ khác nhau, và chỉ gộp lại được khi chủ shop tự khai trọng số. Mỗi ô kèm MẪU SỐ (/n) — 100% trên 2 quan sát không giống 100% trên 200. Trục Kết quả chỉ tính việc mà kết quả nằm trong tầm kiểm soát của người xử lý: ĐVVC giao hỏng không phải lỗi CSKH."
+        hint={
+          <>
+            <p>
+              KHÔNG có cột điểm tổng. Sáu trục đứng riêng vì chúng nói về sáu thứ khác nhau, và chỉ gộp lại được khi chủ shop tự khai trọng số. Mỗi ô kèm MẪU SỐ (/n) — 100% trên 2 quan sát không giống 100% trên 200. Trục Kết quả chỉ tính việc mà kết quả nằm trong tầm kiểm soát của người xử lý: ĐVVC giao hỏng không phải lỗi CSKH.
+            </p>
+            {!hasWeights ? (
+              <p className="mt-1">
+                Bảng này CỐ Ý không có cột điểm tổng. Muốn có một con số duy nhất thì chủ shop phải tự khai trọng số cho từng trục ở{" "}
+                <strong>Cấu hình → Trọng số điểm tổng</strong> — không có bộ mặc định nào, vì một bộ trọng số mặc định sẽ được đọc như thể nó có căn cứ.
+              </p>
+            ) : null}
+            <p className="mt-2 font-semibold">Cách đọc bảng này</p>
+            <ul className="mt-1 space-y-1">
+              <li><strong>Kết quả</strong> — phần việc đã đóng mà kết quả THUỘC TRÁCH NHIỆM người xử lý. Care vận đơn không tính vào đây: bưu tá giao được hay không là chuyện của ĐVVC.</li>
+              <li><strong>Chất lượng</strong> — phần việc đóng rồi KHÔNG phải mở lại.</li>
+              <li><strong>Đúng hạn</strong> — chỉ tính việc CÓ ĐẶT HẠN. Việc không đặt hạn rơi khỏi cả tử lẫn mẫu.</li>
+              <li><strong>Năng suất</strong> — số việc đã đóng, LUÔN đọc cùng độ khó trung bình. Số lượng một mình không phải năng suất.</li>
+              <li><strong>Thời gian xử lý</strong> — TRUNG VỊ số giờ từ lúc việc xuất hiện tới lúc đóng. Trung vị chứ không trung bình: một ca để quên ba tuần sẽ kéo trung bình lên và che mất phần lớn ca xử lý trong vài giờ. Ca chậm nhất đứng ngay cạnh vì một con số giữa không nói gì về đuôi.</li>
+              <li><strong>OKR</strong> — tiến độ Key Result cá nhân, chỉ tính KR đo được.</li>
+              <li><strong>Tiền cứu được</strong> — tiền lấy lại được nhờ việc đã đóng, CHỈ cộng phần đo được từ chứng từ. Nó phụ thuộc giá trị đơn chứ không phụ thuộc người xử lý, nên nó không bao giờ được gộp vào một điểm nào.</li>
+              <li><strong>&ldquo;+n việc phòng khác&rdquo;</strong> — việc người này đã đóng nhưng thuộc phòng khác. Không vào trục nào, vì không ai bị chấm điểm bằng kết quả của phòng khác — nhưng vẫn hiện để người gánh việc hộ không trông như đang rảnh.</li>
+              <li><strong>&ldquo;chưa đo được&rdquo;</strong> — chưa có quan sát nào, KHÔNG phải điểm 0.</li>
+            </ul>
+          </>
+        }
       />
 
       <SectionCard padded={false}>
@@ -194,13 +219,6 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
 
       {department ? <TrendSection people={deptPeople.map((p) => ({ id: p.id, name: p.name }))} /> : null}
 
-      {!hasWeights ? (
-        <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          Bảng này CỐ Ý không có cột điểm tổng. Muốn có một con số duy nhất thì chủ shop phải tự khai trọng số cho từng trục ở{" "}
-          <strong>Cấu hình → Trọng số điểm tổng</strong> — không có bộ mặc định nào, vì một bộ trọng số mặc định sẽ được đọc như thể nó có căn cứ.
-        </p>
-      ) : null}
-
       {/*
         MỖI PHÒNG ĐO BẰNG THỨ HỌ QUYẾT ĐƯỢC — VÀ NÓI THẲNG CÁI GÌ CHƯA ĐO ĐƯỢC.
 
@@ -209,20 +227,22 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       */}
       <SectionCard
         title={department ? `${DEPARTMENT_LABEL[department]} được đánh giá bằng gì` : "Mỗi phòng được đánh giá bằng gì"}
-        description="Chỉ số nằm trong tầm kiểm soát của phòng, và những chỉ số chủ shop muốn có mà ERP chưa đọc được ở độ mịn NGƯỜI."
+        hint="Chỉ số nằm trong tầm kiểm soát của phòng, và những chỉ số chủ shop muốn có mà ERP chưa đọc được ở độ mịn NGƯỜI."
       >
         <div className="space-y-4">
           {(department ? [department] : DEPARTMENT_ORDER).map((code) => {
             const spec = DEPT_PERF[code];
             return (
               <div key={code} className="space-y-1.5">
-                <div className="flex flex-wrap items-baseline gap-2">
+                <div className="flex flex-wrap items-center gap-1">
                   <span className="text-sm font-medium">{DEPARTMENT_LABEL[code]}</span>
-                  <span className="text-xs text-muted-foreground">{spec.focus}</span>
+                  <InfoHint>
+                    <p>{spec.focus}</p>
+                    <p className="mt-1">
+                      <strong>Không tính cho họ:</strong> {spec.notAttributed}
+                    </p>
+                  </InfoHint>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  <strong className="text-foreground">Không tính cho họ:</strong> {spec.notAttributed}
-                </p>
                 <ul className="space-y-1 text-xs">
                   {spec.metrics.map((m) => (
                     <li key={m.label} className="flex flex-wrap items-baseline gap-1.5">
@@ -233,7 +253,8 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                         {m.availability === "MEASURED" ? "đo được" : "chưa đo được"}
                       </Badge>
                       <span className="font-medium">{m.label}</span>
-                      <span className="text-muted-foreground">— {m.note}</span>
+                      {/* Lý do CHƯA ĐO ĐƯỢC phải nằm trên màn hình (AGENTS.md mục 24) — chỉ chú giải của chỉ số đo được mới vào ⓘ. */}
+                      {m.availability === "MEASURED" ? <InfoHint>{m.note}</InfoHint> : <span className="text-muted-foreground">— {m.note}</span>}
                     </li>
                   ))}
                 </ul>
@@ -241,20 +262,6 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
             );
           })}
         </div>
-      </SectionCard>
-
-      <SectionCard title="Cách đọc bảng này" >
-        <ul className="space-y-1.5 text-sm text-muted-foreground">
-          <li><strong className="text-foreground">Kết quả</strong> — phần việc đã đóng mà kết quả THUỘC TRÁCH NHIỆM người xử lý. Care vận đơn không tính vào đây: bưu tá giao được hay không là chuyện của ĐVVC.</li>
-          <li><strong className="text-foreground">Chất lượng</strong> — phần việc đóng rồi KHÔNG phải mở lại.</li>
-          <li><strong className="text-foreground">Đúng hạn</strong> — chỉ tính việc CÓ ĐẶT HẠN. Việc không đặt hạn rơi khỏi cả tử lẫn mẫu.</li>
-          <li><strong className="text-foreground">Năng suất</strong> — số việc đã đóng, LUÔN đọc cùng độ khó trung bình. Số lượng một mình không phải năng suất.</li>
-          <li><strong className="text-foreground">Thời gian xử lý</strong> — TRUNG VỊ số giờ từ lúc việc xuất hiện tới lúc đóng. Trung vị chứ không trung bình: một ca để quên ba tuần sẽ kéo trung bình lên và che mất phần lớn ca xử lý trong vài giờ. Ca chậm nhất đứng ngay cạnh vì một con số giữa không nói gì về đuôi.</li>
-          <li><strong className="text-foreground">OKR</strong> — tiến độ Key Result cá nhân, chỉ tính KR đo được.</li>
-          <li><strong className="text-foreground">Tiền cứu được</strong> — tiền lấy lại được nhờ việc đã đóng, CHỈ cộng phần đo được từ chứng từ. Nó phụ thuộc giá trị đơn chứ không phụ thuộc người xử lý, nên nó không bao giờ được gộp vào một điểm nào.</li>
-          <li><strong className="text-foreground">&ldquo;+n việc phòng khác&rdquo;</strong> — việc người này đã đóng nhưng thuộc phòng khác. Không vào trục nào, vì không ai bị chấm điểm bằng kết quả của phòng khác — nhưng vẫn hiện để người gánh việc hộ không trông như đang rảnh.</li>
-          <li><strong className="text-foreground">&ldquo;chưa đo được&rdquo;</strong> — chưa có quan sát nào, KHÔNG phải điểm 0.</li>
-        </ul>
       </SectionCard>
     </div>
   );
@@ -351,11 +358,18 @@ async function TrendSection({ people }: { people: { id: string; name: string }[]
   const moc = await latestSnapshotPeriod("WEEKLY");
   if (!moc) {
     return (
-      <SectionCard title="Xu hướng theo tuần" description="Chưa có ảnh chụp nào.">
-        <p className="text-xs text-muted-foreground">
-          Job <code>work-snapshot</code> chụp thẻ điểm của tuần VỪA ĐÓNG, mỗi 6 giờ một lần. Kỳ đầu tiên sẽ xuất hiện sau lần giao tuần kế tiếp — trước đó bảng này trống là
-          đúng, không phải hỏng.
-        </p>
+      <SectionCard
+        title="Xu hướng theo tuần"
+        description="Chưa có ảnh chụp nào."
+        hint={
+          <>
+            Job <code>work-snapshot</code> chụp thẻ điểm của tuần VỪA ĐÓNG, mỗi 6 giờ một lần. Kỳ đầu tiên sẽ xuất hiện sau lần giao tuần kế tiếp — trước đó bảng này trống là
+            đúng, không phải hỏng.
+          </>
+        }
+        padded={false}
+      >
+        {null}
       </SectionCard>
     );
   }
@@ -370,7 +384,10 @@ async function TrendSection({ people }: { people: { id: string; name: string }[]
       hint="Số ở đây KHÔNG được tính lại: chúng là ảnh chụp bất biến của từng kỳ. Nhờ vậy con số của tuần trước hôm nay vẫn đúng bằng con số đã in ra hồi đó, kể cả khi công thức đã đổi — và nếu hai kỳ dùng hai phiên bản công thức khác nhau thì dòng đó nói rõ."
     >
       {coSo.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Kỳ {moc.period} chưa có chỉ số nào đo được cho người của phòng này — đó là một sự thật đã được ghi lại, không phải thiếu dữ liệu.</p>
+        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+          Kỳ {moc.period} chưa có chỉ số nào đo được cho người của phòng này
+          <InfoHint>Đó là một sự thật đã được ghi lại, không phải thiếu dữ liệu.</InfoHint>
+        </p>
       ) : (
         <div className="space-y-3">
           {coSo.map(({ person, trends }) => (
@@ -434,15 +451,17 @@ function DeptMetricCards({
   return (
     <>
       {perf.team.length ? (
-        <SectionCard title={`${perf.label} · chỉ số mức phòng`} description="Đo được ở mức SỔ, không quy về cá nhân — một dòng tiền có thể do nhiều người chạm.">
+        <SectionCard title={`${perf.label} · chỉ số mức phòng`} hint="Đo được ở mức SỔ, không quy về cá nhân — một dòng tiền có thể do nhiều người chạm.">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {perf.team.map((m) => (
               <div key={m.key} className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">{m.label}</p>
+                <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                  {m.label}
+                  <InfoHint>{m.basis}</InfoHint>
+                </p>
                 <p className="mt-0.5 text-lg font-semibold">
                   <MetricCell m={m} target={resolveTarget(targets, { metricKey: m.key, departmentCode: perf.department, positionId: null, at })} />
                 </p>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">{m.basis}</p>
               </div>
             ))}
           </div>
@@ -451,7 +470,7 @@ function DeptMetricCards({
 
       <SectionCard
         title={`${perf.label} · chỉ số riêng của phòng`}
-        description="Đọc thẳng từ bảng nghiệp vụ của phòng (case CSKH, nhật ký care, phiếu kiểm hoàn, nhật ký đối soát) — không phải số việc đã đóng."
+        hint="Đọc thẳng từ bảng nghiệp vụ của phòng (case CSKH, nhật ký care, phiếu kiểm hoàn, nhật ký đối soát) — không phải số việc đã đóng."
         padded={false}
       >
         {keys.length ? (

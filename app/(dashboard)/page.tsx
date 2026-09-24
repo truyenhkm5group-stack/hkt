@@ -11,6 +11,8 @@ import { TopActions } from "@/app/(dashboard)/top-actions";
 import { BusinessBriefSection } from "@/app/(dashboard)/business-brief";
 import { DataFreshnessStrip } from "@/app/(dashboard)/data-freshness";
 import { PageHeader } from "@/components/page-header";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { SourceBadge } from "@/components/status-badge";
 import { SyncButton } from "@/components/sync-button";
 import { SectionCard } from "@/components/ui-bits";
@@ -59,18 +61,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       />
 
       {!status.pancake ? (
-        <div className="flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
-          <div>
-            <p className="font-semibold">Chưa kết nối Pancake POS</p>
-            <p className="text-muted-foreground">Thêm PANCAKE_API_KEY và PANCAKE_SHOP_ID vào file .env rồi khởi động lại. Xem hướng dẫn tại trang Kết nối dữ liệu.</p>
-          </div>
+        <div className="flex items-center gap-2 rounded-xl border border-warning/40 bg-warning/10 px-4 py-2.5 text-sm">
+          <AlertTriangle className="size-4 shrink-0 text-amber-600" />
+          <p className="font-semibold">Chưa kết nối Pancake POS</p>
+          <InfoHint>Thêm PANCAKE_API_KEY và PANCAKE_SHOP_ID vào file .env rồi khởi động lại. Xem hướng dẫn tại trang Kết nối dữ liệu.</InfoHint>
         </div>
       ) : data.orderTotal === 0 ? (
         <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary/5 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
-          <div>
+          <div className="flex items-center gap-1.5">
             <p className="font-semibold">Chưa có đơn hàng nào trong ERP</p>
-            <p className="text-muted-foreground">Chạy đồng bộ lịch sử lần đầu để kéo toàn bộ đơn từ Pancake POS (có thể mất vài phút tuỳ số lượng đơn).</p>
+            <InfoHint>Chạy đồng bộ lịch sử lần đầu để kéo toàn bộ đơn từ Pancake POS (có thể mất vài phút tuỳ số lượng đơn).</InfoHint>
           </div>
           <SyncButton job="pancake-all" label="Đồng bộ toàn bộ Pancake" variant="default" params={{ backfill: "1" }} />
         </div>
@@ -118,8 +118,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           href={`/reports?tab=truth&period=${period.key}`}
           label="③ TIỀN THỰC NHẬN"
           value={formatVND(data.money.cashReceived, { compact: true })}
-          note="Bảng kê Viettel Post + khách chuyển trước"
-          hint="Tiền đã vào tài khoản có chứng từ. KHÁC hẳn hai con số bên trái: chênh lệch là tiền Viettel Post còn giữ và đơn chưa kết thúc."
+          hint="Bảng kê Viettel Post + khách chuyển trước. Tiền đã vào tài khoản có chứng từ. KHÁC hẳn hai con số bên trái: chênh lệch là tiền Viettel Post còn giữ và đơn chưa kết thúc."
           icon={Banknote}
           tone="green"
         />
@@ -179,8 +178,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           {
             label: "QC / DT giao thành công",
             value: data.money.adsOverDelivered === null ? "—" : `${data.money.adsOverDelivered.toFixed(1)}%`,
-            note: "Chi quảng cáo / doanh thu đã tới tay khách",
-            hint: "Kỳ đang chạy luôn cao bất thường: tiền quảng cáo tiêu ngay, còn hàng 1–2 tuần sau mới giao xong. Đọc tỷ lệ này cho kỳ đã khép.",
+            hint: "Chi quảng cáo / doanh thu đã tới tay khách. Kỳ đang chạy luôn cao bất thường: tiền quảng cáo tiêu ngay, còn hàng 1–2 tuần sau mới giao xong. Đọc tỷ lệ này cho kỳ đã khép.",
             icon: Megaphone,
             tone: data.money.adsOverDelivered !== null && data.money.adsOverDelivered > 40 ? ("rose" as const) : ("default" as const),
             href: `/ads?period=${period.key}`,
@@ -216,13 +214,17 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       </Suspense>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
-        <SectionCard title="Doanh thu theo ngày" description="Doanh thu lên đơn so với doanh thu đơn đã giao thành công" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
+        <SectionCard title="Doanh thu theo ngày" hint="Doanh thu lên đơn so với doanh thu đơn đã giao thành công" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
           <RevenueChart data={data.daily} />
         </SectionCard>
         <SectionCard
           title="Việc cần làm hôm nay"
-          description="Xếp theo cùng công thức ưu tiên của toàn ERP"
-          hint="Trước đây ô này liệt kê các NHÓM việc kèm số đếm; đọc xong vẫn phải mở từng trang để biết bắt đầu từ đâu. Nay hiện đúng những việc cụ thể đứng đầu hàng đợi, kèm vì sao gấp, bao nhiêu tiền đang treo, ai đang cầm và đã trễ hạn chưa."
+          hint={
+            <>
+              <p>Xếp theo cùng công thức ưu tiên của toàn ERP.</p>
+              <p className="mt-1.5">Trước đây ô này liệt kê các NHÓM việc kèm số đếm; đọc xong vẫn phải mở từng trang để biết bắt đầu từ đâu. Nay hiện đúng những việc cụ thể đứng đầu hàng đợi, kèm vì sao gấp, bao nhiêu tiền đang treo, ai đang cầm và đã trễ hạn chưa.</p>
+            </>
+          }
           actions={<Link href="/alerts" className="text-xs font-semibold text-primary hover:underline">Hàng đợi việc</Link>}
           padded={false}
         >
@@ -256,7 +258,17 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         */}
         <SectionCard
           title="Hàng đang ở đâu"
-          description="Theo chứng từ đơn vị vận chuyển — không đọc trạng thái Pancake, không đọc tiền"
+          hint={
+            <>
+              <p>Theo chứng từ đơn vị vận chuyển — không đọc trạng thái Pancake, không đọc tiền.</p>
+              <p className="mt-1.5">
+                <b>“Đã gửi”</b> ở đây nghĩa là <b>đơn vị vận chuyển đã cầm được hàng và kiện vẫn đang trên đường tới khách</b>. Nó KHÔNG
+                gồm hàng còn trong kho, hàng bưu tá tới mà không lấy được, đơn đã giao tới khách, đơn đang hoàn hay đã hoàn, và đơn đã
+                huỷ. Đây là số kiện <b>đang đi ngay lúc này</b>, không phải tổng đã gửi trong kỳ. Căn cứ chỉ là chứng từ của đơn vị vận
+                chuyển — trạng thái Pancake, tiền thu hộ và đối soát không tham gia. Bấm một dòng để mở đúng những đơn đã sinh ra con số đó.
+              </p>
+            </>
+          }
           actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{formatNumber(data.fulfillment.total)} đơn</span>}
         >
           <div className="space-y-2.5">
@@ -289,21 +301,26 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             chỗ nó lộ ra, trước mặt người đọc chứ không trong một tệp log không ai mở.
           */}
           {!buckedCheck.ok ? (
-            <p className="mt-3 rounded-lg border border-rose-300/70 bg-rose-50/60 px-3 py-2 text-[11px] font-semibold text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/20 dark:text-rose-300">
-              {formatNumber(Math.abs(buckedCheck.chenh))} đơn không rổ nào nhận (tổng rổ {formatNumber(buckedCheck.tongRo)} / tổng đơn {formatNumber(data.fulfillment.total)}). Con số bên trên đang thiếu — báo cho người dựng ERP.
-            </p>
+            <div className="mt-3">
+              <DataWarnings
+                tone="danger"
+                items={[
+                  <>
+                    {formatNumber(Math.abs(buckedCheck.chenh))} đơn không rổ nào nhận (tổng rổ {formatNumber(buckedCheck.tongRo)} / tổng đơn {formatNumber(data.fulfillment.total)}). Con số bên trên đang thiếu — báo cho người dựng ERP.
+                  </>,
+                ]}
+              />
+            </div>
           ) : null}
-          <p className="mt-3 border-t pt-2.5 text-[11px] leading-relaxed text-muted-foreground">
-            <b>“Đã gửi”</b> ở đây nghĩa là <b>đơn vị vận chuyển đã cầm được hàng và kiện vẫn đang trên đường tới khách</b>. Nó KHÔNG
-            gồm hàng còn trong kho, hàng bưu tá tới mà không lấy được, đơn đã giao tới khách, đơn đang hoàn hay đã hoàn, và đơn đã
-            huỷ. Đây là số kiện <b>đang đi ngay lúc này</b>, không phải tổng đã gửi trong kỳ. Căn cứ chỉ là chứng từ của đơn vị vận
-            chuyển — trạng thái Pancake, tiền thu hộ và đối soát không tham gia. Bấm một dòng để mở đúng những đơn đã sinh ra con số đó.
-          </p>
         </SectionCard>
         <SectionCard
           title="Luồng đơn hàng"
-          description="Số đơn theo giai đoạn trong kỳ (theo trạng thái Pancake)"
-          hint="Đây là nhãn do NGƯỜI BÁN bấm trên Pancake, không phải kết luận từ chứng từ vận chuyển. “Đã gửi hàng” ở khối này nghĩa là ai đó đã bấm nút — muốn biết gói hàng thật sự đang ở đâu thì đọc khối “Hàng đang ở đâu” bên cạnh."
+          hint={
+            <>
+              <p>Số đơn theo giai đoạn trong kỳ (theo trạng thái Pancake).</p>
+              <p className="mt-1.5">Đây là nhãn do NGƯỜI BÁN bấm trên Pancake, không phải kết luận từ chứng từ vận chuyển. “Đã gửi hàng” ở khối này nghĩa là ai đó đã bấm nút — muốn biết gói hàng thật sự đang ở đâu thì đọc khối “Hàng đang ở đâu” bên cạnh.</p>
+            </>
+          }
         >
           <div className="space-y-2.5">
             {ORDER_STAGE_ORDER.filter((s) => s !== "DELETED" || (data.byStage[s]?.count ?? 0) > 0).map((stage) => {
@@ -321,7 +338,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             })}
           </div>
         </SectionCard>
-        <SectionCard title="Hiệu quả theo kênh bán" description="Doanh thu lên đơn theo nguồn (không tính đơn huỷ)">
+        <SectionCard title="Hiệu quả theo kênh bán" hint="Doanh thu lên đơn theo nguồn (không tính đơn huỷ)">
           {data.channels.length ? (
             <div className="space-y-4">
               {data.channels.slice(0, 6).map((channel, index) => (
@@ -346,7 +363,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <p className="text-sm text-muted-foreground">Chưa có dữ liệu.</p>
           )}
         </SectionCard>
-        <SectionCard title="Sản phẩm bán chạy" description="Theo số lượng bán trong kỳ" actions={<Link href="/products" className="text-xs font-semibold text-primary hover:underline">Xem kho</Link>}>
+        <SectionCard title="Sản phẩm bán chạy" hint="Theo số lượng bán trong kỳ" actions={<Link href="/products" className="text-xs font-semibold text-primary hover:underline">Xem kho</Link>}>
           {data.topProducts.length ? (
             <ul className="divide-y">
               {data.topProducts.map((p, i) => (

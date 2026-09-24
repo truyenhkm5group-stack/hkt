@@ -22,6 +22,7 @@ import { ScopeDenied } from "@/components/scope-denied";
 import { ProfitChart } from "@/components/charts/profit-chart";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { MetricCard } from "@/components/metric-card";
+import { InfoHint } from "@/components/info-hint";
 import { FinanceNav } from "@/components/finance-nav";
 import { PageHeader } from "@/components/page-header";
 import { SourceBadge } from "@/components/status-badge";
@@ -281,11 +282,16 @@ export default async function ReportsPage({
         <DataTableToolbar
           period={{ defaultKey: "month" }}
           resultLabel={
-            tab === "cash"
-              ? "Tiền vào / tiền ra được gán vào kỳ theo ngày thực nhận / thực chi."
-              : tab === "truth"
-              ? "Doanh thu lên đơn / doanh thu giao thành công / tiền thực nhận là BA con số khác nhau — xem rõ chênh lệch nằm ở đâu."
-              : "Đơn được gán vào kỳ theo ngày lên đơn; tỷ lệ giao thành công ước tính theo lịch sử từng mã (đơn GTC = COD thực > 100K)."
+            <span className="inline-flex items-center gap-1">
+              Cách gán kỳ
+              <InfoHint>
+                {tab === "cash"
+                  ? "Tiền vào / tiền ra được gán vào kỳ theo ngày thực nhận / thực chi."
+                  : tab === "truth"
+                  ? "Doanh thu lên đơn / doanh thu giao thành công / tiền thực nhận là BA con số khác nhau — xem rõ chênh lệch nằm ở đâu."
+                  : "Đơn được gán vào kỳ theo ngày lên đơn; tỷ lệ giao thành công ước tính theo lịch sử từng mã (đơn GTC = COD thực > 100K)."}
+              </InfoHint>
+            </span>
           }
         />
       ) : null}
@@ -319,9 +325,14 @@ export default async function ReportsPage({
               },
             ]}
             resultLabel={
-              basis === "delivered"
-                ? "Đơn được gán vào kỳ theo ngày Viettel Post phát thành công (đơn chưa giao tính theo ngày lên đơn)."
-                : "Đơn được gán vào kỳ theo ngày lên đơn trên Pancake. “Giao thành công” tính theo trạng thái vận đơn Viettel Post (webhook / tra cứu / nhập danh sách vận đơn) kết hợp trạng thái Pancake; đơn giao thành công = đơn có doanh thu COD thực > 100.000đ (tiền thực thu / đã về), kể cả khi chưa có trạng thái Viettel Post; COD ≤ 100.000đ (khách chỉ trả tiền ship / phí xem hàng) được coi là không thành công."
+              <span className="inline-flex items-center gap-1">
+                Cách gán kỳ
+                <InfoHint>
+                  {basis === "delivered"
+                    ? "Đơn được gán vào kỳ theo ngày Viettel Post phát thành công (đơn chưa giao tính theo ngày lên đơn)."
+                    : "Đơn được gán vào kỳ theo ngày lên đơn trên Pancake. “Giao thành công” tính theo trạng thái vận đơn Viettel Post (webhook / tra cứu / nhập danh sách vận đơn) kết hợp trạng thái Pancake; đơn giao thành công = đơn có doanh thu COD thực > 100.000đ (tiền thực thu / đã về), kể cả khi chưa có trạng thái Viettel Post; COD ≤ 100.000đ (khách chỉ trả tiền ship / phí xem hàng) được coi là không thành công."}
+                </InfoHint>
+              </span>
             }
           />
 
@@ -346,7 +357,8 @@ export default async function ReportsPage({
               label="Lợi nhuận ròng"
               value={formatVND(current.netProfit, { compact: true })}
               change={change(current.netProfit, previous?.netProfit)}
-              note={`Biên ròng ${current.margin.toFixed(1)}% trên doanh thu giao thành công`}
+              hint="Biên ròng tính trên doanh thu giao thành công."
+              note={`Biên ròng ${current.margin.toFixed(1)}%`}
               icon={TrendingUp}
               tone={current.netProfit >= 0 ? "primary" : "rose"}
             />
@@ -362,7 +374,8 @@ export default async function ReportsPage({
           <section className="grid gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.8fr)]">
             <SectionCard
               title="Bảng kết quả kinh doanh"
-              description={`So sánh với kỳ liền trước có cùng độ dài · ${REPORT_BASIS_LABEL[basis].toLowerCase()}`}
+              description={REPORT_BASIS_LABEL[basis]}
+              hint="So sánh với kỳ liền trước có cùng độ dài."
               padded={false}
             >
               <div className="overflow-x-auto">
@@ -393,14 +406,10 @@ export default async function ReportsPage({
                           <TableCell
                             className={cn("py-2.5", emphasis && "font-bold")}
                           >
-                            <div className={cn(!emphasis && "pl-3")}>
+                            <div className={cn("flex items-center gap-1", !emphasis && "pl-3")}>
                               {line.label}
+                              {line.note ? <InfoHint>{line.note}</InfoHint> : null}
                             </div>
-                            {line.note ? (
-                              <div className="pl-3 text-[11px] text-muted-foreground">
-                                {line.note}
-                              </div>
-                            ) : null}
                           </TableCell>
                           <TableCell className="text-right">
                             <Money
@@ -481,7 +490,7 @@ export default async function ReportsPage({
             <div className="space-y-5">
               <SectionCard
                 title="Tiền thực về"
-                description="Dòng tiền thực tế thay vì doanh thu ghi nhận"
+                hint="Dòng tiền thực tế thay vì doanh thu ghi nhận"
                 padded={false}
               >
                 <div className="divide-y">
@@ -496,19 +505,21 @@ export default async function ReportsPage({
                     icon={Wallet}
                     tone="bg-sky-50 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300"
                     title="COD đã thu, chờ về tài khoản"
-                    note={`${formatNumber(cash.codWaiting.count)} vận đơn đã thu ${formatVND(cash.codWaiting.collected, { compact: true })}${cash.codWaiting.deductedByStatements ? ` − ${formatVND(cash.codWaiting.deductedByStatements, { compact: true })} đã về theo bảng kê (chưa gắn vận đơn)` : ""} · toàn bộ đến cuối kỳ`}
+                    note={`${formatNumber(cash.codWaiting.count)} vận đơn đã thu ${formatVND(cash.codWaiting.collected, { compact: true })}${cash.codWaiting.deductedByStatements ? ` − ${formatVND(cash.codWaiting.deductedByStatements, { compact: true })} đã về theo bảng kê (chưa gắn vận đơn)` : ""}`}
+                    hint="Toàn bộ đến cuối kỳ"
                     amount={cash.codWaiting.amount}
                   />
                   <CashRow
                     icon={PackageCheck}
                     tone="bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
                     title="Đã thanh toán trước"
-                    note="Chuyển khoản, tiền mặt, trả trước của đơn giao thành công trong kỳ"
+                    hint="Chuyển khoản, tiền mặt, trả trước của đơn giao thành công trong kỳ"
                     amount={cash.prepaid}
                   />
                 </div>
-                <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-                  Tổng tiền thực về trong kỳ (COD thực nhận sau cước + trả trước):{" "}
+                <div className="flex items-center gap-1 border-t px-5 py-3 text-xs text-muted-foreground">
+                  Tổng tiền thực về trong kỳ
+                  <InfoHint>COD thực nhận sau cước + trả trước</InfoHint>:{" "}
                   <strong className="text-foreground">
                     {formatVND(cash.cashIn)}
                   </strong>
@@ -517,7 +528,7 @@ export default async function ReportsPage({
 
               <SectionCard
                 title="Không thành công / huỷ"
-                description="Đơn không giao thành công (hoàn) và huỷ trong kỳ, kèm phí ship mất trắng"
+                hint="Đơn không giao thành công (hoàn) và huỷ trong kỳ, kèm phí ship mất trắng"
               >
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg border bg-background p-3">
@@ -568,7 +579,7 @@ export default async function ReportsPage({
 
           <SectionCard
             title="Doanh thu & lợi nhuận theo ngày"
-            description="Doanh thu giao thành công (cột), lãi gộp và lợi nhuận ròng sau chi phí quảng cáo, vận hành (đường)"
+            hint="Doanh thu giao thành công (cột), lãi gộp và lợi nhuận ròng sau chi phí quảng cáo, vận hành (đường)"
             actions={
               <span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">
                 {period.label}
@@ -581,7 +592,7 @@ export default async function ReportsPage({
           <section className="grid gap-5 xl:grid-cols-2">
             <SectionCard
               title="Theo kênh bán"
-              description="Đơn không huỷ, giao thành công và lãi gộp theo nguồn đơn"
+              hint="Đơn không huỷ, giao thành công và lãi gộp theo nguồn đơn"
               padded={false}
             >
               <BreakdownTable
@@ -592,7 +603,7 @@ export default async function ReportsPage({
             </SectionCard>
             <SectionCard
               title="Theo nhân viên chốt đơn"
-              description="Xếp theo doanh thu giao thành công"
+              hint="Xếp theo doanh thu giao thành công"
               padded={false}
             >
               <BreakdownTable
@@ -605,7 +616,8 @@ export default async function ReportsPage({
 
           <SectionCard
             title="Sản phẩm lãi nhất"
-            description="Top 15 theo lãi gộp (doanh thu dòng hàng − giá vốn × số lượng) trên đơn giao thành công"
+            description="Top 15"
+            hint="Top 15 theo lãi gộp (doanh thu dòng hàng − giá vốn × số lượng) trên đơn giao thành công"
             padded={false}
           >
             <div className="overflow-x-auto">
@@ -724,12 +736,15 @@ function CashRow({
   tone,
   title,
   note,
+  hint,
   amount,
 }: {
   icon: typeof Banknote;
   tone: string;
   title: string;
-  note: string;
+  note?: string;
+  /** Giải thích — hiện trong dấu ⓘ cạnh tiêu đề, không in thẳng ra màn hình. */
+  hint?: string;
   amount: number;
 }) {
   return (
@@ -740,8 +755,11 @@ function CashRow({
         <Icon className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold leading-tight">{title}</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">{note}</p>
+        <p className="flex items-center gap-1 text-sm font-semibold leading-tight">
+          {title}
+          {hint ? <InfoHint>{hint}</InfoHint> : null}
+        </p>
+        {note ? <p className="mt-0.5 text-xs text-muted-foreground">{note}</p> : null}
       </div>
       <Money value={amount} className="shrink-0 text-sm font-bold" />
     </div>

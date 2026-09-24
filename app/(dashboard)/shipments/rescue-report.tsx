@@ -1,4 +1,4 @@
-import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { TableToolsFor } from "@/components/data-table/table-tools";
 import { MetricCard } from "@/components/metric-card";
 import { SectionCard } from "@/components/ui-bits";
@@ -111,7 +111,17 @@ export async function RescueReportSection({ period, raw = {} }: { period: Period
           label="Tỷ lệ cứu đơn (trực tiếp)"
           value={tong.directRate === null ? "—" : `${tong.directRate.toFixed(1)}%`}
           note={`${formatNumber(tong.direct)} cứu được / ${formatNumber(tong.direct + tong.failed)} ca đã chốt`}
-          hint={`Chính vận đơn đang gặp sự cố cuối cùng ĐÃ GIAO theo chứng từ ĐVVC. Mẫu số chỉ gồm ca đã có kết cục cuối — ${formatNumber(tong.pending)} ca chưa có kết quả nằm NGOÀI cả tử số lẫn mẫu số. Bấm "Phát tiếp" không làm một ca thành cứu được; chỉ hành trình ĐVVC làm được điều đó.`}
+          hint={
+            <>
+              <p className="mb-2">{`Chính vận đơn đang gặp sự cố cuối cùng ĐÃ GIAO theo chứng từ ĐVVC. Mẫu số chỉ gồm ca đã có kết cục cuối — ${formatNumber(tong.pending)} ca chưa có kết quả nằm NGOÀI cả tử số lẫn mẫu số. Bấm "Phát tiếp" không làm một ca thành cứu được; chỉ hành trình ĐVVC làm được điều đó.`}</p>
+              <p>
+                <b>Kết quả lấy từ đâu.</b> Ca mở khi ĐVVC báo <b>{CARRIER_SUBSTATE_LABEL["WAITING_PROCESSING" as CarrierSubstate]}</b> (chỉ khi có chứng từ rời kho — mã 102 trước lúc lấy hàng
+                không phải việc của đội), <b>{CARRIER_SUBSTATE_LABEL["WAITING_REDELIVERY" as CarrierSubstate]}</b> hoặc <b>{CARRIER_SUBSTATE_LABEL["DELIVERY_EXCEPTION" as CarrierSubstate]}</b>, và chốt khi ĐVVC báo kết cục cuối theo
+                CHIỀU ĐI / CHIỀU HOÀN (501 chiều hoàn là hàng về shop, không phải giao thành công). Không thao tác nào của nhân viên mở hay chốt được kết quả một ca — bấm nút không làm gói hàng di chuyển.
+                Ca máy đóng vì kiện không phải điều kiện care nằm ngoài mọi con số ở đây. {CARE_OUTCOME_LABEL.RESCUED_DIRECT}: {CARE_OUTCOME_HINT.RESCUED_DIRECT}
+              </p>
+            </>
+          }
           tone="green"
         />
         <MetricCard
@@ -124,8 +134,12 @@ export async function RescueReportSection({ period, raw = {} }: { period: Period
         <MetricCard
           label="Chưa có kết quả"
           value={formatNumber(tong.pending)}
-          note="kiện chưa tới đích và cũng chưa quay đầu"
-          hint="CHƯA BIẾT. Cố ý nằm ngoài cả tử số lẫn mẫu số: đẩy vào mẫu số là ép một câu trả lời chưa tồn tại thành “chưa cứu được”, và tỷ lệ tụt xuống chỉ vì hôm nay có nhiều ca mới."
+          hint={
+            <>
+              <p className="mb-2">CHƯA BIẾT. Cố ý nằm ngoài cả tử số lẫn mẫu số: đẩy vào mẫu số là ép một câu trả lời chưa tồn tại thành “chưa cứu được”, và tỷ lệ tụt xuống chỉ vì hôm nay có nhiều ca mới.</p>
+              <p>Kiện chưa tới đích và cũng chưa quay đầu.</p>
+            </>
+          }
           tone="amber"
         />
         <MetricCard
@@ -136,22 +150,29 @@ export async function RescueReportSection({ period, raw = {} }: { period: Period
         />
       </section>
 
-      {tong.falseReopenExcluded ? (
-        <p className="rounded-lg border border-dashed px-3 py-2 text-[12px] text-muted-foreground">
-          {formatNumber(tong.falseReopenExcluded)} đợt là <b>bản sao do lỗi mở ca cũ</b> (bộ đối chiếu từng dựng lại ca đã xong cho đúng tình trạng ĐVVC cũ, đã vá 18/09) — không tính ở bất kỳ con số nào trên trang này, kể cả hiệu suất từng người. Đợt mở lại mà có sự kiện ĐVVC xen giữa vẫn được tính.
-        </p>
-      ) : null}
-
-      {tong.unattributed ? (
-        <p className="rounded-lg border border-dashed px-3 py-2 text-[12px] text-muted-foreground">
-          {formatNumber(tong.unattributed)} ca <b>không đủ chứng cứ để kết luận</b> — ca lịch sử chưa nối được về người hoặc về chứng từ. Chúng nằm ngoài mọi tỷ lệ và không tính vào hiệu suất của ai.
-        </p>
-      ) : null}
+      <DataWarnings
+        items={[
+          tong.falseReopenExcluded ? (
+            <span key="ban-sao">
+              {formatNumber(tong.falseReopenExcluded)} đợt là <b>bản sao do lỗi mở ca cũ</b> (bộ đối chiếu từng dựng lại ca đã xong cho đúng tình trạng ĐVVC cũ, đã vá 18/09) — không tính ở bất kỳ con số nào trên trang này, kể cả hiệu suất từng người. Đợt mở lại mà có sự kiện ĐVVC xen giữa vẫn được tính.
+            </span>
+          ) : null,
+          tong.unattributed ? (
+            <span key="chua-noi">
+              {formatNumber(tong.unattributed)} ca <b>không đủ chứng cứ để kết luận</b> — ca lịch sử chưa nối được về người hoặc về chứng từ. Chúng nằm ngoài mọi tỷ lệ và không tính vào hiệu suất của ai.
+            </span>
+          ) : null,
+        ]}
+      />
 
       <SectionCard
         title="Hiệu suất theo người xử lý"
-        description="Quy kết theo người ĐANG CẦM CA LÚC CHỐT KẾT QUẢ — không phải người mở ca, không phải người bấm nhiều nhất"
-        actions={<InfoHint>Một ca qua tay nhiều người thì cộng kết quả cho tất cả sẽ đếm một ca thành nhiều lần trong tỷ lệ tổng. Số THAO TÁC của từng người đếm riêng ở các cột bên phải để thấy ai đã đóng góp — nhưng nó KHÔNG tham gia tỷ lệ cứu đơn.</InfoHint>}
+        hint={
+          <>
+            <p className="mb-2">Một ca qua tay nhiều người thì cộng kết quả cho tất cả sẽ đếm một ca thành nhiều lần trong tỷ lệ tổng. Số THAO TÁC của từng người đếm riêng ở các cột bên phải để thấy ai đã đóng góp — nhưng nó KHÔNG tham gia tỷ lệ cứu đơn.</p>
+            <p>Quy kết theo người ĐANG CẦM CA LÚC CHỐT KẾT QUẢ — không phải người mở ca, không phải người bấm nhiều nhất.</p>
+          </>
+        }
         padded={false}
       >
         <TableToolsFor tableId="shipments-rescue-report-1" />
@@ -227,18 +248,22 @@ export async function RescueReportSection({ period, raw = {} }: { period: Period
 
       <SectionCard
         title="Hiệu suất chăm sóc theo mã hàng"
-        description="Ca chăm sóc gắn với VẬN ĐƠN; mã hàng gắn với DÒNG HÀNG — nên tổng theo mã lớn hơn tổng ca thật"
-        actions={
-          <InfoHint>
-            Đơn nhiều mã thì ca đó được cộng cho MỌI mã của đơn. Không chia ca theo tỷ lệ và không gán nguyên nhân cho một mã: không có gì trong dữ liệu nói mã nào gây ra sự cố giao hàng. Mã hàng lần qua quan hệ thật (dòng hàng → mẫu mã → sản phẩm), không qua chuỗi SKU.
-          </InfoHint>
+        description={
+          <>
+            {formatNumber(theoMa.totalCases)} ca trong kỳ · <b>{formatNumber(theoMa.multiCodeCases)}</b> ca thuộc đơn nhiều mã ·{" "}
+            <b>{formatNumber(theoMa.unmappedCases)}</b> ca chưa lần được về mã nào
+          </>
+        }
+        hint={
+          <>
+            <p className="mb-2">
+              Đơn nhiều mã thì ca đó được cộng cho MỌI mã của đơn. Không chia ca theo tỷ lệ và không gán nguyên nhân cho một mã: không có gì trong dữ liệu nói mã nào gây ra sự cố giao hàng. Mã hàng lần qua quan hệ thật (dòng hàng → mẫu mã → sản phẩm), không qua chuỗi SKU.
+            </p>
+            <p>Ca chăm sóc gắn với VẬN ĐƠN; mã hàng gắn với DÒNG HÀNG — nên tổng theo mã lớn hơn tổng ca thật. Ca thuộc đơn nhiều mã được cộng cho từng mã.</p>
+          </>
         }
         padded={false}
       >
-        <p className="border-b px-3 py-2 text-[11.5px] text-muted-foreground">
-          {formatNumber(theoMa.totalCases)} ca trong kỳ · <b>{formatNumber(theoMa.multiCodeCases)}</b> ca thuộc đơn nhiều mã (được cộng cho từng mã) ·{" "}
-          <b>{formatNumber(theoMa.unmappedCases)}</b> ca chưa lần được về mã nào
-        </p>
         <TableToolsFor tableId="shipments-rescue-report-2" />
         <div className={TABLE_SCROLL}>
           <table id="shipments-rescue-report-2" className="w-full min-w-[720px] text-[12px]">
@@ -275,13 +300,6 @@ export async function RescueReportSection({ period, raw = {} }: { period: Period
           </table>
         </div>
       </SectionCard>
-
-      <p className="text-[11px] leading-relaxed text-muted-foreground">
-        <b>Kết quả lấy từ đâu.</b> Ca mở khi ĐVVC báo <b>{CARRIER_SUBSTATE_LABEL["WAITING_PROCESSING" as CarrierSubstate]}</b> (chỉ khi có chứng từ rời kho — mã 102 trước lúc lấy hàng
-        không phải việc của đội), <b>{CARRIER_SUBSTATE_LABEL["WAITING_REDELIVERY" as CarrierSubstate]}</b> hoặc <b>{CARRIER_SUBSTATE_LABEL["DELIVERY_EXCEPTION" as CarrierSubstate]}</b>, và chốt khi ĐVVC báo kết cục cuối theo
-        CHIỀU ĐI / CHIỀU HOÀN (501 chiều hoàn là hàng về shop, không phải giao thành công). Không thao tác nào của nhân viên mở hay chốt được kết quả một ca — bấm nút không làm gói hàng di chuyển.
-        Ca máy đóng vì kiện không phải điều kiện care nằm ngoài mọi con số ở đây. {CARE_OUTCOME_LABEL.RESCUED_DIRECT}: {CARE_OUTCOME_HINT.RESCUED_DIRECT}
-      </p>
     </div>
   );
 }

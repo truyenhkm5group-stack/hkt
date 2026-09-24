@@ -1,5 +1,7 @@
 import { AlertTriangle, Banknote, Boxes, TrendingDown } from "lucide-react";
 import { MetricCard } from "@/components/metric-card";
+import { DataWarnings } from "@/components/data-warnings";
+import { InfoHint } from "@/components/info-hint";
 import { Money, SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatNumber } from "@/lib/format";
@@ -33,15 +35,16 @@ export async function ForecastTab() {
       <MetricCard
         label="Trong đó quá hạn"
         value={<Money value={w.codOverdue} />}
-        note="Đã quá kỳ đối soát thông thường — nhiều khả năng phải đi đòi"
+        hint="Đã quá kỳ đối soát thông thường — nhiều khả năng phải đi đòi"
         icon={AlertTriangle}
         tone={w.codOverdue > 0 ? "rose" : "slate"}
       />
-      <MetricCard label="Vốn nằm trong hàng tồn" value={<Money value={w.inventoryValue} />} note="Theo giá nhập; mẫu chưa có giá nhập không tính vào" icon={Boxes} tone="slate" />
+      <MetricCard label="Vốn nằm trong hàng tồn" value={<Money value={w.inventoryValue} />} hint="Theo giá nhập; mẫu chưa có giá nhập không tính vào" icon={Boxes} tone="slate" />
       <MetricCard
         label="Kỳ căng nhất"
         value={<Money value={worst.net} />}
-        note={`${worst.label} · dòng tiền ròng thấp nhất trong ba kỳ`}
+        note={worst.label}
+        hint="Dòng tiền ròng thấp nhất trong ba kỳ"
         icon={TrendingDown}
         tone={worst.net < 0 ? "rose" : "green"}
       />
@@ -49,8 +52,8 @@ export async function ForecastTab() {
 
     <SectionCard
       title="Dự phóng dòng tiền"
-      description="Tiền vào trừ tiền ra, theo nhịp chi thực tế"
-      hint={`Tiền vào = COD của đơn ĐÃ GIAO chưa thấy chứng từ, rải đều tới kỳ đối soát ${r.basis.codSettlementDays} ngày. Tiền ra = nhịp chi quảng cáo 14 ngày gần nhất (${r.basis.adsPerDay.toLocaleString("vi-VN")}đ/ngày) + nhịp chi vận hành 60 ngày gần nhất (${r.basis.opexPerDay.toLocaleString("vi-VN")}đ/ngày) + tiền hàng phải trả xưởng. CỐ Ý không dự phóng tiền từ đơn chưa giao.`}
+      description={<DataWarnings items={r.limitations} label={`${r.limitations.length} điều ERP không biết`} />}
+      hint={`Tiền vào trừ tiền ra, theo nhịp chi thực tế. Tiền vào = COD của đơn ĐÃ GIAO chưa thấy chứng từ, rải đều tới kỳ đối soát ${r.basis.codSettlementDays} ngày. Tiền ra = nhịp chi quảng cáo 14 ngày gần nhất (${r.basis.adsPerDay.toLocaleString("vi-VN")}đ/ngày) + nhịp chi vận hành 60 ngày gần nhất (${r.basis.opexPerDay.toLocaleString("vi-VN")}đ/ngày) + tiền hàng phải trả xưởng. CỐ Ý không dự phóng tiền từ đơn chưa giao.`}
       padded={false}
     >
       <div className="overflow-x-auto">
@@ -81,41 +84,44 @@ export async function ForecastTab() {
           </TableBody>
         </Table>
       </div>
-      <div className="border-t px-5 py-3 text-xs text-muted-foreground">
-        <p className="font-medium text-foreground">ERP KHÔNG biết những điều sau — đọc trước khi tin con số:</p>
-        <ul className="mt-1 space-y-0.5">
-          {r.limitations.map((l, i) => (
-            <li key={i}>• {l}</li>
-          ))}
-        </ul>
-      </div>
     </SectionCard>
 
-    <SectionCard title="Vốn lưu động" description="Tiền đang nằm ở đâu ngoài tài khoản" padded={false}>
+    <SectionCard title="Vốn lưu động" hint="Tiền đang nằm ở đâu ngoài tài khoản" padded={false}>
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Khoản</TableHead>
               <TableHead className="text-right">Giá trị</TableHead>
-              <TableHead>Nghĩa là gì</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             <TableRow>
-              <TableCell className="font-medium">COD chờ về</TableCell>
+              <TableCell className="font-medium">
+                <span className="inline-flex items-center gap-1">
+                  COD chờ về
+                  <InfoHint>Hàng đã tới tay khách, tiền còn ở Viettel Post</InfoHint>
+                </span>
+              </TableCell>
               <TableCell className="text-right"><Money value={w.codReceivable} /></TableCell>
-              <TableCell className="text-xs text-muted-foreground">Hàng đã tới tay khách, tiền còn ở Viettel Post</TableCell>
             </TableRow>
             <TableRow>
-              <TableCell className="font-medium">Vốn trong hàng tồn</TableCell>
+              <TableCell className="font-medium">
+                <span className="inline-flex items-center gap-1">
+                  Vốn trong hàng tồn
+                  <InfoHint>Đã trả tiền xưởng, chưa bán được</InfoHint>
+                </span>
+              </TableCell>
               <TableCell className="text-right"><Money value={w.inventoryValue} /></TableCell>
-              <TableCell className="text-xs text-muted-foreground">Đã trả tiền xưởng, chưa bán được</TableCell>
             </TableRow>
             <TableRow>
-              <TableCell className="font-medium">Đã cam kết với xưởng</TableCell>
+              <TableCell className="font-medium">
+                <span className="inline-flex items-center gap-1">
+                  Đã cam kết với xưởng
+                  <InfoHint>Đơn sản xuất đã gửi, chưa nhận hàng — sẽ phải trả</InfoHint>
+                </span>
+              </TableCell>
               <TableCell className="text-right"><Money value={w.productionCommitted} /></TableCell>
-              <TableCell className="text-xs text-muted-foreground">Đơn sản xuất đã gửi, chưa nhận hàng — sẽ phải trả</TableCell>
             </TableRow>
           </TableBody>
         </Table>

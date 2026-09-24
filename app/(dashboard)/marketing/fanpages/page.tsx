@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { TableToolsFor } from "@/components/data-table/table-tools";
-import { AlertTriangle } from "lucide-react";
+import { InfoHint } from "@/components/info-hint";
+import { DataWarnings } from "@/components/data-warnings";
 import { AssignPanel, type FanpageView, type MarketerOption } from "@/app/(dashboard)/marketing/fanpages/assign-panel";
 import { SkuFilter } from "@/app/(dashboard)/marketing/fanpages/sku-filter";
 import { FanpageTabs } from "@/app/(dashboard)/marketing/fanpages/tabs";
@@ -145,18 +146,26 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
             tiền Viettel Post đã thu, không phải doanh thu giao thành công.
           </>
         }
-        actions={canWrite ? <ReconcileButton /> : null}
+        actions={
+          report.missing > 0 || canWrite ? (
+            <>
+              {/* Cảnh báo thiếu dòng quy kết: không biến mất, thu về một nhãn ⚠ cạnh nút "Đối soát lại". */}
+              <DataWarnings
+                align="end"
+                items={[
+                  report.missing > 0 ? (
+                    <>
+                      <b>{formatNumber(report.missing)}</b> đơn trong kỳ chưa có dòng quy kết — bảng dưới đang thiếu đúng chừng ấy đơn.
+                      {canWrite ? " Bấm “Đối soát lại” để dựng lại." : " Nhờ người có quyền khai báo chạy “Đối soát lại”."}
+                    </>
+                  ) : null,
+                ]}
+              />
+              {canWrite ? <ReconcileButton /> : null}
+            </>
+          ) : null
+        }
       />
-
-      {report.missing > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-200">
-          <AlertTriangle className="size-4 shrink-0" />
-          <span>
-            <b>{formatNumber(report.missing)}</b> đơn trong kỳ chưa có dòng quy kết — bảng dưới đang thiếu đúng chừng ấy đơn.
-            {canWrite ? " Bấm “Đối soát lại” để dựng lại." : " Nhờ người có quyền khai báo chạy “Đối soát lại”."}
-          </span>
-        </div>
-      ) : null}
 
       <FanpageTabs active={tab} />
 
@@ -180,7 +189,15 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
 
           <SectionCard
             title="Độ phủ quy kết"
-            description={`Mỗi đơn thuộc đúng một nhóm — cộng bốn nhóm bằng tổng số đơn của kỳ. Trùng đơn cần ĐỦ CHỨNG CỨ (≥ ${DUPLICATE_SCORE_THRESHOLD} điểm), tìm trong cửa sổ ${DUPLICATE_CANDIDATE_WINDOW_HOURS} giờ — riêng cửa sổ không bao giờ đủ để kết luận.`}
+            hint={`Mỗi đơn thuộc đúng một nhóm — cộng bốn nhóm bằng tổng số đơn của kỳ. Trùng đơn cần ĐỦ CHỨNG CỨ (≥ ${DUPLICATE_SCORE_THRESHOLD} điểm), tìm trong cửa sổ ${DUPLICATE_CANDIDATE_WINDOW_HOURS} giờ — riêng cửa sổ không bao giờ đủ để kết luận.`}
+            actions={
+              <DataWarnings
+                align="end"
+                items={ATTRIBUTION_STATUSES.map((s) =>
+                  ATTRIBUTION_STATUS_FIX[s] && (report.byStatus[s] ?? 0) > 0 ? `${ATTRIBUTION_STATUS_LABEL[s]}: ${ATTRIBUTION_STATUS_FIX[s]}` : null,
+                )}
+              />
+            }
           >
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {ATTRIBUTION_STATUSES.map((s) => {
@@ -189,13 +206,13 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
                 return (
                   <div key={s} className="rounded-lg border p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <span className={cn("rounded px-1.5 py-0.5 text-[11.5px] font-medium", ATTRIBUTION_STATUS_TONE[s])}>{ATTRIBUTION_STATUS_LABEL[s]}</span>
+                      <span className="inline-flex items-center gap-1">
+                        <span className={cn("rounded px-1.5 py-0.5 text-[11.5px] font-medium", ATTRIBUTION_STATUS_TONE[s])}>{ATTRIBUTION_STATUS_LABEL[s]}</span>
+                        <InfoHint>{ATTRIBUTION_STATUS_HINT[s]}</InfoHint>
+                      </span>
                       <span className="font-mono text-sm font-semibold">{formatNumber(n)}</span>
                     </div>
-                    <p className="mt-1 text-[11.5px] text-muted-foreground">
-                      {p === null ? "—" : `${p}% số đơn`} · {ATTRIBUTION_STATUS_HINT[s]}
-                    </p>
-                    {ATTRIBUTION_STATUS_FIX[s] && n > 0 ? <p className="mt-1 text-[11.5px] text-amber-700 dark:text-amber-400">{ATTRIBUTION_STATUS_FIX[s]}</p> : null}
+                    <p className="mt-1 text-[11.5px] text-muted-foreground">{p === null ? "—" : `${p}% số đơn`}</p>
                   </div>
                 );
               })}
@@ -213,7 +230,7 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
           {NO_PAGE_GROUPS.some((g) => report.noPageGroups[g].orders > 0) ? (
             <SectionCard
               title="Đơn không mang page_id của Pancake — tách theo loại"
-              description="Đơn landing có đủ bằng chứng tracking đã RA KHỎI nhóm “không có fanpage”. Ba nhóm còn lại là ba việc phải làm khác nhau."
+              hint="Đơn landing có đủ bằng chứng tracking đã RA KHỎI nhóm “không có fanpage”. Ba nhóm còn lại là ba việc phải làm khác nhau."
             >
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                 {NO_PAGE_GROUPS.map((g) => {
@@ -221,13 +238,17 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
                   return (
                     <div key={g} className="rounded-lg border p-3">
                       <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-[11.5px] font-medium">{NO_PAGE_GROUP_LABEL[g]}</span>
+                        <span className="inline-flex items-center gap-1 text-[11.5px] font-medium">
+                          {NO_PAGE_GROUP_LABEL[g]}
+                          <InfoHint>{NO_PAGE_GROUP_HINT[g]}</InfoHint>
+                        </span>
                         <span className={cn("font-mono text-sm font-semibold", g === "LANDING_ATTRIBUTED" && b.orders > 0 && "text-success")}>{formatNumber(b.orders)}</span>
                       </div>
-                      <p className="mt-1 text-[11.5px] text-muted-foreground">
-                        {b.confirmedOrders > 0 ? `${formatNumber(b.confirmedOrders)} đơn xác nhận · ${formatVND(b.confirmedRevenue)} · ` : ""}
-                        {NO_PAGE_GROUP_HINT[g]}
-                      </p>
+                      {b.confirmedOrders > 0 ? (
+                        <p className="mt-1 text-[11.5px] text-muted-foreground">
+                          {formatNumber(b.confirmedOrders)} đơn xác nhận · {formatVND(b.confirmedRevenue)}
+                        </p>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -238,7 +259,7 @@ export default async function FanpageAttributionPage({ searchParams }: { searchP
           {tab === "orders" ? (
             <OrdersTab params={params} filters={{ ...filters, status, source }} />
           ) : (
-            <SectionCard title="Theo marketer" description="Doanh thu xác nhận = tổng giá trị đơn đã xác nhận trên Pancake. Đơn trùng không tính cho ai.">
+            <SectionCard title="Theo marketer" hint="Doanh thu xác nhận = tổng giá trị đơn đã xác nhận trên Pancake. Đơn trùng không tính cho ai.">
               {report.rows.length === 0 ? (
                 <EmptyState title="Chưa có đơn nào trong kỳ" description="Đổi kỳ hoặc bỏ bớt bộ lọc." />
               ) : (
@@ -349,9 +370,9 @@ async function AssignTab({ canWrite, noPageOrders }: { canWrite: boolean; noPage
   const treoOrders = unmapped.reduce((t, p) => t + p.orders, 0);
   const treoRevenue = unmapped.reduce((t, p) => t + p.confirmedRevenue, 0);
 
-  const group = (title: string, desc: React.ReactNode, list: FanpageView[]) =>
+  const group = (title: string, hint: React.ReactNode, list: FanpageView[]) =>
     list.length ? (
-      <SectionCard title={title} description={desc}>
+      <SectionCard title={title} hint={hint}>
         <AssignPanel pages={list} marketers={marketers as MarketerOption[]} canWrite={canWrite} />
       </SectionCard>
     ) : null;
@@ -380,7 +401,15 @@ async function AssignTab({ canWrite, noPageOrders }: { canWrite: boolean; noPage
       )}
       <SectionCard
         title="Đơn không có nguồn fanpage"
-        description="Pancake không gửi `page_id` cho những đơn này — chúng KHÔNG thuộc fanpage nào, nên không ép vào mô hình Fanpage → MKTer."
+        hint={
+          <>
+            <p className="mb-1">Pancake không gửi `page_id` cho những đơn này — chúng KHÔNG thuộc fanpage nào, nên không ép vào mô hình Fanpage → MKTer.</p>
+            <p>
+              Phần lớn là đơn landing page và đơn nhập tay. Đã dò payload gốc Pancake: không đơn nào mang `page_id`, và không đơn nào có `conversation_id` /
+              `post_id` để suy ra — nên KHÔNG có gì để backfill.
+            </p>
+          </>
+        }
       >
         <p className="text-[13px]">
           <b>{formatNumber(noPageOrders.orders)}</b> đơn · <b>{formatNumber(noPageOrders.confirmedOrders)}</b> đã xác nhận ·{" "}
@@ -388,10 +417,6 @@ async function AssignTab({ canWrite, noPageOrders }: { canWrite: boolean; noPage
           <Link className="underline" href={{ pathname: "/marketing/fanpages", query: { tab: "orders", st: "NO_PAGE", period: "all" } }}>
             xem danh sách
           </Link>
-        </p>
-        <p className="mt-1 text-[11.5px] text-muted-foreground">
-          Phần lớn là đơn landing page và đơn nhập tay. Đã dò payload gốc Pancake: không đơn nào mang `page_id`, và không đơn nào có
-          `conversation_id` / `post_id` để suy ra — nên KHÔNG có gì để backfill.
         </p>
       </SectionCard>
       {unmapped.length ? (
@@ -408,7 +433,7 @@ async function AssignTab({ canWrite, noPageOrders }: { canWrite: boolean; noPage
 async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseListParams>; filters: { marketerId: string | null; pageId: string | null; sku: string | null; status: string | null; source: string | null } }) {
   const { rows, total, pageCount } = await listAttributionOrders(params, filters);
   return (
-    <SectionCard title="Từng đơn" description="Mốc hiển thị là MỐC ĐƠN LÊN TẠI PANCAKE — cùng mốc mà luật trùng đơn dùng để quyết ai thắng.">
+    <SectionCard title="Từng đơn" hint="Mốc hiển thị là MỐC ĐƠN LÊN TẠI PANCAKE — cùng mốc mà luật trùng đơn dùng để quyết ai thắng.">
       {rows.length === 0 ? (
         <EmptyState title="Không có đơn nào khớp bộ lọc" description="Đổi kỳ, bỏ bớt bộ lọc, hoặc chạy đối soát nếu vừa gán fanpage." />
       ) : (
@@ -466,9 +491,10 @@ async function OrdersTab({ params, filters }: { params: ReturnType<typeof parseL
                             </div>
                           ) : null}
                           {r.landing.productMismatch ? (
-                            <div className="text-amber-700 dark:text-amber-400">
-                              Chiến dịch nói mã {r.landing.campaignProductCode}, đơn lại là mã khác — mã của đơn GIỮ NGUYÊN, đánh dấu để rà.
-                            </div>
+                            <DataWarnings
+                              label={`lệch mã ${r.landing.campaignProductCode ?? ""}`.trim()}
+                              items={[`Chiến dịch nói mã ${r.landing.campaignProductCode}, đơn lại là mã khác — mã của đơn GIỮ NGUYÊN, đánh dấu để rà.`]}
+                            />
                           ) : null}
                         </div>
                       ) : null}
