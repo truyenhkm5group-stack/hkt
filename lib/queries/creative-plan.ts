@@ -67,7 +67,7 @@ export function parseGeneStat(raw: unknown): GeneStat | null {
  *                   điều kiện ấy vẫn là nguồn cảm hứng (đứng trước spy / tay / R&D ở `planBatch`).
  *  · stats        — `gene_stats` của dòng sổ học mới nhất, cùng phiên bản từ vựng; chưa có ⇒ rỗng.
  */
-export async function loadPlanInputs(db: Db, batchDay: string, cfg: Pick<CreativeLoopConfig, "batchSize" | "extraCandidates" | "exploreShare" | "focusProductIds">): Promise<PlanInput> {
+export async function loadPlanInputs(db: Db, batchDay: string, cfg: Pick<CreativeLoopConfig, "batchSize" | "extraCandidates" | "focusProductIds">): Promise<PlanInput> {
   const dayStart = vnMidnight(batchDay);
   const recentFrom = vnMidnight(shiftDay(batchDay, -PLAN_RECENT_TEST_DAYS));
   const dedupFrom = vnMidnight(shiftDay(batchDay, -PLAN_DEDUP_DAYS));
@@ -208,7 +208,6 @@ export async function loadPlanInputs(db: Db, batchDay: string, cfg: Pick<Creativ
   return {
     batchDay,
     slotCount: cfg.batchSize + cfg.extraCandidates,
-    exploreShare: cfg.exploreShare,
     products,
     inspirations: inspirations.sort((a, b) => a.sourceId.localeCompare(b.sourceId)),
     parents,

@@ -4,7 +4,7 @@ import { ApproveBatchButton, RejectBatchButton, RejectVariantButton } from "@/ap
 import { Countdown, ExpandText } from "@/app/(dashboard)/marketing/creatives/creative-bits";
 import { EditCopyButton } from "@/app/(dashboard)/marketing/creatives/copy-editor";
 import { ManualForm } from "@/app/(dashboard)/marketing/creatives/manual-form";
-import { AdPreview, GeneChips, ModeChip, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
+import { AdPreview, DnaChips, GeneChips, ModeChip, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { StatStrip } from "@/components/stat-tile";
 import { DescriptionList, EmptyState, SectionCard } from "@/components/ui-bits";
 import { getDb } from "@/db";
@@ -21,7 +21,7 @@ import {
 } from "@/lib/constants/creative-loop";
 import { CAPTION_FALLBACK_PREFIX } from "@/lib/creative/caption";
 import { describeRule } from "@/lib/creative/judge";
-import { manualTargetDay } from "@/lib/creative/manual";
+import { manualTargetDay, publishOrder } from "@/lib/creative/manual";
 import { batchWindow } from "@/lib/creative/schedule";
 import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
 import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
@@ -114,9 +114,43 @@ function VariantTile({ v, reserve, canReject, canEditCopy, pageName }: { v: Vari
             Câu chữ vẫn là bản nháp viết trước khi có ảnh — AI chưa đọc được ảnh. Bấm “Soạn câu chữ” để xin gợi ý lại hoặc sửa tay.
           </p>
         ) : null}
-        <p className="line-clamp-1 text-[11.5px] text-muted-foreground" title={v.productId ?? undefined}>
-          Mã hàng: <span className="text-foreground">{v.productName ?? v.productId ?? "—"}</span>
-        </p>
+        {v.mode === "DESIGN" ? (
+          v.design ? (
+            <div className="space-y-1 rounded-md border border-brand/30 bg-brand/5 p-2">
+              <p className="flex flex-wrap items-baseline justify-between gap-1 text-[12px]">
+                <span className="font-semibold">
+                  Thiết kế mới <span className="font-mono">{v.design.code}</span>
+                </span>
+                <span className="numeric text-[11.5px]" title="Giá đề nghị = giá của mã cha trội nhất. Không suy được ⇒ câu chữ không ghi giá.">
+                  {v.design.priceVnd === null ? <span className="text-muted-foreground">giá: chưa suy được</span> : `giá đề nghị ${formatVND(v.design.priceVnd)}`}
+                </span>
+              </p>
+              <DnaChips dna={v.design.dna} />
+              <p className="line-clamp-1 text-[11px] text-muted-foreground" title="Mã cha — thiết kế lai DNA của các mã này, bắt buộc khác mọi mã đang có ở ít nhất 2 thuộc tính">
+                Mã cha: <span className="text-foreground">{v.design.parentLabels.join(" × ") || "—"}</span>
+              </p>
+              <p className="text-[10.5px] text-muted-foreground">Mẫu CHƯA sản xuất — tạo sản phẩm trên Pancake đúng mã {v.design.code} để nhân viên chốt đơn.</p>
+            </div>
+          ) : (
+            <p className="text-[11.5px] text-warning">Ô thiết kế không còn nối được về thiết kế nào.</p>
+          )
+        ) : (
+          <p className="line-clamp-1 text-[11.5px] text-muted-foreground" title={v.productId ?? undefined}>
+            Mã hàng: <span className="text-foreground">{v.productName ?? v.productId ?? "—"}</span>
+          </p>
+        )}
+        {v.rules ? (
+          <p className="text-[11px] text-muted-foreground" title={v.rules.basis === "PRODUCT_HISTORY" ? `${v.rules.samples} mẩu QC có tin nhắn của mã trong ${v.rules.lookbackDays} ngày` : v.rules.reason}>
+            {v.rules.basis === "PRODUCT_HISTORY" ? (
+              <>
+                Luật riêng theo mã: tắt khi chi/tin &gt; <b className="numeric text-foreground">{formatVND(v.rules.p75CostPerMessageVnd)}</b> (p75) · giữ khi ≤{" "}
+                <b className="numeric text-foreground">{formatVND(v.rules.medianCostPerMessageVnd)}</b> (trung vị)
+              </>
+            ) : (
+              <>Luật chung của lô — mã chưa đủ lịch sử ({formatNumber(v.rules.samples)} mẩu có tin nhắn)</>
+            )}
+          </p>
+        ) : null}
         <GeneChips genes={v.genes} mutated={v.mode === "EXPLOIT" ? v.mutatedGene : undefined} />
         {v.why ? <p className="line-clamp-2 text-[11px] text-muted-foreground" title={v.why}>Vì sao: {v.why}</p> : null}
         {v.status === "GEN_FAILED" ? <p className="text-[11.5px] text-destructive">Sinh lỗi: {v.genError || "không rõ lý do"}</p> : null}
@@ -138,7 +172,8 @@ function PendingBlock({ pending, now, canApprove, canEdit, pageName }: { pending
   const coAnh = variants.filter((v) => v.status === "GENERATED");
   const tran = config.batchSize;
   const seChay = Math.min(coAnh.length, tran);
-  const reserveIds = new Set([...coAnh].sort((a, z) => a.slot - z.slot).slice(tran).map((v) => v.id));
+  // Dự phòng = mẫu nằm SAU trần theo đúng thứ tự đăng (tự làm → thiết kế mới → mockup → thăm dò).
+  const reserveIds = new Set(publishOrder(coAnh).slice(tran).map((v) => v.id));
   const quaHan = now.getTime() >= new Date(b.approvalDeadline).getTime();
   const choDuyet = b.status === "PENDING_APPROVAL";
   const thieuDeDang = configProblems.filter((p) => (PUBLISH_REQUIRED_FIELDS as readonly string[]).includes(p.field));
@@ -194,7 +229,7 @@ function PendingBlock({ pending, now, canApprove, canEdit, pageName }: { pending
               label: "Sẽ chạy",
               value: formatNumber(seChay),
               note: `trần ${formatNumber(tran)} mẫu / lô`,
-              hint: "Máy đăng theo thứ tự ô, tối đa số mẫu của cấu hình. Mẫu dư là dự phòng — gạt bớt để tự chọn mẫu nào chạy.",
+              hint: "Máy đăng theo thứ tự: mẫu tự làm → thiết kế mới → mockup mẫu thắng → thăm dò, tối đa số mẫu của cấu hình. Mẫu dư là dự phòng — gạt bớt để tự chọn mẫu nào chạy.",
             },
             {
               label: "Tổng tiền cam kết nếu duyệt",
@@ -207,7 +242,7 @@ function PendingBlock({ pending, now, canApprove, canEdit, pageName }: { pending
 
         <div className="grid gap-3 lg:grid-cols-2">
           <div className="rounded-lg border px-3 py-2 text-[12.5px]">
-            <p className="font-semibold">Luật tắt đi kèm lô</p>
+            <p className="font-semibold">Luật tắt đi kèm lô{variants.some((v) => v.rules?.basis === "PRODUCT_HISTORY") ? " (ô mockup có luật riêng theo mã — in trên từng ô, cũng nằm trong phiếu duyệt)" : ""}</p>
             {config.killRules.length ? (
               <>
                 <p className="text-muted-foreground">Duyệt = cho phép máy tắt mẫu theo các luật này, không cần hỏi lại.</p>

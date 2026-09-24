@@ -4,7 +4,8 @@ import { estimateCostUsd, getAiProvider, type AiMessage, type AiProvider, type A
 import { aiDisabledReason } from "@/lib/ai/router";
 import { tienAiHomNay, tranNgayUsd } from "@/lib/ai/budget";
 import { xetTranNgay } from "@/lib/constants/ai-budget";
-import { GENE_KEYS, GENE_LABEL, GENE_VALUE_LABEL, type GeneKey, type Genes, type SlotMode } from "@/lib/constants/creative-loop";
+import { GENE_KEYS, GENE_LABEL, GENE_VALUE_LABEL, type DesignDna, type GeneKey, type Genes, type SlotMode } from "@/lib/constants/creative-loop";
+import { describeDnaVi, designPromptEn } from "@/lib/creative/design";
 
 /**
  * ═══════════ VIẾT CÂU LỆNH ẢNH + CÂU CHỮ CHO MỘT Ô ĐÃ ĐƯỢC CHỌN ═══════════
@@ -34,6 +35,12 @@ export type WriterInput = {
   /** Mô tả CHỮ của nguồn cảm hứng — thứ DUY NHẤT của ảnh spy/tay/R&D đi vào câu lệnh. */
   inspirationSummary: string | null;
   winningExamples: { primaryText: string; headline: string }[];
+  /**
+   * Ô THIẾT KẾ MỚI (`mode = DESIGN`, chủ shop 24/09/2026): mẫu CHƯA SẢN XUẤT. Câu lệnh ảnh mô tả thiết kế
+   * theo DNA (mã nguồn gắn, tất định) và dặn KHÔNG sao chép sản phẩm trong ảnh tham chiếu; câu chữ nói
+   * đây là mẫu mới. `product.priceVnd` là GIÁ ĐỀ NGHỊ của thiết kế (`design_concepts.price_vnd`).
+   */
+  design?: { code: string; dna: DesignDna };
 };
 
 export type WriterOutput = {
@@ -195,6 +202,15 @@ export function geneDirectives(genes: Genes, priceVnd: number | null, headline: 
   return GENE_KEYS.map((k) => (k === "textOverlay" ? textOverlayDirective(genes.textOverlay, priceVnd, headline) : (GENE_PROMPT_EN[k] as Record<string, string>)[genes[k]]));
 }
 
+/**
+ * Ô `DESIGN`: ảnh tham chiếu là ảnh sản phẩm THẬT của mã cha — chỉ để giữ chất ảnh, ánh sáng, thương
+ * hiệu của shop. Thiết kế trên ảnh phải là thiết kế MỚI theo mô tả, không phải chiếc áo trong ảnh.
+ */
+export const NEW_DESIGN_CLAUSE =
+  "IMPORTANT: this is a NEW garment design — do NOT copy, reproduce or lightly edit the garment shown in the reference photo(s). " +
+  "Use the reference photo(s) ONLY for photographic style, lighting, model styling and the shop's brand look. The garment must follow the NEW GARMENT DESIGN description above. " +
+  "Do not add any logo, brand name or watermark. Photorealistic commercial fashion photo.";
+
 export const PRESERVE_PRODUCT_CLAUSE =
   "IMPORTANT: keep the product EXACTLY as in the reference product photo(s) — same colors, pattern, print, fabric, cut and silhouette. " +
   "Do not redesign, recolor or add details to the product. Do not add any logo, brand name or watermark. Photorealistic advertising photo.";
@@ -213,6 +229,18 @@ const WRITER_SYSTEM = [
   "- Nếu nhắc giá thì CHỈ dùng đúng giá được cung cấp. Không có giá thì KHÔNG viết con số giá nào.",
 ].join("\n");
 
+const DESIGN_WRITER_SYSTEM = [
+  "Bạn là người viết quảng cáo Facebook cho một shop thời trang Việt Nam.",
+  "Ô này quảng cáo một MẪU MỚI của shop (thiết kế chưa từng bán, mã TK-…). Thiết kế (DNA) và bộ gen ảnh đã được chọn sẵn. Bạn chỉ diễn đạt đúng chúng.",
+  "Trả về DUY NHẤT một đối tượng JSON, không kèm chữ nào khác:",
+  '{"imagePrompt": "<tiếng Anh: mô tả cảnh, ánh sáng, tư thế người mẫu mặc mẫu mới, góc máy — diễn đạt đủ sáu gen>", "primaryText": "<tiếng Việt, ≤ 500 ký tự>", "headline": "<tiếng Việt, ≤ 40 ký tự>"}',
+  "Luật:",
+  "- imagePrompt mô tả ẢNH THƯƠNG MẠI của một người mẫu MẶC mẫu mới. Ảnh đính kèm chỉ là ảnh sản phẩm cũ của shop để giữ chất ảnh — KHÔNG mô tả lại sản phẩm cũ đó.",
+  "- imagePrompt KHÔNG chứa chữ hay con số sẽ in lên ảnh — phần chữ trên ảnh do hệ thống tự thêm.",
+  "- Câu chữ có thể nói đây là mẫu mới của shop. Không hứa ngày giao cụ thể, không bịa số khách đã mua, không bịa giảm giá, không nhắc thương hiệu khác.",
+  "- Nếu nhắc giá thì CHỈ dùng đúng giá được cung cấp. Không có giá thì KHÔNG viết con số giá nào.",
+].join("\n");
+
 function briefOf(input: WriterInput): string {
   const genes = GENE_KEYS.map((k) => `- ${GENE_LABEL[k]} (${k}): ${input.genes[k]} — ${GENE_VALUE_LABEL[input.genes[k]] ?? input.genes[k]}`).join("\n");
   const examples = input.winningExamples
@@ -222,7 +250,8 @@ function briefOf(input: WriterInput): string {
   return [
     `Sản phẩm: ${input.product.name} (mã ${input.product.code || "không rõ"})`,
     `Giá bán ERP: ${input.product.priceVnd !== null ? formatVnd(input.product.priceVnd) : "KHÔNG RÕ — không được viết con số giá nào"}`,
-    `Loại ô: ${input.mode === "EXPLOIT" ? "biến thể của một mẫu đã chạy tốt" : "thử ý mới"}. Vì sao: ${input.why}`,
+    `Loại ô: ${input.mode === "DESIGN" ? "THIẾT KẾ MỚI — mẫu chưa từng bán" : input.mode === "EXPLOIT" ? "biến thể của một mẫu đã chạy tốt" : "thử ý mới"}. Vì sao: ${input.why}`,
+    input.design ? `Thiết kế mới ${input.design.code} (mô tả sản phẩm — diễn đạt đúng, không thêm bớt):\n${describeDnaVi(input.design.dna)}` : "",
     `Bộ gen phải diễn đạt:\n${genes}`,
     input.inspirationSummary ? `Mô tả phong cách tham khảo (chỉ lấy tinh thần bố cục/phong cách, KHÔNG chép):\n${input.inspirationSummary}` : "",
     examples ? `Câu chữ của các mẫu đã thắng (tham khảo giọng văn, không chép nguyên văn):\n${examples}` : "",
@@ -321,7 +350,7 @@ export async function writeVariantCopy(input: WriterInput, deps: WriterDeps = {}
 
   try {
     for (attempts = 1; attempts <= 2; attempts += 1) {
-      const res = await provider.complete({ system: WRITER_SYSTEM, messages, tools: [], maxTokens: 1500 });
+      const res = await provider.complete({ system: input.design ? DESIGN_WRITER_SYSTEM : WRITER_SYSTEM, messages, tools: [], maxTokens: 1500 });
       usage = addUsage(usage, res.usage);
       model = res.model || model;
       lastAnswer = res.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
@@ -356,7 +385,10 @@ export async function writeVariantCopy(input: WriterInput, deps: WriterDeps = {}
   const headline = clipWords(fix(copy.headline), WRITER_LIMITS.headlineMaxChars);
   const primaryText = clipWords(fix(copy.primaryText), WRITER_LIMITS.primaryTextMaxChars);
   const body = fix(copy.imagePrompt);
-  const imagePrompt = [body, geneDirectives(input.genes, priceVnd, headline).join(" "), PRESERVE_PRODUCT_CLAUSE].join("\n\n");
+  // Ô thiết kế: mô tả thiết kế MỚI (tất định theo DNA) đứng TRƯỚC chỉ thị gen, và câu "không sao chép" thay câu giữ sản phẩm.
+  const imagePrompt = input.design
+    ? [body, designPromptEn(input.design.dna), geneDirectives(input.genes, priceVnd, headline).join(" "), NEW_DESIGN_CLAUSE].join("\n\n")
+    : [body, geneDirectives(input.genes, priceVnd, headline).join(" "), PRESERVE_PRODUCT_CLAUSE].join("\n\n");
 
   await logInteraction({ provider: provider.name, model, prompt: brief, answer: lastAnswer, usage, costUsd, latencyMs: Date.now() - started, rounds: attempts, status: "OK", error: null, entityId: deps.entityId ?? "" });
   return { imagePrompt, primaryText, headline, model, costUsd, attempts, priceStripped };

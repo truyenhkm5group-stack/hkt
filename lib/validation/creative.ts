@@ -125,6 +125,17 @@ export type VariantCopyInput = z.infer<typeof variantCopyInputSchema>;
 
 export const creativeSourceToggleSchema = z.object({ id: z.string().trim().min(1, "Thiếu mã nguồn ảnh"), active: z.boolean() }).strict();
 
+/**
+ * Công tắc "Chạy mockup hằng ngày" trên thẻ nguồn (tab Nguồn ảnh). `kind = SOURCE` ⇒ id nguồn `OWN_AD`;
+ * `kind = PRODUCT` ⇒ id mã hàng (thẻ ảnh sản phẩm thật). Máy chủ kiểm lại loại nguồn / mã có thật.
+ */
+export const mockupToggleSchema = z
+  .object({ kind: z.enum(["SOURCE", "PRODUCT"]), id: z.string().trim().min(1, "Thiếu mã").max(200), on: z.boolean() })
+  .strict();
+
+/** Người đánh dấu một thiết kế "đưa vào sản xuất" — máy không bao giờ tự đặt trạng thái này. */
+export const designProductionSchema = z.object({ id: z.string().trim().min(1, "Thiếu mã thiết kế").max(200), on: z.boolean() }).strict();
+
 // ───────────────────────────── CẤU HÌNH ─────────────────────────────
 
 /** Trường số của cấu hình — mỗi ô trên màn hình là một khoá ở đây. */
@@ -136,7 +147,8 @@ export const CONFIG_NUMERIC_FIELDS = [
   "approvalLeadMinutes",
   "genHourVn",
   "extraCandidates",
-  "exploreShare",
+  "designSlots",
+  "exploreSlots",
   "winOrdersAbove",
   "verdictSettleHours",
   "imageDailyCapUsd",
@@ -158,8 +170,11 @@ export const CONFIG_FIELD_LABEL: Record<Exclude<keyof CreativeLoopConfig, "killR
   startHourVn: "Giờ bắt đầu chạy (giờ VN)",
   approvalLeadMinutes: "Hạn duyệt trước giờ chạy (phút)",
   genHourVn: "Giờ dựng lô cho ngày mai (giờ VN)",
-  extraCandidates: "Số mẫu sinh dư để gạt bớt",
-  exploreShare: "Tỷ lệ ô thăm dò (0 – 1)",
+  extraCandidates: "Số ô thiết kế sinh dư để gạt bớt",
+  designSlots: "Số ô THIẾT KẾ MỚI mỗi lô",
+  exploreSlots: "Số ô thăm dò mỗi lô",
+  mockupSourceIds: "Quảng cáo cũ chạy mockup hằng ngày",
+  mockupProductIds: "Mã hàng chạy mockup hằng ngày",
   winOrdersAbove: "THẮNG khi đơn chốt vượt",
   verdictSettleHours: "Đợi đơn về sau khung test (giờ)",
   focusProductIds: "Chỉ test các mã này (để trống = mọi mã có ảnh thật)",
@@ -201,7 +216,12 @@ export const creativeConfigRawSchema = z
     approvalLeadMinutes: finiteNumber("approvalLeadMinutes"),
     genHourVn: finiteNumber("genHourVn"),
     extraCandidates: finiteNumber("extraCandidates"),
-    exploreShare: finiteNumber("exploreShare"),
+    designSlots: finiteNumber("designSlots"),
+    exploreSlots: finiteNumber("exploreSlots"),
+    // Hai danh sách mockup được bật / tắt bằng công tắc ở tab Nguồn ảnh, không ở form cấu hình — form
+    // không gửi chúng thì server action GIỮ danh sách đang lưu (`saveCreativeConfig`), không xoá.
+    mockupSourceIds: z.array(z.string().trim().min(1).max(200)).max(200).optional(),
+    mockupProductIds: z.array(z.string().trim().min(1).max(200)).max(200).optional(),
     winOrdersAbove: finiteNumber("winOrdersAbove"),
     verdictSettleHours: finiteNumber("verdictSettleHours"),
     killRules: z.array(z.unknown()).max(20, "Tối đa 20 luật tắt"),
