@@ -57,6 +57,18 @@ export function batchDayToBuild(now: Date, cfg: Pick<CreativeLoopConfig, "startH
   return tomorrow;
 }
 
+/**
+ * Mốc VẼ NỐT của lô Batch: tới đây mà lô Batch còn chưa xong thì huỷ và vẽ phần còn lại bằng gọi ngay
+ * (chủ shop chốt 24/09/2026: 2:00 sáng của ngày chạy). Là mốc `batchFallbackHourVn:00` giờ VN GẦN NHẤT
+ * ĐỨNG TRƯỚC hạn duyệt — giờ 2 với lịch mặc định (chạy 6:00, hạn 5:30) là 2:00 ngày chạy; một giờ ghi
+ * sau hạn duyệt (vd 22) được hiểu là tối hôm trước, không bao giờ là một mốc lô đã hết hạn.
+ */
+export function imageBatchFallbackAt(batchDay: string, cfg: Pick<CreativeLoopConfig, "startHourVn" | "testDays" | "approvalLeadMinutes" | "genHourVn" | "batchFallbackHourVn">): Date {
+  const w = batchWindow(batchDay, cfg);
+  const at = vnAt(batchDay, cfg.batchFallbackHourVn);
+  return at < w.approvalDeadline ? at : new Date(at.getTime() - 24 * 3_600_000);
+}
+
 /** Còn duyệt kịp không. Quá hạn ⇒ lô `EXPIRED`, không đồng nào được chi. */
 export function isApprovalOpen(now: Date, w: BatchWindow): boolean {
   return now < w.approvalDeadline;

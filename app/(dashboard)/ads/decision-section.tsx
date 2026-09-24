@@ -5,6 +5,8 @@ import { DataWarnings } from "@/components/data-warnings";
 import { formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { ArrowRight } from "lucide-react";
 import { getAdsDecision, DECISION_METRIC_HINT } from "@/lib/queries/ads-decision";
+import { FB_SCOPE_STATE_LABEL } from "@/lib/constants/fb-token-scopes";
+import { getFbTokenScopes } from "@/lib/queries/fb-token-scopes";
 import { ADS_DIMENSION_HAS_SPEND, rowsToRender, type AdsDimension } from "@/lib/constants/ads-decision";
 import { LEDGER_WINDOW_DAYS, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { decisionStability } from "@/lib/queries/marketing-ledger";
@@ -88,7 +90,7 @@ export async function AdsDecisionSection({
   showAll?: boolean;
   showAllHref?: string;
 }) {
-  const d = await getAdsDecision(period, dimension);
+  const [d, quyenToken] = await Promise.all([getAdsDecision(period, dimension), getFbTokenScopes()]);
   const { shown: dongVe, hidden: dongAn } = rowsToRender(d.rows, showAll);
   /*
     ─── ĐỘ BỀN ĐỌC TỪ SỔ, VÀ SỔ CÓ THỂ RỖNG ───
@@ -132,6 +134,16 @@ export async function AdsDecisionSection({
         gây ra chuyện đó.
       */}
       <ChainStrip t={d.totals} />
+
+      {/*
+        TOKEN THIẾU QUYỀN GHI — nói TRƯỚC khi người ta bấm, không phải sau khi Facebook từ chối.
+        Chỉ hiện khi Facebook ĐÃ TRẢ LỜI là thiếu; "chưa biết" không đủ căn cứ để chặn ai.
+      */}
+      {quyenToken.state === "MISSING" ? (
+        <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          <b>{FB_SCOPE_STATE_LABEL.MISSING}.</b> {quyenToken.reason} Nút &ldquo;Bàn tay&rdquo; vẫn hiện, nhưng Facebook sẽ từ chối lượt ghi cho tới khi thay token.
+        </p>
+      ) : null}
 
       {/*
         Chỉ đếm dòng THẬT SỰ có khuyến nghị: dòng bị từ chối kết luận vẫn mang căn cứ PROJECTED

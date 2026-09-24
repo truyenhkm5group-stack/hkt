@@ -6,6 +6,7 @@ import {
   AGENT_ZONES,
   AI_RUNGS,
   AI_STATUSES,
+  CLOSED_RUNGS_MISDECLARED,
   DEPARTMENTS_WITHOUT_AGENT_ROW,
   RUNGS_WITHOUT_EVIDENCE,
   RUNGS_WITHOUT_MISSING,
@@ -168,20 +169,41 @@ export function testDepartmentMap() {
       }
     }
 
+    /*
+      "CỐ Ý ĐÓNG" LÀ MỘT LỜI KHAI AN TOÀN, KHÔNG PHẢI MỘT CÁCH GIẤU VIỆC CHƯA LÀM.
+
+      `nextRung()` bỏ qua nấc cố ý đóng, nên cờ này mà đặt bừa thì một nấc CHƯA LÀM sẽ biến khỏi cột
+      "việc phải làm tiếp" và phòng trông như đã xong. Ba chốt: chỉ nấc BÀN TAY (đo, chẩn đoán, đề
+      nghị không có lý do an toàn nào để đóng — chúng chỉ ĐỌC), chỉ ở `NONE` không bằng chứng, và
+      câu `missing` phải nói ra đây là quyết định KHÔNG MỞ.
+    */
+    for (const r of AI_RUNGS) {
+      const st = spec.rungs[r];
+      if (!st.closedByDesign) continue;
+      assert.equal(r, "ACT", `nấc ${zone}:${r} khai "cố ý đóng" — chỉ nấc BÀN TAY (ghi ra ngoài) mới có lý do an toàn để đóng; các nấc chỉ-đọc không được giấu khỏi "việc phải làm tiếp"`);
+      assert.match(st.missing ?? "", /không nên mở|cố ý/i, `nấc ${zone}:${r} khai "cố ý đóng" mà câu lý do không nói đây là quyết định KHÔNG MỞ`);
+    }
+
     const cover = agentCoverage(spec);
     assert.equal(cover.total, AI_RUNGS.length);
     const next = nextRung(spec);
-    if (next === null) assert.equal(cover.built, cover.total, "không còn nấc nào phải làm thì cả năm nấc phải đang chạy");
-    else assert.notEqual(spec.rungs[next].status, "BUILT", "nấc đáng làm tiếp không được là một nấc đã chạy");
+    if (next === null) assert.equal(cover.built + cover.closed, cover.total, "không còn nấc nào phải làm thì mọi nấc phải đang chạy hoặc cố ý đóng");
+    else {
+      assert.notEqual(spec.rungs[next].status, "BUILT", "nấc đáng làm tiếp không được là một nấc đã chạy");
+      assert.ok(!spec.rungs[next].closedByDesign, "nấc đáng làm tiếp không được là một nấc cố ý đóng — đó là chỉ người đọc đi mở đúng cánh cửa sổ dặn đóng");
+    }
   }
+  assert.deepEqual(CLOSED_RUNGS_MISDECLARED, [], "nấc 'cố ý đóng' phải ở NONE và không có bằng chứng đang chạy — đóng mà vẫn chạy là hai lời khai trái nhau");
 
   // Phòng Tech AI là cột mốc so sánh: nếu một ngày nó không còn đủ năm nấc thì bảng mất mốc, và mọi
-  // phòng khác chỉ còn so với một hình dung.
+  // phòng khác chỉ còn so với một hình dung. Đủ năm nấc CHẠY THẬT — không phải bốn nấc cộng một nấc đóng.
   assert.equal(nextRung(AGENTS.SYSTEM), null, "Phòng Tech AI phải đủ năm nấc — nó là phòng AI đã chạy thật và là mốc so sánh của bảng này");
+  assert.equal(agentCoverage(AGENTS.SYSTEM).built, AI_RUNGS.length, "mốc so sánh phải CHẠY đủ năm nấc, không được đóng bớt một nấc để trông như xong");
 
-  const daChay = AGENT_ZONES.filter((z) => nextRung(AGENTS[z]) === null).length;
+  const xongPhanDuocPhep = AGENT_ZONES.filter((z) => nextRung(AGENTS[z]) === null).length;
+  const duNamNac = AGENT_ZONES.filter((z) => agentCoverage(AGENTS[z]).built === AI_RUNGS.length).length;
   console.log(
     `✓ Bản đồ phòng ban: ${NAV_MODULES.length} module / ${MODULE_GROUPS.length} nhóm, ${DEPARTMENT_CODES.length} phòng đều khai được sở hữu gì · ` +
-      `bảng AI ${AGENT_ZONES.length} phòng với ${AGENT_EVIDENCE_PATHS.length} tệp bằng chứng đều tồn tại, ${daChay} phòng đủ năm nấc`,
+      `bảng AI ${AGENT_ZONES.length} phòng với ${AGENT_EVIDENCE_PATHS.length} tệp bằng chứng đều tồn tại, ${xongPhanDuocPhep} phòng xong mọi nấc được phép (${duNamNac} phòng chạy đủ năm nấc)`,
   );
 }

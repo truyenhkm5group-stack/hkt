@@ -1,9 +1,9 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { GENE_KEYS, GENE_VOCAB_VERSION, geneSignature, parseGenes, parsePartialGenes, type CreativeLoopConfig, type CreativeSourceKind, type GeneKey } from "@/lib/constants/creative-loop";
+import { GENE_KEYS, GENE_VOCAB_VERSION, geneSignature, parseGenes, parseOwnAdMetrics, parsePartialGenes, type CreativeLoopConfig, type CreativeSourceKind, type GeneKey } from "@/lib/constants/creative-loop";
 import { shiftDay } from "@/lib/constants/marketing-decision-ledger";
 import type { GeneStat } from "@/lib/creative/learn";
-import type { PlanInput, PlanInspiration, PlanParent, PlanProduct } from "@/lib/creative/plan";
+import { parentKey, type PlanInput, type PlanInspiration, type PlanParent, type PlanProduct } from "@/lib/creative/plan";
 
 /**
  * ═══════════ GOM ĐẦU VÀO CHO `planBatch()` — CHỈ ĐỌC ═══════════
@@ -61,7 +61,10 @@ export function parseGeneStat(raw: unknown): GeneStat | null {
  *                   khai `focusProductIds` thì CHỈ các mã ấy. Một mã nhiều ảnh ⇒ lấy ảnh mới nhất.
  *  · inspirations — nguồn còn bật không phải ảnh sản phẩm; `usedCount` = số mẫu đã dùng nó.
  *  · parents      — mẫu đã vào thư viện (THẮNG) hoặc phán quyết MỚI NHẤT là HỨA HẸN; gen hỏng hoặc
- *                   khác phiên bản từ vựng ⇒ bỏ (không so được).
+ *                   khác phiên bản từ vựng ⇒ bỏ (không so được). CỘNG nguồn `OWN_AD` (quảng cáo cũ của
+ *                   shop) có ĐỦ sáu gen và có mã hàng nằm trong `products` — THẮNG nếu lúc nhập nó là
+ *                   mẫu thắng, không thì HỨA HẸN; đơn / chi lấy từ số đo chụp lúc nhập. `OWN_AD` chưa đủ
+ *                   điều kiện ấy vẫn là nguồn cảm hứng (đứng trước spy / tay / R&D ở `planBatch`).
  *  · stats        — `gene_stats` của dòng sổ học mới nhất, cùng phiên bản từ vựng; chưa có ⇒ rỗng.
  */
 export async function loadPlanInputs(db: Db, batchDay: string, cfg: Pick<CreativeLoopConfig, "batchSize" | "extraCandidates" | "exploreShare" | "focusProductIds">): Promise<PlanInput> {
@@ -100,8 +103,9 @@ export async function loadPlanInputs(db: Db, batchDay: string, cfg: Pick<Creativ
 
   // ─── Nguồn cảm hứng ───
   const inspRows = await db
-    .select({ sourceId: s.id, kind: s.kind, productId: s.productId, genes: s.genes })
+    .select({ sourceId: s.id, kind: s.kind, productId: s.productId, genes: s.genes, title: s.title, metrics: s.metrics, imageId: s.imageId, imagePurgedAt: img.purgedAt })
     .from(s)
+    .leftJoin(img, eq(img.id, s.imageId))
     .where(and(eq(s.active, true), ne(s.kind, "PRODUCT_PHOTO")));
   const usedRows = inspRows.length
     ? await db
@@ -111,9 +115,37 @@ export async function loadPlanInputs(db: Db, batchDay: string, cfg: Pick<Creativ
         .groupBy(v.inspirationSourceId)
     : [];
   const usedOf = new Map(usedRows.map((r) => [r.sourceId as string, Number(r.n)]));
-  const inspirations: PlanInspiration[] = inspRows
-    .filter((r) => r.kind === "MANUAL" || r.kind === "SPY" || r.kind === "RND")
-    .map((r) => ({ sourceId: r.sourceId, kind: r.kind as Exclude<CreativeSourceKind, "PRODUCT_PHOTO">, productId: r.productId, genes: parsePartialGenes(r.genes), usedCount: usedOf.get(r.sourceId) ?? 0 }));
+  const inspirations: PlanInspiration[] = [];
+  const ownAdParents: PlanParent[] = [];
+  for (const r of inspRows) {
+    if (r.kind === "OWN_AD") {
+      const genes = parseGenes(r.genes);
+      if (genes && r.productId && photoOf.has(r.productId)) {
+        const m = parseOwnAdMetrics(r.metrics);
+        ownAdParents.push({
+          variantId: null,
+          ownAdSourceId: r.sourceId,
+          productId: r.productId,
+          genes,
+          verdict: m.reason === "WIN" ? "WIN" : "PROMISING",
+          bookedOrders: m.bookedOrders,
+          // Không có số chi ⇒ CHƯA BIẾT, không phải 0 — `rankParents` xếp sau.
+          spendVnd: m.spendVnd,
+          imageId: r.imageId && r.imagePurgedAt === null ? r.imageId : null,
+        });
+        continue;
+      }
+    }
+    if (r.kind !== "OWN_AD" && r.kind !== "MANUAL" && r.kind !== "SPY" && r.kind !== "RND") continue;
+    inspirations.push({
+      sourceId: r.sourceId,
+      kind: r.kind as Exclude<CreativeSourceKind, "PRODUCT_PHOTO">,
+      ...(r.kind === "OWN_AD" && r.title ? { label: r.title } : {}),
+      productId: r.productId,
+      genes: parsePartialGenes(r.genes),
+      usedCount: usedOf.get(r.sourceId) ?? 0,
+    });
+  }
 
   // ─── Mẫu cha: THẮNG (đã vào thư viện) hoặc phán quyết mới nhất là HỨA HẸN ───
   const cv = schema.creativeVerdicts;
@@ -146,7 +178,8 @@ export async function loadPlanInputs(db: Db, batchDay: string, cfg: Pick<Creativ
       imageId: r.imageId && r.imagePurgedAt === null ? r.imageId : null,
     });
   }
-  parents.sort((a, b) => a.variantId.localeCompare(b.variantId));
+  parents.push(...ownAdParents);
+  parents.sort((a, b) => parentKey(a).localeCompare(parentKey(b)));
 
   // ─── Sổ học mới nhất ───
   const [learning] = await db
@@ -210,14 +243,36 @@ export async function loadProductBrief(db: Db, productId: string): Promise<Produ
   return { productId: p.id, name: p.name, code: p.customId ?? (p.displayId !== null ? String(p.displayId) : ""), priceVnd: distinct.length === 1 ? distinct[0] : null };
 }
 
-/** Câu chữ của các mẫu THẮNG gần nhất — cùng mã hàng đứng trước. */
+/**
+ * Câu chữ ĐÃ BÁN ĐƯỢC cho người viết học giọng văn: mẫu THẮNG của vòng (thư viện) và quảng cáo cũ của
+ * shop (`OWN_AD` còn bật, có câu chữ) — cùng mã hàng đứng trước, rồi xen kẽ hai nguồn (mẫu vòng trước),
+ * mỗi nguồn theo thứ tự tốt nhất của nó: thư viện mới nhất · quảng cáo cũ nhiều đơn nhất rồi rẻ tin
+ * nhắn nhất. Xen kẽ để thư viện đầy không đẩy hết câu chữ đã bán được trên tài khoản của shop ra ngoài.
+ */
 export async function loadWinningExamples(db: Db, productId: string | null, limit = 3): Promise<{ primaryText: string; headline: string }[]> {
   const v = schema.creativeVariants;
-  const rows = await db
-    .select({ primaryText: v.primaryText, headline: v.headline })
-    .from(v)
-    .where(and(isNotNull(v.libraryAt), ne(v.primaryText, "")))
-    .orderBy(sql`case when ${v.productId} = ${productId ?? ""} then 0 else 1 end`, desc(v.libraryAt), v.id)
-    .limit(limit);
-  return rows;
+  const s = schema.creativeSources;
+  const same = productId ?? "";
+  const [variantRows, ownRows] = await Promise.all([
+    db
+      .select({ primaryText: v.primaryText, headline: v.headline, productId: v.productId })
+      .from(v)
+      .where(and(isNotNull(v.libraryAt), ne(v.primaryText, "")))
+      .orderBy(sql`case when ${v.productId} = ${same} then 0 else 1 end`, desc(v.libraryAt), v.id)
+      .limit(limit),
+    db
+      .select({ primaryText: s.primaryText, headline: s.headline, productId: s.productId })
+      .from(s)
+      .where(and(eq(s.kind, "OWN_AD"), eq(s.active, true), ne(s.primaryText, "")))
+      .orderBy(
+        sql`case when ${s.productId} = ${same} then 0 else 1 end`,
+        sql`(case when jsonb_typeof(${s.metrics} -> 'bookedOrders') = 'number' then (${s.metrics} ->> 'bookedOrders')::numeric else 0 end) desc`,
+        sql`(case when jsonb_typeof(${s.metrics} -> 'costPerMessageVnd') = 'number' then (${s.metrics} ->> 'costPerMessageVnd')::numeric end) asc nulls last`,
+        s.id,
+      )
+      .limit(limit),
+  ]);
+  const tagged = [...variantRows.map((r, i) => ({ r, i, k: 0 })), ...ownRows.map((r, i) => ({ r, i, k: 1 }))];
+  tagged.sort((a, b) => Number(a.r.productId !== same || !productId) - Number(b.r.productId !== same || !productId) || a.i - b.i || a.k - b.k);
+  return tagged.slice(0, limit).map((x) => ({ primaryText: x.r.primaryText, headline: x.r.headline }));
 }

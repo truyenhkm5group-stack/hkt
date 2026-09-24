@@ -1,8 +1,11 @@
 import { z } from "zod";
 import {
-  CREATIVE_SOURCE_KINDS,
   GENE_LABEL,
   GENE_VOCAB,
+  IMAGE_MODES,
+  IMAGE_QUALITIES,
+  IMAGE_SIZES,
+  MANUAL_UPLOAD_SOURCE_KINDS,
   normalizeCreativeConfig,
   type ConfigProblem,
   type CreativeLoopConfig,
@@ -40,10 +43,13 @@ function httpUrlOrEmpty(s: string): boolean {
  * Đầu vào của `createCreativeSource`. KHÔNG có băm, KHÔNG có loại ảnh: máy chủ tự băm và tự đọc
  * chữ ký tệp (`storeCreativeImage`) — nhận hai thứ đó từ client là để một ảnh bị tráo lọt qua phiếu
  * duyệt lô với băm cũ.
+ *
+ * Loại nguồn chỉ nhận `MANUAL_UPLOAD_SOURCE_KINDS` — `OWN_AD` (quảng cáo cũ của shop, được gửi điểm ảnh
+ * sang máy sinh ảnh) chỉ vào được qua nút nhập từ Facebook theo `ad_id`, không qua form tải tay.
  */
 export const creativeSourceInputSchema = z
   .object({
-    kind: z.enum(CREATIVE_SOURCE_KINDS, { message: "Chọn loại ảnh nguồn" }),
+    kind: z.enum(MANUAL_UPLOAD_SOURCE_KINDS, { message: "Chọn loại ảnh nguồn" }),
     productId: z.string().trim().max(200).default(""),
     title: z.string().trim().max(200, "Tiêu đề tối đa 200 ký tự").default(""),
     note: z.string().trim().max(2000, "Ghi chú tối đa 2.000 ký tự").default(""),
@@ -100,6 +106,23 @@ export const manualCreativeInputSchema = z
 
 export type ManualCreativeInput = z.infer<typeof manualCreativeInputSchema>;
 
+/**
+ * SỬA CÂU CHỮ của một mẫu trước khi duyệt lô (tab Duyệt lô). Cùng trần với câu chữ máy viết và mẫu tự
+ * làm: tiêu đề ≤ 40 (được để trống — bài ảnh không có ô tiêu đề), nội dung chính 1…500. Hai trần này
+ * đọc từ MỘT chỗ để ô đếm ký tự trên màn hình và máy chủ không nói hai con số khác nhau.
+ */
+export const VARIANT_COPY_LIMITS = { headlineMaxChars: 40, primaryTextMaxChars: 500 } as const;
+
+export const variantCopyInputSchema = z
+  .object({
+    variantId: z.string().trim().min(1, "Thiếu mã mẫu"),
+    headline: z.string().trim().max(VARIANT_COPY_LIMITS.headlineMaxChars, `Tiêu đề tối đa ${VARIANT_COPY_LIMITS.headlineMaxChars} ký tự`).default(""),
+    primaryText: z.string().trim().min(1, "Nhập nội dung chính của bài quảng cáo").max(VARIANT_COPY_LIMITS.primaryTextMaxChars, `Nội dung chính tối đa ${VARIANT_COPY_LIMITS.primaryTextMaxChars} ký tự`),
+  })
+  .strict();
+
+export type VariantCopyInput = z.infer<typeof variantCopyInputSchema>;
+
 export const creativeSourceToggleSchema = z.object({ id: z.string().trim().min(1, "Thiếu mã nguồn ảnh"), active: z.boolean() }).strict();
 
 // ───────────────────────────── CẤU HÌNH ─────────────────────────────
@@ -117,6 +140,7 @@ export const CONFIG_NUMERIC_FIELDS = [
   "winOrdersAbove",
   "verdictSettleHours",
   "imageDailyCapUsd",
+  "batchFallbackHourVn",
   "loserImageRetentionDays",
 ] as const satisfies readonly (keyof CreativeLoopConfig)[];
 export type ConfigNumericField = (typeof CONFIG_NUMERIC_FIELDS)[number];
@@ -142,6 +166,9 @@ export const CONFIG_FIELD_LABEL: Record<Exclude<keyof CreativeLoopConfig, "killR
   imageModel: "Mô hình sinh ảnh",
   imageSize: "Khổ ảnh",
   imageQuality: "Chất lượng ảnh",
+  imageMode: "Cách gửi yêu cầu vẽ",
+  batchFallbackHourVn: "Batch chưa xong thì vẽ nốt lúc (giờ VN)",
+  fallbackImageQuality: "Chất lượng khi vẽ nốt bằng gọi ngay",
   imageDailyCapUsd: "Trần chi sinh ảnh / ngày (USD)",
   loserImageRetentionDays: "Giữ ảnh mẫu bị loại (ngày)",
 };
@@ -181,8 +208,11 @@ export const creativeConfigRawSchema = z
     keepRules: z.array(z.unknown()).max(20, "Tối đa 20 luật giữ"),
     focusProductIds: z.array(z.string().trim().min(1).max(200)).max(200),
     imageModel: z.string().trim().min(1, "Chưa khai mô hình sinh ảnh").max(100),
-    imageSize: z.enum(["1024x1024", "1024x1536"]),
-    imageQuality: z.enum(["low", "medium", "high"]),
+    imageSize: z.enum(IMAGE_SIZES),
+    imageQuality: z.enum(IMAGE_QUALITIES),
+    imageMode: z.enum(IMAGE_MODES),
+    batchFallbackHourVn: finiteNumber("batchFallbackHourVn"),
+    fallbackImageQuality: z.enum(IMAGE_QUALITIES),
     imageDailyCapUsd: finiteNumber("imageDailyCapUsd"),
     loserImageRetentionDays: finiteNumber("loserImageRetentionDays"),
   })

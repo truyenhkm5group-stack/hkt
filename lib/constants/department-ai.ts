@@ -37,7 +37,10 @@ import { DEPARTMENT_CODES, DEPARTMENT_LABEL, DEPARTMENT_ORDER, type DepartmentCo
  *    không ai làm được gì với nó. "Chưa có `WorkSource` cho mẫu tới hạn đặt" thì có.
  * 3. **`NONE` CỐ Ý khác `NONE` CHƯA LÀM.** Kế toán và Kho không có nấc BÀN TAY vì `RISK_FLOOR` trong
  *    `lib/ai/tools/registry.ts` CẤM AI ghi vào tiền và tồn kho — đó là một quyết định an toàn, không
- *    phải một thiếu sót. Ô ấy vẫn in "chưa có", nhưng `missing` nói rõ là không nên mở.
+ *    phải một thiếu sót. Nấc ấy mang `closedByDesign: true` và `missing` nói rõ vì sao không nên mở.
+ *    Từ 24/09/2026 `nextRung()` BỎ QUA nấc cố ý đóng: trước đó, phòng đã làm xong mọi nấc được phép
+ *    vẫn hiện "việc phải làm tiếp: Bàn tay", tức là chỉ người đọc đi mở đúng cánh cửa sổ này dặn
+ *    đóng.
  * 4. **`measuredAt` là ngày ĐỌC MÃ NGUỒN, không phải ngày viết kế hoạch.** Số liệu production nào
  *    được nhắc trong `what`/`missing` đều phải có ngày đo kèm, vì một tỷ lệ 0/565 của tháng trước
  *    không còn là bằng chứng của hôm nay.
@@ -110,6 +113,11 @@ export type RungState = {
   evidence: string[];
   /** Bắt buộc khi `status !== "BUILT"`: thiếu đúng cái gì, cụ thể tới mức sửa được. */
   missing?: string;
+  /**
+   * `true` = nấc này CỐ Ý đóng (chỉ đi với `status: "NONE"`), và `missing` nói vì sao không nên mở.
+   * `nextRung()` bỏ qua nó. Không dùng để giấu một nấc chưa làm — bài kiểm đòi câu lý do.
+   */
+  closedByDesign?: true;
 };
 
 export type AgentZone = DepartmentCode | "SYSTEM";
@@ -179,7 +187,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
     autonomy: "COPILOT",
     autonomyWhy: "Chủ shop chốt 22/09/2026: mở nấc BÀN TAY ở mức COPILOT — agent đề nghị, người bấm xác nhận thì ERP mới gọi Facebook. Nấc `AUTO` chưa mở.",
     spec: "docs/marketing-ai-department.md",
-    measuredAt: "2026-09-23",
+    measuredAt: "2026-09-24",
     rungs: {
       MEASURE: {
         status: "BUILT",
@@ -203,9 +211,10 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       },
       ACT: {
         status: "PARTIAL",
-        what: "Đường ghi ngân sách / bật tắt chiến dịch đã dựng, qua bảy hàng rào và hai bước bấm, có trần thay đổi và phanh.",
-        evidence: ["lib/marketing/ads-write-gate.ts", "lib/constants/ads-write.ts"],
-        missing: "Chờ token Facebook có quyền `ads_management`. Cho tới lúc đó mọi lượt bấm dừng ở hàng rào cuối và ERP vẫn chỉ ĐỌC Facebook. Đây là quyết định cấp quyền của chủ shop, không phải việc lập trình.",
+        what: "Đường ghi ngân sách / bật tắt chiến dịch đã dựng, qua bảy hàng rào và hai bước bấm, có trần thay đổi và phanh. Công tắc máy chủ `ADS_WRITE_ENABLED=true`, nấc `COPILOT` bật từ 22/09/2026; ERP tự hỏi Facebook token có `ads_management` không (tab Cấu hình vòng mẫu, `/ads`, `check-integrations`).",
+        evidence: ["lib/marketing/ads-write-gate.ts", "lib/constants/ads-write.ts", "lib/constants/fb-token-scopes.ts"],
+        missing:
+          "CHƯA CÓ MỘT LƯỢT GHI THẬT NÀO: đo production 24/09/2026, sổ `ads_budget_changes` và `creative_fb_actions` đều TRỐNG — kể cả lượt bị từ chối. Chủ shop báo token đã có quyền; nấc này chỉ lên 'đang chạy' khi sổ có một lượt ghi THÀNH CÔNG (bấm 'Xác nhận' ở ô Bàn tay trên một dòng đã chín), không lên vì một lời kể.",
       },
     },
   },
@@ -218,7 +227,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
     autonomy: "COPILOT",
     autonomyWhy: "Máy tự MỞ ca và tự xếp thứ tự, nhưng mọi lệnh gửi sang Viettel Post đều do người bấm; tool `request_carrier_action` mang `policy: \"confirm\"`.",
     spec: "docs/care-engine-contract.md",
-    measuredAt: "2026-09-23",
+    measuredAt: "2026-09-24",
     rungs: {
       MEASURE: {
         status: "BUILT",
@@ -245,7 +254,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
         what: "`requestCarrierAction` gọi thật `order/UpdateOrder` của Viettel Post (phát tiếp · duyệt hoàn · gửi lại · huỷ · sửa người nhận), idempotent theo kiện + hành động + ngày.",
         evidence: ["lib/care/service.ts", "lib/care/carrier-capabilities.ts"],
         missing:
-          "Đo 11/09/2026: 565/565 kiện trả `PERMISSION_MISSING` — API Viettel Post không trả về vận đơn nào cho tài khoản của shop, nên mọi lượt rơi về `MANUAL_REQUIRED` (làm tay trên viettelpost.vn, ERP ghi vết). NGUYÊN NHÂN CHƯA BIẾT: đo lại 23/09 cho thấy CÙNG tài khoản ấy thấy đủ 598 đơn trên web, và webhook của chính VTP gửi đúng mã mà API trả rỗng. Đang chờ Viettel Post trả lời; không tự động hoá đường web (AGENTS.md mục 5).",
+          "Viettel Post KHÔNG cấp API cho tài khoản shop — chỉ có webhook (chủ shop xác nhận 24/09/2026). Đo cùng ngày: tra cứu vận đơn trả HTTP 403, 2.815/2.873 vận đơn là `WEBHOOK_ONLY`; trước đó 11/09 là 565/565 `PERMISSION_MISSING`. Nên mọi lệnh phát tiếp · duyệt hoàn · sửa người nhận rơi về `MANUAL_REQUIRED`: làm tay trên viettelpost.vn, ERP ghi vết. Không tự động hoá đường web (AGENTS.md mục 5). Việc còn làm được ở phía ERP là SOẠN SẴN nội dung yêu cầu cho người làm tay, không phải gọi API.",
       },
     },
   },
@@ -258,7 +267,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
     autonomy: "READ_ONLY",
     autonomyWhy: "`RISK_FLOOR.inventory = \"forbidden\"`: AI không có một tool ghi nào vào tồn kho. Hàng vào tồn CHỈ bằng phiếu kho của người đếm thật.",
     spec: null,
-    measuredAt: "2026-09-23",
+    measuredAt: "2026-09-24",
     rungs: {
       MEASURE: {
         status: "BUILT",
@@ -267,13 +276,13 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       },
       DIAGNOSE: {
         status: "BUILT",
-        what: "Cảnh báo sắp hết / đã hết theo tốc độ bán 30 ngày; đơn đã chốt còn nằm trong kho được tách theo bốn lý do tắc.",
-        evidence: ["lib/constants/alerts.ts", "lib/constants/fulfillment-bottleneck.ts"],
+        what: "Cảnh báo sắp hết / đã hết theo tốc độ bán 30 ngày; đơn đã chốt còn nằm trong kho được tách theo năm lý do tắc, trong đó tồn thực tế được PHÂN cho đơn lên trước để tách đơn đóng gói được ngay khỏi đơn đang chờ hàng.",
+        evidence: ["lib/constants/alerts.ts", "lib/constants/fulfillment-bottleneck.ts", "lib/constants/stock-shortage.ts"],
       },
       PROPOSE: {
         status: "PARTIAL",
-        what: "Xếp thứ tự kiện hoàn cần mở đếm trước; nhận ra hàng chậm bán để đề nghị xả.",
-        evidence: ["lib/returns/receive-queue.ts", "lib/constants/slow-moving.ts"],
+        what: "Xếp thứ tự kiện hoàn cần mở đếm trước; nhận ra hàng chậm bán để đề nghị xả; mẫu ERP báo thiếu mà sổ kho âm hoặc Pancake báo còn đủ thì đề nghị KIỂM ĐẾM trước khi ai đặt sản xuất.",
+        evidence: ["lib/returns/receive-queue.ts", "lib/constants/slow-moving.ts", "lib/constants/stock-shortage.ts"],
         missing: "Chưa có đề nghị cho hai việc tốn người nhất của kho: (a) gom đơn theo mẫu mã để đóng gói một lượt, (b) vị trí xếp hàng trong kho. Cả hai cần dữ liệu ERP CHƯA CÓ — không có bảng vị trí kệ, không có mốc thời gian đóng gói từng đơn.",
       },
       DISPATCH: {
@@ -285,6 +294,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
         status: "NONE",
         what: "Không có, và CỐ Ý không có.",
         evidence: [],
+        closedByDesign: true,
         missing:
           "KHÔNG NÊN MỞ. Một phiếu kho do máy ghi là một con số tồn không ai đếm — và tồn kho sai thì sai theo cả giá vốn, lợi nhuận và kế hoạch đặt hàng. Nấc này đứng ở `NONE` vĩnh viễn là trạng thái ĐÚNG; việc còn lại của kho là làm phần ĐO và ĐỀ NGHỊ tốt hơn, không phải giao bàn tay cho máy.",
       },
@@ -295,11 +305,11 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
   PRODUCTION: {
     zone: "PRODUCTION",
     name: null,
-    home: null,
+    home: "/inventory/shortage",
     autonomy: "READ_ONLY",
-    autonomyWhy: "Chưa có tool ghi nào. Lệnh đặt hàng sản xuất do người tạo trên `/inventory/planning/orders/new`.",
+    autonomyWhy: "Chưa có tool ghi nào. Lệnh đặt hàng sản xuất do người tạo trên `/inventory/planning/orders/new`; bảng thiếu hàng chỉ ĐỀ XUẤT và dẫn link tới đó.",
     spec: "docs/inventory-forecast-contract.md",
-    measuredAt: "2026-09-23",
+    measuredAt: "2026-09-24",
     rungs: {
       MEASURE: {
         status: "BUILT",
@@ -318,18 +328,24 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
         what: "`getReplenishmentPlan()` ra số lượng nên đặt cho từng mẫu, theo giả định khai ở trang Giả định chứ không phải hằng số trong mã.",
         evidence: ["lib/queries/planning.ts", "lib/constants/purchasing.ts"],
       },
+      /*
+        SỬA LỜI KHAI 24/09/2026 — hai nấc dưới đây từng khai `NONE` trong khi mã đã chạy.
+
+        Mẫu tới hạn đặt ĐÃ sinh việc: `lib/alerts/rules.ts` dựng cảnh báo `STOCKOUT_RISK` ("hết trước
+        khi SX xong") và `STOCK_LOW` thẳng từ `getReplenishmentPlan()`, và nguồn `INVENTORY_EXCEPTION`
+        chiếu chúng vào `/work`. Bản khai cũ đề nghị thêm một nguồn `PRODUCTION_ORDER_DUE` — làm thế là
+        HAI nguồn ở CÙNG độ mịn (một mẫu mã), và mọi tổng hợp tiền của hàng đợi sẽ cộng hai lần (AGENTS.md
+        mục 19). Chỗ thiếu thật chỉ là việc mặc định rơi về phòng Kho.
+      */
       DISPATCH: {
-        status: "NONE",
-        what: "Kế hoạch nằm trên trang của nó và đợi người mở ra đọc.",
-        evidence: [],
-        missing:
-          "Chưa có `WorkSource` nào cho phòng Sản xuất: một mẫu tới hạn đặt KHÔNG sinh dòng việc có hạn, có phòng, trong `/work`. Cần khai một nguồn mới (ví dụ `PRODUCTION_ORDER_DUE`) vào `lib/constants/work-sources.ts` + một adapter trong `lib/queries/work-adapters.ts` + hạn xử lý ở `lib/constants/work-sla.ts`. Đây là việc lập trình rõ ràng, không chờ dữ liệu mới.",
+        status: "BUILT",
+        what: "Mẫu đã hết, hoặc sẽ hết trước khi lô mới kịp sản xuất xong, thành việc `INVENTORY_EXCEPTION` trong `/work` (hạn 48–72 giờ), dựng thẳng từ `getReplenishmentPlan()` kèm số đề xuất đặt — và việc ấy VỀ PHÒNG SẢN XUẤT: chủ shop đã ghi đè `work.ownership` cho cả hai khoá `INVENTORY_EXCEPTION:STOCKOUT_RISK` / `:LOW_STOCK_RISK` (đo production 24/09/2026; phòng có 1 thành viên). Đơn đã chốt thiếu hàng tự ĐI TÌM NGƯỜI: bảng mẫu thiếu (mã · màu · size · thiếu · đơn chờ · chờ lâu nhất · đã đặt xưởng · đề xuất đặt · việc cần làm) gửi Lark nhóm Kho/Sản xuất khi phát sinh hoặc nặng thêm và mỗi sáng; đơn chờ hàng vào hàng đợi fulfillment cho CSKH báo khách.",
+        evidence: ["lib/alerts/rules.ts", "lib/constants/work-sources.ts", "lib/constants/work-ownership.ts", "lib/alerts/stock-shortage-digest.ts", "lib/constants/stock-shortage.ts"],
       },
       ACT: {
-        status: "NONE",
-        what: "Không có đường ghi nào ra ngoài.",
-        evidence: [],
-        missing: "Xưởng không có API — trao đổi bằng tin nhắn và bảng tính. Nấc BÀN TAY của phòng này thực tế là 'soạn sẵn nội dung đặt hàng để người gửi', chứ không phải gọi một dịch vụ. Làm được ngay sau khi nấc VÀO VIỆC có chỗ.",
+        status: "BUILT",
+        what: "Xưởng không có API, nên bàn tay của phòng này là SOẠN SẴN: bảng chốt đặt hàng điền sẵn số lượng ERP đề xuất cho từng màu × size, in / lưu PDF và sao chép văn bản dán Zalo. Người gửi rồi bấm 'Đã gửi xưởng'; kho bấm 'Đã nhận hàng về' để lại mốc thật.",
+        evidence: ["lib/queries/production.ts", "app/(dashboard)/inventory/planning/orders/[id]/order-actions.tsx"],
       },
     },
   },
@@ -342,7 +358,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
     autonomy: "READ_ONLY",
     autonomyWhy: "`RISK_FLOOR.finance = \"forbidden\"`: AI không có tool ghi nào vào tiền. Quy tắc tự động phân loại dòng tiền là LUẬT DO NGƯỜI KHAI, và nó không bao giờ ghi đè dòng người đã phân loại tay.",
     spec: "docs/finance-truth-contract.md",
-    measuredAt: "2026-09-23",
+    measuredAt: "2026-09-24",
     rungs: {
       MEASURE: {
         status: "BUILT",
@@ -355,10 +371,9 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
         evidence: ["lib/constants/reconciliation.ts", "lib/queries/finance-ops.ts", "lib/constants/finance-ops.ts"],
       },
       PROPOSE: {
-        status: "PARTIAL",
-        what: "Ghép dòng tiền với chứng từ theo khoá tự nhiên và gợi ý nhóm kế toán theo quy tắc; đề nghị chứ không tự ghi.",
-        evidence: ["lib/queries/bank-match.ts", "lib/constants/bank.ts", "lib/finance/linkage.ts"],
-        missing: "Chưa xếp hạng đề nghị theo SỐ TIỀN ĐANG TREO, nên một dòng 50 triệu chưa phân loại nằm cùng thứ tự với một dòng 50 nghìn. Cần điểm ưu tiên trong `lib/queries/finance-ops.ts` đọc số tiền + số ngày treo.",
+        status: "BUILT",
+        what: "Ghép dòng tiền với chứng từ theo khoá tự nhiên, gợi ý nhóm kế toán theo quy tắc, và XẾP dòng chưa phân loại theo tiền đang treo × số ngày treo (cùng điểm thì khoản lớn trước) — một công thức cho cả `/finance-ops` và `/work`. Đề nghị chứ không tự ghi.",
+        evidence: ["lib/queries/bank-match.ts", "lib/constants/bank.ts", "lib/finance/linkage.ts", "lib/constants/finance-ops.ts"],
       },
       DISPATCH: {
         status: "BUILT",
@@ -369,6 +384,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
         status: "NONE",
         what: "Không có, và CỐ Ý không có.",
         evidence: [],
+        closedByDesign: true,
         missing:
           "KHÔNG NÊN MỞ cho AI. Một dòng tiền do máy phân loại sai sẽ đi thẳng vào lợi nhuận và vào lương — và không ai phát hiện, vì con số vẫn cân. Thứ ĐƯỢC phép tự động ở đây là quy tắc do người khai, chạy trên dòng CHƯA ai phân loại; phần đó đã có và không cần mô hình.",
       },
@@ -383,7 +399,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
     autonomy: "COPILOT",
     autonomyWhy: "Copilot đọc ERP qua sổ tool; mọi tool ghi mang `policy: \"confirm\"` và ba nhóm rủi ro (tiền · tồn kho · ĐVVC) bị `forbidden` ngay ở sàn.",
     spec: "docs/ai-copilot-architecture.md",
-    measuredAt: "2026-09-23",
+    measuredAt: "2026-09-24",
     rungs: {
       MEASURE: {
         status: "BUILT",
@@ -396,10 +412,9 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
         evidence: ["lib/constants/data-quality-issues.ts", "lib/queries/data-quality-issues.ts"],
       },
       PROPOSE: {
-        status: "PARTIAL",
-        what: "Copilot trả lời được câu hỏi bằng số thật qua sổ tool; hình dạng một khuyến nghị bị kiểu dữ liệu bắt buộc phải nêu chỉ số, bằng chứng và khoảng thời gian.",
-        evidence: ["lib/ai/copilot.ts", "lib/ai/tools/registry.ts", "lib/constants/recommendation.ts"],
-        missing: "Copilot TRẢ LỜI khi được hỏi, chưa TỰ XẾP HẠNG ba việc đáng làm nhất sáng nay. Cần một hàm thuần gom khuyến nghị của cả bảy phòng rồi xếp theo tiền đang treo — hôm nay mỗi phòng tự xếp trong phạm vi của mình.",
+        status: "BUILT",
+        what: "ERP tự xếp BA VIỆC ĐÁNG LÀM NHẤT liên phòng (mỗi phòng một đầu việc; mức gấp trước, rồi tiền đang treo) trên màn hình Hôm nay, và Copilot đọc đúng hàm đó qua tool `get_morning_priorities`. Hình dạng khuyến nghị bị kiểu dữ liệu bắt buộc nêu chỉ số, bằng chứng, khoảng thời gian.",
+        evidence: ["lib/work/morning-picks.ts", "lib/ai/tools/erp.ts", "lib/ai/copilot.ts", "lib/constants/recommendation.ts"],
       },
       DISPATCH: {
         status: "BUILT",
@@ -410,7 +425,8 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
         status: "NONE",
         what: "Không có đường ghi nào ở mức điều hành.",
         evidence: [],
-        missing: "Cố ý: ban điều hành không có 'hành động' riêng để tự động — việc của họ là quyết, và quyết định phải là của người. Thứ đáng làm tiếp là nấc ĐỀ NGHỊ (xếp hạng liên phòng), không phải nấc này.",
+        closedByDesign: true,
+        missing: "Cố ý: ban điều hành không có 'hành động' riêng để tự động — việc của họ là quyết, và quyết định phải là của người. Ba việc đáng làm nhất chỉ là ĐỀ NGHỊ; giao việc vẫn là một cú bấm của người (`reassignWork`).",
       },
     },
   },
@@ -423,7 +439,7 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
     autonomy: "READ_ONLY",
     autonomyWhy: "Máy phân việc mặc định CHẠY THỬ và tắt ở mọi phòng; `apply: true` là một cú bấm của người.",
     spec: "docs/work-management-os.md",
-    measuredAt: "2026-09-23",
+    measuredAt: "2026-09-24",
     rungs: {
       MEASURE: {
         status: "PARTIAL",
@@ -432,10 +448,9 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
         missing: "Chỉ đo được VIỆC TRONG ERP. Chấm công, tuyển dụng, đào tạo, nghỉ việc: ERP CHƯA CÓ BẢNG NÀO — nên chúng đã khai `UNAVAILABLE` kèm lý do thay vì dựng một con số gần đúng từ việc giao tay.",
       },
       DIAGNOSE: {
-        status: "PARTIAL",
-        what: "Leo thang khi vỡ hạn, một tin mỗi phòng mỗi ngày; xem trước tác động khi một người rời phòng.",
-        evidence: ["lib/work/escalation.ts", "lib/org/impact.ts"],
-        missing: "Chưa phân biệt được 'người này chậm' với 'phòng này thiếu người' — hai kết luận khác nhau mà hôm nay cùng hiện ra là một con số quá hạn. Cần đọc trần tải (`workforce`) cạnh số việc quá hạn.",
+        status: "BUILT",
+        what: "Leo thang khi vỡ hạn; xem trước tác động khi một người rời phòng; và chẩn đoán VÌ SAO một phòng quá hạn bằng trần tải cạnh số quá hạn: hết chỗ (thiếu người) · còn chỗ mà chưa ai nhận · dồn ở một người · chậm đều. Không bao giờ kết luận 'người này chậm' (mục 39).",
+        evidence: ["lib/work/escalation.ts", "lib/org/impact.ts", "lib/work/overdue-diagnosis.ts"],
       },
       PROPOSE: {
         status: "BUILT",
@@ -510,21 +525,31 @@ export function agentLabel(zone: AgentZone): string {
   return zone === "SYSTEM" ? "Hệ thống" : DEPARTMENT_LABEL[zone];
 }
 
-/** Bao nhiêu nấc đang chạy / một phần, trên tổng năm nấc. Dùng để xếp bảng, KHÔNG để chấm điểm ai. */
-export function agentCoverage(spec: AgentSpec): { built: number; partial: number; total: number } {
-  const list = AI_RUNGS.map((r) => spec.rungs[r].status);
-  return { built: list.filter((s) => s === "BUILT").length, partial: list.filter((s) => s === "PARTIAL").length, total: AI_RUNGS.length };
+/** Bao nhiêu nấc đang chạy / một phần / cố ý đóng, trên tổng năm nấc. Dùng để xếp bảng, KHÔNG để chấm điểm ai. */
+export function agentCoverage(spec: AgentSpec): { built: number; partial: number; closed: number; total: number } {
+  const list = AI_RUNGS.map((r) => spec.rungs[r]);
+  return {
+    built: list.filter((s) => s.status === "BUILT").length,
+    partial: list.filter((s) => s.status === "PARTIAL").length,
+    closed: list.filter((s) => s.closedByDesign === true).length,
+    total: AI_RUNGS.length,
+  };
 }
 
 /**
- * Nấc đáng làm tiếp: nấc THẤP NHẤT chưa xong.
+ * Nấc đáng làm tiếp: nấc THẤP NHẤT chưa xong, BỎ QUA nấc cố ý đóng.
  *
  * Thứ tự thang bậc không đảo được, nên đi vá nấc BÀN TAY khi nấc ĐỀ NGHỊ còn dở là dựng một cỗ máy
- * không có lý lẽ. Trả `null` khi cả năm nấc đã chạy.
+ * không có lý lẽ. Trả `null` khi mọi nấc được phép mở đều đã chạy.
  */
 export function nextRung(spec: AgentSpec): AiRung | null {
-  return AI_RUNGS.find((r) => spec.rungs[r].status !== "BUILT") ?? null;
+  return AI_RUNGS.find((r) => spec.rungs[r].status !== "BUILT" && spec.rungs[r].closedByDesign !== true) ?? null;
 }
+
+/** Lá chắn khai báo: nấc khai "cố ý đóng" mà không ở `NONE` hoặc lại có bằng chứng đang chạy. Phải luôn rỗng. */
+export const CLOSED_RUNGS_MISDECLARED: string[] = AGENT_ZONES.flatMap((z) =>
+  AI_RUNGS.filter((r) => AGENTS[z].rungs[r].closedByDesign === true && (AGENTS[z].rungs[r].status !== "NONE" || AGENTS[z].rungs[r].evidence.length > 0)).map((r) => `${z}:${r}`),
+);
 
 /** Mọi đường dẫn bằng chứng — bài kiểm mở từng tệp, khai tệp không có thật là ĐỎ. */
 export const AGENT_EVIDENCE_PATHS: string[] = [...new Set(AGENT_ZONES.flatMap((z) => AI_RUNGS.flatMap((r) => AGENTS[z].rungs[r].evidence)))];

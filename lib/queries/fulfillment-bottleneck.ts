@@ -12,6 +12,8 @@ import {
 import { formatVND } from "@/lib/format";
 import { sqlPromiseNotSuppressing } from "@/lib/constants/promised-delivery";
 import { rowsOf } from "@/lib/sql-rows";
+import { waitingOrderDetail, type ShortageVariantRow, type StockShortageSnapshot } from "@/lib/constants/stock-shortage";
+import { getStockShortage } from "@/lib/queries/stock-shortage";
 import type { OrderStage, ShipmentStage } from "@/db/schema";
 
 /**
@@ -108,6 +110,11 @@ export type FulfillmentBottleneckQueue = {
   moneyAtRisk: number;
   breached: number;
   measuredAt: Date;
+  /**
+   * `false` = không đọc được sổ kho để phân bổ hàng ⇒ KHÔNG tách được "chờ hàng" khỏi "chưa gửi",
+   * mọi đơn chưa có vận đơn rơi về NOT_YET_SHIPPED như trước. Trang phải nói ra điều đó.
+   */
+  stockCheckOk: boolean;
   /** `false` = đọc trực tiếp không dùng được (lỗi CSDL) — để trang gọi biết mà báo thay vì hiện danh sách rỗng như thể mọi thứ đều thông. */
   ok: boolean;
 };
@@ -145,10 +152,19 @@ function sinceStage(r: Row): Date {
   return new Date(r.last_update_status_at ?? r.inserted_at);
 }
 
-function classifyBottleneck(r: Row): { reason: FulfillmentBlockReason; detail: string; detectedAt: Date } {
+type StockView = { snapshot: StockShortageSnapshot; byVariant: Map<string, ShortageVariantRow> } | null;
+
+function classifyBottleneck(r: Row, stock: StockView, now: Date): { reason: FulfillmentBlockReason; detail: string; detectedAt: Date } {
   if (!r.shipment_id) {
     const blocked = dataBlockReason(r);
     if (blocked) return { reason: "DATA_BLOCKED", detail: blocked, detectedAt: sinceStage(r) };
+    /*
+      KHO KHÔNG ĐỦ HÀNG cho đơn này sau khi phân bổ cho đơn lên trước. Chỉ xét khi CHƯA có vận đơn:
+      đã tạo vận đơn thì kho đã gói xong, câu hỏi còn lại là của ĐVVC. Tồn CHƯA BIẾT không rơi vào
+      đây — không biết thì không được kết luận là thiếu.
+    */
+    const verdict = stock?.snapshot.orders.get(r.order_id);
+    if (stock && verdict?.state === "WAITING_STOCK") return { reason: "OUT_OF_STOCK", detail: waitingOrderDetail(verdict, stock.byVariant, now), detectedAt: sinceStage(r) };
     return { reason: "NOT_YET_SHIPPED", detail: "Đơn đã chốt, dữ liệu đủ, nhưng chưa có vận đơn nào.", detectedAt: sinceStage(r) };
   }
   const since = new Date(r.shipment_created_at as string | Date);
@@ -212,12 +228,16 @@ export async function getFulfillmentBottleneckQueue(): Promise<FulfillmentBottle
   } catch {
     // Đọc thẳng từ CSDL, không qua cache/notifications — lỗi câu SQL (vd. thiếu bảng ở môi trường
     // chưa migrate xong) phải báo THẲNG là chưa đo được, không được hiện "0 việc" như thể đã thông.
-    return { cases: [], byReason: [], total: 0, moneyAtRisk: 0, breached: 0, measuredAt: new Date(), ok: false };
+    return { cases: [], byReason: [], total: 0, moneyAtRisk: 0, breached: 0, measuredAt: new Date(), stockCheckOk: false, ok: false };
   }
 
   const now = Date.now();
+  // Sổ kho hỏng thì hàng đợi VẪN phải chạy — chỉ mất khả năng tách "chờ hàng", và nói ra điều đó.
+  const snapshot = rows.some((r) => !r.shipment_id) ? await getStockShortage().catch(() => null) : null;
+  const stock: StockView = snapshot ? { snapshot, byVariant: new Map(snapshot.variants.map((v) => [v.variantId, v])) } : null;
+  const stockCheckOk = Boolean(snapshot) || !rows.some((r) => !r.shipment_id);
   const cases: FulfillmentBottleneckCase[] = rows.map((r) => {
-    const { reason, detail, detectedAt } = classifyBottleneck(r);
+    const { reason, detail, detectedAt } = classifyBottleneck(r, stock, new Date(now));
     const hours = BOTTLENECK_SLA_HOURS[reason];
     const dueAt = new Date(detectedAt.getTime() + hours * 3_600_000);
     const hoursRemaining = (dueAt.getTime() - now) / 3_600_000;
@@ -278,6 +298,7 @@ export async function getFulfillmentBottleneckQueue(): Promise<FulfillmentBottle
     moneyAtRisk: cases.reduce((t, c) => t + c.moneyAtRisk, 0),
     breached: cases.filter((c) => c.sla.breached).length,
     measuredAt: new Date(),
+    stockCheckOk,
     ok: true,
   };
 }

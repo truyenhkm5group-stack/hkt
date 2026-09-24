@@ -152,6 +152,25 @@ async function checkPancakePages() {
   }
 }
 
+/**
+ * Quyền của token — kết luận bằng CÙNG hàm thuần mà tab Cấu hình vòng mẫu và `/ads` dùng.
+ *
+ * IMPORT ĐỘNG, CÓ ĐƯỜNG LÙI: thao tác ops lấy tệp script này từ `main` nhưng chạy nó trên `lib/` của
+ * ảnh ĐÃ DEPLOY. Giữa lúc gộp và lúc deploy, ảnh chưa có `fb-token-scopes` lẫn `getPermissions` — một
+ * import tĩnh sẽ làm cả lượt kiểm kết nối chết `MODULE_NOT_FOUND` chỉ vì một dòng báo cáo phụ.
+ */
+async function reportFbScopes(client: FacebookAdsClient) {
+  const mod = await import("@/lib/constants/fb-token-scopes").catch(() => null);
+  if (!mod || !("getPermissions" in client)) {
+    info("Bản đang chạy trên máy chủ chưa có bộ kiểm quyền token — bỏ qua (deploy xong sẽ có).");
+    return;
+  }
+  const quyen = mod.assessFbScopes({ hasToken: true, permissions: await client.getPermissions().catch(() => null) });
+  (quyen.state === "READY" ? ok : quyen.state === "MISSING" ? bad : info)(`${mod.FB_SCOPE_STATE_LABEL[quyen.state]} — ${quyen.reason}${quyen.granted.length ? ` Đang có: ${quyen.granted.join(", ")}.` : ""}`);
+  if (quyen.missingRead.length) bad(`Thiếu quyền ĐỌC ERP đang dùng: ${quyen.missingRead.join(", ")}.`);
+  info('Quyền của System User trên TỪNG tài sản (fanpage "Tạo quảng cáo") không nằm trong token — lượt đăng đầu tiên mới trả lời.');
+}
+
 async function checkFacebook() {
   console.log("\n▶ Facebook Ads");
   if (!env.facebook.accessToken) {
@@ -164,6 +183,7 @@ async function checkFacebook() {
     ok(`Token hợp lệ · ${result.userName || result.userId}${result.businessName ? ` · BM "${result.businessName}"` : ""} (${env.facebook.businessId})`);
     if (result.accounts.length) ok(`Tài khoản quảng cáo: ${result.accounts.map((a) => `${a.name} (${a.accountId}, ${a.currency}${a.relation === "client" ? ", client" : ""})`).join(", ")}`);
     else bad("BM không có tài khoản quảng cáo nào mà token nhìn thấy — gán System User vào các tài khoản quảng cáo (Business Settings → Ad Accounts → Add People/Partners).");
+    await reportFbScopes(client);
     const first = result.accounts[0];
     if (first) {
       const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(new Date());

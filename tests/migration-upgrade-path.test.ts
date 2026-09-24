@@ -66,6 +66,7 @@ const MOI = [
   "0116_agent_run_review_verdict",
   "0117_creative_loop",
   "0118_creative_manual_variants",
+  "0119_creative_own_ads",
 ] as const;
 
 /*
