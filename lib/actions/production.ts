@@ -8,6 +8,8 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { matrixTotals, PRODUCTION_STATUS, shouldStampReceipt } from "@/lib/constants/production";
+import { matchSupplier } from "@/lib/constants/suppliers";
+import { supplierCatalog } from "@/lib/queries/suppliers";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
@@ -56,6 +58,12 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
     if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
   }
   const db = await getDb();
+  /*
+    XƯỞNG: chữ gõ khớp ĐÚNG MỘT xưởng trong danh mục ⇒ ghi khoá `supplier_id` và dùng TÊN CHUẨN do máy
+    chủ đọc từ danh mục (không nhận tên từ client — AGENTS.md mục 34). Không khớp / khớp hai xưởng ⇒
+    giữ nguyên chữ gõ, khoá để trống, và tên ấy hiện ở danh sách "chưa vào danh mục" của trang Mua hàng.
+  */
+  const xuong = matchSupplier(d.supplier, (await supplierCatalog()).index);
   const values = {
     productId: d.productId,
     productCode: d.productCode,
@@ -66,7 +74,8 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
     images: d.images,
     totalQty: totals.total,
     unitCost: d.unitCost,
-    supplier: d.supplier,
+    supplier: xuong.state === "MATCHED" ? xuong.name : d.supplier,
+    supplierId: xuong.state === "MATCHED" ? xuong.id : null,
     note: d.note,
     dueDate: d.dueDate ? new Date(d.dueDate) : null,
     updatedAt: new Date(),

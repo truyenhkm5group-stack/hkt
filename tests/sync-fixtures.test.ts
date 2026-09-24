@@ -204,6 +204,7 @@ import { testInspectionTruth } from "./inspection-truth.test";
 import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
+import { testSuppliersPure, testSuppliersQueries } from "./suppliers.test";
 import { testCrm } from "./crm.test";
 import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
@@ -1802,6 +1803,8 @@ async function main() {
   await testMultiAttemptMoney(db);
   await testCashflow(db);
   await testPurchasing(db);
+  testSuppliersPure();
+  await testSuppliersQueries(db);
   await testCrm(db);
   testScenario();
   testAccessControl();

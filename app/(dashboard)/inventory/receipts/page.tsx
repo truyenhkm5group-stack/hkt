@@ -1,5 +1,6 @@
 import { ArrowDownToLine, ClipboardCheck, Coins, Info, ListOrdered } from "lucide-react";
 import Link from "next/link";
+import { activeSupplierNames } from "@/lib/queries/suppliers";
 import { DeleteReceiptButton } from "@/app/(dashboard)/inventory/receipts/delete-receipt-button";
 import { ReceiptDialog } from "@/app/(dashboard)/inventory/receipts/receipt-dialog";
 import { MetricCard } from "@/components/metric-card";
@@ -26,11 +27,12 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
   if (decision.allow === "NONE") return <ScopeDenied title="Phiếu nhập kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
   const selectedId = param(raw, "receipt");
-  const [receipts, summary, variants, pendingMap] = await Promise.all([
+  const [receipts, summary, variants, pendingMap, supplierOptions] = await Promise.all([
     listStockReceipts(200),
     stockReceiptSummary(),
     canWrite ? listVariantsForReceipt() : Promise.resolve([]),
     canWrite ? pendingReturnsByVariant() : Promise.resolve(new Map<string, number>()),
+    canWrite ? activeSupplierNames() : Promise.resolve([] as string[]),
   ]);
   const pendingReturns = Object.fromEntries(pendingMap);
   const pendingReturnTotal = [...pendingMap.values()].reduce((t, n) => t + n, 0);
@@ -47,7 +49,7 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
             <>
               <ReceiptDialog variants={variants} defaultKind="ADJUSTMENT" pendingReturns={pendingReturns} />
               <ReceiptDialog variants={variants} defaultKind="RETURN" pendingReturns={pendingReturns} />
-              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} />
+              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} supplierOptions={supplierOptions} />
             </>
           ) : null
         }

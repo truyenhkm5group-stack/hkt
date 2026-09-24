@@ -349,6 +349,32 @@ export const adAccountBilling = pgTable("ad_account_billing", {
   updatedAt: updatedAt(),
 });
 
+/*
+  DANH MỤC XƯỞNG / NHÀ CUNG CẤP (24/09/2026).
+
+  Trước bảng này, "xưởng" là Ô CHỮ TỰ DO ở hai nơi (`production_orders.supplier`, `stock_receipts.supplier`)
+  và trang Mua hàng ghép chúng bằng cách hạ chữ thường — "Xưởng Hà" và "Chị Hà may" là hai xưởng. Nên
+  thời gian giao và giá nhập theo TỪNG xưởng chỉ là phép nối yếu (AGENTS.md mục 39).
+
+  `aliases` là các cách gõ khác của cùng một xưởng. Chúng làm LỊCH SỬ quy về đúng xưởng lúc ĐỌC mà
+  không sửa một dòng cũ nào (mục 35: không backfill, chỉ ánh xạ khi XÁC ĐỊNH — đúng một xưởng khớp).
+*/
+export const suppliers = pgTable(
+  "suppliers",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    aliases: jsonb("aliases").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    phone: text("phone").notNull().default(""),
+    note: text("note").notNull().default(""),
+    active: boolean("active").notNull().default(true),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("suppliers_name_uq").on(sql`lower(${t.name})`)],
+);
+
 /** Bảng chốt số lượng đặt hàng sản xuất theo mã (ma trận màu × size) gửi xưởng may */
 export const productionOrders = pgTable(
   "production_orders",
@@ -368,7 +394,9 @@ export const productionOrders = pgTable(
     images: jsonb("images").$type<{ color: string; url: string }[]>().notNull().default(sql`'[]'::jsonb`),
     totalQty: integer("total_qty").notNull().default(0),
     unitCost: integer("unit_cost").notNull().default(0),
+    /** ẢNH CHỤP tên xưởng lúc ghi. Khoá thật là `supplier_id` (`NULL` = lô cũ / chưa chọn trong danh mục). */
     supplier: text("supplier").notNull().default(""),
+    supplierId: text("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
     note: text("note").notNull().default(""),
     dueDate: ts("due_date"),
     sentAt: ts("sent_at"),
@@ -1708,7 +1736,9 @@ export const stockReceipts = pgTable(
     kind: text("kind").notNull().default("RECEIPT"),
     receivedAt: ts("received_at").notNull(),
     reference: text("reference").notNull().default(""),
+    /** ẢNH CHỤP tên xưởng / nơi mua lúc ghi. Khoá thật là `supplier_id` (`NULL` = phiếu cũ / chưa chọn trong danh mục). */
     supplier: text("supplier").notNull().default(""),
+    supplierId: text("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
     note: text("note").notNull().default(""),
     totalQuantity: integer("total_quantity").notNull().default(0),
     totalCost: money("total_cost"),
