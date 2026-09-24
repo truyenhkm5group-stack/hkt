@@ -41,6 +41,8 @@ Ba điều tôi (người dựng) suy ra từ các câu chốt, cần chủ shop
 14:00 hôm trước  LẬP LÔ   planBatch()  — 10 + 3 ô dự phòng, hạt giống = ngày chạy (chạy lại ra đúng lô cũ)
                  VIẾT     LLM viết câu lệnh ảnh (EN) + câu chữ + tiêu đề (VI) cho từng ô
                  SINH     gpt-image SỬA ảnh sản phẩm THẬT theo câu lệnh — không vẽ sản phẩm từ con số 0
+                          (mặc định gửi cả lô qua Batch API, rẻ 50% — §5e)
+02:00            VẼ NỐT   Batch còn chưa xong ⇒ huỷ, ô thiếu ảnh vẽ bằng gọi ngay ở chất lượng vừa (§5e)
                  ⇒ lô "Chờ duyệt", báo Lark/Telegram
 tối / sáng sớm   NGƯỜI    xem 13 ảnh, gạt ảnh không ưng, bấm DUYỆT CẢ LÔ (thấy rõ tổng tiền, khung giờ, luật tắt)
 05:30            HẠN      chưa duyệt ⇒ lô "Quá hạn", KHÔNG một đồng nào được chi
@@ -182,6 +184,47 @@ content (AI suggest luôn sao cho phù hợp với ảnh đã sinh ra và đư�
 Tệp: `lib/creative/{caption,copy-edit}.ts` · `lib/actions/creative-copy.ts` · `copy-editor.tsx` ·
 `AdPreview` trong `variant-bits.tsx` · `tests/creative-copy.test.ts`.
 
+## 5e. Mô hình ảnh và đường Batch
+
+> **Đang chạy (chủ shop chốt lần hai 24/09/2026): `gpt-image-2.5-sunburst`, chất lượng VỪA, khổ 4:5, GỌI
+> NGAY (`imageMode = SYNC`), trần 2 USD/ngày** — ước ~1,1 USD / lô 13 ảnh. Lần chốt đầu là "Cao + Batch"
+> nhưng tài liệu mô hình của OpenAI ghi sunburst **không nhận Batch**. Đường Batch dưới đây vẫn nằm trong
+> mã và bật được ở tab Cấu hình cho mô hình nhận nó (vd `gpt-image-2`, ~1,4 USD / lô ở mức cao).
+
+
+- **Khi bật Batch** (`imageMode = BATCH`, mô hình nhận Batch): chất lượng do cấu hình · khổ dọc 4:5 `1088x1360` (bảng tin Facebook; hai
+  cạnh bội số 16) · vẽ nốt lúc `batchFallbackHourVn = 2` ở `fallbackImageQuality = medium`.
+  Trần `maxImageUsdPerDay = 2` KHÔNG đổi. `SYNC` giữ nguyên hành vi cũ (gọi ngay từng ảnh).
+- **Giá là ƯỚC TÍNH, một bảng:** `IMAGE_MODEL_TOKEN_PRICE_PER_MTOK` (USD / 1 triệu token, developers.openai.com
+  pricing đọc 24/09/2026) × số token ước tính (bảng token đầu ra theo chất lượng của gpt-image-1, quy theo diện
+  tích; 1.000 token chữ + 3 ảnh × 1.500 token đầu vào) × 0,5 khi đi Batch. Mô hình lạ ⇒ tính theo mô hình đắt
+  nhất. Ghi chi phí sau khi gọi cũng đọc ĐÚNG bảng ấy (`imageEditCostUsd`, × 0,5 cho dòng Batch). Một lô 13 ảnh
+  cao 4:5 qua Batch ≈ 1,4 USD; gọi ngay cả lô ở mức cao ≈ 2,8 USD (vượt trần — lý do vẽ nốt hạ về mức vừa ≈ 1,1 USD).
+- **Lượt dựng lô:** viết câu chữ cho MỌI ô `PLANNED`, kiểm trần NGÀY theo giá Batch (ô vượt trần ⇒ `GEN_FAILED`
+  có lý do), gom điểm ảnh qua `gatherPixels` (đường duy nhất), tải ảnh tham chiếu lên Files API (`purpose:
+  "vision"`) — `assertPixelSafe` chạy lại trước byte đầu tiên VÀ khi dựng từng dòng JSONL — rồi tạo MỘT lô
+  (`/v1/batches`, `endpoint: "/v1/images/edits"`, `completion_window: "24h"`), mỗi dòng `custom_id` = id mẫu,
+  thân JSON `images: [{ file_id }]`. Trạng thái nằm ở `creative_batches.plan.imageBatch` (không migration).
+- **Lũy đẳng:** pha `SUBMITTING` được ghi TRƯỚC lời gọi, có điều kiện "chưa có `imageBatch`". Lượt gửi đứt giữa
+  chừng KHÔNG gửi lại (có thể trả tiền hai lần) — tới mốc vẽ nốt thì bỏ và vẽ bằng gọi ngay.
+- **Giữ chỗ trong trần:** lô đã gửi mà chưa về ảnh giữ chỗ (`reservedImageSpend`) cho tới khi dừng.
+- **Kết quả:** `completed` ⇒ ảnh lưu + câu chữ theo ảnh (y đường gọi ngay) + `GENERATED`; dòng lỗi ⇒ `GEN_FAILED`
+  CHỈ khi lô có ít nhất một dòng ra ảnh. Lô huỷ / hết hạn / hỏng, hoặc không dòng nào ra ảnh ⇒ ô ở lại để vẽ nốt.
+- **Vẽ nốt:** tới `imageBatchFallbackAt()` (2:00 ngày chạy) mà lô còn chạy ⇒ huỷ; đợi OpenAI báo đã huỷ (nhận
+  cả dòng đã xong) tối đa 30 phút, rồi vẽ ô còn thiếu bằng gọi ngay ở `medium`, dùng lại câu lệnh đã viết.
+  OpenAI từ chối lô ngay lúc gửi ⇒ vẽ nốt NGAY (đợi tới 2:00 không đổi được kết quả).
+- **Báo:** tóm tắt `buildBatch().imageBatch` đi vào `sync_runs.detail` của job `creative-loop`. Tin "chờ duyệt"
+  vẫn chỉ bắn khi lô sang `PENDING_APPROVAL`.
+
+> **Mâu thuẫn tài liệu cần chủ shop biết:** trang mô hình `gpt-image-2.5-sunburst` (và `-flare`) trên
+> developers.openai.com ghi **"Batch · v1/batch · Not supported"** (đọc 24/09/2026), và trang giá chưa niêm yết giá
+> Batch cho hai mô hình này; `gpt-image-2` và `gpt-image-1` ghi "Supported". Máy vẫn gửi thử (tài liệu của mô
+> hình mới có thể đi sau API) — bị từ chối thì vẽ ngay bằng gọi ngay ở `medium` và tab Cấu hình cảnh báo. Muốn
+> đúng "Cao + Batch" thì đổi mô hình sang `gpt-image-2` (cùng giá token, Batch được hỗ trợ).
+
+Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `lib/creative/generate.ts` ·
+`lib/constants/creative-loop.ts` (giá) · `tests/creative-image-batch.test.ts`.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |
@@ -213,6 +256,9 @@ Tệp: `lib/creative/{caption,copy-edit}.ts` · `lib/actions/creative-copy.ts` �
   tiêu tiền, nhưng ERP không biết nó). Tên nhóm mang ngày lô + số ô để tra tay.
 - Các hàm ghi mới chưa từng chạy trên Facebook thật — lượt đầu nên là MỘT lô nhỏ (`batchSize` 2–3).
 - Chi phí đọc ảnh / viết chữ bằng model OpenAI in "CHƯA BIẾT" vì bảng giá AI của kho chỉ có Claude.
+- Đường Batch ảnh (§5e) chưa từng gọi OpenAI thật: tên trường lấy từ tài liệu, kiểm thử chạy trên OpenAI giả.
+  Số token mỗi ảnh của gpt-image-2.x là ước tính (OpenAI chưa công bố bảng) — đối chiếu `gen_cost_usd` thật
+  sau lô đầu.
 
 ## 7. Chủ shop còn phải làm gì để vòng CHẠY THẬT
 

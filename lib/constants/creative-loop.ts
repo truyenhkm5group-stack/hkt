@@ -461,8 +461,9 @@ export const CREATIVE_HARD_LIMITS = {
   /** Số ảnh sinh tối đa trong một ngày — kể cả ảnh sinh lại. Chặn một vòng lặp hỏng đốt credit. */
   maxImagesPerDay: 30,
   /**
-   * Trần chi sinh ảnh / ngày (USD). Chủ shop chốt 24/09/2026: 2 USD — một lô 13 ảnh chất lượng vừa
-   * tốn ~0,55 USD, phần còn lại cho sinh lại. Cấu hình chỉ hạ được.
+   * Trần chi sinh ảnh / ngày (USD). Chủ shop chốt 24/09/2026: 2 USD, và GIỮ NGUYÊN khi chuyển sang
+   * "Cao + Batch": một lô 13 ảnh chất lượng cao khổ 4:5 qua Batch ƯỚC TÍNH ~1,4 USD (`estimateImageUsd`).
+   * Cấu hình chỉ hạ được.
    */
   maxImageUsdPerDay: 2,
 } as const;
@@ -471,8 +472,31 @@ export const CREATIVE_HARD_LIMITS = {
 
 export const CREATIVE_CONFIG_KEY = "creative.config";
 
-export type ImageSize = "1024x1024" | "1024x1536";
-export type ImageQuality = "low" | "medium" | "high";
+/**
+ * Khổ ảnh. Hai khổ đầu là khổ chuẩn của gpt-image; `1088x1360` là khổ DỌC 4:5 của bảng tin Facebook
+ * (chủ shop chốt 24/09/2026). Mô hình gpt-image-2.x nhận kích thước tuỳ ý khi hai cạnh là bội số 16,
+ * tỷ lệ trong 1:3–3:1 và không cạnh nào quá 3840 (developers.openai.com/api/docs/guides/image-generation,
+ * đọc 24/09/2026): 1088 = 68 × 16, 1360 = 85 × 16, 1088 / 1360 = 0,8 đúng 4:5.
+ */
+export const IMAGE_SIZES = ["1024x1024", "1024x1536", "1088x1360"] as const;
+export type ImageSize = (typeof IMAGE_SIZES)[number];
+export const IMAGE_SIZE_LABEL: Record<ImageSize, string> = { "1024x1024": "Vuông 1:1 · 1024×1024", "1024x1536": "Dọc 2:3 · 1024×1536", "1088x1360": "Dọc 4:5 · 1088×1360 (bảng tin Facebook)" };
+
+export const IMAGE_QUALITIES = ["low", "medium", "high"] as const;
+export type ImageQuality = (typeof IMAGE_QUALITIES)[number];
+export const IMAGE_QUALITY_LABEL: Record<ImageQuality, string> = { low: "Thấp", medium: "Vừa", high: "Cao" };
+
+/**
+ * Cách gửi yêu cầu vẽ ảnh.
+ *
+ * `BATCH` — gom mọi ô của lô thành MỘT lô Batch API của OpenAI (giảm 50%, OpenAI hứa xong trong 24 giờ)
+ *           ngay lúc dựng lô. Tới `batchFallbackHourVn` của ngày chạy mà còn ô chưa có ảnh ⇒ huỷ lô
+ *           Batch và vẽ nốt bằng gọi ngay ở `fallbackImageQuality`, vẫn trong trần ngày.
+ * `SYNC`  — gọi ngay từng ảnh (hành vi trước 24/09/2026).
+ */
+export const IMAGE_MODES = ["BATCH", "SYNC"] as const;
+export type ImageMode = (typeof IMAGE_MODES)[number];
+export const IMAGE_MODE_LABEL: Record<ImageMode, string> = { BATCH: "Batch (rẻ 50%, chậm)", SYNC: "Gọi ngay (giá đủ)" };
 
 export type CreativeLoopConfig = {
   /** Công tắc mềm. Job vẫn cần `CREATIVE_LOOP_EVERY_MINUTES` ở env mới có trong lịch. */
@@ -525,6 +549,15 @@ export type CreativeLoopConfig = {
   imageModel: string;
   imageSize: ImageSize;
   imageQuality: ImageQuality;
+  /** `BATCH` (mặc định) hay gọi ngay — xem `IMAGE_MODES`. */
+  imageMode: ImageMode;
+  /**
+   * Giờ Việt Nam (đêm trước giờ chạy) mà lô Batch còn chưa xong thì bị huỷ và vẽ nốt bằng gọi ngay.
+   * Là mốc `HH:00` gần nhất ĐỨNG TRƯỚC hạn duyệt — xem `imageBatchFallbackAt()`.
+   */
+  batchFallbackHourVn: number;
+  /** Chất lượng của lượt vẽ nốt bằng gọi ngay — thấp hơn để không vượt trần ngày (giá đủ, không giảm 50%). */
+  fallbackImageQuality: ImageQuality;
   imageDailyCapUsd: number;
   /** Ảnh của mẫu bị LOẠI được giữ bấy nhiêu ngày cho người xem lại, rồi xoá điểm ảnh (giữ gen + số đo). */
   loserImageRetentionDays: number;
@@ -554,9 +587,15 @@ export const DEFAULT_CREATIVE_CONFIG: CreativeLoopConfig = {
   killRules: [],
   keepRules: [],
   focusProductIds: [],
-  imageModel: "gpt-image-1",
-  imageSize: "1024x1024",
+  // Chủ shop chốt 24/09/2026 (lần hai): "Sunburst vừa, gọi ngay, giữ 2 USD". Lần đầu chọn "Cao + Batch"
+  // nhưng tài liệu OpenAI ghi sunburst KHÔNG nhận Batch (`imageModelBatchSupport`). Đường Batch vẫn giữ
+  // cho mô hình nhận nó (vd gpt-image-2) — đổi ở tab Cấu hình. gpt-image-1 bị ngừng ngày 23/10/2026.
+  imageModel: "gpt-image-2.5-sunburst",
+  imageSize: "1088x1360",
   imageQuality: "medium",
+  imageMode: "SYNC",
+  batchFallbackHourVn: 2,
+  fallbackImageQuality: "medium",
   imageDailyCapUsd: 2,
   loserImageRetentionDays: 7,
 };
@@ -630,8 +669,11 @@ export function normalizeCreativeConfig(raw: unknown): { config: CreativeLoopCon
     keepRules: rules("keepRules"),
     focusProductIds: Array.isArray(r.focusProductIds) ? (r.focusProductIds as unknown[]).map(str).filter(Boolean) : [],
     imageModel: str(r.imageModel) || d.imageModel,
-    imageSize: r.imageSize === "1024x1536" ? "1024x1536" : "1024x1024",
-    imageQuality: r.imageQuality === "low" || r.imageQuality === "high" ? r.imageQuality : "medium",
+    imageSize: IMAGE_SIZES.find((x) => x === r.imageSize) ?? d.imageSize,
+    imageQuality: IMAGE_QUALITIES.find((x) => x === r.imageQuality) ?? d.imageQuality,
+    imageMode: IMAGE_MODES.find((x) => x === r.imageMode) ?? d.imageMode,
+    batchFallbackHourVn: Math.round(num(r.batchFallbackHourVn, d.batchFallbackHourVn, 0, 23)),
+    fallbackImageQuality: IMAGE_QUALITIES.find((x) => x === r.fallbackImageQuality) ?? d.fallbackImageQuality,
     imageDailyCapUsd: num(r.imageDailyCapUsd, d.imageDailyCapUsd, 0, L.maxImageUsdPerDay),
     loserImageRetentionDays: Math.round(num(r.loserImageRetentionDays, d.loserImageRetentionDays, 0, 90)),
   };
@@ -707,16 +749,91 @@ export const CREATIVE_WRITE_DENIAL_REASON: Record<CreativeWriteDenial, string> =
 // ───────────────────────────── GIÁ SINH ẢNH ─────────────────────────────
 
 /**
- * Giá ƯỚC TÍNH một ảnh (USD) theo chất lượng × khổ, theo bảng giá công bố của OpenAI cho
- * gpt-image-1. Dùng để CHẶN TRƯỚC khi gọi; chi phí THẬT ghi theo `usage` OpenAI trả về. Model khác
- * không có trong bảng ⇒ ước tính theo mức `high` (hướng an toàn: chặn sớm hơn, không muộn hơn).
+ * ═══ BẢNG GIÁ TOKEN THEO MÔ HÌNH — MỘT BẢNG DUY NHẤT ═══
+ *
+ * USD / 1 triệu token, giá gọi ngay (không cache). Nguồn: developers.openai.com/api/docs/pricing và
+ * trang từng mô hình (`/api/docs/models/<id>`), đọc 24/09/2026. `lib/integrations/openai/images.ts`
+ * dùng lại ĐÚNG bảng này để ghi chi phí sau khi gọi — hai bảng là hai con số cho cùng một ảnh.
+ *
+ * Khớp tên: đúng tên, hoặc tên kèm hậu tố NGÀY (`gpt-image-2.5-sunburst-2026-09-08`). Không khớp theo
+ * tiền tố trần: `gpt-image-1-mini` là mô hình khác, giá khác.
  */
-export const IMAGE_PRICE_USD: Record<ImageQuality, Record<ImageSize, number>> = {
-  low: { "1024x1024": 0.011, "1024x1536": 0.016 },
-  medium: { "1024x1024": 0.042, "1024x1536": 0.063 },
-  high: { "1024x1024": 0.167, "1024x1536": 0.25 },
+export const IMAGE_MODEL_TOKEN_PRICE_PER_MTOK: Readonly<Record<string, { textInput: number; imageInput: number; imageOutput: number }>> = {
+  "gpt-image-2.5-sunburst": { textInput: 5, imageInput: 8, imageOutput: 30 },
+  "gpt-image-2.5-flare": { textInput: 5, imageInput: 8, imageOutput: 30 },
+  "gpt-image-2": { textInput: 5, imageInput: 8, imageOutput: 30 },
+  "gpt-image-1.5": { textInput: 5, imageInput: 8, imageOutput: 32 },
+  "gpt-image-1": { textInput: 5, imageInput: 10, imageOutput: 40 },
 };
 
-export function estimateImageUsd(model: string, quality: ImageQuality, size: ImageSize): number {
-  return model.startsWith("gpt-image-1") ? IMAGE_PRICE_USD[quality][size] : IMAGE_PRICE_USD.high[size];
+/**
+ * Batch API giảm 50% so với gọi ngay (developers.openai.com/api/docs/guides/batch, đọc 24/09/2026).
+ * Trang giá CHƯA niêm yết giá Batch riêng cho gpt-image-2.5-* — hệ số này là của hướng dẫn Batch chung.
+ */
+export const IMAGE_BATCH_PRICE_FACTOR = 0.5;
+
+/**
+ * Mô hình có nhận Batch không, theo bảng "Endpoints" trên trang từng mô hình (đọc 24/09/2026):
+ * `gpt-image-2.5-sunburst` và `-flare` ghi "Batch · v1/batch · Not supported"; `gpt-image-2` và
+ * `gpt-image-1` ghi "Supported". Mô hình không có ở đây là CHƯA ĐỌC (`null`), không phải "không hỗ trợ".
+ * Bảng này chỉ để MÀN HÌNH cảnh báo — đường sinh vẫn gửi thử và đọc câu trả lời THẬT của OpenAI (tài
+ * liệu của một mô hình mới có thể đi sau API); gửi hỏng thì vẽ nốt bằng gọi ngay ngay lập tức.
+ */
+export const IMAGE_MODEL_BATCH_SUPPORT: Readonly<Record<string, boolean>> = {
+  "gpt-image-2.5-sunburst": false,
+  "gpt-image-2.5-flare": false,
+  "gpt-image-2": true,
+  "gpt-image-1": true,
+};
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Khoá bảng giá của một tên mô hình, hoặc `null`. Xem luật khớp tên ở trên. */
+export function imagePriceKeyOf(model: string): string | null {
+  for (const k of Object.keys(IMAGE_MODEL_TOKEN_PRICE_PER_MTOK)) {
+    if (model === k || new RegExp(`^${escapeRegExp(k)}-\\d{4}`).test(model)) return k;
+  }
+  return null;
+}
+
+/** `true` / `false` theo tài liệu; `null` = chưa đọc được tài liệu của mô hình này. */
+export function imageModelBatchSupport(model: string): boolean | null {
+  const k = imagePriceKeyOf(model);
+  return k !== null && k in IMAGE_MODEL_BATCH_SUPPORT ? IMAGE_MODEL_BATCH_SUPPORT[k] : null;
+}
+
+/**
+ * Số token ẢNH ĐẦU RA cho khổ 1024×1024 theo chất lượng — bảng "Cost and latency" OpenAI công bố cho
+ * gpt-image-1 (low 272 · medium 1056 · high 4160). Trang của gpt-image-2.x KHÔNG công bố bảng này (đọc
+ * 24/09/2026), nên đây là ƯỚC TÍNH dùng tạm cho mọi mô hình. Khổ khác quy theo DIỆN TÍCH (bảng gốc:
+ * 1024×1536 = đúng 1,5 lần ở cả ba mức).
+ */
+export const IMAGE_OUTPUT_TOKENS_1024_SQUARE: Readonly<Record<ImageQuality, number>> = { low: 272, medium: 1056, high: 4160 };
+
+/**
+ * Phần ĐẦU VÀO của một lượt sửa ảnh — ước tính rộng tay: câu lệnh ~1.000 token chữ, tối đa 3 ảnh tham
+ * chiếu (sản phẩm · mẫu cha · quảng cáo cũ của shop) × 1.500 token ảnh. Với một cái phanh, ước tính
+ * THỪA làm chặn sớm hơn; ước tính THIẾU làm vượt trần.
+ */
+export const IMAGE_ESTIMATE_INPUT = { promptTextTokens: 1_000, references: 3, imageTokensPerReference: 1_500 } as const;
+
+export function imageOutputTokensEstimate(quality: ImageQuality, size: ImageSize): number {
+  const [w, h] = size.split("x").map(Number);
+  return Math.ceil((IMAGE_OUTPUT_TOKENS_1024_SQUARE[quality] * w * h) / (1024 * 1024));
+}
+
+/**
+ * Giá ƯỚC TÍNH một ảnh (USD) — dùng để CHẶN TRƯỚC khi gọi; chi phí THẬT ghi theo `usage` OpenAI trả về.
+ * = (token chữ × giá chữ + token ảnh vào × giá ảnh vào + token ảnh ra × giá ảnh ra) / 1 triệu,
+ * × `IMAGE_BATCH_PRICE_FACTOR` khi đi Batch. Mô hình không có trong bảng ⇒ tính theo mô hình ĐẮT NHẤT
+ * của bảng (chặn sớm hơn, không muộn hơn).
+ */
+export function estimateImageUsd(model: string, quality: ImageQuality, size: ImageSize, mode: ImageMode = "SYNC"): number {
+  const k = imagePriceKeyOf(model);
+  const p = k ? IMAGE_MODEL_TOKEN_PRICE_PER_MTOK[k] : Object.values(IMAGE_MODEL_TOKEN_PRICE_PER_MTOK).reduce((a, b) => (b.imageOutput > a.imageOutput ? b : a));
+  const inp = IMAGE_ESTIMATE_INPUT;
+  const usd = (inp.promptTextTokens * p.textInput + inp.references * inp.imageTokensPerReference * p.imageInput + imageOutputTokensEstimate(quality, size) * p.imageOutput) / 1_000_000;
+  return Math.round(usd * (mode === "BATCH" ? IMAGE_BATCH_PRICE_FACTOR : 1) * 1_000_000) / 1_000_000;
 }

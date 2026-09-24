@@ -2,6 +2,9 @@ import { z } from "zod";
 import {
   GENE_LABEL,
   GENE_VOCAB,
+  IMAGE_MODES,
+  IMAGE_QUALITIES,
+  IMAGE_SIZES,
   MANUAL_UPLOAD_SOURCE_KINDS,
   normalizeCreativeConfig,
   type ConfigProblem,
@@ -137,6 +140,7 @@ export const CONFIG_NUMERIC_FIELDS = [
   "winOrdersAbove",
   "verdictSettleHours",
   "imageDailyCapUsd",
+  "batchFallbackHourVn",
   "loserImageRetentionDays",
 ] as const satisfies readonly (keyof CreativeLoopConfig)[];
 export type ConfigNumericField = (typeof CONFIG_NUMERIC_FIELDS)[number];
@@ -162,6 +166,9 @@ export const CONFIG_FIELD_LABEL: Record<Exclude<keyof CreativeLoopConfig, "killR
   imageModel: "Mô hình sinh ảnh",
   imageSize: "Khổ ảnh",
   imageQuality: "Chất lượng ảnh",
+  imageMode: "Cách gửi yêu cầu vẽ",
+  batchFallbackHourVn: "Batch chưa xong thì vẽ nốt lúc (giờ VN)",
+  fallbackImageQuality: "Chất lượng khi vẽ nốt bằng gọi ngay",
   imageDailyCapUsd: "Trần chi sinh ảnh / ngày (USD)",
   loserImageRetentionDays: "Giữ ảnh mẫu bị loại (ngày)",
 };
@@ -201,8 +208,11 @@ export const creativeConfigRawSchema = z
     keepRules: z.array(z.unknown()).max(20, "Tối đa 20 luật giữ"),
     focusProductIds: z.array(z.string().trim().min(1).max(200)).max(200),
     imageModel: z.string().trim().min(1, "Chưa khai mô hình sinh ảnh").max(100),
-    imageSize: z.enum(["1024x1024", "1024x1536"]),
-    imageQuality: z.enum(["low", "medium", "high"]),
+    imageSize: z.enum(IMAGE_SIZES),
+    imageQuality: z.enum(IMAGE_QUALITIES),
+    imageMode: z.enum(IMAGE_MODES),
+    batchFallbackHourVn: finiteNumber("batchFallbackHourVn"),
+    fallbackImageQuality: z.enum(IMAGE_QUALITIES),
     imageDailyCapUsd: finiteNumber("imageDailyCapUsd"),
     loserImageRetentionDays: finiteNumber("loserImageRetentionDays"),
   })
