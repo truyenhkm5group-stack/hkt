@@ -1,4 +1,4 @@
-import { PIXEL_SAFE_SOURCE_KINDS, type ImageQuality, type ImageSize } from "@/lib/constants/creative-loop";
+import { PIXEL_SAFE_EDIT_LABEL, PIXEL_SAFE_SOURCE_KINDS, type ImageQuality, type ImageSize } from "@/lib/constants/creative-loop";
 import { env } from "@/lib/env";
 
 /**
@@ -10,7 +10,8 @@ import { env } from "@/lib/env";
  * ─── HÀNG RÀO Ở RANH GIỚI HÀM (đặc tả `docs/creative-loop.md` §2, ranh giới 2) ───
  *
  * Điểm ảnh gửi sang máy SINH ảnh chỉ được là ảnh CỦA SHOP: ảnh sản phẩm thật (`PRODUCT_PHOTO`) và
- * ảnh mẫu của chính shop (`OWN_VARIANT`). Ảnh SPY / tay / R&D không bao giờ tới đây. Kiểu TypeScript
+ * ảnh của chính shop (`OWN_VARIANT` — mẫu cha của vòng, HOẶC quảng cáo cũ của shop nguồn `OWN_AD`).
+ * Ảnh SPY / tay / R&D không bao giờ tới đây. Kiểu TypeScript
  * đã nói điều đó, nhưng kiểu biến mất lúc chạy — một `as` ở nơi gọi là đủ để lọt. Nên hàm KIỂM LẠI
  * từng ảnh lúc chạy và NÉM LỖI trước khi dựng một byte nào của yêu cầu.
  *
@@ -25,8 +26,14 @@ import { env } from "@/lib/env";
 
 export const OPENAI_IMAGES_EDIT_URL = "https://api.openai.com/v1/images/edits";
 
-/** Loại ảnh được gửi điểm ảnh — dẫn xuất từ hợp đồng, cộng ảnh mẫu của chính shop. */
-export const IMAGE_EDIT_ALLOWED_KINDS = [...PIXEL_SAFE_SOURCE_KINDS, "OWN_VARIANT"] as const;
+/**
+ * NHÃN ảnh được gửi điểm ảnh: ảnh sản phẩm thật + ảnh của chính shop. Mọi loại nguồn trong
+ * `PIXEL_SAFE_SOURCE_KINDS` quy về đúng hai nhãn này qua `PIXEL_SAFE_EDIT_LABEL` (`PRODUCT_PHOTO` giữ
+ * nhãn, `OWN_AD` đi dưới nhãn `OWN_VARIANT`) — `tests/creative-loop.test.ts` khoá phép quy ấy. Nhãn
+ * nguồn thô (`OWN_AD`, `SPY`…) tới đây là bị chặn: chỉ `gatherPixels()` đặt nhãn, sau khi kiểm loại
+ * trong CSDL.
+ */
+export const IMAGE_EDIT_ALLOWED_KINDS = [...new Set([...PIXEL_SAFE_SOURCE_KINDS.flatMap((k) => PIXEL_SAFE_EDIT_LABEL[k] ?? []), "OWN_VARIANT"])] as readonly string[];
 export type ImageEditKind = "PRODUCT_PHOTO" | "OWN_VARIANT";
 
 export type ImageEditInputImage = { kind: ImageEditKind; bytes: Uint8Array; contentType: string };

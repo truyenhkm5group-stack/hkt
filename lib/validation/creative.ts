@@ -1,8 +1,8 @@
 import { z } from "zod";
 import {
-  CREATIVE_SOURCE_KINDS,
   GENE_LABEL,
   GENE_VOCAB,
+  MANUAL_UPLOAD_SOURCE_KINDS,
   normalizeCreativeConfig,
   type ConfigProblem,
   type CreativeLoopConfig,
@@ -40,10 +40,13 @@ function httpUrlOrEmpty(s: string): boolean {
  * Đầu vào của `createCreativeSource`. KHÔNG có băm, KHÔNG có loại ảnh: máy chủ tự băm và tự đọc
  * chữ ký tệp (`storeCreativeImage`) — nhận hai thứ đó từ client là để một ảnh bị tráo lọt qua phiếu
  * duyệt lô với băm cũ.
+ *
+ * Loại nguồn chỉ nhận `MANUAL_UPLOAD_SOURCE_KINDS` — `OWN_AD` (quảng cáo cũ của shop, được gửi điểm ảnh
+ * sang máy sinh ảnh) chỉ vào được qua nút nhập từ Facebook theo `ad_id`, không qua form tải tay.
  */
 export const creativeSourceInputSchema = z
   .object({
-    kind: z.enum(CREATIVE_SOURCE_KINDS, { message: "Chọn loại ảnh nguồn" }),
+    kind: z.enum(MANUAL_UPLOAD_SOURCE_KINDS, { message: "Chọn loại ảnh nguồn" }),
     productId: z.string().trim().max(200).default(""),
     title: z.string().trim().max(200, "Tiêu đề tối đa 200 ký tự").default(""),
     note: z.string().trim().max(2000, "Ghi chú tối đa 2.000 ký tự").default(""),

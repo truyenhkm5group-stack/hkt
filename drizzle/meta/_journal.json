@@ -827,6 +827,13 @@
       "when": 1790001868245,
       "tag": "0118_creative_manual_variants",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1790001928245,
+      "tag": "0119_creative_own_ads",
+      "breakpoints": true
     }
   ]
 }

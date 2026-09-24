@@ -36,10 +36,12 @@ import { loadPlanInputs, loadProductBrief, loadWinningExamples } from "@/lib/que
  *
  * ─── ĐƯỜNG ĐIỂM ẢNH (ranh giới 2 + 3 của vòng mẫu) ───
  *
- * `gatherPixels()` là chỗ DUY NHẤT trong tệp này đọc điểm ảnh, và nó chỉ nhận HAI khoá: nguồn ảnh
- * sản phẩm thật của ô và mẫu cha. Nguồn cảm hứng (spy / tay / R&D) không có đường nào tới đây — chỉ
- * `vision_summary` của nó đi vào người viết câu chữ. `tests/creative-generate.test.ts` quét mã nguồn
- * để giữ điều đó, và `editImage()` kiểm lại loại ảnh lúc chạy.
+ * `gatherPixels()` là chỗ DUY NHẤT trong tệp này đọc điểm ảnh, và nó chỉ nhận BA khoá: nguồn ảnh
+ * sản phẩm thật của ô, mẫu cha, và nguồn QUẢNG CÁO CŨ CỦA SHOP (`ownAdSourceId`). Khoá thứ ba được
+ * điền từ `inspiration_source_id` của ô, nhưng điểm ảnh chỉ được đọc khi LOẠI đọc lại từ CSDL đúng là
+ * `OWN_AD` VÀ nguồn ấy gắn đúng mã hàng của ảnh sản phẩm — spy / tay / R&D đi qua khoá này cũng không
+ * lấy được một byte nào, chỉ `vision_summary` của chúng đi vào người viết câu chữ.
+ * `tests/creative-generate.test.ts` quét mã nguồn để giữ điều đó, và `editImage()` kiểm lại nhãn ảnh lúc chạy.
  *
  * ─── TRẦN NGÀY ───
  *
@@ -229,12 +231,13 @@ export async function imageSpendToday(db: Db, now: Date, unpricedUsd: number): P
 }
 
 /**
- * ĐƯỜNG ĐIỂM ẢNH DUY NHẤT của đường sinh. Chỉ nhận nguồn ảnh sản phẩm thật và mẫu cha — xem đầu tệp.
+ * ĐƯỜNG ĐIỂM ẢNH DUY NHẤT của đường sinh. Chỉ nhận nguồn ảnh sản phẩm thật, mẫu cha và nguồn quảng cáo
+ * cũ của shop — xem đầu tệp.
  */
-async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; parentVariantId: string | null }): Promise<ImageEditInputImage[]> {
+async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; parentVariantId: string | null; ownAdSourceId: string | null }): Promise<ImageEditInputImage[]> {
   if (!ref.productPhotoSourceId) throw new Error("Ô không có ảnh sản phẩm thật làm gốc.");
   const [photo] = await db
-    .select({ kind: schema.creativeSources.kind, imageId: schema.creativeSources.imageId })
+    .select({ kind: schema.creativeSources.kind, imageId: schema.creativeSources.imageId, productId: schema.creativeSources.productId })
     .from(schema.creativeSources)
     .where(eq(schema.creativeSources.id, ref.productPhotoSourceId))
     .limit(1);
@@ -249,6 +252,20 @@ async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; 
     const parentPixels = parent?.imageId ? await readCreativeImage(db, parent.imageId) : null;
     // Ảnh mẫu cha đã mất thì ô vẫn sinh được từ ảnh sản phẩm — mất tham chiếu bố cục, không mất sản phẩm.
     if (parentPixels) out.push({ kind: "OWN_VARIANT", bytes: new Uint8Array(parentPixels.bytes), contentType: parentPixels.contentType });
+  }
+
+  if (ref.ownAdSourceId) {
+    const [ownAd] = await db
+      .select({ kind: schema.creativeSources.kind, imageId: schema.creativeSources.imageId, productId: schema.creativeSources.productId })
+      .from(schema.creativeSources)
+      .where(eq(schema.creativeSources.id, ref.ownAdSourceId))
+      .limit(1);
+    // Kiểm lại LOẠI lúc đọc: khoá này điền từ một cột trỏ được tới MỌI loại nguồn. Chỉ quảng cáo cũ CỦA
+    // SHOP được gửi điểm ảnh, và chỉ khi nó quảng cáo ĐÚNG mã của ảnh sản phẩm — bố cục của một chiếc
+    // váy khác làm tham chiếu là mời máy vẽ lẫn hai sản phẩm.
+    const allowed = ownAd && ownAd.kind === "OWN_AD" && ownAd.imageId && ownAd.productId !== null && ownAd.productId === photo.productId;
+    const ownAdPixels = allowed && ownAd.imageId ? await readCreativeImage(db, ownAd.imageId) : null;
+    if (ownAdPixels) out.push({ kind: "OWN_VARIANT", bytes: new Uint8Array(ownAdPixels.bytes), contentType: ownAdPixels.contentType });
   }
   return out;
 }
@@ -302,7 +319,7 @@ async function generateOne(db: Db, variant: VariantRow, cfg: CreativeLoopConfig,
   const written = { imagePrompt: copy.imagePrompt, primaryText: copy.primaryText, headline: copy.headline, writerModel: copy.model, writerCostUsd: copy.costUsd === null ? "" : copy.costUsd.toFixed(6) };
 
   try {
-    const images = await gatherPixels(db, { productPhotoSourceId: variant.productPhotoSourceId, parentVariantId: variant.parentVariantId });
+    const images = await gatherPixels(db, { productPhotoSourceId: variant.productPhotoSourceId, parentVariantId: variant.parentVariantId, ownAdSourceId: variant.inspirationSourceId });
     const out = await deps.imageClient({ model: cfg.imageModel, prompt: copy.imagePrompt, images, size: cfg.imageSize, quality: cfg.imageQuality });
     const stored = await storeCreativeImage(db, out.bytes);
     const rows = await db
