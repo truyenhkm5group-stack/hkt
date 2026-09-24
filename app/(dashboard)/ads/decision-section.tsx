@@ -7,7 +7,7 @@ import { ArrowRight } from "lucide-react";
 import { getAdsDecision, DECISION_METRIC_HINT } from "@/lib/queries/ads-decision";
 import { FB_SCOPE_STATE_LABEL } from "@/lib/constants/fb-token-scopes";
 import { getFbTokenScopes } from "@/lib/queries/fb-token-scopes";
-import { ADS_DIMENSION_HAS_SPEND, rowsToRender, type AdsDimension } from "@/lib/constants/ads-decision";
+import { ADS_DIMENSION_HAS_SPEND, keepRipeRows, rowsToRender, type AdsDimension } from "@/lib/constants/ads-decision";
 import { LEDGER_WINDOW_DAYS, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { decisionStability } from "@/lib/queries/marketing-ledger";
 import type { Stability } from "@/lib/marketing/decision-stability";
@@ -91,7 +91,7 @@ export async function AdsDecisionSection({
   showAllHref?: string;
 }) {
   const [d, quyenToken] = await Promise.all([getAdsDecision(period, dimension), getFbTokenScopes()]);
-  const { shown: dongVe, hidden: dongAn } = rowsToRender(d.rows, showAll);
+  const { shown: dongVeTheoKetLuan, hidden: dongAnTheoKetLuan } = rowsToRender(d.rows, showAll);
   /*
     ─── ĐỘ BỀN ĐỌC TỪ SỔ, VÀ SỔ CÓ THỂ RỖNG ───
 
@@ -103,6 +103,17 @@ export async function AdsDecisionSection({
   const stability: Record<string, Stability> = Object.fromEntries(stabilityMap);
   const soDaChay = Object.values(stability).some((s) => s.heldDays > 0);
   const daChin = Object.values(stability).filter((s) => s.ready).length;
+  /*
+    DÒNG ĐÃ CHÍN LUÔN ĐƯỢC GỬI XUỐNG, KỂ CẢ KHI NẰM NGOÀI PHẦN ĐANG HIỆN.
+
+    Nút Bàn tay chỉ hiện trên dòng đã chín, và bảng chỉ gửi xuống một phần các dòng. `rowsToRender`
+    giữ mọi dòng CÓ KẾT LUẬN hôm nay — nhưng "đã chín" đọc từ SỔ (giữ nguyên N ngày), không từ hành
+    động hôm nay, nên hai tập không trùng nhau tuyệt đối. Chủ shop báo 24/09/2026: "không thấy Bàn
+    tay" trong khi đầu bảng ghi 2/782 dòng đã chín. Một dòng bấm được mà không có trên màn hình là
+    một nút không tồn tại.
+  */
+  const chin = new Set(Object.entries(stability).filter(([, v]) => v.ready).map(([k]) => k));
+  const { shown: dongVe, hidden: dongAn } = keepRipeRows({ shown: dongVeTheoKetLuan, hidden: dongAnTheoKetLuan }, chin);
   const hasSpend = ADS_DIMENSION_HAS_SPEND[dimension];
   const lowCoverage = d.confidence.verdict === "DATA_INSUFFICIENT";
   // Chỉ dòng THẬT SỰ có khuyến nghị mới dùng tới một tỷ lệ; dòng bị từ chối kết luận thì không.

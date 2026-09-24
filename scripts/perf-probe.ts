@@ -29,7 +29,14 @@ import { clearMemo } from "@/lib/cache";
  * Bọc thẳng `Pool.query` của `pg`: mọi câu lệnh đều đi qua đó, không sót đường nào.
  */
 let dbMs = 0;
-const chamNhat: { ms: number; sql: string; full: string; params: unknown[] }[] = [];
+const chamNhat: { ms: number; sql: string; full: string; params: unknown[]; ham: string | null }[] = [];
+/**
+ * HÀM NÀO ĐANG ĐƯỢC ĐO khi một câu chậm chạy. Đo production 24/09/2026: câu chậm nhất (8.199 ms) chỉ
+ * in được 600 ký tự đầu — toàn là biểu thức kết quả đơn, không thấy `from` — nên KHÔNG định vị được
+ * nó thuộc hàm nào, và không vá được mà không đoán. Ghi tên hàm + in phần ĐUÔI câu lệnh (nơi có
+ * `from` / `where` / `group by` ngoài cùng) là đủ để lần đo sau trỏ thẳng vào dòng mã.
+ */
+let hamDangDo: string | null = null;
 let dbCalls = 0;
 let dbRows = 0;
 
@@ -122,6 +129,7 @@ const cauTheoHam = new Map<string, { ms: number; sql: string }[]>();
 
 async function timed(page: string, fn: string, run: () => Promise<unknown>) {
   clearMemo();
+  hamDangDo = `${page} · ${fn}`;
   lapHienTai = new Map();
   cauTrongHam = TRONG_DIEM.test(fn) ? [] : null;
   const dbBefore = dbMs;
@@ -274,7 +282,7 @@ async function main() {
       if (cauTrongHam && ms >= 50) cauTrongHam.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 180) });
       if (ms < 200) return;
       // Giữ NGUYÊN VĂN đầy đủ + tham số để lát nữa chạy EXPLAIN ANALYZE trên đúng câu đó.
-      chamNhat.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 600), full: sqlText, params });
+      chamNhat.push({ ms, sql: sqlText.replace(/\s+/g, " ").trim().slice(0, 600), full: sqlText, params, ham: hamDangDo });
       chamNhat.sort((a, b) => b.ms - a.ms);
       chamNhat.length = Math.min(chamNhat.length, 8);
     };
@@ -780,7 +788,7 @@ async function main() {
       }
       const mBat = trungVi(bat);
       const mTat = trungVi(tat);
-      console.log(`\n  ${c.ms}ms trong lượt đo đường ứng dụng · ${c.sql.slice(0, 110)}…`);
+      console.log(`\n  ${c.ms}ms trong lượt đo đường ứng dụng · hàm: ${c.ham ?? "(ngoài timed)"} · ${c.sql.slice(0, 110)}…`);
       console.log(`    JIT MẶC ĐỊNH  trung vị ${mBat === null ? "CHƯA ĐO ĐƯỢC" : `${mBat.toFixed(1)} ms`}  [${bat.map((x) => x.toFixed(1)).join(" · ")}]`);
       console.log(`    JIT TẮT       trung vị ${mTat === null ? "CHƯA ĐO ĐƯỢC" : `${mTat.toFixed(1)} ms`}  [${tat.map((x) => x.toFixed(1)).join(" · ")}]`);
       if (mBat !== null && mTat !== null && mBat > 0) {
@@ -807,7 +815,11 @@ async function main() {
 
   console.log("\n── TÁM CÂU LỆNH SQL CHẬM NHẤT (nguyên văn, cắt 600 ký tự) ──");
   if (!chamNhat.length) console.log("  (không câu lệnh nào vượt 200ms)");
-  for (const c of chamNhat) console.log(`\n  ${c.ms}ms\n  ${c.sql}`);
+  for (const c of chamNhat) {
+    const gon = c.full.replace(/\s+/g, " ").trim();
+    // Câu chậm ở đây đi thẳng qua POOL, tức là CHƯA được bọc `chayKhongJit` (câu đã bọc chạy trong giao dịch).
+    console.log(`\n  ${c.ms}ms · hàm: ${c.ham ?? "(ngoài timed)"} · ngoài chayKhongJit\n  ĐẦU: ${c.sql}\n  ĐUÔI: …${gon.slice(-500)}`);
+  }
   process.exit(0);
 }
 
