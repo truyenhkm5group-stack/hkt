@@ -363,6 +363,78 @@ export async function testCsSemantic(db: Db) {
   assert.ok(bc.byKind.every((k) => k.total === Object.values(k.counts).reduce((a, b) => a + b, 0)), "tổng theo loại phải bằng tổng các kết luận của chính loại đó — bảng không được tự mâu thuẫn");
   assert.ok(Object.hasOwn(bc.orderNotCreated.closed, "POS_CONFIRMED"), "báo cáo phải gộp cả máy riêng của “chưa tạo đơn”");
 
+  /* ═══════════ 12 · CASE DO BOT SINH TỪ CHỨNG TỪ CŨNG PHẢI TỰ HẾT ═══════════ */
+
+  /*
+    Sự cố chủ shop báo 25/09/2026: "nhiều case đã quá lâu, đã chuyển sang trạng thái khác rồi mà
+    ERP vẫn là trạng thái cũ". Hai lỗ trong máy đối chiếu:
+
+     · `DELIVERY_FAILED` / `PHONE_VERIFY` không có điều kiện đóng ⇒ giữ nguyên MÃI MÃI;
+     · bot ghi `assignee = 'Bot ERP'` + một câu `resolution` khi nhắn khách ⇒ bị đọc là "có người
+       cầm" ⇒ kể cả khi có điều kiện thì máy cũng không đóng.
+  */
+  const ngay = (n: number) => new Date(Date.now() - n * 86_400_000);
+  await db.insert(schema.orders).values([
+    { id: "lv-o1", stage: "SHIPPED", status: 2, insertedAt: ngay(10), billFullName: "POS trễ", billPhone: "0934000001", totalPriceAfterDiscount: 300_000 },
+    { id: "lv-o2", stage: "SHIPPED", status: 2, insertedAt: ngay(4), billFullName: "Huỷ lấy", billPhone: "0934000002", totalPriceAfterDiscount: 300_000 },
+    { id: "lv-o3", stage: "SHIPPED", status: 2, insertedAt: ngay(6), billFullName: "Phát lại", billPhone: "0934000003", totalPriceAfterDiscount: 300_000 },
+    { id: "lv-o4", stage: "SHIPPED", status: 2, insertedAt: ngay(6), billFullName: "Vẫn hỏng", billPhone: "0934000004", totalPriceAfterDiscount: 300_000 },
+    { id: "lv-o5", stage: "SHIPPED", status: 2, insertedAt: ngay(6), billFullName: "Người cầm", billPhone: "0934000005", totalPriceAfterDiscount: 300_000 },
+    { id: "lv-o6", stage: "CONFIRMED", status: 1, insertedAt: ngay(1), billFullName: "Chờ lấy", billPhone: "0934000006", totalPriceAfterDiscount: 300_000 },
+    { id: "lv-o7", stage: "CANCELLED", status: 6, insertedAt: ngay(2), billFullName: "Đã huỷ", billPhone: "0934000007", totalPriceAfterDiscount: 300_000 },
+    { id: "lv-o8", stage: "CONFIRMED", status: 1, insertedAt: ngay(2), billFullName: "Đã lấy", billPhone: "0934000008", totalPriceAfterDiscount: 300_000 },
+  ]).onConflictDoNothing();
+  await db.insert(schema.shipments).values([
+    { id: "lv-s1", orderId: "lv-o1", carrier: "Viettel Post", vtpOrderNumber: "LV1", stage: "DELIVERED", isFinal: true, receiverPhone: "0934000001" },
+    { id: "lv-s2", orderId: "lv-o2", carrier: "Viettel Post", vtpOrderNumber: "LV2", stage: "CANCELLED", isFinal: true, receiverPhone: "0934000002" },
+    { id: "lv-s3", orderId: "lv-o3", carrier: "Viettel Post", vtpOrderNumber: "LV3", stage: "OUT_FOR_DELIVERY", isFinal: false, receiverPhone: "0934000003" },
+    { id: "lv-s4", orderId: "lv-o4", carrier: "Viettel Post", vtpOrderNumber: "LV4", stage: "DELIVERY_FAILED", isFinal: false, receiverPhone: "0934000004" },
+    { id: "lv-s5", orderId: "lv-o5", carrier: "Viettel Post", vtpOrderNumber: "LV5", stage: "RETURNING", isFinal: false, receiverPhone: "0934000005" },
+    { id: "lv-s6", orderId: "lv-o6", carrier: "Viettel Post", vtpOrderNumber: "LV6", stage: "PENDING", isFinal: false, receiverPhone: "0934000006" },
+    { id: "lv-s8", orderId: "lv-o8", carrier: "Viettel Post", vtpOrderNumber: "LV8", stage: "PICKED_UP", isFinal: false, receiverPhone: "0934000008" },
+  ]).onConflictDoNothing();
+  const bot = { status: "IN_PROGRESS", assignee: "Bot ERP", resolution: "Đã nhắn khách qua Pancake lúc 10:00", createdBy: "failed-delivery-bot" } as const;
+  await db.insert(schema.csCases).values([
+    { id: "lv-c1", orderId: "lv-o1", kind: "URGE_DELIVERY", status: "OPEN", source: "PANCAKE_CHAT", title: "Giục giao · POS còn ghi Đã gửi hàng", dedupeKey: "test:lv-c1" },
+    { id: "lv-c2", orderId: "lv-o2", kind: "URGE_DELIVERY", status: "OPEN", source: "PANCAKE_CHAT", title: "Giục giao · kiện bị huỷ lấy", dedupeKey: "test:lv-c2" },
+    { ...bot, id: "lv-c3", orderId: "lv-o3", kind: "DELIVERY_FAILED", source: "AUTO_FAILED_DELIVERY", title: "✅ Đã nhắn khách · kiện đã đi phát lại", dedupeKey: "failed-delivery:lv-s3:2026-09-20" },
+    { ...bot, id: "lv-c4", orderId: "lv-o4", kind: "DELIVERY_FAILED", source: "AUTO_FAILED_DELIVERY", title: "✅ Đã nhắn khách · vẫn đang hỏng", dedupeKey: "failed-delivery:lv-s4:2026-09-22", createdAt: ngay(1) },
+    { ...bot, id: "lv-c4cu", orderId: "lv-o4", kind: "DELIVERY_FAILED", source: "AUTO_FAILED_DELIVERY", title: "✅ Đã nhắn khách · lần hỏng trước", dedupeKey: "failed-delivery:lv-s4:2026-09-19", createdAt: ngay(4) },
+    { ...bot, id: "lv-c5", orderId: "lv-o5", kind: "DELIVERY_FAILED", source: "AUTO_FAILED_DELIVERY", title: "Giao không thành · người đã ghi chú", dedupeKey: "failed-delivery:lv-s5:2026-09-20" },
+    { ...bot, id: "lv-c9", kind: "DELIVERY_FAILED", source: "AUTO_FAILED_DELIVERY", title: "Giao không thành · vận đơn không còn", dedupeKey: "failed-delivery:khong-ton-tai:2026-09-20" },
+    { ...bot, id: "lv-c6", orderId: "lv-o6", kind: "PHONE_VERIFY", source: "AUTO_PHONE_VERIFY", title: "Xác nhận SĐT · vận đơn còn chờ lấy", dedupeKey: "phone-verify:lv-o6", createdBy: "phone-verify-bot" },
+    { ...bot, id: "lv-c7", orderId: "lv-o7", kind: "PHONE_VERIFY", source: "AUTO_PHONE_VERIFY", title: "Xác nhận SĐT · đơn đã huỷ", dedupeKey: "phone-verify:lv-o7", createdBy: "phone-verify-bot" },
+    { ...bot, id: "lv-c8", orderId: "lv-o8", kind: "PHONE_VERIFY", source: "AUTO_PHONE_VERIFY", title: "Xác nhận SĐT · ĐVVC đã lấy", dedupeKey: "phone-verify:lv-o8", createdBy: "phone-verify-bot" },
+  ]).onConflictDoNothing();
+  // Người thật đã ghi một dòng lịch sử lên lv-c5 ⇒ máy KHÔNG đóng hộ, dù bot cũng đã chạm vào.
+  await db.insert(schema.csCaseEvents).values({ caseId: "lv-c5", actorId: "csq-user", actorName: "Linh CSKH", action: "NOTE", note: "Đã gọi, khách hẹn mai" });
+
+  const lvIds = ["lv-c1", "lv-c2", "lv-c3", "lv-c4", "lv-c4cu", "lv-c5", "lv-c6", "lv-c7", "lv-c8", "lv-c9"];
+  const lv = new Map((await assessOpenCases(lvIds)).map((a) => [a.id, a]));
+  assert.equal(lv.size, lvIds.length, "đánh giá theo danh sách id phải trả đúng các case đó, không hơn không kém");
+  assert.equal(lv.get("lv-c1")?.verdict, "AUTO_RESOLVE", "ĐVVC đã chốt kiện mà POS còn ghi Đã gửi hàng: chứng từ ĐVVC thắng, câu giục là chuyện đã qua");
+  assert.ok(lv.get("lv-c1")?.reason.includes("ĐVVC"), "lý do phải nói căn cứ là ĐVVC, không phải POS");
+  assert.equal(lv.get("lv-c2")?.verdict, "KEEP_OPEN", "kiện bị HUỶ LẤY cũng is_final nhưng hàng chưa đi — khách giục lúc này càng đúng, KHÔNG được đóng");
+  assert.equal(lv.get("lv-c3")?.verdict, "AUTO_RESOLVE", "case bot đã nhắn: 'Bot ERP' + resolution của bot KHÔNG phải dấu tay người — kiện đã đi phát lại thì case tự hết");
+  assert.ok(lv.get("lv-c3")?.reason.includes("Đang giao"), "lý do phải nói kiện đang ở chặng nào");
+  assert.equal(lv.get("lv-c3")?.humanTouched, false, "bot không phải người");
+  assert.equal(lv.get("lv-c4")?.verdict, "KEEP_OPEN", "kiện VẪN đang giao không thành: việc còn nguyên");
+  assert.equal(lv.get("lv-c4cu")?.verdict, "AUTO_RESOLVE", "lần hỏng cũ của cùng kiện đã có case mới thay — không để hai dòng cho một kiện");
+  assert.equal(lv.get("lv-c5")?.verdict, "NEEDS_REVIEW", "có người thật ghi lịch sử case ⇒ máy KHÔNG đóng hộ, dù kiện đã sang đang hoàn");
+  assert.equal(lv.get("lv-c5")?.humanTouched, true, "một dòng cs_case_events mang khoá tài khoản là dấu tay người");
+  assert.equal(lv.get("lv-c9")?.verdict, "KEEP_OPEN", "không tìm thấy vận đơn = CHƯA BIẾT, không phải bằng chứng việc đã xong");
+  assert.equal(lv.get("lv-c6")?.verdict, "KEEP_OPEN", "vận đơn còn 'Chờ lấy hàng' thì ĐVVC chưa cầm hàng — vẫn kịp xác nhận SĐT (AGENTS.md mục 41)");
+  assert.equal(lv.get("lv-c7")?.verdict, "AUTO_RESOLVE", "đơn đã huỷ: không còn gì để xác nhận trước khi gửi");
+  assert.equal(lv.get("lv-c8")?.verdict, "AUTO_RESOLVE", "ĐVVC đã lấy hàng: bước trước-khi-gửi đã qua");
+
+  const lvThat = await applyStaleReconciliation({ dryRun: false, actor: "test:cs-liveness" });
+  assert.ok(lvThat.closed >= 5, "chạy thật phải đóng đủ năm case đã hết việc");
+  const trangThai = async (id: string) => (await db.query.csCases.findFirst({ where: eq(schema.csCases.id, id) }))?.status;
+  for (const id of ["lv-c1", "lv-c3", "lv-c4cu", "lv-c7", "lv-c8"]) assert.equal(await trangThai(id), "AUTO_RESOLVED", `${id} phải được đóng MỀM`);
+  assert.equal(await trangThai("lv-c2"), "OPEN", "lv-c2 còn việc thì KHÔNG được đóng");
+  for (const id of ["lv-c4", "lv-c5", "lv-c6", "lv-c9"]) assert.equal(await trangThai(id), "IN_PROGRESS", `${id} phải giữ nguyên`);
+  assert.equal((await applyStaleReconciliation({ dryRun: false, actor: "test:cs-liveness" })).closed, 0, "chạy lại là không-thao-tác");
+
   console.log(
     `✓ Máy sinh case hiểu câu: ca gốc “Yến Ruby” (giả định) KHÔNG sinh việc trả hàng · bốn cửa theo đúng thứ tự (thời gian → người nói → CHỨNG TỪ → tin cậy) · chứng từ BÁC model (POS đã xác nhận / đã có vận đơn / đơn đã xong) · mất AI thì từ khoá KHÔNG tạo việc còn đường xác định vẫn chạy · bộ đánh giá ${boDanhGia.length} ca: độ chính xác ${(doChinhXac * 100).toFixed(0)}% · độ phủ ${(doPhu * 100).toFixed(0)}% · báo nhầm ${(tyLeBaoNham * 100).toFixed(0)}% · ${deXem} ca để người xem · một đoạn sự việc một việc · bản ghi không chứa dòng suy nghĩ · case hết lý do tồn tại tự rời hàng đợi (đóng MỀM có lý do, việc bàn khác và việc có người cầm thì KHÔNG, chạy lại là không-thao-tác)`,
   );

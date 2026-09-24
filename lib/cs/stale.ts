@@ -1,7 +1,9 @@
 import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { CARRIER_HANDOFF_STAGES } from "@/lib/constants/carrier-handoff";
 import { checkEligibility, type CaseFacts } from "@/lib/constants/case-semantics";
-import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
+import { CS_BOT_ASSIGNEES, CS_BOT_SOURCES, CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
+import { checkLiveness, type LivenessFacts } from "@/lib/constants/cs-liveness";
 import { isOrderMaterialized } from "@/lib/constants/order-materialized";
 import { reconcileOrderNotCreated, type ReconcileResult } from "@/lib/cs/reconcile-order-created";
 import { rowsOf } from "@/lib/sql-rows";
@@ -69,6 +71,12 @@ type Row = {
   conv_inserted_at: string | null;
   ship_total: number;
   ship_active: number;
+  case_ship_stage: string | null;
+  case_ship_final: boolean | null;
+  newer_failure: boolean;
+  order_ship_active: number;
+  order_ship_handed_off: number;
+  order_ship_settled: number;
 };
 
 /** Chặng cuối đời của một đơn — dùng chung định nghĩa với `lib/cs/chat-detect.ts`. */
@@ -80,7 +88,8 @@ const FINAL_STAGES = new Set(["DELIVERED", "PAID", "RETURNED", "CANCELLED", "DEL
  * Không đặt truy vấn trong vòng lặp: hàng đợi production có hàng trăm case đang mở, và một lượt
  * đối chiếu N+1 sẽ chạy hàng nghìn câu lệnh cho một việc vốn chỉ cần một.
  */
-async function loadOpenCases(): Promise<Row[]> {
+async function loadOpenCases(ids?: readonly string[]): Promise<Row[]> {
+  if (ids && !ids.length) return [];
   const db = await getDb();
   return rowsOf<Row>(
     await db.execute(sql`
@@ -89,7 +98,26 @@ async function loadOpenCases(): Promise<Row[]> {
              c.status,
              c.title,
              c.created_at,
-             (coalesce(c.assignee, '') <> '' or coalesce(c.resolution, '') <> '') as cham_tay,
+             /*
+               CÓ NGƯỜI THẬT ĐÃ CHẠM VÀO — không phải "ô chữ khác rỗng".
+
+               Bản cũ đọc "assignee <> '' or resolution <> ''". Nhưng bot giao-không-thành và bot
+               xác nhận SĐT tự ghi assignee = 'Bot ERP' và một câu resolution ngay khi nhắn khách,
+               nên MỌI case bot đã nhắn đều bị coi là "có người cầm" và máy không bao giờ đóng
+               chúng nữa — đúng loại case chiếm đa số hàng đợi (AGENTS.md mục 36: tên một job không
+               phải một con người).
+
+               Chứng cứ người thật: người phụ trách không phải bot · khoá tài khoản phụ trách · một
+               dòng lịch sử case do tài khoản ghi · một lượt sửa có nhật ký của tài khoản · ô kết
+               luận của case KHÔNG do bot sinh (case tay / case từ hội thoại chỉ có người ghi ô đó).
+             */
+             (
+               (coalesce(c.assignee, '') <> '' and c.assignee not in ${[...CS_BOT_ASSIGNEES]})
+               or c.assignee_user_id is not null
+               or (coalesce(c.resolution, '') <> '' and c.source not in ${[...CS_BOT_SOURCES]})
+               or exists (select 1 from cs_case_events e where e.case_id = c.id and e.actor_id is not null)
+               or exists (select 1 from audit_logs a where a.entity = 'CS_CASE' and a.entity_id = c.id and a.user_id is not null)
+             ) as cham_tay,
              o.stage::text     as order_stage,
              o.system_id       as order_system_id,
              o.inserted_at     as order_inserted_at,
@@ -97,12 +125,25 @@ async function loadOpenCases(): Promise<Row[]> {
              oc.system_id      as conv_system_id,
              oc.inserted_at    as conv_inserted_at,
              sh.tong           as ship_total,
-             sh.dang_chay      as ship_active
+             sh.dang_chay      as ship_active,
+             cs_s.stage::text  as case_ship_stage,
+             cs_s.is_final     as case_ship_final,
+             (c.kind = 'DELIVERY_FAILED' and exists (
+                select 1 from cs_cases c2
+                 where c2.kind = 'DELIVERY_FAILED'
+                   and c2.id <> c.id
+                   and c2.dedupe_key like 'failed-delivery:%'
+                   and split_part(c2.dedupe_key, ':', 2) = split_part(c.dedupe_key, ':', 2)
+                   and c2.created_at > c.created_at
+             )) as newer_failure,
+             osh.dang_chay     as order_ship_active,
+             osh.da_ban_giao   as order_ship_handed_off,
+             osh.da_chot       as order_ship_settled
         from cs_cases c
         left join orders o on o.id = c.order_id
         -- Đơn của HỘI THOẠI: case chưa gắn đơn vẫn có thể đã có đơn lên bằng đường khác.
         left join lateral (
-          select o2.stage::text as stage, o2.system_id, o2.inserted_at
+          select o2.id, o2.stage::text as stage, o2.system_id, o2.inserted_at
             from orders o2
            where coalesce(c.conversation_id, '') <> ''
              and o2.conversation_id = c.conversation_id
@@ -116,7 +157,21 @@ async function loadOpenCases(): Promise<Row[]> {
            where (c.order_id is not null and s.order_id = c.order_id)
               or (coalesce(c.customer_phone, '') <> '' and s.receiver_phone = c.customer_phone)
         ) sh on true
-       where c.status in ('OPEN','IN_PROGRESS')`),
+        -- Kiện của ĐÚNG đơn case nói tới (theo order_id, không theo SĐT) — lib/constants/cs-liveness.ts.
+        left join lateral (
+          select count(*) filter (where s.is_final = false)::int as dang_chay,
+                 count(*) filter (where s.stage::text in ${[...CARRIER_HANDOFF_STAGES]} or s.picked_up_at is not null)::int as da_ban_giao,
+                 count(*) filter (where s.is_final and s.stage::text in ('DELIVERED','RETURNED'))::int as da_chot
+            from shipments s
+           where s.order_id = coalesce(c.order_id, oc.id)
+        ) osh on true
+        -- Vận đơn sinh ra case giao-không-thành: khoá "failed-delivery:<shipmentId>:<ngày>".
+        left join shipments cs_s
+          on c.kind = 'DELIVERY_FAILED'
+         and c.dedupe_key like 'failed-delivery:%'
+         and cs_s.id = split_part(c.dedupe_key, ':', 2)
+       where c.status in ('OPEN','IN_PROGRESS')
+         ${ids ? sql`and c.id in ${[...ids]}` : sql``}`),
   );
 }
 
@@ -136,21 +191,52 @@ function factsOf(r: Row): CaseFacts {
   };
 }
 
+function livenessOf(r: Row): LivenessFacts {
+  return {
+    caseShipment: r.case_ship_stage ? { stage: r.case_ship_stage, isFinal: Boolean(r.case_ship_final) } : null,
+    newerFailureCase: Boolean(r.newer_failure),
+    orderStage: r.order_stage ?? r.conv_stage,
+    orderShipmentsActive: Number(r.order_ship_active ?? 0),
+    orderShipmentsHandedOff: Number(r.order_ship_handed_off ?? 0),
+    orderShipmentsSettled: Number(r.order_ship_settled ?? 0),
+  };
+}
+
 /**
- * Đọc-KHÔNG-ghi: phân loại toàn bộ hàng đợi đang mở.
+ * Đọc-KHÔNG-ghi: phân loại toàn bộ hàng đợi đang mở (hoặc đúng các case `ids` — màn hình dùng để
+ * gắn nhãn "điều kiện đã hết" lên dòng mà máy không được đóng hộ vì đã có người cầm).
  *
  * `ORDER_NOT_CREATED` cố ý KHÔNG có mặt ở đây — nó đi qua máy riêng của nó (xem đầu tệp), và số
  * của nó được gộp vào ở `staleReport`.
  */
-export async function assessOpenCases(): Promise<StaleAssessment[]> {
-  const rows = await loadOpenCases();
+export async function assessOpenCases(ids?: readonly string[]): Promise<StaleAssessment[]> {
+  const rows = await loadOpenCases(ids);
   const out: StaleAssessment[] = [];
   for (const r of rows) {
     const kind = r.kind as CsKind;
     if (kind === "ORDER_NOT_CREATED") continue;
     const facts = factsOf(r);
-    const dieuKien = checkEligibility(kind, facts);
     const base = { id: r.id, kind, status: r.status, title: r.title, createdAt: new Date(r.created_at), facts, humanTouched: Boolean(r.cham_tay) };
+    const dieuKien = checkEligibility(kind, facts);
+    /*
+      CHỨNG TỪ ĐÃ ĐI TIẾP CHƯA — `lib/constants/cs-liveness.ts`.
+
+      Loại do máy sinh từ vận đơn / đơn (giao không thành, xác nhận SĐT) không có mặt trong
+      `CASE_ELIGIBILITY` và trước bản này rơi vào nhánh "chưa khai điều kiện ⇒ giữ nguyên" — mãi
+      mãi. Với loại ĐÃ khai, luật này chỉ BỔ SUNG khi bộ gác cũ còn cho là có việc (vd. POS trễ
+      hơn ĐVVC); bộ gác cũ đã kết luận thì lý do của nó đứng nguyên. `null` = không kết luận được
+      ⇒ đi tiếp luật cũ, không đoán.
+    */
+    const chuaKhai = !dieuKien.ok && dieuKien.reason.includes("chưa khai điều kiện chứng từ");
+    const song = chuaKhai || dieuKien.ok ? checkLiveness(kind, livenessOf(r)) : null;
+    if (song && song.alive) {
+      out.push({ ...base, verdict: "KEEP_OPEN", reason: "Chứng từ vẫn đỡ được việc này" });
+      continue;
+    }
+    if (song && !song.alive) {
+      out.push({ ...base, verdict: r.cham_tay ? "NEEDS_REVIEW" : "AUTO_RESOLVE", reason: song.reason });
+      continue;
+    }
     /*
       LOẠI CHƯA KHAI ĐIỀU KIỆN ⇒ GIỮ NGUYÊN.
 
@@ -158,7 +244,7 @@ export async function assessOpenCases(): Promise<StaleAssessment[]> {
       Ở đây nó là mặc định SAI: "chưa ai viết luật cho loại này" không phải bằng chứng rằng việc đã
       xong. Phân biệt hai thứ bằng chính sổ đăng ký, không bằng câu chữ của lý do.
     */
-    if (!dieuKien.ok && dieuKien.reason.includes("chưa khai điều kiện chứng từ")) {
+    if (chuaKhai) {
       out.push({ ...base, verdict: "KEEP_OPEN", reason: "Loại này chưa khai điều kiện đóng — máy KHÔNG tự đóng" });
       continue;
     }

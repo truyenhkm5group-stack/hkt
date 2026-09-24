@@ -22,6 +22,8 @@ import { NESTED_ROW, ROW_EXPANDED, ROW_PARENT, ROW_SELECTED, STICKY_ACTIONS, STI
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { CsStaff } from "@/app/(dashboard)/cs/cs-table";
+import { StaleHintChip } from "@/app/(dashboard)/cs/stale-hint";
+import type { CsStaleHint } from "@/lib/queries/cs";
 
 /**
  * ═══════ MỘT KHÁCH — MỘT DÒNG VIỆC, VÀ LÀM ĐƯỢC VIỆC NGAY TRÊN DÒNG ĐÓ ═══════
@@ -64,6 +66,8 @@ export type CustomerQueueCase = {
   dueAt: string | null;
   slaBucket: CsSlaBucket;
   chatUrl: string | null;
+  /** Chứng từ đã đi tiếp mà case vẫn mở — `lib/queries/cs.ts::staleHints`. */
+  staleHint: CsStaleHint | null;
 };
 
 export type CustomerQueueRow = {
@@ -264,6 +268,18 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
                             +{r.kinds.length - 2}
                           </Badge>
                         ) : null}
+                        {(() => {
+                          const het = openCases.filter((c) => c.staleHint);
+                          if (!het.length) return null;
+                          return (
+                            <span
+                              className="inline-flex shrink-0 items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900 dark:bg-amber-950/60 dark:text-amber-200"
+                              title={het.map((c) => `${CS_KIND_LABEL[c.kind as CsKind] ?? c.kind}: ${c.staleHint?.reason ?? ""}`).join(" · ")}
+                            >
+                              {het.length}/{openCases.length} hết việc?
+                            </span>
+                          );
+                        })()}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -371,6 +387,7 @@ function CaseLine({ c, canWrite, busy, currentUser, onRun }: { c: CustomerQueueC
         {c.title}
       </span>
       <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", CS_STATUS_TONE[c.status as CsStatus])}>{CS_STATUS_LABEL[c.status as CsStatus] ?? c.status}</span>
+      {dong ? <StaleHintChip hint={c.staleHint} /> : null}
       {dong ? <SlaChip bucket={c.slaBucket} dueAt={c.dueAt} className="text-[11px]" /> : null}
       <span className="text-[11px] text-muted-foreground">{c.assignee || "chưa ai nhận"}</span>
       {c.orderId ? (
