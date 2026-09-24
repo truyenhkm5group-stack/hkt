@@ -307,6 +307,7 @@ export async function testStockShortageDb(db: Db) {
     // MỘT VỊ NGỮ: tổng số cái đơn giữ theo mẫu = cột "đã chốt" của sổ kho / Kế hoạch SX.
     const plan = await getReplenishmentPlan();
     const planDen = plan.rows.find((r) => r.variantId === `${P}den-m`);
+    assert.equal(den.onHand, planDen?.stock, "tồn đọc bằng phép gộp ĐÃ LỌC theo mẫu phải bằng đúng tồn của phép gộp toàn shop — lọc chỉ được bớt việc, không được đổi số");
     assert.equal(den.reserved, planDen?.committed, "số cái đơn giữ phải BẰNG cột 'đã chốt' của sổ kho — hai vị ngữ là hai con số");
     assert.equal(den.proposeQty, suggestedNetOfOpenPo(planDen?.suggested ?? 0, 1));
 

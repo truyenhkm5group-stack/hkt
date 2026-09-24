@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE, VTP_DESTROYED } from "@/lib/queries/return-rate";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
@@ -79,8 +79,13 @@ const OUT_RETURN_HANDLED = sql`(${SHIPMENT_LEFT_WAREHOUSE} and ${s.returnReceive
 /**
  * Số lượng theo mẫu mã ở phía ĐƠN HÀNG (grain: dòng đơn × vận đơn của đơn đó).
  * `shipped` là số THỰC SỰ RỜI KHO — trụ cột của phương trình tồn kho.
+ *
+ * `onlyVariantIds` (tuỳ chọn) lọc NGAY TRONG phép gộp, trước `group by` — cho nơi chỉ cần vài mẫu
+ * (bảng thiếu hàng: đúng các mẫu đang có đơn giữ). Không truyền thì câu lệnh y hệt như cũ. Lọc ở
+ * NGOÀI (nối xong rồi `where pv.id in …`) không cứu được: Postgres vẫn gộp toàn bộ dòng đơn của
+ * shop rồi mới vứt đi phần không dùng. Giá trị từng mẫu không đổi, vì phép gộp là theo mẫu.
  */
-export function variantSalesSubquery(db: Db) {
+export function variantSalesSubquery(db: Db, onlyVariantIds?: string[]) {
   return db
     .select({
       variantId: oi.variantId,
@@ -113,12 +118,13 @@ export function variantSalesSubquery(db: Db) {
         sql`(${s.id} is null or ${coo.computedAt} >= ${s.updatedAt})`,
       ),
     )
+    .where(onlyVariantIds ? inArray(oi.variantId, onlyVariantIds) : undefined)
     .groupBy(oi.variantId)
     .as("vsales");
 }
 
-/** Tổng các phiếu kho theo mẫu mã, tách theo loại phiếu để theo dõi riêng nhập mới / tái nhập / điều chỉnh / xuất tay. */
-export function variantReceiptsSubquery(db: Db) {
+/** Tổng các phiếu kho theo mẫu mã, tách theo loại phiếu để theo dõi riêng nhập mới / tái nhập / điều chỉnh / xuất tay. `onlyVariantIds`: như `variantSalesSubquery`. */
+export function variantReceiptsSubquery(db: Db, onlyVariantIds?: string[]) {
   return db
     .select({
       variantId: ri.variantId,
@@ -138,6 +144,7 @@ export function variantReceiptsSubquery(db: Db) {
     })
     .from(ri)
     .innerJoin(r, eq(r.id, ri.receiptId))
+    .where(onlyVariantIds ? inArray(ri.variantId, onlyVariantIds) : undefined)
     .groupBy(ri.variantId)
     .as("vreceipts");
 }

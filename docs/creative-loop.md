@@ -90,9 +90,10 @@ mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của 
 Cấu hình (`settings` khoá `creative.config`) chỉ LÀM HẸP được, không nới. Trần tiền theo ngày đếm
 trên SỔ `creative_fb_actions` (lượt đã áp), không đếm trên cấu hình.
 
-Ba lớp chặn tiêu quá, độc lập nhau: **(a)** cổng thuần từ chối trước khi gọi · **(b)** ngân sách TRỌN
+Bốn lớp chặn tiêu quá, độc lập nhau: **(a)** cổng thuần từ chối trước khi gọi · **(b)** ngân sách TRỌN
 ĐỜI + `end_time` trên chính Facebook — ERP có chết cũng không tiêu quá · **(c)** chốt cứng env đọc lại
-ngay trước lời gọi mạng.
+ngay trước lời gọi mạng · **(d)** công tắc tắt khẩn cấp `ads.write.kill` đọc lại ngay trước MỖI lời gọi
+ghi, không cần deploy (§9).
 
 ## 4. Chấm mẫu (`judgeVariant`, hàm thuần)
 
@@ -103,6 +104,32 @@ khung) → đang chạy `RUNNING` → hết khung, đợi đơn về `AWAITING_O
 
 **Luật trên tỷ số có mẫu số 0 không kích hoạt** (mục 42). Muốn tắt mẫu "tiêu 100K mà không có tin
 nhắn nào" thì viết luật trên SỐ ĐẾM: `{ metric: "messages", op: "lt", value: 1, minSpendVnd: 100000 }`.
+
+**"0 tin nhắn" là số ĐO ĐƯỢC, không phải CHƯA BIẾT** (điều tra 24/09/2026, không đổi mã). Câu hỏi:
+`variantMetrics` cộng `coalesce(sum(ad_spends.messages), 0)` và cột ấy `NOT NULL DEFAULT 0` — liệu
+có dòng chi tiêu nào mà số tin nhắn thật ra là *không biết* nhưng bị ghi 0, để luật "tiêu 150K mà
+0 tin nhắn" tắt nhầm mẫu? Kết luận: với tập dòng mà vòng mẫu đọc, **không có trạng thái chưa biết
+thật**. Căn cứ:
+
+- Vòng mẫu chỉ đọc dòng `grain = 'AD'` khớp `ad_id` của chính mẩu nó đăng. Dòng hạt `AD` chỉ sinh ra
+  từ `lib/integrations/facebook/sync.ts::dungDong` — dòng gõ tay (`createAdSpend`) và dòng hạt
+  chiến dịch không có `ad_id`, nên không bao giờ vào phép cộng này.
+- Mỗi dòng hạt `AD` dựng từ MỘT dòng insights mà lời gọi LUÔN xin trường `actions`
+  (`client.ts::insightItems`). Insights API của Facebook chỉ trả các `action_type` có giá trị khác 0
+  và bỏ hẳn mảng `actions` khi không có hành động nào — nên "vắng" trong một dòng đã trả về có nghĩa
+  là 0, không phải "không lấy được". Không có nhánh nào ghi `spend` mà bỏ `actions` của cùng dòng.
+- Lượt đồng bộ lỗi (hoặc cấp mẩu lỗi và lùi về hạt chiến dịch) thì KHÔNG ghi dòng hạt `AD` nào cho
+  ngày ấy ⇒ `spendVnd = null` ⇒ phán quyết đã là CHƯA BIẾT sẵn (`judge.ts`, bước 2), không có "tiền
+  có, tin nhắn 0" giả.
+- Chiến dịch không phải mục tiêu Tin nhắn: 0 vẫn là số đếm đúng (không có hội thoại nào bắt đầu);
+  vòng mẫu sao chép cài đặt nhóm từ mẩu mẫu trong chiến dịch TEST mục tiêu Tin nhắn (§7), nên luật
+  trên `messages` áp đúng loại quảng cáo. Đặt luật ấy cho một mẩu mẫu không nhắn tin là lỗi CẤU HÌNH,
+  và bằng `null` thì cũng không sửa được.
+
+Rủi ro còn lại là ĐỘ TƯƠI, không phải chỗ trống: Facebook có thể điều chỉnh số hành động vài ngày sau;
+đồng bộ ghi đè 3 ngày gần nhất mỗi lượt. Luật tắt nên kèm `minSpendVnd` đủ lớn để không kết luận trên
+vài giờ dữ liệu đầu tiên. Nếu sau này có một nguồn chi tiêu hạt `AD` KHÔNG xin `actions`, lúc ấy mới
+cần cột `messages` nhận `NULL` — và phải kèm luật chấm coi `null` là "chưa đủ căn cứ".
 
 **Đơn chốt** = đơn Pancake mang `ad_id` của mẩu, `ORDER_OUTCOME <> 'CANCELLED'`. Màn hình in cạnh nó
 số đơn giao thành công và hoàn (theo `ORDER_OUTCOME`), vì mẫu nhiều đơn mà hoàn cao vẫn là mẫu lỗ.
@@ -271,7 +298,7 @@ Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `l
 | Bật `enabled` ở tab Cấu hình | công tắc mềm của vòng |
 | Bấm **Nhập ảnh sản phẩm từ Pancake** (hoặc tải tay ảnh sản phẩm thật) cho các mã muốn test | máy không sinh mẫu cho sản phẩm nó không nhìn thấy |
 | Bấm **Nhập mẫu thắng / mẫu tốt từ Facebook** (token hiện có `ads_read` là đủ — chỉ GET) | chọn mẩu nào làm mẫu cha là việc của người |
-| Chốt ba con số "đề xuất" ở §3 | ngưỡng tiền |
+| ~~Chốt ba con số "đề xuất" ở §3~~ — **ĐÃ CHỐT 24/09/2026** (`b32a1fac`: 200.000đ/lượt · 1.000.000đ/ngày · 2 USD/ngày) | ngưỡng tiền |
 
 ## 8. BLOCKED / HUMAN GATE
 
@@ -279,3 +306,51 @@ Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `l
 - ⏸ Luật tắt / luật giữ — chủ shop tự điền (đã nói 24/09).
 - ⏸ Quyền: duyệt lô và tiêu thêm đang dùng lại `expenses:write` (giống bàn tay Nấc 3). Một quyền riêng
   hẹp hơn là đổi vai trò (mục 7) ⇒ chủ shop quyết.
+
+## 9. Vận hành: công tắc tắt khẩn cấp đường ghi quảng cáo
+
+`ADS_WRITE_ENABLED` tắt được mọi thứ nhưng là biến môi trường: đổi phải deploy lại, 15–20 phút. Công
+tắc khẩn cấp đóng đường ghi trong vài giây. Luật: `lib/constants/ads-kill-switch.ts`; chốt đọc ở ĐÚNG
+MỘT chỗ — `graphPost()` trong `lib/integrations/facebook/ads-write.ts`, ngay trước lời gọi mạng, không
+đệm. Kiểm thử: `tests/ads-kill-switch.test.ts` (kéo ⇒ 0 lời gọi ghi ra mạng; lỗi đọc ⇒ chặn).
+
+**Kéo công tắc** (một trong hai cách, có hiệu lực ở lời gọi Facebook KẾ TIẾP):
+
+- Màn hình `/marketing/creatives` → tab **Đang chạy** hoặc **Cấu hình** → ô *Công tắc tắt khẩn cấp* →
+  ghi lý do → bấm. Quyền: `expenses:write` (người duyệt lô) hoặc `settings:manage`.
+- Ops, không cần giao diện: workflow **ops-vps** → `set-setting` với arg (GIỮ dấu nháy đơn — lệnh
+  đi qua `sh -c`; lý do không được chứa dấu nháy đơn):
+  `ads.write.kill '{"killed":true,"reason":"<vì sao>","by":"ops","at":"<giờ>"}'`.
+  `set-setting` GỘP vào giá trị cũ, nên luôn ghi đủ `by`/`at` để không giữ lại tên người bấm trước.
+
+**Nhả công tắc:** màn hình (chỉ `settings:manage` — nhả là cho máy tiêu tiền tiếp), hoặc ops
+`set-setting` arg `ads.write.kill '{"killed":false,"reason":"<vì sao>","by":"ops","at":"<giờ>"}'`. Mọi lượt bấm trên màn hình ghi nhật
+ký (`ADS_WRITE_KILL_ENGAGE` / `ADS_WRITE_KILL_RELEASE`) kèm người, lúc, lý do.
+
+**Khi công tắc KÉO, cái gì bị chặn, cái gì vẫn đi:**
+
+| Lời gọi | Kéo công tắc |
+|---|---|
+| Tải ảnh · tạo bài · tạo nhóm · tạo mẩu | CHẶN |
+| Tiêu thêm (đặt lại ngân sách trọn đời) | CHẶN |
+| Đổi ngân sách ngày chiến dịch — kể cả HẠ | CHẶN |
+| Tạm dừng nhóm / chiến dịch (`status = PAUSED`, không kèm trường nào khác) | **VẪN ĐI** |
+
+Vì sao tạm dừng vẫn đi: người kéo công tắc muốn TIỀN NGỪNG CHẢY. Nhóm test đã tạo vẫn tiêu tới
+`end_time`, và luật tắt sớm là thứ duy nhất của ERP dừng được chúng — chặn nó là giữ tiền chảy đúng
+lúc cần nó dừng. Tạm dừng đảo ngược được bằng một cú bấm trong Ads Manager; tiền đã tiêu thì không.
+Phân loại đọc từ CHÍNH các trường sẽ gửi đi (đúng một trường `status` = `PAUSED`), không từ một cờ nơi
+gọi khai. Hạ ngân sách ngày vẫn bị chặn vì cổng không tự kiểm được chiều mà không gọi Facebook, và một
+lỗi đơn vị (đồng ↔ xu) trông y hệt một lượt hạ.
+
+Muốn chặn cả tạm dừng (ví dụ nghi chính luật tắt đang tắt nhầm) ⇒ đóng `ADS_WRITE_ENABLED` (chậm hơn,
+tuyệt đối).
+
+**Mọi nhánh lỗi rơi về ĐÓNG:** không đọc được CSDL, JSON hỏng, `"killed"` không phải đúng `true`/`false`
+(chuỗi `"false"`, `0`, thiếu trường) ⇒ coi như đang kéo. Không có dòng nào = chưa ai kéo = mở.
+
+**Lô đang chờ đăng khi công tắc kéo:** lượt đăng ghi một dòng `DENIED · KILL_SWITCH` vào sổ và dừng
+TRƯỚC mọi lời gọi Facebook — lô giữ nguyên ĐÃ DUYỆT, mẫu giữ nguyên, không thành `PUBLISH_FAILED`. Nhả
+trước giờ chạy ⇒ lượt kế tiếp đăng tiếp; quá giờ ⇒ lô hết hạn, không đồng nào được chi.
+
+Công tắc chỉ LÀM HẸP: `{"killed":false}` không mở được đường ghi khi `ADS_WRITE_ENABLED` đang tắt.

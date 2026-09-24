@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { getMorningPrioritiesTool } from "@/lib/ai/tools/erp";
+import { clearMemo } from "@/lib/cache";
+import { assessFbScopes, maskFbSecrets } from "@/lib/constants/fb-token-scopes";
+import { getFbTokenScopes } from "@/lib/queries/fb-token-scopes";
 import { bankExceptionScore, rankBankExceptions } from "@/lib/constants/finance-ops";
 import { MONEY_UNKNOWN, type WorkItem, type WorkMoney } from "@/lib/constants/work";
 import type { DepartmentCode } from "@/lib/constants/departments";
@@ -257,4 +260,49 @@ export async function testAutomationLadderQueries(db: Db) {
     await db.delete(b).where(sql`${b.id} like 'alad-%'`);
   }
   console.log("✓ Thang tự động hoá (CSDL): dòng tiền chưa phân loại xếp rồi mới cắt — khoản lớn treo lâu không rơi khỏi hàng đợi");
+}
+
+/**
+ * Token Facebook có quyền gì — HỎI Facebook, kết luận bằng hàm thuần. Ba chỗ dễ nói sai nhất:
+ * coi "không hỏi được" là "thiếu" (tô đỏ oan), coi quyền BỊ TỪ CHỐI là có quyền, và in token ra
+ * màn hình qua một câu lỗi chép lại URL.
+ */
+export async function testFbTokenScopes() {
+  // 1. Có ads_management ở trạng thái granted ⇒ READY; quyền đọc thiếu thì nêu riêng.
+  const du = assessFbScopes({ hasToken: true, permissions: [{ permission: "ads_management", status: "granted" }, { permission: "ads_read", status: "granted" }] });
+  assert.equal(du.state, "READY");
+  assert.deepEqual(du.missingRead, ["business_management"], "quyền ĐỌC ERP đang dùng mà token thiếu phải được nêu ra, dù quyền ghi đã đủ");
+  assert.equal(du.assetAccess, "UNKNOWN", "phân quyền TÀI SẢN không nằm trong token — không bao giờ tự nhận là đã biết");
+
+  // 2. Có tên nhưng bị TỪ CHỐI ⇒ MISSING, và câu lý do nói đúng là bị từ chối.
+  const tuChoi = assessFbScopes({ hasToken: true, permissions: [{ permission: "ads_management", status: "declined" }, { permission: "ads_read", status: "granted" }] });
+  assert.equal(tuChoi.state, "MISSING", "quyền có tên mà status = declined thì KHÔNG dùng được");
+  assert.deepEqual(tuChoi.declined, ["ads_management"]);
+  assert.match(tuChoi.reason, /TỪ CHỐI/);
+
+  // 3. Chỉ có quyền đọc ⇒ MISSING, và câu lý do chỉ đúng lối ra (tạo token MỚI).
+  const chiDoc = assessFbScopes({ hasToken: true, permissions: [{ permission: "ads_read", status: "granted" }, { permission: "business_management", status: "granted" }] });
+  assert.equal(chiDoc.state, "MISSING");
+  assert.match(chiDoc.reason, /tạo mã mới|FACEBOOK_ACCESS_TOKEN/, "phải nói: thêm quyền cho System User KHÔNG đủ — phải tạo token mới");
+
+  // 4. Không hỏi được ⇒ UNKNOWN, KHÔNG BAO GIỜ MISSING (AGENTS.md mục 0.3).
+  assert.equal(assessFbScopes({ hasToken: false, permissions: null }).state, "UNKNOWN", "chưa có token ⇒ chưa biết, không phải thiếu");
+  const loi = assessFbScopes({ hasToken: true, permissions: null, error: "Facebook: fetch failed https://graph.facebook.com/v21.0/me/permissions?access_token=EAAB1234567890abcdefXYZ" });
+  assert.equal(loi.state, "UNKNOWN", "Facebook không trả lời ⇒ chưa biết");
+  assert.ok(!loi.reason.includes("EAAB1234567890abcdefXYZ"), "câu lỗi đi lên màn hình KHÔNG được mang token (kho PUBLIC)");
+  assert.ok(loi.reason.includes("access_token=***"));
+  assert.equal(maskFbSecrets("token EAAGabcdefghijklmnopqrstu hết hạn"), "token EAA*** hết hạn", "chuỗi token Meta trần cũng bị che");
+
+  // 5. Đường truy vấn không có token ⇒ UNKNOWN mà KHÔNG gọi mạng.
+  const cu = process.env.FACEBOOK_ACCESS_TOKEN;
+  delete process.env.FACEBOOK_ACCESS_TOKEN;
+  clearMemo();
+  try {
+    const r = await getFbTokenScopes();
+    assert.equal(r.state, "UNKNOWN", "máy không có token ⇒ trang Cấu hình hiện 'chưa biết', không sập và không đỏ oan");
+  } finally {
+    if (cu !== undefined) process.env.FACEBOOK_ACCESS_TOKEN = cu;
+    clearMemo();
+  }
+  console.log("✓ Quyền token Facebook: đủ / thiếu / bị từ chối / chưa biết tách bạch · không hỏi được KHÔNG phải thiếu · câu lỗi không mang token");
 }

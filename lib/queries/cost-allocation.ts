@@ -1,5 +1,4 @@
 import { sql, type SQL } from "drizzle-orm";
-import type { Db } from "@/db";
 import { schema } from "@/db";
 import { allocateExpenseToRange, type AllocatableExpense } from "@/lib/constants/cost-allocation";
 import { COVERAGE_GATED_EXPENSE_CATEGORIES, EVIDENCE_ONLY_EXPENSE_CATEGORIES, HARD_EXCLUDED_EXPENSE_CATEGORIES } from "@/lib/constants/cost-authority";
@@ -70,7 +69,7 @@ export function allocatedExpenseSum(from: Date | null, to: Date | null): SQL<num
 }
 
 /**
- * ─────────── CHI PHÍ ĐÃ PHÂN BỔ THEO TỪNG NGÀY (cho biểu đồ / bảng theo ngày) ───────────
+ * ─────────── RẢI MỘT KHOẢN CHI RA TỪNG NGÀY (cho biểu đồ / bảng theo ngày) ───────────
  *
  * Biểu đồ theo ngày là chỗ bug phân bổ lộ ra rõ nhất: tiền thuê cả tháng đổ vào đúng ngày ghi sổ
  * tạo một cột dựng đứng, những ngày còn lại chi phí bằng 0. Nhìn biểu đồ đó sẽ kết luận "ngày 01
@@ -80,54 +79,43 @@ export function allocatedExpenseSum(from: Date | null, to: Date | null): SQL<num
  * chỉ có ĐÚNG MỘT công thức phân bổ (`allocateExpenseToRange`) thay vì thêm một bản SQL thứ ba phải
  * đi khoá bằng kiểm thử. Vòng lặp bị chặn bởi chính kỳ hiệu lực của từng khoản nên không bao giờ
  * chạy vô hạn dù báo cáo chọn "Toàn bộ".
+ *
+ * ─── HÀM THUẦN, VÀ CỐ Ý KHÔNG BIẾT GÌ VỀ THẨM QUYỀN ───
+ *
+ * Bản trước (`allocatedExpenseByDay`) tự đọc CẢ bảng Chi phí rồi chia hai rổ "quảng cáo" / "còn
+ * lại". Nó bỏ qua sổ thẩm quyền (AGENTS.md mục 15 + 18): khoản ADS gõ tay bị cộng CHỒNG lên chi
+ * tiêu thật của tài khoản quảng cáo, còn PURCHASE, cước gõ tay không khai điều chỉnh và nhóm Lương
+ * khi bảng Lương đã cầm quyền đều lọt vào chi phí vận hành — trong khi `getOperatingCost()` loại
+ * đúng những khoản ấy. Biểu đồ theo ngày và tổng của cùng kỳ vì thế nói hai con số.
+ *
+ * Nay hàm này chỉ còn là PHÉP RẢI: nhận MỘT khoản, trả phần của từng ngày. Chọn khoản nào được rải
+ * là việc của Profit Engine (`lib/queries/cost-engine.ts::getOperatingCostByDay`), và
+ * `tests/cost-allocation.test.ts` chặn ở mức mã nguồn mọi tệp khác gọi thẳng vào đây.
  */
-export async function allocatedExpenseByDay(
-  db: Db,
-  from: Date | null,
-  to: Date | null,
-): Promise<Map<string, { ads: number; other: number }>> {
-  const rows = await db
-    .select({
-      category: e.category,
-      amount: e.amount,
-      occurredAt: e.occurredAt,
-      allocationMethod: e.allocationMethod,
-      periodStart: e.periodStart,
-      periodEnd: e.periodEnd,
-    })
-    .from(e)
-    .where(expenseInRange(from, to));
+export function spreadExpenseByDay(item: AllocatableExpense, from: Date | null, to: Date | null, add: (day: string, amount: number) => void): void {
+  const prorata = item.allocationMethod === "PERIOD_PRORATA" && item.periodStart && item.periodEnd;
+  if (!prorata) {
+    const amount = allocateExpenseToRange(item, from, to);
+    if (amount) add(vnDayKey(item.occurredAt), amount);
+    return;
+  }
+  // Chỉ quét phần chồng lấn giữa kỳ hiệu lực và khoảng báo cáo — không quét cả khoảng báo cáo.
+  const start = from && from > item.periodStart! ? from : item.periodStart!;
+  const end = to && to < item.periodEnd! ? to : item.periodEnd!;
+  for (let day = startOfVnDay(start); day <= end; day = new Date(day.getTime() + 86_400_000)) {
+    const dayEnd = new Date(day.getTime() + 86_400_000 - 1);
+    const amount = allocateExpenseToRange(item, day, dayEnd > end ? end : dayEnd);
+    if (amount) add(vnDayKey(day), amount);
+  }
+}
 
-  const out = new Map<string, { ads: number; other: number }>();
-  const add = (day: string, isAds: boolean, amount: number) => {
-    if (!amount) return;
-    const cur = out.get(day) ?? { ads: 0, other: 0 };
-    if (isAds) cur.ads += amount;
-    else cur.other += amount;
-    out.set(day, cur);
-  };
-
-  for (const row of rows) {
-    const item: AllocatableExpense = {
-      amount: Number(row.amount),
-      occurredAt: row.occurredAt,
-      allocationMethod: row.allocationMethod as AllocatableExpense["allocationMethod"],
-      periodStart: row.periodStart,
-      periodEnd: row.periodEnd,
-    };
-    const isAds = row.category === "ADS";
-    const prorata = item.allocationMethod === "PERIOD_PRORATA" && item.periodStart && item.periodEnd;
-    if (!prorata) {
-      add(vnDayKey(item.occurredAt), isAds, allocateExpenseToRange(item, from, to));
-      continue;
-    }
-    // Chỉ quét phần chồng lấn giữa kỳ hiệu lực và khoảng báo cáo — không quét cả khoảng báo cáo.
-    const start = from && from > item.periodStart! ? from : item.periodStart!;
-    const end = to && to < item.periodEnd! ? to : item.periodEnd!;
-    for (let day = startOfVnDay(start); day <= end; day = new Date(day.getTime() + 86_400_000)) {
-      const dayEnd = new Date(day.getTime() + 86_400_000 - 1);
-      add(vnDayKey(day), isAds, allocateExpenseToRange(item, day, dayEnd > end ? end : dayEnd));
-    }
+/** Mọi ngày (theo lịch Việt Nam) của khoảng `[from, to]`, kèm số ngày thật của tháng chứa ngày đó. */
+export function vnDaysOfRange(from: Date, to: Date): { day: string; daysInMonth: number }[] {
+  const out: { day: string; daysInMonth: number }[] = [];
+  for (let day = startOfVnDay(from); day <= to; day = new Date(day.getTime() + 86_400_000)) {
+    const key = vnDayKey(day);
+    const [y, m] = key.split("-").map(Number);
+    out.push({ day: key, daysInMonth: new Date(Date.UTC(y, m, 0)).getUTCDate() });
   }
   return out;
 }

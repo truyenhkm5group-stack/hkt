@@ -33,6 +33,7 @@
 import { and, sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, REPORTABLE_ORDER } from "@/lib/queries/return-rate";
+import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import { OM_CONFLICT, OM_EVIDENCE, OM_MARKETER_ID, OM_STATE, orderMarketerJoin, summarizeMarketerCoverage } from "@/lib/queries/order-marketer";
 import { MARKETER_EVIDENCE, MARKETER_UNRESOLVED, type MarketerCoverage, type MarketerEvidence, type MarketerLinkState } from "@/lib/constants/marketer-attribution";
 import { rowsOf } from "@/lib/sql-rows";
@@ -294,7 +295,7 @@ async function baseRows(f: ReasonFilter) {
           phải riêng phần đã ngã ngũ. Lấy hẹp rồi cộng thêm một truy vấn thứ hai để có mẫu số là
           mở đường cho hai con số "đã gửi" cùng tồn tại trên một màn hình.
        */
-       where b.outcome in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')${locSauCung}
+       where b.outcome in (${sql.raw(ELIGIBLE_SENT_SQL)})${locSauCung}
     `)),
   );
 

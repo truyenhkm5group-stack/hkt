@@ -1,12 +1,15 @@
 import { and, eq, sql, sum, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { allocatedExpenseByDay } from "@/lib/queries/cost-allocation";
+import { getOperatingCostByDay, type OperatingCostByDay } from "@/lib/queries/cost-engine";
+import { COST_AUTHORITY, COST_SOURCE_LABEL, EXPENSE_CATEGORY_ECONOMIC } from "@/lib/constants/cost-sources";
+import { EXPENSE_CATEGORY_LABEL } from "@/lib/constants/expenses";
 import { lineUnitCost } from "@/lib/queries/cogs";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { marketerLabel, marketerNames as employeeNames } from "@/lib/queries/order-marketer";
 import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
+import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { AD_MESSAGES, spendPeriod } from "@/lib/queries/ads-roas";
 import { metricScope } from "@/lib/queries/metrics";
@@ -472,7 +475,7 @@ async function productDayRows(db: Db, period: Period, basis: MarketingBasis, f: 
   const returned = sql`${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)})`;
   const booked = sql`${facts.outcome} <> 'CANCELLED'`;
   const open = sql`${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)})`;
-  const shipped = sql`${facts.outcome} in ('DELIVERED','RETURNED','RETURNED_BY_RULE','IN_TRANSIT')`;
+  const shipped = sql`${facts.outcome} in (${sql.raw(ELIGIBLE_SENT_SQL)})`;
   const live = sql`not ${facts.duplicate}`;
   const cnt = (cond: SQL) => sql<number>`count(distinct ${facts.orderId}) filter (where ${cond} and ${live})`;
   const money = (expr: SQL, cond: SQL) => sql<number>`coalesce(sum(${expr}) filter (where ${cond} and ${live}), 0)`;
@@ -584,7 +587,7 @@ async function buildDays(
   basis: MarketingBasis,
   filters: MarketingFilters,
   opts: { skipUnits?: boolean; rates?: ProductDeliveryRates | null } = {},
-): Promise<{ rows: MarketingDailyRow[]; spendObservedThrough: string | null; spendDimensionKnown: boolean | null }> {
+): Promise<{ rows: MarketingDailyRow[]; spendObservedThrough: string | null; spendDimensionKnown: boolean | null; opex: OperatingCostByDay | null }> {
   const extra = dimensionFilter(filters);
   const filtered = hasDimensionFilter(filters);
   const rates = opts.rates ?? null;
@@ -623,7 +626,8 @@ async function buildDays(
     spendByDay(db, period, filters),
     filters.productId || opts.skipUnits ? Promise.resolve(null) : unitsByDay(db, period, basis, extra),
     // Chi phí vận hành phân bổ CHỈ có nghĩa ở mức toàn shop. Có bộ lọc ⇒ không đọc, và ô là `—`.
-    filtered ? Promise.resolve(null) : allocatedExpenseByDay(db, period.from, period.to),
+    // Qua Profit Engine: cùng sổ thẩm quyền với tổng kỳ, nên Σ các ngày = `getOperatingCost()`.
+    filtered ? Promise.resolve(null) : getOperatingCostByDay(period, db),
   ]);
 
   const map = new Map<string, MarketingDailyRow>();
@@ -673,13 +677,24 @@ async function buildDays(
   if (units) for (const [day, qty] of units) get(day).units = qty;
   // Ngày chỉ có chi quảng cáo (không đơn nào) vẫn phải là một dòng: đó chính là ngày đốt tiền không ra gì.
   if (spend) for (const day of spend.byDay.keys()) get(day);
-  const allocatedAds = new Map<string, number>();
-  if (allocated) for (const [day, amounts] of allocated) {
+  // CÙNG ĐƯỜNG với `getDailyBreakdown` và với tổng kỳ: chi phí vận hành đi qua sổ thẩm quyền. Khoản
+  // nhóm Quảng cáo gõ tay KHÔNG còn được cộng vào chi quảng cáo — tài khoản QC mới có thẩm quyền, và
+  // cộng thêm là trừ hai lần cùng một đồng (AGENTS.md mục 15). Phần bị loại được NÓI ra ở `warnings`.
+  if (allocated) for (const [day, amount] of allocated.byDay) {
     const row = get(day);
-    // CÙNG CÁCH CỘNG với `getDailyBreakdown`: khoản chi nhóm Quảng cáo đã phân bổ đi vào chi quảng
-    // cáo, phần còn lại đi vào chi phí vận hành. Không tự chọn cách khác, nếu không hai báo cáo lệch.
-    if (amounts.ads) allocatedAds.set(day, (allocatedAds.get(day) ?? 0) + amounts.ads);
-    row.operatingCost = (row.operatingCost ?? 0) + amounts.other;
+    row.operatingCost = (row.operatingCost ?? 0) + amount;
+  }
+  /*
+    CƯỚC / PHÍ HOÀN ĐIỀU CHỈNH CÓ LÝ DO — cùng đường, cùng ngày với `getDailyBreakdown`.
+
+    Chỉ ở mức TOÀN SHOP, như chi phí vận hành: khoản đền bù / cước chuyến gom hàng không gắn được
+    đơn nào, nên không có căn cứ chia xuống một marketer / mã / chiến dịch. Có bộ lọc thì cột cước chỉ
+    còn cước của chính các đơn trong lát cắt — đúng nghĩa "chi phí giao nhận của chính đơn đó".
+  */
+  if (allocated) {
+    for (const part of [allocated.logisticsAdjustment.shipping, allocated.logisticsAdjustment.returnFee]) {
+      for (const [day, amount] of part.byDay) get(day).shippingCost += amount;
+    }
   }
 
   const rows = [...map.values()].sort((a, b) => a.day.localeCompare(b.day));
@@ -697,7 +712,7 @@ async function buildDays(
       const inWindow = spend.dimensionKnown && spend.observedThrough !== null && row.day <= spend.observedThrough;
       if (observed || inWindow) {
         row.spendKnown = true;
-        row.adSpend = (observed?.spend ?? 0) + (allocatedAds.get(row.day) ?? 0);
+        row.adSpend = observed?.spend ?? 0;
         row.messages = observed?.messages ?? 0;
       }
     }
@@ -719,7 +734,7 @@ async function buildDays(
     row.projectedContributionProfit = projectedProfitOf(row);
     row.netProfit = row.operatingCost === null || row.contributionProfit === null ? null : row.contributionProfit - row.operatingCost;
   }
-  return { rows, spendObservedThrough: spend?.observedThrough ?? null, spendDimensionKnown: spend ? spend.dimensionKnown : null };
+  return { rows, spendObservedThrough: spend?.observedThrough ?? null, spendDimensionKnown: spend ? spend.dimensionKnown : null, opex: allocated };
 }
 
 function rollupTotals(rows: MarketingDailyRow[]) {
@@ -814,6 +829,20 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
   if (dupDays.length) {
     const dupOrders = dupDays.reduce((s, r) => s + r.duplicates.orders, 0);
     warnings.push(`Đã loại ${dupOrders} đơn bị kết luận TRÙNG (một lần đặt nhập hai lần) theo ảnh chụp quy kết. Vì vậy tổng ở đây nhỏ hơn Báo cáo lợi nhuận đúng bằng phần ấy — chênh lệch giải thích được, không phải sai số.`);
+  }
+  /*
+    KHOẢN GÕ TAY BỊ LOẠI VÌ THẨM QUYỀN — NÓI RA, KHÔNG ĐỂ BIẾN MẤT.
+
+    Bản trước cộng khoản nhóm Quảng cáo gõ tay vào Chi QC, và khoản Nhập hàng / cước gõ tay vào chi
+    phí vận hành. Nay chúng đi đúng sổ thẩm quyền như tổng kỳ — người từng thấy con số cũ phải được
+    biết vì sao nó đổi, và khoản nào đang không được tính.
+  */
+  for (const x of built.opex?.excluded ?? []) {
+    warnings.push(
+      x.rule === "EXCLUDED_BY_AUTHORITY"
+        ? `${x.count} khoản chi nhóm “${EXPENSE_CATEGORY_LABEL[x.category]}” gõ tay ở bảng Chi phí (${x.amount.toLocaleString("vi-VN")} ₫ trong kỳ) KHÔNG được cộng: nguồn có thẩm quyền của nhóm này là ${COST_SOURCE_LABEL[COST_AUTHORITY[EXPENSE_CATEGORY_ECONOMIC[x.category]]]}, cộng thêm là trừ hai lần cùng một đồng.`
+        : `${x.count} khoản “${EXPENSE_CATEGORY_LABEL[x.category]}” gõ tay (${x.amount.toLocaleString("vi-VN")} ₫) KHÔNG được cộng vì trùng cước theo vận đơn. Khoản ngoại lệ thật thì đổi nguồn thành “Điều chỉnh thủ công” kèm lý do.`,
+    );
   }
 
   return {

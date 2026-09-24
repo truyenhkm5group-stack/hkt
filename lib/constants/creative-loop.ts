@@ -727,7 +727,8 @@ export type CreativeWriteDenial =
   | "TOO_LATE"
   | "OVER_EXTENSION_CAP"
   | "NOT_PROMISING"
-  | "NO_KILL_RULE";
+  | "NO_KILL_RULE"
+  | "KILL_SWITCH";
 
 export const CREATIVE_WRITE_DENIAL_REASON: Record<CreativeWriteDenial, string> = {
   HARD_DISABLED: "Đường ghi quảng cáo đang TẮT ở cấp máy chủ (ADS_WRITE_ENABLED).",
@@ -744,6 +745,8 @@ export const CREATIVE_WRITE_DENIAL_REASON: Record<CreativeWriteDenial, string> =
   OVER_EXTENSION_CAP: "Vượt trần tiền 'tiêu thêm' (một lượt bấm hoặc cả ngày).",
   NOT_PROMISING: "Mẫu không ở trạng thái HỨA HẸN theo luật giữ — không có căn cứ để tiêu thêm.",
   NO_KILL_RULE: "Không luật tắt nào kích hoạt cho mẫu này.",
+  KILL_SWITCH:
+    "Công tắc tắt khẩn cấp đường ghi quảng cáo đang KÉO (settings `ads.write.kill`, hoặc không đọc được công tắc). Lô giữ nguyên trạng thái ĐÃ DUYỆT: nhả công tắc trước giờ chạy thì lượt kế tiếp đăng tiếp, quá giờ thì lô hết hạn mà không đồng nào được chi.",
 };
 
 // ───────────────────────────── GIÁ SINH ẢNH ─────────────────────────────

@@ -412,6 +412,12 @@ export type NominalReport = {
     /** Σ số sản phẩm giao thành công ước tính — đo được cả ở mã chưa biết giá vốn. */
     expectedQty: number;
     shipCost: number;
+    /**
+     * Phần của `shipCost` là cước / phí hoàn gõ tay khai ĐIỀU CHỈNH có lý do (Profit Engine) — tiền
+     * THẬT, không phải ước tính; đã chia vào cột cước của từng mã theo số đơn. `count` là số khoản của
+     * cả kỳ (không thu nhỏ theo bộ lọc bậc giá).
+     */
+    logisticsAdjustment: { amount: number; count: number };
     expectedProfit: number;
     margin: number | null;
     delivered: number;
@@ -1030,6 +1036,29 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       profitOnPurchase: 0, marginOnPurchase: null, tax: 0, otherCost: Math.round((adByProduct.get(pid) ?? 0) * otherPct), netProfit: 0, netMargin: null,
     });
   }
+  /*
+    ═══ CƯỚC / PHÍ HOÀN ĐIỀU CHỈNH CÓ LÝ DO — TIỀN THẬT, CỘNG VÀO CỘT CƯỚC CỦA TỪNG MÃ ═══
+
+    Cột cước ở đây là ƯỚC TÍNH theo đơn (số đơn × cước gửi / cước hoàn giả định). Khoản đền bù, phí
+    ngoại lệ, cước chuyến gom hàng khai `MANUAL_ADJUSTMENT` kèm lý do không gắn được vận đơn nào nên
+    KHÔNG nằm trong ước tính ấy — bản trước bỏ sót nó trong khi Profit Engine tính nó vào thành phần
+    Cước, và lợi nhuận danh nghĩa cao hơn đúng bằng khoản ấy. Lấy từ engine (không tự đọc bảng Chi
+    phí), chia theo SỐ ĐƠN của mã (cước đi theo đơn) bằng largest remainder để Σ các mã = đúng khoản
+    của kỳ; đang lọc bậc giá thì chỉ phần tương ứng tỷ trọng doanh số, như chi phí vận hành chung.
+    Không mã nào có đơn thì chia theo doanh số; vẫn không chia được thì phần ấy đứng ở dòng tổng,
+    như CPQC chưa quy kết — không biến mất.
+  */
+  const dieuChinhCuoc = dangLoc ? Math.round(operating.logisticsAdjustment.amount * costShare) : operating.logisticsAdjustment.amount;
+  const canCuCuoc = rows.some((r) => r.orders > 0) ? rows.map((r) => r.orders) : rows.map((r) => r.grossSales);
+  const phanCuoc = distributeProportionally(dieuChinhCuoc, canCuCuoc);
+  rows.forEach((r, idx) => {
+    if (!phanCuoc[idx]) return;
+    r.shipCost += phanCuoc[idx];
+    r.expectedProfit -= phanCuoc[idx];
+    r.margin = r.expectedRevenue ? (r.expectedProfit / r.expectedRevenue) * 100 : null;
+  });
+  const dieuChinhCuocChuaChia = dieuChinhCuoc - phanCuoc.reduce((t, v) => t + v, 0);
+
   // phân bổ chi phí vận hành đã nhập + chi phí cố định theo tỷ trọng doanh số POS, rồi tính LN ròng từng mã.
   // Chia bằng LARGEST REMAINDER: Σ phần của các mã = ĐÚNG tổng của shop, không lệch vì làm tròn từng dòng.
   const weights = rows.map((r) => r.grossSales);
@@ -1121,12 +1150,14 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
   );
   const adSpendAll = totals.adSpend + unmatchedAdSpend;
   const otherCostAll = totals.otherCost + Math.round(unmatchedAdSpend * otherPct);
-  const expectedProfitAll = totals.expectedProfit - unmatchedAdSpend;
+  // Phần điều chỉnh cước không chia được cho mã nào (kỳ không có dòng mã nào) đứng ở dòng tổng.
+  const shipCostAll = totals.shipCost + dieuChinhCuocChuaChia;
+  const expectedProfitAll = totals.expectedProfit - unmatchedAdSpend - dieuChinhCuocChuaChia;
   const opexTotal = operatingExpenses + totals.packingCost + totals.opsStaffCost + fixedCost;
   const otherCostsTotal = opexTotal + totals.inventoryRisk + totals.tax + otherCostAll;
   const netProfit = expectedProfitAll - opexTotal - totals.inventoryRisk - totals.tax - otherCostAll;
   // Cùng lý do như từng dòng: rủi ro tính theo HÀNG BÁN RA trong kỳ, không theo lô nhập.
-  const profitOnPurchase = totals.expectedRevenue - adSpendAll - totals.purchaseCost - totals.shipCost - opexTotal - totals.inventoryRisk - totals.tax - otherCostAll;
+  const profitOnPurchase = totals.expectedRevenue - adSpendAll - totals.purchaseCost - shipCostAll - opexTotal - totals.inventoryRisk - totals.tax - otherCostAll;
   const expectedDeliveredAll = rows.reduce((t, r) => t + (r.returnRate === null ? 0 : r.orders * (1 - Math.min(Math.max(r.returnRate, 0), 100) / 100)), 0);
   /*
     ═══ THẺ "TL GTC ƯỚC TÍNH" TOÀN SHOP = CON SỐ CỦA HỢP ĐỒNG Ở GRAIN ĐƠN ═══
@@ -1160,7 +1191,8 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       expectedRevenue: totals.expectedRevenue,
       expectedCogs: totals.expectedCogs,
       expectedQty: totals.expectedQty,
-      shipCost: totals.shipCost,
+      shipCost: shipCostAll,
+      logisticsAdjustment: { amount: dieuChinhCuoc, count: operating.logisticsAdjustment.count },
       expectedProfit: expectedProfitAll,
       margin: totals.expectedRevenue ? (expectedProfitAll / totals.expectedRevenue) * 100 : null,
       delivered: totals.delivered,

@@ -1,4 +1,6 @@
 # TECH-9 · Kiểm tra yếu tố hạ tầng: tài nguyên, cold start, lịch job trùng giờ
+
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md` (hiệu năng: `docs/perf/TRANG-THAI.md`).**
 **Production Health Check · 23/09/2026 04:09–04:12 UTC (11:09–11:12 giờ Việt Nam)**
 
 ---

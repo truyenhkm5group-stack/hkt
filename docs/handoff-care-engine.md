@@ -1,5 +1,7 @@
 # Handoff cho phiên UI (Claude Opus 5) — Care Engine + AI Copilot backend
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.**
+
 Nhánh backend: `claude/serene-hopper-bsfnnh` (Fable). **Chưa merge main, chưa deploy** — theo thoả
 thuận làm song song. UI mới hãy dựng trên các hợp đồng dưới đây; không gọi CSDL trực tiếp.
 

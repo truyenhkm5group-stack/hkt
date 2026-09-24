@@ -13,6 +13,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { CashTab } from "@/app/(dashboard)/reports/cash-tab";
+import { CostQualityPanel } from "@/app/(dashboard)/reports/cost-quality-panel";
 import { FinancialTruthTab } from "@/app/(dashboard)/reports/financial-truth-tab";
 import { NominalTab } from "@/app/(dashboard)/reports/nominal-tab";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -119,21 +120,21 @@ const PNL_LINES: LineDef[] = [
     label: "(–) Phí vận chuyển",
     key: "shipping",
     kind: "cost",
-    note: "Phí ĐVVC của đơn đã gửi hàng (không tính đơn huỷ)",
+    note: "Phí ĐVVC của đơn đã gửi hàng (không tính đơn huỷ) + khoản cước điều chỉnh tay có lý do",
   },
-  { label: "(–) Phí hoàn hàng", key: "returnFee", kind: "cost" },
+  { label: "(–) Phí hoàn hàng", key: "returnFee", kind: "cost", note: "Phí hoàn ghi trên đơn + khoản phí hoàn điều chỉnh tay có lý do" },
   { label: "(–) Phí sàn TMĐT", key: "marketplaceFee", kind: "cost" },
   {
     label: "(–) Chi phí quảng cáo",
     key: "adSpend",
     kind: "cost",
-    note: "Chi tiêu quảng cáo + chi phí nhóm Quảng cáo",
+    note: "Chi tiêu theo tài khoản quảng cáo (khoản Quảng cáo gõ tay không cộng thêm)",
   },
   {
     label: "(–) Chi phí vận hành",
     key: "operating",
     kind: "cost",
-    note: "Lương, mặt bằng, phần mềm, đóng gói, nhập hàng, khác",
+    note: "Lương, mặt bằng, phần mềm, đóng gói, khác (nhập hàng đi theo giá vốn)",
   },
   { label: "= Lợi nhuận ròng", key: "netProfit", kind: "total" },
 ];
@@ -335,6 +336,12 @@ export default async function ReportsPage({
               </span>
             }
           />
+
+          {/* Khoản gõ tay bị loại vì nguồn khác có thẩm quyền (Quảng cáo, Nhập hàng, cước trùng vận
+              đơn…) phải được NÓI ra ngay trên bảng này: bảng và biểu đồ theo ngày không cộng chúng. */}
+          <Suspense fallback={null}>
+            <CostQualityPanel period={period} />
+          </Suspense>
 
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard

@@ -1,5 +1,7 @@
 # Tiến độ `CLAUDE_ERP_NEXT_TASKS_NO_DIRECT_VTP_V2.md`
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.**
+
 Cập nhật 08/09/2026. **ĐÃ DEPLOY** — một lần duy nhất sau FINAL GATE, đúng chính sách.
 Production đang chạy `b067913d96d8` trên `main`, `/api/health` `ok: true`.
 

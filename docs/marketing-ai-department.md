@@ -1,7 +1,10 @@
 # Phòng Marketing AI — đặc tả và lộ trình
 
 > **File trạng thái DUY NHẤT của phòng.** Mọi nấc cập nhật vào đây, không mở file mới.
-> Cập nhật: **22/09/2026** · **Nấc 0 (trí nhớ) và Nấc 3 (bàn tay, nấc COPILOT) đã dựng · Nấc 1·2·4 chưa**
+> Cập nhật: **22/09/2026** (dòng này sửa 24/09) · **Nấc 0 (trí nhớ) và Nấc 3 (bàn tay, nấc COPILOT) đã dựng ·
+> Nấc 4 (vòng mẫu) đã dựng 24/09, CHƯA chạy thật — trạng thái ở `docs/creative-loop.md` · Nấc 1·2 chưa**
+> (lưu ý Nấc 1: nguồn `ADS_DECISION` đã chiếu MỌI khuyến nghị vào `/work` — dòng chưa chín bị hạ một
+> bậc và gắn nhãn chứ không bị lọc, `6d7d494a` — khác bộ lọc "chỉ `ready`" mà §4 đặc tả).
 >
 > Đọc kèm: `docs/ads-decision-contract.md` (hợp đồng chỉ số) · `docs/marketing-daily-contract.md` ·
 > `docs/tech-ai-room-status.md` (phòng AI đầu tiên — mọi lớp lỗi ở đó sẽ lặp lại ở đây) ·
@@ -68,7 +71,7 @@ Nấc 0  TRÍ NHỚ      sổ quyết định + độ bền                     
 Nấc 1  VIỆC         khuyến nghị đã chín → hàng đợi /work          ⏳ (Nấc 0 phải có dữ liệu trước)
 Nấc 2  DIỄN ĐẠT     agent đọc sổ, viết bản tin, xếp ưu tiên       ⏳
 Nấc 3  BÀN TAY      ghi ngân sách Facebook, có trần và phanh      ✅ ĐÃ DỰNG (COPILOT) · chờ token ads_management
-Nấc 4  NỘI DUNG     ảnh → mẫu → QC test → chấm → học, mỗi ngày    🚧 docs/creative-loop.md
+Nấc 4  NỘI DUNG     ảnh → mẫu → QC test → chấm → học, mỗi ngày    ✅ ĐÃ DỰNG 24/09 · chưa chạy thật · docs/creative-loop.md
 ```
 
 Thứ tự này không đảo được. Nấc 3 mà không có Nấc 0 là một cỗ máy tiêu tiền không có trí nhớ: nó sẽ

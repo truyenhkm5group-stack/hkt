@@ -1,5 +1,7 @@
 # Đo hiệu năng ERP — 08/09/2026
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md` (hiệu năng: `docs/perf/TRANG-THAI.md`).**
+
 ## Nguyên tắc: đo trước, sửa sau
 
 Kho mã này đã theo nguyên tắc đó (xem `drizzle/0034_perf_indexes.sql`). Tối ưu khi chưa đo được nút

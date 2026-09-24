@@ -1,5 +1,7 @@
 # Đo hiệu năng vòng 2 — sau roadmap V2
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md` (hiệu năng: `docs/perf/TRANG-THAI.md`).**
+
 Vòng 1: `docs/erp-perf-audit.md` (đo trên production, kết luận: chưa có nút thắt nào ở quy mô vài
 nghìn dòng).
 

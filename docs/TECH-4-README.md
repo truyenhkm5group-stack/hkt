@@ -3,7 +3,7 @@
 **Phạm vi**: Định nghĩa 8 kịch bản đo lặp lại được cho trang `/shipments` của ERP VNXcommerce, cùng chỉ số, công thức tính, và hướng dẫn chạy đo.
 
 **Trạng thái**: ✅ Chốt kịch bản (TECH-4-mucrcyev)  
-**Cập nhật**: 2025-07-XX
+**Cập nhật**: 2026-09-22 (commit `96111b59`; bản đầu ghi nhầm "2025-07-XX")
 
 ---
 
@@ -233,6 +233,6 @@ A: Kiểm tra `SELECT count(*) FROM shipments` trong DB. Nếu sai, chạy lại
 ---
 
 **Người chốt**: [Tên agent]  
-**Ngày chốt**: 2025-07-XX  
+**Ngày chốt**: 2026-09-22  
 **Nhánh**: ai/architect/TECH-4-mucrcyev  
 **Base commit**: a6a219c

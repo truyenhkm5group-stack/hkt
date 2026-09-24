@@ -5,8 +5,10 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { clearLoginFailures, loginAllowed, recordLoginFailure } from "@/lib/auth/login-throttle";
+import { clientIpFrom } from "@/lib/auth/client-ip";
+import { clearLoginFailures, loginAllowed, loginThrottleKeys, recordLoginFailure } from "@/lib/auth/login-throttle";
 import { verifyPassword } from "@/lib/auth/password";
+import { safeNextPath } from "@/lib/auth/safe-redirect";
 import { createSession, destroySession, getSession } from "@/lib/auth/session";
 
 export type LoginState = { error?: string } | undefined;
@@ -17,11 +19,12 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   const next = String(formData.get("next") ?? "/");
   if (!email || !password) return { error: "Vui lòng nhập email và mật khẩu." };
 
-  // Chặn dò mật khẩu theo EMAIL và theo IP (xem lib/auth/login-throttle.ts). Kiểm TRƯỚC khi băm
-  // để lần thử bị chặn không tốn tài nguyên và không lộ thêm gì qua thời gian phản hồi.
+  // Chặn dò mật khẩu theo CẶP (email, IP) và theo IP (xem lib/auth/login-throttle.ts) — không theo
+  // email trần, nếu không ai cũng khoá được tài khoản người khác. Kiểm TRƯỚC khi băm để lần thử bị
+  // chặn không tốn tài nguyên. IP đọc phần Caddy ghi (lib/auth/client-ip.ts), không đọc phần client khai.
   const h = await headers();
-  const ip = (h.get("x-forwarded-for") ?? h.get("x-real-ip") ?? "").split(",")[0]?.trim() || "unknown";
-  const throttleKeys = [`email:${email}`, `ip:${ip}`];
+  const ip = clientIpFrom(h.get("x-forwarded-for"));
+  const throttleKeys = loginThrottleKeys(email, ip);
   const gate = loginAllowed(throttleKeys);
   if (!gate.ok) {
     console.warn(`[login] chặn dò mật khẩu · email=${email} · ip=${ip} · đợi ${gate.retryAfterSec}s`);
@@ -41,7 +44,8 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
   await createSession({ id: user.id, email: user.email, name: user.name, role: user.role });
   await db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, user.id));
   await audit({ userId: user.id, userEmail: user.email, action: "LOGIN", entity: "USER", entityId: user.id });
-  redirect(next.startsWith("/") && !next.startsWith("//") ? next : "/");
+  // Chỉ đường dẫn NỘI BỘ đã chuẩn hoá (lib/auth/safe-redirect.ts) — `/\evil.com` từng lọt phép kiểm cũ.
+  redirect(safeNextPath(next));
 }
 
 export async function logoutAction() {

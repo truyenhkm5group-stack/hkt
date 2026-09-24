@@ -113,7 +113,7 @@ export function strictInputSchema(schema: z.ZodType): Record<string, unknown> {
 }
 
 export function toProviderTools(tools: AiToolDefinition[]): AiToolDef[] {
-  return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: strictInputSchema(t.input) }));
+  return tools.map((t) => ({ name: t.name, description: t.description, inputSchema: strictInputSchema(t.input), kind: t.kind }));
 }
 
 /** Chỉ cho kiểm thử: xoá sổ để đăng ký lại. */

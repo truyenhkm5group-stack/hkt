@@ -54,14 +54,15 @@ export async function testFinancialTruth(db: Db) {
   // ───────── 3. Bậc thang phải CỘNG ĐÚNG ─────────
   const line = (key: string) => f.waterfall.find((l) => l.key === key)!;
   assert.ok(line("delivered_revenue") && line("contribution") && line("estimated_profit"), "bậc thang phải có đủ các mốc");
+  assert.ok(line("shipping_adjustment"), "bậc thang phải có dòng cước / phí hoàn điều chỉnh tay — engine tính nó vào Cước");
   const contributionParts =
-    line("delivered_revenue").amount + line("cogs").amount + line("shipping_out").amount + line("shipping_return").amount + line("ads").amount;
+    line("delivered_revenue").amount + line("cogs").amount + line("shipping_out").amount + line("shipping_return").amount + line("shipping_adjustment").amount + line("ads").amount;
   assert.equal(line("contribution").amount, contributionParts, "lợi nhuận góp phải đúng bằng tổng các dòng phía trên");
   assert.equal(f.contribution, contributionParts);
   assert.equal(line("estimated_profit").amount, line("contribution").amount + line("operating").amount, "lợi nhuận ước tính = lợi nhuận góp − chi phí vận hành");
   assert.equal(f.estimatedProfit, line("estimated_profit").amount);
   // Mọi dòng chi phí phải mang dấu âm để bậc thang đọc được bằng mắt.
-  for (const key of ["cogs", "shipping_out", "shipping_return", "ads", "operating"]) {
+  for (const key of ["cogs", "shipping_out", "shipping_return", "shipping_adjustment", "ads", "operating"]) {
     assert.ok(line(key).amount <= 0, `dòng chi phí ${key} phải mang dấu âm`);
   }
 

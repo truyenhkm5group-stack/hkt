@@ -1,6 +1,32 @@
 # Caddy tự xin và gia hạn chứng chỉ Let's Encrypt cho {$ERP_DOMAIN}
 {$ERP_DOMAIN} {
 	encode gzip zstd
+
+	# ─── TRẦN BODY CỦA WEBHOOK (cửa không đăng nhập) ───
+	# Chặn body quá cỡ TRƯỚC khi byte nào tới Node. Số là BYTE, và phải KHỚP hằng số trong
+	# lib/constants/webhook-limits.ts — tests/webhook-hardening.test.ts đọc tệp này để đòi điều đó.
+	# Handler vẫn tự kiểm lại (lib/http/body-limit.ts) cho máy dev không có Caddy.
+	@vtpWebhook path /api/webhooks/viettelpost /api/webhooks/viettelpost/
+	request_body @vtpWebhook {
+		# VTP_WEBHOOK_MAX_BODY_BYTES = 1 MiB
+		max_size 1048576
+	}
+	@vtpStatement path /api/webhooks/vtp-statement /api/webhooks/vtp-statement/
+	request_body @vtpStatement {
+		# VTP_STATEMENT_MAX_BODY_BYTES = MAX_LIST_FILES × (MAX_LIST_BASE64 + 1024) + 64 KiB
+		max_size 240106496
+	}
+	@pancakeWebhook path /api/webhooks/pancake/*
+	request_body @pancakeWebhook {
+		# PANCAKE_WEBHOOK_MAX_BODY_BYTES = 5 MiB
+		max_size 5242880
+	}
+	@sepayWebhook path /api/webhooks/sepay /api/webhooks/sepay/
+	request_body @sepayWebhook {
+		# SEPAY_WEBHOOK_MAX_BODY_BYTES = 256 KiB
+		max_size 262144
+	}
+
 	reverse_proxy app:3000 {
 		# SSE realtime (/api/events) cần giữ kết nối lâu
 		flush_interval -1
@@ -15,6 +41,23 @@
 	}
 	log {
 		output stdout
-		format console
+		# ─── KHÔNG IN BÍ MẬT VÀO LOG TRUY CẬP ───
+		# Webhook Pancake mang bí mật TRÊN ĐƯỜNG DẪN, webhook Viettel Post nhận `?token=` — URL đã
+		# đăng ký với hai bên nên KHÔNG đổi được. Thay vào đó che chúng ở đây: đoạn bí mật sau
+		# /api/webhooks/pancake/ và giá trị của token / secret / access_token trên query.
+		# Header mang bí mật bị xoá khỏi bản ghi (Authorization / Cookie Caddy đã tự che).
+		format filter {
+			wrap console
+			fields {
+				request>uri regexp "(/api/webhooks/pancake/)[^/?]+|([?&](?i:token|secret|access_token)=)[^&]*" "${1}${2}REDACTED"
+				request>headers>Token delete
+				request>headers>Secret delete
+				request>headers>X-Token delete
+				request>headers>X-Secret delete
+				request>headers>X-Webhook-Secret delete
+				request>headers>X-Api-Key delete
+				request>headers>X-Cron-Secret delete
+			}
+		}
 	}
 }

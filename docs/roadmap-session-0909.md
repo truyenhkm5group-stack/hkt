@@ -1,5 +1,7 @@
 # Phiên roadmap 09/09/2026 — việc đã làm, việc còn nợ, việc bị chặn
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.**
+
 Bối cảnh: **hai phiên làm việc song song trên cùng một cây làm việc.** Phiên kia đang làm P0
 PERFORMANCE (loading.tsx từng trang, thanh tiến trình điều hướng, chỉ mục CSDL, viết lại hình dạng
 truy vấn) và một số việc kho/ngân hàng. Phiên này cố ý **không đụng vào file đang có thay đổi chưa

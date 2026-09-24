@@ -1,5 +1,7 @@
 # Tiến độ release "ERP Data Truth"
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.**
+
 Nhánh: `claude/erp-data-truth-p0` · tách từ `main` tại `cf90934`.
 Quy tắc: mỗi task một commit riêng, KHÔNG deploy giữa chừng, KHÔNG merge `main` giữa chừng.
 Chỉ deploy MỘT LẦN sau khi FINAL GATE đạt.

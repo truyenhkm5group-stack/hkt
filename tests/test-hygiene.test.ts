@@ -125,6 +125,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
   "tests/ops-concurrency.test.ts":
     "Truyền biến xuống tiến trình bash con để dựng tình huống khoá — đầu vào của kịch bản đang đo; và dùng process.platform để nói CHƯA ĐO ĐƯỢC, không để bỏ qua một khẳng định.",
   "tests/test-hygiene.test.ts": "Chính bài này.",
+  "tests/automation-ladder.test.ts":
+    "XOÁ FACEBOOK_ACCESS_TOKEN để dựng đúng tình huống 'máy chưa có token' rồi trả lại nguyên trạng trong finally: kỳ vọng (UNKNOWN, không gọi mạng) là của nhánh đó, và bài không bao giờ rẽ theo việc máy đang chạy có token hay không.",
   "tests/chatbot.test.ts":
     "ĐẶT DATA_DIR / BOT_ENV_FILE / SYSTEM_PROMPT_FILE trỏ vào thư mục tạm để bộ nạp cấu hình của bot ghi vào đó thay vì vào máy, rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của hàm đang đo, không phải điều kiện của kết luận.",
   "tests/ai-incident-watch.test.ts":
@@ -145,6 +147,10 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Đặt MEMO_INFLIGHT_TIMEOUT_MS = 40ms để cửa sổ gộp lời gọi đo được trong một bài kiểm; giữ giá trị cũ và trả lại sau.",
   "tests/tech-cto-proposal.test.ts":
     "Đặt ADMIN_PASSWORD để dựng tài khoản quản trị của tình huống, rồi trả lại giá trị cũ.",
+  "tests/webhook-hardening.test.ts":
+    "ĐẶT VIETTELPOST_WEBHOOK_SECRET (chuỗi BỊA) để route webhook có một bí mật để so, rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của route đang đo (401/413/429), không phải điều kiện của kết luận.",
+  "tests/ads-kill-switch.test.ts":
+    "ĐẶT ADS_WRITE_ENABLED / ADS_WRITE_MODE / FACEBOOK_ACCESS_TOKEN (token BỊA) để chốt env mở ra, rồi mới đo được thứ bài này hỏi — công tắc settings có chặn lời gọi ghi ra mạng không (fetch là bản giả đếm lượt gọi). Trả lại nguyên trạng trong finally; không khẳng định nào rẽ theo giá trị sẵn có của máy.",
 
   /* ───── ĐỌC biến, nhưng đọc ĐÚNG NGUỒN mà mã sản xuất đọc ───── */
   "tests/session-renewal.test.ts":

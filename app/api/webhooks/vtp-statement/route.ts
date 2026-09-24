@@ -10,6 +10,8 @@ import { staleMemo } from "@/lib/cache";
 import { scheduleAlertEvaluation } from "@/lib/alerts/rules";
 import { publish } from "@/lib/realtime/bus";
 import { anySecretMatches } from "@/lib/auth/secret-compare";
+import { VTP_STATEMENT_MAX_BODY_BYTES, VTP_STATEMENT_MAX_UNAUTHENTICATED_READS } from "@/lib/constants/webhook-limits";
+import { concurrencyGate, readBodyCapped } from "@/lib/http/body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -50,11 +52,10 @@ const bodySchema = z.object({
   ping: z.boolean().optional(),
 });
 
-function secretsFrom(request: NextRequest, body: Record<string, unknown>) {
+/** Bí mật NGOÀI body — kiểm được trước khi đọc một byte body. Script Gmail bản mới gửi `x-webhook-secret`. */
+function outerSecrets(request: NextRequest) {
   const auth = request.headers.get("authorization") ?? "";
   return [
-    typeof body.token === "string" ? body.token : "",
-    typeof body.TOKEN === "string" ? body.TOKEN : "",
     request.headers.get("x-webhook-secret") ?? "",
     request.headers.get("x-token") ?? "",
     auth.replace(/^(Bearer|Token)\s+/i, ""),
@@ -63,19 +64,47 @@ function secretsFrom(request: NextRequest, body: Record<string, unknown>) {
   ].filter(Boolean);
 }
 
+/** Script Gmail bản cũ (đã cài trong hộp thư của shop, không sửa từ xa được) để bí mật TRONG body. */
+function bodySecrets(body: Record<string, unknown>) {
+  return [typeof body.token === "string" ? body.token : "", typeof body.TOKEN === "string" ? body.TOKEN : ""].filter(Boolean);
+}
+
+/** Số lượt đang đọc body mà CHƯA biết người gửi là ai — xem `VTP_STATEMENT_MAX_UNAUTHENTICATED_READS`. */
+const unauthenticatedReads = concurrencyGate(VTP_STATEMENT_MAX_UNAUTHENTICATED_READS);
+
 export async function POST(request: NextRequest) {
   const expected = env.viettelPost.webhookSecret;
   if (!expected) return NextResponse.json({ ok: false, error: "Chưa cấu hình tham số bí mật webhook" }, { status: 503 });
 
+  /*
+    XÁC THỰC TRƯỚC KHI ĐỌC, NẾU ĐƯỢC.
+
+    Trước đây route `request.json()` TOÀN BỘ body (tới 40 tệp × 6 MB) rồi mới hỏi bí mật — ai cũng bắt
+    được máy chủ cấp phát hàng trăm MB. Nay: bí mật ở header/query ⇒ kiểm trước, đọc sau. Bí mật trong
+    body (script cũ) ⇒ vẫn phải đọc, nhưng có trần kích thước và chỉ `VTP_STATEMENT_MAX_UNAUTHENTICATED_READS`
+    lượt như thế chạy cùng lúc; hết chỗ thì 429 — script chỉ gắn nhãn khi nhận 200 nên lượt sau gửi lại.
+  */
+  const outerOk = anySecretMatches(outerSecrets(request), expected);
+  if (!outerOk && !unauthenticatedReads.tryEnter()) {
+    return NextResponse.json({ ok: false, error: "Đang bận đọc lượt gửi khác — thử lại lượt sau" }, { status: 429 });
+  }
   let body: Record<string, unknown>;
   try {
-    body = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ ok: false, error: "Body không phải JSON" }, { status: 400 });
-  }
-  if (!anySecretMatches(secretsFrom(request, body), expected)) {
-    console.warn(`[vtp-statement] 401 sai tham số bí mật · ua=${request.headers.get("user-agent") ?? "?"}`);
-    return NextResponse.json({ ok: false, error: "Sai tham số bí mật" }, { status: 401 });
+    const read = await readBodyCapped(request, VTP_STATEMENT_MAX_BODY_BYTES);
+    if (!read.ok) return NextResponse.json({ ok: false, error: read.reason }, { status: 413 });
+    try {
+      const parsedJson: unknown = JSON.parse(read.text);
+      if (!parsedJson || typeof parsedJson !== "object" || Array.isArray(parsedJson)) throw new Error("không phải đối tượng");
+      body = parsedJson as Record<string, unknown>;
+    } catch {
+      return NextResponse.json({ ok: false, error: "Body không phải JSON" }, { status: 400 });
+    }
+    if (!outerOk && !anySecretMatches(bodySecrets(body), expected)) {
+      console.warn(`[vtp-statement] 401 sai tham số bí mật · ua=${request.headers.get("user-agent") ?? "?"}`);
+      return NextResponse.json({ ok: false, error: "Sai tham số bí mật" }, { status: 401 });
+    }
+  } finally {
+    if (!outerOk) unauthenticatedReads.leave();
   }
 
   const parsed = bodySchema.safeParse(body);

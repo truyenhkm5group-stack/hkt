@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { and, eq, inArray } from "drizzle-orm";
 import { schema, type Db } from "@/db";
+import { ADS_WRITE_KILL_KEY } from "@/lib/constants/ads-kill-switch";
 import { CREATIVE_HARD_LIMITS, DEFAULT_CREATIVE_CONFIG, type CreativeLoopConfig, type CreativeRule, type CreativeWriteDenial } from "@/lib/constants/creative-loop";
 import { shiftDay } from "@/lib/constants/marketing-decision-ledger";
 import type { TemplateAd } from "@/lib/integrations/facebook/ads-write";
@@ -504,6 +505,26 @@ export async function testCreativeWriteDb(db: Db) {
       assert.deepEqual(g.calls, [], "chốt env tắt: không một lời gọi nào, kể cả đọc mẩu mẫu");
       const so = await soCuaLo(db, L.batchId);
       assert.deepEqual(so.map((r) => r.denial), ["HARD_DISABLED"], "chốt env phải thắng cả lỗi lệch digest");
+      await khoaLo(db, L.batchId);
+    }
+
+    // ── 3b. CÔNG TẮC KHẨN CẤP KÉO ⇒ KILL_SWITCH, KHÔNG LỜI GỌI NÀO, LÔ VẪN "ĐÃ DUYỆT" ──
+    {
+      const L = await dungLo(db, 1, true);
+      await db
+        .insert(schema.settings)
+        .values({ key: ADS_WRITE_KILL_KEY, value: JSON.stringify({ killed: true, reason: "kiểm thử" }) })
+        .onConflictDoUpdate({ target: schema.settings.key, set: { value: JSON.stringify({ killed: true, reason: "kiểm thử" }) } });
+      try {
+        const g = writerGia(db);
+        await publishApprovedBatches(db, L.truoc, { writer: g.writer, env: ON });
+        assert.deepEqual(g.calls, [], "công tắc kéo: không một lời gọi Facebook nào, kể cả đọc mẩu mẫu");
+        assert.deepEqual((await soCuaLo(db, L.batchId)).map((r) => r.denial), ["KILL_SWITCH"]);
+        for (const id of L.variantIds) assert.equal((await mau(db, id)).status, "GENERATED", "mẫu KHÔNG thành PUBLISH_FAILED — kéo công tắc năm phút không được giết lô");
+        assert.equal(await trangThaiLo(db, L.batchId), "APPROVED", "lô vẫn ĐÃ DUYỆT: nhả trước giờ chạy là đăng tiếp");
+      } finally {
+        await db.delete(schema.settings).where(eq(schema.settings.key, ADS_WRITE_KILL_KEY));
+      }
       await khoaLo(db, L.batchId);
     }
 

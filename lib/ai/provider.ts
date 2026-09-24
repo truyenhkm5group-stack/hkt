@@ -12,7 +12,29 @@ import { env } from "@/lib/env";
  * Thêm provider khác = thêm một file, không đụng copilot.
  */
 
-export type AiToolDef = { name: string; description: string; inputSchema: Record<string, unknown> };
+export type AiToolDef = { name: string; description: string; inputSchema: Record<string, unknown>; kind?: "read" | "write" };
+
+/**
+ * ═══════════ ANTHROPIC NHẬN TỐI ĐA 20 TOOL `strict` TRONG MỘT YÊU CẦU ═══════════
+ *
+ * Đo production 24/09/2026 (ops `check-integrations`, sau khi nạp credit): mọi lượt Copilot của tài
+ * khoản toàn quyền trả `400 Too many strict tools (21). The maximum number of strict tools supported
+ * is 20`. Tool thứ 21 là `get_morning_priorities` thêm cùng ngày — và lỗi nằm im vì ngay trước đó
+ * tài khoản Anthropic hết credit, nên mọi lượt đều chết ở bước sớm hơn.
+ *
+ * Luật chọn, cố định và xác định (đổi thứ tự là vỡ đệm prompt):
+ *  1. Tool GHI luôn `strict` — đó là chỗ đầu vào phải khớp tuyệt đối trước khi người xác nhận.
+ *  2. Chỗ còn lại cho tool ĐỌC theo đúng thứ tự đăng ký.
+ * Tool không `strict` KHÔNG bị nới luật nào: zod vẫn kiểm đầu vào ở máy chủ trước khi tool chạy
+ * (`runCopilot`), model gõ sai thì nhận lỗi và gõ lại.
+ */
+export const ANTHROPIC_MAX_STRICT_TOOLS = 20;
+
+export function strictToolNames(tools: AiToolDef[], max = ANTHROPIC_MAX_STRICT_TOOLS): Set<string> {
+  const ghi = tools.filter((t) => t.kind === "write").map((t) => t.name);
+  const doc = tools.filter((t) => t.kind !== "write").map((t) => t.name);
+  return new Set([...ghi, ...doc].slice(0, Math.max(0, max)));
+}
 
 export type AiBlock =
   | { type: "text"; text: string }
@@ -162,6 +184,8 @@ export class AnthropicProvider implements AiProvider {
   async complete(req: AiRequest): Promise<AiResponse> {
     const started = Date.now();
     const caps = anthropicCapsOf(this.model);
+    // Trần 20 tool `strict` của Anthropic — xem `strictToolNames`.
+    const strictSet = strictToolNames(req.tools);
     const body = {
       model: this.model,
       max_tokens: req.maxTokens ?? 4000,
@@ -174,7 +198,7 @@ export class AnthropicProvider implements AiProvider {
       // Hợp đồng tool là MỘT; chỉ bước serialize đi theo phương ngữ của provider — xem
       // `lib/ai/schema-dialect.ts`. Ràng buộc bị gỡ ở đây vẫn được zod kiểm ở máy chủ trước khi
       // tool chạy (`runCopilot` / `confirmCopilotActions`), nên không luật nghiệp vụ nào bị nới.
-      tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: toDialectSchema(t.inputSchema, this.schemaDialect) as Anthropic.Beta.BetaTool["input_schema"], strict: true })),
+      tools: req.tools.map((t) => ({ name: t.name, description: t.description, input_schema: toDialectSchema(t.inputSchema, this.schemaDialect) as Anthropic.Beta.BetaTool["input_schema"], strict: strictSet.has(t.name) })),
       /*
         ═══════════ ĐỆM CẢ PHẦN ĐẦU CỦA CUỘC HỘI THOẠI, KHÔNG CHỈ PROMPT HỆ THỐNG ═══════════
 

@@ -1,5 +1,9 @@
 # Đưa việc dựng image ra khỏi máy chủ production
 
+> **Tài liệu lịch sử — trạng thái hiện hành xem `docs/README.md`.** Kế hoạch dưới đây ĐÃ THỰC HIỆN:
+> image dựng trên GitHub Actions và đẩy lên GHCR theo SHA (job `build_image` trong
+> `.github/workflows/deploy-vps.yml`, từ `bbac9bdc`), VPS chỉ `docker pull`.
+
 Trạng thái: **kế hoạch, chưa thực hiện.** Bước tạm thời đã làm nằm ở mục 3.
 
 ---

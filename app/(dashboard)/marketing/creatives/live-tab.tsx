@@ -1,4 +1,5 @@
 import { Activity } from "lucide-react";
+import { AdsKillSwitchCard } from "@/app/(dashboard)/marketing/creatives/kill-switch";
 import { ExtendButton, PauseNowButton } from "@/app/(dashboard)/marketing/creatives/live-actions";
 import { MODE_LABEL, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
 import { StatStrip } from "@/components/stat-tile";
@@ -7,6 +8,7 @@ import { getDb } from "@/db";
 import { CREATIVE_VERDICT_LABEL, VARIANT_STATUS_LABEL, type CreativeVerdict } from "@/lib/constants/creative-loop";
 import { describeRule, metricValue } from "@/lib/creative/judge";
 import { formatDate, formatNumber, formatPercent, formatVND, vnShortStamp } from "@/lib/format";
+import { readAdsKillSwitch } from "@/lib/integrations/facebook/ads-write";
 import { LIVE_WINDOW_DAYS, listLiveVariants, type JudgedVariant } from "@/lib/queries/creative-loop";
 import { cn } from "@/lib/utils";
 
@@ -49,10 +51,10 @@ function KeepChecks({ v }: { v: JudgedVariant }) {
   );
 }
 
-export async function LiveTab({ canWrite }: { canWrite: boolean }) {
+export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boolean; canKill: boolean; canRelease: boolean }) {
   const db = await getDb();
   const now = new Date();
-  const rows = await listLiveVariants(db, now);
+  const [rows, kill] = await Promise.all([listLiveVariants(db, now), readAdsKillSwitch()]);
 
   const chay = rows.filter((r) => r.status === "LIVE");
   const chi = rows.reduce<number | null>((s, r) => (r.metrics.spendVnd === null ? s : (s ?? 0) + r.metrics.spendVnd), null);
@@ -62,6 +64,7 @@ export async function LiveTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <div className="space-y-4">
+      <AdsKillSwitchCard state={kill} canEngage={canKill} canRelease={canRelease} />
       <StatStrip
         columns={5}
         items={[
