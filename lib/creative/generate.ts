@@ -13,6 +13,7 @@ import {
   type CreativeLoopConfig,
   type SlotMode,
 } from "@/lib/constants/creative-loop";
+import { CAPTION_FALLBACK_PREFIX, captionFromImage, type VariantCaptioner } from "@/lib/creative/caption";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
 import { isManualSeed } from "@/lib/creative/manual";
 import { planBatch, type PlannedSlot } from "@/lib/creative/plan";
@@ -36,16 +37,26 @@ import { loadPlanInputs, loadProductBrief, loadWinningExamples } from "@/lib/que
  *
  * ─── ĐƯỜNG ĐIỂM ẢNH (ranh giới 2 + 3 của vòng mẫu) ───
  *
- * `gatherPixels()` là chỗ DUY NHẤT trong tệp này đọc điểm ảnh, và nó chỉ nhận HAI khoá: nguồn ảnh
- * sản phẩm thật của ô và mẫu cha. Nguồn cảm hứng (spy / tay / R&D) không có đường nào tới đây — chỉ
- * `vision_summary` của nó đi vào người viết câu chữ. `tests/creative-generate.test.ts` quét mã nguồn
- * để giữ điều đó, và `editImage()` kiểm lại loại ảnh lúc chạy.
+ * `gatherPixels()` là chỗ DUY NHẤT trong tệp này đọc điểm ảnh, và nó chỉ nhận BA khoá: nguồn ảnh
+ * sản phẩm thật của ô, mẫu cha, và nguồn QUẢNG CÁO CŨ CỦA SHOP (`ownAdSourceId`). Khoá thứ ba được
+ * điền từ `inspiration_source_id` của ô, nhưng điểm ảnh chỉ được đọc khi LOẠI đọc lại từ CSDL đúng là
+ * `OWN_AD` VÀ nguồn ấy gắn đúng mã hàng của ảnh sản phẩm — spy / tay / R&D đi qua khoá này cũng không
+ * lấy được một byte nào, chỉ `vision_summary` của chúng đi vào người viết câu chữ.
+ * `tests/creative-generate.test.ts` quét mã nguồn để giữ điều đó, và `editImage()` kiểm lại nhãn ảnh lúc chạy.
  *
  * ─── TRẦN NGÀY ───
  *
  * Trước MỖI ảnh: số ảnh đã sinh hôm nay (giờ VN) ≤ `CREATIVE_HARD_LIMITS.maxImagesPerDay` và tổng
  * USD + ước tính ảnh này ≤ `cfg.imageDailyCapUsd`. Chạm trần ⇒ mọi mẫu còn `PLANNED` của lô thành
  * `GEN_FAILED` với lý do nói rõ trần nào — lô đi tiếp tới duyệt với số ảnh đã có, không treo.
+ *
+ * ─── CÂU CHỮ VIẾT LẠI THEO ẢNH ───
+ *
+ * `writer.ts` viết câu chữ TRƯỚC khi có ảnh (nó cần câu lệnh ảnh), nên câu ấy chỉ là NHÁP. Ngay sau
+ * khi ảnh được lưu, `captionFromImage()` NHÌN chính ảnh ấy và viết lại tiêu đề + nội dung chính.
+ * Điểm ảnh đi vào đó là ĐẦU RA của máy vẽ (đang nằm trong bộ nhớ) — không đọc lại CSDL, nên
+ * `gatherPixels()` vẫn là chỗ duy nhất đọc điểm ảnh. Viết lại hỏng ⇒ GIỮ câu nháp, mẫu vẫn
+ * `GENERATED`, lý do nằm ở `gen_error` (bắt đầu bằng `CAPTION_FALLBACK_PREFIX`) để màn hình nói ra.
  */
 
 /** Số mẫu sinh tối đa trong MỘT tick. */
@@ -57,6 +68,8 @@ export type BuildBatchDeps = {
   imageClient?: ImageEditClient;
   writer?: CopyWriter;
   describe?: SourceDescriber;
+  /** Viết lại câu chữ theo ảnh vừa sinh. Bỏ trống ⇒ `captionFromImage` (OpenAI thật). */
+  caption?: VariantCaptioner;
   now?: Date;
   perTick?: number;
 };
@@ -229,12 +242,13 @@ export async function imageSpendToday(db: Db, now: Date, unpricedUsd: number): P
 }
 
 /**
- * ĐƯỜNG ĐIỂM ẢNH DUY NHẤT của đường sinh. Chỉ nhận nguồn ảnh sản phẩm thật và mẫu cha — xem đầu tệp.
+ * ĐƯỜNG ĐIỂM ẢNH DUY NHẤT của đường sinh. Chỉ nhận nguồn ảnh sản phẩm thật, mẫu cha và nguồn quảng cáo
+ * cũ của shop — xem đầu tệp.
  */
-async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; parentVariantId: string | null }): Promise<ImageEditInputImage[]> {
+async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; parentVariantId: string | null; ownAdSourceId: string | null }): Promise<ImageEditInputImage[]> {
   if (!ref.productPhotoSourceId) throw new Error("Ô không có ảnh sản phẩm thật làm gốc.");
   const [photo] = await db
-    .select({ kind: schema.creativeSources.kind, imageId: schema.creativeSources.imageId })
+    .select({ kind: schema.creativeSources.kind, imageId: schema.creativeSources.imageId, productId: schema.creativeSources.productId })
     .from(schema.creativeSources)
     .where(eq(schema.creativeSources.id, ref.productPhotoSourceId))
     .limit(1);
@@ -249,6 +263,20 @@ async function gatherPixels(db: Db, ref: { productPhotoSourceId: string | null; 
     const parentPixels = parent?.imageId ? await readCreativeImage(db, parent.imageId) : null;
     // Ảnh mẫu cha đã mất thì ô vẫn sinh được từ ảnh sản phẩm — mất tham chiếu bố cục, không mất sản phẩm.
     if (parentPixels) out.push({ kind: "OWN_VARIANT", bytes: new Uint8Array(parentPixels.bytes), contentType: parentPixels.contentType });
+  }
+
+  if (ref.ownAdSourceId) {
+    const [ownAd] = await db
+      .select({ kind: schema.creativeSources.kind, imageId: schema.creativeSources.imageId, productId: schema.creativeSources.productId })
+      .from(schema.creativeSources)
+      .where(eq(schema.creativeSources.id, ref.ownAdSourceId))
+      .limit(1);
+    // Kiểm lại LOẠI lúc đọc: khoá này điền từ một cột trỏ được tới MỌI loại nguồn. Chỉ quảng cáo cũ CỦA
+    // SHOP được gửi điểm ảnh, và chỉ khi nó quảng cáo ĐÚNG mã của ảnh sản phẩm — bố cục của một chiếc
+    // váy khác làm tham chiếu là mời máy vẽ lẫn hai sản phẩm.
+    const allowed = ownAd && ownAd.kind === "OWN_AD" && ownAd.imageId && ownAd.productId !== null && ownAd.productId === photo.productId;
+    const ownAdPixels = allowed && ownAd.imageId ? await readCreativeImage(db, ownAd.imageId) : null;
+    if (ownAdPixels) out.push({ kind: "OWN_VARIANT", bytes: new Uint8Array(ownAdPixels.bytes), contentType: ownAdPixels.contentType });
   }
   return out;
 }
@@ -273,7 +301,12 @@ async function markFailed(db: Db, id: string, error: string, extra: Partial<Vari
   return rows.length > 0;
 }
 
-async function generateOne(db: Db, variant: VariantRow, cfg: CreativeLoopConfig, deps: { imageClient: ImageEditClient; writer: CopyWriter; now: Date }): Promise<boolean> {
+/** Cộng hai chi phí USD dạng chuỗi của cột; một vế CHƯA BIẾT ⇒ tổng CHƯA BIẾT (`""`), không phải vế kia. */
+function sumCostText(a: number | null, b: number | null): string {
+  return a === null || b === null ? "" : (a + b).toFixed(6);
+}
+
+async function generateOne(db: Db, variant: VariantRow, cfg: CreativeLoopConfig, deps: { imageClient: ImageEditClient; writer: CopyWriter; caption: VariantCaptioner; now: Date }): Promise<boolean> {
   const genes = parseGenes(variant.genes);
   const precheck = !genes ? "Bộ gen của ô hỏng — không viết được câu lệnh." : !variant.productId ? "Ô không còn gắn mã hàng." : null;
   const product = !precheck && variant.productId ? await loadProductBrief(db, variant.productId) : null;
@@ -282,6 +315,7 @@ async function generateOne(db: Db, variant: VariantRow, cfg: CreativeLoopConfig,
     return false;
   }
 
+  const winningExamples = await loadWinningExamples(db, variant.productId);
   let copy: Awaited<ReturnType<CopyWriter>>;
   try {
     copy = await deps.writer(
@@ -291,7 +325,7 @@ async function generateOne(db: Db, variant: VariantRow, cfg: CreativeLoopConfig,
         why: variant.why,
         product: { name: product.name, code: product.code, priceVnd: product.priceVnd },
         inspirationSummary: await inspirationSummaryOf(db, variant.inspirationSourceId),
-        winningExamples: await loadWinningExamples(db, variant.productId),
+        winningExamples,
       },
       { now: deps.now, entityId: variant.id },
     );
@@ -302,12 +336,26 @@ async function generateOne(db: Db, variant: VariantRow, cfg: CreativeLoopConfig,
   const written = { imagePrompt: copy.imagePrompt, primaryText: copy.primaryText, headline: copy.headline, writerModel: copy.model, writerCostUsd: copy.costUsd === null ? "" : copy.costUsd.toFixed(6) };
 
   try {
-    const images = await gatherPixels(db, { productPhotoSourceId: variant.productPhotoSourceId, parentVariantId: variant.parentVariantId });
+    const images = await gatherPixels(db, { productPhotoSourceId: variant.productPhotoSourceId, parentVariantId: variant.parentVariantId, ownAdSourceId: variant.inspirationSourceId });
     const out = await deps.imageClient({ model: cfg.imageModel, prompt: copy.imagePrompt, images, size: cfg.imageSize, quality: cfg.imageQuality });
     const stored = await storeCreativeImage(db, out.bytes);
+    // Ảnh đã có và đã tốn tiền: từ đây mọi lỗi của lượt viết lại chỉ làm mất phần "theo ảnh", không làm mất mẫu.
+    let captioned: { primaryText: string; headline: string; writerModel: string; writerCostUsd: string } | null = null;
+    let captionError = "";
+    try {
+      const cap = await deps.caption(
+        db,
+        { image: { bytes: out.bytes, contentType: out.contentType }, product: { name: product.name, code: product.code, priceVnd: product.priceVnd }, genes, draft: { headline: copy.headline, primaryText: copy.primaryText }, winningExamples, options: 1 },
+        { now: deps.now, entityId: variant.id },
+      );
+      if (cap.ok) captioned = { primaryText: cap.primaryText, headline: cap.headline, writerModel: `${copy.model} → ${cap.model}`, writerCostUsd: sumCostText(copy.costUsd, cap.costUsd) };
+      else captionError = cap.error;
+    } catch (e) {
+      captionError = errText(e);
+    }
     const rows = await db
       .update(schema.creativeVariants)
-      .set({ ...written, imageId: stored.id, genModel: cfg.imageModel, genCostUsd: out.costUsd === null ? "" : out.costUsd.toFixed(6), genError: "", status: "GENERATED" })
+      .set({ ...written, ...(captioned ?? {}), imageId: stored.id, genModel: cfg.imageModel, genCostUsd: out.costUsd === null ? "" : out.costUsd.toFixed(6), genError: captioned ? "" : `${CAPTION_FALLBACK_PREFIX}${captionError}`.slice(0, 1000), status: "GENERATED" })
       .where(and(eq(schema.creativeVariants.id, variant.id), eq(schema.creativeVariants.status, "PLANNED")))
       .returning({ id: schema.creativeVariants.id });
     return rows.length > 0;
@@ -347,6 +395,7 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
   const imageClient = deps.imageClient ?? editImage;
   const writer = deps.writer ?? writeVariantCopy;
   const describe = deps.describe ?? ((d: Db, id: string) => describeSource(d, id, { now: at }));
+  const caption: VariantCaptioner = deps.caption ?? captionFromImage;
   const perTick = Math.max(1, Math.min(deps.perTick ?? GEN_PER_TICK, CREATIVE_HARD_LIMITS.maxImagesPerDay));
   const summary: BuildBatchSummary = { batchDay: null, batchId: null, created: false, generated: 0, failed: 0, capped: 0, described: 0, status: null, skippedReason: null };
 
@@ -415,7 +464,7 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
     }
     let ok = false;
     try {
-      ok = await generateOne(db, variant, snap, { imageClient, writer, now: at });
+      ok = await generateOne(db, variant, snap, { imageClient, writer, caption, now: at });
     } catch (e) {
       // Lỗi ngoài dự kiến (đọc CSDL…) của MỘT mẫu không được chặn các mẫu còn lại.
       await markFailed(db, variant.id, `Lỗi khi dựng mẫu: ${errText(e)}`).catch(() => false);

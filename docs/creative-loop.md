@@ -55,9 +55,13 @@ mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của 
 
 1. **Mô hình không quyết định.** Chọn gen, chấm mẫu, tắt mẫu đều là hàm thuần có kiểm thử. LLM chỉ
    VIẾT câu chữ cho một bản giao việc đã được chọn, và viết bản tin học từ một bảng đã được đếm.
-2. **Điểm ảnh gửi sang máy SINH ảnh chỉ là ảnh của shop:** ảnh sản phẩm thật (`PRODUCT_PHOTO`) và ảnh
-   mẫu thắng/hứa hẹn của chính shop. Ảnh SPY / tay / R&D chỉ được một mô hình ĐỌC ảnh xem và rút ra
-   gen + mô tả chữ. Chép ảnh người khác là rủi ro bản quyền và là lý do Facebook khoá tài khoản.
+2. **Điểm ảnh gửi sang máy SINH ảnh chỉ là ảnh của shop:** ảnh sản phẩm thật (`PRODUCT_PHOTO`), ảnh
+   mẫu thắng/hứa hẹn của vòng, và ảnh **quảng cáo cũ của shop** (`OWN_AD`, §5c) — cùng một lý do: đó là
+   quảng cáo CỦA SHOP đã chạy trên tài khoản của shop. `OWN_AD` chỉ vào được bằng nút nhập theo `ad_id`
+   (form tải tay không nhận loại này, CSDL bắt buộc `fb_ad_id`), đi sang máy sinh ảnh dưới nhãn
+   `OWN_VARIANT`, và chỉ khi nó gắn ĐÚNG mã hàng của ảnh sản phẩm trong ô. Ảnh SPY / tay / R&D chỉ được
+   một mô hình ĐỌC ảnh xem và rút ra gen + mô tả chữ — kể cả khi chúng gắn đúng mã. Chép ảnh người khác
+   là rủi ro bản quyền và là lý do Facebook khoá tài khoản.
 3. **Mọi ô có ảnh sản phẩm thật làm gốc.** Quảng cáo ra một chiếc váy không có trong kho thì đơn nào
    cũng thành đơn hoàn — tiền quảng cáo mua về tỷ lệ hoàn.
 4. **Một cửa ghi Facebook.** Mọi lời gọi ghi nằm trong `lib/integrations/facebook/ads-write.ts`, qua
@@ -131,6 +135,53 @@ Chủ shop vẽ mẫu trên web ChatGPT / Grok (gói tháng, không có API cho 
 Tệp: `lib/creative/manual.ts` (đường ghi duy nhất) · `lib/actions/creative-manual.ts` · form ở tab Duyệt lô ·
 `drizzle/0118_creative_manual_variants.sql` · `tests/creative-manual.test.ts`.
 
+## 5c. Nhập nguồn ảnh có sẵn (chủ shop yêu cầu 24/09/2026)
+
+*"Lấy luôn những ảnh mẫu win và những ảnh mẫu có chỉ số tốt (giá tin nhắn < 4.000đ) để làm nguồn ảnh
+ban đầu, từ đó sinh thêm ảnh biến thể mẫu test mới."* Và tab Nguồn ảnh không bắt tải tay ảnh sản phẩm
+mà Pancake đã có.
+
+- **Nhập ảnh sản phẩm từ Pancake** — mỗi mã `not is_removed` có `products.image` ⇒ một nguồn
+  `PRODUCT_PHOTO` (`title` = tên mã, `source_url` = URL ảnh). Lũy đẳng theo (mã, URL); ảnh lỗi mang lý
+  do, không làm hỏng cả lượt; tối đa `PANCAKE_PHOTO_IMPORT_MAX` ảnh một lượt bấm.
+- **Nhập mẫu thắng / mẫu tốt từ Facebook** — HAI bước. Xem trước (chỉ đọc CSDL): mẩu có chi hạt `AD`
+  trong 60 ngày, tin nhắn cả đời ≥ 5, và THẮNG (đơn chốt vượt `winOrdersAbove`) hoặc TỐT (chi / tin nhắn
+  cả đời < 4.000đ, đã chi ≥ 50.000đ) — số đo qua ĐÚNG `variantMetrics()` của vòng, không điều kiện kết
+  quả đơn thứ hai. Nhập (tối đa 30 / lượt): máy chủ KIỂM LẠI ngưỡng, đọc ảnh + câu chữ qua Graph CHỈ-GET
+  (`image_url` → `link_data.picture` / `photo_data.url` → `image_hash` tra `adimages`), video / băng
+  chuyền / quảng cáo động bị bỏ kèm lý do; lũy đẳng theo `fb_ad_id`. Mã hàng = mã chiếm nhiều dòng đơn
+  nhất trong các đơn mang `ad_id` (bỏ quà tặng) → không có thì `ad_spends.product_id` → không có nữa thì
+  để trống và NÓI RA (nguồn ấy chưa làm mẫu cha được).
+- **Dùng vào đâu.** `OWN_AD` đủ sáu gen + có mã có ảnh thật ⇒ MẪU CHA của ô khai thác (THẮNG nếu lúc nhập
+  là mẫu thắng, không thì HỨA HẸN; xếp theo đơn / chi như mẫu của vòng), ô con ghi nguồn vào
+  `inspiration_source_id`. Gen chưa đủ ⇒ nguồn cảm hứng đứng TRƯỚC spy / tay / R&D. Câu chữ của nó đi vào
+  `loadWinningExamples` (xen kẽ với mẫu thắng của vòng) để máy viết học giọng văn đã bán được. Gen của
+  nguồn mới được đọc ở lượt chạy sau như mọi nguồn (`describePending`).
+
+Tệp: `lib/creative/import.ts` (đường ghi) · `lib/queries/creative-own-ads.ts` (xem trước, chỉ đọc) ·
+`lib/actions/creative-import.ts` · `app/(dashboard)/marketing/creatives/import-buttons.tsx` ·
+`drizzle/0119_creative_own_ads.sql` · `tests/creative-import.test.ts`.
+
+## 5d. Câu chữ theo ảnh + soạn trước khi duyệt (chủ shop yêu cầu 24/09/2026)
+
+*"Duyệt ảnh xong cần có phần soạn các thông tin sẵn để sẵn sàng đăng bài, đăng camp ads như tiêu đề,
+content (AI suggest luôn sao cho phù hợp với ảnh đã sinh ra và được duyệt)."*
+
+- `writer.ts` viết câu chữ TRƯỚC khi có ảnh ⇒ chỉ là NHÁP. Ngay sau khi ảnh được lưu, `captionFromImage()`
+  (`lib/creative/caption.ts`, OpenAI Responses + `input_image`, route `creative.caption`) NHÌN ảnh và viết
+  lại tiêu đề + nội dung chính. Luật giá y như `writer.ts`: sai ⇒ viết lại một lần ⇒ vẫn sai thì bỏ con số giá.
+- Viết theo ảnh hỏng ⇒ GIỮ câu nháp, mẫu vẫn `GENERATED`; lý do ở `gen_error` (tiền tố `CAPTION_FALLBACK_PREFIX`)
+  và thẻ mẫu nói ra. Không có cột mới.
+- Tab Duyệt lô: mỗi mẫu `GENERATED` hiện khối **Sẵn sàng đăng** (xem trước bài như trên Facebook — tên fanpage
+  theo cấu hình chụp của lô, đọc từ sổ `fanpages`) và nút **Soạn câu chữ**: sửa tay (đếm ký tự 40/500), hoặc
+  **AI gợi ý theo ảnh** (2–3 phương án, không tự lưu). Mẫu tự làm dùng được như mẫu máy.
+- Sửa được khi lô chưa duyệt (`PLANNED`/`PENDING_APPROVAL`) và còn hạn — điều kiện nằm TRONG câu `UPDATE`.
+  Câu chữ nằm trong digest ⇒ **sửa câu chữ ⇒ cần bấm duyệt lại** (phiếu đã phát tự vô hiệu). Giá khác ERP
+  chỉ cảnh báo. Quyền `ideas:write`; nhật ký ghi trước/sau.
+
+Tệp: `lib/creative/{caption,copy-edit}.ts` · `lib/actions/creative-copy.ts` · `copy-editor.tsx` ·
+`AdPreview` trong `variant-bits.tsx` · `tests/creative-copy.test.ts`.
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |
@@ -172,7 +223,8 @@ Tệp: `lib/creative/manual.ts` (đường ghi duy nhất) · `lib/actions/creat
 | Điền `creative.config`: fanpage · tài khoản · chiến dịch test · mẩu mẫu · **luật tắt · luật giữ** | ngưỡng là quyết định kinh doanh (mục 38) |
 | Đặt `ADS_WRITE_ENABLED=true`, `ADS_WRITE_MODE=COPILOT`, `CREATIVE_LOOP_EVERY_MINUTES=10` trên VPS; `OPENAI_API_KEY` phải có | đổi lịch và mở đường ghi là việc của chủ shop (mục 7) |
 | Bật `enabled` ở tab Cấu hình | công tắc mềm của vòng |
-| Tải lên **ảnh sản phẩm thật** cho các mã muốn test | máy không sinh mẫu cho sản phẩm nó không nhìn thấy |
+| Bấm **Nhập ảnh sản phẩm từ Pancake** (hoặc tải tay ảnh sản phẩm thật) cho các mã muốn test | máy không sinh mẫu cho sản phẩm nó không nhìn thấy |
+| Bấm **Nhập mẫu thắng / mẫu tốt từ Facebook** (token hiện có `ads_read` là đủ — chỉ GET) | chọn mẩu nào làm mẫu cha là việc của người |
 | Chốt ba con số "đề xuất" ở §3 | ngưỡng tiền |
 
 ## 8. BLOCKED / HUMAN GATE

@@ -259,6 +259,30 @@ export class FacebookAdsClient {
     return out;
   }
 
+  /**
+   * ĐỌC nội dung quảng cáo (ảnh + câu chữ) của MỘT mẩu — cho việc nhập quảng cáo cũ của shop làm
+   * nguồn ảnh của vòng mẫu (`lib/creative/import.ts`). Chỉ GET; trả nguyên bản ghi để hàm thuần
+   * `pickOwnAdContent()` bóc, vì hình dạng `object_story_spec` đổi theo loại quảng cáo.
+   */
+  async getAdCreativeContent(adId: string): Promise<Record<string, unknown>> {
+    if (!/^\d{5,}$/.test(adId.trim())) throw new IntegrationError(`Facebook: mã quảng cáo không hợp lệ (${adId})`, 400);
+    return this.get(adId.trim(), { fields: "name,account_id,creative{id,image_url,image_hash,thumbnail_url,body,title,object_type,video_id,object_story_spec,asset_feed_spec}" });
+  }
+
+  /** ĐỌC địa chỉ ảnh gốc theo `image_hash` trong thư viện ảnh của tài khoản. Hash không tra được ⇒ vắng khỏi kết quả. */
+  async getAdImageUrls(accountId: string, hashes: string[]): Promise<Record<string, string>> {
+    const account = accountId.trim().replace(/^act_/, "");
+    const clean = [...new Set(hashes.map((h) => h.trim()).filter(Boolean))];
+    if (!/^\d{5,}$/.test(account) || clean.length === 0) return {};
+    const out: Record<string, string> = {};
+    for await (const item of this.paginate(`act_${account}/adimages`, { hashes: clean, fields: "hash,url" })) {
+      const hash = str(item.hash);
+      const url = str(item.url);
+      if (hash && url) out[hash] = url;
+    }
+    return out;
+  }
+
   /** Dư nợ, trạng thái, nguồn thanh toán của mọi tài khoản quảng cáo (để cảnh báo ngưỡng thanh toán) */
   async listAdAccountsBilling(): Promise<FbAdAccountBilling[]> {
     // Một số trường có thể không tồn tại ở phiên bản API / loại tài khoản → bỏ trường bị báo lỗi (#100) rồi thử lại

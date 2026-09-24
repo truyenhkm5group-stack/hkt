@@ -1,8 +1,8 @@
 import { z } from "zod";
 import {
-  CREATIVE_SOURCE_KINDS,
   GENE_LABEL,
   GENE_VOCAB,
+  MANUAL_UPLOAD_SOURCE_KINDS,
   normalizeCreativeConfig,
   type ConfigProblem,
   type CreativeLoopConfig,
@@ -40,10 +40,13 @@ function httpUrlOrEmpty(s: string): boolean {
  * Đầu vào của `createCreativeSource`. KHÔNG có băm, KHÔNG có loại ảnh: máy chủ tự băm và tự đọc
  * chữ ký tệp (`storeCreativeImage`) — nhận hai thứ đó từ client là để một ảnh bị tráo lọt qua phiếu
  * duyệt lô với băm cũ.
+ *
+ * Loại nguồn chỉ nhận `MANUAL_UPLOAD_SOURCE_KINDS` — `OWN_AD` (quảng cáo cũ của shop, được gửi điểm ảnh
+ * sang máy sinh ảnh) chỉ vào được qua nút nhập từ Facebook theo `ad_id`, không qua form tải tay.
  */
 export const creativeSourceInputSchema = z
   .object({
-    kind: z.enum(CREATIVE_SOURCE_KINDS, { message: "Chọn loại ảnh nguồn" }),
+    kind: z.enum(MANUAL_UPLOAD_SOURCE_KINDS, { message: "Chọn loại ảnh nguồn" }),
     productId: z.string().trim().max(200).default(""),
     title: z.string().trim().max(200, "Tiêu đề tối đa 200 ký tự").default(""),
     note: z.string().trim().max(2000, "Ghi chú tối đa 2.000 ký tự").default(""),
@@ -99,6 +102,23 @@ export const manualCreativeInputSchema = z
   .strict();
 
 export type ManualCreativeInput = z.infer<typeof manualCreativeInputSchema>;
+
+/**
+ * SỬA CÂU CHỮ của một mẫu trước khi duyệt lô (tab Duyệt lô). Cùng trần với câu chữ máy viết và mẫu tự
+ * làm: tiêu đề ≤ 40 (được để trống — bài ảnh không có ô tiêu đề), nội dung chính 1…500. Hai trần này
+ * đọc từ MỘT chỗ để ô đếm ký tự trên màn hình và máy chủ không nói hai con số khác nhau.
+ */
+export const VARIANT_COPY_LIMITS = { headlineMaxChars: 40, primaryTextMaxChars: 500 } as const;
+
+export const variantCopyInputSchema = z
+  .object({
+    variantId: z.string().trim().min(1, "Thiếu mã mẫu"),
+    headline: z.string().trim().max(VARIANT_COPY_LIMITS.headlineMaxChars, `Tiêu đề tối đa ${VARIANT_COPY_LIMITS.headlineMaxChars} ký tự`).default(""),
+    primaryText: z.string().trim().min(1, "Nhập nội dung chính của bài quảng cáo").max(VARIANT_COPY_LIMITS.primaryTextMaxChars, `Nội dung chính tối đa ${VARIANT_COPY_LIMITS.primaryTextMaxChars} ký tự`),
+  })
+  .strict();
+
+export type VariantCopyInput = z.infer<typeof variantCopyInputSchema>;
 
 export const creativeSourceToggleSchema = z.object({ id: z.string().trim().min(1, "Thiếu mã nguồn ảnh"), active: z.boolean() }).strict();
 
