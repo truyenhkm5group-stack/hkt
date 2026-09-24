@@ -8,6 +8,7 @@ import { PRIMARY_ATTEMPT, SHIPMENT_DELIVERED } from "@/lib/queries/return-rate";
 import { getDb, schema } from "@/db";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { sendLark } from "@/lib/alerts/lark";
+import { runStockShortageDigest, type ShortageDigestResult } from "@/lib/alerts/stock-shortage-digest";
 import { escapeHtml, sendTelegram } from "@/lib/alerts/telegram";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { detectCsCases } from "@/lib/cs/detect";
@@ -930,7 +931,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   return { candidates, activeKinds };
 }
 
-export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string } };
+export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string }; /** Bảng thiếu hàng giao đơn gửi Lark — `null` khi tắt. */ stockShortage: ShortageDigestResult | null };
 
 /** Chạy toàn bộ quy tắc; trả về số thông báo mới / đã đóng / đang mở */
 export async function evaluateAlerts(): Promise<AlertRunResult> {
@@ -1065,7 +1066,16 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     }
   }
   if (created.length || resolved) publish({ type: "notification", open: Number(open) });
-  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark };
+  /*
+    BẢNG THIẾU HÀNG GIAO ĐƠN ĐÃ CHỐT — một tin CÓ BẢNG cho cả shop, không phải một tin cho mỗi mẫu.
+    Không đi qua bảng `notifications`: việc theo mẫu mã đã có (`STOCK_LOW` → phòng Sản xuất), việc
+    theo đơn đã có (hàng đợi fulfillment, lý do `OUT_OF_STOCK` → CSKH). Tạo thêm một dòng việc nữa là
+    đếm một chỗ thiếu hai lần. Lỗi ở đây không được làm hỏng lượt cảnh báo đã chạy xong ở trên.
+  */
+  const stockShortage = cfg.enabled.stockShortage
+    ? await runStockShortageDigest().catch((e): ShortageDigestResult => ({ sent: null, via: null, variants: 0, waitingOrders: 0, error: e instanceof Error ? e.message : String(e) }))
+    : null;
+  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, stockShortage };
 }
 
 const holder = globalThis as unknown as { __erpAlertsLastRun?: number; __erpAlertsTimer?: ReturnType<typeof setTimeout> };

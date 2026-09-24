@@ -164,6 +164,18 @@ function confidenceFrom(notes: string[], critical: boolean): RecommendationConfi
 }
 
 /**
+ * SỐ NÊN ĐẶT THÊM SAU KHI TRỪ HÀNG ĐÃ ĐẶT XƯỞNG CHƯA NHẬN.
+ *
+ * `computePlan` trừ hàng sắp quay lại kho nhưng KHÔNG biết đơn sản xuất đang mở, nên mẫu đã đặt 500
+ * cái vẫn bị kêu đặt thêm 500. Một chỗ duy nhất cho phép trừ này: trang Quyết định vốn tồn kho và
+ * bảng Thiếu hàng giao đơn (`lib/constants/stock-shortage.ts`) cùng đọc nó, để hai nơi không thể
+ * đề xuất hai con số khác nhau cho cùng một mẫu mã.
+ */
+export function suggestedNetOfOpenPo(suggested: number, openPoQty: number): number {
+  return Math.max(0, Math.round(suggested - Math.max(0, openPoQty)));
+}
+
+/**
  * Kết luận cho MỘT mẫu mã. Hàm thuần — cùng đầu vào luôn cho cùng đầu ra, kiểm thử được từng
  * trường hợp biên mà không cần CSDL.
  *
@@ -221,7 +233,7 @@ export function decideInventory(i: DecisionInput): InventoryDecisionResult {
   // Số nên đặt SAU khi trừ hàng đã đặt xưởng: computePlan đã trừ hàng sắp quay về kho
   // (`incomingFromReturns`) nhưng không biết đơn sản xuất đang mở,
   // nên nếu không trừ thì mẫu đã đặt 500 cái vẫn bị kêu đặt thêm 500 cái nữa.
-  const suggestedNet = Math.max(0, Math.round(i.suggested - Math.max(0, i.openPoQty)));
+  const suggestedNet = suggestedNetOfOpenPo(i.suggested, i.openPoQty);
   const capitalOf = (qty: number) => (i.unitCost === null ? null : Math.round(qty * i.unitCost));
 
   if (i.velocity > 0) {

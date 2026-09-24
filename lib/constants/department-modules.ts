@@ -215,6 +215,13 @@ export const NAV_MODULES = [
     why: "Đặt bao nhiêu, mẫu nào, khi nào — quyết định trung tâm của phòng Sản xuất.",
   },
   {
+    href: "/inventory/shortage",
+    label: "Thiếu hàng giao đơn",
+    zone: "PRODUCTION",
+    permission: "planning:view",
+    why: "Đơn đã chốt đang chờ vì kho không đủ hàng: việc gỡ nó là đặt / giục xưởng. Kho đọc để kiểm đếm, CSKH đọc để báo khách — nhưng nguồn cung là quyết định của phòng Sản xuất.",
+  },
+  {
     href: "/inventory/decisions",
     label: "Quyết định vốn tồn kho",
     zone: "PRODUCTION",
