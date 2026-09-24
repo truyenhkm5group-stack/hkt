@@ -110,8 +110,16 @@ async function describePending(db: Db, describe: SourceDescriber): Promise<numbe
   return ok;
 }
 
-async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): Promise<{ batch: BatchRow; created: boolean }> {
+async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): Promise<{ batch: BatchRow; created: boolean } | { batch: null; emptyReasons: string[] }> {
   const plan = planBatch(await loadPlanInputs(db, batchDay, cfg));
+  /*
+    LẬP KHÔNG ĐƯỢC Ô NÀO ⇒ KHÔNG GHI LÔ.
+
+    Mỗi ngày chỉ có MỘT lô (khoá `batch_day`). Ghi một lô rỗng thành FAILED là khoá chết cả ngày ấy:
+    chủ shop tải ảnh sản phẩm lúc 15:00 thì lượt 15:10 vẫn thấy "đã có lô" và không lập lại. Không ghi
+    gì thì lượt sau tự thử lại, cho tới hạn duyệt — lý do vẫn đi vào sổ `sync_runs` qua `skippedReason`.
+  */
+  if (plan.slots.length === 0) return { batch: null, emptyReasons: plan.shortfall?.reasons ?? ["Lập lô không ra ô nào."] };
   const w = batchWindow(batchDay, cfg);
   const created = await db.transaction(async (tx) => {
     const [b] = await tx
@@ -310,6 +318,7 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
     if (!batch) {
       summary.described = await describePending(db, describe);
       const r = await createBatch(db, day, cfg);
+      if (!r.batch) return { ...summary, skippedReason: `Chưa lập được lô ${day}: ${r.emptyReasons.join(" ")} Lượt sau thử lại.` };
       batch = r.batch;
       summary.created = r.created;
     }

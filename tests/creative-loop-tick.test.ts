@@ -8,6 +8,10 @@ import { runCreativeLoopTick } from "@/lib/creative/loop";
 import type { CreativeWriter } from "@/lib/creative/publish";
 import { evaluateCreatives } from "@/lib/creative/evaluate";
 import { vnStartOfDay } from "@/lib/format";
+import { buildBatch } from "@/lib/creative/generate";
+import { batchWindow } from "@/lib/creative/schedule";
+import { DEFAULT_CREATIVE_CONFIG } from "@/lib/constants/creative-loop";
+import { shiftDay } from "@/lib/constants/marketing-decision-ledger";
 
 /**
  * ═══════════ VÒNG MẪU — MỘT LƯỢT ═══════════
@@ -189,4 +193,38 @@ export async function testCreativeExtendedWindow(db: Db) {
     else await db.delete(schema.creativeLearnings).where(inArray(schema.creativeLearnings.learningDay, [vnDay(now)]));
   }
   console.log("✓ Vòng mẫu — mẫu đã tiêu thêm: khung hiệu lực đọc từ sổ, không ENDED sớm, luật tắt vẫn bắn");
+}
+
+/**
+ * HỒI QUY: lập không ra ô nào (chưa có ảnh sản phẩm thật) thì KHÔNG ghi lô.
+ *
+ * Mỗi ngày chỉ có một lô (khoá `batch_day`). Bản đầu ghi lô rỗng thành FAILED ⇒ chủ shop tải ảnh lúc
+ * 15:00 cũng không cứu được ngày ấy. Nay lượt sau tự thử lại cho tới hạn duyệt.
+ */
+export async function testCreativeEmptyBatch(db: Db) {
+  const [prevCfg] = await db.select().from(schema.settings).where(eq(schema.settings.key, CREATIVE_CONFIG_KEY));
+  // Ngày lô xa trong tương lai; giờ gọi dựng TỪ CHÍNH hàm lịch (AGENTS.md mục 50).
+  const day = shiftDay(vnDay(new Date()), 60);
+  const at = new Date(batchWindow(day, DEFAULT_CREATIVE_CONFIG).buildFrom.getTime() + 3_600_000);
+  const cfg = { enabled: true, focusProductIds: ["clt-khong-ton-tai"] };
+  try {
+    await db
+      .insert(schema.settings)
+      .values({ key: CREATIVE_CONFIG_KEY, value: JSON.stringify(cfg) })
+      .onConflictDoUpdate({ target: schema.settings.key, set: { value: JSON.stringify(cfg) } });
+    const khongDuocGoi = async () => {
+      throw new Error("không được viết/sinh ảnh khi lô không có ô nào");
+    };
+    const r = await buildBatch(db, at, { describe: async () => ({ ok: false, error: "bỏ qua" }), writer: khongDuocGoi, imageClient: khongDuocGoi });
+    assert.equal(r.batchDay, day);
+    assert.equal(r.batchId, null, "không có ô nào ⇒ không ghi lô");
+    assert.match(r.skippedReason ?? "", /ảnh sản phẩm thật/, "lý do phải nói ra thiếu gì");
+    const rows = await db.select({ id: schema.creativeBatches.id }).from(schema.creativeBatches).where(eq(schema.creativeBatches.batchDay, day));
+    assert.equal(rows.length, 0, "ngày ấy phải còn TRỐNG để lượt sau lập lại khi đã có ảnh");
+  } finally {
+    await db.delete(schema.creativeBatches).where(eq(schema.creativeBatches.batchDay, day));
+    if (prevCfg) await db.update(schema.settings).set({ value: prevCfg.value }).where(eq(schema.settings.key, CREATIVE_CONFIG_KEY));
+    else await db.delete(schema.settings).where(eq(schema.settings.key, CREATIVE_CONFIG_KEY));
+  }
+  console.log("✓ Vòng mẫu — lô rỗng: không ghi lô, nói rõ thiếu ảnh sản phẩm, ngày ấy còn trống để lập lại");
 }
