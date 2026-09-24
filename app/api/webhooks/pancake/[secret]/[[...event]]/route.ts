@@ -6,6 +6,8 @@ import { env } from "@/lib/env";
 import { str } from "@/lib/integrations/http";
 import { detectKind, parseWebhookBody, processPancakeWebhook, storeWebhook, webhookDedupeKey } from "@/lib/integrations/pancake/webhook";
 import { secretEquals } from "@/lib/auth/secret-compare";
+import { PANCAKE_WEBHOOK_MAX_BODY_BYTES } from "@/lib/constants/webhook-limits";
+import { readBodyCapped } from "@/lib/http/body-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +20,11 @@ export async function POST(request: NextRequest, context: { params: Promise<{ se
   const { secret, event = [] } = await context.params;
   if (!secretOk(secret)) return NextResponse.json({ ok: false, error: "Sai bí mật webhook" }, { status: 401 });
 
-  const text = await request.text();
+  // Bí mật nằm trên đường dẫn nên đã kiểm TRƯỚC khi đọc body; trần vẫn cần — bí mật lộ không được
+  // thành cửa bắt máy chủ cấp phát body vô hạn (lib/constants/webhook-limits.ts).
+  const read = await readBodyCapped(request, PANCAKE_WEBHOOK_MAX_BODY_BYTES);
+  if (!read.ok) return NextResponse.json({ ok: false, error: read.reason }, { status: 413 });
+  const text = read.text;
   let payload: Record<string, unknown>;
   try {
     payload = parseWebhookBody(text);

@@ -59,6 +59,7 @@ function dongBoBangKeVTP() {
     const res = UrlFetchApp.fetch(ERP_URL + '/api/webhooks/vtp-statement', {
       method: 'post',
       contentType: 'application/json',
+      headers: { 'x-webhook-secret': SECRET },   // ERP kiểm bí mật TRƯỚC khi đọc tệp
       payload: JSON.stringify({ files: files, source: 'gmail', token: SECRET }),
       muteHttpExceptions: true,
     });
@@ -74,6 +75,7 @@ function baoSong() {
   UrlFetchApp.fetch(ERP_URL + '/api/webhooks/vtp-statement', {
     method: 'post',
     contentType: 'application/json',
+    headers: { 'x-webhook-secret': SECRET },
     payload: JSON.stringify({ files: [], ping: true, source: 'gmail', token: SECRET }),
     muteHttpExceptions: true,
   });
@@ -88,6 +90,8 @@ function baoSong() {
 
 | Hiện tượng | Nguyên nhân |
 |---|---|
+| `HTTP 413 Body vượt trần …` | Một thư kèm quá nhiều / quá lớn tệp (trần = 40 tệp × 6 MB base64, `lib/constants/webhook-limits.ts`); tách thư hoặc tải tay |
+| `HTTP 429 Đang bận đọc lượt gửi khác` | Script bản cũ (bí mật chỉ nằm trong body) và đang có lượt khác chưa xong — thư giữ nguyên, lượt 15 phút sau gửi lại. Thêm dòng `headers` như đoạn script trên để hết giới hạn này |
 | `HTTP 401 Sai tham số bí mật` | `SECRET` không khớp; lấy lại ở ERP → Kết nối dữ liệu |
 | `HTTP 503 Chưa cấu hình tham số bí mật` | `VIETTELPOST_WEBHOOK_SECRET` trống trong `.env` trên VPS |
 | `HTTP 400 Không có tệp nào` | Thư chỉ có PDF hoá đơn, không có `.xlsx` — script tự gắn nhãn bỏ qua |

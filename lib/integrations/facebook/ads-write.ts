@@ -10,6 +10,7 @@ import {
   type AdsWriteAction,
   type AdsWriteMode,
 } from "@/lib/constants/ads-write";
+import { ADS_WRITE_KILL_KEY, killSwitchVerdict, parseAdsKillSwitch, type AdsKillSwitchRead, type AdsKillSwitchState } from "@/lib/constants/ads-kill-switch";
 
 /**
  * ═══════════ CỬA GHI DUY NHẤT RA FACEBOOK ═══════════
@@ -30,6 +31,12 @@ import {
  * `assertAdsWriteAllowed()` bịt lỗ hổng đó: nó đọc LẠI biến môi trường ngay trước lời gọi mạng.
  * Nói cách khác — muốn ghi được phải sửa `.env` trên máy chủ rồi khởi động lại, không đổi được
  * bằng cách làm một hàm trả về giá trị khác.
+ *
+ * ─── CÔNG TẮC KHẨN CẤP: CHỐT THỨ HAI, ĐÓNG ĐƯỢC KHÔNG CẦN DEPLOY ───
+ *
+ * Sau chốt env, `graphPost` đọc LẠI dòng `settings["ads.write.kill"]` trước mỗi lời gọi ghi
+ * (`lib/constants/ads-kill-switch.ts`). Nó chỉ LÀM HẸP: kéo ⇒ chặn mọi lời gọi tạo/tăng chi, chỉ
+ * `{status: "PAUSED"}` còn đi; đọc lỗi ⇒ coi như đang kéo.
  */
 
 /** Nấc quyền hạn thật, đã kẹp bằng trần cứng của mã nguồn. */
@@ -60,6 +67,41 @@ export function adsWriteDisabledReason(): string | null {
 function assertAdsWriteAllowed() {
   const reason = adsWriteDisabledReason();
   if (reason) throw new IntegrationError(`Facebook: đường ghi quảng cáo đang đóng — ${reason}`, 403);
+}
+
+/**
+ * ĐỌC CÔNG TẮC KHẨN CẤP (`lib/constants/ads-kill-switch.ts`). KHÔNG qua `getSettingJson()`: hàm đó
+ * nuốt lỗi CSDL thành "không có dòng" — tức biến KHÔNG BIẾT thành MỞ. Ở đây lỗi đọc phải thành ĐÓNG.
+ */
+export async function readAdsKillSwitchRaw(): Promise<AdsKillSwitchRead> {
+  try {
+    const db = await getDb();
+    const rows = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, ADS_WRITE_KILL_KEY)).limit(1);
+    return { ok: true, value: rows[0]?.value ?? null };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Trạng thái công tắc cho màn hình và cho các đường gọi muốn dừng SỚM (trước lời gọi đọc Facebook). */
+export async function readAdsKillSwitch(): Promise<AdsKillSwitchState> {
+  return parseAdsKillSwitch(await readAdsKillSwitchRaw());
+}
+
+/**
+ * Chốt THỨ HAI trong mỗi lời gọi ghi, sau chốt env: đọc LẠI công tắc ngay trước lời gọi mạng — không
+ * đệm, không nhớ từ lượt trước, vì kéo công tắc phải có hiệu lực ở lời gọi KẾ TIẾP chứ không phải
+ * sau khi đệm hết hạn. `read` tiêm được chỉ để kiểm thử nhánh lỗi đọc.
+ */
+export async function assertKillSwitchAllows(fields: Readonly<Record<string, string>>, read: () => Promise<AdsKillSwitchRead> = readAdsKillSwitchRaw): Promise<void> {
+  let raw: AdsKillSwitchRead;
+  try {
+    raw = await read();
+  } catch (e) {
+    raw = { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  const verdict = killSwitchVerdict(parseAdsKillSwitch(raw), fields);
+  if (!verdict.allow) throw new IntegrationError(`Facebook: đường ghi quảng cáo đang đóng — ${verdict.reason}`, 403);
 }
 
 function graphUrl(path: string) {
@@ -105,6 +147,7 @@ async function graphGet(path: string, params: Record<string, string>): Promise<G
  */
 async function graphPost(path: string, fields: Record<string, string>): Promise<GraphRecord> {
   assertAdsWriteAllowed();
+  await assertKillSwitchAllows(fields);
   const url = graphUrl(path);
   const form = new URLSearchParams({ ...fields, access_token: env.facebook.accessToken });
   const { body } = await fetchJson(url, {

@@ -21,6 +21,7 @@ import {
   createTestAdset,
   extendAdset,
   pauseAdset,
+  readAdsKillSwitch,
   readTemplateAd,
   uploadAdImage,
   vndToFbMinor,
@@ -310,6 +311,21 @@ async function publishOneBatch(db: Db, b: BatchRow, now: Date, d: { writer: Crea
       )
       .where(and(eq(T.creativeBatches.id, b.id), eq(T.creativeBatches.status, "APPROVED")));
     return { ...report, result: "TOO_LATE", live, detail: `Quá giờ chạy — ${pending.length} mẫu không đăng.` };
+  }
+
+  /*
+    CÔNG TẮC KHẨN CẤP TRƯỚC MỌI LỜI GỌI FACEBOOK CỦA LÔ.
+
+    `graphPost()` tự chặn từng lời gọi ghi, nên bỏ đoạn này đi cũng không lọt đồng nào. Nhưng khi đó
+    mỗi mẫu sẽ vấp ở bước tải ảnh và thành `PUBLISH_FAILED` — một lô đã duyệt bị giết vĩnh viễn chỉ
+    vì ai đó kéo công tắc năm phút. Dừng ở đây thì lô vẫn ĐÃ DUYỆT: nhả công tắc trước giờ chạy là
+    lượt kế tiếp đăng tiếp. Không đọc được công tắc ⇒ coi như đang kéo (mục 31).
+  */
+  const kill = await readAdsKillSwitch();
+  if (kill.killed) {
+    const detail = `${CREATIVE_WRITE_DENIAL_REASON.KILL_SWITCH} ${kill.reason ?? ""}`.trim();
+    await log({ variantId: null, action: "CREATE_ADSET", outcome: "DENIED", denial: "KILL_SWITCH", detail });
+    return { ...report, result: "DENIED", denied: 1, detail };
   }
 
   const digestNow = approvalDigest(await batchApprovalContent(db, b));
