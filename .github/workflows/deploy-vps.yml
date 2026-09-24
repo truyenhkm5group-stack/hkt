@@ -170,7 +170,9 @@ jobs:
           if [ -n "$missing" ]; then echo "::error::Thiếu Secrets:$missing — vào Settings → Secrets and variables → Actions để thêm."; exit 1; fi
 
       - name: SSH vào VPS và chạy bootstrap
-        uses: appleboy/ssh-action@v1
+        # Ghim SHA của thẻ v1 (= v1.2.5, tra 24/09/2026) — thẻ dời được, SHA thì không. Bước này
+        # cầm VPS_PASSWORD / VPS_SSH_KEY. Cùng SHA với ops-vps.yml.
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         env:
           ERP_BRANCH: ${{ github.ref_name }}
           # Danh tính lượt chạy + trần chờ khoá vòng đời, đi vào nhật ký khoá trên máy chủ.

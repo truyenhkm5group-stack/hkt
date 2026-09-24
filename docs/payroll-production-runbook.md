@@ -44,8 +44,15 @@ chưa có bản sao lưu — dừng lại.
 
 **Hai cách, KHÔNG thay thế nhau** — cách A chạy được ngay, cách B chỉ chạy được sau deploy:
 
-**Cách A — không cần deploy gì, chạy ngay hôm nay.** Thao tác `db-query` chạy dưới
-`default_transaction_read_only=on`, nghĩa là chính Postgres từ chối mọi lệnh ghi.
+**Cách A — không cần deploy gì, chạy ngay hôm nay.** Thao tác `db-query` chạy bằng role
+`erp_ro`, role này KHÔNG có quyền ghi bảng nào — chính Postgres từ chối mọi lệnh ghi, kể cả khi câu
+SQL tự tắt cờ chỉ-đọc. Kết quả KHÔNG in ra log (kho public): nó được mã hoá thành hiện vật
+`ket-qua-ma-hoa-<RUN_ID>` giữ 1 ngày, giải mã theo `docs/ops-doc-ket-qua.md`.
+
+> Sửa 24/09/2026: bản trước của đoạn này nói `db-query` chạy dưới
+> `default_transaction_read_only=on`. Điều đó **chưa bao giờ đúng** — biến `PGOPTIONS` đặt ở shell
+> máy chủ không vào được container, và lệnh chạy bằng `erp` (superuser). Xem
+> `docs/security-2026-09-24-ops-log-leak.md`.
 
 ```
 Actions → "Vận hành ERP trên VPS" → action: db-query
