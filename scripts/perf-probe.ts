@@ -123,7 +123,7 @@ const results: {
  * một câu 16 giây che mất hoàn toàn — không biết phải sửa câu nào. Hàm khớp mẫu dưới đây được ghi
  * lại MỌI câu từ 50ms trở lên trong lượt NGUỘI, in thành một mục riêng.
  */
-const TRONG_DIEM = /getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage|dataQualitySummary|getDataQualityIssues|codSettlementSummary|listCodSettlement|customerFacets|getCashflowStatement/;
+const TRONG_DIEM = /getPreOrderFunnel|getSalesLeakageQueue|getPreshipRiskBacktest|getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage|dataQualitySummary|getDataQualityIssues|codSettlementSummary|listCodSettlement|customerFacets|getCashflowStatement/;
 let cauTrongHam: { ms: number; sql: string }[] | null = null;
 const cauTheoHam = new Map<string, { ms: number; sql: string }[]>();
 
@@ -369,6 +369,17 @@ async function main() {
   await timed("/reports/funnel", "getFunnelBySource", () => funnel.getFunnelBySource(month));
   const staff = await import("@/lib/queries/staff-performance");
   await timed("/reports/funnel", "getStaffPerformance", () => staff.getStaffPerformance(month, "sellerName"));
+  /*
+    BA KHỐI SUSPENSE CÒN LẠI CỦA TRANG — trước 25/09/2026 probe chỉ đo bốn hàm đầu trang, cả bốn dưới
+    180 ms, trong khi smoke đo trang 5,7 s: phần thời gian nằm ở chỗ công cụ chưa nhìn. Đo đủ mọi
+    khối mà trang thật sự chờ (conversion-sections.tsx).
+  */
+  const preOrder = await import("@/lib/queries/conversation-funnel");
+  await timed("/reports/funnel", "getPreOrderFunnel", () => preOrder.getPreOrderFunnel(month));
+  const leakage = await import("@/lib/queries/sales-leakage");
+  await timed("/reports/funnel", "getSalesLeakageQueue", () => leakage.getSalesLeakageQueue({ limit: 200 }));
+  const backtest = await import("@/lib/queries/preship-risk-backtest");
+  await timed("/reports/funnel", "getPreshipRiskBacktest", () => backtest.getPreshipRiskBacktest(month));
 
   const tower = await import("@/lib/queries/control-tower");
   await timed("/ (thành phần)", "getControlTower", () => tower.getControlTower());
