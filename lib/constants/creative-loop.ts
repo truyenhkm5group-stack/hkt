@@ -380,7 +380,10 @@ export type CreativeLoopConfig = {
   killRules: CreativeRule[];
   /** Luật GIỮ — qua TẤT CẢ ⇒ hứa hẹn ⇒ đề nghị tiêu thêm. Rỗng ⇒ máy không kết luận hứa hẹn/loại. */
   keepRules: CreativeRule[];
-  /** Mã hàng ưu tiên cho ô THĂM DÒ. Rỗng ⇒ mọi mã có ảnh sản phẩm thật. */
+  /**
+   * CHỈ test các mã này (cả ô thăm dò lẫn ô khai thác). Rỗng ⇒ mọi mã có ảnh sản phẩm thật.
+   * Lọc cả hai loại ô là chủ ý: người khai "chỉ chạy mã A, B" không muốn thấy biến thể của mã C lọt vào lô.
+   */
   focusProductIds: string[];
   imageModel: string;
   imageSize: ImageSize;
