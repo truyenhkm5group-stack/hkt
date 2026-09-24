@@ -191,8 +191,10 @@ Chạy tay một lượt: ops `run-job` với `arg = marketing-decision-ledger`.
   thành danh sách mọi chiến dịch — và một hàng đợi như thế bị tắt sau một tuần.
 
 **Nấc 2.** Agent đọc sổ + phát hiện của `diagnose()`, viết bản tin và xếp ưu tiên. Dùng lại nguyên
-`lib/marketing/ai-context.ts` (bối cảnh có cấu trúc, không gửi dữ liệu thô) và `ai-explain.ts` (lớp
-tuỳ chọn, không bao giờ chặn đường). Phần mới duy nhất là đưa **độ bền** vào bối cảnh: một khuyến
+`lib/marketing/ai-context.ts` (bối cảnh có cấu trúc, không gửi dữ liệu thô). `ai-explain.ts` — lớp
+"Diễn giải" chèn vào `/ads/daily` — đã bị GỠ 24/09/2026 (chủ shop chốt): nó chỉ viết lại thành văn
+đúng các phát hiện đã in, bằng mô hình bậc `analysis` ngoài trần chi tiêu AI và ngoài
+`ai_interactions`. Agent nấc 2 phải đi qua trần chi tiêu và nhật ký như Copilot. Phần mới duy nhất là đưa **độ bền** vào bối cảnh: một khuyến
 nghị đã giữ 6 ngày và một khuyến nghị mới nảy hôm nay không được viết bằng cùng một giọng.
 
 ---

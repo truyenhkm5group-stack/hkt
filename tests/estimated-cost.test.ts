@@ -138,9 +138,14 @@ function testOnlyNominalTabEnablesEstimates() {
     if (!bat.length) continue;
     assert.ok(choPhep.has(rel), `${rel} bật giá vốn DỰ TÍNH cho báo cáo lợi nhuận — chỉ tab Lợi nhuận danh nghĩa được làm vậy (lương / quảng cáo không được thấy một giá đoán)`);
   }
-  // payroll.ts chỉ được CHUYỂN TIẾP tham số của chính nó, không tự bật.
+  // payroll.ts chỉ được CHUYỂN TIẾP tham số của chính nó, không tự bật. `false` TƯỜNG MINH vẫn
+  // được — nó không bao giờ bật giá đoán; nó xuất hiện khi lời gọi cần tới tham số thứ sáu
+  // (`withStock`, tắt đọc tồn kho ở `getMarketerReport`).
   const payroll = readFileSync(path.join(goc, "lib/queries/payroll.ts"), "utf8");
-  for (const x of goiCoCongTac(payroll, "getNominalProfitReport", 5)) assert.equal(x, "withEstimatedCost", "payroll.ts chỉ chuyển tiếp công tắc, không tự bật");
+  for (const x of goiCoCongTac(payroll, "getNominalProfitReport", 5)) {
+    if (x === "false") continue;
+    assert.equal(x, "withEstimatedCost", "payroll.ts chỉ chuyển tiếp công tắc, không tự bật");
+  }
 }
 
 export async function testEstimatedCost(db: Db) {

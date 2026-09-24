@@ -473,7 +473,20 @@ export async function getMarketerReport(period: Period, basis: PayrollBasis = "p
 
 async function getMarketerReportUncached(period: Period, basis: PayrollBasis): Promise<MarketerReport> {
   const db = await getDb();
-  const [nominal, employees, config, econ, byPage] = await Promise.all([getNominalProfitReport(period), listEmployees(), loadPayrollConfig(), productEconomics(period), salesByProductPage(period, "delivered")]);
+  /*
+    TỒN KHO TẮT (tham số thứ sáu): báo cáo này — và `/ads` đọc nó qua `getAdsPerformance` — chỉ
+    dùng các khoản TIỀN của Báo cáo lợi nhuận danh nghĩa (doanh thu ƯT, lợi nhuận, QC chưa quy
+    kết, tên mã). Tồn kho chỉ nuôi các ô ghi chú, không một đồng nào vào lợi nhuận hay lương
+    (`tests/marketer-daily-nominal.test.ts` khoá điều ấy), mà `stockByProduct` là 5–6 giây nguội
+    trên production 23/09/2026. Giá vốn dự tính giữ TẮT như cũ (luật 2, `estimated-cost.ts`).
+  */
+  const [nominal, employees, config, econ, byPage] = await Promise.all([
+    getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true, false, false),
+    listEmployees(),
+    loadPayrollConfig(),
+    productEconomics(period),
+    salesByProductPage(period, "delivered"),
+  ]);
   const ads = schema.adSpends;
   const spendRows = await db
     .select({ marketerId: ads.marketerId, productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })

@@ -281,3 +281,8 @@ cho SQL, hãy hỏi: *giữa hai lượt đo, cái gì đã thực sự đổi?*
 
 Phần còn lại (~9,5s) là giá thật của hai lượt quét 30 ngày `orders ⋈ shipments` kèm `ORDER_OUTCOME`
 — cùng họ với `/ads` (21,4s) và `/reports/*`. Đó là một lượt tối ưu truy vấn riêng, chưa làm.
+
+**Cập nhật 23–24/09/2026.** Bóc tách MKTer chuyển sang số của Báo cáo lợi nhuận (#165), tắt JIT hai
+câu lớn (#176), bỏ đọc tồn kho (#185) ⇒ mọi hàm dữ liệu của trang ~3s nguội. Đoạn AI được nhả khỏi
+luồng trả về (#198) ⇒ smoke `/ads/daily` 14–16s → 2,0–2,8s. Rồi chủ shop chốt GỠ hẳn đoạn "Diễn
+giải" cùng `lib/marketing/ai-explain.ts`: nó chỉ viết lại thành văn các phát hiện đã in phía trên.
