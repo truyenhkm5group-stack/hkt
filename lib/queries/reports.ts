@@ -8,8 +8,7 @@ import { COD_COLLECTABLE, ORDER_OUTCOME, OUTCOME_FENCE, PRIMARY_ATTEMPT, outcome
 import { populationFilter } from "@/lib/queries/metrics";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { previousPeriod, type Period } from "@/lib/search-params";
-import { allocatedExpenseByDay } from "@/lib/queries/cost-allocation";
-import { getOperatingCost } from "@/lib/queries/cost-engine";
+import { getOperatingCost, getOperatingCostByDay } from "@/lib/queries/cost-engine";
 
 export type ReportBasis = "created" | "delivered";
 
@@ -266,7 +265,10 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
     // Chi phí RẢI ĐỀU theo ngày trong kỳ hiệu lực. Gộp theo `occurred_at` thì tiền thuê cả tháng
     // dựng thành một cột duy nhất ở ngày ghi sổ và mọi ngày khác chi phí bằng 0 — nhìn biểu đồ đó
     // sẽ kết luận "ngày 01 lỗ nặng, các ngày sau lãi đều", cả hai đều sai.
-    allocatedExpenseByDay(tx, period.from, period.to),
+    // Đi qua Profit Engine để các cột ngày cộng lại BẰNG ĐÚNG `pnl().operating` của cùng kỳ: khoản
+    // ADS / PURCHASE gõ tay, cước gõ tay không khai điều chỉnh, nhóm Lương khi bảng Lương cầm quyền
+    // bị loại Ở CẢ HAI NƠI (AGENTS.md mục 15 + 18) — phần bị loại hiện ở bảng cảnh báo chi phí.
+    getOperatingCostByDay(period, tx),
   ]));
 
   const map = new Map<string, DailyRow>();
@@ -289,11 +291,9 @@ export async function getDailyBreakdown(period: Period, basis: ReportBasis): Pro
     row.marketplaceFee += Number(r.marketplaceFee);
   }
   for (const r of adRows) get(r.day).adSpend += Number(r.spend ?? 0);
-  for (const [day, amounts] of expenseRows) {
-    const row = get(day);
-    row.adSpend += amounts.ads;
-    row.operating += amounts.other;
-  }
+  // Chi quảng cáo CHỈ đọc từ tài khoản quảng cáo (vòng trên) — cùng cách `pnl()` cộng. Khoản nhóm
+  // Quảng cáo gõ tay ở bảng Chi phí từng bị cộng thêm ở đây: cùng một đồng bị trừ hai lần.
+  for (const [day, amount] of expenseRows.byDay) get(day).operating += amount;
   const rows = [...map.values()].sort((a, b) => a.day.localeCompare(b.day));
   for (const row of rows) {
     row.grossProfit = row.revenue - row.cogs;

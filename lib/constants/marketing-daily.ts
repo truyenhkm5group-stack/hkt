@@ -591,7 +591,7 @@ export const MARKETING_METRICS: MarketingMetricSpec[] = [
     meaning: "Chi phí vận hành của CẢ SHOP rải theo ngày (thuê, lương, phần mềm…).",
     numerator: null,
     denominator: null,
-    source: "lib/queries/cost-allocation.ts::allocatedExpenseByDay + cost-engine",
+    source: "lib/queries/cost-engine.ts::getOperatingCostByDay",
     timing: "Chia theo số ngày chồng lấn của kỳ hiệu lực, không dồn vào ngày ghi sổ.",
     nullRule: "CÓ BẤT KỲ BỘ LỌC CHIỀU NÀO ⇒ `—`: không có căn cứ chia tiền thuê nhà cho một chiến dịch.",
     direction: "DOWN",

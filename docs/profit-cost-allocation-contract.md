@@ -273,9 +273,12 @@ Cố ý **giữ nguyên** cách cộng thô ở hai chỗ:
 
 ### Biểu đồ theo ngày
 
-`allocatedExpenseByDay()` rải khoản theo kỳ ra từng ngày. Trước đây tiền thuê cả tháng dựng thành
-**một cột duy nhất** ở ngày ghi sổ, mọi ngày khác chi phí bằng 0 — nhìn biểu đồ đó sẽ kết luận
-"ngày 01 lỗ nặng, các ngày sau lãi đều", cả hai đều sai.
+`getOperatingCostByDay()` (`lib/queries/cost-engine.ts`) rải khoản theo kỳ ra từng ngày. Trước đây
+tiền thuê cả tháng dựng thành **một cột duy nhất** ở ngày ghi sổ, mọi ngày khác chi phí bằng 0 — nhìn
+biểu đồ đó sẽ kết luận "ngày 01 lỗ nặng, các ngày sau lãi đều", cả hai đều sai.
+
+Bản đầu (`allocatedExpenseByDay`, đã bỏ 24/09/2026) rải đúng nhưng **không lọc thẩm quyền** — xem
+Phần 5.
 
 ## Kiểm thử bắt buộc (bổ sung)
 
@@ -290,7 +293,7 @@ Cố ý **giữ nguyên** cách cộng thô ở hai chỗ:
 - rải theo ngày: mọi ngày trong kỳ thuê đều có chi phí, hai ngày bất kỳ chênh nhau ≤ 1đ, cộng 30 ngày
   = đúng tổng đã phân bổ;
 - **ranh giới ở mức mã nguồn**: sáu file báo cáo không được chứa `sum(expenses.amount)` và bắt buộc
-  phải dùng `allocatedExpenseSum` / `allocatedExpenseByDay`. Bug này đã bị sửa một lần rồi tái sinh ở
+  phải dùng `getOperatingCost` / `getOperatingCostByDay` / `getRecognizedCosts`. Bug này đã bị sửa một lần rồi tái sinh ở
   năm trang khác vì mỗi trang tự chép lại phép cộng thô — lời hứa trong tài liệu không chặn được ai.
 
 `tests/consistency.test.ts` (khối 8): cùng một kỳ, chi phí vận hành phải **bằng nhau** ở Bảng điều
@@ -561,3 +564,130 @@ cột đã có mặc định nên không dòng nào vi phạm.
 
 Toàn bộ chuỗi 0000 đến 0044 được dựng lại từ **CSDL trống** ở mỗi lần `npm test` (`tests/setup-env.ts`
 xoá và tạo mới), nên migration được kiểm chứng thật chứ không chỉ đọc bằng mắt.
+
+---
+
+# Phần 5 — Chi phí THEO NGÀY đi qua CÙNG sổ thẩm quyền với tổng kỳ (24/09/2026)
+
+## Lỗi
+
+`allocatedExpenseByDay()` đọc **cả** bảng Chi phí trong khoảng rồi chia hai rổ: nhóm `ADS` → cột
+"Chi quảng cáo", mọi thứ còn lại → cột "Chi phí vận hành". Nó không hỏi sổ thẩm quyền
+(`lib/constants/cost-authority.ts`), trong khi tổng kỳ (`getOperatingCost()`) thì có. Hệ quả ở
+Báo cáo lợi nhuận **theo ngày** (`reports.ts::getDailyBreakdown`, cả tệp CSV xuất ra) và Hiệu quả
+marketing theo ngày (`marketing-daily.ts`):
+
+| Khoản gõ tay ở bảng Chi phí | Tổng kỳ (engine) | Theo ngày (bản cũ) |
+|---|---|---|
+| `ADS` | loại — tài khoản QC có thẩm quyền | **cộng CHỒNG lên** chi tiêu `ad_spends` ⇒ trừ hai lần |
+| `PURCHASE` | loại — giá vốn đi theo phiếu kho | cộng vào chi phí vận hành |
+| `SHIPPING` / `RETURN_FEE` không khai điều chỉnh | loại — trùng vận đơn | cộng vào chi phí vận hành |
+| `SHIPPING` / `RETURN_FEE` `MANUAL_ADJUSTMENT` | thành phần **Cước**, không phải vận hành | cộng vào chi phí vận hành |
+| `SALARY` khi bảng Lương cầm quyền | lương cứng từ bảng Lương + phần dư là hoa hồng | cộng NGUYÊN nhóm Lương |
+
+Bài kiểm không bắt được vì cổng mã nguồn (`tests/cost-allocation.test.ts`) chấp nhận
+`allocatedExpenseByDay` như một cửa hợp lệ, và bài đối soát của trang marketing so với
+`getDailyBreakdown` — hai bên cùng gọi một hàm, tức là tự so với chính nó.
+
+## Sửa
+
+- `lib/queries/cost-allocation.ts`: bỏ `allocatedExpenseByDay`; còn lại `spreadExpenseByDay()` —
+  phép rải THUẦN của một khoản, không đọc CSDL, không biết thẩm quyền. Chỉ `cost-engine.ts` được gọi
+  nó (cổng mã nguồn chặn mọi tệp khác).
+- `lib/queries/cost-engine.ts::getOperatingCostByDay(period, db?)`: đọc ĐÚNG những nhóm mà tổng kỳ
+  đọc (dẫn xuất từ `COST_AUTHORITY_REGISTRY[c].expenseCategories` của các thành phần vận hành — engine
+  cũng thôi gõ tay danh sách nhóm), cắt nhóm Lương bằng CHÍNH `splitPayrollComponents()` mà tổng kỳ
+  dùng. Σ các ngày = `getOperatingCost(period).amount` **tới từng đồng** — không có sai số làm tròn:
+  khoản chi rải bằng hiệu hai số luỹ kế (các ngày tự triệt tiêu), còn lương cứng và phần dư hoa hồng
+  rải bằng `distributeProportionally` (largest remainder, Σ chắc chắn bằng tổng).
+  - Lương cứng (bảng Lương cầm quyền) rải theo SỐ NGÀY THẬT của tháng chứa ngày.
+  - Phần nhóm Lương vượt lương cứng (thành phần Hoa hồng) rải theo NGÀY của chính các khoản đã ghi,
+    không chia đều theo lịch (luật 16).
+- Phần bị loại được **NÊU RA**, không biến mất: hàm trả `excluded` (`EXCLUDED_BY_AUTHORITY` /
+  `DUPLICATE_LOGISTICS_COST_SOURCE`) và `logisticsAdjustment`; trang marketing in thành câu cảnh báo,
+  tab Báo cáo tổng hợp hiện `CostQualityPanel` (đã có luật `EXCLUDED_BY_AUTHORITY`).
+- Cột "Chi quảng cáo" theo ngày ở cả hai báo cáo chỉ còn đọc `ad_spends` — cùng cách `pnl()` đã làm.
+
+## Kiểm thử
+
+`tests/cost-allocation.test.ts::testOperatingCostByDayAuthority` gieo tháng 6/2027: thuê theo kỳ,
+khoản một lần, `ADS` gõ tay, `PURCHASE`, cước gõ tay không điều chỉnh, cước `MANUAL_ADJUSTMENT` có lý
+do, hai khoản `SALARY`; đối chiếu Σ theo ngày với `getOperatingCost()` / `getRecognizedCosts()` ở
+tháng, tuần và kỳ vắt tháng 30→31 ngày, cả khi bảng Lương **chưa** và **đã** cầm quyền; và cột Chi QC
+của `getDailyBreakdown` với chính bảng `ad_spends`. `tests/marketing-daily.test.ts` thêm hai chốt
+đối chiếu với engine và `ad_spends` thay vì chỉ với `getDailyBreakdown`.
+
+## Còn ngoài phạm vi (nói thẳng)
+
+`reports.ts::pnl()` (Bảng kết quả kinh doanh tổng hợp) lấy cước từ `orders.partner_fee`, không cộng
+khoản cước `MANUAL_ADJUSTMENT` mà engine xếp vào thành phần Cước. Bản cũ theo ngày vô tình cộng nó
+(sai chỗ: vào vận hành); nay theo ngày khớp tổng kỳ và cả hai cùng thiếu khoản này — trang marketing
+nói ra con số ấy bằng một câu cảnh báo. Hợp nhất cước của Báo cáo tổng hợp với engine là việc riêng.
+
+## Đo trước / sau trên production (CHỈ ĐỌC, một câu một ô, chỉ số tổng hợp)
+
+Chưa đo được từ phiên sửa (máy không có đường tới CSDL thật). Chạy qua `db-query` khi kênh đó dùng
+lại được.
+
+**Ô 1 — chế độ ghi nhận lương** (quyết định nhóm Lương vào vận hành theo ngày theo cách nào):
+
+```sql
+select coalesce((select value::json->>'mode' from settings where key = 'payroll.recognition'), 'LEGACY_EXPENSES (mặc định)') as che_do_luong
+```
+
+**Ô 2 — phân bổ 30 ngày gần nhất theo nhóm × nguồn** (cùng công thức `allocatedExpenseAmount`):
+
+```sql
+with k as (
+  select (now() at time zone 'Asia/Ho_Chi_Minh')::date - 29 as d0, (now() at time zone 'Asia/Ho_Chi_Minh')::date as d1
+), r as (
+  select d0, d1, (d0::timestamp at time zone 'Asia/Ho_Chi_Minh') as t0,
+         ((d1 + 1)::timestamp at time zone 'Asia/Ho_Chi_Minh') - interval '1 millisecond' as t1
+    from k
+), x as (
+  select e.category::text as nhom, e.cost_source as nguon, e.amount,
+         (e.allocation_method = 'PERIOD_PRORATA' and e.period_start is not null and e.period_end is not null) as theo_ky,
+         (e.period_start at time zone 'Asia/Ho_Chi_Minh')::date as ps, (e.period_end at time zone 'Asia/Ho_Chi_Minh')::date as pe,
+         r.d0, r.d1
+    from expenses e cross join r
+   where case when e.allocation_method = 'PERIOD_PRORATA' and e.period_start is not null and e.period_end is not null
+              then e.period_end >= r.t0 and e.period_start <= r.t1
+              else e.occurred_at between r.t0 and r.t1 end
+), y as (
+  select nhom, nguon,
+         case when not theo_ky then amount
+              else greatest(0,
+                (case when least(pe, d1) - ps + 1 <= 0 then 0
+                      when least(pe, d1) - ps + 1 >= pe - ps + 1 then amount
+                      else round(amount::numeric * (least(pe, d1) - ps + 1) / (pe - ps + 1)) end)
+              - (case when greatest(ps, d0) - ps <= 0 then 0
+                      when greatest(ps, d0) - ps >= pe - ps + 1 then amount
+                      else round(amount::numeric * (greatest(ps, d0) - ps) / (pe - ps + 1)) end))
+         end as phan_bo
+    from x
+)
+select nhom, nguon, count(*) as so_khoan, sum(phan_bo)::bigint as phan_bo_30_ngay
+  from y group by nhom, nguon order by nhom, nguon
+```
+
+Đọc kết quả:
+
+- **Tổng theo ngày CŨ** (Chi QC gõ tay + Chi phí vận hành) = Σ mọi dòng.
+- **Chi phí vận hành theo ngày MỚI** = Σ các dòng `RENT`, `SOFTWARE`, `PACKAGING`, `OTHER`, và
+  `SALARY` nếu Ô 1 không phải `PAYROLL` (nếu là `PAYROLL`: lấy số của tab Báo cáo tổng hợp — lương
+  cứng từ bảng Lương + phần dư).
+- Chênh lệch = dòng `ADS` (trước bị trừ hai lần ở cột Chi QC) + `PURCHASE` + `SHIPPING`/`RETURN_FEE`
+  mọi nguồn (trước nằm trong vận hành; phần `MANUAL_ADJUSTMENT` nay thuộc thành phần Cước).
+- Sau deploy: Σ cột "Chi phí vận hành" của biểu đồ theo ngày 30 ngày phải BẰNG dòng Chi phí vận
+  hành của Bảng kết quả kinh doanh cùng kỳ.
+
+**Ô 3 — số khoản gõ tay thuộc nhóm nguồn khác sở hữu, theo tháng:**
+
+```sql
+select to_char(occurred_at at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM') as thang, category::text as nhom, cost_source as nguon,
+       count(*) as so_khoan, sum(amount)::bigint as tong_tien
+  from expenses
+ where category::text in ('ADS', 'PURCHASE', 'SHIPPING', 'RETURN_FEE')
+ group by 1, 2, 3
+ order by 1, 2, 3
+```

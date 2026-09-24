@@ -13,6 +13,7 @@ import {
   WalletCards,
 } from "lucide-react";
 import { CashTab } from "@/app/(dashboard)/reports/cash-tab";
+import { CostQualityPanel } from "@/app/(dashboard)/reports/cost-quality-panel";
 import { FinancialTruthTab } from "@/app/(dashboard)/reports/financial-truth-tab";
 import { NominalTab } from "@/app/(dashboard)/reports/nominal-tab";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -335,6 +336,12 @@ export default async function ReportsPage({
               </span>
             }
           />
+
+          {/* Khoản gõ tay bị loại vì nguồn khác có thẩm quyền (Quảng cáo, Nhập hàng, cước trùng vận
+              đơn…) phải được NÓI ra ngay trên bảng này: bảng và biểu đồ theo ngày không cộng chúng. */}
+          <Suspense fallback={null}>
+            <CostQualityPanel period={period} />
+          </Suspense>
 
           <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard

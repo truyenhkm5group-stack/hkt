@@ -19,19 +19,24 @@
  * khác thực tế**, KHÔNG phải vì trừ hai lần. Hợp nhất hẳn hai cơ sở đó là việc riêng, chưa làm, và
  * ở đây ghi rõ ra thay vì để người đọc tưởng đã xong.
  */
-import { and, count, eq, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
+import { and, count, eq, inArray, isNotNull, isNull, notInArray, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { chayKhongJit, getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
+import type { ExpenseCategory } from "@/db/schema";
+import { distributeProportionally, type AllocatableExpense } from "@/lib/constants/cost-allocation";
 import {
   COST_AUTHORITY_REGISTRY,
   COST_COMPONENTS,
+  COVERAGE_GATED_EXPENSE_CATEGORIES,
+  EVIDENCE_ONLY_EXPENSE_CATEGORIES,
+  HARD_EXCLUDED_EXPENSE_CATEGORIES,
   type CostComponent,
   type CoverageState,
 } from "@/lib/constants/cost-authority";
 import { COMPENSATION_PROFIT_LABEL } from "@/lib/constants/compensation-profit";
 import { COST_SOURCE_LABEL } from "@/lib/constants/cost-sources";
-import { allocatedExpenseSum, expenseInRange, logisticsDuplicateCond } from "@/lib/queries/cost-allocation";
+import { allocatedExpenseSum, expenseInRange, logisticsDuplicateCond, spreadExpenseByDay, vnDaysOfRange } from "@/lib/queries/cost-allocation";
 import { orderCogsFast } from "@/lib/queries/cogs";
 import { getRecognizedPayrollCost, type PayrollRecognition } from "@/lib/queries/payroll-cost";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
@@ -85,6 +90,34 @@ export type RecognizedCosts = {
 /** Khối "chi phí vận hành theo kỳ" — phần engine là nguồn DUY NHẤT */
 export const OPERATING_COMPONENTS: CostComponent[] = ["SALARY", "COMMISSION", "RENT", "SOFTWARE", "UTILITIES", "OTHER_OPERATING"];
 
+/** Nhóm ở bảng Chi phí mà một thành phần đọc — DẪN XUẤT từ sổ thẩm quyền, không gõ lại ở đây. */
+function expenseCategoriesOf(component: CostComponent): ExpenseCategory[] {
+  return COST_AUTHORITY_REGISTRY[component].expenseCategories;
+}
+
+/**
+ * Mọi nhóm ở bảng Chi phí có thể góp vào khối vận hành. Nhóm Lương nằm ở đây kể cả khi bảng Lương
+ * đang cầm quyền: phần vượt lương cứng vẫn vào thành phần Hoa hồng (xem `splitPayrollComponents`).
+ */
+const OPERATING_EXPENSE_CATEGORIES: ExpenseCategory[] = [...new Set(OPERATING_COMPONENTS.flatMap(expenseCategoriesOf))];
+
+/**
+ * ═══ LƯƠNG CỐ ĐỊNH VÀ HOA HỒNG: MỘT CÔNG THỨC, HAI NƠI DÙNG ═══
+ *
+ * Tổng của kỳ (`build`) và bản rải theo ngày (`getOperatingCostByDay`) phải cắt nhóm "Lương" ở
+ * bảng Chi phí theo CÙNG một cách, nếu không cộng các ngày sẽ không ra tổng kỳ. Chép phép cắt sang
+ * nơi thứ hai là mở đường cho hai bản trôi xa nhau — nên nó là một hàm.
+ *
+ *  · Bảng Lương CHƯA cầm quyền ⇒ cả nhóm "Lương" là lương (gồm cả hoa hồng nằm lẫn), hoa hồng 0.
+ *  · ĐÃ cầm quyền ⇒ lương cứng lấy từ bảng Lương; phần nhóm cũ VƯỢT lương cứng là tiền thật đã chi,
+ *    nó vào thành phần Hoa hồng thay vì bị vứt đi.
+ */
+export function splitPayrollComponents(payrollCovered: boolean, fixedSalary: number, legacySalaryExpenses: number): { salary: number; commission: number } {
+  return payrollCovered
+    ? { salary: fixedSalary, commission: Math.max(0, legacySalaryExpenses - fixedSalary) }
+    : { salary: legacySalaryExpenses, commission: 0 };
+}
+
 function periodConds(column: AnyPgColumn | SQL, from: Date | null, to: Date | null): SQL[] {
   const conds: SQL[] = [];
   if (from) conds.push(sql`${column} >= ${from}`);
@@ -134,11 +167,11 @@ async function build(period: Period): Promise<RecognizedCosts> {
   const chieuHoanAt = sql`coalesce(${s.deliveredAt}, ${s.returnedAt}, ${s.pickedUpAt}, ${s.createdAt})`;
 
   const [rent, software, otherOperating, salaryLegacy, logisticsAdjust, logisticsDup, adSpend, returnLeg, [cogsRow, shipRow]] = await Promise.all([
-    categorySum(["RENT"]),
-    categorySum(["SOFTWARE"]),
-    categorySum(["PACKAGING", "OTHER"]),
-    categorySum(["SALARY"]),
-    categorySum(["SHIPPING", "RETURN_FEE"], sql`${e.costSource} = 'MANUAL_ADJUSTMENT'`),
+    categorySum(expenseCategoriesOf("RENT")),
+    categorySum(expenseCategoriesOf("SOFTWARE")),
+    categorySum(expenseCategoriesOf("OTHER_OPERATING")),
+    categorySum(COVERAGE_GATED_EXPENSE_CATEGORIES),
+    categorySum(EVIDENCE_ONLY_EXPENSE_CATEGORIES, sql`${e.costSource} = 'MANUAL_ADJUSTMENT'`),
     // Khoản cước gõ tay KHÔNG khai là điều chỉnh ⇒ trùng với cước theo vận đơn, bị loại.
     db.select({ amount: allocatedExpenseSum(period.from, period.to), n: count() }).from(e).where(and(logisticsDuplicateCond(), inRange)),
     db
@@ -183,7 +216,8 @@ async function build(period: Period): Promise<RecognizedCosts> {
   const returnLegFee = { amount: Number(returnLeg[0]?.amount ?? 0), n: Number(returnLeg[0]?.n ?? 0) };
 
   // ── LƯƠNG: bảng Lương chỉ cầm quyền khi đã phủ đủ; chưa đủ thì lùi về bảng Chi phí, KHÔNG im lặng ──
-  const salaryAmount = payrollCovered ? payroll.fixedSalary : salaryLegacy.amount;
+  const tachLuong = splitPayrollComponents(payrollCovered, payroll.fixedSalary, salaryLegacy.amount);
+  const salaryAmount = tachLuong.salary;
   if (!payrollCovered && salaryLegacy.amount > 0) {
     warnings.push({
       rule: "PAYROLL_COST_COVERAGE_INCOMPLETE",
@@ -212,7 +246,7 @@ async function build(period: Period): Promise<RecognizedCosts> {
     lương lẫn hoa hồng, và lương cứng đã được nguồn mới nhận. Phần còn lại là tiền THẬT đã chi —
     gọi tên nó là "chưa đối chiếu" thì đúng hơn là vứt đi.
   */
-  const legacyChuaDoiChieu = payrollCovered ? Math.max(0, salaryLegacy.amount - payroll.fixedSalary) : 0;
+  const legacyChuaDoiChieu = tachLuong.commission;
   /*
     ═══ NGHĨA VỤ LƯƠNG CÓ THẬT, MÀ LỢI NHUẬN KHÔNG TRỪ ĐỒNG NÀO ═══
 
@@ -391,4 +425,118 @@ export async function getOperatingCost(period: Period): Promise<{ amount: number
     payrollCovered: costs.payroll.coverage === "COMPLETE",
     warnings: costs.warnings,
   };
+}
+
+export type OperatingCostByDay = {
+  /** Chi phí vận hành của từng ngày (khoá `YYYY-MM-DD` giờ Việt Nam). Σ = `getOperatingCost().amount`. */
+  byDay: Map<string, number>;
+  total: number;
+  payrollCovered: boolean;
+  /**
+   * Khoản gõ tay trong kỳ KHÔNG vào chi phí vận hành vì nguồn khác có thẩm quyền. Nêu ra để màn
+   * hình nói được vì sao, không để chúng biến mất im lặng.
+   */
+  excluded: { category: ExpenseCategory; rule: "EXCLUDED_BY_AUTHORITY" | "DUPLICATE_LOGISTICS_COST_SOURCE"; amount: number; count: number }[];
+  /** Cước / phí hoàn gõ tay khai ĐIỀU CHỈNH có lý do: engine tính vào thành phần Cước, KHÔNG vào khối vận hành. */
+  logisticsAdjustment: { amount: number; count: number };
+};
+
+/**
+ * ═══════════ CHI PHÍ VẬN HÀNH RẢI THEO NGÀY — CÙNG MỘT SỔ THẨM QUYỀN VỚI TỔNG KỲ ═══════════
+ *
+ * Biểu đồ / bảng theo ngày (Báo cáo lợi nhuận tổng hợp, Hiệu quả marketing theo ngày) từng đọc
+ * THẲNG bảng Chi phí qua `allocatedExpenseByDay`, không qua sổ thẩm quyền. Ba hậu quả:
+ *
+ *  · khoản ADS gõ tay bị cộng CHỒNG lên chi tiêu thật của tài khoản quảng cáo (luật 15);
+ *  · PURCHASE, cước / phí hoàn gõ tay không khai điều chỉnh lọt vào chi phí vận hành;
+ *  · bảng Lương đã cầm quyền mà nhóm "Lương" ở bảng Chi phí vẫn được cộng nguyên.
+ *
+ * Tổng kỳ (`getOperatingCost`) loại đúng những khoản ấy, nên cộng các cột ngày KHÔNG ra tổng kỳ —
+ * và bài kiểm đối soát của trang marketing so với `getDailyBreakdown`, tức tự so với chính nó.
+ *
+ * Nay hàm này đọc ĐÚNG những nhóm mà `build()` đọc (dẫn xuất từ sổ thẩm quyền), cắt nhóm Lương
+ * bằng ĐÚNG `splitPayrollComponents`, nên Σ các ngày = `getOperatingCost(period).amount` tới từng
+ * đồng. Hai phần không đến từ một khoản chi có ngày riêng được rải bằng largest remainder:
+ *
+ *  · lương cứng của bảng Lương — theo SỐ NGÀY THẬT của tháng chứa ngày (cùng tinh thần
+ *    `prorateMonthlyAmount`: một ngày tháng Hai đắt hơn một ngày tháng Tư);
+ *  · phần nhóm "Lương" vượt lương cứng (thành phần Hoa hồng) — theo đúng NGÀY của các khoản chi đã
+ *    ghi, KHÔNG chia đều theo lịch (luật 16: hoa hồng đi theo đơn, không theo thời gian).
+ *
+ * `db` là tuỳ chọn để nơi gọi đang ở trong một giao dịch (tắt JIT) dùng lại chính kết nối ấy.
+ */
+export async function getOperatingCostByDay(period: Period, db?: Db): Promise<OperatingCostByDay> {
+  const conn = db ?? (await getDb());
+  const inRange = expenseInRange(period.from, period.to);
+  const [payroll, rows, others] = await Promise.all([
+    getRecognizedPayrollCost(period),
+    conn
+      .select({
+        category: e.category,
+        amount: e.amount,
+        occurredAt: e.occurredAt,
+        allocationMethod: e.allocationMethod,
+        periodStart: e.periodStart,
+        periodEnd: e.periodEnd,
+      })
+      .from(e)
+      .where(and(inArray(e.category, OPERATING_EXPENSE_CATEGORIES), inRange)),
+    // Phần KHÔNG vào khối vận hành — đọc ra để NÓI, không để cộng.
+    conn
+      .select({ category: e.category, costSource: e.costSource, amount: allocatedExpenseSum(period.from, period.to), n: count() })
+      .from(e)
+      .where(and(notInArray(e.category, OPERATING_EXPENSE_CATEGORIES), inRange))
+      .groupBy(e.category, e.costSource),
+  ]);
+
+  const payrollCovered = payroll.coverage === "COMPLETE";
+  const byDay = new Map<string, number>();
+  const legacy = new Map<string, number>();
+  const into = (map: Map<string, number>) => (day: string, amount: number) => {
+    if (amount) map.set(day, (map.get(day) ?? 0) + amount);
+  };
+  for (const row of rows) {
+    const item: AllocatableExpense = {
+      amount: Number(row.amount),
+      occurredAt: row.occurredAt,
+      allocationMethod: row.allocationMethod as AllocatableExpense["allocationMethod"],
+      periodStart: row.periodStart,
+      periodEnd: row.periodEnd,
+    };
+    spreadExpenseByDay(item, period.from, period.to, into(COVERAGE_GATED_EXPENSE_CATEGORIES.includes(row.category) ? legacy : byDay));
+  }
+
+  const legacyTotal = [...legacy.values()].reduce((t, v) => t + v, 0);
+  const tach = splitPayrollComponents(payrollCovered, payroll.fixedSalary, legacyTotal);
+  if (payrollCovered && period.from && period.to) {
+    const days = vnDaysOfRange(period.from, period.to);
+    const fixed = distributeProportionally(tach.salary, days.map((d) => 1 / d.daysInMonth));
+    days.forEach((d, i) => into(byDay)(d.day, fixed[i]));
+    const legacyDays = [...legacy.keys()];
+    const commission = distributeProportionally(tach.commission, legacyDays.map((d) => legacy.get(d) ?? 0));
+    legacyDays.forEach((d, i) => into(byDay)(d, commission[i]));
+  } else {
+    for (const [day, amount] of legacy) into(byDay)(day, amount);
+  }
+
+  const excluded: OperatingCostByDay["excluded"] = [];
+  const logisticsAdjustment = { amount: 0, count: 0 };
+  for (const r of others) {
+    const amount = Number(r.amount ?? 0);
+    const n = Number(r.n ?? 0);
+    if (EVIDENCE_ONLY_EXPENSE_CATEGORIES.includes(r.category) && r.costSource === "MANUAL_ADJUSTMENT") {
+      logisticsAdjustment.amount += amount;
+      logisticsAdjustment.count += n;
+      continue;
+    }
+    const rule = HARD_EXCLUDED_EXPENSE_CATEGORIES.includes(r.category) ? "EXCLUDED_BY_AUTHORITY" : "DUPLICATE_LOGISTICS_COST_SOURCE";
+    const cur = excluded.find((x) => x.category === r.category && x.rule === rule);
+    if (cur) {
+      cur.amount += amount;
+      cur.count += n;
+    } else excluded.push({ category: r.category, rule, amount, count: n });
+  }
+
+  const total = [...byDay.values()].reduce((t, v) => t + v, 0);
+  return { byDay, total, payrollCovered, excluded: excluded.filter((x) => x.amount > 0), logisticsAdjustment };
 }

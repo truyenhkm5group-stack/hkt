@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { allocateExpenseToRange, distributeProportionally, inclusiveDays, inventoryRiskExposure, inventoryRiskOnSold, type AllocatableExpense } from "@/lib/constants/cost-allocation";
-import { allocatedExpenseByDay, allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
+import { allocatedExpenseSum, expenseInRange } from "@/lib/queries/cost-allocation";
+import { getOperatingCost, getOperatingCostByDay, getRecognizedCosts } from "@/lib/queries/cost-engine";
+import { getDailyBreakdown } from "@/lib/queries/reports";
+import { clearMemo } from "@/lib/cache";
+import { PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
+import { PAYROLL_RECOGNITION_KEY } from "@/lib/queries/payroll-cost";
+import { getSettingJson, setSettingJson } from "@/lib/settings";
+import type { Period } from "@/lib/search-params";
 
 /**
  * ═══════ PHÂN BỔ CHI PHÍ THEO KHOẢNG BÁO CÁO ═══════
@@ -98,18 +106,22 @@ export async function testCostAllocation(db: Db) {
   assert.ok(Number(ngoai?.v ?? 0) > 0, "khoản thuê vẫn được tính ở tuần cuối tháng dù ghi ngày 01/09");
 
   // ══ Rải theo NGÀY: biểu đồ theo ngày không được có một cột dựng đứng ở ngày ghi sổ ══
-  const byDay = await allocatedExpenseByDay(db, d("2026-09-01"), dEnd("2026-09-30"));
-  const ngay01 = byDay.get("2026-09-01")?.other ?? 0;
-  const ngay20 = byDay.get("2026-09-20")?.other ?? 0;
+  clearMemo();
+  const thang9: Period = { key: "custom", from: d("2026-09-01"), to: dEnd("2026-09-30"), label: "Tháng 9/2026", fromKey: "2026-09-01", toKey: "2026-09-30" };
+  const { byDay } = await getOperatingCostByDay(thang9, db);
+  const ngay01 = byDay.get("2026-09-01") ?? 0;
+  const ngay20 = byDay.get("2026-09-20") ?? 0;
   assert.ok(ngay01 > 0 && ngay20 > 0, "theo ngày: mọi ngày trong kỳ thuê đều có chi phí, không chỉ ngày ghi sổ");
   assert.ok(Math.abs(ngay01 - ngay20) <= 1, "theo ngày: tiền thuê rải đều, hai ngày bất kỳ chênh nhau tối đa 1đ");
   assert.ok(ngay01 < 100_000, "theo ngày: KHÔNG được dồn cả 2.000.000đ vào ngày 01/09");
-  const tongTheoNgay = [...byDay.values()].reduce((t, v) => t + v.ads + v.other, 0);
+  const tongTheoNgay = [...byDay.values()].reduce((t, v) => t + v, 0);
   assert.equal(tongTheoNgay, 2_500_000, "theo ngày: cộng 30 ngày = đúng tổng đã phân bổ của kỳ, không thừa không thiếu");
-  const ngay10 = byDay.get("2026-09-10")?.other ?? 0;
+  const ngay10 = byDay.get("2026-09-10") ?? 0;
   assert.ok(Math.abs(ngay10 - (ngay01 + 500_000)) <= 1, "theo ngày: ngày 10 = phần thuê của ngày đó + trọn khoản một lần 500K");
 
   await db.delete(schema.expenses).where(sql`${schema.expenses.id} in ('ca-rent','ca-oneoff')`);
+
+  await testOperatingCostByDayAuthority(db);
 
   // ══ RỦI RO TỒN KHO: driver là HÀNG BÁN RA, không phải hàng nhập ══
   // Bối cảnh chủ shop nêu: mã Q002 nhập 200 triệu, dự phòng 10% = 20 triệu, tuần chỉ bán 100/1.000 đơn.
@@ -191,23 +203,42 @@ export async function testCostAllocation(db: Db) {
       }
       continue;
     }
-    if (!/getOperatingCost|getRecognizedCosts|allocatedExpenseByDay/.test(src)) congTho.push(file);
+    // `getOperatingCostByDay` khớp nhánh `getOperatingCost` — nó CŨNG là một cửa của Profit Engine.
+    if (!/getOperatingCost|getRecognizedCosts/.test(src)) congTho.push(file);
   }
   assert.deepEqual(
     congTho,
     [],
     `Cộng thẳng expenses.amount mà không qua Profit Engine: ${congTho.join(", ")}. ` +
-      "Dùng getOperatingCost / getRecognizedCosts / allocatedExpenseByDay, hoặc khai vào MIEN_TRU_CHI_PHI kèm lý do.",
+      "Dùng getOperatingCost / getOperatingCostByDay / getRecognizedCosts, hoặc khai vào MIEN_TRU_CHI_PHI kèm lý do.",
   );
 
   // Các trang lợi nhuận thì không được miễn: chúng PHẢI hỏi Profit Engine.
-  for (const file of ["lib/queries/profit-nominal.ts", "lib/queries/profit-cash.ts", "lib/queries/payroll.ts", "lib/queries/dashboard.ts", "lib/queries/financial-truth.ts", "lib/queries/reports.ts"]) {
+  //
+  // TRƯỚC 24/09/2026 cổng này chấp nhận cả `allocatedExpenseByDay` — một hàm đọc THẲNG bảng Chi phí
+  // mà không qua sổ thẩm quyền. Nên `reports.ts` (biểu đồ theo ngày) và `marketing-daily.ts` cộng
+  // khoản ADS gõ tay CHỒNG lên chi tiêu tài khoản QC, và cộng PURCHASE / cước trùng vận đơn vào chi
+  // phí vận hành, mà cổng vẫn xanh. Nay chỉ còn cửa của Profit Engine được coi là hợp lệ.
+  for (const file of ["lib/queries/profit-nominal.ts", "lib/queries/profit-cash.ts", "lib/queries/payroll.ts", "lib/queries/dashboard.ts", "lib/queries/financial-truth.ts", "lib/queries/reports.ts", "lib/queries/marketing-daily.ts"]) {
     const src = readFileSync(file, "utf8");
     assert.ok(
-      /getOperatingCost|getRecognizedCosts|allocatedExpenseByDay/.test(src),
+      /getOperatingCost|getRecognizedCosts/.test(src),
       `${file}: phải lấy chi phí vận hành qua Profit Engine, không tự cộng theo cách riêng`,
     );
   }
+
+  // PHÉP RẢI THEO NGÀY là một nguyên tố KHÔNG biết thẩm quyền — chỉ Profit Engine được gọi nó. Tệp
+  // nào khác gọi thẳng là dựng lại đúng đường vòng qua sổ thẩm quyền vừa bị bịt. Và cái tên cũ
+  // không được sống lại dưới bất kỳ hình thức nào.
+  const tatCaTepMa = execFileSync("git", ["ls-files", "lib", "app", "components", "scripts"], { encoding: "utf8" })
+    .split("\n")
+    .filter((f) => /\.(ts|tsx)$/.test(f) && existsSync(f));
+  const goiThangPhepRai = tatCaTepMa.filter(
+    (f) => !["lib/queries/cost-allocation.ts", "lib/queries/cost-engine.ts"].includes(f) && /\bspreadExpenseByDay\b/.test(readFileSync(f, "utf8")),
+  );
+  assert.deepEqual(goiThangPhepRai, [], `gọi thẳng phép rải chi phí theo ngày, bỏ qua sổ thẩm quyền: ${goiThangPhepRai.join(", ")} — dùng getOperatingCostByDay`);
+  const tenCu = tatCaTepMa.filter((f) => /\ballocatedExpenseByDay\s*\(/.test(readFileSync(f, "utf8")));
+  assert.deepEqual(tenCu, [], `allocatedExpenseByDay đã bị bỏ vì không lọc thẩm quyền: ${tenCu.join(", ")}`);
 
   // Danh sách miễn trừ phải sạch: khai cho tệp không còn cộng thô là rác, và che mất ca thật.
   const thuaMienTru = Object.keys(MIEN_TRU_CHI_PHI).filter((f) => !CONG_THO.test(readFileSync(f, "utf8")));
@@ -218,5 +249,102 @@ export async function testCostAllocation(db: Db) {
   );
   console.log(
     "✓ Rủi ro tồn kho đi theo HÀNG BÁN RA: tuần bán 1/10 lô chỉ gánh 1/10 dự phòng, cộng cả vòng đời vẫn đúng % giá trị lô, phần hàng chưa bán hiện riêng · chia chi phí cho các mã cộng lại đúng tổng",
+  );
+}
+
+/**
+ * ═══════ CHI PHÍ THEO NGÀY ĐI QUA SỔ THẨM QUYỀN — ĐỐI CHIẾU VỚI PROFIT ENGINE, KHÔNG VỚI CHÍNH NÓ ═══════
+ *
+ * Bản cũ (`allocatedExpenseByDay`) chia bảng Chi phí làm hai rổ "quảng cáo" / "còn lại" và bỏ qua sổ
+ * thẩm quyền. Bài đối soát của trang marketing so với `getDailyBreakdown` — hai bên cùng gọi một hàm
+ * — nên nó xanh dù cả hai cùng sai. Ở đây kỳ vọng dựng từ `getOperatingCost()` / `getRecognizedCosts()`:
+ * một đường tính KHÁC, đọc cùng sổ thẩm quyền bằng SQL.
+ *
+ * Tháng 6/2027 có 30 ngày, không fixture nào khác đụng tới.
+ */
+async function testOperatingCostByDayAuthority(db: Db) {
+  const KY: Period = { key: "custom", from: d("2027-06-01"), to: dEnd("2027-06-30"), label: "Tháng 6/2027", fromKey: "2027-06-01", toKey: "2027-06-30" };
+  const TUAN: Period = { key: "custom", from: d("2027-06-01"), to: dEnd("2027-06-07"), label: "Tuần 1 tháng 6/2027", fromKey: "2027-06-01", toKey: "2027-06-07" };
+  // Vắt qua hai tháng dài khác nhau (30 và 31 ngày): lương cứng phải rải theo SỐ NGÀY THẬT của từng tháng.
+  const VAT: Period = { key: "custom", from: d("2027-06-25"), to: dEnd("2027-07-05"), label: "25/06–05/07/2027", fromKey: "2027-06-25", toKey: "2027-07-05" };
+  const donDep = async () => {
+    await db.delete(schema.expenses).where(sql`${schema.expenses.id} like 'ob-%'`);
+    clearMemo();
+  };
+  const truocDo = {
+    mode: await getSettingJson<unknown>(PAYROLL_RECOGNITION_KEY, null),
+    employees: await getSettingJson<unknown>(PAYROLL_EMPLOYEES_KEY, null),
+  };
+  await donDep();
+  await db.insert(schema.expenses).values([
+    { id: "ob-rent", category: "RENT", description: "Thuê mặt bằng tháng 6", amount: 3_000_000, occurredAt: d("2027-06-01"), allocationMethod: "PERIOD_PRORATA", periodStart: d("2027-06-01"), periodEnd: dEnd("2027-06-30") },
+    { id: "ob-oneoff", category: "OTHER", description: "Sửa máy in", amount: 500_000, occurredAt: d("2027-06-10") },
+    // Ba khoản mà sổ thẩm quyền LOẠI khỏi chi phí vận hành:
+    { id: "ob-ads", category: "ADS", description: "Nạp tiền quảng cáo (gõ tay, trùng tài khoản QC)", amount: 700_000, occurredAt: d("2027-06-05") },
+    { id: "ob-purchase", category: "PURCHASE", description: "Trả xưởng (dòng tiền, giá vốn đi theo phiếu kho)", amount: 5_000_000, occurredAt: d("2027-06-06") },
+    { id: "ob-ship-dup", category: "SHIPPING", description: "Cước tháng 6 gõ tay (trùng vận đơn)", amount: 40_000, occurredAt: d("2027-06-07"), costSource: "MANUAL" },
+    // Khoản ĐIỀU CHỈNH có lý do: engine tính vào thành phần Cước, KHÔNG vào khối vận hành.
+    { id: "ob-ship-adj", category: "SHIPPING", description: "Đền bù kiện vỡ", amount: 150_000, occurredAt: d("2027-06-08"), costSource: "MANUAL_ADJUSTMENT", reason: "Đền bù ngoài cước vận đơn" },
+    // Nhóm Lương: 12.000.000 ghi hai ngày, NHIỀU hơn lương cứng 9.000.000 ⇒ phần dư là hoa hồng.
+    { id: "ob-salary-1", category: "SALARY", description: "Lương + hoa hồng đợt 1", amount: 6_000_000, occurredAt: d("2027-06-15") },
+    { id: "ob-salary-2", category: "SALARY", description: "Lương + hoa hồng đợt 2", amount: 6_000_000, occurredAt: d("2027-06-20") },
+  ]);
+
+  const tong = (m: Map<string, number>) => [...m.values()].reduce((t, v) => t + v, 0);
+  const doiChieu = async (ky: Period, nhan: string) => {
+    clearMemo();
+    const [theoNgay, engine, recognized] = await Promise.all([getOperatingCostByDay(ky, db), getOperatingCost(ky), getRecognizedCosts(ky)]);
+    assert.equal(tong(theoNgay.byDay), engine.amount, `${nhan}: Σ các ngày phải BẰNG getOperatingCost() của cùng kỳ, tới từng đồng`);
+    assert.equal(theoNgay.total, engine.amount, `${nhan}: tổng khai kèm phải bằng Σ các ngày`);
+    assert.equal(engine.amount, recognized.operatingTotal, `${nhan}: hai cửa của engine nói cùng một con số`);
+    return theoNgay;
+  };
+
+  // ══ A. Bảng Lương CHƯA cầm quyền (mặc định) ══
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "LEGACY_EXPENSES" });
+  let ngay = await doiChieu(KY, "A. tháng, lương từ bảng Chi phí");
+  assert.equal(tong(ngay.byDay), 3_000_000 + 500_000 + 12_000_000, "A. vận hành = thuê + sửa chữa + nhóm Lương; KHÔNG có ADS / PURCHASE / cước gõ tay");
+  assert.equal(ngay.byDay.get("2027-06-05"), 100_000, "A. ngày 05/06 chỉ có phần thuê — 700.000 ADS gõ tay KHÔNG được cộng vào chi phí vận hành");
+  assert.equal(ngay.byDay.get("2027-06-06"), 100_000, "A. ngày 06/06 chỉ có phần thuê — 5.000.000 trả xưởng là dòng tiền, không phải chi phí vận hành");
+  assert.equal(ngay.byDay.get("2027-06-15"), 6_100_000, "A. lương chưa có bảng Lương cầm quyền ⇒ nằm đúng ngày ghi sổ");
+  const loai = new Map(ngay.excluded.map((x) => [`${x.category}:${x.rule}`, x.amount]));
+  assert.equal(loai.get("ADS:EXCLUDED_BY_AUTHORITY"), 700_000, "A. khoản ADS gõ tay phải được NÊU RA là bị loại, không biến mất im lặng");
+  assert.equal(loai.get("PURCHASE:EXCLUDED_BY_AUTHORITY"), 5_000_000, "A. khoản trả xưởng phải được nêu ra là bị loại");
+  assert.equal(loai.get("SHIPPING:DUPLICATE_LOGISTICS_COST_SOURCE"), 40_000, "A. cước gõ tay không khai điều chỉnh phải được nêu ra là trùng vận đơn");
+  assert.deepEqual(ngay.logisticsAdjustment, { amount: 150_000, count: 1 }, "A. khoản điều chỉnh cước có lý do: tách riêng, không vào khối vận hành, không bị vứt");
+  ngay = await doiChieu(TUAN, "A. tuần 01–07/06");
+  assert.equal(tong(ngay.byDay), 700_000, "A. tuần = 7/30 tiền thuê; ADS / PURCHASE / cước gõ tay trong tuần đều không cộng");
+
+  // Báo cáo lợi nhuận THEO NGÀY: cột chi QC chỉ đọc tài khoản QC, cột vận hành cộng lại = engine.
+  clearMemo();
+  const [daily, engineKy] = await Promise.all([getDailyBreakdown(KY, "created"), getOperatingCost(KY)]);
+  const [qc] = await db
+    .select({ v: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
+    .from(schema.adSpends)
+    .where(and(eq(schema.adSpends.excluded, false), sql`${schema.adSpends.spendDate} >= ${KY.from} and ${schema.adSpends.spendDate} <= ${KY.to}`));
+  assert.equal(daily.reduce((t, r) => t + r.adSpend, 0), Number(qc?.v ?? 0), "biểu đồ theo ngày: chi QC = đúng tài khoản QC, KHÔNG cộng thêm 700.000 gõ tay (trừ hai lần)");
+  assert.equal(daily.reduce((t, r) => t + r.operating, 0), engineKy.amount, "biểu đồ theo ngày: Σ chi phí vận hành = getOperatingCost() của cùng kỳ");
+
+  // ══ B. Bảng Lương CẦM QUYỀN, lương cứng 9.000.000/tháng ══
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, { list: [{ id: "ob-emp-1", name: "Nhân sự kiểm thử", shortName: "KT", department: "Quản lý", aliases: [], accountIds: [], fixed: 9_000_000, percentTotal: 0, percentPersonal: 0, percentRevenue: 0, active: true, note: "" }] });
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, { mode: "PAYROLL" });
+  ngay = await doiChieu(KY, "B. tháng, bảng Lương cầm quyền");
+  assert.ok(ngay.payrollCovered, "B. bảng Lương phải đang cầm quyền ở ca này");
+  // 3.000.000 thuê + 500.000 + 9.000.000 lương cứng + 3.000.000 phần dư (hoa hồng) — không mất, không trùng.
+  assert.equal(tong(ngay.byDay), 15_500_000, "B. lương cứng từ bảng Lương + phần nhóm Lương vượt lương cứng, không cộng nguyên nhóm Lương lần nữa");
+  assert.equal(ngay.byDay.get("2027-06-03"), 100_000 + 300_000, "B. lương cứng đi theo THỜI GIAN: mỗi ngày tháng 6 gánh 9.000.000 / 30");
+  assert.equal(ngay.byDay.get("2027-06-15"), 100_000 + 300_000 + 1_500_000, "B. phần dư (hoa hồng) đi theo NGÀY của khoản chi đã ghi, KHÔNG chia đều theo lịch");
+  ngay = await doiChieu(TUAN, "B. tuần 01–07/06");
+  assert.equal(tong(ngay.byDay), 700_000 + 2_100_000, "B. tuần: 7/30 thuê + 7/30 lương cứng; tuần không có khoản Lương nào thì không có hoa hồng");
+  ngay = await doiChieu(VAT, "B. kỳ vắt tháng 6 (30 ngày) → tháng 7 (31 ngày)");
+  const luongNgayThang6 = (ngay.byDay.get("2027-06-26") ?? 0) - 100_000; // trừ phần thuê của ngày ấy
+  const luongNgayThang7 = ngay.byDay.get("2027-07-02") ?? 0; // tháng 7 không có khoản thuê nào
+  assert.ok(luongNgayThang6 > luongNgayThang7 && luongNgayThang7 > 0, `B. một ngày lương tháng 6 (30 ngày) đắt hơn một ngày tháng 7 (31 ngày): ${luongNgayThang6} vs ${luongNgayThang7}`);
+
+  await setSettingJson(PAYROLL_RECOGNITION_KEY, truocDo.mode ?? { mode: "LEGACY_EXPENSES" });
+  await setSettingJson(PAYROLL_EMPLOYEES_KEY, truocDo.employees ?? { list: [] });
+  await donDep();
+  console.log(
+    "✓ Chi phí theo ngày đi qua SỔ THẨM QUYỀN: Σ các ngày = getOperatingCost() ở tháng / tuần / kỳ vắt tháng, cả khi bảng Lương chưa và đã cầm quyền · ADS / PURCHASE / cước trùng vận đơn gõ tay không vào ngày nào và được NÊU RA · chi QC theo ngày chỉ đọc tài khoản QC · lương cứng theo thời gian, phần dư hoa hồng theo ngày ghi sổ",
   );
 }
