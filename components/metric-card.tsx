@@ -71,7 +71,7 @@ export function MetricCard({
   const body = (
     <>
       <div className="flex items-start justify-between gap-3">
-        <p className={cn("flex items-center gap-1.5 text-[13px] font-semibold", soft)}>
+        <p className={cn("flex min-w-0 items-center gap-1.5 text-[13px] font-semibold", soft)} title={label}>
           <span className="truncate">{label}</span>
           {hint ? <InfoHint>{hint}</InfoHint> : null}
         </p>

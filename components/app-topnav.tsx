@@ -70,8 +70,8 @@ export function AppTopNav({ user }: { user: TopNavUser }) {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-30 bg-background/85 px-3 pb-2 pt-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/70 sm:px-6 print:hidden">
-      <div className="mx-auto flex h-14 max-w-[1760px] items-center gap-1 rounded-full bg-card pl-2 pr-1.5 shadow-[var(--shadow-card)]">
+    <header className="sticky top-0 z-30 bg-background/85 px-3 pb-2 pt-3 backdrop-blur-md supports-[backdrop-filter]:bg-background/70 sm:px-5 lg:px-6 2xl:px-8 print:hidden">
+      <div className="flex h-14 items-center gap-1 rounded-full bg-card pl-2 pr-1.5 shadow-[var(--shadow-card)]">
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
           <SheetTrigger asChild>
             <button type="button" aria-label="Mở menu" className="flex size-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground xl:hidden">

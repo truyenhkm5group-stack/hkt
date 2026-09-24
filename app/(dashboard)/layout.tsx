@@ -26,8 +26,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
               thao tác — người dùng vẫn đọc được số của kỳ trước và biết chắc nó chưa phải số mới.
               Chuyển sang TRANG KHÁC thì không có số cũ để giữ, lúc đó `loading.tsx` hiện khung xương.
             */}
+            {/*
+              TRẢI HẾT BỀ NGANG, KHÔNG CĂN GIỮA TRONG MỘT KHUNG CỐ ĐỊNH. Bản đầu giới hạn 1760px:
+              trên màn 2560px của chủ shop hai bên trống ~400px trong khi bảng rộng vẫn phải cuộn
+              ngang. Lề co theo màn hình (12px điện thoại → 32px màn lớn) — cùng thang với thanh menu
+              để mép thẻ và mép viên thuốc thẳng một hàng.
+            */}
             <StaleWhileRefreshing asChild>
-              <main className="mx-auto w-full min-w-0 max-w-[1760px] flex-1 space-y-6 px-3 pb-10 pt-3 sm:px-6">
+              <main className="w-full min-w-0 flex-1 space-y-6 px-3 pb-10 pt-3 sm:px-5 lg:px-6 2xl:px-8">
                 <DetailCrumb />
                 {children}
               </main>
