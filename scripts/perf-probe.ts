@@ -116,7 +116,7 @@ const results: {
  * một câu 16 giây che mất hoàn toàn — không biết phải sửa câu nào. Hàm khớp mẫu dưới đây được ghi
  * lại MỌI câu từ 50ms trở lên trong lượt NGUỘI, in thành một mục riêng.
  */
-const TRONG_DIEM = /getNominalProfitReport|getMarketerDailyNominal/;
+const TRONG_DIEM = /getNominalProfitReport|getMarketerDailyNominal|getAdsPerformance|getMarketerReport|getAdsDecision|salesByProductPage/;
 let cauTrongHam: { ms: number; sql: string }[] | null = null;
 const cauTheoHam = new Map<string, { ms: number; sql: string }[]>();
 
@@ -453,6 +453,18 @@ async function main() {
   const adsDec = await import("@/lib/queries/ads-decision");
   await timed("/ads", "getAdsDecision campaign", () => adsDec.getAdsDecision(month, "campaign"));
   await timed("/ads", "getAdsDecision product", () => adsDec.getAdsDecision(month, "product"));
+  /*
+    KHỐI CUỐI TRANG /ads — "hiệu quả theo marketer" — 9,7s nguội (perf-audit 24/09/2026), và bỏ đọc
+    tồn kho (#199) KHÔNG làm nó nhanh lên: chỗ tốn nằm ở phần khác. Đo nó và các phần con xuất ra
+    được, theo KỲ MẶC ĐỊNH CỦA TRANG (tháng này, `resolvePeriod(raw, "month")`), để mục "câu chậm
+    bên trong hàm trọng điểm" chỉ đúng câu phải sửa.
+  */
+  const thangTrang = resolvePeriod({}, "month");
+  const adsPerf = await import("@/lib/queries/ads-performance");
+  const payrollQ = await import("@/lib/queries/payroll");
+  await timed("/ads", "getAdsPerformance tháng này", () => adsPerf.getAdsPerformance(thangTrang));
+  await timed("/ads", "getMarketerReport tháng này", () => payrollQ.getMarketerReport(thangTrang));
+  await timed("/ads", "salesByProductPage tháng này (delivered)", () => payrollQ.salesByProductPage(thangTrang, "delivered"));
   const ledger = await import("@/lib/queries/marketing-ledger");
   const { vnDay } = await import("@/lib/constants/marketing-decision-ledger");
   await timed("/ads", "decisionStability campaign", async () => {
