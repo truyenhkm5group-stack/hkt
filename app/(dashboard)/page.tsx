@@ -92,8 +92,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
         GIAO DIỆN BENTO (24/09/2026): ô ② mang nền MỰC — đó là con số chủ shop hỏi đầu tiên mỗi sáng
         ("hàng tới tay khách được bao nhiêu"), nên nó là ô duy nhất được nhấn trên trang.
+        Ba ô đứng MỘT HÀNG từ 768px (máy tính bảng): xếp chồng thì chuỗi ①→②→③ bị cắt qua ba màn cuộn.
       */}
-      <section className="grid gap-4 lg:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-3">
         <MetricCard
           size="lg"
           href={`/orders?period=${period.key}`}
