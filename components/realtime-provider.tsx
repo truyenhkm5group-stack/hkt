@@ -126,7 +126,7 @@ export function RealtimeIndicator() {
       <TooltipTrigger asChild>
         <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${connected ? "border-success/30 bg-success/10 text-success" : "border-border bg-muted text-muted-foreground"}`}>
           {connected ? <RadioTower className="size-3.5" /> : <Radio className="size-3.5" />}
-          <span className="hidden sm:inline">{connected ? "Realtime" : "Đang kết nối…"}</span>
+          <span className="hidden 2xl:inline">{connected ? "Realtime" : "Đang kết nối…"}</span>
           {connected ? <span className="relative flex size-1.5"><span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-75" /><span className="relative inline-flex size-1.5 rounded-full bg-success" /></span> : null}
         </span>
       </TooltipTrigger>

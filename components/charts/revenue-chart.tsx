@@ -3,6 +3,7 @@
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { type ChartConfig, ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { formatVND } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 const config = {
   revenue: { label: "Doanh thu lên đơn", color: "var(--chart-2)" },
@@ -15,10 +16,11 @@ function shortDay(day: string) {
   return `${d}/${m}`;
 }
 
-export function RevenueChart({ data }: { data: { day: string; revenue: number; successRevenue: number; orders: number }[] }) {
-  if (!data.length) return <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">Chưa có dữ liệu trong kỳ này</div>;
+/** `className` chỉ để đổi CHIỀU CAO (ô bento lớn cao hơn khối thường); màu và trục giữ nguyên. */
+export function RevenueChart({ data, className }: { data: { day: string; revenue: number; successRevenue: number; orders: number }[]; className?: string }) {
+  if (!data.length) return <div className={cn("flex h-[260px] items-center justify-center text-sm text-muted-foreground", className)}>Chưa có dữ liệu trong kỳ này</div>;
   return (
-    <ChartContainer config={config} className="h-[260px] w-full">
+    <ChartContainer config={config} className={cn("h-[260px] w-full", className)}>
       <AreaChart data={data} margin={{ left: 4, right: 8, top: 8 }}>
         <defs>
           <linearGradient id="fillRevenue" x1="0" y1="0" x2="0" y2="1">

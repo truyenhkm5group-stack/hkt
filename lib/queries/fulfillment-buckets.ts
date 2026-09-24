@@ -1,5 +1,5 @@
 import { and, gte, lte, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { chayKhongJit, getDb, schema } from "@/db";
 import { memo } from "@/lib/cache";
 import { CARRIER_EVENT_SOURCES, sqlSourceList } from "@/lib/constants/truth";
 import { FULFILLMENT_BUCKETS, type FulfillmentBucket } from "@/lib/constants/fulfillment-bucket";
@@ -88,11 +88,19 @@ export async function getFulfillmentBuckets(period: Period): Promise<Fulfillment
   return memo(`fulfillment-buckets:${period.from?.toISOString() ?? "-"}:${period.to?.toISOString() ?? "-"}`, 90_000, async () => {
     const db = await getDb();
     const dieuKien = [period.from ? gte(o.insertedAt, period.from) : undefined, period.to ? lte(o.insertedAt, period.to) : undefined].filter(Boolean);
-    const rows = await db
-      .select({ bucket: ORDER_BUCKET_SCALAR, count: sql<number>`count(*)`, revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)` })
-      .from(o)
-      .where(dieuKien.length ? and(...dieuKien) : undefined)
-      .groupBy(sql`1`);
+    /*
+      JIT TẮT — đo production 24/09/2026 (ops perf-probe, bản in tên hàm): câu CHẬM NHẤT của trang
+      chủ, 6.723–11.087 ms trên đường thật (getDashboardData và bản tin chủ shop cùng gọi). EXPLAIN
+      3 lượt xen kẽ: 4.315–4.469 ms JIT bật, 887–1.014 ms JIT tắt (77–79 % là biên dịch biểu thức
+      nhóm đơn cho từng dòng). Không đổi một dấu nào của câu lệnh.
+    */
+    const rows = await chayKhongJit(db, (tx) =>
+      tx
+        .select({ bucket: ORDER_BUCKET_SCALAR, count: sql<number>`count(*)`, revenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}), 0)` })
+        .from(o)
+        .where(dieuKien.length ? and(...dieuKien) : undefined)
+        .groupBy(sql`1`),
+    );
 
     const counts = roRong();
     const bookedRevenue = roRong();
