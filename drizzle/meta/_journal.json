@@ -834,6 +834,13 @@
       "when": 1790001928245,
       "tag": "0119_creative_own_ads",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1790001988245,
+      "tag": "0120_creative_design_concepts",
+      "breakpoints": true
     }
   ]
 }

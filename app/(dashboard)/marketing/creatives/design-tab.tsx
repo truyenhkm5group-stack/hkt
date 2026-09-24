@@ -1,0 +1,129 @@
+import { Shirt } from "lucide-react";
+import { DesignProductionButton } from "@/app/(dashboard)/marketing/creatives/design-actions";
+import { DnaChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
+import { StatStrip } from "@/components/stat-tile";
+import { EmptyState, SectionCard } from "@/components/ui-bits";
+import { getDb } from "@/db";
+import { DESIGN_NOVELTY, DESIGN_PARENT_RULES, DESIGN_STATUS_LABEL, type DesignStatus } from "@/lib/constants/creative-loop";
+import { formatDate, formatNumber, formatVND } from "@/lib/format";
+import { listDesignConcepts, productDnaCoverage } from "@/lib/queries/creative-design";
+import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
+import { cn } from "@/lib/utils";
+
+/**
+ * ═══════════ TAB THIẾT KẾ MỚI ═══════════
+ *
+ * Chủ shop 24/09/2026: máy thiết kế mẫu áo / váy CHƯA TỪNG CÓ (lai DNA của mã bán tốt), quảng cáo và
+ * nhận đơn như hàng thường, sản xuất sau. Bảng này trả lời: thiết kế nào đang test, đã ra bao nhiêu đơn
+ * (qua `orders.ad_id` của các mẩu mang thiết kế — CHỈ ĐỌC), và cái nào đáng đưa vào sản xuất.
+ */
+
+const STATUS_TONE: Record<DesignStatus, string> = {
+  DRAFT: "bg-muted text-muted-foreground",
+  TESTING: "bg-primary/10 text-primary",
+  WIN: "bg-success/15 text-success",
+  LOSE: "bg-muted text-muted-foreground",
+  PRODUCTION: "bg-brand/15 text-brand",
+};
+
+export async function DesignTab({ canEdit }: { canEdit: boolean }) {
+  const db = await getDb();
+  const [rows, coverage, { config }] = await Promise.all([listDesignConcepts(db, 200), productDnaCoverage(db), readCurrentCreativeConfig(db)]);
+  const dangTest = rows.filter((r) => r.status === "TESTING").length;
+  const thang = rows.filter((r) => r.status === "WIN" || r.status === "PRODUCTION").length;
+  const don = rows.reduce((s, r) => s + r.bookedOrders, 0);
+
+  return (
+    <div className="space-y-4">
+      <StatStrip
+        columns={4}
+        items={[
+          { label: "Ô thiết kế mỗi lô", value: formatNumber(config.designSlots), note: config.extraCandidates ? `+ ${formatNumber(config.extraCandidates)} sinh dư` : "không sinh dư", hint: "Số ô THIẾT KẾ MỚI máy lập mỗi lô (cấu hình). Không đủ mã cha có DNA hoặc không đủ thiết kế đủ mới lạ ⇒ lô ít hơn và máy nói vì sao ở lịch sử lô." },
+          {
+            label: "Mã đã đọc DNA",
+            value: formatNumber(coverage.withDna),
+            note: coverage.failed ? `${formatNumber(coverage.failed)} mã đọc hỏng — thử lại sau 24 giờ` : "đọc dần mỗi lượt dựng lô",
+            tone: coverage.withDna ? "default" : "amber",
+            hint: `DNA (nhóm hàng, dáng, cổ, tay, chất liệu, hoạ tiết, màu, chi tiết, phong cách) đọc từ ảnh sản phẩm bằng mô hình đọc ảnh. Mã làm cha khi có ≥ ${DESIGN_PARENT_RULES.minDelivered} đơn giao thành công trong ${DESIGN_PARENT_RULES.lookbackDays} ngày hoặc chi / tin nhắn tốt.`,
+          },
+          { label: "Đang test", value: formatNumber(dangTest), note: `${formatNumber(thang)} thắng / đưa vào sản xuất` },
+          { label: "Đơn chốt quy về thiết kế", value: formatNumber(don), note: "qua ad_id của mẩu — có thể đếm THIẾU", hint: "Đơn Pancake mang ad_id của các mẩu quảng cáo thiết kế, không huỷ (cùng định nghĩa đơn chốt của vòng mẫu). Pancake gửi ad_id cho khoảng 72,6% đơn Facebook nên con số đếm thiếu, không đếm thừa." },
+        ]}
+      />
+      <SectionCard
+        title="Thiết kế mới"
+        description={`Mỗi thiết kế khác mọi mã đang có và mọi thiết kế ${DESIGN_NOVELTY.recentDesignDays} ngày gần nhất ở ít nhất ${DESIGN_NOVELTY.minDiffAttributes} thuộc tính DNA. Tạo sản phẩm trên Pancake đúng mã TK-… để nhân viên chốt đơn.`}
+        hint="Giá đề nghị = giá của mã cha trội nhất; không suy được thì để trống và câu chữ quảng cáo không ghi giá. Trạng thái do máy chấm theo mẩu quảng cáo mang thiết kế (thắng khi đơn chốt vượt ngưỡng thắng của vòng); “Đưa vào sản xuất” chỉ người bấm."
+        padded={false}
+      >
+        {rows.length === 0 ? (
+          <div className="p-5">
+            <EmptyState icon={Shirt} title="Chưa có thiết kế nào" description="Máy lập thiết kế khi dựng lô: cần mã bán tốt đã đọc được DNA VÀ có ảnh sản phẩm thật (ảnh tham chiếu chất ảnh của shop)." />
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12.5px]">
+              <thead className="border-b bg-muted/40 text-left text-[11.5px] text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Thiết kế</th>
+                  <th className="px-3 py-2 font-medium">DNA</th>
+                  <th className="px-3 py-2 font-medium">Mã cha</th>
+                  <th className="px-3 py-2 text-right font-medium">Giá đề nghị</th>
+                  <th className="px-3 py-2 font-medium">Trạng thái</th>
+                  <th className="px-3 py-2 text-right font-medium">Đơn chốt · giao / hoàn</th>
+                  <th className="px-3 py-2 text-right font-medium">Đã chi</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="border-b border-hairline align-top last:border-b-0">
+                    <td className="px-3 py-2">
+                      <div className="flex items-start gap-2">
+                        <VariantImage imageId={r.imageId} available={r.imageAvailable} alt={r.code} className="size-14 shrink-0 rounded-md" iconClassName="size-4" />
+                        <div className="min-w-0">
+                          <p className="font-mono font-semibold">{r.code}</p>
+                          <p className="text-[11px] text-muted-foreground">{r.batchDay ? `lô ${formatDate(r.batchDay)}` : formatDate(r.createdAt)}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="max-w-[340px] px-3 py-2" title={r.why}>
+                      <DnaChips dna={r.dna} />
+                    </td>
+                    <td className="max-w-[160px] px-3 py-2">
+                      <span className="line-clamp-2" title={r.parentProductIds.join(", ")}>
+                        {r.parentLabels.join(" × ") || "—"}
+                      </span>
+                    </td>
+                    <td className="numeric whitespace-nowrap px-3 py-2 text-right">{r.priceVnd === null ? <span className="text-muted-foreground">—</span> : formatVND(r.priceVnd)}</td>
+                    <td className="px-3 py-2">
+                      <span className={cn("whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-semibold", STATUS_TONE[r.status])}>{DESIGN_STATUS_LABEL[r.status] ?? r.status}</span>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">{r.ads ? `${formatNumber(r.ads)} mẩu QC` : "chưa đăng"}</p>
+                    </td>
+                    <td className="numeric whitespace-nowrap px-3 py-2 text-right">
+                      {r.ads ? (
+                        <>
+                          <b>{formatNumber(r.bookedOrders)}</b>
+                          <span className="text-muted-foreground">
+                            {" "}
+                            · {formatNumber(r.deliveredOrders)} / {formatNumber(r.returnedOrders)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="numeric whitespace-nowrap px-3 py-2 text-right">{formatVND(r.spendVnd)}</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-right">
+                      <DesignProductionButton id={r.id} code={r.code} production={r.status === "PRODUCTION"} canEdit={canEdit} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
+    </div>
+  );
+}

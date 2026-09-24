@@ -101,8 +101,8 @@ async function loadContext(db: Db, variantId: string, now: Date): Promise<Ctx | 
   const { config: current } = await readCurrentCreativeConfig(db);
   const metrics = (await variantMetrics(db, [{ id: v.id, fbAdId: v.fbAdId, startAt: b.startAt }])).get(v.id);
   if (!metrics) return { error: "Không đọc được số đo của mẫu." };
-  // Phán quyết SỐNG — luật tắt của ảnh chụp lô, luật giữ hiện tại (xem `effectiveJudgeConfig`).
-  const j = judgeVariant({ status: v.status as VariantStatus, startAt: b.startAt, endAt: b.endAt, libraryAt: v.libraryAt, metrics }, effectiveJudgeConfig(b.configSnapshot, current), now);
+  // Phán quyết SỐNG — luật tắt của ảnh chụp lô, luật giữ hiện tại, hoặc LUẬT RIÊNG của ô mockup (xem `effectiveJudgeConfig`).
+  const j = judgeVariant({ status: v.status as VariantStatus, startAt: b.startAt, endAt: b.endAt, libraryAt: v.libraryAt, metrics }, effectiveJudgeConfig(b.configSnapshot, current, v.rulesSnapshot), now);
 
   const snap = batchConfig(b.configSnapshot);
   const digestMatches = b.approvalDigest !== "" && approvalDigest(await batchApprovalContent(db, b)) === b.approvalDigest;

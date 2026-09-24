@@ -217,6 +217,7 @@ import { testAdsBrakeByDecision, testAdsWrite } from "./ads-write.test";
 import { testAdsKillSwitchDb, testAdsKillSwitchPure } from "./ads-kill-switch.test";
 import { testCreativeLoop } from "./creative-loop.test";
 import { testCreativeGenerate } from "./creative-generate.test";
+import { testCreativeDesignDb, testCreativeDesignPure } from "./creative-design.test";
 import { testCreativeEvaluate } from "./creative-evaluate.test";
 import { testCreativeWrite, testCreativeWriteDb } from "./creative-write.test";
 import { testCreativeEmptyBatch, testCreativeExtendedWindow, testCreativeLoopTick } from "./creative-loop-tick.test";
@@ -1677,6 +1678,8 @@ async function main() {
   await testMarketingDecisionLedger();
   testAdsWrite();
   testCreativeLoop();
+  testCreativeDesignPure();
+  await testCreativeDesignDb(db);
   await testCreativeGenerate(db);
   await testCreativeEvaluate(db);
   testCreativeWrite();

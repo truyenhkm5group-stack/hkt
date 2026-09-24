@@ -28,6 +28,13 @@
  *  3. **Ảnh sinh ra phải là sản phẩm thật.** Mọi ô trong lô bắt buộc có ảnh sản phẩm thật làm gốc
  *     (`PRODUCT_PHOTO`). Quảng cáo ra một chiếc váy không có trong kho thì đơn nào cũng thành đơn
  *     hoàn — tiền quảng cáo mua về tỷ lệ hoàn, không mua về doanh thu.
+ *
+ *     **NGOẠI LỆ CÓ CHỦ ĐÍCH — ô `DESIGN` (chủ shop 24/09/2026):** ô THIẾT KẾ MỚI quảng cáo một mẫu
+ *     CHƯA SẢN XUẤT (lai "DNA" của các mã bán tốt, bắt buộc khác mọi mã đang có). Chủ shop tạo sản phẩm
+ *     trên Pancake đúng mã `TK-…`, nhận đơn như hàng thường rồi mới sản xuất — shop bán trước. Ranh giới
+ *     2 KHÔNG nới: ảnh tham chiếu gửi máy sinh ảnh vẫn chỉ là ảnh sản phẩm THẬT của mã cha (giữ chất ảnh,
+ *     thương hiệu), `assertPixelSafe` vẫn đòi ít nhất một `PRODUCT_PHOTO`, và câu lệnh dặn rõ "thiết kế
+ *     mới, KHÔNG sao chép mẫu tham chiếu". Ô khai thác / thăm dò / tự làm giữ nguyên ranh giới 3.
  */
 
 // ───────────────────────────── PHIÊN BẢN ─────────────────────────────
@@ -346,13 +353,25 @@ export const VARIANT_STATUS_LABEL: Record<VariantStatus, string> = {
 };
 
 /**
- * `EXPLOIT` · `EXPLORE` — ô do máy lập (`planBatch`).
+ * `EXPLOIT` · `EXPLORE` — ô do máy lập (`planBatch`). Ô `EXPLOIT` là MOCKUP hằng ngày của một mẫu thắng
+ *             chủ shop CHỌN (`mockupSourceIds` / `mockupProductIds`): giữ sản phẩm, đổi đúng một gen.
  * `MANUAL`  — mẫu NGƯỜI tự làm (vd vẽ trên web ChatGPT/Grok) rồi tải vào lô: không qua máy viết và máy
  *             sinh ảnh, nhưng đi qua ĐÚNG cổng duyệt · đăng · chấm · học như mẫu máy làm.
+ * `DESIGN`  — THIẾT KẾ SẢN PHẨM MỚI (chủ shop 24/09/2026): mẫu chưa từng có, lai DNA của các mã bán tốt
+ *             (`planDesigns`), nối về một dòng `design_concepts` (mã `TK-YYMMDD-NN`). Ngoại lệ có chủ đích
+ *             của ranh giới 3 — xem đầu tệp.
  */
-export type SlotMode = "EXPLOIT" | "EXPLORE" | "MANUAL";
+export type SlotMode = "EXPLOIT" | "EXPLORE" | "MANUAL" | "DESIGN";
 
-export const SLOT_MODE_LABEL: Record<SlotMode, string> = { EXPLOIT: "Khai thác", EXPLORE: "Thăm dò", MANUAL: "Tự làm" };
+export const SLOT_MODES: readonly SlotMode[] = ["EXPLOIT", "EXPLORE", "MANUAL", "DESIGN"];
+
+export const SLOT_MODE_LABEL: Record<SlotMode, string> = { EXPLOIT: "Mockup mẫu thắng", EXPLORE: "Thăm dò", MANUAL: "Tự làm", DESIGN: "Thiết kế mới" };
+
+/**
+ * Thứ tự ĐĂNG theo chế độ ô (chủ shop 24/09/2026): mẫu tự làm → thiết kế mới (phần chính của lô) →
+ * mockup mẫu thắng → thăm dò. Trần số mẫu cắt ở CUỐI thứ tự này.
+ */
+export const SLOT_MODE_PUBLISH_RANK: Record<SlotMode, number> = { MANUAL: 0, DESIGN: 1, EXPLOIT: 2, EXPLORE: 3 };
 
 /**
  * Ô của mẫu tự làm đánh số từ đây (1001, 1002…), tách hẳn khỏi dải ô máy lập (1…13): hai đường ghi
@@ -435,22 +454,24 @@ export const SETTLED_VERDICTS: readonly CreativeVerdict[] = ["KILL", "PROMISING"
 /**
  * Cấu hình ở `settings` chỉ được LÀM HẸP các trần này, không bao giờ nới ra.
  *
- * Ba con số đầu là quyết định của chủ shop ngày 24/09/2026 (10 mẫu × 200.000đ × 1 ngày, chạy lúc
- * 6:00). Nâng chúng là một lần sửa mã có người đọc — không phải một dòng JSON ai đó gõ lúc nửa đêm.
+ * Chủ shop chốt 24/09/2026 (lần một): 10 mẫu × 200.000đ × 1 ngày, chạy lúc 6:00. Chủ shop 24/09 (lần
+ * hai, cùng lúc mở ô THIẾT KẾ MỚI): trần mới **20 mẫu / 4.000.000đ mỗi ngày chạy** — lô = 10 thiết kế mới
+ * + 1 mockup cho mỗi mẫu thắng chủ shop chọn, mỗi mẫu vẫn 200.000đ. Nâng chúng là một lần sửa mã có
+ * người đọc — không phải một dòng JSON ai đó gõ lúc nửa đêm.
  */
 export const CREATIVE_HARD_LIMITS = {
-  /** Số mẫu tối đa được ĐĂNG trong một lô. */
-  maxBatchSize: 10,
+  /** Số mẫu tối đa được ĐĂNG trong một lô. Chủ shop 24/09: 20 (trước đó 10). */
+  maxBatchSize: 20,
   /** Ngân sách trọn đời tối đa của MỘT mẫu trong khung test. */
   maxBudgetPerVariantVnd: 200_000,
   /** Khung test tối đa (ngày). */
   maxTestDays: 1,
   /**
-   * Tổng ngân sách test được CAM KẾT cho một ngày chạy. = 10 × 200.000đ. Đếm trên sổ
+   * Tổng ngân sách test được CAM KẾT cho một ngày chạy. Chủ shop 24/09: 4.000.000đ = 20 × 200.000đ. Đếm trên sổ
    * `creative_fb_actions` (lượt tạo nhóm ĐÃ ÁP), không đếm trên cấu hình — cấu hình có thể đổi
    * giữa hai lượt đăng, sổ thì không.
    */
-  maxDailyTestSpendVnd: 2_000_000,
+  maxDailyTestSpendVnd: 4_000_000,
   /**
    * Một lượt "cho tiêu thêm" (người bấm trên mẫu HỨA HẸN) được cộng tối đa bấy nhiêu.
    * Chủ shop chốt 24/09/2026: 200.000đ — đúng bằng MỘT ngày test nữa của một mẫu.
@@ -463,7 +484,8 @@ export const CREATIVE_HARD_LIMITS = {
   /**
    * Trần chi sinh ảnh / ngày (USD). Chủ shop chốt 24/09/2026: 2 USD, và GIỮ NGUYÊN khi chuyển sang
    * "Cao + Batch": một lô 13 ảnh chất lượng cao khổ 4:5 qua Batch ƯỚC TÍNH ~1,4 USD (`estimateImageUsd`).
-   * Cấu hình chỉ hạ được.
+   * Lô đầy trần 20 mẫu (chủ shop 24/09, lần hai) ở cấu hình đang chạy (gọi ngay · vừa · 4:5) ≈ 1,7 USD — vừa
+   * trần; ở "Cao + Batch" thì 20 ảnh ≈ 2,2 USD, VƯỢT — ô vượt thành "Sinh ảnh lỗi" có lý do. Cấu hình chỉ hạ được.
    */
   maxImageUsdPerDay: 2,
 } as const;
@@ -526,10 +548,29 @@ export type CreativeLoopConfig = {
   approvalLeadMinutes: number;
   /** Giờ Việt Nam bắt đầu dựng lô cho NGÀY MAI. */
   genHourVn: number;
-  /** Sinh dư bấy nhiêu mẫu để người duyệt gạt bớt mà lô vẫn đủ. */
+  /** Sinh dư bấy nhiêu ô THIẾT KẾ để người duyệt gạt bớt mà lô vẫn đủ. Chủ shop 24/09: mặc định 0. */
   extraCandidates: number;
-  /** Tỷ lệ ô THĂM DÒ (gen mới / nguồn mới). Phần còn lại KHAI THÁC (biến thể của mẫu tốt). */
-  exploreShare: number;
+  /**
+   * Số ô THIẾT KẾ MỚI mỗi lô (chủ shop 24/09/2026: 10 — phần chính của lô). Không đủ mã bán tốt có DNA
+   * hoặc không đủ thiết kế đủ MỚI LẠ ⇒ lô ít ô hơn và `shortfall` nói vì sao, không nhồi.
+   */
+  designSlots: number;
+  /**
+   * Số ô THĂM DÒ (gen mới / nguồn cảm hứng). Chủ shop 24/09: thăm dò giờ là việc của ô thiết kế ⇒ mặc
+   * định 0; mã vẫn giữ để bật lại được.
+   */
+  exploreSlots: number;
+  /**
+   * MOCKUP hằng ngày — nguồn `OWN_AD` (quảng cáo cũ của shop) mà chủ shop bật "Chạy mockup hằng ngày".
+   * Mỗi nguồn = 1 ô khai thác mỗi lô (giữ sản phẩm, đổi một gen). Nguồn chưa đủ sáu gen / chưa có mã có
+   * ảnh thật ⇒ không lập được, `shortfall` nói ra.
+   */
+  mockupSourceIds: string[];
+  /**
+   * MOCKUP hằng ngày theo MÃ HÀNG (công tắc trên thẻ ảnh sản phẩm thật): mỗi mã = 1 ô khai thác từ mẫu
+   * cha tốt nhất của chính mã ấy (mẫu thắng / hứa hẹn của vòng hoặc quảng cáo cũ của shop).
+   */
+  mockupProductIds: string[];
   /** THẮNG khi đơn chốt (không huỷ) quy về mẫu VƯỢT con số này. Chủ shop chốt: > 100. */
   winOrdersAbove: number;
   /**
@@ -580,8 +621,12 @@ export const DEFAULT_CREATIVE_CONFIG: CreativeLoopConfig = {
   startHourVn: 6,
   approvalLeadMinutes: 30,
   genHourVn: 14,
-  extraCandidates: 3,
-  exploreShare: 0.4,
+  // Chủ shop 24/09/2026: lô = 10 thiết kế + 1 mockup / mẫu thắng được chọn — không sinh dư mặc định.
+  extraCandidates: 0,
+  designSlots: 10,
+  exploreSlots: 0,
+  mockupSourceIds: [],
+  mockupProductIds: [],
   winOrdersAbove: 100,
   verdictSettleHours: 24,
   killRules: [],
@@ -611,6 +656,12 @@ function num(raw: unknown, fallback: number, min: number, max: number): number {
 
 function str(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
+}
+
+/** Danh sách id (chuỗi khác rỗng, không trùng, giữ thứ tự nhập). Phần tử lạ bị bỏ. */
+function idList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set((raw as unknown[]).map(str).filter(Boolean))].slice(0, 200);
 }
 
 function parseRule(raw: unknown): CreativeRule | null {
@@ -662,7 +713,10 @@ export function normalizeCreativeConfig(raw: unknown): { config: CreativeLoopCon
     approvalLeadMinutes: Math.round(num(r.approvalLeadMinutes, d.approvalLeadMinutes, 10, 12 * 60)),
     genHourVn: Math.round(num(r.genHourVn, d.genHourVn, 0, 23)),
     extraCandidates: Math.round(num(r.extraCandidates, d.extraCandidates, 0, 10)),
-    exploreShare: num(r.exploreShare, d.exploreShare, 0, 1),
+    designSlots: Math.round(num(r.designSlots, d.designSlots, 0, L.maxBatchSize)),
+    exploreSlots: Math.round(num(r.exploreSlots, d.exploreSlots, 0, L.maxBatchSize)),
+    mockupSourceIds: idList(r.mockupSourceIds),
+    mockupProductIds: idList(r.mockupProductIds),
     winOrdersAbove: Math.round(num(r.winOrdersAbove, d.winOrdersAbove, 1, 100_000)),
     verdictSettleHours: Math.round(num(r.verdictSettleHours, d.verdictSettleHours, 0, 14 * 24)),
     killRules: rules("killRules"),
@@ -839,4 +893,275 @@ export function estimateImageUsd(model: string, quality: ImageQuality, size: Ima
   const inp = IMAGE_ESTIMATE_INPUT;
   const usd = (inp.promptTextTokens * p.textInput + inp.references * inp.imageTokensPerReference * p.imageInput + imageOutputTokensEstimate(quality, size) * p.imageOutput) / 1_000_000;
   return Math.round(usd * (mode === "BATCH" ? IMAGE_BATCH_PRICE_FACTOR : 1) * 1_000_000) / 1_000_000;
+}
+
+// ───────────────────────────── THIẾT KẾ SẢN PHẨM MỚI — DNA (chủ shop 24/09/2026) ─────────────────────────────
+
+/**
+ * Tăng khi đổi TỪ VỰNG DNA SẢN PHẨM. Tách hẳn khỏi `GENE_VOCAB_VERSION`: gen là thuộc tính của một
+ * MẨU QUẢNG CÁO (bối cảnh, bố cục…), DNA là thuộc tính của CHIẾC ÁO / VÁY. Đổi nghĩa một giá trị DNA mà
+ * vẫn so khác biệt với DNA đọc theo từ vựng cũ là so hai thứ khác nhau — dòng DNA khác phiên bản bị bỏ
+ * qua ở mọi phép so, và mã ấy được đọc lại.
+ */
+export const DESIGN_DNA_VERSION = 1;
+
+/**
+ * "DNA" của một sản phẩm thời trang — một TỪ VỰNG ĐÓNG, cùng lý do với `GENE_VOCAB`: không đếm được thì
+ * không học được, và không so được thì không kiểm được "mẫu mới có thật sự KHÁC mẫu cũ không".
+ *
+ * `NONE` ở cổ / tay = không có hoặc không áp dụng (quần, chân váy). Mô hình đọc ảnh chỉ được CHỌN trong
+ * từ vựng; giá trị lạ bị BỎ (thuộc tính ấy thành CHƯA BIẾT), không bị ép về giá trị gần nhất.
+ */
+export const DESIGN_DNA_VOCAB = {
+  /** Nhóm hàng. */
+  category: ["DRESS", "BLOUSE", "SHIRT", "TEE", "KNIT_TOP", "OUTERWEAR", "PANTS", "SHORTS", "SKIRT", "SET", "JUMPSUIT"],
+  /** Dáng. */
+  silhouette: ["A_LINE", "BODYCON", "SHIFT", "FIT_FLARE", "WRAP", "OVERSIZED", "STRAIGHT", "MERMAID", "BABYDOLL"],
+  /** Độ dài. */
+  length: ["CROP", "HIP", "MINI", "KNEE", "MIDI", "MAXI"],
+  /** Cổ. */
+  neckline: ["ROUND", "V_NECK", "SQUARE", "SHIRT_COLLAR", "BOAT", "OFF_SHOULDER", "HALTER", "HIGH_NECK", "SWEETHEART", "NONE"],
+  /** Tay. */
+  sleeve: ["SLEEVELESS", "CAP", "SHORT", "ELBOW", "LONG", "PUFF", "BELL", "NONE"],
+  /** Chất liệu. */
+  material: ["COTTON", "LINEN", "SILK_SATIN", "CHIFFON", "DENIM", "KNIT", "TWEED", "LACE", "VELVET", "POLY_BLEND"],
+  /** Hoạ tiết. */
+  pattern: ["SOLID", "FLORAL", "STRIPE", "CHECK", "POLKA_DOT", "PRINT", "ANIMAL"],
+  /** Họ màu. */
+  colorFamily: ["BLACK", "WHITE_CREAM", "BEIGE_BROWN", "PINK", "RED", "BLUE", "GREEN", "YELLOW_ORANGE", "PURPLE", "GREY", "MULTI"],
+  /** Chi tiết nổi bật. */
+  detail: ["BOW", "RUFFLE", "PLEAT", "BUTTONS", "EMBROIDERY", "LACE_TRIM", "BELTED", "NONE"],
+  /** Phong cách – dịp dùng. */
+  style: ["OFFICE", "CASUAL", "PARTY", "BEACH", "ELEGANT", "STREET"],
+} as const;
+
+export type DesignDnaKey = keyof typeof DESIGN_DNA_VOCAB;
+export type DesignDna = { [K in DesignDnaKey]: (typeof DESIGN_DNA_VOCAB)[K][number] };
+export const DESIGN_DNA_KEYS = Object.keys(DESIGN_DNA_VOCAB) as DesignDnaKey[];
+
+export const DESIGN_DNA_LABEL: Record<DesignDnaKey, string> = {
+  category: "Nhóm hàng",
+  silhouette: "Dáng",
+  length: "Độ dài",
+  neckline: "Cổ",
+  sleeve: "Tay",
+  material: "Chất liệu",
+  pattern: "Hoạ tiết",
+  colorFamily: "Họ màu",
+  detail: "Chi tiết",
+  style: "Phong cách",
+};
+
+/** Nhãn tiếng Việt THEO TỪNG KHOÁ — hai khoá dùng chung chữ `NONE` với hai nghĩa khác nhau. */
+export const DESIGN_DNA_VALUE_LABEL: { [K in DesignDnaKey]: Record<DesignDna[K], string> } = {
+  category: { DRESS: "Đầm / váy liền", BLOUSE: "Áo kiểu", SHIRT: "Áo sơ mi", TEE: "Áo thun", KNIT_TOP: "Áo len / dệt kim", OUTERWEAR: "Áo khoác / vest", PANTS: "Quần dài", SHORTS: "Quần short", SKIRT: "Chân váy", SET: "Set bộ", JUMPSUIT: "Jumpsuit" },
+  silhouette: { A_LINE: "Chữ A", BODYCON: "Ôm body", SHIFT: "Suông", FIT_FLARE: "Chiết eo xoè", WRAP: "Vạt đắp chéo", OVERSIZED: "Rộng oversize", STRAIGHT: "Đứng", MERMAID: "Đuôi cá", BABYDOLL: "Babydoll" },
+  length: { CROP: "Lửng (croptop)", HIP: "Ngang hông", MINI: "Ngắn (mini)", KNEE: "Ngang gối", MIDI: "Qua gối (midi)", MAXI: "Dài (maxi)" },
+  neckline: { ROUND: "Cổ tròn", V_NECK: "Cổ V", SQUARE: "Cổ vuông", SHIRT_COLLAR: "Cổ sơ mi", BOAT: "Cổ thuyền", OFF_SHOULDER: "Trễ vai", HALTER: "Cổ yếm", HIGH_NECK: "Cổ cao", SWEETHEART: "Cổ trái tim", NONE: "Không có / không áp dụng" },
+  sleeve: { SLEEVELESS: "Sát nách", CAP: "Tay con", SHORT: "Tay ngắn", ELBOW: "Tay lỡ", LONG: "Tay dài", PUFF: "Tay bồng", BELL: "Tay loe", NONE: "Không áp dụng" },
+  material: { COTTON: "Cotton", LINEN: "Linen / đũi", SILK_SATIN: "Lụa / satin", CHIFFON: "Voan", DENIM: "Denim / bò", KNIT: "Len / dệt kim", TWEED: "Tweed / dạ", LACE: "Ren", VELVET: "Nhung", POLY_BLEND: "Vải tổng hợp" },
+  pattern: { SOLID: "Trơn", FLORAL: "Hoa", STRIPE: "Kẻ sọc", CHECK: "Kẻ caro", POLKA_DOT: "Chấm bi", PRINT: "Hoạ tiết in", ANIMAL: "Da thú" },
+  colorFamily: { BLACK: "Đen", WHITE_CREAM: "Trắng / kem", BEIGE_BROWN: "Be / nâu", PINK: "Hồng", RED: "Đỏ", BLUE: "Xanh dương", GREEN: "Xanh lá", YELLOW_ORANGE: "Vàng / cam", PURPLE: "Tím", GREY: "Xám", MULTI: "Nhiều màu" },
+  detail: { BOW: "Nơ", RUFFLE: "Bèo", PLEAT: "Xếp ly", BUTTONS: "Cúc", EMBROIDERY: "Thêu", LACE_TRIM: "Viền ren", BELTED: "Thắt eo", NONE: "Không" },
+  style: { OFFICE: "Công sở", CASUAL: "Dạo phố", PARTY: "Dự tiệc", BEACH: "Đi biển", ELEGANT: "Thanh lịch", STREET: "Cá tính" },
+};
+
+/**
+ * Câu tiếng Anh cố định cho từng giá trị DNA — gắn TẤT ĐỊNH vào câu lệnh ảnh của ô `DESIGN` (như chỉ
+ * thị gen của `writer.ts`): mô tả thiết kế mới không được giao cho trí nhớ của LLM. Chuỗi rỗng = không
+ * nói gì (cổ / tay không áp dụng).
+ */
+export const DESIGN_DNA_PROMPT_EN: { [K in DesignDnaKey]: Record<DesignDna[K], string> } = {
+  category: { DRESS: "a dress", BLOUSE: "a feminine blouse", SHIRT: "a shirt", TEE: "a T-shirt", KNIT_TOP: "a knit top", OUTERWEAR: "a jacket / blazer", PANTS: "long trousers", SHORTS: "shorts", SKIRT: "a skirt", SET: "a matching two-piece set", JUMPSUIT: "a jumpsuit" },
+  silhouette: { A_LINE: "A-line silhouette", BODYCON: "bodycon fitted silhouette", SHIFT: "straight shift silhouette", FIT_FLARE: "fit-and-flare silhouette with a defined waist", WRAP: "wrap silhouette", OVERSIZED: "relaxed oversized silhouette", STRAIGHT: "straight cut", MERMAID: "mermaid silhouette", BABYDOLL: "babydoll silhouette" },
+  length: { CROP: "cropped length", HIP: "hip length", MINI: "mini length", KNEE: "knee length", MIDI: "midi length", MAXI: "maxi length" },
+  neckline: { ROUND: "round neckline", V_NECK: "V-neckline", SQUARE: "square neckline", SHIRT_COLLAR: "shirt collar", BOAT: "boat neckline", OFF_SHOULDER: "off-the-shoulder neckline", HALTER: "halter neckline", HIGH_NECK: "high neckline", SWEETHEART: "sweetheart neckline", NONE: "" },
+  sleeve: { SLEEVELESS: "sleeveless", CAP: "cap sleeves", SHORT: "short sleeves", ELBOW: "elbow-length sleeves", LONG: "long sleeves", PUFF: "puff sleeves", BELL: "bell sleeves", NONE: "" },
+  material: { COTTON: "cotton fabric", LINEN: "linen fabric", SILK_SATIN: "silk satin fabric", CHIFFON: "flowing chiffon", DENIM: "denim", KNIT: "soft knit", TWEED: "tweed", LACE: "lace fabric", VELVET: "velvet", POLY_BLEND: "smooth woven fabric" },
+  pattern: { SOLID: "solid color, no print", FLORAL: "floral print", STRIPE: "stripes", CHECK: "check / plaid pattern", POLKA_DOT: "polka dots", PRINT: "abstract print", ANIMAL: "animal print" },
+  colorFamily: { BLACK: "black", WHITE_CREAM: "white / cream", BEIGE_BROWN: "beige / brown", PINK: "pink", RED: "red", BLUE: "blue", GREEN: "green", YELLOW_ORANGE: "yellow / orange", PURPLE: "purple", GREY: "grey", MULTI: "multicolor" },
+  detail: { BOW: "a bow detail", RUFFLE: "ruffle details", PLEAT: "pleats", BUTTONS: "a button placket", EMBROIDERY: "embroidery", LACE_TRIM: "lace trim", BELTED: "a belted waist", NONE: "clean minimal details" },
+  style: { OFFICE: "office-ready style", CASUAL: "casual everyday style", PARTY: "party / evening style", BEACH: "beach vacation style", ELEGANT: "elegant refined style", STREET: "bold streetwear style" },
+};
+
+/** Nhóm hàng không có cổ / tay — cổ và tay của chúng luôn là `NONE` (không áp dụng). */
+export const DNA_NO_UPPER_BODY: readonly DesignDna["category"][] = ["PANTS", "SHORTS", "SKIRT"];
+
+/** Nhận một giá trị DNA từ nguồn không tin được. Lạ ⇒ `null`, không đoán. */
+export function parseDnaValue<K extends DesignDnaKey>(key: K, raw: unknown): DesignDna[K] | null {
+  const vocab = DESIGN_DNA_VOCAB[key] as readonly string[];
+  return typeof raw === "string" && vocab.includes(raw) ? (raw as DesignDna[K]) : null;
+}
+
+/** DNA MỘT PHẦN — thuộc tính đọc được thì giữ, lạ thì bỏ (thành CHƯA BIẾT). */
+export function parsePartialDna(raw: unknown): Partial<DesignDna> {
+  const out: Partial<DesignDna> = {};
+  if (!raw || typeof raw !== "object") return out;
+  const rec = raw as Record<string, unknown>;
+  for (const k of DESIGN_DNA_KEYS) {
+    const v = parseDnaValue(k, rec[k]);
+    if (v !== null) (out as Record<string, string>)[k] = v;
+  }
+  return out;
+}
+
+/** DNA ĐỦ mười thuộc tính, hoặc `null`. Thiết kế mới luôn phải đủ. */
+export function parseDna(raw: unknown): DesignDna | null {
+  const p = parsePartialDna(raw);
+  return DESIGN_DNA_KEYS.every((k) => k in p) ? (p as DesignDna) : null;
+}
+
+/**
+ * Số thuộc tính mà `a` KHÁC `b`. Thuộc tính CHƯA BIẾT ở một bên KHÔNG được tính là khác: không biết mã
+ * cũ cổ gì thì không được khẳng định mẫu mới khác nó ở cổ — mới lạ phải CHỨNG MINH được, không suy từ
+ * chỗ trống (mục 42).
+ */
+export function dnaDifference(a: Partial<DesignDna>, b: Partial<DesignDna>): number {
+  let n = 0;
+  for (const k of DESIGN_DNA_KEYS) if (a[k] !== undefined && b[k] !== undefined && a[k] !== b[k]) n += 1;
+  return n;
+}
+
+/** Chữ ký để chống trùng hai thiết kế trong cùng một lượt lập. */
+export function dnaSignature(dna: DesignDna): string {
+  return DESIGN_DNA_KEYS.map((k) => dna[k]).join("|");
+}
+
+/**
+ * LUẬT MỚI LẠ (chủ shop 24/09/2026: "mẫu mới PHẢI KHÁC các mẫu cũ, không phải ảnh chụp khác của mẫu
+ * cũ"): DNA của một thiết kế phải khác DNA của MỌI mã đang có và MỌI thiết kế trong
+ * `recentDesignDays` ngày gần nhất ở ÍT NHẤT `minDiffAttributes` thuộc tính.
+ */
+export const DESIGN_NOVELTY = { minDiffAttributes: 2, recentDesignDays: 30 } as const;
+
+/**
+ * Chọn MÃ CHA cho thiết kế — ĐỀ XUẤT của người dựng (chủ shop chưa chốt con số; sửa ở đây là một lần
+ * sửa mã có người đọc):
+ *  · `lookbackDays` — cửa sổ đo "bán tốt": đơn giao thành công (theo `ORDER_OUTCOME`) và chi / tin nhắn
+ *    của các mẩu QC hạt `AD` của mã trong bấy nhiêu ngày.
+ *  · Mã đủ điều kiện làm cha khi có ít nhất `minDelivered` đơn giao thành công, HOẶC chi / tin nhắn dưới
+ *    `OWN_AD_IMPORT.goodCostPerMessageBelowVnd` trên ít nhất `OWN_AD_IMPORT.minMessages` tin (mẫu quảng
+ *    cáo lịch sử có chỉ số tốt — chủ shop 24/09) — và PHẢI có DNA đọc được.
+ *  · `mutationRate` — xác suất mỗi thuộc tính (trừ nhóm hàng) bị ĐỘT BIẾN thay vì lấy của cha / mẹ.
+ */
+export const DESIGN_PARENT_RULES = { lookbackDays: 90, minDelivered: 3, mutationRate: 0.25 } as const;
+
+/** Điểm "bán tốt" của một mã — trọng số khi chọn cha mẹ. Hàm thuần. `null` = không đủ điều kiện làm cha. */
+export function designParentScore(m: { delivered: number; returned: number; spendVnd: number | null; messages: number | null }): number | null {
+  const cpmOk = m.spendVnd !== null && m.messages !== null && m.messages >= OWN_AD_IMPORT.minMessages && m.spendVnd / m.messages < OWN_AD_IMPORT.goodCostPerMessageBelowVnd;
+  if (m.delivered < DESIGN_PARENT_RULES.minDelivered && !cpmOk) return null;
+  // Đơn giao thành công × tỷ lệ giao (đơn hoàn kéo điểm xuống); mã chỉ có chỉ số QC tốt mà chưa có đơn
+  // giao vẫn được trọng số tối thiểu 1 — đủ để được chọn, không đủ để lấn mã đã bán được thật.
+  const settled = m.delivered + m.returned;
+  const score = settled > 0 ? (m.delivered * m.delivered) / settled : 0;
+  return Math.max(1, Math.round(score * 100) / 100);
+}
+
+/** Trạng thái một thiết kế. `PRODUCTION` chỉ NGƯỜI đặt (đưa vào sản xuất); máy không bao giờ chạm. */
+export const DESIGN_STATUSES = ["DRAFT", "TESTING", "WIN", "LOSE", "PRODUCTION"] as const;
+export type DesignStatus = (typeof DESIGN_STATUSES)[number];
+export const DESIGN_STATUS_LABEL: Record<DesignStatus, string> = { DRAFT: "Chờ test", TESTING: "Đang test", WIN: "THẮNG", LOSE: "Loại", PRODUCTION: "Đưa vào sản xuất" };
+
+/**
+ * Mã thiết kế `TK-YYMMDD-NN` — YYMMDD là NGÀY CHẠY của lô, NN là thứ tự trong lô. Chủ shop tạo sản phẩm
+ * trên Pancake ĐÚNG mã này để nhân viên chốt đơn được như hàng thường.
+ */
+export function designCode(batchDay: string, n: number): string {
+  return `TK-${batchDay.slice(2, 4)}${batchDay.slice(5, 7)}${batchDay.slice(8, 10)}-${String(n).padStart(2, "0")}`;
+}
+
+export const DESIGN_CODE_RE = /^TK-[0-9]{6}-[0-9]{2,}$/;
+
+// ───────────────────────────── ĐỌC DNA CỦA SẢN PHẨM ĐANG CÓ ─────────────────────────────
+
+/** Route ghi sổ `ai_interactions` của lượt đọc DNA. */
+export const PRODUCT_DNA_ROUTE = "creative.dna";
+/** Một lượt dựng lô đọc DNA tối đa bấy nhiêu mã (mỗi mã một lời gọi mô hình đọc ảnh). */
+export const PRODUCT_DNA_PER_BUILD = 5;
+/** Đọc hỏng thì bấy nhiêu giờ sau mới thử lại mã ấy — không đốt tiền AI mỗi mười phút cho một ảnh hỏng. */
+export const PRODUCT_DNA_RETRY_HOURS = 24;
+
+// ───────────────────────────── LUẬT RIÊNG THEO MÃ CHO Ô MOCKUP (chủ shop 24/09/2026) ─────────────────────────────
+
+/**
+ * Ô MOCKUP của MÃ CŨ không chấm bằng luật chung: mã bán giá 199K và mã 599K có "chi / tin nhắn" tự nhiên
+ * khác nhau cả lần. Chủ shop 24/09/2026:
+ *  · lịch sử = `lookbackDays` ngày các mẩu QC (hạt `AD`) của CHÍNH mã ấy, mẩu có tin nhắn;
+ *  · TẮT khi chi / tin nhắn TỆ HƠN phân vị `killQuantile` (p75) của lịch sử mã, sau khi đã chi `killMinSpendVnd`;
+ *  · GIỮ khi chi / tin nhắn ≤ trung vị (`keepQuantile`) của mã;
+ *  · mã có dưới `minSamples` mẩu lịch sử có tin nhắn ⇒ dùng LUẬT CHUNG của lô (không đủ căn cứ cho luật riêng).
+ */
+export const MOCKUP_RULES = { lookbackDays: 60, killQuantile: 0.75, keepQuantile: 0.5, killMinSpendVnd: 50_000, minSamples: 5 } as const;
+
+/**
+ * Ảnh chụp luật của MỘT ô, lưu ở `creative_variants.rules_snapshot` lúc lập lô và khoá trong phiếu duyệt.
+ *  · `PRODUCT_HISTORY` — luật riêng suy từ lịch sử của mã (hai bộ luật THAY luật chung của lô).
+ *  · `GLOBAL`          — ô mockup mà mã chưa đủ lịch sử ⇒ dùng luật chung; vẫn chụp để người duyệt thấy vì sao.
+ */
+export type VariantRulesSnapshot =
+  | { basis: "PRODUCT_HISTORY"; productId: string; lookbackDays: number; samples: number; p75CostPerMessageVnd: number; medianCostPerMessageVnd: number; killRules: CreativeRule[]; keepRules: CreativeRule[] }
+  | { basis: "GLOBAL"; productId: string; lookbackDays: number; samples: number; reason: string };
+
+/** Phân vị nội suy tuyến tính (kiểu 7, như `percentile_cont`). Mảng rỗng ⇒ `null`. */
+export function quantile(xs: readonly number[], q: number): number | null {
+  if (xs.length === 0) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const pos = (s.length - 1) * Math.min(1, Math.max(0, q));
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return s[lo] + (s[hi] - s[lo]) * (pos - lo);
+}
+
+/**
+ * Luật riêng của một mã từ chi / tin nhắn của các mẩu lịch sử — hàm THUẦN. `samples` = chi / tin nhắn của
+ * TỪNG mẩu (chỉ mẩu có tin nhắn: mẫu số 0 là CHƯA BIẾT, không phải vô cực — không vào mẫu).
+ */
+export function mockupRulesFromHistory(productId: string, samples: readonly number[]): VariantRulesSnapshot {
+  const R = MOCKUP_RULES;
+  const clean = samples.filter((x) => Number.isFinite(x) && x > 0);
+  if (clean.length < R.minSamples) {
+    return { basis: "GLOBAL", productId, lookbackDays: R.lookbackDays, samples: clean.length, reason: `Mã chỉ có ${clean.length} mẩu QC có tin nhắn trong ${R.lookbackDays} ngày (cần ${R.minSamples}) — dùng luật chung của lô.` };
+  }
+  const p75 = Math.round(quantile(clean, R.killQuantile) as number);
+  const med = Math.round(quantile(clean, R.keepQuantile) as number);
+  const vnd = (n: number) => `${n.toLocaleString("vi-VN")}đ`;
+  return {
+    basis: "PRODUCT_HISTORY",
+    productId,
+    lookbackDays: R.lookbackDays,
+    samples: clean.length,
+    p75CostPerMessageVnd: p75,
+    medianCostPerMessageVnd: med,
+    killRules: [{ metric: "costPerMessage", op: "gt", value: p75, minSpendVnd: R.killMinSpendVnd, label: `Chi/tin nhắn tệ hơn p75 lịch sử của mã (${vnd(p75)})` }],
+    keepRules: [{ metric: "costPerMessage", op: "lte", value: med, minSpendVnd: 0, label: `Chi/tin nhắn ≤ trung vị lịch sử của mã (${vnd(med)})` }],
+  };
+}
+
+/** Đọc `rules_snapshot` (JSON không tin được). Hỏng / rỗng ⇒ `null` (ô không có luật riêng). */
+export function parseVariantRules(raw: unknown): VariantRulesSnapshot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const n = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+  const productId = typeof r.productId === "string" ? r.productId : "";
+  const lookbackDays = n(r.lookbackDays) ?? MOCKUP_RULES.lookbackDays;
+  const samples = n(r.samples) ?? 0;
+  if (r.basis === "GLOBAL") return { basis: "GLOBAL", productId, lookbackDays, samples, reason: typeof r.reason === "string" ? r.reason : "" };
+  if (r.basis !== "PRODUCT_HISTORY") return null;
+  const rules = (x: unknown) => (Array.isArray(x) ? x.map(parseRule).filter((y): y is CreativeRule => y !== null) : []);
+  const killRules = rules(r.killRules);
+  const keepRules = rules(r.keepRules);
+  const p75 = n(r.p75CostPerMessageVnd);
+  const med = n(r.medianCostPerMessageVnd);
+  // Luật riêng hỏng KHÔNG rơi về "không luật" (mẫu chạy hết tiền) mà về luật chung của lô: nơi gọi nhận `null`.
+  if (killRules.length === 0 || keepRules.length === 0 || p75 === null || med === null) return null;
+  return { basis: "PRODUCT_HISTORY", productId, lookbackDays, samples, p75CostPerMessageVnd: p75, medianCostPerMessageVnd: med, killRules, keepRules };
+}
+
+/**
+ * Bộ luật dùng cho MỘT ô: luật riêng của ô nếu có (`PRODUCT_HISTORY`), không thì luật chung của lô.
+ * Hàm THUẦN — lượt chấm, màn hình và đường TẮT (`pauseCreativeVariant`) đều đi qua đây.
+ */
+export function variantRuleSet(rulesSnapshotRaw: unknown, batch: { killRules: CreativeRule[]; keepRules: CreativeRule[] }): { killRules: CreativeRule[]; keepRules: CreativeRule[]; own: boolean } {
+  const r = parseVariantRules(rulesSnapshotRaw);
+  return r && r.basis === "PRODUCT_HISTORY" ? { killRules: r.killRules, keepRules: r.keepRules, own: true } : { killRules: batch.killRules, keepRules: batch.keepRules, own: false };
 }

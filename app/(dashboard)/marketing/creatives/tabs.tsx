@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
  */
 export const CREATIVE_TABS = [
   { value: "duyet", label: "Duyệt lô" },
+  { value: "thiet-ke", label: "Thiết kế mới" },
   { value: "dang-chay", label: "Đang chạy" },
   { value: "thu-vien", label: "Thư viện mẫu thắng" },
   { value: "hoc", label: "Máy đã học gì" },

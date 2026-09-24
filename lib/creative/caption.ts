@@ -54,6 +54,11 @@ export type CaptionInput = {
   /** Câu chữ đang có (nháp của máy viết, hoặc câu người đã sửa). `null` = chưa có. */
   draft: { headline: string; primaryText: string } | null;
   winningExamples: { primaryText: string; headline: string }[];
+  /**
+   * Ghi chú về sản phẩm cho người viết — ô THIẾT KẾ MỚI (`DESIGN`) dùng để nói "đây là mẫu MỚI của shop,
+   * mã TK-…" (chủ shop 24/09/2026). Không đổi luật giá: giá vẫn chỉ là `product.priceVnd`.
+   */
+  productNote?: string;
   /** Số phương án xin (1…3). Đường sinh xin 1; nút gợi ý xin 3. */
   options?: number;
 };
@@ -188,6 +193,7 @@ function briefOf(input: CaptionInput, priceVnd: number | null, n: number): strin
     `Viết ${n} phương án câu chữ cho ảnh quảng cáo đính kèm.`,
     `Sản phẩm: ${input.product.name} (mã ${input.product.code || "không rõ"})`,
     `Giá bán ERP: ${priceVnd !== null ? formatVnd(priceVnd) : "KHÔNG RÕ — không được viết con số giá nào"}`,
+    input.productNote ? input.productNote : "",
     genes ? `Ý đồ của mẫu (tham khảo — ảnh thật mới là căn cứ, ảnh khác ý đồ thì theo ảnh):\n${genes}` : "",
     input.draft && (input.draft.headline || input.draft.primaryText) ? `Câu chữ nháp viết TRƯỚC khi có ảnh (có thể không khớp ảnh — sửa theo ảnh):\nTiêu đề: ${input.draft.headline}\nCâu chữ: ${input.draft.primaryText}` : "",
     examples ? `Câu chữ của các mẫu đã thắng (tham khảo giọng văn, không chép nguyên văn):\n${examples}` : "",

@@ -74,7 +74,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Vòng mẫu quảng cáo",
     source: "ALL",
     description:
-      "Một lượt của vòng mẫu: đánh dấu lô quá hạn duyệt, đăng lô đã duyệt (trong trần 10 mẫu × 200.000đ), chấm mẫu đang chạy và tắt mẫu phạm luật tắt của lô, rồi dựng + sinh ảnh cho lô ngày mai (dừng ở Chờ duyệt). Lũy đẳng — chạy lại không đẻ lô thứ hai.",
+      "Một lượt của vòng mẫu: đánh dấu lô quá hạn duyệt, đăng lô đã duyệt (trong trần 20 mẫu × 200.000đ — chủ shop 24/09), chấm mẫu đang chạy và tắt mẫu phạm luật tắt của lô, rồi dựng + sinh ảnh cho lô ngày mai (dừng ở Chờ duyệt). Lũy đẳng — chạy lại không đẻ lô thứ hai.",
     run: (o) =>
       runSyncJob({ source: "ERP", job: "creative-loop", trigger: o.trigger, actor: o.actor }, async (ctx) => {
         const r = await runCreativeLoopTick(await getDb(), new Date());

@@ -1,7 +1,7 @@
 import { ExternalLink, ImageIcon, ImageOff, Info } from "lucide-react";
 import { OwnAdImportDialog, PancakePhotoImportButton } from "@/app/(dashboard)/marketing/creatives/import-buttons";
 import { SourceForm } from "@/app/(dashboard)/marketing/creatives/source-form";
-import { SourceToggle } from "@/app/(dashboard)/marketing/creatives/source-toggle";
+import { MockupToggle, SourceToggle } from "@/app/(dashboard)/marketing/creatives/source-toggle";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
 import { UrlPagination } from "@/components/data-table/url-pagination";
 import { StatStrip } from "@/components/stat-tile";
@@ -18,7 +18,7 @@ import {
   type CreativeSourceKind,
 } from "@/lib/constants/creative-loop";
 import { formatNumber, formatTimeAgo, formatVND } from "@/lib/format";
-import { creativeSourceCounts, listCreativeProductOptions, listCreativeSources, type CreativeSourceRow } from "@/lib/queries/creative-sources";
+import { creativeSourceCounts, listCreativeProductOptions, listCreativeSources, readCreativeConfig, type CreativeSourceRow } from "@/lib/queries/creative-sources";
 import type { ListParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -87,11 +87,14 @@ function SourcesGuide({ canWrite }: { canWrite: boolean }) {
 }
 
 export async function SourcesTab({ params, canWrite }: { params: ListParams; canWrite: boolean }) {
-  const [list, counts, products] = await Promise.all([
+  const [list, counts, products, cfgState] = await Promise.all([
     listCreativeSources({ kinds: params.filters.loai ?? [], active: params.filters.bat ?? [], q: params.q, page: params.page, pageSize: params.pageSize }),
     creativeSourceCounts(),
     canWrite ? listCreativeProductOptions() : Promise.resolve([]),
+    readCreativeConfig(),
   ]);
+  const mockupSources = new Set(cfgState.config.mockupSourceIds);
+  const mockupProducts = new Set(cfgState.config.mockupProductIds);
 
   return (
     <div className="space-y-4">
@@ -209,6 +212,11 @@ export async function SourcesTab({ params, canWrite }: { params: ListParams; can
                   <SourceToggle key={`${r.id}-${r.active}`} id={r.id} active={r.active} canWrite={canWrite} />
                   <span className="truncate text-[11px] text-muted-foreground">{r.createdByName || "máy"}</span>
                 </div>
+                {r.kind === "OWN_AD" ? (
+                  <MockupToggle key={`m-${r.id}-${mockupSources.has(r.id)}`} kind="SOURCE" id={r.id} on={mockupSources.has(r.id)} canWrite={canWrite} />
+                ) : r.kind === "PRODUCT_PHOTO" && r.productId ? (
+                  <MockupToggle key={`m-${r.productId}-${mockupProducts.has(r.productId)}`} kind="PRODUCT" id={r.productId} on={mockupProducts.has(r.productId)} canWrite={canWrite} />
+                ) : null}
               </div>
             </div>
           ))}

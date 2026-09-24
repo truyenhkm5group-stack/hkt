@@ -3,6 +3,8 @@ import { chayKhongJit, schema, type Db } from "@/db";
 import {
   CREATIVE_CONFIG_KEY,
   normalizeCreativeConfig,
+  parseVariantRules,
+  variantRuleSet,
   type BatchStatus,
   type ConfigProblem,
   type CreativeLoopConfig,
@@ -10,6 +12,7 @@ import {
   type CreativeSourceKind,
   type CreativeVerdict,
   type SlotMode,
+  type VariantRulesSnapshot,
   type VariantStatus,
 } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
@@ -209,16 +212,20 @@ export type JudgeConfig =Pick<CreativeLoopConfig, "killRules" | "keepRules" | "w
  *  · LUẬT TẮT lấy từ `config_snapshot` CỦA LÔ. Lượt duyệt lô đã cho phép trước đúng bộ luật ấy (phiếu
  *    duyệt khoá cả luật tắt). Luật tắt thêm SAU khi duyệt là thứ người duyệt chưa từng thấy — để nó
  *    tự tắt mẫu của lô cũ là để một dòng JSON gõ lúc nửa đêm quyết thay lượt duyệt.
+ *  · Ô có LUẬT RIÊNG (`rules_snapshot`, ô mockup) ⇒ luật tắt VÀ luật giữ của chính ô.
  *  · LUẬT GIỮ, `winOrdersAbove`, `verdictSettleHours` lấy từ cấu hình HIỆN TẠI. Chúng chỉ quyết
  *    NHÃN (hứa hẹn / loại / thắng) và việc học, không chạm tiền: tiêu thêm vẫn phải người bấm. Chủ
  *    shop điền luật giữ sau khi lô đã chạy thì mẫu cũ vẫn được chấm — nếu đi theo snapshot, mọi lô
  *    dựng trước ngày điền luật mãi mãi là `UNJUDGED` và máy không học được gì từ chúng.
  */
-export function effectiveJudgeConfig(snapshotRaw: unknown, current: CreativeLoopConfig): JudgeConfig {
+export function effectiveJudgeConfig(snapshotRaw: unknown, current: CreativeLoopConfig, variantRulesRaw: unknown = null): JudgeConfig {
   const snap = normalizeCreativeConfig(snapshotRaw).config;
+  // Ô có LUẬT RIÊNG (mockup của mã cũ, chủ shop 24/09/2026): cả luật tắt lẫn luật giữ là của ô — chụp lúc
+  // lập lô và khoá trong phiếu duyệt. Không có ⇒ luật chung như trên.
+  const own = variantRuleSet(variantRulesRaw, { killRules: snap.killRules, keepRules: current.keepRules });
   return {
-    killRules: snap.killRules,
-    keepRules: current.keepRules,
+    killRules: own.killRules,
+    keepRules: own.keepRules,
     winOrdersAbove: current.winOrdersAbove,
     verdictSettleHours: current.verdictSettleHours,
   };
@@ -289,6 +296,23 @@ export type VariantCard = {
   libraryOrders: number | null;
   lostAt: string | null;
   createdAt: string;
+  designConceptId: string | null;
+  /** Luật riêng của ô (mockup của mã cũ). `null` = ô dùng luật chung của lô. */
+  rules: VariantRulesSnapshot | null;
+  /** Ô `DESIGN` ⇒ thiết kế mà mẩu quảng cáo. */
+  design: DesignCard | null;
+};
+
+/** Thiết kế của một ô `DESIGN` — đủ để người duyệt thấy mã, DNA, mã cha, giá đề nghị. */
+export type DesignCard = {
+  id: string;
+  code: string;
+  status: string;
+  dna: Record<string, string>;
+  parentProductIds: string[];
+  parentLabels: string[];
+  /** Giá đề nghị; `null` = không suy được (câu chữ không ghi giá). */
+  priceVnd: number | null;
 };
 
 export type JudgedVariant = VariantCard & {
@@ -443,7 +467,7 @@ function toVariantCard(r: VariantJoined): VariantCard {
     id: v.id,
     batchId: v.batchId,
     slot: v.slot,
-    mode: v.mode === "EXPLOIT" || v.mode === "MANUAL" ? v.mode : "EXPLORE",
+    mode: v.mode === "EXPLOIT" || v.mode === "MANUAL" || v.mode === "DESIGN" ? v.mode : "EXPLORE",
     productId: v.productId,
     productName: r.productName ?? null,
     productPhotoSourceId: v.productPhotoSourceId,
@@ -475,7 +499,23 @@ function toVariantCard(r: VariantJoined): VariantCard {
     libraryOrders: v.libraryOrders,
     lostAt: iso(v.lostAt),
     createdAt: isoReq(v.createdAt),
+    designConceptId: v.designConceptId,
+    rules: parseVariantRules(v.rulesSnapshot),
+    design: null,
   };
+}
+
+/** Gắn thiết kế vào các thẻ ô `DESIGN` (một câu đọc cho cả lô). */
+async function withDesigns(db: Db, cards: VariantCard[]): Promise<VariantCard[]> {
+  const ids = [...new Set(cards.flatMap((c) => (c.mode === "DESIGN" && c.designConceptId ? [c.designConceptId] : [])))];
+  if (ids.length === 0) return cards;
+  const dc = schema.designConcepts;
+  const rows = await db.select({ id: dc.id, code: dc.code, status: dc.status, dna: dc.dna, parentProductIds: dc.parentProductIds, priceVnd: dc.priceVnd }).from(dc).where(inArray(dc.id, ids));
+  const parentIds = [...new Set(rows.flatMap((r) => r.parentProductIds))];
+  const prods = parentIds.length ? await db.select({ id: schema.products.id, name: schema.products.name, customId: schema.products.customId }).from(schema.products).where(inArray(schema.products.id, parentIds)) : [];
+  const labelOf = new Map(prods.map((p) => [p.id, p.customId || p.name]));
+  const byId = new Map(rows.map((r) => [r.id, { id: r.id, code: r.code, status: r.status, dna: { ...(r.dna ?? {}) }, parentProductIds: r.parentProductIds, parentLabels: r.parentProductIds.map((x) => labelOf.get(x) ?? x), priceVnd: r.priceVnd }]));
+  return cards.map((c) => (c.designConceptId && byId.has(c.designConceptId) ? { ...c, design: byId.get(c.designConceptId) ?? null } : c));
 }
 
 async function variantCountsByBatch(db: Db, batchIds: string[]): Promise<Map<string, Partial<Record<VariantStatus, number>>>> {
@@ -536,7 +576,7 @@ export function judgeLive(card: VariantCard, batch: Pick<BatchRow, "startAt" | "
       libraryAt: card.libraryAt ? new Date(card.libraryAt) : null,
       metrics,
     },
-    effectiveJudgeConfig(batch.configSnapshot, current),
+    effectiveJudgeConfig(batch.configSnapshot, current, card.rules),
     now,
   );
 }
@@ -593,7 +633,7 @@ export async function getPendingBatch(db: Db): Promise<PendingBatch | null> {
 
 async function pendingOf(db: Db, b: BatchRow): Promise<PendingBatch> {
   const rows = await variantQuery(db).where(eq(schema.creativeVariants.batchId, b.id)).orderBy(schema.creativeVariants.slot);
-  const variants = rows.map(toVariantCard);
+  const variants = await withDesigns(db, rows.map(toVariantCard));
   const counts: Partial<Record<VariantStatus, number>> = {};
   for (const v of variants) counts[v.status] = (counts[v.status] ?? 0) + 1;
   const { config, problems } = normalizeCreativeConfig(b.configSnapshot);
