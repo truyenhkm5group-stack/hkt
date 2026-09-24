@@ -191,10 +191,15 @@ function testContract() {
   const syncHigh = estimateImageUsd(m, "high", "1088x1360", "SYNC");
   assert.ok(Math.abs(batchHigh - syncHigh * IMAGE_BATCH_PRICE_FACTOR) < 1e-6, "Batch = 50% giá gọi ngay");
   assert.equal(estimateImageUsd(`${m}-2026-09-08`, "high", "1088x1360", "BATCH"), batchHigh, "bản chụp có hậu tố ngày cùng giá");
-  const lo = d.batchSize + d.extraCandidates;
+  // Lô MẶC ĐỊNH (chủ shop 24/09, lần hai) = các ô thiết kế + sinh dư; mockup cộng thêm tuỳ số mẫu được chọn.
+  const lo = d.designSlots + d.extraCandidates;
   assert.ok(batchHigh * lo <= CREATIVE_HARD_LIMITS.maxImageUsdPerDay, `một lô ${lo} ảnh cao qua Batch (${batchHigh * lo}) phải vừa trần 2 USD`);
   assert.ok(syncHigh * lo > CREATIVE_HARD_LIMITS.maxImageUsdPerDay, "gọi ngay chất lượng cao cả lô thì vượt trần — lý do vẽ nốt phải hạ chất lượng");
   assert.ok(estimateImageUsd(m, d.fallbackImageQuality, d.imageSize) * lo <= CREATIVE_HARD_LIMITS.maxImageUsdPerDay, "vẽ nốt cả lô ở mức vừa vẫn trong trần");
+  // Lô ĐẦY TRẦN (20 mẫu) ở cấu hình ĐANG CHẠY (gọi ngay · vừa · 4:5) vẫn vừa trần 2 USD. "Cao + Batch" với 20 ảnh thì
+  // KHÔNG vừa — máy chặn ô vượt bằng GEN_FAILED có lý do (không tiêu quá), và tab Cấu hình in cảnh báo.
+  const full = d.batchSize + d.extraCandidates;
+  assert.ok(estimateImageUsd(m, d.imageQuality, d.imageSize, d.imageMode) * full <= CREATIVE_HARD_LIMITS.maxImageUsdPerDay, `lô đầy ${full} ảnh ở cấu hình đang chạy phải vừa trần ngày`);
   const unknown = estimateImageUsd("mo-hinh-la", "high", "1088x1360");
   for (const k of Object.keys(IMAGE_MODEL_TOKEN_PRICE_PER_MTOK)) assert.ok(unknown >= estimateImageUsd(k, "high", "1088x1360"), `mô hình lạ phải ước tính ≥ ${k}`);
   assert.ok(estimateImageUsd(m, "high", "1024x1536") > estimateImageUsd(m, "high", "1024x1024"), "khổ lớn hơn đắt hơn");
@@ -327,7 +332,8 @@ export async function testCreativeImageBatch(db: Db) {
   const startedAt = new Date();
   const batchDay = shiftDay(vnDay(startedAt), 1);
   // Khối này kiểm ĐƯỜNG BATCH ⇒ khai tường minh, không dựa vào mặc định (mặc định là gọi ngay từ khi chủ shop chốt lại).
-  const baseCfg = { ...DEFAULT_CREATIVE_CONFIG, enabled: true, batchSize: 3, extraCandidates: 1, exploreShare: 0.5, imageMode: "BATCH" as const, imageQuality: "high" as const };
+  // Không ô THIẾT KẾ ở đây: 1 mockup của mã (mẫu thắng của vòng) + 3 thăm dò = 4 ô, như lô cũ.
+  const baseCfg = { ...DEFAULT_CREATIVE_CONFIG, enabled: true, batchSize: 3, extraCandidates: 1, designSlots: 0, exploreSlots: 3, mockupProductIds: [`${P}prod`], imageMode: "BATCH" as const, imageQuality: "high" as const };
   const w = batchWindow(batchDay, baseCfg);
   // 14:01 giờ VN của HÔM NAY — cùng ngày Việt Nam với `created_at` mà CSDL sắp ghi (trần ngày đếm trên nó).
   const now = new Date(w.buildFrom.getTime() + 60_000);

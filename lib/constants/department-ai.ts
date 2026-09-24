@@ -211,8 +211,8 @@ export const AGENTS: Record<AgentZone, AgentSpec> = {
       },
       ACT: {
         status: "PARTIAL",
-        what: "Đường ghi ngân sách / bật tắt chiến dịch đã dựng, qua bảy hàng rào và hai bước bấm, có trần thay đổi và phanh. Công tắc máy chủ `ADS_WRITE_ENABLED=true`, nấc `COPILOT` bật từ 22/09/2026; ERP tự hỏi Facebook token có `ads_management` không (tab Cấu hình vòng mẫu, `/ads`, `check-integrations`).",
-        evidence: ["lib/marketing/ads-write-gate.ts", "lib/constants/ads-write.ts", "lib/constants/fb-token-scopes.ts"],
+        what: "Đường ghi ngân sách / bật tắt chiến dịch đã dựng, qua bảy hàng rào và hai bước bấm, có trần thay đổi và phanh. Công tắc máy chủ `ADS_WRITE_ENABLED=true`, nấc `COPILOT` bật từ 22/09/2026; ERP tự hỏi Facebook token có `ads_management` không (tab Cấu hình vòng mẫu, `/ads`, `check-integrations`). Từ 24/09/2026 có thêm LÀN NHANH: tăng ngân sách trong ngày theo số HÔM NAY (%CPQC ≤ 15% doanh số chốt, chi ≥ 300k, ≥ 3 đơn, +20%/lượt, cách 2 giờ, tối đa 3 lượt/ngày — ngưỡng chủ shop chốt), không chờ sổ quyết định chín.",
+        evidence: ["lib/marketing/ads-write-gate.ts", "lib/constants/ads-write.ts", "lib/constants/fb-token-scopes.ts", "lib/constants/ads-intraday.ts", "lib/queries/ads-intraday.ts"],
         missing:
           "CHƯA CÓ MỘT LƯỢT GHI THẬT NÀO: đo production 24/09/2026, sổ `ads_budget_changes` và `creative_fb_actions` đều TRỐNG — kể cả lượt bị từ chối. Chủ shop báo token đã có quyền; nấc này chỉ lên 'đang chạy' khi sổ có một lượt ghi THÀNH CÔNG (bấm 'Xác nhận' ở ô Bàn tay trên một dòng đã chín), không lên vì một lời kể.",
       },

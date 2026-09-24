@@ -4,8 +4,12 @@
 > `docs/marketing-ai-department.md`. Cập nhật: **24/09/2026** · **ĐÃ DỰNG ĐỦ vòng** (sinh · đăng · đo ·
 > chấm · học · màn hình) — **CHƯA CHẠY THẬT**: chờ các việc của chủ shop ở §7.
 >
-> Hợp đồng mã nguồn: `lib/constants/creative-loop.ts` (mọi con số, mọi trần, từ vựng gen).
-> Hàm thuần: `lib/creative/{plan,judge,learn,schedule}.ts`. Kiểm thử: `tests/creative-loop.test.ts`.
+> Hợp đồng mã nguồn: `lib/constants/creative-loop.ts` (mọi con số, mọi trần, từ vựng gen, từ vựng DNA).
+> Hàm thuần: `lib/creative/{plan,design,judge,learn,schedule}.ts`. Kiểm thử: `tests/creative-loop.test.ts`,
+> `tests/creative-design.test.ts`.
+>
+> **24/09/2026 (lần hai): lô = 10 THIẾT KẾ SẢN PHẨM MỚI + 1 mockup cho mỗi mẫu thắng chủ shop chọn; trần 20
+> mẫu / 4.000.000đ mỗi ngày chạy — §5f.**
 
 ---
 
@@ -38,13 +42,14 @@ Ba điều tôi (người dựng) suy ra từ các câu chốt, cần chủ shop
 ## 1. Vòng một ngày (giờ Việt Nam)
 
 ```
-14:00 hôm trước  LẬP LÔ   planBatch()  — 10 + 3 ô dự phòng, hạt giống = ngày chạy (chạy lại ra đúng lô cũ)
+14:00 hôm trước  ĐỌC DNA  vài mã còn thiếu DNA (mô hình đọc ảnh, §5f)
+                 LẬP LÔ   composeDailyBatch() — 10 ô THIẾT KẾ MỚI + 1 mockup / mẫu thắng được chọn, hạt giống = ngày chạy
                  VIẾT     LLM viết câu lệnh ảnh (EN) + câu chữ + tiêu đề (VI) cho từng ô
                  SINH     gpt-image SỬA ảnh sản phẩm THẬT theo câu lệnh — không vẽ sản phẩm từ con số 0
                           (mặc định gửi cả lô qua Batch API, rẻ 50% — §5e)
 02:00            VẼ NỐT   Batch còn chưa xong ⇒ huỷ, ô thiếu ảnh vẽ bằng gọi ngay ở chất lượng vừa (§5e)
                  ⇒ lô "Chờ duyệt", báo Lark/Telegram
-tối / sáng sớm   NGƯỜI    xem 13 ảnh, gạt ảnh không ưng, bấm DUYỆT CẢ LÔ (thấy rõ tổng tiền, khung giờ, luật tắt)
+tối / sáng sớm   NGƯỜI    xem ảnh, gạt ảnh không ưng, bấm DUYỆT CẢ LÔ (thấy rõ tổng tiền, khung giờ, luật tắt + luật riêng từng ô)
 05:30            HẠN      chưa duyệt ⇒ lô "Quá hạn", KHÔNG một đồng nào được chi
 trước 06:00      ĐĂNG     mỗi mẫu: tải ảnh → bài ẩn trên fanpage → nhóm QC (trọn đời 200.000đ, 06:00→06:00) → mẩu QC
 06:00 → 06:00    CHẠY     Facebook tự dừng ở end_time — ERP chết giữa chừng cũng không tiêu quá ngân sách đã duyệt
@@ -66,10 +71,17 @@ mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của 
    là rủi ro bản quyền và là lý do Facebook khoá tài khoản.
 3. **Mọi ô có ảnh sản phẩm thật làm gốc.** Quảng cáo ra một chiếc váy không có trong kho thì đơn nào
    cũng thành đơn hoàn — tiền quảng cáo mua về tỷ lệ hoàn.
+   **Ngoại lệ có chủ đích — ô `DESIGN` (chủ shop 24/09/2026):** ô THIẾT KẾ MỚI quảng cáo một mẫu CHƯA SẢN
+   XUẤT; chủ shop tạo sản phẩm trên Pancake đúng mã `TK-…`, nhận đơn như hàng thường rồi mới sản xuất (shop
+   bán trước). Ranh giới 2 KHÔNG nới: ảnh tham chiếu vẫn chỉ là ảnh sản phẩm THẬT của mã cha (chất ảnh,
+   thương hiệu), `assertPixelSafe` vẫn đòi `PRODUCT_PHOTO`, câu lệnh dặn "thiết kế mới, KHÔNG sao chép mẫu
+   tham chiếu". Ô khai thác / thăm dò / tự làm giữ nguyên ranh giới 3.
 4. **Một cửa ghi Facebook.** Mọi lời gọi ghi nằm trong `lib/integrations/facebook/ads-write.ts`, qua
    cùng chốt cứng `ADS_WRITE_ENABLED` và nấc `COPILOT`. `tests/ads-write.test.ts` quét toàn kho.
 5. **Máy chỉ làm việc BÊN TRONG chiến dịch test do NGƯỜI dựng**, và chỉ đụng nhóm/mẩu do chính nó tạo.
-   Máy không tạo chiến dịch, không sửa đối tượng, không đụng quảng cáo của marketer.
+   Máy không tạo chiến dịch, không sửa đối tượng, không đụng quảng cáo của marketer. **Ngoại lệ duy
+   nhất, có chủ đích:** scale mẫu thắng (§5g) — máy SAO CHÉP một trong hai chiến dịch MẪU người dựng,
+   bản sao luôn TẮT, chỉ bật khi người duyệt.
 6. **Không nguồn tiền mới.** Chi đọc từ `ad_spends` hạt `AD` (đã đo khớp 0 đồng với hạt chiến dịch,
    `docs/ads-measurement-audit-2026-09-22.md` §4). Kết quả đơn đọc qua `ORDER_OUTCOME_FAST`. Không bảng
    nào của vòng mẫu được báo cáo lợi nhuận/lương đọc.
@@ -78,14 +90,14 @@ mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của 
 
 | Trần | Giá trị | Nguồn |
 |---|---|---|
-| Mẫu đăng mỗi lô | 10 | chủ shop 24/09 |
+| Mẫu đăng mỗi lô | 20 | chủ shop 24/09 (lần hai; trước đó 10) |
 | Ngân sách trọn đời một mẫu (khung test) | 200.000đ | chủ shop 24/09 |
 | Khung test | 1 ngày | chủ shop 24/09 |
-| Tổng cam kết test / ngày chạy | 2.000.000đ | = 10 × 200.000đ |
+| Tổng cam kết test / ngày chạy | 4.000.000đ | = 20 × 200.000đ, chủ shop 24/09 (lần hai) |
 | "Tiêu thêm" một lần bấm | 200.000đ | chủ shop 24/09 |
 | "Tiêu thêm" toàn shop / ngày | 1.000.000đ | chủ shop 24/09 |
 | Ảnh sinh / ngày | 30 | chặn vòng lặp hỏng |
-| Chi sinh ảnh / ngày | 2 USD | chủ shop 24/09 |
+| Chi sinh ảnh / ngày | 2 USD | chủ shop 24/09 — lô đầy 20 ảnh ở cấu hình đang chạy (gọi ngay · vừa · 4:5) ≈ 1,7 USD; ở "Cao + Batch" ≈ 2,2 USD thì ô vượt thành "Sinh ảnh lỗi" có lý do |
 
 Cấu hình (`settings` khoá `creative.config`) chỉ LÀM HẸP được, không nới. Trần tiền theo ngày đếm
 trên SỔ `creative_fb_actions` (lượt đã áp), không đếm trên cấu hình.
@@ -156,7 +168,7 @@ Chủ shop vẽ mẫu trên web ChatGPT / Grok (gói tháng, không có API cho 
 - Vào **lô gần nhất còn hạn duyệt** (`manualTargetDay`): trước 5:30 là lô hôm nay, sau đó là lô ngày mai.
 - Lô chưa có ⇒ dựng sẵn "Chờ duyệt" (`plan.manualSeed`). Tới 14:00 máy chỉ lập **phần còn thiếu**:
   `batchSize + extraCandidates − số mẫu tự làm`; ô máy đánh số 1…n, ô tự làm 1001+.
-- **Đăng trước** ô máy lập (`publishOrder`); trần 10 mẫu/lô không đổi — mẫu tự làm chiếm chỗ ô máy.
+- **Đăng trước** ô máy lập (`publishOrder`: tự làm → thiết kế mới → mockup → thăm dò); trần số mẫu/lô không đổi — mẫu tự làm chiếm chỗ ô máy lập.
 - Không qua máy viết / máy vẽ. Bắt buộc mã hàng + sáu gen (không có gen thì máy không học được gì từ mẫu).
 - Câu chữ ghi giá khác giá ERP ⇒ cảnh báo, không chặn. Người tải được quy kết bằng khoá tài khoản (mục 34).
 - Vẫn qua MỘT lượt duyệt lô; thêm mẫu sau khi mở hộp duyệt làm phiếu cũ mất hiệu lực (digest đổi).
@@ -252,6 +264,120 @@ Tệp: `lib/creative/{caption,copy-edit}.ts` · `lib/actions/creative-copy.ts` �
 Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `lib/creative/generate.ts` ·
 `lib/constants/creative-loop.ts` (giá) · `tests/creative-image-batch.test.ts`.
 
+## 5f. Thiết kế sản phẩm mới + mockup có luật riêng (chủ shop 24/09/2026, lần hai)
+
+*"Ngoài ảnh biến thể của mẫu cũ, thiết kế SẢN PHẨM MỚI (áo/váy chưa từng có) lấy DNA từ các mã đã bán tốt và
+các mẩu quảng cáo lịch sử có chỉ số tốt — mẫu mới PHẢI KHÁC các mẫu cũ. Thiết kế mới được quảng cáo và nhận đơn
+như hàng thường (sản xuất sau)."*
+
+**Lô mỗi ngày** (`composeDailyBatch`, hàm thuần, tất định theo ngày lô) = `designSlots` (10) ô **THIẾT KẾ MỚI**
++ 1 ô **MOCKUP** cho MỖI mẫu thắng chủ shop bật "Chạy mockup hằng ngày" (công tắc trên thẻ nguồn `OWN_AD` /
+thẻ ảnh sản phẩm thật ở tab Nguồn ảnh — `mockupSourceIds` / `mockupProductIds`, action `setDailyMockup`, quyền
+`ideas:write`, lưu qua đúng đường cấu hình) + `exploreSlots` (mặc định 0) ô thăm dò. Mỗi mẫu 200.000đ, mục
+tiêu tin nhắn — đường đăng qua mẩu mẫu / chiến dịch test không đổi. Thứ tự đăng **tự làm → thiết kế →
+mockup → thăm dò**; trần cắt ở cuối. `extraCandidates` = số ô THIẾT KẾ sinh dư (mặc định 0).
+
+**DNA** — từ vựng ĐÓNG `DESIGN_DNA_VOCAB` (nhóm hàng · dáng · độ dài · cổ · tay · chất liệu · hoạ tiết · họ màu ·
+chi tiết · phong cách), phiên bản riêng `DESIGN_DNA_VERSION`. DNA của mã đang có (kể cả mã đã gỡ có ảnh) đọc
+bằng mô hình đọc ảnh (`lib/creative/dna.ts`, route `creative.dna`, phanh tiền AI ngày, sổ `ai_interactions`),
+tối đa `PRODUCT_DNA_PER_BUILD` mã mỗi lượt dựng lô, ảnh: nguồn `PRODUCT_PHOTO` → `OWN_AD` gắn mã →
+`products.image`. Lũy đẳng (`product_dna`, một dòng mỗi mã); đọc hỏng thử lại sau 24 giờ; không có khoá API ⇒
+bỏ qua, không ghi gì.
+
+**Mã cha** (`loadDesignInputs`, chỉ đọc): đơn giao thành công / hoàn 90 ngày qua `ORDER_OUTCOME_FAST` (không
+viết điều kiện kết quả đơn thứ hai), nối đơn → mã qua `order_items.product_id` (bỏ quà tặng); chi / tin nhắn
+hạt `AD`. Đủ điều kiện khi ≥ 3 đơn giao HOẶC chi/tin < 4.000đ trên ≥ 5 tin — và có DNA. Điểm = giao × tỷ lệ
+giao (`designParentScore`). Các con số này là **đề xuất của người dựng** (`DESIGN_PARENT_RULES`).
+
+**Lập thiết kế** (`planDesigns`): cha trội (A, bắt buộc có ảnh sản phẩm thật) × mẹ (B), chọn có trọng số theo
+điểm; lai từng thuộc tính bằng lấy mẫu Thompson trên thống kê DNA của các thiết kế đã test (`dnaStats`, học
+như `learn.ts`); đột biến 25% mỗi thuộc tính (trừ nhóm hàng). **MỚI LẠ:** DNA phải khác MỌI mã đang có và MỌI
+thiết kế 30 ngày gần nhất ở ≥ 2 thuộc tính — thuộc tính CHƯA BIẾT không tính là khác. Không đủ ⇒ `shortfall`,
+không nhồi. Giá đề nghị = giá của A (một giá duy nhất), không suy được ⇒ `NULL` và câu chữ không ghi giá.
+
+**Bảng `design_concepts`** (migration `0120`): mã `TK-YYMMDD-NN` (duy nhất; chủ shop tạo sản phẩm Pancake
+đúng mã này), DNA, mã cha, lý do, ảnh đại diện, trạng thái `DRAFT · TESTING · WIN · LOSE · PRODUCTION`, giá đề
+nghị. Ô nối bằng `creative_variants.design_concept_id` (chế độ ô `DESIGN`). Trạng thái do lượt chấm đẩy tới
+(chỉ tiến); `PRODUCTION` chỉ NGƯỜI bấm (`setDesignProduction`). Số đơn của thiết kế = đơn mang `ad_id` của các
+mẩu mang nó (`variantMetrics`, chỉ đọc) — tab **Thiết kế mới**.
+
+**Sinh ảnh:** cùng mô hình / khổ / chất lượng của cấu hình; ảnh tham chiếu DUY NHẤT là ảnh sản phẩm thật của A;
+câu lệnh = mô tả thiết kế tất định theo DNA (`designPromptEn`) + chỉ thị gen + `NEW_DESIGN_CLAUSE` ("thiết kế
+mới, KHÔNG sao chép"). Gen quảng cáo của ô thiết kế luôn có người mẫu mặc (không `NONE`, không trải phẳng).
+Câu chữ qua `writer` + `caption` hiện có, được báo "mẫu mới", giá = giá đề nghị.
+
+**Luật riêng theo mã cho ô mockup** (chủ shop 24/09; `MOCKUP_RULES`): lịch sử 60 ngày các mẩu QC hạt `AD` của
+chính mã (mẩu có tin nhắn) ⇒ **TẮT** khi chi/tin nhắn > p75 (sàn chi 50.000đ), **GIỮ** khi ≤ trung vị; dưới 5
+mẩu ⇒ luật chung của lô. Chụp vào `creative_variants.rules_snapshot` lúc lập lô; `judgeVariant` / lượt chấm
+dùng luật của ô (`effectiveJudgeConfig`); **phiếu duyệt khoá cả luật riêng từng ô** (`approvalDigest` — ô
+không có luật riêng thì digest y như cũ); đường tắt (`applyKills` → `pauseCreativeVariant`) chấp nhận luật
+riêng của ô như luật thuộc lô.
+
+Tệp: `lib/creative/{design,dna}.ts` · `composeDailyBatch` trong `lib/creative/plan.ts` ·
+`lib/queries/creative-design.ts` · `lib/actions/creative-design.ts` · `design-tab.tsx` · `drizzle/0120_creative_design_concepts.sql` ·
+`tests/creative-design.test.ts`.
+
+## 5g. Scale mẫu thắng — chiến dịch NHÁP chờ duyệt (chủ shop quyết 24/09/2026)
+
+*"Mẫu test thắng thì: scale ngân sách, scale camp, scale nhóm, chạy mục tiêu tối đa hoá lượt mua qua tin
+nhắn và khách hàng tiềm năng (tạo bản nháp chờ duyệt)."* Ngân sách đề nghị ban đầu **500.000đ/ngày mỗi
+chiến dịch nháp**. Vẫn nấc `COPILOT`: máy DỰNG nháp đang TẮT, NGƯỜI bấm duyệt thì mới BẬT.
+
+**Đây là NGOẠI LỆ có chủ đích với ranh giới §2.5 ("máy không tạo chiến dịch").** Máy chỉ được có chiến
+dịch mới bằng đúng MỘT cách: **sao chép một trong hai chiến dịch MẪU do NGƯỜI dựng** (id khai ở
+`creative.config.scaleTemplates`). Máy không tạo chiến dịch từ số không, không đổi đối tượng / mục tiêu /
+biểu mẫu — chép NGUYÊN; chỉ thay BÀI QUẢNG CÁO (ảnh + câu chữ của mẫu thắng) và NGÂN SÁCH NGÀY.
+
+Luồng:
+
+```
+lượt chấm   mẫu THẮNG / HỨA HẸN ⇒ 2 dòng PROPOSED (mua qua tin nhắn · khách tiềm năng) — 0 lời gọi Facebook
+            ⇒ MỘT tin Lark/Telegram cho các đề nghị chưa báo (đóng dấu notified_at khi gửi được)
+người bấm   "Dựng nháp" ⇒ đọc chiến dịch mẫu (đúng 1 nhóm + 1 mẩu, đúng mục tiêu, ngân sách NGÀY)
+            ⇒ POST /{mẫu}/copies  deep_copy=true · status_option=PAUSED · rename_options (tiền tố "[VM scale …]")
+            ⇒ đọc bản sao (phải TẮT; lỡ đang bật ⇒ tắt ngay, dừng) ⇒ tạo bài từ ảnh + câu chữ mẫu thắng theo khuôn
+              bài của bản sao ⇒ gắn vào mẩu (POST /{ad} creative) ⇒ đặt daily_budget ĐÚNG CẤP (CBO: chiến dịch,
+              ABO: nhóm — đọc từ bản sao) ⇒ DRAFT, vẫn TẮT
+người bấm   "Duyệt chạy" (hai bước: đề nghị → phiếu HMAC → áp) ⇒ tính lại, đọc LẠI bản sao trên Facebook
+            (ai sửa bài/ngân sách trên Ads Manager sau khi phát phiếu ⇒ không bật) ⇒ bật mẩu → nhóm → CHIẾN DỊCH cuối
+người bấm   "Tắt" (chỉ làm giảm tiền, công tắc khẩn cấp vẫn cho đi) · "Bỏ qua" đề nghị / nháp hỏng
+```
+
+| Trần / luật | Giá trị | Nguồn |
+|---|---|---|
+| Ngân sách ngày một chiến dịch scale | ≤ 500.000đ (cả CHECK ở CSDL) | chủ shop 24/09 |
+| Tổng ngân sách ngày các chiến dịch scale ĐANG BẬT (`ACTIVE`) | ≤ 5.000.000đ | **ĐỀ XUẤT, CHỜ CHỦ SHOP CHỐT** |
+| Nháp mỗi mẫu thắng | ≤ 2 (một mỗi loại); khoá duy nhất (mẫu, loại) | chủ shop 24/09 |
+| Nguồn sao chép | CHỈ hai id mẫu đã khai (khác ⇒ `NOT_SCALE_TEMPLATE`) | ngoại lệ này |
+| Căn cứ | phán quyết SỐNG `WIN` hoặc `PROMISING` (khác ⇒ `NOT_WINNER`) | §4 |
+
+Cổng `gateScaleWrite` (hàm thuần, thứ tự khoá bằng bài kiểm): `HARD_DISABLED → MODE_OFF →
+CONFIG_INCOMPLETE → NOT_APPROVED → APPROVAL_MISMATCH (bật) → NOT_SCALE_TEMPLATE (sao chép) → NOT_OUR_AD →
+[tắt dừng ở đây] → NOT_WINNER → SCALE_DUPLICATE → OVER_SCALE_BUDGET → OVER_SCALE_DAILY_CAP (bật)`.
+
+**Hỏng giữa chừng thì không có nửa nào đang chạy.** Bản sao sinh ra TẮT; mọi bước dựng nháp không bật gì;
+bước bật đi mẩu → nhóm → chiến dịch nên chiến dịch (công tắc tổng) chỉ bật khi hai bước trước đã xong. Dựng
+hỏng sau khi đã sao chép ⇒ `FAILED`, ô ghi id bản sao để người xoá tay, và KHÔNG dựng lại (mốc
+`copy_attempted_at` ghi TRƯỚC lời gọi sao chép: phản hồi rơi mất vẫn biết là có thể đã có bản sao mồ côi).
+
+Tham số Graph API (đọc 24/09/2026): `developers.facebook.com/docs/marketing-api/reference/ad-campaign-group/copies/`
+(`deep_copy` — đồng bộ khi ≤ 3 mẩu con, nên mẫu phải có đúng 1 mẩu; `status_option` ACTIVE · PAUSED ·
+INHERITED_FROM_SOURCE; `rename_options`; trả `copied_campaign_id` + `ad_object_ids`) và
+`…/reference/adgroup/` (cập nhật `creative` của mẩu). Không có `copied_campaign_id` ⇒ không đoán, ghi FAILED.
+
+Tệp: `lib/creative/scale.ts` (đường ghi) · `lib/integrations/facebook/ads-write.ts` (sáu hàm mới) ·
+`gateScaleWrite` trong `lib/marketing/creative-write-gate.ts` · `lib/queries/creative-scale.ts` ·
+`lib/actions/creative-scale.ts` · khối "Scale mẫu thắng" ở tab Đang chạy (`scale-panel.tsx`,
+`scale-actions.tsx`) · ô cấu hình ở tab Cấu hình · `drizzle/0121_creative_scale_drafts.sql` ·
+`tests/creative-scale.test.ts`.
+
+**Chủ shop phải dựng trên Ads Manager (hai chiến dịch mẫu):** mỗi chiến dịch ĐÚNG một nhóm + một mẩu, để
+TẮT; ngân sách NGÀY (CBO hoặc ABO đều được, không dùng trọn đời); fanpage của nhóm = fanpage đã khai.
+(1) *Tối đa lượt mua qua tin nhắn*: mục tiêu **Doanh số** (`OUTCOME_SALES`), vị trí chuyển đổi **Ứng
+dụng nhắn tin**, mục tiêu hiệu quả tối đa lượt mua qua tin nhắn, mẩu ảnh đơn nút "Gửi tin nhắn".
+(2) *Khách hàng tiềm năng*: mục tiêu **Khách hàng tiềm năng** (`OUTCOME_LEADS`), biểu mẫu tức thì đã
+tạo sẵn, mẩu ảnh đơn nút đăng ký. Rồi dán hai id chiến dịch vào tab Cấu hình → "Scale mẫu thắng".
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |
@@ -283,6 +409,10 @@ Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `l
   tiêu tiền, nhưng ERP không biết nó). Tên nhóm mang ngày lô + số ô để tra tay.
 - Các hàm ghi mới chưa từng chạy trên Facebook thật — lượt đầu nên là MỘT lô nhỏ (`batchSize` 2–3).
 - Chi phí đọc ảnh / viết chữ bằng model OpenAI in "CHƯA BIẾT" vì bảng giá AI của kho chỉ có Claude.
+- Scale (§5g): lời bật CHIẾN DỊCH mà phản hồi rơi mất sau khi Facebook đã bật ⇒ ERP ghi "nháp" trong khi
+  chiến dịch đang chạy (đã được người duyệt, nhưng trần tổng đang bật đếm THIẾU nó). Người tắt / đổi
+  ngân sách chiến dịch scale trực tiếp trên Ads Manager thì ERP không biết — trần tổng đếm theo bảng nháp.
+  `/copies` chưa từng gọi Facebook thật: tham số lấy từ tài liệu, kiểm thử chạy trên cửa ghi giả.
 - Đường Batch ảnh (§5e) chưa từng gọi OpenAI thật: tên trường lấy từ tài liệu, kiểm thử chạy trên OpenAI giả.
   Số token mỗi ảnh của gpt-image-2.x là ước tính (OpenAI chưa công bố bảng) — đối chiếu `gen_cost_usd` thật
   sau lô đầu.
@@ -298,6 +428,9 @@ Tệp: `lib/integrations/openai/batch.ts` · `lib/creative/image-batch.ts` · `l
 | Bật `enabled` ở tab Cấu hình | công tắc mềm của vòng |
 | Bấm **Nhập ảnh sản phẩm từ Pancake** (hoặc tải tay ảnh sản phẩm thật) cho các mã muốn test | máy không sinh mẫu cho sản phẩm nó không nhìn thấy |
 | Bấm **Nhập mẫu thắng / mẫu tốt từ Facebook** (token hiện có `ads_read` là đủ — chỉ GET) | chọn mẩu nào làm mẫu cha là việc của người |
+| Bật **Chạy mockup hằng ngày** trên thẻ các mẫu thắng muốn chạy mockup (tab Nguồn ảnh) | chọn mẫu nào chạy mockup là quyết định của chủ shop (24/09) |
+| Tạo sản phẩm trên Pancake đúng mã **TK-…** của thiết kế được duyệt (tab Thiết kế mới) | nhân viên chốt đơn thiết kế mới như hàng thường; máy không ghi vào Pancake |
+| Dựng **hai chiến dịch MẪU scale** (§5g) và dán id vào tab Cấu hình; **chốt trần tổng 5.000.000đ/ngày** các chiến dịch scale đang bật (đang là ĐỀ XUẤT) | máy chỉ sao chép, không tự dựng mục tiêu / biểu mẫu; trần tiền là quyết định kinh doanh |
 | ~~Chốt ba con số "đề xuất" ở §3~~ — **ĐÃ CHỐT 24/09/2026** (`b32a1fac`: 200.000đ/lượt · 1.000.000đ/ngày · 2 USD/ngày) | ngưỡng tiền |
 
 ## 8. BLOCKED / HUMAN GATE

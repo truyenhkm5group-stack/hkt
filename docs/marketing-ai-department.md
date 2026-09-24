@@ -238,6 +238,10 @@ trường ai đó gõ lúc nửa đêm.
 (từ `CUT`). `FIX_DELIVERY` **cố ý không** nối vào bàn tay — sửa khâu giao là việc của kho và CSKH;
 nối nó vào một nút đổi tiền là chữa sai bệnh, đúng thứ `FIX_DELIVERY` sinh ra để ngăn.
 
+> **Ngoại lệ có chủ đích (24/09/2026): scale mẫu thắng** — vòng mẫu được "tạo chiến dịch" theo đúng
+> MỘT cách: SAO CHÉP chiến dịch MẪU người dựng, bản sao TẮT, bật khi người duyệt. Bảy hàng rào ở trên
+> vẫn áp nguyên (cùng cửa ghi, cùng chốt env, cùng phiếu HMAC). Chi tiết: `docs/creative-loop.md` §5g.
+
 **Thứ tự các chốt là một phần của thiết kế**, và bài kiểm khoá nó lại: chốt cứng đứng trước tất cả,
 rồi tới phanh — vì phanh nói về SỨC KHOẺ CỦA CHÍNH LUẬT, và một luật đang sai thì khuyến nghị "đã
 chín" của nó cũng không đáng tin.
@@ -269,6 +273,31 @@ chín" của nó cũng không đáng tin.
 bấm mà bỏ qua bảy hàng rào trên là dựng một nút giả thứ hai — lần này là nút giả tiêu được tiền.
 
 ---
+
+### 5b. Làn nhanh — tăng ngân sách trong ngày (chủ shop chốt 24/09/2026)
+
+Chủ shop: *"cứ ads rẻ, chỉ số tốt là có thể quyết định tăng ngân sách, scale camp theo khung giờ được
+luôn rồi chứ không phải theo ngày nữa."* Đo production cùng ngày: sổ quyết định bắt đầu ghi 22/09 nên
+chưa dòng nào kịp "chín" (TĂNG cần giữ 4 ngày), và kết luận của sổ đứng trên kỳ lùi 15 ngày
+(27/08 → 09/09) — 586/594 chiến dịch là "chưa đủ dữ liệu".
+
+Làn nhanh không thay làn sổ quyết định — nó hỏi một câu khác, bằng số HÔM NAY:
+
+| Ngưỡng (chủ shop chốt qua bốn câu hỏi) | Giá trị |
+|---|---|
+| "Rẻ, tốt" | %CPQC hôm nay ≤ **15%** doanh số CHỐT hôm nay |
+| Mẫu tối thiểu | chi ≥ **300.000đ** và ≥ **3** đơn chốt |
+| Bước · nhịp | **+20%**/lượt · hai lượt cách ≥ **2 giờ** · tối đa **3** lượt/ngày (mọi làn cộng lại) |
+| Ai quyết | máy đề nghị, **người bấm** xác nhận (nấc `COPILOT`) |
+
+- Luật: `lib/constants/ads-intraday.ts`. Cổng: `gateIntradayScale` (`lib/marketing/ads-write-gate.ts`).
+  Số hôm nay đọc từ ĐÚNG engine của bảng quyết định (`getAdsDecision` kỳ "Hôm nay").
+- Giữ NGUYÊN mọi chốt của đường ghi: `ADS_WRITE_ENABLED`, nấc quyền, phanh, chiến dịch phải `ACTIVE`,
+  phiếu duyệt HMAC (tool riêng `ads.budget.intraday`), trần biên độ 30%/lượt, trần 2.000.000đ/ngày cả shop.
+- CHỈ TĂNG. Cắt / tạm dừng vẫn chỉ đi qua làn sổ quyết định, nơi kết luận đứng trên tiền thật.
+- Rủi ro đã biết: doanh số chốt chưa trừ hoàn. Bù bằng bước nhỏ, trần lượt, và phanh.
+- Màn hình: khối "Tăng ngân sách trong ngày" đầu trang `/ads`. Mọi lượt (kể cả bị chặn) vào
+  `ads_budget_changes` với `decision = 'SCALE_INTRADAY'`.
 
 ## 6. Nấc 4 — NỘI DUNG (đang dựng — xem `docs/creative-loop.md`)
 

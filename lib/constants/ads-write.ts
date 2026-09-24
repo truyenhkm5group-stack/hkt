@@ -106,6 +106,14 @@ export const ADS_WRITE_LIMITS = {
  * chặn của nó nằm ở `lib/constants/creative-loop.ts` (`CREATIVE_WRITE_ACTIONS`, `CREATIVE_HARD_LIMITS`),
  * cổng ở `lib/marketing/creative-write-gate.ts`, lời gọi vẫn ở cùng MỘT cửa ghi. Ngoại lệ ấy KHÔNG
  * mở rộng hai hành động dưới đây: bàn tay Nấc 3 vẫn không sửa creative và không tạo gì.
+ *
+ * NGOẠI LỆ THỨ HAI, CÓ CHỦ ĐÍCH — SCALE MẪU THẮNG (chủ shop quyết 24/09/2026, `docs/creative-loop.md` §5g):
+ * "tạo chiến dịch" được phép theo ĐÚNG MỘT cách — SAO CHÉP một trong hai chiến dịch MẪU do NGƯỜI dựng
+ * (id khai ở `creative.config.scaleTemplates`), bản sao LUÔN ở trạng thái TẮT (`status_option=PAUSED`),
+ * chỉ thay bài quảng cáo bằng mẫu thắng và đặt ngân sách ngày ≤ 500.000đ; BẬT chỉ khi người bấm "Duyệt
+ * chạy" với phiếu HMAC khoá đúng (chiến dịch nháp · ngân sách · bài). Máy vẫn KHÔNG tạo chiến dịch từ
+ * số không, không đổi đối tượng / mục tiêu. Hành động: `*_SCALE*` trong `CREATIVE_WRITE_ACTIONS`; cổng
+ * `gateScaleWrite`; lời gọi vẫn ở cùng MỘT cửa ghi.
  */
 export type AdsWriteAction = "SET_DAILY_BUDGET" | "PAUSE_CAMPAIGN";
 
@@ -194,7 +202,9 @@ export type AdsWriteDenial =
   | "DAILY_CAP"
   | "CAMPAIGN_RATE_LIMIT"
   | "BELOW_MIN_BUDGET"
-  | "BRAKE_ON";
+  | "BRAKE_ON"
+  | "INTRADAY_NOT_ELIGIBLE"
+  | "INTRADAY_RATE_LIMIT";
 
 export const ADS_WRITE_DENIAL_REASON: Record<AdsWriteDenial, string> = {
   HARD_DISABLED: "Đường ghi quảng cáo đang TẮT ở cấp máy chủ (ADS_WRITE_ENABLED). Đây là chốt ngoài cùng, không mở được từ giao diện hay từ bảng settings.",
@@ -216,4 +226,6 @@ export const ADS_WRITE_DENIAL_REASON: Record<AdsWriteDenial, string> = {
   CAMPAIGN_RATE_LIMIT: `Chiến dịch này đã đổi ${ADS_WRITE_LIMITS.maxChangesPerCampaignPerDay} lần trong 24 giờ.`,
   BELOW_MIN_BUDGET: `Sẽ hạ ngân sách xuống dưới sàn ${ADS_WRITE_LIMITS.minDailyBudgetVnd.toLocaleString("vi-VN")}đ. Muốn dừng hẳn thì tạm dừng chiến dịch, đó là một hành động khác.`,
   BRAKE_ON: `PHANH ĐANG BẬT: ${ADS_WRITE_LIMITS.brakeConsecutiveWorse} lượt đổi gần nhất đều làm lợi nhuận góp sau quảng cáo đi xuống. Đường ghi dừng cho tới khi người xem lại.`,
+  INTRADAY_NOT_ELIGIBLE: "Số của HÔM NAY chưa đạt ngưỡng tăng trong ngày chủ shop đã chốt (%CPQC trên doanh số chốt, chi tối thiểu, số đơn tối thiểu).",
+  INTRADAY_RATE_LIMIT: "Chiến dịch đã chạm nhịp tăng trong ngày (số lượt tối đa, hoặc chưa đủ khoảng cách giờ từ lượt trước).",
 };

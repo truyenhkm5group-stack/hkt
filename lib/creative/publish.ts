@@ -7,6 +7,7 @@ import {
   CREATIVE_WRITE_DENIAL_REASON,
   PUBLISH_REQUIRED_FIELDS,
   normalizeCreativeConfig,
+  variantRuleSet,
   type CreativeLoopConfig,
   type CreativeRule,
   type CreativeWriteAction,
@@ -120,7 +121,7 @@ type VariantRow = typeof T.creativeVariants.$inferSelect;
 export async function batchApprovalContent(db: Db, batch: Pick<BatchRow, "id" | "batchDay" | "startAt" | "endAt" | "configSnapshot">): Promise<ApprovalContent> {
   const cfg = batchConfig(batch.configSnapshot);
   const rows = await db
-    .select({ id: T.creativeVariants.id, primaryText: T.creativeVariants.primaryText, headline: T.creativeVariants.headline, sha256: T.creativeImages.sha256 })
+    .select({ id: T.creativeVariants.id, primaryText: T.creativeVariants.primaryText, headline: T.creativeVariants.headline, rules: T.creativeVariants.rulesSnapshot, sha256: T.creativeImages.sha256 })
     .from(T.creativeVariants)
     .leftJoin(T.creativeImages, eq(T.creativeImages.id, T.creativeVariants.imageId))
     .where(and(eq(T.creativeVariants.batchId, batch.id), inArray(T.creativeVariants.status, DIGEST_STATUSES)));
@@ -130,7 +131,7 @@ export async function batchApprovalContent(db: Db, batch: Pick<BatchRow, "id" | 
     endAt: batch.endAt,
     budgetPerVariantVnd: cfg.budgetPerVariantVnd,
     killRules: cfg.config.killRules,
-    variants: rows.map((r) => ({ id: r.id, imageSha256: r.sha256 ?? "", primaryText: r.primaryText, headline: r.headline })),
+    variants: rows.map((r) => ({ id: r.id, imageSha256: r.sha256 ?? "", primaryText: r.primaryText, headline: r.headline, rules: r.rules ?? null })),
   };
 }
 
@@ -634,7 +635,9 @@ export async function pauseCreativeVariant(db: Db, req: PauseRequest, now: Date,
   const adsetId = v.fbAdsetId ?? "";
   const ourAdset = !!v.fbAdsetId && (req.adsetId === undefined || req.adsetId === v.fbAdsetId) && (req.batchId === undefined || req.batchId === v.batchId);
   const rule = req.rule ?? null;
-  const killRuleFired = req.kind === "KILL_RULE" && rule !== null && cfg.config.killRules.some((r) => sameRule(r, rule));
+  // Luật tắt THUỘC LÔ = luật tắt của ảnh chụp lô, hoặc luật RIÊNG của ô (ô mockup) — cả hai nằm trong phiếu duyệt.
+  const allowedKill = variantRuleSet(v.rulesSnapshot, cfg.config).killRules;
+  const killRuleFired = req.kind === "KILL_RULE" && rule !== null && allowedKill.some((r) => sameRule(r, rule));
 
   const g = gateCreativeWrite({
     hardEnabled: d.env.hardEnabled,
@@ -695,8 +698,9 @@ export type KillReport = { variantId: string; ok: boolean; denial: CreativeWrite
 
 /**
  * Tắt theo luật. Mỗi lệnh đi qua cổng như một lượt máy tắt (`KILL_RULE`): lô phải có
- * `approval_digest`, và luật phải nằm trong luật tắt của ẢNH CHỤP lô — luật gõ thêm vào cấu hình sau
- * khi duyệt KHÔNG tắt được mẫu của lô cũ, vì người duyệt chưa từng thấy nó.
+ * `approval_digest`, và luật phải nằm trong luật tắt của ẢNH CHỤP lô — hoặc trong LUẬT RIÊNG của ô
+ * (`rules_snapshot`, ô mockup), cũng nằm trong phiếu duyệt. Luật gõ thêm vào cấu hình sau khi duyệt KHÔNG
+ * tắt được mẫu của lô cũ, vì người duyệt chưa từng thấy nó.
  */
 export async function applyKills(db: Db, kills: CreativeKill[], now: Date, deps?: CreativeDeps): Promise<KillReport[]> {
   const out: KillReport[] = [];

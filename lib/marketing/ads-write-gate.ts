@@ -12,6 +12,7 @@ import {
   type AdsWriteMode,
 } from "@/lib/constants/ads-write";
 import type { Stability } from "@/lib/marketing/decision-stability";
+import type { IntradayRate, IntradayVerdict } from "@/lib/constants/ads-intraday";
 
 /**
  * ═══════════ CỔNG GHI QUẢNG CÁO — HÀM THUẦN, VÀ ĐÓ LÀ CẢ Ý NGHĨA CỦA NÓ ═══════════
@@ -341,4 +342,56 @@ export function planProductBudget(i: {
     }
     return { ...t, nextBudgetVnd: next, allow: false, denial: g.denial, reason: g.reason, deltaVnd: 0 };
   });
+}
+
+/* ═══════════════════ LÀN NHANH: TĂNG TRONG NGÀY ═══════════════════ */
+
+/**
+ * CỔNG CỦA LÀN NHANH — cùng các chốt an toàn với `gateAdsWrite`, khác đúng MỘT chỗ: căn cứ.
+ *
+ * Làn cũ đòi khuyến nghị đứng trên TIỀN ĐÃ ĐO và đã giữ nguyên đủ số ngày. Làn nhanh thay hai chốt ấy
+ * bằng ngưỡng HÔM NAY chủ shop chốt ngày 24/09/2026 (`intradayScaleVerdict`) và nhịp theo giờ
+ * (`intradayRateCheck`). Mọi chốt còn lại giữ nguyên, CÙNG THỨ TỰ: chốt máy chủ → nấc quyền → phanh
+ * → chiến dịch còn chạy → căn cứ → phiếu duyệt → nhịp → biên độ → trần tiền cả shop.
+ *
+ * Làn nhanh CHỈ TĂNG. Không có nhánh cắt hay tạm dừng: hạ tiền dựa trên số của nửa ngày là để một buổi
+ * sáng ế quyết định số phận chiến dịch — việc đó vẫn đi qua làn có tiền thật.
+ */
+export type IntradayGateInput = {
+  hardEnabled: boolean;
+  mode: AdsWriteMode;
+  confirmed: boolean;
+  brake: BrakeState;
+  /** Trạng thái Facebook đọc lúc bấm. `null` = không đọc được. */
+  status: string | null;
+  verdict: IntradayVerdict;
+  rate: IntradayRate;
+  currentBudgetVnd: number | null;
+  nextBudgetVnd: number | null;
+  shiftedTodayVnd: number;
+};
+
+export function gateIntradayScale(i: IntradayGateInput): GateResult {
+  if (!i.hardEnabled) return deny("HARD_DISABLED");
+  if (i.mode === "OFF") return deny("MODE_OFF");
+  if (i.brake.on) return deny("BRAKE_ON", `(${i.brake.consecutiveWorse} lượt xấu liên tiếp, ${i.brake.unmeasured} lượt chưa đo được)`);
+  if (i.status === null) return deny("SUBJECT_UNREADABLE");
+  if (i.status !== "ACTIVE") return deny("SUBJECT_NOT_RUNNING", `(Facebook báo: ${i.status}.)`);
+  if (!i.verdict.eligible) return deny("INTRADAY_NOT_ELIGIBLE", i.verdict.reason);
+  if (i.mode === "COPILOT" && !i.confirmed) return deny("NOT_CONFIRMED");
+  if (!i.rate.ok) return deny("INTRADAY_RATE_LIMIT", i.rate.reason);
+  if (i.currentBudgetVnd === null || i.nextBudgetVnd === null) {
+    return deny("STEP_TOO_BIG", "Chưa đọc được ngân sách hiện tại nên không tính được biên độ — CHƯA BIẾT thì không ghi.");
+  }
+  if (i.currentBudgetVnd <= 0) return deny("STEP_TOO_BIG", "Ngân sách hiện tại bằng 0 nên không có gốc để tính phần trăm.");
+  // Làn nhanh chỉ biết TĂNG — một ngân sách đích không lớn hơn là dấu hiệu đường tính sai.
+  if (!(i.nextBudgetVnd > i.currentBudgetVnd)) return deny("DIRECTION_MISMATCH");
+  const delta = i.nextBudgetVnd - i.currentBudgetVnd;
+  if (delta / i.currentBudgetVnd > ADS_WRITE_LIMITS.maxStepPct) {
+    return deny("STEP_TOO_BIG", `Đang xin tăng ${Math.round((delta / i.currentBudgetVnd) * 100)}%.`);
+  }
+  if (i.shiftedTodayVnd + delta > ADS_WRITE_LIMITS.maxDailyShiftVnd) {
+    return deny("DAILY_CAP", `Hôm nay đã dịch chuyển ${i.shiftedTodayVnd.toLocaleString("vi-VN")}đ.`);
+  }
+  return { allow: true, action: "SET_DAILY_BUDGET", deltaVnd: delta };
 }

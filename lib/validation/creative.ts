@@ -125,6 +125,17 @@ export type VariantCopyInput = z.infer<typeof variantCopyInputSchema>;
 
 export const creativeSourceToggleSchema = z.object({ id: z.string().trim().min(1, "Thiếu mã nguồn ảnh"), active: z.boolean() }).strict();
 
+/**
+ * Công tắc "Chạy mockup hằng ngày" trên thẻ nguồn (tab Nguồn ảnh). `kind = SOURCE` ⇒ id nguồn `OWN_AD`;
+ * `kind = PRODUCT` ⇒ id mã hàng (thẻ ảnh sản phẩm thật). Máy chủ kiểm lại loại nguồn / mã có thật.
+ */
+export const mockupToggleSchema = z
+  .object({ kind: z.enum(["SOURCE", "PRODUCT"]), id: z.string().trim().min(1, "Thiếu mã").max(200), on: z.boolean() })
+  .strict();
+
+/** Người đánh dấu một thiết kế "đưa vào sản xuất" — máy không bao giờ tự đặt trạng thái này. */
+export const designProductionSchema = z.object({ id: z.string().trim().min(1, "Thiếu mã thiết kế").max(200), on: z.boolean() }).strict();
+
 // ───────────────────────────── CẤU HÌNH ─────────────────────────────
 
 /** Trường số của cấu hình — mỗi ô trên màn hình là một khoá ở đây. */
@@ -136,12 +147,14 @@ export const CONFIG_NUMERIC_FIELDS = [
   "approvalLeadMinutes",
   "genHourVn",
   "extraCandidates",
-  "exploreShare",
+  "designSlots",
+  "exploreSlots",
   "winOrdersAbove",
   "verdictSettleHours",
   "imageDailyCapUsd",
   "batchFallbackHourVn",
   "loserImageRetentionDays",
+  "scaleDailyBudgetVnd",
 ] as const satisfies readonly (keyof CreativeLoopConfig)[];
 export type ConfigNumericField = (typeof CONFIG_NUMERIC_FIELDS)[number];
 
@@ -158,8 +171,11 @@ export const CONFIG_FIELD_LABEL: Record<Exclude<keyof CreativeLoopConfig, "killR
   startHourVn: "Giờ bắt đầu chạy (giờ VN)",
   approvalLeadMinutes: "Hạn duyệt trước giờ chạy (phút)",
   genHourVn: "Giờ dựng lô cho ngày mai (giờ VN)",
-  extraCandidates: "Số mẫu sinh dư để gạt bớt",
-  exploreShare: "Tỷ lệ ô thăm dò (0 – 1)",
+  extraCandidates: "Số ô thiết kế sinh dư để gạt bớt",
+  designSlots: "Số ô THIẾT KẾ MỚI mỗi lô",
+  exploreSlots: "Số ô thăm dò mỗi lô",
+  mockupSourceIds: "Quảng cáo cũ chạy mockup hằng ngày",
+  mockupProductIds: "Mã hàng chạy mockup hằng ngày",
   winOrdersAbove: "THẮNG khi đơn chốt vượt",
   verdictSettleHours: "Đợi đơn về sau khung test (giờ)",
   focusProductIds: "Chỉ test các mã này (để trống = mọi mã có ảnh thật)",
@@ -171,7 +187,21 @@ export const CONFIG_FIELD_LABEL: Record<Exclude<keyof CreativeLoopConfig, "killR
   fallbackImageQuality: "Chất lượng khi vẽ nốt bằng gọi ngay",
   imageDailyCapUsd: "Trần chi sinh ảnh / ngày (USD)",
   loserImageRetentionDays: "Giữ ảnh mẫu bị loại (ngày)",
+  scaleTemplates: "Chiến dịch MẪU scale (ID)",
+  scaleDailyBudgetVnd: "Ngân sách ngày mỗi chiến dịch scale nháp",
 };
+
+/** Nhãn hai ô id chiến dịch mẫu scale (§5g). */
+export const SCALE_TEMPLATE_LABEL = {
+  purchaseMessagingCampaignId: "Chiến dịch MẪU · tối đa lượt mua qua tin nhắn (ID)",
+  leadsCampaignId: "Chiến dịch MẪU · khách hàng tiềm năng (ID)",
+} as const;
+
+const scaleIdText = z
+  .string()
+  .trim()
+  .max(40, "Id chiến dịch mẫu quá dài")
+  .refine((s) => s === "" || /^[0-9]{5,25}$/.test(s), "Id chiến dịch mẫu chỉ gồm chữ số (id Facebook), hoặc để trống");
 
 const finiteNumber = (field: ConfigNumericField) =>
   z.number({ message: `Ô "${CONFIG_FIELD_LABEL[field]}" phải là một con số` }).refine(Number.isFinite, `Ô "${CONFIG_FIELD_LABEL[field]}" phải là một con số`);
@@ -201,7 +231,12 @@ export const creativeConfigRawSchema = z
     approvalLeadMinutes: finiteNumber("approvalLeadMinutes"),
     genHourVn: finiteNumber("genHourVn"),
     extraCandidates: finiteNumber("extraCandidates"),
-    exploreShare: finiteNumber("exploreShare"),
+    designSlots: finiteNumber("designSlots"),
+    exploreSlots: finiteNumber("exploreSlots"),
+    // Hai danh sách mockup được bật / tắt bằng công tắc ở tab Nguồn ảnh, không ở form cấu hình — form
+    // không gửi chúng thì server action GIỮ danh sách đang lưu (`saveCreativeConfig`), không xoá.
+    mockupSourceIds: z.array(z.string().trim().min(1).max(200)).max(200).optional(),
+    mockupProductIds: z.array(z.string().trim().min(1).max(200)).max(200).optional(),
     winOrdersAbove: finiteNumber("winOrdersAbove"),
     verdictSettleHours: finiteNumber("verdictSettleHours"),
     killRules: z.array(z.unknown()).max(20, "Tối đa 20 luật tắt"),
@@ -215,6 +250,10 @@ export const creativeConfigRawSchema = z
     fallbackImageQuality: z.enum(IMAGE_QUALITIES),
     imageDailyCapUsd: finiteNumber("imageDailyCapUsd"),
     loserImageRetentionDays: finiteNumber("loserImageRetentionDays"),
+    // Hai trường của scale (§5g) là TUỲ CHỌN để bản lưu cũ / bài kiểm cũ không vỡ — thiếu thì
+    // `normalizeCreativeConfig` điền rỗng (không scale được) và ngân sách mặc định 500.000đ.
+    scaleTemplates: z.object({ purchaseMessagingCampaignId: scaleIdText, leadsCampaignId: scaleIdText }).strict().optional(),
+    scaleDailyBudgetVnd: finiteNumber("scaleDailyBudgetVnd").optional(),
   })
   .strict();
 

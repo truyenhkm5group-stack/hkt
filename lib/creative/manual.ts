@@ -1,6 +1,6 @@
 import { and, count, eq, inArray, max } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { CREATIVE_RULE_VERSION, GENE_VOCAB_VERSION, MANUAL_SLOT_BASE, type CreativeLoopConfig, type Genes, type SlotMode } from "@/lib/constants/creative-loop";
+import { CREATIVE_RULE_VERSION, GENE_VOCAB_VERSION, MANUAL_SLOT_BASE, SLOT_MODE_PUBLISH_RANK, type CreativeLoopConfig, type Genes, type SlotMode } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { storeCreativeImage } from "@/lib/creative/images";
 import { batchWindow } from "@/lib/creative/schedule";
@@ -14,7 +14,7 @@ import { batchWindow } from "@/lib/creative/schedule";
  *
  *  1. **Không qua máy viết, không qua máy sinh ảnh** — vào thẳng trạng thái `GENERATED`.
  *  2. **Được đăng TRƯỚC** ô máy lập (`publishOrder`): người đã cố ý chọn nó, còn ô máy lập là để lấp
- *     chỗ. Trần 10 mẫu/lô vẫn giữ nguyên — mẫu tự làm chiếm chỗ của ô máy lập, không cộng thêm.
+ *     chỗ. Trần số mẫu/lô (`CREATIVE_HARD_LIMITS.maxBatchSize`) vẫn giữ nguyên — mẫu tự làm chiếm chỗ của ô máy lập, không cộng thêm.
  *  3. **Lô chưa có thì dựng sẵn** ở trạng thái "Chờ duyệt", đánh dấu `plan.manualSeed`. Tới giờ dựng
  *     lô, máy chỉ lập PHẦN CÒN THIẾU cho đủ lô (`generate.ts`), không đè lên mẫu của người.
  *
@@ -32,12 +32,14 @@ export function manualTargetDay(now: Date, cfg: Pick<CreativeLoopConfig, "startH
 }
 
 /**
- * Thứ tự ĐĂNG trong một lô: mẫu tự làm trước, rồi theo số ô. Hàm thuần.
+ * Thứ tự ĐĂNG trong một lô (chủ shop 24/09/2026): mẫu tự làm → thiết kế mới → mockup mẫu thắng → thăm
+ * dò (`SLOT_MODE_PUBLISH_RANK`), cùng loại thì theo số ô. Hàm thuần.
  * Trần số mẫu cắt ở CUỐI danh sách này — nên nó cắt ô máy lập trước, không bao giờ cắt mẫu của người
- * khi còn chỗ.
+ * khi còn chỗ; và cắt mockup trước thiết kế mới (phần chính của lô).
  */
 export function publishOrder<T extends { mode: string; slot: number }>(variants: readonly T[]): T[] {
-  return [...variants].sort((a, b) => Number(b.mode === "MANUAL") - Number(a.mode === "MANUAL") || a.slot - b.slot);
+  const rank = (m: string) => SLOT_MODE_PUBLISH_RANK[m as SlotMode] ?? 9;
+  return [...variants].sort((a, b) => rank(a.mode) - rank(b.mode) || a.slot - b.slot);
 }
 
 /** Lô được dựng sẵn bởi mẫu tự làm và CHƯA được máy lập phần còn lại. */

@@ -3024,7 +3024,7 @@ export const creativeVariants = pgTable(
       .notNull()
       .references(() => creativeBatches.id),
     slot: integer("slot").notNull(),
-    /** `EXPLOIT` · `EXPLORE`. */
+    /** `EXPLOIT` (mockup mẫu thắng) · `EXPLORE` · `MANUAL` · `DESIGN` (thiết kế sản phẩm mới). */
     mode: text("mode").notNull(),
     productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
     productPhotoSourceId: text("product_photo_source_id").references(() => creativeSources.id, { onDelete: "set null" }),
@@ -3068,16 +3068,24 @@ export const creativeVariants = pgTable(
     libraryAt: ts("library_at"),
     libraryOrders: integer("library_orders"),
     lostAt: ts("lost_at"),
+    /** Ô `DESIGN` ⇒ thiết kế mà mẩu này quảng cáo. Ô khác: `NULL`. */
+    designConceptId: text("design_concept_id").references((): AnyPgColumn => designConcepts.id, { onDelete: "set null" }),
+    /**
+     * Luật RIÊNG của ô (`VariantRulesSnapshot`, chụp lúc lập lô) — ô mockup của mã cũ chấm bằng lịch sử
+     * của chính mã (chủ shop 24/09/2026). `NULL` = ô dùng luật chung của lô. Phiếu duyệt khoá cả cột này.
+     */
+    rulesSnapshot: jsonb("rules_snapshot").$type<Record<string, unknown>>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("creative_variants_batch_slot_uq").on(t.batchId, t.slot),
+    index("creative_variants_design_idx").on(t.designConceptId),
     uniqueIndex("creative_variants_fb_ad_uq").on(t.fbAdId),
     index("creative_variants_status_idx").on(t.status),
     index("creative_variants_product_idx").on(t.productId),
     index("creative_variants_library_idx").on(t.libraryAt),
-    check("creative_variants_mode_check", sql`${t.mode} IN ('EXPLOIT', 'EXPLORE', 'MANUAL')`),
+    check("creative_variants_mode_check", sql`${t.mode} IN ('EXPLOIT', 'EXPLORE', 'MANUAL', 'DESIGN')`),
     check("creative_variants_status_check", sql`${t.status} IN ('PLANNED', 'GENERATED', 'GEN_FAILED', 'REJECTED', 'LIVE', 'PAUSED', 'ENDED', 'PUBLISH_FAILED')`),
     // "Đang chạy" mà không có mẩu QC nào là một khẳng định không có chứng từ.
     check("creative_variants_live_check", sql`${t.status} NOT IN ('LIVE', 'PAUSED', 'ENDED') OR ${t.fbAdId} IS NOT NULL`),
@@ -3166,6 +3174,135 @@ export const creativeLearnings = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex("creative_learnings_day_uq").on(t.learningDay)],
+);
+
+/**
+ * THIẾT KẾ SẢN PHẨM MỚI (chủ shop 24/09/2026): một mẫu áo / váy CHƯA TỪNG CÓ, lai DNA của các mã bán tốt
+ * (`lib/creative/design.ts::planDesigns`). Mã `TK-YYMMDD-NN` là mã chủ shop tạo trên Pancake để nhân viên
+ * chốt đơn như hàng thường; đơn quy về thiết kế đi bằng `orders.ad_id` của các mẩu mang nó — bảng này
+ * KHÔNG phải nguồn của đơn hay tiền.
+ */
+export const designConcepts = pgTable(
+  "design_concepts",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    batchId: text("batch_id").references(() => creativeBatches.id, { onDelete: "set null" }),
+    /** DNA ĐỦ mười thuộc tính (`DesignDna`) theo từ vựng phiên bản `dna_version`. */
+    dna: jsonb("dna").$type<Record<string, string>>().notNull(),
+    dnaVersion: integer("dna_version").notNull(),
+    /** Mã cha (trội nhất đứng đầu) — thứ duy nhất thiết kế "thừa kế". */
+    parentProductIds: text("parent_product_ids").array().notNull().default(sql`'{}'::text[]`),
+    why: text("why").notNull().default(""),
+    /** Ảnh thiết kế đầu tiên máy vẽ được (ảnh của ô `DESIGN`). */
+    imageId: text("image_id").references(() => creativeImages.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("DRAFT"),
+    /** Giá đề nghị = giá của mã cha trội nhất. `NULL` = không suy được — câu chữ không ghi giá, không đoán. */
+    priceVnd: integer("price_vnd"),
+    /** Người đánh dấu "đưa vào sản xuất" (mục 34). Máy không bao giờ đặt trạng thái ấy. */
+    productionByUserId: text("production_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    productionAt: ts("production_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("design_concepts_code_uq").on(t.code),
+    index("design_concepts_status_idx").on(t.status, t.createdAt),
+    check("design_concepts_status_check", sql`${t.status} IN ('DRAFT', 'TESTING', 'WIN', 'LOSE', 'PRODUCTION')`),
+    check("design_concepts_code_check", sql`${t.code} ~ '^TK-[0-9]{6}-[0-9]{2,}$'`),
+    check("design_concepts_price_check", sql`${t.priceVnd} IS NULL OR ${t.priceVnd} > 0`),
+  ],
+);
+
+/**
+ * DNA của sản phẩm ĐANG CÓ — đọc bằng mô hình đọc ảnh từ ảnh sản phẩm (`lib/creative/dna.ts`), kể cả mã
+ * đã gỡ (lịch sử bán tốt vẫn là DNA quý). Một dòng mỗi mã; đọc lại khi đổi phiên bản từ vựng. Đọc hỏng
+ * ⇒ `error` + `read_at`, thử lại sau `PRODUCT_DNA_RETRY_HOURS`.
+ */
+export const productDna = pgTable(
+  "product_dna",
+  {
+    id: id(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** DNA MỘT PHẦN — thuộc tính mô hình không đọc rõ là CHƯA BIẾT (vắng khoá), không phải một giá trị. */
+    dna: jsonb("dna").$type<Record<string, string>>().notNull().default({}),
+    dnaVersion: integer("dna_version").notNull(),
+    /** Ảnh đã đọc: `PRODUCT_PHOTO` · `OWN_AD` · `PANCAKE_URL` (ảnh `products.image`). */
+    imageSource: text("image_source").notNull().default(""),
+    imageSha256: text("image_sha256").notNull().default(""),
+    summary: text("summary").notNull().default(""),
+    model: text("model").notNull().default(""),
+    /** Rỗng = đọc được. Có chữ = lần đọc gần nhất hỏng (DNA cũ, nếu có, vẫn giữ). */
+    error: text("error").notNull().default(""),
+    readAt: ts("read_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("product_dna_product_uq").on(t.productId)],
+);
+
+/**
+ * NHÁP SCALE MẪU THẮNG (`docs/creative-loop.md` §5f). Một dòng = một (mẫu thắng, loại chiến dịch):
+ * đề nghị → nháp (bản sao chiến dịch MẪU, đang TẮT) → người duyệt ⇒ bật. Khoá duy nhất (mẫu, loại)
+ * ⇒ không bao giờ có nháp thứ hai cho cùng một cặp. Không phải nguồn tiền: chi của chiến dịch scale
+ * vẫn đọc từ `ad_spends` như mọi chiến dịch.
+ */
+export const creativeScaleDrafts = pgTable(
+  "creative_scale_drafts",
+  {
+    id: id(),
+    variantId: text("variant_id")
+      .notNull()
+      .references(() => creativeVariants.id),
+    batchId: text("batch_id").references(() => creativeBatches.id),
+    /** `PURCHASE_MESSAGING` · `LEADS` (`ScaleKind`). */
+    kind: text("kind").notNull(),
+    /** `ScaleDraftStatus`. */
+    status: text("status").notNull().default("PROPOSED"),
+    /** Phán quyết + số đo lúc máy đề nghị — để người đọc biết đề nghị đứng trên gì. */
+    proposedVerdict: text("proposed_verdict").notNull().default(""),
+    proposalMetrics: jsonb("proposal_metrics").$type<Record<string, unknown>>().notNull().default({}),
+    /** Chiến dịch MẪU đã sao chép (chụp lúc sao chép — cấu hình có thể đổi về sau). */
+    sourceCampaignId: text("source_campaign_id").notNull().default(""),
+    fbCampaignId: text("fb_campaign_id"),
+    fbAdsetId: text("fb_adset_id"),
+    fbAdId: text("fb_ad_id"),
+    fbCreativeId: text("fb_creative_id"),
+    /** `CAMPAIGN` (CBO) · `ADSET` (ABO) — đọc từ chính bản sao. Rỗng = chưa đọc. */
+    budgetLevel: text("budget_level").notNull().default(""),
+    dailyBudgetVnd: integer("daily_budget_vnd"),
+    currency: text("currency").notNull().default("VND"),
+    error: text("error").notNull().default(""),
+    /** Ghi NGAY TRƯỚC lời gọi sao chép: có mốc này mà không có id bản sao ⇒ có thể đã có bản sao mồ côi. */
+    copyAttemptedAt: ts("copy_attempted_at"),
+    /** QUY KẾT ĐI BẰNG KHOÁ TÀI KHOẢN (mục 34); tên là ảnh chụp do máy chủ đọc. */
+    draftedByUserId: text("drafted_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    draftedByName: text("drafted_by_name").notNull().default(""),
+    draftedAt: ts("drafted_at"),
+    approvedByUserId: text("approved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    approvedByName: text("approved_by_name").notNull().default(""),
+    approvedAt: ts("approved_at"),
+    pausedAt: ts("paused_at"),
+    dismissedByUserId: text("dismissed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    dismissedAt: ts("dismissed_at"),
+    /** Tin báo "có đề nghị scale mới" đã gửi được lúc nào. */
+    notifiedAt: ts("notified_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("creative_scale_drafts_variant_kind_uq").on(t.variantId, t.kind),
+    index("creative_scale_drafts_status_idx").on(t.status),
+    check("creative_scale_drafts_kind_check", sql`${t.kind} IN ('PURCHASE_MESSAGING', 'LEADS')`),
+    check("creative_scale_drafts_status_check", sql`${t.status} IN ('PROPOSED', 'DRAFTING', 'DRAFT', 'ACTIVE', 'PAUSED', 'FAILED', 'DISMISSED')`),
+    // Trần cứng 500.000đ/ngày một chiến dịch (chủ shop 24/09/2026) — nhắc lại ở CSDL.
+    check("creative_scale_drafts_budget_check", sql`${t.dailyBudgetVnd} IS NULL OR (${t.dailyBudgetVnd} > 0 AND ${t.dailyBudgetVnd} <= 500000)`),
+    // "Đang chạy" phải có bản sao và dấu duyệt của người — không có chứng từ thì không phải đang chạy.
+    check("creative_scale_drafts_active_check", sql`${t.status} NOT IN ('ACTIVE', 'PAUSED') OR (${t.fbCampaignId} IS NOT NULL AND ${t.approvedAt} IS NOT NULL)`),
+    check("creative_scale_drafts_draft_check", sql`${t.status} <> 'DRAFT' OR (${t.fbCampaignId} IS NOT NULL AND ${t.fbAdId} IS NOT NULL AND ${t.fbCreativeId} IS NOT NULL AND ${t.dailyBudgetVnd} IS NOT NULL)`),
+  ],
 );
 
 // ───────────────────── Quy kết fanpage → marketer ─────────────────────

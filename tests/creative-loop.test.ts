@@ -54,9 +54,10 @@ function cfg(over: Partial<CreativeLoopConfig> = {}) {
 export function testCreativeLoop() {
   // ═══════════ 1. TRẦN CỨNG ═══════════
 
-  // Chủ shop chốt 24/09/2026: 10 mẫu × 200.000đ × 1 ngày, chạy 6:00. Đổi trần là một lần sửa mã có
-  // người đọc — bài kiểm này đỏ để người sửa phải thấy mình đang đổi một quyết định của chủ shop.
-  assert.equal(CREATIVE_HARD_LIMITS.maxBatchSize, 10);
+  // Chủ shop chốt 24/09/2026: 200.000đ × 1 ngày, chạy 6:00; trần số mẫu nâng lên 20 (4.000.000đ / ngày)
+  // cùng lúc mở ô THIẾT KẾ MỚI (chủ shop 24/09, lần hai). Đổi trần là một lần sửa mã có người đọc — bài
+  // kiểm này đỏ để người sửa phải thấy mình đang đổi một quyết định của chủ shop.
+  assert.equal(CREATIVE_HARD_LIMITS.maxBatchSize, 20);
   assert.equal(CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd, 200_000);
   assert.equal(CREATIVE_HARD_LIMITS.maxTestDays, 1);
   assert.equal(CREATIVE_HARD_LIMITS.maxDailyTestSpendVnd, CREATIVE_HARD_LIMITS.maxBatchSize * CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd);

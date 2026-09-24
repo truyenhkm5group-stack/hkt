@@ -5,25 +5,32 @@ import {
   CREATIVE_CONFIG_KEY,
   CREATIVE_HARD_LIMITS,
   CREATIVE_RULE_VERSION,
+  DESIGN_DNA_VERSION,
   GENE_VOCAB_VERSION,
   estimateImageUsd,
   normalizeCreativeConfig,
+  parseDna,
   parseGenes,
+  type DesignDna,
   type BatchStatus,
   type CreativeLoopConfig,
   type Genes,
   type SlotMode,
 } from "@/lib/constants/creative-loop";
 import { CAPTION_FALLBACK_PREFIX, captionFromImage, type VariantCaptioner } from "@/lib/creative/caption";
+import { describeDnaVi } from "@/lib/creative/design";
+import { describePendingProducts, readProductDna, type ProductDnaReader } from "@/lib/creative/dna";
 import { IMAGE_BATCH_CANCEL_GRACE_MINUTES, RESERVING_PHASES, describeImageBatch, emptyImageBatchState, parseImageBatchState, type ImageBatchState } from "@/lib/creative/image-batch";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
 import { isManualSeed } from "@/lib/creative/manual";
-import { planBatch, type PlannedSlot } from "@/lib/creative/plan";
+import { composeDailyBatch, selectMockupParents, type ComposedSlot } from "@/lib/creative/plan";
 import { batchDayToBuild, batchWindow, imageBatchFallbackAt } from "@/lib/creative/schedule";
 import { describeSource, type SourceDescriber } from "@/lib/creative/vision";
 import { writeVariantCopy, type CopyWriter } from "@/lib/creative/writer";
 import { IMAGE_EDITS_BATCH_ENDPOINT, imageEditBatchLine, isBatchTerminal, openAiBatchClient, parseImageBatchResults, uploadEditReferences, type ImageBatchClient, type ImageBatchLineResult, type OpenAiBatch } from "@/lib/integrations/openai/batch";
 import { editImage, type ImageEditClient, type ImageEditInputImage } from "@/lib/integrations/openai/images";
+import { env } from "@/lib/env";
+import { loadDesignInputs, productAdCostHistory } from "@/lib/queries/creative-design";
 import { loadPlanInputs, loadProductBrief, loadWinningExamples } from "@/lib/queries/creative-plan";
 
 /**
@@ -88,6 +95,11 @@ export type BuildBatchDeps = {
   caption?: VariantCaptioner;
   /** Files + Batch API. Bỏ trống ⇒ OpenAI thật (`OPENAI_API_KEY`). */
   batchClient?: ImageBatchClient;
+  /**
+   * Đọc DNA của sản phẩm đang có trước khi lập lô (ô THIẾT KẾ cần DNA của mã cha). Bỏ trống ⇒ mô hình đọc
+   * ảnh thật NẾU máy chủ có `OPENAI_API_KEY`, không thì bỏ qua bước này (không ghi gì).
+   */
+  dna?: ProductDnaReader;
   now?: Date;
   perTick?: number;
 };
@@ -103,6 +115,8 @@ export type BuildBatchSummary = {
   capped: number;
   /** Số nguồn cảm hứng vừa được đọc thành gen trước khi lập lô. */
   described: number;
+  /** Số mã vừa được đọc DNA trước khi lập lô. */
+  dnaRead: number;
   status: BatchStatus | null;
   skippedReason: string | null;
   /** Lô Batch ảnh đang ở đâu (`imageMode = BATCH`) — một câu cho `sync_runs.detail`. */
@@ -144,28 +158,69 @@ async function describePending(db: Db, describe: SourceDescriber): Promise<numbe
   return ok;
 }
 
-/** Ô máy lập ⇒ dòng `creative_variants` PLANNED. Dùng chung cho lô mới và lô dựng sẵn bởi mẫu tự làm. */
-function plannedRows(batchId: string, slots: PlannedSlot[]) {
-  return slots.map((s) => ({
-    batchId,
-    slot: s.slot,
-    mode: s.mode,
-    productId: s.productId,
-    productPhotoSourceId: s.productPhotoSourceId,
-    inspirationSourceId: s.inspirationSourceId,
-    parentVariantId: s.parentVariantId,
-    genes: s.genes as Record<string, string>,
-    genesVersion: GENE_VOCAB_VERSION,
-    mutatedGene: s.mutatedGene ?? "",
-    why: s.why,
-    status: "PLANNED" as const,
-  }));
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+function vnMidnight(day: string): Date {
+  return new Date(`${day}T00:00:00+07:00`);
+}
+
+/**
+ * LẬP LÔ HẰNG NGÀY (chủ shop 24/09/2026): gom đầu vào (chỉ đọc) rồi gọi hàm THUẦN `composeDailyBatch` —
+ * thiết kế mới → mockup mẫu thắng được chọn (luật riêng theo mã) → thăm dò. `manual` = số mẫu tự làm đã
+ * có trong lô: chúng đăng TRƯỚC và chiếm chỗ của ô máy lập.
+ */
+async function composeFor(db: Db, batchDay: string, cfg: CreativeLoopConfig, manual: number) {
+  const plan = await loadPlanInputs(db, batchDay, cfg);
+  const design = await loadDesignInputs(db, batchDay);
+  const mockup = { sourceIds: cfg.mockupSourceIds, productIds: cfg.mockupProductIds };
+  const sel = selectMockupParents(plan.parents, mockup, new Set(plan.products.map((p) => p.productId)));
+  const mockupHistory = await productAdCostHistory(db, [...new Set(sel.parents.map((p) => p.productId))], vnMidnight(batchDay));
+  return composeDailyBatch({ batchDay, budget: cfg.batchSize + cfg.extraCandidates - manual, designSlots: cfg.designSlots + cfg.extraCandidates, exploreSlots: cfg.exploreSlots, plan, mockup, design, mockupHistory });
+}
+
+/**
+ * Ô máy lập ⇒ dòng `creative_variants` PLANNED (+ một dòng `design_concepts` cho mỗi ô THIẾT KẾ), trong
+ * CÙNG giao dịch với lô. Dùng chung cho lô mới và lô dựng sẵn bởi mẫu tự làm. Mã `TK-…` đã tồn tại (không
+ * thể xảy ra với một lô mỗi ngày, nhưng khoá duy nhất là hàng rào) ⇒ bỏ ô ấy, không ghi đè thiết kế cũ.
+ * Trả số ô đã ghi.
+ */
+async function insertComposed(tx: Tx, batchId: string, slots: ComposedSlot[]): Promise<number> {
+  const designs = slots.flatMap((s) => (s.design ? [s.design] : []));
+  const dc = schema.designConcepts;
+  const inserted = designs.length
+    ? await tx
+        .insert(dc)
+        .values(designs.map((d) => ({ code: d.code, batchId, dna: d.dna as Record<string, string>, dnaVersion: DESIGN_DNA_VERSION, parentProductIds: d.parentProductIds, why: d.why, priceVnd: d.priceVnd, status: "DRAFT" })))
+        .onConflictDoNothing({ target: dc.code })
+        .returning({ id: dc.id, code: dc.code })
+    : [];
+  const idOf = new Map(inserted.map((r) => [r.code, r.id]));
+  const rows = slots
+    .filter((s) => !s.design || idOf.has(s.design.code))
+    .map((s) => ({
+      batchId,
+      slot: s.slot,
+      mode: s.mode,
+      productId: s.productId,
+      productPhotoSourceId: s.productPhotoSourceId,
+      inspirationSourceId: s.inspirationSourceId,
+      parentVariantId: s.parentVariantId,
+      genes: s.genes as Record<string, string>,
+      genesVersion: GENE_VOCAB_VERSION,
+      mutatedGene: s.mutatedGene ?? "",
+      why: s.why,
+      designConceptId: s.design ? (idOf.get(s.design.code) as string) : null,
+      rulesSnapshot: s.rulesSnapshot ? (s.rulesSnapshot as unknown as Record<string, unknown>) : null,
+      status: "PLANNED" as const,
+    }));
+  if (rows.length) await tx.insert(schema.creativeVariants).values(rows);
+  return rows.length;
 }
 
 /**
  * Lô đã được MẪU TỰ LÀM dựng sẵn (`plan.manualSeed`, chưa có `slots`) ⇒ máy chỉ lập PHẦN CÒN THIẾU:
- * `batchSize + extraCandidates − số mẫu tự làm`. Không đụng mẫu của người, không đổi số ô của nó
- * (ô máy lập 1…n, ô tự làm 1001+).
+ * `batchSize + extraCandidates − số mẫu tự làm` ô, theo thứ tự thiết kế → mockup → thăm dò (`composeFor`).
+ * Không đụng mẫu của người, không đổi số ô của nó (ô máy lập 1…n, ô tự làm 1001+).
  *
  * Chỉ điền MỘT lần: điều kiện "plan còn là bản dựng sẵn" nằm trong WHERE, nên hai lượt chạy chồng
  * không lập hai lần.
@@ -176,15 +231,12 @@ async function fillManualSeed(db: Db, batch: BatchRow, cfg: CreativeLoopConfig):
     .select({ n: sql<number>`count(*)::int` })
     .from(v)
     .where(and(eq(v.batchId, batch.id), eq(v.mode, "MANUAL"), eq(v.status, "GENERATED")));
-  const need = Math.max(0, cfg.batchSize + cfg.extraCandidates - Number(c?.n ?? 0));
-  const inputs = await loadPlanInputs(db, batch.batchDay, cfg);
-  const plan = planBatch({ ...inputs, slotCount: need });
+  const plan = await composeFor(db, batch.batchDay, cfg, Number(c?.n ?? 0));
   const filled = await db.transaction(async (tx) => {
     const [u] = await tx
       .update(schema.creativeBatches)
       .set({
         plan: { ...plan, manualSeed: true } as unknown as Record<string, unknown>,
-        slotCount: sql`${schema.creativeBatches.slotCount} + ${plan.slots.length}`,
         configSnapshot: cfg as unknown as Record<string, unknown>,
         status: plan.slots.length > 0 ? "PLANNED" : batch.status,
       })
@@ -197,14 +249,20 @@ async function fillManualSeed(db: Db, batch: BatchRow, cfg: CreativeLoopConfig):
       )
       .returning();
     if (!u) return null;
-    if (plan.slots.length) await tx.insert(v).values(plannedRows(batch.id, plan.slots));
-    return u;
+    const n = await insertComposed(tx, batch.id, plan.slots);
+    if (n === 0) return u;
+    const [u2] = await tx
+      .update(schema.creativeBatches)
+      .set({ slotCount: sql`${schema.creativeBatches.slotCount} + ${n}` })
+      .where(eq(schema.creativeBatches.id, batch.id))
+      .returning();
+    return u2 ?? u;
   });
   return filled ?? (await batchByDay(db, batch.batchDay)) ?? batch;
 }
 
 async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): Promise<{ batch: BatchRow; created: boolean } | { batch: null; emptyReasons: string[] }> {
-  const plan = planBatch(await loadPlanInputs(db, batchDay, cfg));
+  const plan = await composeFor(db, batchDay, cfg, 0);
   /*
     LẬP KHÔNG ĐƯỢC Ô NÀO ⇒ KHÔNG GHI LÔ.
 
@@ -231,8 +289,10 @@ async function createBatch(db: Db, batchDay: string, cfg: CreativeLoopConfig): P
       .onConflictDoNothing({ target: schema.creativeBatches.batchDay })
       .returning();
     if (!b) return null;
-    if (plan.slots.length) await tx.insert(schema.creativeVariants).values(plannedRows(b.id, plan.slots));
-    return b;
+    const n = await insertComposed(tx, b.id, plan.slots);
+    if (n === plan.slots.length) return b;
+    const [b2] = await tx.update(schema.creativeBatches).set({ slotCount: n }).where(eq(schema.creativeBatches.id, b.id)).returning();
+    return b2 ?? b;
   });
   if (created) return { batch: created, created: true };
   // Một tick khác đã lập lô ngày này trước — đọc lô ấy, không lập lại.
@@ -328,7 +388,20 @@ function sumCostText(a: number | null, b: number | null): string {
 
 type ProductBrief = NonNullable<Awaited<ReturnType<typeof loadProductBrief>>>;
 type WrittenCopy = { imagePrompt: string; primaryText: string; headline: string; model: string; costUsd: number | null };
-type Prepared = { genes: Genes; product: ProductBrief; winningExamples: Awaited<ReturnType<typeof loadWinningExamples>>; copy: WrittenCopy; written: Partial<VariantRow> };
+type DesignBrief = { conceptId: string; code: string; dna: DesignDna };
+type Prepared = { genes: Genes; product: ProductBrief; design: DesignBrief | null; winningExamples: Awaited<ReturnType<typeof loadWinningExamples>>; copy: WrittenCopy; written: Partial<VariantRow> };
+
+/**
+ * Ô THIẾT KẾ: "sản phẩm" là thiết kế chưa tồn tại — tên "Mẫu mới TK-…", mã `TK-…`, giá = GIÁ ĐỀ NGHỊ của
+ * thiết kế (`price_vnd`, `null` ⇒ câu chữ không ghi con số giá nào). Câu chữ học giọng văn của mã cha trội.
+ */
+async function designBriefOf(db: Db, variant: VariantRow): Promise<{ product: ProductBrief; design: DesignBrief; exampleProductId: string | null } | null> {
+  if (!variant.designConceptId) return null;
+  const [c] = await db.select().from(schema.designConcepts).where(eq(schema.designConcepts.id, variant.designConceptId)).limit(1);
+  const dna = c ? parseDna(c.dna) : null;
+  if (!c || !dna) return null;
+  return { product: { productId: "", name: `Mẫu mới ${c.code}`, code: c.code, priceVnd: c.priceVnd }, design: { conceptId: c.id, code: c.code, dna }, exampleProductId: c.parentProductIds[0] ?? null };
+}
 
 /**
  * Bước chung của hai đường vẽ: kiểm ô, đọc mã hàng, VIẾT câu chữ nháp + câu lệnh ảnh. Ô đã được viết ở
@@ -337,14 +410,17 @@ type Prepared = { genes: Genes; product: ProductBrief; winningExamples: Awaited<
  */
 async function prepareVariant(db: Db, variant: VariantRow, deps: { writer: CopyWriter; now: Date }): Promise<Prepared | null> {
   const genes = parseGenes(variant.genes);
-  const precheck = !genes ? "Bộ gen của ô hỏng — không viết được câu lệnh." : !variant.productId ? "Ô không còn gắn mã hàng." : null;
-  const product = !precheck && variant.productId ? await loadProductBrief(db, variant.productId) : null;
-  if (!genes || !variant.productId || !product) {
-    await markFailed(db, variant.id, precheck ?? "Không tìm thấy mã hàng của ô.");
+  const isDesign = variant.mode === "DESIGN";
+  const precheck = !genes ? "Bộ gen của ô hỏng — không viết được câu lệnh." : !isDesign && !variant.productId ? "Ô không còn gắn mã hàng." : null;
+  const designInfo = !precheck && isDesign ? await designBriefOf(db, variant) : null;
+  const product = precheck ? null : isDesign ? (designInfo?.product ?? null) : variant.productId ? await loadProductBrief(db, variant.productId) : null;
+  if (!genes || !product) {
+    await markFailed(db, variant.id, precheck ?? (isDesign ? "Ô thiết kế không còn nối được về một thiết kế có DNA đủ mười thuộc tính." : "Không tìm thấy mã hàng của ô."));
     return null;
   }
+  const design = designInfo?.design ?? null;
 
-  const winningExamples = await loadWinningExamples(db, variant.productId);
+  const winningExamples = await loadWinningExamples(db, isDesign ? (designInfo?.exampleProductId ?? null) : variant.productId);
   let copy: WrittenCopy;
   if (variant.imagePrompt.trim() && variant.writerModel) {
     copy = { imagePrompt: variant.imagePrompt, primaryText: variant.primaryText, headline: variant.headline, model: variant.writerModel, costUsd: variant.writerCostUsd === "" ? null : Number(variant.writerCostUsd) };
@@ -358,6 +434,7 @@ async function prepareVariant(db: Db, variant: VariantRow, deps: { writer: CopyW
           product: { name: product.name, code: product.code, priceVnd: product.priceVnd },
           inspirationSummary: await inspirationSummaryOf(db, variant.inspirationSourceId),
           winningExamples,
+          ...(design ? { design: { code: design.code, dna: design.dna } } : {}),
         },
         { now: deps.now, entityId: variant.id },
       );
@@ -367,7 +444,7 @@ async function prepareVariant(db: Db, variant: VariantRow, deps: { writer: CopyW
     }
   }
   const written = { imagePrompt: copy.imagePrompt, primaryText: copy.primaryText, headline: copy.headline, writerModel: copy.model, writerCostUsd: copy.costUsd === null ? "" : copy.costUsd.toFixed(6) };
-  return { genes, product, winningExamples, copy, written };
+  return { genes, product, design, winningExamples, copy, written };
 }
 
 /**
@@ -376,14 +453,22 @@ async function prepareVariant(db: Db, variant: VariantRow, deps: { writer: CopyW
  * không làm mất mẫu. Lỗi lưu ảnh thì NÉM — nơi gọi quyết định.
  */
 async function saveGenerated(db: Db, variant: VariantRow, prep: Prepared, out: { bytes: Uint8Array; contentType: string; costUsd: number | null }, genModel: string, deps: { caption: VariantCaptioner; now: Date }): Promise<boolean> {
-  const { copy, product, genes, winningExamples, written } = prep;
+  const { copy, product, genes, winningExamples, written, design } = prep;
   const stored = await storeCreativeImage(db, out.bytes);
   let captioned: { primaryText: string; headline: string; writerModel: string; writerCostUsd: string } | null = null;
   let captionError = "";
   try {
     const cap = await deps.caption(
       db,
-      { image: { bytes: out.bytes, contentType: out.contentType }, product: { name: product.name, code: product.code, priceVnd: product.priceVnd }, genes, draft: { headline: copy.headline, primaryText: copy.primaryText }, winningExamples, options: 1 },
+      {
+        image: { bytes: out.bytes, contentType: out.contentType },
+        product: { name: product.name, code: product.code, priceVnd: product.priceVnd },
+        genes,
+        draft: { headline: copy.headline, primaryText: copy.primaryText },
+        winningExamples,
+        options: 1,
+        ...(design ? { productNote: `Đây là MẪU MỚI của shop (mã ${design.code}) — thiết kế: ${describeDnaVi(design.dna)}. Có thể nói "mẫu mới"; không hứa ngày giao cụ thể.` } : {}),
+      },
       { now: deps.now, entityId: variant.id },
     );
     if (cap.ok) captioned = { primaryText: cap.primaryText, headline: cap.headline, writerModel: `${copy.model} → ${cap.model}`, writerCostUsd: sumCostText(copy.costUsd, cap.costUsd) };
@@ -396,6 +481,8 @@ async function saveGenerated(db: Db, variant: VariantRow, prep: Prepared, out: {
     .set({ ...written, ...(captioned ?? {}), imageId: stored.id, genModel, genCostUsd: out.costUsd === null ? "" : out.costUsd.toFixed(6), genError: captioned ? "" : `${CAPTION_FALLBACK_PREFIX}${captionError}`.slice(0, 1000), status: "GENERATED" })
     .where(and(eq(schema.creativeVariants.id, variant.id), eq(schema.creativeVariants.status, "PLANNED")))
     .returning({ id: schema.creativeVariants.id });
+  // Ảnh đầu tiên của một thiết kế là ảnh ĐẠI DIỆN của nó (tab Thiết kế mới) — không đè ảnh đã có.
+  if (rows.length > 0 && design) await db.update(schema.designConcepts).set({ imageId: stored.id, updatedAt: deps.now }).where(and(eq(schema.designConcepts.id, design.conceptId), isNull(schema.designConcepts.imageId)));
   return rows.length > 0;
 }
 
@@ -686,7 +773,12 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
   const describe = deps.describe ?? ((d: Db, id: string) => describeSource(d, id, { now: at }));
   const caption: VariantCaptioner = deps.caption ?? captionFromImage;
   const perTick = Math.max(1, Math.min(deps.perTick ?? GEN_PER_TICK, CREATIVE_HARD_LIMITS.maxImagesPerDay));
-  const summary: BuildBatchSummary = { batchDay: null, batchId: null, created: false, generated: 0, failed: 0, capped: 0, described: 0, status: null, skippedReason: null, imageBatch: null };
+  const summary: BuildBatchSummary = { batchDay: null, batchId: null, created: false, generated: 0, failed: 0, capped: 0, described: 0, dnaRead: 0, status: null, skippedReason: null, imageBatch: null };
+  // Không có khoá API và không ai tiêm bộ đọc ⇒ bỏ hẳn bước đọc DNA (không một câu truy vấn, không một dòng ghi).
+  const dnaReader: ProductDnaReader | null = deps.dna ?? (env.openaiRest.apiKey ? (d: Db, t) => readProductDna(d, t, { now: at }) : null);
+  const readDna = async () => {
+    if (dnaReader) summary.dnaRead = (await describePendingProducts(db, dnaReader, at)).read;
+  };
 
   const cfg = await readConfig(db);
   if (!cfg.enabled) return { ...summary, skippedReason: "Vòng mẫu đang TẮT (creative.config.enabled = false)." };
@@ -698,10 +790,12 @@ export async function buildBatch(db: Db, now: Date = new Date(), deps: BuildBatc
     batch = await batchByDay(db, day);
     if (batch && isManualSeed(batch.plan) && ["PLANNED", "PENDING_APPROVAL"].includes(batch.status)) {
       summary.described = await describePending(db, describe);
+      await readDna();
       batch = await fillManualSeed(db, batch, cfg);
     }
     if (!batch) {
       summary.described = await describePending(db, describe);
+      await readDna();
       const r = await createBatch(db, day, cfg);
       if (!r.batch) return { ...summary, skippedReason: `Chưa lập được lô ${day}: ${r.emptyReasons.join(" ")} Lượt sau thử lại.` };
       batch = r.batch;

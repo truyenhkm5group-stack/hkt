@@ -1,5 +1,6 @@
 import { ApproveTab } from "@/app/(dashboard)/marketing/creatives/approve-tab";
 import { ConfigTab } from "@/app/(dashboard)/marketing/creatives/config-tab";
+import { DesignTab } from "@/app/(dashboard)/marketing/creatives/design-tab";
 import { LearningTab } from "@/app/(dashboard)/marketing/creatives/learning-tab";
 import { LibraryTab } from "@/app/(dashboard)/marketing/creatives/library-tab";
 import { LiveTab } from "@/app/(dashboard)/marketing/creatives/live-tab";
@@ -16,7 +17,7 @@ import { param, parseListParams, type SearchParams } from "@/lib/search-params";
 export const metadata = { title: "Vòng mẫu quảng cáo" };
 
 /** Tab đã có màn hình. */
-const TABS = new Set(["duyet", "dang-chay", "thu-vien", "hoc", "nguon", "cau-hinh"]);
+const TABS = new Set(["duyet", "thiet-ke", "dang-chay", "thu-vien", "hoc", "nguon", "cau-hinh"]);
 
 /** Tham số chỉ tab Nguồn ảnh đọc — có chúng mà thiếu `tab` thì người ta đang mở Nguồn ảnh (link cũ). */
 const SOURCE_KEYS = ["loai", "bat", "q", "page"];
@@ -52,6 +53,8 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
 
       {tab === "duyet" ? (
         <ApproveTab pending={pending} batchId={param(raw, "lo") || null} canApprove={can(user, "expenses:write")} canEdit={can(user, "ideas:write")} />
+      ) : tab === "thiet-ke" ? (
+        <DesignTab canEdit={can(user, "ideas:write")} />
       ) : tab === "dang-chay" ? (
         <LiveTab canWrite={can(user, "expenses:write")} canKill={can(user, "expenses:write") || can(user, "settings:manage")} canRelease={can(user, "settings:manage")} />
       ) : tab === "thu-vien" ? (

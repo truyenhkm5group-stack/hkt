@@ -29,7 +29,7 @@ import {
 } from "@/lib/constants/creative-loop";
 import { formatNumber, formatVND } from "@/lib/format";
 import type { ProductOption } from "@/lib/queries/creative-sources";
-import { CONFIG_FIELD_LABEL, CONFIG_NUMERIC_FIELDS, numericBounds, validateCreativeConfigInput, type ClampNote, type ConfigNumericField } from "@/lib/validation/creative";
+import { CONFIG_FIELD_LABEL, CONFIG_NUMERIC_FIELDS, SCALE_TEMPLATE_LABEL, numericBounds, validateCreativeConfigInput, type ClampNote, type ConfigNumericField } from "@/lib/validation/creative";
 import { cn } from "@/lib/utils";
 
 const OPS: { value: RuleOp; label: string }[] = [
@@ -55,6 +55,8 @@ type Draft = {
   imageMode: CreativeLoopConfig["imageMode"];
   fallbackImageQuality: CreativeLoopConfig["fallbackImageQuality"];
   focusProductIds: string[];
+  scalePurchaseMessagingCampaignId: string;
+  scaleLeadsCampaignId: string;
   nums: Record<ConfigNumericField, string>;
   killRules: RuleRow[];
   keepRules: RuleRow[];
@@ -85,6 +87,8 @@ function toDraft(c: CreativeLoopConfig): Draft {
     imageMode: c.imageMode,
     fallbackImageQuality: c.fallbackImageQuality,
     focusProductIds: c.focusProductIds,
+    scalePurchaseMessagingCampaignId: c.scaleTemplates.purchaseMessagingCampaignId,
+    scaleLeadsCampaignId: c.scaleTemplates.leadsCampaignId,
     nums,
     killRules: c.killRules.map(ruleToRow),
     keepRules: c.keepRules.map(ruleToRow),
@@ -110,6 +114,7 @@ function toPayload(d: Draft) {
     killRules: d.killRules.map(rowPayload),
     keepRules: d.keepRules.map(rowPayload),
     focusProductIds: d.focusProductIds,
+    scaleTemplates: { purchaseMessagingCampaignId: d.scalePurchaseMessagingCampaignId.trim(), leadsCampaignId: d.scaleLeadsCampaignId.trim() },
     imageModel: d.imageModel,
     imageSize: d.imageSize,
     imageQuality: d.imageQuality,
@@ -137,9 +142,10 @@ const usd = (n: number) => `${n.toLocaleString("vi-VN", { maximumFractionDigits:
  * Giá ƯỚC TÍNH theo đúng bản nháp đang gõ — đọc từ `estimateImageUsd` của hợp đồng, không gõ lại con số
  * nào. Số ô một lô = số mẫu đăng + số sinh dư (đã kẹp như lúc lưu).
  */
-function ImageCostEstimate({ draft, payload }: { draft: Draft; payload: Record<string, unknown> }) {
+function ImageCostEstimate({ draft, payload, mockupCount }: { draft: Draft; payload: Record<string, unknown>; mockupCount: number }) {
   const c = normalizeCreativeConfig(payload).config;
-  const slots = c.batchSize + c.extraCandidates;
+  // Số ô máy lập = thiết kế + sinh dư + mockup đã bật + thăm dò, không quá số mẫu đăng + sinh dư (như lúc lập lô).
+  const slots = Math.min(c.batchSize + c.extraCandidates, c.designSlots + c.extraCandidates + mockupCount + c.exploreSlots);
   const one = estimateImageUsd(c.imageModel, c.imageQuality, c.imageSize, c.imageMode);
   const sync = estimateImageUsd(c.imageModel, c.imageQuality, c.imageSize, "SYNC");
   const rescue = estimateImageUsd(c.imageModel, c.fallbackImageQuality, c.imageSize, "SYNC");
@@ -405,6 +411,17 @@ export function ConfigForm({ config, products, canManage }: { config: CreativeLo
         </div>
       </Group>
 
+      <Group
+        title="Scale mẫu thắng"
+        hint="Mẫu THẮNG / HỨA HẸN ⇒ máy đề nghị scale. Người bấm “Dựng nháp” ⇒ máy SAO CHÉP đúng chiến dịch MẪU bên dưới (mỗi chiến dịch đúng một nhóm + một mẩu, mục tiêu đặt sẵn), thay bài bằng ảnh + câu chữ của mẫu thắng, đặt ngân sách ngày — bản sao luôn TẮT. Chỉ bật khi người bấm “Duyệt chạy”. Máy không tạo chiến dịch nào khác."
+      >
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <TextField id="cfg-scale-pm" label={SCALE_TEMPLATE_LABEL.purchaseMessagingCampaignId} value={draft.scalePurchaseMessagingCampaignId} onChange={set("scalePurchaseMessagingCampaignId")} disabled={disabled} missing={false} />
+          <TextField id="cfg-scale-lead" label={SCALE_TEMPLATE_LABEL.leadsCampaignId} value={draft.scaleLeadsCampaignId} onChange={set("scaleLeadsCampaignId")} disabled={disabled} missing={false} />
+          {nf("scaleDailyBudgetVnd", "đ")}
+        </div>
+      </Group>
+
       <Group title="Lịch (giờ Việt Nam)" hint="Lô cho ngày mai được dựng lúc giờ dựng lô; phải được duyệt trước giờ chạy một khoảng hạn duyệt, quá hạn thì lô thành “Quá hạn duyệt” và không đồng nào được chi. Hết khung test, máy đợi thêm một khoảng để đơn từ tin nhắn kịp về rồi mới kết luận.">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {nf("genHourVn", "giờ")}
@@ -414,11 +431,19 @@ export function ConfigForm({ config, products, canManage }: { config: CreativeLo
         </div>
       </Group>
 
-      <Group title="Lập lô" hint="Ô THĂM DÒ thử gen mới / nguồn mới; phần còn lại KHAI THÁC — biến thể của mẫu tốt, đổi đúng một gen. Mã ưu tiên chỉ áp cho ô thăm dò; để trống ⇒ mọi mã có ảnh sản phẩm thật.">
+      <Group
+        title="Lập lô"
+        hint="Chủ shop 24/09/2026: lô = các ô THIẾT KẾ MỚI (mẫu chưa từng có, lai DNA của mã bán tốt) + 1 ô MOCKUP cho mỗi mẫu thắng được bật “Chạy mockup hằng ngày” ở tab Nguồn ảnh. Thứ tự đăng: mẫu tự làm → thiết kế mới → mockup → thăm dò; trần số mẫu cắt ở cuối. Ô thăm dò mặc định 0 — thăm dò giờ là việc của ô thiết kế. Mã ưu tiên chỉ áp cho ô thăm dò / mockup; để trống ⇒ mọi mã có ảnh sản phẩm thật."
+      >
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {nf("extraCandidates", "mẫu")}
-          {nf("exploreShare")}
+          {nf("designSlots", "ô")}
+          {nf("extraCandidates", "ô")}
+          {nf("exploreSlots", "ô")}
         </div>
+        <p className="text-[12px] text-muted-foreground">
+          Mockup hằng ngày: <b className="numeric">{formatNumber(config.mockupSourceIds.length)}</b> quảng cáo cũ · <b className="numeric">{formatNumber(config.mockupProductIds.length)}</b> mã hàng — bật / tắt bằng
+          công tắc “Chạy mockup hằng ngày” trên thẻ nguồn ở tab Nguồn ảnh.
+        </p>
         <div className="space-y-1.5">
           <Label className="text-[12.5px]">{CONFIG_FIELD_LABEL.focusProductIds}</Label>
           <div className="flex flex-wrap gap-1.5">
@@ -504,7 +529,7 @@ export function ConfigForm({ config, products, canManage }: { config: CreativeLo
           {nf("imageDailyCapUsd", "USD")}
           {nf("loserImageRetentionDays", "ngày")}
         </div>
-        <ImageCostEstimate draft={draft} payload={payload} />
+        <ImageCostEstimate draft={draft} payload={payload} mockupCount={config.mockupSourceIds.length + config.mockupProductIds.length} />
       </Group>
 
       <Group title="Bộ luật chấm mẫu">

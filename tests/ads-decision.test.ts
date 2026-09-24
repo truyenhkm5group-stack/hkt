@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
-import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis, isConclusive, rowsToRender, spendClassOf } from "@/lib/constants/ads-decision";
+import { ADS_DECISION_RULE, ADS_ACTION_HINT, ADS_ACTION_LABEL, ADS_DIMENSION_HAS_SPEND, type AdsAction, type DecisionBasis, isConclusive, keepRipeRows, rowsToRender, spendClassOf } from "@/lib/constants/ads-decision";
 import { DECISION_METRIC_HINT, buildDecisionRow, decideAction, getAdsDecision, inheritVerdict } from "@/lib/queries/ads-decision";
 import { hrefWith, type Period } from "@/lib/search-params";
 
@@ -453,6 +453,20 @@ export async function testAdsDecision(db: Db) {
   // `all` = vẽ hết.
   assert.equal(rowsToRender(hon, true, 80).shown.length, hon.length);
   assert.equal(rowsToRender(hon, true, 80).hidden.length, 0);
+
+  /*
+    DÒNG ĐÃ CHÍN KHÔNG ĐƯỢC NẰM TRONG PHẦN ẨN — nút Bàn tay chỉ hiện trên dòng chín, nên một dòng
+    chín bị ẩn là một nút không ai thấy (chủ shop báo 24/09/2026: "không thấy Bàn tay").
+  */
+  const tach = rowsToRender(hon, false, 80);
+  const chinBiAn = tach.hidden[tach.hidden.length - 1];
+  assert.ok(chinBiAn, "bài này cần ít nhất một dòng ẩn để có nghĩa");
+  const giu = keepRipeRows(tach, new Set([chinBiAn.key]));
+  assert.ok(giu.shown.some((r) => r.key === chinBiAn.key), "dòng đã chín phải được gửi xuống dù rowsToRender xếp nó vào phần ẩn");
+  assert.ok(!giu.hidden.some((r) => r.key === chinBiAn.key), "một dòng không được vừa hiện vừa ẩn");
+  assert.deepEqual(giu.shown.slice(0, tach.shown.length).map((r) => r.key), tach.shown.map((r) => r.key), "phần đang hiện giữ nguyên thứ tự — không xáo lại bảng");
+  assert.equal(giu.shown.length + giu.hidden.length, hon.length, "không thêm, không mất dòng nào");
+  assert.deepEqual(keepRipeRows(tach, new Set()), tach, "không dòng nào chín thì y như cũ");
   // NO_SPEND_DATA cũng là "chưa có kết luận" — không được giữ chỗ như một khuyến nghị.
   assert.equal(isConclusive("NO_SPEND_DATA"), false);
   assert.equal(isConclusive("WATCH"), true, "THEO DÕI là một kết luận thật");
