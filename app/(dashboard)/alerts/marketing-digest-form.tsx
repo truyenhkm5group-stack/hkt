@@ -179,7 +179,7 @@ export function MarketingDigestForm({ config, marketers }: { config: MarketingAl
 
       <div className="flex flex-wrap gap-2">
         <Button size="sm" disabled={pending} onClick={save}>
-          Lưu cấu hình
+          Lưu bản tin marketing
         </Button>
         <Button size="sm" variant="outline" disabled={pending} onClick={test}>
           <Send className="mr-1 size-3.5" /> Gửi thử vào nhóm quản lý
