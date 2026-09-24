@@ -25,12 +25,12 @@ export function DescriptionList({ items, className, columns = 2 }: { items: { la
 // mà thả người đọc xuống đầu một trang dài thì họ vẫn phải tự đi tìm.
 export function SectionCard({ id, title, description, hint, actions, children, className, contentClassName, padded = true }: { id?: string; title?: React.ReactNode; description?: React.ReactNode; hint?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; className?: string; contentClassName?: string; padded?: boolean }) {
   return (
-    <section id={id} className={cn("overflow-hidden scroll-mt-20 rounded-xl border bg-card text-card-foreground shadow-[var(--shadow-card)]", className)}>
+    <section id={id} className={cn("overflow-hidden scroll-mt-24 rounded-2xl border border-transparent bg-card text-card-foreground shadow-[var(--shadow-card)]", className)}>
       {/* Bộ lọc dài (Cần xử lý) từng ép tiêu đề thành một cột hẹp: hàng đầu được GÃY DÒNG, tiêu đề giữ tối thiểu 220px. */}
       {title ? (
-        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 border-b border-hairline px-5 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 border-b border-hairline px-5 py-3.5">
           <div className="min-w-0 flex-1 basis-[220px]">
-            <h2 className="flex items-center gap-1.5 text-[13.5px] font-bold">
+            <h2 className="flex items-center gap-1.5 text-[14px] font-bold tracking-[-0.005em]">
               {title}
               {hint ? <InfoHint>{hint}</InfoHint> : null}
             </h2>
@@ -47,7 +47,7 @@ export function SectionCard({ id, title, description, hint, actions, children, c
 
 export function EmptyState({ title, description, action, icon: Icon, className }: { title: string; description?: React.ReactNode; action?: React.ReactNode; icon?: LucideIcon; className?: string }) {
   return (
-    <div className={cn("flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed bg-surface-sunken/40 p-10 text-center", className)}>
+    <div className={cn("flex flex-col items-center justify-center gap-2 rounded-2xl border border-dashed bg-surface-sunken/40 p-10 text-center", className)}>
       {Icon ? (
         <span className="mb-1 flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
           <Icon className="size-5" />

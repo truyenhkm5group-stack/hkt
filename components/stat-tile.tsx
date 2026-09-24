@@ -44,7 +44,7 @@ export function StatStrip({ items, className, columns = 4 }: { items: StatTilePr
     cũng tự đúng: ngang có, dọc có, mép ngoài không thừa.
   */
   return (
-    <div className={cn("grid gap-px overflow-hidden rounded-xl border bg-border shadow-[var(--shadow-card)]", cols, className)}>
+    <div className={cn("grid gap-px overflow-hidden rounded-2xl bg-hairline shadow-[var(--shadow-card)]", cols, className)}>
       {items.map((item) => (
         <StatTile key={item.label} {...item} className="bg-card" />
       ))}
@@ -60,11 +60,11 @@ export function StatTile({ label, value, note, hint, icon: Icon, tone = "default
         <span className="truncate">{label}</span>
         {hint ? <InfoHint>{hint}</InfoHint> : null}
       </p>
-      <p className={cn("numeric mt-1 text-[19px] font-bold leading-6 tracking-tight", valueTones[tone])}>{value}</p>
+      <p className={cn("numeric mt-1 text-[20px] font-extrabold leading-6 tracking-[-0.02em]", valueTones[tone])}>{value}</p>
       {note ? <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{note}</p> : null}
     </>
   );
-  const shell = cn("min-w-0 px-4 py-3", className);
+  const shell = cn("min-w-0 px-5 py-3.5", className);
   if (!href) return <div className={shell}>{body}</div>;
   return (
     <Link href={href} className={cn(shell, "block transition-colors hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring")}>

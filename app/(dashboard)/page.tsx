@@ -47,7 +47,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const maxChannel = Math.max(1, ...data.channels.map((c) => c.revenue));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
         eyebrow="Trung tâm điều hành"
         title="Tổng quan kinh doanh"
@@ -89,6 +89,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           bậc 2 — lợi nhuận và tiền/việc đang treo, thứ cần quyết hôm nay;
           bậc 3 — tỷ lệ theo dõi định kỳ, gom vào một dải mảnh.
         Cùng chừng ấy thông tin, không bỏ con số nào.
+
+        GIAO DIỆN BENTO (24/09/2026): ô ② mang nền MỰC — đó là con số chủ shop hỏi đầu tiên mỗi sáng
+        ("hàng tới tay khách được bao nhiêu"), nên nó là ô duy nhất được nhấn trên trang.
       */}
       <section className="grid gap-4 lg:grid-cols-3">
         <MetricCard
@@ -106,6 +109,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           size="lg"
           href={`/reports/returns?period=${period.key}`}
           label="② Doanh thu GIAO THÀNH CÔNG"
+          emphasis
           value={formatVND(data.money.delivered, { compact: true })}
           change={change(data.kpi.successRevenue, data.previous?.successRevenue)}
           note={`${formatNumber(data.kpi.successOrders)} đơn tới tay khách · GTC ${successRate === null ? "—" : `${successRate.toFixed(1)}%`}${data.kpi.unknownOrders ? ` · ${formatNumber(data.kpi.unknownOrders)} chưa có chứng từ` : ""}`}
@@ -124,7 +128,14 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         />
       </section>
 
+      {/*
+        Ô BENTO LỚN: biểu đồ doanh thu chiếm nửa trái, bốn thẻ bậc 2 xếp 2×2 bên phải. Biểu đồ trả lời
+        "xu hướng thế nào", bốn thẻ trả lời "cần quyết gì hôm nay" — đứng cạnh nhau để đọc một lượt.
+      */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <SectionCard title="Doanh thu theo ngày" hint="Doanh thu lên đơn so với doanh thu đơn đã giao thành công" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>} className="sm:col-span-2 xl:row-span-2">
+          <RevenueChart data={data.daily} className="h-[300px]" />
+        </SectionCard>
         <MetricCard
           href={`/reports?tab=truth&period=${period.key}`}
           label="Lợi nhuận ước tính"
@@ -205,19 +216,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         chúng. Trước đây cả trang phải đợi khối chậm nhất.
       */}
       {/* Độ tươi đứng TRƯỚC mọi con số: biết số cũ hay mới là điều kiện để đọc số. */}
-      <Suspense fallback={<Skeleton className="h-9 rounded-xl" />}>
+      <Suspense fallback={<Skeleton className="h-9 rounded-2xl" />}>
         <DataFreshnessStrip />
       </Suspense>
 
-      <Suspense fallback={<Skeleton className="h-32 rounded-xl" />}>
+      <Suspense fallback={<Skeleton className="h-32 rounded-2xl" />}>
         <BusinessBriefSection period={period} />
       </Suspense>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)]">
-        <SectionCard title="Doanh thu theo ngày" hint="Doanh thu lên đơn so với doanh thu đơn đã giao thành công" actions={<span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold">{period.label}</span>}>
-          <RevenueChart data={data.daily} />
-        </SectionCard>
+      {/*
+        BỐN KHỐI DƯỚI: lưới 12 cột để mỗi khối rộng đúng bằng nội dung của nó — danh sách việc và
+        thanh "hàng đang ở đâu" cần chỗ cho nhãn dài, kênh bán chỉ cần một cột hẹp.
+      */}
+      <section className="grid gap-4 lg:grid-cols-2 xl:grid-cols-12">
         <SectionCard
+          className="xl:col-span-7"
           title="Việc cần làm hôm nay"
           hint={
             <>
@@ -239,15 +252,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             {data.attention.lowStock === null ? "đang tính" : formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp
           </div>
         </SectionCard>
-      </section>
 
-      {/*
-        BA KHỐI, KHÔNG PHẢI NĂM. Trước đây trang còn "Vận đơn & COD" (bản chép của tháp Giao vận và
-        của trang Đối soát COD) và "Đơn hàng mới nhất" (bản chép 8 cột của trang Đơn hàng). Cùng số
-        ở hai nơi là hai chỗ để lệch, và ba truy vấn nữa mỗi lần mở trang chủ. Mỗi khối chỉ còn ở
-        NHÀ của nó: vận đơn ở /shipments, COD ở /cod, đơn mới ở /orders.
-      */}
-      <section className="grid gap-5 lg:grid-cols-2 2xl:grid-cols-3">
+        {/*
+          BA KHỐI, KHÔNG PHẢI NĂM. Trước đây trang còn "Vận đơn & COD" (bản chép của tháp Giao vận và
+          của trang Đối soát COD) và "Đơn hàng mới nhất" (bản chép 8 cột của trang Đơn hàng). Cùng số
+          ở hai nơi là hai chỗ để lệch, và ba truy vấn nữa mỗi lần mở trang chủ. Mỗi khối chỉ còn ở
+          NHÀ của nó: vận đơn ở /shipments, COD ở /cod, đơn mới ở /orders.
+        */}
         {/*
           ═══ HAI KHỐI TRẠNG THÁI, CỐ Ý ĐỨNG CẠNH NHAU ═══
 
@@ -257,6 +268,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           (đơn bấm "đã gửi" mà chưa ai lấy, đơn đã tới tay khách mà chưa ai bấm sang "đã nhận").
         */}
         <SectionCard
+          className="xl:col-span-5"
           title="Hàng đang ở đâu"
           hint={
             <>
@@ -314,6 +326,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           ) : null}
         </SectionCard>
         <SectionCard
+          className="xl:col-span-5"
           title="Luồng đơn hàng"
           hint={
             <>
@@ -338,7 +351,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             })}
           </div>
         </SectionCard>
-        <SectionCard title="Hiệu quả theo kênh bán" hint="Doanh thu lên đơn theo nguồn (không tính đơn huỷ)">
+        <SectionCard className="xl:col-span-3" title="Hiệu quả theo kênh bán" hint="Doanh thu lên đơn theo nguồn (không tính đơn huỷ)">
           {data.channels.length ? (
             <div className="space-y-4">
               {data.channels.slice(0, 6).map((channel, index) => (
@@ -363,7 +376,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <p className="text-sm text-muted-foreground">Chưa có dữ liệu.</p>
           )}
         </SectionCard>
-        <SectionCard title="Sản phẩm bán chạy" hint="Theo số lượng bán trong kỳ" actions={<Link href="/products" className="text-xs font-semibold text-primary hover:underline">Xem kho</Link>}>
+        <SectionCard className="lg:col-span-2 xl:col-span-4" title="Sản phẩm bán chạy" hint="Theo số lượng bán trong kỳ" actions={<Link href="/products" className="text-xs font-semibold text-primary hover:underline">Xem kho</Link>}>
           {data.topProducts.length ? (
             <ul className="divide-y">
               {data.topProducts.map((p, i) => (

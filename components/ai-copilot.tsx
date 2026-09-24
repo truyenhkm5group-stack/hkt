@@ -147,7 +147,7 @@ export function AiCopilot() {
 
   return (
     <>
-      <Button variant="outline" size="sm" className="h-8 gap-1.5 px-2 text-xs" onClick={() => setOpen(true)} title="AI Copilot (Ctrl+J)" aria-label="Mở AI Copilot">
+      <Button variant="ghost" size="sm" className="h-10 gap-1.5 rounded-full px-3 text-xs" onClick={() => setOpen(true)} title="AI Copilot (Ctrl+J)" aria-label="Mở AI Copilot">
         <Sparkles className="size-3.5 text-brand" />
         <span className="hidden sm:inline">AI</span>
       </Button>

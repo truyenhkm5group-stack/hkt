@@ -22,7 +22,7 @@ export function PageHeader({ title, description, hint, eyebrow, actions, refresh
       <div className="min-w-0">
         {eyebrow ? <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">{eyebrow}</p> : null}
         <div className="flex min-w-0 items-center gap-1.5">
-          <h1 className="truncate text-xl font-bold tracking-tight sm:text-2xl">{title}</h1>
+          <h1 className="truncate text-2xl font-extrabold tracking-[-0.02em] sm:text-[30px] sm:leading-9">{title}</h1>
           {hint ? <InfoHint>{hint}</InfoHint> : null}
           {/* Đang đổi kỳ / bộ lọc: số cũ vẫn hiện (mờ đi), nhãn này nói rõ số mới đang được tính. */}
           <RefreshingBadge />
