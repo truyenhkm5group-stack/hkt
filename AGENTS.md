@@ -559,7 +559,10 @@ deploy dừng, không phải cảnh báo.
     khi đợt thiếu kết thúc.
 
 ## 4. Database
-- Sửa schema **chỉ** trong `db/schema.ts`, rồi `npm run db:generate` để sinh migration mới trong `drizzle/`.
+- Sửa schema **chỉ** trong `db/schema.ts`, rồi thêm migration mới trong `drizzle/`. **KHÔNG dùng
+  `npm run db:generate`**: ảnh chụp `drizzle/meta/*_snapshot.json` chỉ tới `0032`, nên nó sinh migration
+  dựng lại TOÀN BỘ lược đồ. Migration viết TAY, idempotent (`IF NOT EXISTS` / `DROP … IF EXISTS`, mẫu ở
+  đầu `drizzle/0063_bank_sepay_webhook.sql`), tự thêm mục `_journal.json` với `when` muộn hơn mục cuối.
   **Không sửa tay, không đánh số lại, không xoá một migration ĐÃ ÁP** — production đã chạy nó rồi, và
   `drizzle.__drizzle_migrations` trên máy chủ mới là lời khai cuối cùng về việc gì đã chạy. Số migration
   mới nhất đọc ở `drizzle/meta/_journal.json`, KHÔNG chép vào tài liệu (chép là để nó cũ đi sau một tuần);
@@ -571,6 +574,10 @@ deploy dừng, không phải cảnh báo.
 - Upsert theo khoá tự nhiên: `shipments.vtp_order_number` (UNIQUE), `orders.id` (id Pancake dạng chuỗi — có thể vượt 2^53), `landing_orders.row_key`, `settings.key`.
 - Không xoá dữ liệu Pancake đã đồng bộ (kể cả đơn `DELETED`); dùng cờ/trạng thái.
 - Truy vấn production **chỉ đọc** qua ops `db-query` (một câu lệnh mỗi lần; CTE không tồn tại sang câu sau; enum phải cast `::text`; bảng `notifications` dùng `resolved_at` chứ không có `status`). Thay đổi dữ liệu production chỉ qua job/action của ứng dụng hoặc `set-setting`.
+  Từ 24/09/2026 `db-query` chạy bằng role `erp_ro` (không quyền ghi, không đọc `pg_authid`), câu SQL
+  KHÔNG được chứa dấu `\`, và **kết quả KHÔNG in ra log** (kho PUBLIC) — nó là hiện vật MÃ HOÁ giữ 1 ngày,
+  giải bằng khoá riêng trên máy vận hành (`docs/ops-doc-ket-qua.md`). Cùng cơ chế cho mọi thao tác trong
+  `OPS_THAO_TAC_MA_HOA`. Không bao giờ dán dữ liệu khách đã giải mã vào commit, PR, tài liệu hay tin nhắn.
 - Thời gian trong DB là `timestamptz`; Pancake trả ISO không múi giờ nhưng là UTC; Viettel Post là giờ VN (UTC+7) — chuyển đổi trong mapper, không trong query.
 
 ## 5. Tích hợp API
@@ -585,7 +592,7 @@ deploy dừng, không phải cảnh báo.
 2. `npm run lint` sạch.
 3. `npm test` in **"TẤT CẢ KIỂM THỬ ĐẠT"**. Sửa logic báo cáo / import / landing / cảnh báo thì **phải thêm hoặc cập nhật assertion** trong `tests/sync-fixtures.test.ts` (fixture dùng chung: thêm đơn cho `rr-var` sẽ đổi tổng của các assertion khác — kiểm tra lại toàn bộ khối 8).
 4. `npm run build` khi chạm `components/data-table`, ranh giới client/server, `next.config.ts`, hoặc import mới từ `lib/*` vào client component.
-5. Sửa số liệu báo cáo: đối chiếu trước/sau trên production bằng ops `db-query` và ghi số vào commit message / câu trả lời.
+5. Sửa số liệu báo cáo: đối chiếu trước/sau trên production bằng ops `db-query` (kết quả mã hoá — mục 4) và ghi SỐ TỔNG HỢP vào commit message / câu trả lời.
 6. Commit message tiếng Việt: dòng đầu là kết quả nghiệp vụ, thân giải thích **vì sao** (nguyên nhân gốc) và liệt kê thay đổi; không ghi tên model AI vào commit/PR/code. Push lên nhánh phát triển hiện tại và `main` (theo thoả thuận với chủ shop), rồi deploy bằng workflow **Deploy ERP to VPS** trên `main` và xác nhận run thành công.
 7. Không tạo Pull Request trừ khi chủ shop yêu cầu.
 

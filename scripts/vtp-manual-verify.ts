@@ -39,7 +39,10 @@ const VERIFIED_AT = new Date("2026-09-08T00:00:00+07:00");
 
 type CodText = "Đã nhận COD" | "Không có COD" | "Chưa đối soát COD";
 type Record18 = {
-  tracking: string; phone: string; status: string; cod: CodText;
+  tracking: string;
+  /** Không còn ghi trong mã nguồn (kho PUBLIC) — xem chú thích RECORDS. */
+  phone?: string;
+  status: string; cod: CodText;
   /** COD KHAI BÁO trên vận đơn. */
   amount: number;
   /**
@@ -60,19 +63,21 @@ type Record18 = {
 
 /**
  * Chủ shop xác minh trên giao diện Viettel Post ngày 08/09/2026.
- * `phone` chỉ để đối chiếu khi con người xem lại — KHÔNG dùng để ghép đơn.
+ * SĐT khách ĐÃ GỠ khỏi tệp này (25/09/2026): kho mã PUBLIC, và lô đã áp xong ngày 08/09 — số đã nằm
+ * trong CSDL (`shipments.receiver_phone`, `raw` của sự kiện). Chạy lại lô không cần SĐT: vận đơn đã có
+ * thì chỉ điền SĐT khi ô còn trống, mà ô ấy không trống. SĐT chưa bao giờ dùng để ghép đơn.
  */
 const RECORDS: Record18[] = [
-  { tracking: "PKE1511633400", phone: "0979936889", status: "Giao thành công", cod: "Đã nhận COD", amount: 524_000 },
+  { tracking: "PKE1511633400", status: "Giao thành công", cod: "Đã nhận COD", amount: 524_000 },
 
   // Chủ shop chép "PKE14844634301P1" và "PKE14844634303". Hai chuỗi đó KHÔNG tồn tại trong tệp xuất
   // của chính Viettel Post, trong khi hai mã dưới đây có, và trùng khít từng thuộc tính đã xác minh
   // (vận đơn chiều về 0đ "Không có COD"; vận đơn gốc 30.000đ "Giao thành công"). Kết luận: lỗi đảo
   // chữ số lúc chép. Ghi theo mã CÓ THẬT, và lưu lại nguyên văn chuỗi đã chép để truy nguyên.
-  { tracking: "PKE14844634031P1", phone: "0345222695", status: "Giao thành công", cod: "Không có COD", amount: 0, note: "chép tay: PKE14844634301P1 (đảo chữ số)" },
-  { tracking: "PKE1484463403", phone: "0345222695", status: "Giao thành công", cod: "Đã nhận COD", amount: 30_000, note: "chép tay: PKE14844634303 (đảo chữ số)" },
+  { tracking: "PKE14844634031P1", status: "Giao thành công", cod: "Không có COD", amount: 0, note: "chép tay: PKE14844634301P1 (đảo chữ số)" },
+  { tracking: "PKE1484463403", status: "Giao thành công", cod: "Đã nhận COD", amount: 30_000, note: "chép tay: PKE14844634303 (đảo chữ số)" },
 
-  { tracking: "PKE14844633651P1", phone: "0345222695", status: "Giao thành công", cod: "Không có COD", amount: 0 },
+  { tracking: "PKE14844633651P1", status: "Giao thành công", cod: "Không có COD", amount: 0 },
   // Tệp xuất ghi 30.000đ cho vận đơn này, giao diện web ghi 474.000đ. Lấy số chủ shop xác minh trực
   // tiếp trên web; chênh lệch đã nêu trong báo cáo để đối chiếu lại.
   // ĐÍNH CHÍNH 08/09/2026 — tiêu đề "Giao thành công" KHÔNG đủ để kết luận đơn đã giao.
@@ -81,25 +86,25 @@ const RECORDS: Record18[] = [
   // PKE14844633651P1 đã giao thành công VỀ SHOP. Tức khách chỉ trả tiền xem hàng rồi không nhận,
   // toàn bộ hàng bán quay về. 474.000đ KHÔNG phải doanh thu; 30.000đ là tiền ĐVVC thực thu.
   // `ORDER_OUTCOME` kết luận HOÀN qua HAI đường độc lập: có vận đơn chiều hoàn, và thực thu < 50K.
-  { tracking: "PKE1484463365", phone: "0345222695", status: "Giao thành công", cod: "Đã nhận COD",
+  { tracking: "PKE1484463365", status: "Giao thành công", cod: "Đã nhận COD",
     amount: 474_000, collected: 30_000, partial: true, returnedWeight: 1_000, linkedReturn: "PKE14844633651P1",
     note: "giao một phần: khách trả 30.000đ xem hàng rồi hoàn — hàng bán KHÔNG tới tay khách" },
-  { tracking: "PKE1484450905", phone: "0345222695", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 399_000 },
-  { tracking: "PKE1484434062", phone: "0345222695", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
+  { tracking: "PKE1484450905", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 399_000 },
+  { tracking: "PKE1484434062", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
 
-  { tracking: "PKE14844633801P1", phone: "0896997119", status: "Giao thành công", cod: "Không có COD", amount: 0 },
-  { tracking: "PKE1484463380", phone: "0896997119", status: "Giao thành công", cod: "Đã nhận COD", amount: 5_001 },
-  { tracking: "PKE1484463371", phone: "0896997119", status: "Giao thành công", cod: "Đã nhận COD", amount: 474_000 },
-  { tracking: "PKE1484450889", phone: "0896997119", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
-  { tracking: "PKE1484434067", phone: "0896997119", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
+  { tracking: "PKE14844633801P1", status: "Giao thành công", cod: "Không có COD", amount: 0 },
+  { tracking: "PKE1484463380", status: "Giao thành công", cod: "Đã nhận COD", amount: 5_001 },
+  { tracking: "PKE1484463371", status: "Giao thành công", cod: "Đã nhận COD", amount: 474_000 },
+  { tracking: "PKE1484450889", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
+  { tracking: "PKE1484434067", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
 
-  { tracking: "PKE1484460381", phone: "0909728879", status: "Giao thành công", cod: "Đã nhận COD", amount: 474_000 },
-  { tracking: "PKE1484463375", phone: "0909728879", status: "Giao thành công", cod: "Đã nhận COD", amount: 474_000 },
-  { tracking: "PKE1484434076", phone: "0909728879", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
-  { tracking: "PKE1484434068", phone: "0909728879", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
+  { tracking: "PKE1484460381", status: "Giao thành công", cod: "Đã nhận COD", amount: 474_000 },
+  { tracking: "PKE1484463375", status: "Giao thành công", cod: "Đã nhận COD", amount: 474_000 },
+  { tracking: "PKE1484434076", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
+  { tracking: "PKE1484434068", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 474_000 },
 
-  { tracking: "PKE1508908614", phone: "0985222958", status: "Đang chuyển hoàn", cod: "Chưa đối soát COD", amount: 849_000 },
-  { tracking: "PKE1508295104", phone: "0985222958", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 849_000 },
+  { tracking: "PKE1508908614", status: "Đang chuyển hoàn", cod: "Chưa đối soát COD", amount: 849_000 },
+  { tracking: "PKE1508295104", status: "Shop hủy lấy", cod: "Chưa đối soát COD", amount: 849_000 },
 ];
 
 /** Chữ của giao diện Viettel Post → trạng thái chuẩn của ERP. Chiều hoàn xử lý bằng `legType`. */
@@ -173,7 +178,7 @@ async function main() {
           verificationStatus: "VERIFIED", verifiedAt: VERIFIED_AT, verifiedBy: "SHOP_OWNER",
           sourceReference: `${BATCH}:${r.tracking}`,
           raw: { evidenceType: "CARRIER_SCREENSHOT", verifiedBy: "SHOP_OWNER", batch: BATCH,
-            statusText: r.status, codText: r.cod, phone: r.phone, note: r.note ?? null,
+            statusText: r.status, codText: r.cod, phone: r.phone ?? null, note: r.note ?? null,
             // Giữ NGUYÊN VĂN chứng từ: khai báo, thực thu, giao một phần, khối lượng hoàn, vận đơn hoàn.
             direction: legOf ? "RETURN" : "OUTBOUND",
             originalCod: r.amount, actualCollected: r.collected ?? null,
@@ -189,7 +194,7 @@ async function main() {
         else if (!ship.codAmount && r.amount) set.codAmount = r.amount;
         // Số THỰC THU chỉ ghi khi chứng từ nói rõ, và chỉ đi lên — không lần nhập nào được hạ nó.
         if (r.collected !== undefined && r.collected > (ship.codCollected ?? 0)) set.codCollected = r.collected;
-        if (!ship.receiverPhone) set.receiverPhone = r.phone;
+        if (!ship.receiverPhone && r.phone) set.receiverPhone = r.phone;
         if (Object.keys(set).length) await db.update(schema.shipments).set({ ...set, updatedAt: new Date() }).where(eq(schema.shipments.id, ship.id));
         // Trạng thái vận đơn LUÔN do lịch sử quyết định — không ghi tay vào `stage`.
         await materializeShipmentState(db, ship.id);
@@ -198,7 +203,7 @@ async function main() {
 
     const after = apply && ship ? await db.query.shipments.findFirst({ where: eq(schema.shipments.id, ship.id) }) : null;
     rows.push({
-      ma_van_don: r.tracking, sdt_doi_chieu: r.phone, chieu: legOf ? "HOÀN" : "ĐI",
+      ma_van_don: r.tracking, sdt_doi_chieu: r.phone ?? "—", chieu: legOf ? "HOÀN" : "ĐI",
       van_don: existed ? "đã có" : apply ? "đã tạo" : "sẽ tạo",
       trang_thai_truoc: before?.stage ?? "—", trang_thai_de_xuat: stage, trang_thai_sau: after?.stage ?? "—",
       cod_truoc: before ? `${before.codStatus} ${before.codAmount}đ` : "—",
