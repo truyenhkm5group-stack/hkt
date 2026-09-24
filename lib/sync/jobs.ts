@@ -429,10 +429,19 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
         thoại của chúng. `applyStaleReconciliation` phủ cả những loại còn lại bằng CÙNG bộ điều
         kiện mà nơi SINH case dùng (`lib/constants/case-semantics.ts`) — một luật, hai đầu.
       */
-      const docSoat = await applyStaleReconciliation({ dryRun: false, actor: "job:cs-chat" }).catch(() => null);
+      /*
+        Lỗi đối chiếu KHÔNG được nuốt im lặng: bản cũ `.catch(() => null)` nên một câu SQL hỏng làm
+        hàng đợi ngừng tự dọn mà sổ `sync_runs` vẫn ghi lượt chạy thành công. Vẫn không chặn lượt
+        quét hội thoại phía sau, nhưng câu lỗi phải nằm trong kết quả job.
+      */
+      let loiDoiChieu: string | null = null;
+      const docSoat = await applyStaleReconciliation({ dryRun: false, actor: "job:cs-chat" }).catch((e: unknown) => {
+        loiDoiChieu = e instanceof Error ? e.message : String(e);
+        return null;
+      });
       const r = await syncPancakeChatCases({ hours: num(o.params?.hours) });
       await evaluateAlerts().catch(() => undefined);
-      return { ...r, reconciled: (docSoat?.closed ?? 0) + (docSoat?.orderNotCreated.closedTotal ?? 0), stillPending: docSoat?.orderNotCreated.stillPending ?? null };
+      return { ...r, reconciled: (docSoat?.closed ?? 0) + (docSoat?.orderNotCreated.closedTotal ?? 0), stillPending: docSoat?.orderNotCreated.stillPending ?? null, reconcileError: loiDoiChieu };
     },
   },
   "ads-billing": {

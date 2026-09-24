@@ -67,6 +67,12 @@ export const CS_ESCALATE_KINDS: readonly CsKind[] = ["ORDER_NOT_CREATED", "URGE_
 export const CS_ESCALATE_WINDOW_HOURS = 72;
 /** Người phụ trách là máy, không phải người: việc gán cho nó không được tách ra thành việc của "ai đó". */
 export const CS_BOT_ASSIGNEES: readonly string[] = ["Bot ERP"];
+/**
+ * Nguồn case mà BOT tự ghi ô kết luận (`resolution`) ngay khi nhắn khách — `lib/cs/failed-delivery.ts`
+ * và `lib/cs/phone-verify.ts`. Ô ấy ở các case này là lời của máy, KHÔNG phải dấu vết người đã xử lý;
+ * đọc nó như dấu tay người thì máy đối chiếu không bao giờ đóng được case bot đã nhắn (`lib/cs/stale.ts`).
+ */
+export const CS_BOT_SOURCES: readonly string[] = ["AUTO_FAILED_DELIVERY", "AUTO_PHONE_VERIFY"];
 
 /**
  * ═══════ "ĐÃ ĐÓNG" KHÔNG PHẢI LÀ "ĐÃ LÀM" ═══════
