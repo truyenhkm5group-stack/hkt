@@ -4460,6 +4460,33 @@ export const conversationFunnel = pgTable(
   ],
 );
 
+/**
+ * KẾT LUẬN NGỮ NGHĨA ĐÃ TRẢ TIỀN — một câu hỏi y hệt thì không hỏi model lần hai.
+ *
+ * Job `cs-chat` quét lại mọi hội thoại trong 48 giờ gần nhất mỗi 15 phút. Hội thoại không có tin
+ * mới, chứng từ không đổi ⇒ câu hỏi gửi model giống hệt lượt trước, và câu trả lời cũng vậy. Khoá
+ * là DẤU VÂN TAY của toàn bộ đầu vào (model · lời dặn · lược đồ · khách · thẻ · chứng từ · hội
+ * thoại) — đổi bất kỳ vế nào thì khoá đổi và model được hỏi lại. Xem `lib/cs/semantic-cache.ts`.
+ *
+ * Bảng này KHÔNG phải nguồn sự thật của case nào: case vẫn ghi kết luận của nó ở `cs_cases`. Xoá
+ * sạch bảng này chỉ tốn một lượt hỏi lại model, không mất dữ liệu nghiệp vụ nào.
+ */
+export const csSemanticVerdicts = pgTable(
+  "cs_semantic_verdicts",
+  {
+    fingerprint: text("fingerprint").primaryKey(),
+    conversationId: text("conversation_id").notNull(),
+    model: text("model").notNull(),
+    /** `SemanticVerdict` đã qua `parseVerdict` — đọc lại vẫn phải qua `parseVerdict` lần nữa. */
+    verdict: jsonb("verdict").notNull(),
+    /** Số lượt quét đã dùng lại kết luận này thay vì gọi model. */
+    hits: integer("hits").notNull().default(0),
+    createdAt: createdAt(),
+    lastUsedAt: ts("last_used_at").notNull().defaultNow(),
+  },
+  (t) => [index("cs_semantic_verdicts_last_used_idx").on(t.lastUsedAt), index("cs_semantic_verdicts_conversation_idx").on(t.conversationId)],
+);
+
 /* ═══════════════════════════════════════════════════════════════════════════════════════════════
    HỆ ĐIỀU HÀNH CÔNG VIỆC (Work OS) — đặc tả: docs/work-management-os.md
 
@@ -5532,7 +5559,7 @@ export const payrollAdjustments = pgTable(
 );
 
 /**
- * ═══ HỘP THƯ CÁ NHÂN (migration 0125) ═══
+ * ═══ HỘP THƯ CÁ NHÂN (migration 0126) ═══
  *
  * `notifications` là hàng đợi CHUNG của cả shop. Phiếu lương là tin của MỘT người — không được nằm
  * trong hàng đợi chung và không được gửi vào nhóm Lark. Mỗi dòng thuộc đúng một tài khoản.
@@ -5558,7 +5585,7 @@ export const userMessages = pgTable(
 );
 
 /**
- * ═══ PHIẾU LƯƠNG ĐÃ GỬI VÀ LỜI XÁC NHẬN (migration 0125) ═══
+ * ═══ PHIẾU LƯƠNG ĐÃ GỬI VÀ LỜI XÁC NHẬN (migration 0126) ═══
  *
  * Một dòng = một người trong MỘT LƯỢT GỬI (`round` = `payroll_periods.calc_runs` lúc gửi). "Hết hạn
  * không trả lời" KHÔNG ghi vào đây — nó tính lúc đọc từ `deadline_at` (`confirmationState`).
@@ -5597,7 +5624,7 @@ export const payrollConfirmations = pgTable(
 );
 
 /**
- * ═══ LỆNH CHUYỂN LƯƠNG (migration 0125) ═══
+ * ═══ LỆNH CHUYỂN LƯƠNG (migration 0126) ═══
  *
  * Một dòng = một người trong một kỳ đã KHOÁ. Tài khoản nhận CHỤP LẠI lúc lập. "Đã trả" chỉ có khi một
  * dòng sao kê chứng minh tiền đã đi (`bank_txn_id`) — AGENTS.md mục 8.7.

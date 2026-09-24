@@ -12,6 +12,7 @@ import {
 import { generateRecurringTasks } from "@/lib/work/service";
 import { snapshotPerformance } from "@/lib/work/performance-snapshot";
 import { runEscalationDigest } from "@/lib/work/escalation-run";
+import { runMorningBrief } from "@/lib/work/morning-brief";
 import { runMarketingDigest } from "@/lib/marketing/digest";
 import { recordDecisionLedger } from "@/lib/marketing/decision-ledger";
 import { evaluateAlerts } from "@/lib/alerts/rules";
@@ -133,6 +134,26 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
         ctx.summary.detail = r.detail;
         if (hong.length) ctx.summary.warning = `Không gửi được ${hong.length} bản tin: ${hong.map((x) => `${x.scope} (${x.error ?? "không rõ lý do"})`).join(" · ")}`;
         for (const sk of r.skipped) ctx.log(`bỏ qua ${sk.scope}: ${sk.reason}`);
+        return r;
+      }),
+  },
+  "morning-brief": {
+    label: "Bản tin sáng cho nhóm Quản lý",
+    source: "ALL",
+    description:
+      "CHỈ ĐỌC + GỬI TIN, KHÔNG DÙNG AI: chép màn hình /work/today (ba việc đáng làm nhất xếp liên phòng, việc quá hạn, việc chưa ai nhận, tiền đang treo, phòng chưa có người) vào nhóm Lark Quản lý mỗi sáng từ 7 giờ. " +
+      "Mọi con số đọc từ CÙNG hàm với màn hình. Chưa khai webhook nhóm Quản lý thì không gửi — không lùi về nhóm vận đơn. Sổ chống gửi lại ở settings 'work.morning-brief.sent' nên chạy nhiều lần trong ngày chỉ gửi một tin.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "morning-brief", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await runMorningBrief(new Date(), { force: o.params?.force === "1" });
+        ctx.summary.imported = r.sent ? 1 : 0;
+        ctx.summary.skipped = r.sent ? 0 : 1;
+        ctx.summary.detail = r.detail;
+        // Gửi hỏng phải hiện ra ở Kết nối dữ liệu — kênh người điều hành dựa vào không được hỏng im lặng.
+        if (r.reason.startsWith("gửi hỏng")) {
+          ctx.summary.failed = 1;
+          ctx.summary.warning = r.reason;
+        }
         return r;
       }),
   },

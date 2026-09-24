@@ -30,6 +30,8 @@ import { previousOrderHints } from "@/lib/queries/order-hints";
 import { SHIPMENT_STAGE_LABEL } from "@/lib/constants/viettelpost";
 import { FRESHNESS_BY_STAGE } from "@/lib/constants/logistics-freshness";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
+import { COD_STATEMENT_GRACE_HOURS, COD_STATEMENT_LOOKBACK_DAYS, COD_STATEMENT_MATCH_WINDOW_DAYS, statementCoverage, vnDayOf, vtpOrderListDue } from "@/lib/constants/feed-freshness";
+import { readStatementMailHeartbeat, STATEMENT_MAIL_SILENCE_HOURS } from "@/lib/integrations/viettelpost/statement-mail";
 import { getControlTower } from "@/lib/queries/control-tower";
 import { env } from "@/lib/env";
 import { formatVND } from "@/lib/format";
@@ -801,6 +803,145 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
     }
   } catch {
     // chưa có dữ liệu vận đơn
+  }
+
+  /*
+    ───────── NGUỒN DỮ LIỆU TAY ĐẾN HẠN — Viettel Post không đẩy, ERP phải đi nhắc ─────────
+
+    Ba câu hỏi, ba việc, và cả ba đều là PHÉP CHIẾU (AGENTS.md mục 19): việc tự đóng khi điều kiện
+    hết — có lượt nhập mới, có tệp bảng kê, script liên lạc lại — không có nút "đánh dấu xong".
+    Luật và các mốc nằm ở `lib/constants/feed-freshness.ts`; ở đây chỉ đọc CSDL rồi hỏi các hàm thuần.
+  */
+  if (cfg.enabled.vtpOrderListDue) {
+    activeKinds.push("VTP_ORDER_LIST_DUE");
+    try {
+      const now = new Date();
+      const [last] = await db
+        .select({ at: schema.vtpImportBatches.createdAt })
+        .from(schema.vtpImportBatches)
+        .where(and(eq(schema.vtpImportBatches.mode, "APPLY"), eq(schema.vtpImportBatches.kind, "ORDER_LIST")))
+        .orderBy(sql`${schema.vtpImportBatches.createdAt} desc`)
+        .limit(1);
+      const han = vtpOrderListDue(last?.at ?? null, now);
+      if (han.due) {
+        // Bối cảnh, không phải điều kiện: số kiện đang "chờ lấy" là nhóm mà chỉ tệp mới nói được
+        // kiện nào thật ra đã lấy hỏng.
+        const [{ choLay }] = await db
+          .select({ choLay: sql<number>`count(*)` })
+          .from(schema.shipments)
+          .where(and(eq(schema.shipments.stage, "PENDING"), eq(schema.shipments.isFinal, false)));
+        const tuoi = han.ageHours === null ? "chưa từng nhập tệp nào" : `lần nhập gần nhất cách đây ${Math.floor(han.ageHours)} giờ`;
+        candidates.push({
+          kind: "VTP_ORDER_LIST_DUE",
+          severity: "warning",
+          title: `Đến hạn nhập Danh sách vận đơn Viettel Post · ${tuoi}`,
+          body:
+            `${Number(choLay)} kiện đang mang nhãn "chờ lấy hàng". Webhook KHÔNG báo "lấy hàng thất bại" — chỉ tệp Danh sách vận đơn cho biết kiện nào bưu tá đã tới mà không lấy được. ` +
+            "Xuất tệp trên viettelpost.vn rồi tải lên trang Bổ sung danh sách vận đơn. Việc tự đóng khi có lượt nhập mới.",
+          href: "/import-vtp",
+          entityType: "DATA_FEED",
+          entityId: "vtp-order-list",
+          // Một việc mỗi NGÀY: nhập xong hôm nay thì việc hôm nay đóng; mai đến hạn lại là việc mới.
+          dedupeKey: `vtp-order-list-due:${vnDayOf(now)}`,
+          occurredAt: last?.at ?? null,
+          refresh: true,
+        });
+      }
+    } catch {
+      // chưa có bảng lượt nhập
+    }
+  }
+
+  if (cfg.enabled.codStatementMissing) {
+    activeKinds.push("COD_STATEMENT_MISSING", "STATEMENT_MAIL_SILENT");
+    try {
+      const now = Date.now();
+      const tu = new Date(now - COD_STATEMENT_LOOKBACK_DAYS * 86_400_000);
+      const den = new Date(now - COD_STATEMENT_GRACE_HOURS * 3_600_000);
+      const bt = schema.bankTransactions;
+      const txs = await db
+        .select({ id: bt.id, txnAt: bt.txnAt, amount: bt.amount, description: bt.description })
+        .from(bt)
+        .where(and(eq(bt.accountingGroup, "COD_SETTLEMENT"), sql`${bt.amount} > 0`, sql`${bt.txnAt} >= ${tu.toISOString()}::timestamptz`, sql`${bt.txnAt} <= ${den.toISOString()}::timestamptz`));
+      if (txs.length) {
+        // Đợt bảng kê và tệp đã nhập, lùi thêm một cửa sổ ghép để đợt chốt TRƯỚC ngày đầu kỳ vẫn khớp.
+        const tuDot = new Date(tu.getTime() - COD_STATEMENT_MATCH_WINDOW_DAYS * 86_400_000);
+        // Tên tệp đã nhận từ HAI sổ: dòng chứng từ đã ghép (`cod_statement_lines`) và tệp script Gmail
+        // gửi sang (`vtp_statement_files`) — tệp đã về mà chưa ghép dòng nào vẫn là "ERP ĐÃ CÓ tệp".
+        const [dot, tep, tepGmail, noi] = await Promise.all([
+          db
+            .select({ id: schema.codBatches.id, receivedAt: schema.codBatches.receivedAt, totalAmount: schema.codBatches.totalAmount, note: schema.codBatches.note, reference: schema.codBatches.reference })
+            .from(schema.codBatches)
+            .where(sql`${schema.codBatches.receivedAt} >= ${tuDot.toISOString()}::timestamptz`),
+          db
+            .selectDistinct({ f: schema.codStatementLines.sourceFile })
+            .from(schema.codStatementLines)
+            .where(sql`${schema.codStatementLines.statementAt} >= ${tuDot.toISOString()}::timestamptz`),
+          db
+            .select({ f: schema.vtpStatementFiles.filename })
+            .from(schema.vtpStatementFiles)
+            .where(sql`${schema.vtpStatementFiles.receivedAt} >= ${tuDot.toISOString()}::timestamptz`),
+          db
+            .select({ txnId: schema.bankTransactionLinks.txnId, targetId: schema.bankTransactionLinks.targetId })
+            .from(schema.bankTransactionLinks)
+            .where(and(eq(schema.bankTransactionLinks.targetType, "COD_BATCH"), inArray(schema.bankTransactionLinks.txnId, txs.map((t) => t.id)))),
+        ]);
+        const tepDaNhap = [...tep.map((r) => r.f), ...tepGmail.map((r) => r.f)];
+        for (const tx of txs) {
+          const phu = statementCoverage(
+            { id: tx.id, txnAt: tx.txnAt, amount: Number(tx.amount), description: tx.description },
+            dot.map((d) => ({ ...d, totalAmount: Number(d.totalAmount) })),
+            tepDaNhap,
+            noi.filter((l) => l.txnId === tx.id).map((l) => l.targetId),
+          );
+          if (phu.covered) continue;
+          const so = phu.statementNumber;
+          candidates.push({
+            kind: "COD_STATEMENT_MISSING",
+            severity: "warning",
+            title: `Viettel Post đã chuyển ${formatVND(Number(tx.amount))} ngày ${fmtAt(tx.txnAt)} · ERP chưa có bảng kê${so ? ` số ${so}` : ""}`,
+            body:
+              `Sao kê có khoản tiền COD này nhưng ERP không có tệp bảng kê nào khớp (theo số bảng kê, hay cùng số tiền trong ±${COD_STATEMENT_MATCH_WINDOW_DAYS} ngày). ` +
+              `Thiếu tệp thì các vận đơn của đợt này hiện "quá hạn chưa trả" — ĐỪNG đi đòi Viettel Post. Tải tệp BangKeChiCOD${so ? `_${so}` : ""} lên Đối soát COD.`,
+            href: "/cod",
+            entityType: "BANK_TRANSACTION",
+            entityId: tx.id,
+            dedupeKey: `cod-statement-missing:${tx.id}`,
+            occurredAt: tx.txnAt,
+            refresh: true,
+          });
+        }
+      }
+
+      /*
+        Script Gmail CHỈ báo sống — nó không báo được lúc nó chết. Nhịp tim cũ hơn ngưỡng quan sát
+        là tín hiệu duy nhất ERP có. Chưa từng có nhịp tim ⇒ CHƯA BIẾT (script có thể chưa cài),
+        KHÔNG phải "đã chết": trang Kết nối dữ liệu đã nói chuyện đó, ở đây không bịa thêm việc.
+      */
+      const nhip = await readStatementMailHeartbeat();
+      if (nhip) {
+        const im = (now - new Date(nhip.at).getTime()) / 3_600_000;
+        if (im > STATEMENT_MAIL_SILENCE_HOURS) {
+          candidates.push({
+            kind: "STATEMENT_MAIL_SILENT",
+            severity: "warning",
+            title: `Script Gmail lấy bảng kê COD im lặng ${Math.floor(im)} giờ`,
+            body:
+              `Script chạy 15 phút một lần và báo về cả khi không có thư; lần liên lạc cuối ${fmtAt(new Date(nhip.at))}. Bảng kê mới sẽ KHÔNG tự vào ERP cho tới khi nó chạy lại. ` +
+              "Mở script.google.com → dự án bảng kê → Trình kích hoạt, xem nhật ký thực thi.",
+            href: "/integrations",
+            entityType: "DATA_FEED",
+            entityId: "vtp-statement-mail",
+            // Cùng một lần im lặng là cùng một việc; script liên lạc lại rồi im lần nữa là việc mới.
+            dedupeKey: `statement-mail-silent:${nhip.at}`,
+            occurredAt: new Date(nhip.at),
+            refresh: true,
+          });
+        }
+      }
+    } catch {
+      // chưa có sổ ngân hàng / bảng kê
+    }
   }
 
   // ───────── TÀI KHOẢN NGÂN HÀNG MỚI CHỜ XÁC NHẬN ─────────

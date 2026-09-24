@@ -145,11 +145,13 @@ export const OPERATING_FUNNEL: StageSpec[] = [
     key: "HANDED_TO_CARRIER",
     label: "Đã bàn giao ĐVVC",
     order: 7,
-    // Kiện hàng là của giao vận, nhưng việc TỒN ĐỌNG ở khâu này chỉ có một loại: không biết vận
-    // đơn nào thuộc đơn nào. Người sửa được chuyện đó là đội dữ liệu, nên chủ khâu ghi theo người
-    // xử lý được, không theo người sở hữu kiện hàng.
+    // Kiện hàng là của giao vận, nhưng việc TỒN ĐỌNG chính ở khâu này là không biết vận đơn nào
+    // thuộc đơn nào. Người sửa được chuyện đó là đội dữ liệu, nên chủ khâu ghi theo người xử lý
+    // được, không theo người sở hữu kiện hàng. Việc "đến hạn nhập Danh sách vận đơn" cũng thuộc
+    // khâu này (tệp ấy là nguồn duy nhất thấy kiện lấy hàng thất bại) nhưng mang nhóm GIAO VẬN của
+    // riêng nó — người xuất tệp trên viettelpost.vn là người giao vận.
     team: "DATA",
-    caseTypes: ["ORPHAN_SHIPMENT", "AMBIGUOUS_ORDER_SHIPMENT_MAPPING"],
+    caseTypes: ["ORPHAN_SHIPMENT", "AMBIGUOUS_ORDER_SHIPMENT_MAPPING", "VTP_ORDER_LIST_DUE"],
     moneyMeaning: "COD đang nằm trên đường — chưa phải tiền của shop.",
     href: "/shipments",
     sourceNote: "Vận đơn Viettel Post, webhook + tra cứu định kỳ.",
@@ -199,7 +201,7 @@ export const OPERATING_FUNNEL: StageSpec[] = [
     label: "Tiền đã về",
     order: 12,
     team: "FINANCE",
-    caseTypes: [],
+    caseTypes: ["COD_STATEMENT_MISSING"],
     moneyMeaning: "Tiền mặt ĐÃ VỀ, có chứng từ đối chiếu.",
     href: "/cod",
     sourceNote: "Bảng kê COD. Sổ ngân hàng chưa nhập nên chưa đối chiếu được với số dư thật.",

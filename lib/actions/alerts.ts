@@ -28,6 +28,8 @@ const configSchema = z.object({
   larkBillingSecret: z.string().trim().max(200).default(""),
   larkInventoryWebhookUrl: z.string().trim().max(300).refine((v) => !v || /^https:\/\/open\.(larksuite|feishu)\.(com|cn)\/open-apis\/bot\/v2\/hook\//.test(v), "Webhook Lark phải có dạng https://open.larksuite.com/open-apis/bot/v2/hook/…").default(""),
   larkInventorySecret: z.string().trim().max(200).default(""),
+  larkManagerWebhookUrl: z.string().trim().max(300).refine((v) => !v || /^https:\/\/open\.(larksuite|feishu)\.(com|cn)\/open-apis\/bot\/v2\/hook\//.test(v), "Webhook Lark phải có dạng https://open.larksuite.com/open-apis/bot/v2/hook/…").default(""),
+  larkManagerSecret: z.string().trim().max(200).default(""),
   billingWarnPercent: z.number().int().min(10).max(100).default(80),
   riskMinReturned: z.number().int().min(1).max(50).default(2),
   riskReturnRatePct: z.number().int().min(1).max(100).default(40),
@@ -59,6 +61,9 @@ const configSchema = z.object({
     addressNotNormalized: z.boolean().default(true),
     bankAccountUnconfirmed: z.boolean().default(true),
     stockShortage: z.boolean().default(true),
+    vtpOrderListDue: z.boolean().default(true),
+    codStatementMissing: z.boolean().default(true),
+    morningBrief: z.boolean().default(true),
   }),
 });
 
@@ -68,15 +73,27 @@ export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { 
   const parsed = configSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
   /*
-    KHOÁ KÝ NHÓM KHO KHÔNG BAO GIỜ ĐI XUỐNG TRÌNH DUYỆT (trang gửi chuỗi rỗng + cờ "đã lưu"), nên ô
-    trống lúc lưu nghĩa là "giữ khoá cũ", không phải "xoá khoá". Đọc lại từ settings — không từ
+    KHÔNG KHOÁ BÍ MẬT NÀO ĐI XUỐNG TRÌNH DUYỆT (trang gửi chuỗi rỗng + cờ "đã lưu"), nên ô trống lúc
+    lưu nghĩa là "giữ khoá cũ", không phải "xoá khoá". Đọc lại từ settings — không từ
     `loadAlertConfig`, vì hàm đó trộn cả biến môi trường, và ghi biến môi trường vào settings là
     chép một secret sang chỗ thứ hai.
+
+    Trước 25/09/2026 luật này chỉ áp cho khoá nhóm Kho. Trang đã xoá trắng token Telegram và khoá ký
+    Lark chính trước khi gửi xuống, nên mỗi lần bấm Lưu mà không gõ lại chúng là ghi đè chúng thành
+    chuỗi rỗng — còn khoá nhóm thanh toán thì bị gửi nguyên văn xuống trình duyệt.
   */
   const stored = await getSettingJson<Partial<AlertConfig>>(ALERT_CONFIG_KEY, {});
-  const data = { ...parsed.data, larkInventorySecret: parsed.data.larkInventorySecret || stored.larkInventorySecret || "" };
+  const giu = (moi: string, cu: string | undefined) => moi || cu || "";
+  const data = {
+    ...parsed.data,
+    telegramBotToken: giu(parsed.data.telegramBotToken, stored.telegramBotToken),
+    larkSecret: giu(parsed.data.larkSecret, stored.larkSecret),
+    larkBillingSecret: giu(parsed.data.larkBillingSecret, stored.larkBillingSecret),
+    larkInventorySecret: giu(parsed.data.larkInventorySecret, stored.larkInventorySecret),
+    larkManagerSecret: giu(parsed.data.larkManagerSecret, stored.larkManagerSecret),
+  };
   await setSettingJson(ALERT_CONFIG_KEY, data);
-  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: ALERT_CONFIG_KEY, detail: { ...data, telegramBotToken: data.telegramBotToken ? "***" : "", larkSecret: data.larkSecret ? "***" : "", larkBillingSecret: data.larkBillingSecret ? "***" : "", larkInventorySecret: data.larkInventorySecret ? "***" : "" } });
+  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: ALERT_CONFIG_KEY, detail: { ...data, telegramBotToken: data.telegramBotToken ? "***" : "", larkSecret: data.larkSecret ? "***" : "", larkBillingSecret: data.larkBillingSecret ? "***" : "", larkInventorySecret: data.larkInventorySecret ? "***" : "", larkManagerSecret: data.larkManagerSecret ? "***" : "" } });
   revalidatePath("/integrations");
   return { ok: true };
 }

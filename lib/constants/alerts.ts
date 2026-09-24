@@ -15,6 +15,13 @@ export type AlertConfig = {
    */
   larkInventoryWebhookUrl: string;
   larkInventorySecret: string;
+  /**
+   * Lark Suite: webhook nhóm QUẢN LÝ / CHỦ SHOP nhận BẢN TIN SÁNG (ba việc đáng làm nhất, việc quá
+   * hạn, tiền đang treo). KHÔNG có đường lui về webhook chính: bản tin viết cho người điều hành, gửi
+   * nhầm vào nhóm vận đơn thì mười người đọc một tin không phải của mình. Trống ⇒ không gửi.
+   */
+  larkManagerWebhookUrl: string;
+  larkManagerSecret: string;
   /** Cảnh báo khi dư nợ đạt N% ngưỡng thanh toán */
   billingWarnPercent: number;
   /** Đơn rủi ro: khách đã hoàn ≥ N đơn và tỷ lệ hoàn ≥ M% (theo Pancake hoặc lịch sử ERP) → báo CSKH xin cọc */
@@ -29,7 +36,7 @@ export type AlertConfig = {
   /** Hàng hoàn đã về tới shop quá N ngày mà kho chưa lập phiếu tái nhập → báo kho kiểm đếm */
   returnInspectionDays: number;
   /** Bật/tắt từng loại */
-  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean; incomplete: boolean; returnInspection: boolean; customerRecovery: boolean; adsAnomaly: boolean; cancelledButShipping: boolean; addressNotNormalized: boolean; bankAccountUnconfirmed: boolean; marketingDaily: boolean; stockShortage: boolean };
+  enabled: { failed: boolean; pending: boolean; stale: boolean; returning: boolean; cs: boolean; stock: boolean; billing: boolean; risk: boolean; incomplete: boolean; returnInspection: boolean; customerRecovery: boolean; adsAnomaly: boolean; cancelledButShipping: boolean; addressNotNormalized: boolean; bankAccountUnconfirmed: boolean; marketingDaily: boolean; stockShortage: boolean; vtpOrderListDue: boolean; codStatementMissing: boolean; morningBrief: boolean };
 };
 
 export const ALERT_CONFIG_KEY = "alerts.config";
@@ -43,6 +50,8 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   larkBillingSecret: "",
   larkInventoryWebhookUrl: "",
   larkInventorySecret: "",
+  larkManagerWebhookUrl: "",
+  larkManagerSecret: "",
   billingWarnPercent: 80,
   riskMinReturned: 2,
   riskReturnRatePct: 40,
@@ -50,7 +59,7 @@ export const DEFAULT_ALERT_CONFIG: AlertConfig = {
   staleDays: 4,
   lookbackDays: 14,
   returnInspectionDays: 3,
-  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true, incomplete: true, returnInspection: true, customerRecovery: true, adsAnomaly: true, cancelledButShipping: true, addressNotNormalized: true, bankAccountUnconfirmed: true, marketingDaily: true, stockShortage: true },
+  enabled: { failed: true, pending: true, stale: true, returning: true, cs: true, stock: true, billing: true, risk: true, incomplete: true, returnInspection: true, customerRecovery: true, adsAnomaly: true, cancelledButShipping: true, addressNotNormalized: true, bankAccountUnconfirmed: true, marketingDaily: true, stockShortage: true, vtpOrderListDue: true, codStatementMissing: true, morningBrief: true },
 };
 
 export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
@@ -75,11 +84,14 @@ export const NOTIFICATION_KIND_LABEL: Record<string, string> = {
   RISKY_ORDER: "Đơn rủi ro · xin cọc",
   COD_OVERDUE: "Quá hạn mà tiền chưa về",
   BANK_ACCOUNT_UNCONFIRMED: "Tài khoản ngân hàng mới · cần xác nhận",
+  VTP_ORDER_LIST_DUE: "Đến hạn nhập Danh sách vận đơn VTP",
+  COD_STATEMENT_MISSING: "Tiền COD đã về · thiếu bảng kê",
+  STATEMENT_MAIL_SILENT: "Script Gmail bảng kê im lặng",
   DATA_ERROR: "Dữ liệu sai nghiêm trọng",
   SYSTEM: "Hệ thống",
 };
 
-export const NOTIFICATION_KIND_ORDER = ["DATA_ERROR", "ORDER_INCOMPLETE", "ORDER_ADDRESS_NOT_NORMALIZED", "SHIPMENT_FAILED", "ORDER_PENDING", "ORDER_CONFIRMED_STALE", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "RETURN_PENDING_INSPECTION", "CUSTOMER_RECOVERY", "CANCELLED_BUT_SHIPPING", "COD_OVERDUE", "BANK_ACCOUNT_UNCONFIRMED", "CS_CASE", "CS_CASE_GROUP", "STOCK_LOW", "STOCKOUT_RISK", "ADS_BILLING", "ADS_ANOMALY", "MARKETING_DAILY", "PROFITABILITY_ALERT", "RISKY_ORDER", "SYSTEM"];
+export const NOTIFICATION_KIND_ORDER = ["DATA_ERROR", "ORDER_INCOMPLETE", "ORDER_ADDRESS_NOT_NORMALIZED", "SHIPMENT_FAILED", "ORDER_PENDING", "ORDER_CONFIRMED_STALE", "SHIPMENT_STALE", "SHIPMENT_RETURNING", "RETURN_PENDING_INSPECTION", "CUSTOMER_RECOVERY", "CANCELLED_BUT_SHIPPING", "COD_OVERDUE", "COD_STATEMENT_MISSING", "STATEMENT_MAIL_SILENT", "VTP_ORDER_LIST_DUE", "BANK_ACCOUNT_UNCONFIRMED", "CS_CASE", "CS_CASE_GROUP", "STOCK_LOW", "STOCKOUT_RISK", "ADS_BILLING", "ADS_ANOMALY", "MARKETING_DAILY", "PROFITABILITY_ALERT", "RISKY_ORDER", "SYSTEM"];
 
 export const SEVERITY_TONE: Record<string, string> = {
   critical: "bg-rose-50 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300",

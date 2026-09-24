@@ -1,9 +1,9 @@
--- 0125 · LƯƠNG TỰ ĐỘNG: gửi phiếu cho nhân viên xác nhận, hộp thư cá nhân, lệnh chuyển có mã VietQR.
+-- 0126 · LƯƠNG TỰ ĐỘNG: gửi phiếu cho nhân viên xác nhận, hộp thư cá nhân, lệnh chuyển có mã VietQR.
 -- Đặc tả: docs/payroll-autopilot.md. Chủ shop chốt 25/09/2026: chốt số ngày 01, trả lương ngày 15.
 --
 -- CHỈ THÊM BẢNG MỚI. Không đụng một dòng nào đã có, không backfill (AGENTS.md mục 35): chưa kỳ nào
 -- được gửi phiếu, chưa lệnh chuyển nào được lập, nên ba bảng sinh ra RỖNG là đúng sự thật.
--- Viết tay và idempotent như 0033–0124 (không dùng db:generate — xem ghi chú trong AGENTS.md mục 4).
+-- Viết tay và idempotent như 0033–0125 (không dùng db:generate — xem ghi chú trong AGENTS.md mục 4).
 
 -- ═══ HỘP THƯ CÁ NHÂN ═══
 -- `notifications` là hàng đợi CHUNG của cả shop (ai có quyền cảnh báo cũng thấy mọi dòng). Phiếu lương
