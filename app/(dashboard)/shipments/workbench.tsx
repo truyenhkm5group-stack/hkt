@@ -7,6 +7,7 @@ import { parseAsString, parseAsStringLiteral, useQueryState, useQueryStates } fr
 import { CalendarClock, CalendarRange, Check, ChevronDown, ChevronRight, ExternalLink, Loader2, MessageSquarePlus, Pencil, Phone, Plus, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CareBoard } from "@/app/(dashboard)/shipments/care-board";
+import { PhraseFilterBox } from "@/app/(dashboard)/shipments/phrase-filter-box";
 import { CareDrawerHost, CareOpenButton, onCareUpdated } from "@/app/(dashboard)/shipments/care-drawer";
 import { CopyButton } from "@/components/misc";
 import { InfoHint } from "@/components/info-hint";
@@ -539,6 +540,13 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
   return (
     <div className="space-y-3">
       <CareDrawerHost queue={queue} />
+
+      {/*
+        LỌC BẰNG CÂU — một cách GÕ khác cho đúng các chip bên dưới. Tên tham số của câu đã dịch
+        trùng tên tham số của `f`, nên áp câu = đặt đúng những chip ấy lên đường dẫn; không có luật
+        lọc thứ hai.
+      */}
+      <PhraseFilterBox onApply={(patch) => setF(patch)} />
 
       {/* Dải tóm tắt + bộ lọc nhẹ: tất cả trên một hàng, không có thẻ KPI to. */}
       <div className="flex flex-wrap items-center gap-2 text-[12px]">
