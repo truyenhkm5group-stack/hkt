@@ -391,7 +391,7 @@ Xuất CSV từ `/payroll`. Kiểm:
 
 Bản này ĐỔI SỐ TIỀN của kỳ chưa khoá — khác hẳn nguyên tắc "không một con số nào đổi" ở mục 0 — và
 chủ shop đã quyết như vậy. Chi tiết: `docs/profit-cost-allocation-contract.md` Phần 5, mục "Bảng
-lương". Phiên bản phép tính `PAYROLL_CALC_VERSION` 2 → 3.
+lương". Phiên bản phép tính `PAYROLL_CALC_VERSION` 3 → 4 (bản 3 là ngày vào / ngày nghỉ của #239).
 
 **Hướng số đổi (chỉ kỳ CHƯA KHOÁ — `DRAFT` · `CALCULATED` · `UNDER_REVIEW` · `APPROVED`):**
 

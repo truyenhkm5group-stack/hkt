@@ -23,6 +23,22 @@ export type Employee = {
   percentRevenue: number;
   active: boolean;
   note: string;
+  /**
+   * NGÀY VÀO LÀM / NGÀY LÀM CUỐI (`YYYY-MM-DD`, giờ Việt Nam). Thiếu = không khai.
+   *
+   * "Đã nghỉ" đi bằng NGÀY chứ không bằng cờ `active`: cờ tắt là người ấy biến mất khỏi mọi kỳ,
+   * kể cả tháng còn làm dở. Luật có mặt trong kỳ ở `lib/constants/payroll-employment.ts`.
+   */
+  startedOn?: string;
+  leftOn?: string;
+  /**
+   * TÀI KHOẢN NHẬN LƯƠNG. Lệnh chuyển (`payroll_payout_lines`) CHỤP LẠI ba ô này lúc tạo, nên sửa
+   * hồ sơ sau khi đã trả không làm đổi chứng từ của kỳ đã trả.
+   */
+  bankBin?: string;
+  bankAccount?: string;
+  /** Tên chủ tài khoản KHÔNG DẤU VIẾT HOA — để so với tên app ngân hàng hiện ra trước khi xác nhận. */
+  bankAccountName?: string;
 };
 
 export const PAYROLL_EMPLOYEES_KEY = "payroll.employees";
@@ -38,11 +54,15 @@ export const PAYROLL_EMPLOYEES_KEY = "payroll.employees";
  * 2 = bản 14/09/2026: lương cứng chia theo SỐ NGÀY của kỳ (trước đó chép nguyên lương tháng), quy
  * kết marketer đi bằng ảnh chụp fanpage theo mốc đơn lên, và CHƯA BIẾT thôi in ra thành 0.
  *
- * 3 = bản 25/09/2026: cột vận chuyển của cơ sở tính lương cộng cước / phí hoàn gõ tay khai
- * `MANUAL_ADJUSTMENT` kèm lý do (lấy từ engine, chia theo số đơn gửi của mã) — như mọi báo cáo lợi
- * nhuận. Kỳ chốt bằng số 2 đọc ảnh chụp của nó, không tính lại.
+ * 3 = bản 25/09/2026: đường cũ cộng khoản điều chỉnh (`payroll_adjustments`) như máy chung vẫn làm,
+ * và lương cứng chia theo NGÀY VÀO / NGÀY NGHỈ khi hồ sơ có khai. Hồ sơ không khai ngày và không có
+ * khoản điều chỉnh nào thì ra đúng con số của bản 2.
+ *
+ * 4 = bản 25/09/2026 (sau bản 3 ở trên): cột vận chuyển của cơ sở tính lương cộng cước / phí hoàn
+ * gõ tay khai `MANUAL_ADJUSTMENT` kèm lý do (lấy từ engine, chia theo số đơn gửi của mã) — như mọi
+ * báo cáo lợi nhuận. Kỳ đã chốt đọc ảnh chụp của nó, không tính lại.
  */
-export const PAYROLL_CALC_VERSION = 3;
+export const PAYROLL_CALC_VERSION = 4;
 
 /**
  * KHOÁ TỰ NHIÊN CỦA MỘT KỲ LƯƠNG — đọc được bằng mắt, và ổn định.

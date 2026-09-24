@@ -89,6 +89,8 @@ function snapshotRows(snapshot: PayrollSnapshot, live: readonly PayrollLine[]) {
       bonusPersonal: s.bonusPersonal,
       bonusRevenue: s.bonusRevenue,
       salary: s.salary,
+      // Ảnh chụp đời cũ (`undefined`) chưa gồm điều chỉnh trong `salary` — ô để TRỐNG, không tự tính lại.
+      legacyAdjustments: s.legacyAdjustments ?? null,
       /*
         `undefined` = ảnh chụp dựng TRƯỚC khi ảnh chụp giữ sổ lỗ. Bảy cột ấy để TRỐNG và cột Ghi
         chú nói vì sao — KHÔNG đi tính lại chúng bằng dữ liệu hôm nay, vì tính lại một kỳ đã trả
@@ -167,6 +169,9 @@ export async function GET(request: NextRequest) {
     "% DT cá nhân",
     "DT cá nhân (đ)",
     "Thưởng % DT (đ)",
+    // Điều chỉnh của đường tính cũ (thưởng, tạm ứng, khấu trừ, quyết toán kỳ trước) — ĐÃ nằm trong
+    // "Tổng lương". Người đi máy chung để trống: điều chỉnh của họ nằm trong bốn cột máy chung.
+    "Điều chỉnh (đ)",
     "Tổng lương (đ)",
     /*
       BẢY CỘT BÙ TRỪ LỖ LŨY KẾ.
@@ -206,6 +211,7 @@ export async function GET(request: NextRequest) {
     if ("carryMissing" in l && l.carryMissing) {
       ghiChu.push("Bảy cột sổ lỗ để TRỐNG: ảnh chụp của kỳ này dựng trước khi ảnh chụp giữ sổ lỗ. Tính lại chúng bằng dữ liệu hôm nay sẽ ra một con số khác con số đã trả, nên không tính.");
     }
+    for (const a of l.legacyAdjustments?.items ?? []) ghiChu.push(`${a.label}: ${a.amount.toLocaleString("vi-VN")} đ — ${a.reason}`);
     for (const m of l.engine?.result.missing ?? []) ghiChu.push(`THIẾU “${m.label}”: ${m.message}`);
     for (const p of l.engine?.result.problems ?? []) ghiChu.push(p);
     if (l.engine?.splitAcrossSegments) {
@@ -230,6 +236,7 @@ export async function GET(request: NextRequest) {
         l.employee.percentRevenue,
         l.personalRevenue ?? "",
         l.bonusRevenue,
+        l.legacyAdjustments ? l.legacyAdjustments.total : "",
         l.salary ?? "",
         l.carry?.monthKey ?? "không áp dụng",
         l.carry?.openingBalance ?? "",

@@ -4,6 +4,7 @@
  */
 import "./setup-env";
 import { testCodReconciliation } from "./cod-reconciliation.test";
+import { testCodStatementAudit } from "./cod-statement-audit.test";
 import { testIdeas } from "./ideas.test";
 import { testPermissions } from "./permissions.test";
 import { testOrderSource } from "./order-source.test";
@@ -93,6 +94,7 @@ import { cleanupTaskAdvanceFixtures, testTaskAdvanceDb, testTaskAdvanceGuards, t
 import { testAdsIngestGuardsProductFk, testAdsMappingDangling, testAdsMappingGuards } from "./ads-mapping-dangling.test";
 import { testCtoProposal } from "./tech-cto-proposal.test";
 import { testPayrollPeriod } from "./payroll-period.test";
+import { testPayrollAutopilotFlow, testPayrollAutopilotPure } from "./payroll-autopilot.test";
 import { testWorkforce } from "./workforce.test";
 import { testNoAutoReassignOnOrgChange, testNoEmptyValueSelect, testOneMembershipReadPath, testOrgMembership } from "./org-membership.test";
 import { testMetricConfidenceIsAFunction, testPeriodKeys, testSnapshotImmutability } from "./performance-provenance.test";
@@ -246,6 +248,8 @@ import { testReturnReceiveSelector } from "./return-receive-selector.test";
 import { testSearchTermParsing, testShipmentSearch } from "./shipment-search.test";
 import { testCsOrderReconcile } from "./cs-order-reconcile.test";
 import { testCsSemantic } from "./cs-semantic.test";
+import { testCsSemanticCache } from "./cs-semantic-cache.test";
+import { testFeedAutomation } from "./feed-automation.test";
 import { testOutreachErrorClassify, testOutreachIdempotentSend } from "./outreach-send.test";
 import { testOutreachEligibility, testOutreachOutcomeFacet } from "./outreach-segment.test";
 import { testCsCustomerQueue } from "./cs-customer-queue.test";
@@ -1742,6 +1746,7 @@ async function main() {
   await testShipmentSearch(db);
   await testCsOrderReconcile(db);
   await testCsSemantic(db);
+  await testCsSemanticCache(db);
   testCsNextAction();
   testCsUiContrast();
   testOutreachErrorClassify();
@@ -1839,6 +1844,7 @@ async function main() {
   await testSlowMoving(db);
   await testInventoryDecision(db);
   await testCodReconciliation();
+  await testCodStatementAudit();
   await testOrderSource();
   testDuplicateEvidencePure();
   await testFanpageAttribution();
@@ -2078,6 +2084,8 @@ async function main() {
   testPositionGrantsNothing();
   testRoleBuilderCannotEscalate();
   await testPayrollPeriod(db);
+  testPayrollAutopilotPure();
+  await testPayrollAutopilotFlow(db);
   testEveryScopedRouteIsGuarded();
   testPayrollOwnLineNeedsAccountKey();
   testPayrollAuthorization();
@@ -2189,6 +2197,7 @@ async function main() {
   testDuplicateMetrics();
   testLogisticsStatusBoundary();
   await testOpsLogLeak();
+  await testFeedAutomation(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 

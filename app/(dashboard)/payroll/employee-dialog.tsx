@@ -46,6 +46,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { deleteEmployee, saveEmployee } from "@/lib/actions/payroll";
 import { DEPARTMENTS, type Employee } from "@/lib/constants/payroll";
+import { VN_BANKS } from "@/lib/constants/vn-banks";
 import { employeeSchema, type EmployeeInput } from "@/lib/validation/payroll";
 
 export type EmployeePreset = {
@@ -70,7 +71,67 @@ function toForm(e?: Employee | null, preset?: EmployeePreset): EmployeeInput {
     percentRevenue: e?.percentRevenue ?? 0,
     active: e?.active ?? true,
     note: e?.note ?? "",
+    startedOn: e?.startedOn ?? "",
+    leftOn: e?.leftOn ?? "",
+    bankBin: e?.bankBin ?? "",
+    bankAccount: e?.bankAccount ?? "",
+    bankAccountName: e?.bankAccountName ?? "",
   };
+}
+
+const OTHER_BANK = "__other__";
+
+/**
+ * Chọn ngân hàng theo TÊN, lưu theo MÃ BIN. Ngân hàng ngoài danh sách thì tự nhập BIN — một lựa chọn
+ * có chủ, thay vì để ERP đoán mã của một ngân hàng nó không biết.
+ */
+function BankBinPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const known = VN_BANKS.some((b) => b.bin === value);
+  const [other, setOther] = useState(Boolean(value) && !known);
+  return (
+    <>
+      <Select
+        value={other ? OTHER_BANK : known ? value : ""}
+        onValueChange={(v) => {
+          setOther(v === OTHER_BANK);
+          onChange(v === OTHER_BANK ? "" : v);
+        }}
+      >
+        <FormControl>
+          <SelectTrigger className="w-full">
+            <SelectValue placeholder="Chọn ngân hàng" />
+          </SelectTrigger>
+        </FormControl>
+        <SelectContent>
+          {VN_BANKS.map((b) => (
+            <SelectItem key={b.bin} value={b.bin}>
+              {b.name}
+            </SelectItem>
+          ))}
+          <SelectItem value={OTHER_BANK}>Khác — tự nhập mã BIN</SelectItem>
+        </SelectContent>
+      </Select>
+      {other ? <Input placeholder="Mã BIN 6 số" inputMode="numeric" maxLength={6} value={value} onChange={(e) => onChange(e.target.value.replace(/\D/g, ""))} /> : null}
+    </>
+  );
+}
+
+function DateField({ name, label, hint }: { name: "startedOn" | "leftOn"; label: string; hint?: string }) {
+  return (
+    <FormField
+      name={name}
+      render={({ field }) => (
+        <FormItem>
+          <FormLabel>{label}</FormLabel>
+          <FormControl>
+            <Input type="date" {...field} value={field.value ?? ""} />
+          </FormControl>
+          {hint ? <p className="text-[11px] text-muted-foreground">{hint}</p> : null}
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
 }
 
 function NumberField({
@@ -322,37 +383,93 @@ export function EmployeeDialog({
                 step={0.5}
               />
             </div>
-            <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
-              <FormField
-                control={form.control}
-                name="note"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Ghi chú</FormLabel>
-                    <FormControl>
-                      <Textarea rows={1} {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+            <div className="grid gap-4 sm:grid-cols-3">
               <FormField
                 control={form.control}
                 name="active"
                 render={({ field }) => (
-                  <FormItem className="flex items-end gap-2 pb-2">
-                    <FormControl>
-                      <input
-                        type="checkbox"
-                        checked={field.value}
-                        onChange={(e) => field.onChange(e.target.checked)}
-                      />
-                    </FormControl>
-                    <FormLabel className="mb-0">Đang làm việc</FormLabel>
+                  <FormItem>
+                    <FormLabel>Tình trạng</FormLabel>
+                    <Select value={field.value ? "working" : "left"} onValueChange={(v) => field.onChange(v === "working")}>
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="working">Đang làm</SelectItem>
+                        <SelectItem value="left">Đã nghỉ</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
                   </FormItem>
                 )}
               />
+              <DateField name="startedOn" label="Ngày vào làm" hint="Tuỳ chọn. Tháng đầu chỉ tính lương cứng từ ngày này." />
+              <DateField
+                name="leftOn"
+                label="Ngày làm cuối"
+                hint={form.watch("active") ? "Để trống nếu chưa nghỉ." : "Bắt buộc khi đã nghỉ: tháng cuối vẫn trả đủ những ngày còn làm."}
+              />
             </div>
+            <fieldset className="space-y-3 rounded-md border p-3">
+              <legend className="px-1 text-sm font-medium">Tài khoản nhận lương</legend>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <FormField
+                  control={form.control}
+                  name="bankBin"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Ngân hàng</FormLabel>
+                      <BankBinPicker value={field.value ?? ""} onChange={field.onChange} />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="bankAccount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Số tài khoản</FormLabel>
+                      <FormControl>
+                        <Input inputMode="numeric" placeholder="0123456789" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="bankAccountName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tên chủ tài khoản</FormLabel>
+                      <FormControl>
+                        <Input placeholder="TRAN ANH QUAN" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Dùng để dựng mã QR chuyển lương. Đổi tài khoản được ghi nhật ký riêng, và lệnh chuyển lần sau sẽ in đỏ “STK khác lần trả trước”.
+              </p>
+            </fieldset>
+            <FormField
+              control={form.control}
+              name="note"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Ghi chú</FormLabel>
+                  <FormControl>
+                    <Textarea rows={1} {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
             <DialogFooter>
               <Button
                 type="button"
@@ -397,8 +514,9 @@ export function DeleteEmployeeButton({ employee }: { employee: Employee }) {
         <AlertDialogHeader>
           <AlertDialogTitle>Xoá {employee.name}?</AlertDialogTitle>
           <AlertDialogDescription>
-            Các chiến dịch đang gán cho người này sẽ về “chưa gán marketer”. Nếu
-            chỉ nghỉ việc, hãy bỏ tick “Đang làm việc” thay vì xoá.
+            Các chiến dịch đang gán cho người này sẽ về “chưa gán marketer”, và
+            người này biến mất khỏi mọi kỳ lương chưa khoá. Nếu chỉ nghỉ việc, hãy
+            đặt Tình trạng “Đã nghỉ” kèm ngày làm cuối thay vì xoá.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

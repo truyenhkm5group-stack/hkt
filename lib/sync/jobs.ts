@@ -12,6 +12,7 @@ import {
 import { generateRecurringTasks } from "@/lib/work/service";
 import { snapshotPerformance } from "@/lib/work/performance-snapshot";
 import { runEscalationDigest } from "@/lib/work/escalation-run";
+import { runMorningBrief } from "@/lib/work/morning-brief";
 import { runMarketingDigest } from "@/lib/marketing/digest";
 import { recordDecisionLedger } from "@/lib/marketing/decision-ledger";
 import { evaluateAlerts } from "@/lib/alerts/rules";
@@ -45,6 +46,7 @@ import { runTaskAdvanceWatch } from "@/lib/tech/task-advance-watch";
 import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
+import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
 
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
@@ -132,6 +134,26 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
         ctx.summary.detail = r.detail;
         if (hong.length) ctx.summary.warning = `Không gửi được ${hong.length} bản tin: ${hong.map((x) => `${x.scope} (${x.error ?? "không rõ lý do"})`).join(" · ")}`;
         for (const sk of r.skipped) ctx.log(`bỏ qua ${sk.scope}: ${sk.reason}`);
+        return r;
+      }),
+  },
+  "morning-brief": {
+    label: "Bản tin sáng cho nhóm Quản lý",
+    source: "ALL",
+    description:
+      "CHỈ ĐỌC + GỬI TIN, KHÔNG DÙNG AI: chép màn hình /work/today (ba việc đáng làm nhất xếp liên phòng, việc quá hạn, việc chưa ai nhận, tiền đang treo, phòng chưa có người) vào nhóm Lark Quản lý mỗi sáng từ 7 giờ. " +
+      "Mọi con số đọc từ CÙNG hàm với màn hình. Chưa khai webhook nhóm Quản lý thì không gửi — không lùi về nhóm vận đơn. Sổ chống gửi lại ở settings 'work.morning-brief.sent' nên chạy nhiều lần trong ngày chỉ gửi một tin.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "morning-brief", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await runMorningBrief(new Date(), { force: o.params?.force === "1" });
+        ctx.summary.imported = r.sent ? 1 : 0;
+        ctx.summary.skipped = r.sent ? 0 : 1;
+        ctx.summary.detail = r.detail;
+        // Gửi hỏng phải hiện ra ở Kết nối dữ liệu — kênh người điều hành dựa vào không được hỏng im lặng.
+        if (r.reason.startsWith("gửi hỏng")) {
+          ctx.summary.failed = 1;
+          ctx.summary.warning = r.reason;
+        }
         return r;
       }),
   },
@@ -401,6 +423,21 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       return { ok: true, ...r };
     },
   },
+  "payroll-autopilot": {
+    label: "Lương tự động",
+    source: "ALL",
+    description:
+      "Mỗi giờ: khớp tiền ra trong sổ ngân hàng với lệnh chuyển lương, khép kỳ đã trả đủ theo sao kê. Khi công tắc lương tự động BẬT: từ 09:00 ngày 01 quyết toán kỳ trước nữa, tính & gửi phiếu kỳ trước vào hộp thư từng người, báo chủ shop khi đủ trả lời, nhắc duyệt từ ngày 13 và nhắc chuyển từ ngày 15. " +
+      "KHÔNG BAO GIỜ duyệt, khoá, hay khai “đã trả” khi chưa có dòng sao kê. Chạy lại vô hại: mọi tin nhắn và dòng lệnh đều có khoá chống trùng ở CSDL. Đặc tả: docs/payroll-autopilot.md.",
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "payroll-autopilot", trigger: o.trigger, actor: o.actor }, async (ctx) => {
+        const r = await runPayrollAutopilot();
+        ctx.summary.imported = r.did.length;
+        ctx.summary.skipped = r.notes.length;
+        ctx.summary.detail = [`kỳ ${r.monthKey}`, ...r.did, ...r.notes].join(" · ").slice(0, 900);
+        return r;
+      }),
+  },
   "work-recurrence": {
     label: "Sinh việc định kỳ",
     source: "ALL",
@@ -431,10 +468,19 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
         thoại của chúng. `applyStaleReconciliation` phủ cả những loại còn lại bằng CÙNG bộ điều
         kiện mà nơi SINH case dùng (`lib/constants/case-semantics.ts`) — một luật, hai đầu.
       */
-      const docSoat = await applyStaleReconciliation({ dryRun: false, actor: "job:cs-chat" }).catch(() => null);
+      /*
+        Lỗi đối chiếu KHÔNG được nuốt im lặng: bản cũ `.catch(() => null)` nên một câu SQL hỏng làm
+        hàng đợi ngừng tự dọn mà sổ `sync_runs` vẫn ghi lượt chạy thành công. Vẫn không chặn lượt
+        quét hội thoại phía sau, nhưng câu lỗi phải nằm trong kết quả job.
+      */
+      let loiDoiChieu: string | null = null;
+      const docSoat = await applyStaleReconciliation({ dryRun: false, actor: "job:cs-chat" }).catch((e: unknown) => {
+        loiDoiChieu = e instanceof Error ? e.message : String(e);
+        return null;
+      });
       const r = await syncPancakeChatCases({ hours: num(o.params?.hours) });
       await evaluateAlerts().catch(() => undefined);
-      return { ...r, reconciled: (docSoat?.closed ?? 0) + (docSoat?.orderNotCreated.closedTotal ?? 0), stillPending: docSoat?.orderNotCreated.stillPending ?? null };
+      return { ...r, reconciled: (docSoat?.closed ?? 0) + (docSoat?.orderNotCreated.closedTotal ?? 0), stillPending: docSoat?.orderNotCreated.stillPending ?? null, reconcileError: loiDoiChieu };
     },
   },
   "ads-billing": {

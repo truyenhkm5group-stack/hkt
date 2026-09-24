@@ -43,13 +43,17 @@ function hangSo(ten: string): number {
 const boChuThichShell = (s: string) => s.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n");
 
 type Ra = { ma: number; ra: string };
-/** Chạy một kịch bản bash (ghi vào tệp tạm của Node), trả mã thoát + toàn bộ đầu ra. */
-function chayBash(noiDung: string): Ra {
+/**
+ * Chạy một kịch bản bash (ghi vào tệp tạm của Node), trả mã thoát + toàn bộ đầu ra. `env` đi qua
+ * MÔI TRƯỜNG của tiến trình, không qua chữ của kịch bản — giá trị có `"`, `'`, `$`, `\`, `` ` `` tới
+ * bash nguyên vẹn đúng như Actions truyền một Secret xuống, không qua một lớp trích dẫn nào của bài kiểm.
+ */
+function chayBash(noiDung: string, env?: Record<string, string>): Ra {
   const tmp = mkdtempSync(path.join(tmpdir(), "backup-kiem-"));
   const kich = path.join(tmp, "run.sh");
   writeFileSync(kich, noiDung);
   try {
-    const ra = execFileSync("bash", [kich], { stdio: "pipe", encoding: "utf8", maxBuffer: 1 << 24 });
+    const ra = execFileSync("bash", [kich], { stdio: "pipe", encoding: "utf8", maxBuffer: 1 << 24, env: env ? { ...process.env, ...env } : process.env });
     return { ma: 0, ra };
   } catch (e) {
     const err = e as { status?: number; stdout?: string; stderr?: string };
@@ -618,6 +622,247 @@ export function testChamSaoLuu() {
   console.log(`✓ Chấm sao lưu: không mount ⇒ UNKNOWN · chưa có bản ⇒ DOWN · biên ${BACKUP_MAX_AGE_HOURS} giờ · chưa có ngoài máy / chưa diễn tập / bot thiếu ⇒ DEGRADED · diễn tập hỏng ⇒ DOWN · tệp hỏng không bao giờ xanh`);
 }
 
+/* ═════════════ 9 · NGOÀI MÁY: GOOGLE DRIVE + CRYPT, CẤU HÌNH TỪ SECRETS — KHÔNG SSH ═════════════ */
+
+/**
+ * Token OAuth mẫu mang ĐỦ những ký tự từng giết một đường ghi `.env`: `"` (trích dẫn của dotenv),
+ * `/` `+` `=` (base64 của Google), `|` `&` `\` (ký tự của `sed` trong upsert_env), `$` `` ` `` `'`
+ * (ký tự của shell). JSON hợp lệ: `\\\\` trong chuỗi TS là `\\` trong JSON, tức một dấu gạch ngược.
+ */
+const TOKEN_MAU =
+  '{"access_token":"ya29.a0/Ab+c=d|e&f$g\'h`i\\\\j k","token_type":"Bearer","refresh_token":"1//0gX-y+z/w==|&x","expiry":"2026-09-25T10:00:00.123+07:00"}';
+const MK_MAU = "Q3JpcHRNYXRLaGF1R2lhS2hvbmdUaGF0XzEyMzQ1Ng-_x";
+const MK2_MAU = "TXVvaUdpYUtob25nVGhhdF85ODc2NTQzMjEw_-y";
+const THU_MUC_MAU = "ThuMucGia_1234567890-KhongPhaiThat";
+const BIEN_NGOAI_MAY = ["RCLONE_GDRIVE_TOKEN", "RCLONE_CRYPT_PASSWORD", "RCLONE_CRYPT_PASSWORD2", "BACKUP_GDRIVE_FOLDER_ID"] as const;
+
+type KetQuaCauHinh = { exit: string; out: string; tep: string | null; quyen: string; nap: Map<string, string>; token: string; raw: string };
+
+/**
+ * Chạy `erp-backup.sh configure-offsite` THẬT với các biến cho trước (qua môi trường), rồi ở một tiến
+ * trình SẠCH (đã unset mọi Secret) `source` script và gọi `nap_cau_hinh` — đúng đường mà cron và ops
+ * `backup` đi. Token nạp được trả về qua base64 để so từng BYTE, không qua một lớp in ấn nào.
+ */
+function chayCauHinh(bien: Partial<Record<(typeof BIEN_NGOAI_MAY)[number], string>>, truoc = ""): KetQuaCauHinh {
+  const r = chayBash(
+    [
+      "#!/usr/bin/env bash",
+      "set -uo pipefail",
+      'unset BACKUP_OFFSITE_REMOTE $(compgen -v RCLONE_CONFIG_ || true)',
+      'T="$(mktemp -d)"; mkdir -p "$T/erp"',
+      `S="${bashPath(SCRIPT)}"`,
+      'export ERP_BACKUP_OFFSITE_ENV="$T/cfg/offsite.env" ERP_DIR="$T/erp" ERP_BACKUP_DIR="$T/b"',
+      truoc,
+      'bash "$S" configure-offsite > "$T/out" 2>&1; rc=$?',
+      'echo "@@EXIT"; echo "$rc"',
+      'echo "@@OUT"; cat "$T/out"',
+      'echo "@@TEP"; if [ -f "$ERP_BACKUP_OFFSITE_ENV" ]; then cat "$ERP_BACKUP_OFFSITE_ENV"; else echo "--KHONG-CO-TEP--"; fi',
+      'echo "@@QUYEN"; stat -c %a "$T/cfg" "$ERP_BACKUP_OFFSITE_ENV" 2>/dev/null | tr "\\n" " "; echo',
+      `unset ${BIEN_NGOAI_MAY.join(" ")}`,
+      // Tiến trình MỚI, đúng như cron: không Secret nào trong môi trường, chỉ có tệp trên đĩa.
+      'bash -c \'source "$1"; set +e; nap_cau_hinh; env | grep -E "^(RCLONE_CONFIG_|BACKUP_OFFSITE_REMOTE=)" | grep -v "^RCLONE_CONFIG_GDRIVE_TOKEN=" | sort; printf "%s" "${RCLONE_CONFIG_GDRIVE_TOKEN:-}" > "$2/token.out"\' _ "$S" "$T" > "$T/nap" 2>&1',
+      'echo "@@NAP"; cat "$T/nap"',
+      'echo "@@TOKEN"; base64 < "$T/token.out" | tr -d "\\r\\n"; echo',
+      'echo "@@HET"; rm -rf "$T"',
+      "",
+    ].join("\n"),
+    Object.fromEntries(Object.entries(bien).filter(([, v]) => v !== undefined)) as Record<string, string>,
+  );
+  const tep = phan(r.ra, "TEP");
+  const nap = new Map(
+    phan(r.ra, "NAP")
+      .split("\n")
+      .filter((l) => l.includes("="))
+      .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)] as [string, string]),
+  );
+  return {
+    exit: phan(r.ra, "EXIT"),
+    out: phan(r.ra, "OUT"),
+    tep: tep === "--KHONG-CO-TEP--" ? null : tep,
+    quyen: phan(r.ra, "QUYEN"),
+    nap,
+    token: Buffer.from(phan(r.ra, "TOKEN"), "base64").toString("utf8"),
+    raw: r.ra,
+  };
+}
+
+/** Đầu ra (log Actions công khai) không được chứa một mảnh giá trị bí mật nào. */
+function khongLoBiMat(out: string, nhan: string) {
+  const manh = [TOKEN_MAU, "1//0gX-y+z/w==", "ya29.a0/Ab+c", MK_MAU, MK_MAU.slice(0, 12), MK2_MAU, MK2_MAU.slice(0, 12), Buffer.from(TOKEN_MAU).toString("base64").slice(0, 24)];
+  for (const m of manh) assert.ok(!out.includes(m), `${nhan}: log in ra một mảnh giá trị bí mật ("${m.slice(0, 6)}…") — log Actions của kho PUBLIC ai cũng đọc được`);
+}
+
+export function testNgoaiMayGoogleDrive() {
+  assert.doesNotThrow(() => JSON.parse(TOKEN_MAU), "token mẫu phải là JSON hợp lệ — nếu không, bài kiểm đo một thứ rclone không bao giờ nhận");
+  const DU = { RCLONE_GDRIVE_TOKEN: TOKEN_MAU, RCLONE_CRYPT_PASSWORD: MK_MAU, RCLONE_CRYPT_PASSWORD2: MK2_MAU, BACKUP_GDRIVE_FOLDER_ID: THU_MUC_MAU };
+
+  // ───────── MỨC MÃ NGUỒN: deploy truyền đủ biến, install-vps gọi đúng chỗ, không ai in giá trị ─────────
+  const deploy = readFileSync(".github/workflows/deploy-vps.yml", "utf8");
+  const iSsh = deploy.indexOf("- name: SSH vào VPS và chạy bootstrap");
+  assert.ok(iSsh > 0, "không tìm thấy bước SSH của deploy");
+  const ssh = deploy.slice(iSsh, deploy.indexOf("\n      - name:", iSsh + 10));
+  const nguon: Record<(typeof BIEN_NGOAI_MAY)[number], "secrets" | "vars"> = {
+    RCLONE_GDRIVE_TOKEN: "secrets",
+    RCLONE_CRYPT_PASSWORD: "secrets",
+    RCLONE_CRYPT_PASSWORD2: "secrets",
+    BACKUP_GDRIVE_FOLDER_ID: "vars",
+  };
+  const envs = (/^\s+envs: (.+)$/m.exec(ssh)?.[1] ?? "").split(",");
+  const xuat = (/^\s+export (ERP_BRANCH .+)$/m.exec(ssh)?.[1] ?? "").split(/\s+/);
+  for (const [ten, loai] of Object.entries(nguon)) {
+    assert.match(ssh, new RegExp(`^\\s+${ten}: \\$\\{\\{ ${loai}\\.${ten} \\}\\}$`, "m"), `bước SSH phải khai ${ten} từ ${loai}.${ten}${loai === "vars" ? " — ID thư mục không bí mật, để ở Variable cho đọc lại được" : ""}`);
+    assert.ok(envs.includes(ten), `${ten} phải nằm trong danh sách envs: của bước SSH — thiếu thì VPS không bao giờ nhận được nó`);
+    assert.ok(xuat.includes(ten), `${ten} phải nằm trong dòng export của kịch bản SSH`);
+  }
+  // Mọi lần deploy nhắc tới giá trị Secret chỉ được để HỎI CÓ / KHÔNG, không bao giờ in.
+  for (const m of boChuThichShell(deploy).matchAll(/.*\$\{?(RCLONE_GDRIVE_TOKEN|RCLONE_CRYPT_PASSWORD2?)\b.*/g)) {
+    const conLai = m[0].replace(/\[ -n "\$(RCLONE_GDRIVE_TOKEN|RCLONE_CRYPT_PASSWORD2?)" \]/g, "");
+    assert.ok(!/\$\{?(RCLONE_GDRIVE_TOKEN|RCLONE_CRYPT_PASSWORD2?)\b/.test(conLai), `deploy-vps.yml chỉ được HỎI Secret có hay không, không in: "${m[0].trim().slice(0, 100)}"`);
+  }
+  const install = boChuThichShell(readFileSync("scripts/install-vps.sh", "utf8"));
+  assert.match(install, /^bash scripts\/erp-backup\.sh configure-offsite \|\| warn /m, "install-vps.sh phải dựng cấu hình ngoài máy ở MỌI lần deploy, và hỏng thì cảnh báo chứ không đổ deploy");
+  assert.ok(install.indexOf("erp-backup.sh configure-offsite") < install.indexOf("erp-backup.sh install-cron"), "configure-offsite phải chạy TRƯỚC install-cron — install-cron chỉ cài rclone khi đã có nơi lưu");
+  assert.ok(!/\$\{?(RCLONE_GDRIVE_TOKEN|RCLONE_CRYPT_PASSWORD2?|BACKUP_GDRIVE_FOLDER_ID)\b/.test(install), "install-vps.sh không được tự đụng tới giá trị Secret Drive — không upsert_env vào .env (compose nạp .env vào container app), không in");
+  assert.ok(!/upsert_env\s+(RCLONE|BACKUP_OFFSITE)/.test(install), "cấu hình rclone KHÔNG đi vào .env");
+  // Không ghi cứng ID thư mục Drive (33 ký tự bắt đầu bằng 1) vào mã: đổi thư mục là đổi Variable.
+  for (const f of ["scripts/erp-backup.sh", "scripts/install-vps.sh", ".github/workflows/deploy-vps.yml", ".github/workflows/ops-vps.yml"]) {
+    assert.ok(!/(?<![A-Za-z0-9_])1[A-Za-z0-9_-]{32}(?![A-Za-z0-9_-])/.test(readFileSync(f, "utf8")), `${f} ghi cứng một ID thư mục Google Drive — nó phải đi qua Variable BACKUP_GDRIVE_FOLDER_ID`);
+  }
+  const ham = boChuThichShell(src());
+  const iCfg = ham.indexOf("cmd_configure_offsite() {");
+  const cfg = ham.slice(iCfg, ham.indexOf("\n}\n", iCfg));
+  // Dòng GÁN từ một phép thế lệnh (`x="$(printf … | tr …)"`) không in gì ra log — bỏ qua; mọi dòng
+  // còn lại có bao/loi/echo/printf là một dòng IN.
+  const dongIn = cfg.split("\n").filter((l) => /\b(bao|loi|echo|printf)\b/.test(l) && !/> "\$tam"/.test(l) && !/^\s*(if !\s+)?\w+="\$\(/.test(l));
+  assert.ok(dongIn.length >= 4, `phải tìm thấy các dòng in của configure-offsite (thấy ${dongIn.length})`);
+  for (const dong of dongIn) {
+    const conLai = dong.replace(/\[ -[nz] "\$\w+" \]/g, ""); // HỎI rỗng hay không thì không in gì
+    assert.ok(!/\$\{?(token|json|b64|mk2?|RCLONE_GDRIVE_TOKEN|RCLONE_CRYPT_PASSWORD2?)\b/.test(conLai),`configure-offsite in một giá trị bí mật: "${dong.trim().slice(0, 100)}" — chỉ được in độ dài (\${#…})`);
+  }
+
+  // ───────── ĐỦ BA ⇒ GHI TỆP, VÀ JSON ĐI QUA NGUYÊN VẸN TỪNG BYTE ─────────
+  const du = chayCauHinh(DU, 'printf \'BACKUP_OFFSITE_REMOTE="cu-trong-env:"\\nRCLONE_CONFIG_GCRYPT_PASSWORD="tu-env-cu"\\n\' > "$T/erp/.env"');
+  assert.equal(du.exit, "0", `configure-offsite đủ biến phải thành công:\n${du.raw}`);
+  assert.ok(du.tep, "đủ ba thứ bắt buộc thì phải ghi tệp cấu hình");
+  assert.equal(du.token, TOKEN_MAU, "JSON token nạp lại phải GIỐNG TỪNG BYTE bản chủ shop dán vào Secret — `\"`, `/`, `+`, `=`, `|`, `&`, `\\`, `$`, `` ` ``, `'`, dấu cách");
+  const mongDoi: Record<string, string> = {
+    BACKUP_OFFSITE_REMOTE: "gcrypt:",
+    RCLONE_CONFIG_GDRIVE_TYPE: "drive",
+    RCLONE_CONFIG_GDRIVE_SCOPE: "drive",
+    RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: THU_MUC_MAU,
+    RCLONE_CONFIG_GCRYPT_TYPE: "crypt",
+    RCLONE_CONFIG_GCRYPT_REMOTE: "gdrive:erp-backup",
+    RCLONE_CONFIG_GCRYPT_PASSWORD: MK_MAU,
+    RCLONE_CONFIG_GCRYPT_PASSWORD2: MK2_MAU,
+    RCLONE_CONFIG_GCRYPT_FILENAME_ENCRYPTION: "standard",
+  };
+  assert.deepEqual(Object.fromEntries(du.nap), mongDoi, "nạp lại phải ra ĐÚNG bộ biến rclone đọc — và tệp ngoài máy phải THẮNG giá trị cũ trong .env");
+  assert.ok(!du.nap.has("RCLONE_CONFIG_GDRIVE_TOKEN_B64"), "khoá _B64 KHÔNG được export — rclone sẽ đọc nó như một tuỳ chọn lạ của remote");
+  assert.ok(!du.tep.includes(TOKEN_MAU) && !du.tep.includes('"refresh_token"'), "token nằm trên đĩa ở dạng base64, không phải JSON thô");
+  assert.equal((du.tep.match(/^BACKUP_OFFSITE_REMOTE=/gm) ?? []).length, 1, "mỗi khoá đúng một dòng");
+  khongLoBiMat(du.out, "đủ biến");
+  assert.match(du.out, new RegExp(`token ${TOKEN_MAU.length} ký tự`), "log phải in ĐỘ DÀI token để người vận hành biết đã nhận được gì");
+  if (process.platform === "linux") {
+    assert.deepEqual(du.quyen.split(/\s+/).filter(Boolean), ["700", "600"], "thư mục cấu hình 700, tệp 600 — chỉ root đọc");
+  } else {
+    console.log(`⚠ Quyền 700/600 của tệp cấu hình ngoài máy: CHƯA ĐO ĐƯỢC trên ${process.platform} (NTFS không giữ bit POSIX); đo trên Linux/CI.`);
+  }
+
+  // Chạy lại (mỗi lần deploy) với cùng Secret ⇒ tệp không đổi.
+  const lai = chayCauHinh(DU, `mkdir -p "$T/cfg"; cat > "$ERP_BACKUP_OFFSITE_ENV" <<'EOF_CU'\n${du.tep}\nEOF_CU`);
+  assert.equal(lai.tep, du.tep, "chạy lại với cùng Secret phải ra đúng tệp cũ");
+  assert.match(lai.out, /không đổi/, "…và nói là không đổi");
+
+  // Dán kèm hai dòng mũi tên của `rclone authorize`, xuống dòng Windows ⇒ vẫn đúng token.
+  const dan = chayCauHinh({ ...DU, RCLONE_GDRIVE_TOKEN: `Paste the following into your remote machine --->\r\n${TOKEN_MAU}\r\n<---End paste\r\n` });
+  assert.equal(dan.token, TOKEN_MAU, `dán cả khối mũi tên + CRLF phải ra đúng JSON token:\n${dan.raw}`);
+  // rclone vài bản in token dạng một khối base64.
+  const b64 = chayCauHinh({ ...DU, RCLONE_GDRIVE_TOKEN: Buffer.from(TOKEN_MAU).toString("base64") });
+  assert.equal(b64.token, TOKEN_MAU, "token dán ở dạng base64 phải được giải ra đúng JSON");
+
+  // ───────── THIẾU MỘT TRONG BA ⇒ KHÔNG GHI GÌ MỚI, CẤU HÌNH CŨ GIỮ NGUYÊN, NÓI RÕ THIẾU GÌ ─────────
+  const CU = "BACKUP_OFFSITE_REMOTE=cu:";
+  const coTepCu = `mkdir -p "$T/cfg"; printf '%s\\n' '${CU}' > "$ERP_BACKUP_OFFSITE_ENV"`;
+  for (const thieu of ["RCLONE_GDRIVE_TOKEN", "RCLONE_CRYPT_PASSWORD", "BACKUP_GDRIVE_FOLDER_ID"] as const) {
+    const bien = { ...DU } as Partial<typeof DU>;
+    delete bien[thieu];
+    const k = chayCauHinh(bien, coTepCu);
+    assert.equal(k.exit, "0", `thiếu ${thieu}: không được làm đổ deploy`);
+    assert.equal(k.tep, CU, `thiếu ${thieu}: KHÔNG được ghi gì mới — tệp cũ giữ nguyên từng byte`);
+    assert.match(k.out, new RegExp(`::warning::.*THIẾU.*${thieu}`), `thiếu ${thieu}: log phải nói rõ THIẾU ĐÚNG CÁI GÌ`);
+    for (const khac of ["RCLONE_GDRIVE_TOKEN", "RCLONE_CRYPT_PASSWORD", "BACKUP_GDRIVE_FOLDER_ID"].filter((x) => x !== thieu)) {
+      assert.ok(!new RegExp(`THIẾU[^\\n]*${khac} \\(`).test(k.out), `thiếu ${thieu}: không được báo thiếu nhầm ${khac}`);
+    }
+    khongLoBiMat(k.out, `thiếu ${thieu}`);
+  }
+  // Thiếu salt (tuỳ chọn) thì vẫn ghi, và không có dòng PASSWORD2.
+  const khongSalt = chayCauHinh({ ...DU, RCLONE_CRYPT_PASSWORD2: "" });
+  assert.ok(khongSalt.tep && !/PASSWORD2/.test(khongSalt.tep), "salt là TUỲ CHỌN: không có thì vẫn ghi, và không có dòng PASSWORD2");
+
+  // Chưa khai gì ⇒ không tạo tệp; cấu hình tay kiểu cũ trong .env vẫn chạy như trước.
+  const chua = chayCauHinh({}, 'printf \'BACKUP_OFFSITE_REMOTE="b2:kho/erp"\\n\' > "$T/erp/.env"');
+  assert.equal(chua.tep, null, "chưa khai Secret nào ⇒ không tạo tệp");
+  assert.ok(!/::warning::/.test(chua.out), "chưa khai gì là trạng thái hợp lệ (chủ shop chưa quyết) — không cảnh báo nhầm");
+  assert.equal(chua.nap.get("BACKUP_OFFSITE_REMOTE"), "b2:kho/erp", "cấu hình tay kiểu cũ trong .env vẫn được nạp");
+
+  // Giá trị sai dạng ⇒ KHÔNG ghi (một cấu hình hỏng im lặng tệ hơn không có cấu hình).
+  for (const [ten, bien] of [
+    ["token không có refresh_token", { ...DU, RCLONE_GDRIVE_TOKEN: '{"access_token":"a"}' }],
+    ["ID thư mục là cả đường dẫn", { ...DU, BACKUP_GDRIVE_FOLDER_ID: "https://drive.google.com/drive/folders/abc" }],
+    ["mật khẩu gốc chưa obscure", { ...DU, RCLONE_CRYPT_PASSWORD: "matkhau goc!" }],
+  ] as const) {
+    const k = chayCauHinh(bien);
+    assert.equal(k.tep, null, `${ten}: KHÔNG được ghi cấu hình`);
+    assert.match(k.out, /::warning::/, `${ten}: phải cảnh báo`);
+    khongLoBiMat(k.out, ten);
+  }
+
+  // ───────── ĐƯỜNG ĐẨY: `gcrypt:` + daily ⇒ `gcrypt:daily/…`, không phải `gcrypt:/daily/…` ─────────
+  const day = chayBash(khungChay({ dfAvail: 999_999, offsite: "ok" }));
+  const log = phan(day.ra, "DOCKER");
+  assert.match(log, /^rclone copyto --retries 3 \S+ gia:daily\/erp-\d{8}-\d{4}\.dump$/m, `đích đẩy phải là remote:thư-mục-con/tệp:\n${log}`);
+  assert.match(log, /^rclone lsf --format s gia:daily\/erp-/m, "đọc lại kích thước ở ĐÚNG đường vừa đẩy");
+  assert.match(log, /^rclone delete gia:daily --min-age /m, "dọn theo tuổi ở đúng thư mục con");
+  assert.ok(!/gia:\//.test(log), "không bao giờ `remote:/…` — dấu `/` đầu đổi nghĩa đường ở vài backend");
+
+  // ───────── install-cron CÀI rclone khi (và chỉ khi) đã có nơi lưu — kể cả khi danh sách gói cũ ─────────
+  const cai = chayBash(
+    [
+      "#!/usr/bin/env bash",
+      "set -uo pipefail",
+      'unset BACKUP_OFFSITE_REMOTE $(compgen -v RCLONE_CONFIG_ || true)',
+      'T="$(mktemp -d)"; mkdir -p "$T/bin" "$T/erp" "$T/logrotate"',
+      'printf "#!/usr/bin/env bash\\nexit 0\\n" > "$T/bin/cron"; cp "$T/bin/cron" "$T/bin/systemctl"',
+      // apt-get giả: lần `install` đầu hỏng (danh sách gói cũ), sau `update` thì được.
+      'printf \'#!/usr/bin/env bash\\necho "apt-get $*" >> "%s/apt.log"\\ncase "$1" in update) : > "%s/da-update" ;; install) [ -f "%s/da-update" ] || exit 100 ;; esac\\n\' "$T" "$T" "$T" > "$T/bin/apt-get"',
+      'chmod +x "$T/bin/cron" "$T/bin/systemctl" "$T/bin/apt-get"',
+      'export PATH="$T/bin:/usr/bin:/bin" ERP_DIR="$T/erp" ERP_BACKUP_DIR="$T/backups" ERP_CRON_FILE="$T/cron.d/erp-backup" ERP_LOGROTATE_FILE="$T/logrotate/erp-backup" ERP_BACKUP_LOG="$T/erp-backup.log" ERP_BACKUP_OFFSITE_ENV="$T/cfg/offsite.env"',
+      'echo "@@CORCLONE"; command -v rclone >/dev/null 2>&1 && echo co || echo khong',
+      `S="${bashPath(SCRIPT)}"`,
+      'bash "$S" install-cron > /dev/null 2>&1; echo "@@CHUAKHAI"; cat "$T/apt.log" 2>/dev/null; : > "$T/apt.log"',
+      'bash "$S" configure-offsite > /dev/null 2>&1',
+      'bash "$S" install-cron > "$T/out" 2>&1; echo "@@DAKHAI"; cat "$T/apt.log"',
+      'echo "@@HET"; rm -rf "$T"',
+      "",
+    ].join("\n"),
+    DU,
+  );
+  if (phan(cai.ra, "CORCLONE") === "khong") {
+    assert.ok(!/rclone/.test(phan(cai.ra, "CHUAKHAI")), "chưa khai nơi lưu thì KHÔNG cài rclone — không cài công cụ cho một quyết định chưa có");
+    assert.deepEqual(
+      phan(cai.ra, "DAKHAI").split("\n").map((l) => l.replace(/ -y -qq/, "")),
+      ["apt-get install rclone", "apt-get update -qq", "apt-get install rclone"],
+      `đã khai qua Secrets ⇒ install-cron cài rclone; danh sách gói cũ ⇒ update rồi thử lại:\n${cai.ra}`,
+    );
+  } else {
+    console.log("⚠ install-cron cài rclone: CHƯA ĐO ĐƯỢC — máy chạy kiểm thử đã có rclone trong /usr/bin nên nhánh cài không bao giờ chạy.");
+  }
+
+  console.log(
+    `✓ Ngoài máy Google Drive: deploy truyền ${BIEN_NGOAI_MAY.join(" · ")} (token/mật khẩu = Secret, thư mục = Variable) · cấu hình vào tệp RIÊNG 600, không vào .env · JSON ${TOKEN_MAU.length} ký tự có " / + = | & \\ $ \` ' đi qua NGUYÊN VẸN (base64 trên đĩa) · dán kèm mũi tên/CRLF/base64 vẫn đúng · thiếu 1/3 ⇒ không ghi, nói rõ thiếu gì · không in giá trị · đẩy tới remote:daily/… · rclone tự cài`,
+  );
+}
+
 export function testSaoLuu() {
   testLichSaoLuuDuocCai();
   testXoayVongMotChoKhai();
@@ -627,5 +872,6 @@ export function testSaoLuu() {
   testOpsSaoLuu();
   testMountTrangThaiChiDoc();
   testChamSaoLuu();
+  testNgoaiMayGoogleDrive();
 }
 

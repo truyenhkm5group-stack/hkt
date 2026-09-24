@@ -17,5 +17,18 @@ export const employeeSchema = z.object({
   percentRevenue: pct("% doanh thu cá nhân"),
   active: z.boolean(),
   note: z.string().trim().max(500),
-});
+  startedOn: z.string().trim().refine((v) => !v || /^\d{4}-\d{2}-\d{2}$/.test(v), "Ngày vào làm không hợp lệ"),
+  leftOn: z.string().trim().refine((v) => !v || /^\d{4}-\d{2}-\d{2}$/.test(v), "Ngày nghỉ không hợp lệ"),
+  bankBin: z.string().trim().refine((v) => !v || /^\d{6}$/.test(v), "Mã BIN ngân hàng gồm đúng 6 chữ số"),
+  bankAccount: z.string().trim().refine((v) => !v || /^[0-9A-Za-z]{4,19}$/.test(v), "Số tài khoản chỉ gồm chữ và số, dài 4–19 ký tự"),
+  bankAccountName: z.string().trim().max(80),
+})
+  // Đã nghỉ thì PHẢI có ngày: "đã nghỉ" không ngày là đúng thứ làm một người biến mất khỏi tháng họ còn làm dở.
+  .refine((v) => v.active || Boolean(v.leftOn), { path: ["leftOn"], message: "Đã nghỉ thì nhập ngày làm cuối — để tháng cuối vẫn được trả đủ những ngày còn làm" })
+  .refine((v) => !v.startedOn || !v.leftOn || v.leftOn >= v.startedOn, { path: ["leftOn"], message: "Ngày nghỉ phải sau ngày vào làm" })
+  // Ba ô ngân hàng đi cùng nhau: thiếu một ô thì lệnh chuyển không dựng được, và điền nửa vời dễ chuyển nhầm.
+  .refine((v) => [v.bankBin, v.bankAccount, v.bankAccountName].every(Boolean) || [v.bankBin, v.bankAccount, v.bankAccountName].every((x) => !x), {
+    path: ["bankAccount"],
+    message: "Khai đủ cả ngân hàng, số tài khoản và tên chủ tài khoản (hoặc để trống cả ba)",
+  });
 export type EmployeeInput = z.infer<typeof employeeSchema>;

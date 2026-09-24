@@ -3,6 +3,7 @@ import { getDb, schema } from "@/db";
 import { CS_BOT_ASSIGNEES, CS_ESCALATE_KINDS, CS_ESCALATE_WINDOW_HOURS, CS_KIND_LABEL, CS_KINDS, CS_STATUS_LABEL, CS_SURFACE_MODE, type CsKind, type CsStatus } from "@/lib/constants/cs";
 import { CS_CUSTOMER_WAITING_KINDS, CS_DUE_SOON_HOURS, CS_KIND_SEVERITY, CS_SLA_BUCKETS, CS_SLA_BUCKET_LABEL, csCasePriority, csDueAt, csSlaBucket, getCustomerNextAction, type CsNextAction, type CsSlaBucket } from "@/lib/constants/cs-next-action";
 import { CS_ACTIONABLE_STATUSES, CS_ASSIGNEE_FACET_BOT, CS_ASSIGNEE_FACET_LABEL, CS_ASSIGNEE_FACET_UNLINKED, CS_CASE_SLA_HOURS, CS_DOMAIN_LABEL, CS_DOMAINS, CS_LIFECYCLE_KINDS, CS_LOGISTICS_KINDS, csDomainOf, humanAssignee, type CsDomain } from "@/lib/constants/cs-domain";
+import { assessOpenCases } from "@/lib/cs/stale";
 import { rowsOf } from "@/lib/sql-rows";
 import { decideScope } from "@/lib/auth/scope-guard";
 import type { ListParams } from "@/lib/search-params";
@@ -235,6 +236,33 @@ async function loadCaseShipments(ids: string[]) {
   return out;
 }
 
+/**
+ * ═══ CHỨNG TỪ ĐÃ ĐI TIẾP MÀ CASE VẪN MỞ — NÓI RA TRÊN DÒNG ═══
+ *
+ * Máy đối chiếu (`lib/cs/stale.ts`, 15 phút/lần) tự đóng case mà điều kiện sinh ra nó đã hết —
+ * TRỪ case đã có người thật cầm: máy không đóng hộ công của người. Trước bản này, những case ấy nằm
+ * lại hàng đợi với đúng trạng thái cũ và không có dấu hiệu gì, nên người trực cứ thấy "Giục giao"
+ * của một đơn ĐVVC đã phát xong từ tuần trước. Giờ dòng mang một câu lý do đọc được; người vẫn là
+ * người bấm đóng.
+ *
+ * `autoClose` = chưa ai cầm ⇒ lượt đối chiếu tới sẽ tự đóng (dòng chỉ còn trong tối đa 15 phút).
+ * Lỗi khi đánh giá KHÔNG làm sập trang: mất nhãn gợi ý tệ hơn nhiều so với mất cả hàng đợi.
+ */
+export type CsStaleHint = { reason: string; autoClose: boolean };
+
+async function staleHints(ids: string[]): Promise<Map<string, CsStaleHint>> {
+  const out = new Map<string, CsStaleHint>();
+  if (!ids.length) return out;
+  const danhGia = await assessOpenCases(ids).catch((e: unknown) => {
+    console.error("[cs] không đánh giá được điều kiện sống của case:", e instanceof Error ? e.message : e);
+    return [];
+  });
+  for (const a of danhGia) {
+    if (a.verdict === "NEEDS_REVIEW" || a.verdict === "AUTO_RESOLVE") out.set(a.id, { reason: a.reason, autoClose: a.verdict === "AUTO_RESOLVE" });
+  }
+  return out;
+}
+
 export async function listCsCases(params: ListParams) {
   const db = await getDb();
   const c = schema.csCases;
@@ -251,7 +279,7 @@ export async function listCsCases(params: ListParams) {
     db.select({ total: count() }).from(c).where(where),
   ]);
   const ids = base.map((r) => r.id);
-  const [notes, shipments] = await Promise.all([loadCaseNotes(ids), loadCaseShipments(ids)]);
+  const [notes, shipments, hints] = await Promise.all([loadCaseNotes(ids), loadCaseShipments(ids), staleHints(ids)]);
   const rows = base.map((r) => {
     const kien = shipments.get(r.id) ?? null;
     const ship = kien?.active ?? null;
@@ -267,6 +295,7 @@ export async function listCsCases(params: ListParams) {
       /** MỌI lần gửi của đơn, lần đang chạy đứng đầu — để CSKH thấy đủ mã, không phải một mã do máy chọn. */
       shipments: kien?.all ?? [],
       note: notes.get(r.id) ?? null,
+      staleHint: hints.get(r.id) ?? null,
     };
   });
   return { rows, total: Number(total), pageCount: Math.max(1, Math.ceil(Number(total) / params.pageSize)) };
@@ -602,6 +631,8 @@ export type CsCustomerCase = {
   slaBucket: CsSlaBucket;
   /** Đường mở đúng hội thoại Pancake của case. `null` = đơn landing/sheet, không có hội thoại. */
   chatUrl: string | null;
+  /** Chứng từ đã đi tiếp mà case vẫn mở — xem `staleHints`. `null` = vẫn còn việc / chưa kết luận được. */
+  staleHint: CsStaleHint | null;
 };
 
 /**
@@ -702,6 +733,7 @@ export async function listCsCustomerQueue(params: ListParams, now = new Date()):
     .where(and(where, sql`${KHOA} in ${danhSachKhoa}`))
     .orderBy(desc(c.createdAt));
 
+  const hints = await staleHints(cases.map((x) => x.id));
   const theoKhoa = new Map<string, typeof cases>();
   for (const r of cases) {
     const list = theoKhoa.get(r.key) ?? [];
@@ -738,6 +770,7 @@ export async function listCsCustomerQueue(params: ListParams, now = new Date()):
         dueAt,
         slaBucket: csSlaBucket(dueAt, now),
         chatUrl: chatCua(x),
+        staleHint: hints.get(x.id) ?? null,
       };
     });
     const dangMo = chiTiet.filter((x) => (CS_ACTIONABLE_STATUSES as readonly string[]).includes(x.status));

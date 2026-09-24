@@ -678,7 +678,7 @@ Chủ shop quyết: làm cho đúng, nhưng không đụng kỳ đã chốt.
   vận chuyển của từng mã theo **số đơn đã gửi** (cùng căn cứ với đóng hàng / NV vận đơn), largest
   remainder; kỳ không gửi đơn nào thì theo doanh thu; vẫn không chia được thì đứng ở cấp shop
   (`totals.logisticsAdjustmentUnallocated`) và vẫn bị trừ khỏi lợi nhuận shop. Khoản ấy đi xuống lợi
-  nhuận cá nhân theo đúng tỷ trọng quy kết của mã, như cước theo vận đơn. `PAYROLL_CALC_VERSION` 2 → 3.
+  nhuận cá nhân theo đúng tỷ trọng quy kết của mã, như cước theo vận đơn. `PAYROLL_CALC_VERSION` 3 → 4.
 - **Kỳ đã khoá không đổi một đồng.** Cơ chế có sẵn (`lib/queries/payroll-period.ts`): kỳ `LOCKED` /
   `PAID` (và `FINAL` cũ) đọc ẢNH CHỤP ở `payroll_periods.snapshot` — màn hình `/payroll`, tệp xuất
   CSV, phiếu lương đều thế; bản tính sống chỉ để dựng ĐỀ XUẤT ĐIỀU CHỈNH (`payrollDrift`), người quyết

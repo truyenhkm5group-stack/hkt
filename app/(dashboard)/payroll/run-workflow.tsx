@@ -65,7 +65,10 @@ export function RunWorkflow({
         toast.error(r.error);
         return;
       }
-      toast.success(`${PAYROLL_ACTION_SPEC[action].label} — kỳ chuyển sang “${PAYROLL_RUN_STATUS_LABEL[r.status as PayrollRunStatus]}”`);
+      toast.success(`${PAYROLL_ACTION_SPEC[action].label} — kỳ chuyển sang “${PAYROLL_RUN_STATUS_LABEL[r.status as PayrollRunStatus]}”`, {
+        // Việc đi kèm (gửi phiếu khi chuyển soát, lập lệnh chuyển khi khoá) — nói ra cả khi nó hỏng.
+        description: r.sideEffects.length ? r.sideEffects.join(" · ") : undefined,
+      });
       setReasonFor(null);
       setReason("");
       router.refresh();

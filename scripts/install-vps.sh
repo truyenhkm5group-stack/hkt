@@ -426,6 +426,14 @@ docker exec erp-app wget -qO- http://127.0.0.1:3000/api/health 2>/dev/null | gre
 # một lượt sao lưu trong lúc deploy: deploy đang cầm khoá vòng đời ĐỘC QUYỀN, còn sao lưu cần khoá
 # đọc nặng trước rồi mới tới khoá vòng đời — lấy ngược thứ tự ở đây là mở đường cho bế tắc.
 # Hỏng thì cảnh báo chứ không đổ deploy: trang Kết nối dữ liệu tự báo "chưa có bản sao lưu".
+#
+# Nơi lưu NGOÀI MÁY (Google Drive + crypt) dựng TRƯỚC `install-cron`, vì install-cron chỉ cài rclone khi
+# đã có nơi lưu. Secrets RCLONE_GDRIVE_TOKEN / RCLONE_CRYPT_PASSWORD[2] + Variable BACKUP_GDRIVE_FOLDER_ID
+# đi thẳng từ môi trường (deploy-vps.yml) vào erp-backup.sh — KHÔNG qua `upsert_env`, KHÔNG vào .env:
+# .env được compose nạp vào container app/scheduler, còn token Drive và mật khẩu giải mã bản sao lưu
+# không có việc gì ở đó. `sed` của upsert_env cũng không chở nổi JSON (`|`, `&`, `\` là ký tự của sed).
+say "Cấu hình nơi lưu ngoài máy (Google Drive)"
+bash scripts/erp-backup.sh configure-offsite || warn "KHÔNG dựng được cấu hình Google Drive — xem docs/backup-restore.md mục 5. ERP sẽ báo vàng ở mục Sao lưu dữ liệu."
 say "Cài lịch sao lưu tự động"
 bash scripts/erp-backup.sh install-cron || warn "KHÔNG cài được lịch sao lưu — xem docs/backup-restore.md. ERP sẽ báo đỏ ở mục Sao lưu dữ liệu."
 

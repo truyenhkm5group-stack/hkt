@@ -869,6 +869,20 @@
       "when": 1790002228245,
       "tag": "0124_creative_manual_gen_campaign_per_post",
       "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1790002288245,
+      "tag": "0125_cs_semantic_verdicts",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1790002348245,
+      "tag": "0126_payroll_autopilot",
+      "breakpoints": true
     }
   ]
 }

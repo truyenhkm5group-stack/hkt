@@ -51,6 +51,14 @@ const JOBS = [
   */
   { job: "work-recurrence", every: minutes("WORK_RECURRENCE_EVERY_MINUTES", 15), offset: 9 },
   /*
+    LƯƠNG TỰ ĐỘNG — 60 phút/lần (chủ shop cho phép thêm job 25/09/2026).
+
+    Bản thân job tự biết giờ: trước 09:00 ngày 01 nó không tính gì, và mọi tin nhắn / dòng lệnh có
+    khoá chống trùng ở CSDL, nên chạy mỗi giờ chỉ tốn một lượt đọc khi không có việc. Khớp tiền ra với
+    lệnh chuyển chạy CẢ KHI công tắc tắt — đó là đọc chứng từ ngân hàng, không phải quyết định thay ai.
+  */
+  { job: "payroll-autopilot", every: minutes("PAYROLL_AUTOPILOT_EVERY_MINUTES", 60), offset: 17 },
+  /*
     LEO THANG SLA — 30 phút/lần, và nó là job ĐỌC.
 
     Nó không đổi mức ưu tiên của việc nào (mức leo thang được tính lúc đọc, xem
@@ -70,6 +78,12 @@ const JOBS = [
     Bản tin nói về NGÀY HÔM QUA — ngày duy nhất vừa đã đóng vừa còn đáng hành động.
   */
   { job: "marketing-digest", every: minutes("MARKETING_DIGEST_EVERY_MINUTES", 30), offset: 13 },
+  /*
+    BẢN TIN SÁNG — 30 phút/lần, cùng lý lẽ với bản tin marketing: sổ chống gửi lại khoá MỘT tin mỗi
+    ngày Việt Nam, và hàm tự đứng yên trước 7 giờ. Chạy dày chỉ để tin tới sớm cả khi máy chủ vừa
+    khởi động lại. Chỉ đọc + gửi Lark, không dùng AI; chưa khai webhook nhóm Quản lý thì không gửi.
+  */
+  { job: "morning-brief", every: minutes("MORNING_BRIEF_EVERY_MINUTES", 30), offset: 17 },
   /*
     CHỤP ẢNH HIỆU SUẤT — mỗi 6 giờ, và đó là con số chọn có lý do.
 

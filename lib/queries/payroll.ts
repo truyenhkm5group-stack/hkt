@@ -1,7 +1,11 @@
 import { and, eq, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { attributionShares, DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, shareFor, splitProfit, type AttributionMode, type Employee, type PageBucket, type PayrollBasis, type PayrollConfig } from "@/lib/constants/payroll";
+import { attributionShares, DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, payrollPeriodKey, shareFor, splitProfit, type AttributionMode, type Employee, type PageBucket, type PayrollBasis, type PayrollConfig } from "@/lib/constants/payroll";
+import { employmentWindow } from "@/lib/constants/payroll-employment";
+import { PAYROLL_COMPONENT_SIGN, type PayrollComponentKind } from "@/lib/constants/payroll-components";
+import { loadAdjustments } from "@/lib/queries/payroll-policies";
+import { vnDateKey } from "@/lib/format";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { adMarketerMap } from "@/lib/integrations/facebook/ads-index";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
@@ -733,7 +737,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
     m.totalSpend = m.adSpend + m.testSpend;
     m.products.sort((a, b) => b.personalProfit - a.personalProfit);
   }
-  for (const e of employees) if (e.active && e.department === "Marketing" && !marketers.has(e.id)) ensure(e.id);
+  for (const e of employees) if (employmentWindow(e, period.from, period.to).included && e.department === "Marketing" && !marketers.has(e.id)) ensure(e.id);
   const list = [...marketers.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.personalProfit - a.personalProfit));
   products.sort((a, b) => b.profit - a.profit);
   return { basis, config, nominal, products, totals, marketers: list, unattributedProfit, unattributedRevenue, shopRetained, costWarnings: econ.costWarnings, payrollCovered: econ.payrollCovered, attributionCoverage: coverage };
@@ -803,6 +807,19 @@ export type PayrollLine = {
    * đường cũ. Cộng cả hai là trả hai lần cho cùng một tháng công.
    */
   engine: EmployeeEngineResult | null;
+  /**
+   * KHOẢN ĐIỀU CHỈNH CỦA ĐƯỜNG TÍNH CŨ (thưởng, tạm ứng, khấu trừ, quyết toán kỳ trước…).
+   *
+   * Trước bản này bảng `payroll_adjustments` chỉ vào lương của người ĐÃ gán chính sách — người còn
+   * ở đường cũ nhập điều chỉnh vào thì nó nằm im trong bảng, không cộng vào đâu, không báo gì. Luật
+   * "sai thì sửa bằng điều chỉnh kỳ sau" chỉ đúng khi nó đúng cho MỌI người.
+   *
+   * `null` = người này đi máy chung (điều chỉnh đã nằm trong `engine.result.adjustments`). Mỗi mục
+   * mang DẤU đã áp (`PAYROLL_COMPONENT_SIGN`).
+   */
+  legacyAdjustments: { items: { label: string; kind: string; amount: number; reason: string }[]; total: number } | null;
+  /** Phần kỳ người này thật sự làm, khi bị ngày vào / ngày nghỉ cắt bớt — để màn hình nói "chỉ tính N ngày". */
+  employmentClip: { from: string; to: string; days: number } | null;
 };
 
 /** Một dòng bù trừ lỗ lũy kế, đủ để chủ shop đọc mà không cần mở thêm màn hình nào. */
@@ -931,7 +948,13 @@ export async function getPayrollReport(
     `null` — "KHÔNG ÁP DỤNG", khác hẳn "chưa biết" và khác hẳn "bằng 0".
   */
   const carryMonth = wholeMonthKey(period.from, period.to);
-  const marketerIds = employees.filter((e) => e.active).map((e) => e.id);
+  /*
+    AI CÓ MẶT TRONG KỲ: đi bằng NGÀY VÀO / NGÀY NGHỈ khi có khai, bằng cờ khi không
+    (`lib/constants/payroll-employment.ts`). Người nghỉ ngày 20 vẫn có dòng lương của tháng ấy.
+  */
+  const windows = new Map(employees.map((e) => [e.id, employmentWindow(e, period.from, period.to)] as const));
+  const inPeriod = (e: Employee) => windows.get(e.id)?.included === true;
+  const marketerIds = employees.filter(inPeriod).map((e) => e.id);
   const openings =
     carryMonth && carryConfig.enabled
       ? await resolveOpeningMany(marketerIds, carryMonth, carryConfig)
@@ -969,7 +992,9 @@ export async function getPayrollReport(
 
     Người chưa gán chính sách KHÔNG có mặt trong `engineLines`, và nhánh dưới chạy y như trước.
   */
-  const activeEmployees = employees.filter((e) => e.active);
+  const activeEmployees = employees.filter(inPeriod);
+  const periodKeyForAdj = payrollPeriodKey(period.from, period.to);
+  const adjustmentRows = periodKeyForAdj ? (await loadAdjustments(periodKeyForAdj)).byEmployee : null;
   const engineLines = await computeEngineLines(
     period,
     {
@@ -1068,7 +1093,18 @@ export async function getPayrollReport(
         Nay cả hai đi cùng một hàm, cùng luật: chia theo số ngày chồng lấn của TỪNG THÁNG THẬT
         (AGENTS.md mục 14 · 16). Cộng đủ một tháng vẫn ra đúng khoản tháng, không dư không thiếu.
       */
-      const fixed = fixedBounded ? prorateMonthlyAmount(fixedMonthly, period.from, period.to) : null;
+      /*
+        NGÀY VÀO / NGÀY NGHỈ CẮT PHẦN KỲ ĐƯỢC TÍNH — cùng hàm chia theo ngày, chỉ khác hai mốc.
+        Không khai ngày ⇒ cửa sổ trùng nguyên kỳ ⇒ con số y như trước bản này.
+      */
+      const win = windows.get(e.id);
+      const winFrom = win && win.included ? win.from : period.from;
+      const winTo = win && win.included ? win.to : period.to;
+      const fixed = fixedBounded ? prorateMonthlyAmount(fixedMonthly, winFrom, winTo) : null;
+      const employmentClip =
+        win && win.included && win.clipped && winFrom && winTo
+          ? { from: vnDateKey(winFrom), to: vnDateKey(winTo), days: Math.max(0, inclusiveDays(winFrom, winTo)) }
+          : null;
       /*
         HAI ĐƯỜNG TÍNH, VÀ CHỈ MỘT ĐƯỜNG RA TIỀN CHO MỖI NGƯỜI.
 
@@ -1080,7 +1116,20 @@ export async function getPayrollReport(
         riêng và không cộng vào tổng.
       */
       const engine = engineLines.get(e.id) ?? null;
-      const legacySalary = fixed === null || bonusPersonal === null ? null : fixed + bonusTotal + bonusPersonal + bonusRevenue;
+      /*
+        Điều chỉnh cho người ở đường cũ: cùng bảng, cùng dấu (`PAYROLL_COMPONENT_SIGN`) mà máy chung
+        dùng — một khoản tạm ứng trừ như nhau dù người nhận đi đường tính nào.
+      */
+      const adjItems = engine
+        ? null
+        : (adjustmentRows?.get(e.id) ?? []).map((r) => ({
+            label: r.label,
+            kind: r.kind,
+            amount: (PAYROLL_COMPONENT_SIGN[r.kind as PayrollComponentKind] ?? 1) * Math.abs(Number(r.amount) || 0),
+            reason: r.reason,
+          }));
+      const legacyAdjustments = adjItems ? { items: adjItems, total: adjItems.reduce((t, a) => t + a.amount, 0) } : null;
+      const legacySalary = fixed === null || bonusPersonal === null ? null : fixed + bonusTotal + bonusPersonal + bonusRevenue + (legacyAdjustments?.total ?? 0);
       return {
         employee: e,
         totalProfit,
@@ -1094,6 +1143,8 @@ export async function getPayrollReport(
         salary: engine ? engine.result.netPay : legacySalary,
         carry,
         engine,
+        legacyAdjustments,
+        employmentClip,
       };
     });
   /*

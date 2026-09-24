@@ -210,6 +210,11 @@ export function testNavigationCoverage() {
     "/payroll/runs": "tab 'Lịch sử kỳ' của /payroll",
     "/payroll/payslip": "tab 'Phiếu lương' của /payroll — người chỉ có quyền xem của mình vào đây để xem phiếu của chính họ",
     "/payroll/settings": "tab 'Cấu hình' của /payroll, chỉ hiện với quyền payroll:manage",
+    "/payroll/autopilot": "tab 'Trả lương tự động' của /payroll, chỉ hiện với quyền payroll:manage — cùng lý do với ba tab khai báo",
+    // Trang của NGƯỜI NHẬN phiếu lương: mọi tài khoản đều có (cổng là quyền sở hữu phiếu), nên nó
+    // nằm ở menu tài khoản (`components/nav-user.tsx`) và ở tin "Gửi riêng bạn" trên chuông — không
+    // phải một module của thanh điều hướng chính.
+    "/my-payslip": "mục 'Phiếu lương của tôi' trong menu tài khoản (components/nav-user.tsx) và tin phiếu lương ở chuông",
     // Phòng Tech AI: MỘT mục sidebar (`/tech`), bốn màn hình còn lại là tab bên trong
     // `app/(dashboard)/tech/tech-nav.tsx`. Thanh bên trái là bản đồ của CẢ ERP; nhét năm mục của
     // một module vào đó làm loãng bản đồ của mọi module khác. Cả bốn đều nằm trong `scripts/smoke.ts`

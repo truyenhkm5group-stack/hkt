@@ -33,6 +33,7 @@ import { inclusiveDays, prorateMonthlyAmount } from "@/lib/constants/cost-alloca
 import type { CoverageState } from "@/lib/constants/cost-authority";
 import { COMPENSATION_PROFIT_BASIS, COMPENSATION_PROFIT_LABEL, type CompensationProfitBasis } from "@/lib/constants/compensation-profit";
 import { PAYROLL_EMPLOYEES_KEY, type Employee } from "@/lib/constants/payroll";
+import { employmentWindow } from "@/lib/constants/payroll-employment";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 
@@ -120,11 +121,21 @@ export async function getRecognizedPayrollCost(period: Period): Promise<PayrollR
     getSettingJson<{ list: Employee[] }>(PAYROLL_EMPLOYEES_KEY, { list: [] }).then((v) => v.list ?? []),
   ]);
   const mode: PayrollRecognitionMode = config?.mode === "PAYROLL" ? "PAYROLL" : "LEGACY_EXPENSES";
-  const active = employees.filter((e) => e && e.active !== false);
-  const monthlyFixedTotal = active.reduce((t, e) => t + Math.max(0, Math.round(Number(e.fixed) || 0)), 0);
+  /*
+    CÙNG LUẬT CÓ MẶT TRONG KỲ VỚI BẢNG LƯƠNG (`employmentWindow`): người nghỉ giữa kỳ vẫn là chi phí
+    của những ngày họ còn làm. Hai nơi tự viết hai mệnh đề là hai con số cho cùng một khoản lương.
+  */
+  const windows = employees.filter(Boolean).map((e) => ({ e, w: employmentWindow({ ...e, active: e.active !== false }, period.from, period.to) }));
+  const active = windows.filter((x) => x.w.included).map((x) => x.e);
+  const monthly = (e: Employee) => Math.max(0, Math.round(Number(e.fixed) || 0));
+  const monthlyFixedTotal = active.reduce((t, e) => t + monthly(e), 0);
 
   // Chia theo SỐ NGÀY THẬT của từng tháng: 9.000.000đ/tháng, xem 7 ngày của tháng 30 ngày = 2.100.000đ.
-  const fixedSalary = prorateMonthlyAmount(monthlyFixedTotal, period.from, period.to);
+  // Người KHÔNG bị ngày vào/nghỉ cắt thì cộng lại rồi chia MỘT lần — đúng phép tính trước bản này, nên
+  // hồ sơ không khai ngày không lệch một đồng làm tròn nào. Người bị cắt thì chia theo cửa sổ riêng.
+  const unclipped = windows.filter((x) => x.w.included && !x.w.clipped).reduce((t, x) => t + monthly(x.e), 0);
+  const clippedPart = windows.reduce((t, x) => (x.w.included && x.w.clipped ? t + prorateMonthlyAmount(monthly(x.e), x.w.from, x.w.to) : t), 0);
+  const fixedSalary = prorateMonthlyAmount(unclipped, period.from, period.to) + clippedPart;
   // Cùng hàm đếm ngày với `prorateMonthlyAmount`: mốc cuối là 23:59:59 nên chia rồi làm tròn ra
   // thừa một ngày (7 ngày thành 8), và con số ấy hiện thẳng ra màn hình.
   const days = period.from && period.to ? Math.max(0, inclusiveDays(period.from, period.to)) : 0;
