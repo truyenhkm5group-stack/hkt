@@ -14,6 +14,7 @@ import { getWorkshopLedger, workshopFormOptions, type BatchView } from "@/lib/qu
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { DeleteMarketerPriceButton, MarketerPriceDialog } from "./marketer-price-forms";
+import { SheetImportDialog } from "./sheet-import-dialog";
 import { BatchDialog, DeleteButton, DeliveryDialog, FabricDialog, PaymentDialog } from "./workshop-forms";
 
 export const metadata = { title: "Đặt xưởng & thanh toán" };
@@ -74,6 +75,7 @@ export default async function WorkshopLedgerPage({ searchParams }: { searchParam
         actions={
           options && canWrite ? (
             <>
+              {canPay ? <SheetImportDialog /> : null}
               <FabricDialog options={options} suppliers={suppliers} />
               <BatchDialog options={options} suppliers={suppliers} />
             </>

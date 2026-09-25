@@ -7,11 +7,14 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { matchSupplier } from "@/lib/constants/suppliers";
 import { cellsTotal, normalizeProductCode } from "@/lib/constants/workshop-ledger";
+import { parseCsv, sheetCsvUrl } from "@/lib/constants/landing";
 import { formatDate, vnStartOfDay } from "@/lib/format";
 import { frozenPayrollOverlapping } from "@/lib/queries/marketer-price";
 import { resolveProductByCode } from "@/lib/queries/product-code";
 import { supplierCatalog } from "@/lib/queries/suppliers";
 import { batchInput, deliveryInput, fabricInput, paymentInput } from "@/lib/validation/workshop-ledger";
+import { SHEET_TABS } from "@/lib/workshop/sheet-import";
+import { applySheetPreview, previewSheetRows, type SheetImportPreview } from "@/lib/workshop/sheet-import-db";
 
 /**
  * ═══════════ SỔ ĐẶT XƯỞNG — ĐƯỜNG GHI ═══════════
@@ -362,4 +365,45 @@ export async function deleteSupplierPayment(id: string): Promise<Result> {
   await audit({ userId: user.id, userEmail: user.email, action: "SUPPLIER_PAYMENT_DELETE", entity: row.batchId ? "PRODUCTION_BATCH" : "FABRIC_ORDER", entityId: (row.batchId ?? row.fabricOrderId) as string, detail: { paymentId: id, kind: row.kind, amount: row.amount, paidAt: row.paidAt, createdBy: row.createdBy } });
   refresh(batchId);
   return { ok: true };
+}
+
+// ─────────────────────────── NHẬP TỪ BẢNG TÍNH "BÁO CÁO ĐẶT HÀNG" ───────────────────────────
+
+const SHEET_LINK = /^https:\/\/docs\.google\.com\/spreadsheets\/d\/([A-Za-z0-9_-]{20,})/;
+
+async function readSheetTab(link: string, tab: string): Promise<string[][]> {
+  const res = await fetch(sheetCsvUrl(link, "", tab), { signal: AbortSignal.timeout(20_000), redirect: "follow", cache: "no-store" });
+  if (!res.ok) throw new Error(`Google trả HTTP ${res.status} cho trang "${tab}" — bảng tính phải chia sẻ "Bất kỳ ai có đường liên kết đều xem được"`);
+  const text = await res.text();
+  if (/^\s*</.test(text)) throw new Error(`Google trả trang đăng nhập thay vì dữ liệu trang "${tab}" — bảng tính chưa mở quyền xem công khai`);
+  return parseCsv(text);
+}
+
+/** Chỉ link Google Sheet (không nhận địa chỉ tuỳ ý — máy chủ không đi gọi URL người dùng gõ). */
+async function buildSheetPreview(link: string): Promise<SheetImportPreview | { error: string }> {
+  if (!SHEET_LINK.test(link.trim())) return { error: "Dán link Google Sheet dạng https://docs.google.com/spreadsheets/d/…" };
+  try {
+    const [finished, fabric] = await Promise.all([readSheetTab(link.trim(), SHEET_TABS.finished), readSheetTab(link.trim(), SHEET_TABS.fabric)]);
+    return await previewSheetRows(finished, fabric);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+export async function previewWorkshopSheetImport(link: string): Promise<({ ok: true } & SheetImportPreview) | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "planning:write") || !can(user, "expenses:write")) return { error: "Nhập sổ đặt xưởng cần quyền lập bảng đặt hàng SX và quyền Chi phí: sửa (có thanh toán)" };
+  const p = await buildSheetPreview(link);
+  return "error" in p ? p : { ok: true, ...p };
+}
+
+export async function applyWorkshopSheetImport(link: string): Promise<{ ok: true; batches: number; deliveries: number; fabrics: number; payments: number } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "planning:write") || !can(user, "expenses:write")) return { error: "Nhập sổ đặt xưởng cần quyền lập bảng đặt hàng SX và quyền Chi phí: sửa (có thanh toán)" };
+  const p = await buildSheetPreview(link);
+  if ("error" in p) return p;
+  const dem = await applySheetPreview(p, { id: user.id, name: user.name || user.email });
+  await audit({ userId: user.id, userEmail: user.email, action: "WORKSHOP_SHEET_IMPORT", entity: "PRODUCTION_BATCH", detail: { ...dem, skippedExisting: p.batches.filter((b) => b.status === "EXISTS").length + p.fabrics.filter((f) => f.status === "EXISTS").length, conflicts: p.batches.filter((b) => b.status === "CONFLICT").map((b) => `${b.code}#${b.batchNo}`) } });
+  refresh();
+  return { ok: true, ...dem };
 }
