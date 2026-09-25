@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { InfoHint } from "@/components/info-hint";
 import { DataWarnings } from "@/components/data-warnings";
-import { MARKETING_DIMENSION_NO_SPEND_HINT, MATURITY_LABEL, ratioOf } from "@/lib/constants/marketing-daily";
+import { MARKETING_AD_GRAIN_SPEND_HINT, MARKETING_DIMENSION_NO_SPEND_HINT, MATURITY_LABEL, ratioOf } from "@/lib/constants/marketing-daily";
 import { MISSING_TEXT, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import type { getMarketingBreakdown } from "@/lib/queries/marketing-daily";
 import { cn } from "@/lib/utils";
@@ -33,16 +33,31 @@ const NEXT_DIMENSION: Record<Breakdown["dimension"], Breakdown["dimension"]> = {
 
 export function MarketingBreakdown({ data }: { data: Breakdown }) {
   if (!data.rows.length) return <div className="px-4 py-6 text-sm text-muted-foreground">Chưa có dữ liệu để bóc tách trong kỳ này.</div>;
+  // Nhóm / mẩu: ô chi `—` nghĩa là "có ngày chiến dịch còn ở hạt chiến dịch", KHÔNG phải "chưa khai ánh
+  // xạ marketer" — hai câu giải thích đưa người đọc đi hai nơi khác nhau (mục 67).
+  const adGrain = data.dimension === "adset" || data.dimension === "ad";
 
   return (
     <div className="space-y-2">
       {/* Cảnh báo dữ liệu thu về MỘT nhãn ⚠ — không biến mất (mục 42 / 67), chỉ thôi chiếm chỗ. */}
-      {!data.spendGrain || data.spendUnknown.length ? (
+      {!data.spendGrain || data.spendUnknown.length || adGrain ? (
         <div className="px-4 pt-3">
           <DataWarnings
             items={[
               !data.spendGrain ? MARKETING_DIMENSION_NO_SPEND_HINT : null,
-              data.spendUnknown.length ? (
+              adGrain ? (
+                <>
+                  {MARKETING_AD_GRAIN_SPEND_HINT}
+                  {data.spendUnknown.length ? (
+                    <>
+                      {" "}
+                      Đang có {data.spendUnknown.length} dòng mang ngày chưa tách ({data.spendUnknown.slice(0, 4).join(" · ")}
+                      {data.spendUnknown.length > 4 ? "…" : ""}) — bấm vào một dòng để xem ngày nào đã biết, ngày nào chưa.
+                    </>
+                  ) : null}
+                </>
+              ) : null,
+              data.spendUnknown.length && !adGrain ? (
                 <>
                   Chưa khai chiến dịch nào ở bảng chi tiêu cho {data.spendUnknown.length} nhóm ({data.spendUnknown.slice(0, 4).join(" · ")}
                   {data.spendUnknown.length > 4 ? "…" : ""}), nên Chi QC · ROAS · CPQC/đơn · LN góp của họ là <b>CHƯA BIẾT</b> (—), KHÔNG phải 0. Đơn được quy

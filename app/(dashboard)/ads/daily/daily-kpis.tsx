@@ -3,7 +3,7 @@ import { Clock } from "lucide-react";
 import { StatStrip } from "@/components/stat-tile";
 import { InfoHint } from "@/components/info-hint";
 import { DataWarnings } from "@/components/data-warnings";
-import { MARKETING_METRIC_BY_KEY, MATURITY_HINT, MATURITY_LABEL, ratioOf } from "@/lib/constants/marketing-daily";
+import { MARKETING_AD_GRAIN_SPEND_HINT, MARKETING_METRIC_BY_KEY, MATURITY_HINT, MATURITY_LABEL, ratioOf } from "@/lib/constants/marketing-daily";
 import { MISSING_TEXT, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import type { MarketingDaily, MarketingDailyBase } from "@/lib/queries/marketing-daily";
 
@@ -67,7 +67,23 @@ export function MarketingKpis({ data }: { data: MarketingDaily }) {
   const pct = (v: number | null) => (v === null ? MISSING_TEXT : formatPercent(v));
 
   const tiles: Tile[] = [
-    { label: "Chi quảng cáo", value: vnd(t.adSpend), hint: MARKETING_METRIC_BY_KEY.adSpend.nullRule, ...changeNote("adSpend", t, p) },
+    data.spendCoverage
+      ? {
+          /*
+            CHIỀU NHÓM / MẨU: ĐỘ PHỦ ĐỨNG NGAY TRONG THẺ CHI.
+            Có ngày chưa tách được xuống mẩu thì tổng là `—`, và phần đã biết in ở dòng ghi chú — một
+            tổng cộng thiếu mà in như tổng kỳ là báo chi nhỏ hơn thật, lợi nhuận lớn hơn thật.
+          */
+          label: "Chi quảng cáo",
+          value: vnd(t.adSpend),
+          note:
+            data.spendCoverage.unsplitDays > 0
+              ? `đã biết ${formatVND(data.spendCoverage.knownSpend)} · ${formatNumber(data.spendCoverage.knownDays)} ngày hạt mẩu · ${formatNumber(data.spendCoverage.unsplitDays)} ngày chưa tách`
+              : `${formatNumber(data.spendCoverage.knownDays)} ngày hạt mẩu · đủ cả kỳ`,
+          hint: MARKETING_AD_GRAIN_SPEND_HINT,
+          tone: data.spendCoverage.unsplitDays > 0 ? "amber" : "default",
+        }
+      : { label: "Chi quảng cáo", value: vnd(t.adSpend), hint: MARKETING_METRIC_BY_KEY.adSpend.nullRule, ...changeNote("adSpend", t, p) },
     { label: "Đơn xác nhận", value: cnt(t.orders), ...changeNote("orders", t, p) },
     { label: "Sản phẩm", value: cnt(t.units), ...changeNote("units", t, p) },
     { label: "Doanh số POS", value: vnd(t.posRevenue), ...changeNote("posRevenue", t, p) },

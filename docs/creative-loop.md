@@ -57,7 +57,7 @@ tối / sáng sớm   NGƯỜI    xem ảnh, gạt ảnh không ưng, bấm DUY�
 trước 06:00      ĐĂNG     mỗi mẫu: tải ảnh → bài ẩn trên fanpage → CHIẾN DỊCH riêng (TẮT) → nhóm QC (trọn đời 200.000đ,
                           06:00→06:00) → mẩu QC → bật chiến dịch (§5i)
 06:00 → 06:00    CHẠY     Facebook tự dừng ở end_time — ERP chết giữa chừng cũng không tiêu quá ngân sách đã duyệt
-mỗi lượt tick    ĐO+TẮT   chi cấp mẩu (ad_spends hạt AD) + đơn theo ad_id → judgeVariant() → luật tắt ⇒ tắt nhóm
+mỗi lượt tick    ĐO+TẮT   chi cấp mẩu (ad_spends hạt AD) + đơn theo ORDER_AD_ID → judgeVariant() → luật tắt ⇒ tắt nhóm
 hết khung + 24h  CHẤM     WIN (> 100 đơn) ⇒ thư viện · PROMISING ⇒ đề nghị tiêu thêm · LOSE ⇒ loại, ảnh xoá sau 7 ngày
 mỗi ngày         HỌC      geneStats() ⇒ sổ học ⇒ đầu vào của planBatch() ngày mai
 ```
@@ -149,12 +149,25 @@ Rủi ro còn lại là ĐỘ TƯƠI, không phải chỗ trống: Facebook có 
 vài giờ dữ liệu đầu tiên. Nếu sau này có một nguồn chi tiêu hạt `AD` KHÔNG xin `actions`, lúc ấy mới
 cần cột `messages` nhận `NULL` — và phải kèm luật chấm coi `null` là "chưa đủ căn cứ".
 
-**Đơn chốt** = đơn Pancake mang `ad_id` của mẩu, `ORDER_OUTCOME <> 'CANCELLED'`. Màn hình in cạnh nó
-số đơn giao thành công và hoàn (theo `ORDER_OUTCOME`), vì mẫu nhiều đơn mà hoàn cao vẫn là mẫu lỗ.
+**Đơn chốt** = đơn quy về mẩu bằng `ORDER_AD_ID` (`lib/queries/ads-attribution-link.ts` — CÙNG biểu
+thức với cấp mẩu của `/ads`), `ORDER_OUTCOME <> 'CANCELLED'`. Hai đường, theo thứ tự thẩm quyền:
+`ad_id` Pancake gửi; không có thì bài viết của đơn, CHỈ khi bài ấy thuộc ĐÚNG MỘT mẩu (bài nhiều mẩu cùng
+chạy ⇒ nhập nhằng ⇒ không nối). Mỗi đơn đi một đường, số đo mang cả hai con số (`attribution.direct` /
+`attribution.viaPost`) và sổ phán quyết chụp lại (`ordersDirect` / `ordersViaPost`). Màn hình in cạnh nó
+số đơn giao thành công và hoàn (theo `ORDER_OUTCOME`), vì mẫu nhiều đơn mà hoàn cao vẫn là mẫu lỗ, và
+**chi / đơn + doanh thu lên đơn** làm BẰNG CHỨNG (không đổi ngưỡng, không tô màu).
 
-> **Giới hạn đã biết:** quy kết đơn → quảng cáo đi bằng `ad_id` Pancake gửi, phủ **72,6%** đơn có
-> nguồn Facebook (đo 22/09). ~1/4 đơn thật của một mẫu có thể không được đếm ⇒ ngưỡng "> 100 đơn"
-> đang đếm THIẾU, không đếm thừa. Không lấp bằng suy đoán.
+**Luật TẮT vẫn đếm đơn mang `ad_id`** (`KILL_RULE_ORDER_BASIS = "DIRECT_AD_ID"`, 25/09/2026): luật tắt là
+đường duy nhất số đơn tự dẫn tới một lượt GHI Facebook, và người duyệt lô đã cho phép nó theo định nghĩa
+cũ. Chuyển luật tắt sang `ORDER_AD_ID` là quyết định của chủ shop (HUMAN GATE).
+
+> **Giới hạn đã biết:** Pancake gửi `ad_id` cho **72,6%** đơn có nguồn Facebook (đo 22/09); đường bài
+> viết lấp thêm phần đơn của bài chỉ thuộc một mẩu (mẫu tự đăng của vòng là đúng loại ấy). Đơn không có
+> dấu vết nào, hoặc đến từ bài nhiều mẩu cùng chạy, vẫn không được đếm ⇒ ngưỡng "> 100 đơn" có thể đếm
+> THIẾU, không đếm thừa. Không lấp bằng suy đoán.
+>
+> **Chưa đổi theo:** đếm MOQ thiết kế (`lib/queries/creative-moq.ts`, đường `viaAd`) vẫn đi bằng
+> `orders.ad_id` — nó tự dựng nháp lệnh sản xuất nên đổi định nghĩa là việc riêng, có người quyết.
 
 ## 5. Học (`geneStats` + Thompson, hàm thuần)
 
@@ -540,7 +553,7 @@ tạo chiến dịch sẽ báo lỗi rõ ràng (không mồ côi gì) — kho đ
 |---|---|---|
 | Nền | `lib/constants/creative-loop.ts` · `lib/creative/{plan,judge,learn,schedule,images}.ts` · 7 bảng (`drizzle/0117_creative_loop.sql`) | hợp đồng, hàm thuần, lược đồ |
 | Sinh | `lib/creative/{vision,writer,generate}.ts` · `lib/integrations/openai/images.ts` · `lib/queries/creative-plan.ts` | đọc ảnh nguồn → gen; lập lô; LLM viết (giá đúng ERP); gpt-image sửa ảnh sản phẩm thật; trần ảnh/ngày |
-| Đo / chấm / học | `lib/queries/creative-loop.ts` · `lib/creative/evaluate.ts` | chi hạt AD + đơn theo `ad_id`; chấm; chốt thư viện; sổ phán quyết + sổ học; xoá ảnh mẫu thua sau hạn |
+| Đo / chấm / học | `lib/queries/creative-loop.ts` · `lib/creative/evaluate.ts` | chi hạt AD + đơn theo `ORDER_AD_ID` (luật tắt: `ad_id`); chấm; chốt thư viện; sổ phán quyết + sổ học; xoá ảnh mẫu thua sau hạn |
 | Bàn tay | `lib/integrations/facebook/ads-write.ts` (thêm hàm) · `lib/marketing/creative-write-gate.ts` · `lib/creative/{approval,story-spec,publish,extend}.ts` · `lib/actions/{creative,creative-extend}.ts` | cổng thuần có thứ tự; phiếu duyệt lô; đăng; tắt theo luật; tắt tay; tiêu thêm (hai bước) |
 | Màn hình | `/marketing/creatives` — tab Duyệt lô · Đang chạy · Thư viện · Máy đã học gì · Nguồn ảnh · Cấu hình | mọi việc của người nằm ở đây |
 | Vòng | `lib/creative/{loop,notify}.ts` · job `creative-loop` · `scripts/scheduler.mjs` | một lượt tất định; tin báo Lark/Telegram |
