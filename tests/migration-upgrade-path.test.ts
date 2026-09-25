@@ -78,6 +78,7 @@ const MOI = [
   "0128_workshop_ledger",
   "0129_workshop_variants_mkt",
   "0130_marketer_prices",
+  "0131_company_os_models",
 ] as const;
 
 /*
@@ -238,6 +239,13 @@ export async function testMigrationUpgradePath() {
 
     const sau = await dem("select count(*)::int as n from drizzle.__drizzle_migrations");
     assert.equal(sau - truoc, MOI.length, `bước 2: phải áp thêm ĐÚNG ${MOI.length} migration, thực tế ${sau - truoc}`);
+
+    // 0131 (Company OS · Agent A): ba bảng mới, và migration KHÔNG gieo mẫu nào — sổ mẫu chỉ được lấp bằng
+    // job `model-registry` do người bấm, trạng thái vòng đời không backfill (mục 8.8, 35).
+    for (const bang of ["product_models", "product_model_state_history", "domain_events"]) {
+      assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `bước 2: 0131 phải tạo bảng ${bang}`);
+      assert.equal(await dem(`select count(*)::int as n from ${bang}`), 0, `bước 2: 0131 không được gieo dòng nào vào ${bang}`);
+    }
 
     /*
       ═══ 0081 NAY NẰM TRONG TRẠNG THÁI PRODUCTION (bước 1) ═══
