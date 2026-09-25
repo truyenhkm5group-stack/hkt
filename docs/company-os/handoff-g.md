@@ -8,7 +8,7 @@ Nhánh `claude/cos-g-control-plane`, dựng trên `origin/main` 5a3a7ee6.
 |---|---|---|
 | 1 | Duyệt hai bước **hoàn tất được**: lời duyệt được TIÊU THỤ đúng một lần (`EXECUTED` + `executed_at`) khi người xin làm lại ĐÚNG việc (dấu vân tay sha256 của JSON chuẩn hoá: nhóm · thao tác · thực thể · payload) trong `APPROVAL_VALID_HOURS` = 72 giờ. Tiêu thụ là `UPDATE … WHERE id = ? AND status = 'APPROVED' RETURNING`. Bấm lại việc đang CHỜ không đẻ yêu cầu thứ hai (chỉ mục duy nhất một phần). Quá hạn ⇒ `EXPIRED`, ghi **khi chạm** (người xin gọi lại cổng cho nhóm đó) — không có job mới; điều kiện hạn nằm ngay trong phép tiêu thụ nên không bao giờ sai dù cột `status` chưa kịp lật. Quyết định (`decideApprovalCore`) lật có điều kiện `status = 'PENDING'`. | `lib/approvals/service.ts` (lõi, không `"use server"`), `lib/actions/approvals.ts` (lớp mỏng), `lib/constants/approval.ts` |
 | 1b | **LỖI THẬT tìm ra khi làm**: `settings.value` là TEXT, cổng cũ đưa CHUỖI JSON vào `isEnforced()` ⇒ cưỡng chế KHÔNG BAO GIỜ bật được, kể cả khi ai đó đã ghi khoá. Nay parse (`parseEnforceConfig`). | `lib/constants/approval.ts`, `lib/approvals/service.ts` |
-| 2 | Công tắc `approval.enforce` theo nhóm, CHỈ ADMIN, bật phải xác nhận bằng chữ, `audit()` trước/sau. Chỉ bật được nhóm đã nối (`APPROVAL_GROUPS_WIRED`; `ADS_BUDGET_MUTATION`, `COD_CORRECTION`, `LOGISTICS_OVERRIDE` không bật được). **Không bật nhóm nào.** | `/alerts` → `approval-enforce-panel.tsx` + `approval-enforce-toggle.tsx` |
+| 2 | Công tắc cưỡng chế theo nhóm (ghi khoá MỚI `approval.enforce.v2`, hình dạng `{ v: 2, groups }` — chỉ nó có hiệu lực; dòng cũ `approval.enforce` hiện ra với nút "Áp dụng cấu hình này", không tự có hiệu lực, không bị xoá — xem mục 2b), CHỈ ADMIN, bật phải xác nhận bằng chữ, `audit()` trước/sau. Chỉ bật được nhóm đã nối (`APPROVAL_GROUPS_WIRED`; `ADS_BUDGET_MUTATION`, `COD_CORRECTION`, `LOGISTICS_OVERRIDE` không bật được). **Không bật nhóm nào.** | `/alerts` → `approval-enforce-panel.tsx` + `approval-enforce-toggle.tsx` |
 | 3 | Quyền `approvals:decide` thay điều kiện theo vai. Tập người giữ NGUYÊN: ADMIN, MANAGER (theo VAI — production có mảng ghi đè MANAGER không chứa khoá mới) và ai có `settings:manage` luôn có nó (`withDerivedApprovalDecide`, gọi ở `resolvePermissions` và nhánh vai tuỳ chỉnh của `grantedPermissions`). Vai trò tuỳ chỉnh KHÔNG cấp được (`ROLE_BUILDER_FORBIDDEN`). | `lib/auth/permissions.ts`, `lib/auth/access.ts`, `lib/constants/access-scope.ts`, `lib/validation/access.ts` (câu thông báo) |
 | 4 | Nguồn việc `APPROVAL` (SOURCE, phép chiếu `approval_requests` PENDING; phòng `MANAGEMENT`; hạn `null` — không có hằng số hạn duyệt nào đang chạy để lấy lại, luật 22; chủ shop đặt được khoá `APPROVAL` / `APPROVAL:<nhóm>`). Chỉ nút `OPEN_SOURCE` → `/alerts`; đóng DUY NHẤT qua `decideApproval`. Tiền = `MONEY_UNKNOWN` (số tiền xin là quy mô việc, không phải tiền đang treo). Một truy vấn chung cho `/alerts` và `/work`: `lib/queries/approvals.ts`. Không trùng độ mịn cảnh báo nào ⇒ không thêm vào `ALERT_KINDS_OWNED_ELSEWHERE`. | `lib/constants/work-sources.ts`, `work-sla.ts`, `work-ownership.ts`, `lib/queries/work-adapters.ts::adaptApprovals` |
 | 5 | `audit_logs.actor_kind` (CHECK USER/SYSTEM/AGENT/WEBHOOK hoặc NULL) · `correlation_id` (chỉ mục một phần) · `reason`. `audit()` ghi cả ba, VẪN ghi `detail` như cũ. Suy loại: khai tường minh → có `userId` ⇒ USER → trong job nền ⇒ SYSTEM → email `job:`/`script:` ⇒ SYSTEM → NULL (chưa biết). Lỗi ghi nhật ký: `console.error`, không ném. `/audit` hiện loại tác nhân, lý do, mã lần chạy. Dòng cũ KHÔNG backfill. | `lib/audit.ts`, `lib/constants/audit-actor.ts`, `app/(dashboard)/audit/columns.tsx` |
@@ -32,6 +32,21 @@ Migration `drizzle/0134_company_os_control_plane.sql` (viết tay, idempotent), 
 4. **`APPROVAL_VALID_HOURS = 72`** là một giá trị MỚI (chưa có hằng số nào để lấy lại). Chủ shop cần xác nhận.
 5. Cấp tường minh `approvals:decide` cho một người (quyền riêng, do người có `users:manage`) VẪN được — đó
    là nghĩa của một khoá quyền; hôm nay không ai có khoá này nên tập người lúc deploy khớp đúng luật cũ.
+
+## 2b. Sửa theo yêu cầu Tech Lead (bản phát hành phải giữ nguyên hành vi)
+
+Sửa lỗi đọc TEXT làm mọi dòng `approval.enforce` gõ tay (theo hướng dẫn cũ ở docs/second-approval-policy.md)
+BỖNG có hiệu lực lúc deploy — chủ shop làm một mình có thể bị chặn khỏi việc kho / lương. Nên:
+
+- Cưỡng chế CHỈ đọc khoá `approval.enforce.v2`, và chỉ khi giá trị mang dấu `"v": 2`. Hình dạng cũ (ở bất
+  kỳ khoá nào) ⇒ TẮT.
+- **Chọn khoá mới thay vì marker trên khoá cũ**: ghi v2 vào khoá cũ thì lần bấm công tắc đầu tiên ĐÈ MẤT
+  dòng cũ — trái với "không xoá / không ghi đè dòng cũ tự động". Khoá riêng giữ dòng cũ nguyên vẹn để hiện
+  và áp dụng có chủ đích; dấu `v: 2` vẫn giữ làm lớp chặn thứ hai.
+- `/alerts` hiện dòng cũ + nút "Áp dụng cấu hình này" (xác nhận, `applyLegacyEnforceCore`, nhật ký trước/
+  sau, chỉ nhóm đã nối, nhóm bỏ qua được nói ra). Không migration dữ liệu, không xoá dòng nào.
+- Đột biến mới (7): bỏ dấu v2 · đọc khoá cũ · dùng chung một khoá · không lọc nhóm đã nối khi chuyển · công
+  tắc ghi hình dạng cũ · công tắc không canh ADMIN · áp dụng xoá dòng cũ — kết quả ở báo cáo phiên.
 
 ## 3. Kiểm thử
 
@@ -67,8 +82,8 @@ Cổng: xem báo cáo cuối của phiên (typecheck · lint · test · build).
 
 ## 5. CỔNG NGƯỜI (HUMAN GATE)
 
-1. **Trước deploy**: `select value from settings where key = 'approval.enforce'` trên production. Nếu có
-   dòng, bản này làm nó BẮT ĐẦU có hiệu lực (lỗi đọc TEXT đã sửa) — chủ shop phải biết trước.
+1. Dòng `approval.enforce` cũ trên production (nếu có) KHÔNG tự có hiệu lực ở bản này; nó hiện ở mục
+   cưỡng chế trên `/alerts` cho ADMIN, và chỉ có hiệu lực khi chủ shop bấm "Áp dụng cấu hình này".
 2. Chủ shop xác nhận hạn hiệu lực lời duyệt 72 giờ.
 3. Bật cưỡng chế nhóm nào là quyết định của chủ shop (production 10/09 chỉ có 2 tài khoản; bật là tự chặn mình
    nếu người duyệt thứ hai không có mặt).

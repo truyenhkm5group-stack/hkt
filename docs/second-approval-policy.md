@@ -74,18 +74,28 @@ Trang **Cần xử lý** (`/alerts`) → mục **Cưỡng chế duyệt hai bư�
 bấm được; bật phải xác nhận bằng chữ, mỗi lần bật/tắt ghi nhật ký `approval.enforce` kèm trước/sau.
 Chỉ bật được nhóm ĐÃ NỐI vào thao tác thật (`APPROVAL_GROUPS_WIRED`). Bật là quyết định của chủ shop.
 
-Công tắc ghi `settings` khoá `approval.enforce`, giá trị JSON theo nhóm:
+Công tắc ghi `settings` khoá **`approval.enforce.v2`**, hình dạng:
 
 ```json
-{ "INVENTORY_ADJUSTMENT": true, "PAYROLL_EDIT": true }
+{ "v": 2, "groups": { "INVENTORY_ADJUSTMENT": true, "PAYROLL_EDIT": true } }
 ```
 
-Bật một nhóm KHÔNG kéo theo nhóm khác. Chỉ đúng boolean `true` mới tính.
+Chỉ hình dạng này, ở khoá này, mới có hiệu lực. Bật một nhóm KHÔNG kéo theo nhóm khác; chỉ đúng boolean
+`true` mới tính.
 
-> **Lỗi đã sửa (Company OS · 25/09/2026):** `settings.value` là cột TEXT. Cổng cũ đưa thẳng CHUỖI JSON
-> vào `isEnforced()` (chỉ nhận object), nên dù có ai ghi khoá này bằng `set-setting` thì cưỡng chế vẫn
-> KHÔNG BAO GIỜ bật. Nay cổng parse chuỗi (`parseEnforceConfig`). Trước khi deploy: kiểm production
-> có dòng `approval.enforce` chưa — nếu có, nó sẽ BẮT ĐẦU có hiệu lực từ bản này.
+**JSON gõ tay không còn tự có hiệu lực.** Bản trước của tài liệu này bảo ghi tay khoá `approval.enforce`
+dạng `{ "INVENTORY_ADJUSTMENT": true }`. Dòng như vậy CHƯA TỪNG có hiệu lực: `settings.value` là cột
+TEXT và cổng cũ đưa thẳng CHUỖI JSON vào `isEnforced()` (chỉ nhận object) — cưỡng chế không bao giờ bật.
+Bản Company OS sửa lỗi đọc, nhưng cố ý KHÔNG đọc khoá cũ: nếu đọc, một dòng gõ tay từ lâu sẽ BỖNG có
+hiệu lực ngay sáng hôm sau deploy, và chủ shop — đang làm một mình — bị `BLOCKED_NO_APPROVER` chặn khỏi
+việc kho / lương. Nay nếu còn dòng cũ, mục cưỡng chế trên `/alerts` hiện nó ("Cấu hình cưỡng chế cũ
+(chưa từng có hiệu lực do lỗi đọc)") kèm nút **Áp dụng cấu hình này**: hỏi lại bằng chữ, ghi bản v2
+bằng đúng các nhóm đã nối của dòng cũ (thay các công tắc hiện tại), ghi nhật ký
+`approval.enforce.apply-legacy` trước/sau. Dòng cũ KHÔNG bị xoá hay sửa.
+
+Vì sao khoá riêng chứ không đổi hình dạng trên khoá cũ: ghi v2 đè lên khoá cũ thì lần bấm công tắc đầu
+tiên xoá mất lời khai cũ mà chủ shop chưa kịp thấy. Dấu `"v": 2` là lớp chặn thứ hai — chép tay hình dạng
+cũ sang khoá mới vẫn không có hiệu lực.
 
 ### Sau khi được duyệt thì sao — lời duyệt dùng ĐÚNG MỘT LẦN
 

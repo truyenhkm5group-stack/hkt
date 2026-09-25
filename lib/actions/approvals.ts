@@ -4,17 +4,24 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb } from "@/db";
 import { listApprovalRequests } from "@/lib/queries/approvals";
-import { audit } from "@/lib/audit";
 import { can, requireUser, type SessionUser } from "@/lib/auth/session";
-import { decideApprovalCore, guardSecondApprovalCore, readEnforceConfig, type GuardInput, type GuardResult } from "@/lib/approvals/service";
-import { setSettingJson } from "@/lib/settings";
 import {
-  APPROVAL_ENFORCE_KEY,
+  applyLegacyEnforceCore,
+  decideApprovalCore,
+  guardSecondApprovalCore,
+  readEnforceConfig,
+  readLegacyEnforce,
+  setEnforceGroupCore,
+  type GuardInput,
+  type GuardResult,
+} from "@/lib/approvals/service";
+import {
   APPROVAL_GROUP_LABEL,
   APPROVAL_GROUP_REASON,
   APPROVAL_GROUPS,
   APPROVAL_GROUPS_WIRED,
   isEnforced,
+  legacyToV2,
   type ApprovalGroup,
 } from "@/lib/constants/approval";
 
@@ -83,40 +90,40 @@ export async function decideApproval(id: string, dong_y: boolean, note?: string)
  * CSDL. Công tắc ở đây ghi đúng khoá ấy, theo từng nhóm, và để lại một dòng nhật ký trước/sau.
  * `ADS_BUDGET_MUTATION` CỐ Ý không nối (docs/marketing-ai-department.md) nên không bật được ở đây.
  */
-export type ApprovalEnforceState = { group: ApprovalGroup; label: string; reason: string; enforced: boolean; wired: boolean };
+export type ApprovalEnforceState = {
+  groups: { group: ApprovalGroup; label: string; reason: string; enforced: boolean; wired: boolean }[];
+  /** Dòng CŨ `approval.enforce` nếu có — chưa từng có hiệu lực, chỉ hiện để quản trị viên quyết. */
+  legacy: { raw: string; groups: { group: ApprovalGroup; label: string }[]; ignored: string[] } | null;
+};
 
-export async function getApprovalEnforceState(): Promise<ApprovalEnforceState[]> {
+export async function getApprovalEnforceState(): Promise<ApprovalEnforceState | null> {
   const user = await requireUser();
-  if (user.role !== "ADMIN") return [];
-  const cfg = await readEnforceConfig(await getDb());
-  return APPROVAL_GROUPS.map((g) => ({ group: g, label: APPROVAL_GROUP_LABEL[g], reason: APPROVAL_GROUP_REASON[g], enforced: isEnforced(cfg, g), wired: APPROVAL_GROUPS_WIRED.includes(g) }));
+  if (user.role !== "ADMIN") return null;
+  const db = await getDb();
+  const cfg = await readEnforceConfig(db);
+  const legacy = await readLegacyEnforce(db);
+  const chuyen = legacy ? legacyToV2(legacy) : null;
+  return {
+    groups: APPROVAL_GROUPS.map((g) => ({ group: g, label: APPROVAL_GROUP_LABEL[g], reason: APPROVAL_GROUP_REASON[g], enforced: isEnforced(cfg, g), wired: APPROVAL_GROUPS_WIRED.includes(g) })),
+    legacy: legacy && chuyen ? { raw: legacy.raw, groups: legacy.groups.map((g) => ({ group: g, label: APPROVAL_GROUP_LABEL[g] })), ignored: chuyen.ignored } : null,
+  };
 }
 
 export async function setApprovalEnforce(group: string, enforced: boolean): Promise<{ ok: true } | { error: string }> {
   const user = await requireUser();
-  // CHỈ ADMIN — không phải `settings:manage`: bật cưỡng chế đổi AI được làm việc một mình, tức là
-  // đổi luật kiểm soát của cả shop. Người có quyền cấu hình khác không được tự nới/siết luật đó.
-  if (user.role !== "ADMIN") return { error: "Chỉ quản trị viên được bật / tắt cưỡng chế duyệt hai bước" };
   const parsed = setEnforceSchema.safeParse({ group, enforced });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const g = parsed.data.group;
-  if (!APPROVAL_GROUPS_WIRED.includes(g)) return { error: `Nhóm "${APPROVAL_GROUP_LABEL[g]}" chưa nối vào thao tác nào — bật lên cũng không chặn được gì` };
-  const truoc = (await readEnforceConfig(await getDb())) ?? {};
-  const sau: Record<string, unknown> = { ...truoc, [g]: parsed.data.enforced };
-  await setSettingJson(APPROVAL_ENFORCE_KEY, sau);
-  await audit({
-    userId: user.id,
-    userEmail: user.email,
-    actorKind: "USER",
-    action: "approval.enforce",
-    entity: "SETTINGS",
-    entityId: APPROVAL_ENFORCE_KEY,
-    before: truoc,
-    after: sau,
-    reason: `${parsed.data.enforced ? "BẬT" : "TẮT"} cưỡng chế duyệt hai bước cho nhóm ${APPROVAL_GROUP_LABEL[g]}`,
-  });
-  revalidatePath("/alerts");
-  return { ok: true };
+  const kq = await setEnforceGroupCore(await getDb(), { id: user.id, email: user.email, isAdmin: user.role === "ADMIN" }, parsed.data.group, parsed.data.enforced);
+  if ("ok" in kq) revalidatePath("/alerts");
+  return kq;
+}
+
+/** Nút "Áp dụng cấu hình này" cho dòng cưỡng chế CŨ — xem `applyLegacyEnforceCore`. */
+export async function applyLegacyApprovalEnforce(): Promise<{ ok: true; applied: string[]; ignored: string[] } | { error: string }> {
+  const user = await requireUser();
+  const kq = await applyLegacyEnforceCore(await getDb(), { id: user.id, email: user.email, isAdmin: user.role === "ADMIN" });
+  if ("ok" in kq) revalidatePath("/alerts");
+  return kq;
 }
 
 export type PendingApproval = {
