@@ -6,7 +6,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { matchSupplier } from "@/lib/constants/suppliers";
-import { normalizeProductCode } from "@/lib/constants/workshop-ledger";
+import { cellsTotal, normalizeProductCode } from "@/lib/constants/workshop-ledger";
 import { vnStartOfDay } from "@/lib/format";
 import { supplierCatalog } from "@/lib/queries/suppliers";
 import { batchInput, deliveryInput, fabricInput, paymentInput } from "@/lib/validation/workshop-ledger";
@@ -46,6 +46,27 @@ async function resolveProduct(code: string): Promise<{ id: string; name: string 
   return rows.length === 1 ? rows[0] : null;
 }
 
+/** Mã mẫu (màu/size) của một sản phẩm — để kiểm bảng chia mẫu chỉ chứa mẫu CỦA ĐÚNG mã hàng đó. */
+async function variantIdsOf(productId: string): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(eq(schema.productVariants.productId, productId));
+  return new Set(rows.map((r) => r.id));
+}
+
+/** Danh sách mẫu (màu/size) của mã hàng — cho ô chia số lượng trên form lô / đợt trả hàng. */
+export async function listVariantsForProductCode(rawCode: string): Promise<{ productId: string | null; productName: string; variants: { id: string; color: string; size: string; sku: string }[] }> {
+  const user = await requireUser();
+  if (!can(user, "planning:view")) return { productId: null, productName: "", variants: [] };
+  const product = await resolveProduct(normalizeProductCode(rawCode));
+  if (!product) return { productId: null, productName: "", variants: [] };
+  const db = await getDb();
+  const variants = await db
+    .select({ id: schema.productVariants.id, color: schema.productVariants.color, size: schema.productVariants.size, sku: schema.productVariants.sku })
+    .from(schema.productVariants)
+    .where(eq(schema.productVariants.productId, product.id));
+  return { productId: product.id, productName: product.name, variants: variants.map((v) => ({ id: v.id, color: v.color ?? "", size: v.size ?? "", sku: v.sku ?? "" })) };
+}
+
 async function resolveSupplier(raw: string) {
   const xuong = matchSupplier(raw, (await supplierCatalog()).index);
   return { supplier: xuong.state === "MATCHED" ? xuong.name : raw, supplierId: xuong.state === "MATCHED" ? xuong.id : null };
@@ -75,6 +96,23 @@ export async function saveProductionBatch(input: unknown, id?: string): Promise<
   }
 
   const product = await resolveProduct(code);
+  // Bảng chia mẫu chỉ hợp lệ khi mã hàng khớp ĐÚNG MỘT sản phẩm, và mọi ô là mẫu của chính sản phẩm ấy.
+  const cells = d.cells;
+  const chiaMau = Object.keys(cells).length > 0;
+  if (chiaMau) {
+    if (!product) return { error: `Mã ${code} chưa khớp sản phẩm nào — không chia được theo màu/size` };
+    const ids = await variantIdsOf(product.id);
+    if (Object.keys(cells).some((v) => !ids.has(v))) return { error: "Bảng chia màu/size có mẫu không thuộc mã hàng này — tải lại form rồi nhập lại" };
+  }
+  const orderedQty = chiaMau ? cellsTotal(cells) : d.orderedQty;
+  if (id && chiaMau) {
+    // Chuyển sang chia mẫu khi đã có đợt trả hàng ghi TỔNG: số đã về theo từng mẫu là CHƯA BIẾT.
+    const [khongChia] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(schema.productionDeliveries)
+      .where(and(eq(schema.productionDeliveries.batchId, id), sql`${schema.productionDeliveries.cells} = '{}'::jsonb`));
+    if (Number(khongChia?.n)) return { error: "Lô đã có đợt trả hàng ghi tổng (không chia màu/size) — xoá và ghi lại các đợt đó theo màu/size trước khi chia lô" };
+  }
   const values = {
     productId: product?.id ?? null,
     productCode: code,
@@ -83,8 +121,12 @@ export async function saveProductionBatch(input: unknown, id?: string): Promise<
     ...(await resolveSupplier(d.supplier)),
     productionOrderId: d.productionOrderId,
     orderedAt: vnStartOfDay(d.orderedAt),
-    orderedQty: d.orderedQty,
+    orderedQty,
     agreedQty: d.agreedQty,
+    cells,
+    workshopPenalty: d.workshopPenalty,
+    penaltyNote: d.penaltyNote,
+    marketerPrice: d.marketerPrice,
     dueDate: d.dueDate ? vnStartOfDay(d.dueDate) : null,
     laborUnitPrice: d.laborUnitPrice,
     adjustment: d.adjustment,
@@ -106,7 +148,7 @@ export async function saveProductionBatch(input: unknown, id?: string): Promise<
       .returning({ id: schema.productionBatches.id });
     rowId = row.id;
   }
-  await audit({ userId: user.id, userEmail: user.email, action: id ? "PRODUCTION_BATCH_UPDATE" : "PRODUCTION_BATCH_CREATE", entity: "PRODUCTION_BATCH", entityId: rowId, detail: { code, batchNo: d.batchNo, orderedQty: d.orderedQty, agreedQty: d.agreedQty, laborUnitPrice: d.laborUnitPrice, adjustment: d.adjustment } });
+  await audit({ userId: user.id, userEmail: user.email, action: id ? "PRODUCTION_BATCH_UPDATE" : "PRODUCTION_BATCH_CREATE", entity: "PRODUCTION_BATCH", entityId: rowId, detail: { code, batchNo: d.batchNo, orderedQty, agreedQty: d.agreedQty, laborUnitPrice: d.laborUnitPrice, adjustment: d.adjustment, workshopPenalty: d.workshopPenalty, marketerPrice: d.marketerPrice, variants: Object.keys(cells).length } });
   refresh(rowId);
   return { ok: true, id: rowId as string };
 }
@@ -161,14 +203,23 @@ export async function addProductionDelivery(input: unknown): Promise<Result> {
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const d = parsed.data;
   const db = await getDb();
-  const lo = await db.query.productionBatches.findFirst({ where: eq(schema.productionBatches.id, d.batchId), columns: { status: true } });
+  const lo = await db.query.productionBatches.findFirst({ where: eq(schema.productionBatches.id, d.batchId), columns: { status: true, cells: true } });
   if (!lo) return { error: "Không tìm thấy lô" };
   if (lo.status === "CANCELLED") return { error: "Lô đã huỷ — mở lại lô trước khi ghi hàng về" };
+  // Lô chia theo mẫu ⇒ đợt trả hàng cũng phải chia theo mẫu, và chỉ trong các mẫu của lô. Không chia
+  // thì ERP không biết mẫu nào đã về, và trang Thiếu hàng sẽ phải bỏ cả lô khỏi phép trừ.
+  const loCells = lo.cells ?? {};
+  if (Object.keys(loCells).length) {
+    if (!Object.keys(d.cells).length) return { error: "Lô này đặt theo màu/size — ghi số trả theo từng màu/size" };
+    if (Object.keys(d.cells).some((v) => !(v in loCells))) return { error: "Có mẫu không nằm trong bảng đặt của lô" };
+  } else if (Object.keys(d.cells).length) return { error: "Lô chưa chia màu/size — ghi số trả dạng tổng, hoặc chia lô trước" };
+  const quantity = Object.keys(d.cells).length ? cellsTotal(d.cells) : d.quantity;
+  if (quantity === 0) return { error: "Tổng số lượng phải khác 0" };
   const [row] = await db
     .insert(schema.productionDeliveries)
-    .values({ batchId: d.batchId, deliveredAt: vnStartOfDay(d.deliveredAt), quantity: d.quantity, note: d.note, createdByUserId: user.id, createdBy: user.name || user.email })
+    .values({ batchId: d.batchId, deliveredAt: vnStartOfDay(d.deliveredAt), quantity, cells: d.cells, note: d.note, createdByUserId: user.id, createdBy: user.name || user.email })
     .returning({ id: schema.productionDeliveries.id });
-  await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_DELIVERY_CREATE", entity: "PRODUCTION_BATCH", entityId: d.batchId, detail: { deliveryId: row.id, quantity: d.quantity, deliveredAt: d.deliveredAt } });
+  await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_DELIVERY_CREATE", entity: "PRODUCTION_BATCH", entityId: d.batchId, detail: { deliveryId: row.id, quantity, deliveredAt: d.deliveredAt, variants: Object.keys(d.cells).length } });
   refresh(d.batchId);
   return { ok: true };
 }

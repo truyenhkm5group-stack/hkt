@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { inArray, like, sql } from "drizzle-orm";
+import { eq, inArray, like, sql } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
@@ -234,6 +234,7 @@ async function cleanup(db: Db) {
     await db.delete(schema.orderItems).where(inArray(schema.orderItems.orderId, ids));
     await db.delete(schema.orders).where(inArray(schema.orders.id, ids));
   }
+  await db.delete(schema.productionBatches).where(like(schema.productionBatches.productCode, "SSH%"));
   await db.delete(schema.productionOrders).where(like(schema.productionOrders.code, `${P}%`));
   const receipts = (await db.select({ id: schema.stockReceipts.id }).from(schema.stockReceipts).where(like(schema.stockReceipts.reference, `${P}%`))).map((r) => r.id);
   if (receipts.length) {
@@ -321,6 +322,43 @@ export async function testStockShortageDb(db: Db) {
     assert.equal(c("o1")?.reason, "NOT_YET_SHIPPED", "đơn đã được phân hàng thì kho đóng gói như thường");
     assert.equal(c("o4")?.reason, "NOT_YET_SHIPPED", "tồn chưa biết KHÔNG được kết luận là thiếu");
     assert.ok(!c("o5"), "đơn hẹn xa vẫn nằm ngoài hàng đợi như trước");
+
+    /*
+      ĐÃ ĐẶT BỔ SUNG ⇒ TRỪ VÀO SỐ THIẾU (chủ shop chốt 25/09/2026): "không cảnh báo nữa nếu đã đặt bổ
+      sung đủ rồi, chỉ cảnh báo khi đặt bổ sung rồi mà vẫn thiếu". Đen/M đang thiếu 3.
+    */
+    const [lo] = await db
+      .insert(schema.productionBatches)
+      .values({ productId: `${P}prod`, productCode: "SSH01", batchNo: 1, orderedAt: ago(10), orderedQty: 2, cells: { [`${P}den-m`]: 2 }, dueDate: new Date(Date.now() + 72 * H), productionOrderId: (await db.select({ id: schema.productionOrders.id }).from(schema.productionOrders).where(like(schema.productionOrders.code, `${P}sx-1`)))[0].id })
+      .returning({ id: schema.productionBatches.id });
+    await db.insert(schema.productionBatches).values({ productId: `${P}prod`, productCode: "SSH01", batchNo: 2, orderedAt: ago(5), orderedQty: 10 });
+    clearMemo();
+    const datThieu = (await getStockShortage({ fresh: true, urgentAfterHours: 24 })).variants.find((r) => r.variantId === `${P}den-m`);
+    assert.equal(datThieu?.openPoQty, 2, "lô nối với lệnh sx-1 thay lệnh ấy — KHÔNG đếm 1 (lệnh) + 2 (lô)");
+    assert.equal(datThieu?.stillShortAfterOrder, 1, "đặt 2 mà thiếu 3 ⇒ còn thiếu 1");
+    assert.equal(datThieu?.muted, false, "đặt rồi mà vẫn thiếu ⇒ VẪN nhắc");
+    assert.ok(datThieu?.actionText.includes("VẪN THIẾU 1"), datThieu?.actionText);
+    const chuaChia = (await getStockShortage({ fresh: true, urgentAfterHours: 24 })).unsplitOrdered;
+    assert.deepEqual(chuaChia, { batches: 1, units: 10 }, "lô ghi tổng không trừ được vào mẫu nào — phải nói ra, không chia hộ");
+
+    await db.update(schema.productionBatches).set({ cells: { [`${P}den-m`]: 5 }, orderedQty: 5 }).where(eq(schema.productionBatches.id, lo.id));
+    await db.insert(schema.productionDeliveries).values({ batchId: lo.id, deliveredAt: ago(1), quantity: 1, cells: { [`${P}den-m`]: 1 } });
+    clearMemo();
+    const datDu = await getStockShortage({ fresh: true, urgentAfterHours: 24 });
+    const denDu = datDu.variants.find((r) => r.variantId === `${P}den-m`);
+    assert.equal(denDu?.openPoQty, 4, "đặt 5, xưởng đã trả 1 ⇒ còn 4 chưa về");
+    assert.equal(denDu?.coveredByOrder, true);
+    assert.equal(denDu?.muted, true, "đã đặt đủ số thiếu ⇒ Lark thôi nhắc");
+    assert.equal(denDu?.shortQty, 3, "đặt xưởng KHÔNG đổi số thiếu thật — hàng chưa về thì đơn vẫn chờ");
+    assert.equal(datDu.orders.get(`${P}o3`)?.state, "WAITING_STOCK", "đơn vẫn chờ hàng — đã đặt không phải đã có hàng");
+    assert.equal(datDu.totals.coveredVariants, 1);
+
+    await db.update(schema.productionBatches).set({ status: "DONE" }).where(eq(schema.productionBatches.id, lo.id));
+    clearMemo();
+    const loXong = (await getStockShortage({ fresh: true, urgentAfterHours: 24 })).variants.find((r) => r.variantId === `${P}den-m`);
+    assert.equal(loXong?.openPoQty, 0, "lô bấm 'xưởng đã trả xong' ⇒ phần chưa trả KHÔNG bao giờ về; lệnh đã nối cũng không sống lại");
+    assert.equal(loXong?.muted, false, "hết nguồn bù ⇒ nhắc lại");
+    await db.delete(schema.productionBatches).where(like(schema.productionBatches.productCode, "SSH%"));
 
     // Quyết định trong sổ settings phải tới được bảng thiếu — và KHÔNG đổi phân bổ.
     await setSettingJson(SHORTAGE_DECISIONS_KEY, { ...decisionBookBefore, [`${P}den-m`]: { decision: "ORDERED", at: new Date().toISOString(), byUserId: "u1", byName: "Kiểm thử", shortQtyAtDecision: 3, note: "" } });

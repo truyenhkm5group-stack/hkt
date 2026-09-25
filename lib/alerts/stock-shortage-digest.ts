@@ -68,9 +68,11 @@ export async function runStockShortageDigest(opts: { force?: boolean; now?: Date
   const to = target(cfg);
 
   const snapshot = await getStockShortage({ fresh: true, urgentAfterHours: cfg.pendingHours, now });
-  // Mẫu đã được người xác nhận "đã đặt" (trong mức thiếu lúc bấm) hoặc "không đặt nữa" KHÔNG tính
-  // là đang thiếu với sổ chống gửi lại — nên khi "đã đặt" bị vượt, nó hiện ra như một mẫu MỚI và được báo.
-  const current = Object.fromEntries(snapshot.variants.filter((v) => !v.muted).map((v) => [v.variantId, v.shortQty]));
+  // Sổ chống gửi lại đếm PHẦN CÒN THIẾU SAU KHI ĐÃ ĐẶT XƯỞNG (chủ shop chốt 25/09/2026): đặt bổ sung
+  // đủ thì mẫu tự im; đặt rồi mà vẫn thiếu thì chỉ phần còn thiếu được báo, và báo lại khi nó TĂNG.
+  // Mẫu đã được người xác nhận "đã đặt" (trong mức thiếu lúc bấm) hoặc "không đặt nữa" cũng không
+  // tính — nên khi "đã đặt" bị vượt, nó hiện ra như một mẫu MỚI và được báo.
+  const current = Object.fromEntries(snapshot.variants.filter((v) => !v.muted).map((v) => [v.variantId, v.stillShortAfterOrder]));
   // "Đã đặt" / "sẽ đặt" gắn với một đợt thiếu: mẫu hết thiếu thì quyết định rơi. "Không đặt nữa" giữ.
   const book = await getSettingJson<ShortageDecisionBook>(SHORTAGE_DECISIONS_KEY, {});
   const pruned = pruneShortageDecisions(book, Object.fromEntries(snapshot.variants.map((v) => [v.variantId, v.shortQty])));

@@ -21,6 +21,13 @@ const optionalDateKey = z
   .default(null);
 /** Ô số tự do: "" / null ⇒ null; còn lại phải là số nguyên. */
 const optionalInt = (min: number) => z.preprocess((v) => (v === "" || v == null ? null : typeof v === "string" ? Number(v.replace(/[^\d-]/g, "")) : v), z.number().int().min(min).nullable());
+/** Bảng số theo mẫu `{ [variantId]: số cái }` — bỏ ô 0; mỗi ô là số nguyên. */
+const cellsInput = (min: number) =>
+  z
+    .record(z.string().min(1).max(64), z.coerce.number().int().min(min).max(1_000_000))
+    .default({})
+    .transform((c) => Object.fromEntries(Object.entries(c).filter(([, n]) => n !== 0)))
+    .refine((c) => Object.keys(c).length <= 300, "Quá nhiều mẫu trong một lô");
 const optionalDecimal = z.preprocess((v) => (v === "" || v == null ? null : typeof v === "string" ? Number(v.replace(",", ".")) : v), z.number().min(0).nullable());
 
 export const batchInput = z.object({
@@ -37,6 +44,11 @@ export const batchInput = z.object({
   adjustment: z.coerce.number().int().min(-1_000_000_000).max(1_000_000_000).default(0),
   adjustmentNote: z.string().trim().max(300).default(""),
   fabricSource: z.enum(FABRIC_SOURCES).default("SHOP"),
+  /** Số đặt theo mẫu. Có bảng này thì SL đặt = tổng các ô (máy chủ tự tính, không nhận số gõ tay). */
+  cells: cellsInput(0),
+  workshopPenalty: z.coerce.number().int().min(0, "Tiền phạt xưởng không âm").max(1_000_000_000).default(0),
+  penaltyNote: z.string().trim().max(300).default(""),
+  marketerPrice: optionalInt(0),
   note: z.string().trim().max(1000).default(""),
 });
 export type BatchInput = z.input<typeof batchInput>;
@@ -49,6 +61,8 @@ export const deliveryInput = z.object({
     .int()
     .refine((n) => n !== 0, "Số lượng phải khác 0 (âm = trả lại xưởng hàng lỗi)")
     .refine((n) => Math.abs(n) <= 1_000_000, "Số lượng quá lớn"),
+  /** Số trả theo mẫu — bắt buộc khi lô có chia mẫu; khi có, số lượng = tổng các ô. */
+  cells: cellsInput(-1_000_000),
   note: z.string().trim().max(300).default(""),
 });
 
