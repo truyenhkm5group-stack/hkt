@@ -193,6 +193,7 @@ import {
   testIntelligenceRuns,
 } from "./return-intelligence.test";
 import { testApproval } from "./approval.test";
+import { testCompanyOsControlPlane } from "./company-os-control-plane.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
 import { testVtpTrackingLink } from "./vtp-tracking-link.test";
 import { testDeliveryTower } from "./delivery-tower.test";
@@ -1849,6 +1850,8 @@ async function main() {
   testPackingWavesPure();
   await testPackingWavesQueries(db);
   await testApproval(db);
+  // Company OS · Agent G — duyệt hai bước tiêu thụ được, approvals:decide, nguồn việc APPROVAL, audit, sync_runs.
+  await testCompanyOsControlPlane(db);
   await testMultiAttemptMoney(db);
   await testCashflow(db);
   await testPurchasing(db);

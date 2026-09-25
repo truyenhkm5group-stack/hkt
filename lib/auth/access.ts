@@ -24,7 +24,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { Role } from "@/db/schema";
-import { ALL_PERMISSIONS, resolvePermissions, type RolePermissionMap } from "@/lib/auth/permissions";
+import { ALL_PERMISSIONS, resolvePermissions, withDerivedApprovalDecide, type RolePermissionMap } from "@/lib/auth/permissions";
 import {
   normalizeScope,
   ROLE_BUILDER_FORBIDDEN,
@@ -68,7 +68,8 @@ export function grantedPermissions(
   if (Array.isArray(userCustom)) return { permissions: resolvePermissions(role, userCustom, templates, known), source: "USER_CUSTOM" };
   if (customRole && customRole.active) {
     const bo = customRole.permissions.filter((p) => (ALL_PERMISSIONS as string[]).includes(p) && !ROLE_BUILDER_FORBIDDEN.includes(p));
-    return { permissions: [...new Set(bo)], source: "CUSTOM_ROLE" };
+    // Quyền duyệt hai bước đi theo VAI hệ thống + `settings:manage`, y như trước khi có khoá (Company OS · G).
+    return { permissions: withDerivedApprovalDecide(role, [...new Set(bo)]), source: "CUSTOM_ROLE" };
   }
   return { permissions: resolvePermissions(role, null, templates, known), source: "ROLE_TEMPLATE" };
 }

@@ -70,13 +70,43 @@ nhìn lại được nhóm việc đó đã xảy ra bao nhiêu lần và do ai.
 
 ### Bật thế nào
 
-Ghi `settings` khoá `approval.enforce`, giá trị JSON theo nhóm:
+Trang **Cần xử lý** (`/alerts`) → mục **Cưỡng chế duyệt hai bước** — CHỈ quản trị viên (ADMIN) thấy và
+bấm được; bật phải xác nhận bằng chữ, mỗi lần bật/tắt ghi nhật ký `approval.enforce` kèm trước/sau.
+Chỉ bật được nhóm ĐÃ NỐI vào thao tác thật (`APPROVAL_GROUPS_WIRED`). Bật là quyết định của chủ shop.
+
+Công tắc ghi `settings` khoá `approval.enforce`, giá trị JSON theo nhóm:
 
 ```json
 { "INVENTORY_ADJUSTMENT": true, "PAYROLL_EDIT": true }
 ```
 
 Bật một nhóm KHÔNG kéo theo nhóm khác. Chỉ đúng boolean `true` mới tính.
+
+> **Lỗi đã sửa (Company OS · 25/09/2026):** `settings.value` là cột TEXT. Cổng cũ đưa thẳng CHUỖI JSON
+> vào `isEnforced()` (chỉ nhận object), nên dù có ai ghi khoá này bằng `set-setting` thì cưỡng chế vẫn
+> KHÔNG BAO GIỜ bật. Nay cổng parse chuỗi (`parseEnforceConfig`). Trước khi deploy: kiểm production
+> có dòng `approval.enforce` chưa — nếu có, nó sẽ BẮT ĐẦU có hiệu lực từ bản này.
+
+### Sau khi được duyệt thì sao — lời duyệt dùng ĐÚNG MỘT LẦN
+
+Trước Company OS, duyệt xong không có gì xảy ra: người xin bấm lại thì cổng đẻ yêu cầu MỚI — vòng
+lặp không lối ra. Nay (`lib/approvals/service.ts`):
+
+1. Người xin bấm lại **đúng việc đã xin** (cùng nhóm · thao tác · thực thể · payload chuẩn hoá — dấu vân
+   tay sha256) ⇒ lời duyệt được **tiêu thụ**: `EXECUTED` + `executed_at`, và việc chạy.
+2. Tiêu thụ là `UPDATE … WHERE id = ? AND status = 'APPROVED' RETURNING` — hai lượt bấm đồng thời chỉ
+   một lượt chạy.
+3. Lần thứ hai phải xin lại. Việc khác (đổi một con số) hay người khác làm hộ ⇒ không dùng được lời duyệt.
+4. Lời duyệt còn hiệu lực `APPROVAL_VALID_HOURS` = **72 giờ** kể từ lúc duyệt. Hạn nằm ngay trong điều
+   kiện tiêu thụ; trạng thái `EXPIRED` được GHI khi người xin chạm lại nhóm đó (không có job định kỳ).
+   Hệ quả: yêu cầu quá hạn mà không ai thử lại vẫn đọc `APPROVED` trong CSDL, nhưng không mở khoá gì.
+5. Bấm lại việc đang CHỜ không đẻ yêu cầu thứ hai (chỉ mục duy nhất `approval_pending_fingerprint_uq`).
+6. Giới hạn đã biết: lời duyệt được tiêu thụ TRƯỚC khi thao tác ghi dữ liệu; thao tác hỏng sau đó thì
+   lời duyệt đã mất và phải xin lại (cột `execution_error` chưa được nối).
+
+Ai duyệt được: quyền `approvals:decide` — ADMIN, MANAGER và người có `settings:manage` LUÔN có (đúng
+tập người cũ); vai trò tuỳ chỉnh không cấp được. Việc chờ duyệt cũng hiện trên `/work` (nguồn
+`APPROVAL`, phòng Điều hành), và chỉ đóng bằng Duyệt / Từ chối.
 
 ## 5. Ba chỗ cơ chế loại này thường hỏng, và cách chặn
 

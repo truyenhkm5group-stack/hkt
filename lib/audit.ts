@@ -1,5 +1,6 @@
 import { getDb, schema } from "@/db";
 import { clearMemo, dangTrongJobNen, staleMemo } from "@/lib/cache";
+import type { AuditActorKind } from "@/lib/constants/audit-actor";
 
 /**
  * ───────────── NHẬT KÝ TRUY VẾT ─────────────
@@ -46,6 +47,12 @@ export type AuditParams = {
   reason?: string;
   /** Nối các thay đổi cùng một lần chạy / một gói tin. */
   correlationId?: string;
+  /**
+   * AI LÀM — người hay máy. Bỏ trống thì suy (xem `inferActorKind`): có `userId` ⇒ `USER`; đang
+   * chạy trong job nền ⇒ `SYSTEM`; `userEmail` dạng `job:` / `script:` ⇒ `SYSTEM`; còn lại `NULL`
+   * (CHƯA BIẾT — không đoán thành "người dùng").
+   */
+  actorKind?: AuditActorKind;
   /** Dữ liệu bổ sung tự do (vẫn được che bí mật). */
   detail?: unknown;
 };
@@ -64,6 +71,29 @@ export type AuditParams = {
  * ngoài — xoá đệm thừa chỉ tốn thời gian, còn bỏ sót thì trình bày số cũ như số mới.
  */
 const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT"]);
+
+/**
+ * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).
+ *
+ * Thứ tự: khai tường minh → có `userId` (`USER`) → đang trong job nền (`SYSTEM`) → email theo quy
+ * ước `job:` / `script:` (`SYSTEM`) → `null`.
+ *
+ * VÌ SAO `userId` ĐỨNG TRƯỚC cờ job nền: `dangTrongJobNen()` là một bộ đếm TOÀN CỤC của tiến trình
+ * (lib/cache.ts), không phải ngữ cảnh của riêng lượt gọi. Trong lúc `dashboard-warm` chạy 60 giây,
+ * MỌI thao tác của người dùng cùng tiến trình cũng thấy cờ bật. Với đệm thì sai sót đó vô hại (xoá
+ * mềm thay vì cứng); với quy kết thì nó biến việc của người thành việc của máy. Job nền trong kho
+ * này ghi nhật ký với `userId = null`, nên đặt `userId` trước không làm mất nhãn `SYSTEM` của chúng.
+ *
+ * Không có nhánh "mặc định USER": một dòng không biết ai làm mà in là người dùng thì thẻ điểm người
+ * sẽ đếm việc của máy (AGENTS.md mục 36). `null` = CHƯA BIẾT.
+ */
+export function inferActorKind(params: Pick<AuditParams, "actorKind" | "userId" | "userEmail">, inJob: boolean): AuditActorKind | null {
+  if (params.actorKind) return params.actorKind;
+  if (params.userId) return "USER";
+  if (inJob) return "SYSTEM";
+  if (/^(job|script):/i.test(params.userEmail ?? "")) return "SYSTEM";
+  return null;
+}
 
 export async function audit(params: AuditParams) {
   // Mọi thao tác ghi đều được ghi nhật ký → làm mới cache báo cáo. NHƯNG mức độ tuỳ ai ghi:
@@ -95,8 +125,17 @@ export async function audit(params: AuditParams) {
       entity: params.entity,
       entityId: params.entityId ?? "",
       detail: (redactSecrets(structured) as object) ?? null,
+      actorKind: inferActorKind(params, dangTrongJobNen()),
+      correlationId: params.correlationId?.slice(0, 200) ?? null,
+      // Lý do là chữ người gõ — vẫn đi qua bộ che bí mật như mọi thứ khác, và bị cắt độ dài.
+      reason: params.reason !== undefined ? String(redactSecrets(params.reason)).slice(0, 2000) : null,
     });
-  } catch {
-    // không chặn nghiệp vụ vì lỗi ghi log
+  } catch (error) {
+    /*
+      KHÔNG CHẶN NGHIỆP VỤ vì lỗi ghi nhật ký — nhưng cũng KHÔNG NUỐT IM LẶNG nữa. Bản cũ `catch {}`
+      nên một ràng buộc CSDL hỏng làm nhật ký ngừng ghi mà không ai biết, đúng lúc cần nó nhất.
+      In ra log máy chủ (không kèm `detail`: có thể mang dữ liệu khách).
+    */
+    console.error(`[audit] ghi nhật ký hỏng — ${params.action} · ${params.entity}:${params.entityId ?? ""}:`, error instanceof Error ? error.message : error);
   }
 }

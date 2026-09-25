@@ -77,7 +77,25 @@ export function runningJobKeys() {
  * Chạy một job đồng bộ, ghi bản ghi sync_runs. Mỗi job chỉ chạy một tiến trình tại một thời điểm.
  */
 export async function runSyncJob<T>(
-  options: { source: SyncSource; job: string; trigger?: SyncTrigger; actor?: string },
+  options: {
+    source: SyncSource;
+    job: string;
+    trigger?: SyncTrigger;
+    actor?: string;
+    /**
+     * CHỈ QUAN SÁT (mặc định `false`). Company OS · Agent G: năm job được bọc thêm vào `runSyncJob`
+     * chỉ để có dòng `sync_runs` (giữ ấm bảng điều khiển, cảnh báo, việc định kỳ, leo thang, chụp
+     * thẻ điểm). Trước khi bọc chúng KHÔNG làm cũ đệm báo cáo và KHÔNG phát sự kiện `sync` — bọc là
+     * để NHÌN THẤY chúng, không được đổi việc chúng làm. Nên `observeOnly` bỏ hai hiệu ứng phụ ấy:
+     *
+     *  · làm cũ đệm: với `dashboard-warm` là tự triệt tiêu (vừa làm ấm xong đã đánh dấu cũ);
+     *  · sự kiện `sync`: mỗi sự kiện làm MỌI trình duyệt đang mở dựng lại trang — một job 4 phút
+     *    một lần mà phát sự kiện là bắt máy chủ 2 nhân dựng lại trang liên tục.
+     *
+     * Ghi `sync_runs`, khoá chạy-một-lượt và đồng hồ canh thì VẪN áp như mọi job.
+     */
+    observeOnly?: boolean;
+  },
   fn: (ctx: SyncContext) => Promise<T>,
 ): Promise<{ run: { id: string; status: string }; summary: SyncSummary; result: T | null; skippedBecauseRunning?: boolean }> {
   const key = `${options.source}:${options.job}`;
@@ -140,7 +158,7 @@ export async function runSyncJob<T>(
         Vẫn báo khi: có dòng đổi · có cảnh báo/lỗi · hoặc chính NGƯỜI bấm chạy (họ đang chờ kết quả).
       */
       const coGiDeBao = summary.imported + summary.updated + summary.failed > 0 || status !== "SUCCESS" || (options.trigger ?? "MANUAL") === "MANUAL";
-      if (coGiDeBao) publish({ type: "sync", source: options.source, job: options.job, status });
+      if (coGiDeBao && !options.observeOnly) publish({ type: "sync", source: options.source, job: options.job, status });
       return { run: { id: run.id, status }, summary, result };
     } catch (error) {
       const message = moTaLoiCsdl(error);
@@ -148,7 +166,7 @@ export async function runSyncJob<T>(
         .update(schema.syncRuns)
         .set({ status: "FAILED", imported: summary.imported, updated: summary.updated, skipped: summary.skipped, failed: summary.failed + 1, detail: summary.detail || logs.at(-1) || "", error: message.slice(0, 2000), finishedAt: new Date() })
         .where(eq(schema.syncRuns.id, run.id));
-      publish({ type: "sync", source: options.source, job: options.job, status: "FAILED" });
+      if (!options.observeOnly) publish({ type: "sync", source: options.source, job: options.job, status: "FAILED" });
       throw error;
     } finally {
       /*
@@ -161,7 +179,7 @@ export async function runSyncJob<T>(
         tài chính). Người vừa bấm "Đồng bộ" nhận số của phút trước ngay lập tức, và được kéo lên số
         mới bằng sự kiện `memo` khi lượt tính lại xong (xem lib/cache.ts).
       */
-      staleMemo();
+      if (!options.observeOnly) staleMemo();
       releaseJob(key);
     }
   })();
