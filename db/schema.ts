@@ -474,11 +474,11 @@ export const productionBatches = pgTable(
     workshopPenalty: integer("workshop_penalty").notNull().default(0),
     penaltyNote: text("penalty_note").notNull().default(""),
     /**
-     * GIÁ BÁO MKT (đ/chiếc): giá chốt tính cho marketer khi tính lợi nhuận danh nghĩa và lương.
-     * NULL = CHƯA BÁO. Hôm nay CHỈ GHI NHẬN và hiển thị cạnh giá SX thực tế — CHƯA đi vào báo cáo lợi
-     * nhuận hay bảng lương nào: đổi giá vốn của lương là quyết định của chủ shop (AGENTS.md mục 7).
+     * NGÀY GHI PHẠT — quyết định tiền phạt được CỘNG cho MKT phụ trách mã ở kỳ lương nào (chủ shop chốt
+     * 25/09/2026: "Hoàn phạt MKT" cộng lại cho MKT). NULL khi có phạt = CHƯA KHAI NGÀY ⇒ chưa cộng cho
+     * ai, và màn hình nói ra; không đoán ngày giúp (AGENTS.md mục 35).
      */
-    marketerPrice: integer("marketer_price"),
+    penaltyAt: ts("penalty_at"),
     /**
      * Ai lo vải: SHOP (shop mua vải, xưởng may công — tiền vải lấy từ các đợt vải gán vào lô) ·
      * WORKSHOP (xưởng lo vải, đơn giá là giá trọn gói — tiền vải 0đ là THẬT). Phải khai, vì
@@ -506,9 +506,39 @@ export const productionBatches = pgTable(
     check("production_batches_status_check", sql`${t.status} IN ('OPEN', 'DONE', 'CANCELLED')`),
     check("production_batches_fabric_source_check", sql`${t.fabricSource} IN ('SHOP', 'WORKSHOP')`),
     check("production_batches_qty_check", sql`${t.orderedQty} >= 0 AND ${t.batchNo} > 0 AND (${t.agreedQty} IS NULL OR ${t.agreedQty} >= 0)`),
-    check("production_batches_price_check", sql`(${t.laborUnitPrice} IS NULL OR ${t.laborUnitPrice} >= 0) AND (${t.marketerPrice} IS NULL OR ${t.marketerPrice} >= 0) AND ${t.workshopPenalty} >= 0`),
+    check("production_batches_price_check", sql`(${t.laborUnitPrice} IS NULL OR ${t.laborUnitPrice} >= 0) AND ${t.workshopPenalty} >= 0`),
     check("production_batches_code_check", sql`length(trim(${t.productCode})) > 0`),
   ],
+);
+
+/**
+ * ═══════════ GIÁ BÁO MKT — MỘT GIÁ CHO MỖI MÃ, CÓ NGÀY HIỆU LỰC ═══════════
+ *
+ * Giá chốt tính cho marketer thay cho giá vốn thật, ở ĐÚNG hai chỗ: lợi nhuận danh nghĩa theo MKT và
+ * cơ sở tính lương (chủ shop chốt 25/09/2026). Lợi nhuận SHOP vẫn đứng trên giá vốn phiếu kho; phần
+ * chênh là một dòng đối soát riêng. Luật: `lib/constants/marketer-price.ts`.
+ *
+ * "Một mã một giá từ đầu tới cuối, gần hết vòng đời có thể giảm cho MKT để xả tồn" ⇒ mỗi lần đổi giá
+ * là một DÒNG MỚI có ngày hiệu lực; đơn lấy giá đang hiệu lực vào NGÀY LÊN ĐƠN. Hạ giá hôm nay không
+ * làm đổi lợi nhuận của đơn đã lên trước đó.
+ */
+export const marketerPrices = pgTable(
+  "marketer_prices",
+  {
+    id: id(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    /** Ảnh chụp mã hàng lúc ghi — để đọc; khoá thật là `product_id`. */
+    productCode: text("product_code").notNull().default(""),
+    price: integer("price").notNull(),
+    effectiveFrom: ts("effective_from").notNull(),
+    reason: text("reason").notNull().default(""),
+    setByUserId: text("set_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    setBy: text("set_by").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("marketer_prices_product_from_uq").on(t.productId, t.effectiveFrom), check("marketer_prices_price_check", sql`${t.price} >= 0`)],
 );
 
 /** Một lần xưởng trả hàng cho một lô ("14/08: 240"). Âm = shop trả lại xưởng hàng lỗi. */

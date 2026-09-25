@@ -55,7 +55,7 @@ export function ProfitBreakdown({
       href: `/orders?${periodQs}&outcome=DELIVERED`,
     },
     {
-      label: "Giá vốn hàng đã giao",
+      label: "Giá vốn hàng đã giao (theo giá báo MKT khi mã có giá báo)",
       value: marketer.cogsCharged,
       sign: -1,
       why: COMPENSATION_PROFIT_RULES.COGS.why,
@@ -96,10 +96,18 @@ export function ProfitBreakdown({
       why: "Người đẩy chéo trích một phần lợi nhuận cho chủ mã; chủ mã nhận phần ấy. Số âm ở đây nghĩa là NHẬN nhiều hơn trả.",
       missingSource: "",
     },
+    {
+      label: "Hoàn phạt xưởng (MKT phụ trách mã)",
+      value: marketer.workshopPenaltyCredit,
+      sign: 1,
+      why: "Tiền phạt xưởng vì sai sót / trả hàng chậm, ghi trên lô đặt xưởng, cộng cho MKT phụ trách mã theo ngày ghi phạt (chủ shop chốt 25/09/2026).",
+      href: "/inventory/workshop",
+    },
   ];
 
   const tongTru = rows.filter((r) => r.sign === -1).reduce((t, r) => t + (r.value ?? 0), 0);
-  const congLai = marketer.attributedRevenue - tongTru;
+  const tongCong = rows.filter((r) => r.sign === 1).reduce((t, r) => t + (r.value ?? 0), 0);
+  const congLai = tongCong - tongTru;
   /** Lệch giữa bảng bóc tách và con số máy đã tính. Phải bằng 0 — nếu không thì nói ra. */
   const lech = congLai - marketer.personalProfit;
 

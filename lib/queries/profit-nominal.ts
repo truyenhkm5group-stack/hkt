@@ -6,6 +6,7 @@ import { memo, periodKey } from "@/lib/cache";
 import { DEFAULT_PROFIT_ASSUMPTIONS, FALLBACK_SHIP_FEE_DELIVERED, fixedCostForPeriod, opsCosts, periodMonths, PROFIT_ASSUMPTIONS_KEY, rescuedFromRate, type ProfitAssumptions } from "@/lib/constants/profit";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
+import { LINE_MARKETER_PRICE } from "@/lib/queries/marketer-price";
 import type { Period } from "@/lib/search-params";
 import { getSettingJson } from "@/lib/settings";
 import { getOperatingCost } from "@/lib/queries/cost-engine";
@@ -249,6 +250,12 @@ export type NominalRow = {
   cogsKnown: boolean;
   /** Số sản phẩm bán ra KHÔNG có giá vốn THẬT (không phiếu nhập, không giá Pancake) — kể cả phần đã được lấp bằng giá dự tính. */
   cogsUnknownQty: number;
+  /**
+   * GIÁ BÁO MKT: phần giá vốn MKT chịu THÊM (âm = ít hơn) so với giá vốn thật, ở mức giao thành công
+   * ước tính. `0` khi mã chưa có giá báo áp được. CHỈ đường "theo MKT" đọc số này
+   * (`getNominalMarketerBreakdown`); mọi cột của bảng theo mã vẫn đứng trên giá vốn thật.
+   */
+  marketerCostDelta: number;
   /**
    * Số sản phẩm vẫn CHƯA BIẾT giá vốn sau khi đã lấp giá dự tính — `0` khi mã có giá dự tính.
    * `cogsKnown` = (số này bằng 0).
@@ -713,6 +720,13 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         cogsFull: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${NOT_CANCELLED}), 0)`,
         // Sản phẩm KHÔNG biết giá vốn (không phiếu nhập, không giá Pancake): đang bị tính 0đ — là CHƯA BIẾT.
         cogsUnknownQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${NOT_CANCELLED} and ${LINE_UNIT_COST} = 0), 0)`,
+        /*
+          GIÁ BÁO MKT (chủ shop chốt 25/09/2026) — hai con số chỉ đường "theo MKT" dùng: phần chênh
+          (giá báo − giá vốn thật) × số lượng trên các dòng CÓ giá báo đang hiệu lực, và số sản phẩm có
+          giá báo mà chưa biết giá vốn thật (giá dự tính của chúng phải trừ ra, không thì cộng hai lần).
+        */
+        mktDeltaFull: sql<number>`coalesce(sum(${i.quantity} * (${LINE_MARKETER_PRICE} - ${LINE_UNIT_COST})) filter (where ${NOT_CANCELLED} and ${LINE_MARKETER_PRICE} is not null), 0)`,
+        mktPricedUnknownQty: sql<number>`coalesce(sum(${i.quantity}) filter (where ${NOT_CANCELLED} and ${LINE_MARKETER_PRICE} is not null and ${LINE_UNIT_COST} = 0), 0)`,
         delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
         returned: sql<number>`count(distinct ${o.id}) filter (where ${IS_RETURNED})`,
         inTransit: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'IN_TRANSIT')`,
@@ -960,6 +974,15 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       const duTinh = cogsUnknownQty > 0 ? (giaDuTinh[r.productId] ?? null) : null;
       const calc = applyAssumptions(base, returnRate, assumptions, orderLevel, duTinh?.unitCost ?? null);
       const pur = purchases.get(r.productId);
+      /*
+        GIÁ BÁO MKT Ở MỨC GIAO THÀNH CÔNG ƯỚC TÍNH: phần chênh của các dòng có giá báo, quy về đúng tỷ
+        lệ SỐ SẢN PHẨM giao thành công ước tính của mã (`expectedQty / items` — cùng đường với cột giá
+        vốn ước tính). Dòng chưa biết giá vốn thật đang mang giá dự tính trong `expectedCogs` ⇒ trừ
+        phần dự tính ấy ra, để giá báo THAY nó chứ không cộng chồng.
+      */
+      const tyLeGiao = base.items > 0 ? calc.expectedQty / base.items : 0;
+      const duTinhBiThay = duTinh?.unitCost ? duTinh.unitCost * Number(r.mktPricedUnknownQty ?? 0) : 0;
+      const marketerCostDelta = Math.round((Number(r.mktDeltaFull ?? 0) - duTinhBiThay) * tyLeGiao);
       return {
         productId: r.productId,
         productName: r.productName ?? "",
@@ -977,6 +1000,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
         cogsUnknownQty,
         cogsUncoveredQty: duTinh ? 0 : cogsUnknownQty,
         estimatedCost: duTinh,
+        marketerCostDelta,
         purchaseCostKnown: pur ? pur.costKnown : true,
         baseReturnRate,
         historyFinished: h?.finished ?? 0,
@@ -1031,7 +1055,7 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
       productId: pid, productName: pur.name || pid, code: pur.code, image: null, orders: 0, ordersWeighted: 0, items: 0, grossSales: 0, salesAfterDiscount: 0, adSpend: adByProduct.get(pid) ?? 0,
       // Mã CHƯA CÓ ĐƠN: không có tỷ lệ nào để in — `null`, không phải 100% (không giao đơn nào thì không "giao thành công 100%").
       ads: adsRatios({ adSpend: adByProduct.get(pid) ?? 0, posSales: 0, deliveredRevenueActual: 0, projectedDeliveredRevenue: 0 }),
-      returnRate: null, deliveryRate: null, returnRateSource: "unmeasured" as const, projection: null, revenueBasis: "RATE" as const, unmodelledRevenue: 0, cogsKnown: true, cogsUnknownQty: 0, cogsUncoveredQty: 0, estimatedCost: null, purchaseCostKnown: pur.costKnown,
+      returnRate: null, deliveryRate: null, returnRateSource: "unmeasured" as const, projection: null, revenueBasis: "RATE" as const, unmodelledRevenue: 0, cogsKnown: true, cogsUnknownQty: 0, marketerCostDelta: 0, cogsUncoveredQty: 0, estimatedCost: null, purchaseCostKnown: pur.costKnown,
       baseReturnRate: 0, historyFinished: 0, rateMature: false, rateOwnFinished: 0, rateOverride: null, rateMatureAt: assumptions.rateMatureMinFinished, measuredDeliveryRate: null, borrowedShare: null, blendReason: null, expectedRevenue: 0, expectedCogs: 0, expectedCogsEstimated: 0, expectedQty: 0, shipCost: 0, expectedProfit: -(adByProduct.get(pid) ?? 0), margin: null, cpo: null, revenuePerOrder: null,
       delivered: 0, returned: 0, inTransit: 0, failed: 0, pending: 0, actualRevenue: 0, operatingAlloc: 0, rescued: 0, packingCost: 0, opsStaffCost: 0, fixedAlloc: 0, opexTotal: 0, otherCostsTotal: 0, opexPerOrder: null, opexPerDelivered: null,
       // Chưa bán được gì trong kỳ ⇒ chưa giải phóng đồng dự phòng nào vào lãi lỗ; rủi ro của lô

@@ -9,6 +9,8 @@ import { vnDateKey } from "@/lib/format";
 import { CONFIRMED_STAGES } from "@/lib/queries/expenses";
 import { adMarketerMap } from "@/lib/integrations/facebook/ads-index";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
+import { MKT_LINE_UNIT_COST } from "@/lib/queries/marketer-price";
+import { workshopPenaltyByProduct } from "@/lib/queries/workshop-ledger";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -102,7 +104,9 @@ export type MarketerProfit = {
   ownerBonusReceived: number;
   ownerBonusPaid: number;
   ownedProducts: string[];
-  personalProfit: number; // = LN phân bổ − QC của mình − giá vốn chịu trách nhiệm ± % chủ mã − QC test
+  /** Tiền phạt xưởng ("Hoàn phạt MKT") cộng cho người này vì là MKT phụ trách mã — theo ngày ghi phạt. */
+  workshopPenaltyCredit: number;
+  personalProfit: number; // = LN phân bổ − QC của mình − giá vốn (theo giá báo MKT nếu có) ± % chủ mã − QC test + hoàn phạt xưởng
   products: MarketerProductLine[];
 };
 
@@ -167,6 +171,17 @@ export type MarketerReport = {
      * và ước tính ấy phải hiện ra màn hình chứ không đi im lặng (AGENTS.md mục 8.6).
      */
     basisExclusions: BasisExclusion[];
+    /**
+     * GIÁ BÁO MKT: Σ (giá vốn phía MKT − giá vốn thật) trên các mã CÓ người nhận. Dương = shop giữ phần
+     * chênh; âm = shop bù cho MKT (giá xả tồn thấp hơn giá vốn). `profit` phía trên vẫn là giá vốn thật.
+     */
+    marketerPriceMargin: number;
+    /** Tiền phạt xưởng đã cộng cho MKT phụ trách mã trong kỳ (theo ngày ghi phạt). */
+    workshopPenaltyCredited: number;
+    /** Tiền phạt xưởng của mã CHƯA có MKT phụ trách — chưa cộng cho ai. */
+    workshopPenaltyUncredited: number;
+    /** Số lô có phạt mà chưa khai ngày ghi phạt — chưa biết thuộc kỳ nào nên chưa cộng. */
+    workshopPenaltyUndatedBatches: number;
   };
   marketers: MarketerProfit[];
   /** Lợi nhuận mã hàng không có quảng cáo và không có người phụ trách (không phân bổ cho ai) */
@@ -376,6 +391,12 @@ async function productEconomics(period: Period) {
         */
         revenue: sql<number>`coalesce(sum(${i.lineTotal}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED' and ${i.isBonus} = false), 0)`,
         cogsDelivered: sql<number>`coalesce(sum(${i.quantity} * ${LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
+        /*
+          GIÁ VỐN PHÍA MKT (chủ shop chốt 25/09/2026): cùng tập dòng, cùng số lượng với `cogsDelivered`,
+          chỉ khác đơn giá — dòng có giá báo MKT đang hiệu lực vào ngày lên đơn (từ 01/09/2026) dùng giá
+          báo, dòng còn lại dùng đúng giá vốn thật. Mã chưa khai giá báo ⇒ hai cột BẰNG NHAU.
+        */
+        cogsDeliveredMkt: sql<number>`coalesce(sum(${i.quantity} * ${MKT_LINE_UNIT_COST}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED'), 0)`,
         shipping: sql<number>`coalesce(sum(${shipFee} * ${i.lineTotal} / ${orderTotal}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(ELIGIBLE_SENT_SQL)})), 0)`,
       })
       .from(i)
@@ -427,11 +448,11 @@ async function productEconomics(period: Period) {
     const sentOrders = Number(r.sentOrders);
     const rescued = rescuedFromRate(sentOrders, Number(assumptions.rescueRatePercent ?? 10));
     const ops = opsCosts({ orders: sentOrders, rescued }, assumptions);
-    return { productId: r.productId, productName: r.productName ?? "", code: r.code ?? "", deliveredOrders: Number(r.deliveredOrders), sentOrders, rescued, revenue: Number(r.revenue), cogsDelivered: Math.round(Number(r.cogsDelivered)), shipping: Math.round(Number(r.shipping)), purchaseCost: purchase.get(r.productId) ?? 0, ...ops };
+    return { productId: r.productId, productName: r.productName ?? "", code: r.code ?? "", deliveredOrders: Number(r.deliveredOrders), sentOrders, rescued, revenue: Number(r.revenue), cogsDelivered: Math.round(Number(r.cogsDelivered)), cogsDeliveredMkt: Math.round(Number(r.cogsDeliveredMkt)), shipping: Math.round(Number(r.shipping)), purchaseCost: purchase.get(r.productId) ?? 0, ...ops };
   });
   const revenueTotal = rows.reduce((a, r) => a + r.revenue, 0);
   // mã có nhập hàng nhưng chưa có đơn trong kỳ vẫn cần hiện (LN2 trừ giá vốn hàng nhập)
-  for (const [pid, cost] of purchase) if (!rows.some((r) => r.productId === pid)) rows.push({ productId: pid, productName: "", code: "", deliveredOrders: 0, sentOrders: 0, rescued: 0, revenue: 0, cogsDelivered: 0, shipping: 0, purchaseCost: cost, packingCost: 0, opsStaffCost: 0 });
+  for (const [pid, cost] of purchase) if (!rows.some((r) => r.productId === pid)) rows.push({ productId: pid, productName: "", code: "", deliveredOrders: 0, sentOrders: 0, rescued: 0, revenue: 0, cogsDelivered: 0, cogsDeliveredMkt: 0, shipping: 0, purchaseCost: cost, packingCost: 0, opsStaffCost: 0 });
   const perOrderTotal = rows.reduce((a, r) => a + r.packingCost + r.opsStaffCost, 0);
   // CP vận hành phân bổ của mã = (đã nhập + cố định) theo tỷ trọng doanh thu GTC + đóng hàng & NV vận đơn theo đơn của chính mã
   const operating = operatingEntered + fixedCost + perOrderTotal;
@@ -527,12 +548,13 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
     (`tests/marketer-daily-nominal.test.ts` khoá điều ấy), mà `stockByProduct` là 5–6 giây nguội
     trên production 23/09/2026. Giá vốn dự tính giữ TẮT như cũ (luật 2, `estimated-cost.ts`).
   */
-  const [nominal, employees, config, econ, byPage] = await Promise.all([
+  const [nominal, employees, config, econ, byPage, penalties] = await Promise.all([
     getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true, false, false),
     listEmployees(),
     loadPayrollConfig(),
     productEconomics(period),
     salesByProductPage(period, "delivered"),
+    workshopPenaltyByProduct(period),
   ]);
   const ads = schema.adSpends;
   const spendRows = await db
@@ -572,14 +594,14 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
     let m = marketers.get(id);
     if (!m) {
       const emp = nameOf(id);
-      m = { marketerId: id, name: labelOf(id, emp), adSpend: 0, testSpend: 0, totalSpend: 0, attributedRevenue: 0, attributedOrders: 0, attributedProfitBeforeAds: 0, cogsCharged: 0, shippingCharged: 0, operatingCharged: 0, ownerBonusReceived: 0, ownerBonusPaid: 0, ownedProducts: [], personalProfit: 0, products: [] };
+      m = { marketerId: id, name: labelOf(id, emp), adSpend: 0, testSpend: 0, totalSpend: 0, attributedRevenue: 0, attributedOrders: 0, attributedProfitBeforeAds: 0, cogsCharged: 0, shippingCharged: 0, operatingCharged: 0, ownerBonusReceived: 0, ownerBonusPaid: 0, ownedProducts: [], workshopPenaltyCredit: 0, personalProfit: 0, products: [] };
       marketers.set(id, m);
     }
     return m;
   };
   const products: ProductProfitLine[] = [];
   let shopRetained = 0;
-  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, sharedUnallocated: econ.sharedUnallocated, logisticsAdjustment: econ.logisticsAdjustment.amount, logisticsAdjustmentCount: econ.logisticsAdjustment.count, logisticsAdjustmentUnallocated: econ.logisticsAdjustment.unallocated, months: econ.months, testSpend: 0, profit: 0, basisExclusions: econ.basisExclusions };
+  const totals = { revenue: 0, adSpend: 0, cogs: 0, shipping: 0, operating: econ.operating, operatingEntered: econ.operatingEntered, fixedCost: econ.fixedCost, perOrderOps: econ.perOrderTotal, sharedUnallocated: econ.sharedUnallocated, logisticsAdjustment: econ.logisticsAdjustment.amount, logisticsAdjustmentCount: econ.logisticsAdjustment.count, logisticsAdjustmentUnallocated: econ.logisticsAdjustment.unallocated, months: econ.months, testSpend: 0, profit: 0, basisExclusions: econ.basisExclusions, marketerPriceMargin: 0, workshopPenaltyCredited: 0, workshopPenaltyUncredited: 0, workshopPenaltyUndatedBatches: penalties.undatedBatches };
   let unattributedProfit = 0;
   let unattributedRevenue = 0;
   const coverage = { snapshot: 0, legacyPage: 0, ads: 0, unmapped: 0, total: 0 };
@@ -613,6 +635,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
       rescued: 0,
       revenue: 0,
       cogsDelivered: 0,
+      cogsDeliveredMkt: 0,
       shipping: 0,
       purchaseCost: 0,
       packingCost: 0,
@@ -635,8 +658,14 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
     totals.shipping += row.shipping;
     totals.profit += profit;
 
-    // phần biến đổi đi theo đơn: doanh thu − vận chuyển − chi phí phân bổ − (LN1: giá vốn hàng giao TC)
-    const variable = row.revenue - row.shipping - row.operatingAlloc - (useDeliveredCogs ? row.cogsDelivered : 0);
+    /*
+      phần biến đổi đi theo đơn: doanh thu − vận chuyển − chi phí phân bổ − (LN1: giá vốn hàng giao TC).
+      Giá vốn ở đây là giá vốn PHÍA MKT (`cogsDeliveredMkt` — theo giá báo MKT khi mã có giá báo); lợi
+      nhuận CỦA MÃ ở dòng `products` phía trên vẫn đứng trên giá vốn thật. Phần chênh đi vào
+      `totals.marketerPriceMargin` — shop giữ (hoặc bù) — để Σ các MKT vẫn đối soát được với tổng shop.
+    */
+    const mktCogs = useDeliveredCogs ? row.cogsDeliveredMkt : 0;
+    const variable = row.revenue - row.shipping - row.operatingAlloc - mktCogs;
     const adShares = new Map<string | null, number>();
     if (spend && spend.total > 0) for (const [mid, amount] of spend.byMarketer) adShares.set(mid, amount / spend.total);
     const attribution = attributionShares({ byPage: byPage.get(row.productId) ?? [], pageMarketers: config.pageMarketers, adShares, ownerId });
@@ -651,6 +680,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
       unattributedRevenue += row.revenue;
       continue;
     }
+    if (useDeliveredCogs) totals.marketerPriceMargin += row.cogsDeliveredMkt - row.cogsDelivered;
     const pctShare = shareFor(config, row.productId);
     if (ownerId) ensure(ownerId).ownedProducts.push(row.code || row.productName);
     let ownerBonusTotal = 0;
@@ -658,7 +688,7 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
       const m = ensure(mid);
       const mySpend = spend?.byMarketer.get(mid) ?? 0;
       const isOwner = ownerId !== null && mid === ownerId;
-      const cogsCharged = useDeliveredCogs ? Math.round(row.cogsDelivered * share) : isOwner ? row.purchaseCost : 0;
+      const cogsCharged = useDeliveredCogs ? Math.round(row.cogsDeliveredMkt * share) : isOwner ? row.purchaseCost : 0;
       const base = Math.round(variable * share) - mySpend - (useDeliveredCogs ? 0 : cogsCharged);
       // chủ mã giữ ownerPct % LN đơn của mình (còn lại shop giữ); người chạy cùng giữ crossPct %, phần còn lại về chủ mã
       const split = splitProfit(base, isOwner || !ownerId ? "owner" : "cross", isOwner || !ownerId ? pctShare : pctShare);
@@ -715,6 +745,24 @@ async function getMarketerReportUncached(period: Period, basis: PayrollBasis): P
       }
       o.ownerBonusReceived += ownerBonusTotal;
     }
+  }
+  /*
+    HOÀN PHẠT XƯỞNG CHO MKT PHỤ TRÁCH MÃ (chủ shop chốt 25/09/2026). Tiền phạt ghi trên lô đặt xưởng,
+    theo NGÀY GHI PHẠT trong kỳ, cộng vào lợi nhuận cá nhân của MKT phụ trách mã ("Marketer phụ trách
+    mã" ở cấu hình Lương). Mã chưa có người phụ trách ⇒ không cộng cho ai, và con số ấy đứng riêng
+    (`workshopPenaltyUncredited`) chứ không biến mất. Lợi nhuận SHOP không đổi: tiền phạt đã làm giảm
+    tiền trả xưởng, và giá vốn shop đi theo phiếu kho.
+  */
+  for (const [productId, amount] of penalties.byProduct) {
+    const ownerId = config.productOwners[productId] ?? null;
+    if (!ownerId) {
+      totals.workshopPenaltyUncredited += amount;
+      continue;
+    }
+    const m = ensure(ownerId);
+    m.workshopPenaltyCredit += amount;
+    m.personalProfit += amount;
+    totals.workshopPenaltyCredited += amount;
   }
   for (const [marketerId, amount] of testByMarketer) {
     const m = ensure(marketerId);
@@ -1360,10 +1408,10 @@ export async function getNominalMarketerBreakdown(
    * hai con số lợi nhuận cho cùng một mã. `getPayrollReport` / `getMarketerReport` không đi qua đây.
    */
   withEstimatedCost = false,
-): Promise<{ rows: NominalMarketerRow[]; unattributed: number; shopRetained: number; ownerSharePct: number; pagesMapped: number; pagesTotal: number }> {
+): Promise<{ rows: NominalMarketerRow[]; unattributed: number; shopRetained: number; ownerSharePct: number; pagesMapped: number; pagesTotal: number; marketerPriceMargin: number; workshopPenaltyCredited: number; workshopPenaltyUncredited: number }> {
   return memo(`nominalByMarketer:${periodKey(period)}:${orderValueKey(value)}:${includeAds ? "ads" : "noads"}:${withEstimatedCost ? "gvdt" : "thuc"}`, 120_000, async () => {
     const db = await getDb();
-    const [nominal, employees, config, byPage] = await Promise.all([getNominalProfitReport(period, "ORDERED", value, includeAds, withEstimatedCost), listEmployees(), loadPayrollConfig(), salesByProductPage(period, "confirmed")]);
+    const [nominal, employees, config, byPage, penalties] = await Promise.all([getNominalProfitReport(period, "ORDERED", value, includeAds, withEstimatedCost), listEmployees(), loadPayrollConfig(), salesByProductPage(period, "confirmed"), workshopPenaltyByProduct(period)]);
     const ads = schema.adSpends;
     const spendRows = await db
       .select({ marketerId: ads.marketerId, productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
@@ -1397,6 +1445,9 @@ export async function getNominalMarketerBreakdown(
     };
     let unattributed = 0;
     let shopRetained = 0;
+    let marketerPriceMargin = 0;
+    let workshopPenaltyCredited = 0;
+    let workshopPenaltyUncredited = 0;
     const pagesSeen = new Set<string>();
     const pagesMappedSet = new Set<string>();
     for (const r of nominal.rows) {
@@ -1434,6 +1485,12 @@ export async function getNominalMarketerBreakdown(
         unattributed += netBeforeAds;
         continue;
       }
+      /*
+        GIÁ BÁO MKT: phần của MKT đứng trên giá báo, không trên giá vốn thật — phần chênh shop giữ (hoặc
+        bù) đi vào `marketerPriceMargin`. Mã không ai nhận (nhánh trên) giữ nguyên số của shop.
+      */
+      const netBeforeAdsMkt = netBeforeAds - r.marketerCostDelta;
+      marketerPriceMargin += r.marketerCostDelta;
       const pctShare = shareFor(config, r.productId);
       if (ownerId) ensure(ownerId).ownedProducts.push(r.code || r.productName);
       let bonusTotal = 0;
@@ -1442,7 +1499,7 @@ export async function getNominalMarketerBreakdown(
         const mySpend = Math.round((spend?.byMarketer.get(mid) ?? 0) * adScale);
         const other = Math.round(mySpend * otherPct);
         const isOwner = ownerId !== null && mid === ownerId;
-        const base = Math.round(netBeforeAds * share) - mySpend - other;
+        const base = Math.round(netBeforeAdsMkt * share) - mySpend - other;
         const split = splitProfit(base, isOwner || !ownerId ? "owner" : "cross", pctShare);
         const bonus = !isOwner && ownerId ? split.toOwner : 0;
         const toShop = isOwner || !ownerId ? split.toShop : 0;
@@ -1452,10 +1509,10 @@ export async function getNominalMarketerBreakdown(
         m.otherCost += other;
         m.attributedOrders += Math.round(r.orders * share);
         m.attributedRevenue += Math.round(r.expectedRevenue * share);
-        m.profitBeforeAds += Math.round(netBeforeAds * share);
+        m.profitBeforeAds += Math.round(netBeforeAdsMkt * share);
         m.ownerBonusPaid += bonus;
         m.personalNet += base - bonus - toShop;
-        m.products.push({ productId: r.productId, code: r.code, productName: r.productName, role: isOwner ? "owner" : "cross", share, attributionMode: attribution.mode, orders: Math.round(r.orders * share), revenue: Math.round(r.expectedRevenue * share), profitBeforeAds: Math.round(netBeforeAds * share), adSpend: mySpend, otherCost: other, ownerBonus: -bonus, shopRetained: toShop, personalNet: base - bonus - toShop });
+        m.products.push({ productId: r.productId, code: r.code, productName: r.productName, role: isOwner ? "owner" : "cross", share, attributionMode: attribution.mode, orders: Math.round(r.orders * share), revenue: Math.round(r.expectedRevenue * share), profitBeforeAds: Math.round(netBeforeAdsMkt * share), adSpend: mySpend, otherCost: other, ownerBonus: -bonus, shopRetained: toShop, personalNet: base - bonus - toShop });
       }
       if (ownerId) {
         const o = ensure(ownerId);
@@ -1470,6 +1527,16 @@ export async function getNominalMarketerBreakdown(
         }
       }
     }
+    // Hoàn phạt xưởng cho MKT phụ trách mã — cùng luật với cơ sở tính lương (`getMarketerReportUncached`).
+    for (const [productId, amount] of penalties.byProduct) {
+      const ownerId = config.productOwners[productId] ?? null;
+      if (!ownerId) {
+        workshopPenaltyUncredited += amount;
+        continue;
+      }
+      ensure(ownerId).personalNet += amount;
+      workshopPenaltyCredited += amount;
+    }
     for (const [mid, thoc] of testByMarketer) {
       // QC TEST không gắn mã hàng nên không có tỷ trọng riêng: đi theo tỷ trọng doanh số của tập
       // đang lọc, và về 0 khi công tắc quảng cáo tắt — cùng luật với mọi đồng quảng cáo khác.
@@ -1483,6 +1550,6 @@ export async function getNominalMarketerBreakdown(
     for (const e of employees) if (e.active && e.department === "Marketing" && !rows.has(e.id)) ensure(e.id);
     const list = [...rows.values()].sort((a, b) => (a.marketerId === null ? 1 : b.marketerId === null ? -1 : b.personalNet - a.personalNet));
     for (const m of list) m.products = m.products.filter((x) => x.adSpend || x.orders || x.revenue || x.ownerBonus || x.personalNet).sort((a, b) => b.personalNet - a.personalNet);
-    return { rows: list, unattributed, shopRetained, ownerSharePct: config.ownerSharePct, pagesMapped: pagesMappedSet.size, pagesTotal: pagesSeen.size };
+    return { rows: list, unattributed, shopRetained, ownerSharePct: config.ownerSharePct, pagesMapped: pagesMappedSet.size, pagesTotal: pagesSeen.size, marketerPriceMargin, workshopPenaltyCredited, workshopPenaltyUncredited };
   });
 }

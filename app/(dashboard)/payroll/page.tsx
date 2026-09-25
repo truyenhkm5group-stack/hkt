@@ -997,6 +997,28 @@ export default async function PayrollPage({
                   <TableCell className="text-right">—</TableCell>
                 </TableRow>
               ) : null}
+              {m.totals.marketerPriceMargin ? (
+                <TableRow className="text-muted-foreground">
+                  <TableCell colSpan={6}>Chênh lệch giá báo MKT so với giá vốn thật (dương = shop giữ, âm = shop bù) — phần của MKT tính trên giá báo từ 01/09/2026</TableCell>
+                  <TableCell className="text-right">
+                    <Money value={m.totals.marketerPriceMargin} />
+                  </TableCell>
+                  <TableCell className="text-right">—</TableCell>
+                </TableRow>
+              ) : null}
+              {m.totals.workshopPenaltyCredited || m.totals.workshopPenaltyUncredited || m.totals.workshopPenaltyUndatedBatches ? (
+                <TableRow className="text-muted-foreground">
+                  <TableCell colSpan={6}>
+                    Hoàn phạt xưởng đã cộng cho MKT phụ trách mã
+                    {m.totals.workshopPenaltyUncredited ? ` · ⚠ ${formatVND(m.totals.workshopPenaltyUncredited)} phạt của mã chưa có MKT phụ trách — chưa cộng cho ai` : ""}
+                    {m.totals.workshopPenaltyUndatedBatches ? ` · ⚠ ${m.totals.workshopPenaltyUndatedBatches} lô có phạt chưa ghi ngày — chưa cộng` : ""}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Money value={m.totals.workshopPenaltyCredited} />
+                  </TableCell>
+                  <TableCell className="text-right">—</TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         </div>

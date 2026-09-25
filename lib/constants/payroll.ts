@@ -61,8 +61,12 @@ export const PAYROLL_EMPLOYEES_KEY = "payroll.employees";
  * 4 = bản 25/09/2026 (sau bản 3 ở trên): cột vận chuyển của cơ sở tính lương cộng cước / phí hoàn
  * gõ tay khai `MANUAL_ADJUSTMENT` kèm lý do (lấy từ engine, chia theo số đơn gửi của mã) — như mọi
  * báo cáo lợi nhuận. Kỳ đã chốt đọc ảnh chụp của nó, không tính lại.
+ *
+ * 5 = bản 25/09/2026 (sau bản 4): giá vốn PHÍA MKT dùng GIÁ BÁO MKT của mã (bảng `marketer_prices`,
+ * hiệu lực theo ngày lên đơn, chỉ đơn từ 01/09/2026); tiền phạt xưởng cộng cho MKT phụ trách mã theo
+ * ngày ghi phạt. Lợi nhuận shop vẫn trên giá vốn thật. Kỳ đã khoá đọc ảnh chụp, không tính lại.
  */
-export const PAYROLL_CALC_VERSION = 4;
+export const PAYROLL_CALC_VERSION = 5;
 
 /**
  * KHOÁ TỰ NHIÊN CỦA MỘT KỲ LƯƠNG — đọc được bằng mắt, và ổn định.

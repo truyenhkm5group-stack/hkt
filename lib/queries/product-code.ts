@@ -156,3 +156,19 @@ export async function productCodesOfShipments(shipmentIds: readonly string[]): P
   for (const v of out.values()) v.codes.sort();
   return out;
 }
+
+/**
+ * Mã hàng (đã chuẩn hoá: bỏ khoảng trắng, IN HOA) khớp ĐÚNG MỘT sản phẩm đang bán ⇒ trả sản phẩm đó.
+ * Không khớp, hoặc khớp HAI sản phẩm trở lên ⇒ `null` — không bốc một (AGENTS.md mục 35). Dùng chung
+ * cho Sổ đặt xưởng và Giá báo MKT: hai nơi cùng nói "mã Q002" thì phải trỏ cùng một sản phẩm.
+ */
+export async function resolveProductByCode(code: string): Promise<{ id: string; name: string } | null> {
+  if (!code) return null;
+  const db = await getDb();
+  const rows = await db
+    .select({ id: schema.products.id, name: schema.products.name })
+    .from(schema.products)
+    .where(sql`upper(replace(trim(coalesce(${schema.products.customId}, '')), ' ', '')) = ${code} and ${schema.products.isRemoved} = false`)
+    .limit(2);
+  return rows.length === 1 ? rows[0] : null;
+}

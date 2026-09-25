@@ -48,7 +48,8 @@ export const batchInput = z.object({
   cells: cellsInput(0),
   workshopPenalty: z.coerce.number().int().min(0, "Tiền phạt xưởng không âm").max(1_000_000_000).default(0),
   penaltyNote: z.string().trim().max(300).default(""),
-  marketerPrice: optionalInt(0),
+  /** Ngày ghi phạt — bắt buộc khi có phạt: quyết định tiền phạt cộng cho MKT ở kỳ lương nào. */
+  penaltyAt: optionalDateKey,
   note: z.string().trim().max(1000).default(""),
 });
 export type BatchInput = z.input<typeof batchInput>;

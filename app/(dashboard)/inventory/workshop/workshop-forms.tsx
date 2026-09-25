@@ -193,7 +193,7 @@ export type BatchFormValue = {
   adjustmentNote: string;
   workshopPenalty: number;
   penaltyNote: string;
-  marketerPrice: number | null;
+  penaltyAt: Date | string | null;
   fabricSource: string;
   cells: Record<string, number>;
   note: string;
@@ -218,7 +218,7 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
     adjustmentNote: batch?.adjustmentNote ?? "",
     workshopPenalty: batch?.workshopPenalty ? String(batch.workshopPenalty) : "",
     penaltyNote: batch?.penaltyNote ?? "",
-    marketerPrice: batch?.marketerPrice != null ? String(batch.marketerPrice) : "",
+    penaltyAt: dateOf(batch?.penaltyAt),
     fabricSource: (batch?.fabricSource ?? "SHOP") as FabricSource,
     note: batch?.note ?? "",
   });
@@ -267,7 +267,7 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
             cells: split ? cellsToPayload(cellValues) : {},
             agreedQty: f.agreedQty,
             laborUnitPrice: f.laborUnitPrice,
-            marketerPrice: f.marketerPrice,
+            penaltyAt: intOrNull(f.workshopPenalty) ? f.penaltyAt || todayVN() : "",
             adjustment: intOrNull(f.adjustment) ?? 0,
             workshopPenalty: intOrNull(f.workshopPenalty) ?? 0,
           },
@@ -383,9 +383,7 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
           <Field label="Đơn giá công (đ/chiếc)" hint={<MoneyHint value={f.laborUnitPrice} />}>
             <Input inputMode="numeric" value={f.laborUnitPrice} onChange={(e) => set({ laborUnitPrice: digits(e.target.value) })} />
           </Field>
-          <Field label="Giá báo MKT (đ/chiếc)" hint={<MoneyHint value={f.marketerPrice} />}>
-            <Input inputMode="numeric" value={f.marketerPrice} onChange={(e) => set({ marketerPrice: e.target.value.replace(/[^\d]/g, "") })} />
-          </Field>
+          <div />
           <Field label="Thưởng (+) / Phạt khác (−)" hint={<MoneyHint value={f.adjustment} />}>
             <Input inputMode="numeric" value={f.adjustment} onChange={(e) => set({ adjustment: digits(e.target.value) })} placeholder="0" />
           </Field>
@@ -397,7 +395,10 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
           <Field label="Phạt xưởng · hoàn MKT (đ)" hint={<MoneyHint value={f.workshopPenalty} />}>
             <Input inputMode="numeric" value={f.workshopPenalty} onChange={(e) => set({ workshopPenalty: e.target.value.replace(/[^\d]/g, "") })} placeholder="0" />
           </Field>
-          <div className="sm:col-span-2">
+          <Field label="Ngày ghi phạt" hint="Tiền phạt cộng cho MKT phụ trách mã ở kỳ lương chứa ngày này">
+            <Input type="date" value={f.penaltyAt} disabled={!intOrNull(f.workshopPenalty)} onChange={(e) => set({ penaltyAt: e.target.value })} placeholder={todayVN()} />
+          </Field>
+          <div className="sm:col-span-3">
             <Field label="Lý do phạt xưởng (sai sót / trả chậm)">
               <Input value={f.penaltyNote} onChange={(e) => set({ penaltyNote: e.target.value })} />
             </Field>

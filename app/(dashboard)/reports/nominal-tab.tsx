@@ -1034,6 +1034,22 @@ export async function NominalTab({
                   <TableCell />
                 </TableRow>
               ) : null}
+              {byMarketer.marketerPriceMargin ? (
+                <TableRow className="text-muted-foreground">
+                  <TableCell colSpan={8}>Chênh lệch giá báo MKT so với giá vốn thật (dương = shop giữ, âm = shop bù cho MKT) — phần của MKT tính trên giá báo từ 01/09/2026</TableCell>
+                  <TableCell className="text-right"><Money value={byMarketer.marketerPriceMargin} /></TableCell>
+                  <TableCell />
+                </TableRow>
+              ) : null}
+              {byMarketer.workshopPenaltyCredited || byMarketer.workshopPenaltyUncredited ? (
+                <TableRow className="text-muted-foreground">
+                  <TableCell colSpan={8}>
+                    Hoàn phạt xưởng đã cộng cho MKT phụ trách mã (shop chi){byMarketer.workshopPenaltyUncredited ? ` · ⚠ ${formatVND(byMarketer.workshopPenaltyUncredited)} phạt của mã chưa có MKT phụ trách — chưa cộng cho ai` : ""}
+                  </TableCell>
+                  <TableCell className="text-right"><Money value={-byMarketer.workshopPenaltyCredited} /></TableCell>
+                  <TableCell />
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         </div>

@@ -9,9 +9,11 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { DELIVERY_STATE_LABEL, DELIVERY_STATE_TONE, PAYMENT_KIND_LABEL, PAYMENT_METHOD_LABEL, PAYMENT_STATE_LABEL, PAYMENT_STATE_TONE, type PaymentKind, type PaymentMethod } from "@/lib/constants/workshop-ledger";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import { activeSupplierNames } from "@/lib/queries/suppliers";
+import { listMarketerPrices, type MarketerPriceRow } from "@/lib/queries/marketer-price";
 import { getWorkshopLedger, workshopFormOptions, type BatchView } from "@/lib/queries/workshop-ledger";
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
+import { DeleteMarketerPriceButton, MarketerPriceDialog } from "./marketer-price-forms";
 import { BatchDialog, DeleteButton, DeliveryDialog, FabricDialog, PaymentDialog } from "./workshop-forms";
 
 export const metadata = { title: "Đặt xưởng & thanh toán" };
@@ -46,7 +48,14 @@ export default async function WorkshopLedgerPage({ searchParams }: { searchParam
   const tab: Tab = (TABS.find((t) => t.key === param(raw, "tab"))?.key ?? "batches") as Tab;
   const canWrite = can(user, "planning:write");
   const canPay = can(user, "expenses:write");
-  const [ledger, options, suppliers] = await Promise.all([getWorkshopLedger(), canWrite ? workshopFormOptions() : Promise.resolve(null), canWrite ? activeSupplierNames() : Promise.resolve([] as string[])]);
+  // Giá báo MKT đổi LƯƠNG của marketer ⇒ cùng quyền với "Marketer phụ trách mã".
+  const canSetPrice = can(user, "payroll:manage");
+  const [ledger, options, suppliers, prices] = await Promise.all([
+    getWorkshopLedger(),
+    canWrite || canSetPrice ? workshopFormOptions() : Promise.resolve(null),
+    canWrite ? activeSupplierNames() : Promise.resolve([] as string[]),
+    tab === "cost" ? listMarketerPrices() : Promise.resolve([] as MarketerPriceRow[]),
+  ]);
   const { summary: s } = ledger;
 
   return (
@@ -63,7 +72,7 @@ export default async function WorkshopLedgerPage({ searchParams }: { searchParam
           </>
         }
         actions={
-          options ? (
+          options && canWrite ? (
             <>
               <FabricDialog options={options} suppliers={suppliers} />
               <BatchDialog options={options} suppliers={suppliers} />
@@ -99,9 +108,9 @@ export default async function WorkshopLedgerPage({ searchParams }: { searchParam
       </div>
 
       {tab === "batches" ? <BatchesTab batches={ledger.batches} canWrite={canWrite} canPay={canPay} /> : null}
-      {tab === "fabric" ? <FabricTab ledger={ledger} options={options} suppliers={suppliers} canWrite={canWrite} canPay={canPay} /> : null}
+      {tab === "fabric" ? <FabricTab ledger={ledger} options={canWrite ? options : null} suppliers={suppliers} canWrite={canWrite} canPay={canPay} /> : null}
       {tab === "payments" ? <PaymentsTab payments={ledger.payments} canPay={canPay} /> : null}
-      {tab === "cost" ? <CostTab ledger={ledger} /> : null}
+      {tab === "cost" ? <CostTab ledger={ledger} prices={prices} products={canSetPrice ? (options?.products ?? []) : null} /> : null}
     </div>
   );
 }
@@ -370,7 +379,10 @@ function PaymentsTab({ payments, canPay }: { payments: Ledger["payments"]; canPa
 
 // ─────────────────────────── GIÁ SX THỰC TẾ ───────────────────────────
 
-function CostTab({ ledger }: { ledger: Ledger }) {
+function CostTab({ ledger, prices, products }: { ledger: Ledger; prices: MarketerPriceRow[]; products: { code: string; name: string }[] | null }) {
+  const byCode = new Map<string, MarketerPriceRow[]>();
+  for (const p of prices) byCode.set(p.productCode, [...(byCode.get(p.productCode) ?? []), p]);
+  const now = new Date();
   const batches = ledger.batches.filter((b) => b.status !== "CANCELLED");
   return (
     <div className="space-y-5">
@@ -389,13 +401,12 @@ function CostTab({ ledger }: { ledger: Ledger }) {
                 <TableHead className="text-right">Tổng</TableHead>
                 <TableHead className="text-right">Xưởng thực trả</TableHead>
                 <TableHead className="text-right">Giá SX / chiếc</TableHead>
-                <TableHead className="text-right">Giá báo MKT</TableHead>
                 <TableHead>Tình trạng</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {batches.length === 0 ? (
-                <EmptyRow cols={8}>Chưa có lô nào để tính giá.</EmptyRow>
+                <EmptyRow cols={7}>Chưa có lô nào để tính giá.</EmptyRow>
               ) : (
                 batches.map((b) => (
                   <TableRow key={b.id}>
@@ -410,10 +421,6 @@ function CostTab({ ledger }: { ledger: Ledger }) {
                     <TableCell className="text-right tabular-nums">{formatVND(b.cost.total)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(b.cost.delivered)}</TableCell>
                     <TableCell className="text-right text-base font-bold tabular-nums">{formatVND(b.cost.unitCost)}</TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatVND(b.marketerPrice)}
-                      {b.marketerPrice != null && b.cost.unitCost != null ? <div className="text-xs text-muted-foreground">chênh {formatVND(b.marketerPrice - b.cost.unitCost, { sign: true })}</div> : null}
-                    </TableCell>
                     <TableCell className="text-xs">
                       <span className={b.cost.unitCost == null ? "text-amber-600 dark:text-amber-400" : b.cost.provisional ? "text-sky-600 dark:text-sky-400" : "text-emerald-600 dark:text-emerald-400"}>{b.cost.reason}</span>
                     </TableCell>
@@ -475,6 +482,57 @@ function CostTab({ ledger }: { ledger: Ledger }) {
                         <div className="text-xs text-muted-foreground">{p.receiptAt ? `phiếu ${formatDate(p.receiptAt)}` : p.productId ? "chưa có phiếu nhập" : "mã chưa khớp sản phẩm"}</div>
                       </TableCell>
                       <TableCell className={cn("text-right font-medium tabular-nums", diff != null && diff !== 0 && "text-amber-600 dark:text-amber-400")}>{diff == null ? "—" : formatVND(diff, { sign: true })}</TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Giá báo MKT theo mã"
+        hint="Giá chốt tính cho MKT thay giá vốn thật, ở phần của MKT (lợi nhuận danh nghĩa theo MKT và lương), cho đơn lên từ 01/09/2026. Một mã một giá; muốn hạ giá xả tồn thì thêm dòng mới có ngày hiệu lực — đơn lên từ ngày đó dùng giá mới. Không sửa lùi được vào kỳ lương đã khoá. Lợi nhuận SHOP vẫn trên giá vốn thật."
+        actions={products ? <MarketerPriceDialog products={products} /> : null}
+        padded={false}
+      >
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Mã hàng</TableHead>
+                <TableHead className="text-right">Giá đang áp</TableHead>
+                <TableHead>Lịch sử giá (hiệu lực từ → giá)</TableHead>
+                {products ? <TableHead /> : null}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {byCode.size === 0 ? (
+                <EmptyRow cols={products ? 4 : 3}>Chưa có giá báo MKT nào — mọi mã đang tính cho MKT bằng giá vốn thật.</EmptyRow>
+              ) : (
+                [...byCode.entries()].map(([code, rows]) => {
+                  const ap = rows.filter((x) => x.effectiveFrom.getTime() <= now.getTime()).at(-1) ?? null;
+                  return (
+                    <TableRow key={code}>
+                      <TableCell className="font-mono font-semibold">{code}</TableCell>
+                      <TableCell className="text-right text-base font-bold tabular-nums">{ap ? formatVND(ap.price) : <span className="text-sm font-normal text-muted-foreground">chưa tới ngày hiệu lực</span>}</TableCell>
+                      <TableCell className="text-xs">
+                        {rows.map((x) => (
+                          <div key={x.id} className="flex items-center gap-1">
+                            <span className={x === ap ? "font-semibold text-foreground" : "text-muted-foreground"}>
+                              {formatDate(x.effectiveFrom)} → {formatVND(x.price)}
+                              {x.reason ? ` · ${x.reason}` : ""} · {x.setBy || "—"}
+                            </span>
+                            {products ? <DeleteMarketerPriceButton id={x.id} label={`${code} từ ${formatDate(x.effectiveFrom)}`} /> : null}
+                          </div>
+                        ))}
+                      </TableCell>
+                      {products ? (
+                        <TableCell className="text-right">
+                          <MarketerPriceDialog products={products} defaultCode={code} />
+                        </TableCell>
+                      ) : null}
                     </TableRow>
                   );
                 })

@@ -7,7 +7,9 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { matchSupplier } from "@/lib/constants/suppliers";
 import { cellsTotal, normalizeProductCode } from "@/lib/constants/workshop-ledger";
-import { vnStartOfDay } from "@/lib/format";
+import { formatDate, vnStartOfDay } from "@/lib/format";
+import { frozenPayrollOverlapping } from "@/lib/queries/marketer-price";
+import { resolveProductByCode } from "@/lib/queries/product-code";
 import { supplierCatalog } from "@/lib/queries/suppliers";
 import { batchInput, deliveryInput, fabricInput, paymentInput } from "@/lib/validation/workshop-ledger";
 
@@ -34,18 +36,6 @@ function firstIssue(e: { issues: { message: string }[] }) {
   return e.issues[0]?.message ?? "Dữ liệu không hợp lệ";
 }
 
-/** Mã hàng khớp ĐÚNG MỘT sản phẩm đang bán ⇒ nối khoá. Không khớp / khớp nhiều ⇒ chỉ giữ chữ (mục 35). */
-async function resolveProduct(code: string): Promise<{ id: string; name: string } | null> {
-  if (!code) return null;
-  const db = await getDb();
-  const rows = await db
-    .select({ id: schema.products.id, name: schema.products.name })
-    .from(schema.products)
-    .where(sql`upper(replace(trim(coalesce(${schema.products.customId}, '')), ' ', '')) = ${code} and ${schema.products.isRemoved} = false`)
-    .limit(2);
-  return rows.length === 1 ? rows[0] : null;
-}
-
 /** Mã mẫu (màu/size) của một sản phẩm — để kiểm bảng chia mẫu chỉ chứa mẫu CỦA ĐÚNG mã hàng đó. */
 async function variantIdsOf(productId: string): Promise<Set<string>> {
   const db = await getDb();
@@ -57,7 +47,7 @@ async function variantIdsOf(productId: string): Promise<Set<string>> {
 export async function listVariantsForProductCode(rawCode: string): Promise<{ productId: string | null; productName: string; variants: { id: string; color: string; size: string; sku: string }[] }> {
   const user = await requireUser();
   if (!can(user, "planning:view")) return { productId: null, productName: "", variants: [] };
-  const product = await resolveProduct(normalizeProductCode(rawCode));
+  const product = await resolveProductByCode(normalizeProductCode(rawCode));
   if (!product) return { productId: null, productName: "", variants: [] };
   const db = await getDb();
   const variants = await db
@@ -95,7 +85,7 @@ export async function saveProductionBatch(input: unknown, id?: string): Promise<
     if (!po) return { error: "Không tìm thấy bảng đặt hàng màu × size đã chọn" };
   }
 
-  const product = await resolveProduct(code);
+  const product = await resolveProductByCode(code);
   // Bảng chia mẫu chỉ hợp lệ khi mã hàng khớp ĐÚNG MỘT sản phẩm, và mọi ô là mẫu của chính sản phẩm ấy.
   const cells = d.cells;
   const chiaMau = Object.keys(cells).length > 0;
@@ -105,6 +95,22 @@ export async function saveProductionBatch(input: unknown, id?: string): Promise<
     if (Object.keys(cells).some((v) => !ids.has(v))) return { error: "Bảng chia màu/size có mẫu không thuộc mã hàng này — tải lại form rồi nhập lại" };
   }
   const orderedQty = chiaMau ? cellsTotal(cells) : d.orderedQty;
+  /*
+    PHẠT XƯỞNG ĐI VÀO LƯƠNG MKT (cộng cho MKT phụ trách mã theo NGÀY GHI PHẠT) ⇒ có phạt thì phải có
+    ngày, và cả ngày cũ lẫn ngày mới đều không được rơi vào kỳ lương ĐÃ KHOÁ: sửa ở đó là sửa lùi lương
+    đã chốt (AGENTS.md mục 7, 21).
+  */
+  const penaltyAt = d.workshopPenalty > 0 && d.penaltyAt ? vnStartOfDay(d.penaltyAt) : null;
+  if (d.workshopPenalty > 0 && !penaltyAt) return { error: "Có tiền phạt xưởng thì phải nhập ngày ghi phạt — ngày đó quyết định cộng cho MKT ở kỳ lương nào" };
+  const cu = id ? await db.query.productionBatches.findFirst({ where: eq(schema.productionBatches.id, id), columns: { workshopPenalty: true, penaltyAt: true } }) : null;
+  const penaltyChanged = !cu || cu.workshopPenalty !== d.workshopPenalty || (cu.penaltyAt?.getTime() ?? null) !== (penaltyAt?.getTime() ?? null);
+  if (penaltyChanged) {
+    for (const day of [cu?.workshopPenalty ? cu.penaltyAt : null, penaltyAt]) {
+      if (!day) continue;
+      const khoa = await frozenPayrollOverlapping(day, day);
+      if (khoa) return { error: `Ngày ghi phạt ${formatDate(day)} nằm trong kỳ lương đã khoá (${khoa}) — không sửa lùi được` };
+    }
+  }
   if (id && chiaMau) {
     // Chuyển sang chia mẫu khi đã có đợt trả hàng ghi TỔNG: số đã về theo từng mẫu là CHƯA BIẾT.
     const [khongChia] = await db
@@ -126,7 +132,7 @@ export async function saveProductionBatch(input: unknown, id?: string): Promise<
     cells,
     workshopPenalty: d.workshopPenalty,
     penaltyNote: d.penaltyNote,
-    marketerPrice: d.marketerPrice,
+    penaltyAt,
     dueDate: d.dueDate ? vnStartOfDay(d.dueDate) : null,
     laborUnitPrice: d.laborUnitPrice,
     adjustment: d.adjustment,
@@ -148,7 +154,7 @@ export async function saveProductionBatch(input: unknown, id?: string): Promise<
       .returning({ id: schema.productionBatches.id });
     rowId = row.id;
   }
-  await audit({ userId: user.id, userEmail: user.email, action: id ? "PRODUCTION_BATCH_UPDATE" : "PRODUCTION_BATCH_CREATE", entity: "PRODUCTION_BATCH", entityId: rowId, detail: { code, batchNo: d.batchNo, orderedQty, agreedQty: d.agreedQty, laborUnitPrice: d.laborUnitPrice, adjustment: d.adjustment, workshopPenalty: d.workshopPenalty, marketerPrice: d.marketerPrice, variants: Object.keys(cells).length } });
+  await audit({ userId: user.id, userEmail: user.email, action: id ? "PRODUCTION_BATCH_UPDATE" : "PRODUCTION_BATCH_CREATE", entity: "PRODUCTION_BATCH", entityId: rowId, detail: { code, batchNo: d.batchNo, orderedQty, agreedQty: d.agreedQty, laborUnitPrice: d.laborUnitPrice, adjustment: d.adjustment, workshopPenalty: d.workshopPenalty, penaltyAt: d.penaltyAt, variants: Object.keys(cells).length } });
   refresh(rowId);
   return { ok: true, id: rowId as string };
 }
@@ -254,7 +260,7 @@ export async function saveFabricOrder(input: unknown, id?: string): Promise<Resu
     productId = lo.productId;
     productCode = lo.productCode;
   } else {
-    productId = (await resolveProduct(productCode))?.id ?? null;
+    productId = (await resolveProductByCode(productCode))?.id ?? null;
   }
   if (!productCode) return { error: "Nhập mã hàng hoặc chọn lô sản xuất dùng vải này" };
 
