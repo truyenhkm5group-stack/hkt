@@ -63,7 +63,10 @@ export type ReceiptSnapshot = {
 export type ReceiptDeleteBlocker = {
   inspections: { id: string; shipmentId: string; code: string | null; status: string }[];
   unidentified: string[];
-  /** Company OS · Agent E: dòng sổ kết cục "nhập lại sau sửa" đứng trên phiếu này (`return_dispositions.stock_receipt_id`). */
+  /**
+   * Company OS · Agent E: dòng sổ kết cục "nhập lại sau sửa" đứng trên phiếu này (`return_dispositions.stock_receipt_id`).
+   * Agent R: kể cả dòng neo vào món hàng hoàn KHÔNG NHÃN (không có phiếu kiểm) — `code` là mã `UR-…`.
+   */
   reworkRestocks: { id: string; code: string | null; qty: number }[];
 };
 
@@ -79,11 +82,21 @@ export async function receiptDeleteBlockers(db: Db, receiptId: string): Promise<
       .leftJoin(schema.shipments, eq(schema.shipments.id, ins.shipmentId))
       .where(eq(ins.stockReceiptId, receiptId)),
     db.select({ id: schema.returnUnidentified.id }).from(schema.returnUnidentified).where(eq(schema.returnUnidentified.stockReceiptId, receiptId)),
+    /*
+      NỐI NGOÀI, không nối trong (Agent R): dòng sổ của món KHÔNG NHÃN không có phiếu kiểm — nối trong làm
+      nó rơi khỏi danh sách chặn, và lượt xoá đi tới cổng duyệt + nhật ký rồi mới bị câu xoá có điều kiện
+      chặn lại với một thông điệp sai ("vừa gắn vào phiếu kiểm").
+    */
     db
-      .select({ id: schema.returnDispositions.id, qty: schema.returnDispositions.qty, code: schema.shipments.vtpOrderNumber })
+      .select({
+        id: schema.returnDispositions.id,
+        qty: schema.returnDispositions.qty,
+        code: sql<string | null>`coalesce(${schema.returnUnidentified.code}, ${schema.shipments.vtpOrderNumber})`,
+      })
       .from(schema.returnDispositions)
-      .innerJoin(ins, eq(ins.id, schema.returnDispositions.inspectionId))
+      .leftJoin(ins, eq(ins.id, schema.returnDispositions.inspectionId))
       .leftJoin(schema.shipments, eq(schema.shipments.id, ins.shipmentId))
+      .leftJoin(schema.returnUnidentified, eq(schema.returnUnidentified.id, schema.returnDispositions.unidentifiedId))
       .where(eq(schema.returnDispositions.stockReceiptId, receiptId)),
   ]);
   return { inspections, unidentified: unidentified.map((u) => u.id), reworkRestocks };

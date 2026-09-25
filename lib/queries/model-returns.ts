@@ -21,6 +21,11 @@ import { rowsOf } from "@/lib/sql-rows";
  *  · Mẫu chưa có món hàng hoàn nào không tái nhập (và không kiện cả kiện nào) ⇒ 0 THẬT.
  *
  * Giá trị là ƯỚC TÍNH (`basis.value = "ESTIMATED"`) và KHÔNG nằm trong báo cáo lợi nhuận nào.
+ *
+ * Company OS · Agent R: món hàng hoàn KHÔNG NHÃN vào tóm tắt của mẫu CHỈ KHI kho đã nhận diện mẫu mã
+ * của nó (`return_unidentified.variant_id` — người chọn với món hàng trên tay, không phải máy đoán).
+ * Món chưa nhận diện KHÔNG quy về mẫu nào (luật 35); nó đứng ở con số cấp shop "không nhãn, chưa gán
+ * mẫu" trên `/inventory/returns` (`unassignedUnidentifiedDispositions`).
  */
 
 export type ModelReturnDispositions = {
@@ -42,13 +47,16 @@ export type ModelReturnDispositions = {
     /** Kiện kiểm cả kiện, có hàng không bán được, trong đơn có mẫu này — không chia được theo mẫu. */
     parcelLevelSubjects: number;
     itemSubjects: number;
+    /** Món KHÔNG NHÃN đã nhận diện được mẫu mã thuộc mẫu này (Agent R). Nằm trong mọi ô ở trên. */
+    unidentifiedSubjects: number;
   };
 };
 
 export async function getModelReturnDispositions(productId: string): Promise<ModelReturnDispositions> {
   const db = await getDb();
   const [subjects, [parcel], quyetDinh] = await Promise.all([
-    loadSubjects(db, sql`subj.grain = 'ITEM' and pv.product_id = ${productId}`),
+    // Món không nhãn CHƯA nhận diện mẫu mã không có `pv` ⇒ tự rơi ra khỏi phép lọc theo mẫu (không đoán).
+    loadSubjects(db, sql`subj.grain in ('ITEM', 'UNIDENTIFIED') and subj.variant_id is not null and pv.product_id = ${productId}`),
     db
       .execute(sql`
         select count(*)::int as n
@@ -115,6 +123,11 @@ export async function getModelReturnDispositions(productId: string): Promise<Mod
     writeOffValueKnownPart: known,
     writeOffValueUnknownQty: unknownQty,
     decisions,
-    basis: { value: "ESTIMATED", parcelLevelSubjects, itemSubjects: subjects.length },
+    basis: {
+      value: "ESTIMATED",
+      parcelLevelSubjects,
+      itemSubjects: subjects.filter((x) => x.grain === "ITEM").length,
+      unidentifiedSubjects: subjects.filter((x) => x.grain === "UNIDENTIFIED").length,
+    },
   };
 }

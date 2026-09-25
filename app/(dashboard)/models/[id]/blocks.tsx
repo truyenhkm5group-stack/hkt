@@ -751,7 +751,7 @@ export async function ReturnsDispositionBlock({ ctx }: { ctx: BlockCtx }) {
             <Stat label="Sửa xong · nhập lại" value={countText(l.data.restockedAfterReworkQty)} />
             <Stat label="Đã huỷ" value={countText(l.data.writtenOffQty)} sub={`giá trị ước tính ${moneyText(l.data.writeOffValueEstimate)}`} />
             <Stat label="Trả xưởng" value={countText(l.data.returnedToSupplierQty)} />
-            <Stat label="Món còn mở" value={countText(l.data.openSubjects)} sub={`${formatNumber(l.data.basis.itemSubjects)} món đã qua trạm kiểm`} />
+            <Stat label="Món còn mở" value={countText(l.data.openSubjects)} sub={`${formatNumber(l.data.basis.itemSubjects)} món đã qua trạm kiểm${l.data.basis.unidentifiedSubjects ? ` · ${formatNumber(l.data.basis.unidentifiedSubjects)} món không nhãn đã nhận diện mẫu` : ""}`} />
           </StatGrid>
         </div>
       )}

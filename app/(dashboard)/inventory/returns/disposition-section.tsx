@@ -16,6 +16,7 @@ import { CONDITION_LABEL, isReturnCondition } from "@/lib/constants/returns-cond
 import {
   DISPOSITION_ACTION_LABEL,
   DISPOSITION_ALLOWED_FROM,
+  DISPOSITION_GRAIN_LABEL,
   DISPOSITION_HINT,
   DISPOSITION_LABEL,
   DISPOSITION_NEEDS_NOTE,
@@ -23,9 +24,11 @@ import {
   DISPOSITION_TONE,
   RETURN_DISPOSITIONS,
   isTerminalDisposition,
+  type DispositionGrain,
   type OpenDispositionState,
   type ReturnDisposition,
 } from "@/lib/constants/return-disposition";
+import { restockAuthorityOf } from "@/lib/constants/return-unidentified";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +39,10 @@ import { cn } from "@/lib/utils";
  * ngoài sổ. Khối này là lối ra của chúng: mỗi món một dòng, mỗi dòng đúng những nút mà trạng thái
  * hiện tại cho phép (`DISPOSITION_ALLOWED_FROM`), và mọi quyết định để lại một dòng lịch sử có tên
  * người làm. Không có nút "đánh dấu xong": món rời danh sách khi có kết cục cuối cho TOÀN BỘ số lượng.
+ *
+ * Company OS · Agent R: món hàng hoàn KHÔNG NHÃN (bàn "Hàng hoàn không có mã vận đơn") kết luận không bán
+ * được cũng ở đây, gắn nhãn "không nhãn" — cùng nút, cùng luật. Nhập lại sau sửa của món CHƯA nối được
+ * đơn đòi quyền "Tái nhập hàng hoàn không xác định nguồn" và lý do, y như nút tái nhập của bàn ấy.
  */
 
 export type DispositionHistoryView = {
@@ -52,8 +59,11 @@ export type DispositionHistoryView = {
 
 export type DispositionRowView = {
   subjectKey: string;
-  grain: "ITEM" | "PARCEL";
-  shipmentId: string;
+  grain: DispositionGrain;
+  /** Vận đơn của kiện; món không nhãn: vận đơn ĐÃ NỐI hoặc `null`. */
+  shipmentId: string | null;
+  /** Chỉ món không nhãn: trạng thái xác định nguồn — quyết quyền nhập lại. */
+  unidentifiedStatus: string | null;
   code: string | null;
   orderCode: string | null;
   condition: string;
@@ -73,7 +83,7 @@ export type DispositionRowView = {
   history: DispositionHistoryView[];
 };
 
-export type RecentDispositionView = DispositionHistoryView & { code: string | null; sku: string; productName: string };
+export type RecentDispositionView = DispositionHistoryView & { code: string | null; sku: string; productName: string; grain: DispositionGrain | null };
 
 export type DispositionSummaryView = {
   totalOpen: number;
@@ -84,6 +94,10 @@ export type DispositionSummaryView = {
   openValueKnown: number;
   openValueUnknownQty: number;
   excludedMissingParcels: number;
+  /** Món không nhãn còn mở — nằm TRONG `openQty`. */
+  unidentifiedOpenQty: number;
+  /** Món không nhãn CHƯA gán mẫu mã — con số cấp shop, không thuộc mẫu nào (luật 35). */
+  unidentifiedUnassigned: { subjects: number; openQty: number; writtenOffQty: number; returnedToSupplierQty: number };
 };
 
 const TONE: Record<string, string> = {
@@ -94,8 +108,8 @@ const TONE: Record<string, string> = {
   slate: "bg-muted text-muted-foreground",
 };
 
-function conditionLabel(grain: "ITEM" | "PARCEL", c: string) {
-  if (grain === "ITEM" && isItemCondition(c)) return ITEM_CONDITION_LABEL[c];
+function conditionLabel(grain: DispositionGrain, c: string) {
+  if (grain !== "PARCEL" && isItemCondition(c)) return ITEM_CONDITION_LABEL[c];
   if (grain === "PARCEL" && isReturnCondition(c)) return CONDITION_LABEL[c];
   return c || "—";
 }
@@ -109,7 +123,7 @@ function newRequestKey() {
   return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function ActionForm({ row, disposition, onDone }: { row: DispositionRowView; disposition: ReturnDisposition; onDone: () => void }) {
+function ActionForm({ row, disposition, onDone, canOverride }: { row: DispositionRowView; disposition: ReturnDisposition; onDone: () => void; canOverride: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const terminal = isTerminalDisposition(disposition);
@@ -118,7 +132,12 @@ function ActionForm({ row, disposition, onDone }: { row: DispositionRowView; dis
   const [variantId, setVariantId] = useState(row.expectedVariants.length === 1 ? row.expectedVariants[0].variantId : "");
   const requestKey = useRef(newRequestKey());
   const canVariant = row.grain === "PARCEL" && (disposition === "RESTOCK_AFTER_REWORK" || disposition === "WRITE_OFF");
-  const needNote = DISPOSITION_NEEDS_NOTE[disposition];
+  /* Món KHÔNG NHÃN chưa nối được đơn: nhập lại là cộng tồn không chứng từ — quyền riêng + lý do bắt buộc
+     (máy chủ kiểm lại bằng `checkUnidentifiedRestock`; ở đây chỉ để người bấm biết trước). */
+  const khongChungTu = row.grain === "UNIDENTIFIED" && disposition === "RESTOCK_AFTER_REWORK" && restockAuthorityOf(row.unidentifiedStatus ?? "") === "MANAGER_OVERRIDE";
+  const thieuQuyen = khongChungTu && !canOverride;
+  const needNote = DISPOSITION_NEEDS_NOTE[disposition] || khongChungTu;
+  const noteMin = DISPOSITION_NEEDS_NOTE[disposition] ? DISPOSITION_NOTE_MIN : 1;
 
   const gui = () =>
     start(async () => {
@@ -146,6 +165,13 @@ function ActionForm({ row, disposition, onDone }: { row: DispositionRowView; dis
   return (
     <div className="mt-2 space-y-2 rounded-lg border bg-muted/30 p-2.5 text-xs">
       <p className="text-muted-foreground">{DISPOSITION_HINT[disposition]}</p>
+      {khongChungTu ? (
+        <p className="rounded bg-warning/15 px-2 py-1 text-amber-700 dark:text-amber-300">
+          {thieuQuyen
+            ? "Món không nhãn này chưa nối được đơn — nhập lại là cộng tồn KHÔNG chứng từ, cần quyền “Tái nhập hàng hoàn không xác định nguồn”. Nhờ người có quyền bấm, hoặc nối đơn trước."
+            : "Món không nhãn chưa nối được đơn — nhập lại là cộng tồn KHÔNG chứng từ: bắt buộc ghi lý do, lượt này được ghi riêng (không chứng từ đơn)."}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-end gap-2">
         {terminal ? (
           <label className="flex flex-col gap-0.5">
@@ -167,10 +193,15 @@ function ActionForm({ row, disposition, onDone }: { row: DispositionRowView; dis
           </label>
         ) : null}
         <label className="flex min-w-[220px] flex-1 flex-col gap-0.5">
-          <span className="text-muted-foreground">{needNote ? `Lý do (bắt buộc, ≥ ${DISPOSITION_NOTE_MIN} ký tự)` : "Ghi chú"}</span>
+          <span className="text-muted-foreground">{needNote ? `Lý do (bắt buộc${noteMin > 1 ? `, ≥ ${noteMin} ký tự` : ""})` : "Ghi chú"}</span>
           <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder={disposition === "WRITE_OFF" ? "Rách không vá được, mốc…" : disposition === "RETURN_TO_SUPPLIER" ? "Trả xưởng nào, lỗi gì…" : ""} className="h-8" />
         </label>
-        <Button size="sm" className="h-8" disabled={pending || (needNote && note.trim().length < DISPOSITION_NOTE_MIN) || (disposition === "RESTOCK_AFTER_REWORK" && row.grain === "PARCEL" && !variantId)} onClick={gui}>
+        <Button
+          size="sm"
+          className="h-8"
+          disabled={pending || thieuQuyen || (needNote && note.trim().length < noteMin) || (disposition === "RESTOCK_AFTER_REWORK" && row.grain === "PARCEL" && !variantId)}
+          onClick={gui}
+        >
           {pending ? <Loader2 className="size-3.5 animate-spin" /> : null} Ghi
         </Button>
         <Button size="sm" variant="ghost" className="h-8" onClick={onDone} disabled={pending}>
@@ -192,7 +223,7 @@ function ActionForm({ row, disposition, onDone }: { row: DispositionRowView; dis
   );
 }
 
-function Row({ row, canWrite, focused }: { row: DispositionRowView; canWrite: boolean; focused: boolean }) {
+function Row({ row, canWrite, canOverride, focused }: { row: DispositionRowView; canWrite: boolean; canOverride: boolean; focused: boolean }) {
   const [open, setOpen] = useState<ReturnDisposition | null>(null);
   const [showHistory, setShowHistory] = useState(focused);
   const ref = useRef<HTMLLIElement>(null);
@@ -208,6 +239,11 @@ function Row({ row, canWrite, focused }: { row: DispositionRowView; canWrite: bo
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <DispositionBadge d={row.state} />
+            {row.grain === "UNIDENTIFIED" ? (
+              <Badge variant="outline" className="border-amber-500/50 text-[11px] text-amber-700 dark:text-amber-300" title="Hàng hoàn không có mã vận đơn — ghi nhận ở bàn “Hàng hoàn không có mã vận đơn”">
+                không nhãn
+              </Badge>
+            ) : null}
             <span className="text-sm font-medium">{ten}</span>
             <span className="text-xs text-muted-foreground">
               còn <b className="numeric text-foreground">{formatNumber(row.remaining)}</b>/{formatNumber(row.qty)} món
@@ -215,14 +251,31 @@ function Row({ row, canWrite, focused }: { row: DispositionRowView; canWrite: bo
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11.5px] text-muted-foreground">
             <span>
-              {row.grain === "PARCEL" ? "Kiểm cả kiện" : "Kiểm từng món"} · {conditionLabel(row.grain, row.condition)}
+              {DISPOSITION_GRAIN_LABEL[row.grain]} · {conditionLabel(row.grain, row.condition)}
               {row.inspectNote ? ` — ${row.inspectNote}` : ""}
             </span>
-            <Link href={`/shipments/${row.shipmentId}`} className="font-mono text-primary hover:underline">
-              {row.code ?? row.shipmentId}
-            </Link>
+            {row.grain === "UNIDENTIFIED" ? (
+              <>
+                <span className="font-mono">{row.code ?? "—"}</span>
+                {row.shipmentId ? (
+                  <Link href={`/shipments/${row.shipmentId}`} className="text-primary hover:underline">
+                    đã nối vận đơn
+                  </Link>
+                ) : (
+                  <span>chưa nối đơn</span>
+                )}
+              </>
+            ) : row.shipmentId ? (
+              <Link href={`/shipments/${row.shipmentId}`} className="font-mono text-primary hover:underline">
+                {row.code ?? row.shipmentId}
+              </Link>
+            ) : (
+              <span className="font-mono">{row.code ?? "—"}</span>
+            )}
             {row.orderCode ? <span>đơn {row.orderCode}</span> : null}
-            <span>kiểm {formatDateTime(row.inspectedAt)}</span>
+            <span>
+              {row.grain === "UNIDENTIFIED" ? "nhận" : "kiểm"} {formatDateTime(row.inspectedAt)}
+            </span>
             <span title={row.unitCost === null ? "Chưa có giá vốn nào cho mẫu mã này" : `Ước tính theo ${COST_BASIS_LABEL[row.costBasis].toLowerCase()}`}>
               ≈ {row.openValueEstimate === null ? "—" : formatVND(row.openValueEstimate)} (ước tính)
             </span>
@@ -241,7 +294,7 @@ function Row({ row, canWrite, focused }: { row: DispositionRowView; canWrite: bo
           </Button>
         </div>
       </div>
-      {open ? <ActionForm key={open} row={row} disposition={open} onDone={() => setOpen(null)} /> : null}
+      {open ? <ActionForm key={open} row={row} disposition={open} canOverride={canOverride} onDone={() => setOpen(null)} /> : null}
       {showHistory ? (
         row.history.length ? (
           <ul className="mt-2 space-y-1 border-l-2 pl-3 text-[11.5px]">
@@ -286,12 +339,15 @@ export function DispositionSection({
   summary,
   recent,
   canWrite,
+  canOverride,
   focusKey,
 }: {
   rows: DispositionRowView[];
   summary: DispositionSummaryView;
   recent: RecentDispositionView[];
   canWrite: boolean;
+  /** Có quyền `inventory:restock-unidentified` — nhập lại sau sửa món không nhãn chưa nối đơn. */
+  canOverride: boolean;
   focusKey: string | null;
 }) {
   const [showRecent, setShowRecent] = useState(false);
@@ -301,6 +357,10 @@ export function DispositionSection({
         `${formatNumber(summary.pendingQty)} món chưa quyết`,
         summary.reworkQty ? `${formatNumber(summary.reworkQty)} món đang sửa / giặt` : "",
         `≈ ${formatVND(summary.openValueKnown)} ước tính${summary.openValueUnknownQty ? ` + ${formatNumber(summary.openValueUnknownQty)} món chưa biết giá vốn` : ""}`,
+        summary.unidentifiedOpenQty ? `trong đó ${formatNumber(summary.unidentifiedOpenQty)} món không nhãn` : "",
+        summary.unidentifiedUnassigned.subjects
+          ? `không nhãn, chưa gán mẫu: ${formatNumber(summary.unidentifiedUnassigned.openQty)} món còn mở · ${formatNumber(summary.unidentifiedUnassigned.writtenOffQty)} đã huỷ · ${formatNumber(summary.unidentifiedUnassigned.returnedToSupplierQty)} trả xưởng (không thuộc mẫu nào)`
+          : "",
         summary.excludedMissingParcels ? `${formatNumber(summary.excludedMissingParcels)} kiện “Thiếu hàng” cả kiện không vào đây` : "",
       ]
         .filter(Boolean)
@@ -322,6 +382,10 @@ export function DispositionSection({
           <p>Món đã kiểm là KHÔNG bán ngay được (hỏng, bẩn, sai hàng…). Mỗi món phải đi tới một kết cục: sửa / giặt rồi đếm lại để nhập tồn, trả xưởng, hoặc huỷ có lý do.</p>
           <p className="mt-1">Nhập lại tồn chỉ đi SAU bước sửa, theo SỐ ĐẾM THỰC TẾ, qua một phiếu tái nhập. Huỷ bỏ không ghi sổ kho (hàng chưa từng vào lại tồn) — giá trị là ước tính và chưa vào báo cáo lợi nhuận.</p>
           <p className="mt-1">Kiện kết luận “Thiếu hàng” cả kiện không vào đây: con số không bán được của chúng là hàng KHÔNG có mặt.</p>
+          <p className="mt-1">
+            Món <b>không nhãn</b> (bàn “Hàng hoàn không có mã vận đơn”) kết luận không bán được cũng ở đây. Nhập lại sau sửa của món chưa nối được đơn cần quyền “Tái nhập hàng hoàn
+            không xác định nguồn” và lý do. Món chưa nhận diện được mẫu mã không được quy về mẫu nào — nó đứng ở con số “không nhãn, chưa gán mẫu”.
+          </p>
         </>
       }
       padded={false}
@@ -329,7 +393,7 @@ export function DispositionSection({
       {rows.length ? (
         <ul className="divide-y">
           {rows.map((r) => (
-            <Row key={r.subjectKey} row={r} canWrite={canWrite} focused={focusKey === r.subjectKey} />
+            <Row key={r.subjectKey} row={r} canWrite={canWrite} canOverride={canOverride} focused={focusKey === r.subjectKey} />
           ))}
         </ul>
       ) : (
@@ -356,6 +420,7 @@ export function DispositionSection({
                   extra={
                     <span>
                       {h.sku || h.productName || "—"} · <span className="font-mono">{h.code ?? "—"}</span>
+                      {h.grain === "UNIDENTIFIED" ? " · không nhãn" : ""}
                     </span>
                   }
                 />

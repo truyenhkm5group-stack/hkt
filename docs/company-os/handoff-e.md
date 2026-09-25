@@ -54,3 +54,7 @@ M1 nhập lại đi thẳng từ chưa quyết · M2 huỷ không bắt buộc l
 
 - Bật cưỡng chế `approval.enforce.INVENTORY_WRITE_OFF` là việc của chủ shop (ngưỡng 1.000.000 ₫ có sẵn; giá vốn chưa biết ⇒ coi như vượt ngưỡng).
 - Đưa giá trị huỷ ước tính vào báo cáo lợi nhuận = đổi số lợi nhuận ⇒ chủ shop quyết (AGENTS.md mục 7) — bản này cố ý không làm.
+
+## Cập nhật sau bàn giao
+
+- **Agent R (0142) — đã đóng khoảng trống hàng không nhãn.** Món hàng hoàn mất nhãn (`return_unidentified`) kết luận không bán được nay là đối tượng thứ ba của sổ này (`unidentified:<id>`, neo `unidentified_id`, CHECK đúng một neo), cùng máy trạng thái, cùng hàng đợi, cùng cổng huỷ; nhập lại sau sửa đi CÙNG luật quyền + lý do (`checkUnidentifiedRestock`) và CÙNG đường lập phiếu (`writeUnidentifiedRestockReceipt`) của bàn không nhãn. Chi tiết: `docs/company-os/handoff-r.md`.

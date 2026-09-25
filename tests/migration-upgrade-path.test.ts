@@ -89,6 +89,7 @@ const MOI = [
   "0139_company_os_cockpit",
   "0140_company_os_early_topic",
   "0141_company_os_stock_feedback",
+  "0142_company_os_unidentified_dispositions",
 ] as const;
 
 /*
@@ -1636,6 +1637,17 @@ export async function testMigrationUpgradePath() {
     await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd9', 'stock:x', 'STOCK_LA', 'ACCEPTED', 'up-uh', '{}')`), "0141: loại đề xuất lạ VẪN phải bị CSDL chặn");
     assert.equal(await dem("select count(*)::int as n from recommendation_decisions where id in ('up-rd1', 'up-rd6', 'up-rd7', 'up-rd8')"), 4, "0141: dòng cũ (kể cả loại của 0140) còn nguyên, hai loại mới ghi được");
     await client.query(`delete from recommendation_decisions where id in ('up-rd1', 'up-rd6', 'up-rd7', 'up-rd8')`);
+    // 0142 (Company OS · Agent R): sổ kết cục nhận NEO THỨ HAI — món hàng hoàn không nhãn. Đúng một neo; khoá đối
+    // tượng khớp neo; căn cứ nhập lại chỉ có ở dòng nhập lại của món không nhãn. Không dòng nào được gieo.
+    assert.equal(await dem("select count(*)::int as n from return_dispositions"), 0, "0142: không gieo dòng kết cục nào (mục 8.8, 35)");
+    await client.query(`insert into return_unidentified (id, code, received_at, quantity, condition) values ('up-ru1', 'UR-UP-1', now(), 2, 'DAMAGED')`);
+    await client.query(`insert into return_dispositions (id, unidentified_id, subject_key, disposition, qty, actor_user_id) values ('up-rdu1', 'up-ru1', 'unidentified:up-ru1', 'REWORK', 2, 'up-uh')`);
+    await assert.rejects(client.query(`insert into return_dispositions (id, subject_key, disposition, qty, actor_user_id) values ('up-rdu2', 'unidentified:up-ru1', 'REWORK', 2, 'up-uh')`), /return_dispositions_(anchor|subject)_check/, "0142: dòng không neo nào phải bị CSDL chặn");
+    await assert.rejects(client.query(`insert into return_dispositions (id, unidentified_id, subject_key, disposition, qty, actor_user_id) values ('up-rdu3', 'up-ru1', 'parcel:up-ru1', 'REWORK', 2, 'up-uh')`), /return_dispositions_subject_check/, "0142: khoá đối tượng phải khớp neo không nhãn");
+    await assert.rejects(client.query(`delete from return_unidentified where id = 'up-ru1'`), /foreign key|violates/i, "0142: xoá món không nhãn đã có quyết định phải bị chặn (RESTRICT)");
+    assert.equal(await dem("select count(*)::int as n from pg_constraint where conname in ('return_dispositions_anchor_check', 'return_dispositions_subject_check', 'return_dispositions_restock_authority_check')"), 3, "0142: đúng một ràng buộc mỗi tên");
+    await client.query(`delete from return_dispositions where id = 'up-rdu1'`);
+    await client.query(`delete from return_unidentified where id = 'up-ru1'`);
     await client.query(`delete from users where id = 'up-uh'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══

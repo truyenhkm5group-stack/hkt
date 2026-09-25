@@ -7,6 +7,7 @@ import { guardSecondApproval } from "@/lib/actions/approvals";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { DISPOSITION_LABEL, RETURN_DISPOSITIONS } from "@/lib/constants/return-disposition";
+import { RESTOCK_UNIDENTIFIED_PERMISSION } from "@/lib/constants/return-unidentified";
 import { setReturnDispositionCore, type SetDispositionResult } from "@/lib/returns/disposition";
 
 /**
@@ -18,6 +19,10 @@ import { setReturnDispositionCore, type SetDispositionResult } from "@/lib/retur
  *
  * TÊN NGƯỜI LÀM DO MÁY CHỦ ĐỌC từ phiên đăng nhập (luật 34) — form không gửi tên.
  * Huỷ bỏ đi qua `guardSecondApproval` nhóm `INVENTORY_WRITE_OFF` có sẵn (lõi gọi cổng TRƯỚC giao dịch).
+ *
+ * Company OS · Agent R: món hàng hoàn KHÔNG NHÃN nhập lại sau sửa cần đúng quyền của bàn không nhãn —
+ * action đọc `inventory:restock-unidentified` từ phiên và đưa vào lõi (`canRestockUnidentified`); lõi
+ * hỏi `checkUnidentifiedRestock` (cùng hàm với nút tái nhập nguyên món).
  */
 
 const input = z.object({
@@ -44,6 +49,7 @@ export async function setReturnDisposition(raw: unknown): Promise<SetDisposition
     ...parsed.data,
     actor: { id: user.id, label: user.name || user.email },
     gate: guardSecondApproval,
+    canRestockUnidentified: can(user, RESTOCK_UNIDENTIFIED_PERMISSION),
   });
   if ("error" in res || res.replayed) return res;
 
@@ -60,6 +66,7 @@ export async function setReturnDisposition(raw: unknown): Promise<SetDisposition
       qty: parsed.data.qty,
       stockReceiptId: res.receiptId,
       valueEstimate: res.valueEstimate,
+      restockAuthority: res.restockAuthority,
     },
     reason: parsed.data.note.trim() || undefined,
   });
