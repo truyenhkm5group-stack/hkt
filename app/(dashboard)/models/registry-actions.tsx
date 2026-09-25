@@ -1,20 +1,27 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
+import { useNavTransition } from "@/components/nav-progress";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { registerModel, runModelRegistrySync } from "@/lib/actions/models";
 
+/*
+  `useNavTransition` chứ không phải `useTransition` trần: cả hai nút kết thúc bằng một lượt đi lên máy
+  chủ (`router.refresh` / `router.push` sang trang mẫu vừa tạo), nên thanh tiến trình phải biết
+  (tests/loading-ux-contract.test.ts mục 5).
+*/
+
 /**
  * Nút "Đồng bộ sổ mẫu" — chạy job `model-registry` (có bản ghi `sync_runs`). Không có lịch tự động.
  */
 export function RegistrySyncButton({ label = "Đồng bộ sổ mẫu", variant = "outline" }: { label?: string; variant?: "outline" | "default" }) {
-  const [pending, start] = useTransition();
+  const [pending, start] = useNavTransition();
   const router = useRouter();
   return (
     <Button
@@ -46,7 +53,7 @@ export function RegisterModelDialog() {
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
-  const [pending, start] = useTransition();
+  const [pending, start] = useNavTransition();
   const router = useRouter();
 
   const luu = () =>
