@@ -117,7 +117,9 @@ export function subjectsQuery(where: SQL, opts: { openOnly: boolean; limit?: num
       group by rd.subject_key
     )
     select subj.subject_key, subj.grain, subj.inspection_id, subj.item_id, subj.shipment_id,
-           s.vtp_order_number as code, s.tracking_code, i.order_id,
+           -- Tra ĐÚNG kiện của đối tượng (truy vấn con theo khoá), không nối đơn → vận đơn: không có grain nào để nhân.
+           (select sv.vtp_order_number from shipments sv where sv.id = subj.shipment_id) as code,
+           (select sv.tracking_code from shipments sv where sv.id = subj.shipment_id) as tracking_code, i.order_id,
            (select coalesce(nullif(o.custom_id, ''), o.system_id::text) from orders o where o.id = i.order_id) as order_code,
            subj.condition, subj.inspect_note, subj.inspected_at, subj.qty, subj.variant_id,
            pv.product_id, coalesce(p.name, nullif(subj.name_snapshot, ''), '') as product_name,
@@ -127,7 +129,6 @@ export function subjectsQuery(where: SQL, opts: { openOnly: boolean; limit?: num
            nullif(pv.last_imported_price, 0) as variant_cost
     from subj
     join return_inspections i on i.id = subj.inspection_id
-    left join shipments s on s.id = subj.shipment_id
     left join product_variants pv on pv.id = subj.variant_id
     left join products p on p.id = pv.product_id
     left join gia on gia.variant_id = subj.variant_id
