@@ -32,6 +32,7 @@ import { todayVN, vnDateKey } from "@/lib/format";
 import { CONFIRMED_AT } from "@/lib/queries/conversion-funnel";
 import { MIN_TIER_SAMPLE, OUTCOME_FENCE, PRIMARY_ATTEMPT, REPORTABLE_ORDER, outcomeColumn } from "@/lib/queries/return-rate";
 import { getStockShortage } from "@/lib/queries/stock-shortage";
+import { orderHasProductCode, variantIdsOfCodes } from "@/lib/queries/product-code";
 import { rowsOf } from "@/lib/sql-rows";
 import type { Period } from "@/lib/search-params";
 
@@ -60,6 +61,20 @@ export const DAILY_MAX_DAYS = 60;
 /** Số đơn đang chờ in ra trang; danh sách đầy đủ ở trang Thiếu hàng giao đơn / hàng đợi fulfillment. */
 export const CURRENT_LIST_LIMIT = 200;
 
+/**
+ * BỘ LỌC MÃ HÀNG (chủ shop yêu cầu 25/09/2026: "thêm bộ lọc theo mã hàng ở từng báo cáo").
+ *
+ * `null` = KHÔNG lọc. Có lọc thì mọi khối của báo cáo — GTC theo ngày chờ / vùng / bảng chéo / nguồn,
+ * số đơn chờ theo ngày, đơn đang chờ, mẫu gây chờ — chỉ còn đơn CHỨA ít nhất một mẫu của mã đó, qua
+ * ĐÚNG quan hệ đơn → mẫu mã → mã hàng (`orderHasProductCode`), không dò chuỗi SKU. Mã không tồn tại ⇒
+ * tập mẫu rỗng ⇒ mọi khối rỗng, và trang nói rõ mã nào không tìm thấy.
+ */
+export type ProductFilter = { codes: string[]; variantIds: string[]; unknown: string[] } | null;
+
+function productCond(filter: ProductFilter, orderIdColumn: SQL): SQL {
+  return filter ? orderHasProductCode(orderIdColumn, filter.variantIds) : sql`true`;
+}
+
 const codeList = (codes: number[]) => sql.raw(`(${codes.length ? codes.join(",") : "null"})`);
 
 /**
@@ -70,9 +85,9 @@ function originSql(origin: WaitOrigin): SQL {
   return origin === "CONFIRMED" ? sql`${CONFIRMED_AT}` : sql`${o.insertedAt}`;
 }
 
-async function waitCells(period: Period, origin: WaitOrigin): Promise<WaitCell[]> {
+async function waitCells(period: Period, origin: WaitOrigin, filter: ProductFilter): Promise<WaitCell[]> {
   const db = await getDb();
-  const conds: SQL[] = [REPORTABLE_ORDER];
+  const conds: SQL[] = [REPORTABLE_ORDER, productCond(filter, sql`${o.id}`)];
   if (period.from) conds.push(sql`${o.insertedAt} >= ${period.from}`);
   if (period.to) conds.push(sql`${o.insertedAt} <= ${period.to}`);
   const base = db
@@ -150,13 +165,13 @@ async function waitCells(period: Period, origin: WaitOrigin): Promise<WaitCell[]
 }
 
 /** Khoảng chờ ERP (sổ) và Pancake (lịch sử trạng thái) chạm vào [from, to]. */
-async function waitIntervals(from: Date, to: Date): Promise<{ erp: WaitInterval[]; pancake: WaitInterval[]; erpSince: Date | null }> {
+async function waitIntervals(from: Date, to: Date, filter: ProductFilter): Promise<{ erp: WaitInterval[]; pancake: WaitInterval[]; erpSince: Date | null }> {
   const db = await getDb();
   const [erpRows, sinceRow, pancakeRes] = await Promise.all([
     db
       .select({ orderId: w.orderId, start: w.firstSeenAt, end: w.clearedAt })
       .from(w)
-      .where(and(lte(w.firstSeenAt, to), or(isNull(w.clearedAt), gte(w.clearedAt, from)))),
+      .where(and(lte(w.firstSeenAt, to), or(isNull(w.clearedAt), gte(w.clearedAt, from)), productCond(filter, sql`${w.orderId}`))),
     db.select({ since: sql<string | null>`min(${w.firstSeenAt})` }).from(w),
     db.execute(sql`
       select x.order_id,
@@ -174,6 +189,7 @@ async function waitIntervals(from: Date, to: Date): Promise<{ erp: WaitInterval[
         ) x
         join orders od on od.id = x.order_id
        where x.status in ${codeList(PANCAKE_WAITING_CODES)}
+         and ${productCond(filter, sql`x.order_id`)}
          and x.start_at <= ${to}
          and (x.end_at is null or x.end_at >= ${from})
     `),
@@ -190,14 +206,17 @@ async function waitIntervals(from: Date, to: Date): Promise<{ erp: WaitInterval[
   };
 }
 
-async function currentWaiting(report: WaitReport, now: Date, origin: WaitOrigin) {
+async function currentWaiting(report: WaitReport, now: Date, origin: WaitOrigin, filter: ProductFilter) {
   const db = await getDb();
   const snapshot = await getStockShortage();
-  const erp = [...snapshot.orders.values()].filter((x) => x.state === "WAITING_STOCK");
+  const erpAll = [...snapshot.orders.values()].filter((x) => x.state === "WAITING_STOCK");
+  // Lọc mã hàng theo MỌI dòng của đơn (không chỉ dòng thiếu) — cùng mệnh đề với các khối khác.
+  const erpKeep = filter && erpAll.length ? new Set((await db.select({ id: o.id }).from(o).where(and(inArray(o.id, erpAll.map((x) => x.orderId)), productCond(filter, sql`${o.id}`)))).map((r) => r.id)) : null;
+  const erp = erpKeep ? erpAll.filter((x) => erpKeep.has(x.orderId)) : erpAll;
   const pancake = await db
     .select({ id: o.id, systemId: o.systemId, customer: o.billFullName, value: o.totalPriceAfterDiscount, insertedAt: o.insertedAt, province: o.shipProvince })
     .from(o)
-    .where(eq(o.stage, "WAITING"));
+    .where(and(eq(o.stage, "WAITING"), productCond(filter, sql`${o.id}`)));
   const ids = [...new Set([...erp.map((x) => x.orderId), ...pancake.map((p) => p.id)])];
   const metaRows = ids.length ? await db.select({ id: o.id, province: o.shipProvince, originAt: sql<Date | string | null>`${originSql(origin)}` }).from(o).where(inArray(o.id, ids)) : [];
   const provinceOf = new Map(metaRows.map((r) => [r.id, r.province]));
@@ -232,7 +251,9 @@ async function currentWaiting(report: WaitReport, now: Date, origin: WaitOrigin)
     byId.set(p.id, row);
   }
   const list = [...byId.values()].sort((a, b) => (b.waitDays ?? -1) - (a.waitDays ?? -1) || (a.orderId < b.orderId ? -1 : 1));
+  const onlyCodes = filter ? new Set(filter.variantIds) : null;
   const topShortVariants = [...snapshot.variants]
+    .filter((v) => !onlyCodes || onlyCodes.has(v.variantId))
     .sort((a, b) => b.waitingOrders - a.waitingOrders || b.shortQty - a.shortQty)
     .slice(0, 5)
     .map((v) => ({ label: variantLabel(v), waitingOrders: v.waitingOrders }));
@@ -242,6 +263,8 @@ async function currentWaiting(report: WaitReport, now: Date, origin: WaitOrigin)
 export type StockWaitReport = {
   /** Mốc bắt đầu tính ngày chờ mà mọi con số của lượt này dùng. */
   origin: WaitOrigin;
+  /** Bộ lọc mã hàng đã áp; `null` = mọi mã. */
+  productFilter: ProductFilter;
   report: WaitReport;
   breakpoint: WaitBreakpoint | null;
   daily: DailyWaitingRow[];
@@ -252,8 +275,9 @@ export type StockWaitReport = {
   measuredAt: Date;
 };
 
-async function getStockWaitReportUncached(period: Period, origin: WaitOrigin, now: Date): Promise<StockWaitReport> {
-  const cells = await waitCells(period, origin);
+async function getStockWaitReportUncached(period: Period, origin: WaitOrigin, codes: string[], now: Date): Promise<StockWaitReport> {
+  const productFilter: ProductFilter = codes.length ? { codes, ...(await variantIdsOfCodes(codes)) } : null;
+  const cells = await waitCells(period, origin, productFilter);
   const report = buildWaitReport(cells, MIN_TIER_SAMPLE);
   const breakpoint = findWaitBreakpoint(report.byWait, MIN_TIER_SAMPLE);
 
@@ -262,7 +286,7 @@ async function getStockWaitReportUncached(period: Period, origin: WaitOrigin, no
   const days = dayRange(fromKey, toKey > todayVN() ? todayVN() : toKey, DAILY_MAX_DAYS);
   const ivFrom = days.length ? new Date(`${days[0]}T00:00:00+07:00`) : now;
   const ivTo = days.length ? new Date(`${days[days.length - 1]}T23:59:59.999+07:00`) : now;
-  const [iv, cur] = await Promise.all([waitIntervals(ivFrom, ivTo), currentWaiting(report, now, origin)]);
+  const [iv, cur] = await Promise.all([waitIntervals(ivFrom, ivTo, productFilter), currentWaiting(report, now, origin, productFilter)]);
   const daily = dailyWaitingSeries(days, iv.erp, iv.pancake, iv.erpSince, now);
 
   const recommendations = buildRecommendations({
@@ -273,14 +297,16 @@ async function getStockWaitReportUncached(period: Period, origin: WaitOrigin, no
     erpSince: iv.erpSince,
     pancakeOnlyWaiting: cur.pancakeOnly,
   });
-  return { origin, report, breakpoint, daily, erpSince: iv.erpSince, current: cur.list, pancakeOnlyWaiting: cur.pancakeOnly, recommendations, measuredAt: now };
+  return { origin, productFilter, report, breakpoint, daily, erpSince: iv.erpSince, current: cur.list, pancakeOnlyWaiting: cur.pancakeOnly, recommendations, measuredAt: now };
 }
 
 /** Đệm 90 giây theo kỳ — cùng nhịp với các báo cáo GTC khác. */
-export async function getStockWaitReport(period: Period, opts: { fresh?: boolean; now?: Date; origin?: WaitOrigin } = {}): Promise<StockWaitReport> {
+export async function getStockWaitReport(period: Period, opts: { fresh?: boolean; now?: Date; origin?: WaitOrigin; codes?: readonly string[] } = {}): Promise<StockWaitReport> {
   const now = opts.now ?? new Date();
   const origin = opts.origin ?? DEFAULT_WAIT_ORIGIN;
-  if (opts.fresh || opts.now) return getStockWaitReportUncached(period, origin, now);
-  // Mốc bắt đầu đổi mọi con số ⇒ phải nằm trong khoá đệm (AGENTS.md mục 2).
-  return memo(`getStockWaitReport:${origin}:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90_000, () => getStockWaitReportUncached(period, origin, now));
+  // Chuẩn hoá để "q005,Q001" và "Q001, Q005" là CÙNG một khoá đệm.
+  const codes = [...new Set((opts.codes ?? []).map((c) => c.trim().toUpperCase()).filter(Boolean))].sort();
+  if (opts.fresh || opts.now) return getStockWaitReportUncached(period, origin, codes, now);
+  // Mốc bắt đầu và mã hàng đổi mọi con số ⇒ phải nằm trong khoá đệm (AGENTS.md mục 2).
+  return memo(`getStockWaitReport:${origin}:${codes.join(",")}:${period.key}:${period.fromKey ?? ""}:${period.toKey ?? ""}`, 90_000, () => getStockWaitReportUncached(period, origin, codes, now));
 }

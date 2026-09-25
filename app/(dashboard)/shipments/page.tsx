@@ -138,6 +138,11 @@ export default async function ShipmentsPage({ searchParams }: { searchParams: Pr
         <span className="ml-auto flex items-center gap-1">
           {tab("reconcile", "VTP cần đối chiếu")}
           {tab("report", "Hiệu quả care")}
+          {/* Báo cáo chờ hàng & GTC là trang riêng (nặng, có kỳ và bộ lọc riêng) nhưng thuộc khu này. */}
+          <NavLink href="/shipments/stock-wait" className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-foreground">
+            Chờ hàng & GTC
+            <LinkPending />
+          </NavLink>
         </span>
       </div>
 
