@@ -25,6 +25,7 @@ import {
   type InheritedVerdict,
   spendClassOf,
 } from "@/lib/constants/ads-decision";
+import { cpoHeadroom, maxAdCostPerOrder, type BreakEvenCpoBasis } from "@/lib/constants/break-even-cpo";
 import { deliveryRateCaseSql, orderDeliveryRateSql, productDeliveryRates, rateCoverage, type ProductDeliveryRates } from "@/lib/queries/delivery-rate";
 import type { DeliveryRateSource } from "@/lib/constants/delivery-rate";
 import type { Period } from "@/lib/search-params";
@@ -216,6 +217,26 @@ export type AdsDecisionRow = {
   costPerMessage: number | null;
   /** Chi cho một ĐƠN CHỐT (chưa trừ hoàn). Khác hẳn CAC giao thành công ở dưới. */
   costPerOrder: number | null;
+  /**
+   * ═══════════ CPO HOÀ VỐN — CÙNG MỘT HÀM VỚI TRẦN CPQC/ĐƠN CỦA LỢI NHUẬN DANH NGHĨA ═══════════
+   *
+   * `maxAdCostPerOrder()` (`lib/constants/break-even-cpo.ts`) với tử số là LỢI NHUẬN GÓP trước QC và
+   * %CP khác = 0 — đúng phạm vi mọi ô khác của bảng này. Bất biến: `costPerOrder ≤ CPO hoà vốn ⟺
+   * profitAfterAds ≥ 0` (sai lệch làm tròn ≤ 1 ₫). Khác trần CPQC/đơn ở tab Lợi nhuận danh nghĩa,
+   * vốn đã trừ cả vận hành/cố định/thuế — hai con số mang hai nhãn (`BREAK_EVEN_CPO_LABEL`).
+   *
+   * `null` khi chưa có đơn chốt. ≤ 0 là câu trả lời thật: dòng lỗ cả khi không tiêu đồng QC nào.
+   */
+  breakEvenCpo: number | null;
+  /** Như trên nhưng trên lợi nhuận góp TẠM TÍNH (cộng phần đang treo đã cân theo GTC ước tính). */
+  projectedBreakEvenCpo: number | null;
+  /** CPO hoà vốn mà dòng này đọc để so — đi theo `basis` của chính khuyến nghị. */
+  breakEvenCpoBasis: BreakEvenCpoBasis;
+  /**
+   * Dư địa mỗi đơn = CPO hoà vốn (theo `breakEvenCpoBasis`) − CPO thực. `null` khi thiếu một vế
+   * (không biết số chi, hoặc chưa có đơn) — không phải 0.
+   */
+  cpoHeadroom: number | null;
   /** Tin nhắn → đơn chốt. `null` khi chưa biết số tin nhắn. */
   closeRate: number | null;
 
@@ -408,6 +429,9 @@ type Agg = {
   /** Số đơn đang treo đã cân theo tỷ lệ — số thập phân, vì nó là kỳ vọng chứ không phải phép đếm. */
   openProjectedOrders: number;
 };
+
+/** Số gộp đầu vào của `buildDecisionRow` — xuất ra để kiểm thử dựng dòng không cần CSDL. */
+export type AdsDecisionAgg = Agg;
 
 function toAgg(r: Record<string, unknown>): Agg {
   return {
@@ -973,6 +997,10 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
   const cpc = clicks !== null && clicks > 0 ? Math.round(spendForRatio / clicks) : null;
   const costPerMessage = messages !== null && messages > 0 ? Math.round(spendForRatio / messages) : null;
   const costPerOrder = spendKnown && agg.bookedOrders > 0 ? Math.round(spendForRatio / agg.bookedOrders) : null;
+  const breakEvenCpo = maxAdCostPerOrder({ profitBeforeAds: contributionBeforeAds, orders: agg.bookedOrders });
+  const projectedBreakEvenCpo = maxAdCostPerOrder({ profitBeforeAds: projectedContributionBeforeAds, orders: agg.bookedOrders });
+  const breakEvenCpoBasis: BreakEvenCpoBasis = basis === "PROJECTED" ? "CONTRIBUTION_PROJECTED" : "CONTRIBUTION_ACTUAL";
+  const cpoHeadroomValue = cpoHeadroom(basis === "PROJECTED" ? projectedBreakEvenCpo : breakEvenCpo, costPerOrder);
   const closeRate = messages !== null && messages > 0 ? Math.round((agg.bookedOrders / messages) * 1000) / 10 : null;
 
   return {
@@ -1019,6 +1047,10 @@ export function buildDecisionRow(agg: Agg, dimension: AdsDimension, spend: numbe
     cpc,
     costPerMessage,
     costPerOrder,
+    breakEvenCpo,
+    projectedBreakEvenCpo,
+    breakEvenCpoBasis,
+    cpoHeadroom: cpoHeadroomValue,
     closeRate,
     // Dùng LẠI `adsRatio()` của báo cáo lợi nhuận — mẫu số 0 ⇒ null, không bao giờ 0%.
     adsPctOverPos: spendKnown ? adsRatio(spendForRatio, agg.bookedRevenue) : null,

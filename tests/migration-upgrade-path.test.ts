@@ -78,6 +78,7 @@ const MOI = [
   "0128_workshop_ledger",
   "0129_workshop_variants_mkt",
   "0130_marketer_prices",
+  "0133_company_os_economics",
 ] as const;
 
 /*
@@ -214,6 +215,8 @@ export async function testMigrationUpgradePath() {
     await client.query(`insert into users (id, email, name, password_hash, role) values ('up-u1', 'a@shop.vn', 'An', 'x', 'CS')`);
     await client.query(`insert into orders (id, stage, status, inserted_at, bill_full_name) values ('up-o1', 'CONFIRMED', 2, now(), 'Khách Cũ')`);
     await client.query(`insert into cs_cases (id, order_id, kind, status, title) values ('up-c1', 'up-o1', 'OTHER', 'OPEN', 'Case có từ trước')`);
+    // 0133 (Company OS · F): một dòng sổ quyết định CÓ TỪ TRƯỚC — ghi bằng câu lệnh không biết tới ba cột dự phóng.
+    await client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, basis, period_from, period_to, rule_version, rule_snapshot, spend_known, profit_after_ads) values ('up-f1', '2026-09-20', 'product', 'p-old', 'SCALE', 'ACTIONABLE', 'PROJECTED', '2026-08-22', '2026-09-04', 2, '{}'::jsonb, true, 123456)`);
 
     /*
       ═══ THỨ TỰ PHÒNG BAN CỦA PRODUCTION KHÔNG GIỐNG THỨ TỰ 0069 GIEO ═══
@@ -285,7 +288,7 @@ export async function testMigrationUpgradePath() {
     );
     // Sổ bắt đầu RỖNG ngoài dòng vừa gieo: KHÔNG backfill. Kết luận của quá khứ không dựng lại được
     // từ dữ liệu hôm nay — đơn hôm ấy còn treo nay đã ngã ngũ (AGENTS.md mục 8.8).
-    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id <> 'up-dl1'"), 0, "0108: migration KHÔNG được dựng hộ một dòng lịch sử nào");
+    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id not in ('up-dl1', 'up-f1')"), 0, "0108: migration KHÔNG được dựng hộ một dòng lịch sử nào (`up-f1` là dòng gieo ở bước 1 cho 0133)");
 
     /*
       ═══ 0109: SỔ LƯỢT GHI NGÂN SÁCH — BA RÀNG BUỘC PHẢI CHẶN THẬT ═══
@@ -1550,6 +1553,21 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from tech_proposals"), 0, "chạy lại migration KHÔNG được sinh bản đề xuất nào");
     assert.equal(await dem("select count(*)::int as n from tech_agent_runs"), 0, "chạy lại migration KHÔNG được sinh lượt chạy agent nào");
 
+    /*
+      ═══ 0133 (Company OS · F): ẢNH CHỤP DỰ PHÓNG — BA CỘT MỚI, DÒNG CŨ ĐỨNG NGUYÊN ═══
+
+      Dòng `up-f1` ghi ở BƯỚC 1, trước khi ba cột tồn tại. Nó phải mang NULL ở cả ba — CHƯA CHỤP,
+      không phải 0 ₫ — và giữ nguyên lợi nhuận đo được. Một backfill "cho đủ cột" sau này làm bài
+      này đỏ, đúng lúc cần đỏ (mục 35, 8.8).
+    */
+    assert.equal(
+      await dem("select count(*)::int as n from ads_decision_ledger where id = 'up-f1' and projected_profit_after_ads is null and projected_headroom is null and applied_delivery_rate is null and profit_after_ads = 123456"),
+      1,
+      "0133: dòng sổ cũ phải giữ NULL ở ba cột dự phóng — không backfill, không mặc định — và giữ nguyên lợi nhuận đo được",
+    );
+    await client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, basis, period_from, period_to, rule_version, rule_snapshot, spend_known, projected_profit_after_ads, projected_headroom, applied_delivery_rate) values ('up-f2', '2026-09-26', 'product', 'p-new', 'SCALE', 'ACTIONABLE', 'PROJECTED', '2026-08-28', '2026-09-10', 2, '{}'::jsonb, true, -250000, 0.85, 62.5)`);
+    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id = 'up-f2' and projected_profit_after_ads = -250000 and applied_delivery_rate = 62.5"), 1, "0133: dòng mới ghi được dự phóng (kể cả số âm)");
+    await client.query(`delete from ads_decision_ledger where id in ('up-f1', 'up-f2')`);
     console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · sổ đề xuất AI CTO và phép chiếu PR vào đời RỖNG, bốn ràng buộc mới chặn đúng · bằng chứng lượt sửa mặc định (1,'',NONE) và hai ràng buộc 0105 chặn đúng · khoá lượt chạy ngoài chặn bản sao nhưng cho nhiều NULL, không backfill dòng cũ · chạy lại không nhân đôi`);
   } finally {
     await client.close().catch(() => {});
