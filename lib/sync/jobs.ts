@@ -35,6 +35,7 @@ import { applyStaleReconciliation } from "@/lib/cs/stale";
 import { syncFacebookAds } from "@/lib/integrations/facebook/sync";
 import { importViettelPostOrders, syncViettelPostShipments } from "@/lib/integrations/viettelpost/sync";
 import { reconcileCareCoverage } from "@/lib/care/lifecycle";
+import { relinkUnmatchedStatementLines } from "@/lib/integrations/viettelpost/statement-db";
 import { getDb } from "@/db";
 import { reconcileSepay } from "@/lib/integrations/bank/sepay-reconcile";
 import { runSyncJob, type SyncTrigger } from "@/lib/sync/runner";
@@ -315,7 +316,10 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       // Đối chiếu độ phủ care (10 phút/lần): mở đợt cho kiện cần care bị sót, đóng đợt máy mở cho
       // kiện chưa rời kho, chốt đợt treo trên kiện đã kết thúc. Không phụ thuộc khoảnh khắc webhook.
       const careReconcile = await reconcileCareCoverage(await getDb()).catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
-      return { ...r, careReconcile };
+      // Ghép lại dòng bảng kê "chưa ghép" khi vận đơn của nó đã vào ERP (webhook / đồng bộ tạo vận
+      // đơn SAU lần nhập bảng kê) — nếu không, đơn đã được trả tiền cứ nằm ở tab "Quá hạn" của /cod.
+      const statementRelink = await relinkUnmatchedStatementLines().catch((e: unknown) => ({ error: e instanceof Error ? e.message : String(e) }));
+      return { ...r, careReconcile, statementRelink };
     },
   },
   "vtp-import": {

@@ -345,7 +345,8 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
           <>
             Mỗi bảng kê là một lần Viettel Post chuyển tiền. Thư “BẢNG KÊ ĐỐI SOÁT THANH TOÁN” về hòm thư shop được đẩy thẳng vào ERP. Ba số tổng lấy
             từ phần <b>KẾT LUẬN ĐỐI SOÁT</b> in trong chính tệp: tiền COD phải trả − cước phải thu =
-            còn lại phải thanh toán. <b>Chưa ghép</b> là dòng bảng kê có mã vận đơn mà ERP chưa có
+            còn lại phải thanh toán. Tệp tải tay từ web không có phần đó: số tổng cộng từ chính các dòng của
+            tệp, ngày lấy từ sao kê khi có đúng một khoản chuyển khớp số thực nhận. <b>Chưa ghép</b> là dòng bảng kê có mã vận đơn mà ERP chưa có
             vận đơn đó — tiền có thật nhưng chưa truy nguyên được về đơn nào.
           </>
         }
@@ -369,7 +370,14 @@ export default async function CodPage({ searchParams }: { searchParams: Promise<
               <TableBody>
                 {bangKe.map((f) => (
                   <TableRow key={f.filename}>
-                    <TableCell className="text-sm font-semibold">{f.paidOn ? formatDate(f.paidOn) : <span className="text-amber-600">chưa rõ</span>}</TableCell>
+                    <TableCell className="text-sm font-semibold">
+                      {f.paidOn ? formatDate(f.paidOn) : <span className="text-amber-600">chưa rõ</span>}
+                      {f.paidOn && f.totalsFrom === "LINES" ? (
+                        <span className="ml-1 text-[10px] font-normal text-muted-foreground" title="Tệp tải tay không in ngày chốt: đây là ngày tiền về theo sao kê ngân hàng (khoản chuyển khớp đúng số thực nhận)">
+                          sao kê
+                        </span>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="text-xs">{f.periodFrom ? `${formatDate(f.periodFrom)} → ${formatDate(f.periodTo ?? f.periodFrom)}` : "—"}</TableCell>
                     <TableCell className="text-right"><Money value={f.codTotal || f.codMatched} /></TableCell>
                     <TableCell className="text-right"><Money value={f.feeTotal} className="text-muted-foreground" /></TableCell>

@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { COD_OVERDUE_DAYS } from "@/lib/constants/cod";
-import { materializeCodFromStatementLines } from "@/lib/integrations/viettelpost/statement-db";
+import { materializeCodFromStatementLines, relinkUnmatchedStatementLines } from "@/lib/integrations/viettelpost/statement-db";
 import { codSettlementCounts, codSettlementSummary, listCodSettlement, listStatementPayments, statementGapDays } from "@/lib/queries/cod-settlement";
 
 const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null };
@@ -122,6 +122,41 @@ export async function testCodReconciliation() {
   assert.equal(test1.matched, 3, "ba dòng ghép được vận đơn");
   assert.equal(test1.codMatched, 929000, "tiền đã truy nguyên = 499.000 + 400.000 + 30.000");
   assert.equal(test1.codUnmatched, 250000, "phần chưa truy nguyên giữ nguyên, không giấu đi");
+
+  // Tệp không có "đợt tiền về" (tải tay từ web, không có phần KẾT LUẬN): số tổng cộng từ DÒNG, không
+  // in 0 — bản trước hiện "Cước 0 ₫ · Thực nhận 0 ₫" cho bảng kê đã trả 33 triệu (25/09/2026).
+  assert.equal(test1.totalsFrom, "LINES");
+  assert.deepEqual([test1.codTotal, test1.feeTotal, test1.netTotal], [1179000, 51000, 1128000], "thu hộ · cước · thực nhận cộng từ các dòng của tệp");
+  assert.equal(test1.paidOn, null, "chưa có khoản chuyển nào khớp số tiền ⇒ ngày tiền về là CHƯA RÕ, không đoán");
+  await db.insert(schema.bankTransactions).values({ id: "ds-ck-1", bankRef: "ds-ck-ref-1", txnAt: new Date("2026-09-14T03:00:00Z"), amount: 1128000, description: "VTP GLMTQY14 140926 30751602", accountingGroup: "COD_SETTLEMENT" });
+  const coNgay = (await listStatementPayments(50)).find((f) => f.filename === "BK-test-1.xlsx");
+  assert.equal(coNgay?.paidOn, "2026-09-14", "đúng MỘT khoản chuyển khớp số thực nhận ⇒ lấy ngày tiền về theo sao kê");
+  await db.insert(schema.bankTransactions).values({ id: "ds-ck-2", bankRef: "ds-ck-ref-2", txnAt: new Date("2026-09-15T03:00:00Z"), amount: 1128000, description: "VTP GLMTQY15 150926 30760000", accountingGroup: "COD_SETTLEMENT" });
+  const moHo = (await listStatementPayments(50)).find((f) => f.filename === "BK-test-1.xlsx");
+  assert.equal(moHo?.paidOn, null, "hai khoản chuyển cùng số tiền là mơ hồ ⇒ để CHƯA RÕ, không gán nhầm ngày");
+  await db.delete(schema.bankTransactions).where(sql`${schema.bankTransactions.id} like 'ds-ck-%'`);
+
+  // ───────── 5b. Dòng "chưa ghép" được ghép lại khi vận đơn của nó vào ERP SAU lần nhập bảng kê ─────────
+  // Ca production 24/09/2026: vận đơn quá hạn tháng 8 có dòng bảng kê mang đúng mã, mà dòng ấy vẫn
+  // "chưa ghép" vì vận đơn được tạo sau lần nhập tệp — nên đơn đã được trả tiền hiện ở tab Quá hạn.
+  await db.insert(schema.shipments).values([
+    { id: "ds-muon", vtpOrderNumber: "PKE7799999999", trackingCode: "PKE7799999999", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 250000, deliveredAt: ngay(-10) },
+    // Hai vận đơn cùng khớp một mã ⇒ mơ hồ ⇒ KHÔNG ghép.
+    { id: "ds-mo-ho-1", vtpOrderNumber: "PKE7788888888", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 300000, deliveredAt: ngay(-10) },
+    { id: "ds-mo-ho-2", vtpOrderNumber: "PKE7788888889", trackingCode: "PKE7788888888", carrier: "Viettel Post", stage: "DELIVERED", codAmount: 300000, deliveredAt: ngay(-10) },
+  ]);
+  await db.insert(schema.codStatementLines).values({ statementKey: "BK-test-1", sourceFile: "BK-test-1.xlsx", trackingCode: "PKE7788888888", cod: 300000, fee: 0, net: 300000, codReported: true, statementAt: ngay(-8), shipmentId: null });
+  const ghep = await relinkUnmatchedStatementLines();
+  assert.ok(ghep.linked >= 1, "dòng có đúng một vận đơn khớp mã phải được ghép lại");
+  const dongMuon = await db.select().from(schema.codStatementLines).where(eq(schema.codStatementLines.trackingCode, "PKE7799999999"));
+  assert.equal(dongMuon[0]?.shipmentId, "ds-muon", "ghép đúng vận đơn vừa vào ERP");
+  const tauMuon = await db.query.shipments.findFirst({ where: eq(schema.shipments.id, "ds-muon") });
+  assert.equal(Number(tauMuon?.codCollected), 250000, "ghép xong thì tiền thực thu được dựng lại ngay trên vận đơn");
+  assert.equal(tauMuon?.codStatus, "PAID_TO_BANK");
+  const dongMoHo = await db.select().from(schema.codStatementLines).where(eq(schema.codStatementLines.trackingCode, "PKE7788888888"));
+  assert.equal(dongMoHo[0]?.shipmentId, null, "mã khớp HAI vận đơn là mơ hồ ⇒ để chưa ghép, không gán tiền nhầm đơn");
+  const lanHai = await relinkUnmatchedStatementLines();
+  assert.equal(lanHai.shipments, 0, "chạy lại không ghép thêm gì — an toàn cho job 10 phút");
 
   // ───────── 6. Dọn dẹp ─────────
   await db.delete(schema.codStatementLines).where(eq(schema.codStatementLines.statementKey, "BK-test-1"));

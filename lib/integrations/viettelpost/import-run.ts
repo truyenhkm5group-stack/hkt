@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { detectVtpFile, mergeDetectedOrderLists, type DetectedVtpFile } from "@/lib/integrations/viettelpost/import-files";
-import { applyStatementDetailRows, applyVtpOrderList, matchStatementFileToBatch, upsertBatchFromStatementFile } from "@/lib/integrations/viettelpost/statement-db";
+import { applyStatementDetailRows, applyVtpOrderList, matchStatementFileToBatch, relinkUnmatchedStatementLines, upsertBatchFromStatementFile } from "@/lib/integrations/viettelpost/statement-db";
 import { capNhatSoNhapTep, fileChecksum, ghiSoNhapTep } from "@/lib/integrations/viettelpost/import-preview";
 
 
@@ -178,6 +178,10 @@ export async function runVtpDataFileImport(
     });
     await audit({ userId: null, userEmail: actor, action: "COD_STATEMENT_DETAIL", entity: "COD_BATCH", entityId: match.batchId ?? f.filename, detail: { filename: f.filename, ...applied, period: [match.periodFrom, match.periodTo] } });
   }
+
+  // Tệp Danh sách vận đơn vừa tạo vận đơn mới ⇒ dòng bảng kê nhập TRƯỚC đó mang mã của chúng giờ
+  // mới ghép được. Lỗi ở đây không được làm hỏng lần nhập vừa xong: job 10 phút sẽ thử lại.
+  await relinkUnmatchedStatementLines().catch(() => null);
 
   // Ghi lại loại tệp và số dòng đọc được để trang vận hành nhìn thấy tệp nào đọc được gì.
   try {

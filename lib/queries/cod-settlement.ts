@@ -285,8 +285,13 @@ export async function codSettlementCounts(period: Period): Promise<Record<Settle
 export type StatementPayment = {
   filename: string;
   batchReference: string | null;
-  /** Ngày Viettel Post chốt trả tiền (phần kết luận của bảng kê). */
+  /** Ngày Viettel Post chốt trả tiền (phần kết luận của bảng kê), hoặc ngày tiền về theo sao kê. */
   paidOn: string | null;
+  /**
+   * Số tổng lấy từ đâu. `BATCH` = phần KẾT LUẬN in trong tệp email. `LINES` = tệp tải tay không có
+   * phần đó: cộng từ chính các dòng của tệp, ngày lấy từ sao kê khi có ĐÚNG MỘT khoản chuyển khớp.
+   */
+  totalsFrom: "BATCH" | "LINES";
   /** Khoảng ngày phát thành công mà bảng kê này chi trả. */
   periodFrom: string | null;
   periodTo: string | null;
@@ -312,9 +317,13 @@ export async function listStatementPayments(limit = 40): Promise<StatementPaymen
            max(b.received_at)::date::text paid_on,
            min(l.paid_date) period_from,
            max(l.paid_date) period_to,
+           bool_or(b.id is not null) co_dot,
            coalesce(max(b.cod_gross), 0) cod_total,
            coalesce(max(b.fee_total), 0) fee_total,
            coalesce(max(b.total_amount), 0) net_total,
+           coalesce(sum(l.cod), 0) cod_dong,
+           coalesce(sum(l.fee), 0) fee_dong,
+           coalesce(sum(l.net), 0) net_dong,
            count(*) lines,
            count(*) filter (where l.shipment_id is not null) matched,
            coalesce(sum(l.cod) filter (where l.shipment_id is not null), 0) cod_matched,
@@ -325,15 +334,39 @@ export async function listStatementPayments(limit = 40): Promise<StatementPaymen
     order by max(coalesce(b.received_at, l.statement_at)) desc
     limit ${limit}
   `));
+  /*
+    TỆP TẢI TAY KHÔNG CÓ "ĐỢT TIỀN VỀ" ⇒ SỐ TỔNG LẤY TỪ DÒNG, KHÔNG IN 0.
+
+    Tệp "Báo cáo chi tiết bảng kê" tải từ web không có phần KẾT LUẬN nên không lập đợt; bản trước đọc
+    số tổng từ đợt nên in "Cước 0 ₫ · Thực nhận 0 ₫" cho chính những bảng kê đã trả hàng chục triệu
+    (25/09/2026: tệp 30751602 thực nhận 33.082.937 ₫ hiện 0 ₫). Đó là CHƯA BIẾT in thành 0 — nhưng
+    ở đây số không hề chưa biết: mỗi dòng của tệp mang sẵn thu hộ, cước và thu về.
+    Ngày tiền về: khoản COD_SETTLEMENT trên sao kê có số tiền BẰNG ĐÚNG tổng thu về. Chỉ lấy khi khớp
+    ĐÚNG MỘT khoản — hai khoản cùng số tiền là mơ hồ, để "chưa rõ" còn hơn gán nhầm ngày.
+  */
+  const canNgay = list.filter((r) => !r.co_dot).map((r) => Number(r.net_dong ?? 0)).filter((v) => v > 0);
+  const ngayTheoTien = new Map<number, string | null>();
+  if (canNgay.length) {
+    const ck = rowsOf(await db.execute(sql`
+      select amount, (txn_at at time zone 'Asia/Ho_Chi_Minh')::date::text ngay
+      from bank_transactions
+      where accounting_group = 'COD_SETTLEMENT' and amount in (${sql.join(canNgay.map((v) => sql`${v}`), sql`, `)})
+    `));
+    for (const c of ck) {
+      const tien = Number(c.amount ?? 0);
+      ngayTheoTien.set(tien, ngayTheoTien.has(tien) ? null : String(c.ngay));
+    }
+  }
   return list.map((r) => ({
     filename: String(r.filename ?? ""),
     batchReference: (r.batch_reference as string | null) ?? null,
-    paidOn: (r.paid_on as string | null) ?? null,
+    paidOn: r.co_dot ? ((r.paid_on as string | null) ?? null) : (ngayTheoTien.get(Number(r.net_dong ?? 0)) ?? null),
+    totalsFrom: r.co_dot ? ("BATCH" as const) : ("LINES" as const),
     periodFrom: (r.period_from as string | null) ?? null,
     periodTo: (r.period_to as string | null) ?? null,
-    codTotal: Number(r.cod_total ?? 0),
-    feeTotal: Number(r.fee_total ?? 0),
-    netTotal: Number(r.net_total ?? 0),
+    codTotal: Number((r.co_dot ? r.cod_total : r.cod_dong) ?? 0),
+    feeTotal: Number((r.co_dot ? r.fee_total : r.fee_dong) ?? 0),
+    netTotal: Number((r.co_dot ? r.net_total : r.net_dong) ?? 0),
     lines: Number(r.lines ?? 0),
     matched: Number(r.matched ?? 0),
     codMatched: Number(r.cod_matched ?? 0),
