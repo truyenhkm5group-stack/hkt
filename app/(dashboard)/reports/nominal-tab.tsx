@@ -11,13 +11,13 @@ import {
   AssumptionsForm,
   ReturnRateOverride,
 } from "@/app/(dashboard)/reports/assumptions-form";
-import { DataTableToolbar } from "@/components/data-table/toolbar";
+import { DataTableToolbar, FacetFilter } from "@/components/data-table/toolbar";
+import { ProfitChart } from "@/components/charts/profit-chart";
 import { CostQualityPanel } from "@/app/(dashboard)/reports/cost-quality-panel";
 import { MetricCard } from "@/components/metric-card";
 import { InfoHint } from "@/components/info-hint";
 import { DataWarnings } from "@/components/data-warnings";
 import { MarketerNominalRows } from "./marketer-nominal-rows";
-import { Button } from "@/components/ui/button";
 import { Money, SectionCard } from "@/components/ui-bits";
 import {
   Table,
@@ -27,12 +27,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatNumber, formatVND } from "@/lib/format";
+import { formatNumber, formatPercent, formatVND, pctOrNull } from "@/lib/format";
 import {
-  getNominalDailyForProduct,
   getNominalProfitReport,
   type NominalRow,
 } from "@/lib/queries/profit-nominal";
+import { getNominalDaily, NO_DAY, type NominalCell, type NominalDaily } from "@/lib/queries/marketer-daily-nominal";
 import type { Period } from "@/lib/search-params";
 import { DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
 import { NewProductRates } from "@/app/(dashboard)/reports/new-product-rates";
@@ -282,6 +282,7 @@ function TranHoaVon({ r, otherPct }: { r: NominalRow; otherPct: number }) {
 export async function NominalTab({
   period,
   productId,
+  marketerKey = "",
   tabQuery,
   canWrite,
   basis = "ORDERED",
@@ -291,6 +292,8 @@ export async function NominalTab({
 }: {
   period: Period;
   productId: string;
+  /** MKTer đang lọc ở bảng theo ngày (`?mkt=`) — khoá marketer hoặc "Chưa quy kết". Rỗng = mọi người. */
+  marketerKey?: string;
   tabQuery: string;
   canWrite: boolean;
   /** Mốc gán đơn vào kỳ. Mặc định ngày tạo đơn — xem `mocCuaBasis` ở lib/queries/profit-nominal.ts. */
@@ -320,26 +323,20 @@ export async function NominalTab({
     đứng trên cùng trang nên bật theo, để hai bảng nói cùng một lợi nhuận cho cùng một mã; bảng
     lương và trang Quảng cáo gọi hai hàm này không tham số nên không bao giờ thấy giá đoán.
   */
-  const [report, byMarketer] = await Promise.all([
+  const [report, byMarketer, daily] = await Promise.all([
     getNominalProfitReport(period, basis, value, includeAds, true),
     getNominalMarketerBreakdown(period, value, includeAds, true),
+    /*
+      Bảng theo ngày đứng CÙNG MỐC với bảng theo mã, trên MỌI đơn và CÓ chi QC: nó là phép chia số
+      của từng mã, và phép chia ấy chưa biết đường đi của bộ lọc giá trị đơn — khi bộ lọc bật, màn
+      hình nói ra thay vì lặng lẽ đặt hai tập đơn cạnh nhau.
+    */
+    getNominalDaily(period, basis, { productId: productId || null, marketerKey: marketerKey || null }),
   ]);
   const selected = productId
     ? report.rows.find((r) => r.productId === productId)
     : null;
-  // Bảng theo ngày tính theo TỶ LỆ (chưa có cohort theo ngày); mã chưa đo được thì dùng tỷ lệ lịch sử
-  // của mã và NÓI RÕ ở tiêu đề — không lặng lẽ.
-  const dailyRate = selected ? (selected.returnRate ?? selected.baseReturnRate) : 0;
-  const daily = selected
-    ? await getNominalDailyForProduct(
-        selected.productId,
-        period,
-        dailyRate,
-        report.assumptions,
-        basis,
-        selected.estimatedCost?.unitCost ?? null,
-      )
-    : [];
+  const mktChon = daily.filter.marketerKey ? daily.marketers.find((m) => m.value === daily.filter.marketerKey) : null;
   const t = report.totals;
   const pj = t.projection;
   const riskPct = report.assumptions.inventoryRiskPercent ?? DEFAULT_PROFIT_ASSUMPTIONS.inventoryRiskPercent;
@@ -606,7 +603,7 @@ export async function NominalTab({
                   >
                     <TableCell className="align-top">
                       <Link
-                        href={`/reports?${tabQuery}&product=${encodeURIComponent(r.productId)}#ma-hang`}
+                        href={`/reports?${tabQuery}&product=${encodeURIComponent(r.productId)}${marketerKey ? `&mkt=${encodeURIComponent(marketerKey)}` : ""}#ma-hang`}
                         className="flex items-center gap-2.5 hover:text-primary"
                       >
                         {r.image ? (
@@ -755,96 +752,68 @@ export async function NominalTab({
         </div>
       </SectionCard>
 
+      {/*
+        ═══ LỢI NHUẬN DANH NGHĨA THEO NGÀY — LỌC THEO MÃ · THEO MKTER ═══
+
+        Cùng các ô với bảng ngày × MKTer (`lib/queries/marketer-daily-nominal.ts`), cộng theo bộ
+        lọc: không lọc thì Σ = dòng tổng bảng trên, lọc một mã thì Σ = ĐÚNG dòng của mã. Bấm tên mã
+        ở bảng trên = chọn mã ở đây (cùng tham số `product`), nên neo `#ma-hang` vẫn dẫn tới khối này.
+      */}
+      <SectionCard
+        id="ma-hang"
+        title={
+          <>
+            Lợi nhuận danh nghĩa theo ngày
+            {selected ? <span className="font-normal text-muted-foreground"> · {selected.code || selected.productName}</span> : null}
+            {mktChon ? <span className="font-normal text-muted-foreground"> · {mktChon.label}</span> : null}
+          </>
+        }
+        description={`${formatNumber(daily.days.filter((d) => d.day !== NO_DAY).length)} ngày · mốc: ${TIME_BASIS_LABEL[basis]}`}
+        hint={
+          <>
+            <p className="mb-1">
+              Mỗi ngày: DT GTC ƯT − giá vốn − vận chuyển − CPQC = LN danh nghĩa ƯT; trừ tiếp vận hành, rủi ro tồn kho, thuế, CP khác = LN ròng ƯT. Không có công thức
+              riêng — mọi khoản của từng mã trên bảng theo mã được CHIA xuống từng đơn của mã (doanh thu và giá vốn theo phần giao được của CHÍNH đơn đó, cước theo
+              số đơn, vận hành theo doanh số), nên cộng các ngày lại ra đúng con số của bảng trên.
+            </p>
+            <p className="mb-1">
+              Lọc mã: Chi QC là phần đã ghép vào mã đó. Lọc MKTer: đơn theo người phụ trách fanpage lúc đơn lên, Chi QC theo chiến dịch đã ghép cho người đó, giá vốn
+              theo giá báo MKT. Chi QC luôn theo NGÀY CHI, không theo mốc của đơn.
+            </p>
+            {selected ? <p>TL GTC ƯT của mã {selected.deliveryRate === null ? "— (chưa đo được)" : `${selected.deliveryRate.toFixed(1)}%`}: {moTaUocTinh(selected)}.</p> : null}
+          </>
+        }
+        actions={
+          <>
+            <FacetFilter facet={{ key: "product", label: "Mã hàng", options: daily.products, single: true }} />
+            <FacetFilter facet={{ key: "mkt", label: "MKTer", options: daily.marketers.map((m) => ({ value: m.value, label: m.spendMapped ? m.label : `${m.label} (QC chưa ghép)` })), single: true }} />
+            {selected ? (
+              <ReturnRateOverride
+                productId={selected.productId}
+                assumptions={report.assumptions}
+                current={selected.deliveryRate ?? Math.round((100 - selected.baseReturnRate) * 10) / 10}
+                source={selected.returnRateSource}
+                canWrite={canWrite}
+                mature={selected.rateMature}
+              />
+            ) : null}
+          </>
+        }
+        padded={false}
+      >
+        <LoiNhuanTheoNgay
+          daily={daily}
+          ghiChuLoc={
+            dangLocGiaTri || !includeAds
+              ? `Bảng theo ngày tính trên MỌI đơn của kỳ${includeAds ? "" : " và CÓ trừ chi quảng cáo"} — ${[dangLocGiaTri ? "bộ lọc giá trị đơn" : null, includeAds ? null : "công tắc bỏ CPQC"].filter(Boolean).join(" và ")} phía trên chưa áp cho bảng này.`
+              : null
+          }
+        />
+      </SectionCard>
+
       <AdsCeilingTable report={report} canWrite={canWrite} targetMargin={targetMargin} />
 
       <NewProductRates rows={report.rows} assumptions={report.assumptions} canWrite={canWrite} />
-
-      {selected ? (
-        <div id="ma-hang">
-          <SectionCard
-            title={`${selected.productName}${selected.code ? ` (${selected.code})` : ""} · theo ngày`}
-            description={`TL GTC ƯT ${selected.deliveryRate === null ? "—" : `${selected.deliveryRate.toFixed(1)}%`} · theo ngày ${(100 - dailyRate).toFixed(1)}% · giá vốn ${selected.expectedQty && selected.cogsKnown ? formatVND(Math.round(selected.expectedCogs / selected.expectedQty)) : "—"}/sp`}
-            hint={`Tỷ lệ giao thành công ước tính ${selected.deliveryRate === null ? "— (chưa đo được)" : `${selected.deliveryRate.toFixed(1)}%`} (${moTaUocTinh(selected)}) · bảng theo ngày tính theo tỷ lệ ${(100 - dailyRate).toFixed(1)}%${selected.returnRate === null ? " (tỷ lệ lịch sử của mã, vì mô hình chưa đo được)" : ""} · giá vốn ${selected.expectedQty && selected.cogsKnown ? formatVND(Math.round(selected.expectedCogs / selected.expectedQty)) : "—"}/sp${selected.estimatedCost ? ` (gồm giá DỰ TÍNH ${formatVND(selected.estimatedCost.unitCost)}/sp cho sản phẩm chưa có phiếu nhập)` : ""}`}
-            actions={
-              <div className="flex items-center gap-3">
-                <ReturnRateOverride
-                  productId={selected.productId}
-                  assumptions={report.assumptions}
-                  current={selected.deliveryRate ?? Math.round((100 - selected.baseReturnRate) * 10) / 10}
-                  source={selected.returnRateSource}
-                  canWrite={canWrite}
-                  mature={selected.rateMature}
-                />
-                <Button asChild variant="ghost" size="sm">
-                  <Link href={`/reports?${tabQuery}`}>Đóng</Link>
-                </Button>
-              </div>
-            }
-            padded={false}
-          >
-            <div className="overflow-x-auto">
-              <Table className="min-w-[820px]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Ngày</TableHead>
-                    <TableHead className="text-right" title="Tiền hàng của mã trên đơn đã xác nhận trong ngày. Dòng nhỏ: số đơn và số sản phẩm.">Doanh số POS</TableHead>
-                    <TableHead className="text-right" title="Chi quảng cáo của ngày. Dòng nhỏ: chi phí quảng cáo trên mỗi đơn.">CPQC</TableHead>
-                    <TableHead className="text-right">DT GTC ƯT</TableHead>
-                    <TableHead className="text-right" title="Giá vốn hàng giao thành công ước tính của ngày. Dòng nhỏ: số sản phẩm. Tiền “—” = có sản phẩm chưa biết giá vốn; SỐ LƯỢNG vẫn đo được nên vẫn in ra.">Giá vốn</TableHead>
-                    <TableHead className="text-right">Vận chuyển</TableHead>
-                    <TableHead className="text-right" title="Theo ngày chỉ có DT − giá vốn − vận chuyển − CPQC (chưa trừ vận hành, rủi ro TK, thuế, CP khác vì các khoản này tính theo kỳ). Dòng nhỏ: margin gộp.">LN gộp sau QC</TableHead>
-                    <TableHead className="text-right">Thực tế</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {daily.map((d) => (
-                    <TableRow key={d.day}>
-                      <TableCell className="align-top font-medium">
-                        {d.day.split("-").reverse().join("/")}
-                      </TableCell>
-                      <OKep sub={`${formatNumber(d.orders)} đơn · ${formatNumber(d.items)} sp`}>
-                        <Money value={d.grossSales} />
-                      </OKep>
-                      <OKep sub={d.cpo === null ? null : <>{formatVND(Math.round(d.cpo), { compact: true })}/đơn</>}>
-                        <Money value={d.adSpend} className={d.adSpend ? "text-rose-600" : "text-muted-foreground"} />
-                      </OKep>
-                      <OKep><Money value={d.expectedRevenue} className="font-semibold" /></OKep>
-                      <OKep sub={`${formatNumber(d.expectedQty)} sp`}>
-                        <TienCoTheChuaBiet value={d.expectedCogs} known={d.cogsKnown} reason={`${formatNumber(d.cogsUnknownQty)} sản phẩm của ngày này chưa biết giá vốn — giá vốn đang bị tính 0đ nên KHÔNG in ra; số lượng bên dưới vẫn đo được`} className="text-muted-foreground" />
-                      </OKep>
-                      <OKep><Money value={d.shipCost} className="text-muted-foreground" /></OKep>
-                      <OKep sub={<Pct value={d.margin} />}>
-                        <Money
-                          value={d.expectedProfit}
-                          className={cn(
-                            "font-bold",
-                            d.expectedProfit >= 0
-                              ? "text-success"
-                              : "text-destructive",
-                          )}
-                        />
-                      </OKep>
-                      <TableCell className="align-top text-right text-xs text-muted-foreground">
-                        giao {d.delivered} · hoàn {d.returned}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {daily.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={8}
-                        className="py-8 text-center text-sm text-muted-foreground"
-                      >
-                        Không có dữ liệu trong kỳ.
-                      </TableCell>
-                    </TableRow>
-                  ) : null}
-                </TableBody>
-              </Table>
-            </div>
-          </SectionCard>
-        </div>
-      ) : null}
 
       <SectionCard
         title="Lợi nhuận theo tổng giá trị hàng nhập trong kỳ"
@@ -1081,6 +1050,166 @@ export async function NominalTab({
           </Table>
         </div>
       </SectionCard>
+    </div>
+  );
+}
+
+/* ═══════════════════ LỢI NHUẬN DANH NGHĨA THEO NGÀY ═══════════════════ */
+
+function ngayThang(day: string) {
+  if (day === NO_DAY) return "Chưa có mốc";
+  const [, m, d] = day.split("-");
+  return `${d}/${m}`;
+}
+
+function thu(day: string) {
+  if (day === NO_DAY) return "";
+  // Chuỗi ngày là NGÀY LỊCH (giờ VN). Đọc nó ở 12:00 UTC thì mọi múi giờ đều ra cùng một ngày.
+  return ["CN", "T2", "T3", "T4", "T5", "T6", "T7"][new Date(`${day}T12:00:00Z`).getUTCDay()];
+}
+
+/** Đơn có thể lẻ khi một đơn chưa rõ người nhận được chia cho nhiều MKTer theo QC. */
+function soDon(n: number) {
+  const r = Math.round(n * 10) / 10;
+  return Number.isInteger(r) ? formatNumber(r) : r.toFixed(1).replace(".", ",");
+}
+
+function DoiChieu({ label, ours, report }: { label: string; ours: number; report: number }) {
+  const lech = ours - report;
+  return (
+    <span title={`Bảng này ${formatVND(ours)} · bảng theo mã ${formatVND(report)}`}>
+      {label} {formatVND(report, { compact: true })}{" "}
+      {lech === 0 ? <b>✓</b> : Math.abs(lech) <= 1_000 ? <span>(lệch {formatVND(lech)} do làm tròn)</span> : <b className="text-amber-600 dark:text-amber-400">lệch {formatVND(lech)}</b>}
+    </span>
+  );
+}
+
+/**
+ * MỘT DÒNG NGÀY. KHÔNG tô xanh/đỏ (AGENTS.md mục 44 · 68): phần lớn giá trị của một ngày mới là
+ * tỷ lệ giao chưa xảy ra — dòng ngày in "còn x% đang đi" để người đọc biết con số dựa vào ước tính
+ * bao nhiêu, và số âm tự mang dấu trừ.
+ */
+function DongNgay({ label, sub, c, className }: { label: React.ReactNode; sub?: React.ReactNode; c: NominalCell; className?: string }) {
+  const giaVonDu = c.cogsUncoveredQty === 0;
+  const chuaDuGiaVon = `${formatNumber(Math.round(c.cogsUncoveredQty))} sản phẩm chưa có giá vốn nào (không phiếu nhập, không giá Pancake, chưa đặt giá dự tính) — giá vốn đang bị tính 0 ₫ nên KHÔNG in ra; số lượng bên dưới vẫn đo được`;
+  const loNhuanCao = giaVonDu ? null : <span title="Giá vốn còn thiếu ⇒ lợi nhuận này CAO hơn thực tế"> ⚠</span>;
+  return (
+    <TableRow className={cn("align-top", className)}>
+      <TableCell className="align-top font-medium">
+        <div>{label}</div>
+        {sub ? <div className="text-[10.5px] font-normal text-muted-foreground">{sub}</div> : null}
+      </TableCell>
+      <OKep sub={`${soDon(c.deliveredOrders)} · ${soDon(c.returnedOrders)} · ${soDon(c.openOrders)}`} subTitle="giao thành công · hoàn · đang đi">
+        {soDon(c.orders)}
+      </OKep>
+      <OKep sub={c.adSpend === null || c.orders <= 0 ? null : <>{formatVND(Math.round(c.adSpend / c.orders), { compact: true })}/đơn</>}>
+        <Money value={c.posSales} />
+      </OKep>
+      <OKep sub={<>{formatPercent(pctOrNull(c.adSpend, c.posSales))} DS</>}>
+        {c.adSpend === null ? <span className="text-muted-foreground" title="Chưa biết chi bao nhiêu — không phải 0">—</span> : <Money value={c.adSpend} />}
+      </OKep>
+      <OKep sub={<>{formatPercent(pctOrNull(c.expectedRevenue, c.posSales))} DS</>}>
+        <Money value={c.expectedRevenue} className="font-semibold" />
+      </OKep>
+      <OKep sub={`${formatNumber(Math.round(c.expectedQty))} sp`}>
+        <TienCoTheChuaBiet value={c.expectedCogs} known={giaVonDu} reason={chuaDuGiaVon} className="text-muted-foreground" />
+      </OKep>
+      <OKep>
+        <Money value={c.shipCost} className="text-muted-foreground" />
+      </OKep>
+      <OKep sub={<>{formatPercent(pctOrNull(c.expectedProfit, c.expectedRevenue))}</>}>
+        {c.expectedProfit === null ? <span className="text-muted-foreground" title="Chi QC chưa biết ⇒ lợi nhuận chưa biết">—</span> : <Money value={c.expectedProfit} />}
+        {c.expectedProfit === null ? null : loNhuanCao}
+      </OKep>
+      <OKep
+        sub={
+          <>
+            rủi ro <TienCoTheChuaBiet value={c.inventoryRisk} known={giaVonDu} reason="Rủi ro tồn kho tính trên giá vốn — giá vốn còn thiếu nên chưa tính được" /> · thuế {formatVND(c.tax, { compact: true })} · khác{" "}
+            {formatVND(c.otherCost, { compact: true })}
+          </>
+        }
+      >
+        <Money value={c.opex} className="text-muted-foreground" />
+      </OKep>
+      <OKep sub={<>{formatPercent(pctOrNull(c.netProfit, c.expectedRevenue))}</>}>
+        {c.netProfit === null ? <span className="text-muted-foreground" title="Chi QC chưa biết ⇒ lợi nhuận chưa biết">—</span> : <Money value={c.netProfit} className="font-bold" />}
+        {c.netProfit === null ? null : loNhuanCao}
+      </OKep>
+    </TableRow>
+  );
+}
+
+function LoiNhuanTheoNgay({ daily, ghiChuLoc }: { daily: NominalDaily; ghiChuLoc: string | null }) {
+  const rc = daily.reconcile;
+  // Biểu đồ đi từ cũ tới mới; dòng "Chưa có mốc" không phải một ngày nên không có chỗ trên trục.
+  const bieuDo = daily.days
+    .filter((d) => d.day !== NO_DAY)
+    .map((d) => ({ day: d.day, revenue: d.cell.expectedRevenue, grossProfit: d.cell.expectedProfit, netProfit: d.cell.netProfit }))
+    .reverse();
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 pt-3 text-[11px] text-muted-foreground">
+        {rc ? (
+          <>
+            <span>Khớp {rc.against}:</span>
+            <DoiChieu label="DT GTC ƯT" ours={rc.expectedRevenue.ours} report={rc.expectedRevenue.report} />
+            <DoiChieu label="LN danh nghĩa" ours={rc.expectedProfit.ours} report={rc.expectedProfit.report} />
+            <DoiChieu label="LN ròng" ours={rc.netProfit.ours} report={rc.netProfit.report} />
+            <InfoHint>
+              Cộng mọi ngày của bảng này (coi ngày chưa có số chi QC như báo cáo coi — bằng số chi đã có) rồi so với {rc.against}. Rê chuột lên từng con số để xem hai vế.
+              LN ròng được lệch vài đồng do làm tròn “CP khác = % QC” theo từng ngày thay vì theo từng mã.
+            </InfoHint>
+          </>
+        ) : (
+          <span className="inline-flex items-center gap-1">
+            Lọc theo MKTer
+            <InfoHint>
+              Không có dòng nào trên bảng theo mã để đối chiếu. Tổng cả kỳ của người này bằng đúng cột của họ ở Quảng cáo → Hiệu quả theo ngày (cùng một bộ máy, khi mốc là
+              ngày đơn lên). Đây là lợi nhuận của các đơn người này mang về, TRƯỚC chia % chủ mã — khác “LN cá nhân” ở bảng “Lợi nhuận danh nghĩa theo Marketer” bên dưới
+              (bảng ấy chia theo tỷ trọng QC cả kỳ rồi cộng/trừ % chủ mã, như bảng lương).
+            </InfoHint>
+          </span>
+        )}
+        <DataWarnings items={[ghiChuLoc, ...daily.warnings]} />
+      </div>
+      {bieuDo.length > 1 ? (
+        <div className="px-3">
+          <ProfitChart data={bieuDo} height={220} labels={{ revenue: "DT GTC ƯT", grossProfit: "LN danh nghĩa ƯT", netProfit: "LN ròng ƯT" }} />
+        </div>
+      ) : null}
+      <div className="max-h-[640px] overflow-auto">
+        <Table className="min-w-[1000px]">
+          <TableHeader className="sticky top-0 z-10 bg-card">
+            <TableRow>
+              <TableHead>Ngày</TableHead>
+              <TableHead className="text-right" title="Đơn đã xác nhận, không huỷ, của ngày theo mốc đang chọn. Dòng nhỏ: giao thành công · hoàn · đang đi. Lẻ khi một đơn chưa rõ người nhận được chia cho nhiều MKTer.">Đơn</TableHead>
+              <TableHead className="text-right" title="Tiền hàng trên đơn của ngày (trước hoàn huỷ). Dòng nhỏ: chi QC trên mỗi đơn.">Doanh số POS</TableHead>
+              <TableHead className="text-right" title="Chi quảng cáo theo NGÀY CHI. “—” = chưa biết (nguồn chưa đồng bộ tới ngày này, hoặc MKTer chưa được ghép chiến dịch nào) — không phải 0. Dòng nhỏ: % doanh số POS.">Chi QC</TableHead>
+              <TableHead className="text-right" title="Doanh thu giao thành công ước tính — phần của ngày trong con số của từng mã, chia theo phần giao được của CHÍNH từng đơn. Dòng nhỏ: % doanh số POS.">DT GTC ƯT</TableHead>
+              <TableHead className="text-right" title="Giá vốn hàng giao thành công ước tính. “—” = có sản phẩm chưa biết giá vốn. Dòng nhỏ: số sản phẩm giao thành công ước tính (vẫn đo được).">Giá vốn</TableHead>
+              <TableHead className="text-right" title="Cước ước tính: đơn × cước gửi + phần hoàn × phí hoàn — cùng đơn giá ở khối Giả định.">Vận chuyển</TableHead>
+              <TableHead className="text-right" title="DT GTC ƯT − giá vốn − vận chuyển − chi QC. Dòng nhỏ: % trên DT GTC ƯT. ⚠ = giá vốn còn thiếu nên con số cao hơn thật.">LN danh nghĩa</TableHead>
+              <TableHead className="text-right" title="Vận hành phân bổ (đã nhập + cố định theo doanh số; đóng hàng + NV vận đơn theo số đơn). Dòng nhỏ: rủi ro tồn kho · thuế · CP khác (% QC).">Vận hành</TableHead>
+              <TableHead className="text-right" title="LN danh nghĩa − vận hành − rủi ro tồn kho − thuế − CP khác. Dòng nhỏ: % trên DT GTC ƯT.">LN ròng</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {daily.days.map((d) => {
+              const dangDi = pctOrNull(d.cell.openOrders, d.cell.orders);
+              return <DongNgay key={d.day || "chua-co-moc"} label={ngayThang(d.day)} sub={<>{thu(d.day)}{dangDi ? <> · còn {formatPercent(dangDi, 0)} đang đi</> : null}</>} c={d.cell} />;
+            })}
+            {daily.days.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">
+                  Không có đơn hay chi quảng cáo nào khớp bộ lọc trong kỳ.
+                </TableCell>
+              </TableRow>
+            ) : (
+              <DongNgay label="Cả kỳ" c={daily.total} className="bg-muted/40 font-semibold hover:bg-muted/40" />
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   );
 }
