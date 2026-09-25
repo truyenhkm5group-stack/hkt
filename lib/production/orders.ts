@@ -136,10 +136,13 @@ export async function persistPoPlanTx(
   return { linkedEventId, overriddenEventId, modelId };
 }
 
-/** Vòng đời mẫu đi theo lượt nối bản duyệt — gọi SAU khi giao dịch đã chốt. */
-export async function followPoLink(db: Db, r: { linkedEventId: string | null; modelId: string | null; poId: string; actor: Actor }): Promise<LifecycleFollow | null> {
+/**
+ * Vòng đời mẫu đi theo lượt nối bản duyệt — gọi TRONG giao dịch đã ghi lệnh (`tx` của nơi gọi, ngay sau
+ * `persistPoPlanTx`), để lệnh và lượt chuyển vòng đời sống chết cùng nhau (Agent K).
+ */
+export async function followPoLink(tx: DbLike, r: { linkedEventId: string | null; modelId: string | null; poId: string; actor: Actor }): Promise<LifecycleFollow | null> {
   if (!r.linkedEventId || !r.modelId) return null;
-  return followModelLifecycle(db, { modelId: r.modelId, eventName: "production_order.linked_design", eventId: r.linkedEventId, triggeredBy: r.actor, related: { type: "production_order", id: r.poId } });
+  return followModelLifecycle(tx, { modelId: r.modelId, eventName: "production_order.linked_design", eventId: r.linkedEventId, triggeredBy: r.actor, related: { type: "production_order", id: r.poId } });
 }
 
 /** Đổi ba cột của MỘT lệnh đã có mà không đụng ô số lượng — và là đường kiểm thử dùng. */
@@ -151,7 +154,9 @@ export async function savePoPlanCore(
   if (!o) return { error: "Không tìm thấy lệnh sản xuất" };
   const v = await validatePoPlan(db, { productId: o.productId, designVersionId: input.designVersionId, suggestion: input.suggestion, finalCells: o.cells, overrideReason: input.overrideReason });
   if ("error" in v) return v;
-  const r = await db.transaction((tx) => persistPoPlanTx(tx, { poId: o.id, poCode: o.code, beforeDesignVersionId: o.designVersionId, plan: v.plan, suggestion: input.suggestion, finalCells: o.cells, actor: input.actor }));
-  const lifecycle = await followPoLink(db, { ...r, poId: o.id, actor: input.actor });
+  const lifecycle = await db.transaction(async (tx) => {
+    const r = await persistPoPlanTx(tx, { poId: o.id, poCode: o.code, beforeDesignVersionId: o.designVersionId, plan: v.plan, suggestion: input.suggestion, finalCells: o.cells, actor: input.actor });
+    return followPoLink(tx, { ...r, poId: o.id, actor: input.actor });
+  });
   return { ok: true, diff: v.plan.diff, lifecycle };
 }

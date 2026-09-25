@@ -56,8 +56,9 @@ CHECK: `actor_kind = 'USER'` ⇒ `actor_id IS NOT NULL`.
   - `observeModelStage(e: ModelEvidence): { stage: ModelState | null; reasons: string[]; basis: "ESTIMATED" }`
     — hàm thuần, KHÔNG BAO GIỜ được ghi vào `lifecycle_state`.
 - `lib/models/service.ts` (lõi, KHÔNG `"use server"`):
-  - `transitionModelCore(db, { modelId, to, reason, actor: Actor, actorKind, source, sourceEventId?, related? })`
-    — một giao dịch: kiểm cạnh → UPDATE `product_models` → INSERT lịch sử → `emitDomainEvent("model.state_changed")`.
+  - `transitionModelCore(db | tx, { modelId, to, reason, actor: Actor, actorKind, source, sourceEventId?, related? })`
+    — một giao dịch (của chính nó, hoặc giao dịch đang mở được trao vào — Agent K): kiểm cạnh → UPDATE
+    `product_models` → INSERT lịch sử → `emitDomainEvent("model.state_changed")`.
     Đây là đường DUY NHẤT đổi `lifecycle_state`. Agent C/E/… gọi hàm này, không UPDATE thẳng.
   - `planModelRegistry(input)` thuần → `{ toInsert, toLink, ambiguous }`; `syncModelRegistry(db)` áp nó.
 - `lib/queries/models.ts`: `listModels(params)`, `getModel(id)`, `getModelByProductId(productId)`,
@@ -239,8 +240,11 @@ SAMPLING → SAMPLE_REVIEW cần một sự kiện để trỏ về (Q3).
 topic mở ⇒ WINNER → PRODUCTION_DISCUSSION · giá thành phiên bản mới ⇒ PRODUCTION_DISCUSSION → COSTING · mẫu
 mới ⇒ COSTING → SAMPLING · gửi duyệt ⇒ SAMPLING → SAMPLE_REVIEW · yêu cầu sửa ⇒ SAMPLE_REVIEW → SAMPLING ·
 duyệt ⇒ SAMPLE_REVIEW → APPROVED · lệnh trỏ bản duyệt ⇒ APPROVED / SELLING → PRODUCTION_PLANNING. Mẫu CHƯA
-KHAI hoặc đang ở chỗ khác ⇒ không chuyển. Chạy SAU giao dịch nghiệp vụ (`transitionModelCore` nhận `Db`),
-lũy đẳng theo `sourceEventId`.
+KHAI hoặc đang ở chỗ khác ⇒ không chuyển. Chạy TRONG CHÍNH giao dịch nghiệp vụ (Agent K):
+`transitionModelCore(db | tx, …)` được trao giao dịch đang mở thì chạy thẳng trong nó, không savepoint lồng
+(`lib/db-transaction.ts::isOpenTransaction`, kiểm bằng `is()` của drizzle). Lượt chuyển NÉM ⇒ hành động
+nghiệp vụ bị huỷ; hành động đổ ⇒ lượt chuyển cũng không còn. Lỗi nghiệp vụ của lượt chuyển (`{ error }`)
+không ghi gì, không huỷ hành động. Vẫn lũy đẳng theo `sourceEventId`.
 
 ### Quyền · việc · màn hình
 

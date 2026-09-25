@@ -130,9 +130,11 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
       rowId = row.id;
     }
     const su = await persistPoPlanTx(tx, { poId: rowId, poCode: code, beforeDesignVersionId: existing?.designVersionId ?? null, plan: ke.plan, suggestion, finalCells, actor });
-    return { rowId, ...su };
+    // Vòng đời mẫu đi theo lượt nối bản duyệt TRONG cùng giao dịch với lệnh (Agent K).
+    const theo = await followPoLink(tx, { linkedEventId: su.linkedEventId, modelId: su.modelId, poId: rowId, actor });
+    return { rowId, ...su, lifecycle: theo };
   });
-  const lifecycle = await followPoLink(db, { linkedEventId: ghi.linkedEventId, modelId: ghi.modelId, poId: ghi.rowId, actor });
+  const lifecycle = ghi.lifecycle;
   await audit({
     userId: user.id,
     userEmail: user.email,

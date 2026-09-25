@@ -16,8 +16,8 @@ import { followModelLifecycle, type LifecycleFollow } from "@/lib/production/lif
  * ═══════════ LÕI DỊCH VỤ: TOPIC HỎI GIÁ / BÀN PHƯƠNG ÁN (Company OS · Agent C) ═══════════
  *
  * KHÔNG "use server": server action (`lib/actions/production-topics.ts`) và kiểm thử cùng gọi vào đây
- * với một `Actor`. Mỗi hàm ghi dữ liệu nghiệp vụ và phát sự kiện trong CÙNG MỘT giao dịch; vòng đời mẫu
- * đi theo SAU khi giao dịch chốt (`followModelLifecycle`).
+ * với một `Actor`. Mỗi hàm ghi dữ liệu nghiệp vụ, phát sự kiện VÀ để vòng đời mẫu đi theo
+ * (`followModelLifecycle`) trong CÙNG MỘT giao dịch — hỏng một bước là huỷ cả (Agent K).
  *
  * `production_topic_messages` là APPEND-ONLY: tệp này chỉ INSERT vào đó.
  */
@@ -77,11 +77,11 @@ export async function createTopicCore(db: Db, input: CreateTopicInput): Promise<
     });
     const first = (input.firstMessage ?? "").trim();
     if (first) await insertMessage(tx, { topicId: row.id, modelId: m.id, kind: "NOTE", body: first, attachments: [], quotedUnitPrice: null, actor: input.actor, causationId: eventId });
-    return { topicId: row.id, eventId };
+    const lifecycle = await followModelLifecycle(tx, { modelId: m.id, eventName: "production_topic.created", eventId, triggeredBy: input.actor, related: { type: "production_topic", id: row.id } });
+    return { topicId: row.id, eventId, lifecycle };
   });
 
-  const lifecycle = await followModelLifecycle(db, { modelId: m.id, eventName: "production_topic.created", eventId: out.eventId, triggeredBy: input.actor, related: { type: "production_topic", id: out.topicId } });
-  return { ok: true, ...out, lifecycle };
+  return { ok: true, ...out };
 }
 
 type MessageRow = { topicId: string; modelId: string; kind: TopicMessageKind; body: string; attachments: string[]; quotedUnitPrice: number | null; actor: Actor; causationId?: string | null };
