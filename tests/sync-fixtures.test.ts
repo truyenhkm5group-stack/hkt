@@ -128,6 +128,7 @@ import { testCsUiContrast } from "./cs-ui-contrast.test";
 import { testSalesFunnel } from "./sales-funnel.test";
 import { testStaffPerformance } from "./staff-performance.test";
 import { testConversionFunnel } from "./conversion-funnel.test";
+import { testOrderHourAuditDb, testOrderHourAuditPure } from "./order-hour-audit.test";
 import { testCancelAnalysisDb, testCancelAnalysisPure } from "./cancel-analysis.test";
 import { testPreshipRisk } from "./preship-risk.test";
 import { testAdsAttribution } from "./ads-attribution.test";
@@ -1728,6 +1729,8 @@ async function main() {
     đếm tổng đơn thì vẫn nên giữ hai khối này ở đây.
   */
   await testConversionFunnel(db);
+  testOrderHourAuditPure();
+  await testOrderHourAuditDb(db);
   testCancelAnalysisPure();
   await testCancelAnalysisDb(db);
   await testPreshipRisk(db);
