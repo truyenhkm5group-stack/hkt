@@ -218,6 +218,7 @@ import { testWorkshopLedgerPure, testWorkshopLedgerQueries } from "./workshop-le
 import { testWorkshopSheetImportDb, testWorkshopSheetImportPure } from "./workshop-sheet-import.test";
 import { testWorkshopBankLink } from "./workshop-bank-link.test";
 import { testMarketerPricePure, testMarketerPriceQueries } from "./marketer-price.test";
+import { testCompanyOsModelsPure, testCompanyOsModelsQueries } from "./company-os-models.test";
 import { testCrm } from "./crm.test";
 import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
@@ -279,6 +280,8 @@ import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testStockShortageDb, testStockShortagePure } from "./stock-shortage.test";
 import { testStockWaitReportDb, testStockWaitReportPure } from "./stock-wait-report.test";
+// Company OS · Agent D — sổ kho an toàn · trạng thái tồn theo mẫu · ngưỡng hàng chậm.
+import { testCompanyOsInventoryDb, testCompanyOsInventoryPure } from "./company-os-inventory.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
@@ -1870,6 +1873,8 @@ async function main() {
   await testWorkshopBankLink(db);
   testMarketerPricePure();
   await testMarketerPriceQueries(db);
+  testCompanyOsModelsPure();
+  await testCompanyOsModelsQueries(db);
   await testCrm(db);
   testScenario();
   testAccessControl();
@@ -1882,6 +1887,9 @@ async function main() {
   testPlanExplain();
   await testSlowMoving(db);
   await testInventoryDecision(db);
+  // Company OS · Agent D: tự dọn dữ liệu mã `cosd-` (kể cả khoá settings inventory.slowMoving).
+  testCompanyOsInventoryPure();
+  await testCompanyOsInventoryDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();

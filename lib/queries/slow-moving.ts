@@ -5,7 +5,7 @@ import { computeVelocity } from "@/lib/constants/planning";
 import { loadPlanningAssumptions } from "@/lib/queries/planning";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { LAST_RECEIPT_COST, availableStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
-import { SLOW_MOVING_RULES, type StockRisk } from "@/lib/constants/slow-moving";
+import { SLOW_MOVING_KEY, resolveSlowMovingRules, type ResolvedSlowMovingRules, type SlowMovingRules, type StockRisk } from "@/lib/constants/slow-moving";
 
 /**
  * ───────────── HÀNG BÁN CHẬM & VỐN NẰM CHẾT ─────────────
@@ -57,6 +57,8 @@ export type SlowMovingReport = {
   /** Tổng phần vốn vượt mức cần thiết. */
   totalExcessValue: number;
   byRisk: Record<StockRisk, { count: number; value: number }>;
+  /** Bộ ngưỡng ĐÃ DÙNG để xếp loại — màn hình in đúng bộ này, không đọc lại hằng số. */
+  rules: SlowMovingRules;
 };
 
 /**
@@ -105,7 +107,25 @@ function lastSoldSubquery(db: Awaited<ReturnType<typeof getDb>>) {
     .as("sm_last");
 }
 
-async function slowMovingUncached(): Promise<SlowMovingReport> {
+/**
+ * Ngưỡng hàng chậm ĐANG CÓ HIỆU LỰC: mặc định trong mã + ghi đè thưa ở `settings`
+ * (`inventory.slowMoving`). Đọc thô rồi đưa qua `resolveSlowMovingRules` — KHÔNG dùng
+ * `getSettingJson` vì hàm ấy trộn sẵn với mặc định, và bộ ghi đè sai phải bị bỏ NGUYÊN BỘ.
+ */
+export async function loadSlowMovingRules(): Promise<ResolvedSlowMovingRules> {
+  const db = await getDb();
+  const row = await db.query.settings.findFirst({ where: eq(schema.settings.key, SLOW_MOVING_KEY) }).catch(() => null);
+  if (!row) return resolveSlowMovingRules(null);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(row.value);
+  } catch {
+    return { ...resolveSlowMovingRules(null), ignored: "Ghi đè không đọc được (không phải JSON)" };
+  }
+  return resolveSlowMovingRules(raw);
+}
+
+async function slowMovingUncached(rules: SlowMovingRules): Promise<SlowMovingReport> {
   const db = await getDb();
   const a = await loadPlanningAssumptions();
   const windowDays = Math.max(1, a.velocityWindowDays);
@@ -167,13 +187,13 @@ async function slowMovingUncached(): Promise<SlowMovingReport> {
 
     let risk: StockRisk = "HEALTHY";
     let reason = "";
-    if (v.velocity <= 0 && (daysSinceLastSale === null || daysSinceLastSale >= SLOW_MOVING_RULES.deadDays)) {
+    if (v.velocity <= 0 && (daysSinceLastSale === null || daysSinceLastSale >= rules.deadDays)) {
       risk = "DEAD";
       reason = daysSinceLastSale === null ? "Chưa bán được cái nào" : `Không bán được cái nào trong ${daysSinceLastSale} ngày`;
-    } else if (daysOfCover !== null && daysOfCover > SLOW_MOVING_RULES.excessCoverDays) {
+    } else if (daysOfCover !== null && daysOfCover > rules.excessCoverDays) {
       risk = "EXCESS";
       reason = `Tồn đủ bán ${daysOfCover} ngày — vượt xa mức cần thiết`;
-    } else if (daysOfCover !== null && daysOfCover > SLOW_MOVING_RULES.slowCoverDays) {
+    } else if (daysOfCover !== null && daysOfCover > rules.slowCoverDays) {
       risk = "SLOW";
       reason = `Tồn đủ bán ${daysOfCover} ngày — bán chậm hơn mức lành mạnh`;
     } else {
@@ -184,7 +204,7 @@ async function slowMovingUncached(): Promise<SlowMovingReport> {
      * PHẦN VỐN VƯỢT MỨC = tiền nằm trong số hàng nhiều hơn mức đủ bán trong kỳ lành mạnh.
      * Hàng chết thì TOÀN BỘ là vượt mức — không có nhịp bán nào để giữ lại phần nào cả.
      */
-    const healthyQty = v.velocity > 0 ? Math.ceil(v.velocity * SLOW_MOVING_RULES.healthyCoverDays) : 0;
+    const healthyQty = v.velocity > 0 ? Math.ceil(v.velocity * rules.healthyCoverDays) : 0;
     const excessQty = Math.max(0, available - healthyQty);
     const excessValue = risk === "HEALTHY" ? 0 : excessQty * unitCost;
 
@@ -215,9 +235,11 @@ async function slowMovingUncached(): Promise<SlowMovingReport> {
 
   // Vốn nằm chết nhiều nhất lên trước — đó là thứ đáng xả trước.
   out.sort((x, y) => y.excessValue - x.excessValue || y.stockValue - x.stockValue);
-  return { rows: out, totalStockValue, totalExcessValue, byRisk };
+  return { rows: out, totalStockValue, totalExcessValue, byRisk, rules };
 }
 
 export async function getSlowMoving(): Promise<SlowMovingReport> {
-  return memo("slowMoving", 120_000, slowMovingUncached);
+  const { rules } = await loadSlowMovingRules();
+  // Ngưỡng ảnh hưởng kết quả ⇒ nằm trong khoá đệm (AGENTS.md §2).
+  return memo(`slowMoving:${JSON.stringify(rules)}`, 120_000, () => slowMovingUncached(rules));
 }

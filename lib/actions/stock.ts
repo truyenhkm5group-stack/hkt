@@ -10,7 +10,9 @@ import type { Actor } from "@/lib/constants/actor";
 import { vnStartOfDay } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
 import { settleReturnsForReceipt } from "@/lib/returns/warehouse";
-import { stockReceiptSchema } from "@/lib/validation/stock";
+import { deleteReceiptSchema, stockReceiptSchema } from "@/lib/validation/stock";
+import { deleteStockReceiptCore } from "@/lib/inventory/receipt-delete";
+import { validateProductionLink } from "@/lib/inventory/production-link";
 import { matchSupplier } from "@/lib/constants/suppliers";
 import { supplierCatalog } from "@/lib/queries/suppliers";
 
@@ -45,6 +47,9 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
   const variantIds = [...new Set(items.map((i) => i.variantId))];
   const known = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(inArray(schema.productVariants.id, variantIds));
   if (known.length !== variantIds.length) return { error: "Có mẫu mã không tồn tại trong ERP — hãy đồng bộ sản phẩm từ Pancake trước" };
+  // Nối lệnh SX / lô xưởng: người chọn, máy kiểm TỒN TẠI + đúng loại phiếu (lib/inventory/production-link.ts).
+  const noiXuong = await validateProductionLink(db, { kind: data.kind, productionOrderId: data.productionOrderId, productionBatchId: data.productionBatchId });
+  if ("error" in noiXuong) return { error: noiXuong.error };
 
   const totalQuantity = items.reduce((s, i) => s + i.quantity, 0);
   const totalCost = items.reduce((s, i) => s + Math.max(i.quantity, 0) * i.unitCost, 0);
@@ -93,7 +98,7 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
     await db.transaction(async (tx) => {
       const [receipt] = await tx
         .insert(schema.stockReceipts)
-        .values({ kind: data.kind, receivedAt: vnStartOfDay(data.receivedAt), reference: data.reference, supplier: xuong.state === "MATCHED" ? xuong.name : data.supplier, supplierId: xuong.state === "MATCHED" ? xuong.id : null, note: data.note, totalQuantity, totalCost, createdBy: actor.label })
+        .values({ kind: data.kind, receivedAt: vnStartOfDay(data.receivedAt), reference: data.reference, supplier: xuong.state === "MATCHED" ? xuong.name : data.supplier, supplierId: xuong.state === "MATCHED" ? xuong.id : null, productionOrderId: noiXuong.link.productionOrderId, productionBatchId: noiXuong.link.productionBatchId, note: data.note, totalQuantity, totalCost, createdBy: actor.label })
         .returning({ id: schema.stockReceipts.id });
       receiptId = receipt.id;
       await tx.insert(schema.stockReceiptItems).values(lines.map((l) => ({ receiptId: receipt.id, ...l })));
@@ -130,16 +135,20 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
   return { ok: true, id: receiptId };
 }
 
-export async function deleteStockReceipt(id: string): Promise<ActionResult> {
+/**
+ * Xoá phiếu kho. Lõi ở `lib/inventory/receipt-delete.ts`: chặn phiếu tái nhập đang làm chứng từ kiểm
+ * hoàn · duyệt hai bước như phiếu điều chỉnh / xuất tay · nhật ký ảnh chụp đầy đủ + LÝ DO trước khi xoá.
+ */
+export async function deleteStockReceipt(id: string, reason: string): Promise<ActionResult> {
   const user = await requireUser();
   if (!can(user, "inventory:write")) return { error: "Không có quyền nhập kho" };
-  if (!id) return { error: "Thiếu mã phiếu" };
+  const parsed = deleteReceiptSchema.safeParse({ id, reason });
+  if (!parsed.success) return { error: firstIssue(parsed.error) };
   const db = await getDb();
-  const existing = await db.query.stockReceipts.findFirst({ where: eq(schema.stockReceipts.id, id), with: { items: true } });
-  if (!existing) return { error: "Không tìm thấy phiếu" };
-  await db.delete(schema.stockReceipts).where(eq(schema.stockReceipts.id, id));
-  await audit({ userId: user.id, userEmail: user.email, action: "STOCK_RECEIPT_DELETE", entity: "STOCK_RECEIPT", entityId: id, detail: { kind: existing.kind, receivedAt: existing.receivedAt, reference: existing.reference, totalQuantity: existing.totalQuantity, items: existing.items.length } });
-  for (const item of existing.items) publish({ type: "stock", variantId: item.variantId });
+  const actor: Actor = { id: user.id, label: user.name || user.email };
+  const result = await deleteStockReceiptCore(db, { id: parsed.data.id, reason: parsed.data.reason, actor, actorEmail: user.email, gate: guardSecondApproval });
+  if ("error" in result) return { error: result.error };
+  for (const item of result.snapshot.items) publish({ type: "stock", variantId: item.variantId });
   revalidate();
   return { ok: true };
 }

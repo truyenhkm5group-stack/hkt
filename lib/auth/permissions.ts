@@ -58,6 +58,9 @@ export const PERMISSION_GROUPS = [
       { key: "inventory:restock-unidentified", label: "Tái nhập hàng hoàn không xác định nguồn", hint: "Cộng vào tồn món hàng hoàn không lần ra được đơn / vận đơn. Bắt buộc ghi lý do, có nhật ký." },
       { key: "planning:view", label: "Kế hoạch đặt hàng SX: xem", hint: "Đề xuất đặt hàng, bảng đặt hàng chốt" },
       { key: "planning:write", label: "Kế hoạch đặt hàng SX: lập bảng", hint: "Tạo / sửa / duyệt bảng đặt hàng gửi xưởng, sửa tham số" },
+      // Company OS · Agent A — sổ mẫu & vòng đời. `models:view` được kéo theo từ `products:view` (LEGACY_IMPLIES).
+      { key: "models:view", label: "Vòng đời mẫu: xem", hint: "Sổ mẫu (mã chủ shop), trạng thái vòng đời đã khai, giai đoạn máy quan sát (ước tính), dòng thời gian của mẫu" },
+      { key: "models:write", label: "Vòng đời mẫu: khai & đồng bộ", hint: "Đổi trạng thái vòng đời (lùi bước / nhảy cóc bắt buộc lý do), đổi người phụ trách, đăng ký mẫu mới, chạy đồng bộ sổ mẫu" },
     ],
   },
   {
@@ -165,7 +168,7 @@ export const LEGACY_IMPLIES: Record<string, string[]> = {
   "cs:manage": ["cs:view", "outreach:send", "landing:manage", "shipments:manage"],
   "settings:manage": ["cs:config", "outreach:config", "alerts:manage", "integrations:manage", "landing:config"],
   "expenses:write": ["reports:assumptions"],
-  "products:view": ["planning:view"],
+  "products:view": ["planning:view", "models:view"],
   "inventory:write": ["planning:write"],
   /*
     `payroll:view` KHÔNG kéo theo `payroll:view-all`, và đó là cả điểm của bản vá này. Chiều kéo
@@ -183,7 +186,7 @@ export const PERMISSION_LABEL: Record<string, string> = Object.fromEntries(PERMI
 
 // `work:view` + `work:manage` nằm trong mọi vai: một người không xem được việc của CHÍNH MÌNH thì
 // hàng đợi vô nghĩa với họ. Quyền leo thang nằm ở `work:assign` / `work:department` / `work:all`.
-const VIEW_ALL: Permission[] = ["dashboard:view", "ideas:view", "orders:read", "shipments:view", "alerts:view", "cs:view", "outreach:view", "landing:view", "returns:view", "customers:view", "products:view", "planning:view", "work:view", "work:manage", "okr:view"];
+const VIEW_ALL: Permission[] = ["dashboard:view", "ideas:view", "orders:read", "shipments:view", "alerts:view", "cs:view", "outreach:view", "landing:view", "returns:view", "customers:view", "products:view", "planning:view", "models:view", "work:view", "work:manage", "okr:view"];
 
 /*
   ═══ LƯƠNG TOÀN CÔNG TY KHÔNG PHẢI MỘT MẶC ĐỊNH ═══
@@ -242,7 +245,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
-  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
+  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "payroll:view-all", "integrations:view"],
   /*
     KHÔNG có `inventory:restock-unidentified`. Nhân viên kho nhận kiện, đếm, tra đơn — nhưng lượt

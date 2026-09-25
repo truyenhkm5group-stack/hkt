@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { can, requirePermission } from "@/lib/auth/session";
 import { ProductNotes } from "@/app/(dashboard)/products/[id]/product-notes";
 import { listProductNotes } from "@/lib/queries/product-notes";
+import { getModelByProductId } from "@/lib/queries/models";
 
 export const metadata = { title: "Chi tiết sản phẩm" };
 
@@ -45,7 +46,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const { totals } = product;
   // Ma trận Màu × Size — chỉ dựng khi mã hàng thật sự có nhiều màu/size, mã một biến thể thì rối.
   const matrixPeriod = resolvePeriod({}, "90d");
-  const [matrix, ghiChu] = await Promise.all([getProductMatrix(id, matrixPeriod), listProductNotes(id)]);
+  const [matrix, ghiChu, mau] = await Promise.all([getProductMatrix(id, matrixPeriod), listProductNotes(id), can(user, "models:view") ? getModelByProductId(product.id) : Promise.resolve(null)]);
   const statusLabel = product.isRemoved ? "Đã xoá" : product.isHidden ? "Đang ẩn" : "Đang bán";
   const statusTone = product.isRemoved ? "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300" : product.isHidden ? "bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300";
   const image = product.image || product.variants.find((v) => v.images[0])?.images[0] || null;
@@ -64,6 +65,11 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         description={`${product.categories.length ? `${product.categories.join(", ")} · ` : ""}${formatNumber(product.variants.length)} mẫu mã (${formatNumber(totals.selling)} đang bán) · đồng bộ ${formatDateTime(product.syncedAt)}`}
         actions={
           <>
+            {mau ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/models/${mau.id}`}>Vòng đời mẫu</Link>
+              </Button>
+            ) : null}
             <SyncButton job="pancake-products" label="Đồng bộ sản phẩm từ Pancake" />
             <Button asChild variant="outline" size="sm">
               <a href={pancakeUrl} target="_blank" rel="noreferrer">
