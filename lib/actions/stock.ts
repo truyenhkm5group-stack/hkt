@@ -15,8 +15,10 @@ import { deleteStockReceiptCore } from "@/lib/inventory/receipt-delete";
 import { validateProductionLink } from "@/lib/inventory/production-link";
 import { matchSupplier } from "@/lib/constants/suppliers";
 import { supplierCatalog } from "@/lib/queries/suppliers";
+import { priceReceiptLines } from "@/lib/inventory/receipt-pricing";
 
-export type ActionResult = { ok: true; id?: string } | { error: string };
+/** `missingPrice`: mã trên phiếu nhập chưa có giá báo MKT ⇒ dòng đó lưu với giá CHƯA BIẾT (0). */
+export type ActionResult = { ok: true; id?: string; missingPrice?: string[] } | { error: string };
 
 /** Lỗi nghiệp vụ khi đóng kiện hoàn — ném ra để huỷ giao dịch rồi trả `{ error }` cho màn hình, không phải lỗi hệ thống. */
 class SettleError extends Error {}
@@ -29,7 +31,13 @@ function revalidate() {
   for (const path of ["/inventory/receipts", "/inventory/returns", "/products", "/inventory", "/"]) revalidatePath(path);
 }
 
-/** Tạo phiếu kho (nhập mới / tái nhập hàng hoàn / xuất tay / điều chỉnh kiểm kê). Giá nhập > 0 trên phiếu NHẬP MỚI sẽ cập nhật giá vốn gần nhất của mẫu mã. */
+/**
+ * Tạo phiếu kho (nhập mới / tái nhập hàng hoàn / xuất tay / điều chỉnh kiểm kê).
+ *
+ * Phiếu NHẬP HÀNG MỚI: đơn giá = GIÁ BÁO MKT của mã theo ngày nhập, máy chủ tự đọc; giá client gửi lên
+ * bị bỏ qua (chủ shop chốt 25/09/2026 "Luôn lấy giá báo MKT" — kho không cần biết giá). Mã chưa có
+ * giá báo ⇒ dòng ghi 0 = chưa biết giá, phiếu VẪN lưu và kết quả trả về tên mã để màn hình nói ra.
+ */
 export async function createStockReceipt(input: unknown): Promise<ActionResult> {
   const user = await requireUser();
   if (!can(user, "inventory:write")) return { error: "Không có quyền nhập kho" };
@@ -42,14 +50,16 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
   if (data.kind === "ISSUE" && raw.some((i) => i.quantity < 0)) return { error: "Phiếu xuất kho tay nhập số lượng dương — ERP tự trừ kho" };
   // Sổ kho quy ước DƯƠNG = vào kho, ÂM = ra kho. Người dùng luôn nhập số dương cho phiếu xuất tay
   // rồi ERP đổi dấu, để không ai phải nhớ quy ước dấu khi ghi phiếu.
-  const items = data.kind === "ISSUE" ? raw.map((i) => ({ ...i, quantity: -Math.abs(i.quantity) })) : raw;
+  const signed = data.kind === "ISSUE" ? raw.map((i) => ({ ...i, quantity: -Math.abs(i.quantity) })) : raw;
   const db = await getDb();
-  const variantIds = [...new Set(items.map((i) => i.variantId))];
+  const variantIds = [...new Set(signed.map((i) => i.variantId))];
   const known = await db.select({ id: schema.productVariants.id }).from(schema.productVariants).where(inArray(schema.productVariants.id, variantIds));
   if (known.length !== variantIds.length) return { error: "Có mẫu mã không tồn tại trong ERP — hãy đồng bộ sản phẩm từ Pancake trước" };
   // Nối lệnh SX / lô xưởng: người chọn, máy kiểm TỒN TẠI + đúng loại phiếu (lib/inventory/production-link.ts).
   const noiXuong = await validateProductionLink(db, { kind: data.kind, productionOrderId: data.productionOrderId, productionBatchId: data.productionBatchId });
   if ("error" in noiXuong) return { error: noiXuong.error };
+  const dinhGia = data.kind === "RECEIPT" ? await priceReceiptLines(db, variantIds, vnStartOfDay(data.receivedAt)) : null;
+  const items = signed.map((i) => ({ ...i, unitCost: dinhGia ? (dinhGia.price.get(i.variantId) ?? 0) : i.unitCost }));
 
   const totalQuantity = items.reduce((s, i) => s + i.quantity, 0);
   const totalCost = items.reduce((s, i) => s + Math.max(i.quantity, 0) * i.unitCost, 0);
@@ -128,11 +138,11 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
     action: data.kind === "RECEIPT" ? "STOCK_RECEIPT_CREATE" : data.kind === "RETURN" ? "STOCK_RETURN_CREATE" : data.kind === "ISSUE" ? "STOCK_ISSUE_CREATE" : "STOCK_ADJUST_CREATE",
     entity: "STOCK_RECEIPT",
     entityId: receiptId,
-    detail: { ...data, items: lines, totalQuantity, totalCost, settledShipmentIds },
+    detail: { ...data, items: lines, totalQuantity, totalCost, settledShipmentIds, ...(dinhGia ? { priceSource: "MARKETER_PRICE", missingPrice: dinhGia.missing } : {}) },
   });
   for (const id of variantIds) publish({ type: "stock", variantId: id });
   revalidate();
-  return { ok: true, id: receiptId };
+  return { ok: true, id: receiptId, ...(dinhGia?.missing.length ? { missingPrice: dinhGia.missing } : {}) };
 }
 
 /**

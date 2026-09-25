@@ -50,7 +50,10 @@ deploy dừng, không phải cảnh báo.
 10. **SỔ KHO** (`lib/queries/stock.ts`): `Tồn thực tế = tổng phiếu kho − đã xuất qua ĐVVC`; `Khả dụng bán = Tồn thực tế − đã chốt đơn chưa xuất`. Phiếu kho quy ước DƯƠNG = vào kho (RECEIPT nhập mới, RETURN tái nhập hàng hoàn, ADJUSTMENT tăng), ÂM = ra kho (ISSUE xuất tay, ADJUSTMENT giảm). "Đã xuất" đếm theo `SHIPMENT_LEFT_WAREHOUSE` (mốc lấy hàng / trạng thái vận đơn dựng từ sự kiện Viettel Post) — **không** dùng `ORDER_OUTCOME` (đó là định nghĩa theo tiền) và **không** dùng trạng thái Pancake. Hàng hoàn CHỈ quay lại tồn khi kho lập phiếu RETURN với số đếm thực tế; ĐVVC báo "đã hoàn" là chưa đủ. Hàng tặng (`is_bonus`) vẫn trừ tồn như hàng bán. Mẫu mã chưa có phiếu RECEIPT nào ⇒ `stockKnown = false`, hiện "Chưa có phiếu nhập", không hiện số.
 11. Landing: 1 sản phẩm không ghi giá = 499K + 25K ship; gói ≥ 2 = giá gói, free ship; không đoán mẫu mã khi thiếu cả size lẫn màu; không ghi ngược vào Pancake (API không có update-order).
 12. Khách cũ mua lại: chỉ **gợi ý** SĐT/địa chỉ cũ, không tự điền vào đơn.
-13. Giá vốn tính "sống" theo phiếu nhập ERP gần nhất → giá vốn Pancake → giá nhập mẫu mã.
+13. Giá vốn tính "sống" theo phiếu nhập ERP gần nhất → giá vốn Pancake → giá nhập mẫu mã. **Đơn giá
+    trên phiếu NHẬP HÀNG MỚI = giá báo MKT của mã theo ngày nhập** (chủ shop chốt 25/09/2026 — kho
+    không nhập giá; `lib/inventory/receipt-pricing.ts`). Mã chưa có giá báo ⇒ dòng ghi 0 = CHƯA BIẾT.
+    Phiếu cũ giá 0 chỉ được lấp qua nút "Định giá phiếu nhập" (xem trước → người bấm), không backfill ngầm.
 14. **PHÂN BỔ CHI PHÍ** (`docs/profit-cost-allocation-contract.md`): mọi chi phí phải khai rõ **căn
     cứ phân bổ** rồi mới nhân. Chi phí theo thời gian (thuê mặt bằng, phần mềm, cố định) chia theo
     số ngày chồng lấn; **dự phòng rủi ro tồn kho đi theo GIÁ VỐN HÀNG BÁN RA, không theo giá trị

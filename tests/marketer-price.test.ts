@@ -59,6 +59,9 @@ export function testMarketerPricePure() {
     "lib/queries/production-variance.ts",
     "lib/actions/marketer-price.ts",
     "lib/actions/workshop-ledger.ts",
+    // Chủ shop chốt 25/09/2026 "Luôn lấy giá báo MKT" làm giá nhập kho: đường GHI phiếu nhập đọc giá báo
+    // để điền `unit_cost`. Báo cáo vẫn chỉ đọc phiếu kho — tệp này không tính báo cáo nào.
+    "lib/inventory/receipt-pricing.ts",
   ]);
   const tep = execSync("git ls-files lib app components && git ls-files --others --exclude-standard lib app components", { encoding: "utf8" })
     .split("\n")
