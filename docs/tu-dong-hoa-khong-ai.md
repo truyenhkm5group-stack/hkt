@@ -65,3 +65,22 @@ Trang Cảnh báo xoá trắng token Telegram và khoá ký Lark trước khi g�
 lưu chỉ giữ lại khoá nhóm Kho — nên mỗi lần bấm Lưu mà không gõ lại, token Telegram và khoá ký Lark
 chính bị ghi đè thành rỗng; khoá nhóm thanh toán thì bị gửi nguyên văn xuống trình duyệt. Nay mọi
 khoá bí mật: không xuống trình duyệt, ô trống = giữ nguyên.
+
+## 5. "Cần anh quyết" vào nhóm Quản lý (Company OS · L — chạy trong job `alerts`)
+
+Không thêm lịch mới: `evaluateAlerts` gọi `runOwnerDecisionDigest()` ở cuối lượt. Khi nào gửi do hàm
+thuần `decideOwnerDecisionDigest` (`lib/constants/owner-digest.ts`) quyết:
+
+- **Bản sáng** — lượt đầu tiên từ 7 giờ (giờ VN, cùng giờ bản tin sáng) mỗi ngày, nếu hàng đợi còn dòng:
+  số việc theo loại, vài dòng đầu (CÁI GÌ + một ô số liệu), link mở `/cockpit`. Rỗng ⇒ không gửi.
+- **Tin thêm trong ngày** — CHỈ khi có yêu cầu duyệt / mẫu chờ duyệt MỚI (khoá nguồn chưa báo hôm nay),
+  cách tin trước ≥ 30 phút, trước 22 giờ. Quảng cáo / tồn kho nhúc nhích không kích tin.
+- Dòng đã **Bỏ qua** / đang **Hẹn nhắc** không vào tin. Tin không in số tiền, không email, không webhook.
+- Người xem là tài khoản MÁY mang bộ quyền mẫu của vai trò **MANAGER** — loại nào Quản lý không mở được
+  màn hình chủ thì không vào tin.
+- Sổ chống gửi lại `settings["owner.digest.sent"]` ghi bằng so-sánh-rồi-đổi: hai lượt `alerts` song song
+  chỉ gửi một tin; gửi hỏng không ghi sổ, lượt sau thử lại.
+
+**Để bật (mặc định TẮT):** trang **Cảnh báo** → khung cấu hình → ô *"Gửi “Cần anh quyết” vào nhóm Quản
+lý"* (lưu NGAY khi bấm, ghi nhật ký `SETTINGS_UPDATE owner.digest`). Cần webhook nhóm Quản lý đã lưu —
+không lùi về nhóm vận đơn.

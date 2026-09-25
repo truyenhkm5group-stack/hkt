@@ -6,6 +6,8 @@ import { MarketingDigestForm } from "@/app/(dashboard)/alerts/marketing-digest-f
 import { loadMarketingAlertConfig } from "@/lib/marketing/digest";
 import { listMarketerOptions } from "@/lib/queries/fanpage-attribution";
 import { loadAlertConfig } from "@/lib/alerts/config";
+import { DEFAULT_OWNER_DIGEST_CONFIG, OWNER_DIGEST_CONFIG_KEY, type OwnerDigestConfig } from "@/lib/constants/owner-digest";
+import { getSettingJson } from "@/lib/settings";
 import { can, requirePermission } from "@/lib/auth/session";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getActionQueue, queueThroughput } from "@/lib/queries/action-queue";
@@ -51,7 +53,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   */
   const queuePage = Math.max(1, Number(one("qpage")) || 1);
   const queuePageSize = Math.min(200, Math.max(20, Number(one("qsize")) || 100));
-  const [config, queue, staff, throughput, marketingConfig, marketers] = await Promise.all([
+  const [config, queue, staff, throughput, marketingConfig, marketers, ownerDigest] = await Promise.all([
     loadAlertConfig(),
     // Phân trang THẬT: nạp đúng một trang, đếm bằng CSDL. Trước đây nạp 300 rồi lấy số đó làm tổng.
     getActionQueue({ limit: queuePageSize, page: queuePage, filter }),
@@ -62,6 +64,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
     // Danh sách MKTer lấy từ SỔ NHÂN SỰ dùng chung — cùng không gian khoá với `ad_spends.marketer_id`
     // và `order_attributions.marketer_id`, nên người khai ở đây chắc chắn khớp người trong báo cáo.
     listMarketerOptions(),
+    // "Cần anh quyết" gửi nhóm Quản lý — khoá riêng, mặc định TẮT.
+    getSettingJson<OwnerDigestConfig>(OWNER_DIGEST_CONFIG_KEY, DEFAULT_OWNER_DIGEST_CONFIG),
   ]);
   const visibleCases = queue.cases;
   const canConfig = can(user, "alerts:manage");
@@ -218,6 +222,7 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
             hasLarkBillingSecret={Boolean(config.larkBillingSecret)}
             hasLarkInventorySecret={Boolean(config.larkInventorySecret)}
             hasLarkManagerSecret={Boolean(config.larkManagerSecret)}
+            ownerDigestEnabled={ownerDigest.enabled === true}
           />
         </SectionCard>
       ) : null}
