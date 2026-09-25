@@ -296,6 +296,13 @@ export function preConfirmCancelBucketSql(hoursExpr: string): string {
   return `case when ${hoursExpr} is null or ${hoursExpr} < 0 then '?' ${arms.join(" ")} else '?' end`;
 }
 
+/** Bản TypeScript của `preConfirmCancelBucketSql` — cùng danh sách khoảng, dùng khi đã có số giờ trong bộ nhớ. */
+export function cancelAgeBucket(hours: number | null): PreConfirmCancelBucketKey | null {
+  if (hours === null || !Number.isFinite(hours) || hours < 0) return null;
+  for (const b of PRE_CONFIRM_CANCEL_BUCKETS) if (hours >= b.minHours && (b.maxHours === null || hours < b.maxHours)) return b.key;
+  return null;
+}
+
 export type ConversionDimension = "employee" | "source" | "product" | "day" | "hour";
 
 export const CONVERSION_DIMENSION_LABEL: Record<ConversionDimension, string> = {

@@ -14,6 +14,7 @@ import { getAttributionCoverage, getFunnelBySource, getSalesFunnel } from "@/lib
 import { getStaffPerformance } from "@/lib/queries/staff-performance";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { RoleTabs } from "@/app/(dashboard)/reports/funnel/role-tabs";
+import { CancelAnalysisSection } from "@/app/(dashboard)/reports/funnel/cancel-section";
 import {
   ConversionByDimensionSection,
   LeakageSection,
@@ -113,6 +114,9 @@ export default async function FunnelPage({ searchParams }: { searchParams: Promi
 
       {/* ───────── ĐƠN KẸT Ở BƯỚC NÀO, KẸT BAO LÂU ───────── */}
       <StuckStepsSection period={params.period} />
+
+      {/* ───────── ĐƠN HUỶ: MẤT THẬT HAY ĐÃ CÓ ĐƠN THAY ───────── */}
+      <CancelAnalysisSection period={params.period} />
 
       {/* ───────── THEO KÊNH ───────── */}
       <SectionCard

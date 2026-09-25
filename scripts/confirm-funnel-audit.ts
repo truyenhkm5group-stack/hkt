@@ -13,6 +13,10 @@
   Nhánh ops vẫn bọc `ma_hoa_ket_qua`. CHỈ ĐỌC do Postgres ép (ERP_READ_ONLY), cùng khuôn với
   `cod-statement-audit` / `stock-wait-summary`.
 
+  Bổ sung 25/09/2026 (chủ shop hỏi "đã lọc trùng chưa" và "báo cáo đơn huỷ sau xác nhận"): in thêm
+  phân tích đơn huỷ của `getCancelAnalysis` — mất thật hay đã có đơn thay (luật đơn trùng), huỷ sau
+  bao lâu, huỷ sau xác nhận ở khâu nào. Vẫn chỉ số đếm, không một dòng đơn nào.
+
   arg: `--days=N` (mặc định 90, trần 365) — kỳ lọc theo ngày lên đơn.
 */
 const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("confirm-funnel-audit.ts"));
@@ -23,6 +27,8 @@ import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { PANCAKE_ORDER_STATUS } from "@/lib/constants/pancake";
 import { addDays, todayVN } from "@/lib/format";
+import { CANCEL_MATCHES, CANCEL_MATCH_LABEL, POST_CONFIRM_STAGES, POST_CONFIRM_STAGE_LABEL } from "@/lib/constants/cancel-analysis";
+import { getCancelAnalysis, type CancelAnalysis, type CancelSide } from "@/lib/queries/cancel-analysis";
 import { getConversionByDimension, getConversionFunnel, type ConversionFunnel } from "@/lib/queries/conversion-funnel";
 import { rowsOf } from "@/lib/sql-rows";
 import type { Period } from "@/lib/search-params";
@@ -42,6 +48,25 @@ export type DimLine = { label: string; created: number; confirmed: number; preCa
 
 const pct = (a: number, b: number) => (b > 0 ? `${((a / b) * 100).toFixed(1)}%` : "—");
 const gio = (h: number | null) => (h === null ? "—" : h < 1 ? `${Math.round(h * 60)} phút` : h < 48 ? `${h.toFixed(1)} giờ` : `${(h / 24).toFixed(1)} ngày`);
+
+function sideLines(title: string, x: CancelSide, windowHours: number): string[] {
+  return [
+    `${title}: ${x.total} đơn (xoá ${x.deleted}) · MẤT THẬT ${x.lost} · đã có đơn thay ${x.replaced} · trung vị tuổi lúc huỷ ${gio(x.medianAgeHours)} (đo được ${x.ageMeasured})`,
+    `  ${CANCEL_MATCHES.map((k) => `${CANCEL_MATCH_LABEL[k]}: ${x.byMatch[k]} (7 ngày: ${x.byMatchWide[k]})`).join(" · ")} — cửa sổ ${windowHours} giờ`,
+    `  tuổi lúc huỷ: ${x.ageBuckets.map((b) => `${b.label}: ${b.count}`).join(" · ")}`,
+  ];
+}
+
+/** Phân tích đơn huỷ — số tổng hợp. Hàm THUẦN. */
+export function cancelAnalysisLines(a: CancelAnalysis): string[] {
+  return [
+    ...sideLines("HUỶ TRƯỚC XÁC NHẬN", a.pre, a.windowHours),
+    ...sideLines("HUỶ SAU XÁC NHẬN (tuổi tính từ lúc xác nhận)", a.post, a.windowHours),
+    `  huỷ ở khâu: ${POST_CONFIRM_STAGES.map((k) => `${POST_CONFIRM_STAGE_LABEL[k]}: ${a.post.byStage[k]}`).join(" · ")} · từng chờ hàng: ${a.post.waitedStock}`,
+    "THEO NGUỒN: nguồn · huỷ trước XN (mất thật) · huỷ sau XN (mất thật)",
+    ...a.bySource.map((r) => `  ${r.label} · ${r.pre} (${r.preLost}) · ${r.post} (${r.postLost})`),
+  ];
+}
 
 /** Mọi dòng tóm tắt. Hàm THUẦN — bài kiểm gọi thẳng. */
 export function confirmAuditLines(days: number, oldDef: OldDefinition, f: ConversionFunnel, bySource: DimLine[], byHour: DimLine[]): string[] {
@@ -109,15 +134,21 @@ async function main() {
   const toKey = todayVN();
   const fromKey = addDays(toKey, -(days - 1));
   const period: Period = { key: "custom", from: new Date(`${fromKey}T00:00:00+07:00`), to: new Date(`${toKey}T23:59:59.999+07:00`), label: `${days} ngày`, fromKey, toKey };
-  const [oldDef, f, src, hour] = await Promise.all([
+  const [oldDef, f, src, hour, huy] = await Promise.all([
     oldDefinition(period.from as Date, period.to as Date),
     getConversionFunnel(period),
     getConversionByDimension(period, "source"),
     getConversionByDimension(period, "hour"),
+    getCancelAnalysis(period, { fresh: true }),
   ]);
   const dim = (rows: typeof src.rows): DimLine[] =>
     rows.map((r) => ({ label: r.label, created: r.created, confirmed: r.confirmed, preCancel: r.cancelledBeforeConfirm, postCancel: r.cancelledAfterConfirm, medianHoursToPreCancel: r.medianHoursToPreConfirmCancel }));
-  for (const line of confirmAuditLines(days, oldDef, f, dim(src.rows), dim(hour.rows))) tomTat(line);
+  // Phân tích đơn huỷ chèn TRƯỚC phần theo giờ: phần theo giờ đứng cuối để nếu chạm trần 60 dòng
+  // thì mất phần ít quan trọng nhất.
+  const head = confirmAuditLines(days, oldDef, f, dim(src.rows), dim(hour.rows));
+  const hourAt = head.findIndex((l) => l.startsWith("THEO GIỜ"));
+  const lines = hourAt < 0 ? [...head, ...cancelAnalysisLines(huy)] : [...head.slice(0, hourAt), ...cancelAnalysisLines(huy), ...head.slice(hourAt)];
+  for (const line of lines.slice(0, AUDIT_MAX_LINES)) tomTat(line.slice(0, 300));
   process.exit(0);
 }
 
