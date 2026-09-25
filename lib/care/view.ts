@@ -33,6 +33,11 @@ export type CareStateLike = {
    * `undefined` = chưa đọc được ⇒ coi như không có tin mới, tức giữ nguyên hành vi cũ.
    */
   carrierNewsAfterLastRound?: boolean;
+  /**
+   * ĐVVC báo một lần GIAO HỤT MỚI sau lúc đội chốt kết quả gần nhất (mốc `DELIVERY_FAILED` mới nhất
+   * của kiện muộn hơn `lastDecision.at`). `undefined` = chưa đọc được ⇒ coi như KHÔNG có.
+   */
+  carrierFailedAfterDecision?: boolean;
 };
 
 /**
@@ -45,6 +50,33 @@ export type CareStateLike = {
 export function teamWorkEnded(care: CareStateLike): boolean {
   const d = care.lastDecision?.decision;
   return d !== undefined && d !== null && DECISION_ENDS_TEAM_WORK[d] === true;
+}
+
+/**
+ * ═══════════ KẾT QUẢ ĐÃ CHỐT ⇒ CA NẰM Ở "ĐANG CHỜ KẾT QUẢ", KHÔNG Ở "CẦN CARE" ═══════════
+ *
+ * Chủ shop báo 25/09/2026 (tối): ca có kết quả "Phát tiếp", trạng thái "Chờ phát lại", vẫn đứng ở
+ * "Cần care" vì giờ hẹn đã qua / ĐVVC có tin mới. Chủ shop chốt: ca đã xử lý và có kết quả trên
+ * ERP thì về "Đang chờ kết quả" (hoặc "Đã xử lý"), không ở "Cần care".
+ *
+ *  · "Đã hoàn"   — đội hết việc, chờ chứng từ ĐVVC (`teamWorkEnded`).
+ *  · "Phát tiếp" — đội đã làm phần mình, chờ bưu tá phát lại. Giờ hẹn qua hay tin ĐVVC thường
+ *                  (trung chuyển, chờ xử lý…) KHÔNG kéo ca về; "Quá hẹn" vẫn hiện trên dòng và lọc
+ *                  được ở tab chờ. Chỉ một lần GIAO HỤT MỚI sau lúc bấm mới là việc mới
+ *                  (`carrierFailedAfterDecision`) ⇒ ca về "Cần care" để người quyết lại.
+ *  · "Xử lý sau" — chính là một cái hẹn: tới giờ thì phải quay lại, giữ luật giờ hẹn như cũ.
+ *
+ * Chỉ áp khi ca ĐANG CHỜ (`CARE_WAITING_STATUSES`). Người đổi sang "Đang xử lý" là người đang cầm
+ * việc ⇒ về "Cần care" như thường.
+ */
+export function decisionParksCase(care: CareStateLike): boolean {
+  if (teamWorkEnded(care)) return true;
+  return care.lastDecision?.decision === "CARE_CONTINUE_DELIVERY" && care.carrierFailedAfterDecision !== true;
+}
+
+/** Ca đang chờ có được nằm yên ở "Đang chờ kết quả" không — một vị từ cho góc nhìn, SLA và bộ lọc. */
+export function waitingHolds(care: CareStateLike, now: Date): boolean {
+  return CARE_WAITING_STATUSES.includes(care.status) && (decisionParksCase(care) || followUpStillHolds(care, now));
 }
 
 /**
@@ -124,8 +156,7 @@ export function careViewOf(care: CareStateLike, queueSince: Date, now = new Date
       người — chờ chứng từ ĐVVC). Trộn hai thứ đó lại thì nhân viên mở một ca đã chốt và gọi lại
       khách, đúng việc chủ shop báo ngày 22/09/2026.
     */
-    if (teamWorkEnded(care)) return { view: "waiting", reopened: false };
-    return { view: followUpStillHolds(care, now) ? "waiting" : "care", reopened: false };
+    return { view: waitingHolds(care, now) ? "waiting" : "care", reopened: false };
   }
   if (care.status === "ESCALATED") return { view: "escalated", reopened: false };
   if (CARE_TERMINAL_STATUSES.includes(care.status)) {
@@ -192,7 +223,7 @@ export function slaOf(queueSince: Date, care: CareStateLike, now = new Date(), h
   // qua, không có giờ hẹn, hoặc ĐVVC đã nói thêm điều gì sau lượt cuối ⇒ đồng hồ chạy tiếp. CÙNG
   // một vị từ với `careViewOf`: ca nào rời "Đang chờ" thì đồng hồ của nó cũng phải chạy lại, nếu
   // không thì nó nằm ở Cần care mà mãi mãi không bao giờ vỡ hạn.
-  const paused = CARE_WAITING_STATUSES.includes(care.status) && followUpStillHolds(care, now);
+  const paused = waitingHolds(care, now);
   return {
     firstResponseDueAt,
     resolveDueAt,

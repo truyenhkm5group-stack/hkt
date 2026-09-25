@@ -1,9 +1,9 @@
-import { CARE_SLA_SOON_FRACTION, CARE_TERMINAL_STATUSES, CARE_WAITING_STATUSES } from "@/lib/constants/care";
+import { CARE_SLA_SOON_FRACTION, CARE_TERMINAL_STATUSES } from "@/lib/constants/care";
 import { CARE_DATE_KEYS, matchesCareDate, parseCareDateFilter, type CareDateFilter, type CareDateKey } from "@/lib/constants/care-dates";
 import { followUpBucket, type FollowUpFilterKey, type ResolutionFilterKey } from "@/lib/constants/care-resolution";
 import { careRoundBand, type CareRoundBand } from "@/lib/constants/care-rounds";
 import type { CareCase } from "@/lib/care/contracts";
-import { DEFAULT_CARE_SLA_HOURS, followUpStillHolds, teamResponded, teamWorkEnded, type CareSlaHours, type CareStateLike } from "@/lib/care/view";
+import { DEFAULT_CARE_SLA_HOURS, teamResponded, teamWorkEnded, waitingHolds, type CareSlaHours, type CareStateLike } from "@/lib/care/view";
 
 /**
  * ═══════════ MỘT LUẬT LỌC, DÙNG CHO CẢ BẢNG LẪN CON SỐ TRÊN CHIP ═══════════
@@ -60,9 +60,19 @@ export const CARE_SLA_BUCKET_HINT: Record<CareSlaBucket, string> = {
  * `history` không có ⇒ CẢ HAI trường để `undefined`, tức là CHƯA ĐỌC ĐƯỢC ⇒ hành vi cũ. Không bao
  * giờ dịch nó thành `null` (= "đã đọc, không có lượt nào"), vì đó là một khẳng định (luật 42).
  */
-export function careStateFor(c: Pick<CareCase, "care" | "history">): CareStateLike {
+export function careStateFor(c: Pick<CareCase, "care" | "history"> & { carrier?: Pick<CareCase["carrier"], "lastFailedAt"> }): CareStateLike {
   const h = c.history;
-  return h ? { ...c.care, firstRoundAt: h.firstRoundAt, carrierNewsAfterLastRound: h.carrierNewsAfterLastRound } : c.care;
+  const base: CareStateLike = h ? { ...c.care, firstRoundAt: h.firstRoundAt, carrierNewsAfterLastRound: h.carrierNewsAfterLastRound } : c.care;
+  return { ...base, carrierFailedAfterDecision: failedAfterDecision(c.carrier?.lastFailedAt ?? null, c.care.lastDecision?.at ?? null) };
+}
+
+/**
+ * Lần giao hụt mới nhất có MUỘN HƠN lúc đội chốt kết quả không. Nhận cả chuỗi lẫn `Date` vì dữ liệu
+ * đi qua ranh giới máy chủ → trình duyệt; thiếu một trong hai mốc ⇒ KHÔNG (chưa có gì mới để làm).
+ */
+export function failedAfterDecision(lastFailedAt: Date | string | null | undefined, decidedAt: Date | string | null | undefined): boolean {
+  if (!lastFailedAt || !decidedAt) return false;
+  return new Date(lastFailedAt).getTime() > new Date(decidedAt).getTime();
 }
 
 /**
@@ -91,7 +101,7 @@ export function careSlaBucket(c: Pick<CareCase, "queueSince" | "care" | "sla" | 
   */
   const responded = teamResponded(care, c.queueSince);
   const closed = CARE_TERMINAL_STATUSES.includes(care.status) || care.status === "ESCALATED" || teamWorkEnded(care);
-  const paused = CARE_WAITING_STATUSES.includes(care.status) && followUpStillHolds(care, now);
+  const paused = waitingHolds(care, now);
 
   const live: number[] = [];
   if (!responded) live.push(hours.firstResponseHours);
