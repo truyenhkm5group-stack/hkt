@@ -3,7 +3,20 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
+import { guardWithinScope, withApprovalExecution } from "@/lib/approvals/execution";
+import {
+  approvalExecutedDedupeKey,
+  confirmApprovalExecution,
+  decideApprovalCore,
+  guardSecondApprovalCore,
+  releaseApprovalExecution,
+  type ApprovalUser,
+  type GuardInput,
+} from "@/lib/approvals/service";
+import { APPROVAL_ENFORCE_KEY } from "@/lib/constants/approval";
+import { DOMAIN_EVENT_BY_NAME } from "@/lib/constants/domain-events";
 import { REQUIRE_APPROVED_DESIGN_KEY } from "@/lib/constants/production-os";
+import { writeStockReceiptCore } from "@/lib/inventory/receipt-create";
 import { transitionModelCore } from "@/lib/models/service";
 import { requireApprovedDesignFlag } from "@/lib/queries/production-os";
 import { getSettingJson, mergeSettingJson, setSettingJson } from "@/lib/settings";
@@ -17,6 +30,7 @@ import { createTopicCore } from "@/lib/production/topics";
  * Mỗi mục một khối, mỗi khối khoá đúng chỗ hở mà một agent khác đã báo:
  *  1. Vòng đời mẫu đi theo TRONG giao dịch nghiệp vụ (yêu cầu của C, handoff-c mục 5).
  *  2. `getSettingJson` đọc được giá trị nguyên thuỷ mà không đổi một khoá object nào (C báo).
+ *  3. Lời duyệt không mất khi thao tác được duyệt hỏng; `approval.executed` LIVE (G, handoff-g mục 4).
  *
  * Dữ liệu mang tiền tố `cos-k-` / mã `COSK`; không mốc tuyệt đối, không cửa sổ "N giờ trước" (luật 50, 65).
  */
@@ -299,4 +313,211 @@ export async function testHardeningSettingsPrimitive(db: Db) {
   }
 
   console.log(`✓ Company OS · K2: getSettingJson đọc được boolean / số / chuỗi (khác kiểu ⇒ mặc định) · ${khoaObject.size} khoá object × ${mauDaLuu.length} dạng giá trị = ${soSanh} phép so, Y NHƯ luật cũ · cờ bản duyệt của C đi qua bộ đọc chung`);
+}
+
+// ─────────────────────────── 3. LỜI DUYỆT KHÔNG MẤT KHI THAO TÁC HỎNG ───────────────────────────
+
+type DongDuyet = typeof schema.approvalRequests.$inferSelect;
+
+async function yeuCau(db: Db, id: string): Promise<DongDuyet> {
+  const [r] = await db.select().from(schema.approvalRequests).where(eq(schema.approvalRequests.id, id));
+  return r;
+}
+
+async function demSuKienDuyet(db: Db, id: string): Promise<number> {
+  const [r] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.domainEvents).where(and(eq(schema.domainEvents.name, "approval.executed"), eq(schema.domainEvents.subjectId, id)));
+  return Number(r.n);
+}
+
+/** Thân các export trong một tệp "use server" — cắt theo `\nexport ` kế tiếp. */
+function thanCacHam(src: string): { name: string; body: string }[] {
+  const out: { name: string; body: string }[] = [];
+  const re = /^export async function (\w+)\(/gm;
+  const vt: { name: string; at: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src))) vt.push({ name: m[1], at: m.index });
+  vt.forEach((v, i) => out.push({ name: v.name, body: src.slice(v.at, i + 1 < vt.length ? vt[i + 1].at : undefined) }));
+  return out;
+}
+
+/**
+ * Nơi gọi cổng mà CHƯA thanh toán theo kết quả — khai tường minh, kèm lý do. Một lời gọi mới không bọc
+ * mà không khai ở đây là ĐỎ.
+ */
+const CONG_CHUA_THANH_TOAN: Record<string, string> = {
+  "lib/actions/return-dispositions.ts:setReturnDisposition":
+    "thuộc vùng Agent R đang sửa song song (lib/returns/*, return_dispositions) — cổng chạy IMMEDIATE như cũ; nêu ở handoff-k mục mở",
+};
+
+export async function testHardeningApprovalExecution(db: Db) {
+  const R = `${P}xin`;
+  const A = `${P}duyet`;
+  await db
+    .insert(schema.users)
+    .values([
+      { id: R, email: "cos-k-xin@test.local", name: "Người xin K", passwordHash: "x", role: "LEADER" },
+      { id: A, email: "cos-k-duyet@test.local", name: "Người duyệt K", passwordHash: "x", role: "MANAGER" },
+    ])
+    .onConflictDoNothing();
+  const xin: ApprovalUser = { id: R, email: "cos-k-xin@test.local" };
+  const [cauHinhCu] = await db.select().from(schema.settings).where(eq(schema.settings.key, APPROVAL_ENFORCE_KEY));
+  await db
+    .insert(schema.settings)
+    .values({ key: APPROVAL_ENFORCE_KEY, value: JSON.stringify({ v: 2, groups: { INVENTORY_ADJUSTMENT: true, EXPENSE_EDIT: true } }) })
+    .onConflictDoUpdate({ target: schema.settings.key, set: { value: JSON.stringify({ v: 2, groups: { INVENTORY_ADJUSTMENT: true, EXPENSE_EDIT: true } }) } });
+
+  let so = 0;
+  const viec = (): GuardInput => ({ group: "EXPENSE_EDIT", action: "expense.update", entity: "EXPENSE", entityId: `${P}chi-${++so}`, summary: "Sửa khoản chi kiểm K", amount: 9_000_000, payload: { so } });
+  /** Xin + người khác duyệt ⇒ id yêu cầu đã APPROVED cho đúng việc `v`. */
+  const duocDuyet = async (v: GuardInput): Promise<string> => {
+    const g = await guardSecondApprovalCore(db, xin, v);
+    assert.equal(g.mode, "NEEDS_APPROVAL", "tiền đề: cưỡng chế bật ⇒ phải xin");
+    const d = await decideApprovalCore(db, { id: A, email: "cos-k-duyet@test.local", canDecide: true }, g.requestId!, true, undefined);
+    assert.ok("ok" in d);
+    return g.requestId!;
+  };
+
+  try {
+    // ── (a) DEFERRED · thao tác xong ⇒ EXECUTED + đúng một approval.executed ──
+    const v1 = viec();
+    const id1 = await duocDuyet(v1);
+    const r1 = await withApprovalExecution(async () => {
+      const g = await guardWithinScope(db, xin, v1);
+      assert.ok(g.consumed && g.settlement === "DEFERRED", "trong phạm vi thanh toán ⇒ tiêu thụ GIỮ CHỖ");
+      assert.equal((await yeuCau(db, id1)).status, "EXECUTED", "giữ chỗ: lật EXECUTED ngay để lượt đồng thời không lấy được");
+      assert.equal(await demSuKienDuyet(db, id1), 0, "sự kiện CHƯA phát khi thao tác chưa xong");
+      return { ok: true as const };
+    });
+    assert.ok("ok" in r1);
+    const sau1 = await yeuCau(db, id1);
+    assert.deepEqual([sau1.status, sau1.executionError], ["EXECUTED", null]);
+    assert.equal(await demSuKienDuyet(db, id1), 1, "thao tác xong ⇒ đúng một approval.executed");
+    const [ev1] = await db.select().from(schema.domainEvents).where(eq(schema.domainEvents.dedupeKey, approvalExecutedDedupeKey(id1)));
+    assert.deepEqual([ev1.subjectType, ev1.actorKind, ev1.actorId, ev1.modelId], ["approval_request", "USER", R, null]);
+    assert.equal(DOMAIN_EVENT_BY_NAME["approval.executed"].status, "LIVE");
+    assert.equal((await confirmApprovalExecution(db, id1, xin)).eventId, null, "khẳng định lại ⇒ trùng khoá, không sự kiện thứ hai");
+    assert.equal(await releaseApprovalExecution(db, id1, "muộn", xin), false, "lượt đã khẳng định xong KHÔNG bao giờ bị hồi sinh");
+    assert.equal((await yeuCau(db, id1)).status, "EXECUTED");
+
+    // ── (b) DEFERRED · thao tác trả { error } ⇒ lời duyệt trả lại + execution_error; làm lại không cần xin lại ──
+    const v2 = viec();
+    const id2 = await duocDuyet(v2);
+    const hong = await withApprovalExecution(async () => {
+      const g = await guardWithinScope(db, xin, v2);
+      assert.ok(g.consumed);
+      return { error: "Khoản chi vừa bị khoá sổ — ghi không được" };
+    });
+    assert.ok("error" in hong);
+    const sau2 = await yeuCau(db, id2);
+    assert.deepEqual([sau2.status, sau2.executedAt, sau2.executionError], ["APPROVED", null, "Khoản chi vừa bị khoá sổ — ghi không được"], "thao tác hỏng ⇒ lời duyệt còn nguyên, kèm câu lỗi");
+    assert.equal(await demSuKienDuyet(db, id2), 0, "không có sự kiện 'đã thực hiện' cho việc chưa chạy");
+    const lai = await withApprovalExecution(async () => {
+      const g = await guardWithinScope(db, xin, v2);
+      assert.ok(g.consumed && g.requestId === id2, "làm lại ĐÚNG việc ⇒ dùng lại ĐÚNG lời duyệt cũ");
+      return { ok: true as const };
+    });
+    assert.ok("ok" in lai);
+    const sau2b = await yeuCau(db, id2);
+    assert.deepEqual([sau2b.status, sau2b.executionError], ["EXECUTED", null], "lần sau xong ⇒ EXECUTED, câu lỗi cũ xoá");
+    assert.equal(await demSuKienDuyet(db, id2), 1);
+
+    // ── (c) DEFERRED · thao tác NÉM ⇒ như trên, lỗi vẫn nổi lên ──
+    const v3 = viec();
+    const id3 = await duocDuyet(v3);
+    await assert.rejects(
+      () =>
+        withApprovalExecution(async () => {
+          await guardWithinScope(db, xin, v3);
+          throw new Error("mất kết nối giữa chừng");
+        }),
+      /mất kết nối/,
+    );
+    const sau3 = await yeuCau(db, id3);
+    assert.deepEqual([sau3.status, sau3.executionError], ["APPROVED", "mất kết nối giữa chừng"]);
+
+    // ── (d) Hai lượt ĐỒNG THỜI trong phạm vi thanh toán: đúng một lượt tiêu thụ ──
+    const v4 = viec();
+    const id4 = await duocDuyet(v4);
+    const hai = await Promise.all(
+      [0, 1].map(() =>
+        withApprovalExecution(async () => {
+          const g = await guardWithinScope(db, xin, v4);
+          return g.consumed ? { ok: true as const } : { error: `không tiêu thụ (${g.mode})` };
+        }),
+      ),
+    );
+    assert.equal(hai.filter((x) => "ok" in x).length, 1, "đồng thời chỉ MỘT lượt thắng");
+    assert.equal((await yeuCau(db, id4)).status, "EXECUTED");
+    assert.equal(await demSuKienDuyet(db, id4), 1);
+
+    // ── (e) Ngoài phạm vi (IMMEDIATE): hành vi cũ + sự kiện trong CÙNG giao dịch với lượt lật ──
+    const v5 = viec();
+    const id5 = await duocDuyet(v5);
+    const g5 = await guardSecondApprovalCore(db, xin, v5);
+    assert.ok(g5.consumed && g5.settlement === "IMMEDIATE");
+    assert.equal(await demSuKienDuyet(db, id5), 1);
+
+    // ── (f) IN_TRANSACTION · phiếu kho thật: phiếu hỏng ⇒ lời duyệt còn; phiếu xong ⇒ lật + sự kiện cùng giao dịch ──
+    await db.insert(schema.products).values({ id: `${P}p-kho`, name: "Đầm COSK kho", customId: "COSKKHO" }).onConflictDoNothing();
+    await db.insert(schema.productVariants).values({ id: `${P}v-kho`, productId: `${P}p-kho`, sku: "COSKKHO-M", color: "Đen", size: "M" }).onConflictDoNothing();
+    const nguoiKho = { id: R, label: "Người xin K" };
+    const congKho: GuardInput = { group: "INVENTORY_ADJUSTMENT", action: "stock.adjustment", entity: "STOCK_RECEIPT", summary: "Điều chỉnh kiểm kê COSK", amount: null, payload: { ref: `${P}kk-1` } };
+    const phieu = (variantId: string) => ({
+      kind: "ADJUSTMENT" as const,
+      receipt: { receivedAt: new Date(), reference: `${P}kk-1`, supplier: "", supplierId: null, productionOrderId: null, productionBatchId: null, note: "", totalQuantity: 2, totalCost: 0, createdBy: "Người xin K" },
+      lines: [{ variantId, quantity: 2, unitCost: 0, shipmentId: null }],
+      note: "",
+      actor: nguoiKho,
+      approver: xin,
+      gate: congKho,
+    });
+    const demPhieu = async () => Number((await db.select({ n: sql<number>`count(*)::int` }).from(schema.stockReceipts).where(eq(schema.stockReceipts.reference, `${P}kk-1`)))[0].n);
+    const xinKho = await writeStockReceiptCore(db, phieu(`${P}v-kho`));
+    assert.ok("error" in xinKho && xinKho.gate?.mode === "NEEDS_APPROVAL", "cưỡng chế bật ⇒ phiếu dừng ở cổng, yêu cầu được ghi");
+    assert.equal(await demPhieu(), 0);
+    const idKho = xinKho.gate!.requestId!;
+    assert.equal((await yeuCau(db, idKho)).status, "PENDING", "yêu cầu ghi trong giao dịch vẫn còn sau khi phiếu dừng");
+    await decideApprovalCore(db, { id: A, email: "cos-k-duyet@test.local", canDecide: true }, idKho, true, undefined);
+    // Phiếu hỏng GIỮA giao dịch (dòng trỏ mẫu mã không tồn tại ⇒ khoá ngoại) — SAU khi cổng đã tiêu thụ.
+    await assert.rejects(() => writeStockReceiptCore(db, phieu(`${P}v-khong-co`)));
+    const sauHong = await yeuCau(db, idKho);
+    assert.equal(sauHong.status, "APPROVED", "phiếu hỏng ⇒ lượt tiêu thụ huỷ theo giao dịch, lời duyệt còn nguyên");
+    assert.ok((sauHong.executionError ?? "").length > 0, "câu lỗi được ghi lại cho người xin / người duyệt");
+    assert.equal(await demSuKienDuyet(db, idKho), 0);
+    assert.equal(await demPhieu(), 0, "không phiếu nửa vời");
+    const xong = await writeStockReceiptCore(db, phieu(`${P}v-kho`));
+    assert.ok("ok" in xong && xong.gate?.consumed && xong.gate.settlement === "IN_TRANSACTION", "làm lại ⇒ dùng đúng lời duyệt, tiêu thụ TRONG giao dịch phiếu");
+    const sauXong = await yeuCau(db, idKho);
+    assert.deepEqual([sauXong.status, sauXong.executionError], ["EXECUTED", null]);
+    assert.equal(await demSuKienDuyet(db, idKho), 1);
+    assert.equal(await demPhieu(), 1);
+    const lan3 = await writeStockReceiptCore(db, phieu(`${P}v-kho`));
+    assert.ok("error" in lan3 && lan3.gate?.mode === "NEEDS_APPROVAL", "lời duyệt dùng một lần — lần ba phải xin lại");
+    assert.equal(await demPhieu(), 1, "không phiếu thứ hai");
+    const nhatKy = await db.select({ action: schema.auditLogs.action }).from(schema.auditLogs).where(eq(schema.auditLogs.entityId, idKho));
+    assert.ok(nhatKy.some((x) => x.action === "approval.execute:stock.adjustment"), "nhật ký cổng ghi SAU khi giao dịch chốt");
+    assert.ok(nhatKy.some((x) => x.action === "approval.execute_failed:stock.adjustment"), "lượt hỏng để lại dòng nhật ký");
+
+    // ── (g) Cổng trong giao dịch mà không hoãn nhật ký ⇒ lỗi lập trình (khoá chết trên PGlite) ──
+    await assert.rejects(() => db.transaction((tx) => guardSecondApprovalCore(tx, xin, viec())), /auditSink/);
+
+    // ── (h) Quét mã nguồn: mọi action gọi cổng đều thanh toán theo kết quả ──
+    const chuaBoc: string[] = [];
+    const tep = execSync("git ls-files lib/actions", { encoding: "utf8" }).split("\n").map((f) => f.trim()).filter((f) => f.endsWith(".ts") && f !== "lib/actions/approvals.ts");
+    for (const f of tep) {
+      const khongChuThich = readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+      for (const h of thanCacHam(khongChuThich)) {
+        if (!/\bguardSecondApproval\b/.test(h.body)) continue;
+        const boc = /^export async function \w+\([^]*?\{\s*\n\s*return withApprovalExecution\(async \(\) => \{/.test(h.body);
+        if (!boc && !(`${f}:${h.name}` in CONG_CHUA_THANH_TOAN)) chuaBoc.push(`${f}:${h.name}`);
+      }
+    }
+    assert.deepEqual(chuaBoc, [], "action gọi guardSecondApproval phải bọc thân bằng withApprovalExecution (hoặc khai ở CONG_CHUA_THANH_TOAN kèm lý do)");
+    assert.ok(!/^\s*["']use server["'];?\s*$/m.test(readFileSync("lib/approvals/execution.ts", "utf8")),"hàm trả lời duyệt về APPROVED KHÔNG được là server action");
+  } finally {
+    if (cauHinhCu) await db.update(schema.settings).set({ value: cauHinhCu.value }).where(eq(schema.settings.key, APPROVAL_ENFORCE_KEY));
+    else await db.delete(schema.settings).where(eq(schema.settings.key, APPROVAL_ENFORCE_KEY));
+  }
+
+  console.log("✓ Company OS · K3: lời duyệt không mất khi thao tác hỏng — giữ chỗ rồi thanh toán theo kết quả (xong ⇒ approval.executed; { error } / ném ⇒ APPROVED + execution_error) · phiếu kho tiêu thụ TRONG giao dịch · đồng thời một lượt thắng · lượt đã xong không hồi sinh · mọi action gọi cổng đều thanh toán");
 }

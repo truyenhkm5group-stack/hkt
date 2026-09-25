@@ -28,6 +28,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { guardSecondApproval } from "@/lib/actions/approvals";
+import { withApprovalExecution } from "@/lib/approvals/execution";
 import { can, requireUser } from "@/lib/auth/session";
 import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import {
@@ -50,63 +51,65 @@ const schemaIn = z.object({
 });
 
 export async function movePayrollRun(input: unknown): Promise<RunActionResult> {
-  const user = await requireUser();
-  const parsed = schemaIn.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const { periodKey, basis, action, reason } = parsed.data;
-  const spec = PAYROLL_ACTION_SPEC[action];
+  return withApprovalExecution(async () => {
+    const user = await requireUser();
+    const parsed = schemaIn.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const { periodKey, basis, action, reason } = parsed.data;
+    const spec = PAYROLL_ACTION_SPEC[action];
 
-  // 1 · QUYỀN. Nút cũng ẩn theo đúng quyền này, nhưng máy chủ vẫn kiểm: một cái nút ẩn không phải
-  //     một lớp bảo vệ, nó chỉ là một lời gợi ý.
-  if (!can(user, spec.permission) || !canAdministerPayroll(user, true)) {
-    return {
-      error:
-        spec.permission === "payroll:approve"
-          ? `“${spec.label}” cần quyền DUYỆT LƯƠNG. Quyền khai báo lương không tự mang theo quyền duyệt — người khai số và người duyệt số không nên là một.`
-          : `“${spec.label}” cần quyền khai báo lương.`,
-    };
-  }
+    // 1 · QUYỀN. Nút cũng ẩn theo đúng quyền này, nhưng máy chủ vẫn kiểm: một cái nút ẩn không phải
+    //     một lớp bảo vệ, nó chỉ là một lời gợi ý.
+    if (!can(user, spec.permission) || !canAdministerPayroll(user, true)) {
+      return {
+        error:
+          spec.permission === "payroll:approve"
+            ? `“${spec.label}” cần quyền DUYỆT LƯƠNG. Quyền khai báo lương không tự mang theo quyền duyệt — người khai số và người duyệt số không nên là một.`
+            : `“${spec.label}” cần quyền khai báo lương.`,
+      };
+    }
 
-  // 2 · LÝ DO BẮT BUỘC cho những việc làm đổi một kỳ đã có số.
-  if (spec.requiresReason && reason.length < 3) {
-    return { error: `“${spec.label}” bắt buộc ghi LÝ DO. Không có lý do thì người đọc sau chỉ biết là “có gì đó đã đổi”.` };
-  }
+    // 2 · LÝ DO BẮT BUỘC cho những việc làm đổi một kỳ đã có số.
+    if (spec.requiresReason && reason.length < 3) {
+      return { error: `“${spec.label}” bắt buộc ghi LÝ DO. Không có lý do thì người đọc sau chỉ biết là “có gì đó đã đổi”.` };
+    }
 
-  const db = await getDb();
-  const p = schema.payrollPeriods;
-  const [row] = await db.select().from(p).where(and(eq(p.periodKey, periodKey), eq(p.basis, basis))).limit(1);
-  if (!row) return { error: "Kỳ này chưa có bản ghi nào. Bấm “Tính & chụp ảnh kỳ” trước." };
-  const current = normalizePayrollStatus(row.status);
+    const db = await getDb();
+    const p = schema.payrollPeriods;
+    const [row] = await db.select().from(p).where(and(eq(p.periodKey, periodKey), eq(p.basis, basis))).limit(1);
+    if (!row) return { error: "Kỳ này chưa có bản ghi nào. Bấm “Tính & chụp ảnh kỳ” trước." };
+    const current = normalizePayrollStatus(row.status);
 
-  // 3 · BẢNG CHUYỂN TRẠNG THÁI — cùng một bảng mà màn hình dùng để quyết định hiện nút nào.
-  if (!canTransition(current, action)) {
-    return { error: `Kỳ đang ở trạng thái “${current}” nên không làm được việc “${spec.label}”.` };
-  }
+    // 3 · BẢNG CHUYỂN TRẠNG THÁI — cùng một bảng mà màn hình dùng để quyết định hiện nút nào.
+    if (!canTransition(current, action)) {
+      return { error: `Kỳ đang ở trạng thái “${current}” nên không làm được việc “${spec.label}”.` };
+    }
 
-  // 4 · NGƯỜI THỨ HAI, cho ba việc mà một mình quyết là quá nhiều quyền.
-  if (spec.secondApproval) {
-    const cong = await guardSecondApproval({
-      group: "PAYROLL_EDIT",
-      action: `payroll.run.${action.toLowerCase()}`,
-      entity: "PAYROLL_PERIOD",
-      entityId: `${periodKey}:${basis}`,
-      summary: `${spec.label} — kỳ ${periodKey}, cơ sở ${PAYROLL_BASIS_SHORT[basis]}${reason ? ` · lý do: ${reason}` : ""}`,
-      amount: null,
-      payload: { periodKey, basis, action, reason },
-    });
-    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
-  }
+    // 4 · NGƯỜI THỨ HAI, cho ba việc mà một mình quyết là quá nhiều quyền.
+    if (spec.secondApproval) {
+      const cong = await guardSecondApproval({
+        group: "PAYROLL_EDIT",
+        action: `payroll.run.${action.toLowerCase()}`,
+        entity: "PAYROLL_PERIOD",
+        entityId: `${periodKey}:${basis}`,
+        summary: `${spec.label} — kỳ ${periodKey}, cơ sở ${PAYROLL_BASIS_SHORT[basis]}${reason ? ` · lý do: ${reason}` : ""}`,
+        amount: null,
+        payload: { periodKey, basis, action, reason },
+      });
+      if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+      if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    }
 
-  /*
-    KHOÁ TÊN, ĐỌC LẠI TRONG KHOÁ, BẢNG CHUYỂN TRẠNG THÁI và NHẬT KÝ nằm ở lõi dùng chung
-    (`lib/payroll/run-service.ts`) — máy tự động đi CÙNG cửa ấy cho hai bước nó được phép.
-    Phần ở trên (quyền · lý do · người thứ hai) chỉ có nghĩa khi có một NGƯỜI đang bấm.
-  */
-  const r = await transitionPayrollRunAs({ id: user.id, email: user.email }, { periodKey, basis, action, reason });
-  if ("error" in r) return r;
-  revalidatePath("/payroll");
-  revalidatePath("/payroll/runs");
-  revalidatePath("/payroll/autopilot");
-  return { ok: true, status: r.status, sideEffects: r.sideEffects };
+    /*
+      KHOÁ TÊN, ĐỌC LẠI TRONG KHOÁ, BẢNG CHUYỂN TRẠNG THÁI và NHẬT KÝ nằm ở lõi dùng chung
+      (`lib/payroll/run-service.ts`) — máy tự động đi CÙNG cửa ấy cho hai bước nó được phép.
+      Phần ở trên (quyền · lý do · người thứ hai) chỉ có nghĩa khi có một NGƯỜI đang bấm.
+    */
+    const r = await transitionPayrollRunAs({ id: user.id, email: user.email }, { periodKey, basis, action, reason });
+    if ("error" in r) return r;
+    revalidatePath("/payroll");
+    revalidatePath("/payroll/runs");
+    revalidatePath("/payroll/autopilot");
+    return { ok: true, status: r.status, sideEffects: r.sideEffects };
+  });
 }

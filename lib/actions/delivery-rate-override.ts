@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { guardSecondApproval } from "@/lib/actions/approvals";
+import { withApprovalExecution } from "@/lib/approvals/execution";
 import { audit } from "@/lib/audit";
 import { clearMemo } from "@/lib/cache";
 import { can, requireUser } from "@/lib/auth/session";
@@ -50,90 +51,94 @@ async function docGiaDinh(): Promise<ProfitAssumptions> {
 }
 
 export async function setDeliveryRateOverride(input: unknown): Promise<{ ok: true } | { error: string }> {
-  const user = await requireUser();
-  if (!can(user, "reports:assumptions")) return { error: "Không có quyền" };
-  const parsed = schema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const { productId, deliveryRate, reason, mode } = parsed.data;
+  return withApprovalExecution(async () => {
+    const user = await requireUser();
+    if (!can(user, "reports:assumptions")) return { error: "Không có quyền" };
+    const parsed = schema.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const { productId, deliveryRate, reason, mode } = parsed.data;
 
-  const before = await docGiaDinh();
-  if (mode === "PERMANENT") {
-    const cong = await guardSecondApproval({
-      group: "BUSINESS_RULE_CHANGE",
-      action: "reports.deliveryRateOverride",
+    const before = await docGiaDinh();
+    if (mode === "PERMANENT") {
+      const cong = await guardSecondApproval({
+        group: "BUSINESS_RULE_CHANGE",
+        action: "reports.deliveryRateOverride",
+        entity: "SETTINGS",
+        entityId: `${PROFIT_ASSUMPTIONS_KEY}#${productId}`,
+        summary: `Ghi đè VĨNH VIỄN tỷ lệ giao thành công của mã ${productId} = ${deliveryRate}%`,
+        amount: null,
+        payload: { productId, deliveryRate, reason, truoc: before.overrides?.[productId] ?? null },
+      });
+      if (cong.mode === "NEEDS_APPROVAL") return { error: `Ghi đè vĩnh viễn cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
+      if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Ghi đè vĩnh viễn cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    }
+
+    const entry: StoredDeliveryRateOverride = {
+      // LƯU TỶ LỆ HOÀN, không phải GTC: mọi dòng đã có trong `settings` là tỷ lệ hoàn, và trộn hai
+      // quy ước trong cùng một bản đồ là cách chắc chắn để một ngày nào đó đọc ngược con số.
+      returnRate: Math.min(100, Math.max(0, 100 - deliveryRate)),
+      mode,
+      reason,
+      setAt: new Date().toISOString(),
+      setBy: user.email,
+    };
+    const overrides = { ...(before.overrides ?? {}), [productId]: entry };
+    await setSettingJson(PROFIT_ASSUMPTIONS_KEY, { ...before, overrides });
+    await audit({
+      userId: user.id,
+      userEmail: user.email,
+      action: "SETTINGS_UPDATE",
       entity: "SETTINGS",
       entityId: `${PROFIT_ASSUMPTIONS_KEY}#${productId}`,
-      summary: `Ghi đè VĨNH VIỄN tỷ lệ giao thành công của mã ${productId} = ${deliveryRate}%`,
-      amount: null,
-      payload: { productId, deliveryRate, reason, truoc: before.overrides?.[productId] ?? null },
+      detail: { productId, before: before.overrides?.[productId] ?? null, after: entry },
     });
-    if (cong.mode === "NEEDS_APPROVAL") return { error: `Ghi đè vĩnh viễn cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
-    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Ghi đè vĩnh viễn cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
-  }
-
-  const entry: StoredDeliveryRateOverride = {
-    // LƯU TỶ LỆ HOÀN, không phải GTC: mọi dòng đã có trong `settings` là tỷ lệ hoàn, và trộn hai
-    // quy ước trong cùng một bản đồ là cách chắc chắn để một ngày nào đó đọc ngược con số.
-    returnRate: Math.min(100, Math.max(0, 100 - deliveryRate)),
-    mode,
-    reason,
-    setAt: new Date().toISOString(),
-    setBy: user.email,
-  };
-  const overrides = { ...(before.overrides ?? {}), [productId]: entry };
-  await setSettingJson(PROFIT_ASSUMPTIONS_KEY, { ...before, overrides });
-  await audit({
-    userId: user.id,
-    userEmail: user.email,
-    action: "SETTINGS_UPDATE",
-    entity: "SETTINGS",
-    entityId: `${PROFIT_ASSUMPTIONS_KEY}#${productId}`,
-    detail: { productId, before: before.overrides?.[productId] ?? null, after: entry },
+    // Báo cáo được nhớ đệm 120 giây; người vừa bấm lưu phải thấy ngay tỷ lệ mới.
+    clearMemo();
+    revalidatePath("/reports");
+    return { ok: true };
   });
-  // Báo cáo được nhớ đệm 120 giây; người vừa bấm lưu phải thấy ngay tỷ lệ mới.
-  clearMemo();
-  revalidatePath("/reports");
-  return { ok: true };
 }
 
 /** Bỏ ghi đè — mã quay về thang bậc tự động (số đo / co ngót / tỷ lệ khai). */
 export async function clearDeliveryRateOverride(productId: string): Promise<{ ok: true } | { error: string }> {
-  const user = await requireUser();
-  if (!can(user, "reports:assumptions")) return { error: "Không có quyền" };
-  if (!productId) return { error: "Thiếu mã hàng" };
-  const before = await docGiaDinh();
-  const cu = before.overrides?.[productId];
-  if (cu === undefined) return { ok: true };
+  return withApprovalExecution(async () => {
+    const user = await requireUser();
+    if (!can(user, "reports:assumptions")) return { error: "Không có quyền" };
+    if (!productId) return { error: "Thiếu mã hàng" };
+    const before = await docGiaDinh();
+    const cu = before.overrides?.[productId];
+    if (cu === undefined) return { ok: true };
 
-  // Gỡ một ghi đè VĨNH VIỄN cũng là đổi luật đọc số: nó trả mã về cho máy đo, và con số lợi nhuận
-  // của mọi kỳ đã in đổi theo. Cùng cổng với lúc đặt nó.
-  if (parseDeliveryRateOverride(cu)?.mode === "PERMANENT") {
-    const cong = await guardSecondApproval({
-      group: "BUSINESS_RULE_CHANGE",
-      action: "reports.deliveryRateOverride.clear",
+    // Gỡ một ghi đè VĨNH VIỄN cũng là đổi luật đọc số: nó trả mã về cho máy đo, và con số lợi nhuận
+    // của mọi kỳ đã in đổi theo. Cùng cổng với lúc đặt nó.
+    if (parseDeliveryRateOverride(cu)?.mode === "PERMANENT") {
+      const cong = await guardSecondApproval({
+        group: "BUSINESS_RULE_CHANGE",
+        action: "reports.deliveryRateOverride.clear",
+        entity: "SETTINGS",
+        entityId: `${PROFIT_ASSUMPTIONS_KEY}#${productId}`,
+        summary: `Bỏ ghi đè VĨNH VIỄN tỷ lệ giao thành công của mã ${productId}`,
+        amount: null,
+        payload: { productId, truoc: cu },
+      });
+      if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
+      if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    }
+
+    const overrides = { ...(before.overrides ?? {}) };
+    delete overrides[productId];
+    await setSettingJson(PROFIT_ASSUMPTIONS_KEY, { ...before, overrides });
+    await audit({
+      userId: user.id,
+      userEmail: user.email,
+      action: "SETTINGS_UPDATE",
       entity: "SETTINGS",
       entityId: `${PROFIT_ASSUMPTIONS_KEY}#${productId}`,
-      summary: `Bỏ ghi đè VĨNH VIỄN tỷ lệ giao thành công của mã ${productId}`,
-      amount: null,
-      payload: { productId, truoc: cu },
+      detail: { productId, before: cu, after: null },
     });
-    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
-    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
-  }
-
-  const overrides = { ...(before.overrides ?? {}) };
-  delete overrides[productId];
-  await setSettingJson(PROFIT_ASSUMPTIONS_KEY, { ...before, overrides });
-  await audit({
-    userId: user.id,
-    userEmail: user.email,
-    action: "SETTINGS_UPDATE",
-    entity: "SETTINGS",
-    entityId: `${PROFIT_ASSUMPTIONS_KEY}#${productId}`,
-    detail: { productId, before: cu, after: null },
+    // Báo cáo được nhớ đệm 120 giây; người vừa bấm lưu phải thấy ngay tỷ lệ mới.
+    clearMemo();
+    revalidatePath("/reports");
+    return { ok: true };
   });
-  // Báo cáo được nhớ đệm 120 giây; người vừa bấm lưu phải thấy ngay tỷ lệ mới.
-  clearMemo();
-  revalidatePath("/reports");
-  return { ok: true };
 }

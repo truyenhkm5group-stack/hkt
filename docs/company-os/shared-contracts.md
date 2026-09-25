@@ -108,7 +108,7 @@ NGHIỆP VỤ) · `recorded_at` default now(). Chỉ mục: `(model_id, occurred
 | `production_order.linked_design` · `production_plan.overridden` | C | LIVE |
 | `stock_receipt.linked_production` | D | RESERVED (D chỉ thêm cột ở Wave 1) |
 | `return.disposition_set` | E | LIVE |
-| `approval.executed` | G | RESERVED |
+| `approval.executed` | G | LIVE từ Agent K (`lib/approvals/service.ts`) — phát CÙNG giao dịch với lượt ghi trạng thái yêu cầu: lật `EXECUTED` khi cổng đứng trong giao dịch nghiệp vụ, hoặc lượt khẳng định sau khi action xong (`withApprovalExecution`); khoá chống trùng `approval.executed:<id yêu cầu>`; `model_id` NULL |
 | `recommendation.decided` | H | LIVE |
 
 ## 3. Việc (`work_items`) — nguồn mới

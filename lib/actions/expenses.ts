@@ -2,6 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import { guardSecondApproval } from "@/lib/actions/approvals";
+import { withApprovalExecution } from "@/lib/approvals/execution";
 import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
@@ -19,81 +20,85 @@ function firstIssue(error: { issues: { message: string }[] }) {
 // ───────────────────────── Chi phí ─────────────────────────
 
 export async function createExpense(input: unknown): Promise<ActionResult> {
-  const user = await requireUser();
-  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
-  const parsed = expenseSchema.safeParse(input);
-  if (!parsed.success) return { error: firstIssue(parsed.error) };
-  const data = parsed.data;
-  // Khoản ĐIỀU CHỈNH là khoản DUY NHẤT được phép vượt qua luật chống trừ hai lần (cước / phí hoàn),
-  // nên nó bắt buộc phải nói vì sao. CSDL cũng chặn, đây là lớp báo lỗi thân thiện hơn.
-  if (data.costSource === "MANUAL_ADJUSTMENT" && !data.reason.trim()) {
-    return { error: "Khoản điều chỉnh phải ghi rõ lý do vì sao nó không nằm trong cước theo vận đơn" };
-  }
-  {
-    // Tạo một khoản chi lớn đổi kết quả kinh doanh của kỳ y như sửa hay xoá nó — bản trước chỉ gác
-    // hai đường sau, nên một người vẫn dựng được khoản 50 triệu mà không ai duyệt. Cùng nhóm, cùng ngưỡng.
-    const cong = await guardSecondApproval({
-      group: "EXPENSE_EDIT",
-      action: "expense.create",
-      entity: "EXPENSE",
-      summary: `Tạo khoản chi ${data.description} · ${data.amount}đ`,
-      amount: Math.abs(data.amount),
-      payload: data,
-    });
-    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
-  }
-  const db = await getDb();
-  const [row] = await db
-    .insert(schema.expenses)
-    .values({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, costSource: data.costSource, reason: data.reason, createdBy: user.email })
-    .returning({ id: schema.expenses.id });
-  await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_CREATE", entity: "EXPENSE", entityId: row.id, detail: data });
-  for (const p of ["/expenses", "/ads"]) revalidatePath(p);
-  revalidatePath("/reports");
-  revalidatePath("/");
-  return { ok: true, id: row.id };
+  return withApprovalExecution(async () => {
+    const user = await requireUser();
+    if (!can(user, "expenses:write")) return { error: "Không có quyền" };
+    const parsed = expenseSchema.safeParse(input);
+    if (!parsed.success) return { error: firstIssue(parsed.error) };
+    const data = parsed.data;
+    // Khoản ĐIỀU CHỈNH là khoản DUY NHẤT được phép vượt qua luật chống trừ hai lần (cước / phí hoàn),
+    // nên nó bắt buộc phải nói vì sao. CSDL cũng chặn, đây là lớp báo lỗi thân thiện hơn.
+    if (data.costSource === "MANUAL_ADJUSTMENT" && !data.reason.trim()) {
+      return { error: "Khoản điều chỉnh phải ghi rõ lý do vì sao nó không nằm trong cước theo vận đơn" };
+    }
+    {
+      // Tạo một khoản chi lớn đổi kết quả kinh doanh của kỳ y như sửa hay xoá nó — bản trước chỉ gác
+      // hai đường sau, nên một người vẫn dựng được khoản 50 triệu mà không ai duyệt. Cùng nhóm, cùng ngưỡng.
+      const cong = await guardSecondApproval({
+        group: "EXPENSE_EDIT",
+        action: "expense.create",
+        entity: "EXPENSE",
+        summary: `Tạo khoản chi ${data.description} · ${data.amount}đ`,
+        amount: Math.abs(data.amount),
+        payload: data,
+      });
+      if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+      if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    }
+    const db = await getDb();
+    const [row] = await db
+      .insert(schema.expenses)
+      .values({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, costSource: data.costSource, reason: data.reason, createdBy: user.email })
+      .returning({ id: schema.expenses.id });
+    await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_CREATE", entity: "EXPENSE", entityId: row.id, detail: data });
+    for (const p of ["/expenses", "/ads"]) revalidatePath(p);
+    revalidatePath("/reports");
+    revalidatePath("/");
+    return { ok: true, id: row.id };
+  });
 }
 
 export async function updateExpense(id: string, input: unknown): Promise<ActionResult> {
-  const user = await requireUser();
-  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
-  if (!id) return { error: "Thiếu mã chi phí" };
-  const parsed = expenseSchema.safeParse(input);
-  if (!parsed.success) return { error: firstIssue(parsed.error) };
-  const data = parsed.data;
-  // Khoản ĐIỀU CHỈNH là khoản DUY NHẤT được phép vượt qua luật chống trừ hai lần (cước / phí hoàn),
-  // nên nó bắt buộc phải nói vì sao. CSDL cũng chặn, đây là lớp báo lỗi thân thiện hơn.
-  if (data.costSource === "MANUAL_ADJUSTMENT" && !data.reason.trim()) {
-    return { error: "Khoản điều chỉnh phải ghi rõ lý do vì sao nó không nằm trong cước theo vận đơn" };
-  }
-  const db = await getDb();
-  const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.id, id) });
-  if (!existing) return { error: "Không tìm thấy khoản chi phí" };
-  {
-    // Sửa một khoản chi là đổi kết quả kinh doanh của cả kỳ — so ngưỡng bằng số LỚN HƠN giữa giá trị
-    // cũ và mới, vì hạ một khoản lớn xuống nhỏ cũng rủi ro y như dựng một khoản lớn lên.
-    const cong = await guardSecondApproval({
-      group: "EXPENSE_EDIT",
-      action: "expense.update",
-      entity: "EXPENSE",
-      entityId: id,
-      summary: `Sửa khoản chi ${existing.description} · ${existing.amount}đ → ${data.amount}đ`,
-      amount: Math.max(Math.abs(existing.amount), Math.abs(data.amount)),
-      payload: { truoc: existing, sau: data },
-    });
-    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
-  }
-  await db
-    .update(schema.expenses)
-    .set({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, costSource: data.costSource, reason: data.reason })
-    .where(eq(schema.expenses.id, id));
-  await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_UPDATE", entity: "EXPENSE", entityId: id, detail: { before: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt, reference: existing.reference }, after: data } });
-  for (const p of ["/expenses", "/ads"]) revalidatePath(p);
-  revalidatePath("/reports");
-  revalidatePath("/");
-  return { ok: true, id };
+  return withApprovalExecution(async () => {
+    const user = await requireUser();
+    if (!can(user, "expenses:write")) return { error: "Không có quyền" };
+    if (!id) return { error: "Thiếu mã chi phí" };
+    const parsed = expenseSchema.safeParse(input);
+    if (!parsed.success) return { error: firstIssue(parsed.error) };
+    const data = parsed.data;
+    // Khoản ĐIỀU CHỈNH là khoản DUY NHẤT được phép vượt qua luật chống trừ hai lần (cước / phí hoàn),
+    // nên nó bắt buộc phải nói vì sao. CSDL cũng chặn, đây là lớp báo lỗi thân thiện hơn.
+    if (data.costSource === "MANUAL_ADJUSTMENT" && !data.reason.trim()) {
+      return { error: "Khoản điều chỉnh phải ghi rõ lý do vì sao nó không nằm trong cước theo vận đơn" };
+    }
+    const db = await getDb();
+    const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.id, id) });
+    if (!existing) return { error: "Không tìm thấy khoản chi phí" };
+    {
+      // Sửa một khoản chi là đổi kết quả kinh doanh của cả kỳ — so ngưỡng bằng số LỚN HƠN giữa giá trị
+      // cũ và mới, vì hạ một khoản lớn xuống nhỏ cũng rủi ro y như dựng một khoản lớn lên.
+      const cong = await guardSecondApproval({
+        group: "EXPENSE_EDIT",
+        action: "expense.update",
+        entity: "EXPENSE",
+        entityId: id,
+        summary: `Sửa khoản chi ${existing.description} · ${existing.amount}đ → ${data.amount}đ`,
+        amount: Math.max(Math.abs(existing.amount), Math.abs(data.amount)),
+        payload: { truoc: existing, sau: data },
+      });
+      if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+      if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    }
+    await db
+      .update(schema.expenses)
+      .set({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, costSource: data.costSource, reason: data.reason })
+      .where(eq(schema.expenses.id, id));
+    await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_UPDATE", entity: "EXPENSE", entityId: id, detail: { before: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt, reference: existing.reference }, after: data } });
+    for (const p of ["/expenses", "/ads"]) revalidatePath(p);
+    revalidatePath("/reports");
+    revalidatePath("/");
+    return { ok: true, id };
+  });
 }
 
 /**
@@ -158,36 +163,38 @@ export async function setExpenseAllocation(input: unknown): Promise<ActionResult
 }
 
 export async function deleteExpense(id: string): Promise<ActionResult> {
-  const user = await requireUser();
-  if (!can(user, "expenses:write")) return { error: "Không có quyền" };
-  if (!id) return { error: "Thiếu mã chi phí" };
-  const db = await getDb();
-  const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.id, id) });
-  if (!existing) return { error: "Không tìm thấy khoản chi phí" };
-  {
-    const cong = await guardSecondApproval({
-      group: "EXPENSE_EDIT",
-      action: "expense.delete",
-      entity: "EXPENSE",
-      entityId: id,
-      summary: `Xoá khoản chi ${existing.description} · ${existing.amount}đ`,
-      amount: Math.abs(existing.amount),
-      payload: existing,
-    });
-    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
-  }
-  // Gỡ mối nối tiền ↔ khoản chi TRƯỚC khi xoá: để lại là để lại dòng tiền "đã đối chiếu" với một
-  // chứng từ không còn tồn tại, và sổ nghĩa vụ vẫn cộng nó vào "đã trả". Đi qua `lib/finance/linkage`
-  // để ảnh chụp `linked_type/linked_id` của dòng tiền được dựng lại.
-  const goNoi = await removeLinksToTarget("EXPENSE", id);
-  await db.delete(schema.expenses).where(eq(schema.expenses.id, id));
-  await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_DELETE", entity: "EXPENSE", entityId: id, detail: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt, linksRemoved: goNoi } });
-  if (goNoi) revalidatePath("/bank");
-  for (const p of ["/expenses", "/ads"]) revalidatePath(p);
-  revalidatePath("/reports");
-  revalidatePath("/");
-  return { ok: true };
+  return withApprovalExecution(async () => {
+    const user = await requireUser();
+    if (!can(user, "expenses:write")) return { error: "Không có quyền" };
+    if (!id) return { error: "Thiếu mã chi phí" };
+    const db = await getDb();
+    const existing = await db.query.expenses.findFirst({ where: eq(schema.expenses.id, id) });
+    if (!existing) return { error: "Không tìm thấy khoản chi phí" };
+    {
+      const cong = await guardSecondApproval({
+        group: "EXPENSE_EDIT",
+        action: "expense.delete",
+        entity: "EXPENSE",
+        entityId: id,
+        summary: `Xoá khoản chi ${existing.description} · ${existing.amount}đ`,
+        amount: Math.abs(existing.amount),
+        payload: existing,
+      });
+      if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+      if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    }
+    // Gỡ mối nối tiền ↔ khoản chi TRƯỚC khi xoá: để lại là để lại dòng tiền "đã đối chiếu" với một
+    // chứng từ không còn tồn tại, và sổ nghĩa vụ vẫn cộng nó vào "đã trả". Đi qua `lib/finance/linkage`
+    // để ảnh chụp `linked_type/linked_id` của dòng tiền được dựng lại.
+    const goNoi = await removeLinksToTarget("EXPENSE", id);
+    await db.delete(schema.expenses).where(eq(schema.expenses.id, id));
+    await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_DELETE", entity: "EXPENSE", entityId: id, detail: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt, linksRemoved: goNoi } });
+    if (goNoi) revalidatePath("/bank");
+    for (const p of ["/expenses", "/ads"]) revalidatePath(p);
+    revalidatePath("/reports");
+    revalidatePath("/");
+    return { ok: true };
+  });
 }
 
 // ───────────────────────── Quảng cáo ─────────────────────────

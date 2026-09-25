@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { guardSecondApproval } from "@/lib/actions/approvals";
+import { withApprovalExecution } from "@/lib/approvals/execution";
 import { z } from "zod";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
@@ -101,29 +102,31 @@ const payrollConfigSchema = z.object({
 
 /** Lưu người phụ trách chính từng mã và % chủ mã nhận từ đơn đẩy chéo */
 export async function savePayrollConfig(input: unknown): Promise<ActionResult> {
-  const user = await requireUser();
-  if (!canAdministerPayroll(user, can(user, "payroll:manage"))) return { error: "Không có quyền" };
-  const parsed = payrollConfigSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const productOwners = Object.fromEntries(Object.entries(parsed.data.productOwners).filter(([, v]) => Boolean(v)));
-  const pageMarketers = Object.fromEntries(Object.entries(parsed.data.pageMarketers).filter(([k, v]) => Boolean(k) && Boolean(v)));
-  const next = { ownerSharePct: parsed.data.ownerSharePct, productOwners, pageMarketers, productShares: parsed.data.productShares };
-  {
-    // Đổi cơ chế trả công là đổi TIỀN TRẢ CHO NGƯỜI, và người đó có thể chính là người đang sửa.
-    const cong = await guardSecondApproval({
-      group: "PAYROLL_EDIT",
-      action: "payroll.config",
-      entity: "SETTINGS",
-      entityId: PAYROLL_CONFIG_KEY,
-      summary: `Đổi cơ chế trả công · chia chủ mã ${parsed.data.ownerSharePct}% · ${Object.keys(productOwners).length} mã · ${Object.keys(pageMarketers).length} fanpage`,
-      amount: null,
-      payload: next,
-    });
-    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
-  }
-  await setSettingJson(PAYROLL_CONFIG_KEY, next);
-  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: PAYROLL_CONFIG_KEY, detail: { ownerSharePct: parsed.data.ownerSharePct, owners: Object.keys(productOwners).length, pages: Object.keys(pageMarketers).length, shares: Object.keys(parsed.data.productShares).length } });
-  revalidate();
-  return { ok: true };
+  return withApprovalExecution(async () => {
+    const user = await requireUser();
+    if (!canAdministerPayroll(user, can(user, "payroll:manage"))) return { error: "Không có quyền" };
+    const parsed = payrollConfigSchema.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const productOwners = Object.fromEntries(Object.entries(parsed.data.productOwners).filter(([, v]) => Boolean(v)));
+    const pageMarketers = Object.fromEntries(Object.entries(parsed.data.pageMarketers).filter(([k, v]) => Boolean(k) && Boolean(v)));
+    const next = { ownerSharePct: parsed.data.ownerSharePct, productOwners, pageMarketers, productShares: parsed.data.productShares };
+    {
+      // Đổi cơ chế trả công là đổi TIỀN TRẢ CHO NGƯỜI, và người đó có thể chính là người đang sửa.
+      const cong = await guardSecondApproval({
+        group: "PAYROLL_EDIT",
+        action: "payroll.config",
+        entity: "SETTINGS",
+        entityId: PAYROLL_CONFIG_KEY,
+        summary: `Đổi cơ chế trả công · chia chủ mã ${parsed.data.ownerSharePct}% · ${Object.keys(productOwners).length} mã · ${Object.keys(pageMarketers).length} fanpage`,
+        amount: null,
+        payload: next,
+      });
+      if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+      if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    }
+    await setSettingJson(PAYROLL_CONFIG_KEY, next);
+    await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: PAYROLL_CONFIG_KEY, detail: { ownerSharePct: parsed.data.ownerSharePct, owners: Object.keys(productOwners).length, pages: Object.keys(pageMarketers).length, shares: Object.keys(parsed.data.productShares).length } });
+    revalidate();
+    return { ok: true };
+  });
 }

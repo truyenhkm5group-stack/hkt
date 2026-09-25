@@ -50,6 +50,9 @@ import { saveAccessRoleSchema } from "@/lib/validation/access";
 const P = "cosg-";
 
 async function donDep(db: Db) {
+  // Agent K: `approval.executed` đã LIVE — sự kiện của người thử (USER, CHECK cấm actor_id NULL) phải đi
+  // trước tài khoản, nếu không ON DELETE SET NULL đụng CHECK và lượt dọn đổ.
+  await db.delete(schema.domainEvents).where(and(eq(schema.domainEvents.name, "approval.executed"), like(schema.domainEvents.actorId, `${P}%`)));
   await db.delete(schema.auditLogs).where(like(schema.auditLogs.userEmail, `${P}%`));
   await db.delete(schema.approvalRequests).where(like(schema.approvalRequests.requestedByEmail, `${P}%`));
   await db.delete(schema.users).where(like(schema.users.id, `${P}%`));

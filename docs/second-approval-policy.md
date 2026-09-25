@@ -111,8 +111,17 @@ lặp không lối ra. Nay (`lib/approvals/service.ts`):
    kiện tiêu thụ; trạng thái `EXPIRED` được GHI khi người xin chạm lại nhóm đó (không có job định kỳ).
    Hệ quả: yêu cầu quá hạn mà không ai thử lại vẫn đọc `APPROVED` trong CSDL, nhưng không mở khoá gì.
 5. Bấm lại việc đang CHỜ không đẻ yêu cầu thứ hai (chỉ mục duy nhất `approval_pending_fingerprint_uq`).
-6. Giới hạn đã biết: lời duyệt được tiêu thụ TRƯỚC khi thao tác ghi dữ liệu; thao tác hỏng sau đó thì
-   lời duyệt đã mất và phải xin lại (cột `execution_error` chưa được nối).
+6. **Thao tác được duyệt mà hỏng thì lời duyệt KHÔNG mất** (Company OS · Agent K). Hai đường, chọn theo
+   nơi gọi cổng:
+   - Phiếu kho (`createStockReceipt` → `lib/inventory/receipt-create.ts`): cổng đứng TRONG giao dịch ghi
+     phiếu — lật `EXECUTED` + sự kiện `approval.executed` cùng giao dịch với phiếu. Phiếu hỏng ⇒ tất cả
+     huỷ, lời duyệt vẫn `APPROVED`, câu lỗi vào `execution_error`.
+   - Mọi server action khác gọi `guardSecondApproval` trước thân: thân action bọc bằng
+     `withApprovalExecution` (`lib/approvals/execution.ts`). Cổng lật `EXECUTED` để GIỮ CHỖ; action trả
+     `{ error }` hoặc ném ⇒ về lại `APPROVED` + `execution_error` (làm lại không cần xin lại); xong ⇒
+     `approval.executed` phát cùng giao dịch với lượt khẳng định. Lượt đã khẳng định không bao giờ bị hồi sinh.
+   - Ngoại lệ đang mở: `setReturnDisposition` (vùng Agent R) chưa bọc — cổng chạy như cũ (tiêu thụ + sự
+     kiện ngay). Xem `docs/company-os/handoff-k.md`.
 
 Ai duyệt được: quyền `approvals:decide` — ADMIN, MANAGER và người có `settings:manage` LUÔN có (đúng
 tập người cũ); vai trò tuỳ chỉnh không cấp được. Việc chờ duyệt cũng hiện trên `/work` (nguồn
