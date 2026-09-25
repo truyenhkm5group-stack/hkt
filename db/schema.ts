@@ -7421,7 +7421,7 @@ export const recommendationDecisions = pgTable(
     check("recommendation_decisions_decision_check", sql`${t.decision} IN ('ACCEPTED', 'DISMISSED', 'SNOOZED')`),
     check(
       "recommendation_decisions_kind_check",
-      sql`${t.kind} IN ('APPROVAL', 'SAMPLE_REVIEW', 'TOPIC_DECISION', 'ADS_CUT', 'INVENTORY_STOCKOUT', 'PRODUCTION_LATE', 'INVENTORY_REORDER', 'MODEL_SCALE', 'MODEL_EARLY_TOPIC', 'INVENTORY_CLEARANCE')`,
+      sql`${t.kind} IN ('APPROVAL', 'SAMPLE_REVIEW', 'TOPIC_DECISION', 'ADS_CUT', 'SCALE_STOCK_RISK', 'INVENTORY_STOCKOUT', 'PRODUCTION_LATE', 'INVENTORY_REORDER', 'MODEL_SCALE', 'MODEL_EARLY_TOPIC', 'INVENTORY_CLEARANCE', 'STOCK_PUSH')`,
     ),
     check("recommendation_decisions_reason_check", sql`${t.decision} <> 'DISMISSED' OR length(btrim(${t.reason})) > 0`),
     check("recommendation_decisions_snooze_check", sql`(${t.decision} = 'SNOOZED') = (${t.snoozeUntil} IS NOT NULL)`),

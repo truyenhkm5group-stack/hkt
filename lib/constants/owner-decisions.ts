@@ -35,17 +35,21 @@ export const OWNER_DECISION_KINDS = [
   "SAMPLE_REVIEW",
   "TOPIC_DECISION",
   "ADS_CUT",
+  // Agent X: đứng ngay sau CẮT quảng cáo — tiền đang rủi ro NGAY (tăng ngân sách vào hàng sắp hết).
+  "SCALE_STOCK_RISK",
   "INVENTORY_STOCKOUT",
   "PRODUCTION_LATE",
   "INVENTORY_REORDER",
   "MODEL_SCALE",
   "MODEL_EARLY_TOPIC",
   "INVENTORY_CLEARANCE",
+  // Agent X: vòng phản hồi tồn → creative / quảng cáo — không gấp, đứng cuối.
+  "STOCK_PUSH",
 ] as const;
 export type OwnerDecisionKind = (typeof OWNER_DECISION_KINDS)[number];
 
 /** Nguồn đọc — một nguồn có thể sinh nhiều loại (quyết định tồn sinh ba). */
-export const OWNER_DECISION_SOURCES = ["APPROVALS", "SAMPLES", "TOPICS", "ADS_CUT", "MODEL_SCALE", "PRODUCTION_LATE", "INVENTORY"] as const;
+export const OWNER_DECISION_SOURCES = ["APPROVALS", "SAMPLES", "TOPICS", "ADS_CUT", "MODEL_SCALE", "PRODUCTION_LATE", "INVENTORY", "STOCK_FEEDBACK"] as const;
 export type OwnerDecisionSource = (typeof OWNER_DECISION_SOURCES)[number];
 
 export const OWNER_DECISION_SOURCE_LABEL: Record<OwnerDecisionSource, string> = {
@@ -56,6 +60,7 @@ export const OWNER_DECISION_SOURCE_LABEL: Record<OwnerDecisionSource, string> = 
   MODEL_SCALE: "Tín hiệu mẫu",
   PRODUCTION_LATE: "Lệnh sản xuất",
   INVENTORY: "Quyết định vốn tồn",
+  STOCK_FEEDBACK: "Phản hồi tồn → creative / quảng cáo",
 };
 
 export type OwnerDecisionKindSpec = {
@@ -155,6 +160,22 @@ export const OWNER_DECISION_KIND_SPEC: Record<OwnerDecisionKind, OwnerDecisionKi
     requires: ["planning:view"],
     scopeResource: null,
     hint: "Kết luận CLEARANCE_CANDIDATE của trang Quyết định vốn tồn. Tác động = vốn theo giá nhập giải phóng được nếu xả phần vượt mức.",
+  },
+  SCALE_STOCK_RISK: {
+    label: "Đừng tăng ngân sách — sắp hết hàng",
+    source: "STOCK_FEEDBACK",
+    home: "/inventory/planning",
+    requires: ["planning:view", "expenses:view"],
+    scopeResource: "ADS",
+    hint: "Bảng quyết định /ads (chiều mã hàng, 30 ngày, CHỈ mã đã ghép chi) đề nghị TĂNG NGÂN SÁCH trong khi bộ máy tồn nói mẫu mã của mã sẽ hết trước khi lô mới về (STOCKOUT_RISK / đủ bán < thời gian sản xuất). Nói rõ lệnh đặt xưởng đang mở đã phủ hay chưa. Tác động = lãi gộp ƯỚC TÍNH mất nếu để hết hàng. Không tự đổi ngân sách nào.",
+  },
+  STOCK_PUSH: {
+    label: "Tồn chậm — đẩy bằng creative / khách cũ",
+    source: "STOCK_FEEDBACK",
+    home: "/inventory/decisions",
+    requires: ["planning:view"],
+    scopeResource: null,
+    hint: "Mã có mẫu mã BIẾT tồn mà bộ máy tồn kết luận Đang chôn vốn / Nên xả (gộp theo mã hàng). Việc chính: làm creative mới cho mẫu tồn (mở vòng mẫu với ảnh của mã chọn sẵn — máy không tự vẽ); quảng cáo của mã đang CẮT ⇒ đẩy bằng ưu đãi / khách cũ thay vì tăng quảng cáo. Số chi quảng cáo chỉ hiện với người có quyền xem quảng cáo. Tác động = vốn theo giá nhập giải phóng được. Bỏ qua có hiệu lực tới khi tập mẫu mã / kết luận tồn đổi.",
   },
 };
 

@@ -88,6 +88,7 @@ const MOI = [
   "0138_company_os_idea_model",
   "0139_company_os_cockpit",
   "0140_company_os_early_topic",
+  "0141_company_os_stock_feedback",
 ] as const;
 
 /*
@@ -1628,7 +1629,13 @@ export async function testMigrationUpgradePath() {
     // 0140 (Company OS · Agent T): CHECK loại mở rộng cho MODEL_EARLY_TOPIC — loại mới ghi được, loại lạ vẫn bị chặn.
     await client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd6', 'model:PROMISING:x:h', 'MODEL_EARLY_TOPIC', 'ACCEPTED', 'up-uh', '{}')`);
     assert.equal(await dem("select count(*)::int as n from pg_constraint where conname = 'recommendation_decisions_kind_check'"), 1, "0140: đúng MỘT ràng buộc CHECK loại sau khi thay");
-    await client.query(`delete from recommendation_decisions where id in ('up-rd1', 'up-rd6')`);
+    // 0141 (Company OS · Agent X): CHECK loại nhận hai loại của vòng phản hồi tồn → creative / quảng cáo,
+    // loại cũ vẫn nhận, loại lạ vẫn bị chặn (0141 chỉ thay CHECK, không nới nó thành "gì cũng được").
+    await client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd7', 'stock:PUSH:p:x', 'STOCK_PUSH', 'ACCEPTED', 'up-uh', '{}')`);
+    await client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd8', 'stock:SCALE:p:x', 'SCALE_STOCK_RISK', 'ACCEPTED', 'up-uh', '{}')`);
+    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd9', 'stock:x', 'STOCK_LA', 'ACCEPTED', 'up-uh', '{}')`), "0141: loại đề xuất lạ VẪN phải bị CSDL chặn");
+    assert.equal(await dem("select count(*)::int as n from recommendation_decisions where id in ('up-rd1', 'up-rd6', 'up-rd7', 'up-rd8')"), 4, "0141: dòng cũ (kể cả loại của 0140) còn nguyên, hai loại mới ghi được");
+    await client.query(`delete from recommendation_decisions where id in ('up-rd1', 'up-rd6', 'up-rd7', 'up-rd8')`);
     await client.query(`delete from users where id = 'up-uh'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══

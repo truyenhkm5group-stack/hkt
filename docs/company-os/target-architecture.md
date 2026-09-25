@@ -135,7 +135,7 @@ IDEA → CREATIVE → ADS_TESTING ─┬─▶ WINNER → PRODUCTION_DISCUSSION 
 | 8 Xưởng mua vải, sản xuất | `/inventory/workshop` (lô, vải, thanh toán) | lệnh SX trỏ bản duyệt |
 | 9 Xưởng trả hàng, nhập kho | `production_deliveries`, `/inventory/receipts` | phiếu nhập có FK lệnh/lô |
 | 10 Đẩy đơn qua VTP | có đủ | — |
-| 11 Quản lý tồn, đẩy tồn | planning, decisions, slow-moving, outreach | đề xuất xả nối về creative/ads |
+| 11 Quản lý tồn, đẩy tồn | planning, decisions, slow-moving, outreach | **ĐÃ DỰNG (X)**: vòng phản hồi tồn → creative / quảng cáo (`deriveStockFeedback`): tồn chậm ⇒ làm creative mới (`/marketing/creatives?tab=duyet&product=` chọn sẵn ảnh, người bấm Gen) / khách cũ / xem QC; QC đề nghị tăng mà sắp hết hàng ⇒ “đừng tăng ngân sách”. Cockpit `STOCK_PUSH` · `SCALE_STOCK_RISK`, khối Đề xuất trang 360 — xem `handoff-x.md` |
 | 12 Xử lý hoàn, tái nhập | `/inventory/returns` | kết quả SỬA LẠI / HUỶ; trạng thái tồn dẫn xuất |
 | 13 Đơn mới | vòng lặp | trang 360 + cockpit |
 

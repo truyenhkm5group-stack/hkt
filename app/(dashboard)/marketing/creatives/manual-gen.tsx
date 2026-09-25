@@ -39,10 +39,23 @@ export function ManualGenAutoRefresh({ active }: { active: boolean }) {
   ) : null;
 }
 
-export function ManualGenForm({ sources, allowedNow, capReason, disabledReason }: { sources: PixelSourceOption[]; allowedNow: number; capReason: string | null; disabledReason: string | null }) {
+export function ManualGenForm({
+  sources,
+  allowedNow,
+  capReason,
+  disabledReason,
+  initialPhotoId,
+}: {
+  sources: PixelSourceOption[];
+  allowedNow: number;
+  capReason: string | null;
+  disabledReason: string | null;
+  /** Ảnh chọn sẵn (vd `?product=` từ đề xuất đẩy tồn). Chỉ là giá trị khởi đầu — không kích lượt vẽ nào. */
+  initialPhotoId?: string;
+}) {
   const router = useRouter();
   const photos = sources.filter((s) => s.kind === "PRODUCT_PHOTO");
-  const [photoId, setPhotoId] = useState(photos[0]?.id ?? "");
+  const [photoId, setPhotoId] = useState(initialPhotoId && photos.some((s) => s.id === initialPhotoId) ? initialPhotoId : (photos[0]?.id ?? ""));
   const [ownAdId, setOwnAdId] = useState("");
   const [idea, setIdea] = useState("");
   const [pending, start] = useTransition();

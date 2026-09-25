@@ -294,6 +294,7 @@ import { testCompanyOsReturnsDb, testCompanyOsReturnsPure } from "./company-os-r
 import { testCompanyOsE2eLifecycle, testCompanyOsE2ePure } from "./company-os-e2e-lifecycle.test";
 import { testCompanyOsCockpitDb, testCompanyOsCockpitPure } from "./company-os-cockpit.test";
 import { testCompanyOsSignalBatchDb, testCompanyOsSignalBatchSource } from "./company-os-signal-batch.test";
+import { testCompanyOsStockFeedbackDb, testCompanyOsStockFeedbackPure } from "./company-os-stock-feedback.test";
 import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./company-os-owner-digest.test";
 import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
@@ -1931,6 +1932,9 @@ async function main() {
   // Company OS · Agent T: topic sản xuất mở SỚM cho mẫu TRIỂN VỌNG (quy tắc chủ shop 25/09/2026).
   testCompanyOsEarlyTopicPure();
   await testCompanyOsEarlyTopicDb(db);
+  // Company OS · Agent X: vòng phản hồi tồn → creative / quảng cáo (mã `cos-x-` / `COSX-`, tự dọn; một dòng sổ phản ứng append-only giữ nguyên).
+  testCompanyOsStockFeedbackPure();
+  await testCompanyOsStockFeedbackDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();
