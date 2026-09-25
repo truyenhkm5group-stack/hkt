@@ -2,9 +2,10 @@ import Link from "next/link";
 import { SectionCard } from "@/components/ui-bits";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Money } from "@/components/ui-bits";
-import { STOCK_RISK_ACTION, STOCK_RISK_LABEL, STOCK_RISK_TONE, SLOW_MOVING_RULES } from "@/lib/constants/slow-moving";
+import { STOCK_RISK_ACTION, STOCK_RISK_LABEL, STOCK_RISK_TONE } from "@/lib/constants/slow-moving";
+import { SlowMovingRulesEditor } from "@/app/(dashboard)/inventory/planning/slow-moving-rules-editor";
 import { formatNumber } from "@/lib/format";
-import { getSlowMoving } from "@/lib/queries/slow-moving";
+import { getSlowMoving, loadSlowMovingRules } from "@/lib/queries/slow-moving";
 import { pendingReturnedForWarehouse } from "@/lib/returns/warehouse";
 import { cn } from "@/lib/utils";
 
@@ -14,13 +15,15 @@ import { cn } from "@/lib/utils";
  * Bảng bên trên chỉ nhìn cái SẮP HẾT. Nếu chỉ có nó thì shop luôn thấy chỗ cần đổ thêm tiền vào và
  * không bao giờ thấy chỗ tiền đang nằm chết — đó là cách một shop vừa thiếu hàng bán vừa hết vốn.
  */
-export async function SlowMovingSection() {
-  const [report, pendingReturns] = await Promise.all([getSlowMoving(), pendingReturnedForWarehouse().catch(() => null)]);
+export async function SlowMovingSection({ canWrite = false }: { canWrite?: boolean }) {
+  const [report, pendingReturns, resolved] = await Promise.all([getSlowMoving(), pendingReturnedForWarehouse().catch(() => null), loadSlowMovingRules()]);
   const risky = report.rows.filter((r) => r.risk !== "HEALTHY");
-  if (!risky.length && !pendingReturns?.count) return null;
+  const R = report.rules;
 
   return (
     <>
+      {/* Ngưỡng luôn hiện (kể cả khi chưa mẫu nào chạm ngưỡng) — không thấy ngưỡng thì không sửa được. */}
+      <SlowMovingRulesEditor rules={resolved.rules} overridden={resolved.overridden} ignored={resolved.ignored} canWrite={canWrite} />
       {/* HÀNG HOÀN CHỜ ĐẾM — vốn nằm NGOÀI SỔ, khác hẳn vốn nằm chết TRONG sổ ở bảng dưới. */}
       {pendingReturns?.count ? (
         <SectionCard
@@ -47,7 +50,7 @@ export async function SlowMovingSection() {
     <SectionCard
       title={`Vốn đang nằm chết — ${formatNumber(risky.length)} mẫu mã`}
       description={`${Math.round(report.totalExcessValue).toLocaleString("vi-VN")}đ vượt mức cần thiết trên tổng ${Math.round(report.totalStockValue).toLocaleString("vi-VN")}đ vốn tồn · ${report.byRisk.DEAD.count} mẫu chết · ${report.byRisk.EXCESS.count} mẫu thừa`}
-      hint={`Giá trị tính theo GIÁ NHẬP — đây là tiền đã bỏ ra và chưa thu lại, không phải doanh thu có thể thu. Hàng chết = không bán được cái nào trong ${SLOW_MOVING_RULES.deadDays} ngày. Vốn nằm chết = tồn đủ bán quá ${SLOW_MOVING_RULES.excessCoverDays} ngày. Phần "vượt mức" là số vốn nhiều hơn mức đủ bán ${SLOW_MOVING_RULES.healthyCoverDays} ngày. Mẫu mã chưa có phiếu nhập KHÔNG có mặt ở đây: chưa biết tồn thì không kết luận được gì.`}
+      hint={`Giá trị tính theo GIÁ NHẬP — đây là tiền đã bỏ ra và chưa thu lại, không phải doanh thu có thể thu. Hàng chết = không bán được cái nào trong ${R.deadDays} ngày. Vốn nằm chết = tồn đủ bán quá ${R.excessCoverDays} ngày. Phần "vượt mức" là số vốn nhiều hơn mức đủ bán ${R.healthyCoverDays} ngày. Mẫu mã chưa có phiếu nhập KHÔNG có mặt ở đây: chưa biết tồn thì không kết luận được gì.`}
       padded={false}
     >
       <div className="overflow-x-auto">

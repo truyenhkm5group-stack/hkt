@@ -407,3 +407,49 @@ export async function workshopPenaltyByProduct(period: Period): Promise<{ byProd
   }
   return { byProduct, undatedBatches, noProductBatches };
 }
+
+/*
+  ═══ Company OS · Agent D — ĐỌC DANH TÍNH LÔ CHO SỔ KHO (không tiền) ═══
+
+  Sổ đặt xưởng là công nợ / giá thành, nên CHỈ tệp này được chạm bốn bảng của nó
+  (tests/workshop-ledger.test.ts). Ba hàm dưới đây cho sổ kho đúng thứ nó cần — mã lô, trạng thái,
+  số cái — và KHÔNG trả một đồng tiền nào: phiếu nhập nối về lô, và trang 360 đếm hàng đang may.
+*/
+
+export type BatchLinkOption = { id: string; productCode: string; batchNo: number; supplier: string; orderedQty: number };
+
+/** Lô xưởng ĐANG MỞ — ứng viên cho ô "Hàng của lô xưởng" trên phiếu nhập. */
+export async function openBatchLinkOptions(limit = 300): Promise<BatchLinkOption[]> {
+  const db = await getDb();
+  const pb = schema.productionBatches;
+  return db
+    .select({ id: pb.id, productCode: pb.productCode, batchNo: pb.batchNo, supplier: pb.supplier, orderedQty: pb.orderedQty })
+    .from(pb)
+    .where(eq(pb.status, "OPEN"))
+    .orderBy(desc(pb.orderedAt))
+    .limit(limit);
+}
+
+/** Trạng thái + lệnh nối của MỘT lô — để kiểm phiếu nhập gắn vào lô có thật, chưa huỷ. `null` = không có lô đó. */
+export async function batchLinkFacts(id: string): Promise<{ status: string; productionOrderId: string | null } | null> {
+  const db = await getDb();
+  const pb = schema.productionBatches;
+  const [row] = await db.select({ status: pb.status, productionOrderId: pb.productionOrderId }).from(pb).where(eq(pb.id, id));
+  return row ?? null;
+}
+
+/**
+ * Số cái còn trong lô ĐANG MỞ của một mã hàng mà lô CHƯA chia được theo mẫu (không chia hộ — xem
+ * `openBatchQtyByVariant`). Cùng một phép tính với phần theo mẫu, chỉ lọc theo mã hàng.
+ */
+export async function unsplitOpenBatchUnitsForProduct(productId: string): Promise<number> {
+  const ledger = await openBatchQtyByVariantFromLedger();
+  const ids = ledger.unsplit.map((u) => u.batchId);
+  if (!ids.length) return 0;
+  const db = await getDb();
+  const pb = schema.productionBatches;
+  const mine = new Set(
+    (await db.select({ id: pb.id, productId: pb.productId }).from(pb).where(inArray(pb.id, ids))).filter((b) => b.productId === productId).map((b) => b.id),
+  );
+  return ledger.unsplit.filter((u) => mine.has(u.batchId)).reduce((t, u) => t + u.remaining, 0);
+}

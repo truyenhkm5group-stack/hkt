@@ -1975,6 +1975,13 @@ export const stockReceipts = pgTable(
     /** ẢNH CHỤP tên xưởng / nơi mua lúc ghi. Khoá thật là `supplier_id` (`NULL` = phiếu cũ / chưa chọn trong danh mục). */
     supplier: text("supplier").notNull().default(""),
     supplierId: text("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    /**
+     * Company OS · Agent D (0132): phiếu NHẬP HÀNG này nhận hàng của lệnh sản xuất / lô xưởng nào.
+     * `NULL` = chưa khai — KHÔNG backfill (AGENTS.md mục 35): đoán lô cho phiếu cũ theo tên xưởng là
+     * bịa một quy kết. Chỉ phiếu `RECEIPT` được gắn; kiểm tồn tại ở server action.
+     */
+    productionOrderId: text("production_order_id").references(() => productionOrders.id, { onDelete: "set null" }),
+    productionBatchId: text("production_batch_id").references(() => productionBatches.id, { onDelete: "set null" }),
     note: text("note").notNull().default(""),
     totalQuantity: integer("total_quantity").notNull().default(0),
     totalCost: money("total_cost"),
@@ -4021,7 +4028,12 @@ export const productVariantsRelations = relations(productVariants, ({ one, many 
   inventoryHistories: many(inventoryHistories),
   receiptItems: many(stockReceiptItems),
 }));
-export const stockReceiptsRelations = relations(stockReceipts, ({ many }) => ({ items: many(stockReceiptItems) }));
+export const stockReceiptsRelations = relations(stockReceipts, ({ many, one }) => ({
+  items: many(stockReceiptItems),
+  // Company OS · Agent D (0132): phiếu nhập nối về lệnh sản xuất / lô xưởng — NULL = chưa khai.
+  productionOrder: one(productionOrders, { fields: [stockReceipts.productionOrderId], references: [productionOrders.id] }),
+  productionBatch: one(productionBatches, { fields: [stockReceipts.productionBatchId], references: [productionBatches.id] }),
+}));
 export const stockReceiptItemsRelations = relations(stockReceiptItems, ({ one }) => ({
   receipt: one(stockReceipts, { fields: [stockReceiptItems.receiptId], references: [stockReceipts.id] }),
   variant: one(productVariants, { fields: [stockReceiptItems.variantId], references: [productVariants.id] }),
