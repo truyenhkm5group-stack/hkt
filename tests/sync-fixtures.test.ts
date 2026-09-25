@@ -208,6 +208,7 @@ import { testMultiAttemptMoney } from "./multi-attempt-money.test";
 import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
 import { testSuppliersPure, testSuppliersQueries } from "./suppliers.test";
+import { testWorkshopLedgerPure, testWorkshopLedgerQueries } from "./workshop-ledger.test";
 import { testCrm } from "./crm.test";
 import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
@@ -1843,6 +1844,8 @@ async function main() {
   await testPurchasing(db);
   testSuppliersPure();
   await testSuppliersQueries(db);
+  testWorkshopLedgerPure();
+  await testWorkshopLedgerQueries(db);
   await testCrm(db);
   testScenario();
   testAccessControl();

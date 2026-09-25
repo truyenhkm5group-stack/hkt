@@ -75,6 +75,7 @@ const MOI = [
   "0125_cs_semantic_verdicts",
   "0126_payroll_autopilot",
   "0127_stock_wait_log",
+  "0128_workshop_ledger",
 ] as const;
 
 /*

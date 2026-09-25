@@ -426,6 +426,156 @@ export const productionOrders = pgTable(
   (t) => [index("production_orders_product_idx").on(t.productId, t.createdAt)],
 );
 
+/*
+  ═══════════ SỔ ĐẶT XƯỞNG: LÔ SẢN XUẤT · ĐỢT TRẢ HÀNG · ĐỢT VẢI · ĐỢT THANH TOÁN ═══════════
+
+  Thay bảng tính "BÁO CÁO ĐẶT HÀNG" (hai trang Thành phẩm + Vải). Bốn bảng trả lời bốn câu khác nhau:
+  đặt xưởng bao nhiêu (lô) · xưởng đã trả bao nhiêu (đợt trả hàng) · vải mua bao nhiêu tiền (đợt vải) ·
+  đã trả xưởng / nhà vải bao nhiêu (đợt thanh toán).
+
+  ĐÂY LÀ SỔ CÔNG NỢ VÀ GIÁ THÀNH, KHÔNG PHẢI SỔ CHI PHÍ. Giá vốn có ĐÚNG MỘT nguồn được vào lợi nhuận là
+  phiếu kho (AGENTS.md mục 15, `COST_AUTHORITY.COGS = "INVENTORY"`); tiền trả xưởng ghi ở đây mà cũng
+  trừ vào lợi nhuận thì mỗi chiếc áo bị tính giá vốn hai lần. `tests/workshop-ledger.test.ts` quét mã
+  nguồn: không truy vấn lợi nhuận / chi phí / dòng tiền nào được đọc bốn bảng này.
+
+  Chi tiết luật tính ở `lib/constants/workshop-ledger.ts`.
+*/
+
+/** Một lô đặt xưởng may cho một mã hàng — một dòng của trang "Thành phẩm". Khoá tự nhiên: mã hàng + số lô. */
+export const productionBatches = pgTable(
+  "production_batches",
+  {
+    id: id(),
+    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    /** Mã hàng đã chuẩn hoá (cắt khoảng trắng, IN HOA) — cùng với `batch_no` là danh tính của lô. */
+    productCode: text("product_code").notNull(),
+    productName: text("product_name").notNull().default(""),
+    batchNo: integer("batch_no").notNull(),
+    /** Ảnh chụp tên xưởng may; khoá thật là `supplier_id` (NULL = chưa vào danh mục xưởng). */
+    supplier: text("supplier").notNull().default(""),
+    supplierId: text("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    /** Bảng chốt màu × size đã gửi xưởng (nếu có) — nối để hai sổ nói về cùng một lần đặt. */
+    productionOrderId: text("production_order_id").references(() => productionOrders.id, { onDelete: "set null" }),
+    orderedAt: ts("ordered_at").notNull(),
+    orderedQty: integer("ordered_qty").notNull(),
+    /** SL CHỐT THANH TOÁN với xưởng. NULL = CHƯA CHỐT — tiền công tạm tính theo số xưởng đã trả, có nhãn. */
+    agreedQty: integer("agreed_qty"),
+    dueDate: ts("due_date"),
+    /** Đơn giá công (hoặc giá trọn gói khi xưởng lo vải). NULL = CHƯA BIẾT, không phải 0đ. */
+    laborUnitPrice: integer("labor_unit_price"),
+    /** Thưởng (+) / phạt (−) với xưởng, cộng thẳng vào tiền công. */
+    adjustment: integer("adjustment").notNull().default(0),
+    adjustmentNote: text("adjustment_note").notNull().default(""),
+    /**
+     * Ai lo vải: SHOP (shop mua vải, xưởng may công — tiền vải lấy từ các đợt vải gán vào lô) ·
+     * WORKSHOP (xưởng lo vải, đơn giá là giá trọn gói — tiền vải 0đ là THẬT). Phải khai, vì
+     * "chưa gán đợt vải nào" và "vải do xưởng lo" cho ra cùng một con số 0 mà nghĩa ngược nhau.
+     */
+    fabricSource: text("fabric_source").notNull().default("SHOP"),
+    /** OPEN (xưởng đang trả hàng) · DONE (xưởng đã trả xong — do người bấm) · CANCELLED */
+    status: text("status").notNull().default("OPEN"),
+    doneAt: ts("done_at"),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("production_batches_code_no_uq").on(t.productCode, t.batchNo),
+    index("production_batches_ordered_idx").on(t.orderedAt),
+    check("production_batches_status_check", sql`${t.status} IN ('OPEN', 'DONE', 'CANCELLED')`),
+    check("production_batches_fabric_source_check", sql`${t.fabricSource} IN ('SHOP', 'WORKSHOP')`),
+    check("production_batches_qty_check", sql`${t.orderedQty} >= 0 AND ${t.batchNo} > 0 AND (${t.agreedQty} IS NULL OR ${t.agreedQty} >= 0)`),
+    check("production_batches_price_check", sql`${t.laborUnitPrice} IS NULL OR ${t.laborUnitPrice} >= 0`),
+    check("production_batches_code_check", sql`length(trim(${t.productCode})) > 0`),
+  ],
+);
+
+/** Một lần xưởng trả hàng cho một lô ("14/08: 240"). Âm = shop trả lại xưởng hàng lỗi. */
+export const productionDeliveries = pgTable(
+  "production_deliveries",
+  {
+    id: id(),
+    batchId: text("batch_id")
+      .notNull()
+      .references(() => productionBatches.id, { onDelete: "cascade" }),
+    deliveredAt: ts("delivered_at").notNull(),
+    quantity: integer("quantity").notNull(),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [index("production_deliveries_batch_idx").on(t.batchId, t.deliveredAt), check("production_deliveries_qty_check", sql`${t.quantity} <> 0`)],
+);
+
+/** Một lần đặt / nhập vải — một dòng của trang "Vải". Gán vào lô sản xuất nào thì tiền vải vào giá thành lô đó. */
+export const fabricOrders = pgTable(
+  "fabric_orders",
+  {
+    id: id(),
+    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    productCode: text("product_code").notNull().default(""),
+    /** Lô sản xuất dùng vải này. NULL = chưa gán — tiền vải chỉ vào giá thành cấp MÃ, không vào lô nào. */
+    batchId: text("batch_id").references(() => productionBatches.id, { onDelete: "set null" }),
+    supplier: text("supplier").notNull().default(""),
+    supplierId: text("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    /** Vải chính / lót / màu… */
+    description: text("description").notNull().default(""),
+    orderedAt: ts("ordered_at").notNull(),
+    /** Ngày vải về. NULL = CHƯA VỀ. */
+    receivedAt: ts("received_at"),
+    /** Số lượng vải theo `unit` (m, kg, cây…) — có thể lẻ. NULL = không khai. */
+    quantity: doublePrecision("quantity"),
+    unit: text("unit").notNull().default(""),
+    unitPrice: integer("unit_price"),
+    /** Thành tiền theo hoá đơn nhà vải — con số đi vào giá thành và công nợ. */
+    amount: integer("amount").notNull(),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("fabric_orders_batch_idx").on(t.batchId),
+    index("fabric_orders_code_idx").on(t.productCode, t.orderedAt),
+    check("fabric_orders_amount_check", sql`${t.amount} >= 0 AND (${t.quantity} IS NULL OR ${t.quantity} >= 0) AND (${t.unitPrice} IS NULL OR ${t.unitPrice} >= 0)`),
+  ],
+);
+
+/**
+ * Một đợt trả tiền cho xưởng may (gắn LÔ) hoặc cho nhà vải (gắn ĐỢT VẢI) — đúng MỘT trong hai.
+ * DEPOSIT (cọc) và PAYMENT cộng vào "đã trả"; REFUND (bên kia trả lại tiền) trừ ra. Số tiền luôn dương.
+ */
+export const supplierPayments = pgTable(
+  "supplier_payments",
+  {
+    id: id(),
+    batchId: text("batch_id").references(() => productionBatches.id, { onDelete: "restrict" }),
+    fabricOrderId: text("fabric_order_id").references(() => fabricOrders.id, { onDelete: "restrict" }),
+    kind: text("kind").notNull().default("PAYMENT"),
+    amount: integer("amount").notNull(),
+    paidAt: ts("paid_at").notNull(),
+    method: text("method").notNull().default("BANK"),
+    reference: text("reference").notNull().default(""),
+    note: text("note").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("supplier_payments_batch_idx").on(t.batchId),
+    index("supplier_payments_fabric_idx").on(t.fabricOrderId),
+    index("supplier_payments_paid_idx").on(t.paidAt),
+    check("supplier_payments_target_check", sql`(${t.batchId} IS NULL) <> (${t.fabricOrderId} IS NULL)`),
+    check("supplier_payments_kind_check", sql`${t.kind} IN ('DEPOSIT', 'PAYMENT', 'REFUND')`),
+    check("supplier_payments_method_check", sql`${t.method} IN ('BANK', 'CASH', 'OTHER')`),
+    check("supplier_payments_amount_check", sql`${t.amount} > 0`),
+  ],
+);
+
 /** Thông báo / cảnh báo vận hành (đơn chờ xử lý, giao thất bại chờ phát lại, đơn treo…) */
 export const notifications = pgTable(
   "notifications",
