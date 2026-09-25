@@ -11,6 +11,7 @@ import {
   type ModelTimelineDimension,
 } from "@/lib/constants/model-lifecycle";
 import { loadRegistryInputs, planModelRegistry, type RegistryAmbiguous } from "@/lib/models/service";
+import { spendMappedFor } from "@/lib/queries/model-ads";
 import { erpStockExpr, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import type { ListParams } from "@/lib/search-params";
 
@@ -300,7 +301,7 @@ export async function getModelEvidence(model: Pick<ModelDetail, "product" | "des
   const oi = schema.orderItems;
   const khongHuy = notInArray(o.stage, ["CANCELLED", "DELETED"]);
 
-  const [[qc], [don], [lenh], ton] = await Promise.all([
+  const [[qc], [don], [lenh], ton, daGhepChi] = await Promise.all([
     db
       .select({ spend: sql<number>`coalesce(sum(${schema.adSpends.spend}), 0)` })
       .from(schema.adSpends)
@@ -323,11 +324,14 @@ export async function getModelEvidence(model: Pick<ModelDetail, "product" | "des
       .from(schema.productionOrders)
       .where(eq(schema.productionOrders.productId, productId)),
     variantIds.length ? stockOfVariants(variantIds) : Promise.resolve({ known: false, onHand: null }),
+    // Chưa từng ghép chiến dịch nào với mã ⇒ tổng 0 ở trên là "chưa ghép", KHÔNG phải "không tiêu"
+    // (luật 42, 67). Cùng cờ với tóm tắt quảng cáo của B — một nguồn.
+    spendMappedFor(db, productId),
   ]);
 
   return {
     ...base,
-    adSpend30d: Number(qc?.spend ?? 0),
+    adSpend30d: daGhepChi ? Number(qc?.spend ?? 0) : null,
     orders30d: Number(don?.recent ?? 0),
     ordersTotal: Number(don?.total ?? 0),
     draftProductionOrders: Number(lenh?.draft ?? 0),

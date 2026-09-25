@@ -21,7 +21,7 @@ import {
   type SuggestionInput,
   type SuggestionInventoryRow,
 } from "@/lib/constants/model-360";
-import { MODEL_REASON_MIN_LENGTH, MODEL_STATES, type ModelState } from "@/lib/constants/model-lifecycle";
+import { evidenceUnknowns, MODEL_REASON_MIN_LENGTH, MODEL_STATES, observeModelStage, type ModelEvidence, type ModelState } from "@/lib/constants/model-lifecycle";
 import {
   adsVote,
   aggregateProductVerdicts,
@@ -43,6 +43,10 @@ import type { ProductVerdict } from "@/lib/constants/product-verdict";
 import { registerModelFromIdeaCore } from "@/lib/models/idea-link";
 import { getModelLinkedIdeas, getModelOrderOutcome, ideaTimelineEntries, pickModelInventoryRows } from "@/lib/queries/model-360";
 import { getModelSignal } from "@/lib/queries/model-signal";
+import type { AdsDecisionRow } from "@/lib/queries/ads-decision";
+import { buildModelEconomics } from "@/lib/queries/model-economics";
+import { getModelEvidence } from "@/lib/queries/models";
+import type { NominalRow } from "@/lib/queries/profit-nominal";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -248,7 +252,7 @@ function inv(decision: InventoryDecisionKind, o: Partial<SuggestionInventoryRow>
 }
 
 function testSuggestions() {
-  const base: SuggestionInput = { modelId: "m1", declaredState: null, signal: null, ads: null, inventory: null, creativeHref: null, periodQuery: "period=30d" };
+  const base: SuggestionInput = { modelId: "m1", declaredState: null, signal: null, ads: null, inventory: null, creativeHref: null, periodQuery: "period=30d", production: { openTopics: 0 }, canCreateTopic: false };
   assert.deepEqual(deriveModelSuggestions(base), [], "không nguồn nào ⇒ không đề xuất");
 
   // Quảng cáo: chỉ SCALE / CUT với chi ĐÃ ghép.
@@ -287,9 +291,20 @@ function testSuggestions() {
       if (co) {
         assert.equal(out[0].transition?.to, "PRODUCTION_DISCUSSION");
         assert.ok((out[0].transition?.reason.trim().length ?? 0) >= MODEL_REASON_MIN_LENGTH, "lý do điền sẵn phải qua được kiểm tra lý do");
+        assert.equal(out[0].links.length, 0, "không quyền production:write ⇒ không link tạo topic");
+        assert.equal(out[0].caveat, null);
       }
     }
   }
+  // Đã có topic ĐANG MỞ (Agent C) ⇒ KHÔNG đề xuất mở trao đổi sản xuất lần nữa.
+  const thang = { signal: "WINNER" as const, summary: "Quảng cáo: Tăng ngân sách · Mẫu mã: Đáng nhân bản" };
+  assert.equal(deriveModelSuggestions({ ...base, signal: thang, production: { openTopics: 1 } }).length, 0, "topic đang mở ⇒ không đề xuất mở topic");
+  // Có quyền tạo topic ⇒ đề xuất kèm link tạo topic cho đúng mẫu.
+  const coLink = deriveModelSuggestions({ ...base, signal: thang, canCreateTopic: true })[0];
+  assert.deepEqual(coLink.links.map((l) => l.href), ["/production/topics/new?model=m1"]);
+  // Không đọc được sản xuất ⇒ vẫn đề xuất nhưng NÓI RA có thể đã có topic.
+  const chuaBiet = deriveModelSuggestions({ ...base, signal: thang, production: null })[0];
+  assert.ok(chuaBiet && chuaBiet.caveat, "không biết có topic hay chưa ⇒ đề xuất phải kèm lưu ý");
 }
 
 // ─────────────────────────── 3. KHỐI KHÔNG SẬP TRANG · IN SỐ ───────────────────────────
@@ -393,7 +408,20 @@ function testSourceContracts() {
   for (const t of thanKhoi) assert.ok(/loadSource\(|signalOnce\(/.test(t), `khối ${t.slice(0, 30)} phải đọc nguồn qua loadSource`);
   assert.ok(!/from "@\/db"/.test(blocks) && !/from "@\/db"/.test(page), "trang không được truy vấn CSDL trực tiếp — không công thức riêng");
 
-  // Danh sách chờ C / E nói thật: hàm đã export thì dòng chờ phải được gỡ.
+  // C và E đã nối: khối gọi đúng hàm của họ, qua loadSource, và đứng sau Suspense (kiểm ở trên).
+  assert.ok(blocks.includes("getModelProductionSummary(ctx.modelId)"), "khối Sản xuất phải đọc getModelProductionSummary của C");
+  assert.ok(blocks.includes("getModelReturnDispositions(pid)"), "khối Kết cục hàng hoàn phải đọc getModelReturnDispositions của E");
+  assert.ok(/ctx\.canCreateTopic \?/.test(blocks), "nút Tạo topic sản xuất phải gác bằng production:write");
+  assert.ok(page.includes(`canCreateTopic: can(user, "production:write")`), "canCreateTopic phải lấy từ quyền production:write");
+
+  // Một nguồn cho câu hỏi "chi QC này là 0 thật hay chưa ghép": `spendMappedFor` của B.
+  const econ = readFileSync("lib/queries/model-economics.ts", "utf8");
+  assert.ok(econ.includes("spendMapped: ads.attribution.spendMapped"), "kinh tế theo mẫu phải lấy cờ ghép chi từ tóm tắt quảng cáo của B");
+  const modelsQ = readFileSync("lib/queries/models.ts", "utf8");
+  assert.ok(/spendMappedFor\(db, productId\)/.test(modelsQ), "chứng cứ giai đoạn quan sát phải hỏi cùng spendMappedFor");
+  assert.ok(!/async function spendMapped/.test(modelsQ) && !/async function spendMapped/.test(econ), "không được viết bản thứ hai của spendMappedFor");
+
+  // Danh sách chờ nói thật: hàm đã export thì dòng chờ phải được gỡ.
   const lib = listTs("lib").map((f) => [f, readFileSync(f, "utf8")] as const);
   for (const p of MODEL_360_PENDING_SOURCES) {
     const coRoi = lib.filter(([, src]) => new RegExp(`export (async )?function ${p.fn}\\b`).test(src)).map(([f]) => f);
@@ -408,18 +436,70 @@ function testSourceContracts() {
   assert.ok(!/status/.test(strip(link).replace(/\.returning\([^)]*\)/g, "")), "không chạm trạng thái ý tưởng");
 }
 
+// ─────────────────────────── 4b. CHI QC CHƯA GHÉP ⇒ CHƯA BIẾT (F · A) ───────────────────────────
+
+function testUnmappedSpend() {
+  const nominal = {
+    productId: "p", code: "P", orders: 20, adSpend: 0, expectedRevenue: 12_000_000, expectedProfit: 3_000_000, netProfit: 1_000_000,
+    otherCost: 0, salesAfterDiscount: 20_000_000, cpo: 0, deliveryRate: 60, returnRateSource: "projected",
+    cogsUncoveredQty: 0, cogsUnknownQty: 0, expectedCogsEstimated: 0,
+  } as unknown as NominalRow;
+  const decision = {
+    key: "p", bookedOrders: 20, successRate: 60, appliedDeliveryRate: 60, deliveredRevenue: 9_000_000, projectedDeliveredRevenue: 11_000_000,
+    spendKnown: true, spend: 0, costPerOrder: 0, marginRate: 0.4, profitAfterAds: 2_000_000, projectedProfitAfterAds: 2_500_000,
+    breakEvenCpo: 100_000, projectedBreakEvenCpo: 120_000, basis: "ACTUAL",
+  } as unknown as AdsDecisionRow;
+  const period = { key: "all", from: null, to: null, label: "Toàn bộ", fromKey: null, toKey: null } as Period;
+  const mk = (spendMapped: boolean) => buildModelEconomics({ productId: "p", period, nominal, otherCostPercentOfAds: 0, decision, withEstimatedCost: false, spendMapped });
+  const co = mk(true);
+  const chua = mk(false);
+  const ln = (m: typeof co, k: string) => m.lines.find((x) => x.key === k)!;
+  // Phụ thuộc số chi ⇒ CHƯA BIẾT khi chưa ghép; KHÔNG phụ thuộc ⇒ đúng bằng số khi đã ghép.
+  const phuThuocChi = new Set(["adSpend", "cpo", "contributionAfterAds", "contributionPerOrder", "netProfit", "netProfitPerOrder"]);
+  for (const l of co.lines) {
+    const c = ln(chua, l.key);
+    if (phuThuocChi.has(l.key)) {
+      assert.equal(c.estimated.value, null, `${l.key}: chi chưa ghép ⇒ Ước tính null (—), không phải 0 ₫`);
+      assert.equal(c.realized.value, null, `${l.key}: chi chưa ghép ⇒ Thực đạt null`);
+      if (c.projected) assert.equal(c.projected.value, null, `${l.key}: chi chưa ghép ⇒ Tạm tính null`);
+      assert.ok(c.estimated.note, `${l.key}: ô — phải nói vì sao`);
+    } else {
+      assert.equal(c.estimated.value, l.estimated.value, `${l.key}: không phụ thuộc số chi ⇒ giữ nguyên số`);
+      assert.equal(c.realized.value, l.realized.value, `${l.key}: không phụ thuộc số chi ⇒ giữ nguyên số`);
+      assert.equal(c.projected?.value ?? null, l.projected?.value ?? null);
+    }
+  }
+  // Đã ghép ⇒ số của hai bộ máy đứng nguyên (0 ₫ THẬT được in là 0).
+  assert.equal(ln(co, "adSpend").estimated.value, 0);
+  assert.equal(ln(co, "adSpend").realized.value, 0);
+  assert.equal(ln(co, "contributionAfterAds").estimated.value, 3_000_000);
+  assert.equal(ln(co, "contributionAfterAds").realized.value, 2_000_000);
+  assert.equal(ln(co, "netProfit").estimated.value, 1_000_000);
+
+  // Giai đoạn quan sát: chi CHƯA BIẾT không phải chứng cứ; chi dương đã biết mới là chứng cứ.
+  const ev = (adSpend30d: number | null): ModelEvidence => ({ designStatus: null, productRemoved: false, adSpend30d, orders30d: 0, ordersTotal: 0, draftProductionOrders: 0, sentProductionOrders: 0, stockKnown: true, stockOnHand: 0 });
+  assert.equal(observeModelStage(ev(null)).stage, null, "chi chưa biết ⇒ không kết luận đang test quảng cáo");
+  assert.equal(observeModelStage(ev(0)).stage, null);
+  assert.equal(observeModelStage(ev(500_000)).stage, "ADS_TESTING");
+  assert.ok(evidenceUnknowns(ev(null)).some((x) => x.includes("Chi quảng cáo CHƯA BIẾT")), "chi chưa biết phải được nói ra");
+  assert.equal(evidenceUnknowns(ev(0)).length, 0, "0 thật không phải chưa biết");
+  assert.deepEqual(evidenceUnknowns({ ...ev(null), productRemoved: null }), [], "mẫu chưa có sản phẩm ⇒ không cần nói");
+}
+
 export function testCompanyOsModel360Pure() {
   testSignalVotes();
   testSignalTables();
   const n = testSignalExhaustive();
   testSuggestions();
   testSourceContracts();
+  testUnmappedSpend();
   console.log(`✓ Company OS · Model 360 (thuần): bảng tín hiệu ${n} tổ hợp × tồn kho × trạng thái khai · thiếu nguồn thị trường không bao giờ THẮNG · xung đột lấy phía thận trọng · đề xuất không sinh từ dữ liệu thiếu · khối dùng loadSource sau Suspense · danh sách chờ C/E nói thật`);
 }
 
 // ─────────────────────────── 5. CSDL: Ý TƯỞNG → MẪU · MẪU TRỐNG ───────────────────────────
 
 const U = "cos-a2-user";
+const P_ID = "cos-a2-product";
 const I = "cos-a2-idea-";
 const CODE = "A2X";
 
@@ -432,6 +512,8 @@ async function donDep(db: Db) {
     await db.delete(schema.productModels).where(inArray(schema.productModels.id, mau));
   }
   await db.delete(schema.users).where(eq(schema.users.id, U));
+  await db.delete(schema.adSpends).where(eq(schema.adSpends.productId, P_ID));
+  await db.delete(schema.products).where(eq(schema.products.id, P_ID));
 }
 
 export async function testCompanyOsModel360Db(db: Db) {
@@ -507,6 +589,14 @@ export async function testCompanyOsModel360Db(db: Db) {
     assert.equal(o.status, "NO_ORDERS");
     assert.equal(o.booked, 0);
     assert.equal(o.successRate, null, "chưa đơn nào kết thúc ⇒ tỷ lệ là null, không phải 0%");
+
+    // Chứng cứ "Chi QC 30 ngày" (A): mã chưa từng ghép chiến dịch ⇒ null (—); đã ghép (dù chi cũ ngoài 30
+    // ngày) ⇒ 0 THẬT. Dòng chi gieo năm 2001 nên không phụ thuộc đồng hồ.
+    await db.insert(schema.products).values({ id: P_ID, name: "Sản phẩm A2" });
+    const spModel = { product: { id: P_ID, name: "Sản phẩm A2", image: null, customId: null, isRemoved: false, isHidden: false }, design: null };
+    assert.equal((await getModelEvidence(spModel)).adSpend30d, null, "chưa ghép chiến dịch ⇒ chi QC CHƯA BIẾT, không phải 0 ₫");
+    await db.insert(schema.adSpends).values({ id: `${P_ID}-ad`, platform: "facebook", spend: 150_000, spendDate: new Date("2001-02-01T00:00:00Z"), productId: P_ID });
+    assert.equal((await getModelEvidence(spModel)).adSpend30d, 0, "đã ghép, 30 ngày không tiêu ⇒ 0 thật");
 
     // Xoá mẫu ⇒ ý tưởng còn nguyên, chỉ mất liên kết (ON DELETE SET NULL).
     await db.delete(schema.productModelStateHistory).where(eq(schema.productModelStateHistory.modelId, modelId));

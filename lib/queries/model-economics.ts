@@ -3,6 +3,7 @@ import { adsCeiling } from "@/lib/constants/estimated-cost";
 import { BREAK_EVEN_CPO_LABEL, maxAdCostPerOrder } from "@/lib/constants/break-even-cpo";
 import type { DecisionBasis } from "@/lib/constants/ads-decision";
 import { getAdsDecision, type AdsDecisionRow } from "@/lib/queries/ads-decision";
+import { getModelAdsSummary } from "@/lib/queries/model-ads";
 import { getNominalProfitReport, type NominalRow } from "@/lib/queries/profit-nominal";
 import type { Period } from "@/lib/search-params";
 
@@ -133,6 +134,13 @@ export function buildModelEconomics(input: {
   otherCostPercentOfAds: number;
   decision: AdsDecisionRow | null;
   withEstimatedCost: boolean;
+  /**
+   * Bảng chi tiêu đã từng ghép ít nhất một chiến dịch với mã chưa — CÙNG cờ `attribution.spendMapped` của
+   * `getModelAdsSummary` (Agent B), một nguồn cho mọi màn hình. `false` ⇒ hai bộ máy bên dưới đang cộng
+   * chi 0 ₫ cho mã (quy ước của chúng), nên MỌI ô đứng trên số chi (chi, CPO, LN sau QC, LN ròng) là
+   * CHƯA BIẾT — `null`, không phải 0 ₫ (AGENTS.md mục 42, 67). Bắt buộc truyền: không có mặc định ẩn.
+   */
+  spendMapped: boolean;
 }): ModelEconomics {
   const n = input.nominal;
   const d = input.decision;
@@ -148,7 +156,11 @@ export function buildModelEconomics(input: {
   const est = (value: number | null, field: string, note: string | null = null) => economicsCell("ESTIMATED", n ? value : null, `${NOMINAL_SRC} · ${field}`, n ? note : noNominal);
   const real = (value: number | null, field: string, note: string | null = null) => economicsCell("REALIZED", d ? value : null, `${DECISION_SRC} · ${field}`, d ? note : noDecision);
   const proj = (value: number | null, field: string, note: string | null = null) => economicsCell("PROJECTED", d ? value : null, `${DECISION_SRC} · ${field}`, d ? note : noDecision);
-  const spendNote = d && !d.spendKnown ? "Không biết số chi QC của mã trong kỳ" : null;
+  const UNMAPPED_NOTE = "Chưa từng ghép chiến dịch quảng cáo nào với mã — chi QC CHƯA BIẾT (chưa ghép ≠ không tiêu), nên mọi ô đứng trên số chi là —";
+  const estSpendKnown = input.spendMapped;
+  const realSpendKnown = !!d && d.spendKnown && input.spendMapped;
+  const spendNote = !input.spendMapped ? UNMAPPED_NOTE : d && !d.spendKnown ? "Không biết số chi QC của mã trong kỳ" : null;
+  const estSpendNote = estSpendKnown ? null : UNMAPPED_NOTE;
 
   const estOrders = n ? n.orders : null;
   const estContributionBeforeAds = n ? n.expectedProfit + n.adSpend : null;
@@ -194,16 +206,16 @@ export function buildModelEconomics(input: {
       key: "adSpend",
       label: "Chi quảng cáo",
       unit: "VND",
-      estimated: est(n?.adSpend ?? null, "adSpend"),
-      realized: real(d && d.spendKnown ? d.spend : null, "spend", spendNote),
+      estimated: est(estSpendKnown ? (n?.adSpend ?? null) : null, "adSpend", estSpendNote),
+      realized: real(realSpendKnown && d ? d.spend : null, "spend", spendNote),
       projected: null,
     },
     {
       key: "cpo",
       label: "CPO thực (chi / đơn chốt)",
       unit: "VND",
-      estimated: est(n && n.cpo !== null ? Math.round(n.cpo) : null, "cpo"),
-      realized: real(d?.costPerOrder ?? null, "costPerOrder", spendNote),
+      estimated: est(estSpendKnown && n && n.cpo !== null ? Math.round(n.cpo) : null, "cpo", estSpendNote),
+      realized: real(realSpendKnown ? (d?.costPerOrder ?? null) : null, "costPerOrder", spendNote),
       projected: null,
     },
     {
@@ -222,17 +234,17 @@ export function buildModelEconomics(input: {
       key: "contributionAfterAds",
       label: "Lợi nhuận góp sau QC",
       unit: "VND",
-      estimated: est(n?.expectedProfit ?? null, "expectedProfit", estGap ?? "Cước theo GIẢ ĐỊNH (cước gửi / cước hoàn)"),
-      realized: real(d && d.spendKnown ? d.profitAfterAds : null, "profitAfterAds", spendNote ?? realGap ?? "Cước thật cả phí hoàn; chỉ đơn đã giao mang doanh thu"),
-      projected: proj(d && d.spendKnown ? d.projectedProfitAfterAds : null, "projectedProfitAfterAds", spendNote ?? realGap),
+      estimated: est(estSpendKnown ? (n?.expectedProfit ?? null) : null, "expectedProfit", estSpendNote ?? estGap ?? "Cước theo GIẢ ĐỊNH (cước gửi / cước hoàn)"),
+      realized: real(realSpendKnown && d ? d.profitAfterAds : null, "profitAfterAds", spendNote ?? realGap ?? "Cước thật cả phí hoàn; chỉ đơn đã giao mang doanh thu"),
+      projected: proj(realSpendKnown && d ? d.projectedProfitAfterAds : null, "projectedProfitAfterAds", spendNote ?? realGap),
     },
     {
       key: "contributionPerOrder",
       label: "LN góp sau QC / đơn chốt",
       unit: "VND",
-      estimated: est(perOrder(n?.expectedProfit ?? null, estOrders), "expectedProfit ÷ orders", estGap),
-      realized: real(d && d.spendKnown ? perOrder(d.profitAfterAds, d.bookedOrders) : null, "profitAfterAds ÷ bookedOrders", spendNote ?? realGap),
-      projected: proj(d && d.spendKnown ? perOrder(d.projectedProfitAfterAds, d.bookedOrders) : null, "projectedProfitAfterAds ÷ bookedOrders", spendNote ?? realGap),
+      estimated: est(estSpendKnown ? perOrder(n?.expectedProfit ?? null, estOrders) : null, "expectedProfit ÷ orders", estSpendNote ?? estGap),
+      realized: real(realSpendKnown && d ? perOrder(d.profitAfterAds, d.bookedOrders) : null, "profitAfterAds ÷ bookedOrders", spendNote ?? realGap),
+      projected: proj(realSpendKnown && d ? perOrder(d.projectedProfitAfterAds, d.bookedOrders) : null, "projectedProfitAfterAds ÷ bookedOrders", spendNote ?? realGap),
     },
     {
       key: "breakEvenCpoContribution",
@@ -255,7 +267,7 @@ export function buildModelEconomics(input: {
       key: "netProfit",
       label: "Lợi nhuận ròng",
       unit: "VND",
-      estimated: est(n?.netProfit ?? null, "netProfit", estGap ?? "Đã trừ vận hành/cố định phân bổ, thuế, rủi ro tồn kho, CP khác"),
+      estimated: est(estSpendKnown ? (n?.netProfit ?? null) : null, "netProfit", estSpendNote ?? estGap ?? "Đã trừ vận hành/cố định phân bổ, thuế, rủi ro tồn kho, CP khác"),
       realized: economicsCell("REALIZED", null, "—", "ERP chưa đo LN RÒNG thực đạt theo mã (lợi nhuận tiền thật chỉ có ở cấp shop)"),
       projected: null,
     },
@@ -263,7 +275,7 @@ export function buildModelEconomics(input: {
       key: "netProfitPerOrder",
       label: "LN ròng / đơn chốt",
       unit: "VND",
-      estimated: est(perOrder(n?.netProfit ?? null, estOrders), "netProfit ÷ orders", estGap),
+      estimated: est(estSpendKnown ? perOrder(n?.netProfit ?? null, estOrders) : null, "netProfit ÷ orders", estSpendNote ?? estGap),
       realized: economicsCell("REALIZED", null, "—", "ERP chưa đo LN RÒNG thực đạt theo mã"),
       projected: null,
     },
@@ -303,10 +315,12 @@ export function buildModelEconomics(input: {
  * lợi nhuận (mục 14), và đó là câu đắt nhất của báo cáo — cùng lựa chọn với bảng lương.
  */
 export async function getModelEconomics(productId: string, range: Period): Promise<ModelEconomics> {
-  const [nominal, decision] = await Promise.all([
+  const [nominal, decision, ads] = await Promise.all([
     // Tham số thứ năm `false` TƯỜNG MINH: không bao giờ giá vốn dự tính (xem chú thích đầu tệp).
     getNominalProfitReport(range, "ORDERED", NO_ORDER_VALUE_FILTER, true, false, false),
     getAdsDecision(range, "product"),
+    // CHỈ để lấy cờ "đã ghép chi" — một nguồn với khối quảng cáo (Agent B), không đọc số nào khác.
+    getModelAdsSummary(productId, range),
   ]);
   return buildModelEconomics({
     productId,
@@ -315,5 +329,6 @@ export async function getModelEconomics(productId: string, range: Period): Promi
     otherCostPercentOfAds: nominal.assumptions.otherCostPercentOfAds ?? 0,
     decision: decision.rows.find((r) => r.key === productId) ?? null,
     withEstimatedCost: false,
+    spendMapped: ads.attribution.spendMapped,
   });
 }

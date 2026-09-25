@@ -7,6 +7,7 @@ import {
   EconomicsBlock,
   OrdersBlock,
   ProductionBlock,
+  ReturnsDispositionBlock,
   SignalBadge,
   SignalBlock,
   StockBlock,
@@ -16,6 +17,7 @@ import {
 import { OwnerControl, TransitionControl } from "@/app/(dashboard)/models/[id]/model-controls";
 import { ModelStateBadge, ObservedStageBadge } from "@/app/(dashboard)/models/state-badge";
 import { PeriodFilter } from "@/components/data-table/toolbar";
+import { DataWarnings } from "@/components/data-warnings";
 import { InfoHint } from "@/components/info-hint";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
@@ -26,7 +28,7 @@ import { can, requirePermission, type SessionUser } from "@/lib/auth/session";
 import { DESIGN_STATUS_LABEL, type DesignStatus } from "@/lib/constants/creative-loop";
 import { DOMAIN_ACTOR_KIND_LABEL } from "@/lib/constants/domain-events";
 import { loadSource, MODEL_360_BLOCK_ACCESS, mergeTimelines, type Model360Block } from "@/lib/constants/model-360";
-import { MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL, MODEL_TIMELINE_DIMENSION_LABEL, MODEL_TIMELINE_DIMENSION_TONE, observeModelStage } from "@/lib/constants/model-lifecycle";
+import { evidenceUnknowns, MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL, MODEL_TIMELINE_DIMENSION_LABEL, MODEL_TIMELINE_DIMENSION_TONE, observeModelStage } from "@/lib/constants/model-lifecycle";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getModelLinkedIdeas, ideaTimelineEntries } from "@/lib/queries/model-360";
 import { getModel, getModelEvidence, getModelStateHistory, getModelTimeline, listModelOwnerOptions } from "@/lib/queries/models";
@@ -106,6 +108,7 @@ export default async function ModelDetailPage({ params, searchParams }: { params
     periodQuery: periodQueryOf(range),
     allowed,
     canWrite,
+    canCreateTopic: can(user, "production:write"),
   };
 
   return (
@@ -192,6 +195,7 @@ export default async function ModelDetailPage({ params, searchParams }: { params
             <div className="flex flex-wrap items-center gap-2">
               <ObservedStageBadge state={observed.stage} />
               {observed.reasons.length ? <InfoHint>{observed.reasons.join(" · ")}</InfoHint> : null}
+              <DataWarnings items={evidenceUnknowns(evidence)} />
             </div>
             {observed.stage && model.state && observed.stage !== model.state ? <p className="text-xs">Khác với trạng thái khai ({MODEL_STATE_LABELS[model.state]}) — người phụ trách xem lại xem lời khai hay chứng cứ đang cũ.</p> : null}
             <DescriptionList
@@ -234,7 +238,12 @@ export default async function ModelDetailPage({ params, searchParams }: { params
           <EconomicsBlock ctx={ctx} />
         </Suspense>
         <div className="space-y-4">
-          <ProductionBlock ctx={ctx} draftOrders={evidence.draftProductionOrders} sentOrders={evidence.sentProductionOrders} />
+          <Suspense fallback={<BlockSkeleton />}>
+            <ProductionBlock ctx={ctx} />
+          </Suspense>
+          <Suspense fallback={<BlockSkeleton />}>
+            <ReturnsDispositionBlock ctx={ctx} />
+          </Suspense>
           <SectionCard title="Lịch sử vòng đời" description={history.length ? `${formatNumber(history.length)} lượt khai` : undefined}>
             {history.length ? (
               <ol className="space-y-2 text-sm">

@@ -1,12 +1,14 @@
 import { cache } from "react";
 import Link from "next/link";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Plus } from "lucide-react";
 import { SuggestedTransition } from "@/app/(dashboard)/models/[id]/suggestion-transition";
 import { DataWarnings } from "@/components/data-warnings";
 import { InfoHint } from "@/components/info-hint";
 import { SectionCard } from "@/components/ui-bits";
+import { Button } from "@/components/ui/button";
 import { ADS_ACTION_HINT, ADS_ACTION_TONE, isConclusive } from "@/lib/constants/ads-decision";
 import { CREATIVE_VERDICT_LABEL, CREATIVE_VERDICTS } from "@/lib/constants/creative-loop";
+import { SAMPLE_STATUS_LABEL, TOPIC_STATUS_LABEL } from "@/lib/constants/production-os";
 import {
   countText,
   deriveModelSuggestions,
@@ -24,11 +26,13 @@ import {
 } from "@/lib/constants/model-360";
 import type { ModelState } from "@/lib/constants/model-lifecycle";
 import { MODEL_SIGNAL_HINT, MODEL_SIGNAL_LABEL, MODEL_SIGNAL_TONE, SIGNAL_SOURCE_LABEL, SOURCE_VOTE_LABEL } from "@/lib/constants/model-signal";
-import { formatNumber, formatPercent, formatVND } from "@/lib/format";
+import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { getModelAdsSummary, getModelCreativeSummary, NO_VERDICT } from "@/lib/queries/model-ads";
 import { getModelEconomics, type EconomicsUnit, type EconomicsValue } from "@/lib/queries/model-economics";
 import { getModelInventoryDecisions, getModelOrderOutcome } from "@/lib/queries/model-360";
 import { getModelSignal } from "@/lib/queries/model-signal";
+import { getModelProductionSummary } from "@/lib/queries/model-production";
+import { getModelReturnDispositions } from "@/lib/queries/model-returns";
 import { getModelStockStates } from "@/lib/queries/model-stock";
 import type { Period } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -55,6 +59,8 @@ export type BlockCtx = {
   periodQuery: string;
   allowed: Record<Model360Block, boolean>;
   canWrite: boolean;
+  /** `production:write` — nút "Tạo topic sản xuất". */
+  canCreateTopic: boolean;
 };
 
 /** Tín hiệu đọc MỘT lần cho mỗi lượt dựng trang (đầu trang + khối tín hiệu + khối đề xuất). */
@@ -186,12 +192,13 @@ export async function SignalBlock({ ctx }: { ctx: BlockCtx }) {
 
 export async function SuggestionsBlock({ ctx }: { ctx: BlockCtx }) {
   const pid = ctx.productId;
-  const [sig, ads, inv] = await Promise.all([
+  const [sig, ads, inv, prod] = await Promise.all([
     signalOnce(ctx.modelId, ctx.range),
     pid && ctx.allowed.ADS ? loadSource("quảng cáo", () => getModelAdsSummary(pid, ctx.range)) : Promise.resolve(null),
     pid && ctx.allowed.INVENTORY ? loadSource("quyết định tồn", () => getModelInventoryDecisions(pid)) : Promise.resolve(null),
+    ctx.allowed.PRODUCTION ? loadSource("sản xuất", () => getModelProductionSummary(ctx.modelId)) : Promise.resolve(null),
   ]);
-  const failed = [sig, ads, inv].filter((x): x is Extract<Loaded<unknown>, { ok: false }> => !!x && !x.ok);
+  const failed = [sig, ads, inv, prod].filter((x): x is Extract<Loaded<unknown>, { ok: false }> => !!x && !x.ok);
   const list: ModelSuggestion[] = deriveModelSuggestions({
     modelId: ctx.modelId,
     declaredState: ctx.declaredState,
@@ -203,6 +210,8 @@ export async function SuggestionsBlock({ ctx }: { ctx: BlockCtx }) {
     inventory: inv && inv.ok ? { rows: inv.data.rows, dataGate: inv.data.dataGate.state } : null,
     creativeHref: pid ? `/marketing/creatives?tab=thu-vien&mau=${encodeURIComponent(pid)}` : null,
     periodQuery: ctx.periodQuery,
+    production: prod && prod.ok && prod.data ? { openTopics: prod.data.openTopics } : null,
+    canCreateTopic: ctx.canCreateTopic,
   });
   return (
     <SectionCard
@@ -393,7 +402,7 @@ export async function StockBlock({ ctx }: { ctx: BlockCtx }) {
     );
   }
   const l = await loadSource("trạng thái tồn (getModelStockStates)", () => getModelStockStates(pid));
-  const pendingE = MODEL_360_PENDING_SOURCES.filter((p) => p.block === "STOCK");
+  const pendingStock = MODEL_360_PENDING_SOURCES.filter((p) => p.block === "STOCK");
   return (
     <SectionCard
       title={title}
@@ -418,7 +427,7 @@ export async function StockBlock({ ctx }: { ctx: BlockCtx }) {
                 l.data.basis.pendingQcTruncated ? "Danh sách chờ kiểm bị cắt ở trần đọc — số chờ kiểm có thể thiếu" : null,
                 l.data.basis.inProductionUnsplitUnits ? `${formatNumber(l.data.basis.inProductionUnsplitUnits)} sp trong lô xưởng đang mở chưa chia màu/size — không cộng vào mẫu mã nào` : null,
                 l.data.basis.inProductionUnmappedUnitsShopWide ? `${formatNumber(l.data.basis.inProductionUnmappedUnitsShopWide)} sp lệnh SX toàn shop không khớp màu/size` : null,
-                ...pendingE.map((p) => `Chưa nối: ${p.what} — hàm ${p.fn} đang xây ở gói của Agent ${p.owner}.`),
+                ...pendingStock.map((p) => `Chưa nối: ${p.what} — hàm ${p.fn} đang xây ở gói của Agent ${p.owner}.`),
               ]}
             />
           </div>
@@ -504,12 +513,9 @@ export async function EconomicsBlock({ ctx }: { ctx: BlockCtx }) {
       </SectionCard>
     );
   }
-  const [l, ads] = await Promise.all([
-    loadSource("kinh tế theo mẫu (getModelEconomics)", () => getModelEconomics(pid, ctx.range)),
-    // Chỉ đọc CỜ ghép chi của B (đệm chung với khối quảng cáo) — không lấy số nào từ đây.
-    loadSource("quảng cáo (/ads)", () => getModelAdsSummary(pid, ctx.range)),
-  ]);
-  const chiChuaGhep = ads.ok && ads.data.status === "SPEND_UNMAPPED";
+  // Chi QC chưa ghép chiến dịch ⇒ `getModelEconomics` tự trả `null` (—) cho mọi ô đứng trên số chi, kèm
+  // câu giải thích trong ⓘ của từng ô — cùng cờ `spendMapped` của khối quảng cáo.
+  const l = await loadSource("kinh tế theo mẫu (getModelEconomics)", () => getModelEconomics(pid, ctx.range));
   return (
     <SectionCard
       title={title}
@@ -528,19 +534,7 @@ export async function EconomicsBlock({ ctx }: { ctx: BlockCtx }) {
           "Agent F · getModelEconomics"
         )
       }
-      actions={
-        <>
-          <DataWarnings
-            tone="danger"
-            items={[
-              chiChuaGhep
-                ? "Mã CHƯA TỪNG được ghép chiến dịch quảng cáo nào: dòng Chi quảng cáo / CPO / lợi nhuận sau QC của hai bộ máy bên dưới đang tính chi 0 ₫ — chưa ghép không phải không tiêu (luật 42, 67). Đọc như CHƯA BIẾT cho tới khi khai ánh xạ chiến dịch."
-                : null,
-            ]}
-          />
-          <HomeLink href={`/reports?tab=nominal${ctx.periodQuery ? `&${ctx.periodQuery}` : ""}`} label="Lợi nhuận danh nghĩa" />
-        </>
-      }
+      actions={<HomeLink href={`/reports?tab=nominal${ctx.periodQuery ? `&${ctx.periodQuery}` : ""}`} label="Lợi nhuận danh nghĩa" />}
       padded={false}
     >
       {!l.ok ? (
@@ -582,29 +576,165 @@ export async function EconomicsBlock({ ctx }: { ctx: BlockCtx }) {
 // ─────────────────────────── SẢN XUẤT ───────────────────────────
 
 /**
- * ═══ ĐIỂM NỐI (Agent C · getModelProductionSummary) ═══
- * Hôm nay khối chỉ có số lệnh SX đếm từ `getModelEvidence` (A) và link sang Đặt hàng sản xuất. Topic ·
- * costing · mẫu thử là của gói sản xuất (C) — KHÔNG dựng bản thay thế ở đây. Khi C giao hàm: gọi nó qua
- * `loadSource` trong khối này và xoá dòng của C khỏi `MODEL_360_PENDING_SOURCES`.
+ * Khối Sản xuất đọc `getModelProductionSummary(modelId)` của Agent C (topic · giá thành chốt · mẫu thử mới
+ * nhất · bản thiết kế đã duyệt · lệnh SX đang mở với số đặt / số đã nhận qua phiếu nối). Không công thức ở
+ * đây. "Tạo topic sản xuất" chỉ hiện với `production:write`, và chỉ dẫn tới biểu mẫu — người bấm tạo.
  */
-export function ProductionBlock({ ctx, draftOrders, sentOrders }: { ctx: BlockCtx; draftOrders: number | null; sentOrders: number | null }) {
+export async function ProductionBlock({ ctx }: { ctx: BlockCtx }) {
   const title = "Sản xuất";
   if (!ctx.allowed.PRODUCTION) return <DeniedBlock title={title} block="PRODUCTION" />;
+  const l = await loadSource("sản xuất (getModelProductionSummary)", () => getModelProductionSummary(ctx.modelId));
   const pending = MODEL_360_PENDING_SOURCES.filter((p) => p.block === "PRODUCTION");
+  const taoTopic = ctx.canCreateTopic ? (
+    <Button asChild size="sm" variant="outline" className="h-7">
+      <Link href={`/production/topics/new?model=${encodeURIComponent(ctx.modelId)}`}>
+        <Plus className="size-3.5" /> Tạo topic sản xuất
+      </Link>
+    </Button>
+  ) : null;
   return (
-    <SectionCard title={title} actions={<HomeLink href="/inventory/planning/orders" label="Đặt hàng sản xuất" />} hint="Số lệnh sản xuất đếm từ bảng lệnh SX của sản phẩm (cùng ô chứng cứ của giai đoạn quan sát). Mẫu chưa có sản phẩm Pancake thì chưa biết (—).">
-      <div className="space-y-2">
-        <StatGrid cols={3}>
-          <Stat label="Lệnh SX nháp" value={countText(draftOrders)} />
-          <Stat label="Lệnh SX đã gửi xưởng" value={countText(sentOrders)} />
-          <Stat label="Topic · báo giá · mẫu thử" value="—" sub="Chưa nối" />
-        </StatGrid>
-        {pending.map((p) => (
-          <p key={p.fn} className="text-[11px] text-muted-foreground">
-            Chưa nối — {p.what}: đang xây ở gói sản xuất (Agent {p.owner}, <code>{p.fn}</code>).
+    <SectionCard
+      title={title}
+      actions={
+        <>
+          {taoTopic}
+          <HomeLink href={`/production/models/${encodeURIComponent(ctx.modelId)}`} label="Bàn sản xuất của mẫu" />
+        </>
+      }
+      hint="Agent C · getModelProductionSummary: topic hỏi giá xưởng, giá thành đã chốt (tổng lưu lúc chốt), mẫu thử mới nhất, bản thiết kế đã duyệt, lệnh sản xuất đang mở (nháp / đã gửi) của sản phẩm."
+    >
+      {!l.ok ? (
+        <Failed l={l} />
+      ) : !l.data ? (
+        <p className="text-sm text-muted-foreground">— Không đọc được mẫu ở sổ sản xuất.</p>
+      ) : (
+        <div className="space-y-2">
+          <StatGrid cols={3}>
+            <Stat label="Topic đang mở · tổng" value={`${countText(l.data.openTopics)} · ${countText(l.data.topics.length)}`} />
+            <Stat
+              label="Giá thành đã chốt"
+              value={l.data.finalCosting ? moneyText(l.data.finalCosting.totalUnitCost) : "—"}
+              sub={
+                l.data.finalCosting
+                  ? `bản ${l.data.finalCosting.version}${l.data.draftCostings ? ` · ${l.data.draftCostings} bản nháp` : ""}`
+                  : l.data.draftCostings
+                    ? `${l.data.draftCostings} bản nháp, chưa chốt`
+                    : "chưa có bảng giá thành"
+              }
+            />
+            <Stat
+              label="Mẫu thử mới nhất"
+              value={l.data.latestSample ? `Bản ${l.data.latestSample.version}` : "—"}
+              sub={l.data.latestSample ? `${SAMPLE_STATUS_LABEL[l.data.latestSample.status] ?? l.data.latestSample.status}${l.data.latestSample.supplierName ? ` · ${l.data.latestSample.supplierName}` : ""}` : "chưa có mẫu thử"}
+            />
+          </StatGrid>
+          <p className="text-xs text-muted-foreground">
+            Thiết kế đã duyệt:{" "}
+            {l.data.approvedDesign ? `bản ${l.data.approvedDesign.version} · ${formatDateTime(l.data.approvedDesign.approvedAt)}${l.data.approvedDesign.approvedBy ? ` · ${l.data.approvedDesign.approvedBy}` : ""}` : "—"}
           </p>
-        ))}
-      </div>
+          {l.data.topics.length ? (
+            <ul className="space-y-1 text-xs">
+              {l.data.topics.slice(0, 5).map((t) => (
+                <li key={t.id} className="flex flex-wrap items-center gap-2">
+                  <Link href={`/production/topics/${encodeURIComponent(t.id)}`} className="font-medium underline-offset-2 hover:underline">
+                    {t.title || "(không tiêu đề)"}
+                  </Link>
+                  <span className="text-muted-foreground">
+                    {TOPIC_STATUS_LABEL[t.status] ?? t.status} · {formatDateTime(t.updatedAt)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {l.data.productId === null ? (
+            <p className="text-[11px] text-muted-foreground">Mẫu chưa có sản phẩm Pancake — chưa đặt được lệnh sản xuất nào (khác với &ldquo;có sản phẩm, không lệnh mở&rdquo;).</p>
+          ) : l.data.openOrders.length ? (
+            <table className="w-full text-xs">
+              <thead className="text-left text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-2 font-medium">Lệnh SX đang mở</th>
+                  <th className="py-1 pr-2 text-right font-medium">Đặt</th>
+                  <th className="py-1 text-right font-medium">
+                    <span className="inline-flex items-center gap-1">
+                      Đã nhận <InfoHint align="end">{l.data.basis.received}</InfoHint>
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="numeric">
+                {l.data.openOrders.map((o) => (
+                  <tr key={o.id} className="border-t">
+                    <td className="py-1 pr-2">
+                      {o.code} <span className="text-muted-foreground">· {o.status === "SENT" ? "đã gửi xưởng" : "nháp"}</span>
+                    </td>
+                    <td className="py-1 pr-2 text-right">{countText(o.plannedQty)}</td>
+                    <td className="py-1 text-right">{countText(o.receivedViaLinkedReceipts)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">Không có lệnh sản xuất đang mở (0).</p>
+          )}
+          {pending.map((p) => (
+            <p key={p.fn} className="text-[11px] text-muted-foreground">
+              Chưa nối — {p.what} (Agent {p.owner}, <code>{p.fn}</code>).
+            </p>
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+// ─────────────────────────── KẾT CỤC HÀNG HOÀN ───────────────────────────
+
+/**
+ * Khối Kết cục hàng hoàn đọc `getModelReturnDispositions(productId)` của Agent E. Mỗi ô `null` = CHƯA BIẾT
+ * (kiện kiểm cả kiện không chia được theo mẫu) — in "—", không in 0. Giá trị huỷ là ƯỚC TÍNH và không nằm
+ * trong báo cáo lợi nhuận nào.
+ */
+export async function ReturnsDispositionBlock({ ctx }: { ctx: BlockCtx }) {
+  const title = "Kết cục hàng hoàn";
+  if (!ctx.allowed.RETURNS) return <DeniedBlock title={title} block="RETURNS" />;
+  const pid = ctx.productId;
+  if (!pid) {
+    return (
+      <SectionCard title={title}>
+        <NoProduct what="hàng hoàn" />
+      </SectionCard>
+    );
+  }
+  const l = await loadSource("kết cục hàng hoàn (getModelReturnDispositions)", () => getModelReturnDispositions(pid));
+  return (
+    <SectionCard
+      title={title}
+      description="hiện tại — không theo kỳ"
+      hint="Agent E · getModelReturnDispositions: hàng hoàn KHÔNG tái nhập ngay sau trạm kiểm đi tới đâu — chờ quyết, đang sửa / giặt, sửa xong nhập lại, huỷ, trả xưởng. Giá trị huỷ là ƯỚC TÍNH theo giá vốn lúc huỷ, không vào báo cáo lợi nhuận."
+      actions={<HomeLink href={MODEL_360_BLOCK_ACCESS.RETURNS.home} label="Kiểm đếm hàng hoàn" />}
+    >
+      {!l.ok ? (
+        <Failed l={l} />
+      ) : (
+        <div className="space-y-2">
+          <DataWarnings
+            items={[
+              l.data.basis.parcelLevelSubjects
+                ? `${l.data.basis.parcelLevelSubjects} kiện hoàn kiểm CẢ KIỆN có hàng không bán được và có mẫu này trong đơn — không chia được theo mẫu, nên các ô số món là — (chưa biết).`
+                : null,
+              l.data.writeOffValueUnknownQty ? `${formatNumber(l.data.writeOffValueUnknownQty)} món huỷ chưa biết giá vốn — tổng giá trị huỷ là —; phần đã biết ${formatVND(l.data.writeOffValueKnownPart)}.` : null,
+            ]}
+          />
+          <StatGrid cols={3}>
+            <Stat label="Chờ quyết" value={countText(l.data.pendingQty)} />
+            <Stat label="Đang sửa / giặt" value={countText(l.data.reworkQty)} />
+            <Stat label="Sửa xong · nhập lại" value={countText(l.data.restockedAfterReworkQty)} />
+            <Stat label="Đã huỷ" value={countText(l.data.writtenOffQty)} sub={`giá trị ước tính ${moneyText(l.data.writeOffValueEstimate)}`} />
+            <Stat label="Trả xưởng" value={countText(l.data.returnedToSupplierQty)} />
+            <Stat label="Món còn mở" value={countText(l.data.openSubjects)} sub={`${formatNumber(l.data.basis.itemSubjects)} món đã qua trạm kiểm`} />
+          </StatGrid>
+        </div>
+      )}
     </SectionCard>
   );
 }

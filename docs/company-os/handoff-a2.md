@@ -80,3 +80,32 @@ Windows, cây `wt-cos-a2`: `npm run typecheck` sạch · `npm run lint` sạch �
 1. Bảng gộp tín hiệu (mục 2) là một quyết định kinh doanh về CÁCH đọc các phán quyết — chủ shop xác nhận, đặc biệt hai chỗ lệch ở mục 4.1–4.2.
 2. Migration 0137 (thêm cột, không backfill) áp khi deploy.
 3. Quyền theo khối (mục 1): người chỉ có `models:view` sẽ thấy ít khối hơn — đúng ý đồ, nhưng cần báo trước.
+
+---
+
+## 10. Lượt 2 (nhánh `claude/cos-mo-hinh-360`, trên nền tích hợp C + E)
+
+### Nối C và E vào trang 360
+
+- **Khối Sản xuất** đọc `getModelProductionSummary(modelId)` (C): topic đang mở / tổng (link `/production/topics/[id]`), giá thành đã chốt (tổng lưu lúc chốt, số bản nháp), mẫu thử mới nhất, bản thiết kế đã duyệt, lệnh SX đang mở với số đặt / số đã nhận qua phiếu nối (`—` khi chưa phiếu nào nối — ⓘ nói căn cứ của C). Link "Bàn sản xuất của mẫu" `/production/models/[id]`; nút **"Tạo topic sản xuất"** → `/production/topics/new?model=<id>` chỉ hiện với `production:write`. Khối gác `planning:view` (cùng quyền các trang `/production`).
+- **Khối Kết cục hàng hoàn** (mới) đọc `getModelReturnDispositions(productId)` (E): chờ quyết · đang sửa / giặt · sửa xong nhập lại · đã huỷ (+ giá trị ước tính) · trả xưởng · món còn mở. Ô `null` (kiện kiểm cả kiện không chia được theo mẫu) in `—` kèm "⚠" nói số kiện; giá trị huỷ thiếu giá vốn in `—` kèm phần đã biết. Gác `products:view` + phạm vi `RETURNS` (cùng cổng `/inventory/returns`).
+- Hai khối có Suspense riêng, đọc qua `loadSource`. `MODEL_360_PENDING_SOURCES` nay RỖNG (vẫn là điểm nối cho hàm đọc sau này; bài kiểm vẫn canh).
+- **Đề xuất**: tín hiệu THẮNG mà mẫu đã có topic ĐANG MỞ ⇒ KHÔNG đề xuất mở trao đổi sản xuất nữa. Không đọc được sản xuất (lỗi / không quyền) ⇒ vẫn đề xuất nhưng kèm lưu ý "có thể đã có topic". Người có `production:write` thấy thêm link "Tạo topic sản xuất" trong đề xuất.
+
+### Sửa lỗi F — chi QC chưa ghép là CHƯA BIẾT (Tech Lead cho phép sửa `lib/queries/model-economics.ts`)
+
+`buildModelEconomics` nhận thêm `spendMapped: boolean` (BẮT BUỘC, không mặc định ẩn); `getModelEconomics` lấy nó từ `getModelAdsSummary(productId, range).attribution.spendMapped` — cùng cờ khối quảng cáo dùng, một nguồn (`spendMappedFor` của B, nay được export). `false` ⇒ Chi QC, CPO, LN góp sau QC (+ Tạm tính), LN góp/đơn, LN ròng, LN ròng/đơn là `null` (in `—`) ở cả Ước tính lẫn Thực đạt, mỗi ô kèm câu lý do. Dòng không phụ thuộc số chi (đơn, GTC, DT giao, biên trước QC, CPO hoà vốn, trần CPQC/đơn) giữ nguyên số. Đã ghép ⇒ mọi số y như cũ (0 ₫ thật vẫn in 0 ₫). Cảnh báo đỏ tạm ở khối Kinh tế đã GỠ — ⓘ của từng ô nay tự nói. Bài kiểm DB của F (`tests/company-os-economics.test.ts`) được cập nhật đúng hành vi mới (mã chưa ghép ⇒ kỳ vọng `null`), 4 lời gọi `buildModelEconomics` thêm `spendMapped: true`.
+
+### Sửa lỗi A — "Chi QC 30 ngày"
+
+`getModelEvidence` hỏi `spendMappedFor(db, productId)`: chưa từng ghép ⇒ `adSpend30d = null` (không còn 0 ₫); đã ghép mà 30 ngày không tiêu ⇒ 0 thật. `observeModelStage` chỉ lấy chi DƯƠNG đã biết làm chứng cứ (`null` không phải "có chạy" lẫn "không chạy"). Hàm thuần mới `evidenceUnknowns(e)` nêu ô chứng cứ CHƯA BIẾT (chi QC, tồn) — thẻ "Giai đoạn máy quan sát" in thành "⚠ n", để "máy chưa thấy chứng cứ" không bị đọc thành "không có gì".
+
+### Kiểm thử + đột biến (11/11 bị bắt)
+
+Thêm vào `tests/company-os-model-360.test.ts`: `testUnmappedSpend` (từng dòng kinh tế: phụ thuộc chi ⇒ null + lý do khi chưa ghép, còn lại bằng đúng; giai đoạn quan sát và `evidenceUnknowns`), đề xuất theo topic mở / quyền / không đọc được, kiểm mã nguồn (khối gọi đúng hàm C/E, nút gác `production:write`, một nguồn `spendMappedFor`, không bản thứ hai), CSDL: sản phẩm không ghép chi ⇒ `adSpend30d = null`, ghép bằng dòng chi năm 2001 ⇒ 0 thật (không phụ thuộc đồng hồ).
+
+N1 Ước tính bỏ cờ · N2 Thực đạt bỏ cờ · N3 `getModelEconomics` bỏ cờ của B · N4 chứng cứ in 0 khi chưa ghép · N5 chi null thành chứng cứ · N6 đề xuất topic khi đã có topic mở · N7 nút tạo topic không gác quyền · N8 link đề xuất không gác quyền · N9 không nói chi chưa biết · N10 bỏ lưu ý khi không đọc được sản xuất · N11 bỏ Suspense quanh khối hàng hoàn — cả 11 ĐỎ, khôi phục xanh.
+
+### Cổng và đường bấm (lượt 2)
+
+Windows, cây `wt-cos-int4`: `npm run typecheck` sạch · `npm run lint` sạch · `npm test` **TẤT CẢ KIỂM THỬ ĐẠT** (bài DB của F chạy đúng nhánh mới: "dq-prod (chi chưa ghép ⇒ ô chi / LN sau QC là —)") · `npm run build` thành công (`/models/[id]` 4,08 kB). `next start` trên PGlite demo, `/models/<SP001>`: 200, 0 lỗi console, không cuộn ngang; "Chi QC 30 ngày" = `—` + "⚠ 2 lưu ý dữ liệu"; Kinh tế: Chi QC / CPO / LN sau QC / LN ròng = `—`, biên trước QC 62,3% giữ nguyên; khối Sản xuất hiện topic 0 · 0, chưa giá thành / mẫu thử, 0 lệnh mở, nút "Tạo topic sản xuất" + link bàn sản xuất; khối Kết cục hàng hoàn in 0 thật. Chưa bấm thử luồng tạo topic (thuộc C).
