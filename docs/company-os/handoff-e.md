@@ -37,12 +37,14 @@ M1 nhập lại đi thẳng từ chưa quyết · M2 huỷ không bắt buộc l
 3. **`RESTOCK_AFTER_REWORK` chỉ đi sau `REWORK`** (luật ở hằng số + kiểm lại trong khoá) — nếu không đó là đường lật kết luận kiểm bằng một cú bấm.
 4. **Kiện "Thiếu hàng" cả kiện bị loại** (đường hàng loạt ghi `unsellable_qty` = số kỳ vọng cho cả "thiếu", tức hàng KHÔNG có mặt); số kiện bị loại in ra ở đầu khối.
 5. **Nguồn việc mới thay vì mở rộng `RETURN_INSPECTION`**: nguồn cũ chiếu từ cảnh báo (kiện chưa đếm, độ mịn kiện) và `stage-health` thay số tồn đọng của nó bằng số KIỆN chờ đếm — gộp vào sẽ đếm lẫn. Hai nguồn không chạm cùng một kiện (RECEIVED vs INSPECTED); không loại cảnh báo nào trùng ⇒ không thêm vào `ALERT_KINDS_OWNED_ELSEWHERE`.
-6. Tệp ngoài danh sách sở hữu, chỉ THÊM: `lib/constants/audit.ts` (2 nhãn), `lib/constants/work-ownership.ts`, `lib/constants/work-sla.ts`, `lib/queries/work-adapters.ts`, `app/(dashboard)/returns/page.tsx`.
+6. Tệp ngoài danh sách sở hữu, chỉ THÊM (và hai tệp của D ở mục dưới, theo chỉ đạo Tech Lead): `lib/constants/audit.ts` (2 nhãn), `lib/constants/work-ownership.ts`, `lib/constants/work-sla.ts`, `lib/queries/work-adapters.ts`, `app/(dashboard)/returns/page.tsx`.
 
 ## Còn lại / yêu cầu agent khác
 
-- **Agent D**: `receiptDeleteBlockers` (lib/inventory/receipt-delete.ts) chưa biết `return_dispositions.stock_receipt_id`. FK là RESTRICT nên phiếu nhập lại sau sửa KHÔNG xoá được, nhưng lỗi hiện ra là lỗi CSDL thô (và nhật ký `STOCK_RECEIPT_DELETE` đã ghi trước lượt xoá hỏng). Đề nghị thêm một vế chặn có thông điệp.
-- **Agent D**: `getModelStockStates().damaged` vẫn cộng mọi món kết luận hỏng — không trừ phần đã nhập lại / huỷ / trả xưởng. Nếu muốn "hỏng còn trên kệ", đọc `getModelReturnDispositions`.
+- ĐÃ LÀM (Tech Lead cho phép chạm tệp của D, đúng hai việc này):
+  - `lib/inventory/receipt-delete.ts`: `receiptDeleteBlockers` thêm vế `reworkRestocks` (dòng `return_dispositions` trỏ tới phiếu). Chặn TRƯỚC cổng duyệt và TRƯỚC nhật ký, thông điệp tiếng Việt riêng cho lượt nhập lại sau sửa; lượt xoá có điều kiện thêm `not exists (… return_dispositions …)`. Kiểm: trả `{ error }` (không phải lỗi CSDL), 0 lời gọi cổng, 0 dòng nhật ký, phiếu còn nguyên.
+  - `lib/queries/model-stock.ts`: `damaged` = hỏng đã kiểm − số món đã có KẾT CỤC CUỐI (nhập lại sau sửa · huỷ · trả xưởng) theo cùng mẫu mã của dòng kiểm, kẹp ≥ 0; `REWORK` KHÔNG trừ; `null`/0 giữ nguyên nghĩa cũ; `basis.damagedMinusDispositions` khai các kết cục đã trừ. Kết cục của kiện kiểm cả kiện không trừ (ô này chưa bao giờ cộng chúng).
+  - Đột biến (5/5 bị bắt): bỏ vế chặn · chặn sau nhật ký · không trừ kết cục · trừ cả "đang sửa" · hỏng chưa biết thành 0.
 - **Agent G**: yêu cầu duyệt huỷ gửi `action: "return.disposition_write_off"`, `entity: "RETURN_DISPOSITION"`, `entityId: <subject_key>`, `payload: { subjectKey, qty, variantId, note, valueEstimate, costBasis }` — chưa có đường "thực hiện lại sau khi duyệt". Hệ quả thật: khi chủ shop BẬT cưỡng chế nhóm này, huỷ ≥ 1.000.000 ₫ hoặc chưa biết giá vốn sẽ bị CHẶN hẳn (bấm lại chỉ sinh thêm một yêu cầu duyệt), cho tới khi G dựng đường tiêu thụ yêu cầu đã duyệt. Khi TẮT (mặc định) thì chạy và để vết `approval.skip:*`.
 - Hàng hoàn **mất nhãn** (`return_unidentified`) chưa có kết cục trong sổ này (ngoài phạm vi: nó có vòng đời riêng).
 - Hạn xử lý của `RETURN_DISPOSITION` để `null` — chủ shop đặt ở `/work/settings` nếu muốn.

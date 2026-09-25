@@ -1,6 +1,7 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { DAMAGED_ITEM_CONDITIONS } from "@/lib/constants/inventory";
+import { TERMINAL_DISPOSITIONS } from "@/lib/constants/return-disposition";
 import { openPoQtyByVariant } from "@/lib/queries/inventory-decision";
 import { availableStockExpr, erpStockExpr, splitSignedStock, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import { unsplitOpenBatchUnitsForProduct } from "@/lib/queries/workshop-ledger";
@@ -17,7 +18,11 @@ import { listPendingInspections } from "@/lib/returns/inspection";
  *  · đang sản xuất — `openPoQtyByVariant` (lệnh `SENT` + phần chưa trả của lô `OPEN`, không đếm
  *    trùng — luật 70); lô chưa chia màu/size đếm riêng ở mức MẪU, không chia hộ;
  *  · chờ kiểm — `listPendingInspections` (kiện `RECEIVED` chưa đếm, món theo `product-context`);
- *  · hỏng — dòng `return_inspection_items` mang kết luận trong `DAMAGED_ITEM_CONDITIONS`.
+ *  · hỏng — dòng `return_inspection_items` mang kết luận trong `DAMAGED_ITEM_CONDITIONS`, TRỪ phần đã
+ *    có KẾT CỤC CUỐI trong sổ `return_dispositions` (Agent E: nhập lại sau sửa · huỷ · trả xưởng) — ô
+ *    này là "hỏng CÒN CHỜ XỬ LÝ trên kệ". Món nhập lại sau sửa đã nằm ở tồn thực tế (phiếu RETURN);
+ *    đếm nó thêm ở đây là đếm hai lần. Chỉ trừ theo dòng từng món (`inspection_item_id`): kết cục của
+ *    kiện kiểm cả kiện không có mẫu mã và cũng chưa bao giờ được cộng vào ô này.
  *
  * MỖI Ô LÀ `number | null`; `null` = CHƯA BIẾT, không phải 0 (luật 42):
  *  · chưa có phiếu nhập (`stockKnown = false`) ⇒ tồn thực tế và khả dụng `null`;
@@ -83,6 +88,8 @@ export type ModelStockStates = {
     inProductionUnmappedUnitsShopWide: number;
     returningIncludesPendingQc: true;
     damagedConditions: readonly string[];
+    /** Ô hỏng đã TRỪ phần có kết cục cuối trong `return_dispositions` (các kết cục ở `damagedMinusDispositions`). */
+    damagedMinusDispositions: readonly string[];
   };
 };
 
@@ -105,7 +112,7 @@ export async function getModelStockStates(productId: string): Promise<ModelStock
     totals: { actualStock: null, available: null, reserved: 0, inProduction: 0, returning: 0, pendingQc: 0, damaged: null, negativeVariants: 0, negativeQty: 0 },
     variants: [],
     coverage: { variants: 0, stockKnownVariants: 0, damagedKnownVariants: 0 },
-    basis: { pendingQc: "ITEM_QTY", pendingQcUnattributedParcels: 0, pendingQcTruncated: false, inProductionUnsplitUnits: 0, inProductionUnmappedUnitsShopWide: 0, returningIncludesPendingQc: true, damagedConditions: DAMAGED_ITEM_CONDITIONS },
+    basis: { pendingQc: "ITEM_QTY", pendingQcUnattributedParcels: 0, pendingQcTruncated: false, inProductionUnsplitUnits: 0, inProductionUnmappedUnitsShopWide: 0, returningIncludesPendingQc: true, damagedConditions: DAMAGED_ITEM_CONDITIONS, damagedMinusDispositions: TERMINAL_DISPOSITIONS },
   };
   if (!ids.length) return empty;
 
@@ -114,7 +121,7 @@ export async function getModelStockStates(productId: string): Promise<ModelStock
   const rii = schema.returnInspectionItems;
   const itemVariant = sql<string>`coalesce(${rii.actualVariantId}, ${rii.expectedVariantId})`;
 
-  const [ledger, itemRows, openPo, pending] = await Promise.all([
+  const [ledger, itemRows, openPo, pending, disposed] = await Promise.all([
     // Cùng dạng truy vấn với sổ kho (họ `vsales`) — tắt JIT như mọi chỗ khác đọc nó.
     chayKhongJit(db, (tx) =>
       tx
@@ -144,6 +151,13 @@ export async function getModelStockStates(productId: string): Promise<ModelStock
       .groupBy(itemVariant),
     openPoQtyByVariant(),
     listPendingInspections(PENDING_QC_READ_CAP),
+    // Phần hỏng ĐÃ có kết cục cuối (nhập lại sau sửa · huỷ · trả xưởng), theo CÙNG mẫu mã của dòng kiểm.
+    db
+      .select({ variantId: itemVariant, qty: sql<number>`coalesce(sum(${schema.returnDispositions.qty}), 0)` })
+      .from(schema.returnDispositions)
+      .innerJoin(rii, eq(rii.id, schema.returnDispositions.inspectionItemId))
+      .where(and(inArray(itemVariant, ids), inArray(rii.condition, [...DAMAGED_ITEM_CONDITIONS]), inArray(schema.returnDispositions.disposition, [...TERMINAL_DISPOSITIONS])))
+      .groupBy(itemVariant),
   ]);
 
   // Lô đang mở chưa chia màu/size của CHÍNH mẫu này — đếm ở mức mẫu, không chia hộ.
@@ -163,6 +177,7 @@ export async function getModelStockStates(productId: string): Promise<ModelStock
 
   const ledgerByVariant = new Map(ledger.map((l) => [l.variantId, l]));
   const itemsByVariant = new Map(itemRows.map((r) => [r.variantId, r]));
+  const disposedByVariant = new Map(disposed.map((r) => [r.variantId, Number(r.qty)]));
 
   const variants: VariantStockStates[] = variantRows.map((v) => {
     const l = ledgerByVariant.get(v.id);
@@ -170,7 +185,8 @@ export async function getModelStockStates(productId: string): Promise<ModelStock
     const it = itemsByVariant.get(v.id);
     // Đã có hàng hoàn QUAY VỀ kho (có phiếu tái nhập, hoặc kiện đã xử lý) mà chưa có dòng kiểm từng món ⇒ CHƯA BIẾT.
     const cameBack = Number(l?.returnHandled ?? 0) > 0 || Number(l?.returnIn ?? 0) > 0;
-    const damaged: StockCell = it ? Number(it.damaged) : cameBack ? null : 0;
+    // Hỏng CÒN CHỜ XỬ LÝ = hỏng đã kiểm − phần đã có kết cục cuối. Không bao giờ âm; CHƯA BIẾT vẫn là null.
+    const damaged: StockCell = it ? Math.max(0, Number(it.damaged) - (disposedByVariant.get(v.id) ?? 0)) : cameBack ? null : 0;
     return {
       variantId: v.id,
       sku: v.sku,
@@ -215,6 +231,7 @@ export async function getModelStockStates(productId: string): Promise<ModelStock
       inProductionUnmappedUnitsShopWide: openPo.unmappedUnits,
       returningIncludesPendingQc: true,
       damagedConditions: DAMAGED_ITEM_CONDITIONS,
+      damagedMinusDispositions: TERMINAL_DISPOSITIONS,
     },
   };
 }

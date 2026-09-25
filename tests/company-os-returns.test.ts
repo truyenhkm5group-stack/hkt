@@ -21,7 +21,9 @@ import {
   type DispositionEntry,
 } from "@/lib/constants/return-disposition";
 import { ALERT_KIND_TO_SOURCE, WORK_SOURCE_SPEC } from "@/lib/constants/work-sources";
+import { deleteStockReceiptCore } from "@/lib/inventory/receipt-delete";
 import { getModelReturnDispositions } from "@/lib/queries/model-returns";
+import { getModelStockStates } from "@/lib/queries/model-stock";
 import { listDispositionQueue } from "@/lib/queries/return-dispositions";
 import { adaptReturnDispositions, collectWorkItems } from "@/lib/queries/work-adapters";
 import { setReturnDispositionCore, type DispositionGate, type DispositionGateInput } from "@/lib/returns/disposition";
@@ -110,7 +112,16 @@ export function testCompanyOsReturnsPure() {
   const boChuThich = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1").replace(/^\s*--.*$/gm, "");
   const ghiDe: string[] = [];
   const docSo: string[] = [];
-  const DUOC_DOC = new Set(["lib/queries/return-dispositions.ts", "lib/queries/model-returns.ts", "lib/returns/disposition.ts", "lib/actions/return-dispositions.ts"]);
+  // Hai tệp của Agent D đọc sổ vì lý do KHÔNG phải tiền: chặn xoá phiếu nhập lại sau sửa, và trừ SỐ MÓN đã
+  // có kết cục khỏi ô "hỏng chờ xử lý". Không tệp nào khác — nhất là không báo cáo lợi nhuận nào.
+  const DUOC_DOC = new Set([
+    "lib/queries/return-dispositions.ts",
+    "lib/queries/model-returns.ts",
+    "lib/returns/disposition.ts",
+    "lib/actions/return-dispositions.ts",
+    "lib/inventory/receipt-delete.ts",
+    "lib/queries/model-stock.ts",
+  ]);
   for (const f of tep) {
     const src = boChuThich(readFileSync(f, "utf8"));
     const biDanh = ["schema\\.returnDispositions", ...[...src.matchAll(/const (\w+) = schema\.returnDispositions\b/g)].map((m) => m[1])];
@@ -118,7 +129,7 @@ export function testCompanyOsReturnsPure() {
     if ((/returnDispositions\b|return_dispositions\b/.test(src)) && !DUOC_DOC.has(f) && f !== "db/schema.ts" && !f.startsWith("drizzle/")) docSo.push(f);
   }
   assert.deepEqual(ghiDe, [], "return_dispositions là APPEND-ONLY — không UPDATE / DELETE ở lib/app/scripts/components");
-  assert.deepEqual(docSo, [], "chỉ bốn tệp của sổ kết cục được đọc return_dispositions — KHÔNG báo cáo lợi nhuận / tồn kho nào đọc giá trị huỷ ước tính ở bản này");
+  assert.deepEqual(docSo, [], "chỉ sáu tệp khai ở DUOC_DOC được đọc return_dispositions — KHÔNG báo cáo lợi nhuận / tồn kho nào đọc giá trị huỷ ước tính ở bản này");
 
   const dv = boChuThich(nguon("lib/returns/disposition.ts"));
   assert.ok(!/insert\(\s*schema\.stockReceipt/.test(dv), "lõi kết cục KHÔNG tự lập phiếu kho — chỉ đi qua createRestockReceipt của trạm kiểm");
@@ -262,6 +273,9 @@ export async function testCompanyOsReturnsDb(db: Db) {
     assert.equal(m3.writeOffValueEstimate, null);
     assert.equal(m3.basis.parcelLevelSubjects, 1, "kiện 'Thiếu hàng' cả kiện không tính — chỉ kiện có hàng hỏng thật");
 
+    const tonTruoc = await getModelStockStates(`${P}prod`);
+    assert.equal(tonTruoc.variants.find((x) => x.variantId === `${P}v1`)!.damaged, 2, "chưa có kết cục ⇒ hỏng chờ = cả 2 món");
+
     // ═══ 2. Nhập lại sau sửa ═══
     const phieu0 = await demPhieuKho(db);
     assert.ok("error" in (await setReturnDispositionCore(db, { subjectKey: I1, disposition: "RESTOCK_AFTER_REWORK", qty: 1, note: "", actor, gate: g.gate })), "chưa qua sửa ⇒ KHÔNG nhập lại");
@@ -269,6 +283,8 @@ export async function testCompanyOsReturnsDb(db: Db) {
 
     const sua = await setReturnDispositionCore(db, { subjectKey: I1, disposition: "REWORK", qty: null, note: "giặt lại", actor, gate: g.gate });
     assert.ok("ok" in sua && sua.receiptId === null, "đưa đi sửa KHÔNG lập phiếu kho");
+    clearMemo();
+    assert.equal((await getModelStockStates(`${P}prod`)).variants.find((x) => x.variantId === `${P}v1`)!.damaged, 2, "ĐANG SỬA chưa phải kết cục — hàng vẫn là hỏng chờ xử lý, không được trừ");
     assert.equal(await demPhieuKho(db), phieu0);
     const [ev] = await db.select().from(schema.domainEvents).where(eq(schema.domainEvents.dedupeKey, `return.disposition_set:${"ok" in sua ? sua.dispositionId : ""}`));
     assert.ok(ev, "mỗi dòng sổ phát return.disposition_set");
@@ -351,6 +367,26 @@ export async function testCompanyOsReturnsDb(db: Db) {
       .where(inArray(schema.returnInspectionItems.id, insOfDisp.filter((k) => k.grain === "ITEM").map((k) => k.id).concat(["-"])));
     assert.ok(trangThai.every((t) => t.status === "INSPECTED"), "mọi việc kết cục trỏ về kiện ĐÃ KIỂM");
     assert.ok(insOfDisp.filter((k) => k.grain === "PARCEL").length >= 2);
+
+    // ═══ 8. Phiếu nhập lại sau sửa KHÔNG xoá được — chặn có thông điệp, không nhật ký, không lỗi CSDL ═══
+    const demNhatKy = async () => Number((await db.select({ n: sql<number>`count(*)::int` }).from(schema.auditLogs).where(eq(schema.auditLogs.entityId, rid)))[0]?.n ?? 0);
+    const nkTruoc = await demNhatKy();
+    const gXoa = congGia({});
+    const xoa = await deleteStockReceiptCore(db, { id: rid, reason: "lập nhầm phiếu sửa", actor, actorEmail: `${P}kho@t.local`, gate: gXoa.gate });
+    assert.ok("error" in xoa, "phiếu nhập lại sau sửa phải bị CHẶN, không xoá được");
+    assert.ok("error" in xoa && xoa.blocker?.reworkRestocks.length === 1, "chặn bằng vế riêng của sổ kết cục (không phải lỗi khoá ngoại)");
+    assert.ok("error" in xoa && /NHẬP LẠI SAU SỬA/.test(xoa.error) && !/violat|foreign key|constraint/i.test(xoa.error), "thông điệp tiếng Việt nói rõ lượt nhập lại sau sửa");
+    assert.equal(gXoa.calls.length, 0, "chặn TRƯỚC cổng duyệt — không gửi yêu cầu duyệt cho lượt xoá không thể xảy ra");
+    assert.equal(await demNhatKy(), nkTruoc, "lượt xoá bị chặn KHÔNG để lại dòng nhật ký nào");
+    assert.ok((await db.select({ id: schema.stockReceipts.id }).from(schema.stockReceipts).where(eq(schema.stockReceipts.id, rid))).length === 1, "phiếu còn nguyên");
+
+    // ═══ 9. Tồn theo mẫu: hỏng CÒN CHỜ = hỏng đã kiểm − phần có kết cục cuối ═══
+    clearMemo();
+    const ton = await getModelStockStates(`${P}prod`);
+    const v1 = ton.variants.find((x) => x.variantId === `${P}v1`)!;
+    assert.equal(v1.damaged, 0, "2 món hỏng: 1 nhập lại sau sửa + 1 huỷ ⇒ không còn món hỏng nào chờ (không đếm hai lần với tồn thực tế)");
+    assert.deepEqual([...ton.basis.damagedMinusDispositions].sort(), [...TERMINAL_DISPOSITIONS].sort(), "basis khai rõ những kết cục đã trừ");
+    assert.equal(ton.variants.find((x) => x.variantId === `${P}v2`)!.damaged, 0, "mẫu mã có dòng kiểm nhưng không hỏng ⇒ 0 thật");
 
     // ═══ 7b. Tóm tắt sau quyết định ═══
     clearMemo();
