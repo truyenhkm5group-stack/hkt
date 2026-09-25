@@ -88,17 +88,17 @@ NGHIỆP VỤ) · `recorded_at` default now(). Chỉ mục: `(model_id, occurred
   `null` khi trùng.
 - KHÔNG gọi `emitDomainEvent` trong giao dịch của webhook Pancake/VTP hay job đồng bộ nóng (Q5).
 
-### Tên sự kiện đã cấp
+### Tên sự kiện đã cấp (trạng thái sau khi gộp Wave 2)
 
 | Tên | Chủ | Trạng thái ở Wave 1 |
 |---|---|---|
 | `model.registered` · `model.linked` · `model.state_changed` · `model.owner_changed` | A | LIVE |
-| `production_topic.created` · `production_topic.status_changed` · `production_topic.message_added` | C | RESERVED |
-| `costing.version_created` · `costing.finalized` | C | RESERVED |
-| `sample.created` · `sample.reviewed` · `sample.approved` · `design_version.approved` | C | RESERVED |
-| `production_order.linked_design` · `production_plan.overridden` | C | RESERVED |
+| `production_topic.created` · `production_topic.status_changed` · `production_topic.message_added` | C | LIVE |
+| `costing.version_created` · `costing.finalized` | C | LIVE |
+| `sample.created` · `sample.submitted` · `sample.reviewed` · `sample.approved` · `design_version.approved` | C | LIVE |
+| `production_order.linked_design` · `production_plan.overridden` | C | LIVE |
 | `stock_receipt.linked_production` | D | RESERVED (D chỉ thêm cột ở Wave 1) |
-| `return.disposition_set` | E | RESERVED |
+| `return.disposition_set` | E | LIVE |
 | `approval.executed` | G | RESERVED |
 | `recommendation.decided` | H | RESERVED |
 
@@ -124,17 +124,124 @@ kiểm `ALERT_KINDS_OWNED_ELSEWHERE` (luật 19).
 | `production:approve` | C | 2 | — (chỉ MANAGER/ADMIN; KHÔNG vai tuỳ chỉnh nào tự có) |
 | `approvals:decide` | G | 1 | thay điều kiện theo vai trong `approvals.ts`, giữ nguyên tập người đang duyệt được |
 
-## 5. Sản xuất nửa đầu (Agent C · Wave 2 · migration cấp khi bắt đầu)
+## 5. Sản xuất nửa đầu (Agent C · Wave 2 · migration `0136_company_os_production`)
 
-Tên bảng đã giữ chỗ — cột chi tiết C khai vào tệp này ở PR của mình:
-`production_topics` · `production_topic_messages` (append-only) · `cost_sheets` (mỗi dòng = một phiên
-bản; `version` tăng dần theo mẫu; `status` DRAFT/FINAL; FINAL bất biến) · `cost_sheet_lines`
-(`kind` ∈ FABRIC/LABOR/TRIM/PRINTING/PACKING/FACTORY_TRANSPORT/INBOUND/WASTAGE/OTHER) · `samples`
-(`version` theo mẫu) · `sample_reviews` (`decision` ∈ REQUEST_CHANGES/REJECT/APPROVE, append-only) ·
-`design_versions` (ảnh chụp bất biến khi APPROVE). Cột mới trên bảng cũ:
-`production_orders.design_version_id` (NULL được), `production_orders.suggested_cells` jsonb,
-`production_orders.override_reason` text. Cờ `settings`: `production.requireApprovedDesign` (mặc định
-`false` = chỉ cảnh báo).
+Luật thuần: `lib/constants/production-os.ts`. Lõi dịch vụ (KHÔNG `"use server"`, nhận `Actor`):
+`lib/production/{topics,costing,samples,orders,lifecycle}.ts`. Action: `lib/actions/production-topics.ts`,
+`production-costing.ts`, `production-samples.ts`; lệnh SX vẫn ở `lib/actions/production.ts` (sửa tại chỗ).
+Mọi bảng dưới đây có `id` text PK (uuid); mốc là `timestamptz`; tiền là số nguyên VND.
+
+### `production_topics` — topic hỏi giá / bàn phương án cho MỘT mẫu
+
+| Cột | Kiểu | Ràng buộc | Nghĩa |
+|---|---|---|---|
+| `model_id` | text | NOT NULL, FK `product_models` RESTRICT | |
+| `title` | text | NOT NULL, CHECK `length(btrim) > 0` | |
+| `requirements` | jsonb | NOT NULL default `{}` | `TopicRequirements`: `material`, `colors[]`, `sizes[]`, `trims`, `designNotes`, `targetPrice` (VND \| null), `expectedQty` (\| null), `deadline` (`YYYY-MM-DD` \| null). null = CHƯA ĐẶT |
+| `status` | text | NOT NULL default `WAITING_QUOTE`, CHECK ∈ `WAITING_QUOTE · DISCUSSING · OPTIONS_READY · WAITING_DECISION · SELECTED · CLOSED` | bảng chuyển `TOPIC_TRANSITIONS` |
+| `supplier_id` | text | FK `suppliers` SET NULL | NULL = chưa chọn xưởng |
+| `selected_option` | text | CHECK: `status = 'SELECTED'` ⇒ khác rỗng | |
+| `evidence_snapshot` | jsonb | NOT NULL | `TopicEvidenceSnapshot` `{ kind: "SNAPSHOT", capturedAt, basis, productId, orders30d, ordersTotal, adSpend30d }` — MÁY CHỦ chụp từ `getModelEvidence` lúc mở, không cập nhật; ô null = chưa biết |
+| `created_by_user_id` · `created_by` | text | FK users SET NULL · ảnh chụp tên | |
+| `status_changed_at` · `created_at` · `updated_at` | timestamptz | | `updated_at` đi theo lượt trao đổi mới nhất |
+
+### `production_topic_messages` — APPEND-ONLY (chỉ INSERT, quét mã nguồn)
+
+`topic_id` NOT NULL FK RESTRICT · `author_user_id` FK users SET NULL (NULL = máy) · `author_name` · `kind`
+CHECK ∈ `NOTE · QUOTE · OPTION · DECISION` · `body` NOT NULL khác rỗng · `attachments` jsonb `string[]` (URL
+http/https — không có kho ảnh chung phù hợp) · `quoted_unit_price` int NULL (chỉ lượt `QUOTE`, ≥ 0) ·
+`created_at`. Đổi trạng thái topic tự để lại MỘT lượt (`DECISION` khi chốt, `NOTE` còn lại).
+
+### `cost_sheets` — mỗi dòng là MỘT phiên bản giá thành của một mẫu; FINAL bất biến
+
+| Cột | Kiểu | Ràng buộc |
+|---|---|---|
+| `model_id` | text | NOT NULL FK `product_models` RESTRICT |
+| `topic_id` | text | FK `production_topics` SET NULL (NULL được) |
+| `version` | int | NOT NULL > 0, UNIQUE (`model_id`, `version`) |
+| `status` | text | NOT NULL default `DRAFT`, CHECK ∈ `DRAFT · FINAL` |
+| `total_unit_cost` | int | NOT NULL ≥ 0 — TÍNH ở máy chủ bằng `computeCostSheet`, lưu lại |
+| `notes` | text | NOT NULL default `''` |
+| `created_by_user_id` · `created_by` | | FK users SET NULL · ảnh chụp tên |
+| `finalized_at` · `finalized_by_user_id` · `finalized_by` | | FK users RESTRICT; CHECK `cost_sheets_final_check`: DRAFT ⇒ hai cột NULL, FINAL ⇒ cả hai NOT NULL |
+
+Bất biến của FINAL: mọi `UPDATE cost_sheets` mang `status = 'DRAFT'`; dòng chi phí chỉ thay sau khi khoá
+dòng cha (`FOR UPDATE`) và thấy nó còn DRAFT; tệp DUY NHẤT ghi hai bảng là `lib/production/costing.ts`
+(không trigger — kiểm bằng mã + CHECK + bài kiểm). Chốt = `production:approve` + một `users.id`.
+
+### `cost_sheet_lines`
+
+`cost_sheet_id` NOT NULL FK RESTRICT · `kind` CHECK ∈ `FABRIC · LABOR · TRIM · PRINTING · PACKING ·
+FACTORY_TRANSPORT · INBOUND · WASTAGE · OTHER` · `description` · `qty` double precision ≥ 0 · `unit` text ·
+`unit_cost` int ≥ 0 · `amount` int ≥ 0 (máy chủ tính) · `sort_order`. **Hao hụt %**: `unit = '%'` CHỈ cho
+`WASTAGE` (CHECK, `qty ≤ 100`), `qty` là số phần trăm, `amount = round(cơ sở × qty / 100)` với cơ sở = tổng
+tiền mọi dòng KHÔNG phải %; nhiều dòng % cùng tính trên một cơ sở (không lãi kép); `unit_cost` lưu 0.
+
+### `samples` — mỗi dòng là MỘT phiên bản mẫu (V1, V2…)
+
+`model_id` NOT NULL FK RESTRICT · `topic_id` FK SET NULL · `version` int > 0, UNIQUE (`model_id`, `version`)
+· `supplier_id` FK `suppliers` SET NULL (**NULL được** — "chưa chọn xưởng", in "—") · `cost_vnd` int NULL
+(= chưa biết) · `images` jsonb `string[]` URL · `notes` · `problems` · `requested_changes` (chép từ lượt
+REQUEST_CHANGES) · `status` CHECK ∈ `IN_PROGRESS · SUBMITTED · CHANGES_REQUESTED · REJECTED · APPROVED` ·
+`created_by_user_id` · `created_by` · `submitted_at` (CHECK: khác IN_PROGRESS ⇒ NOT NULL) · `decided_at`
+(CHECK: đã có phán quyết ⇒ NOT NULL) · `created_at` · `updated_at`. Mỗi mẫu tối đa MỘT phiên bản đang mở
+(IN_PROGRESS/SUBMITTED); cả ba phán quyết KẾT THÚC phiên bản — sửa tiếp là phiên bản mới.
+
+### `sample_reviews` — APPEND-ONLY, mỗi phiên bản mẫu đúng MỘT phán quyết
+
+`sample_id` NOT NULL **UNIQUE** FK RESTRICT · `decision` CHECK ∈ `REQUEST_CHANGES · REJECT · APPROVE` · `note`
+(CHECK: khác `APPROVE` ⇒ khác rỗng; ứng dụng đòi ≥ 5 ký tự) · `reviewer_user_id` NOT NULL FK users RESTRICT
+· `reviewer_name` · `reviewed_at`. `APPROVE`/`REJECT` cần `production:approve`; `REQUEST_CHANGES` cần
+`production:write`.
+
+### `design_versions` — ẢNH CHỤP BẤT BIẾN, sinh ra DUY NHẤT bởi lượt APPROVE (cùng giao dịch)
+
+`model_id` NOT NULL FK RESTRICT · `sample_id` NOT NULL UNIQUE FK RESTRICT · `review_id` NOT NULL UNIQUE FK
+`sample_reviews` RESTRICT · `cost_sheet_id` FK `cost_sheets` RESTRICT — bảng CHỐT mới nhất của mẫu lúc duyệt,
+**NULL = lúc duyệt chưa có bảng chốt nào** (ảnh chụp ghi `costSheetNote` nói rõ) · `version` int > 0, UNIQUE
+(`model_id`, `version`) · `spec` jsonb NOT NULL `{ snapshotAt, sample{…}, topic{id,title,requirements,
+selectedOption,statusAtApproval} | null, costSheet{id,version,totalUnitCost,finalizedAt,finalizedBy,lines[]} |
+null, costSheetNote }` · `approved_by_user_id` NOT NULL FK users RESTRICT · `approved_by` · `approved_at`.
+
+### Cột mới trên `production_orders` (NULL được, KHÔNG backfill)
+
+`design_version_id` text FK `design_versions` RESTRICT (+ chỉ mục một phần) · `suggested_cells` jsonb
+`SuggestedCellsSnapshot { cells, basis: { source: "buildMatrixForProduct", coverDays, countIncoming,
+leadTimeDays }, computedAt }` — MÁY CHỦ tính lại gợi ý lúc lưu, không nhận từ trình duyệt · `override_reason`
+text — bắt buộc (≥ 5 ký tự) khi số chốt khác gợi ý dù MỘT ô (không ngưỡng — luật 38). Ghi DUY NHẤT qua
+`lib/production/orders.ts::persistPoPlanTx` (cùng giao dịch với ô số lượng và sự kiện). Lệnh chỉ trỏ được bản
+duyệt của CHÍNH mẫu của sản phẩm trong lệnh.
+
+### Cờ `settings` `production.requireApprovedDesign`
+
+Chỉ đúng JSON `true` mới bật (không có dòng / chuỗi `"true"` / JSON hỏng ⇒ TẮT). TẮT (mặc định) ⇒ lệnh chưa
+trỏ bản duyệt vẫn lưu / gửi được, màn hình cảnh báo, nhật ký ghi `sentWithoutApprovedDesign`. BẬT ⇒ chặn
+ĐÚNG lượt DRAFT → SENT; lệnh đã gửi / đã nhận không bị đụng. Migration không ghi cờ. Bật = HUMAN GATE.
+
+### Sự kiện (sổ `DOMAIN_EVENTS`, tất cả LIVE)
+
+`production_topic.{created,status_changed,message_added}` (`lib/production/topics.ts`) ·
+`costing.{version_created,finalized}` (`costing.ts`) · `sample.{created,submitted,reviewed,approved}` +
+`design_version.approved` (`samples.ts`) · `production_order.linked_design` + `production_plan.overridden`
+(`orders.ts`). **`sample.submitted` là tên MỚI** (không có ở bảng mục 2): lượt chuyển vòng đời
+SAMPLING → SAMPLE_REVIEW cần một sự kiện để trỏ về (Q3).
+
+### Vòng đời đi theo (`LIFECYCLE_FOLLOW`, chỉ CẠNH TIẾN từ trạng thái hiện tại, `actor_kind = SYSTEM`)
+
+topic mở ⇒ WINNER → PRODUCTION_DISCUSSION · giá thành phiên bản mới ⇒ PRODUCTION_DISCUSSION → COSTING · mẫu
+mới ⇒ COSTING → SAMPLING · gửi duyệt ⇒ SAMPLING → SAMPLE_REVIEW · yêu cầu sửa ⇒ SAMPLE_REVIEW → SAMPLING ·
+duyệt ⇒ SAMPLE_REVIEW → APPROVED · lệnh trỏ bản duyệt ⇒ APPROVED / SELLING → PRODUCTION_PLANNING. Mẫu CHƯA
+KHAI hoặc đang ở chỗ khác ⇒ không chuyển. Chạy SAU giao dịch nghiệp vụ (`transitionModelCore` nhận `Db`),
+lũy đẳng theo `sourceEventId`.
+
+### Quyền · việc · màn hình
+
+`production:write` (LEADER, MANAGER; ADMIN) · `production:approve` (MANAGER qua phép trừ; ADMIN; nằm trong
+`ROLE_BUILDER_FORBIDDEN`). Nguồn việc `PRODUCTION_TOPIC` (topic chưa ngã ngũ) và `SAMPLE_REVIEW` (mẫu
+SUBMITTED): SOURCE, phòng `TEAM_DEPARTMENT.PRODUCTION` (hôm nay → Kho, luật 69), `slaHours = null` (không có
+hằng số đang chạy), chỉ nút MỞ. Route: `/production` · `/production/topics/new?model=<id>` ·
+`/production/topics/[id]` · `/production/models/[id]`. Hàm đọc giao A2: `getModelProductionSummary(modelId)`
+(`lib/queries/model-production.ts`).
 
 ## 6. Hàm đọc dùng chung đã giao (để trang 360 và cockpit không tự tính)
 

@@ -26,6 +26,7 @@ import { resolvePeriod } from "@/lib/search-params";
 import { APPROVAL_GROUP_LABEL, type ApprovalGroup } from "@/lib/constants/approval";
 import { listApprovalRequests } from "@/lib/queries/approvals";
 import { formatVND } from "@/lib/format";
+import { SAMPLE_STATUS_TO_WORK, TOPIC_OPEN_STATUSES, TOPIC_STATUS_LABEL, TOPIC_STATUS_TO_WORK, type SampleStatus, type TopicStatus } from "@/lib/constants/production-os";
 
 /**
  * ═══════════════ PHÉP CHIẾU: SÁU HÀNG ĐỢI THÀNH MỘT DANH SÁCH ═══════════════
@@ -851,6 +852,109 @@ export async function adaptApprovals(now: Date, includeClosed = false, closedSin
   });
 }
 
+/* ═══════════════════ 7c · SẢN XUẤT NỬA ĐẦU (Company OS · Agent C) ═══════════════════ */
+
+/*
+  Hai phép chiếu đọc THẲNG bảng nguồn — không luật nào ở đây: tập việc là `TOPIC_OPEN_STATUSES` và
+  `samples.status = 'SUBMITTED'`, trạng thái chung đi qua `TOPIC_STATUS_TO_WORK` / `SAMPLE_STATUS_TO_WORK`
+  (lib/constants/production-os.ts). Việc tự rời hàng đợi khi người chốt / đóng topic hoặc ghi phán quyết
+  cho mẫu ở `/production` — không job nào đóng hộ, không nút "xong" nào ở hàng đợi.
+
+  Tiền: KHÔNG khai (`MONEY_UNKNOWN`). Giá mục tiêu × số lượng dự kiến là một ƯỚC LƯỢNG của người mở
+  topic, không phải tiền đang rủi ro — in nó vào cột tiền là biến một mong muốn thành một con số.
+*/
+export async function adaptProductionTopics(now: Date): Promise<WorkItem[]> {
+  const db = await getDb();
+  const t = schema.productionTopics;
+  const rows = await db
+    .select({ id: t.id, title: t.title, status: t.status, createdAt: t.createdAt, updatedAt: t.updatedAt, modelCode: schema.productModels.code, modelId: t.modelId })
+    .from(t)
+    .innerJoin(schema.productModels, eq(schema.productModels.id, t.modelId))
+    .where(inArray(t.status, [...TOPIC_OPEN_STATUSES]))
+    .limit(500);
+  const ms = now.getTime();
+  return rows.map((r) => {
+    const status = r.status as TopicStatus;
+    const canQuyet = status === "OPTIONS_READY" || status === "WAITING_DECISION";
+    return {
+      key: workKey("PRODUCTION_TOPIC", r.id),
+      sourceType: "PRODUCTION_TOPIC",
+      sourceKey: r.id,
+      kind: status,
+      title: `${r.modelCode} · ${r.title}`,
+      summary: `Topic sản xuất đang “${TOPIC_STATUS_LABEL[status]}”.`,
+      department: WORK_SOURCE_SPEC.PRODUCTION_TOPIC.department!,
+      assignee: null,
+      status: TOPIC_STATUS_TO_WORK[status],
+      statusAuthority: "SOURCE" as const,
+      priority: canQuyet ? "HIGH" : "NORMAL",
+      score: caseScore({ severity: canQuyet ? "warning" : "info", ageHours: hoursSince(r.createdAt, ms), amount: 0, type: "OTHER" }),
+      createdAt: r.createdAt,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaAtOf("PRODUCTION_TOPIC", r.createdAt),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "MODEL",
+      businessEntityId: r.modelId,
+      sourceUrl: `/production/topics/${r.id}`,
+      money: MONEY_UNKNOWN,
+      tags: [status.toLowerCase()],
+      evidence: { source: "Sản xuất · Topic", detail: `${TOPIC_STATUS_LABEL[status]} · cập nhật ${r.updatedAt.toISOString().slice(0, 10)}` },
+      blockedReason: "",
+      creationSource: "AUTO" as WorkItem["creationSource"],
+      actions: actionsOf("PRODUCTION_TOPIC"),
+      recommendedAction: canQuyet ? "Mở topic, chọn phương án và bấm Chốt phương án" : status === "WAITING_QUOTE" ? "Giục xưởng báo giá, ghi báo giá vào topic" : "Mở topic và tiếp tục trao đổi",
+    };
+  });
+}
+
+export async function adaptSampleReviews(now: Date): Promise<WorkItem[]> {
+  const db = await getDb();
+  const s = schema.samples;
+  const rows = await db
+    .select({ id: s.id, version: s.version, status: s.status, submittedAt: s.submittedAt, createdAt: s.createdAt, topicId: s.topicId, modelId: s.modelId, modelCode: schema.productModels.code })
+    .from(s)
+    .innerJoin(schema.productModels, eq(schema.productModels.id, s.modelId))
+    .where(eq(s.status, "SUBMITTED"))
+    .limit(500);
+  const ms = now.getTime();
+  return rows.map((r) => {
+    // Việc bắt đầu lúc mẫu được GỬI DUYỆT, không phải lúc xưởng bắt đầu làm.
+    const from = r.submittedAt ?? r.createdAt;
+    return {
+      key: workKey("SAMPLE_REVIEW", r.id),
+      sourceType: "SAMPLE_REVIEW",
+      sourceKey: r.id,
+      kind: null,
+      title: `${r.modelCode} · mẫu V${r.version} chờ duyệt`,
+      summary: "Mẫu đã về, chờ người có quyền duyệt: duyệt / yêu cầu sửa / loại.",
+      department: WORK_SOURCE_SPEC.SAMPLE_REVIEW.department!,
+      assignee: null,
+      status: SAMPLE_STATUS_TO_WORK[r.status as SampleStatus],
+      statusAuthority: "SOURCE" as const,
+      priority: "HIGH",
+      score: caseScore({ severity: "warning", ageHours: hoursSince(from, ms), amount: 0, type: "OTHER" }),
+      createdAt: from,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaAtOf("SAMPLE_REVIEW", from),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "SAMPLE",
+      businessEntityId: r.id,
+      sourceUrl: r.topicId ? `/production/topics/${r.topicId}#mau` : `/production/models/${r.modelId}`,
+      money: MONEY_UNKNOWN,
+      tags: [`v${r.version}`],
+      evidence: { source: "Sản xuất · Mẫu", detail: `V${r.version} gửi duyệt ${from.toISOString().slice(0, 10)}` },
+      blockedReason: "",
+      creationSource: "AUTO" as WorkItem["creationSource"],
+      actions: actionsOf("SAMPLE_REVIEW"),
+      recommendedAction: "Mở mẫu, xem ảnh và ghi phán quyết",
+    };
+  });
+}
+
 /* ═══════════════════ 8 · VIỆC TAY & VIỆC ĐỊNH KỲ ═══════════════════ */
 
 /** Nguồn duy nhất giữ trạng thái trong `work_items`. Ở đây không có phép chiếu nào. */
@@ -1048,6 +1152,8 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     want("ALERT") || want("COD_EXCEPTION") || want("INVENTORY_EXCEPTION") || want("RETURN_INSPECTION") ? guard("ALERT", () => adaptAlerts(now)) : [],
     want("TECH_TASK") ? guard("TECH_TASK", () => adaptTechTasks(now, opts.includeClosed ?? false)) : [],
     want("APPROVAL") ? guard("APPROVAL", () => adaptApprovals(now, opts.includeClosed ?? false, closedSince)) : [],
+    want("PRODUCTION_TOPIC") ? guard("PRODUCTION_TOPIC", () => adaptProductionTopics(now)) : [],
+    want("SAMPLE_REVIEW") ? guard("SAMPLE_REVIEW", () => adaptSampleReviews(now)) : [],
     want("MANUAL_TASK") || want("RECURRING_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);
 
