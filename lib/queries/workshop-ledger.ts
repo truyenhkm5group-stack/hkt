@@ -372,7 +372,7 @@ export async function openBatchQtyByVariantFromLedger() {
       .from(schema.productionDeliveries)
       .innerJoin(schema.productionBatches, eq(schema.productionBatches.id, schema.productionDeliveries.batchId))
       .where(eq(schema.productionBatches.status, "OPEN")),
-    // Phiếu NHẬP HÀNG nối về lô (0132) — chứng từ TỒN, trừ khỏi "đang sản xuất" qua `openQtyAfterReceived`.
+    // Phiếu NHẬP HÀNG nối về lô (0133) — chứng từ TỒN, trừ khỏi "đang sản xuất" qua `openQtyAfterReceived`.
     linkedReceiptQty("batch"),
   ]);
   return openBatchQtyByVariant(

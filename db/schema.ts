@@ -1398,7 +1398,7 @@ export const marketingIdeas = pgTable(
     reviewedAt: ts("reviewed_at"),
     reviewedBy: text("reviewed_by").notNull().default(""),
     /**
-     * Company OS · A2 (0137): mẫu được đăng ký TỪ ý tưởng này (nút "Đăng ký thành mẫu"). `NULL` = chưa
+     * Company OS · A2 (0138): mẫu được đăng ký TỪ ý tưởng này (nút "Đăng ký thành mẫu"). `NULL` = chưa
      * đăng ký — KHÔNG backfill theo nội dung chữ (mục 35). Xoá mẫu thì ý tưởng còn nguyên, chỉ mất liên
      * kết. Không đổi trạng thái hay quyền của ý tưởng.
      */
@@ -2037,7 +2037,7 @@ export const stockReceipts = pgTable(
     supplier: text("supplier").notNull().default(""),
     supplierId: text("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
     /**
-     * Company OS · Agent D (0132): phiếu NHẬP HÀNG này nhận hàng của lệnh sản xuất / lô xưởng nào.
+     * Company OS · Agent D (0133): phiếu NHẬP HÀNG này nhận hàng của lệnh sản xuất / lô xưởng nào.
      * `NULL` = chưa khai — KHÔNG backfill (AGENTS.md mục 35): đoán lô cho phiếu cũ theo tên xưởng là
      * bịa một quy kết. Chỉ phiếu `RECEIPT` được gắn; kiểm tồn tại ở server action.
      */
@@ -3107,18 +3107,18 @@ export const adsDecisionLedger = pgTable(
     headroom: doublePrecision("headroom"),
     breakEvenBookedRoas: doublePrecision("break_even_booked_roas"),
     /*
-      ─── Company OS · Agent F · ẢNH CHỤP DỰ PHÓNG (migration 0134) ───
+      ─── Company OS · Agent F · ẢNH CHỤP DỰ PHÓNG (migration 0135) ───
 
       Lợi nhuận TẠM TÍNH mà dòng đứng trên lúc kết luận — chép từ ĐÚNG dòng `buildDecisionRow` đã
       dựng, không tính lại. Có nó thì vài tuần sau mới so được "hôm ấy máy dự phóng bao nhiêu" với
       số đo khi cohort đã chín; thiếu nó thì mọi phép đo độ chính xác dự báo phải dựng lại quá khứ.
 
-      NULLABLE và KHÔNG BACKFILL (mục 35, 8.8): dòng ghi trước 0134 mang `NULL` = CHƯA CHỤP, không
+      NULLABLE và KHÔNG BACKFILL (mục 35, 8.8): dòng ghi trước 0135 mang `NULL` = CHƯA CHỤP, không
       phải 0 ₫. Dựng lại số của một ngày đã qua là tính trên dữ liệu đã chín thêm — một con số khác.
     */
     projectedProfitAfterAds: integer("projected_profit_after_ads"),
     projectedHeadroom: doublePrecision("projected_headroom"),
-    /** Tỷ lệ GTC (%) đã áp cho phần đang treo của dòng. `NULL` = không có gì treo, hoặc dòng ghi trước 0134. */
+    /** Tỷ lệ GTC (%) đã áp cho phần đang treo của dòng. `NULL` = không có gì treo, hoặc dòng ghi trước 0135. */
     appliedDeliveryRate: doublePrecision("applied_delivery_rate"),
 
     createdAt: createdAt(),
@@ -4105,7 +4105,7 @@ export const productVariantsRelations = relations(productVariants, ({ one, many 
 }));
 export const stockReceiptsRelations = relations(stockReceipts, ({ many, one }) => ({
   items: many(stockReceiptItems),
-  // Company OS · Agent D (0132): phiếu nhập nối về lệnh sản xuất / lô xưởng — NULL = chưa khai.
+  // Company OS · Agent D (0133): phiếu nhập nối về lệnh sản xuất / lô xưởng — NULL = chưa khai.
   productionOrder: one(productionOrders, { fields: [stockReceipts.productionOrderId], references: [productionOrders.id] }),
   productionBatch: one(productionBatches, { fields: [stockReceipts.productionBatchId], references: [productionBatches.id] }),
 }));

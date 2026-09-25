@@ -25,7 +25,7 @@ function toInt(value: string) {
 }
 
 /** Dialog lập phiếu kho (nhập mới / tái nhập hàng hoàn / xuất tay / điều chỉnh kiểm kê) cho nhiều mẫu mã cùng lúc */
-export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturns = {}, supplierOptions = [], productionLinks = [] }: { variants: VariantPickerRow[]; defaultKind?: StockReceiptKind; pendingReturns?: Record<string, number>; /** Tên xưởng trong danh mục — chỉ là GỢI Ý. */ supplierOptions?: string[]; /** Lệnh SX đã gửi + lô xưởng đang mở — để NGƯỜI chọn phiếu nhập này là hàng của lần đặt nào (0132). */ productionLinks?: ProductionLinkOption[] }) {
+export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturns = {}, supplierOptions = [], productionLinks = [] }: { variants: VariantPickerRow[]; defaultKind?: StockReceiptKind; pendingReturns?: Record<string, number>; /** Tên xưởng trong danh mục — chỉ là GỢI Ý. */ supplierOptions?: string[]; /** Lệnh SX đã gửi + lô xưởng đang mở — để NGƯỜI chọn phiếu nhập này là hàng của lần đặt nào (0133). */ productionLinks?: ProductionLinkOption[] }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<StockReceiptKind>(defaultKind);
   const [receivedAt, setReceivedAt] = useState(todayVN());

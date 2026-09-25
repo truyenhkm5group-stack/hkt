@@ -89,7 +89,7 @@ export function isTerminalDisposition(d: ReturnDisposition): d is TerminalDispos
   return (TERMINAL_DISPOSITIONS as readonly string[]).includes(d);
 }
 
-/** Kết cục BẮT BUỘC lý do. Cùng danh sách với CHECK `return_dispositions_note_check` của migration 0136. */
+/** Kết cục BẮT BUỘC lý do. Cùng danh sách với CHECK `return_dispositions_note_check` của migration 0137. */
 export const DISPOSITION_NEEDS_NOTE: Record<ReturnDisposition, boolean> = {
   PENDING_DECISION: false,
   REWORK: false,
