@@ -80,6 +80,7 @@ const MOI = [
   "0130_marketer_prices",
   "0131_bank_link_supplier_payment",
   "0132_company_os_models",
+  "0133_company_os_inventory",
 ] as const;
 
 /*

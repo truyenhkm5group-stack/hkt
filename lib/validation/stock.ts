@@ -29,6 +29,9 @@ export const stockReceiptSchema = z.object({
   reference: z.string().trim().max(200, "Tham chiếu tối đa 200 ký tự"),
   supplier: z.string().trim().max(200, "Nhà cung cấp tối đa 200 ký tự"),
   note: z.string().trim().max(1000, "Ghi chú tối đa 1000 ký tự"),
+  /** Company OS · Agent D (0132): phiếu NHẬP HÀNG nhận hàng của lệnh SX / lô xưởng nào. Trống = chưa khai. */
+  productionOrderId: z.string().trim().max(100).optional(),
+  productionBatchId: z.string().trim().max(100).optional(),
   items: z
     .array(
       z.object({
@@ -43,3 +46,12 @@ export const stockReceiptSchema = z.object({
     .refine((items) => items.some((i) => i.quantity !== 0), "Số lượng đều bằng 0"),
 });
 export type StockReceiptInput = z.infer<typeof stockReceiptSchema>;
+
+/** Lý do xoá phiếu tối thiểu — đủ để một câu có nghĩa, không phải "x". */
+export const RECEIPT_DELETE_REASON_MIN = 5;
+
+/** Xoá phiếu kho: lý do BẮT BUỘC — xoá cứng thì nhật ký là thứ duy nhất còn lại (Company OS · Agent D). */
+export const deleteReceiptSchema = z.object({
+  id: z.string().trim().min(1, "Thiếu mã phiếu"),
+  reason: z.string().trim().min(RECEIPT_DELETE_REASON_MIN, `Nêu lý do xoá phiếu (ít nhất ${RECEIPT_DELETE_REASON_MIN} ký tự)`).max(500, "Lý do tối đa 500 ký tự"),
+});

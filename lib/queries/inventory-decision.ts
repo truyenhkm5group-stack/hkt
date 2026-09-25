@@ -8,11 +8,10 @@ import {
   type InventoryDecisionKind,
   type InventoryDecisionResult,
 } from "@/lib/constants/inventory-decision";
-import { SLOW_MOVING_RULES } from "@/lib/constants/slow-moving";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
 import { openBatchQtyByVariantFromLedger } from "@/lib/queries/workshop-ledger";
-import { getSlowMoving } from "@/lib/queries/slow-moving";
+import { getSlowMoving, loadSlowMovingRules } from "@/lib/queries/slow-moving";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 
 /**
@@ -283,6 +282,7 @@ async function decisionReportUncached(): Promise<InventoryDecisionReport> {
       returnRateSource,
       daysSinceLastSale,
       ageDays,
+      slowRules: slow.rules,
     });
 
     byDecision[decision.decision] += 1;
@@ -421,7 +421,7 @@ export type DecisionBacktest = {
 
 async function backtestUncached(daysBack: number): Promise<DecisionBacktest> {
   const db = await getDb();
-  const plan = await getReplenishmentPlan();
+  const [plan, { rules: slowRules }] = await Promise.all([getReplenishmentPlan(), loadSlowMovingRules()]);
   const a = plan.assumptions;
   const windowDays = Math.max(1, a.velocityWindowDays);
   const horizonDays = Math.min(Math.max(1, a.leadTimeDays), daysBack);
@@ -534,6 +534,7 @@ async function backtestUncached(daysBack: number): Promise<DecisionBacktest> {
       returnRateSource: null,
       daysSinceLastSale,
       ageDays,
+      slowRules,
     });
 
     result.evaluated += 1;
@@ -543,7 +544,7 @@ async function backtestUncached(daysBack: number): Promise<DecisionBacktest> {
       if (stockAtEnd <= 0) result.stockout.confirmed += 1;
     } else if (decision.decision === "OVERSTOCK") {
       result.overstock.predicted += 1;
-      if (velocity <= 0 || stockAtEnd / velocity > SLOW_MOVING_RULES.excessCoverDays) result.overstock.stillExcess += 1;
+      if (velocity <= 0 || stockAtEnd / velocity > slowRules.excessCoverDays) result.overstock.stillExcess += 1;
     } else if (decision.decision === "CLEARANCE_CANDIDATE") {
       result.clearance.predicted += 1;
       if (soldAfter === 0) result.clearance.noSales += 1;

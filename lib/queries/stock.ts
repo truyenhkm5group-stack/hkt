@@ -273,8 +273,40 @@ export async function listStockReceipts(limit = 100) {
   return db.query.stockReceipts.findMany({
     orderBy: [desc(schema.stockReceipts.receivedAt), desc(schema.stockReceipts.createdAt)],
     limit,
-    with: { items: { with: { variant: { columns: { id: true, sku: true, color: true, size: true }, with: { product: { columns: { name: true } } } } } } },
+    with: {
+      items: { with: { variant: { columns: { id: true, sku: true, color: true, size: true }, with: { product: { columns: { name: true } } } } } },
+      // Company OS · Agent D (0132): phiếu nhập nối về lệnh SX / lô xưởng — NULL = chưa khai.
+      productionOrder: { columns: { id: true, code: true } },
+      productionBatch: { columns: { id: true, productCode: true, batchNo: true } },
+    },
   });
+}
+
+export type ProductionLinkOption = {
+  kind: "ORDER" | "BATCH";
+  id: string;
+  label: string;
+  /** Ảnh chụp tên xưởng — để lọc theo ô "Nhà cung cấp" trên form. */
+  supplier: string;
+};
+
+/**
+ * Lệnh sản xuất ĐÃ GỬI XƯỞNG và lô xưởng ĐANG MỞ — ứng viên cho ô "Hàng của lệnh / lô" trên phiếu
+ * nhập. Cùng định nghĩa "đang mở" với `openPoQtyByVariant` (lệnh `SENT`, lô `OPEN`).
+ */
+export async function listOpenProductionLinks(): Promise<ProductionLinkOption[]> {
+  const db = await getDb();
+  const po = schema.productionOrders;
+  const { openBatchLinkOptions } = await import("@/lib/queries/workshop-ledger");
+  const [orders, batches] = await Promise.all([
+    db.select({ id: po.id, code: po.code, productName: po.productName, productCode: po.productCode, supplier: po.supplier, totalQty: po.totalQty }).from(po).where(eq(po.status, "SENT")).orderBy(desc(po.createdAt)).limit(300),
+    // Bảng lô thuộc sổ đặt xưởng — chỉ đọc qua hàm của sổ (tests/workshop-ledger.test.ts).
+    openBatchLinkOptions(300),
+  ]);
+  return [
+    ...orders.map((o) => ({ kind: "ORDER" as const, id: o.id, label: `Lệnh ${o.code} · ${o.productCode || o.productName} · ${o.totalQty} cái`, supplier: o.supplier })),
+    ...batches.map((b) => ({ kind: "BATCH" as const, id: b.id, label: `Lô ${b.productCode} #${b.batchNo} · ${b.orderedQty} cái`, supplier: b.supplier })),
+  ];
 }
 
 export type StockReceiptRow = Awaited<ReturnType<typeof listStockReceipts>>[number];
@@ -319,11 +351,19 @@ export async function stockRiskSummary() {
   );
   const rows = plan.rows;
   const sum = (pick: (r: (typeof rows)[number]) => number) => rows.reduce((total, r) => total + pick(r), 0);
+  const signed = splitSignedStock(rows.map((r) => ({ stockKnown: r.stockKnown, stock: r.stock, available: r.available })));
   return {
     states: {
-      ON_HAND: sum((r) => (r.stockKnown ? r.stock : 0)),
+      /*
+        CHỈ CỘNG DÒNG DƯƠNG (Company OS · Agent D). Trước đây tổng này cộng CẢ dòng âm, nên một mẫu
+        âm sổ −30 lặng lẽ xoá 30 món có thật của mẫu khác và con số trên trang chủ trông "vừa phải".
+        Tồn âm là SAI LỆCH CẦN KIỂM (thiếu phiếu nhập, xuất hai lần…), không phải kho đang nợ hàng —
+        nên nó đứng riêng ở `negativeRows` / `negativeQty`. Mẫu chưa có phiếu nhập vẫn là CHƯA BIẾT,
+        không vào tổng, không vào số âm.
+      */
+      ON_HAND: signed.onHandPositive,
       RESERVED: sum((r) => r.committed),
-      AVAILABLE: sum((r) => (r.stockKnown ? r.available : 0)),
+      AVAILABLE: signed.availablePositive,
       INBOUND: plan.summary.incomingUnits,
       UNSELLABLE: Number(shrink?.n ?? 0),
     },
@@ -336,7 +376,48 @@ export async function stockRiskSummary() {
     unknown: plan.summary.unknown,
     suggestedUnits: plan.summary.suggestedUnits,
     orderCost: plan.summary.orderCost,
+    /** Mẫu mã ÂM SỔ (tồn thực tế < 0, đã biết tồn) — cần kiểm, KHÔNG cộng vào ON_HAND. */
+    negativeRows: signed.negativeRows,
+    /** Tổng phần âm (số dương, món) của các mẫu âm sổ. */
+    negativeQty: signed.negativeQty,
+    /** Mẫu mã khả dụng < 0 (đã chốt nhiều hơn tồn) — đơn chờ hàng, xem /inventory/shortage. */
+    oversoldRows: signed.oversoldRows,
+    oversoldQty: signed.oversoldQty,
   };
+}
+
+export type SignedStockRow = { stockKnown: boolean; stock: number; available: number };
+
+/**
+ * Tách tồn có dấu thành tổng DƯƠNG + phần ÂM đếm riêng. Hàm THUẦN (kiểm thử được không cần CSDL).
+ *
+ * Luật: mẫu CHƯA BIẾT tồn (`stockKnown = false`) không vào vế nào — chưa biết không phải 0, cũng
+ * không phải âm. `max(khả dụng, 0) ≤ max(tồn, 0)` vì khả dụng ≤ tồn, nên bất biến "khả dụng không
+ * lớn hơn tồn thực tế" vẫn giữ trên hai tổng.
+ */
+export function splitSignedStock(rows: readonly SignedStockRow[]) {
+  let onHandPositive = 0;
+  let availablePositive = 0;
+  let negativeRows = 0;
+  let negativeQty = 0;
+  let oversoldRows = 0;
+  let oversoldQty = 0;
+  for (const r of rows) {
+    if (!r.stockKnown) continue;
+    const stock = Number(r.stock);
+    const available = Number(r.available);
+    if (stock > 0) onHandPositive += stock;
+    else if (stock < 0) {
+      negativeRows += 1;
+      negativeQty += -stock;
+    }
+    if (available > 0) availablePositive += available;
+    else if (available < 0) {
+      oversoldRows += 1;
+      oversoldQty += -available;
+    }
+  }
+  return { onHandPositive, availablePositive, negativeRows, negativeQty, oversoldRows, oversoldQty };
 }
 
 export type StockRiskSummary = Awaited<ReturnType<typeof stockRiskSummary>>;

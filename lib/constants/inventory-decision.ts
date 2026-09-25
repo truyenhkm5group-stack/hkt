@@ -1,4 +1,4 @@
-import { SLOW_MOVING_RULES } from "@/lib/constants/slow-moving";
+import { SLOW_MOVING_RULES, type SlowMovingRules } from "@/lib/constants/slow-moving";
 import { VERDICT_RULES } from "@/lib/constants/product-verdict";
 import { RECOMMENDATION_CONFIDENCE, type RecommendationConfidence } from "@/lib/constants/recommendation";
 
@@ -130,6 +130,12 @@ export type DecisionInput = {
   daysSinceLastSale: number | null;
   /** Tuổi của mẫu mã tính từ phiếu nhập đầu tiên; `null` = không xác định được. */
   ageDays: number | null;
+  /**
+   * Ngưỡng hàng chậm / hàng chết ĐANG CÓ HIỆU LỰC (mặc định + ghi đè `inventory.slowMoving`). Bỏ trống
+   * = hằng số trong mã. Truy vấn truyền đúng bộ mà trang Hàng chậm đã dùng, để hai trang không nói hai
+   * ngưỡng khác nhau khi chủ shop chỉnh số.
+   */
+  slowRules?: SlowMovingRules;
 };
 
 export type InventoryDecisionResult = {
@@ -188,6 +194,7 @@ export function suggestedNetOfOpenPo(suggested: number, openPoQty: number): numb
  *  6. Tồn vượt xa nhịp bán ⇒ OVERSTOCK. Còn lại ⇒ HOLD.
  */
 export function decideInventory(i: DecisionInput): InventoryDecisionResult {
+  const R: SlowMovingRules = i.slowRules ?? SLOW_MOVING_RULES;
   const notes: string[] = [];
   const base: Omit<InventoryDecisionResult, "decision" | "reason" | "confidence"> = {
     notes,
@@ -277,20 +284,20 @@ export function decideInventory(i: DecisionInput): InventoryDecisionResult {
     }
 
     // Đủ hàng theo kế hoạch — xét chiều ngược lại: có đang GIỮ QUÁ NHIỀU vốn không?
-    if (i.daysOfCover !== null && i.daysOfCover > SLOW_MOVING_RULES.excessCoverDays) {
-      const healthyQty = Math.ceil(i.velocity * SLOW_MOVING_RULES.healthyCoverDays);
+    if (i.daysOfCover !== null && i.daysOfCover > R.excessCoverDays) {
+      const healthyQty = Math.ceil(i.velocity * R.healthyCoverDays);
       const excessQty = Math.max(0, i.available - healthyQty);
       return {
         ...base,
         decision: "OVERSTOCK",
-        reason: `Tồn đủ bán ${Math.floor(i.daysOfCover)} ngày theo nhịp hiện tại — vượt xa ngưỡng ${SLOW_MOVING_RULES.excessCoverDays} ngày; ${excessQty} cái nhiều hơn mức đủ bán ${SLOW_MOVING_RULES.healthyCoverDays} ngày.`,
+        reason: `Tồn đủ bán ${Math.floor(i.daysOfCover)} ngày theo nhịp hiện tại — vượt xa ngưỡng ${R.excessCoverDays} ngày; ${excessQty} cái nhiều hơn mức đủ bán ${R.healthyCoverDays} ngày.`,
         excessQty,
         capitalFreeable: capitalOf(excessQty),
         confidence: confidenceFrom(notes, false),
       };
     }
 
-    const slowNote = i.daysOfCover !== null && i.daysOfCover > SLOW_MOVING_RULES.slowCoverDays ? " Bán chậm hơn mức lành mạnh — KHÔNG đặt thêm cho tới khi nhịp bán tăng lại." : "";
+    const slowNote = i.daysOfCover !== null && i.daysOfCover > R.slowCoverDays ? " Bán chậm hơn mức lành mạnh — KHÔNG đặt thêm cho tới khi nhịp bán tăng lại." : "";
     const poHold = i.openPoQty > 0 && i.suggested > 0 ? ` Nhu cầu ${i.suggested} cái đã được phủ bởi ${i.openPoQty} cái đang đặt xưởng.` : "";
     return {
       ...base,
@@ -328,7 +335,7 @@ export function decideInventory(i: DecisionInput): InventoryDecisionResult {
   }
 
   const idleDays = i.daysSinceLastSale ?? i.ageDays;
-  if (idleDays !== null && idleDays >= SLOW_MOVING_RULES.deadDays) {
+  if (idleDays !== null && idleDays >= R.deadDays) {
     const freeable = capitalOf(i.available);
     return {
       ...base,
@@ -336,7 +343,7 @@ export function decideInventory(i: DecisionInput): InventoryDecisionResult {
       reason:
         i.daysSinceLastSale === null
           ? `Nhập từ ${idleDays} ngày trước mà chưa bán được cái nào — toàn bộ ${i.available} cái là vốn nằm chết.`
-          : `${idleDays} ngày không bán được cái nào (ngưỡng hàng chết ${SLOW_MOVING_RULES.deadDays} ngày) — còn ${i.available} cái trong kho.`,
+          : `${idleDays} ngày không bán được cái nào (ngưỡng hàng chết ${R.deadDays} ngày) — còn ${i.available} cái trong kho.`,
       excessQty: i.available,
       capitalFreeable: freeable,
       confidence: confidenceFrom(notes, false),
@@ -347,7 +354,7 @@ export function decideInventory(i: DecisionInput): InventoryDecisionResult {
   return {
     ...base,
     decision: "HOLD",
-    reason: `Không bán được trong cửa sổ gần đây (lần bán cuối ${idleDays === null ? "chưa rõ" : `${idleDays} ngày trước`}) — chưa tới ngưỡng ${SLOW_MOVING_RULES.deadDays} ngày để gọi là hàng chết. Không đặt thêm.`,
+    reason: `Không bán được trong cửa sổ gần đây (lần bán cuối ${idleDays === null ? "chưa rõ" : `${idleDays} ngày trước`}) — chưa tới ngưỡng ${R.deadDays} ngày để gọi là hàng chết. Không đặt thêm.`,
     suggestedQty: 0,
     capitalRequired: 0,
     confidence: confidenceFrom(notes, false),
