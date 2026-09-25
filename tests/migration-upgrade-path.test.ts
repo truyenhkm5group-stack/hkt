@@ -83,6 +83,7 @@ const MOI = [
   "0133_company_os_control_plane",
   "0134_company_os_economics",
   "0135_company_os_production",
+  "0136_company_os_returns",
 ] as const;
 
 /*
@@ -257,6 +258,9 @@ export async function testMigrationUpgradePath() {
 
     // 0131 (Company OS · Agent A): ba bảng mới, và migration KHÔNG gieo mẫu nào — sổ mẫu chỉ được lấp bằng
     // job `model-registry` do người bấm, trạng thái vòng đời không backfill (mục 8.8, 35).
+    // 0136 (Company OS · Agent E): sổ kết cục hàng hoàn — bảng mới, KHÔNG gieo kết cục cho món đã kiểm trước đó.
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_dispositions'"), 1, "bước 2: 0136 phải tạo bảng return_dispositions");
+    assert.equal(await dem("select count(*)::int as n from return_dispositions"), 0, "bước 2: 0136 không được gieo kết cục nào (mục 8.8, 35)");
     for (const bang of ["product_models", "product_model_state_history", "domain_events"]) {
       assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `bước 2: 0131 phải tạo bảng ${bang}`);
       assert.equal(await dem(`select count(*)::int as n from ${bang}`), 0, `bước 2: 0131 không được gieo dòng nào vào ${bang}`);

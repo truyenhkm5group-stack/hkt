@@ -50,6 +50,7 @@ const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   CS_CASE: "Khách nhắn tin là khâu chốt đơn — người trả lời chính là người bán.",
   SHIPMENT_CARE: "Làm việc với Viettel Post về một kiện đang mắc là nghề của giao vận, không phải của người chốt đơn.",
   RETURN_INSPECTION: "Chỉ người mở kiện và đếm hàng mới lập được phiếu tái nhập — hàng hoàn không tự vào tồn.",
+  RETURN_DISPOSITION: "Món hỏng / bẩn / sai hàng nằm trên kệ kho; người cầm nó mới đưa đi sửa, đếm lại để nhập, hay lập biên bản huỷ.",
   FULFILLMENT_EXCEPTION: "Đơn đã chốt mà chưa rời kho: hàng đang nằm trong tay kho, nên kho là nơi gỡ được.",
   ORDER_DUPLICATE: "Chỉ người GỌI ĐƯỢC KHÁCH mới biết họ có cố ý đặt hai lần không. Kho nhìn hai đơn giống nhau thì vẫn phải đóng hai gói.",
   BANK_EXCEPTION: "Phân loại dòng tiền là việc kế toán; gán cho phòng khác thì lợi nhuận sai mà không ai chịu trách nhiệm.",

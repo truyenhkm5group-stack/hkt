@@ -34,6 +34,8 @@ export const WORK_SOURCES = [
   "CS_CASE",
   "SHIPMENT_CARE",
   "RETURN_INSPECTION",
+  // Company OS · Agent E — hàng hoàn đã kiểm, không tái nhập, chưa có kết cục cuối.
+  "RETURN_DISPOSITION",
   "FULFILLMENT_EXCEPTION",
   "ORDER_DUPLICATE",
   "BANK_EXCEPTION",
@@ -134,6 +136,32 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     slaHours: CASE_SLA_HOURS.RETURN_RECEIVED_PENDING_INSPECTION,
     outcomeAttributable: true,
     actions: ["RETURN_RECEIVE", "RETURN_OPEN_INSPECTION", "OPEN_SHIPMENT", "OPEN_ORDER"],
+  },
+  /*
+    Company OS · Agent E. MỘT NGUỒN RIÊNG, không nhét vào `RETURN_INSPECTION`, vì hai nguồn hỏi hai
+    câu khác nhau ở hai ĐỘ MỊN khác nhau và KHÔNG chạm cùng một kiện:
+      · `RETURN_INSPECTION` (chiếu từ cảnh báo) — kiện ĐVVC đã trả / kho đã nhận mà CHƯA ĐẾM
+        (`return_inspections.status = 'RECEIVED'`). Độ mịn: kiện.
+      · `RETURN_DISPOSITION` — món ĐÃ ĐẾM (`status = 'INSPECTED'`) kết luận không bán được mà chưa có
+        kết cục cuối. Độ mịn: dòng kiểm từng món (hoặc phần không bán được của kiện kiểm cả kiện).
+    Một kiện rời nguồn thứ nhất đúng lúc (và chỉ khi) nó có thể vào nguồn thứ hai, nên không việc nào
+    bị chiếu hai lần. Không loại cảnh báo nào trùng độ mịn ⇒ không thêm gì vào
+    `ALERT_KINDS_OWNED_ELSEWHERE`. Gộp vào `RETURN_INSPECTION` thì `stage-health` (đang thay số tồn
+    đọng của nguồn ấy bằng số KIỆN chờ đếm của đường ống) sẽ đếm lẫn món chờ kết cục vào kiện chờ đếm.
+  */
+  RETURN_DISPOSITION: {
+    key: "RETURN_DISPOSITION",
+    label: "Hàng hoàn không tái nhập · chờ kết cục",
+    why: "Món hàng hoàn đã kiểm là không bán ngay được mà chưa ai quyết sửa, huỷ hay trả xưởng — vốn nằm trên kệ, không ở sổ kho nào.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
+    department: "WAREHOUSE",
+    businessEntity: "SHIPMENT",
+    // CỐ Ý không đặt hạn: chưa có con số nào chủ shop chốt cho việc này (luật 22, 38). Chủ shop đặt ở /work/settings.
+    slaHours: null,
+    outcomeAttributable: true,
+    // Mọi nút LINK của hàng đợi đi tới `sourceUrl`; một nút là đủ — hai nút cùng đích là nút giả.
+    actions: ["OPEN_SOURCE"],
   },
   FULFILLMENT_EXCEPTION: {
     key: "FULFILLMENT_EXCEPTION",
