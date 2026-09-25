@@ -32,12 +32,23 @@ Nay món ấy đi CÙNG sổ, CÙNG máy trạng thái, CÙNG hàng đợi, CÙN
 4. **`restock_authority` là cột mới trên sổ**, không suy lại từ trạng thái hiện tại: món có thể được nối đơn SAU khi đã nhập, và lượt nhập lúc ấy vẫn là không chứng từ.
 5. `anchor_check` trùng một phần với `subject_check` mới (cả hai chặn "hai neo" / "không neo") — cố ý: `anchor_check` đọc được bằng mắt, `subject_check` là nơi khoá khớp neo.
 
-## Cổng
+## Cổng (Windows, worktree riêng, SHA 93175d47)
 
-Xem báo cáo cuối của phiên (SHA, lệnh, kết quả). Kiểm đột biến: xem mục dưới.
+`npm run typecheck` sạch · `npm run lint` sạch · `npm test` in **TẤT CẢ KIỂM THỬ ĐẠT** · `npm run build` thành công (`/inventory/returns` 42,9 kB). Lượt `npm test` đầu đỏ vì hai lỗi của chính bài kiểm (thiếu `note` bắt buộc của phiếu kiểm hỏng, thiếu mốc nối đơn của món `IDENTIFIED`) — sửa dữ liệu gieo, không nới ràng buộc; lượt hai đỏ ở `migration-journal` vì chạy trên chỉ mục CHƯA commit (bài kiểm đọc `HEAD`) — xanh sau khi commit.
+
+### Kiểm đột biến (16/16 bị bắt, chạy riêng bộ E + R rồi hoàn nguyên)
+
+M1 lõi bỏ kiểm quyền không chứng từ · M2 luật bỏ bắt buộc lý do · M3 chặn xoá quay về nối TRONG · M4 bàn không nhãn cho đổi kết luận khi đã vào sổ · M5 cho tái nhập nguyên món khi đã vào sổ · M6 tóm tắt mẫu nhận món chưa gán mẫu · M7 đoán mẫu mã từ đơn đã nối (đơn chỉ một mẫu) · M8 "giữ tạm" không trừ kết cục · M9 đối tượng gồm món đã vào tồn · M10 sự kiện không mang căn cứ · M10b dòng sổ không ghi căn cứ (CSDL chặn) · M11 action cấp quyền cứng · M12 lập phiếu món không nhãn bằng đường trạm kiểm · M13 sự kiện mất mẫu của món đã nhận diện · M14 bỏ CHECK một neo khỏi 0142 · M15 CHECK khoá đối tượng nhận mọi khoá.
+
+Không kiểm được bằng đột biến: lượt kiểm luật lần hai TRONG khoá (cần hai giao dịch đua nhau thật) — bài kiểm quét mã nguồn đòi đúng hai lời gọi.
+
+### Đường bấm có thật (next start + PGlite + seed demo)
+
+Gieo một món không nhãn `UNIDENTIFIABLE`, 3 món hỏng. Trên `/inventory/returns` (tài khoản quản trị): dòng hiện trong "Hàng hoàn không tái nhập" với nhãn **không nhãn**, mã `UR-…`, "chưa nối đơn", tiêu đề "trong đó 3 món không nhãn" → "Đưa đi sửa / giặt" → "Sửa xong · nhập lại": biểu mẫu báo "cộng tồn KHÔNG chứng từ, bắt buộc lý do", nút Ghi khoá tới khi có lý do → nhập 2 món → thông báo "Đã nhập lại 2 món vào tồn qua phiếu tái nhập", dòng còn 1/3; bàn "Hàng hoàn không có mã vận đơn" ẩn nút tái nhập nguyên món / "Đã làm lại xong" và trỏ sang khối kết cục.
 
 ## Còn lại
 
 - **Không có đường bấm để gắn mẫu mã cho món không nhãn ĐÃ tạo** (có từ trước bản này: `setUnidentifiedConditionAction` nhận `variantId` nhưng màn hình chỉ chọn mẫu lúc nhận kiện). Hệ quả: món không nhãn chưa nhận diện mẫu chỉ đi được tới huỷ / trả xưởng; nhập lại báo "gắn mẫu mã ở bàn không nhãn trước". Lõi đã cho phép gắn mẫu (giữ kết luận) cả khi món đã vào sổ.
+- Dòng của món trên bàn không nhãn vẫn in "Giữ tạm — chưa vào tồn · × <số món ban đầu>" khi món đã nhập lại một phần qua sổ (tiêu đề "giữ tạm" của bàn thì đã trừ đúng); dòng có liên kết sang khối kết cục nơi phần còn lại hiện đúng. Chưa sửa chữ của dòng.
 - Chưa đo production (không có quyền). Sau deploy, món không nhãn đang giữ tạm mang kết luận không bán được sẽ hiện "Chưa quyết" (không backfill).
 - Duyệt huỷ vẫn phụ thuộc đường "thực hiện lại sau khi duyệt" của Agent G (như E đã ghi).
