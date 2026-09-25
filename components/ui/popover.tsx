@@ -21,11 +21,15 @@ function PopoverContent({
   className,
   align = "center",
   sideOffset = 4,
+  forceMount,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content>) {
   return (
-    <PopoverPrimitive.Portal>
+    // `forceMount` phải tới CẢ Portal lẫn Content (Radix): chỉ đặt ở Content thì Portal vẫn gỡ nội
+    // dung khi đóng — mất trạng thái của ô nhập và của lượt lưu đang chạy trong đó.
+    <PopoverPrimitive.Portal forceMount={forceMount}>
       <PopoverPrimitive.Content
+        forceMount={forceMount}
         data-slot="popover-content"
         align={align}
         sideOffset={sideOffset}
