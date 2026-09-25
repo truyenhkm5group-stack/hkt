@@ -252,6 +252,7 @@ export function testCompanyOsProductionPure() {
   const luu = hanhDongPo.slice(hanhDongPo.indexOf("export async function saveProductionOrder("), hanhDongPo.indexOf("export async function setProductionStatus("));
   assert.ok(luu.indexOf("buildMatrixForProduct(") > 0 && luu.indexOf("validatePoPlan(") > 0, "gợi ý máy TÍNH Ở MÁY CHỦ và số chốt được kiểm");
   assert.ok(luu.indexOf("validatePoPlan(") < luu.indexOf("guardSecondApproval("), "kiểm lý do TRƯỚC cổng duyệt và trước mọi lượt ghi");
+  assert.ok(/if \("error" in ke\) return \{ error: ke\.error \};/.test(luu.slice(luu.indexOf("validatePoPlan("), luu.indexOf("guardSecondApproval("))), "lỗi của kiểm lý do / bản duyệt phải DỪNG lượt lưu trước cổng duyệt");
   assert.ok(!/suggestion\s*:\s*d\./.test(luu) && !/d\.suggest(ed|ion)Cells/.test(luu), "không nhận gợi ý từ trình duyệt");
   assert.match(hanhDongPo.slice(hanhDongPo.indexOf("export async function setProductionStatus(")), /checkSendWithoutDesign\(/, "gửi xưởng đi qua luật bắt buộc bản duyệt");
   const khoiValues = luu.slice(luu.indexOf("const values = {"), luu.indexOf("};", luu.indexOf("const values = {")));
@@ -310,11 +311,17 @@ export async function testCompanyOsProductionDb(db: Db) {
   assert.ok("ok" in lap && lap.noop, "bấm lại cùng trạng thái ⇒ noop");
   const ra = await adaptProductionTopics(NOW);
   assert.equal(ra.find((w) => w.sourceKey === t.topicId)?.status, "NEW", "có phương án ⇒ việc CẦN NGƯỜI QUYẾT");
+  // Hai người đổi cùng lúc từ CÙNG một trạng thái: người sau nhận lỗi, không ghi đè lời của người trước.
+  const [dua1, dua2] = await Promise.all([
+    setTopicStatusCore(db, { topicId: t.topicId, to: "WAITING_DECISION", actor: writer }),
+    setTopicStatusCore(db, { topicId: t.topicId, to: "DISCUSSING", actor: approver }),
+  ]);
+  assert.deepEqual([("ok" in dua1), ("ok" in dua2)].sort(), [false, true], "hàng rào trạng thái cũ: đúng MỘT trong hai lượt đồng thời được ghi");
   assert.ok("error" in (await setTopicStatusCore(db, { topicId: t.topicId, to: "SELECTED", selectedOption: "  ", actor: writer })), "chốt phải ghi phương án");
   await assert.rejects(() => db.update(schema.productionTopics).set({ status: "SELECTED", selectedOption: null }).where(eq(schema.productionTopics.id, t.topicId)), viPhamRangBuoc("production_topics_selected_check"), "CSDL chặn SELECTED không có phương án");
   assert.ok("ok" in (await setTopicStatusCore(db, { topicId: t.topicId, to: "SELECTED", selectedOption: "PA1: vải đũi Nhật", note: "Chốt theo giá 118k", actor: writer })));
   const msgs = await db.select().from(schema.productionTopicMessages).where(eq(schema.productionTopicMessages.topicId, t.topicId)).orderBy(asc(schema.productionTopicMessages.createdAt));
-  assert.equal(msgs.length, 5, "mở đầu + báo giá + phương án + 2 lượt đổi trạng thái (noop không ghi)");
+  assert.equal(msgs.length, 6, "mở đầu + báo giá + phương án + 3 lượt đổi trạng thái (noop và lượt thua hàng rào không ghi)");
   assert.equal(msgs.at(-1)?.kind, "DECISION", "chốt phương án để lại một lượt QUYẾT ĐỊNH trong luồng");
   assert.ok(!(await adaptProductionTopics(NOW)).some((w) => w.sourceKey === t.topicId), "chốt xong ⇒ việc tự rời hàng đợi (không ai đóng hộ)");
 
@@ -349,6 +356,9 @@ export async function testCompanyOsProductionDb(db: Db) {
   assert.equal(v1Row.status, "DRAFT", "V1 vẫn còn nguyên (không bị đè bởi V2)");
   assert.equal(v1Row.totalUnitCost, 115_000, "V1 giữ số của lần sửa của nó");
   await assert.rejects(() => db.update(schema.costSheets).set({ status: "FINAL" }).where(eq(schema.costSheets.id, v1.costSheetId)), viPhamRangBuoc("cost_sheets_final_check"), "CSDL chặn FINAL không có người chốt");
+  // V3 NHÁP mới hơn V2 đã chốt: bản duyệt về sau phải trỏ bảng CHỐT, không phải phiên bản mới nhất.
+  const v3 = await createCostSheetCore(db, { modelId: m1.id, topicId: t.topicId, lines: [{ kind: "LABOR", description: "Xưởng B báo thử", qty: 1, unit: "", unitCost: 150_000 }], notes: "Đang hỏi xưởng khác", actor: writer });
+  assert.ok("ok" in v3 && v3.version === 3);
 
   // ═══ 3. MẪU V1 → YÊU CẦU SỬA ═══
   const fields = { supplierId: sup.id, costVnd: 250_000, images: ["https://anh.local/mau1.jpg"], notes: "Mẫu đầu", problems: "" };
@@ -489,7 +499,7 @@ export async function testCompanyOsProductionDb(db: Db) {
   if (tomTat) {
     assert.equal(tomTat.openTopics, 0);
     assert.equal(tomTat.finalCosting?.version, 2);
-    assert.equal(tomTat.draftCostings, 1, "V1 nháp vẫn được đếm");
+    assert.equal(tomTat.draftCostings, 2, "V1 và V3 nháp vẫn được đếm");
     assert.equal(tomTat.latestSample?.version, 2);
     assert.equal(tomTat.approvedDesign?.id, dv.id);
     assert.deepEqual(tomTat.openOrders.map((o) => [o.code, o.plannedQty, o.receivedViaLinkedReceipts]), [[`${P}PO-1`, 260, null]], "chưa có phiếu nhập nối vào lệnh ⇒ đã nhận CHƯA BIẾT (null), không phải 0");
@@ -498,10 +508,10 @@ export async function testCompanyOsProductionDb(db: Db) {
   // Hàm đọc của màn hình chạy được trên dữ liệu thật (câu con tương quan không được mơ hồ cột).
   const ds = await listTopics({ page: 1, pageSize: 25, sort: "updatedAt", dir: "desc", q: "COSC", filters: {}, period: { from: null, to: null, key: "all", label: "", fromKey: null, toKey: null } } satisfies ListParams);
   const dong1 = ds.rows.find((r) => r.id === t.topicId);
-  assert.equal(dong1?.messages, 5, "danh sách đếm đúng số lượt trao đổi của TỪNG topic");
+  assert.equal(dong1?.messages, 6, "danh sách đếm đúng số lượt trao đổi của TỪNG topic");
   assert.equal(dong1?.lastQuote, 118_000, "báo giá gần nhất đọc từ lượt QUOTE");
   const chiTiet = await getTopicDetail(t.topicId);
-  assert.equal(chiTiet?.costSheets.length, 2);
+  assert.equal(chiTiet?.costSheets.length, 3);
   assert.equal(chiTiet?.samples.find((x) => x.id === s2.sampleId)?.design?.id, dv.id, "trang topic thấy bản duyệt sinh từ mẫu V2");
 
   // ═══ 8. CỜ BẮT BUỘC BẢN DUYỆT: chỉ đúng boolean true ═══
