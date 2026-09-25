@@ -85,6 +85,7 @@ const MOI = [
   "0135_company_os_production",
   "0136_company_os_returns",
   "0137_company_os_idea_model",
+  "0138_company_os_cockpit",
 ] as const;
 
 /*
@@ -256,6 +257,9 @@ export async function testMigrationUpgradePath() {
     */
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'marketing_ideas' and column_name = 'model_id'"), 0, "bước 1: cột marketing_ideas.model_id CHƯA được có — đó là thứ 0137 thêm vào");
     await client.query(`insert into marketing_ideas (id, idea_date, content) values ('up-idea1', '2026-09-01', 'Ý tưởng cũ Q012')`);
+
+    // Company OS · Agent H (0138). Bảng sổ phản ứng chưa được có ở trạng thái cũ.
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'recommendation_decisions'"), 0, "bước 1: bảng recommendation_decisions CHƯA được có — đó là thứ 0138 thêm vào");
 
     // ══ BƯỚC 2: áp migration mới lên ĐÚNG trạng thái đó ══
     writeFileSync(soFile, JSON.stringify(so, null, 2) + "\n");
@@ -1609,6 +1613,18 @@ export async function testMigrationUpgradePath() {
     await client.query(`delete from product_models where id = 'up-pm1'`);
     assert.equal(await dem("select count(*)::int as n from marketing_ideas where id = 'up-idea1' and model_id is null"), 1, "0137: xoá mẫu thì ý tưởng còn nguyên, liên kết rơi về NULL (ON DELETE SET NULL)");
     await client.query(`delete from marketing_ideas where id = 'up-idea1'`);
+
+    // 0138 (Company OS · Agent H): sổ phản ứng với đề xuất — bảng mới RỖNG (không đoán phản ứng cho quá
+    // khứ), bỏ qua phải có lý do, nhắc lại sau phải có ngày, người quyết phải là một tài khoản có thật.
+    assert.equal(await dem("select count(*)::int as n from recommendation_decisions"), 0, "0138: bảng recommendation_decisions phải RỖNG sau migration — không backfill");
+    await client.query(`insert into users (id, email, name, password_hash, role) values ('up-uh', 'h@shop.vn', 'H', 'x', 'ADMIN')`);
+    await client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd1', 'sample:x', 'SAMPLE_REVIEW', 'ACCEPTED', 'up-uh', '{}')`);
+    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, reason, decided_by_user_id, snapshot) values ('up-rd2', 'sample:x', 'SAMPLE_REVIEW', 'DISMISSED', '  ', 'up-uh', '{}')`), "0138: bỏ qua không lý do phải bị CSDL chặn");
+    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd3', 'sample:x', 'SAMPLE_REVIEW', 'SNOOZED', 'up-uh', '{}')`), "0138: nhắc lại sau không ngày phải bị CSDL chặn");
+    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd4', 'sample:x', 'SAMPLE_REVIEW', 'ACCEPTED', 'khong-co', '{}')`), "0138: người quyết phải là một tài khoản có thật (khoá ngoại)");
+    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd5', 'sample:x', 'LA', 'ACCEPTED', 'up-uh', '{}')`), "0138: loại đề xuất lạ phải bị CSDL chặn");
+    await client.query(`delete from recommendation_decisions where id = 'up-rd1'`);
+    await client.query(`delete from users where id = 'up-uh'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });
