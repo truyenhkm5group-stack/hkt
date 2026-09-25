@@ -807,6 +807,20 @@ export const auditLogs = pgTable(
     entityId: text("entity_id").notNull().default(""),
     detail: jsonb("detail"),
     createdAt: createdAt(),
+    /*
+      ═══ Company OS · Agent G · ba cột truy vết nâng từ `detail` ═══
+
+      Trước bản này "ai làm (người hay máy)", "vì sao" và "thuộc lần chạy nào" chỉ nằm trong jsonb
+      `detail` — lọc được nhưng không chỉ mục được, và dòng không ghi thì không ai biết là THIẾU.
+      Cả ba cột NULL được: dòng cũ KHÔNG backfill (AGENTS.md mục 35) — `NULL` nghĩa là CHƯA BIẾT,
+      không phải "người dùng". `detail` vẫn được ghi y như cũ để mọi chỗ đang đọc nó không gãy.
+    */
+    /** `USER` · `SYSTEM` · `AGENT` · `WEBHOOK` — `NULL` = chưa biết (dòng cũ, hoặc không suy được). */
+    actorKind: text("actor_kind"),
+    /** Nối các dòng cùng một lần chạy / một yêu cầu duyệt / một gói tin. */
+    correlationId: text("correlation_id"),
+    /** VÌ SAO — lý do người nhập hoặc luật đã áp. */
+    reason: text("reason"),
   },
   (t) => [
     index("audit_entity_created_idx").on(t.entity, t.createdAt),
@@ -814,6 +828,9 @@ export const auditLogs = pgTable(
     // Dòng thời gian của đơn tra nhật ký theo `entity_id` (mã đơn + mã các vận đơn). Không có chỉ mục
     // này là quét tuần tự bảng tăng nhanh nhất CSDL mỗi lần mở chi tiết đơn.
     index("audit_entity_id_idx").on(t.entityId, t.createdAt),
+    // Chỉ mục MỘT PHẦN: gần như mọi dòng không có mã lần chạy, và chỉ mục đầy đủ sẽ gánh hàng triệu NULL.
+    index("audit_correlation_idx").on(t.correlationId).where(sql`${t.correlationId} is not null`),
+    check("audit_logs_actor_kind_check", sql`${t.actorKind} is null or ${t.actorKind} in ('USER','SYSTEM','AGENT','WEBHOOK')`),
   ],
 );
 
@@ -860,10 +877,23 @@ export const approvalRequests = pgTable(
     note: text("note"),
     executedAt: timestamp("executed_at", { withTimezone: true }),
     executionError: text("execution_error"),
+    /**
+     * Company OS · Agent G — DẤU VÂN TAY của việc đã xin: sha256 của JSON CHUẨN HOÁ (khoá sắp xếp)
+     * gồm nhóm · thao tác · thực thể · payload. Người xin thực hiện lại đúng việc đó thì yêu cầu đã
+     * duyệt được TIÊU THỤ (một lần); đổi một con số là một việc khác, phải xin lại.
+     * `NULL` ở dòng cũ (trước 0134): không tiêu thụ được — không đoán lại dấu vân tay từ payload đã lưu.
+     */
+    payloadFingerprint: text("payload_fingerprint"),
   },
   (t) => [
     index("approval_status_idx").on(t.status, t.requestedAt),
     index("approval_group_idx").on(t.group, t.status),
+    index("approval_requester_idx").on(t.requestedBy, t.group, t.status),
+    // Bấm lại một việc đang chờ duyệt KHÔNG đẻ yêu cầu thứ hai — chặn ở CSDL, không chỉ ở ứng dụng,
+    // vì hai lượt bấm đồng thời cùng đi qua được bước "đã có chưa?".
+    uniqueIndex("approval_pending_fingerprint_uq")
+      .on(t.requestedBy, t.group, t.payloadFingerprint)
+      .where(sql`${t.status} = 'PENDING' and ${t.payloadFingerprint} is not null`),
     // Người xin không được tự duyệt. Ứng dụng đã chặn; đây là hàng rào cuối, vì hàng rào ở tầng
     // ứng dụng có thể bị một đường ghi mới nào đó đi vòng qua.
     check("approval_khac_nguoi", sql`${t.decidedBy} is null or ${t.decidedBy} <> ${t.requestedBy}`),

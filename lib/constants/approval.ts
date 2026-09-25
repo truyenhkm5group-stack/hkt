@@ -118,3 +118,90 @@ export function overThreshold(group: ApprovalGroup, amount: number | null | unde
   if (amount === null || amount === undefined) return true;
   return Math.abs(amount) >= nguong;
 }
+
+/* ═══════ Company OS · Agent G · TIÊU THỤ YÊU CẦU ĐÃ DUYỆT ═══════
+ *
+ * Trước bản này, duyệt xong thì KHÔNG GÌ xảy ra: `decideApproval` chỉ lật trạng thái, và khi người
+ * xin bấm lại đúng việc đó thì cổng lại đẻ một yêu cầu MỚI — vòng lặp không có lối ra. Nghĩa là ngày
+ * chủ shop bật cưỡng chế, mọi việc trong nhóm ấy đứng hẳn.
+ *
+ * Luật mới: người xin làm lại ĐÚNG việc đã xin (cùng dấu vân tay) trong hạn hiệu lực ⇒ yêu cầu đã
+ * duyệt được TIÊU THỤ đúng một lần (`EXECUTED` + `executed_at`) và việc chạy. Lần thứ hai phải xin lại.
+ */
+
+/**
+ * Một lời duyệt còn hiệu lực bao lâu kể từ lúc được duyệt.
+ *
+ * Người duyệt gật MỘT việc ở MỘT thời điểm. Để lời gật đó nằm chờ vô thời hạn thì một tuần sau nó
+ * vẫn mở khoá được việc đã không còn đúng bối cảnh (kho đã đếm lại, kỳ lương đã chốt). 72 giờ phủ một
+ * cuối tuần mà không biến lời duyệt thành tấm séc khống. Đây là giá trị MỚI của bản này — chủ shop
+ * đổi được, nhưng đổi thì sửa ở đây (AGENTS.md mục 7).
+ */
+export const APPROVAL_VALID_HOURS = 72;
+
+/**
+ * JSON CHUẨN HOÁ — đầu vào của dấu vân tay. Cùng một việc phải ra cùng một chuỗi bất kể thứ tự khoá.
+ *
+ *  · khoá của object SẮP XẾP; giá trị `undefined` bị bỏ (như `JSON.stringify`);
+ *  · `Date` → chuỗi ISO (giống cách jsonb lưu), `bigint` → chuỗi số;
+ *  · số không hữu hạn (`NaN`, `Infinity`) → `null` (như `JSON.stringify`).
+ *
+ * Hàm THUẦN, không dùng `crypto` — băm nằm ở `lib/approvals/service.ts` (chỉ máy chủ).
+ */
+export function canonicalJson(value: unknown): string {
+  const chuan = (v: unknown): unknown => {
+    if (v === null || v === undefined) return v ?? null;
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.toISOString();
+    if (typeof v === "bigint") return v.toString();
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    if (Array.isArray(v)) return v.map((x) => (x === undefined ? null : chuan(x)));
+    if (typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+        const x = (v as Record<string, unknown>)[k];
+        if (x !== undefined) out[k] = chuan(x);
+      }
+      return out;
+    }
+    return v;
+  };
+  return JSON.stringify(chuan(value));
+}
+
+/**
+ * Nhóm ĐÃ NỐI vào một thao tác thật (có lời gọi `guardSecondApproval` mang nhóm đó). Công tắc cưỡng
+ * chế chỉ bật được những nhóm này: bật một nhóm chưa nối là một công tắc không chặn được gì, và nó
+ * làm người bật tưởng mình đã được bảo vệ. `tests/company-os-control-plane.test.ts` quét mã nguồn để
+ * danh sách này không trôi khỏi thực tế.
+ *
+ * `COD_CORRECTION` · `LOGISTICS_OVERRIDE`: chưa có Server Action nào. `ADS_BUDGET_MUTATION`: CỐ Ý
+ * không nối — đường ghi ngân sách có phiếu duyệt ký HMAC riêng (docs/marketing-ai-department.md).
+ */
+export const APPROVAL_GROUPS_WIRED: readonly ApprovalGroup[] = [
+  "INVENTORY_ADJUSTMENT",
+  "INVENTORY_WRITE_OFF",
+  "EXPENSE_EDIT",
+  "PAYROLL_EDIT",
+  "PURCHASING_LARGE",
+  "BUSINESS_RULE_CHANGE",
+];
+
+/**
+ * Đọc giá trị THÔ của khoá `approval.enforce` (cột `settings.value` là TEXT chứa JSON).
+ *
+ * LỖI THẬT tìm ra ở bản này (Company OS · Agent G): cổng cũ đưa thẳng CHUỖI JSON vào `isEnforced`,
+ * mà `isEnforced` chỉ nhận object — nên dù ai đó có ghi khoá này bằng `set-setting`, cưỡng chế vẫn
+ * KHÔNG BAO GIỜ bật. Chuỗi hỏng / không phải object ⇒ `null` ⇒ TẮT (phía an toàn của một công tắc
+ * mà bật nhầm là chặn việc thật).
+ */
+export function parseEnforceConfig(raw: unknown): Record<string, unknown> | null {
+  let v: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      v = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}

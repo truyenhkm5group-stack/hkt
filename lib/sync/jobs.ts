@@ -394,7 +394,16 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "ALL",
     description:
       "Tính sẵn số liệu Tổng quan và Tóm tắt & rủi ro cho các kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
-    run: () => warmDashboard(),
+    // Company OS · G: bọc để có dòng `sync_runs` — CHỈ QUAN SÁT (không làm cũ đệm vừa ấm, không phát `sync`).
+    // Kỳ lỗi ghi vào `detail`, không vào `failed`: lỗi giữ ấm không đổi dữ liệu nào, và trạng thái
+    // PARTIAL ở đây sẽ bật chuỗi sự cố của một job chỉ-đọc mỗi 4 phút.
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "dashboard-warm", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
+        const r = await warmDashboard();
+        ctx.summary.skipped = r.failed.length;
+        ctx.summary.detail = `ấm ${r.warmed.length} mục (${r.warmed.join(", ") || "không mục nào"}) · ${r.ms} ms${r.failed.length ? ` · LỖI ${r.failed.map((f) => `${f.key}: ${f.error}`).join(" | ")}` : ""}`.slice(0, 900);
+        return r;
+      }),
   },
   "work-snapshot": {
     label: "Chụp ảnh hiệu suất kỳ đã đóng",
@@ -404,7 +413,8 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       "GHI MỘT LẦN: chạy lại bao nhiêu lần cũng không ghi đè số đã chụp, nên số lịch sử không đổi vì truy vấn hôm nay đổi. " +
       "KHÔNG chụp kỳ đang chạy dở — đóng băng một con số nửa vời thành 'sự thật của tuần đó' là thứ sau này không sửa được. " +
       "Kỳ không có quan sát nào vẫn ghi dòng `value = null`, để phân biệt 'chưa đo được' với 'chưa từng chạy job'.",
-    run: async () => {
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "work-snapshot", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
       const tuan = await snapshotPerformance({ kind: "WEEKLY" });
       /*
         Tháng chỉ chụp trong 7 ngày đầu tháng. Chạy mỗi ngày thì 24 lần đầu đều bị chặn vì kỳ chưa
@@ -412,8 +422,10 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       */
       const homNay = new Date();
       const thang = homNay.getUTCDate() <= 7 ? await snapshotPerformance({ kind: "MONTHLY" }) : null;
+      // "Kỳ chưa đóng" là một lượt BỎ QUA hợp lệ, không phải lỗi — chỉ ghi vào detail.
+      ctx.summary.detail = [tuan, thang].filter(Boolean).map((k) => JSON.stringify(k).slice(0, 300)).join(" · ").slice(0, 900);
       return { ok: true, tuan, thang };
-    },
+      }),
   },
   "work-escalation": {
     label: "Leo thang việc quá hạn",
@@ -422,10 +434,17 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       "Quét hàng đợi công việc, đếm việc sắp vỡ hạn / đã vỡ hạn, và gửi MỘT tin Lark cho mỗi phòng có việc vỡ hạn hơn 24 giờ mà vẫn chưa ai nhận. " +
       "CHỈ ĐỌC dữ liệu nghiệp vụ: không đổi mức ưu tiên của việc nào (mức leo thang được tính lúc đọc), không tạo cảnh báo nào. " +
       "Một phòng chỉ nhận một tin mỗi ngày — sổ chống gửi lại nằm ở settings 'work.escalation.sent'.",
-    run: async () => {
-      const r = await runEscalationDigest();
-      return { ok: true, ...r };
-    },
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "work-escalation", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
+        const r = await runEscalationDigest();
+        ctx.summary.imported = r.sent.length;
+        ctx.summary.skipped = r.skipped.length;
+        const guiHong = r.skipped.filter((k) => k.reason.startsWith("gửi hỏng"));
+        // Gửi hỏng là thứ duy nhất ở đây cần người nhìn: PARTIAL (không phải FAILED — job vẫn chạy trọn).
+        if (guiHong.length) ctx.summary.warning = `gửi tin leo thang hỏng cho ${guiHong.map((k) => k.department).join(", ")}`;
+        ctx.summary.detail = r.detail.slice(0, 900);
+        return { ok: true, ...r };
+      }),
   },
   "payroll-autopilot": {
     label: "Lương tự động",
@@ -447,13 +466,28 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "ALL",
     description:
       "Sinh việc của kỳ hiện tại cho mọi định nghĩa việc lặp đang bật (đối soát hằng ngày, review quảng cáo, kiểm kê, chốt công). Chạy lại bao nhiêu lần cũng chỉ ra một việc cho mỗi kỳ — khoá tự nhiên (recurrence_id, occurrence_key) chặn ở CSDL.",
-    run: () => generateRecurringTasks(),
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "work-recurrence", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
+        const r = await generateRecurringTasks();
+        ctx.summary.imported = r.created;
+        ctx.summary.skipped = r.skipped;
+        ctx.summary.detail = `sinh ${r.created} việc · ${r.skipped} định nghĩa chưa tới kỳ / đã có việc kỳ này`;
+        return r;
+      }),
   },
   alerts: {
     label: "Cảnh báo vận hành",
     source: "ALL",
     description: "Quét đơn chờ xử lý quá hạn, vận đơn giao thất bại chờ phát lại, vận đơn treo lâu, chuyển hoàn → tạo thông báo và gửi Telegram (chạy mỗi 10 phút và sau mỗi webhook).",
-    run: () => evaluateAlerts(),
+    run: (o) =>
+      runSyncJob({ source: "ERP", job: "alerts", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
+        const r = await evaluateAlerts();
+        ctx.summary.imported = r.created;
+        ctx.summary.updated = r.resolved;
+        if (r.lark.error || r.telegram.error) ctx.summary.warning = `gửi cảnh báo hỏng: ${[r.lark.error && `Lark ${r.lark.error}`, r.telegram.error && `Telegram ${r.telegram.error}`].filter(Boolean).join(" · ")}`.slice(0, 500);
+        ctx.summary.detail = `mở mới ${r.created} · đóng ${r.resolved} · thôi theo dõi ${r.stale} · đổi loại ${r.reclassified} · đang mở ${r.open} · Lark ${r.lark.sent}${r.lark.error ? ` (lỗi: ${r.lark.error})` : ""} · Telegram ${r.telegram.sent}${r.telegram.error ? ` (lỗi: ${r.telegram.error})` : ""}`.slice(0, 900);
+        return r;
+      }),
   },
   "cs-chat": {
     label: "Case CSKH từ hội thoại Pancake",

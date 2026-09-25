@@ -4,7 +4,7 @@ import { ageLabel, caseScore, priorityOf, slaFor } from "@/lib/constants/action-
 import { CS_STATUSES, type CsStatus } from "@/lib/constants/cs";
 import { csDomainOf, isBotAssignee } from "@/lib/constants/cs-domain";
 import { departmentOfTeam, type DepartmentCode } from "@/lib/constants/departments";
-import { actionsOf, ALERT_KINDS_OWNED_ELSEWHERE, ALERT_STATUS_TO_WORK, assigneeAuthorityOf, CARE_STATUS_TO_WORK, CS_STATUS_TO_WORK, sourceOfAlert, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
+import { actionsOf, ALERT_KINDS_OWNED_ELSEWHERE, ALERT_STATUS_TO_WORK, APPROVAL_STATUS_TO_WORK, assigneeAuthorityOf, CARE_STATUS_TO_WORK, CS_STATUS_TO_WORK, sourceOfAlert, WORK_SOURCE_SPEC, type WorkSource } from "@/lib/constants/work-sources";
 import { MONEY_UNKNOWN, WORK_PRIORITIES, WORK_TAG_MACHINE_HELD, workKey, type WorkItem, type WorkMoney, type WorkPriority, type WorkStatus } from "@/lib/constants/work";
 import { departmentFor } from "@/lib/constants/work-ownership";
 import { slaDueAt } from "@/lib/constants/work-sla";
@@ -23,6 +23,9 @@ import { DUPLICATE_VERDICT_LABEL } from "@/lib/constants/order-duplicate";
 import { unclassifiedBankRows } from "@/lib/queries/finance-ops";
 import { bankExceptionScore } from "@/lib/constants/finance-ops";
 import { resolvePeriod } from "@/lib/search-params";
+import { APPROVAL_GROUP_LABEL, type ApprovalGroup } from "@/lib/constants/approval";
+import { listApprovalRequests } from "@/lib/queries/approvals";
+import { formatVND } from "@/lib/format";
 
 /**
  * ═══════════════ PHÉP CHIẾU: SÁU HÀNG ĐỢI THÀNH MỘT DANH SÁCH ═══════════════
@@ -796,6 +799,58 @@ export async function adaptTechTasks(now: Date, includeClosed = false): Promise<
   });
 }
 
+/* ═══════════════════ 7b · VIỆC CHỜ DUYỆT (Company OS · Agent G) ═══════════════════ */
+
+/**
+ * Nguồn: `approval_requests` — ĐÚNG truy vấn mà mục "việc chờ duyệt" ở trang Cần xử lý đọc
+ * (`listApprovalRequests`). Việc biến khỏi hàng đợi khi `decideApproval` lật trạng thái; không có
+ * đường nào khác đóng nó.
+ *
+ * TIỀN: `MONEY_UNKNOWN`, không phải số tiền trong yêu cầu. Số đó là QUY MÔ của việc xin (một khoản
+ * chi 5 triệu, một lô đặt xưởng 20 triệu), không phải tiền ĐANG TREO vì chưa ai duyệt — cộng nó vào
+ * "tiền đang treo" của hàng đợi là đếm một thứ khác dưới cùng một nhãn. Số tiền vẫn hiện ở phần
+ * bằng chứng và vẫn đẩy điểm ưu tiên lên.
+ */
+export async function adaptApprovals(now: Date, includeClosed = false, closedSince: Date | null = null): Promise<WorkItem[]> {
+  const rows = await listApprovalRequests({ includeDecided: includeClosed, decidedSince: closedSince });
+  const ms = now.getTime();
+  return rows.map((r) => {
+    const status = APPROVAL_STATUS_TO_WORK[r.status as keyof typeof APPROVAL_STATUS_TO_WORK] ?? "NEW";
+    const nhom = APPROVAL_GROUP_LABEL[r.group as ApprovalGroup] ?? r.group;
+    const score = caseScore({ severity: "warning", ageHours: hoursSince(r.requestedAt, ms), amount: r.amount ?? 0, type: "OTHER" });
+    return {
+      key: workKey("APPROVAL", r.id),
+      sourceType: "APPROVAL",
+      sourceKey: r.id,
+      kind: r.group,
+      title: `Chờ duyệt · ${r.summary}`,
+      summary: `${nhom} · ${r.requestedByEmail || "không rõ người xin"} xin — người xin không tự duyệt được việc của mình.`,
+      department: "MANAGEMENT" as DepartmentCode,
+      assignee: null,
+      status,
+      statusAuthority: "SOURCE" as const,
+      priority: priorityOf(score),
+      score,
+      createdAt: r.requestedAt,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaAtOf("APPROVAL", r.requestedAt),
+      completedAt: status === "NEW" ? null : r.decidedAt,
+      snoozedUntil: null,
+      businessEntity: "NONE",
+      businessEntityId: r.entityId || r.id,
+      sourceUrl: "/alerts",
+      money: MONEY_UNKNOWN,
+      tags: [r.group],
+      evidence: { source: "Phê duyệt hai bước", detail: `${nhom} · ${r.amount === null ? "chưa rõ số tiền" : formatVND(r.amount)} · ${r.action}` },
+      blockedReason: "",
+      creationSource: "AUTO" as WorkItem["creationSource"],
+      actions: actionsOf("APPROVAL"),
+      recommendedAction: "Mở trang Cần xử lý, đọc vì sao việc cần người thứ hai, rồi Duyệt hoặc Từ chối (từ chối phải nêu lý do)",
+    };
+  });
+}
+
 /* ═══════════════════ 8 · VIỆC TAY & VIỆC ĐỊNH KỲ ═══════════════════ */
 
 /** Nguồn duy nhất giữ trạng thái trong `work_items`. Ở đây không có phép chiếu nào. */
@@ -992,6 +1047,7 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     // Một lượt đọc `notifications` sinh ra bốn nguồn; lọc lại sau khi đã có.
     want("ALERT") || want("COD_EXCEPTION") || want("INVENTORY_EXCEPTION") || want("RETURN_INSPECTION") ? guard("ALERT", () => adaptAlerts(now)) : [],
     want("TECH_TASK") ? guard("TECH_TASK", () => adaptTechTasks(now, opts.includeClosed ?? false)) : [],
+    want("APPROVAL") ? guard("APPROVAL", () => adaptApprovals(now, opts.includeClosed ?? false, closedSince)) : [],
     want("MANUAL_TASK") || want("RECURRING_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);
 

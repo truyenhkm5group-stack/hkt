@@ -150,6 +150,12 @@ export const PERMISSION_GROUPS = [
       { key: "audit:view", label: "Nhật ký hệ thống" },
       { key: "users:manage", label: "Quản lý người dùng & phân quyền" },
       { key: "settings:manage", label: "Cấu hình hệ thống khác" },
+      // ═══ Company OS · Agent G ═══ — xem `withDerivedApprovalDecide()` cuối tệp.
+      {
+        key: "approvals:decide",
+        label: "Duyệt việc cần người thứ hai",
+        hint: "Duyệt / từ chối yêu cầu phê duyệt hai bước (điều chỉnh kho, sửa chi phí lớn, sửa lương, đổi luật…). Quản trị viên, Quản lý và người có “Cấu hình hệ thống khác” LUÔN có quyền này — đúng tập người duyệt được trước khi có khoá. Vai trò tuỳ chỉnh không cấp được nó. Người xin không bao giờ tự duyệt việc của mình.",
+      },
     ],
   },
 ] as const;
@@ -317,17 +323,46 @@ export function resolvePermissions(
   known?: string[] | null,
 ): string[] {
   if (role === "ADMIN") return [...ALL_PERMISSIONS];
-  if (!Array.isArray(custom)) return rolePermissions(role, templates);
+  if (!Array.isArray(custom)) return withDerivedApprovalDecide(role, rolePermissions(role, templates));
   const rieng = new Set(expandLegacy(custom).filter((p) => (ALL_PERMISSIONS as string[]).includes(p)));
   const daBiet = Array.isArray(known) && known.length ? new Set(known) : khoaDaBietKieuCu();
   const mau = new Set(rolePermissions(role, templates));
   for (const p of ALL_PERMISSIONS as string[]) {
     if (!daBiet.has(p) && mau.has(p)) rieng.add(p);
   }
-  return [...rieng];
+  return withDerivedApprovalDecide(role, [...rieng]);
 }
 
 export function hasPermission(perms: readonly string[] | Set<string> | null | undefined, permission: string) {
   if (!perms) return false;
   return perms instanceof Set ? perms.has(permission) : perms.includes(permission);
+}
+
+/* ═══════════ Company OS · Agent G · QUYỀN DUYỆT HAI BƯỚC GIỮ NGUYÊN TẬP NGƯỜI CŨ ═══════════
+ *
+ * Trước khoá `approvals:decide`, `lib/actions/approvals.ts` tự viết điều kiện:
+ * `can(user, "settings:manage") || role === "ADMIN" || role === "MANAGER"`. Chuyển sang một khoá
+ * quyền mà KHÔNG làm ai mất quyền duyệt đòi hai điều, vì bản ghi đè cũ trong `settings` và danh
+ * sách quyền riêng của từng người không bao giờ chứa một khoá mới:
+ *
+ *  1. Vai ADMIN / MANAGER LUÔN có nó — theo VAI, như điều kiện cũ. Production có mảng ghi đè cho
+ *     MANAGER trong `auth.rolePermissions` (đo 15/09/2026); chỉ dựa vào mẫu mặc định thì tài khoản
+ *     Quản lý thật sẽ mất quyền duyệt.
+ *  2. Ai có `settings:manage` (sau khi đã tính đủ ba chiều) LUÔN có nó.
+ *
+ * Ngoài hai nhánh đó khoá chỉ đến từ một lần CẤP TƯỜNG MINH của người có `users:manage`. Vai trò tuỳ
+ * chỉnh không cấp được nó (`ROLE_BUILDER_FORBIDDEN`) — nếu không, người dựng vai trò tự cho mình
+ * quyền duyệt chính yêu cầu của người khác mà không cần quyền nào khác (AGENTS.md mục 31).
+ *
+ * Hàm THUẦN, gọi ở ĐÚNG hai chỗ tính bó quyền: cuối `resolvePermissions` (ở đây) và nhánh vai trò
+ * tuỳ chỉnh trong `lib/auth/access.ts::grantedPermissions`. Phạm vi (`applyScope`) không đụng tới
+ * nó vì cả hai khoá liên quan đều không thuộc vùng nhạy cảm.
+ */
+export const APPROVAL_DECIDE_PERMISSION = "approvals:decide";
+export const APPROVAL_DECIDE_ROLES: readonly Role[] = ["ADMIN", "MANAGER"];
+
+export function withDerivedApprovalDecide(role: Role, perms: string[]): string[] {
+  if (perms.includes(APPROVAL_DECIDE_PERMISSION)) return perms;
+  if (APPROVAL_DECIDE_ROLES.includes(role) || perms.includes("settings:manage")) return [...perms, APPROVAL_DECIDE_PERMISSION];
+  return perms;
 }
