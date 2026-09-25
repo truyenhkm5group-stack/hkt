@@ -109,6 +109,13 @@ export function statementCoverage(
   batches: StatementBatchInput[],
   statementFiles: string[],
   linkedBatchIds: string[],
+  /**
+   * Tổng THỰC NHẬN (Σ net) của từng bảng kê trong sổ chứng từ. Tệp "Báo cáo chi tiết bảng kê" tải
+   * tay từ web KHÔNG mang số bảng kê trong tên và không lập đợt, nên hai phép khớp ở trên đều trượt
+   * — 25/09/2026 bốn bảng kê vừa tải lên (30601124 · 30751602 · 30873899 · 31031025) vẫn bị báo
+   * "ERP chưa có bảng kê". Nhưng tổng thu về của tệp bằng ĐÚNG khoản Viettel Post chuyển, tới từng đồng.
+   */
+  statementNets: number[] = [],
 ): StatementCoverage {
   if (linkedBatchIds.length) return { covered: true, by: "LINKED", batchId: linkedBatchIds[0] };
   const so = statementNumberOf(tx.description);
@@ -121,5 +128,6 @@ export function statementCoverage(
   const cuaSo = COD_STATEMENT_MATCH_WINDOW_DAYS * 86_400_000;
   const theoTien = batches.find((b) => b.totalAmount === tx.amount && Math.abs(b.receivedAt.getTime() - tx.txnAt.getTime()) <= cuaSo);
   if (theoTien) return { covered: true, by: "AMOUNT", batchId: theoTien.id };
+  if (tx.amount > 0 && statementNets.includes(tx.amount)) return { covered: true, by: "AMOUNT", batchId: null };
   return { covered: false, statementNumber: so };
 }

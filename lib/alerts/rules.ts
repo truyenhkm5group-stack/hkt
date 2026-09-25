@@ -869,7 +869,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
         const tuDot = new Date(tu.getTime() - COD_STATEMENT_MATCH_WINDOW_DAYS * 86_400_000);
         // Tên tệp đã nhận từ HAI sổ: dòng chứng từ đã ghép (`cod_statement_lines`) và tệp script Gmail
         // gửi sang (`vtp_statement_files`) — tệp đã về mà chưa ghép dòng nào vẫn là "ERP ĐÃ CÓ tệp".
-        const [dot, tep, tepGmail, noi] = await Promise.all([
+        const [dot, tep, tepGmail, noi, thucNhan] = await Promise.all([
           db
             .select({ id: schema.codBatches.id, receivedAt: schema.codBatches.receivedAt, totalAmount: schema.codBatches.totalAmount, note: schema.codBatches.note, reference: schema.codBatches.reference })
             .from(schema.codBatches)
@@ -886,6 +886,12 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
             .select({ txnId: schema.bankTransactionLinks.txnId, targetId: schema.bankTransactionLinks.targetId })
             .from(schema.bankTransactionLinks)
             .where(and(eq(schema.bankTransactionLinks.targetType, "COD_BATCH"), inArray(schema.bankTransactionLinks.txnId, txs.map((t) => t.id)))),
+          // Σ thực nhận của từng bảng kê trong sổ — khớp được cả tệp tải tay (không số, không đợt).
+          db
+            .select({ net: sql<number>`coalesce(sum(${schema.codStatementLines.net}), 0)` })
+            .from(schema.codStatementLines)
+            .groupBy(schema.codStatementLines.statementKey)
+            .having(sql`max(${schema.codStatementLines.statementAt}) >= ${tuDot.toISOString()}::timestamptz`),
         ]);
         const tepDaNhap = [...tep.map((r) => r.f), ...tepGmail.map((r) => r.f)];
         for (const tx of txs) {
@@ -894,6 +900,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
             dot.map((d) => ({ ...d, totalAmount: Number(d.totalAmount) })),
             tepDaNhap,
             noi.filter((l) => l.txnId === tx.id).map((l) => l.targetId),
+            thucNhan.map((r) => Number(r.net)),
           );
           if (phu.covered) continue;
           const so = phu.statementNumber;
@@ -902,8 +909,8 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
             severity: "warning",
             title: `Viettel Post đã chuyển ${formatVND(Number(tx.amount))} ngày ${fmtAt(tx.txnAt)} · ERP chưa có bảng kê${so ? ` số ${so}` : ""}`,
             body:
-              `Sao kê có khoản tiền COD này nhưng ERP không có tệp bảng kê nào khớp (theo số bảng kê, hay cùng số tiền trong ±${COD_STATEMENT_MATCH_WINDOW_DAYS} ngày). ` +
-              `Thiếu tệp thì các vận đơn của đợt này hiện "quá hạn chưa trả" — ĐỪNG đi đòi Viettel Post. Tải tệp BangKeChiCOD${so ? `_${so}` : ""} lên Đối soát COD.`,
+              `Sao kê có khoản tiền COD này nhưng ERP không có tệp bảng kê nào khớp (theo số bảng kê, theo tổng thực nhận của tệp, hay cùng số tiền đợt trong ±${COD_STATEMENT_MATCH_WINDOW_DAYS} ngày). ` +
+              `Thiếu tệp thì các vận đơn của đợt này hiện "quá hạn chưa trả" — ĐỪNG đi đòi Viettel Post. Tải tệp BangKeChiCOD${so ? `_${so}` : ""} lên Đối soát COD; thư không về thì tải "Báo cáo chi tiết bảng kê" của đợt này từ web Viettel Post.`,
             href: "/cod",
             entityType: "BANK_TRANSACTION",
             entityId: tx.id,
