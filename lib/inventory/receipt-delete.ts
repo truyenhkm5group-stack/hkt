@@ -60,22 +60,33 @@ export type ReceiptSnapshot = {
   items: (typeof schema.stockReceiptItems.$inferSelect)[];
 };
 
-export type ReceiptDeleteBlocker = { inspections: { id: string; shipmentId: string; code: string | null; status: string }[]; unidentified: string[] };
+export type ReceiptDeleteBlocker = {
+  inspections: { id: string; shipmentId: string; code: string | null; status: string }[];
+  unidentified: string[];
+  /** Company OS · Agent E: dòng sổ kết cục "nhập lại sau sửa" đứng trên phiếu này (`return_dispositions.stock_receipt_id`). */
+  reworkRestocks: { id: string; code: string | null; qty: number }[];
+};
 
 export type DeleteReceiptResult = { ok: true; snapshot: ReceiptSnapshot } | { error: string; blocker?: ReceiptDeleteBlocker; approval?: ApprovalDecision["mode"] };
 
 /** Phiếu kho này có đang là chứng từ của phiếu kiểm hoàn / món hoàn không nhãn nào không. */
 export async function receiptDeleteBlockers(db: Db, receiptId: string): Promise<ReceiptDeleteBlocker> {
   const ins = schema.returnInspections;
-  const [inspections, unidentified] = await Promise.all([
+  const [inspections, unidentified, reworkRestocks] = await Promise.all([
     db
       .select({ id: ins.id, shipmentId: ins.shipmentId, status: ins.status, code: schema.shipments.vtpOrderNumber })
       .from(ins)
       .leftJoin(schema.shipments, eq(schema.shipments.id, ins.shipmentId))
       .where(eq(ins.stockReceiptId, receiptId)),
     db.select({ id: schema.returnUnidentified.id }).from(schema.returnUnidentified).where(eq(schema.returnUnidentified.stockReceiptId, receiptId)),
+    db
+      .select({ id: schema.returnDispositions.id, qty: schema.returnDispositions.qty, code: schema.shipments.vtpOrderNumber })
+      .from(schema.returnDispositions)
+      .innerJoin(ins, eq(ins.id, schema.returnDispositions.inspectionId))
+      .leftJoin(schema.shipments, eq(schema.shipments.id, ins.shipmentId))
+      .where(eq(schema.returnDispositions.stockReceiptId, receiptId)),
   ]);
-  return { inspections, unidentified: unidentified.map((u) => u.id) };
+  return { inspections, unidentified: unidentified.map((u) => u.id), reworkRestocks };
 }
 
 function blockerMessage(b: ReceiptDeleteBlocker): string {
@@ -85,6 +96,17 @@ function blockerMessage(b: ReceiptDeleteBlocker): string {
     parts.push(`${b.inspections.length} phiếu kiểm hàng hoàn (${codes}${b.inspections.length > 5 ? "…" : ""})`);
   }
   if (b.unidentified.length) parts.push(`${b.unidentified.length} món hoàn không nhãn đã tái nhập`);
+  if (b.reworkRestocks.length) {
+    const mon = b.reworkRestocks.reduce((t, r) => t + r.qty, 0);
+    const codes = [...new Set(b.reworkRestocks.map((r) => r.code).filter(Boolean))].slice(0, 5).join(", ");
+    parts.push(`lượt NHẬP LẠI SAU SỬA / GIẶT của ${mon} món hàng hoàn${codes ? ` (${codes})` : ""}`);
+  }
+  if (!b.inspections.length && !b.unidentified.length) {
+    return (
+      `Không xoá được: phiếu tái nhập này là chứng từ của ${parts.join(" và ")} (khối "Hàng hoàn không tái nhập"). Xoá nó thì tồn biến mất còn sổ kết cục vẫn ghi "đã sửa xong, đã nhập lại". ` +
+      `Sổ kết cục là sổ ghi thêm, không gỡ ngược — muốn sửa số, lập phiếu "Điều chỉnh kiểm kê" (đi qua duyệt hai bước).`
+    );
+  }
   return (
     `Không xoá được: phiếu tái nhập này là chứng từ của ${parts.join(" và ")}. Xoá nó thì tồn biến mất còn kiện vẫn ghi "đã đếm, đã về kho". ` +
     `ERP KHÔNG có đường gỡ một kiện đã đếm (trạm kiểm hoàn chỉ gỡ được kiện CHƯA đếm) — muốn sửa số, lập phiếu "Điều chỉnh kiểm kê" (đi qua duyệt hai bước).`
@@ -108,7 +130,8 @@ export async function deleteStockReceiptCore(
   const items = await db.select().from(schema.stockReceiptItems).where(eq(schema.stockReceiptItems.receiptId, input.id));
 
   const blocker = await receiptDeleteBlockers(db, input.id);
-  if (blocker.inspections.length || blocker.unidentified.length) return { error: blockerMessage(blocker), blocker };
+  // Chặn TRƯỚC cổng duyệt và TRƯỚC nhật ký: lượt xoá không thể xảy ra thì không để lại dòng nào.
+  if (blocker.inspections.length || blocker.unidentified.length || blocker.reworkRestocks.length) return { error: blockerMessage(blocker), blocker };
 
   const kind = (header.kind in RECEIPT_DELETE_GROUP ? header.kind : "ADJUSTMENT") as StockReceiptKind;
   const group = RECEIPT_DELETE_GROUP[kind];
@@ -147,6 +170,7 @@ export async function deleteStockReceiptCore(
         eq(schema.stockReceipts.id, header.id),
         sql`not exists (select 1 from return_inspections ri where ri.stock_receipt_id = ${header.id})`,
         sql`not exists (select 1 from return_unidentified ru where ru.stock_receipt_id = ${header.id})`,
+        sql`not exists (select 1 from return_dispositions rd where rd.stock_receipt_id = ${header.id})`,
       ),
     )
     .returning({ id: schema.stockReceipts.id });
