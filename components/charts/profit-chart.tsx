@@ -15,11 +15,28 @@ function shortDay(day: string) {
   return `${d}/${m}`;
 }
 
-/** Doanh thu (cột) so với lãi gộp và lợi nhuận ròng (đường) theo ngày */
-export function ProfitChart({ data }: { data: { day: string; revenue: number; grossProfit: number; netProfit: number }[] }) {
-  if (!data.length) return <div className="flex h-[280px] items-center justify-center text-sm text-muted-foreground">Chưa có dữ liệu trong kỳ này</div>;
+type Key = keyof typeof config;
+
+/**
+ * Doanh thu (cột) so với lãi gộp và lợi nhuận ròng (đường) theo ngày.
+ *
+ * `labels` đổi TÊN ba chuỗi cho bảng dùng nó (Lợi nhuận danh nghĩa gọi hai đường là "LN danh
+ * nghĩa ƯT" / "LN ròng ƯT", không phải "lãi gộp"). Giá trị `null` là CHƯA BIẾT (ngày chưa có số
+ * chi quảng cáo): đường ĐỨT tại đó và chú giải in "—", không vẽ một điểm 0 ₫ (AGENTS.md mục 42).
+ */
+export function ProfitChart({
+  data,
+  labels,
+  height = 280,
+}: {
+  data: { day: string; revenue: number; grossProfit: number | null; netProfit: number | null }[];
+  labels?: Partial<Record<Key, string>>;
+  height?: number;
+}) {
+  const cfg = labels ? (Object.fromEntries((Object.keys(config) as Key[]).map((k) => [k, { ...config[k], label: labels[k] ?? config[k].label }])) as typeof config) : config;
+  if (!data.length) return <div className="flex items-center justify-center text-sm text-muted-foreground" style={{ height }}>Chưa có dữ liệu trong kỳ này</div>;
   return (
-    <ChartContainer config={config} className="h-[280px] w-full">
+    <ChartContainer config={cfg} className="w-full" style={{ height }}>
       <ComposedChart data={data} margin={{ left: 4, right: 8, top: 8 }}>
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis dataKey="day" tickLine={false} axisLine={false} tickMargin={8} minTickGap={24} tickFormatter={shortDay} fontSize={11} />
@@ -34,9 +51,9 @@ export function ProfitChart({ data }: { data: { day: string; revenue: number; gr
                 <div className="flex w-full items-center justify-between gap-4">
                   <span className="flex items-center gap-1.5 text-muted-foreground">
                     <span className="size-2 rounded-[2px]" style={{ backgroundColor: String(item.color ?? "") }} />
-                    {config[name as keyof typeof config]?.label ?? name}
+                    {cfg[name as Key]?.label ?? name}
                   </span>
-                  <span className={`numeric font-semibold ${Number(value) < 0 ? "text-destructive" : ""}`}>{formatVND(Number(value))}</span>
+                  <span className={`numeric font-semibold ${Number(value) < 0 ? "text-destructive" : ""}`}>{formatVND(value === null || value === undefined ? null : Number(value))}</span>
                 </div>
               )}
             />

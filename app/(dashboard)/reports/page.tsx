@@ -302,6 +302,7 @@ export default async function ReportsPage({
         <NominalTab
           period={period}
           productId={productParam}
+          marketerKey={param(raw, "mkt")}
           tabQuery={tabQuery}
           canWrite={canWrite}
           basis={mocNominal}

@@ -171,7 +171,8 @@ export async function testEstimatedCost(db: Db) {
   await motDon(db, "c0", `${P}vc`, `${P}pc`, true, 0, 2, luc);
 
   const ky = { from: gio(24 * 30), to: new Date(), key: "30d", label: "30 ngày" } as never;
-  const { getNominalProfitReport, getNominalDailyForProduct } = await import("@/lib/queries/profit-nominal");
+  const { getNominalProfitReport } = await import("@/lib/queries/profit-nominal");
+  const { getNominalDaily } = await import("@/lib/queries/marketer-daily-nominal");
 
   try {
     clearMemo();
@@ -226,9 +227,9 @@ export async function testEstimatedCost(db: Db) {
     assert.equal(c.revenueBasis, "RATE", "mã C chưa chín ⇒ nhánh theo tỷ lệ");
     assert.ok(c.returnRate !== null);
     assert.equal(c.expectedCogsEstimated, Math.round(2 * (1 - c.returnRate! / 100) * 100_000), "nhánh tỷ lệ: SP chưa có giá × TL GTC × giá dự tính");
-    const ngay = await getNominalDailyForProduct(`${P}pc`, ky, c.returnRate!, sau.assumptions, "ORDERED", c.estimatedCost?.unitCost ?? null);
-    assert.equal(ngay.reduce((t, d) => t + d.expectedCogsEstimated, 0), c.expectedCogsEstimated, "bảng theo ngày dùng đúng giá dự tính của dòng cha");
-    assert.ok(ngay.every((d) => d.cogsKnown), "ngày có giá dự tính không in “—”");
+    const ngay = await getNominalDaily(ky, "ORDERED", { productId: `${P}pc`, marketerKey: null });
+    assert.equal(ngay.total.expectedCogs, c.expectedCogs, "bảng theo ngày chia ĐÚNG giá vốn của dòng cha — gồm cả phần giá dự tính");
+    assert.ok(ngay.days.length > 0 && ngay.days.every((d) => d.cell.cogsUncoveredQty === 0), "mã đã đặt giá dự tính ⇒ ngày không in “—” ở giá vốn");
 
     assert.equal(sau.totals.expectedCogsEstimated, sau.rows.reduce((t, r) => t + r.expectedCogsEstimated, 0));
     assert.ok(sau.totals.estimatedCostProducts >= 2);
