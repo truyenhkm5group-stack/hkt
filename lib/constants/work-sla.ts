@@ -170,6 +170,15 @@ const SOURCE_RULES: SlaRule[] = [
     department: "WAREHOUSE",
     alsoShownOn: "Kiểm đếm hàng hoàn",
   },
+  {
+    key: "RETURN_DISPOSITION",
+    label: "Hàng hoàn không tái nhập · chờ kết cục",
+    // LẤY LẠI từ sổ nguồn (luật 22) — hôm nay là `null`: chủ shop chưa chốt số giờ nào cho việc này.
+    hours: WORK_SOURCE_SPEC.RETURN_DISPOSITION.slaHours,
+    why: "Chưa có hạn do chủ shop chốt. Món nằm trên kệ không mất giá theo giờ như kiện đang giao; đặt một con số bịa chỉ sinh ra số trễ hạn giả.",
+    department: "WAREHOUSE",
+    alsoShownOn: "",
+  },
   /*
     BỐN LÝ DO TẮC, BỐN HẠN KHÁC NHAU — KHÔNG GỘP LÀM MỘT.
 

@@ -59,8 +59,10 @@ import {
   WarehouseThroughput,
 } from "@/app/(dashboard)/inventory/returns/warehouse-people";
 import { param, type SearchParams } from "@/lib/search-params";
+import { DispositionSection } from "@/app/(dashboard)/inventory/returns/disposition-section";
+import { listDispositionQueue, listRecentDispositions } from "@/lib/queries/return-dispositions";
 
-export const metadata = { title: "Kiểm đếm hàng hoàn" };
+export const metadata = { title: "Kiểm đếm hàng hoàn · kho" };
 
 /*
   KỲ ĐO KHAI MỘT CHỖ. Ba khối dưới trang nhìn ba kỳ khác nhau, cố ý: năng suất đọc theo tháng để
@@ -79,6 +81,9 @@ const SKU_DAYS = 90;
  * đã nặng sẵn này là làm đứng hình đúng lúc kho cần nó nhất. Bộ đếm phía trên vẫn đếm TOÀN BỘ.
  */
 const UNIDENTIFIED_CAP = 60;
+
+/** Trần vẽ hàng đợi "Hàng hoàn không tái nhập" — tiêu đề vẫn đếm TOÀN BỘ, và khối nói ra khi bị cắt. */
+const DISPOSITION_CAP = 300;
 
 /**
  * TRẠM ĐẾM HÀNG HOÀN.
@@ -107,6 +112,8 @@ export default async function ReturnInspectionPage({
   */
   const sp = await searchParams;
   const timKien = param(sp, "kien") ?? "";
+  // Việc trên /work trỏ về đúng món: `?xu-ly=<khoá món>#hang-khong-tai-nhap`.
+  const xuLy = param(sp, "xu-ly") ?? null;
   const { user, decision } = await requireResource("RETURNS", "products:view");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
   if (decision.allow === "NONE")
@@ -144,6 +151,8 @@ export default async function ReturnInspectionPage({
     suThat,
     khongMa,
     khongMaTong,
+    ketCuc,
+    ketCucGanDay,
   ] = await Promise.all([
     inspectionDashboard(),
     listPendingInspections(PENDING_STATION_CAP),
@@ -159,6 +168,8 @@ export default async function ReturnInspectionPage({
     inspectionTruth(),
     listUnidentifiedReturns({ limit: UNIDENTIFIED_CAP }),
     unidentifiedSummary(),
+    listDispositionQueue({ limit: DISPOSITION_CAP }),
+    listRecentDispositions(30),
   ]);
   /*
     CHỈ ĐƯA **META** XUỐNG TRÌNH DUYỆT.
@@ -188,7 +199,8 @@ export default async function ReturnInspectionPage({
     <div className="space-y-5">
       <PageHeader
         eyebrow="Kho"
-        title="Kiểm đếm hàng hoàn"
+        title="Kiểm đếm hàng hoàn · kho"
+        description="Hàng hoàn THỰC VỀ kho ERP — khác phiếu đổi / trả ghi trên Pancake."
         hint={
           <>
             <p>Bắn mã → kiện nhảy lên đầu → một chạm ra kết luận. Hàng hoàn CHỈ vào lại tồn khi có người đếm thực tế.</p>
@@ -411,6 +423,40 @@ export default async function ReturnInspectionPage({
           </div>
         </SectionCard>
       </div>
+
+      {/*
+        BƯỚC SAU TRẠM ĐẾM: món kiểm là KHÔNG bán được đi đâu. Đặt ngay dưới trạm đếm vì đó là việc
+        tiếp theo của cùng người kho — trước đây món hỏng / bẩn / sai hàng dừng ở kết luận kiểm và biến
+        khỏi mọi sổ.
+      */}
+      <DispositionSection
+        canWrite={canWrite}
+        focusKey={xuLy}
+        summary={{ totalOpen: ketCuc.totalOpen, truncated: ketCuc.truncated, ...ketCuc.summary }}
+        rows={ketCuc.rows.map((r) => ({
+          subjectKey: r.subjectKey,
+          grain: r.grain,
+          shipmentId: r.shipmentId,
+          code: r.code,
+          orderCode: r.orderCode,
+          condition: r.condition,
+          inspectNote: r.inspectNote,
+          inspectedAt: r.inspectedAt ? r.inspectedAt.toISOString() : null,
+          qty: r.qty,
+          sku: r.sku,
+          productName: r.productName,
+          color: r.color,
+          size: r.size,
+          unitCost: r.unitCost,
+          costBasis: r.costBasis,
+          remaining: r.folded.remaining,
+          state: r.folded.state ?? "PENDING_DECISION",
+          openValueEstimate: r.openValueEstimate,
+          expectedVariants: r.expectedVariants,
+          history: r.history.map((h) => ({ id: h.id, disposition: h.disposition, qty: h.qty, note: h.note, actorName: h.actorName, createdAt: h.createdAt.toISOString(), stockReceiptId: h.stockReceiptId, valueEstimate: h.valueEstimate, costBasis: h.costBasis })),
+        }))}
+        recent={ketCucGanDay.map((h) => ({ id: h.id, disposition: h.disposition, qty: h.qty, note: h.note, actorName: h.actorName, createdAt: h.createdAt.toISOString(), stockReceiptId: h.stockReceiptId, valueEstimate: h.valueEstimate, costBasis: h.costBasis, code: h.code, sku: h.sku, productName: h.productName }))}
+      />
 
       {/*
         ĐO HIỆU SUẤT NẰM SAU CHỖ LÀM VIỆC, CỐ Ý.

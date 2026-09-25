@@ -6996,3 +6996,77 @@ export const productModelStateHistory = pgTable(
 export type ProductModelRow = typeof productModels.$inferSelect;
 export type DomainEventRow = typeof domainEvents.$inferSelect;
 export type ProductModelStateHistoryRow = typeof productModelStateHistory.$inferSelect;
+
+// ═══ Company OS · Agent E · kết cục hàng hoàn không tái nhập ═══
+
+/**
+ * ───────────── KẾT CỤC CỦA HÀNG HOÀN KHÔNG VÀO LẠI TỒN (APPEND-ONLY) ─────────────
+ *
+ * Trạm kiểm đếm cho món `OK` một phiếu tái nhập; mọi kết luận khác (hỏng · bẩn · sai hàng · không bán
+ * được) trước đây không có trạng thái tiếp theo nào — hàng nằm trên kệ mà sổ không biết nó đi đâu.
+ * Bảng này là SỔ GHI THÊM: mỗi dòng là một quyết định của một NGƯỜI (khoá tài khoản bắt buộc, luật
+ * 34). Không UPDATE, không DELETE ở đâu cả — tình trạng hiện tại gập từ sổ
+ * (`lib/constants/return-disposition.ts::foldDispositions`).
+ *
+ * Đối tượng: một dòng kiểm từng món (`inspection_item_id`), HOẶC phần "không bán được" của một kiện
+ * kiểm cả kiện (`inspection_item_id` NULL). `subject_key` là khoá chung của hai loại, CHECK buộc nó
+ * khớp đúng cột nguồn.
+ *
+ * Tồn kho: CHỈ `RESTOCK_AFTER_REWORK` đổi tồn, và qua một phiếu `RETURN` (`stock_receipt_id`, bắt
+ * buộc với đúng kết cục ấy và cấm với mọi kết cục khác). `WRITE_OFF` ghi GIÁ TRỊ ƯỚC TÍNH, không ghi
+ * sổ kho. Khoá ngoại tới phiếu kiểm / dòng kiểm / phiếu kho là RESTRICT: xoá chúng là xoá chứng từ
+ * của một quyết định đã ghi.
+ */
+export const returnDispositions = pgTable(
+  "return_dispositions",
+  {
+    id: id(),
+    inspectionId: text("inspection_id")
+      .notNull()
+      .references(() => returnInspections.id, { onDelete: "restrict" }),
+    /** `NULL` = đối tượng là CẢ KIỆN (kiện kiểm nhanh, không có dòng từng món). */
+    inspectionItemId: text("inspection_item_id").references(() => returnInspectionItems.id, { onDelete: "restrict" }),
+    /** `item:<id dòng kiểm>` hoặc `parcel:<id phiếu kiểm>`. */
+    subjectKey: text("subject_key").notNull(),
+    /** PENDING_DECISION · REWORK · RESTOCK_AFTER_REWORK · WRITE_OFF · RETURN_TO_SUPPLIER */
+    disposition: text("disposition").notNull(),
+    /** Số món dòng này nói tới. Kết cục cuối tiêu đúng bấy nhiêu từ phần còn mở. */
+    qty: integer("qty").notNull(),
+    /** Mẫu mã dòng này nói tới — đích nhập lại, hoặc mẫu dùng để định giá khi huỷ. `NULL` = không biết. */
+    variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    /** Phiếu tái nhập sinh ra — CHỈ với `RESTOCK_AFTER_REWORK`. */
+    stockReceiptId: text("stock_receipt_id").references(() => stockReceipts.id, { onDelete: "restrict" }),
+    /** Chỉ với `WRITE_OFF`: đơn giá vốn ƯỚC TÍNH lúc huỷ, bậc căn cứ, và giá trị = đơn giá × số món. `NULL` = CHƯA BIẾT. */
+    unitCostEstimate: integer("unit_cost_estimate"),
+    costBasis: text("cost_basis"),
+    valueEstimate: integer("value_estimate"),
+    note: text("note").notNull().default(""),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    /** ẢNH CHỤP tên người làm — do MÁY CHỦ đọc từ `users`, không nhận từ client. */
+    actorName: text("actor_name").notNull().default(""),
+    /** Khoá chống bấm đúp / gửi lại: cùng khoá ⇒ trả lại dòng đã ghi, không ghi dòng thứ hai. */
+    requestKey: text("request_key").unique(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("return_dispositions_subject_idx").on(t.subjectKey, t.createdAt),
+    index("return_dispositions_inspection_idx").on(t.inspectionId),
+    index("return_dispositions_variant_idx").on(t.variantId),
+    check("return_dispositions_disposition_check", sql`${t.disposition} IN ('PENDING_DECISION', 'REWORK', 'RESTOCK_AFTER_REWORK', 'WRITE_OFF', 'RETURN_TO_SUPPLIER')`),
+    check("return_dispositions_qty_check", sql`${t.qty} > 0`),
+    check(
+      "return_dispositions_subject_check",
+      sql`(${t.inspectionItemId} IS NULL AND ${t.subjectKey} = 'parcel:' || ${t.inspectionId}) OR (${t.inspectionItemId} IS NOT NULL AND ${t.subjectKey} = 'item:' || ${t.inspectionItemId})`,
+    ),
+    check("return_dispositions_receipt_check", sql`(${t.disposition} = 'RESTOCK_AFTER_REWORK') = (${t.stockReceiptId} IS NOT NULL)`),
+    check("return_dispositions_note_check", sql`${t.disposition} <> 'WRITE_OFF' OR length(trim(${t.note})) > 0`),
+    check(
+      "return_dispositions_value_check",
+      sql`(${t.disposition} = 'WRITE_OFF' OR (${t.unitCostEstimate} IS NULL AND ${t.valueEstimate} IS NULL AND ${t.costBasis} IS NULL)) AND (${t.valueEstimate} IS NULL OR ${t.valueEstimate} >= 0) AND (${t.costBasis} IS NULL OR ${t.costBasis} IN ('RECEIPT', 'ORDER_SNAPSHOT', 'VARIANT_DEFAULT', 'UNKNOWN'))`,
+    ),
+  ],
+);
+
+export type ReturnDispositionRow = typeof returnDispositions.$inferSelect;

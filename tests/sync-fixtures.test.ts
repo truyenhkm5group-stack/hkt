@@ -275,6 +275,8 @@ import { testStockShortageDb, testStockShortagePure } from "./stock-shortage.tes
 import { testStockWaitReportDb, testStockWaitReportPure } from "./stock-wait-report.test";
 // Company OS · Agent D — sổ kho an toàn · trạng thái tồn theo mẫu · ngưỡng hàng chậm.
 import { testCompanyOsInventoryDb, testCompanyOsInventoryPure } from "./company-os-inventory.test";
+// Company OS · Agent E — kết cục hàng hoàn không tái nhập.
+import { testCompanyOsReturnsDb, testCompanyOsReturnsPure } from "./company-os-returns.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
@@ -1875,6 +1877,9 @@ async function main() {
   // Company OS · Agent D: tự dọn dữ liệu mã `cosd-` (kể cả khoá settings inventory.slowMoving).
   testCompanyOsInventoryPure();
   await testCompanyOsInventoryDb(db);
+  // Company OS · Agent E: tự dọn dữ liệu mã `cose-` (kể cả sổ kết cục và sự kiện của nó).
+  testCompanyOsReturnsPure();
+  await testCompanyOsReturnsDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();

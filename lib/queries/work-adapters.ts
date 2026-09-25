@@ -19,6 +19,8 @@ import { getCareQueue } from "@/lib/queries/care-workbench";
 import { csRunningHandoffExists } from "@/lib/queries/cs";
 import { getFulfillmentBottleneckQueue } from "@/lib/queries/fulfillment-bottleneck";
 import { getDuplicateOrderQueue } from "@/lib/queries/order-duplicate";
+import { listDispositionQueue } from "@/lib/queries/return-dispositions";
+import { DISPOSITION_LABEL } from "@/lib/constants/return-disposition";
 import { DUPLICATE_VERDICT_LABEL } from "@/lib/constants/order-duplicate";
 import { unclassifiedBankRows } from "@/lib/queries/finance-ops";
 import { bankExceptionScore } from "@/lib/constants/finance-ops";
@@ -437,6 +439,63 @@ export async function adaptDuplicateOrders(now: Date): Promise<WorkItem[]> {
       creationSource: "AUTO" as const,
       actions: actionsOf("ORDER_DUPLICATE"),
       recommendedAction: r.nextAction,
+    };
+  });
+}
+
+/* ═══════════════════ 3c · HÀNG HOÀN KHÔNG TÁI NHẬP (Company OS · Agent E) ═══════════════════ */
+
+/**
+ * Nguồn: `listDispositionQueue()` — CÙNG hàm mà khối "Hàng hoàn không tái nhập" ở `/inventory/returns`
+ * dùng, không viết lại điều kiện nào. Một việc cho MỖI món (dòng kiểm từng món, hoặc phần không bán
+ * được của một kiện kiểm cả kiện); rời hàng đợi khi món có kết cục cuối cho toàn bộ số lượng — không
+ * ai phải đóng hộ (luật 19).
+ *
+ * Không trùng với `RETURN_INSPECTION`: nguồn đó chỉ nói kiện CHƯA ĐẾM, nguồn này chỉ nói món ĐÃ ĐẾM
+ * (`lib/queries/return-dispositions.ts::subjectsQuery` chỉ đọc `status = 'INSPECTED'`).
+ */
+export async function adaptReturnDispositions(now: Date): Promise<WorkItem[]> {
+  const queue = await listDispositionQueue({ limit: 500 });
+  const t = now.getTime();
+  return queue.rows.map((r) => {
+    const createdAt = r.inspectedAt ?? now;
+    const state = r.folded.state ?? "PENDING_DECISION";
+    // Cùng trục chấm điểm với hàng hoàn chờ đếm — không thêm một loại `CaseType` chỉ để chấm điểm.
+    const score = caseScore({ severity: "warning", ageHours: hoursSince(createdAt, t), amount: r.openValueEstimate ?? 0, type: "RETURN_RECEIVED_PENDING_INSPECTION" });
+    const ten = [r.sku || r.productName || "Món chưa rõ mẫu mã", [r.color, r.size].filter(Boolean).join(" / ")].filter(Boolean).join(" · ");
+    return {
+      key: workKey("RETURN_DISPOSITION", r.subjectKey),
+      sourceType: "RETURN_DISPOSITION",
+      sourceKey: r.subjectKey,
+      kind: state,
+      title: `${r.folded.remaining} món ${ten} · ${DISPOSITION_LABEL[state].toLowerCase()}`,
+      summary: `${r.grain === "PARCEL" ? "Kiện kiểm cả kiện" : "Kiểm từng món"} · kết luận ${r.condition}${r.inspectNote ? ` — ${r.inspectNote}` : ""}`,
+      department: "WAREHOUSE" as DepartmentCode,
+      assignee: null,
+      status: (state === "REWORK" ? "IN_PROGRESS" : "NEW") as WorkStatus,
+      statusAuthority: "SOURCE" as const,
+      priority: priorityOf(score),
+      score,
+      createdAt,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaAtOf("RETURN_DISPOSITION", createdAt),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "SHIPMENT",
+      businessEntityId: r.code ?? r.shipmentId,
+      sourceUrl: `/inventory/returns?xu-ly=${encodeURIComponent(r.subjectKey)}#hang-khong-tai-nhap`,
+      // ƯỚC TÍNH theo giá vốn gần nhất của mẫu mã; chưa biết giá vốn thì CHƯA BIẾT, không phải 0đ.
+      money:
+        r.openValueEstimate === null
+          ? MONEY_UNKNOWN
+          : { atRisk: r.openValueEstimate, recoverable: null, confidence: "ESTIMATED" as const, basis: "Giá vốn ước tính của phần chưa có kết cục (phiếu nhập gần nhất → giá vốn trên đơn → giá nhập mẫu mã)" },
+      tags: [state, r.grain],
+      evidence: { source: "Trạm kiểm hàng hoàn", detail: `${r.code ?? r.shipmentId} · còn ${r.folded.remaining}/${r.qty} món chưa có kết cục` },
+      blockedReason: "",
+      creationSource: "AUTO" as const,
+      actions: actionsOf("RETURN_DISPOSITION"),
+      recommendedAction: state === "REWORK" ? "Sửa / giặt xong thì đếm lại và nhập tồn; không cứu được thì huỷ có lý do." : "Quyết: đưa đi sửa / giặt, trả xưởng, hay huỷ có lý do.",
     };
   });
 }
@@ -987,6 +1046,7 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     want("SHIPMENT_CARE") ? guard("SHIPMENT_CARE", () => adaptShipmentCare(now, closedSince)) : [],
     want("FULFILLMENT_EXCEPTION") ? guard("FULFILLMENT_EXCEPTION", () => adaptFulfillment()) : [],
     want("ORDER_DUPLICATE") ? guard("ORDER_DUPLICATE", () => adaptDuplicateOrders(now)) : [],
+    want("RETURN_DISPOSITION") ? guard("RETURN_DISPOSITION", () => adaptReturnDispositions(now)) : [],
     want("BANK_EXCEPTION") ? guard("BANK_EXCEPTION", () => adaptBank(now)) : [],
     want("ADS_DECISION") ? guard("ADS_DECISION", () => adaptAdsDecisions(now)) : [],
     // Một lượt đọc `notifications` sinh ra bốn nguồn; lọc lại sau khi đã có.
