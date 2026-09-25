@@ -222,7 +222,7 @@ function chiTietVanHanh(r: { operatingAlloc: number; packingCost: number; opsSta
 }
 
 /** Một dòng của bảng hàng nhập, hoặc dòng tổng — hai chỗ dùng chung đúng một phép trừ. */
-type CoTonKho = Pick<NominalRow, "purchaseQty" | "purchaseCost" | "purchaseCostKnown" | "expectedQty" | "expectedCogs" | "expectedCogsEstimated" | "cogsKnown" | "stockQty" | "stockValue" | "stockKnown" | "outInTransitQty" | "outAwaitingReturnQty">;
+type CoTonKho = Pick<NominalRow, "purchaseQty" | "purchaseCost" | "purchaseCostKnown" | "purchaseCostEstimated" | "expectedQty" | "expectedCogs" | "expectedCogsEstimated" | "cogsKnown" | "stockQty" | "stockValue" | "stockKnown" | "outInTransitQty" | "outAwaitingReturnQty">;
 
 /**
  * HÀNG NHẬP − HÀNG ĐÃ TỚI TAY KHÁCH. Không kẹp về 0: số âm nghĩa là trong kỳ bán ra nhiều hơn
@@ -238,7 +238,7 @@ function conLaiUocTinh(r: CoTonKho) {
       DỰ TÍNH cũng không được vào đây: đây là phép trừ giữa hai CHỨNG TỪ (phiếu nhập − hàng đã giao),
       và một con số đặt tay trừ vào giá trị phiếu nhập cho ra một "hàng còn lại" không ai đếm được.
     */
-    costKnown: r.purchaseCostKnown && r.cogsKnown && r.expectedCogsEstimated === 0,
+    costKnown: r.purchaseCostKnown && r.purchaseCostEstimated === 0 && r.cogsKnown && r.expectedCogsEstimated === 0,
   };
 }
 
@@ -871,6 +871,11 @@ export async function NominalTab({
               dưới phép trừ; hai số lệch nhau nhiều là việc phải làm, không phải lỗi hiển thị.
             </p>
             <p className="mt-2">
+              <b>Phiếu nhập không ghi đơn giá</b> (chủ shop chốt 25/09/2026): phần đó được định giá bằng <b>giá vốn DỰ TÍNH</b> đặt tay ở bảng
+              &ldquo;Bàn dự tính&rdquo; bên trên, và ô in kèm nhãn &ldquo;dự tính&rdquo;. Mã chưa có giá dự tính thì giá trị hàng nhập và LN theo hàng
+              nhập đều <b>chưa biết</b> (&ldquo;—&rdquo;) — không bao giờ tính phần đó là 0 ₫.
+            </p>
+            <p className="mt-2">
               Hai vế của phép trừ còn đứng trên hai CÁCH ĐỊNH GIÁ: giá trị hàng nhập lấy đơn giá ghi trên CHÍNH phiếu nhập đó,
               còn giá vốn ước tính lấy đơn giá của phiếu nhập GẦN NHẤT. Mã đổi giá nhập giữa các lô thì hiệu số mang cả phần
               chênh giá, không chỉ phần chênh số lượng.
@@ -897,13 +902,25 @@ export async function NominalTab({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {[...report.rows].sort((a, b) => b.profitOnPurchase - a.profitOnPurchase).map((r) => {
+              {[...report.rows].sort((a, b) => Number(b.profitOnPurchaseKnown) - Number(a.profitOnPurchaseKnown) || b.profitOnPurchase - a.profitOnPurchase).map((r) => {
                 const conLai = conLaiUocTinh(r);
                 return (
                   <TableRow key={`pur-${r.productId}`} className={cn(!r.orders && "text-muted-foreground")}>
                     <TableCell className="font-medium">{r.code ? `${r.code} · ` : ""}{r.productName}{!r.orders ? <span className="ml-1 text-[11px]">(chưa có đơn)</span> : null}</TableCell>
-                    <OKep sub={`${formatNumber(r.purchaseQty)} sp`}>
-                      <TienCoTheChuaBiet value={r.purchaseCost} known={r.purchaseCostKnown} reason="Phiếu nhập trong kỳ có dòng không ghi đơn giá — giá trị hàng nhập CHƯA BIẾT, không phải 0 ₫" className={r.purchaseCost ? "text-rose-600" : "text-muted-foreground"} />
+                    <OKep
+                      sub={
+                        <>
+                          {formatNumber(r.purchaseQty)} sp
+                          {r.purchaseCostEstimated > 0 ? <span title={`${formatNumber(r.purchaseUnpricedQty)} sp trên phiếu nhập không ghi đơn giá, định giá bằng giá vốn dự tính ở Bàn dự tính`}> · gồm {formatVND(r.purchaseCostEstimated, { compact: true })} dự tính</span> : null}
+                        </>
+                      }
+                    >
+                      <TienCoTheChuaBiet
+                        value={r.purchaseCost}
+                        known={r.purchaseCostKnown}
+                        reason={`${formatNumber(r.purchaseUnpricedQty)} sp trên phiếu nhập trong kỳ không ghi đơn giá và mã chưa có giá vốn dự tính — giá trị hàng nhập CHƯA BIẾT, không phải 0 ₫. Đặt giá dự tính ở Bàn dự tính bên trên.`}
+                        className={cn(r.purchaseCost ? "text-rose-600" : "text-muted-foreground", r.purchaseCostEstimated > 0 && "italic")}
+                      />
                     </OKep>
                     <OKep sub={`${formatNumber(r.expectedQty)} sp`}>
                       <TienCoTheChuaBiet value={r.expectedCogs} known={r.cogsKnown} reason={`${formatNumber(r.cogsUnknownQty)} sản phẩm bán ra chưa biết giá vốn (không phiếu nhập, không giá Pancake) — giá vốn đang bị tính 0đ nên KHÔNG in ra; số lượng bên dưới vẫn đo được`} className="text-muted-foreground" />
@@ -921,8 +938,13 @@ export async function NominalTab({
                       <TienCoTheChuaBiet value={r.inventoryRisk} known={r.cogsKnown} reason="Chưa biết giá vốn hàng bán ⇒ chưa tính được dự phòng" className="text-muted-foreground" />
                     </OKep>
                     <OKep sub={<>khác <Money value={r.otherCost} /></>}><Money value={r.tax} className="text-muted-foreground" /></OKep>
-                    <OKep sub={<Pct value={r.marginOnPurchase} />}>
-                      <Money value={r.profitOnPurchase} className={cn("font-bold", r.profitOnPurchase >= 0 ? "text-success" : "text-destructive")} />
+                    <OKep sub={r.profitOnPurchaseKnown ? <Pct value={r.marginOnPurchase} /> : null}>
+                      <TienCoTheChuaBiet
+                        value={r.profitOnPurchase}
+                        known={r.profitOnPurchaseKnown}
+                        reason="Giá trị hàng nhập của mã chưa biết (phiếu nhập thiếu đơn giá, chưa có giá dự tính) ⇒ LN theo hàng nhập chưa tính được. Trước 25/09/2026 ô này in số như thể hàng nhập bằng 0 ₫."
+                        className={cn("font-bold", r.profitOnPurchase >= 0 ? "text-success" : "text-destructive")}
+                      />
                     </OKep>
                   </TableRow>
                 );
@@ -932,8 +954,8 @@ export async function NominalTab({
                 return (
                   <TableRow className="bg-muted/40 font-bold hover:bg-muted/40">
                     <TableCell>Tổng{report.unmatchedAdSpend ? <div className="text-[10.5px] font-normal text-muted-foreground" title="Tỷ lệ ở dòng này chỉ tính phần đã quy kết">+ {formatVND(report.unmatchedAdSpend)} QC chưa quy kết</div> : null}</TableCell>
-                    <OKep sub={`${formatNumber(t.purchaseQty)} sp`}>
-                      <TienCoTheChuaBiet value={t.purchaseCost} known={t.purchaseCostKnown} reason="Có phiếu nhập không ghi đơn giá — tổng giá trị hàng nhập chưa biết đủ" className="text-rose-600" />
+                    <OKep sub={<>{formatNumber(t.purchaseQty)} sp{t.purchaseCostEstimated > 0 ? ` · gồm ${formatVND(t.purchaseCostEstimated, { compact: true })} dự tính` : ""}</>}>
+                      <TienCoTheChuaBiet value={t.purchaseCost} known={t.purchaseCostKnown} reason={`${formatNumber(t.purchaseUnknownProducts)} mã có phiếu nhập thiếu đơn giá mà chưa có giá dự tính — tổng giá trị hàng nhập chưa biết đủ`} className="text-rose-600" />
                     </OKep>
                     <OKep sub={`${formatNumber(t.expectedQty)} sp`}>
                       <TienCoTheChuaBiet value={t.expectedCogs} known={t.cogsKnown} reason={`${formatNumber(t.cogsUncoveredQty)} sản phẩm bán ra chưa biết giá vốn — tổng giá vốn đang thiếu hẳn phần đó, nên KHÔNG in ra một con số trông như đã đủ`} />
@@ -951,8 +973,13 @@ export async function NominalTab({
                       <TienCoTheChuaBiet value={t.inventoryRisk} known={t.cogsKnown} reason="Có sản phẩm chưa biết giá vốn ⇒ dự phòng chưa tính đủ" />
                     </OKep>
                     <OKep sub={<>khác <Money value={t.otherCost} /></>}><Money value={t.tax} /></OKep>
-                    <OKep sub={<Pct value={t.marginOnPurchase} />}>
-                      <Money value={t.profitOnPurchase} className={t.profitOnPurchase >= 0 ? "text-success" : "text-destructive"} />
+                    <OKep sub={t.profitOnPurchaseKnown ? <Pct value={t.marginOnPurchase} /> : null}>
+                      <TienCoTheChuaBiet
+                        value={t.profitOnPurchase}
+                        known={t.profitOnPurchaseKnown}
+                        reason={`${formatNumber(t.purchaseUnknownProducts)} mã chưa biết giá trị hàng nhập ⇒ tổng LN theo hàng nhập chưa tính đủ`}
+                        className={t.profitOnPurchase >= 0 ? "text-success" : "text-destructive"}
+                      />
                     </OKep>
                   </TableRow>
                 );

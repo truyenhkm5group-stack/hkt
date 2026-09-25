@@ -68,8 +68,8 @@ export function testNominalTableDisplay() {
 
   // ───────── LUẬT 1c: phép trừ chỉ in ra khi CẢ HAI vế đã biết ─────────
   assert.ok(
-    /costKnown: r\.purchaseCostKnown && r\.cogsKnown/.test(src),
-    "hiệu `hàng nhập − giá vốn đã giao` chỉ biết được khi cả hai vế biết; thiếu một vế là trừ đi một ẩn số",
+    /costKnown: r\.purchaseCostKnown && r\.purchaseCostEstimated === 0 && r\.cogsKnown && r\.expectedCogsEstimated === 0/.test(src),
+    "hiệu `hàng nhập − giá vốn đã giao` chỉ biết được khi cả hai vế biết VÀ không vế nào là giá dự tính (25/09/2026: hàng nhập thiếu đơn giá nay định giá bằng giá dự tính — phần đó không được vào phép trừ giữa hai chứng từ)",
   );
   // Và nó KHÔNG được kẹp về 0: bán nhiều hơn nhập trong kỳ là một việc phải làm, không phải lỗi.
   assert.ok(

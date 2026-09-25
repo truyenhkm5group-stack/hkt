@@ -82,8 +82,9 @@ export function EstimatedCostControl({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 space-y-2 text-xs">
         <p className="text-muted-foreground">
-          Giá nhập DỰ TÍNH cho mỗi sản phẩm chưa có phiếu nhập / giá Pancake. Có giá thật là con số này tự đứng sang một bên.
-          Chỉ báo cáo lợi nhuận danh nghĩa dùng nó — lương và dòng tiền thực không đọc.
+          Giá nhập DỰ TÍNH cho mỗi sản phẩm chưa có phiếu nhập / giá Pancake, và cho các dòng phiếu nhập KHÔNG ghi đơn giá (bảng
+          &ldquo;LN theo hàng nhập&rdquo;). Có giá thật là con số này tự đứng sang một bên. Chỉ báo cáo lợi nhuận danh nghĩa dùng nó —
+          lương và dòng tiền thực không đọc.
         </p>
         <Input
           type="text"
