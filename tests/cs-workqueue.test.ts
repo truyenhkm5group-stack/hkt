@@ -8,7 +8,7 @@ import { CS_QUICK_ACTIONS_BY_KIND, CS_QUICK_ACTION, CS_MUTATE_ACTIONS, type CsQu
 import { CS_ASSIGNEE_FACET_BOT, CS_HUMAN_KINDS, CS_KIND_DOMAIN, csDomainOf, humanAssignee, isBotAssignee } from "@/lib/constants/cs-domain";
 import { addCsNote, applyCsQuickAction, setCsCaseFields, type CsActor } from "@/lib/cs/workqueue";
 import { getCareQueue } from "@/lib/queries/care-workbench";
-import { CS_SORTABLE, botMessageFailuresByShipment, csCasesToSurface, csFacets, csSummary, isHandedOffToCarrier, listCsCaseEvents, listCsCases, openCsGroups } from "@/lib/queries/cs";
+import { CS_SORTABLE, botMessageFailuresByShipment, csCasesToSurface, csFacets, csSummary, isHandedOffToCarrier, isRunningHandoff, listCsCaseEvents, listCsCases, openCsGroups } from "@/lib/queries/cs";
 import { getFunnelHealth } from "@/lib/queries/stage-health";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 
@@ -131,17 +131,18 @@ export async function testCsWorkqueue(db: Db) {
   const saiDiaChiTruoc = await demNhom("WRONG_ADDRESS");
 
   /*
-    ĐÃ GIAO CHO ĐVVC THÌ Ở LẠI VẬN ĐƠN, KỂ CẢ KHI KIỆN ĐÃ KẾT THÚC (chủ shop chốt 25/09/2026).
+    KIỆN ĐÃ CHỐT THÌ CASE VỀ CSKH (chủ shop chốt lại 25/09/2026, chiều).
 
-    Luật cũ trả case về CSKH khi kiện kết thúc. Luật mới: mốc duy nhất là bàn giao cho ĐVVC, nên
-    case KHÔNG đổi bàn khi kiện phát xong. Điều phải giữ là nó KHÔNG rơi vào khoảng trống: bàn care
-    vẫn có dòng cho kiện đó.
+    Buổi sáng cùng ngày luật là "đã giao cho ĐVVC thì ở lại Vận đơn, kể cả khi kiện kết thúc". Hệ quả
+    đo được: đơn "Đã trả" / "Đã hoàn" đứng mãi ở "Cần care" mà nhân viên care không gỡ được. Luật mới:
+    Vận đơn chỉ giữ case khi kiện CÒN ĐANG CHẠY. Điều vẫn phải giữ là case KHÔNG rơi vào khoảng trống:
+    rời bàn care thì phải có mặt ở hàng đợi CSKH.
   */
   await db.update(schema.shipments).set({ stage: "DELIVERED", isFinal: true }).where(eq(schema.shipments.id, "csq-s4"));
   clearMemo();
-  assert.equal(await demNhom("WRONG_ADDRESS"), saiDiaChiTruoc, "kiện đã kết thúc: case vẫn thuộc Vận đơn, KHÔNG quay về tồn đọng CSKH");
-  assert.ok(!(await listIds()).includes("csq-c6"), "đã giao cho ĐVVC thì không quay lại hàng đợi CSKH");
-  assert.ok((await getCareQueue()).cases.some((c) => c.shipmentId === "csq-s4" && c.reason === "WRONG_INFO"), "…và bàn care vẫn giữ dòng — việc không bị bỏ rơi giữa hai bàn");
+  assert.ok(!(await getCareQueue()).cases.some((c) => c.shipmentId === "csq-s4" && c.reason === "WRONG_INFO"), "kiện đã chốt: bàn care thôi giữ dòng");
+  assert.ok((await listIds()).includes("csq-c6"), "…và case quay về hàng đợi CSKH — không bị bỏ rơi giữa hai bàn");
+  assert.equal(await demNhom("WRONG_ADDRESS"), saiDiaChiTruoc + 1, "…và được đếm vào tồn đọng CSKH");
 
   // ───────── 7 · Case giao vận ĐÃ XONG không quay lại CSKH ─────────
   assert.ok(!csKh.has("csq-c7"), "case giao vận đã đóng không được rơi ngược vào hàng đợi CSKH");
@@ -306,7 +307,10 @@ export async function testCsWorkqueue(db: Db) {
   assert.equal(c16.shipment, null, "không còn lần gửi đang chạy");
   assert.equal(c16.shipments[0]?.tracking, "PKE16DAHOAN", "kiện đã hoàn vẫn phải đưa được mã cho CSKH gọi ĐVVC");
   assert.equal(c16.shipments[0]?.isFinal, true, "và phải nói rõ nó đã kết thúc");
-  assert.equal(c16.domain, "LOGISTICS", "đơn đã giao cho ĐVVC (kiện đã hoàn) ⇒ Vận đơn, dù kiện đã kết thúc");
+  // Chủ shop chốt lại 25/09/2026 (chiều): kiện ĐÃ CHỐT thì không còn gì để care vận chuyển — việc còn
+  // lại là nói chuyện với khách ⇒ case về CSKH. Bản trước giữ nó ở Vận đơn, kéo đơn "Đã hoàn" vào
+  // "Cần care" mãi mãi mà nhân viên care không gỡ được.
+  assert.equal(c16.domain, "CUSTOMER", "kiện duy nhất của đơn đã hoàn ⇒ case về CSKH, không kéo đơn đã hoàn vào Cần care");
   assert.equal(c17.domain, "CUSTOMER", "case không có đơn ⇒ chưa giao ⇒ CSKH");
 
   // (4) Không có đơn ⇒ không có mã ⇒ giao diện không vẽ nút.
@@ -538,10 +542,13 @@ export async function testCsWorkqueue(db: Db) {
   clearMemo();
   const csTN = new Set(await listIds());
   const vanDonTN = new Set(await listIds({ domain: "LOGISTICS" }));
-  for (const id of ["csq-c30", "csq-c30b", "csq-c30c", "csq-c32", "csq-c1u"]) {
-    assert.ok(!csTN.has(id), `${id}: đơn đã giao cho ĐVVC ⇒ KHÔNG nằm trong hàng đợi CSKH, dù case là loại gì`);
+  for (const id of ["csq-c30", "csq-c30b", "csq-c30c", "csq-c1u"]) {
+    assert.ok(!csTN.has(id), `${id}: kiện ĐANG trên đường ⇒ KHÔNG nằm trong hàng đợi CSKH, dù case là loại gì`);
     assert.ok(vanDonTN.has(id), `${id}: …mà phải tra được ở miền Vận đơn & care`);
   }
+  // Kiện đã chốt (giao xong) ⇒ case khiếu nại về CSKH — và KHÔNG biến mất ở cả hai nơi.
+  assert.ok(csTN.has("csq-c32"), "csq-c32: kiện đã giao xong ⇒ khiếu nại thuộc CSKH");
+  assert.ok(!vanDonTN.has("csq-c32"), "csq-c32: …và không còn ở miền Vận đơn");
   for (const id of ["csq-c31", "csq-c33"]) {
     assert.ok(csTN.has(id), `${id}: CHƯA giao cho ĐVVC (chưa có vận đơn / vận đơn còn chờ lấy) ⇒ CSKH`);
     assert.ok(!vanDonTN.has(id), `${id}: …và không đồng thời nằm ở miền Vận đơn`);
@@ -554,6 +561,13 @@ export async function testCsWorkqueue(db: Db) {
   assert.equal(isHandedOffToCarrier({ stage: "PICKED_UP" }), true);
   assert.equal(isHandedOffToCarrier({ stage: "RETURNED" }), true, "hàng không thể hoàn về nếu chưa từng được lấy đi");
   assert.equal(isHandedOffToCarrier({ stage: "PENDING", pickedUpAt: gio(3) }), true, "có mốc lấy hàng = đã giao, dù chặng hiện tại lệch");
+  // "Đang trên đường" = đã giao cho ĐVVC VÀ chưa chốt — mệnh đề quyết định miền từ 25/09/2026.
+  assert.equal(isRunningHandoff({ stage: "IN_TRANSIT" }), true);
+  assert.equal(isRunningHandoff({ stage: "RETURNING" }), true, "đang chuyển hoàn vẫn đang chạy (505 còn phát tiếp được)");
+  assert.equal(isRunningHandoff({ stage: "RETURNED" }), false, "đã hoàn về shop ⇒ đã chốt");
+  assert.equal(isRunningHandoff({ stage: "DELIVERED" }), false, "giao xong ⇒ đã chốt");
+  assert.equal(isRunningHandoff({ stage: "IN_TRANSIT", isFinal: true }), false, "cờ kết thúc của ĐVVC ⇒ đã chốt, dù chặng còn lệch");
+  assert.equal(isRunningHandoff({ stage: "PENDING" }), false, "chưa giao thì cũng không đang chạy");
 
   const qTN = await getCareQueue();
   const s30 = qTN.cases.find((c) => c.shipmentId === "csq-s30");
@@ -562,11 +576,7 @@ export async function testCsWorkqueue(db: Db) {
   // csq-s30 không có sự kiện ĐVVC nào ⇒ tháp xếp nó vào rổ THIẾU DỮ LIỆU. Khách đang chờ thì vẫn là việc thật.
   assert.notEqual(s30.reasonClass, "DATA_FRESHNESS", "lời khách không được chìm vào mục 'thiếu dữ liệu' — ở đó không ai làm");
   assert.ok(["Khách giục", "không nhận", "Khiếu nại"].every((t) => s30.reasonDetail.includes(t)), "MỌI case của kiện đều đi theo lên dòng");
-  const s32 = qTN.cases.find((c) => c.shipmentId === "csq-s32");
-  assert.ok(s32, "kiện ĐÃ CHỐT mà khách còn khiếu nại: vẫn là việc của Vận đơn, phải có dòng");
-  assert.equal(s32.reason, "CUSTOMER_COMPLAINT");
-  const tongCodDong = qTN.cases.filter((c) => c.view === "care").reduce((a, c) => a + c.codAmount, 0);
-  if (s32.view === "care") assert.ok(tongCodDong - qTN.moneyAtRisk >= 777_000, "COD của kiện đã phát xong KHÔNG phải tiền đang treo — không cộng vào moneyAtRisk");
+  assert.ok(!qTN.cases.some((c) => c.shipmentId === "csq-s32"), "kiện ĐÃ CHỐT mà khách còn khiếu nại: KHÔNG còn ở bàn care — case đã về CSKH (chủ shop chốt 25/09/2026)");
   const s1u = qTN.cases.find((c) => c.shipmentId === "csq-s1");
   assert.ok(s1u?.reasonDetail.includes("Khách giục giao"), "kiện đã nằm ở rổ giao hụt: lời khách giục phải hiện trên chính dòng đó, không mất đi");
   assert.equal(qTN.cases.filter((c) => c.shipmentId === "csq-s1").length, 1, "…và KHÔNG sinh dòng thứ hai cho cùng kiện");
@@ -578,8 +588,10 @@ export async function testCsWorkqueue(db: Db) {
   await db.insert(schema.shipments).values({ id: "csq-s40", orderId: "csq-o40", carrier: "Viettel Post", vtpOrderNumber: "CSQ040", stage: "DELIVERED", isFinal: true, deliveredAt: gio(10), codAmount: 300_000 }).onConflictDoNothing();
   await db.insert(schema.csCases).values({ id: "csq-c40", kind: "RETURN", orderId: "csq-o40", source: "PANCAKE_CHAT", status: "IN_PROGRESS", title: "Khách báo không nhận", customerPhone: "0911000040", assignee: "Linh CSKH", assigneeUserId: "csq-user", dedupeKey: "test:csq-c40", createdAt: gio(20) }).onConflictDoNothing();
   clearMemo();
-  const s40 = (await getCareQueue()).cases.find((c) => c.shipmentId === "csq-s40");
-  assert.ok(s40?.reasonDetail.includes("Hết việc?"), "dòng care của case đã hết việc mà có người cầm phải nói ra để người đó đóng");
+  assert.ok(!(await getCareQueue()).cases.some((c) => c.shipmentId === "csq-s40"), "kiện đã giao xong không còn ở bàn care");
+  const c40 = (await listCsCases(paramsOf())).rows.find((r) => r.id === "csq-c40");
+  assert.ok(c40, "case của kiện đã chốt phải về hàng đợi CSKH — không được biến mất ở cả hai nơi");
+  assert.ok(c40.staleHint, "…và mang câu 'hết việc? xem lại' để người đang cầm đóng");
 
   console.log(
     `✓ Hàng đợi CSKH: ${sau.open} việc CSKH · ${sau.logistics} case giao vận đã trả về Vận đơn & care (giao hụt · không liên lạc · sai địa chỉ khi kiện đang chạy) · sai SĐT chưa có vận đơn vẫn ở CSKH · một gốc một việc · case đã đóng không quay lại · bot ≠ người nhận · hành động nhanh có lịch sử (trạng thái · người · ghi chú · hẹn lại) · sao chép SĐT/mã vận đơn chép đúng giá trị, nhiều lần gửi thì liệt kê chứ không chọn hộ · hàng đợi V2: tự nhận / trưởng nhóm giao / chuyển / bỏ gán đều đi bằng KHOÁ tài khoản (khoá lạ bị từ chối, không ghi bừa) · ghi chú gần nhất có người + mốc + số lượng và KHÔNG đè bằng chứng · cột Phát sinh bám created_at · sắp xếp hai chiều chạy ở máy chủ và không mất khi sang trang`,

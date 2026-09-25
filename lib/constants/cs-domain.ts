@@ -91,9 +91,10 @@ export const CS_HUMAN_KINDS: readonly CsKind[] = (Object.keys(CS_KIND_DOMAIN) as
 export const CS_LIFECYCLE_KINDS: readonly CsKind[] = (Object.keys(CS_KIND_DOMAIN) as CsKind[]).filter((k) => CS_KIND_DOMAIN[k] === "BY_SHIPMENT");
 
 /**
- * Miền của MỘT case. `handedOff` = đơn của case có ít nhất một vận đơn ĐVVC đã cầm hàng
- * (`csHandedOffExists` / `isHandedOffToCarrier` trong `lib/queries/cs.ts`) — đúng mệnh đề mà trang
- * CSKH dùng để loại ra và bàn care dùng để nhận về, để hai bên không thể kết luận lệch nhau.
+ * Miền của MỘT case. `handedOff` = đơn của case có ít nhất một vận đơn ĐVVC đã cầm hàng VÀ CHƯA
+ * CHỐT (`csRunningHandoffExists` / `isRunningHandoff` trong `lib/queries/cs.ts`) — đúng mệnh đề mà
+ * trang CSKH dùng để loại ra và bàn care dùng để nhận về, để hai bên không thể kết luận lệch nhau.
+ * Kiện đã chốt (giao xong / đã hoàn / huỷ) ⇒ case về CSKH (chủ shop chốt lại 25/09/2026).
  *
  * CHƯA BIẾT không tồn tại ở đây: không có vận đơn nào ĐVVC đã cầm nghĩa là hàng còn ở shop, và việc
  * đó thuộc về người đang nói chuyện với khách.

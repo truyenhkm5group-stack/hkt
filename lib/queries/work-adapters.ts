@@ -16,7 +16,7 @@ import { decisionStability } from "@/lib/queries/marketing-ledger";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import type { Stability } from "@/lib/marketing/decision-stability";
 import { getCareQueue } from "@/lib/queries/care-workbench";
-import { csHandedOffExists } from "@/lib/queries/cs";
+import { csRunningHandoffExists } from "@/lib/queries/cs";
 import { getFulfillmentBottleneckQueue } from "@/lib/queries/fulfillment-bottleneck";
 import { getDuplicateOrderQueue } from "@/lib/queries/order-duplicate";
 import { DUPLICATE_VERDICT_LABEL } from "@/lib/constants/order-duplicate";
@@ -210,7 +210,7 @@ export async function adaptCsCases(now: Date, closedSince: Date | null = null): 
       source: c.source,
       orderValue: schema.orders.totalPriceAfterDiscount,
       // Đơn đã giao cho ĐVVC chưa quyết định miền của case (`BY_SHIPMENT`) — CÙNG mệnh đề với trang CSKH.
-      handedOff: sql<boolean>`${csHandedOffExists(c.orderId)}`,
+      handedOff: sql<boolean>`${csRunningHandoffExists(c.orderId)}`,
     })
     .from(c)
     .leftJoin(schema.orders, eq(schema.orders.id, c.orderId))

@@ -357,6 +357,17 @@ export async function reopenCase(user: CareActor, input: z.input<typeof reopenSc
 
 // ───────────────────────────── GIAO NGƯỜI ─────────────────────────────
 
+/**
+ * Kiện có đang đứng ở góc nhìn "Cần care" của hàng đợi không — đọc ĐÚNG hàng đợi mà người đang nhìn
+ * (đệm 30 giây), không dựng lại luật. Nạp muộn để `lib/care/service` không kéo cả hàng đợi vào mọi
+ * nơi dùng dịch vụ care.
+ */
+async function kienDangOCanCare(shipmentId: string): Promise<boolean> {
+  const { getCareQueue } = await import("@/lib/queries/care-workbench");
+  const q = await getCareQueue();
+  return q.cases.some((c) => c.shipmentId === shipmentId && c.view === "care");
+}
+
 export const ownerSchema = z.object({ shipmentIds: z.array(z.string().min(1)).min(1).max(200), ownerId: z.string().nullable() });
 
 export async function setCareOwner(user: CareActor, input: z.input<typeof ownerSchema>): Promise<Result<{ states: Record<string, CareState>; skipped: { shipmentId: string; reason: string }[] }>> {
@@ -370,10 +381,33 @@ export async function setCareOwner(user: CareActor, input: z.input<typeof ownerS
   const states: Record<string, CareState> = {};
   const skipped: { shipmentId: string; reason: string }[] = [];
   for (const shipmentId of [...new Set(shipmentIds)]) {
-    const before = await ensureCareRow(shipmentId, user.email);
+    let before = await ensureCareRow(shipmentId, user.email);
     if (!before) {
       skipped.push({ shipmentId, reason: "Không tìm thấy vận đơn" });
       continue;
+    }
+    /*
+      ═══ KHÔNG GIAO NGƯỜI VÀO MỘT CA ĐÃ ĐÓNG ═══
+
+      `ensureCareRow` trả về ca ĐÃ ĐÓNG khi kiện không có ca nào đang mở. Bản trước ghi người vào
+      chính ca đó: màn hình hiện tên trong chốc lát (đọc lại không lọc `active`), còn F5 thì hàng
+      đợi chỉ đọc ca đang mở nên dòng lại "chưa giao" — chủ shop giao cho Trần Anh Quân rồi thấy mất
+      (25/09/2026). Chủ shop chốt: ca đã đóng thì không còn cần care, không có việc để giao.
+      Ngoại lệ duy nhất là kiện VÀO LẠI "Cần care" sau lúc đóng (ĐVVC báo sự cố mới, khách giục khi
+      kiện đang chạy): đó là việc thật, nên giao = mở lại ca rồi giao — đúng đường `reopenCase`.
+    */
+    if (!before.active) {
+      if (!owner || !(await kienDangOCanCare(shipmentId))) {
+        skipped.push({ shipmentId, reason: "Ca care của kiện này đã đóng và kiện không còn cần care — không có việc để giao. Có việc mới thì bấm “Mở lại” trước." });
+        continue;
+      }
+      const moLai = await reopenCase(user, { shipmentId, note: `Mở lại để giao ${owner.name || owner.email}: kiện vào lại “Cần care” sau lúc đóng` });
+      const dangMo = "error" in moLai ? null : await db.query.shipmentCare.findFirst({ where: and(eq(schema.shipmentCare.shipmentId, shipmentId), eq(schema.shipmentCare.active, true)) });
+      if (!dangMo) {
+        skipped.push({ shipmentId, reason: "error" in moLai ? moLai.error : "Không mở lại được ca care" });
+        continue;
+      }
+      before = dangMo;
     }
     const from = before.careStatus as CareStatus;
     // Giao người cho case mới ⇒ ASSIGNED; bỏ người khỏi case ASSIGNED ⇒ NEW. Các trạng thái khác giữ nguyên.

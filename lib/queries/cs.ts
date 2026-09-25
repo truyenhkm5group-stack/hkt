@@ -1,5 +1,6 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { CARE_TERMINAL_STAGES } from "@/lib/care/entry";
 import { CARRIER_HANDOFF_STAGES } from "@/lib/constants/carrier-handoff";
 import { CS_BOT_ASSIGNEES, CS_ESCALATE_KINDS, CS_ESCALATE_WINDOW_HOURS, CS_KIND_LABEL, CS_KINDS, CS_STATUS_LABEL, CS_SURFACE_MODE, type CsKind, type CsStatus } from "@/lib/constants/cs";
 import { CS_CUSTOMER_WAITING_KINDS, CS_DUE_SOON_HOURS, CS_KIND_SEVERITY, CS_SLA_BUCKETS, CS_SLA_BUCKET_LABEL, csCasePriority, csDueAt, csSlaBucket, getCustomerNextAction, type CsNextAction, type CsSlaBucket } from "@/lib/constants/cs-next-action";
@@ -23,7 +24,7 @@ export const CS_SORTABLE = ["createdAt", "updatedAt", "status", "kind", "followU
  * định là chính tên bảng). Chuỗi này luôn là hằng trong mã nguồn, không đến từ người dùng.
  */
 function logisticsBody(kind: SQL | AnyColumn, orderId: SQL | AnyColumn): SQL {
-  return sql`(${kind} in ${CS_LOGISTICS_KINDS} or (${kind} in ${CS_LIFECYCLE_KINDS} and ${csHandedOffExists(orderId)}))`;
+  return sql`(${kind} in ${CS_LOGISTICS_KINDS} or (${kind} in ${CS_LIFECYCLE_KINDS} and ${csRunningHandoffExists(orderId)}))`;
 }
 
 /**
@@ -39,6 +40,26 @@ export function csHandedOffExists(orderId: SQL | AnyColumn): SQL {
 }
 export function isHandedOffToCarrier(s: { stage: string | null; pickedUpAt?: Date | string | null }): boolean {
   return Boolean(s.pickedUpAt) || (CARRIER_HANDOFF_STAGES as readonly string[]).includes(s.stage ?? "");
+}
+
+/**
+ * ═══ KIỆN ĐANG TRÊN ĐƯỜNG — RANH GIỚI CSKH / VẬN ĐƠN (chủ shop chốt lại 25/09/2026, chiều) ═══
+ *
+ * "Đã giao cho ĐVVC" (hai hàm trên) là điều KIỆN CẦN, không còn là đủ: case khách chỉ thuộc Vận đơn
+ * khi đơn còn một kiện ĐVVC đã cầm VÀ CHƯA CHỐT. Kiện đã chốt (giao xong · đã hoàn · huỷ, hoặc cờ
+ * kết thúc của ĐVVC) thì không còn gì để care vận chuyển — việc còn lại (đổi, trả, khiếu nại) là
+ * nói chuyện với khách, nên case về hàng đợi CSKH.
+ *
+ * Vì sao phải sửa ở LUẬT MIỀN chứ không chỉ ở bàn care: trang CSKH LOẠI mọi case miền Vận đơn. Chỉ
+ * bỏ kiện đã chốt khỏi "Cần care" thì những case ấy biến mất ở CẢ HAI nơi. Đo production 25/09/2026:
+ * đơn "Đã trả" / "Đã hoàn" đứng mãi ở "Cần care" vì case "trả hàng" tạo SAU khi hoàn (phiếu trả hàng
+ * Pancake, thẻ "hoàn hàng", tin nhắn khách) kéo chúng vào, và nhân viên care không có nút nào gỡ được.
+ */
+export function csRunningHandoffExists(orderId: SQL | AnyColumn): SQL {
+  return sql`exists (select 1 from shipments cs_dom_s where cs_dom_s.order_id = ${orderId} and (cs_dom_s.stage::text in ${[...CARRIER_HANDOFF_STAGES]} or cs_dom_s.picked_up_at is not null) and not coalesce(cs_dom_s.is_final, false) and cs_dom_s.stage::text not in ${[...CARE_TERMINAL_STAGES]})`;
+}
+export function isRunningHandoff(s: { stage: string | null; pickedUpAt?: Date | string | null; isFinal?: boolean | null }): boolean {
+  return isHandedOffToCarrier(s) && !s.isFinal && !(CARE_TERMINAL_STAGES as readonly string[]).includes(s.stage ?? "");
 }
 
 /**
@@ -200,7 +221,7 @@ async function loadCaseNotes(ids: string[]) {
 }
 
 /** Một lần gửi của đơn gắn vào case. `tracking` là MÃ CHUẨN, đúng chuỗi CSKH dán sang trang ĐVVC. */
-export type CsCaseShipment = { shipmentId: string; tracking: string; stage: string; isFinal: boolean; handedOff: boolean };
+export type CsCaseShipment = { shipmentId: string; tracking: string; stage: string; isFinal: boolean; handedOff: boolean; running: boolean };
 
 /**
  * ═══════════ MỌI LẦN GỬI CỦA ĐƠN GẮN VÀO CASE, VÀ LẦN ĐANG CHẠY LÀ CÁI NÀO ═══════════
@@ -244,7 +265,7 @@ async function loadCaseShipments(ids: string[]) {
        order by c.id, s.is_final asc, s.created_at desc`),
   );
   for (const r of rows) {
-    const item: CsCaseShipment = { shipmentId: r.shipment_id, tracking: r.tracking ?? r.shipment_id, stage: r.stage ?? "UNKNOWN", isFinal: Boolean(r.is_final), handedOff: isHandedOffToCarrier({ stage: r.stage, pickedUpAt: r.picked_up_at }) };
+    const item: CsCaseShipment = { shipmentId: r.shipment_id, tracking: r.tracking ?? r.shipment_id, stage: r.stage ?? "UNKNOWN", isFinal: Boolean(r.is_final), handedOff: isHandedOffToCarrier({ stage: r.stage, pickedUpAt: r.picked_up_at }), running: isRunningHandoff({ stage: r.stage, pickedUpAt: r.picked_up_at, isFinal: r.is_final }) };
     const cur = out.get(r.case_id) ?? { active: null, all: [] };
     cur.all.push(item);
     if (!cur.active && !item.isFinal) cur.active = item;
@@ -305,8 +326,8 @@ export async function listCsCases(params: ListParams) {
       /** Người THẬT đang cầm case — bot chỉ là người tạo, xem `lib/constants/cs-domain.ts`. */
       owner: humanAssignee(r.assignee),
       botTouched: Boolean(r.assignee) && CS_BOT_ASSIGNEES.includes(r.assignee),
-      // Miền theo thời điểm bàn giao: có lần gửi nào ĐVVC đã cầm hàng ⇒ Vận đơn (chủ shop chốt 25/09/2026).
-      domain: csDomainOf(r.kind, (kien?.all ?? []).some((k) => k.handedOff)),
+      // Miền: có kiện ĐVVC đã cầm VÀ CHƯA CHỐT ⇒ Vận đơn; mọi kiện đã chốt ⇒ CSKH (chủ shop chốt 25/09/2026).
+      domain: csDomainOf(r.kind, (kien?.all ?? []).some((k) => k.running)),
       shipment: ship,
       /** MỌI lần gửi của đơn, lần đang chạy đứng đầu — để CSKH thấy đủ mã, không phải một mã do máy chọn. */
       shipments: kien?.all ?? [],
