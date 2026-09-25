@@ -64,9 +64,45 @@ async function banDoTrachNhiem() {
   for (const r of rows) tomTat(`  ${String(r.n).padStart(5)}  ${(CS_KIND_LABEL[r.kind as keyof typeof CS_KIND_LABEL] ?? r.kind).padEnd(34)} ${r.tinh_trang}`);
 }
 
+/**
+ * CASE ĐANG MỞ TRÊN KIỆN ĐÃ CHỐT — chúng hiện ở "Cần care" của trang Vận đơn từ 25/09/2026.
+ *
+ * Câu hỏi quyết định luật đóng: case mở TRƯỚC hay SAU mốc ĐVVC chốt kiện (phát xong / hoàn về)?
+ * Mở trước ⇒ lời khách nói về một chuyến giao đã kết thúc. Mở sau ⇒ yêu cầu sau bán (khiếu nại, đổi,
+ * trả) còn nguyên. Kèm "có người thật chạm chưa" vì máy không đóng hộ việc người đang cầm. Chỉ đếm.
+ */
+async function caseTrenKienDaChot() {
+  const db = await getDb();
+  const rows = rowsOf<{ kind: string; chang: string; moc: string; cham: string; n: number }>(
+    await db.execute(sql`
+      select c.kind,
+             k.stage::text as chang,
+             case when k.moc is null then 'KHÔNG CÓ MỐC' when c.created_at <= k.moc then 'MỞ TRƯỚC MỐC CHỐT' else 'MỞ SAU MỐC CHỐT' end as moc,
+             case when (coalesce(c.assignee, '') <> '' and c.assignee <> 'Bot ERP') or c.assignee_user_id is not null
+                    or exists (select 1 from cs_case_events e where e.case_id = c.id and e.actor_id is not null)
+                  then 'CÓ NGƯỜI CHẠM' else 'CHƯA AI CHẠM' end as cham,
+             count(*)::int as n
+        from cs_cases c
+        join lateral (
+          select s.stage, coalesce(s.delivered_at, s.returned_at, s.vtp_status_date) as moc, s.is_final
+            from shipments s
+           where s.order_id = c.order_id
+           order by s.is_final asc, s.created_at desc
+           limit 1
+        ) k on k.is_final
+       where c.status in ('OPEN','IN_PROGRESS') and c.kind <> 'DELIVERY_FAILED'
+       group by 1, 2, 3, 4
+       order by 1, 2, 3, 4`),
+  );
+  tomTat("═══ CASE ĐANG MỞ TRÊN KIỆN ĐÃ CHỐT: loại × chặng cuối × mở trước/sau mốc chốt × người chạm ═══");
+  for (const r of rows) tomTat(`  ${String(r.n).padStart(5)}  ${(CS_KIND_LABEL[r.kind as keyof typeof CS_KIND_LABEL] ?? r.kind).padEnd(34)} ${r.chang.padEnd(10)} ${r.moc.padEnd(18)} ${r.cham}`);
+  if (!rows.length) tomTat("  (không có)");
+}
+
 async function main() {
   const apply = process.argv.includes("--apply");
   await banDoTrachNhiem();
+  await caseTrenKienDaChot();
   const bc = await staleReport(20);
   console.log("");
   tomTat(`═══ HÀNG ĐỢI CSKH ĐANG MỞ: ${bc.openTotal} case ═══`);
