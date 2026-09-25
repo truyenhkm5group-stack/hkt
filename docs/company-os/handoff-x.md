@@ -1,7 +1,8 @@
 # Company OS — Bàn giao Agent X (vòng phản hồi tồn kho → creative / quảng cáo)
 
-Nhánh `claude/cos-xa-ton-ve-creative` (từ `origin/main` `bf58dead`) · migration `0141_company_os_stock_feedback`
-(journal `idx` 141, `when` = 1790006301853 — số do Tech Lead cấp).
+Nhánh `claude/cos-xa-ton-ve-creative` (dựng lại trên nhánh của Agent T `claude/cos-topic-som` `11b7dbf5`, gốc
+`origin/main` `bf58dead`) · migration `0141_company_os_stock_feedback` (journal `idx` 141, `when` = 1790006301853, ngay
+sau `0140_company_os_early_topic` của T — số do Tech Lead cấp).
 
 Đặc tả §21 P4: *"Khi Slow / Dead: ERP tạo recommendation … Phải liên kết stock → Creative → Ads. Đây là feedback
 loop trở lại đầu quy trình."* Dựng thành **ĐỀ XUẤT người bấm** — không ghi Facebook, không đổi ngân sách, không gọi
@@ -15,7 +16,7 @@ máy vẽ ảnh.
 | Đọc nguồn cả shop MỘT lượt: `getStockFeedbackShop({ adsVisible, onlyProductId? })`, `getStockFeedbackForProduct`, `lastCreativeDatesByProduct` | `lib/queries/stock-feedback.ts` |
 | Cockpit: 2 loại `SCALE_STOCK_RISK` (ngay sau `ADS_CUT`) · `STOCK_PUSH` (cuối), nguồn `STOCK_FEEDBACK` | `lib/constants/owner-decisions.ts` (chỉ THÊM) |
 | Cockpit: `stockFeedbackSourceKey`, `stockFeedbackToItems`, bộ đọc `loadStockFeedback`; `SourceLoader` nhận thêm `kinds?` (loại người xem được thấy) | `lib/queries/owner-decisions.ts` (chỉ THÊM + truyền `kinds`) |
-| CHECK `recommendation_decisions_kind_check` nhận 11 loại | `drizzle/0141_company_os_stock_feedback.sql`, `db/schema.ts`, `_journal.json` |
+| CHECK `recommendation_decisions_kind_check` nhận đủ 12 loại (9 của H + `MODEL_EARLY_TOPIC` của T + 2 của X) | `drizzle/0141_company_os_stock_feedback.sql`, `db/schema.ts`, `_journal.json` |
 | Trang 360 — khối Đề xuất đọc `getStockFeedbackForProduct` qua `loadSource` | `app/(dashboard)/models/[id]/blocks.tsx` |
 | Vòng mẫu `?tab=duyet&product=<id>#gen-tay`: CHỌN SẴN ảnh sản phẩm thật của mã ở "Gen ảnh bằng tay" | `app/(dashboard)/marketing/creatives/{page,approve-tab,manual-gen-panel,manual-gen}.tsx` |
 | Kiểm thử | `tests/company-os-stock-feedback.test.ts` (đăng ký sau Agent L); sửa khẳng định có sẵn: `company-os-cockpit` (quyền `planning:view` nay thấy `STOCK_PUSH`; CHECK đọc migration MỚI NHẤT), `company-os-owner-digest` (nguồn giả thêm `STOCK_FEEDBACK`), `migration-upgrade-path` (+0141) |
@@ -56,9 +57,9 @@ mặc định cũ và nói ra. Không lượt vẽ nào được kích.
 
 1. **Cần migration 0141** (đề bài "không dự kiến"): CHECK `kind` của sổ phản ứng (0139) liệt kê đúng 9 loại — thiếu thì
    mọi cú Chấp nhận / Bỏ qua / Nhắc lại trên hai loại mới bị CSDL từ chối. Chỉ DROP + ADD CHECK, không đụng dòng nào.
-   **Gộp với Agent T** (cũng thêm một loại cockpit): migration ÁP SAU CÙNG phải liệt kê HỢP các loại;
-   `tests/company-os-cockpit.test.ts` nay so CHECK của migration MỚI NHẤT với `OWNER_DECISION_KINDS` nên sẽ ĐỎ nếu
-   thiếu — đừng nới bài đó, sửa migration cuối.
+   **Đã gộp với Agent T**: 0141 áp SAU 0140 và liệt kê HỢP (gồm `MODEL_EARLY_TOPIC`); bài kiểm của H/T so CHECK
+   của migration MUỘN NHẤT với `OWNER_DECISION_KINDS` nên sẽ ĐỎ nếu một nhánh sau thêm loại mà thiếu migration —
+   đừng nới bài đó, thêm migration mới liệt kê hợp. `migration-upgrade-path`: 0140 và 0141 cùng trong `MOI`.
 2. Link quảng cáo là `/ads?dim=product&period=30d` — trang /ads đọc `dim` (không phải `dimension`) và KHÔNG có ô lọc
    `q`; không thêm bộ lọc mới vào /ads trong gói này.
 3. Kế hoạch SX không có tham số lọc theo mã ⇒ link `/inventory/planning` (+ `/inventory/planning/orders` để lập đơn).
