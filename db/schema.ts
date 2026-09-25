@@ -3075,6 +3075,20 @@ export const adsDecisionLedger = pgTable(
     maturity: doublePrecision("maturity"),
     headroom: doublePrecision("headroom"),
     breakEvenBookedRoas: doublePrecision("break_even_booked_roas"),
+    /*
+      ─── Company OS · Agent F · ẢNH CHỤP DỰ PHÓNG (migration 0134) ───
+
+      Lợi nhuận TẠM TÍNH mà dòng đứng trên lúc kết luận — chép từ ĐÚNG dòng `buildDecisionRow` đã
+      dựng, không tính lại. Có nó thì vài tuần sau mới so được "hôm ấy máy dự phóng bao nhiêu" với
+      số đo khi cohort đã chín; thiếu nó thì mọi phép đo độ chính xác dự báo phải dựng lại quá khứ.
+
+      NULLABLE và KHÔNG BACKFILL (mục 35, 8.8): dòng ghi trước 0134 mang `NULL` = CHƯA CHỤP, không
+      phải 0 ₫. Dựng lại số của một ngày đã qua là tính trên dữ liệu đã chín thêm — một con số khác.
+    */
+    projectedProfitAfterAds: integer("projected_profit_after_ads"),
+    projectedHeadroom: doublePrecision("projected_headroom"),
+    /** Tỷ lệ GTC (%) đã áp cho phần đang treo của dòng. `NULL` = không có gì treo, hoặc dòng ghi trước 0134. */
+    appliedDeliveryRate: doublePrecision("applied_delivery_rate"),
 
     createdAt: createdAt(),
     updatedAt: updatedAt(),

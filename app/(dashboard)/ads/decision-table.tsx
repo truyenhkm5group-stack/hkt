@@ -17,6 +17,7 @@ import {
   ADS_SPEND_CLASS_LABEL,
   DECISION_BASIS_NOTE,
 } from "@/lib/constants/ads-decision";
+import { BREAK_EVEN_CPO_LABEL, BREAK_EVEN_CPO_NOTE } from "@/lib/constants/break-even-cpo";
 import type { AdsDecisionRow } from "@/lib/queries/ads-decision";
 import type { AdsDimension } from "@/lib/constants/ads-decision";
 import type { Stability } from "@/lib/marketing/decision-stability";
@@ -136,12 +137,36 @@ function Chain({ row }: { row: AdsDecisionRow }) {
  * ngang để thấy đúng cột quan trọng nhất — nên chỉ số phụ đi xuống tầng dưới của chính ô nó thuộc
  * về, thay vì chiếm một cột riêng.
  */
-function Cell({ top, bottom, tone }: { top: React.ReactNode; bottom?: React.ReactNode; tone?: string }) {
+function Cell({ top, bottom, extra, tone }: { top: React.ReactNode; bottom?: React.ReactNode; extra?: React.ReactNode; tone?: string }) {
   return (
     <div className="flex flex-col items-end leading-tight">
       <span className={cn("numeric whitespace-nowrap", tone)}>{top}</span>
       {bottom !== undefined ? <span className="numeric whitespace-nowrap text-[11px] text-muted-foreground">{bottom}</span> : null}
+      {extra !== undefined && extra !== null ? <span className="numeric whitespace-nowrap text-[11px]">{extra}</span> : null}
     </div>
+  );
+}
+
+/**
+ * ───────────── CPO HOÀ VỐN: TẦNG THỨ BA CỦA Ô "ĐƠN CHỐT", KHÔNG PHẢI CỘT MỚI ─────────────
+ *
+ * Con số đọc ĐÚNG căn cứ của khuyến nghị (`breakEvenCpoBasis`): dòng tạm tính so với CPO hoà vốn
+ * tạm tính (có dấu ≈), dòng số thật so với số đo. Cùng hàm với trần CPQC/đơn của tab Lợi nhuận
+ * danh nghĩa (`lib/constants/break-even-cpo.ts`), nhưng tử số là lợi nhuận GÓP — nhãn nói rõ.
+ * Thiếu một vế thì in "—", không in 0 (mục 42). ≤ 0 là câu trả lời thật: lỗ cả khi không QC.
+ */
+function BreakEvenCpo({ row }: { row: AdsDecisionRow }) {
+  const projected = row.breakEvenCpoBasis === "CONTRIBUTION_PROJECTED";
+  const be = projected ? row.projectedBreakEvenCpo : row.breakEvenCpo;
+  if (be === null) return <span className="text-muted-foreground">hoà vốn —</span>;
+  const tone = row.cpoHeadroom === null ? "text-muted-foreground" : row.cpoHeadroom >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400";
+  const title = `${BREAK_EVEN_CPO_LABEL[row.breakEvenCpoBasis]}: ${formatVND(be)} / đơn chốt.${
+    row.cpoHeadroom === null ? "" : ` Dư địa ${formatVND(row.cpoHeadroom, { sign: true })} / đơn so với CPO thực.`
+  } ${BREAK_EVEN_CPO_NOTE[row.breakEvenCpoBasis]}`;
+  return (
+    <span className={cn(tone, projected && "italic")} title={title}>
+      {be <= 0 ? "lỗ cả khi không QC" : `${projected ? "≈" : ""}≤ ${formatVND(be, { compact: true })}`}
+    </span>
   );
 }
 
@@ -189,6 +214,10 @@ function Detail({ row }: { row: AdsDecisionRow }) {
     { label: "ROAS tiền về", value: <Ratio value={row.cashRoas} /> },
     { label: "Biên lợi nhuận góp", value: row.marginRate === null ? <span className="text-muted-foreground">—</span> : formatPercent(row.marginRate * 100) },
     { label: "CAC giao thành công", value: row.cacDelivered === null ? <span className="text-muted-foreground">—</span> : formatVND(row.cacDelivered) },
+    { label: "CPO thực (chi / đơn chốt)", value: row.costPerOrder === null ? <span className="text-muted-foreground">—</span> : formatVND(row.costPerOrder) },
+    { label: BREAK_EVEN_CPO_LABEL.CONTRIBUTION_ACTUAL, value: row.breakEvenCpo === null ? <span className="text-muted-foreground">—</span> : formatVND(row.breakEvenCpo) },
+    { label: BREAK_EVEN_CPO_LABEL.CONTRIBUTION_PROJECTED, value: row.projectedBreakEvenCpo === null ? <span className="text-muted-foreground">—</span> : formatVND(row.projectedBreakEvenCpo) },
+    { label: "Dư địa mỗi đơn (theo căn cứ khuyến nghị)", value: row.cpoHeadroom === null ? <span className="text-muted-foreground">—</span> : formatVND(row.cpoHeadroom, { sign: true }) },
     { label: "Đơn chưa ngã ngũ", value: `${formatNumber(row.openOrders)} đơn` },
     { label: "Hiển thị", value: row.impressions === null ? <span className="text-muted-foreground">—</span> : formatNumber(row.impressions) },
     { label: "Click", value: row.clicks === null ? <span className="text-muted-foreground">—</span> : formatNumber(row.clicks) },
@@ -347,10 +376,12 @@ export function AdsDecisionTable({
               </TableHead>
               <TableHead className="text-right whitespace-nowrap">
                 <span className="inline-flex items-center gap-1">
-                  Đơn chốt · giá/đơn
+                  Đơn chốt · CPO · hoà vốn
                   <InfoHint>
                     Số đơn khách đã chốt (doanh số POS, CHƯA trừ hoàn) và chi phí quảng cáo cho một đơn chốt. Khác hẳn CAC giao thành công trong phần mở
-                    rộng — cái sau chia cho số đơn thật sự tới tay khách, nên luôn đắt hơn.
+                    rộng — cái sau chia cho số đơn thật sự tới tay khách, nên luôn đắt hơn. Tầng ba là CPO HOÀ VỐN theo LỢI NHUẬN GÓP (≤ số này thì dòng
+                    còn lãi góp; xanh = CPO thực đang dưới mốc, đỏ = đang vượt) — đọc theo đúng căn cứ của khuyến nghị (≈ = tạm tính). Nó chưa trừ vận
+                    hành, cố định, thuế nên luôn RỘNG hơn “Trần CPQC/đơn” ở tab Lợi nhuận danh nghĩa — cùng một công thức, khác tử số.
                   </InfoHint>
                 </span>
               </TableHead>
@@ -437,7 +468,7 @@ export function AdsDecisionTable({
                       />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Cell top={formatNumber(row.bookedOrders)} bottom={row.costPerOrder === null ? "—" : formatVND(row.costPerOrder)} />
+                      <Cell top={formatNumber(row.bookedOrders)} bottom={row.costPerOrder === null ? "—" : formatVND(row.costPerOrder)} extra={<BreakEvenCpo row={row} />} />
                     </TableCell>
                     <TableCell className="text-right">
                       {/*

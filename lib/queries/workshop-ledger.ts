@@ -172,8 +172,8 @@ function buildBatch(b: BatchRecord, deliveries: DeliveryRecord[], payments: Paym
   };
 }
 
-/** Giá nhập bình quân trên phiếu nhập (RECEIPT) gần nhất của từng mã — chỉ đọc. */
-async function latestReceiptCost(productIds: string[]): Promise<Map<string, { unitCost: number; at: Date }>> {
+/** Giá nhập bình quân trên phiếu nhập (RECEIPT) gần nhất của từng mã — chỉ đọc. Báo cáo chênh lệch giá SX dùng lại cho mã chỉ có lệnh SX. */
+export async function latestReceiptCost(productIds: string[]): Promise<Map<string, { unitCost: number; at: Date }>> {
   const out = new Map<string, { unitCost: number; at: Date }>();
   if (!productIds.length) return out;
   const db = await getDb();
