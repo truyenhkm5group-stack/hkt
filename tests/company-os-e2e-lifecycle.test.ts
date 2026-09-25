@@ -529,12 +529,11 @@ async function chay(db: Db, keepModels: Set<string>) {
   assert.equal(sauNhap.totals.actualStock, 30);
   const tomTatSx = await getModelProductionSummary(M);
   assert.deepEqual(tomTatSx?.openOrders.map((o) => [o.code, o.plannedQty, o.receivedViaLinkedReceipts]), [[`${P}PO-1`, 30, 30]], "tóm tắt SX đọc được số đã nhận qua phiếu nối lệnh (cột của Agent D)");
-  const dangSxKhiDaNhan = variantOf(sauNhap, V_M).inProduction + variantOf(sauNhap, V_L).inProduction;
-  if (dangSxKhiDaNhan !== 0) {
-    console.log(
-      `  ⚠ CHƯA ĐẠT: lệnh ${P}PO-1 đã nhận đủ 30/30 qua phiếu nối lệnh nhưng "đang sản xuất" vẫn đếm ${dangSxKhiDaNhan} (openPoQtyByVariant chỉ nhìn trạng thái SENT, không trừ phiếu nhập đã nối) — cùng 30 món nằm ở cả tồn thực tế lẫn đang sản xuất cho tới khi người bấm "Đã nhận". Xem docs/company-os/handoff-qa.md.`,
-    );
-  }
+  // B1 (đã sửa): phiếu NHẬP nối lệnh trừ khỏi "đang sản xuất" ngay — không chờ ai bấm "Đã nhận",
+  // nếu không cùng 30 món nằm ở cả tồn thực tế lẫn đang sản xuất.
+  assert.equal(variantOf(sauNhap, V_M).inProduction, 0, "M: lệnh đặt 20, đã nhập 20 qua phiếu nối lệnh ⇒ không còn đang sản xuất");
+  assert.equal(variantOf(sauNhap, V_L).inProduction, 0, "L: lệnh đặt 10, đã nhập 10 ⇒ 0");
+  assert.equal(sauNhap.totals.inProduction, 0, "cùng một món không được nằm ở cả tồn thực tế lẫn đang sản xuất");
   // Người bấm "Đã nhận" trên lệnh (như `setProductionStatus` ghi) ⇒ lệnh rời "đang sản xuất".
   await db.update(schema.productionOrders).set({ status: "RECEIVED", receivedAt: tick(), receivedByUserId: U.kho, receivedBy: KHO.label, updatedAt: new Date() }).where(eq(schema.productionOrders.id, `${P}po1`));
   clearMemo();
