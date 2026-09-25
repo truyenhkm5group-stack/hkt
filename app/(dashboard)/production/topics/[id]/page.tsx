@@ -6,6 +6,9 @@ import { TopicMessageForm, TopicStatusControl } from "@/app/(dashboard)/producti
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
+import { describeTopicOpenContext } from "@/lib/constants/early-topic";
+import { MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL } from "@/lib/constants/model-lifecycle";
+import { MODEL_SIGNAL_LABEL } from "@/lib/constants/model-signal";
 import { EMPTY_REQUIREMENTS, TOPIC_MESSAGE_KIND_LABEL, type TopicEvidenceSnapshot, type TopicMessageKind, type TopicRequirements } from "@/lib/constants/production-os";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getTopicDetail, listSupplierOptions } from "@/lib/queries/production-os";
@@ -25,6 +28,10 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
   const canApprove = can(user, "production:approve");
   const req: TopicRequirements = { ...EMPTY_REQUIREMENTS, ...(d.topic.requirements as Partial<TopicRequirements>) };
   const ev = d.topic.evidenceSnapshot as Partial<TopicEvidenceSnapshot>;
+  // Bối cảnh lúc mở (Agent T): topic mở SỚM (mẫu chưa thắng — luồng song song) hay không. Ảnh chụp cũ
+  // không mang bối cảnh ⇒ không nhãn, không đoán.
+  const openCtx = describeTopicOpenContext(ev);
+  const hasCtx = openCtx !== null;
 
   return (
     <div className="space-y-5">
@@ -35,6 +42,14 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
         actions={
           <div className="flex items-center gap-2">
             <TopicStatusBadge status={d.topic.status} />
+            {openCtx?.early ? (
+              <span
+                className="rounded-md bg-sky-100 px-2 py-0.5 text-xs font-semibold text-sky-800 dark:bg-sky-950/60 dark:text-sky-300"
+                title="Topic mở khi mẫu CHƯA thắng (quy tắc chủ shop 25/09/2026): xưởng báo giá, làm mẫu song song với test quảng cáo. Vòng đời mẫu không đổi khi topic mở — khai THẮNG vẫn là việc của người."
+              >
+                {openCtx.label}
+              </span>
+            ) : null}
             {d.model ? (
               <Link href={`/models/${d.model.id}`} className="text-sm text-primary hover:underline">
                 Trang mẫu
@@ -119,6 +134,12 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
                 { label: "Đơn lên 30 ngày", value: formatNumber(ev.orders30d ?? null) },
                 { label: "Đơn lên từ trước tới nay", value: formatNumber(ev.ordersTotal ?? null) },
                 { label: "Chi quảng cáo 30 ngày", value: formatVND(ev.adSpend30d ?? null) },
+                ...(hasCtx
+                  ? [
+                      { label: "Tín hiệu mẫu lúc mở", value: ev.signalAtOpen ? MODEL_SIGNAL_LABEL[ev.signalAtOpen.signal] : (ev.signalErrorAtOpen ?? "—") },
+                      { label: "Vòng đời lúc mở", value: ev.lifecycleAtOpen ? MODEL_STATE_LABELS[ev.lifecycleAtOpen] : MODEL_STATE_UNDECLARED_LABEL },
+                    ]
+                  : [{ label: "Bối cảnh lúc mở", value: "— (topic mở trước khi ERP chụp tín hiệu mẫu)" }]),
               ]}
             />
             <p className="mt-2 text-xs text-muted-foreground">Đây là ẢNH CHỤP, không cập nhật theo ngày — số hôm nay xem ở trang mẫu.</p>

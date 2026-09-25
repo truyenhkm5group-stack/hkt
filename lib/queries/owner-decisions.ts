@@ -6,6 +6,7 @@ import { decideScope } from "@/lib/auth/scope-guard";
 import { APPROVAL_GROUP_LABEL, type ApprovalGroup } from "@/lib/constants/approval";
 import { DECISION_LABEL, type InventoryDecisionKind } from "@/lib/constants/inventory-decision";
 import { BEFORE_PRODUCTION_DISCUSSION } from "@/lib/constants/model-360";
+import { suggestsTopicOpening } from "@/lib/constants/early-topic";
 import { MODEL_SIGNAL_HINT, MODEL_SIGNAL_LABEL, SIGNAL_SOURCE_LABEL, type SignalSource } from "@/lib/constants/model-signal";
 import {
   allowedKinds,
@@ -275,6 +276,39 @@ export function modelScaleToItems(cands: readonly ModelSignalBatchRow[]): OwnerD
   }));
 }
 
+/**
+ * ─── MẪU TRIỂN VỌNG — CÂN NHẮC MỞ TOPIC SẢN XUẤT SỚM (Agent T · quy tắc chủ shop 25/09/2026) ───
+ *
+ * Cùng lô tín hiệu với MODEL_SCALE, cổng đi qua hàm thuần dùng chung với trang 360 (`suggestsTopicOpening`):
+ * tín hiệu TRIỂN VỌNG · trạng thái khai còn trước “Bàn sản xuất” (Loại / Ngừng không vào) · KHÔNG topic đang
+ * mở (số topic CHƯA BIẾT ⇒ không vào). Khoá nguồn dùng lại `modelWinnerSourceKey` — tín hiệu nằm trong
+ * khoá nên khoá TRIỂN VỌNG không bao giờ trùng khoá THẮNG của cùng mẫu; mẫu lên THẮNG thì dòng này rời
+ * hàng đợi và dòng MODEL_SCALE thay chỗ.
+ */
+export function modelEarlyTopicCandidates(rows: readonly ModelSignalBatchRow[]): ModelSignalBatchRow[] {
+  return rows.filter((r) => r.signal.signal === "PROMISING" && suggestsTopicOpening(r.signal.signal, r.model.state, r.openProductionTopics) !== null);
+}
+
+export function modelEarlyTopicToItems(cands: readonly ModelSignalBatchRow[]): OwnerDecisionItem[] {
+  return cands.map(({ model, signal }) => ({
+    kind: "MODEL_EARLY_TOPIC" as const,
+    sourceKey: modelWinnerSourceKey(model.id, signal),
+    what: `Mẫu ${model.code} · tín hiệu ${MODEL_SIGNAL_LABEL.PROMISING.toUpperCase()} — cân nhắc mở topic sản xuất sớm`,
+    why: [
+      `${MODEL_SIGNAL_HINT.PROMISING} (${signal.periodLabel.toLowerCase()})`,
+      "Mở topic sớm để xưởng báo giá, làm mẫu song song với test quảng cáo; vòng đời mẫu không đổi khi topic mở.",
+      ...signal.conflicts.map((c) => `Lưu ý: ${c}`),
+    ].join(" "),
+    data: signal.reasons.map((r) => ({ label: SIGNAL_SOURCE_LABEL[r.source], value: r.vote === "ABSENT" ? null : r.verdict })),
+    impact: {
+      amountVnd: null,
+      basis: "Chưa có con số tiền đo được cho quyết định mở topic sớm — báo giá xưởng chưa phải cam kết vốn.",
+    },
+    action: { label: "Mở trang mẫu", href: `/models/${model.id}` },
+    modelId: model.id,
+  }));
+}
+
 const INVENTORY_KIND: Partial<Record<InventoryDecisionKind, OwnerDecisionKind>> = {
   STOCKOUT_RISK: "INVENTORY_STOCKOUT",
   REORDER: "INVENTORY_REORDER",
@@ -385,7 +419,7 @@ async function loadAdsCut({ now }: { now: Date }): Promise<SourceResult> {
 async function loadModelScale(): Promise<SourceResult> {
   const batch = await getModelSignalsBatch(ADS_PERIOD());
   if (batch.topicsError) throw new Error(batch.topicsError);
-  return { items: modelScaleToItems(modelWinnerCandidates(batch.rows)) };
+  return { items: [...modelScaleToItems(modelWinnerCandidates(batch.rows)), ...modelEarlyTopicToItems(modelEarlyTopicCandidates(batch.rows))] };
 }
 
 async function loadInventory(): Promise<SourceResult> {

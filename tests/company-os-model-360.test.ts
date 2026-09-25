@@ -282,12 +282,20 @@ function testSuggestions() {
   assert.equal(xa.length, 1);
   assert.deepEqual(xa[0].links.map((l) => l.href), ["/outreach", "/marketing/creatives?tab=thu-vien&mau=p"]);
 
-  // Tín hiệu: chỉ THẮNG, và chỉ khi vòng đời chưa tới bước trao đổi sản xuất; lý do đủ dài để lưu được.
+  // Tín hiệu: THẮNG (mở trao đổi + chuyển vòng đời) hoặc TRIỂN VỌNG (mở topic SỚM, KHÔNG chuyển vòng đời —
+  // quy tắc chủ shop 25/09/2026, Agent T), và chỉ khi vòng đời chưa tới bước trao đổi sản xuất; lý do đủ dài.
   for (const s of MODEL_SIGNALS) {
     for (const st of [null, ...MODEL_STATES] as (ModelState | null)[]) {
       const out = deriveModelSuggestions({ ...base, declaredState: st, signal: { signal: s, summary: "Quảng cáo: Tăng ngân sách · Mẫu mã: Đáng nhân bản" } });
-      const co = s === "WINNER" && (st === null || ["IDEA", "CREATIVE", "ADS_TESTING", "WINNER"].includes(st));
-      assert.equal(out.length, co ? 1 : 0, `tín hiệu ${s} · trạng thái ${st}`);
+      const truoc = st === null || ["IDEA", "CREATIVE", "ADS_TESTING", "WINNER"].includes(st);
+      const co = s === "WINNER" && truoc;
+      const som = s === "PROMISING" && truoc;
+      assert.equal(out.length, co || som ? 1 : 0, `tín hiệu ${s} · trạng thái ${st}`);
+      if (som) {
+        assert.equal(out[0].transition, null, "TRIỂN VỌNG ⇒ luồng song song, KHÔNG đề xuất chuyển vòng đời");
+        assert.equal(out[0].key, st === "WINNER" ? "topic-open" : "topic-open-early", "đã khai THẮNG thì không gọi là 'sớm'");
+        assert.equal(out[0].links.length, 0, "không quyền production:write ⇒ không link tạo topic");
+      }
       if (co) {
         assert.equal(out[0].transition?.to, "PRODUCTION_DISCUSSION");
         assert.ok((out[0].transition?.reason.trim().length ?? 0) >= MODEL_REASON_MIN_LENGTH, "lý do điền sẵn phải qua được kiểm tra lý do");

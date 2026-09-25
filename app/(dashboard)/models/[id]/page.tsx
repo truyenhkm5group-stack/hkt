@@ -7,6 +7,7 @@ import {
   EconomicsBlock,
   OrdersBlock,
   ProductionBlock,
+  productionOnce,
   ReturnsDispositionBlock,
   SignalBadge,
   SignalBlock,
@@ -28,6 +29,7 @@ import { can, requirePermission, type SessionUser } from "@/lib/auth/session";
 import { DESIGN_STATUS_LABEL, type DesignStatus } from "@/lib/constants/creative-loop";
 import { DOMAIN_ACTOR_KIND_LABEL } from "@/lib/constants/domain-events";
 import { loadSource, MODEL_360_BLOCK_ACCESS, mergeTimelines, type Model360Block } from "@/lib/constants/model-360";
+import { winnerFollowUp } from "@/lib/constants/early-topic";
 import { evidenceUnknowns, MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL, MODEL_TIMELINE_DIMENSION_LABEL, MODEL_TIMELINE_DIMENSION_TONE, observeModelStage } from "@/lib/constants/model-lifecycle";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getModelLinkedIdeas, ideaTimelineEntries } from "@/lib/queries/model-360";
@@ -98,6 +100,10 @@ export default async function ModelDetailPage({ params, searchParams }: { params
   const designLabel = model.design ? (DESIGN_STATUS_LABEL[model.design.status as DesignStatus] ?? model.design.status) : null;
   const linkedIdeas = ideas.ok ? ideas.data : [];
   const fullTimeline = mergeTimelines(timeline, ideaTimelineEntries(linkedIdeas));
+  // Lượt chuyển tiếp sau khi khai THẮNG (Agent T): chỉ cần khi người xem khai được, đọc được sản xuất, và
+  // mẫu chưa ở THẮNG. Đọc hỏng ⇒ không đề xuất (ô đổi trạng thái vẫn dùng được như cũ).
+  const production = canWrite && allowed.PRODUCTION && model.state !== "WINNER" ? await productionOnce(model.id) : null;
+  const followUp = production && production.ok ? winnerFollowUp(production.data) : null;
 
   const ctx: BlockCtx = {
     modelId: model.id,
@@ -182,7 +188,7 @@ export default async function ModelDetailPage({ params, searchParams }: { params
             <div className="flex flex-wrap items-center gap-2 text-sm">
               Hiện tại: <ModelStateBadge state={model.state} />
             </div>
-            {canWrite ? <TransitionControl modelId={model.id} state={model.state} /> : <p className="text-xs text-muted-foreground">Cần quyền &ldquo;Vòng đời mẫu: khai &amp; đồng bộ&rdquo; để đổi trạng thái.</p>}
+            {canWrite ? <TransitionControl modelId={model.id} state={model.state} winnerFollowUp={followUp} /> : <p className="text-xs text-muted-foreground">Cần quyền &ldquo;Vòng đời mẫu: khai &amp; đồng bộ&rdquo; để đổi trạng thái.</p>}
             <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-sm">
               <span>Người phụ trách:</span>
               {canWrite ? <OwnerControl modelId={model.id} ownerUserId={model.ownerUserId} options={ownerOptions} /> : <span className={model.ownerName ? "" : "text-muted-foreground"}>{model.ownerName ?? "—"}</span>}

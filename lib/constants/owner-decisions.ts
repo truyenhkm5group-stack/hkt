@@ -15,7 +15,8 @@ import { formatVND } from "@/lib/format";
  * mà màn hình chủ của nó đang dùng: yêu cầu duyệt (`listApprovalRequests`), mẫu chờ duyệt và topic chờ
  * chốt (hai adapter của `/work`), lệnh SX quá hẹn (`getPurchasingReport`), cắt quảng cáo
  * (`adaptAdsDecisions` + `getAdsDecision`), mẫu THẮNG chưa mở topic sản xuất (`getModelSignalsBatch` —
- * tín hiệu mẫu đầy đủ của A2 đọc theo lô), và ba kết luận tồn kho (`getInventoryDecisionReport` →
+ * tín hiệu mẫu đầy đủ của A2 đọc theo lô) và mẫu TRIỂN VỌNG nên cân nhắc mở topic SỚM (cùng lô, Agent T),
+ * và ba kết luận tồn kho (`getInventoryDecisionReport` →
  * `decideInventory`, đã trừ hàng đặt xưởng).
  *
  * Người ĐÓNG việc ở màn hình chủ của nó — không có nút "xong" ở đây. Ba nút của cockpit chỉ GHI LẠI
@@ -38,6 +39,7 @@ export const OWNER_DECISION_KINDS = [
   "PRODUCTION_LATE",
   "INVENTORY_REORDER",
   "MODEL_SCALE",
+  "MODEL_EARLY_TOPIC",
   "INVENTORY_CLEARANCE",
 ] as const;
 export type OwnerDecisionKind = (typeof OWNER_DECISION_KINDS)[number];
@@ -136,6 +138,15 @@ export const OWNER_DECISION_KIND_SPEC: Record<OwnerDecisionKind, OwnerDecisionKi
     requires: ["models:view", "expenses:view"],
     scopeResource: "ADS",
     hint: "Mẫu có tín hiệu THẮNG trong 30 ngày (tín hiệu mẫu của trang 360: quảng cáo có lãi VÀ phân loại mẫu mã tốt, không nguồn nào nói ngược — getModelSignalsBatch), chưa có topic sản xuất đang mở và trạng thái khai còn trước “Bàn sản xuất”. Mỗi ô số liệu là NHÃN phán quyết của một nguồn. Bỏ qua có hiệu lực tới khi tín hiệu hoặc một phán quyết nguồn đổi.",
+  },
+  MODEL_EARLY_TOPIC: {
+    label: "Mẫu TRIỂN VỌNG — cân nhắc mở topic sản xuất sớm",
+    // Cùng nguồn đọc với MODEL_SCALE (một lượt `getModelSignalsBatch` sinh cả hai loại) — cùng quyền.
+    source: "MODEL_SCALE",
+    home: "/models",
+    requires: ["models:view", "expenses:view"],
+    scopeResource: "ADS",
+    hint: "Quy tắc chủ shop 25/09/2026: topic sản xuất mở được cho mẫu có chỉ số tốt mà CHƯA thắng. Mẫu có tín hiệu TRIỂN VỌNG trong 30 ngày (getModelSignalsBatch — thiếu một nguồn thị trường, hoặc mới thắng ở vòng thử creative / thiết kế), chưa có topic sản xuất đang mở, trạng thái khai còn trước “Bàn sản xuất” (Loại / Ngừng không vào). Topic mở sớm chạy SONG SONG với test quảng cáo — vòng đời mẫu không đổi. Ưu tiên thấp hơn mẫu THẮNG; không gửi tin gấp, chỉ vào bản tin sáng. Bỏ qua có hiệu lực tới khi tín hiệu hoặc một phán quyết nguồn đổi.",
   },
   INVENTORY_CLEARANCE: {
     label: "Nên xả / dừng",

@@ -294,6 +294,7 @@ import { testCompanyOsE2eLifecycle, testCompanyOsE2ePure } from "./company-os-e2
 import { testCompanyOsCockpitDb, testCompanyOsCockpitPure } from "./company-os-cockpit.test";
 import { testCompanyOsSignalBatchDb, testCompanyOsSignalBatchSource } from "./company-os-signal-batch.test";
 import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./company-os-owner-digest.test";
+import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
@@ -1924,6 +1925,9 @@ async function main() {
   // Company OS · Agent L: "Cần anh quyết" → nhóm Lark Quản lý. Đường gửi là hàm giả (không gọi mạng); tự dọn khoá settings `owner.digest*`.
   testCompanyOsOwnerDigestPure();
   await testCompanyOsOwnerDigestDb(db);
+  // Company OS · Agent T: topic sản xuất mở SỚM cho mẫu TRIỂN VỌNG (quy tắc chủ shop 25/09/2026).
+  testCompanyOsEarlyTopicPure();
+  await testCompanyOsEarlyTopicDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();

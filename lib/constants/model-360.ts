@@ -2,6 +2,7 @@ import { ADS_ACTION_LABEL, type AdsAction } from "@/lib/constants/ads-decision";
 import { DECISION_LABEL, type InventoryDecisionKind } from "@/lib/constants/inventory-decision";
 import { MODEL_STATE_LABELS, type ModelState } from "@/lib/constants/model-lifecycle";
 import { MODEL_SIGNAL_LABEL, type ModelSignal, type SignalReason, type SignalSource } from "@/lib/constants/model-signal";
+import { BEFORE_PRODUCTION_DISCUSSION_STATES, topicOpeningMode, type WinnerFollowUp } from "@/lib/constants/early-topic";
 import { formatNumber, formatVND, MISSING_TEXT } from "@/lib/format";
 
 /**
@@ -153,14 +154,22 @@ export type SuggestionInput = {
    * Topic sản xuất của mẫu (Agent C · `getModelProductionSummary`). `null` = không đọc được / người xem
    * không có quyền xem sản xuất ⇒ CHƯA BIẾT có topic hay chưa.
    */
-  production: { openTopics: number } | null;
+  production: {
+    openTopics: number;
+    /**
+     * Sản xuất đã đi tới đâu (`winnerFollowUp` — lib/constants/early-topic.ts, Agent T). Mẫu ĐÃ KHAI THẮNG mà
+     * sản xuất đi trước (topic mở sớm, giá thành, mẫu thử…) ⇒ đề xuất chuyển tiếp tới đúng chỗ đó thay cho
+     * "mở trao đổi sản xuất". Không truyền / `null` = sản xuất chưa bắt đầu.
+     */
+    winnerFollowUp?: WinnerFollowUp | null;
+  } | null;
   /** Người xem có `production:write` ⇒ đề xuất kèm link "Tạo topic sản xuất". */
   canCreateTopic: boolean;
   periodQuery: string;
 };
 
-/** Trạng thái khai mà ở đó "mở trao đổi sản xuất" là bước còn phía trước. */
-export const BEFORE_PRODUCTION_DISCUSSION: readonly (ModelState | null)[] = [null, "IDEA", "CREATIVE", "ADS_TESTING", "WINNER"];
+/** Trạng thái khai mà ở đó "mở trao đổi sản xuất" là bước còn phía trước (một bản — lib/constants/early-topic.ts). */
+export const BEFORE_PRODUCTION_DISCUSSION: readonly (ModelState | null)[] = BEFORE_PRODUCTION_DISCUSSION_STATES;
 
 const sum = (xs: (number | null)[]): number | null => (xs.some((x) => x === null) ? null : xs.reduce<number>((a, b) => a + (b as number), 0));
 
@@ -228,23 +237,69 @@ export function deriveModelSuggestions(i: SuggestionInput): ModelSuggestion[] {
     }
   }
 
-  // ── 3. Tín hiệu THẮNG mà vòng đời chưa tới bước trao đổi sản xuất ⇒ đề xuất CHUYỂN trạng thái ──
-  //    Đã có topic ĐANG MỞ ⇒ không đề xuất mở trao đổi lần nữa: việc đó đang diễn ra ở /production.
+  // ── 3. Mở topic sản xuất ──
+  //    · Đã KHAI THẮNG mà sản xuất đi trước (topic mở sớm, giá thành, mẫu thử…) ⇒ đề xuất CHUYỂN TIẾP vòng
+  //      đời tới đúng chỗ sản xuất đang đứng (Agent T) — thay cho "mở trao đổi", việc đó đã xảy ra rồi.
+  //    · Tín hiệu THẮNG, vòng đời chưa tới bước trao đổi sản xuất ⇒ đề xuất mở trao đổi + CHUYỂN trạng thái.
+  //    · Tín hiệu TRIỂN VỌNG (chỉ số tốt, chưa thắng — quy tắc chủ shop 25/09/2026) ⇒ đề xuất mở topic SỚM,
+  //      luồng song song: KHÔNG kèm chuyển vòng đời (mẫu vẫn đang test quảng cáo).
+  //    Đã có topic ĐANG MỞ ⇒ không đề xuất mở lần nữa: việc đó đang diễn ra ở /production.
   const topicDangMo = (i.production?.openTopics ?? 0) > 0;
-  if (i.signal && i.signal.signal === "WINNER" && BEFORE_PRODUCTION_DISCUSSION.includes(i.declaredState) && !topicDangMo) {
+  const followUp = i.production?.winnerFollowUp ?? null;
+  const topicHref = `/production/topics/new?model=${encodeURIComponent(i.modelId)}`;
+  const topicCaveat = i.production === null ? "Không đọc được topic sản xuất của mẫu (hoặc bạn không có quyền xem) — có thể đã có topic đang mở." : null;
+  const stateText = i.declaredState ? MODEL_STATE_LABELS[i.declaredState] : "Chưa khai";
+  const mode = i.signal ? topicOpeningMode(i.signal.signal, i.declaredState) : null;
+  if (i.declaredState === "WINNER" && followUp) {
     out.push({
-      key: "lifecycle-production-discussion",
+      key: "lifecycle-production-ahead",
       source: "SIGNAL",
-      what: "Cân nhắc mở trao đổi sản xuất cho mẫu",
-      why: `Tín hiệu mẫu là ${MODEL_SIGNAL_LABEL.WINNER} trong khi trạng thái khai là ${i.declaredState ? MODEL_STATE_LABELS[i.declaredState] : "Chưa khai"}.`,
-      data: i.signal.summary,
-      links: i.canCreateTopic ? [{ label: "Tạo topic sản xuất", href: `/production/topics/new?model=${encodeURIComponent(i.modelId)}` }] : [],
-      transition: {
-        to: "PRODUCTION_DISCUSSION",
-        reason: `Tín hiệu mẫu: THẮNG (${i.signal.summary}) — mở trao đổi sản xuất.`,
-      },
-      caveat: i.production === null ? "Không đọc được topic sản xuất của mẫu (hoặc bạn không có quyền xem) — có thể đã có topic đang mở." : null,
+      what: `Sản xuất đã đi trước — chuyển vòng đời tới “${MODEL_STATE_LABELS[followUp.to]}”`,
+      why: `Mẫu đã khai ${MODEL_STATE_LABELS.WINNER} nhưng miền sản xuất đã tới “${MODEL_STATE_LABELS[followUp.to]}” (topic mở sớm chạy song song với test quảng cáo). Người bấm chuyển — không có gì tự áp.`,
+      data: followUp.reason,
+      links: [{ label: "Bàn sản xuất của mẫu", href: `/production/models/${encodeURIComponent(i.modelId)}` }],
+      transition: { to: followUp.to, reason: followUp.reason },
+      caveat: null,
     });
+  } else if (i.signal && mode && !topicDangMo) {
+    if (i.signal.signal === "WINNER") {
+      out.push({
+        key: "lifecycle-production-discussion",
+        source: "SIGNAL",
+        what: "Cân nhắc mở trao đổi sản xuất cho mẫu",
+        why: `Tín hiệu mẫu là ${MODEL_SIGNAL_LABEL.WINNER} trong khi trạng thái khai là ${stateText}.`,
+        data: i.signal.summary,
+        links: i.canCreateTopic ? [{ label: "Tạo topic sản xuất", href: topicHref }] : [],
+        transition: {
+          to: "PRODUCTION_DISCUSSION",
+          reason: `Tín hiệu mẫu: THẮNG (${i.signal.summary}) — mở trao đổi sản xuất.`,
+        },
+        caveat: topicCaveat,
+      });
+    } else if (mode === "EARLY") {
+      out.push({
+        key: "topic-open-early",
+        source: "SIGNAL",
+        what: "Cân nhắc mở topic sản xuất SỚM — luồng song song với test quảng cáo",
+        why: `Tín hiệu mẫu là ${MODEL_SIGNAL_LABEL.PROMISING} (chỉ số tốt, chưa thắng) trong khi trạng thái khai là ${stateText}. Quy tắc chủ shop 25/09/2026: mẫu tiềm năng được mở topic để xưởng báo giá, làm mẫu song song — vòng đời mẫu KHÔNG đổi khi topic mở; khai THẮNG vẫn là việc của người.`,
+        data: i.signal.summary,
+        links: i.canCreateTopic ? [{ label: "Mở topic sản xuất sớm", href: topicHref }] : [],
+        transition: null,
+        caveat: topicCaveat,
+      });
+    } else {
+      // TRIỂN VỌNG nhưng người ĐÃ khai THẮNG: mở topic là bước tiếp thường (vòng đời tự đi theo sang “Bàn sản xuất”).
+      out.push({
+        key: "topic-open",
+        source: "SIGNAL",
+        what: "Cân nhắc mở topic sản xuất cho mẫu",
+        why: `Trạng thái khai là ${MODEL_STATE_LABELS.WINNER}; tín hiệu mẫu hiện là ${MODEL_SIGNAL_LABEL.PROMISING}. Mở topic thì vòng đời tự đi theo sang “${MODEL_STATE_LABELS.PRODUCTION_DISCUSSION}”.`,
+        data: i.signal.summary,
+        links: i.canCreateTopic ? [{ label: "Tạo topic sản xuất", href: topicHref }] : [],
+        transition: null,
+        caveat: topicCaveat,
+      });
+    }
   }
   return out;
 }
