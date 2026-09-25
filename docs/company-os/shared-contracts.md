@@ -100,7 +100,7 @@ NGHIỆP VỤ) · `recorded_at` default now(). Chỉ mục: `(model_id, occurred
 | `stock_receipt.linked_production` | D | RESERVED (D chỉ thêm cột ở Wave 1) |
 | `return.disposition_set` | E | LIVE |
 | `approval.executed` | G | RESERVED |
-| `recommendation.decided` | H | RESERVED |
+| `recommendation.decided` | H | LIVE |
 
 ## 3. Việc (`work_items`) — nguồn mới
 
@@ -256,9 +256,11 @@ hằng số đang chạy), chỉ nút MỞ. Route: `/production` · `/production
 
 Mọi hàm trên CHỈ gọi truy vấn có sẵn của miền mình — không công thức mới cho một con số đã có.
 
-## 7. Cấp số migration (Wave 1)
+## 7. Số migration đã dùng (theo THỨ TỰ GỘP, không theo thứ tự cấp)
 
-`0131` A · `0132` D · `0133` F · `0134` G. B không cần migration (nếu cần: `0135`). Kiểm
+`0131` A · `0132` D · `0133` G · `0134` F · `0135` C · `0136` E · `0137` A2 · `0138` H. B không có migration.
+Drizzle bỏ qua VĨNH VIỄN migration có `when` nhỏ hơn migration đã áp, nên số hiệu và `when` phải tăng
+cùng thứ tự gộp — G và F đã đổi số cho nhau lúc tích hợp vì lý do đó. Kiểm
 `git ls-tree --name-only origin/main drizzle/ | tail -3` trước khi đặt tên; trùng thì báo Tech Lead.
 
 ## 8. Sở hữu tệp (không sửa tệp của agent khác)
