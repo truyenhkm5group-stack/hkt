@@ -45,7 +45,7 @@ export type LedgerWriteResult = {
   written: { dimension: AdsDimension; rows: number; actionable: number }[];
 };
 
-function rowToValues(row: AdsDecisionRow, decisionDay: string, periodFrom: string, periodTo: string) {
+export function ledgerRowValues(row: AdsDecisionRow, decisionDay: string, periodFrom: string, periodTo: string) {
   return {
     decisionDay,
     dimension: row.dimension,
@@ -78,8 +78,60 @@ function rowToValues(row: AdsDecisionRow, decisionDay: string, periodFrom: strin
     maturity: row.maturity,
     headroom: row.headroom,
     breakEvenBookedRoas: row.breakEvenBookedRoas,
+    /*
+      ẢNH CHỤP DỰ PHÓNG (Company OS · F, migration 0134) — chép từ CHÍNH dòng vừa kết luận, không
+      tính lại. Ghi cho MỌI dòng, cả dòng căn cứ `ACTUAL`: khi ấy nó bằng số đo cộng phần treo nhỏ,
+      và vẫn là con số cần có để đo sai số dự báo về sau. Không biết số chi ⇒ lợi nhuận sau QC là
+      CHƯA BIẾT ⇒ `null`, không phải con số trước QC giả làm sau QC (mục 42).
+    */
+    projectedProfitAfterAds: row.spendKnown ? Math.round(row.projectedProfitAfterAds) : null,
+    projectedHeadroom: row.projectedHeadroom,
+    appliedDeliveryRate: row.appliedDeliveryRate,
     updatedAt: new Date(),
   };
+}
+
+/**
+ * Ghi (hoặc cập nhật trong CÙNG ngày) các dòng sổ. Tách ra khỏi `recordDecisionLedger` để kiểm thử
+ * được đường ghi thật mà không cần dựng cả bộ quyết định. Khoá xung đột là `(ngày, chiều, mục)`:
+ * dòng của NGÀY KHÁC không bao giờ bị chạm — sổ là ảnh chụp, không phải khung nhìn (mục 21).
+ */
+export async function upsertLedgerValues(values: ReturnType<typeof ledgerRowValues>[]): Promise<void> {
+  if (!values.length) return;
+  const db = await getDb();
+  await db
+    .insert(ledger)
+    .values(values)
+    .onConflictDoUpdate({
+      target: [ledger.decisionDay, ledger.dimension, ledger.entityKey],
+      set: {
+        entityName: sql`excluded.entity_name`,
+        action: sql`excluded.action`,
+        actionClass: sql`excluded.action_class`,
+        basis: sql`excluded.basis`,
+        reason: sql`excluded.reason`,
+        periodFrom: sql`excluded.period_from`,
+        periodTo: sql`excluded.period_to`,
+        ruleVersion: sql`excluded.rule_version`,
+        ruleSnapshot: sql`excluded.rule_snapshot`,
+        spendKnown: sql`excluded.spend_known`,
+        spend: sql`excluded.spend`,
+        bookedOrders: sql`excluded.booked_orders`,
+        deliveredOrders: sql`excluded.delivered_orders`,
+        returnedOrders: sql`excluded.returned_orders`,
+        openOrders: sql`excluded.open_orders`,
+        deliveredRevenue: sql`excluded.delivered_revenue`,
+        profitAfterAds: sql`excluded.profit_after_ads`,
+        successRate: sql`excluded.success_rate`,
+        maturity: sql`excluded.maturity`,
+        headroom: sql`excluded.headroom`,
+        breakEvenBookedRoas: sql`excluded.break_even_booked_roas`,
+        projectedProfitAfterAds: sql`excluded.projected_profit_after_ads`,
+        projectedHeadroom: sql`excluded.projected_headroom`,
+        appliedDeliveryRate: sql`excluded.applied_delivery_rate`,
+        updatedAt: new Date(),
+      },
+    });
 }
 
 /**
@@ -96,44 +148,12 @@ export async function recordDecisionLedger(options: { now?: Date; log?: (m: stri
   const { decisionDay, period } = ledgerPeriod(now);
   const periodFrom = period.fromKey ?? "";
   const periodTo = period.toKey ?? "";
-  const db = await getDb();
   const written: LedgerWriteResult["written"] = [];
 
   for (const dimension of LEDGER_DIMENSIONS) {
     const decision = await getAdsDecision(period, dimension);
-    const values = decision.rows.map((r) => rowToValues(r, decisionDay, periodFrom, periodTo));
-    if (values.length) {
-      await db
-        .insert(ledger)
-        .values(values)
-        .onConflictDoUpdate({
-          target: [ledger.decisionDay, ledger.dimension, ledger.entityKey],
-          set: {
-            entityName: sql`excluded.entity_name`,
-            action: sql`excluded.action`,
-            actionClass: sql`excluded.action_class`,
-            basis: sql`excluded.basis`,
-            reason: sql`excluded.reason`,
-            periodFrom: sql`excluded.period_from`,
-            periodTo: sql`excluded.period_to`,
-            ruleVersion: sql`excluded.rule_version`,
-            ruleSnapshot: sql`excluded.rule_snapshot`,
-            spendKnown: sql`excluded.spend_known`,
-            spend: sql`excluded.spend`,
-            bookedOrders: sql`excluded.booked_orders`,
-            deliveredOrders: sql`excluded.delivered_orders`,
-            returnedOrders: sql`excluded.returned_orders`,
-            openOrders: sql`excluded.open_orders`,
-            deliveredRevenue: sql`excluded.delivered_revenue`,
-            profitAfterAds: sql`excluded.profit_after_ads`,
-            successRate: sql`excluded.success_rate`,
-            maturity: sql`excluded.maturity`,
-            headroom: sql`excluded.headroom`,
-            breakEvenBookedRoas: sql`excluded.break_even_booked_roas`,
-            updatedAt: new Date(),
-          },
-        });
-    }
+    const values = decision.rows.map((r) => ledgerRowValues(r, decisionDay, periodFrom, periodTo));
+    await upsertLedgerValues(values);
     const actionable = values.filter((v) => v.actionClass === "ACTIONABLE").length;
     written.push({ dimension, rows: values.length, actionable });
     options.log?.(`${dimension}: ${values.length} dòng · ${actionable} cần làm`);

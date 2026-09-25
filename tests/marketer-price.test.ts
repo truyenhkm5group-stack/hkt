@@ -54,6 +54,9 @@ export function testMarketerPricePure() {
     "lib/queries/profit-nominal.ts",
     "lib/queries/marketer-daily-nominal.ts",
     "lib/queries/workshop-ledger.ts",
+    // Company OS · F: báo cáo chênh lệch giá SX chỉ HIỂN THỊ giá báo đang hiệu lực cạnh bốn giá khác
+    // (trang Giá SX thực tế). Không truy vấn lợi nhuận/lương nào import nó — company-os-economics.test.ts khoá.
+    "lib/queries/production-variance.ts",
     "lib/actions/marketer-price.ts",
     "lib/actions/workshop-ledger.ts",
   ]);

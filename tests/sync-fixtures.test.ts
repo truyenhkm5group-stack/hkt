@@ -229,6 +229,8 @@ import { testMarketerDailyNominal } from "./marketer-daily-nominal.test";
 import { testAdsDecision } from "./ads-decision.test";
 import { testAdsIntraday } from "./ads-intraday.test";
 import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
+// Company OS · Agent F — kinh tế theo mẫu, CPO hoà vốn một công thức, sổ chụp dự phóng, chênh lệch giá SX.
+import { testCompanyOsEconomicsDb, testCompanyOsEconomicsPure } from "./company-os-economics.test";
 import { testAdsBrakeByDecision, testAdsWrite } from "./ads-write.test";
 import { testAdsKillSwitchDb, testAdsKillSwitchPure } from "./ads-kill-switch.test";
 import { testCreativeLoop } from "./creative-loop.test";
@@ -1721,6 +1723,8 @@ async function main() {
   await testAdsDecision(db);
   testAdsIntraday();
   await testMarketingDecisionLedger();
+  testCompanyOsEconomicsPure();
+  await testCompanyOsEconomicsDb(db);
   testAdsWrite();
   testCreativeLoop();
   testCreativeDesignPure();
