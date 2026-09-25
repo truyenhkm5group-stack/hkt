@@ -49,7 +49,7 @@ import {
   type CareDateKey,
 } from "@/lib/constants/care-dates";
 import { RETURN_REASON_GROUPS, RETURN_REASON_GROUP_LABEL, RETURN_REASON_GROUP_OF, RETURN_REASON_LABEL, RETURN_REASONS, type ReturnReason } from "@/lib/constants/return-reason";
-import { careViewOf, slaOf, teamWorkEnded } from "@/lib/care/view";
+import { queueViewOf, slaOf, teamWorkEnded } from "@/lib/care/view";
 import {
   CARE_ATTEMPT_BANDS,
   CARE_COD_BANDS,
@@ -342,7 +342,8 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
         */
         const sau = { ...c, ...extra, care: revived };
         const choHan = careStateFor(sau);
-        const { view: v, reopened } = c.inCareCondition ? careViewOf(choHan, c.queueSince) : { view: "done" as const, reopened: false };
+        // Cùng `queueViewOf` với máy chủ: bấm "Đã hoàn" trên kiện đang chuyển hoàn ⇒ dòng rời "Cần care" ngay.
+        const { view: v, reopened } = queueViewOf(sau, choHan);
         return { ...sau, view: v, reopened, sla: slaOf(c.queueSince, choHan, new Date(), initial.slaHours) };
       }),
     );

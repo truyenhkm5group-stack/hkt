@@ -24,6 +24,7 @@ const RealtimeContext = createContext<RealtimeState>({ connected: false, lastEve
  */
 // `/cod` có thao tác ghi (đánh dấu đã về ngân hàng) và nhận bảng kê từ Gmail bất kỳ lúc nào — phải là trang sống.
 const LIVE_ROUTES = ["/orders", "/shipments", "/alerts", "/cs", "/landing", "/outreach", "/returns", "/integrations", "/cod"];
+const CARE_ROUTES = ["/shipments", "/work", "/cs"];
 const LIVE_GAP = 20_000;
 const REPORT_GAP = 90_000;
 
@@ -40,6 +41,9 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   // Đọc trong callback của SSE nên phải qua ref: closure của effect không thấy pathname mới.
   const gap = useRef(LIVE_GAP);
   gap.current = pathname === "/" || LIVE_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`)) ? LIVE_GAP : REPORT_GAP;
+  // Lượt ghi của đội care chỉ đổi hàng đợi care / hàng đợi việc — trang khác không cần dựng lại vì nó.
+  const careRoute = useRef(false);
+  careRoute.current = CARE_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
 
   useEffect(() => {
     let source: EventSource | null = null;
@@ -78,6 +82,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
           if (event.type === "order" && event.action === "created") toast.success("Có đơn hàng mới từ Pancake", { id: "new-order", duration: 4000 });
           // chỉ làm mới khi dữ liệu thực sự đổi: đơn / vận đơn / tồn / quảng cáo / thông báo, hoặc job đồng bộ kết thúc
           if (event.type === "sync" && event.status !== "SUCCESS" && event.status !== "FAILED") return;
+          if (event.type === "care" && !careRoute.current) return;
           scheduleRefresh();
         } catch {
           // bỏ qua
