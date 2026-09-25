@@ -91,6 +91,9 @@ export default async function ScenarioPage({ searchParams }: { searchParams: Pro
             <Button asChild variant="ghost" size="sm">
               <a href="/reports/scenario">Đặt lại</a>
             </Button>
+            <Button asChild variant="ghost" size="sm">
+              <a href="/reports/target">Đặt mục tiêu LN → cần bao nhiêu đơn</a>
+            </Button>
             <InfoHint label="Giới hạn đòn bẩy">
               Giới hạn ±{SCENARIO_LIMIT.successRatePoints} điểm cho tỷ lệ giao và ±{SCENARIO_LIMIT.percent}% cho các đòn bẩy còn lại — xa hơn thì phép ngoại suy tuyến tính không còn nghĩa.
             </InfoHint>
