@@ -35,8 +35,10 @@ import type { Period } from "@/lib/search-params";
  * giao (`recognized_cogs`, mục 6 của hợp đồng ấy). Một phiếu nhập mới hôm nay đổi hai cột ở đây mà
  * không đổi P&L — nên số ở đây có thể lệch P&L của cùng mã, và lý do nằm trong dữ liệu trả về.
  *
- * Giá vốn DỰ TÍNH (`profit.estimatedCosts`) mặc định KHÔNG áp (luật 2 của `estimated-cost.ts`):
- * chỉ bật khi người gọi truyền `withEstimatedCost`, và phần tiền dự tính luôn đi riêng một trường.
+ * Giá vốn DỰ TÍNH (`profit.estimatedCosts`) KHÔNG BAO GIỜ áp ở đây (luật 2 của `estimated-cost.ts`:
+ * chỉ tab Lợi nhuận danh nghĩa và một ngoại lệ chủ shop đã chốt được bật; `tests/estimated-cost.test.ts`
+ * quét mã nguồn). Mã chưa có giá vốn thật thì ô tiền mang ghi chú "CAO HƠN THẬT", không mượn giá đoán.
+ * Mở rộng ngoại lệ là quyết định của chủ shop.
  */
 
 export type EconomicsBasis = "ESTIMATED" | "REALIZED" | "PROJECTED";
@@ -111,7 +113,7 @@ export type ModelEconomics = {
 const NOMINAL_SRC = "getNominalProfitReport";
 const DECISION_SRC = "getAdsDecision(product)";
 
-function v(basis: EconomicsBasis, value: number | null, source: string, note: string | null = null): EconomicsValue {
+function economicsCell(basis: EconomicsBasis, value: number | null, source: string, note: string | null = null): EconomicsValue {
   const clean = value === null || !Number.isFinite(value) ? null : value;
   return { value: clean, basis, label: ECONOMICS_BASIS_LABEL[basis], source, note: clean === null && value !== null ? (note ?? "Không tính được") : note };
 }
@@ -143,9 +145,9 @@ export function buildModelEconomics(input: {
   const noNominal = n ? null : "Mã không có dòng trong báo cáo danh nghĩa của kỳ (không đơn, không chi QC).";
   const noDecision = d ? null : "Mã không có dòng trong bảng quyết định cấp mã của kỳ.";
 
-  const est = (value: number | null, field: string, note: string | null = null) => v("ESTIMATED", n ? value : null, `${NOMINAL_SRC} · ${field}`, n ? note : noNominal);
-  const real = (value: number | null, field: string, note: string | null = null) => v("REALIZED", d ? value : null, `${DECISION_SRC} · ${field}`, d ? note : noDecision);
-  const proj = (value: number | null, field: string, note: string | null = null) => v("PROJECTED", d ? value : null, `${DECISION_SRC} · ${field}`, d ? note : noDecision);
+  const est = (value: number | null, field: string, note: string | null = null) => economicsCell("ESTIMATED", n ? value : null, `${NOMINAL_SRC} · ${field}`, n ? note : noNominal);
+  const real = (value: number | null, field: string, note: string | null = null) => economicsCell("REALIZED", d ? value : null, `${DECISION_SRC} · ${field}`, d ? note : noDecision);
+  const proj = (value: number | null, field: string, note: string | null = null) => economicsCell("PROJECTED", d ? value : null, `${DECISION_SRC} · ${field}`, d ? note : noDecision);
   const spendNote = d && !d.spendKnown ? "Không biết số chi QC của mã trong kỳ" : null;
 
   const estOrders = n ? n.orders : null;
@@ -246,7 +248,7 @@ export function buildModelEconomics(input: {
       label: BREAK_EVEN_CPO_LABEL.NOMINAL_NET,
       unit: "VND",
       estimated: est(ceiling?.breakEven.perOrder ?? null, "adsCeiling(…).breakEven.perOrder", estGap),
-      realized: v("REALIZED", null, "—", "ERP chưa đo LN RÒNG thực đạt theo mã: vận hành/cố định chỉ được phân bổ trong bộ máy danh nghĩa"),
+      realized: economicsCell("REALIZED", null, "—", "ERP chưa đo LN RÒNG thực đạt theo mã: vận hành/cố định chỉ được phân bổ trong bộ máy danh nghĩa"),
       projected: null,
     },
     {
@@ -254,7 +256,7 @@ export function buildModelEconomics(input: {
       label: "Lợi nhuận ròng",
       unit: "VND",
       estimated: est(n?.netProfit ?? null, "netProfit", estGap ?? "Đã trừ vận hành/cố định phân bổ, thuế, rủi ro tồn kho, CP khác"),
-      realized: v("REALIZED", null, "—", "ERP chưa đo LN RÒNG thực đạt theo mã (lợi nhuận tiền thật chỉ có ở cấp shop)"),
+      realized: economicsCell("REALIZED", null, "—", "ERP chưa đo LN RÒNG thực đạt theo mã (lợi nhuận tiền thật chỉ có ở cấp shop)"),
       projected: null,
     },
     {
@@ -262,7 +264,7 @@ export function buildModelEconomics(input: {
       label: "LN ròng / đơn chốt",
       unit: "VND",
       estimated: est(perOrder(n?.netProfit ?? null, estOrders), "netProfit ÷ orders", estGap),
-      realized: v("REALIZED", null, "—", "ERP chưa đo LN RÒNG thực đạt theo mã"),
+      realized: economicsCell("REALIZED", null, "—", "ERP chưa đo LN RÒNG thực đạt theo mã"),
       projected: null,
     },
   ];
@@ -300,10 +302,10 @@ export function buildModelEconomics(input: {
  * `withStock = false` khi gọi báo cáo danh nghĩa: tồn kho chỉ nuôi ô GHI CHÚ, không một đồng nào vào
  * lợi nhuận (mục 14), và đó là câu đắt nhất của báo cáo — cùng lựa chọn với bảng lương.
  */
-export async function getModelEconomics(productId: string, range: Period, opts: { withEstimatedCost?: boolean } = {}): Promise<ModelEconomics> {
-  const withEstimatedCost = opts.withEstimatedCost ?? false;
+export async function getModelEconomics(productId: string, range: Period): Promise<ModelEconomics> {
   const [nominal, decision] = await Promise.all([
-    getNominalProfitReport(range, "ORDERED", NO_ORDER_VALUE_FILTER, true, withEstimatedCost, false),
+    // Tham số thứ năm `false` TƯỜNG MINH: không bao giờ giá vốn dự tính (xem chú thích đầu tệp).
+    getNominalProfitReport(range, "ORDERED", NO_ORDER_VALUE_FILTER, true, false, false),
     getAdsDecision(range, "product"),
   ]);
   return buildModelEconomics({
@@ -312,6 +314,6 @@ export async function getModelEconomics(productId: string, range: Period, opts: 
     nominal: nominal.rows.find((r) => r.productId === productId) ?? null,
     otherCostPercentOfAds: nominal.assumptions.otherCostPercentOfAds ?? 0,
     decision: decision.rows.find((r) => r.key === productId) ?? null,
-    withEstimatedCost,
+    withEstimatedCost: false,
   });
 }

@@ -215,8 +215,6 @@ export async function testMigrationUpgradePath() {
     await client.query(`insert into users (id, email, name, password_hash, role) values ('up-u1', 'a@shop.vn', 'An', 'x', 'CS')`);
     await client.query(`insert into orders (id, stage, status, inserted_at, bill_full_name) values ('up-o1', 'CONFIRMED', 2, now(), 'Khách Cũ')`);
     await client.query(`insert into cs_cases (id, order_id, kind, status, title) values ('up-c1', 'up-o1', 'OTHER', 'OPEN', 'Case có từ trước')`);
-    // 0133 (Company OS · F): một dòng sổ quyết định CÓ TỪ TRƯỚC — ghi bằng câu lệnh không biết tới ba cột dự phóng.
-    await client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, basis, period_from, period_to, rule_version, rule_snapshot, spend_known, profit_after_ads) values ('up-f1', '2026-09-20', 'product', 'p-old', 'SCALE', 'ACTIONABLE', 'PROJECTED', '2026-08-22', '2026-09-04', 2, '{}'::jsonb, true, 123456)`);
 
     /*
       ═══ THỨ TỰ PHÒNG BAN CỦA PRODUCTION KHÔNG GIỐNG THỨ TỰ 0069 GIEO ═══
@@ -288,7 +286,7 @@ export async function testMigrationUpgradePath() {
     );
     // Sổ bắt đầu RỖNG ngoài dòng vừa gieo: KHÔNG backfill. Kết luận của quá khứ không dựng lại được
     // từ dữ liệu hôm nay — đơn hôm ấy còn treo nay đã ngã ngũ (AGENTS.md mục 8.8).
-    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id not in ('up-dl1', 'up-f1')"), 0, "0108: migration KHÔNG được dựng hộ một dòng lịch sử nào (`up-f1` là dòng gieo ở bước 1 cho 0133)");
+    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id <> 'up-dl1'"), 0, "0108: migration KHÔNG được dựng hộ một dòng lịch sử nào");
 
     /*
       ═══ 0109: SỔ LƯỢT GHI NGÂN SÁCH — BA RÀNG BUỘC PHẢI CHẶN THẬT ═══
@@ -1556,10 +1554,14 @@ export async function testMigrationUpgradePath() {
     /*
       ═══ 0133 (Company OS · F): ẢNH CHỤP DỰ PHÓNG — BA CỘT MỚI, DÒNG CŨ ĐỨNG NGUYÊN ═══
 
-      Dòng `up-f1` ghi ở BƯỚC 1, trước khi ba cột tồn tại. Nó phải mang NULL ở cả ba — CHƯA CHỤP,
-      không phải 0 ₫ — và giữ nguyên lợi nhuận đo được. Một backfill "cho đủ cột" sau này làm bài
-      này đỏ, đúng lúc cần đỏ (mục 35, 8.8).
+      Bảng sổ vẫn nằm trong nhóm migration mới của bản phát hành này (0108), nên không gieo được một
+      dòng "trước 0133" ở bước 1. Thay vào đó: (a) một dòng ghi bằng câu lệnh KHÔNG nhắc tới ba cột —
+      đúng như mọi dòng đã có trên production — phải mang NULL ở cả ba (không DEFAULT); (b) tệp 0133
+      không được chứa UPDATE nào (không backfill, mục 35, 8.8). Dòng cũ đứng nguyên sau lượt ghi của
+      job được khoá ở `tests/company-os-economics.test.ts`.
     */
+    await client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, basis, period_from, period_to, rule_version, rule_snapshot, spend_known, profit_after_ads) values ('up-f1', '2026-09-20', 'product', 'p-old', 'SCALE', 'ACTIONABLE', 'PROJECTED', '2026-08-22', '2026-09-04', 2, '{}'::jsonb, true, 123456)`);
+    assert.ok(!/update/i.test(readFileSync(path.join(goc, "0133_company_os_economics.sql"), "utf8").replace(/--.*$/gm, "")), "0133: migration KHÔNG được chứa UPDATE — không backfill dòng sổ cũ");
     assert.equal(
       await dem("select count(*)::int as n from ads_decision_ledger where id = 'up-f1' and projected_profit_after_ads is null and projected_headroom is null and applied_delivery_rate is null and profit_after_ads = 123456"),
       1,
