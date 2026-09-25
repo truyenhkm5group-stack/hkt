@@ -391,7 +391,13 @@ const PO_STATUS_LABEL: Record<string, string> = { DRAFT: "nháp", SENT: "đã g�
  * hàng hoàn") mang nhãn "Vòng đời", nên mốc sản xuất / kho của Agent C, E không bao giờ đứng đúng chiều
  * "Sản xuất" / "Kho" trên trang 360. Subject lạ ⇒ "Vòng đời" như cũ.
  */
-const EVENT_DIMENSION_BY_SUBJECT: Readonly<Record<string, ModelTimelineDimension>> = {
+export const EVENT_DIMENSION_BY_SUBJECT: Readonly<Record<string, ModelTimelineDimension>> = {
+  /*
+    Quyết định của chủ shop trên cockpit về MỘT mẫu (chấp nhận / bỏ qua / hẹn nhắc một đề xuất) —
+    lớp quyết định đứng cạnh vòng đời, không thuộc miền sản xuất hay kho. Khai TƯỜNG MINH: một loại
+    chủ thể mới không được lặng lẽ rơi về chiều mặc định (tests/company-os-e2e-lifecycle.test.ts).
+  */
+  recommendation: "LIFECYCLE",
   production_topic: "PRODUCTION",
   cost_sheet: "PRODUCTION",
   sample: "PRODUCTION",

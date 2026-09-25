@@ -28,7 +28,7 @@ import { getModelEconomics } from "@/lib/queries/model-economics";
 import { getModelProductionSummary } from "@/lib/queries/model-production";
 import { getModelReturnDispositions } from "@/lib/queries/model-returns";
 import { getModelStockStates, type ModelStockStates } from "@/lib/queries/model-stock";
-import { domainEventDimension, getModel, getModelEvidence, getModelTimeline } from "@/lib/queries/models";
+import { EVENT_DIMENSION_BY_SUBJECT, domainEventDimension, getModel, getModelEvidence, getModelTimeline } from "@/lib/queries/models";
 import { variantMetrics } from "@/lib/queries/creative-loop";
 import { buildMatrixForProduct } from "@/lib/queries/production";
 import { requireApprovedDesignFlag } from "@/lib/queries/production-os";
@@ -237,9 +237,18 @@ export function testCompanyOsE2ePure() {
   assert.deepEqual(thieuNhan, [], "sự kiện LIVE nào cũng phải có nhãn cho dòng thời gian mẫu");
   const chieu = Object.fromEntries(live.map((e) => [e.name, domainEventDimension(e.name)]));
   for (const e of live) {
-    const mongDoi = e.subjectType === "product_model" ? "LIFECYCLE" : e.subjectType === "return_inspection" ? "INVENTORY" : "PRODUCTION";
-    assert.equal(chieu[e.name], mongDoi, `${e.name} (${e.subjectType}) phải ở chiều ${mongDoi}`);
+    // Loại chủ thể nào của một sự kiện LIVE cũng phải được KHAI chiều — không đoán tập đóng ở đây, và
+    // không để mã lặng lẽ rơi về "Vòng đời" (sự kiện của gói H từng lộ đúng lỗ hổng này lúc tích hợp).
+    if (e.subjectType === "product_model") {
+      assert.equal(chieu[e.name], "LIFECYCLE", `${e.name} (sự kiện của chính mẫu) phải ở chiều LIFECYCLE`);
+      continue;
+    }
+    const khai = EVENT_DIMENSION_BY_SUBJECT[e.subjectType];
+    assert.ok(khai, `loại chủ thể "${e.subjectType}" của ${e.name} chưa khai chiều trong EVENT_DIMENSION_BY_SUBJECT`);
+    assert.equal(chieu[e.name], khai, `${e.name} (${e.subjectType}) phải ở đúng chiều đã khai`);
   }
+  assert.equal(EVENT_DIMENSION_BY_SUBJECT.production_topic, "PRODUCTION", "sự kiện topic sản xuất đứng ở chiều Sản xuất");
+  assert.equal(EVENT_DIMENSION_BY_SUBJECT.return_inspection, "INVENTORY", "kết cục hàng hoàn đứng ở chiều Kho");
   assert.equal(domainEventDimension("khong.co"), "LIFECYCLE", "tên lạ ⇒ chiều Vòng đời như cũ, không ném");
   console.log(`✓ Company OS · QA (thuần): ${live.length} sự kiện LIVE đều có nhãn; chiều dòng thời gian theo subject (Vòng đời / Sản xuất / Kho)`);
 }
