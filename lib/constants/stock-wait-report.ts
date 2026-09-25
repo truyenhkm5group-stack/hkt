@@ -61,7 +61,7 @@ export const WAIT_ORIGIN_LABEL: Record<WaitOrigin, string> = {
 export const WAIT_ORIGIN_QUESTION: Record<WaitOrigin, string> = {
   ORDERED: "Khách phải chờ bao lâu kể từ lúc chốt mua? Gồm cả thời gian đơn nằm ở nhóm chờ / chưa xác nhận trên Pancake.",
   CONFIRMED:
-    "Kho và sản xuất để đơn chờ bao lâu kể từ lúc đơn rời nhóm chờ trên Pancake? Mốc lấy từ lịch sử trạng thái Pancake; đơn bị huỷ khi còn ở nhóm chờ thì mốc là lúc huỷ.",
+    "Kho và sản xuất để đơn chờ bao lâu kể từ lúc đơn rời nhóm chờ trên Pancake? Mốc lấy từ lịch sử trạng thái Pancake; đơn bị huỷ khi còn ở nhóm chờ chưa từng được xác nhận nên đứng ở nhóm “không có mốc bắt đầu”, không tính là chờ 0 ngày.",
 };
 
 /** Mặc định giữ đúng mốc của bản đầu, để link cũ và số đã báo không đổi nghĩa. */

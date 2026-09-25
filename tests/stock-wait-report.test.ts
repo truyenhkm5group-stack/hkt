@@ -360,9 +360,14 @@ export async function testStockWaitReportDb(db: Db) {
   assert.equal(cw("D2").orders, 11, "l1..l11: xác nhận sau 6 ngày, ĐVVC cầm hàng ngày thứ 8 ⇒ chờ 2 ngày tính từ xác nhận");
   assert.equal(cw("D3_5").orders, 1, "l0: rời nhóm Chờ hàng ngày 05/03 ⇒ 4 ngày tính từ xác nhận");
   assert.equal(cw("D7_14").orders, 0, "không đơn nào còn ở khoảng 7–14 ngày khi tính từ xác nhận");
-  assert.equal(c.report.noOriginOrders, 13, "12 đơn gửi sớm + đơn Mars chưa có lịch sử trạng thái ⇒ KHÔNG có mốc xác nhận, không rơi về mốc lên đơn");
-  assert.equal(cw("D0").orders, 1, "đơn huỷ khi còn ở nhóm chờ: mốc 'rời nhóm chờ' là chính lúc huỷ (định nghĩa dùng chung của phễu)");
-  assert.equal(cw("D0").cancelledBeforeShip, 1);
+  assert.equal(
+    c.report.noOriginOrders,
+    14,
+    "12 đơn gửi sớm + đơn Mars chưa có lịch sử trạng thái ⇒ KHÔNG có mốc xác nhận, không rơi về mốc lên đơn; + đơn huỷ khi chưa từng xác nhận",
+  );
+  assert.equal(cw("D0").orders, 0, "đơn huỷ khi còn ở nhóm chờ KHÔNG phải 'chờ 0 ngày rồi huỷ' — nó chưa từng được xác nhận");
+  assert.equal(c.report.byWait.reduce((t, x) => t + x.cancelledBeforeShip, 0), 0);
+  assert.equal(w("D3_5").cancelledBeforeShip, 1, "tính từ lúc lên đơn thì chính đơn đó vẫn là huỷ sau 3,2 ngày chờ");
   assert.equal(c.report.openOrders, 2);
   const cwait = c.current.find((x) => x.orderId === `${P}wait`);
   assert.equal(cwait?.waitDays, null, "đơn chưa xác nhận: số ngày chờ từ xác nhận là CHƯA BIẾT, không phải 0");

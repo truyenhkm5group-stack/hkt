@@ -168,7 +168,7 @@ export default async function StockWaitReportPage({ searchParams }: { searchPara
           label="Đơn trong kỳ chưa gửi"
           value={formatNumber(r.openOrders)}
           note={`${formatNumber(r.overall.orders)} đơn lên trong kỳ${r.anomalyOrders ? ` · ${formatNumber(r.anomalyOrders)} đơn thiếu / ngược mốc` : ""}${r.noOriginOrders ? ` · ${formatNumber(r.noOriginOrders)} đơn không có mốc bắt đầu` : ""}`}
-          hint="Chưa bàn giao, chưa huỷ: chưa biết sẽ chờ bao lâu nên nằm ngoài mọi khoảng. Thiếu / ngược mốc = đơn đã có kết cục mà không có mốc bàn giao, hoặc mốc bàn giao trước mốc bắt đầu. Không có mốc bắt đầu = đã gửi / đã huỷ mà không có mốc đang chọn (mốc xác nhận cần lịch sử trạng thái Pancake) — không bị tính theo mốc kia."
+          hint="Chưa bàn giao, chưa huỷ: chưa biết sẽ chờ bao lâu nên nằm ngoài mọi khoảng. Thiếu / ngược mốc = đơn đã có kết cục mà không có mốc bàn giao, hoặc mốc bàn giao trước mốc bắt đầu. Không có mốc bắt đầu = đã gửi / đã huỷ mà không có mốc đang chọn (mốc xác nhận cần lịch sử trạng thái Pancake), hoặc bị huỷ khi chưa từng xác nhận — không bị tính theo mốc kia, không tính là chờ 0 ngày."
           icon={MapPin}
           tone="slate"
         />

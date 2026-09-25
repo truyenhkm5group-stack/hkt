@@ -104,10 +104,15 @@ async function waitCells(period: Period, origin: WaitOrigin): Promise<WaitCell[]
   /*
     Khoảng chờ: có mốc bàn giao ⇒ đo từ mốc bắt đầu tới mốc đó; huỷ khi chưa gửi ⇒ đo tới mốc huỷ;
     đã gửi / đã huỷ mà KHÔNG có mốc bắt đầu đang chọn ⇒ 'NO_ORIGIN' (đếm riêng, không rơi về mốc kia);
+    huỷ khi chưa gửi mà mốc bắt đầu KHÔNG sớm hơn lúc huỷ ⇒ cũng 'NO_ORIGIN': đơn chưa từng bắt đầu chờ
+    theo mốc này. Đo production 25/09/2026 (mốc xác nhận): 682 đơn huỷ khi còn ở nhóm chờ mang mốc
+    "rời nhóm chờ" = CHÍNH lúc huỷ và bị đếm là "chờ 0 ngày rồi huỷ" — sai nghĩa cột huỷ trước gửi.
+    Với mốc lên đơn luật này không đổi gì: đơn luôn được lên trước khi huỷ.
     đã có kết cục mà THIẾU mốc bàn giao ⇒ '?'; còn lại (chưa gửi, chưa huỷ) ⇒ 'OPEN'.
   */
   const bucket = sql<WaitCellKey>`${sql.raw(`case
     when (${ha} is not null or ${oc} = 'CANCELLED') and ${og} is null then 'NO_ORIGIN'
+    when ${ha} is null and ${oc} = 'CANCELLED' and ${ca} is not null and ${og} >= ${ca} then 'NO_ORIGIN'
     when ${ha} is not null then ${waitBucketCaseSql(hd)}
     when ${oc} = 'CANCELLED' then ${waitBucketCaseSql(cd)}
     when ${finishedSql} then '?'
