@@ -10,12 +10,12 @@ import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 
-export const metadata = { title: "Đổi / trả hàng" };
+export const metadata = { title: "Phiếu đổi / trả (Pancake)" };
 
 export default async function ReturnsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const { decision } = await requireResource("RETURNS", "returns:view");
   // Phạm vi hẹp hơn thứ dữ liệu này biểu diễn được ⇒ TỪ CHỐI và nói rõ, không cho xem hết.
-  if (decision.allow === "NONE") return <ScopeDenied title="Đổi / trả hàng" reason={decision.reason} fix={decision.fix} />;
+  if (decision.allow === "NONE") return <ScopeDenied title="Phiếu đổi / trả (Pancake)" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "insertedAt", filterKeys: ["type"], sortable: RETURN_SORTABLE, defaultPeriod: "30d" });
   const [{ rows, total, pageCount }, facets, summary] = await Promise.all([listReturns(params), returnFacets(params), returnSummary(params)]);
@@ -23,9 +23,9 @@ export default async function ReturnsPage({ searchParams }: { searchParams: Prom
   return (
     <div className="space-y-5">
       <PageHeader
-        eyebrow="Bán hàng"
-        title="Đổi / trả hàng"
-        description={`Phiếu đổi/trả ghi nhận trên Pancake POS · ${params.period.label.toLowerCase()} · ${formatNumber(summary.total)} phiếu trên ${formatNumber(summary.orders)} đơn`}
+        eyebrow="Bán hàng · nguồn Pancake"
+        title="Phiếu đổi / trả (Pancake)"
+        description={`Phiếu trên Pancake POS, chưa phải hàng đã về kho · ${params.period.label.toLowerCase()} · ${formatNumber(summary.total)} phiếu trên ${formatNumber(summary.orders)} đơn`}
         actions={<SyncButton job="pancake-returns" label="Đồng bộ đổi/trả" />}
       />
 

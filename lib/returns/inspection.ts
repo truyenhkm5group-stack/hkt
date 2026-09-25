@@ -236,14 +236,27 @@ async function closeReturnedShipment(tx: DbLike, shipmentId: string, ctx: Return
 /**
  * Phiếu TÁI NHẬP cho đúng số đếm được, vào ĐÚNG MỘT mẫu mã. Không có phân bổ: kiện nhiều mẫu mã đi
  * đường đếm từng món (`recordItemInspection`), nơi mỗi dòng phiếu là một con số người kho đã đếm.
+ *
+ * XUẤT RA cho đúng một nơi gọi khác: nhập lại tồn sau khi sửa / giặt (`lib/returns/disposition.ts`).
+ * Hàng hoàn chỉ có MỘT đường lập phiếu tái nhập — viết đường thứ hai là mở cửa cho hai luật lệch nhau
+ * (phiếu mang `shipment_id` hay không, `kind` gì, người lập ghi thế nào). `reference` là thứ duy nhất
+ * khác giữa hai nơi gọi, để người đọc sổ kho biết phiếu đến từ lượt đếm hay từ lượt sửa xong.
  */
-async function createRestockReceipt(db: DbLike, variantId: string, shipmentId: string, restock: number, note: string, actor: Actor): Promise<string> {
+export async function createRestockReceipt(
+  db: DbLike,
+  variantId: string,
+  shipmentId: string,
+  restock: number,
+  note: string,
+  actor: Actor,
+  reference = `Đếm hàng hoàn ${shipmentId}`,
+): Promise<string> {
   const [receipt] = await db
     .insert(schema.stockReceipts)
     .values({
       kind: "RETURN",
       receivedAt: new Date(),
-      reference: `Đếm hàng hoàn ${shipmentId}`,
+      reference,
       note,
       totalQuantity: restock,
       totalCost: 0,

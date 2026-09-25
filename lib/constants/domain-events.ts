@@ -117,7 +117,8 @@ export const DOMAIN_EVENTS = [
 
   // ─── Agent D / E / G / H ───
   { name: "stock_receipt.linked_production", subjectType: "stock_receipt", owner: "D", status: "RESERVED", emitter: null, why: "Phiếu nhập kho được nối với lệnh / lô sản xuất (D chỉ thêm cột ở Wave 1)." },
-  { name: "return.disposition_set", subjectType: "return_inspection", owner: "E", status: "RESERVED", emitter: null, why: "Kết quả xử lý hàng hoàn: sửa lại / huỷ." },
+  // Agent E (0136): LIVE. Một sự kiện cho MỖI dòng sổ `return_dispositions` (khoá chống trùng theo id dòng), phát trong CÙNG giao dịch với dòng sổ và phiếu tái nhập (nếu có).
+  { name: "return.disposition_set", subjectType: "return_inspection", owner: "E", status: "LIVE", emitter: "lib/returns/disposition.ts", why: "Kết cục của hàng hoàn không tái nhập: sửa / giặt lại, nhập lại sau sửa, huỷ bỏ, trả xưởng." },
   { name: "approval.executed", subjectType: "approval_request", owner: "G", status: "RESERVED", emitter: null, why: "Yêu cầu duyệt đã được tiêu thụ đúng một lần." },
   { name: "recommendation.decided", subjectType: "recommendation", owner: "H", status: "RESERVED", emitter: null, why: "Chủ shop chấp nhận / bỏ qua một đề xuất trên cockpit — để đo độ đúng sau này." },
 ] as const satisfies readonly DomainEventSpec[];

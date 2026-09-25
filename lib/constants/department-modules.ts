@@ -163,7 +163,7 @@ export const NAV_MODULES = [
   },
   {
     href: "/returns",
-    label: "Đổi / trả hàng",
+    label: "Phiếu đổi / trả (Pancake)",
     zone: "LOGISTICS",
     permission: "returns:view",
     why: "Vòng đời một kiện hoàn bắt đầu ở chiều vận chuyển. Khâu ĐẾM hàng về là của kho và có màn hình riêng.",
@@ -200,7 +200,7 @@ export const NAV_MODULES = [
   },
   {
     href: "/inventory/returns",
-    label: "Kiểm đếm hàng hoàn",
+    label: "Kiểm đếm hàng hoàn · kho",
     zone: "WAREHOUSE",
     permission: "products:view",
     why: "Hàng hoàn CHỈ vào tồn khi kho mở kiện và đếm thật — ĐVVC báo 'đã hoàn' không phải là một phiếu nhập.",
