@@ -165,5 +165,6 @@ export const NAV_TITLES: Record<string, string> = {
   "/operations/dwell": "Vận đơn đứng yên quá lâu",
   "/reports/funnel": "Phễu bán hàng",
   "/reports/scenario": "Mô phỏng kịch bản",
+  "/reports/target": "Kế hoạch mục tiêu lợi nhuận",
   "/shipments/stock-wait": "Chờ hàng & giao thành công",
 };

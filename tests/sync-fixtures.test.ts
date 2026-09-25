@@ -230,6 +230,7 @@ import { testAdvisorySafety } from "./advisory-safety.test";
 import { testAdsRoas } from "./ads-roas.test";
 import { testMarketingDaily } from "./marketing-daily.test";
 import { testMarketerDailyNominal } from "./marketer-daily-nominal.test";
+import { testProfitTarget } from "./profit-target.test";
 import { testAdsDecision } from "./ads-decision.test";
 import { testAdsIntraday } from "./ads-intraday.test";
 import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
@@ -1737,6 +1738,7 @@ async function main() {
   await testAdsRoas(db);
   await testMarketingDaily();
   await testMarketerDailyNominal();
+  await testProfitTarget();
   await testAdsDecision(db);
   testAdsIntraday();
   await testMarketingDecisionLedger();

@@ -140,6 +140,7 @@ export function testUiConsistency() {
     "app/(dashboard)/inventory/purchasing/page.tsx",
     "app/(dashboard)/customers/retention/page.tsx",
     "app/(dashboard)/reports/scenario/page.tsx",
+    "app/(dashboard)/reports/target/page.tsx",
     "app/(dashboard)/shipments/stock-wait/page.tsx",
   ];
   // Trang đầy đủ phải nói rõ VÌ SAO trống; mảnh ghép nhúng trong trang khác thì không cần.
@@ -192,6 +193,7 @@ export function testNavigationCoverage() {
     "/ads/daily": "tab 'Hiệu quả theo ngày' ngay trên trang Quảng cáo (cùng module, hai góc nhìn: theo chiến dịch vs theo ngày), và từ ô lệnh ⌘K",
     "/orders/verify": "một GÓC NHÌN của chính danh sách đơn (đơn còn trong kho, xếp theo khả năng hoàn), vào từ nút 'Cần xác minh trước khi giao' ngay trên trang Đơn hàng",
     "/reports/scenario": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
+    "/reports/target": "vào từ dòng “Xem thêm” của Báo cáo lợi nhuận và từ trang Mô phỏng kịch bản, và từ ô lệnh ⌘K",
     "/shipments/stock-wait": "tab 'Chờ hàng & GTC' ngay trên trang Vận đơn & care, nút trên trang Tỷ lệ giao thành công và Thiếu hàng giao đơn, và ô lệnh ⌘K",
     "/reports/stock-wait": "địa chỉ CŨ của báo cáo chờ hàng — chỉ còn chuyển hướng sang /shipments/stock-wait để link đã gửi không gãy",
     // Work OS: MỘT mục sidebar (`/work`), năm góc nhìn là tab bên trong `app/(dashboard)/work/tabs.tsx`.
