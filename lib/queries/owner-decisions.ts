@@ -4,10 +4,9 @@ import type { SessionUser } from "@/lib/auth/session";
 import { can } from "@/lib/auth/session";
 import { decideScope } from "@/lib/auth/scope-guard";
 import { APPROVAL_GROUP_LABEL, type ApprovalGroup } from "@/lib/constants/approval";
-import { ADS_ACTION_LABEL } from "@/lib/constants/ads-decision";
 import { DECISION_LABEL, type InventoryDecisionKind } from "@/lib/constants/inventory-decision";
 import { BEFORE_PRODUCTION_DISCUSSION } from "@/lib/constants/model-360";
-import type { ModelState } from "@/lib/constants/model-lifecycle";
+import { MODEL_SIGNAL_HINT, MODEL_SIGNAL_LABEL, SIGNAL_SOURCE_LABEL, type SignalSource } from "@/lib/constants/model-signal";
 import {
   allowedKinds,
   applyDecisions,
@@ -23,13 +22,13 @@ import {
   type OwnerDecisionSource,
   type RecommendationDecisionRow,
 } from "@/lib/constants/owner-decisions";
-import { TOPIC_OPEN_STATUSES, TOPIC_STATUS_LABEL, type TopicStatus } from "@/lib/constants/production-os";
+import { TOPIC_STATUS_LABEL, type TopicStatus } from "@/lib/constants/production-os";
 import type { WorkItem } from "@/lib/constants/work";
 import { formatDate, formatDateTime, formatNumber, formatVND, vnDateKey } from "@/lib/format";
 import { getAdsDecision, type AdsDecisionRow } from "@/lib/queries/ads-decision";
 import { listApprovalRequests, type ApprovalRequestRow } from "@/lib/queries/approvals";
 import { getInventoryDecisionReport, type InventoryDecisionRow } from "@/lib/queries/inventory-decision";
-import { getModelAdsSummary } from "@/lib/queries/model-ads";
+import { getModelSignalsBatch, type ModelSignalBatchRow, type ModelSignalReport } from "@/lib/queries/model-signal";
 import { getPurchasingReport, type OpenProductionOrder } from "@/lib/queries/purchasing";
 import { adaptAdsDecisions, adaptProductionTopics, adaptSampleReviews } from "@/lib/queries/work-adapters";
 import { readDecisionRows, toRow } from "@/lib/owner-decisions/service";
@@ -210,30 +209,70 @@ export function adsCutToItems(work: readonly WorkItem[], rows: ReadonlyMap<strin
     });
 }
 
-export type ScaleCandidate = { model: { id: string; code: string; name: string }; row: AdsDecisionRow };
+/**
+ * ─── MẪU THẮNG CHƯA MỞ TOPIC SẢN XUẤT (Agent S thay nguồn của H) ───
+ *
+ * Nguồn là tín hiệu mẫu ĐẦY ĐỦ của A2 (`getModelSignalsBatch` — cùng `deriveModelSignal` với trang 360),
+ * không còn là riêng lá phiếu quảng cáo. Ba cổng, đúng ba cổng mà đề xuất "mở trao đổi sản xuất" ở trang
+ * 360 dùng (`deriveModelSuggestions`): tín hiệu THẮNG · trạng thái khai còn trước “Bàn sản xuất”
+ * (`BEFORE_PRODUCTION_DISCUSSION`) · KHÔNG topic sản xuất đang mở. Số topic CHƯA BIẾT (`null`) không phải 0
+ * — mẫu đó không vào (nguồn ném lỗi ở bộ đọc để khối nêu tên nguồn hỏng).
+ */
+export function modelWinnerCandidates(rows: readonly ModelSignalBatchRow[]): ModelSignalBatchRow[] {
+  return rows.filter((r) => r.signal.signal === "WINNER" && r.openProductionTopics === 0 && BEFORE_PRODUCTION_DISCUSSION.includes(r.model.state));
+}
 
-export function modelScaleToItems(cands: readonly ScaleCandidate[]): OwnerDecisionItem[] {
-  return cands.map(({ model, row }) => {
-    const tamTinh = row.basis === "PROJECTED";
-    return {
-      kind: "MODEL_SCALE" as const,
-      sourceKey: `model:SCALE:${model.id}`,
-      what: `Mẫu ${model.code} · quảng cáo đề nghị ${ADS_ACTION_LABEL.SCALE.toUpperCase()} — chưa có topic sản xuất`,
-      why: row.reason,
-      data: [
-        { label: "Chi QC 30 ngày", value: money(row.spend) },
-        { label: "Đơn chốt", value: formatNumber(row.bookedOrders) },
-        { label: tamTinh ? "Lãi sau QC (tạm tính)" : "Lãi sau QC", value: money(tamTinh ? row.projectedProfitAfterAds : row.profitAfterAds) },
-        { label: "Chi / đơn", value: money(row.costPerOrder) },
-      ],
-      impact: {
-        amountVnd: null,
-        basis: "Chưa có con số tiền đo được cho quyết định mở bàn sản xuất — xem khối Kinh tế (ước tính vs thực đạt) ở trang 360 của mẫu.",
-      },
-      action: { label: "Mở trang mẫu", href: `/models/${model.id}` },
-      modelId: model.id,
-    };
+/**
+ * Băm 53 bit (cyrb53) — tất định, không phụ thuộc môi trường. Không dùng `node:crypto`: tệp này đọc sổ
+ * phản ứng nên bài kiểm của H cấm mọi lời gọi cập nhật ở đây (sổ append-only), kể cả của bộ băm. Khoá
+ * mang `modelId` rõ ràng, nên hai căn cứ của CÙNG một mẫu trùng băm (~2⁻⁵³) là rủi ro duy nhất.
+ */
+function basisHash(s: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/** Nguồn BỎ PHIẾU của tín hiệu — tồn kho chỉ là bối cảnh nên không vào khoá (đổi mỗi ngày theo tốc độ bán). */
+const SIGNAL_VOTING_SOURCES: readonly SignalSource[] = ["ADS", "PRODUCT", "CREATIVE", "DESIGN"];
+
+/**
+ * Khoá nguồn: tín hiệu + TẬP phán quyết của các nguồn bỏ phiếu (nguồn · lá phiếu · nhãn), băm ngắn —
+ * KHÔNG mang ngày. "Bỏ qua" có hiệu lực tới khi CĂN CỨ đổi (vd quảng cáo từ Tăng sang Giữ, creative có
+ * mẩu thắng), không tự hết sau một ngày. Câu chi tiết (số mẫu mã, số creative) không vào khoá — đổi số
+ * đếm không phải một khuyến nghị khác.
+ */
+export function modelWinnerSourceKey(modelId: string, signal: Pick<ModelSignalReport, "signal" | "reasons">): string {
+  const basis = SIGNAL_VOTING_SOURCES.map((src) => {
+    const r = signal.reasons.find((x) => x.source === src);
+    return `${src}=${r ? `${r.vote}:${r.verdict}` : "-"}`;
   });
+  const hash = basisHash(JSON.stringify([signal.signal, ...basis]));
+  return `model:${signal.signal}:${modelId}:${hash}`;
+}
+
+export function modelScaleToItems(cands: readonly ModelSignalBatchRow[]): OwnerDecisionItem[] {
+  return cands.map(({ model, signal }) => ({
+    kind: "MODEL_SCALE" as const,
+    sourceKey: modelWinnerSourceKey(model.id, signal),
+    what: `Mẫu ${model.code} · tín hiệu ${MODEL_SIGNAL_LABEL.WINNER.toUpperCase()} — chưa mở topic sản xuất`,
+    why: [`${MODEL_SIGNAL_HINT.WINNER} (${signal.periodLabel.toLowerCase()})`, ...signal.conflicts.map((c) => `Lưu ý: ${c}`)].join(" "),
+    // Chỉ NHÃN phán quyết của từng nguồn (cùng mức trang 360 cho hiện khi che câu chi tiết) — không số.
+    data: signal.reasons.map((r) => ({ label: SIGNAL_SOURCE_LABEL[r.source], value: r.vote === "ABSENT" ? null : r.verdict })),
+    impact: {
+      amountVnd: null,
+      basis: "Chưa có con số tiền đo được cho quyết định mở bàn sản xuất — xem khối Kinh tế (ước tính vs thực đạt) ở trang 360 của mẫu.",
+    },
+    action: { label: "Mở trang mẫu", href: `/models/${model.id}` },
+    modelId: model.id,
+  }));
 }
 
 const INVENTORY_KIND: Partial<Record<InventoryDecisionKind, OwnerDecisionKind>> = {
@@ -339,41 +378,14 @@ async function loadAdsCut({ now }: { now: Date }): Promise<SourceResult> {
 }
 
 /**
- * Mẫu quảng cáo đề nghị TĂNG mà chưa bàn sản xuất. `getModelSignal` (A2) gộp đủ bốn nguồn nhưng đọc
- * hiệu quả mẫu mã TỪNG mẫu một — không đủ rẻ để chạy cho mọi mẫu ở trang chủ. Nên nguồn là lá phiếu
- * quảng cáo (chiều mã hàng), lọc bằng đúng các cổng A2 đã dựng: chi đã ghép chiến dịch
- * (`getModelAdsSummary` = OK — chi chưa ghép ra 0 ₫ giả ở bảng gốc), trạng thái khai còn trước “Bàn sản
- * xuất” (`BEFORE_PRODUCTION_DISCUSSION`), và chưa có topic đang mở.
+ * Mẫu THẮNG chưa mở topic sản xuất — tín hiệu mẫu đầy đủ đọc theo LÔ (`getModelSignalsBatch`, một lượt
+ * mỗi nguồn cho cả shop, đệm theo kỳ). Nguồn sản xuất không đọc được ⇒ NÉM: khối nêu tên nguồn hỏng thay
+ * vì đề xuất mở bàn sản xuất cho một mẫu có thể đã có topic.
  */
 async function loadModelScale(): Promise<SourceResult> {
-  const period = ADS_PERIOD();
-  const decision = await getAdsDecision(period, "product");
-  const scale = decision.rows.filter((r) => r.action === "SCALE" && r.spendKnown && r.key);
-  if (!scale.length) return { items: [] };
-  const db = await getDb();
-  const pm = schema.productModels;
-  const models = await db
-    .select({ id: pm.id, code: pm.code, name: pm.name, productId: pm.productId, state: pm.lifecycleState })
-    .from(pm)
-    .where(inArray(pm.productId, scale.map((r) => r.key)));
-  const eligible = models.filter((m) => BEFORE_PRODUCTION_DISCUSSION.includes((m.state as ModelState | null) ?? null));
-  if (!eligible.length) return { items: [] };
-  const t = schema.productionTopics;
-  const openRows = await db
-    .select({ modelId: t.modelId, status: t.status })
-    .from(t)
-    .where(inArray(t.modelId, eligible.map((m) => m.id)));
-  const hasOpen = new Set(openRows.filter((r) => (TOPIC_OPEN_STATUSES as readonly string[]).includes(r.status)).map((r) => r.modelId));
-  const byProduct = new Map(scale.map((r) => [r.key, r]));
-  const cands: ScaleCandidate[] = [];
-  for (const m of eligible) {
-    if (hasOpen.has(m.id) || !m.productId) continue;
-    const summary = await getModelAdsSummary(m.productId, period);
-    if (summary.status !== "OK") continue;
-    const row = byProduct.get(m.productId);
-    if (row) cands.push({ model: { id: m.id, code: m.code, name: m.name }, row });
-  }
-  return { items: modelScaleToItems(cands) };
+  const batch = await getModelSignalsBatch(ADS_PERIOD());
+  if (batch.topicsError) throw new Error(batch.topicsError);
+  return { items: modelScaleToItems(modelWinnerCandidates(batch.rows)) };
 }
 
 async function loadInventory(): Promise<SourceResult> {

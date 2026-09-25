@@ -133,6 +133,20 @@ export async function spendMappedFor(db: Db, productId: string): Promise<boolean
   return Number(r?.n ?? 0) > 0;
 }
 
+/**
+ * CÙNG câu hỏi của `spendMappedFor`, hỏi cho CẢ SHOP một lượt: tập mã hàng đã từng được ghép ít nhất một
+ * chiến dịch (không bị loại). Tín hiệu mẫu theo lô (`getModelSignalsBatch`) đọc hàm này thay vì gọi
+ * `spendMappedFor` cho từng mẫu — điều kiện y hệt (`excluded = false`, `product_id` khớp).
+ */
+export async function spendMappedProductIds(db: Db): Promise<Set<string>> {
+  const ads = schema.adSpends;
+  const rows = await db
+    .selectDistinct({ productId: ads.productId })
+    .from(ads)
+    .where(and(sql`${ads.productId} is not null`, eq(ads.excluded, false)));
+  return new Set(rows.map((r) => String(r.productId)));
+}
+
 /** Quảng cáo của MỘT mẫu trong kỳ — đọc thẳng dòng chiều mã hàng của `getAdsDecision`. */
 export async function getModelAdsSummary(productId: string, range: Period): Promise<ModelAdsSummary> {
   return memo(`modelAds:${productId}:${periodKey(range)}`, 90_000, async () => {
@@ -165,6 +179,51 @@ export type ModelCreativeSummary = {
   latestWinner: { variantId: string; headline: string; libraryAt: string; libraryOrders: number | null; imageId: string | null; href: string } | null;
   links: { library: string; live: string };
 };
+
+/** Ô đếm của một phán quyết đã chụp: phán quyết lạ / chưa có dòng nào ⇒ `NO_VERDICT`. Một luật cho cả đường một mẫu lẫn đường theo lô. */
+export function verdictBucket(k: string | null | undefined): CreativeVerdict | typeof NO_VERDICT {
+  return k && (CREATIVE_VERDICTS as readonly string[]).includes(k) ? (k as CreativeVerdict) : NO_VERDICT;
+}
+
+export type CreativeVerdictCounts = Pick<ModelCreativeSummary, "total" | "byVerdict">;
+
+/**
+ * Đếm creative theo phán quyết ĐÃ CHỤP cho MỌI mã hàng một lượt — đúng hai ô `total` và `byVerdict` mà
+ * `modelCreativeSummary` trả cho từng mã (cùng phép nối lô, cùng "dòng phán quyết mới nhất theo ngày" —
+ * `creative_verdicts` có khoá duy nhất (ngày, mẫu) nên "mới nhất" là một dòng xác định). Không đo
+ * `variantMetrics`: tín hiệu mẫu chỉ đọc phán quyết. Mã không có creative nào ⇒ không có trong map.
+ */
+export async function creativeVerdictCountsByProduct(db: Db): Promise<Map<string, CreativeVerdictCounts>> {
+  const cv = schema.creativeVariants;
+  const cb = schema.creativeBatches;
+  const vd = schema.creativeVerdicts;
+  const [variants, latest] = await Promise.all([
+    db
+      .select({ id: cv.id, productId: cv.productId })
+      .from(cv)
+      .innerJoin(cb, eq(cb.id, cv.batchId))
+      .where(sql`${cv.productId} is not null`),
+    db
+      .selectDistinctOn([vd.variantId], { variantId: vd.variantId, verdict: vd.verdict })
+      .from(vd)
+      .innerJoin(cv, eq(cv.id, vd.variantId))
+      .where(sql`${cv.productId} is not null`)
+      .orderBy(vd.variantId, desc(vd.verdictDay)),
+  ]);
+  const verdictOf = new Map(latest.map((r) => [r.variantId, r.verdict]));
+  const out = new Map<string, CreativeVerdictCounts>();
+  for (const v of variants) {
+    const pid = String(v.productId);
+    let c = out.get(pid);
+    if (!c) {
+      c = { total: 0, byVerdict: Object.fromEntries([...CREATIVE_VERDICTS, NO_VERDICT].map((k) => [k, 0])) as ModelCreativeSummary["byVerdict"] };
+      out.set(pid, c);
+    }
+    c.total += 1;
+    c.byVerdict[verdictBucket(verdictOf.get(v.id))] += 1;
+  }
+  return out;
+}
 
 export async function getModelCreativeSummary(productId: string): Promise<ModelCreativeSummary> {
   return memo(`modelCreative:${productId}`, 90_000, async () => modelCreativeSummary(await getDb(), productId));
@@ -202,11 +261,7 @@ export async function modelCreativeSummary(db: Db, productId: string): Promise<M
     ),
   ]);
   const verdictOf = new Map(latest.map((r) => [r.variantId, r.verdict]));
-  for (const v of variants) {
-    const k = verdictOf.get(v.id);
-    const key = k && (CREATIVE_VERDICTS as readonly string[]).includes(k) ? (k as CreativeVerdict) : NO_VERDICT;
-    byVerdict[key] += 1;
-  }
+  for (const v of variants) byVerdict[verdictBucket(verdictOf.get(v.id))] += 1;
   let attributedOrders = 0;
   let ordersViaPost = 0;
   let spend: number | null = null;

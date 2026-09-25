@@ -41,7 +41,7 @@ export function testCompanyOsModelsPure() {
   const mig = readFileSync("drizzle/0132_company_os_models.sql", "utf8");
   const checkList = (ten: string) => {
     const m = new RegExp(`"${ten}" CHECK \\(([^\\n]+)\\)`).exec(mig);
-    assert.ok(m, `migration 0131 phải có CHECK ${ten}`);
+    assert.ok(m, `migration 0132 phải có CHECK ${ten}`);
     return [...m[1].matchAll(/'([A-Z_]+)'/g)].map((x) => x[1]);
   };
   assert.deepEqual(checkList("product_models_state_check"), [...MODEL_STATES], "CHECK trạng thái trong migration phải đúng bằng MODEL_STATES — lệch là một trạng thái không lưu được");

@@ -109,3 +109,33 @@ N1 Ước tính bỏ cờ · N2 Thực đạt bỏ cờ · N3 `getModelEconomics
 ### Cổng và đường bấm (lượt 2)
 
 Windows, cây `wt-cos-int4`: `npm run typecheck` sạch · `npm run lint` sạch · `npm test` **TẤT CẢ KIỂM THỬ ĐẠT** (bài DB của F chạy đúng nhánh mới: "dq-prod (chi chưa ghép ⇒ ô chi / LN sau QC là —)") · `npm run build` thành công (`/models/[id]` 4,08 kB). `next start` trên PGlite demo, `/models/<SP001>`: 200, 0 lỗi console, không cuộn ngang; "Chi QC 30 ngày" = `—` + "⚠ 2 lưu ý dữ liệu"; Kinh tế: Chi QC / CPO / LN sau QC / LN ròng = `—`, biên trước QC 62,3% giữ nguyên; khối Sản xuất hiện topic 0 · 0, chưa giá thành / mẫu thử, 0 lệnh mở, nút "Tạo topic sản xuất" + link bàn sản xuất; khối Kết cục hàng hoàn in 0 thật. Chưa bấm thử luồng tạo topic (thuộc C).
+
+---
+
+## 11. Agent S — tín hiệu mẫu đọc theo LÔ (nhánh `claude/cos-tin-hieu-hang-loat`)
+
+- **`getModelSignalsBatch(range?)`** (`lib/queries/model-signal.ts`): tín hiệu của MỌI mẫu một lượt. Mỗi nguồn
+  đọc ĐÚNG MỘT LẦN cho cả shop — `getAdsDecision(range, "product")` + `spendMappedProductIds` (B, cùng điều kiện
+  `spendMappedFor`) ⇒ `summarizeModelAds` từng mã; `getProductIntelligence({ splitByProduct: true })` +
+  `adSpendByProduct` ⇒ cắt theo mã, trần `SIGNAL_VARIANT_LIMIT` = 500 dòng/mã (cùng `limit` đường một mẫu);
+  `creativeVerdictCountsByProduct` (B, cùng luật ô đếm `verdictBucket`); `design_concepts.status` qua cùng phép
+  nối của `getModel`; `getInventoryDecisionReport` ⇒ `pickModelInventoryRows`; topic sản xuất ĐANG MỞ
+  (`TOPIC_OPEN_STATUSES`, chỉ để nơi dùng lọc — KHÔNG bỏ phiếu; `null` = không đọc được, không phải 0). Đệm
+  `memo("modelSignalsBatch:<kỳ>", 90 s)`.
+- **Một phép gộp**: phần đổi dòng nguồn thành đầu vào (`adsSignalInput`, `productSourceInput` →
+  `productVerdictsOf`, `inventoryKindsOf`, `finishReport`) tách ra và `getModelSignal` dùng lại đúng chúng; cả hai
+  đường gọi CÙNG `deriveModelSignal`. Không ngưỡng mới.
+- **`splitByProduct`** (thêm vào `getProductIntelligence`, mặc định tắt, có trong khoá đệm): gộp theo (mẫu mã, mã
+  hàng). Không có nó thì dòng đơn THIẾU mẫu mã của hai mã khác nhau dính làm một khi đọc cả shop.
+  `/products/performance` không đổi hành vi.
+- **`/models`**: nút "Cột: Tín hiệu mẫu" (`?tinhieu=1`, TẮT mặc định) thêm cột "Tín hiệu · 30 ngày qua" (nhãn +
+  tóm tắt nhãn quảng cáo/mẫu mã + "⚡ n" xung đột). Đo trên seed demo (PGlite, 10 mẫu, 1.126 đơn): `listModels`
+  2–21 ms; lô NGUỘI 848–1.034 ms, ẤM 0 ms (đệm) — nên để sau nút bật.
+- **Kiểm thử** `tests/company-os-signal-batch.test.ts`: lô = `getModelSignal` (deepEqual cả lý do, câu chi tiết,
+  xung đột, nhãn kỳ) trên mọi mẫu của CSDL kiểm thử × 3 kỳ (2004 cố định, toàn bộ, 30 ngày) không xoá đệm giữa
+  kỳ; fixture phủ cần thêm dữ liệu · LOẠI + xung đột khai · xung đột tầng thử · phán creative mới nhất đè cũ ·
+  dòng đơn không mẫu mã ở hai mã · chi đã / chưa ghép · topic mở / đã đóng. Trên seed demo: 10/10 mẫu khớp ở 30
+  ngày và toàn bộ. **Đột biến 13/13 bị bắt** (M1 lô bỏ trạng thái khai · M2 bỏ `splitByProduct` · M3 creative lấy
+  phán cũ nhất · M4 mọi mã coi là đã ghép chi · M5 khoá đệm thiếu kỳ · M6 cockpit bỏ lọc topic mở · M7 khoá
+  cockpit mang ngày · M8 đếm cả topic đã đóng · M9 topic chưa biết coi như 0 · M10 khoá bỏ phán quyết quảng cáo ·
+  M11 lô bỏ thiết kế · M12 mã không creative thành "chưa phán" · M13 cockpit nhận mẫu đã qua Bàn sản xuất).

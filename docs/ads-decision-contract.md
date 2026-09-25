@@ -131,7 +131,7 @@ cùng số (`tests/company-os-economics.test.ts`). Bất biến: `cpoHeadroom �
 (±1 ₫ làm tròn). ≤ 0 là câu trả lời thật: dòng lỗ cả khi không tiêu đồng QC nào.
 
 Sổ quyết định chép thêm `projected_profit_after_ads`, `projected_headroom`, `applied_delivery_rate`
-từ ĐÚNG dòng này (migration 0134). Dòng sổ ghi trước đó mang `NULL` = CHƯA CHỤP — không backfill.
+từ ĐÚNG dòng này (migration 0135). Dòng sổ ghi trước đó mang `NULL` = CHƯA CHỤP — không backfill.
 
 ### `headroom` — khoảng cách tới điểm hoà vốn
 

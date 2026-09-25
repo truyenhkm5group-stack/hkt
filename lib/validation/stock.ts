@@ -29,7 +29,7 @@ export const stockReceiptSchema = z.object({
   reference: z.string().trim().max(200, "Tham chiếu tối đa 200 ký tự"),
   supplier: z.string().trim().max(200, "Nhà cung cấp tối đa 200 ký tự"),
   note: z.string().trim().max(1000, "Ghi chú tối đa 1000 ký tự"),
-  /** Company OS · Agent D (0132): phiếu NHẬP HÀNG nhận hàng của lệnh SX / lô xưởng nào. Trống = chưa khai. */
+  /** Company OS · Agent D (0133): phiếu NHẬP HÀNG nhận hàng của lệnh SX / lô xưởng nào. Trống = chưa khai. */
   productionOrderId: z.string().trim().max(100).optional(),
   productionBatchId: z.string().trim().max(100).optional(),
   items: z

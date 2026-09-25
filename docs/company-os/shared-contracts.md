@@ -18,7 +18,7 @@
 - CHƯA BIẾT in `—`, không in 0 (luật 42). Kiểm thử không mang hạn sử dụng (luật 50, 65).
 - Kiểm thử mới: `tests/<chủ-đề>.test.ts`, đăng ký trong `tests/sync-fixtures.test.ts`.
 
-## 1. Sổ danh tính mẫu (Agent A · migration 0131)
+## 1. Sổ danh tính mẫu (Agent A · migration 0132)
 
 ### Bảng `product_models`
 
@@ -66,7 +66,7 @@ CHECK: `actor_kind = 'USER'` ⇒ `actor_id IS NOT NULL`.
   `runModelRegistrySync`.
 - Route: `/models` (danh sách) · `/models/[id]` (trang 360). Khai trong `lib/constants/department-modules.ts`.
 
-## 2. Sổ sự kiện (Agent A · cùng migration 0131)
+## 2. Sổ sự kiện (Agent A · cùng migration 0132)
 
 ### Bảng `domain_events` (APPEND-ONLY)
 
@@ -253,12 +253,15 @@ hằng số đang chạy), chỉ nút MỞ. Route: `/production` · `/production
 | `getModelEconomics(productId, range)` | F | 1 | lợi nhuận ƯỚC TÍNH (nominal) vs THỰC ĐẠT · CPO hoà vốn · trần QC/đơn · biên/đơn |
 | `getModelProductionSummary(modelId)` | C | 2 | topic · costing chốt · sample mới nhất · lệnh mở · số kế hoạch/nhận |
 | `getModelSignal(modelId)` | A2 | 2 | WINNER/PROMISING/TESTING/LOSER/NEEDS_MORE_DATA + lý do từng nguồn |
+| `getModelSignalsBatch(range?)` | S | 3 | tín hiệu của MỌI mẫu một lượt (mỗi nguồn đọc một lần cho cả shop, cùng `deriveModelSignal`) + số topic sản xuất đang mở (`null` = không đọc được); đệm theo kỳ. Bằng `getModelSignal` từng mẫu — có bài kiểm so |
 
 Mọi hàm trên CHỈ gọi truy vấn có sẵn của miền mình — không công thức mới cho một con số đã có.
 
 ## 7. Số migration đã dùng (theo THỨ TỰ GỘP, không theo thứ tự cấp)
 
-`0131` A · `0132` D · `0133` G · `0134` F · `0135` C · `0136` E · `0137` A2 · `0138` H. B không có migration.
+`0132` A · `0133` D · `0134` G · `0135` F · `0136` C · `0137` E · `0138` A2 · `0139` H. B không có migration.
+`0131` là của sổ ngân hàng (PR #273, phiên khác) — nó vào `main` trước, nên cả chuỗi dời lên một số và
+mốc `when` của sổ mẫu dời lên sau mốc của nó (hai bên từng trùng đúng một mốc).
 Drizzle bỏ qua VĨNH VIỄN migration có `when` nhỏ hơn migration đã áp, nên số hiệu và `when` phải tăng
 cùng thứ tự gộp — G và F đã đổi số cho nhau lúc tích hợp vì lý do đó. Kiểm
 `git ls-tree --name-only origin/main drizzle/ | tail -3` trước khi đặt tên; trùng thì báo Tech Lead.

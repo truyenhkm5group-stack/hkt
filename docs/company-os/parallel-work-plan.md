@@ -8,7 +8,7 @@
 ## Wave 1 — chạy ngay (không phụ thuộc nhau)
 
 ### Agent A — Sổ mẫu · vòng đời · sự kiện · `/models` khung  (P0, đường găng)
-Nhánh `claude/cos-a-model-foundation` · migration `0131`.
+Nhánh `claude/cos-a-model-foundation` · migration `0132` (cấp ban đầu 0131).
 1. `product_models`, `product_model_state_history`, `domain_events` (hợp đồng mục 1–2).
 2. `lib/constants/model-lifecycle.ts`, `lib/constants/domain-events.ts`, `lib/events/emit.ts`,
    `lib/models/service.ts`, `lib/queries/models.ts`, `lib/actions/models.ts`.
@@ -28,7 +28,7 @@ Nhánh `claude/cos-b-creative-ads` · không migration.
 5. Hiện CPO / doanh thu làm BẰNG CHỨNG cạnh phán quyết creative — KHÔNG đổi ngưỡng WIN.
 
 ### Agent D — Sổ kho an toàn · trạng thái tồn  (P0/P2)
-Nhánh `claude/cos-d-inventory` · migration `0132`.
+Nhánh `claude/cos-d-inventory` · migration `0133` (cấp ban đầu 0132).
 1. FIX xoá phiếu kho: chặn xoá phiếu RETURN đang gắn phiếu kiểm hoàn (chỉ đường gỡ có sẵn), xoá phiếu
    đi qua duyệt hai bước như ADJUSTMENT/ISSUE, `audit()` mang ảnh chụp đầy đủ trước khi xoá.
 2. FIX tổng tồn trang chủ cộng cả dòng âm: tách dòng âm thành con số riêng.
@@ -37,7 +37,7 @@ Nhánh `claude/cos-d-inventory` · migration `0132`.
 5. Ngưỡng chậm/chết/tồn dư vào `settings` (`inventory.slowMoving`), mặc định LẤY TỪ hằng số đang chạy.
 
 ### Agent F — Kinh tế theo mẫu  (P1/P3)
-Nhánh `claude/cos-f-economics` · migration `0133`.
+Nhánh `claude/cos-f-economics` · migration `0135` (cấp ban đầu 0133).
 1. CPO hoà vốn / trần QC mỗi đơn trên bảng quyết định `/ads` — MỘT công thức với `adsCeiling` hoặc
    chứng minh bằng kiểm thử hai đường ra cùng số.
 2. Lưu lợi nhuận DỰ PHÓNG vào `ads_decision_ledger` để đo độ chính xác dự báo sau này.
@@ -81,17 +81,21 @@ số lại migration nếu trùng, chạy cổng trên cây sạch, kiểm độ
 |---|---|---|---|---|
 | — | Tài liệu audit / kiến trúc / hợp đồng | — | — | #263 (đã gộp) |
 | B | Creative ↔ Ads theo mẫu | — | 12/12 | #263 (đã gộp) |
-| A | Sổ mẫu · vòng đời · sự kiện · `/models` | 0131 | 14/14 | #264 |
-| D | Sổ kho an toàn · trạng thái tồn · phiếu nối lệnh SX | 0132 | 13/13 | #264 |
-| G | Duyệt hai bước tiêu thụ được · audit cột · quan sát job | 0133 | 17/17 + 7/7 | #265 |
-| F | CPO hoà vốn · dự phóng trong sổ · kinh tế theo mẫu · chênh lệch giá SX | 0134 | 13/13 | #265 |
-| C | Topic → costing phiên bản → mẫu → bản thiết kế bất biến → PO | 0135 | 23/23 | #269 |
-| E | Kết cục hàng hoàn không tái nhập | 0136 | 18/18 + 5/5 | #269 |
-| A2 | Trang Model 360 · tín hiệu mẫu · ý tưởng → mẫu | 0137 | 19/19 + 11/11 | #270 |
+| A | Sổ mẫu · vòng đời · sự kiện · `/models` | 0132 | 14/14 | #264 |
+| D | Sổ kho an toàn · trạng thái tồn · phiếu nối lệnh SX | 0133 | 13/13 | #264 |
+| G | Duyệt hai bước tiêu thụ được · audit cột · quan sát job | 0134 | 17/17 + 7/7 | #265 |
+| F | CPO hoà vốn · dự phóng trong sổ · kinh tế theo mẫu · chênh lệch giá SX | 0135 | 13/13 | #265 |
+| C | Topic → costing phiên bản → mẫu → bản thiết kế bất biến → PO | 0136 | 23/23 | #269 |
+| E | Kết cục hàng hoàn không tái nhập | 0137 | 18/18 + 5/5 | #269 |
+| A2 | Trang Model 360 · tín hiệu mẫu · ý tưởng → mẫu | 0138 | 19/19 + 11/11 | #270 |
 | QA | E2E 11 bước toàn vòng đời (+ sửa B1 "đang SX" đếm trùng) | — | B1 6/6 | #270 |
-| H | Cockpit "Cần anh quyết" + sổ quyết định đề xuất | 0138 | 23/23 | PR cuối |
+| H | Cockpit "Cần anh quyết" + sổ quyết định đề xuất | 0139 | 23/23 | #271 |
+| S + L | Tín hiệu mẫu hàng loạt · tin Lark "Cần anh quyết" | — | 13/13 · 20/20 | #274 |
 
-Thứ tự gộp bắt buộc: #264 → #265 → #269 → #270 → PR cuối (mỗi PR dựng trên PR trước).
+Thứ tự gộp bắt buộc: #264 → #265 → #269 → #270 → #271 → #274 (mỗi PR dựng trên PR trước).
+
+Các tệp `handoff-*.md` ghi số migration LÚC agent viết; số thật là cột Migration ở bảng trên
+(và `shared-contracts.md` §7).
 
 ## Còn lại sau đợt này (DEFER có lý do)
 
@@ -99,4 +103,3 @@ Thứ tự gộp bắt buộc: #264 → #265 → #269 → #270 → PR cuối (m�
 - `approval.executed`, `stock_receipt.linked_production`: vẫn RESERVED — chưa có điểm phát đáng tin.
 - `transitionModelCore` nhận giao dịch đang mở (yêu cầu của C) để vòng đời đổi CÙNG giao dịch nghiệp vụ.
 - Luồng xả tồn → creative / ads (P4), video creative, BOM vật tư, dự báo 3/7/14/30 ngày.
-- Tín hiệu mẫu đọc hàng loạt để cockpit dùng WINNER thật thay cho phiếu SCALE của quảng cáo.

@@ -265,7 +265,7 @@ export async function testCompanyOsEconomicsDb(db: Db) {
   await db.delete(L).where(eq(L.entityKey, KEY));
   try {
     const base = ledgerRowValues(buildDecisionRow(agg({ key: KEY }), "product", 1_000_000, true), "2020-01-01", "2019-12-01", "2019-12-14");
-    // Dòng "cũ": ghi như trước 0134 — không có ba cột dự phóng.
+    // Dòng "cũ": ghi như trước 0135 — không có ba cột dự phóng.
     await db.insert(L).values({ ...base, projectedProfitAfterAds: null, projectedHeadroom: null, appliedDeliveryRate: null });
     const cuTruoc = (await db.select().from(L).where(and(eq(L.entityKey, KEY), eq(L.decisionDay, "2020-01-01"))))[0];
 

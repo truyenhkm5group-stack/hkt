@@ -164,7 +164,7 @@ export function testCompanyOsProductionPure() {
   const mig = nguon("drizzle/0136_company_os_production.sql");
   const danhSach = (ten: string) => {
     const m = new RegExp(`"${ten}" CHECK \\(\\(?"[a-z_]+" IN \\(([^)]+)\\)`).exec(mig);
-    assert.ok(m, `migration 0135 phải có CHECK ${ten}`);
+    assert.ok(m, `migration 0136 phải có CHECK ${ten}`);
     return [...m[1].matchAll(/'([A-Z_]+)'/g)].map((x) => x[1]);
   };
   assert.deepEqual(danhSach("production_topics_status_check"), [...TOPIC_STATUSES]);
@@ -172,7 +172,7 @@ export function testCompanyOsProductionPure() {
   assert.deepEqual(danhSach("cost_sheet_lines_kind_check"), [...COST_LINE_KINDS]);
   assert.deepEqual(danhSach("samples_status_check"), [...SAMPLE_STATUSES]);
   assert.deepEqual(danhSach("sample_reviews_decision_check"), [...SAMPLE_REVIEW_DECISIONS]);
-  assert.ok(!/INSERT INTO "settings"/i.test(mig) && !/UPDATE "production_orders"/i.test(mig), "0135 không gieo cờ, không backfill lệnh cũ");
+  assert.ok(!/INSERT INTO "settings"/i.test(mig) && !/UPDATE "production_orders"/i.test(mig), "0136 không gieo cờ, không backfill lệnh cũ");
 
   // ───────── 8. Quyền ─────────
   assert.ok(ROLE_BUILDER_FORBIDDEN.includes("production:approve"), "vai trò tuỳ chỉnh không được tự bó quyền duyệt");

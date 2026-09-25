@@ -3,7 +3,7 @@ import { schema, type Db } from "@/db";
 import { batchLinkFacts } from "@/lib/queries/workshop-ledger";
 
 /**
- * ═══════════ PHIẾU NHẬP ↔ LỆNH SẢN XUẤT / LÔ XƯỞNG (Company OS · Agent D · 0132) ═══════════
+ * ═══════════ PHIẾU NHẬP ↔ LỆNH SẢN XUẤT / LÔ XƯỞNG (Company OS · Agent D · 0133) ═══════════
  *
  * Hai cột `stock_receipts.production_order_id` / `production_batch_id` trả lời "phiếu nhập này là hàng
  * của lần đặt xưởng nào". Chỉ do NGƯỜI chọn trên form nhập hàng — máy KHÔNG đoán (khớp theo tên xưởng

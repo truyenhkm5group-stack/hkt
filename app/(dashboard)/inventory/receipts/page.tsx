@@ -182,7 +182,7 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
 }
 
 /**
- * Phiếu nhập này là hàng của lệnh SX / lô xưởng nào (0132). `null` = chưa khai — phiếu cũ không
+ * Phiếu nhập này là hàng của lệnh SX / lô xưởng nào (0133). `null` = chưa khai — phiếu cũ không
  * được đoán lô (AGENTS.md mục 35), nên không in gì thay vì in một lô đoán.
  */
 function productionLinkLabel(r: StockReceiptRow): string | null {

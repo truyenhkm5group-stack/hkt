@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { acknowledgeCase, assignCase, ignoreCase, markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, sendStockShortageNow, sendTestLark, sendTestLarkBilling, sendTestTelegram, startCase, unignoreCase } from "@/lib/actions/alerts";
+import { acknowledgeCase, assignCase, ignoreCase, markNotificationsRead, resolveNotification, runAlertsNow, saveAlertConfig, saveOwnerDigestConfig, sendStockShortageNow, sendTestLark, sendTestLarkBilling, sendTestTelegram, startCase, unignoreCase } from "@/lib/actions/alerts";
 import type { AlertConfig } from "@/lib/constants/alerts";
 import type { CaseStatus } from "@/lib/constants/action-queue";
 
@@ -250,6 +250,36 @@ export function AssignSelect({ id, users, current }: { id: string; users: { id: 
   );
 }
 
+/**
+ * Công tắc "Cần anh quyết" → nhóm Quản lý. LƯU NGAY khi bấm (khoá riêng `owner.digest`), nên nó KHÔNG
+ * làm khung cảnh báo "chưa lưu" và không cần nút "Lưu cấu hình cảnh báo".
+ */
+function OwnerDigestSwitch({ initial, hasManagerWebhook }: { initial: boolean; hasManagerWebhook: boolean }) {
+  const [enabled, setEnabled] = useState(initial);
+  const [pending, startTransition] = useTransition();
+  const change = (v: boolean) =>
+    startTransition(async () => {
+      const r = await saveOwnerDigestConfig({ enabled: v });
+      if ("error" in r) toast.error(r.error);
+      else {
+        setEnabled(r.enabled);
+        toast.success(r.enabled ? "Đã BẬT tin “Cần anh quyết” vào nhóm Quản lý" : "Đã TẮT tin “Cần anh quyết”");
+      }
+    });
+  return (
+    <div className="space-y-1 rounded-lg border px-3 py-2 sm:col-span-2">
+      <label className="flex items-center gap-2 font-medium">
+        <Checkbox checked={enabled} disabled={pending} onCheckedChange={(v) => change(v === true)} /> Gửi “Cần anh quyết” vào nhóm Quản lý
+        {pending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+      </label>
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        Một tin mỗi sáng (số việc theo loại + vài dòng đầu + link mở Cần anh quyết); thêm tin trong ngày CHỈ khi có yêu cầu duyệt / mẫu chờ duyệt MỚI. Dòng đã bỏ qua / hẹn nhắc không vào tin, tin không in số tiền. Lưu ngay khi bấm — không cần nút Lưu cấu hình cảnh báo.
+        {hasManagerWebhook ? "" : " Chưa lưu webhook nhóm Quản lý — bật cũng chưa gửi được."}
+      </p>
+    </div>
+  );
+}
+
 /** Cấu hình cảnh báo & Telegram (Quản trị) */
 export function AlertConfigForm({
   config,
@@ -258,6 +288,7 @@ export function AlertConfigForm({
   hasLarkBillingSecret,
   hasLarkInventorySecret,
   hasLarkManagerSecret,
+  ownerDigestEnabled = false,
 }: {
   config: AlertConfig;
   hasToken: boolean;
@@ -265,6 +296,7 @@ export function AlertConfigForm({
   hasLarkBillingSecret?: boolean;
   hasLarkInventorySecret?: boolean;
   hasLarkManagerSecret?: boolean;
+  ownerDigestEnabled?: boolean;
 }) {
   const initial = useMemo(() => ({ ...config, telegramBotToken: "", larkSecret: "", larkBillingSecret: "", larkInventorySecret: "", larkManagerSecret: "" }), [config]);
   const [form, setForm] = useState(initial);
@@ -377,6 +409,7 @@ export function AlertConfigForm({
           <Label>Lark · Signature secret nhóm Quản lý (tuỳ chọn)</Label>
           <Input type="password" value={form.larkManagerSecret} onChange={(e) => setForm({ ...form, larkManagerSecret: e.target.value })} placeholder={hasLarkManagerSecret ? "Đã lưu — để trống là giữ nguyên" : "Để trống nếu không bật ký"} />
         </div>
+        <OwnerDigestSwitch initial={ownerDigestEnabled} hasManagerWebhook={Boolean(config.larkManagerWebhookUrl)} />
         <div className="space-y-1">
           <Label>Cảnh báo khi dư nợ đạt (% ngưỡng thanh toán)</Label>
           <Input type="number" min={10} max={100} value={form.billingWarnPercent} onChange={(e) => setForm({ ...form, billingWarnPercent: Number(e.target.value) || 80 })} />

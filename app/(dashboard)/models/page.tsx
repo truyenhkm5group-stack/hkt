@@ -7,8 +7,10 @@ import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
+import { loadSource } from "@/lib/constants/model-360";
 import { MODEL_STATE_UNDECLARED_LABEL } from "@/lib/constants/model-lifecycle";
 import { formatDateTime, formatNumber } from "@/lib/format";
+import { getModelSignalsBatch } from "@/lib/queries/model-signal";
 import { listModels, MODEL_SORTABLE, MODEL_STATE_NONE, modelRegistrySummary, modelStateFacets, previewModelRegistry } from "@/lib/queries/models";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
@@ -27,7 +29,35 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
   const canWrite = can(user, "models:write");
   const raw = await searchParams;
   const params = parseListParams(raw, { defaultSort: "code", defaultDir: "asc", filterKeys: ["state", "link"], sortable: MODEL_SORTABLE, defaultPeriod: "all" });
-  const [{ rows, total, pageCount }, facets, summary, preview] = await Promise.all([listModels(params), modelStateFacets(), modelRegistrySummary(), previewModelRegistry()]);
+  // Cột "Tín hiệu" (Agent S): TẮT mặc định — lượt nguội của tín hiệu theo lô đọc bảng quyết định quảng cáo và
+  // hiệu quả mẫu mã cả shop (vài giây trên production), không bắt mọi lượt mở danh sách trả giá đó.
+  const coTinHieu = raw.tinhieu === "1";
+  const [{ rows, total, pageCount }, facets, summary, preview, tinHieu] = await Promise.all([
+    listModels(params),
+    modelStateFacets(),
+    modelRegistrySummary(),
+    previewModelRegistry(),
+    coTinHieu ? loadSource("tín hiệu mẫu", () => getModelSignalsBatch()) : Promise.resolve(null),
+  ]);
+  const signals =
+    tinHieu && tinHieu.ok
+      ? {
+          periodLabel: tinHieu.data.periodLabel,
+          byModel: Object.fromEntries(
+            tinHieu.data.rows.filter((r) => rows.some((x) => x.id === r.model.id)).map((r) => [r.model.id, { signal: r.signal.signal, summary: r.signal.summary, conflicts: r.signal.conflicts.length }]),
+          ),
+        }
+      : undefined;
+  const hrefTinHieu = (() => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(raw)) {
+      if (k === "tinhieu" || v === undefined) continue;
+      for (const x of Array.isArray(v) ? v : [v]) q.append(k, x);
+    }
+    if (!coTinHieu) q.set("tinhieu", "1");
+    const s = q.toString();
+    return s ? `/models?${s}` : "/models";
+  })();
 
   const chuaDongBo = summary.total === 0;
   const trangThaiLoc = params.filters.state ?? [];
@@ -113,6 +143,11 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
             <Link href={`/models?state=${MODEL_STATE_NONE}`} className={cn("rounded-full border px-2.5 py-0.5", chiChuaKhai ? "border-primary bg-primary/10 font-semibold" : "hover:bg-muted")}>
               {MODEL_STATE_UNDECLARED_LABEL} ({formatNumber(summary.undeclared)})
             </Link>
+            <span className="ml-2 text-muted-foreground">Cột:</span>
+            <Link href={hrefTinHieu} className={cn("rounded-full border px-2.5 py-0.5", coTinHieu ? "border-primary bg-primary/10 font-semibold" : "hover:bg-muted")}>
+              {coTinHieu ? "✓ " : ""}Tín hiệu mẫu
+            </Link>
+            {tinHieu && !tinHieu.ok ? <span className="text-rose-700 dark:text-rose-300">Không đọc được nguồn {tinHieu.source}: {tinHieu.error}</span> : null}
           </div>
           <DataTableToolbar
             searchPlaceholder="Mã mẫu, tên…"
@@ -131,7 +166,7 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
             ]}
             resultLabel={`${formatNumber(total)} mẫu phù hợp`}
           />
-          <ModelsTable rows={rows} pageCount={pageCount} total={total} emptyDescription="Không mẫu nào khớp bộ lọc — thử bỏ bớt điều kiện." />
+          <ModelsTable rows={rows} pageCount={pageCount} total={total} signals={signals} emptyDescription="Không mẫu nào khớp bộ lọc — thử bỏ bớt điều kiện." />
         </>
       )}
 

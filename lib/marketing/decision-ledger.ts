@@ -79,7 +79,7 @@ export function ledgerRowValues(row: AdsDecisionRow, decisionDay: string, period
     headroom: row.headroom,
     breakEvenBookedRoas: row.breakEvenBookedRoas,
     /*
-      ẢNH CHỤP DỰ PHÓNG (Company OS · F, migration 0134) — chép từ CHÍNH dòng vừa kết luận, không
+      ẢNH CHỤP DỰ PHÓNG (Company OS · F, migration 0135) — chép từ CHÍNH dòng vừa kết luận, không
       tính lại. Ghi cho MỌI dòng, cả dòng căn cứ `ACTUAL`: khi ấy nó bằng số đo cộng phần treo nhỏ,
       và vẫn là con số cần có để đo sai số dự báo về sau. Không biết số chi ⇒ lợi nhuận sau QC là
       CHƯA BIẾT ⇒ `null`, không phải con số trước QC giả làm sau QC (mục 42).

@@ -14,6 +14,7 @@ import { sendTelegram } from "@/lib/alerts/telegram";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { ALERT_CONFIG_KEY, type AlertConfig } from "@/lib/constants/alerts";
+import { DEFAULT_OWNER_DIGEST_CONFIG, OWNER_DIGEST_CONFIG_KEY, type OwnerDigestConfig } from "@/lib/constants/owner-digest";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
 
 const configSchema = z.object({
@@ -96,6 +97,25 @@ export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { 
   await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: ALERT_CONFIG_KEY, detail: { ...data, telegramBotToken: data.telegramBotToken ? "***" : "", larkSecret: data.larkSecret ? "***" : "", larkBillingSecret: data.larkBillingSecret ? "***" : "", larkInventorySecret: data.larkInventorySecret ? "***" : "", larkManagerSecret: data.larkManagerSecret ? "***" : "" } });
   revalidatePath("/integrations");
   return { ok: true };
+}
+
+/**
+ * BẬT / TẮT tin "Cần anh quyết" vào nhóm Lark Quản lý (`owner.digest`). Khoá RIÊNG, không nằm trong
+ * `alerts.config`: công tắc lưu NGAY khi bấm, nên không lẫn với nút "Lưu cấu hình cảnh báo" của khung
+ * (sự cố hai khung lưu 24/09/2026). Mặc định TẮT — bật là quyết định của chủ shop; mỗi lần đổi vào nhật ký.
+ */
+export async function saveOwnerDigestConfig(input: unknown): Promise<{ ok: true; enabled: boolean } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "alerts:manage")) return { error: "Không có quyền" };
+  const parsed = z.object({ enabled: z.boolean() }).safeParse(input);
+  if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };
+  const before = await getSettingJson<OwnerDigestConfig>(OWNER_DIGEST_CONFIG_KEY, DEFAULT_OWNER_DIGEST_CONFIG);
+  if (before.enabled === parsed.data.enabled) return { ok: true, enabled: parsed.data.enabled };
+  const data: OwnerDigestConfig = { enabled: parsed.data.enabled };
+  await setSettingJson(OWNER_DIGEST_CONFIG_KEY, data);
+  await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: OWNER_DIGEST_CONFIG_KEY, detail: { before: { enabled: before.enabled === true }, after: data } });
+  revalidatePath("/alerts");
+  return { ok: true, enabled: data.enabled };
 }
 
 export async function sendTestTelegram(): Promise<{ ok: true } | { error: string }> {

@@ -240,8 +240,8 @@ export async function testMigrationUpgradePath() {
       kiểm dựng trên dữ liệu đẹp hơn thực tế thì nó đo một thế giới không tồn tại.
     */
     await client.query(`update departments set sort_order = 100`);
-    // 0135: một lệnh sản xuất CŨ (có trước bản duyệt / gợi ý đã lưu) — ba cột mới phải để NULL cho nó.
-    await client.query(`insert into production_orders (id, code) values ('up-po1', 'PO-UP-0135')`);
+    // 0136: một lệnh sản xuất CŨ (có trước bản duyệt / gợi ý đã lưu) — ba cột mới phải để NULL cho nó.
+    await client.query(`insert into production_orders (id, code) values ('up-po1', 'PO-UP-0136')`);
 
     /*
       Company OS · Agent G (0134). Một dòng nhật ký và một yêu cầu duyệt ĐANG CHỜ có từ trước — bước
@@ -253,14 +253,14 @@ export async function testMigrationUpgradePath() {
     await client.query(`insert into approval_requests (id, "group", action, summary, requested_by, requested_by_email) values ('up-ar1', 'EXPENSE_EDIT', 'expense.update', 'yêu cầu cũ', 'up-u1', 'a@shop.vn')`);
 
     /*
-      Company OS · A2 (0137). Một ý tưởng marketing có từ trước — bước 2 kiểm rằng migration KHÔNG đoán
+      Company OS · A2 (0138). Một ý tưởng marketing có từ trước — bước 2 kiểm rằng migration KHÔNG đoán
       mẫu cho ý tưởng cũ (mục 35): cột mới `model_id` phải NULL.
     */
-    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'marketing_ideas' and column_name = 'model_id'"), 0, "bước 1: cột marketing_ideas.model_id CHƯA được có — đó là thứ 0137 thêm vào");
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'marketing_ideas' and column_name = 'model_id'"), 0, "bước 1: cột marketing_ideas.model_id CHƯA được có — đó là thứ 0138 thêm vào");
     await client.query(`insert into marketing_ideas (id, idea_date, content) values ('up-idea1', '2026-09-01', 'Ý tưởng cũ Q012')`);
 
-    // Company OS · Agent H (0138). Bảng sổ phản ứng chưa được có ở trạng thái cũ.
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'recommendation_decisions'"), 0, "bước 1: bảng recommendation_decisions CHƯA được có — đó là thứ 0138 thêm vào");
+    // Company OS · Agent H (0139). Bảng sổ phản ứng chưa được có ở trạng thái cũ.
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'recommendation_decisions'"), 0, "bước 1: bảng recommendation_decisions CHƯA được có — đó là thứ 0139 thêm vào");
 
     // ══ BƯỚC 2: áp migration mới lên ĐÚNG trạng thái đó ══
     writeFileSync(soFile, JSON.stringify(so, null, 2) + "\n");
@@ -269,29 +269,29 @@ export async function testMigrationUpgradePath() {
     const sau = await dem("select count(*)::int as n from drizzle.__drizzle_migrations");
     assert.equal(sau - truoc, MOI.length, `bước 2: phải áp thêm ĐÚNG ${MOI.length} migration, thực tế ${sau - truoc}`);
 
-    // 0131 (Company OS · Agent A): ba bảng mới, và migration KHÔNG gieo mẫu nào — sổ mẫu chỉ được lấp bằng
+    // 0132 (Company OS · Agent A): ba bảng mới, và migration KHÔNG gieo mẫu nào — sổ mẫu chỉ được lấp bằng
     // job `model-registry` do người bấm, trạng thái vòng đời không backfill (mục 8.8, 35).
-    // 0136 (Company OS · Agent E): sổ kết cục hàng hoàn — bảng mới, KHÔNG gieo kết cục cho món đã kiểm trước đó.
-    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_dispositions'"), 1, "bước 2: 0136 phải tạo bảng return_dispositions");
-    assert.equal(await dem("select count(*)::int as n from return_dispositions"), 0, "bước 2: 0136 không được gieo kết cục nào (mục 8.8, 35)");
+    // 0137 (Company OS · Agent E): sổ kết cục hàng hoàn — bảng mới, KHÔNG gieo kết cục cho món đã kiểm trước đó.
+    assert.equal(await dem("select count(*)::int as n from information_schema.tables where table_name = 'return_dispositions'"), 1, "bước 2: 0137 phải tạo bảng return_dispositions");
+    assert.equal(await dem("select count(*)::int as n from return_dispositions"), 0, "bước 2: 0137 không được gieo kết cục nào (mục 8.8, 35)");
     for (const bang of ["product_models", "product_model_state_history", "domain_events"]) {
-      assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `bước 2: 0131 phải tạo bảng ${bang}`);
-      assert.equal(await dem(`select count(*)::int as n from ${bang}`), 0, `bước 2: 0131 không được gieo dòng nào vào ${bang}`);
+      assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `bước 2: 0132 phải tạo bảng ${bang}`);
+      assert.equal(await dem(`select count(*)::int as n from ${bang}`), 0, `bước 2: 0132 không được gieo dòng nào vào ${bang}`);
     }
 
-    // 0135 (Company OS · Agent C): bảy bảng sản xuất nửa đầu, KHÔNG gieo dòng nào; ba cột mới của lệnh sản
+    // 0136 (Company OS · Agent C): bảy bảng sản xuất nửa đầu, KHÔNG gieo dòng nào; ba cột mới của lệnh sản
     // xuất để NULL (không backfill bản duyệt / gợi ý / lý do cho lệnh cũ — mục 8.8, 35); cờ bắt buộc bản
     // duyệt KHÔNG được migration ghi (không dòng settings ⇒ mặc định TẮT).
     for (const bang of ["production_topics", "production_topic_messages", "cost_sheets", "cost_sheet_lines", "samples", "sample_reviews", "design_versions"]) {
-      assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `bước 2: 0135 phải tạo bảng ${bang}`);
-      assert.equal(await dem(`select count(*)::int as n from ${bang}`), 0, `bước 2: 0135 không được gieo dòng nào vào ${bang}`);
+      assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `bước 2: 0136 phải tạo bảng ${bang}`);
+      assert.equal(await dem(`select count(*)::int as n from ${bang}`), 0, `bước 2: 0136 không được gieo dòng nào vào ${bang}`);
     }
     assert.equal(
       await dem("select count(*)::int as n from production_orders where id = 'up-po1' and design_version_id is null and suggested_cells is null and override_reason is null"),
       1,
-      "bước 2: 0135 không được backfill bản duyệt / gợi ý / lý do cho lệnh sản xuất cũ",
+      "bước 2: 0136 không được backfill bản duyệt / gợi ý / lý do cho lệnh sản xuất cũ",
     );
-    assert.equal(await dem("select count(*)::int as n from settings where key = 'production.requireApprovedDesign'"), 0, "bước 2: 0135 không được bật cờ bắt buộc bản duyệt");
+    assert.equal(await dem("select count(*)::int as n from settings where key = 'production.requireApprovedDesign'"), 0, "bước 2: 0136 không được bật cờ bắt buộc bản duyệt");
 
     /*
       ═══ 0081 NAY NẰM TRONG TRẠNG THÁI PRODUCTION (bước 1) ═══
@@ -1606,24 +1606,24 @@ export async function testMigrationUpgradePath() {
     await client.query(`delete from audit_logs where id = 'up-al1'`);
     await client.query(`delete from users where id = 'up-ug'`);
 
-    // 0137: ý tưởng cũ giữ NULL (không đoán mẫu); mẫu bị xoá thì ý tưởng còn nguyên, chỉ mất liên kết.
-    assert.equal(await dem("select count(*)::int as n from marketing_ideas where id = 'up-idea1' and model_id is null"), 1, "0137: ý tưởng cũ phải giữ model_id NULL — KHÔNG backfill theo nội dung chữ");
-    await assert.rejects(client.query(`update marketing_ideas set model_id = 'khong-co-mau' where id = 'up-idea1'`), "0137: khoá ngoại phải chặn mẫu không tồn tại");
+    // 0138: ý tưởng cũ giữ NULL (không đoán mẫu); mẫu bị xoá thì ý tưởng còn nguyên, chỉ mất liên kết.
+    assert.equal(await dem("select count(*)::int as n from marketing_ideas where id = 'up-idea1' and model_id is null"), 1, "0138: ý tưởng cũ phải giữ model_id NULL — KHÔNG backfill theo nội dung chữ");
+    await assert.rejects(client.query(`update marketing_ideas set model_id = 'khong-co-mau' where id = 'up-idea1'`), "0138: khoá ngoại phải chặn mẫu không tồn tại");
     await client.query(`insert into product_models (id, code, registered_by) values ('up-pm1', 'UPQ012', 'USER')`);
     await client.query(`update marketing_ideas set model_id = 'up-pm1' where id = 'up-idea1'`);
     await client.query(`delete from product_models where id = 'up-pm1'`);
-    assert.equal(await dem("select count(*)::int as n from marketing_ideas where id = 'up-idea1' and model_id is null"), 1, "0137: xoá mẫu thì ý tưởng còn nguyên, liên kết rơi về NULL (ON DELETE SET NULL)");
+    assert.equal(await dem("select count(*)::int as n from marketing_ideas where id = 'up-idea1' and model_id is null"), 1, "0138: xoá mẫu thì ý tưởng còn nguyên, liên kết rơi về NULL (ON DELETE SET NULL)");
     await client.query(`delete from marketing_ideas where id = 'up-idea1'`);
 
-    // 0138 (Company OS · Agent H): sổ phản ứng với đề xuất — bảng mới RỖNG (không đoán phản ứng cho quá
+    // 0139 (Company OS · Agent H): sổ phản ứng với đề xuất — bảng mới RỖNG (không đoán phản ứng cho quá
     // khứ), bỏ qua phải có lý do, nhắc lại sau phải có ngày, người quyết phải là một tài khoản có thật.
-    assert.equal(await dem("select count(*)::int as n from recommendation_decisions"), 0, "0138: bảng recommendation_decisions phải RỖNG sau migration — không backfill");
+    assert.equal(await dem("select count(*)::int as n from recommendation_decisions"), 0, "0139: bảng recommendation_decisions phải RỖNG sau migration — không backfill");
     await client.query(`insert into users (id, email, name, password_hash, role) values ('up-uh', 'h@shop.vn', 'H', 'x', 'ADMIN')`);
     await client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd1', 'sample:x', 'SAMPLE_REVIEW', 'ACCEPTED', 'up-uh', '{}')`);
-    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, reason, decided_by_user_id, snapshot) values ('up-rd2', 'sample:x', 'SAMPLE_REVIEW', 'DISMISSED', '  ', 'up-uh', '{}')`), "0138: bỏ qua không lý do phải bị CSDL chặn");
-    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd3', 'sample:x', 'SAMPLE_REVIEW', 'SNOOZED', 'up-uh', '{}')`), "0138: nhắc lại sau không ngày phải bị CSDL chặn");
-    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd4', 'sample:x', 'SAMPLE_REVIEW', 'ACCEPTED', 'khong-co', '{}')`), "0138: người quyết phải là một tài khoản có thật (khoá ngoại)");
-    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd5', 'sample:x', 'LA', 'ACCEPTED', 'up-uh', '{}')`), "0138: loại đề xuất lạ phải bị CSDL chặn");
+    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, reason, decided_by_user_id, snapshot) values ('up-rd2', 'sample:x', 'SAMPLE_REVIEW', 'DISMISSED', '  ', 'up-uh', '{}')`), "0139: bỏ qua không lý do phải bị CSDL chặn");
+    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd3', 'sample:x', 'SAMPLE_REVIEW', 'SNOOZED', 'up-uh', '{}')`), "0139: nhắc lại sau không ngày phải bị CSDL chặn");
+    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd4', 'sample:x', 'SAMPLE_REVIEW', 'ACCEPTED', 'khong-co', '{}')`), "0139: người quyết phải là một tài khoản có thật (khoá ngoại)");
+    await assert.rejects(client.query(`insert into recommendation_decisions (id, source_key, kind, decision, decided_by_user_id, snapshot) values ('up-rd5', 'sample:x', 'LA', 'ACCEPTED', 'up-uh', '{}')`), "0139: loại đề xuất lạ phải bị CSDL chặn");
     await client.query(`delete from recommendation_decisions where id = 'up-rd1'`);
     await client.query(`delete from users where id = 'up-uh'`);
 
@@ -1641,23 +1641,23 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from tech_agent_runs"), 0, "chạy lại migration KHÔNG được sinh lượt chạy agent nào");
 
     /*
-      ═══ 0134 (Company OS · F): ẢNH CHỤP DỰ PHÓNG — BA CỘT MỚI, DÒNG CŨ ĐỨNG NGUYÊN ═══
+      ═══ 0135 (Company OS · F): ẢNH CHỤP DỰ PHÓNG — BA CỘT MỚI, DÒNG CŨ ĐỨNG NGUYÊN ═══
 
       Bảng sổ vẫn nằm trong nhóm migration mới của bản phát hành này (0108), nên không gieo được một
-      dòng "trước 0134" ở bước 1. Thay vào đó: (a) một dòng ghi bằng câu lệnh KHÔNG nhắc tới ba cột —
-      đúng như mọi dòng đã có trên production — phải mang NULL ở cả ba (không DEFAULT); (b) tệp 0134
+      dòng "trước 0135" ở bước 1. Thay vào đó: (a) một dòng ghi bằng câu lệnh KHÔNG nhắc tới ba cột —
+      đúng như mọi dòng đã có trên production — phải mang NULL ở cả ba (không DEFAULT); (b) tệp 0135
       không được chứa UPDATE nào (không backfill, mục 35, 8.8). Dòng cũ đứng nguyên sau lượt ghi của
       job được khoá ở `tests/company-os-economics.test.ts`.
     */
     await client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, basis, period_from, period_to, rule_version, rule_snapshot, spend_known, profit_after_ads) values ('up-f1', '2026-09-20', 'product', 'p-old', 'SCALE', 'ACTIONABLE', 'PROJECTED', '2026-08-22', '2026-09-04', 2, '{}'::jsonb, true, 123456)`);
-    assert.ok(!/update/i.test(readFileSync(path.join(goc, "0135_company_os_economics.sql"), "utf8").replace(/--.*$/gm, "")), "0134: migration KHÔNG được chứa UPDATE — không backfill dòng sổ cũ");
+    assert.ok(!/update/i.test(readFileSync(path.join(goc, "0135_company_os_economics.sql"), "utf8").replace(/--.*$/gm, "")), "0135: migration KHÔNG được chứa UPDATE — không backfill dòng sổ cũ");
     assert.equal(
       await dem("select count(*)::int as n from ads_decision_ledger where id = 'up-f1' and projected_profit_after_ads is null and projected_headroom is null and applied_delivery_rate is null and profit_after_ads = 123456"),
       1,
-      "0134: dòng sổ cũ phải giữ NULL ở ba cột dự phóng — không backfill, không mặc định — và giữ nguyên lợi nhuận đo được",
+      "0135: dòng sổ cũ phải giữ NULL ở ba cột dự phóng — không backfill, không mặc định — và giữ nguyên lợi nhuận đo được",
     );
     await client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, basis, period_from, period_to, rule_version, rule_snapshot, spend_known, projected_profit_after_ads, projected_headroom, applied_delivery_rate) values ('up-f2', '2026-09-26', 'product', 'p-new', 'SCALE', 'ACTIONABLE', 'PROJECTED', '2026-08-28', '2026-09-10', 2, '{}'::jsonb, true, -250000, 0.85, 62.5)`);
-    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id = 'up-f2' and projected_profit_after_ads = -250000 and applied_delivery_rate = 62.5"), 1, "0134: dòng mới ghi được dự phóng (kể cả số âm)");
+    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id = 'up-f2' and projected_profit_after_ads = -250000 and applied_delivery_rate = 62.5"), 1, "0135: dòng mới ghi được dự phóng (kể cả số âm)");
     await client.query(`delete from ads_decision_ledger where id in ('up-f1', 'up-f2')`);
     console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · sổ đề xuất AI CTO và phép chiếu PR vào đời RỖNG, bốn ràng buộc mới chặn đúng · bằng chứng lượt sửa mặc định (1,'',NONE) và hai ràng buộc 0105 chặn đúng · khoá lượt chạy ngoài chặn bản sao nhưng cho nhiều NULL, không backfill dòng cũ · chạy lại không nhân đôi`);
   } finally {

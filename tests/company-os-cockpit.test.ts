@@ -24,7 +24,10 @@ import {
 } from "@/lib/constants/owner-decisions";
 import { MONEY_UNKNOWN, type WorkItem } from "@/lib/constants/work";
 import { readDecisionRows, recordRecommendationDecisionCore } from "@/lib/owner-decisions/service";
+import { ADS_ACTION_LABEL } from "@/lib/constants/ads-decision";
+import { deriveModelSignal, MODEL_SIGNAL_HINT, SIGNAL_SOURCE_LABEL, type ModelSignalInputs, type SignalSource } from "@/lib/constants/model-signal";
 import type { AdsDecisionRow } from "@/lib/queries/ads-decision";
+import type { ModelSignalBatchRow } from "@/lib/queries/model-signal";
 import type { ApprovalRequestRow } from "@/lib/queries/approvals";
 import type { InventoryDecisionRow } from "@/lib/queries/inventory-decision";
 import {
@@ -35,6 +38,8 @@ import {
   inventoryToItems,
   lateOrdersToItems,
   modelScaleToItems,
+  modelWinnerCandidates,
+  modelWinnerSourceKey,
   samplesToItems,
   topicsToItems,
   type SourceLoader,
@@ -220,13 +225,48 @@ export function testCompanyOsCockpitPure() {
   assert.ok(cut[1].data.every((d) => d.value === null || d.label === ""), "không có dòng bảng quyết định ⇒ ô số liệu CHƯA BIẾT");
   assert.ok(cut[1].data.some((d) => d.label === "Lãi sau QC (tạm tính)"), "dòng tạm tính mang nhãn tạm tính");
 
-  // ─── 1f. Mẫu quảng cáo đề nghị tăng ───
-  const ms = modelScaleToItems([{ model: { id: "m9", code: "Q009", name: "Áo" }, row: { ...row, reason: "ROAS giao vượt hoà vốn", basis: "ACTUAL" } as unknown as AdsDecisionRow }]);
-  assert.equal(ms[0].sourceKey, "model:SCALE:m9");
+  // ─── 1f. Mẫu THẮNG chưa mở topic sản xuất ───
+  // Agent S đổi nguồn: trước đây là riêng lá phiếu quảng cáo TĂNG (khoá `model:SCALE:<id>`); nay là tín
+  // hiệu mẫu ĐẦY ĐỦ đọc theo lô, nên dòng dựng từ `ModelSignalBatchRow` và khoá mang căn cứ (không ngày).
+  const sig = (i: Partial<ModelSignalInputs>, modelId = "m9") => ({
+    ...deriveModelSignal({ ads: { kind: "OK", action: "SCALE", reason: "ROAS giao vượt hoà vốn" }, productVerdicts: ["WINNER"], creative: null, design: null, inventory: [], declaredState: null, ...i }),
+    modelId,
+    periodLabel: "30 ngày qua",
+    summary: "",
+  });
+  const bRow = (id: string, over: { state?: ModelSignalBatchRow["model"]["state"]; open?: number | null; signal?: ModelSignalBatchRow["signal"] } = {}): ModelSignalBatchRow => ({
+    model: { id, code: `Q-${id}`, name: "Áo", state: over.state ?? null, productId: `p-${id}` },
+    signal: over.signal ?? sig({}, id),
+    openProductionTopics: over.open === undefined ? 0 : over.open,
+  });
+  assert.equal(sig({}).signal, "WINNER", "đầu vào mẫu của bài kiểm phải là THẮNG thật theo bảng gộp");
+  const ungVien = modelWinnerCandidates([
+    bRow("m9"),
+    bRow("m8", { open: 1 }),
+    bRow("m7", { open: null }),
+    bRow("m6", { state: "PRODUCTION_DISCUSSION" }),
+    bRow("m5", { signal: sig({ productVerdicts: [] }, "m5") }),
+    bRow("m4", { state: "WINNER" }),
+    bRow("m3", { state: "COSTING" }),
+  ]);
+  assert.deepEqual(ungVien.map((r) => r.model.id), ["m9", "m4"], "chỉ THẮNG · không topic mở (0 thật, không phải chưa biết) · trạng thái khai trước Bàn sản xuất");
+  const ms = modelScaleToItems(ungVien);
+  assert.ok(ms[0].sourceKey.startsWith("model:WINNER:m9:"), "khoá mang tín hiệu + mẫu");
+  assert.ok(!/\d{4}-\d{2}-\d{2}/.test(ms[0].sourceKey), "khoá KHÔNG mang ngày");
+  assert.equal(modelWinnerSourceKey("m9", sig({})), ms[0].sourceKey, "tất định — cùng căn cứ, cùng khoá");
+  assert.notEqual(modelWinnerSourceKey("m9", sig({ ads: { kind: "OK", action: "HOLD", reason: "x" } })), ms[0].sourceKey, "phán quyết quảng cáo đổi (Tăng → Giữ) ⇒ khoá đổi, lời bỏ qua cũ hết hiệu lực");
+  assert.notEqual(modelWinnerSourceKey("m9", sig({ creative: { total: 1, byVerdict: { WIN: 1 } } })), ms[0].sourceKey, "thêm một nguồn bỏ phiếu ⇒ khoá đổi");
+  assert.equal(modelWinnerSourceKey("m9", sig({ ads: { kind: "OK", action: "SCALE", reason: "câu khác" }, productVerdicts: ["WINNER", "WINNER"], inventory: ["REORDER"] })), ms[0].sourceKey, "câu chi tiết / số mẫu mã / bối cảnh tồn đổi ⇒ KHÔNG đổi khoá");
   assert.equal(ms[0].action.href, "/models/m9", "mở trang 360 — nơi có tín hiệu mẫu đầy đủ");
   assert.equal(ms[0].modelId, "m9");
-  assert.equal(ms[0].why, "ROAS giao vượt hoà vốn");
+  assert.match(ms[0].what, /THẮNG/);
+  assert.ok(ms[0].why.startsWith(MODEL_SIGNAL_HINT.WINNER), "vì sao = nghĩa của nhãn THẮNG");
   assert.equal(ms[0].impact.amountVnd, null);
+  assert.deepEqual(ms[0].data.map((d) => d.label), ["ADS", "PRODUCT", "CREATIVE", "DESIGN", "INVENTORY"].map((k) => SIGNAL_SOURCE_LABEL[k as SignalSource]), "mỗi nguồn một ô");
+  assert.equal(ms[0].data[0].value, ADS_ACTION_LABEL.SCALE, "ô là NHÃN phán quyết của nguồn");
+  assert.equal(ms[0].data[2].value, null, "nguồn không có (creative) ⇒ —, không phải một nhãn giả");
+  const coXungDot = modelScaleToItems([bRow("m2", { signal: sig({ inventory: ["OVERSTOCK"] }, "m2") })]);
+  assert.ok(coXungDot[0].why.includes("Lưu ý:"), "xung đột (bối cảnh tồn) được nêu trong vì sao");
 
   // ─── 1g. Tồn kho: đúng ba kết luận, tác động đúng cột của từng kết luận ───
   const inv = (decision: InventoryDecisionRow["decision"], over: Partial<InventoryDecisionRow> = {}): InventoryDecisionRow =>

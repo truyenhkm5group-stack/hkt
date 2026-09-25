@@ -275,7 +275,7 @@ export async function listStockReceipts(limit = 100) {
     limit,
     with: {
       items: { with: { variant: { columns: { id: true, sku: true, color: true, size: true }, with: { product: { columns: { name: true } } } } } },
-      // Company OS · Agent D (0132): phiếu nhập nối về lệnh SX / lô xưởng — NULL = chưa khai.
+      // Company OS · Agent D (0133): phiếu nhập nối về lệnh SX / lô xưởng — NULL = chưa khai.
       productionOrder: { columns: { id: true, code: true } },
       productionBatch: { columns: { id: true, productCode: true, batchNo: true } },
     },
