@@ -881,7 +881,7 @@ export const approvalRequests = pgTable(
      * Company OS · Agent G — DẤU VÂN TAY của việc đã xin: sha256 của JSON CHUẨN HOÁ (khoá sắp xếp)
      * gồm nhóm · thao tác · thực thể · payload. Người xin thực hiện lại đúng việc đó thì yêu cầu đã
      * duyệt được TIÊU THỤ (một lần); đổi một con số là một việc khác, phải xin lại.
-     * `NULL` ở dòng cũ (trước 0134): không tiêu thụ được — không đoán lại dấu vân tay từ payload đã lưu.
+     * `NULL` ở dòng cũ (trước 0133): không tiêu thụ được — không đoán lại dấu vân tay từ payload đã lưu.
      */
     payloadFingerprint: text("payload_fingerprint"),
   },

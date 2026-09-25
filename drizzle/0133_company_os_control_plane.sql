@@ -1,4 +1,4 @@
--- 0134 · COMPANY OS · MẶT PHẲNG ĐIỀU KHIỂN (Agent G): DUYỆT HAI BƯỚC TIÊU THỤ ĐƯỢC + NHẬT KÝ CÓ CỘT.
+-- 0133 · COMPANY OS · MẶT PHẲNG ĐIỀU KHIỂN (Agent G): DUYỆT HAI BƯỚC TIÊU THỤ ĐƯỢC + NHẬT KÝ CÓ CỘT.
 --
 -- 1. `approval_requests.payload_fingerprint` — dấu vân tay của việc đã xin. Yêu cầu ĐÃ DUYỆT chỉ
 --    được tiêu thụ khi người xin làm lại ĐÚNG việc đó (cùng nhóm · thao tác · thực thể · payload).

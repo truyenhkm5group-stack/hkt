@@ -48,7 +48,7 @@ export const auditColumns: ColumnDef<AuditLogRow, unknown>[] = [
           {row.original.userEmail}
           {row.original.user ? ` · ${ROLE_LABEL[row.original.user.role]}` : ""}
         </div>
-        {/* Người hay máy — dòng cũ (trước 0134) không biết thì KHÔNG in gì, không đoán là người dùng. */}
+        {/* Người hay máy — dòng cũ (trước 0133) không biết thì KHÔNG in gì, không đoán là người dùng. */}
         {row.original.actorKind ? (
           <div className="text-[10.5px] text-muted-foreground">{AUDIT_ACTOR_KIND_LABEL[row.original.actorKind as AuditActorKind] ?? row.original.actorKind}</div>
         ) : null}
@@ -95,7 +95,7 @@ export const auditColumns: ColumnDef<AuditLogRow, unknown>[] = [
     enableSorting: false,
     cell: ({ row }) => {
       const { detail, reason, correlationId } = row.original;
-      // Lý do và mã lần chạy là CỘT riêng từ 0134 — hiện ngay, không bắt người đọc mở JSON.
+      // Lý do và mã lần chạy là CỘT riêng từ 0133 — hiện ngay, không bắt người đọc mở JSON.
       const phu =
         reason || correlationId ? (
           <div className="max-w-[320px] truncate text-[10.5px] text-muted-foreground" title={[reason, correlationId && `lần chạy ${correlationId}`].filter(Boolean).join(" · ")}>

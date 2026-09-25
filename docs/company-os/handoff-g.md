@@ -1,4 +1,4 @@
-# Bàn giao · Agent G · Mặt phẳng điều khiển (migration 0134)
+# Bàn giao · Agent G · Mặt phẳng điều khiển (migration 0133)
 
 Nhánh `claude/cos-g-control-plane`, dựng trên `origin/main` 5a3a7ee6.
 
@@ -14,7 +14,7 @@ Nhánh `claude/cos-g-control-plane`, dựng trên `origin/main` 5a3a7ee6.
 | 5 | `audit_logs.actor_kind` (CHECK USER/SYSTEM/AGENT/WEBHOOK hoặc NULL) · `correlation_id` (chỉ mục một phần) · `reason`. `audit()` ghi cả ba, VẪN ghi `detail` như cũ. Suy loại: khai tường minh → có `userId` ⇒ USER → trong job nền ⇒ SYSTEM → email `job:`/`script:` ⇒ SYSTEM → NULL (chưa biết). Lỗi ghi nhật ký: `console.error`, không ném. `/audit` hiện loại tác nhân, lý do, mã lần chạy. Dòng cũ KHÔNG backfill. | `lib/audit.ts`, `lib/constants/audit-actor.ts`, `app/(dashboard)/audit/columns.tsx` |
 | 6 | Bọc `alerts`, `work-recurrence`, `work-escalation`, `work-snapshot`, `dashboard-warm` bằng `runSyncJob` với `observeOnly: true` (ghi `sync_runs`, KHÔNG làm cũ đệm, KHÔNG phát sự kiện `sync`). Chỉ ném lỗi thật mới thành FAILED; "kỳ chưa đóng", "đã gửi hôm nay", lỗi giữ ấm từng kỳ nằm ở `detail` ⇒ không sinh sự cố giả cho `tech-incident-watch`. Gửi Lark/Telegram hỏng ⇒ PARTIAL (không phải FAILED). | `lib/sync/jobs.ts`, `lib/sync/runner.ts` |
 
-Migration `drizzle/0134_company_os_control_plane.sql` (viết tay, idempotent), sổ `_journal.json` idx 134,
+Migration `drizzle/0133_company_os_control_plane.sql` (viết tay, idempotent), sổ `_journal.json` idx 134,
 `when` 1790002828245. `origin/main` đang dừng ở 0130 ⇒ không trùng; 0131–0133 là của A/D/F.
 
 ## 2. Lệch khỏi đề bài / hợp đồng — và vì sao
@@ -57,7 +57,7 @@ do · quá hạn không tiêu thụ (cả khi chưa ghi EXPIRED) và ghi EXPIRED
 lời duyệt · cấu hình TEXT đọc được · `approvals:decide` = luật cũ ở 80 ca (10 kịch bản × 8 vai) · nguồn
 `APPROVAL` hiện/biến mất/hiện DONE trong cửa sổ đã đóng · ba cột audit + CHECK + `console.error` · năm job
 chạy thật qua `runJob` và có dòng `sync_runs` SUCCESS/PARTIAL · `observeOnly` không làm cũ đệm (job thường
-thì có) · `APPROVAL_GROUPS_WIRED` khớp mã nguồn. `tests/migration-upgrade-path.test.ts`: thêm 0134 vào `MOI`,
+thì có) · `APPROVAL_GROUPS_WIRED` khớp mã nguồn. `tests/migration-upgrade-path.test.ts`: thêm 0133 vào `MOI`,
 dòng cũ ở NULL, CHECK chặn, chỉ mục chống trùng chặn.
 
 **Đột biến (17/17 bị bắt)**: bỏ canh `status` khi tiêu thụ · bỏ so dấu vân tay · bỏ so người xin · bỏ canh
