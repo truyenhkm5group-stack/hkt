@@ -142,4 +142,17 @@ export const SENSITIVE_BY_PERMISSION: Record<string, SensitiveArea> = Object.fro
  * thang kinh điển. Không vai trò hệ thống nào ngoài `ADMIN` có quyền này, nên chặn ở đây không
  * lấy đi của ai thứ gì.
  */
-export const ROLE_BUILDER_FORBIDDEN: readonly string[] = ["users:manage"];
+export const ROLE_BUILDER_FORBIDDEN: readonly string[] = ["users:manage", "production:approve"];
+
+/**
+ * Vì sao từng khoá bị cấm — in cạnh ô tích bị khoá và trong thông báo lỗi của lược đồ đầu vào.
+ *
+ * `production:approve` (Company OS · Agent C, target-architecture Q7a): duyệt mẫu và chốt giá thành là
+ * CHỮ KÝ bỏ vốn vào một mẫu. Mặc định chỉ MANAGER / ADMIN có; một vai trò tuỳ chỉnh tự bó nó vào là
+ * lối để một người không được giao quyền duyệt tự ký cho mẫu của chính mình. Chủ shop vẫn cấp được cho
+ * TỪNG NGƯỜI ở trang Người dùng — có tên, có người quyết.
+ */
+export const ROLE_BUILDER_FORBIDDEN_REASON: Record<string, string> = {
+  "users:manage": "Vai trò tuỳ chỉnh không được cấp quyền quản lý người dùng — đó là cửa để tự nâng mình lên toàn quyền",
+  "production:approve": "Vai trò tuỳ chỉnh không được cấp quyền duyệt mẫu / chốt giá thành — chữ ký bỏ vốn phải cấp cho từng người, có tên",
+};

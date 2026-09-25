@@ -250,6 +250,14 @@ export const NAV_MODULES = [
     permission: "models:view",
     why: "Mẫu nào đang ở khâu nào — thắng test, bàn giá, làm mẫu, sản xuất, bán, xả — và ai phụ trách. Các khai báo trên trang này quyết định mẫu nào được đưa vào sản xuất / đặt lại / ngừng, tức quyết định của phòng Sản xuất; marketing đọc nó để biết mẫu thắng của mình đã đi tới đâu.",
   },
+  // Company OS · Agent C — sản xuất nửa đầu (bước 4–6 của chủ shop).
+  {
+    href: "/production",
+    label: "Topic sản xuất",
+    zone: "PRODUCTION",
+    permission: "planning:view",
+    why: "Hỏi giá xưởng, chốt phương án, giá thành tạm tính, làm mẫu và duyệt mẫu — các quyết định bỏ vốn TRƯỚC khi có lệnh đặt hàng. Lệnh sản xuất trỏ vào bản thiết kế được duyệt ở đây.",
+  },
   {
     href: "/products/performance",
     label: "Hiệu quả mẫu mã",

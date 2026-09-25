@@ -8,7 +8,12 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { matrixTotals, PRODUCTION_STATUS, shouldStampReceipt } from "@/lib/constants/production";
+import { checkSendWithoutDesign, type SuggestedCellsSnapshot } from "@/lib/constants/production-os";
 import { matchSupplier } from "@/lib/constants/suppliers";
+import { followPoLink, persistPoPlanTx, validatePoPlan } from "@/lib/production/orders";
+import { describeFollow } from "@/lib/production/lifecycle";
+import { buildMatrixForProduct } from "@/lib/queries/production";
+import { requireApprovedDesignFlag } from "@/lib/queries/production-os";
 import { supplierCatalog } from "@/lib/queries/suppliers";
 
 type Result<T = object> = ({ ok: true } & T) | { error: string };
@@ -25,6 +30,16 @@ const inputSchema = z.object({
   supplier: z.string().trim().max(120).default(""),
   note: z.string().trim().max(1000).default(""),
   dueDate: z.string().trim().optional().nullable(),
+  /*
+    Company OS · Agent C. `designVersionId`: `undefined` = nơi gọi không nói gì (giữ bản duyệt đang có),
+    `null` = bỏ trỏ. `fromSuggestion`: người vừa "điền theo đề xuất" (hoặc mở bảng mới — ô khởi tạo LÀ
+    đề xuất) ⇒ máy chủ TÍNH LẠI gợi ý theo đúng căn cứ kế hoạch rồi lưu ảnh chụp; không nhận gợi ý từ
+    trình duyệt. `overrideReason`: bắt buộc khi số chốt khác gợi ý dù một ô (không ngưỡng — luật 38).
+  */
+  designVersionId: z.string().trim().min(1).nullable().optional(),
+  fromSuggestion: z.boolean().default(false),
+  suggestionBasis: z.object({ coverDays: z.number().int().min(0).max(3650).optional(), countIncoming: z.boolean().optional() }).optional(),
+  overrideReason: z.string().trim().max(1000).default(""),
 });
 
 async function nextCode() {
@@ -34,7 +49,7 @@ async function nextCode() {
   return `PO-${day}-${String(Number(n) + 1).padStart(2, "0")}`;
 }
 
-export async function saveProductionOrder(input: unknown, id?: string): Promise<Result<{ id: string; code: string }>> {
+export async function saveProductionOrder(input: unknown, id?: string): Promise<Result<{ id: string; code: string; lifecycle: string | null }>> {
   const user = await requireUser();
   if (!can(user, "planning:write")) return { error: "Không có quyền tạo bảng đặt hàng" };
   const parsed = inputSchema.safeParse(input);
@@ -42,6 +57,29 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
   const d = parsed.data;
   const totals = matrixTotals(d.colors, d.sizes, d.cells);
   if (totals.total <= 0) return { error: "Tổng số lượng phải lớn hơn 0" };
+  const db = await getDb();
+  const existing = id ? await db.query.productionOrders.findFirst({ where: eq(schema.productionOrders.id, id) }) : null;
+  if (id && !existing) return { error: "Không tìm thấy bảng đặt hàng" };
+  if (existing && existing.status !== "DRAFT" && existing.status !== "SENT") return { error: "Bảng đã kết thúc, không sửa được" };
+  const finalCells = Object.fromEntries(Object.entries(d.cells).filter(([, v]) => v > 0));
+  /*
+    GỢI Ý CỦA MÁY vs SỐ NGƯỜI CHỐT (Company OS · Agent C). Kiểm TRƯỚC mọi lượt ghi và trước cổng duyệt:
+    thiếu lý do thì không ô nào bị lưu, và không có yêu cầu duyệt nào được gửi cho một bảng sẽ bị trả lại.
+  */
+  let suggestion: SuggestedCellsSnapshot | null = existing?.suggestedCells ?? null;
+  if (d.fromSuggestion) {
+    const m = await buildMatrixForProduct(d.productId, { coverDays: d.suggestionBasis?.coverDays, countIncoming: d.suggestionBasis?.countIncoming ?? true });
+    if (m) {
+      suggestion = {
+        cells: Object.fromEntries(Object.entries(m.cells).filter(([, v]) => v > 0)),
+        basis: { source: "buildMatrixForProduct", coverDays: m.coverDays, countIncoming: m.countIncoming, leadTimeDays: m.leadTimeDays },
+        computedAt: new Date().toISOString(),
+      };
+    }
+  }
+  const designVersionId = d.designVersionId === undefined ? (existing?.designVersionId ?? null) : d.designVersionId;
+  const ke = await validatePoPlan(db, { productId: d.productId, designVersionId, suggestion, finalCells, overrideReason: d.overrideReason });
+  if ("error" in ke) return { error: ke.error };
   {
     // Đặt hàng vượt ngưỡng khoá vốn của shop trong nhiều tháng nếu quyết sai. Dưới ngưỡng thì cổng
     // tự cho qua — bắt duyệt mọi lệnh nhỏ chỉ tạo thói quen bấm cho xong.
@@ -57,7 +95,6 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
     if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cần xử lý.` };
     if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
   }
-  const db = await getDb();
   /*
     XƯỞNG: chữ gõ khớp ĐÚNG MỘT xưởng trong danh mục ⇒ ghi khoá `supplier_id` và dùng TÊN CHUẨN do máy
     chủ đọc từ danh mục (không nhận tên từ client — AGENTS.md mục 34). Không khớp / khớp hai xưởng ⇒
@@ -70,7 +107,7 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
     productName: d.productName,
     colors: d.colors,
     sizes: d.sizes,
-    cells: Object.fromEntries(Object.entries(d.cells).filter(([, v]) => v > 0)),
+    cells: finalCells,
     images: d.images,
     totalQty: totals.total,
     unitCost: d.unitCost,
@@ -80,23 +117,35 @@ export async function saveProductionOrder(input: unknown, id?: string): Promise<
     dueDate: d.dueDate ? new Date(d.dueDate) : null,
     updatedAt: new Date(),
   };
-  let rowId = id;
-  let code = "";
-  if (id) {
-    const existing = await db.query.productionOrders.findFirst({ where: eq(schema.productionOrders.id, id) });
-    if (!existing) return { error: "Không tìm thấy bảng đặt hàng" };
-    if (existing.status !== "DRAFT" && existing.status !== "SENT") return { error: "Bảng đã kết thúc, không sửa được" };
-    await db.update(schema.productionOrders).set(values).where(eq(schema.productionOrders.id, id));
-    code = existing.code;
-  } else {
-    code = await nextCode();
-    const [row] = await db.insert(schema.productionOrders).values({ ...values, code, createdBy: user.email }).returning({ id: schema.productionOrders.id });
-    rowId = row.id;
-  }
-  await audit({ userId: user.id, userEmail: user.email, action: id ? "PRODUCTION_ORDER_UPDATE" : "PRODUCTION_ORDER_CREATE", entity: "PRODUCTION_ORDER", entityId: rowId, detail: { code, total: totals.total } });
+  const code = existing ? existing.code : await nextCode();
+  const actor = { id: user.id, label: user.name || user.email };
+  // Ô số lượng + ba cột bản duyệt / gợi ý / lý do + sự kiện: MỘT giao dịch.
+  const ghi = await db.transaction(async (tx) => {
+    let rowId: string;
+    if (existing) {
+      await tx.update(schema.productionOrders).set(values).where(eq(schema.productionOrders.id, existing.id));
+      rowId = existing.id;
+    } else {
+      const [row] = await tx.insert(schema.productionOrders).values({ ...values, code, createdBy: user.email }).returning({ id: schema.productionOrders.id });
+      rowId = row.id;
+    }
+    const su = await persistPoPlanTx(tx, { poId: rowId, poCode: code, beforeDesignVersionId: existing?.designVersionId ?? null, plan: ke.plan, suggestion, finalCells, actor });
+    return { rowId, ...su };
+  });
+  const lifecycle = await followPoLink(db, { linkedEventId: ghi.linkedEventId, modelId: ghi.modelId, poId: ghi.rowId, actor });
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: id ? "PRODUCTION_ORDER_UPDATE" : "PRODUCTION_ORDER_CREATE",
+    entity: "PRODUCTION_ORDER",
+    entityId: ghi.rowId,
+    detail: { code, total: totals.total, designVersionId: ke.plan.designVersion?.id ?? null, overriddenCells: ke.plan.diff.length, lifecycle },
+    reason: ke.plan.overrideReason ?? undefined,
+  });
   revalidatePath("/inventory/planning");
   revalidatePath("/inventory/planning/orders");
-  return { ok: true, id: rowId as string, code };
+  revalidatePath(`/inventory/planning/orders/${ghi.rowId}`);
+  return { ok: true, id: ghi.rowId, code, lifecycle: lifecycle ? describeFollow(lifecycle) : null };
 }
 
 /**
@@ -123,7 +172,14 @@ export async function setProductionStatus(id: string, status: string): Promise<R
   if (!can(user, "planning:write")) return { error: "Không có quyền" };
   if (!(PRODUCTION_STATUS as readonly string[]).includes(status)) return { error: "Trạng thái không hợp lệ" };
   const db = await getDb();
-  const truoc = await db.query.productionOrders.findFirst({ where: eq(schema.productionOrders.id, id), columns: { receivedAt: true } });
+  const truoc = await db.query.productionOrders.findFirst({ where: eq(schema.productionOrders.id, id), columns: { receivedAt: true, status: true, designVersionId: true } });
+  /*
+    Company OS · Agent C (Q8): gửi xưởng một lệnh chưa trỏ bản thiết kế đã duyệt. Cờ
+    `production.requireApprovedDesign` TẮT (mặc định) ⇒ cho qua, ghi dấu vào nhật ký; BẬT ⇒ chặn. Chỉ xét
+    lượt DRAFT → SENT, nên lệnh đã gửi từ trước không bao giờ bị đụng tới khi cờ được bật.
+  */
+  const guiThieuBanDuyet = truoc ? checkSendWithoutDesign({ from: truoc.status, to: status, designVersionId: truoc.designVersionId, requireApprovedDesign: await requireApprovedDesignFlag() }) : { ok: true as const, warn: false };
+  if ("error" in guiThieuBanDuyet) return { error: guiThieuBanDuyet.error };
   const ghiMocNhan = shouldStampReceipt(status, truoc?.receivedAt);
   await db
     .update(schema.productionOrders)
@@ -136,7 +192,7 @@ export async function setProductionStatus(id: string, status: string): Promise<R
       updatedAt: new Date(),
     })
     .where(eq(schema.productionOrders.id, id));
-  await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_ORDER_STATUS", entity: "PRODUCTION_ORDER", entityId: id, detail: { status, ghiMocNhan } });
+  await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_ORDER_STATUS", entity: "PRODUCTION_ORDER", entityId: id, detail: { status, ghiMocNhan, sentWithoutApprovedDesign: guiThieuBanDuyet.warn } });
   revalidatePath("/inventory/planning/orders");
   revalidatePath(`/inventory/planning/orders/${id}`);
   return { ok: true };

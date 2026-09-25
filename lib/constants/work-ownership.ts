@@ -58,6 +58,8 @@ const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   INVENTORY_EXCEPTION: "Người quyết đặt bao nhiêu hàng ở shop này chính là người giữ kho.",
   ALERT: "Cảnh báo suy phòng ban theo NHÓM VIỆC của từng loại — xem bảng bên dưới, không phải một phòng cố định.",
   TECH_TASK: "Việc kỹ thuật ở shop này do chủ shop quyết — cùng lý do nhóm việc DATA được xếp về Ban điều hành: nó chặn quyết định của mọi phòng chứ không thuộc phòng nào.",
+  PRODUCTION_TOPIC: "Bàn giá và phương án với xưởng là việc của nhóm Sản xuất — hôm nay nhóm đó route về Kho (TEAM_DEPARTMENT_DIVERGENCE) vì phòng Sản xuất chưa có thành viên; chuyển bằng ghi đè work.ownership.",
+  SAMPLE_REVIEW: "Duyệt mẫu xưởng gửi là việc của nhóm Sản xuất — cùng lý do route về Kho như topic sản xuất cho tới khi phòng Sản xuất có người.",
   MANUAL_TASK: "Việc giao tay đi theo phòng mà người giao chọn; không có phòng mặc định nào đúng cho mọi việc.",
   RECURRING_TASK: "Việc định kỳ khai phòng ngay trong định nghĩa của nó.",
 };

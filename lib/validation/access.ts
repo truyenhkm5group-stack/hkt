@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 import { ALL_PERMISSIONS } from "@/lib/auth/permissions";
-import { ACCESS_SCOPES, ROLE_BUILDER_FORBIDDEN } from "@/lib/constants/access-scope";
+import { ACCESS_SCOPES, ROLE_BUILDER_FORBIDDEN, ROLE_BUILDER_FORBIDDEN_REASON } from "@/lib/constants/access-scope";
 import { ROLE_ORDER } from "@/lib/constants/roles";
 
 const code = z
@@ -31,8 +31,9 @@ const scope = z.enum(ACCESS_SCOPES, { error: "Chọn phạm vi dữ liệu" });
 const bundle = z
   .array(z.enum(ALL_PERMISSIONS as [string, ...string[]]))
   .max(200)
-  .refine((list) => !list.some((p) => ROLE_BUILDER_FORBIDDEN.includes(p)), {
-    message: "Vai trò tuỳ chỉnh không được cấp quyền quản lý người dùng — đó là cửa để tự nâng mình lên toàn quyền",
+  .superRefine((list, ctx) => {
+    const cam = list.find((p) => ROLE_BUILDER_FORBIDDEN.includes(p));
+    if (cam) ctx.addIssue({ code: "custom", message: ROLE_BUILDER_FORBIDDEN_REASON[cam] ?? "Vai trò tuỳ chỉnh không được cấp quyền này" });
   });
 
 export const saveAccessRoleSchema = z.object({

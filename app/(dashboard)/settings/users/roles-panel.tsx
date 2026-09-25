@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { PickerMenu } from "@/components/picker-menu";
 import { saveAccessRole, setAccessRoleActive } from "@/lib/actions/access";
 import { PERMISSION_GROUPS } from "@/lib/auth/permissions";
-import { ACCESS_SCOPE_HINT, ACCESS_SCOPE_LABEL, ACCESS_SCOPES, ROLE_BUILDER_FORBIDDEN, type AccessScope } from "@/lib/constants/access-scope";
+import { ACCESS_SCOPE_HINT, ACCESS_SCOPE_LABEL, ACCESS_SCOPES, ROLE_BUILDER_FORBIDDEN, ROLE_BUILDER_FORBIDDEN_REASON, type AccessScope } from "@/lib/constants/access-scope";
 import { ROLE_HINT, ROLE_LABEL, ROLE_ORDER } from "@/lib/constants/roles";
 import { cn } from "@/lib/utils";
 
@@ -182,7 +182,7 @@ function RoleDialog({ row, onClose }: { row: RolePanelRow | null; onClose: () =>
                       <Checkbox checked={perms.has(item.key)} disabled={cam} onCheckedChange={(v) => toggle(item.key, v === true)} className="mt-0.5" />
                       <span>
                         <span className="font-medium">{item.label}</span>
-                        {cam ? <span className="block text-[10.5px] text-muted-foreground">Vai trò tuỳ chỉnh không được cấp quyền này — đó là cửa để tự nâng mình lên toàn quyền</span> : null}
+                        {cam ? <span className="block text-[10.5px] text-muted-foreground">{ROLE_BUILDER_FORBIDDEN_REASON[item.key] ?? "Vai trò tuỳ chỉnh không được cấp quyền này"}</span> : null}
                       </span>
                     </label>
                   );

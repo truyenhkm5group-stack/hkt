@@ -249,6 +249,26 @@ const SOURCE_RULES: SlaRule[] = [
     alsoShownOn: "Phòng Tech AI",
   },
 
+  /* ───── Sản xuất nửa đầu (Company OS · Agent C) ───── */
+  {
+    key: "PRODUCTION_TOPIC",
+    label: "Topic sản xuất chờ báo giá / chờ quyết",
+    hours: WORK_SOURCE_SPEC.PRODUCTION_TOPIC.slaHours,
+    why:
+      "CỐ Ý bỏ trống: chưa có hằng số đang chạy nào nói một topic hỏi giá được phép nằm bao lâu, và gõ một con số " +
+      "mới ở đây là bịa (AGENTS.md mục 22, 38). Chủ shop đặt được — nó đo 'topic đã mở bao lâu', tính từ lúc mở.",
+    department: WORK_SOURCE_SPEC.PRODUCTION_TOPIC.department,
+    alsoShownOn: "Sản xuất · Topic",
+  },
+  {
+    key: "SAMPLE_REVIEW",
+    label: "Mẫu chờ duyệt",
+    hours: WORK_SOURCE_SPEC.SAMPLE_REVIEW.slaHours,
+    why: "CỐ Ý bỏ trống vì cùng lý do: không có hằng số đang chạy nào cho hạn duyệt mẫu. Chủ shop đặt ở đây khi đã quyết một con số.",
+    department: WORK_SOURCE_SPEC.SAMPLE_REVIEW.department,
+    alsoShownOn: "Sản xuất · Topic",
+  },
+
   /* ───── Việc tay & định kỳ ───── */
   {
     key: "MANUAL_TASK",

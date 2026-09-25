@@ -61,6 +61,21 @@ export const PERMISSION_GROUPS = [
       // Company OS · Agent A — sổ mẫu & vòng đời. `models:view` được kéo theo từ `products:view` (LEGACY_IMPLIES).
       { key: "models:view", label: "Vòng đời mẫu: xem", hint: "Sổ mẫu (mã chủ shop), trạng thái vòng đời đã khai, giai đoạn máy quan sát (ước tính), dòng thời gian của mẫu" },
       { key: "models:write", label: "Vòng đời mẫu: khai & đồng bộ", hint: "Đổi trạng thái vòng đời (lùi bước / nhảy cóc bắt buộc lý do), đổi người phụ trách, đăng ký mẫu mới, chạy đồng bộ sổ mẫu" },
+      /*
+        Company OS · Agent C — sản xuất nửa đầu (topic → giá thành → mẫu → bản duyệt).
+
+        HAI KHOÁ, KHÔNG MỘT, và KHÔNG khoá nào được kéo theo từ khoá cũ (`LEGACY_IMPLIES`):
+         · `production:write` — việc trao đổi thường ngày: mở topic, ghi báo giá, lập / sửa bảng giá
+           thành NHÁP, ghi mẫu, gửi mẫu chờ duyệt, yêu cầu xưởng sửa mẫu. Mặc định LEADER (cùng nhóm
+           người đang lập bảng đặt hàng và khai vòng đời mẫu) + MANAGER; KHÔNG cho WAREHOUSE: kho đếm
+           hàng về, còn bàn giá và phương án với xưởng là quyết định bỏ vốn. Không kéo theo từ
+           `inventory:write` / `planning:write` vì hai khoá đó đang nằm trong mẫu WAREHOUSE — kéo theo
+           là lặng lẽ mở cho kho một quyền không ai quyết cấp.
+         · `production:approve` — CHỮ KÝ (target-architecture Q7a): duyệt / loại mẫu, chốt giá thành.
+           Chỉ MANAGER (qua phép trừ) và ADMIN; vai trò tuỳ chỉnh KHÔNG cấp được (ROLE_BUILDER_FORBIDDEN).
+      */
+      { key: "production:write", label: "Sản xuất: topic, giá thành, mẫu", hint: "Mở topic hỏi giá xưởng, ghi trao đổi / báo giá, lập & sửa bảng giá thành nháp, ghi mẫu, gửi mẫu chờ duyệt, yêu cầu xưởng sửa mẫu" },
+      { key: "production:approve", label: "Sản xuất: duyệt mẫu & chốt giá thành", hint: "Chữ ký bỏ vốn: duyệt / loại mẫu (sinh bản thiết kế bất biến), chốt bảng giá thành. Vai trò tuỳ chỉnh không cấp được quyền này." },
     ],
   },
   {
@@ -245,7 +260,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   MANAGER: ALL_PERMISSIONS.filter((p) => !["users:manage", "settings:manage", "payroll:manage", "payroll:approve", "payroll:view", "payroll:view-all", "tech:view", "tech:manage"].includes(p)),
   // Trưởng nhóm: báo cáo danh nghĩa / tỷ lệ giao thành công / theo đơn giao; không xem dòng tiền
   // thực, không sửa cấu hình. Lương: CHỈ của chính mình cho tới khi có phạm vi theo nhóm.
-  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
+  LEADER: [...VIEW_ALL, "ideas:write", "ideas:review", "orders:export", "cs:manage", "outreach:send", "landing:manage", "shipments:manage", "inventory:write", "inventory:restock-unidentified", "planning:write", "models:write", "production:write", "cod:view", "expenses:view", "expenses:write", "bank:view", "reports:delivered", "reports:nominal", "reports:returns", "payroll:view-own", "integrations:view", "sync:run", "work:assign", "work:department", "work:all", "okr:manage", "performance:view", "review:manage"],
   ACCOUNTANT: [...VIEW_ALL, "orders:export", "cod:view", "cod:write", "expenses:view", "expenses:write", "bank:view", "bank:write", "reports:delivered", "reports:cash", "reports:nominal", "reports:returns", "payroll:view-own", "payroll:view", "payroll:view-all", "integrations:view"],
   /*
     KHÔNG có `inventory:restock-unidentified`. Nhân viên kho nhận kiện, đếm, tra đơn — nhưng lượt
