@@ -82,6 +82,7 @@ const MOI = [
   "0132_company_os_inventory",
   "0133_company_os_control_plane",
   "0134_company_os_economics",
+  "0137_company_os_idea_model",
 ] as const;
 
 /*
@@ -244,6 +245,13 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'audit_logs' and column_name = 'actor_kind'"), 0, "bước 1: cột audit_logs.actor_kind CHƯA được có — đó là thứ 0133 thêm vào");
     await client.query(`insert into audit_logs (id, user_id, user_email, action, entity) values ('up-al1', 'up-u1', 'a@shop.vn', 'EXPENSE_UPDATE', 'EXPENSE')`);
     await client.query(`insert into approval_requests (id, "group", action, summary, requested_by, requested_by_email) values ('up-ar1', 'EXPENSE_EDIT', 'expense.update', 'yêu cầu cũ', 'up-u1', 'a@shop.vn')`);
+
+    /*
+      Company OS · A2 (0137). Một ý tưởng marketing có từ trước — bước 2 kiểm rằng migration KHÔNG đoán
+      mẫu cho ý tưởng cũ (mục 35): cột mới `model_id` phải NULL.
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'marketing_ideas' and column_name = 'model_id'"), 0, "bước 1: cột marketing_ideas.model_id CHƯA được có — đó là thứ 0137 thêm vào");
+    await client.query(`insert into marketing_ideas (id, idea_date, content) values ('up-idea1', '2026-09-01', 'Ý tưởng cũ Q012')`);
 
     // ══ BƯỚC 2: áp migration mới lên ĐÚNG trạng thái đó ══
     writeFileSync(soFile, JSON.stringify(so, null, 2) + "\n");
@@ -1571,6 +1579,15 @@ export async function testMigrationUpgradePath() {
     await client.query(`delete from approval_requests where id in ('up-ar1', 'up-ar2')`);
     await client.query(`delete from audit_logs where id = 'up-al1'`);
     await client.query(`delete from users where id = 'up-ug'`);
+
+    // 0137: ý tưởng cũ giữ NULL (không đoán mẫu); mẫu bị xoá thì ý tưởng còn nguyên, chỉ mất liên kết.
+    assert.equal(await dem("select count(*)::int as n from marketing_ideas where id = 'up-idea1' and model_id is null"), 1, "0137: ý tưởng cũ phải giữ model_id NULL — KHÔNG backfill theo nội dung chữ");
+    await assert.rejects(client.query(`update marketing_ideas set model_id = 'khong-co-mau' where id = 'up-idea1'`), "0137: khoá ngoại phải chặn mẫu không tồn tại");
+    await client.query(`insert into product_models (id, code, registered_by) values ('up-pm1', 'UPQ012', 'USER')`);
+    await client.query(`update marketing_ideas set model_id = 'up-pm1' where id = 'up-idea1'`);
+    await client.query(`delete from product_models where id = 'up-pm1'`);
+    assert.equal(await dem("select count(*)::int as n from marketing_ideas where id = 'up-idea1' and model_id is null"), 1, "0137: xoá mẫu thì ý tưởng còn nguyên, liên kết rơi về NULL (ON DELETE SET NULL)");
+    await client.query(`delete from marketing_ideas where id = 'up-idea1'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });

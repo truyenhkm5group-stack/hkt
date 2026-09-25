@@ -1377,10 +1377,21 @@ export const marketingIdeas = pgTable(
     /** Lần quản lý chốt trạng thái gần nhất. */
     reviewedAt: ts("reviewed_at"),
     reviewedBy: text("reviewed_by").notNull().default(""),
+    /**
+     * Company OS · A2 (0137): mẫu được đăng ký TỪ ý tưởng này (nút "Đăng ký thành mẫu"). `NULL` = chưa
+     * đăng ký — KHÔNG backfill theo nội dung chữ (mục 35). Xoá mẫu thì ý tưởng còn nguyên, chỉ mất liên
+     * kết. Không đổi trạng thái hay quyền của ý tưởng.
+     */
+    modelId: text("model_id").references((): AnyPgColumn => productModels.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("marketing_ideas_date_idx").on(t.ideaDate), index("marketing_ideas_status_idx").on(t.status), index("marketing_ideas_marketer_idx").on(t.marketerId)],
+  (t) => [
+    index("marketing_ideas_date_idx").on(t.ideaDate),
+    index("marketing_ideas_status_idx").on(t.status),
+    index("marketing_ideas_marketer_idx").on(t.marketerId),
+    index("marketing_ideas_model_idx").on(t.modelId),
+  ],
 );
 
 /**

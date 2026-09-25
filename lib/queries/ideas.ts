@@ -119,17 +119,20 @@ export type IdeaDetail = {
   reviewedBy: string;
   images: { id: string; bytes: number }[];
   comments: { id: string; authorName: string; authorEmail: string; body: string; statusSet: IdeaStatus | null; createdAt: Date }[];
+  /** Company OS · A2: mẫu đăng ký TỪ ý tưởng này (`marketing_ideas.model_id`); `null` = chưa đăng ký. */
+  model: { id: string; code: string } | null;
 };
 
 export async function getIdea(id: string): Promise<IdeaDetail | null> {
   const db = await getDb();
   const row = await db.query.marketingIdeas.findFirst({ where: eq(i.id, id) });
   if (!row) return null;
-  const [images, comments] = await Promise.all([
+  const [images, comments, models] = await Promise.all([
     db.select({ id: img.id, bytes: img.bytes }).from(img).where(eq(img.ideaId, id)).orderBy(img.sortOrder, img.createdAt),
     db.select({ id: cm.id, authorName: cm.authorName, authorEmail: cm.authorEmail, body: cm.body, statusSet: cm.statusSet, createdAt: cm.createdAt }).from(cm).where(eq(cm.ideaId, id)).orderBy(cm.createdAt),
+    row.modelId ? db.select({ id: schema.productModels.id, code: schema.productModels.code }).from(schema.productModels).where(eq(schema.productModels.id, row.modelId)).limit(1) : Promise.resolve([]),
   ]);
-  return { ...row, images, comments };
+  return { ...row, images, comments, model: models[0] ?? null };
 }
 
 /** Dữ liệu một ảnh — chỉ dùng cho route phục vụ ảnh, không gọi từ trang danh sách. */
