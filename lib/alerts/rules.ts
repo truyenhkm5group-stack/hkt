@@ -10,6 +10,7 @@ import { loadAlertConfig } from "@/lib/alerts/config";
 import { sendLark } from "@/lib/alerts/lark";
 import { runStockShortageDigest, type ShortageDigestResult } from "@/lib/alerts/stock-shortage-digest";
 import { runStockWaitLog, type StockWaitLogResult } from "@/lib/alerts/stock-wait-log";
+import { maskUrls, runOwnerDecisionDigest, type OwnerDigestResult } from "@/lib/alerts/owner-decision-digest";
 import { escapeHtml, sendTelegram } from "@/lib/alerts/telegram";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { detectCsCases } from "@/lib/cs/detect";
@@ -1080,7 +1081,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   return { candidates, activeKinds };
 }
 
-export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string }; /** Bảng thiếu hàng giao đơn gửi Lark — `null` khi tắt. */ stockShortage: ShortageDigestResult | null; /** Sổ đơn chờ hàng — ghi dù tin Lark có bật hay không. */ stockWaitLog: StockWaitLogResult };
+export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string }; /** Bảng thiếu hàng giao đơn gửi Lark — `null` khi tắt. */ stockShortage: ShortageDigestResult | null; /** Sổ đơn chờ hàng — ghi dù tin Lark có bật hay không. */ stockWaitLog: StockWaitLogResult; /** "Cần anh quyết" gửi nhóm Quản lý — tự bỏ qua khi `owner.digest` tắt (mặc định). */ ownerDigest: OwnerDigestResult };
 
 /** Chạy toàn bộ quy tắc; trả về số thông báo mới / đã đóng / đang mở */
 export async function evaluateAlerts(): Promise<AlertRunResult> {
@@ -1229,7 +1230,13 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     đơn thiếu hàng theo ngày (`/shipments/stock-wait`). Lỗi ở đây cũng không làm hỏng lượt cảnh báo.
   */
   const stockWaitLog = await runStockWaitLog().catch((e): StockWaitLogResult => ({ waiting: 0, opened: 0, closed: 0, error: e instanceof Error ? e.message : String(e) }));
-  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, stockShortage, stockWaitLog };
+  /*
+    "CẦN ANH QUYẾT" — một tin mỗi sáng vào nhóm Quản lý, thêm tin trong ngày CHỈ khi có yêu cầu duyệt /
+    mẫu chờ duyệt MỚI (`lib/constants/owner-digest.ts`). Mặc định TẮT (`owner.digest`). Lỗi ở đây không
+    làm hỏng lượt cảnh báo đã chạy xong ở trên; câu lỗi đã che URL.
+  */
+  const ownerDigest = await runOwnerDecisionDigest().catch((e): OwnerDigestResult => ({ sent: null, items: 0, error: maskUrls(e instanceof Error ? e.message : String(e)) }));
+  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, stockShortage, stockWaitLog, ownerDigest };
 }
 
 const holder = globalThis as unknown as { __erpAlertsLastRun?: number; __erpAlertsTimer?: ReturnType<typeof setTimeout> };

@@ -292,6 +292,7 @@ import { testCompanyOsReturnsDb, testCompanyOsReturnsPure } from "./company-os-r
 import { testCompanyOsE2eLifecycle, testCompanyOsE2ePure } from "./company-os-e2e-lifecycle.test";
 import { testCompanyOsCockpitDb, testCompanyOsCockpitPure } from "./company-os-cockpit.test";
 import { testCompanyOsSignalBatchDb, testCompanyOsSignalBatchSource } from "./company-os-signal-batch.test";
+import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./company-os-owner-digest.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
@@ -1917,6 +1918,9 @@ async function main() {
   // Company OS · Agent S: tín hiệu mẫu theo lô = getModelSignal từng mẫu (mã `cos-s-` / `COSS-`, tự dọn).
   testCompanyOsSignalBatchSource();
   await testCompanyOsSignalBatchDb(db);
+  // Company OS · Agent L: "Cần anh quyết" → nhóm Lark Quản lý. Đường gửi là hàm giả (không gọi mạng); tự dọn khoá settings `owner.digest*`.
+  testCompanyOsOwnerDigestPure();
+  await testCompanyOsOwnerDigestDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();
