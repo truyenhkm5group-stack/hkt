@@ -84,6 +84,9 @@ export async function testFeedAutomation(db: Db) {
   const xa = dot({ totalAmount: ck.amount, receivedAt: new Date(ck.txnAt.getTime() - (COD_STATEMENT_MATCH_WINDOW_DAYS + 1) * 86_400_000) });
   assert.deepEqual(statementCoverage(ck, [xa], [], []), { covered: false, statementNumber: "30751602" }, "cùng số tiền nhưng xa ngày ⇒ KHÔNG coi là cùng đợt");
   assert.deepEqual(statementCoverage(ck, [dot()], ["BangKeChiCOD_30601124.xlsx"], []), { covered: false, statementNumber: "30751602" }, "tệp của đợt KHÁC không phủ được đợt này");
+  // Tệp tải tay từ web: tên không mang số, không lập đợt — chỉ khớp được bằng Σ thực nhận của tệp.
+  assert.deepEqual(statementCoverage(ck, [], ["Bao_cao_chi_tiet_bang_ke_25_09_2026 02_07_48.xlsx"], [], [ck.amount]), { covered: true, by: "AMOUNT", batchId: null }, "tổng thực nhận của một bảng kê trong sổ bằng đúng khoản chuyển ⇒ đủ");
+  assert.equal(statementCoverage(ck, [], [], [], [ck.amount - 1, 3_250_997]).covered, false, "lệch một đồng hay bảng kê của đợt khác ⇒ vẫn thiếu");
 
   /* ═══════════ 4 · LUẬT CHẠY TRÊN CSDL: CÓ THIẾU THÌ BÁO, ĐỦ RỒI THÌ THÔI ═══════════ */
 
