@@ -4,14 +4,20 @@ import { schema, type Db } from "@/db";
 import { audit } from "@/lib/audit";
 import {
   APPROVAL_ENFORCE_KEY,
+  APPROVAL_ENFORCE_LEGACY_KEY,
+  APPROVAL_GROUP_LABEL,
   APPROVAL_GROUP_REASON,
+  APPROVAL_GROUPS_WIRED,
   APPROVAL_VALID_HOURS,
   canonicalJson,
   isEnforced,
   overThreshold,
+  legacyToV2,
   parseEnforceConfig,
+  parseLegacyEnforceConfig,
   type ApprovalDecision,
   type ApprovalGroup,
+  type EnforceConfigV2,
 } from "@/lib/constants/approval";
 
 /**
@@ -72,10 +78,79 @@ export function approvalStillValid(req: { status: string; decidedAt: Date | null
   return req.status === "APPROVED" && req.executedAt === null && req.decidedAt !== null && req.decidedAt.getTime() > approvalValidSince(now).getTime();
 }
 
-/** Cấu hình cưỡng chế theo nhóm — đã PARSE (cột `settings.value` là TEXT). Xem `parseEnforceConfig`. */
+async function docSetting(db: Db, key: string): Promise<string | null> {
+  const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, key));
+  return row?.value ?? null;
+}
+
+async function ghiSetting(db: Db, key: string, value: unknown) {
+  const text = JSON.stringify(value);
+  await db.insert(schema.settings).values({ key, value: text }).onConflictDoUpdate({ target: schema.settings.key, set: { value: text, updatedAt: new Date() } });
+}
+
+/** Cấu hình cưỡng chế CÓ HIỆU LỰC — chỉ khoá v2 do công tắc ADMIN ghi. Xem `parseEnforceConfig`. */
 export async function readEnforceConfig(db: Db): Promise<Record<string, unknown> | null> {
-  const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, APPROVAL_ENFORCE_KEY));
-  return parseEnforceConfig(row?.value ?? null);
+  return parseEnforceConfig(await docSetting(db, APPROVAL_ENFORCE_KEY));
+}
+
+/** Dòng CŨ `approval.enforce` (chỉ để hiện cho ADMIN) — `null` khi không có. KHÔNG quyết định cưỡng chế. */
+export async function readLegacyEnforce(db: Db): Promise<{ raw: string; groups: ApprovalGroup[]; unknownKeys: string[] } | null> {
+  const raw = await docSetting(db, APPROVAL_ENFORCE_LEGACY_KEY);
+  if (raw === null) return null;
+  const parsed = parseLegacyEnforceConfig(raw);
+  return { raw, groups: parsed?.groups ?? [], unknownKeys: parsed ? parsed.unknownKeys : ["(không đọc được JSON)"] };
+}
+
+export type AdminUser = ApprovalUser & { isAdmin: boolean };
+
+/**
+ * Bật / tắt cưỡng chế MỘT nhóm — ghi hình dạng v2. CHỈ ADMIN (không phải `settings:manage`): bật là đổi
+ * AI được làm việc một mình trong cả shop. Nhóm chưa nối không bật được.
+ */
+export async function setEnforceGroupCore(db: Db, user: AdminUser, group: ApprovalGroup, enforced: boolean): Promise<{ ok: true } | { error: string }> {
+  if (!user.isAdmin) return { error: "Chỉ quản trị viên được bật / tắt cưỡng chế duyệt hai bước" };
+  if (!APPROVAL_GROUPS_WIRED.includes(group)) return { error: `Nhóm "${APPROVAL_GROUP_LABEL[group]}" chưa nối vào thao tác nào — bật lên cũng không chặn được gì` };
+  const truoc = (await readEnforceConfig(db)) ?? {};
+  const sau: EnforceConfigV2 = { v: 2, groups: { ...(truoc as EnforceConfigV2["groups"]), [group]: enforced } };
+  await ghiSetting(db, APPROVAL_ENFORCE_KEY, sau);
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    actorKind: "USER",
+    action: "approval.enforce",
+    entity: "SETTINGS",
+    entityId: APPROVAL_ENFORCE_KEY,
+    before: { v: 2, groups: truoc },
+    after: sau,
+    reason: `${enforced ? "BẬT" : "TẮT"} cưỡng chế duyệt hai bước cho nhóm ${APPROVAL_GROUP_LABEL[group]}`,
+  });
+  return { ok: true };
+}
+
+/**
+ * Nút "Áp dụng cấu hình này": chuyển dòng CŨ thành v2 và GHI ĐÈ cấu hình có hiệu lực bằng đúng nó.
+ * Dòng cũ để nguyên (không xoá, không sửa) — nó là lời khai của một người, và nhật ký ghi trước/sau.
+ */
+export async function applyLegacyEnforceCore(db: Db, user: AdminUser): Promise<{ ok: true; applied: ApprovalGroup[]; ignored: string[] } | { error: string }> {
+  if (!user.isAdmin) return { error: "Chỉ quản trị viên được áp dụng cấu hình cưỡng chế" };
+  const legacy = await readLegacyEnforce(db);
+  if (!legacy) return { error: "Không có cấu hình cưỡng chế cũ nào để áp dụng" };
+  const { config, applied, ignored } = legacyToV2(legacy);
+  const truoc = await readEnforceConfig(db);
+  await ghiSetting(db, APPROVAL_ENFORCE_KEY, config);
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    actorKind: "USER",
+    action: "approval.enforce.apply-legacy",
+    entity: "SETTINGS",
+    entityId: APPROVAL_ENFORCE_KEY,
+    before: truoc ? { v: 2, groups: truoc } : null,
+    after: config,
+    reason: `Áp dụng cấu hình cưỡng chế cũ (khoá ${APPROVAL_ENFORCE_LEGACY_KEY}): ${applied.map((g) => APPROVAL_GROUP_LABEL[g]).join(", ") || "không nhóm nào"}${ignored.length ? ` · bỏ qua: ${ignored.join(", ")}` : ""}`,
+    detail: { legacyRaw: legacy.raw },
+  });
+  return { ok: true, applied, ignored };
 }
 
 /**
