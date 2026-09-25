@@ -15,7 +15,12 @@ import {
 } from "@/lib/approvals/service";
 import { APPROVAL_ENFORCE_KEY } from "@/lib/constants/approval";
 import { DOMAIN_EVENT_BY_NAME } from "@/lib/constants/domain-events";
-import { REQUIRE_APPROVED_DESIGN_KEY } from "@/lib/constants/production-os";
+import { productionTrackState, suggestsTopicOpening } from "@/lib/constants/early-topic";
+import { deriveModelSuggestions, type SuggestionInput } from "@/lib/constants/model-360";
+import { countTopicsBlockingSuggestion, REQUIRE_APPROVED_DESIGN_KEY, TOPIC_BLOCKS_NEW_SUGGESTION, TOPIC_OPEN_STATUSES, TOPIC_STATUSES } from "@/lib/constants/production-os";
+import { clearMemo } from "@/lib/cache";
+import { getModelSignalsBatch } from "@/lib/queries/model-signal";
+import { modelEarlyTopicCandidates, modelWinnerCandidates } from "@/lib/queries/owner-decisions";
 import { writeStockReceiptCore } from "@/lib/inventory/receipt-create";
 import { domainEventDimension, getModelTimeline } from "@/lib/queries/models";
 import { transitionModelCore } from "@/lib/models/service";
@@ -33,6 +38,7 @@ import { createTopicCore } from "@/lib/production/topics";
  *  2. `getSettingJson` đọc được giá trị nguyên thuỷ mà không đổi một khoá object nào (C báo).
  *  3. Lời duyệt không mất khi thao tác được duyệt hỏng; `approval.executed` LIVE (G, handoff-g mục 4).
  *  4. `stock_receipt.linked_production` LIVE (RESERVED từ D).
+ *  5. "Đã có đường sản xuất" (chặn đề xuất mở topic) — một định nghĩa, kể cả topic Đã chốt (T báo).
  *
  * Dữ liệu mang tiền tố `cos-k-` / mã `COSK`; không mốc tuyệt đối, không cửa sổ "N giờ trước" (luật 50, 65).
  */
@@ -590,4 +596,64 @@ export async function testHardeningReceiptLinkedEvent(db: Db) {
   assert.equal(Number(moCoi), 1, "phiếu đổ ⇒ sự kiện đổ theo");
 
   console.log("✓ Company OS · K4: phiếu nhập nối lệnh SX / lô xưởng ⇒ stock_receipt.linked_production LIVE, cùng giao dịch với phiếu · mẫu theo sản phẩm của lệnh / lô (chưa vào sổ ⇒ NULL, không đoán) · chiều Kho trên trang 360 · phiếu không nối / phiếu đổ không phát");
+}
+
+// ─────────────────────────── 5. "ĐÃ CÓ ĐƯỜNG SẢN XUẤT" — MỘT ĐỊNH NGHĨA ───────────────────────────
+
+export async function testHardeningTopicTrackSemantics(db: Db) {
+  // ── (a) Định nghĩa: mọi trạng thái trừ Đã đóng, KỂ CẢ Đã chốt phương án ──
+  assert.deepEqual([...TOPIC_BLOCKS_NEW_SUGGESTION].sort(), TOPIC_STATUSES.filter((s) => s !== "CLOSED").sort());
+  assert.ok(TOPIC_BLOCKS_NEW_SUGGESTION.includes("SELECTED") && !TOPIC_OPEN_STATUSES.includes("SELECTED"), "Đã chốt phương án chặn đề xuất dù đã rời hàng đợi");
+  assert.equal(countTopicsBlockingSuggestion([{ status: "SELECTED" }, { status: "CLOSED" }]), 1);
+  const chiChot = countTopicsBlockingSuggestion([{ status: "SELECTED" }]);
+  const chiDong = countTopicsBlockingSuggestion([{ status: "CLOSED" }]);
+
+  // ── (b) Luật topic sớm + trang 360: mẫu chỉ có topic ĐÃ CHỐT không được đề xuất mở topic lần nữa ──
+  assert.equal(suggestsTopicOpening("PROMISING", "ADS_TESTING", chiChot), null, "TRIỂN VỌNG + topic đã chốt ⇒ không đề xuất mở sớm lần nữa");
+  assert.equal(suggestsTopicOpening("WINNER", "WINNER", chiChot), null);
+  assert.equal(suggestsTopicOpening("PROMISING", "ADS_TESTING", chiDong), "EARLY", "chỉ còn topic Đã đóng (có thể bỏ dở) ⇒ vẫn đề xuất");
+  const base: SuggestionInput = { modelId: "k5", declaredState: "ADS_TESTING", signal: null, ads: null, inventory: null, creativeHref: null, periodQuery: "period=30d", production: { trackTopics: chiChot }, canCreateTopic: true };
+  const moTopic = (s: ReturnType<typeof deriveModelSuggestions>) => s.filter((x) => ["topic-open-early", "topic-open", "lifecycle-production-discussion"].includes(x.key));
+  assert.equal(moTopic(deriveModelSuggestions({ ...base, signal: { signal: "PROMISING", summary: "x" } })).length, 0, "trang 360: TRIỂN VỌNG + topic đã chốt ⇒ không đề xuất");
+  assert.equal(moTopic(deriveModelSuggestions({ ...base, declaredState: "WINNER", signal: { signal: "WINNER", summary: "x" } })).length, 0, "trang 360: THẮNG + topic đã chốt ⇒ không đề xuất");
+  assert.equal(moTopic(deriveModelSuggestions({ ...base, signal: { signal: "PROMISING", summary: "x" }, production: { trackTopics: chiDong } })).length, 1, "trang 360: chỉ topic đã đóng ⇒ đề xuất lại");
+  assert.ok(productionTrackState({ topics: [{ status: "SELECTED" }], finalCosting: null, draftCostings: 0, latestSample: null, approvedDesign: null, openOrders: [] }), "topic đã chốt là chứng cứ đường sản xuất");
+  assert.equal(productionTrackState({ topics: [{ status: "CLOSED" }], finalCosting: null, draftCostings: 0, latestSample: null, approvedDesign: null, openOrders: [] }), null);
+
+  // ── (c) Buồng lái: lô tín hiệu đếm theo CÙNG định nghĩa; hai loại đề xuất đều bỏ mẫu đã chốt topic ──
+  const ev = { kind: "SNAPSHOT", capturedAt: new Date().toISOString(), basis: "kiểm thử K5", productId: null, orders30d: null, ordersTotal: null, adSpend30d: null };
+  const mau = async (code: string, status: "SELECTED" | "CLOSED" | null) => {
+    const [m] = await db.insert(schema.productModels).values({ id: `${P}${code}`, code, name: code, lifecycleState: "ADS_TESTING", registeredBy: "USER" }).returning();
+    if (status) await db.insert(schema.productionTopics).values({ modelId: m.id, title: `Topic ${code}`, status, selectedOption: status === "SELECTED" ? "Xưởng A · vải đũi" : null, evidenceSnapshot: ev });
+    return m.id;
+  };
+  const idChot = await mau("COSK5-CHOT", "SELECTED");
+  const idDong = await mau("COSK5-DONG", "CLOSED");
+  const idTrong = await mau("COSK5-TRONG", null);
+  clearMemo();
+  const lo = await getModelSignalsBatch();
+  const dong = (id: string) => {
+    const r = lo.rows.find((x) => x.model.id === id);
+    assert.ok(r, `lô phải có mẫu ${id}`);
+    return r;
+  };
+  assert.deepEqual([dong(idChot).productionTrackTopics, dong(idDong).productionTrackTopics, dong(idTrong).productionTrackTopics], [1, 0, 0], "lô đếm topic đã chốt, bỏ topic đã đóng");
+  const voi = (id: string, signal: "WINNER" | "PROMISING") => {
+    const r = dong(id);
+    return { ...r, signal: { ...r.signal, signal } };
+  };
+  const thang = modelWinnerCandidates([voi(idChot, "WINNER"), voi(idDong, "WINNER"), voi(idTrong, "WINNER")]).map((r) => r.model.id);
+  assert.deepEqual(thang.sort(), [idDong, idTrong].sort(), "MODEL_SCALE: mẫu đã chốt topic không bị đề xuất mở topic lần nữa");
+  const som = modelEarlyTopicCandidates([voi(idChot, "PROMISING"), voi(idDong, "PROMISING"), voi(idTrong, "PROMISING")]).map((r) => r.model.id);
+  assert.deepEqual(som.sort(), [idDong, idTrong].sort(), "MODEL_EARLY_TOPIC: như trên");
+
+  // ── (d) Mã nguồn: không nơi đề xuất nào tự viết lại tập trạng thái ──
+  const bo = (f: string) => readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  assert.match(bo("lib/queries/model-signal.ts"), /inArray\(t\.status, \[\.\.\.TOPIC_BLOCKS_NEW_SUGGESTION\]\)/, "lô tín hiệu đếm theo TOPIC_BLOCKS_NEW_SUGGESTION");
+  assert.match(bo("app/(dashboard)/models/[id]/blocks.tsx"), /trackTopics: countTopicsBlockingSuggestion\(prod\.data\.topics\)/, "khối Đề xuất 360 đếm theo cùng hàm");
+  for (const f of ["lib/constants/early-topic.ts", "lib/constants/model-360.ts", "lib/queries/owner-decisions.ts", "lib/queries/model-signal.ts"]) {
+    assert.ok(!/status\s*!==\s*"CLOSED"|TOPIC_OPEN_STATUSES/.test(bo(f)), `${f}: đề xuất mở topic không được tự dựng tập trạng thái — dùng TOPIC_BLOCKS_NEW_SUGGESTION`);
+  }
+
+  console.log("✓ Company OS · K5: “đã có đường sản xuất” = mọi trạng thái topic trừ Đã đóng (KỂ CẢ Đã chốt phương án), một định nghĩa cho MODEL_SCALE · MODEL_EARLY_TOPIC · khối Đề xuất 360 · luật topic sớm; chỉ còn topic Đã đóng ⇒ vẫn đề xuất");
 }

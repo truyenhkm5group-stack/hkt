@@ -74,6 +74,12 @@ CHECK: `actor_kind = 'USER'` ⇒ `actor_id IS NOT NULL`.
 > (`{ signal, decidedBy, reasons: [{source, vote, verdict}] }` — chỉ NHÃN) · `signalErrorAtOpen` ·
 > `lifecycleAtOpen`; topic cũ không mang chúng (không backfill). Luật đọc và đề xuất chuyển tiếp sau khi
 > khai THẮNG: `lib/constants/early-topic.ts` (`topicOpeningMode`, `isEarlyOpen`, `winnerFollowUp`).
+>
+> **"Đã có đường sản xuất" (Agent K)** — cổng CHUNG của mọi đề xuất mở topic (buồng lái `MODEL_SCALE` +
+> `MODEL_EARLY_TOPIC`, khối Đề xuất trang 360, `suggestsTopicOpening`, `productionTrackState`):
+> `TOPIC_BLOCKS_NEW_SUGGESTION` / `countTopicsBlockingSuggestion` (`lib/constants/production-os.ts`) = mọi
+> trạng thái topic TRỪ `CLOSED`, KỂ CẢ `SELECTED`. `TOPIC_OPEN_STATUSES` giữ nghĩa "còn việc để bàn" (hàng
+> đợi, bộ lọc, ô "Topic đang mở", link tab Thiết kế) — hai tập khác nhau có chủ đích.
 
 ## 2. Sổ sự kiện (Agent A · cùng migration 0132)
 
@@ -265,7 +271,7 @@ hằng số đang chạy), chỉ nút MỞ. Route: `/production` · `/production
 | `getModelEconomics(productId, range)` | F | 1 | lợi nhuận ƯỚC TÍNH (nominal) vs THỰC ĐẠT · CPO hoà vốn · trần QC/đơn · biên/đơn |
 | `getModelProductionSummary(modelId)` | C | 2 | topic · costing chốt · sample mới nhất · lệnh mở · số kế hoạch/nhận |
 | `getModelSignal(modelId)` | A2 | 2 | WINNER/PROMISING/TESTING/LOSER/NEEDS_MORE_DATA + lý do từng nguồn |
-| `getModelSignalsBatch(range?)` | S | 3 | tín hiệu của MỌI mẫu một lượt (mỗi nguồn đọc một lần cho cả shop, cùng `deriveModelSignal`) + số topic sản xuất đang mở (`null` = không đọc được); đệm theo kỳ. Bằng `getModelSignal` từng mẫu — có bài kiểm so |
+| `getModelSignalsBatch(range?)` | S | 3 | tín hiệu của MỌI mẫu một lượt (mỗi nguồn đọc một lần cho cả shop, cùng `deriveModelSignal`) + `productionTrackTopics` = số topic mang nghĩa "đã có đường sản xuất" (`TOPIC_BLOCKS_NEW_SUGGESTION` — mọi trạng thái trừ Đã đóng, kể cả Đã chốt phương án; Agent K) (`null` = không đọc được); đệm theo kỳ. Bằng `getModelSignal` từng mẫu — có bài kiểm so |
 
 Mọi hàm trên CHỈ gọi truy vấn có sẵn của miền mình — không công thức mới cho một con số đã có.
 

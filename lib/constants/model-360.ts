@@ -155,7 +155,11 @@ export type SuggestionInput = {
    * không có quyền xem sản xuất ⇒ CHƯA BIẾT có topic hay chưa.
    */
   production: {
-    openTopics: number;
+    /**
+     * Số topic mang nghĩa "đường sản xuất đã có" (`countTopicsBlockingSuggestion` — mọi trạng thái trừ Đã
+     * đóng, kể cả Đã chốt phương án; lib/constants/production-os.ts, Agent K). > 0 ⇒ không đề xuất mở topic.
+     */
+    trackTopics: number;
     /**
      * Sản xuất đã đi tới đâu (`winnerFollowUp` — lib/constants/early-topic.ts, Agent T). Mẫu ĐÃ KHAI THẮNG mà
      * sản xuất đi trước (topic mở sớm, giá thành, mẫu thử…) ⇒ đề xuất chuyển tiếp tới đúng chỗ đó thay cho
@@ -243,8 +247,9 @@ export function deriveModelSuggestions(i: SuggestionInput): ModelSuggestion[] {
   //    · Tín hiệu THẮNG, vòng đời chưa tới bước trao đổi sản xuất ⇒ đề xuất mở trao đổi + CHUYỂN trạng thái.
   //    · Tín hiệu TRIỂN VỌNG (chỉ số tốt, chưa thắng — quy tắc chủ shop 25/09/2026) ⇒ đề xuất mở topic SỚM,
   //      luồng song song: KHÔNG kèm chuyển vòng đời (mẫu vẫn đang test quảng cáo).
-  //    Đã có topic ĐANG MỞ ⇒ không đề xuất mở lần nữa: việc đó đang diễn ra ở /production.
-  const topicDangMo = (i.production?.openTopics ?? 0) > 0;
+  //    Đã có đường sản xuất (topic chưa đóng, KỂ CẢ đã chốt phương án — `TOPIC_BLOCKS_NEW_SUGGESTION`) ⇒ không
+  //    đề xuất mở lần nữa: việc đó đang / đã diễn ra ở /production.
+  const topicDangMo = (i.production?.trackTopics ?? 0) > 0;
   const followUp = i.production?.winnerFollowUp ?? null;
   const topicHref = `/production/topics/new?model=${encodeURIComponent(i.modelId)}`;
   const topicCaveat = i.production === null ? "Không đọc được topic sản xuất của mẫu (hoặc bạn không có quyền xem) — có thể đã có topic đang mở." : null;

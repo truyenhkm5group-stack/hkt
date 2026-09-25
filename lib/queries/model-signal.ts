@@ -6,7 +6,7 @@ import { DESIGN_STATUSES, type DesignStatus } from "@/lib/constants/creative-loo
 import { loadSource, type Loaded } from "@/lib/constants/model-360";
 import { isModelState, type ModelState } from "@/lib/constants/model-lifecycle";
 import { deriveModelSignal, MODEL_SIGNAL_LABEL, SIGNAL_SOURCE_LABEL, type ModelSignalInputs, type ModelSignalResult, type SignalAdsInput, type SignalSource } from "@/lib/constants/model-signal";
-import { TOPIC_OPEN_STATUSES } from "@/lib/constants/production-os";
+import { TOPIC_BLOCKS_NEW_SUGGESTION } from "@/lib/constants/production-os";
 import { getAdsDecision, type AdsDecisionRow } from "@/lib/queries/ads-decision";
 import { getInventoryDecisionReport, type InventoryDecisionRow } from "@/lib/queries/inventory-decision";
 import { creativeVerdictCountsByProduct, getModelAdsSummary, getModelCreativeSummary, spendMappedProductIds, summarizeModelAds, type ModelAdsSummary } from "@/lib/queries/model-ads";
@@ -159,16 +159,17 @@ export type ModelSignalBatchRow = {
   model: { id: string; code: string; name: string; state: ModelState | null; productId: string | null };
   signal: ModelSignalReport;
   /**
-   * Topic sản xuất ĐANG MỞ của mẫu (`TOPIC_OPEN_STATUSES` — cùng tập `getModelProductionSummary` đếm).
-   * `null` = không đọc được nguồn sản xuất (câu lỗi ở `topicsError`), KHÔNG phải 0.
+   * Topic mang nghĩa "đường sản xuất đã có" của mẫu (`TOPIC_BLOCKS_NEW_SUGGESTION` — mọi trạng thái trừ Đã
+   * đóng, kể cả Đã chốt phương án; cùng tập khối Đề xuất trang 360 đếm — Agent K). Chỉ để nơi dùng lọc đề
+   * xuất mở topic. `null` = không đọc được nguồn sản xuất (câu lỗi ở `topicsError`), KHÔNG phải 0.
    */
-  openProductionTopics: number | null;
+  productionTrackTopics: number | null;
 };
 
 export type ModelSignalBatch = {
   rows: ModelSignalBatchRow[];
   periodLabel: string;
-  /** Nguồn sản xuất không đọc được ⇒ câu lỗi; mọi `openProductionTopics` là `null`. */
+  /** Nguồn sản xuất không đọc được ⇒ câu lỗi; mọi `productionTrackTopics` là `null`. */
   topicsError: string | null;
 };
 
@@ -182,7 +183,7 @@ export type ModelSignalBatch = {
  *  · creative  — `creativeVerdictCountsByProduct` (cùng luật ô đếm `verdictBucket`);
  *  · thiết kế  — `design_concepts.status` qua cùng phép nối của `getModel`;
  *  · tồn kho   — `getInventoryDecisionReport` ⇒ `pickModelInventoryRows` từng mã;
- *  · sản xuất  — `production_topics` đang mở (chỉ để NƠI DÙNG lọc — KHÔNG bỏ phiếu).
+ *  · sản xuất  — `production_topics` chưa đóng (chỉ để NƠI DÙNG lọc — KHÔNG bỏ phiếu).
  *
  * Rồi đưa từng mẫu qua CÙNG `deriveModelSignal`. Không ngưỡng mới, không phép gộp thứ hai. Đệm theo kỳ.
  */
@@ -212,7 +213,7 @@ async function modelSignalsBatchUncached(range: Period): Promise<ModelSignalBatc
     loadSource("chi quảng cáo theo mã", () => adSpendByProduct(range)),
     loadSource("creative", () => creativeVerdictCountsByProduct(db)),
     loadSource("quyết định tồn", () => getInventoryDecisionReport()),
-    loadSource("topic sản xuất", () => db.select({ modelId: t.modelId }).from(t).where(inArray(t.status, [...TOPIC_OPEN_STATUSES]))),
+    loadSource("topic sản xuất", () => db.select({ modelId: t.modelId }).from(t).where(inArray(t.status, [...TOPIC_BLOCKS_NEW_SUGGESTION]))),
   ]);
 
   // Cắt nguồn cả shop theo mã hàng — giữ NGUYÊN thứ tự dòng của từng nguồn.
@@ -272,7 +273,7 @@ async function modelSignalsBatchUncached(range: Period): Promise<ModelSignalBatc
     return {
       model: { id: m.id, code: m.code, name: m.name, state, productId: pid },
       signal: finishReport(deriveModelSignal(inputs), m.id, range),
-      openProductionTopics: topics.ok ? (openOf.get(m.id) ?? 0) : null,
+      productionTrackTopics: topics.ok ? (openOf.get(m.id) ?? 0) : null,
     };
   });
 

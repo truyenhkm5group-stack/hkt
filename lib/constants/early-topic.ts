@@ -1,6 +1,6 @@
 import { MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL, MODEL_STATES, type ModelState } from "@/lib/constants/model-lifecycle";
 import { MODEL_SIGNAL_LABEL, MODEL_SIGNALS, type ModelSignal, type ModelSignalResult, type SignalSource, type SourceVote } from "@/lib/constants/model-signal";
-import { SAMPLE_STATUS_LABEL, TOPIC_STATUS_LABEL, type SampleStatus, type TopicStatus } from "@/lib/constants/production-os";
+import { SAMPLE_STATUS_LABEL, TOPIC_BLOCKS_NEW_SUGGESTION, TOPIC_STATUS_LABEL, type SampleStatus, type TopicStatus } from "@/lib/constants/production-os";
 
 /**
  * ═══════════ TOPIC SẢN XUẤT MỞ SỚM — LUỒNG SONG SONG, KHÔNG PHẢI CÚ NHẢY VÒNG ĐỜI (Company OS · Agent T) ═══════════
@@ -54,11 +54,13 @@ export function topicOpeningMode(signal: ModelSignal | null, state: ModelState |
 }
 
 /**
- * Cổng của đề xuất "mở topic" (trang 360 và buồng lái dùng CHUNG): có chế độ ⇒ và KHÔNG có topic đang
- * mở. Số topic CHƯA BIẾT (`null`) không phải 0 ⇒ không đề xuất (có thể đã có topic).
+ * Cổng của đề xuất "mở topic" (trang 360 và buồng lái dùng CHUNG): có chế độ ⇒ và KHÔNG có topic nào
+ * mang nghĩa "đường sản xuất đã có" (`trackTopics` — đếm theo `TOPIC_BLOCKS_NEW_SUGGESTION`: mọi trạng thái
+ * trừ Đã đóng, KỂ CẢ Đã chốt phương án — Agent K). Số topic CHƯA BIẾT (`null`) không phải 0 ⇒ không đề xuất
+ * (có thể đã có topic).
  */
-export function suggestsTopicOpening(signal: ModelSignal | null, state: ModelState | null, openTopics: number | null): TopicOpeningMode | null {
-  if (openTopics === null || openTopics > 0) return null;
+export function suggestsTopicOpening(signal: ModelSignal | null, state: ModelState | null, trackTopics: number | null): TopicOpeningMode | null {
+  if (trackTopics === null || trackTopics > 0) return null;
   return topicOpeningMode(signal, state);
 }
 
@@ -157,7 +159,7 @@ export type ProductionTrackInput = {
  */
 export function productionTrackState(p: ProductionTrackInput): { to: ModelState; evidence: string[] } | null {
   const ung: { state: ModelState; text: string }[] = [];
-  const conMo = p.topics.filter((t) => t.status !== "CLOSED");
+  const conMo = p.topics.filter((t) => TOPIC_BLOCKS_NEW_SUGGESTION.includes(t.status));
   if (conMo.length) {
     const daChot = conMo.filter((t) => t.status === "SELECTED").length;
     ung.push({

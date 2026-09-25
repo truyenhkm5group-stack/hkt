@@ -62,6 +62,31 @@ export const TOPIC_TRANSITIONS: Record<TopicStatus, readonly TopicStatus[]> = {
 export const TOPIC_OPEN_STATUSES: readonly TopicStatus[] = ["WAITING_QUOTE", "DISCUSSING", "OPTIONS_READY", "WAITING_DECISION"];
 
 /**
+ * Topic mang nghĩa "ĐƯỜNG SẢN XUẤT ĐÃ CÓ cho mẫu này" ⇒ KHÔNG đề xuất mở topic mới (Company OS · Agent K,
+ * việc còn mở của T). MỘT định nghĩa cho mọi nơi đề xuất: buồng lái (`MODEL_SCALE`, `MODEL_EARLY_TOPIC`),
+ * khối Đề xuất trang 360, luật topic sớm (`suggestsTopicOpening`, `productionTrackState`).
+ *
+ * = mọi trạng thái TRỪ `CLOSED`:
+ *  · bốn trạng thái của `TOPIC_OPEN_STATUSES` — đang trao đổi, đương nhiên đã có đường;
+ *  · `SELECTED` (Đã chốt phương án) — đường sản xuất ĐÃ CHỐT, bước tiếp là giá thành / mẫu thử trên chính
+ *    topic ấy. Trước bản này nó rơi khỏi `TOPIC_OPEN_STATUSES` (đúng cho HÀNG ĐỢI — không còn gì để bàn)
+ *    nên máy đề xuất "mở topic" lần nữa cho một mẫu vừa chốt xưởng. Phương án đổ vỡ thì topic quay lại
+ *    `DISCUSSING` (bảng `TOPIC_TRANSITIONS`) — vẫn chặn, đúng;
+ *  · `CLOSED` KHÔNG chặn: đóng có thể là bỏ dở (cùng lý do `productionTrackState` không tính topic chỉ còn
+ *    "Đã đóng"). Mẫu chỉ còn topic đã đóng mà tín hiệu vẫn tốt ⇒ đề xuất quay lại là thông tin đáng có;
+ *    mở lại hay mở mới vẫn là việc của người.
+ *
+ * KHÁC `TOPIC_OPEN_STATUSES` có chủ đích: tập ấy trả lời "còn việc để làm không" (hàng đợi, bộ lọc "đang
+ * mở", ô "Topic đang mở" của khối Sản xuất, link "Topic sản xuất đang mở" ở tab Thiết kế).
+ */
+export const TOPIC_BLOCKS_NEW_SUGGESTION: readonly TopicStatus[] = TOPIC_STATUSES.filter((s) => s !== "CLOSED");
+
+/** Số topic CHẶN đề xuất mở topic mới — đếm trên danh sách trạng thái đã đọc. */
+export function countTopicsBlockingSuggestion(topics: readonly { status: string }[]): number {
+  return topics.filter((t) => (TOPIC_BLOCKS_NEW_SUGGESTION as readonly string[]).includes(t.status)).length;
+}
+
+/**
  * Chiếu sang ngôn ngữ chung của hàng đợi (luật 19). Phủ HẾT trạng thái — thiếu một giá trị thì việc
  * rơi âm thầm vào `NEW`.
  *

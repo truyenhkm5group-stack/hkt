@@ -237,7 +237,7 @@ export function testCompanyOsCockpitPure() {
   const bRow = (id: string, over: { state?: ModelSignalBatchRow["model"]["state"]; open?: number | null; signal?: ModelSignalBatchRow["signal"] } = {}): ModelSignalBatchRow => ({
     model: { id, code: `Q-${id}`, name: "Áo", state: over.state ?? null, productId: `p-${id}` },
     signal: over.signal ?? sig({}, id),
-    openProductionTopics: over.open === undefined ? 0 : over.open,
+    productionTrackTopics: over.open === undefined ? 0 : over.open,
   });
   assert.equal(sig({}).signal, "WINNER", "đầu vào mẫu của bài kiểm phải là THẮNG thật theo bảng gộp");
   const ungVien = modelWinnerCandidates([
