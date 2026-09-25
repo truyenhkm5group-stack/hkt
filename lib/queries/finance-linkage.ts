@@ -14,6 +14,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema, type Db } from "@/db";
 import { allocationOf, PAYROLL_PERIOD_RE, type Allocation, type LinkConfidence, type LinkMethod, type LinkTargetType } from "@/lib/constants/finance-truth";
+import { supplierPaymentAmount } from "@/lib/queries/workshop-ledger";
 
 const b = schema.bankTransactions;
 const l = schema.bankTransactionLinks;
@@ -123,6 +124,8 @@ export async function targetAmount(targetType: LinkTargetType, targetId: string,
   if (targetType === "COD_BATCH") return one(db.select({ amount: schema.codBatches.totalAmount }).from(schema.codBatches).where(eq(schema.codBatches.id, targetId)).limit(1));
   if (targetType === "STOCK_RECEIPT") return one(db.select({ amount: schema.stockReceipts.totalCost }).from(schema.stockReceipts).where(eq(schema.stockReceipts.id, targetId)).limit(1));
   if (targetType === "AD_SPEND") return one(db.select({ amount: schema.adSpends.spend }).from(schema.adSpends).where(eq(schema.adSpends.id, targetId)).limit(1));
+  // Sổ đặt xưởng tự trả lời số tiền của đợt thanh toán — phía ngân hàng không đọc bảng của sổ ấy.
+  if (targetType === "SUPPLIER_PAYMENT") return supplierPaymentAmount(targetId, db);
   return one(db.select({ amount: b.amount }).from(b).where(eq(b.id, targetId)).limit(1));
 }
 
@@ -140,6 +143,7 @@ export async function targetExists(targetType: LinkTargetType, targetId: string,
   if (targetType === "COD_BATCH") return one(db.select({ id: schema.codBatches.id }).from(schema.codBatches).where(eq(schema.codBatches.id, targetId)).limit(1));
   if (targetType === "STOCK_RECEIPT") return one(db.select({ id: schema.stockReceipts.id }).from(schema.stockReceipts).where(eq(schema.stockReceipts.id, targetId)).limit(1));
   if (targetType === "AD_SPEND") return one(db.select({ id: schema.adSpends.id }).from(schema.adSpends).where(eq(schema.adSpends.id, targetId)).limit(1));
+  if (targetType === "SUPPLIER_PAYMENT") return (await supplierPaymentAmount(targetId, db)) !== null;
   return one(db.select({ id: b.id }).from(b).where(eq(b.id, targetId)).limit(1));
 }
 

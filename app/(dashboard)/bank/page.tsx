@@ -57,7 +57,7 @@ export default async function BankPage({ searchParams }: { searchParams: Promise
       <FinanceNav badges={{ bank: unclassified }} />
       <BankTabs active={tab} unclassified={unclassified} unconfirmedAccounts={unconfirmedAccounts} />
 
-      {tab === "giao-dich" ? <BankTransactionsTab raw={raw} period={period} canWrite={canWrite} /> : null}
+      {tab === "giao-dich" ? <BankTransactionsTab raw={raw} period={period} canWrite={canWrite} canLinkSupplier={canWrite && can(user, "expenses:write")} /> : null}
       {tab === "tai-khoan" ? <BankAccountsTab accounts={accounts} canManage={canManageAccounts} lastReconciliation={lastReconciliation} /> : null}
       {tab === "doi-khop" ? <BankMatchTab canWrite={canWrite} /> : null}
       {tab === "nhap-sao-ke" ? <BankImportTab canWrite={canWrite} accounts={accounts.map((a) => ({ id: a.id, label: a.label, gateway: a.gateway, accountNumber: a.accountNumber, status: a.status }))} /> : null}

@@ -21,7 +21,7 @@ import {
 } from "@/lib/constants/workshop-ledger";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import { activeSupplierNames } from "@/lib/queries/suppliers";
-import { getProductionBatchDetail, workshopFormOptions, type PaymentRecord } from "@/lib/queries/workshop-ledger";
+import { getProductionBatchDetail, workshopFormOptions, type PaymentRecord, type SupplierPaymentBankLink } from "@/lib/queries/workshop-ledger";
 import { cn } from "@/lib/utils";
 import { BatchDialog, BatchStatusButtons, DeleteButton, DeliveryDialog, FabricDialog, PaymentDialog } from "../workshop-forms";
 
@@ -31,7 +31,7 @@ function Chip({ tone, children }: { tone: string; children: React.ReactNode }) {
   return <span className={cn("inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-medium", tone)}>{children}</span>;
 }
 
-function PaymentRows({ payments, canPay }: { payments: PaymentRecord[]; canPay: boolean }) {
+function PaymentRows({ payments, canPay, bankLinks }: { payments: PaymentRecord[]; canPay: boolean; bankLinks: Map<string, SupplierPaymentBankLink[]> }) {
   return (
     <>
       {payments.map((p) => (
@@ -41,7 +41,12 @@ function PaymentRows({ payments, canPay }: { payments: PaymentRecord[]; canPay: 
           <TableCell className={cn("text-right font-medium tabular-nums", p.kind === "REFUND" && "text-emerald-600 dark:text-emerald-400")}>{formatVND(p.kind === "REFUND" ? -p.amount : p.amount)}</TableCell>
           <TableCell className="text-xs text-muted-foreground">
             {PAYMENT_METHOD_LABEL[p.method as PaymentMethod] ?? p.method}
-            {p.reference ? ` · ${p.reference}` : ""}
+            {bankLinks.get(p.id)?.length ? (
+              <span className="ml-1 text-emerald-600 dark:text-emerald-400">✓ sao kê {bankLinks.get(p.id)?.map((x) => x.bankRef).join(", ")}</span>
+            ) : p.method === "BANK" ? (
+              <span className="ml-1 text-amber-600 dark:text-amber-400">· chưa đối chiếu sao kê</span>
+            ) : null}
+            {p.reference && !bankLinks.get(p.id)?.some((x) => x.bankRef === p.reference) ? ` · ${p.reference}` : ""}
             {p.note ? ` · ${p.note}` : ""}
             <div>{p.createdBy}</div>
           </TableCell>
@@ -244,7 +249,7 @@ export default async function WorkshopBatchPage({ params }: { params: Promise<{ 
                     </TableCell>
                   </TableRow>
                 ) : (
-                  <PaymentRows payments={b.payments} canPay={canPay} />
+                  <PaymentRows payments={b.payments} canPay={canPay} bankLinks={detail.bankLinks} />
                 )}
               </TableBody>
             </Table>
@@ -319,7 +324,7 @@ export default async function WorkshopBatchPage({ params }: { params: Promise<{ 
             <p className="mb-2 text-xs font-medium text-muted-foreground">Các đợt trả tiền vải</p>
             <Table>
               <TableBody>
-                <PaymentRows payments={fabrics.flatMap((f) => f.payments)} canPay={canPay} />
+                <PaymentRows payments={fabrics.flatMap((f) => f.payments)} canPay={canPay} bankLinks={detail.bankLinks} />
               </TableBody>
             </Table>
           </div>

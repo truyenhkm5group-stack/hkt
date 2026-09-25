@@ -911,6 +911,13 @@
       "when": 1790002588245,
       "tag": "0130_marketer_prices",
       "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1790002648245,
+      "tag": "0131_bank_link_supplier_payment",
+      "breakpoints": true
     }
   ]
 }

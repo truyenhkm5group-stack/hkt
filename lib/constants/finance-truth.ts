@@ -96,7 +96,7 @@ export const TRUTH_DOMAIN_SPEC: Record<TruthDomain, TruthDomainSpec> = {
  *    B là HAI dòng sao kê của cùng MỘT sự kiện; không ghép được hai chân thì dòng tiền công ty vừa
  *    cộng tiền ra vừa cộng tiền vào cho một đồng không hề rời khỏi shop.
  */
-export const LINK_TARGET_TYPES = ["EXPENSE", "COD_BATCH", "STOCK_RECEIPT", "AD_SPEND", "PAYROLL_PERIOD", "BANK_TRANSACTION"] as const;
+export const LINK_TARGET_TYPES = ["EXPENSE", "COD_BATCH", "STOCK_RECEIPT", "AD_SPEND", "PAYROLL_PERIOD", "BANK_TRANSACTION", "SUPPLIER_PAYMENT"] as const;
 export type LinkTargetType = (typeof LINK_TARGET_TYPES)[number];
 
 export const LINK_TARGET_LABEL: Record<LinkTargetType, string> = {
@@ -106,6 +106,7 @@ export const LINK_TARGET_LABEL: Record<LinkTargetType, string> = {
   AD_SPEND: "Chi tiêu quảng cáo",
   PAYROLL_PERIOD: "Kỳ lương",
   BANK_TRANSACTION: "Chân kia của lần chuyển nội bộ",
+  SUPPLIER_PAYMENT: "Thanh toán xưởng may / nhà vải",
 };
 
 /** Sổ mà chứng từ đích thuộc về — để không ai nối một dòng tiền vào chính sổ tiền rồi cộng hai lần. */
@@ -116,6 +117,8 @@ export const LINK_TARGET_DOMAIN: Record<LinkTargetType, TruthDomain> = {
   AD_SPEND: "EXPENSE",
   PAYROLL_PERIOD: "PAYROLL",
   BANK_TRANSACTION: "CASH",
+  // Sổ đặt xưởng là CÔNG NỢ nhà cung cấp — cùng miền với phiếu nhập kho, không phải một sổ tiền.
+  SUPPLIER_PAYMENT: "EXPENSE",
 };
 
 /** Khoá tự nhiên của một kỳ lương: `YYYY-MM`. */

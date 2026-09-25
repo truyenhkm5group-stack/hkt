@@ -201,7 +201,7 @@ export function testWorkshopLedgerPure() {
     tiền đọc tiền trả xưởng ở đây, mỗi chiếc áo bị tính giá vốn hai lần — và con số vẫn "trông hợp lý".
     Nên chỉ bốn tệp của chính sổ được nhắc tới bốn bảng này.
   */
-  const DUOC_PHEP = new Set(["lib/queries/workshop-ledger.ts", "lib/actions/workshop-ledger.ts", "lib/workshop/sheet-import-db.ts"]);
+  const DUOC_PHEP = new Set(["lib/queries/workshop-ledger.ts", "lib/actions/workshop-ledger.ts", "lib/workshop/sheet-import-db.ts", "lib/workshop/bank-link.ts"]);
   // Trang Thiếu hàng / Quyết định vốn chỉ nhận SỐ LƯỢNG qua `openBatchQtyByVariantFromLedger`, không đọc bảng.
   assert.ok(readFileSync("lib/queries/inventory-decision.ts", "utf8").includes("openBatchQtyByVariantFromLedger()"), "hàng đã đặt theo mẫu phải đi qua đúng một hàm của sổ");
   const tep = execSync("git ls-files lib app components && git ls-files --others --exclude-standard lib app components", { encoding: "utf8" })

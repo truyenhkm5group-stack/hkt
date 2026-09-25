@@ -14,6 +14,7 @@ import { getDb, schema } from "@/db";
 import { BANK_GROUPS, BANK_GROUP_SPEC, isBankGroup, isBusinessCash, type BankGroup } from "@/lib/constants/bank";
 import { getRecognizedCosts } from "@/lib/queries/cost-engine";
 import type { ListParams, Period } from "@/lib/search-params";
+import { bankLinkDetails } from "@/lib/queries/bank-link-detail";
 
 const b = schema.bankTransactions;
 
@@ -100,10 +101,14 @@ export async function listBankTransactions(params: ListParams, options: BankList
     db.select({ n: count() }).from(b).where(where),
   ]);
   const n = Number(total?.n ?? 0);
-  return { rows, total: n, pageCount: Math.max(1, Math.ceil(n / params.pageSize)) };
+  // Diễn giải từ chứng từ đã nối ("Trả xưởng Hà · Q002 lô 2 · …") — chỉ cho đúng trang đang xem.
+  const chiTiet = await bankLinkDetails(rows.filter((r) => r.linked).map((r) => r.id));
+  return { rows: rows.map((r) => ({ ...r, linkDetails: chiTiet.get(r.id) ?? [] })), total: n, pageCount: Math.max(1, Math.ceil(n / params.pageSize)) };
 }
 
-export type BankTxnRow = Awaited<ReturnType<typeof listBankTransactions>>["rows"][number];
+type BankTxnRowFull = Awaited<ReturnType<typeof listBankTransactions>>["rows"][number];
+/** `linkDetails` tuỳ chọn: trang Điều phối tài chính dùng lại bảng này với dòng không kèm diễn giải. */
+export type BankTxnRow = Omit<BankTxnRowFull, "linkDetails"> & { linkDetails?: string[] };
 
 /**
  * Tổng tiền vào / ra của bộ lọc hiện tại.
