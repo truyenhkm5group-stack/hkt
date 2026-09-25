@@ -4,6 +4,7 @@ import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import type { Role } from "@/db/schema";
 import {
+  applyLegacyEnforceCore,
   approvalFingerprint,
   approvalStillValid,
   approvalValidSince,
@@ -11,6 +12,8 @@ import {
   decideApprovalCore,
   guardSecondApprovalCore,
   readEnforceConfig,
+  readLegacyEnforce,
+  setEnforceGroupCore,
   type GuardInput,
 } from "@/lib/approvals/service";
 import { audit, inferActorKind } from "@/lib/audit";
@@ -18,7 +21,7 @@ import { effectiveAccess, type CustomRole } from "@/lib/auth/access";
 import { ALL_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, resolvePermissions, type RolePermissionMap } from "@/lib/auth/permissions";
 import { can, type SessionUser } from "@/lib/auth/session";
 import { memo, trongJobNen } from "@/lib/cache";
-import { APPROVAL_ENFORCE_KEY, APPROVAL_GROUPS, APPROVAL_GROUPS_WIRED, APPROVAL_VALID_HOURS, canonicalJson, isEnforced, parseEnforceConfig } from "@/lib/constants/approval";
+import { APPROVAL_ENFORCE_KEY, APPROVAL_ENFORCE_LEGACY_KEY, APPROVAL_GROUPS, APPROVAL_GROUPS_WIRED, APPROVAL_VALID_HOURS, canonicalJson, isEnforced, legacyToV2, parseEnforceConfig } from "@/lib/constants/approval";
 import { ROLE_BUILDER_FORBIDDEN } from "@/lib/constants/access-scope";
 import { ROLE_ORDER } from "@/lib/constants/roles";
 import { WORK_SOURCE_SPEC } from "@/lib/constants/work-sources";
@@ -27,7 +30,6 @@ import { DEFAULT_SLA_MAP } from "@/lib/constants/work-sla";
 import { collectWorkItems } from "@/lib/queries/work-adapters";
 import { runJob } from "@/lib/sync/jobs";
 import { runSyncJob } from "@/lib/sync/runner";
-import { setSettingJson } from "@/lib/settings";
 import { saveAccessRoleSchema } from "@/lib/validation/access";
 
 /**
@@ -51,7 +53,7 @@ async function donDep(db: Db) {
   await db.delete(schema.auditLogs).where(like(schema.auditLogs.userEmail, `${P}%`));
   await db.delete(schema.approvalRequests).where(like(schema.approvalRequests.requestedByEmail, `${P}%`));
   await db.delete(schema.users).where(like(schema.users.id, `${P}%`));
-  await db.delete(schema.settings).where(eq(schema.settings.key, APPROVAL_ENFORCE_KEY));
+  await db.delete(schema.settings).where(inArray(schema.settings.key, [APPROVAL_ENFORCE_KEY, APPROVAL_ENFORCE_LEGACY_KEY]));
 }
 
 function nguoi(id: string, role: Role, permissions: string[]): SessionUser {
@@ -76,16 +78,7 @@ export async function testCompanyOsControlPlane(db: Db) {
   assert.notEqual(approvalFingerprint(goc), approvalFingerprint({ ...goc, payload: { items: [{ v: "a", q: -3 }], note: "kiểm kê" } }), "đổi một con số là một việc KHÁC");
   assert.notEqual(approvalFingerprint(goc), approvalFingerprint({ ...goc, action: "stock.issue" }), "đổi thao tác là một việc khác");
 
-  /* ═══════════ 1b · CẤU HÌNH CƯỠNG CHẾ ĐỌC ĐƯỢC (LỖI THẬT CỦA BẢN CŨ) ═══════════ */
-  // `settings.value` là TEXT. Bản cũ đưa thẳng chuỗi vào `isEnforced` ⇒ luôn TẮT.
-  assert.equal(isEnforced('{"INVENTORY_ADJUSTMENT":true}', "INVENTORY_ADJUSTMENT"), false, "tiền đề: isEnforced nhận CHUỖI thì luôn tắt — đúng lỗi của bản cũ");
-  assert.equal(isEnforced(parseEnforceConfig('{"INVENTORY_ADJUSTMENT":true}'), "INVENTORY_ADJUSTMENT"), true, "chuỗi JSON đã parse thì phải bật được");
-  assert.equal(parseEnforceConfig("không phải json"), null, "chuỗi hỏng ⇒ TẮT, không ném lỗi");
-  assert.equal(parseEnforceConfig("[true]"), null, "mảng không phải cấu hình theo nhóm");
-  await setSettingJson(APPROVAL_ENFORCE_KEY, { INVENTORY_ADJUSTMENT: true, EXPENSE_EDIT: true });
-  assert.equal(isEnforced(await readEnforceConfig(db), "INVENTORY_ADJUSTMENT"), true, "ghi bằng setSettingJson (đúng đường của công tắc) thì cổng phải đọc thấy BẬT");
-
-  /* ═══════════ 1c · VÒNG ĐỜI: XIN → DUYỆT → TIÊU THỤ MỘT LẦN ═══════════ */
+  /* ═══════════ 1b · CẤU HÌNH CƯỠNG CHẾ: CHỈ BẢN v2 DO CÔNG TẮC GHI MỚI CÓ HIỆU LỰC ═══════════ */
   const now = new Date();
   await db.insert(schema.users).values([
     { id: `${P}xin`, email: `${P}xin@t.local`, name: "Người xin", role: "MANAGER", passwordHash: "x", active: true },
@@ -95,6 +88,55 @@ export async function testCompanyOsControlPlane(db: Db) {
   const xin = { id: `${P}xin`, email: `${P}xin@t.local` };
   const xin2 = { id: `${P}xin2`, email: `${P}xin2@t.local` };
   const duyet = { id: `${P}duyet`, email: `${P}duyet@t.local`, canDecide: true };
+  const quanTri = { id: duyet.id, email: duyet.email, isAdmin: true };
+
+  // `settings.value` là TEXT. Bản cũ đưa thẳng chuỗi vào `isEnforced` ⇒ luôn TẮT.
+  assert.equal(isEnforced('{"INVENTORY_ADJUSTMENT":true}', "INVENTORY_ADJUSTMENT"), false, "tiền đề: isEnforced nhận CHUỖI thì luôn tắt — đúng lỗi của bản cũ");
+  assert.equal(isEnforced(parseEnforceConfig('{"v":2,"groups":{"INVENTORY_ADJUSTMENT":true}}'), "INVENTORY_ADJUSTMENT"), true, "chuỗi v2 đã parse thì bật được");
+  assert.equal(parseEnforceConfig('{"INVENTORY_ADJUSTMENT":true}'), null, "hình dạng CŨ không bao giờ có hiệu lực — kể cả khi nằm ở khoá mới");
+  assert.equal(parseEnforceConfig('{"v":1,"groups":{"INVENTORY_ADJUSTMENT":true}}'), null, "thiếu dấu v2 thì không có hiệu lực");
+  assert.equal(parseEnforceConfig("không phải json"), null, "chuỗi hỏng ⇒ TẮT, không ném lỗi");
+  assert.equal(parseEnforceConfig("[true]"), null, "mảng không phải cấu hình theo nhóm");
+  assert.notEqual(APPROVAL_ENFORCE_KEY, APPROVAL_ENFORCE_LEGACY_KEY, "khoá có hiệu lực phải KHÁC khoá cũ");
+
+  // DÒNG CŨ trên production (gõ tay theo hướng dẫn cũ) KHÔNG được tự có hiệu lực sau deploy.
+  const dongCu = '{"INVENTORY_ADJUSTMENT":true,"PAYROLL_EDIT":true,"COD_CORRECTION":true,"NHOM_LA":true}';
+  await db.insert(schema.settings).values({ key: APPROVAL_ENFORCE_LEGACY_KEY, value: dongCu });
+  assert.equal(await readEnforceConfig(db), null, "chỉ có dòng cũ ⇒ cưỡng chế TẮT");
+  const khongBat = await guardSecondApprovalCore(db, xin, goc, now);
+  assert.equal(khongBat.mode, "PROCEED", "dòng cũ KHÔNG được chặn việc thật của chủ shop");
+  // Hiện được cho quản trị viên, và chuyển đổi đúng.
+  const cu0 = await readLegacyEnforce(db);
+  assert.deepEqual(cu0?.groups, ["INVENTORY_ADJUSTMENT", "PAYROLL_EDIT", "COD_CORRECTION"]);
+  const chuyen = legacyToV2(cu0!);
+  assert.deepEqual(chuyen.config, { v: 2, groups: { INVENTORY_ADJUSTMENT: true, PAYROLL_EDIT: true } }, "chỉ nhóm ĐÃ NỐI vào v2");
+  assert.deepEqual(chuyen.ignored, ["COD_CORRECTION", "NHOM_LA"], "nhóm chưa nối và khoá lạ được nói ra, không lặng lẽ bỏ");
+
+  // Công tắc ghi v2 (người không phải ADMIN bị chặn).
+  assert.ok("error" in (await setEnforceGroupCore(db, { ...quanTri, isAdmin: false }, "EXPENSE_EDIT", true)), "chỉ ADMIN bật được");
+  assert.ok("error" in (await setEnforceGroupCore(db, quanTri, "COD_CORRECTION", true)), "nhóm chưa nối không bật được");
+  assert.ok("ok" in (await setEnforceGroupCore(db, quanTri, "EXPENSE_EDIT", true)));
+  const [v2Row] = await db.select().from(schema.settings).where(eq(schema.settings.key, APPROVAL_ENFORCE_KEY));
+  assert.deepEqual(JSON.parse(v2Row.value), { v: 2, groups: { EXPENSE_EDIT: true } }, "công tắc ghi đúng hình dạng v2");
+  assert.equal(isEnforced(await readEnforceConfig(db), "EXPENSE_EDIT"), true, "v2 ⇒ bật đúng nhóm");
+  assert.equal(isEnforced(await readEnforceConfig(db), "INVENTORY_ADJUSTMENT"), false, "v2 không kéo theo nhóm của dòng cũ");
+
+  // Nút "Áp dụng cấu hình này": v2 = đúng dòng cũ (thay công tắc hiện tại), dòng cũ để nguyên.
+  assert.ok("error" in (await applyLegacyEnforceCore(db, { ...quanTri, isAdmin: false })), "chỉ ADMIN áp dụng được");
+  const apDung = await applyLegacyEnforceCore(db, quanTri);
+  assert.ok("ok" in apDung);
+  const cfgSau = await readEnforceConfig(db);
+  assert.deepEqual(cfgSau, { INVENTORY_ADJUSTMENT: true, PAYROLL_EDIT: true }, "áp dụng xong ⇒ v2 đúng bằng các nhóm đã nối của dòng cũ");
+  const [conDongCu] = await db.select().from(schema.settings).where(eq(schema.settings.key, APPROVAL_ENFORCE_LEGACY_KEY));
+  assert.equal(conDongCu?.value, dongCu, "dòng cũ KHÔNG bị xoá hay sửa");
+  const [nhatKyApDung] = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.action, "approval.enforce.apply-legacy"), eq(schema.auditLogs.userId, quanTri.id)));
+  assert.deepEqual((nhatKyApDung?.detail as { after?: unknown })?.after, { v: 2, groups: { INVENTORY_ADJUSTMENT: true, PAYROLL_EDIT: true } }, "nhật ký ghi trước/sau");
+  // Dọn: từ đây cưỡng chế bật cho đúng hai nhóm mà các khối dưới cần.
+  await db.delete(schema.settings).where(eq(schema.settings.key, APPROVAL_ENFORCE_LEGACY_KEY));
+  assert.ok("ok" in (await setEnforceGroupCore(db, quanTri, "EXPENSE_EDIT", true)));
+  assert.equal(isEnforced(await readEnforceConfig(db), "INVENTORY_ADJUSTMENT"), true);
+
+  /* ═══════════ 1c · VÒNG ĐỜI: XIN → DUYỆT → TIÊU THỤ MỘT LẦN ═══════════ */
   const a = schema.approvalRequests;
   const dong = async (id: string) => (await db.select().from(a).where(eq(a.id, id)))[0];
   const demCho = async () => Number((await db.select({ n: sql<number>`count(*)` }).from(a).where(and(eq(a.status, "PENDING"), like(a.requestedByEmail, `${P}%`))))[0].n);
@@ -197,7 +239,7 @@ export async function testCompanyOsControlPlane(db: Db) {
   /* ═══════════ 1f · CƯỠNG CHẾ TẮT ⇒ HÀNH VI Y HỆT BẢN CŨ ═══════════ */
   const l5 = await guardSecondApprovalCore(db, xin, goc, now);
   assert.ok("ok" in (await decideApprovalCore(db, duyet, l5.requestId!, true, undefined, now)));
-  await setSettingJson(APPROVAL_ENFORCE_KEY, { EXPENSE_EDIT: true });
+  assert.ok("ok" in (await setEnforceGroupCore(db, quanTri, "INVENTORY_ADJUSTMENT", false)));
   const tat = await guardSecondApprovalCore(db, xin, goc, now);
   assert.equal(tat.mode, "PROCEED");
   assert.equal(tat.consumed, undefined, "cưỡng chế tắt thì KHÔNG đụng tới lời duyệt nào");
@@ -213,7 +255,7 @@ export async function testCompanyOsControlPlane(db: Db) {
   const [dongHet] = await db.select().from(schema.auditLogs).where(and(eq(schema.auditLogs.entityId, cu.id), eq(schema.auditLogs.action, "approval.expire")));
   assert.equal(dongHet?.actorKind, "SYSTEM", "hết hạn là MÁY làm, không phải người");
   const tuChoi = await guardSecondApprovalCore(db, xin2, { ...goc, payload: { tu: "choi" } }, now);
-  await setSettingJson(APPROVAL_ENFORCE_KEY, { INVENTORY_ADJUSTMENT: true });
+  assert.ok("ok" in (await setEnforceGroupCore(db, quanTri, "INVENTORY_ADJUSTMENT", true)));
   const tc = await guardSecondApprovalCore(db, xin2, { ...goc, payload: { tu: "choi-2" } }, now);
   assert.equal(tuChoi.mode, "PROCEED", "tiền đề: nhóm tắt thì làm luôn");
   assert.ok("ok" in (await decideApprovalCore(db, duyet, tc.requestId!, false, "thiếu biên bản kiểm kê", now)));
@@ -342,6 +384,6 @@ export async function testCompanyOsControlPlane(db: Db) {
 
   await donDep(db);
   console.log(
-    `✓ Company OS · mặt phẳng điều khiển: lời duyệt tiêu thụ ĐÚNG MỘT LẦN (đúng việc · đúng người · trong ${APPROVAL_VALID_HOURS} giờ; đồng thời chỉ một lượt thắng; quá hạn ghi EXPIRED) · cưỡng chế đọc được cấu hình TEXT (bản cũ không bao giờ bật) · approvals:decide khớp luật cũ ở ${soCa} ca × 8 vai · nguồn việc APPROVAL tự biến mất khi đã quyết · audit ghi actor_kind/correlation_id/reason, CSDL chặn loại lạ, lỗi ghi được in ra · 5 job có sync_runs mà không làm cũ đệm`,
+    `✓ Company OS · mặt phẳng điều khiển: lời duyệt tiêu thụ ĐÚNG MỘT LẦN (đúng việc · đúng người · trong ${APPROVAL_VALID_HOURS} giờ; đồng thời chỉ một lượt thắng; quá hạn ghi EXPIRED) · chỉ cấu hình v2 do công tắc ADMIN ghi mới có hiệu lực, dòng cũ hiện ra và áp dụng có chủ đích · approvals:decide khớp luật cũ ở ${soCa} ca × 8 vai · nguồn việc APPROVAL tự biến mất khi đã quyết · audit ghi actor_kind/correlation_id/reason, CSDL chặn loại lạ, lỗi ghi được in ra · 5 job có sync_runs mà không làm cũ đệm`,
   );
 }

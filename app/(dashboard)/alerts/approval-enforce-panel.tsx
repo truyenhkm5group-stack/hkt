@@ -2,7 +2,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { getApprovalEnforceState } from "@/lib/actions/approvals";
 import { APPROVAL_THRESHOLD, APPROVAL_VALID_HOURS, type ApprovalGroup } from "@/lib/constants/approval";
 import { formatVND } from "@/lib/format";
-import { ApprovalEnforceToggle } from "@/app/(dashboard)/alerts/approval-enforce-toggle";
+import { ApplyLegacyEnforceButton, ApprovalEnforceToggle } from "@/app/(dashboard)/alerts/approval-enforce-toggle";
 
 /**
  * ───────────── CÔNG TẮC CƯỠNG CHẾ DUYỆT HAI BƯỚC — CHỈ QUẢN TRỊ VIÊN ─────────────
@@ -16,8 +16,8 @@ import { ApprovalEnforceToggle } from "@/app/(dashboard)/alerts/approval-enforce
  */
 export async function ApprovalEnforcePanel() {
   const state = await getApprovalEnforceState();
-  if (!state.length) return null;
-  const dangBat = state.filter((s) => s.enforced).length;
+  if (!state) return null;
+  const dangBat = state.groups.filter((s) => s.enforced).length;
   return (
     <SectionCard
       title="Cưỡng chế duyệt hai bước"
@@ -25,8 +25,28 @@ export async function ApprovalEnforcePanel() {
       hint={`TẮT: việc vẫn chạy ngay, chỉ để lại dòng nhật ký "chưa cần duyệt". BẬT: việc vượt ngưỡng dừng lại thành một yêu cầu chờ người KHÁC duyệt; người xin bấm lại đúng việc đó sau khi được duyệt thì việc chạy, và lời duyệt chỉ dùng được MỘT lần trong ${APPROVAL_VALID_HOURS} giờ. Chưa có người duyệt thứ hai (ADMIN / MANAGER khác người xin) thì việc bị CHẶN hẳn — không tự cho qua. Mỗi lần bật / tắt được ghi nhật ký trước/sau.`}
       padded={false}
     >
+      {/*
+        DÒNG CŨ `approval.enforce` — hướng dẫn cũ bảo chủ shop gõ tay khoá này, nhưng lỗi đọc TEXT làm
+        nó CHƯA TỪNG có hiệu lực. Bản này cố ý KHÔNG để nó tự có hiệu lực (chủ shop làm một mình sẽ bị
+        chặn khỏi việc kho / lương ngay sáng hôm sau). Hiện ra để NGƯỜI quyết; không xoá, không sửa.
+      */}
+      {state.legacy ? (
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-amber-50/60 px-5 py-3 text-sm dark:bg-amber-950/20">
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">
+              Cấu hình cưỡng chế cũ (chưa từng có hiệu lực do lỗi đọc):{" "}
+              {state.legacy.groups.length ? state.legacy.groups.map((g) => g.label).join(", ") : "không nhóm nào được bật"}
+            </div>
+            <div className="mt-0.5 text-[11.5px] text-muted-foreground">
+              Khoá <code>approval.enforce</code> gõ tay theo hướng dẫn cũ. Nó KHÔNG tự có hiệu lực — bấm áp dụng thì các nhóm đã nối ở trên được bật đúng như vậy (các công tắc hiện tại bị thay).
+              {state.legacy.ignored.length ? ` Không áp được: ${state.legacy.ignored.join(", ")}.` : ""}
+            </div>
+          </div>
+          <ApplyLegacyEnforceButton summary={state.legacy.groups.map((g) => g.label).join(", ")} />
+        </div>
+      ) : null}
       <ul className="divide-y">
-        {state.map((s) => (
+        {state.groups.map((s) => (
           <li key={s.group} className="flex flex-wrap items-start justify-between gap-3 px-5 py-3">
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium">

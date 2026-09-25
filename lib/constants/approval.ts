@@ -23,7 +23,8 @@
  * niềm tin vào mọi cơ chế kiểm soát khác. Nên: máy móc dựng đủ, GHI NHẬN đầy đủ ngay từ đầu, còn
  * CƯỠNG CHẾ bật theo từng nhóm khi shop có người thứ hai thật sự.
  *
- * Bật ở `settings` khoá `approval.enforce` — xem `APPROVAL_ENFORCE_KEY`.
+ * Bật bằng công tắc ở trang Cần xử lý (chỉ ADMIN), ghi `settings` khoá `approval.enforce.v2` — xem
+ * `APPROVAL_ENFORCE_KEY`. Khoá cũ `approval.enforce` KHÔNG còn tự có hiệu lực (xem `parseEnforceConfig`).
  */
 
 /** Nhóm việc rủi ro. Bật / tắt cưỡng chế theo NHÓM, không theo từng nút. */
@@ -88,8 +89,25 @@ export const APPROVAL_THRESHOLD: Partial<Record<ApprovalGroup, number>> = {
   EXPENSE_EDIT: 5_000_000,
 };
 
-/** Khoá `settings` bật cưỡng chế theo nhóm: `{ "INVENTORY_ADJUSTMENT": true, ... }` */
-export const APPROVAL_ENFORCE_KEY = "approval.enforce";
+/**
+ * Khoá `settings` DUY NHẤT có hiệu lực: `{ "v": 2, "groups": { "INVENTORY_ADJUSTMENT": true, ... } }`,
+ * và chỉ công tắc ADMIN ở trang Cần xử lý ghi nó (Company OS · Agent G).
+ *
+ * VÌ SAO KHOÁ MỚI, KHÔNG PHẢI ĐỔI HÌNH DẠNG TRÊN KHOÁ CŨ: khoá cũ `approval.enforce` có thể đang có một
+ * dòng gõ tay theo hướng dẫn cũ, CHƯA TỪNG có hiệu lực (lỗi đọc TEXT). Ghi v2 vào cùng khoá thì lần bấm
+ * công tắc đầu tiên sẽ ĐÈ MẤT dòng ấy — chủ shop không bao giờ còn thấy mình từng khai gì. Khoá riêng
+ * giữ nguyên dòng cũ để đọc và "Áp dụng" có chủ đích, và dấu `v: 2` là lớp chặn thứ hai: một giá trị
+ * chép tay sang khoá mới mà không mang dấu ấy vẫn KHÔNG có hiệu lực.
+ */
+export const APPROVAL_ENFORCE_KEY = "approval.enforce.v2";
+
+/**
+ * Khoá CŨ — chỉ để ĐỌC và HIỆN cho quản trị viên, KHÔNG BAO GIỜ quyết định cưỡng chế. Không xoá, không
+ * ghi đè tự động: nó là lời khai của một người, và chỉ người mới quyết định áp dụng nó.
+ */
+export const APPROVAL_ENFORCE_LEGACY_KEY = "approval.enforce";
+
+export type EnforceConfigV2 = { v: 2; groups: Partial<Record<ApprovalGroup, boolean>> };
 
 export type ApprovalDecision =
   /** Làm luôn — nhóm này không cần người thứ hai, hoặc chưa bật cưỡng chế. */
@@ -186,22 +204,58 @@ export const APPROVAL_GROUPS_WIRED: readonly ApprovalGroup[] = [
   "BUSINESS_RULE_CHANGE",
 ];
 
+function docJson(raw: unknown): unknown {
+  if (typeof raw !== "string") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Đọc giá trị THÔ của khoá `approval.enforce` (cột `settings.value` là TEXT chứa JSON).
+ * Cấu hình cưỡng chế CÓ HIỆU LỰC — đọc từ giá trị THÔ của khoá `approval.enforce.v2` (cột TEXT).
  *
- * LỖI THẬT tìm ra ở bản này (Company OS · Agent G): cổng cũ đưa thẳng CHUỖI JSON vào `isEnforced`,
- * mà `isEnforced` chỉ nhận object — nên dù ai đó có ghi khoá này bằng `set-setting`, cưỡng chế vẫn
- * KHÔNG BAO GIỜ bật. Chuỗi hỏng / không phải object ⇒ `null` ⇒ TẮT (phía an toàn của một công tắc
- * mà bật nhầm là chặn việc thật).
+ * LỖI THẬT tìm ra ở bản này (Company OS · Agent G): cổng cũ đưa thẳng CHUỖI JSON vào `isEnforced`, mà
+ * `isEnforced` chỉ nhận object — nên cưỡng chế KHÔNG BAO GIỜ bật. Sửa lỗi đọc mà vẫn đọc khoá cũ thì
+ * một dòng gõ tay chưa từng có hiệu lực sẽ BỖNG có hiệu lực ngay buổi sáng sau deploy, và chủ shop
+ * (làm một mình) bị `BLOCKED_NO_APPROVER` chặn khỏi việc kho / lương. Nên chỉ hình dạng v2
+ * (`{ v: 2, groups: {...} }`) — thứ chỉ công tắc ADMIN ghi — mới có hiệu lực. Mọi thứ khác ⇒ `null` ⇒ TẮT.
  */
 export function parseEnforceConfig(raw: unknown): Record<string, unknown> | null {
-  let v: unknown = raw;
-  if (typeof raw === "string") {
-    try {
-      v = JSON.parse(raw);
-    } catch {
-      return null;
-    }
+  const v = docJson(raw);
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  if (o.v !== 2) return null;
+  const g = o.groups;
+  return g && typeof g === "object" && !Array.isArray(g) ? (g as Record<string, unknown>) : null;
+}
+
+/**
+ * Đọc dòng CŨ (`approval.enforce`, hình dạng `{ NHÓM: true }`) để HIỆN cho quản trị viên. Trả các nhóm
+ * được khai `true` (chỉ nhóm có trong sổ), hoặc `null` khi không có / không đọc được. Không bao giờ
+ * dùng để quyết định cưỡng chế.
+ */
+export function parseLegacyEnforceConfig(raw: unknown): { groups: ApprovalGroup[]; unknownKeys: string[] } | null {
+  const v = docJson(raw);
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const groups: ApprovalGroup[] = [];
+  const unknownKeys: string[] = [];
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if ((APPROVAL_GROUPS as readonly string[]).includes(k)) {
+      if (val === true) groups.push(k as ApprovalGroup);
+    } else unknownKeys.push(k);
   }
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  return { groups, unknownKeys };
+}
+
+/**
+ * Chuyển dòng cũ thành v2 — hàm THUẦN, đầu vào của nút "Áp dụng cấu hình này". Chỉ nhóm ĐÃ NỐI mới vào
+ * v2 (nhóm chưa nối bật lên cũng không chặn được gì); nhóm chưa nối và khoá lạ được TRẢ RA để màn hình
+ * nói thẳng phần nào không áp.
+ */
+export function legacyToV2(legacy: { groups: ApprovalGroup[]; unknownKeys: string[] }): { config: EnforceConfigV2; applied: ApprovalGroup[]; ignored: string[] } {
+  const applied = legacy.groups.filter((g) => APPROVAL_GROUPS_WIRED.includes(g));
+  const ignored = [...legacy.groups.filter((g) => !APPROVAL_GROUPS_WIRED.includes(g)), ...legacy.unknownKeys];
+  return { config: { v: 2, groups: Object.fromEntries(applied.map((g) => [g, true])) }, applied, ignored };
 }
