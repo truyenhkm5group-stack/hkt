@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ImageIcon } from "lucide-react";
+import { ArrowLeft, GitBranch, ImageIcon } from "lucide-react";
 import { FeedbackForm } from "@/app/(dashboard)/ideas/feedback-form";
 import { ThemAnh, XoaAnh, XoaYTuong } from "@/app/(dashboard)/ideas/idea-manage";
+import { RegisterModelFromIdea } from "@/app/(dashboard)/ideas/[id]/register-model";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,8 @@ export default async function IdeaDetailPage({ params }: { params: Promise<{ id:
   // SỬA SAI SÓT: cùng luật với tầng hành động (người đăng sửa của mình, người duyệt sửa của mọi
   // người). Ẩn nút chỉ để gọn mắt — tầng hành động vẫn tự kiểm, vì ẩn nút không phải kiểm soát.
   const duocSua = canReview || (laNguoiDang && can(user, "ideas:write"));
+  // Company OS · A2: đăng ký ý tưởng thành MẪU đòi quyền của sổ mẫu, không đổi gì ở quyền ý tưởng.
+  const duocDangKyMau = can(user, "models:write");
 
   return (
     <div className="space-y-5">
@@ -37,6 +40,19 @@ export default async function IdeaDetailPage({ params }: { params: Promise<{ id:
         actions={
           <div className="flex items-center gap-2">
             <span className={cn("rounded-md px-2 py-1 text-xs font-semibold", IDEA_STATUS_TONE[idea.status])}>{IDEA_STATUS_LABEL[idea.status]}</span>
+            {idea.model ? (
+              can(user, "models:view") ? (
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/models/${idea.model.id}`}>
+                    <GitBranch className="size-4" /> Mẫu {idea.model.code}
+                  </Link>
+                </Button>
+              ) : (
+                <span className="rounded-md border px-2 py-1 font-mono text-xs">Mẫu {idea.model.code}</span>
+              )
+            ) : duocDangKyMau ? (
+              <RegisterModelFromIdea ideaId={idea.id} defaultName={ideaTitle(idea.content)} />
+            ) : null}
             {duocSua ? <XoaYTuong ideaId={idea.id} soAnh={idea.images.length} soTraoDoi={idea.comments.length} /> : null}
             <Button asChild variant="outline" size="sm">
               <Link href="/ideas">

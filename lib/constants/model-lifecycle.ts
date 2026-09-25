@@ -171,7 +171,11 @@ export type ModelEvidence = {
   designStatus: "DRAFT" | "TESTING" | "WIN" | "LOSE" | "PRODUCTION" | null;
   /** Sản phẩm Pancake đã bị xoá (`products.is_removed`); `null` = chưa có sản phẩm. */
   productRemoved: boolean | null;
-  /** Chi quảng cáo 30 ngày gắn thẳng sản phẩm (`ad_spends.product_id`), VND. */
+  /**
+   * Chi quảng cáo 30 ngày gắn thẳng sản phẩm (`ad_spends.product_id`), VND. `null` = CHƯA BIẾT: chưa có
+   * sản phẩm, HOẶC bảng chi tiêu chưa từng ghép chiến dịch nào với mã (chưa ghép ≠ không tiêu). 0 = đã
+   * ghép và thật sự không tiêu trong 30 ngày.
+   */
   adSpend30d: number | null;
   /** Số đơn lên 30 ngày (không kể huỷ / xoá) — đơn LÊN, không phải đơn giao thành công. */
   orders30d: number | null;
@@ -232,12 +236,26 @@ export function observeModelStage(e: ModelEvidence): ObservedModelStage {
       break;
   }
 
-  if ((e.adSpend30d ?? 0) > 0 && (e.orders30d ?? 0) === 0) ungVien.push({ stage: "ADS_TESTING", reason: `Có chi quảng cáo ${nf(e.adSpend30d ?? 0)} ₫ trong 30 ngày mà chưa có đơn` });
+  // Chi CHƯA BIẾT (null) không phải chứng cứ "có chạy" lẫn "không chạy" — chỉ số DƯƠNG đã biết mới là chứng cứ.
+  if (e.adSpend30d !== null && e.adSpend30d > 0 && (e.orders30d ?? 0) === 0) ungVien.push({ stage: "ADS_TESTING", reason: `Có chi quảng cáo ${nf(e.adSpend30d ?? 0)} ₫ trong 30 ngày mà chưa có đơn` });
 
   if (!ungVien.length) return { stage: null, reasons: [], basis: "ESTIMATED" };
   const hang = (s: ModelState) => MODEL_STATES.indexOf(s);
   const chon = ungVien.reduce((a, b) => (hang(b.stage) > hang(a.stage) ? b : a));
   return { stage: chon.stage, reasons: ungVien.map((u) => u.reason), basis: "ESTIMATED" };
+}
+
+/**
+ * Ô chứng cứ CHƯA BIẾT mà người đọc phải được nói ra (luật 42): giai đoạn quan sát không dùng chúng, nên
+ * "máy chưa thấy chứng cứ" có thể là "máy không đọc được", không phải "không có gì". Chỉ nêu khi mẫu có
+ * sản phẩm (không có sản phẩm thì mọi ô trống là hiển nhiên).
+ */
+export function evidenceUnknowns(e: ModelEvidence): string[] {
+  if (e.productRemoved === null) return [];
+  const out: string[] = [];
+  if (e.adSpend30d === null) out.push("Chi quảng cáo CHƯA BIẾT: chưa từng ghép chiến dịch nào với mã — không kết luận có hay không chạy quảng cáo.");
+  if (e.stockKnown === false) out.push("Tồn CHƯA BIẾT: chưa có phiếu nhập kho nào.");
+  return out;
 }
 
 // ─────────────────────────── DÒNG THỜI GIAN MẪU ───────────────────────────

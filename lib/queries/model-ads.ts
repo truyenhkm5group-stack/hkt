@@ -119,7 +119,12 @@ export function summarizeModelAds(
   };
 }
 
-async function spendMappedFor(db: Db, productId: string): Promise<boolean> {
+/**
+ * Bảng chi tiêu đã từng ghép ít nhất một chiến dịch (không bị loại) với mã chưa — MỌI thời điểm. Một nguồn
+ * cho mọi màn hình hỏi "chi QC của mã này là 0 thật hay chưa ghép": tóm tắt quảng cáo (ở đây), kinh tế
+ * theo mẫu (F) và chứng cứ giai đoạn quan sát (A) cùng đọc hàm này.
+ */
+export async function spendMappedFor(db: Db, productId: string): Promise<boolean> {
   const ads = schema.adSpends;
   const [r] = await db
     .select({ n: sql<number>`count(*)` })

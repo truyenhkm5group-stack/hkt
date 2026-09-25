@@ -275,6 +275,27 @@ export type OpenBatchQty = {
 };
 
 /**
+ * ═══ PHẦN CÒN MỞ CỦA MỘT LẦN ĐẶT = SỐ ĐẶT − SỐ ĐÃ VỀ (Company OS · QA B1) ═══
+ *
+ * MỘT phép trừ cho mọi nơi đọc "đang sản xuất" (lệnh SX lẫn lô xưởng). Hai chứng cứ "đã về":
+ *  · đợt xưởng trả (sổ đặt xưởng) — sổ CÔNG NỢ với xưởng, nghĩa không đổi;
+ *  · phiếu NHẬP HÀNG nối về lần đặt đó (`stock_receipts.production_order_id` / cột nối lô)
+ *    — chứng từ TỒN KHO.
+ * Hai chứng cứ có thể nói về CÙNG những món (xưởng trả rồi kho đếm nhập), nên lấy SỐ LỚN HƠN, không
+ * cộng: cộng là trừ hai lần và "đang sản xuất" về 0 sớm, đúng lúc Lark phải còn nhắc. Không có phiếu
+ * nối nào (toàn bộ dữ liệu hiện nay) ⇒ dùng đúng số đã trả ⇒ kết quả y như trước.
+ */
+export function openQtyAfterReceived(planned: number, delivered: number, receivedViaLinkedReceipts = 0): number {
+  // Không phiếu nối ⇒ ĐÚNG phép tính cũ, kể cả khi số đã trả ÂM (shop trả lại xưởng hàng lỗi): kẹp
+  // về 0 ở đây là đổi âm thầm số của lô đang có đợt trả âm.
+  const done = receivedViaLinkedReceipts > 0 ? Math.max(delivered, receivedViaLinkedReceipts) : delivered;
+  return Math.max(0, planned - done);
+}
+
+/** Số đã nhận qua phiếu NHẬP nối về từng lô: `lô → (mẫu mã → số cái)`. */
+export type LinkedReceiptQty = ReadonlyMap<string, ReadonlyMap<string, number>>;
+
+/**
  * Hàng đặt xưởng chưa về, theo mẫu. Hàm THUẦN.
  *
  * Chỉ lô `OPEN`: lô đã bấm "xưởng đã trả xong" thì phần chưa trả sẽ KHÔNG bao giờ về (Q003 lô 1 đặt
@@ -284,7 +305,7 @@ export type OpenBatchQty = {
  * nào thì mọi cách chia đều là đoán, và đoán sai theo hướng "đủ rồi" làm Lark im đúng lúc cần nhắc.
  * Sai theo hướng an toàn là nhắc thêm một lần.
  */
-export function openBatchQtyByVariant(batches: readonly OpenBatchInput[], deliveries: readonly DeliveryCellsInput[]): OpenBatchQty {
+export function openBatchQtyByVariant(batches: readonly OpenBatchInput[], deliveries: readonly DeliveryCellsInput[], receivedByBatch: LinkedReceiptQty = new Map()): OpenBatchQty {
   const qtyByVariant = new Map<string, number>();
   const earliestDueByVariant = new Map<string, Date>();
   const linkedProductionOrderIds = new Set<string>();
@@ -297,19 +318,21 @@ export function openBatchQtyByVariant(batches: readonly OpenBatchInput[], delive
     if (b.status !== "OPEN") continue;
     const ds = byBatch.get(b.id) ?? [];
     const deliveredTotal = ds.reduce((t, d) => t + d.quantity, 0);
+    const rec = receivedByBatch.get(b.id);
+    const receivedTotal = rec ? [...rec.values()].reduce((t, n) => t + n, 0) : 0;
     const target = cellsTotal(b.cells) || (b.agreedQty ?? b.orderedQty);
     if (!cellsTotal(b.cells)) {
-      unsplit.push({ batchId: b.id, remaining: Math.max(0, target - deliveredTotal), reason: "NO_CELLS" });
+      unsplit.push({ batchId: b.id, remaining: openQtyAfterReceived(target, deliveredTotal, receivedTotal), reason: "NO_CELLS" });
       continue;
     }
     if (ds.some((d) => cellsTotal(d.cells) !== d.quantity)) {
-      unsplit.push({ batchId: b.id, remaining: Math.max(0, target - deliveredTotal), reason: "DELIVERY_NOT_SPLIT" });
+      unsplit.push({ batchId: b.id, remaining: openQtyAfterReceived(target, deliveredTotal, receivedTotal), reason: "DELIVERY_NOT_SPLIT" });
       continue;
     }
     const got = new Map<string, number>();
     for (const d of ds) for (const [v, n] of Object.entries(d.cells)) got.set(v, (got.get(v) ?? 0) + n);
     for (const [v, n] of Object.entries(b.cells)) {
-      const left = Math.max(0, Math.trunc(n) - (got.get(v) ?? 0));
+      const left = openQtyAfterReceived(Math.trunc(n), got.get(v) ?? 0, rec?.get(v) ?? 0);
       if (!left) continue;
       qtyByVariant.set(v, (qtyByVariant.get(v) ?? 0) + left);
       const cur = earliestDueByVariant.get(v);

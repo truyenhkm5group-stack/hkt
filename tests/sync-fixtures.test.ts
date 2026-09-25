@@ -220,6 +220,7 @@ import { testWorkshopSheetImportDb, testWorkshopSheetImportPure } from "./worksh
 import { testWorkshopBankLink } from "./workshop-bank-link.test";
 import { testMarketerPricePure, testMarketerPriceQueries } from "./marketer-price.test";
 import { testCompanyOsModelsPure, testCompanyOsModelsQueries } from "./company-os-models.test";
+import { testCompanyOsModel360Db, testCompanyOsModel360Pure } from "./company-os-model-360.test";
 import { testCrm } from "./crm.test";
 import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
@@ -288,6 +289,8 @@ import { testCompanyOsInventoryDb, testCompanyOsInventoryPure } from "./company-
 import { testCompanyOsProductionDb, testCompanyOsProductionPure } from "./company-os-production.test";
 // Company OS · Agent E — kết cục hàng hoàn không tái nhập.
 import { testCompanyOsReturnsDb, testCompanyOsReturnsPure } from "./company-os-returns.test";
+// Company OS · QA — một mẫu đi hết vòng đời qua các agent A–G.
+import { testCompanyOsE2eLifecycle, testCompanyOsE2ePure } from "./company-os-e2e-lifecycle.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
@@ -1885,6 +1888,9 @@ async function main() {
   await testMarketerPriceQueries(db);
   testCompanyOsModelsPure();
   await testCompanyOsModelsQueries(db);
+  // Company OS · A2 — trang Model 360: bảng tín hiệu, đề xuất, khối không sập trang, ý tưởng → mẫu.
+  testCompanyOsModel360Pure();
+  await testCompanyOsModel360Db(db);
   await testCrm(db);
   testScenario();
   testAccessControl();
@@ -2267,6 +2273,9 @@ async function main() {
   testLogisticsStatusBoundary();
   await testOpsLogLeak();
   await testFeedAutomation(db);
+  // Company OS · QA: MỘT mẫu đi hết vòng đời qua mọi agent (A–G). Đứng CUỐI để không đổi tổng của bài nào; tự dọn mã `cosqa-` / `COSQA`.
+  testCompanyOsE2ePure();
+  await testCompanyOsE2eLifecycle(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 

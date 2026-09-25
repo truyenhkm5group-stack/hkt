@@ -10,7 +10,8 @@ import {
 } from "@/lib/constants/inventory-decision";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
-import { openBatchQtyByVariantFromLedger } from "@/lib/queries/workshop-ledger";
+import { linkedReceiptQty, openBatchQtyByVariantFromLedger } from "@/lib/queries/workshop-ledger";
+import { openQtyAfterReceived } from "@/lib/constants/workshop-ledger";
 import { getSlowMoving, loadSlowMovingRules } from "@/lib/queries/slow-moving";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 
@@ -133,15 +134,22 @@ const norm = (v: string) => v.trim().toLowerCase();
  *     cùng một lần đặt. Lô chưa chia mẫu KHÔNG góp số theo mẫu, được đếm ở `unsplitBatchUnits`.
  *
  * Vốn (`capital`) vẫn chỉ tính từ lệnh (1): sổ đặt xưởng là công nợ, tiền của nó không đi vào đây.
+ *
+ * ĐÃ NHẬP QUA PHIẾU NỐI LỆNH (Company OS · QA B1): lệnh còn `SENT` mà kho đã lập phiếu NHẬP HÀNG trỏ
+ * về nó (`stock_receipts.production_order_id`) thì phần đã nhập KHÔNG còn "đang sản xuất" — trước
+ * đây cùng một món nằm ở cả tồn thực tế lẫn đang sản xuất cho tới khi có người bấm "Đã nhận". Mỗi ô
+ * đi qua `openQtyAfterReceived` (một phép trừ, dùng chung với lô xưởng). Lệnh không có phiếu nối
+ * (toàn bộ dữ liệu hiện nay) ra ĐÚNG số như trước — có kiểm thử khoá.
  */
 export async function openPoQtyByVariant() {
   const db = await getDb();
-  const [allRows, batches] = await Promise.all([
+  const [allRows, batches, receivedByOrder] = await Promise.all([
     db
       .select({ id: po.id, productId: po.productId, cells: po.cells, totalQty: po.totalQty, unitCost: po.unitCost, dueDate: po.dueDate })
       .from(po)
       .where(eq(po.status, "SENT")),
     openBatchQtyByVariantFromLedger(),
+    linkedReceiptQty("order"),
   ]);
   const rows = allRows.filter((r) => !batches.linkedProductionOrderIds.has(r.id));
 
@@ -163,18 +171,25 @@ export async function openPoQtyByVariant() {
   let capital = 0;
   let capitalUnknownOrders = 0;
   for (const row of rows) {
-    units += Number(row.totalQty ?? 0);
+    const received = receivedByOrder.get(row.id);
+    const receivedTotal = received ? [...received.values()].reduce((t, n) => t + n, 0) : 0;
+    // Phần lệnh còn chưa về = tổng lệnh − đã nhập qua phiếu nối lệnh (không phiếu nối ⇒ y như cũ).
+    const openTotal = openQtyAfterReceived(Number(row.totalQty ?? 0), 0, receivedTotal);
+    units += openTotal;
     // Giá xưởng chưa khai (0/null) là CHƯA BIẾT — không được cộng 0đ rồi hiện như đã tính.
-    if (Number(row.unitCost ?? 0) > 0) capital += Number(row.totalQty ?? 0) * Number(row.unitCost);
+    if (Number(row.unitCost ?? 0) > 0) capital += openTotal * Number(row.unitCost);
     else capitalUnknownOrders += 1;
     const cells = (row.cells ?? {}) as Record<string, number>;
     for (const [key, rawQty] of Object.entries(cells)) {
-      const qty = Math.max(0, Number(rawQty ?? 0));
-      if (!qty) continue;
+      const cellQty = Math.max(0, Number(rawQty ?? 0));
+      if (!cellQty) continue;
       const sep = key.indexOf("|");
       const color = sep >= 0 ? key.slice(0, sep) : key;
       const size = sep >= 0 ? key.slice(sep + 1) : "";
       const variantId = row.productId ? byKey.get(`${row.productId}::${norm(color)}|${norm(size)}`) : undefined;
+      // Ô ghép được mẫu mã ⇒ trừ số đã nhập của ĐÚNG mẫu đó; ô không ghép được thì không biết trừ gì.
+      const qty = variantId ? openQtyAfterReceived(cellQty, 0, received?.get(variantId) ?? 0) : cellQty;
+      if (variantId && !qty) continue;
       if (variantId) {
         qtyByVariant.set(variantId, (qtyByVariant.get(variantId) ?? 0) + qty);
         const due = row.dueDate ? new Date(row.dueDate) : null;

@@ -16,6 +16,8 @@ import { getSlowMoving, loadSlowMovingRules } from "@/lib/queries/slow-moving";
 import { splitSignedStock, stockRiskSummary } from "@/lib/queries/stock";
 import { setSettingJson } from "@/lib/settings";
 import { STOCK_RECEIPT_KINDS } from "@/lib/validation/stock";
+import { openBatchQtyByVariant, openQtyAfterReceived, type OpenBatchInput } from "@/lib/constants/workshop-ledger";
+import { openPoQtyByVariant } from "@/lib/queries/inventory-decision";
 
 /**
  * ═══════════ COMPANY OS · AGENT D — SỔ KHO AN TOÀN · TRẠNG THÁI TỒN ═══════════
@@ -160,6 +162,27 @@ export function testCompanyOsInventoryPure() {
   assert.equal(DERIVED_STOCK_STATES_ARE_LEDGER_MOVEMENTS, false);
   for (const k of Object.keys(DERIVED_STOCK_STATE_LABEL)) assert.ok(!(k in STOCK_STATE_LABEL), `${k} không được trùng khoá trạng thái sổ kho`);
   for (const c of DAMAGED_ITEM_CONDITIONS) assert.equal(ITEM_CONDITION_RESTOCKS[c], false, `${c} tính là hỏng thì không được cộng tồn`);
+
+  // ───────── B1 (QA). "Đang sản xuất" trừ hàng đã nhập qua phiếu nối lệnh / lô — MỘT phép trừ ─────────
+  assert.equal(openQtyAfterReceived(30, 0, 0), 30, "không phiếu nối ⇒ cả lệnh còn mở");
+  assert.equal(openQtyAfterReceived(30, 0, 20), 10);
+  assert.equal(openQtyAfterReceived(30, 25, 20), 5, "đã trả và đã nhập có thể là CÙNG món ⇒ lấy số lớn hơn, không cộng");
+  assert.equal(openQtyAfterReceived(30, 10, 25), 5);
+  assert.equal(openQtyAfterReceived(30, 0, 40), 0, "nhập vượt số đặt ⇒ 0, không âm");
+  assert.equal(openQtyAfterReceived(30, -10, 0), 40, "không phiếu nối ⇒ ĐÚNG phép tính cũ, kể cả đợt trả âm (trả lại xưởng)");
+  const loB1: OpenBatchInput[] = [
+    { id: "b1", status: "OPEN", cells: { den: 100, do: 50 }, orderedQty: 150, agreedQty: null, dueDate: null, productionOrderId: null },
+    { id: "b2", status: "OPEN", cells: {}, orderedQty: 40, agreedQty: null, dueDate: null, productionOrderId: null },
+  ];
+  const traB1 = [{ batchId: "b1", quantity: 60, cells: { den: 70, do: -10 } }];
+  assert.deepEqual(openBatchQtyByVariant(loB1, traB1, new Map()), openBatchQtyByVariant(loB1, traB1), "không phiếu nối ⇒ kết quả lô y như trước");
+  const coPhieuB1 = openBatchQtyByVariant(loB1, traB1, new Map([["b1", new Map([["den", 90], ["do", 5]])], ["b2", new Map([["x", 15]])]]));
+  assert.equal(coPhieuB1.qtyByVariant.get("den"), 10, "đen: đặt 100, xưởng trả 70, kho nhập 90 ⇒ còn 10 (không phải 100 − 160)");
+  assert.equal(coPhieuB1.qtyByVariant.get("do"), 45, "đỏ: đặt 50, trả −10, nhập 5 ⇒ max(−10, 5) = 5 ⇒ còn 45");
+  assert.equal(coPhieuB1.unsplit.find((u) => u.batchId === "b2")?.remaining, 25, "lô chưa chia mẫu: 40 − 15 đã nhập");
+  // Mọi nơi đọc "đang sản xuất" đi qua ĐÚNG hàm này.
+  const dqB1 = nguon("lib/queries/inventory-decision.ts");
+  assert.ok(dqB1.includes("linkedReceiptQty(\"order\")") && dqB1.includes("openQtyAfterReceived("), "openPoQtyByVariant phải trừ phiếu nối lệnh qua openQtyAfterReceived");
 
   console.log("✓ Company OS · D (thuần): tách tồn âm · ngưỡng hàng chậm thưa/bỏ nguyên bộ · nhóm duyệt khi xoá · trạng thái dẫn xuất");
 }
@@ -323,6 +346,42 @@ export async function testCompanyOsInventoryDb(db: Db) {
     assert.equal(m.totals.damaged, 2);
     const rong = await getModelStockStates(`${P}empty`);
     assert.equal(rong.totals.actualStock, null, "mẫu không có mẫu mã nào ⇒ tồn CHƯA BIẾT, không phải 0");
+
+    // ═══ 4b. B1 (QA): "đang sản xuất" trừ hàng đã NHẬP qua phiếu nối lệnh / lô ═══
+    clearMemo();
+    const v1Id = `${P}v1`;
+    const truocB1 = await openPoQtyByVariant();
+    const nenV1 = truocB1.qtyByVariant.get(v1Id) ?? 0;
+    assert.equal(nenV1, 30, "nền: lô b1 còn mở 30 cái v1, chưa phiếu nào nối lô");
+    await db.insert(schema.productionOrders).values({ id: `${P}po-b1`, code: `${P}PO-B1`, productId: `${P}prod`, productCode: "COSD1", status: "SENT", cells: { "Đen|S": 10 }, totalQty: 10, unitCost: 100_000, createdBy: "t" });
+    const khongPhieu = await openPoQtyByVariant();
+    assert.equal(khongPhieu.qtyByVariant.get(v1Id), nenV1 + 10, "lệnh chưa có phiếu nối ⇒ đếm đủ 10 như trước");
+    assert.equal(khongPhieu.units, truocB1.units + 10);
+    assert.equal(khongPhieu.capital, truocB1.capital + 1_000_000);
+    await db.insert(schema.stockReceipts).values({ id: `${P}r-b1po`, kind: "RECEIPT", receivedAt: DAY0, productionOrderId: `${P}po-b1`, totalQuantity: 4, createdBy: "t" });
+    await db.insert(schema.stockReceiptItems).values({ id: `${P}r-b1po-i`, receiptId: `${P}r-b1po`, variantId: v1Id, quantity: 4, unitCost: 100_000 });
+    const motPhan = await openPoQtyByVariant();
+    assert.equal(motPhan.qtyByVariant.get(v1Id), nenV1 + 6, "nhập 4/10 qua phiếu nối lệnh ⇒ còn 6");
+    assert.equal(motPhan.units, truocB1.units + 6);
+    assert.equal(motPhan.capital, truocB1.capital + 600_000, "vốn cam kết chỉ còn phần chưa về");
+    // Phiếu KHÔNG nối (hoặc nối nhưng là tái nhập) không được trừ.
+    await phieu(db, `${P}r-b1free`, "RECEIPT", [{ variantId: v1Id, quantity: 50 }]);
+    // Phiếu tái nhập hoàn mang mã lệnh (form không cho, nhưng CSDL không cấm) — không phải hàng của xưởng.
+    await db.insert(schema.stockReceipts).values({ id: `${P}r-b1ret`, kind: "RETURN", receivedAt: DAY0, productionOrderId: `${P}po-b1`, totalQuantity: 3, createdBy: "t" });
+    await db.insert(schema.stockReceiptItems).values({ id: `${P}r-b1ret-i`, receiptId: `${P}r-b1ret`, variantId: v1Id, quantity: 3 });
+    assert.equal((await openPoQtyByVariant()).qtyByVariant.get(v1Id), nenV1 + 6, "phiếu không nối lệnh, hay phiếu tái nhập hoàn, không trừ gì");
+    await db.insert(schema.stockReceipts).values({ id: `${P}r-b1lo`, kind: "RECEIPT", receivedAt: DAY0, productionBatchId: `${P}b1`, totalQuantity: 25, createdBy: "t" });
+    await db.insert(schema.stockReceiptItems).values({ id: `${P}r-b1lo-i`, receiptId: `${P}r-b1lo`, variantId: v1Id, quantity: 25 });
+    await db.insert(schema.stockReceipts).values({ id: `${P}r-b1po2`, kind: "RECEIPT", receivedAt: DAY0, productionOrderId: `${P}po-b1`, totalQuantity: 9, createdBy: "t" });
+    await db.insert(schema.stockReceiptItems).values({ id: `${P}r-b1po2-i`, receiptId: `${P}r-b1po2`, variantId: v1Id, quantity: 9 });
+    clearMemo();
+    const duB1 = await openPoQtyByVariant();
+    assert.equal(duB1.qtyByVariant.get(v1Id), 5, "lô b1 30 − 25 đã nhập = 5; lệnh 10 − 13 đã nhập = 0 (không âm)");
+    assert.equal(duB1.units, truocB1.units - 25, "lệnh không còn góp; lô bớt 25");
+    const modelB1 = await getModelStockStates(`${P}prod`);
+    assert.equal(modelB1.variants.find((x) => x.variantId === v1Id)?.inProduction, 5, "trang 360 đọc đúng phép trừ đó");
+    await db.delete(schema.stockReceipts).where(inArray(schema.stockReceipts.id, [`${P}r-b1po`, `${P}r-b1po2`, `${P}r-b1lo`, `${P}r-b1free`, `${P}r-b1ret`]));
+    await db.delete(schema.productionOrders).where(eq(schema.productionOrders.id, `${P}po-b1`));
 
     // ═══ 2. Tổng tồn trang chủ = tổng DƯƠNG của đúng bảng kế hoạch ═══
     clearMemo();
