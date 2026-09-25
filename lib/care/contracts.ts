@@ -130,6 +130,11 @@ export type CareCase = {
     rawStatus: string;
     ageHours: number | null;
     failedAttempts: number;
+    /**
+     * Mốc lần GIAO HỤT gần nhất (`shipment_events.normalized_stage = 'DELIVERY_FAILED'`). `null` =
+     * chưa hụt lần nào. Optional để không đổi hình dạng cũ; dùng để biết "Phát tiếp" có hụt lại chưa.
+     */
+    lastFailedAt?: Date | null;
     /** Tài khoản API có đọc được kiện này không. */
     trackingCapability: "API_TRACKABLE" | "WEBHOOK_ONLY" | "UNKNOWN_CAPABILITY";
     /** CHỨNG TỪ nói gói hàng đã rời kho — không suy từ câu chữ trạng thái. */

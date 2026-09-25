@@ -23,6 +23,7 @@ import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@
 import { careSlaHours } from "@/lib/care/sla";
 import { rawMedian, timingStat } from "@/lib/constants/care-timing";
 import { queueViewOf, slaOf, type CareStateLike } from "@/lib/care/view";
+import { careStateFor } from "@/lib/care/filters";
 import { CARE_TERMINAL_STAGES } from "@/lib/care/entry";
 import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CS_CARE_NEXT_ACTION, CS_CARE_REASONS, CS_KIND_CARE_REASON, type CsCareReason, CARE_STATUS_LABEL, CARE_STATUSES, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus } from "@/lib/constants/care";
 import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
@@ -839,8 +840,8 @@ async function buildQueue(): Promise<CareQueue> {
       việc không phải một lần phản hồi" (22/25 ca, đo 22/09/2026) biến mất mà bài kiểm nào cũng
       xanh. Thiếu `carrierNewsAfterLastRound` thì ca có tin ĐVVC mới vẫn nằm im tới giờ hẹn.
     */
-    const careChoHan: CareStateLike = { ...care, firstRoundAt: hist.firstRoundAt, carrierNewsAfterLastRound: hist.carrierNewsAfterLastRound };
     const fact = facts.get(base.shipmentId);
+    const careChoHan: CareStateLike = careStateFor({ care, history: hist, carrier: { lastFailedAt: fact?.failedAt ?? null } });
     const capability = fact?.capability;
     const trangThaiCon = substateOf(base.carrier);
     /*
@@ -865,6 +866,7 @@ async function buildQueue(): Promise<CareQueue> {
         // SỐ LẦN PHÁT HỤT CHUẨN — cùng một phép đếm cho mọi nguồn dòng và cho cả panel chi tiết.
         // Nguồn dòng chỉ còn là nơi lấy các cột khác; nó không được phép nói một con số riêng.
         failedAttempts: fact?.failedAttempts ?? base.carrier.failedAttempts,
+        lastFailedAt: fact?.failedAt ?? null,
         ...trangThaiCon,
         trackingCapability: asTrackingCapability(capability),
       },
