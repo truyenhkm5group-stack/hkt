@@ -12,9 +12,9 @@ import { subscribe, type RealtimeEvent } from "@/lib/realtime/bus";
  * ═══ KIỆN ĐANG CHUYỂN HOÀN MÀ ĐỘI ĐÃ CHỐT "ĐÃ HOÀN" KHÔNG ĐỨNG Ở "CẦN CARE" ═══
  *
  * Chủ shop báo 25/09/2026 (PKE1527396993): kết quả case "Đã hoàn", trạng thái care "Đã xong",
- * Viettel Post "Đang chuyển hoàn" — vẫn nằm ở "Cần care" với nhãn "mở lại" + "vỡ SLA". Case khách
- * "Khách muốn trả / không nhận" còn mở kéo kiện vào (chiều hoàn chưa chốt), và `careViewOf` coi ca
- * đã đóng là MỞ LẠI vì mốc vào hàng đợi mới hơn lúc đóng.
+ * Viettel Post "Đang chuyển hoàn" — vẫn nằm ở "Cần care" với nhãn "mở lại" + "vỡ SLA". Một case
+ * còn mở kéo kiện vào (chiều hoàn chưa chốt), và `careViewOf` coi ca đã đóng là MỞ LẠI vì mốc vào
+ * hàng đợi mới hơn lúc đóng. Từ 25/09/2026 (tối) chỉ case sai địa chỉ / SĐT còn kéo được kiện vào.
  *
  *  (A) đúng ca trong ảnh ⇒ KHÔNG ở "Cần care", về "Đã xử lý";
  *  (B) 505 "Yêu cầu chuyển hoàn" mà đội CHƯA chốt gì ⇒ VẪN ở "Cần care" (shop còn phát tiếp được);
@@ -43,7 +43,7 @@ export async function testCareReturnLegQueue(db: Db) {
   assert.equal(queueViewOf({ inCareCondition: true, carrier: chuaGiao, queueSince: gio(1) }, caDaHoan).reopened, true, "chiều đi có sự cố mới sau lúc đóng ⇒ vẫn là mở lại như cũ");
   assert.equal(queueViewOf({ inCareCondition: false, carrier: chuaGiao, queueSince: gio(1) }, caTrong).view, "done");
 
-  // ─── Dữ liệu: ba kiện đang ở chiều hoàn, mỗi kiện có case khách "trả hàng" còn mở ───
+  // ─── Dữ liệu: ba kiện đang ở chiều hoàn, mỗi kiện có một case còn mở kéo nó vào bàn care ───
   const kien = [
     { id: "crl-a", code: 505, name: "Yêu cầu chuyển hoàn" },
     { id: "crl-b", code: 505, name: "Yêu cầu chuyển hoàn" },
@@ -58,9 +58,10 @@ export async function testCareReturnLegQueue(db: Db) {
       // Tin của CHIỀU HOÀN tới đều đặn SAU lúc đội đóng ca — chính thứ từng "mở lại" ca.
       { shipmentId: k.id, source: "VTP_WEBHOOK", status: String(k.code), statusName: k.name, occurredAt: gio(2), normalizedStage: "RETURNING", legType: "RETURN" },
     ]).onConflictDoNothing();
-    await db.insert(schema.csCases).values({ orderId: `${k.id}-o`, kind: "RETURN", status: "OPEN", source: "MANUAL", title: "Khách muốn trả / không nhận" });
+    // Từ 25/09/2026 (tối) chỉ sai địa chỉ / SĐT còn kéo kiện đang chạy vào bàn care.
+    await db.insert(schema.csCases).values({ orderId: `${k.id}-o`, kind: "WRONG_ADDRESS", status: "OPEN", source: "MANUAL", title: "Sai địa chỉ · kiện đang chuyển hoàn" });
   }
-  // (A) đúng ca trong ảnh: đợt 2 đã đóng "Đã xong", kết quả "Đã hoàn" từ 2 ngày trước.
+  // (A) đúng hình ca trong ảnh: đợt 2 đã đóng "Đã xong", kết quả "Đã hoàn" từ 2 ngày trước.
   await db.insert(schema.shipmentCare).values({ shipmentId: "crl-a", orderId: "crl-a-o", trackingNumber: "CRL000", episodeNo: 1, active: false, careStatus: "RESOLVED", openedAt: gio(100), doneAt: gio(90), careOutcome: "PENDING" });
   const [dot2] = await db
     .insert(schema.shipmentCare)

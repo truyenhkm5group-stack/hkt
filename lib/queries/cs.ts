@@ -30,7 +30,7 @@ function logisticsBody(kind: SQL | AnyColumn, orderId: SQL | AnyColumn): SQL {
 /**
  * ═══ ĐƠN ĐÃ GIAO CHO ĐVVC CHƯA — RANH GIỚI CSKH / VẬN ĐƠN (chủ shop chốt 25/09/2026) ═══
  *
- * "Chưa giao cho ĐVVC thì thuộc CSKH, giao cho ĐVVC rồi thì thuộc Vận đơn." Đã giao = có một vận
+ * Áp cho các loại case `BY_SHIPMENT` (sai địa chỉ / SĐT — xem `CS_KIND_DOMAIN`). Đã giao = có một vận
  * đơn ở chặng `CARRIER_HANDOFF_STAGES` hoặc có mốc lấy hàng (AGENTS.md mục 41) — "Chờ lấy hàng",
  * "lấy thất bại", "shop huỷ lấy" là CHƯA. Hai bản dưới (SQL · TypeScript) là CÙNG một mệnh đề;
  * `tests/cs-workqueue.test.ts` chạy cả hai trên cùng dữ liệu.
