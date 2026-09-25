@@ -14,7 +14,7 @@ import { getWorkshopLedger, workshopFormOptions, type BatchView } from "@/lib/qu
 import { getProductionVariance, VARIANCE_SOURCE_LABEL, VARIANCE_SOURCES, type ProductionVarianceRow } from "@/lib/queries/production-variance";
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
-import { DeleteMarketerPriceButton, MarketerPriceDialog } from "./marketer-price-forms";
+import { DeleteMarketerPriceButton, MarketerPriceDialog, ReceiptRepricingDialog } from "./marketer-price-forms";
 import { SheetImportDialog } from "./sheet-import-dialog";
 import { BatchDialog, DeleteButton, DeliveryDialog, FabricDialog, PaymentDialog } from "./workshop-forms";
 
@@ -529,8 +529,15 @@ function CostTab({ ledger, variance, prices, products }: { ledger: Ledger; varia
 
       <SectionCard
         title="Giá báo MKT theo mã"
-        hint="Giá chốt tính cho MKT thay giá vốn thật, ở phần của MKT (lợi nhuận danh nghĩa theo MKT và lương), cho đơn lên từ 01/09/2026. Một mã một giá; muốn hạ giá xả tồn thì thêm dòng mới có ngày hiệu lực — đơn lên từ ngày đó dùng giá mới. Không sửa lùi được vào kỳ lương đã khoá. Lợi nhuận SHOP vẫn trên giá vốn thật."
-        actions={products ? <MarketerPriceDialog products={products} /> : null}
+        hint="Giá chốt tính cho MKT thay giá vốn thật, ở phần của MKT (lợi nhuận danh nghĩa theo MKT và lương), cho đơn lên từ 01/09/2026. Một mã một giá; muốn hạ giá xả tồn thì thêm dòng mới có ngày hiệu lực — đơn lên từ ngày đó dùng giá mới. Không sửa lùi được vào kỳ lương đã khoá. Từ 25/09/2026 giá báo cũng là GIÁ NHẬP KHO: phiếu nhập hàng mới tự lấy giá báo theo ngày nhập (kho không nhập giá); phiếu cũ ghi giá 0 thì bấm “Định giá phiếu nhập”."
+        actions={
+          products ? (
+            <div className="flex gap-2">
+              <ReceiptRepricingDialog />
+              <MarketerPriceDialog products={products} />
+            </div>
+          ) : null
+        }
         padded={false}
       >
         <div className="overflow-x-auto">

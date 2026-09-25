@@ -11,13 +11,13 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { createStockReceipt } from "@/lib/actions/stock";
-import { formatNumber, formatVND, todayVN } from "@/lib/format";
+import { formatNumber, todayVN } from "@/lib/format";
 import type { ProductionLinkOption, VariantPickerRow } from "@/lib/queries/stock";
 import { STOCK_RECEIPT_KIND_HINT, STOCK_RECEIPT_KIND_LABEL, STOCK_RECEIPT_KINDS, type StockReceiptKind } from "@/lib/validation/stock";
 import { STICKY_HEAD } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
 
-type RowInput = { qty: string; cost: string; counted: string };
+type RowInput = { qty: string; counted: string };
 
 function toInt(value: string) {
   const n = Number(String(value).replace(/[^\d-]/g, ""));
@@ -25,7 +25,27 @@ function toInt(value: string) {
 }
 
 /** Dialog lập phiếu kho (nhập mới / tái nhập hàng hoàn / xuất tay / điều chỉnh kiểm kê) cho nhiều mẫu mã cùng lúc */
-export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturns = {}, supplierOptions = [], productionLinks = [] }: { variants: VariantPickerRow[]; defaultKind?: StockReceiptKind; pendingReturns?: Record<string, number>; /** Tên xưởng trong danh mục — chỉ là GỢI Ý. */ supplierOptions?: string[]; /** Lệnh SX đã gửi + lô xưởng đang mở — để NGƯỜI chọn phiếu nhập này là hàng của lần đặt nào (0133). */ productionLinks?: ProductionLinkOption[] }) {
+export function ReceiptDialog({
+  variants,
+  defaultKind = "RECEIPT",
+  pendingReturns = {},
+  supplierOptions = [],
+  productionLinks = [],
+  pricedProductIds,
+}: {
+  variants: VariantPickerRow[];
+  defaultKind?: StockReceiptKind;
+  pendingReturns?: Record<string, number>;
+  /** Tên xưởng trong danh mục — chỉ là GỢI Ý. */
+  supplierOptions?: string[];
+  /** Lệnh SX đã gửi + lô xưởng đang mở — để NGƯỜI chọn phiếu nhập này là hàng của lần đặt nào (0133). */
+  productionLinks?: ProductionLinkOption[];
+  /**
+   * Sản phẩm đã có giá báo MKT. Kho KHÔNG nhập giá (chủ shop chốt 25/09/2026): máy chủ lấy giá báo theo
+   * ngày nhập. Danh sách này chỉ để báo TRƯỚC mã nào sẽ lưu với giá "chưa biết".
+   */
+  pricedProductIds?: string[];
+}) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<StockReceiptKind>(defaultKind);
   const [receivedAt, setReceivedAt] = useState(todayVN());
@@ -39,30 +59,32 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
   const [inputs, setInputs] = useState<Record<string, RowInput>>({});
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  const coGiaBao = useMemo(() => (pricedProductIds ? new Set(pricedProductIds) : null), [pricedProductIds]);
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     return variants.filter((v) => (!onlySelling || v.selling) && (!term || `${v.productName} ${v.sku} ${v.color} ${v.size}`.toLowerCase().includes(term)));
   }, [variants, search, onlySelling]);
 
-  const setField = (id: string, field: keyof RowInput, value: string) => setInputs((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { qty: "", cost: "", counted: "" }), [field]: value } }));
+  const setField = (id: string, field: keyof RowInput, value: string) => setInputs((prev) => ({ ...prev, [id]: { ...(prev[id] ?? { qty: "", counted: "" }), [field]: value } }));
 
   const items = useMemo(() => {
-    const list: { variantId: string; quantity: number; unitCost: number; name: string }[] = [];
+    const list: { variantId: string; productId: string; quantity: number }[] = [];
     for (const v of variants) {
       const input = inputs[v.id];
       if (!input) continue;
-      const unitCost = input.cost === "" ? v.lastCost : toInt(input.cost);
       if (kind !== "ADJUSTMENT") {
         const quantity = toInt(input.qty);
-        if (quantity > 0) list.push({ variantId: v.id, quantity, unitCost: kind === "RECEIPT" ? unitCost : 0, name: `${v.sku || v.productName}` });
+        if (quantity > 0) list.push({ variantId: v.id, productId: v.productId, quantity });
       } else if (input.counted !== "") {
         const quantity = toInt(input.counted) - v.currentStock;
-        if (quantity !== 0) list.push({ variantId: v.id, quantity, unitCost: 0, name: `${v.sku || v.productName}` });
+        if (quantity !== 0) list.push({ variantId: v.id, productId: v.productId, quantity });
       }
     }
     return list;
   }, [variants, inputs, kind]);
+  // Mẫu mã trên phiếu NHẬP mà sản phẩm chưa có giá báo ⇒ sẽ lưu với giá chưa biết.
+  const chuaCoGia = kind === "RECEIPT" && coGiaBao ? items.filter((i) => !coGiaBao.has(i.productId)).length : 0;
 
   // Đã gõ tên xưởng ⇒ chỉ hiện lệnh / lô của ĐÚNG xưởng đó (so tên đã chuẩn hoá); chưa gõ ⇒ tất cả.
   const linkOptions = useMemo(() => {
@@ -76,7 +98,6 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
   const chosenBatchId = batchOptions.some((o) => o.id === productionBatchId) ? productionBatchId : "";
 
   const totalQty = items.reduce((s, i) => s + i.quantity, 0);
-  const totalCost = items.reduce((s, i) => s + Math.max(i.quantity, 0) * i.unitCost, 0);
 
   const reset = () => {
     setInputs({});
@@ -96,7 +117,8 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
     }
     startTransition(async () => {
       const link = kind === "RECEIPT" ? { productionOrderId: chosenOrderId || undefined, productionBatchId: chosenBatchId || undefined } : {};
-      const result = await createStockReceipt({ kind, receivedAt, reference, supplier, note, ...link, items: items.map(({ variantId, quantity, unitCost }) => ({ variantId, quantity, unitCost })) });
+      // Không gửi giá: phiếu nhập lấy giá báo MKT ở máy chủ; các loại phiếu khác không mang giá.
+      const result = await createStockReceipt({ kind, receivedAt, reference, supplier, note, ...link, items: items.map(({ variantId, quantity }) => ({ variantId, quantity })) });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -107,6 +129,7 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
         : kind === "ISSUE" ? `Đã xuất tay ${formatNumber(totalQty)} sản phẩm (${items.length} mẫu mã)`
         : `Đã điều chỉnh ${items.length} mẫu mã`;
       toast.success(done);
+      if (result.missingPrice?.length) toast.warning(`Mã chưa có giá báo MKT: ${result.missingPrice.join(", ")} — phiếu đã lưu, giá nhập để CHƯA BIẾT cho tới khi có giá báo`, { duration: 10_000 });
       setOpen(false);
       reset();
       router.refresh();
@@ -217,7 +240,6 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
                   <>
                     {kind === "RETURN" ? <th className="w-28 px-3 py-2 text-right">Hoàn chờ nhận</th> : null}
                     <th className="w-28 px-3 py-2 text-right">{kind === "RECEIPT" ? "Số lượng nhập" : kind === "RETURN" ? "Thực nhận" : "Số lượng xuất"}</th>
-                    {kind === "RECEIPT" ? <th className="w-36 px-3 py-2 text-right">Giá nhập (₫)</th> : null}
                     <th className="px-3 py-2 text-right">Tồn sau phiếu</th>
                   </>
                 ) : (
@@ -230,7 +252,7 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
             </thead>
             <tbody>
               {visible.map((v) => {
-                const input = inputs[v.id] ?? { qty: "", cost: "", counted: "" };
+                const input = inputs[v.id] ?? { qty: "", counted: "" };
                 const qty = toInt(input.qty);
                 const counted = input.counted === "" ? null : toInt(input.counted);
                 const diff = counted === null ? 0 : counted - v.currentStock;
@@ -249,6 +271,11 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
                           <div className="truncate font-medium">
                             {v.productName}
                             {!v.selling ? <span className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">ẩn</span> : null}
+                            {kind === "RECEIPT" && coGiaBao && !coGiaBao.has(v.productId) ? (
+                              <span className="ml-1 rounded bg-amber-50 px-1 text-[10px] text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" title="Mã chưa có giá báo MKT — phiếu vẫn lưu, giá nhập để chưa biết">
+                                chưa có giá báo
+                              </span>
+                            ) : null}
                           </div>
                           <div className="truncate text-xs text-muted-foreground">
                             <span className="font-mono">{v.sku || "—"}</span>
@@ -266,11 +293,6 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
                         <td className="px-3 py-1.5">
                           <Input type="number" inputMode="numeric" min={0} className="numeric h-8 text-right" placeholder={kind === "RETURN" && waiting ? String(waiting) : "0"} value={input.qty} onChange={(e) => setField(v.id, "qty", e.target.value)} />
                         </td>
-                        {kind === "RECEIPT" ? (
-                          <td className="px-3 py-1.5">
-                            <Input type="number" inputMode="numeric" min={0} step={1000} className="numeric h-8 text-right" placeholder={String(v.lastCost || 0)} value={input.cost} onChange={(e) => setField(v.id, "cost", e.target.value)} />
-                          </td>
-                        ) : null}
                         <td className="numeric px-3 py-1.5 text-right text-muted-foreground">
                           {qty > 0 ? <span className="font-semibold text-foreground">{formatNumber(v.currentStock + (kind === "ISSUE" ? -qty : qty))}</span> : "—"}
                         </td>
@@ -302,7 +324,8 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
             {items.length ? (
               <>
                 <b className="text-foreground">{items.length}</b> mẫu mã · <b className={cn("numeric", totalQty < 0 ? "text-rose-600" : "text-foreground")}>{totalQty > 0 ? "+" : ""}{formatNumber(totalQty)}</b> sản phẩm
-                {kind === "RECEIPT" && totalCost ? <> · giá trị <b className="text-foreground">{formatVND(totalCost)}</b></> : null}
+                {kind === "RECEIPT" ? <> · giá nhập theo <b className="text-foreground">giá báo MKT</b></> : null}
+                {chuaCoGia ? <span className="text-amber-700 dark:text-amber-400"> · {chuaCoGia} mẫu mã chưa có giá báo</span> : null}
                 {kind === "ISSUE" ? <> · <span className="text-rose-600">trừ khỏi tồn</span></> : null}
               </>
             ) : (

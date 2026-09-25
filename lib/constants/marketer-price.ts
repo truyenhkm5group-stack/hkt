@@ -17,6 +17,24 @@
  *
  * Mã CHƯA có giá báo ⇒ giá vốn như cũ (phiếu kho → Pancake → giá nhập mẫu mã). Không có "giá báo 0đ
  * mặc định": giá báo 0 phải là một dòng người khai.
+ *
+ * ═══ SỬA ĐỔI 25/09/2026 — GIÁ NHẬP KHO = GIÁ BÁO MKT ═══
+ *
+ * Chủ shop chốt (giữ nguyên lời): "Có thể lấy giá báo MKT làm giá ở phần nhập kho, hoặc bỏ phần giá
+ * ở khâu nhập kho vì kho không cần biết giá, tính theo giá báo MKT là được rồi" — rồi chọn "Luôn lấy
+ * giá báo MKT". Hệ quả, đã nói với chủ shop trước khi làm:
+ *
+ *  · Kho KHÔNG nhập giá nữa. Phiếu NHẬP HÀNG MỚI ghi `unit_cost` = giá báo của mã theo NGÀY NHẬP
+ *    (`receiptUnitCostFromMarketer`), máy chủ tự đọc — giá client gửi lên bị bỏ qua.
+ *  · Câu 2 ở trên ("lợi nhuận shop đứng trên giá vốn phiếu kho") VẪN ĐÚNG về đường đi: báo cáo lợi
+ *    nhuận shop vẫn chỉ đọc phiếu kho, không đọc thẳng bảng giá báo. Nhưng vì phiếu kho giờ mang
+ *    chính giá báo, phần chênh "shop giữ lại" (giá báo − giá vốn thật) về 0 cho hàng nhập theo luật
+ *    mới; nó chỉ còn khác 0 khi giá báo đổi (hạ xả tồn) sau lúc nhập, hoặc với hàng nhập bằng giá cũ.
+ *  · Mã CHƯA có giá báo ⇒ phiếu vẫn lưu được (kho không được bị chặn vì một việc của người khác), dòng
+ *    ghi giá 0 = CHƯA BIẾT GIÁ (cùng quy ước "phiếu không ghi đơn giá" mọi báo cáo đã hiểu), và màn
+ *    hình nói ra mã nào đang thiếu. Không bao giờ đoán giá.
+ *  · Phiếu CŨ ghi giá 0 không tự đổi. Người có quyền giá báo bấm "Định giá phiếu nhập theo giá báo
+ *    MKT" (xem trước → xác nhận, có nhật ký); dòng đã có giá thật KHÔNG bao giờ bị ghi đè.
  */
 
 /** Ngày đầu tiên giá báo MKT được áp (giờ Việt Nam). Đổi = đổi lương các kỳ đã tính ⇒ hỏi chủ shop. */
@@ -50,4 +68,26 @@ export function marketerPriceAt(entries: readonly MarketerPriceEntry[], at: Date
  */
 export function marketerCostDelta(qty: number, realUnitCost: number, price: number | null): number {
   return price == null ? 0 : qty * (price - realUnitCost);
+}
+
+/**
+ * Đơn giá ghi lên một dòng PHIẾU NHẬP HÀNG MỚI theo giá báo MKT (chủ shop chốt 25/09/2026). Hàm THUẦN.
+ *
+ *  · Giá đang hiệu lực vào ngày nhập (dòng có `effectiveFrom` ≤ `at`, mới nhất thắng).
+ *  · Hàng về TRƯỚC dòng giá đầu tiên ⇒ lấy dòng giá đầu tiên: "1 mã chỉ tính theo 1 giá từ đầu tới
+ *    cuối" — ngày hiệu lực của dòng đầu là ngày người khai, không phải ngày mã bắt đầu có giá.
+ *  · KHÔNG áp mốc `MARKETER_PRICE_EFFECTIVE_FROM`: mốc đó giữ lương các tháng đã trả (theo NGÀY LÊN
+ *    ĐƠN), còn đây là giá của một lô hàng nhập.
+ *  · Chưa khai dòng nào ⇒ `null` (chưa biết), KHÔNG phải 0.
+ */
+export function receiptUnitCostFromMarketer(entries: readonly MarketerPriceEntry[], at: Date): number | null {
+  if (!entries.length) return null;
+  let best: MarketerPriceEntry | null = null;
+  let first: MarketerPriceEntry | null = null;
+  for (const e of entries) {
+    if (!first || e.effectiveFrom.getTime() < first.effectiveFrom.getTime()) first = e;
+    if (e.effectiveFrom.getTime() > at.getTime()) continue;
+    if (!best || e.effectiveFrom.getTime() > best.effectiveFrom.getTime()) best = e;
+  }
+  return (best ?? first)!.price;
 }

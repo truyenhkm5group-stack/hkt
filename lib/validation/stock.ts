@@ -17,7 +17,7 @@ export const STOCK_RECEIPT_KIND_LABEL: Record<StockReceiptKind, string> = {
 };
 
 export const STOCK_RECEIPT_KIND_HINT: Record<StockReceiptKind, string> = {
-  RECEIPT: "Hàng về từ xưởng / nhà cung cấp. Nhập số lượng dương và giá nhập để cập nhật giá vốn.",
+  RECEIPT: "Hàng về từ xưởng / nhà cung cấp. Kho chỉ nhập số lượng — giá nhập ERP tự lấy theo giá báo MKT của mã.",
   RETURN: "Kho đếm hàng hoàn thực tế nhận về. Chọn vận đơn hoàn rồi sửa số lượng đúng số đếm được — thiếu bao nhiêu ERP ghi nhận là hàng hụt.",
   ISSUE: "Hàng rời kho không qua Viettel Post (khách tới lấy, ship nội thành, gửi tay). Nhập số lượng dương, ERP tự trừ kho.",
   ADJUSTMENT: "Sửa lệch sau kiểm kê. Số dương = tăng tồn, số âm = giảm tồn.",
@@ -39,7 +39,8 @@ export const stockReceiptSchema = z.object({
         /** Vận đơn hoàn được tái nhập (chỉ phiếu RETURN) — để truy nguyên hàng nào đã thực sự về kho. */
         shipmentId: z.string().trim().optional(),
         quantity: z.number({ error: "Nhập số lượng" }).int("Số lượng phải là số nguyên").min(-1_000_000).max(1_000_000),
-        unitCost: z.number({ error: "Nhập giá nhập" }).int("Giá nhập phải là số nguyên").min(0, "Giá nhập không được âm").max(2_000_000_000),
+        /** Phiếu NHẬP HÀNG MỚI bỏ qua trường này — máy chủ lấy giá báo MKT (lib/inventory/receipt-pricing.ts). */
+        unitCost: z.number().int("Giá nhập phải là số nguyên").min(0, "Giá nhập không được âm").max(2_000_000_000).default(0),
       }),
     )
     .min(1, "Nhập số lượng cho ít nhất một mẫu mã")

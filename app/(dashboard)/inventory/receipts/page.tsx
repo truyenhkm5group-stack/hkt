@@ -1,6 +1,8 @@
 import { ArrowDownToLine, ClipboardCheck, Coins, Info, ListOrdered } from "lucide-react";
 import Link from "next/link";
 import { activeSupplierNames } from "@/lib/queries/suppliers";
+import { getDb } from "@/db";
+import { productIdsHavingMarketerPrice } from "@/lib/inventory/receipt-pricing";
 import { DeleteReceiptButton } from "@/app/(dashboard)/inventory/receipts/delete-receipt-button";
 import { ReceiptDialog } from "@/app/(dashboard)/inventory/receipts/receipt-dialog";
 import { MetricCard } from "@/components/metric-card";
@@ -27,13 +29,14 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
   if (decision.allow === "NONE") return <ScopeDenied title="Phiếu nhập kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
   const selectedId = param(raw, "receipt");
-  const [receipts, summary, variants, pendingMap, supplierOptions, productionLinks] = await Promise.all([
+  const [receipts, summary, variants, pendingMap, supplierOptions, productionLinks, pricedProductIds] = await Promise.all([
     listStockReceipts(200),
     stockReceiptSummary(),
     canWrite ? listVariantsForReceipt() : Promise.resolve([]),
     canWrite ? pendingReturnsByVariant() : Promise.resolve(new Map<string, number>()),
     canWrite ? activeSupplierNames() : Promise.resolve([] as string[]),
     canWrite ? listOpenProductionLinks() : Promise.resolve([]),
+    canWrite ? getDb().then(productIdsHavingMarketerPrice) : Promise.resolve([] as string[]),
   ]);
   const pendingReturns = Object.fromEntries(pendingMap);
   const pendingReturnTotal = [...pendingMap.values()].reduce((t, n) => t + n, 0);
@@ -50,7 +53,7 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
             <>
               <ReceiptDialog variants={variants} defaultKind="ADJUSTMENT" pendingReturns={pendingReturns} />
               <ReceiptDialog variants={variants} defaultKind="RETURN" pendingReturns={pendingReturns} />
-              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} supplierOptions={supplierOptions} productionLinks={productionLinks} />
+              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} supplierOptions={supplierOptions} productionLinks={productionLinks} pricedProductIds={pricedProductIds} />
             </>
           ) : null
         }
@@ -59,7 +62,7 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Tổng đã nhập" value={`+${formatNumber(summary.received)}`} note={`${formatNumber(summary.receipts)} phiếu nhập hàng`} icon={ArrowDownToLine} tone="green" />
         <MetricCard label="Điều chỉnh kiểm kê" value={`${summary.adjusted > 0 ? "+" : ""}${formatNumber(summary.adjusted)}`} note={`${formatNumber(summary.adjustments)} phiếu điều chỉnh`} icon={ClipboardCheck} tone={summary.adjusted < 0 ? "rose" : "slate"} />
-        <MetricCard label="Giá trị hàng nhập" value={formatVND(summary.cost, { compact: true })} note="Theo giá nhập ghi trên phiếu" icon={Coins} tone="primary" />
+        <MetricCard label="Giá trị hàng nhập" value={formatVND(summary.cost, { compact: true })} note="Theo giá ghi trên phiếu — phiếu nhập mới lấy giá báo MKT" icon={Coins} tone="primary" />
         <MetricCard label="Mẫu mã trong ERP" value={formatNumber(variants.length || 0)} note={`${formatNumber(variants.filter((v) => v.currentStock <= 0).length)} mẫu mã tồn ≤ 0`} icon={ListOrdered} tone="blue" />
       </section>
 
@@ -164,11 +167,12 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
                       {it.quantity > 0 ? "+" : ""}
                       {formatNumber(it.quantity)}
                     </TableCell>
+                    {/* Dòng NHẬP HÀNG giá 0 = phiếu không ghi đơn giá (mã chưa có giá báo MKT) ⇒ CHƯA BIẾT, in "—" chứ không in 0 ₫ (mục 42). */}
                     <TableCell className="text-right">
-                      <Money value={it.unitCost} className={it.unitCost ? "" : "text-muted-foreground"} />
+                      {selected.kind === "RECEIPT" && !it.unitCost ? <span className="text-muted-foreground" title="Chưa có giá — mã chưa có giá báo MKT lúc nhập">—</span> : <Money value={it.unitCost} className={it.unitCost ? "" : "text-muted-foreground"} />}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Money value={Math.max(it.quantity, 0) * it.unitCost} className={it.unitCost ? "" : "text-muted-foreground"} />
+                      {selected.kind === "RECEIPT" && !it.unitCost ? <span className="text-muted-foreground">—</span> : <Money value={Math.max(it.quantity, 0) * it.unitCost} className={it.unitCost ? "" : "text-muted-foreground"} />}
                     </TableCell>
                   </TableRow>
                 ))}
