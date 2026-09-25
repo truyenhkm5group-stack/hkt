@@ -14,9 +14,9 @@ import { formatVND } from "@/lib/format";
  * Không nguồn nào ở đây có công thức hay ngưỡng của riêng nó (luật 27, 38). Mỗi loại đọc lại ĐÚNG hàm
  * mà màn hình chủ của nó đang dùng: yêu cầu duyệt (`listApprovalRequests`), mẫu chờ duyệt và topic chờ
  * chốt (hai adapter của `/work`), lệnh SX quá hẹn (`getPurchasingReport`), cắt quảng cáo
- * (`adaptAdsDecisions` + `getAdsDecision`), mẫu quảng cáo đề nghị tăng (`getAdsDecision` chiều mã +
- * `getModelAdsSummary`), và ba kết luận tồn kho (`getInventoryDecisionReport` → `decideInventory`, đã
- * trừ hàng đặt xưởng).
+ * (`adaptAdsDecisions` + `getAdsDecision`), mẫu THẮNG chưa mở topic sản xuất (`getModelSignalsBatch` —
+ * tín hiệu mẫu đầy đủ của A2 đọc theo lô), và ba kết luận tồn kho (`getInventoryDecisionReport` →
+ * `decideInventory`, đã trừ hàng đặt xưởng).
  *
  * Người ĐÓNG việc ở màn hình chủ của nó — không có nút "xong" ở đây. Ba nút của cockpit chỉ GHI LẠI
  * phản ứng của người đọc với ĐỀ XUẤT (`recommendation_decisions`, append-only), để sau này đo được đề
@@ -51,7 +51,7 @@ export const OWNER_DECISION_SOURCE_LABEL: Record<OwnerDecisionSource, string> = 
   SAMPLES: "Mẫu chờ duyệt",
   TOPICS: "Topic sản xuất",
   ADS_CUT: "Quyết định quảng cáo",
-  MODEL_SCALE: "Quảng cáo theo mã hàng",
+  MODEL_SCALE: "Tín hiệu mẫu",
   PRODUCTION_LATE: "Lệnh sản xuất",
   INVENTORY: "Quyết định vốn tồn",
 };
@@ -130,12 +130,12 @@ export const OWNER_DECISION_KIND_SPEC: Record<OwnerDecisionKind, OwnerDecisionKi
     hint: "Kết luận REORDER của trang Quyết định vốn tồn. Số nên đặt đã trừ hàng đặt xưởng chưa nhận; tác động = vốn cần bỏ ra (chưa biết giá nhập ⇒ —).",
   },
   MODEL_SCALE: {
-    label: "Mẫu quảng cáo đề nghị TĂNG, chưa bàn sản xuất",
+    label: "Mẫu THẮNG chưa mở topic sản xuất",
     source: "MODEL_SCALE",
     home: "/models",
     requires: ["models:view", "expenses:view"],
     scopeResource: "ADS",
-    hint: "Mã hàng mà bảng quyết định quảng cáo 30 ngày (chiều mã hàng) kết luận TĂNG, chi đã ghép chiến dịch (getModelAdsSummary = OK), mẫu chưa có topic sản xuất đang mở và trạng thái khai còn trước “Bàn sản xuất”. Đây là MỘT lá phiếu — tín hiệu mẫu đầy đủ (gộp mẫu mã, creative, thiết kế) nằm ở trang 360 của mẫu.",
+    hint: "Mẫu có tín hiệu THẮNG trong 30 ngày (tín hiệu mẫu của trang 360: quảng cáo có lãi VÀ phân loại mẫu mã tốt, không nguồn nào nói ngược — getModelSignalsBatch), chưa có topic sản xuất đang mở và trạng thái khai còn trước “Bàn sản xuất”. Mỗi ô số liệu là NHÃN phán quyết của một nguồn. Bỏ qua có hiệu lực tới khi tín hiệu hoặc một phán quyết nguồn đổi.",
   },
   INVENTORY_CLEARANCE: {
     label: "Nên xả / dừng",

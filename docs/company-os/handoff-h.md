@@ -153,3 +153,24 @@ kịch bản không commit), Chrome headless qua `playwright-core`, 1440px:
 - **Agent A2**: nếu có `getModelSignal` đọc theo LÔ (nhiều mẫu một lượt), `MODEL_SCALE` nên chuyển sang tín hiệu
   THẮNG thật — thay bộ đọc `loadModelScale` trong `lib/queries/owner-decisions.ts`, giữ nguyên khoá `model:SCALE:<id>`
   (hoặc đổi khoá có chủ đích để lời bỏ qua cũ hết hiệu lực).
+
+---
+
+## 10. Agent S — `MODEL_SCALE` nay là tín hiệu THẮNG thật (nhánh `claude/cos-tin-hieu-hang-loat`)
+
+Chỗ lệch 4.2 và HUMAN GATE 7.4 đã đóng: bộ đọc `loadModelScale` gọi `getModelSignalsBatch(30 ngày)` (A2/S) rồi
+`modelWinnerCandidates` (thuần): tín hiệu = THẮNG · `openProductionTopics === 0` (CHƯA BIẾT không phải 0 — nguồn
+topic hỏng thì bộ đọc NÉM để khối nêu tên nguồn) · trạng thái khai ∈ `BEFORE_PRODUCTION_DISCUSSION` — đúng ba cổng
+của đề xuất "mở trao đổi sản xuất" ở trang 360.
+
+- Nhãn loại: **"Mẫu THẮNG chưa mở topic sản xuất"**; nguồn: "Tín hiệu mẫu". Mã loại `MODEL_SCALE` GIỮ NGUYÊN
+  (CHECK của 0138 và sổ phản ứng đã lưu nó).
+- Ô số liệu = NHÃN phán quyết từng nguồn (Quảng cáo · Mẫu mã · Creative · Thiết kế · Tồn kho; nguồn không có ⇒
+  `—`), không số — cùng mức trang 360 cho hiện khi che câu chi tiết. Xung đột (vd bối cảnh tồn) nêu trong "vì sao".
+- **Khoá đổi có chủ đích**: `model:WINNER:<modelId>:<băm>` — băm (cyrb53, tất định) của tín hiệu + (nguồn · lá phiếu
+  · nhãn) của BỐN nguồn bỏ phiếu. KHÔNG mang ngày; câu chi tiết / số đếm / bối cảnh tồn không vào khoá. Lời "bỏ
+  qua" cũ trên khoá `model:SCALE:<id>` hết hiệu lực vì khuyến nghị đã là một điều khác (lá phiếu QC → tín hiệu đủ).
+- Quyền giữ nguyên: `models:view` + `expenses:view` + phạm vi `ADS`.
+- `tests/company-os-cockpit.test.ts` mục 1f viết lại theo định nghĩa mới (không nới): tập ứng viên (THẮNG + 0 topic
+  + trạng thái trước Bàn SX; loại topic mở, topic chưa biết, đã qua Bàn SX, tín hiệu khác), khoá tất định / không
+  ngày / đổi khi phán quyết nguồn đổi / không đổi khi câu chi tiết đổi, ô = nhãn nguồn, nguồn vắng ⇒ `—`.

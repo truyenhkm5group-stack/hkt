@@ -80,6 +80,13 @@ export type ProductIntelQuery = {
   color?: string;
   size?: string;
   limit?: number;
+  /**
+   * Gộp theo (mẫu mã, mã hàng) thay vì chỉ theo mẫu mã. Chỉ tín hiệu mẫu theo LÔ (`getModelSignalsBatch`)
+   * bật cờ này: đọc cả shop một lượt mà mỗi dòng vẫn là ĐÚNG dòng mà truy vấn lọc `productId` sẽ trả —
+   * dòng đơn thiếu mẫu mã của hai mã hàng khác nhau không bị gộp chung. Khi đã lọc `productId` thì cờ
+   * này không đổi gì (mọi dòng cùng một mã). Mặc định tắt: /products/performance giữ nguyên hành vi.
+   */
+  splitByProduct?: boolean;
 };
 
 /** Đơn vào bảng: đã chốt trên Pancake, bỏ hàng tặng (0đ nhưng vẫn rời kho — đếm ở sổ kho, không ở đây). */
@@ -180,7 +187,7 @@ async function intelligenceUncached(query: ProductIntelQuery): Promise<ProductIn
       reserved: sql<number | null>`max(case when ${base.stockKnown} then ${base.reservedStock} else null end)`,
     })
     .from(base)
-    .groupBy(base.variantId)
+    .groupBy(...(query.splitByProduct ? [base.variantId, base.productId] : [base.variantId]))
     .orderBy(desc(sql`coalesce(sum(${base.lineTotal}) filter (where ${DELIVERED}), 0)`))
     .limit(limit));
 
@@ -244,7 +251,7 @@ export async function adSpendByProduct(period: Period): Promise<Map<string, numb
 }
 
 export async function getProductIntelligence(query: ProductIntelQuery): Promise<ProductIntelRow[]> {
-  const key = `productIntel:${periodKey(query.period)}:${query.q ?? ""}:${query.channel ?? ""}:${query.productId ?? ""}:${query.color ?? ""}:${query.size ?? ""}:${query.limit ?? 50}`;
+  const key = `productIntel:${periodKey(query.period)}:${query.q ?? ""}:${query.channel ?? ""}:${query.productId ?? ""}:${query.color ?? ""}:${query.size ?? ""}:${query.limit ?? 50}:${query.splitByProduct ? "sp" : ""}`;
   return memo(key, 90_000, () => intelligenceUncached(query));
 }
 

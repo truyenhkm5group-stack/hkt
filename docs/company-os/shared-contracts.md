@@ -253,6 +253,7 @@ hằng số đang chạy), chỉ nút MỞ. Route: `/production` · `/production
 | `getModelEconomics(productId, range)` | F | 1 | lợi nhuận ƯỚC TÍNH (nominal) vs THỰC ĐẠT · CPO hoà vốn · trần QC/đơn · biên/đơn |
 | `getModelProductionSummary(modelId)` | C | 2 | topic · costing chốt · sample mới nhất · lệnh mở · số kế hoạch/nhận |
 | `getModelSignal(modelId)` | A2 | 2 | WINNER/PROMISING/TESTING/LOSER/NEEDS_MORE_DATA + lý do từng nguồn |
+| `getModelSignalsBatch(range?)` | S | 3 | tín hiệu của MỌI mẫu một lượt (mỗi nguồn đọc một lần cho cả shop, cùng `deriveModelSignal`) + số topic sản xuất đang mở (`null` = không đọc được); đệm theo kỳ. Bằng `getModelSignal` từng mẫu — có bài kiểm so |
 
 Mọi hàm trên CHỈ gọi truy vấn có sẵn của miền mình — không công thức mới cho một con số đã có.
 

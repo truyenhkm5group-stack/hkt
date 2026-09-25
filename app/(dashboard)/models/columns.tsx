@@ -5,7 +5,12 @@ import { Shirt } from "lucide-react";
 import { ModelStateBadge } from "@/app/(dashboard)/models/state-badge";
 import { RowLink } from "@/components/data-table/data-table";
 import { formatDate } from "@/lib/format";
+import { MODEL_SIGNAL_HINT, MODEL_SIGNAL_LABEL, MODEL_SIGNAL_TONE, type ModelSignal } from "@/lib/constants/model-signal";
 import type { ModelListRow } from "@/lib/queries/models";
+import { cn } from "@/lib/utils";
+
+/** Ô tín hiệu của một mẫu trên /models (Agent S) — chỉ NHÃN, cùng mức trang 360 cho hiện khi che câu chi tiết. */
+export type ModelSignalCell = { signal: ModelSignal; summary: string; conflicts: number };
 
 export const modelColumns: ColumnDef<ModelListRow, unknown>[] = [
   {
@@ -83,3 +88,28 @@ export const modelColumns: ColumnDef<ModelListRow, unknown>[] = [
     ),
   },
 ];
+
+/**
+ * Cột "Tín hiệu" — chỉ thêm khi người xem bật (`?tinhieu=1`): tín hiệu đọc theo LÔ (`getModelSignalsBatch`)
+ * cho mọi mẫu. `null` ⇒ "—" (không đọc được), không bao giờ là một nhãn giả.
+ */
+export function signalColumn(signals: Readonly<Record<string, ModelSignalCell | null>>, periodLabel: string): ColumnDef<ModelListRow, unknown> {
+  return {
+    id: "signal",
+    header: `Tín hiệu · ${periodLabel.toLowerCase()}`,
+    enableSorting: false,
+    cell: ({ row }) => {
+      const c = signals[row.original.id] ?? null;
+      if (!c) return <span className="text-sm text-muted-foreground">—</span>;
+      return (
+        <div className="max-w-[240px] space-y-0.5" title={MODEL_SIGNAL_HINT[c.signal]}>
+          <span className={cn("inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold", MODEL_SIGNAL_TONE[c.signal])}>
+            {MODEL_SIGNAL_LABEL[c.signal]}
+            {c.conflicts ? <span className="ml-1 font-normal">⚡ {c.conflicts}</span> : null}
+          </span>
+          {c.summary ? <div className="truncate text-[10.5px] text-muted-foreground">{c.summary}</div> : null}
+        </div>
+      );
+    },
+  };
+}

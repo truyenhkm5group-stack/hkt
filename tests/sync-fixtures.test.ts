@@ -291,6 +291,7 @@ import { testCompanyOsReturnsDb, testCompanyOsReturnsPure } from "./company-os-r
 // Company OS · QA — một mẫu đi hết vòng đời qua các agent A–G.
 import { testCompanyOsE2eLifecycle, testCompanyOsE2ePure } from "./company-os-e2e-lifecycle.test";
 import { testCompanyOsCockpitDb, testCompanyOsCockpitPure } from "./company-os-cockpit.test";
+import { testCompanyOsSignalBatchDb, testCompanyOsSignalBatchSource } from "./company-os-signal-batch.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
@@ -1913,6 +1914,9 @@ async function main() {
   // Company OS · Agent H: "Cần anh quyết". Dọn nguồn của chính nó (mã `cosh-`); sổ phản ứng và sự kiện append-only giữ nguyên (CSDL dùng một lần).
   testCompanyOsCockpitPure();
   await testCompanyOsCockpitDb(db);
+  // Company OS · Agent S: tín hiệu mẫu theo lô = getModelSignal từng mẫu (mã `cos-s-` / `COSS-`, tự dọn).
+  testCompanyOsSignalBatchSource();
+  await testCompanyOsSignalBatchDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();
