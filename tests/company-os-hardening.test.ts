@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
+import { REQUIRE_APPROVED_DESIGN_KEY } from "@/lib/constants/production-os";
 import { transitionModelCore } from "@/lib/models/service";
+import { requireApprovedDesignFlag } from "@/lib/queries/production-os";
+import { getSettingJson, mergeSettingJson, setSettingJson } from "@/lib/settings";
 import { createCostSheetCore } from "@/lib/production/costing";
 import { followModelLifecycle } from "@/lib/production/lifecycle";
 import { createTopicCore } from "@/lib/production/topics";
@@ -11,6 +16,7 @@ import { createTopicCore } from "@/lib/production/topics";
  *
  * Mỗi mục một khối, mỗi khối khoá đúng chỗ hở mà một agent khác đã báo:
  *  1. Vòng đời mẫu đi theo TRONG giao dịch nghiệp vụ (yêu cầu của C, handoff-c mục 5).
+ *  2. `getSettingJson` đọc được giá trị nguyên thuỷ mà không đổi một khoá object nào (C báo).
  *
  * Dữ liệu mang tiền tố `cos-k-` / mã `COSK`; không mốc tuyệt đối, không cửa sổ "N giờ trước" (luật 50, 65).
  */
@@ -116,4 +122,181 @@ export async function testHardeningLifecycleInTx(db: Db) {
   assert.equal(await demLichSu(db, m1.id), truoc, "phát lại không đẻ dòng lịch sử");
 
   console.log("✓ Company OS · K1: vòng đời mẫu đi theo TRONG giao dịch nghiệp vụ — vòng đời hỏng ⇒ giá thành huỷ theo · nghiệp vụ đổ lúc chốt ⇒ không lượt chuyển mồ côi · không savepoint lồng · phát lại không ghi lần hai");
+}
+
+// ─────────────────────────── 2. getSettingJson VỚI GIÁ TRỊ NGUYÊN THUỶ ───────────────────────────
+
+/** Luật CŨ, chép nguyên văn để so: mọi khoá object phải đọc ra y như vậy. */
+function mergeCu<T>(raw: string, fallback: T): T {
+  try {
+    return { ...fallback, ...(JSON.parse(raw) as Partial<T>) } as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Tách đối số cấp ngoài cùng của lời gọi có dấu `(` ở vị trí `mo`. */
+function doiSo(src: string, mo: number): string[] {
+  const out: string[] = [];
+  let sau = 0;
+  let cur = "";
+  let chuoi: string | null = null;
+  for (let i = mo + 1; i < src.length; i++) {
+    const c = src[i];
+    if (chuoi) {
+      cur += c;
+      if (c === chuoi && src[i - 1] !== "\\") chuoi = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      chuoi = c;
+      cur += c;
+      continue;
+    }
+    if ("([{".includes(c)) sau++;
+    if (")]}".includes(c)) {
+      if (sau === 0) {
+        out.push(cur.trim());
+        return out;
+      }
+      sau--;
+    }
+    if (c === "," && sau === 0) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += c;
+  }
+  return out;
+}
+
+type LoiGoiSetting = { file: string; key: string; fallbackText: string };
+
+/** Mọi lời gọi `getSettingJson(key, fallback)` trong mã nguồn đã vào kho (lib · app · scripts). */
+function loiGoiGetSettingJson(): LoiGoiSetting[] {
+  const tep = execSync("git ls-files lib app scripts", { encoding: "utf8" })
+    .split("\n")
+    .map((f) => f.trim())
+    .filter((f) => /\.(ts|tsx)$/.test(f) && f !== "lib/settings.ts" && existsSync(f));
+  const out: LoiGoiSetting[] = [];
+  for (const file of tep) {
+    const src = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    const re = /getSettingJson\s*(<)?/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      let i = m.index + m[0].length;
+      if (m[1]) {
+        // Bỏ tham số kiểu (có thể lồng `<…<…>>` và xuống dòng; `=>` không đóng ngoặc nhọn).
+        let sau = 1;
+        while (i < src.length && sau > 0) {
+          if (src[i] === "<") sau++;
+          else if (src[i] === ">" && src[i - 1] !== "=") sau--;
+          i++;
+        }
+      }
+      while (/\s/.test(src[i] ?? "")) i++;
+      if (src[i] !== "(") continue; // `import { getSettingJson }`, chú thích còn sót…
+      const a = doiSo(src, i);
+      if (a.length === 2) out.push({ file, key: a[0], fallbackText: a[1] });
+    }
+  }
+  return out;
+}
+
+/** Giá trị của một hằng số được export ở lib/** (mặc định cấu hình). */
+async function giaTriHang(ten: string): Promise<{ found: true; value: unknown } | { found: false }> {
+  const tep = execSync("git ls-files lib", { encoding: "utf8" }).split("\n").map((f) => f.trim()).filter((f) => /\.ts$/.test(f));
+  for (const f of tep) {
+    if (!new RegExp(`export const ${ten}\\b`).test(readFileSync(f, "utf8"))) continue;
+    const mod = (await import(`@/${f.replace(/\.ts$/, "")}`)) as Record<string, unknown>;
+    if (ten in mod) return { found: true, value: mod[ten] };
+  }
+  return { found: false };
+}
+
+/** Khoá được đọc qua `getSettingJson` mà giá trị là NGUYÊN THUỶ — khai tường minh, kèm lý do. */
+const KHOA_NGUYEN_THUY: Record<string, string> = {
+  REQUIRE_APPROVED_DESIGN_KEY: "cờ bật / tắt bắt buộc bản duyệt (JSON true) — Agent C",
+};
+
+export async function testHardeningSettingsPrimitive(db: Db) {
+  // ── (a) Luật mới cho giá trị nguyên thuỷ ──
+  assert.deepEqual(mergeCu("true", false), {}, "luật CŨ: cờ boolean đọc ra object rỗng — đúng lỗi C báo");
+  assert.equal(mergeSettingJson("true", false), true, "JSON true đọc ra true");
+  assert.equal(mergeSettingJson("false", true), false);
+  assert.equal(mergeSettingJson("42", 0), 42);
+  assert.equal(mergeSettingJson('"abc"', ""), "abc");
+  assert.equal(mergeSettingJson("true", null), true, "mặc định null nhận mọi giá trị nguyên thuỷ");
+  assert.equal(mergeSettingJson('"true"', false), false, "chuỗi “true” KHÁC KIỂU với cờ boolean ⇒ mặc định, không ép kiểu");
+  assert.equal(mergeSettingJson("1", false), false, "số 1 không phải true");
+  assert.equal(mergeSettingJson("null", false), false, "JSON null ⇒ mặc định");
+  assert.equal(mergeSettingJson("null", null), null);
+  assert.equal(mergeSettingJson("{hỏng", true), true, "JSON hỏng ⇒ mặc định");
+
+  // ── (b) MỌI lời gọi có mặc định object: đọc ra Y NHƯ luật cũ với mọi kiểu giá trị đã lưu ──
+  const loiGoi = loiGoiGetSettingJson();
+  assert.ok(loiGoi.length >= 40, `đọc hụt lời gọi getSettingJson (chỉ thấy ${loiGoi.length})`);
+  const mauDaLuu = ['{"a":1,"enabled":true}', "{}", '{"list":[{"id":"x"}]}', "[1,2]", "[]", "true", "false", "0", "7", '"chuoi"', '""', "null", "{hỏng"];
+  const khoaObject = new Set<string>();
+  const nguyenThuy: string[] = [];
+  let soSanh = 0;
+  for (const g of loiGoi) {
+    const t = g.fallbackText;
+    let fb: unknown;
+    let biet = true;
+    if (t === "null") fb = null;
+    else if (t === "true" || t === "false") fb = t === "true";
+    else if (/^-?\d+$/.test(t)) fb = Number(t);
+    else if (/^["']/.test(t)) fb = t.slice(1, -1);
+    else if (t.startsWith("{") || t.startsWith("[")) {
+      try {
+        fb = new Function(`return (${t});`)();
+      } catch {
+        // Object có định danh bên trong (`{ presets: X }`) — vẫn là object; so bằng một object đại diện.
+        fb = { doiDien: t };
+      }
+    } else if (/^[A-Z][A-Z0-9_]*$/.test(t)) {
+      const v = await giaTriHang(t);
+      assert.ok(v.found, `${g.file}: không tìm thấy hằng số mặc định ${t}`);
+      fb = v.found ? v.value : undefined;
+    } else biet = false;
+    assert.ok(biet, `${g.file}: mặc định "${t}" không nhận diện được — thêm nhánh vào bài kiểm`);
+    const laObject = fb !== null && typeof fb === "object";
+    if (!laObject && fb !== null) {
+      nguyenThuy.push(g.key);
+      assert.ok(g.key in KHOA_NGUYEN_THUY, `${g.file}: ${g.key} đọc với mặc định nguyên thuỷ nhưng chưa khai ở KHOA_NGUYEN_THUY`);
+      continue;
+    }
+    if (!laObject) continue;
+    khoaObject.add(g.key);
+    for (const raw of mauDaLuu) {
+      assert.deepEqual(mergeSettingJson(raw, fb), mergeCu(raw, fb), `${g.file}: ${g.key} với giá trị đã lưu ${raw} phải đọc ra Y NHƯ luật cũ`);
+      soSanh++;
+    }
+  }
+  assert.ok(khoaObject.size >= 30, `phải so được hầu hết khoá object (mới ${khoaObject.size})`);
+  assert.deepEqual(nguyenThuy, ["REQUIRE_APPROVED_DESIGN_KEY"], "đúng một khoá nguyên thuỷ đọc qua getSettingJson: cờ bản duyệt của C");
+
+  // ── (c) Đường đọc thật trên CSDL: cờ bản duyệt đi qua bộ đọc chung, cùng hành vi mọi nhánh ──
+  const nguonC = readFileSync("lib/queries/production-os.ts", "utf8");
+  assert.match(nguonC, /getSettingJson<boolean>\(REQUIRE_APPROVED_DESIGN_KEY, false\)/, "cờ bản duyệt đọc qua bộ đọc chung");
+  assert.ok(!/findFirst\(\{ where: eq\(schema\.settings\.key, REQUIRE_APPROVED_DESIGN_KEY\)/.test(nguonC), "bỏ bản đọc thẳng dòng");
+  const [cu] = await db.select().from(schema.settings).where(eq(schema.settings.key, REQUIRE_APPROVED_DESIGN_KEY));
+  try {
+    await db.delete(schema.settings).where(eq(schema.settings.key, REQUIRE_APPROVED_DESIGN_KEY));
+    assert.equal(await requireApprovedDesignFlag(), false, "không có dòng ⇒ TẮT");
+    await setSettingJson(REQUIRE_APPROVED_DESIGN_KEY, true);
+    assert.equal(await requireApprovedDesignFlag(), true, "JSON true ⇒ BẬT");
+    assert.equal(await getSettingJson<boolean>(REQUIRE_APPROVED_DESIGN_KEY, false), true);
+    await setSettingJson(REQUIRE_APPROVED_DESIGN_KEY, "true");
+    assert.equal(await requireApprovedDesignFlag(), false, "chuỗi “true” ⇒ TẮT");
+    await db.update(schema.settings).set({ value: "{hỏng" }).where(eq(schema.settings.key, REQUIRE_APPROVED_DESIGN_KEY));
+    assert.equal(await requireApprovedDesignFlag(), false, "JSON hỏng ⇒ TẮT");
+  } finally {
+    await db.delete(schema.settings).where(eq(schema.settings.key, REQUIRE_APPROVED_DESIGN_KEY));
+    if (cu) await db.insert(schema.settings).values(cu);
+  }
+
+  console.log(`✓ Company OS · K2: getSettingJson đọc được boolean / số / chuỗi (khác kiểu ⇒ mặc định) · ${khoaObject.size} khoá object × ${mauDaLuu.length} dạng giá trị = ${soSanh} phép so, Y NHƯ luật cũ · cờ bản duyệt của C đi qua bộ đọc chung`);
 }
