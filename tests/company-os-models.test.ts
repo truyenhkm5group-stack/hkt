@@ -141,7 +141,7 @@ export function testCompanyOsModelsPure() {
     "model.registered", "model.linked", "model.state_changed", "model.owner_changed",
     "production_topic.created", "production_topic.status_changed", "production_topic.message_added",
     "costing.version_created", "costing.finalized",
-    "sample.created", "sample.reviewed", "sample.approved", "design_version.approved",
+    "sample.created", "sample.submitted", "sample.reviewed", "sample.approved", "design_version.approved",
     "production_order.linked_design", "production_plan.overridden",
     "stock_receipt.linked_production", "return.disposition_set", "approval.executed", "recommendation.decided",
   ];

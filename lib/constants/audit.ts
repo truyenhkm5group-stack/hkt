@@ -56,9 +56,23 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   "carrier.request": "Gửi yêu cầu tới ĐVVC",
   "carrier.request.result": "ĐVVC trả lời yêu cầu",
   "carrier.manual": "Xác nhận đã làm tay trên ĐVVC",
+  // Company OS · Agent C — sản xuất nửa đầu.
+  PRODUCTION_TOPIC_CREATE: "Mở topic sản xuất",
+  PRODUCTION_TOPIC_MESSAGE: "Ghi trao đổi vào topic sản xuất",
+  PRODUCTION_TOPIC_STATUS: "Đổi trạng thái topic sản xuất",
+  COST_SHEET_CREATE: "Lập phiên bản giá thành",
+  COST_SHEET_UPDATE: "Sửa bảng giá thành nháp",
+  COST_SHEET_FINALIZE: "Chốt giá thành",
+  SAMPLE_CREATE: "Ghi mẫu xưởng làm",
+  SAMPLE_UPDATE: "Sửa mẫu xưởng đang làm",
+  SAMPLE_SUBMIT: "Gửi mẫu chờ duyệt",
+  SAMPLE_REVIEW: "Ghi phán quyết duyệt mẫu",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
+  PRODUCTION_TOPIC: "Topic sản xuất",
+  COST_SHEET: "Bảng giá thành",
+  SAMPLE: "Mẫu xưởng làm",
   USER: "Người dùng",
   ORDER: "Đơn hàng",
   SHIPMENT: "Vận đơn",

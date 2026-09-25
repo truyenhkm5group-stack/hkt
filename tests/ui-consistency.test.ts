@@ -227,6 +227,9 @@ export function testNavigationCoverage() {
     "/tech/agents": "tab 'Sổ agent' của /tech",
     "/tech/deployments": "tab 'Deploy' của /tech",
     "/tech/incidents": "tab 'Sự cố' của /tech",
+    // Company OS · Agent C: form mở topic — vào từ nút 'Mở topic' trên /production, trên bàn sản xuất của
+    // một mẫu (/production/models/[id]) và từ trang 360 của mẫu (`?model=<id>`, nút do Agent A2 đặt).
+    "/production/topics/new": "nút 'Mở topic' trên /production và trên bàn sản xuất của mẫu; trang mẫu /models/[id] trỏ tới với ?model=",
   };
 
   const pages = walkPages("app/(dashboard)");

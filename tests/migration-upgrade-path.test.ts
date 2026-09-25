@@ -82,6 +82,7 @@ const MOI = [
   "0132_company_os_inventory",
   "0133_company_os_control_plane",
   "0134_company_os_economics",
+  "0135_company_os_production",
 ] as const;
 
 /*
@@ -235,6 +236,8 @@ export async function testMigrationUpgradePath() {
       kiểm dựng trên dữ liệu đẹp hơn thực tế thì nó đo một thế giới không tồn tại.
     */
     await client.query(`update departments set sort_order = 100`);
+    // 0135: một lệnh sản xuất CŨ (có trước bản duyệt / gợi ý đã lưu) — ba cột mới phải để NULL cho nó.
+    await client.query(`insert into production_orders (id, code) values ('up-po1', 'PO-UP-0135')`);
 
     /*
       Company OS · Agent G (0133). Một dòng nhật ký và một yêu cầu duyệt ĐANG CHỜ có từ trước — bước
@@ -258,6 +261,20 @@ export async function testMigrationUpgradePath() {
       assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `bước 2: 0131 phải tạo bảng ${bang}`);
       assert.equal(await dem(`select count(*)::int as n from ${bang}`), 0, `bước 2: 0131 không được gieo dòng nào vào ${bang}`);
     }
+
+    // 0135 (Company OS · Agent C): bảy bảng sản xuất nửa đầu, KHÔNG gieo dòng nào; ba cột mới của lệnh sản
+    // xuất để NULL (không backfill bản duyệt / gợi ý / lý do cho lệnh cũ — mục 8.8, 35); cờ bắt buộc bản
+    // duyệt KHÔNG được migration ghi (không dòng settings ⇒ mặc định TẮT).
+    for (const bang of ["production_topics", "production_topic_messages", "cost_sheets", "cost_sheet_lines", "samples", "sample_reviews", "design_versions"]) {
+      assert.equal(await dem(`select count(*)::int as n from information_schema.tables where table_name = '${bang}'`), 1, `bước 2: 0135 phải tạo bảng ${bang}`);
+      assert.equal(await dem(`select count(*)::int as n from ${bang}`), 0, `bước 2: 0135 không được gieo dòng nào vào ${bang}`);
+    }
+    assert.equal(
+      await dem("select count(*)::int as n from production_orders where id = 'up-po1' and design_version_id is null and suggested_cells is null and override_reason is null"),
+      1,
+      "bước 2: 0135 không được backfill bản duyệt / gợi ý / lý do cho lệnh sản xuất cũ",
+    );
+    assert.equal(await dem("select count(*)::int as n from settings where key = 'production.requireApprovedDesign'"), 0, "bước 2: 0135 không được bật cờ bắt buộc bản duyệt");
 
     /*
       ═══ 0081 NAY NẰM TRONG TRẠNG THÁI PRODUCTION (bước 1) ═══

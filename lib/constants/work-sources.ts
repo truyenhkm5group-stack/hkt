@@ -44,6 +44,9 @@ export const WORK_SOURCES = [
   "TECH_TASK",
   // Company OS · Agent G — phép chiếu của `approval_requests` đang chờ.
   "APPROVAL",
+  // Company OS · Agent C — sản xuất nửa đầu (shared-contracts.md mục 3).
+  "PRODUCTION_TOPIC",
+  "SAMPLE_REVIEW",
   "MANUAL_TASK",
   "RECURRING_TASK",
 ] as const;
@@ -337,6 +340,47 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     outcomeAttributable: true,
     // CHỈ NÚT MỞ: duyệt / từ chối có lý do bắt buộc nằm ở trang Cần xử lý, nơi người duyệt đọc được
     // vì sao việc đó cần người thứ hai. Nút bấm-một-phát ở đây sẽ bỏ qua đúng đoạn đọc ấy.
+    actions: ["OPEN_SOURCE"],
+  },
+  /*
+    ═══ SẢN XUẤT NỬA ĐẦU (Company OS · Agent C) — PHÉP CHIẾU, KHÔNG PHẢI BẢN SAO ═══
+
+    `production_topics` và `samples` giữ trạng thái của chính chúng; việc rời hàng đợi khi NGUỒN đổi
+    (chốt / đóng topic, ghi phán quyết cho mẫu) qua ĐÚNG server action của miền
+    (`lib/actions/production-topics.ts`, `lib/actions/production-samples.ts`). Không nút "xong" nào ở
+    đây — chỉ nút MỞ.
+
+    PHÒNG BAN đi qua `TEAM_DEPARTMENT.PRODUCTION`, KHÔNG gõ thẳng `PRODUCTION`: phòng Sản xuất sở hữu
+    màn hình nhưng nhóm việc cùng tên vẫn route về Kho cho tới khi phòng có người
+    (`TEAM_DEPARTMENT_DIVERGENCE`, AGENTS.md mục 69). Chuyển thật bằng ghi đè `work.ownership`.
+
+    Không trùng độ mịn với cảnh báo nào đang có (một topic / một phiên bản mẫu — không `CaseType` nào
+    nói về chúng), nên `ALERT_KINDS_OWNED_ELSEWHERE` không cần thêm gì.
+  */
+  PRODUCTION_TOPIC: {
+    key: "PRODUCTION_TOPIC",
+    label: "Topic sản xuất chờ báo giá / chờ quyết",
+    why: "Mẫu thắng test mà chưa chốt được phương án với xưởng thì chưa đặt hàng được — mỗi ngày chờ là một ngày bán hết hàng test mà không có hàng về.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
+    department: TEAM_DEPARTMENT.PRODUCTION,
+    businessEntity: "MODEL",
+    // Không có hằng số đang chạy nào cho hạn này (luật 22: không gõ số mới) — chủ shop đặt ở `work.sla`.
+    slaHours: null,
+    // Xưởng báo giá nhanh hay chậm không do người trong shop quyết (mục 24).
+    outcomeAttributable: false,
+    actions: ["OPEN_SOURCE"],
+  },
+  SAMPLE_REVIEW: {
+    key: "SAMPLE_REVIEW",
+    label: "Mẫu chờ duyệt",
+    why: "Mẫu đã về tay shop mà chưa ai duyệt thì xưởng đứng chờ — lịch sản xuất trượt theo đúng số ngày mẫu nằm trên bàn.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
+    department: TEAM_DEPARTMENT.PRODUCTION,
+    businessEntity: "SAMPLE",
+    slaHours: null,
+    outcomeAttributable: true,
     actions: ["OPEN_SOURCE"],
   },
   MANUAL_TASK: {
