@@ -65,7 +65,7 @@ toàn việc đang xảy ra.
 | # | Bước | Nguồn sự thật |
 |---|---|---|
 | 1 | Đơn được tạo | `orders.inserted_at` |
-| 2 | Đã rời trạng thái chờ | `stage ∉ (NEW, WAITING)` — **dùng lại đúng định nghĩa của `getSalesFunnel`** |
+| 2 | Đã xác nhận | `ORDER_EVER_CONFIRMED` — đơn **từng** được xác nhận; **một** vị từ cho phễu, phễu theo nguồn và thẻ nhân viên (xem §1.3) |
 | 3 | Đã tạo vận đơn | có dòng `shipments` qua `PRIMARY_ATTEMPT` |
 | 4 | Hàng đã rời kho | `SHIPMENT_LEFT_WAREHOUSE` (sự kiện Viettel Post) |
 | 5 | Giao thành công | `ORDER_OUTCOME_FAST = 'DELIVERED'` |
@@ -84,17 +84,22 @@ Bước 5 dùng **đúng** `ORDER_OUTCOME_FAST = 'DELIVERED'`, **không** phải
 thêm điều kiện "và" là tạo ra định nghĩa giao thành công **thứ hai** trong ERP. Đơn giao thành công mà
 thiếu chứng từ vận đơn được xếp mức 5 và **đếm riêng** ở `evidenceGaps.deliveredWithoutShipment`.
 
-### 1.3 "Đã xác nhận" — hai định nghĩa cùng tồn tại, và đây là lựa chọn
+### 1.3 "Đã xác nhận" = đơn TỪNG được xác nhận (chủ shop chốt 25/09/2026)
 
 | Nơi | Định nghĩa |
 |---|---|
-| `getSalesFunnel` | `stage not in ('NEW','WAITING')` — **LỎNG**, gồm cả đơn sau đó huỷ |
-| `CONFIRMED_ORDER` (tầng chỉ số) | `stage in CONFIRMED_STAGES` — **LOẠI** đơn huỷ |
+| Phễu, phễu theo nguồn, thẻ nhân viên (`getConversionFunnel` · `getSalesFunnel` · `getStaffPerformance`) | `ORDER_EVER_CONFIRMED` = `stage in CONFIRMED_STAGES` **hoặc** lịch sử trạng thái có một lần xác nhận (`CONFIRMED_AT`) **hoặc** đã có vận đơn — trùng khít "mức ≥ 2" của phễu |
+| `CONFIRMED_ORDER` (tầng chỉ số) | `stage in CONFIRMED_STAGES` — **LOẠI** mọi đơn đang huỷ |
 
-**Chọn bản LỎNG**, cố ý, vì đơn huỷ sau khi đã gửi vẫn đã từng được xác nhận và đã từng rời kho; dùng
-bản chặt sẽ làm "đã rời kho" > "đã xác nhận" ⇒ phễu phình. Số đơn huỷ sau xác nhận hiện ở dòng riêng
-(`cancelledAfterConfirm`). **Hợp nhất hai định nghĩa là một thay đổi chỉ số phải có chủ shop đồng ý kèm
-số trước/sau** — không phải hệ quả phụ của một màn hình mới.
+**Bản cũ** (`stage not in ('NEW','WAITING')`, đọc trạng thái HIỆN TẠI) tính cả đơn **huỷ khi chưa ai
+xác nhận** vào bước này: đo production 25/09/2026 là ~633 / 3.319 đơn trong 90 ngày. `cancelledAfterConfirm`
+khi ấy luôn bằng tổng đơn huỷ. Chủ shop đồng ý đổi sau khi xem số (25/09/2026).
+
+Lý do của bản lỏng cũ **vẫn giữ**: đơn xác nhận rồi mới huỷ — kể cả huỷ sau khi đã gửi — vẫn ĐÃ TỪNG
+được xác nhận (vế lịch sử bắt nó), và mức đi được lấy "có vận đơn" trước "đã xác nhận" nên phễu không
+phình. `CONFIRMED_AT` cũng thôi tính mã Huỷ / Xoá là mốc xác nhận, nên "thời gian xác nhận" không còn
+lẫn thời gian huỷ đơn rác. Đơn huỷ khi chưa từng xác nhận đếm riêng ở `preConfirmCancel` (số, tỷ lệ,
+huỷ sau bao lâu) và theo từng chiều (`cancelledBeforeConfirm`).
 
 ---
 

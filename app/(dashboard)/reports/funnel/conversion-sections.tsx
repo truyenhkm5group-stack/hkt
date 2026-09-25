@@ -189,7 +189,7 @@ export async function StuckStepsSection({ period }: { period: Period }) {
               f.evidenceGaps.deliveredWithoutShipment ? `Khuyết chứng từ trong kỳ: ${formatNumber(f.evidenceGaps.deliveredWithoutShipment)} đơn kết luận giao thành công mà KHÔNG có vận đơn nào (dựa trên trạng thái Pancake)` : null,
               f.evidenceGaps.shipmentWithoutConfirm ? `${formatNumber(f.evidenceGaps.shipmentWithoutConfirm)} đơn có vận đơn mà Pancake còn ở trạng thái chờ` : null,
               f.evidenceGaps.noStatusHistory ? `${formatNumber(f.evidenceGaps.noStatusHistory)} đơn không có dòng lịch sử trạng thái nào nên KHÔNG đo được thời gian xác nhận` : null,
-              f.cancelledAfterConfirm ? `${formatNumber(f.cancelledAfterConfirm)} đơn huỷ SAU khi đã rời trạng thái chờ (bước “đã xác nhận” đang gánh phần này)` : null,
+              f.cancelledAfterConfirm ? `${formatNumber(f.cancelledAfterConfirm)} đơn huỷ SAU khi đã được xác nhận (bước “đã xác nhận” đang gánh phần này)` : null,
             ]}
           />
         </span>
@@ -230,7 +230,47 @@ export async function StuckStepsSection({ period }: { period: Period }) {
           </TableBody>
         </Table>
       </div>
+      <PreConfirmCancelStrip f={f} />
     </SectionCard>
+  );
+}
+
+/**
+ * ═══════════ ĐƠN HUỶ KHI CHƯA TỪNG XÁC NHẬN ═══════════
+ *
+ * Đo production 25/09/2026: 633/3.319 đơn (19%) trong 90 ngày huỷ khi CHƯA ai xác nhận — gấp ~6 lần
+ * số đơn huỷ sau xác nhận. Đây là chỗ mất đơn lớn nhất trước kho. Khoảng giờ tách "huỷ ngay" (đơn
+ * rác / trùng) khỏi "để nguội rồi huỷ" (chậm xác nhận) — hai việc sửa ở hai chỗ.
+ */
+function PreConfirmCancelStrip({ f }: { f: Awaited<ReturnType<typeof getConversionFunnel>> }) {
+  const p = f.preConfirmCancel;
+  const unmeasured = p.count - p.buckets.reduce((t, b) => t + b.count, 0);
+  return (
+    <div className="border-t px-5 py-3 text-sm">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="font-semibold">Huỷ khi chưa từng xác nhận:</span>
+        <span className="tabular-nums font-bold text-rose-600 dark:text-rose-400">{formatNumber(p.count)} đơn</span>
+        <span className="text-muted-foreground">({pctOrDash(p.ofCreated)} số đơn tạo)</span>
+        <span className="text-muted-foreground">· huỷ sau xác nhận: {formatNumber(f.cancelledAfterConfirm)}</span>
+        <span className="text-muted-foreground">
+          · trung vị {hoursOrDash(p.medianHours)} sau khi lên đơn, p90 {hoursOrDash(p.p90Hours)}
+        </span>
+        <InfoHint>
+          Đơn bị huỷ / xoá mà lịch sử trạng thái Pancake chưa từng có một lần xác nhận. Giờ huỷ tính từ lúc lên đơn tới lần đầu đơn sang Đã huỷ / Đã xoá; đơn không có dòng lịch sử huỷ thì không đo được
+          (không tính là 0 giờ). Huỷ ngay thường là đơn rác / trùng; huỷ sau nhiều giờ thường là khách nguội vì chưa ai gọi xác nhận.
+        </InfoHint>
+      </div>
+      {p.count > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {p.buckets.map((b) => (
+            <span key={b.key} className="rounded-md border px-2 py-0.5 text-xs">
+              {b.label}: <b className="tabular-nums">{formatNumber(b.count)}</b>
+            </span>
+          ))}
+          {unmeasured > 0 ? <span className="rounded-md border border-dashed px-2 py-0.5 text-xs text-muted-foreground">chưa có mốc huỷ: {formatNumber(unmeasured)}</span> : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -248,12 +288,15 @@ export async function ConversionByDimensionSection({ period, dimension, role }: 
       padded={false}
     >
       <div className="overflow-x-auto">
-        <Table className="min-w-[980px]">
+        <Table className="min-w-[1080px]">
           <TableHeader>
             <TableRow>
               <TableHead>{CONVERSION_DIMENSION_LABEL[dimension]}</TableHead>
               <TableHead className="text-right">Đơn</TableHead>
               <TableHead className="text-right">Xác nhận</TableHead>
+              <TableHead className="text-right">
+                Huỷ trước XN <InfoHint>Đơn huỷ khi chưa từng được xác nhận · tỷ lệ trên số đơn tạo · trung vị giờ từ lúc lên đơn tới lúc huỷ.</InfoHint>
+              </TableHead>
               <TableHead className="text-right">Có vận đơn</TableHead>
               <TableHead className="text-right">Rời kho</TableHead>
               <TableHead className="text-right">Giao TC</TableHead>
@@ -266,7 +309,7 @@ export async function ConversionByDimensionSection({ period, dimension, role }: 
           <TableBody>
             {r.rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={11} className="py-8 text-center text-sm text-muted-foreground">
                   Chưa có đơn nào trong kỳ.
                 </TableCell>
               </TableRow>
@@ -279,6 +322,14 @@ export async function ConversionByDimensionSection({ period, dimension, role }: 
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(row.created)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(row.confirmed)}</TableCell>
+                  <TableCell className="text-right tabular-nums whitespace-nowrap">
+                    {formatNumber(row.cancelledBeforeConfirm)}
+                    {row.cancelledBeforeConfirm ? (
+                      <span className="block text-[10.5px] text-muted-foreground">
+                        {pctOrDash(row.preConfirmCancelRate)} · {hoursOrDash(row.medianHoursToPreConfirmCancel)}
+                      </span>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(row.shipmentCreated)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(row.leftWarehouse)}</TableCell>
                   <TableCell className="text-right tabular-nums">{formatNumber(row.delivered)}</TableCell>

@@ -2,6 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
+import { ORDER_EVER_CONFIRMED } from "@/lib/queries/conversion-funnel";
 import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
 import type { Period } from "@/lib/search-params";
@@ -126,11 +127,12 @@ async function staffPerformanceUncached(period: Period, field: AttributionField)
     .select({
       name: sql<string>`${who}`,
       orders: sql<number>`count(distinct ${o.id})`,
-      confirmed: sql<number>`count(distinct ${o.id}) filter (where ${o.stage} not in ('NEW','WAITING'))`,
+      confirmed: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_EVER_CONFIRMED})`,
       delivered: sql<number>`count(distinct ${o.id}) filter (where ${isDelivered})`,
       returned: sql<number>`count(distinct ${o.id}) filter (where ${isReturned})`,
       unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
-      bookedRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${o.stage} not in ('NEW','WAITING')), 0)`,
+      // Doanh số CHỐT (POS): đơn từng được xác nhận, kể cả huỷ SAU xác nhận — không gồm đơn huỷ khi chưa ai xác nhận.
+      bookedRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${ORDER_EVER_CONFIRMED}), 0)`,
       deliveredRevenue: sql<number>`coalesce(sum(${o.totalPriceAfterDiscount}) filter (where ${isDelivered}), 0)`,
       cogs: sql<number>`coalesce(sum(${o.cogs}) filter (where ${isDelivered} and ${o.cogs} is not null), 0)`,
       // Đếm riêng phần giao thành công TRA ĐƯỢC giá vốn: thiếu giá vốn phải hiện thành thiếu,

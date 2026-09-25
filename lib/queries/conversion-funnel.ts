@@ -1,8 +1,19 @@
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
-import { PANCAKE_ORDER_STATUS } from "@/lib/constants/pancake";
-import { CONVERSION_DIMENSION_LABEL, dimensionHasUnassigned, ORDER_STEPS, type ConversionDimension, type EvidenceTier, type OrderStepKey } from "@/lib/constants/conversion";
+import { CONFIRMED_STAGES, PANCAKE_ORDER_STATUS } from "@/lib/constants/pancake";
+import {
+  CONVERSION_DIMENSION_LABEL,
+  dimensionHasUnassigned,
+  ORDER_STEPS,
+  PRE_CONFIRM_CANCEL_BUCKETS,
+  preConfirmCancelBucketSql,
+  type ConversionDimension,
+  type EvidenceTier,
+  type OrderStepKey,
+  type PreConfirmCancelBucketKey,
+} from "@/lib/constants/conversion";
+import { PANCAKE_CANCEL_CODES } from "@/lib/constants/stock-wait-report";
 import { LOW_COVERAGE_PCT, UNASSIGNED_LABEL, type AttributionField } from "@/lib/constants/sales-funnel";
 import { OPEN_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { successRate } from "@/lib/queries/metrics";
@@ -47,17 +58,25 @@ const o = schema.orders;
 const s = schema.shipments;
 
 /**
- * Trạng thái Pancake nghĩa là "đã rời trạng thái chờ".
+ * Trạng thái Pancake nghĩa là "ĐÃ ĐƯỢC XÁC NHẬN": rời nhóm chờ ĐỂ ĐI TIẾP — không tính HUỶ / XOÁ.
  *
  * Suy từ `PANCAKE_ORDER_STATUS` chứ KHÔNG gõ tay danh sách số: thêm một trạng thái mới vào bảng đó
  * mà quên sửa ở đây thì mốc xác nhận sẽ lệch âm thầm.
+ *
+ * ─── VÌ SAO LOẠI HUỶ / XOÁ (sửa 25/09/2026) ───
+ *
+ * Bản trước lấy mọi trạng thái ngoài nhóm Mới / Chờ hàng — tức gồm cả "Đã huỷ" và "Đã xoá". Đơn huỷ
+ * khi còn CHƯA xác nhận vì thế mang mốc "xác nhận" = chính lúc huỷ: trung vị "thời gian xác nhận"
+ * lẫn thời gian huỷ của đơn rác, và báo cáo chờ hàng đếm 682 đơn "chờ 0 ngày rồi huỷ" (đo production
+ * 25/09/2026). Huỷ không phải xác nhận.
  */
 export const CONFIRMED_STATUS_CODES = Object.entries(PANCAKE_ORDER_STATUS)
-  .filter(([, v]) => v.stage !== "NEW" && v.stage !== "WAITING")
+  .filter(([, v]) => v.stage !== "NEW" && v.stage !== "WAITING" && v.stage !== "CANCELLED" && v.stage !== "DELETED")
   .map(([k]) => Number(k));
 
 /**
- * Mốc XÁC NHẬN của đơn: lần đầu trạng thái rời khỏi nhóm chờ. `NULL` = chưa có lịch sử.
+ * Mốc XÁC NHẬN của đơn: lần đầu trạng thái sang một trạng thái ĐÃ XÁC NHẬN (không tính huỷ / xoá).
+ * `NULL` = không có dòng lịch sử nào như vậy — đơn chưa từng được xác nhận, HOẶC thiếu lịch sử.
  *
  * BẢN KHAI DUY NHẤT — báo cáo chờ hàng (`lib/queries/stock-wait-report.ts`) dùng lại đúng biểu thức
  * này làm mốc "tính ngày chờ từ lúc xác nhận". Cần FROM `orders`.
@@ -66,6 +85,38 @@ export const CONFIRMED_AT = sql`(
   select min(h.updated_at) from order_status_history h
    where h.order_id = ${o.id}
      and h.status in ${sql.raw(`(${CONFIRMED_STATUS_CODES.join(",")})`)}
+)`;
+
+/**
+ * ĐƠN ĐÃ TỪNG ĐƯỢC XÁC NHẬN — vị từ DUY NHẤT cho bước "đã xác nhận" của mọi phễu / thẻ nhân viên
+ * (`getConversionFunnel`, `getSalesFunnel`, `getStaffPerformance`). Cần FROM `orders`.
+ *
+ *   = đơn đang ở một trạng thái đã chốt (`CONFIRMED_STAGES`, cùng phạm vi của Tổng quan / Lợi nhuận)
+ *     HOẶC lịch sử trạng thái có một lần xác nhận (`CONFIRMED_AT` không rỗng)
+ *     HOẶC đơn đã có vận đơn.
+ *
+ * Vế lịch sử là để đơn XÁC NHẬN RỒI MỚI HUỶ vẫn được tính là đã qua bước xác nhận — nó thật sự đã
+ * qua. Vế trạng thái là để đơn thiếu lịch sử (đồng bộ cũ) không rơi mất khỏi bước này. Vế vận đơn là
+ * để đơn HUỶ SAU KHI GỬI mà thiếu lịch sử vẫn được tính: đã có vận đơn thì chắc chắn đã từng chốt, và
+ * mức đi được của phễu cũng xếp "có vận đơn" (mức 3) trên "đã xác nhận" — ba vế này làm vị từ trùng
+ * KHÍT với "mức ≥ 2", nên phễu và phễu theo nguồn không thể lệch nhau.
+ *
+ * Bản trước là `stage not in ('NEW','WAITING')` — ĐỌC TRẠNG THÁI HIỆN TẠI, nên mọi đơn đang ở "Đã
+ * huỷ" / "Đã xoá" đều qua, kể cả đơn huỷ khi chưa ai xác nhận: bước "đã xác nhận", tỷ lệ xác nhận
+ * của từng nhân viên và doanh số chốt đều cộng cả đơn rác. `cancelledAfterConfirm` luôn bằng tổng
+ * đơn huỷ — con số không mang thông tin nào.
+ */
+export const ORDER_EVER_CONFIRMED = sql`(${o.stage} in (${sql.raw(CONFIRMED_STAGES.map((x) => `'${x}'`).join(","))}) or exists (
+  select 1 from order_status_history hc
+   where hc.order_id = ${o.id}
+     and hc.status in ${sql.raw(`(${CONFIRMED_STATUS_CODES.join(",")})`)}
+) or exists (select 1 from shipments sc where sc.order_id = ${o.id}))`;
+
+/** Mốc HUỶ của đơn: lần đầu trạng thái Pancake sang Đã huỷ / Đã xoá. `NULL` = không có lịch sử huỷ. */
+const CANCELLED_AT = sql`(
+  select min(hx.updated_at) from order_status_history hx
+   where hx.order_id = ${o.id}
+     and hx.status in ${sql.raw(`(${PANCAKE_CANCEL_CODES.join(",")})`)}
 )`;
 
 /**
@@ -131,12 +182,27 @@ export type EvidenceGaps = {
   noStatusHistory: number;
 };
 
+export type PreConfirmCancel = {
+  /** Đơn huỷ khi CHƯA TỪNG được xác nhận. */
+  count: number;
+  /** Trên tổng đơn được tạo (0–1); `null` khi kỳ rỗng. */
+  ofCreated: number | null;
+  /** Trung vị / p90 giờ từ lúc lên đơn tới lúc huỷ — chỉ trên đơn CÓ mốc huỷ. */
+  medianHours: number | null;
+  p90Hours: number | null;
+  /** Số đơn đo được giờ huỷ (có dòng lịch sử huỷ) — độ phủ của hai con số trên. */
+  measured: number;
+  buckets: { key: PreConfirmCancelBucketKey; label: string; count: number }[];
+};
+
 export type ConversionFunnel = {
   steps: ConversionStep[];
   /** Đơn huỷ — RỜI phễu, không phải thất bại giao vận. */
   cancelled: number;
-  /** Đơn huỷ SAU khi đã rời trạng thái chờ. Đây là phần bước "đã xác nhận" đang gánh. */
+  /** Đơn huỷ SAU khi đã được xác nhận. Đây là phần bước "đã xác nhận" đang gánh. */
   cancelledAfterConfirm: number;
+  /** Đơn huỷ khi CHƯA TỪNG được xác nhận — mất ở khâu chốt / xác nhận. */
+  preConfirmCancel: PreConfirmCancel;
   /** Đơn chưa biết kết quả. KHÔNG được tính là thất bại. */
   unfinished: number;
   evidenceGaps: EvidenceGaps;
@@ -161,9 +227,10 @@ function funnelFacts(db: Awaited<ReturnType<typeof getDb>>, where: SQL, dimColum
       revenue: sql<number>`${o.totalPriceAfterDiscount}`.as("f_revenue"),
       leftWarehouse: sql<boolean>`${SHIPMENT_LEFT_WAREHOUSE}`.as("f_left"),
       hasShipment: sql<boolean>`${s.id} is not null`.as("f_has_ship"),
-      confirmedStage: sql<boolean>`${o.stage} not in ('NEW','WAITING')`.as("f_confirmed"),
+      confirmedStage: sql<boolean>`${ORDER_EVER_CONFIRMED}`.as("f_confirmed"),
       insertedAt: sql`${o.insertedAt}`.as("f_inserted"),
       confirmedAt: sql`${CONFIRMED_AT}`.as("f_confirmed_at"),
+      cancelledAt: sql`${CANCELLED_AT}`.as("f_cancelled_at"),
       shipmentSeenAt: sql`${SHIPMENT_SEEN_AT}`.as("f_ship_at"),
       pickedUpAt: sql`${s.pickedUpAt}`.as("f_picked_at"),
       deliveredAt: sql`${s.deliveredAt}`.as("f_delivered_at"),
@@ -196,6 +263,8 @@ export async function getConversionFunnel(period: Period): Promise<ConversionFun
     const db = await getDb();
     const facts = funnelFacts(db, periodWhere(period)).as("cf_facts");
     const level = reachedLevel(facts);
+    // Giờ từ lúc lên đơn tới lúc huỷ, viết theo tên cột của bảng dẫn xuất `cf_facts` ngay trên.
+    const PRE_CANCEL_HOURS_SQL = `(extract(epoch from ("cf_facts"."f_cancelled_at" - "cf_facts"."f_inserted")) / 3600)`;
 
     // TẮT JIT: `funnelFacts` tính ORDER_OUTCOME_FAST + SHIPMENT_LEFT_WAREHOUSE + hai mốc tương quan
     // cho mọi đơn của kỳ — cùng hình dạng `sales-funnel`/`marketing-daily` đã đo JIT là phần lớn
@@ -209,6 +278,16 @@ export async function getConversionFunnel(period: Period): Promise<ConversionFun
         lvl5: sql<number>`count(*) filter (where ${level} >= 5)`,
         cancelled: sql<number>`count(*) filter (where ${facts.outcome} = 'CANCELLED')`,
         cancelledAfterConfirm: sql<number>`count(*) filter (where ${facts.outcome} = 'CANCELLED' and ${facts.confirmedStage})`,
+        preCancel: sql<number>`count(*) filter (where ${facts.outcome} = 'CANCELLED' and not ${facts.confirmedStage})`,
+        preCancelMed: sql<number>`percentile_cont(0.5) within group (order by ${hoursBetween(facts.insertedAt, facts.cancelledAt)}) filter (where ${facts.outcome} = 'CANCELLED' and not ${facts.confirmedStage})`,
+        preCancelP90: sql<number>`percentile_cont(0.9) within group (order by ${hoursBetween(facts.insertedAt, facts.cancelledAt)}) filter (where ${facts.outcome} = 'CANCELLED' and not ${facts.confirmedStage})`,
+        preCancelN: sql<number>`count(${hoursBetween(facts.insertedAt, facts.cancelledAt)}) filter (where ${facts.outcome} = 'CANCELLED' and not ${facts.confirmedStage})`,
+        ...Object.fromEntries(
+          PRE_CONFIRM_CANCEL_BUCKETS.map((b) => [
+            `pc_${b.key}`,
+            sql<number>`count(*) filter (where ${facts.outcome} = 'CANCELLED' and not ${facts.confirmedStage} and ${sql.raw(preConfirmCancelBucketSql(PRE_CANCEL_HOURS_SQL))} = ${b.key})`,
+          ]),
+        ),
         unfinished: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
         deliveredWithoutShipment: sql<number>`count(*) filter (where ${facts.outcome} = 'DELIVERED' and not ${facts.hasShipment})`,
         shipmentWithoutConfirm: sql<number>`count(*) filter (where ${facts.hasShipment} and not ${facts.confirmedStage})`,
@@ -291,6 +370,14 @@ export async function getConversionFunnel(period: Period): Promise<ConversionFun
       steps,
       cancelled: Number(row?.cancelled ?? 0),
       cancelledAfterConfirm: Number(row?.cancelledAfterConfirm ?? 0),
+      preConfirmCancel: {
+        count: Number(row?.preCancel ?? 0),
+        ofCreated: counts.CREATED > 0 ? Number(row?.preCancel ?? 0) / counts.CREATED : null,
+        medianHours: num(row?.preCancelMed),
+        p90Hours: num(row?.preCancelP90),
+        measured: Number(row?.preCancelN ?? 0),
+        buckets: PRE_CONFIRM_CANCEL_BUCKETS.map((b) => ({ key: b.key, label: b.label, count: Number((row as Record<string, unknown> | undefined)?.[`pc_${b.key}`] ?? 0) })),
+      },
       unfinished: Number(row?.unfinished ?? 0),
       evidenceGaps: {
         deliveredWithoutShipment: Number(row?.deliveredWithoutShipment ?? 0),
@@ -319,6 +406,14 @@ export type ConversionRow = {
   delivered: number;
   returned: number;
   unfinished: number;
+  /** Huỷ khi CHƯA TỪNG được xác nhận. */
+  cancelledBeforeConfirm: number;
+  /** Huỷ SAU khi đã xác nhận. */
+  cancelledAfterConfirm: number;
+  /** Huỷ trước xác nhận / tạo (0–1); `null` khi chưa có đơn. */
+  preConfirmCancelRate: number | null;
+  /** Trung vị giờ từ lên đơn tới lúc huỷ của đơn huỷ trước xác nhận; `null` khi không đo được. */
+  medianHoursToPreConfirmCancel: number | null;
   /** Xác nhận / tạo (0–1); `null` khi chưa có đơn. */
   confirmRate: number | null;
   /** Giao TC / đã rời kho (0–1); `null` khi chưa gửi đơn nào. */
@@ -415,6 +510,9 @@ export async function getConversionByDimension(
         unfinished: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
         deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${facts.outcome} = 'DELIVERED'), 0)`,
         confirmMed: sql<number>`percentile_cont(0.5) within group (order by ${hoursBetween(facts.insertedAt, facts.confirmedAt)})`,
+        preCancel: sql<number>`count(*) filter (where ${facts.outcome} = 'CANCELLED' and not ${facts.confirmedStage})`,
+        postCancel: sql<number>`count(*) filter (where ${facts.outcome} = 'CANCELLED' and ${facts.confirmedStage})`,
+        preCancelMed: sql<number>`percentile_cont(0.5) within group (order by ${hoursBetween(facts.insertedAt, facts.cancelledAt)}) filter (where ${facts.outcome} = 'CANCELLED' and not ${facts.confirmedStage})`,
       })
       .from(facts)
       .groupBy(dim));
@@ -457,6 +555,10 @@ export async function getConversionByDimension(
         delivered,
         returned,
         unfinished: Number(r.unfinished ?? 0),
+        cancelledBeforeConfirm: Number(r.preCancel ?? 0),
+        cancelledAfterConfirm: Number(r.postCancel ?? 0),
+        preConfirmCancelRate: created > 0 ? Number(r.preCancel ?? 0) / created : null,
+        medianHoursToPreConfirmCancel: r.preCancelMed === null || r.preCancelMed === undefined ? null : Math.round(Number(r.preCancelMed) * 10) / 10,
         confirmRate: created > 0 ? confirmed / created : null,
         // Mẫu số là đơn ĐÃ RỜI KHO: không kênh/người nào chịu trách nhiệm cho đơn chưa từng gửi đi.
         deliveryRate: leftWarehouse > 0 ? delivered / leftWarehouse : null,

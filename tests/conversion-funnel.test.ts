@@ -9,6 +9,8 @@ import { getConversionByDimension, getConversionFunnel } from "@/lib/queries/con
 import { getPreOrderFunnel } from "@/lib/queries/conversation-funnel";
 import { getSalesLeakageQueue } from "@/lib/queries/sales-leakage";
 import { getSalesFunnel } from "@/lib/queries/sales-funnel";
+import { getStaffPerformance } from "@/lib/queries/staff-performance";
+import { AUDIT_MAX_LINES, confirmAuditLines, soNgay as soNgayAudit } from "@/scripts/confirm-funnel-audit";
 import { buildConversationFunnelRow, messageTimeline, upsertConversationFunnel } from "@/lib/cs/conversation-funnel";
 import type { PancakeMessage } from "@/lib/integrations/pancake/pages";
 
@@ -32,7 +34,7 @@ const ALL = { key: "all" as const, from: null, to: null, label: "Toàn bộ", fr
  * fixture chung nên thêm đơn mà không dọn sẽ làm lệch assertion của khối khác (đã có tiền lệ).
  */
 export async function testConversionFunnel(db: Db) {
-  const orderIds = ["rci-1", "rci-2", "rci-3", "rci-multi"];
+  const orderIds = ["rci-1", "rci-2", "rci-3", "rci-multi", "rci-cx-pre", "rci-cx-post", "rci-cx-nohist"];
   const convIds = ["rci-c1", "rci-c2", "rci-c3", "rci-c-old", "rci-c-fresh"];
 
   clearMemo();
@@ -126,7 +128,7 @@ export async function testConversionFunnel(db: Db) {
     const lech = (key: (typeof ORDER_STEPS)[number]["key"]) =>
       (sau.steps.find((s) => s.key === key)?.count ?? 0) - (truoc.steps.find((s) => s.key === key)?.count ?? 0);
     assert.equal(lech("CREATED"), 4, "thêm 4 đơn thì bước đầu tăng đúng 4 — đơn hai vận đơn KHÔNG được đếm hai lần");
-    assert.equal(lech("CONFIRMED"), 3, "ba đơn rời trạng thái chờ (rci-1, rci-3, rci-multi)");
+    assert.equal(lech("CONFIRMED"), 3, "ba đơn đã xác nhận (rci-1, rci-3, rci-multi)");
     assert.equal(lech("SHIPMENT_CREATED"), 2, "hai đơn có vận đơn — đơn hai vận đơn vẫn chỉ tính MỘT");
     assert.equal(lech("LEFT_WAREHOUSE"), 2, "hai đơn đã rời kho");
     assert.equal(lech("DELIVERED"), 2, "hai đơn giao thành công");
@@ -136,6 +138,65 @@ export async function testConversionFunnel(db: Db) {
       assert.ok(sau.steps[i].count <= sau.steps[i - 1].count, `phễu phình ở "${sau.steps[i].label}" sau khi thêm fixture`);
     }
 
+    /* ───────── 4b. HUỶ KHÔNG PHẢI XÁC NHẬN ───────── */
+    /*
+      Bản trước đọc "đã xác nhận" từ TRẠNG THÁI HIỆN TẠI (`stage not in NEW/WAITING`), nên mọi đơn
+      đang "Đã huỷ" đều qua bước xác nhận, và mốc xác nhận của đơn huỷ-khi-chưa-xác-nhận là chính lúc
+      huỷ. Ba đơn dưới đây tách đúng ba trường hợp:
+        · huỷ khi CHƯA xác nhận (Mới → Đã huỷ sau 2 giờ)        ⇒ KHÔNG qua bước xác nhận;
+        · xác nhận rồi MỚI huỷ (Đã xác nhận sau 1 giờ → huỷ)     ⇒ CÓ qua bước xác nhận, mốc = 1 giờ;
+        · đơn đang "Đã huỷ" mà KHÔNG có dòng lịch sử nào          ⇒ không có chứng cứ xác nhận ⇒ KHÔNG qua.
+    */
+    const h = 3_600_000;
+    const t0 = new Date(now.getTime() - 48 * h);
+    await db.insert(schema.orders).values([
+      { id: "rci-cx-pre", stage: "CANCELLED", status: 6, insertedAt: t0, totalPriceAfterDiscount: 300_000, sellerName: "RCI Huỷ", source: "Facebook" },
+      { id: "rci-cx-post", stage: "CANCELLED", status: 6, insertedAt: t0, totalPriceAfterDiscount: 300_000, sellerName: "RCI Huỷ", source: "Facebook" },
+      { id: "rci-cx-nohist", stage: "CANCELLED", status: 6, insertedAt: t0, totalPriceAfterDiscount: 300_000, sellerName: "RCI Huỷ", source: "Facebook" },
+    ]);
+    await db.insert(schema.orderStatusHistory).values([
+      { orderId: "rci-cx-pre", status: 0, updatedAt: t0 },
+      { orderId: "rci-cx-pre", status: 6, updatedAt: new Date(t0.getTime() + 2 * h) },
+      { orderId: "rci-cx-post", status: 1, updatedAt: new Date(t0.getTime() + 1 * h) },
+      { orderId: "rci-cx-post", status: 6, updatedAt: new Date(t0.getTime() + 5 * h) },
+    ]);
+    clearMemo();
+    const huy = await getConversionFunnel(ALL);
+    const lechHuy = (key: (typeof ORDER_STEPS)[number]["key"]) =>
+      (huy.steps.find((x) => x.key === key)?.count ?? 0) - (sau.steps.find((x) => x.key === key)?.count ?? 0);
+    assert.equal(lechHuy("CREATED"), 3);
+    assert.equal(lechHuy("CONFIRMED"), 1, "chỉ đơn XÁC NHẬN RỒI MỚI HUỶ qua bước xác nhận — huỷ không phải xác nhận");
+    assert.equal(huy.cancelled - sau.cancelled, 3);
+    assert.equal(huy.cancelledAfterConfirm - sau.cancelledAfterConfirm, 1, "huỷ SAU xác nhận: đúng một đơn, không phải mọi đơn huỷ");
+    assert.equal(huy.preConfirmCancel.count - sau.preConfirmCancel.count, 2, "huỷ khi CHƯA xác nhận: hai đơn (kể cả đơn không có lịch sử)");
+    assert.equal(huy.preConfirmCancel.measured - sau.preConfirmCancel.measured, 1, "chỉ đơn có dòng lịch sử huỷ mới đo được giờ huỷ — thiếu mốc KHÔNG tính là 0 giờ");
+    const bac = (f: typeof huy, k: string) => f.preConfirmCancel.buckets.find((b) => b.key === k)?.count ?? 0;
+    assert.equal(bac(huy, "H1_6") - bac(sau, "H1_6"), 1, "Mới → Đã huỷ sau 2 giờ rơi vào khoảng 1–6 giờ");
+    // Phễu bán hàng (màn hình cũ) phải nói CÙNG một con số xác nhận — một vị từ, không phải hai.
+    const cuHuy = await getSalesFunnel(ALL);
+    assert.equal(
+      huy.steps.find((x) => x.key === "CONFIRMED")?.count,
+      cuHuy.stages.find((x) => x.key === "confirmed")?.count,
+      "sau khi thêm đơn huỷ, hai phễu vẫn phải khớp số đã xác nhận",
+    );
+    const nv = (await getConversionByDimension(ALL, "employee")).rows.find((r) => r.label === "RCI Huỷ");
+    assert.equal(nv?.created, 3);
+    assert.equal(nv?.confirmed, 1, "thẻ nhân viên không được cộng đơn huỷ-khi-chưa-xác-nhận vào số đã xác nhận");
+    assert.equal(nv?.cancelledBeforeConfirm, 2);
+    assert.equal(nv?.cancelledAfterConfirm, 1);
+    assert.equal(nv?.medianHoursToPreConfirmCancel, 2, "trung vị giờ huỷ chỉ trên đơn có mốc huỷ");
+    assert.equal(nv?.medianHoursToConfirm, 1, "mốc xác nhận là lúc XÁC NHẬN, không phải lúc huỷ");
+    const the = (await getStaffPerformance(ALL, "sellerName")).rows.find((r) => r.name === "RCI Huỷ");
+    assert.equal(the?.confirmed, 1, "thẻ hiệu suất nhân viên: cùng vị từ xác nhận");
+    assert.equal(the?.bookedRevenue, 300_000, "doanh số chốt chỉ gồm đơn TỪNG được xác nhận (kể cả huỷ sau đó), không gồm đơn huỷ khi chưa ai xác nhận");
+    // Tóm tắt ops đối chiếu cũ / mới: số tổng hợp, KHÔNG tên nhân viên, lọt trần kênh tóm tắt.
+    const nguon = (await getConversionByDimension(ALL, "source")).rows.map((r) => ({ label: r.label, created: r.created, confirmed: r.confirmed, preCancel: r.cancelledBeforeConfirm, postCancel: r.cancelledAfterConfirm, medianHoursToPreCancel: r.medianHoursToPreConfirmCancel }));
+    const dongAudit = confirmAuditLines(90, { created: 10, confirmed: 9, cancelled: 3, confirmMedianHours: 0.5 }, huy, nguon, []);
+    assert.ok(dongAudit.length <= AUDIT_MAX_LINES);
+    assert.ok(!dongAudit.some((l) => l.includes("RCI Huỷ")), "tên nhân viên KHÔNG được ra log công khai");
+    assert.ok(dongAudit.some((l) => l.startsWith("ĐÃ XÁC NHẬN · CŨ")), "phải in định nghĩa cũ cạnh định nghĩa mới");
+    assert.equal(soNgayAudit(["--days=5"]), 7);
+
     /* ───────── 5. TÁCH THEO CHIỀU: CỘNG LẠI PHẢI ĐÚNG BẰNG TỔNG ───────── */
     for (const dim of ["employee", "source", "product", "day", "hour"] as const) {
       const r = await getConversionByDimension(ALL, dim);
@@ -144,7 +205,7 @@ export async function testConversionFunnel(db: Db) {
         r.total,
         `chiều ${dim}: cộng các dòng phải ĐÚNG bằng tổng đơn — không dòng nào đếm hai lần, không đơn nào rơi mất`,
       );
-      assert.equal(r.total, sau.steps[0].count, `chiều ${dim}: tổng phải khớp bước đầu của phễu`);
+      assert.equal(r.total, huy.steps[0].count, `chiều ${dim}: tổng phải khớp bước đầu của phễu`);
       const chuaGan = r.rows.filter((x) => x.unassigned);
       assert.ok(chuaGan.length <= 1, `chiều ${dim}: phần chưa gán phải gom vào ĐÚNG MỘT dòng`);
       if (chuaGan.length === 1) {

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { chayKhongJit, getDb, schema } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
+import { ORDER_EVER_CONFIRMED } from "@/lib/queries/conversion-funnel";
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ORDER_SOURCE, ORDER_SOURCE_LABEL, type OrderSourceKey } from "@/lib/queries/order-source";
 import { ATTRIBUTION_FIELDS, LOW_COVERAGE_PCT, type AttributionField } from "@/lib/constants/sales-funnel";
@@ -95,7 +96,7 @@ async function salesFunnelUncached(period: Period): Promise<SalesFunnel> {
   const [row] = await chayKhongJit(db, (tx) => tx
     .select({
       created: sql<number>`count(distinct ${o.id})`,
-      confirmed: sql<number>`count(distinct ${o.id}) filter (where ${o.stage} not in ('NEW','WAITING'))`,
+      confirmed: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_EVER_CONFIRMED})`,
       shipped: sql<number>`count(distinct ${o.id}) filter (where ${SHIPMENT_LEFT_WAREHOUSE})`,
       delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
       cancelled: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'CANCELLED')`,
@@ -238,7 +239,7 @@ async function funnelBySourceUncached(period: Period): Promise<FunnelBySource[]>
     .select({
       source: sql<OrderSourceKey>`${ORDER_SOURCE}`,
       created: sql<number>`count(distinct ${o.id})`,
-      confirmed: sql<number>`count(distinct ${o.id}) filter (where ${o.stage} not in ('NEW','WAITING'))`,
+      confirmed: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_EVER_CONFIRMED})`,
       shipped: sql<number>`count(distinct ${o.id}) filter (where ${SHIPMENT_LEFT_WAREHOUSE})`,
       delivered: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} = 'DELIVERED')`,
       unfinished: sql<number>`count(distinct ${o.id}) filter (where ${ORDER_OUTCOME_FAST} in (${sql.raw(OPEN_OUTCOMES_SQL)}))`,
