@@ -52,12 +52,17 @@ const s = schema.shipments;
  * Suy từ `PANCAKE_ORDER_STATUS` chứ KHÔNG gõ tay danh sách số: thêm một trạng thái mới vào bảng đó
  * mà quên sửa ở đây thì mốc xác nhận sẽ lệch âm thầm.
  */
-const CONFIRMED_STATUS_CODES = Object.entries(PANCAKE_ORDER_STATUS)
+export const CONFIRMED_STATUS_CODES = Object.entries(PANCAKE_ORDER_STATUS)
   .filter(([, v]) => v.stage !== "NEW" && v.stage !== "WAITING")
   .map(([k]) => Number(k));
 
-/** Mốc XÁC NHẬN của đơn: lần đầu trạng thái rời khỏi nhóm chờ. `NULL` = chưa có lịch sử. */
-const CONFIRMED_AT = sql`(
+/**
+ * Mốc XÁC NHẬN của đơn: lần đầu trạng thái rời khỏi nhóm chờ. `NULL` = chưa có lịch sử.
+ *
+ * BẢN KHAI DUY NHẤT — báo cáo chờ hàng (`lib/queries/stock-wait-report.ts`) dùng lại đúng biểu thức
+ * này làm mốc "tính ngày chờ từ lúc xác nhận". Cần FROM `orders`.
+ */
+export const CONFIRMED_AT = sql`(
   select min(h.updated_at) from order_status_history h
    where h.order_id = ${o.id}
      and h.status in ${sql.raw(`(${CONFIRMED_STATUS_CODES.join(",")})`)}

@@ -8,12 +8,14 @@ import {
   PANCAKE_CANCEL_CODES,
   PANCAKE_WAITING_CODES,
   WAIT_BUCKETS,
+  WAIT_ORIGINS,
   buildRecommendations,
   buildWaitReport,
   dailyWaitingSeries,
   dayRange,
   expectedRateFor,
   findWaitBreakpoint,
+  parseWaitOrigin,
   twoProportionZ,
   waitBucketOf,
   type CurrentWaitingOrder,
@@ -22,7 +24,7 @@ import {
 import { APPROX_REGION_PROVINCES, provinceCatalog, provinceRegion } from "@/lib/constants/vn-regions";
 import { MIN_TIER_SAMPLE } from "@/lib/queries/return-rate";
 import { getStockWaitReport } from "@/lib/queries/stock-wait-report";
-import { SUMMARY_MAX_LINES, soNgay, stockWaitSummaryLines } from "@/scripts/stock-wait-summary";
+import { SUMMARY_MAX_LINES, mocBatDau, soNgay, stockWaitSummaryLines } from "@/scripts/stock-wait-summary";
 import type { Period } from "@/lib/search-params";
 
 /**
@@ -92,6 +94,15 @@ export function testStockWaitReportPure() {
   assert.equal(waitBucketOf(-0.01), "?", "mốc ngược không được nhét vào khoảng đầu");
   assert.equal(waitBucketOf(Number.NaN), "?");
   assert.deepEqual(PANCAKE_WAITING_CODES.sort((a, b) => a - b), [11, 20], "nhóm Chờ hàng suy từ bảng trạng thái Pancake");
+  assert.deepEqual([...WAIT_ORIGINS], ["ORDERED", "CONFIRMED"]);
+  assert.equal(parseWaitOrigin("confirmed"), "CONFIRMED");
+  assert.equal(parseWaitOrigin("ORDERED"), "ORDERED");
+  assert.equal(parseWaitOrigin("lung tung"), "ORDERED", "giá trị lạ rơi về mốc mặc định, không ném lỗi");
+  assert.equal(parseWaitOrigin(undefined), "ORDERED", "không chọn ⇒ giữ đúng mốc của bản đầu, link cũ không đổi nghĩa");
+  const noOrigin = buildWaitReport([cell({ bucket: "D0", orders: 4, delivered: 4 }), cell({ bucket: "NO_ORIGIN", orders: 3, delivered: 2, returned: 1 })], MIN_TIER_SAMPLE);
+  assert.equal(noOrigin.noOriginOrders, 3, "đơn không có mốc bắt đầu được ĐẾM riêng");
+  assert.equal(noOrigin.byWait.reduce((t, r) => t + r.orders, 0), 4, "và KHÔNG rơi vào khoảng chờ nào");
+  assert.equal(noOrigin.overall.orders, 7);
   assert.ok(PANCAKE_CANCEL_CODES.includes(6), "Đã huỷ nằm trong nhóm mốc huỷ");
 
   // ───────── 3. Gộp bảng, ngưỡng mẫu, điểm gãy ─────────
@@ -171,7 +182,7 @@ export function testStockWaitReportPure() {
   const recs = buildRecommendations({
     report: rep,
     breakpoint: bp,
-    current: [waitingOrder("x1", 9), waitingOrder("x2", 0.2)],
+    current: [waitingOrder("x1", 9), waitingOrder("x2", 0.2), waitingOrder("x3", 0, { waitDays: null, bucket: "?" })],
     topShortVariants: [{ label: "Q005 Đen/M", waitingOrders: 2 }],
     erpSince: null,
     pancakeOnlyWaiting: 3,
@@ -181,7 +192,7 @@ export function testStockWaitReportPure() {
   const late = recs.find((r) => r.key === "LATE_BACKLOG");
   assert.ok(late, "có đơn đang chờ quá điểm gãy ⇒ phải có việc gọi lại");
   assert.equal(late!.estimated, true, "phần nhân tỷ lệ lịch sử lên đơn đang chờ phải mang nhãn ước tính");
-  assert.ok(late!.title.startsWith("1 đơn"), "chỉ đơn đã QUA điểm gãy mới vào danh sách gọi lại");
+  assert.ok(late!.title.startsWith("1 đơn"), "chỉ đơn đã QUA điểm gãy mới vào danh sách gọi lại — đơn chưa có mốc bắt đầu không bị coi là chờ lâu");
   assert.ok(keys.includes("PANCAKE_WAITING_GAP"));
   assert.ok(keys.includes("ERP_LOG_EMPTY"));
   assert.ok(keys.includes("UNKNOWN_REGION"));
@@ -275,6 +286,9 @@ export async function testStockWaitReportDb(db: Db) {
     { orderId: `${P}l0`, status: 11, updatedAt: at("2017-03-02T03:00:00Z") },
     { orderId: `${P}l0`, status: 1, updatedAt: at("2017-03-05T03:00:00Z") },
   ]);
+  // Mốc XÁC NHẬN: nhóm chờ lâu (l1..l11) rời nhóm chờ sau 6 ngày ⇒ tính từ xác nhận chỉ còn 2 ngày.
+  // Nhóm gửi sớm (e*) và đơn "Mars" KHÔNG có lịch sử trạng thái ⇒ không có mốc xác nhận.
+  await db.insert(schema.orderStatusHistory).values(Array.from({ length: 11 }, (_, k) => ({ orderId: `${P}l${k + 1}`, status: 1, updatedAt: new Date(base.getTime() + 6 * DAY) })));
   // Đơn Pancake đang ở "Chờ hàng" từ 20/03 tới giờ.
   await db.insert(schema.orders).values({ id: `${P}wait`, stage: "WAITING" as never, status: 11, shipProvince: "Cần Thơ", billFullName: "Trần Thị Mẫu-SWR-7731", totalPriceAfterDiscount: 300_000, insertedAt: at("2017-03-20T03:00:00Z") });
   await db.insert(schema.orderStatusHistory).values({ orderId: `${P}wait`, status: 11, updatedAt: at("2017-03-20T03:00:00Z") });
@@ -336,6 +350,31 @@ export async function testStockWaitReportDb(db: Db) {
   assert.ok(d.pancakeOnlyWaiting >= 1);
   assert.ok(d.recommendations.some((x) => x.key === "WAIT_BREAKPOINT"));
   assert.ok(d.recommendations.some((x) => x.key === "PANCAKE_WAITING_GAP"));
+
+  // ───────── Mốc XÁC NHẬN: cùng bộ đơn, bảng khác ─────────
+  assert.equal(d.origin, "ORDERED");
+  assert.equal(r.noOriginOrders, 0, "tính từ lúc lên đơn thì mọi đơn đều có mốc");
+  const c = await getStockWaitReport(KY, { fresh: true, origin: "CONFIRMED" });
+  const cw = (k: string) => c.report.byWait.find((x) => x.key === k)!;
+  assert.equal(c.origin, "CONFIRMED");
+  assert.equal(cw("D2").orders, 11, "l1..l11: xác nhận sau 6 ngày, ĐVVC cầm hàng ngày thứ 8 ⇒ chờ 2 ngày tính từ xác nhận");
+  assert.equal(cw("D3_5").orders, 1, "l0: rời nhóm Chờ hàng ngày 05/03 ⇒ 4 ngày tính từ xác nhận");
+  assert.equal(cw("D7_14").orders, 0, "không đơn nào còn ở khoảng 7–14 ngày khi tính từ xác nhận");
+  assert.equal(c.report.noOriginOrders, 13, "12 đơn gửi sớm + đơn Mars chưa có lịch sử trạng thái ⇒ KHÔNG có mốc xác nhận, không rơi về mốc lên đơn");
+  assert.equal(cw("D0").orders, 1, "đơn huỷ khi còn ở nhóm chờ: mốc 'rời nhóm chờ' là chính lúc huỷ (định nghĩa dùng chung của phễu)");
+  assert.equal(cw("D0").cancelledBeforeShip, 1);
+  assert.equal(c.report.openOrders, 2);
+  const cwait = c.current.find((x) => x.orderId === `${P}wait`);
+  assert.equal(cwait?.waitDays, null, "đơn chưa xác nhận: số ngày chờ từ xác nhận là CHƯA BIẾT, không phải 0");
+  assert.equal(cwait?.bucket, "?");
+  assert.ok(stockWaitSummaryLines(c, 30).some((l) => l.includes("từ lúc xác nhận đơn")), "tóm tắt ops nói rõ đang tính từ mốc nào");
+  // Mốc nằm trong khoá đệm: hai lời gọi không-tươi liên tiếp với hai mốc phải ra hai kết quả.
+  const memoA = await getStockWaitReport(KY);
+  const memoB = await getStockWaitReport(KY, { origin: "CONFIRMED" });
+  assert.equal(memoA.origin, "ORDERED");
+  assert.equal(memoB.origin, "CONFIRMED", "đệm theo kỳ mà quên mốc thì lượt thứ hai trả nhầm bảng của mốc kia");
+  assert.equal(mocBatDau(["--days=30", "--origin=confirmed"]), "CONFIRMED");
+  assert.equal(mocBatDau([]), "ORDERED");
 
   // ───────── Tóm tắt ops: số tổng hợp, KHÔNG BAO GIỜ tên khách, lọt trần 60 dòng ─────────
   const lines = stockWaitSummaryLines(d, 30);

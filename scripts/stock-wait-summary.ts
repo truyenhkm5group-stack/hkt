@@ -13,7 +13,8 @@
   CHỈ ĐỌC do Postgres ép (`ERP_READ_ONLY=1` đặt trước lần mở kết nối đầu tiên, `main` hỏi lại rồi
   dừng nếu không phải) — cùng khuôn với `cod-statement-audit`.
 
-  arg: `--days=N` (mặc định 90, trần 365) — kỳ lọc theo NGÀY LÊN ĐƠN.
+  arg: `--days=N` (mặc định 90, trần 365) — kỳ lọc theo NGÀY LÊN ĐƠN; `--origin=confirmed` tính ngày
+  chờ từ lúc xác nhận đơn thay vì lúc lên đơn (mặc định).
 */
 const CHAY_THANG = Boolean(process.argv[1] && process.argv[1].endsWith("stock-wait-summary.ts"));
 if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
@@ -21,7 +22,7 @@ if (CHAY_THANG) process.env.ERP_READ_ONLY = "1";
 import "dotenv/config";
 import { sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { WAIT_BUCKETS, type RateRow } from "@/lib/constants/stock-wait-report";
+import { WAIT_BUCKETS, WAIT_ORIGIN_LABEL, parseWaitOrigin, type RateRow, type WaitOrigin } from "@/lib/constants/stock-wait-report";
 import { MIEN_LABEL } from "@/lib/constants/vn-regions";
 import { addDays, todayVN, vnDateKey } from "@/lib/format";
 import { getStockWaitReport, type StockWaitReport } from "@/lib/queries/stock-wait-report";
@@ -40,6 +41,11 @@ export function soNgay(argv: string[]): number {
   return Math.min(365, Math.max(7, Number.isFinite(n) ? n : 90));
 }
 
+export function mocBatDau(argv: string[]): WaitOrigin {
+  const m = argv.join(" ").match(/--origin=([a-z_]+)/i);
+  return parseWaitOrigin(m ? m[1] : null);
+}
+
 const pctText = (r: Pick<RateRow, "successRate" | "finished">) => (r.successRate === null ? `— (${r.finished} KT)` : `${r.successRate.toFixed(1)}% (${r.finished} KT)`);
 const trieu = (v: number) => `${(v / 1_000_000).toFixed(1)} tr`;
 
@@ -48,9 +54,9 @@ export function stockWaitSummaryLines(d: StockWaitReport, days: number): string[
   const r = d.report;
   const out: string[] = [];
   out.push(
-    `KỲ ${days} ngày theo ngày lên đơn · ${r.overall.orders} đơn · đã kết thúc ${r.overall.finished} · GTC toàn kỳ ${pctText(r.overall)} · chưa gửi ${r.openOrders} · thiếu/ngược mốc ${r.anomalyOrders} · ngưỡng mẫu ${r.minSample}`,
+    `KỲ ${days} ngày theo ngày lên đơn · ${r.overall.orders} đơn · đã kết thúc ${r.overall.finished} · GTC toàn kỳ ${pctText(r.overall)} · chưa gửi ${r.openOrders} · thiếu/ngược mốc ${r.anomalyOrders} · không có mốc bắt đầu ${r.noOriginOrders} · ngưỡng mẫu ${r.minSample}`,
   );
-  out.push("THEO SỐ NGÀY CHỜ (lên đơn → ĐVVC cầm hàng): khoảng · đơn · giao TC/hoàn · GTC · đang giao · huỷ trước gửi · DT mất do hoàn");
+  out.push(`THEO SỐ NGÀY CHỜ (${WAIT_ORIGIN_LABEL[d.origin].toLowerCase()} → ĐVVC cầm hàng): khoảng · đơn · giao TC/hoàn · GTC · đang giao · huỷ trước gửi · DT mất do hoàn`);
   for (const x of r.byWait) out.push(`  ${x.label} · ${x.orders} · ${x.delivered}/${x.returned} · ${pctText(x)} · ${x.inTransit} · ${x.cancelledBeforeShip} · ${trieu(x.returnedValue)}`);
   const bp = d.breakpoint;
   out.push(
@@ -75,11 +81,11 @@ export function stockWaitSummaryLines(d: StockWaitReport, days: number): string[
   const byBucket = WAIT_BUCKETS.map((b) => `${b.label}: ${cur.filter((o) => o.bucket === b.key).length}`).join(" · ");
   const byMien = (["BAC", "TRUNG", "NAM"] as const).map((m) => `${MIEN_LABEL[m]} ${cur.filter((o) => o.mien === m).length}`).join(" · ");
   out.push(
-    `ĐANG CHỜ HÀNG: ${cur.length} đơn (ERP ${erp} · chỉ Pancake ${d.pancakeOnlyWaiting}) · giá trị khai báo ${trieu(cur.reduce((t, o) => t + o.value, 0))} · lâu nhất ${cur[0] ? cur[0].waitDays.toFixed(1) : "—"} ngày`,
+    `ĐANG CHỜ HÀNG: ${cur.length} đơn (ERP ${erp} · chỉ Pancake ${d.pancakeOnlyWaiting}) · giá trị khai báo ${trieu(cur.reduce((t, o) => t + o.value, 0))} · lâu nhất ${cur[0] && cur[0].waitDays !== null ? cur[0].waitDays.toFixed(1) : "—"} ngày · chưa có mốc bắt đầu ${cur.filter((o) => o.waitDays === null).length}`,
   );
   out.push(`  theo số ngày đã chờ — ${byBucket}`);
   out.push(`  theo miền — ${byMien} · chưa rõ vùng ${cur.filter((o) => !o.mien).length}`);
-  if (bp) out.push(`  đã qua điểm gãy ${bp.fromDays} ngày: ${cur.filter((o) => o.waitDays >= bp.fromDays).length} đơn`);
+  if (bp) out.push(`  đã qua điểm gãy ${bp.fromDays} ngày: ${cur.filter((o) => o.waitDays !== null && o.waitDays >= bp.fromDays).length} đơn`);
   const last = d.daily.slice(-14);
   out.push(`SỔ ERP ghi từ: ${d.erpSince ? `${vnDateKey(d.erpSince)}` : "CHƯA GHI LẦN NÀO"}`);
   out.push(`14 NGÀY GẦN NHẤT (ERP/Pancake): ${last.map((x) => `${x.day.slice(8)}/${x.day.slice(5, 7)} ${x.erpWaiting ?? "—"}/${x.pancakeWaiting}`).join(" · ")}`);
@@ -96,10 +102,11 @@ async function main() {
     process.exit(1);
   }
   const days = soNgay(process.argv.slice(2));
+  const origin = mocBatDau(process.argv.slice(2));
   const toKey = todayVN();
   const fromKey = addDays(toKey, -(days - 1));
   const period: Period = { key: "custom", from: new Date(`${fromKey}T00:00:00+07:00`), to: new Date(`${toKey}T23:59:59.999+07:00`), label: `${days} ngày`, fromKey, toKey };
-  const d = await getStockWaitReport(period, { fresh: true });
+  const d = await getStockWaitReport(period, { fresh: true, origin });
   for (const line of stockWaitSummaryLines(d, days)) tomTat(line);
   process.exit(0);
 }

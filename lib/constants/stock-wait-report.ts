@@ -12,11 +12,19 @@ import { addDays, formatNumber, formatVND, vnDateKey, vnEndOfDay, vnStartOfDay }
  *
  * ─── SỐ NGÀY CHỜ ĐO BẰNG HAI MỐC CÓ CHỨNG TỪ ───
  *
- *   ngày chờ = `carrier_handoff_at` − `orders.inserted_at`
+ *   ngày chờ = `carrier_handoff_at` − MỐC BẮT ĐẦU
  *
- * Mốc đầu là lúc khách chốt mua (đơn lên Pancake); mốc sau là lúc ĐVVC THẬT SỰ cầm hàng — đúng hợp
- * đồng `lib/constants/carrier-handoff.ts` (AGENTS.md mục 41), không phải lúc tạo vận đơn. Đó chính là
- * khoảng khách phải đợi trước khi hàng lên đường, bất kể vì thiếu hàng hay vì kho chậm.
+ * Mốc sau là lúc ĐVVC THẬT SỰ cầm hàng — đúng hợp đồng `lib/constants/carrier-handoff.ts` (AGENTS.md
+ * mục 41), không phải lúc tạo vận đơn. MỐC BẮT ĐẦU là một LỰA CHỌN CÓ TÊN (`WAIT_ORIGINS`, chủ shop
+ * yêu cầu 25/09/2026 "tính theo cả hai mốc và cho tuỳ chọn"):
+ *
+ *   · `ORDERED`   — lúc lên đơn (`orders.inserted_at`): khách chờ bao lâu kể từ lúc chốt mua.
+ *   · `CONFIRMED` — lúc đơn rời nhóm chờ trên Pancake (`CONFIRMED_AT` của phễu chuyển đổi — MỘT bản
+ *                   khai, không viết lại): kho / sản xuất để đơn chờ bao lâu kể từ lúc đơn chắc chắn.
+ *
+ * Đơn không có mốc bắt đầu (mốc xác nhận cần lịch sử trạng thái Pancake) đứng ở nhóm `NO_ORIGIN`:
+ * ĐẾM và IN RA, không bao giờ rơi về mốc kia một cách im lặng — trộn hai mốc trong cùng một bảng là
+ * hai câu hỏi khác nhau đội chung một con số.
  *
  * Đơn CHƯA có mốc bàn giao không có số ngày chờ đo được: đơn huỷ trước khi gửi xếp theo MỐC HUỶ
  * (lịch sử trạng thái Pancake) và chỉ đếm ở cột "huỷ trước khi gửi"; đơn còn trong kho đứng ở nhóm
@@ -39,6 +47,31 @@ import { addDays, formatNumber, formatVND, vnDateKey, vnEndOfDay, vnStartOfDay }
  * một chênh lệch ngẫu nhiên là "điểm gãy".
  */
 
+/* ═══════════════════ MỐC BẮT ĐẦU TÍNH NGÀY CHỜ ═══════════════════ */
+
+export const WAIT_ORIGINS = ["ORDERED", "CONFIRMED"] as const;
+export type WaitOrigin = (typeof WAIT_ORIGINS)[number];
+
+export const WAIT_ORIGIN_LABEL: Record<WaitOrigin, string> = {
+  ORDERED: "Từ lúc lên đơn",
+  CONFIRMED: "Từ lúc xác nhận đơn",
+};
+
+/** Câu hỏi mà mốc này trả lời — hiện cạnh bộ chọn để người dùng chọn đúng, không phải đoán. */
+export const WAIT_ORIGIN_QUESTION: Record<WaitOrigin, string> = {
+  ORDERED: "Khách phải chờ bao lâu kể từ lúc chốt mua? Gồm cả thời gian đơn nằm ở nhóm chờ / chưa xác nhận trên Pancake.",
+  CONFIRMED:
+    "Kho và sản xuất để đơn chờ bao lâu kể từ lúc đơn rời nhóm chờ trên Pancake? Mốc lấy từ lịch sử trạng thái Pancake; đơn bị huỷ khi còn ở nhóm chờ thì mốc là lúc huỷ.",
+};
+
+/** Mặc định giữ đúng mốc của bản đầu, để link cũ và số đã báo không đổi nghĩa. */
+export const DEFAULT_WAIT_ORIGIN: WaitOrigin = "ORDERED";
+
+export function parseWaitOrigin(raw: string | null | undefined): WaitOrigin {
+  const v = String(raw ?? "").trim().toUpperCase();
+  return (WAIT_ORIGINS as readonly string[]).includes(v) ? (v as WaitOrigin) : DEFAULT_WAIT_ORIGIN;
+}
+
 /* ═══════════════════ KHOẢNG NGÀY CHỜ ═══════════════════ */
 
 export const WAIT_BUCKETS = [
@@ -52,8 +85,11 @@ export const WAIT_BUCKETS = [
 ] as const;
 
 export type WaitBucketKey = (typeof WAIT_BUCKETS)[number]["key"];
-/** `OPEN` = chưa gửi, chưa huỷ (chưa đo được). `?` = mốc ngược / thiếu mốc huỷ — đếm riêng. */
-export type WaitCellKey = WaitBucketKey | "OPEN" | "?";
+/**
+ * `OPEN` = chưa gửi, chưa huỷ (chưa đo được). `?` = mốc ngược / thiếu mốc huỷ — đếm riêng.
+ * `NO_ORIGIN` = đã gửi / đã huỷ nhưng KHÔNG có mốc bắt đầu đang chọn (vd chưa có lịch sử trạng thái).
+ */
+export type WaitCellKey = WaitBucketKey | "OPEN" | "?" | "NO_ORIGIN";
 
 export function waitBucketOf(days: number): WaitBucketKey | "?" {
   if (!Number.isFinite(days) || days < 0) return "?";
@@ -164,8 +200,10 @@ export type WaitReport = {
   overall: RateRow;
   /** Đơn chưa gửi, chưa huỷ — nằm ngoài mọi khoảng chờ. */
   openOrders: number;
-  /** Mốc ngược (bàn giao trước lúc lên đơn) hoặc huỷ mà không có mốc huỷ — đếm, không giấu. */
+  /** Mốc ngược (bàn giao trước mốc bắt đầu) hoặc huỷ mà không có mốc huỷ — đếm, không giấu. */
   anomalyOrders: number;
+  /** Đã gửi / đã huỷ mà không có mốc bắt đầu đang chọn — nằm ngoài mọi khoảng chờ. */
+  noOriginOrders: number;
   /** Đơn không quy được về vùng (tỉnh trống / chữ lạ). */
   unknownRegion: { orders: number; finished: number; samples: string[] };
   /** Đơn ở tỉnh mới 2025 trải qua hai vùng — vùng gần đúng, miền vẫn đúng. */
@@ -177,7 +215,7 @@ const BUCKET_KEYS = WAIT_BUCKETS.map((b) => ({ key: b.key as string, label: b.la
 
 /** Gộp các ô SQL thành mọi bảng của báo cáo. Hàm THUẦN. */
 export function buildWaitReport(cells: WaitCell[], minSample: number): WaitReport {
-  const timed = (c: WaitCell) => c.bucket !== "OPEN" && c.bucket !== "?";
+  const timed = (c: WaitCell) => c.bucket !== "OPEN" && c.bucket !== "?" && c.bucket !== "NO_ORIGIN";
   const regionOf = (c: WaitCell) => provinceRegion(c.province);
 
   const byWait = rollup(cells, BUCKET_KEYS, (c) => (timed(c) ? c.bucket : null), minSample);
@@ -227,6 +265,7 @@ export function buildWaitReport(cells: WaitCell[], minSample: number): WaitRepor
     overall,
     openOrders: cells.filter((c) => c.bucket === "OPEN").reduce((t, c) => t + c.orders, 0),
     anomalyOrders: cells.filter((c) => c.bucket === "?").reduce((t, c) => t + c.orders, 0),
+    noOriginOrders: cells.filter((c) => c.bucket === "NO_ORIGIN").reduce((t, c) => t + c.orders, 0),
     unknownRegion: {
       orders: unknownOrders,
       finished: unknownFinished,
@@ -356,7 +395,8 @@ export type CurrentWaitingOrder = {
   sources: ("ERP" | "PANCAKE")[];
   /** Mẫu thiếu (chỉ có với nguồn ERP). */
   shortText: string;
-  waitDays: number;
+  /** Tính từ mốc bắt đầu đang chọn tới bây giờ. `null` = đơn chưa có mốc đó (vd chưa xác nhận) — CHƯA BIẾT, không phải 0. */
+  waitDays: number | null;
   bucket: WaitBucketKey | "?";
   /** GTC lịch sử của nhóm (khoảng chờ × miền), rơi về khoảng chờ nếu ô chéo chưa đủ mẫu. `null` = chưa đủ dữ liệu. */
   expectedRate: number | null;
@@ -416,7 +456,7 @@ export function buildRecommendations(input: RecommendationInput): Recommendation
   // 1. Ngày chờ ảnh hưởng GTC tới đâu.
   if (bp) {
     const gap = bp.beforeRate - bp.afterRate;
-    const late = current.filter((o) => o.waitDays >= bp.fromDays);
+    const late = current.filter((o) => o.waitDays !== null && o.waitDays >= bp.fromDays);
     const lateValue = late.reduce((t, o) => t + o.value, 0);
     const extraReturns = Math.round((late.length * gap) / 100);
     out.push({
