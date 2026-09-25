@@ -742,11 +742,22 @@ async function main() {
   assert.ok(cases.some((c) => c.kind === "EXCHANGE_SIZE" && c.source === "PANCAKE_NOTE"), "case đổi size từ ghi chú");
   const cs2 = await detectCsCases();
   assert.equal(cs2.created, 0, "quét lại không tạo trùng");
+  /*
+    CHƯA GIAO ĐVVC ⇒ CSKH · ĐÃ GIAO ⇒ VẬN ĐƠN (chủ shop chốt 25/09/2026, lib/constants/cs-domain.ts).
+
+    rr-9001 đã ở tay ĐVVC (vận đơn "Giao thành công") ⇒ hai case của nó thuộc bàn Vận đơn & care,
+    KHÔNG lên chuông CSKH — báo cả hai bàn là giao một việc cho hai người. Để vẫn kiểm được phép GOM
+    chuông của CSKH, thêm một đơn đã xác nhận mà CHƯA có vận đơn, ghi chú đổi size.
+  */
+  await db.insert(schema.orders).values({ id: "cs-chua-giao", systemId: 9901, stage: "CONFIRMED", status: 1, insertedAt: new Date(), note: "khách nhắn đổi size L cho khách trước khi gửi" }).onConflictDoNothing();
+  const cs3 = await detectCsCases();
+  assert.ok(cs3.created >= 1, "đơn chưa giao ĐVVC có ghi chú đổi size ⇒ sinh case");
   const alertsWithCs = await evaluateAlerts();
-  // Trả hàng / đổi size thuộc nhóm GOM (lib/constants/cs.ts): lên chuông dưới dạng việc TỔNG HỢP
-  // theo loại, không phải mỗi case một dòng.
+  // Đổi size thuộc nhóm GOM (lib/constants/cs.ts): lên chuông dưới dạng việc TỔNG HỢP theo loại,
+  // không phải mỗi case một dòng.
   const csNoti = await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "CS_CASE_GROUP"));
-  assert.ok(csNoti.length >= 2, "case CSKH lên chuông cảnh báo dưới dạng việc tổng hợp theo loại");
+  assert.ok(csNoti.some((n) => n.entityId.startsWith("EXCHANGE_SIZE|")), "case CSKH lên chuông cảnh báo dưới dạng việc tổng hợp theo loại");
+  assert.ok(!csNoti.some((n) => n.entityId.startsWith("RETURN|")), "trả hàng của đơn đã giao cho ĐVVC là việc của bàn Vận đơn, không báo CSKH");
   console.log(`✓ CSKH: ${cs1.created} case tự phát hiện, ${csNoti.length} thông báo (quét ${alertsWithCs.created} mới)`);
 
   // Danh sách vận đơn Viettel Post (Quản lý vận đơn) → trạng thái & COD

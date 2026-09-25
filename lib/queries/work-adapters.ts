@@ -16,6 +16,7 @@ import { decisionStability } from "@/lib/queries/marketing-ledger";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import type { Stability } from "@/lib/marketing/decision-stability";
 import { getCareQueue } from "@/lib/queries/care-workbench";
+import { csHandedOffExists } from "@/lib/queries/cs";
 import { getFulfillmentBottleneckQueue } from "@/lib/queries/fulfillment-bottleneck";
 import { getDuplicateOrderQueue } from "@/lib/queries/order-duplicate";
 import { DUPLICATE_VERDICT_LABEL } from "@/lib/constants/order-duplicate";
@@ -208,8 +209,8 @@ export async function adaptCsCases(now: Date, closedSince: Date | null = null): 
       createdAt: c.createdAt,
       source: c.source,
       orderValue: schema.orders.totalPriceAfterDiscount,
-      // Có kiện ĐANG CHẠY hay không quyết định miền của case sai SĐT / sai địa chỉ (`BY_SHIPMENT`).
-      hasLiveShipment: sql<boolean>`exists (select 1 from shipments s where s.order_id = ${c.orderId} and s.is_final = false)`,
+      // Đơn đã giao cho ĐVVC chưa quyết định miền của case (`BY_SHIPMENT`) — CÙNG mệnh đề với trang CSKH.
+      handedOff: sql<boolean>`${csHandedOffExists(c.orderId)}`,
     })
     .from(c)
     .leftJoin(schema.orders, eq(schema.orders.id, c.orderId))
@@ -223,7 +224,7 @@ export async function adaptCsCases(now: Date, closedSince: Date | null = null): 
   const t = now.getTime();
   const items: WorkItem[] = [];
   for (const r of rows) {
-    if (csDomainOf(r.kind as never, r.hasLiveShipment) !== "CUSTOMER") continue;
+    if (csDomainOf(r.kind as never, r.handedOff) !== "CUSTOMER") continue;
     const status = CS_STATUS_TO_WORK[(CS_STATUSES as readonly string[]).includes(r.status) ? (r.status as CsStatus) : "OPEN"];
     const ageHours = hoursSince(r.createdAt, t);
     const score = caseScore({ severity: "warning", ageHours, amount: r.orderValue ?? null, type: "CS_CASE" });

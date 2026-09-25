@@ -1,5 +1,6 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { CARRIER_HANDOFF_STAGES } from "@/lib/constants/carrier-handoff";
 import { CS_BOT_ASSIGNEES, CS_ESCALATE_KINDS, CS_ESCALATE_WINDOW_HOURS, CS_KIND_LABEL, CS_KINDS, CS_STATUS_LABEL, CS_SURFACE_MODE, type CsKind, type CsStatus } from "@/lib/constants/cs";
 import { CS_CUSTOMER_WAITING_KINDS, CS_DUE_SOON_HOURS, CS_KIND_SEVERITY, CS_SLA_BUCKETS, CS_SLA_BUCKET_LABEL, csCasePriority, csDueAt, csSlaBucket, getCustomerNextAction, type CsNextAction, type CsSlaBucket } from "@/lib/constants/cs-next-action";
 import { CS_ACTIONABLE_STATUSES, CS_ASSIGNEE_FACET_BOT, CS_ASSIGNEE_FACET_LABEL, CS_ASSIGNEE_FACET_UNLINKED, CS_CASE_SLA_HOURS, CS_DOMAIN_LABEL, CS_DOMAINS, CS_LIFECYCLE_KINDS, CS_LOGISTICS_KINDS, csDomainOf, humanAssignee, type CsDomain } from "@/lib/constants/cs-domain";
@@ -22,7 +23,22 @@ export const CS_SORTABLE = ["createdAt", "updatedAt", "status", "kind", "followU
  * định là chính tên bảng). Chuỗi này luôn là hằng trong mã nguồn, không đến từ người dùng.
  */
 function logisticsBody(kind: SQL | AnyColumn, orderId: SQL | AnyColumn): SQL {
-  return sql`(${kind} in ${CS_LOGISTICS_KINDS} or (${kind} in ${CS_LIFECYCLE_KINDS} and exists (select 1 from shipments cs_dom_s where cs_dom_s.order_id = ${orderId} and cs_dom_s.is_final = false)))`;
+  return sql`(${kind} in ${CS_LOGISTICS_KINDS} or (${kind} in ${CS_LIFECYCLE_KINDS} and ${csHandedOffExists(orderId)}))`;
+}
+
+/**
+ * ═══ ĐƠN ĐÃ GIAO CHO ĐVVC CHƯA — RANH GIỚI CSKH / VẬN ĐƠN (chủ shop chốt 25/09/2026) ═══
+ *
+ * "Chưa giao cho ĐVVC thì thuộc CSKH, giao cho ĐVVC rồi thì thuộc Vận đơn." Đã giao = có một vận
+ * đơn ở chặng `CARRIER_HANDOFF_STAGES` hoặc có mốc lấy hàng (AGENTS.md mục 41) — "Chờ lấy hàng",
+ * "lấy thất bại", "shop huỷ lấy" là CHƯA. Hai bản dưới (SQL · TypeScript) là CÙNG một mệnh đề;
+ * `tests/cs-workqueue.test.ts` chạy cả hai trên cùng dữ liệu.
+ */
+export function csHandedOffExists(orderId: SQL | AnyColumn): SQL {
+  return sql`exists (select 1 from shipments cs_dom_s where cs_dom_s.order_id = ${orderId} and (cs_dom_s.stage::text in ${[...CARRIER_HANDOFF_STAGES]} or cs_dom_s.picked_up_at is not null))`;
+}
+export function isHandedOffToCarrier(s: { stage: string | null; pickedUpAt?: Date | string | null }): boolean {
+  return Boolean(s.pickedUpAt) || (CARRIER_HANDOFF_STAGES as readonly string[]).includes(s.stage ?? "");
 }
 
 /**
@@ -184,7 +200,7 @@ async function loadCaseNotes(ids: string[]) {
 }
 
 /** Một lần gửi của đơn gắn vào case. `tracking` là MÃ CHUẨN, đúng chuỗi CSKH dán sang trang ĐVVC. */
-export type CsCaseShipment = { shipmentId: string; tracking: string; stage: string; isFinal: boolean };
+export type CsCaseShipment = { shipmentId: string; tracking: string; stage: string; isFinal: boolean; handedOff: boolean };
 
 /**
  * ═══════════ MỌI LẦN GỬI CỦA ĐƠN GẮN VÀO CASE, VÀ LẦN ĐANG CHẠY LÀ CÁI NÀO ═══════════
@@ -211,13 +227,14 @@ async function loadCaseShipments(ids: string[]) {
   const out = new Map<string, { active: CsCaseShipment | null; all: CsCaseShipment[] }>();
   if (!ids.length) return out;
   const db = await getDb();
-  const rows = rowsOf<{ case_id: string; shipment_id: string; tracking: string | null; stage: string | null; is_final: boolean }>(
+  const rows = rowsOf<{ case_id: string; shipment_id: string; tracking: string | null; stage: string | null; is_final: boolean; picked_up_at: string | null }>(
     await db.execute(sql`
       select c.id as case_id,
              s.id as shipment_id,
              coalesce(nullif(s.vtp_order_number, ''), nullif(s.tracking_code, ''), s.id) as tracking,
              s.stage::text as stage,
-             s.is_final as is_final
+             s.is_final as is_final,
+             s.picked_up_at as picked_up_at
         from cs_cases c
         join shipments s on s.order_id = c.order_id
        where c.id in ${ids}
@@ -227,7 +244,7 @@ async function loadCaseShipments(ids: string[]) {
        order by c.id, s.is_final asc, s.created_at desc`),
   );
   for (const r of rows) {
-    const item: CsCaseShipment = { shipmentId: r.shipment_id, tracking: r.tracking ?? r.shipment_id, stage: r.stage ?? "UNKNOWN", isFinal: Boolean(r.is_final) };
+    const item: CsCaseShipment = { shipmentId: r.shipment_id, tracking: r.tracking ?? r.shipment_id, stage: r.stage ?? "UNKNOWN", isFinal: Boolean(r.is_final), handedOff: isHandedOffToCarrier({ stage: r.stage, pickedUpAt: r.picked_up_at }) };
     const cur = out.get(r.case_id) ?? { active: null, all: [] };
     cur.all.push(item);
     if (!cur.active && !item.isFinal) cur.active = item;
@@ -288,9 +305,8 @@ export async function listCsCases(params: ListParams) {
       /** Người THẬT đang cầm case — bot chỉ là người tạo, xem `lib/constants/cs-domain.ts`. */
       owner: humanAssignee(r.assignee),
       botTouched: Boolean(r.assignee) && CS_BOT_ASSIGNEES.includes(r.assignee),
-      // PHÂN MIỀN GIỮ NGUYÊN NGHĨA CŨ: chỉ lần gửi ĐANG CHẠY mới đưa case vào miền vận đơn. Đổi
-      // sang "có vận đơn nào đó" sẽ kéo hàng trăm case đã kết thúc vào bàn care.
-      domain: csDomainOf(r.kind, Boolean(ship)),
+      // Miền theo thời điểm bàn giao: có lần gửi nào ĐVVC đã cầm hàng ⇒ Vận đơn (chủ shop chốt 25/09/2026).
+      domain: csDomainOf(r.kind, (kien?.all ?? []).some((k) => k.handedOff)),
       shipment: ship,
       /** MỌI lần gửi của đơn, lần đang chạy đứng đầu — để CSKH thấy đủ mã, không phải một mã do máy chọn. */
       shipments: kien?.all ?? [],

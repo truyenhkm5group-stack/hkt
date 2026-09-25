@@ -42,9 +42,9 @@ const MIEN_TRU: Record<string, string> = {
   // để nhân lên — và cũng KHÔNG được thêm PRIMARY_ATTEMPT vào đây: việc gắn với lần gửi thứ hai
   // của một đơn là một việc có thật, lọc nó đi thì tiền của nó biến mất khỏi bảng điều hành.
   "lib/queries/stage-health.ts": "grain là VIỆC (notifications), nối theo entity_id nên mỗi việc ra đúng một dòng — không nhân được",
-  // Bàn làm việc giao vận và báo cáo care đo theo KIỆN (mỗi lần gửi là một kiện phải care, kể cả
-  // lần gửi thứ hai của cùng một đơn). Nối orders chỉ để lấy tên / SĐT khách, không cộng tiền theo đơn.
-  "lib/queries/care-workbench.ts": "grain là KIỆN CẦN CARE — lần gửi thứ hai cũng là một kiện phải gọi; nối orders chỉ lấy tên/SĐT",
+  // Báo cáo care đo theo KIỆN (mỗi lần gửi là một kiện phải care, kể cả lần gửi thứ hai của cùng một
+  // đơn). (`care-workbench.ts` từng ở đây; từ 25/09/2026 nó nối vận đơn bằng `join lateral … limit 1`
+  // — mỗi case đúng một kiện, không nhân được — nên hết cần miễn trừ.)
   "lib/queries/care-report.ts": "grain là KIỆN giao hụt / kiện có can thiệp; kết cục đọc theo SHIPMENT_DELIVERED của chính kiện đó",
   /*
     Hiệu suất giao vận đo theo KIỆN NGƯỜI ĐÓ ĐÃ CARE, và nguồn của nó là `care_case_events` —
