@@ -151,4 +151,19 @@ export const ROLE_BUILDER_FORBIDDEN: readonly string[] = [
     luật cũ. Người thật sự cần thì quản trị viên cấp riêng cho tài khoản đó.
   */
   "approvals:decide",
+  "production:approve",
 ];
+
+/**
+ * Vì sao từng khoá bị cấm — in cạnh ô tích bị khoá và trong thông báo lỗi của lược đồ đầu vào.
+ *
+ * `production:approve` (Company OS · Agent C, target-architecture Q7a): duyệt mẫu và chốt giá thành là
+ * CHỮ KÝ bỏ vốn vào một mẫu. Mặc định chỉ MANAGER / ADMIN có; một vai trò tuỳ chỉnh tự bó nó vào là
+ * lối để một người không được giao quyền duyệt tự ký cho mẫu của chính mình. Chủ shop vẫn cấp được cho
+ * TỪNG NGƯỜI ở trang Người dùng — có tên, có người quyết.
+ */
+export const ROLE_BUILDER_FORBIDDEN_REASON: Record<string, string> = {
+  "users:manage": "Vai trò tuỳ chỉnh không được cấp quyền quản lý người dùng — đó là cửa để tự nâng mình lên toàn quyền",
+  "approvals:decide": "Vai trò tuỳ chỉnh không được cấp quyền duyệt hai bước — đó là cửa để tự duyệt việc của chính mình; quản trị viên cấp riêng cho từng người",
+  "production:approve": "Vai trò tuỳ chỉnh không được cấp quyền duyệt mẫu / chốt giá thành — chữ ký bỏ vốn phải cấp cho từng người, có tên",
+};

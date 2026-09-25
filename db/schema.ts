@@ -420,10 +420,30 @@ export const productionOrders = pgTable(
     receivedByUserId: text("received_by_user_id").references(() => users.id, { onDelete: "set null" }),
     receivedBy: text("received_by").notNull().default(""),
     createdBy: text("created_by").notNull().default(""),
+    /*
+      Company OS · Agent C (shared-contracts.md mục 5). Ba cột, cả ba NULL được và KHÔNG backfill
+      (mục 35): lệnh cũ không có bản duyệt, không có gợi ý đã lưu — màn hình in "—".
+
+      · `design_version_id`: bản thiết kế ĐÃ DUYỆT mà xưởng may theo (Q8). Bắt buộc hay chỉ cảnh báo
+        do cờ `production.requireApprovedDesign` quyết, và chỉ xét lúc DRAFT → SENT.
+      · `suggested_cells`: ẢNH CHỤP gợi ý của máy (`buildMatrixForProduct`, tính ở MÁY CHỦ) kèm căn cứ
+        kế hoạch và mốc tính — để "máy gợi ý bao nhiêu, người chốt bao nhiêu" đọc lại được về sau.
+      · `override_reason`: vì sao người chốt khác máy. Có gợi ý mà số chốt lệch dù MỘT ô ⇒ bắt buộc.
+    */
+    designVersionId: text("design_version_id").references((): AnyPgColumn => designVersions.id, { onDelete: "restrict" }),
+    suggestedCells: jsonb("suggested_cells").$type<{
+      cells: Record<string, number>;
+      basis: { source: "buildMatrixForProduct"; coverDays: number; countIncoming: boolean; leadTimeDays: number };
+      computedAt: string;
+    }>(),
+    overrideReason: text("override_reason"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("production_orders_product_idx").on(t.productId, t.createdAt)],
+  (t) => [
+    index("production_orders_product_idx").on(t.productId, t.createdAt),
+    index("production_orders_design_version_idx").on(t.designVersionId).where(sql`${t.designVersionId} IS NOT NULL`),
+  ],
 );
 
 /*
@@ -7040,3 +7060,313 @@ export const productModelStateHistory = pgTable(
 export type ProductModelRow = typeof productModels.$inferSelect;
 export type DomainEventRow = typeof domainEvents.$inferSelect;
 export type ProductModelStateHistoryRow = typeof productModelStateHistory.$inferSelect;
+
+// ═══ Company OS · Agent C · sản xuất nửa đầu ═══
+//
+// Hợp đồng: docs/company-os/shared-contracts.md mục 5 · kiến trúc: target-architecture.md Q7, Q8, §4.
+// Bước 4–7 của chủ shop: topic hỏi giá xưởng → bảng giá thành có phiên bản → mẫu (sample) có phiên bản
+// → duyệt mẫu ⇒ bản thiết kế BẤT BIẾN → lệnh sản xuất trỏ vào nó (cột trên `production_orders`).
+//
+// Luật (lib/constants/production-os.ts):
+//  · `production_topic_messages`, `sample_reviews`, `design_versions` là APPEND-ONLY — chỉ INSERT.
+//  · `cost_sheets` FINAL không sửa được: mọi UPDATE mang điều kiện `status = 'DRAFT'` và dòng chi phí chỉ
+//    thay khi bảng cha còn DRAFT (khoá dòng cha trong cùng giao dịch). CHECK dưới đây buộc FINAL có
+//    người chốt + mốc chốt.
+//  · Người quyết (chốt giá thành, duyệt / loại mẫu) là một `users.id` NOT NULL, FK RESTRICT: chữ ký
+//    không được biến mất theo một tài khoản.
+//  · Sổ xưởng (`production_batches`…) KHÔNG đổi nghĩa và các bảng ở đây KHÔNG vào lợi nhuận: giá thành
+//    tạm tính chỉ đi vào giá ước tính qua ĐÚNG đường `setEstimatedCost` có sẵn (người bấm).
+
+/** Topic hỏi giá / bàn phương án với xưởng cho MỘT mẫu. */
+export const productionTopics = pgTable(
+  "production_topics",
+  {
+    id: id(),
+    modelId: text("model_id")
+      .notNull()
+      .references(() => productModels.id, { onDelete: "restrict" }),
+    title: text("title").notNull(),
+    /** `TopicRequirements` — chất liệu, màu, size, phụ liệu, ghi chú thiết kế, giá mục tiêu, SL dự kiến, hạn. */
+    requirements: jsonb("requirements").$type<Record<string, unknown>>().notNull().default({}),
+    status: text("status").notNull().default("WAITING_QUOTE"),
+    supplierId: text("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    /** Phương án đã chốt — bắt buộc khi `SELECTED` (CHECK). */
+    selectedOption: text("selected_option"),
+    /** ẢNH CHỤP chứng cứ lúc mở topic (`TopicEvidenceSnapshot`): có `basis` + `capturedAt`, không cập nhật về sau. */
+    evidenceSnapshot: jsonb("evidence_snapshot").$type<Record<string, unknown>>().notNull(),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** ẢNH CHỤP tên người mở — do MÁY CHỦ đọc (mục 34). */
+    createdBy: text("created_by").notNull().default(""),
+    statusChangedAt: ts("status_changed_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("production_topics_model_idx").on(t.modelId, t.createdAt),
+    index("production_topics_status_idx").on(t.status),
+    check("production_topics_status_check", sql`${t.status} IN ('WAITING_QUOTE', 'DISCUSSING', 'OPTIONS_READY', 'WAITING_DECISION', 'SELECTED', 'CLOSED')`),
+    check("production_topics_title_check", sql`length(btrim(${t.title})) > 0`),
+    check("production_topics_selected_check", sql`${t.status} <> 'SELECTED' OR length(btrim(coalesce(${t.selectedOption}, ''))) > 0`),
+  ],
+);
+
+/** Lượt trao đổi trong topic — APPEND-ONLY. `author_user_id NULL` = máy. */
+export const productionTopicMessages = pgTable(
+  "production_topic_messages",
+  {
+    id: id(),
+    topicId: text("topic_id")
+      .notNull()
+      .references(() => productionTopics.id, { onDelete: "restrict" }),
+    authorUserId: text("author_user_id").references(() => users.id, { onDelete: "set null" }),
+    authorName: text("author_name").notNull().default(""),
+    kind: text("kind").notNull().default("NOTE"),
+    body: text("body").notNull(),
+    /** Link ảnh / tài liệu (URL http/https). Không có kho ảnh chung phù hợp — xem handoff-c.md. */
+    attachments: jsonb("attachments").$type<string[]>().notNull().default([]),
+    /** Giá xưởng báo mỗi sản phẩm (VND) — chỉ ở lượt `QUOTE`; `NULL` = lượt không mang giá. */
+    quotedUnitPrice: integer("quoted_unit_price"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("production_topic_messages_topic_idx").on(t.topicId, t.createdAt),
+    check("production_topic_messages_kind_check", sql`${t.kind} IN ('NOTE', 'QUOTE', 'OPTION', 'DECISION')`),
+    check("production_topic_messages_body_check", sql`length(btrim(${t.body})) > 0`),
+    check("production_topic_messages_price_check", sql`${t.quotedUnitPrice} IS NULL OR ${t.quotedUnitPrice} >= 0`),
+  ],
+);
+
+/** Bảng giá thành — mỗi dòng là MỘT phiên bản của một mẫu. FINAL bất biến. */
+export const costSheets = pgTable(
+  "cost_sheets",
+  {
+    id: id(),
+    modelId: text("model_id")
+      .notNull()
+      .references(() => productModels.id, { onDelete: "restrict" }),
+    topicId: text("topic_id").references(() => productionTopics.id, { onDelete: "set null" }),
+    version: integer("version").notNull(),
+    status: text("status").notNull().default("DRAFT"),
+    /** Tổng các dòng (VND/sp) — TÍNH ở máy chủ bằng `computeCostSheet`, lưu lại để phiên bản chốt không đổi số. */
+    totalUnitCost: integer("total_unit_cost").notNull().default(0),
+    notes: text("notes").notNull().default(""),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").notNull().default(""),
+    finalizedAt: ts("finalized_at"),
+    finalizedByUserId: text("finalized_by_user_id").references(() => users.id, { onDelete: "restrict" }),
+    finalizedBy: text("finalized_by").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("cost_sheets_model_version_uq").on(t.modelId, t.version),
+    index("cost_sheets_topic_idx").on(t.topicId),
+    check("cost_sheets_status_check", sql`${t.status} IN ('DRAFT', 'FINAL')`),
+    check("cost_sheets_version_check", sql`${t.version} > 0`),
+    check("cost_sheets_total_check", sql`${t.totalUnitCost} >= 0`),
+    check(
+      "cost_sheets_final_check",
+      sql`(${t.status} = 'DRAFT' AND ${t.finalizedAt} IS NULL AND ${t.finalizedByUserId} IS NULL) OR (${t.status} = 'FINAL' AND ${t.finalizedAt} IS NOT NULL AND ${t.finalizedByUserId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/** Dòng chi phí của một phiên bản. `unit = '%'` chỉ cho dòng WASTAGE: `qty` là số phần trăm (xem `computeCostSheet`). */
+export const costSheetLines = pgTable(
+  "cost_sheet_lines",
+  {
+    id: id(),
+    costSheetId: text("cost_sheet_id")
+      .notNull()
+      .references(() => costSheets.id, { onDelete: "restrict" }),
+    kind: text("kind").notNull(),
+    description: text("description").notNull().default(""),
+    qty: doublePrecision("qty").notNull().default(0),
+    unit: text("unit").notNull().default(""),
+    unitCost: integer("unit_cost").notNull().default(0),
+    amount: integer("amount").notNull().default(0),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (t) => [
+    index("cost_sheet_lines_sheet_idx").on(t.costSheetId, t.sortOrder),
+    check("cost_sheet_lines_kind_check", sql`${t.kind} IN ('FABRIC', 'LABOR', 'TRIM', 'PRINTING', 'PACKING', 'FACTORY_TRANSPORT', 'INBOUND', 'WASTAGE', 'OTHER')`),
+    check("cost_sheet_lines_money_check", sql`${t.qty} >= 0 AND ${t.unitCost} >= 0 AND ${t.amount} >= 0`),
+    check("cost_sheet_lines_percent_check", sql`${t.unit} <> '%' OR (${t.kind} = 'WASTAGE' AND ${t.qty} <= 100)`),
+  ],
+);
+
+/** Mẫu xưởng làm — mỗi dòng là MỘT phiên bản (V1, V2…) của một mẫu. */
+export const samples = pgTable(
+  "samples",
+  {
+    id: id(),
+    modelId: text("model_id")
+      .notNull()
+      .references(() => productModels.id, { onDelete: "restrict" }),
+    topicId: text("topic_id").references(() => productionTopics.id, { onDelete: "set null" }),
+    version: integer("version").notNull(),
+    supplierId: text("supplier_id").references(() => suppliers.id, { onDelete: "set null" }),
+    /** Tiền làm mẫu (VND). `NULL` = chưa biết. */
+    costVnd: integer("cost_vnd"),
+    /** Link ảnh mẫu (URL http/https). */
+    images: jsonb("images").$type<string[]>().notNull().default([]),
+    notes: text("notes").notNull().default(""),
+    problems: text("problems").notNull().default(""),
+    /** Ghi chú "yêu cầu sửa" của lượt duyệt — chép từ `sample_reviews.note` để phiên bản sau đọc ngay. */
+    requestedChanges: text("requested_changes").notNull().default(""),
+    status: text("status").notNull().default("IN_PROGRESS"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdBy: text("created_by").notNull().default(""),
+    submittedAt: ts("submitted_at"),
+    decidedAt: ts("decided_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("samples_model_version_uq").on(t.modelId, t.version),
+    index("samples_status_idx").on(t.status),
+    check("samples_status_check", sql`${t.status} IN ('IN_PROGRESS', 'SUBMITTED', 'CHANGES_REQUESTED', 'REJECTED', 'APPROVED')`),
+    check("samples_version_check", sql`${t.version} > 0`),
+    check("samples_cost_check", sql`${t.costVnd} IS NULL OR ${t.costVnd} >= 0`),
+    check("samples_submitted_check", sql`${t.status} = 'IN_PROGRESS' OR ${t.submittedAt} IS NOT NULL`),
+    check("samples_decided_check", sql`${t.status} IN ('IN_PROGRESS', 'SUBMITTED') OR ${t.decidedAt} IS NOT NULL`),
+  ],
+);
+
+/** Lượt duyệt mẫu — APPEND-ONLY, mỗi phiên bản mẫu đúng MỘT phán quyết (UNIQUE). */
+export const sampleReviews = pgTable(
+  "sample_reviews",
+  {
+    id: id(),
+    sampleId: text("sample_id")
+      .notNull()
+      .unique()
+      .references(() => samples.id, { onDelete: "restrict" }),
+    decision: text("decision").notNull(),
+    note: text("note").notNull().default(""),
+    reviewerUserId: text("reviewer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    reviewerName: text("reviewer_name").notNull().default(""),
+    reviewedAt: ts("reviewed_at").notNull().defaultNow(),
+  },
+  (t) => [
+    check("sample_reviews_decision_check", sql`${t.decision} IN ('REQUEST_CHANGES', 'REJECT', 'APPROVE')`),
+    // Yêu cầu sửa / loại mà không nói vì sao thì xưởng không biết sửa gì, lần sau không ai học được gì.
+    check("sample_reviews_note_check", sql`${t.decision} = 'APPROVE' OR length(btrim(${t.note})) > 0`),
+  ],
+);
+
+/** Bản thiết kế đã duyệt — ẢNH CHỤP BẤT BIẾN, sinh ra DUY NHẤT bởi lượt duyệt mẫu (Q8). */
+export const designVersions = pgTable(
+  "design_versions",
+  {
+    id: id(),
+    modelId: text("model_id")
+      .notNull()
+      .references(() => productModels.id, { onDelete: "restrict" }),
+    sampleId: text("sample_id")
+      .notNull()
+      .unique()
+      .references(() => samples.id, { onDelete: "restrict" }),
+    reviewId: text("review_id")
+      .notNull()
+      .unique()
+      .references(() => sampleReviews.id, { onDelete: "restrict" }),
+    /** Bảng giá thành CHỐT mới nhất của mẫu lúc duyệt. `NULL` = lúc duyệt CHƯA có bảng chốt nào (ảnh chụp nói rõ). */
+    costSheetId: text("cost_sheet_id").references(() => costSheets.id, { onDelete: "restrict" }),
+    version: integer("version").notNull(),
+    /** Ảnh chụp: trường của mẫu + yêu cầu topic + bản sao dòng giá thành. Không cập nhật về sau. */
+    spec: jsonb("spec").$type<Record<string, unknown>>().notNull(),
+    approvedByUserId: text("approved_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    approvedBy: text("approved_by").notNull().default(""),
+    approvedAt: ts("approved_at").notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("design_versions_model_version_uq").on(t.modelId, t.version),
+    check("design_versions_version_check", sql`${t.version} > 0`),
+  ],
+);
+
+// ═══ Company OS · Agent E · kết cục hàng hoàn không tái nhập ═══
+
+/**
+ * ───────────── KẾT CỤC CỦA HÀNG HOÀN KHÔNG VÀO LẠI TỒN (APPEND-ONLY) ─────────────
+ *
+ * Trạm kiểm đếm cho món `OK` một phiếu tái nhập; mọi kết luận khác (hỏng · bẩn · sai hàng · không bán
+ * được) trước đây không có trạng thái tiếp theo nào — hàng nằm trên kệ mà sổ không biết nó đi đâu.
+ * Bảng này là SỔ GHI THÊM: mỗi dòng là một quyết định của một NGƯỜI (khoá tài khoản bắt buộc, luật
+ * 34). Không UPDATE, không DELETE ở đâu cả — tình trạng hiện tại gập từ sổ
+ * (`lib/constants/return-disposition.ts::foldDispositions`).
+ *
+ * Đối tượng: một dòng kiểm từng món (`inspection_item_id`), HOẶC phần "không bán được" của một kiện
+ * kiểm cả kiện (`inspection_item_id` NULL). `subject_key` là khoá chung của hai loại, CHECK buộc nó
+ * khớp đúng cột nguồn.
+ *
+ * Tồn kho: CHỈ `RESTOCK_AFTER_REWORK` đổi tồn, và qua một phiếu `RETURN` (`stock_receipt_id`, bắt
+ * buộc với đúng kết cục ấy và cấm với mọi kết cục khác). `WRITE_OFF` ghi GIÁ TRỊ ƯỚC TÍNH, không ghi
+ * sổ kho. Khoá ngoại tới phiếu kiểm / dòng kiểm / phiếu kho là RESTRICT: xoá chúng là xoá chứng từ
+ * của một quyết định đã ghi.
+ */
+export const returnDispositions = pgTable(
+  "return_dispositions",
+  {
+    id: id(),
+    inspectionId: text("inspection_id")
+      .notNull()
+      .references(() => returnInspections.id, { onDelete: "restrict" }),
+    /** `NULL` = đối tượng là CẢ KIỆN (kiện kiểm nhanh, không có dòng từng món). */
+    inspectionItemId: text("inspection_item_id").references(() => returnInspectionItems.id, { onDelete: "restrict" }),
+    /** `item:<id dòng kiểm>` hoặc `parcel:<id phiếu kiểm>`. */
+    subjectKey: text("subject_key").notNull(),
+    /** PENDING_DECISION · REWORK · RESTOCK_AFTER_REWORK · WRITE_OFF · RETURN_TO_SUPPLIER */
+    disposition: text("disposition").notNull(),
+    /** Số món dòng này nói tới. Kết cục cuối tiêu đúng bấy nhiêu từ phần còn mở. */
+    qty: integer("qty").notNull(),
+    /** Mẫu mã dòng này nói tới — đích nhập lại, hoặc mẫu dùng để định giá khi huỷ. `NULL` = không biết. */
+    variantId: text("variant_id").references(() => productVariants.id, { onDelete: "set null" }),
+    /** Phiếu tái nhập sinh ra — CHỈ với `RESTOCK_AFTER_REWORK`. */
+    stockReceiptId: text("stock_receipt_id").references(() => stockReceipts.id, { onDelete: "restrict" }),
+    /** Chỉ với `WRITE_OFF`: đơn giá vốn ƯỚC TÍNH lúc huỷ, bậc căn cứ, và giá trị = đơn giá × số món. `NULL` = CHƯA BIẾT. */
+    unitCostEstimate: integer("unit_cost_estimate"),
+    costBasis: text("cost_basis"),
+    valueEstimate: integer("value_estimate"),
+    note: text("note").notNull().default(""),
+    actorUserId: text("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    /** ẢNH CHỤP tên người làm — do MÁY CHỦ đọc từ `users`, không nhận từ client. */
+    actorName: text("actor_name").notNull().default(""),
+    /** Khoá chống bấm đúp / gửi lại: cùng khoá ⇒ trả lại dòng đã ghi, không ghi dòng thứ hai. */
+    requestKey: text("request_key").unique(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("return_dispositions_subject_idx").on(t.subjectKey, t.createdAt),
+    index("return_dispositions_inspection_idx").on(t.inspectionId),
+    index("return_dispositions_variant_idx").on(t.variantId),
+    check("return_dispositions_disposition_check", sql`${t.disposition} IN ('PENDING_DECISION', 'REWORK', 'RESTOCK_AFTER_REWORK', 'WRITE_OFF', 'RETURN_TO_SUPPLIER')`),
+    check("return_dispositions_qty_check", sql`${t.qty} > 0`),
+    check(
+      "return_dispositions_subject_check",
+      sql`(${t.inspectionItemId} IS NULL AND ${t.subjectKey} = 'parcel:' || ${t.inspectionId}) OR (${t.inspectionItemId} IS NOT NULL AND ${t.subjectKey} = 'item:' || ${t.inspectionItemId})`,
+    ),
+    check("return_dispositions_receipt_check", sql`(${t.disposition} = 'RESTOCK_AFTER_REWORK') = (${t.stockReceiptId} IS NOT NULL)`),
+    check("return_dispositions_note_check", sql`${t.disposition} <> 'WRITE_OFF' OR length(trim(${t.note})) > 0`),
+    check(
+      "return_dispositions_value_check",
+      sql`(${t.disposition} = 'WRITE_OFF' OR (${t.unitCostEstimate} IS NULL AND ${t.valueEstimate} IS NULL AND ${t.costBasis} IS NULL)) AND (${t.valueEstimate} IS NULL OR ${t.valueEstimate} >= 0) AND (${t.costBasis} IS NULL OR ${t.costBasis} IN ('RECEIPT', 'ORDER_SNAPSHOT', 'VARIANT_DEFAULT', 'UNKNOWN'))`,
+    ),
+  ],
+);
+
+export type ProductionTopicRow = typeof productionTopics.$inferSelect;
+export type ProductionTopicMessageRow = typeof productionTopicMessages.$inferSelect;
+export type CostSheetRow = typeof costSheets.$inferSelect;
+export type CostSheetLineRow = typeof costSheetLines.$inferSelect;
+export type SampleRow = typeof samples.$inferSelect;
+export type SampleReviewRow = typeof sampleReviews.$inferSelect;
+export type DesignVersionRow = typeof designVersions.$inferSelect;
+export type ReturnDispositionRow = typeof returnDispositions.$inferSelect;

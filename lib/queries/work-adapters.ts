@@ -19,6 +19,8 @@ import { getCareQueue } from "@/lib/queries/care-workbench";
 import { csRunningHandoffExists } from "@/lib/queries/cs";
 import { getFulfillmentBottleneckQueue } from "@/lib/queries/fulfillment-bottleneck";
 import { getDuplicateOrderQueue } from "@/lib/queries/order-duplicate";
+import { listDispositionQueue } from "@/lib/queries/return-dispositions";
+import { DISPOSITION_LABEL } from "@/lib/constants/return-disposition";
 import { DUPLICATE_VERDICT_LABEL } from "@/lib/constants/order-duplicate";
 import { unclassifiedBankRows } from "@/lib/queries/finance-ops";
 import { bankExceptionScore } from "@/lib/constants/finance-ops";
@@ -26,6 +28,7 @@ import { resolvePeriod } from "@/lib/search-params";
 import { APPROVAL_GROUP_LABEL, type ApprovalGroup } from "@/lib/constants/approval";
 import { listApprovalRequests } from "@/lib/queries/approvals";
 import { formatVND } from "@/lib/format";
+import { SAMPLE_STATUS_TO_WORK, TOPIC_OPEN_STATUSES, TOPIC_STATUS_LABEL, TOPIC_STATUS_TO_WORK, type SampleStatus, type TopicStatus } from "@/lib/constants/production-os";
 
 /**
  * ═══════════════ PHÉP CHIẾU: SÁU HÀNG ĐỢI THÀNH MỘT DANH SÁCH ═══════════════
@@ -444,6 +447,63 @@ export async function adaptDuplicateOrders(now: Date): Promise<WorkItem[]> {
   });
 }
 
+/* ═══════════════════ 3c · HÀNG HOÀN KHÔNG TÁI NHẬP (Company OS · Agent E) ═══════════════════ */
+
+/**
+ * Nguồn: `listDispositionQueue()` — CÙNG hàm mà khối "Hàng hoàn không tái nhập" ở `/inventory/returns`
+ * dùng, không viết lại điều kiện nào. Một việc cho MỖI món (dòng kiểm từng món, hoặc phần không bán
+ * được của một kiện kiểm cả kiện); rời hàng đợi khi món có kết cục cuối cho toàn bộ số lượng — không
+ * ai phải đóng hộ (luật 19).
+ *
+ * Không trùng với `RETURN_INSPECTION`: nguồn đó chỉ nói kiện CHƯA ĐẾM, nguồn này chỉ nói món ĐÃ ĐẾM
+ * (`lib/queries/return-dispositions.ts::subjectsQuery` chỉ đọc `status = 'INSPECTED'`).
+ */
+export async function adaptReturnDispositions(now: Date): Promise<WorkItem[]> {
+  const queue = await listDispositionQueue({ limit: 500 });
+  const t = now.getTime();
+  return queue.rows.map((r) => {
+    const createdAt = r.inspectedAt ?? now;
+    const state = r.folded.state ?? "PENDING_DECISION";
+    // Cùng trục chấm điểm với hàng hoàn chờ đếm — không thêm một loại `CaseType` chỉ để chấm điểm.
+    const score = caseScore({ severity: "warning", ageHours: hoursSince(createdAt, t), amount: r.openValueEstimate ?? 0, type: "RETURN_RECEIVED_PENDING_INSPECTION" });
+    const ten = [r.sku || r.productName || "Món chưa rõ mẫu mã", [r.color, r.size].filter(Boolean).join(" / ")].filter(Boolean).join(" · ");
+    return {
+      key: workKey("RETURN_DISPOSITION", r.subjectKey),
+      sourceType: "RETURN_DISPOSITION",
+      sourceKey: r.subjectKey,
+      kind: state,
+      title: `${r.folded.remaining} món ${ten} · ${DISPOSITION_LABEL[state].toLowerCase()}`,
+      summary: `${r.grain === "PARCEL" ? "Kiện kiểm cả kiện" : "Kiểm từng món"} · kết luận ${r.condition}${r.inspectNote ? ` — ${r.inspectNote}` : ""}`,
+      department: "WAREHOUSE" as DepartmentCode,
+      assignee: null,
+      status: (state === "REWORK" ? "IN_PROGRESS" : "NEW") as WorkStatus,
+      statusAuthority: "SOURCE" as const,
+      priority: priorityOf(score),
+      score,
+      createdAt,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaAtOf("RETURN_DISPOSITION", createdAt),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "SHIPMENT",
+      businessEntityId: r.code ?? r.shipmentId,
+      sourceUrl: `/inventory/returns?xu-ly=${encodeURIComponent(r.subjectKey)}#hang-khong-tai-nhap`,
+      // ƯỚC TÍNH theo giá vốn gần nhất của mẫu mã; chưa biết giá vốn thì CHƯA BIẾT, không phải 0đ.
+      money:
+        r.openValueEstimate === null
+          ? MONEY_UNKNOWN
+          : { atRisk: r.openValueEstimate, recoverable: null, confidence: "ESTIMATED" as const, basis: "Giá vốn ước tính của phần chưa có kết cục (phiếu nhập gần nhất → giá vốn trên đơn → giá nhập mẫu mã)" },
+      tags: [state, r.grain],
+      evidence: { source: "Trạm kiểm hàng hoàn", detail: `${r.code ?? r.shipmentId} · còn ${r.folded.remaining}/${r.qty} món chưa có kết cục` },
+      blockedReason: "",
+      creationSource: "AUTO" as const,
+      actions: actionsOf("RETURN_DISPOSITION"),
+      recommendedAction: state === "REWORK" ? "Sửa / giặt xong thì đếm lại và nhập tồn; không cứu được thì huỷ có lý do." : "Quyết: đưa đi sửa / giặt, trả xưởng, hay huỷ có lý do.",
+    };
+  });
+}
+
 /* ═══════════════════ 4 · DÒNG TIỀN CHƯA PHÂN LOẠI ═══════════════════ */
 
 export async function adaptBank(now: Date): Promise<WorkItem[]> {
@@ -851,6 +911,109 @@ export async function adaptApprovals(now: Date, includeClosed = false, closedSin
   });
 }
 
+/* ═══════════════════ 7c · SẢN XUẤT NỬA ĐẦU (Company OS · Agent C) ═══════════════════ */
+
+/*
+  Hai phép chiếu đọc THẲNG bảng nguồn — không luật nào ở đây: tập việc là `TOPIC_OPEN_STATUSES` và
+  `samples.status = 'SUBMITTED'`, trạng thái chung đi qua `TOPIC_STATUS_TO_WORK` / `SAMPLE_STATUS_TO_WORK`
+  (lib/constants/production-os.ts). Việc tự rời hàng đợi khi người chốt / đóng topic hoặc ghi phán quyết
+  cho mẫu ở `/production` — không job nào đóng hộ, không nút "xong" nào ở hàng đợi.
+
+  Tiền: KHÔNG khai (`MONEY_UNKNOWN`). Giá mục tiêu × số lượng dự kiến là một ƯỚC LƯỢNG của người mở
+  topic, không phải tiền đang rủi ro — in nó vào cột tiền là biến một mong muốn thành một con số.
+*/
+export async function adaptProductionTopics(now: Date): Promise<WorkItem[]> {
+  const db = await getDb();
+  const t = schema.productionTopics;
+  const rows = await db
+    .select({ id: t.id, title: t.title, status: t.status, createdAt: t.createdAt, updatedAt: t.updatedAt, modelCode: schema.productModels.code, modelId: t.modelId })
+    .from(t)
+    .innerJoin(schema.productModels, eq(schema.productModels.id, t.modelId))
+    .where(inArray(t.status, [...TOPIC_OPEN_STATUSES]))
+    .limit(500);
+  const ms = now.getTime();
+  return rows.map((r) => {
+    const status = r.status as TopicStatus;
+    const canQuyet = status === "OPTIONS_READY" || status === "WAITING_DECISION";
+    return {
+      key: workKey("PRODUCTION_TOPIC", r.id),
+      sourceType: "PRODUCTION_TOPIC",
+      sourceKey: r.id,
+      kind: status,
+      title: `${r.modelCode} · ${r.title}`,
+      summary: `Topic sản xuất đang “${TOPIC_STATUS_LABEL[status]}”.`,
+      department: WORK_SOURCE_SPEC.PRODUCTION_TOPIC.department!,
+      assignee: null,
+      status: TOPIC_STATUS_TO_WORK[status],
+      statusAuthority: "SOURCE" as const,
+      priority: canQuyet ? "HIGH" : "NORMAL",
+      score: caseScore({ severity: canQuyet ? "warning" : "info", ageHours: hoursSince(r.createdAt, ms), amount: 0, type: "OTHER" }),
+      createdAt: r.createdAt,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaAtOf("PRODUCTION_TOPIC", r.createdAt),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "MODEL",
+      businessEntityId: r.modelId,
+      sourceUrl: `/production/topics/${r.id}`,
+      money: MONEY_UNKNOWN,
+      tags: [status.toLowerCase()],
+      evidence: { source: "Sản xuất · Topic", detail: `${TOPIC_STATUS_LABEL[status]} · cập nhật ${r.updatedAt.toISOString().slice(0, 10)}` },
+      blockedReason: "",
+      creationSource: "AUTO" as WorkItem["creationSource"],
+      actions: actionsOf("PRODUCTION_TOPIC"),
+      recommendedAction: canQuyet ? "Mở topic, chọn phương án và bấm Chốt phương án" : status === "WAITING_QUOTE" ? "Giục xưởng báo giá, ghi báo giá vào topic" : "Mở topic và tiếp tục trao đổi",
+    };
+  });
+}
+
+export async function adaptSampleReviews(now: Date): Promise<WorkItem[]> {
+  const db = await getDb();
+  const s = schema.samples;
+  const rows = await db
+    .select({ id: s.id, version: s.version, status: s.status, submittedAt: s.submittedAt, createdAt: s.createdAt, topicId: s.topicId, modelId: s.modelId, modelCode: schema.productModels.code })
+    .from(s)
+    .innerJoin(schema.productModels, eq(schema.productModels.id, s.modelId))
+    .where(eq(s.status, "SUBMITTED"))
+    .limit(500);
+  const ms = now.getTime();
+  return rows.map((r) => {
+    // Việc bắt đầu lúc mẫu được GỬI DUYỆT, không phải lúc xưởng bắt đầu làm.
+    const from = r.submittedAt ?? r.createdAt;
+    return {
+      key: workKey("SAMPLE_REVIEW", r.id),
+      sourceType: "SAMPLE_REVIEW",
+      sourceKey: r.id,
+      kind: null,
+      title: `${r.modelCode} · mẫu V${r.version} chờ duyệt`,
+      summary: "Mẫu đã về, chờ người có quyền duyệt: duyệt / yêu cầu sửa / loại.",
+      department: WORK_SOURCE_SPEC.SAMPLE_REVIEW.department!,
+      assignee: null,
+      status: SAMPLE_STATUS_TO_WORK[r.status as SampleStatus],
+      statusAuthority: "SOURCE" as const,
+      priority: "HIGH",
+      score: caseScore({ severity: "warning", ageHours: hoursSince(from, ms), amount: 0, type: "OTHER" }),
+      createdAt: from,
+      startedAt: null,
+      dueAt: null,
+      slaAt: slaAtOf("SAMPLE_REVIEW", from),
+      completedAt: null,
+      snoozedUntil: null,
+      businessEntity: "SAMPLE",
+      businessEntityId: r.id,
+      sourceUrl: r.topicId ? `/production/topics/${r.topicId}#mau` : `/production/models/${r.modelId}`,
+      money: MONEY_UNKNOWN,
+      tags: [`v${r.version}`],
+      evidence: { source: "Sản xuất · Mẫu", detail: `V${r.version} gửi duyệt ${from.toISOString().slice(0, 10)}` },
+      blockedReason: "",
+      creationSource: "AUTO" as WorkItem["creationSource"],
+      actions: actionsOf("SAMPLE_REVIEW"),
+      recommendedAction: "Mở mẫu, xem ảnh và ghi phán quyết",
+    };
+  });
+}
+
 /* ═══════════════════ 8 · VIỆC TAY & VIỆC ĐỊNH KỲ ═══════════════════ */
 
 /** Nguồn duy nhất giữ trạng thái trong `work_items`. Ở đây không có phép chiếu nào. */
@@ -1042,12 +1205,15 @@ export async function collectWorkItems(opts: CollectOptions = {}): Promise<{ ite
     want("SHIPMENT_CARE") ? guard("SHIPMENT_CARE", () => adaptShipmentCare(now, closedSince)) : [],
     want("FULFILLMENT_EXCEPTION") ? guard("FULFILLMENT_EXCEPTION", () => adaptFulfillment()) : [],
     want("ORDER_DUPLICATE") ? guard("ORDER_DUPLICATE", () => adaptDuplicateOrders(now)) : [],
+    want("RETURN_DISPOSITION") ? guard("RETURN_DISPOSITION", () => adaptReturnDispositions(now)) : [],
     want("BANK_EXCEPTION") ? guard("BANK_EXCEPTION", () => adaptBank(now)) : [],
     want("ADS_DECISION") ? guard("ADS_DECISION", () => adaptAdsDecisions(now)) : [],
     // Một lượt đọc `notifications` sinh ra bốn nguồn; lọc lại sau khi đã có.
     want("ALERT") || want("COD_EXCEPTION") || want("INVENTORY_EXCEPTION") || want("RETURN_INSPECTION") ? guard("ALERT", () => adaptAlerts(now)) : [],
     want("TECH_TASK") ? guard("TECH_TASK", () => adaptTechTasks(now, opts.includeClosed ?? false)) : [],
     want("APPROVAL") ? guard("APPROVAL", () => adaptApprovals(now, opts.includeClosed ?? false, closedSince)) : [],
+    want("PRODUCTION_TOPIC") ? guard("PRODUCTION_TOPIC", () => adaptProductionTopics(now)) : [],
+    want("SAMPLE_REVIEW") ? guard("SAMPLE_REVIEW", () => adaptSampleReviews(now)) : [],
     want("MANUAL_TASK") || want("RECURRING_TASK") ? guard("MANUAL_TASK", () => adaptOwnedWork(now, opts.includeClosed ?? false, closedSince)) : [],
   ]);
 

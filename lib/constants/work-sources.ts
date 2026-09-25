@@ -34,6 +34,8 @@ export const WORK_SOURCES = [
   "CS_CASE",
   "SHIPMENT_CARE",
   "RETURN_INSPECTION",
+  // Company OS · Agent E — hàng hoàn đã kiểm, không tái nhập, chưa có kết cục cuối.
+  "RETURN_DISPOSITION",
   "FULFILLMENT_EXCEPTION",
   "ORDER_DUPLICATE",
   "BANK_EXCEPTION",
@@ -44,6 +46,9 @@ export const WORK_SOURCES = [
   "TECH_TASK",
   // Company OS · Agent G — phép chiếu của `approval_requests` đang chờ.
   "APPROVAL",
+  // Company OS · Agent C — sản xuất nửa đầu (shared-contracts.md mục 3).
+  "PRODUCTION_TOPIC",
+  "SAMPLE_REVIEW",
   "MANUAL_TASK",
   "RECURRING_TASK",
 ] as const;
@@ -131,6 +136,32 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     slaHours: CASE_SLA_HOURS.RETURN_RECEIVED_PENDING_INSPECTION,
     outcomeAttributable: true,
     actions: ["RETURN_RECEIVE", "RETURN_OPEN_INSPECTION", "OPEN_SHIPMENT", "OPEN_ORDER"],
+  },
+  /*
+    Company OS · Agent E. MỘT NGUỒN RIÊNG, không nhét vào `RETURN_INSPECTION`, vì hai nguồn hỏi hai
+    câu khác nhau ở hai ĐỘ MỊN khác nhau và KHÔNG chạm cùng một kiện:
+      · `RETURN_INSPECTION` (chiếu từ cảnh báo) — kiện ĐVVC đã trả / kho đã nhận mà CHƯA ĐẾM
+        (`return_inspections.status = 'RECEIVED'`). Độ mịn: kiện.
+      · `RETURN_DISPOSITION` — món ĐÃ ĐẾM (`status = 'INSPECTED'`) kết luận không bán được mà chưa có
+        kết cục cuối. Độ mịn: dòng kiểm từng món (hoặc phần không bán được của kiện kiểm cả kiện).
+    Một kiện rời nguồn thứ nhất đúng lúc (và chỉ khi) nó có thể vào nguồn thứ hai, nên không việc nào
+    bị chiếu hai lần. Không loại cảnh báo nào trùng độ mịn ⇒ không thêm gì vào
+    `ALERT_KINDS_OWNED_ELSEWHERE`. Gộp vào `RETURN_INSPECTION` thì `stage-health` (đang thay số tồn
+    đọng của nguồn ấy bằng số KIỆN chờ đếm của đường ống) sẽ đếm lẫn món chờ kết cục vào kiện chờ đếm.
+  */
+  RETURN_DISPOSITION: {
+    key: "RETURN_DISPOSITION",
+    label: "Hàng hoàn không tái nhập · chờ kết cục",
+    why: "Món hàng hoàn đã kiểm là không bán ngay được mà chưa ai quyết sửa, huỷ hay trả xưởng — vốn nằm trên kệ, không ở sổ kho nào.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
+    department: "WAREHOUSE",
+    businessEntity: "SHIPMENT",
+    // CỐ Ý không đặt hạn: chưa có con số nào chủ shop chốt cho việc này (luật 22, 38). Chủ shop đặt ở /work/settings.
+    slaHours: null,
+    outcomeAttributable: true,
+    // Mọi nút LINK của hàng đợi đi tới `sourceUrl`; một nút là đủ — hai nút cùng đích là nút giả.
+    actions: ["OPEN_SOURCE"],
   },
   FULFILLMENT_EXCEPTION: {
     key: "FULFILLMENT_EXCEPTION",
@@ -337,6 +368,47 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     outcomeAttributable: true,
     // CHỈ NÚT MỞ: duyệt / từ chối có lý do bắt buộc nằm ở trang Cần xử lý, nơi người duyệt đọc được
     // vì sao việc đó cần người thứ hai. Nút bấm-một-phát ở đây sẽ bỏ qua đúng đoạn đọc ấy.
+    actions: ["OPEN_SOURCE"],
+  },
+  /*
+    ═══ SẢN XUẤT NỬA ĐẦU (Company OS · Agent C) — PHÉP CHIẾU, KHÔNG PHẢI BẢN SAO ═══
+
+    `production_topics` và `samples` giữ trạng thái của chính chúng; việc rời hàng đợi khi NGUỒN đổi
+    (chốt / đóng topic, ghi phán quyết cho mẫu) qua ĐÚNG server action của miền
+    (`lib/actions/production-topics.ts`, `lib/actions/production-samples.ts`). Không nút "xong" nào ở
+    đây — chỉ nút MỞ.
+
+    PHÒNG BAN đi qua `TEAM_DEPARTMENT.PRODUCTION`, KHÔNG gõ thẳng `PRODUCTION`: phòng Sản xuất sở hữu
+    màn hình nhưng nhóm việc cùng tên vẫn route về Kho cho tới khi phòng có người
+    (`TEAM_DEPARTMENT_DIVERGENCE`, AGENTS.md mục 69). Chuyển thật bằng ghi đè `work.ownership`.
+
+    Không trùng độ mịn với cảnh báo nào đang có (một topic / một phiên bản mẫu — không `CaseType` nào
+    nói về chúng), nên `ALERT_KINDS_OWNED_ELSEWHERE` không cần thêm gì.
+  */
+  PRODUCTION_TOPIC: {
+    key: "PRODUCTION_TOPIC",
+    label: "Topic sản xuất chờ báo giá / chờ quyết",
+    why: "Mẫu thắng test mà chưa chốt được phương án với xưởng thì chưa đặt hàng được — mỗi ngày chờ là một ngày bán hết hàng test mà không có hàng về.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
+    department: TEAM_DEPARTMENT.PRODUCTION,
+    businessEntity: "MODEL",
+    // Không có hằng số đang chạy nào cho hạn này (luật 22: không gõ số mới) — chủ shop đặt ở `work.sla`.
+    slaHours: null,
+    // Xưởng báo giá nhanh hay chậm không do người trong shop quyết (mục 24).
+    outcomeAttributable: false,
+    actions: ["OPEN_SOURCE"],
+  },
+  SAMPLE_REVIEW: {
+    key: "SAMPLE_REVIEW",
+    label: "Mẫu chờ duyệt",
+    why: "Mẫu đã về tay shop mà chưa ai duyệt thì xưởng đứng chờ — lịch sản xuất trượt theo đúng số ngày mẫu nằm trên bàn.",
+    statusAuthority: "SOURCE",
+    assigneeAuthority: "WORK",
+    department: TEAM_DEPARTMENT.PRODUCTION,
+    businessEntity: "SAMPLE",
+    slaHours: null,
+    outcomeAttributable: true,
     actions: ["OPEN_SOURCE"],
   },
   MANUAL_TASK: {

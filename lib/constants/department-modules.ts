@@ -163,7 +163,7 @@ export const NAV_MODULES = [
   },
   {
     href: "/returns",
-    label: "Đổi / trả hàng",
+    label: "Phiếu đổi / trả (Pancake)",
     zone: "LOGISTICS",
     permission: "returns:view",
     why: "Vòng đời một kiện hoàn bắt đầu ở chiều vận chuyển. Khâu ĐẾM hàng về là của kho và có màn hình riêng.",
@@ -200,7 +200,7 @@ export const NAV_MODULES = [
   },
   {
     href: "/inventory/returns",
-    label: "Kiểm đếm hàng hoàn",
+    label: "Kiểm đếm hàng hoàn · kho",
     zone: "WAREHOUSE",
     permission: "products:view",
     why: "Hàng hoàn CHỈ vào tồn khi kho mở kiện và đếm thật — ĐVVC báo 'đã hoàn' không phải là một phiếu nhập.",
@@ -249,6 +249,14 @@ export const NAV_MODULES = [
     zone: "PRODUCTION",
     permission: "models:view",
     why: "Mẫu nào đang ở khâu nào — thắng test, bàn giá, làm mẫu, sản xuất, bán, xả — và ai phụ trách. Các khai báo trên trang này quyết định mẫu nào được đưa vào sản xuất / đặt lại / ngừng, tức quyết định của phòng Sản xuất; marketing đọc nó để biết mẫu thắng của mình đã đi tới đâu.",
+  },
+  // Company OS · Agent C — sản xuất nửa đầu (bước 4–6 của chủ shop).
+  {
+    href: "/production",
+    label: "Topic sản xuất",
+    zone: "PRODUCTION",
+    permission: "planning:view",
+    why: "Hỏi giá xưởng, chốt phương án, giá thành tạm tính, làm mẫu và duyệt mẫu — các quyết định bỏ vốn TRƯỚC khi có lệnh đặt hàng. Lệnh sản xuất trỏ vào bản thiết kế được duyệt ở đây.",
   },
   {
     href: "/products/performance",

@@ -50,6 +50,7 @@ const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   CS_CASE: "Khách nhắn tin là khâu chốt đơn — người trả lời chính là người bán.",
   SHIPMENT_CARE: "Làm việc với Viettel Post về một kiện đang mắc là nghề của giao vận, không phải của người chốt đơn.",
   RETURN_INSPECTION: "Chỉ người mở kiện và đếm hàng mới lập được phiếu tái nhập — hàng hoàn không tự vào tồn.",
+  RETURN_DISPOSITION: "Món hỏng / bẩn / sai hàng nằm trên kệ kho; người cầm nó mới đưa đi sửa, đếm lại để nhập, hay lập biên bản huỷ.",
   FULFILLMENT_EXCEPTION: "Đơn đã chốt mà chưa rời kho: hàng đang nằm trong tay kho, nên kho là nơi gỡ được.",
   ORDER_DUPLICATE: "Chỉ người GỌI ĐƯỢC KHÁCH mới biết họ có cố ý đặt hai lần không. Kho nhìn hai đơn giống nhau thì vẫn phải đóng hai gói.",
   BANK_EXCEPTION: "Phân loại dòng tiền là việc kế toán; gán cho phòng khác thì lợi nhuận sai mà không ai chịu trách nhiệm.",
@@ -59,6 +60,8 @@ const SOURCE_OWNERSHIP_WHY: Record<WorkSource, string> = {
   ALERT: "Cảnh báo suy phòng ban theo NHÓM VIỆC của từng loại — xem bảng bên dưới, không phải một phòng cố định.",
   TECH_TASK: "Việc kỹ thuật ở shop này do chủ shop quyết — cùng lý do nhóm việc DATA được xếp về Ban điều hành: nó chặn quyết định của mọi phòng chứ không thuộc phòng nào.",
   APPROVAL: "Người duyệt được là quản trị viên / quản lý (quyền approvals:decide) — việc chờ chủ shop quyết, cùng tiền lệ với việc Tech và nhóm việc DATA.",
+  PRODUCTION_TOPIC: "Bàn giá và phương án với xưởng là việc của nhóm Sản xuất — hôm nay nhóm đó route về Kho (TEAM_DEPARTMENT_DIVERGENCE) vì phòng Sản xuất chưa có thành viên; chuyển bằng ghi đè work.ownership.",
+  SAMPLE_REVIEW: "Duyệt mẫu xưởng gửi là việc của nhóm Sản xuất — cùng lý do route về Kho như topic sản xuất cho tới khi phòng Sản xuất có người.",
   MANUAL_TASK: "Việc giao tay đi theo phòng mà người giao chọn; không có phòng mặc định nào đúng cho mọi việc.",
   RECURRING_TASK: "Việc định kỳ khai phòng ngay trong định nghĩa của nó.",
 };

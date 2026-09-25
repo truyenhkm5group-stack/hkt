@@ -20,6 +20,7 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   STOCK_RECEIPT_CREATE: "Nhập hàng vào kho",
   STOCK_ADJUST_CREATE: "Điều chỉnh kiểm kê",
   STOCK_RECEIPT_DELETE: "Xoá phiếu kho",
+  RETURN_DISPOSITION_SET: "Ghi kết cục hàng hoàn không tái nhập",
   /** Hệ thống chốt lại giá vốn đã ghi nhận — đúng một lần, khi có chứng từ kho mạnh hơn. */
   COGS_TRUE_UP: "Chốt lại giá vốn theo chứng từ kho",
   COD_PAID: "Ghi nhận COD về ngân hàng",
@@ -56,14 +57,29 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   "carrier.request": "Gửi yêu cầu tới ĐVVC",
   "carrier.request.result": "ĐVVC trả lời yêu cầu",
   "carrier.manual": "Xác nhận đã làm tay trên ĐVVC",
+  // Company OS · Agent C — sản xuất nửa đầu.
+  PRODUCTION_TOPIC_CREATE: "Mở topic sản xuất",
+  PRODUCTION_TOPIC_MESSAGE: "Ghi trao đổi vào topic sản xuất",
+  PRODUCTION_TOPIC_STATUS: "Đổi trạng thái topic sản xuất",
+  COST_SHEET_CREATE: "Lập phiên bản giá thành",
+  COST_SHEET_UPDATE: "Sửa bảng giá thành nháp",
+  COST_SHEET_FINALIZE: "Chốt giá thành",
+  SAMPLE_CREATE: "Ghi mẫu xưởng làm",
+  SAMPLE_UPDATE: "Sửa mẫu xưởng đang làm",
+  SAMPLE_SUBMIT: "Gửi mẫu chờ duyệt",
+  SAMPLE_REVIEW: "Ghi phán quyết duyệt mẫu",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
+  PRODUCTION_TOPIC: "Topic sản xuất",
+  COST_SHEET: "Bảng giá thành",
+  SAMPLE: "Mẫu xưởng làm",
   USER: "Người dùng",
   ORDER: "Đơn hàng",
   SHIPMENT: "Vận đơn",
   EXPENSE: "Chi phí",
   STOCK_RECEIPT: "Phiếu kho",
+  RETURN_DISPOSITION: "Kết cục hàng hoàn",
   AD_SPEND: "Chi tiêu QC",
   COD_BATCH: "Bảng kê COD",
   PRODUCT: "Sản phẩm",

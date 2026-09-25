@@ -114,6 +114,7 @@ const ROUTES = [
   "/inventory/shortage",
   "/inventory/decisions",
   "/models",
+  "/production",
   "/inventory/purchasing",
   "/customers",
   "/customers/retention",

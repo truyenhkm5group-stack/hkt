@@ -170,6 +170,15 @@ const SOURCE_RULES: SlaRule[] = [
     department: "WAREHOUSE",
     alsoShownOn: "Kiểm đếm hàng hoàn",
   },
+  {
+    key: "RETURN_DISPOSITION",
+    label: "Hàng hoàn không tái nhập · chờ kết cục",
+    // LẤY LẠI từ sổ nguồn (luật 22) — hôm nay là `null`: chủ shop chưa chốt số giờ nào cho việc này.
+    hours: WORK_SOURCE_SPEC.RETURN_DISPOSITION.slaHours,
+    why: "Chưa có hạn do chủ shop chốt. Món nằm trên kệ không mất giá theo giờ như kiện đang giao; đặt một con số bịa chỉ sinh ra số trễ hạn giả.",
+    department: "WAREHOUSE",
+    alsoShownOn: "",
+  },
   /*
     BỐN LÝ DO TẮC, BỐN HẠN KHÁC NHAU — KHÔNG GỘP LÀM MỘT.
 
@@ -260,6 +269,26 @@ const SOURCE_RULES: SlaRule[] = [
       "của lời duyệt, không phải hạn phải duyệt. Đặt được theo từng nhóm: khoá APPROVAL:<nhóm>.",
     department: "MANAGEMENT",
     alsoShownOn: "Cần xử lý",
+  },
+
+  /* ───── Sản xuất nửa đầu (Company OS · Agent C) ───── */
+  {
+    key: "PRODUCTION_TOPIC",
+    label: "Topic sản xuất chờ báo giá / chờ quyết",
+    hours: WORK_SOURCE_SPEC.PRODUCTION_TOPIC.slaHours,
+    why:
+      "CỐ Ý bỏ trống: chưa có hằng số đang chạy nào nói một topic hỏi giá được phép nằm bao lâu, và gõ một con số " +
+      "mới ở đây là bịa (AGENTS.md mục 22, 38). Chủ shop đặt được — nó đo 'topic đã mở bao lâu', tính từ lúc mở.",
+    department: WORK_SOURCE_SPEC.PRODUCTION_TOPIC.department,
+    alsoShownOn: "Sản xuất · Topic",
+  },
+  {
+    key: "SAMPLE_REVIEW",
+    label: "Mẫu chờ duyệt",
+    hours: WORK_SOURCE_SPEC.SAMPLE_REVIEW.slaHours,
+    why: "CỐ Ý bỏ trống vì cùng lý do: không có hằng số đang chạy nào cho hạn duyệt mẫu. Chủ shop đặt ở đây khi đã quyết một con số.",
+    department: WORK_SOURCE_SPEC.SAMPLE_REVIEW.department,
+    alsoShownOn: "Sản xuất · Topic",
   },
 
   /* ───── Việc tay & định kỳ ───── */

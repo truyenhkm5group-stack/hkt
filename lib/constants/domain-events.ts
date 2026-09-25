@@ -53,6 +53,12 @@ export const MODEL_SUBJECT = "product_model";
 /** Tệp lõi dịch vụ của sổ mẫu — nơi DUY NHẤT phát `model.*`. */
 const MODEL_EMITTER = "lib/models/service.ts";
 
+/** Agent C — mỗi miền con một tệp lõi dịch vụ (lib/production/*), mỗi tệp là nơi DUY NHẤT phát tên của nó. */
+const C_TOPIC_EMITTER = "lib/production/topics.ts";
+const C_COSTING_EMITTER = "lib/production/costing.ts";
+const C_SAMPLE_EMITTER = "lib/production/samples.ts";
+const C_ORDER_EMITTER = "lib/production/orders.ts";
+
 export const DOMAIN_EVENTS = [
   // ─── Agent A · sổ mẫu (LIVE ở Wave 1) ───
   {
@@ -88,22 +94,31 @@ export const DOMAIN_EVENTS = [
     why: "Người phụ trách mẫu đổi — do người chọn, không bao giờ do máy suy.",
   },
 
-  // ─── Agent C · sản xuất nửa đầu (Wave 2) ───
-  { name: "production_topic.created", subjectType: "production_topic", owner: "C", status: "RESERVED", emitter: null, why: "Mở chủ đề hỏi giá / bàn phương án với xưởng cho một mẫu." },
-  { name: "production_topic.status_changed", subjectType: "production_topic", owner: "C", status: "RESERVED", emitter: null, why: "Chủ đề sản xuất đổi trạng thái." },
-  { name: "production_topic.message_added", subjectType: "production_topic", owner: "C", status: "RESERVED", emitter: null, why: "Thêm một lượt trao đổi vào chủ đề sản xuất (append-only)." },
-  { name: "costing.version_created", subjectType: "cost_sheet", owner: "C", status: "RESERVED", emitter: null, why: "Một phiên bản bảng giá thành mới cho mẫu." },
-  { name: "costing.finalized", subjectType: "cost_sheet", owner: "C", status: "RESERVED", emitter: null, why: "Chốt bảng giá thành — phiên bản FINAL bất biến." },
-  { name: "sample.created", subjectType: "sample", owner: "C", status: "RESERVED", emitter: null, why: "Xưởng làm một phiên bản mẫu mới." },
-  { name: "sample.reviewed", subjectType: "sample", owner: "C", status: "RESERVED", emitter: null, why: "Người duyệt ghi nhận xét một phiên bản mẫu (yêu cầu sửa / loại / duyệt)." },
-  { name: "sample.approved", subjectType: "sample", owner: "C", status: "RESERVED", emitter: null, why: "Mẫu được duyệt — có thể đưa vòng đời sang APPROVED qua transitionModelCore." },
-  { name: "design_version.approved", subjectType: "design_version", owner: "C", status: "RESERVED", emitter: null, why: "Ảnh chụp thiết kế bất biến được duyệt để lệnh sản xuất trỏ vào." },
-  { name: "production_order.linked_design", subjectType: "production_order", owner: "C", status: "RESERVED", emitter: null, why: "Lệnh sản xuất được nối vào một bản thiết kế đã duyệt." },
-  { name: "production_plan.overridden", subjectType: "production_order", owner: "C", status: "RESERVED", emitter: null, why: "Người chốt số khác gợi ý của máy, kèm lý do." },
+  // ─── Agent C · sản xuất nửa đầu (Wave 2 — LIVE: lib/production/*) ───
+  { name: "production_topic.created", subjectType: "production_topic", owner: "C", status: "LIVE", emitter: C_TOPIC_EMITTER, why: "Mở chủ đề hỏi giá / bàn phương án với xưởng cho một mẫu." },
+  { name: "production_topic.status_changed", subjectType: "production_topic", owner: "C", status: "LIVE", emitter: C_TOPIC_EMITTER, why: "Chủ đề sản xuất đổi trạng thái." },
+  { name: "production_topic.message_added", subjectType: "production_topic", owner: "C", status: "LIVE", emitter: C_TOPIC_EMITTER, why: "Thêm một lượt trao đổi vào chủ đề sản xuất (append-only)." },
+  { name: "costing.version_created", subjectType: "cost_sheet", owner: "C", status: "LIVE", emitter: C_COSTING_EMITTER, why: "Một phiên bản bảng giá thành mới cho mẫu." },
+  { name: "costing.finalized", subjectType: "cost_sheet", owner: "C", status: "LIVE", emitter: C_COSTING_EMITTER, why: "Chốt bảng giá thành — phiên bản FINAL bất biến." },
+  { name: "sample.created", subjectType: "sample", owner: "C", status: "LIVE", emitter: C_SAMPLE_EMITTER, why: "Xưởng làm một phiên bản mẫu mới." },
+  {
+    name: "sample.submitted",
+    subjectType: "sample",
+    owner: "C",
+    status: "LIVE",
+    emitter: C_SAMPLE_EMITTER,
+    why: "Mẫu đã về tay shop, chờ duyệt — là sự kiện GÂY RA lượt chuyển vòng đời SAMPLING → SAMPLE_REVIEW (Q3 cần một sự kiện để trỏ về).",
+  },
+  { name: "sample.reviewed", subjectType: "sample", owner: "C", status: "LIVE", emitter: C_SAMPLE_EMITTER, why: "Người duyệt ghi nhận xét một phiên bản mẫu (yêu cầu sửa / loại / duyệt)." },
+  { name: "sample.approved", subjectType: "sample", owner: "C", status: "LIVE", emitter: C_SAMPLE_EMITTER, why: "Mẫu được duyệt — có thể đưa vòng đời sang APPROVED qua transitionModelCore." },
+  { name: "design_version.approved", subjectType: "design_version", owner: "C", status: "LIVE", emitter: C_SAMPLE_EMITTER, why: "Ảnh chụp thiết kế bất biến được duyệt để lệnh sản xuất trỏ vào." },
+  { name: "production_order.linked_design", subjectType: "production_order", owner: "C", status: "LIVE", emitter: C_ORDER_EMITTER, why: "Lệnh sản xuất được nối vào một bản thiết kế đã duyệt." },
+  { name: "production_plan.overridden", subjectType: "production_order", owner: "C", status: "LIVE", emitter: C_ORDER_EMITTER, why: "Người chốt số khác gợi ý của máy, kèm lý do." },
 
   // ─── Agent D / E / G / H ───
   { name: "stock_receipt.linked_production", subjectType: "stock_receipt", owner: "D", status: "RESERVED", emitter: null, why: "Phiếu nhập kho được nối với lệnh / lô sản xuất (D chỉ thêm cột ở Wave 1)." },
-  { name: "return.disposition_set", subjectType: "return_inspection", owner: "E", status: "RESERVED", emitter: null, why: "Kết quả xử lý hàng hoàn: sửa lại / huỷ." },
+  // Agent E (0136): LIVE. Một sự kiện cho MỖI dòng sổ `return_dispositions` (khoá chống trùng theo id dòng), phát trong CÙNG giao dịch với dòng sổ và phiếu tái nhập (nếu có).
+  { name: "return.disposition_set", subjectType: "return_inspection", owner: "E", status: "LIVE", emitter: "lib/returns/disposition.ts", why: "Kết cục của hàng hoàn không tái nhập: sửa / giặt lại, nhập lại sau sửa, huỷ bỏ, trả xưởng." },
   { name: "approval.executed", subjectType: "approval_request", owner: "G", status: "RESERVED", emitter: null, why: "Yêu cầu duyệt đã được tiêu thụ đúng một lần." },
   { name: "recommendation.decided", subjectType: "recommendation", owner: "H", status: "RESERVED", emitter: null, why: "Chủ shop chấp nhận / bỏ qua một đề xuất trên cockpit — để đo độ đúng sau này." },
 ] as const satisfies readonly DomainEventSpec[];
@@ -118,6 +133,18 @@ export const DOMAIN_EVENT_LABEL: Partial<Record<DomainEventName, string>> = {
   "model.linked": "Nối sản phẩm / thiết kế",
   "model.state_changed": "Đổi trạng thái vòng đời",
   "model.owner_changed": "Đổi người phụ trách",
+  "production_topic.created": "Mở topic sản xuất",
+  "production_topic.status_changed": "Topic sản xuất đổi trạng thái",
+  "production_topic.message_added": "Trao đổi trong topic sản xuất",
+  "costing.version_created": "Phiên bản giá thành mới",
+  "costing.finalized": "Chốt giá thành",
+  "sample.created": "Mẫu mới",
+  "sample.submitted": "Mẫu chờ duyệt",
+  "sample.reviewed": "Duyệt mẫu: ghi phán quyết",
+  "sample.approved": "Mẫu được duyệt",
+  "design_version.approved": "Bản thiết kế đã duyệt",
+  "production_order.linked_design": "Lệnh SX trỏ bản duyệt",
+  "production_plan.overridden": "Số đặt khác gợi ý máy",
 };
 
 export function domainEventLabel(name: string): string {
