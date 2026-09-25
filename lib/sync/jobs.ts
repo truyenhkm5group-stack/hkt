@@ -48,6 +48,7 @@ import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
+import { runModelRegistryJob } from "@/lib/models/registry-job";
 
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
@@ -370,6 +371,14 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     description:
       "Form landing ghi `utm_source` bằng adset_id. `fb_ads` chỉ tra ad_id có trong đơn Pancake (đơn landing không có), còn `ad_spends` chỉ giữ số liệu ở mức chiến dịch — nên adset_id không khớp được ở đâu cả. Job này tra THẲNG từng mã đang cần về `fb_adsets` (kể cả nhóm đã tắt), để chuỗi adset → chiến dịch → TKQC → marketer khép kín. Không đụng chi tiêu hay thanh toán.",
     run: (o) => syncFacebookAdsetIndex({ dryRun: o.params?.dryRun === "1" }),
+  },
+  // Company OS · Agent A — sổ mẫu. Chạy TAY (nút trên /models hoặc trang Kết nối dữ liệu); lên lịch là việc chủ shop duyệt.
+  "model-registry": {
+    label: "Đồng bộ sổ mẫu",
+    source: "ALL",
+    description:
+      "Đăng ký vào sổ mẫu (`product_models`) mọi mã chủ shop đang có: sản phẩm Pancake có `custom_id` và thiết kế TK. Thiết kế và sản phẩm cùng mã ⇒ một mẫu. Hai sản phẩm cùng mã ⇒ KHÔNG đăng ký, hiện ở danh sách mã mơ hồ để người quyết. Trạng thái vòng đời của mẫu mới để TRỐNG (chưa khai) — không backfill. Chạy lại không đẻ dòng mới.",
+    run: (o) => runModelRegistryJob({ trigger: o.trigger, actor: o.actor }),
   },
   "outcome-materialize": {
     label: "Dựng lại kết quả đơn đã tính sẵn",

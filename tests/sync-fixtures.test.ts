@@ -217,6 +217,7 @@ import { testWorkshopLedgerPure, testWorkshopLedgerQueries } from "./workshop-le
 import { testWorkshopSheetImportDb, testWorkshopSheetImportPure } from "./workshop-sheet-import.test";
 import { testWorkshopBankLink } from "./workshop-bank-link.test";
 import { testMarketerPricePure, testMarketerPriceQueries } from "./marketer-price.test";
+import { testCompanyOsModelsPure, testCompanyOsModelsQueries } from "./company-os-models.test";
 import { testCrm } from "./crm.test";
 import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
@@ -1867,6 +1868,8 @@ async function main() {
   await testWorkshopBankLink(db);
   testMarketerPricePure();
   await testMarketerPriceQueries(db);
+  testCompanyOsModelsPure();
+  await testCompanyOsModelsQueries(db);
   await testCrm(db);
   testScenario();
   testAccessControl();

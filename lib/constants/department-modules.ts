@@ -242,6 +242,14 @@ export const NAV_MODULES = [
     permission: "planning:view",
     why: "Bỏ thêm vốn vào mẫu nào, dừng mẫu nào: cùng một quyết định với đặt hàng, chỉ nhìn từ phía tiền.",
   },
+  // Company OS · Agent A — sổ mẫu & vòng đời.
+  {
+    href: "/models",
+    label: "Vòng đời mẫu",
+    zone: "PRODUCTION",
+    permission: "models:view",
+    why: "Mẫu nào đang ở khâu nào — thắng test, bàn giá, làm mẫu, sản xuất, bán, xả — và ai phụ trách. Các khai báo trên trang này quyết định mẫu nào được đưa vào sản xuất / đặt lại / ngừng, tức quyết định của phòng Sản xuất; marketing đọc nó để biết mẫu thắng của mình đã đi tới đâu.",
+  },
   {
     href: "/products/performance",
     label: "Hiệu quả mẫu mã",
