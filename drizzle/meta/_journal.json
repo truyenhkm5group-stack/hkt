@@ -890,6 +890,13 @@
       "when": 1790002408245,
       "tag": "0127_stock_wait_log",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1790002468245,
+      "tag": "0128_workshop_ledger",
+      "breakpoints": true
     }
   ]
 }

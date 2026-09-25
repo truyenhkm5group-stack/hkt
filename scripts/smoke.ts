@@ -110,6 +110,7 @@ const ROUTES = [
   "/inventory/returns",
   "/returns",
   "/inventory/planning",
+  "/inventory/workshop",
   "/inventory/shortage",
   "/inventory/decisions",
   "/inventory/purchasing",

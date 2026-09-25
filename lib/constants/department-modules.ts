@@ -222,6 +222,13 @@ export const NAV_MODULES = [
     why: "Đặt bao nhiêu, mẫu nào, khi nào — quyết định trung tâm của phòng Sản xuất.",
   },
   {
+    href: "/inventory/workshop",
+    label: "Đặt xưởng & thanh toán",
+    zone: "PRODUCTION",
+    permission: "planning:view",
+    why: "Lô đặt xưởng, đợt vải và đợt trả tiền xưởng là việc phòng Sản xuất theo dõi hằng ngày; giá SX thực tế sinh ra từ đây là căn cứ cho lần đặt hàng sau.",
+  },
+  {
     href: "/inventory/shortage",
     label: "Thiếu hàng giao đơn",
     zone: "PRODUCTION",
