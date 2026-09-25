@@ -3,6 +3,7 @@ import { inArray, like } from "drizzle-orm";
 import type { Db } from "@/db";
 import { schema } from "@/db";
 import { writeStockWaitLog } from "@/lib/alerts/stock-wait-log";
+import { clearMemo } from "@/lib/cache";
 import type { OrderStockVerdict, StockShortageSnapshot } from "@/lib/constants/stock-shortage";
 import {
   PANCAKE_CANCEL_CODES,
@@ -25,7 +26,7 @@ import { APPROX_REGION_PROVINCES, provinceCatalog, provinceRegion } from "@/lib/
 import { MIN_TIER_SAMPLE } from "@/lib/queries/return-rate";
 import { getStockWaitReport } from "@/lib/queries/stock-wait-report";
 import { SUMMARY_MAX_LINES, mocBatDau, soNgay, stockWaitSummaryLines } from "@/scripts/stock-wait-summary";
-import type { Period } from "@/lib/search-params";
+import { searchParamsQuery, type Period } from "@/lib/search-params";
 
 /**
  * ═══════════ CHỜ HÀNG, VÙNG MIỀN VÀ GTC ═══════════
@@ -95,6 +96,9 @@ export function testStockWaitReportPure() {
   assert.equal(waitBucketOf(Number.NaN), "?");
   assert.deepEqual(PANCAKE_WAITING_CODES.sort((a, b) => a - b), [11, 20], "nhóm Chờ hàng suy từ bảng trạng thái Pancake");
   assert.deepEqual([...WAIT_ORIGINS], ["ORDERED", "CONFIRMED"]);
+  // Địa chỉ cũ /reports/stock-wait chuyển hướng GIỮ NGUYÊN bộ lọc, kể cả khoá lặp (nhiều mã hàng).
+  assert.equal(searchParamsQuery({ period: "90d", product: ["Q001", "Q002"], trong: undefined }), "?period=90d&product=Q001&product=Q002");
+  assert.equal(searchParamsQuery({}), "", "không có bộ lọc ⇒ không có dấu ?");
   assert.equal(parseWaitOrigin("confirmed"), "CONFIRMED");
   assert.equal(parseWaitOrigin("ORDERED"), "ORDERED");
   assert.equal(parseWaitOrigin("lung tung"), "ORDERED", "giá trị lạ rơi về mốc mặc định, không ném lỗi");
@@ -230,6 +234,16 @@ async function cleanup(db: Db) {
   await db.delete(schema.orders).where(inArray(schema.orders.id, ids));
 }
 
+async function cleanupProducts(db: Db) {
+  await db.delete(schema.productVariants).where(inArray(schema.productVariants.id, [`${P}va`, `${P}vb`]));
+  await db.delete(schema.products).where(inArray(schema.products.id, [`${P}pa`, `${P}pb`]));
+}
+
+/** Gắn một dòng hàng của mẫu `variant` cho đơn — để bộ lọc mã hàng có quan hệ thật mà đi. */
+async function item(db: Db, id: string, variant: "va" | "vb") {
+  await db.insert(schema.orderItems).values({ id: `${P}${id}-i`, orderId: `${P}${id}`, variantId: `${P}${variant}`, productId: `${P}p${variant.slice(1)}`, productName: "Hàng kiểm chờ", quantity: 1, unitPrice: 400_000, lineTotal: 400_000 });
+}
+
 let seq = 0;
 /** Đơn có kết cục do chứng từ ĐVVC (501/504), mốc bàn giao = `handoff`. */
 async function shipped(db: Db, id: string, province: string, inserted: Date, waitDays: number, outcome: "DELIVERED" | "RETURNED") {
@@ -289,9 +303,22 @@ export async function testStockWaitReportDb(db: Db) {
   // Mốc XÁC NHẬN: nhóm chờ lâu (l1..l11) rời nhóm chờ sau 6 ngày ⇒ tính từ xác nhận chỉ còn 2 ngày.
   // Nhóm gửi sớm (e*) và đơn "Mars" KHÔNG có lịch sử trạng thái ⇒ không có mốc xác nhận.
   await db.insert(schema.orderStatusHistory).values(Array.from({ length: 11 }, (_, k) => ({ orderId: `${P}l${k + 1}`, status: 1, updatedAt: new Date(base.getTime() + 6 * DAY) })));
+  // MÃ HÀNG: nhóm gửi sớm (e*) mang mã SWRA, nhóm chờ lâu (l*) và đơn đang Chờ hàng mang mã SWRB.
+  await cleanupProducts(db);
+  await db.insert(schema.products).values([
+    { id: `${P}pa`, name: "Hàng kiểm A", customId: "SWRA" },
+    { id: `${P}pb`, name: "Hàng kiểm B", customId: "SWRB" },
+  ]);
+  await db.insert(schema.productVariants).values([
+    { id: `${P}va`, productId: `${P}pa`, sku: "SWRA-1", color: "Đen", size: "M", retailPrice: 400_000 },
+    { id: `${P}vb`, productId: `${P}pb`, sku: "SWRB-1", color: "Đen", size: "M", retailPrice: 400_000 },
+  ]);
+  for (let k = 0; k < 12; k++) await item(db, `e${k}`, "va");
+  for (let k = 0; k < 12; k++) await item(db, `l${k}`, "vb");
   // Đơn Pancake đang ở "Chờ hàng" từ 20/03 tới giờ.
   await db.insert(schema.orders).values({ id: `${P}wait`, stage: "WAITING" as never, status: 11, shipProvince: "Cần Thơ", billFullName: "Trần Thị Mẫu-SWR-7731", totalPriceAfterDiscount: 300_000, insertedAt: at("2017-03-20T03:00:00Z") });
   await db.insert(schema.orderStatusHistory).values({ orderId: `${P}wait`, status: 11, updatedAt: at("2017-03-20T03:00:00Z") });
+  await item(db, "wait", "vb");
 
   // ───────── Sổ: mở → đóng → mở lại → đóng ─────────
   const e0 = `${P}e0`;
@@ -381,6 +408,33 @@ export async function testStockWaitReportDb(db: Db) {
   assert.equal(mocBatDau(["--days=30", "--origin=confirmed"]), "CONFIRMED");
   assert.equal(mocBatDau([]), "ORDERED");
 
+  // ───────── BỘ LỌC MÃ HÀNG: áp cho MỌI khối, qua quan hệ thật ─────────
+  clearMemo();
+  const fa = await getStockWaitReport(KY, { fresh: true, codes: ["SWRA"] });
+  assert.deepEqual(fa.productFilter?.codes, ["SWRA"]);
+  assert.equal(fa.report.byWait.find((x) => x.key === "D0")!.orders, 12, "mã SWRA: nhóm gửi sớm còn nguyên");
+  assert.equal(fa.report.byWait.find((x) => x.key === "D7_14")!.orders, 0, "mã SWRA: nhóm chờ lâu (mã khác) biến mất khỏi bảng GTC");
+  assert.equal(fa.report.overall.orders, 12, "đơn không chứa mã SWRA không được vào bất kỳ khối nào");
+  assert.equal(fa.current.find((x) => x.orderId === `${P}wait`), undefined, "đơn đang chờ của mã khác không hiện trong danh sách");
+  assert.equal(fa.daily.find((x) => x.day === "2017-03-11")!.erpWaiting, 1, "sổ ERP: e0 mang mã SWRA ⇒ vẫn đếm");
+  assert.equal(fa.daily.find((x) => x.day === "2017-03-03")!.pancakeWaiting, 0, "lịch sử Chờ hàng của l0 (mã SWRB) không lọt vào mã SWRA");
+  const fb = await getStockWaitReport(KY, { fresh: true, codes: [" swrb "] });
+  assert.deepEqual(fb.productFilter?.codes, ["SWRB"], "mã gõ thường / thừa khoảng trắng vẫn là cùng một mã");
+  assert.equal(fb.report.byWait.find((x) => x.key === "D7_14")!.orders, 12);
+  assert.equal(fb.report.byWait.find((x) => x.key === "D0")!.orders, 0);
+  assert.ok(fb.current.find((x) => x.orderId === `${P}wait`), "đơn đang Chờ hàng mang mã SWRB phải hiện");
+  assert.equal(fb.daily.find((x) => x.day === "2017-03-11")!.erpWaiting, 0, "sổ ERP của mã khác không lọt vào");
+  assert.equal(fb.daily.find((x) => x.day === "2017-03-03")!.pancakeWaiting, 1);
+  const fx = await getStockWaitReport(KY, { fresh: true, codes: ["KHONGCO"] });
+  assert.equal(fx.report.overall.orders, 0, "mã không tồn tại ⇒ rỗng, KHÔNG rơi về 'mọi mã'");
+  assert.deepEqual(fx.productFilter?.unknown, ["KHONGCO"], "và phải nói ra mã nào không tìm thấy");
+  assert.equal((await getStockWaitReport(KY, { fresh: true })).productFilter, null, "không chọn mã ⇒ không lọc");
+  // Mã nằm trong khoá đệm: hai lời gọi không-tươi liên tiếp với hai mã phải ra hai bảng.
+  clearMemo();
+  const ma = await getStockWaitReport(KY, { codes: ["SWRA"] });
+  const mb = await getStockWaitReport(KY, { codes: ["SWRB"] });
+  assert.notEqual(ma.report.overall.orders, mb.report.overall.orders, "đệm theo kỳ mà quên mã hàng thì lượt thứ hai trả nhầm bảng của mã kia");
+
   // ───────── Tóm tắt ops: số tổng hợp, KHÔNG BAO GIỜ tên khách, lọt trần 60 dòng ─────────
   const lines = stockWaitSummaryLines(d, 30);
   assert.ok(lines.length <= SUMMARY_MAX_LINES, `kênh tóm tắt chỉ cho ${SUMMARY_MAX_LINES} dòng`);
@@ -393,5 +447,6 @@ export async function testStockWaitReportDb(db: Db) {
   assert.equal(soNgay(["--days=1"]), 7);
 
   await cleanup(db);
+  await cleanupProducts(db);
   console.log("✓ Chờ hàng & GTC (CSDL): ngày chờ = mốc bàn giao − lên đơn, kết quả qua ORDER_OUTCOME · sổ mở/đóng/mở lại giữ mốc đầu · lịch sử Chờ hàng Pancake thành số theo ngày · điểm gãy + đề xuất sinh từ số");
 }

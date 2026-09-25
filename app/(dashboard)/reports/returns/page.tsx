@@ -207,7 +207,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
             {/* Tỷ lệ giao thành công là đòn bẩy lợi nhuận mạnh nhất — mở thẳng sang chỗ tính thử */}
             {/* Khách chờ bao lâu và ở vùng nào — hai yếu tố vận hành đứng sau tỷ lệ này */}
             <Button asChild variant="outline" size="sm">
-              <Link href="/reports/stock-wait">
+              <Link href="/shipments/stock-wait">
                 <Timer className="size-4" /> Chờ hàng & GTC
               </Link>
             </Button>

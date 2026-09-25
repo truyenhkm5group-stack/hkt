@@ -84,7 +84,7 @@ export default async function StockShortagePage({ searchParams }: { searchParams
               </Link>
             </Button>
             <Button asChild variant="outline" size="sm">
-              <Link href="/reports/stock-wait">
+              <Link href="/shipments/stock-wait">
                 <Timer className="size-4" /> Chờ hàng & GTC theo ngày
               </Link>
             </Button>

@@ -1226,7 +1226,7 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
     : null;
   /*
     SỔ ĐƠN CHỜ HÀNG — ghi dù tin Lark có bật hay không: tắt nhắn tin không được làm mất phép đo số
-    đơn thiếu hàng theo ngày (`/reports/stock-wait`). Lỗi ở đây cũng không làm hỏng lượt cảnh báo.
+    đơn thiếu hàng theo ngày (`/shipments/stock-wait`). Lỗi ở đây cũng không làm hỏng lượt cảnh báo.
   */
   const stockWaitLog = await runStockWaitLog().catch((e): StockWaitLogResult => ({ waiting: 0, opened: 0, closed: 0, error: e instanceof Error ? e.message : String(e) }));
   return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, stockShortage, stockWaitLog };
