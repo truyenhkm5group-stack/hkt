@@ -13,7 +13,7 @@ import { requireResource } from "@/lib/auth/scope-guard";
 import { ScopeDenied } from "@/components/scope-denied";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { pendingReturnsByVariant } from "@/lib/returns/warehouse";
-import { listStockReceipts, listVariantsForReceipt, stockReceiptSummary } from "@/lib/queries/stock";
+import { listOpenProductionLinks, listStockReceipts, listVariantsForReceipt, stockReceiptSummary, type StockReceiptRow } from "@/lib/queries/stock";
 import { param, type SearchParams } from "@/lib/search-params";
 import { STOCK_RECEIPT_KIND_LABEL, type StockReceiptKind } from "@/lib/validation/stock";
 import { cn } from "@/lib/utils";
@@ -27,12 +27,13 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
   if (decision.allow === "NONE") return <ScopeDenied title="Phiếu nhập kho" reason={decision.reason} fix={decision.fix} />;
   const canWrite = can(user, "inventory:write");
   const selectedId = param(raw, "receipt");
-  const [receipts, summary, variants, pendingMap, supplierOptions] = await Promise.all([
+  const [receipts, summary, variants, pendingMap, supplierOptions, productionLinks] = await Promise.all([
     listStockReceipts(200),
     stockReceiptSummary(),
     canWrite ? listVariantsForReceipt() : Promise.resolve([]),
     canWrite ? pendingReturnsByVariant() : Promise.resolve(new Map<string, number>()),
     canWrite ? activeSupplierNames() : Promise.resolve([] as string[]),
+    canWrite ? listOpenProductionLinks() : Promise.resolve([]),
   ]);
   const pendingReturns = Object.fromEntries(pendingMap);
   const pendingReturnTotal = [...pendingMap.values()].reduce((t, n) => t + n, 0);
@@ -49,7 +50,7 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
             <>
               <ReceiptDialog variants={variants} defaultKind="ADJUSTMENT" pendingReturns={pendingReturns} />
               <ReceiptDialog variants={variants} defaultKind="RETURN" pendingReturns={pendingReturns} />
-              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} supplierOptions={supplierOptions} />
+              <ReceiptDialog variants={variants} defaultKind="RECEIPT" pendingReturns={pendingReturns} supplierOptions={supplierOptions} productionLinks={productionLinks} />
             </>
           ) : null
         }
@@ -106,6 +107,7 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
                     <TableCell className="max-w-[220px]">
                       <div className="truncate">{r.reference || "—"}</div>
                       <div className="truncate text-xs text-muted-foreground">{r.supplier || r.note || ""}</div>
+                      {productionLinkLabel(r) ? <div className="truncate text-[10.5px] text-muted-foreground">{productionLinkLabel(r)}</div> : null}
                     </TableCell>
                     <TableCell className="numeric">{formatNumber(r.items.length)}</TableCell>
                     <TableCell className={cn("numeric text-right font-semibold", r.totalQuantity < 0 ? "text-rose-600" : "")}>
@@ -129,7 +131,7 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
         <div id="chi-tiet">
           <SectionCard
             title={`${STOCK_RECEIPT_KIND_LABEL[selected.kind as StockReceiptKind] ?? selected.kind} ngày ${formatDate(selected.receivedAt)}`}
-            description={[selected.reference, selected.supplier, selected.note].filter(Boolean).join(" · ") || undefined}
+            description={[selected.reference, selected.supplier, productionLinkLabel(selected), selected.note].filter(Boolean).join(" · ") || undefined}
             actions={
               <Button asChild variant="ghost" size="sm">
                 <Link href="/inventory/receipts">Đóng</Link>
@@ -177,4 +179,15 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
       ) : null}
     </div>
   );
+}
+
+/**
+ * Phiếu nhập này là hàng của lệnh SX / lô xưởng nào (0132). `null` = chưa khai — phiếu cũ không
+ * được đoán lô (AGENTS.md mục 35), nên không in gì thay vì in một lô đoán.
+ */
+function productionLinkLabel(r: StockReceiptRow): string | null {
+  const parts: string[] = [];
+  if (r.productionOrder) parts.push(`Lệnh ${r.productionOrder.code}`);
+  if (r.productionBatch) parts.push(`Lô ${r.productionBatch.productCode} #${r.productionBatch.batchNo}`);
+  return parts.length ? parts.join(" · ") : null;
 }

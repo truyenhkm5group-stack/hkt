@@ -259,6 +259,8 @@ async function getDashboardDataUncached(period: Period) {
       newOrders: Number(newOrders?.count ?? 0),
       failedDelivery: Number(failedDelivery?.count ?? 0),
       lowStock: stockRisk ? stockRisk.atRisk : null,
+      /** Mẫu mã ÂM SỔ — tách khỏi tổng tồn, hiện riêng để đi kiểm. `null` = sổ kho chưa tính kịp. */
+      negativeStockRows: stockRisk ? stockRisk.negativeRows : null,
       staleShipments: Number(stale?.count ?? 0),
       codWaiting: { count: codCash.codWaiting.count, amount: codCash.codWaiting.amount, collected: codCash.codWaiting.collected, deductedByStatements: codCash.codWaiting.deductedByStatements },
     },

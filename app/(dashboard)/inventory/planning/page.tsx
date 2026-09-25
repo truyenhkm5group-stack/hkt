@@ -218,7 +218,7 @@ export default async function PlanningPage({ searchParams }: { searchParams: Pro
         </SectionCard>
       ))}
       {/* Đối trọng: bảng trên nói chỗ cần đổ thêm tiền, bảng này nói chỗ tiền đang nằm chết. */}
-      <SlowMovingSection />
+      <SlowMovingSection canWrite={canWrite} />
       {report.products.length === 0 ? <SectionCard><p className="py-6 text-center text-sm text-muted-foreground">Chưa có mẫu mã nào có tồn hoặc bán trong 30 ngày. Nhập phiếu nhập / kiểm kê ở “Nhập hàng & kiểm kê” trước.</p></SectionCard> : null}
     </div>
   );

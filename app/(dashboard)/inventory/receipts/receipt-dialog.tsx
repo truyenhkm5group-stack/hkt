@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { createStockReceipt } from "@/lib/actions/stock";
 import { formatNumber, formatVND, todayVN } from "@/lib/format";
-import type { VariantPickerRow } from "@/lib/queries/stock";
+import type { ProductionLinkOption, VariantPickerRow } from "@/lib/queries/stock";
 import { STOCK_RECEIPT_KIND_HINT, STOCK_RECEIPT_KIND_LABEL, STOCK_RECEIPT_KINDS, type StockReceiptKind } from "@/lib/validation/stock";
 import { STICKY_HEAD } from "@/lib/constants/table-ux";
 import { cn } from "@/lib/utils";
@@ -25,13 +25,15 @@ function toInt(value: string) {
 }
 
 /** Dialog lập phiếu kho (nhập mới / tái nhập hàng hoàn / xuất tay / điều chỉnh kiểm kê) cho nhiều mẫu mã cùng lúc */
-export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturns = {}, supplierOptions = [] }: { variants: VariantPickerRow[]; defaultKind?: StockReceiptKind; pendingReturns?: Record<string, number>; /** Tên xưởng trong danh mục — chỉ là GỢI Ý. */ supplierOptions?: string[] }) {
+export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturns = {}, supplierOptions = [], productionLinks = [] }: { variants: VariantPickerRow[]; defaultKind?: StockReceiptKind; pendingReturns?: Record<string, number>; /** Tên xưởng trong danh mục — chỉ là GỢI Ý. */ supplierOptions?: string[]; /** Lệnh SX đã gửi + lô xưởng đang mở — để NGƯỜI chọn phiếu nhập này là hàng của lần đặt nào (0132). */ productionLinks?: ProductionLinkOption[] }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<StockReceiptKind>(defaultKind);
   const [receivedAt, setReceivedAt] = useState(todayVN());
   const [reference, setReference] = useState("");
   const [supplier, setSupplier] = useState("");
   const [note, setNote] = useState("");
+  const [productionOrderId, setProductionOrderId] = useState("");
+  const [productionBatchId, setProductionBatchId] = useState("");
   const [search, setSearch] = useState("");
   const [onlySelling, setOnlySelling] = useState(true);
   const [inputs, setInputs] = useState<Record<string, RowInput>>({});
@@ -62,6 +64,17 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
     return list;
   }, [variants, inputs, kind]);
 
+  // Đã gõ tên xưởng ⇒ chỉ hiện lệnh / lô của ĐÚNG xưởng đó (so tên đã chuẩn hoá); chưa gõ ⇒ tất cả.
+  const linkOptions = useMemo(() => {
+    const key = supplier.trim().toLowerCase();
+    return key ? productionLinks.filter((l) => l.supplier.trim().toLowerCase() === key) : productionLinks;
+  }, [productionLinks, supplier]);
+  const orderOptions = linkOptions.filter((l) => l.kind === "ORDER");
+  const batchOptions = linkOptions.filter((l) => l.kind === "BATCH");
+  // Đổi tên xưởng làm lựa chọn cũ rơi khỏi danh sách ⇒ coi như CHƯA KHAI, không gửi ngầm một mã đã khuất.
+  const chosenOrderId = orderOptions.some((o) => o.id === productionOrderId) ? productionOrderId : "";
+  const chosenBatchId = batchOptions.some((o) => o.id === productionBatchId) ? productionBatchId : "";
+
   const totalQty = items.reduce((s, i) => s + i.quantity, 0);
   const totalCost = items.reduce((s, i) => s + Math.max(i.quantity, 0) * i.unitCost, 0);
 
@@ -70,6 +83,8 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
     setReference("");
     setSupplier("");
     setNote("");
+    setProductionOrderId("");
+    setProductionBatchId("");
     setSearch("");
     setReceivedAt(todayVN());
   };
@@ -80,7 +95,8 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
       return;
     }
     startTransition(async () => {
-      const result = await createStockReceipt({ kind, receivedAt, reference, supplier, note, items: items.map(({ variantId, quantity, unitCost }) => ({ variantId, quantity, unitCost })) });
+      const link = kind === "RECEIPT" ? { productionOrderId: chosenOrderId || undefined, productionBatchId: chosenBatchId || undefined } : {};
+      const result = await createStockReceipt({ kind, receivedAt, reference, supplier, note, ...link, items: items.map(({ variantId, quantity, unitCost }) => ({ variantId, quantity, unitCost })) });
       if ("error" in result) {
         toast.error(result.error);
         return;
@@ -148,6 +164,33 @@ export function ReceiptDialog({ variants, defaultKind = "RECEIPT", pendingReturn
             <Label>Tham chiếu</Label>
             <Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Số hoá đơn, mã lô…" />
           </div>
+          {kind === "RECEIPT" && productionLinks.length ? (
+            <>
+              <div className="space-y-1 sm:col-span-2">
+                <Label>Hàng của lệnh sản xuất (tuỳ chọn)</Label>
+                <select value={chosenOrderId} onChange={(e) => setProductionOrderId(e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
+                  <option value="">— Chưa khai —</option>
+                  {orderOptions.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1 sm:col-span-2">
+                <Label>Hàng của lô xưởng (tuỳ chọn)</Label>
+                <select value={chosenBatchId} onChange={(e) => setProductionBatchId(e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
+                  <option value="">— Chưa khai —</option>
+                  {batchOptions.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                {supplier.trim() && !orderOptions.length && !batchOptions.length ? <p className="text-[10.5px] text-muted-foreground">Xưởng này không có lệnh / lô đang mở — xoá tên xưởng để xem tất cả.</p> : null}
+              </div>
+            </>
+          ) : null}
           <div className="space-y-1 sm:col-span-4">
             <Textarea rows={1} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ghi chú (tuỳ chọn)" />
           </div>

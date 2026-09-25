@@ -251,6 +251,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             {formatNumber(data.attention.newOrders)} đơn mới · {formatNumber(data.attention.failedDelivery)} giao thất bại/đang hoàn ·{" "}
             {formatNumber(data.attention.staleShipments)} treo lâu · {formatVND(data.attention.codWaiting.amount, { compact: true })} COD chờ về ·{" "}
             {data.attention.lowStock === null ? "đang tính" : formatNumber(data.attention.lowStock)} mẫu mã cần sản xuất gấp
+            {/* Tồn âm là SAI LỆCH cần kiểm, không phải kho nợ hàng — đứng riêng, không trừ vào tổng tồn. */}
+            {data.attention.negativeStockRows ? (
+              <>
+                {" · "}
+                <Link href="/inventory/planning" className="font-semibold text-rose-600 hover:underline">
+                  {formatNumber(data.attention.negativeStockRows)} mẫu mã âm sổ — cần kiểm
+                </Link>
+              </>
+            ) : null}
           </div>
         </SectionCard>
 

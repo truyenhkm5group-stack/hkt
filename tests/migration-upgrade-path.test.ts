@@ -78,6 +78,7 @@ const MOI = [
   "0128_workshop_ledger",
   "0129_workshop_variants_mkt",
   "0130_marketer_prices",
+  "0132_company_os_inventory",
 ] as const;
 
 /*
