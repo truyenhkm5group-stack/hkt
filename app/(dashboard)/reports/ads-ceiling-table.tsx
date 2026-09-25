@@ -152,7 +152,9 @@ export function AdsCeilingTable({
             {rows.map((r) => {
               const c = tinh(r, r.orders);
               const gv = giaVonMoiSp(r);
-              const coCho = r.cogsUnknownQty > 0;
+              // Ô đặt giá dự tính hiện khi mã có hàng BÁN RA chưa biết giá vốn, HOẶC phiếu nhập trong kỳ thiếu
+              // đơn giá — giá dự tính định giá cả phần đó ở bảng "LN theo hàng nhập" (chủ shop chốt 25/09/2026).
+              const coCho = r.cogsUnknownQty > 0 || r.purchaseUnpricedQty > 0;
               return (
                 <TableRow key={r.productId} className={cn(r.cogsUncoveredQty > 0 && "bg-amber-50/60 dark:bg-amber-950/20")}>
                   <TableCell className="max-w-[230px] whitespace-normal align-top">

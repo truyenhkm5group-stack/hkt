@@ -203,6 +203,7 @@ import { testMemoInflight } from "./memo-inflight.test";
 import { testCacheSemantics } from "./cache-semantics.test";
 import { testRefreshButton } from "./refresh-button.test";
 import { testReportOverrideLatency } from "./report-override-latency.test";
+import { testPurchaseValuation } from "./purchase-valuation.test";
 import { testUseServerExports } from "./use-server-exports.test";
 import { testSmokeCoverage } from "./smoke-coverage.test";
 import { testReturnPipeline } from "./return-pipeline.test";
@@ -984,6 +985,7 @@ async function main() {
       bên trên vẫn khoá nó, nên nó không thể biến mất trong im lặng.
     */
     assert.equal(r.profitOnPurchase, r.expectedRevenue - r.adSpend - r.purchaseCost - r.shipCost - r.opexTotal - r.inventoryRisk - r.tax - r.otherCost, `LN theo hàng nhập ${r.code}`);
+    assert.equal(r.profitOnPurchaseKnown, r.purchaseCostKnown, `LN theo hàng nhập ${r.code}: chưa biết giá trị hàng nhập thì LN cũng chưa biết (25/09/2026)`);
 
     /*
       ═══ SỐ LƯỢNG GIAO THÀNH CÔNG ƯỚC TÍNH SỐNG ĐỘC LẬP VỚI GIÁ VỐN ═══
@@ -1846,6 +1848,7 @@ async function main() {
   await testCacheSemantics();
   await testRefreshButton();
   testReportOverrideLatency();
+  testPurchaseValuation();
   await testBankPipeline(db);
   testFinanceOpsPure();
   await testFinanceOpsQueries(db);
