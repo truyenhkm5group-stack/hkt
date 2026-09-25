@@ -6856,3 +6856,131 @@ export type TechTaskEventRow = typeof techTaskEvents.$inferSelect;
 export type TechAgentRunRow = typeof techAgentRuns.$inferSelect;
 export type TechDeploymentRow = typeof techDeployments.$inferSelect;
 export type TechIncidentRow = typeof techIncidents.$inferSelect;
+
+// ═══ Company OS · Agent A · sổ mẫu, vòng đời, sự kiện ═══
+//
+// Hợp đồng: docs/company-os/shared-contracts.md mục 1–2 (kiến trúc: target-architecture.md Q1–Q5).
+//
+// `product_models` là SỔ DANH TÍNH, không phải chủ dữ liệu sản phẩm (Q1): `products` (uuid Pancake) vẫn
+// là chủ. Sổ này biến phép nối ngầm `products.custom_id = design_concepts.code` thành một dòng có khoá,
+// có vòng đời do NGƯỜI khai và có người phụ trách — vì một mẫu có thể tồn tại TRƯỚC khi lên Pancake.
+//
+// `lifecycle_state = NULL` nghĩa là CHƯA KHAI, không phải "đang bán" (Q3, mục 42): không backfill trạng
+// thái cho mẫu cũ (mục 8.8, 35). Đường DUY NHẤT đổi cột ấy là `transitionModelCore` (lib/models/service.ts),
+// và mỗi lượt đổi là một dòng lịch sử APPEND-ONLY.
+
+/** Mã chủ shop (`Q001`, `TK-260925-01`) đã chuẩn hoá — `normalizeModelCode` (lib/constants/model-lifecycle.ts). */
+export const productModels = pgTable(
+  "product_models",
+  {
+    id: id(),
+    code: text("code").notNull().unique(),
+    name: text("name").notNull().default(""),
+    /** `NULL` khi mẫu chưa lên Pancake. Một sản phẩm thuộc tối đa MỘT mẫu. */
+    productId: text("product_id")
+      .unique()
+      .references(() => products.id, { onDelete: "set null" }),
+    /** `NULL` khi mẫu không đi từ vòng thiết kế. */
+    designConceptId: text("design_concept_id")
+      .unique()
+      .references(() => designConcepts.id, { onDelete: "set null" }),
+    /** Trạng thái vòng đời do NGƯỜI khai. `NULL` = CHƯA KHAI. Máy không bao giờ tự điền từ phép quan sát. */
+    lifecycleState: text("lifecycle_state"),
+    stateChangedAt: ts("state_changed_at"),
+    /** Người phụ trách do NGƯỜI chọn (mục 34: khoá tài khoản, không phải ô chữ). */
+    ownerUserId: text("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** `SYNC` = máy đăng ký từ sản phẩm / thiết kế đang có · `USER` = người gõ mã (mẫu ở giai đoạn ý tưởng). */
+    registeredBy: text("registered_by").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("product_models_state_idx").on(t.lifecycleState),
+    check(
+      "product_models_state_check",
+      sql`${t.lifecycleState} IS NULL OR ${t.lifecycleState} IN ('IDEA', 'CREATIVE', 'ADS_TESTING', 'WINNER', 'LOSER', 'PRODUCTION_DISCUSSION', 'COSTING', 'SAMPLING', 'SAMPLE_REVIEW', 'APPROVED', 'PRODUCTION_PLANNING', 'IN_PRODUCTION', 'SELLING', 'CLEARANCE', 'DISCONTINUED')`,
+    ),
+    check("product_models_registered_by_check", sql`${t.registeredBy} IN ('SYNC', 'USER')`),
+    // Mã rỗng là một dòng không ai gọi được tên — chuẩn hoá xong mà rỗng thì không đăng ký.
+    check("product_models_code_check", sql`length(${t.code}) > 0`),
+  ],
+);
+
+/**
+ * SỔ SỰ KIỆN cho những miền MỚI của Company OS (Q5). Miền cũ (đơn, vận đơn, hoàn, phiếu kho) đã có nhật
+ * ký riêng và được CHIẾU lúc đọc — không bao giờ chép sang đây. APPEND-ONLY: không UPDATE / DELETE ở đâu
+ * cả (`tests/company-os-models.test.ts` quét mã nguồn). Tên sự kiện phải có trong sổ khai
+ * `lib/constants/domain-events.ts`.
+ */
+export const domainEvents = pgTable(
+  "domain_events",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    subjectType: text("subject_type").notNull(),
+    subjectId: text("subject_id").notNull(),
+    modelId: text("model_id").references(() => productModels.id, { onDelete: "set null" }),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    actorKind: text("actor_kind").notNull(),
+    /** `users.id`. `NULL` = máy / webhook / agent (lib/constants/actor.ts). */
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    source: text("source").notNull(),
+    correlationId: text("correlation_id"),
+    /** Id sự kiện đã gây ra sự kiện này. */
+    causationId: text("causation_id"),
+    /** Khoá chống ghi hai lần khi nguồn có thể gửi lại. `NULL` = không chống trùng. */
+    dedupeKey: text("dedupe_key").unique(),
+    /** Giờ NGHIỆP VỤ của sự việc. */
+    occurredAt: ts("occurred_at").notNull(),
+    recordedAt: ts("recorded_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("domain_events_model_idx").on(t.modelId, t.occurredAt),
+    index("domain_events_name_idx").on(t.name, t.occurredAt),
+    index("domain_events_subject_idx").on(t.subjectType, t.subjectId),
+    check("domain_events_name_check", sql`${t.name} ~ '^[a-z_]+(\\.[a-z_]+)+$'`),
+    check("domain_events_actor_kind_check", sql`${t.actorKind} IN ('USER', 'SYSTEM', 'AGENT', 'WEBHOOK')`),
+    // Mục 34: một sự kiện "người làm" mà không có khoá tài khoản là một quy kết không kiểm được.
+    check("domain_events_user_actor_check", sql`${t.actorKind} <> 'USER' OR ${t.actorId} IS NOT NULL`),
+  ],
+);
+
+/** Lịch sử vòng đời mẫu — APPEND-ONLY. Mỗi lượt đổi `product_models.lifecycle_state` là đúng một dòng. */
+export const productModelStateHistory = pgTable(
+  "product_model_state_history",
+  {
+    id: id(),
+    modelId: text("model_id")
+      .notNull()
+      .references(() => productModels.id, { onDelete: "restrict" }),
+    /** `NULL` = trước đó CHƯA KHAI. */
+    fromState: text("from_state"),
+    toState: text("to_state").notNull(),
+    actorKind: text("actor_kind").notNull(),
+    actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+    /** ẢNH CHỤP tên để người đọc — do MÁY CHỦ đọc, không nhận từ client. */
+    actorName: text("actor_name").notNull().default(""),
+    /** Rỗng được với cạnh "tiến" trong bảng; lùi bước / nhảy cóc / khai lần đầu thì bắt buộc (kiểm ở lõi dịch vụ). */
+    reason: text("reason").notNull(),
+    /** Nơi phát sinh: `ui:/models`, `event:sample.approved`… */
+    source: text("source").notNull(),
+    sourceEventId: text("source_event_id").references(() => domainEvents.id, { onDelete: "set null" }),
+    relatedType: text("related_type"),
+    relatedId: text("related_id"),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    occurredAt: ts("occurred_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("product_model_state_history_model_idx").on(t.modelId, t.occurredAt),
+    check(
+      "product_model_state_history_to_check",
+      sql`${t.toState} IN ('IDEA', 'CREATIVE', 'ADS_TESTING', 'WINNER', 'LOSER', 'PRODUCTION_DISCUSSION', 'COSTING', 'SAMPLING', 'SAMPLE_REVIEW', 'APPROVED', 'PRODUCTION_PLANNING', 'IN_PRODUCTION', 'SELLING', 'CLEARANCE', 'DISCONTINUED')`,
+    ),
+    check("product_model_state_history_actor_kind_check", sql`${t.actorKind} IN ('USER', 'SYSTEM', 'AGENT', 'WEBHOOK')`),
+    check("product_model_state_history_user_actor_check", sql`${t.actorKind} <> 'USER' OR ${t.actorId} IS NOT NULL`),
+  ],
+);
+
+export type ProductModelRow = typeof productModels.$inferSelect;
+export type DomainEventRow = typeof domainEvents.$inferSelect;
+export type ProductModelStateHistoryRow = typeof productModelStateHistory.$inferSelect;
