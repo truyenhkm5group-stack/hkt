@@ -10,12 +10,13 @@ import { DataTable } from "@/components/data-table/data-table";
 import { Button } from "@/components/ui/button";
 import { classifyBankTransactions, deleteBankTransaction } from "@/lib/actions/bank";
 import { UnlinkButton } from "@/app/(dashboard)/bank/unlink-button";
+import { SupplierLinkDialog } from "@/app/(dashboard)/bank/supplier-link-dialog";
 import { BANK_GROUP_SECTIONS, BANK_GROUP_SPEC, BANK_LINK_TYPE_LABEL, BANK_NOT_A_COST_NOTE, type BankGroup, type BankLinkType } from "@/lib/constants/bank";
 import { formatDate, formatVND } from "@/lib/format";
 import type { BankTxnRow } from "@/lib/queries/bank";
 import { cn } from "@/lib/utils";
 
-function buildColumns({ canWrite }: { canWrite: boolean }): ColumnDef<BankTxnRow, unknown>[] {
+function buildColumns({ canWrite, canLinkSupplier }: { canWrite: boolean; canLinkSupplier: boolean }): ColumnDef<BankTxnRow, unknown>[] {
   return [
     {
       id: "txnAt",
@@ -38,17 +39,24 @@ function buildColumns({ canWrite }: { canWrite: boolean }): ColumnDef<BankTxnRow
       cell: ({ row }) => (
         <div className="min-w-[220px] max-w-[360px]">
           <div className="truncate text-[13px]" title={row.original.description}>{row.original.description || "—"}</div>
+          {/* Diễn giải dựng TỪ CHỨNG TỪ ĐÃ NỐI — nói đồng tiền này là gì, thay cho một nhãn "đã đối chiếu" trơn. */}
+          {row.original.linkDetails?.map((t, i) => (
+            <div key={i} className="truncate text-[11.5px] text-emerald-700 dark:text-emerald-300" title={t}>
+              ↳ {t}
+            </div>
+          ))}
           <div className="mt-0.5 flex flex-wrap items-center gap-1">
             <span className="rounded bg-muted px-1 font-mono text-[10px] text-muted-foreground">{row.original.bankRef}</span>
             {row.original.source === "MANUAL" ? <span className="rounded bg-sky-100 px-1 text-[10px] text-sky-700 dark:bg-sky-950/60 dark:text-sky-300">nhập tay</span> : null}
             {row.original.classifiedBy === "rule" ? <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">quy tắc</span> : null}
             {row.original.linked ? (
-              <span className="rounded bg-emerald-100 px-1 text-[10px] text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" title={`Đã nối với ${BANK_LINK_TYPE_LABEL[row.original.linkedType as BankLinkType] ?? row.original.linkedType} · ${row.original.linkedId}`}>
+              <span className="rounded bg-emerald-100 px-1 text-[10px] text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" title={row.original.linkDetails?.length ? row.original.linkDetails.join(" · ") :`Đã nối với ${BANK_LINK_TYPE_LABEL[row.original.linkedType as BankLinkType] ?? row.original.linkedType}`}>
                 đã đối chiếu
               </span>
             ) : null}
             {/* Nối nhầm là chuyện có thật; không có đường gỡ thì cách sửa duy nhất là xoá một giao dịch tiền THẬT. */}
             {row.original.linked ? <UnlinkButton id={row.original.id} /> : null}
+            {canLinkSupplier && row.original.amount < 0 ? <SupplierLinkDialog txnId={row.original.id} /> : null}
           </div>
         </div>
       ),
@@ -81,7 +89,8 @@ function buildColumns({ canWrite }: { canWrite: boolean }): ColumnDef<BankTxnRow
       size: 240,
       cell: ({ row }) => (
         <div className="flex items-center gap-1.5">
-          <BankGroupSelect id={row.original.id} value={row.original.accountingGroup} canWrite={canWrite} />
+          {/* key theo nhóm: ghép xưởng/vải đổi nhóm ở máy chủ, ô giữ state cũ thì vẫn hiện "Chưa phân loại". */}
+          <BankGroupSelect key={row.original.accountingGroup} id={row.original.id} value={row.original.accountingGroup} canWrite={canWrite} />
           {canWrite ? <RuleFromTxnButton txn={row.original} /> : null}
         </div>
       ),
@@ -124,8 +133,8 @@ function DeleteManualButton({ id }: { id: string }) {
   );
 }
 
-export function BankTransactionsTable({ rows, pageCount, total, canWrite }: { rows: BankTxnRow[]; pageCount: number; total: number; canWrite: boolean }) {
-  const columns = useMemo(() => buildColumns({ canWrite }), [canWrite]);
+export function BankTransactionsTable({ rows, pageCount, total, canWrite, canLinkSupplier = false }: { rows: BankTxnRow[]; pageCount: number; total: number; canWrite: boolean; canLinkSupplier?: boolean }) {
+  const columns = useMemo(() => buildColumns({ canWrite, canLinkSupplier }), [canWrite, canLinkSupplier]);
   return (
     <DataTable
       columns={columns}

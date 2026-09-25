@@ -347,7 +347,14 @@ function PaymentsTab({ payments, canPay }: { payments: Ledger["payments"]; canPa
                   <TableCell className={cn("text-right font-medium tabular-nums", p.kind === "REFUND" && "text-emerald-600 dark:text-emerald-400")}>{formatVND(p.kind === "REFUND" ? -p.amount : p.amount)}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {PAYMENT_METHOD_LABEL[p.method as PaymentMethod] ?? p.method}
-                    {p.reference ? ` · ${p.reference}` : ""}
+                    {p.bankLinks.length ? (
+                      <span className="ml-1 text-emerald-600 dark:text-emerald-400" title="Đã ghép với dòng sao kê ở Sổ ngân hàng">
+                        ✓ sao kê {p.bankLinks.map((x) => `${x.bankRef} ${formatDate(x.txnAt)}`).join(", ")}
+                      </span>
+                    ) : p.method === "BANK" ? (
+                      <span className="ml-1 text-amber-600 dark:text-amber-400">· chưa đối chiếu sao kê</span>
+                    ) : null}
+                    {p.reference && !p.bankLinks.some((x) => x.bankRef === p.reference) ? ` · ${p.reference}` : ""}
                     <div>
                       {p.createdBy}
                       {p.note ? ` · ${p.note}` : ""}

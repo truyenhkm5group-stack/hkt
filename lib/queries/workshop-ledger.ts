@@ -1,5 +1,5 @@
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, schema, type Db } from "@/db";
 import { marketerPriceAt, marketerPriceCutoff } from "@/lib/constants/marketer-price";
 import { listMarketerPrices } from "@/lib/queries/marketer-price";
 import type { Period } from "@/lib/search-params";
@@ -68,6 +68,8 @@ export type PaymentView = PaymentRecord & {
   targetKind: "BATCH" | "FABRIC";
   supplierName: string;
   batchIdForLink: string | null;
+  /** Dòng sao kê đã ghép vào đợt này (Sổ ngân hàng). Rỗng = chưa đối chiếu sao kê. */
+  bankLinks: SupplierPaymentBankLink[];
 };
 
 export type ProductCostView = {
@@ -221,10 +223,11 @@ export async function getWorkshopLedger(now = new Date()) {
   });
   const fabricById = new Map(fabricViews.map((f) => [f.id, f] as const));
 
+  const bankLinks = await bankLinksOfSupplierPayments(payments.map((p) => p.id));
   const paymentViews: PaymentView[] = payments.map((p) => {
     if (p.batchId) {
       const b = batchById.get(p.batchId);
-      return { ...p, targetKind: "BATCH", targetLabel: b ? `${batchLabel(b)} · tiền công` : "Lô đã xoá", supplierName: b?.supplier ?? "", batchIdForLink: p.batchId };
+      return { ...p, targetKind: "BATCH", targetLabel: b ? `${batchLabel(b)} · tiền công` : "Lô đã xoá", supplierName: b?.supplier ?? "", batchIdForLink: p.batchId, bankLinks: bankLinks.get(p.id) ?? [] };
     }
     const f = p.fabricOrderId ? fabricById.get(p.fabricOrderId) : undefined;
     return {
@@ -233,6 +236,7 @@ export async function getWorkshopLedger(now = new Date()) {
       targetLabel: f ? `Vải ${f.productCode}${f.description ? ` · ${f.description}` : ""}${f.batchLabel ? ` (${f.batchLabel})` : ""}` : "Đợt vải đã xoá",
       supplierName: f?.supplier ?? "",
       batchIdForLink: f?.batchId ?? null,
+      bankLinks: bankLinks.get(p.id) ?? [],
     };
   });
 
@@ -311,7 +315,8 @@ export async function getProductionBatchDetail(id: string, now = new Date()) {
   const productionOrder = b.productionOrderId
     ? await db.query.productionOrders.findFirst({ where: eq(schema.productionOrders.id, b.productionOrderId), columns: { id: true, code: true, totalQty: true, status: true } })
     : null;
-  return { batch: view, fabrics: fabricViews, productionOrder: productionOrder ?? null };
+  const bankLinks = await bankLinksOfSupplierPayments([...directPayments, ...fabricPayments].map((p) => p.id));
+  return { batch: view, fabrics: fabricViews, productionOrder: productionOrder ?? null, bankLinks };
 }
 
 /** Gợi ý cho ô nhập: mã hàng đang bán, lô đang mở, bảng đặt màu × size chưa gắn lô nào. */
@@ -406,4 +411,124 @@ export async function workshopPenaltyByProduct(period: Period): Promise<{ byProd
     byProduct.set(r.productId, amount);
   }
   return { byProduct, undatedBatches, noProductBatches };
+}
+
+// ─────────────────────────── ĐỐI CHIẾU VỚI SỔ NGÂN HÀNG ───────────────────────────
+
+/**
+ * Sổ ngân hàng nối được tới từng đợt thanh toán (`SUPPLIER_PAYMENT`, migration 0131). Phía ngân hàng
+ * KHÔNG đọc bảng của sổ này — nó gọi các hàm dưới đây (bài quét nguồn của sổ khoá điều đó). Mối nối
+ * là ĐỐI CHIẾU "đồng tiền này trả cho đợt nào", không phải ghi nhận chi phí (AGENTS.md mục 17).
+ */
+
+const KIND_LABEL: Record<string, string> = { DEPOSIT: "đặt cọc", PAYMENT: "thanh toán", REFUND: "hoàn tiền" };
+
+/** Số tiền của một đợt thanh toán — trần phía chứng từ khi nối. `null` = không có đợt đó. */
+export async function supplierPaymentAmount(id: string, dbIn?: Db): Promise<number | null> {
+  const db = dbIn ?? (await getDb());
+  const [r] = await db.select({ amount: schema.supplierPayments.amount }).from(schema.supplierPayments).where(eq(schema.supplierPayments.id, id)).limit(1);
+  return r ? Number(r.amount) : null;
+}
+
+/**
+ * Câu diễn giải cho từng đợt thanh toán — in cạnh dòng sao kê để người đọc biết ngay đồng tiền ấy trả
+ * cho ai, mã nào, lô nào, khoản gì, thay vì chỉ một nhãn "đã đối chiếu".
+ */
+export async function supplierPaymentLabels(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!ids.length) return out;
+  const db = await getDb();
+  const p = schema.supplierPayments;
+  const bt = schema.productionBatches;
+  const f = schema.fabricOrders;
+  const rows = await db
+    .select({
+      id: p.id,
+      kind: p.kind,
+      batchId: p.batchId,
+      code: sql<string>`coalesce(${bt.productCode}, ${f.productCode}, '')`,
+      batchNo: bt.batchNo,
+      workshop: bt.supplier,
+      fabricSupplier: f.supplier,
+      fabricDesc: f.description,
+      fabricBatchId: f.batchId,
+    })
+    .from(p)
+    .leftJoin(bt, eq(bt.id, p.batchId))
+    .leftJoin(f, eq(f.id, p.fabricOrderId))
+    .where(inArray(p.id, ids));
+  const loCuaVai = [...new Set(rows.map((r) => r.fabricBatchId).filter((x): x is string => !!x))];
+  const soLo = new Map(
+    loCuaVai.length ? (await db.select({ id: bt.id, batchNo: bt.batchNo }).from(bt).where(inArray(bt.id, loCuaVai))).map((x) => [x.id, x.batchNo] as const) : [],
+  );
+  for (const r of rows) {
+    const kind = KIND_LABEL[r.kind] ?? r.kind;
+    out.set(
+      r.id,
+      r.batchId
+        ? `Trả xưởng ${r.workshop || "(chưa ghi xưởng)"} · ${r.code} lô ${r.batchNo} · ${kind} tiền công`
+        : `Trả vải ${r.fabricSupplier || "(chưa ghi nhà vải)"} · ${r.code}${r.fabricDesc ? ` ${r.fabricDesc}` : ""}${r.fabricBatchId && soLo.has(r.fabricBatchId) ? ` (lô ${soLo.get(r.fabricBatchId)})` : ""} · ${kind}`,
+    );
+  }
+  return out;
+}
+
+export type SupplierPaymentBankLink = { txnId: string; bankRef: string; txnAt: Date; amount: number };
+
+/** Dòng sao kê đã nối vào từng đợt thanh toán. Đọc bảng MỐI NỐI của sổ ngân hàng, không đọc gì thêm. */
+export async function bankLinksOfSupplierPayments(ids: string[]): Promise<Map<string, SupplierPaymentBankLink[]>> {
+  const out = new Map<string, SupplierPaymentBankLink[]>();
+  if (!ids.length) return out;
+  const db = await getDb();
+  const l = schema.bankTransactionLinks;
+  const b = schema.bankTransactions;
+  const rows = await db
+    .select({ paymentId: l.targetId, txnId: b.id, bankRef: b.bankRef, txnAt: b.txnAt, amount: l.amount })
+    .from(l)
+    .innerJoin(b, eq(b.id, l.txnId))
+    .where(sql`${l.targetType} = 'SUPPLIER_PAYMENT' and ${inArray(l.targetId, ids)}`);
+  for (const r of rows) out.set(r.paymentId, [...(out.get(r.paymentId) ?? []), { txnId: r.txnId, bankRef: r.bankRef, txnAt: new Date(r.txnAt), amount: Number(r.amount) }]);
+  return out;
+}
+
+export type SupplierLinkCandidates = {
+  txn: { id: string; amount: number; remaining: number; txnAt: Date; description: string; bankRef: string };
+  /** Đợt thanh toán đã ghi mà CHƯA nối đủ sao kê — xếp số tiền khớp nhất và ngày gần nhất lên đầu. */
+  payments: { id: string; label: string; amount: number; open: number; paidAt: Date; method: string; exact: boolean }[];
+  /** Lô / đợt vải còn nợ — tạo đợt thanh toán MỚI từ dòng tiền này. */
+  targets: { kind: "BATCH" | "FABRIC"; id: string; label: string; remaining: number | null }[];
+};
+
+/** Ứng viên để ghép MỘT dòng tiền ra với sổ đặt xưởng. Chỉ đọc. */
+export async function supplierLinkCandidates(txnId: string): Promise<SupplierLinkCandidates | null> {
+  const db = await getDb();
+  const b = schema.bankTransactions;
+  const l = schema.bankTransactionLinks;
+  const [t] = await db.select({ id: b.id, amount: b.amount, txnAt: b.txnAt, description: b.description, bankRef: b.bankRef }).from(b).where(eq(b.id, txnId)).limit(1);
+  if (!t) return null;
+  const [da] = await db.select({ n: sql<number>`coalesce(sum(${l.amount}), 0)` }).from(l).where(eq(l.txnId, txnId));
+  const abs = Math.abs(Number(t.amount));
+  const txn = { id: t.id, amount: abs, remaining: abs - Number(da?.n ?? 0), txnAt: new Date(t.txnAt), description: t.description, bankRef: t.bankRef };
+
+  const ledger = await getWorkshopLedger();
+  const payIds = ledger.payments.filter((p) => p.kind !== "REFUND").map((p) => p.id);
+  const [linked, labels] = await Promise.all([bankLinksOfSupplierPayments(payIds), supplierPaymentLabels(payIds)]);
+  const payments = ledger.payments
+    .filter((p) => p.kind !== "REFUND")
+    .map((p) => {
+      const open = p.amount - (linked.get(p.id) ?? []).reduce((s, x) => s + x.amount, 0);
+      return { id: p.id, label: labels.get(p.id) ?? p.targetLabel, amount: p.amount, open, paidAt: new Date(p.paidAt), method: p.method, exact: open === txn.remaining };
+    })
+    .filter((p) => p.open > 0)
+    .sort((x, y) => Number(y.exact) - Number(x.exact) || Math.abs(x.open - txn.remaining) - Math.abs(y.open - txn.remaining) || Math.abs(x.paidAt.getTime() - txn.txnAt.getTime()) - Math.abs(y.paidAt.getTime() - txn.txnAt.getTime()))
+    .slice(0, 30);
+  const targets: SupplierLinkCandidates["targets"] = [
+    ...ledger.batches
+      .filter((x) => x.status !== "CANCELLED" && (x.pay.remaining == null || x.pay.remaining > 0))
+      .map((x) => ({ kind: "BATCH" as const, id: x.id, label: `Xưởng ${x.supplier || "(chưa ghi)"} · ${x.productCode} lô ${x.batchNo} · tiền công`, remaining: x.pay.remaining })),
+    ...ledger.fabrics
+      .filter((x) => (x.pay.remaining ?? 0) > 0)
+      .map((x) => ({ kind: "FABRIC" as const, id: x.id, label: `Vải ${x.supplier || "(chưa ghi nhà vải)"} · ${x.productCode}${x.description ? ` ${x.description}` : ""}${x.batchLabel ? ` (${x.batchLabel})` : ""}`, remaining: x.pay.remaining })),
+  ].sort((x, y) => Number(y.remaining === txn.remaining) - Number(x.remaining === txn.remaining));
+  return { txn, payments, targets };
 }

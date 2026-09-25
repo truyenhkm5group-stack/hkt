@@ -2,6 +2,7 @@
 
 import { and, eq, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
@@ -12,6 +13,9 @@ import { formatDate, vnStartOfDay } from "@/lib/format";
 import { frozenPayrollOverlapping } from "@/lib/queries/marketer-price";
 import { resolveProductByCode } from "@/lib/queries/product-code";
 import { supplierCatalog } from "@/lib/queries/suppliers";
+import { removeLinksToTarget } from "@/lib/finance/linkage";
+import { createPaymentFromTxn, linkTxnToSupplierPayment } from "@/lib/workshop/bank-link";
+import { supplierLinkCandidates, type SupplierLinkCandidates } from "@/lib/queries/workshop-ledger";
 import { batchInput, deliveryInput, fabricInput, paymentInput } from "@/lib/validation/workshop-ledger";
 import { SHEET_TABS } from "@/lib/workshop/sheet-import";
 import { applySheetPreview, previewSheetRows, type SheetImportPreview } from "@/lib/workshop/sheet-import-db";
@@ -32,6 +36,7 @@ const ROOT = "/inventory/workshop";
 
 function refresh(batchId?: string | null) {
   revalidatePath(ROOT);
+  revalidatePath("/bank");
   if (batchId) revalidatePath(`${ROOT}/${batchId}`);
 }
 
@@ -358,11 +363,13 @@ export async function deleteSupplierPayment(id: string): Promise<Result> {
   const user = await requireUser();
   if (!can(user, "expenses:write")) return { error: "Xoá thanh toán cần quyền Chi phí: sửa" };
   const db = await getDb();
+  // Mối nối sao kê trỏ tới đợt này không được mồ côi: gỡ trước, dòng sao kê quay về "chưa đối chiếu".
+  const goNoi = await removeLinksToTarget("SUPPLIER_PAYMENT", id);
   const [row] = await db.delete(schema.supplierPayments).where(eq(schema.supplierPayments.id, id)).returning();
   if (!row) return { error: "Không tìm thấy đợt thanh toán" };
   let batchId = row.batchId;
   if (!batchId && row.fabricOrderId) batchId = (await db.query.fabricOrders.findFirst({ where: eq(schema.fabricOrders.id, row.fabricOrderId), columns: { batchId: true } }))?.batchId ?? null;
-  await audit({ userId: user.id, userEmail: user.email, action: "SUPPLIER_PAYMENT_DELETE", entity: row.batchId ? "PRODUCTION_BATCH" : "FABRIC_ORDER", entityId: (row.batchId ?? row.fabricOrderId) as string, detail: { paymentId: id, kind: row.kind, amount: row.amount, paidAt: row.paidAt, createdBy: row.createdBy } });
+  await audit({ userId: user.id, userEmail: user.email, action: "SUPPLIER_PAYMENT_DELETE", entity: row.batchId ? "PRODUCTION_BATCH" : "FABRIC_ORDER", entityId: (row.batchId ?? row.fabricOrderId) as string, detail: { paymentId: id, kind: row.kind, amount: row.amount, paidAt: row.paidAt, createdBy: row.createdBy, bankLinksRemoved: goNoi } });
   refresh(batchId);
   return { ok: true };
 }
@@ -406,4 +413,65 @@ export async function applyWorkshopSheetImport(link: string): Promise<{ ok: true
   await audit({ userId: user.id, userEmail: user.email, action: "WORKSHOP_SHEET_IMPORT", entity: "PRODUCTION_BATCH", detail: { ...dem, skippedExisting: p.batches.filter((b) => b.status === "EXISTS").length + p.fabrics.filter((f) => f.status === "EXISTS").length, conflicts: p.batches.filter((b) => b.status === "CONFLICT").map((b) => `${b.code}#${b.batchNo}`) } });
   refresh();
   return { ok: true, ...dem };
+}
+
+// ─────────────────────────── GHÉP SAO KÊ NGÂN HÀNG ───────────────────────────
+
+/**
+ * Chủ shop yêu cầu (25/09/2026): ghép giao dịch trả xưởng may / nhà vải trên sao kê vào phần thanh toán
+ * của sổ này. Mối nối đi qua ĐÚNG đường chung `createLink` (trần hai phía, khoá dòng tiền) với loại
+ * `SUPPLIER_PAYMENT`. Đây là ĐỐI CHIẾU, không phải ghi nhận chi phí (AGENTS.md mục 17).
+ *
+ * Cần CẢ HAI quyền: `bank:write` (đụng sổ ngân hàng) và `expenses:write` (lời khai về tiền trả xưởng).
+ */
+async function bankLinkGuard() {
+  const user = await requireUser();
+  if (!can(user, "bank:write") || !can(user, "expenses:write")) return { error: "Ghép sao kê với thanh toán xưởng cần quyền Sổ ngân hàng: nhập & phân loại và Chi phí: sửa" } as const;
+  return { user } as const;
+}
+
+export async function supplierLinkOptions(txnId: string): Promise<({ ok: true } & SupplierLinkCandidates) | { error: string }> {
+  const g = await bankLinkGuard();
+  if (!g.user) return { error: g.error ?? "Không có quyền" };
+  const c = await supplierLinkCandidates(txnId);
+  if (!c) return { error: "Không tìm thấy giao dịch" };
+  return { ok: true, ...c };
+}
+
+/**
+ * Ghép dòng tiền vào một đợt thanh toán ĐÃ GHI. Nối được trọn số tiền của đợt ⇒ sao kê là chứng từ
+ * thật: ngày trả, hình thức và mã giao dịch của đợt lấy theo sao kê (thay ngày TẠM của lượt nhập từ
+ * bảng tính). Nối một phần thì giữ nguyên đợt, chỉ ghi mối nối.
+ */
+export async function linkBankToSupplierPayment(input: { txnId: string; paymentId: string }): Promise<Result<{ amount: number }>> {
+  const g = await bankLinkGuard();
+  if (!g.user) return { error: g.error ?? "Không có quyền" };
+  const kq = await linkTxnToSupplierPayment(input.txnId, input.paymentId, { email: g.user.email });
+  if ("error" in kq) return kq;
+  await audit({ userId: g.user.id, userEmail: g.user.email, action: "BANK_LINK", entity: "BANK_TRANSACTION", entityId: input.txnId, detail: { targetType: "SUPPLIER_PAYMENT", targetId: input.paymentId, amount: kq.amount, paymentDateFromBank: kq.paymentUpdated } });
+  refresh(kq.batchId);
+  return { ok: true, amount: kq.amount };
+}
+
+const fromBankInput = z
+  .object({
+    txnId: z.string().min(1),
+    batchId: z.string().min(1).nullable().default(null),
+    fabricOrderId: z.string().min(1).nullable().default(null),
+    kind: z.enum(["DEPOSIT", "PAYMENT"]).default("PAYMENT"),
+  })
+  .refine((x) => (x.batchId == null) !== (x.fabricOrderId == null), "Chọn đúng một lô hoặc một đợt vải");
+
+/** Tạo đợt thanh toán MỚI từ phần CHƯA nối của dòng tiền ra, rồi nối luôn — một lượt bấm. */
+export async function createSupplierPaymentFromBank(input: unknown): Promise<Result<{ amount: number }>> {
+  const g = await bankLinkGuard();
+  if (!g.user) return { error: g.error ?? "Không có quyền" };
+  const parsed = fromBankInput.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const kq = await createPaymentFromTxn(d, { id: g.user.id, email: g.user.email, name: g.user.name || g.user.email });
+  if ("error" in kq) return kq;
+  await audit({ userId: g.user.id, userEmail: g.user.email, action: "SUPPLIER_PAYMENT_CREATE", entity: d.batchId ? "PRODUCTION_BATCH" : "FABRIC_ORDER", entityId: (d.batchId ?? d.fabricOrderId) as string, detail: { paymentId: kq.paymentId, amount: kq.amount, fromBankTxn: d.txnId, kind: d.kind } });
+  refresh(kq.batchId);
+  return { ok: true, amount: kq.amount };
 }

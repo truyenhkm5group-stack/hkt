@@ -11,7 +11,7 @@ import { formatNumber, formatVND } from "@/lib/format";
 import { param, parseListParams, type Period, type SearchParams } from "@/lib/search-params";
 import { maskAccountNumber, type BankDirection } from "@/lib/constants/bank";
 
-export async function BankTransactionsTab({ raw, period, canWrite }: { raw: SearchParams; period: Period; canWrite: boolean }) {
+export async function BankTransactionsTab({ raw, period, canWrite, canLinkSupplier = false }: { raw: SearchParams; period: Period; canWrite: boolean; canLinkSupplier?: boolean }) {
   const params = parseListParams(raw, { defaultSort: "txnAt", filterKeys: ["group", "category", "account"], sortable: BANK_SORTABLE, defaultPeriod: "month", defaultPageSize: 50 });
   const direction = (["IN", "OUT"].includes(param(raw, "chieu")) ? param(raw, "chieu") : "ANY") as BankDirection;
   const onlyUnclassified = param(raw, "chuaphanloai") === "1";
@@ -112,7 +112,7 @@ export async function BankTransactionsTab({ raw, period, canWrite }: { raw: Sear
         {canWrite ? <ManualTxnDialog /> : null}
       </DataTableToolbar>
 
-      <BankTransactionsTable rows={rows} pageCount={pageCount} total={total} canWrite={canWrite} />
+      <BankTransactionsTable rows={rows} pageCount={pageCount} total={total} canWrite={canWrite} canLinkSupplier={canLinkSupplier} />
     </div>
   );
 }
