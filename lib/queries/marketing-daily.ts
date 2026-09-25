@@ -1,4 +1,4 @@
-import { and, eq, sql, sum, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, sum, type SQL } from "drizzle-orm";
 import { chayKhongJit, getDb, schema, type Db } from "@/db";
 import { memo, periodKey } from "@/lib/cache";
 import { getOperatingCostByDay, type OperatingCostByDay } from "@/lib/queries/cost-engine";
@@ -212,6 +212,11 @@ export type MarketingDaily = {
    */
   spendObservedThrough: string | null;
   /**
+   * ĐỘ PHỦ CHI TIÊU khi lọc theo nhóm QC / mẩu QC (ngày + tiền đã biết ở hạt mẩu, ngày + tiền cấp chiến
+   * dịch chưa tách được). `null` ở mọi chiều khác. Màn hình in nó CẠNH ô chi quảng cáo.
+   */
+  spendCoverage: AdGrainSpendCoverage | null;
+  /**
    * CĂN CỨ CỦA CÁC Ô ƯỚC TÍNH — bao nhiêu mã dùng số đo, bao nhiêu mã dùng tỷ lệ khai ở Giả định.
    * Một con số ước tính không đi kèm độ phủ thì đọc y hệt một con số đo được.
    */
@@ -346,18 +351,32 @@ function spendDimensionConds(f: MarketingFilters): SQL[] {
 /**
  * CHI TIÊU & TIN NHẮN THEO NGÀY.
  *
- * Trả về `null` (chứ không phải map rỗng) khi chiều đang lọc KHÔNG CÓ số chi: Facebook Insights
- * đồng bộ ở cấp chiến dịch/ngày, nên lọc theo adset / mẩu quảng cáo / fanpage / nguồn đơn thì
- * không tồn tại con số chi tiêu nào để đọc. Chia đều tiền chiến dịch xuống các mẩu để bảng trông
- * đầy đủ là bịa — cùng luật với `lib/queries/ads-roas.ts`.
+ * Trả về `null` (chứ không phải map rỗng) khi chiều đang lọc KHÔNG CÓ số chi: fanpage và nguồn đơn
+ * không phải một chiều của bảng chi tiêu. Nhóm QC / mẩu QC thì CÓ — nhưng chỉ ở những ngày đã ghi hạt
+ * mẩu (`adGrainSpendByDay`); ngày còn ở hạt chiến dịch mang `unsplitDays` và in `—`. Chia đều tiền
+ * chiến dịch xuống các mẩu để bảng trông đầy đủ là bịa — cùng luật với `lib/queries/ads-roas.ts`.
  */
+type SpendByDay = {
+  byDay: Map<string, { spend: number; messages: number }>;
+  observedThrough: string | null;
+  dimensionKnown: boolean;
+  /**
+   * CHỈ ở chiều nhóm QC / mẩu QC: ngày mà chiến dịch của nhóm/mẩu còn ở hạt CHIẾN DỊCH ⇒ chi của
+   * nhóm/mẩu ngày ấy là CHƯA BIẾT. Giá trị = tiền cấp chiến dịch của ngày ấy (chưa tách được xuống),
+   * để in độ phủ — KHÔNG bao giờ được dùng làm chi của nhóm/mẩu. `null` ở mọi chiều khác.
+   */
+  unsplitDays: Map<string, number> | null;
+};
+
 async function spendByDay(
   db: Db,
   period: Period,
   f: MarketingFilters,
-): Promise<{ byDay: Map<string, { spend: number; messages: number }>; observedThrough: string | null; dimensionKnown: boolean } | null> {
-  const noSpendDimension = Boolean(f.adsetId || f.adId || f.pageId || f.source);
-  if (noSpendDimension) return null;
+): Promise<SpendByDay | null> {
+  // Fanpage và nguồn đơn KHÔNG có số chi riêng: tiền quảng cáo ghi theo chiến dịch / mẩu, không theo
+  // trang hay nguồn đơn. Chia tiền xuống hai chiều ấy là bịa một căn cứ phân bổ.
+  if (f.pageId || f.source) return null;
+  if (f.adsetId || f.adId) return adGrainSpendByDay(db, period, f);
   const dimConds = spendDimensionConds(f);
   const [rows, frontier, dimSeen] = await Promise.all([
     db
@@ -413,6 +432,72 @@ async function spendByDay(
     byDay: new Map(rows.map((r) => [r.day, { spend: Number(r.spend), messages: Number(r.messages) }])),
     observedThrough: frontier[0]?.day ?? null,
     dimensionKnown: Number(dimSeen[0]?.seen ?? 0) > 0,
+    unsplitDays: null,
+  };
+}
+
+/**
+ * ═══════════ CHI CỦA MỘT NHÓM QC / MẨU QC — CHỈ Ở NHỮNG NGÀY ĐÃ Ở HẠT MẨU ═══════════
+ *
+ * Từ 22/09/2026 `ad_spends` ghi hạt MẨU × NGÀY cho những (tài khoản × ngày) mà tổng cấp mẩu khớp cấp
+ * chiến dịch trong 1.000 ₫ (`decideGrain`, `lib/constants/ads-grain.ts`); ngày còn lại — và mọi ngày
+ * cũ ngoài cửa sổ đồng bộ — mãi ở hạt CHIẾN DỊCH. Nên với một mẩu, mỗi ngày rơi vào đúng MỘT trong ba ô:
+ *
+ *   · có dòng hạt `AD` của mẩu ⇒ chi = PHÉP CỘNG của các dòng ấy (không phải phép chia);
+ *   · chiến dịch của mẩu có dòng hạt KHÁC `AD` (chiến dịch / tay) ngày đó ⇒ tiền có thật nhưng CHƯA TÁCH
+ *     được xuống mẩu ⇒ `null`, và số tiền cấp chiến dịch của ngày ấy được ĐẾM RIÊNG để in độ phủ;
+ *   · không có dòng nào của chiến dịch, trong biên quan sát ⇒ chiến dịch không tiêu ⇒ mẩu tiêu 0 thật.
+ *
+ * Tuyệt đối KHÔNG chia đều tiền chiến dịch xuống mẩu ở ô thứ hai. Chiến dịch của mẩu lấy từ sổ mẩu
+ * `fb_ads` (và từ chính các dòng hạt `AD`) — không biết chiến dịch ⇒ không biết ngày nào là ô thứ hai ⇒
+ * cả chiều là CHƯA BIẾT (`dimensionKnown = false`).
+ */
+async function adGrainSpendByDay(db: Db, period: Period, f: MarketingFilters): Promise<SpendByDay | null> {
+  if (f.adId === MARKETING_UNATTRIBUTED || f.adsetId === MARKETING_UNATTRIBUTED) return null;
+  const adConds: SQL[] = [];
+  if (f.adId) adConds.push(eq(ads.adId, f.adId));
+  if (f.adsetId) adConds.push(eq(ads.adsetId, f.adsetId));
+  const dimConds = spendDimensionConds(f);
+  const fa = schema.fbAds;
+  const indexConds: SQL[] = [];
+  if (f.adId) indexConds.push(eq(fa.id, f.adId));
+  if (f.adsetId) indexConds.push(eq(fa.adsetId, f.adsetId));
+
+  const [fromIndex, fromRows, fromAdsets] = await Promise.all([
+    db.selectDistinct({ id: sql<string | null>`${fa.campaignId}` }).from(fa).where(and(...indexConds)),
+    db.selectDistinct({ id: sql<string | null>`${ads.campaignId}` }).from(ads).where(and(eq(ads.grain, "AD"), eq(ads.excluded, false), ...adConds)),
+    !f.adId && f.adsetId
+      ? db.selectDistinct({ id: sql<string | null>`${schema.fbAdsets.campaignId}` }).from(schema.fbAdsets).where(eq(schema.fbAdsets.id, f.adsetId))
+      : Promise.resolve([] as { id: string | null }[]),
+  ]);
+  const campaigns = [...new Set([...fromIndex, ...fromRows, ...fromAdsets].map((r) => (r.id ?? "").trim()).filter(Boolean))];
+  const frontierQ = db.select({ day: vnDayCol(sql`max(${ads.spendDate})`) }).from(ads).where(eq(ads.excluded, false));
+  if (campaigns.length === 0) {
+    const frontier = await frontierQ;
+    return { byDay: new Map(), observedThrough: frontier[0]?.day ?? null, dimensionKnown: false, unsplitDays: new Map() };
+  }
+  const [rows, unsplit, frontier] = await Promise.all([
+    db
+      .select({
+        day: vnDayCol(sql`${ads.spendDate}`),
+        spend: sql<number>`coalesce(sum(${ads.spend}), 0)`,
+        messages: sql<number>`coalesce(sum(${AD_MESSAGES}), 0)`,
+      })
+      .from(ads)
+      .where(and(marketingSpendScope(period, f), eq(ads.grain, "AD"), ...adConds))
+      .groupBy(sql`1`),
+    db
+      .select({ day: vnDayCol(sql`${ads.spendDate}`), spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
+      .from(ads)
+      .where(and(spendPeriod(period.from, period.to) as SQL, ...dimConds, sql`${ads.grain} <> 'AD'`, inArray(sql`coalesce(${ads.campaignId}, ${ads.campaign})`, campaigns)))
+      .groupBy(sql`1`),
+    frontierQ,
+  ]);
+  return {
+    byDay: new Map(rows.map((r) => [r.day, { spend: Number(r.spend), messages: Number(r.messages) }])),
+    observedThrough: frontier[0]?.day ?? null,
+    dimensionKnown: true,
+    unsplitDays: new Map(unsplit.map((r) => [r.day, Number(r.spend)])),
   };
 }
 
@@ -587,7 +672,7 @@ async function buildDays(
   basis: MarketingBasis,
   filters: MarketingFilters,
   opts: { skipUnits?: boolean; rates?: ProductDeliveryRates | null } = {},
-): Promise<{ rows: MarketingDailyRow[]; spendObservedThrough: string | null; spendDimensionKnown: boolean | null; opex: OperatingCostByDay | null }> {
+): Promise<{ rows: MarketingDailyRow[]; spendObservedThrough: string | null; spendDimensionKnown: boolean | null; spendCoverage: AdGrainSpendCoverage | null; opex: OperatingCostByDay | null }> {
   const extra = dimensionFilter(filters);
   const filtered = hasDimensionFilter(filters);
   const rates = opts.rates ?? null;
@@ -677,6 +762,9 @@ async function buildDays(
   if (units) for (const [day, qty] of units) get(day).units = qty;
   // Ngày chỉ có chi quảng cáo (không đơn nào) vẫn phải là một dòng: đó chính là ngày đốt tiền không ra gì.
   if (spend) for (const day of spend.byDay.keys()) get(day);
+  // Ngày chiến dịch có tiêu mà chưa tách được xuống nhóm/mẩu cũng là MỘT dòng: đó là ngày mẩu CÓ THỂ
+  // đã tiêu, và bảng phải in `—` cho nó thay vì để nó biến mất khỏi tổng như một ngày không chạy.
+  if (spend?.unsplitDays) for (const day of spend.unsplitDays.keys()) get(day);
   // CÙNG ĐƯỜNG với `getDailyBreakdown` và với tổng kỳ: chi phí vận hành đi qua sổ thẩm quyền. Khoản
   // nhóm Quảng cáo gõ tay KHÔNG còn được cộng vào chi quảng cáo — tài khoản QC mới có thẩm quyền, và
   // cộng thêm là trừ hai lần cùng một đồng (AGENTS.md mục 15). Phần bị loại được NÓI ra ở `warnings`.
@@ -707,7 +795,9 @@ async function buildDays(
       cổng đối soát bắt được đúng một ngày lệch 250.000đ so với Báo cáo lợi nhuận. Thứ tự các vòng
       lặp là một phần của phép tính, không phải chuyện sắp xếp mã.
     */
-    if (spend) {
+    // Ngày CHƯA TÁCH (chỉ có ở chiều nhóm/mẩu) đứng ngoài cả hai nhánh: tiền có thật nhưng không thuộc
+    // về ai ở hạt này — không phải 0, không phải một phần chia đều.
+    if (spend && !spend.unsplitDays?.has(row.day)) {
       const observed = spend.byDay.get(row.day);
       const inWindow = spend.dimensionKnown && spend.observedThrough !== null && row.day <= spend.observedThrough;
       if (observed || inWindow) {
@@ -734,7 +824,45 @@ async function buildDays(
     row.projectedContributionProfit = projectedProfitOf(row);
     row.netProfit = row.operatingCost === null || row.contributionProfit === null ? null : row.contributionProfit - row.operatingCost;
   }
-  return { rows, spendObservedThrough: spend?.observedThrough ?? null, spendDimensionKnown: spend ? spend.dimensionKnown : null, opex: allocated };
+  return { rows, spendObservedThrough: spend?.observedThrough ?? null, spendDimensionKnown: spend ? spend.dimensionKnown : null, spendCoverage: adGrainCoverageOf(spend), opex: allocated };
+}
+
+/**
+ * ĐỘ PHỦ CHI TIÊU Ở CHIỀU NHÓM / MẨU — in NGAY CẠNH con số chi, không nằm trong chú thích.
+ *
+ * `null` ở mọi chiều khác (chúng không có khái niệm "chưa tách được"). Bốn con số, và không con số nào
+ * suy ra từ con số khác:
+ *   · `knownDays` / `knownSpend`: ngày có dòng hạt MẨU của chính nhóm/mẩu và tổng tiền của chúng;
+ *   · `unsplitDays` / `unsplitCampaignSpend`: ngày chiến dịch của nó còn ở hạt CHIẾN DỊCH, và tiền CẤP
+ *     CHIẾN DỊCH của những ngày ấy — trần trên của phần chưa biết, KHÔNG phải chi của nhóm/mẩu.
+ */
+export type AdGrainSpendCoverage = { knownDays: number; knownSpend: number; unsplitDays: number; unsplitCampaignSpend: number };
+
+function adGrainCoverageOf(spend: SpendByDay | null): AdGrainSpendCoverage | null {
+  if (!spend?.unsplitDays) return null;
+  let knownSpend = 0;
+  let knownDays = 0;
+  for (const [day, v] of spend.byDay) {
+    if (spend.unsplitDays.has(day)) continue;
+    knownDays += 1;
+    knownSpend += v.spend;
+  }
+  let unsplitCampaignSpend = 0;
+  for (const v of spend.unsplitDays.values()) unsplitCampaignSpend += v;
+  return { knownDays, knownSpend, unsplitDays: spend.unsplitDays.size, unsplitCampaignSpend };
+}
+
+/**
+ * TỔNG KỲ KHI MỘT PHẦN CHI TIÊU CHƯA TÁCH ĐƯỢC ⇒ CHI CỦA KỲ LÀ CHƯA BIẾT.
+ *
+ * `sumBases` cộng `null` như "bỏ qua" — đúng cho biên quan sát (ngày ngoài biên không có đơn nào để
+ * lệch). Ở chiều nhóm/mẩu thì không: cộng phần đã biết rồi in như tổng kỳ là báo một khoản chi NHỎ HƠN
+ * thật và một lợi nhuận góp LỚN HƠN thật. Nên có ngày chưa tách ⇒ chi, tin nhắn và mọi lợi nhuận của
+ * tổng là `null`; phần đã biết đi riêng ở `spendCoverage`. Chiều khác (`coverage = null`) không đổi gì.
+ */
+function withUnsplitSpend<T extends MarketingDailyBase>(base: T, coverage: AdGrainSpendCoverage | null): T {
+  if (!coverage || coverage.unsplitDays === 0) return base;
+  return { ...base, adSpend: null, messages: null, contributionProfit: null, projectedContributionProfit: null, netProfit: null };
 }
 
 function rollupTotals(rows: MarketingDailyRow[]) {
@@ -790,15 +918,23 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
   const warnings: string[] = [];
   const filtered = hasDimensionFilter(filters);
   if (filtered) warnings.push("Đang lọc theo một chiều: chi phí vận hành phân bổ và Lợi nhuận canonical là CHƯA BIẾT (—) vì không có căn cứ chia chi phí toàn shop cho một chiến dịch. Dùng cột Lợi nhuận góp sau QC.");
-  if (filters.adsetId || filters.adId || filters.pageId || filters.source) {
-    warnings.push("Chiều đang lọc không có số chi quảng cáo (Facebook chỉ trả chi tiêu ở cấp chiến dịch/ngày), nên ROAS · CPQC/đơn · giá tin nhắn là CHƯA BIẾT — cố ý không chia đều tiền chiến dịch xuống.");
+  if (filters.pageId || filters.source) {
+    warnings.push("Chiều đang lọc (fanpage / nguồn đơn) không có số chi quảng cáo riêng — tiền quảng cáo ghi theo chiến dịch và mẩu, không theo fanpage hay nguồn đơn — nên ROAS · CPQC/đơn · giá tin nhắn là CHƯA BIẾT, cố ý không chia tiền xuống.");
+  } else if ((filters.adsetId || filters.adId) && built.spendDimensionKnown !== false) {
+    const cov = built.spendCoverage;
+    if (cov && cov.unsplitDays > 0) {
+      warnings.push(
+        `${cov.unsplitDays} ngày trong kỳ chiến dịch của ${filters.adId ? "mẩu" : "nhóm"} này còn ở HẠT CHIẾN DỊCH (chiến dịch tiêu ${cov.unsplitCampaignSpend.toLocaleString("vi-VN")} ₫ những ngày ấy, chưa tách được xuống ${filters.adId ? "mẩu" : "nhóm"}) — chi quảng cáo của những ngày đó là CHƯA BIẾT (—), nên tổng kỳ cũng để trống. Đã biết ${cov.knownSpend.toLocaleString("vi-VN")} ₫ trên ${cov.knownDays} ngày ở hạt mẩu.`,
+      );
+    }
   }
   const staleSources = freshness.filter((f) => f.stale);
   for (const s of staleSources) {
     warnings.push(s.lastOkAt ? `${s.label}: lần đồng bộ thành công gần nhất cách đây ${s.minutesAgo} phút (ngưỡng ${s.staleMinutes} phút). Số của những ngày gần đây có thể còn thiếu.` : `${s.label}: chưa có lượt đồng bộ thành công nào được ghi nhận.`);
   }
-  const unobserved = rows.filter((r) => !r.spendKnown && r.orders > 0);
-  if (unobserved.length && built.spendDimensionKnown !== false && !(filters.adsetId || filters.adId || filters.pageId || filters.source)) {
+  // Chỉ ngày NGOÀI biên quan sát: ngày chưa tách ở chiều nhóm/mẩu đã có câu giải thích riêng ở trên.
+  const unobserved = rows.filter((r) => !r.spendKnown && r.orders > 0 && (built.spendObservedThrough === null || r.day > built.spendObservedThrough));
+  if (unobserved.length && built.spendDimensionKnown !== false && !(filters.pageId || filters.source)) {
     /*
       NÓI THẲNG RA NGÀY NÀO CHƯA KẾT LUẬN ĐƯỢC.
 
@@ -819,7 +955,9 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
   */
   if (built.spendDimensionKnown === false) {
     warnings.push(
-      filters.marketerId
+      filters.adsetId || filters.adId
+        ? `Bảng chi quảng cáo chưa biết ${filters.adId ? "mẩu" : "nhóm"} này thuộc chiến dịch nào (không có trong sổ mẩu quảng cáo, chưa có dòng chi hạt mẩu nào), nên Chi QC · ROAS · CPQC/đơn · Lợi nhuận góp là CHƯA BIẾT (—) chứ không phải 0. Lượt đồng bộ Facebook kế tiếp điền sổ mẩu thì cột tiền mới có số.`
+        : filters.marketerId
         ? "Bảng chi quảng cáo KHÔNG có chiến dịch nào được khai cho marketer này, nên Chi QC · ROAS · CPQC/đơn · Lợi nhuận góp là CHƯA BIẾT (—) chứ không phải 0. Đơn được quy kết bằng ảnh chụp phân công FANPAGE, còn tiền quảng cáo đi bằng ánh xạ CHIẾN DỊCH → marketer — khai ánh xạ ấy ở trang Quảng cáo → Ghép chiến dịch thì cột tiền mới có số."
         : "Bảng chi quảng cáo chưa có dòng nào được khai cho chiều đang lọc, nên Chi QC · ROAS · CPQC/đơn · Lợi nhuận góp là CHƯA BIẾT (—) chứ không phải 0. Ghép chiến dịch với mã hàng / marketer ở trang Quảng cáo thì cột tiền mới có số.",
     );
@@ -850,8 +988,9 @@ async function getMarketingDailyUncached(period: Period, basis: MarketingBasis, 
     basis,
     filters,
     rows,
-    totals: rollupTotals(rows),
-    previousTotals: prevRows ? rollupTotals(prevRows) : null,
+    totals: withUnsplitSpend(rollupTotals(rows), built.spendCoverage),
+    previousTotals: prevRows ? withUnsplitSpend(rollupTotals(prevRows), prevBuilt?.spendCoverage ?? null) : null,
+    spendCoverage: built.spendCoverage,
     freshness,
     spendObservedThrough: built.spendObservedThrough,
     rateBasis: { fallbackDeliveryRate: rates.fallback.deliveryRate, coverage: rateCoverage(rates), projectionError: rates.projectionError },
@@ -963,8 +1102,8 @@ export async function getMarketingBreakdown(
     const rows: MarketingBreakdownRow[] = [];
     for (const k of keys) {
       const scoped: MarketingFilters = { ...filters, ...filterForDimension(dimension, k.key) };
-      const { rows: days } = await buildDays(tx, period, basis, scoped, { skipUnits: unitsByKey !== null, rates });
-      const base = sumBases(days);
+      const { rows: days, spendCoverage } = await buildDays(tx, period, basis, scoped, { skipUnits: unitsByKey !== null, rates });
+      const base = withUnsplitSpend(sumBases(days), spendCoverage);
       if (unitsByKey) base.units = unitsByKey.get(k.key) ?? 0;
       rows.push({ ...base, key: k.key, label: k.label, maturity: maturityState(base.finishedOrders, base.pendingOrders), spendKnown: days.some((d) => d.spendKnown) });
     }
@@ -1146,7 +1285,8 @@ async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimensi
     const rows = await db.select({ key: sql<string>`${o.source}`, total: rank }).from(o).where(scope).groupBy(sql`1`).orderBy(sql`2 desc`).limit(limit);
     return rows.filter((r) => r.key).map((r) => ({ key: r.key, label: r.key }));
   }
-  // adset / ad — đi thẳng qua `fb_ads`, vì chỉ `ad_id` Pancake gửi mới nối được tới hai cấp này.
+  // adset / ad — khoá ĐƠN đi thẳng qua `fb_ads` bằng `ad_id` Pancake gửi (bộ lọc đơn của hai cấp này
+  // cũng vậy — `dimensionFilter`). Tiền của từng khoá đọc ở hạt mẩu (`adGrainSpendByDay`).
   const col = dimension === "adset" ? sql`fa.adset_id` : sql`fa.id`;
   const rows = await db
     .select({ key: sql<string | null>`(select ${col} from fb_ads fa where fa.id = ${o.adId})`, label: sql<string>`max((select fa.name from fb_ads fa where fa.id = ${o.adId}))`, total: rank })

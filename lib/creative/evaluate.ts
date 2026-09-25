@@ -14,7 +14,7 @@ import {
   type VariantStatus,
 } from "@/lib/constants/creative-loop";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
-import { judgeVariant } from "@/lib/creative/judge";
+import { costPerOrderOf, judgeVariant } from "@/lib/creative/judge";
 import { geneStats, outcomeOf, relativeBaseline, type GeneStat, type Observation } from "@/lib/creative/learn";
 import { purgeCreativeImage } from "@/lib/creative/images";
 import { proposeScale, type ScaleCandidate } from "@/lib/creative/scale";
@@ -37,7 +37,8 @@ import {
  *
  * Việc của nó, theo thứ tự:
  *  1. Chọn mẫu: LIVE / PAUSED / ENDED đăng trong 45 ngày + mọi mẫu đã vào thư viện.
- *  2. Đo: `variantMetrics` (chi hạt AD + đơn theo `ad_id` qua `ORDER_OUTCOME_FAST`).
+ *  2. Đo: `variantMetrics` (chi hạt AD + đơn theo `ORDER_AD_ID` — ad_id hoặc bài viết của đúng MỘT
+ *     mẩu — qua `ORDER_OUTCOME_FAST`). Luật TẮT vẫn đếm đơn mang `ad_id` (`KILL_RULE_ORDER_BASIS`).
  *  3. Chấm: `judgeVariant` — luật TẮT của LÔ, luật GIỮ của cấu hình HIỆN TẠI (lý do ở
  *     `effectiveJudgeConfig`).
  *  4. Hệ quả ghi CSDL — chỉ ba sự kiện một chiều, mỗi cái canh bằng điều kiện `where`:
@@ -88,7 +89,18 @@ export type EvaluateResult = {
   warnings: string[];
 };
 
-type MetricsSnapshot = Pick<VariantMetricsRow, "spendVnd" | "impressions" | "clicks" | "messages" | "bookedOrders" | "deliveredOrders" | "returnedOrders">;
+type MetricsSnapshot = Pick<
+  VariantMetricsRow,
+  "spendVnd" | "impressions" | "clicks" | "messages" | "bookedOrders" | "deliveredOrders" | "returnedOrders" | "bookedRevenueVnd" | "deliveredRevenueVnd"
+> & {
+  /** Đơn chốt theo TỪNG đường quy kết — sổ phán quyết phải truy nguyên được đơn nào đến bằng đường nào. */
+  ordersDirect: number;
+  ordersViaPost: number;
+  /** Số đơn mà LUẬT TẮT đã nhìn (xem `KILL_RULE_ORDER_BASIS`). */
+  killRuleOrders: number;
+  /** Chi / đơn chốt — BẰNG CHỨNG in cạnh phán quyết, không vào luật nào. `null` = chưa biết chi hoặc 0 đơn. */
+  costPerOrderVnd: number | null;
+};
 
 function metricsSnapshot(m: VariantMetricsRow): MetricsSnapshot {
   // `null` giữ nguyên là `null` (CHƯA BIẾT) — sổ phán quyết không được biến nó thành 0.
@@ -100,6 +112,12 @@ function metricsSnapshot(m: VariantMetricsRow): MetricsSnapshot {
     bookedOrders: m.bookedOrders,
     deliveredOrders: m.deliveredOrders,
     returnedOrders: m.returnedOrders,
+    ordersDirect: m.attribution.direct.booked,
+    ordersViaPost: m.attribution.viaPost.booked,
+    killRuleOrders: m.killRuleOrders ?? m.bookedOrders,
+    bookedRevenueVnd: m.bookedRevenueVnd,
+    deliveredRevenueVnd: m.deliveredRevenueVnd,
+    costPerOrderVnd: costPerOrderOf(m),
   };
 }
 

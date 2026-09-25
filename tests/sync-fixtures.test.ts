@@ -229,6 +229,8 @@ import { testCreativeLoop } from "./creative-loop.test";
 import { testCreativeGenerate } from "./creative-generate.test";
 import { testCreativeDesignDb, testCreativeDesignPure } from "./creative-design.test";
 import { testCreativeEvaluate } from "./creative-evaluate.test";
+// ═══ Company OS · Agent B · creative ↔ quảng cáo theo mẫu ═══
+import { testCompanyOsCreativeAds } from "./company-os-creative-ads.test";
 import { testCreativeWrite, testCreativeWriteDb } from "./creative-write.test";
 import { testCreativeScaleDb, testCreativeScalePure } from "./creative-scale.test";
 import { testCreativeMoqDb, testCreativeMoqPure } from "./creative-moq.test";
@@ -1717,6 +1719,8 @@ async function main() {
   await testCreativeDesignDb(db);
   await testCreativeGenerate(db);
   await testCreativeEvaluate(db);
+  // Company OS · Agent B — đơn creative qua ORDER_AD_ID, chi nhóm/mẩu theo hạt mẩu, tóm tắt theo mẫu, lọc thư viện.
+  await testCompanyOsCreativeAds(db);
   testCreativeWrite();
   await testCreativeWriteDb(db);
   testCreativeScalePure();

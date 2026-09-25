@@ -18,7 +18,8 @@ import {
  *  1. `WIN` trước mọi thứ, và đã vào thư viện thì KHÔNG tự rơi ra. Một mẫu đã đạt ngưỡng rồi bị huỷ
  *     vài đơn không làm nó hết là mẫu đã chứng minh được — màn hình in số hiện tại bên cạnh.
  *  2. Chưa đăng ⇒ `PENDING`. Không có số chi (CHƯA BIẾT) ⇒ không luật nào được xét.
- *  3. `KILL` xét ĐƯỢC trong khung test — đó là cả mục đích của luật tắt sớm.
+ *  3. `KILL` xét ĐƯỢC trong khung test — đó là cả mục đích của luật tắt sớm. Luật tắt đọc
+ *     `killRuleOrders` thay cho `bookedOrders` khi có (hàng rào của lượt ghi Facebook tự động).
  *  4. Hết khung test nhưng chưa qua `verdictSettleHours` ⇒ `AWAITING_ORDERS`: khách nhắn tin hôm nay
  *     chốt đơn ngày mai, và kết luận LOẠI ở nửa đêm là loại một mẫu trước khi đơn của nó kịp về.
  *  5. Đã ngã ngũ: không có luật GIỮ ⇒ `UNJUDGED` (thiếu căn cứ, KHÔNG phải mẫu kém); qua hết luật
@@ -36,10 +37,24 @@ export type VariantMetrics = {
   impressions: number | null;
   clicks: number | null;
   messages: number | null;
-  /** Đơn chốt (không huỷ) quy về mẩu QC này qua `ad_id`. */
+  /** Đơn chốt (không huỷ) quy về mẩu QC này qua `ORDER_AD_ID` (ad_id Pancake gửi, hoặc bài viết chỉ thuộc đúng MỘT mẩu). */
   bookedOrders: number;
   deliveredOrders: number;
   returnedOrders: number;
+  /**
+   * SỐ ĐƠN MÀ LUẬT TẮT ĐƯỢC NHÌN — tách khỏi `bookedOrders`, và đó là một hàng rào tiền.
+   *
+   * Luật tắt là đường DUY NHẤT mà số đơn tự dẫn tới một lượt GHI Facebook (tạm dừng nhóm QC) không
+   * có người bấm ở từng lượt. Người duyệt lô đã cho phép luật ấy khi "đơn" còn nghĩa là đơn mang
+   * `ad_id`. Đổi định nghĩa đơn (thêm đường qua bài viết, 25/09/2026) thì một luật `costPerOrder`
+   * đang ở trạng thái CHƯA BIẾT (0 đơn ⇒ mẫu số 0) có thể bỗng kích hoạt — tức máy tự tắt một mẫu
+   * theo một định nghĩa người duyệt chưa từng thấy. Nên luật tắt đọc con số này; `undefined` ⇒
+   * dùng `bookedOrders` (hành vi cũ của mọi nơi gọi không truyền nó).
+   *
+   * Chuyển luật tắt sang định nghĩa mới là QUYẾT ĐỊNH của chủ shop (HUMAN GATE), không phải một
+   * lần tái cấu trúc — xem `KILL_RULE_ORDER_BASIS` trong `lib/queries/creative-loop.ts`.
+   */
+  killRuleOrders?: number;
 };
 
 export type JudgeInput = {
@@ -89,6 +104,15 @@ export function metricValue(m: VariantMetrics, metric: RuleMetric): number | nul
   }
 }
 
+/**
+ * CHI / ĐƠN CHỐT làm BẰNG CHỨNG cạnh phán quyết — CHÍNH `metricValue(…, "costPerOrder")` mà luật dùng,
+ * làm tròn về đồng. Chỉ để hiển thị; không ngưỡng nào đọc hàm này. `null` = chi CHƯA BIẾT hoặc 0 đơn.
+ */
+export function costPerOrderOf(m: VariantMetrics): number | null {
+  const v = metricValue(m, "costPerOrder");
+  return v === null ? null : Math.round(v);
+}
+
 /** `true` / `false` / `null` (chưa đủ chi để xét, hoặc chỉ số CHƯA BIẾT). */
 export function evalRule(m: VariantMetrics, rule: CreativeRule): { value: number | null; pass: boolean | null } {
   const value = metricValue(m, rule.metric);
@@ -122,8 +146,11 @@ export function judgeVariant(input: JudgeInput, cfg: Pick<CreativeLoopConfig, "k
   }
 
   // Luật TẮT: xét cả trong lẫn sau khung test. Mẫu đã bị tắt thì vẫn trả KILL để lịch sử đọc được.
+  // Luật tắt đọc `killRuleOrders` (xem kiểu `VariantMetrics`) — đổi định nghĩa đơn không được tự
+  // sinh một lượt ghi Facebook mà người duyệt lô chưa từng cho phép.
+  const killView: VariantMetrics = m.killRuleOrders === undefined ? m : { ...m, bookedOrders: m.killRuleOrders };
   for (const rule of cfg.killRules) {
-    const r = evalRule(m, rule);
+    const r = evalRule(killView, rule);
     if (r.pass === true) return out("KILL", [`Kích hoạt luật tắt: ${describeRule(rule)}.`], rule);
   }
   // Mẫu do NGƯỜI tắt (hoặc tắt bởi một luật đã bị gỡ khỏi cấu hình) đi tiếp để kết luận theo luật giữ.
