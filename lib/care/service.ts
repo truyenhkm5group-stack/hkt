@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { clearMemo } from "@/lib/cache";
+import { publish } from "@/lib/realtime/bus";
 import { canRequestCarrierAction } from "@/lib/care/redelivery-eligibility";
 import { careSlaHours } from "@/lib/care/sla";
 import { carrierSubstate } from "@/lib/constants/carrier-substate";
@@ -112,6 +113,21 @@ export async function loadCareState(shipmentId: string): Promise<CareState> {
  *     lại"); KHÔNG lặng lẽ mở đợt mới thay họ;
  *   · chưa từng có đợt nào ⇒ mở đợt mới (MANUAL) và đánh số tiếp.
  */
+/**
+ * ═══ GHI CARE XONG ⇒ MỌI MÀN HÌNH ĐANG MỞ ĐỀU NGHE ═══
+ *
+ * Bản trước chỉ `clearMemo()`: người bấm thấy dòng đổi (trình duyệt tự vá), nhưng đồng nghiệp đang
+ * mở cùng hàng đợi thì KHÔNG — không có sự kiện realtime nào cho lượt ghi care, nên màn hình của họ
+ * đứng yên cho tới khi Viettel Post tình cờ gửi một gói tin. Hai người cùng gọi một khách là hệ quả.
+ *
+ * Phát `care` qua bus SSE (`lib/realtime/bus.ts`) sau khi đã xoá đệm: trang nhận sự kiện làm mới và
+ * đọc hàng đợi dựng lại — không phải bản đệm cũ.
+ */
+function sauKhiGhiCare(shipmentIds: readonly string[]) {
+  clearMemo();
+  for (const shipmentId of new Set(shipmentIds)) publish({ type: "care", shipmentId });
+}
+
 async function ensureCareRow(shipmentId: string, actor: string): Promise<CareRow | null> {
   const db = await getDb();
   const [s] = await db
@@ -306,7 +322,7 @@ export async function setCareStatus(user: CareActor, input: z.input<typeof statu
     await recordCareEvent(user, before, { action: status === "RESOLVED" ? "RESOLVE" : status === "CANCELLED" ? "CANCEL" : "STATUS", note, nextStatus: status, followUpAt: terminal || waiting ? nextFollowUp : undefined });
     states[shipmentId] = await loadCareState(shipmentId);
   }
-  clearMemo();
+  sauKhiGhiCare(Object.keys(states));
   return { ok: true, data: { states, skipped } };
 }
 
@@ -351,7 +367,7 @@ export async function reopenCase(user: CareActor, input: z.input<typeof reopenSc
     .catch(() => []);
   if (!row) return { error: "Kiện đã có đợt chăm sóc khác đang mở — làm tiếp trên đợt đó" };
   await recordCareEvent(user, before, { action: "REOPEN", note, nextStatus: next, reason: "Mở lại case đã đóng" });
-  clearMemo();
+  sauKhiGhiCare([shipmentId]);
   return { ok: true, data: await loadCareState(shipmentId) };
 }
 
@@ -429,7 +445,7 @@ export async function setCareOwner(user: CareActor, input: z.input<typeof ownerS
     await recordCareEvent(user, before, { action: "ASSIGN", nextStatus: next, nextOwner: owner?.email ?? null, nextOwnerId: owner?.id ?? null, payload: { ownerId: owner?.id ?? null, ownerName: owner?.name ?? null } });
     states[shipmentId] = await loadCareState(shipmentId);
   }
-  clearMemo();
+  sauKhiGhiCare(Object.keys(states));
   return { ok: true, data: { states, skipped } };
 }
 
@@ -481,7 +497,7 @@ export async function setCareFollowUp(user: CareActor, input: z.input<typeof fol
     .set({ followUpAt: at, careStatus: next, firstResponseAt: firstResponse(before, now), updatedBy: user.email, updatedAt: now })
     .where(eq(schema.shipmentCare.id, before.id));
   await recordCareEvent(user, before, { action: "FOLLOW_UP", nextStatus: next, followUpAt: at });
-  clearMemo();
+  sauKhiGhiCare([shipmentId]);
   return { ok: true, data: await loadCareState(shipmentId) };
 }
 
@@ -507,7 +523,7 @@ export async function addCareNote(user: CareActor, input: z.input<typeof noteSch
     .set({ lastNote: note, lastNoteAt: now, lastNoteBy: user.email, careStatus: next, firstResponseAt: firstResponse(before, now), updatedBy: user.email, updatedAt: now })
     .where(eq(schema.shipmentCare.id, before.id));
   await recordCareEvent(user, before, { action: "NOTE", note, nextStatus: next, payload: { kind } });
-  clearMemo();
+  sauKhiGhiCare([shipmentId]);
   return { ok: true, data: await loadCareState(shipmentId) };
 }
 
@@ -653,7 +669,7 @@ export async function recordCareDecision(user: CareActor, input: z.input<typeof 
 
   await recordCareEvent(user, careRow, { action: "STATUS", note, nextStatus: sau, followUpAt: henXemLai, payload: { careDecision: decision, reasonCode: lyDo.reasonCode ?? null, carrierStageAtDecision: kien.stage, carrierSubstateAtDecision: substate } });
   await audit({ userId: user.id, userEmail: user.email, action: "CARE_DECISION", entity: "SHIPMENT", entityId: shipmentId, detail: { decision, reasonCode: lyDo.reasonCode ?? null, reasonFromNote: lyDo.fromNote, previous: truoc, next: sau, carrierStage: kien.stage, carrierSubstate: substate } });
-  clearMemo();
+  sauKhiGhiCare([shipmentId]);
   return { ok: true, data: await loadCareState(shipmentId) };
 }
 
@@ -801,7 +817,7 @@ export async function requestCarrierAction(user: CareActor, input: z.input<typeo
     .where(eq(schema.carrierActionRequests.id, pendingRow.id))
     .returning();
   if (careRow) await recordCareEvent(user, careRow, { action: "CARRIER_RESULT", payload: { requestId: failed.id, actionKey, status: failed.status, error: message, attempts } });
-  clearMemo();
+  sauKhiGhiCare([shipmentId]);
   return { error: unsupported ? `Viettel Post từ chối: ${message} — tài khoản API của ERP không thao tác được kiện này. Phải làm tay trên viettelpost.vn rồi bấm “Đã làm tay”.` : `Viettel Post từ chối: ${message} (đã gửi ${attempts} lần).` };
 }
 
@@ -822,7 +838,7 @@ export async function markCarrierManualDone(user: CareActor, input: z.input<type
   await db.insert(schema.shipmentEvents).values({ shipmentId: row.shipmentId, source: "MANUAL", status: `ERP · ${label} (làm tay)`, statusName: `ERP · ${label} (làm tay)`, note: `${user.name || user.email}${parsed.data.note ? `: ${parsed.data.note}` : ""}`, occurredAt: new Date() }).onConflictDoNothing();
   const careRow = await ensureCareRow(row.shipmentId, user.email);
   if (careRow) await recordCareEvent(user, careRow, { action: "CARRIER_MANUAL", note: parsed.data.note, payload: { requestId: row.id, actionKey: row.actionKey } });
-  clearMemo();
+  sauKhiGhiCare([row.shipmentId]);
   return { ok: true, data: toView(row) };
 }
 
@@ -922,7 +938,7 @@ export async function bulkRequestCarrierAction(user: CareActor, input: z.input<t
     entityId: `bulk:${actionKey}:${rows.length}`,
     detail: { actionKey, note, counts, trackings: rows.map((r) => ({ tracking: r.tracking, outcome: r.outcome })) },
   });
-  clearMemo();
+  clearMemo(); // từng kiện đã phát sự kiện care trong requestCarrierAction
   return { ok: true, data: { rows, counts } };
 }
 
@@ -1077,7 +1093,7 @@ export async function recordBusinessAction(user: CareActor, input: z.input<typeo
 
   await recordCareEvent(user, careRow, { action: "CARRIER_REQUEST", note, followUpAt: henXemLai, payload: { businessAction: action, reasonCode: reasonCode ?? null, carrierResult } });
   await audit({ userId: user.id, userEmail: user.email, action: "CARE_BUSINESS_ACTION", entity: "SHIPMENT", entityId: shipmentId, detail: { action, reasonCode, carrierResult, previous: truoc, next: sau } });
-  clearMemo();
+  sauKhiGhiCare([shipmentId]);
 
   const care = await loadCareState(shipmentId);
   const nhan = BUSINESS_ACTION_LABEL[action];

@@ -4,6 +4,8 @@ export type RealtimeEvent =
   | { type: "sync"; source: string; job: string; status: string }
   | { type: "order"; orderId: string; action: "created" | "updated" }
   | { type: "shipment"; shipmentId: string; status?: string }
+  /** Một lượt ghi của đội care (trạng thái · người · hẹn · note · kết quả) — xem `lib/care/service.ts`. */
+  | { type: "care"; shipmentId: string }
   | { type: "stock"; variantId: string }
   | { type: "ads" }
   | { type: "notification"; open: number }

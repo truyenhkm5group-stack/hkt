@@ -22,7 +22,7 @@ import {
 import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@/lib/constants/carrier-substate";
 import { careSlaHours } from "@/lib/care/sla";
 import { rawMedian, timingStat } from "@/lib/constants/care-timing";
-import { careViewOf, slaOf, type CareStateLike } from "@/lib/care/view";
+import { queueViewOf, slaOf, type CareStateLike } from "@/lib/care/view";
 import { CARE_TERMINAL_STAGES } from "@/lib/care/entry";
 import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CS_CARE_NEXT_ACTION, CS_CARE_REASONS, CS_KIND_CARE_REASON, type CsCareReason, CARE_STATUS_LABEL, CARE_STATUSES, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus } from "@/lib/constants/care";
 import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
@@ -840,9 +840,15 @@ async function buildQueue(): Promise<CareQueue> {
       xanh. Thiếu `carrierNewsAfterLastRound` thì ca có tin ĐVVC mới vẫn nằm im tới giờ hẹn.
     */
     const careChoHan: CareStateLike = { ...care, firstRoundAt: hist.firstRoundAt, carrierNewsAfterLastRound: hist.carrierNewsAfterLastRound };
-    const { view, reopened } = base.inCareCondition ? careViewOf(careChoHan, base.queueSince, now) : { view: "done" as const, reopened: false };
     const fact = facts.get(base.shipmentId);
     const capability = fact?.capability;
+    const trangThaiCon = substateOf(base.carrier);
+    /*
+      Góc nhìn đi qua `queueViewOf` — CÙNG hàm trình duyệt dùng để vá dòng sau cú bấm. Kiện đang
+      chuyển hoàn mà đội đã chốt "Đã hoàn" (hoặc ĐVVC đã duyệt hoàn) về "Đã xử lý" ở đây, không phải
+      một bộ lọc thứ hai ở màn hình.
+    */
+    const { view, reopened } = queueViewOf({ inCareCondition: base.inCareCondition, carrier: { stage: base.carrier.stage, substate: trangThaiCon.substate, vtpStatus: base.carrier.vtpStatus ?? null, rawStatus: base.carrier.rawStatus }, queueSince: base.queueSince }, careChoHan, now);
     all.push({
       ...base,
       /*
@@ -859,7 +865,7 @@ async function buildQueue(): Promise<CareQueue> {
         // SỐ LẦN PHÁT HỤT CHUẨN — cùng một phép đếm cho mọi nguồn dòng và cho cả panel chi tiết.
         // Nguồn dòng chỉ còn là nơi lấy các cột khác; nó không được phép nói một con số riêng.
         failedAttempts: fact?.failedAttempts ?? base.carrier.failedAttempts,
-        ...substateOf(base.carrier),
+        ...trangThaiCon,
         trackingCapability: asTrackingCapability(capability),
       },
       products: productMap.get(base.shipmentId) ?? [],

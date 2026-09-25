@@ -1,5 +1,7 @@
 import { CARE_SLA, CARE_TERMINAL_STATUSES, CARE_WAITING_STATUSES, type CareStatus, type CareView } from "@/lib/constants/care";
 import { DECISION_ENDS_TEAM_WORK, type CareDecision } from "@/lib/constants/care-resolution";
+import { returnApproved } from "@/lib/constants/care-return-approval";
+import type { CarrierSubstate } from "@/lib/constants/carrier-substate";
 
 /**
  * Luật thuần (không đụng CSDL) để cả máy chủ lẫn trình duyệt tính CÙNG một kết quả: kiện thuộc góc
@@ -131,6 +133,51 @@ export function careViewOf(care: CareStateLike, queueSince: Date, now = new Date
     return { view: reopened ? "care" : "done", reopened };
   }
   return { view: "care", reopened: false };
+}
+
+/**
+ * ═══════════ KIỆN ĐANG QUAY ĐẦU MÀ KHÔNG CÒN VIỆC CHO NGƯỜI ⇒ RỜI "CẦN CARE" ═══════════
+ *
+ * Chủ shop báo 25/09/2026: kiện ERP đã chốt "Đã hoàn" và Viettel Post đang báo "Đang chuyển hoàn"
+ * vẫn đứng ở "Cần care", mang nhãn "mở lại" + "vỡ SLA". Hai đường kéo nó vào:
+ *   · ca đã đóng (Đã xong) bị `careViewOf` coi là MỞ LẠI vì mốc vào hàng đợi của ca đã đóng lấy
+ *     theo TIN ĐVVC CUỐI — mà kiện trên đường hoàn thì ĐVVC gửi tin đều đặn (nhận ở bưu cục trung
+ *     chuyển, chuyển tiếp…). Mỗi tin của chiều hoàn "mở lại" một ca đội đã chốt.
+ *   · case khách ("Khách muốn trả / không nhận") còn mở thì kéo kiện vào, vì chiều hoàn CHƯA CHỐT
+ *     (`isRunningHandoff`) — đúng, ĐVVC chưa báo 504.
+ *
+ * Kiện ở CHIỀU HOÀN (chặng `RETURNING` leg-aware, hoặc trạng thái con "Đang chuyển hoàn") hết việc
+ * cho người khi MỘT trong hai điều sau đúng:
+ *   · đội đã chốt kết quả "Đã hoàn" cho ĐỢT đang hiển thị (`teamWorkEnded`) — đội đã quyết cho
+ *     hoàn, không còn cuộc gọi nào phải làm; hoặc
+ *   · ĐVVC đã DUYỆT hoàn (502/515 — `returnApproved`, mục 66): từ mốc đó shop không còn cửa phát
+ *     tiếp, ca đã được máy chốt `RESCUE_FAILED`.
+ * 505 "Yêu cầu chuyển hoàn" mà đội CHƯA chốt gì thì VẪN là việc — shop còn bấm phát tiếp được.
+ *
+ * Luật này chỉ đổi GÓC NHÌN của hàng đợi. Nó KHÔNG đổi chặng vận đơn, KHÔNG đổi `ORDER_OUTCOME`,
+ * không đưa món nào vào tồn — hàng chỉ thành hoàn khi ĐVVC báo 504 (luật 47, 66).
+ *
+ * Hàm thuần: máy chủ dựng hàng đợi và trình duyệt vá dòng sau cú bấm đọc CÙNG một câu, nên bấm
+ * "Đã hoàn" trên một kiện đang chuyển hoàn thì dòng rời "Cần care" ngay, không đợi tải lại; còn
+ * bấm "Mở lại" (đợt mới chưa có kết quả) thì nó quay về — người bấm mở lại là người thấy việc.
+ */
+export type CarrierLegLike = { stage: string; substate: CarrierSubstate; vtpStatus: number | null; rawStatus: string };
+
+export function returnLegSettled(carrier: CarrierLegLike, care: CareStateLike): boolean {
+  const chieuHoan = carrier.stage === "RETURNING" || carrier.substate === "RETURNING";
+  if (!chieuHoan) return false;
+  return teamWorkEnded(care) || returnApproved({ code: carrier.vtpStatus, text: carrier.rawStatus });
+}
+
+/**
+ * GÓC NHÌN CỦA MỘT DÒNG HÀNG ĐỢI — một cửa cho máy chủ và trình duyệt.
+ *
+ * `inCareCondition = false` (kiện không còn trong rổ care nào) và kiện quay đầu đã hết việc đều
+ * về "Đã xử lý"; còn lại đi theo trạng thái đợt care (`careViewOf`).
+ */
+export function queueViewOf(row: { inCareCondition: boolean; carrier: CarrierLegLike; queueSince: Date }, care: CareStateLike, now = new Date()): { view: Exclude<CareView, "all">; reopened: boolean } {
+  if (!row.inCareCondition || returnLegSettled(row.carrier, care)) return { view: "done", reopened: false };
+  return careViewOf(care, row.queueSince, now);
 }
 
 export function slaOf(queueSince: Date, care: CareStateLike, now = new Date(), hours: CareSlaHours = DEFAULT_CARE_SLA_HOURS): CareSla {
