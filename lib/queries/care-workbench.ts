@@ -40,6 +40,7 @@ export type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, Carrier
 export { careViewOf, slaOf } from "@/lib/care/view";
 import { CARE_NOTE_PRESETS_DEFAULT, CARE_NOTE_PRESETS_KEY, type CareNotePreset } from "@/lib/constants/care";
 import type { CsKind } from "@/lib/constants/cs";
+import { assessOpenCases } from "@/lib/cs/stale";
 import { CARRIER_HANDOFF_STAGES } from "@/lib/constants/carrier-handoff";
 import { CARE_DECISIONS, RESOLUTION_NOTES_DEFAULT, RESOLUTION_NOTES_KEY, RESOLUTION_NOTES_MAX } from "@/lib/constants/care-resolution";
 import { getSettingJson } from "@/lib/settings";
@@ -552,7 +553,7 @@ const CARE_EVENT_LABEL: Record<string, string> = {
   CARRIER_MANUAL: "Xác nhận đã làm tay trên Viettel Post",
 };
 
-type CsHandoverSqlRow = { shipment_id: string; is_final: boolean; tracking: string; order_id: string; system_id: number | null; customer: string; phone: string; cod_amount: string | number; stage: string; vtp_status_name: string | null; kind: string; title: string; opened_at: string; tuoi_gio: string | number | null; lan_hut: number };
+type CsHandoverSqlRow = { case_id: string; shipment_id: string; is_final: boolean; tracking: string; order_id: string; system_id: number | null; customer: string; phone: string; cod_amount: string | number; stage: string; vtp_status_name: string | null; kind: string; title: string; opened_at: string; tuoi_gio: string | number | null; lan_hut: number };
 type CsHandoverRow = CsHandoverSqlRow & { reason: CsCareReason; detail: string };
 
 /**
@@ -587,7 +588,7 @@ async function loadCsHandoverCases(): Promise<CsHandoverRow[]> {
              coalesce(o.bill_full_name, s.receiver_name, '') as customer,
              coalesce(o.bill_phone, s.receiver_phone, '') as phone,
              s.cod_amount, s.stage::text as stage, s.vtp_status_name,
-             c.kind, c.title, c.created_at as opened_at,
+             c.id as case_id, c.kind, c.title, c.created_at as opened_at,
              extract(epoch from (now() - (select max(e.occurred_at) from shipment_events e where e.shipment_id = s.id))) / 3600 as tuoi_gio,
              (select count(*) from shipment_events e where e.shipment_id = s.id and e.normalized_stage = 'DELIVERY_FAILED')::int as lan_hut
         from cs_cases c
@@ -608,13 +609,24 @@ async function loadCsHandoverCases(): Promise<CsHandoverRow[]> {
        order by s.id, c.created_at desc
     `),
   );
+  const hint = new Map<string, string>();
+  for (const a of await assessOpenCases(rows.map((r) => r.case_id))) {
+    if (a.verdict === "NEEDS_REVIEW" || a.verdict === "AUTO_RESOLVE") hint.set(a.id, a.reason);
+  }
   const theoKien = new Map<string, CsHandoverSqlRow[]>();
   for (const r of rows) theoKien.set(r.shipment_id, [...(theoKien.get(r.shipment_id) ?? []), r]);
   const out: CsHandoverRow[] = [];
   for (const list of theoKien.values()) {
     const lyDo = (r: CsHandoverSqlRow): CsCareReason => CS_KIND_CARE_REASON[r.kind as Exclude<CsKind, "DELIVERY_FAILED">] ?? "CUSTOMER_OTHER";
     const chinh = [...list].sort((a, b) => CS_CARE_REASON_PRIORITY.indexOf(lyDo(a)) - CS_CARE_REASON_PRIORITY.indexOf(lyDo(b)))[0];
-    out.push({ ...chinh, reason: lyDo(chinh), detail: list.map((r) => r.title).join(" · ") });
+    /*
+      CASE ĐÃ HẾT VIỆC NHƯNG CÓ NGƯỜI CẦM — nói ra trên dòng, không để nó chỉ hiện "vỡ SLA".
+
+      Máy đối chiếu (`lib/cs/stale.ts`) đóng case mà chứng từ ĐVVC cho thấy đã hết việc, TRỪ case có
+      người thật cầm. Những case ấy vẫn kéo kiện vào đây; dòng phải nói lý do để người đang cầm đóng.
+    */
+    const hetViec = list.map((r) => hint.get(r.case_id)).filter((h): h is string => Boolean(h));
+    out.push({ ...chinh, reason: lyDo(chinh), detail: [list.map((r) => r.title).join(" · "), ...hetViec.map((h) => `Hết việc? ${h} — xem lại rồi đóng case`)].join(" · ") });
   }
   return out;
 }

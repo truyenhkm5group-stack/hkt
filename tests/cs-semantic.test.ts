@@ -435,6 +435,44 @@ export async function testCsSemantic(db: Db) {
   for (const id of ["lv-c4", "lv-c5", "lv-c6", "lv-c9"]) assert.equal(await trangThai(id), "IN_PROGRESS", `${id} phải giữ nguyên`);
   assert.equal((await applyStaleReconciliation({ dryRun: false, actor: "test:cs-liveness" })).closed, 0, "chạy lại là không-thao-tác");
 
+  /* ═══════════ 13 · CASE VỀ MỘT CHUYẾN GIAO ĐÃ ĐƯỢC ĐVVC CHỐT ═══════════ */
+  /*
+    Chủ shop hỏi 25/09/2026: vì sao PKE1525012194 (giao thành công 48 giờ trước) vẫn ở "Cần care".
+    Case "trả hàng / không nhận" mở TRƯỚC khi ĐVVC chốt kiện: chuyến giao ấy đã kết thúc (khách vẫn
+    nhận, hoặc hàng đã hoàn) ⇒ hết việc. Mở SAU mốc chốt ⇒ yêu cầu sau bán, còn nguyên.
+  */
+  await db.insert(schema.orders).values([
+    { id: "ch-o1", stage: "DELIVERED", status: 3, insertedAt: ngay(6), billFullName: "Báo không nhận rồi vẫn nhận", billPhone: "0935000001", totalPriceAfterDiscount: 300_000 },
+    { id: "ch-o2", stage: "RETURNED", status: 5, insertedAt: ngay(9), billFullName: "Đã hoàn", billPhone: "0935000002", totalPriceAfterDiscount: 300_000 },
+    { id: "ch-o3", stage: "DELIVERED", status: 3, insertedAt: ngay(9), billFullName: "Nhận rồi muốn trả", billPhone: "0935000003", totalPriceAfterDiscount: 300_000 },
+  ]).onConflictDoNothing();
+  await db.insert(schema.shipments).values([
+    { id: "ch-s1", orderId: "ch-o1", carrier: "Viettel Post", vtpOrderNumber: "CH1", stage: "DELIVERED", isFinal: true, deliveredAt: ngay(2), receiverPhone: "0935000001" },
+    { id: "ch-s2", orderId: "ch-o2", carrier: "Viettel Post", vtpOrderNumber: "CH2", stage: "RETURNED", isFinal: true, returnedAt: ngay(1), receiverPhone: "0935000002" },
+    { id: "ch-s3", orderId: "ch-o3", carrier: "Viettel Post", vtpOrderNumber: "CH3", stage: "DELIVERED", isFinal: true, deliveredAt: ngay(5), receiverPhone: "0935000003" },
+  ]).onConflictDoNothing();
+  await db.insert(schema.csCases).values([
+    { id: "ch-c1", orderId: "ch-o1", kind: "RETURN", status: "OPEN", source: "PANCAKE_CHAT", title: "Khách báo không nhận · rồi vẫn nhận", dedupeKey: "test:ch-c1", createdAt: ngay(4) },
+    { id: "ch-c2", orderId: "ch-o2", kind: "RETURN", status: "OPEN", source: "PANCAKE_CHAT", title: "Khách không nhận · hàng đã hoàn", dedupeKey: "test:ch-c2", createdAt: ngay(4) },
+    { id: "ch-c3", orderId: "ch-o3", kind: "RETURN", status: "OPEN", source: "PANCAKE_RETURN", title: "Nhận rồi mới muốn trả", dedupeKey: "test:ch-c3", createdAt: ngay(1) },
+    { id: "ch-c4", orderId: "ch-o1", kind: "WRONG_ADDRESS", status: "OPEN", source: "PANCAKE_CHAT", title: "Sai địa chỉ · kiện đã giao xong", dedupeKey: "test:ch-c4", createdAt: ngay(4) },
+    { id: "ch-c5", orderId: "ch-o1", kind: "COMPLAINT", status: "OPEN", source: "PANCAKE_CHAT", title: "Khiếu nại mở trước khi nhận", dedupeKey: "test:ch-c5", createdAt: ngay(4) },
+    { id: "ch-c6", orderId: "ch-o2", kind: "RETURN", status: "IN_PROGRESS", source: "PANCAKE_CHAT", title: "Không nhận · có người đang cầm", assignee: "Linh CSKH", assigneeUserId: "csq-user", dedupeKey: "test:ch-c6", createdAt: ngay(4) },
+  ]).onConflictDoNothing();
+  const ch = new Map((await assessOpenCases(["ch-c1", "ch-c2", "ch-c3", "ch-c4", "ch-c5", "ch-c6"])).map((a) => [a.id, a]));
+  assert.equal(ch.get("ch-c1")?.verdict, "AUTO_RESOLVE", "báo không nhận TRƯỚC khi giao, rồi ĐVVC giao thành công ⇒ chuyến giao đã kết thúc");
+  assert.equal(ch.get("ch-c2")?.verdict, "AUTO_RESOLVE", "báo không nhận TRƯỚC khi hoàn, hàng đã hoàn về ⇒ hết việc (nhận hoàn là việc của kho)");
+  assert.equal(ch.get("ch-c3")?.verdict, "KEEP_OPEN", "khách nhận RỒI mới muốn trả là yêu cầu sau bán — KHÔNG được đóng");
+  assert.equal(ch.get("ch-c4")?.verdict, "AUTO_RESOLVE", "sai địa chỉ không còn cản gì khi kiện đã giao xong");
+  assert.equal(ch.get("ch-c5")?.verdict, "KEEP_OPEN", "khiếu nại là việc về SẢN PHẨM — mốc giao không làm nó hết");
+  assert.equal(ch.get("ch-c6")?.verdict, "NEEDS_REVIEW", "có người đang cầm ⇒ máy KHÔNG đóng hộ, chỉ nói ra");
+  assert.ok(ch.get("ch-c1")?.reason.includes("TRƯỚC khi ĐVVC chốt kiện"), "lý do phải nói căn cứ là mốc chốt của ĐVVC");
+  // Không có mốc chốt ⇒ CHƯA BIẾT ⇒ không kết luận.
+  await db.insert(schema.orders).values({ id: "ch-o7", stage: "DELIVERED", status: 3, insertedAt: ngay(9), billFullName: "Không mốc", billPhone: "0935000007", totalPriceAfterDiscount: 300_000 }).onConflictDoNothing();
+  await db.insert(schema.shipments).values({ id: "ch-s7", orderId: "ch-o7", carrier: "Viettel Post", vtpOrderNumber: "CH7", stage: "DELIVERED", isFinal: true, receiverPhone: "0935000007" }).onConflictDoNothing();
+  await db.insert(schema.csCases).values({ id: "ch-c7", orderId: "ch-o7", kind: "RETURN", status: "OPEN", source: "PANCAKE_CHAT", title: "Không có mốc chốt", dedupeKey: "test:ch-c7", createdAt: ngay(4) }).onConflictDoNothing();
+  assert.equal((await assessOpenCases(["ch-c7"]))[0]?.verdict, "KEEP_OPEN", "không có mốc chốt thì không biết case mở trước hay sau — giữ nguyên");
+
   console.log(
     `✓ Máy sinh case hiểu câu: ca gốc “Yến Ruby” (giả định) KHÔNG sinh việc trả hàng · bốn cửa theo đúng thứ tự (thời gian → người nói → CHỨNG TỪ → tin cậy) · chứng từ BÁC model (POS đã xác nhận / đã có vận đơn / đơn đã xong) · mất AI thì từ khoá KHÔNG tạo việc còn đường xác định vẫn chạy · bộ đánh giá ${boDanhGia.length} ca: độ chính xác ${(doChinhXac * 100).toFixed(0)}% · độ phủ ${(doPhu * 100).toFixed(0)}% · báo nhầm ${(tyLeBaoNham * 100).toFixed(0)}% · ${deXem} ca để người xem · một đoạn sự việc một việc · bản ghi không chứa dòng suy nghĩ · case hết lý do tồn tại tự rời hàng đợi (đóng MỀM có lý do, việc bàn khác và việc có người cầm thì KHÔNG, chạy lại là không-thao-tác)`,
   );

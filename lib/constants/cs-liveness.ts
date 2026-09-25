@@ -59,6 +59,14 @@ export type LivenessFacts = {
    * đơn vẫn chỉ đi qua `ORDER_OUTCOME`.
    */
   orderShipmentsSettled: number;
+  /**
+   * Mốc ĐVVC CHỐT kiện của đơn (phát xong / hoàn về — `delivered_at` · `returned_at`, thiếu thì mốc
+   * trạng thái cuối), lấy mốc MUỘN NHẤT trong các kiện đã chốt. `null` = chưa có kiện nào chốt ở hai
+   * chặng đó (CHƯA BIẾT ⇒ luật dựa vào nó không kết luận).
+   */
+  orderSettledAt: Date | null;
+  /** Lúc case được mở — so với `orderSettledAt` để biết lời khách nói về chuyến giao nào. */
+  caseCreatedAt: Date;
 };
 
 export type Liveness = { alive: true } | { alive: false; reason: string } | null;
@@ -85,12 +93,36 @@ export const LIVENESS_RULES: Partial<Record<CsKind, (f: LivenessFacts) => Livene
     if (!f.orderStage) return null;
     return { alive: true };
   },
+  /*
+    TRẢ HÀNG / KHÔNG NHẬN — lời khách về MỘT CHUYẾN GIAO. Chuyến đó đã được ĐVVC chốt SAU khi case
+    mở (khách vẫn nhận, hoặc hàng đã hoàn về) thì việc "hỏi khách giữ hay trả" không còn gì để làm:
+    kết cục đã có trong chứng từ. Nhận hàng hoàn là việc của kho; khách nhận rồi mới muốn trả là một
+    case MỚI (mở sau mốc chốt) và KHÔNG bị luật này đụng tới.
+
+    Đo production 25/09/2026 (ops cs-stale): 16/16 case trả hàng đang mở trên kiện đã chốt đều mở
+    TRƯỚC mốc chốt — 7 kiện sau đó giao thành công, 9 kiện đã hoàn — và từ 25/09 chúng nằm ở "Cần
+    care" của trang Vận đơn với nhãn vỡ SLA (vd. PKE1525012194, kiện giao thành công 48 giờ trước).
+  */
+  RETURN: (f) => trongChuyenDaChot(f, "Khách báo trả / không nhận TRƯỚC khi ĐVVC chốt kiện — kiện đã"),
+  // Sai thông tin chỉ cản được chuyến giao đang chạy; kiện đã chốt thì lỗi ấy không còn cản gì.
+  WRONG_ADDRESS: (f) => trongChuyenDaChot(f, "Sai địa chỉ báo TRƯỚC khi ĐVVC chốt kiện — kiện đã"),
+  WRONG_PHONE: (f) => trongChuyenDaChot(f, "Sai SĐT báo TRƯỚC khi ĐVVC chốt kiện — kiện đã"),
   URGE_DELIVERY: (f) => {
     if (f.orderShipmentsSettled > 0 && f.orderShipmentsActive === 0) return { alive: false, reason: "ĐVVC đã chốt kiện của đơn (phát xong / đã hoàn), không còn kiện nào đang chạy — câu giục là chuyện đã qua" };
     // Còn kiện đang chạy / chưa có kiện: để `CASE_ELIGIBILITY` quyết như cũ.
     return null;
   },
 };
+
+/**
+ * Case về một chuyến giao, mở TRƯỚC khi ĐVVC chốt chuyến đó (không còn kiện nào đang chạy) ⇒ hết.
+ * Mở SAU mốc chốt, hoặc chưa có mốc ⇒ `null` (không kết luận, luật cũ quyết).
+ */
+function trongChuyenDaChot(f: LivenessFacts, dauCau: string): Liveness {
+  if (f.orderShipmentsActive > 0 || f.orderShipmentsSettled === 0 || !f.orderSettledAt) return null;
+  if (f.caseCreatedAt.getTime() > f.orderSettledAt.getTime()) return null;
+  return { alive: false, reason: `${dauCau} phát xong / hoàn về, chuyến giao mà case nói tới đã kết thúc` };
+}
 
 /** `null` = loại này không khai, hoặc chứng từ không đủ để kết luận — nơi gọi đi tiếp luật cũ. */
 export function checkLiveness(kind: CsKind, facts: LivenessFacts): Liveness {
