@@ -7381,3 +7381,51 @@ export type SampleRow = typeof samples.$inferSelect;
 export type SampleReviewRow = typeof sampleReviews.$inferSelect;
 export type DesignVersionRow = typeof designVersions.$inferSelect;
 export type ReturnDispositionRow = typeof returnDispositions.$inferSelect;
+
+// ═══ Company OS · Agent H · sổ phản ứng với đề xuất của buồng lái chủ shop ═══
+//
+// Kiến trúc: docs/company-os/target-architecture.md mục 6 · luật thuần: lib/constants/owner-decisions.ts.
+//
+// Hàng đợi "Cần anh quyết" là PHÉP CHIẾU (luật 19) — nó không lưu đề xuất nào. Bảng này chỉ lưu PHẢN ỨNG
+// của người đọc với một đề xuất (chấp nhận / bỏ qua / nhắc lại sau) kèm ẢNH CHỤP đề xuất lúc quyết, để
+// sau này đo được đề xuất nào được nghe theo và đề xuất nào sai. APPEND-ONLY: chỉ INSERT, ở đâu cũng
+// không UPDATE / DELETE (bài kiểm quét mã nguồn). Phản ứng có hiệu lực = dòng MỚI NHẤT của khoá.
+export const recommendationDecisions = pgTable(
+  "recommendation_decisions",
+  {
+    id: id(),
+    /** Khoá ổn định của đề xuất (vd `ads:CUT:campaign:<id>:ACTUAL`, `sample:<id>`). */
+    sourceKey: text("source_key").notNull(),
+    /** `OwnerDecisionKind`. */
+    kind: text("kind").notNull(),
+    /** ACCEPTED · DISMISSED · SNOOZED */
+    decision: text("decision").notNull(),
+    /** Bắt buộc khi DISMISSED (CHECK + ứng dụng đòi ≥ 5 ký tự). */
+    reason: text("reason").notNull().default(""),
+    /** Chỉ khi SNOOZED: ẩn tới mốc này. */
+    snoozeUntil: ts("snooze_until"),
+    /** Luật 34: người quyết là MỘT tài khoản — máy không có phản ứng với đề xuất. */
+    decidedByUserId: text("decided_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    /** ẢNH CHỤP tên — do MÁY CHỦ đọc từ phiên, không nhận từ client. */
+    decidedBy: text("decided_by").notNull().default(""),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Đề xuất ĐÚNG như người đọc thấy lúc quyết (CÁI GÌ · VÌ SAO · SỐ LIỆU · TÁC ĐỘNG · NÚT), do máy chủ dựng lại. */
+    snapshot: jsonb("snapshot").$type<Record<string, unknown>>().notNull(),
+  },
+  (t) => [
+    index("recommendation_decisions_key_idx").on(t.sourceKey, t.decidedAt),
+    index("recommendation_decisions_at_idx").on(t.decidedAt),
+    check("recommendation_decisions_source_key_check", sql`length(btrim(${t.sourceKey})) > 0`),
+    check("recommendation_decisions_decision_check", sql`${t.decision} IN ('ACCEPTED', 'DISMISSED', 'SNOOZED')`),
+    check(
+      "recommendation_decisions_kind_check",
+      sql`${t.kind} IN ('APPROVAL', 'SAMPLE_REVIEW', 'TOPIC_DECISION', 'ADS_CUT', 'INVENTORY_STOCKOUT', 'PRODUCTION_LATE', 'INVENTORY_REORDER', 'MODEL_SCALE', 'INVENTORY_CLEARANCE')`,
+    ),
+    check("recommendation_decisions_reason_check", sql`${t.decision} <> 'DISMISSED' OR length(btrim(${t.reason})) > 0`),
+    check("recommendation_decisions_snooze_check", sql`(${t.decision} = 'SNOOZED') = (${t.snoozeUntil} IS NOT NULL)`),
+  ],
+);
+
+export type RecommendationDecisionDbRow = typeof recommendationDecisions.$inferSelect;

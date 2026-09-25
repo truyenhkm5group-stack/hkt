@@ -10,6 +10,7 @@ import { StatStrip } from "@/components/stat-tile";
 import { TopActions } from "@/app/(dashboard)/top-actions";
 import { BusinessBriefSection } from "@/app/(dashboard)/business-brief";
 import { DataFreshnessStrip } from "@/app/(dashboard)/data-freshness";
+import { OwnerDecisionsSection } from "@/app/(dashboard)/owner-decisions";
 import { PageHeader } from "@/components/page-header";
 import { DataWarnings } from "@/components/data-warnings";
 import { InfoHint } from "@/components/info-hint";
@@ -223,6 +224,15 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       <Suspense fallback={<Skeleton className="h-32 rounded-2xl" />}>
         <BusinessBriefSection period={period} />
+      </Suspense>
+
+      {/*
+        CẦN ANH QUYẾT (Company OS · Agent H) — đứng TRÊN "Việc cần làm hôm nay": khối dưới là việc của cả
+        shop, khối này chỉ gồm QUYẾT ĐỊNH của người điều hành. Chảy về sau như hai khối trên, và mỗi nguồn
+        có hạn giờ riêng nên một nguồn chậm không giữ cả trang.
+      */}
+      <Suspense fallback={<Skeleton className="h-40 rounded-2xl" />}>
+        <OwnerDecisionsSection />
       </Suspense>
 
       {/*

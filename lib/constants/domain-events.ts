@@ -120,7 +120,8 @@ export const DOMAIN_EVENTS = [
   // Agent E (0136): LIVE. Một sự kiện cho MỖI dòng sổ `return_dispositions` (khoá chống trùng theo id dòng), phát trong CÙNG giao dịch với dòng sổ và phiếu tái nhập (nếu có).
   { name: "return.disposition_set", subjectType: "return_inspection", owner: "E", status: "LIVE", emitter: "lib/returns/disposition.ts", why: "Kết cục của hàng hoàn không tái nhập: sửa / giặt lại, nhập lại sau sửa, huỷ bỏ, trả xưởng." },
   { name: "approval.executed", subjectType: "approval_request", owner: "G", status: "RESERVED", emitter: null, why: "Yêu cầu duyệt đã được tiêu thụ đúng một lần." },
-  { name: "recommendation.decided", subjectType: "recommendation", owner: "H", status: "RESERVED", emitter: null, why: "Chủ shop chấp nhận / bỏ qua một đề xuất trên cockpit — để đo độ đúng sau này." },
+  // Agent H (0138): LIVE. Một sự kiện cho MỖI dòng `recommendation_decisions` (khoá chống trùng theo id dòng), phát trong CÙNG giao dịch với dòng sổ. `subject_id` = khoá nguồn của đề xuất.
+  { name: "recommendation.decided", subjectType: "recommendation", owner: "H", status: "LIVE", emitter: "lib/owner-decisions/service.ts", why: "Chủ shop chấp nhận / bỏ qua / hẹn nhắc lại một đề xuất trên cockpit — để đo độ đúng sau này." },
 ] as const satisfies readonly DomainEventSpec[];
 
 export type DomainEventName = (typeof DOMAIN_EVENTS)[number]["name"];
@@ -147,6 +148,7 @@ export const DOMAIN_EVENT_LABEL: Partial<Record<DomainEventName, string>> = {
   "production_plan.overridden": "Số đặt khác gợi ý máy",
   // Company OS · QA: sự kiện của Agent E đã LIVE mà thiếu nhãn ⇒ dòng thời gian mẫu in mã thô "return.disposition_set".
   "return.disposition_set": "Kết cục hàng hoàn không tái nhập",
+  "recommendation.decided": "Phản ứng với đề xuất trên buồng lái",
 };
 
 export function domainEventLabel(name: string): string {

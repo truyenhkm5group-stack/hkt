@@ -68,9 +68,11 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   SAMPLE_UPDATE: "Sửa mẫu xưởng đang làm",
   SAMPLE_SUBMIT: "Gửi mẫu chờ duyệt",
   SAMPLE_REVIEW: "Ghi phán quyết duyệt mẫu",
+  RECOMMENDATION_DECIDED: "Phản ứng với đề xuất (Cần anh quyết)",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
+  RECOMMENDATION: "Đề xuất trên buồng lái",
   PRODUCTION_TOPIC: "Topic sản xuất",
   COST_SHEET: "Bảng giá thành",
   SAMPLE: "Mẫu xưởng làm",
