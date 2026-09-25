@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requireResource } from "@/lib/auth/scope-guard";
 import { successTone } from "@/lib/constants/returns";
-import { WAIT_BUCKETS, type RateRow, type RecommendationTone } from "@/lib/constants/stock-wait-report";
+import { WAIT_BUCKETS, WAIT_ORIGINS, WAIT_ORIGIN_LABEL, WAIT_ORIGIN_QUESTION, parseWaitOrigin, type RateRow, type RecommendationTone } from "@/lib/constants/stock-wait-report";
 import { MIEN_LABEL, VUNG_LABEL } from "@/lib/constants/vn-regions";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { CURRENT_LIST_LIMIT, getStockWaitReport } from "@/lib/queries/stock-wait-report";
@@ -91,8 +91,11 @@ export default async function StockWaitReportPage({ searchParams }: { searchPara
   const { decision } = await requireResource("REPORTS", "reports:returns");
   if (decision.allow === "NONE") return <ScopeDenied title="Chờ hàng & giao thành công" reason={decision.reason} fix={decision.fix} />;
   const raw = await searchParams;
-  const params = parseListParams(raw, { defaultSort: "wait", defaultDir: "desc", filterKeys: [], sortable: [], defaultPeriod: "90d", defaultPageSize: 50 });
-  const d = await getStockWaitReport(params.period);
+  const params = parseListParams(raw, { defaultSort: "wait", defaultDir: "desc", filterKeys: ["origin"], sortable: [], defaultPeriod: "90d", defaultPageSize: 50 });
+  // MỐC BẮT ĐẦU TÍNH NGÀY CHỜ là một bộ lọc thật (chủ shop yêu cầu 25/09/2026): lên đơn hay xác nhận đơn.
+  const origin = parseWaitOrigin(params.filters.origin?.[0]);
+  const d = await getStockWaitReport(params.period, { origin });
+  const originText = WAIT_ORIGIN_LABEL[origin].toLowerCase();
   const { report: r, breakpoint: bp } = d;
   const m = r.minSample;
   const oldest = d.current[0];
@@ -108,7 +111,7 @@ export default async function StockWaitReportPage({ searchParams }: { searchPara
         hint={
           <>
             <p>
-              <b>Số ngày chờ</b> = từ lúc lên đơn tới lúc ĐVVC <b>thật sự cầm hàng</b> (mốc bàn giao có chứng từ), bất kể chờ vì thiếu hàng hay vì kho chậm. Đơn chưa gửi không có số ngày chờ đo được — đếm riêng.
+              <b>Số ngày chờ</b> = từ <b>mốc bắt đầu</b> (chọn ở bộ lọc: lúc lên đơn, hoặc lúc đơn rời nhóm chờ trên Pancake) tới lúc ĐVVC <b>thật sự cầm hàng</b> (mốc bàn giao có chứng từ), bất kể chờ vì thiếu hàng hay vì kho chậm. Đơn chưa gửi, hoặc không có mốc bắt đầu đang chọn, không có số ngày chờ đo được — đếm riêng.
             </p>
             <p className="mt-1.5">
               <b>GTC</b> = giao thành công ÷ (giao thành công + hoàn), theo kết quả đơn chuẩn của ERP. Nhóm dưới {m} đơn đã kết thúc in &ldquo;—&rdquo;: chưa đủ dữ liệu, không phải 0%. Kỳ lọc theo <b>ngày lên đơn</b>.
@@ -125,7 +128,16 @@ export default async function StockWaitReportPage({ searchParams }: { searchPara
         }
       />
 
-      <DataTableToolbar period={{ defaultKey: "90d" }} />
+      <DataTableToolbar
+        period={{ defaultKey: "90d" }}
+        facets={[{ key: "origin", label: "Tính ngày chờ", options: WAIT_ORIGINS.map((x) => ({ value: x, label: WAIT_ORIGIN_LABEL[x] })), single: true }]}
+        resultLabel={
+          <span className="inline-flex items-center gap-1">
+            Ngày chờ: <b>{originText}</b> tới lúc ĐVVC cầm hàng
+            <InfoHint>{WAIT_ORIGIN_QUESTION[origin]}</InfoHint>
+          </span>
+        }
+      />
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
@@ -138,9 +150,9 @@ export default async function StockWaitReportPage({ searchParams }: { searchPara
         />
         <MetricCard
           label="Chờ lâu nhất"
-          value={oldest ? `${oldest.waitDays.toFixed(1)} ngày` : "—"}
-          note={oldest ? `#${oldest.systemId ?? "?"} · ${oldest.customer}` : "Không đơn nào đang chờ"}
-          hint="Tính từ lúc lên đơn tới bây giờ."
+          value={oldest && oldest.waitDays !== null ? `${oldest.waitDays.toFixed(1)} ngày` : "—"}
+          note={oldest && oldest.waitDays !== null ? `#${oldest.systemId ?? "?"} · ${oldest.customer}` : d.current.length ? "Chưa đơn nào có mốc bắt đầu đang chọn" : "Không đơn nào đang chờ"}
+          hint={`Tính ${originText} tới bây giờ.`}
           icon={AlarmClock}
           tone={oldest ? "amber" : "slate"}
         />
@@ -155,8 +167,8 @@ export default async function StockWaitReportPage({ searchParams }: { searchPara
         <MetricCard
           label="Đơn trong kỳ chưa gửi"
           value={formatNumber(r.openOrders)}
-          note={`${formatNumber(r.overall.orders)} đơn lên trong kỳ${r.anomalyOrders ? ` · ${formatNumber(r.anomalyOrders)} đơn thiếu / ngược mốc` : ""}`}
-          hint="Chưa bàn giao, chưa huỷ: chưa biết sẽ chờ bao lâu nên nằm ngoài mọi khoảng. Thiếu / ngược mốc = đơn đã có kết cục mà không có mốc bàn giao, hoặc mốc bàn giao trước lúc lên đơn."
+          note={`${formatNumber(r.overall.orders)} đơn lên trong kỳ${r.anomalyOrders ? ` · ${formatNumber(r.anomalyOrders)} đơn thiếu / ngược mốc` : ""}${r.noOriginOrders ? ` · ${formatNumber(r.noOriginOrders)} đơn không có mốc bắt đầu` : ""}`}
+          hint="Chưa bàn giao, chưa huỷ: chưa biết sẽ chờ bao lâu nên nằm ngoài mọi khoảng. Thiếu / ngược mốc = đơn đã có kết cục mà không có mốc bàn giao, hoặc mốc bàn giao trước mốc bắt đầu. Không có mốc bắt đầu = đã gửi / đã huỷ mà không có mốc đang chọn (mốc xác nhận cần lịch sử trạng thái Pancake) — không bị tính theo mốc kia."
           icon={MapPin}
           tone="slate"
         />
@@ -194,7 +206,7 @@ export default async function StockWaitReportPage({ searchParams }: { searchPara
 
       <SectionCard
         title="GTC theo số ngày khách chờ"
-        description="Từ lúc lên đơn tới lúc ĐVVC cầm hàng"
+        description={`${WAIT_ORIGIN_LABEL[origin]} tới lúc ĐVVC cầm hàng`}
         hint={`Huỷ trước gửi xếp theo số ngày từ lúc lên đơn tới lúc huỷ (lịch sử trạng thái Pancake) và không vào GTC. Khoảng dưới ${m} đơn đã kết thúc không có cột.`}
         padded={false}
       >
@@ -311,7 +323,9 @@ export default async function StockWaitReportPage({ searchParams }: { searchPara
                       </Link>
                       <span className="text-[11px] text-muted-foreground">lên {formatDate(o.insertedAt)}</span>
                     </TableCell>
-                    <TableCell className={cn("text-right tabular-nums whitespace-nowrap", bp && o.waitDays >= bp.fromDays && "font-semibold text-rose-600 dark:text-rose-400")}>{o.waitDays.toFixed(1)} ngày</TableCell>
+                    <TableCell className={cn("text-right tabular-nums whitespace-nowrap", bp && o.waitDays !== null && o.waitDays >= bp.fromDays && "font-semibold text-rose-600 dark:text-rose-400")}>
+                      {o.waitDays === null ? <span className="text-muted-foreground" title="Đơn chưa có mốc bắt đầu đang chọn (vd chưa xác nhận trên Pancake)">chưa xác nhận</span> : `${o.waitDays.toFixed(1)} ngày`}
+                    </TableCell>
                     <TableCell className="text-xs">
                       {o.province || <span className="text-muted-foreground">(trống)</span>}
                       <span className="block text-[10.5px] text-muted-foreground">{o.vung ? VUNG_LABEL[o.vung] : "chưa rõ vùng"}</span>
