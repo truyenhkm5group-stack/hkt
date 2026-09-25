@@ -139,6 +139,7 @@ function BatchesTab({ batches, canWrite, canPay }: { batches: BatchView[]; canWr
                       {b.productCode} · lô {b.batchNo}
                     </Link>
                     <div className="max-w-[180px] truncate text-xs text-muted-foreground">{[b.productName, b.supplier].filter(Boolean).join(" · ") || "—"}</div>
+                    <div className="text-[11px] text-muted-foreground">MKT: {b.marketerName ?? <span className="text-amber-600 dark:text-amber-400">chưa gán</span>}</div>
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-xs">
                     {formatDate(b.orderedAt)}
@@ -147,6 +148,7 @@ function BatchesTab({ batches, canWrite, canPay }: { batches: BatchView[]; canWr
                   <TableCell className="text-right tabular-nums">
                     {formatNumber(b.orderedQty)}
                     <div className="text-xs text-muted-foreground">{b.agreedQty == null ? "chưa chốt" : `chốt ${formatNumber(b.agreedQty)}`}</div>
+                    <div className="text-[11px] text-muted-foreground">{b.variantLines.length ? `${formatNumber(b.variantLines.length)} mẫu màu/size` : <span className="text-amber-600 dark:text-amber-400">chưa chia màu/size</span>}</div>
                   </TableCell>
                   <TableCell className="text-xs">
                     <b className="text-sm tabular-nums">{formatNumber(b.delivered)}</b>
@@ -155,7 +157,7 @@ function BatchesTab({ batches, canWrite, canPay }: { batches: BatchView[]; canWr
                   <TableCell className="text-right tabular-nums">
                     {formatVND(b.labor.amount)}
                     <div className="text-xs text-muted-foreground" title={b.labor.reason}>
-                      {b.labor.amount == null ? "chưa tính được" : `${formatNumber(b.labor.qtyBasis)} × ${formatNumber(b.laborUnitPrice)}${b.adjustment ? ` ${b.adjustment > 0 ? "+" : "−"} ${formatNumber(Math.abs(b.adjustment))}` : ""}${b.labor.basis === "DELIVERED_ESTIMATE" ? " · tạm tính" : ""}`}
+                      {b.labor.amount == null ? "chưa tính được" : `${formatNumber(b.labor.qtyBasis)} × ${formatNumber(b.laborUnitPrice)}${b.adjustment ? ` ${b.adjustment > 0 ? "+" : "−"} ${formatNumber(Math.abs(b.adjustment))}` : ""}${b.workshopPenalty ? ` − phạt ${formatNumber(b.workshopPenalty)}` : ""}${b.labor.basis === "DELIVERED_ESTIMATE" ? " · tạm tính" : ""}`}
                     </div>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
@@ -177,7 +179,7 @@ function BatchesTab({ batches, canWrite, canPay }: { batches: BatchView[]; canWr
                   {cols === 10 ? (
                     <TableCell className="text-right">
                       <div className="flex justify-end">
-                        {canWrite && b.status !== "CANCELLED" ? <DeliveryDialog batchId={b.id} label={`${b.productCode} · lô ${b.batchNo}`} compact /> : null}
+                        {canWrite && b.status !== "CANCELLED" ? <DeliveryDialog batchId={b.id} label={`${b.productCode} · lô ${b.batchNo}`} variantLines={b.variantLines} compact /> : null}
                         {canPay ? <PaymentDialog target={{ batchId: b.id }} label={`${b.productCode} · lô ${b.batchNo}`} remaining={b.pay.remaining} compact /> : null}
                       </div>
                     </TableCell>
@@ -387,12 +389,13 @@ function CostTab({ ledger }: { ledger: Ledger }) {
                 <TableHead className="text-right">Tổng</TableHead>
                 <TableHead className="text-right">Xưởng thực trả</TableHead>
                 <TableHead className="text-right">Giá SX / chiếc</TableHead>
+                <TableHead className="text-right">Giá báo MKT</TableHead>
                 <TableHead>Tình trạng</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {batches.length === 0 ? (
-                <EmptyRow cols={7}>Chưa có lô nào để tính giá.</EmptyRow>
+                <EmptyRow cols={8}>Chưa có lô nào để tính giá.</EmptyRow>
               ) : (
                 batches.map((b) => (
                   <TableRow key={b.id}>
@@ -407,6 +410,10 @@ function CostTab({ ledger }: { ledger: Ledger }) {
                     <TableCell className="text-right tabular-nums">{formatVND(b.cost.total)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(b.cost.delivered)}</TableCell>
                     <TableCell className="text-right text-base font-bold tabular-nums">{formatVND(b.cost.unitCost)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {formatVND(b.marketerPrice)}
+                      {b.marketerPrice != null && b.cost.unitCost != null ? <div className="text-xs text-muted-foreground">chênh {formatVND(b.marketerPrice - b.cost.unitCost, { sign: true })}</div> : null}
+                    </TableCell>
                     <TableCell className="text-xs">
                       <span className={b.cost.unitCost == null ? "text-amber-600 dark:text-amber-400" : b.cost.provisional ? "text-sky-600 dark:text-sky-400" : "text-emerald-600 dark:text-emerald-400"}>{b.cost.reason}</span>
                     </TableCell>
@@ -420,7 +427,7 @@ function CostTab({ ledger }: { ledger: Ledger }) {
 
       <SectionCard
         title="Giá sản xuất thực tế theo mã hàng"
-        hint="Cộng MỌI tiền vải của mã (kể cả đợt vải chưa gán lô) và tiền công mọi lô, chia cho tổng hàng xưởng trả. Cột “Giá trên phiếu kho” là giá nhập bình quân của phiếu nhập kho gần nhất — thứ báo cáo lợi nhuận đang dùng làm giá vốn. Lệch nhiều nghĩa là phiếu kho đang ghi sai giá; ERP không tự sửa phiếu."
+        hint="Cộng MỌI tiền vải của mã (kể cả đợt vải chưa gán lô) và tiền công mọi lô, chia cho tổng hàng xưởng trả. MKT phụ trách đọc từ cấu hình Lương (Marketer phụ trách mã); giá báo MKT là của lô đặt gần nhất có báo giá. Cột “Giá trên phiếu kho” là giá nhập bình quân của phiếu nhập kho gần nhất — thứ báo cáo lợi nhuận đang dùng làm giá vốn. Lệch nhiều nghĩa là phiếu kho đang ghi sai giá; ERP không tự sửa phiếu."
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -448,6 +455,9 @@ function CostTab({ ledger }: { ledger: Ledger }) {
                         <span className="font-mono font-semibold">{p.productCode}</span>
                         <div className="max-w-[200px] truncate text-xs text-muted-foreground">
                           {formatNumber(p.batches)} lô{p.productName ? ` · ${p.productName}` : ""}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground">
+                          MKT {p.marketerName ?? "chưa gán"} · báo {formatVND(p.marketerPrice)}
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">

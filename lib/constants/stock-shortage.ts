@@ -58,7 +58,11 @@ export type ShortageVariantInput = {
   planSuggested: number | null;
   /** Hàng dự kiến quay lại kho (hoàn) theo Kế hoạch SX. */
   incoming: number;
-  /** Đã đặt xưởng (lệnh SX ĐÃ GỬI) mà chưa nhận. */
+  /**
+   * Đã đặt xưởng mà chưa về: lệnh SX ĐÃ GỬI (bảng màu × size) + phần CHƯA TRẢ của các lô đang sản
+   * xuất ở Sổ đặt xưởng có chia màu/size (`openBatchQtyByVariant`). Lô nối với một bảng màu × size
+   * thì chỉ đếm lô — không đếm hai lần.
+   */
   openPoQty: number;
   /** Hạn xưởng giao SỚM NHẤT trong các lệnh đang mở. `null` = lệnh không ghi hạn / không có lệnh. */
   openPoDueAt: Date | null;
@@ -133,6 +137,14 @@ export type ShortageVariantRow = ShortageVariantInput & {
   ledgerNegative: boolean;
   /** Thiếu chưa có nguồn bù = thiếu − đã đặt xưởng − hàng hoàn sắp về. */
   uncoveredQty: number;
+  /**
+   * CÒN THIẾU SAU KHI ĐÃ ĐẶT = thiếu − đã đặt xưởng (chưa về). Đây là con số Lark nhắc: đặt bổ sung
+   * đủ thì về 0 và thôi nhắc; đặt rồi mà vẫn thiếu thì nhắc đúng phần còn thiếu. Hàng hoàn sắp về
+   * KHÔNG được trừ ở đây — hàng hoàn chưa kiểm thì chưa chắc bán lại được (AGENTS.md mục 0.4).
+   */
+  stillShortAfterOrder: number;
+  /** Đã đặt xưởng ĐỦ số thiếu ⇒ tự thôi nhắc trên Lark (vẫn hiện trên trang, đơn vẫn ở hàng đợi CSKH). */
+  coveredByOrder: boolean;
   /** Đề xuất đặt thêm (Kế hoạch SX đã trừ hàng đặt xưởng). `null` = mẫu không có trong kế hoạch. */
   proposeQty: number | null;
   action: ShortageAction;
@@ -142,7 +154,7 @@ export type ShortageVariantRow = ShortageVariantInput & {
   urgent: boolean;
   /** Quyết định của người phụ trách đặt hàng cho mẫu này (`applyShortageDecisions`). `null` = chưa ai quyết. */
   decision: ShortageDecision | null;
-  /** `true` = KHÔNG nhắc trên Lark nữa (đã đặt đủ mức thiếu lúc xác nhận, hoặc đã quyết ngừng đặt). Vẫn hiện trên trang. */
+  /** `true` = KHÔNG nhắc trên Lark nữa (đã đặt xưởng đủ số thiếu, đã xác nhận đặt đủ mức lúc bấm, hoặc đã quyết ngừng đặt). Vẫn hiện trên trang. */
   muted: boolean;
 };
 
@@ -163,14 +175,32 @@ export type StockShortageSnapshot = {
     unknownVariants: number;
     /** Mẫu thiếu mà sổ kho đang ÂM — số thiếu của chúng chưa đáng tin tới khi kiểm kê. */
     ledgerNegativeVariants: number;
-    /** Mẫu thiếu đã được người xác nhận "đã đặt" / "không đặt nữa" nên không nhắc trên Lark. */
+    /** Mẫu thiếu KHÔNG nhắc trên Lark (đã đặt xưởng đủ, đã xác nhận "đã đặt" / "không đặt nữa"). */
     mutedVariants: number;
+    /** Trong số đó: mẫu đã đặt xưởng ĐỦ số thiếu (số thật ghi trong ERP, không phải lời xác nhận). */
+    coveredVariants: number;
+    /** Tổng số cái còn thiếu sau khi đã trừ hàng đặt xưởng chưa về. */
+    stillShortUnits: number;
   };
   urgentAfterHours: number;
   measuredAt: Date;
+  /**
+   * Lô đang sản xuất ở Sổ đặt xưởng mà KHÔNG trừ được vào mẫu nào (chưa chia màu/size, hoặc có đợt
+   * trả hàng ghi tổng). Nói ra để người đọc biết vì sao đã đặt mà Lark vẫn nhắc — không đoán chia hộ.
+   */
+  unsplitOrdered?: { batches: number; units: number };
 };
 
 /* ═══════════════════ PHÂN BỔ ═══════════════════ */
+
+/**
+ * Còn thiếu sau khi đã đặt xưởng. Chủ shop chốt 25/09/2026: *"không cảnh báo nữa nếu đã đặt bổ sung
+ * đủ rồi, chỉ cảnh báo khi đặt bổ sung rồi mà vẫn thiếu"*. "Đã đặt" là số THẬT ghi trong ERP (lệnh
+ * đã gửi / lô đang sản xuất chia màu-size), không phải một lời "đã đặt rồi" không kèm số.
+ */
+export function stillShortAfterOrder(shortQty: number, openPoQty: number): number {
+  return Math.max(0, shortQty - Math.max(0, openPoQty));
+}
 
 export function variantLabel(v: Pick<ShortageVariantInput, "productCode" | "productName" | "color" | "size" | "sku">): string {
   const opt = [v.color, v.size].filter(Boolean).join("/") || v.sku;
@@ -212,9 +242,11 @@ export function decideShortageAction(v: Pick<ShortageVariantRow, "ledgerNegative
     const due = v.openPoDueAt ? `${overdue ? "ĐÃ QUÁ hạn" : "hạn"} ${fmtDay(v.openPoDueAt)}` : "lệnh chưa ghi hạn giao";
     return { action: "CHASE_FACTORY", text: `Đã đặt xưởng ${v.openPoQty} cái (${due}) — đủ bù ${v.shortQty} cái thiếu; giục xưởng giao sớm, KHÔNG đặt thêm.` };
   }
-  const po = v.openPoQty > 0 ? ` (đã trừ ${v.openPoQty} cái đang đặt xưởng)` : "";
   const qty = v.proposeQty === null ? v.uncoveredQty : v.proposeQty;
-  return { action: "ORDER_PRODUCTION", text: `Tạo lệnh sản xuất ${qty} cái${po}; ${v.uncoveredQty} cái thiếu hiện chưa có nguồn bù nào.` };
+  if (v.openPoQty > 0) {
+    return { action: "ORDER_PRODUCTION", text: `Đã đặt xưởng ${v.openPoQty} cái nhưng VẪN THIẾU ${stillShortAfterOrder(v.shortQty, v.openPoQty)} cái — đặt bổ sung (đề xuất ${qty} cái, đã trừ hàng đang đặt).` };
+  }
+  return { action: "ORDER_PRODUCTION", text: `Tạo lệnh sản xuất ${qty} cái; ${v.uncoveredQty} cái thiếu hiện chưa có nguồn bù nào.` };
 }
 
 /**
@@ -299,11 +331,13 @@ export function allocateStock(variants: ShortageVariantInput[], lines: ReservedL
       oldestWaitHours,
       ledgerNegative: v.onHand < 0,
       uncoveredQty: Math.max(0, a.short - Math.max(0, v.openPoQty) - Math.max(0, v.incoming)),
+      stillShortAfterOrder: stillShortAfterOrder(a.short, v.openPoQty),
+      coveredByOrder: stillShortAfterOrder(a.short, v.openPoQty) === 0,
       proposeQty: v.planSuggested === null ? null : suggestedNetOfOpenPo(v.planSuggested, v.openPoQty),
       urgent: oldestWaitHours >= urgentAfterHours,
     };
     const { action, text } = decideShortageAction(base, now);
-    rows.push({ ...base, action, actionText: text, team: SHORTAGE_ACTION_TEAM[action], decision: null, muted: false });
+    rows.push({ ...base, action, actionText: text, team: SHORTAGE_ACTION_TEAM[action], decision: null, muted: base.coveredByOrder });
   }
   rows.sort((x, y) => y.oldestWaitHours - x.oldestWaitHours || y.shortQty - x.shortQty || (x.variantId < y.variantId ? -1 : 1));
 
@@ -322,7 +356,9 @@ export function allocateStock(variants: ShortageVariantInput[], lines: ReservedL
       unknownOrders: all.filter((o) => o.state === "STOCK_UNKNOWN").length,
       unknownVariants: unknownVariants.size,
       ledgerNegativeVariants: rows.filter((r) => r.ledgerNegative).length,
-      mutedVariants: 0,
+      mutedVariants: rows.filter((r) => r.muted).length,
+      coveredVariants: rows.filter((r) => r.coveredByOrder).length,
+      stillShortUnits: rows.reduce((t, r) => t + r.stillShortAfterOrder, 0),
     },
     urgentAfterHours,
     measuredAt: now,
@@ -417,13 +453,13 @@ export function applyShortageDecisions(s: StockShortageSnapshot, book: ShortageD
   const variants = s.variants.map((r): ShortageVariantRow => {
     const d = book[r.variantId] ?? null;
     if (!d) return r;
-    const muted = isShortageMuted(d, r.shortQty);
+    const muted = r.coveredByOrder || isShortageMuted(d, r.shortQty);
     const who = `${d.byName || "?"} ${fmtDecisionAt(d.at)}`;
     if (d.decision === "STOP") {
       return { ...r, decision: d, muted, proposeQty: 0, actionText: `Đã quyết KHÔNG ĐẶT NỮA (${who}) — không đề xuất sản xuất; ${r.waitingOrders} đơn đang chờ: CSKH đề nghị khách đổi mẫu hoặc huỷ.` };
     }
     if (d.decision === "ORDERED") {
-      const po = r.openPoQty > 0 ? "" : " ERP chưa có lệnh sản xuất ĐÃ GỬI cho mẫu này — tạo bảng chốt để hạn giao được theo dõi.";
+      const po = r.openPoQty > 0 ? "" : " ERP chưa ghi số đã đặt cho mẫu này — ghi lô đặt xưởng có chia màu/size để ERP tự trừ vào số thiếu và theo dõi hạn giao.";
       const text = muted
         ? `Đã xác nhận đặt (${who}) khi thiếu ${d.shortQtyAtDecision} — chỉ nhắc lại nếu thiếu vượt mức đó.${po}`
         : `Đã xác nhận đặt (${who}) khi thiếu ${d.shortQtyAtDecision}, nay thiếu ${r.shortQty} — phần tăng thêm CHƯA ai đặt. ${r.actionText}`;
@@ -556,6 +592,7 @@ function summaryMd(s: StockShortageSnapshot): string {
   const oldest = s.variants.reduce((m, r) => Math.max(m, r.oldestWaitHours), 0);
   const lines = [
     `**${formatNumber(s.totals.waitingOrders)} đơn** đã chốt đang chờ hàng · thiếu **${formatNumber(s.totals.shortUnits)} cái** trên **${formatNumber(s.totals.variants)} mẫu mã** · đơn chờ lâu nhất **${waitLabel(oldest)}**`,
+    `Đã trừ hàng đặt xưởng chưa về: **còn thiếu ${formatNumber(s.totals.stillShortUnits)} cái** chưa có ai đặt`,
     `Giá trị đơn đang treo (khai báo trên đơn): ${formatVND(s.totals.waitingValue)}${s.totals.urgentOrders ? ` · <font color='red'>${formatNumber(s.totals.urgentOrders)} đơn đã chờ quá ${s.urgentAfterHours} giờ</font>` : ""}`,
   ];
   return lines.join("\n");
@@ -564,7 +601,9 @@ function summaryMd(s: StockShortageSnapshot): string {
 function footerNotes(s: StockShortageSnapshot): string[] {
   const notes = ["Số liệu: sổ kho ERP (phiếu kho − đã xuất qua ĐVVC), phân bổ cho đơn lên trước. Tồn Pancake chỉ dùng để gợi ý kiểm đếm."];
   if (s.totals.unknownOrders) notes.push(`⚠️ ${formatNumber(s.totals.unknownOrders)} đơn giữ ${formatNumber(s.totals.unknownVariants)} mẫu CHƯA CÓ PHIẾU NHẬP — không biết còn hay thiếu; kho lập phiếu nhập để ERP tính được.`);
-  if (s.totals.mutedVariants) notes.push(`🔕 ${formatNumber(s.totals.mutedVariants)} mẫu thiếu đã được xác nhận "đã đặt" / "không đặt nữa" nên không nhắc ở đây — vẫn xem được trên trang, đơn chờ vẫn ở hàng đợi CSKH.`);
+  if (s.totals.coveredVariants) notes.push(`🔕 ${formatNumber(s.totals.coveredVariants)} mẫu thiếu đã ĐẶT XƯỞNG ĐỦ số thiếu nên không nhắc ở đây — vẫn xem được trên trang, đơn chờ vẫn ở hàng đợi CSKH.`);
+  const byDecision = s.variants.filter((r) => r.muted && !r.coveredByOrder).length;
+  if (byDecision) notes.push(`🔕 ${formatNumber(byDecision)} mẫu thiếu đã được xác nhận "đã đặt" / "không đặt nữa" nên không nhắc ở đây — vẫn xem được trên trang, đơn chờ vẫn ở hàng đợi CSKH.`);
   notes.push("Cột Xác nhận mở ERP để bấm (cần đăng nhập, quyền lập bảng đặt hàng).");
   if (s.totals.ledgerNegativeVariants) notes.push(`⚠️ ${formatNumber(s.totals.ledgerNegativeVariants)} mẫu có sổ kho ÂM — số thiếu của chúng chưa đáng tin tới khi kho kiểm kê.`);
   return notes;
@@ -603,6 +642,7 @@ export function buildShortageLarkCard(s: StockShortageSnapshot, opts: { appUrl: 
     color: r.color || "—",
     size: r.size || "—",
     short: r.shortQty,
+    still: r.stillShortAfterOrder,
     orders: r.waitingOrders,
     wait: r.urgent ? `⏰ ${waitLabel(r.oldestWaitHours)}` : waitLabel(r.oldestWaitHours),
     stock: r.ledgerNegative ? `${r.onHand} (âm)` : String(r.onHand),
@@ -626,6 +666,7 @@ export function buildShortageLarkCard(s: StockShortageSnapshot, opts: { appUrl: 
         col("color", "Màu", "text"),
         col("size", "Size", "text"),
         col("short", "Thiếu", "number"),
+        col("still", "Còn thiếu sau đặt", "number"),
         col("orders", "Đơn chờ", "number"),
         col("wait", "Chờ lâu nhất", "text"),
         col("stock", "Tồn ERP", "text"),
@@ -663,10 +704,10 @@ export function shortageAsPostLines(s: StockShortageSnapshot, opts: { appUrl: st
   const shown = active.slice(0, SHORTAGE_DIGEST_RULE.maxRows);
   const lines: { text: string; href?: string }[][] = [
     [{ text: summaryMd(s).replace(/\*\*/g, "").replace(/<[^>]+>/g, "") }],
-    [{ text: "Mã · Màu/Size · Thiếu · Đơn chờ · Chờ lâu nhất · Đã đặt xưởng · Đề xuất đặt · Việc" }],
+    [{ text: "Mã · Màu/Size · Thiếu · Còn thiếu sau đặt · Đơn chờ · Chờ lâu nhất · Đã đặt xưởng · Đề xuất đặt · Việc" }],
     ...shown.map((r) => [
       { text: `${changed.has(r.variantId) ? "🆕 " : "• "}${r.productCode || r.productName}`, href: url(SHORTAGE_LINKS.newProductionOrder(r.productId)) },
-      { text: ` · ${[r.color, r.size].filter(Boolean).join("/") || r.sku} · thiếu ${r.shortQty} · ${r.waitingOrders} đơn · ${waitLabel(r.oldestWaitHours)} · xưởng ${r.openPoQty || 0} · đặt ${r.proposeQty ?? "—"} · ${SHORTAGE_ACTION_LABEL[r.action]} · ` },
+      { text: ` · ${[r.color, r.size].filter(Boolean).join("/") || r.sku} · thiếu ${r.shortQty} · còn thiếu sau đặt ${r.stillShortAfterOrder} · ${r.waitingOrders} đơn · ${waitLabel(r.oldestWaitHours)} · xưởng ${r.openPoQty || 0} · đặt ${r.proposeQty ?? "—"} · ${SHORTAGE_ACTION_LABEL[r.action]} · ` },
       ...SHORTAGE_DECISIONS.flatMap((d, i) => [...(i ? [{ text: " · " }] : []), { text: SHORTAGE_DECISION_LABEL[d], href: url(decisionLink(r.variantId, d)) }]),
     ]),
   ];

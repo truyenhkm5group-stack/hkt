@@ -3,8 +3,10 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
+import { allocateStock, buildShortageLarkCard, stillShortAfterOrder, type ShortageVariantInput } from "@/lib/constants/stock-shortage";
 import {
   batchActualCost,
+  openBatchQtyByVariant,
   deliveryStatus,
   laborCost,
   normalizeProductCode,
@@ -133,6 +135,66 @@ export function testWorkshopLedgerPure() {
   assert.equal(paymentInput.safeParse({ amount: 1, paidAt: "2026-08-01" }).success, false, "tiền không gắn vào đâu là tiền trôi nổi");
   assert.equal(paymentInput.safeParse({ batchId: "a", amount: 0, paidAt: "2026-08-01" }).success, false);
 
+  // ───────── Phạt xưởng ("Hoàn phạt MKT") trừ vào tiền công ─────────
+  assert.equal(laborCost({ agreedQty: 335, laborUnitPrice: 60_000, adjustment: 0, penalty: 500_000 }, 335).amount, 19_600_000, "phạt xưởng 500.000 ⇒ trả xưởng ít đi đúng 500.000");
+  assert.equal(laborCost({ agreedQty: 335, laborUnitPrice: 60_000, adjustment: 0, penalty: -500_000 }, 335).amount, 20_100_000, "tiền phạt âm không được biến thành tiền thưởng");
+
+  // ───────── 5. Hàng đã đặt mà chưa về, theo từng mẫu ─────────
+  const dat = openBatchQtyByVariant(
+    [
+      { id: "b1", status: "OPEN", cells: { den: 100, do: 50 }, orderedQty: 150, agreedQty: null, dueDate: new Date("2026-10-01T00:00:00Z"), productionOrderId: "po-1" },
+      { id: "b2", status: "OPEN", cells: { den: 20 }, orderedQty: 20, agreedQty: null, dueDate: new Date("2026-09-28T00:00:00Z"), productionOrderId: null },
+      { id: "b3", status: "DONE", cells: { den: 400 }, orderedQty: 400, agreedQty: null, dueDate: null, productionOrderId: "po-3" },
+      { id: "b4", status: "OPEN", cells: {}, orderedQty: 300, agreedQty: null, dueDate: null, productionOrderId: null },
+      { id: "b5", status: "OPEN", cells: { do: 30 }, orderedQty: 30, agreedQty: null, dueDate: null, productionOrderId: null },
+    ],
+    [
+      { batchId: "b1", quantity: 40, cells: { den: 40 } },
+      { batchId: "b1", quantity: 60, cells: { den: 70, do: -10 } },
+      { batchId: "b4", quantity: 100, cells: {} },
+      { batchId: "b5", quantity: 12, cells: {} },
+    ],
+  );
+  assert.equal(dat.qtyByVariant.get("den"), 0 + 20, "b1 Đen đặt 100 trả 110 ⇒ còn 0 (không âm); b2 còn 20; lô ĐÃ XONG không đếm");
+  assert.equal(dat.qtyByVariant.get("do"), 60, "b1 Đỏ 50 − (−10 trả lại xưởng) = 60; b5 có đợt trả ghi tổng ⇒ không góp");
+  assert.equal(dat.earliestDueByVariant.get("den")?.toISOString(), "2026-09-28T00:00:00.000Z", "hạn sớm nhất trong các lô còn hàng chưa về");
+  assert.deepEqual([...dat.linkedProductionOrderIds].sort(), ["po-1", "po-3"], "lệnh đã có lô nối vào — kể cả lô đã xong — không được đếm lại ở phía lệnh");
+  assert.deepEqual(
+    dat.unsplit.map((u) => [u.batchId, u.reason, u.remaining]),
+    [
+      ["b4", "NO_CELLS", 200],
+      ["b5", "DELIVERY_NOT_SPLIT", 18],
+    ],
+    "lô không trừ được vào mẫu nào phải được ĐẾM RIÊNG kèm lý do",
+  );
+
+  // ───────── 6. Đặt đủ thì Lark im, đặt thiếu thì nhắc phần còn thiếu ─────────
+  assert.equal(stillShortAfterOrder(5, 3), 2);
+  assert.equal(stillShortAfterOrder(5, 9), 0);
+  assert.equal(stillShortAfterOrder(5, -2), 5, "số đặt âm (sổ lệch) không được làm thiếu tăng giả");
+  const mau = (variantId: string, openPoQty: number): ShortageVariantInput => ({
+    variantId, productId: "p", productCode: "Q9", productName: "Áo", color: variantId, size: "M", sku: variantId,
+    onHand: 0, stockKnown: true, pancakeStock: null, planSuggested: null, incoming: 0, openPoQty, openPoDueAt: null, alternatives: [],
+  });
+  const gio = new Date("2026-09-25T03:00:00Z");
+  const snap = allocateStock([mau("du", 5), mau("thieu", 2), mau("chua", 0)], [
+    { orderId: "o1", systemId: 1, variantId: "du", qty: 5, insertedAt: new Date(gio.getTime() - 3_600_000), promisedAt: null, customer: "A", value: 1 },
+    { orderId: "o2", systemId: 2, variantId: "thieu", qty: 5, insertedAt: new Date(gio.getTime() - 3_600_000), promisedAt: null, customer: "B", value: 1 },
+    { orderId: "o3", systemId: 3, variantId: "chua", qty: 4, insertedAt: new Date(gio.getTime() - 3_600_000), promisedAt: null, customer: "C", value: 1 },
+  ], { now: gio, urgentAfterHours: 24 });
+  const r = (id: string) => snap.variants.find((v) => v.variantId === id)!;
+  assert.deepEqual([r("du").muted, r("du").stillShortAfterOrder], [true, 0], "đặt đủ ⇒ im");
+  assert.deepEqual([r("thieu").muted, r("thieu").stillShortAfterOrder], [false, 3], "đặt 2 thiếu 5 ⇒ nhắc 3");
+  assert.deepEqual([r("chua").muted, r("chua").stillShortAfterOrder], [false, 4]);
+  assert.equal(snap.totals.waitingOrders, 3, "im trên Lark KHÔNG giấu đơn đang chờ");
+  assert.equal(snap.totals.stillShortUnits, 7);
+  const the = buildShortageLarkCard(snap, { appUrl: "https://erp.example", reason: "MORNING" });
+  const bang = (the.elements as { tag: string; rows?: Record<string, unknown>[]; columns?: { display_name: string }[] }[]).find((e) => e.tag === "table")!;
+  assert.deepEqual(bang.rows?.map((x) => x.still), [3, 4], "mẫu đã đặt đủ KHÔNG vào bảng Lark; mẫu còn lại in đúng phần còn thiếu");
+  assert.ok(bang.columns?.some((c) => c.display_name === "Còn thiếu sau đặt"));
+  const src = readFileSync("lib/alerts/stock-shortage-digest.ts", "utf8");
+  assert.ok(/v\.stillShortAfterOrder\]/.test(src), "sổ chống gửi lại phải đếm PHẦN CÒN THIẾU SAU ĐẶT — đếm số thiếu gộp thì đặt bổ sung xong Lark vẫn nhắc");
+
   // ───────── 4. Sổ công nợ KHÔNG được lọt vào phép tính nào khác ─────────
   /*
     Giá vốn vào lợi nhuận chỉ đi theo phiếu kho (mục 15). Nếu một truy vấn lợi nhuận / chi phí / dòng
@@ -140,6 +202,8 @@ export function testWorkshopLedgerPure() {
     Nên chỉ bốn tệp của chính sổ được nhắc tới bốn bảng này.
   */
   const DUOC_PHEP = new Set(["lib/queries/workshop-ledger.ts", "lib/actions/workshop-ledger.ts"]);
+  // Trang Thiếu hàng / Quyết định vốn chỉ nhận SỐ LƯỢNG qua `openBatchQtyByVariantFromLedger`, không đọc bảng.
+  assert.ok(readFileSync("lib/queries/inventory-decision.ts", "utf8").includes("openBatchQtyByVariantFromLedger()"), "hàng đã đặt theo mẫu phải đi qua đúng một hàm của sổ");
   const tep = execSync("git ls-files lib app components && git ls-files --others --exclude-standard lib app components", { encoding: "utf8" })
     .split("\n")
     .map((f) => f.trim())

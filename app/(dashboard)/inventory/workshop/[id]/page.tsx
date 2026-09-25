@@ -107,7 +107,10 @@ export default async function WorkshopBatchPage({ params }: { params: Promise<{ 
             { label: "SL chốt TT với xưởng", value: b.agreedQty == null ? "Chưa chốt" : formatNumber(b.agreedQty) },
             { label: "Xưởng đã trả", value: <b>{formatNumber(b.delivered)}</b> },
             { label: "Đơn giá công", value: formatVND(b.laborUnitPrice) },
-            { label: "Thưởng / phạt", value: b.adjustment ? `${formatVND(b.adjustment, { sign: true })}${b.adjustmentNote ? ` · ${b.adjustmentNote}` : ""}` : "Không" },
+            { label: "Thưởng / phạt khác", value: b.adjustment ? `${formatVND(b.adjustment, { sign: true })}${b.adjustmentNote ? ` · ${b.adjustmentNote}` : ""}` : "Không" },
+            { label: "Phạt xưởng · hoàn MKT", value: b.workshopPenalty ? `${formatVND(b.workshopPenalty)}${b.penaltyNote ? ` · ${b.penaltyNote}` : ""}` : "Không" },
+            { label: "MKT phụ trách", value: b.marketerName ?? "Chưa gán — khai ở Lương › Marketer phụ trách mã" },
+            { label: "Giá báo MKT", value: formatVND(b.marketerPrice) },
             { label: "Ai lo vải", value: FABRIC_SOURCE_LABEL[b.fabricSource as FabricSource] ?? b.fabricSource },
             {
               label: "Bảng đặt màu × size",
@@ -125,8 +128,37 @@ export default async function WorkshopBatchPage({ params }: { params: Promise<{ 
         />
       </SectionCard>
 
+      {b.variantLines.length ? (
+        <SectionCard title="Theo màu / size" hint="Số đặt, số xưởng đã trả và phần còn lại của từng mẫu. Phần còn lại của lô ĐANG SẢN XUẤT được trừ vào số thiếu trên trang Thiếu hàng giao đơn." padded={false}>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Màu</TableHead>
+                  <TableHead>Size</TableHead>
+                  <TableHead className="text-right">Đặt</TableHead>
+                  <TableHead className="text-right">Đã trả</TableHead>
+                  <TableHead className="text-right">Còn lại</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {b.variantLines.map((l) => (
+                  <TableRow key={l.variantId}>
+                    <TableCell className="text-sm">{l.color || "—"}</TableCell>
+                    <TableCell className="text-sm">{l.size || "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(l.ordered)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatNumber(l.delivered)}</TableCell>
+                    <TableCell className={cn("text-right font-semibold tabular-nums", l.remaining > 0 && b.status === "OPEN" && "text-sky-600 dark:text-sky-400")}>{formatNumber(l.remaining)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </SectionCard>
+      ) : null}
+
       <div className="grid gap-5 lg:grid-cols-2">
-        <SectionCard title="Xưởng trả hàng" hint="Mỗi lần xưởng giao là một dòng; số âm là shop trả lại xưởng hàng lỗi. Bấm “Xưởng đã trả xong” khi xưởng báo không giao thêm — kể cả khi chưa đủ số đặt." actions={canWrite && b.status !== "CANCELLED" ? <DeliveryDialog batchId={b.id} label={label} /> : null} padded={false}>
+        <SectionCard title="Xưởng trả hàng" hint="Mỗi lần xưởng giao là một dòng; số âm là shop trả lại xưởng hàng lỗi. Bấm “Xưởng đã trả xong” khi xưởng báo không giao thêm — kể cả khi chưa đủ số đặt." actions={canWrite && b.status !== "CANCELLED" ? <DeliveryDialog batchId={b.id} label={label} variantLines={b.variantLines} /> : null} padded={false}>
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>

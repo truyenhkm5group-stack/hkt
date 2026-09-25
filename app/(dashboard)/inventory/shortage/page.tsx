@@ -117,8 +117,8 @@ export default async function StockShortagePage({ searchParams }: { searchParams
         <MetricCard
           label="Thiếu"
           value={`${formatNumber(s.totals.shortUnits)} cái`}
-          note={`${formatNumber(s.totals.variants)} mẫu mã${s.totals.ledgerNegativeVariants ? ` · ${formatNumber(s.totals.ledgerNegativeVariants)} mẫu sổ kho ÂM` : ""}`}
-          hint="Tổng số cái các đơn đang chờ mà kho không có. Mẫu có sổ kho âm thì số thiếu chưa đáng tin tới khi kiểm kê."
+          note={`${formatNumber(s.totals.variants)} mẫu mã · còn ${formatNumber(s.totals.stillShortUnits)} cái chưa đặt${s.totals.ledgerNegativeVariants ? ` · ${formatNumber(s.totals.ledgerNegativeVariants)} mẫu sổ kho ÂM` : ""}`}
+          hint="Tổng số cái các đơn đang chờ mà kho không có. 'Chưa đặt' = phần thiếu còn lại sau khi trừ hàng đã đặt xưởng chưa về (lệnh đã gửi + lô đang sản xuất có chia màu/size) — Lark chỉ nhắc phần này. Mẫu có sổ kho âm thì số thiếu chưa đáng tin tới khi kiểm kê."
           icon={Factory}
           tone={s.totals.shortUnits ? "amber" : "slate"}
         />
@@ -174,7 +174,18 @@ export default async function StockShortagePage({ searchParams }: { searchParams
                       </div>
                       <div className="font-mono text-[11px] text-muted-foreground">{[r.color, r.size].filter(Boolean).join(" / ") || r.sku}</div>
                     </TableCell>
-                    <TableCell className="text-right font-bold tabular-nums text-rose-600 dark:text-rose-400">{formatNumber(r.shortQty)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      <span className="font-bold text-rose-600 dark:text-rose-400">{formatNumber(r.shortQty)}</span>
+                      {r.coveredByOrder ? (
+                        <span className="block text-[10.5px] font-medium text-emerald-600 dark:text-emerald-400" title="Đã đặt xưởng đủ số thiếu — Lark thôi nhắc">
+                          🔕 đã đặt đủ
+                        </span>
+                      ) : r.openPoQty > 0 ? (
+                        <span className="block text-[10.5px] font-semibold text-rose-600 dark:text-rose-400" title="Đã đặt xưởng nhưng chưa đủ — Lark nhắc phần này">
+                          còn thiếu {formatNumber(r.stillShortAfterOrder)}
+                        </span>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">{formatNumber(r.waitingOrders)}</TableCell>
                     <TableCell className={cn("text-xs whitespace-nowrap", r.urgent && "font-semibold text-rose-600 dark:text-rose-400")} title={`Đơn chờ lâu nhất lên lúc ${formatDateTime(r.oldestWaitingAt)}`}>
                       {waitLabel(r.oldestWaitHours)}
@@ -192,8 +203,8 @@ export default async function StockShortagePage({ searchParams }: { searchParams
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span className={cn("rounded px-1.5 py-0.5 text-[10.5px] font-semibold whitespace-nowrap", ACTION_TONE[r.action])}>{SHORTAGE_ACTION_LABEL[r.action]}</span>
                         {r.action === "ORDER_PRODUCTION" ? (
-                          <Link href={SHORTAGE_LINKS.newProductionOrder(r.productId)} className="text-[11px] font-medium text-primary hover:underline">
-                            Tạo bảng chốt SX →
+                          <Link href="/inventory/workshop" className="text-[11px] font-medium text-primary hover:underline">
+                            Ghi lô đặt xưởng →
                           </Link>
                         ) : null}
                         <InfoHint label="Chi tiết">{r.actionText}</InfoHint>
@@ -214,6 +225,14 @@ export default async function StockShortagePage({ searchParams }: { searchParams
             </Table>
           </div>
         )}
+        {s.unsplitOrdered?.batches ? (
+          <p className="border-t px-5 py-2.5 text-xs text-amber-700 dark:text-amber-300">
+            ⚠ {formatNumber(s.unsplitOrdered.batches)} lô đang sản xuất ({formatNumber(s.unsplitOrdered.units)} cái chưa trả) CHƯA chia màu/size hoặc có đợt trả hàng ghi tổng — ERP không biết chúng bù cho mẫu nào nên chưa trừ vào số thiếu.{" "}
+            <Link href="/inventory/workshop" className="font-medium text-primary hover:underline">
+              Chia màu/size ở Sổ đặt xưởng →
+            </Link>
+          </p>
+        ) : null}
       </SectionCard>
 
       {waiting.length ? (

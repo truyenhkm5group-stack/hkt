@@ -18,6 +18,7 @@ import {
   deleteProductionBatch,
   deleteProductionDelivery,
   deleteSupplierPayment,
+  listVariantsForProductCode,
   saveFabricOrder,
   saveProductionBatch,
   setProductionBatchStatus,
@@ -36,6 +37,7 @@ import {
   type PaymentKind,
   type PaymentMethod,
 } from "@/lib/constants/workshop-ledger";
+import { sizeRank } from "@/lib/constants/production";
 import { formatVND, todayVN, vnDateKey } from "@/lib/format";
 import type { WorkshopFormOptions } from "@/lib/queries/workshop-ledger";
 
@@ -87,6 +89,92 @@ function MoneyHint({ value }: { value: string }) {
   return n == null ? null : <>{formatVND(n)}</>;
 }
 
+// ─────────────────────────── BẢNG CHIA MÀU × SIZE ───────────────────────────
+
+type VariantOpt = { id: string; color: string; size: string };
+
+function cellsToPayload(values: Record<string, string>): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(values)
+      .map(([k, v]) => [k, intOrNull(v) ?? 0] as const)
+      .filter(([, n]) => n !== 0),
+  );
+}
+
+function cellsToForm(cells: Record<string, number> | null | undefined): Record<string, string> {
+  return Object.fromEntries(Object.entries(cells ?? {}).map(([k, n]) => [k, String(n)]));
+}
+
+/** Bảng nhập số theo màu (dòng) × size (cột). Ô trống = 0. `hint` in dòng nhỏ dưới ô (vd "còn 20"). */
+function CellsMatrix({ variants, values, onChange, hint, allowNegative }: { variants: VariantOpt[]; values: Record<string, string>; onChange: (next: Record<string, string>) => void; hint?: (id: string) => string | null; allowNegative?: boolean }) {
+  const colors = [...new Set(variants.map((v) => v.color || "—"))];
+  const sizes = [...new Set(variants.map((v) => v.size || "—"))].sort((a, b) => sizeRank(a) - sizeRank(b));
+  const byKey = new Map(variants.map((v) => [`${v.color || "—"}|${v.size || "—"}`, v] as const));
+  const n = (id: string) => intOrNull(values[id] ?? "") ?? 0;
+  const total = variants.reduce((t, v) => t + n(v.id), 0);
+  return (
+    <div className="overflow-x-auto rounded-lg border">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="bg-muted/50">
+            <th className="px-2 py-1.5 text-left font-medium">Màu \ Size</th>
+            {sizes.map((s) => (
+              <th key={s} className="px-1 py-1.5 text-center font-medium">
+                {s}
+              </th>
+            ))}
+            <th className="px-2 py-1.5 text-right font-medium">Cộng</th>
+          </tr>
+        </thead>
+        <tbody>
+          {colors.map((c) => {
+            const rowTotal = sizes.reduce((t, s) => {
+              const v = byKey.get(`${c}|${s}`);
+              return t + (v ? n(v.id) : 0);
+            }, 0);
+            return (
+              <tr key={c} className="border-t">
+                <td className="whitespace-nowrap px-2 py-1 font-medium">{c}</td>
+                {sizes.map((s) => {
+                  const v = byKey.get(`${c}|${s}`);
+                  if (!v)
+                    return (
+                      <td key={s} className="px-1 py-1 text-center text-muted-foreground">
+                        ·
+                      </td>
+                    );
+                  const h = hint?.(v.id);
+                  return (
+                    <td key={s} className="px-1 py-1">
+                      <Input
+                        inputMode="numeric"
+                        aria-label={`${c} ${s}`}
+                        className="mx-auto h-7 w-16 px-1.5 text-center tabular-nums"
+                        value={values[v.id] ?? ""}
+                        onChange={(e) => onChange({ ...values, [v.id]: allowNegative ? digits(e.target.value) : e.target.value.replace(/[^\d]/g, "") })}
+                      />
+                      {h ? <div className="mt-0.5 text-center text-[10px] text-muted-foreground">{h}</div> : null}
+                    </td>
+                  );
+                })}
+                <td className="px-2 py-1 text-right font-semibold tabular-nums">{rowTotal || ""}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="border-t bg-muted/30">
+            <td className="px-2 py-1.5 font-medium" colSpan={sizes.length + 1}>
+              Tổng
+            </td>
+            <td className="px-2 py-1.5 text-right font-bold tabular-nums">{total}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+}
+
 // ─────────────────────────── LÔ SẢN XUẤT ───────────────────────────
 
 export type BatchFormValue = {
@@ -103,7 +191,11 @@ export type BatchFormValue = {
   laborUnitPrice: number | null;
   adjustment: number;
   adjustmentNote: string;
+  workshopPenalty: number;
+  penaltyNote: string;
+  marketerPrice: number | null;
   fabricSource: string;
+  cells: Record<string, number>;
   note: string;
   delivered: number;
 };
@@ -124,16 +216,44 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
     laborUnitPrice: batch?.laborUnitPrice != null ? String(batch.laborUnitPrice) : "",
     adjustment: batch?.adjustment ? String(batch.adjustment) : "",
     adjustmentNote: batch?.adjustmentNote ?? "",
+    workshopPenalty: batch?.workshopPenalty ? String(batch.workshopPenalty) : "",
+    penaltyNote: batch?.penaltyNote ?? "",
+    marketerPrice: batch?.marketerPrice != null ? String(batch.marketerPrice) : "",
     fabricSource: (batch?.fabricSource ?? "SHOP") as FabricSource,
     note: batch?.note ?? "",
   });
   const [f, setF] = useState(init);
   const set = (patch: Partial<typeof f>) => setF((cur) => ({ ...cur, ...patch }));
+  /** `null` = lô ghi TỔNG; mảng = lô chia theo màu/size (danh sách mẫu của mã hàng). */
+  const [variants, setVariants] = useState<VariantOpt[] | null>(null);
+  const [cellValues, setCellValues] = useState<Record<string, string>>({});
+  const [loadingVariants, setLoadingVariants] = useState(false);
 
   const code = normalizeProductCode(f.productCode);
   const nextNo = useMemo(() => Math.max(0, ...options.batches.filter((b) => b.productCode === code).map((b) => b.batchNo)) + 1, [options.batches, code]);
   const knownName = options.products.find((p) => normalizeProductCode(p.code) === code)?.name;
-  const labor = laborCost({ agreedQty: intOrNull(f.agreedQty), laborUnitPrice: intOrNull(f.laborUnitPrice), adjustment: intOrNull(f.adjustment) ?? 0 }, batch?.delivered ?? 0);
+  const split = variants !== null;
+  const splitTotal = split ? variants.reduce((t, v) => t + (intOrNull(cellValues[v.id] ?? "") ?? 0), 0) : 0;
+  const labor = laborCost(
+    { agreedQty: intOrNull(f.agreedQty), laborUnitPrice: intOrNull(f.laborUnitPrice), adjustment: intOrNull(f.adjustment) ?? 0, penalty: intOrNull(f.workshopPenalty) ?? 0 },
+    batch?.delivered ?? 0,
+  );
+
+  const loadVariants = async (forCode: string, keep: Record<string, string>) => {
+    setLoadingVariants(true);
+    try {
+      const r = await listVariantsForProductCode(forCode);
+      if (!r.productId || !r.variants.length) {
+        toast.error(`Mã ${normalizeProductCode(forCode) || "?"} chưa khớp đúng một sản phẩm có màu/size — lô sẽ ghi dạng tổng`);
+        setVariants(null);
+        return;
+      }
+      setVariants(r.variants);
+      setCellValues(keep);
+    } finally {
+      setLoadingVariants(false);
+    }
+  };
 
   const submit = () =>
     run(
@@ -143,10 +263,13 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
             ...f,
             batchNo: f.batchNo || String(nextNo),
             productionOrderId: f.productionOrderId === "none" ? null : f.productionOrderId,
-            orderedQty: intOrNull(f.orderedQty) ?? 0,
+            orderedQty: split ? splitTotal : (intOrNull(f.orderedQty) ?? 0),
+            cells: split ? cellsToPayload(cellValues) : {},
             agreedQty: f.agreedQty,
             laborUnitPrice: f.laborUnitPrice,
+            marketerPrice: f.marketerPrice,
             adjustment: intOrNull(f.adjustment) ?? 0,
+            workshopPenalty: intOrNull(f.workshopPenalty) ?? 0,
           },
           batch?.id,
         ),
@@ -159,7 +282,11 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
       open={open}
       onOpenChange={(o) => {
         setOpen(o);
-        if (o) setF(init());
+        if (!o) return;
+        setF(init());
+        setVariants(null);
+        setCellValues({});
+        if (batch && Object.keys(batch.cells ?? {}).length) void loadVariants(batch.productCode, cellsToForm(batch.cells));
       }}
     >
       <DialogTrigger asChild>
@@ -173,10 +300,10 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{batch ? `Sửa ${batch.productCode} · lô ${batch.batchNo}` : "Thêm lô đặt xưởng"}</DialogTitle>
-          <DialogDescription>Một dòng của trang Thành phẩm. Ô số để trống là CHƯA BIẾT — ERP không coi là 0.</DialogDescription>
+          <DialogDescription>Một dòng của trang Thành phẩm. Ô số để trống là CHƯA BIẾT — ERP không coi là 0. Chia theo màu/size thì hàng đặt được trừ vào số thiếu của đúng mẫu.</DialogDescription>
         </DialogHeader>
         <datalist id="ws-products">
           {options.products.map((p, i) => (
@@ -192,7 +319,18 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
         </datalist>
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Mã hàng *" hint={knownName ? knownName : code ? "Chưa khớp sản phẩm nào — vẫn lưu được theo mã" : undefined}>
-            <Input list="ws-products" value={f.productCode} onChange={(e) => set({ productCode: e.target.value })} placeholder="Q002" />
+            <Input
+              list="ws-products"
+              value={f.productCode}
+              onChange={(e) => {
+                set({ productCode: e.target.value });
+                if (split) {
+                  setVariants(null);
+                  setCellValues({});
+                }
+              }}
+              placeholder="Q002"
+            />
           </Field>
           <Field label="Lô số" hint={!batch && !f.batchNo && code ? `Để trống = lô ${nextNo}` : undefined}>
             <Input inputMode="numeric" value={f.batchNo} onChange={(e) => set({ batchNo: digits(e.target.value) })} placeholder={code ? String(nextNo) : ""} />
@@ -209,21 +347,59 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
           <Field label="Ngày xưởng phải trả">
             <Input type="date" value={f.dueDate} onChange={(e) => set({ dueDate: e.target.value })} />
           </Field>
-          <Field label="SL đặt hàng *">
-            <Input inputMode="numeric" value={f.orderedQty} onChange={(e) => set({ orderedQty: digits(e.target.value) })} />
-          </Field>
+          <div className="sm:col-span-3">
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+              <Label className="text-xs">Số lượng đặt {split ? "theo màu / size" : ""}</Label>
+              {split ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setVariants(null);
+                    setCellValues({});
+                  }}
+                >
+                  Ghi dạng tổng
+                </Button>
+              ) : (
+                <Button type="button" size="sm" variant="outline" disabled={!code || loadingVariants} onClick={() => void loadVariants(code, {})}>
+                  {loadingVariants ? <Loader2 className="size-3.5 animate-spin" /> : null} Chia theo màu / size
+                </Button>
+              )}
+            </div>
+            {split ? (
+              <CellsMatrix variants={variants} values={cellValues} onChange={setCellValues} />
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <Input inputMode="numeric" value={f.orderedQty} onChange={(e) => set({ orderedQty: digits(e.target.value) })} placeholder="SL đặt hàng *" />
+                <p className="text-[11px] text-muted-foreground sm:col-span-2">Ghi dạng tổng thì trang Thiếu hàng KHÔNG trừ được lô này vào mẫu nào — chia theo màu/size để ERP tự thôi nhắc khi đã đặt đủ.</p>
+              </div>
+            )}
+          </div>
           <Field label="SL chốt TT với xưởng" hint="Trống = chưa chốt, tiền công tạm tính theo số đã trả">
             <Input inputMode="numeric" value={f.agreedQty} onChange={(e) => set({ agreedQty: digits(e.target.value) })} />
           </Field>
           <Field label="Đơn giá công (đ/chiếc)" hint={<MoneyHint value={f.laborUnitPrice} />}>
             <Input inputMode="numeric" value={f.laborUnitPrice} onChange={(e) => set({ laborUnitPrice: digits(e.target.value) })} />
           </Field>
-          <Field label="Thưởng (+) / Phạt (−)" hint={<MoneyHint value={f.adjustment} />}>
+          <Field label="Giá báo MKT (đ/chiếc)" hint={<MoneyHint value={f.marketerPrice} />}>
+            <Input inputMode="numeric" value={f.marketerPrice} onChange={(e) => set({ marketerPrice: e.target.value.replace(/[^\d]/g, "") })} />
+          </Field>
+          <Field label="Thưởng (+) / Phạt khác (−)" hint={<MoneyHint value={f.adjustment} />}>
             <Input inputMode="numeric" value={f.adjustment} onChange={(e) => set({ adjustment: digits(e.target.value) })} placeholder="0" />
           </Field>
           <div className="sm:col-span-2">
-            <Field label="Lý do thưởng / phạt">
+            <Field label="Lý do thưởng / phạt khác">
               <Input value={f.adjustmentNote} onChange={(e) => set({ adjustmentNote: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Phạt xưởng · hoàn MKT (đ)" hint={<MoneyHint value={f.workshopPenalty} />}>
+            <Input inputMode="numeric" value={f.workshopPenalty} onChange={(e) => set({ workshopPenalty: e.target.value.replace(/[^\d]/g, "") })} placeholder="0" />
+          </Field>
+          <div className="sm:col-span-2">
+            <Field label="Lý do phạt xưởng (sai sót / trả chậm)">
+              <Input value={f.penaltyNote} onChange={(e) => set({ penaltyNote: e.target.value })} />
             </Field>
           </div>
           <div className="sm:col-span-2">
@@ -242,7 +418,7 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
               </Select>
             </Field>
           </div>
-          <Field label="Bảng đặt màu × size">
+          <Field label="Bảng đặt màu × size cũ">
             <Select value={f.productionOrderId} onValueChange={(v) => set({ productionOrderId: v })}>
               <SelectTrigger className="w-full">
                 <SelectValue />
@@ -270,7 +446,7 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
           <span className="ml-2 text-xs text-muted-foreground">{labor.reason}</span>
         </div>
         <DialogFooter>
-          <Button onClick={submit} disabled={pending || !f.productCode.trim() || !f.orderedAt || f.orderedQty === ""}>
+          <Button onClick={submit} disabled={pending || loadingVariants || !f.productCode.trim() || !f.orderedAt || (split ? splitTotal <= 0 : f.orderedQty === "")}>
             {pending ? <Loader2 className="size-4 animate-spin" /> : null} Lưu
           </Button>
         </DialogFooter>
@@ -281,16 +457,26 @@ export function BatchDialog({ options, suppliers, batch }: { options: WorkshopFo
 
 // ─────────────────────────── ĐỢT XƯỞNG TRẢ HÀNG ───────────────────────────
 
-export function DeliveryDialog({ batchId, label, compact }: { batchId: string; label: string; compact?: boolean }) {
+export type DeliveryVariantLine = { variantId: string; color: string; size: string; ordered: number; delivered: number; remaining: number };
+
+export function DeliveryDialog({ batchId, label, compact, variantLines = [] }: { batchId: string; label: string; compact?: boolean; variantLines?: DeliveryVariantLine[] }) {
   const [open, setOpen] = useState(false);
   const { pending, run } = useRun();
   const [f, setF] = useState({ deliveredAt: todayVN(), quantity: "", note: "" });
+  const [cellValues, setCellValues] = useState<Record<string, string>>({});
+  const split = variantLines.length > 0;
+  const byId = new Map(variantLines.map((l) => [l.variantId, l] as const));
+  const splitTotal = variantLines.reduce((t, l) => t + (intOrNull(cellValues[l.variantId] ?? "") ?? 0), 0);
+  const qty = split ? splitTotal : intOrNull(f.quantity);
   return (
     <Dialog
       open={open}
       onOpenChange={(o) => {
         setOpen(o);
-        if (o) setF({ deliveredAt: todayVN(), quantity: "", note: "" });
+        if (o) {
+          setF({ deliveredAt: todayVN(), quantity: "", note: "" });
+          setCellValues({});
+        }
       }}
     >
       <DialogTrigger asChild>
@@ -304,28 +490,50 @@ export function DeliveryDialog({ batchId, label, compact }: { batchId: string; l
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className={split ? "sm:max-w-3xl" : "sm:max-w-md"}>
         <DialogHeader>
           <DialogTitle>Xưởng trả hàng · {label}</DialogTitle>
-          <DialogDescription>Mỗi lần xưởng giao là một dòng. Số âm = shop trả lại xưởng hàng lỗi.</DialogDescription>
+          <DialogDescription>Mỗi lần xưởng giao là một dòng. Số âm = shop trả lại xưởng hàng lỗi.{split ? " Lô đặt theo màu/size nên ghi số trả theo từng mẫu." : ""}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Ngày nhận *">
             <Input type="date" value={f.deliveredAt} onChange={(e) => setF({ ...f, deliveredAt: e.target.value })} />
           </Field>
-          <Field label="Số lượng *">
-            <Input inputMode="numeric" value={f.quantity} onChange={(e) => setF({ ...f, quantity: digits(e.target.value) })} autoFocus />
-          </Field>
+          {split ? null : (
+            <Field label="Số lượng *">
+              <Input inputMode="numeric" value={f.quantity} onChange={(e) => setF({ ...f, quantity: digits(e.target.value) })} autoFocus />
+            </Field>
+          )}
+          {split ? (
+            <div className="sm:col-span-2">
+              <CellsMatrix
+                variants={variantLines.map((l) => ({ id: l.variantId, color: l.color, size: l.size }))}
+                values={cellValues}
+                onChange={setCellValues}
+                allowNegative
+                hint={(id) => {
+                  const l = byId.get(id);
+                  return l ? `còn ${l.remaining}/${l.ordered}` : null;
+                }}
+              />
+            </div>
+          ) : null}
           <div className="sm:col-span-2">
-            <Field label="Ghi chú (màu, size…)">
-              <Input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="115c đỏ" />
+            <Field label="Ghi chú">
+              <Input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder={split ? "" : "115c đỏ"} />
             </Field>
           </div>
         </div>
         <DialogFooter>
           <Button
-            disabled={pending || !intOrNull(f.quantity)}
-            onClick={() => run(() => addProductionDelivery({ batchId, deliveredAt: f.deliveredAt, quantity: intOrNull(f.quantity), note: f.note }), "Đã ghi hàng về", () => setOpen(false))}
+            disabled={pending || !qty}
+            onClick={() =>
+              run(
+                () => addProductionDelivery({ batchId, deliveredAt: f.deliveredAt, quantity: qty, cells: split ? cellsToPayload(cellValues) : {}, note: f.note }),
+                "Đã ghi hàng về",
+                () => setOpen(false),
+              )
+            }
           >
             {pending ? <Loader2 className="size-4 animate-spin" /> : null} Lưu
           </Button>

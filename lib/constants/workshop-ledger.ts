@@ -70,7 +70,14 @@ export function paidTotals(payments: readonly PaymentLike[]): { paid: number; de
 
 // ─────────────────────────── TIỀN CÔNG ───────────────────────────
 
-export type LaborInput = { agreedQty: number | null; laborUnitPrice: number | null; adjustment: number };
+export type LaborInput = {
+  agreedQty: number | null;
+  laborUnitPrice: number | null;
+  /** Thưởng (+) / phạt khác (−). */
+  adjustment: number;
+  /** Phạt xưởng vì sai sót / trả chậm ("Hoàn phạt MKT") — luôn ≥ 0, TRỪ vào tiền công. */
+  penalty?: number;
+};
 
 export type LaborCost = {
   /** Tiền công phải trả xưởng. `null` = CHƯA BIẾT (thiếu đơn giá, hoặc chưa chốt SL mà xưởng chưa trả chiếc nào). */
@@ -82,12 +89,13 @@ export type LaborCost = {
   reason: string;
 };
 
-/** Tiền công = SL chốt × đơn giá + thưởng/phạt. Chưa chốt SL ⇒ tạm tính theo số đã trả, có nhãn. */
+/** Tiền công = SL chốt × đơn giá + thưởng/phạt − phạt xưởng. Chưa chốt SL ⇒ tạm tính theo số đã trả, có nhãn. */
 export function laborCost(b: LaborInput, deliveredQty: number): LaborCost {
+  const extra = b.adjustment - Math.max(0, b.penalty ?? 0);
   if (b.laborUnitPrice == null) return { amount: null, qtyBasis: null, basis: null, reason: "Chưa nhập đơn giá công" };
-  if (b.agreedQty != null) return { amount: b.agreedQty * b.laborUnitPrice + b.adjustment, qtyBasis: b.agreedQty, basis: "AGREED", reason: "SL chốt × đơn giá + thưởng/phạt" };
+  if (b.agreedQty != null) return { amount: b.agreedQty * b.laborUnitPrice + extra, qtyBasis: b.agreedQty, basis: "AGREED", reason: "SL chốt × đơn giá + thưởng/phạt − phạt xưởng" };
   if (deliveredQty > 0)
-    return { amount: deliveredQty * b.laborUnitPrice + b.adjustment, qtyBasis: deliveredQty, basis: "DELIVERED_ESTIMATE", reason: "TẠM TÍNH theo số xưởng đã trả — chưa chốt SL thanh toán" };
+    return { amount: deliveredQty * b.laborUnitPrice + extra, qtyBasis: deliveredQty, basis: "DELIVERED_ESTIMATE", reason: "TẠM TÍNH theo số xưởng đã trả — chưa chốt SL thanh toán" };
   return { amount: null, qtyBasis: null, basis: null, reason: "Chưa chốt SL thanh toán và xưởng chưa trả chiếc nào" };
 }
 
@@ -232,4 +240,81 @@ export function productActualCost(input: {
   const unitCost = !reason && total != null ? Math.round(total / delivered) : null;
   if (!reason) reason = provisional ? "Tạm tính: còn lô chưa chốt" : "Đã chốt";
   return { fabricCost, laborCost, total, delivered, unitCost, provisional, reason };
+}
+
+// ─────────────────────────── HÀNG ĐÃ ĐẶT MÀ CHƯA VỀ, THEO TỪNG MẪU ───────────────────────────
+
+/** Tổng các ô số lượng `{ [variantId]: số cái }` — ô âm / không phải số bị bỏ. */
+export function cellsTotal(cells: Record<string, number> | null | undefined): number {
+  return Object.values(cells ?? {}).reduce((t, n) => t + (Number.isFinite(n) ? Math.trunc(n) : 0), 0);
+}
+
+export type OpenBatchInput = {
+  id: string;
+  status: string;
+  cells: Record<string, number>;
+  orderedQty: number;
+  agreedQty: number | null;
+  dueDate: Date | null;
+  productionOrderId: string | null;
+};
+export type DeliveryCellsInput = { batchId: string; quantity: number; cells: Record<string, number> };
+
+export type OpenBatchQty = {
+  /** Số cái đã đặt mà xưởng CHƯA trả, theo mẫu — chỉ lô ĐANG SẢN XUẤT có chia màu/size. */
+  qtyByVariant: Map<string, number>;
+  /** Hạn xưởng trả SỚM NHẤT trong các lô đang mở của mẫu. */
+  earliestDueByVariant: Map<string, Date>;
+  /** Bảng màu × size đã có lô nối vào — KHÔNG được đếm lần hai ở phía lệnh sản xuất. */
+  linkedProductionOrderIds: Set<string>;
+  /**
+   * Lô đang sản xuất KHÔNG góp được vào số theo mẫu, kèm lý do: chưa chia màu/size, hoặc có đợt trả
+   * hàng không chia mẫu nên không biết mẫu nào đã về. Đếm riêng, KHÔNG đoán chia hộ.
+   */
+  unsplit: { batchId: string; remaining: number; reason: "NO_CELLS" | "DELIVERY_NOT_SPLIT" }[];
+};
+
+/**
+ * Hàng đặt xưởng chưa về, theo mẫu. Hàm THUẦN.
+ *
+ * Chỉ lô `OPEN`: lô đã bấm "xưởng đã trả xong" thì phần chưa trả sẽ KHÔNG bao giờ về (Q003 lô 1 đặt
+ * 400, xưởng trả 240 rồi dừng) — đếm nó là giấu đi 160 cái thiếu thật.
+ *
+ * Lô có đợt trả hàng không chia mẫu thì cả lô KHÔNG góp số theo mẫu: không biết 100 cái đã về là màu
+ * nào thì mọi cách chia đều là đoán, và đoán sai theo hướng "đủ rồi" làm Lark im đúng lúc cần nhắc.
+ * Sai theo hướng an toàn là nhắc thêm một lần.
+ */
+export function openBatchQtyByVariant(batches: readonly OpenBatchInput[], deliveries: readonly DeliveryCellsInput[]): OpenBatchQty {
+  const qtyByVariant = new Map<string, number>();
+  const earliestDueByVariant = new Map<string, Date>();
+  const linkedProductionOrderIds = new Set<string>();
+  const unsplit: OpenBatchQty["unsplit"] = [];
+  const byBatch = new Map<string, DeliveryCellsInput[]>();
+  for (const d of deliveries) byBatch.set(d.batchId, [...(byBatch.get(d.batchId) ?? []), d]);
+
+  for (const b of batches) {
+    if (b.productionOrderId) linkedProductionOrderIds.add(b.productionOrderId);
+    if (b.status !== "OPEN") continue;
+    const ds = byBatch.get(b.id) ?? [];
+    const deliveredTotal = ds.reduce((t, d) => t + d.quantity, 0);
+    const target = cellsTotal(b.cells) || (b.agreedQty ?? b.orderedQty);
+    if (!cellsTotal(b.cells)) {
+      unsplit.push({ batchId: b.id, remaining: Math.max(0, target - deliveredTotal), reason: "NO_CELLS" });
+      continue;
+    }
+    if (ds.some((d) => cellsTotal(d.cells) !== d.quantity)) {
+      unsplit.push({ batchId: b.id, remaining: Math.max(0, target - deliveredTotal), reason: "DELIVERY_NOT_SPLIT" });
+      continue;
+    }
+    const got = new Map<string, number>();
+    for (const d of ds) for (const [v, n] of Object.entries(d.cells)) got.set(v, (got.get(v) ?? 0) + n);
+    for (const [v, n] of Object.entries(b.cells)) {
+      const left = Math.max(0, Math.trunc(n) - (got.get(v) ?? 0));
+      if (!left) continue;
+      qtyByVariant.set(v, (qtyByVariant.get(v) ?? 0) + left);
+      const cur = earliestDueByVariant.get(v);
+      if (b.dueDate && (!cur || b.dueDate < cur)) earliestDueByVariant.set(v, b.dueDate);
+    }
+  }
+  return { qtyByVariant, earliestDueByVariant, linkedProductionOrderIds, unsplit };
 }

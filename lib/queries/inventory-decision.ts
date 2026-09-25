@@ -11,6 +11,7 @@ import {
 import { SLOW_MOVING_RULES } from "@/lib/constants/slow-moving";
 import { computePlan } from "@/lib/constants/planning";
 import { getReplenishmentPlan } from "@/lib/queries/planning";
+import { openBatchQtyByVariantFromLedger } from "@/lib/queries/workshop-ledger";
 import { getSlowMoving } from "@/lib/queries/slow-moving";
 import { ORDER_OUTCOME_FAST, PRIMARY_ATTEMPT, SHIPMENT_LEFT_WAREHOUSE } from "@/lib/queries/return-rate";
 
@@ -124,16 +125,26 @@ export type InventoryDecisionReport = {
 const norm = (v: string) => v.trim().toLowerCase();
 
 /**
- * Số lượng ĐÃ ĐẶT XƯỞNG chưa nhận, theo mẫu mã. Đơn sản xuất lưu ma trận "màu|size" ở cấp MÃ
- * HÀNG, nên phải ghép về mẫu mã bằng (product, màu, size). Ô không ghép được thì ĐẾM RIÊNG và nói
- * ra — không chia đều, không đoán.
+ * Số lượng ĐÃ ĐẶT XƯỞNG chưa nhận, theo mẫu mã — từ HAI nguồn, không đếm trùng:
+ *
+ *  1. Lệnh sản xuất ĐÃ GỬI (bảng màu × size). Lưu ma trận "màu|size" ở cấp MÃ HÀNG, nên phải ghép về
+ *     mẫu mã bằng (product, màu, size). Ô không ghép được thì ĐẾM RIÊNG và nói ra — không đoán.
+ *  2. Phần CHƯA TRẢ của các lô đang sản xuất ở Sổ đặt xưởng có chia màu/size (khoá theo mã mẫu nên
+ *     không phải ghép tên). Lô nào nối với một lệnh ở (1) thì lệnh ấy bị bỏ — lô là bản mới hơn của
+ *     cùng một lần đặt. Lô chưa chia mẫu KHÔNG góp số theo mẫu, được đếm ở `unsplitBatchUnits`.
+ *
+ * Vốn (`capital`) vẫn chỉ tính từ lệnh (1): sổ đặt xưởng là công nợ, tiền của nó không đi vào đây.
  */
 export async function openPoQtyByVariant() {
   const db = await getDb();
-  const rows = await db
-    .select({ id: po.id, productId: po.productId, cells: po.cells, totalQty: po.totalQty, unitCost: po.unitCost, dueDate: po.dueDate })
-    .from(po)
-    .where(eq(po.status, "SENT"));
+  const [allRows, batches] = await Promise.all([
+    db
+      .select({ id: po.id, productId: po.productId, cells: po.cells, totalQty: po.totalQty, unitCost: po.unitCost, dueDate: po.dueDate })
+      .from(po)
+      .where(eq(po.status, "SENT")),
+    openBatchQtyByVariantFromLedger(),
+  ]);
+  const rows = allRows.filter((r) => !batches.linkedProductionOrderIds.has(r.id));
 
   const productIds = [...new Set(rows.map((x) => x.productId).filter((x): x is string => Boolean(x)))];
   const variants = productIds.length
@@ -173,7 +184,15 @@ export async function openPoQtyByVariant() {
       } else unmappedUnits += qty;
     }
   }
-  return { qtyByVariant, earliestDueByVariant, unmappedUnits, units, capital, capitalUnknownOrders };
+  for (const [variantId, qty] of batches.qtyByVariant) {
+    qtyByVariant.set(variantId, (qtyByVariant.get(variantId) ?? 0) + qty);
+    units += qty;
+    const due = batches.earliestDueByVariant.get(variantId);
+    const cur = earliestDueByVariant.get(variantId);
+    if (due && (!cur || due < cur)) earliestDueByVariant.set(variantId, due);
+  }
+  const unsplitBatchUnits = batches.unsplit.reduce((t, b) => t + b.remaining, 0);
+  return { qtyByVariant, earliestDueByVariant, unmappedUnits, units, capital, capitalUnknownOrders, unsplitBatchUnits, unsplitBatches: batches.unsplit.length };
 }
 
 /** Tuổi mẫu mã = hôm nay − phiếu NHẬP đầu tiên. Chưa có phiếu nhập thì tuổi CHƯA BIẾT. */

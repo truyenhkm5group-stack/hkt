@@ -137,7 +137,8 @@ async function getStockShortageUncached(urgentAfterHours: number, now: Date): Pr
   });
   // Quyết định của người đặt hàng (đã đặt / sẽ đặt / không đặt nữa) — chỉ đổi việc NHẮC, không đổi phân bổ.
   const book = await getSettingJson<ShortageDecisionBook>(SHORTAGE_DECISIONS_KEY, {});
-  return applyShortageDecisions(allocateStock(variants, lines, { now, urgentAfterHours }), book);
+  const snap = applyShortageDecisions(allocateStock(variants, lines, { now, urgentAfterHours }), book);
+  return { ...snap, unsplitOrdered: { batches: openPo.unsplitBatches, units: openPo.unsplitBatchUnits } };
 }
 
 export type StockShortageOptions = { urgentAfterHours?: number; fresh?: boolean; now?: Date };

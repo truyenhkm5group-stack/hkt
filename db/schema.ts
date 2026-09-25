@@ -467,11 +467,30 @@ export const productionBatches = pgTable(
     adjustment: integer("adjustment").notNull().default(0),
     adjustmentNote: text("adjustment_note").notNull().default(""),
     /**
+     * PHẠT XƯỞNG ("Hoàn phạt MKT" trên bảng tính): tiền phạt xưởng khi sai sót hoặc trả hàng chậm.
+     * Luôn ≥ 0 và TRỪ vào tiền công phải trả xưởng. Tách khỏi `adjustment` vì chủ shop theo dõi riêng
+     * khoản này (bảng tính có hai cột), và nó phải kèm lý do.
+     */
+    workshopPenalty: integer("workshop_penalty").notNull().default(0),
+    penaltyNote: text("penalty_note").notNull().default(""),
+    /**
+     * GIÁ BÁO MKT (đ/chiếc): giá chốt tính cho marketer khi tính lợi nhuận danh nghĩa và lương.
+     * NULL = CHƯA BÁO. Hôm nay CHỈ GHI NHẬN và hiển thị cạnh giá SX thực tế — CHƯA đi vào báo cáo lợi
+     * nhuận hay bảng lương nào: đổi giá vốn của lương là quyết định của chủ shop (AGENTS.md mục 7).
+     */
+    marketerPrice: integer("marketer_price"),
+    /**
      * Ai lo vải: SHOP (shop mua vải, xưởng may công — tiền vải lấy từ các đợt vải gán vào lô) ·
      * WORKSHOP (xưởng lo vải, đơn giá là giá trọn gói — tiền vải 0đ là THẬT). Phải khai, vì
      * "chưa gán đợt vải nào" và "vải do xưởng lo" cho ra cùng một con số 0 mà nghĩa ngược nhau.
      */
     fabricSource: text("fabric_source").notNull().default("SHOP"),
+    /**
+     * SỐ ĐẶT THEO TỪNG MẪU (màu/size): `{ [product_variants.id]: số cái }`. Rỗng = lô chỉ ghi TỔNG của
+     * mã. Khoá là mã mẫu chứ không phải chữ "màu|size", để trừ vào đúng mẫu đang thiếu hàng mà không
+     * phải đoán theo tên màu. Có bảng này thì SL đặt = tổng các ô, và mỗi đợt trả hàng phải chia theo mẫu.
+     */
+    cells: jsonb("cells").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
     /** OPEN (xưởng đang trả hàng) · DONE (xưởng đã trả xong — do người bấm) · CANCELLED */
     status: text("status").notNull().default("OPEN"),
     doneAt: ts("done_at"),
@@ -487,7 +506,7 @@ export const productionBatches = pgTable(
     check("production_batches_status_check", sql`${t.status} IN ('OPEN', 'DONE', 'CANCELLED')`),
     check("production_batches_fabric_source_check", sql`${t.fabricSource} IN ('SHOP', 'WORKSHOP')`),
     check("production_batches_qty_check", sql`${t.orderedQty} >= 0 AND ${t.batchNo} > 0 AND (${t.agreedQty} IS NULL OR ${t.agreedQty} >= 0)`),
-    check("production_batches_price_check", sql`${t.laborUnitPrice} IS NULL OR ${t.laborUnitPrice} >= 0`),
+    check("production_batches_price_check", sql`(${t.laborUnitPrice} IS NULL OR ${t.laborUnitPrice} >= 0) AND (${t.marketerPrice} IS NULL OR ${t.marketerPrice} >= 0) AND ${t.workshopPenalty} >= 0`),
     check("production_batches_code_check", sql`length(trim(${t.productCode})) > 0`),
   ],
 );
@@ -502,6 +521,8 @@ export const productionDeliveries = pgTable(
       .references(() => productionBatches.id, { onDelete: "cascade" }),
     deliveredAt: ts("delivered_at").notNull(),
     quantity: integer("quantity").notNull(),
+    /** Số trả theo từng mẫu `{ [variantId]: số cái }` — bắt buộc khi lô có chia màu/size; `quantity` = tổng các ô. */
+    cells: jsonb("cells").$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
     note: text("note").notNull().default(""),
     createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdBy: text("created_by").notNull().default(""),

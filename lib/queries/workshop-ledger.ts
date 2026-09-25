@@ -1,7 +1,11 @@
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, type Employee, type PayrollConfig } from "@/lib/constants/payroll";
+import { sizeRank } from "@/lib/constants/production";
+import { getSettingJson } from "@/lib/settings";
 import {
   batchActualCost,
+  openBatchQtyByVariant,
   deliveryStatus,
   laborCost,
   paymentStatus,
@@ -30,7 +34,14 @@ export type DeliveryRecord = typeof schema.productionDeliveries.$inferSelect;
 export type FabricRecord = typeof schema.fabricOrders.$inferSelect;
 export type PaymentRecord = typeof schema.supplierPayments.$inferSelect;
 
+/** Một dòng của bảng chia màu/size: đặt · đã trả · còn lại. */
+export type VariantLine = { variantId: string; color: string; size: string; ordered: number; delivered: number; remaining: number };
+
 export type BatchView = BatchRecord & {
+  /** Marketer phụ trách mã — ĐỌC từ cấu hình Lương ("Marketer phụ trách mã"), không khai lại ở đây. */
+  marketerName: string | null;
+  /** Bảng chia màu/size (rỗng khi lô chỉ ghi tổng). */
+  variantLines: VariantLine[];
   deliveries: DeliveryRecord[];
   payments: PaymentRecord[];
   fabrics: FabricRecord[];
@@ -64,6 +75,9 @@ export type ProductCostView = {
   fabricOrderCount: number;
   unassignedFabric: number;
   cost: ActualCost;
+  marketerName: string | null;
+  /** Giá báo MKT của lô gần nhất có báo giá (lô chưa huỷ, đặt muộn nhất). `null` = chưa báo. */
+  marketerPrice: number | null;
   /** Giá nhập bình quân trên PHIẾU KHO gần nhất của mã — thứ báo cáo lợi nhuận đang dùng làm giá vốn. */
   receiptUnitCost: number | null;
   receiptAt: Date | null;
@@ -91,12 +105,56 @@ export function batchLabel(b: Pick<BatchRecord, "productCode" | "batchNo">) {
   return `${b.productCode} · lô ${b.batchNo}`;
 }
 
-function buildBatch(b: BatchRecord, deliveries: DeliveryRecord[], payments: PaymentRecord[], fabrics: FabricRecord[], now: Date): BatchView {
+type VariantInfo = { color: string; size: string };
+
+/**
+ * "Marketer phụ trách mã" theo cấu hình Lương. Đọc đúng hai khoá mà trang Lương ghi
+ * (`payroll.config.productOwners` + `payroll.employees`) — chỉ để HIỂN THỊ tên, không quy kết gì.
+ */
+async function productMarketerNames(): Promise<Map<string, string>> {
+  const [cfg, employees] = await Promise.all([
+    getSettingJson<Partial<PayrollConfig>>(PAYROLL_CONFIG_KEY, DEFAULT_PAYROLL_CONFIG),
+    getSettingJson<Employee[]>(PAYROLL_EMPLOYEES_KEY, []),
+  ]);
+  const nameOf = new Map((Array.isArray(employees) ? employees : []).map((e) => [e.id, e.shortName || e.name] as const));
+  const out = new Map<string, string>();
+  for (const [productId, employeeId] of Object.entries(cfg.productOwners ?? {})) {
+    const n = nameOf.get(employeeId);
+    if (n) out.set(productId, n);
+  }
+  return out;
+}
+
+async function variantInfo(ids: string[]): Promise<Map<string, VariantInfo>> {
+  if (!ids.length) return new Map();
+  const db = await getDb();
+  const rows = await db
+    .select({ id: schema.productVariants.id, color: schema.productVariants.color, size: schema.productVariants.size })
+    .from(schema.productVariants)
+    .where(inArray(schema.productVariants.id, ids));
+  return new Map(rows.map((r) => [r.id, { color: r.color ?? "", size: r.size ?? "" }] as const));
+}
+
+function variantLinesOf(b: BatchRecord, deliveries: DeliveryRecord[], info: Map<string, VariantInfo>): VariantLine[] {
+  const got = new Map<string, number>();
+  for (const d of deliveries) for (const [v, n] of Object.entries(d.cells ?? {})) got.set(v, (got.get(v) ?? 0) + n);
+  return Object.entries(b.cells ?? {})
+    .map(([variantId, ordered]) => {
+      const delivered = got.get(variantId) ?? 0;
+      const vi = info.get(variantId);
+      return { variantId, color: vi?.color ?? "?", size: vi?.size ?? "", ordered, delivered, remaining: Math.max(0, ordered - delivered) };
+    })
+    .sort((x, y) => x.color.localeCompare(y.color, "vi") || sizeRank(x.size) - sizeRank(y.size));
+}
+
+function buildBatch(b: BatchRecord, deliveries: DeliveryRecord[], payments: PaymentRecord[], fabrics: FabricRecord[], now: Date, extra: { marketerName: string | null; info: Map<string, VariantInfo> }): BatchView {
   const delivered = deliveries.reduce((s, d) => s + d.quantity, 0);
-  const labor = laborCost({ agreedQty: b.agreedQty, laborUnitPrice: b.laborUnitPrice, adjustment: b.adjustment }, delivered);
+  const labor = laborCost({ agreedQty: b.agreedQty, laborUnitPrice: b.laborUnitPrice, adjustment: b.adjustment, penalty: b.workshopPenalty }, delivered);
   const fabricAmount = fabrics.reduce((s, f) => s + f.amount, 0);
   return {
     ...b,
+    marketerName: extra.marketerName,
+    variantLines: variantLinesOf(b, deliveries, extra.info),
     deliveries,
     payments,
     fabrics,
@@ -145,7 +203,10 @@ export async function getWorkshopLedger(now = new Date()) {
   const payByFabric = groupBy(payments, (p) => p.fabricOrderId);
   const fabByBatch = groupBy(fabrics, (f) => f.batchId);
 
-  const batchViews = batches.map((b) => buildBatch(b, delByBatch.get(b.id) ?? [], payByBatch.get(b.id) ?? [], fabByBatch.get(b.id) ?? [], now));
+  const [owners, info] = await Promise.all([productMarketerNames(), variantInfo([...new Set(batches.flatMap((b) => Object.keys(b.cells ?? {})))])]);
+  const batchViews = batches.map((b) =>
+    buildBatch(b, delByBatch.get(b.id) ?? [], payByBatch.get(b.id) ?? [], fabByBatch.get(b.id) ?? [], now, { marketerName: b.productId ? (owners.get(b.productId) ?? null) : null, info }),
+  );
   const batchById = new Map(batchViews.map((b) => [b.id, b] as const));
 
   const fabricViews: FabricView[] = fabrics.map((f) => {
@@ -190,6 +251,9 @@ export async function getWorkshopLedger(now = new Date()) {
         fabricOrderCount: fs.length,
         unassignedFabric: fs.filter((f) => !f.batchId).reduce((s, f) => s + f.amount, 0),
         cost: productActualCost({ batches: bs, fabricAmount: fs.reduce((s, f) => s + f.amount, 0), fabricOrderCount: fs.length }),
+        marketerName: productId ? (owners.get(productId) ?? null) : null,
+        // `bs` đã xếp lô đặt MUỘN NHẤT trước (orderBy ordered_at desc).
+        marketerPrice: bs.find((b) => b.status !== "CANCELLED" && b.marketerPrice != null)?.marketerPrice ?? null,
         receiptUnitCost: r?.unitCost ?? null,
         receiptAt: r?.at ?? null,
       };
@@ -229,7 +293,8 @@ export async function getProductionBatchDetail(id: string, now = new Date()) {
     ? await db.select().from(schema.supplierPayments).where(inArray(schema.supplierPayments.fabricOrderId, fabrics.map((f) => f.id))).orderBy(asc(schema.supplierPayments.paidAt))
     : [];
   const payByFabric = groupBy(fabricPayments, (p) => p.fabricOrderId);
-  const view = buildBatch(b, deliveries, directPayments, fabrics, now);
+  const [owners, info] = await Promise.all([productMarketerNames(), variantInfo(Object.keys(b.cells ?? {}))]);
+  const view = buildBatch(b, deliveries, directPayments, fabrics, now, { marketerName: b.productId ? (owners.get(b.productId) ?? null) : null, info });
   const fabricViews: FabricView[] = fabrics.map((f) => {
     const ps = payByFabric.get(f.id) ?? [];
     return { ...f, payments: ps, pay: paymentStatus(f.amount, ps), batchLabel: batchLabel(b) };
@@ -268,3 +333,34 @@ export async function workshopFormOptions() {
   };
 }
 export type WorkshopFormOptions = Awaited<ReturnType<typeof workshopFormOptions>>;
+
+/**
+ * Hàng đặt xưởng chưa về theo mẫu, đọc từ Sổ đặt xưởng — CHỈ SỐ LƯỢNG, không một đồng nào (sổ này
+ * không đi vào lợi nhuận). Dùng bởi `openPoQtyByVariant` để trang Thiếu hàng và Quyết định vốn tồn
+ * kho trừ hàng đã đặt. Luật ở `openBatchQtyByVariant` (hàm thuần).
+ */
+export async function openBatchQtyByVariantFromLedger() {
+  const db = await getDb();
+  const [batches, deliveries] = await Promise.all([
+    db
+      .select({
+        id: schema.productionBatches.id,
+        status: schema.productionBatches.status,
+        cells: schema.productionBatches.cells,
+        orderedQty: schema.productionBatches.orderedQty,
+        agreedQty: schema.productionBatches.agreedQty,
+        dueDate: schema.productionBatches.dueDate,
+        productionOrderId: schema.productionBatches.productionOrderId,
+      })
+      .from(schema.productionBatches),
+    db
+      .select({ batchId: schema.productionDeliveries.batchId, quantity: schema.productionDeliveries.quantity, cells: schema.productionDeliveries.cells })
+      .from(schema.productionDeliveries)
+      .innerJoin(schema.productionBatches, eq(schema.productionBatches.id, schema.productionDeliveries.batchId))
+      .where(eq(schema.productionBatches.status, "OPEN")),
+  ]);
+  return openBatchQtyByVariant(
+    batches.map((b) => ({ ...b, cells: b.cells ?? {}, dueDate: b.dueDate ? new Date(b.dueDate) : null })),
+    deliveries.map((d) => ({ ...d, cells: d.cells ?? {} })),
+  );
+}
