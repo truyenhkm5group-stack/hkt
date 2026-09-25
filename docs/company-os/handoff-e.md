@@ -18,6 +18,14 @@ Nhánh `claude/cos-e-returns` (từ `origin/claude/cos-nen-mau-va-kho` dba26e0d)
 | Đổi nhãn (chỉ chữ): `/returns` = "Phiếu đổi / trả (Pancake)" (eyebrow "Bán hàng · nguồn Pancake"), `/inventory/returns` = "Kiểm đếm hàng hoàn · kho" | hai `page.tsx`, `lib/constants/department-modules.ts` |
 | Kiểm thử | `tests/company-os-returns.test.ts` (đăng ký sau Agent D trong `tests/sync-fixtures.test.ts`), `tests/migration-upgrade-path.test.ts` (+0136, bảng có, 0 dòng) |
 
+## Cổng (Windows, worktree riêng, SHA e40fe8d3)
+
+`npm run typecheck` sạch · `npm run lint` sạch · `npm test` in **TẤT CẢ KIỂM THỬ ĐẠT** (kể cả `testChatbotImportGuards`) · `npm run build` thành công (`/inventory/returns` 41,6 kB). Lượt `npm test` đầu đỏ ở `tests/shipment-join-grain.test.ts` (`join shipments` trong truy vấn đối tượng) — sửa bằng truy vấn con theo khoá của đúng kiện, KHÔNG thêm miễn trừ.
+
+### Kiểm đột biến (18/18 bị bắt, chạy riêng bộ này rồi hoàn nguyên)
+
+M1 nhập lại đi thẳng từ chưa quyết · M2 huỷ không bắt buộc lý do · M3 bỏ phát lại theo khoá · M4 bỏ trần phần còn mở · M5 huỷ không qua cổng · M6 huỷ cũng lập phiếu kho · M7 đọc cả kiện chờ đếm (lần đầu LỌT — thêm `unsellable_qty` vào dòng chờ đếm của fixture, nay ĐỎ) · M8 nhận kiện thiếu cả kiện · M9 sự kiện khoá trùng theo món thay vì theo dòng · M10 tóm tắt chia hộ kiện cả kiện · M11 giá trị huỷ chưa biết thành số · M12 phá append-only · M13 báo cáo lợi nhuận đọc sổ kết cục · M14 nhận mẫu mã ngoài hàng kỳ vọng · M15 hàng đợi gồm món đã xong · M16 lập phiếu thứ hai trong lõi · M17 bỏ kiểm khoá tài khoản (bắt được qua FK NOT NULL — lỗi CSDL, không phải thông điệp) · M18 sự kiện không mang mẫu.
+
 ## Hợp đồng `getModelReturnDispositions`
 
 `pendingQty` · `reworkQty` · `writtenOffQty` · `returnedToSupplierQty` · `openSubjects` là `number | null`: `null` khi mẫu nằm trong một kiện KIỂM CẢ KIỆN có hàng không bán được (`basis.parcelLevelSubjects > 0`) — phần ấy không chia được theo mẫu, không chia hộ. `restockedAfterReworkQty` luôn chính xác (đọc dòng sổ mang phiếu của đúng mẫu mã). `writeOffValueEstimate` = ảnh chụp giá trị lúc huỷ; `null` nếu có dòng huỷ chưa biết giá (phần đã biết: `writeOffValueKnownPart`, số món chưa biết: `writeOffValueUnknownQty`). Mẫu không có gì ⇒ 0 thật. Giá trị là ƯỚC TÍNH, không vào báo cáo lợi nhuận nào (bài kiểm quét: chỉ 4 tệp của sổ được đọc `return_dispositions`).
