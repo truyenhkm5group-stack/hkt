@@ -15,24 +15,24 @@ import { CS_BOT_ASSIGNEES, type CsKind, type CsStatus } from "@/lib/constants/cs
  * muốn phát lại phải sang trang vận đơn, muốn duyệt hoàn cũng vậy. Và mọi con số "tồn đọng CSKH"
  * đều sai theo đúng 183 đơn vị.
  *
- * ─── LUẬT PHÂN MIỀN — CHỦ SHOP CHỐT 25/09/2026 ───
+ * ─── LUẬT PHÂN MIỀN — CHỦ SHOP CHỐT LẠI 25/09/2026 (tối) ───
  *
- *   **"Chưa giao cho ĐVVC thì thuộc CSKH, giao cho ĐVVC rồi thì thuộc Vận đơn."**
+ *   **"Bàn care chỉ nhận sự cố của Viettel Post và case sai địa chỉ / SĐT. Mọi case khách khác về
+ *   CSKH."**
  *
- * Một ranh giới DUY NHẤT, không phụ thuộc loại case: Viettel Post đã THẬT SỰ cầm hàng chưa. "Đã
- * cầm" = đơn của case có một vận đơn ở chặng thuộc `CARRIER_HANDOFF_STAGES` (đã lấy hàng trở đi,
- * kể cả đang hoàn / đã hoàn) hoặc có mốc lấy hàng — đúng định nghĩa bàn giao của AGENTS.md mục 41.
- * "Chờ lấy hàng", "lấy thất bại", "shop huỷ lấy" là CHƯA giao ⇒ vẫn là CSKH.
+ *  · `DELIVERY_FAILED` luôn là `LOGISTICS`: nó sinh ra TỪ một vận đơn đã ở tay ĐVVC.
+ *  · `WRONG_ADDRESS` / `WRONG_PHONE` đi theo KIỆN (`BY_SHIPMENT`): kiện ĐVVC đã cầm VÀ chưa chốt ⇒
+ *    `LOGISTICS` (việc là sửa người nhận trên Viettel Post trước khi bưu tá đi phát); chưa giao
+ *    hoặc đã chốt ⇒ `CUSTOMER`. "Đã cầm" = chặng thuộc `CARRIER_HANDOFF_STAGES` hoặc có mốc lấy
+ *    hàng (AGENTS.md mục 41); "chờ lấy hàng", "lấy thất bại", "shop huỷ lấy" là CHƯA giao.
+ *  · Mọi loại còn lại — khách muốn trả / không nhận, giục giao, khiếu nại, đổi size / mẫu, tư vấn,
+ *    sai giá, xác nhận SĐT, khác — LUÔN là `CUSTOMER`, kể cả khi kiện đang trên đường.
  *
- *  · Chưa giao (chưa có đơn, chưa có vận đơn, hoặc vận đơn còn chờ lấy) ⇒ `CUSTOMER`, dù case là
- *    sai địa chỉ, giục giao, đổi size hay khiếu nại.
- *  · Đã giao cho ĐVVC ⇒ `LOGISTICS`, dù kiện đang chạy hay đã chốt (phát xong / đã hoàn), và dù
- *    case là khiếu nại, đổi size, trả hàng sau khi nhận.
- *  · Riêng `DELIVERY_FAILED` luôn là `LOGISTICS`: nó sinh ra TỪ một vận đơn đã ở tay ĐVVC.
- *
- * Bản trước chia theo loại case (việc về kiện đi theo kiện, việc về sản phẩm ở lại CSKH). Chủ shop
- * chọn ranh giới theo thời điểm bàn giao vì nó không cần ai phân vân "case này là về kiện hay về
- * sản phẩm" — nhìn vận đơn là biết của ai.
+ * Vì sao đổi (bản sáng 25/09/2026 chia mọi case theo thời điểm bàn giao): chủ shop mở bàn care
+ * thấy các cột "Đang vận chuyển" / "Đang đi giao" đầy thẻ "Khách khiếu nại", "Khách đổi size",
+ * "Khách cần hỗ trợ", "Khách giục giao"… — kiện không có sự cố nào với ĐVVC, chỉ có một cuộc nói
+ * chuyện với khách. Việc đó là của CSKH; kéo nó sang bàn care là làm "Cần care" và số vỡ SLA phình
+ * lên bằng những việc bàn care không phải người làm.
  *
  * ─── KHÔNG XOÁ GÌ CẢ ───
  *
@@ -54,19 +54,20 @@ export type CsDomainRule = CsDomain | "BY_SHIPMENT";
 export const CS_KIND_DOMAIN: Record<CsKind, CsDomainRule> = {
   // Sinh thẳng từ `shipments.stage = 'DELIVERY_FAILED'` (lib/cs/failed-delivery.ts) — kiện đã ở tay ĐVVC.
   DELIVERY_FAILED: "LOGISTICS",
-  // Mọi loại còn lại: theo thời điểm bàn giao cho ĐVVC (xem đầu tệp).
+  // Sai người nhận: kiện đang trên đường thì sửa trên Viettel Post ⇒ theo kiện (xem đầu tệp).
   WRONG_ADDRESS: "BY_SHIPMENT",
   WRONG_PHONE: "BY_SHIPMENT",
-  URGE_DELIVERY: "BY_SHIPMENT",
-  RETURN: "BY_SHIPMENT",
-  ORDER_NOT_CREATED: "BY_SHIPMENT",
-  EXCHANGE_SIZE: "BY_SHIPMENT",
-  EXCHANGE_COLOR: "BY_SHIPMENT",
-  COMPLAINT: "BY_SHIPMENT",
-  SIZE_ADVICE: "BY_SHIPMENT",
-  WRONG_PRICE: "BY_SHIPMENT",
-  PHONE_VERIFY: "BY_SHIPMENT",
-  OTHER: "BY_SHIPMENT",
+  // Mọi case khách khác: CSKH, kể cả khi kiện đang trên đường (chủ shop chốt lại 25/09/2026).
+  URGE_DELIVERY: "CUSTOMER",
+  RETURN: "CUSTOMER",
+  ORDER_NOT_CREATED: "CUSTOMER",
+  EXCHANGE_SIZE: "CUSTOMER",
+  EXCHANGE_COLOR: "CUSTOMER",
+  COMPLAINT: "CUSTOMER",
+  SIZE_ADVICE: "CUSTOMER",
+  WRONG_PRICE: "CUSTOMER",
+  PHONE_VERIFY: "CUSTOMER",
+  OTHER: "CUSTOMER",
 };
 
 export const CS_DOMAIN_LABEL: Record<CsDomain, string> = {

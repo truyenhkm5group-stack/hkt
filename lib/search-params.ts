@@ -124,6 +124,22 @@ export function parseListParams(
  * mở một khối là bị đưa về tháng hiện tại, và con số trong khối ấy nói về một kỳ khác với phần còn
  * lại của trang.
  */
+/** `searchParams` của một trang App Router (Next 15 truyền dạng Promise). */
+export type PageSearchParams = Promise<SearchParams>;
+
+/**
+ * Chuỗi truy vấn dựng lại TỪ NGUYÊN VẸN tham số của trang (giữ mọi khoá, kể cả khoá lặp) — dùng cho
+ * trang CHUYỂN HƯỚNG địa chỉ cũ sang địa chỉ mới mà không đánh rơi bộ lọc người dùng đã chọn.
+ */
+export function searchParamsQuery(raw: SearchParams): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === "string") q.append(k, v);
+    else if (Array.isArray(v)) for (const x of v) q.append(k, x);
+  }
+  return q.size ? `?${q.toString()}` : "";
+}
+
 export function hrefWith(raw: SearchParams, key: string, value: string): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(raw)) {

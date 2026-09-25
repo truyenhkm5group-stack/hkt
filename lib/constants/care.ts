@@ -153,8 +153,9 @@ export const CARE_BUCKETS: BucketKey[] = ["NO_CONTACT", "DELIVERY_FAILED", "AWAI
  * vào rổ "Cần care" — một dòng nói hai điều trái nhau.
  */
 /**
- * Lý do đến TỪ CASE CSKH đã chuyển sang bàn này vì đơn ĐÃ GIAO CHO ĐVVC
- * (`lib/constants/cs-domain.ts`, chủ shop chốt 25/09/2026: "giao cho ĐVVC rồi thì thuộc Vận đơn").
+ * Lý do đến TỪ CASE CSKH đã chuyển sang bàn này (`lib/constants/cs-domain.ts`). Từ 25/09/2026
+ * (tối) chỉ sai địa chỉ / SĐT của kiện đang trên đường còn chuyển sang (`WRONG_INFO`); các lý do
+ * còn lại giữ để đọc dòng lịch sử và để bảng ánh xạ đủ mọi loại case.
  * Mỗi loại case đúng một lý do — `CS_KIND_CARE_REASON` là bảng ánh xạ duy nhất. `DELIVERY_FAILED`
  * không có ở đây: kiện giao hụt đã vào bàn care qua rổ của tháp giao vận.
  */

@@ -7,7 +7,7 @@ import { StatStrip } from "@/components/stat-tile";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { getDb } from "@/db";
 import { CREATIVE_VERDICT_LABEL, VARIANT_STATUS_LABEL, type CreativeVerdict } from "@/lib/constants/creative-loop";
-import { describeRule, metricValue } from "@/lib/creative/judge";
+import { costPerOrderOf, describeRule, metricValue } from "@/lib/creative/judge";
 import { formatDate, formatNumber, formatPercent, formatVND, vnShortStamp } from "@/lib/format";
 import { readAdsKillSwitch } from "@/lib/integrations/facebook/ads-write";
 import { LIVE_WINDOW_DAYS, listLiveVariants, type JudgedVariant } from "@/lib/queries/creative-loop";
@@ -149,7 +149,7 @@ export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boo
                         <Hai
                           top={formatNumber(m.bookedOrders)}
                           bottom={`${formatNumber(m.deliveredOrders)} / ${formatNumber(m.returnedOrders)}`}
-                          title="Đơn chốt (không huỷ) mang ad_id của mẩu · giao thành công / hoàn theo ORDER_OUTCOME"
+                          title={`Đơn chốt (không huỷ) quy về mẩu bằng ORDER_AD_ID: ${formatNumber(m.attribution.direct.booked)} mang ad_id · ${formatNumber(m.attribution.viaPost.booked)} qua bài viết (bài chỉ thuộc mẩu này). Giao thành công / hoàn theo ORDER_OUTCOME. Luật TẮT chỉ đếm đơn mang ad_id.`}
                         />
                       </td>
                       <td className="max-w-[260px] px-3 py-2">
@@ -158,6 +158,11 @@ export async function LiveTab({ canWrite, canKill, canRelease }: { canWrite: boo
                         </span>
                         <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground" title={v.reasons.join(" ")}>
                           {v.reasons.join(" ")}
+                        </p>
+                        {/* BẰNG CHỨNG cạnh phán quyết — không tô màu, không đổi ngưỡng (mục 38). */}
+                        <p className="mt-0.5 text-[11px] text-muted-foreground" title="Chi / đơn chốt và doanh thu lên đơn của các đơn quy về mẩu. Bằng chứng, không phải luật.">
+                          Chi/đơn <span className="tabular-nums text-foreground">{formatVND(costPerOrderOf(m))}</span> · DT lên đơn{" "}
+                          <span className="tabular-nums text-foreground">{formatVND(m.bookedRevenueVnd)}</span>
                         </p>
                         <KeepChecks v={v} />
                       </td>

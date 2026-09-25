@@ -40,6 +40,9 @@ const MIEN_KHUNG_XUONG: Record<string, string> = {
   // Biểu mẫu TẠO MỚI, không phải trang danh sách: dựng khung xương bảng ở đây là hứa hẹn sai thứ
   // sắp hiện ra. Nó lọt bộ dò vì có đọc tham số tìm kiếm để điền sẵn, không phải vì nặng.
   "app/(dashboard)/inventory/planning/orders/new": "biểu mẫu tạo lệnh sản xuất, không có bảng để dựng khung",
+  // Địa chỉ CŨ của báo cáo chờ hàng: chỉ đọc tham số để CHUYỂN HƯỚNG giữ nguyên bộ lọc sang
+  // /shipments/stock-wait (nơi có khung xương thật) — không render gì để dựng khung.
+  "app/(dashboard)/reports/stock-wait": "trang chuyển hướng sang /shipments/stock-wait, không render nội dung",
 };
 
 /**

@@ -190,7 +190,7 @@ const ROUTES = [
   "/marketing/fanpages?tab=assign",
   "/products/performance",
   "/reports/funnel",
-  "/reports/stock-wait",
+  "/shipments/stock-wait",
   "/reports/cashflow",
   /*
     Phòng Tech AI: năm màn hình nhưng chỉ `/tech` có trên thanh điều hướng, nên

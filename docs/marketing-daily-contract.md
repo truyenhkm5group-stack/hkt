@@ -144,8 +144,14 @@ ngã ngũ. Hai hệ quả, cả hai đều đã được xử lý:
    Ngoài biên ⇒ `—`, và lợi nhuận của ngày ấy cũng `—`.
 2. **Mẫu số 0** ⇒ `null`, không bao giờ `Infinity`/`NaN`.
 3. **Chi phí vận hành khi có bộ lọc** ⇒ `—` (mục 3).
-4. **Chiều không có số chi** (adset · mẩu QC · fanpage · nguồn đơn) ⇒ `—`; Facebook chỉ trả chi
-   tiêu ở cấp chiến dịch/ngày, và **không** chia đều tiền chiến dịch xuống.
+4. **Chiều không có số chi** (fanpage · nguồn đơn) ⇒ `—`; tiền quảng cáo ghi theo chiến dịch và mẩu,
+   **không** chia xuống hai chiều ấy.
+   **Nhóm QC · mẩu QC** (từ 25/09/2026, Company OS · B): CÓ số chi, nhưng CHỈ ở ngày đã ghi hạt MẨU
+   (`ad_spends.grain = 'AD'`, xem `lib/constants/ads-grain.ts`) — chi = phép CỘNG các dòng hạt mẩu. Ngày
+   mà chiến dịch của nhóm/mẩu còn ở hạt CHIẾN DỊCH ⇒ chi của ngày ấy `—` (tiền có thật nhưng chưa tách),
+   và tổng kỳ có ngày như vậy cũng `—`. ĐỘ PHỦ (`spendCoverage`: ngày + tiền đã biết ở hạt mẩu, ngày +
+   tiền cấp chiến dịch chưa tách) in NGAY trong thẻ Chi quảng cáo. Chiều chiến dịch / mã hàng / marketer
+   không đổi — mọi hạt vẫn cộng như trước. Mẩu mà sổ không biết thuộc chiến dịch nào ⇒ cả chiều `—`.
 5. **Chiều CÓ số chi nhưng nguồn chưa biết tới nhóm này** ⇒ `—`. Biên quan sát ở mục 1 trả lời
    "đồng bộ đã chạy tới ngày nào"; nó **không** trả lời được "nhóm này có được khai trong bảng chi
    tiêu không". Để nó trả lời thay là lỗi đã xảy ra trên Bóc tách theo MKTer: đơn được quy kết bằng
@@ -247,7 +253,7 @@ và lý do được in ra.
 
 - **Không** suy rộng doanh thu theo tỷ lệ độ phủ quy kết. Độ phủ 46% thì câu trả lời trung thực là
   "chưa kết luận được", không phải một con số nội suy.
-- **Không** chia đều tiền chiến dịch xuống adset/mẩu quảng cáo.
+- **Không** chia đều tiền chiến dịch xuống adset/mẩu quảng cáo — ngày còn ở hạt chiến dịch là `—`, không phải một phần chia.
 - **Không** chia chi phí cố định cho một chiến dịch.
 - **Không** đặt ngưỡng đạt/không đạt trong mã nguồn, kể cả trong màu của một ô.
 - **Không** để AI sinh ra một con số tài chính.

@@ -45,6 +45,7 @@ import { testVtpCapability } from "./vtp-capability.test";
 import { testCareWorkbench } from "./care-workbench.test";
 import { testCareClosedAssign } from "./care-closed-assign.test";
 import { testCareReturnLegQueue } from "./care-return-leg-queue.test";
+import { testCareDecisionParks } from "./care-decision-parks.test";
 import { testAiCopilot } from "./ai-copilot.test";
 import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
 import { testOrderOutcomeContract } from "./contract-order-outcome.test";
@@ -213,6 +214,7 @@ import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
 import { testSuppliersPure, testSuppliersQueries } from "./suppliers.test";
 import { testWorkshopLedgerPure, testWorkshopLedgerQueries } from "./workshop-ledger.test";
+import { testWorkshopSheetImportDb, testWorkshopSheetImportPure } from "./workshop-sheet-import.test";
 import { testMarketerPricePure, testMarketerPriceQueries } from "./marketer-price.test";
 import { testCompanyOsModelsPure, testCompanyOsModelsQueries } from "./company-os-models.test";
 import { testCrm } from "./crm.test";
@@ -233,6 +235,8 @@ import { testCreativeLoop } from "./creative-loop.test";
 import { testCreativeGenerate } from "./creative-generate.test";
 import { testCreativeDesignDb, testCreativeDesignPure } from "./creative-design.test";
 import { testCreativeEvaluate } from "./creative-evaluate.test";
+// ═══ Company OS · Agent B · creative ↔ quảng cáo theo mẫu ═══
+import { testCompanyOsCreativeAds } from "./company-os-creative-ads.test";
 import { testCreativeWrite, testCreativeWriteDb } from "./creative-write.test";
 import { testCreativeScaleDb, testCreativeScalePure } from "./creative-scale.test";
 import { testCreativeMoqDb, testCreativeMoqPure } from "./creative-moq.test";
@@ -1725,6 +1729,8 @@ async function main() {
   await testCreativeDesignDb(db);
   await testCreativeGenerate(db);
   await testCreativeEvaluate(db);
+  // Company OS · Agent B — đơn creative qua ORDER_AD_ID, chi nhóm/mẩu theo hạt mẩu, tóm tắt theo mẫu, lọc thư viện.
+  await testCompanyOsCreativeAds(db);
   testCreativeWrite();
   await testCreativeWriteDb(db);
   testCreativeScalePure();
@@ -1863,6 +1869,8 @@ async function main() {
   await testSuppliersQueries(db);
   testWorkshopLedgerPure();
   await testWorkshopLedgerQueries(db);
+  testWorkshopSheetImportPure();
+  await testWorkshopSheetImportDb(db);
   testMarketerPricePure();
   await testMarketerPriceQueries(db);
   testCompanyOsModelsPure();
@@ -1932,6 +1940,7 @@ async function main() {
   await testCareWorkbench(db);
   await testCareClosedAssign(db);
   await testCareReturnLegQueue(db);
+  await testCareDecisionParks(db);
   testCarrierManualPure();
   await testCarrierManualDb(db);
   await testAiCopilot(db);

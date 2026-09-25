@@ -2,7 +2,7 @@
   ops `stock-wait-summary` — CHỜ HÀNG & GTC TRÊN DỮ LIỆU THẬT, BẰNG SỐ TỔNG HỢP.
 
   Câu hỏi của chủ shop (25/09/2026): số ngày khách chờ hàng và vùng miền của khách ảnh hưởng tới tỷ
-  lệ giao thành công ra sao, và nên tối ưu vận hành thế nào. Trang `/reports/stock-wait` trả lời
+  lệ giao thành công ra sao, và nên tối ưu vận hành thế nào. Trang `/shipments/stock-wait` trả lời
   cho người đăng nhập; script này in CÙNG các con số (đọc qua ĐÚNG hàm của trang, không viết lại
   truy vấn) ra kênh `[ops:tom-tat] ` để đọc được trên log mà không cần giải mã.
 

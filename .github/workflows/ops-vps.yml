@@ -858,7 +858,7 @@ jobs:
                 ma_hoa_ket_qua chay_voi_arg docker exec erp-app npx tsx --tsconfig tsconfig.json scripts/confirm-funnel-audit.ts ;;
               stock-wait-summary)
                 # CHỈ ĐỌC (script tự đặt ERP_READ_ONLY=1 trước khi nạp @/db). Đọc qua ĐÚNG hàm của trang
-                # /reports/stock-wait: GTC theo số ngày chờ, miền, vùng, tỉnh, bảng chéo, đơn đang chờ
+                # /shipments/stock-wait: GTC theo số ngày chờ, miền, vùng, tỉnh, bảng chéo, đơn đang chờ
                 # theo nhóm, đề xuất. Mọi dòng là SỐ TỔNG HỢP qua kênh tóm tắt; vẫn MÃ HOÁ phần in thêm.
                 fetch_script stock-wait-summary.ts | docker exec -i erp-app sh -c 'cat > /app/scripts/stock-wait-summary.ts'
                 kiem_arg

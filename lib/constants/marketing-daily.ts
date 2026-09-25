@@ -55,9 +55,16 @@ export const MARKETING_BASIS_DEFAULT: MarketingBasis = "created";
 /**
  * ───────────── CHIỀU LỌC / BÓC TÁCH ─────────────
  *
- * `spendGrain` = chiều này có số CHI TIÊU riêng hay không. Facebook Insights được đồng bộ ở cấp
- * CHIẾN DỊCH/ngày (xem `lib/queries/ads-roas.ts`), nên nhóm theo adset/mẩu quảng cáo thì tiền chi
- * là CHƯA BIẾT — không được chia đều tiền chiến dịch cho các mẩu để bảng trông đầy đủ.
+ * `spendGrain` = chiều này CÓ THỂ có số CHI TIÊU riêng hay không.
+ *
+ * Nhóm QC / mẩu QC: CÓ từ 22/09/2026 — `ad_spends` ghi hạt MẨU × NGÀY cho những (tài khoản × ngày) mà
+ * tổng cấp mẩu khớp cấp chiến dịch (`lib/constants/ads-grain.ts`), cùng căn cứ với
+ * `ADS_DIMENSION_HAS_SPEND` của bảng quyết định `/ads`. Nhưng ngày cũ và ngày lệch vẫn ở hạt CHIẾN DỊCH,
+ * nên cờ này chỉ nói "CÓ THỂ": chi của những ngày ấy là CHƯA BIẾT (`—`) và ĐỘ PHỦ (bao nhiêu ngày / bao
+ * nhiêu tiền đã ở hạt mẩu) phải in ngay cạnh — `MarketingDaily.spendCoverage`. Tuyệt đối không chia
+ * đều tiền chiến dịch xuống các mẩu để bảng trông đầy đủ.
+ *
+ * Fanpage / nguồn đơn: KHÔNG — tiền quảng cáo không ghi theo hai chiều ấy.
  */
 export const MARKETING_DIMENSIONS = ["marketer", "product", "page", "campaign", "adset", "ad", "source"] as const;
 export type MarketingDimension = (typeof MARKETING_DIMENSIONS)[number];
@@ -77,14 +84,21 @@ export const MARKETING_DIMENSION_SPEND: Record<MarketingDimension, boolean> = {
   product: true,
   campaign: true,
   page: false,
-  adset: false,
-  ad: false,
+  adset: true,
+  ad: true,
   source: false,
 };
 
 /** Vì sao một chiều không có số chi — hiện ngay cạnh cột trống, không để người đọc tự đoán. */
 export const MARKETING_DIMENSION_NO_SPEND_HINT =
-  "Facebook chỉ trả số chi ở cấp CHIẾN DỊCH theo ngày. Ở chiều này không tồn tại con số chi tiêu, nên ROAS / CPA / giá tin nhắn là CHƯA BIẾT — cố ý không chia đều tiền chiến dịch xuống.";
+  "Tiền quảng cáo ghi theo CHIẾN DỊCH và MẨU quảng cáo, không theo fanpage hay nguồn đơn. Ở chiều này không tồn tại con số chi tiêu, nên ROAS / CPA / giá tin nhắn là CHƯA BIẾT — cố ý không chia tiền xuống.";
+
+/**
+ * Chiều nhóm QC / mẩu QC: CÓ số chi, nhưng CHỈ ở những ngày đã ghi hạt mẩu. Câu này đứng cạnh bảng bóc
+ * tách để một ô `—` ở cấp mẩu không bị đọc thành "mẩu này không tiêu".
+ */
+export const MARKETING_AD_GRAIN_SPEND_HINT =
+  "Chi của nhóm / mẩu quảng cáo là PHÉP CỘNG các dòng hạt mẩu × ngày. Ngày mà chiến dịch còn ở hạt CHIẾN DỊCH (ngày cũ ngoài cửa sổ đồng bộ, hoặc ngày tổng cấp mẩu lệch cấp chiến dịch quá 1.000 ₫) thì chi của mẩu là CHƯA BIẾT (—) — không chia đều tiền chiến dịch xuống, và tổng kỳ có ngày như vậy cũng để trống.";
 
 /** Khoá nhóm cho dòng KHÔNG quy kết được về chiều đang xem. Luôn hiện, không bao giờ bị lọc mất. */
 export const MARKETING_UNATTRIBUTED = "__unattributed__" as const;
