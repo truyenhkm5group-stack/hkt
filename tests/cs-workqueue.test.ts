@@ -572,6 +572,15 @@ export async function testCsWorkqueue(db: Db) {
   assert.equal(qTN.cases.filter((c) => c.shipmentId === "csq-s1").length, 1, "…và KHÔNG sinh dòng thứ hai cho cùng kiện");
   assert.ok(!qTN.cases.some((c) => c.orderId === "csq-o31" || (c.shipmentId === "csq-s33" && c.reason === "WRONG_INFO")), "đơn chưa giao cho ĐVVC không vào bàn care qua case CSKH");
 
+  // Case "không nhận" mở TRƯỚC khi ĐVVC giao xong, có người đang cầm ⇒ máy không đóng hộ, nhưng
+  // dòng care phải nói "hết việc? xem lại" thay vì chỉ hiện vỡ SLA (chủ shop hỏi 25/09/2026).
+  await db.insert(schema.orders).values({ id: "csq-o40", stage: "DELIVERED", status: 3, insertedAt: gio(100), billFullName: "Khách Bốn Mươi", billPhone: "0911000040", totalPriceAfterDiscount: 300_000 }).onConflictDoNothing();
+  await db.insert(schema.shipments).values({ id: "csq-s40", orderId: "csq-o40", carrier: "Viettel Post", vtpOrderNumber: "CSQ040", stage: "DELIVERED", isFinal: true, deliveredAt: gio(10), codAmount: 300_000 }).onConflictDoNothing();
+  await db.insert(schema.csCases).values({ id: "csq-c40", kind: "RETURN", orderId: "csq-o40", source: "PANCAKE_CHAT", status: "IN_PROGRESS", title: "Khách báo không nhận", customerPhone: "0911000040", assignee: "Linh CSKH", assigneeUserId: "csq-user", dedupeKey: "test:csq-c40", createdAt: gio(20) }).onConflictDoNothing();
+  clearMemo();
+  const s40 = (await getCareQueue()).cases.find((c) => c.shipmentId === "csq-s40");
+  assert.ok(s40?.reasonDetail.includes("Hết việc?"), "dòng care của case đã hết việc mà có người cầm phải nói ra để người đó đóng");
+
   console.log(
     `✓ Hàng đợi CSKH: ${sau.open} việc CSKH · ${sau.logistics} case giao vận đã trả về Vận đơn & care (giao hụt · không liên lạc · sai địa chỉ khi kiện đang chạy) · sai SĐT chưa có vận đơn vẫn ở CSKH · một gốc một việc · case đã đóng không quay lại · bot ≠ người nhận · hành động nhanh có lịch sử (trạng thái · người · ghi chú · hẹn lại) · sao chép SĐT/mã vận đơn chép đúng giá trị, nhiều lần gửi thì liệt kê chứ không chọn hộ · hàng đợi V2: tự nhận / trưởng nhóm giao / chuyển / bỏ gán đều đi bằng KHOÁ tài khoản (khoá lạ bị từ chối, không ghi bừa) · ghi chú gần nhất có người + mốc + số lượng và KHÔNG đè bằng chứng · cột Phát sinh bám created_at · sắp xếp hai chiều chạy ở máy chủ và không mất khi sang trang`,
   );

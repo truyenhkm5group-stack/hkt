@@ -77,6 +77,7 @@ type Row = {
   order_ship_active: number;
   order_ship_handed_off: number;
   order_ship_settled: number;
+  order_settled_at: string | null;
 };
 
 /** Chặng cuối đời của một đơn — dùng chung định nghĩa với `lib/cs/chat-detect.ts`. */
@@ -138,7 +139,8 @@ async function loadOpenCases(ids?: readonly string[]): Promise<Row[]> {
              )) as newer_failure,
              osh.dang_chay     as order_ship_active,
              osh.da_ban_giao   as order_ship_handed_off,
-             osh.da_chot       as order_ship_settled
+             osh.da_chot       as order_ship_settled,
+             osh.moc_chot      as order_settled_at
         from cs_cases c
         left join orders o on o.id = c.order_id
         -- Đơn của HỘI THOẠI: case chưa gắn đơn vẫn có thể đã có đơn lên bằng đường khác.
@@ -161,7 +163,8 @@ async function loadOpenCases(ids?: readonly string[]): Promise<Row[]> {
         left join lateral (
           select count(*) filter (where s.is_final = false)::int as dang_chay,
                  count(*) filter (where s.stage::text in ${[...CARRIER_HANDOFF_STAGES]} or s.picked_up_at is not null)::int as da_ban_giao,
-                 count(*) filter (where s.is_final and s.stage::text in ('DELIVERED','RETURNED'))::int as da_chot
+                 count(*) filter (where s.is_final and s.stage::text in ('DELIVERED','RETURNED'))::int as da_chot,
+                 max(coalesce(s.delivered_at, s.returned_at, s.vtp_status_date)) filter (where s.is_final and s.stage::text in ('DELIVERED','RETURNED')) as moc_chot
             from shipments s
            where s.order_id = coalesce(c.order_id, oc.id)
         ) osh on true
@@ -199,6 +202,8 @@ function livenessOf(r: Row): LivenessFacts {
     orderShipmentsActive: Number(r.order_ship_active ?? 0),
     orderShipmentsHandedOff: Number(r.order_ship_handed_off ?? 0),
     orderShipmentsSettled: Number(r.order_ship_settled ?? 0),
+    orderSettledAt: r.order_settled_at ? new Date(r.order_settled_at) : null,
+    caseCreatedAt: new Date(r.created_at),
   };
 }
 
