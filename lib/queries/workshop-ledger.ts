@@ -585,10 +585,11 @@ export async function openBatchLinkOptions(limit = 300): Promise<BatchLinkOption
 }
 
 /** Trạng thái + lệnh nối của MỘT lô — để kiểm phiếu nhập gắn vào lô có thật, chưa huỷ. `null` = không có lô đó. */
-export async function batchLinkFacts(id: string): Promise<{ status: string; productionOrderId: string | null } | null> {
+export async function batchLinkFacts(id: string): Promise<{ status: string; productionOrderId: string | null; productId: string | null } | null> {
   const db = await getDb();
   const pb = schema.productionBatches;
-  const [row] = await db.select({ status: pb.status, productionOrderId: pb.productionOrderId }).from(pb).where(eq(pb.id, id));
+  // `productId`: Agent K — phiếu nhập nối lô cần biết lô là hàng của sản phẩm (⇒ mẫu) nào để phát sự kiện.
+  const [row] = await db.select({ status: pb.status, productionOrderId: pb.productionOrderId, productId: pb.productId }).from(pb).where(eq(pb.id, id));
   return row ?? null;
 }
 

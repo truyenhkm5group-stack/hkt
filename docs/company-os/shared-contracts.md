@@ -106,7 +106,7 @@ NGHIỆP VỤ) · `recorded_at` default now(). Chỉ mục: `(model_id, occurred
 | `costing.version_created` · `costing.finalized` | C | LIVE |
 | `sample.created` · `sample.submitted` · `sample.reviewed` · `sample.approved` · `design_version.approved` | C | LIVE |
 | `production_order.linked_design` · `production_plan.overridden` | C | LIVE |
-| `stock_receipt.linked_production` | D | RESERVED (D chỉ thêm cột ở Wave 1) |
+| `stock_receipt.linked_production` | D | LIVE từ Agent K (`lib/inventory/receipt-create.ts`) — phiếu tạo với `production_order_id` / `production_batch_id`, cùng giao dịch với phiếu; `model_id` = mẫu của sản phẩm trong lệnh (ưu tiên) hoặc lô, NULL khi sản phẩm chưa vào sổ mẫu; khoá chống trùng `stock_receipt.linked_production:<id phiếu>` |
 | `return.disposition_set` | E | LIVE |
 | `approval.executed` | G | LIVE từ Agent K (`lib/approvals/service.ts`) — phát CÙNG giao dịch với lượt ghi trạng thái yêu cầu: lật `EXECUTED` khi cổng đứng trong giao dịch nghiệp vụ, hoặc lượt khẳng định sau khi action xong (`withApprovalExecution`); khoá chống trùng `approval.executed:<id yêu cầu>`; `model_id` NULL |
 | `recommendation.decided` | H | LIVE |

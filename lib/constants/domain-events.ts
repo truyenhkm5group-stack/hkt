@@ -116,7 +116,15 @@ export const DOMAIN_EVENTS = [
   { name: "production_plan.overridden", subjectType: "production_order", owner: "C", status: "LIVE", emitter: C_ORDER_EMITTER, why: "Người chốt số khác gợi ý của máy, kèm lý do." },
 
   // ─── Agent D / E / G / H ───
-  { name: "stock_receipt.linked_production", subjectType: "stock_receipt", owner: "D", status: "RESERVED", emitter: null, why: "Phiếu nhập kho được nối với lệnh / lô sản xuất (D chỉ thêm cột ở Wave 1)." },
+  // Agent K: LIVE. Phát CÙNG giao dịch với phiếu (lib/inventory/receipt-create.ts); khoá chống trùng = id phiếu; mẫu = mẫu của sản phẩm trong lệnh / lô (NULL khi chưa vào sổ mẫu).
+  {
+    name: "stock_receipt.linked_production",
+    subjectType: "stock_receipt",
+    owner: "D",
+    status: "LIVE",
+    emitter: "lib/inventory/receipt-create.ts",
+    why: "Phiếu nhập kho được nối với lệnh / lô sản xuất — hàng của lần đặt xưởng nào đã về kho.",
+  },
   // Agent E (0137): LIVE. Một sự kiện cho MỖI dòng sổ `return_dispositions` (khoá chống trùng theo id dòng), phát trong CÙNG giao dịch với dòng sổ và phiếu tái nhập (nếu có).
   { name: "return.disposition_set", subjectType: "return_inspection", owner: "E", status: "LIVE", emitter: "lib/returns/disposition.ts", why: "Kết cục của hàng hoàn không tái nhập: sửa / giặt lại, nhập lại sau sửa, huỷ bỏ, trả xưởng." },
   // Agent K: LIVE. Phát CÙNG giao dịch với lượt ghi trạng thái của yêu cầu (lật EXECUTED, hoặc lượt khẳng định sau khi thao tác xong); khoá chống trùng = id yêu cầu.
@@ -151,6 +159,7 @@ export const DOMAIN_EVENT_LABEL: Partial<Record<DomainEventName, string>> = {
   "return.disposition_set": "Kết cục hàng hoàn không tái nhập",
   "recommendation.decided": "Phản ứng với đề xuất trên buồng lái",
   "approval.executed": "Việc đã duyệt được thực hiện",
+  "stock_receipt.linked_production": "Phiếu nhập nối lệnh / lô sản xuất",
 };
 
 export function domainEventLabel(name: string): string {

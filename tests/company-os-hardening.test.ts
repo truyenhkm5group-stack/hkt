@@ -17,6 +17,7 @@ import { APPROVAL_ENFORCE_KEY } from "@/lib/constants/approval";
 import { DOMAIN_EVENT_BY_NAME } from "@/lib/constants/domain-events";
 import { REQUIRE_APPROVED_DESIGN_KEY } from "@/lib/constants/production-os";
 import { writeStockReceiptCore } from "@/lib/inventory/receipt-create";
+import { domainEventDimension, getModelTimeline } from "@/lib/queries/models";
 import { transitionModelCore } from "@/lib/models/service";
 import { requireApprovedDesignFlag } from "@/lib/queries/production-os";
 import { getSettingJson, mergeSettingJson, setSettingJson } from "@/lib/settings";
@@ -31,6 +32,7 @@ import { createTopicCore } from "@/lib/production/topics";
  *  1. Vòng đời mẫu đi theo TRONG giao dịch nghiệp vụ (yêu cầu của C, handoff-c mục 5).
  *  2. `getSettingJson` đọc được giá trị nguyên thuỷ mà không đổi một khoá object nào (C báo).
  *  3. Lời duyệt không mất khi thao tác được duyệt hỏng; `approval.executed` LIVE (G, handoff-g mục 4).
+ *  4. `stock_receipt.linked_production` LIVE (RESERVED từ D).
  *
  * Dữ liệu mang tiền tố `cos-k-` / mã `COSK`; không mốc tuyệt đối, không cửa sổ "N giờ trước" (luật 50, 65).
  */
@@ -520,4 +522,72 @@ export async function testHardeningApprovalExecution(db: Db) {
   }
 
   console.log("✓ Company OS · K3: lời duyệt không mất khi thao tác hỏng — giữ chỗ rồi thanh toán theo kết quả (xong ⇒ approval.executed; { error } / ném ⇒ APPROVED + execution_error) · phiếu kho tiêu thụ TRONG giao dịch · đồng thời một lượt thắng · lượt đã xong không hồi sinh · mọi action gọi cổng đều thanh toán");
+}
+
+// ─────────────────────────── 4. PHIẾU NHẬP NỐI SẢN XUẤT ⇒ SỰ KIỆN ───────────────────────────
+
+export async function testHardeningReceiptLinkedEvent(db: Db) {
+  const U = `${P}kho4`;
+  await db.insert(schema.users).values({ id: U, email: "cos-k-kho4@test.local", name: "Kho K4", passwordHash: "x", role: "LEADER" }).onConflictDoNothing();
+  const nguoi = { id: U, label: "Kho K4" };
+  await db.insert(schema.products).values([
+    { id: `${P}p4`, name: "Đầm COSK4", customId: "COSK4" },
+    { id: `${P}p5`, name: "Áo COSK5 (chưa vào sổ mẫu)", customId: "COSK5" },
+  ]);
+  await db.insert(schema.productVariants).values([
+    { id: `${P}v4`, productId: `${P}p4`, sku: "COSK4-M", color: "Đen", size: "M" },
+    { id: `${P}v5`, productId: `${P}p5`, sku: "COSK5-M", color: "Trắng", size: "M" },
+  ]);
+  const [m4] = await db.insert(schema.productModels).values({ id: `${P}m4`, code: "COSK4", name: "Đầm COSK4", productId: `${P}p4`, lifecycleState: "IN_PRODUCTION", registeredBy: "USER" }).returning();
+  await db.insert(schema.productionOrders).values({ id: `${P}po4`, code: `${P}PO-4`, productId: `${P}p4`, productName: "Đầm COSK4", colors: ["Đen"], sizes: ["M"], cells: { "Đen|M": 30 }, totalQty: 30, status: "SENT" });
+  await db.insert(schema.productionBatches).values({ id: `${P}lo5`, productId: `${P}p5`, productCode: "COSK5", batchNo: 1, orderedAt: new Date(), orderedQty: 10 });
+
+  const phieu = (o: { po?: string | null; lo?: string | null; variantId: string; ref: string }) => ({
+    kind: "RECEIPT" as const,
+    receipt: { receivedAt: new Date(), reference: o.ref, supplier: "", supplierId: null, productionOrderId: o.po ?? null, productionBatchId: o.lo ?? null, note: "", totalQuantity: 30, totalCost: 0, createdBy: "Kho K4" },
+    lines: [{ variantId: o.variantId, quantity: 30, unitCost: 0, shipmentId: null }],
+    note: "",
+    actor: nguoi,
+    approver: { id: U, email: "cos-k-kho4@test.local" },
+    gate: null,
+  });
+  const suKien = async (receiptId: string) =>
+    db.select().from(schema.domainEvents).where(and(eq(schema.domainEvents.name, "stock_receipt.linked_production"), eq(schema.domainEvents.subjectId, receiptId)));
+
+  // ── (a) Phiếu nối lệnh SX ⇒ đúng một sự kiện, mẫu = mẫu của sản phẩm trong lệnh ──
+  const a = await writeStockReceiptCore(db, phieu({ po: `${P}po4`, variantId: `${P}v4`, ref: `${P}nhap-po` }));
+  assert.ok("ok" in a);
+  if (!("ok" in a)) return;
+  const [ea, ...thua] = await suKien(a.receiptId);
+  assert.ok(ea, "phiếu nối lệnh SX phải phát stock_receipt.linked_production");
+  assert.equal(thua.length, 0, "một phiếu, một sự kiện");
+  assert.deepEqual([ea.subjectType, ea.modelId, ea.actorKind, ea.actorId, ea.dedupeKey], ["stock_receipt", m4.id, "USER", U, `stock_receipt.linked_production:${a.receiptId}`]);
+  assert.deepEqual((ea.payload as { productionOrderId?: string; productId?: string }).productionOrderId, `${P}po4`);
+  assert.equal((ea.payload as { productId?: string }).productId, `${P}p4`);
+  assert.equal(DOMAIN_EVENT_BY_NAME["stock_receipt.linked_production"].status, "LIVE");
+  assert.equal(domainEventDimension("stock_receipt.linked_production"), "INVENTORY", "đứng ở chiều Kho trên dòng thời gian mẫu");
+  const dong = await getModelTimeline(m4.id);
+  assert.ok(dong.some((e) => e.basis === "RECORDED" && e.dimension === "INVENTORY" && e.title === "Phiếu nhập nối lệnh / lô sản xuất"), "trang 360 của mẫu thấy mốc phiếu nhập nối lệnh");
+
+  // ── (b) Phiếu chỉ nối lô xưởng, sản phẩm của lô chưa vào sổ mẫu ⇒ sự kiện với model_id NULL (không đoán) ──
+  const b = await writeStockReceiptCore(db, phieu({ lo: `${P}lo5`, variantId: `${P}v5`, ref: `${P}nhap-lo` }));
+  assert.ok("ok" in b);
+  if (!("ok" in b)) return;
+  const [eb] = await suKien(b.receiptId);
+  assert.ok(eb, "nối lô cũng phát");
+  assert.deepEqual([eb.modelId, (eb.payload as { productionBatchId?: string }).productionBatchId, (eb.payload as { productId?: string }).productId], [null, `${P}lo5`, `${P}p5`]);
+
+  // ── (c) Phiếu không nối ⇒ không sự kiện ──
+  const c = await writeStockReceiptCore(db, phieu({ variantId: `${P}v4`, ref: `${P}nhap-tu-do` }));
+  assert.ok("ok" in c && (await suKien(c.receiptId)).length === 0, "phiếu không nối sản xuất không phát gì");
+
+  // ── (d) Phiếu hỏng giữa giao dịch ⇒ không sự kiện mồ côi ──
+  await assert.rejects(() => writeStockReceiptCore(db, phieu({ po: `${P}po4`, variantId: `${P}v-khong-co`, ref: `${P}nhap-hong` })));
+  const [{ n: moCoi }] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(schema.domainEvents)
+    .where(and(eq(schema.domainEvents.name, "stock_receipt.linked_production"), eq(schema.domainEvents.modelId, m4.id)));
+  assert.equal(Number(moCoi), 1, "phiếu đổ ⇒ sự kiện đổ theo");
+
+  console.log("✓ Company OS · K4: phiếu nhập nối lệnh SX / lô xưởng ⇒ stock_receipt.linked_production LIVE, cùng giao dịch với phiếu · mẫu theo sản phẩm của lệnh / lô (chưa vào sổ ⇒ NULL, không đoán) · chiều Kho trên trang 360 · phiếu không nối / phiếu đổ không phát");
 }

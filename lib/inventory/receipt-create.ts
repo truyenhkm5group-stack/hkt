@@ -1,5 +1,7 @@
 import { eq } from "drizzle-orm";
 import { schema, type Db } from "@/db";
+import { emitDomainEvent } from "@/lib/events/emit";
+import { batchLinkFacts } from "@/lib/queries/workshop-ledger";
 import type { AuditParams } from "@/lib/audit";
 import { flushApprovalAudits, guardInTransaction } from "@/lib/approvals/execution";
 import { recordApprovalExecutionError, type ApprovalUser, type GuardInput, type GuardResult } from "@/lib/approvals/service";
@@ -18,7 +20,31 @@ import type { StockReceiptKind } from "@/lib/validation/stock";
  * tiêu thụ và `approval.executed` được phát cùng lượt với phiếu — phiếu hỏng ⇒ lượt tiêu thụ huỷ theo,
  * lời duyệt còn `APPROVED`, câu lỗi vào `execution_error`. Trước bản này lời duyệt lật `EXECUTED` ở
  * cổng rồi phiếu mới ghi — phiếu hỏng là mất lời duyệt (handoff-g mục 4).
+ *
+ * Phiếu nối lệnh SX / lô xưởng ⇒ phát `stock_receipt.linked_production` trong CÙNG giao dịch (sổ sự kiện,
+ * RESERVED từ Agent D → LIVE ở Agent K): mẫu của sự kiện = mẫu của SẢN PHẨM trong lệnh (ưu tiên) / lô;
+ * sản phẩm chưa vào sổ mẫu ⇒ `model_id = NULL` (không đoán mẫu theo mã chữ — luật 35).
  */
+
+/**
+ * Mẫu (sổ Agent A) của hàng mà phiếu nhận: sản phẩm của lệnh SX, không có thì của lô xưởng. Đọc TRƯỚC giao
+ * dịch — bảng lô chỉ đọc qua hàm của sổ đặt xưởng (`batchLinkFacts`, kết nối riêng: gọi giữa giao dịch
+ * trên PGlite là khoá chết).
+ */
+export async function resolveReceiptLinkModel(
+  db: Db,
+  link: { productionOrderId: string | null; productionBatchId: string | null },
+): Promise<{ productId: string | null; modelId: string | null }> {
+  let productId: string | null = null;
+  if (link.productionOrderId) {
+    const [po] = await db.select({ productId: schema.productionOrders.productId }).from(schema.productionOrders).where(eq(schema.productionOrders.id, link.productionOrderId));
+    productId = po?.productId ?? null;
+  }
+  if (!productId && link.productionBatchId) productId = (await batchLinkFacts(link.productionBatchId))?.productId ?? null;
+  if (!productId) return { productId: null, modelId: null };
+  const [m] = await db.select({ id: schema.productModels.id }).from(schema.productModels).where(eq(schema.productModels.productId, productId));
+  return { productId, modelId: m?.id ?? null };
+}
 
 /** Lỗi nghiệp vụ khi đóng kiện hoàn — ném ra để huỷ giao dịch rồi trả `{ error }`, không phải lỗi hệ thống. */
 class SettleError extends Error {}
@@ -45,6 +71,9 @@ export type WriteReceiptResult =
 export async function writeStockReceiptCore(db: Db, input: WriteReceiptInput): Promise<WriteReceiptResult> {
   // Kết quả cổng đọc được cả ở nhánh lỗi (khối `catch`) — giữ trong một hộp, không trong biến `let`.
   const giu: { cong: GuardResult | null; nhatKy: AuditParams[] } = { cong: null, nhatKy: [] };
+  const noi = { productionOrderId: input.receipt.productionOrderId ?? null, productionBatchId: input.receipt.productionBatchId ?? null };
+  const coNoi = !!(noi.productionOrderId || noi.productionBatchId);
+  const mauCuaNoi = coNoi ? await resolveReceiptLinkModel(db, noi) : null;
   try {
     const out = await db.transaction(async (tx): Promise<{ blocked: string } | { receiptId: string; settledShipmentIds: string[] }> => {
       if (input.gate) {
@@ -61,6 +90,26 @@ export async function writeStockReceiptCore(db: Db, input: WriteReceiptInput): P
         .values({ ...input.receipt, kind: input.kind })
         .returning({ id: schema.stockReceipts.id });
       await tx.insert(schema.stockReceiptItems).values(input.lines.map((l) => ({ receiptId: receipt.id, ...l })));
+      if (coNoi) {
+        await emitDomainEvent(tx, {
+          name: "stock_receipt.linked_production",
+          subjectType: "stock_receipt",
+          subjectId: receipt.id,
+          modelId: mauCuaNoi?.modelId ?? null,
+          payload: {
+            kind: input.kind,
+            productionOrderId: noi.productionOrderId,
+            productionBatchId: noi.productionBatchId,
+            productId: mauCuaNoi?.productId ?? null,
+            reference: input.receipt.reference ?? "",
+            totalQuantity: input.receipt.totalQuantity ?? null,
+          },
+          actorKind: input.actor.id ? "USER" : "SYSTEM",
+          actorId: input.actor.id,
+          source: "ui:/inventory/receipts",
+          dedupeKey: `stock_receipt.linked_production:${receipt.id}`,
+        });
+      }
       let settledShipmentIds: string[] = [];
       if (input.kind === "RETURN") {
         /*
