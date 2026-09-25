@@ -10,9 +10,20 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
-import { promoteManualGenImageAction, recaptionManualGenImage, reviewManualGenImageAction, startManualGenRun } from "@/lib/actions/creative-manual-gen";
-import { MANUAL_GEN, MANUAL_GEN_IMAGE_STATUS_LABEL, type ManualGenImageStatus } from "@/lib/constants/creative-loop";
-import type { ManualGenImageCard, PixelSourceOption } from "@/lib/queries/creative-manual-gen";
+import { promoteManualGenImageAction, recaptionManualGenImage, reviewManualGenImageAction, startManualDesignRun, startManualGenRun } from "@/lib/actions/creative-manual-gen";
+import {
+  DESIGN_DNA_KEYS,
+  DESIGN_DNA_VALUE_LABEL,
+  MANUAL_DESIGN,
+  MANUAL_GEN,
+  MANUAL_GEN_IMAGE_STATUS_LABEL,
+  MANUAL_GEN_KINDS,
+  MANUAL_GEN_KIND_LABEL,
+  type ManualGenImageStatus,
+  type ManualGenKind,
+} from "@/lib/constants/creative-loop";
+import { formatVND } from "@/lib/format";
+import type { DesignInspirationOption, ManualGenImageCard, PixelSourceOption } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
 import { VARIANT_COPY_LIMITS, manualGenPromoteSchema } from "@/lib/validation/creative";
 
@@ -39,7 +50,162 @@ export function ManualGenAutoRefresh({ active }: { active: boolean }) {
   ) : null;
 }
 
+/**
+ * Khối "Gen ảnh bằng tay": hai kiểu, mặc định THIẾT KẾ MỚI (chủ shop 25/09/2026 — "mẫu mới hoàn toàn từ các
+ * mẫu đã win / chỉ số tốt, không phải mockup mẫu cũ"). Kiểu "ảnh mới cho mẫu đang có" còn cho đề xuất đẩy tồn
+ * (`?product=` mở thẳng kiểu ấy — xả hàng đang có cần ảnh của chính mẫu ấy).
+ */
 export function ManualGenForm({
+  initialKind,
+  inspirations,
+  ...mockup
+}: {
+  initialKind: ManualGenKind;
+  inspirations: DesignInspirationOption[];
+  sources: PixelSourceOption[];
+  allowedNow: number;
+  capReason: string | null;
+  disabledReason: string | null;
+  initialPhotoId?: string;
+}) {
+  const [kind, setKind] = useState<ManualGenKind>(initialKind);
+  return (
+    <div className="space-y-2.5">
+      <div className="inline-flex rounded-md border p-0.5" role="tablist" aria-label="Kiểu gen">
+        {MANUAL_GEN_KINDS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={kind === k}
+            onClick={() => setKind(k)}
+            className={cn("rounded px-2.5 py-1 text-[12px] font-medium", kind === k ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}
+          >
+            {MANUAL_GEN_KIND_LABEL[k]}
+          </button>
+        ))}
+      </div>
+      {kind === "DESIGN" ? <DesignGenForm inspirations={inspirations} allowedNow={mockup.allowedNow} capReason={mockup.capReason} disabledReason={mockup.disabledReason} /> : <MockupGenForm {...mockup} />}
+    </div>
+  );
+}
+
+/** Chi mỗi tin nhắn để HIỂN THỊ — chưa có chi / tin nhắn ⇒ CHƯA BIẾT (`—`), không phải 0 (mục 42). */
+function costPerMessage(o: DesignInspirationOption): string {
+  return o.spendVnd !== null && o.messages !== null && o.messages > 0 ? `${formatVND(Math.round(o.spendVnd / o.messages))}/tin` : "chi/tin —";
+}
+
+function describeDna(dna: Record<string, string>): string {
+  return DESIGN_DNA_KEYS.filter((k) => dna[k] && !(dna[k] === "NONE" && (k === "neckline" || k === "sleeve")))
+    .map((k) => (DESIGN_DNA_VALUE_LABEL[k] as Record<string, string>)[dna[k]] ?? dna[k])
+    .join(" · ");
+}
+
+function DesignGenForm({ inspirations, allowedNow, capReason, disabledReason }: { inspirations: DesignInspirationOption[]; allowedNow: number; capReason: string | null; disabledReason: string | null }) {
+  // Tích sẵn các mẫu điểm cao nhất CÓ ảnh sản phẩm thật — chỉ là giá trị khởi đầu, không kích lượt vẽ nào.
+  const [picked, setPicked] = useState<string[]>(() =>
+    inspirations
+      .filter((o) => o.imageId)
+      .slice(0, MANUAL_DESIGN.preselect)
+      .map((o) => o.productId),
+  );
+  const [idea, setIdea] = useState("");
+  const [pending, start] = useTransition();
+  const toggle = (id: string) => setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.length >= MANUAL_DESIGN.maxInspirations ? cur : [...cur, id]));
+  const coAnh = inspirations.some((o) => picked.includes(o.productId) && o.imageId);
+
+  const gen = () =>
+    start(async () => {
+      const r = await startManualDesignRun({ inspirationProductIds: picked, idea });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(r.note ? `Đang vẽ ${r.allowed} thiết kế mới. ${r.note}` : `Đang vẽ ${r.allowed} thiết kế mới — ảnh hiện dần ở "Kết quả gen tay".`);
+      setIdea("");
+    });
+
+  const khoa =
+    disabledReason ??
+    (inspirations.length === 0
+      ? "Chưa có mẫu nào đủ điều kiện làm cảm hứng."
+      : picked.length === 0
+        ? "Chọn ít nhất một mẫu cảm hứng."
+        : !coAnh
+          ? "Cần ít nhất một mẫu có ảnh sản phẩm thật — máy vẽ chỉ nhận ảnh thật của shop làm tham chiếu."
+          : allowedNow === 0
+            ? (capReason ?? "Hết trần ảnh hôm nay.")
+            : null);
+
+  return (
+    <div className="grid gap-2.5 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div className="space-y-1.5">
+        <div className="flex items-baseline justify-between gap-2">
+          <Label>Mẫu cảm hứng — đã bán tốt / chỉ số quảng cáo tốt</Label>
+          <span className="numeric text-[11px] text-muted-foreground">
+            đã chọn {picked.length}/{MANUAL_DESIGN.maxInspirations}
+          </span>
+        </div>
+        {inspirations.length === 0 ? (
+          <p className="rounded-md border border-dashed px-2.5 py-2 text-[12px] text-muted-foreground">
+            Chưa có mẫu nào đủ điều kiện: cần mã bán tốt trong 90 ngày (đơn giao thành công hoặc chi mỗi tin nhắn tốt) VÀ đã đọc được DNA thiết kế — máy đọc DNA dần mỗi lượt dựng lô. Tạm thời dùng kiểu “{MANUAL_GEN_KIND_LABEL.MOCKUP}”.
+          </p>
+        ) : (
+          <div className="grid max-h-[300px] grid-cols-1 gap-1.5 overflow-y-auto pr-0.5 sm:grid-cols-2">
+            {inspirations.map((o) => {
+              const on = picked.includes(o.productId);
+              return (
+                <button
+                  key={o.productId}
+                  type="button"
+                  disabled={pending}
+                  onClick={() => toggle(o.productId)}
+                  aria-pressed={on}
+                  className={cn("flex items-center gap-2 rounded-md border p-1.5 text-left transition-colors", on ? "border-primary bg-primary/5" : "hover:bg-muted/50")}
+                >
+                  <VariantImage imageId={o.imageId} available={o.imageId !== null} alt={o.label} className="size-12 shrink-0 rounded" iconClassName="size-4" />
+                  <span className="min-w-0 flex-1 space-y-0.5">
+                    <span className="flex items-center gap-1">
+                      <span className={cn("flex size-3.5 shrink-0 items-center justify-center rounded-sm border", on && "border-primary bg-primary text-primary-foreground")}>{on ? <Check className="size-3" /> : null}</span>
+                      <span className="truncate text-[12px] font-semibold">{o.label}</span>
+                    </span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      <span className="numeric">{o.delivered}</span> giao · <span className="numeric">{o.returned}</span> hoàn · {costPerMessage(o)}
+                    </span>
+                    <span className="block truncate text-[10.5px] text-muted-foreground" title={describeDna(o.dna)}>
+                      {o.imageId ? describeDna(o.dna) : "Chưa có ảnh thật — chỉ góp DNA"}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-[11px] text-muted-foreground">Mỗi ảnh là một THIẾT KẾ MỚI lai DNA của hai mẫu đã chọn + đột biến, bắt buộc khác mọi mẫu đang có. Máy vẽ chỉ nhận ảnh sản phẩm THẬT của mẫu cha làm tham chiếu.</p>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-baseline justify-between">
+          <Label htmlFor="md-idea">Ý tưởng / câu lệnh (tuỳ chọn)</Label>
+          <span className="numeric text-[11px] text-muted-foreground">
+            {idea.trim().length}/{MANUAL_GEN.ideaMaxChars}
+          </span>
+        </div>
+        <Textarea id="md-idea" rows={4} value={idea} maxLength={MANUAL_GEN.ideaMaxChars} disabled={pending} onChange={(e) => setIdea(e.target.value)} placeholder="Ví dụ: đi biển mùa thu, nắng chiều, dáng đi tự nhiên…" />
+        <p className="text-[11px] text-muted-foreground">Ý tưởng lái bối cảnh / không khí / cách phối; kiểu dáng của thiết kế đi theo DNA máy lập — để máy học được thiết kế nào bán.</p>
+        <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[11px] text-muted-foreground" title={capReason ?? undefined}>
+            Mỗi lần bấm tới {MANUAL_GEN.imagesPerRun} thiết kế · hôm nay còn vẽ được <b className="numeric text-foreground">{allowedNow}</b> ảnh trong trần chung với lô.
+          </p>
+          <Button onClick={gen} disabled={pending || !!khoa} title={khoa ?? undefined}>
+            {pending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Gen {MANUAL_GEN.imagesPerRun} thiết kế mới
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MockupGenForm({
   sources,
   allowedNow,
   capReason,
@@ -179,6 +345,18 @@ export function ManualGenImageTile({
         <span className={cn("absolute right-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold", TONE[img.status] ?? "bg-background/90")}>{MANUAL_GEN_IMAGE_STATUS_LABEL[img.status]}</span>
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-2">
+        {img.design ? (
+          <div className="space-y-1 rounded-md border border-brand/30 bg-brand/5 p-1.5" title={img.design.why}>
+            <p className="flex flex-wrap items-baseline justify-between gap-1 text-[11px]">
+              <span className="font-semibold">Thiết kế mới</span>
+              <span className="numeric text-muted-foreground">{img.design.priceVnd === null ? "giá: chưa suy được" : `giá đề nghị ${formatVND(img.design.priceVnd)}`}</span>
+            </p>
+            <p className="line-clamp-3 text-[11px] leading-snug" title={describeDna(img.design.dna)}>
+              {describeDna(img.design.dna)}
+            </p>
+            {img.design.parentLabels.length ? <p className="line-clamp-1 text-[10.5px] text-muted-foreground">Lai từ: {img.design.parentLabels.join(" × ")}</p> : null}
+          </div>
+        ) : null}
         <GeneChips genes={img.genes} className="gap-0.5" />
         {img.error ? <p className="line-clamp-3 text-[11px] text-destructive" title={img.error}>{img.error}</p> : null}
         {img.status === "APPROVED" && img.captionError ? <p className="line-clamp-2 text-[11px] text-warning" title={img.captionError}>AI chưa viết được câu chữ: {img.captionError}</p> : null}
@@ -244,7 +422,11 @@ function PromoteButton({ img, pageName, defaults, predictedSeq, targetDay }: { i
         toast.error(r.error);
         return;
       }
-      toast.success(`Đã đưa vào lô ${r.batchDay} (ô #${r.slot}) — lô cần được bấm duyệt (lại).`);
+      toast.success(
+        r.designCode
+          ? `Đã đưa vào lô ${r.batchDay} (ô #${r.slot}) với mã thiết kế ${r.designCode} — tạo sản phẩm Pancake đúng mã này để nhận đơn; lô cần được bấm duyệt (lại).`
+          : `Đã đưa vào lô ${r.batchDay} (ô #${r.slot}) — lô cần được bấm duyệt (lại).`,
+      );
       for (const w of r.warnings) toast.warning(w);
       setOpen(false);
     });
@@ -257,8 +439,13 @@ function PromoteButton({ img, pageName, defaults, predictedSeq, targetDay }: { i
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Đưa ảnh #{img.seq} vào lô chạy ngày {targetDay}</DialogTitle>
-            <DialogDescription>Câu chữ do AI viết theo ảnh — sửa tùy ý. Ba tên theo khuôn mặc định, sửa được; để trống một tên = dùng tên mặc định. Bài vẫn phải qua lượt DUYỆT CẢ LÔ mới được đăng.</DialogDescription>
+            <DialogTitle>
+              Đưa {img.design ? "thiết kế mới" : "ảnh"} #{img.seq} vào lô chạy ngày {targetDay}
+            </DialogTitle>
+            <DialogDescription>
+              {img.design ? "Máy cấp mã thiết kế TK-… lúc đưa vào lô (xem ở tab Thiết kế mới; đơn, chấm, MOQ đi theo mã ấy). " : ""}
+              Câu chữ do AI viết theo ảnh — sửa tùy ý. Ba tên theo khuôn mặc định, sửa được; để trống một tên = dùng tên mặc định. Bài vẫn phải qua lượt DUYỆT CẢ LÔ mới được đăng.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-[1fr_300px]">
             <div className="space-y-2.5">

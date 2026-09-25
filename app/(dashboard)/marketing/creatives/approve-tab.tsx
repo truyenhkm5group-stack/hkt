@@ -135,7 +135,7 @@ function VariantTile({ v, reserve, canReject, canEditCopy, pageName, selectable 
             Câu chữ vẫn là bản nháp viết trước khi có ảnh — AI chưa đọc được ảnh. Bấm “Soạn câu chữ” để xin gợi ý lại hoặc sửa tay.
           </p>
         ) : null}
-        {v.mode === "DESIGN" ? (
+        {v.mode === "DESIGN" || v.design ? (
           v.design ? (
             <div className="space-y-1 rounded-md border border-brand/30 bg-brand/5 p-2">
               <p className="flex flex-wrap items-baseline justify-between gap-1 text-[12px]">

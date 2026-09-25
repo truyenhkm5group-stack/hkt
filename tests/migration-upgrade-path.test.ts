@@ -90,6 +90,7 @@ const MOI = [
   "0140_company_os_early_topic",
   "0141_company_os_stock_feedback",
   "0142_company_os_unidentified_dispositions",
+  "0143_creative_manual_gen_design",
 ] as const;
 
 /*
@@ -1649,6 +1650,16 @@ export async function testMigrationUpgradePath() {
     await client.query(`delete from return_dispositions where id = 'up-rdu1'`);
     await client.query(`delete from return_unidentified where id = 'up-ru1'`);
     await client.query(`delete from users where id = 'up-uh'`);
+    // 0143 (gen tay thiết kế mới): lượt không khai kiểu là `MOCKUP` — kiểu DUY NHẤT từng có trước 0143, nên dòng
+    // cũ đúng như chúng đã làm; mã cảm hứng mặc định rỗng, bản mô tả thiết kế mặc định NULL; kiểu lạ bị CSDL chặn.
+    await client.query(`insert into creative_manual_gens (id, requested, model, size, quality) values ('up-mg1', 10, 'gpt-image-2', '1024x1024', 'low')`);
+    assert.equal(await dem("select count(*)::int as n from creative_manual_gens where id = 'up-mg1' and kind = 'MOCKUP' and inspiration_product_ids = '{}'"), 1, "0143: lượt không khai kiểu là MOCKUP, không có mã cảm hứng");
+    await client.query(`insert into creative_manual_gens (id, kind, inspiration_product_ids, requested, model, size, quality) values ('up-mg2', 'DESIGN', '{p1,p2}', 10, 'gpt-image-2', '1024x1024', 'low')`);
+    await assert.rejects(client.query(`insert into creative_manual_gens (id, kind, requested, model, size, quality) values ('up-mg3', 'LA', 10, 'm', 's', 'q')`), "0143: kiểu lượt lạ phải bị CSDL chặn");
+    await client.query(`insert into creative_manual_gen_images (id, gen_id, seq, genes) values ('up-mgi1', 'up-mg2', 1, '{}')`);
+    assert.equal(await dem("select count(*)::int as n from creative_manual_gen_images where id = 'up-mgi1' and design is null"), 1, "0143: bản mô tả thiết kế mặc định NULL — không backfill");
+    await client.query(`delete from creative_manual_gen_images where id = 'up-mgi1'`);
+    await client.query(`delete from creative_manual_gens where id in ('up-mg1', 'up-mg2')`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });

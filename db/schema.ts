@@ -3676,6 +3676,13 @@ export const creativeManualGens = pgTable(
     productPhotoSourceId: text("product_photo_source_id").references(() => creativeSources.id, { onDelete: "set null" }),
     /** Quảng cáo cũ của shop (`OWN_AD`, cùng mã) làm tham chiếu bố cục — tuỳ chọn. */
     ownAdSourceId: text("own_ad_source_id").references(() => creativeSources.id, { onDelete: "set null" }),
+    /**
+     * `ManualGenKind` (migration 0143): `DESIGN` = mỗi ảnh là một THIẾT KẾ MỚI lai DNA của các mã cảm hứng;
+     * `MOCKUP` = ảnh mới cho ĐÚNG sản phẩm của ảnh gốc (kiểu duy nhất trước 0143).
+     */
+    kind: text("kind").notNull().default("MOCKUP"),
+    /** Lượt `DESIGN`: các mã bán tốt người chọn làm cảm hứng (theo thứ tự người chọn). */
+    inspirationProductIds: text("inspiration_product_ids").array().notNull().default(sql`'{}'::text[]`),
     idea: text("idea").notNull().default(""),
     requested: integer("requested").notNull(),
     model: text("model").notNull(),
@@ -3688,7 +3695,7 @@ export const creativeManualGens = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("creative_manual_gens_created_idx").on(t.createdAt)],
+  (t) => [index("creative_manual_gens_created_idx").on(t.createdAt), check("creative_manual_gens_kind_check", sql`${t.kind} IN ('MOCKUP', 'DESIGN')`)],
 );
 
 /** Một ẢNH của lượt gen tay: câu lệnh · gen · ảnh · duyệt / loại · câu chữ + tên · mẫu đã vào lô. */
@@ -3703,6 +3710,11 @@ export const creativeManualGenImages = pgTable(
     /** Bộ gen ĐỦ sáu khoá — máy học được từ bài này như mọi mẫu. */
     genes: jsonb("genes").$type<Record<string, string>>().notNull(),
     prompt: text("prompt").notNull().default(""),
+    /**
+     * Lượt `DESIGN`: bản mô tả THIẾT KẾ MỚI của ảnh này (`ManualDesignSpec` — DNA đủ mười thuộc tính, mã cha,
+     * nguồn ảnh tham chiếu, giá đề nghị, lý do). `NULL` ở lượt `MOCKUP`. Mã `TK-…` chỉ cấp khi đưa vào lô.
+     */
+    design: jsonb("design").$type<Record<string, unknown>>(),
     /** `ManualGenImageStatus`. */
     status: text("status").notNull().default("PLANNED"),
     imageId: text("image_id").references(() => creativeImages.id, { onDelete: "set null" }),

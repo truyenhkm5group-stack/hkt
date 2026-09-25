@@ -228,6 +228,7 @@ export async function loadDesignInputs(db: Db, batchDay: string): Promise<Omit<D
       score: designParentScore(scores.get(id) as ProductSellScore) as number,
       photoSourceId: photoOf.get(id) ?? null,
       priceVnd: prices.get(id) ?? null,
+      metrics: (({ delivered, returned, spendVnd, messages }: ProductSellScore) => ({ delivered, returned, spendVnd, messages }))(scores.get(id) as ProductSellScore),
     }))
     .sort((a, b) => a.productId.localeCompare(b.productId));
 

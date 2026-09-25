@@ -481,6 +481,39 @@ người "Đưa vào lô"       sửa câu chữ + ba tên ⇒ MỘT mẫu MANUA
   trần "mẫu tự làm ≤ số mẫu / lô", cùng học. Nguồn phân biệt được qua `gen_model` (mô hình vẽ, khác `MANUAL`), `why` ("Gen tay — …"),
   và `creative_manual_gen_images.variant_id`. Mẫu vào lô dùng ĐÚNG ảnh đã duyệt (không lưu bản thứ hai).
 
+### Gen tay kiểu THIẾT KẾ MỚI — mặc định của khối (chủ shop 25/09/2026, lần hai)
+
+*"Gen các mẫu mới hoàn toàn, sáng tạo từ các ảnh đầu vào (các mẫu đã win và các mẫu có chỉ số tốt), không phải tạo
+mockup mới cho các mẫu cũ."* Khối gen tay có hai kiểu (`creative_manual_gens.kind`, migration `0143`):
+
+| Kiểu | Đầu vào | Mỗi ảnh là | Còn dùng cho |
+|---|---|---|---|
+| `DESIGN` — **Thiết kế mới** (mặc định) | các mã BÁN TỐT người tích chọn (≤ `MANUAL_DESIGN.maxInspirations`) + ý tưởng | một thiết kế CHƯA TỪNG CÓ, lai DNA của hai mã đã chọn | mọi lượt gen tay |
+| `MOCKUP` — Ảnh mới cho mẫu đang có | ảnh sản phẩm thật (+ QC cũ cùng mã) + ý tưởng | ảnh quảng cáo mới của ĐÚNG sản phẩm ấy | đề xuất đẩy tồn (`?product=` mở thẳng kiểu này) |
+
+- **Mẫu cảm hứng = đúng mã cha của ô thiết kế trong lô** (`loadDesignInputs`): bán tốt 90 ngày theo `ORDER_OUTCOME_FAST`
+  hoặc chi / tin nhắn tốt, VÀ đã đọc được DNA — không viết điều kiện "bán tốt" thứ hai. Màn hình in số đo (giao · hoàn ·
+  chi/tin; chưa có chi ⇒ `—`), ảnh thật và DNA của từng mã; tích sẵn `preselect` mã điểm cao nhất có ảnh thật. Danh sách đệm
+  120 giây (khối tự tải lại mỗi 8 giây khi đang vẽ). Máy chủ kiểm lại lúc bấm: mã hết điều kiện ⇒ từ chối, không đoán.
+- **Lập thiết kế** (`planManualDesigns`, thuần): gọi ĐÚNG `planDesigns` với cha mẹ = mã người chọn và hạt giống = id lượt
+  (`DesignPlanInput.seed`; lô bỏ trống ⇒ hạt giống ngày lô như cũ). Phép mới lạ gồm mọi mã đang có, mọi thiết kế 30 ngày VÀ
+  mọi thiết kế gen tay 30 ngày chưa vẽ hỏng — lượt sau không vẽ lại lượt trước. Lập được ít hơn 10 ⇒ ghi bấy nhiêu và nói vì sao.
+  Mỗi ảnh lưu bản mô tả `creative_manual_gen_images.design` (DNA, mã cha, ảnh tham chiếu, giá đề nghị, lý do).
+- **Vẽ:** ảnh tham chiếu = ảnh sản phẩm THẬT của cha trội + của mẹ nếu có (`MANUAL_DESIGN.refPhotos`), mỗi ảnh qua
+  `gatherPixels` (ranh giới 2 không nới; KHÔNG gửi quảng cáo cũ). Câu lệnh = `designPromptEn(dna)` + chỉ thị gen +
+  `NEW_DESIGN_CLAUSE`; ý tưởng của người chỉ lái bối cảnh / không khí / cách phối — kiểu dáng đi theo DNA để máy học đúng.
+  Gen: có người mẫu mặc, không trải phẳng (`DESIGN_GENE_EXCLUDE`), 10 tổ hợp bối cảnh × bố cục khác nhau.
+- **Câu chữ:** "sản phẩm" là "Mẫu mới", giá = GIÁ ĐỀ NGHỊ (giá cha trội; không suy được ⇒ không ghi giá), ghi chú "mẫu mới".
+- **Đưa vào lô:** trong CÙNG giao dịch với mẫu, máy cấp mã `TK-YYMMDD-NNN` theo NGÀY LÔ ở dải **101+**
+  (`MANUAL_DESIGN.codeBase`, `manualDesignCode`) — tách khỏi dải 01… của ô thiết kế máy lập, vì lô dựng sau vẫn cấp 01 cho ô
+  của nó và `insertComposed` bỏ ô trùng mã. Ghi `design_concepts` (DRAFT, ảnh đại diện = ảnh đã duyệt) rồi mẫu `MANUAL` với
+  `design_concept_id` và `product_id = NULL`: đơn / chấm / MOQ / tab Thiết kế mới đi theo mã TK, KHÔNG cộng vào mã cha.
+  Thẻ bài trong lô hiện khối "Thiết kế mới" cho mọi mẫu mang thiết kế (không chỉ ô `DESIGN`).
+
+Tệp: `lib/creative/manual-gen.ts` (`startManualDesignGen`, `planManualDesigns`, `manualDesignPrompt`, `manualDesignCode`) ·
+`lib/queries/creative-manual-gen.ts` (`listDesignInspirations`) · `manual-gen.tsx` · `drizzle/0143_creative_manual_gen_design.sql` ·
+`tests/creative-manual-design.test.ts`.
+
 ### Tích chọn bài trong lô chờ duyệt
 
 Ô tích trên từng bài + thanh "Loại các bài đã chọn" / "Giữ các bài đã chọn" (`applyVariantSelection`, quyền `ideas:write`).
