@@ -32,7 +32,7 @@ const bundle = z
   .array(z.enum(ALL_PERMISSIONS as [string, ...string[]]))
   .max(200)
   .refine((list) => !list.some((p) => ROLE_BUILDER_FORBIDDEN.includes(p)), {
-    message: "Vai trò tuỳ chỉnh không được cấp quyền quản lý người dùng — đó là cửa để tự nâng mình lên toàn quyền",
+    message: "Vai trò tuỳ chỉnh không được cấp quyền quản lý người dùng hay quyền duyệt hai bước — đó là cửa để tự nâng mình lên toàn quyền",
   });
 
 export const saveAccessRoleSchema = z.object({

@@ -194,6 +194,7 @@ import {
   testIntelligenceRuns,
 } from "./return-intelligence.test";
 import { testApproval } from "./approval.test";
+import { testCompanyOsControlPlane } from "./company-os-control-plane.test";
 import { testClientBoundaryExports } from "./client-boundary-exports.test";
 import { testVtpTrackingLink } from "./vtp-tracking-link.test";
 import { testDeliveryTower } from "./delivery-tower.test";
@@ -229,6 +230,8 @@ import { testMarketerDailyNominal } from "./marketer-daily-nominal.test";
 import { testAdsDecision } from "./ads-decision.test";
 import { testAdsIntraday } from "./ads-intraday.test";
 import { testMarketingDecisionLedger } from "./marketing-decision-ledger.test";
+// Company OS · Agent F — kinh tế theo mẫu, CPO hoà vốn một công thức, sổ chụp dự phóng, chênh lệch giá SX.
+import { testCompanyOsEconomicsDb, testCompanyOsEconomicsPure } from "./company-os-economics.test";
 import { testAdsBrakeByDecision, testAdsWrite } from "./ads-write.test";
 import { testAdsKillSwitchDb, testAdsKillSwitchPure } from "./ads-kill-switch.test";
 import { testCreativeLoop } from "./creative-loop.test";
@@ -1722,6 +1725,8 @@ async function main() {
   await testAdsDecision(db);
   testAdsIntraday();
   await testMarketingDecisionLedger();
+  testCompanyOsEconomicsPure();
+  await testCompanyOsEconomicsDb(db);
   testAdsWrite();
   testCreativeLoop();
   testCreativeDesignPure();
@@ -1861,6 +1866,8 @@ async function main() {
   testPackingWavesPure();
   await testPackingWavesQueries(db);
   await testApproval(db);
+  // Company OS · Agent G — duyệt hai bước tiêu thụ được, approvals:decide, nguồn việc APPROVAL, audit, sync_runs.
+  await testCompanyOsControlPlane(db);
   await testMultiAttemptMoney(db);
   await testCashflow(db);
   await testPurchasing(db);

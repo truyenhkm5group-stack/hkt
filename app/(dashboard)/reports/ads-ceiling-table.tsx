@@ -142,7 +142,7 @@ export function AdsCeilingTable({
               <TableHead className="text-right" title="DT GTC ước tính. Dòng nhỏ: doanh số POS — mẫu số của mọi tỷ lệ % DS trong bảng này.">DT GTC ƯT</TableHead>
               <TableHead className="text-right" title="Lợi nhuận danh nghĩa (đúng con số bảng trên). Dòng nhỏ: margin trên DT GTC ước tính.">LN danh nghĩa</TableHead>
               <TableHead className="text-right" title="CPQC đã quy kết về mã trong kỳ. Dòng nhỏ: % doanh số POS và CPQC mỗi đơn chốt.">CPQC hiện tại</TableHead>
-              <TableHead className="text-right" title="Mức CPQC tối đa để LN danh nghĩa của mã = 0. Dòng nhỏ: tối đa mỗi đơn chốt · số tiền cả kỳ, rồi khoảng cách từ CPQC hiện tại tới trần (dương = còn tăng được, âm = đang vượt — mỗi đồng thêm là lỗ thêm). Rê chuột để xem trần đứng trên giá vốn / tỷ lệ GTC thật hay dự tính.">Trần hoà vốn</TableHead>
+              <TableHead className="text-right" title="Mức CPQC tối đa để LN danh nghĩa của mã = 0. Dòng nhỏ: tối đa mỗi đơn chốt · số tiền cả kỳ, rồi khoảng cách từ CPQC hiện tại tới trần (dương = còn tăng được, âm = đang vượt — mỗi đồng thêm là lỗ thêm). Rê chuột để xem trần đứng trên giá vốn / tỷ lệ GTC thật hay dự tính. Khác “CPO hoà vốn · LN góp” ở bảng quyết định /ads: CÙNG một hàm (lib/constants/break-even-cpo.ts), nhưng tử số ở đây đã trừ vận hành, cố định, thuế, rủi ro tồn kho nên luôn chặt hơn.">Trần hoà vốn</TableHead>
               <TableHead className="text-right" title="Mức CPQC tối đa để còn giữ được biên LN bạn gõ ở góc trên (trên DT GTC ước tính). Chưa gõ biên thì cột này trống.">
                 Trần giữ biên {targetMargin === null ? "…" : `${targetMargin}%`}
               </TableHead>

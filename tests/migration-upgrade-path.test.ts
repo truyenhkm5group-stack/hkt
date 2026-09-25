@@ -81,6 +81,8 @@ const MOI = [
   "0131_bank_link_supplier_payment",
   "0132_company_os_models",
   "0133_company_os_inventory",
+  "0134_company_os_control_plane",
+  "0135_company_os_economics",
 ] as const;
 
 /*
@@ -234,6 +236,15 @@ export async function testMigrationUpgradePath() {
       kiểm dựng trên dữ liệu đẹp hơn thực tế thì nó đo một thế giới không tồn tại.
     */
     await client.query(`update departments set sort_order = 100`);
+
+    /*
+      Company OS · Agent G (0134). Một dòng nhật ký và một yêu cầu duyệt ĐANG CHỜ có từ trước — bước
+      2 kiểm rằng migration KHÔNG đoán loại tác nhân cho dòng cũ và KHÔNG dựng dấu vân tay cho yêu cầu
+      cũ (AGENTS.md mục 35).
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'audit_logs' and column_name = 'actor_kind'"), 0, "bước 1: cột audit_logs.actor_kind CHƯA được có — đó là thứ 0134 thêm vào");
+    await client.query(`insert into audit_logs (id, user_id, user_email, action, entity) values ('up-al1', 'up-u1', 'a@shop.vn', 'EXPENSE_UPDATE', 'EXPENSE')`);
+    await client.query(`insert into approval_requests (id, "group", action, summary, requested_by, requested_by_email) values ('up-ar1', 'EXPENSE_EDIT', 'expense.update', 'yêu cầu cũ', 'up-u1', 'a@shop.vn')`);
 
     // ══ BƯỚC 2: áp migration mới lên ĐÚNG trạng thái đó ══
     writeFileSync(soFile, JSON.stringify(so, null, 2) + "\n");
@@ -1547,6 +1558,21 @@ export async function testMigrationUpgradePath() {
     await client.query(`delete from tech_proposals where id = 'up-p1'`);
     await client.query(`delete from tech_tasks where id = 'up-t1'`);
 
+    // 0134: dòng cũ ở NULL (chưa biết), ràng buộc mới chặn giá trị lạ, chỉ mục chống trùng chờ duyệt chạy.
+    assert.equal(await dem("select count(*)::int as n from audit_logs where id = 'up-al1' and actor_kind is null and correlation_id is null and reason is null"), 1, "0134: dòng nhật ký cũ phải ở NULL — KHÔNG đoán là người dùng");
+    assert.equal(await dem("select count(*)::int as n from approval_requests where id = 'up-ar1' and payload_fingerprint is null and status = 'PENDING'"), 1, "0134: yêu cầu cũ giữ nguyên, không dựng dấu vân tay");
+    await assert.rejects(client.query(`insert into audit_logs (id, user_email, action, entity, actor_kind) values ('up-al2', 'x', 'x', 'X', 'ROBOT')`), "0134: loại tác nhân lạ phải bị CSDL từ chối");
+    // Người dùng riêng: `up-u1` đã bị xoá ở một khối phía trên (kiểm ON DELETE của 0084).
+    await client.query(`insert into users (id, email, name, password_hash, role) values ('up-ug', 'g@shop.vn', 'G', 'x', 'CS')`);
+    await client.query(`insert into approval_requests (id, "group", action, summary, requested_by, requested_by_email, payload_fingerprint) values ('up-ar2', 'EXPENSE_EDIT', 'expense.update', 'a', 'up-ug', 'g@shop.vn', 'fp1')`);
+    await assert.rejects(
+      client.query(`insert into approval_requests (id, "group", action, summary, requested_by, requested_by_email, payload_fingerprint) values ('up-ar3', 'EXPENSE_EDIT', 'expense.update', 'a', 'up-ug', 'g@shop.vn', 'fp1')`),
+      "0134: hai yêu cầu ĐANG CHỜ cùng dấu vân tay của cùng người phải bị chặn",
+    );
+    await client.query(`delete from approval_requests where id in ('up-ar1', 'up-ar2')`);
+    await client.query(`delete from audit_logs where id = 'up-al1'`);
+    await client.query(`delete from users where id = 'up-ug'`);
+
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });
     // Số phòng lấy TỪ SỔ trong mã nguồn, không gõ lại: tách một phòng mới thì con số này tự đúng,
@@ -1560,6 +1586,25 @@ export async function testMigrationUpgradePath() {
     assert.equal(await dem("select count(*)::int as n from tech_proposals"), 0, "chạy lại migration KHÔNG được sinh bản đề xuất nào");
     assert.equal(await dem("select count(*)::int as n from tech_agent_runs"), 0, "chạy lại migration KHÔNG được sinh lượt chạy agent nào");
 
+    /*
+      ═══ 0134 (Company OS · F): ẢNH CHỤP DỰ PHÓNG — BA CỘT MỚI, DÒNG CŨ ĐỨNG NGUYÊN ═══
+
+      Bảng sổ vẫn nằm trong nhóm migration mới của bản phát hành này (0108), nên không gieo được một
+      dòng "trước 0134" ở bước 1. Thay vào đó: (a) một dòng ghi bằng câu lệnh KHÔNG nhắc tới ba cột —
+      đúng như mọi dòng đã có trên production — phải mang NULL ở cả ba (không DEFAULT); (b) tệp 0134
+      không được chứa UPDATE nào (không backfill, mục 35, 8.8). Dòng cũ đứng nguyên sau lượt ghi của
+      job được khoá ở `tests/company-os-economics.test.ts`.
+    */
+    await client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, basis, period_from, period_to, rule_version, rule_snapshot, spend_known, profit_after_ads) values ('up-f1', '2026-09-20', 'product', 'p-old', 'SCALE', 'ACTIONABLE', 'PROJECTED', '2026-08-22', '2026-09-04', 2, '{}'::jsonb, true, 123456)`);
+    assert.ok(!/update/i.test(readFileSync(path.join(goc, "0135_company_os_economics.sql"), "utf8").replace(/--.*$/gm, "")), "0134: migration KHÔNG được chứa UPDATE — không backfill dòng sổ cũ");
+    assert.equal(
+      await dem("select count(*)::int as n from ads_decision_ledger where id = 'up-f1' and projected_profit_after_ads is null and projected_headroom is null and applied_delivery_rate is null and profit_after_ads = 123456"),
+      1,
+      "0134: dòng sổ cũ phải giữ NULL ở ba cột dự phóng — không backfill, không mặc định — và giữ nguyên lợi nhuận đo được",
+    );
+    await client.query(`insert into ads_decision_ledger (id, decision_day, dimension, entity_key, action, action_class, basis, period_from, period_to, rule_version, rule_snapshot, spend_known, projected_profit_after_ads, projected_headroom, applied_delivery_rate) values ('up-f2', '2026-09-26', 'product', 'p-new', 'SCALE', 'ACTIONABLE', 'PROJECTED', '2026-08-28', '2026-09-10', 2, '{}'::jsonb, true, -250000, 0.85, 62.5)`);
+    assert.equal(await dem("select count(*)::int as n from ads_decision_ledger where id = 'up-f2' and projected_profit_after_ads = -250000 and applied_delivery_rate = 62.5"), 1, "0134: dòng mới ghi được dự phóng (kể cả số âm)");
+    await client.query(`delete from ads_decision_ledger where id in ('up-f1', 'up-f2')`);
     console.log(`✓ Đường nâng cấp từ production: ${truoc} → ${sau} migration (+${sau - truoc}) · dữ liệu nghiệp vụ nguyên vẹn · tài khoản cũ giữ nguyên phạm vi ALL · KHÔNG backfill người phụ trách · đích rỗng và bốn ràng buộc mới chặn đúng, xoá người đặt không cuốn theo đích · work_items rỗng (phép chiếu, không bản sao) · sổ đề xuất AI CTO và phép chiếu PR vào đời RỖNG, bốn ràng buộc mới chặn đúng · bằng chứng lượt sửa mặc định (1,'',NONE) và hai ràng buộc 0105 chặn đúng · khoá lượt chạy ngoài chặn bản sao nhưng cho nhiều NULL, không backfill dòng cũ · chạy lại không nhân đôi`);
   } finally {
     await client.close().catch(() => {});

@@ -1,3 +1,5 @@
+import { breakEvenSpend, spendPerOrder } from "@/lib/constants/break-even-cpo";
+
 /**
  * ═══════════ GIÁ VỐN DỰ TÍNH — CHỖ TRỐNG ĐƯỢC LẤP BẰNG MỘT CON SỐ CÓ TÊN NGƯỜI ĐẶT ═══════════
  *
@@ -124,18 +126,19 @@ export function adsCeiling(input: {
   /** Biên lợi nhuận mong muốn trên DT GTC ước tính (%). `null` = chưa đặt. */
   targetMarginPct: number | null;
 }): AdsCeiling {
-  const heSo = 1 + Math.max(0, input.otherCostPercentOfAds || 0) / 100;
   const profitBeforeAds = input.netProfit + input.adSpend + input.otherCost;
+  // Chia cho (1 + %khác) và chia cho số đơn đi qua ĐƯỜNG DUY NHẤT `lib/constants/break-even-cpo.ts`
+  // — bảng quyết định `/ads` gọi cùng hàm, nên "CPO hoà vốn" không có công thức thứ hai.
   const diem = (spend: number): AdsCeilingPoint => ({
     spend: Math.round(spend),
     overPosSales: input.posSales > 0 ? (spend / input.posSales) * 100 : null,
-    perOrder: input.orders > 0 ? Math.round(spend / input.orders) : null,
+    perOrder: spendPerOrder(spend, input.orders),
   });
-  const breakEven = diem(profitBeforeAds / heSo);
+  const breakEven = diem(breakEvenSpend(profitBeforeAds, input.otherCostPercentOfAds));
   const target =
     input.targetMarginPct === null || !Number.isFinite(input.targetMarginPct)
       ? null
-      : diem((profitBeforeAds - (input.targetMarginPct / 100) * input.expectedRevenue) / heSo);
+      : diem(breakEvenSpend(profitBeforeAds - (input.targetMarginPct / 100) * input.expectedRevenue, input.otherCostPercentOfAds));
   const hienTai = input.posSales > 0 ? (input.adSpend / input.posSales) * 100 : null;
   return {
     profitBeforeAds,

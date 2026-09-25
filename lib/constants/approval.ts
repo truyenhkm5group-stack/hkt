@@ -23,7 +23,8 @@
  * niềm tin vào mọi cơ chế kiểm soát khác. Nên: máy móc dựng đủ, GHI NHẬN đầy đủ ngay từ đầu, còn
  * CƯỠNG CHẾ bật theo từng nhóm khi shop có người thứ hai thật sự.
  *
- * Bật ở `settings` khoá `approval.enforce` — xem `APPROVAL_ENFORCE_KEY`.
+ * Bật bằng công tắc ở trang Cần xử lý (chỉ ADMIN), ghi `settings` khoá `approval.enforce.v2` — xem
+ * `APPROVAL_ENFORCE_KEY`. Khoá cũ `approval.enforce` KHÔNG còn tự có hiệu lực (xem `parseEnforceConfig`).
  */
 
 /** Nhóm việc rủi ro. Bật / tắt cưỡng chế theo NHÓM, không theo từng nút. */
@@ -88,8 +89,25 @@ export const APPROVAL_THRESHOLD: Partial<Record<ApprovalGroup, number>> = {
   EXPENSE_EDIT: 5_000_000,
 };
 
-/** Khoá `settings` bật cưỡng chế theo nhóm: `{ "INVENTORY_ADJUSTMENT": true, ... }` */
-export const APPROVAL_ENFORCE_KEY = "approval.enforce";
+/**
+ * Khoá `settings` DUY NHẤT có hiệu lực: `{ "v": 2, "groups": { "INVENTORY_ADJUSTMENT": true, ... } }`,
+ * và chỉ công tắc ADMIN ở trang Cần xử lý ghi nó (Company OS · Agent G).
+ *
+ * VÌ SAO KHOÁ MỚI, KHÔNG PHẢI ĐỔI HÌNH DẠNG TRÊN KHOÁ CŨ: khoá cũ `approval.enforce` có thể đang có một
+ * dòng gõ tay theo hướng dẫn cũ, CHƯA TỪNG có hiệu lực (lỗi đọc TEXT). Ghi v2 vào cùng khoá thì lần bấm
+ * công tắc đầu tiên sẽ ĐÈ MẤT dòng ấy — chủ shop không bao giờ còn thấy mình từng khai gì. Khoá riêng
+ * giữ nguyên dòng cũ để đọc và "Áp dụng" có chủ đích, và dấu `v: 2` là lớp chặn thứ hai: một giá trị
+ * chép tay sang khoá mới mà không mang dấu ấy vẫn KHÔNG có hiệu lực.
+ */
+export const APPROVAL_ENFORCE_KEY = "approval.enforce.v2";
+
+/**
+ * Khoá CŨ — chỉ để ĐỌC và HIỆN cho quản trị viên, KHÔNG BAO GIỜ quyết định cưỡng chế. Không xoá, không
+ * ghi đè tự động: nó là lời khai của một người, và chỉ người mới quyết định áp dụng nó.
+ */
+export const APPROVAL_ENFORCE_LEGACY_KEY = "approval.enforce";
+
+export type EnforceConfigV2 = { v: 2; groups: Partial<Record<ApprovalGroup, boolean>> };
 
 export type ApprovalDecision =
   /** Làm luôn — nhóm này không cần người thứ hai, hoặc chưa bật cưỡng chế. */
@@ -117,4 +135,127 @@ export function overThreshold(group: ApprovalGroup, amount: number | null | unde
   // CHƯA BIẾT số tiền thì coi như VƯỢT ngưỡng: đoán thấp ở đây là bỏ lọt đúng việc cần canh.
   if (amount === null || amount === undefined) return true;
   return Math.abs(amount) >= nguong;
+}
+
+/* ═══════ Company OS · Agent G · TIÊU THỤ YÊU CẦU ĐÃ DUYỆT ═══════
+ *
+ * Trước bản này, duyệt xong thì KHÔNG GÌ xảy ra: `decideApproval` chỉ lật trạng thái, và khi người
+ * xin bấm lại đúng việc đó thì cổng lại đẻ một yêu cầu MỚI — vòng lặp không có lối ra. Nghĩa là ngày
+ * chủ shop bật cưỡng chế, mọi việc trong nhóm ấy đứng hẳn.
+ *
+ * Luật mới: người xin làm lại ĐÚNG việc đã xin (cùng dấu vân tay) trong hạn hiệu lực ⇒ yêu cầu đã
+ * duyệt được TIÊU THỤ đúng một lần (`EXECUTED` + `executed_at`) và việc chạy. Lần thứ hai phải xin lại.
+ */
+
+/**
+ * Một lời duyệt còn hiệu lực bao lâu kể từ lúc được duyệt.
+ *
+ * Người duyệt gật MỘT việc ở MỘT thời điểm. Để lời gật đó nằm chờ vô thời hạn thì một tuần sau nó
+ * vẫn mở khoá được việc đã không còn đúng bối cảnh (kho đã đếm lại, kỳ lương đã chốt). 72 giờ phủ một
+ * cuối tuần mà không biến lời duyệt thành tấm séc khống. Đây là giá trị MỚI của bản này — chủ shop
+ * đổi được, nhưng đổi thì sửa ở đây (AGENTS.md mục 7).
+ */
+export const APPROVAL_VALID_HOURS = 72;
+
+/**
+ * JSON CHUẨN HOÁ — đầu vào của dấu vân tay. Cùng một việc phải ra cùng một chuỗi bất kể thứ tự khoá.
+ *
+ *  · khoá của object SẮP XẾP; giá trị `undefined` bị bỏ (như `JSON.stringify`);
+ *  · `Date` → chuỗi ISO (giống cách jsonb lưu), `bigint` → chuỗi số;
+ *  · số không hữu hạn (`NaN`, `Infinity`) → `null` (như `JSON.stringify`).
+ *
+ * Hàm THUẦN, không dùng `crypto` — băm nằm ở `lib/approvals/service.ts` (chỉ máy chủ).
+ */
+export function canonicalJson(value: unknown): string {
+  const chuan = (v: unknown): unknown => {
+    if (v === null || v === undefined) return v ?? null;
+    if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.toISOString();
+    if (typeof v === "bigint") return v.toString();
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    if (Array.isArray(v)) return v.map((x) => (x === undefined ? null : chuan(x)));
+    if (typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const k of Object.keys(v as Record<string, unknown>).sort()) {
+        const x = (v as Record<string, unknown>)[k];
+        if (x !== undefined) out[k] = chuan(x);
+      }
+      return out;
+    }
+    return v;
+  };
+  return JSON.stringify(chuan(value));
+}
+
+/**
+ * Nhóm ĐÃ NỐI vào một thao tác thật (có lời gọi `guardSecondApproval` mang nhóm đó). Công tắc cưỡng
+ * chế chỉ bật được những nhóm này: bật một nhóm chưa nối là một công tắc không chặn được gì, và nó
+ * làm người bật tưởng mình đã được bảo vệ. `tests/company-os-control-plane.test.ts` quét mã nguồn để
+ * danh sách này không trôi khỏi thực tế.
+ *
+ * `COD_CORRECTION` · `LOGISTICS_OVERRIDE`: chưa có Server Action nào. `ADS_BUDGET_MUTATION`: CỐ Ý
+ * không nối — đường ghi ngân sách có phiếu duyệt ký HMAC riêng (docs/marketing-ai-department.md).
+ */
+export const APPROVAL_GROUPS_WIRED: readonly ApprovalGroup[] = [
+  "INVENTORY_ADJUSTMENT",
+  "INVENTORY_WRITE_OFF",
+  "EXPENSE_EDIT",
+  "PAYROLL_EDIT",
+  "PURCHASING_LARGE",
+  "BUSINESS_RULE_CHANGE",
+];
+
+function docJson(raw: unknown): unknown {
+  if (typeof raw !== "string") return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cấu hình cưỡng chế CÓ HIỆU LỰC — đọc từ giá trị THÔ của khoá `approval.enforce.v2` (cột TEXT).
+ *
+ * LỖI THẬT tìm ra ở bản này (Company OS · Agent G): cổng cũ đưa thẳng CHUỖI JSON vào `isEnforced`, mà
+ * `isEnforced` chỉ nhận object — nên cưỡng chế KHÔNG BAO GIỜ bật. Sửa lỗi đọc mà vẫn đọc khoá cũ thì
+ * một dòng gõ tay chưa từng có hiệu lực sẽ BỖNG có hiệu lực ngay buổi sáng sau deploy, và chủ shop
+ * (làm một mình) bị `BLOCKED_NO_APPROVER` chặn khỏi việc kho / lương. Nên chỉ hình dạng v2
+ * (`{ v: 2, groups: {...} }`) — thứ chỉ công tắc ADMIN ghi — mới có hiệu lực. Mọi thứ khác ⇒ `null` ⇒ TẮT.
+ */
+export function parseEnforceConfig(raw: unknown): Record<string, unknown> | null {
+  const v = docJson(raw);
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  if (o.v !== 2) return null;
+  const g = o.groups;
+  return g && typeof g === "object" && !Array.isArray(g) ? (g as Record<string, unknown>) : null;
+}
+
+/**
+ * Đọc dòng CŨ (`approval.enforce`, hình dạng `{ NHÓM: true }`) để HIỆN cho quản trị viên. Trả các nhóm
+ * được khai `true` (chỉ nhóm có trong sổ), hoặc `null` khi không có / không đọc được. Không bao giờ
+ * dùng để quyết định cưỡng chế.
+ */
+export function parseLegacyEnforceConfig(raw: unknown): { groups: ApprovalGroup[]; unknownKeys: string[] } | null {
+  const v = docJson(raw);
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const groups: ApprovalGroup[] = [];
+  const unknownKeys: string[] = [];
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if ((APPROVAL_GROUPS as readonly string[]).includes(k)) {
+      if (val === true) groups.push(k as ApprovalGroup);
+    } else unknownKeys.push(k);
+  }
+  return { groups, unknownKeys };
+}
+
+/**
+ * Chuyển dòng cũ thành v2 — hàm THUẦN, đầu vào của nút "Áp dụng cấu hình này". Chỉ nhóm ĐÃ NỐI mới vào
+ * v2 (nhóm chưa nối bật lên cũng không chặn được gì); nhóm chưa nối và khoá lạ được TRẢ RA để màn hình
+ * nói thẳng phần nào không áp.
+ */
+export function legacyToV2(legacy: { groups: ApprovalGroup[]; unknownKeys: string[] }): { config: EnforceConfigV2; applied: ApprovalGroup[]; ignored: string[] } {
+  const applied = legacy.groups.filter((g) => APPROVAL_GROUPS_WIRED.includes(g));
+  const ignored = [...legacy.groups.filter((g) => !APPROVAL_GROUPS_WIRED.includes(g)), ...legacy.unknownKeys];
+  return { config: { v: 2, groups: Object.fromEntries(applied.map((g) => [g, true])) }, applied, ignored };
 }

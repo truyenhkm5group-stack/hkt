@@ -11,6 +11,7 @@ import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import { activeSupplierNames } from "@/lib/queries/suppliers";
 import { listMarketerPrices, type MarketerPriceRow } from "@/lib/queries/marketer-price";
 import { getWorkshopLedger, workshopFormOptions, type BatchView } from "@/lib/queries/workshop-ledger";
+import { getProductionVariance, VARIANCE_SOURCE_LABEL, VARIANCE_SOURCES, type ProductionVarianceRow } from "@/lib/queries/production-variance";
 import { param, type SearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { DeleteMarketerPriceButton, MarketerPriceDialog } from "./marketer-price-forms";
@@ -58,6 +59,8 @@ export default async function WorkshopLedgerPage({ searchParams }: { searchParam
     tab === "cost" ? listMarketerPrices() : Promise.resolve([] as MarketerPriceRow[]),
   ]);
   const { summary: s } = ledger;
+  // Báo cáo chênh lệch giá SX chỉ ĐỌC — nhận dòng sổ vừa đọc, không tự đọc lại bốn bảng của sổ.
+  const variance = tab === "cost" ? await getProductionVariance(ledger.products) : [];
 
   return (
     <div className="space-y-5">
@@ -112,7 +115,7 @@ export default async function WorkshopLedgerPage({ searchParams }: { searchParam
       {tab === "batches" ? <BatchesTab batches={ledger.batches} canWrite={canWrite} canPay={canPay} /> : null}
       {tab === "fabric" ? <FabricTab ledger={ledger} options={canWrite ? options : null} suppliers={suppliers} canWrite={canWrite} canPay={canPay} /> : null}
       {tab === "payments" ? <PaymentsTab payments={ledger.payments} canPay={canPay} /> : null}
-      {tab === "cost" ? <CostTab ledger={ledger} prices={prices} products={canSetPrice ? (options?.products ?? []) : null} /> : null}
+      {tab === "cost" ? <CostTab ledger={ledger} variance={variance} prices={prices} products={canSetPrice ? (options?.products ?? []) : null} /> : null}
     </div>
   );
 }
@@ -388,7 +391,7 @@ function PaymentsTab({ payments, canPay }: { payments: Ledger["payments"]; canPa
 
 // ─────────────────────────── GIÁ SX THỰC TẾ ───────────────────────────
 
-function CostTab({ ledger, prices, products }: { ledger: Ledger; prices: MarketerPriceRow[]; products: { code: string; name: string }[] | null }) {
+function CostTab({ ledger, variance, prices, products }: { ledger: Ledger; variance: ProductionVarianceRow[]; prices: MarketerPriceRow[]; products: { code: string; name: string }[] | null }) {
   const byCode = new Map<string, MarketerPriceRow[]>();
   for (const p of prices) byCode.set(p.productCode, [...(byCode.get(p.productCode) ?? []), p]);
   const now = new Date();
@@ -442,8 +445,18 @@ function CostTab({ ledger, prices, products }: { ledger: Ledger; prices: Markete
       </SectionCard>
 
       <SectionCard
-        title="Giá sản xuất thực tế theo mã hàng"
-        hint="Cộng MỌI tiền vải của mã (kể cả đợt vải chưa gán lô) và tiền công mọi lô, chia cho tổng hàng xưởng trả. MKT phụ trách đọc từ cấu hình Lương (Marketer phụ trách mã); giá báo MKT là của lô đặt gần nhất có báo giá. Cột “Giá trên phiếu kho” là giá nhập bình quân của phiếu nhập kho gần nhất — thứ báo cáo lợi nhuận đang dùng làm giá vốn. Lệch nhiều nghĩa là phiếu kho đang ghi sai giá; ERP không tự sửa phiếu."
+        title="Giá sản xuất theo mã hàng · chênh lệch với phiếu kho"
+        hint={
+          <>
+            Năm con số cho một mã, mỗi con số là lời khai của một khâu: <b>giá SX thực tế</b> = MỌI tiền vải của mã (kể cả đợt chưa gán lô) + tiền công mọi lô, chia tổng hàng xưởng trả · <b>giá lệnh SX</b> = đơn giá trên lệnh sản xuất gần nhất có ghi giá · <b>giá ước tính</b> = giá vốn dự tính chủ shop đặt ở tab Lợi nhuận danh nghĩa · <b>giá báo MKT</b> = giá đang hiệu lực hôm nay · <b>giá phiếu kho</b> = giá nhập bình quân của phiếu nhập kho gần nhất.
+            <br />
+            <br />
+            <b>Vì sao so với phiếu kho:</b> đó là con số DUY NHẤT trong năm con số thật sự đi vào giá vốn của báo cáo lợi nhuận — bốn con số kia là kế hoạch hoặc lời khai. Dòng nhỏ dưới mỗi giá là chênh = <b>phiếu kho − giá ấy</b> (dương = phiếu kho ghi cao hơn). Lệch nhiều thường là phiếu kho ghi sai giá hoặc kế hoạch sai; ERP không tự sửa phiếu. Ô “—” là CHƯA BIẾT, không phải 0 ₫.
+            <br />
+            <br />
+            Bảng này chỉ để đọc: không con số nào ở đây đi vào lợi nhuận, lương hay giá vốn.
+          </>
+        }
         padded={false}
       >
         <div className="overflow-x-auto">
@@ -451,49 +464,63 @@ function CostTab({ ledger, prices, products }: { ledger: Ledger; prices: Markete
             <TableHeader>
               <TableRow>
                 <TableHead>Mã hàng</TableHead>
-                <TableHead className="text-right">Tiền vải</TableHead>
-                <TableHead className="text-right">Tiền công</TableHead>
+                <TableHead className="text-right">Vải · công</TableHead>
                 <TableHead className="text-right">Xưởng thực trả</TableHead>
-                <TableHead className="text-right">Giá SX / chiếc</TableHead>
-                <TableHead className="text-right">Giá trên phiếu kho</TableHead>
-                <TableHead className="text-right">Chênh lệch</TableHead>
+                {VARIANCE_SOURCES.map((k) => (
+                  <TableHead key={k} className="text-right">
+                    {VARIANCE_SOURCE_LABEL[k]}
+                  </TableHead>
+                ))}
+                <TableHead className="text-right">Giá phiếu kho (mốc)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {ledger.products.length === 0 ? (
-                <EmptyRow cols={7}>Chưa có mã hàng nào trong sổ đặt xưởng.</EmptyRow>
+              {variance.length === 0 ? (
+                <EmptyRow cols={4 + VARIANCE_SOURCES.length}>Chưa có mã hàng nào trong sổ đặt xưởng hay lệnh sản xuất có ghi giá.</EmptyRow>
               ) : (
-                ledger.products.map((p) => {
-                  const diff = p.cost.unitCost != null && p.receiptUnitCost != null ? p.receiptUnitCost - p.cost.unitCost : null;
-                  return (
-                    <TableRow key={p.productCode}>
-                      <TableCell>
-                        <span className="font-mono font-semibold">{p.productCode}</span>
-                        <div className="max-w-[200px] truncate text-xs text-muted-foreground">
-                          {formatNumber(p.batches)} lô{p.productName ? ` · ${p.productName}` : ""}
-                        </div>
-                        <div className="text-[11px] text-muted-foreground">
-                          MKT {p.marketerName ?? "chưa gán"} · báo {formatVND(p.marketerPrice)}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatVND(p.cost.fabricCost)}
-                        {p.unassignedFabric ? <div className="text-xs text-amber-600 dark:text-amber-400">{formatVND(p.unassignedFabric)} chưa gán lô</div> : null}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{formatVND(p.cost.laborCost)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{formatNumber(p.cost.delivered)}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        <b className="text-base">{formatVND(p.cost.unitCost)}</b>
-                        <div className={cn("text-xs", p.cost.unitCost == null ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>{p.cost.reason}</div>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatVND(p.receiptUnitCost)}
-                        <div className="text-xs text-muted-foreground">{p.receiptAt ? `phiếu ${formatDate(p.receiptAt)}` : p.productId ? "chưa có phiếu nhập" : "mã chưa khớp sản phẩm"}</div>
-                      </TableCell>
-                      <TableCell className={cn("text-right font-medium tabular-nums", diff != null && diff !== 0 && "text-amber-600 dark:text-amber-400")}>{diff == null ? "—" : formatVND(diff, { sign: true })}</TableCell>
-                    </TableRow>
-                  );
-                })
+                variance.map((v) => (
+                  <TableRow key={`${v.productCode}:${v.productId ?? ""}`}>
+                    <TableCell>
+                      <span className="font-mono font-semibold">{v.productCode}</span>
+                      <div className="max-w-[200px] truncate text-xs text-muted-foreground">
+                        {v.workshop ? `${formatNumber(v.workshop.batches)} lô` : "chỉ có lệnh SX"}
+                        {v.productName ? ` · ${v.productName}` : ""}
+                      </div>
+                      {v.workshop ? <div className="text-[11px] text-muted-foreground">MKT {v.workshop.marketerName ?? "chưa gán"}</div> : null}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {v.workshop ? (
+                        <>
+                          {formatVND(v.workshop.cost.fabricCost)}
+                          {v.workshop.unassignedFabric ? <div className="text-xs text-amber-600 dark:text-amber-400">{formatVND(v.workshop.unassignedFabric)} chưa gán lô</div> : null}
+                          <div className="text-xs text-muted-foreground">công {formatVND(v.workshop.cost.laborCost)}</div>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{v.workshop ? formatNumber(v.workshop.cost.delivered) : "—"}</TableCell>
+                    {VARIANCE_SOURCES.map((k) => {
+                      const src = v.sources[k];
+                      const diff = v.variance[k];
+                      return (
+                        <TableCell key={k} className="text-right tabular-nums">
+                          <span className={k === "WORKSHOP_ACTUAL" ? "text-base font-bold" : undefined}>{formatVND(src.value)}</span>
+                          <div className={cn("text-xs", src.value == null ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")} title={src.note}>
+                            {src.value == null ? src.note : src.at ? `${src.note} · ${formatDate(src.at)}` : src.note}
+                          </div>
+                          <div className={cn("text-xs font-medium", diff != null && diff !== 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
+                            {diff == null ? "chênh —" : `chênh ${formatVND(diff, { sign: true })}`}
+                          </div>
+                        </TableCell>
+                      );
+                    })}
+                    <TableCell className="text-right tabular-nums">
+                      <b>{formatVND(v.baseline.value)}</b>
+                      <div className="text-xs text-muted-foreground">{v.baseline.at ? `phiếu ${formatDate(v.baseline.at)}` : v.baseline.note}</div>
+                    </TableCell>
+                  </TableRow>
+                ))
               )}
             </TableBody>
           </Table>

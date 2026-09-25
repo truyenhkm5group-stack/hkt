@@ -115,6 +115,24 @@ tỷ lệ khác nhau, nên quy đổi qua số đơn sẽ sai ở đúng những
 Cả hai là `null` khi `marginRate ≤ 0` — bán dưới giá vốn thì **không có** mức ROAS nào hoà vốn, và
 `null` nói đúng điều đó. Trả về một con số ở đây là nói dối.
 
+### CPO hoà vốn — MỘT hàm với trần CPQC/đơn của lợi nhuận danh nghĩa (Company OS · F)
+
+```
+breakEvenCpo          = maxAdCostPerOrder(contributionBeforeAds, bookedOrders)           (0 đơn ⇒ null)
+projectedBreakEvenCpo = maxAdCostPerOrder(LN góp trước QC TẠM TÍNH, bookedOrders)
+cpoHeadroom           = (CPO hoà vốn theo `basis` của dòng) − costPerOrder             (thiếu vế ⇒ null)
+```
+
+`maxAdCostPerOrder` (`lib/constants/break-even-cpo.ts`) cũng là hàm `adsCeiling` dùng cho "Trần
+CPQC/đơn" ở tab Lợi nhuận danh nghĩa. Hai màn hình đưa vào HAI TỬ SỐ khác nhau và mang HAI NHÃN khác
+nhau (`BREAK_EVEN_CPO_LABEL`): ở đây là LỢI NHUẬN GÓP (không trừ vận hành/cố định/thuế, %CP khác = 0
+vì bảng này không trừ khoản đó ở ô nào); ở tab danh nghĩa là LN RÒNG + CPQC + CP khác. Cùng đầu vào ⇒
+cùng số (`tests/company-os-economics.test.ts`). Bất biến: `cpoHeadroom ≈ profitAfterAds ÷ bookedOrders`
+(±1 ₫ làm tròn). ≤ 0 là câu trả lời thật: dòng lỗ cả khi không tiêu đồng QC nào.
+
+Sổ quyết định chép thêm `projected_profit_after_ads`, `projected_headroom`, `applied_delivery_rate`
+từ ĐÚNG dòng này (migration 0134). Dòng sổ ghi trước đó mang `NULL` = CHƯA CHỤP — không backfill.
+
 ### `headroom` — khoảng cách tới điểm hoà vốn
 
 `headroom ≥ 1 ⟺ profitAfterAds ≥ 0`. Dùng một số vô hướng thay vì so hai ROAS với nhau vì nó so
