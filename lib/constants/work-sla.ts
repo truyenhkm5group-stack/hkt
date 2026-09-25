@@ -249,6 +249,19 @@ const SOURCE_RULES: SlaRule[] = [
     alsoShownOn: "Phòng Tech AI",
   },
 
+  /* ───── Company OS · Agent G · Việc chờ duyệt ───── */
+  {
+    key: "APPROVAL",
+    label: "Yêu cầu chờ người thứ hai duyệt",
+    hours: WORK_SOURCE_SPEC.APPROVAL.slaHours,
+    why:
+      "CỐ Ý bỏ trống: chưa có hằng số hạn duyệt nào đang chạy để lấy lại, và gõ một con số mới ở đây là " +
+      "quyết thay chủ shop. Lời duyệt đã đưa ra có hạn hiệu lực riêng (APPROVAL_VALID_HOURS) — đó là hạn " +
+      "của lời duyệt, không phải hạn phải duyệt. Đặt được theo từng nhóm: khoá APPROVAL:<nhóm>.",
+    department: "MANAGEMENT",
+    alsoShownOn: "Cần xử lý",
+  },
+
   /* ───── Việc tay & định kỳ ───── */
   {
     key: "MANUAL_TASK",

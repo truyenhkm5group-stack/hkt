@@ -142,4 +142,13 @@ export const SENSITIVE_BY_PERMISSION: Record<string, SensitiveArea> = Object.fro
  * thang kinh điển. Không vai trò hệ thống nào ngoài `ADMIN` có quyền này, nên chặn ở đây không
  * lấy đi của ai thứ gì.
  */
-export const ROLE_BUILDER_FORBIDDEN: readonly string[] = ["users:manage"];
+export const ROLE_BUILDER_FORBIDDEN: readonly string[] = [
+  "users:manage",
+  /*
+    Company OS · Agent G. Quyền DUYỆT việc của người khác. Trước khi có khoá này, quyền duyệt đi
+    theo vai ADMIN / MANAGER hoặc `settings:manage` — không vai trò tuỳ chỉnh nào tự mở được nó mà
+    không kèm `settings:manage`. Cho vai tuỳ chỉnh cấp thẳng khoá này là mở một đường mới rộng hơn
+    luật cũ. Người thật sự cần thì quản trị viên cấp riêng cho tài khoản đó.
+  */
+  "approvals:decide",
+];

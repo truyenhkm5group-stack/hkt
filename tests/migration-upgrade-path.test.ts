@@ -81,6 +81,7 @@ const MOI = [
   "0131_bank_link_supplier_payment",
   "0132_company_os_models",
   "0133_company_os_inventory",
+  "0134_company_os_control_plane",
 ] as const;
 
 /*
@@ -234,6 +235,15 @@ export async function testMigrationUpgradePath() {
       kiểm dựng trên dữ liệu đẹp hơn thực tế thì nó đo một thế giới không tồn tại.
     */
     await client.query(`update departments set sort_order = 100`);
+
+    /*
+      Company OS · Agent G (0134). Một dòng nhật ký và một yêu cầu duyệt ĐANG CHỜ có từ trước — bước
+      2 kiểm rằng migration KHÔNG đoán loại tác nhân cho dòng cũ và KHÔNG dựng dấu vân tay cho yêu cầu
+      cũ (AGENTS.md mục 35).
+    */
+    assert.equal(await dem("select count(*)::int as n from information_schema.columns where table_name = 'audit_logs' and column_name = 'actor_kind'"), 0, "bước 1: cột audit_logs.actor_kind CHƯA được có — đó là thứ 0134 thêm vào");
+    await client.query(`insert into audit_logs (id, user_id, user_email, action, entity) values ('up-al1', 'up-u1', 'a@shop.vn', 'EXPENSE_UPDATE', 'EXPENSE')`);
+    await client.query(`insert into approval_requests (id, "group", action, summary, requested_by, requested_by_email) values ('up-ar1', 'EXPENSE_EDIT', 'expense.update', 'yêu cầu cũ', 'up-u1', 'a@shop.vn')`);
 
     // ══ BƯỚC 2: áp migration mới lên ĐÚNG trạng thái đó ══
     writeFileSync(soFile, JSON.stringify(so, null, 2) + "\n");
@@ -1546,6 +1556,21 @@ export async function testMigrationUpgradePath() {
 
     await client.query(`delete from tech_proposals where id = 'up-p1'`);
     await client.query(`delete from tech_tasks where id = 'up-t1'`);
+
+    // 0134: dòng cũ ở NULL (chưa biết), ràng buộc mới chặn giá trị lạ, chỉ mục chống trùng chờ duyệt chạy.
+    assert.equal(await dem("select count(*)::int as n from audit_logs where id = 'up-al1' and actor_kind is null and correlation_id is null and reason is null"), 1, "0134: dòng nhật ký cũ phải ở NULL — KHÔNG đoán là người dùng");
+    assert.equal(await dem("select count(*)::int as n from approval_requests where id = 'up-ar1' and payload_fingerprint is null and status = 'PENDING'"), 1, "0134: yêu cầu cũ giữ nguyên, không dựng dấu vân tay");
+    await assert.rejects(client.query(`insert into audit_logs (id, user_email, action, entity, actor_kind) values ('up-al2', 'x', 'x', 'X', 'ROBOT')`), "0134: loại tác nhân lạ phải bị CSDL từ chối");
+    // Người dùng riêng: `up-u1` đã bị xoá ở một khối phía trên (kiểm ON DELETE của 0084).
+    await client.query(`insert into users (id, email, name, password_hash, role) values ('up-ug', 'g@shop.vn', 'G', 'x', 'CS')`);
+    await client.query(`insert into approval_requests (id, "group", action, summary, requested_by, requested_by_email, payload_fingerprint) values ('up-ar2', 'EXPENSE_EDIT', 'expense.update', 'a', 'up-ug', 'g@shop.vn', 'fp1')`);
+    await assert.rejects(
+      client.query(`insert into approval_requests (id, "group", action, summary, requested_by, requested_by_email, payload_fingerprint) values ('up-ar3', 'EXPENSE_EDIT', 'expense.update', 'a', 'up-ug', 'g@shop.vn', 'fp1')`),
+      "0134: hai yêu cầu ĐANG CHỜ cùng dấu vân tay của cùng người phải bị chặn",
+    );
+    await client.query(`delete from approval_requests where id in ('up-ar1', 'up-ar2')`);
+    await client.query(`delete from audit_logs where id = 'up-al1'`);
+    await client.query(`delete from users where id = 'up-ug'`);
 
     // ══ BƯỚC 3: áp lại — migration phải idempotent ══
     await migrate(db, { migrationsFolder: thuMucSo });

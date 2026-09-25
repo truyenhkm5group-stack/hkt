@@ -5,6 +5,7 @@ import { ExternalLink } from "lucide-react";
 import { RowLink } from "@/components/data-table/data-table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { auditActionLabel, auditActionTone, auditEntityHref, auditEntityLabel } from "@/lib/constants/audit";
+import { AUDIT_ACTOR_KIND_LABEL, type AuditActorKind } from "@/lib/constants/audit-actor";
 import { ROLE_LABEL } from "@/lib/constants/roles";
 import { formatDateTime, formatTimeAgo } from "@/lib/format";
 import type { AuditLogRow } from "@/lib/queries/audit";
@@ -47,6 +48,10 @@ export const auditColumns: ColumnDef<AuditLogRow, unknown>[] = [
           {row.original.userEmail}
           {row.original.user ? ` · ${ROLE_LABEL[row.original.user.role]}` : ""}
         </div>
+        {/* Người hay máy — dòng cũ (trước 0134) không biết thì KHÔNG in gì, không đoán là người dùng. */}
+        {row.original.actorKind ? (
+          <div className="text-[10.5px] text-muted-foreground">{AUDIT_ACTOR_KIND_LABEL[row.original.actorKind as AuditActorKind] ?? row.original.actorKind}</div>
+        ) : null}
       </div>
     ),
   },
@@ -89,10 +94,20 @@ export const auditColumns: ColumnDef<AuditLogRow, unknown>[] = [
     header: "Chi tiết",
     enableSorting: false,
     cell: ({ row }) => {
-      const detail = row.original.detail;
-      if (detail === null || detail === undefined) return <span className="text-xs text-muted-foreground">—</span>;
+      const { detail, reason, correlationId } = row.original;
+      // Lý do và mã lần chạy là CỘT riêng từ 0134 — hiện ngay, không bắt người đọc mở JSON.
+      const phu =
+        reason || correlationId ? (
+          <div className="max-w-[320px] truncate text-[10.5px] text-muted-foreground" title={[reason, correlationId && `lần chạy ${correlationId}`].filter(Boolean).join(" · ")}>
+            {reason ? <span className="text-foreground">{reason}</span> : null}
+            {correlationId ? <span className="font-mono">{reason ? " · " : ""}#{correlationId.slice(0, 8)}</span> : null}
+          </div>
+        ) : null;
+      if (detail === null || detail === undefined) return phu ?? <span className="text-xs text-muted-foreground">—</span>;
       const text = JSON.stringify(detail, null, 2);
       return (
+        <div>
+        {phu}
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="block max-w-[320px] cursor-help truncate text-xs text-muted-foreground">{summarizeDetail(detail)}</span>
@@ -101,6 +116,7 @@ export const auditColumns: ColumnDef<AuditLogRow, unknown>[] = [
             <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4">{text.length > 1500 ? `${text.slice(0, 1500)}…` : text}</pre>
           </TooltipContent>
         </Tooltip>
+        </div>
       );
     },
   },

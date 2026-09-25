@@ -13,6 +13,7 @@ import { assignableUsers } from "@/lib/actions/alerts";
 import { CASE_STATUS_LABEL, CASE_STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TEAM_LABEL, type CasePriority, type CaseStatus, type CaseTeam, type CaseType } from "@/lib/constants/action-queue";
 import { QueueFilters } from "@/app/(dashboard)/alerts/queue-filters";
 import { ApprovalSection } from "@/app/(dashboard)/alerts/approval-section";
+import { ApprovalEnforcePanel } from "@/app/(dashboard)/alerts/approval-enforce-panel";
 import { CareDrawerHost, CareOpenButton } from "@/app/(dashboard)/shipments/care-drawer";
 import { InfoHint } from "@/components/info-hint";
 import { QueueViewTabs } from "@/components/queue-view-tabs";
@@ -220,6 +221,9 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
           />
         </SectionCard>
       ) : null}
+
+      {/* Company OS · G — công tắc cưỡng chế duyệt hai bước: CHỈ quản trị viên, tự ẩn với người khác. */}
+      {user.role === "ADMIN" ? <ApprovalEnforcePanel /> : null}
 
       {canConfig ? (
         <SectionCard

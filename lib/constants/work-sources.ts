@@ -42,6 +42,8 @@ export const WORK_SOURCES = [
   "INVENTORY_EXCEPTION",
   "ALERT",
   "TECH_TASK",
+  // Company OS · Agent G — phép chiếu của `approval_requests` đang chờ.
+  "APPROVAL",
   "MANUAL_TASK",
   "RECURRING_TASK",
 ] as const;
@@ -307,6 +309,36 @@ export const WORK_SOURCE_SPEC: Record<WorkSource, WorkSourceSpec> = {
     */
     actions: ["OPEN_SOURCE"],
   },
+  /*
+    ═══ Company OS · Agent G · YÊU CẦU PHÊ DUYỆT HAI BƯỚC — PHÉP CHIẾU ═══
+
+    `approval_requests` là MIỀN và giữ trạng thái của chính nó (PENDING → APPROVED/REJECTED →
+    EXECUTED/EXPIRED). Việc chỉ ĐÓNG qua `decideApproval` — không có nút "xong" nào trên hàng đợi,
+    vì một nút như vậy là giấu một yêu cầu mà người xin vẫn đang chờ (AGENTS.md mục 19).
+
+    KHÔNG trùng độ mịn với cảnh báo nào: yêu cầu duyệt không đi qua bảng `notifications`, nên không
+    loại cảnh báo nào phải khai thêm vào `ALERT_KINDS_OWNED_ELSEWHERE`.
+
+    PHÒNG `MANAGEMENT`: người duyệt được là quản trị viên / quản lý (quyền `approvals:decide`) — cùng
+    tiền lệ với `TECH_TASK` và nhóm việc `DATA`: việc chờ CHỦ SHOP quyết. HẠN `null`: chưa có hằng
+    số hạn duyệt nào đang chạy để lấy lại (AGENTS.md mục 22 cấm gõ một con số mới); chủ shop đặt được
+    ở cấu hình hạn xử lý, khoá `APPROVAL` hoặc `APPROVAL:<nhóm>`.
+  */
+  APPROVAL: {
+    key: "APPROVAL",
+    label: "Việc chờ duyệt",
+    why: "Một người đang đứng chờ người thứ hai gật — việc của họ không đi tiếp được cho tới khi có người quyết.",
+    statusAuthority: "SOURCE",
+    // Bảng yêu cầu không có cột người phụ trách; lớp công việc là nơi duy nhất giữ ô này.
+    assigneeAuthority: "WORK",
+    department: "MANAGEMENT",
+    businessEntity: "NONE",
+    slaHours: null,
+    outcomeAttributable: true,
+    // CHỈ NÚT MỞ: duyệt / từ chối có lý do bắt buộc nằm ở trang Cần xử lý, nơi người duyệt đọc được
+    // vì sao việc đó cần người thứ hai. Nút bấm-một-phát ở đây sẽ bỏ qua đúng đoạn đọc ấy.
+    actions: ["OPEN_SOURCE"],
+  },
   MANUAL_TASK: {
     key: "MANUAL_TASK",
     label: "Việc giao tay",
@@ -446,6 +478,18 @@ export const ALERT_STATUS_TO_WORK: Record<CaseStatus, WorkStatus> = {
   // Đóng vì thôi theo dõi: KHÔNG phải đã xử lý. Xếp vào `CANCELLED` để không bị đếm là thành tích.
   CLOSED_STALE: "CANCELLED",
   IGNORED: "CANCELLED",
+};
+
+/**
+ * Yêu cầu phê duyệt → ngôn ngữ chung (Company OS · Agent G). Duyệt HAY từ chối đều là việc của người
+ * duyệt ĐÃ XONG; hết hạn là không ai quyết — `CANCELLED`, không được đếm là thành tích.
+ */
+export const APPROVAL_STATUS_TO_WORK: Record<"PENDING" | "APPROVED" | "REJECTED" | "EXPIRED" | "EXECUTED", WorkStatus> = {
+  PENDING: "NEW",
+  APPROVED: "DONE",
+  REJECTED: "DONE",
+  EXECUTED: "DONE",
+  EXPIRED: "CANCELLED",
 };
 
 /** Lá chắn khai báo — mọi nguồn phải có bộ nút và lời giải thích. Kiểm ở `tests/work-os.test.ts`. */
