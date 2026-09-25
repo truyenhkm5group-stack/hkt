@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { parseAsString, useQueryState } from "nuqs";
 import { Loader2, Pencil, Target } from "lucide-react";
 import { toast } from "sonner";
@@ -37,46 +36,47 @@ export function EstimatedCostControl({
   const [value, setValue] = React.useState(current ? String(current.unitCost) : "");
   const [reason, setReason] = React.useState(current?.reason ?? "");
   const [pending, startTransition] = React.useTransition();
-  const router = useRouter();
   const so = docSoTien(value);
   const hopLe = Number.isFinite(so) && so > 0 && reason.trim().length >= 3;
 
   if (!canWrite) return current ? <span className="text-[10.5px] text-muted-foreground">dự tính · {current.setBy ?? "—"}</span> : null;
 
-  const luu = () =>
+  // Một lượt dựng trang, và popover đóng NGAY khi bấm — xem chú thích ở `ReturnRateOverride`
+  // (app/(dashboard)/reports/assumptions-form.tsx). Giá trị đã gõ vẫn giữ nếu máy chủ báo lỗi.
+  const luu = () => {
+    setOpen(false);
+    const id = toast.loading(`Đang lưu giá vốn dự tính ${formatVND(so)}/sp và tính lại bảng…`);
     startTransition(async () => {
       const r = await setEstimatedCost({ productId, unitCost: so, reason: reason.trim() });
-      if ("error" in r) toast.error(r.error);
-      else {
-        toast.success(`Đã đặt giá vốn dự tính ${formatVND(so)}/sp`);
-        setOpen(false);
-        router.refresh();
-      }
+      if ("error" in r) toast.error(r.error, { id });
+      else toast.success(`Đã đặt giá vốn dự tính ${formatVND(so)}/sp`, { id });
     });
-  const go = () =>
+  };
+  const go = () => {
+    setOpen(false);
+    const id = toast.loading("Đang bỏ giá vốn dự tính và tính lại bảng…");
     startTransition(async () => {
       const r = await clearEstimatedCost(productId);
-      if ("error" in r) toast.error(r.error);
+      if ("error" in r) toast.error(r.error, { id });
       else {
         setValue("");
         setReason("");
-        toast.success("Đã bỏ giá vốn dự tính — mã quay về “chưa biết giá vốn”");
-        setOpen(false);
-        router.refresh();
+        toast.success("Đã bỏ giá vốn dự tính — mã quay về “chưa biết giá vốn”", { id });
       }
     });
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         {/* Chưa có giá thì nút là LỜI MỜI, có chữ; đã đặt rồi thì chỉ còn một cây bút cạnh con số. */}
         {current ? (
-          <Button type="button" variant="ghost" size="icon" className="size-6" title="Sửa giá vốn dự tính" aria-label="Sửa giá vốn dự tính">
-            <Pencil className="size-3" />
+          <Button type="button" variant="ghost" size="icon" className="size-6" title={pending ? "Đang lưu và tính lại bảng…" : "Sửa giá vốn dự tính"} aria-label="Sửa giá vốn dự tính">
+            {pending ? <Loader2 className="size-3 animate-spin" /> : <Pencil className="size-3" />}
           </Button>
         ) : (
           <Button type="button" variant="outline" size="sm" className="h-7 gap-1 px-2 text-[11px]">
-            <Pencil className="size-3" /> Đặt giá dự tính
+            {pending ? <Loader2 className="size-3 animate-spin" /> : <Pencil className="size-3" />} Đặt giá dự tính
           </Button>
         )}
       </PopoverTrigger>
@@ -124,16 +124,20 @@ export function RateOverridePopover(props: {
   canWrite: boolean;
   mature?: boolean;
 }) {
+  const [open, setOpen] = React.useState(false);
+  const [pending, setPending] = React.useState(false);
+  const dong = React.useCallback(() => setOpen(false), []);
   if (!props.canWrite) return null;
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button type="button" variant="ghost" size="icon" className="size-6" title="Đặt tay tỷ lệ giao thành công cho mã này" aria-label="Đặt tỷ lệ giao thành công">
-          <Pencil className="size-3" />
+        <Button type="button" variant="ghost" size="icon" className="size-6" title={pending ? "Đang lưu và tính lại bảng…" : "Đặt tay tỷ lệ giao thành công cho mã này"} aria-label="Đặt tỷ lệ giao thành công">
+          {pending ? <Loader2 className="size-3 animate-spin" /> : <Pencil className="size-3" />}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-[26rem]">
-        <ReturnRateOverride {...props} />
+      {/* forceMount: ô nhập phải SỐNG khi popover đóng — lượt lưu đang chạy trong nó, và giá trị đã gõ phải còn nếu lỗi. */}
+      <PopoverContent align="end" className="w-[26rem] data-[state=closed]:hidden" forceMount>
+        <ReturnRateOverride {...props} onStart={dong} onPendingChange={setPending} />
       </PopoverContent>
     </Popover>
   );

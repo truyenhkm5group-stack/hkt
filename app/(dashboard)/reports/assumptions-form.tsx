@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
 import { Loader2, Save, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -44,7 +43,6 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
     failedToReturnPercent: String(assumptions.failedToReturnPercent ?? 0),
   });
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const num = (v: string, fallback = 0) =>
     v.trim() === "" ? fallback : Number(v);
 
@@ -72,7 +70,6 @@ export function AssumptionsForm({ assumptions, canWrite }: Props) {
       else {
         toast.success("Đã lưu giả định");
         setOpen(false);
-        router.refresh();
       }
     });
 
@@ -331,6 +328,8 @@ export function ReturnRateOverride({
   source,
   canWrite,
   mature,
+  onStart,
+  onPendingChange,
 }: {
   productId: string;
   assumptions: ProfitAssumptions;
@@ -339,13 +338,20 @@ export function ReturnRateOverride({
   canWrite: boolean;
   /** Mã đã đủ chín chưa — quyết định ghi đè TẠM có còn hiệu lực không, và câu chữ in ra. */
   mature?: boolean;
+  /**
+   * Gọi NGAY khi bấm Lưu / Bỏ đặt tay (trước khi máy chủ trả lời) — popover dùng nó để đóng lại,
+   * không bắt người dùng đứng nhìn nút quay trong lúc bảng tính lại. `pending` báo cho ô chứa biết
+   * dòng này còn đang cập nhật.
+   */
+  onStart?: () => void;
+  onPendingChange?: (pending: boolean) => void;
 }) {
   const daDat = parseDeliveryRateOverride(assumptions.overrides?.[productId]);
   const [value, setValue] = useState(daDat ? String(Math.round((100 - daDat.returnRate) * 10) / 10) : "");
   const [reason, setReason] = useState(daDat?.reason ?? "");
   const [giuMai, setGiuMai] = useState(daDat?.mode === "PERMANENT");
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
+  useEffect(() => onPendingChange?.(pending), [pending, onPendingChange]);
   if (!canWrite)
     return (
       <span className="text-xs text-muted-foreground">
@@ -353,7 +359,18 @@ export function ReturnRateOverride({
       </span>
     );
 
-  const luu = () =>
+  /*
+    ═══ MỘT LƯỢT DỰNG TRANG, KHÔNG PHẢI HAI (chủ shop báo "đặt số dự tính hơi lag", 25/09/2026) ═══
+
+    Server action của các ô này gọi `clearMemo()` + `revalidatePath("/reports")`. Trên Next 15,
+    `revalidatePath` trong server action đã trả GIAO DIỆN MỚI của trang hiện tại NGAY TRONG CÙNG
+    lượt gọi — nên `await action()` chỉ xong khi trang Báo cáo lợi nhuận đã dựng lại (đệm vừa bị xoá
+    ⇒ dựng nguội). Bản trước còn gọi thêm `router.refresh()`: một lượt dựng NGUỘI THỨ HAI y hệt, và
+    nút "Lưu" quay suốt cả hai lượt. Bỏ `router.refresh()` là bỏ đúng lượt thừa.
+  */
+  const luu = () => {
+    onStart?.();
+    const id = toast.loading(`Đang lưu tỷ lệ ${value}% và tính lại bảng…`);
     startTransition(async () => {
       const result = await setDeliveryRateOverride({
         productId,
@@ -361,24 +378,24 @@ export function ReturnRateOverride({
         reason: reason.trim(),
         mode: giuMai ? "PERMANENT" : "UNTIL_MATURE",
       });
-      if ("error" in result) toast.error(result.error);
-      else {
-        toast.success(`Đã đặt tỷ lệ giao thành công ${value}% — ${OVERRIDE_MODE_LABEL[giuMai ? "PERMANENT" : "UNTIL_MATURE"].toLowerCase()}`);
-        router.refresh();
-      }
+      if ("error" in result) toast.error(result.error, { id });
+      else toast.success(`Đã đặt tỷ lệ giao thành công ${value}% — ${OVERRIDE_MODE_LABEL[giuMai ? "PERMANENT" : "UNTIL_MATURE"].toLowerCase()}`, { id });
     });
+  };
 
-  const go = () =>
+  const go = () => {
+    onStart?.();
+    const id = toast.loading("Đang bỏ đặt tay và tính lại bảng…");
     startTransition(async () => {
       const result = await clearDeliveryRateOverride(productId);
-      if ("error" in result) toast.error(result.error);
+      if ("error" in result) toast.error(result.error, { id });
       else {
         setValue("");
         setReason("");
-        toast.success("Đã bỏ đặt tay — mã quay về thang bậc tự động");
-        router.refresh();
+        toast.success("Đã bỏ đặt tay — mã quay về thang bậc tự động", { id });
       }
     });
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
