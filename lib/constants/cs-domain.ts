@@ -15,15 +15,24 @@ import { CS_BOT_ASSIGNEES, type CsKind, type CsStatus } from "@/lib/constants/cs
  * muốn phát lại phải sang trang vận đơn, muốn duyệt hoàn cũng vậy. Và mọi con số "tồn đọng CSKH"
  * đều sai theo đúng 183 đơn vị.
  *
- * ─── LUẬT PHÂN MIỀN (không suy từ chữ trong tiêu đề) ───
+ * ─── LUẬT PHÂN MIỀN — CHỦ SHOP CHỐT 25/09/2026 ───
  *
- *  · `LOGISTICS` — việc BẮT NGUỒN TỪ TRẠNG THÁI VẬN CHUYỂN. Nhận diện bằng NGUỒN SINH RA CASE
- *    (`shipments` / sự kiện Viettel Post), không bằng từ khoá trong tiêu đề.
- *  · `CUSTOMER`  — việc bán hàng / chăm khách: chốt đơn, đổi mẫu, tư vấn, khiếu nại, giục giao.
- *  · `BY_SHIPMENT` — CÙNG MỘT LOẠI CASE nhưng miền phụ thuộc VÒNG ĐỜI của đơn, không phụ thuộc
- *    chữ nghĩa: sai SĐT / sai địa chỉ khi CHƯA có vận đơn là việc của CSKH (sửa trước khi gửi);
- *    khi ĐÃ có vận đơn đang chạy thì chính lỗi đó đang cản bưu tá giao — nó là việc của care vận
- *    đơn, nơi có nút sửa người nhận và gửi yêu cầu sang ĐVVC.
+ *   **"Chưa giao cho ĐVVC thì thuộc CSKH, giao cho ĐVVC rồi thì thuộc Vận đơn."**
+ *
+ * Một ranh giới DUY NHẤT, không phụ thuộc loại case: Viettel Post đã THẬT SỰ cầm hàng chưa. "Đã
+ * cầm" = đơn của case có một vận đơn ở chặng thuộc `CARRIER_HANDOFF_STAGES` (đã lấy hàng trở đi,
+ * kể cả đang hoàn / đã hoàn) hoặc có mốc lấy hàng — đúng định nghĩa bàn giao của AGENTS.md mục 41.
+ * "Chờ lấy hàng", "lấy thất bại", "shop huỷ lấy" là CHƯA giao ⇒ vẫn là CSKH.
+ *
+ *  · Chưa giao (chưa có đơn, chưa có vận đơn, hoặc vận đơn còn chờ lấy) ⇒ `CUSTOMER`, dù case là
+ *    sai địa chỉ, giục giao, đổi size hay khiếu nại.
+ *  · Đã giao cho ĐVVC ⇒ `LOGISTICS`, dù kiện đang chạy hay đã chốt (phát xong / đã hoàn), và dù
+ *    case là khiếu nại, đổi size, trả hàng sau khi nhận.
+ *  · Riêng `DELIVERY_FAILED` luôn là `LOGISTICS`: nó sinh ra TỪ một vận đơn đã ở tay ĐVVC.
+ *
+ * Bản trước chia theo loại case (việc về kiện đi theo kiện, việc về sản phẩm ở lại CSKH). Chủ shop
+ * chọn ranh giới theo thời điểm bàn giao vì nó không cần ai phân vân "case này là về kiện hay về
+ * sản phẩm" — nhìn vận đơn là biết của ai.
  *
  * ─── KHÔNG XOÁ GÌ CẢ ───
  *
@@ -43,23 +52,21 @@ export type CsDomain = "CUSTOMER" | "LOGISTICS";
 export type CsDomainRule = CsDomain | "BY_SHIPMENT";
 
 export const CS_KIND_DOMAIN: Record<CsKind, CsDomainRule> = {
-  // Sinh thẳng từ `shipments.stage = 'DELIVERY_FAILED'` (lib/cs/failed-delivery.ts) — chứng từ ĐVVC.
+  // Sinh thẳng từ `shipments.stage = 'DELIVERY_FAILED'` (lib/cs/failed-delivery.ts) — kiện đã ở tay ĐVVC.
   DELIVERY_FAILED: "LOGISTICS",
-  // Lỗi thông tin: trước khi gửi là việc CSKH, đang giao là việc care vận đơn.
+  // Mọi loại còn lại: theo thời điểm bàn giao cho ĐVVC (xem đầu tệp).
   WRONG_ADDRESS: "BY_SHIPMENT",
   WRONG_PHONE: "BY_SHIPMENT",
-  // Còn lại là việc bán hàng / chăm khách, kể cả khi nội dung có nhắc tới chuyện giao hàng:
-  // nguồn của chúng là hội thoại / thẻ đơn / phiếu đổi trả, không phải sự kiện Viettel Post.
-  ORDER_NOT_CREATED: "CUSTOMER",
-  EXCHANGE_SIZE: "CUSTOMER",
-  EXCHANGE_COLOR: "CUSTOMER",
-  RETURN: "CUSTOMER",
-  COMPLAINT: "CUSTOMER",
-  SIZE_ADVICE: "CUSTOMER",
-  WRONG_PRICE: "CUSTOMER",
-  URGE_DELIVERY: "CUSTOMER",
-  PHONE_VERIFY: "CUSTOMER",
-  OTHER: "CUSTOMER",
+  URGE_DELIVERY: "BY_SHIPMENT",
+  RETURN: "BY_SHIPMENT",
+  ORDER_NOT_CREATED: "BY_SHIPMENT",
+  EXCHANGE_SIZE: "BY_SHIPMENT",
+  EXCHANGE_COLOR: "BY_SHIPMENT",
+  COMPLAINT: "BY_SHIPMENT",
+  SIZE_ADVICE: "BY_SHIPMENT",
+  WRONG_PRICE: "BY_SHIPMENT",
+  PHONE_VERIFY: "BY_SHIPMENT",
+  OTHER: "BY_SHIPMENT",
 };
 
 export const CS_DOMAIN_LABEL: Record<CsDomain, string> = {
@@ -80,20 +87,20 @@ export const CS_LOGISTICS_KINDS: readonly CsKind[] = (Object.keys(CS_KIND_DOMAIN
  * care và không ai xử lý được ở đâu cả. `lib/actions/cs.ts` chặn ở lược đồ đầu vào.
  */
 export const CS_HUMAN_KINDS: readonly CsKind[] = (Object.keys(CS_KIND_DOMAIN) as CsKind[]).filter((k) => CS_KIND_DOMAIN[k] !== "LOGISTICS");
-/** Loại case mà miền phụ thuộc vòng đời gửi hàng. */
+/** Loại case mà miền phụ thuộc thời điểm bàn giao cho ĐVVC. */
 export const CS_LIFECYCLE_KINDS: readonly CsKind[] = (Object.keys(CS_KIND_DOMAIN) as CsKind[]).filter((k) => CS_KIND_DOMAIN[k] === "BY_SHIPMENT");
 
 /**
- * Miền của MỘT case. `hasActiveShipment` = đơn của case đang có vận đơn CHƯA kết thúc
- * (`shipments.is_final = false`) — đúng phép nối mà hàng đợi care dùng ở
- * `lib/queries/care-workbench.ts::loadWrongInfoCases`, để hai bên không thể kết luận lệch nhau.
+ * Miền của MỘT case. `handedOff` = đơn của case có ít nhất một vận đơn ĐVVC đã cầm hàng
+ * (`csHandedOffExists` / `isHandedOffToCarrier` trong `lib/queries/cs.ts`) — đúng mệnh đề mà trang
+ * CSKH dùng để loại ra và bàn care dùng để nhận về, để hai bên không thể kết luận lệch nhau.
  *
- * CHƯA BIẾT không tồn tại ở đây: không có vận đơn nào đang chạy nghĩa là chưa cản trở việc giao,
- * và việc đó thuộc về người đang nói chuyện với khách.
+ * CHƯA BIẾT không tồn tại ở đây: không có vận đơn nào ĐVVC đã cầm nghĩa là hàng còn ở shop, và việc
+ * đó thuộc về người đang nói chuyện với khách.
  */
-export function csDomainOf(kind: string, hasActiveShipment: boolean): CsDomain {
-  const rule = CS_KIND_DOMAIN[kind as CsKind] ?? "CUSTOMER";
-  if (rule === "BY_SHIPMENT") return hasActiveShipment ? "LOGISTICS" : "CUSTOMER";
+export function csDomainOf(kind: string, handedOff: boolean): CsDomain {
+  const rule = CS_KIND_DOMAIN[kind as CsKind] ?? "BY_SHIPMENT";
+  if (rule === "BY_SHIPMENT") return handedOff ? "LOGISTICS" : "CUSTOMER";
   return rule;
 }
 

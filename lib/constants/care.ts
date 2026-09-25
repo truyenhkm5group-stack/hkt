@@ -1,4 +1,5 @@
 import type { BucketKey } from "@/lib/constants/delivery-tower";
+import type { CsKind } from "@/lib/constants/cs";
 // Giờ mở cửa khai ở MỘT chỗ (`care-resolution.ts`, nơi đã có phép tính mốc hẹn). Gõ lại số 9 ở đây
 // là mở đường cho "sáng mai" của nút bấm nhanh lệch khỏi "sáng mai" của ô chọn giờ.
 import { WORK_DAY_START_HOUR } from "@/lib/constants/care-resolution";
@@ -127,7 +128,7 @@ export const CARE_VIEW_LABEL: Record<CareView, string> = {
 };
 
 export const CARE_VIEW_HINT: Record<CareView, string> = {
-  care: "Kiện đang trong điều kiện cần người: giao thất bại, khách không nghe máy, chờ phát lại, im lặng quá ngưỡng, thiếu dữ liệu, sai địa chỉ / SĐT — và chưa xong hoặc đã tới hạn theo dõi.",
+  care: "Kiện đang trong điều kiện cần người: giao thất bại, khách không nghe máy, chờ phát lại, im lặng quá ngưỡng, thiếu dữ liệu, sai địa chỉ / SĐT, và mọi yêu cầu của khách sau khi đơn đã giao cho ĐVVC (giục giao, trả, đổi, khiếu nại) — và chưa xong hoặc đã tới hạn theo dõi.",
   waiting: "Đội đã làm phần của mình, đang chờ khách / ĐVVC. Tới hạn hẹn thì tự quay về Cần care.",
   escalated: "Đã báo bưu cục / quản lý. Người có quyền cao hơn phải theo.",
   done: "Đội đã đóng trong 7 ngày qua. Kiện vẫn có thể còn chạy ở chiều ĐVVC.",
@@ -151,8 +152,44 @@ export const CARE_BUCKETS: BucketKey[] = ["NO_CONTACT", "DELIVERY_FAILED", "AWAI
  * dòng ấy mượn khoá `CARE_TODAY`, nên chúng vừa mang nhãn "Đã rời điều kiện cần care" vừa được đếm
  * vào rổ "Cần care" — một dòng nói hai điều trái nhau.
  */
-export type CareReasonKey = BucketKey | "WRONG_INFO" | "LEFT_CARE_CONDITION";
+/**
+ * Lý do đến TỪ CASE CSKH đã chuyển sang bàn này vì đơn ĐÃ GIAO CHO ĐVVC
+ * (`lib/constants/cs-domain.ts`, chủ shop chốt 25/09/2026: "giao cho ĐVVC rồi thì thuộc Vận đơn").
+ * Mỗi loại case đúng một lý do — `CS_KIND_CARE_REASON` là bảng ánh xạ duy nhất. `DELIVERY_FAILED`
+ * không có ở đây: kiện giao hụt đã vào bàn care qua rổ của tháp giao vận.
+ */
+export const CS_CARE_REASONS = ["WRONG_INFO", "CUSTOMER_RETURN", "CUSTOMER_COMPLAINT", "CUSTOMER_EXCHANGE", "CUSTOMER_URGING", "CUSTOMER_OTHER"] as const;
+export type CsCareReason = (typeof CS_CARE_REASONS)[number];
+export type CareReasonKey = BucketKey | CsCareReason | "LEFT_CARE_CONDITION";
+export const CS_KIND_CARE_REASON: Record<Exclude<CsKind, "DELIVERY_FAILED">, CsCareReason> = {
+  WRONG_ADDRESS: "WRONG_INFO",
+  WRONG_PHONE: "WRONG_INFO",
+  RETURN: "CUSTOMER_RETURN",
+  COMPLAINT: "CUSTOMER_COMPLAINT",
+  EXCHANGE_SIZE: "CUSTOMER_EXCHANGE",
+  EXCHANGE_COLOR: "CUSTOMER_EXCHANGE",
+  URGE_DELIVERY: "CUSTOMER_URGING",
+  SIZE_ADVICE: "CUSTOMER_OTHER",
+  WRONG_PRICE: "CUSTOMER_OTHER",
+  ORDER_NOT_CREATED: "CUSTOMER_OTHER",
+  PHONE_VERIFY: "CUSTOMER_OTHER",
+  OTHER: "CUSTOMER_OTHER",
+};
+/** Việc cần làm của từng lý do đến từ case CSKH — hiện ở cột "làm gì tiếp" của bàn care. */
+export const CS_CARE_NEXT_ACTION: Record<CsCareReason, string> = {
+  WRONG_INFO: "Xác nhận lại với khách rồi sửa người nhận / địa chỉ trên Viettel Post trước khi bưu tá đi phát.",
+  CUSTOMER_RETURN: "Hỏi rõ khách muốn gì: giữ đơn (thuyết phục · đổi) hay trả — kiện đang chạy thì phát tiếp hoặc duyệt hoàn; đã nhận rồi thì tạo phiếu đổi / trả.",
+  CUSTOMER_COMPLAINT: "Nghe khách, chụp bằng chứng, rồi chốt hướng xử lý: đổi, hoàn tiền một phần hay nhận lại hàng.",
+  CUSTOMER_EXCHANGE: "Chốt mẫu / size mới với khách; kiện chưa tới thì cân nhắc dừng phát, đã nhận thì tạo đơn đổi.",
+  CUSTOMER_URGING: "Xem kiện đang kẹt ở đâu, hối bưu cục / bưu tá, rồi báo lại khách thời gian giao dự kiến.",
+  CUSTOMER_OTHER: "Đọc case, trả lời khách; việc cần thao tác trên kiện thì làm ngay trên Viettel Post.",
+};
 export const CARE_REASON_LABEL: Record<CareReasonKey, string> = {
+  CUSTOMER_URGING: "Khách giục giao",
+  CUSTOMER_RETURN: "Khách muốn trả / không nhận",
+  CUSTOMER_COMPLAINT: "Khách khiếu nại",
+  CUSTOMER_EXCHANGE: "Khách đổi size / mẫu",
+  CUSTOMER_OTHER: "Khách cần hỗ trợ",
   CARE_TODAY: "Cần care",
   NO_CONTACT: "Khách không nghe máy",
   DELIVERY_FAILED: "Giao thất bại",

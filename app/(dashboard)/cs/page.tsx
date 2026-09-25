@@ -79,7 +79,7 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
         eyebrow="Vận hành"
         title="CSKH · Case chăm sóc khách hàng"
         description="Việc bán hàng và chăm khách: chốt đơn, đổi mẫu, sai thông tin trước khi gửi, khiếu nại, giục giao."
-        hint="Case sinh từ TRẠNG THÁI VẬN CHUYỂN (giao không thành, chờ phát lại, sai địa chỉ khi kiện đang trên đường) thuộc trang Vận đơn & care — nơi có nút phát lại, duyệt hoàn và sửa người nhận. Chúng không bị xoá: mở bộ lọc Miền để tra. Case tự phát hiện từ thẻ đơn, ghi chú đơn, phiếu đổi/trả và hội thoại chat Pancake (15 phút/lần), hoặc nhập tay."
+        hint="Chia việc theo một mốc: Viettel Post đã cầm hàng chưa. CHƯA giao cho ĐVVC (chưa có vận đơn, hoặc vận đơn còn chờ lấy) thì mọi case thuộc CSKH. ĐÃ giao cho ĐVVC thì mọi case của đơn — giao không thành, sai địa chỉ, giục giao, đổi, trả, khiếu nại — thuộc trang Vận đơn & care. Case chuyển bàn không bị xoá: mở bộ lọc Miền để tra. Case tự phát hiện từ thẻ đơn, ghi chú đơn, phiếu đổi/trả và hội thoại chat Pancake (15 phút/lần), hoặc nhập tay."
         actions={canWrite ? (<><DetectButton /><CaseDialog staff={staff} /></>) : null}
       />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -100,7 +100,7 @@ export default async function CsPage({ searchParams }: { searchParams: Promise<S
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50/60 px-3 py-2 text-[12.5px] dark:border-sky-900 dark:bg-sky-950/30">
           <Truck className="size-4 text-sky-700 dark:text-sky-300" />
           <span>
-            <b>{formatNumber(summary.logistics)}</b> case sinh từ trạng thái giao vận (giao không thành, sai địa chỉ khi kiện đang chạy…) thuộc <b>Vận đơn &amp; care</b> — không nằm trong hàng đợi này để một việc không bị giao cho hai người.
+            <b>{formatNumber(summary.logistics)}</b> case của đơn ĐÃ giao cho Viettel Post (giao không thành · sai địa chỉ · giục giao · đổi · trả · khiếu nại) thuộc <b>Vận đơn &amp; care</b> — không nằm trong hàng đợi này để một việc không bị giao cho hai người.
           </span>
           <Link href="/shipments" className="font-medium text-sky-800 underline-offset-2 hover:underline dark:text-sky-300">Mở Vận đơn &amp; care</Link>
           <Link href="/cs?domain=LOGISTICS" className="text-muted-foreground underline-offset-2 hover:underline">Xem tại đây</Link>

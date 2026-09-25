@@ -23,7 +23,7 @@ import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@
 import { careSlaHours } from "@/lib/care/sla";
 import { rawMedian, timingStat } from "@/lib/constants/care-timing";
 import { careViewOf, slaOf, type CareStateLike } from "@/lib/care/view";
-import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CARE_STATUS_LABEL, CARE_STATUSES, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus } from "@/lib/constants/care";
+import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CS_CARE_NEXT_ACTION, CS_CARE_REASONS, CS_KIND_CARE_REASON, type CsCareReason, CARE_STATUS_LABEL, CARE_STATUSES, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus } from "@/lib/constants/care";
 import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
 import { botMessageFailuresByShipment } from "@/lib/queries/cs";
 import { BUCKET_BY_KEY, CARE_ACTION_LABEL, type CareActionKind } from "@/lib/constants/delivery-tower";
@@ -39,6 +39,8 @@ import type { ShipmentStage } from "@/db/schema";
 export type { CareCase, CareCaseDetail, CareEvent, CareQueue, CareState, CarrierRequestView } from "@/lib/care/contracts";
 export { careViewOf, slaOf } from "@/lib/care/view";
 import { CARE_NOTE_PRESETS_DEFAULT, CARE_NOTE_PRESETS_KEY, type CareNotePreset } from "@/lib/constants/care";
+import type { CsKind } from "@/lib/constants/cs";
+import { CARRIER_HANDOFF_STAGES } from "@/lib/constants/carrier-handoff";
 import { CARE_DECISIONS, RESOLUTION_NOTES_DEFAULT, RESOLUTION_NOTES_KEY, RESOLUTION_NOTES_MAX } from "@/lib/constants/care-resolution";
 import { getSettingJson } from "@/lib/settings";
 /** Tên cũ — UI hiện tại đang dùng; giữ nguyên hình dạng, `CareQueue` là bản đầy đủ. */
@@ -65,6 +67,12 @@ const REASON_CLASS: Record<CareReasonKey, CareReasonClass> = {
   WAITING_CARRIER: "CARRIER_ACTION",
   // ĐVVC chưa tới lấy ⇒ việc nằm ở phía đối tác vận chuyển, không phải phía khách.
   AWAITING_PICKUP: "CARRIER_ACTION",
+  // Khách giục ⇒ việc là hối bưu cục; khách muốn trả ⇒ việc là nói chuyện với khách rồi quyết.
+  CUSTOMER_URGING: "CARRIER_ACTION",
+  CUSTOMER_RETURN: "CUSTOMER_ACTION",
+  CUSTOMER_COMPLAINT: "CUSTOMER_ACTION",
+  CUSTOMER_EXCHANGE: "CUSTOMER_ACTION",
+  CUSTOMER_OTHER: "CUSTOMER_ACTION",
   WRONG_INFO: "CUSTOMER_ACTION",
   STALE_NO_UPDATE: "DATA_FRESHNESS",
   DATA_GAP: "DATA_FRESHNESS",
@@ -544,26 +552,36 @@ const CARE_EVENT_LABEL: Record<string, string> = {
   CARRIER_MANUAL: "Xác nhận đã làm tay trên Viettel Post",
 };
 
-type WrongInfoRow = { shipment_id: string; tracking: string; order_id: string; system_id: number | null; customer: string; phone: string; cod_amount: string | number; stage: string; vtp_status_name: string | null; kind: string; title: string; opened_at: string; tuoi_gio: string | number | null; lan_hut: number };
+type CsHandoverSqlRow = { shipment_id: string; is_final: boolean; tracking: string; order_id: string; system_id: number | null; customer: string; phone: string; cod_amount: string | number; stage: string; vtp_status_name: string | null; kind: string; title: string; opened_at: string; tuoi_gio: string | number | null; lan_hut: number };
+type CsHandoverRow = CsHandoverSqlRow & { reason: CsCareReason; detail: string };
 
 /**
- * Case CSKH sai địa chỉ / SĐT còn phải làm, gắn với lần gửi ĐANG CHẠY của đơn ⇒ kiện cần sửa thông
- * tin, và care vận đơn là chủ sở hữu của nó.
+ * Một kiện mang nhiều case: lý do CHÍNH theo thứ tự khai trong `CS_CARE_REASONS` — sai thông tin
+ * cản bưu tá ngay, rồi tới khách muốn trả, khiếu nại, đổi, giục, còn lại.
+ */
+const CS_CARE_REASON_PRIORITY: readonly CsCareReason[] = CS_CARE_REASONS;
+
+/**
+ * Case CSKH đã chuyển sang bàn này vì kiện đang chạy — sai địa chỉ / SĐT, khách giục giao, khách
+ * muốn trả / không nhận — gắn với lần gửi ĐANG CHẠY của đơn. Care vận đơn là chủ sở hữu của chúng.
  *
  * Loại case và tập trạng thái lấy thẳng từ `lib/constants/cs-domain.ts` — đúng bộ mà trang CSKH
- * dùng để LOẠI chúng khỏi hàng đợi của mình. Gõ lại `'WRONG_ADDRESS', 'WRONG_PHONE'` ở đây là mở
- * đường cho hai bên lệch nhau: một loại case mới được thêm vào luật phân miền sẽ biến mất khỏi CSKH
- * mà không xuất hiện ở đây, và việc đó không còn ai làm.
+ * dùng để LOẠI chúng khỏi hàng đợi của mình. Gõ lại danh sách loại ở đây là mở đường cho hai bên
+ * lệch nhau: một loại case mới được thêm vào luật phân miền sẽ biến mất khỏi CSKH mà không xuất
+ * hiện ở đây, và việc đó không còn ai làm.
  *
  * `IN_PROGRESS` cũng phải nằm trong tập: người bấm "Đang xử lý" trên một case sai địa chỉ không làm
  * kiện hàng hết cần sửa — bỏ trạng thái đó ra thì case tự bốc hơi khỏi cả hai bàn làm việc.
+ *
+ * Trả về MỌI kiện có case chuyển sang, KỂ CẢ kiện đã nằm trong một rổ của tháp giao vận: kiện ấy đã
+ * có dòng care, nhưng lời khách ("giục", "không nhận nữa") phải đi theo lên dòng đó — nếu không, nó
+ * rời hàng đợi CSKH mà không hiện ở đâu cả.
  */
-async function loadWrongInfoCases(excludeIds: Set<string>): Promise<WrongInfoRow[]> {
+async function loadCsHandoverCases(): Promise<CsHandoverRow[]> {
   const db = await getDb();
-  const rows = rowsOf<WrongInfoRow>(
+  const rows = rowsOf<CsHandoverSqlRow>(
     await db.execute(sql`
-      select distinct on (s.id)
-             s.id as shipment_id,
+      select s.id as shipment_id, s.is_final,
              coalesce(nullif(s.vtp_order_number, ''), nullif(s.tracking_code, ''), s.id) as tracking,
              o.id as order_id, o.system_id,
              coalesce(o.bill_full_name, s.receiver_name, '') as customer,
@@ -574,12 +592,31 @@ async function loadWrongInfoCases(excludeIds: Set<string>): Promise<WrongInfoRow
              (select count(*) from shipment_events e where e.shipment_id = s.id and e.normalized_stage = 'DELIVERY_FAILED')::int as lan_hut
         from cs_cases c
         join orders o on o.id = c.order_id
-        join shipments s on s.order_id = o.id and s.is_final = false
+        /*
+          MỘT kiện cho mỗi case: trong các lần gửi ĐVVC đã cầm hàng (cùng mệnh đề với trang CSKH —
+          csHandedOffExists trong lib/queries/cs.ts), lần đang chạy trước, rồi lần mới nhất.
+          Kiện đã chốt (phát xong / đã hoàn) VẪN được nhận: sau bàn giao, mọi việc của đơn thuộc Vận đơn.
+        */
+        join lateral (
+          select s2.* from shipments s2
+           where s2.order_id = o.id
+             and (s2.stage::text in ${[...CARRIER_HANDOFF_STAGES]} or s2.picked_up_at is not null)
+           order by s2.is_final asc, s2.created_at desc
+           limit 1
+        ) s on true
        where c.status in ${CS_ACTIONABLE_STATUSES} and c.kind in ${CS_LIFECYCLE_KINDS}
        order by s.id, c.created_at desc
     `),
   );
-  return rows.filter((r) => !excludeIds.has(r.shipment_id));
+  const theoKien = new Map<string, CsHandoverSqlRow[]>();
+  for (const r of rows) theoKien.set(r.shipment_id, [...(theoKien.get(r.shipment_id) ?? []), r]);
+  const out: CsHandoverRow[] = [];
+  for (const list of theoKien.values()) {
+    const lyDo = (r: CsHandoverSqlRow): CsCareReason => CS_KIND_CARE_REASON[r.kind as Exclude<CsKind, "DELIVERY_FAILED">] ?? "CUSTOMER_OTHER";
+    const chinh = [...list].sort((a, b) => CS_CARE_REASON_PRIORITY.indexOf(lyDo(a)) - CS_CARE_REASON_PRIORITY.indexOf(lyDo(b)))[0];
+    out.push({ ...chinh, reason: lyDo(chinh), detail: list.map((r) => r.title).join(" · ") });
+  }
+  return out;
 }
 
 function vtpConfigured() {
@@ -608,7 +645,17 @@ async function buildQueue(): Promise<CareQueue> {
   const tower = await getDeliveryTower();
   const towerRows: TowerRow[] = tower.buckets.filter((b) => (CARE_BUCKETS as string[]).includes(b.key)).flatMap((b) => b.rows);
   const towerIds = new Set(towerRows.map((r) => r.shipmentId));
-  const wrongInfo = await loadWrongInfoCases(towerIds);
+  // Case CSKH chuyển sang: kiện đã có dòng tháp thì lời khách đi theo dòng đó; chưa có thì dựng dòng riêng.
+  const csChuyenSang = await loadCsHandoverCases();
+  const csTheoKien = new Map(csChuyenSang.map((w) => [w.shipment_id, w]));
+  const wrongInfo = csChuyenSang.filter((w) => !towerIds.has(w.shipment_id));
+  /*
+    Kiện ĐÃ CHỐT (phát xong / đã hoàn) có mặt ở đây chỉ vì khách còn việc sau bàn giao (khiếu nại,
+    đổi, trả). COD của nó KHÔNG còn treo ở phía giao vận ⇒ không cộng vào các tổng tiền rủi ro. Dòng
+    vẫn in COD của kiện để người đọc tra.
+  */
+  const kienDaChot = new Set(wrongInfo.filter((w) => w.is_final).map((w) => w.shipment_id));
+  const tienTreo = (c: { shipmentId: string; codAmount: number }) => (kienDaChot.has(c.shipmentId) ? 0 : c.codAmount);
 
   const db = await getDb();
   // "Đã xử lý" 7 ngày gần nhất — kể cả kiện đã rời điều kiện cần care.
@@ -791,6 +838,16 @@ async function buildQueue(): Promise<CareQueue> {
   };
 
   for (const r of towerRows) {
+    /*
+      LỜI KHÁCH ĐI THEO LÊN DÒNG CỦA KIỆN.
+
+      Kiện đã nằm trong một rổ của tháp ⇒ không dựng dòng thứ hai; lời khách ("giục", "không nhận")
+      ghép vào chi tiết. Riêng rổ THIẾU / CŨ DỮ LIỆU (`DATA_FRESHNESS`) không tính là việc — nhưng
+      khách đang giục đúng kiện ấy thì đó là việc thật, nên lý do của khách thành lý do chính. Không
+      làm vậy thì case rời hàng đợi CSKH và chìm vào mục "thiếu dữ liệu", không ai làm.
+    */
+    const kh = csTheoKien.get(r.shipmentId);
+    const theoKhach = kh && REASON_CLASS[r.bucket] === "DATA_FRESHNESS";
     push({
       shipmentId: r.shipmentId,
       tracking: r.tracking,
@@ -800,10 +857,10 @@ async function buildQueue(): Promise<CareQueue> {
       phone: r.phone,
       codAmount: r.codAmount,
       carrier: { stage: r.stage, stageLabel: r.stageLabel, vtpStatus: r.rawStatusCode, rawStatus: r.rawStatus, ageHours: r.lastEventAgeHours, failedAttempts: r.failedAttempts, leftWarehouse: r.leftWarehouse },
-      reason: r.bucket,
-      reasonLabel: CARE_REASON_LABEL[r.bucket],
-      reasonDetail: r.reasonLabel,
-      nextAction: BUCKET_BY_KEY[r.bucket].nextAction,
+      reason: theoKhach ? kh.reason : r.bucket,
+      reasonLabel: CARE_REASON_LABEL[theoKhach ? kh.reason : r.bucket],
+      reasonDetail: kh ? `${r.reasonLabel} · ${CARE_REASON_LABEL[kh.reason]}: ${kh.detail}` : r.reasonLabel,
+      nextAction: theoKhach ? CS_CARE_NEXT_ACTION[kh.reason] : BUCKET_BY_KEY[r.bucket].nextAction,
       queueSince: queueSinceOf(r.shipmentId, null),
       inCareCondition: true,
       lastCareAction: r.lastCsAction ? { label: r.lastCsAction, at: r.lastCsActionAt ?? now, byHuman: r.lastCsActionByHuman } : null,
@@ -819,11 +876,11 @@ async function buildQueue(): Promise<CareQueue> {
       customer: w.customer || "Khách chưa có tên",
       phone: w.phone,
       codAmount: Number(w.cod_amount ?? 0),
-      carrier: { stage: w.stage, stageLabel: SHIPMENT_STAGE_LABEL[w.stage as keyof typeof SHIPMENT_STAGE_LABEL] ?? w.stage, vtpStatus: null, rawStatus: w.vtp_status_name || "Chưa có trạng thái", ageHours: w.tuoi_gio === null ? null : Number(w.tuoi_gio), failedAttempts: Number(w.lan_hut ?? 0), leftWarehouse: false },
-      reason: "WRONG_INFO",
-      reasonLabel: CARE_REASON_LABEL.WRONG_INFO,
-      reasonDetail: w.title,
-      nextAction: "Xác nhận lại với khách rồi sửa người nhận / địa chỉ trên Viettel Post trước khi bưu tá đi phát.",
+      carrier: { stage: w.stage, stageLabel: SHIPMENT_STAGE_LABEL[w.stage as keyof typeof SHIPMENT_STAGE_LABEL] ?? w.stage, vtpStatus: null, rawStatus: w.vtp_status_name || "Chưa có trạng thái", ageHours: w.tuoi_gio === null ? null : Number(w.tuoi_gio), failedAttempts: Number(w.lan_hut ?? 0), leftWarehouse: true },
+      reason: w.reason,
+      reasonLabel: CARE_REASON_LABEL[w.reason],
+      reasonDetail: w.detail,
+      nextAction: CS_CARE_NEXT_ACTION[w.reason],
       queueSince: new Date(w.opened_at),
       inCareCondition: true,
       lastCareAction: null,
@@ -883,7 +940,7 @@ async function buildQueue(): Promise<CareQueue> {
   const byReasonMap = new Map<CareReasonKey, { count: number; money: number }>();
   for (const c of careCases) {
     const cur = byReasonMap.get(c.reason) ?? { count: 0, money: 0 };
-    byReasonMap.set(c.reason, { count: cur.count + 1, money: cur.money + c.codAmount });
+    byReasonMap.set(c.reason, { count: cur.count + 1, money: cur.money + tienTreo(c) });
   }
   /*
     ═══ "CÒN TREO" BỔ RA BA CON SỐ — MỘT PHÉP BỔ, KHÔNG PHẢI MỘT BỘ LỌC THỨ HAI ═══
@@ -897,7 +954,7 @@ async function buildQueue(): Promise<CareQueue> {
   for (const c of careCases) {
     const g = backlogGroups[careBacklogGroup(c.history?.rounds ?? 0, c.care.followUpAt, now)];
     g.count += 1;
-    g.money += c.codAmount;
+    g.money += tienTreo(c);
   }
 
   const byOwnerMap = new Map<string, { ownerId: string | null; name: string; open: number; overdue: number; notStarted: number; money: number }>();
@@ -909,7 +966,7 @@ async function buildQueue(): Promise<CareQueue> {
     // VIỆC ĐÃ NẰM TRONG TAY MÀ CHƯA AI MỞ RA — 22 đợt như vậy trên production 22/09/2026, và
     // trước bản này không con số nào trên màn hình đếm chúng.
     if ((c.history?.rounds ?? 0) === 0) cur.notStarted += 1;
-    cur.money += c.codAmount;
+    cur.money += tienTreo(c);
     byOwnerMap.set(key, cur);
   }
 
@@ -919,7 +976,7 @@ async function buildQueue(): Promise<CareQueue> {
     counts,
     byReason: [...byReasonMap.entries()].map(([reason, v]) => ({ reason, label: CARE_REASON_LABEL[reason], ...v })).sort((a, b) => b.count - a.count),
     byOwner: [...byOwnerMap.values()].sort((a, b) => b.overdue - a.overdue || b.open - a.open),
-    moneyAtRisk: careCases.reduce((a, c) => a + c.codAmount, 0),
+    moneyAtRisk: careCases.reduce((a, c) => a + tienTreo(c), 0),
     overdue: careCases.filter((c) => c.sla.firstResponseBreached || c.sla.resolveBreached).length,
     unassigned: careCases.filter((c) => !c.care.owner).length,
     backlogGroups,
