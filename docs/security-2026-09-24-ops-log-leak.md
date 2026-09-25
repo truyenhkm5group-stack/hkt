@@ -168,6 +168,7 @@ một câu lý do; thao tác nằm ngoài cả hai làm bài kiểm đỏ.
 | `care-outcome-before-open` | từng đợt kèm TÊN nhân viên được quy kết quả cứu đơn | tóm tắt: số đợt, số đã sửa |
 | `fanpage-evidence-backfill` | bảng page → TÊN marketer | tóm tắt: số page theo kết luận, số phân công tạo / bỏ qua |
 | `cod-statement-audit` *(thêm 25/09/2026)* | không in dữ liệu cá nhân — mọi dòng đều qua kênh tóm tắt; bọc mã hoá để phần in thêm (nếu có) không ra log | tóm tắt: số theo tab /cod, quá hạn theo ngày giao, đợt tiền VTP (ngày · số tiền · số bảng kê) so với tệp đã nhận, các lần nhập tệp (loại tệp · số dòng · lỗi đã che), sổ chứng từ, nhịp tim script Gmail |
+| `stock-wait-summary` *(thêm 25/09/2026)* | không in dữ liệu cá nhân — danh sách đơn đang chờ (tên khách) chỉ được ĐẾM theo nhóm, không in dòng nào; bọc mã hoá để phần in thêm (nếu có) không ra log | tóm tắt: GTC theo khoảng ngày chờ / miền / vùng / 8 tỉnh nhiều đơn nhất, bảng chéo chờ × miền, điểm gãy, số đơn đang chờ theo khoảng · miền, 14 ngày gần nhất, tiêu đề đề xuất |
 
 Hai thao tác gốc giữ nguyên chế độ tổng hợp và **từ chối** cờ in dữ liệu cá nhân (exit 64):
 `marketing-calibrate --explain`, `vtp-replay-files --explain`.

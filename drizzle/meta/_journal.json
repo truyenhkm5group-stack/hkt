@@ -883,6 +883,13 @@
       "when": 1790002348245,
       "tag": "0126_payroll_autopilot",
       "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "7",
+      "when": 1790002408245,
+      "tag": "0127_stock_wait_log",
+      "breakpoints": true
     }
   ]
 }

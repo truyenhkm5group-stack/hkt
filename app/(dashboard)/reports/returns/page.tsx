@@ -1,4 +1,4 @@
-import { AlertTriangle, Download, FlaskConical, PackageCheck, Percent, Truck, Undo2 } from "lucide-react";
+import { AlertTriangle, Download, FlaskConical, PackageCheck, Percent, Timer, Truck, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { ReturnRateTable } from "@/app/(dashboard)/reports/returns/return-rate-table";
 import { ActionBoard } from "@/app/(dashboard)/reports/returns/action-board";
@@ -205,6 +205,12 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
               </Button>
             ) : null}
             {/* Tỷ lệ giao thành công là đòn bẩy lợi nhuận mạnh nhất — mở thẳng sang chỗ tính thử */}
+            {/* Khách chờ bao lâu và ở vùng nào — hai yếu tố vận hành đứng sau tỷ lệ này */}
+            <Button asChild variant="outline" size="sm">
+              <Link href="/reports/stock-wait">
+                <Timer className="size-4" /> Chờ hàng & GTC
+              </Link>
+            </Button>
             <Button asChild variant="outline" size="sm">
               <Link href="/reports/scenario">
                 <FlaskConical className="size-4" /> Mô phỏng kịch bản

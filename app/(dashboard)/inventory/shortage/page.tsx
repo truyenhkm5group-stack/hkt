@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlarmClock, Boxes, Factory, HelpCircle, PackageX, Truck } from "lucide-react";
+import { AlarmClock, Boxes, Factory, HelpCircle, PackageX, Timer, Truck } from "lucide-react";
 import { InfoHint } from "@/components/info-hint";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -81,6 +81,11 @@ export default async function StockShortagePage({ searchParams }: { searchParams
             <Button asChild variant="outline" size="sm">
               <Link href="/operations/fulfillment">
                 <Truck className="size-4" /> Nút thắt rời kho
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/reports/stock-wait">
+                <Timer className="size-4" /> Chờ hàng & GTC theo ngày
               </Link>
             </Button>
           </div>
