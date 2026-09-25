@@ -14,7 +14,7 @@ import { formatNumber, formatVND, MISSING_TEXT } from "@/lib/format";
  *  · `deriveModelSuggestions` — khối "Đề xuất": CHỈ dựng từ quyết định ĐÃ CÓ của các bộ máy (quảng cáo,
  *    tồn kho, tín hiệu mẫu). Không có quyết định ⇒ không có đề xuất; thiếu dữ liệu ⇒ không có đề xuất.
  *    Mọi đề xuất là HIỂN THỊ — người bấm, không có gì tự áp (luật 23, target-architecture Q9).
- *  · `MODEL_360_PENDING_SOURCES` — ĐIỂM NỐI DUY NHẤT cho hai hàm đọc chưa có (Agent C, Agent E).
+ *  · `MODEL_360_PENDING_SOURCES` — ĐIỂM NỐI DUY NHẤT cho hàm đọc còn chờ (hôm nay rỗng).
  */
 
 // ─────────────────────────── NGUỒN ĐỌC KHÔNG LÀM SẬP TRANG ───────────────────────────
@@ -73,7 +73,8 @@ export const MODEL_360_BLOCK_ACCESS = {
   STOCK: { permission: "products:view", resource: null, home: "/products" },
   ECONOMICS: { permission: "reports:nominal", resource: "REPORTS", home: "/reports?tab=nominal" },
   INVENTORY: { permission: "planning:view", resource: null, home: "/inventory/decisions" },
-  PRODUCTION: { permission: "planning:view", resource: null, home: "/inventory/planning/orders" },
+  PRODUCTION: { permission: "planning:view", resource: null, home: "/production" },
+  RETURNS: { permission: "products:view", resource: "RETURNS", home: "/inventory/returns#hang-khong-tai-nhap" },
 } as const;
 
 export type Model360Block = keyof typeof MODEL_360_BLOCK_ACCESS;
@@ -95,32 +96,21 @@ export function redactSignalReasons(reasons: readonly SignalReason[], allowed: (
   return reasons.map((r) => (allowed(SIGNAL_SOURCE_BLOCK[r.source]) ? r : { ...r, detail: `Cần quyền xem ${MODEL_360_BLOCK_ACCESS[SIGNAL_SOURCE_BLOCK[r.source]].home} để đọc chi tiết.` }));
 }
 
-// ─────────────────────────── ĐIỂM NỐI CHO C VÀ E ───────────────────────────
+// ─────────────────────────── ĐIỂM NỐI CHO HÀM ĐỌC CHƯA CÓ ───────────────────────────
 
 /**
- * ═══ ĐIỂM NỐI DUY NHẤT ═══
+ * ═══ ĐIỂM NỐI DUY NHẤT cho hàm đọc theo hợp đồng chung §6 mà trang còn CHỜ ═══
  *
- * Hai hàm đọc theo hợp đồng chung §6 CHƯA có ở kho mã khi A2 dựng trang. Trang KHÔNG dựng thay thế
- * (một bản "gần giống" là công thức thứ hai). Khi hàm có thật:
- *   1. Agent C / E xoá dòng của mình khỏi danh sách này;
- *   2. gọi hàm trong đúng khối `block` của `app/(dashboard)/models/[id]/blocks.tsx` (tìm "ĐIỂM NỐI").
- * `tests/company-os-model-360.test.ts` đỏ khi hàm đã được export mà dòng vẫn còn đây — danh sách chờ
- * phải nói thật.
+ * Trang KHÔNG dựng thay thế cho một hàm chưa có (một bản "gần giống" là công thức thứ hai). Hàm nào còn
+ * chờ thì khai ở đây; khi hàm có thật: gỡ dòng và gọi hàm qua `loadSource` trong khối `block` của
+ * `app/(dashboard)/models/[id]/blocks.tsx`. `tests/company-os-model-360.test.ts` đỏ khi hàm đã được export
+ * mà dòng vẫn còn — danh sách chờ phải nói thật.
+ *
+ * Hôm nay RỖNG: `getModelProductionSummary` (C) đã nối vào khối Sản xuất, `getModelReturnDispositions` (E)
+ * vào khối Kết cục hàng hoàn.
  */
-export const MODEL_360_PENDING_SOURCES = [
-  {
-    fn: "getModelProductionSummary",
-    owner: "C",
-    block: "PRODUCTION",
-    what: "Topic hỏi giá xưởng · báo giá (costing) đã chốt · mẫu thử mới nhất",
-  },
-  {
-    fn: "getModelReturnDispositions",
-    owner: "E",
-    block: "STOCK",
-    what: "Kết quả xử lý hàng hoàn (sửa lại / huỷ / bán lại)",
-  },
-] as const;
+export type PendingSource = { fn: string; owner: string; block: Model360Block; what: string };
+export const MODEL_360_PENDING_SOURCES: readonly PendingSource[] = [];
 
 // ─────────────────────────── ĐỀ XUẤT ───────────────────────────
 
@@ -159,6 +149,13 @@ export type SuggestionInput = {
   inventory: { rows: SuggestionInventoryRow[]; dataGate: "BETA" | "DATA_INSUFFICIENT" } | null;
   /** Link tạo creative mới / thư viện creative của mẫu (nếu có sản phẩm). */
   creativeHref: string | null;
+  /**
+   * Topic sản xuất của mẫu (Agent C · `getModelProductionSummary`). `null` = không đọc được / người xem
+   * không có quyền xem sản xuất ⇒ CHƯA BIẾT có topic hay chưa.
+   */
+  production: { openTopics: number } | null;
+  /** Người xem có `production:write` ⇒ đề xuất kèm link "Tạo topic sản xuất". */
+  canCreateTopic: boolean;
   periodQuery: string;
 };
 
@@ -232,19 +229,21 @@ export function deriveModelSuggestions(i: SuggestionInput): ModelSuggestion[] {
   }
 
   // ── 3. Tín hiệu THẮNG mà vòng đời chưa tới bước trao đổi sản xuất ⇒ đề xuất CHUYỂN trạng thái ──
-  if (i.signal && i.signal.signal === "WINNER" && BEFORE_PRODUCTION_DISCUSSION.includes(i.declaredState)) {
+  //    Đã có topic ĐANG MỞ ⇒ không đề xuất mở trao đổi lần nữa: việc đó đang diễn ra ở /production.
+  const topicDangMo = (i.production?.openTopics ?? 0) > 0;
+  if (i.signal && i.signal.signal === "WINNER" && BEFORE_PRODUCTION_DISCUSSION.includes(i.declaredState) && !topicDangMo) {
     out.push({
       key: "lifecycle-production-discussion",
       source: "SIGNAL",
       what: "Cân nhắc mở trao đổi sản xuất cho mẫu",
       why: `Tín hiệu mẫu là ${MODEL_SIGNAL_LABEL.WINNER} trong khi trạng thái khai là ${i.declaredState ? MODEL_STATE_LABELS[i.declaredState] : "Chưa khai"}.`,
       data: i.signal.summary,
-      links: [],
+      links: i.canCreateTopic ? [{ label: "Tạo topic sản xuất", href: `/production/topics/new?model=${encodeURIComponent(i.modelId)}` }] : [],
       transition: {
         to: "PRODUCTION_DISCUSSION",
         reason: `Tín hiệu mẫu: THẮNG (${i.signal.summary}) — mở trao đổi sản xuất.`,
       },
-      caveat: null,
+      caveat: i.production === null ? "Không đọc được topic sản xuất của mẫu (hoặc bạn không có quyền xem) — có thể đã có topic đang mở." : null,
     });
   }
   return out;

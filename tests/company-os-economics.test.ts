@@ -10,6 +10,7 @@ import { adsCeiling } from "@/lib/constants/estimated-cost";
 import type { ProductCostView } from "@/lib/queries/workshop-ledger";
 import { buildDecisionRow, getAdsDecision, type AdsDecisionAgg } from "@/lib/queries/ads-decision";
 import { ledgerRowValues, upsertLedgerValues } from "@/lib/marketing/decision-ledger";
+import { getModelAdsSummary } from "@/lib/queries/model-ads";
 import { buildModelEconomics, getModelEconomics, type EconomicsLineKey, type ModelEconomics } from "@/lib/queries/model-economics";
 import { getNominalProfitReport, type NominalRow } from "@/lib/queries/profit-nominal";
 import { NO_ORDER_VALUE_FILTER } from "@/lib/constants/order-value";
@@ -154,7 +155,7 @@ export function testCompanyOsEconomicsPure() {
   assert.ok(!/projected\w*:\s*[^,\n]*\?\?\s*0/.test(ledgerSrc), "không được `?? 0` trên cột dự phóng (mục 42)");
 
   // ═══════════ PHẦN C — getModelEconomics (phần thuần, nhánh null) ═══════════
-  const rong = buildModelEconomics({ productId: "khong-co", period: ALL, nominal: null, otherCostPercentOfAds: 1, decision: null, withEstimatedCost: false });
+  const rong = buildModelEconomics({ productId: "khong-co", period: ALL, nominal: null, otherCostPercentOfAds: 1, decision: null, withEstimatedCost: false, spendMapped: true });
   assert.equal(rong.estimatedFound, false);
   assert.equal(rong.realizedFound, false);
   for (const l of rong.lines) {
@@ -167,7 +168,7 @@ export function testCompanyOsEconomicsPure() {
   }
   assert.equal(rong.cogsBasis.usesFrozenRecognizedCogs, false);
   assert.ok(rong.cogsBasis.note.includes("recognized_cogs"), "khác biệt giá vốn sống/đóng băng phải nằm trong một trường, không giấu");
-  const chiMu = buildModelEconomics({ productId: "cosf-p", period: ALL, nominal: null, otherCostPercentOfAds: 0, decision: khongChi, withEstimatedCost: false });
+  const chiMu = buildModelEconomics({ productId: "cosf-p", period: ALL, nominal: null, otherCostPercentOfAds: 0, decision: khongChi, withEstimatedCost: false, spendMapped: true });
   const line = (m: ModelEconomics, k: EconomicsLineKey) => m.lines.find((x) => x.key === k)!;
   assert.equal(line(chiMu, "adSpend").realized.value, null, "không biết số chi ⇒ chi QC Thực đạt null");
   assert.equal(line(chiMu, "contributionAfterAds").realized.value, null, "không biết số chi ⇒ LN sau QC Thực đạt null");
@@ -181,7 +182,7 @@ export function testCompanyOsEconomicsPure() {
     otherCost: 22_000, salesAfterDiscount: 20_000_000, cpo: 100_000, deliveryRate: 60, returnRateSource: "projected",
     cogsUncoveredQty: 0, cogsUnknownQty: 0, expectedCogsEstimated: 0,
   } as unknown as NominalRow;
-  const coSo = buildModelEconomics({ productId: "cosf-p", period: ALL, nominal: nGia, otherCostPercentOfAds: 1.1, decision: row, withEstimatedCost: false });
+  const coSo = buildModelEconomics({ productId: "cosf-p", period: ALL, nominal: nGia, otherCostPercentOfAds: 1.1, decision: row, withEstimatedCost: false, spendMapped: true });
   assert.equal(line(coSo, "netProfit").estimated.value, 1_000_000, "LN ròng Ước tính = netProfit");
   assert.equal(line(coSo, "contributionAfterAds").estimated.value, 3_000_000, "LN góp sau QC Ước tính = expectedProfit");
   assert.equal(line(coSo, "deliveredRevenue").estimated.value, 12_000_000);
@@ -199,7 +200,7 @@ export function testCompanyOsEconomicsPure() {
   assert.equal(line(coSo, "breakEvenCpoContribution").realized.value, row.breakEvenCpo);
   assert.equal(line(coSo, "contributionMarginPct").realized.value, (row.marginRate ?? 0) * 100);
   // Giá vốn còn trống ⇒ số vẫn in (như tab danh nghĩa) nhưng ô nói rõ là CAO HƠN THẬT.
-  const thieuGia = buildModelEconomics({ productId: "cosf-p", period: ALL, nominal: { ...nGia, cogsUncoveredQty: 3, cogsUnknownQty: 3 } as NominalRow, otherCostPercentOfAds: 0, decision: row, withEstimatedCost: false });
+  const thieuGia = buildModelEconomics({ productId: "cosf-p", period: ALL, nominal: { ...nGia, cogsUncoveredQty: 3, cogsUnknownQty: 3 } as NominalRow, otherCostPercentOfAds: 0, decision: row, withEstimatedCost: false, spendMapped: true });
   assert.ok(line(thieuGia, "netProfit").estimated.note?.includes("CAO HƠN THẬT"), "thiếu giá vốn phải được nói ra ở ô tiền");
   assert.ok(line(thieuGia, "contributionAfterAds").realized.note?.includes("chưa có giá vốn thật") ?? false, "Thực đạt cũng phải nói phần giá vốn 0 ₫");
 
@@ -305,12 +306,15 @@ export async function testCompanyOsEconomicsDb(db: Db) {
     const d = decision.rows.find((x) => x.key === chung.productId) ?? null;
     const line = (k: EconomicsLineKey) => m.lines.find((x) => x.key === k)!;
     const n: NominalRow = chung;
+    // Company OS · A2 (Tech Lead cho phép sửa F): mã CHƯA TỪNG ghép chiến dịch ⇒ các ô đứng trên số chi
+    // là CHƯA BIẾT (null), không phải con số danh nghĩa tính trên chi 0 ₫. Cờ lấy từ đúng hàm của B.
+    const mapped = (await getModelAdsSummary(chung.productId, ALL)).attribution.spendMapped;
     assert.equal(m.estimatedFound, true);
     assert.equal(line("orders").estimated.value, n.orders, "Ước tính · đơn = dòng danh nghĩa");
     assert.equal(line("deliveredRevenue").estimated.value, n.expectedRevenue, "Ước tính · DT giao = dòng danh nghĩa");
-    assert.equal(line("adSpend").estimated.value, n.adSpend);
-    assert.equal(line("contributionAfterAds").estimated.value, n.expectedProfit, "Ước tính · LN góp sau QC = expectedProfit của dòng danh nghĩa");
-    assert.equal(line("netProfit").estimated.value, n.netProfit, "Ước tính · LN ròng = netProfit của dòng danh nghĩa");
+    assert.equal(line("adSpend").estimated.value, mapped ? n.adSpend : null);
+    assert.equal(line("contributionAfterAds").estimated.value, mapped ? n.expectedProfit : null, "Ước tính · LN góp sau QC = expectedProfit của dòng danh nghĩa (null khi chi chưa ghép)");
+    assert.equal(line("netProfit").estimated.value, mapped ? n.netProfit : null, "Ước tính · LN ròng = netProfit của dòng danh nghĩa (null khi chi chưa ghép)");
     assert.equal(line("deliveryRate").estimated.value, n.deliveryRate);
     const ceil = adsCeiling({ netProfit: n.netProfit, adSpend: n.adSpend, otherCost: n.otherCost, expectedRevenue: n.expectedRevenue, posSales: n.salesAfterDiscount, orders: n.orders, otherCostPercentOfAds: nominal.assumptions.otherCostPercentOfAds ?? 0, targetMarginPct: null });
     assert.equal(line("maxAdCostPerOrderNet").estimated.value, ceil.breakEven.perOrder, "Trần CPQC/đơn danh nghĩa = đúng con số tab Lợi nhuận danh nghĩa in");
@@ -321,10 +325,10 @@ export async function testCompanyOsEconomicsDb(db: Db) {
       assert.equal(line("deliveredRevenue").realized.value, d.deliveredRevenue);
       assert.equal(line("breakEvenCpoContribution").realized.value, d.breakEvenCpo, "Thực đạt · CPO hoà vốn = dòng quyết định");
       assert.equal(line("breakEvenCpoContribution").projected?.value ?? null, d.projectedBreakEvenCpo);
-      assert.equal(line("contributionAfterAds").realized.value, d.spendKnown ? d.profitAfterAds : null);
-      assert.equal(line("contributionAfterAds").projected?.value ?? null, d.spendKnown ? d.projectedProfitAfterAds : null);
+      assert.equal(line("contributionAfterAds").realized.value, d.spendKnown && mapped ? d.profitAfterAds : null);
+      assert.equal(line("contributionAfterAds").projected?.value ?? null, d.spendKnown && mapped ? d.projectedProfitAfterAds : null);
     }
-    console.log(`✓ Company OS · F (CSDL): kinh tế mẫu ${chung.code || chung.productId} — Ước tính khớp báo cáo danh nghĩa${d ? ", Thực đạt khớp bảng quyết định cấp mã" : " (mã không có dòng quyết định)"}`);
+    console.log(`✓ Company OS · F (CSDL): kinh tế mẫu ${chung.code || chung.productId}${mapped ? "" : " (chi chưa ghép ⇒ ô chi / LN sau QC là —)"} — Ước tính khớp báo cáo danh nghĩa${d ? ", Thực đạt khớp bảng quyết định cấp mã" : " (mã không có dòng quyết định)"}`);
   } else {
     console.log("✓ Company OS · F (CSDL): fixture không có dòng danh nghĩa nào — chỉ kiểm được nhánh rỗng");
   }
