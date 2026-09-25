@@ -162,22 +162,20 @@ export const ORDER_STEPS: OrderStepSpec[] = [
   { key: "CREATED", label: "Đơn được tạo", order: 1, tier: "STRUCTURED", source: "orders.inserted_at", previousLabel: "chính nó", caveat: "" },
   {
     key: "CONFIRMED",
-    label: "Đã rời trạng thái chờ",
+    label: "Đã xác nhận",
     order: 2,
     tier: "STRUCTURED",
-    source: "orders.stage ∉ (NEW, WAITING) — dùng lại đúng định nghĩa của getSalesFunnel",
+    source: "ORDER_EVER_CONFIRMED (lib/queries/conversion-funnel.ts) — trạng thái đã chốt HOẶC lịch sử có một lần xác nhận; dùng chung với getSalesFunnel và getStaffPerformance",
     previousLabel: "đơn được tạo",
     /*
-      HAI ĐỊNH NGHĨA "ĐÃ XÁC NHẬN" CÙNG TỒN TẠI TRONG KHO MÃ, và ở đây phải chọn một rồi nói rõ.
+      "ĐÃ XÁC NHẬN" = ĐƠN TỪNG ĐƯỢC XÁC NHẬN. Chủ shop chốt 25/09/2026 (đổi định nghĩa có đồng ý, kèm
+      số đo): bản trước là `stage not in ('NEW','WAITING')` — đọc TRẠNG THÁI HIỆN TẠI, nên cả ~633 /
+      3.319 đơn (90 ngày) HUỶ KHI CHƯA AI XÁC NHẬN cũng được tính là đã xác nhận.
 
-      · phễu bán hàng: `stage not in ('NEW','WAITING')` — LỎNG, gồm cả đơn sau đó huỷ;
-      · tầng chỉ số:   `CONFIRMED_ORDER` = `stage in CONFIRMED_STAGES` — LOẠI đơn huỷ.
-
-      Chọn bản LỎNG, cố ý: đơn huỷ sau khi đã gửi vẫn đã từng được xác nhận và đã từng rời kho. Dùng
-      bản chặt sẽ làm "đã rời kho" > "đã xác nhận" ⇒ phễu phình. Đổi định nghĩa là một thay đổi chỉ
-      số phải có chủ shop đồng ý kèm số trước/sau, không phải hệ quả phụ của một màn hình mới.
+      Lý do của bản lỏng cũ VẪN GIỮ: đơn xác nhận rồi mới huỷ (kể cả huỷ sau khi gửi) vẫn ĐÃ TỪNG được
+      xác nhận — vế lịch sử của vị từ bắt nó, và đơn có vận đơn luôn ở mức ≥ 3 nên phễu không phình.
     */
-    caveat: "Gồm cả đơn sau đó bị huỷ — đơn huỷ sau khi gửi vẫn ĐÃ TỪNG được xác nhận. Số đơn huỷ sau xác nhận hiện ở dòng riêng.",
+    caveat: "Gồm cả đơn xác nhận rồi mới huỷ — nó ĐÃ TỪNG được xác nhận. KHÔNG gồm đơn huỷ khi chưa ai xác nhận (đếm riêng ở dòng 'Huỷ khi chưa từng xác nhận').",
   },
   {
     key: "SHIPMENT_CREATED",
@@ -185,7 +183,7 @@ export const ORDER_STEPS: OrderStepSpec[] = [
     order: 3,
     tier: "STRUCTURED",
     source: "có dòng shipments qua PRIMARY_ATTEMPT — mỗi đơn một lần gửi chính",
-    previousLabel: "đơn đã rời trạng thái chờ",
+    previousLabel: "đơn đã xác nhận",
     caveat: "Đã có mã vận đơn KHÔNG có nghĩa hàng đã ra khỏi kho: vận đơn PENDING là hàng còn trong kho.",
   },
   {
@@ -274,6 +272,30 @@ export function matchIsConclusive(basis: OrderMatchBasis): boolean {
  *
  * Năm chiều là NĂM CÂU HỎI khác nhau, không phải năm cách sắp xếp của cùng một bảng.
  */
+/**
+ * ═══ ĐƠN HUỶ KHI CHƯA TỪNG XÁC NHẬN — HUỶ SAU BAO LÂU ═══
+ *
+ * Đo production 25/09/2026 (ops stock-wait-summary, 90 ngày): 633/3.319 đơn (19%) bị huỷ khi CHƯA
+ * từng được xác nhận, so với ~96 đơn huỷ sau khi đã xác nhận. Đơn mất chủ yếu ở khâu chốt / xác
+ * nhận, không ở khâu chờ hàng. Khoảng giờ dưới đây trả lời "huỷ ngay (đơn rác, trùng) hay huỷ vì để
+ * nguội" — hai việc sửa ở hai chỗ khác nhau. Cận trên HỞ; khoảng cuối không chặn trên.
+ */
+export const PRE_CONFIRM_CANCEL_BUCKETS = [
+  { key: "H0_1", label: "Dưới 1 giờ", minHours: 0, maxHours: 1 },
+  { key: "H1_6", label: "1–6 giờ", minHours: 1, maxHours: 6 },
+  { key: "H6_24", label: "6–24 giờ", minHours: 6, maxHours: 24 },
+  { key: "D1_3", label: "1–3 ngày", minHours: 24, maxHours: 72 },
+  { key: "D3", label: "Từ 3 ngày", minHours: 72, maxHours: null },
+] as const;
+
+export type PreConfirmCancelBucketKey = (typeof PRE_CONFIRM_CANCEL_BUCKETS)[number]["key"];
+
+/** Biểu thức SQL xếp khoảng — SINH RA từ danh sách trên. `hoursExpr` NULL ⇒ '?' (thiếu mốc huỷ). */
+export function preConfirmCancelBucketSql(hoursExpr: string): string {
+  const arms = PRE_CONFIRM_CANCEL_BUCKETS.map((b) => `when ${hoursExpr} >= ${b.minHours}${b.maxHours === null ? "" : ` and ${hoursExpr} < ${b.maxHours}`} then '${b.key}'`);
+  return `case when ${hoursExpr} is null or ${hoursExpr} < 0 then '?' ${arms.join(" ")} else '?' end`;
+}
+
 export type ConversionDimension = "employee" | "source" | "product" | "day" | "hour";
 
 export const CONVERSION_DIMENSION_LABEL: Record<ConversionDimension, string> = {
