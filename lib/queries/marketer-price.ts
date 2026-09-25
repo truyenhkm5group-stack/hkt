@@ -1,4 +1,4 @@
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { marketerPriceCutoff } from "@/lib/constants/marketer-price";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
@@ -19,17 +19,23 @@ const pv = schema.productVariants;
 const mp = schema.marketerPrices;
 
 /**
- * Giá báo đang hiệu lực cho dòng đơn đang xét (cần join `order_items`, `orders`, `product_variants`),
- * hoặc NULL khi không có. Đơn lên trước ngày bắt đầu áp dụng ⇒ NULL, bất kể dòng giá khai từ lúc nào.
+ * Giá báo đang hiệu lực cho dòng đơn đang xét (cần join `order_items`, `product_variants`), hoặc NULL
+ * khi không có. `orderAt` = NGÀY LÊN ĐƠN của dòng — mặc định `orders.inserted_at`; truy vấn nào đã gói
+ * đơn vào một CTE thì truyền cột ngày của CTE ấy. Đơn lên trước ngày bắt đầu áp dụng ⇒ NULL, bất kể
+ * dòng giá khai từ lúc nào.
  */
-export const LINE_MARKETER_PRICE = sql<number | null>`(
+export function marketerPriceOnOrderDate(orderAt: SQL): SQL<number | null> {
+  return sql<number | null>`(
   select ${mp.price} from ${mp}
   where ${mp.productId} = coalesce(${pv.productId}, ${i.productId})
-    and ${mp.effectiveFrom} <= ${o.insertedAt}
-    and ${o.insertedAt} >= ${marketerPriceCutoff().toISOString()}::timestamptz
+    and ${mp.effectiveFrom} <= ${orderAt}
+    and ${orderAt} >= ${marketerPriceCutoff().toISOString()}::timestamptz
   order by ${mp.effectiveFrom} desc
   limit 1
 )`;
+}
+
+export const LINE_MARKETER_PRICE = marketerPriceOnOrderDate(sql`${o.insertedAt}`);
 
 /** Giá vốn phía MKT của một sản phẩm trên dòng đơn: giá báo nếu có, không thì giá vốn thật. */
 export const MKT_LINE_UNIT_COST = sql<number>`coalesce(${LINE_MARKETER_PRICE}, ${LINE_UNIT_COST})`;

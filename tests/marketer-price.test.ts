@@ -6,7 +6,9 @@ import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY } from "@/lib/constants/payroll";
 import { MARKETER_PRICE_EFFECTIVE_FROM, marketerCostDelta, marketerPriceAt } from "@/lib/constants/marketer-price";
+import { MARKETING_UNATTRIBUTED } from "@/lib/constants/marketing-daily";
 import { getNominalMarketerBreakdown, getMarketerReport } from "@/lib/queries/payroll";
+import { getMarketerDailyNominal } from "@/lib/queries/marketer-daily-nominal";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { getWorkshopLedger } from "@/lib/queries/workshop-ledger";
 import { getSettingJson, setSettingJson } from "@/lib/settings";
@@ -50,6 +52,7 @@ export function testMarketerPricePure() {
     "lib/queries/marketer-price.ts",
     "lib/queries/payroll.ts",
     "lib/queries/profit-nominal.ts",
+    "lib/queries/marketer-daily-nominal.ts",
     "lib/queries/workshop-ledger.ts",
     "lib/actions/marketer-price.ts",
     "lib/actions/workshop-ledger.ts",
@@ -81,9 +84,9 @@ async function donDep(db: Db) {
   clearMemo();
 }
 
-async function donGiao(db: Db, id: string, ngay: string, qty: number, revenue: number) {
+async function donGiao(db: Db, id: string, ngay: string, qty: number, revenue: number, ma = "mpk-prod", mau = "mpk-var") {
   await db.insert(schema.orders).values({ id: `mpk-${id}`, insertedAt: d(ngay), stage: "DELIVERED", status: 3, totalPriceAfterDiscount: revenue, partnerFee: 0, returnFee: 0, cod: revenue });
-  await db.insert(schema.orderItems).values({ id: `mpk-${id}-i`, orderId: `mpk-${id}`, variantId: "mpk-var", productId: "mpk-prod", productName: "Đầm giá báo", quantity: qty, lineTotal: revenue, unitCost: 0, isBonus: false });
+  await db.insert(schema.orderItems).values({ id: `mpk-${id}-i`, orderId: `mpk-${id}`, variantId: mau, productId: ma, productName: "Đầm giá báo", quantity: qty, lineTotal: revenue, unitCost: 0, isBonus: false });
   await db.insert(schema.shipments).values({ id: `mpk-${id}-s`, orderId: `mpk-${id}`, vtpOrderNumber: `MPK${id.toUpperCase()}0000001`, stage: "DELIVERED", shippingFee: 0, codAmount: revenue, codCollected: revenue, codStatus: "RECONCILED", deliveredAt: d(ngay) });
 }
 
@@ -103,6 +106,11 @@ export async function testMarketerPriceQueries(db: Db) {
     await donGiao(db, "o8", "2026-08-20", 1, 300_000);
     await donGiao(db, "o1", "2027-10-05", 2, 500_000);
     await donGiao(db, "o2", "2027-10-20", 1, 250_000);
+    // Mã THỨ HAI không có MKT phụ trách, không quảng cáo ⇒ không ai nhận ⇒ shop giữ, đứng trên giá vốn thật.
+    await db.insert(schema.products).values({ id: "mpk-prod2", name: "Áo không ai nhận", customId: "MPK2" });
+    await db.insert(schema.productVariants).values({ id: "mpk-var2", productId: "mpk-prod2", sku: "MPK2-M", color: "Trắng", size: "M" });
+    await db.insert(schema.stockReceiptItems).values({ id: "mpk-ri2", receiptId: "mpk-rc", variantId: "mpk-var2", quantity: 100, unitCost: 80_000 });
+    await donGiao(db, "o3", "2027-10-12", 2, 400_000, "mpk-prod2", "mpk-var2");
     clearMemo();
 
     // ── MỐC: chưa có giá báo, chưa có phạt ──
@@ -110,6 +118,7 @@ export async function testMarketerPriceQueries(db: Db) {
     const gocNominal = await getNominalMarketerBreakdown(THANG10);
     const gocShop = await getNominalProfitReport(THANG10, "ORDERED");
     const gocT8 = await getMarketerReport(THANG8_2026, "profit1");
+    const gocDaily = await getMarketerDailyNominal(THANG10);
     const mkt = (r: typeof goc) => r.marketers.find((m) => m.marketerId === "mpk-mkt");
     assert.equal(mkt(goc)?.cogsCharged, 300_000, "chưa có giá báo ⇒ MKT chịu đúng giá vốn thật 3 × 100.000");
     assert.equal(goc.totals.marketerPriceMargin, 0);
@@ -118,6 +127,7 @@ export async function testMarketerPriceQueries(db: Db) {
     await db.insert(schema.marketerPrices).values([
       { productId: "mpk-prod", productCode: "MPK1", price: 150_000, effectiveFrom: d("2026-07-01") },
       { productId: "mpk-prod", productCode: "MPK1", price: 120_000, effectiveFrom: d("2027-10-15") },
+      { productId: "mpk-prod2", productCode: "MPK2", price: 200_000, effectiveFrom: d("2027-10-01") },
     ]);
     await db.insert(schema.productionBatches).values({ productId: "mpk-prod", productCode: "MPK1", batchNo: 1, orderedAt: d("2027-09-01"), orderedQty: 10, workshopPenalty: 50_000, penaltyAt: d("2027-10-10"), status: "DONE" });
     clearMemo();
@@ -148,6 +158,17 @@ export async function testMarketerPriceQueries(db: Db) {
     assert.equal(sauNominal.marketerPriceMargin, dongNominal.marketerCostDelta);
     assert.equal((r(sauNominal)?.personalNet ?? 0) - (r(gocNominal)?.personalNet ?? 0), -dongNominal.marketerCostDelta + 50_000, "lợi nhuận danh nghĩa của MKT đổi đúng bằng phần chênh giá báo + hoàn phạt");
     assert.equal(sauNominal.workshopPenaltyCredited, 50_000);
+
+    // ── /ads/daily: cột MKT trên giá báo, hàng tổng trên giá vốn thật ──
+    const sauDaily = await getMarketerDailyNominal(THANG10);
+    const cot = (x: typeof sauDaily) => x.marketers.find((m) => m.key === "mpk-mkt");
+    const chuaQuyKet = (x: typeof sauDaily) => x.marketers.find((m) => m.key === MARKETING_UNATTRIBUTED)?.total.expectedCogs ?? 0;
+    assert.equal(chuaQuyKet(sauDaily), chuaQuyKet(gocDaily), "ô 'Chưa quy kết' là phần shop giữ ⇒ giá vốn thật, dù mã có giá báo");
+    assert.equal(sauDaily.marketerPriceMargin, dongNominal.marketerCostDelta, "/ads/daily chia đúng phần chênh của mã mà tab Lợi nhuận danh nghĩa dùng");
+    assert.equal((cot(sauDaily)?.total.expectedCogs ?? 0) - (cot(gocDaily)?.total.expectedCogs ?? 0), dongNominal.marketerCostDelta, "cột của MKT chịu giá vốn theo giá báo");
+    assert.equal(sauDaily.total.expectedCogs, gocDaily.total.expectedCogs, "hàng tổng kỳ vẫn trên giá vốn thật");
+    assert.equal(sauDaily.reconcile.expectedProfit.ours, sauDaily.reconcile.expectedProfit.report, "đối chiếu với Báo cáo lợi nhuận vẫn khớp từng đồng");
+    assert.ok(sauDaily.warnings.some((w) => w.includes("GIÁ BÁO MKT")), "màn hình phải nói cột MKT đang trên giá báo");
 
     // ── Sổ đặt xưởng: tên MKT phụ trách + giá báo đang áp đọc đúng nguồn ──
     const so = await getWorkshopLedger(d("2027-10-25"));
