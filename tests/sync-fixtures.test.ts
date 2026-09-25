@@ -266,6 +266,7 @@ import { testDepartmentMap } from "./department-map.test";
 import { testLoadingUxContract } from "./loading-ux-contract.test";
 import { testFulfillmentBottleneck } from "./fulfillment-bottleneck.test";
 import { testStockShortageDb, testStockShortagePure } from "./stock-shortage.test";
+import { testStockWaitReportDb, testStockWaitReportPure } from "./stock-wait-report.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
@@ -1988,6 +1989,8 @@ async function main() {
   testAlertsConfigForm();
   testStockShortagePure();
   await testStockShortageDb(db);
+  testStockWaitReportPure();
+  await testStockWaitReportDb(db);
   // CHẠY SAU CÙNG trong khối dữ liệu: bộ này thêm tài khoản ngân hàng, dòng tiền, khoản chi và đơn
   // riêng ở tháng 5/2027 rồi tự dọn sạch. Đặt giữa chừng thì những dòng đó lọt vào tổng của bài khác.
   await testFinanceTruth(db);

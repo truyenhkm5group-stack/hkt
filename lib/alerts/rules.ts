@@ -9,6 +9,7 @@ import { getDb, schema } from "@/db";
 import { loadAlertConfig } from "@/lib/alerts/config";
 import { sendLark } from "@/lib/alerts/lark";
 import { runStockShortageDigest, type ShortageDigestResult } from "@/lib/alerts/stock-shortage-digest";
+import { runStockWaitLog, type StockWaitLogResult } from "@/lib/alerts/stock-wait-log";
 import { escapeHtml, sendTelegram } from "@/lib/alerts/telegram";
 import { CS_KIND_LABEL, type CsKind } from "@/lib/constants/cs";
 import { detectCsCases } from "@/lib/cs/detect";
@@ -1072,7 +1073,7 @@ export async function collectCandidates(): Promise<{ candidates: Candidate[]; ac
   return { candidates, activeKinds };
 }
 
-export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string }; /** Bảng thiếu hàng giao đơn gửi Lark — `null` khi tắt. */ stockShortage: ShortageDigestResult | null };
+export type AlertRunResult = { created: number; resolved: number; /** Việc bị đóng vì loại cảnh báo đã tắt — KHÔNG phải đã xử lý. */ stale: number; reclassified: number; open: number; telegram: { sent: number; error?: string }; lark: { sent: number; error?: string }; /** Bảng thiếu hàng giao đơn gửi Lark — `null` khi tắt. */ stockShortage: ShortageDigestResult | null; /** Sổ đơn chờ hàng — ghi dù tin Lark có bật hay không. */ stockWaitLog: StockWaitLogResult };
 
 /** Chạy toàn bộ quy tắc; trả về số thông báo mới / đã đóng / đang mở */
 export async function evaluateAlerts(): Promise<AlertRunResult> {
@@ -1216,7 +1217,12 @@ export async function evaluateAlerts(): Promise<AlertRunResult> {
   const stockShortage = cfg.enabled.stockShortage
     ? await runStockShortageDigest().catch((e): ShortageDigestResult => ({ sent: null, via: null, variants: 0, waitingOrders: 0, error: e instanceof Error ? e.message : String(e) }))
     : null;
-  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, stockShortage };
+  /*
+    SỔ ĐƠN CHỜ HÀNG — ghi dù tin Lark có bật hay không: tắt nhắn tin không được làm mất phép đo số
+    đơn thiếu hàng theo ngày (`/reports/stock-wait`). Lỗi ở đây cũng không làm hỏng lượt cảnh báo.
+  */
+  const stockWaitLog = await runStockWaitLog().catch((e): StockWaitLogResult => ({ waiting: 0, opened: 0, closed: 0, error: e instanceof Error ? e.message : String(e) }));
+  return { created: created.length, resolved, stale, reclassified: reclassified.length, open: Number(open), telegram, lark, stockShortage, stockWaitLog };
 }
 
 const holder = globalThis as unknown as { __erpAlertsLastRun?: number; __erpAlertsTimer?: ReturnType<typeof setTimeout> };

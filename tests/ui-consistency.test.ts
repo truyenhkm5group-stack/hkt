@@ -140,6 +140,7 @@ export function testUiConsistency() {
     "app/(dashboard)/inventory/purchasing/page.tsx",
     "app/(dashboard)/customers/retention/page.tsx",
     "app/(dashboard)/reports/scenario/page.tsx",
+    "app/(dashboard)/reports/stock-wait/page.tsx",
   ];
   // Trang đầy đủ phải nói rõ VÌ SAO trống; mảnh ghép nhúng trong trang khác thì không cần.
   const khongCanTrangThaiRong = ["app/(dashboard)/inventory/planning/slow-moving-section.tsx"];
@@ -191,6 +192,7 @@ export function testNavigationCoverage() {
     "/ads/daily": "tab 'Hiệu quả theo ngày' ngay trên trang Quảng cáo (cùng module, hai góc nhìn: theo chiến dịch vs theo ngày), và từ ô lệnh ⌘K",
     "/orders/verify": "một GÓC NHÌN của chính danh sách đơn (đơn còn trong kho, xếp theo khả năng hoàn), vào từ nút 'Cần xác minh trước khi giao' ngay trên trang Đơn hàng",
     "/reports/scenario": "vào từ dải tab của Báo cáo lợi nhuận, và từ ô lệnh ⌘K",
+    "/reports/stock-wait": "vào từ nút 'Chờ hàng & GTC' ngay trên trang Tỷ lệ giao thành công và trang Thiếu hàng giao đơn, và từ ô lệnh ⌘K",
     // Work OS: MỘT mục sidebar (`/work`), năm góc nhìn là tab bên trong `app/(dashboard)/work/tabs.tsx`.
     // Sáu mục menu cho một bàn làm việc sẽ bắt người dùng chọn góc nhìn trước khi nhìn thấy gì.
     "/work/today": "tab 'Hôm nay' của bàn làm việc /work — màn hình sáng của trưởng phòng",

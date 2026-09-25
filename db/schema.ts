@@ -1042,6 +1042,36 @@ export const orderStatusHistory = pgTable(
   (t) => [uniqueIndex("order_status_history_uq").on(t.orderId, t.status, t.updatedAt), index("order_status_history_order_idx").on(t.orderId)],
 );
 
+/**
+ * ═══ SỔ ĐƠN CHỜ HÀNG (`lib/alerts/stock-wait-log.ts`) ═══
+ *
+ * Phép phân bổ thiếu hàng (`allocateStock`) chỉ trả lời "BÂY GIỜ đơn nào chờ hàng". Không ghi lại thì
+ * không bao giờ trả lời được "hôm qua bao nhiêu đơn chờ" hay "đơn từng chờ hàng có hay hoàn không".
+ * Job `alerts` ghi sổ này mỗi lượt: một dòng cho MỘT đơn, mở lần đầu ERP thấy đơn chờ hàng, đóng
+ * (`cleared_at`) khi đơn hết chờ. Đơn chờ lại sau khi đã đóng thì mở lại (`episodes` + 1), giữ mốc đầu.
+ *
+ * Chỉ là SỔ QUAN SÁT: không phép tính tồn kho / kết quả đơn nào đọc nó. KHÔNG backfill — ngày trước
+ * lần ghi đầu tiên là CHƯA ĐO (AGENTS.md mục 35, 42).
+ */
+export const stockWaitLog = pgTable(
+  "stock_wait_log",
+  {
+    orderId: text("order_id")
+      .primaryKey()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    firstSeenAt: ts("first_seen_at").notNull(),
+    lastSeenAt: ts("last_seen_at").notNull(),
+    /** `NULL` = đơn vẫn đang chờ hàng ở lượt ghi gần nhất. */
+    clearedAt: ts("cleared_at"),
+    /** Số cái thiếu LỚN NHẤT từng thấy. */
+    maxShortUnits: integer("max_short_units").notNull().default(0),
+    /** Ảnh chụp nhãn mẫu thiếu lần gần nhất — để người đọc, không phải đầu vào phép tính. */
+    shortLabels: text("short_labels").notNull().default(""),
+    episodes: integer("episodes").notNull().default(1),
+  },
+  (t) => [index("stock_wait_log_first_seen_idx").on(t.firstSeenAt), index("stock_wait_log_open_idx").on(t.orderId).where(sql`${t.clearedAt} is null`)],
+);
+
 export const orderReturns = pgTable(
   "order_returns",
   {
