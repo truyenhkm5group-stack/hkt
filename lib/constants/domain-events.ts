@@ -145,6 +145,8 @@ export const DOMAIN_EVENT_LABEL: Partial<Record<DomainEventName, string>> = {
   "design_version.approved": "Bản thiết kế đã duyệt",
   "production_order.linked_design": "Lệnh SX trỏ bản duyệt",
   "production_plan.overridden": "Số đặt khác gợi ý máy",
+  // Company OS · QA: sự kiện của Agent E đã LIVE mà thiếu nhãn ⇒ dòng thời gian mẫu in mã thô "return.disposition_set".
+  "return.disposition_set": "Kết cục hàng hoàn không tái nhập",
 };
 
 export function domainEventLabel(name: string): string {

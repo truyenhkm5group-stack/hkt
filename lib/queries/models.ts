@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gte, ilike, inArray, isNull, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { DOMAIN_ACTOR_KIND_LABEL, domainEventLabel, type DomainActorKind } from "@/lib/constants/domain-events";
+import { DOMAIN_ACTOR_KIND_LABEL, DOMAIN_EVENT_BY_NAME, domainEventLabel, type DomainActorKind } from "@/lib/constants/domain-events";
 import {
   isModelState,
   MODEL_STATE_LABELS,
@@ -385,6 +385,27 @@ const PO_STATUS_LABEL: Record<string, string> = { DRAFT: "nháp", SENT: "đã g�
  * sản phẩm (lệnh sản xuất tạo / gửi / nhận, phiếu NHẬP HÀNG cho mẫu mã, đơn đầu tiên, thiết kế). Không
  * dòng nào của miền khác bị chép vào `domain_events` (target-architecture.md Q5). Mới nhất lên trước.
  */
+/**
+ * Chiều của một sự kiện miền trên dòng thời gian — theo `subjectType` đã khai trong sổ sự kiện, không theo
+ * tên. Company OS · QA: trước bản này MỌI sự kiện (kể cả "Chốt giá thành", "Mẫu được duyệt", "Kết cục
+ * hàng hoàn") mang nhãn "Vòng đời", nên mốc sản xuất / kho của Agent C, E không bao giờ đứng đúng chiều
+ * "Sản xuất" / "Kho" trên trang 360. Subject lạ ⇒ "Vòng đời" như cũ.
+ */
+const EVENT_DIMENSION_BY_SUBJECT: Readonly<Record<string, ModelTimelineDimension>> = {
+  production_topic: "PRODUCTION",
+  cost_sheet: "PRODUCTION",
+  sample: "PRODUCTION",
+  design_version: "PRODUCTION",
+  production_order: "PRODUCTION",
+  stock_receipt: "INVENTORY",
+  return_inspection: "INVENTORY",
+};
+
+export function domainEventDimension(name: string): ModelTimelineDimension {
+  const subject = DOMAIN_EVENT_BY_NAME[name]?.subjectType;
+  return (subject && EVENT_DIMENSION_BY_SUBJECT[subject]) || "LIFECYCLE";
+}
+
 export async function getModelTimeline(modelId: string): Promise<ModelTimelineEntry[]> {
   const model = await getModel(modelId);
   if (!model) return [];
@@ -447,7 +468,7 @@ export async function getModelTimeline(modelId: string): Promise<ModelTimelineEn
     else if (e.name === "model.registered") detail = pl.registeredBy === "USER" ? "Người gõ mã mẫu mới" : "Máy đăng ký từ sản phẩm / thiết kế đang có";
     else if (e.name === "model.owner_changed") detail = pl.to ? "Có người phụ trách mới" : "Gỡ người phụ trách";
     const ai = e.actorKind === "USER" ? e.actorName || "người dùng" : DOMAIN_ACTOR_KIND_LABEL[e.actorKind as DomainActorKind] ?? e.actorKind;
-    entries.push({ id: `event-${e.id}`, at: e.at, dimension: "LIFECYCLE", title: domainEventLabel(e.name), detail: `${detail}${detail ? " · " : ""}${ai}`, source: "Sổ mẫu", basis: "RECORDED" });
+    entries.push({ id: `event-${e.id}`, at: e.at, dimension: domainEventDimension(e.name), title: domainEventLabel(e.name), detail: `${detail}${detail ? " · " : ""}${ai}`, source: "Sổ mẫu", basis: "RECORDED" });
   }
 
   // ── 2. THIẾT KẾ (chiếu `design_concepts`) ──
