@@ -112,8 +112,11 @@ export const ORDER_EVER_CONFIRMED = sql`(${o.stage} in (${sql.raw(CONFIRMED_STAG
      and hc.status in ${sql.raw(`(${CONFIRMED_STATUS_CODES.join(",")})`)}
 ) or exists (select 1 from shipments sc where sc.order_id = ${o.id}))`;
 
-/** Mốc HUỶ của đơn: lần đầu trạng thái Pancake sang Đã huỷ / Đã xoá. `NULL` = không có lịch sử huỷ. */
-const CANCELLED_AT = sql`(
+/**
+ * Mốc HUỶ của đơn: lần đầu trạng thái Pancake sang Đã huỷ / Đã xoá. `NULL` = không có lịch sử huỷ.
+ * Dùng chung với phân tích đơn huỷ (`lib/queries/cancel-analysis.ts`). Cần FROM `orders`.
+ */
+export const CANCELLED_AT = sql`(
   select min(hx.updated_at) from order_status_history hx
    where hx.order_id = ${o.id}
      and hx.status in ${sql.raw(`(${PANCAKE_CANCEL_CODES.join(",")})`)}
