@@ -9,6 +9,7 @@ import { DESIGN_MOQ, DESIGN_NOVELTY, DESIGN_PARENT_RULES, DESIGN_STATUS_LABEL, t
 import { PRODUCTION_STATUS_LABEL } from "@/lib/constants/production";
 import { formatDate, formatNumber, formatVND } from "@/lib/format";
 import { listDesignConcepts, productDnaCoverage } from "@/lib/queries/creative-design";
+import { designModelLinks } from "@/lib/queries/early-topic";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +22,15 @@ import { cn } from "@/lib/utils";
  *
  * Cột MOQ (§5h): `x/50 đơn` đếm SỐNG theo hai đường (sản phẩm Pancake mã TK · `ad_id` của mẩu), hợp theo id
  * đơn; đủ thì máy đã dựng NHÁP lệnh sản xuất — link tới nháp. Máy không gửi xưởng.
+ *
+ * Topic sản xuất SỚM (quy tắc chủ shop 25/09/2026 · Agent T): thiết kế đang test / thắng mà đã có mẫu trong
+ * sổ (`product_models.design_concept_id`) ⇒ link "Mở topic sản xuất" để xưởng báo giá, làm mẫu song song
+ * với test quảng cáo — kể cả khi chưa có mã Pancake. Đã có topic đang mở ⇒ link tới topic đó. Thiết kế
+ * chưa vào sổ ⇒ nhắc "Đồng bộ sổ mẫu trước" (không tự đăng ký).
  */
+
+/** Trạng thái thiết kế mà việc mở topic sớm có nghĩa: đang test / đã thắng (Chờ test, Loại, Đã đưa vào SX thì không). */
+export const EARLY_TOPIC_DESIGN_STATUSES: readonly DesignStatus[] = ["TESTING", "WIN"];
 
 const STATUS_TONE: Record<DesignStatus, string> = {
   DRAFT: "bg-muted text-muted-foreground",
@@ -31,9 +40,14 @@ const STATUS_TONE: Record<DesignStatus, string> = {
   PRODUCTION: "bg-brand/15 text-brand",
 };
 
-export async function DesignTab({ canEdit }: { canEdit: boolean }) {
+export async function DesignTab({ canEdit, canCreateTopic = false }: { canEdit: boolean; canCreateTopic?: boolean }) {
   const db = await getDb();
   const [rows, coverage, { config }] = await Promise.all([listDesignConcepts(db, 200), productDnaCoverage(db), readCurrentCreativeConfig(db)]);
+  const topicRows = canCreateTopic ? rows.filter((r) => EARLY_TOPIC_DESIGN_STATUSES.includes(r.status)) : [];
+  const modelOf = await designModelLinks(
+    db,
+    topicRows.map((r) => r.id),
+  );
   const dangTest = rows.filter((r) => r.status === "TESTING").length;
   const thang = rows.filter((r) => r.status === "WIN" || r.status === "PRODUCTION").length;
   const don = rows.reduce((s, r) => s + r.bookedOrders, 0);
@@ -148,6 +162,7 @@ export async function DesignTab({ canEdit }: { canEdit: boolean }) {
                     </td>
                     <td className="whitespace-nowrap px-3 py-2 text-right">
                       <DesignProductionButton id={r.id} code={r.code} production={r.status === "PRODUCTION"} canEdit={canEdit} />
+                      {canCreateTopic && EARLY_TOPIC_DESIGN_STATUSES.includes(r.status) ? <EarlyTopicLink link={modelOf.get(r.id) ?? null} /> : null}
                     </td>
                   </tr>
                 ))}
@@ -157,5 +172,32 @@ export async function DesignTab({ canEdit }: { canEdit: boolean }) {
         )}
       </SectionCard>
     </div>
+  );
+}
+
+/** Lối vào topic sản xuất SỚM của một thiết kế (Agent T). */
+function EarlyTopicLink({ link }: { link: { modelId: string; openTopicId: string | null } | null }) {
+  if (!link) {
+    return (
+      <Link href="/models" className="mt-1 block text-[11px] text-muted-foreground hover:underline" title="Thiết kế chưa có mẫu trong sổ Vòng đời mẫu — bấm Đồng bộ sổ ở trang Vòng đời mẫu rồi quay lại để mở topic sản xuất.">
+        Đồng bộ sổ mẫu trước
+      </Link>
+    );
+  }
+  if (link.openTopicId) {
+    return (
+      <Link href={`/production/topics/${encodeURIComponent(link.openTopicId)}`} className="mt-1 block text-[11px] font-medium text-primary hover:underline">
+        Topic sản xuất đang mở
+      </Link>
+    );
+  }
+  return (
+    <Link
+      href={`/production/topics/new?model=${encodeURIComponent(link.modelId)}`}
+      className="mt-1 block text-[11px] font-medium text-primary hover:underline"
+      title="Mở topic hỏi giá / làm mẫu với xưởng ngay khi thiết kế còn đang test — luồng song song, vòng đời mẫu không đổi (quy tắc chủ shop 25/09/2026)."
+    >
+      Mở topic sản xuất
+    </Link>
   );
 }

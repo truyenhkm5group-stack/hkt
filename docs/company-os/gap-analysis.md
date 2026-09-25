@@ -43,7 +43,7 @@
 | 19 | Chỉ số tồn thông minh | EXTEND | có; ngưỡng chậm/chết vào settings; thêm HOT + sell-through | D | P2 |
 | 19 | Hai định nghĩa tốc độ bán | CONSOLIDATE | chọn một, đo trước/sau | D | P2 (cần đo production) |
 | 20 | Máy đặt lại | KEEP | `computePlan` + `decideInventory`; chỉ ĐỀ XUẤT | — | — |
-| 21 | Xả tồn nối về creative/ads | **BUILD** | đề xuất creative/ads đọc CLEARANCE/STOCKOUT_RISK | B + H | P4 |
+| 21 | Xả tồn nối về creative/ads | **BUILD** — ĐÃ DỰNG (X) | `deriveStockFeedback` đọc OVERSTOCK/CLEARANCE/STOCKOUT_RISK × lá phiếu QC chiều mã hàng (chỉ khi chi đã ghép); cockpit `STOCK_PUSH` / `SCALE_STOCK_RISK`, trang 360, `?product=` ở vòng mẫu; chỉ đề xuất — xem `handoff-x.md` | X | P4 |
 | 22 | Trang Model 360 | **BUILD** (khung) → EXTEND | `/models/[id]` khung + dòng thời gian (A); các khối (A2) | A, A2 | P0/P1 |
 | 23 | Cockpit chủ shop | EXTEND | khối "Cần anh quyết" + lưu quyết định đề xuất | H | P4 |
 | 24 | Control plane, agent có trách nhiệm | KEEP/EXTEND | Tech room có; phòng khác theo thang luật 69 | — | P4 |

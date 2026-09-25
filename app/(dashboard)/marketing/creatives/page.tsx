@@ -52,9 +52,9 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
       <CreativeTabs active={tab} defaultTab={defaultTab} pendingApproval={pendingApproval} />
 
       {tab === "duyet" ? (
-        <ApproveTab pending={pending} batchId={param(raw, "lo") || null} canApprove={can(user, "expenses:write")} canEdit={can(user, "ideas:write")} />
+        <ApproveTab pending={pending} batchId={param(raw, "lo") || null} canApprove={can(user, "expenses:write")} canEdit={can(user, "ideas:write")} preselectProductId={param(raw, "product") || null} />
       ) : tab === "thiet-ke" ? (
-        <DesignTab canEdit={can(user, "ideas:write")} />
+        <DesignTab canEdit={can(user, "ideas:write")} canCreateTopic={can(user, "production:write")} />
       ) : tab === "dang-chay" ? (
         <LiveTab canWrite={can(user, "expenses:write")} canKill={can(user, "expenses:write") || can(user, "settings:manage")} canRelease={can(user, "settings:manage")} />
       ) : tab === "thu-vien" ? (

@@ -329,11 +329,11 @@ export function testCompanyOsCockpitPure() {
   const tat = allowedKinds(() => true, () => true);
   assert.deepEqual(tat, [...OWNER_DECISION_KINDS]);
   const khoQ = allowedKinds((p) => p === "planning:view", () => true);
-  assert.deepEqual(khoQ, ["INVENTORY_STOCKOUT", "PRODUCTION_LATE", "INVENTORY_REORDER", "INVENTORY_CLEARANCE"], "chỉ quyền xem kế hoạch ⇒ không thấy duyệt mẫu / topic / quảng cáo / yêu cầu duyệt");
+  assert.deepEqual(khoQ, ["INVENTORY_STOCKOUT", "PRODUCTION_LATE", "INVENTORY_REORDER", "INVENTORY_CLEARANCE", "STOCK_PUSH"], "chỉ quyền xem kế hoạch ⇒ không thấy duyệt mẫu / topic / quảng cáo / yêu cầu duyệt (Agent X: thấy tồn chậm cần đẩy, KHÔNG thấy loại có quảng cáo)");
   assert.ok(!allowedKinds((p) => p === "alerts:view", () => true).includes("APPROVAL"), "xem Cần xử lý mà không có quyền DUYỆT ⇒ không thấy yêu cầu duyệt");
   assert.ok(!allowedKinds((p) => p === "expenses:view" || p === "models:view", () => false).includes("ADS_CUT"), "phạm vi quảng cáo NONE ⇒ không thấy quảng cáo");
   assert.ok(allowedKinds((p) => p === "expenses:view", () => true).includes("ADS_CUT"));
-  assert.deepEqual(sourcesFor(khoQ), ["PRODUCTION_LATE", "INVENTORY"], "nguồn không sinh loại nào được thấy thì không đọc");
+  assert.deepEqual(sourcesFor(khoQ), ["PRODUCTION_LATE", "INVENTORY", "STOCK_FEEDBACK"], "nguồn không sinh loại nào được thấy thì không đọc");
   for (const k of OWNER_DECISION_KINDS) assert.ok(OWNER_DECISION_KIND_SPEC[k].requires.length > 0, `${k} phải khai quyền màn hình chủ`);
 
   // ─── 6. Mã nguồn ───
@@ -355,9 +355,15 @@ export function testCompanyOsCockpitPure() {
   const ev = DOMAIN_EVENT_BY_NAME["recommendation.decided"];
   assert.equal(ev.status, "LIVE");
   assert.ok(readFileSync(ev.emitter!, "utf8").includes('"recommendation.decided"'), "tệp khai phát phải thật sự phát tên đó");
-  const mig = readFileSync("drizzle/0139_company_os_cockpit.sql", "utf8");
+  // CHECK loại có hiệu lực = bản của migration MUỘN NHẤT có khai nó (0139 dựng, 0140 của Agent T mở rộng
+  // cho MODEL_EARLY_TOPIC, 0141 của Agent X thêm STOCK_PUSH · SCALE_STOCK_RISK). Thêm loại thì thêm migration mới — bài kiểm tự đọc bản cuối, không gõ tên tệp.
+  const tepCheck = readdirSync("drizzle")
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && readFileSync(path.join("drizzle", f), "utf8").includes("recommendation_decisions_kind_check"))
+    .sort();
+  assert.ok(tepCheck.includes("0139_company_os_cockpit.sql"), "0139 dựng CHECK loại");
+  const mig = readFileSync(path.join("drizzle", tepCheck[tepCheck.length - 1]), "utf8");
   const khaiCheck = /"kind" IN \(([^)]*)\)/.exec(mig)?.[1].split(",").map((x) => x.trim().replace(/'/g, "")) ?? [];
-  assert.deepEqual(khaiCheck, [...OWNER_DECISION_KINDS], "CHECK loại của migration phải bằng OWNER_DECISION_KINDS");
+  assert.deepEqual(khaiCheck, [...OWNER_DECISION_KINDS], "CHECK loại của migration muộn nhất phải bằng OWNER_DECISION_KINDS");
   const trang = readFileSync("app/(dashboard)/page.tsx", "utf8");
   assert.ok(trang.indexOf("<OwnerDecisionsSection") > 0 && trang.indexOf("<OwnerDecisionsSection") < trang.indexOf("<TopActions"), "khối Cần anh quyết đứng TRÊN Việc cần làm hôm nay");
   assert.match(trang, /<Suspense fallback=\{<Skeleton[^}]*\}>\s*<OwnerDecisionsSection \/>\s*<\/Suspense>/, "khối Cần anh quyết đứng sau Suspense riêng — không chặn các thẻ tiền");
@@ -461,7 +467,7 @@ export async function testCompanyOsCockpitDb(db: Db) {
   assert.deepEqual(q5.kinds, [], "chỉ có quyền Tổng quan ⇒ không loại nào");
   assert.equal(goi, 0, "nguồn của loại không được thấy KHÔNG được đọc");
   const keHoach = nguoi(`${P}v2`, ["dashboard:view", "planning:view"]);
-  const q6 = await getOwnerDecisionQueue({ viewer: keHoach, loaders: { INVENTORY: dem, PRODUCTION_LATE: async () => ({ items: [] }), APPROVALS: dem }, scopeOk: async () => true });
+  const q6 = await getOwnerDecisionQueue({ viewer: keHoach, loaders: { INVENTORY: dem, PRODUCTION_LATE: async () => ({ items: [] }), APPROVALS: dem, STOCK_FEEDBACK: async () => ({ items: [] }) }, scopeOk: async () => true });
   assert.ok(!q6.kinds.includes("APPROVAL") && q6.kinds.includes("INVENTORY_REORDER"));
   assert.ok(q6.groups.some((g) => g.kind === "INVENTORY_REORDER"));
   const qc = nguoi(`${P}v3`, ["dashboard:view", "expenses:view"]);

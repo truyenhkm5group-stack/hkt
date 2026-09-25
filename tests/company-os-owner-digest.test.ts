@@ -259,7 +259,7 @@ export async function testCompanyOsOwnerDigestDb(db: Db) {
 
   // Nguồn giả đi qua ĐƯỜNG THẬT của hàng đợi (quyền, sổ phản ứng trong CSDL, áp BỎ QUA / HẸN NHẮC).
   let approvals: OwnerDecisionItem[] = [];
-  const loaders: Partial<Record<"APPROVALS" | "SAMPLES" | "TOPICS" | "ADS_CUT" | "MODEL_SCALE" | "PRODUCTION_LATE" | "INVENTORY", SourceLoader>> = {
+  const loaders: Partial<Record<"APPROVALS" | "SAMPLES" | "TOPICS" | "ADS_CUT" | "MODEL_SCALE" | "PRODUCTION_LATE" | "INVENTORY" | "STOCK_FEEDBACK", SourceLoader>> = {
     APPROVALS: async () => ({ items: approvals }),
     SAMPLES: async () => ({ items: [] }),
     TOPICS: async () => ({ items: [] }),
@@ -267,6 +267,7 @@ export async function testCompanyOsOwnerDigestDb(db: Db) {
     MODEL_SCALE: async () => ({ items: [] }),
     PRODUCTION_LATE: async () => ({ items: [] }),
     INVENTORY: async () => ({ items: [INV_1] }),
+    STOCK_FEEDBACK: async () => ({ items: [] }),
   };
   const seenCalls: { viewer: SessionUser; onlyKinds: readonly OwnerDecisionKind[] | undefined }[] = [];
   const loadQueue: NonNullable<OwnerDigestDeps["loadQueue"]> = async (viewer, now, onlyKinds) => {

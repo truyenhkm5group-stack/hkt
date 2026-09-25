@@ -6,6 +6,7 @@ import { decideScope } from "@/lib/auth/scope-guard";
 import { APPROVAL_GROUP_LABEL, type ApprovalGroup } from "@/lib/constants/approval";
 import { DECISION_LABEL, type InventoryDecisionKind } from "@/lib/constants/inventory-decision";
 import { BEFORE_PRODUCTION_DISCUSSION } from "@/lib/constants/model-360";
+import { suggestsTopicOpening } from "@/lib/constants/early-topic";
 import { MODEL_SIGNAL_HINT, MODEL_SIGNAL_LABEL, SIGNAL_SOURCE_LABEL, type SignalSource } from "@/lib/constants/model-signal";
 import {
   allowedKinds,
@@ -23,6 +24,7 @@ import {
   type RecommendationDecisionRow,
 } from "@/lib/constants/owner-decisions";
 import { TOPIC_STATUS_LABEL, type TopicStatus } from "@/lib/constants/production-os";
+import { deriveStockFeedback, type StockFeedback } from "@/lib/constants/stock-feedback";
 import type { WorkItem } from "@/lib/constants/work";
 import { formatDate, formatDateTime, formatNumber, formatVND, vnDateKey } from "@/lib/format";
 import { getAdsDecision, type AdsDecisionRow } from "@/lib/queries/ads-decision";
@@ -30,6 +32,7 @@ import { listApprovalRequests, type ApprovalRequestRow } from "@/lib/queries/app
 import { getInventoryDecisionReport, type InventoryDecisionRow } from "@/lib/queries/inventory-decision";
 import { getModelSignalsBatch, type ModelSignalBatchRow, type ModelSignalReport } from "@/lib/queries/model-signal";
 import { getPurchasingReport, type OpenProductionOrder } from "@/lib/queries/purchasing";
+import { getStockFeedbackShop } from "@/lib/queries/stock-feedback";
 import { adaptAdsDecisions, adaptProductionTopics, adaptSampleReviews } from "@/lib/queries/work-adapters";
 import { readDecisionRows, toRow } from "@/lib/owner-decisions/service";
 import { resolvePeriod } from "@/lib/search-params";
@@ -62,7 +65,12 @@ export const OWNER_DECISION_TIMEOUT_MS = 2_500;
 export const OWNER_DECISION_WRITE_TIMEOUT_MS = 20_000;
 
 export type SourceResult = { items: OwnerDecisionItem[]; notes?: string[] };
-export type SourceLoader = (ctx: { now: Date; viewer: SessionUser }) => Promise<SourceResult>;
+/**
+ * `kinds` = loại người xem ĐƯỢC thấy (đã áp quyền + phạm vi). Nguồn sinh nhiều loại dùng nó để không đọc
+ * phần mà người xem không được thấy (vd vòng phản hồi tồn không đọc quảng cáo khi người xem không được xem
+ * quảng cáo). Thiếu ⇒ coi như không được thấy gì thêm (hỏng về phía hẹp).
+ */
+export type SourceLoader = (ctx: { now: Date; viewer: SessionUser; kinds?: readonly OwnerDecisionKind[] }) => Promise<SourceResult>;
 
 // ═══════════════════════════ ĐỔI HÌNH DẠNG (thuần) ═══════════════════════════
 
@@ -275,6 +283,84 @@ export function modelScaleToItems(cands: readonly ModelSignalBatchRow[]): OwnerD
   }));
 }
 
+/**
+ * ─── MẪU TRIỂN VỌNG — CÂN NHẮC MỞ TOPIC SẢN XUẤT SỚM (Agent T · quy tắc chủ shop 25/09/2026) ───
+ *
+ * Cùng lô tín hiệu với MODEL_SCALE, cổng đi qua hàm thuần dùng chung với trang 360 (`suggestsTopicOpening`):
+ * tín hiệu TRIỂN VỌNG · trạng thái khai còn trước “Bàn sản xuất” (Loại / Ngừng không vào) · KHÔNG topic đang
+ * mở (số topic CHƯA BIẾT ⇒ không vào). Khoá nguồn dùng lại `modelWinnerSourceKey` — tín hiệu nằm trong
+ * khoá nên khoá TRIỂN VỌNG không bao giờ trùng khoá THẮNG của cùng mẫu; mẫu lên THẮNG thì dòng này rời
+ * hàng đợi và dòng MODEL_SCALE thay chỗ.
+ */
+export function modelEarlyTopicCandidates(rows: readonly ModelSignalBatchRow[]): ModelSignalBatchRow[] {
+  return rows.filter((r) => r.signal.signal === "PROMISING" && suggestsTopicOpening(r.signal.signal, r.model.state, r.openProductionTopics) !== null);
+}
+
+export function modelEarlyTopicToItems(cands: readonly ModelSignalBatchRow[]): OwnerDecisionItem[] {
+  return cands.map(({ model, signal }) => ({
+    kind: "MODEL_EARLY_TOPIC" as const,
+    sourceKey: modelWinnerSourceKey(model.id, signal),
+    what: `Mẫu ${model.code} · tín hiệu ${MODEL_SIGNAL_LABEL.PROMISING.toUpperCase()} — cân nhắc mở topic sản xuất sớm`,
+    why: [
+      `${MODEL_SIGNAL_HINT.PROMISING} (${signal.periodLabel.toLowerCase()})`,
+      "Mở topic sớm để xưởng báo giá, làm mẫu song song với test quảng cáo; vòng đời mẫu không đổi khi topic mở.",
+      ...signal.conflicts.map((c) => `Lưu ý: ${c}`),
+    ].join(" "),
+    data: signal.reasons.map((r) => ({ label: SIGNAL_SOURCE_LABEL[r.source], value: r.vote === "ABSENT" ? null : r.verdict })),
+    impact: {
+      amountVnd: null,
+      basis: "Chưa có con số tiền đo được cho quyết định mở topic sớm — báo giá xưởng chưa phải cam kết vốn.",
+    },
+    action: { label: "Mở trang mẫu", href: `/models/${model.id}` },
+    modelId: model.id,
+  }));
+}
+
+/**
+ * ─── VÒNG PHẢN HỒI TỒN → CREATIVE / QUẢNG CÁO (Agent X) ───
+ *
+ * Khoá nguồn: `stock:<PUSH|SCALE>:<mã hàng>:<băm căn cứ>` — căn cứ là chuỗi chuẩn của `deriveStockFeedback`
+ * (tập mẫu mã × kết luận tồn; với SCALE thêm lá phiếu quảng cáo và lệnh đặt xưởng đã phủ / chưa). KHÔNG mang
+ * ngày và KHÔNG mang số đếm trôi (khả dụng, bán 30 ngày): "Bỏ qua" có hiệu lực tới khi các bộ máy nói một
+ * điều khác. Căn cứ của PUSH chỉ gồm TỒN — nên cùng một khoá cho mọi người xem, dù người không có quyền
+ * quảng cáo không thấy phần quảng cáo của câu.
+ */
+export function stockFeedbackSourceKey(f: Pick<StockFeedback, "kind" | "productId" | "basis">): string {
+  return `stock:${f.kind === "PUSH_STOCK" ? "PUSH" : "SCALE"}:${f.productId}:${basisHash(f.basis)}`;
+}
+
+export function stockFeedbackToItems(recs: readonly StockFeedback[]): OwnerDecisionItem[] {
+  return recs.map((f) => ({
+    kind: f.kind === "PUSH_STOCK" ? ("STOCK_PUSH" as const) : ("SCALE_STOCK_RISK" as const),
+    sourceKey: stockFeedbackSourceKey(f),
+    what: f.what,
+    why: f.caveat ? `${f.why} Lưu ý: ${f.caveat}` : f.why,
+    // Ô ước tính mang nhãn ngay trong tên ô (luật 8.6) — cockpit in nhãn nguyên văn.
+    data: f.data.map((d) => ({ label: d.label, value: d.value })),
+    impact: f.impact,
+    action: f.action,
+    modelId: f.modelId,
+  }));
+}
+
+/**
+ * Một lượt đọc cả shop cho CẢ HAI loại (`getStockFeedbackShop`: tồn · quảng cáo · creative, mỗi nguồn một lần).
+ * Quảng cáo chỉ được đọc khi người xem được thấy `SCALE_STOCK_RISK` — cùng quyền + phạm vi của màn hình
+ * quảng cáo. Tồn hỏng ⇒ ném (khối nêu tên nguồn).
+ */
+async function loadStockFeedback({ kinds }: { kinds?: readonly OwnerDecisionKind[] }): Promise<SourceResult> {
+  const adsVisible = kinds?.includes("SCALE_STOCK_RISK") ?? false;
+  const shop = await getStockFeedbackShop({ adsVisible });
+  const items: OwnerDecisionItem[] = [];
+  const notes = [...shop.notes];
+  for (const input of shop.inputs) {
+    const r = deriveStockFeedback(input);
+    items.push(...stockFeedbackToItems(r.recommendations));
+    notes.push(...r.insufficient.map((x) => `Chưa kết luận (dữ liệu chưa đủ): ${x}`));
+  }
+  return { items, notes };
+}
+
 const INVENTORY_KIND: Partial<Record<InventoryDecisionKind, OwnerDecisionKind>> = {
   STOCKOUT_RISK: "INVENTORY_STOCKOUT",
   REORDER: "INVENTORY_REORDER",
@@ -385,7 +471,7 @@ async function loadAdsCut({ now }: { now: Date }): Promise<SourceResult> {
 async function loadModelScale(): Promise<SourceResult> {
   const batch = await getModelSignalsBatch(ADS_PERIOD());
   if (batch.topicsError) throw new Error(batch.topicsError);
-  return { items: modelScaleToItems(modelWinnerCandidates(batch.rows)) };
+  return { items: [...modelScaleToItems(modelWinnerCandidates(batch.rows)), ...modelEarlyTopicToItems(modelEarlyTopicCandidates(batch.rows))] };
 }
 
 async function loadInventory(): Promise<SourceResult> {
@@ -402,6 +488,7 @@ export const OWNER_DECISION_LOADERS: Record<OwnerDecisionSource, SourceLoader> =
   MODEL_SCALE: loadModelScale,
   PRODUCTION_LATE: loadProductionLate,
   INVENTORY: loadInventory,
+  STOCK_FEEDBACK: loadStockFeedback,
 };
 
 // ═══════════════════════════ GOM ═══════════════════════════
@@ -467,7 +554,7 @@ export async function getOwnerDecisionQueue(opts: QueueOptions): Promise<OwnerDe
   const results = await Promise.all(
     sourcesFor(kinds).map(async (source) => {
       const loader = opts.loaders?.[source] ?? OWNER_DECISION_LOADERS[source];
-      const r = await guarded(OWNER_DECISION_SOURCE_LABEL[source], () => loader({ now, viewer: opts.viewer }), timeoutMs);
+      const r = await guarded(OWNER_DECISION_SOURCE_LABEL[source], () => loader({ now, viewer: opts.viewer, kinds }), timeoutMs);
       if (!r.ok) {
         failed.push({ source, label: OWNER_DECISION_SOURCE_LABEL[source], error: r.error });
         return [];
@@ -506,7 +593,7 @@ export async function findOwnerDecisionItem(
   if (!kinds.includes(kind)) return { error: "FORBIDDEN" };
   const source = OWNER_DECISION_KIND_SPEC[kind].source;
   const loader = opts.loaders?.[source] ?? OWNER_DECISION_LOADERS[source];
-  const r = await guarded(OWNER_DECISION_SOURCE_LABEL[source], () => loader({ now: opts.now ?? new Date(), viewer }), OWNER_DECISION_WRITE_TIMEOUT_MS);
+  const r = await guarded(OWNER_DECISION_SOURCE_LABEL[source], () => loader({ now: opts.now ?? new Date(), viewer, kinds }), OWNER_DECISION_WRITE_TIMEOUT_MS);
   if (!r.ok) return { error: "SOURCE_FAILED", detail: r.error };
   const item = r.value.items.find((i) => i.kind === kind && i.sourceKey === sourceKey);
   return item ? { item } : { error: "GONE" };

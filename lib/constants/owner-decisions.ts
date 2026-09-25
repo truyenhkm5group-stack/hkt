@@ -15,7 +15,8 @@ import { formatVND } from "@/lib/format";
  * mà màn hình chủ của nó đang dùng: yêu cầu duyệt (`listApprovalRequests`), mẫu chờ duyệt và topic chờ
  * chốt (hai adapter của `/work`), lệnh SX quá hẹn (`getPurchasingReport`), cắt quảng cáo
  * (`adaptAdsDecisions` + `getAdsDecision`), mẫu THẮNG chưa mở topic sản xuất (`getModelSignalsBatch` —
- * tín hiệu mẫu đầy đủ của A2 đọc theo lô), và ba kết luận tồn kho (`getInventoryDecisionReport` →
+ * tín hiệu mẫu đầy đủ của A2 đọc theo lô) và mẫu TRIỂN VỌNG nên cân nhắc mở topic SỚM (cùng lô, Agent T),
+ * và ba kết luận tồn kho (`getInventoryDecisionReport` →
  * `decideInventory`, đã trừ hàng đặt xưởng).
  *
  * Người ĐÓNG việc ở màn hình chủ của nó — không có nút "xong" ở đây. Ba nút của cockpit chỉ GHI LẠI
@@ -34,16 +35,21 @@ export const OWNER_DECISION_KINDS = [
   "SAMPLE_REVIEW",
   "TOPIC_DECISION",
   "ADS_CUT",
+  // Agent X: đứng ngay sau CẮT quảng cáo — tiền đang rủi ro NGAY (tăng ngân sách vào hàng sắp hết).
+  "SCALE_STOCK_RISK",
   "INVENTORY_STOCKOUT",
   "PRODUCTION_LATE",
   "INVENTORY_REORDER",
   "MODEL_SCALE",
+  "MODEL_EARLY_TOPIC",
   "INVENTORY_CLEARANCE",
+  // Agent X: vòng phản hồi tồn → creative / quảng cáo — không gấp, đứng cuối.
+  "STOCK_PUSH",
 ] as const;
 export type OwnerDecisionKind = (typeof OWNER_DECISION_KINDS)[number];
 
 /** Nguồn đọc — một nguồn có thể sinh nhiều loại (quyết định tồn sinh ba). */
-export const OWNER_DECISION_SOURCES = ["APPROVALS", "SAMPLES", "TOPICS", "ADS_CUT", "MODEL_SCALE", "PRODUCTION_LATE", "INVENTORY"] as const;
+export const OWNER_DECISION_SOURCES = ["APPROVALS", "SAMPLES", "TOPICS", "ADS_CUT", "MODEL_SCALE", "PRODUCTION_LATE", "INVENTORY", "STOCK_FEEDBACK"] as const;
 export type OwnerDecisionSource = (typeof OWNER_DECISION_SOURCES)[number];
 
 export const OWNER_DECISION_SOURCE_LABEL: Record<OwnerDecisionSource, string> = {
@@ -54,6 +60,7 @@ export const OWNER_DECISION_SOURCE_LABEL: Record<OwnerDecisionSource, string> = 
   MODEL_SCALE: "Tín hiệu mẫu",
   PRODUCTION_LATE: "Lệnh sản xuất",
   INVENTORY: "Quyết định vốn tồn",
+  STOCK_FEEDBACK: "Phản hồi tồn → creative / quảng cáo",
 };
 
 export type OwnerDecisionKindSpec = {
@@ -137,6 +144,15 @@ export const OWNER_DECISION_KIND_SPEC: Record<OwnerDecisionKind, OwnerDecisionKi
     scopeResource: "ADS",
     hint: "Mẫu có tín hiệu THẮNG trong 30 ngày (tín hiệu mẫu của trang 360: quảng cáo có lãi VÀ phân loại mẫu mã tốt, không nguồn nào nói ngược — getModelSignalsBatch), chưa có topic sản xuất đang mở và trạng thái khai còn trước “Bàn sản xuất”. Mỗi ô số liệu là NHÃN phán quyết của một nguồn. Bỏ qua có hiệu lực tới khi tín hiệu hoặc một phán quyết nguồn đổi.",
   },
+  MODEL_EARLY_TOPIC: {
+    label: "Mẫu TRIỂN VỌNG — cân nhắc mở topic sản xuất sớm",
+    // Cùng nguồn đọc với MODEL_SCALE (một lượt `getModelSignalsBatch` sinh cả hai loại) — cùng quyền.
+    source: "MODEL_SCALE",
+    home: "/models",
+    requires: ["models:view", "expenses:view"],
+    scopeResource: "ADS",
+    hint: "Quy tắc chủ shop 25/09/2026: topic sản xuất mở được cho mẫu có chỉ số tốt mà CHƯA thắng. Mẫu có tín hiệu TRIỂN VỌNG trong 30 ngày (getModelSignalsBatch — thiếu một nguồn thị trường, hoặc mới thắng ở vòng thử creative / thiết kế), chưa có topic sản xuất đang mở, trạng thái khai còn trước “Bàn sản xuất” (Loại / Ngừng không vào). Topic mở sớm chạy SONG SONG với test quảng cáo — vòng đời mẫu không đổi. Ưu tiên thấp hơn mẫu THẮNG; không gửi tin gấp, chỉ vào bản tin sáng. Bỏ qua có hiệu lực tới khi tín hiệu hoặc một phán quyết nguồn đổi.",
+  },
   INVENTORY_CLEARANCE: {
     label: "Nên xả / dừng",
     source: "INVENTORY",
@@ -144,6 +160,22 @@ export const OWNER_DECISION_KIND_SPEC: Record<OwnerDecisionKind, OwnerDecisionKi
     requires: ["planning:view"],
     scopeResource: null,
     hint: "Kết luận CLEARANCE_CANDIDATE của trang Quyết định vốn tồn. Tác động = vốn theo giá nhập giải phóng được nếu xả phần vượt mức.",
+  },
+  SCALE_STOCK_RISK: {
+    label: "Đừng tăng ngân sách — sắp hết hàng",
+    source: "STOCK_FEEDBACK",
+    home: "/inventory/planning",
+    requires: ["planning:view", "expenses:view"],
+    scopeResource: "ADS",
+    hint: "Bảng quyết định /ads (chiều mã hàng, 30 ngày, CHỈ mã đã ghép chi) đề nghị TĂNG NGÂN SÁCH trong khi bộ máy tồn nói mẫu mã của mã sẽ hết trước khi lô mới về (STOCKOUT_RISK / đủ bán < thời gian sản xuất). Nói rõ lệnh đặt xưởng đang mở đã phủ hay chưa. Tác động = lãi gộp ƯỚC TÍNH mất nếu để hết hàng. Không tự đổi ngân sách nào.",
+  },
+  STOCK_PUSH: {
+    label: "Tồn chậm — đẩy bằng creative / khách cũ",
+    source: "STOCK_FEEDBACK",
+    home: "/inventory/decisions",
+    requires: ["planning:view"],
+    scopeResource: null,
+    hint: "Mã có mẫu mã BIẾT tồn mà bộ máy tồn kết luận Đang chôn vốn / Nên xả (gộp theo mã hàng). Việc chính: làm creative mới cho mẫu tồn (mở vòng mẫu với ảnh của mã chọn sẵn — máy không tự vẽ); quảng cáo của mã đang CẮT ⇒ đẩy bằng ưu đãi / khách cũ thay vì tăng quảng cáo. Số chi quảng cáo chỉ hiện với người có quyền xem quảng cáo. Tác động = vốn theo giá nhập giải phóng được. Bỏ qua có hiệu lực tới khi tập mẫu mã / kết luận tồn đổi.",
   },
 };
 

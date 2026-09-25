@@ -488,7 +488,20 @@ function BatchDetailBlock({ d }: { d: BatchDetail }) {
   );
 }
 
-export async function ApproveTab({ pending, batchId, canApprove, canEdit }: { pending: PendingBatch | null; batchId: string | null; canApprove: boolean; canEdit: boolean }) {
+export async function ApproveTab({
+  pending,
+  batchId,
+  canApprove,
+  canEdit,
+  preselectProductId = null,
+}: {
+  pending: PendingBatch | null;
+  batchId: string | null;
+  canApprove: boolean;
+  canEdit: boolean;
+  /** `?product=<id>` (đề xuất đẩy tồn, Agent X): mã được CHỌN SẴN ở khối Gen ảnh bằng tay — máy không tự vẽ. */
+  preselectProductId?: string | null;
+}) {
   const db = await getDb();
   const now = new Date();
   const [recent, detail, current, products, pageName] = await Promise.all([
@@ -531,7 +544,9 @@ export async function ApproveTab({ pending, batchId, canApprove, canEdit }: { pe
         </SectionCard>
       )}
 
-      <ManualGenPanel canEdit={canEdit} />
+      <div id="gen-tay" className="scroll-mt-4">
+        <ManualGenPanel canEdit={canEdit} preselectProductId={preselectProductId} />
+      </div>
 
       {batchId && !detail ? <EmptyState title="Không tìm thấy lô" description="Lô trong đường dẫn không còn tồn tại." /> : null}
       {detail ? <BatchDetailBlock d={detail} /> : null}

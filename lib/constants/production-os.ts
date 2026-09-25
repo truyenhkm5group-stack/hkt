@@ -18,6 +18,7 @@
  */
 import { MODEL_TRANSITIONS, type ModelState } from "@/lib/constants/model-lifecycle";
 import type { WorkStatus } from "@/lib/constants/work";
+import type { TopicOpenContext } from "@/lib/constants/early-topic";
 
 // ─────────────────────────── TOPIC HỎI GIÁ / BÀN PHƯƠNG ÁN ───────────────────────────
 
@@ -119,6 +120,13 @@ export type TopicEvidenceSnapshot = {
   orders30d: number | null;
   ordersTotal: number | null;
   adSpend30d: number | null;
+  /**
+   * Bối cảnh lúc mở (Agent T · topic mở sớm): tín hiệu mẫu + trạng thái khai. Tuỳ chọn — topic mở trước khi
+   * có hai trường này KHÔNG được backfill. Kiểu đầy đủ và luật đọc: `lib/constants/early-topic.ts`.
+   */
+  signalAtOpen?: TopicOpenContext["signalAtOpen"];
+  signalErrorAtOpen?: string | null;
+  lifecycleAtOpen?: ModelState | null;
 };
 
 /** Căn cứ in cạnh ảnh chụp — nói rõ đây là đơn LÊN, không phải đơn giao thành công (ORDER_OUTCOME). */

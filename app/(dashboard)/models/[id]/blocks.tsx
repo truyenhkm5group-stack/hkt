@@ -25,6 +25,7 @@ import {
   type ModelSuggestion,
 } from "@/lib/constants/model-360";
 import type { ModelState } from "@/lib/constants/model-lifecycle";
+import { winnerFollowUp } from "@/lib/constants/early-topic";
 import { MODEL_SIGNAL_HINT, MODEL_SIGNAL_LABEL, MODEL_SIGNAL_TONE, SIGNAL_SOURCE_LABEL, SOURCE_VOTE_LABEL } from "@/lib/constants/model-signal";
 import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { getModelAdsSummary, getModelCreativeSummary, NO_VERDICT } from "@/lib/queries/model-ads";
@@ -34,6 +35,8 @@ import { getModelSignal } from "@/lib/queries/model-signal";
 import { getModelProductionSummary } from "@/lib/queries/model-production";
 import { getModelReturnDispositions } from "@/lib/queries/model-returns";
 import { getModelStockStates } from "@/lib/queries/model-stock";
+import { mergeStockFeedbackSuggestions } from "@/lib/constants/stock-feedback";
+import { getStockFeedbackForProduct } from "@/lib/queries/stock-feedback";
 import type { Period } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -65,6 +68,12 @@ export type BlockCtx = {
 
 /** Tín hiệu đọc MỘT lần cho mỗi lượt dựng trang (đầu trang + khối tín hiệu + khối đề xuất). */
 const signalOnce = cache((modelId: string, range: Period) => loadSource("tín hiệu mẫu", () => getModelSignal(modelId, range)));
+
+/**
+ * Tóm tắt sản xuất (Agent C) đọc MỘT lần cho mỗi lượt dựng trang — khối Đề xuất và ô đổi trạng thái
+ * (lượt chuyển tiếp sau khi khai THẮNG — Agent T) dùng chung. Người gọi tự kiểm quyền khối.
+ */
+export const productionOnce = cache((modelId: string) => loadSource("sản xuất (getModelProductionSummary)", () => getModelProductionSummary(modelId)));
 
 // ─────────────────────────── MẢNH GIAO DIỆN DÙNG CHUNG ───────────────────────────
 
@@ -192,14 +201,17 @@ export async function SignalBlock({ ctx }: { ctx: BlockCtx }) {
 
 export async function SuggestionsBlock({ ctx }: { ctx: BlockCtx }) {
   const pid = ctx.productId;
-  const [sig, ads, inv, prod] = await Promise.all([
+  const [sig, ads, inv, prod, stock] = await Promise.all([
     signalOnce(ctx.modelId, ctx.range),
     pid && ctx.allowed.ADS ? loadSource("quảng cáo", () => getModelAdsSummary(pid, ctx.range)) : Promise.resolve(null),
     pid && ctx.allowed.INVENTORY ? loadSource("quyết định tồn", () => getModelInventoryDecisions(pid)) : Promise.resolve(null),
-    ctx.allowed.PRODUCTION ? loadSource("sản xuất", () => getModelProductionSummary(ctx.modelId)) : Promise.resolve(null),
+    ctx.allowed.PRODUCTION ? productionOnce(ctx.modelId) : Promise.resolve(null),
+    // Vòng phản hồi tồn → creative / quảng cáo (Agent X): gác quyền quyết định tồn; phần quảng cáo chỉ đọc khi được xem quảng cáo.
+    pid && ctx.allowed.INVENTORY ? loadSource("phản hồi tồn → creative / quảng cáo", () => getStockFeedbackForProduct(pid, ctx.allowed.ADS)) : Promise.resolve(null),
   ]);
-  const failed = [sig, ads, inv, prod].filter((x): x is Extract<Loaded<unknown>, { ok: false }> => !!x && !x.ok);
-  const list: ModelSuggestion[] = deriveModelSuggestions({
+  const failed = [sig, ads, inv, prod, stock].filter((x): x is Extract<Loaded<unknown>, { ok: false }> => !!x && !x.ok);
+  const stockNotes = stock && stock.ok ? [...stock.data.insufficient.map((x) => `Chưa kết luận (dữ liệu chưa đủ): ${x}`), ...stock.data.notes] : [];
+  const base: ModelSuggestion[] = deriveModelSuggestions({
     modelId: ctx.modelId,
     declaredState: ctx.declaredState,
     signal: sig.ok && sig.data ? { signal: sig.data.signal, summary: sig.data.summary } : null,
@@ -210,14 +222,22 @@ export async function SuggestionsBlock({ ctx }: { ctx: BlockCtx }) {
     inventory: inv && inv.ok ? { rows: inv.data.rows, dataGate: inv.data.dataGate.state } : null,
     creativeHref: pid ? `/marketing/creatives?tab=thu-vien&mau=${encodeURIComponent(pid)}` : null,
     periodQuery: ctx.periodQuery,
-    production: prod && prod.ok && prod.data ? { openTopics: prod.data.openTopics } : null,
+    production: prod && prod.ok && prod.data ? { openTopics: prod.data.openTopics, winnerFollowUp: winnerFollowUp(prod.data) } : null,
     canCreateTopic: ctx.canCreateTopic,
   });
+  const list: ModelSuggestion[] = stock && stock.ok ? mergeStockFeedbackSuggestions(base, stock.data.recommendations) : base;
   return (
     <SectionCard
       title="Đề xuất"
-      hint="Chỉ dựng từ quyết định ĐÃ CÓ: bảng quyết định quảng cáo (Tăng ngân sách / Cắt), bộ máy quyết định tồn (đặt thêm — số đã trừ hàng đặt xưởng; chôn vốn / nên xả), tín hiệu mẫu THẮNG khi vòng đời chưa tới bước trao đổi sản xuất. Không có quyết định thì không có đề xuất. Mọi đề xuất là để NGƯỜI bấm — không có gì tự áp."
-      actions={failed.length ? <DataWarnings tone="danger" items={failed.map((f) => `${sourceFailedText(f)}: ${f.error}`)} /> : null}
+      hint="Chỉ dựng từ quyết định ĐÃ CÓ: bảng quyết định quảng cáo (Tăng ngân sách / Cắt), bộ máy quyết định tồn (đặt thêm — số đã trừ hàng đặt xưởng; chôn vốn / nên xả), tín hiệu mẫu THẮNG khi vòng đời chưa tới bước trao đổi sản xuất; tín hiệu TRIỂN VỌNG ⇒ mở topic sản xuất SỚM, chạy song song với test quảng cáo, vòng đời không đổi (quy tắc chủ shop 25/09/2026); mẫu đã khai THẮNG mà sản xuất đi trước ⇒ chuyển vòng đời tới đúng chỗ sản xuất đang đứng. Vòng phản hồi tồn → creative / quảng cáo: tồn chậm ⇒ làm creative mới / đẩy qua khách cũ; quảng cáo đề nghị tăng mà sắp hết hàng ⇒ đừng tăng. Không có quyết định thì không có đề xuất. Mọi đề xuất là để NGƯỜI bấm — không có gì tự áp."
+      actions={
+        failed.length || stockNotes.length ? (
+          <span className="flex items-center gap-2">
+            {failed.length ? <DataWarnings tone="danger" items={failed.map((f) => `${sourceFailedText(f)}: ${f.error}`)} /> : null}
+            {stockNotes.length ? <DataWarnings items={stockNotes} /> : null}
+          </span>
+        ) : null
+      }
     >
       {list.length ? (
         <ul className="space-y-3">

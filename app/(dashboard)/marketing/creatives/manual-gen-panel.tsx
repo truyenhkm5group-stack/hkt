@@ -3,6 +3,7 @@ import { ManualGenAutoRefresh, ManualGenForm, ManualGenImageTile } from "@/app/(
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { getDb } from "@/db";
 import { MANUAL_GEN_IMAGE_STATUSES, MANUAL_GEN_IMAGE_STATUS_LABEL } from "@/lib/constants/creative-loop";
+import { manualGenPreselect } from "@/lib/constants/stock-feedback";
 import { formatNumber, vnShortStamp } from "@/lib/format";
 import { loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
 
@@ -13,10 +14,12 @@ import { loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
  * (KHÔNG vào lô) → người Duyệt / Loại từng ảnh → ảnh duyệt được máy viết câu chữ theo ảnh → người soạn
  * tên + câu chữ rồi "Đưa vào lô" chờ duyệt đăng. Trần chi ảnh là trần chung với lô hằng ngày.
  */
-export async function ManualGenPanel({ canEdit }: { canEdit: boolean }) {
+export async function ManualGenPanel({ canEdit, preselectProductId = null }: { canEdit: boolean; preselectProductId?: string | null }) {
   const db = await getDb();
   const now = new Date();
   const p = await loadManualGenPanel(db, now);
+  // `?product=` chỉ CHỌN SẴN ô ảnh gốc — không vẽ gì cho tới khi người bấm Gen (vẽ ảnh tốn tiền).
+  const chon = manualGenPreselect(p.sources, preselectProductId);
   return (
     <SectionCard
       title={
@@ -33,7 +36,8 @@ export async function ManualGenPanel({ canEdit }: { canEdit: boolean }) {
       }
     >
       <div className="space-y-4">
-        {canEdit ? <ManualGenForm sources={p.sources} allowedNow={p.capacity.allowedNow} capReason={p.capacity.reason} disabledReason={null} /> : null}
+        {canEdit && chon.note ? <p className="rounded-md border border-dashed px-2.5 py-1.5 text-[12px] text-muted-foreground">{chon.note}</p> : null}
+        {canEdit ? <ManualGenForm key={chon.photoId} sources={p.sources} allowedNow={p.capacity.allowedNow} capReason={p.capacity.reason} disabledReason={null} initialPhotoId={chon.photoId} /> : null}
         <div className="space-y-3">
           <p className="text-[12.5px] font-semibold">Kết quả gen tay</p>
           {p.runs.length === 0 ? (
