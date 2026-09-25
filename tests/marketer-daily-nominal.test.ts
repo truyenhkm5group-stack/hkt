@@ -92,7 +92,7 @@ function testOrderDeliveryShare() {
  * lãi không có thật cho họ, trong khi tiền thật nằm ở dòng "Chưa quy kết".
  */
 function testFinishCell() {
-  const base: NominalCell = { orders: 3, deliveredOrders: 1, returnedOrders: 1, openOrders: 1, posSales: 1_500_000, expectedRevenue: 900_000, expectedCogs: 300_000, shipCost: 90_000, opex: 50_000, inventoryRisk: 30_000, tax: 9_000, adSpend: null, messages: null, otherCost: null, expectedProfit: null, netProfit: null };
+  const base: NominalCell = { orders: 3, deliveredOrders: 1, returnedOrders: 1, openOrders: 1, posSales: 1_500_000, expectedRevenue: 900_000, expectedCogs: 300_000, shipCost: 90_000, opex: 50_000, inventoryRisk: 30_000, tax: 9_000, adSpend: null, messages: null, otherCost: null, expectedProfit: null, netProfit: null, marketerPriceAdj: 0 };
   const unknown = finishCell(base, 0.05);
   assert.equal(unknown.expectedProfit, null, "QC chưa biết ⇒ LN danh nghĩa CHƯA BIẾT");
   assert.equal(unknown.netProfit, null, "QC chưa biết ⇒ LN ròng CHƯA BIẾT");

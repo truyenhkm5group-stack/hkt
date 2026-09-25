@@ -11,6 +11,7 @@ import { OUTCOME_GROUP } from "@/lib/constants/truth";
 import { adMarketerMap } from "@/lib/integrations/facebook/ads-index";
 import { carrierSubstateSql } from "@/lib/queries/carrier-substate-sql";
 import { LINE_UNIT_COST } from "@/lib/queries/cogs";
+import { marketerPriceOnOrderDate } from "@/lib/queries/marketer-price";
 import { listEmployees, loadPayrollConfig } from "@/lib/queries/payroll";
 import { getNominalProfitReport, type NominalRow } from "@/lib/queries/profit-nominal";
 import { NO_ORDER_VALUE_FILTER } from "@/lib/constants/order-value";
@@ -95,6 +96,12 @@ export type NominalCell = {
   expectedProfit: number | null;
   /** LN ròng ƯT = LN danh nghĩa − vận hành − rủi ro tồn − thuế − CP khác (TRƯỚC chia % chủ mã). */
   netProfit: number | null;
+  /**
+   * GIÁ BÁO MKT: phần của `expectedCogs` là chênh lệch giá báo so với giá vốn thật (chủ shop chốt
+   * 25/09/2026 — phần của MKT tính trên giá báo từ 01/09/2026). Ô của MKT mang nó; hàng TỔNG ngày /
+   * kỳ trừ nó ra để vẫn đứng trên giá vốn thật và khớp Báo cáo lợi nhuận.
+   */
+  marketerPriceAdj: number;
 };
 
 export type NominalMarketerColumn = {
@@ -134,6 +141,8 @@ export type MarketerDailyNominal = {
    * nhãn (AGENTS.md mục 8.6) — đúng cách tab Lợi nhuận danh nghĩa tính.
    */
   estimatedCogs: { amount: number; products: number };
+  /** Σ chênh lệch giá báo MKT đã tính vào các cột MKT (dương = shop giữ, âm = shop bù). */
+  marketerPriceMargin: number;
   warnings: string[];
 };
 
@@ -154,6 +163,7 @@ const emptyCell = (): NominalCell => ({
   otherCost: null,
   expectedProfit: null,
   netProfit: null,
+  marketerPriceAdj: 0,
 });
 
 /* ═══════════════════ HÀM THUẦN ═══════════════════ */
@@ -220,6 +230,12 @@ function addInto(t: NominalCell, c: NominalCell) {
   t.opex += c.opex;
   t.inventoryRisk += c.inventoryRisk;
   t.tax += c.tax;
+  t.marketerPriceAdj += c.marketerPriceAdj;
+}
+
+/** Hàng TỔNG đứng trên giá vốn thật: bỏ phần chênh giá báo mà các ô MKT đã mang. */
+function giaVonThat(t: NominalCell): NominalCell {
+  return { ...t, expectedCogs: t.expectedCogs - t.marketerPriceAdj, marketerPriceAdj: 0 };
 }
 
 /* ═══════════════════ ĐỌC SỐ ═══════════════════ */
@@ -234,6 +250,8 @@ type LineRow = {
   code: string | null;
   line: string | number;
   cogs: string | number;
+  /** Σ số lượng × (giá báo MKT − giá vốn thật) trên các dòng có giá báo đang hiệu lực. */
+  mkt_delta: string | number;
   outcome: string;
   con: string;
   age_hours: string | number | null;
@@ -255,11 +273,14 @@ async function readLines(period: Period): Promise<LineRow[]> {
   ];
   if (period.from) dk.push(sql`"orders"."inserted_at" >= ${period.from}`);
   if (period.to) dk.push(sql`"orders"."inserted_at" <= ${period.to}`);
+  // Giá báo MKT theo NGÀY LÊN ĐƠN của dòng — ngày ấy nằm trong CTE `don`, không phải bảng `orders`.
+  const giaBao = marketerPriceOnOrderDate(sql`d.ordered_at`);
   return chayKhongJit(db, async (tx) =>
     rowsOf<LineRow>(
       await tx.execute(sql`
         with don as (
           select "orders"."id" as order_id,
+                 "orders"."inserted_at" as ordered_at,
                  to_char("orders"."inserted_at" at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD') as day,
                  "orders"."page_id" as page_id,
                  "orders"."ad_id" as ad_id,
@@ -276,13 +297,14 @@ async function readLines(period: Period): Promise<LineRow[]> {
                coalesce("product_variants"."product_id", "order_items"."product_id") as pid,
                max(coalesce("products"."custom_id", '')) as code,
                coalesce(sum("order_items"."line_total"), 0) as line,
-               coalesce(sum("order_items"."quantity" * ${LINE_UNIT_COST}), 0) as cogs
+               coalesce(sum("order_items"."quantity" * ${LINE_UNIT_COST}), 0) as cogs,
+               coalesce(sum("order_items"."quantity" * (${giaBao} - ${LINE_UNIT_COST})) filter (where ${giaBao} is not null), 0) as mkt_delta
           from don d
           join "order_items" on "order_items"."order_id" = d.order_id and "order_items"."is_bonus" = false
           left join "product_variants" on "product_variants"."id" = "order_items"."variant_id"
           left join "products" on "products"."id" = coalesce("product_variants"."product_id", "order_items"."product_id")
           left join "order_attributions" on "order_attributions"."order_id" = d.order_id
-         group by d.order_id, d.day, d.page_id, d.ad_id, d.con, d.outcome, d.age_hours, coalesce("product_variants"."product_id", "order_items"."product_id")
+         group by d.order_id, d.ordered_at, d.day, d.page_id, d.ad_id, d.con, d.outcome, d.age_hours, coalesce("product_variants"."product_id", "order_items"."product_id")
       `),
     ),
   );
@@ -318,6 +340,8 @@ async function readSpend(period: Period) {
 /* ═══════════════════ HÀM CHÍNH ═══════════════════ */
 
 type Slot = {
+  /** Trọng số chia phần chênh giá báo MKT: chênh của dòng × phần giao được × phần của marketer. */
+  mktKey: number;
   day: string;
   key: string;
   orderId: string;
@@ -422,6 +446,7 @@ async function getMarketerDailyNominalUncached(period: Period): Promise<Marketer
           : 1 - r;
       const pos = Number(l.line);
       const cogs = Number(l.cogs);
+      const mktDelta = Number(l.mkt_delta ?? 0);
       const d = direct[idx];
       const recipients: [string | null, number][] = d.mid ? [[d.mid, 1]] : fb.size ? [...fb.entries()] : [[null, 1]];
       if (d.via) attribution[d.via as "snapshot" | "page" | "ad"] += pos;
@@ -429,7 +454,7 @@ async function getMarketerDailyNominalUncached(period: Period): Promise<Marketer
       else attribution.none += pos;
       const orderFrac = 1 / (linesOfOrder.get(l.order_id) ?? 1);
       for (const [mid, frac] of recipients) {
-        slots.push({ day: l.day, key: keyOf(mid), orderId: l.order_id, outcome: l.outcome, frac, orderFrac, pos: pos * frac, revKey: pos * w * frac, cogsKey: cogs * w * frac, cogs: cogs * frac });
+        slots.push({ day: l.day, key: keyOf(mid), orderId: l.order_id, outcome: l.outcome, frac, orderFrac, pos: pos * frac, revKey: pos * w * frac, cogsKey: cogs * w * frac, cogs: cogs * frac, mktKey: mktDelta * w * frac });
       }
     });
 
@@ -447,12 +472,24 @@ async function getMarketerDailyNominalUncached(period: Period): Promise<Marketer
     const tax = chiaTheoCanCu(row.tax, rev, pos, cnt);
     // Doanh số POS cũng chia bằng largest remainder để Σ ô = `grossSales` của mã, không lệch vì làm tròn.
     const posInt = chiaTheoCanCu(row.grossSales, pos, cnt);
+    /*
+      GIÁ BÁO MKT: phần chênh của MÃ (cùng con số bảng MKT của tab Lợi nhuận danh nghĩa dùng) chia xuống
+      các ô theo chênh của từng dòng × phần giao được. Trọng số lấy theo CHIỀU của tổng: một kỳ vừa có
+      giá báo cao hơn vừa có giá xả tồn thấp hơn giá vốn thì phần chênh RÒNG đi theo các dòng cùng chiều.
+    */
+    const chieu = row.marketerCostDelta < 0 ? -1 : 1;
+    const mktAdj = chiaTheoCanCu(row.marketerCostDelta, slots.map((s) => s.mktKey * chieu), cogsK, rev, cnt);
 
     slots.forEach((s, i) => {
       const c = cellOf(s.day, s.key);
       c.posSales += posInt[i];
       c.expectedRevenue += expRev[i];
       c.expectedCogs += expCogs[i];
+      // Ô "Chưa quy kết" là phần shop giữ ⇒ đứng trên giá vốn thật; chỉ ô CỦA MKT mang giá báo.
+      if (s.key !== MARKETING_UNATTRIBUTED) {
+        c.expectedCogs += mktAdj[i];
+        c.marketerPriceAdj += mktAdj[i];
+      }
       c.shipCost += ship[i];
       c.opex += opexPos[i] + opexCnt[i];
       c.inventoryRisk += risk[i];
@@ -521,6 +558,7 @@ async function getMarketerDailyNominalUncached(period: Period): Promise<Marketer
     daySpend.set(r.day, e);
   }
   const grand = emptyCell();
+  let marketerPriceMargin = 0;
   let grandAds = 0;
   let grandMsgs = 0;
   let grandExp = 0;
@@ -528,8 +566,10 @@ async function getMarketerDailyNominalUncached(period: Period): Promise<Marketer
   let grandExpAll = 0;
   let grandNetAll = 0;
   for (const dr of dayMap.values()) {
-    const t = emptyCell();
-    for (const c of Object.values(dr.cells)) addInto(t, c);
+    const tMkt = emptyCell();
+    for (const c of Object.values(dr.cells)) addInto(tMkt, c);
+    marketerPriceMargin += tMkt.marketerPriceAdj;
+    const t = giaVonThat(tMkt);
     const s = daySpend.get(dr.day);
     const known = dr.spendKnown || Boolean(s);
     dr.total = finishCell({ ...t, adSpend: known ? (s?.spend ?? 0) : null, messages: known ? (s?.messages ?? 0) : null }, otherPct);
@@ -583,6 +623,11 @@ async function getMarketerDailyNominalUncached(period: Period): Promise<Marketer
       `${nominal.totals.cogsUncoveredQty.toLocaleString("vi-VN")} sản phẩm bán ra chưa có giá vốn nào — không phiếu nhập, không giá Pancake, cũng chưa đặt giá dự tính — nên đang trừ 0 ₫ giá vốn: lợi nhuận của những mã ấy đang CAO hơn thực tế. Đặt giá dự tính ở Báo cáo lợi nhuận → Lợi nhuận danh nghĩa, hoặc lập phiếu nhập có đơn giá.`,
     );
   }
+  if (marketerPriceMargin) {
+    warnings.push(
+      `Cột của từng MKT tính giá vốn theo GIÁ BÁO MKT (đơn từ 01/09/2026, mã đã khai giá báo); hàng tổng ngày và tổng kỳ vẫn theo giá vốn thật để khớp Báo cáo lợi nhuận. Chênh lệch ${marketerPriceMargin.toLocaleString("vi-VN")} ₫ (dương = shop giữ, âm = shop bù cho MKT).`,
+    );
+  }
   if (nominal.totals.projectionError) warnings.push(`Mô hình dự báo giao thành công lỗi (${nominal.totals.projectionError}); Báo cáo lợi nhuận đang tính mọi mã theo tỷ lệ, và bảng này chia đúng theo con số ấy.`);
 
   return {
@@ -600,6 +645,7 @@ async function getMarketerDailyNominalUncached(period: Period): Promise<Marketer
     assumptions: { shipFeeDelivered: a.shipFeeDeliveredUsed, shipFeeReturned: a.shipFeeReturnedUsed, otherCostPercentOfAds: Number(a.otherCostPercentOfAds ?? 0), taxPercent: Number(a.taxPercent ?? 0) },
     unknownCostQty: nominal.totals.cogsUncoveredQty,
     estimatedCogs: { amount: nominal.totals.expectedCogsEstimated, products: nominal.totals.estimatedCostProducts },
+    marketerPriceMargin,
     warnings,
   };
 }
