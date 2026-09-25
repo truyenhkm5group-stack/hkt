@@ -37,7 +37,7 @@ on:
           - vtp-replay-files     # nhập lại các tệp Viettel Post đã lưu (mặc định CHỈ LIỆT KÊ; arg "--apply")
           - vtp-replay-explain   # vì sao dòng tệp Viettel Post đã lưu không ghép được vận đơn — kết quả MÃ HOÁ (chỉ đọc; arg "--like=<phần tên tệp>")
           - vtp-statement-peek   # xem bố cục thật của tệp bảng kê đã lưu (arg: phần tên tệp)
-          - confirm-funnel-audit # "đã xác nhận" cũ vs mới + đơn huỷ khi chưa từng xác nhận, theo nguồn / giờ — số tổng hợp (CHỈ ĐỌC; arg "--days=N")
+          - confirm-funnel-audit # "đã xác nhận" cũ vs mới + đơn huỷ khi chưa từng xác nhận, theo nguồn / giờ — số tổng hợp (CHỈ ĐỌC; arg "--days=N", thêm "--gio" = giờ lên đơn bất thường, "--xoa" = Đã xoá vs Đã huỷ)
           - stock-wait-summary   # chờ hàng & GTC theo số ngày chờ, miền, vùng + đơn đang chờ + đề xuất — số tổng hợp (CHỈ ĐỌC; arg "--days=N")
           - cod-statement-audit  # vì sao /cod quá hạn nhiều: quá hạn theo ngày giao, tiền VTP đã về vs tệp bảng kê đã nhận (CHỈ ĐỌC; arg "--days=N")
           - vtp-retry-webhooks   # xử lý lại gói tin Viettel Post chưa ghép/chưa xử lý được
