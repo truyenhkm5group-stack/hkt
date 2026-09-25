@@ -108,9 +108,8 @@ export default async function WorkshopBatchPage({ params }: { params: Promise<{ 
             { label: "Xưởng đã trả", value: <b>{formatNumber(b.delivered)}</b> },
             { label: "Đơn giá công", value: formatVND(b.laborUnitPrice) },
             { label: "Thưởng / phạt khác", value: b.adjustment ? `${formatVND(b.adjustment, { sign: true })}${b.adjustmentNote ? ` · ${b.adjustmentNote}` : ""}` : "Không" },
-            { label: "Phạt xưởng · hoàn MKT", value: b.workshopPenalty ? `${formatVND(b.workshopPenalty)}${b.penaltyNote ? ` · ${b.penaltyNote}` : ""}` : "Không" },
+            { label: "Phạt xưởng · hoàn MKT", value: b.workshopPenalty ? `${formatVND(b.workshopPenalty)} · ${b.penaltyAt ? `ghi ${formatDate(b.penaltyAt)}` : "CHƯA có ngày ghi — chưa cộng cho MKT"}${b.penaltyNote ? ` · ${b.penaltyNote}` : ""}` : "Không" },
             { label: "MKT phụ trách", value: b.marketerName ?? "Chưa gán — khai ở Lương › Marketer phụ trách mã" },
-            { label: "Giá báo MKT", value: formatVND(b.marketerPrice) },
             { label: "Ai lo vải", value: FABRIC_SOURCE_LABEL[b.fabricSource as FabricSource] ?? b.fabricSource },
             {
               label: "Bảng đặt màu × size",

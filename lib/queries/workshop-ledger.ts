@@ -1,5 +1,8 @@
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { marketerPriceAt, marketerPriceCutoff } from "@/lib/constants/marketer-price";
+import { listMarketerPrices } from "@/lib/queries/marketer-price";
+import type { Period } from "@/lib/search-params";
 import { DEFAULT_PAYROLL_CONFIG, PAYROLL_CONFIG_KEY, PAYROLL_EMPLOYEES_KEY, type Employee, type PayrollConfig } from "@/lib/constants/payroll";
 import { sizeRank } from "@/lib/constants/production";
 import { getSettingJson } from "@/lib/settings";
@@ -76,7 +79,7 @@ export type ProductCostView = {
   unassignedFabric: number;
   cost: ActualCost;
   marketerName: string | null;
-  /** Giá báo MKT của lô gần nhất có báo giá (lô chưa huỷ, đặt muộn nhất). `null` = chưa báo. */
+  /** Giá báo MKT ĐANG HIỆU LỰC của mã (bảng giá báo theo mã). `null` = chưa báo. */
   marketerPrice: number | null;
   /** Giá nhập bình quân trên PHIẾU KHO gần nhất của mã — thứ báo cáo lợi nhuận đang dùng làm giá vốn. */
   receiptUnitCost: number | null;
@@ -114,9 +117,11 @@ type VariantInfo = { color: string; size: string };
 async function productMarketerNames(): Promise<Map<string, string>> {
   const [cfg, employees] = await Promise.all([
     getSettingJson<Partial<PayrollConfig>>(PAYROLL_CONFIG_KEY, DEFAULT_PAYROLL_CONFIG),
-    getSettingJson<Employee[]>(PAYROLL_EMPLOYEES_KEY, []),
+    // Sổ nhân sự lưu dạng `{ list: [...] }` (xem `listEmployees`) — KHÔNG phải mảng trần. Bản đầu đọc
+    // nhầm hình nên mọi mã hiện "chưa gán" dù cấu hình Lương đã khai; bài kiểm CSDL khoá điều này.
+    getSettingJson<{ list?: Employee[] }>(PAYROLL_EMPLOYEES_KEY, { list: [] }),
   ]);
-  const nameOf = new Map((Array.isArray(employees) ? employees : []).map((e) => [e.id, e.shortName || e.name] as const));
+  const nameOf = new Map((Array.isArray(employees?.list) ? employees.list : []).map((e) => [e.id, e.shortName || e.name] as const));
   const out = new Map<string, string>();
   for (const [productId, employeeId] of Object.entries(cfg.productOwners ?? {})) {
     const n = nameOf.get(employeeId);
@@ -236,7 +241,12 @@ export async function getWorkshopLedger(now = new Date()) {
   const batchByCode = groupBy(batchViews, (b) => b.productCode);
   const fabricByCode = groupBy(fabricViews, (f) => f.productCode);
   const productIds = [...new Set([...batchViews.map((b) => b.productId), ...fabricViews.map((f) => f.productId)].filter((x): x is string => !!x))];
-  const receipt = await latestReceiptCost(productIds);
+  const [receipt, prices] = await Promise.all([latestReceiptCost(productIds), listMarketerPrices()]);
+  /*
+    Giá báo HIỆN HÀNH để đọc cạnh giá SX. Tính TỪ HÔM NAY chứ không từ ngày bắt đầu áp dụng: trước
+    tháng 9/2026 giá báo không áp cho đơn nào, nhưng người đặt giá vẫn cần thấy mình đã khai giá nào.
+  */
+  const currentMarketerPrice = (productId: string) => marketerPriceAt(prices.filter((x) => x.productId === productId), now);
   const productViews: ProductCostView[] = codes
     .map((code) => {
       const bs = batchByCode.get(code) ?? [];
@@ -252,8 +262,7 @@ export async function getWorkshopLedger(now = new Date()) {
         unassignedFabric: fs.filter((f) => !f.batchId).reduce((s, f) => s + f.amount, 0),
         cost: productActualCost({ batches: bs, fabricAmount: fs.reduce((s, f) => s + f.amount, 0), fabricOrderCount: fs.length }),
         marketerName: productId ? (owners.get(productId) ?? null) : null,
-        // `bs` đã xếp lô đặt MUỘN NHẤT trước (orderBy ordered_at desc).
-        marketerPrice: bs.find((b) => b.status !== "CANCELLED" && b.marketerPrice != null)?.marketerPrice ?? null,
+        marketerPrice: productId ? currentMarketerPrice(productId) : null,
         receiptUnitCost: r?.unitCost ?? null,
         receiptAt: r?.at ?? null,
       };
@@ -363,4 +372,38 @@ export async function openBatchQtyByVariantFromLedger() {
     batches.map((b) => ({ ...b, cells: b.cells ?? {}, dueDate: b.dueDate ? new Date(b.dueDate) : null })),
     deliveries.map((d) => ({ ...d, cells: d.cells ?? {} })),
   );
+}
+
+/**
+ * Tiền phạt xưởng CỘNG cho MKT phụ trách mã trong kỳ (theo ngày ghi phạt). Chỉ SỐ TIỀN theo mã —
+ * không đọc gì khác của sổ đặt xưởng. Phạt ghi trước ngày bắt đầu áp dụng không cộng.
+ * Kèm số lô có phạt mà CHƯA khai ngày — không biết thuộc kỳ nào nên chưa cộng cho ai.
+ */
+export async function workshopPenaltyByProduct(period: Period): Promise<{ byProduct: Map<string, number>; undatedBatches: number; noProductBatches: number }> {
+  const db = await getDb();
+  const b = schema.productionBatches;
+  const from = period.from && period.from > marketerPriceCutoff() ? period.from : marketerPriceCutoff();
+  const rows = await db
+    .select({
+      productId: b.productId,
+      amount: sql<number>`coalesce(sum(${b.workshopPenalty}) filter (where ${b.penaltyAt} >= ${from.toISOString()}::timestamptz${period.to ? sql` and ${b.penaltyAt} <= ${period.to.toISOString()}::timestamptz` : sql``}), 0)`,
+      undated: sql<number>`count(*) filter (where ${b.penaltyAt} is null)`,
+    })
+    .from(b)
+    .where(sql`${b.workshopPenalty} > 0 and ${b.status} <> 'CANCELLED'`)
+    .groupBy(b.productId);
+  const byProduct = new Map<string, number>();
+  let undatedBatches = 0;
+  let noProductBatches = 0;
+  for (const r of rows) {
+    undatedBatches += Number(r.undated);
+    const amount = Number(r.amount);
+    if (!amount) continue;
+    if (!r.productId) {
+      noProductBatches += 1;
+      continue;
+    }
+    byProduct.set(r.productId, amount);
+  }
+  return { byProduct, undatedBatches, noProductBatches };
 }
