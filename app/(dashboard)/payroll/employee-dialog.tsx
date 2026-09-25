@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -197,7 +196,6 @@ export function EmployeeDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const form = useForm<EmployeeInput>({
     resolver: zodResolver(employeeSchema),
     defaultValues: toForm(employee, preset),
@@ -215,7 +213,6 @@ export function EmployeeDialog({
       }
       toast.success(employee ? "Đã cập nhật nhân sự" : "Đã thêm nhân sự");
       setOpen(false);
-      router.refresh();
     });
 
   return (
@@ -493,7 +490,6 @@ export function EmployeeDialog({
 
 export function DeleteEmployeeButton({ employee }: { employee: Employee }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -528,7 +524,6 @@ export function DeleteEmployeeButton({ employee }: { employee: Employee }) {
                 if ("error" in r) toast.error(r.error);
                 else {
                   toast.success("Đã xoá");
-                  router.refresh();
                 }
               })
             }

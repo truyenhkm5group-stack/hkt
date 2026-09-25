@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Eye, Loader2, Save, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -17,14 +16,12 @@ export function LandingConfigForm({ config, canWrite }: { config: LandingConfig;
   const [form, setForm] = useState({ ...config, columns: { ...config.columns } });
   const [preview, setPreview] = useState<TabPreviewDto[] | null>(null);
   const [pending, start] = useTransition();
-  const router = useRouter();
   const save = () =>
     start(async () => {
       const r = await saveLandingConfig({ ...form, dedupeDays: Number(form.dedupeDays) || 7, shippingFee: Number(form.shippingFee) || 0, singlePrice: Number(form.singlePrice) || 0 });
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(r.preview ? `Đã lưu · ${r.preview}` : "Đã lưu cấu hình");
-        router.refresh();
       }
     });
   const doPreview = () =>

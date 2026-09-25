@@ -1,7 +1,6 @@
 "use client";
 
 import { useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { AlertTriangle, Crown, UserMinus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +38,6 @@ export type DeptRow = { id: string; code: DepartmentCode; name: string; leadUser
 
 export function PeoplePanel({ people, departments }: { people: PersonRow[]; departments: DeptRow[] }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const run = (fn: () => Promise<{ ok: true } | { error: string } | { ok: true; id: string }>, ok: string) =>
     start(async () => {
@@ -49,7 +47,6 @@ export function PeoplePanel({ people, departments }: { people: PersonRow[]; depa
         return;
       }
       toast.success(ok);
-      router.refresh();
     });
 
   const chuaCoPhong = people.filter((p) => p.departments.length === 0);

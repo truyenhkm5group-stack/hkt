@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { ArrowRightLeft, Building2, Crown, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +43,6 @@ export function DepartmentCell({
   all: { id: string; name: string }[];
 }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const run = (fn: () => Promise<{ ok: true } | { error: string } | { ok: true; changed: boolean } | { ok: true; leadCleared: boolean }>, ok: string) =>
     start(async () => {
@@ -54,7 +52,6 @@ export function DepartmentCell({
         return;
       }
       toast.success(ok);
-      router.refresh();
     });
 
   /*
@@ -91,7 +88,6 @@ export function DepartmentCell({
         toast.success(`Đã chuyển ${userName} sang ${yc.toName}`);
       }
       setXacNhan(null);
-      router.refresh();
     });
   };
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, PlayCircle, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +35,6 @@ export function AutoAssignButton({ department, unassigned }: { department: Depar
   const [after, setAfter] = useState<AfterRow[]>([]);
   const [unplaced, setUnplaced] = useState<UnplacedSummary[]>([]);
   const [considered, setConsidered] = useState(0);
-  const router = useRouter();
 
   const chayThu = () =>
     start(async () => {
@@ -61,7 +59,6 @@ export function AutoAssignButton({ department, unassigned }: { department: Depar
       }
       toast.success(`Đã giao ${r.applied} việc${r.failed ? ` · ${r.failed} việc không ghi được` : ""}`);
       setOpen(false);
-      router.refresh();
     });
 
   return (
@@ -152,7 +149,6 @@ export function AutoAssignButton({ department, unassigned }: { department: Depar
 /** Chuyển một việc sang người khác, hoặc trả lại hàng đợi phòng. */
 export function ReassignSelect({ workKey, current, people }: { workKey: string; current: string; people: { id: string; name: string; free: number; limit: number; away: boolean }[] }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
   return (
     /* `PickerMenu` chứ không `Select value=""` — xem `components/picker-menu.tsx`. */
     <PickerMenu
@@ -173,7 +169,6 @@ export function ReassignSelect({ workKey, current, people }: { workKey: string; 
             return;
           }
           toast.success(v === "__none" ? "Đã trả về hàng đợi phòng" : "Đã chuyển việc");
-          router.refresh();
         })
       }
     />
@@ -184,7 +179,6 @@ export function ReassignSelect({ workKey, current, people }: { workKey: string; 
 export function BulkAssignBar({ keys, people, onDone }: { keys: string[]; people: { id: string; name: string; free: number; limit: number; away: boolean }[]; onDone: () => void }) {
   const [pending, start] = useTransition();
   const [force, setForce] = useState(false);
-  const router = useRouter();
   if (!keys.length) return null;
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-2.5 text-sm">
@@ -204,7 +198,6 @@ export function BulkAssignBar({ keys, people, onDone }: { keys: string[]; people
             }
             toast.success(`Đã giao ${r.assigned} việc${r.skipped ? ` · ${r.skipped} việc không ghi được` : ""}`);
             onDone();
-            router.refresh();
           })
         }
       />

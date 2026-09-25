@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
-import { useRouter } from "next/navigation";
 import { Check, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -61,7 +60,6 @@ export function AdjustmentManager({
   /** Người đang xem có quyền duyệt hay không — nút duyệt không hiện cho người chỉ đọc. */
   canApprove: boolean;
 }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [inp, setInp] = useState({ employeeId: "", inputKey: MANUAL_INPUTS[0]?.key ?? "", value: "", evidence: "" });
   const [adj, setAdj] = useState({ employeeId: "", kind: "BONUS" as PayrollComponentKind, label: "", amount: "", reason: "", reference: "" });
@@ -79,7 +77,6 @@ export function AdjustmentManager({
       }
       toast.success(`Đã ghi “${inputLabel(inp.inputKey)}” cho kỳ ${periodLabel}`);
       setInp((s) => ({ ...s, value: "", evidence: "" }));
-      router.refresh();
     });
 
   const approveInput = (employeeId: string, inputKey: string) =>
@@ -90,7 +87,6 @@ export function AdjustmentManager({
         return;
       }
       toast.success(`Đã duyệt “${inputLabel(inputKey)}” của ${nameOf(employeeId)}`);
-      router.refresh();
     });
 
   const saveAdj = () =>
@@ -102,7 +98,6 @@ export function AdjustmentManager({
       }
       toast.success("Đã ghi khoản điều chỉnh");
       setAdj((s) => ({ ...s, label: "", amount: "", reason: "", reference: "" }));
-      router.refresh();
     });
 
   const remove = (id: string) =>
@@ -113,7 +108,6 @@ export function AdjustmentManager({
         return;
       }
       toast.success("Đã xoá khoản điều chỉnh");
-      router.refresh();
     });
 
   return (

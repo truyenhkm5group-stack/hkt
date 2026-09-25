@@ -1,7 +1,6 @@
 "use client";
 
 import { useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -13,7 +12,6 @@ import { applyLegacyApprovalEnforce, setApprovalEnforce } from "@/lib/actions/ap
  */
 export function ApprovalEnforceToggle({ group, label, enforced, disabled }: { group: string; label: string; enforced: boolean; disabled?: boolean }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   const doi = (bat: boolean) => {
     if (
@@ -28,7 +26,6 @@ export function ApprovalEnforceToggle({ group, label, enforced, disabled }: { gr
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(bat ? `Đã BẬT cưỡng chế: ${label}` : `Đã tắt cưỡng chế: ${label}`);
-        router.refresh();
       }
     });
   };
@@ -47,7 +44,6 @@ export function ApprovalEnforceToggle({ group, label, enforced, disabled }: { gr
  */
 export function ApplyLegacyEnforceButton({ summary }: { summary: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const apDung = () => {
     if (
       !window.confirm(
@@ -60,7 +56,6 @@ export function ApplyLegacyEnforceButton({ summary }: { summary: string }) {
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(`Đã áp dụng: ${r.applied.length} nhóm bật${r.ignored.length ? ` · bỏ qua ${r.ignored.join(", ")}` : ""}`);
-        router.refresh();
       }
     });
   };

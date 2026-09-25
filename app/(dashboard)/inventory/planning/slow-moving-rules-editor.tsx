@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Save, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -18,7 +17,6 @@ export function SlowMovingRulesEditor({ rules, overridden, ignored, canWrite }: 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Record<SlowMovingRuleKey, string>>(() => Object.fromEntries(SLOW_MOVING_RULE_KEYS.map((k) => [k, String(rules[k])])) as Record<SlowMovingRuleKey, string>);
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   const save = () =>
     startTransition(async () => {
@@ -28,7 +26,6 @@ export function SlowMovingRulesEditor({ rules, overridden, ignored, canWrite }: 
       else {
         toast.success("Đã lưu ngưỡng hàng chậm");
         setOpen(false);
-        router.refresh();
       }
     });
 

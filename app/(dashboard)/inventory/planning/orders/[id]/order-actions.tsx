@@ -11,7 +11,7 @@ export function OrderActions({ id, status, text, canWrite }: { id: string; statu
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const router = useRouter();
-  const set = (s: string) => startTransition(async () => { const r = await setProductionStatus(id, s); if ("error" in r) toast.error(r.error); else router.refresh(); });
+  const set = (s: string) => startTransition(async () => { const r = await setProductionStatus(id, s); if ("error" in r) toast.error(r.error); });
   return (
     <div className="flex flex-wrap gap-2">
       <Button asChild variant="outline" size="sm"><a href={`/print/production/${id}`} target="_blank" rel="noreferrer"><Printer className="size-4" /> In / lưu PDF</a></Button>

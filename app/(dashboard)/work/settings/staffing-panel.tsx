@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -50,7 +49,6 @@ export function StaffingPanel({
   sources: WorkSource[];
 }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const run = (fn: () => Promise<{ ok: true } | { error: string }>, ok: string) =>
     start(async () => {
@@ -60,7 +58,6 @@ export function StaffingPanel({
         return;
       }
       toast.success(ok);
-      router.refresh();
     });
 
   return (

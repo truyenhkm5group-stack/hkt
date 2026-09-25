@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -28,7 +27,6 @@ export function RevokeSessionsDialog({
 }) {
   const [reason, setReason] = useState("");
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const hopLe = reason.trim().length >= 5;
 
   const submit = () => {
@@ -41,7 +39,6 @@ export function RevokeSessionsDialog({
       toast.success(`Đã thu hồi mọi phiên của ${user.email}`);
       setReason("");
       onOpenChange(false);
-      router.refresh();
     });
   };
 

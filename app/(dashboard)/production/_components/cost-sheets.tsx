@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Copy, Lock, Pencil, Plus, Tag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { CostSheetStatusBadge } from "@/app/(dashboard)/production/_components/badges";
@@ -66,7 +65,6 @@ export function CostSheets({
   const [notes, setNotes] = useState("");
   const [open, setOpen] = useState<string | null>(sheets[0]?.id ?? null);
   const [pending, start] = useNavTransition();
-  const router = useRouter();
   const tinh = useMemo(() => computeCostSheet(toInput(rows)), [rows]);
 
   const moMoi = (base?: CostSheetView) => {
@@ -99,7 +97,6 @@ export function CostSheets({
         toast.success(`Đã tạo V${r.version} · ${formatVND(r.totalUnitCost)}/sp${r.lifecycle ? ` · ${r.lifecycle}` : ""}`);
       }
       setEditing(null);
-      router.refresh();
     });
 
   const chot = (s: CostSheetView) => {
@@ -109,7 +106,6 @@ export function CostSheets({
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(`Đã chốt V${r.version}`);
-        router.refresh();
       }
     });
   };

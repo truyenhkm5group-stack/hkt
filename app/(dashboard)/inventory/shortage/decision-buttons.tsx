@@ -22,7 +22,6 @@ export function ShortageDecisionButtons({ variantId, current, suggested, canWrit
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(r.message);
-        router.refresh();
       }
     });
   const clear = () =>

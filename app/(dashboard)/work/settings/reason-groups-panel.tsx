@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { RotateCcw } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -35,7 +34,6 @@ import { cn } from "@/lib/utils";
 export function ReasonGroupsPanel({ overrides }: { overrides: ReasonGroupOverrides }) {
   const [pending, start] = useTransition();
   const [hienHet, setHienHet] = useState(false);
-  const router = useRouter();
 
   const luu = (reason: ReturnReason, group: ReturnReasonGroup | null) =>
     start(async () => {
@@ -45,7 +43,6 @@ export function ReasonGroupsPanel({ overrides }: { overrides: ReasonGroupOverrid
         return;
       }
       toast.success(group === null ? "Đã trả về cách xếp mặc định" : `“${RETURN_REASON_LABEL[reason]}” nay thuộc nhóm ${RETURN_REASON_GROUP_LABEL[group]}`);
-      router.refresh();
     });
 
   const daSua = Object.keys(overrides).length;

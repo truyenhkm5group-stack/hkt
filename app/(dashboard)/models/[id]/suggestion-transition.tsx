@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useNavTransition } from "@/components/nav-progress";
 import { Button } from "@/components/ui/button";
@@ -18,7 +17,6 @@ export function SuggestedTransition({ modelId, to, reason }: { modelId: string; 
   const [open, setOpen] = useState(false);
   const [text, setText] = useState(reason);
   const [pending, start] = useNavTransition();
-  const router = useRouter();
 
   const luu = () =>
     start(async () => {
@@ -29,7 +27,6 @@ export function SuggestedTransition({ modelId, to, reason }: { modelId: string; 
       }
       toast.success(`Đã khai: ${MODEL_STATE_LABELS[to]}`);
       setOpen(false);
-      router.refresh();
     });
 
   if (!open) {

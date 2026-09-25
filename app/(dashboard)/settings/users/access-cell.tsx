@@ -7,7 +7,6 @@
  * ra — một ô duy nhất phải gánh ba câu hỏi khác nhau. Chip trống ("chưa đặt") cũng là thông tin.
  */
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, ShieldAlert, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { PickerMenu } from "@/components/picker-menu";
@@ -96,7 +95,6 @@ function AccessDialog({
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [loading, setLoading] = useState(false);
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   /*
     Xem trước chạy lại mỗi lần đổi vai trò hoặc phạm vi — TRƯỚC khi lưu. Chức danh không nằm trong
@@ -132,7 +130,6 @@ function AccessDialog({
       }
       toast.success(`Đã cập nhật quyền & phạm vi của ${userName}`);
       onOpenChange(false);
-      router.refresh();
     });
 
   return (

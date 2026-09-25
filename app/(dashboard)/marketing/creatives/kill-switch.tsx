@@ -2,7 +2,6 @@
 
 import { Loader2, OctagonX, PlayCircle } from "lucide-react";
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +14,6 @@ import { cn } from "@/lib/utils";
  * Kéo có hiệu lực ở lời gọi Facebook KẾ TIẾP — không cần deploy, không cần khởi động lại.
  */
 export function AdsKillSwitchCard({ state, canEngage, canRelease }: { state: AdsKillSwitchState; canEngage: boolean; canRelease: boolean }) {
-  const router = useRouter();
   const [reason, setReason] = useState("");
   const [pending, start] = useTransition();
   const want = !state.killed;
@@ -30,7 +28,6 @@ export function AdsKillSwitchCard({ state, canEngage, canRelease }: { state: Ads
       }
       toast.success(r.killed ? "Đã KÉO công tắc — mọi lời gọi tạo/tăng chi bị chặn từ lời gọi kế tiếp." : "Đã nhả công tắc — đường ghi trở lại theo chốt env và phiếu duyệt.");
       setReason("");
-      router.refresh();
     });
 
   return (

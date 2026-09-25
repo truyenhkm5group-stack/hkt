@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useContext, useMemo, useState, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { CheckSquare, Loader2, XSquare } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -55,7 +54,6 @@ export function VariantSelectCheckbox({ variantId, label }: { variantId: string;
 }
 
 export function VariantSelectionBar({ batchId, allIds, disabledReason }: { batchId: string; allIds: string[]; disabledReason: string | null }) {
-  const router = useRouter();
   const { selected, clear, setAll } = useSelection();
   const [pending, start] = useTransition();
   const ids = [...selected].filter((id) => allIds.includes(id));
@@ -69,7 +67,6 @@ export function VariantSelectionBar({ batchId, allIds, disabledReason }: { batch
       }
       toast.success(`Đã loại ${r.rejected} bài${r.restored ? `, khôi phục ${r.restored} bài` : ""} — lô còn ${r.kept} bài; cần bấm DUYỆT CẢ LÔ lại.`);
       clear();
-      router.refresh();
     });
 
   return (

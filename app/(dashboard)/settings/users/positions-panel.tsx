@@ -85,7 +85,6 @@ function PositionDialog({ row, departments, onClose }: { row: PositionPanelRow |
   const [description, setDescription] = useState(row?.description ?? "");
   const [departmentId, setDepartmentId] = useState(row?.departmentId ?? "");
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   const save = () =>
     startTransition(async () => {
@@ -96,7 +95,6 @@ function PositionDialog({ row, departments, onClose }: { row: PositionPanelRow |
       }
       toast.success(row ? `Đã lưu chức danh ${name}` : `Đã tạo chức danh ${name}`);
       onClose();
-      router.refresh();
     });
 
   return (

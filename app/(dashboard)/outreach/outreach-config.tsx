@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Eye, Plus, RotateCcw, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -20,7 +19,6 @@ export function OutreachConfigForm({ config, products, canWrite }: { config: Out
   const [form, setForm] = useState<OutreachConfig>({ ...config, nurtureSteps: [...config.nurtureSteps] });
   const [preview, setPreview] = useState<Record<string, string>>({});
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const num = (v: string, d: number) => (v.trim() === "" ? d : Number(v));
   const byId = new Map(products.map((p) => [p.id, p]));
   const codeOf = (id: string) => byId.get(id)?.code || byId.get(id)?.name || id;
@@ -44,7 +42,7 @@ export function OutreachConfigForm({ config, products, canWrite }: { config: Out
       for (const [pid, text] of Object.entries(mediaText)) { const urls = text.split(/[\n,]/).map((u) => u.trim()).filter(Boolean); if (urls.length) crossSellMedia[pid] = urls; }
       const r = await saveOutreachConfig({ ...rest, crossSellMap, crossSellMedia, nurtureSteps: form.nurtureSteps.map((s) => s.trim()).filter(Boolean) });
       if ("error" in r) toast.error(r.error);
-      else { toast.success("Đã lưu cấu hình chăm sóc khách"); setOpen(false); router.refresh(); }
+      else { toast.success("Đã lưu cấu hình chăm sóc khách"); setOpen(false); }
     });
   const doPreview = (key: string, seg: "NURTURE" | "CROSS_SELL", template: string) =>
     startTransition(async () => {

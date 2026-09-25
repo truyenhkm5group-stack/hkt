@@ -76,7 +76,6 @@ export function TechIncidentActions({
                 return;
               }
               toast.success(v === "NONE" ? "Đã bỏ liên kết" : "Đã nối sự cố với việc Tech");
-              router.refresh();
             })
           }
         >

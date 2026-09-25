@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
-import { useRouter } from "next/navigation";
 import { History, Undo2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -51,7 +50,6 @@ export function AssignPanel({ pages, marketers, canWrite }: { pages: FanpageView
   const [aliasDraft, setAliasDraft] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Record<string, { marketerId: string; from: string; note: string }>>({});
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const today = todayVN();
 
   const get = (id: string) => draft[id] ?? { marketerId: "", from: today, note: "" };
@@ -69,7 +67,6 @@ export function AssignPanel({ pages, marketers, canWrite }: { pages: FanpageView
       else {
         toast.success(r.message ?? "Đã gán", { duration: 8000 });
         setDraft((s) => ({ ...s, [page.id]: { marketerId: "", from: today, note: "" } }));
-        router.refresh();
       }
     });
   };
@@ -80,7 +77,6 @@ export function AssignPanel({ pages, marketers, canWrite }: { pages: FanpageView
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(r.message ?? "Đã thu hồi", { duration: 8000 });
-        router.refresh();
       }
     });
 
@@ -95,7 +91,6 @@ export function AssignPanel({ pages, marketers, canWrite }: { pages: FanpageView
           delete next[page.id];
           return next;
         });
-        router.refresh();
       }
     });
 
@@ -103,7 +98,6 @@ export function AssignPanel({ pages, marketers, canWrite }: { pages: FanpageView
     startTransition(async () => {
       const r = await toggleFanpage({ fanpageId: page.id, active: !page.active });
       if ("error" in r) toast.error(r.error);
-      else router.refresh();
     });
 
   if (!pages.length) {

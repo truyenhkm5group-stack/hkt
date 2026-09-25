@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { ClipboardCheck, Loader2, PackagePlus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -58,7 +57,6 @@ export function ReceiptDialog({
   const [onlySelling, setOnlySelling] = useState(true);
   const [inputs, setInputs] = useState<Record<string, RowInput>>({});
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const coGiaBao = useMemo(() => (pricedProductIds ? new Set(pricedProductIds) : null), [pricedProductIds]);
 
   const visible = useMemo(() => {
@@ -132,7 +130,6 @@ export function ReceiptDialog({
       if (result.missingPrice?.length) toast.warning(`Mã chưa có giá báo MKT: ${result.missingPrice.join(", ")} — phiếu đã lưu, giá nhập để CHƯA BIẾT cho tới khi có giá báo`, { duration: 10_000 });
       setOpen(false);
       reset();
-      router.refresh();
     });
   };
 

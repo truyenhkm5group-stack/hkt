@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Check, Loader2, MessageSquareWarning } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -13,7 +12,6 @@ export function PayslipRespondForm({ confirmationId, status, note }: { confirmat
   const [pending, start] = useTransition();
   const [text, setText] = useState(status === "DISPUTED" ? note : "");
   const [disputing, setDisputing] = useState(status === "DISPUTED");
-  const router = useRouter();
 
   const send = (decision: "CONFIRMED" | "DISPUTED") =>
     start(async () => {
@@ -23,7 +21,6 @@ export function PayslipRespondForm({ confirmationId, status, note }: { confirmat
         return;
       }
       toast.success(r.message ?? "Đã ghi nhận");
-      router.refresh();
     });
 
   return (

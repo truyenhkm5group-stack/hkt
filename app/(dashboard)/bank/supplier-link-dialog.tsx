@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Factory, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavTransition } from "@/components/nav-progress";
@@ -26,7 +25,6 @@ export function SupplierLinkDialog({ txnId }: { txnId: string }) {
   const [target, setTarget] = useState("");
   const [kind, setKind] = useState<"PAYMENT" | "DEPOSIT">("PAYMENT");
   const [pending, start] = useNavTransition();
-  const router = useRouter();
 
   const load = () =>
     start(async () => {
@@ -42,7 +40,6 @@ export function SupplierLinkDialog({ txnId }: { txnId: string }) {
   const done = (msg: string) => {
     toast.success(msg);
     setOpen(false);
-    router.refresh();
   };
   const ghep = (paymentId: string) =>
     start(async () => {

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AdSpendDialog } from "@/app/(dashboard)/expenses/ad-spend-dialog";
@@ -37,7 +36,6 @@ function ActionMenu({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => 
 
 function DeleteConfirm({ open, onOpenChange, title, description, action, successMessage }: { open: boolean; onOpenChange: (open: boolean) => void; title: string; description: React.ReactNode; action: () => Promise<ActionResult>; successMessage: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const confirm = () => {
     startTransition(async () => {
       const result = await action();
@@ -47,7 +45,6 @@ function DeleteConfirm({ open, onOpenChange, title, description, action, success
       }
       toast.success(successMessage);
       onOpenChange(false);
-      router.refresh();
     });
   };
   return (

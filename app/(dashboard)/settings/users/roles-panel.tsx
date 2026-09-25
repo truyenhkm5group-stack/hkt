@@ -99,7 +99,6 @@ function RoleDialog({ row, onClose }: { row: RolePanelRow | null; onClose: () =>
   const [scope, setScope] = useState<AccessScope>(row?.defaultScope ?? "DEPARTMENT");
   const [perms, setPerms] = useState<Set<string>>(new Set(row?.permissions ?? []));
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   const toggle = (key: string, on: boolean) =>
     setPerms((prev) => {
@@ -118,7 +117,6 @@ function RoleDialog({ row, onClose }: { row: RolePanelRow | null; onClose: () =>
       }
       toast.success(row ? `Đã lưu vai trò ${name}` : `Đã tạo vai trò ${name}`);
       onClose();
-      router.refresh();
     });
 
   return (

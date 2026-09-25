@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Unlink } from "lucide-react";
 import { toast } from "sonner";
 import { unlinkBankTransaction } from "@/lib/actions/bank";
@@ -16,7 +15,6 @@ import { unlinkBankTransaction } from "@/lib/actions/bank";
  */
 export function UnlinkButton({ id }: { id: string }) {
   const [dangChay, setDangChay] = React.useState(false);
-  const router = useRouter();
   return (
     <button
       type="button"
@@ -31,7 +29,6 @@ export function UnlinkButton({ id }: { id: string }) {
         if ("error" in r) toast.error(r.error);
         else {
           toast.success("Đã gỡ liên kết — dòng này quay lại danh sách chờ đối khớp");
-          router.refresh();
         }
       }}
       className="rounded p-0.5 text-emerald-700 transition-colors hover:text-rose-600 dark:text-emerald-300"

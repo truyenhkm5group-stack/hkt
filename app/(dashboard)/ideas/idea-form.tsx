@@ -2,7 +2,6 @@
 
 import { ImagePlus, Loader2, Plus, X } from "lucide-react";
 import { useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -25,7 +24,6 @@ export function IdeaForm({ marketers, defaultMarketer }: { marketers: { id: stri
   const [dangXuLyAnh, setDangXuLyAnh] = useState(false);
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
-  const router = useRouter();
 
   const chonAnh = async (list: FileList | null) => {
     const files = list ? Array.from(list) : [];
@@ -81,7 +79,6 @@ export function IdeaForm({ marketers, defaultMarketer }: { marketers: { id: stri
       }
       toast.success("Đã đăng ý tưởng, quản lý sẽ nhận xét");
       dong();
-      router.refresh();
     });
   };
 

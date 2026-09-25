@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Save, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -14,7 +13,6 @@ export function PlanningForm({ assumptions, products, canWrite }: { assumptions:
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ ...assumptions });
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const num = (v: string, d: number) => (v.trim() === "" ? d : Number(v));
   const save = () =>
     startTransition(async () => {
@@ -23,7 +21,6 @@ export function PlanningForm({ assumptions, products, canWrite }: { assumptions:
       else {
         toast.success("Đã lưu giả định đặt hàng");
         setOpen(false);
-        router.refresh();
       }
     });
   return (

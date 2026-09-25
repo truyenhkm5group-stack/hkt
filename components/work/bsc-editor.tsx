@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,6 @@ export function AddBscMetric({ scorecardId }: { scorecardId: string }) {
   const [target, setTarget] = useState("");
   const [manualValue, setManualValue] = useState("");
   const [weight, setWeight] = useState("1");
-  const router = useRouter();
 
   const pick = (key: string) => {
     setMetricSource(key);
@@ -118,7 +116,6 @@ export function AddBscMetric({ scorecardId }: { scorecardId: string }) {
               setLabel("");
               setTarget("");
               setManualValue("");
-              router.refresh();
             })
           }
         >
@@ -131,14 +128,13 @@ export function AddBscMetric({ scorecardId }: { scorecardId: string }) {
 
 export function DeleteBscMetric({ id }: { id: string }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
   return (
     <button
       type="button"
       aria-label="Xoá chỉ số"
       disabled={pending}
       className="rounded p-0.5 text-muted-foreground hover:bg-accent"
-      onClick={() => start(async () => { const r = await deleteBscMetric(id); if ("error" in r) toast.error(r.error); else { toast.success("Đã xoá"); router.refresh(); } })}
+      onClick={() => start(async () => { const r = await deleteBscMetric(id); if ("error" in r) toast.error(r.error); else { toast.success("Đã xoá"); } })}
     >
       <Trash2 className="size-3" />
     </button>

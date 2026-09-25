@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,7 +28,6 @@ const AXES = [
 export function WeightsPanel({ weights }: { weights: Partial<Record<"outcome" | "quality" | "sla" | "okr", number>> }) {
   const [vals, setVals] = useState<Record<string, string>>(Object.fromEntries(AXES.map((a) => [a.key, weights[a.key] === undefined ? "" : String(weights[a.key])])));
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const tong = AXES.reduce((s, a) => s + (Number(vals[a.key]) || 0), 0);
   const dirty = AXES.some((a) => (vals[a.key] ?? "") !== (weights[a.key] === undefined ? "" : String(weights[a.key])));
@@ -47,7 +45,6 @@ export function WeightsPanel({ weights }: { weights: Partial<Record<"outcome" | 
         return;
       }
       toast.success(Object.keys(payload).length ? "Đã lưu trọng số — màn hình Hiệu suất sẽ hiện cột điểm tổng" : "Đã bỏ trọng số — không còn cột điểm tổng");
-      router.refresh();
     });
 
   return (

@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
-import { useRouter } from "next/navigation";
 import { CheckSquare, Loader2, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -43,7 +42,6 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
   const [onlyUnmapped, setOnlyUnmapped] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
-  const router = useRouter();
   const productName = (id: string | null) => (id ? products.find((p) => p.id === id)?.name ?? "(đã xoá)" : "");
   const marketerName = (id: string | null) => (id ? marketers.find((m) => m.id === id)?.name ?? "(đã xoá)" : "");
   const [pendingMarketer, setPendingMarketer] = useState<string | null>(null);
@@ -55,7 +53,6 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
       if ("error" in result) toast.error(result.error);
       else {
         baoKetQua(result.warning, value === "__auto__" ? "Đã để tự nhận diện marketer" : value ? `Đã gán cho ${marketerName(value)}` : "Đã bỏ marketer");
-        router.refresh();
       }
     });
   };
@@ -91,7 +88,6 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
         setSelected(new Set());
         setBulkProduct("__keep__");
         setBulkMarketer("__keep__");
-        router.refresh();
       }
     });
   };
@@ -113,7 +109,6 @@ export function CampaignMapping({ rows, products, aliases, marketers, canWrite, 
       if ("error" in result) toast.error(result.error);
       else {
         baoKetQua(result.warning, value === "__exclude__" ? "Đã loại chiến dịch khỏi chi phí" : value === "__test__" ? "Đã đánh dấu là chi phí test" : value === "__auto__" ? "Đã để tự nhận diện" : `Đã ghép với ${productName(value)}`);
-        router.refresh();
       }
     });
   };
@@ -297,7 +292,6 @@ function AliasEditor({ products, aliases }: { products: Product[]; aliases: Reco
   const [values, setValues] = useState<Record<string, string>>(Object.fromEntries(products.map((p) => [p.id, (aliases[p.id] ?? []).join(", ")])));
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
-  const router = useRouter();
   const save = (productId: string) => {
     setPendingId(productId);
     startTransition(async () => {
@@ -306,7 +300,6 @@ function AliasEditor({ products, aliases }: { products: Product[]; aliases: Reco
       if ("error" in result) toast.error(result.error);
       else {
         baoKetQua(result.warning, `Đã lưu bí danh · ${result.changed} dòng chi tiêu được ghép lại`);
-        router.refresh();
       }
     });
   };

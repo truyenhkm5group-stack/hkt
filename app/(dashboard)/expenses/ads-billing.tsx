@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -18,14 +17,13 @@ const money = (v: number, currency: string) => (currency === "VND" ? `${formatNu
 function ThresholdInput({ row, canWrite }: { row: BillingRow; canWrite: boolean }) {
   const [value, setValue] = useState(row.threshold ? String(row.threshold) : "");
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const dirty = (row.threshold ? String(row.threshold) : "") !== value.trim();
   const save = () =>
     startTransition(async () => {
       const n = Number(value.replace(/[^\d]/g, ""));
       const r = await saveAdAccountThreshold(row.accountId, n > 0 ? n : null);
       if ("error" in r) toast.error(r.error);
-      else { toast.success("Đã lưu ngưỡng thanh toán"); router.refresh(); }
+      else { toast.success("Đã lưu ngưỡng thanh toán"); }
     });
   if (!canWrite) return <span className="tabular-nums">{row.threshold ? money(row.threshold, row.currency) : row.learnedThreshold ? `~${money(row.learnedThreshold, row.currency)} (tự học)` : "—"}</span>;
   return (

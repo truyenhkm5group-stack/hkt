@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, PackageCheck, Tag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavTransition } from "@/components/nav-progress";
@@ -17,7 +16,6 @@ import { formatNumber, formatVND, todayVN } from "@/lib/format";
 export function MarketerPriceDialog({ products, defaultCode = "" }: { products: { code: string; name: string }[]; defaultCode?: string }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useNavTransition();
-  const router = useRouter();
   const init = () => ({ productCode: defaultCode, price: "", effectiveFrom: defaultCode ? todayVN() : MARKETER_PRICE_EFFECTIVE_FROM, reason: "" });
   const [f, setF] = useState(init);
   const price = f.price === "" ? null : Number(f.price);
@@ -30,7 +28,6 @@ export function MarketerPriceDialog({ products, defaultCode = "" }: { products: 
       }
       toast.success("Đã lưu giá báo MKT");
       setOpen(false);
-      router.refresh();
     });
   return (
     <Dialog
@@ -97,7 +94,6 @@ export function MarketerPriceDialog({ products, defaultCode = "" }: { products: 
 
 export function DeleteMarketerPriceButton({ id, label }: { id: string; label: string }) {
   const [pending, start] = useNavTransition();
-  const router = useRouter();
   return (
     <Button
       size="icon"
@@ -112,7 +108,6 @@ export function DeleteMarketerPriceButton({ id, label }: { id: string; label: st
           if ("error" in r) toast.error(r.error);
           else {
             toast.success("Đã xoá dòng giá");
-            router.refresh();
           }
         });
       }}
@@ -132,7 +127,6 @@ export function ReceiptRepricingDialog() {
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<ReceiptRepricingPreview | null>(null);
   const [pending, start] = useNavTransition();
-  const router = useRouter();
   const load = async () => {
     setLoading(true);
     setPreview(null);
@@ -156,7 +150,6 @@ export function ReceiptRepricingDialog() {
       }
       toast.success(`Đã định giá ${formatNumber(r.lines)} dòng trên ${formatNumber(r.receipts)} phiếu nhập theo giá báo MKT`);
       setOpen(false);
-      router.refresh();
     });
   return (
     <Dialog

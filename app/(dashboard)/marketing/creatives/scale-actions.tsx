@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, PauseCircle, Play, Rocket, X } from "lucide-react";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -36,7 +35,6 @@ export function ScaleCellActions({
   copyAttempted: boolean;
   templateMissing: boolean;
 }) {
-  const router = useRouter();
   const [busy, start] = useTransition();
   const [confirmDraft, setConfirmDraft] = useState(false);
   const [confirmPause, setConfirmPause] = useState(false);
@@ -51,7 +49,6 @@ export function ScaleCellActions({
       }
       toast.success(r.detail);
       after?.();
-      router.refresh();
     });
 
   const moDuyet = () =>

@@ -107,7 +107,6 @@ export function SamplesPanel({
       setNotes("");
       setProblems("");
       setCost("");
-      router.refresh();
     });
 
   const gui = (id: string) =>
@@ -126,7 +125,6 @@ export function SamplesPanel({
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(`${SAMPLE_REVIEW_DECISION_LABEL[decision]}${r.designVersion ? ` · bản thiết kế V${r.designVersion}` : ""}${r.lifecycle ? ` · ${r.lifecycle}` : ""}`);
-        router.refresh();
       }
     });
 

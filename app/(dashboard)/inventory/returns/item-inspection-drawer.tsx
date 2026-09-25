@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { ClipboardCheck, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -74,7 +73,6 @@ export function ItemInspectionDrawer({
   const [open, setOpen] = React.useState(false);
   const [daDoiChieu, setDaDoiChieu] = React.useState(false);
   const [pending, start] = React.useTransition();
-  const router = useRouter();
   const [dong, setDong] = React.useState<Dong[]>([]);
 
   // Dựng lại mỗi lần mở: kiện có thể đã đổi, và bản nháp cũ của kiện trước không được lẫn sang.
@@ -128,7 +126,6 @@ export function ItemInspectionDrawer({
       toast.success(r.message);
       setOpen(false);
       onDone?.();
-      router.refresh();
     });
 
   return (

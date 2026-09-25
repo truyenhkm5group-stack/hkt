@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Save, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -45,7 +44,6 @@ export function AssignmentManager({
   positions: Option[];
   users: { id: string; name: string; email: string }[];
 }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
 
   const [emp, setEmp] = useState({
@@ -81,7 +79,6 @@ export function AssignmentManager({
         return;
       }
       toast.success("Đã lưu phân công — có hiệu lực từ mốc đã khai, không đụng tới kỳ trước đó");
-      router.refresh();
     });
 
   const savePol = () =>
@@ -92,7 +89,6 @@ export function AssignmentManager({
         return;
       }
       toast.success("Đã gán chính sách lương — từ mốc này, lương của người đó tính bằng máy chung");
-      router.refresh();
     });
 
   return (

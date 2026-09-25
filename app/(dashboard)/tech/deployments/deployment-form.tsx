@@ -2,7 +2,6 @@
 
 import { Loader2, Plus } from "lucide-react";
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,7 +30,6 @@ export function TechDeploymentRecordForm() {
   const [externalRef, setExternalRef] = useState("");
   const [notes, setNotes] = useState("");
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const dong = () => {
     setOpen(false);
@@ -102,7 +100,6 @@ export function TechDeploymentRecordForm() {
                   }
                   toast.success("Đã ghi lượt deploy");
                   dong();
-                  router.refresh();
                 })
               }
             >
@@ -130,7 +127,6 @@ export function TechDeploymentUpdateForm({ deployments }: { deployments: { id: s
   const [smoke, setSmoke] = useState<TechGateResult | "">("");
   const [observation, setObservation] = useState<TechGateResult | "">("");
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   if (!deployments.length) return null;
 
@@ -221,7 +217,6 @@ export function TechDeploymentUpdateForm({ deployments }: { deployments: { id: s
                   }
                   toast.success("Đã cập nhật lượt deploy");
                   setOpen(false);
-                  router.refresh();
                 })
               }
             >

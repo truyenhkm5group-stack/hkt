@@ -2,7 +2,6 @@
 
 import { CheckCircle2, Download, Loader2, Megaphone } from "lucide-react";
 import { useMemo, useState, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -24,7 +23,6 @@ type OwnAdImportSummary = Extract<Awaited<ReturnType<typeof importOwnAdsAction>>
 
 export function PancakePhotoImportButton() {
   const [pending, start] = useTransition();
-  const router = useRouter();
   const chay = () =>
     start(async () => {
       const r = await importPancakeProductPhotosAction();
@@ -44,7 +42,6 @@ export function PancakePhotoImportButton() {
         .join("\n");
       const tieuDe = s.scanned === 0 ? "Không có mã đang bán nào có ảnh trên Pancake" : `Đã nhập ${formatNumber(s.imported.length)} ảnh sản phẩm thật${s.failed.length ? ` · ${formatNumber(s.failed.length)} lỗi` : ""}`;
       (s.failed.length ? toast.warning : toast.success)(tieuDe, { description: <span className="whitespace-pre-line">{moTa}</span>, duration: 10_000 });
-      if (s.imported.length) router.refresh();
     });
   return (
     <Button size="sm" variant="outline" onClick={chay} disabled={pending} title="Tải ảnh chính của mọi mã đang bán trên Pancake thành “Ảnh sản phẩm thật”. Mã đã có ảnh từ đúng địa chỉ ấy thì bỏ qua.">
@@ -70,7 +67,6 @@ export function OwnAdImportDialog() {
   const [ketQua, setKetQua] = useState<OwnAdImportSummary | null>(null);
   const [loading, startLoad] = useTransition();
   const [importing, startImport] = useTransition();
-  const router = useRouter();
 
   const mo = () => {
     setOpen(true);
@@ -110,7 +106,6 @@ export function OwnAdImportDialog() {
       setList((cu) => (cu ? { ...cu, rows: cu.rows.map((x) => (daCo.has(x.adId) ? { ...x, importedSourceId: daCo.get(x.adId) ?? "?" } : x)) } : cu));
       setChon((cu) => new Set([...cu].filter((id) => !daCo.has(id))));
       toast.success(`Đã nhập ${formatNumber(r.summary.imported.length)} quảng cáo cũ của shop`);
-      if (r.summary.imported.length) router.refresh();
     });
 
   return (

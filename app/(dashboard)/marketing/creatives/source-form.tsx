@@ -2,7 +2,6 @@
 
 import { ImagePlus, Loader2, ShieldAlert, Upload, X } from "lucide-react";
 import { useMemo, useRef, useState, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -36,7 +35,6 @@ export function SourceForm({ products }: { products: ProductOption[] }) {
   const [dangXuLyAnh, setDangXuLyAnh] = useState(false);
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
-  const router = useRouter();
 
   const chonAnh = async (list: FileList | null) => {
     const f = list?.[0];
@@ -83,7 +81,6 @@ export function SourceForm({ products }: { products: ProductOption[] }) {
       }
       toast.success("Đã lưu ảnh nguồn — máy sẽ đọc gen ở lượt chạy kế tiếp");
       dong();
-      router.refresh();
     });
 
   const pixelSafe = PIXEL_SAFE_SOURCE_KINDS.includes(kind);

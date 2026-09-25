@@ -13,7 +13,7 @@ import { registerModel, runModelRegistrySync } from "@/lib/actions/models";
 
 /*
   `useNavTransition` chứ không phải `useTransition` trần: cả hai nút kết thúc bằng một lượt đi lên máy
-  chủ (`router.refresh` / `router.push` sang trang mẫu vừa tạo), nên thanh tiến trình phải biết
+  chủ (trang dựng lại nhờ `revalidatePath` của action / `router.push` sang trang mẫu vừa tạo), nên thanh tiến trình phải biết
   (tests/loading-ux-contract.test.ts mục 5).
 */
 
@@ -22,7 +22,6 @@ import { registerModel, runModelRegistrySync } from "@/lib/actions/models";
  */
 export function RegistrySyncButton({ label = "Đồng bộ sổ mẫu", variant = "outline" }: { label?: string; variant?: "outline" | "default" }) {
   const [pending, start] = useNavTransition();
-  const router = useRouter();
   return (
     <Button
       size="sm"
@@ -36,7 +35,6 @@ export function RegistrySyncButton({ label = "Đồng bộ sổ mẫu", variant 
             return;
           }
           toast.success(`Đăng ký ${r.inserted} mẫu · nối ${r.linked} liên kết${r.ambiguous ? ` · ${r.ambiguous} mã mơ hồ chờ người quyết` : ""}${r.failed ? ` · ${r.failed} lỗi` : ""}`);
-          router.refresh();
         })
       }
     >

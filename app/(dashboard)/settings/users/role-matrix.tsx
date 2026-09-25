@@ -2,7 +2,6 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
-import { useRouter } from "next/navigation";
 import { Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -20,7 +19,6 @@ export function RoleMatrix({ templates, canEdit }: { templates: RolePermissionMa
   const initial = useMemo(() => Object.fromEntries(EDITABLE.map((r) => [r, new Set(rolePermissions(r, templates))])) as Record<string, Set<string>>, [templates]);
   const [state, setState] = useState<Record<string, Set<string>>>(initial);
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const dirty = EDITABLE.some((r) => {
     const a = state[r];
     const b = initial[r];
@@ -43,7 +41,6 @@ export function RoleMatrix({ templates, canEdit }: { templates: RolePermissionMa
         return;
       }
       toast.success("Đã lưu mẫu quyền của các vai trò");
-      router.refresh();
     });
 
   return (

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { AlertTriangle, FileSpreadsheet, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useNavTransition } from "@/components/nav-progress";
@@ -45,7 +44,6 @@ export function SheetImportDialog() {
   const [link, setLink] = useState("");
   const [preview, setPreview] = useState<SheetImportPreview | null>(null);
   const [pending, start] = useNavTransition();
-  const router = useRouter();
 
   const xemTruoc = () =>
     start(async () => {
@@ -70,7 +68,6 @@ export function SheetImportDialog() {
       toast.success(`Đã nhập ${r.batches} lô · ${r.deliveries} đợt trả hàng · ${r.fabrics} đợt vải · ${r.payments} đợt thanh toán`);
       setOpen(false);
       setPreview(null);
-      router.refresh();
     });
 
   const moiLo = preview?.batches.filter((b) => b.status === "NEW").length ?? 0;
