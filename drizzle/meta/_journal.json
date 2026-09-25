@@ -953,6 +953,13 @@
       "when": 1790006060000,
       "tag": "0136_company_os_returns",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1790006120000,
+      "tag": "0137_company_os_idea_model",
+      "breakpoints": true
     }
   ]
 }
