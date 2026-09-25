@@ -352,10 +352,7 @@ function thanCacHam(src: string): { name: string; body: string }[] {
  * Nơi gọi cổng mà CHƯA thanh toán theo kết quả — khai tường minh, kèm lý do. Một lời gọi mới không bọc
  * mà không khai ở đây là ĐỎ.
  */
-const CONG_CHUA_THANH_TOAN: Record<string, string> = {
-  "lib/actions/return-dispositions.ts:setReturnDisposition":
-    "thuộc vùng Agent R đang sửa song song (lib/returns/*, return_dispositions) — cổng chạy IMMEDIATE như cũ; nêu ở handoff-k mục mở",
-};
+const CONG_CHUA_THANH_TOAN: Record<string, string> = {};
 
 export async function testHardeningApprovalExecution(db: Db) {
   const R = `${P}xin`;
