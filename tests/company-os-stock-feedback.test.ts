@@ -21,7 +21,8 @@ import {
 import { formatDate, formatVND } from "@/lib/format";
 import { recordRecommendationDecisionCore } from "@/lib/owner-decisions/service";
 import { findOwnerDecisionItem, getOwnerDecisionQueue, stockFeedbackSourceKey, stockFeedbackToItems } from "@/lib/queries/owner-decisions";
-import { getStockFeedbackForProduct, getStockFeedbackShop } from "@/lib/queries/stock-feedback";
+import type { InventoryDecisionRow } from "@/lib/queries/inventory-decision";
+import { getStockFeedbackForProduct, getStockFeedbackShop, toFeedbackVariant } from "@/lib/queries/stock-feedback";
 
 /**
  * ═══════════ COMPANY OS · AGENT X · VÒNG PHẢN HỒI TỒN → CREATIVE / QUẢNG CÁO ═══════════
@@ -161,6 +162,8 @@ export function testCompanyOsStockFeedbackPure() {
   assert.equal(datum(b, "Hạn đặt sớm nhất")?.value, formatDate("2026-09-20"));
   assert.equal(b.impact.amountVnd, 4_000_000, "tác động = lãi gộp ƯỚC TÍNH mất nếu hết hàng");
   assert.match(b.impact.basis, /ƯỚC TÍNH/);
+  const khongGiaBan = deriveStockFeedback(inp({ variants: [OUT, { ...OUT, variantId: "vc3", grossImpactEstimate: null }], ads: SCALE })).recommendations[0];
+  assert.equal(khongGiaBan.impact.amountVnd, null, "một mẫu mã chưa biết giá ⇒ tác động CHƯA BIẾT, không cộng thiếu");
   // Lệnh đặt xưởng đã phủ đủ ⇒ nói ra, việc chính đổi sang Mua hàng & xưởng, khoá đổi.
   const phu = deriveStockFeedback(inp({ variants: [{ ...OUT, openPoQty: 50, suggestedQty: 0 }], ads: SCALE })).recommendations[0];
   assert.match(phu.why, /đã phủ đủ số nên đặt — không cần đặt thêm/);
@@ -247,6 +250,12 @@ export function testCompanyOsStockFeedbackPure() {
   const thieu = manualGenPreselect(nguon, "prod-khac");
   assert.equal(thieu.photoId, "s-a");
   assert.match(thieu.note ?? "", /chưa có ảnh sản phẩm thật/, "mã chưa có ảnh ⇒ nói ra, không lặng lẽ chọn mã khác");
+
+  // ─── 8b. Dòng quyết định tồn ⇒ mẫu mã: DATA_INSUFFICIENT là tồn CHƯA BIẾT ───
+  const dong = (decision: InventoryDecisionRow["decision"]) => ({ variantId: "r1", sku: "", color: "Đen", size: "M", decision, available: 3, velocity: 0, sold30: 0, daysOfCover: null, leadTimeDays: 20, unitCost: null, suggestedQty: null, openPoQty: 0, capitalFreeable: null, grossImpactEstimate: null, reorderByDate: null }) as unknown as InventoryDecisionRow;
+  assert.equal(toFeedbackVariant(dong("DATA_INSUFFICIENT")).stockKnown, false, "bộ máy tồn nói CHƯA ĐỦ DỮ LIỆU ⇒ tồn chưa biết");
+  assert.equal(toFeedbackVariant(dong("OVERSTOCK")).stockKnown, true);
+  assert.equal(toFeedbackVariant(dong("OVERSTOCK")).label, "Đen / M", "nhãn mẫu mã: SKU, không có thì màu / size");
 
   // ─── 9. Mã nguồn ───
   const boCmt = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
