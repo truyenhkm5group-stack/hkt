@@ -23,6 +23,7 @@ import { CARRIER_SUBSTATE_LABEL, carrierSubstate, type CarrierSubstate } from "@
 import { careSlaHours } from "@/lib/care/sla";
 import { rawMedian, timingStat } from "@/lib/constants/care-timing";
 import { careViewOf, slaOf, type CareStateLike } from "@/lib/care/view";
+import { CARE_TERMINAL_STAGES } from "@/lib/care/entry";
 import { CARE_BUCKETS, CARE_REASON_LABEL, CARE_SLA, CS_CARE_NEXT_ACTION, CS_CARE_REASONS, CS_KIND_CARE_REASON, type CsCareReason, CARE_STATUS_LABEL, CARE_STATUSES, CARE_TERMINAL_STATUSES, type CareEventAction, type CareEventSource, type CareReasonClass, type CareReasonKey, type CareStatus } from "@/lib/constants/care";
 import { CS_ACTIONABLE_STATUSES, CS_LIFECYCLE_KINDS } from "@/lib/constants/cs-domain";
 import { botMessageFailuresByShipment } from "@/lib/queries/cs";
@@ -594,15 +595,19 @@ async function loadCsHandoverCases(): Promise<CsHandoverRow[]> {
         from cs_cases c
         join orders o on o.id = c.order_id
         /*
-          MỘT kiện cho mỗi case: trong các lần gửi ĐVVC đã cầm hàng (cùng mệnh đề với trang CSKH —
-          csHandedOffExists trong lib/queries/cs.ts), lần đang chạy trước, rồi lần mới nhất.
-          Kiện đã chốt (phát xong / đã hoàn) VẪN được nhận: sau bàn giao, mọi việc của đơn thuộc Vận đơn.
+          MỘT kiện cho mỗi case: kiện ĐVVC đã cầm VÀ CHƯA CHỐT — cùng mệnh đề với trang CSKH
+          (csRunningHandoffExists trong lib/queries/cs.ts), lần mới nhất trước.
+          Kiện đã chốt (phát xong / đã hoàn / huỷ) KHÔNG được nhận nữa (chủ shop chốt 25/09/2026):
+          không còn gì để care vận chuyển, và case của nó đã về hàng đợi CSKH theo cùng mệnh đề đó —
+          nên nó không mất ở đâu cả.
         */
         join lateral (
           select s2.* from shipments s2
            where s2.order_id = o.id
              and (s2.stage::text in ${[...CARRIER_HANDOFF_STAGES]} or s2.picked_up_at is not null)
-           order by s2.is_final asc, s2.created_at desc
+             and not coalesce(s2.is_final, false)
+             and s2.stage::text not in ${[...CARE_TERMINAL_STAGES]}
+           order by s2.created_at desc
            limit 1
         ) s on true
        where c.status in ${CS_ACTIONABLE_STATUSES} and c.kind in ${CS_LIFECYCLE_KINDS}
@@ -710,6 +715,33 @@ async function buildQueue(): Promise<CareQueue> {
   // ĐỢT ĐANG MỞ THẮNG ĐỢT ĐÃ ĐÓNG. Kiện vừa hỏng lại (đợt 2 đang mở) mà đợt 1 đóng trong 7 ngày:
   // ghi đè bằng đợt 1 là màn hình hiện "Đã xong" cho một kiện đang cần người.
   for (const r of doneRows) if (!careMap.has(r.care.shipmentId)) careMap.set(r.care.shipmentId, { ...r.care, ownerName: r.ownerName });
+
+  /*
+    ═══ CA ĐÃ ĐÓNG NGOÀI CỬA SỔ 7 NGÀY VẪN PHẢI ĐỌC ĐƯỢC ═══
+
+    Kiện còn nằm trong một rổ của tháp giao vận mà ca care gần nhất ĐÃ ĐÓNG (người bấm xong, hoặc
+    máy chốt) và ĐVVC chưa báo gì mới — bộ chặn mở lại (mục 59) cố ý không mở ca mới. Bản trước chỉ
+    nạp ca đang mở + ca đóng trong 7 ngày (tối đa 300), nên kiện kiểu này rơi về `EMPTY_CARE`: hiện
+    ở "Cần care" như một ca MỚI, chưa ai nhận. Người bấm "Giao" thì tên được ghi vào CA ĐÃ ĐÓNG,
+    màn hình hiện tên trong chốc lát, F5 lại thành "chưa giao" (chủ shop báo 25/09/2026).
+    Nạp ca gần nhất của những kiện ấy thì `careViewOf` trả đúng câu: đã đóng ⇒ "Đã xử lý", trừ khi
+    kiện vào lại điều kiện care SAU lúc đóng (mở lại). Ca đã đóng không còn đứng ở "Cần care".
+  */
+  const chuaCoDot = [...towerIds, ...wrongInfo.map((w) => w.shipment_id)].filter((id) => !careMap.has(id));
+  if (chuaCoDot.length) {
+    const dotCu = await db
+      .select({ care: schema.shipmentCare, ownerName: schema.users.name })
+      .from(schema.shipmentCare)
+      .leftJoin(schema.users, eq(schema.users.id, schema.shipmentCare.ownerId))
+      .where(inArray(schema.shipmentCare.shipmentId, chuaCoDot))
+      .orderBy(schema.shipmentCare.shipmentId, desc(schema.shipmentCare.episodeNo));
+    const daXet = new Set<string>();
+    for (const r of dotCu) {
+      if (daXet.has(r.care.shipmentId)) continue;
+      daXet.add(r.care.shipmentId);
+      if (!r.care.active && CARE_TERMINAL_STATUSES.includes(r.care.careStatus as CareStatus)) careMap.set(r.care.shipmentId, { ...r.care, ownerName: r.ownerName });
+    }
+  }
 
   // Quyết định gần nhất của ĐÚNG đợt đang hiển thị — một truy vấn cho cả hàng đợi, không một câu
   // cho mỗi dòng. Đợt nào không có quyết định nào thì `lastDecision = null` (CHƯA AI QUYẾT).
@@ -941,8 +973,13 @@ async function buildQueue(): Promise<CareQueue> {
     c.botMessageFailure = f ? { caseId: f.caseId, title: f.title, detail: f.detail, at: f.createdAt } : null;
   }
 
-  const dataGaps = all.filter((c) => c.reasonClass === "DATA_FRESHNESS");
-  const cases = all.filter((c) => c.reasonClass !== "DATA_FRESHNESS");
+  // Tab "Đã xử lý" là 7 NGÀY gần nhất. Ca đóng lâu hơn (vừa được nạp ở trên để khỏi rơi về "ca mới")
+  // mà kiện chưa vào lại điều kiện care thì không thuộc tab nào — nó không phải việc, cũng không
+  // phải lịch sử của tuần này.
+  const hanDaXuLy = now.getTime() - CARE_SLA.doneWindowDays * 86_400_000;
+  const conHieuLuc = all.filter((c) => !(c.view === "done" && c.care.doneAt && c.care.doneAt.getTime() < hanDaXuLy));
+  const dataGaps = conHieuLuc.filter((c) => c.reasonClass === "DATA_FRESHNESS");
+  const cases = conHieuLuc.filter((c) => c.reasonClass !== "DATA_FRESHNESS");
 
   const counts = { care: 0, waiting: 0, escalated: 0, done: 0 };
   for (const c of cases) counts[c.view] += 1;

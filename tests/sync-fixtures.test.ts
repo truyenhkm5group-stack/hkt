@@ -43,6 +43,7 @@ import { testCodPaymentStatement, testCodStatusMeaning, testStatementDedupAcross
 import { testVtpHealth } from "./vtp-health.test";
 import { testVtpCapability } from "./vtp-capability.test";
 import { testCareWorkbench } from "./care-workbench.test";
+import { testCareClosedAssign } from "./care-closed-assign.test";
 import { testAiCopilot } from "./ai-copilot.test";
 import { testLogisticsPerformance, testVtpState } from "./vtp-state.test";
 import { testOrderOutcomeContract } from "./contract-order-outcome.test";
@@ -745,11 +746,12 @@ async function main() {
   const cs2 = await detectCsCases();
   assert.equal(cs2.created, 0, "quét lại không tạo trùng");
   /*
-    CHƯA GIAO ĐVVC ⇒ CSKH · ĐÃ GIAO ⇒ VẬN ĐƠN (chủ shop chốt 25/09/2026, lib/constants/cs-domain.ts).
+    KIỆN ĐANG TRÊN ĐƯỜNG ⇒ VẬN ĐƠN · CHƯA GIAO HOẶC ĐÃ CHỐT ⇒ CSKH (chủ shop chốt 25/09/2026, chốt lại
+    buổi chiều cùng ngày — lib/constants/cs-domain.ts).
 
-    rr-9001 đã ở tay ĐVVC (vận đơn "Giao thành công") ⇒ hai case của nó thuộc bàn Vận đơn & care,
-    KHÔNG lên chuông CSKH — báo cả hai bàn là giao một việc cho hai người. Để vẫn kiểm được phép GOM
-    chuông của CSKH, thêm một đơn đã xác nhận mà CHƯA có vận đơn, ghi chú đổi size.
+    rr-9001 có vận đơn "Giao thành công" ⇒ kiện ĐÃ CHỐT ⇒ case trả hàng / đổi size của nó là việc
+    nói chuyện với khách, thuộc CSKH và lên chuông CSKH (bản trước giữ nó ở bàn Vận đơn, kéo đơn đã
+    xong vào "Cần care" mãi mãi). Thêm một đơn đã xác nhận mà CHƯA có vận đơn để kiểm phép GOM chuông.
   */
   await db.insert(schema.orders).values({ id: "cs-chua-giao", systemId: 9901, stage: "CONFIRMED", status: 1, insertedAt: new Date(), note: "khách nhắn đổi size L cho khách trước khi gửi" }).onConflictDoNothing();
   const cs3 = await detectCsCases();
@@ -759,7 +761,7 @@ async function main() {
   // không phải mỗi case một dòng.
   const csNoti = await db.select().from(schema.notifications).where(eq(schema.notifications.kind, "CS_CASE_GROUP"));
   assert.ok(csNoti.some((n) => n.entityId.startsWith("EXCHANGE_SIZE|")), "case CSKH lên chuông cảnh báo dưới dạng việc tổng hợp theo loại");
-  assert.ok(!csNoti.some((n) => n.entityId.startsWith("RETURN|")), "trả hàng của đơn đã giao cho ĐVVC là việc của bàn Vận đơn, không báo CSKH");
+  assert.ok(csNoti.some((n) => n.entityId.startsWith("RETURN|")), "trả hàng của đơn mà kiện ĐÃ CHỐT (giao xong) là việc của CSKH ⇒ lên chuông CSKH, không bị bỏ rơi ở bàn Vận đơn");
   console.log(`✓ CSKH: ${cs1.created} case tự phát hiện, ${csNoti.length} thông báo (quét ${alertsWithCs.created} mới)`);
 
   // Danh sách vận đơn Viettel Post (Quản lý vận đơn) → trạng thái & COD
@@ -1906,6 +1908,7 @@ async function main() {
   await testVtpHealth(db);
   await testVtpCapability(db);
   await testCareWorkbench(db);
+  await testCareClosedAssign(db);
   testCarrierManualPure();
   await testCarrierManualDb(db);
   await testAiCopilot(db);

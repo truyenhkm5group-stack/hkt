@@ -491,7 +491,10 @@ export function CareWorkbenchView({ initial, view, staff, presets: initialPreset
       }
       for (const [id, st] of Object.entries(r.data.states)) patch(id, st);
       setSelected(new Set());
-      toast.success(`Đã giao ${ids.length} kiện`);
+      const giao = Object.keys(r.data.states).length;
+      if (giao) toast.success(`Đã giao ${giao} kiện`);
+      // Kiện bị bỏ qua (ca đã đóng…) phải nói ra — im lặng là người giao tưởng đã giao.
+      if (r.data.skipped.length) toast.warning(`${r.data.skipped.length} kiện không giao: ${r.data.skipped[0].reason}`);
     });
 
   /*
@@ -1199,6 +1202,7 @@ function CaseRow({ c, now, ngayHien, staff, presets, resolutionPresets, onPreset
       }
       const st = r.data.states[c.shipmentId];
       if (st) onPatch(st);
+      else if (r.data.skipped[0]) toast.warning(r.data.skipped[0].reason);
     });
   const followUp = (at: Date | null) =>
     start(async () => {

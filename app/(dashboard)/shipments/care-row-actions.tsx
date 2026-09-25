@@ -70,9 +70,15 @@ export function CareRowActions({
 
   const chay = (fn: () => Promise<{ error?: string } | unknown>, ok: string, sau?: () => void) =>
     start(async () => {
-      const r = (await fn()) as { error?: string };
+      const r = (await fn()) as { error?: string; data?: { states?: Record<string, unknown>; skipped?: { reason: string }[] } };
       if (r && typeof r === "object" && "error" in r && r.error) {
         toast.error(r.error);
+        return;
+      }
+      // Máy chủ bỏ qua kiện này (vd ca care đã đóng) ⇒ nói lý do, KHÔNG báo thành công giả.
+      const boQua = r?.data?.skipped?.[0];
+      if (boQua && !Object.keys(r.data?.states ?? {}).length) {
+        toast.warning(boQua.reason);
         return;
       }
       toast.success(ok);

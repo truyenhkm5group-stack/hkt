@@ -246,6 +246,7 @@ export function CareDrawer({
       }
       const st = r.data.states[current.shipmentId];
       if (st) phatCapNhat(current.shipmentId, st);
+      else if (r.data.skipped[0]) toast.warning(r.data.skipped[0].reason);
       await naplai();
     });
 
