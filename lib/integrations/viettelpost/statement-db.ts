@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { rowsOf } from "@/lib/sql-rows";
 import { vnStartOfDay } from "@/lib/format";
 import { legBaseCode, mergeVtpOrderLists, vtpSaysCodReceived, type CodPaymentSummary, type StatementDetailRow, type StatementSummary, type VtpOrderListRow } from "@/lib/integrations/viettelpost/statement";
 import { ghiLoiKhaiTho, materializeShipmentState } from "@/lib/integrations/viettelpost/state";
@@ -865,6 +866,39 @@ export async function applyStatementDetailRows(rows: StatementDetailRow[], sourc
   void khoa;
   const withCash = matches.filter((m) => m.shipmentId && m.cod > 0).length;
   return { linked, withCash, statementAt, rows: values.length, unmatched: matches.length - linked, statementKey: khoa };
+}
+
+/**
+ * GHÉP LẠI dòng bảng kê "chưa ghép" với vận đơn ĐÃ CÓ trong ERP.
+ *
+ * Bước ghép (`matchStatementRows`) chỉ chạy đúng lúc nhập tệp. Vận đơn vào ERP SAU đó — qua tệp
+ * Danh sách vận đơn, webhook, hay đồng bộ Pancake — thì dòng bảng kê của nó nằm "chưa ghép" mãi,
+ * còn chính vận đơn ấy đứng ở tab "Quá hạn" như thể Viettel Post chưa trả. Đo production 24/09/2026:
+ * 6 vận đơn quá hạn tháng 8 có dòng bảng kê mang ĐÚNG mã của chúng mà `shipment_id` vẫn trống.
+ *
+ * Chỉ ghép khi mã khớp ĐÚNG MỘT vận đơn (theo mã VTP hoặc mã tra cứu): hai vận đơn cùng mã là mơ
+ * hồ, và gắn tiền nhầm đơn tệ hơn để "chưa ghép". Không đụng dòng đã ghép. Idempotent — chạy lại
+ * không đổi gì nên đặt được vào job định kỳ.
+ */
+export async function relinkUnmatchedStatementLines(): Promise<{ linked: number; shipments: number }> {
+  const db = await getDb();
+  const rows = rowsOf<Record<string, unknown>>(
+    await db.execute(sql`
+      with ung as (
+        select l.id line_id, min(s.id) ship, count(distinct s.id) n
+        from cod_statement_lines l
+        join shipments s on upper(s.vtp_order_number) = l.tracking_code or upper(s.tracking_code) = l.tracking_code
+        where l.shipment_id is null
+        group by l.id
+      )
+      update cod_statement_lines l set shipment_id = ung.ship, updated_at = now()
+      from ung
+      where ung.line_id = l.id and ung.n = 1 and l.shipment_id is null
+      returning l.shipment_id`),
+  );
+  const ids = [...new Set(rows.map((r) => String(r.shipment_id)))];
+  if (ids.length) await materializeCodFromStatementLines(ids);
+  return { linked: rows.length, shipments: ids.length };
 }
 
 /**
