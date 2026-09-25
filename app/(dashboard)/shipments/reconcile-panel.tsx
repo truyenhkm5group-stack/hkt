@@ -3,7 +3,6 @@
 import { useMemo, useState, useTransition } from "react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
 import { Copy, ExternalLink, FileUp, RotateCcw } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { NavLink } from "@/components/nav-progress";
 import { Button } from "@/components/ui/button";
@@ -237,7 +236,6 @@ function BangNguong({ rows }: { rows: NguongChang[] }) {
 }
 
 function DongNguong({ row }: { row: NguongChang }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [aging, setAging] = useState(String(row.hieuLuc.aging));
   const [stale, setStale] = useState(String(row.hieuLuc.stale));
@@ -249,7 +247,6 @@ function DongNguong({ row }: { row: NguongChang }) {
       if ("error" in res) toast.error(res.error);
       else {
         toast.success("Đã lưu ngưỡng");
-        router.refresh();
       }
     });
 

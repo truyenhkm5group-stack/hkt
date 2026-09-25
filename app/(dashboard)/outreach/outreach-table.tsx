@@ -2,7 +2,6 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Download, ExternalLink, MessageCircle, Pencil, RefreshCw, Send, SkipForward } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -23,7 +22,6 @@ import type { CustomerOutcome } from "@/lib/constants/outreach-segment";
 export function BuildButton({ segment, defaultHours }: { segment: "NURTURE" | "CROSS_SELL"; defaultHours: number }) {
   const [pending, startTransition] = useTransition();
   const [hours, setHours] = useState(String(NURTURE_WINDOWS.some((w) => w.hours === defaultHours) ? defaultHours : 168));
-  const router = useRouter();
   return (
     <div className="flex items-center gap-2">
       {segment === "NURTURE" ? (
@@ -42,7 +40,6 @@ export function BuildButton({ segment, defaultHours }: { segment: "NURTURE" | "C
             else {
               const extra = segment === "NURTURE" ? ` · quét ${r.scanned} hội thoại · đã mua ${r.converted} · khách trả lời ${r.replied}` : "";
               toast.success(`Thêm ${r.nurture + r.crossSell} khách mới${extra}${r.errors.length ? ` · ${r.errors.length} lỗi` : ""}`);
-              router.refresh();
             }
           })
       }
@@ -65,7 +62,6 @@ export function OutreachTable({ rows, segment, canWrite }: { rows: OutreachRow[]
   const [draft, setDraft] = useState("");
   const [mediaDraft, setMediaDraft] = useState("");
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const pendingRows = useMemo(() => rows.filter((r) => isDue(r)), [rows]);
   const allSelected = pendingRows.length > 0 && pendingRows.every((r) => selected.has(r.id));
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(pendingRows.map((r) => r.id)));
@@ -79,14 +75,13 @@ export function OutreachTable({ rows, segment, canWrite }: { rows: OutreachRow[]
       else {
         toast[r.failed ? "warning" : "success"](`Đã gửi ${r.sent} · lỗi ${r.failed} · bỏ qua ${r.skipped}${r.notDue ? ` · chưa đến hạn ${r.notDue}` : ""} · còn ${r.remainingToday} lượt hôm nay`);
         setSelected(new Set());
-        router.refresh();
       }
     });
   const skip = () =>
     startTransition(async () => {
       const r = await skipOutreach(ids);
       if ("error" in r) toast.error(r.error);
-      else { setSelected(new Set()); router.refresh(); }
+      else { setSelected(new Set()); }
     });
   const exportCsv = () => {
     const list = ids.length ? rows.filter((r) => selected.has(r.id)) : rows;
@@ -104,7 +99,7 @@ export function OutreachTable({ rows, segment, canWrite }: { rows: OutreachRow[]
       if ("error" in r) { toast.error(r.error); return; }
       const m = await updateOutreachMedia(editing.id, mediaDraft.split(/[\n,]/));
       if ("error" in m) toast.error(m.error);
-      else { setEditing(null); router.refresh(); }
+      else { setEditing(null); }
     });
 
   return (

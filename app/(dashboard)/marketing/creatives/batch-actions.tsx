@@ -27,7 +27,6 @@ function Dong({ label, children, strong }: { label: string; children: React.Reac
 
 /** DUYỆT CẢ LÔ — bước 1 đề nghị (chỉ đọc), bước 2 gửi lại phiếu. */
 export function ApproveBatchButton({ batchId, disabledReason }: { batchId: string; disabledReason: string | null }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [p, setP] = useState<BatchApprovalProposal | null>(null);
   const [loading, startLoad] = useTransition();
@@ -54,7 +53,6 @@ export function ApproveBatchButton({ batchId, disabledReason }: { batchId: strin
       }
       toast.success("Đã duyệt lô — máy sẽ đăng trước giờ chạy.");
       setOpen(false);
-      router.refresh();
     });
 
   return (
@@ -142,7 +140,6 @@ export function ApproveBatchButton({ batchId, disabledReason }: { batchId: strin
 
 /** Từ chối cả lô — bắt buộc ghi lý do. */
 export function RejectBatchButton({ batchId, disabledReason }: { batchId: string; disabledReason: string | null }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [pending, start] = useTransition();
@@ -155,7 +152,6 @@ export function RejectBatchButton({ batchId, disabledReason }: { batchId: string
       }
       toast.success("Đã từ chối lô — không đồng nào được chi.");
       setOpen(false);
-      router.refresh();
     });
   return (
     <>

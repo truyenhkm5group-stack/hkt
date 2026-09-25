@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Check, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +30,6 @@ export function AddKeyResult({ objectiveId }: { objectiveId: string }) {
   const [direction, setDirection] = useState("UP");
   const [baseline, setBaseline] = useState("");
   const [target, setTarget] = useState("");
-  const router = useRouter();
 
   const pick = (key: string) => {
     setMetricSource(key);
@@ -107,7 +105,6 @@ export function AddKeyResult({ objectiveId }: { objectiveId: string }) {
               setTitle("");
               setTarget("");
               setBaseline("");
-              router.refresh();
             })
           }
         >
@@ -125,7 +122,6 @@ export function CheckinKeyResult({ id, manual, current }: { id: string; manual: 
   const [value, setValue] = useState(current === null ? "" : String(current));
   const [confidence, setConfidence] = useState("ON_TRACK");
   const [note, setNote] = useState("");
-  const router = useRouter();
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -160,7 +156,6 @@ export function CheckinKeyResult({ id, manual, current }: { id: string; manual: 
               if ("error" in r) { toast.error(r.error); return; }
               toast.success("Đã chấm");
               setOpen(false);
-              router.refresh();
             })
           }
         >
@@ -173,7 +168,6 @@ export function CheckinKeyResult({ id, manual, current }: { id: string; manual: 
 
 export function DeleteKeyResult({ id }: { id: string }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
   return (
     <Button
       size="sm"
@@ -181,7 +175,7 @@ export function DeleteKeyResult({ id }: { id: string }) {
       className="h-6 px-1.5 text-[11px] text-muted-foreground"
       disabled={pending}
       title="Xoá Key Result"
-      onClick={() => start(async () => { const r = await deleteKeyResult(id); if ("error" in r) toast.error(r.error); else { toast.success("Đã xoá"); router.refresh(); } })}
+      onClick={() => start(async () => { const r = await deleteKeyResult(id); if ("error" in r) toast.error(r.error); else { toast.success("Đã xoá"); } })}
     >
       <Trash2 className="size-3" />
     </Button>
@@ -190,7 +184,6 @@ export function DeleteKeyResult({ id }: { id: string }) {
 
 export function DeleteObjective({ id, title }: { id: string; title: string }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
   return (
     <Button
       size="sm"
@@ -198,7 +191,7 @@ export function DeleteObjective({ id, title }: { id: string; title: string }) {
       className="h-7 px-2 text-xs text-muted-foreground"
       disabled={pending}
       title={`Xoá mục tiêu "${title}" cùng mọi Key Result của nó`}
-      onClick={() => start(async () => { const r = await deleteObjective(id); if ("error" in r) toast.error(r.error); else { toast.success("Đã xoá mục tiêu"); router.refresh(); } })}
+      onClick={() => start(async () => { const r = await deleteObjective(id); if ("error" in r) toast.error(r.error); else { toast.success("Đã xoá mục tiêu"); } })}
     >
       <Trash2 className="size-3.5" />
     </Button>
@@ -214,7 +207,6 @@ export function DeleteObjective({ id, title }: { id: string; title: string }) {
  */
 export function ObjectiveStatus({ id, status, canManage }: { id: string; status: OkrStatus; canManage: boolean }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const doi = (to: OkrStatus, ok: string) =>
     start(async () => {
@@ -224,7 +216,6 @@ export function ObjectiveStatus({ id, status, canManage }: { id: string; status:
         return;
       }
       toast.success(ok);
-      router.refresh();
     });
 
   if (status === "ACTIVE") return null;

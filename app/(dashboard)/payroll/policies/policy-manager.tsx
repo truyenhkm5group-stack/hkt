@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
-import { useRouter } from "next/navigation";
 import { Copy, Plus, Rocket, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -89,7 +88,6 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 export function PolicyManager({ policies, departments }: { policies: PolicyView[]; departments: { id: string; name: string }[] }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState<string | null>(null);
 
@@ -103,7 +101,6 @@ export function PolicyManager({ policies, departments }: { policies: PolicyView[
       }
       toast.success("Đã lưu chính sách lương");
       setForm({ code: "", name: "", description: "", departmentId: "", active: true, sortOrder: 100 });
-      router.refresh();
     });
 
   return (
@@ -166,7 +163,6 @@ export function PolicyManager({ policies, departments }: { policies: PolicyView[
 }
 
 function PolicyCard({ policy, editing, onToggleEdit }: { policy: PolicyView; editing: boolean; onToggleEdit: () => void }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const latest = policy.versions[0];
   const [draft, setDraft] = useState<{ id?: string; effectiveFrom: string; effectiveTo: string; note: string; components: PolicyComponent[] }>(() => {
@@ -208,7 +204,6 @@ function PolicyCard({ policy, editing, onToggleEdit }: { policy: PolicyView; edi
         return;
       }
       toast.success("Đã lưu bản nháp phiên bản");
-      router.refresh();
     });
 
   const activate = (versionId: string) =>
@@ -219,7 +214,6 @@ function PolicyCard({ policy, editing, onToggleEdit }: { policy: PolicyView; edi
         return;
       }
       toast.success("Đã phát hành phiên bản — từ mốc hiệu lực, lương tính theo bản này");
-      router.refresh();
     });
 
   const clone = (versionId: string) =>
@@ -230,7 +224,6 @@ function PolicyCard({ policy, editing, onToggleEdit }: { policy: PolicyView; edi
         return;
       }
       toast.success("Đã nhân bản thành bản nháp mới — sửa rồi phát hành");
-      router.refresh();
     });
 
   return (

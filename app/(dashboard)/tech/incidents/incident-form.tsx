@@ -2,7 +2,6 @@
 
 import { Loader2, Plus } from "lucide-react";
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -34,7 +33,6 @@ export function TechIncidentForm() {
   const [module, setModule] = useState<TechModule>("PLATFORM");
   const [evidence, setEvidence] = useState("");
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const dong = () => {
     setOpen(false);
@@ -112,7 +110,6 @@ export function TechIncidentForm() {
                   }
                   toast.success(`Đã mở sự cố ${res.code}`);
                   dong();
-                  router.refresh();
                 })
               }
             >

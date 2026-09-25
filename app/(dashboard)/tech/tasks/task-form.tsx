@@ -2,7 +2,6 @@
 
 import { Loader2, Plus } from "lucide-react";
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -47,7 +46,6 @@ export function TechTaskForm() {
   const [source, setSource] = useState<TechTaskSource>("OWNER");
   const [branch, setBranch] = useState("");
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const xep = useMemo(() => classifyTechRisk({ taskType, module, title, description }), [taskType, module, title, description]);
 
@@ -71,7 +69,6 @@ export function TechTaskForm() {
       }
       toast.success(`Đã ghi việc ${res.code}`);
       dong();
-      router.refresh();
     });
   };
 

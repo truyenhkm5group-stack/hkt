@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Plus } from "lucide-react";
 import { useForm, type ControllerRenderProps } from "react-hook-form";
@@ -57,7 +56,6 @@ export function AdSpendDialog({ ad, open, onOpenChange }: { ad?: AdSpendRow | nu
   const isOpen = open ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const form = useForm<AdSpendInput>({ resolver: zodResolver(adSpendSchema), defaultValues: toForm(ad) });
 
   useEffect(() => {
@@ -75,7 +73,6 @@ export function AdSpendDialog({ ad, open, onOpenChange }: { ad?: AdSpendRow | nu
       }
       toast.success(ad ? "Đã cập nhật chi tiêu quảng cáo" : "Đã thêm chi tiêu quảng cáo");
       setOpen(false);
-      router.refresh();
     });
   };
 

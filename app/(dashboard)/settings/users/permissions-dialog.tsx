@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -70,7 +69,6 @@ export function PermissionsDialog({ user, templates, open, onOpenChange }: { use
   const [custom, setCustom] = useState<boolean>(Array.isArray(user.permissions));
   const [value, setValue] = useState<Set<string>>(new Set(user.permissions ?? roleDefaults));
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   useEffect(() => {
     if (open) {
@@ -88,7 +86,6 @@ export function PermissionsDialog({ user, templates, open, onOpenChange }: { use
       }
       toast.success(custom ? `Đã lưu quyền tuỳ chỉnh cho ${user.name}` : `${user.name} dùng quyền mặc định của vai trò ${ROLE_LABEL[user.role]}`);
       onOpenChange(false);
-      router.refresh();
     });
 
   const isAdmin = user.role === "ADMIN";

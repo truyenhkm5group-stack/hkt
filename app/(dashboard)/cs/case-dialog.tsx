@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -23,7 +22,6 @@ export function CaseDialog({ caseRow, staff, open, onOpenChange }: { caseRow?: C
   const [internalOpen, setInternalOpen] = useState(false);
   const isOpen = open ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const empty = { orderId: "", orderLabel: "", kind: "EXCHANGE_SIZE" as CsKind, status: "OPEN" as CsStatus, title: "", detail: "", customerName: "", customerPhone: "", assigneeUserId: "" as string, resolution: "" };
   const [form, setForm] = useState(empty);
@@ -66,7 +64,6 @@ export function CaseDialog({ caseRow, staff, open, onOpenChange }: { caseRow?: C
       else {
         toast.success(caseRow ? "Đã cập nhật case" : "Đã tạo case");
         setOpen(false);
-        router.refresh();
       }
     });
 

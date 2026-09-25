@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { AlarmClock, ChevronDown, ChevronRight, ExternalLink, Loader2, MessageCircle, MessageSquarePlus, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/misc";
@@ -113,8 +112,6 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
   const [mo, setMo] = useState<Set<string>>(new Set());
   const [chon, setChon] = useState<Set<string>>(new Set());
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
-  const router = useRouter();
 
   // Dữ liệu mới từ máy chủ về ⇒ bỏ lựa chọn cũ: giữ lại là để người dùng bấm hàng loạt lên một tập
   // dòng không còn đúng nữa.
@@ -148,7 +145,6 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
       return false;
     }
     if (okMessage) toast.success(okMessage);
-    startTransition(() => router.refresh());
     return true;
   };
 
@@ -162,7 +158,6 @@ export function CustomerQueueTable({ rows, staff, canWrite, currentUser }: { row
     }
     toast.success(res.message);
     setChon(new Set());
-    startTransition(() => router.refresh());
     return true;
   };
 
@@ -511,7 +506,6 @@ function NoteButton({ caseId, busy }: { caseId: string; busy: boolean }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
-  const router = useRouter();
   const save = async () => {
     if (!text.trim()) return;
     setSaving(true);
@@ -524,7 +518,6 @@ function NoteButton({ caseId, busy }: { caseId: string; busy: boolean }) {
     setText("");
     setOpen(false);
     toast.success("Đã lưu ghi chú");
-    router.refresh();
   };
   return (
     <Popover open={open} onOpenChange={setOpen}>

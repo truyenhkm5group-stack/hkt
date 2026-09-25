@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Play, Plus, UserMinus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +30,6 @@ const WEEKDAYS = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sá
 
 export function DepartmentsPanel({ departments, people }: { departments: Dept[]; people: { id: string; name: string }[] }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
   const [newCode, setNewCode] = useState("");
   const [newName, setNewName] = useState("");
 
@@ -40,7 +38,6 @@ export function DepartmentsPanel({ departments, people }: { departments: Dept[];
       const r = await fn();
       if ("error" in r) { toast.error(r.error); return; }
       toast.success(ok);
-      router.refresh();
     });
 
   /*
@@ -146,7 +143,6 @@ export function DepartmentsPanel({ departments, people }: { departments: Dept[];
               }
               toast.success(r.leadCleared ? `Đã bỏ khỏi ${xacNhan.deptName} — ghế trưởng phòng cũng trống` : `Đã bỏ khỏi ${xacNhan.deptName}`);
               setXacNhan(null);
-              router.refresh();
             })
           }
         />
@@ -159,7 +155,6 @@ type Rec = { id: string; title: string; cadence: string; cadenceDay: number | nu
 
 export function RecurrencePanel({ rows, departments, people }: { rows: Rec[]; departments: { id: string; code: string; name: string }[]; people: { id: string; name: string }[] }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
   const [title, setTitle] = useState("");
   const [department, setDepartment] = useState(departments[0]?.code ?? "MANAGEMENT");
   const [cadence, setCadence] = useState("DAILY");
@@ -173,7 +168,6 @@ export function RecurrencePanel({ rows, departments, people }: { rows: Rec[]; de
       const r = await fn();
       if ("error" in r) { toast.error(r.error); return; }
       toast.success("created" in r ? `Đã sinh ${r.created} việc (bỏ qua ${r.skipped})` : ok);
-      router.refresh();
     });
 
   return (

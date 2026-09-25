@@ -53,7 +53,6 @@ export function ManualGenForm({
   /** Ảnh chọn sẵn (vd `?product=` từ đề xuất đẩy tồn). Chỉ là giá trị khởi đầu — không kích lượt vẽ nào. */
   initialPhotoId?: string;
 }) {
-  const router = useRouter();
   const photos = sources.filter((s) => s.kind === "PRODUCT_PHOTO");
   const [photoId, setPhotoId] = useState(initialPhotoId && photos.some((s) => s.id === initialPhotoId) ? initialPhotoId : (photos[0]?.id ?? ""));
   const [ownAdId, setOwnAdId] = useState("");
@@ -71,7 +70,6 @@ export function ManualGenForm({
       }
       toast.success(r.allowed === r.requested ? `Đang vẽ ${r.requested} ảnh — ảnh hiện dần ở "Kết quả gen tay".` : `Chỉ vẽ được ${r.allowed}/${r.requested} ảnh. ${r.note ?? ""}`);
       setIdea("");
-      router.refresh();
     });
 
   const khoa = disabledReason ?? (photos.length === 0 ? "Chưa có ảnh sản phẩm thật nào — nhập ở tab Nguồn ảnh trước." : allowedNow === 0 ? (capReason ?? "Hết trần ảnh hôm nay.") : null);
@@ -154,7 +152,6 @@ export function ManualGenImageTile({
   predictedSeq: number;
   targetDay: string;
 }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const review = (decision: "APPROVE" | "REJECT") =>
     start(async () => {
@@ -165,7 +162,6 @@ export function ManualGenImageTile({
       }
       if (r.status === "APPROVED") toast.success(r.captionError ? `Đã duyệt — AI chưa viết được câu chữ (${r.captionError}). Gõ tay trong hộp "Đưa vào lô".` : "Đã duyệt — AI đã viết câu chữ theo ảnh.");
       else toast.success("Đã loại ảnh.");
-      router.refresh();
     });
   const loai = img.status === "REJECTED" || img.status === "GEN_FAILED";
   return (
@@ -208,7 +204,6 @@ export function ManualGenImageTile({
 }
 
 function PromoteButton({ img, pageName, defaults, predictedSeq, targetDay }: { img: ManualGenImageCard; pageName: string | null; defaults: { campaign: string; adset: string; ad: string; problems: string[] }; predictedSeq: number; targetDay: string }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [h, setH] = useState(img.headline);
   const [t, setT] = useState(img.primaryText);
@@ -252,7 +247,6 @@ function PromoteButton({ img, pageName, defaults, predictedSeq, targetDay }: { i
       toast.success(`Đã đưa vào lô ${r.batchDay} (ô #${r.slot}) — lô cần được bấm duyệt (lại).`);
       for (const w of r.warnings) toast.warning(w);
       setOpen(false);
-      router.refresh();
     });
 
   return (

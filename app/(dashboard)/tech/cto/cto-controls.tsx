@@ -35,7 +35,6 @@ function Bao({ v }: { v: { ok: boolean; text: string } | null }) {
 export function PlanButton({ taskId, label }: { taskId: string; label?: string }) {
   const [dang, batDau] = useTransition();
   const [bao, setBao] = useState<{ ok: boolean; text: string } | null>(null);
-  const router = useRouter();
   return (
     <div className="space-y-1">
       <Button
@@ -47,7 +46,6 @@ export function PlanButton({ taskId, label }: { taskId: string; label?: string }
             const r = await planTechProposalAction({ taskId });
             if ("error" in r) setBao({ ok: false, text: r.error });
             else setBao({ ok: true, text: r.status === "READY_FOR_REVIEW" ? `Đã lập kế hoạch: ${r.tasks} việc đề nghị — CHƯA tạo việc thật.` : "Lượt lập kế hoạch KHÔNG đạt — xem lý do bên dưới." });
-            router.refresh();
           })
         }
       >
@@ -115,7 +113,6 @@ export function RejectButton({ proposalId }: { proposalId: string }) {
   const [dang, batDau] = useTransition();
   const [bao, setBao] = useState<{ ok: boolean; text: string } | null>(null);
   const [reason, setReason] = useState("");
-  const router = useRouter();
   return (
     <div className="space-y-2">
       <input
@@ -134,7 +131,6 @@ export function RejectButton({ proposalId }: { proposalId: string }) {
             const r = await rejectTechProposalAction({ proposalId, reason });
             if ("error" in r) setBao({ ok: false, text: r.error });
             else setBao({ ok: true, text: "Đã từ chối. Bản này vẫn đọc lại được." });
-            router.refresh();
           })
         }
       >

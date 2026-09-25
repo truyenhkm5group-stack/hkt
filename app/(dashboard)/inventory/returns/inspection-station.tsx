@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, Barcode, Check, ChevronLeft, ChevronRight, FilterX, Layers, Loader2, PackageX, ScanLine, Trash2, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -102,7 +101,6 @@ export function InspectionStation({
   /** TỔNG THẬT của hàng đợi phía máy chủ — để biết phần đang tải có phải toàn bộ hay không. */
   total: number;
 }) {
-  const router = useRouter();
   const [rows, setRows] = React.useState<Row[]>(initial);
   const [chon, setChon] = React.useState<Set<string>>(new Set());
   const [ma, setMa] = React.useState("");
@@ -124,7 +122,7 @@ export function InspectionStation({
   const [daDoiChieu, setDaDoiChieu] = React.useState(false);
   const oMa = React.useRef<HTMLInputElement>(null);
 
-  // Danh sách phía máy chủ đổi (sau refresh) thì lấy lại — nhưng KHÔNG đè lên phần vừa xử lý cục bộ.
+  // Danh sách phía máy chủ đổi (sau khi trang dựng lại) thì lấy lại — nhưng KHÔNG đè lên phần vừa xử lý cục bộ.
   React.useEffect(() => setRows(initial), [initial]);
 
   /** Con trỏ LUÔN quay về ô mã. Đây là thứ giữ nhịp bắn mã liên tục không cần chạm chuột. */
@@ -219,7 +217,6 @@ export function InspectionStation({
       return;
     }
     toast.success(r.message);
-    router.refresh();
   }
 
   async function motKien(row: Row, condition: ReturnCondition, soLuong?: number) {
@@ -255,7 +252,6 @@ export function InspectionStation({
       return;
     }
     toast.success(r.message);
-    router.refresh();
   }
 
   /**
@@ -329,7 +325,6 @@ export function InspectionStation({
     }
     for (const e of [...new Set(loiCaMe)]) toast.error(e, { duration: 12_000 });
     if (!tongDone && !tongFailed.length && !loiCaMe.length) toast.info("Không kiện nào được xử lý");
-    router.refresh();
   }
 
   const tatCa = daLoc.length > 0 && daLoc.every((r) => chon.has(r.shipmentId));

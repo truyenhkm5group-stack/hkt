@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +16,6 @@ export function ApprovalDecisionButtons({ id }: { id: string }) {
   const [pending, startTransition] = useTransition();
   const [dangTuChoi, setDangTuChoi] = useState(false);
   const [lyDo, setLyDo] = useState("");
-  const router = useRouter();
 
   const quyet = (dongY: boolean) =>
     startTransition(async () => {
@@ -27,7 +25,6 @@ export function ApprovalDecisionButtons({ id }: { id: string }) {
         toast.success(dongY ? "Đã duyệt" : "Đã từ chối");
         setDangTuChoi(false);
         setLyDo("");
-        router.refresh();
       }
     });
 

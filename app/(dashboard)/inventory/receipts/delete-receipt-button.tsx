@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -19,7 +18,6 @@ export function DeleteReceiptButton({ id, label }: { id: string; label: string }
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
-  const router = useRouter();
   const ready = reason.trim().length >= RECEIPT_DELETE_REASON_MIN;
   return (
     <AlertDialog
@@ -58,7 +56,6 @@ export function DeleteReceiptButton({ id, label }: { id: string; label: string }
                   toast.success("Đã xoá phiếu");
                   setOpen(false);
                   setReason("");
-                  router.refresh();
                 }
               })
             }

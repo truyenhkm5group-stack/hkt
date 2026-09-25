@@ -3,7 +3,6 @@
 import { useEffect, useState, useTransition } from "react";
 import { parseAsInteger, parseAsString, useQueryStates } from "nuqs";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { AlarmClock, ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, Loader2, MessageCircle, MessageSquarePlus, Pencil, RefreshCw, Trash2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import { CaseDialog } from "@/app/(dashboard)/cs/case-dialog";
@@ -29,9 +28,8 @@ import { cn } from "@/lib/utils";
 
 export function DetectButton() {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
-    <Button variant="outline" disabled={pending} onClick={() => startTransition(async () => { const r = await runCsDetection(); if ("error" in r) toast.error(r.error); else { toast.success(`Quét ${r.scanned} dấu hiệu · ${r.created} case mới`); router.refresh(); } })}>
+    <Button variant="outline" disabled={pending} onClick={() => startTransition(async () => { const r = await runCsDetection(); if ("error" in r) toast.error(r.error); else { toast.success(`Quét ${r.scanned} dấu hiệu · ${r.created} case mới`); } })}>
       <RefreshCw className={cn("size-4", pending && "animate-spin")} /> Quét từ Pancake
     </Button>
   );
@@ -44,7 +42,8 @@ export function DetectButton() {
  *
  *  1. **Phản hồi tại chỗ.** Mọi thao tác vẽ kết quả lên dòng trước (`patches`) rồi mới đồng bộ với
  *     máy chủ. Hỏng thì hoàn tác đúng dòng đó và báo lỗi ngay đó — không nhảy trang, không mất vị
- *     trí cuộn. `router.refresh()` chỉ chạy SAU khi máy chủ xác nhận, để hoà lại các số ở đầu trang.
+ *     trí cuộn. Giao diện mới của trang (server action đã `revalidatePath("/cs")`, trả về NGAY trong
+ *     lượt gọi) chỉ về SAU khi máy chủ xác nhận, để hoà lại các số ở đầu trang.
  *  2. **Chữ dài không được chiếm chỗ của nút.** Bằng chứng (ghi chú bưu tá, đoạn chat, kết luận,
  *     lịch sử) nằm sau nút "Xem bằng chứng"; dòng chỉ giữ một câu. Bảng cũ in cả `detail` lẫn
  *     `resolution` nhiều dòng chữ xanh/đỏ, và 40 case cao bằng ba màn hình.
@@ -76,7 +75,6 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [patches, setPatches] = useState<Record<string, Patch>>({});
   const [, startTransition] = useTransition();
-  const router = useRouter();
 
   // Dữ liệu mới từ máy chủ đã về ⇒ bỏ lớp vẽ tạm, không để hai nguồn sự thật chồng lên nhau.
   useEffect(() => setPatches({}), [rows]);
@@ -94,7 +92,6 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
       return false;
     }
     if (okMessage) toast.success(okMessage);
-    startTransition(() => router.refresh());
     return true;
   };
 
@@ -368,7 +365,7 @@ export function CsTable({ rows, staff, canWrite, currentUser, currentUserId }: {
                     {canWrite ? (
                       <>
                         <Button variant="ghost" size="icon" className="size-8" aria-label="Sửa" onClick={() => setEditing(r)}><Pencil className="size-4" /></Button>
-                        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-destructive" aria-label="Xoá" disabled={busy} onClick={() => { if (confirm("Xoá case này?")) startTransition(async () => { const x = await deleteCsCase(r.id); if ("error" in x) toast.error(x.error); else router.refresh(); }); }}><Trash2 className="size-4" /></Button>
+                        <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-destructive" aria-label="Xoá" disabled={busy} onClick={() => { if (confirm("Xoá case này?")) startTransition(async () => { const x = await deleteCsCase(r.id); if ("error" in x) toast.error(x.error); }); }}><Trash2 className="size-4" /></Button>
                       </>
                     ) : null}
                   </div>
@@ -488,7 +485,6 @@ function NoteButton({ caseId, busy, onSaved }: { caseId: string; busy: boolean; 
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
-  const router = useRouter();
   const save = async () => {
     if (!text.trim()) return;
     setSaving(true);
@@ -502,7 +498,6 @@ function NoteButton({ caseId, busy, onSaved }: { caseId: string; busy: boolean; 
     setText("");
     setOpen(false);
     toast.success("Đã lưu ghi chú");
-    router.refresh();
   };
   return (
     <Popover open={open} onOpenChange={setOpen}>

@@ -17,7 +17,6 @@ export function TopicMessageForm({ topicId }: { topicId: string }) {
   const [price, setPrice] = useState("");
   const [links, setLinks] = useState("");
   const [pending, start] = useNavTransition();
-  const router = useRouter();
   const gui = () =>
     start(async () => {
       const r = await addProductionTopicMessage({
@@ -34,7 +33,6 @@ export function TopicMessageForm({ topicId }: { topicId: string }) {
       setBody("");
       setPrice("");
       setLinks("");
-      router.refresh();
     });
   return (
     <div className="space-y-2 rounded-xl border bg-muted/30 p-3">

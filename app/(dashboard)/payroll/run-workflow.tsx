@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,7 +52,6 @@ export function RunWorkflow({
   lockedAt: string | null;
   paidAt: string | null;
 }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [reasonFor, setReasonFor] = useState<PayrollRunAction | null>(null);
   const [reason, setReason] = useState("");
@@ -71,7 +69,6 @@ export function RunWorkflow({
       });
       setReasonFor(null);
       setReason("");
-      router.refresh();
     });
 
   const allowed = availableActions(status).filter((a) => {

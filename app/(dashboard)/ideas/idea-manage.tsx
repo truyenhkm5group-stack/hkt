@@ -26,7 +26,6 @@ import { thuNhoAnh } from "@/lib/ideas/shrink-image";
 export function ThemAnh({ ideaId, dangCo }: { ideaId: string; dangCo: number }) {
   const [dangTai, setDangTai] = React.useState(false);
   const input = React.useRef<HTMLInputElement>(null);
-  const router = useRouter();
   const conLai = IDEA_MAX_IMAGES - dangCo;
 
   async function chon(files: FileList | null) {
@@ -43,7 +42,6 @@ export function ThemAnh({ ideaId, dangCo }: { ideaId: string; dangCo: number }) 
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(`Đã thêm ${r.added} ảnh`);
-        router.refresh();
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Không xử lý được ảnh");
@@ -67,7 +65,6 @@ export function ThemAnh({ ideaId, dangCo }: { ideaId: string; dangCo: number }) 
 /** Nút xoá một ảnh, đặt đè lên góc ảnh. Bấm nhầm thì thêm lại được, nên không hỏi lại. */
 export function XoaAnh({ imageId }: { imageId: string }) {
   const [dangXoa, setDangXoa] = React.useState(false);
-  const router = useRouter();
   return (
     <button
       type="button"
@@ -82,7 +79,6 @@ export function XoaAnh({ imageId }: { imageId: string }) {
         if ("error" in r) toast.error(r.error);
         else {
           toast.success("Đã xoá ảnh");
-          router.refresh();
         }
       }}
       className="absolute right-1 top-1 rounded-md bg-background/90 p-1 text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-rose-600 focus:opacity-100 group-hover:opacity-100"

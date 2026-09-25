@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -33,7 +32,6 @@ export function RunVerdict({
   const [moLoi, setMoLoi] = useState(false);
   const [ghiChu, setGhiChu] = useState("");
   const [doi, setDoi] = useState(false);
-  const router = useRouter();
 
   const gui = (v: ReviewVerdict, n?: string) =>
     start(async () => {
@@ -46,7 +44,6 @@ export function RunVerdict({
       setMoLoi(false);
       setDoi(false);
       setGhiChu("");
-      router.refresh();
     });
 
   const chuThichSua = laLuotSua ? (

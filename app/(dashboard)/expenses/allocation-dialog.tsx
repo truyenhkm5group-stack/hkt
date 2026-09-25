@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { CalendarRange, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -23,7 +22,6 @@ export function AllocationDialog({ id, description, amount }: { id: string; desc
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const save = () =>
     start(async () => {
@@ -32,7 +30,6 @@ export function AllocationDialog({ id, description, amount }: { id: string; desc
       else {
         toast.success("Đã khai kỳ hiệu lực — Báo cáo lợi nhuận sẽ phân bổ theo phần chồng lấn");
         setOpen(false);
-        router.refresh();
       }
     });
 

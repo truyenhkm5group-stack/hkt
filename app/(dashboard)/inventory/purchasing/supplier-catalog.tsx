@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +24,6 @@ const tach = (raw: string) =>
  * ra lại. Máy chủ từ chối mọi tên đã thuộc một xưởng khác (một cách gõ, một xưởng).
  */
 export function SupplierCatalog({ suppliers, unmatched, canWrite }: { suppliers: CatalogSupplier[]; unmatched: CatalogUnmatched[]; canWrite: boolean }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState({ name: "", aliases: "", phone: "", note: "" });
@@ -38,7 +36,6 @@ export function SupplierCatalog({ suppliers, unmatched, canWrite }: { suppliers:
       else {
         toast.success(okText);
         after?.();
-        router.refresh();
       }
     });
 

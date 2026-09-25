@@ -28,7 +28,6 @@ export function TransitionControl({ modelId, state, winnerFollowUp = null }: { m
   const [reason, setReason] = useState("");
   const [followUp, setFollowUp] = useState<WinnerFollowUp | null>(null);
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const kiem = to ? checkModelTransition(state, to) : null;
   const canLyDo = !!kiem && kiem.ok && kiem.needsReason;
@@ -44,9 +43,8 @@ export function TransitionControl({ modelId, state, winnerFollowUp = null }: { m
       }
       toast.success(`Đã khai: ${MODEL_STATE_LABELS[to]}`);
       setReason("");
-      // Giữ đề xuất ở trạng thái cục bộ: sau `refresh` trang không còn truyền nó (mẫu đã ở THẮNG).
+      // Giữ đề xuất ở trạng thái cục bộ: sau khi trang dựng lại, nó không còn được truyền xuống (mẫu đã ở THẮNG).
       setFollowUp(to === "WINNER" ? winnerFollowUp : null);
-      router.refresh();
     });
 
   const chuyenTiep = () =>
@@ -59,7 +57,6 @@ export function TransitionControl({ modelId, state, winnerFollowUp = null }: { m
       }
       toast.success(`Đã khai: ${MODEL_STATE_LABELS[followUp.to]}`);
       setFollowUp(null);
-      router.refresh();
     });
 
   return (

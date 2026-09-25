@@ -2,7 +2,6 @@
 
 import { CheckCircle2, Loader2, MessageSquare, PenLine, XCircle } from "lucide-react";
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,7 +21,6 @@ const QUYET_DINH: { value: Exclude<IdeaStatus, "NEW" | "REVIEWING">; label: stri
 export function FeedbackForm({ ideaId, canReview }: { ideaId: string; canReview: boolean }) {
   const [body, setBody] = useState("");
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const gui = (decision?: Exclude<IdeaStatus, "NEW" | "REVIEWING">) => {
     if (!body.trim()) {
@@ -37,7 +35,6 @@ export function FeedbackForm({ ideaId, canReview }: { ideaId: string; canReview:
       }
       toast.success(decision ? "Đã chốt và ghi nhận xét" : "Đã gửi nhận xét");
       setBody("");
-      router.refresh();
     });
   };
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Save, Settings2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -27,7 +26,6 @@ export function ProductOwnersForm({ config, products, marketers, pages, canWrite
   const [shares, setShares] = useState<Record<string, ProductShare>>(() => Object.fromEntries(products.map((p) => [p.id, shareFor(config, p.id)])));
   const [pct, setPct] = useState(config.ownerSharePct);
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const assigned = products.filter((p) => config.productOwners[p.id]).length;
   const pagesMapped = pages.filter((p) => config.pageMarketers[p.pageId]).length;
   const nameOf = (id: string) => marketers.find((m) => m.id === id)?.name ?? "?";
@@ -38,7 +36,6 @@ export function ProductOwnersForm({ config, products, marketers, pages, canWrite
       else {
         toast.success("Đã lưu người phụ trách mã hàng, % lợi nhuận và fanpage");
         setOpen(false);
-        router.refresh();
       }
     });
   const setShare = (pid: string, key: keyof ProductShare, v: string) => setShares((s) => ({ ...s, [pid]: { ...(s[pid] ?? shareFor(config, pid)), [key]: Math.min(100, Math.max(0, Number(v) || 0)) } }));

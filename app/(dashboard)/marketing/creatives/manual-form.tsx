@@ -2,7 +2,6 @@
 
 import { ImagePlus, Loader2, ShieldAlert, Upload, X } from "lucide-react";
 import { useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,7 +30,6 @@ export function ManualForm({ products, targetDay, deadlineLabel }: { products: P
   const [dangXuLyAnh, setDangXuLyAnh] = useState(false);
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
-  const router = useRouter();
 
   const chonAnh = async (list: FileList | null) => {
     const f = list?.[0];
@@ -78,7 +76,6 @@ export function ManualForm({ products, targetDay, deadlineLabel }: { products: P
       toast.success(`Đã thêm mẫu tự làm vào lô ${r.batchDay}`);
       for (const w of r.warnings) toast.warning(w);
       dong();
-      router.refresh();
     });
 
   return (

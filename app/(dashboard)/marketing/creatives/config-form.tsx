@@ -2,7 +2,6 @@
 
 import { AlertTriangle, Loader2, Plus, Save, Trash2, X } from "lucide-react";
 import { useMemo, useState, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { InfoHint } from "@/components/info-hint";
 import { Button } from "@/components/ui/button";
@@ -332,7 +331,6 @@ export function ConfigForm({ config, products, canManage }: { config: CreativeLo
   const [saved, setSaved] = useState<ClampNote[] | null>(null);
   const [serverProblems, setServerProblems] = useState<string[]>([]);
   const [pending, start] = useTransition();
-  const router = useRouter();
   const disabled = !canManage || pending;
 
   const payload = useMemo(() => toPayload(draft), [draft]);
@@ -356,7 +354,6 @@ export function ConfigForm({ config, products, canManage }: { config: CreativeLo
       // Hiện đúng thứ ĐÃ LƯU (bản đã kẹp), không giữ số người gõ trên màn hình.
       setDraft(toDraft(r.config));
       toast.success(r.clamped.length ? `Đã lưu — ${r.clamped.length} ô bị kẹp về trần của mã nguồn` : "Đã lưu cấu hình vòng mẫu");
-      router.refresh();
     });
 
   const nf = (f: ConfigNumericField, suffix?: string) => <NumberField field={f} draft={draft} bounds={bounds[f]} onChange={setNum(f)} disabled={disabled} suffix={suffix} />;

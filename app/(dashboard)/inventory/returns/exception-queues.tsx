@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, Ban, Link2, Loader2, PackageSearch, ScanLine } from "lucide-react";
 import { toast } from "sonner";
@@ -102,7 +101,6 @@ function ExceptionRow({ row, canWrite }: { row: HmtExceptionRow; canWrite: boole
   const [note, setNote] = useState("");
   const [variantId, setVariantId] = useState("");
   const [maKien, setMaKien] = useState("");
-  const router = useRouter();
   const allow = HMT_QUEUE[row.queue].allow;
 
   const chay = (fn: () => Promise<{ ok: true } | { error: string }>, ok: string) =>
@@ -113,7 +111,6 @@ function ExceptionRow({ row, canWrite }: { row: HmtExceptionRow; canWrite: boole
         return;
       }
       toast.success(ok);
-      router.refresh();
     });
 
   return (

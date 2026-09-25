@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -33,7 +32,6 @@ export function FinalizePeriodButton({ from, to, basis, label, totalSalary }: { 
   const [note, setNote] = useState("");
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
@@ -76,7 +74,6 @@ export function FinalizePeriodButton({ from, to, basis, label, totalSalary }: { 
                 }
                 toast.success(`Đã tính và chụp ảnh kỳ ${res.key}. Bước tiếp theo: chuyển soát rồi duyệt.`);
                 setOpen(false);
-                router.refresh();
               })
             }
           >

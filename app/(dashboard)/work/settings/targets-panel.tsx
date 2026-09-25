@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,7 +97,6 @@ export function TargetsPanel({
   const [note, setNote] = useState("");
   const [from, setFrom] = useState(() => todayVN());
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const spec = metricOf(metricKey);
   const phamVi = useMemo(() => scopesFor(metricKey), [metricKey]);
@@ -136,7 +134,6 @@ export function TargetsPanel({
       setWarningAt("");
       setCriticalAt("");
       setNote("");
-      router.refresh();
     });
 
   const xoa = (id: string) =>
@@ -147,7 +144,6 @@ export function TargetsPanel({
         return;
       }
       toast.success("Đã bỏ mục tiêu — chỉ số quay về hiện thực tế mà không kết luận đạt/không đạt");
-      router.refresh();
     });
 
   const nhanRef = scopeThat === "DEPARTMENT" ? "Phòng ban" : scopeThat === "POSITION" ? "Chức danh" : scopeThat === "PRODUCT" ? "Mã hàng" : "Cá nhân";

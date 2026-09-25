@@ -300,7 +300,6 @@ function CandidateFinder({
 // ───────────────────────── PHIẾU NHẬN KIỆN MẤT NHÃN ─────────────────────────
 
 function NhanKienSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  const router = useRouter();
   const [source, setSource] = React.useState<UnidentifiedSource>("NO_TRACKING_LABEL");
   const [variant, setVariant] = React.useState<VariantOption | null>(null);
   const [qty, setQty] = React.useState("1");
@@ -342,7 +341,6 @@ function NhanKienSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v
     toast.success(r.message, { duration: 9000 });
     reset();
     onOpenChange(false);
-    router.refresh();
   }
 
   return (

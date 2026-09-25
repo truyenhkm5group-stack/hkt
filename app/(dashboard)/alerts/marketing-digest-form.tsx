@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Eye, Plus, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,6 @@ export function MarketingDigestForm({ config, marketers }: { config: MarketingAl
   type Preview = { day: string; settledDay: string | null; blocks: { scope: string; title: string; lines: string[]; willSend: boolean; reason: string | null }[] };
   const [preview, setPreview] = useState<Preview | null>(null);
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const set = <K extends keyof MarketingAlertConfig>(key: K, value: MarketingAlertConfig[K]) => setForm((f) => ({ ...f, [key]: value }));
   const setRecipient = (i: number, patch: Partial<MarketingAlertConfig["recipients"][number]>) =>
@@ -48,7 +46,6 @@ export function MarketingDigestForm({ config, marketers }: { config: MarketingAl
       if ("error" in res) toast.error(res.error);
       else {
         toast.success("Đã lưu cấu hình bản tin marketing");
-        router.refresh();
       }
     });
 

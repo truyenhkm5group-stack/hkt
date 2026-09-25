@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { FileUp, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -49,7 +48,6 @@ export function BankImportTab({ canWrite, accounts }: { canWrite: boolean; accou
   const usable = accounts.filter((a) => a.status !== "DISABLED");
   const [accountId, setAccountId] = useState<string>(usable.length === 1 ? usable[0].id : "");
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   const clear = () => {
     setText("");
@@ -93,7 +91,6 @@ export function BankImportTab({ canWrite, accounts }: { canWrite: boolean; accou
       if (res.conflicts) toast.warning(`${formatNumber(res.conflicts)} dòng đã có trong sổ nhưng file nói KHÁC số tiền / tài khoản — đã GIỮ dòng cũ, không ghi đè. Xem chi tiết ở Nhật ký.`, { duration: 15000 });
       for (const w of res.warnings.filter((x) => !x.startsWith(`${res.conflicts} dòng`))) toast.warning(w, { duration: 12000 });
       clear();
-      router.refresh();
     });
 
   return (

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, PauseCircle, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -13,7 +12,6 @@ import { formatVND, vnShortStamp } from "@/lib/format";
 
 /** TẮT NGAY — người bấm là căn cứ, nhưng lời gọi vẫn đi qua đủ cổng (chốt cứng env, nấc COPILOT, nhóm của vòng). */
 export function PauseNowButton({ variantId, slot }: { variantId: string; slot: number }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const tat = () =>
@@ -25,7 +23,6 @@ export function PauseNowButton({ variantId, slot }: { variantId: string; slot: n
       }
       toast.success(r.detail);
       setOpen(false);
-      router.refresh();
     });
   return (
     <>
@@ -73,7 +70,6 @@ function Dong({ label, children, strong }: { label: string; children: React.Reac
  * nhận gửi lại chính các con số đó kèm phiếu, và máy chủ tính lại tất cả trước khi gọi Facebook.
  */
 export function ExtendButton({ variantId, slot }: { variantId: string; slot: number }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [p, setP] = useState<ExtensionProposal | null>(null);
   const [loading, startLoad] = useTransition();
@@ -100,7 +96,6 @@ export function ExtendButton({ variantId, slot }: { variantId: string; slot: num
       }
       toast.success(r.detail);
       setOpen(false);
-      router.refresh();
     });
 
   return (

@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { AlertTriangle, CopyX, ExternalLink, Loader2, RefreshCw, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -34,7 +33,6 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
   */
   const [dangChonMauMa, setDangChonMauMa] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const router = useRouter();
   const run = (id: string, fn: () => Promise<{ error?: string } & Record<string, unknown>>, okMsg?: (r: Record<string, unknown>) => string) => {
     setBusy(id);
     start(async () => {
@@ -43,7 +41,6 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
       if (r.error) toast.error(String(r.error));
       else {
         if (okMsg) toast.success(okMsg(r));
-        router.refresh();
       }
     });
   };
@@ -59,7 +56,6 @@ export function LandingTable({ rows, variants, canManage }: { rows: LandingRow[]
       }
       if (res.failed.length) toast.warning(`Đã gửi ${res.failed.length ? res.pushed : res.pushed} đơn · ${res.failed.length} đơn lỗi: ${res.failed[0]?.error ?? ""}`);
       else toast.success(`Đã tạo ${res.pushed} đơn nháp trên Pancake POS`);
-      router.refresh();
     });
 
   return (

@@ -51,7 +51,6 @@ function ObjectiveDialog({ period, departments }: { period: string; departments:
   const [description, setDescription] = useState("");
   const [level, setLevel] = useState<string>("COMPANY");
   const [department, setDepartment] = useState<string>("");
-  const router = useRouter();
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -102,7 +101,6 @@ function ObjectiveDialog({ period, departments }: { period: string; departments:
                 setOpen(false);
                 setTitle("");
                 setDescription("");
-                router.refresh();
               })
             }
           >
@@ -120,7 +118,6 @@ function ScorecardDialog({ period, departments }: { period: string; departments:
   const [scope, setScope] = useState<"COMPANY" | "DEPARTMENT">("COMPANY");
   const [department, setDepartment] = useState<string>(departments[0]?.code ?? "");
   const [useTemplate, setUseTemplate] = useState(true);
-  const router = useRouter();
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -169,7 +166,6 @@ function ScorecardDialog({ period, departments }: { period: string; departments:
                 if ("error" in r) { toast.error(r.error); return; }
                 toast.success("Đã dựng thẻ điểm");
                 setOpen(false);
-                router.refresh();
               })
             }
           >
@@ -197,7 +193,6 @@ function TemplateDialog({ period, departments }: { period: string; departments: 
   const [department, setDepartment] = useState<string>(departments[0]?.code ?? "SALES");
   const [templateKey, setTemplateKey] = useState<string>(templatesOf((departments[0]?.code ?? "SALES") as DepartmentCode)[0]?.key ?? OKR_TEMPLATES[0].key);
   const [targets, setTargets] = useState<Record<string, string>>({});
-  const router = useRouter();
 
   const danhSach = templatesOf(department as DepartmentCode);
   const tpl = danhSach.find((t) => t.key === templateKey) ?? danhSach[0] ?? null;
@@ -294,7 +289,6 @@ function TemplateDialog({ period, departments }: { period: string; departments: 
                 if ("error" in r) { toast.error(r.error); return; }
                 toast.success(`Đã tạo mục tiêu NHÁP với ${r.created} Key Result${r.skipped ? ` (bỏ qua ${r.skipped} KR chưa đặt đích)` : ""}`);
                 setOpen(false);
-                router.refresh();
               })
             }
           >

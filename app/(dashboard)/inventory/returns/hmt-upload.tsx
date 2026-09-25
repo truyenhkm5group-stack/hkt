@@ -103,7 +103,6 @@ export function HmtUpload({ current }: { current: { filename: string; sha256: st
                     if ("error" in r) toast.error(r.error);
                     else {
                       toast.success("Đã xoá tệp khỏi máy chủ · chứng cứ đối soát vẫn còn");
-                      router.refresh();
                     }
                   })
                 }

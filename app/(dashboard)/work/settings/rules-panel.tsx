@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -85,7 +84,6 @@ function HoursCell({ row, disabled, onSave, onReset }: { row: RuleRow; disabled:
 
 export function WorkRulesPanel({ rows }: { rows: RuleRow[] }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const run = (fn: () => Promise<{ ok: true } | { error: string }>, ok: string) =>
     start(async () => {
@@ -95,7 +93,6 @@ export function WorkRulesPanel({ rows }: { rows: RuleRow[] }) {
         return;
       }
       toast.success(ok);
-      router.refresh();
     });
 
   // Nhóm theo phòng ban đang hiệu lực: trưởng phòng mở màn hình này để xem PHẦN CỦA MÌNH trước.

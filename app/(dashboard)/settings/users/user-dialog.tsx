@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, UserPlus } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -41,7 +40,6 @@ function RoleSelect({ value, onChange }: { value: string; onChange: (v: string) 
 export function CreateUserDialog() {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const form = useForm<CreateUserInput>({ resolver: zodResolver(createUserSchema), defaultValues: { name: "", email: "", password: "", role: "VIEWER" } });
 
   useEffect(() => {
@@ -57,7 +55,6 @@ export function CreateUserDialog() {
       }
       toast.success(`Đã tạo tài khoản ${values.email}`);
       setOpen(false);
-      router.refresh();
     });
   };
 
@@ -145,7 +142,6 @@ export function CreateUserDialog() {
 /** Dialog sửa tên / vai trò / trạng thái (điều khiển từ ngoài) */
 export function EditUserDialog({ user, open, onOpenChange, isSelf }: { user: UserRow; open: boolean; onOpenChange: (open: boolean) => void; isSelf: boolean }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const form = useForm<UpdateUserInput>({ resolver: zodResolver(updateUserSchema), defaultValues: { id: user.id, name: user.name, role: user.role, active: user.active } });
 
   useEffect(() => {
@@ -161,7 +157,6 @@ export function EditUserDialog({ user, open, onOpenChange, isSelf }: { user: Use
       }
       toast.success("Đã cập nhật người dùng");
       onOpenChange(false);
-      router.refresh();
     });
   };
 

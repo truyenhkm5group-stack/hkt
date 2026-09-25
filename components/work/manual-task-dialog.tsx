@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -29,7 +28,6 @@ export function ManualTaskDialog({ members, defaultDepartment }: { members: { id
   const [assigneeId, setAssigneeId] = useState<string>("");
   const [priority, setPriority] = useState<string>("NORMAL");
   const [dueAt, setDueAt] = useState("");
-  const router = useRouter();
 
   const submit = () =>
     startTransition(async () => {
@@ -52,7 +50,6 @@ export function ManualTaskDialog({ members, defaultDepartment }: { members: { id
       setTitle("");
       setSummary("");
       setDueAt("");
-      router.refresh();
     });
 
   return (

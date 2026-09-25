@@ -1,7 +1,6 @@
 "use client";
 
 import { useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,14 +15,12 @@ import { reconcileAttribution } from "@/lib/actions/fanpage-attribution";
  */
 export function ReconcileButton({ disabled }: { disabled?: boolean }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const run = (dryRun: boolean) =>
     startTransition(async () => {
       const r = await reconcileAttribution({ dryRun });
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(r.message ?? "Đã đối soát", { duration: 8000 });
-        if (!dryRun) router.refresh();
       }
     });
   return (

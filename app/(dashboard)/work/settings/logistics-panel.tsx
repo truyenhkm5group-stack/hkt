@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,7 +34,6 @@ export type DwellRow = {
  */
 export function LogisticsRulesPanel({ rows, duplicate }: { rows: DwellRow[]; duplicate: { windowHours: number; enabled: boolean } }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const run = (fn: () => Promise<{ ok: true } | { error: string }>, ok: string) =>
     start(async () => {
@@ -45,7 +43,6 @@ export function LogisticsRulesPanel({ rows, duplicate }: { rows: DwellRow[]; dup
         return;
       }
       toast.success(ok);
-      router.refresh();
     });
 
   return (

@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ArrowUpRight, CheckCircle2, ClipboardPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,6 @@ import { cn } from "@/lib/utils";
 export function ActionBoard({ actions, periodLabel }: { actions: ReturnAction[]; periodLabel: string }) {
   const [pending, startTransition] = useTransition();
   const [daTao, setDaTao] = useState<Record<string, boolean>>({});
-  const router = useRouter();
 
   const taoViec = (a: ReturnAction) =>
     startTransition(async () => {
@@ -59,7 +57,6 @@ export function ActionBoard({ actions, periodLabel }: { actions: ReturnAction[];
       }
       toast.success("Đã tạo việc cho phòng — chưa gán người, trưởng phòng nhận rồi giao.");
       setDaTao((x) => ({ ...x, [a.key]: true }));
-      router.refresh();
     });
 
   if (!actions.length) {

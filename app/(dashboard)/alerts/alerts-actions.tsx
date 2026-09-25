@@ -14,7 +14,6 @@ import type { CaseStatus } from "@/lib/constants/action-queue";
 
 export function RunAlertsButton() {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <Button
       variant="outline"
@@ -26,7 +25,6 @@ export function RunAlertsButton() {
           if ("error" in r) toast.error(r.error);
           else {
             toast.success(`Đã quét: ${r.created} mới · ${r.resolved} tự đóng${r.reclassified ? ` · ${r.reclassified} phân loại lại` : ""} · ${r.open} đang mở${r.telegramError ? ` · Telegram lỗi: ${r.telegramError}` : ""}${r.larkError ? ` · Lark lỗi: ${r.larkError}` : ""}`);
-            router.refresh();
           }
         })
       }
@@ -38,7 +36,6 @@ export function RunAlertsButton() {
 
 export function MarkAllReadButton() {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <Button
       variant="ghost"
@@ -47,7 +44,6 @@ export function MarkAllReadButton() {
       onClick={() =>
         startTransition(async () => {
           await markNotificationsRead([]);
-          router.refresh();
         })
       }
     >
@@ -82,7 +78,6 @@ export function AcknowledgeButton({ id }: { id: string }) {
 /** Trả việc về hàng đợi chung (bỏ người nhận). */
 export function UnassignButton({ id }: { id: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <Button
       variant="ghost"
@@ -93,7 +88,6 @@ export function UnassignButton({ id }: { id: string }) {
         startTransition(async () => {
           const r = await assignCase(id, null);
           if ("error" in r) toast.error(r.error);
-          else router.refresh();
         })
       }
     >
@@ -104,7 +98,6 @@ export function UnassignButton({ id }: { id: string }) {
 
 export function ResolveButton({ id }: { id: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <Button
       variant="ghost"
@@ -115,7 +108,6 @@ export function ResolveButton({ id }: { id: string }) {
         startTransition(async () => {
           const r = await resolveNotification(id);
           if ("error" in r) toast.error(r.error);
-          else router.refresh();
         })
       }
     >
@@ -157,7 +149,6 @@ export function IgnoreButton({ id }: { id: string }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   if (!open) {
     return (
       <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setOpen(true)}>
@@ -185,7 +176,6 @@ export function IgnoreButton({ id }: { id: string }) {
             else {
               setOpen(false);
               setReason("");
-              router.refresh();
             }
           })
         }
@@ -202,7 +192,6 @@ export function IgnoreButton({ id }: { id: string }) {
 /** Bỏ đánh dấu "bỏ qua" — đưa việc trở lại hàng đợi. Lý do cũ vẫn nằm trong nhật ký. */
 export function UnignoreButton({ id }: { id: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <Button
       variant="ghost"
@@ -213,7 +202,6 @@ export function UnignoreButton({ id }: { id: string }) {
         startTransition(async () => {
           const r = await unignoreCase(id);
           if ("error" in r) toast.error(r.error);
-          else router.refresh();
         })
       }
     >
@@ -225,7 +213,6 @@ export function UnignoreButton({ id }: { id: string }) {
 /** GIAO VIỆC cho người khác — không chỉ tự nhận. Việc không có chủ là việc trôi. */
 export function AssignSelect({ id, users, current }: { id: string; users: { id: string; name: string }[]; current: string | null }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   if (!users.length) return null;
   return (
     <select
@@ -236,7 +223,6 @@ export function AssignSelect({ id, users, current }: { id: string; users: { id: 
         startTransition(async () => {
           const r = await assignCase(id, e.target.value || null);
           if ("error" in r) toast.error(r.error);
-          else router.refresh();
         })
       }
     >
