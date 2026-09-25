@@ -43,7 +43,7 @@ M1 nhập lại đi thẳng từ chưa quyết · M2 huỷ không bắt buộc l
 
 - **Agent D**: `receiptDeleteBlockers` (lib/inventory/receipt-delete.ts) chưa biết `return_dispositions.stock_receipt_id`. FK là RESTRICT nên phiếu nhập lại sau sửa KHÔNG xoá được, nhưng lỗi hiện ra là lỗi CSDL thô (và nhật ký `STOCK_RECEIPT_DELETE` đã ghi trước lượt xoá hỏng). Đề nghị thêm một vế chặn có thông điệp.
 - **Agent D**: `getModelStockStates().damaged` vẫn cộng mọi món kết luận hỏng — không trừ phần đã nhập lại / huỷ / trả xưởng. Nếu muốn "hỏng còn trên kệ", đọc `getModelReturnDispositions`.
-- **Agent G**: yêu cầu duyệt huỷ gửi `action: "return.disposition_write_off"`, `entity: "RETURN_DISPOSITION"`, `entityId: <subject_key>`, `payload: { subjectKey, qty, variantId, note, valueEstimate, costBasis }` — chưa có đường "thực hiện lại sau khi duyệt"; hôm nay người làm bấm lại sau khi được duyệt.
+- **Agent G**: yêu cầu duyệt huỷ gửi `action: "return.disposition_write_off"`, `entity: "RETURN_DISPOSITION"`, `entityId: <subject_key>`, `payload: { subjectKey, qty, variantId, note, valueEstimate, costBasis }` — chưa có đường "thực hiện lại sau khi duyệt". Hệ quả thật: khi chủ shop BẬT cưỡng chế nhóm này, huỷ ≥ 1.000.000 ₫ hoặc chưa biết giá vốn sẽ bị CHẶN hẳn (bấm lại chỉ sinh thêm một yêu cầu duyệt), cho tới khi G dựng đường tiêu thụ yêu cầu đã duyệt. Khi TẮT (mặc định) thì chạy và để vết `approval.skip:*`.
 - Hàng hoàn **mất nhãn** (`return_unidentified`) chưa có kết cục trong sổ này (ngoài phạm vi: nó có vòng đời riêng).
 - Hạn xử lý của `RETURN_DISPOSITION` để `null` — chủ shop đặt ở `/work/settings` nếu muốn.
 - Chưa đo production (không có quyền). Sau deploy, mọi món không tái nhập đã kiểm từ trước hiện là "Chưa quyết" (không backfill) — số lượng thật sẽ lộ ra ở tiêu đề khối.
