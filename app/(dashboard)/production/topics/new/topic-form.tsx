@@ -22,7 +22,17 @@ const soHoacNull = (s: string) => (s.trim() ? Math.round(Number(s.replace(/[^\d]
  * Mở topic hỏi giá xưởng. Ô nào bỏ trống là CHƯA ĐẶT (in "—"), không phải 0. Số đơn / chi quảng cáo lúc
  * mở topic do MÁY CHỦ chụp lại — form không gửi con số nào như vậy.
  */
-export function TopicForm({ models, fixedModelId, suppliers }: { models: { id: string; code: string; name: string }[]; fixedModelId: string | null; suppliers: { id: string; name: string }[] }) {
+export type TopicModelOption = {
+  id: string;
+  code: string;
+  name: string;
+  /** Trạng thái khai + tín hiệu mẫu (nhãn, không số) — để người chọn thấy mẫu nào đang Triển vọng. */
+  hint?: string;
+  /** Câu nhắc "mở SỚM / vòng đời đi theo" (`topicOpenNotice`, Agent T). */
+  notice?: string | null;
+};
+
+export function TopicForm({ models, fixedModelId, fixedNotice = null, suppliers }: { models: TopicModelOption[]; fixedModelId: string | null; fixedNotice?: string | null; suppliers: { id: string; name: string }[] }) {
   const [modelId, setModelId] = useState(fixedModelId ?? "");
   const [title, setTitle] = useState("");
   const [supplierId, setSupplierId] = useState("");
@@ -37,6 +47,7 @@ export function TopicForm({ models, fixedModelId, suppliers }: { models: { id: s
   const [firstMessage, setFirstMessage] = useState("");
   const [pending, start] = useNavTransition();
   const router = useRouter();
+  const notice = fixedModelId ? fixedNotice : (models.find((m) => m.id === modelId)?.notice ?? null);
 
   const luu = () =>
     start(async () => {
@@ -75,11 +86,13 @@ export function TopicForm({ models, fixedModelId, suppliers }: { models: { id: s
               <option key={m.id} value={m.id}>
                 {m.code}
                 {m.name ? ` · ${m.name}` : ""}
+                {m.hint ? ` — ${m.hint}` : ""}
               </option>
             ))}
           </select>
         </div>
       )}
+      {notice ? <p className="rounded-md border border-sky-300/60 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 sm:col-span-2">{notice}</p> : null}
       <div className="space-y-1 sm:col-span-2">
         <Label>Tiêu đề</Label>
         <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Hỏi giá may 500 áo Q001 vải đũi" />

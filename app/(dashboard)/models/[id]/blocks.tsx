@@ -25,6 +25,7 @@ import {
   type ModelSuggestion,
 } from "@/lib/constants/model-360";
 import type { ModelState } from "@/lib/constants/model-lifecycle";
+import { winnerFollowUp } from "@/lib/constants/early-topic";
 import { MODEL_SIGNAL_HINT, MODEL_SIGNAL_LABEL, MODEL_SIGNAL_TONE, SIGNAL_SOURCE_LABEL, SOURCE_VOTE_LABEL } from "@/lib/constants/model-signal";
 import { formatDateTime, formatNumber, formatPercent, formatVND } from "@/lib/format";
 import { getModelAdsSummary, getModelCreativeSummary, NO_VERDICT } from "@/lib/queries/model-ads";
@@ -65,6 +66,12 @@ export type BlockCtx = {
 
 /** Tín hiệu đọc MỘT lần cho mỗi lượt dựng trang (đầu trang + khối tín hiệu + khối đề xuất). */
 const signalOnce = cache((modelId: string, range: Period) => loadSource("tín hiệu mẫu", () => getModelSignal(modelId, range)));
+
+/**
+ * Tóm tắt sản xuất (Agent C) đọc MỘT lần cho mỗi lượt dựng trang — khối Đề xuất và ô đổi trạng thái
+ * (lượt chuyển tiếp sau khi khai THẮNG — Agent T) dùng chung. Người gọi tự kiểm quyền khối.
+ */
+export const productionOnce = cache((modelId: string) => loadSource("sản xuất (getModelProductionSummary)", () => getModelProductionSummary(modelId)));
 
 // ─────────────────────────── MẢNH GIAO DIỆN DÙNG CHUNG ───────────────────────────
 
@@ -196,7 +203,7 @@ export async function SuggestionsBlock({ ctx }: { ctx: BlockCtx }) {
     signalOnce(ctx.modelId, ctx.range),
     pid && ctx.allowed.ADS ? loadSource("quảng cáo", () => getModelAdsSummary(pid, ctx.range)) : Promise.resolve(null),
     pid && ctx.allowed.INVENTORY ? loadSource("quyết định tồn", () => getModelInventoryDecisions(pid)) : Promise.resolve(null),
-    ctx.allowed.PRODUCTION ? loadSource("sản xuất", () => getModelProductionSummary(ctx.modelId)) : Promise.resolve(null),
+    ctx.allowed.PRODUCTION ? productionOnce(ctx.modelId) : Promise.resolve(null),
   ]);
   const failed = [sig, ads, inv, prod].filter((x): x is Extract<Loaded<unknown>, { ok: false }> => !!x && !x.ok);
   const list: ModelSuggestion[] = deriveModelSuggestions({
@@ -210,13 +217,13 @@ export async function SuggestionsBlock({ ctx }: { ctx: BlockCtx }) {
     inventory: inv && inv.ok ? { rows: inv.data.rows, dataGate: inv.data.dataGate.state } : null,
     creativeHref: pid ? `/marketing/creatives?tab=thu-vien&mau=${encodeURIComponent(pid)}` : null,
     periodQuery: ctx.periodQuery,
-    production: prod && prod.ok && prod.data ? { openTopics: prod.data.openTopics } : null,
+    production: prod && prod.ok && prod.data ? { openTopics: prod.data.openTopics, winnerFollowUp: winnerFollowUp(prod.data) } : null,
     canCreateTopic: ctx.canCreateTopic,
   });
   return (
     <SectionCard
       title="Đề xuất"
-      hint="Chỉ dựng từ quyết định ĐÃ CÓ: bảng quyết định quảng cáo (Tăng ngân sách / Cắt), bộ máy quyết định tồn (đặt thêm — số đã trừ hàng đặt xưởng; chôn vốn / nên xả), tín hiệu mẫu THẮNG khi vòng đời chưa tới bước trao đổi sản xuất. Không có quyết định thì không có đề xuất. Mọi đề xuất là để NGƯỜI bấm — không có gì tự áp."
+      hint="Chỉ dựng từ quyết định ĐÃ CÓ: bảng quyết định quảng cáo (Tăng ngân sách / Cắt), bộ máy quyết định tồn (đặt thêm — số đã trừ hàng đặt xưởng; chôn vốn / nên xả), tín hiệu mẫu THẮNG khi vòng đời chưa tới bước trao đổi sản xuất; tín hiệu TRIỂN VỌNG ⇒ mở topic sản xuất SỚM, chạy song song với test quảng cáo, vòng đời không đổi (quy tắc chủ shop 25/09/2026); mẫu đã khai THẮNG mà sản xuất đi trước ⇒ chuyển vòng đời tới đúng chỗ sản xuất đang đứng. Không có quyết định thì không có đề xuất. Mọi đề xuất là để NGƯỜI bấm — không có gì tự áp."
       actions={failed.length ? <DataWarnings tone="danger" items={failed.map((f) => `${sourceFailedText(f)}: ${f.error}`)} /> : null}
     >
       {list.length ? (

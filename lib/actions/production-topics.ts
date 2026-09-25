@@ -10,6 +10,8 @@ import { buildTopicEvidenceSnapshot, TOPIC_MESSAGE_KINDS, TOPIC_STATUSES } from 
 import { describeFollow } from "@/lib/production/lifecycle";
 import { addTopicMessageCore, createTopicCore, setTopicStatusCore } from "@/lib/production/topics";
 import { getModel, getModelEvidence } from "@/lib/queries/models";
+import { buildTopicOpenContext } from "@/lib/constants/early-topic";
+import { getModelSignal } from "@/lib/queries/model-signal";
 
 /**
  * ═══════════ SERVER ACTION: TOPIC HỎI GIÁ / BÀN PHƯƠNG ÁN ═══════════
@@ -66,8 +68,20 @@ export async function createProductionTopic(input: unknown): Promise<Result<{ to
   const d = parsed.data;
   const model = await getModel(d.modelId);
   if (!model) return { error: "Không tìm thấy mẫu trong sổ" };
-  // ẢNH CHỤP chứng cứ lúc mở topic — MÁY CHỦ đọc, không nhận số từ trình duyệt.
-  const evidence = buildTopicEvidenceSnapshot(await getModelEvidence(model), model.product?.id ?? null, new Date());
+  // ẢNH CHỤP chứng cứ lúc mở topic — MÁY CHỦ đọc, không nhận số từ trình duyệt. Kèm bối cảnh (Agent T):
+  // tín hiệu mẫu + trạng thái khai lúc mở, để trang topic nói được topic này mở SỚM (mẫu chưa thắng) hay
+  // không. Tín hiệu đọc hỏng ⇒ `signalAtOpen = null` kèm câu lỗi — KHÔNG chặn việc mở topic.
+  const [ev, sig] = await Promise.all([
+    getModelEvidence(model),
+    getModelSignal(model.id).then(
+      (r) => ({ ok: true as const, r }),
+      (e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }),
+    ),
+  ]);
+  const evidence = {
+    ...buildTopicEvidenceSnapshot(ev, model.product?.id ?? null, new Date()),
+    ...buildTopicOpenContext(sig.ok ? sig.r : null, model.state, sig.ok ? null : `Không đọc được tín hiệu mẫu lúc mở topic: ${sig.error}`),
+  };
   const db = await getDb();
   const r = await createTopicCore(db, { modelId: d.modelId, title: d.title, requirements: d.requirements, supplierId: d.supplierId, evidence, firstMessage: d.firstMessage, actor: actorOf(user) });
   if ("error" in r) return r;

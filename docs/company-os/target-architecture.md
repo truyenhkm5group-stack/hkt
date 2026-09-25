@@ -110,6 +110,16 @@ IDEA → CREATIVE → ADS_TESTING ─┬─▶ WINNER → PRODUCTION_DISCUSSION 
 - Lùi bước / nhảy cóc: được, nhưng BẮT BUỘC lý do. Mọi lượt chuyển là một dòng lịch sử append-only.
 - `DISCONTINUED` không có lối ra trừ khi người khai lại có lý do.
 - Bảng cạnh cụ thể nằm trong `lib/constants/model-lifecycle.ts` (hợp đồng: `shared-contracts.md`).
+- **Topic sản xuất mở SỚM là LUỒNG SONG SONG, không phải cú nhảy vòng đời** (quy tắc chủ shop 25/09/2026,
+  nguyên văn: *"Phần topic sản xuất thì có thể tạo topic trao đổi sản xuất cho những mẫu có chỉ số tốt mà
+  chưa win (tiềm năng sẽ win và lên mã), ko phải chỉ cho những mẫu đã win."*). "Chỉ số tốt mà chưa win" =
+  tín hiệu TRIỂN VỌNG của bảng gộp có sẵn (Q10) — không ngưỡng mới. Topic mở trên mẫu còn trước THẮNG
+  (Ý tưởng / Creative / Test quảng cáo, hoặc chưa khai + TRIỂN VỌNG — kể cả thiết kế TK chưa có mã Pancake)
+  KHÔNG kéo vòng đời sang Bàn sản xuất: bộ đi theo của C chỉ đi CẠNH TIẾN, nên mẫu vẫn đứng ở "Test quảng
+  cáo" và lượt khai THẮNG vẫn ghi được. Khi NGƯỜI khai THẮNG mà sản xuất đã đi trước (topic, giá thành, mẫu
+  thử, bản duyệt, lệnh trỏ bản duyệt), máy ĐỀ XUẤT một lượt chuyển tiếp tới đúng chỗ sản xuất đang đứng, lý
+  do điền sẵn "Sản xuất đã đi trước lúc mẫu thắng: …" — người bấm, qua `transitionModel`
+  (`lib/constants/early-topic.ts::winnerFollowUp`). Mẫu đã ≥ THẮNG giữ nguyên tự động hoá cạnh tiến của C.
 
 ## 4. Dòng chảy dữ liệu theo quy trình 13 bước của chủ shop
 
@@ -174,6 +184,6 @@ bộ chống đổ tin có sẵn (một tin mỗi phòng mỗi ngày — luật 
 | Stock ledger với ORDER_RESERVATION / SHIPMENT_OUT | giữ luật 10: đã chốt/đã xuất là DẪN XUẤT từ đơn + vận đơn, sổ chỉ ghi phiếu người lập | luật 10, 70 |
 | Winner detection "có ngưỡng chỉnh được" | gộp phán quyết có sẵn; không đặt ngưỡng mặc định mới | luật 27, 38 |
 | PO BẮT BUỘC tham chiếu bản duyệt | có cờ, mặc định chỉ cảnh báo; bật là HUMAN GATE | Q8, AGENTS §7 |
-| Tự tạo Production Topic khi mẫu thắng | máy ĐỀ XUẤT (việc trên `/work`), người bấm tạo | luật 23 (mẫu không tự kích hoạt), Q9 |
+| Tự tạo Production Topic khi mẫu thắng | máy ĐỀ XUẤT topic cho mẫu THẮNG **và mẫu TRIỂN VỌNG (mở sớm, luồng song song — vòng đời không đổi)** trên trang 360 và buồng lái (`MODEL_SCALE` · `MODEL_EARLY_TOPIC`), người bấm tạo. Quy tắc chủ shop 25/09/2026: *"có thể tạo topic trao đổi sản xuất cho những mẫu có chỉ số tốt mà chưa win (tiềm năng sẽ win và lên mã), ko phải chỉ cho những mẫu đã win"* | luật 23 (mẫu không tự kích hoạt), Q3, Q9, Q10 |
 | Video creative | DEFER | chưa có nhà cung cấp video trong kho |
 | MRP / BOM vật tư | DEFER | yêu cầu tự ghi "không cần phase đầu" |

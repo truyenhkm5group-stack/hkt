@@ -355,9 +355,15 @@ export function testCompanyOsCockpitPure() {
   const ev = DOMAIN_EVENT_BY_NAME["recommendation.decided"];
   assert.equal(ev.status, "LIVE");
   assert.ok(readFileSync(ev.emitter!, "utf8").includes('"recommendation.decided"'), "tệp khai phát phải thật sự phát tên đó");
-  const mig = readFileSync("drizzle/0139_company_os_cockpit.sql", "utf8");
+  // CHECK loại có hiệu lực = bản của migration MUỘN NHẤT có khai nó (0139 dựng, 0140 của Agent T mở rộng
+  // cho MODEL_EARLY_TOPIC). Thêm loại thì thêm migration mới — bài kiểm tự đọc bản cuối, không gõ tên tệp.
+  const tepCheck = readdirSync("drizzle")
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && readFileSync(path.join("drizzle", f), "utf8").includes("recommendation_decisions_kind_check"))
+    .sort();
+  assert.ok(tepCheck.includes("0139_company_os_cockpit.sql"), "0139 dựng CHECK loại");
+  const mig = readFileSync(path.join("drizzle", tepCheck[tepCheck.length - 1]), "utf8");
   const khaiCheck = /"kind" IN \(([^)]*)\)/.exec(mig)?.[1].split(",").map((x) => x.trim().replace(/'/g, "")) ?? [];
-  assert.deepEqual(khaiCheck, [...OWNER_DECISION_KINDS], "CHECK loại của migration phải bằng OWNER_DECISION_KINDS");
+  assert.deepEqual(khaiCheck, [...OWNER_DECISION_KINDS], "CHECK loại của migration muộn nhất phải bằng OWNER_DECISION_KINDS");
   const trang = readFileSync("app/(dashboard)/page.tsx", "utf8");
   assert.ok(trang.indexOf("<OwnerDecisionsSection") > 0 && trang.indexOf("<OwnerDecisionsSection") < trang.indexOf("<TopActions"), "khối Cần anh quyết đứng TRÊN Việc cần làm hôm nay");
   assert.match(trang, /<Suspense fallback=\{<Skeleton[^}]*\}>\s*<OwnerDecisionsSection \/>\s*<\/Suspense>/, "khối Cần anh quyết đứng sau Suspense riêng — không chặn các thẻ tiền");

@@ -66,6 +66,14 @@ CHECK: `actor_kind = 'USER'` ⇒ `actor_id IS NOT NULL`.
   `runModelRegistrySync`.
 - Route: `/models` (danh sách) · `/models/[id]` (trang 360). Khai trong `lib/constants/department-modules.ts`.
 
+> **Ghi chú (Agent T · quy tắc chủ shop 25/09/2026): topic sản xuất mở SỚM là luồng song song.** Topic mở
+> được cho MỌI mẫu trong sổ; mẫu TRIỂN VỌNG (chưa thắng) được máy đề xuất mở sớm. Mở topic trên mẫu còn
+> trước THẮNG KHÔNG đổi `lifecycle_state` (cạnh tiến ra khỏi `ADS_TESTING` vẫn chỉ là `WINNER`/`LOSER`).
+> Ảnh chụp lúc mở (`production_topics.evidence_snapshot`, jsonb — không cột mới) thêm `signalAtOpen`
+> (`{ signal, decidedBy, reasons: [{source, vote, verdict}] }` — chỉ NHÃN) · `signalErrorAtOpen` ·
+> `lifecycleAtOpen`; topic cũ không mang chúng (không backfill). Luật đọc và đề xuất chuyển tiếp sau khi
+> khai THẮNG: `lib/constants/early-topic.ts` (`topicOpeningMode`, `isEarlyOpen`, `winnerFollowUp`).
+
 ## 2. Sổ sự kiện (Agent A · cùng migration 0132)
 
 ### Bảng `domain_events` (APPEND-ONLY)
@@ -259,7 +267,8 @@ Mọi hàm trên CHỈ gọi truy vấn có sẵn của miền mình — không 
 
 ## 7. Số migration đã dùng (theo THỨ TỰ GỘP, không theo thứ tự cấp)
 
-`0132` A · `0133` D · `0134` G · `0135` F · `0136` C · `0137` E · `0138` A2 · `0139` H. B không có migration.
+`0132` A · `0133` D · `0134` G · `0135` F · `0136` C · `0137` E · `0138` A2 · `0139` H · `0140` T (CHECK loại
+của `recommendation_decisions` mở rộng cho `MODEL_EARLY_TOPIC`; `when` 1790006243217). B không có migration.
 `0131` là của sổ ngân hàng (PR #273, phiên khác) — nó vào `main` trước, nên cả chuỗi dời lên một số và
 mốc `when` của sổ mẫu dời lên sau mốc của nó (hai bên từng trùng đúng một mốc).
 Drizzle bỏ qua VĨNH VIỄN migration có `when` nhỏ hơn migration đã áp, nên số hiệu và `when` phải tăng
