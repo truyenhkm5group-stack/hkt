@@ -213,6 +213,7 @@ import { testCashflow } from "./cashflow.test";
 import { testPurchasing } from "./purchasing.test";
 import { testSuppliersPure, testSuppliersQueries } from "./suppliers.test";
 import { testWorkshopLedgerPure, testWorkshopLedgerQueries } from "./workshop-ledger.test";
+import { testWorkshopSheetImportDb, testWorkshopSheetImportPure } from "./workshop-sheet-import.test";
 import { testMarketerPricePure, testMarketerPriceQueries } from "./marketer-price.test";
 import { testCrm } from "./crm.test";
 import { testScenario } from "./scenario.test";
@@ -1858,6 +1859,8 @@ async function main() {
   await testSuppliersQueries(db);
   testWorkshopLedgerPure();
   await testWorkshopLedgerQueries(db);
+  testWorkshopSheetImportPure();
+  await testWorkshopSheetImportDb(db);
   testMarketerPricePure();
   await testMarketerPriceQueries(db);
   await testCrm(db);
