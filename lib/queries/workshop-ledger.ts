@@ -355,7 +355,7 @@ export type WorkshopFormOptions = Awaited<ReturnType<typeof workshopFormOptions>
  */
 export async function openBatchQtyByVariantFromLedger() {
   const db = await getDb();
-  const [batches, deliveries] = await Promise.all([
+  const [batches, deliveries, linked] = await Promise.all([
     db
       .select({
         id: schema.productionBatches.id,
@@ -372,11 +372,40 @@ export async function openBatchQtyByVariantFromLedger() {
       .from(schema.productionDeliveries)
       .innerJoin(schema.productionBatches, eq(schema.productionBatches.id, schema.productionDeliveries.batchId))
       .where(eq(schema.productionBatches.status, "OPEN")),
+    // Phiếu NHẬP HÀNG nối về lô (0132) — chứng từ TỒN, trừ khỏi "đang sản xuất" qua `openQtyAfterReceived`.
+    linkedReceiptQty("batch"),
   ]);
   return openBatchQtyByVariant(
     batches.map((b) => ({ ...b, cells: b.cells ?? {}, dueDate: b.dueDate ? new Date(b.dueDate) : null })),
     deliveries.map((d) => ({ ...d, cells: d.cells ?? {} })),
+    linked,
   );
+}
+
+/**
+ * Số cái đã NHẬP KHO qua phiếu `RECEIPT` nối về một lệnh SX (`order`) hoặc một lô xưởng (`batch`),
+ * theo mẫu mã: `mã lệnh/lô → (mẫu mã → số cái)`. Chỉ phiếu Nhập hàng — tái nhập hoàn / xuất tay /
+ * điều chỉnh không phải hàng của xưởng. Phiếu không nối (mọi phiếu cũ) không góp gì.
+ */
+export async function linkedReceiptQty(by: "order" | "batch"): Promise<Map<string, Map<string, number>>> {
+  const db = await getDb();
+  const r = schema.stockReceipts;
+  const ri = schema.stockReceiptItems;
+  const key = by === "order" ? r.productionOrderId : r.productionBatchId;
+  const rows = await db
+    .select({ linkId: key, variantId: ri.variantId, qty: sql<number>`coalesce(sum(${ri.quantity}), 0)` })
+    .from(ri)
+    .innerJoin(r, eq(r.id, ri.receiptId))
+    .where(sql`${r.kind} = 'RECEIPT' and ${key} is not null`)
+    .groupBy(key, ri.variantId);
+  const out = new Map<string, Map<string, number>>();
+  for (const row of rows) {
+    if (!row.linkId) continue;
+    const m = out.get(row.linkId) ?? new Map<string, number>();
+    m.set(row.variantId, (m.get(row.variantId) ?? 0) + Number(row.qty));
+    out.set(row.linkId, m);
+  }
+  return out;
 }
 
 /**

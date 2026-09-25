@@ -22,6 +22,29 @@ Nhánh `claude/cos-d-inventory` (từ `origin/main` 5a3a7ee6) · migration `0133
 - `damaged`: tổng `actual_qty` của `return_inspection_items` mang kết luận trong `DAMAGED_ITEM_CONDITIONS`. Mẫu mã đã có hàng hoàn quay về mà chưa có dòng kiểm từng món nào ⇒ `null`; chưa có kiện nào quay về ⇒ `0` thật. Kết luận CẢ KIỆN (`return_inspections.unsellable_qty`) không có mẫu mã nên KHÔNG quy vào đây.
 - Tổng theo mẫu: tồn/khả dụng chỉ cộng dòng dương của mẫu mã đã biết tồn (`splitSignedStock`), `null` khi không mẫu mã nào biết tồn; `coverage` nói bao nhiêu mẫu mã đứng sau con số.
 
+### Sửa sau bàn giao — B1 (lỗi QA tìm ra)
+
+`openPoQtyByVariant()` từng đếm lệnh `SENT` đủ số, bỏ qua phiếu `RECEIPT` nối lệnh qua cột 0132 ⇒ cùng
+một món nằm ở cả tồn thực tế lẫn đang sản xuất cho tới khi có người bấm "Đã nhận". Nay:
+
+- `openQtyAfterReceived(planned, delivered, received)` (lib/constants/workshop-ledger.ts) — MỘT phép
+  trừ: `max(0, planned − max(delivered, received))` khi có phiếu nối; không phiếu nối ⇒ đúng
+  `planned − delivered` như cũ (kể cả đợt trả âm). Đã trả và đã nhập có thể là CÙNG món nên lấy số lớn
+  hơn, không cộng.
+- Lệnh SX: trừ theo từng mẫu mã (phép ghép "màu|size" có sẵn); `units` và `capital` chỉ còn phần chưa
+  về. Ô không ghép được mẫu mã không bị trừ (không biết trừ gì).
+- Lô xưởng: `openBatchQtyByVariant(batches, deliveries, receivedByBatch?)` trừ phiếu nối lô; ngữ nghĩa
+  đợt xưởng trả không đổi. `linkedReceiptQty("order" | "batch")` ở lib/queries/workshop-ledger.ts đọc số.
+- Mọi nơi đọc (kế hoạch/thiếu hàng qua `suggestedNetOfOpenPo`, quyết định vốn tồn, trang 360) đi qua
+  hàm này — không nơi nào tự trừ.
+- Kiểm thử: `tests/company-os-inventory.test.ts` (phần thuần + khối CSDL "4b. B1": không phiếu nối ⇒ số
+  y như trước; nhập một phần; phiếu không nối / phiếu tái nhập hoàn không trừ; lệnh nhập vượt ⇒ 0) và
+  bước 5 của `tests/company-os-e2e-lifecycle.test.ts`. Đột biến 6/6 bị bắt: PO không trừ phiếu · lô
+  không trừ phiếu · cộng thay vì lấy số lớn hơn · kẹp đợt trả âm về 0 · đếm cả phiếu tái nhập · `units`
+  không trừ.
+- Chỗ hở còn lại: phiếu chỉ nối LỆNH mà lệnh ấy đã có LÔ nối vào (lệnh bị bỏ, lô thay) thì không trừ
+  vào lô — lô chỉ nhận phiếu nối chính nó.
+
 ## 3. Lệch so với đề bài — và vì sao
 
 1. **Trang chủ KHÔNG in tổng ON_HAND ở đâu cả.** `stockRisk.states` có trong `getDashboardData` nhưng không màn hình nào vẽ nó; trang chủ chỉ dùng `atRisk`. Nên số "mẫu âm sổ" đặt ở dòng chân khối "Việc cần làm hôm nay" (cạnh "mẫu mã cần sản xuất gấp"), trỏ `/inventory/planning`.

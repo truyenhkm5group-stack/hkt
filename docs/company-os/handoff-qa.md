@@ -55,7 +55,7 @@ webhook chỉ cộng số lần quan sát của mã đã có, không có dòng m
 | 2 | Creative nối mẩu QC; chi 200.000 ₫ hạt mẩu; O1 qua `ad_id`, O2 qua bài viết ⇒ creative đếm 2 đơn (1 qua bài), chi 200.000, CPO 100.000; `getModelAdsSummary` OK, chi 200.000, 2 đơn, CPO 100.000 | PASS |
 | 3 | WINNER (người) → topic ⇒ PRODUCTION_DISCUSSION (SYSTEM, trỏ `production_topic.created`); 6 lượt trao đổi; giá V1 nháp 115.000 / V2 chốt 120.000 (V1 còn, V2 sửa bị chặn, LEADER không chốt được); mẫu V1 yêu cầu sửa (ghi chú bắt buộc), V2 duyệt bởi MANAGER ⇒ bản thiết kế trỏ giá CHỐT; lịch sử 12 bước liền mạch (USER khai · SYSTEM trỏ sự kiện gây ra); sổ sự kiện đếm đúng từng tên (40 dòng) dù đã phát lại / bấm hai lần / lưu lại / đồng bộ lại | PASS |
 | 4 | Lệnh SX trỏ bản duyệt; gợi ý máy tính ở máy chủ, lệch ⇒ lý do bắt buộc, `suggested_cells` + `override_reason` lưu; cờ tắt = cảnh báo, cờ bật = lệnh chưa trỏ bản duyệt bị chặn ở DRAFT → SENT | PASS (xem G1) |
-| 5 | Phiếu RECEIPT nối lệnh ⇒ tồn thực tế 20/10, `stockKnown`, khả dụng trừ đã chốt; tóm tắt SX thấy 30/30 đã nhận | PASS · **CHƯA ĐẠT một vế** (B1) |
+| 5 | Phiếu RECEIPT nối lệnh ⇒ tồn thực tế 20/10, `stockKnown`, khả dụng trừ đã chốt; tóm tắt SX thấy 30/30 đã nhận | PASS (B1 đã sửa: đang sản xuất = 0 ngay sau phiếu nối lệnh, khẳng định chính xác) |
 | 6 | Webhook VTP: Pancake "đã gửi" KHÔNG trừ tồn; lấy hàng trừ đúng số rời kho; O1 501 + bảng kê 350.000 ⇒ DELIVERED/DELIVERED (trước bảng kê: DELIVERED/UNVERIFIED); O2 505 → 504 ⇒ RETURNED; O3 ⇒ AWAITING_PICKUP; hàng hoàn chưa vào tồn; creative thấy O1 giao · O2 hoàn | PASS |
 | 7 | Về kho (chờ kiểm M1 · L2) → kiểm từng món: M đủ ⇒ phiếu RETURN +1; L hỏng 2 ⇒ REWORK → nhập lại 1 (đúng một phiếu, gửi lại cùng khoá không nhân đôi) + huỷ 1 qua cổng duyệt THẬT (cưỡng chế bật, 120.000 ₫ dưới ngưỡng ⇒ `approval.skip`); tồn 28, hỏng 0; xoá phiếu nhập lại sau sửa bị chặn có thông điệp, 0 dòng nhật ký; tóm tắt kết cục của mẫu khớp | PASS |
 | 8 | `getModelEconomics`: 12 dòng Ước tính cạnh Thực đạt; thực đạt 3 đơn, DT giao 350.000 (đúng đơn DELIVERED theo `ORDER_OUTCOME`), GTC 50%, chi 200.000; CPO hoà vốn = `maxAdCostPerOrder` trên cùng đầu vào; LN ròng thực đạt `null` kèm lý do | PASS |
@@ -79,15 +79,18 @@ webhook chỉ cộng số lần quan sát của mã đã có, không có dòng m
 
 ### Còn mở
 
-- **B1 · "Đang sản xuất" đếm trùng hàng đã nhận qua phiếu nối lệnh (CHƯA ĐẠT, bài in `⚠ CHƯA ĐẠT`).**
-  `openPoQtyByVariant()` (`lib/queries/inventory-decision.ts:137`) chỉ nhìn `production_orders.status =
-  'SENT'`, không trừ `stock_receipts.production_order_id` (cột D thêm ở 0132). Tái hiện: bước 5 — lệnh
-  30 món SENT, phiếu RECEIPT nối lệnh nhận đủ 30 ⇒ `getModelStockStates` in tồn thực tế 30 VÀ đang sản
-  xuất 30 cho tới khi người bấm "Đã nhận" trên lệnh; nhận một phần thì không có cách nào cho số đúng.
-  `getModelProductionSummary` đã đọc được `receivedViaLinkedReceipts` = 30 nên dữ liệu có sẵn. Không sửa
-  ở đây vì hàm ấy nuôi cả kế hoạch SX / quyết định vốn tồn / gợi ý `buildMatrixForProduct` — đổi là đổi
-  con số kế hoạch (AGENTS.md mục 7) ⇒ Agent D / Tech Lead + chủ shop quyết. Đề xuất: phần còn lại của
-  lệnh SENT = ô lệnh − số đã nhận qua phiếu nối lệnh theo mẫu mã (kẹp ≥ 0).
+- Không còn lỗi mở từ bài vòng đời. (B1 đã sửa — xem dưới.)
+
+### Đã sửa sau khi bàn giao QA
+
+- **B1 · "Đang sản xuất" đếm trùng hàng đã nhận qua phiếu nối lệnh — ĐÃ SỬA (Tech Lead quyết, Agent D
+  làm).** `openPoQtyByVariant()` nay trừ số đã nhập qua phiếu `RECEIPT` nối lệnh
+  (`stock_receipts.production_order_id`) theo từng mẫu mã (dùng lại phép ghép ô "màu|size" có sẵn);
+  lô xưởng trừ phiếu nối lô (`production_batch_id`) trong `openBatchQtyByVariant`. MỘT phép trừ cho mọi
+  nơi đọc: `openQtyAfterReceived` (lib/constants/workshop-ledger.ts) — đã trả (sổ công nợ) và đã nhập
+  (chứng từ tồn) lấy SỐ LỚN HƠN, không cộng. Lệnh/lô không có phiếu nối (toàn bộ dữ liệu production hôm
+  nay — cột mới từ 0132) ra ĐÚNG số như trước; có kiểm thử khoá. Bước 5 nay khẳng định chính xác
+  `inProduction = 0` cho M, L và tổng mẫu thay cho dòng `⚠ CHƯA ĐẠT`.
 
 ### Chỗ hở của phạm vi kiểm (không phải lỗi, nói ra để không ai tưởng đã kiểm)
 
