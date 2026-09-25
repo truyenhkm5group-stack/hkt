@@ -20,7 +20,7 @@ import { csRunningHandoffExists } from "@/lib/queries/cs";
 import { getFulfillmentBottleneckQueue } from "@/lib/queries/fulfillment-bottleneck";
 import { getDuplicateOrderQueue } from "@/lib/queries/order-duplicate";
 import { listDispositionQueue } from "@/lib/queries/return-dispositions";
-import { DISPOSITION_LABEL } from "@/lib/constants/return-disposition";
+import { DISPOSITION_GRAIN_LABEL, DISPOSITION_LABEL } from "@/lib/constants/return-disposition";
 import { DUPLICATE_VERDICT_LABEL } from "@/lib/constants/order-duplicate";
 import { unclassifiedBankRows } from "@/lib/queries/finance-ops";
 import { bankExceptionScore } from "@/lib/constants/finance-ops";
@@ -457,6 +457,10 @@ export async function adaptDuplicateOrders(now: Date): Promise<WorkItem[]> {
  *
  * Không trùng với `RETURN_INSPECTION`: nguồn đó chỉ nói kiện CHƯA ĐẾM, nguồn này chỉ nói món ĐÃ ĐẾM
  * (`lib/queries/return-dispositions.ts::subjectsQuery` chỉ đọc `status = 'INSPECTED'`).
+ *
+ * Company OS · Agent R: món hàng hoàn KHÔNG NHÃN hỏng / bẩn / sai hàng cũng là một việc ở đây (khoá
+ * `unidentified:<id>`, thực thể `RETURN_UNIDENTIFIED` = mã `UR-…`). Không nguồn việc / cảnh báo nào khác
+ * chiếu `return_unidentified`, nên không đếm hai lần.
  */
 export async function adaptReturnDispositions(now: Date): Promise<WorkItem[]> {
   const queue = await listDispositionQueue({ limit: 500 });
@@ -473,7 +477,7 @@ export async function adaptReturnDispositions(now: Date): Promise<WorkItem[]> {
       sourceKey: r.subjectKey,
       kind: state,
       title: `${r.folded.remaining} món ${ten} · ${DISPOSITION_LABEL[state].toLowerCase()}`,
-      summary: `${r.grain === "PARCEL" ? "Kiện kiểm cả kiện" : "Kiểm từng món"} · kết luận ${r.condition}${r.inspectNote ? ` — ${r.inspectNote}` : ""}`,
+      summary: `${DISPOSITION_GRAIN_LABEL[r.grain]} · kết luận ${r.condition}${r.inspectNote ? ` — ${r.inspectNote}` : ""}`,
       department: "WAREHOUSE" as DepartmentCode,
       assignee: null,
       status: (state === "REWORK" ? "IN_PROGRESS" : "NEW") as WorkStatus,
@@ -486,8 +490,8 @@ export async function adaptReturnDispositions(now: Date): Promise<WorkItem[]> {
       slaAt: slaAtOf("RETURN_DISPOSITION", createdAt),
       completedAt: null,
       snoozedUntil: null,
-      businessEntity: "SHIPMENT",
-      businessEntityId: r.code ?? r.shipmentId,
+      businessEntity: r.grain === "UNIDENTIFIED" ? "RETURN_UNIDENTIFIED" : "SHIPMENT",
+      businessEntityId: r.code ?? r.shipmentId ?? r.subjectKey,
       sourceUrl: `/inventory/returns?xu-ly=${encodeURIComponent(r.subjectKey)}#hang-khong-tai-nhap`,
       // ƯỚC TÍNH theo giá vốn gần nhất của mẫu mã; chưa biết giá vốn thì CHƯA BIẾT, không phải 0đ.
       money:
@@ -495,7 +499,10 @@ export async function adaptReturnDispositions(now: Date): Promise<WorkItem[]> {
           ? MONEY_UNKNOWN
           : { atRisk: r.openValueEstimate, recoverable: null, confidence: "ESTIMATED" as const, basis: "Giá vốn ước tính của phần chưa có kết cục (phiếu nhập gần nhất → giá vốn trên đơn → giá nhập mẫu mã)" },
       tags: [state, r.grain],
-      evidence: { source: "Trạm kiểm hàng hoàn", detail: `${r.code ?? r.shipmentId} · còn ${r.folded.remaining}/${r.qty} món chưa có kết cục` },
+      evidence: {
+        source: r.grain === "UNIDENTIFIED" ? "Bàn hàng hoàn không nhãn" : "Trạm kiểm hàng hoàn",
+        detail: `${r.code ?? r.shipmentId ?? r.subjectKey} · còn ${r.folded.remaining}/${r.qty} món chưa có kết cục`,
+      },
       blockedReason: "",
       creationSource: "AUTO" as const,
       actions: actionsOf("RETURN_DISPOSITION"),

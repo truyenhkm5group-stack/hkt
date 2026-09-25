@@ -240,7 +240,7 @@ export async function testCompanyOsReturnsDb(db: Db) {
 
     // ═══ 4. Chỉ đúng đối tượng ═══
     const q0 = await listDispositionQueue();
-    const cua = q0.rows.filter((r) => r.shipmentId.startsWith(P));
+    const cua = q0.rows.filter((r) => (r.shipmentId ?? "").startsWith(P));
     assert.deepEqual(cua.map((r) => r.subjectKey).sort(), [I1, K3].sort(), "đối tượng = món hỏng có hàng thật + phần hỏng của kiện kiểm cả kiện; KHÔNG món đủ / món đếm 0 / kiện chờ đếm / kiện thiếu cả kiện");
     assert.ok(q0.summary.excludedMissingParcels >= 1, "kiện 'Thiếu hàng' cả kiện bị loại thì phải ĐẾM ra, không biến mất");
     const r1 = cua.find((r) => r.subjectKey === I1)!;

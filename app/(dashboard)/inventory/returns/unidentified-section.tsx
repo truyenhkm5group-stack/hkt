@@ -432,7 +432,7 @@ function NhanKienSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v
 
 // ───────────────────────── MỘT DÒNG HÀNG GIỮ TẠM ─────────────────────────
 
-function HoldingRow({ row, canOverride }: { row: UnidentifiedRow; canOverride: boolean }) {
+function HoldingRow({ row, canOverride, inLedger }: { row: UnidentifiedRow; canOverride: boolean; inLedger: boolean }) {
   const router = useRouter();
   const [dangChay, setDangChay] = React.useState(false);
   const [moTra, setMoTra] = React.useState(false);
@@ -440,7 +440,8 @@ function HoldingRow({ row, canOverride }: { row: UnidentifiedRow; canOverride: b
   const [lyDo, setLyDo] = React.useState("");
 
   const daVaoTon = Boolean(row.stockReceiptId);
-  const canRestock = ITEM_CONDITION_RESTOCKS[row.condition] && Boolean(row.variantId);
+  // Món đã vào sổ kết cục (Agent R): sổ là chủ của nó — không tái nhập nguyên món / đổi kết luận ở đây.
+  const canRestock = !inLedger && ITEM_CONDITION_RESTOCKS[row.condition] && Boolean(row.variantId);
   const canDoQuyen = row.status !== "IDENTIFIED";
   const seed = React.useMemo(() => ({ sku: row.sku, color: row.color, size: row.size }), [row.sku, row.color, row.size]);
 
@@ -534,13 +535,17 @@ function HoldingRow({ row, canOverride }: { row: UnidentifiedRow; canOverride: b
                 Tái nhập +{formatNumber(row.quantity)}
               </Button>
             )
+          ) : inLedger ? (
+            <a href={`/inventory/returns?xu-ly=${encodeURIComponent(`unidentified:${row.id}`)}#hang-khong-tai-nhap`} className="rounded bg-sky-500/12 px-2 py-1 text-[11px] text-sky-700 hover:underline dark:text-sky-300">
+              Đã vào sổ kết cục — xử lý tiếp ở “Hàng hoàn không tái nhập” (sửa → nhập lại theo số đếm · huỷ · trả xưởng)
+            </a>
           ) : (
             <span className="rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
               {!row.variantId ? "Chưa chọn mẫu mã nên chưa biết cộng vào đâu." : `Kết luận “${ITEM_CONDITION_LABEL[row.condition]}” không vào tồn được.`}
             </span>
           )}
 
-          {!ITEM_CONDITION_RESTOCKS[row.condition] && row.variantId ? (
+          {!inLedger && !ITEM_CONDITION_RESTOCKS[row.condition] && row.variantId ? (
             <Button
               type="button"
               size="sm"
@@ -606,13 +611,17 @@ export function UnidentifiedSection({
   summary,
   canWrite,
   canOverride,
+  inLedger = [],
 }: {
   rows: UnidentifiedRow[];
   summary: UnidentifiedSummary;
   canWrite: boolean;
   /** Có quyền `inventory:restock-unidentified` — mở được nút tái nhập không chứng từ. */
   canOverride: boolean;
+  /** Id các món đã có dòng ở sổ kết cục (Agent R) — nút tái nhập nguyên món / đổi kết luận ẩn đi. */
+  inLedger?: string[];
 }) {
+  const soKetCuc = React.useMemo(() => new Set(inLedger), [inLedger]);
   const [moNhan, setMoNhan] = React.useState(false);
 
   return (
@@ -648,13 +657,19 @@ export function UnidentifiedSection({
             Vào tồn KHÔNG có chứng từ đơn: <span className="numeric font-medium">{formatNumber(summary.restockedOverride)}</span>
             <InfoHint>Quản lý kho quyết đưa vào tồn dù không lần ra được đơn nào. Mỗi lượt đều có lý do và nhật ký; con số này cố ý không gộp vào tổng tái nhập.</InfoHint>
           </span>
+          {summary.reworkRestockedUnits ? (
+            <span className={cn("rounded-md px-2 py-1", summary.reworkRestockedOverrideUnits ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-muted")}>
+              Nhập lại sau sửa: <span className="numeric font-medium">{formatNumber(summary.reworkRestockedUnits)}</span> món
+              {summary.reworkRestockedOverrideUnits ? ` · ${formatNumber(summary.reworkRestockedOverrideUnits)} món KHÔNG có chứng từ đơn` : ""}
+            </span>
+          ) : null}
           {summary.oldestPendingDays !== null ? <span className="rounded-md bg-muted px-2 py-1">Kiện chờ lâu nhất: {formatNumber(summary.oldestPendingDays)} ngày</span> : null}
         </div>
 
         {rows.length ? (
           <div className="space-y-1.5">
             {rows.map((r) => (
-              <HoldingRow key={r.id} row={r} canOverride={canOverride} />
+              <HoldingRow key={r.id} row={r} canOverride={canOverride} inLedger={soKetCuc.has(r.id)} />
             ))}
           </div>
         ) : (
