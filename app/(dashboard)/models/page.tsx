@@ -7,9 +7,11 @@ import { PageHeader } from "@/components/page-header";
 import { StatStrip } from "@/components/stat-tile";
 import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { can, requirePermission } from "@/lib/auth/session";
+import { MODEL_STATE_UNDECLARED_LABEL } from "@/lib/constants/model-lifecycle";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { listModels, MODEL_SORTABLE, MODEL_STATE_NONE, modelRegistrySummary, modelStateFacets, previewModelRegistry } from "@/lib/queries/models";
 import { parseListParams, type SearchParams } from "@/lib/search-params";
+import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Vòng đời mẫu" };
 
@@ -28,6 +30,8 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
   const [{ rows, total, pageCount }, facets, summary, preview] = await Promise.all([listModels(params), modelStateFacets(), modelRegistrySummary(), previewModelRegistry()]);
 
   const chuaDongBo = summary.total === 0;
+  const trangThaiLoc = params.filters.state ?? [];
+  const chiChuaKhai = trangThaiLoc.length === 1 && trangThaiLoc[0] === MODEL_STATE_NONE;
   const choDongBo = preview.pendingInsert + preview.pendingLink;
 
   return (
@@ -97,6 +101,19 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
               },
             ]}
           />
+          {/* Company OS · A2: lọc nhanh "Chưa khai" — cùng facet `state` của thanh lọc, chỉ là một cú bấm ngắn hơn. */}
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">Lọc nhanh:</span>
+            <Link
+              href="/models"
+              className={cn("rounded-full border px-2.5 py-0.5", !chiChuaKhai && !(params.filters.state ?? []).length ? "border-primary bg-primary/10 font-semibold" : "hover:bg-muted")}
+            >
+              Tất cả ({formatNumber(summary.total)})
+            </Link>
+            <Link href={`/models?state=${MODEL_STATE_NONE}`} className={cn("rounded-full border px-2.5 py-0.5", chiChuaKhai ? "border-primary bg-primary/10 font-semibold" : "hover:bg-muted")}>
+              {MODEL_STATE_UNDECLARED_LABEL} ({formatNumber(summary.undeclared)})
+            </Link>
+          </div>
           <DataTableToolbar
             searchPlaceholder="Mã mẫu, tên…"
             period={false}

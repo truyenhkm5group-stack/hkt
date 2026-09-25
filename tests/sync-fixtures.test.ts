@@ -219,6 +219,7 @@ import { testWorkshopSheetImportDb, testWorkshopSheetImportPure } from "./worksh
 import { testWorkshopBankLink } from "./workshop-bank-link.test";
 import { testMarketerPricePure, testMarketerPriceQueries } from "./marketer-price.test";
 import { testCompanyOsModelsPure, testCompanyOsModelsQueries } from "./company-os-models.test";
+import { testCompanyOsModel360Db, testCompanyOsModel360Pure } from "./company-os-model-360.test";
 import { testCrm } from "./crm.test";
 import { testScenario } from "./scenario.test";
 import { testAccessControl } from "./access-control.test";
@@ -1882,6 +1883,9 @@ async function main() {
   await testMarketerPriceQueries(db);
   testCompanyOsModelsPure();
   await testCompanyOsModelsQueries(db);
+  // Company OS · A2 — trang Model 360: bảng tín hiệu, đề xuất, khối không sập trang, ý tưởng → mẫu.
+  testCompanyOsModel360Pure();
+  await testCompanyOsModel360Db(db);
   await testCrm(db);
   testScenario();
   testAccessControl();
