@@ -12,7 +12,7 @@ import { can, requirePermission } from "@/lib/auth/session";
 import { CREATIVE_HARD_LIMITS } from "@/lib/constants/creative-loop";
 import { formatNumber, formatVND } from "@/lib/format";
 import { getPendingBatch } from "@/lib/queries/creative-loop";
-import { param, parseListParams, type SearchParams } from "@/lib/search-params";
+import { param, parseListParams, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
 export const metadata = { title: "Vòng mẫu quảng cáo" };
 
@@ -58,7 +58,7 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
       ) : tab === "dang-chay" ? (
         <LiveTab canWrite={can(user, "expenses:write")} canKill={can(user, "expenses:write") || can(user, "settings:manage")} canRelease={can(user, "settings:manage")} />
       ) : tab === "thu-vien" ? (
-        <LibraryTab />
+        <LibraryTab productId={param(raw, "mau") || null} period={resolvePeriod(raw, "all")} />
       ) : tab === "hoc" ? (
         <LearningTab />
       ) : tab === "cau-hinh" ? (

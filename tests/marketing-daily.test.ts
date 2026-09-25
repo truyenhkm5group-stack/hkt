@@ -633,10 +633,10 @@ export async function testMarketingDailyFilterHonesty() {
   }
   assert.ok(filtered.warnings.some((w) => w.includes("CHƯA BIẾT")), "màn hình phải nói ra vì sao cột trống");
 
-  // Chiều không có số chi: phải nói ra, không âm thầm in 0.
+  // Mẩu mà bảng chi tiêu không biết thuộc chiến dịch nào: phải nói ra, không âm thầm in 0.
   const adLevel = await getMarketingDaily(ALL, "created", { adId: "khong-ton-tai-ad" });
-  assert.ok(adLevel.warnings.some((w) => w.includes("chi quảng cáo")), "lọc theo mẩu quảng cáo ⇒ phải cảnh báo không có số chi");
-  for (const row of adLevel.rows) assert.equal(row.spendKnown, false, "cấp mẩu quảng cáo không có số chi — không được chia đều tiền chiến dịch xuống");
+  assert.ok(adLevel.warnings.some((w) => w.includes("chi quảng cáo")), "lọc theo mẩu quảng cáo không rõ chiến dịch ⇒ phải cảnh báo không có số chi");
+  for (const row of adLevel.rows) assert.equal(row.spendKnown, false, "mẩu không rõ chiến dịch ⇒ chi CHƯA BIẾT — không được chia đều tiền chiến dịch xuống");
 }
 
 /**
@@ -655,9 +655,13 @@ export async function testMarketingBreakdownConservation() {
   if (total.totals.orders > 0) {
     assert.equal(sumOrders, total.totals.orders, "mỗi đơn thuộc đúng một nhóm marketer (kể cả nhóm chưa quy kết) ⇒ tổng phải bằng");
   }
-  // Chiều mẩu quảng cáo không có số chi — cờ phải nói đúng, vì mọi tỷ lệ chia cho chi tiêu phụ thuộc nó.
+  // Chiều mẩu quảng cáo CÓ số chi ở hạt mẩu từ 22/09/2026 (Company OS · B) — cờ phải nói đúng, vì mọi
+  // tỷ lệ chia cho chi tiêu phụ thuộc nó. Ngày còn ở hạt chiến dịch là CHƯA BIẾT: khoá ở
+  // tests/company-os-creative-ads.test.ts. Fanpage thì vẫn không có số chi riêng.
   const adBd = await getMarketingBreakdown(ALL, "created", "ad", {}, 5);
-  assert.equal(adBd.spendGrain, false);
+  assert.equal(adBd.spendGrain, true);
+  const pageBd = await getMarketingBreakdown(ALL, "created", "page", {}, 5);
+  assert.equal(pageBd.spendGrain, false);
   const campBd = await getMarketingBreakdown(ALL, "created", "campaign", {}, 5);
   assert.equal(campBd.spendGrain, true);
 

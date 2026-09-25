@@ -16,12 +16,14 @@ import {
   type VariantStatus,
 } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
-import { judgeVariant, type JudgeResult, type VariantMetrics } from "@/lib/creative/judge";
+import { costPerOrderOf, judgeVariant, type JudgeResult, type VariantMetrics } from "@/lib/creative/judge";
 import type { GeneStat } from "@/lib/creative/learn";
 import { vnStartOfDay } from "@/lib/format";
 import { CONFIRMED_ORDER } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { AD_MESSAGES } from "@/lib/queries/ads-roas";
+import { ORDER_AD_ID } from "@/lib/queries/ads-attribution-link";
+import { postKeySql } from "@/lib/queries/ads-identity-sql";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
 /**
@@ -35,10 +37,17 @@ import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
  *  · TIỀN / HIỂN THỊ / NHẤP / TIN NHẮN: `ad_spends` hạt `AD` (`ad_id` = mẩu QC của mẫu), bỏ dòng
  *    `excluded`. Đã đo khớp 0 đồng với hạt chiến dịch (`docs/ads-measurement-audit-2026-09-22.md` §4).
  *    `spend` đã quy ra VND nguyên ở lượt đồng bộ (`lib/integrations/facebook/sync.ts`).
- *  · ĐƠN: đơn Pancake mang `orders.ad_id` = mẩu QC, kết quả qua `ORDER_OUTCOME_FAST`, nối vận đơn
- *    bằng `PRIMARY_ATTEMPT` (mỗi đơn một dòng) — đúng hình dạng của `lib/queries/ads-decision.ts`.
- *    Cấp mẩu CHỈ đi bằng `ad_id`, không qua `post_id` (`docs/ads-decision-contract.md` §6): một bài
- *    có thể do nhiều mẩu chạy, chọn bừa một mẩu là bịa quy kết.
+ *  · ĐƠN: đơn quy về mẩu QC bằng `ORDER_AD_ID` (`lib/queries/ads-attribution-link.ts`) — ĐÚNG biểu
+ *    thức mà bảng quyết định `/ads` dùng ở cấp mẩu, không một bản chép tay nào. Hai đường, theo thứ tự
+ *    thẩm quyền: (1) `orders.ad_id` Pancake gửi; (2) chỉ khi đơn KHÔNG mang `ad_id`: bài viết của đơn
+ *    ứng với ĐÚNG MỘT mẩu trong `fb_ads`. Bài do nhiều mẩu cùng chạy ⇒ nhập nhằng ⇒ KHÔNG nối (chọn
+ *    bừa một mẩu là bịa quy kết). Kết quả qua `ORDER_OUTCOME_FAST`, nối vận đơn bằng `PRIMARY_ATTEMPT`
+ *    (mỗi đơn một dòng) — đúng hình dạng của `lib/queries/ads-decision.ts`.
+ *
+ *    Trước 25/09/2026 vòng mẫu chỉ đếm đường (1), trong khi `/ads` đã đếm cả hai từ 22/09 — cùng một
+ *    mẩu mang hai số đơn trên hai màn hình, và mẫu tự đăng (bài tối, mỗi bài đúng một mẩu) mất trắng
+ *    phần đơn chốt dưới bình luận / tin nhắn mà Pancake không gắn `ad_id`. Mỗi đơn nay mang theo ĐƯỜNG
+ *    đã quy kết nó (`attribution.direct` / `attribution.viaPost`) để sổ phán quyết truy nguyên được.
  *
  * ─── POPULATION CỦA "ĐƠN CHỐT" ───
  *
@@ -59,26 +68,67 @@ type BatchRow = typeof schema.creativeBatches.$inferSelect;
 
 // ───────────────────────────── SỐ ĐO TỪNG MẪU ─────────────────────────────
 
+/** Đơn chốt / giao / hoàn của MỘT đường quy kết. */
+export type OrderPathCounts = { booked: number; delivered: number; returned: number };
+
+/**
+ * ĐƯỜNG QUY KẾT CỦA SỐ ĐƠN — hai con số cộng lại đúng bằng `bookedOrders` / `deliveredOrders` /
+ * `returnedOrders` (kiểm thử khoá). Một đơn đi đúng MỘT đường: mang `ad_id` thì là `direct`, kể cả khi
+ * bài viết của nó cũng trỏ về mẩu này — không bao giờ đếm hai lần.
+ */
+export type OrderAttributionSplit = { direct: OrderPathCounts; viaPost: OrderPathCounts };
+
 export type VariantMetricsRow = VariantMetrics & {
   /** Số NGÀY có dòng chi cấp mẩu (sau mốc bắt đầu). 0 khi chưa có dòng nào. */
   spendDays: number;
   /** Ngày VN mới nhất có dòng chi (`YYYY-MM-DD`). `null` = chưa có dòng nào. */
   lastSpendDate: string | null;
+  attribution: OrderAttributionSplit;
+  /**
+   * DOANH THU LÊN ĐƠN của đơn chốt quy về mẫu (`total_price_after_discount`, đơn không huỷ) — cùng cột
+   * tiền mà `/ads` gọi là "doanh thu lên đơn". CHỈ LÀ BẰNG CHỨNG in cạnh phán quyết, không vào luật nào.
+   * `null` = mẫu chưa có mẩu QC (chưa đăng) — CHƯA BIẾT; mẩu có mà chưa đơn nào ⇒ 0 thật.
+   */
+  bookedRevenueVnd: number | null;
+  /** Doanh thu GIAO THÀNH CÔNG theo `ORDER_OUTCOME`. `null` như trên. */
+  deliveredRevenueVnd: number | null;
 };
 
 export type VariantMetricsInput = { id: string; fbAdId: string | null; startAt: Date | null };
 
-const UNKNOWN_METRICS: VariantMetricsRow = {
-  spendVnd: null,
-  impressions: null,
-  clicks: null,
-  messages: null,
-  bookedOrders: 0,
-  deliveredOrders: 0,
-  returnedOrders: 0,
-  spendDays: 0,
-  lastSpendDate: null,
-};
+/**
+ * LUẬT TẮT ĐẾM ĐƠN THEO ĐƯỜNG NÀO — HUMAN GATE, không phải một chi tiết cài đặt.
+ *
+ * `DIRECT_AD_ID`: luật tắt (`orders` / `costPerOrder`) chỉ nhìn đơn mang `ad_id` — đúng định nghĩa mà
+ * mọi lô ĐANG CHẠY đã được người duyệt cho phép. Nhãn phán quyết, thư viện, đề nghị scale và việc học
+ * đọc số đơn ĐẦY ĐỦ (cả đường bài viết), vì chúng không tự tiêu tiền và không tự ghi Facebook: scale
+ * dựng nháp PAUSED + phiếu người duyệt, tiêu thêm cần người bấm kèm phiếu.
+ *
+ * Luật tắt thì KHÁC: nó tự tạm dừng nhóm QC trên Facebook. Đổi sang `ORDER_AD_ID` là quyết định
+ * của chủ shop (vd khi lô mới được duyệt với định nghĩa mới) — sửa hằng số này kèm kiểm thử.
+ */
+export const KILL_RULE_ORDER_BASIS: "DIRECT_AD_ID" | "ORDER_AD_ID" = "DIRECT_AD_ID";
+
+const emptyPath = (): OrderPathCounts => ({ booked: 0, delivered: 0, returned: 0 });
+
+/** Số đo CHƯA BIẾT — hàm (không phải hằng) vì `attribution` là đối tượng lồng: chép nông là dùng chung. */
+export function unknownMetrics(): VariantMetricsRow {
+  return {
+    spendVnd: null,
+    impressions: null,
+    clicks: null,
+    messages: null,
+    bookedOrders: 0,
+    deliveredOrders: 0,
+    returnedOrders: 0,
+    killRuleOrders: 0,
+    spendDays: 0,
+    lastSpendDate: null,
+    attribution: { direct: emptyPath(), viaPost: emptyPath() },
+    bookedRevenueVnd: null,
+    deliveredRevenueVnd: null,
+  };
+}
 
 /**
  * Số đo của từng mẫu, khoá theo `variantId`. Mẫu không có `fbAdId` (chưa đăng) ⇒ số đo CHƯA BIẾT.
@@ -89,7 +139,7 @@ const UNKNOWN_METRICS: VariantMetricsRow = {
  */
 export async function variantMetrics(db: Db, variants: VariantMetricsInput[]): Promise<Map<string, VariantMetricsRow>> {
   const out = new Map<string, VariantMetricsRow>();
-  for (const v of variants) out.set(v.id, { ...UNKNOWN_METRICS });
+  for (const v of variants) out.set(v.id, unknownMetrics());
 
   const byAd = new Map<string, { id: string; floor: Date | null }>();
   for (const v of variants) {
@@ -134,39 +184,83 @@ export async function variantMetrics(db: Db, variants: VariantMetricsInput[]): P
     if (m.lastSpendDate === null || day > m.lastSpendDate) m.lastSpendDate = day;
   }
 
+  // Mẩu có id ⇒ số đơn / doanh thu là số ĐẾM THẬT (0 nếu chưa đơn nào), không còn là CHƯA BIẾT.
+  for (const { id } of byAd.values()) {
+    const m = out.get(id) as VariantMetricsRow;
+    m.bookedRevenueVnd = 0;
+    m.deliveredRevenueVnd = 0;
+  }
+
   const o = schema.orders;
   const s = schema.shipments;
+  /*
+    ĐƠN ỨNG VIÊN trước, quy kết sau — vì lý do HIỆU NĂNG, không phải lý do nghĩa.
+
+    `ORDER_AD_ID` mang một truy vấn con tương quan (bài viết → mẩu). Tính nó trên MỌI đơn đã chốt của
+    shop để rồi giữ lại vài đơn của vài mẩu là quét cả bảng. Nên thu hẹp trước bằng một điều kiện RỘNG
+    HƠN điều kiện thật: đơn mang `ad_id` của một mẩu đang xét, HOẶC đơn có bài viết là bài của một mẩu
+    đang xét. Mọi đơn mà `ORDER_AD_ID` quy về một mẩu trong danh sách đều nằm trong tập ấy (vế 1 của
+    `ORDER_AD_ID` là `ad_id`, vế 2 chỉ trả mẩu mà bài viết thuộc về) — rồi `ORDER_AD_ID` mới quyết.
+  */
+  const postsOfAds = sql`(select fa.post_id from fb_ads fa where fa.id in (${sql.join(
+    adIds.map((a) => sql`${a}`),
+    sql`, `,
+  )}) and fa.post_id is not null)`;
+  const candidate = or(inArray(o.adId, adIds), sql`(${o.postId} is not null and ${postKeySql(o.postId)} in ${postsOfAds})`) as SQL;
   // Mỗi đơn tính kết quả ĐÚNG MỘT LẦN (bảng dẫn xuất + rào `OUTCOME_FENCE`), như ads-decision.
   const facts = db
     .select({
-      adId: sql<string>`${o.adId}`.as("cl_ad_id"),
+      adId: sql<string | null>`${ORDER_AD_ID}`.as("cl_ad_id"),
+      // Đường quy kết: đơn mang `ad_id` luôn là TRỰC TIẾP — `ORDER_AD_ID` không bao giờ hỏi tới bài viết của nó.
+      viaPost: sql<boolean>`(nullif(${o.adId}, '') is null)`.as("cl_via_post"),
+      revenue: sql<number>`coalesce(${o.totalPriceAfterDiscount}, 0)`.as("cl_revenue"),
       outcome: ORDER_OUTCOME_FAST.as("cl_outcome"),
     })
     .from(o)
     // MỖI ĐƠN MỘT DÒNG (xem PRIMARY_ATTEMPT) — đơn gửi lại không được đếm hai lần.
     .leftJoin(s, and(eq(s.orderId, o.id), PRIMARY_ATTEMPT))
-    .where(and(CONFIRMED_ORDER, inArray(o.adId, adIds)))
+    .where(and(CONFIRMED_ORDER, candidate))
     .offset(OUTCOME_FENCE)
     .as("creative_order_facts");
 
+  const booked = sql`${facts.outcome} <> 'CANCELLED'`;
+  const delivered = sql`${facts.outcome} = 'DELIVERED'`;
   const orderRows = await chayKhongJit(db, (tx) =>
     tx
       .select({
         adId: sql<string>`${facts.adId}`,
-        booked: sql<number>`count(*) filter (where ${facts.outcome} <> 'CANCELLED')`,
-        delivered: sql<number>`count(*) filter (where ${facts.outcome} = 'DELIVERED')`,
+        viaPost: sql<boolean>`${facts.viaPost}`,
+        booked: sql<number>`count(*) filter (where ${booked})`,
+        delivered: sql<number>`count(*) filter (where ${delivered})`,
         returned: sql<number>`count(*) filter (where ${facts.outcome} in (${sql.raw(RETURNED_OUTCOMES_SQL)}))`,
+        bookedRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${booked}), 0)`,
+        deliveredRevenue: sql<number>`coalesce(sum(${facts.revenue}) filter (where ${delivered}), 0)`,
       })
       .from(facts)
-      .groupBy(facts.adId),
+      .where(sql`${facts.adId} in (${sql.join(
+        adIds.map((a) => sql`${a}`),
+        sql`, `,
+      )})`)
+      .groupBy(facts.adId, facts.viaPost),
   );
   for (const r of orderRows) {
     const target = byAd.get(String(r.adId));
     if (!target) continue;
     const m = out.get(target.id) as VariantMetricsRow;
-    m.bookedOrders = Number(r.booked ?? 0);
-    m.deliveredOrders = Number(r.delivered ?? 0);
-    m.returnedOrders = Number(r.returned ?? 0);
+    const path = r.viaPost === true || String(r.viaPost) === "true" ? m.attribution.viaPost : m.attribution.direct;
+    path.booked += Number(r.booked ?? 0);
+    path.delivered += Number(r.delivered ?? 0);
+    path.returned += Number(r.returned ?? 0);
+    m.bookedRevenueVnd = (m.bookedRevenueVnd ?? 0) + Number(r.bookedRevenue ?? 0);
+    m.deliveredRevenueVnd = (m.deliveredRevenueVnd ?? 0) + Number(r.deliveredRevenue ?? 0);
+  }
+  for (const { id } of byAd.values()) {
+    const m = out.get(id) as VariantMetricsRow;
+    const { direct, viaPost } = m.attribution;
+    m.bookedOrders = direct.booked + viaPost.booked;
+    m.deliveredOrders = direct.delivered + viaPost.delivered;
+    m.returnedOrders = direct.returned + viaPost.returned;
+    m.killRuleOrders = KILL_RULE_ORDER_BASIS === "DIRECT_AD_ID" ? direct.booked : m.bookedOrders;
   }
   return out;
 }
@@ -370,7 +464,23 @@ export type LibraryItem = VariantCard & {
   deliveredOrders: number;
   returnedOrders: number;
   spendVnd: number | null;
+  /** Đơn chốt theo từng đường quy kết (`ad_id` / bài viết) — cộng lại bằng `bookedOrders`. */
+  ordersDirect: number;
+  ordersViaPost: number;
+  /** BẰNG CHỨNG cạnh phán quyết, không vào luật: chi / đơn chốt và doanh thu lên đơn. `null` = CHƯA BIẾT. */
+  costPerOrderVnd: number | null;
+  bookedRevenueVnd: number | null;
 };
+
+/**
+ * BỘ LỌC THƯ VIỆN — mọi vế đều THU HẸP, không vế nào mở rộng.
+ *
+ * `productId` = mẫu (mã hàng Pancake) mà creative quảng bá (`creative_variants.product_id`).
+ * `from` / `to` lọc theo NGÀY VÀO THƯ VIỆN (`library_at`) — mốc thắng, không phải ngày chạy lô: câu
+ * người dùng hỏi là "tháng này có mẫu nào mới thắng", và mẫu chạy tháng trước mà đơn về đủ tháng này
+ * thì thắng tháng này.
+ */
+export type LibraryFilters = { productId?: string | null; from?: Date | null; to?: Date | null };
 
 export type LearningPoint = { day: string; observations: number | null; relativeObservations: number | null };
 
@@ -608,7 +718,7 @@ async function judgeCards(db: Db, rows: { card: VariantCard; batch: BatchRow }[]
   ]);
   return rows.map(({ card, batch: b0 }) => {
     const batch = { ...b0, endAt: effectiveEndAt(b0.endAt, extended.get(card.id)) };
-    const m = metrics.get(card.id) ?? { ...UNKNOWN_METRICS };
+    const m = metrics.get(card.id) ?? unknownMetrics();
     const j = judgeLive(card, batch, m, current, now);
     return {
       ...card,
@@ -720,25 +830,63 @@ export async function listLiveVariants(db: Db, now: Date): Promise<JudgedVariant
   );
 }
 
-/** Thư viện: mẫu đã THẮNG (`library_at`), mới → cũ, kèm số đơn HIỆN TẠI. */
-export async function listLibrary(db: Db): Promise<LibraryItem[]> {
+/** Thư viện: mẫu đã THẮNG (`library_at`), mới → cũ, kèm số đơn HIỆN TẠI. Lọc theo mẫu và ngày vào thư viện. */
+export async function listLibrary(db: Db, filters: LibraryFilters = {}): Promise<LibraryItem[]> {
+  const cv = schema.creativeVariants;
+  const conds: SQL[] = [isNotNull(cv.libraryAt)];
+  if (filters.productId) conds.push(eq(cv.productId, filters.productId));
+  if (filters.from) conds.push(gte(cv.libraryAt, filters.from));
+  if (filters.to) conds.push(lte(cv.libraryAt, filters.to));
   const rows = await db
     .select({ ...variantSelect, batch: schema.creativeBatches })
-    .from(schema.creativeVariants)
-    .innerJoin(schema.creativeBatches, eq(schema.creativeBatches.id, schema.creativeVariants.batchId))
-    .leftJoin(schema.products, eq(schema.products.id, schema.creativeVariants.productId))
-    .leftJoin(schema.creativeImages, eq(schema.creativeImages.id, schema.creativeVariants.imageId))
-    .where(isNotNull(schema.creativeVariants.libraryAt))
-    .orderBy(desc(schema.creativeVariants.libraryAt));
+    .from(cv)
+    .innerJoin(schema.creativeBatches, eq(schema.creativeBatches.id, cv.batchId))
+    .leftJoin(schema.products, eq(schema.products.id, cv.productId))
+    .leftJoin(schema.creativeImages, eq(schema.creativeImages.id, cv.imageId))
+    .where(and(...conds))
+    .orderBy(desc(cv.libraryAt));
   const cards = rows.map((r) => ({ card: toVariantCard(r), batch: r.batch }));
   const metrics = await variantMetrics(
     db,
     cards.map((c) => ({ id: c.card.id, fbAdId: c.card.fbAdId, startAt: c.batch.startAt })),
   );
   return cards.map(({ card, batch }) => {
-    const m = metrics.get(card.id) ?? { ...UNKNOWN_METRICS };
-    return { ...card, batchDay: batch.batchDay, bookedOrders: m.bookedOrders, deliveredOrders: m.deliveredOrders, returnedOrders: m.returnedOrders, spendVnd: m.spendVnd };
+    const m = metrics.get(card.id) ?? unknownMetrics();
+    return {
+      ...card,
+      batchDay: batch.batchDay,
+      bookedOrders: m.bookedOrders,
+      deliveredOrders: m.deliveredOrders,
+      returnedOrders: m.returnedOrders,
+      spendVnd: m.spendVnd,
+      ordersDirect: m.attribution.direct.booked,
+      ordersViaPost: m.attribution.viaPost.booked,
+      costPerOrderVnd: costPerOrderOf(m),
+      bookedRevenueVnd: m.bookedRevenueVnd,
+    };
   });
+}
+
+/**
+ * Các mẫu (mã hàng) CÓ ít nhất một creative trong thư viện — lựa chọn của bộ lọc "Mẫu". Chỉ mẫu có
+ * mặt trong thư viện: một danh sách 5.000 mã mà chọn mã nào cũng ra trang trống là một bộ lọc vô dụng.
+ */
+export async function listLibraryProductOptions(db: Db): Promise<{ id: string; label: string; count: number }[]> {
+  const cv = schema.creativeVariants;
+  const p = schema.products;
+  const rows = await db
+    .select({
+      id: sql<string>`${cv.productId}`,
+      name: sql<string | null>`max(${p.name})`,
+      code: sql<string | null>`max(${p.customId})`,
+      count: sql<number>`count(*)`,
+    })
+    .from(cv)
+    .leftJoin(p, eq(p.id, cv.productId))
+    .where(and(isNotNull(cv.libraryAt), isNotNull(cv.productId)))
+    .groupBy(cv.productId)
+    .orderBy(sql`count(*) desc`);
+  return rows.map((r) => ({ id: r.id, label: [r.code, r.name].filter((x) => x && x.trim()).join(" · ") || r.id, count: Number(r.count ?? 0) }));
 }
 
 function parseGeneStats(raw: unknown): GeneStat[] {
