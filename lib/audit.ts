@@ -70,7 +70,13 @@ export type AuditParams = {
  * Danh sách này cố ý HẸP: chỉ những việc chắc chắn không chạm dữ liệu nghiệp vụ. Nghi ngờ thì để
  * ngoài — xoá đệm thừa chỉ tốn thời gian, còn bỏ sót thì trình bày số cũ như số mới.
  */
-const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT"]);
+/*
+  Company OS · Agent H: `RECOMMENDATION_DECIDED` là phản ứng của người đọc với một ĐỀ XUẤT (chấp nhận /
+  bỏ qua / nhắc lại sau). Nó không chạm một bảng nghiệp vụ nào và không đổi một con số nào; hàng đợi
+  "Cần anh quyết" đọc sổ phản ứng thẳng, không qua đệm. Để ngoài danh sách thì MỖI cú bấm trên trang chủ
+  xoá sạch đệm báo cáo — và lượt mở trang chủ kế tiếp phải tính lại bảng quyết định quảng cáo (~6 giây nguội).
+*/
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "RECOMMENDATION_DECIDED"]);
 
 /**
  * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).
