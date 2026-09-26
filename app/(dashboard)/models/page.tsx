@@ -124,7 +124,7 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
                 label: "Chờ đồng bộ",
                 value: formatNumber(choDongBo),
                 note: `${formatNumber(preview.pendingInsert)} mẫu mới · ${formatNumber(preview.pendingLink)} liên kết`,
-                hint: "Sản phẩm / thiết kế mang mã mà sổ chưa có hoặc chưa nối. Bấm “Đồng bộ sổ mẫu” để đưa vào.",
+                hint: "Sản phẩm / thiết kế mang mã mà sổ chưa có hoặc chưa nối. Sổ tự bắt kịp sau mỗi lượt đồng bộ sản phẩm (30 phút); muốn ngay thì bấm “Đồng bộ sổ mẫu”. Mã mơ hồ không bao giờ tự nối.",
                 icon: GitBranch,
                 tone: choDongBo ? "amber" : "muted",
                 href: "/models",

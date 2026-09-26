@@ -5,6 +5,9 @@ import { getDb } from "@/db";
 import { productIdsHavingMarketerPrice } from "@/lib/inventory/receipt-pricing";
 import { DeleteReceiptButton } from "@/app/(dashboard)/inventory/receipts/delete-receipt-button";
 import { ReceiptDialog } from "@/app/(dashboard)/inventory/receipts/receipt-dialog";
+import { LinkProductionControl } from "@/app/(dashboard)/inventory/receipts/link-production-control";
+import { prefilledOrderId } from "@/lib/constants/evidence-gaps";
+import { listLinkableReceipts } from "@/lib/queries/evidence-gaps";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { Money, SectionCard } from "@/components/ui-bits";
@@ -41,6 +44,8 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
   const pendingReturns = Object.fromEntries(pendingMap);
   const pendingReturnTotal = [...pendingMap.values()].reduce((t, n) => t + n, 0);
   const selected = selectedId ? receipts.find((r) => r.id === selectedId) : null;
+  // Phiếu NHẬP HÀNG đang mở mà chưa nối: lệnh SX khớp (Agent P2) — chỉ ĐỀ XUẤT, người bấm nối.
+  const linkable = canWrite && selected && selected.kind === "RECEIPT" && !selected.productionOrder && !selected.productionBatch ? ((await listLinkableReceipts({ receiptIds: [selected.id] }))[0] ?? null) : null;
 
   return (
     <div className="space-y-5">
@@ -142,6 +147,13 @@ export default async function StockReceiptsPage({ searchParams }: { searchParams
             }
             padded={false}
           >
+            {linkable ? (
+              <LinkProductionControl
+                receiptId={linkable.receiptId}
+                candidates={linkable.candidates.map((c) => ({ id: c.id, label: `Lệnh ${c.code}${c.sentAt ? ` · gửi ${formatDate(c.sentAt)}` : ""}` }))}
+                prefilled={prefilledOrderId(linkable.candidates, param(raw, "po"))}
+              />
+            ) : null}
             <Table>
               <TableHeader>
                 <TableRow>

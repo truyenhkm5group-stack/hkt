@@ -605,7 +605,14 @@ export async function syncWarehouses(options: { trigger?: SyncTrigger; actor?: s
   });
 }
 
-export async function syncProducts(options: { trigger?: SyncTrigger; actor?: string } = {}) {
+/**
+ * Bước nối chạy SAU khi sản phẩm đã ghi xong, trong cùng lượt `sync_runs` của job sản phẩm. Lớp tích hợp
+ * không biết bước ấy là gì — `lib/sync/jobs.ts` cắm vào (hôm nay: sổ mẫu tự bắt kịp mã mới). Bước nối hỏng
+ * KHÔNG làm hỏng lượt sản phẩm: sản phẩm đã ghi đủ, chỉ để lại một dòng log.
+ */
+export type ProductSyncFollowUp = (ctx: SyncContext) => Promise<void>;
+
+export async function syncProducts(options: { trigger?: SyncTrigger; actor?: string; followUp?: ProductSyncFollowUp } = {}) {
   return runSyncJob({ source: "PANCAKE", job: "products", trigger: options.trigger, actor: options.actor }, async (ctx) => {
     const db = await getDb();
     const client = getPancakeClient();
@@ -653,6 +660,13 @@ export async function syncProducts(options: { trigger?: SyncTrigger; actor?: str
     }
     publish({ type: "stock", variantId: "*" });
     ctx.summary.detail = `${ctx.summary.updated} sản phẩm · ${count} mẫu mã`;
+    if (options.followUp) {
+      try {
+        await options.followUp(ctx);
+      } catch (error) {
+        ctx.log(`Bước nối sau đồng bộ sản phẩm hỏng (sản phẩm vẫn đã ghi): ${moTaLoiCsdl(error)}`);
+      }
+    }
     return count;
   });
 }
@@ -763,10 +777,10 @@ export async function syncOrderReturns(options: { trigger?: SyncTrigger; actor?:
 }
 
 /** Chạy toàn bộ: kho → sản phẩm → đơn (lịch sử hoặc tăng dần) → khách → trả hàng → nhật ký kho */
-export async function syncPancakeAll(options: { trigger?: SyncTrigger; actor?: string; backfill?: boolean; days?: number } = {}) {
+export async function syncPancakeAll(options: { trigger?: SyncTrigger; actor?: string; backfill?: boolean; days?: number; productsFollowUp?: ProductSyncFollowUp } = {}) {
   const results: Record<string, unknown> = {};
   results.warehouses = await syncWarehouses(options).catch((e) => ({ error: String(e) }));
-  results.products = await syncProducts(options).catch((e) => ({ error: String(e) }));
+  results.products = await syncProducts({ trigger: options.trigger, actor: options.actor, followUp: options.productsFollowUp }).catch((e) => ({ error: String(e) }));
   const backfillState = await getSyncState<{ done?: boolean }>(BACKFILL_KEY);
   results.orders =
     options.backfill || !backfillState?.done

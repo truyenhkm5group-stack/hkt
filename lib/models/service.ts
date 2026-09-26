@@ -24,6 +24,7 @@ import {
   type ProvisionalStartState,
 } from "@/lib/constants/provisional-model";
 import { emitDomainEvent } from "@/lib/events/emit";
+import { isUniqueViolation as trungKhoaDuyNhat } from "@/lib/db/unique-violation";
 import { isOpenTransaction, type DbOrTx } from "@/lib/db-transaction";
 
 /**
@@ -484,10 +485,19 @@ export async function loadRegistryInputs(db: Db): Promise<{ products: RegistryPr
 export type RegistrySyncResult = {
   inserted: number;
   linked: number;
+  /**
+   * Lượt nối bị khoá duy nhất chặn vì một lượt đồng bộ KHÁC vừa nối đúng sản phẩm / thiết kế ấy (chạy
+   * chồng: nút trên /models và lượt tự bắt kịp sau đồng bộ sản phẩm). Không phải lỗi — CSDL vừa làm đúng
+   * việc của nó; lượt sau đọc lại và không còn gì để nối.
+   */
+  raced: { code: string; kind: "product" | "design" }[];
   ambiguous: RegistryAmbiguous[];
   failed: { code: string; error: string }[];
   plan: { toInsert: number; toLink: number };
 };
+
+/** Hai khoá duy nhất của phép NỐI — đòi đúng tên (hai khoá khác nhau là hai sự việc khác nhau). */
+const KHOA_NOI = { product: "product_models_product_id_unique", design: "product_models_design_concept_id_unique" } as const;
 
 /**
  * Áp kế hoạch vào CSDL. Mỗi mẫu một giao dịch nhỏ (ghi + sự kiện cùng lúc), để một mã hỏng không kéo cả
@@ -498,9 +508,17 @@ export type RegistrySyncResult = {
  * còn ai đã bấm thì ghi vào `payload.triggeredBy` và `sync_runs.actor`.
  */
 export async function syncModelRegistry(db: Db, opts: { triggeredBy: string; correlationId?: string | null } = { triggeredBy: "job:model-registry" }): Promise<RegistrySyncResult> {
-  const plan = planModelRegistry(await loadRegistryInputs(db));
+  return applyModelRegistryPlan(db, planModelRegistry(await loadRegistryInputs(db)), opts);
+}
+
+/**
+ * Nửa GHI của `syncModelRegistry`, tách ra để kiểm được đúng nhánh chạy chồng: kế hoạch lập từ ảnh chụp
+ * CŨ (lượt khác đã nối sản phẩm ấy vào mẫu khác giữa lúc đọc và lúc ghi) ⇒ khoá duy nhất chặn ⇒ `raced`,
+ * không phải `failed`. Không ai ngoài `syncModelRegistry` và kiểm thử được gọi nó với kế hoạch tự dựng.
+ */
+export async function applyModelRegistryPlan(db: Db, plan: RegistryPlan, opts: { triggeredBy: string; correlationId?: string | null }): Promise<RegistrySyncResult> {
   const source = "job:model-registry";
-  const ket: RegistrySyncResult = { inserted: 0, linked: 0, ambiguous: plan.ambiguous, failed: [], plan: { toInsert: plan.toInsert.length, toLink: plan.toLink.length } };
+  const ket: RegistrySyncResult = { inserted: 0, linked: 0, raced: [], ambiguous: plan.ambiguous, failed: [], plan: { toInsert: plan.toInsert.length, toLink: plan.toLink.length } };
 
   for (const m of plan.toInsert) {
     try {
@@ -564,7 +582,9 @@ export async function syncModelRegistry(db: Db, opts: { triggeredBy: string; cor
       });
       ket.linked += n;
     } catch (e) {
-      ket.failed.push({ code: l.code, error: e instanceof Error ? e.message : String(e) });
+      const kind = trungKhoaDuyNhat(e, KHOA_NOI.product) ? "product" : trungKhoaDuyNhat(e, KHOA_NOI.design) ? "design" : null;
+      if (kind) ket.raced.push({ code: l.code, kind });
+      else ket.failed.push({ code: l.code, error: e instanceof Error ? e.message : String(e) });
     }
   }
   return ket;

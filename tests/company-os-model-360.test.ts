@@ -413,7 +413,8 @@ function testSourceContracts() {
   assert.ok(khoiAsync.length >= 7, "trang phải có đủ các khối bất đồng bộ");
   for (const k of khoiAsync) assert.ok(new RegExp(`<Suspense fallback=\\{<[^{}]*\\}>\\s*<${k}\\b`).test(page), `khối ${k} phải đứng sau một ranh giới Suspense riêng`);
   const thanKhoi = blocks.split(/export async function /).slice(1);
-  for (const t of thanKhoi) assert.ok(/loadSource\(|signalOnce\(/.test(t), `khối ${t.slice(0, 30)} phải đọc nguồn qua loadSource`);
+  // `productionOnce` là `loadSource` bọc `getModelProductionSummary` (đọc một lần mỗi lượt dựng) — ô "lời khai ≠ chứng cứ" của P2 dùng nó.
+  for (const t of thanKhoi) assert.ok(/loadSource\(|signalOnce\(|productionOnce\(/.test(t), `khối ${t.slice(0, 30)} phải đọc nguồn qua loadSource`);
   assert.ok(!/from "@\/db"/.test(blocks) && !/from "@\/db"/.test(page), "trang không được truy vấn CSDL trực tiếp — không công thức riêng");
 
   // C và E đã nối: khối gọi đúng hàm của họ, qua loadSource, và đứng sau Suspense (kiểm ở trên).

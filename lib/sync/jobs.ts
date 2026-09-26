@@ -48,7 +48,7 @@ import { runSyncIncidentWatch } from "@/lib/tech/sync-incident-watch";
 import { reapStaleRuns } from "@/lib/agents/runner";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { runPayrollAutopilot } from "@/lib/payroll/autopilot";
-import { runModelRegistryJob } from "@/lib/models/registry-job";
+import { modelRegistryFollowUp, runModelRegistryJob } from "@/lib/models/registry-job";
 
 export type JobOptions = { trigger: SyncTrigger; actor: string; params?: Record<string, string | undefined> };
 
@@ -275,8 +275,9 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
   "pancake-products": {
     label: "Sản phẩm & tồn kho",
     source: "PANCAKE",
-    description: "Sản phẩm, mẫu mã, giá vốn và tồn kho theo từng kho.",
-    run: (o) => syncProducts({ trigger: o.trigger, actor: o.actor }),
+    description: "Sản phẩm, mẫu mã, giá vốn và tồn kho theo từng kho. Xong thì sổ mẫu tự bắt kịp mã mới (job `model-registry`, dòng chạy riêng) — chỉ đăng ký danh tính, trạng thái vòng đời để trống.",
+    // Company OS · P1: sổ mẫu bắt kịp NGAY sau khi mã mới vào ERP — không phải lịch mới, là bước cuối của job này.
+    run: (o) => syncProducts({ trigger: o.trigger, actor: o.actor, followUp: modelRegistryFollowUp(o.trigger) }),
   },
   "pancake-warehouses": {
     label: "Danh sách kho",
@@ -306,7 +307,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Đồng bộ toàn bộ Pancake",
     source: "PANCAKE",
     description: "Kho → sản phẩm → đơn hàng → khách hàng → đổi trả → nhật ký kho.",
-    run: (o) => syncPancakeAll({ trigger: o.trigger, actor: o.actor, backfill: o.params?.backfill === "1", days: num(o.params?.days) }),
+    run: (o) => syncPancakeAll({ trigger: o.trigger, actor: o.actor, backfill: o.params?.backfill === "1", days: num(o.params?.days), productsFollowUp: modelRegistryFollowUp(o.trigger) }),
   },
   "vtp-tracking": {
     label: "Trạng thái vận đơn Viettel Post",
@@ -372,12 +373,12 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       "Form landing ghi `utm_source` bằng adset_id. `fb_ads` chỉ tra ad_id có trong đơn Pancake (đơn landing không có), còn `ad_spends` chỉ giữ số liệu ở mức chiến dịch — nên adset_id không khớp được ở đâu cả. Job này tra THẲNG từng mã đang cần về `fb_adsets` (kể cả nhóm đã tắt), để chuỗi adset → chiến dịch → TKQC → marketer khép kín. Không đụng chi tiêu hay thanh toán.",
     run: (o) => syncFacebookAdsetIndex({ dryRun: o.params?.dryRun === "1" }),
   },
-  // Company OS · Agent A — sổ mẫu. Chạy TAY (nút trên /models hoặc trang Kết nối dữ liệu); lên lịch là việc chủ shop duyệt.
+  // Company OS · Agent A — sổ mẫu. Không có lịch RIÊNG: chạy lồng sau mỗi lượt `pancake-products` (P1), và chạy tay từ /models hoặc trang Kết nối dữ liệu.
   "model-registry": {
     label: "Đồng bộ sổ mẫu",
     source: "ALL",
     description:
-      "Đăng ký vào sổ mẫu (`product_models`) mọi mã chủ shop đang có: sản phẩm Pancake có `custom_id` và thiết kế TK. Thiết kế và sản phẩm cùng mã ⇒ một mẫu. Hai sản phẩm cùng mã ⇒ KHÔNG đăng ký, hiện ở danh sách mã mơ hồ để người quyết. Trạng thái vòng đời của mẫu mới để TRỐNG (chưa khai) — không backfill. Chạy lại không đẻ dòng mới.",
+      "Đăng ký vào sổ mẫu (`product_models`) mọi mã chủ shop đang có: sản phẩm Pancake có `custom_id` và thiết kế TK. Thiết kế và sản phẩm cùng mã ⇒ một mẫu. Hai sản phẩm cùng mã ⇒ KHÔNG đăng ký, hiện ở danh sách mã mơ hồ để người quyết. Trạng thái vòng đời của mẫu mới để TRỐNG (chưa khai) — không backfill. Chạy lại không đẻ dòng mới. Tự chạy sau mỗi lượt “Sản phẩm & tồn kho”.",
     run: (o) => runModelRegistryJob({ trigger: o.trigger, actor: o.actor }),
   },
   "outcome-materialize": {
@@ -592,7 +593,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     source: "ALL",
     description: "Pancake (toàn bộ) rồi Viettel Post.",
     run: async (o) => {
-      const pancake = await syncPancakeAll({ trigger: o.trigger, actor: o.actor }).catch((e) => ({ error: String(e) }));
+      const pancake = await syncPancakeAll({ trigger: o.trigger, actor: o.actor, productsFollowUp: modelRegistryFollowUp(o.trigger) }).catch((e) => ({ error: String(e) }));
       const vtp = await syncViettelPostShipments({ trigger: o.trigger, actor: o.actor }).catch((e) => ({ error: String(e) }));
       const ads = await syncFacebookAds({ trigger: o.trigger, actor: o.actor }).catch((e) => ({ error: String(e) }));
       return { pancake, vtp, ads };

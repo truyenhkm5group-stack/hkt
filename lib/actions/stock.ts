@@ -10,9 +10,9 @@ import { can, requireUser } from "@/lib/auth/session";
 import type { Actor } from "@/lib/constants/actor";
 import { vnStartOfDay } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
-import { deleteReceiptSchema, stockReceiptSchema } from "@/lib/validation/stock";
+import { deleteReceiptSchema, linkReceiptSchema, stockReceiptSchema } from "@/lib/validation/stock";
 import { deleteStockReceiptCore } from "@/lib/inventory/receipt-delete";
-import { writeStockReceiptCore } from "@/lib/inventory/receipt-create";
+import { linkExistingReceiptCore, writeStockReceiptCore } from "@/lib/inventory/receipt-create";
 import { validateProductionLink } from "@/lib/inventory/production-link";
 import { matchSupplier } from "@/lib/constants/suppliers";
 import { supplierCatalog } from "@/lib/queries/suppliers";
@@ -144,4 +144,25 @@ export async function deleteStockReceipt(id: string, reason: string): Promise<Ac
     revalidate();
     return { ok: true };
   });
+}
+
+/**
+ * Nối một phiếu NHẬP HÀNG đã có vào lệnh sản xuất (Company OS · Agent P2). Lõi ở
+ * `lib/inventory/receipt-create.ts::linkExistingReceiptCore`: cùng cổng `validateProductionLink` với lúc tạo
+ * phiếu · chỉ phiếu chưa nối · sản phẩm của lệnh phải có trên phiếu · sự kiện + nhật ký trước / sau.
+ * Chỉ NGƯỜI bấm — trang Chất lượng dữ liệu chỉ đề xuất lệnh khớp, không nối hộ.
+ */
+export async function linkStockReceiptToProductionOrder(input: unknown): Promise<ActionResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Không có quyền nhập kho" };
+  const parsed = linkReceiptSchema.safeParse(input);
+  if (!parsed.success) return { error: firstIssue(parsed.error) };
+  const db = await getDb();
+  const actor: Actor = { id: user.id, label: user.name || user.email };
+  const kq = await linkExistingReceiptCore(db, { receiptId: parsed.data.receiptId, productionOrderId: parsed.data.productionOrderId, actor, actorEmail: user.email, note: parsed.data.note });
+  if ("error" in kq) return { error: kq.error };
+  revalidate();
+  // Phiếu nối lệnh đổi "đang sản xuất" của lệnh (openQtyAfterReceived) và làm chỗ hở rời trang Chất lượng dữ liệu.
+  for (const path of ["/data-quality", "/inventory/planning", "/inventory/planning/orders", "/production", "/models"]) revalidatePath(path);
+  return { ok: true, id: parsed.data.receiptId };
 }

@@ -5,6 +5,7 @@ import { ExternalLink, Lightbulb, Shirt } from "lucide-react";
 import {
   AdsCreativeBlock,
   EconomicsBlock,
+  EvidenceGapNote,
   OrdersBlock,
   ProductionBlock,
   productionOnce,
@@ -110,6 +111,7 @@ export default async function ModelDetailPage({ params, searchParams }: { params
 
   const ctx: BlockCtx = {
     modelId: model.id,
+    modelCode: model.code,
     productId: model.product?.id ?? null,
     productName: model.product?.name ?? null,
     declaredState: model.state,
@@ -187,11 +189,15 @@ export default async function ModelDetailPage({ params, searchParams }: { params
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <SectionCard title="Trạng thái khai" hint="Điều NGƯỜI nói về mẫu. Bước tiếp theo trong sơ đồ vòng đời không cần lý do; lùi bước, nhảy cóc hay khai lần đầu thì bắt buộc lý do. Mỗi lượt đổi là một dòng lịch sử không sửa được.">
+        <SectionCard id="trang-thai-khai" title="Trạng thái khai" hint="Điều NGƯỜI nói về mẫu. Bước tiếp theo trong sơ đồ vòng đời không cần lý do; lùi bước, nhảy cóc hay khai lần đầu thì bắt buộc lý do. Mỗi lượt đổi là một dòng lịch sử không sửa được.">
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-2 text-sm">
               Hiện tại: <ModelStateBadge state={model.state} />
             </div>
+            {/* Agent P2: lời khai ≠ chứng cứ — trạng thái sản xuất đã khai mà ERP không có chứng từ tương ứng. */}
+            <Suspense fallback={<span className="hidden" />}>
+              <EvidenceGapNote ctx={ctx} />
+            </Suspense>
             {canWrite && provisional ? <AssignCodeControl modelId={model.id} code={model.code} /> : null}
             {canWrite ? <TransitionControl modelId={model.id} state={model.state} winnerFollowUp={followUp} /> : <p className="text-xs text-muted-foreground">Cần quyền &ldquo;Vòng đời mẫu: khai &amp; đồng bộ&rdquo; để đổi trạng thái.</p>}
             <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-sm">
