@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { conversationVerdict, META_WINDOW_MARGIN_MINUTES, timesFromMessages } from "@/lib/constants/outreach-broadcast";
+import { conversationVerdict, META_WINDOW_MARGIN_MINUTES, seenVerdict, timesFromMessages } from "@/lib/constants/outreach-broadcast";
+import { upsertConversationFunnel } from "@/lib/cs/conversation-funnel";
+import { customerReadWatermark } from "@/lib/integrations/pancake/pages";
 import type { PancakeMessage } from "@/lib/integrations/pancake/pages";
 import { createBroadcast, resumeBroadcast, runBroadcast, stopBroadcast, type BroadcastClient } from "@/lib/outreach/broadcast";
 import { previewBroadcast } from "@/lib/queries/outreach-broadcast";
@@ -45,6 +47,20 @@ export function testBroadcastVerdictPure() {
   ]);
   assert.equal(t.lastCustomerAt, KHACH_HOI);
   assert.equal(t.lastShopAt, SHOP_GUI_ANH, "ảnh của shop là một tin");
+  // ── Khách đã xem: hình dạng THẬT của `read_watermarks` (dò production 26/09/2026, ops 36256183975) ──
+  const conv = { from_psid: "25000000000000001", from: { id: "25000000000000001" }, read_watermarks: [{ psid: "25000000000000001", watermark: 1789542357, message_id: "m", is_group_conv: null }, { psid: "khac", watermark: 1799999999 }] };
+  assert.equal(customerReadWatermark(conv)?.getTime(), 1789542357 * 1000, "mốc GIÂY của đúng khách trong hội thoại");
+  assert.equal(customerReadWatermark({ read_watermarks: conv.read_watermarks }), null, "không biết khách là ai ⇒ chưa biết, không lấy bừa phần tử");
+  assert.equal(customerReadWatermark({ from_psid: "25000000000000001" }), null, "không có mốc đọc ⇒ chưa biết");
+  const shopGui = ago(2);
+  assert.equal(seenVerdict(ago(1), shopGui, "SEEN"), null, "xem sau tin cuối của shop ⇒ đã xem");
+  assert.equal(seenVerdict(new Date(shopGui.getTime() - 500), shopGui, "SEEN"), null, "mốc đọc là giây, lệch dưới 1 giây vẫn là đã xem");
+  assert.equal(seenVerdict(ago(3), shopGui, "SEEN"), "NOT_SEEN_YET");
+  assert.equal(seenVerdict(ago(3), shopGui, "NOT_SEEN"), null);
+  assert.equal(seenVerdict(ago(1), shopGui, "NOT_SEEN"), "ALREADY_SEEN");
+  assert.equal(seenVerdict(null, shopGui, "NOT_SEEN"), "SEEN_UNKNOWN", "không có mốc KHÔNG phải chưa xem");
+  assert.equal(seenVerdict(null, shopGui, "SEEN"), "SEEN_UNKNOWN");
+  assert.equal(seenVerdict(null, shopGui, "ANY"), null);
   console.log("✓ Gửi tin hàng loạt · luật thuần: ngoài 24 giờ (trừ biên 10 phút) không gửi · khách nhắn cuối để nhân viên · im chưa đủ giờ chờ · tin rỗng không tính");
 }
 
@@ -56,8 +72,8 @@ export async function testBroadcastFlowDb(db: Db) {
   const conv = (id: string, v: Partial<typeof schema.conversationFunnel.$inferInsert>) => ({ pageId: PAGE, conversationId: `${P}${id}`, pancakeCustomerId: `cust-${id}`, customerName: `Nguyễn Thị ${id}`, ...v });
   try {
     await db.insert(schema.conversationFunnel).values([
-      conv("ok1", { lastCustomerMessageAt: ago(5), lastShopMessageAt: ago(4), tags: ["Kiểm hàng"] }),
-      conv("ok2", { lastCustomerMessageAt: ago(6), lastShopMessageAt: ago(3), tags: ["Kiểm hàng"] }),
+      conv("ok1", { lastCustomerMessageAt: ago(5), lastShopMessageAt: ago(4), tags: ["Kiểm hàng"], customerSeenAt: ago(3) }),
+      conv("ok2", { lastCustomerMessageAt: ago(6), lastShopMessageAt: ago(3), tags: ["Kiểm hàng"], customerSeenAt: ago(5) }),
       conv("fail", { lastCustomerMessageAt: ago(7), lastShopMessageAt: ago(6), tags: ["Kiểm hàng"] }),
       conv("replied-live", { lastCustomerMessageAt: ago(8), lastShopMessageAt: ago(7), tags: ["Kiểm hàng"] }),
       conv("old", { lastCustomerMessageAt: ago(30), lastShopMessageAt: ago(29), tags: ["Kiểm hàng"] }),
@@ -69,7 +85,7 @@ export async function testBroadcastFlowDb(db: Db) {
     // Đơn ghép theo SĐT, KHÔNG theo hội thoại — luật "đã có đơn" phải bắt được cả đường này.
     await db.insert(schema.orders).values({ id: `${P}order`, stage: "NEW", billPhone: "0911000111", insertedAt: ago(10) });
 
-    const filters = { pageIds: [PAGE], from: "", to: "", tagsAny: ["Kiểm hàng"], tagsNone: ["Đã gửi"], replyState: "SHOP_LAST" as const, minSilenceHours: 1, phone: "ANY" as const, order: "NO_ORDER" as const, skipRecentHours: 24, limit: 500 };
+    const filters = { pageIds: [PAGE], from: "", to: "", tagsAny: ["Kiểm hàng"], tagsNone: ["Đã gửi"], replyState: "SHOP_LAST" as const, minSilenceHours: 1, phone: "ANY" as const, seen: "ANY" as const, order: "NO_ORDER" as const, skipRecentHours: 24, limit: 500 };
     const p = await previewBroadcast(filters);
     assert.deepEqual(
       p.eligible.map((e) => e.conversationId),
@@ -82,6 +98,26 @@ export async function testBroadcastFlowDb(db: Db) {
     assert.equal(p.excluded.NO_CUSTOMER_ID, 1);
     assert.equal(p.excluded.RECENTLY_BROADCAST, undefined);
     assert.ok(!p.eligible.some((e) => e.conversationId === `${P}tag-out`), "thẻ loại trừ thắng thẻ bắt buộc");
+
+    // Đã xem: ok1 xem SAU tin cuối của shop, ok2 xem TRƯỚC; hai khách còn lại không có mốc ⇒ chưa biết.
+    const daXem = await previewBroadcast({ ...filters, seen: "SEEN" });
+    assert.deepEqual(daXem.eligible.map((e) => e.conversationId), [`${P}ok1`]);
+    assert.equal(daXem.excluded.NOT_SEEN_YET, 1);
+    assert.equal(daXem.excluded.SEEN_UNKNOWN, 2, "không có mốc đọc được ĐẾM là chưa biết");
+    const chuaXem = await previewBroadcast({ ...filters, seen: "NOT_SEEN" });
+    assert.deepEqual(chuaXem.eligible.map((e) => e.conversationId), [`${P}ok2`], "chưa biết KHÔNG bị gộp vào chưa xem");
+
+    // Ghi lại từ lượt quét: mốc đọc chỉ tiến lên, lượt quét thiếu mốc không xoá mốc đã biết.
+    const base = { pageId: PAGE, conversationId: `${P}ok1`, pancakeCustomerId: "cust-ok1", customerName: "Nguyễn Thị ok1", tags: ["Kiểm hàng"], lastCustomerMessageAt: ago(5), lastShopMessageAt: ago(4) };
+    const docMoc = async () => (await db.select({ at: schema.conversationFunnel.customerSeenAt }).from(schema.conversationFunnel).where(eq(schema.conversationFunnel.conversationId, `${P}ok1`)))[0]?.at ?? null;
+    const MOC_DA_BIET = await docMoc();
+    assert.ok(MOC_DA_BIET);
+    await upsertConversationFunnel(db, [{ ...base, customerSeenAt: null }]);
+    await upsertConversationFunnel(db, [{ ...base, customerSeenAt: new Date(MOC_DA_BIET.getTime() - 7 * H) }]);
+    assert.equal((await docMoc())?.getTime(), MOC_DA_BIET.getTime(), "mốc cũ hơn / NULL không đè mốc đọc mới hơn");
+    const MOI_HON = new Date(MOC_DA_BIET.getTime() + 60_000);
+    await upsertConversationFunnel(db, [{ ...base, customerSeenAt: MOI_HON }]);
+    assert.equal((await docMoc())?.getTime(), MOI_HON.getTime(), "mốc mới hơn thì tiến lên");
 
     const limited = await previewBroadcast({ ...filters, limit: 2 });
     assert.equal(limited.eligible.length, 2);

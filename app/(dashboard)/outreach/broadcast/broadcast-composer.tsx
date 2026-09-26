@@ -23,6 +23,8 @@ import {
   PHONE_FILTERS,
   REPLY_STATE_LABEL,
   REPLY_STATES,
+  SEEN_FILTER_LABEL,
+  SEEN_FILTERS,
   type BroadcastFilters,
   type BroadcastPreviewResult,
 } from "@/lib/constants/outreach-broadcast";
@@ -41,6 +43,7 @@ const DEFAULT_FILTERS: BroadcastFilters = {
   replyState: "SHOP_LAST",
   minSilenceHours: 1,
   phone: "ANY",
+  seen: "ANY",
   order: "NO_ORDER",
   skipRecentHours: 24,
   limit: 500,
@@ -160,6 +163,16 @@ export function BroadcastComposer({ pages, tags, canSend, defaultMessage }: { pa
             <Input inputMode="decimal" defaultValue={String(filters.minSilenceHours)} onChange={(e) => patch({ minSilenceHours: Math.min(23, Math.max(0, num(e.target.value, 0))) })} />
           </div>
           <div className="space-y-1">
+            <Label className="flex items-center gap-1">
+              Khách đã xem
+              <InfoHint>Theo mốc &quot;đã xem&quot; của Messenger mà Pancake trả về. Khách chưa có mốc nào là CHƯA BIẾT: bị loại ở cả hai lựa chọn và đếm riêng, không bị coi là chưa xem.</InfoHint>
+            </Label>
+            <Select value={filters.seen} onValueChange={(v) => patch({ seen: v as BroadcastFilters["seen"] })}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>{SEEN_FILTERS.map((s) => <SelectItem key={s} value={s}>{SEEN_FILTER_LABEL[s]}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
             <Label>Số điện thoại</Label>
             <Select value={filters.phone} onValueChange={(v) => patch({ phone: v as BroadcastFilters["phone"] })}>
               <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
@@ -224,6 +237,7 @@ export function BroadcastComposer({ pages, tags, canSend, defaultMessage }: { pa
                     <th className="px-2 py-1 font-medium">Thẻ</th>
                     <th className="px-2 py-1 font-medium">Tin cuối của khách</th>
                     <th className="px-2 py-1 font-medium">Tin cuối của shop</th>
+                    <th className="px-2 py-1 font-medium">Khách xem lúc</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -234,6 +248,7 @@ export function BroadcastComposer({ pages, tags, canSend, defaultMessage }: { pa
                       <td className="px-2 py-1">{r.tags.join(", ") || "—"}</td>
                       <td className="px-2 py-1">{formatTimeAgo(r.lastCustomerAt)}</td>
                       <td className="px-2 py-1">{formatTimeAgo(r.lastShopAt)}</td>
+                      <td className="px-2 py-1">{formatTimeAgo(r.seenAt)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -41,11 +41,19 @@ export const REPLY_STATE_LABEL: Record<ReplyState, string> = {
 export const PHONE_FILTERS = ["ANY", "HAS", "NONE"] as const;
 export const PHONE_FILTER_LABEL: Record<(typeof PHONE_FILTERS)[number], string> = { ANY: "Tất cả", HAS: "Đã cho SĐT", NONE: "Chưa cho SĐT" };
 
+/**
+ * KHÁCH ĐÃ XEM TIN CUỐI CỦA SHOP CHƯA — theo mốc đọc Messenger (`conversation_funnel.customer_seen_at`).
+ * Mốc `NULL` là CHƯA BIẾT: nó bị loại ở CẢ HAI lựa chọn và đếm riêng, không bị coi là "chưa xem".
+ */
+export const SEEN_FILTERS = ["ANY", "SEEN", "NOT_SEEN"] as const;
+export type SeenFilter = (typeof SEEN_FILTERS)[number];
+export const SEEN_FILTER_LABEL: Record<SeenFilter, string> = { ANY: "Tất cả", SEEN: "Đã xem tin cuối của shop", NOT_SEEN: "Chưa xem tin cuối của shop" };
+
 export const ORDER_FILTERS = ["NO_ORDER", "ANY"] as const;
 export const ORDER_FILTER_LABEL: Record<(typeof ORDER_FILTERS)[number], string> = { NO_ORDER: "Chưa có đơn (30 ngày)", ANY: "Tất cả, kể cả đã có đơn" };
 
 /** Lý do một khách KHÔNG vào lượt gửi — lúc xem trước hoặc lúc sắp gửi. */
-export const BROADCAST_SKIP_REASONS = ["OUTSIDE_WINDOW", "NO_CUSTOMER_MESSAGE", "CUSTOMER_REPLIED", "SHOP_REPLIED", "NOT_SILENT_YET", "HAS_ORDER", "RECENTLY_BROADCAST", "NO_CUSTOMER_ID", "OVER_LIMIT"] as const;
+export const BROADCAST_SKIP_REASONS = ["OUTSIDE_WINDOW", "NO_CUSTOMER_MESSAGE", "CUSTOMER_REPLIED", "SHOP_REPLIED", "NOT_SILENT_YET", "HAS_ORDER", "RECENTLY_BROADCAST", "NO_CUSTOMER_ID", "OVER_LIMIT", "SEEN_UNKNOWN", "NOT_SEEN_YET", "ALREADY_SEEN"] as const;
 export type BroadcastSkipReason = (typeof BROADCAST_SKIP_REASONS)[number];
 export const BROADCAST_SKIP_LABEL: Record<BroadcastSkipReason, string> = {
   OUTSIDE_WINDOW: "Quá 24 giờ từ tin cuối của khách — Meta không cho nhắn",
@@ -57,6 +65,9 @@ export const BROADCAST_SKIP_LABEL: Record<BroadcastSkipReason, string> = {
   RECENTLY_BROADCAST: "Đã nhận tin hàng loạt gần đây",
   NO_CUSTOMER_ID: "Thiếu mã khách Pancake — không kiểm lại được trước khi gửi",
   OVER_LIMIT: "Vượt số khách tối đa của lượt",
+  SEEN_UNKNOWN: "Chưa biết khách đã xem hay chưa",
+  NOT_SEEN_YET: "Khách chưa xem tin cuối của shop",
+  ALREADY_SEEN: "Khách đã xem tin cuối của shop",
 };
 
 export const BROADCAST_STATUS_LABEL: Record<string, string> = { RUNNING: "Đang gửi", STOPPED: "Đã dừng", DONE: "Xong" };
@@ -91,6 +102,7 @@ export const broadcastFiltersSchema = z
     /** Im ít nhất N giờ kể từ tin cuối (của bất kỳ bên nào). */
     minSilenceHours: z.number().min(0).max(23).default(1),
     phone: z.enum(PHONE_FILTERS).default("ANY"),
+    seen: z.enum(SEEN_FILTERS).default("ANY"),
     order: z.enum(ORDER_FILTERS).default("NO_ORDER"),
     /** Bỏ khách đã nhận tin hàng loạt trong N giờ. 0 = không bỏ. */
     skipRecentHours: z.number().int().min(0).max(24 * 30).default(24),
@@ -110,7 +122,7 @@ export const broadcastStartSchema = z
 export type BroadcastStartInput = z.infer<typeof broadcastStartSchema>;
 
 /** Kết quả "Xem trước" gửi về trình duyệt (đã tuần tự hoá). */
-export type BroadcastPreviewRow = { pageName: string; pageId: string; customerName: string; hasPhone: boolean; tags: string[]; lastCustomerAt: string | null; lastShopAt: string | null };
+export type BroadcastPreviewRow = { pageName: string; pageId: string; customerName: string; hasPhone: boolean; tags: string[]; lastCustomerAt: string | null; lastShopAt: string | null; seenAt: string | null };
 export type BroadcastPreviewResult = {
   total: number;
   sample: BroadcastPreviewRow[];
@@ -137,6 +149,18 @@ export function conversationVerdict(t: ConversationTimes, rule: VerdictRule, now
   const latest = Math.max(t.lastCustomerAt.getTime(), t.lastShopAt?.getTime() ?? 0);
   if (now.getTime() - latest < rule.minSilenceHours * 3_600_000) return "NOT_SILENT_YET";
   return null;
+}
+
+/**
+ * Lọc theo "khách đã xem". Mốc đọc là GIÂY còn mốc tin là mili giây, nên so với dung sai 1 giây.
+ * Không có mốc đọc, hoặc shop chưa nhắn tin nào để mà xem ⇒ `SEEN_UNKNOWN`.
+ */
+export function seenVerdict(seenAt: Date | null, lastShopAt: Date | null, mode: SeenFilter): BroadcastSkipReason | null {
+  if (mode === "ANY") return null;
+  if (!seenAt || !lastShopAt) return "SEEN_UNKNOWN";
+  const daXem = seenAt.getTime() + 1000 >= lastShopAt.getTime();
+  if (mode === "SEEN") return daXem ? null : "NOT_SEEN_YET";
+  return daXem ? "ALREADY_SEEN" : null;
 }
 
 /** Mốc tin cuối của mỗi bên từ tin nhắn đọc lại — chỉ đếm tin có nội dung (chữ hoặc tệp). */

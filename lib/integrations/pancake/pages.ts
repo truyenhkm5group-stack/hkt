@@ -7,7 +7,20 @@ import { env } from "@/lib/env";
 import { asArray, asRecord, fetchJson, IntegrationError, int, str } from "@/lib/integrations/http";
 
 export type PancakePage = { id: string; name: string; platform: string };
-export type PancakeConversation = { id: string; pageId: string; type: string; tags: string[]; customerName: string; customerId: string; phones: string[]; snippet: string; updatedAt: Date | null; raw: Record<string, unknown> };
+export type PancakeConversation = {
+  id: string;
+  pageId: string;
+  type: string;
+  tags: string[];
+  customerName: string;
+  customerId: string;
+  phones: string[];
+  snippet: string;
+  updatedAt: Date | null;
+  /** Khách đã đọc tới mốc này (mốc đọc Facebook). `null` = Pancake không cho biết — KHÔNG phải "chưa xem". */
+  customerSeenAt: Date | null;
+  raw: Record<string, unknown>;
+};
 export type PancakeMessage = { id: string; text: string; fromId: string; fromName: string; fromPage: boolean; insertedAt: Date | null; hasAttachment: boolean };
 
 function toDate(value: unknown): Date | null {
@@ -16,6 +29,29 @@ function toDate(value: unknown): Date | null {
   if (!s) return null;
   const d = new Date(/^\d{4}-\d{2}-\d{2}T/.test(s) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s) ? `${s}Z` : s);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * MỐC "KHÁCH ĐÃ XEM" — `read_watermarks` của hội thoại Pancake.
+ *
+ * Dò production 26/09/2026 (ops pages-debug 36256183975): mỗi phần tử là `{ psid, watermark, message_id,
+ * is_group_conv }`, `watermark` là mốc GIÂY. Theo quy ước mốc đọc của Messenger, mọi tin có mốc ≤ watermark
+ * đã được người mang `psid` đọc — chính là dòng "đã xem · <giờ>" trên giao diện Pancake. (`seen` và
+ * `unread_count` của hội thoại là phía TRANG — nhân viên đã đọc chưa — không phải phía khách.)
+ *
+ * Chỉ nhận phần tử có `psid` TRÙNG khách của hội thoại (`from_psid`, rồi `from.id`). Không xác định được
+ * khách ⇒ `null` (chưa biết), không đoán theo phần tử duy nhất.
+ */
+export function customerReadWatermark(conv: Record<string, unknown>): Date | null {
+  const psid = str(conv.from_psid, asRecord(conv.from).id);
+  if (!psid) return null;
+  let best: Date | null = null;
+  for (const e of asArray(conv.read_watermarks).map(asRecord)) {
+    if (str(e.psid) !== psid) continue;
+    const at = toDate(e.watermark);
+    if (at && (!best || at > best)) best = at;
+  }
+  return best;
 }
 
 export class PancakePagesClient {
@@ -95,6 +131,7 @@ export class PancakePagesClient {
           phones,
           snippet: str(c.snippet, c.last_message),
           updatedAt: toDate(c.updated_at ?? c.last_message_at ?? c.inserted_at),
+          customerSeenAt: customerReadWatermark(c),
           raw: c,
         });
       }

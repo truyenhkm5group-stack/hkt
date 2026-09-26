@@ -8,7 +8,7 @@
  */
 import { sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
-import { broadcastFiltersSchema, conversationVerdict, META_WINDOW_HOURS, META_WINDOW_MARGIN_MINUTES, type BroadcastFilters, type BroadcastSkipReason } from "@/lib/constants/outreach-broadcast";
+import { broadcastFiltersSchema, conversationVerdict, seenVerdict, META_WINDOW_HOURS, META_WINDOW_MARGIN_MINUTES, type BroadcastFilters, type BroadcastSkipReason } from "@/lib/constants/outreach-broadcast";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
 import { rowsOf } from "@/lib/sql-rows";
 
@@ -57,6 +57,7 @@ export type BroadcastCandidate = {
   tags: string[];
   lastCustomerMessageAt: Date | null;
   lastShopMessageAt: Date | null;
+  customerSeenAt: Date | null;
 };
 
 export type BroadcastPreview = {
@@ -79,6 +80,7 @@ type Row = {
   tags: string[] | null;
   last_customer_message_at: string | Date | null;
   last_shop_message_at: string | Date | null;
+  customer_seen_at: string | Date | null;
   has_order: boolean;
   recently_broadcast: boolean;
 };
@@ -96,7 +98,7 @@ export async function previewBroadcast(rawFilters: BroadcastFilters, now = new D
   const [rows, outside, truncated, scan] = await Promise.all([
     db.execute(sql`
       select cf.page_id, fp.name as page_name, cf.conversation_id, cf.pancake_customer_id, cf.customer_name, cf.phone, cf.tags,
-             cf.last_customer_message_at, cf.last_shop_message_at,
+             cf.last_customer_message_at, cf.last_shop_message_at, cf.customer_seen_at,
              ${recentOrderExists(sql`cf.conversation_id`, sql`cf.phone`)} as has_order,
              ${
                f.skipRecentHours > 0
@@ -123,11 +125,15 @@ export async function previewBroadcast(rawFilters: BroadcastFilters, now = new D
 
   const eligible: BroadcastCandidate[] = [];
   for (const r of rowsOf<Row>(rows)) {
-    const verdict = conversationVerdict({ lastCustomerAt: toDate(r.last_customer_message_at), lastShopAt: toDate(r.last_shop_message_at) }, f, now);
+    const lastShopAt = toDate(r.last_shop_message_at);
+    const verdict = conversationVerdict({ lastCustomerAt: toDate(r.last_customer_message_at), lastShopAt }, f, now);
+    // Lý do MẠNH đếm trước: khách đã có đơn thì "chưa biết đã xem" không còn nghĩa gì.
+    const seen = seenVerdict(toDate(r.customer_seen_at), lastShopAt, f.seen);
     if (verdict) bump(verdict);
     else if (f.order === "NO_ORDER" && r.has_order) bump("HAS_ORDER");
     else if (r.recently_broadcast) bump("RECENTLY_BROADCAST");
     else if (!r.pancake_customer_id) bump("NO_CUSTOMER_ID");
+    else if (seen) bump(seen);
     else if (eligible.length >= f.limit) bump("OVER_LIMIT");
     else
       eligible.push({
@@ -139,7 +145,8 @@ export async function previewBroadcast(rawFilters: BroadcastFilters, now = new D
         phone: r.phone,
         tags: r.tags ?? [],
         lastCustomerMessageAt: toDate(r.last_customer_message_at),
-        lastShopMessageAt: toDate(r.last_shop_message_at),
+        lastShopMessageAt: lastShopAt,
+        customerSeenAt: toDate(r.customer_seen_at),
       });
   }
   const scanAt = rowsOf<{ at: string | Date | null }>(scan)[0]?.at ?? null;
