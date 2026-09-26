@@ -274,6 +274,7 @@ import { testCsSemantic } from "./cs-semantic.test";
 import { testCsSemanticCache } from "./cs-semantic-cache.test";
 import { testFeedAutomation } from "./feed-automation.test";
 import { testOutreachErrorClassify, testOutreachIdempotentSend } from "./outreach-send.test";
+import { testBroadcastFlowDb, testBroadcastVerdictPure } from "./outreach-broadcast.test";
 import { testOutreachEligibility, testOutreachOutcomeFacet } from "./outreach-segment.test";
 import { testCsCustomerQueue } from "./cs-customer-queue.test";
 import { testCareUiContrast } from "./care-ui-contrast.test";
@@ -1821,6 +1822,8 @@ async function main() {
   testCsUiContrast();
   testOutreachErrorClassify();
   await testOutreachIdempotentSend(db);
+  testBroadcastVerdictPure();
+  await testBroadcastFlowDb(db);
   testOutreachEligibility();
   await testOutreachOutcomeFacet(db);
   await testCsCustomerQueue(db);

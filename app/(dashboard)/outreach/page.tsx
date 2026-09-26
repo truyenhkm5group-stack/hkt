@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { HeartHandshake, MessageSquareHeart, Send, ShoppingBag } from "lucide-react";
+import { HeartHandshake, Megaphone, MessageSquareHeart, Send, ShoppingBag } from "lucide-react";
 import { OutreachConfigForm } from "@/app/(dashboard)/outreach/outreach-config";
 import { BuildButton, OutreachTable } from "@/app/(dashboard)/outreach/outreach-table";
 import { DataTableToolbar } from "@/components/data-table/toolbar";
@@ -8,6 +8,7 @@ import { UrlPagination } from "@/components/data-table/url-pagination";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/ui-bits";
+import { Button } from "@/components/ui/button";
 import { can, requirePermission } from "@/lib/auth/session";
 import { NURTURE_WINDOWS, OUTREACH_STATUS_LABEL, OUTREACH_STATUSES, SEGMENT_LABEL } from "@/lib/constants/outreach";
 import { formatNumber } from "@/lib/format";
@@ -41,7 +42,16 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
         title="Chăm sóc khách băn khoăn & bán chéo"
         description="Nhắc khách còn băn khoăn và gợi ý bán chéo sau khi khách nhận hàng."
         hint="(1) Khách đã nhắn Pancake trong 24 giờ hoặc 7 ngày nhưng chưa đặt đơn → kịch bản băn khoăn nhiều bước, mỗi ngày một tin (ưu đãi chốt nhanh → chất lượng → kiểm hàng trước khi trả tiền → còn ít hàng → hỗ trợ → hỏi lại); tự dừng khi khách đặt đơn hoặc trả lời để nhân viên tiếp quản. (2) Khách đã nhận hàng 3–14 ngày → tin cảm ơn kèm gợi ý sản phẩm phối cùng. Nhân viên duyệt, sửa nội dung rồi gửi qua inbox Pancake; khách không có hội thoại thì xuất CSV để nhắn Zalo/SMS."
-        actions={canWrite ? <BuildButton segment={segment} defaultHours={config.nurtureWindowHours} /> : null}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/outreach/broadcast">
+                <Megaphone className="size-4" /> Gửi tin hàng loạt
+              </Link>
+            </Button>
+            {canWrite ? <BuildButton segment={segment} defaultHours={config.nurtureWindowHours} /> : null}
+          </div>
+        }
       />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label="Băn khoăn chưa mua · đến hạn gửi" value={formatNumber(summary.nurture.due)} note={`${formatNumber(summary.nurture.pending)} đang trong kịch bản · ${formatNumber(summary.nurture.converted)} đã mua · ${formatNumber(summary.nurture.replied)} khách trả lời · ${formatNumber(summary.nurture.failed)} lỗi`} icon={MessageSquareHeart} tone={summary.nurture.due ? "amber" : "slate"} />
