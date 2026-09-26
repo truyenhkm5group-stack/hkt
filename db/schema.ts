@@ -2378,6 +2378,17 @@ export const returnUnidentified = pgTable(
     /** Một khoá trong `ITEM_CONDITIONS` — DÙNG CHUNG với kiểm từng món, không dựng danh sách thứ hai. */
     condition: text("condition").notNull(),
     note: text("note").notNull().default(""),
+    /*
+      Company OS · Agent U (0144): AI XÁC NHẬN MẪU MÃ, LÚC NÀO — tách hẳn khỏi `identified_*` (đó là LỚP 2:
+      nối ĐƠN). Mẫu mã là lời xác nhận của NGƯỜI cầm món hàng (luật 34: khoá tài khoản + ảnh chụp tên do
+      máy chủ đọc). NULL ở dòng cũ = CHƯA BIẾT ai chọn (không backfill — luật 35), không phải "máy chọn".
+      Mốc và tên đi cùng nhau (CHECK `return_unidentified_variant_identified_check`).
+    */
+    variantIdentifiedAt: ts("variant_identified_at"),
+    variantIdentifiedBy: text("variant_identified_by"),
+    variantIdentifiedByUserId: text("variant_identified_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Ghi chú của lượt xác nhận — BẮT BUỘC khi ĐỔI mẫu đã gán (lý do), không bắt buộc khi gán lần đầu. */
+    variantIdentifyNote: text("variant_identify_note"),
 
     // ── LỚP 2: nối được với đơn nào (có thể mãi không có) ──
     /** `MANUAL_MATCH` — xem `IDENTIFICATION_METHODS`. `NULL` = chưa ai nối. */
@@ -2461,6 +2472,9 @@ export const returnUnidentified = pgTable(
     /* MỖI PHIẾU KHO CHỈ PHỤC VỤ MỘT MÓN GIỮ TẠM. Không có ràng buộc này thì một lỗi lập trình có
        thể trỏ hai dòng vào cùng một phiếu, và "đã vào tồn" trở thành một lời nói dối có vẻ hợp lệ. */
     uniqueIndex("return_unidentified_receipt_uk").on(t.stockReceiptId),
+    /* Agent U (0144): một lượt xác nhận mẫu mã phải nói AI và LÚC NÀO — thiếu một trong hai là một lời
+       khẳng định không truy được về người (luật 34). Dòng cũ có cả hai NULL ⇒ vẫn hợp lệ (không backfill). */
+    check("return_unidentified_variant_identified_check", sql`(${t.variantIdentifiedAt} IS NULL) = (${t.variantIdentifiedBy} IS NULL)`),
   ],
 );
 

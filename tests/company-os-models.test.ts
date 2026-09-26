@@ -144,6 +144,8 @@ export function testCompanyOsModelsPure() {
     "sample.created", "sample.submitted", "sample.reviewed", "sample.approved", "design_version.approved",
     "production_order.linked_design", "production_plan.overridden",
     "stock_receipt.linked_production", "return.disposition_set", "approval.executed", "recommendation.decided",
+    // Agent U (0144): kho xác định mẫu mã món hàng hoàn không nhãn — Tech Lead thêm dòng vào shared-contracts.md mục 2.
+    "return.variant_identified",
   ];
   assert.deepEqual([...ten].sort(), [...hopDong].sort(), "sổ khai phải đúng bằng bảng tên đã cấp ở shared-contracts.md mục 2");
   const migName = /"domain_events_name_check" CHECK \("name" ~ '([^']+)'\)/.exec(mig);

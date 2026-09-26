@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight, History, Loader2, PackageX } from "lucide-react";
+import { ChevronDown, ChevronRight, History, Loader2, PackageX, Tag } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,8 @@ import {
   type OpenDispositionState,
   type ReturnDisposition,
 } from "@/lib/constants/return-disposition";
-import { restockAuthorityOf } from "@/lib/constants/return-unidentified";
+import { restockAuthorityOf, unidentifiedStockReceived } from "@/lib/constants/return-unidentified";
+import { IdentifyVariantPanel } from "@/app/(dashboard)/inventory/returns/identify-variant";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -63,6 +64,10 @@ export type DispositionRowView = {
   shipmentId: string | null;
   /** Chỉ món không nhãn: trạng thái xác định nguồn — quyết quyền nhập lại. */
   unidentifiedStatus: string | null;
+  /** Chỉ món không nhãn: id `return_unidentified` — để xác định mẫu mã ngay tại dòng (Agent U). */
+  unidentifiedId: string | null;
+  /** Mẫu mã THỰC NHẬN / kho đã xác nhận. `null` = chưa biết (món không nhãn chưa xác định, hoặc kiện cả kiện). */
+  variantId: string | null;
   code: string | null;
   orderCode: string | null;
   condition: string;
@@ -135,6 +140,9 @@ function ActionForm({ row, disposition, onDone, canOverride }: { row: Dispositio
   const khongChungTu = row.grain === "UNIDENTIFIED" && disposition === "RESTOCK_AFTER_REWORK" && restockAuthorityOf(row.unidentifiedStatus ?? "") === "MANAGER_OVERRIDE";
   const thieuQuyen = khongChungTu && !canOverride;
   const needNote = DISPOSITION_NEEDS_NOTE[disposition] || khongChungTu;
+  /* Món không nhãn CHƯA xác định mẫu mã: nhập lại không biết cộng vào mẫu nào — nói trước, khoá nút Ghi
+     (máy chủ vẫn chặn). Lối ra: nút "Xác định mẫu mã" ngay trên dòng. */
+  const chuaCoMau = row.grain === "UNIDENTIFIED" && disposition === "RESTOCK_AFTER_REWORK" && !row.variantId;
   const noteMin = DISPOSITION_NEEDS_NOTE[disposition] ? DISPOSITION_NOTE_MIN : 1;
 
   const gui = () =>
@@ -162,6 +170,11 @@ function ActionForm({ row, disposition, onDone, canOverride }: { row: Dispositio
   return (
     <div className="mt-2 space-y-2 rounded-lg border bg-muted/30 p-2.5 text-xs">
       <p className="text-muted-foreground">{DISPOSITION_HINT[disposition]}</p>
+      {chuaCoMau ? (
+        <p className="rounded bg-warning/15 px-2 py-1 text-amber-700 dark:text-amber-300">
+          Món không nhãn này chưa được xác định mẫu mã — nhập lại không biết cộng vào mẫu nào. Bấm “Xác định mẫu mã” trên dòng trước.
+        </p>
+      ) : null}
       {khongChungTu ? (
         <p className="rounded bg-warning/15 px-2 py-1 text-amber-700 dark:text-amber-300">
           {thieuQuyen
@@ -196,7 +209,7 @@ function ActionForm({ row, disposition, onDone, canOverride }: { row: Dispositio
         <Button
           size="sm"
           className="h-8"
-          disabled={pending || thieuQuyen || (needNote && note.trim().length < noteMin) || (disposition === "RESTOCK_AFTER_REWORK" && row.grain === "PARCEL" && !variantId)}
+          disabled={pending || thieuQuyen || chuaCoMau || (needNote && note.trim().length < noteMin) || (disposition === "RESTOCK_AFTER_REWORK" && row.grain === "PARCEL" && !variantId)}
           onClick={gui}
         >
           {pending ? <Loader2 className="size-3.5 animate-spin" /> : null} Ghi
@@ -222,6 +235,7 @@ function ActionForm({ row, disposition, onDone, canOverride }: { row: Dispositio
 
 function Row({ row, canWrite, canOverride, focused }: { row: DispositionRowView; canWrite: boolean; canOverride: boolean; focused: boolean }) {
   const [open, setOpen] = useState<ReturnDisposition | null>(null);
+  const [moMau, setMoMau] = useState(false);
   const [showHistory, setShowHistory] = useState(focused);
   const ref = useRef<HTMLLIElement>(null);
   useEffect(() => {
@@ -229,6 +243,10 @@ function Row({ row, canWrite, canOverride, focused }: { row: DispositionRowView;
   }, [focused]);
   const allowed = RETURN_DISPOSITIONS.filter((d) => DISPOSITION_ALLOWED_FROM[d].includes(row.state));
   const ten = [row.sku || row.productName || "Món chưa rõ mẫu mã", row.color, row.size].filter(Boolean).join(" · ");
+  /* Agent U: món không nhãn xác định / đổi mẫu mã ngay tại dòng. Hàng đợi chỉ chứa món CHƯA vào tồn nguyên
+     món, nên "đã có hàng vào tồn" ở đây = có dòng nhập lại sau sửa trong lịch sử. */
+  const daCoTon = unidentifiedStockReceived({ stockReceiptId: null, reworkRestockRows: row.history.filter((h) => h.disposition === "RESTOCK_AFTER_REWORK").length });
+  const coTheXacDinh = canWrite && row.grain === "UNIDENTIFIED" && Boolean(row.unidentifiedId) && !(row.variantId && daCoTon);
 
   return (
     <li ref={ref} className={cn("p-3", focused && "bg-primary/5")}>
@@ -279,6 +297,11 @@ function Row({ row, canWrite, canOverride, focused }: { row: DispositionRowView;
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
+          {coTheXacDinh ? (
+            <Button size="sm" variant={row.variantId ? "ghost" : "default"} className="h-7 px-2 text-xs" onClick={() => setMoMau((v) => !v)} title="Chọn mã hàng → màu → size của món đang cầm trên tay">
+              <Tag className="size-3.5" /> {row.variantId ? "Đổi mẫu mã" : "Xác định mẫu mã"}
+            </Button>
+          ) : null}
           {canWrite
             ? allowed.map((d) => (
                 <Button key={d} size="sm" variant={open === d ? "default" : "outline"} className="h-7 px-2 text-xs" title={DISPOSITION_HINT[d]} onClick={() => setOpen(open === d ? null : d)}>
@@ -291,6 +314,21 @@ function Row({ row, canWrite, canOverride, focused }: { row: DispositionRowView;
           </Button>
         </div>
       </div>
+      {moMau && row.unidentifiedId ? (
+        <IdentifyVariantPanel
+          target={{
+            id: row.unidentifiedId,
+            code: row.code ?? row.subjectKey,
+            quantity: row.remaining,
+            conditionLabel: conditionLabel(row.grain, row.condition),
+            note: row.inspectNote,
+            variantId: row.variantId,
+            variantLabel: row.variantId ? ten : "",
+          }}
+          stockReceived={daCoTon}
+          onDone={() => setMoMau(false)}
+        />
+      ) : null}
       {open ? <ActionForm key={open} row={row} disposition={open} canOverride={canOverride} onDone={() => setOpen(null)} /> : null}
       {showHistory ? (
         row.history.length ? (

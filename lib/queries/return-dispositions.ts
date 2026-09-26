@@ -284,6 +284,20 @@ export function unidentifiedTerminalQtySql(idColumn: SQL): SQL {
   return sql`(select coalesce(sum(rd.qty), 0)::int from return_dispositions rd where rd.unidentified_id = ${idColumn} and rd.disposition in (${inList(TERMINAL_DISPOSITIONS)}))`;
 }
 
+/**
+ * Số dòng `RESTOCK_AFTER_REWORK` của một món không nhãn — biểu thức SQL tương quan (Company OS · Agent U).
+ * Có ít nhất một dòng ⇒ đã có hàng của món này vào tồn dưới mẫu mã đang gán, nên đổi mẫu mã phải đi phiếu
+ * điều chỉnh (`checkVariantIdentify`). Một biểu thức cho cả danh sách bàn không nhãn lẫn lõi ghi.
+ */
+export function unidentifiedReworkRestockRowsSql(idColumn: SQL): SQL {
+  return sql`(select count(*)::int from return_dispositions rd where rd.unidentified_id = ${idColumn} and rd.disposition = 'RESTOCK_AFTER_REWORK')`;
+}
+
+export async function unidentifiedReworkRestockRows(db: DbLike, unidentifiedId: string): Promise<number> {
+  const [r] = rowsOf<{ n: number | string }>(await db.execute(sql`select ${unidentifiedReworkRestockRowsSql(sql`${unidentifiedId}`)} as n`));
+  return Number(r?.n ?? 0);
+}
+
 /** Món không nhãn nào (trong danh sách) đã có dòng sổ — bàn không nhãn ẩn nút đổi kết luận / tái nhập nguyên món. */
 export async function unidentifiedIdsInLedger(db: DbLike, ids: readonly string[]): Promise<Set<string>> {
   if (!ids.length) return new Set();

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Boxes, Check, HelpCircle, Link2, Loader2, PackageSearch, Search, ShieldAlert, Tag } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,9 +16,9 @@ import {
   markUnidentifiableAction,
   restockUnidentifiedReturnAction,
   searchReturnCandidatesAction,
-  searchVariantsAction,
   setUnidentifiedConditionAction,
 } from "@/lib/actions/returns-unidentified";
+import { IdentifyVariantPanel, VariantPicker } from "@/app/(dashboard)/inventory/returns/identify-variant";
 import { ITEM_CONDITION_LABEL, ITEM_CONDITION_RESTOCKS, type ItemCondition } from "@/lib/constants/return-lifecycle";
 import {
   CONFIDENCE_HINT,
@@ -32,10 +33,12 @@ import {
   UNIDENTIFIED_SOURCE_LABEL,
   UNIDENTIFIED_SOURCES,
   UNIDENTIFIED_STATUS_LABEL,
+  unidentifiedStockReceived,
+  VARIANT_FIX_ADJUSTMENT_HREF,
   type UnidentifiedSource,
   type UnidentifiedStatus,
 } from "@/lib/constants/return-unidentified";
-import type { UnidentifiedRow, UnidentifiedSummary, VariantOption } from "@/lib/returns/unidentified";
+import type { UnidentifiedListRow, UnidentifiedSummary, VariantOption } from "@/lib/returns/unidentified";
 import { formatDateTime, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -87,79 +90,7 @@ const KET_LUAN: { condition: ItemCondition; nhan: string; giaiThich: string }[] 
   { condition: "WRONG_ITEM", nhan: "Không phải hàng của shop", giaiThich: "Món này không nằm trong danh mục, hoặc là hàng của người khác. Không vào tồn." },
 ];
 
-// ───────────────────────── Ô CHỌN MẪU MÃ ─────────────────────────
-
-/**
- * TRA MẪU MÃ THEO TỪ KHOÁ, KHÔNG TẢI CẢ DANH MỤC.
- *
- * Danh mục vài nghìn mẫu mã nhồi vào HTML mỗi lượt tải trang là trả tiền cho thứ người kho chỉ gõ
- * hai chữ là xong — và bàn nhận hàng hoàn mở suốt ca.
- */
-function VariantPicker({ value, onPick }: { value: VariantOption | null; onPick: (v: VariantOption | null) => void }) {
-  const [q, setQ] = React.useState("");
-  const [rows, setRows] = React.useState<VariantOption[]>([]);
-  const [dangTim, setDangTim] = React.useState(false);
-
-  React.useEffect(() => {
-    const term = q.trim();
-    if (term.length < 2) {
-      setRows([]);
-      return;
-    }
-    // Gõ tới đâu tìm tới đó, nhưng chờ 300ms: mỗi ký tự một lượt truy vấn là bắt máy chủ trả tiền
-    // cho từng nhịp bàn phím.
-    const t = setTimeout(async () => {
-      setDangTim(true);
-      const r = await searchVariantsAction(term);
-      setDangTim(false);
-      setRows(r);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [q]);
-
-  if (value) {
-    return (
-      <div className="flex items-center gap-2 rounded-lg border bg-muted/40 p-2 text-[12.5px]">
-        <Tag className="size-4 shrink-0 text-primary" />
-        <span className="min-w-0 flex-1">
-          <span className="font-medium">{value.sku || value.name}</span>
-          {[value.color, value.size].filter(Boolean).length ? <span className="text-muted-foreground"> · {[value.color, value.size].filter(Boolean).join(" / ")}</span> : null}
-          <span className="block text-[11.5px] text-muted-foreground">{value.name}</span>
-        </span>
-        <Button type="button" variant="ghost" size="sm" className="h-7" onClick={() => onPick(null)}>
-          Đổi
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5">
-      <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Gõ mã hàng / tên / màu / size để tìm mẫu mã…" className="h-9" autoComplete="off" />
-      {dangTim ? <p className="text-[11.5px] text-muted-foreground">Đang tìm…</p> : null}
-      {rows.length ? (
-        <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border p-1">
-          {rows.map((v) => (
-            <button
-              key={v.id}
-              type="button"
-              onClick={() => onPick(v)}
-              className="block w-full rounded-md px-2 py-1.5 text-left text-[12.5px] hover:bg-accent"
-            >
-              <span className="font-medium">{v.sku || v.name}</span>
-              {[v.color, v.size].filter(Boolean).length ? <span className="text-muted-foreground"> · {[v.color, v.size].filter(Boolean).join(" / ")}</span> : null}
-              <span className="block text-[11px] text-muted-foreground">{v.name}</span>
-            </button>
-          ))}
-        </div>
-      ) : q.trim().length >= 2 && !dangTim ? (
-        <p className="text-[11.5px] text-muted-foreground">
-          Không thấy mẫu mã nào khớp. <span className="font-medium">Để trống cũng được</span> — kiện vẫn ghi nhận được, chỉ là chưa vào tồn được cho tới khi chọn mẫu mã.
-        </p>
-      ) : null}
-    </div>
-  );
-}
+// Ô chọn mẫu mã dùng CHUNG với biểu mẫu "Xác định mẫu mã" — `identify-variant.tsx` (Agent U).
 
 // ───────────────────────── TRA ỨNG VIÊN ─────────────────────────
 
@@ -429,9 +360,10 @@ function NhanKienSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v
 
 // ───────────────────────── MỘT DÒNG HÀNG GIỮ TẠM ─────────────────────────
 
-function HoldingRow({ row, canOverride, inLedger }: { row: UnidentifiedRow; canOverride: boolean; inLedger: boolean }) {
+function HoldingRow({ row, canOverride, inLedger }: { row: UnidentifiedListRow; canOverride: boolean; inLedger: boolean }) {
   const [dangChay, setDangChay] = React.useState(false);
   const [moTra, setMoTra] = React.useState(false);
+  const [moMau, setMoMau] = React.useState(false);
   const [picked, setPicked] = React.useState<Candidate | null>(null);
   const [lyDo, setLyDo] = React.useState("");
 
@@ -439,6 +371,9 @@ function HoldingRow({ row, canOverride, inLedger }: { row: UnidentifiedRow; canO
   // Món đã vào sổ kết cục (Agent R): sổ là chủ của nó — không tái nhập nguyên món / đổi kết luận ở đây.
   const canRestock = !inLedger && ITEM_CONDITION_RESTOCKS[row.condition] && Boolean(row.variantId);
   const canDoQuyen = row.status !== "IDENTIFIED";
+  // Agent U: đã có hàng vào tồn (nguyên món HOẶC nhập lại sau sửa) ⇒ đổi mẫu mã phải đi phiếu điều chỉnh.
+  const daCoTon = unidentifiedStockReceived({ stockReceiptId: row.stockReceiptId, reworkRestockRows: row.reworkRestockRows });
+  const tenMau = [row.sku || row.productName, row.color, row.size].filter(Boolean).join(" · ");
   const seed = React.useMemo(() => ({ sku: row.sku, color: row.color, size: row.size }), [row.sku, row.color, row.size]);
 
   async function chay<T extends { message?: string } | { error: string }>(fn: () => Promise<T>) {
@@ -463,21 +398,33 @@ function HoldingRow({ row, canOverride, inLedger }: { row: UnidentifiedRow; canO
             Đã vào tồn +{formatNumber(row.quantity)}
             {row.restockAuthority === "MANAGER_OVERRIDE" ? " · không chứng từ đơn" : ""}
           </Badge>
-        ) : (
+        ) : row.holdingQty > 0 ? (
           <Badge variant="outline" className="text-[10.5px]">
             Giữ tạm — chưa vào tồn
           </Badge>
+        ) : (
+          <Badge variant="secondary" className="text-[10.5px]">
+            Đã có kết cục cho toàn bộ
+          </Badge>
         )}
+        {/*
+          SỐ MÓN CÒN GIỮ TẠM, không phải số món nhận ban đầu (Agent U sửa lỗi R ghi): món đã nhập lại / huỷ /
+          trả xưởng một phần qua sổ kết cục thì phần ấy không còn "giữ tạm". Cùng MỘT biểu thức với tiêu đề
+          bàn (`HOLDING_QTY_SQL`).
+        */}
         <span className="text-muted-foreground">
           {row.sku || "chưa chọn mẫu mã"}
-          {[row.color, row.size].filter(Boolean).length ? ` · ${[row.color, row.size].filter(Boolean).join(" / ")}` : ""} × {formatNumber(row.quantity)} ·{" "}
-          {ITEM_CONDITION_LABEL[row.condition]}
+          {[row.color, row.size].filter(Boolean).length ? ` · ${[row.color, row.size].filter(Boolean).join(" / ")}` : ""} ×{" "}
+          <span data-holding-qty={row.holdingQty}>{formatNumber(daVaoTon ? row.quantity : row.holdingQty)}</span>
+          {!daVaoTon && row.holdingQty !== row.quantity ? ` (nhận ${formatNumber(row.quantity)})` : ""} · {ITEM_CONDITION_LABEL[row.condition]}
         </span>
         {row.linkedTrackingNumber ? <span className="font-mono text-[11.5px] text-muted-foreground">↔ {row.linkedTrackingNumber}</span> : null}
       </div>
 
       <p className="mt-1 text-[11.5px] text-muted-foreground">
         {UNIDENTIFIED_SOURCE_LABEL[row.source]} · nhận {formatDateTime(row.receivedAt)} bởi {row.receivedBy || "—"}
+        {row.variantIdentifiedAt && row.variantIdentifiedAt.getTime() !== row.receivedAt.getTime() ? ` · xác định mẫu ${formatDateTime(row.variantIdentifiedAt)} bởi ${row.variantIdentifiedBy || "—"}` : ""}
+        {row.variantIdentifyNote ? ` (${row.variantIdentifyNote})` : ""}
         {row.identifiedAt ? ` · nối đơn ${formatDateTime(row.identifiedAt)} bởi ${row.identifiedBy}` : ""}
         {row.restockedAt ? ` · vào tồn ${formatDateTime(row.restockedAt)} bởi ${row.restockedBy}` : ""}
         {row.note ? ` · ${row.note}` : ""}
@@ -487,6 +434,12 @@ function HoldingRow({ row, canOverride, inLedger }: { row: UnidentifiedRow; canO
 
       {!daVaoTon ? (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {!row.variantId ? (
+            <Button type="button" size="sm" className="h-7" onClick={() => setMoMau((v) => !v)} disabled={dangChay}>
+              <Tag className="size-3.5" />
+              Xác định mẫu mã
+            </Button>
+          ) : null}
           <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => setMoTra((v) => !v)} disabled={dangChay}>
             <Search className="size-3.5" />
             {row.status === "IDENTIFIED" ? "Đổi đơn đã nối" : "Tra đơn"}
@@ -547,7 +500,7 @@ function HoldingRow({ row, canOverride, inLedger }: { row: UnidentifiedRow; canO
               variant="outline"
               className="h-7"
               disabled={dangChay}
-              onClick={() => void chay(() => setUnidentifiedConditionAction({ id: row.id, condition: "OK", note: "", variantId: null }))}
+              onClick={() => void chay(() => setUnidentifiedConditionAction({ id: row.id, condition: "OK", note: "" }))}
             >
               Đã làm lại xong · chuyển “Bán lại được”
             </Button>
@@ -569,7 +522,43 @@ function HoldingRow({ row, canOverride, inLedger }: { row: UnidentifiedRow; canO
               Không lần ra được đơn
             </Button>
           ) : null}
+
+          {row.variantId && !daCoTon ? (
+            <Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => setMoMau((v) => !v)} disabled={dangChay}>
+              <Tag className="size-3.5" />
+              Đổi mẫu mã
+            </Button>
+          ) : null}
         </div>
+      ) : null}
+
+      {row.variantId && daCoTon ? (
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Sai mẫu mã? Món đã có hàng vào tồn dưới mẫu này — sửa bằng{" "}
+          <Link href={VARIANT_FIX_ADJUSTMENT_HREF} className="text-primary hover:underline">
+            phiếu điều chỉnh kho
+          </Link>
+          , không đổi ở đây.
+        </p>
+      ) : null}
+
+      {moMau && !daVaoTon ? (
+        <IdentifyVariantPanel
+          target={{
+            id: row.id,
+            code: row.code,
+            quantity: row.holdingQty,
+            conditionLabel: ITEM_CONDITION_LABEL[row.condition],
+            note: row.note,
+            warehouseNote: row.warehouseNote,
+            variantId: row.variantId,
+            variantLabel: tenMau,
+            identifiedBy: row.variantIdentifiedBy,
+            identifiedAt: row.variantIdentifiedAt,
+          }}
+          stockReceived={daCoTon}
+          onDone={() => setMoMau(false)}
+        />
       ) : null}
 
       {moTra && !daVaoTon ? (
@@ -608,7 +597,7 @@ export function UnidentifiedSection({
   canOverride,
   inLedger = [],
 }: {
-  rows: UnidentifiedRow[];
+  rows: UnidentifiedListRow[];
   summary: UnidentifiedSummary;
   canWrite: boolean;
   /** Có quyền `inventory:restock-unidentified` — mở được nút tái nhập không chứng từ. */

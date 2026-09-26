@@ -127,6 +127,20 @@ export const DOMAIN_EVENTS = [
   },
   // Agent E (0137): LIVE. Một sự kiện cho MỖI dòng sổ `return_dispositions` (khoá chống trùng theo id dòng), phát trong CÙNG giao dịch với dòng sổ và phiếu tái nhập (nếu có).
   { name: "return.disposition_set", subjectType: "return_inspection", owner: "E", status: "LIVE", emitter: "lib/returns/disposition.ts", why: "Kết cục của hàng hoàn không tái nhập: sửa / giặt lại, nhập lại sau sửa, huỷ bỏ, trả xưởng." },
+  /*
+    Agent U (0144): LIVE. Miền hàng hoàn (chủ E). Subject giữ `return_inspection` theo quy ước của R cho món
+    không nhãn: `subject_id = unidentified:<id>` (không bao giờ trùng id phiếu kiểm), `payload.grain =
+    "UNIDENTIFIED"`. Phát CÙNG giao dịch với lượt ghi mẫu mã; `model_id` khi sản phẩm của mẫu đã vào sổ mẫu.
+    Không phát khi chọn lại đúng mẫu đang có; không phát cho lượt chọn mẫu ngay lúc nhận kiện.
+  */
+  {
+    name: "return.variant_identified",
+    subjectType: "return_inspection",
+    owner: "E",
+    status: "LIVE",
+    emitter: "lib/returns/unidentified.ts",
+    why: "Người kho xác nhận (hoặc đổi, kèm lý do) mẫu mã của một món hàng hoàn không nhãn sau khi nhận — từ đây món đếm được về mẫu.",
+  },
   // Agent K: LIVE. Phát CÙNG giao dịch với lượt ghi trạng thái của yêu cầu (lật EXECUTED, hoặc lượt khẳng định sau khi thao tác xong); khoá chống trùng = id yêu cầu.
   { name: "approval.executed", subjectType: "approval_request", owner: "G", status: "LIVE", emitter: "lib/approvals/service.ts", why: "Yêu cầu duyệt đã được tiêu thụ đúng một lần VÀ thao tác được duyệt đã chạy xong." },
   // Agent H (0139): LIVE. Một sự kiện cho MỖI dòng `recommendation_decisions` (khoá chống trùng theo id dòng), phát trong CÙNG giao dịch với dòng sổ. `subject_id` = khoá nguồn của đề xuất.
@@ -157,6 +171,7 @@ export const DOMAIN_EVENT_LABEL: Partial<Record<DomainEventName, string>> = {
   "production_plan.overridden": "Số đặt khác gợi ý máy",
   // Company OS · QA: sự kiện của Agent E đã LIVE mà thiếu nhãn ⇒ dòng thời gian mẫu in mã thô "return.disposition_set".
   "return.disposition_set": "Kết cục hàng hoàn không tái nhập",
+  "return.variant_identified": "Kho xác định mẫu mã hàng hoàn không nhãn",
   "recommendation.decided": "Phản ứng với đề xuất trên buồng lái",
   "approval.executed": "Việc đã duyệt được thực hiện",
   "stock_receipt.linked_production": "Phiếu nhập nối lệnh / lô sản xuất",
