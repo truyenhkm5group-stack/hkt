@@ -56,8 +56,9 @@ CHECK: `actor_kind = 'USER'` ⇒ `actor_id IS NOT NULL`.
   - `observeModelStage(e: ModelEvidence): { stage: ModelState | null; reasons: string[]; basis: "ESTIMATED" }`
     — hàm thuần, KHÔNG BAO GIỜ được ghi vào `lifecycle_state`.
 - `lib/models/service.ts` (lõi, KHÔNG `"use server"`):
-  - `transitionModelCore(db, { modelId, to, reason, actor: Actor, actorKind, source, sourceEventId?, related? })`
-    — một giao dịch: kiểm cạnh → UPDATE `product_models` → INSERT lịch sử → `emitDomainEvent("model.state_changed")`.
+  - `transitionModelCore(db | tx, { modelId, to, reason, actor: Actor, actorKind, source, sourceEventId?, related? })`
+    — một giao dịch (của chính nó, hoặc giao dịch đang mở được trao vào — Agent K): kiểm cạnh → UPDATE
+    `product_models` → INSERT lịch sử → `emitDomainEvent("model.state_changed")`.
     Đây là đường DUY NHẤT đổi `lifecycle_state`. Agent C/E/… gọi hàm này, không UPDATE thẳng.
   - `planModelRegistry(input)` thuần → `{ toInsert, toLink, ambiguous }`; `syncModelRegistry(db)` áp nó.
 - `lib/queries/models.ts`: `listModels(params)`, `getModel(id)`, `getModelByProductId(productId)`,
@@ -73,6 +74,12 @@ CHECK: `actor_kind = 'USER'` ⇒ `actor_id IS NOT NULL`.
 > (`{ signal, decidedBy, reasons: [{source, vote, verdict}] }` — chỉ NHÃN) · `signalErrorAtOpen` ·
 > `lifecycleAtOpen`; topic cũ không mang chúng (không backfill). Luật đọc và đề xuất chuyển tiếp sau khi
 > khai THẮNG: `lib/constants/early-topic.ts` (`topicOpeningMode`, `isEarlyOpen`, `winnerFollowUp`).
+>
+> **"Đã có đường sản xuất" (Agent K)** — cổng CHUNG của mọi đề xuất mở topic (buồng lái `MODEL_SCALE` +
+> `MODEL_EARLY_TOPIC`, khối Đề xuất trang 360, `suggestsTopicOpening`, `productionTrackState`):
+> `TOPIC_BLOCKS_NEW_SUGGESTION` / `countTopicsBlockingSuggestion` (`lib/constants/production-os.ts`) = mọi
+> trạng thái topic TRỪ `CLOSED`, KỂ CẢ `SELECTED`. `TOPIC_OPEN_STATUSES` giữ nghĩa "còn việc để bàn" (hàng
+> đợi, bộ lọc, ô "Topic đang mở", link tab Thiết kế) — hai tập khác nhau có chủ đích.
 
 ## 2. Sổ sự kiện (Agent A · cùng migration 0132)
 
@@ -105,9 +112,9 @@ NGHIỆP VỤ) · `recorded_at` default now(). Chỉ mục: `(model_id, occurred
 | `costing.version_created` · `costing.finalized` | C | LIVE |
 | `sample.created` · `sample.submitted` · `sample.reviewed` · `sample.approved` · `design_version.approved` | C | LIVE |
 | `production_order.linked_design` · `production_plan.overridden` | C | LIVE |
-| `stock_receipt.linked_production` | D | RESERVED (D chỉ thêm cột ở Wave 1) |
+| `stock_receipt.linked_production` | D | LIVE từ Agent K (`lib/inventory/receipt-create.ts`) — phiếu tạo với `production_order_id` / `production_batch_id`, cùng giao dịch với phiếu; `model_id` = mẫu của sản phẩm trong lệnh (ưu tiên) hoặc lô, NULL khi sản phẩm chưa vào sổ mẫu; khoá chống trùng `stock_receipt.linked_production:<id phiếu>` |
 | `return.disposition_set` | E | LIVE |
-| `approval.executed` | G | RESERVED |
+| `approval.executed` | G | LIVE từ Agent K (`lib/approvals/service.ts`) — phát CÙNG giao dịch với lượt ghi trạng thái yêu cầu: lật `EXECUTED` khi cổng đứng trong giao dịch nghiệp vụ, hoặc lượt khẳng định sau khi action xong (`withApprovalExecution`); khoá chống trùng `approval.executed:<id yêu cầu>`; `model_id` NULL |
 | `recommendation.decided` | H | LIVE |
 
 ## 3. Việc (`work_items`) — nguồn mới
@@ -239,8 +246,11 @@ SAMPLING → SAMPLE_REVIEW cần một sự kiện để trỏ về (Q3).
 topic mở ⇒ WINNER → PRODUCTION_DISCUSSION · giá thành phiên bản mới ⇒ PRODUCTION_DISCUSSION → COSTING · mẫu
 mới ⇒ COSTING → SAMPLING · gửi duyệt ⇒ SAMPLING → SAMPLE_REVIEW · yêu cầu sửa ⇒ SAMPLE_REVIEW → SAMPLING ·
 duyệt ⇒ SAMPLE_REVIEW → APPROVED · lệnh trỏ bản duyệt ⇒ APPROVED / SELLING → PRODUCTION_PLANNING. Mẫu CHƯA
-KHAI hoặc đang ở chỗ khác ⇒ không chuyển. Chạy SAU giao dịch nghiệp vụ (`transitionModelCore` nhận `Db`),
-lũy đẳng theo `sourceEventId`.
+KHAI hoặc đang ở chỗ khác ⇒ không chuyển. Chạy TRONG CHÍNH giao dịch nghiệp vụ (Agent K):
+`transitionModelCore(db | tx, …)` được trao giao dịch đang mở thì chạy thẳng trong nó, không savepoint lồng
+(`lib/db-transaction.ts::isOpenTransaction`, kiểm bằng `is()` của drizzle). Lượt chuyển NÉM ⇒ hành động
+nghiệp vụ bị huỷ; hành động đổ ⇒ lượt chuyển cũng không còn. Lỗi nghiệp vụ của lượt chuyển (`{ error }`)
+không ghi gì, không huỷ hành động. Vẫn lũy đẳng theo `sourceEventId`.
 
 ### Quyền · việc · màn hình
 
@@ -261,7 +271,7 @@ hằng số đang chạy), chỉ nút MỞ. Route: `/production` · `/production
 | `getModelEconomics(productId, range)` | F | 1 | lợi nhuận ƯỚC TÍNH (nominal) vs THỰC ĐẠT · CPO hoà vốn · trần QC/đơn · biên/đơn |
 | `getModelProductionSummary(modelId)` | C | 2 | topic · costing chốt · sample mới nhất · lệnh mở · số kế hoạch/nhận |
 | `getModelSignal(modelId)` | A2 | 2 | WINNER/PROMISING/TESTING/LOSER/NEEDS_MORE_DATA + lý do từng nguồn |
-| `getModelSignalsBatch(range?)` | S | 3 | tín hiệu của MỌI mẫu một lượt (mỗi nguồn đọc một lần cho cả shop, cùng `deriveModelSignal`) + số topic sản xuất đang mở (`null` = không đọc được); đệm theo kỳ. Bằng `getModelSignal` từng mẫu — có bài kiểm so |
+| `getModelSignalsBatch(range?)` | S | 3 | tín hiệu của MỌI mẫu một lượt (mỗi nguồn đọc một lần cho cả shop, cùng `deriveModelSignal`) + `productionTrackTopics` = số topic mang nghĩa "đã có đường sản xuất" (`TOPIC_BLOCKS_NEW_SUGGESTION` — mọi trạng thái trừ Đã đóng, kể cả Đã chốt phương án; Agent K) (`null` = không đọc được); đệm theo kỳ. Bằng `getModelSignal` từng mẫu — có bài kiểm so |
 
 Mọi hàm trên CHỈ gọi truy vấn có sẵn của miền mình — không công thức mới cho một con số đã có.
 

@@ -68,7 +68,7 @@ function bRow(id: string, over: { state?: ModelState | null; open?: number | nul
   return {
     model: { id, code: `TK-${id}`, name: "Váy", state: over.state === undefined ? null : over.state, productId: null },
     signal: over.signal ?? trienVong(id),
-    openProductionTopics: over.open === undefined ? 0 : over.open,
+    productionTrackTopics: over.open === undefined ? 0 : over.open,
   };
 }
 
@@ -102,7 +102,7 @@ export function testCompanyOsEarlyTopicPure() {
   assert.equal(suggestsTopicOpening("PROMISING", null, null), null, "số topic CHƯA BIẾT ⇒ không đề xuất (có thể đã có)");
 
   // ─── 3. Trang 360: đề xuất phân biệt SỚM vs thường; link chỉ với production:write ───
-  const base: SuggestionInput = { modelId: "m1", declaredState: "ADS_TESTING", signal: null, ads: null, inventory: null, creativeHref: null, periodQuery: "period=30d", production: { openTopics: 0 }, canCreateTopic: true };
+  const base: SuggestionInput = { modelId: "m1", declaredState: "ADS_TESTING", signal: null, ads: null, inventory: null, creativeHref: null, periodQuery: "period=30d", production: { trackTopics: 0 }, canCreateTopic: true };
   const som = deriveModelSuggestions({ ...base, signal: { signal: "PROMISING", summary: "Thiết kế: Thắng" } });
   assert.equal(som.length, 1);
   assert.equal(som[0].key, "topic-open-early");
@@ -119,7 +119,7 @@ export function testCompanyOsEarlyTopicPure() {
   assert.equal(khaiThang[0].key, "topic-open", "đã khai THẮNG + tín hiệu TRIỂN VỌNG ⇒ mở topic thường, không 'sớm'");
   assert.equal(khaiThang[0].transition, null, "mở topic thì vòng đời tự đi theo — không đề xuất chuyển tay");
   assert.equal(deriveModelSuggestions({ ...base, signal: { signal: "PROMISING", summary: "x" }, canCreateTopic: false })[0].links.length, 0, "không production:write ⇒ không link tạo topic");
-  assert.equal(deriveModelSuggestions({ ...base, signal: { signal: "PROMISING", summary: "x" }, production: { openTopics: 2 } }).length, 0, "đã có topic đang mở ⇒ không đề xuất mở sớm");
+  assert.equal(deriveModelSuggestions({ ...base, signal: { signal: "PROMISING", summary: "x" }, production: { trackTopics: 2 } }).length, 0, "đã có topic đang mở ⇒ không đề xuất mở sớm");
   assert.ok(deriveModelSuggestions({ ...base, signal: { signal: "PROMISING", summary: "x" }, production: null })[0].caveat, "không đọc được sản xuất ⇒ đề xuất kèm lưu ý");
   for (const s of ["TESTING", "LOSER", "NEEDS_MORE_DATA"] as ModelSignal[]) assert.equal(deriveModelSuggestions({ ...base, signal: { signal: s, summary: "x" } }).length, 0, `tín hiệu ${s} ⇒ không đề xuất topic`);
 
@@ -183,12 +183,12 @@ export function testCompanyOsEarlyTopicPure() {
 
   // Trang 360: mẫu ĐÃ khai THẮNG mà sản xuất đi trước ⇒ đề xuất chuyển tiếp thay cho "mở trao đổi".
   const diTruoc = winnerFollowUp(track({ topics: [{ status: "SELECTED" }], latestSample: { version: 1, status: "SUBMITTED" } }));
-  const s360 = deriveModelSuggestions({ ...base, declaredState: "WINNER", signal: { signal: "WINNER", summary: "x" }, production: { openTopics: 0, winnerFollowUp: diTruoc } });
+  const s360 = deriveModelSuggestions({ ...base, declaredState: "WINNER", signal: { signal: "WINNER", summary: "x" }, production: { trackTopics: 0, winnerFollowUp: diTruoc } });
   assert.equal(s360.length, 1);
   assert.equal(s360[0].key, "lifecycle-production-ahead");
   assert.equal(s360[0].transition?.to, "SAMPLE_REVIEW");
   assert.equal(s360[0].transition?.reason, diTruoc?.reason, "lý do điền sẵn đúng câu của hàm thuần");
-  assert.equal(deriveModelSuggestions({ ...base, declaredState: "ADS_TESTING", signal: { signal: "PROMISING", summary: "x" }, production: { openTopics: 0, winnerFollowUp: diTruoc } })[0].key, "topic-open-early", "chưa khai THẮNG ⇒ KHÔNG đề xuất chuyển tiếp (khai THẮNG là việc của người)");
+  assert.equal(deriveModelSuggestions({ ...base, declaredState: "ADS_TESTING", signal: { signal: "PROMISING", summary: "x" }, production: { trackTopics: 0, winnerFollowUp: diTruoc } })[0].key, "topic-open-early", "chưa khai THẮNG ⇒ KHÔNG đề xuất chuyển tiếp (khai THẮNG là việc của người)");
 
   // ─── 6. Buồng lái: loại mới, ứng viên, khoá ───
   assert.ok(OWNER_DECISION_KINDS.indexOf("MODEL_EARLY_TOPIC") > OWNER_DECISION_KINDS.indexOf("MODEL_SCALE"), "ưu tiên SAU mẫu THẮNG");

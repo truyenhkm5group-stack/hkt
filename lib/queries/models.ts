@@ -405,6 +405,11 @@ export const EVENT_DIMENSION_BY_SUBJECT: Readonly<Record<string, ModelTimelineDi
   production_order: "PRODUCTION",
   stock_receipt: "INVENTORY",
   return_inspection: "INVENTORY",
+  /*
+    Agent K: lời duyệt hai bước đã được thực hiện. Sự kiện mang `model_id = NULL` nên không hiện trên dòng
+    thời gian mẫu nào — khai tường minh để một loại chủ thể mới không lặng lẽ rơi về chiều mặc định.
+  */
+  approval_request: "LIFECYCLE",
 };
 
 export function domainEventDimension(name: string): ModelTimelineDimension {

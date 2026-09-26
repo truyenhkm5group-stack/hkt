@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, ilike, inArray, or, sql, type SQL } from "dr
 import { getDb, schema } from "@/db";
 import { REQUIRE_APPROVED_DESIGN_KEY, TOPIC_OPEN_STATUSES, TOPIC_STATUSES, TOPIC_STATUS_LABEL, type TopicStatus } from "@/lib/constants/production-os";
 import { designOptionsForProduct } from "@/lib/production/orders";
+import { getSettingJson } from "@/lib/settings";
 import type { ListParams } from "@/lib/search-params";
 
 /**
@@ -16,20 +17,14 @@ const pm = schema.productModels;
 
 /**
  * Cờ bắt buộc bản duyệt khi gửi xưởng. CHỈ đúng giá trị JSON `true` mới tính — không có dòng, chuỗi
- * `"true"`, JSON hỏng ⇒ TẮT (mọi nhánh lỗi rơi về phía cũ: chỉ cảnh báo).
+ * `"true"`, JSON hỏng, lỗi CSDL ⇒ TẮT (mọi nhánh lỗi rơi về phía cũ: chỉ cảnh báo).
  *
- * Đọc THẲNG dòng `settings`, không qua `getSettingJson`: hàm đó trải `{ ...fallback, ...parsed }` nên một
- * giá trị boolean luôn ra một object rỗng — cờ sẽ không bao giờ bật được (đã đo trong kiểm thử).
+ * Đọc qua bộ đọc chung `getSettingJson` với mặc định `false`: từ Agent K nó trả đúng giá trị nguyên thuỷ
+ * CÙNG KIỂU với mặc định (chuỗi `"true"` khác kiểu ⇒ mặc định), nên bản đọc thẳng dòng C từng phải viết để
+ * né lỗi `{ ...fallback, ...parsed }` đã bỏ — cùng hành vi ở mọi nhánh (kiểm thử khoá).
  */
 export async function requireApprovedDesignFlag(): Promise<boolean> {
-  const db = await getDb();
-  const row = await db.query.settings.findFirst({ where: eq(schema.settings.key, REQUIRE_APPROVED_DESIGN_KEY) }).catch(() => null);
-  if (!row) return false;
-  try {
-    return JSON.parse(row.value) === true;
-  } catch {
-    return false;
-  }
+  return (await getSettingJson<boolean>(REQUIRE_APPROVED_DESIGN_KEY, false)) === true;
 }
 
 export const TOPIC_SORTABLE = ["updatedAt", "createdAt", "status"];

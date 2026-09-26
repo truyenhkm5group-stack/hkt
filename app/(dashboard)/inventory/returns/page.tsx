@@ -60,7 +60,8 @@ import {
 } from "@/app/(dashboard)/inventory/returns/warehouse-people";
 import { param, type SearchParams } from "@/lib/search-params";
 import { DispositionSection } from "@/app/(dashboard)/inventory/returns/disposition-section";
-import { listDispositionQueue, listRecentDispositions } from "@/lib/queries/return-dispositions";
+import { listDispositionQueue, listRecentDispositions, unidentifiedIdsInLedger } from "@/lib/queries/return-dispositions";
+import { getDb } from "@/db";
 
 export const metadata = { title: "Kiểm đếm hàng hoàn · kho" };
 
@@ -171,6 +172,8 @@ export default async function ReturnInspectionPage({
     listDispositionQueue({ limit: DISPOSITION_CAP }),
     listRecentDispositions(30),
   ]);
+  // Món không nhãn đã có dòng ở sổ kết cục (Agent R): bàn không nhãn ẩn nút tái nhập nguyên món / đổi kết luận.
+  const trongSo = await unidentifiedIdsInLedger(await getDb(), khongMa.map((r) => r.id));
   /*
     CHỈ ĐƯA **META** XUỐNG TRÌNH DUYỆT.
 
@@ -246,6 +249,7 @@ export default async function ReturnInspectionPage({
         summary={khongMaTong}
         canWrite={canWrite}
         canOverride={can(user, RESTOCK_UNIDENTIFIED_PERMISSION)}
+        inLedger={[...trongSo]}
       />
 
       <ReturnQualityCounters rows={chatLuong} />
@@ -432,11 +436,13 @@ export default async function ReturnInspectionPage({
       <DispositionSection
         canWrite={canWrite}
         focusKey={xuLy}
-        summary={{ totalOpen: ketCuc.totalOpen, truncated: ketCuc.truncated, ...ketCuc.summary }}
+        canOverride={can(user, RESTOCK_UNIDENTIFIED_PERMISSION)}
+        summary={{ totalOpen: ketCuc.totalOpen, truncated: ketCuc.truncated, ...ketCuc.summary, unidentifiedUnassigned: ketCuc.unidentifiedUnassigned }}
         rows={ketCuc.rows.map((r) => ({
           subjectKey: r.subjectKey,
           grain: r.grain,
           shipmentId: r.shipmentId,
+          unidentifiedStatus: r.unidentifiedStatus,
           code: r.code,
           orderCode: r.orderCode,
           condition: r.condition,
@@ -455,7 +461,7 @@ export default async function ReturnInspectionPage({
           expectedVariants: r.expectedVariants,
           history: r.history.map((h) => ({ id: h.id, disposition: h.disposition, qty: h.qty, note: h.note, actorName: h.actorName, createdAt: h.createdAt.toISOString(), stockReceiptId: h.stockReceiptId, valueEstimate: h.valueEstimate, costBasis: h.costBasis })),
         }))}
-        recent={ketCucGanDay.map((h) => ({ id: h.id, disposition: h.disposition, qty: h.qty, note: h.note, actorName: h.actorName, createdAt: h.createdAt.toISOString(), stockReceiptId: h.stockReceiptId, valueEstimate: h.valueEstimate, costBasis: h.costBasis, code: h.code, sku: h.sku, productName: h.productName }))}
+        recent={ketCucGanDay.map((h) => ({ id: h.id, disposition: h.disposition, qty: h.qty, note: h.note, actorName: h.actorName, createdAt: h.createdAt.toISOString(), stockReceiptId: h.stockReceiptId, valueEstimate: h.valueEstimate, costBasis: h.costBasis, code: h.code, sku: h.sku, productName: h.productName, grain: h.grain }))}
       />
 
       {/*

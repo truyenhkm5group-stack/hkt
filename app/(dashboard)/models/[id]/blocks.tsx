@@ -8,7 +8,7 @@ import { SectionCard } from "@/components/ui-bits";
 import { Button } from "@/components/ui/button";
 import { ADS_ACTION_HINT, ADS_ACTION_TONE, isConclusive } from "@/lib/constants/ads-decision";
 import { CREATIVE_VERDICT_LABEL, CREATIVE_VERDICTS } from "@/lib/constants/creative-loop";
-import { SAMPLE_STATUS_LABEL, TOPIC_STATUS_LABEL } from "@/lib/constants/production-os";
+import { countTopicsBlockingSuggestion, SAMPLE_STATUS_LABEL, TOPIC_STATUS_LABEL } from "@/lib/constants/production-os";
 import {
   countText,
   deriveModelSuggestions,
@@ -222,7 +222,7 @@ export async function SuggestionsBlock({ ctx }: { ctx: BlockCtx }) {
     inventory: inv && inv.ok ? { rows: inv.data.rows, dataGate: inv.data.dataGate.state } : null,
     creativeHref: pid ? `/marketing/creatives?tab=thu-vien&mau=${encodeURIComponent(pid)}` : null,
     periodQuery: ctx.periodQuery,
-    production: prod && prod.ok && prod.data ? { openTopics: prod.data.openTopics, winnerFollowUp: winnerFollowUp(prod.data) } : null,
+    production: prod && prod.ok && prod.data ? { trackTopics: countTopicsBlockingSuggestion(prod.data.topics), winnerFollowUp: winnerFollowUp(prod.data) } : null,
     canCreateTopic: ctx.canCreateTopic,
   });
   const list: ModelSuggestion[] = stock && stock.ok ? mergeStockFeedbackSuggestions(base, stock.data.recommendations) : base;
@@ -751,7 +751,7 @@ export async function ReturnsDispositionBlock({ ctx }: { ctx: BlockCtx }) {
             <Stat label="Sửa xong · nhập lại" value={countText(l.data.restockedAfterReworkQty)} />
             <Stat label="Đã huỷ" value={countText(l.data.writtenOffQty)} sub={`giá trị ước tính ${moneyText(l.data.writeOffValueEstimate)}`} />
             <Stat label="Trả xưởng" value={countText(l.data.returnedToSupplierQty)} />
-            <Stat label="Món còn mở" value={countText(l.data.openSubjects)} sub={`${formatNumber(l.data.basis.itemSubjects)} món đã qua trạm kiểm`} />
+            <Stat label="Món còn mở" value={countText(l.data.openSubjects)} sub={`${formatNumber(l.data.basis.itemSubjects)} món đã qua trạm kiểm${l.data.basis.unidentifiedSubjects ? ` · ${formatNumber(l.data.basis.unidentifiedSubjects)} món không nhãn đã nhận diện mẫu` : ""}`} />
           </StatGrid>
         </div>
       )}

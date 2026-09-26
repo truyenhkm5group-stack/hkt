@@ -46,7 +46,7 @@ export async function createSampleCore(
     if (!t || t.modelId !== m.id) return { error: "Topic không thuộc mẫu này" };
   }
 
-  const out = await db.transaction(async (tx): Promise<{ error: string } | { sampleId: string; version: number; eventId: string | null }> => {
+  const out = await db.transaction(async (tx): Promise<{ error: string } | { sampleId: string; version: number; eventId: string | null; lifecycle: LifecycleFollow }> => {
     const [mo] = await tx
       .select({ version: sm.version, status: sm.status })
       .from(sm)
@@ -82,12 +82,11 @@ export async function createSampleCore(
       source: "ui:/production",
       dedupeKey: `sample.created:${row.id}`,
     });
-    return { sampleId: row.id, version, eventId };
+    const lifecycle = await followModelLifecycle(tx, { modelId: m.id, eventName: "sample.created", eventId, triggeredBy: input.actor, related: { type: "sample", id: row.id } });
+    return { sampleId: row.id, version, eventId, lifecycle };
   });
   if ("error" in out) return { error: out.error };
-
-  const lifecycle = await followModelLifecycle(db, { modelId: m.id, eventName: "sample.created", eventId: out.eventId, triggeredBy: input.actor, related: { type: "sample", id: out.sampleId } });
-  return { ok: true, ...out, lifecycle };
+  return { ok: true, ...out };
 }
 
 /** Sửa thông tin phiên bản mẫu khi xưởng CÒN ĐANG LÀM. Đã gửi duyệt ⇒ khoá (người duyệt đang xem đúng thứ đó). */
@@ -111,7 +110,7 @@ export async function submitSampleCore(db: Db, input: { sampleId: string; actor:
   // Bấm hai lần không ghi thêm gì (cùng bài học với AGENTS.md mục 61).
   if (s.status === "SUBMITTED") return { ok: true, noop: true, lifecycle: null };
   if (s.status !== "IN_PROGRESS") return { error: `Mẫu đang “${SAMPLE_STATUS_LABEL[s.status as SampleStatus]}” — không gửi duyệt lại được` };
-  const out = await db.transaction(async (tx): Promise<{ error: string } | { eventId: string | null }> => {
+  const out = await db.transaction(async (tx): Promise<{ error: string } | { eventId: string | null; lifecycle: LifecycleFollow }> => {
     const now = new Date();
     const doi = await tx.update(sm).set({ status: "SUBMITTED", submittedAt: now, updatedAt: now }).where(and(eq(sm.id, s.id), eq(sm.status, "IN_PROGRESS"))).returning({ id: sm.id });
     if (!doi.length) return { error: "Mẫu vừa được đổi ở chỗ khác — tải lại trang" };
@@ -127,11 +126,11 @@ export async function submitSampleCore(db: Db, input: { sampleId: string; actor:
       dedupeKey: `sample.submitted:${s.id}`,
       occurredAt: now,
     });
-    return { eventId };
+    const lifecycle = await followModelLifecycle(tx, { modelId: s.modelId, eventName: "sample.submitted", eventId, triggeredBy: input.actor, related: { type: "sample", id: s.id } });
+    return { eventId, lifecycle };
   });
   if ("error" in out) return { error: out.error };
-  const lifecycle = await followModelLifecycle(db, { modelId: s.modelId, eventName: "sample.submitted", eventId: out.eventId, triggeredBy: input.actor, related: { type: "sample", id: s.id } });
-  return { ok: true, noop: false, lifecycle };
+  return { ok: true, noop: false, lifecycle: out.lifecycle };
 }
 
 export type ReviewResult = { ok: true; reviewId: string; status: SampleStatus; designVersionId: string | null; designVersion: number | null; lifecycle: LifecycleFollow | null } | { error: string };
@@ -150,7 +149,20 @@ export async function reviewSampleCore(
 ): Promise<ReviewResult> {
   const note = (input.note ?? "").trim();
   type Ra = { reviewId: string; status: SampleStatus; designVersionId: string | null; designVersion: number | null; followEvent: { name: string; id: string | null } | null; modelId: string };
-  const out = await db.transaction(async (tx): Promise<{ error: string } | Ra> => {
+  // Vòng đời đi theo phán quyết TRONG cùng giao dịch với nó (Agent K): phần thân ghi phán quyết chạy
+  // trước, rồi đi theo sự kiện nó trả về trước khi giao dịch chốt.
+  const out = await db.transaction(async (tx): Promise<{ error: string } | (Ra & { lifecycle: LifecycleFollow | null })> => {
+    const ra = await reviewInTx(tx);
+    if ("error" in ra) return ra;
+    const lifecycle = ra.followEvent
+      ? await followModelLifecycle(tx, { modelId: ra.modelId, eventName: ra.followEvent.name, eventId: ra.followEvent.id, triggeredBy: input.actor, related: { type: "sample", id: input.sampleId } })
+      : null;
+    return { ...ra, lifecycle };
+  });
+  if ("error" in out) return { error: out.error };
+  return { ok: true, reviewId: out.reviewId, status: out.status, designVersionId: out.designVersionId, designVersion: out.designVersion, lifecycle: out.lifecycle };
+
+  async function reviewInTx(tx: DbLike): Promise<{ error: string } | Ra> {
     const [s] = await tx.select().from(sm).where(eq(sm.id, input.sampleId)).for("update").limit(1);
     if (!s) return { error: "Không tìm thấy mẫu" };
     const kiem = checkSampleReview({ status: s.status as SampleStatus, decision: input.decision, note, reviewerUserId: input.actor.id, canApprove: input.canApprove });
@@ -216,13 +228,7 @@ export async function reviewSampleCore(
       occurredAt: now,
     });
     return { reviewId: r.id, status, designVersionId: d.id, designVersion: version, followEvent: { name: "sample.approved", id: approvedEvent }, modelId: s.modelId };
-  });
-  if ("error" in out) return { error: out.error };
-
-  const lifecycle = out.followEvent
-    ? await followModelLifecycle(db, { modelId: out.modelId, eventName: out.followEvent.name, eventId: out.followEvent.id, triggeredBy: input.actor, related: { type: "sample", id: input.sampleId } })
-    : null;
-  return { ok: true, reviewId: out.reviewId, status: out.status, designVersionId: out.designVersionId, designVersion: out.designVersion, lifecycle };
+  }
 }
 
 /**

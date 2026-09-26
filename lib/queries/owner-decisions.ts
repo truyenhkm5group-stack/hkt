@@ -223,11 +223,12 @@ export function adsCutToItems(work: readonly WorkItem[], rows: ReadonlyMap<strin
  * Nguồn là tín hiệu mẫu ĐẦY ĐỦ của A2 (`getModelSignalsBatch` — cùng `deriveModelSignal` với trang 360),
  * không còn là riêng lá phiếu quảng cáo. Ba cổng, đúng ba cổng mà đề xuất "mở trao đổi sản xuất" ở trang
  * 360 dùng (`deriveModelSuggestions`): tín hiệu THẮNG · trạng thái khai còn trước “Bàn sản xuất”
- * (`BEFORE_PRODUCTION_DISCUSSION`) · KHÔNG topic sản xuất đang mở. Số topic CHƯA BIẾT (`null`) không phải 0
- * — mẫu đó không vào (nguồn ném lỗi ở bộ đọc để khối nêu tên nguồn hỏng).
+ * (`BEFORE_PRODUCTION_DISCUSSION`) · KHÔNG có đường sản xuất (topic chưa đóng, KỂ CẢ đã chốt phương án —
+ * `TOPIC_BLOCKS_NEW_SUGGESTION`, Agent K). Số topic CHƯA BIẾT (`null`) không phải 0 — mẫu đó không vào
+ * (nguồn ném lỗi ở bộ đọc để khối nêu tên nguồn hỏng).
  */
 export function modelWinnerCandidates(rows: readonly ModelSignalBatchRow[]): ModelSignalBatchRow[] {
-  return rows.filter((r) => r.signal.signal === "WINNER" && r.openProductionTopics === 0 && BEFORE_PRODUCTION_DISCUSSION.includes(r.model.state));
+  return rows.filter((r) => r.signal.signal === "WINNER" && r.productionTrackTopics === 0 && BEFORE_PRODUCTION_DISCUSSION.includes(r.model.state));
 }
 
 /**
@@ -293,7 +294,7 @@ export function modelScaleToItems(cands: readonly ModelSignalBatchRow[]): OwnerD
  * hàng đợi và dòng MODEL_SCALE thay chỗ.
  */
 export function modelEarlyTopicCandidates(rows: readonly ModelSignalBatchRow[]): ModelSignalBatchRow[] {
-  return rows.filter((r) => r.signal.signal === "PROMISING" && suggestsTopicOpening(r.signal.signal, r.model.state, r.openProductionTopics) !== null);
+  return rows.filter((r) => r.signal.signal === "PROMISING" && suggestsTopicOpening(r.signal.signal, r.model.state, r.productionTrackTopics) !== null);
 }
 
 export function modelEarlyTopicToItems(cands: readonly ModelSignalBatchRow[]): OwnerDecisionItem[] {

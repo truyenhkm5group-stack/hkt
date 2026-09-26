@@ -114,6 +114,42 @@ export const RESTOCK_AUTHORITY_LABEL: Record<RestockAuthority, string> = {
 /** Quyền CAO HƠN `inventory:write` — chỉ để tái nhập hàng không lần ra được đơn. */
 export const RESTOCK_UNIDENTIFIED_PERMISSION = "inventory:restock-unidentified";
 
+/** Căn cứ của một lượt cộng tồn cho món không nhãn — suy từ TRẠNG THÁI XÁC ĐỊNH NGUỒN, không khai tay. */
+export function restockAuthorityOf(status: string): RestockAuthority {
+  return status === "IDENTIFIED" ? "IDENTIFIED" : "MANAGER_OVERRIDE";
+}
+
+export type UnidentifiedRestockCheck =
+  | { ok: true; authority: RestockAuthority; reason: string }
+  | { error: string; code: "NEEDS_PERMISSION" | "NEEDS_REASON" };
+
+/**
+ * LUẬT DUY NHẤT CHO MỌI LƯỢT CỘNG TỒN HÀNG HOÀN KHÔNG NHÃN — hàm THUẦN.
+ *
+ * Hai đường gọi nó, và chúng phải nói CÙNG một điều (Company OS · Agent R):
+ *  · tái nhập nguyên món ở bàn hàng không nhãn (`restockUnidentifiedReturnAction`);
+ *  · nhập lại SAU SỬA từ sổ kết cục (`setReturnDispositionCore`, grain `UNIDENTIFIED`).
+ *
+ * Chưa nối được đơn ⇒ lượt cộng tồn không chứng từ ⇒ cần `inventory:restock-unidentified` VÀ một lý do.
+ * Đã nối được đơn ⇒ hàng hoàn bình thường, `inventory:write` (đã kiểm ở tầng action) là đủ.
+ * Quyền kiểm TRƯỚC lý do: người không có quyền thì gõ lý do cũng vô ích — nói điều đó trước.
+ */
+export function checkUnidentifiedRestock(input: { status: string; reason: string; canOverride: boolean }): UnidentifiedRestockCheck {
+  const authority = restockAuthorityOf(input.status);
+  const reason = input.reason.trim();
+  if (authority === "MANAGER_OVERRIDE" && !input.canOverride) {
+    return {
+      code: "NEEDS_PERMISSION",
+      error:
+        "Kiện này chưa lần ra được đơn nào, nên đưa nó vào tồn là một quyết định không có chứng từ đối chiếu — cần quyền “Tái nhập hàng hoàn không xác định nguồn” (quản lý kho / quản trị). Nhờ người có quyền bấm, hoặc tra thêm để nối được đơn trước.",
+    };
+  }
+  if (authority === "MANAGER_OVERRIDE" && !reason) {
+    return { code: "NEEDS_REASON", error: "Tái nhập hàng không lần ra được đơn thì bắt buộc ghi lý do (ví dụ: mất nhãn vận đơn, hàng còn nguyên tem)." };
+  }
+  return { ok: true, authority, reason };
+}
+
 /**
  * TIỀN TỐ MÃ NỘI BỘ. Đọc được bằng mắt, gõ lại được, và bắn được bằng máy quét sau khi in nhãn tạm.
  * Dạng: `UR-YYYYMMDD-NNNNN` (số thứ tự trong NGÀY, không phải toàn cục — người kho đọc "số 37 hôm

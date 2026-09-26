@@ -180,9 +180,9 @@ export async function testCompanyOsSignalBatchDb(db: Db) {
     assert.notEqual(m4.reasons.find((x) => x.source === "ADS")!.verdict, "Không có dòng", "P4 có đơn ⇒ có dòng quảng cáo");
     assert.match(m5.reasons.find((x) => x.source === "ADS")!.verdict, /chưa ghép chi/, "P5 có đơn mà chưa từng ghép chiến dịch ⇒ chưa đủ, không dùng hành động");
     assert.ok(!/chưa ghép chi/.test(m4.reasons.find((x) => x.source === "ADS")!.verdict), "P4 đã ghép chi ⇒ không mang cờ chưa ghép");
-    assert.equal(cua("COSS-7").openProductionTopics, 1, "topic đang mở được đếm");
-    assert.equal(cua("COSS-4").openProductionTopics, 0, "topic đã đóng không đếm — 0 thật");
-    assert.equal(cua("COSS-1").openProductionTopics, 0);
+    assert.equal(cua("COSS-7").productionTrackTopics, 1, "topic đang mở được đếm");
+    assert.equal(cua("COSS-4").productionTrackTopics, 0, "topic đã đóng không đếm — 0 thật");
+    assert.equal(cua("COSS-1").productionTrackTopics, 0);
     assert.equal(lo.topicsError, null);
 
     // ── Hai kỳ nữa, KHÔNG xoá đệm: khoá thiếu kỳ ⇒ đọc nhầm kết quả kỳ trước ⇒ đỏ ──

@@ -293,6 +293,7 @@ import { testCompanyOsInventoryDb, testCompanyOsInventoryPure } from "./company-
 import { testCompanyOsProductionDb, testCompanyOsProductionPure } from "./company-os-production.test";
 // Company OS · Agent E — kết cục hàng hoàn không tái nhập.
 import { testCompanyOsReturnsDb, testCompanyOsReturnsPure } from "./company-os-returns.test";
+import { testCompanyOsUnidentifiedDispositionsDb, testCompanyOsUnidentifiedDispositionsPure } from "./company-os-unidentified-dispositions.test";
 // Company OS · QA — một mẫu đi hết vòng đời qua các agent A–G.
 import { testCompanyOsE2eLifecycle, testCompanyOsE2ePure } from "./company-os-e2e-lifecycle.test";
 import { testCompanyOsCockpitDb, testCompanyOsCockpitPure } from "./company-os-cockpit.test";
@@ -300,6 +301,7 @@ import { testCompanyOsSignalBatchDb, testCompanyOsSignalBatchSource } from "./co
 import { testCompanyOsStockFeedbackDb, testCompanyOsStockFeedbackPure } from "./company-os-stock-feedback.test";
 import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./company-os-owner-digest.test";
 import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
+import { testHardeningApprovalExecution, testHardeningLifecycleInTx, testHardeningReceiptLinkedEvent, testHardeningSettingsPrimitive, testHardeningTopicTrackSemantics } from "./company-os-hardening.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
@@ -1927,6 +1929,9 @@ async function main() {
   // Company OS · Agent E: tự dọn dữ liệu mã `cose-` (kể cả sổ kết cục và sự kiện của nó).
   testCompanyOsReturnsPure();
   await testCompanyOsReturnsDb(db);
+  // Company OS · Agent R: kết cục cho hàng hoàn KHÔNG NHÃN (mã `cosr-` / `UR-COSR-`, tự dọn cả sổ kết cục và sự kiện của nó).
+  testCompanyOsUnidentifiedDispositionsPure();
+  await testCompanyOsUnidentifiedDispositionsDb(db);
   // Company OS · Agent H: "Cần anh quyết". Dọn nguồn của chính nó (mã `cosh-`); sổ phản ứng và sự kiện append-only giữ nguyên (CSDL dùng một lần).
   testCompanyOsCockpitPure();
   await testCompanyOsCockpitDb(db);
@@ -2303,6 +2308,12 @@ async function main() {
   testLogisticsStatusBoundary();
   await testOpsLogLeak();
   await testFeedAutomation(db);
+  // Company OS · K: gia cố năm chỗ hở (mã `cos-k-` / `COSK`). Đứng ngay trước QA để không đổi tổng của bài nào phía trên.
+  await testHardeningLifecycleInTx(db);
+  await testHardeningSettingsPrimitive(db);
+  await testHardeningApprovalExecution(db);
+  await testHardeningReceiptLinkedEvent(db);
+  await testHardeningTopicTrackSemantics(db);
   // Company OS · QA: MỘT mẫu đi hết vòng đời qua mọi agent (A–G). Đứng CUỐI để không đổi tổng của bài nào; tự dọn mã `cosqa-` / `COSQA`.
   testCompanyOsE2ePure();
   await testCompanyOsE2eLifecycle(db);

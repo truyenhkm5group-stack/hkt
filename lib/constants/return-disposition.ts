@@ -128,8 +128,16 @@ export const DISPOSITION_ALLOWED_FROM: Record<ReturnDisposition, readonly OpenDi
  * Kiện kết luận "Thiếu hàng" cả kiện KHÔNG vào hàng đợi: đường hàng loạt ghi `unsellable_qty` = số
  * KỲ VỌNG cho mọi kết luận không nhận đủ, nên với "thiếu" con số ấy là hàng KHÔNG có mặt. Đưa nó vào
  * là bắt kho quyết số phận cho những món không nằm trên kệ. Số kiện bị loại được đếm và in ra.
+ *
+ * Company OS · Agent R (0142) thêm độ mịn thứ BA:
+ *  · `UNIDENTIFIED` — một món hàng hoàn KHÔNG NHÃN (`return_unidentified`) CHƯA vào tồn, kết luận KHÔNG
+ *    cộng tồn (cùng `NON_RESTOCK_ITEM_CONDITIONS` — một sổ kết luận cho cả hai bàn), `quantity > 0`. Số
+ *    món = `quantity`. Mẫu mã = mẫu KHO NHẬN DIỆN được lúc nhận (`return_unidentified.variant_id`, người
+ *    chọn từ danh mục với món hàng trên tay — ERP không lưu mẫu mã đoán nào cho bảng này); `NULL` = chưa
+ *    nhận diện được ⇒ không quy về mẫu nào (luật 35). Nhập lại sau sửa đi ĐÚNG luật tái nhập hàng không
+ *    nhãn (`checkUnidentifiedRestock`) và ĐÚNG đường lập phiếu của bàn ấy.
  */
-export const DISPOSITION_GRAINS = ["ITEM", "PARCEL"] as const;
+export const DISPOSITION_GRAINS = ["ITEM", "PARCEL", "UNIDENTIFIED"] as const;
 export type DispositionGrain = (typeof DISPOSITION_GRAINS)[number];
 
 /** Kết luận CẢ KIỆN mà `unsellable_qty` KHÔNG phải hàng có mặt. */
@@ -138,15 +146,26 @@ export const PARCEL_CONDITIONS_WITHOUT_GOODS: readonly ReturnCondition[] = ["MIS
 /** Kết luận từng món KHÔNG cộng tồn — dẫn xuất từ `ITEM_CONDITION_RESTOCKS`, không phải danh sách thứ hai. */
 export const NON_RESTOCK_ITEM_CONDITIONS = ITEM_CONDITIONS.filter((c) => !ITEM_CONDITION_RESTOCKS[c]);
 
+/** Tiền tố khoá đối tượng theo độ mịn — CÙNG chuỗi với CHECK `return_dispositions_subject_check` (0142). */
+export const SUBJECT_KEY_PREFIX: Record<DispositionGrain, string> = { ITEM: "item", PARCEL: "parcel", UNIDENTIFIED: "unidentified" };
+
 export function subjectKeyOf(grain: DispositionGrain, id: string): string {
-  return grain === "ITEM" ? `item:${id}` : `parcel:${id}`;
+  return `${SUBJECT_KEY_PREFIX[grain]}:${id}`;
 }
 
 export function parseSubjectKey(key: string): { grain: DispositionGrain; id: string } | null {
-  const m = /^(item|parcel):(.+)$/.exec(key.trim());
+  const m = /^(item|parcel|unidentified):(.+)$/.exec(key.trim());
   if (!m || !m[2]) return null;
-  return { grain: m[1] === "item" ? "ITEM" : "PARCEL", id: m[2] };
+  const grain = DISPOSITION_GRAINS.find((g) => SUBJECT_KEY_PREFIX[g] === m[1]);
+  return grain ? { grain, id: m[2] } : null;
 }
+
+/** Nhãn độ mịn cho màn hình — "không nhãn" phải đọc được ngay, không lẫn với kiện có mã. */
+export const DISPOSITION_GRAIN_LABEL: Record<DispositionGrain, string> = {
+  ITEM: "Kiểm từng món",
+  PARCEL: "Kiểm cả kiện",
+  UNIDENTIFIED: "Hàng hoàn không nhãn",
+};
 
 // ───────────────────────── GẬP SỔ GHI THÊM ─────────────────────────
 

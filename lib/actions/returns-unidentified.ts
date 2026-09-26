@@ -6,7 +6,7 @@ import type { Actor } from "@/lib/constants/actor";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { ITEM_CONDITIONS } from "@/lib/constants/return-lifecycle";
-import { RESTOCK_UNIDENTIFIED_PERMISSION, UNIDENTIFIED_SOURCES } from "@/lib/constants/return-unidentified";
+import { checkUnidentifiedRestock, RESTOCK_UNIDENTIFIED_PERMISSION, UNIDENTIFIED_SOURCES } from "@/lib/constants/return-unidentified";
 import { searchReturnCandidates, type CandidateSearch } from "@/lib/returns/candidate-match";
 import { scanReceiveReturn, type ScanReceiveResult } from "@/lib/returns/receive-scan";
 import {
@@ -288,16 +288,9 @@ export async function restockUnidentifiedReturnAction(input: unknown): Promise<R
   const row = await findUnidentifiedById(parsed.data.id);
   if (!row) return { error: "Không thấy kiện hàng hoàn chưa xác định này" };
 
-  const canOverride = can(user, RESTOCK_UNIDENTIFIED_PERMISSION);
-  if (row.status !== "IDENTIFIED" && !canOverride) {
-    return {
-      error:
-        "Kiện này chưa lần ra được đơn nào, nên đưa nó vào tồn là một quyết định không có chứng từ đối chiếu — cần quyền “Tái nhập hàng hoàn không xác định nguồn” (quản lý kho / quản trị). Nhờ người có quyền bấm, hoặc tra thêm để nối được đơn trước.",
-    };
-  }
-  if (row.status !== "IDENTIFIED" && !parsed.data.reason.trim()) {
-    return { error: "Tái nhập hàng không lần ra được đơn thì bắt buộc ghi lý do (ví dụ: mất nhãn vận đơn, hàng còn nguyên tem)." };
-  }
+  // CÙNG luật với lượt nhập lại sau sửa của sổ kết cục (`checkUnidentifiedRestock`) — một hàm, hai đường gọi.
+  const luat = checkUnidentifiedRestock({ status: row.status, reason: parsed.data.reason, canOverride: can(user, RESTOCK_UNIDENTIFIED_PERMISSION) });
+  if ("error" in luat) return { error: luat.error };
 
   const r = await restockUnidentifiedReturn({ ...parsed.data, actor: khoActor(user) });
   if ("error" in r) return { error: r.error };

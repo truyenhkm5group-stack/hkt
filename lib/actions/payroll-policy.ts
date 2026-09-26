@@ -20,6 +20,7 @@ import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { canAdministerPayroll } from "@/lib/auth/payroll-scope";
 import { guardSecondApproval } from "@/lib/actions/approvals";
+import { withApprovalExecution } from "@/lib/approvals/execution";
 import { componentBasisKey, payrollInput, type PayrollCalcParams } from "@/lib/constants/payroll-components";
 import { policyActivationBlockers } from "@/lib/payroll/policy-validation";
 import { vnEndOfDay, vnStartOfDay } from "@/lib/format";
@@ -193,81 +194,83 @@ export async function saveSalaryPolicyVersion(input: unknown): Promise<PolicyAct
  * Đóng tường minh để người đọc sổ thấy được đường phân chia.
  */
 export async function activateSalaryPolicyVersion(versionId: string): Promise<PolicyActionResult> {
-  const guard = await requireManage();
-  if ("error" in guard) return guard;
-  const loaded = await getPolicyVersion(versionId);
-  if (!loaded) return { error: "Không tìm thấy phiên bản" };
-  const { version, components } = loaded;
-  if (version.status === "ACTIVE") return { error: "Phiên bản này đã phát hành rồi" };
-  if (version.status === "RETIRED") return { error: "Phiên bản đã rút thì không phát hành lại — hãy nhân bản thành bản mới" };
-  const chongLan = await overlappingActiveVersions(version.policyId, version.effectiveFrom, version.effectiveTo);
+  return withApprovalExecution(async () => {
+    const guard = await requireManage();
+    if ("error" in guard) return guard;
+    const loaded = await getPolicyVersion(versionId);
+    if (!loaded) return { error: "Không tìm thấy phiên bản" };
+    const { version, components } = loaded;
+    if (version.status === "ACTIVE") return { error: "Phiên bản này đã phát hành rồi" };
+    if (version.status === "RETIRED") return { error: "Phiên bản đã rút thì không phát hành lại — hãy nhân bản thành bản mới" };
+    const chongLan = await overlappingActiveVersions(version.policyId, version.effectiveFrom, version.effectiveTo);
 
-  /*
-    ═══ CỔNG PHÁT HÀNH: KIỂM MỌI THỨ TRƯỚC KHI LỜI KHAI THÀNH TIỀN ═══
+    /*
+      ═══ CỔNG PHÁT HÀNH: KIỂM MỌI THỨ TRƯỚC KHI LỜI KHAI THÀNH TIỀN ═══
 
-    Kiểm ở ĐÂY chứ không ở bước lưu nháp: bản nháp là chỗ để viết dở, và bắt nó hoàn chỉnh ngay từ
-    ô đầu tiên là bắt người khai phải nghĩ xong toàn bộ chính sách trước khi gõ chữ nào.
+      Kiểm ở ĐÂY chứ không ở bước lưu nháp: bản nháp là chỗ để viết dở, và bắt nó hoàn chỉnh ngay từ
+      ô đầu tiên là bắt người khai phải nghĩ xong toàn bộ chính sách trước khi gõ chữ nào.
 
-    `policyActivationBlockers` là hàm THUẦN và màn hình gọi CHÍNH nó, nên không còn cảnh nút hiện
-    rồi server từ chối.
-  */
-  const [policyRow] = await (await getDb())
-    .select({ code: schema.salaryPolicies.code })
-    .from(schema.salaryPolicies)
-    .where(eq(schema.salaryPolicies.id, version.policyId))
-    .limit(1);
-  const blockers = policyActivationBlockers({
-    policyCode: policyRow?.code ?? version.policyId,
-    version: version.version,
-    effectiveFrom: version.effectiveFrom,
-    effectiveTo: version.effectiveTo,
-    components,
-    otherActiveVersions: chongLan.filter((v) => v.id !== versionId).map((v) => ({ version: v.version, effectiveFrom: v.effectiveFrom, effectiveTo: v.effectiveTo })),
-  });
-  if (blockers.length) {
-    return { error: `Chưa phát hành được phiên bản này:\n· ${blockers.map((b) => b.message).join("\n· ")}` };
-  }
-
-  const cong = await guardSecondApproval({
-    group: "PAYROLL_EDIT",
-    action: "payroll.policy.activate",
-    entity: "SALARY_POLICY_VERSION",
-    entityId: versionId,
-    summary: `Phát hành phiên bản ${version.version} của chính sách lương, hiệu lực từ ${version.effectiveFrom.toLocaleDateString("vi-VN")} · ${components.length} thành phần`,
-    amount: null,
-    payload: { versionId, components },
-  });
-  if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-  if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
-
-  const db = await getDb();
-  const v = schema.salaryPolicyVersions;
-  const luc = new Date();
-  // Ngày liền trước mốc hiệu lực mới, tính bằng mili giây để không lệch múi giờ.
-  const dongTai = new Date(version.effectiveFrom.getTime() - 1);
-  await db.transaction(async (tx) => {
-    for (const cu of chongLan) {
-      if (cu.id === versionId) continue;
-      if (cu.effectiveFrom >= version.effectiveFrom) {
-        // Bản cũ bắt đầu SAU bản mới: rút hẳn, vì bản mới đã phủ từ mốc sớm hơn.
-        await tx.update(v).set({ status: "RETIRED" }).where(eq(v.id, cu.id));
-        continue;
-      }
-      await tx.update(v).set({ effectiveTo: dongTai, status: "RETIRED" }).where(eq(v.id, cu.id));
+      `policyActivationBlockers` là hàm THUẦN và màn hình gọi CHÍNH nó, nên không còn cảnh nút hiện
+      rồi server từ chối.
+    */
+    const [policyRow] = await (await getDb())
+      .select({ code: schema.salaryPolicies.code })
+      .from(schema.salaryPolicies)
+      .where(eq(schema.salaryPolicies.id, version.policyId))
+      .limit(1);
+    const blockers = policyActivationBlockers({
+      policyCode: policyRow?.code ?? version.policyId,
+      version: version.version,
+      effectiveFrom: version.effectiveFrom,
+      effectiveTo: version.effectiveTo,
+      components,
+      otherActiveVersions: chongLan.filter((v) => v.id !== versionId).map((v) => ({ version: v.version, effectiveFrom: v.effectiveFrom, effectiveTo: v.effectiveTo })),
+    });
+    if (blockers.length) {
+      return { error: `Chưa phát hành được phiên bản này:\n· ${blockers.map((b) => b.message).join("\n· ")}` };
     }
-    await tx.update(v).set({ status: "ACTIVE", activatedAt: luc, activatedBy: guard.id }).where(eq(v.id, versionId));
+
+    const cong = await guardSecondApproval({
+      group: "PAYROLL_EDIT",
+      action: "payroll.policy.activate",
+      entity: "SALARY_POLICY_VERSION",
+      entityId: versionId,
+      summary: `Phát hành phiên bản ${version.version} của chính sách lương, hiệu lực từ ${version.effectiveFrom.toLocaleDateString("vi-VN")} · ${components.length} thành phần`,
+      amount: null,
+      payload: { versionId, components },
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+
+    const db = await getDb();
+    const v = schema.salaryPolicyVersions;
+    const luc = new Date();
+    // Ngày liền trước mốc hiệu lực mới, tính bằng mili giây để không lệch múi giờ.
+    const dongTai = new Date(version.effectiveFrom.getTime() - 1);
+    await db.transaction(async (tx) => {
+      for (const cu of chongLan) {
+        if (cu.id === versionId) continue;
+        if (cu.effectiveFrom >= version.effectiveFrom) {
+          // Bản cũ bắt đầu SAU bản mới: rút hẳn, vì bản mới đã phủ từ mốc sớm hơn.
+          await tx.update(v).set({ status: "RETIRED" }).where(eq(v.id, cu.id));
+          continue;
+        }
+        await tx.update(v).set({ effectiveTo: dongTai, status: "RETIRED" }).where(eq(v.id, cu.id));
+      }
+      await tx.update(v).set({ status: "ACTIVE", activatedAt: luc, activatedBy: guard.id }).where(eq(v.id, versionId));
+    });
+    await audit({
+      userId: guard.id,
+      userEmail: guard.email,
+      action: "PAYROLL_POLICY_VERSION_ACTIVATE",
+      entity: "SALARY_POLICY_VERSION",
+      entityId: versionId,
+      after: { version: version.version, effectiveFrom: version.effectiveFrom, components: components.length },
+      reason: `Đóng ${chongLan.filter((x) => x.id !== versionId).length} phiên bản chồng lấn`,
+    });
+    revalidate();
+    return { ok: true, id: versionId };
   });
-  await audit({
-    userId: guard.id,
-    userEmail: guard.email,
-    action: "PAYROLL_POLICY_VERSION_ACTIVATE",
-    entity: "SALARY_POLICY_VERSION",
-    entityId: versionId,
-    after: { version: version.version, effectiveFrom: version.effectiveFrom, components: components.length },
-    reason: `Đóng ${chongLan.filter((x) => x.id !== versionId).length} phiên bản chồng lấn`,
-  });
-  revalidate();
-  return { ok: true, id: versionId };
 }
 
 /** Nhân bản một phiên bản thành bản NHÁP mới — đường duy nhất để đổi một chính sách đã phát hành. */
@@ -333,50 +336,52 @@ export async function saveEmploymentAssignment(input: unknown): Promise<PolicyAc
  * từ màn hình.
  */
 export async function saveEmployeePolicyAssignment(input: unknown): Promise<PolicyActionResult> {
-  const guard = await requireManage();
-  if ("error" in guard) return guard;
-  const parsed = policyAssignmentSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const d = parsed.data;
-  const from = vnStartOfDay(d.effectiveFrom);
-  const to = dayOrNull(d.effectiveTo || undefined);
-  const db = await getDb();
-  const t = schema.employeePolicyAssignments;
-  const id = d.id ?? crypto.randomUUID();
-  const values = { employeeId: d.employeeId, policyId: d.policyId, effectiveFrom: from, effectiveTo: to, note: d.note };
+  return withApprovalExecution(async () => {
+    const guard = await requireManage();
+    if ("error" in guard) return guard;
+    const parsed = policyAssignmentSchema.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const d = parsed.data;
+    const from = vnStartOfDay(d.effectiveFrom);
+    const to = dayOrNull(d.effectiveTo || undefined);
+    const db = await getDb();
+    const t = schema.employeePolicyAssignments;
+    const id = d.id ?? crypto.randomUUID();
+    const values = { employeeId: d.employeeId, policyId: d.policyId, effectiveFrom: from, effectiveTo: to, note: d.note };
 
-  const cong = await guardSecondApproval({
-    group: "PAYROLL_EDIT",
-    action: "payroll.policy.assign",
-    entity: "EMPLOYEE_POLICY_ASSIGNMENT",
-    entityId: id,
-    summary: `Gán chính sách lương cho nhân sự ${d.employeeId}, hiệu lực từ ${d.effectiveFrom}`,
-    amount: null,
-    payload: values,
-  });
-  if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-  if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    const cong = await guardSecondApproval({
+      group: "PAYROLL_EDIT",
+      action: "payroll.policy.assign",
+      entity: "EMPLOYEE_POLICY_ASSIGNMENT",
+      entityId: id,
+      summary: `Gán chính sách lương cho nhân sự ${d.employeeId}, hiệu lực từ ${d.effectiveFrom}`,
+      amount: null,
+      payload: values,
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
 
-  const dongTai = new Date(from.getTime() - 1);
-  await db.transaction(async (tx) => {
-    if (d.id) await tx.update(t).set(values).where(eq(t.id, d.id));
-    else await tx.insert(t).values({ id, ...values, createdBy: guard.id });
-    // Đóng các dòng còn mở của CHÍNH người này bắt đầu trước mốc mới.
-    await tx
-      .update(t)
-      .set({ effectiveTo: dongTai })
-      .where(
-        and(
-          eq(t.employeeId, d.employeeId),
-          sql`${t.id} <> ${id}`,
-          lte(t.effectiveFrom, from),
-          or(isNull(t.effectiveTo), sql`${t.effectiveTo} > ${dongTai}`),
-        ),
-      );
+    const dongTai = new Date(from.getTime() - 1);
+    await db.transaction(async (tx) => {
+      if (d.id) await tx.update(t).set(values).where(eq(t.id, d.id));
+      else await tx.insert(t).values({ id, ...values, createdBy: guard.id });
+      // Đóng các dòng còn mở của CHÍNH người này bắt đầu trước mốc mới.
+      await tx
+        .update(t)
+        .set({ effectiveTo: dongTai })
+        .where(
+          and(
+            eq(t.employeeId, d.employeeId),
+            sql`${t.id} <> ${id}`,
+            lte(t.effectiveFrom, from),
+            or(isNull(t.effectiveTo), sql`${t.effectiveTo} > ${dongTai}`),
+          ),
+        );
+    });
+    await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_POLICY_ASSIGN", entity: "EMPLOYEE_POLICY_ASSIGNMENT", entityId: id, after: values });
+    revalidate();
+    return { ok: true, id };
   });
-  await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_POLICY_ASSIGN", entity: "EMPLOYEE_POLICY_ASSIGNMENT", entityId: id, after: values });
-  revalidate();
-  return { ok: true, id };
 }
 
 // ═════════════════════════ ĐẦU VÀO NHẬP TAY ═════════════════════════
@@ -731,77 +736,81 @@ const carryoverConfigSchema = z
   });
 
 export async function savePayrollCarryoverConfig(input: unknown): Promise<PolicyActionResult> {
-  const guard = await requireManage();
-  if ("error" in guard) return guard;
-  const parsed = carryoverConfigSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const d = parsed.data;
-  const truoc = await getSettingJson<PayrollCarryoverConfig>(PAYROLL_CARRYOVER_KEY, DEFAULT_PAYROLL_CARRYOVER);
-  const sau: PayrollCarryoverConfig = { enabled: d.enabled, startMonth: d.startMonth || null, startNote: d.startNote };
+  return withApprovalExecution(async () => {
+    const guard = await requireManage();
+    if ("error" in guard) return guard;
+    const parsed = carryoverConfigSchema.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const d = parsed.data;
+    const truoc = await getSettingJson<PayrollCarryoverConfig>(PAYROLL_CARRYOVER_KEY, DEFAULT_PAYROLL_CARRYOVER);
+    const sau: PayrollCarryoverConfig = { enabled: d.enabled, startMonth: d.startMonth || null, startNote: d.startNote };
 
-  const cong = await guardSecondApproval({
-    group: "PAYROLL_EDIT",
-    action: "payroll.carryover.config",
-    entity: "SETTINGS",
-    entityId: PAYROLL_CARRYOVER_KEY,
-    summary: d.enabled ? `BẬT sổ lỗ lũy kế từ tháng ${d.startMonth} — đổi cơ sở tính hoa hồng của mọi MKTer` : "TẮT sổ lỗ lũy kế",
-    amount: null,
-    payload: sau,
-  });
-  if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-  if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    const cong = await guardSecondApproval({
+      group: "PAYROLL_EDIT",
+      action: "payroll.carryover.config",
+      entity: "SETTINGS",
+      entityId: PAYROLL_CARRYOVER_KEY,
+      summary: d.enabled ? `BẬT sổ lỗ lũy kế từ tháng ${d.startMonth} — đổi cơ sở tính hoa hồng của mọi MKTer` : "TẮT sổ lỗ lũy kế",
+      amount: null,
+      payload: sau,
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
 
-  await setSettingJson(PAYROLL_CARRYOVER_KEY, sau);
-  await audit({
-    userId: guard.id,
-    userEmail: guard.email,
-    action: "PAYROLL_CARRYOVER_CONFIG",
-    entity: "SETTINGS",
-    entityId: PAYROLL_CARRYOVER_KEY,
-    before: truoc,
-    after: sau,
-    reason: d.startNote,
+    await setSettingJson(PAYROLL_CARRYOVER_KEY, sau);
+    await audit({
+      userId: guard.id,
+      userEmail: guard.email,
+      action: "PAYROLL_CARRYOVER_CONFIG",
+      entity: "SETTINGS",
+      entityId: PAYROLL_CARRYOVER_KEY,
+      before: truoc,
+      after: sau,
+      reason: d.startNote,
+    });
+    revalidate();
+    return { ok: true };
   });
-  revalidate();
-  return { ok: true };
 }
 
 const recognitionSchema = z.object({ mode: z.enum(["LEGACY_EXPENSES", "PAYROLL"]) });
 
 export async function savePayrollRecognitionMode(input: unknown): Promise<PolicyActionResult> {
-  const guard = await requireManage();
-  if ("error" in guard) return guard;
-  const parsed = recognitionSchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const truoc = await getSettingJson<PayrollRecognitionConfig>(PAYROLL_RECOGNITION_KEY, DEFAULT_PAYROLL_RECOGNITION);
+  return withApprovalExecution(async () => {
+    const guard = await requireManage();
+    if ("error" in guard) return guard;
+    const parsed = recognitionSchema.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const truoc = await getSettingJson<PayrollRecognitionConfig>(PAYROLL_RECOGNITION_KEY, DEFAULT_PAYROLL_RECOGNITION);
 
-  const cong = await guardSecondApproval({
-    group: "PAYROLL_EDIT",
-    action: "payroll.recognition.mode",
-    entity: "SETTINGS",
-    entityId: PAYROLL_RECOGNITION_KEY,
-    summary:
-      parsed.data.mode === "PAYROLL"
-        ? "Chuyển nguồn ghi nhận chi phí nhân sự sang BẢNG LƯƠNG — nhóm “Lương” ở bảng Chi phí sẽ bị loại khỏi lợi nhuận"
-        : "Đưa nguồn ghi nhận chi phí nhân sự về BẢNG CHI PHÍ",
-    amount: null,
-    payload: parsed.data,
-  });
-  if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-  if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+    const cong = await guardSecondApproval({
+      group: "PAYROLL_EDIT",
+      action: "payroll.recognition.mode",
+      entity: "SETTINGS",
+      entityId: PAYROLL_RECOGNITION_KEY,
+      summary:
+        parsed.data.mode === "PAYROLL"
+          ? "Chuyển nguồn ghi nhận chi phí nhân sự sang BẢNG LƯƠNG — nhóm “Lương” ở bảng Chi phí sẽ bị loại khỏi lợi nhuận"
+          : "Đưa nguồn ghi nhận chi phí nhân sự về BẢNG CHI PHÍ",
+      amount: null,
+      payload: parsed.data,
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
 
-  await setSettingJson(PAYROLL_RECOGNITION_KEY, parsed.data);
-  await audit({
-    userId: guard.id,
-    userEmail: guard.email,
-    action: "PAYROLL_RECOGNITION_MODE",
-    entity: "SETTINGS",
-    entityId: PAYROLL_RECOGNITION_KEY,
-    before: truoc,
-    after: parsed.data,
+    await setSettingJson(PAYROLL_RECOGNITION_KEY, parsed.data);
+    await audit({
+      userId: guard.id,
+      userEmail: guard.email,
+      action: "PAYROLL_RECOGNITION_MODE",
+      entity: "SETTINGS",
+      entityId: PAYROLL_RECOGNITION_KEY,
+      before: truoc,
+      after: parsed.data,
+    });
+    revalidate();
+    return { ok: true };
   });
-  revalidate();
-  return { ok: true };
 }
 
 // ═════════════════════════ KHẤU TRỪ THEO LUẬT ═════════════════════════
@@ -829,43 +838,45 @@ const statutorySchema = z
   });
 
 export async function savePayrollStatutoryConfig(input: unknown): Promise<PolicyActionResult> {
-  const guard = await requireManage();
-  if ("error" in guard) return guard;
-  const parsed = statutorySchema.safeParse(input);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  const truoc = await getSettingJson<StatutoryConfig>(STATUTORY_DEDUCTION_KEY, DEFAULT_STATUTORY);
-  if (truoc.state === parsed.data.state && truoc.legalBasis === parsed.data.legalBasis && truoc.note === parsed.data.note) {
+  return withApprovalExecution(async () => {
+    const guard = await requireManage();
+    if ("error" in guard) return guard;
+    const parsed = statutorySchema.safeParse(input);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+    const truoc = await getSettingJson<StatutoryConfig>(STATUTORY_DEDUCTION_KEY, DEFAULT_STATUTORY);
+    if (truoc.state === parsed.data.state && truoc.legalBasis === parsed.data.legalBasis && truoc.note === parsed.data.note) {
+      return { ok: true };
+    }
+
+    const cong = await guardSecondApproval({
+      group: "PAYROLL_EDIT",
+      action: "payroll.statutory.state",
+      entity: "SETTINGS",
+      entityId: STATUTORY_DEDUCTION_KEY,
+      summary:
+        parsed.data.state === "EXEMPT"
+          ? "Khai KHÔNG ÁP DỤNG khấu trừ theo luật — phiếu lương sẽ in 0 ₫ ở dòng thuế / bảo hiểm"
+          : parsed.data.state === "CONFIGURED"
+            ? "Khai ĐÃ CẤU HÌNH khấu trừ theo luật — số tiền do thành phần trong chính sách lương tính"
+            : "Đưa khấu trừ theo luật về CHƯA CẤU HÌNH",
+      amount: null,
+      payload: parsed.data,
+    });
+    if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
+    if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
+
+    const ten = (await userNamesByIds([guard.id])).get(guard.id) ?? guard.email;
+    const sau: StatutoryConfig = {
+      state: parsed.data.state,
+      legalBasis: parsed.data.legalBasis,
+      note: parsed.data.note,
+      declaredBy: parsed.data.state === "NOT_CONFIGURED" ? "" : ten,
+      declaredAt: parsed.data.state === "NOT_CONFIGURED" ? null : new Date().toISOString(),
+    };
+    await setSettingJson(STATUTORY_DEDUCTION_KEY, sau);
+    await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_STATUTORY_STATE", entity: "SETTINGS", entityId: STATUTORY_DEDUCTION_KEY, before: truoc, after: sau });
+    revalidatePath("/payroll/payslip");
+    revalidate();
     return { ok: true };
-  }
-
-  const cong = await guardSecondApproval({
-    group: "PAYROLL_EDIT",
-    action: "payroll.statutory.state",
-    entity: "SETTINGS",
-    entityId: STATUTORY_DEDUCTION_KEY,
-    summary:
-      parsed.data.state === "EXEMPT"
-        ? "Khai KHÔNG ÁP DỤNG khấu trừ theo luật — phiếu lương sẽ in 0 ₫ ở dòng thuế / bảo hiểm"
-        : parsed.data.state === "CONFIGURED"
-          ? "Khai ĐÃ CẤU HÌNH khấu trừ theo luật — số tiền do thành phần trong chính sách lương tính"
-          : "Đưa khấu trừ theo luật về CHƯA CẤU HÌNH",
-    amount: null,
-    payload: parsed.data,
   });
-  if (cong.mode === "NEEDS_APPROVAL") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-  if (cong.mode === "BLOCKED_NO_APPROVER") return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng chưa có ai khác đủ tư cách duyệt.` };
-
-  const ten = (await userNamesByIds([guard.id])).get(guard.id) ?? guard.email;
-  const sau: StatutoryConfig = {
-    state: parsed.data.state,
-    legalBasis: parsed.data.legalBasis,
-    note: parsed.data.note,
-    declaredBy: parsed.data.state === "NOT_CONFIGURED" ? "" : ten,
-    declaredAt: parsed.data.state === "NOT_CONFIGURED" ? null : new Date().toISOString(),
-  };
-  await setSettingJson(STATUTORY_DEDUCTION_KEY, sau);
-  await audit({ userId: guard.id, userEmail: guard.email, action: "PAYROLL_STATUTORY_STATE", entity: "SETTINGS", entityId: STATUTORY_DEDUCTION_KEY, before: truoc, after: sau });
-  revalidatePath("/payroll/payslip");
-  revalidate();
-  return { ok: true };
 }

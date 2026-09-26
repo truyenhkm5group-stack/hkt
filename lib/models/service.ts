@@ -1,4 +1,5 @@
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
+
 import { schema, type Db } from "@/db";
 import type { Actor } from "@/lib/constants/actor";
 import { MODEL_SUBJECT } from "@/lib/constants/domain-events";
@@ -13,6 +14,7 @@ import {
   type ModelState,
 } from "@/lib/constants/model-lifecycle";
 import { emitDomainEvent } from "@/lib/events/emit";
+import { isOpenTransaction, type DbOrTx } from "@/lib/db-transaction";
 
 /**
  * ═══════════ LÕI DỊCH VỤ SỔ MẪU (Company OS · Agent A) ═══════════
@@ -27,6 +29,9 @@ import { emitDomainEvent } from "@/lib/events/emit";
  * `product_model_state_history` và `domain_events` là APPEND-ONLY: tệp này chỉ INSERT vào chúng.
  */
 type DbLike = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/** Kết nối hoặc một giao dịch ĐANG MỞ của nơi gọi — `transitionModelCore` nhận cả hai. */
+export type { DbOrTx };
 
 const pm = schema.productModels;
 const hist = schema.productModelStateHistory;
@@ -130,10 +135,17 @@ async function applyTransition(tx: DbLike, input: TransitionModelInput): Promise
 /**
  * Chuyển trạng thái vòng đời. Đây là đường DUY NHẤT đổi `lifecycle_state` — Agent C/E/… gọi hàm này,
  * không UPDATE thẳng. Lỗi nghiệp vụ trả `{ error }`; lỗi CSDL (vi phạm CHECK…) thì ném.
+ *
+ * Nhận `Db` HOẶC một giao dịch đang mở (Company OS · Agent K). Được trao giao dịch thì chạy NGAY TRONG
+ * nó — không mở giao dịch lồng (savepoint): lượt chuyển vòng đời đi theo một hành động nghiệp vụ phải
+ * sống chết cùng hành động ấy. Hành động bị huỷ ⇒ lượt chuyển cũng không còn; lượt chuyển ném lỗi ⇒
+ * hành động bị huỷ theo. Lỗi NGHIỆP VỤ (`{ error }`, ví dụ hàng rào trạng thái cũ) thì không ghi gì cả,
+ * nên giao dịch của nơi gọi vẫn dùng tiếp được.
  */
-export async function transitionModelCore(db: Db, input: TransitionModelInput): Promise<TransitionModelResult> {
+export async function transitionModelCore(db: DbOrTx, input: TransitionModelInput): Promise<TransitionModelResult> {
   const loi = actorError(input.actor, input.actorKind);
   if (loi) return { error: loi };
+  if (isOpenTransaction(db)) return applyTransition(db, input);
   return db.transaction(async (tx) => applyTransition(tx, input));
 }
 

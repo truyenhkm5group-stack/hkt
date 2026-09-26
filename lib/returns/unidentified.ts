@@ -3,12 +3,15 @@ import { getDb, schema, type Db } from "@/db";
 import type { Actor } from "@/lib/constants/actor";
 import { ITEM_CONDITION_LABEL, ITEM_CONDITION_RESTOCKS, type ItemCondition } from "@/lib/constants/return-lifecycle";
 import {
+  RESTOCK_AUTHORITY_LABEL,
+  restockAuthorityOf,
   unidentifiedCode,
   type IdentificationMethod,
   type RestockAuthority,
   type UnidentifiedSource,
   type UnidentifiedStatus,
 } from "@/lib/constants/return-unidentified";
+import { unidentifiedLedgerRows, unidentifiedReworkRestockTotals, unidentifiedTerminalQtySql } from "@/lib/queries/return-dispositions";
 import { markReturnsArrived } from "@/lib/returns/inspection";
 
 /**
@@ -272,6 +275,64 @@ export async function markUnidentifiable(input: { id: string; reason: string; ac
 
 // ───────────────────────── 3. CỘNG TỒN — CHỖ DUY NHẤT, MỘT LẦN DUY NHẤT ─────────────────────────
 
+/**
+ * ĐƯỜNG LẬP PHIẾU DUY NHẤT CHO HÀNG HOÀN KHÔNG NHÃN — phiếu `RETURN` + đúng một dòng.
+ *
+ * Hai nơi gọi, không nơi nào tự chèn `stock_receipts` cho món không nhãn:
+ *  · `restockUnidentifiedReturn` — tái nhập NGUYÊN MÓN (kết luận còn bán được), chốt bằng
+ *    `return_unidentified.stock_receipt_id`;
+ *  · `setReturnDispositionCore` (Company OS · Agent R) — nhập lại SAU SỬA từ sổ kết cục, theo SỐ ĐẾM
+ *    THỰC TẾ, chốt bằng dòng sổ `return_dispositions.stock_receipt_id` (một món có thể nhập lại từng phần,
+ *    nên cột một-phiếu-một-món của bảng này không dùng được ở đó).
+ *
+ * Dòng phiếu mang vận đơn ĐÃ NỐI khi có — không nối được thì `NULL`, không bao giờ một vận đơn "gần đúng".
+ * Chạy BÊN TRONG giao dịch của nơi gọi: phiếu và cái chốt cùng sống hoặc cùng chết.
+ */
+export async function writeUnidentifiedRestockReceipt(
+  tx: DbLike,
+  input: {
+    row: { code: string; variantId: string; linkedShipmentId: string | null };
+    qty: number;
+    authority: RestockAuthority;
+    reason: string;
+    label: string;
+    now: Date;
+    /** `true` = nhập lại SAU SỬA từ sổ kết cục (tham chiếu và ghi chú nói rõ). */
+    afterRework?: boolean;
+  },
+): Promise<string> {
+  const { row, qty, authority, reason, label, now } = input;
+  const [receipt] = await tx
+    .insert(schema.stockReceipts)
+    .values({
+      kind: "RETURN",
+      receivedAt: now,
+      reference: `${input.afterRework ? "Nhập lại sau sửa · " : ""}Hàng hoàn không mã vận đơn ${row.code}`,
+      note: [
+        input.afterRework ? `Nhập lại sau sửa · ${RESTOCK_AUTHORITY_LABEL[authority].toLowerCase()}` : authority === "MANAGER_OVERRIDE" ? "Tái nhập không xác định nguồn" : "Tái nhập sau khi xác định được đơn",
+        reason,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      totalQuantity: qty,
+      totalCost: 0,
+      createdBy: label,
+    })
+    .returning({ id: schema.stockReceipts.id });
+
+  await tx.insert(schema.stockReceiptItems).values({
+    receiptId: receipt.id,
+    variantId: row.variantId,
+    quantity: qty,
+    unitCost: 0,
+    /* Nối được vận đơn thì ghi vào dòng phiếu: sổ kho tra ngược được về đúng kiện. Không nối
+       được thì để `NULL` — ghi một vận đơn "gần đúng" ở đây là đúng kiểu nói dối gọn gàng mà
+       `settleReturnsForReceipt` đã phải gỡ bỏ. */
+    shipmentId: row.linkedShipmentId,
+  });
+  return receipt.id;
+}
+
 export type RestockResult = { ok: true; row: UnidentifiedRow; restocked: number; receiptId: string; already: false } | { ok: true; row: UnidentifiedRow; restocked: 0; receiptId: string; already: true } | { error: string };
 
 /**
@@ -304,12 +365,14 @@ export async function restockUnidentifiedReturn(input: { id: string; reason: str
   if (row.stockReceiptId) return { ok: true, row: toRow(row), restocked: 0, receiptId: row.stockReceiptId, already: true };
 
   if (!row.variantId) return { error: `${row.code} chưa nhận diện được mẫu mã — không biết cộng vào đâu. Chọn mẫu mã trước.` };
+  // Món đã vào SỔ KẾT CỤC (Company OS · Agent R): sổ là chủ của nó, nhập tồn chỉ qua "Sửa xong · nhập lại".
+  if ((await unidentifiedLedgerRows(db, row.id)) > 0) return { error: LEDGER_OWNS_MSG(row.code) };
   const condition = row.condition as ItemCondition;
   if (!ITEM_CONDITION_RESTOCKS[condition]) {
     return { error: `${row.code} đang ở kết luận “${ITEM_CONDITION_LABEL[condition]}” nên không vào tồn bán được. Làm sạch / sửa xong thì đổi kết luận sang “Đủ” rồi tái nhập.` };
   }
 
-  const authority: RestockAuthority = row.status === "IDENTIFIED" ? "IDENTIFIED" : "MANAGER_OVERRIDE";
+  const authority: RestockAuthority = restockAuthorityOf(row.status);
   const reason = input.reason.trim();
   if (authority === "MANAGER_OVERRIDE" && !reason) {
     return { error: "Tái nhập hàng không lần ra được đơn thì bắt buộc ghi lý do — đây là toàn bộ khác biệt giữa một quyết định của quản lý kho và một lượt cộng tồn không nguồn gốc" };
@@ -327,34 +390,19 @@ export async function restockUnidentifiedReturn(input: { id: string; reason: str
         vừa cộng tồn cho dòng này thì nó khớp 0 dòng, ta ném lỗi, giao dịch huỷ, và phiếu kho vừa
         lập biến mất cùng nó. Không có đường nào để lại một phiếu mồ côi đã cộng tồn.
       */
-      const [receipt] = await tx
-        .insert(schema.stockReceipts)
-        .values({
-          kind: "RETURN",
-          receivedAt: now,
-          reference: `Hàng hoàn không mã vận đơn ${row.code}`,
-          note: [authority === "MANAGER_OVERRIDE" ? "Tái nhập không xác định nguồn" : "Tái nhập sau khi xác định được đơn", reason].filter(Boolean).join(" · "),
-          totalQuantity: qty,
-          totalCost: 0,
-          createdBy: label,
-        })
-        .returning({ id: schema.stockReceipts.id });
-
-      await tx.insert(schema.stockReceiptItems).values({
-        receiptId: receipt.id,
-        variantId: row.variantId as string,
-        quantity: qty,
-        unitCost: 0,
-        /* Nối được vận đơn thì ghi vào dòng phiếu: sổ kho tra ngược được về đúng kiện. Không nối
-           được thì để `NULL` — ghi một vận đơn "gần đúng" ở đây là đúng kiểu nói dối gọn gàng mà
-           `settleReturnsForReceipt` đã phải gỡ bỏ. */
-        shipmentId: row.linkedShipmentId,
+      const receiptId = await writeUnidentifiedRestockReceipt(tx, {
+        row: { code: row.code, variantId: row.variantId as string, linkedShipmentId: row.linkedShipmentId },
+        qty,
+        authority,
+        reason,
+        label,
+        now,
       });
 
       const [locked] = await tx
         .update(u)
         .set({
-          stockReceiptId: receipt.id,
+          stockReceiptId: receiptId,
           restockedAt: now,
           restockedBy: label,
           restockedByUserId: input.actor.id,
@@ -365,7 +413,7 @@ export async function restockUnidentifiedReturn(input: { id: string; reason: str
         .where(and(eq(u.id, input.id), isNull(u.stockReceiptId)))
         .returning();
       if (!locked) throw new Error("DA_VAO_TON");
-      return { receiptId: receipt.id, row: locked };
+      return { receiptId, row: locked };
     });
     return { ok: true, row: toRow(out.row), restocked: qty, receiptId: out.receiptId, already: false };
   } catch (e) {
@@ -378,7 +426,16 @@ export async function restockUnidentifiedReturn(input: { id: string; reason: str
   }
 }
 
-/** Đổi kết luận kiểm hàng (ví dụ giặt xong thì từ “Bẩn” sang “Đủ”). Đã vào tồn thì khoá. */
+const LEDGER_OWNS_MSG = (code: string) =>
+  `${code} đã vào sổ kết cục ở khối “Hàng hoàn không tái nhập” — từ đây nó đi tiếp bằng các nút ở đó (sửa / giặt → nhập lại theo số đếm, huỷ, trả xưởng). Đổi kết luận hay tái nhập nguyên món ở đây là mở đường vào tồn thứ hai cho cùng món hàng.`;
+
+/**
+ * Đổi kết luận kiểm hàng (ví dụ giặt xong thì từ “Bẩn” sang “Đủ”). Đã vào tồn thì khoá.
+ *
+ * Company OS · Agent R: món ĐÃ CÓ DÒNG trong sổ kết cục cũng khoá — trừ đúng một việc: gắn mẫu mã cho món
+ * CHƯA nhận diện được (giữ nguyên kết luận). Đó là thêm hiểu biết, không mở đường vào tồn nào. Khoá dòng
+ * món (`FOR UPDATE`) rồi mới hỏi sổ: lõi kết cục khoá CÙNG dòng này trước khi ghi, nên hai bên xếp hàng.
+ */
 export async function setUnidentifiedCondition(input: { id: string; condition: ItemCondition; note: string; variantId?: string | null; actor: Actor }): Promise<IdentifyResult> {
   const db = await getDb();
   const [row] = await db.select({ code: u.code, receipt: u.stockReceiptId }).from(u).where(eq(u.id, input.id)).limit(1);
@@ -399,13 +456,23 @@ export async function setUnidentifiedCondition(input: { id: string; condition: I
     snapshot = { sku: v.sku ?? "", productName: v.name ?? "", color: v.color ?? "", size: v.size ?? "" };
   }
 
-  const [x] = await db
-    .update(u)
-    .set({ condition: input.condition, note, ...(input.variantId ? { variantId: input.variantId, ...snapshot } : {}), updatedAt: new Date() })
-    .where(and(eq(u.id, input.id), isNull(u.stockReceiptId)))
-    .returning();
-  if (!x) return { error: "Kiện vừa được người khác xử lý — mở lại danh sách để xem trạng thái mới" };
-  return { ok: true, row: toRow(x), code: x.code };
+  type KetQua = { error: string } | { ok: true; x: typeof schema.returnUnidentified.$inferSelect };
+  const out = await db.transaction(async (tx): Promise<KetQua> => {
+    const [khoa] = await tx.select({ condition: u.condition, variantId: u.variantId }).from(u).where(eq(u.id, input.id)).for("update");
+    if (!khoa) return { error: "Không thấy kiện hàng hoàn chưa xác định này" };
+    if ((await unidentifiedLedgerRows(tx, input.id)) > 0) {
+      const chiGanMau = input.condition === khoa.condition && !khoa.variantId && Boolean(input.variantId);
+      if (!chiGanMau) return { error: LEDGER_OWNS_MSG(row.code) };
+    }
+    const [x] = await tx
+      .update(u)
+      .set({ condition: input.condition, note, ...(input.variantId ? { variantId: input.variantId, ...snapshot } : {}), updatedAt: new Date() })
+      .where(and(eq(u.id, input.id), isNull(u.stockReceiptId)))
+      .returning();
+    return x ? { ok: true, x } : { error: "Kiện vừa được người khác xử lý — mở lại danh sách để xem trạng thái mới" };
+  });
+  if ("error" in out) return { error: out.error };
+  return { ok: true, row: toRow(out.x), code: out.x.code };
 }
 
 // ───────────────────────── Đọc ─────────────────────────
@@ -468,7 +535,10 @@ export async function findUnidentifiedByCode(code: string): Promise<Unidentified
 }
 
 export type UnidentifiedSummary = {
-  /** Kiện chưa vào tồn — hàng có thật trong kho mà sổ tồn chưa có. */
+  /**
+   * Kiện chưa vào tồn — hàng có thật trong kho mà sổ tồn chưa có. Company OS · Agent R: trừ phần đã có
+   * KẾT CỤC CUỐI ở sổ kết cục (nhập lại sau sửa đã nằm trong tồn; huỷ / trả xưởng không còn trên kệ).
+   */
   holding: number;
   holdingUnits: number;
   pending: number;
@@ -479,6 +549,10 @@ export type UnidentifiedSummary = {
   /** Đã vào tồn bằng quyết định của quản lý kho, KHÔNG có chứng từ đơn — phải nhìn thấy được. */
   restockedOverride: number;
   restockedUnits: number;
+  /** Số món đã NHẬP LẠI SAU SỬA qua sổ kết cục (Agent R) — không nằm trong `restockedUnits` (cột một-phiếu-một-món). */
+  reworkRestockedUnits: number;
+  /** …trong đó KHÔNG có chứng từ đơn (`MANAGER_OVERRIDE`) — đứng riêng như `restockedOverride`. */
+  reworkRestockedOverrideUnits: number;
   /** Kiện chờ xác định lâu nhất (ngày). `null` = không có kiện nào chờ. */
   oldestPendingDays: number | null;
 };
@@ -491,10 +565,12 @@ export type UnidentifiedSummary = {
  */
 export async function unidentifiedSummary(): Promise<UnidentifiedSummary> {
   const db = await getDb();
-  const [r] = await db
+  const conLai = sql`(${u.quantity} - ${unidentifiedTerminalQtySql(sql`${u.id}`)})`;
+  const [[r], sauSua] = await Promise.all([
+    db
     .select({
-      holding: sql<number>`count(*) filter (where ${u.stockReceiptId} is null)`,
-      holdingUnits: sql<number>`coalesce(sum(${u.quantity}) filter (where ${u.stockReceiptId} is null), 0)`,
+      holding: sql<number>`count(*) filter (where ${u.stockReceiptId} is null and ${conLai} > 0)`,
+      holdingUnits: sql<number>`coalesce(sum(greatest(${conLai}, 0)) filter (where ${u.stockReceiptId} is null), 0)`,
       pending: sql<number>`count(*) filter (where ${u.stockReceiptId} is null and ${u.status} = 'PENDING_IDENTIFICATION')`,
       identified: sql<number>`count(*) filter (where ${u.stockReceiptId} is null and ${u.status} = 'IDENTIFIED')`,
       unidentifiable: sql<number>`count(*) filter (where ${u.stockReceiptId} is null and ${u.status} = 'UNIDENTIFIABLE')`,
@@ -503,7 +579,9 @@ export async function unidentifiedSummary(): Promise<UnidentifiedSummary> {
       restockedUnits: sql<number>`coalesce(sum(${u.quantity}) filter (where ${u.stockReceiptId} is not null), 0)`,
       oldest: sql<Date | null>`min(${u.receivedAt}) filter (where ${u.stockReceiptId} is null)`,
     })
-    .from(u);
+    .from(u),
+    unidentifiedReworkRestockTotals(db),
+  ]);
 
   const oldest = r?.oldest ? new Date(r.oldest) : null;
   return {
@@ -515,6 +593,8 @@ export async function unidentifiedSummary(): Promise<UnidentifiedSummary> {
     restockedIdentified: Number(r?.restockedIdentified ?? 0),
     restockedOverride: Number(r?.restockedOverride ?? 0),
     restockedUnits: Number(r?.restockedUnits ?? 0),
+    reworkRestockedUnits: sauSua.units,
+    reworkRestockedOverrideUnits: sauSua.overrideUnits,
     oldestPendingDays: oldest ? Math.floor((Date.now() - oldest.getTime()) / 86_400_000) : null,
   };
 }

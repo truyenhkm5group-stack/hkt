@@ -220,6 +220,8 @@ async function donDep(db: Db, keepModels: Set<string>) {
   await db.delete(schema.products).where(eq(schema.products.id, PRODUCT));
   await db.delete(schema.suppliers).where(like(schema.suppliers.name, `${P}%`));
 
+  // Agent K: `approval.executed` đã LIVE (model_id NULL nên không đi theo khối dọn theo mẫu ở trên).
+  await db.delete(schema.domainEvents).where(and(eq(schema.domainEvents.name, "approval.executed"), like(schema.domainEvents.actorId, `${P}%`)));
   await db.delete(schema.approvalRequests).where(like(schema.approvalRequests.requestedByEmail, `${P}%`));
   await db.delete(schema.auditLogs).where(like(schema.auditLogs.userEmail, `${P}%`));
   await db.delete(schema.users).where(like(schema.users.id, `${P}%`));

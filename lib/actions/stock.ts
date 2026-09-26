@@ -1,7 +1,8 @@
 "use server";
 
-import { eq, inArray } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { guardSecondApproval } from "@/lib/actions/approvals";
+import { withApprovalExecution } from "@/lib/approvals/execution";
 import { revalidatePath } from "next/cache";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
@@ -9,9 +10,9 @@ import { can, requireUser } from "@/lib/auth/session";
 import type { Actor } from "@/lib/constants/actor";
 import { vnStartOfDay } from "@/lib/format";
 import { publish } from "@/lib/realtime/bus";
-import { settleReturnsForReceipt } from "@/lib/returns/warehouse";
 import { deleteReceiptSchema, stockReceiptSchema } from "@/lib/validation/stock";
 import { deleteStockReceiptCore } from "@/lib/inventory/receipt-delete";
+import { writeStockReceiptCore } from "@/lib/inventory/receipt-create";
 import { validateProductionLink } from "@/lib/inventory/production-link";
 import { matchSupplier } from "@/lib/constants/suppliers";
 import { supplierCatalog } from "@/lib/queries/suppliers";
@@ -20,8 +21,6 @@ import { priceReceiptLines } from "@/lib/inventory/receipt-pricing";
 /** `missingPrice`: mã trên phiếu nhập chưa có giá báo MKT ⇒ dòng đó lưu với giá CHƯA BIẾT (0). */
 export type ActionResult = { ok: true; id?: string; missingPrice?: string[] } | { error: string };
 
-/** Lỗi nghiệp vụ khi đóng kiện hoàn — ném ra để huỷ giao dịch rồi trả `{ error }` cho màn hình, không phải lỗi hệ thống. */
-class SettleError extends Error {}
 
 function firstIssue(error: { issues: { message: string }[] }) {
   return error.issues[0]?.message ?? "Dữ liệu không hợp lệ";
@@ -72,24 +71,21 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
    * quen bấm cho xong (xem `NO_SECOND_APPROVAL` trong lib/constants/approval.ts).
    *
    * `ADJUSTMENT` và `ISSUE` thì khác: chúng là lời khai của một người, không đối chiếu được với gì.
+   *
+   * Cổng đứng TRONG giao dịch ghi phiếu (Company OS · Agent K, `lib/inventory/receipt-create.ts`): lời
+   * duyệt chỉ được tiêu thụ khi phiếu thật sự ghi xong — phiếu hỏng thì lời duyệt còn nguyên.
    */
   const nhomDuyet = data.kind === "ADJUSTMENT" ? "INVENTORY_ADJUSTMENT" : data.kind === "ISSUE" ? "INVENTORY_WRITE_OFF" : null;
-  if (nhomDuyet) {
-    const cong = await guardSecondApproval({
-      group: nhomDuyet,
-      action: `stock.${data.kind.toLowerCase()}`,
-      entity: "STOCK_RECEIPT",
-      summary: `${data.kind === "ADJUSTMENT" ? "Điều chỉnh kiểm kê" : "Xuất kho tay"} ${items.length} mẫu mã · ${totalQuantity} món${data.reference ? ` · ${data.reference}` : ""}`,
-      amount: Math.abs(totalCost) || null,
-      payload: data,
-    });
-    if (cong.mode === "NEEDS_APPROVAL") {
-      return { error: `Việc này cần người thứ hai duyệt (${cong.reason}). Đã gửi yêu cầu — xem ở trang Cảnh báo.` };
-    }
-    if (cong.mode === "BLOCKED_NO_APPROVER") {
-      return { error: `Việc này cần người thứ hai duyệt (${cong.reason}), nhưng hệ thống chưa có ai khác đủ tư cách duyệt. Thêm một tài khoản ADMIN hoặc MANAGER trước.` };
-    }
-  }
+  const congDuyet = nhomDuyet
+    ? {
+        group: nhomDuyet,
+        action: `stock.${data.kind.toLowerCase()}`,
+        entity: "STOCK_RECEIPT",
+        summary: `${data.kind === "ADJUSTMENT" ? "Điều chỉnh kiểm kê" : "Xuất kho tay"} ${items.length} mẫu mã · ${totalQuantity} món${data.reference ? ` · ${data.reference}` : ""}`,
+        amount: Math.abs(totalCost) || null,
+        payload: data,
+      } as const
+    : null;
 
   /**
    * NGƯỜI LẬP PHIẾU = KHOÁ TÀI KHOẢN + TÊN (luật 34). Phiếu kiểm hàng hoàn sinh ra từ phiếu tái nhập
@@ -100,38 +96,23 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
   const xuong = data.kind === "RECEIPT" ? matchSupplier(data.supplier, (await supplierCatalog()).index) : ({ state: "EMPTY" } as const);
   const lines = items.map((i) => ({ variantId: i.variantId, quantity: i.quantity, unitCost: i.unitCost, shipmentId: i.shipmentId?.trim() || null }));
 
-  // MỘT GIAO DỊCH: phiếu · dòng phiếu · đóng kiện hoàn. Phiếu ghi được mà kiện không đóng được (hay
-  // ngược lại) thì tồn và hàng chờ nói hai chuyện khác nhau — nên hỏng giữa chừng là huỷ cả.
-  let receiptId = "";
-  let settledShipmentIds: string[] = [];
-  try {
-    await db.transaction(async (tx) => {
-      const [receipt] = await tx
-        .insert(schema.stockReceipts)
-        .values({ kind: data.kind, receivedAt: vnStartOfDay(data.receivedAt), reference: data.reference, supplier: xuong.state === "MATCHED" ? xuong.name : data.supplier, supplierId: xuong.state === "MATCHED" ? xuong.id : null, productionOrderId: noiXuong.link.productionOrderId, productionBatchId: noiXuong.link.productionBatchId, note: data.note, totalQuantity, totalCost, createdBy: actor.label })
-        .returning({ id: schema.stockReceipts.id });
-      receiptId = receipt.id;
-      await tx.insert(schema.stockReceiptItems).values(lines.map((l) => ({ receiptId: receipt.id, ...l })));
-      if (data.kind === "RETURN") {
-        /*
-          Đóng ĐÚNG những vận đơn mà dòng phiếu chỉ tên — không đoán kiện nào theo mẫu mã (FIFO) như
-          trước. Dòng không nêu vận đơn thì phiếu vẫn cộng tồn theo số đếm, nhưng KHÔNG gạch kiện nào
-          khỏi hàng chờ: ERP không biết kiện nào đã về, và nói bừa còn tệ hơn nói "chưa biết".
-        */
-        const settled = await settleReturnsForReceipt(tx, { receiptId: receipt.id, lines, actor, note: data.note });
-        if ("error" in settled) throw new SettleError(settled.error);
-        settledShipmentIds = settled.settledShipmentIds;
-      }
-      if (data.kind === "RECEIPT") {
-        for (const item of items) {
-          if (item.unitCost > 0) await tx.update(schema.productVariants).set({ lastImportedPrice: item.unitCost, updatedAt: new Date() }).where(eq(schema.productVariants.id, item.variantId));
-        }
-      }
-    });
-  } catch (e) {
-    if (e instanceof SettleError) return { error: e.message };
-    throw e;
+  // MỘT GIAO DỊCH (lib/inventory/receipt-create.ts): cổng duyệt · phiếu · dòng phiếu · đóng kiện hoàn.
+  // Phiếu ghi được mà kiện không đóng được (hay ngược lại) thì tồn và hàng chờ nói hai chuyện khác nhau.
+  const ghi = await writeStockReceiptCore(db, {
+    kind: data.kind,
+    receipt: { receivedAt: vnStartOfDay(data.receivedAt), reference: data.reference, supplier: xuong.state === "MATCHED" ? xuong.name : data.supplier, supplierId: xuong.state === "MATCHED" ? xuong.id : null, productionOrderId: noiXuong.link.productionOrderId, productionBatchId: noiXuong.link.productionBatchId, note: data.note, totalQuantity, totalCost, createdBy: actor.label },
+    lines,
+    note: data.note,
+    actor,
+    approver: { id: user.id, email: user.email },
+    gate: congDuyet,
+  });
+  if (ghi.gate && (ghi.gate.mode === "NEEDS_APPROVAL" || ghi.gate.consumed)) {
+    revalidatePath("/alerts");
+    revalidatePath("/work");
   }
+  if ("error" in ghi) return { error: ghi.error };
+  const { receiptId, settledShipmentIds } = ghi;
   await audit({
     userId: user.id,
     userEmail: user.email,
@@ -150,15 +131,17 @@ export async function createStockReceipt(input: unknown): Promise<ActionResult> 
  * hoàn · duyệt hai bước như phiếu điều chỉnh / xuất tay · nhật ký ảnh chụp đầy đủ + LÝ DO trước khi xoá.
  */
 export async function deleteStockReceipt(id: string, reason: string): Promise<ActionResult> {
-  const user = await requireUser();
-  if (!can(user, "inventory:write")) return { error: "Không có quyền nhập kho" };
-  const parsed = deleteReceiptSchema.safeParse({ id, reason });
-  if (!parsed.success) return { error: firstIssue(parsed.error) };
-  const db = await getDb();
-  const actor: Actor = { id: user.id, label: user.name || user.email };
-  const result = await deleteStockReceiptCore(db, { id: parsed.data.id, reason: parsed.data.reason, actor, actorEmail: user.email, gate: guardSecondApproval });
-  if ("error" in result) return { error: result.error };
-  for (const item of result.snapshot.items) publish({ type: "stock", variantId: item.variantId });
-  revalidate();
-  return { ok: true };
+  return withApprovalExecution(async () => {
+    const user = await requireUser();
+    if (!can(user, "inventory:write")) return { error: "Không có quyền nhập kho" };
+    const parsed = deleteReceiptSchema.safeParse({ id, reason });
+    if (!parsed.success) return { error: firstIssue(parsed.error) };
+    const db = await getDb();
+    const actor: Actor = { id: user.id, label: user.name || user.email };
+    const result = await deleteStockReceiptCore(db, { id: parsed.data.id, reason: parsed.data.reason, actor, actorEmail: user.email, gate: guardSecondApproval });
+    if ("error" in result) return { error: result.error };
+    for (const item of result.snapshot.items) publish({ type: "stock", variantId: item.variantId });
+    revalidate();
+    return { ok: true };
+  });
 }

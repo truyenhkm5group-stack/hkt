@@ -7325,9 +7325,13 @@ export const returnDispositions = pgTable(
   "return_dispositions",
   {
     id: id(),
-    inspectionId: text("inspection_id")
-      .notNull()
-      .references(() => returnInspections.id, { onDelete: "restrict" }),
+    /**
+     * Neo vào phiếu kiểm của kiện CÓ mã vận đơn. `NULL` ⇔ dòng neo vào một món hàng hoàn KHÔNG NHÃN
+     * (`unidentified_id`) — Company OS · Agent R, 0142. CHECK `return_dispositions_anchor_check`: đúng MỘT neo.
+     */
+    inspectionId: text("inspection_id").references(() => returnInspections.id, { onDelete: "restrict" }),
+    /** Company OS · Agent R (0142): món hàng hoàn KHÔNG NHÃN (`return_unidentified`). Xoá món là xoá chứng từ ⇒ RESTRICT. */
+    unidentifiedId: text("unidentified_id").references(() => returnUnidentified.id, { onDelete: "restrict" }),
     /** `NULL` = đối tượng là CẢ KIỆN (kiện kiểm nhanh, không có dòng từng món). */
     inspectionItemId: text("inspection_item_id").references(() => returnInspectionItems.id, { onDelete: "restrict" }),
     /** `item:<id dòng kiểm>` hoặc `parcel:<id phiếu kiểm>`. */
@@ -7350,6 +7354,12 @@ export const returnDispositions = pgTable(
       .references(() => users.id, { onDelete: "restrict" }),
     /** ẢNH CHỤP tên người làm — do MÁY CHỦ đọc từ `users`, không nhận từ client. */
     actorName: text("actor_name").notNull().default(""),
+    /**
+     * Company OS · Agent R (0142): CĂN CỨ của lượt nhập lại sau sửa cho món KHÔNG NHÃN — `IDENTIFIED` (đã
+     * nối vận đơn) hay `MANAGER_OVERRIDE` (không chứng từ đơn, cần quyền `inventory:restock-unidentified`
+     * + lý do). Cùng từ vựng với `return_unidentified.restock_authority`. CHỈ có ở đúng loại dòng ấy (CHECK).
+     */
+    restockAuthority: text("restock_authority"),
     /** Khoá chống bấm đúp / gửi lại: cùng khoá ⇒ trả lại dòng đã ghi, không ghi dòng thứ hai. */
     requestKey: text("request_key").unique(),
     createdAt: createdAt(),
@@ -7357,12 +7367,19 @@ export const returnDispositions = pgTable(
   (t) => [
     index("return_dispositions_subject_idx").on(t.subjectKey, t.createdAt),
     index("return_dispositions_inspection_idx").on(t.inspectionId),
+    index("return_dispositions_unidentified_idx").on(t.unidentifiedId),
     index("return_dispositions_variant_idx").on(t.variantId),
     check("return_dispositions_disposition_check", sql`${t.disposition} IN ('PENDING_DECISION', 'REWORK', 'RESTOCK_AFTER_REWORK', 'WRITE_OFF', 'RETURN_TO_SUPPLIER')`),
     check("return_dispositions_qty_check", sql`${t.qty} > 0`),
+    // 0142: ĐÚNG MỘT neo — phiếu kiểm (kiện có mã) HOẶC món không nhãn. Không cả hai, không thiếu cả hai.
+    check("return_dispositions_anchor_check", sql`num_nonnulls(${t.inspectionId}, ${t.unidentifiedId}) = 1`),
     check(
       "return_dispositions_subject_check",
-      sql`(${t.inspectionItemId} IS NULL AND ${t.subjectKey} = 'parcel:' || ${t.inspectionId}) OR (${t.inspectionItemId} IS NOT NULL AND ${t.subjectKey} = 'item:' || ${t.inspectionItemId})`,
+      sql`(${t.unidentifiedId} IS NULL AND ${t.inspectionId} IS NOT NULL AND ((${t.inspectionItemId} IS NULL AND ${t.subjectKey} = 'parcel:' || ${t.inspectionId}) OR (${t.inspectionItemId} IS NOT NULL AND ${t.subjectKey} = 'item:' || ${t.inspectionItemId}))) OR (${t.unidentifiedId} IS NOT NULL AND ${t.inspectionId} IS NULL AND ${t.inspectionItemId} IS NULL AND ${t.subjectKey} = 'unidentified:' || ${t.unidentifiedId})`,
+    ),
+    check(
+      "return_dispositions_restock_authority_check",
+      sql`((${t.unidentifiedId} IS NOT NULL AND ${t.disposition} = 'RESTOCK_AFTER_REWORK') = (${t.restockAuthority} IS NOT NULL)) AND (${t.restockAuthority} IS NULL OR ${t.restockAuthority} IN ('IDENTIFIED', 'MANAGER_OVERRIDE'))`,
     ),
     check("return_dispositions_receipt_check", sql`(${t.disposition} = 'RESTOCK_AFTER_REWORK') = (${t.stockReceiptId} IS NOT NULL)`),
     check("return_dispositions_note_check", sql`${t.disposition} <> 'WRITE_OFF' OR length(trim(${t.note})) > 0`),

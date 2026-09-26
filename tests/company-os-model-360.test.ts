@@ -252,7 +252,7 @@ function inv(decision: InventoryDecisionKind, o: Partial<SuggestionInventoryRow>
 }
 
 function testSuggestions() {
-  const base: SuggestionInput = { modelId: "m1", declaredState: null, signal: null, ads: null, inventory: null, creativeHref: null, periodQuery: "period=30d", production: { openTopics: 0 }, canCreateTopic: false };
+  const base: SuggestionInput = { modelId: "m1", declaredState: null, signal: null, ads: null, inventory: null, creativeHref: null, periodQuery: "period=30d", production: { trackTopics: 0 }, canCreateTopic: false };
   assert.deepEqual(deriveModelSuggestions(base), [], "không nguồn nào ⇒ không đề xuất");
 
   // Quảng cáo: chỉ SCALE / CUT với chi ĐÃ ghép.
@@ -306,7 +306,7 @@ function testSuggestions() {
   }
   // Đã có topic ĐANG MỞ (Agent C) ⇒ KHÔNG đề xuất mở trao đổi sản xuất lần nữa.
   const thang = { signal: "WINNER" as const, summary: "Quảng cáo: Tăng ngân sách · Mẫu mã: Đáng nhân bản" };
-  assert.equal(deriveModelSuggestions({ ...base, signal: thang, production: { openTopics: 1 } }).length, 0, "topic đang mở ⇒ không đề xuất mở topic");
+  assert.equal(deriveModelSuggestions({ ...base, signal: thang, production: { trackTopics: 1 } }).length, 0, "topic đang mở ⇒ không đề xuất mở topic");
   // Có quyền tạo topic ⇒ đề xuất kèm link tạo topic cho đúng mẫu.
   const coLink = deriveModelSuggestions({ ...base, signal: thang, canCreateTopic: true })[0];
   assert.deepEqual(coLink.links.map((l) => l.href), ["/production/topics/new?model=m1"]);

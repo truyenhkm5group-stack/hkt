@@ -75,11 +75,12 @@ export async function createCostSheetCore(
       source: "ui:/production",
       dedupeKey: `costing.version_created:${row.id}`,
     });
-    return { costSheetId: row.id, version, totalUnitCost: c.total, eventId };
+    // Vòng đời đi theo TRONG giao dịch này — sống chết cùng phiên bản giá thành (Agent K).
+    const lifecycle = await followModelLifecycle(tx, { modelId: m.id, eventName: "costing.version_created", eventId, triggeredBy: input.actor, related: { type: "cost_sheet", id: row.id } });
+    return { costSheetId: row.id, version, totalUnitCost: c.total, eventId, lifecycle };
   });
 
-  const lifecycle = await followModelLifecycle(db, { modelId: m.id, eventName: "costing.version_created", eventId: out.eventId, triggeredBy: input.actor, related: { type: "cost_sheet", id: out.costSheetId } });
-  return { ok: true, ...out, lifecycle };
+  return { ok: true, ...out };
 }
 
 /** Sửa một bảng NHÁP: thay toàn bộ dòng + ghi chú. Bảng đã chốt ⇒ từ chối. */

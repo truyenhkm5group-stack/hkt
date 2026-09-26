@@ -5,10 +5,10 @@ import { z } from "zod";
 import { getDb } from "@/db";
 import { listApprovalRequests } from "@/lib/queries/approvals";
 import { can, requireUser, type SessionUser } from "@/lib/auth/session";
+import { guardWithinScope } from "@/lib/approvals/execution";
 import {
   applyLegacyEnforceCore,
   decideApprovalCore,
-  guardSecondApprovalCore,
   readEnforceConfig,
   readLegacyEnforce,
   setEnforceGroupCore,
@@ -61,11 +61,14 @@ export type { GuardInput } from "@/lib/approvals/service";
  * Gọi TRƯỚC khi ghi dữ liệu. Trả `PROCEED` thì cứ làm; trả hai mode còn lại thì dừng và trả thông
  * điệp cho người dùng. Người xin làm lại ĐÚNG việc đã được duyệt thì lời duyệt được TIÊU THỤ (một
  * lần) và trả `PROCEED` — xem `lib/approvals/service.ts`.
+ *
+ * Gọi trong thân một action bọc bằng `withApprovalExecution` (lib/approvals/execution.ts) thì lượt tiêu
+ * thụ chỉ là GIỮ CHỖ: action hỏng ⇒ lời duyệt trả lại kèm `execution_error`; xong ⇒ `approval.executed`.
  */
 export async function guardSecondApproval(input: GuardInput): Promise<GuardResult> {
   const user = await requireUser();
   const db = await getDb();
-  const kq = await guardSecondApprovalCore(db, { id: user.id, email: user.email }, input);
+  const kq = await guardWithinScope(db, { id: user.id, email: user.email }, input);
   if (kq.mode === "NEEDS_APPROVAL" || kq.consumed) {
     revalidatePath("/alerts");
     revalidatePath("/work");

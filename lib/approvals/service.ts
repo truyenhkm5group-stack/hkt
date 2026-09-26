@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { audit } from "@/lib/audit";
+import { audit, type AuditParams } from "@/lib/audit";
+import { isOpenTransaction, type DbOrTx } from "@/lib/db-transaction";
+import { emitDomainEvent } from "@/lib/events/emit";
 import {
   APPROVAL_ENFORCE_KEY,
   APPROVAL_ENFORCE_LEGACY_KEY,
@@ -39,11 +41,43 @@ import {
  *     chạm lại nhóm đó — không cần job định kỳ nào. Hệ quả nói thẳng: một yêu cầu đã quá hạn mà
  *     người xin không bao giờ thử lại thì cột `status` vẫn đọc `APPROVED`; nó vẫn không mở khoá được
  *     gì, và mọi chỗ đọc "còn hiệu lực" phải đọc qua `approvalStillValid()`.
- *
- * Không phát sự kiện `approval.executed` ở đây: tên đó đang RESERVED trong sổ sự kiện của Agent A.
+ *  4. **TIÊU THỤ MÀ VIỆC KHÔNG CHẠY ĐƯỢC THÌ LỜI DUYỆT CÒN NGUYÊN** (Company OS · Agent K). Trước bản
+ *     này lời duyệt lật `EXECUTED` ngay ở cổng, trước thao tác ghi — thao tác hỏng sau đó là mất lời
+ *     duyệt. Nay có ba cách "thanh toán" một lượt tiêu thụ (`ApprovalSettlement`), chọn theo nơi gọi:
+ *       · `IN_TRANSACTION` — `db` là giao dịch nghiệp vụ ĐANG MỞ của nơi gọi (cổng gọi TRONG giao dịch):
+ *         lật `EXECUTED` + phát `approval.executed` cùng giao dịch với thao tác ghi. Thao tác hỏng ⇒
+ *         tất cả cùng huỷ, lời duyệt vẫn `APPROVED`; nơi gọi ghi câu lỗi bằng
+ *         `recordApprovalExecutionError`. Dòng nhật ký của cổng phải HOÃN (`auditSink`) tới sau khi
+ *         giao dịch chốt — PGlite chỉ có một kết nối, `audit()` giữa giao dịch là khoá chết.
+ *       · `DEFERRED` — cổng gọi TRƯỚC thân thao tác (server action có sẵn): lật `EXECUTED` ngay là để
+ *         GIỮ CHỖ (hai lượt đồng thời vẫn chỉ một thắng), rồi `lib/approvals/execution.ts` thanh toán
+ *         theo kết quả thật: xong ⇒ `confirmApprovalExecution` (phát `approval.executed` trong cùng
+ *         giao dịch với lượt khẳng định `status = 'EXECUTED'`); `{ error }` hoặc ném ⇒
+ *         `releaseApprovalExecution` trả về `APPROVED` + `execution_error`. Sự kiện KHÔNG phát lúc giữ
+ *         chỗ: `domain_events` là append-only, một "đã thực hiện" cho việc rồi hỏng thì không rút lại được.
+ *       · `IMMEDIATE` — không có ai thanh toán (lời gọi ngoài phạm vi `withApprovalExecution`): hành vi
+ *         cũ — lật + phát sự kiện trong một giao dịch nhỏ.
  */
 
 export type ApprovalUser = { id: string; email: string };
+
+/** Cách một lượt tiêu thụ được "thanh toán" — xem điểm 4 ở đầu tệp. */
+export type ApprovalSettlement = "IN_TRANSACTION" | "DEFERRED" | "IMMEDIATE";
+
+/** Khoá chống trùng của `approval.executed`: một yêu cầu, một sự kiện — dù thanh toán theo đường nào. */
+export function approvalExecutedDedupeKey(requestId: string): string {
+  return `approval.executed:${requestId}`;
+}
+
+export type GuardOptions = {
+  /** Cổng gọi TRƯỚC thân thao tác và nơi gọi SẼ thanh toán (`lib/approvals/execution.ts`). */
+  deferSettlement?: boolean;
+  /**
+   * Nhận dòng nhật ký thay vì ghi ngay. BẮT BUỘC khi `db` là giao dịch đang mở: nơi gọi ghi chúng
+   * (`audit()`) SAU khi giao dịch chốt.
+   */
+  auditSink?: AuditParams[];
+};
 
 export type GuardInput = {
   group: ApprovalGroup;
@@ -60,6 +94,8 @@ export type GuardResult = ApprovalDecision & {
   requestId?: string;
   /** `true` khi lần chạy này TIÊU THỤ một yêu cầu đã duyệt. */
   consumed?: boolean;
+  /** Khi `consumed`: lượt tiêu thụ được thanh toán theo đường nào. */
+  settlement?: ApprovalSettlement;
 };
 
 /** Dấu vân tay của MỘT việc: sha256 của JSON chuẩn hoá. Không chứa `summary` (chữ đổi được mà việc không đổi). */
@@ -78,7 +114,7 @@ export function approvalStillValid(req: { status: string; decidedAt: Date | null
   return req.status === "APPROVED" && req.executedAt === null && req.decidedAt !== null && req.decidedAt.getTime() > approvalValidSince(now).getTime();
 }
 
-async function docSetting(db: Db, key: string): Promise<string | null> {
+async function docSetting(db: DbOrTx, key: string): Promise<string | null> {
   const [row] = await db.select({ value: schema.settings.value }).from(schema.settings).where(eq(schema.settings.key, key));
   return row?.value ?? null;
 }
@@ -89,7 +125,7 @@ async function ghiSetting(db: Db, key: string, value: unknown) {
 }
 
 /** Cấu hình cưỡng chế CÓ HIỆU LỰC — chỉ khoá v2 do công tắc ADMIN ghi. Xem `parseEnforceConfig`. */
-export async function readEnforceConfig(db: Db): Promise<Record<string, unknown> | null> {
+export async function readEnforceConfig(db: DbOrTx): Promise<Record<string, unknown> | null> {
   return parseEnforceConfig(await docSetting(db, APPROVAL_ENFORCE_KEY));
 }
 
@@ -161,7 +197,7 @@ export async function applyLegacyEnforceCore(db: Db, user: AdminUser): Promise<{
  * tồn tại mà máy vẫn báo "không có người duyệt". Mở rộng phải tính quyền của mọi tài khoản bằng
  * `lib/auth/access.ts`; chưa làm ở bản này, nêu ở docs/company-os/handoff-g.md.
  */
-async function coNguoiDuyetKhac(db: Db, requesterId: string): Promise<boolean> {
+async function coNguoiDuyetKhac(db: DbOrTx, requesterId: string): Promise<boolean> {
   const [row] = await db
     .select({ n: sql<number>`count(*)` })
     .from(schema.users)
@@ -173,7 +209,7 @@ async function coNguoiDuyetKhac(db: Db, requesterId: string): Promise<boolean> {
  * Ghi `EXPIRED` cho mọi lời duyệt ĐÃ QUÁ HẠN mà chưa dùng của người này trong nhóm này ("chạm thì
  * ghi"). Trả số dòng đã lật để còn ghi nhật ký.
  */
-export async function expireStaleApprovals(db: Db, requesterId: string, group: ApprovalGroup, now: Date): Promise<string[]> {
+export async function expireStaleApprovals(db: DbOrTx, requesterId: string, group: ApprovalGroup, now: Date): Promise<string[]> {
   const a = schema.approvalRequests;
   const rows = await db
     .update(a)
@@ -190,7 +226,7 @@ export async function expireStaleApprovals(db: Db, requesterId: string, group: A
  * lượt song song đã lấy mất) thì thử ứng viên kế tiếp, hết ứng viên thì trả `null`.
  */
 export async function consumeApprovedRequest(
-  db: Db,
+  db: DbOrTx,
   input: { requesterId: string; group: ApprovalGroup; action: string; fingerprint: string; now: Date },
 ): Promise<string | null> {
   const a = schema.approvalRequests;
@@ -212,7 +248,7 @@ export async function consumeApprovedRequest(
   for (const u of ungVien) {
     const [lat] = await db
       .update(a)
-      .set({ status: "EXECUTED", executedAt: input.now })
+      .set({ status: "EXECUTED", executedAt: input.now, executionError: null })
       .where(and(eq(a.id, u.id), eq(a.status, "APPROVED")))
       .returning({ id: a.id });
     if (lat) return lat.id;
@@ -220,13 +256,145 @@ export async function consumeApprovedRequest(
   return null;
 }
 
+type ExecutedEvent = {
+  requestId: string;
+  /** Người THỰC HIỆN (= người xin — chỉ người xin tiêu thụ được lời duyệt của mình). */
+  actorId: string;
+  group: string;
+  action: string;
+  entity: string;
+  entityId: string;
+  summary: string;
+  amount: number | null;
+  settlement: ApprovalSettlement;
+  now: Date;
+};
+
+/**
+ * Phát `approval.executed` — trong giao dịch ĐANG MỞ của nơi gọi, cùng lượt ghi trạng thái. Khoá chống
+ * trùng = id yêu cầu: một yêu cầu, một sự kiện, dù thanh toán theo đường nào và dù phát lại.
+ */
+async function emitApprovalExecuted(tx: DbOrTx, e: ExecutedEvent): Promise<string | null> {
+  return emitDomainEvent(tx, {
+    name: "approval.executed",
+    subjectType: "approval_request",
+    subjectId: e.requestId,
+    modelId: null,
+    payload: { group: e.group, action: e.action, entity: e.entity, entityId: e.entityId, summary: e.summary, amount: e.amount, settlement: e.settlement },
+    actorKind: "USER",
+    actorId: e.actorId,
+    source: `approval:${e.action}`,
+    correlationId: e.requestId,
+    dedupeKey: approvalExecutedDedupeKey(e.requestId),
+    occurredAt: e.now,
+  });
+}
+
+/** Câu lỗi lưu vào `execution_error` — cắt ngắn, không để một stack trace dài chiếm dòng. */
+function cauLoi(error: string): string {
+  const t = error.trim() || "Thao tác hỏng mà không có câu lỗi";
+  return t.length > 1000 ? `${t.slice(0, 1000)}…` : t;
+}
+
+/**
+ * `DEFERRED` · thao tác ĐÃ XONG: khẳng định lượt tiêu thụ (vẫn `EXECUTED`, xoá câu lỗi cũ nếu có) và phát
+ * `approval.executed` trong CÙNG giao dịch. Yêu cầu không còn ở `EXECUTED` (đã bị trả lại ở đâu đó) ⇒
+ * không phát gì. Gọi lại ⇒ sự kiện trùng khoá, không ghi lần hai.
+ */
+export async function confirmApprovalExecution(db: Db, requestId: string, actor: ApprovalUser, now: Date = new Date()): Promise<{ confirmed: boolean; eventId: string | null }> {
+  const a = schema.approvalRequests;
+  return db.transaction(async (tx) => {
+    const [r] = await tx
+      .update(a)
+      .set({ executionError: null })
+      .where(and(eq(a.id, requestId), eq(a.status, "EXECUTED")))
+      .returning({ group: a.group, action: a.action, entity: a.entity, entityId: a.entityId, summary: a.summary, amount: a.amount });
+    if (!r) return { confirmed: false, eventId: null };
+    const eventId = await emitApprovalExecuted(tx, { requestId, actorId: actor.id, ...r, settlement: "DEFERRED", now });
+    return { confirmed: true, eventId };
+  });
+}
+
+/**
+ * `DEFERRED` · thao tác HỎNG (trả `{ error }` hoặc ném): trả lời duyệt về `APPROVED` (bỏ `executed_at`)
+ * và ghi `execution_error` — người xin làm lại được mà không phải xin lại. Hàng rào: chỉ khi đang
+ * `EXECUTED` VÀ chưa có `approval.executed` — một lượt đã khẳng định xong thì không bao giờ bị hồi sinh.
+ * Hạn 72 giờ vẫn tính từ lúc DUYỆT, không từ lúc trả lại.
+ */
+export async function releaseApprovalExecution(db: Db, requestId: string, error: string, actor: ApprovalUser): Promise<boolean> {
+  const a = schema.approvalRequests;
+  const loi = cauLoi(error);
+  const [r] = await db
+    .update(a)
+    .set({ status: "APPROVED", executedAt: null, executionError: loi })
+    .where(
+      and(
+        eq(a.id, requestId),
+        eq(a.status, "EXECUTED"),
+        sql`not exists (select 1 from ${schema.domainEvents} where ${schema.domainEvents.dedupeKey} = ${approvalExecutedDedupeKey(requestId)})`,
+      ),
+    )
+    .returning({ id: a.id, group: a.group, action: a.action });
+  if (!r) return false;
+  await audit({
+    userId: actor.id,
+    userEmail: actor.email,
+    actorKind: "USER",
+    action: `approval.execute_failed:${r.action}`,
+    entity: "APPROVAL_REQUEST",
+    entityId: requestId,
+    correlationId: requestId,
+    reason: "Thao tác đã được duyệt nhưng KHÔNG chạy được — lời duyệt trả lại nguyên vẹn, làm lại không cần xin lại.",
+    detail: { group: r.group, executionError: loi },
+  });
+  return true;
+}
+
+/**
+ * `IN_TRANSACTION` · giao dịch nghiệp vụ đã ĐỔ (lượt lật cũng đã huỷ theo, lời duyệt vẫn `APPROVED`): chỉ
+ * ghi lại câu lỗi để người xin / người duyệt thấy vì sao việc chưa xong. Không đổi trạng thái.
+ */
+export async function recordApprovalExecutionError(db: Db, requestId: string, error: string, actor: ApprovalUser): Promise<boolean> {
+  const a = schema.approvalRequests;
+  const loi = cauLoi(error);
+  const [r] = await db
+    .update(a)
+    .set({ executionError: loi })
+    .where(and(eq(a.id, requestId), eq(a.status, "APPROVED")))
+    .returning({ id: a.id, group: a.group, action: a.action });
+  if (!r) return false;
+  await audit({
+    userId: actor.id,
+    userEmail: actor.email,
+    actorKind: "USER",
+    action: `approval.execute_failed:${r.action}`,
+    entity: "APPROVAL_REQUEST",
+    entityId: requestId,
+    correlationId: requestId,
+    reason: "Thao tác đã được duyệt nhưng giao dịch đổ — lượt tiêu thụ huỷ theo, lời duyệt còn nguyên.",
+    detail: { group: r.group, executionError: loi },
+  });
+  return true;
+}
+
 /**
  * Hỏi cổng: việc này làm luôn được, hay phải chờ người thứ hai?
  *
  * Gọi TRƯỚC khi ghi dữ liệu. `PROCEED` thì cứ làm; hai mode còn lại thì dừng và trả thông điệp.
  * Khi cưỡng chế TẮT (mặc định) hành vi y hệt bản trước: làm luôn và để lại dòng `approval.skip:*`.
+ *
+ * `db` là giao dịch nghiệp vụ đang mở ⇒ tiêu thụ `IN_TRANSACTION` (bắt buộc kèm `auditSink`);
+ * `opts.deferSettlement` ⇒ `DEFERRED`; còn lại ⇒ `IMMEDIATE`. Xem điểm 4 ở đầu tệp.
  */
-export async function guardSecondApprovalCore(db: Db, user: ApprovalUser, input: GuardInput, now: Date = new Date()): Promise<GuardResult> {
+export async function guardSecondApprovalCore(db: DbOrTx, user: ApprovalUser, input: GuardInput, now: Date = new Date(), opts: GuardOptions = {}): Promise<GuardResult> {
+  const trongGiaoDich = isOpenTransaction(db);
+  if (trongGiaoDich && !opts.auditSink) {
+    throw new Error("guardSecondApprovalCore gọi TRONG giao dịch phải kèm auditSink — audit() giữa giao dịch là khoá chết trên PGlite (một kết nối)");
+  }
+  const ghi = async (p: AuditParams) => {
+    if (opts.auditSink) opts.auditSink.push(p);
+    else await audit(p);
+  };
   const enforce = isEnforced(await readEnforceConfig(db), input.group);
   const vuotNguong = overThreshold(input.group, input.amount);
 
@@ -235,7 +403,7 @@ export async function guardSecondApprovalCore(db: Db, user: ApprovalUser, input:
   // Dấu vết này là thứ khiến ngày bật cưỡng chế lên không phải bắt đầu từ con số không: shop nhìn
   // được sáu tháng qua nhóm việc đó xảy ra bao nhiêu lần và do ai.
   if (!enforce || !vuotNguong) {
-    await audit({
+    await ghi({
       userId: user.id,
       userEmail: user.email,
       actorKind: "USER",
@@ -257,7 +425,7 @@ export async function guardSecondApprovalCore(db: Db, user: ApprovalUser, input:
 
   // ── Lời duyệt quá hạn của chính người này, nhóm này: ghi EXPIRED ngay lúc chạm ──
   for (const id of await expireStaleApprovals(db, user.id, input.group, now)) {
-    await audit({
+    await ghi({
       userId: null,
       userEmail: "system:approval-expiry",
       actorKind: "SYSTEM",
@@ -274,9 +442,26 @@ export async function guardSecondApprovalCore(db: Db, user: ApprovalUser, input:
   //
   // Đứng TRƯỚC nhánh "không có người duyệt": lời duyệt đã có là do một người khác đưa ra; người đó
   // hôm nay nghỉ việc không làm lời duyệt hôm qua mất giá trị.
-  const daTieuThu = await consumeApprovedRequest(db, { requesterId: user.id, group: input.group, action: input.action, fingerprint, now });
+  const settlement: ApprovalSettlement = trongGiaoDich ? "IN_TRANSACTION" : opts.deferSettlement ? "DEFERRED" : "IMMEDIATE";
+  const tieuThu = { requesterId: user.id, group: input.group, action: input.action, fingerprint, now };
+  const phat = { actorId: user.id, group: input.group, action: input.action, entity: input.entity ?? "", entityId: input.entityId ?? "", summary: input.summary, amount: input.amount ?? null, now };
+  let daTieuThu: string | null;
+  if (isOpenTransaction(db)) {
+    // Cùng giao dịch với thao tác ghi của nơi gọi: lật + sự kiện sống chết cùng nó.
+    daTieuThu = await consumeApprovedRequest(db, tieuThu);
+    if (daTieuThu) await emitApprovalExecuted(db, { ...phat, requestId: daTieuThu, settlement });
+  } else if (settlement === "DEFERRED") {
+    // GIỮ CHỖ: lật EXECUTED để lượt đồng thời không lấy được; sự kiện chờ kết quả thật của thao tác.
+    daTieuThu = await consumeApprovedRequest(db, tieuThu);
+  } else {
+    daTieuThu = await db.transaction(async (tx) => {
+      const id = await consumeApprovedRequest(tx, tieuThu);
+      if (id) await emitApprovalExecuted(tx, { ...phat, requestId: id, settlement });
+      return id;
+    });
+  }
   if (daTieuThu) {
-    await audit({
+    await ghi({
       userId: user.id,
       userEmail: user.email,
       actorKind: "USER",
@@ -284,15 +469,18 @@ export async function guardSecondApprovalCore(db: Db, user: ApprovalUser, input:
       entity: "APPROVAL_REQUEST",
       entityId: daTieuThu,
       correlationId: daTieuThu,
-      reason: "Thực hiện đúng việc đã được người thứ hai duyệt — lời duyệt đã dùng, lần sau phải xin lại.",
-      detail: { group: input.group, summary: input.summary, amount: input.amount ?? null },
+      reason:
+        settlement === "IMMEDIATE"
+          ? "Thực hiện đúng việc đã được người thứ hai duyệt — lời duyệt đã dùng, lần sau phải xin lại."
+          : "Thực hiện đúng việc đã được người thứ hai duyệt — thao tác hỏng thì lời duyệt được trả lại kèm câu lỗi (execution_error).",
+      detail: { group: input.group, summary: input.summary, amount: input.amount ?? null, settlement },
     });
-    return { mode: "PROCEED", recorded: true, group: input.group, requestId: daTieuThu, consumed: true };
+    return { mode: "PROCEED", recorded: true, group: input.group, requestId: daTieuThu, consumed: true, settlement };
   }
 
   // ── Cần duyệt nhưng KHÔNG CÓ AI để duyệt ──
   if (!(await coNguoiDuyetKhac(db, user.id))) {
-    await audit({
+    await ghi({
       userId: user.id,
       userEmail: user.email,
       actorKind: "USER",
@@ -335,7 +523,7 @@ export async function guardSecondApprovalCore(db: Db, user: ApprovalUser, input:
     return { mode: "NEEDS_APPROVAL", group: input.group, reason, requestId: dangCho?.id };
   }
 
-  await audit({
+  await ghi({
     userId: user.id,
     userEmail: user.email,
     actorKind: "USER",
