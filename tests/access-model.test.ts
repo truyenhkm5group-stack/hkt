@@ -3,8 +3,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { applyScope, effectiveAccess, grantedPermissions, type CustomRole } from "@/lib/auth/access";
-import { ROLE_BUILDER_FORBIDDEN, SENSITIVE_AREAS } from "@/lib/constants/access-scope";
+import { applyScope, CUSTOM_ROLE_IMPLIED_VIEWS, customRoleImpliedViews, effectiveAccess, grantedPermissions, type CustomRole } from "@/lib/auth/access";
+import { LEGACY_IMPLIES } from "@/lib/auth/permissions";
+import { ROLE_BUILDER_FORBIDDEN, SENSITIVE_AREAS, SENSITIVE_BY_PERMISSION } from "@/lib/constants/access-scope";
 import { saveAccessRoleSchema, setUserAccessSchema } from "@/lib/validation/access";
 
 /**
@@ -179,6 +180,53 @@ export function testDisabledRoleFallsBackNarrow() {
   assert.ok(!rieng.permissions.includes("cod:write"), "danh sách riêng của người phải thắng bó vai trò");
 
   console.log("✓ Mọi nhánh rơi về phía hẹp hơn: vai trò tắt → mẫu hệ thống, quyền riêng thắng bó vai trò");
+}
+
+/**
+ * VAI TRÒ TUỲ CHỈNH NHẬN KHOÁ XEM SINH RA SAU LỜI KHAI — VÀ CHỈ KHOÁ XEM.
+ *
+ * `models:view` ra đời sau khi các vai trò tuỳ chỉnh đã được dựng, nên nhân viên xem được sản phẩm lại bị
+ * chặn ở `/models`. Sửa bằng danh sách TRẮNG trên chính `LEGACY_IMPLIES`, không bằng cả `expandLegacy`:
+ * bảng ấy còn phép kéo GHI (`cs:manage ⇒ shipments:manage`…) — chạy nó cho vai trò tuỳ chỉnh là âm thầm
+ * cấp quyền ghi mà người dựng vai trò chưa từng tick.
+ */
+export function testCustomRoleViewImplies() {
+  // Luật của danh sách trắng: khoá xem, không nhạy cảm, không bị cấm, và là phép kéo đã có sẵn.
+  const keoCoSan = new Set(Object.values(LEGACY_IMPLIES).flat());
+  for (const k of CUSTOM_ROLE_IMPLIED_VIEWS) {
+    assert.ok(k.endsWith(":view"), `${k}: vai trò tuỳ chỉnh chỉ được kéo theo khoá XEM`);
+    assert.ok(!SENSITIVE_BY_PERMISSION[k], `${k}: khoá thuộc vùng nhạy cảm không được kéo theo — phạm vi phải quyết nó`);
+    assert.ok(!ROLE_BUILDER_FORBIDDEN.includes(k), `${k}: khoá bị cấm ở trình dựng vai trò không được lọt vào qua đường kéo`);
+    assert.ok(keoCoSan.has(k), `${k}: danh sách trắng chỉ CHỌN phép kéo có sẵn trong LEGACY_IMPLIES, không khai phép mới`);
+  }
+
+  const vaiTro = (permissions: string[]): CustomRole => ({ id: "r", code: "R", name: "Kho", baseRole: "VIEWER", permissions, defaultScope: "ALL", active: true });
+
+  // Ca thật: vai trò tuỳ chỉnh xem được sản phẩm ⇒ mở được /models.
+  const coSanPham = grantedPermissions("WAREHOUSE", null, vaiTro(["products:view", "orders:read"]), null, null);
+  assert.equal(coSanPham.source, "CUSTOM_ROLE");
+  assert.ok(coSanPham.permissions.includes("models:view"), "vai trò tuỳ chỉnh có products:view phải nhận models:view");
+  assert.ok(!coSanPham.permissions.includes("models:write"), "KHÔNG bao giờ kéo theo quyền ghi sổ mẫu");
+  assert.ok(!coSanPham.permissions.includes("planning:view"), "khoá xem chủ shop đã chủ động bỏ trống (planning:view) không được lấp");
+  assert.ok(!coSanPham.permissions.includes("orders:export"), "orders:read không được kéo theo orders:export cho vai trò tuỳ chỉnh");
+
+  // Không có products:view ⇒ không có gì để kéo.
+  const khongSanPham = grantedPermissions("WAREHOUSE", null, vaiTro(["orders:read"]), null, null);
+  assert.ok(!khongSanPham.permissions.includes("models:view"), "không xem được sản phẩm thì không tự có models:view");
+
+  // Phép kéo GHI trong LEGACY_IMPLIES không được chạy cho vai trò tuỳ chỉnh.
+  const coGhi = grantedPermissions("CS", null, vaiTro(["cs:manage", "inventory:write", "settings:manage", "expenses:write"]), null, null);
+  for (const ghi of ["shipments:manage", "outreach:send", "planning:write", "integrations:manage", "reports:assumptions"]) {
+    assert.ok(!coGhi.permissions.includes(ghi), `vai trò tuỳ chỉnh không được KÉO THEO quyền ${ghi} — chỉ khoá xem trong danh sách trắng`);
+  }
+  assert.deepEqual(customRoleImpliedViews(["cs:manage", "settings:manage", "payroll:view-all"]), [], "không khoá nào ngoài danh sách trắng được kéo");
+  assert.deepEqual(customRoleImpliedViews(["products:view", "models:view"]), [], "đã có thì không kéo lặp");
+
+  // Vai trò bị tắt vẫn rơi về mẫu hệ thống — phép kéo không mở đường vòng.
+  const tat = grantedPermissions("VIEWER", null, { ...vaiTro(["products:view"]), active: false }, null, null);
+  assert.equal(tat.source, "ROLE_TEMPLATE");
+
+  console.log(`✓ Vai trò tuỳ chỉnh: products:view ⇒ models:view · ${CUSTOM_ROLE_IMPLIED_VIEWS.length} khoá xem trong danh sách trắng · 0 phép kéo ghi (shipments:manage, planning:write, integrations:manage…)`);
 }
 
 /** Đường đi đầy đủ trên CSDL thật: gán ba chiều, đọc lại, và chức danh không đổi được quyền. */

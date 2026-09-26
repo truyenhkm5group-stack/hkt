@@ -163,8 +163,21 @@ nhóm/mẩu nào thật sự đưa được hàng tới tay khách.
 | Cấp | Nguồn quy kết |
 |---|---|
 | Chiến dịch | `ad_id` Pancake gửi, **hoặc** `post_id` khi bài đó chỉ thuộc MỘT chiến dịch (`ORDER_CAMPAIGN_ID`) |
-| Nhóm QC / Mẩu QC | **Chỉ** `ad_id`. Một bài có thể do nhiều mẩu chạy ⇒ chọn bừa một mẩu là bịa |
+| Nhóm QC | `ad_id` Pancake gửi, **hoặc** `post_id` khi bài đó chỉ thuộc ĐÚNG MỘT nhóm (`ORDER_ADSET_ID`) |
+| Mẩu QC | `ad_id` Pancake gửi, **hoặc** `post_id` khi bài đó chỉ thuộc ĐÚNG MỘT mẩu (`ORDER_AD_ID`). Bài do nhiều mẩu chạy ⇒ NULL — chọn bừa một mẩu là bịa |
 | Mã hàng | `ad_spends.product_id` (ghép từ tên chiến dịch); doanh thu theo dòng đơn, KHÔNG lọc `ad_id` |
+
+Ba cấp dùng CHUNG một bậc thang thẩm quyền, khai một lần ở `lib/queries/ads-attribution-link.ts`
+(`ORDER_CAMPAIGN_ID` · `ORDER_ADSET_ID` · `ORDER_AD_ID`): vế đầu là `ad_id` (bằng chứng trực tiếp
+nhất), vế sau chỉ chen vào khi vế đầu trả `NULL` và bài viết ứng với đúng một nút ở mức đó. Không
+màn hình nào tự viết lại điều kiện. Trước 22/09/2026 hai cấp dưới đi "chỉ `ad_id`" — câu cũ ở bảng
+này là mô tả của thời đó, không còn đúng.
+
+**Ngoại lệ có chủ đích — luật TẮT của vòng mẫu:** `KILL_RULE_ORDER_BASIS = "DIRECT_AD_ID"`
+(`lib/queries/creative-loop.ts`) vẫn chỉ đếm đơn mang `ad_id`, vì luật tắt tự tạm dừng nhóm QC trên
+Facebook và mọi lô đang chạy được duyệt với định nghĩa ấy. Nhãn phán quyết, thư viện, đề nghị scale
+và việc học đọc số đầy đủ theo `ORDER_AD_ID`. Đổi luật tắt sang `ORDER_AD_ID` là quyết định của chủ
+shop (sửa hằng số kèm kiểm thử) — không phải một chi tiết cài đặt.
 
 Cấp mã hàng cố ý không lọc `ad_id`: mã hàng có doanh thu từ cả đơn không chạy quảng cáo, và lọc
 theo `ad_id` sẽ bỏ mất phần doanh thu mà chính quảng cáo đó tạo ra nhưng Pancake không gắn mã —

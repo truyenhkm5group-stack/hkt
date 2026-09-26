@@ -35,8 +35,8 @@ const KHONG_CAN_LICH: Record<string, string> = {
   "vtp-import": "nhập tệp Viettel Post do người tải về, không có gì để tự động",
   "landing-push": "TẠO ĐƠN trên Pancake — việc ghi ra hệ thống ngoài phải có người bấm (AGENTS.md mục 7)",
   "canonical-backfill": "dựng lại trạng thái vận đơn hàng loạt, mặc định chạy thử; ghi thật phải có người quyết",
-  "model-registry": "Company OS · sổ mẫu: người bấm trên /models; đưa vào lịch là đổi lịch scheduler — việc chủ shop duyệt (AGENTS.md mục 7)",
   // Chạy LỒNG trong job khác — có người chạy, chỉ là không trực tiếp trong bộ lập lịch.
+  "model-registry": "chạy lồng cuối `pancake-products` (lib/sync/jobs.ts → modelRegistryFollowUp), mỗi 30 phút; nút trên /models vẫn chạy tay. Lịch RIÊNG là đổi lịch scheduler — việc chủ shop duyệt (AGENTS.md mục 7)",
   "failed-delivery": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",
   "phone-verify": "chạy lồng trong `alerts` (lib/alerts/rules.ts), mỗi 10 phút",
   "facebook-ad-index": "chạy lồng trong `facebook-ads` (lib/sync/jobs.ts), mỗi 60 phút",

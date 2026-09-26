@@ -1,6 +1,6 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { AUDIT_ACTION_LABEL } from "@/lib/constants/audit";
+import { auditActionLabel } from "@/lib/constants/audit";
 import { pancakeStatusName } from "@/lib/constants/pancake";
 import type { TimelineDimension } from "@/lib/constants/timeline";
 
@@ -192,7 +192,7 @@ export async function getOrderTimeline(orderId: string): Promise<TimelineEntry[]
       at: a.at,
       dimension: "MANUAL",
       source: a.email,
-      title: AUDIT_ACTION_LABEL[a.action] ?? a.action,
+      title: auditActionLabel(a.action),
       detail: typeof a.detail === "object" && a.detail !== null && "reason" in a.detail ? String((a.detail as Record<string, unknown>).reason ?? "") : "Thao tác của người dùng",
       amount: null,
     });

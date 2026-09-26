@@ -141,6 +141,8 @@ const DOC_MOI_TRUONG_DA_KHAI: Record<string, string> = {
     "Tệp dựng môi trường của bộ kiểm thử: nó GHI DATABASE_URL trỏ vào CSDL dùng-một-lần của chính tiến trình này. Đó là việc của nó.",
 
   /* ───── ĐẶT biến để DỰNG TÌNH HUỐNG, rồi trả lại nguyên trạng — đầu vào, không phải điều kiện của kết luận ───── */
+  "tests/company-os-registry-catchup.test.ts":
+    "ĐẶT PANCAKE_API_KEY / PANCAKE_SHOP_ID / PANCAKE_BASE_URL (khoá BỊA, địa chỉ .test) cùng fetch giả để chạy đồng bộ sản phẩm thật qua runJob, rồi trả lại nguyên trạng trong finally. Đó là ĐẦU VÀO của job đang đo; không khẳng định nào rẽ theo giá trị sẵn có của máy.",
   "tests/agent-identity.test.ts":
     "Chụp lại rồi xoá ba biến danh tính agent để kiểm nhánh CHƯA CẤU HÌNH, sau đó khôi phục từng khoá (kể cả khoá vốn không tồn tại). Không khẳng định nào rẽ theo giá trị sẵn có của máy.",
   "tests/ai-copilot.test.ts":

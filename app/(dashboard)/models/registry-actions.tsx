@@ -18,7 +18,8 @@ import { registerModel, runModelRegistrySync } from "@/lib/actions/models";
 */
 
 /**
- * Nút "Đồng bộ sổ mẫu" — chạy job `model-registry` (có bản ghi `sync_runs`). Không có lịch tự động.
+ * Nút "Đồng bộ sổ mẫu" — chạy job `model-registry` (có bản ghi `sync_runs`). Job này không có lịch RIÊNG,
+ * nhưng tự chạy lồng sau mỗi lượt `pancake-products`; nút là để không phải đợi lượt kế tiếp.
  */
 export function RegistrySyncButton({ label = "Đồng bộ sổ mẫu", variant = "outline" }: { label?: string; variant?: "outline" | "default" }) {
   const [pending, start] = useNavTransition();

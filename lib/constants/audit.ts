@@ -73,6 +73,38 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   SAMPLE_SUBMIT: "Gửi mẫu chờ duyệt",
   SAMPLE_REVIEW: "Ghi phán quyết duyệt mẫu",
   RECOMMENDATION_DECIDED: "Phản ứng với đề xuất (Cần anh quyết)",
+  // Company OS · sổ mẫu & vòng đời (lib/actions/models.ts).
+  MODEL_STATE_CHANGE: "Khai / chuyển trạng thái vòng đời mẫu",
+  MODEL_OWNER_CHANGE: "Đổi người phụ trách mẫu",
+  MODEL_REGISTER: "Đăng ký mẫu mới vào sổ",
+  MODEL_REGISTRY_SYNC: "Đồng bộ sổ mẫu (bấm tay)",
+  // Lệnh đặt xưởng (lib/actions/production.ts).
+  PRODUCTION_ORDER_CREATE: "Tạo lệnh đặt xưởng",
+  PRODUCTION_ORDER_UPDATE: "Sửa lệnh đặt xưởng",
+  PRODUCTION_ORDER_STATUS: "Đổi trạng thái lệnh đặt xưởng",
+  PRODUCTION_ORDER_DELETE: "Xoá lệnh đặt xưởng",
+  // Bàn nhận hàng hoàn · kiện không mã (lib/actions/returns-unidentified.ts).
+  "return.received.scan": "Bắn mã nhận hàng hoàn tại bàn kho",
+  "return.unidentified.created": "Ghi kiện hoàn không mã (giữ tạm)",
+  "return.unidentified.identified": "Xác định đơn cho kiện hoàn không mã",
+  "return.unidentified.unidentifiable": "Chốt kiện hoàn không xác định được đơn",
+  "return.unidentified.condition": "Ghi tình trạng kiện hoàn không mã",
+  "return.unidentified.restock": "Tái nhập kiện hoàn đã xác định đơn",
+  "return.unidentified.restock.override": "Tái nhập kiện hoàn KHÔNG có chứng từ đơn (quản lý quyết)",
+  "return.unidentified.variant_identified": "Xác định mẫu mã cho kiện hoàn",
+  "return.unidentified.variant_changed": "Đổi mẫu mã đã xác định cho kiện hoàn",
+  // Duyệt hai bước (lib/approvals/service.ts). Dạng `approval.<bước>:<việc>` đọc qua `auditActionLabel`.
+  "approval.enforce": "Bật / tắt cưỡng chế duyệt hai bước",
+  "approval.enforce.apply-legacy": "Áp dụng cấu hình cưỡng chế duyệt cũ",
+  "approval.approve": "Duyệt yêu cầu hai bước",
+  "approval.reject": "Từ chối yêu cầu hai bước",
+  "approval.expire": "Yêu cầu duyệt hết hiệu lực",
+  "approval.request": "Xin duyệt hai bước",
+  "approval.skip": "Làm không qua duyệt (chưa cưỡng chế / dưới ngưỡng)",
+  "approval.execute": "Thực hiện việc đã được duyệt",
+  "approval.execute_failed": "Việc đã duyệt thực hiện hỏng — trả lại lời duyệt",
+  "approval.blocked": "Chặn: cần duyệt mà chưa có người đủ tư cách duyệt",
+  "approval.reservation_released": "Nhả lời duyệt giữ chỗ quá hạn",
 };
 
 export const AUDIT_ENTITY_LABEL: Record<string, string> = {
@@ -96,10 +128,27 @@ export const AUDIT_ENTITY_LABEL: Record<string, string> = {
   WEBHOOK_EVENT: "Gói tin webhook",
   DATA_RULE: "Luật đối soát",
   shipments: "Vận đơn",
+  PRODUCT_MODEL: "Mẫu (sổ mẫu)",
+  PRODUCTION_ORDER: "Lệnh đặt xưởng",
+  APPROVAL: "Duyệt hai bước",
+  APPROVAL_REQUEST: "Yêu cầu duyệt hai bước",
+  return_unidentified: "Kiện hoàn không mã",
 };
 
+/**
+ * Nhãn hành động. Dạng ghép `<bước>:<việc>` (duyệt hai bước ghi `approval.skip:production.save`) đọc nhãn
+ * của BƯỚC rồi kèm việc — mỗi việc được cổng duyệt không cần một dòng nhãn riêng cho từng bước.
+ */
 export function auditActionLabel(action: string) {
-  return AUDIT_ACTION_LABEL[action] ?? action;
+  const exact = AUDIT_ACTION_LABEL[action];
+  if (exact) return exact;
+  const i = action.indexOf(":");
+  if (i > 0) {
+    const buoc = AUDIT_ACTION_LABEL[action.slice(0, i)];
+    const viec = action.slice(i + 1);
+    if (buoc && viec) return `${buoc} · ${AUDIT_ACTION_LABEL[viec] ?? viec}`;
+  }
+  return action;
 }
 
 export function auditEntityLabel(entity: string) {
@@ -122,6 +171,10 @@ export function auditEntityHref(entity: string, entityId: string): string | null
       return "/expenses?period=all";
     case "AD_SPEND":
       return "/ads?period=all";
+    case "PRODUCT_MODEL":
+      return `/models/${entityId}`;
+    case "PRODUCTION_ORDER":
+      return `/inventory/planning/orders/${entityId}`;
     default:
       return null;
   }

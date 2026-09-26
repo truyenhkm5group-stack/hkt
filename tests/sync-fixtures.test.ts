@@ -114,7 +114,7 @@ import {
   testTargetResolution,
 } from "./attribution.test";
 import { testAuthSecretHasNoProdFallback, testEveryScopedRouteIsGuarded, testPayrollOwnLineNeedsAccountKey, testScopeDecisions } from "./scope-enforcement.test";
-import { testAccessModel, testDisabledRoleFallsBackNarrow, testPositionGrantsNothing, testRoleBuilderCannotEscalate, testScopeOnlyNarrows } from "./access-model.test";
+import { testAccessModel, testCustomRoleViewImplies, testDisabledRoleFallsBackNarrow, testPositionGrantsNothing, testRoleBuilderCannotEscalate, testScopeOnlyNarrows } from "./access-model.test";
 import { testApplyGithubEnvBlock, testDeployScript } from "./deploy-script.test";
 import { testOpsConcurrency } from "./ops-concurrency.test";
 import { testSaoLuu } from "./backup.test";
@@ -301,6 +301,8 @@ import { testCompanyOsUnidentifiedDispositionsDb, testCompanyOsUnidentifiedDispo
 import { testCompanyOsUnidentifiedIdentifyDb, testCompanyOsUnidentifiedIdentifyPure } from "./company-os-unidentified-identify.test";
 // Company OS · QA — một mẫu đi hết vòng đời qua các agent A–G.
 import { testCompanyOsE2eLifecycle, testCompanyOsE2ePure } from "./company-os-e2e-lifecycle.test";
+import { testCompanyOsAuditLabels } from "./company-os-audit-labels.test";
+import { testRegistryCatchUpAfterProductSync } from "./company-os-registry-catchup.test";
 import { testCompanyOsCockpitDb, testCompanyOsCockpitPure } from "./company-os-cockpit.test";
 import { testCompanyOsSignalBatchDb, testCompanyOsSignalBatchSource } from "./company-os-signal-batch.test";
 import { testCompanyOsStockFeedbackDb, testCompanyOsStockFeedbackPure } from "./company-os-stock-feedback.test";
@@ -2230,6 +2232,7 @@ async function main() {
   testPeriodKeys();
   testScopeOnlyNarrows();
   testDisabledRoleFallsBackNarrow();
+  testCustomRoleViewImplies();
 
   // ═══ PHASE 3.1 · QUY KẾT & DANH MỤC CHỈ SỐ CÓ THẨM QUYỀN ═══
   testMetricCatalogIsComplete();
@@ -2347,6 +2350,10 @@ async function main() {
   // Company OS · QA: MỘT mẫu đi hết vòng đời qua mọi agent (A–G). Đứng CUỐI để không đổi tổng của bài nào; tự dọn mã `cosqa-` / `COSQA`.
   testCompanyOsE2ePure();
   await testCompanyOsE2eLifecycle(db);
+  // Company OS · P1: nhãn nhật ký (quét mã nguồn) + sổ mẫu tự bắt kịp sau đồng bộ sản phẩm. Bài sau đổi
+  // fetch / biến môi trường Pancake (khôi phục trong finally) và đăng ký mọi mã đang có — nên đứng SAU CÙNG.
+  testCompanyOsAuditLabels();
+  await testRegistryCatchUpAfterProductSync(db);
   console.log("\nTẤT CẢ KIỂM THỬ ĐẠT");
   process.exit(0);
 

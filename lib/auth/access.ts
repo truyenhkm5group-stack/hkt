@@ -24,7 +24,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { Role } from "@/db/schema";
-import { ALL_PERMISSIONS, resolvePermissions, withDerivedApprovalDecide, type RolePermissionMap } from "@/lib/auth/permissions";
+import { ALL_PERMISSIONS, LEGACY_IMPLIES, resolvePermissions, withDerivedApprovalDecide, type RolePermissionMap } from "@/lib/auth/permissions";
 import {
   normalizeScope,
   ROLE_BUILDER_FORBIDDEN,
@@ -52,6 +52,36 @@ export type EffectiveAccess = {
 };
 
 /**
+ * Khoá XEM mà vai trò tuỳ chỉnh được KÉO THEO qua `LEGACY_IMPLIES` — danh sách TRẮNG, không phải cả bảng.
+ *
+ * Vì sao cần: `models:view` (Company OS) sinh ra SAU khi chủ shop đã dựng các vai trò tuỳ chỉnh, nên không
+ * vai trò nào có dịp được tick nó. Mẫu vai trò hệ thống và danh sách quyền riêng kiểu cũ nhận nó qua
+ * `expandLegacy` (`products:view ⇒ models:view`); vai trò tuỳ chỉnh thì không, nên một nhân viên xem được
+ * sản phẩm lại bị chặn ở `/models` — hỏng về phía hẹp, nhưng vẫn là hỏng.
+ *
+ * Vì sao KHÔNG chạy cả `expandLegacy`: bảng ấy còn những phép kéo GHI (`cs:manage ⇒ shipments:manage`,
+ * `settings:manage ⇒ integrations:manage`, `inventory:write ⇒ planning:write`) và những khoá xem chủ shop
+ * đã chủ động bỏ trống khi dựng vai trò (`planning:view`, `alerts:view`). Với vai trò tuỳ chỉnh, bó quyền là
+ * lời khai TƯỜNG MINH của người dựng — chỉ khoá xem sinh ra sau lời khai đó mới được lấp.
+ *
+ * Luật cho mọi khoá thêm vào đây (khoá bằng `tests/access-model.test.ts`): đuôi `:view`, không thuộc vùng
+ * nhạy cảm (`SENSITIVE_BY_PERMISSION`), không nằm trong `ROLE_BUILDER_FORBIDDEN`, và đã là một phép kéo có
+ * sẵn trong `LEGACY_IMPLIES` — danh sách này chỉ CHỌN, không khai phép kéo mới.
+ */
+export const CUSTOM_ROLE_IMPLIED_VIEWS: readonly string[] = ["models:view"];
+
+/** Khoá xem kéo theo cho bó quyền của một vai trò tuỳ chỉnh — chỉ những khoá trong danh sách trắng. */
+export function customRoleImpliedViews(perms: readonly string[]): string[] {
+  const them = new Set<string>();
+  for (const p of perms) {
+    for (const k of LEGACY_IMPLIES[p] ?? []) {
+      if (CUSTOM_ROLE_IMPLIED_VIEWS.includes(k) && !perms.includes(k)) them.add(k);
+    }
+  }
+  return [...them];
+}
+
+/**
  * Bó quyền TRƯỚC khi cắt theo phạm vi.
  *
  * Tách riêng để màn xem trước chỉ ra được chênh lệch giữa "vai trò cấp gì" và "thực tế còn gì" —
@@ -67,7 +97,10 @@ export function grantedPermissions(
   if (role === "ADMIN") return { permissions: [...ALL_PERMISSIONS], source: "ADMIN" };
   if (Array.isArray(userCustom)) return { permissions: resolvePermissions(role, userCustom, templates, known), source: "USER_CUSTOM" };
   if (customRole && customRole.active) {
-    const bo = customRole.permissions.filter((p) => (ALL_PERMISSIONS as string[]).includes(p) && !ROLE_BUILDER_FORBIDDEN.includes(p));
+    const hopLe = (p: string) => (ALL_PERMISSIONS as string[]).includes(p) && !ROLE_BUILDER_FORBIDDEN.includes(p);
+    const khai = customRole.permissions.filter(hopLe);
+    // Khoá xem sinh ra sau lời khai (xem `CUSTOM_ROLE_IMPLIED_VIEWS`) — qua CÙNG bộ lọc với bó đã khai.
+    const bo = [...khai, ...customRoleImpliedViews(khai).filter(hopLe)];
     // Quyền duyệt hai bước đi theo VAI hệ thống + `settings:manage`, y như trước khi có khoá (Company OS · G).
     return { permissions: withDerivedApprovalDecide(role, [...new Set(bo)]), source: "CUSTOM_ROLE" };
   }
