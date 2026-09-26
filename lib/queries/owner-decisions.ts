@@ -410,7 +410,12 @@ export function inventoryToItems(rows: readonly InventoryDecisionRow[]): OwnerDe
 
 // ═══════════════════════════ NGUỒN (đọc hàm có sẵn) ═══════════════════════════
 
-const ADS_PERIOD = () => resolvePeriod({ period: "30d" }, "30d");
+/**
+ * Kỳ của mọi nguồn quảng cáo / tín hiệu mẫu trên buồng lái (30 ngày). XUẤT RA để job `dashboard-warm`
+ * (`lib/queries/warm.ts`) làm ấm ĐÚNG khoá đệm trang chủ đọc — gõ lại kỳ ở nơi thứ hai là để hai khoá lệch
+ * nhau mà không ai biết, và lượt mở đầu buổi sáng lại rơi vào "Chưa đọc được".
+ */
+export const ownerDecisionAdsPeriod = () => resolvePeriod({ period: "30d" }, "30d");
 
 async function loadApprovals({ viewer }: { viewer: SessionUser }): Promise<SourceResult> {
   return { items: approvalsToItems(await listApprovalRequests(), viewer.id) };
@@ -460,7 +465,7 @@ async function loadProductionLate(): Promise<SourceResult> {
 }
 
 async function loadAdsCut({ now }: { now: Date }): Promise<SourceResult> {
-  const [work, decision] = await Promise.all([adaptAdsDecisions(now), getAdsDecision(ADS_PERIOD(), "campaign")]);
+  const [work, decision] = await Promise.all([adaptAdsDecisions(now), getAdsDecision(ownerDecisionAdsPeriod(), "campaign")]);
   return { items: adsCutToItems(work, new Map(decision.rows.map((r) => [r.key, r]))) };
 }
 
@@ -470,7 +475,7 @@ async function loadAdsCut({ now }: { now: Date }): Promise<SourceResult> {
  * vì đề xuất mở bàn sản xuất cho một mẫu có thể đã có topic.
  */
 async function loadModelScale(): Promise<SourceResult> {
-  const batch = await getModelSignalsBatch(ADS_PERIOD());
+  const batch = await getModelSignalsBatch(ownerDecisionAdsPeriod());
   if (batch.topicsError) throw new Error(batch.topicsError);
   return { items: [...modelScaleToItems(modelWinnerCandidates(batch.rows)), ...modelEarlyTopicToItems(modelEarlyTopicCandidates(batch.rows))] };
 }

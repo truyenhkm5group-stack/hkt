@@ -304,6 +304,8 @@ import { testCompanyOsSignalBatchDb, testCompanyOsSignalBatchSource } from "./co
 import { testCompanyOsStockFeedbackDb, testCompanyOsStockFeedbackPure } from "./company-os-stock-feedback.test";
 import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./company-os-owner-digest.test";
 import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
+import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.test";
+import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
 import { testHardeningApprovalExecution, testHardeningLifecycleInTx, testHardeningReceiptLinkedEvent, testHardeningSettingsPrimitive, testHardeningTopicTrackSemantics } from "./company-os-hardening.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
@@ -1955,6 +1957,11 @@ async function main() {
   // Company OS · Agent X: vòng phản hồi tồn → creative / quảng cáo (mã `cos-x-` / `COSX-`, tự dọn; một dòng sổ phản ứng append-only giữ nguyên).
   testCompanyOsStockFeedbackPure();
   await testCompanyOsStockFeedbackDb(db);
+  // Company OS · Agent W: job giữ ấm phủ khoá đệm của "Cần anh quyết" (so TẬP KHOÁ, không gõ tên) + ops company-os-summary (mã `cos-w-` / `COSW`, tự dọn, trả lại `owner.digest`).
+  await testCompanyOsWarmPure();
+  await testCompanyOsWarmDb();
+  testCompanyOsSummaryPure();
+  await testCompanyOsSummaryDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();

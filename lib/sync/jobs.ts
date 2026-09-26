@@ -17,7 +17,7 @@ import { runMarketingDigest } from "@/lib/marketing/digest";
 import { recordDecisionLedger } from "@/lib/marketing/decision-ledger";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { rematerializeStale } from "@/lib/queries/canonical-outcome";
-import { warmDashboard } from "@/lib/queries/warm";
+import { warmDashboard, warmDetail } from "@/lib/queries/warm";
 import { trongJobNen } from "@/lib/cache";
 import { buildOutreachTargets } from "@/lib/outreach/build";
 import { runFanpageAttributionJob } from "@/lib/attribution/fanpage";
@@ -402,7 +402,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Giữ ấm bảng điều khiển",
     source: "ALL",
     description:
-      "Tính sẵn số liệu Tổng quan và Tóm tắt & rủi ro cho các kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
+      "Tính sẵn số liệu Tổng quan, Tóm tắt & rủi ro và các bộ máy cả shop của khối \"Cần anh quyết\" (tín hiệu mẫu, quyết định quảng cáo, vốn tồn, lệnh sản xuất) cho kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
     // Company OS · G: bọc để có dòng `sync_runs` — CHỈ QUAN SÁT (không làm cũ đệm vừa ấm, không phát `sync`).
     // Kỳ lỗi ghi vào `detail`, không vào `failed`: lỗi giữ ấm không đổi dữ liệu nào, và trạng thái
     // PARTIAL ở đây sẽ bật chuỗi sự cố của một job chỉ-đọc mỗi 4 phút.
@@ -410,7 +410,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       runSyncJob({ source: "ERP", job: "dashboard-warm", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         const r = await warmDashboard();
         ctx.summary.skipped = r.failed.length;
-        ctx.summary.detail = `ấm ${r.warmed.length} mục (${r.warmed.join(", ") || "không mục nào"}) · ${r.ms} ms${r.failed.length ? ` · LỖI ${r.failed.map((f) => `${f.key}: ${f.error}`).join(" | ")}` : ""}`.slice(0, 900);
+        ctx.summary.detail = warmDetail(r);
         return r;
       }),
   },
