@@ -39,7 +39,11 @@ function shape(obj: unknown, depth = 0): string[] {
     // Số lớn có thể là ID Facebook của khách: chỉ in số nhỏ hoặc số có dạng mốc thời gian (giây / mili giây).
     else if (typeof v === "number") out.push(`${pad}${k}: ${Math.abs(v) < 1e6 || (v >= 1e9 && v <= 2e10) || (v >= 1e12 && v <= 2e13) ? v : `số(${String(v).length} chữ số)`}`);
     else if (typeof v === "string") out.push(`${pad}${k}: ${ISO.test(v) ? v : `chuỗi(${v.length})`}`);
-    else if (Array.isArray(v)) out.push(`${pad}${k}: mảng[${v.length}]`);
+    else if (Array.isArray(v)) {
+      out.push(`${pad}${k}: mảng[${v.length}]`);
+      // Mốc đọc của khách (lượt dò 36255407584 thấy `read_watermarks: mảng[1]`) — in hình dạng phần tử ĐẦU.
+      if (/watermark|seen/i.test(k) && v[0] && typeof v[0] === "object") out.push(...shape(v[0], depth + 1).map((l) => `${l}   ← [0]`));
+    }
     else {
       out.push(`${pad}${k}: {…}`);
       if (depth < 1) out.push(...shape(v, depth + 1));
