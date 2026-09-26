@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { EstimatedCostControl, RateOverridePopover, TargetMarginControl } from "@/app/(dashboard)/reports/estimated-cost-control";
 import { DataWarnings } from "@/components/data-warnings";
 import { Money, SectionCard } from "@/components/ui-bits";
@@ -137,7 +138,7 @@ export function AdsCeilingTable({
           <TableHeader>
             <TableRow>
               <TableHead>Mã hàng</TableHead>
-              <TableHead className="text-right" title="Giá vốn bình quân mỗi sản phẩm giao thành công ước tính. Nhãn nói nó là giá THẬT (phiếu nhập / Pancake), DỰ TÍNH (chủ shop đặt), hay CHƯA BIẾT (đang tính 0 ₫).">Giá vốn/sp</TableHead>
+              <TableHead className="text-right" title="Giá vốn bình quân mỗi sản phẩm giao thành công ước tính. Nhãn nói nó là giá THẬT (phiếu nhập / Pancake), GIÁ BÁO MKT (mã chưa có giá thật nhưng đã khai giá báo — giá dự tính = giá báo), DỰ TÍNH (chủ shop đặt tay, mã chưa có giá báo), hay CHƯA BIẾT (đang tính 0 ₫).">Giá vốn/sp</TableHead>
               <TableHead className="text-right" title="Tỷ lệ giao thành công ước tính đang dùng cho mã, và nguồn của nó.">TL GTC</TableHead>
               <TableHead className="text-right" title="DT GTC ước tính. Dòng nhỏ: doanh số POS — mẫu số của mọi tỷ lệ % DS trong bảng này.">DT GTC ƯT</TableHead>
               <TableHead className="text-right" title="Lợi nhuận danh nghĩa (đúng con số bảng trên). Dòng nhỏ: margin trên DT GTC ước tính.">LN danh nghĩa</TableHead>
@@ -155,6 +156,13 @@ export function AdsCeilingTable({
               // Ô đặt giá dự tính hiện khi mã có hàng BÁN RA chưa biết giá vốn, HOẶC phiếu nhập trong kỳ thiếu
               // đơn giá — giá dự tính định giá cả phần đó ở bảng "LN theo hàng nhập" (chủ shop chốt 25/09/2026).
               const coCho = r.cogsUnknownQty > 0 || r.purchaseUnpricedQty > 0;
+              /*
+                GIÁ DỰ TÍNH ĐẾN TỪ GIÁ BÁO MKT (luật 5, chủ shop chốt 26/09/2026): ô đặt tay KHÔNG hiện, vì con
+                số gõ ở đây sẽ bị giá báo thắng — một ô sửa mà sửa không có tác dụng là một ô nói dối. Muốn đổi
+                thì đổi giá báo ở Xưởng › Giá báo MKT.
+              */
+              const tuGiaBao = r.estimatedCost?.source === "MARKETER_PRICE";
+              const nhanDuTinh = tuGiaBao ? "giá báo MKT" : "dự tính";
               return (
                 <TableRow key={r.productId} className={cn(r.cogsUncoveredQty > 0 && "bg-amber-50/60 dark:bg-amber-950/20")}>
                   <TableCell className="max-w-[230px] whitespace-normal align-top">
@@ -167,17 +175,22 @@ export function AdsCeilingTable({
                   <TableCell className="text-right align-top">
                     <div className="numeric flex items-center justify-end gap-0.5 font-semibold">
                       {r.cogsUncoveredQty > 0 ? <span className="text-amber-700 dark:text-amber-300">chưa biết</span> : gv === null ? "—" : formatVND(gv)}
-                      {coCho && r.estimatedCost ? <EstimatedCostControl productId={r.productId} current={r.estimatedCost} canWrite={canWrite} /> : null}
+                      {coCho && r.estimatedCost && !tuGiaBao ? <EstimatedCostControl productId={r.productId} current={r.estimatedCost} canWrite={canWrite} /> : null}
                     </div>
                     <div className="text-[10.5px] text-muted-foreground">
                       {r.cogsUncoveredQty > 0
                         ? `${formatNumber(r.cogsUncoveredQty)} sp đang tính 0 ₫`
                         : r.estimatedCost
                           ? r.expectedCogsEstimated === r.expectedCogs
-                            ? `dự tính ${formatVND(r.estimatedCost.unitCost, { compact: true })}/sp`
-                            : `gồm ${formatNumber(r.cogsUnknownQty)} sp dự tính ${formatVND(r.estimatedCost.unitCost, { compact: true })}`
+                            ? `${nhanDuTinh} ${formatVND(r.estimatedCost.unitCost, { compact: true })}/sp`
+                            : `gồm ${formatNumber(r.cogsUnknownQty)} sp ${nhanDuTinh} ${formatVND(r.estimatedCost.unitCost, { compact: true })}`
                           : "giá nhập thật"}
                     </div>
+                    {tuGiaBao ? (
+                      <div className="text-[10.5px] text-muted-foreground" title={r.estimatedCost?.reason ?? ""}>
+                        sửa ở <Link href="/inventory/workshop?tab=cost" className="underline">Xưởng › Giá báo MKT</Link>
+                      </div>
+                    ) : null}
                     {coCho && !r.estimatedCost ? (
                       <div className="mt-1 flex justify-end">
                         <EstimatedCostControl productId={r.productId} current={r.estimatedCost} canWrite={canWrite} />

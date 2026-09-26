@@ -5,7 +5,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { clearMemo } from "@/lib/cache";
 import { inventoryRiskOnSold } from "@/lib/constants/cost-allocation";
-import { adsCeiling, ESTIMATED_COST_KEY, parseEstimatedCosts, parseTargetMargin } from "@/lib/constants/estimated-cost";
+import { adsCeiling, ESTIMATED_COST_KEY, estimatedCostsWithMarketerPrice, parseEstimatedCosts, parseTargetMargin } from "@/lib/constants/estimated-cost";
 
 /**
  * ═══════════ GIÁ VỐN DỰ TÍNH & TRẦN CPQC ═══════════
@@ -130,7 +130,12 @@ function testOnlyNominalTabEnablesEstimates() {
     luật 2 muốn chặn, chỉ theo chiều ngược lại. Bảng ấy KHÔNG đi vào lương và mang nhãn "dự tính".
     Mọi chỗ khác của khu quảng cáo (bảng quyết định, ROAS, AI) vẫn bị cấm như cũ.
   */
-  const choPhep = new Set(["app/(dashboard)/reports/nominal-tab.tsx", "lib/queries/payroll.ts", "lib/queries/marketer-daily-nominal.ts"]);
+  /*
+    `profit-target.ts` — trang Kế hoạch mục tiêu lợi nhuận. NGOẠI LỆ THỨ HAI, chủ shop chốt
+    26/09/2026 cùng lúc với luật 5 "giá dự tính = giá báo MKT": kịch bản "giữ nguyên" phải nói cùng
+    lợi nhuận với tab Lợi nhuận danh nghĩa. Trang ấy chỉ tính kế hoạch, không vào lương.
+  */
+  const choPhep = new Set(["app/(dashboard)/reports/nominal-tab.tsx", "lib/queries/payroll.ts", "lib/queries/marketer-daily-nominal.ts", "lib/queries/profit-target.ts"]);
   for (const p of [...tepMaNguon(path.join(goc, "app")), ...tepMaNguon(path.join(goc, "lib"))]) {
     const rel = path.relative(goc, p).split(path.sep).join("/");
     const src = readFileSync(p, "utf8");
@@ -148,8 +153,36 @@ function testOnlyNominalTabEnablesEstimates() {
   }
 }
 
+/**
+ * ═══ LUẬT 5: GIÁ DỰ TÍNH = GIÁ BÁO MKT (chủ shop chốt 26/09/2026) ═══
+ *
+ * Mã đã khai giá báo thì giá dự tính LÀ giá báo — cùng phép chọn dòng với phiếu nhập kho; mã chưa
+ * khai mới dùng số đặt tay. Giá báo 0 ₫ là "chưa định giá" (như ở kho), không được thành giá vốn 0.
+ */
+function testMarketerPriceRule() {
+  const ngay = (s: string) => new Date(`${s}T00:00:00+07:00`);
+  const tay = { A: { unitCost: 100_000, reason: "báo giá xưởng", setAt: null, setBy: "chu@shop" }, B: { unitCost: 90_000, reason: "lô thử", setAt: null, setBy: null } };
+  const bao = {
+    A: [
+      { price: 150_000, effectiveFrom: ngay("2026-09-01"), reason: "", setBy: "mkt@shop" },
+      { price: 120_000, effectiveFrom: ngay("2026-10-15"), reason: "xả tồn", setBy: "mkt@shop" },
+    ],
+    C: [{ price: 0, effectiveFrom: ngay("2026-09-01"), reason: "", setBy: "" }],
+  };
+  const t9 = estimatedCostsWithMarketerPrice(tay, bao, ngay("2026-09-30"));
+  assert.equal(t9.A.unitCost, 150_000, "mã có giá báo: giá dự tính = giá báo đang hiệu lực, THẮNG số đặt tay");
+  assert.equal(t9.A.source, "MARKETER_PRICE");
+  assert.ok(t9.A.reason.includes("Giá báo MKT"), "nguồn phải nói ra được");
+  assert.equal(estimatedCostsWithMarketerPrice(tay, bao, ngay("2026-11-01")).A.unitCost, 120_000, "cuối kỳ sau ngày hạ giá ⇒ giá mới");
+  assert.equal(estimatedCostsWithMarketerPrice(tay, bao, ngay("2026-08-01")).A.unitCost, 150_000, "trước dòng giá đầu tiên ⇒ dòng đầu tiên, như phiếu nhập kho");
+  assert.equal(t9.B.unitCost, 90_000, "mã chưa khai giá báo: giữ số đặt tay");
+  assert.equal(t9.B.source, "MANUAL");
+  assert.equal(t9.C, undefined, "giá báo 0 ₫ = chưa định giá ⇒ không có giá dự tính (CHƯA BIẾT), không phải 0 ₫");
+}
+
 export async function testEstimatedCost(db: Db) {
   testCeilingMath();
+  testMarketerPriceRule();
   testOnlyNominalTabEnablesEstimates();
 
   const luc = gio(72);
@@ -231,6 +264,20 @@ export async function testEstimatedCost(db: Db) {
     assert.equal(ngay.total.expectedCogs, c.expectedCogs, "bảng theo ngày chia ĐÚNG giá vốn của dòng cha — gồm cả phần giá dự tính");
     assert.ok(ngay.days.length > 0 && ngay.days.every((d) => d.cell.cogsUncoveredQty === 0), "mã đã đặt giá dự tính ⇒ ngày không in “—” ở giá vốn");
 
+    // ─── Luật 5 trên báo cáo thật: khai giá báo cho mã C ⇒ giá dự tính của C thành giá báo ───
+    await db.insert(schema.marketerPrices).values({ productId: `${P}pc`, productCode: "GVDT-C", price: 130_000, effectiveFrom: gio(24 * 60), reason: "kiểm luật 5", setBy: "mkt@kiem" });
+    clearMemo();
+    const coGiaBao = await getNominalProfitReport(ky, "ORDERED", undefined, true, true);
+    const c2 = coGiaBao.rows.find((r) => r.code === "GVDT-C")!;
+    assert.equal(c2.estimatedCost?.unitCost, 130_000, "mã đã khai giá báo: giá dự tính = giá báo, không còn là 100.000 đặt tay");
+    assert.equal(c2.estimatedCost?.source, "MARKETER_PRICE");
+    assert.equal(c2.expectedCogsEstimated, Math.round(2 * (1 - c2.returnRate! / 100) * 130_000), "phần dự tính đi theo giá báo");
+    const a2 = coGiaBao.rows.find((r) => r.code === "GVDT-A")!;
+    assert.equal(a2.estimatedCost?.source, "MANUAL", "mã chưa khai giá báo giữ số đặt tay");
+    assert.equal(a2.expectedCogsEstimated, 450_000);
+    const macDinh2 = await getNominalProfitReport(ky);
+    assert.equal(macDinh2.rows.find((r) => r.code === "GVDT-C")!.expectedCogsEstimated, 0, "đường gọi mặc định (lương) vẫn KHÔNG thấy giá dự tính, kể cả khi nó đến từ giá báo");
+
     assert.equal(sau.totals.expectedCogsEstimated, sau.rows.reduce((t, r) => t + r.expectedCogsEstimated, 0));
     assert.ok(sau.totals.estimatedCostProducts >= 2);
 
@@ -247,6 +294,7 @@ export async function testEstimatedCost(db: Db) {
     await db.delete(schema.shipments).where(inArray(schema.shipments.id, ship));
     await db.delete(schema.orderItems).where(sql`${schema.orderItems.id} like ${`${P}i-%`}`);
     await db.delete(schema.orders).where(sql`${schema.orders.id} like ${`${P}o-%`}`);
+    await db.delete(schema.marketerPrices).where(eq(schema.marketerPrices.productId, `${P}pc`));
     await db.delete(schema.productVariants).where(inArray(schema.productVariants.id, [`${P}va-co`, `${P}va-thieu`, `${P}vb`, `${P}vc`]));
     await db.delete(schema.products).where(inArray(schema.products.id, [`${P}pa`, `${P}pb`, `${P}pc`]));
     await db.delete(schema.settings).where(eq(schema.settings.key, ESTIMATED_COST_KEY));

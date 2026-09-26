@@ -81,13 +81,22 @@ export function marketerCostDelta(qty: number, realUnitCost: number, price: numb
  *  · Chưa khai dòng nào ⇒ `null` (chưa biết), KHÔNG phải 0.
  */
 export function receiptUnitCostFromMarketer(entries: readonly MarketerPriceEntry[], at: Date): number | null {
+  return receiptPriceEntry(entries, at)?.price ?? null;
+}
+
+/**
+ * DÒNG giá báo mà luật trên chọn (không chỉ con số) — để nơi dùng in được "hiệu lực từ ngày nào,
+ * ai khai". Cùng MỘT phép chọn cho phiếu nhập kho và giá vốn dự tính: hai chỗ cùng nói "giá của mã
+ * này" thì không được chọn hai dòng khác nhau.
+ */
+export function receiptPriceEntry<T extends MarketerPriceEntry>(entries: readonly T[], at: Date): T | null {
   if (!entries.length) return null;
-  let best: MarketerPriceEntry | null = null;
-  let first: MarketerPriceEntry | null = null;
+  let best: T | null = null;
+  let first: T | null = null;
   for (const e of entries) {
     if (!first || e.effectiveFrom.getTime() < first.effectiveFrom.getTime()) first = e;
     if (e.effectiveFrom.getTime() > at.getTime()) continue;
     if (!best || e.effectiveFrom.getTime() > best.effectiveFrom.getTime()) best = e;
   }
-  return (best ?? first)!.price;
+  return best ?? first;
 }

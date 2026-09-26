@@ -29,16 +29,16 @@ function soNgay(period: Period): number | null {
 }
 
 /**
- * Số gốc cho bảng kế hoạch: dòng mã của Báo cáo lợi nhuận danh nghĩa (mốc ngày tạo đơn, mọi đơn,
- * có CPQC) — kịch bản "giữ nguyên" ra đúng lợi nhuận báo cáo tính.
+ * Số gốc cho bảng kế hoạch: dòng mã của Báo cáo lợi nhuận danh nghĩa với ĐÚNG bộ cờ tab ấy dùng
+ * (mốc ngày tạo đơn, mọi đơn, có CPQC, BẬT giá vốn dự tính) — kịch bản "giữ nguyên" ra đúng lợi
+ * nhuận tab đang in, và đi chung bộ đệm với nó.
  *
- * GIÁ VỐN DỰ TÍNH KHÔNG BẬT (luật 2 ở `lib/constants/estimated-cost.ts`: chỉ tab Lợi nhuận danh
- * nghĩa và bảng MKTer ở /ads/daily được đọc con số đặt tay, ngoại lệ do chủ shop chốt). Nên mã
- * chưa có giá vốn đang trừ 0 ₫ ở đây — lãi góp/đơn của nó CAO hơn thật và màn hình gắn ⚠; mở
- * ngoại lệ cho trang này là quyết định của chủ shop, không phải của mã nguồn.
+ * GIÁ VỐN DỰ TÍNH BẬT — ngoại lệ thứ hai của luật 2 (`lib/constants/estimated-cost.ts`), chủ shop
+ * chốt 26/09/2026 cùng lúc với luật 5 "giá dự tính = giá báo MKT". Mã vẫn chưa có giá nào (không
+ * giá thật, không giá báo, không giá đặt tay) thì trừ 0 ₫ và màn hình gắn ⚠.
  */
 export async function getProfitTargetData(period: Period): Promise<ProfitTargetData> {
-  const report = await getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true);
+  const report = await getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true, true);
   const a = report.assumptions;
   const skus: TargetSku[] = report.rows
     .filter((r) => r.orders > 0)
@@ -63,7 +63,7 @@ export async function getProfitTargetData(period: Period): Promise<ProfitTargetD
   const chuaDo = skus.filter((s) => s.deliveryRate === null);
   if (chuaDo.length) warnings.push(`${chuaDo.length} mã chưa đo được TL GTC (${chuaDo.map((s) => s.code || s.name).join(", ")}) — không đưa vào kế hoạch được; phần lãi/lỗ hiện tại của chúng nằm ở "phần còn lại".`);
   const thieuGia = skus.filter((s) => s.cogsIncomplete);
-  if (thieuGia.length) warnings.push(`${thieuGia.length} mã còn sản phẩm chưa có giá vốn nào (${thieuGia.map((s) => s.code || s.name).join(", ")}) — lãi góp/đơn của chúng đang CAO hơn thật, nên số đơn cần có đang THẤP hơn thật. Trang này dùng giá vốn THẬT (không dùng giá dự tính đặt tay); lập phiếu nhập có đơn giá thì số tự đúng.`);
+  if (thieuGia.length) warnings.push(`${thieuGia.length} mã còn sản phẩm chưa có giá vốn nào (${thieuGia.map((s) => s.code || s.name).join(", ")}) — lãi góp/đơn của chúng đang CAO hơn thật, nên số đơn cần có đang THẤP hơn thật. Khai giá báo MKT cho mã (Xưởng › Giá báo MKT) thì giá dự tính tự lấp.`);
   if (report.totals.projectionError) warnings.push(`Mô hình dự báo giao thành công lỗi (${report.totals.projectionError}); TL GTC đang theo tỷ lệ.`);
   return {
     periodDays: soNgay(period),
