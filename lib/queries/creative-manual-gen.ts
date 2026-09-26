@@ -6,7 +6,7 @@ import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { manualGenSpendToday } from "@/lib/creative/generate";
 import { resolveManualTargetDay } from "@/lib/creative/manual";
 import { instantPublishBlockers, parseManualDesignSpec } from "@/lib/creative/manual-gen";
-import { defaultNames, loadNamingContext, nextNameSeq, type DefaultNames } from "@/lib/creative/naming";
+import { defaultNames, loadNamingContext, nextNameSeq, nextNameSeqOnDay, type DefaultNames } from "@/lib/creative/naming";
 import { batchWindow } from "@/lib/creative/schedule";
 import { loadDesignInputs } from "@/lib/queries/creative-design";
 import { env } from "@/lib/env";
@@ -146,6 +146,12 @@ export type ManualGenPanel = {
   deadline: string;
   predictedSeq: number;
   defaults: DefaultNames;
+  /**
+   * Ba tên ĐIỀN SẴN cho "Đăng camp" (chủ shop 26/09/2026: "cần điền sẵn để sẵn sàng đăng ngay, tôi có thể sửa") — theo
+   * khuôn, NGÀY CHẠY = hôm nay, số thứ tự = kế tiếp trong ngày trên MỌI lô (`nextNameSeqOnDay`, đúng số đường ghi sẽ
+   * cấp nếu không ai đăng xen giữa). Người không sửa ⇒ màn hình gửi rỗng ⇒ đường ghi tính lại với số THẬT lúc bấm.
+   */
+  campDefaults: DefaultNames;
   pageName: string | null;
   /** Còn ảnh chờ vẽ / đang vẽ ⇒ màn hình tự tải lại để hiện tiến độ. */
   drawing: boolean;
@@ -353,6 +359,8 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
     instantPublishBlockers(db, config, vnDay(now)),
   ]);
   const unitUsd = estimateImageUsd(config.imageModel, config.imageQuality, config.imageSize);
+  // Bài lẻ đứng tên theo cấu hình HIỆN TẠI (lô `INSTANT` chụp cấu hình lúc bấm), không theo ảnh chụp của lô hằng ngày.
+  const [campCtx, campSeq] = await Promise.all([namingCfg === config ? Promise.resolve(ctx) : loadNamingContext(db, config), nextNameSeqOnDay(db, vnDay(now))]);
   return {
     runs,
     queue,
@@ -382,6 +390,7 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
     deadline: (batch?.approvalDeadline ?? batchWindow(targetDay, config).approvalDeadline).toISOString(),
     predictedSeq,
     defaults: defaultNames(ctx, targetDay, predictedSeq),
+    campDefaults: defaultNames(campCtx, vnDay(now), campSeq),
     pageName,
     drawing: runs.some((r) => (r.counts.PLANNED ?? 0) + (r.counts.DRAWING ?? 0) > 0),
     day,

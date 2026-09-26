@@ -12,6 +12,7 @@ import { manualTargetDay } from "@/lib/creative/manual";
 import { drawManualGen, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
 import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, genderPart, geoPart, refreshNamingTemplate, saveVariantNamesCore, type NamingContext } from "@/lib/creative/naming";
 import { batchApprovalContent, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
+import { MESSENGER_DOC_LINK, buildObjectStorySpec } from "@/lib/creative/story-spec";
 import { listRecentBatches } from "@/lib/queries/creative-loop";
 import { listManualGenRuns, listPublishQueue, listReviewDays, loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
 import { batchWindow } from "@/lib/creative/schedule";
@@ -86,6 +87,25 @@ export function testCreativeManualGenPure() {
   assert.equal(usdToVndRounded(0.04, 25_500), 1020);
   assert.equal(usdToVndRounded(null, 25_500), null, "ảnh không có giá ⇒ null, không thành 0 đồng");
   assert.equal(usdToVndRounded(0, 25_500), 0, "0 thật vẫn là 0");
+
+  // ── Mẫu QUẢNG CÁO ĐỘNG ⇒ bài ảnh đơn (thuần) ──
+  const noi = { pageId: "pg", imageHash: "h1", primaryText: "Câu bài", headline: "Tiêu đề" };
+  const dongQc = (feed: Record<string, unknown>) => buildObjectStorySpec({ page_id: "khac", instagram_user_id: "ig" }, noi, feed);
+  const mo = dongQc({ call_to_action_types: ["MESSAGE_PAGE"], descriptions: [{ text: "Nhắn ngay" }] });
+  assert.ok(mo.ok && mo.fromAssetFeed && mo.kind === "link_data");
+  const ld0 = mo.ok ? (mo.spec.link_data as Record<string, unknown>) : {};
+  assert.equal(mo.ok && mo.spec.page_id, "pg", "fanpage luôn của cấu hình");
+  assert.equal(ld0.link, MESSENGER_DOC_LINK, "nút nhắn tin không khai đường dẫn ⇒ đường dẫn Messenger chuẩn");
+  assert.equal(ld0.description, "Nhắn ngay");
+  const web = dongQc({ call_to_action_types: ["SHOP_NOW"], link_urls: [{ website_url: "https://shop.vn/a" }] });
+  assert.ok(web.ok && (web.spec.link_data as Record<string, unknown>).link === "https://shop.vn/a");
+  assert.deepEqual(web.ok && (web.spec.link_data as Record<string, unknown>).call_to_action, { type: "SHOP_NOW", value: { link: "https://shop.vn/a" } });
+  assert.ok(!dongQc({ call_to_action_types: ["MESSAGE_PAGE"], ad_formats: ["CAROUSEL"] }).ok, "mẫu động băng chuyền ⇒ từ chối");
+  assert.ok(!dongQc({ call_to_action_types: ["MESSAGE_PAGE", "SHOP_NOW"] }).ok, "nhiều nút ⇒ không chọn thay người dựng");
+  assert.ok(!dongQc({ call_to_action_types: ["SHOP_NOW"], link_urls: [{ website_url: "a" }, { website_url: "b" }] }).ok, "nhiều đường dẫn ⇒ không chọn");
+  assert.ok(!dongQc({ call_to_action_types: ["SHOP_NOW"] }).ok, "nút web mà không có đường dẫn ⇒ từ chối");
+  assert.ok(!dongQc({}).ok, "không khai nút ⇒ từ chối");
+  assert.ok(!dongQc({ call_to_action_types: ["MESSAGE_PAGE"], videos: [{ video_id: "v" }] }).ok, "mẫu động chỉ có video ⇒ từ chối");
 
   // ── Bộ lọc ngày của tab "Duyệt mẫu" (thuần): vắng / hỏng / ngày không có trên lịch ⇒ HÔM NAY ──
   assert.equal(parseReviewDay(null, "2031-05-05"), "2031-05-05");
@@ -403,14 +423,24 @@ export async function testCreativeManualGenDb(db: Db) {
     let n = 0;
     const tplPub: TemplateAd = { ...tplAd, adset: { ...tplAd.adset, promotedObject: { page_id: `${P}page` } }, objectStorySpec: { page_id: `${P}page`, link_data: { link: "https://m.me/x", call_to_action: { type: "MESSAGE_PAGE" } } } };
     let templateFails = false;
+    /** Lượt đọc mẩu mẫu THỨ MẤY (đếm từ 1) sẽ hỏng — để dựng ca "đọc trước được, lượt đăng đọc lại thì hỏng". */
+    let failReadNo = 0;
+    let readNo = 0;
+    let tplNow: TemplateAd = tplPub;
+    const specsSent: Record<string, unknown>[] = [];
     const fbGia: CreativeWriter = {
       readTemplateAd: async () => {
         fbCalls.push("readTemplateAd");
-        if (templateFails) throw new Error("Facebook: lỗi giả khi đọc mẩu mẫu");
-        return tplPub;
+        readNo += 1;
+        if (templateFails || readNo === failReadNo) throw new Error("Facebook: lỗi giả khi đọc mẩu mẫu");
+        return tplNow;
       },
       uploadAdImage: async () => (fbCalls.push("uploadAdImage"), `hash-${++n}`),
-      createAdCreative: async () => (fbCalls.push("createAdCreative"), { id: `cr-${++n}`, effectiveObjectStoryId: `post-${n}` }),
+      createAdCreative: async (_a, i) => {
+        fbCalls.push("createAdCreative");
+        specsSent.push(i.objectStorySpec);
+        return { id: `cr-${++n}`, effectiveObjectStoryId: `post-${n}` };
+      },
       createTestCampaign: async () => (fbCalls.push("createTestCampaign"), `camp-${++n}`),
       createTestAdset: async (_a, i) => {
         fbCalls.push("createTestAdset");
@@ -430,7 +460,8 @@ export async function testCreativeManualGenDb(db: Db) {
     };
     const khongKeo = async () => ({ killed: false, source: "UNSET" as const, reason: null, by: null, at: null });
     const ON = { hardEnabled: true, mode: "COPILOT" as const };
-    const cam = [ready[4], ready[5], ready[6]];
+    assert.ok(ready.length >= 9, `cần ≥ 9 ảnh chờ duyệt cho các ca Đăng camp (có ${ready.length})`);
+    const cam = [ready[4], ready[5], ready[6], ready[8]];
     for (const r of cam) await reviewManualGenImage(db, { imageId: r.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
     const camInput = (imageId: string, scheduleAt: Date | null) => ({ imageId, headline: "Đầm đi biển", primaryText: "Nhắn shop để được tư vấn size.", names: { campaign: "", adset: "", ad: "" }, predictedSeq: null, scheduleAt });
 
@@ -480,7 +511,7 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.equal(bc1.approvedByUserId, actor.id, "người bấm Đăng camp là người duyệt (khoá tài khoản — mục 34)");
     assert.ok(bc1.approvalDigest.length > 0);
     assert.equal(bc1.startAt.getTime(), henLuc.getTime());
-    assert.deepEqual(fbCalls, ["readTemplateAd", "uploadAdImage", "createAdCreative", "createTestCampaign", "createTestAdset", "createAd", "activateTestCampaign"], "đi ĐÚNG sáu bước của đường đăng lô");
+    assert.deepEqual(fbCalls, ["readTemplateAd", "readTemplateAd", "uploadAdImage", "createAdCreative", "createTestCampaign", "createTestAdset", "createAd", "activateTestCampaign"], "đọc mẫu TRƯỚC khi ghi dòng nào, rồi đi ĐÚNG sáu bước của đường đăng lô");
     assert.equal(adsetTimes[0].start.getTime(), henLuc.getTime(), "Facebook giữ lịch: start_time = giờ hẹn");
     assert.equal(adsetTimes[0].end.getTime(), henLuc.getTime() + 86_400_000, "end_time — Facebook tự dừng");
     const [vc1] = await db.select().from(schema.creativeVariants).where(eq(schema.creativeVariants.id, c1.ok ? c1.variantId : ""));
@@ -506,22 +537,64 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.equal(adsetTimes[1].start.getTime(), t2.getTime() + INSTANT_PUBLISH.leadSeconds * 1000, "chạy ngay = sau lúc bấm leadSeconds giây");
     assert.ok(c1.ok && c2.ok && c2.nameSeq > c1.nameSeq || (c1.ok && c2.ok && c1.batchDay !== c2.batchDay), "số thứ tự theo NGÀY — hai bài lẻ cùng ngày không trùng tên");
 
-    // (f4) Hỏng khi CHƯA gửi gì lên Facebook ⇒ ảnh về "Đã duyệt", lô FAILED có lý do, bấm lại được.
+    // (f4) Quảng cáo mẫu đọc không được ⇒ dừng TRƯỚC khi ghi: không lô, không mã TK, ảnh vẫn "Đã duyệt" (26/09/2026:
+    //      lần bấm đầu của chủ shop cấp mã TK-260926-103 rồi mới vấp mẫu).
     fbCalls.length = 0;
+    const loTruoc = (await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.kind, "INSTANT"))).length;
+    const tkTruoc = (await db.select().from(schema.designConcepts)).length;
     templateFails = true;
     const c3 = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
-    assert.ok(c3.ok && c3.outcome === "FAILED" && c3.detail.includes("Đã duyệt"), c3.ok ? c3.detail : c3.error);
-    if (c3.ok) instantIds.push(c3.batchId);
+    assert.ok(!c3.ok && c3.error.includes("quảng cáo mẫu") && c3.error.includes("Đã duyệt"), c3.ok ? c3.detail : c3.error);
     assert.deepEqual(fbCalls, ["readTemplateAd"], "chỉ lượt ĐỌC — không một lời gọi ghi nào");
+    assert.equal((await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.kind, "INSTANT"))).length, loTruoc, "không dựng lô");
+    assert.equal((await db.select().from(schema.designConcepts)).length, tkTruoc, "không cấp mã thiết kế cho lần đăng không thành");
+    const [ic3a] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, cam[2].id));
+    assert.equal(ic3a.status, "APPROVED");
+    templateFails = false;
+    // Mẫu có hình dạng không dựng lại được (băng chuyền) ⇒ cũng dừng trước khi ghi.
+    tplNow = { ...tplPub, objectStorySpec: { page_id: `${P}page`, link_data: { link: "x", child_attachments: [{ link: "a" }, { link: "b" }] } } };
+    const c3c = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    assert.ok(!c3c.ok && c3c.error.includes("băng chuyền"), "mẫu băng chuyền ⇒ từ chối trước khi ghi, nói rõ lý do");
+    tplNow = tplPub;
+
+    // (f4b) Đọc trước được nhưng lượt đăng đọc lại HỎNG khi chưa gửi gì ⇒ ảnh về "Đã duyệt", lô FAILED, bấm lại được.
+    fbCalls.length = 0;
+    failReadNo = readNo + 2;
+    const c3d = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    assert.ok(c3d.ok && c3d.outcome === "FAILED" && c3d.detail.includes("Đã duyệt"), c3d.ok ? c3d.detail : c3d.error);
+    if (c3d.ok) instantIds.push(c3d.batchId);
+    assert.deepEqual(fbCalls, ["readTemplateAd", "readTemplateAd"], "chỉ lượt ĐỌC — không một lời gọi ghi nào");
     const [ic3] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, cam[2].id));
     assert.equal(ic3.status, "APPROVED", "ảnh trả về 'Đã duyệt'");
     assert.equal(ic3.variantId, null);
-    const [bc3] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.id, c3.ok ? c3.batchId : ""));
+    const [bc3] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.id, c3d.ok ? c3d.batchId : ""));
     assert.equal(bc3.status, "FAILED");
-    templateFails = false;
+    failReadNo = 0;
     const c3b = await publishManualGenImageInstant(db, camInput(cam[2].id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(c3b.ok && c3b.outcome === "LIVE", "bấm lại sau khi sửa ⇒ đăng được");
     if (c3b.ok) instantIds.push(c3b.batchId);
+
+    // (f5) QUẢNG CÁO MẪU LÀ QUẢNG CÁO ĐỘNG (đúng cấu hình của shop 26/09/2026) ⇒ đăng được một bài ảnh đơn mang ĐÚNG nút /
+    //      lời chào của mẫu, ảnh + câu chữ của bài.
+    tplNow = {
+      ...tplPub,
+      objectStorySpec: { page_id: `${P}page`, instagram_user_id: "ig-1" },
+      hasAssetFeed: true,
+      assetFeedSpec: { images: [{ hash: "cu" }], bodies: [{ text: "câu cũ" }], titles: [{ text: "tiêu đề cũ" }], call_to_action_types: ["MESSAGE_PAGE"], ad_formats: ["SINGLE_IMAGE"], additional_data: { page_welcome_message: "chào bạn" } },
+    };
+    specsSent.length = 0;
+    const c5 = await publishManualGenImageInstant(db, camInput(cam[3].id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    assert.ok(c5.ok && c5.outcome === "LIVE", c5.ok ? c5.detail : c5.error);
+    if (c5.ok) instantIds.push(c5.batchId);
+    const ld = (specsSent[0]?.link_data ?? {}) as Record<string, unknown>;
+    assert.equal(specsSent[0]?.page_id, `${P}page`);
+    assert.equal(specsSent[0]?.instagram_user_id, "ig-1", "tài khoản Instagram của mẫu chép nguyên");
+    assert.equal(ld.message, "Nhắn shop để được tư vấn size.", "câu chữ của BÀI, không phải câu cũ trong mẫu động");
+    assert.equal(ld.name, "Đầm đi biển");
+    assert.ok(typeof ld.image_hash === "string" && (ld.image_hash as string).startsWith("hash-"), "ảnh của bài vừa tải lên");
+    assert.deepEqual(ld.call_to_action, { type: "MESSAGE_PAGE", value: { app_destination: "MESSENGER" } }, "nút Gửi tin nhắn đúng như mẫu");
+    assert.equal(ld.page_welcome_message, "chào bạn", "lời chào tin nhắn của mẫu chép nguyên");
+    tplNow = tplPub;
 
     // ── (d) SỬA TÊN ⇒ DIGEST ĐỔI ⇒ PHIẾU CŨ VÔ HIỆU; lô đã duyệt thì không sửa được ──
     const dg0 = approvalDigest(await batchApprovalContent(db, lo));

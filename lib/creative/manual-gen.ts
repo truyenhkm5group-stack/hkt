@@ -31,7 +31,7 @@ import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
 import { insertManualVariant, type ManualActor } from "@/lib/creative/manual";
 import { defaultNames, loadNamingContext, nextNameSeq, nextNameSeqOnDay } from "@/lib/creative/naming";
 import { DESIGN_GENE_EXCLUDE } from "@/lib/creative/plan";
-import { batchApprovalContent, batchConfig, committedTestSpendForDay, publishBatchNow, type CreativeDeps, type CreativeWriteEnv, type PublishBatchReport } from "@/lib/creative/publish";
+import { REAL_CREATIVE_WRITER, batchApprovalContent, batchConfig, committedTestSpendForDay, publishBatchNow, templateShapeError, type CreativeDeps, type CreativeWriteEnv, type PublishBatchReport } from "@/lib/creative/publish";
 import { NEW_DESIGN_CLAUSE, PRESERVE_PRODUCT_CLAUSE, geneDirectives } from "@/lib/creative/writer";
 import { adsWriteHardEnabled, adsWriteMode, readAdsKillSwitch } from "@/lib/integrations/facebook/ads-write";
 import { editImage, type ImageEditClient, type ImageEditInputImage } from "@/lib/integrations/openai/images";
@@ -944,6 +944,16 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
   if (!w.ok) return w;
   const blockers = await instantPublishBlockers(db, cfg, w.batchDay, deps);
   if (blockers.length) return { ok: false, error: `Chưa đăng được: ${blockers.join(" ")}` };
+  // Quảng cáo mẫu kiểm TRƯỚC khi ghi dòng nào (một lượt ĐỌC Facebook): mẫu không dùng được thì không dựng lô, không
+  // cấp mã TK, ảnh vẫn "Đã duyệt". 26/09/2026 lần bấm đầu tiên của chủ shop cấp mã TK-260926-103 rồi mới vấp ở đây.
+  const writer = deps.writer ?? REAL_CREATIVE_WRITER;
+  let shape: string | null;
+  try {
+    shape = templateShapeError(await writer.readTemplateAd(cfg.templateAdId), cfg.pageId, true);
+  } catch (e) {
+    shape = `không đọc được (${errText(e)})`;
+  }
+  if (shape) return { ok: false, error: `Chưa đăng được — quảng cáo mẫu ${cfg.templateAdId || "(chưa khai)"} ở tab Cấu hình & luật: ${shape} Chưa có gì lên Facebook, ảnh vẫn ở "Đã duyệt".` };
 
   const B = schema.creativeBatches;
   let made: PromoteOk & { batchId: string };

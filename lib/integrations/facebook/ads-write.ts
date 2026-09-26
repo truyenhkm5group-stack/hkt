@@ -358,8 +358,13 @@ export type TemplateAd = {
   adset: TemplateAdset;
   /** `object_story_spec` của bài quảng cáo mẫu. `null` = không đọc được. */
   objectStorySpec: Record<string, unknown> | null;
-  /** Bài mẫu dùng quảng cáo động (`asset_feed_spec`) — vòng không chép được kiểu này. */
+  /** Bài mẫu dùng quảng cáo động (`asset_feed_spec`). */
   hasAssetFeed: boolean;
+  /**
+   * Nguyên khối `asset_feed_spec` của bài mẫu (quảng cáo động). Vòng mẫu dựng từ đó MỘT bài ảnh đơn theo đúng nút kêu
+   * gọi / đường dẫn / lời chào của mẫu (`buildObjectStorySpec`). Vắng / `null` = bài mẫu không phải quảng cáo động.
+   */
+  assetFeedSpec?: Record<string, unknown> | null;
 };
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -411,6 +416,7 @@ export async function readTemplateAd(adId: string): Promise<TemplateAd> {
     },
     objectStorySpec: asRecord(creative.object_story_spec),
     hasAssetFeed: creative.asset_feed_spec !== undefined && creative.asset_feed_spec !== null,
+    assetFeedSpec: asRecord(creative.asset_feed_spec),
   };
 }
 

@@ -47,7 +47,7 @@ export async function ManualGenPanel({ canEdit, canPublish = false, preselectPro
       <div className="space-y-4">
         {canEdit && chon.note ? <p className="rounded-md border border-dashed px-2.5 py-1.5 text-[12px] text-muted-foreground">{chon.note}</p> : null}
         {canEdit ? <ManualGenForm key={chon.photoId} initialKind={preselectProductId ? "MOCKUP" : "DESIGN"} inspirations={p.inspirations} sources={p.sources} unitVnd={pr.unitVnd} unitUsd={pr.unitUsd} initialPhotoId={chon.photoId} /> : null}
-        <PublishQueue items={p.queue} canEdit={canEdit} canPublish={canPublish} instant={p.instant} pageName={p.pageName} defaults={p.defaults} predictedSeq={p.predictedSeq} targetDay={p.targetDay} />
+        <PublishQueue items={p.queue} canEdit={canEdit} canPublish={canPublish} instant={p.instant} pageName={p.pageName} defaults={p.defaults} campDefaults={p.campDefaults} predictedSeq={p.predictedSeq} targetDay={p.targetDay} />
         <div className="space-y-3">
           <p className="text-[12.5px] font-semibold">
             Kết quả gen tay — {p.isToday ? "hôm nay" : `ngày ${formatDate(p.day)}`}
@@ -97,7 +97,7 @@ export async function ManualGenPanel({ canEdit, canPublish = false, preselectPro
                 {run.note ? <p className="text-[11.5px] text-warning">{run.note}</p> : null}
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                   {run.images.map((img) => (
-                    <ManualGenImageTile key={img.id} img={img} canEdit={canEdit} canPublish={canPublish} instant={p.instant} pageName={p.pageName} defaults={p.defaults} predictedSeq={p.predictedSeq} targetDay={p.targetDay} />
+                    <ManualGenImageTile key={img.id} img={img} canEdit={canEdit} canPublish={canPublish} instant={p.instant} pageName={p.pageName} defaults={p.defaults} campDefaults={p.campDefaults} predictedSeq={p.predictedSeq} targetDay={p.targetDay} />
                   ))}
                 </div>
               </div>
