@@ -295,6 +295,8 @@ import { testCompanyOsProductionDb, testCompanyOsProductionPure } from "./compan
 // Company OS · Agent E — kết cục hàng hoàn không tái nhập.
 import { testCompanyOsReturnsDb, testCompanyOsReturnsPure } from "./company-os-returns.test";
 import { testCompanyOsUnidentifiedDispositionsDb, testCompanyOsUnidentifiedDispositionsPure } from "./company-os-unidentified-dispositions.test";
+// Company OS · Agent U — xác định mẫu mã món hàng hoàn không nhãn sau khi nhận.
+import { testCompanyOsUnidentifiedIdentifyDb, testCompanyOsUnidentifiedIdentifyPure } from "./company-os-unidentified-identify.test";
 // Company OS · QA — một mẫu đi hết vòng đời qua các agent A–G.
 import { testCompanyOsE2eLifecycle, testCompanyOsE2ePure } from "./company-os-e2e-lifecycle.test";
 import { testCompanyOsCockpitDb, testCompanyOsCockpitPure } from "./company-os-cockpit.test";
@@ -1935,6 +1937,9 @@ async function main() {
   // Company OS · Agent R: kết cục cho hàng hoàn KHÔNG NHÃN (mã `cosr-` / `UR-COSR-`, tự dọn cả sổ kết cục và sự kiện của nó).
   testCompanyOsUnidentifiedDispositionsPure();
   await testCompanyOsUnidentifiedDispositionsDb(db);
+  // Company OS · Agent U: xác định mẫu mã món không nhãn (mã `cosu-` / `UR-COSU-`, tự dọn cả sổ kết cục, phiếu và sự kiện của nó).
+  testCompanyOsUnidentifiedIdentifyPure();
+  await testCompanyOsUnidentifiedIdentifyDb(db);
   // Company OS · Agent H: "Cần anh quyết". Dọn nguồn của chính nó (mã `cosh-`); sổ phản ứng và sự kiện append-only giữ nguyên (CSDL dùng một lần).
   testCompanyOsCockpitPure();
   await testCompanyOsCockpitDb(db);

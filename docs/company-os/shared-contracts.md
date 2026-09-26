@@ -114,6 +114,7 @@ NGHIỆP VỤ) · `recorded_at` default now(). Chỉ mục: `(model_id, occurred
 | `production_order.linked_design` · `production_plan.overridden` | C | LIVE |
 | `stock_receipt.linked_production` | D | LIVE từ Agent K (`lib/inventory/receipt-create.ts`) — phiếu tạo với `production_order_id` / `production_batch_id`, cùng giao dịch với phiếu; `model_id` = mẫu của sản phẩm trong lệnh (ưu tiên) hoặc lô, NULL khi sản phẩm chưa vào sổ mẫu; khoá chống trùng `stock_receipt.linked_production:<id phiếu>` |
 | `return.disposition_set` | E | LIVE |
+| `return.variant_identified` | E (Agent U) | LIVE (`lib/returns/unidentified.ts`) — kho XÁC ĐỊNH / đổi mẫu mã cho hàng hoàn không nhãn sau khi nhận; `subject_id` = `unidentified:<id>`, `model_id` qua sổ mẫu của sản phẩm (NULL khi chưa vào sổ); không tự cộng tồn |
 | `approval.executed` | G | LIVE từ Agent K (`lib/approvals/service.ts`) — phát CÙNG giao dịch với lượt ghi trạng thái yêu cầu: lật `EXECUTED` khi cổng đứng trong giao dịch nghiệp vụ, hoặc lượt khẳng định sau khi action xong (`withApprovalExecution`); khoá chống trùng `approval.executed:<id yêu cầu>`; `model_id` NULL |
 | `recommendation.decided` | H | LIVE |
 
@@ -278,7 +279,9 @@ Mọi hàm trên CHỈ gọi truy vấn có sẵn của miền mình — không 
 ## 7. Số migration đã dùng (theo THỨ TỰ GỘP, không theo thứ tự cấp)
 
 `0132` A · `0133` D · `0134` G · `0135` F · `0136` C · `0137` E · `0138` A2 · `0139` H · `0140` T (CHECK loại
-của `recommendation_decisions` mở rộng cho `MODEL_EARLY_TOPIC`; `when` 1790006243217). B không có migration.
+của `recommendation_decisions` mở rộng cho `MODEL_EARLY_TOPIC`; `when` 1790006243217) · `0141` X (CHECK đủ 12
+loại cockpit) · `0142` R (kết cục hàng hoàn không nhãn) · `0144` U (ai / lúc nào xác định mẫu mã hàng không nhãn — `0143` đã
+thuộc gen ảnh tay của phiên khác, #282). B, K, S, L không có migration.
 `0131` là của sổ ngân hàng (PR #273, phiên khác) — nó vào `main` trước, nên cả chuỗi dời lên một số và
 mốc `when` của sổ mẫu dời lên sau mốc của nó (hai bên từng trùng đúng một mốc).
 Drizzle bỏ qua VĨNH VIỄN migration có `when` nhỏ hơn migration đã áp, nên số hiệu và `when` phải tăng

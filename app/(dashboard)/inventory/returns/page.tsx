@@ -443,6 +443,8 @@ export default async function ReturnInspectionPage({
           grain: r.grain,
           shipmentId: r.shipmentId,
           unidentifiedStatus: r.unidentifiedStatus,
+          unidentifiedId: r.unidentifiedId,
+          variantId: r.variantId,
           code: r.code,
           orderCode: r.orderCode,
           condition: r.condition,

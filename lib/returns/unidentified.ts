@@ -3,16 +3,29 @@ import { getDb, schema, type Db } from "@/db";
 import type { Actor } from "@/lib/constants/actor";
 import { ITEM_CONDITION_LABEL, ITEM_CONDITION_RESTOCKS, type ItemCondition } from "@/lib/constants/return-lifecycle";
 import {
+  checkVariantIdentify,
   RESTOCK_AUTHORITY_LABEL,
   restockAuthorityOf,
   unidentifiedCode,
+  unidentifiedStockReceived,
   type IdentificationMethod,
   type RestockAuthority,
   type UnidentifiedSource,
   type UnidentifiedStatus,
+  type VariantIdentifyKind,
 } from "@/lib/constants/return-unidentified";
-import { unidentifiedLedgerRows, unidentifiedReworkRestockTotals, unidentifiedTerminalQtySql } from "@/lib/queries/return-dispositions";
+import { normalizeProductCode } from "@/lib/constants/workshop-ledger";
+import { emitDomainEvent } from "@/lib/events/emit";
+import { resolveProductByCode } from "@/lib/queries/product-code";
+import {
+  unidentifiedLedgerRows,
+  unidentifiedReworkRestockRows,
+  unidentifiedReworkRestockRowsSql,
+  unidentifiedReworkRestockTotals,
+  unidentifiedTerminalQtySql,
+} from "@/lib/queries/return-dispositions";
 import { markReturnsArrived } from "@/lib/returns/inspection";
+import { rowsOf } from "@/lib/sql-rows";
 
 /**
  * ═══════════ HÀNG HOÀN CHƯA XÁC ĐỊNH NGUỒN — LỚP 1 VÀ LỚP 3, KHÔNG CẦN LỚP 2 ═══════════
@@ -61,6 +74,11 @@ export type UnidentifiedRow = {
   quantity: number;
   condition: ItemCondition;
   note: string;
+  /** Agent U: ai xác nhận mẫu mã, lúc nào. `null` ở dòng cũ = CHƯA BIẾT ai chọn (không backfill). */
+  variantIdentifiedAt: Date | null;
+  variantIdentifiedBy: string | null;
+  variantIdentifiedByUserId: string | null;
+  variantIdentifyNote: string | null;
   identificationMethod: IdentificationMethod | null;
   identifiedAt: Date | null;
   identifiedBy: string;
@@ -151,6 +169,8 @@ export async function createUnidentifiedReturn(input: CreateUnidentifiedInput): 
         receivedByUserId: input.actor.id,
         warehouseNote: input.warehouseNote.trim(),
         variantId: input.variantId,
+        // Chọn mẫu ngay lúc nhận cũng là một lượt NGƯỜI xác nhận (Agent U) — ghi ai / lúc nào như lượt gắn sau.
+        ...(input.variantId ? { variantIdentifiedAt: now, variantIdentifiedBy: label, variantIdentifiedByUserId: input.actor.id } : {}),
         ...snapshot,
         quantity: qty,
         condition: input.condition,
@@ -432,11 +452,14 @@ const LEDGER_OWNS_MSG = (code: string) =>
 /**
  * Đổi kết luận kiểm hàng (ví dụ giặt xong thì từ “Bẩn” sang “Đủ”). Đã vào tồn thì khoá.
  *
- * Company OS · Agent R: món ĐÃ CÓ DÒNG trong sổ kết cục cũng khoá — trừ đúng một việc: gắn mẫu mã cho món
- * CHƯA nhận diện được (giữ nguyên kết luận). Đó là thêm hiểu biết, không mở đường vào tồn nào. Khoá dòng
- * món (`FOR UPDATE`) rồi mới hỏi sổ: lõi kết cục khoá CÙNG dòng này trước khi ghi, nên hai bên xếp hàng.
+ * Company OS · Agent R: món ĐÃ CÓ DÒNG trong sổ kết cục cũng khoá. Khoá dòng món (`FOR UPDATE`) rồi mới
+ * hỏi sổ: lõi kết cục khoá CÙNG dòng này trước khi ghi, nên hai bên xếp hàng.
+ *
+ * Company OS · Agent U: hàm này KHÔNG còn nhận mẫu mã. Gắn / đổi mẫu mã đi ĐÚNG MỘT đường —
+ * `identifyUnidentifiedVariant` — nơi ghi ai xác nhận, lúc nào, lý do khi đổi, và chặn khi đã có hàng vào
+ * tồn. Để một cửa thứ hai ở đây là để mẫu mã đổi được mà không ai biết ai đổi.
  */
-export async function setUnidentifiedCondition(input: { id: string; condition: ItemCondition; note: string; variantId?: string | null; actor: Actor }): Promise<IdentifyResult> {
+export async function setUnidentifiedCondition(input: { id: string; condition: ItemCondition; note: string; actor: Actor }): Promise<IdentifyResult> {
   const db = await getDb();
   const [row] = await db.select({ code: u.code, receipt: u.stockReceiptId }).from(u).where(eq(u.id, input.id)).limit(1);
   if (!row) return { error: "Không thấy kiện hàng hoàn chưa xác định này" };
@@ -444,35 +467,177 @@ export async function setUnidentifiedCondition(input: { id: string; condition: I
   const note = input.note.trim();
   if (!ITEM_CONDITION_RESTOCKS[input.condition] && !note) return { error: "Kết luận không vào tồn thì phải ghi rõ vì sao" };
 
-  let snapshot: Record<string, string> = {};
-  if (input.variantId) {
-    const [v] = await db
-      .select({ sku: schema.productVariants.sku, color: schema.productVariants.color, size: schema.productVariants.size, name: schema.products.name })
-      .from(schema.productVariants)
-      .leftJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
-      .where(eq(schema.productVariants.id, input.variantId))
-      .limit(1);
-    if (!v) return { error: "Mẫu mã không có trong danh mục ERP" };
-    snapshot = { sku: v.sku ?? "", productName: v.name ?? "", color: v.color ?? "", size: v.size ?? "" };
-  }
-
   type KetQua = { error: string } | { ok: true; x: typeof schema.returnUnidentified.$inferSelect };
   const out = await db.transaction(async (tx): Promise<KetQua> => {
-    const [khoa] = await tx.select({ condition: u.condition, variantId: u.variantId }).from(u).where(eq(u.id, input.id)).for("update");
+    const [khoa] = await tx.select({ id: u.id }).from(u).where(eq(u.id, input.id)).for("update");
     if (!khoa) return { error: "Không thấy kiện hàng hoàn chưa xác định này" };
-    if ((await unidentifiedLedgerRows(tx, input.id)) > 0) {
-      const chiGanMau = input.condition === khoa.condition && !khoa.variantId && Boolean(input.variantId);
-      if (!chiGanMau) return { error: LEDGER_OWNS_MSG(row.code) };
-    }
+    if ((await unidentifiedLedgerRows(tx, input.id)) > 0) return { error: LEDGER_OWNS_MSG(row.code) };
     const [x] = await tx
       .update(u)
-      .set({ condition: input.condition, note, ...(input.variantId ? { variantId: input.variantId, ...snapshot } : {}), updatedAt: new Date() })
+      .set({ condition: input.condition, note, updatedAt: new Date() })
       .where(and(eq(u.id, input.id), isNull(u.stockReceiptId)))
       .returning();
     return x ? { ok: true, x } : { error: "Kiện vừa được người khác xử lý — mở lại danh sách để xem trạng thái mới" };
   });
   if ("error" in out) return { error: out.error };
   return { ok: true, row: toRow(out.x), code: out.x.code };
+}
+
+// ───────────────────────── 4. XÁC ĐỊNH MẪU MÃ (Company OS · Agent U) ─────────────────────────
+
+/** `source` của sự kiện miền — đường ghi duy nhất của lượt xác định mẫu mã. */
+export const VARIANT_IDENTIFY_EVENT_SOURCE = "lib/returns/unidentified.ts#identifyUnidentifiedVariant";
+
+export type VariantSnapshot = { variantId: string | null; sku: string; productName: string; color: string; size: string };
+
+export type IdentifyVariantResult =
+  | { ok: true; kind: VariantIdentifyKind; row: UnidentifiedRow; before: VariantSnapshot; after: VariantSnapshot; eventId: string | null }
+  | { error: string; code?: string };
+
+/**
+ * NGƯỜI KHO XÁC NHẬN MẪU MÃ CỦA MỘT MÓN KHÔNG NHÃN — đường ghi DUY NHẤT sau lúc nhận kiện.
+ *
+ * Làm đúng ba việc, trong MỘT giao dịch:
+ *  1. Khoá dòng món (`FOR UPDATE` — lõi kết cục và nút tái nhập nguyên món khoá CÙNG dòng này), đọc lại
+ *     mẫu đang lưu + phiếu nguyên món + số dòng `RESTOCK_AFTER_REWORK` TRONG khoá, rồi hỏi
+ *     `checkVariantIdentify` (luật thuần duy nhất).
+ *  2. Ghi mẫu mã + ảnh chụp tên hàng / màu / size + AI (khoá tài khoản + tên do máy chủ đọc) + LÚC NÀO +
+ *     ghi chú / lý do.
+ *  3. Phát `return.variant_identified` (subject `return_inspection`, `subject_id = unidentified:<id>`,
+ *     `model_id` khi sản phẩm của mẫu đã vào sổ mẫu — không đoán).
+ *
+ * KHÔNG chạm tồn: không phiếu kho, không dòng sổ kết cục. Món chỉ trở nên ĐỦ ĐIỀU KIỆN cho các đường vào
+ * tồn đã có (mỗi đường giữ nguyên luật quyền + lý do của nó).
+ *
+ * Người xác nhận phải là một TÀI KHOẢN (`actor.id` khác null): máy không xác nhận được món hàng trên tay ai.
+ */
+export async function identifyUnidentifiedVariant(input: { id: string; variantId: string; note: string; expectedVariantId?: string | null; actor: Actor }): Promise<IdentifyVariantResult> {
+  const label = input.actor.label.trim();
+  if (!input.actor.id || !label) return { error: "Xác nhận mẫu mã là việc của một người có tài khoản — thiếu người xác nhận." };
+  const variantId = input.variantId.trim();
+  if (!variantId) {
+    const thieu = checkVariantIdentify({ current: null, next: "", stockReceived: false, note: input.note });
+    return "error" in thieu ? thieu : { error: "Chưa chọn mẫu mã" };
+  }
+
+  const db = await getDb();
+  const [v] = await db
+    .select({ sku: schema.productVariants.sku, color: schema.productVariants.color, size: schema.productVariants.size, name: schema.products.name })
+    .from(schema.productVariants)
+    .leftJoin(schema.products, eq(schema.products.id, schema.productVariants.productId))
+    .where(eq(schema.productVariants.id, variantId))
+    .limit(1);
+  if (!v) return { error: "Mẫu mã không có trong danh mục ERP" };
+  const after: VariantSnapshot = { variantId, sku: v.sku ?? "", productName: v.name ?? "", color: v.color ?? "", size: v.size ?? "" };
+  const [pm] = rowsOf<{ id: string }>(
+    await db.execute(sql`select pm.id from product_models pm join product_variants pv on pv.product_id = pm.product_id where pv.id = ${variantId} limit 1`),
+  );
+  const modelId = pm?.id ?? null;
+
+  type KetQua = { error: string; code?: string } | { ok: true; kind: VariantIdentifyKind; x: typeof schema.returnUnidentified.$inferSelect; before: VariantSnapshot; eventId: string | null };
+  const out = await db.transaction(async (tx): Promise<KetQua> => {
+    const [cu] = await tx.select().from(u).where(eq(u.id, input.id)).for("update");
+    if (!cu) return { error: "Không thấy kiện hàng hoàn chưa xác định này" };
+    const before: VariantSnapshot = { variantId: cu.variantId, sku: cu.sku, productName: cu.productName, color: cu.color, size: cu.size };
+    const luat = checkVariantIdentify({
+      current: cu.variantId,
+      next: variantId,
+      stockReceived: unidentifiedStockReceived({ stockReceiptId: cu.stockReceiptId, reworkRestockRows: await unidentifiedReworkRestockRows(tx, input.id) }),
+      note: input.note,
+      expectedCurrent: input.expectedVariantId,
+    });
+    if ("error" in luat) return { error: `${cu.code}: ${luat.error}`, code: luat.code };
+    // Chọn lại đúng mẫu đang có: không ghi gì, không phát gì — bấm đúp / gửi lại không đẻ dòng thứ hai.
+    if (luat.kind === "SAME") return { ok: true, kind: "SAME", x: cu, before, eventId: null };
+
+    const now = new Date();
+    const [x] = await tx
+      .update(u)
+      .set({
+        variantId,
+        sku: after.sku,
+        productName: after.productName,
+        color: after.color,
+        size: after.size,
+        variantIdentifiedAt: now,
+        variantIdentifiedBy: label,
+        variantIdentifiedByUserId: input.actor.id,
+        variantIdentifyNote: luat.note || null,
+        updatedAt: now,
+      })
+      .where(eq(u.id, input.id))
+      .returning();
+    const eventId = await emitDomainEvent(tx, {
+      name: "return.variant_identified",
+      subjectType: "return_inspection",
+      subjectId: `unidentified:${input.id}`,
+      modelId,
+      payload: {
+        grain: "UNIDENTIFIED",
+        unidentifiedId: input.id,
+        code: cu.code,
+        kind: luat.kind,
+        variantId,
+        sku: after.sku,
+        color: after.color,
+        size: after.size,
+        previousVariantId: before.variantId,
+        note: luat.note,
+        quantity: cu.quantity,
+      },
+      actorKind: "USER",
+      actorId: input.actor.id,
+      source: VARIANT_IDENTIFY_EVENT_SOURCE,
+      dedupeKey: `return.variant_identified:${input.id}:${now.getTime()}`,
+      occurredAt: now,
+    });
+    return { ok: true, kind: luat.kind, x, before, eventId };
+  });
+  if ("error" in out) return { error: out.error, code: out.code };
+  return { ok: true, kind: out.kind, row: toRow(out.x), before: out.before, after: out.kind === "SAME" ? out.before : after, eventId: out.eventId };
+}
+
+export type ProductCodeVariants = {
+  /** Mã chủ shop đã chuẩn hoá (IN HOA, bỏ khoảng trắng). */
+  code: string;
+  /** `null` = mã không khớp ĐÚNG MỘT sản phẩm (không có, hoặc mơ hồ) — không bốc một (luật 35). */
+  product: { id: string; name: string } | null;
+  variants: (VariantOption & { image: string | null; selling: boolean })[];
+};
+
+/**
+ * MÃ HÀNG → MÀU → SIZE: toàn bộ mẫu mã của MỘT sản phẩm theo mã chủ shop (`Q001`…).
+ *
+ * Đi qua `resolveProductByCode` (cùng phép chuẩn hoá với Sổ đặt xưởng và Giá báo MKT): mã khớp hai sản
+ * phẩm thì trả `product = null`, KHÔNG chọn hộ một cái. Mẫu mã đã ẩn / ngừng bán VẪN hiện (đánh dấu
+ * `selling = false`): hàng hoàn của mã vừa ngừng bán vẫn quay về.
+ */
+export async function variantsOfProductCode(raw: string): Promise<ProductCodeVariants> {
+  const code = normalizeProductCode(raw);
+  if (!code) return { code, product: null, variants: [] };
+  const product = await resolveProductByCode(code);
+  if (!product) return { code, product: null, variants: [] };
+  const db = await getDb();
+  const pv = schema.productVariants;
+  const rows = await db
+    .select({ id: pv.id, sku: pv.sku, color: pv.color, size: pv.size, images: pv.images, productImage: schema.products.image, removed: pv.isRemoved, hidden: pv.isHidden })
+    .from(pv)
+    .innerJoin(schema.products, eq(schema.products.id, pv.productId))
+    .where(eq(pv.productId, product.id))
+    .orderBy(pv.color, pv.size, pv.sku);
+  return {
+    code,
+    product,
+    variants: rows.map((r) => ({
+      id: r.id,
+      sku: r.sku ?? "",
+      name: product.name,
+      color: r.color ?? "",
+      size: r.size ?? "",
+      image: r.images?.[0] || r.productImage || null,
+      selling: !r.removed && !r.hidden,
+    })),
+  };
 }
 
 // ───────────────────────── Đọc ─────────────────────────
@@ -494,6 +659,10 @@ function toRow(r: typeof schema.returnUnidentified.$inferSelect): UnidentifiedRo
     quantity: r.quantity,
     condition: r.condition as ItemCondition,
     note: r.note,
+    variantIdentifiedAt: r.variantIdentifiedAt,
+    variantIdentifiedBy: r.variantIdentifiedBy,
+    variantIdentifiedByUserId: r.variantIdentifiedByUserId,
+    variantIdentifyNote: r.variantIdentifyNote,
     identificationMethod: (r.identificationMethod as IdentificationMethod | null) ?? null,
     identifiedAt: r.identifiedAt,
     identifiedBy: r.identifiedBy,
@@ -509,17 +678,36 @@ function toRow(r: typeof schema.returnUnidentified.$inferSelect): UnidentifiedRo
   };
 }
 
-export async function listUnidentifiedReturns({ limit = 100, holdingOnly = false }: { limit?: number; holdingOnly?: boolean } = {}): Promise<UnidentifiedRow[]> {
+/**
+ * SỐ MÓN CÒN GIỮ TẠM của một món không nhãn = số món nhận − phần đã có KẾT CỤC CUỐI ở sổ kết cục.
+ * MỘT biểu thức cho cả tiêu đề bàn (`unidentifiedSummary`) lẫn từng dòng (`listUnidentifiedReturns`) —
+ * trước bản này dòng in số món BAN ĐẦU trong khi tiêu đề đã trừ đúng (Agent R ghi, Agent U sửa).
+ */
+const HOLDING_QTY_SQL = sql`(${u.quantity} - ${unidentifiedTerminalQtySql(sql`${u.id}`)})`;
+
+/** Dòng của bàn không nhãn: thêm hai con số đọc từ sổ kết cục (không lưu trên bảng món). */
+export type UnidentifiedListRow = UnidentifiedRow & {
+  /** Số món còn giữ tạm (chưa vào tồn, chưa huỷ / trả xưởng). Món đã vào tồn nguyên món: 0. */
+  holdingQty: number;
+  /** Số dòng `RESTOCK_AFTER_REWORK` — > 0 ⇒ đã có hàng vào tồn, đổi mẫu mã phải đi phiếu điều chỉnh. */
+  reworkRestockRows: number;
+};
+
+export async function listUnidentifiedReturns({ limit = 100, holdingOnly = false }: { limit?: number; holdingOnly?: boolean } = {}): Promise<UnidentifiedListRow[]> {
   const db = await getDb();
   const rows = await db
-    .select()
+    .select({ r: u, holding: sql<number>`greatest(${HOLDING_QTY_SQL}, 0)`, reworkRestockRows: unidentifiedReworkRestockRowsSql(sql`${u.id}`).mapWith(Number) })
     .from(u)
     .where(holdingOnly ? isNull(u.stockReceiptId) : sql`true`)
     // Chưa vào tồn lên trước: đó là phần còn phải làm. Trong đó, cũ nhất trước — nằm lâu nhất là
     // nằm ngoài sổ lâu nhất.
     .orderBy(sql`(${u.stockReceiptId} is not null)`, u.receivedAt)
     .limit(limit);
-  return rows.map(toRow);
+  return rows.map(({ r, holding, reworkRestockRows }) => ({
+    ...toRow(r),
+    holdingQty: r.stockReceiptId ? 0 : Number(holding ?? 0),
+    reworkRestockRows: Number(reworkRestockRows ?? 0),
+  }));
 }
 
 export async function findUnidentifiedByCode(code: string): Promise<UnidentifiedRow | null> {
@@ -565,7 +753,7 @@ export type UnidentifiedSummary = {
  */
 export async function unidentifiedSummary(): Promise<UnidentifiedSummary> {
   const db = await getDb();
-  const conLai = sql`(${u.quantity} - ${unidentifiedTerminalQtySql(sql`${u.id}`)})`;
+  const conLai = HOLDING_QTY_SQL;
   const [[r], sauSua] = await Promise.all([
     db
     .select({
@@ -613,6 +801,15 @@ export function unidentifiedTimeline(r: UnidentifiedRow): UnidentifiedTimelineSt
       by: r.receivedBy,
     },
   ];
+  // Agent U: mẫu mã xác nhận SAU lúc nhận (lượt chọn ngay lúc nhận đã nằm ở bước đầu).
+  if (r.variantIdentifiedAt && r.variantIdentifiedAt.getTime() !== r.receivedAt.getTime()) {
+    steps.push({
+      at: r.variantIdentifiedAt,
+      title: "Xác định mẫu mã",
+      detail: [`${r.sku || "mẫu mã đã chọn"}${[r.color, r.size].filter(Boolean).length ? ` · ${[r.color, r.size].filter(Boolean).join(" / ")}` : ""}`, r.variantIdentifyNote ?? ""].filter(Boolean).join(" · "),
+      by: r.variantIdentifiedBy ?? "",
+    });
+  }
   if (r.identifiedAt) {
     steps.push({
       at: r.identifiedAt,

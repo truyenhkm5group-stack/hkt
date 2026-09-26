@@ -13,10 +13,13 @@ import {
   createUnidentifiedReturn,
   findUnidentifiedById,
   identifyUnidentifiedReturn,
+  identifyUnidentifiedVariant,
   markUnidentifiable,
   restockUnidentifiedReturn,
   searchVariants,
   setUnidentifiedCondition,
+  variantsOfProductCode,
+  type ProductCodeVariants,
   type UnidentifiedRow,
   type VariantOption,
 } from "@/lib/returns/unidentified";
@@ -233,10 +236,12 @@ const conditionSchema = z.object({
   id: z.string().trim().min(1).max(100),
   condition: z.enum(ITEM_CONDITIONS),
   note: z.string().trim().max(1000).default(""),
-  variantId: z.string().trim().max(100).nullable().default(null),
 });
 
-/** Đổi kết luận / gắn mẫu mã cho một kiện CHƯA vào tồn (ví dụ giặt xong thì từ “Bẩn” sang “Đủ”). */
+/**
+ * Đổi kết luận cho một kiện CHƯA vào tồn (ví dụ giặt xong thì từ “Bẩn” sang “Đủ”). KHÔNG nhận mẫu mã nữa
+ * (Agent U) — gắn / đổi mẫu mã chỉ qua `identifyUnidentifiedVariantAction`.
+ */
 export async function setUnidentifiedConditionAction(input: unknown): Promise<UnidentifiedActionResult> {
   const user = await requireUser();
   if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
@@ -252,7 +257,7 @@ export async function setUnidentifiedConditionAction(input: unknown): Promise<Un
     action: "return.unidentified.condition",
     entity: "return_unidentified",
     entityId: parsed.data.id,
-    after: { condition: parsed.data.condition, variantId: parsed.data.variantId ?? "", note: parsed.data.note },
+    after: { condition: parsed.data.condition, note: parsed.data.note },
   });
   revalidate();
   return { ok: true, row: r.row, message: `${r.row.code}: đã cập nhật kết luận kiểm hàng.` };
@@ -330,4 +335,62 @@ export async function searchVariantsAction(term: unknown): Promise<VariantOption
   const q = z.string().trim().max(120).safeParse(term);
   if (!q.success) return [];
   return searchVariants(q.data);
+}
+
+// ───────────────────────── XÁC ĐỊNH MẪU MÃ (Company OS · Agent U) ─────────────────────────
+
+const identifyVariantSchema = z.object({
+  id: z.string().trim().min(1).max(100),
+  variantId: z.string().trim().min(1, "Chưa chọn mẫu mã").max(100),
+  /** Ghi chú khi gán; LÝ DO bắt buộc khi đổi mẫu đã gán (luật thuần `checkVariantIdentify` kiểm). */
+  note: z.string().trim().max(1000).default(""),
+  /** Mẫu người bấm nhìn thấy lúc mở biểu mẫu — khác mẫu đang lưu ⇒ từ chối (ai đó vừa đổi). */
+  expectedVariantId: z.string().trim().max(100).nullable(),
+});
+
+/**
+ * NGƯỜI KHO XÁC NHẬN MẪU MÃ của một món không nhãn — gán lần đầu, hoặc đổi kèm lý do khi món CHƯA có
+ * hàng nào vào tồn. `inventory:write` (cùng quyền bàn không nhãn đang đòi cho mọi lượt ghi). KHÔNG cộng
+ * tồn: món chỉ trở nên đủ điều kiện cho các đường vào tồn đã có, mỗi đường giữ luật quyền + lý do riêng.
+ * Không gắn cổng duyệt hai bước: lượt này không đổi một con số tồn / tiền nào.
+ */
+export async function identifyUnidentifiedVariantAction(input: unknown): Promise<UnidentifiedActionResult> {
+  const user = await requireUser();
+  if (!can(user, "inventory:write")) return { error: "Bạn không có quyền cập nhật kho" };
+  const parsed = identifyVariantSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+
+  const r = await identifyUnidentifiedVariant({ ...parsed.data, actor: khoActor(user) });
+  if ("error" in r) return { error: r.error };
+  const ten = [r.after.sku || r.after.productName, r.after.color, r.after.size].filter(Boolean).join(" · ");
+  if (r.kind === "SAME") {
+    // Nhánh trả sớm vẫn làm mới: màn hình có thể đang cũ vì người khác vừa xác định cùng mẫu (PR #284).
+    revalidate();
+    return { ok: true, row: r.row, message: `${r.row.code} đã mang đúng mẫu ${ten} — không ghi thêm.` };
+  }
+
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: r.kind === "CHANGE" ? "return.unidentified.variant_changed" : "return.unidentified.variant_identified",
+    entity: "return_unidentified",
+    entityId: r.row.id,
+    reason: parsed.data.note || (r.kind === "CHANGE" ? "Đổi mẫu mã" : "Kho xác định mẫu mã món không nhãn"),
+    before: { variantId: r.before.variantId ?? "", sku: r.before.sku, color: r.before.color, size: r.before.size },
+    after: { variantId: r.after.variantId ?? "", sku: r.after.sku, color: r.after.color, size: r.after.size },
+  });
+  revalidate();
+  return {
+    ok: true,
+    row: r.row,
+    message: `${r.row.code}: ${r.kind === "CHANGE" ? "đã đổi" : "đã xác định"} mẫu mã ${ten}. Hàng vẫn GIỮ TẠM — vào tồn chỉ qua nút tái nhập / “Sửa xong · nhập lại”.`,
+  };
+}
+
+/** CHỈ ĐỌC. Mã hàng chủ shop (Q001…) → toàn bộ màu × size của đúng MỘT sản phẩm (mơ hồ ⇒ không chọn hộ). */
+export async function variantsOfProductCodeAction(code: unknown): Promise<ProductCodeVariants> {
+  const user = await requireUser();
+  const q = z.string().trim().max(60).safeParse(code);
+  if (!can(user, "inventory:write") || !q.success) return { code: "", product: null, variants: [] };
+  return variantsOfProductCode(q.data);
 }

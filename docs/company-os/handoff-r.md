@@ -52,3 +52,5 @@ Gieo một món không nhãn `UNIDENTIFIABLE`, 3 món hỏng. Trên `/inventory/
 - Dòng của món trên bàn không nhãn vẫn in "Giữ tạm — chưa vào tồn · × <số món ban đầu>" khi món đã nhập lại một phần qua sổ (tiêu đề "giữ tạm" của bàn thì đã trừ đúng); dòng có liên kết sang khối kết cục nơi phần còn lại hiện đúng. Chưa sửa chữ của dòng.
 - Chưa đo production (không có quyền). Sau deploy, món không nhãn đang giữ tạm mang kết luận không bán được sẽ hiện "Chưa quyết" (không backfill).
 - Duyệt huỷ vẫn phụ thuộc đường "thực hiện lại sau khi duyệt" của Agent G (như E đã ghi).
+
+- **Khoảng trống gán mẫu mã đã đóng** (Agent U, `docs/company-os/handoff-u.md`): "Xác định mẫu mã" (mã hàng → màu → size) trên bàn không nhãn và trên dòng "không nhãn" của khối kết cục; đổi mẫu cần lý do và bị chặn khi món đã có hàng vào tồn; dòng bàn không nhãn nay in số món còn giữ tạm.

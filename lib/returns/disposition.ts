@@ -185,7 +185,7 @@ export async function setReturnDispositionCore(db: Db, input: SetDispositionInpu
         subject.grain === "PARCEL"
           ? "Kiện này kiểm cả kiện và có nhiều mẫu mã (hoặc chưa ghép được đơn) — chọn đúng mẫu mã của món đã sửa xong."
           : subject.grain === "UNIDENTIFIED"
-            ? `${subject.code ?? "Món không nhãn"} chưa nhận diện được mẫu mã — không biết cộng vào đâu. Gắn mẫu mã ở bàn “Hàng hoàn không có mã vận đơn” trước.`
+            ? `${subject.code ?? "Món không nhãn"} chưa nhận diện được mẫu mã — không biết cộng vào đâu. Bấm “Xác định mẫu mã” (trên dòng này hoặc ở bàn “Hàng hoàn không có mã vận đơn”) trước.`
             : "Món này chưa ghép được mẫu mã ERP nên không biết cộng vào đâu — đồng bộ sản phẩm rồi làm lại.",
     };
   }

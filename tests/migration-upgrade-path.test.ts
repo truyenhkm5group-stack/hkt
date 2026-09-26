@@ -91,6 +91,7 @@ const MOI = [
   "0141_company_os_stock_feedback",
   "0142_company_os_unidentified_dispositions",
   "0143_creative_manual_gen_design",
+  "0144_company_os_unidentified_identify",
 ] as const;
 
 /*
@@ -1647,6 +1648,14 @@ export async function testMigrationUpgradePath() {
     await assert.rejects(client.query(`insert into return_dispositions (id, unidentified_id, subject_key, disposition, qty, actor_user_id) values ('up-rdu3', 'up-ru1', 'parcel:up-ru1', 'REWORK', 2, 'up-uh')`), /return_dispositions_subject_check/, "0142: khoá đối tượng phải khớp neo không nhãn");
     await assert.rejects(client.query(`delete from return_unidentified where id = 'up-ru1'`), /foreign key|violates/i, "0142: xoá món không nhãn đã có quyết định phải bị chặn (RESTRICT)");
     assert.equal(await dem("select count(*)::int as n from pg_constraint where conname in ('return_dispositions_anchor_check', 'return_dispositions_subject_check', 'return_dispositions_restock_authority_check')"), 3, "0142: đúng một ràng buộc mỗi tên");
+    // 0144 (Company OS · Agent U): ai xác nhận mẫu mã của món không nhãn, lúc nào. Dòng ghi KHÔNG nhắc tới
+    // bốn cột mới — đúng như mọi dòng đã có trên production — phải mang NULL ở cả bốn (không DEFAULT, không
+    // backfill); mốc và tên đi cùng nhau.
+    assert.equal(await dem("select count(*)::int as n from return_unidentified where id = 'up-ru1' and variant_identified_at is null and variant_identified_by is null and variant_identified_by_user_id is null and variant_identify_note is null"), 1, "0144: dòng cũ giữ NULL ở cả bốn cột (không backfill)");
+    await assert.rejects(client.query(`update return_unidentified set variant_identified_at = now() where id = 'up-ru1'`), /return_unidentified_variant_identified_check/, "0144: có mốc mà không có người xác nhận phải bị CSDL chặn");
+    await client.query(`update return_unidentified set variant_identified_at = now(), variant_identified_by = 'Kho', variant_identified_by_user_id = 'up-uh' where id = 'up-ru1'`);
+    assert.ok(!/(^|;|\s)UPDATE\s+"?return_unidentified/im.test(readFileSync(path.join(goc, "0144_company_os_unidentified_identify.sql"), "utf8").replace(/--.*$/gm, "")), "0144: migration KHÔNG được chứa UPDATE — không backfill");
+    assert.equal(await dem("select count(*)::int as n from pg_constraint where conname in ('return_unidentified_variant_identified_check', 'return_unidentified_variant_identified_by_user_id_users_id_fk')"), 2, "0144: đúng một ràng buộc mỗi tên");
     await client.query(`delete from return_dispositions where id = 'up-rdu1'`);
     await client.query(`delete from return_unidentified where id = 'up-ru1'`);
     await client.query(`delete from users where id = 'up-uh'`);

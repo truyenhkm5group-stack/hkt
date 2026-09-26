@@ -151,6 +151,72 @@ export function checkUnidentifiedRestock(input: { status: string; reason: string
 }
 
 /**
+ * ═══════════ XÁC ĐỊNH MẪU MÃ CỦA MÓN KHÔNG NHÃN (Company OS · Agent U) ═══════════
+ *
+ * Mẫu mã (`return_unidentified.variant_id`) là LỜI XÁC NHẬN CỦA NGƯỜI cầm món hàng — không bao giờ là
+ * mẫu máy đoán từ đơn đã nối (luật 35). Có nó thì món mới đếm được về một mẫu và mới đủ điều kiện đi
+ * các đường vào tồn ĐÃ CÓ (tái nhập nguyên món · sửa xong → nhập lại theo số đếm). Bản thân lượt xác
+ * nhận KHÔNG cộng tồn, KHÔNG lập phiếu nào (hàng hoàn không bao giờ tự vào tồn — luật 4, 10).
+ *
+ * Ba lượt khác nhau, một hàm thuần quyết:
+ *  · GÁN lần đầu (món chưa có mẫu) — ghi chú không bắt buộc.
+ *  · ĐỔI mẫu đã gán — chỉ khi món CHƯA có hàng nào vào tồn, và BẮT BUỘC lý do.
+ *  · Chọn lại ĐÚNG mẫu đang có — không ghi gì (bấm đúp / gửi lại không đẻ ra dòng nhật ký thứ hai).
+ *
+ * "Đã có hàng vào tồn" = có phiếu tái nhập nguyên món (`stock_receipt_id`) HOẶC có dòng sổ
+ * `RESTOCK_AFTER_REWORK`. Khi ấy dòng phiếu kho đã mang mẫu CŨ: đổi mẫu ở đây là làm sổ tồn và món hàng
+ * nói hai điều khác nhau. Sửa đúng cách là một phiếu ĐIỀU CHỈNH kho (−1 mẫu cũ · +1 mẫu mới) có người
+ * ký — `VARIANT_FIX_ADJUSTMENT_HREF`. Lời chặn áp cho CẢ lượt gán (mẫu cũ có thể đã bị xoá khỏi danh mục
+ * — khoá ngoại SET NULL — trong khi phiếu vẫn còn).
+ */
+export const VARIANT_FIX_ADJUSTMENT_HREF = "/inventory/receipts";
+
+export type VariantIdentifyKind = "ASSIGN" | "CHANGE" | "SAME";
+
+export type VariantIdentifyCheck =
+  | { ok: true; kind: VariantIdentifyKind; note: string }
+  | { error: string; code: "NO_VARIANT" | "STOCK_RECEIVED" | "NEEDS_REASON" | "STALE" };
+
+/** Món đã có hàng vào tồn chưa — MỘT định nghĩa cho màn hình (ẩn nút) và máy chủ (chặn). */
+export function unidentifiedStockReceived(input: { stockReceiptId: string | null; reworkRestockRows: number }): boolean {
+  return Boolean(input.stockReceiptId) || input.reworkRestockRows > 0;
+}
+
+/**
+ * LUẬT DUY NHẤT CHO MỘT LƯỢT XÁC ĐỊNH MẪU MÃ — hàm THUẦN.
+ *
+ * `expectedCurrent` = mẫu người bấm NHÌN THẤY trên màn hình lúc mở biểu mẫu (`undefined` = không khai).
+ * Khác mẫu đang lưu ⇒ từ chối: người khác vừa đổi, và "đổi" của người này thực ra là đè lên một lượt
+ * xác nhận họ chưa từng đọc.
+ *
+ * Thứ tự: thiếu mẫu → dữ liệu cũ → chọn lại đúng mẫu → đã có hàng vào tồn → thiếu lý do khi đổi. Chặn
+ * vì tồn TRƯỚC lý do: đã không đổi được thì gõ lý do cũng vô ích — nói điều đó trước.
+ */
+export function checkVariantIdentify(input: {
+  current: string | null;
+  next: string;
+  stockReceived: boolean;
+  note: string;
+  expectedCurrent?: string | null;
+}): VariantIdentifyCheck {
+  const next = input.next.trim();
+  const note = input.note.trim();
+  if (!next) return { code: "NO_VARIANT", error: "Chưa chọn mẫu mã — chọn mã hàng, màu rồi size của món đang cầm trên tay." };
+  if (input.expectedCurrent !== undefined && (input.expectedCurrent ?? null) !== input.current) {
+    return { code: "STALE", error: "Mẫu mã của món này vừa được người khác xác nhận / đổi — tải lại trang để đọc lượt xác nhận mới trước khi đổi." };
+  }
+  if (input.current === next) return { ok: true, kind: "SAME", note };
+  if (input.stockReceived) {
+    return {
+      code: "STOCK_RECEIVED",
+      error: `Món này đã có hàng vào tồn — dòng phiếu kho đang mang mẫu mã ${input.current ? "cũ" : "đã chọn trước đó"}, nên đổi mẫu ở đây là làm sổ tồn và món hàng nói hai điều khác nhau. Sửa bằng một phiếu ĐIỀU CHỈNH kho (trừ mẫu cũ, cộng mẫu đúng) tại ${VARIANT_FIX_ADJUSTMENT_HREF}.`,
+    };
+  }
+  if (input.current && !note) return { code: "NEEDS_REASON", error: "Đổi mẫu mã đã xác nhận thì bắt buộc ghi lý do (ví dụ: đọc lại tem mác thì là size L, không phải M)." };
+  return { ok: true, kind: input.current ? "CHANGE" : "ASSIGN", note };
+}
+
+/**
  * TIỀN TỐ MÃ NỘI BỘ. Đọc được bằng mắt, gõ lại được, và bắn được bằng máy quét sau khi in nhãn tạm.
  * Dạng: `UR-YYYYMMDD-NNNNN` (số thứ tự trong NGÀY, không phải toàn cục — người kho đọc "số 37 hôm
  * nay" dễ hơn "số 128.431").
