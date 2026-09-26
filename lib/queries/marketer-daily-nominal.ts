@@ -766,6 +766,20 @@ async function getMarketerDailyNominalUncached(period: Period): Promise<Marketer
       `Bảng chi quảng cáo chưa khai chiến dịch nào cho ${unmapped.map((m) => m.label).join(" · ")}, nên Chi QC và lợi nhuận của họ là CHƯA BIẾT (—), KHÔNG phải 0 — tiền thật của họ đang nằm ở cột "${MARKETING_UNATTRIBUTED_LABEL}". Ghép chiến dịch với marketer ở trang Quảng cáo thì cột này mới có số.`,
     );
   }
+  /*
+    TIỀN Ở CỘT "CHƯA QUY KẾT" PHẢI NÊU ĐƯỢC TÊN CHIẾN DỊCH. Đo production 26/09/2026: 16 chiến dịch
+    `TRINH_…` (19.980.485 ₫ tháng 9) nằm ở cột ấy chỉ vì T Trinh chưa có bí danh — một con số
+    trong cột "Chưa quy kết" không nói ai phải đi khai gì. Cùng lời với bảng lọc MKTer.
+  */
+  const chuaGan = spend.unassignedCampaigns;
+  const tienChuaGan = chuaGan.reduce((t, c) => t + c.spend, 0);
+  if (tienChuaGan > 0) {
+    const ten = chuaGan.slice(0, 4).map((c) => `“${c.campaign || c.campaignId}”`).join(" · ");
+    const them = chuaGan.length > 4 ? ` và ${chuaGan.length - 4} chiến dịch nữa` : "";
+    warnings.push(
+      `${tienChuaGan.toLocaleString("vi-VN")} ₫ chi QC trong kỳ đang ở cột "${MARKETING_UNATTRIBUTED_LABEL}" vì chiến dịch CHƯA GÁN MKTer nào: ${ten}${them}. Gán bằng bí danh ở Lương › Nhân sự (bí danh xuất hiện trong tên chiến dịch), hoặc ghép tay ở Chi phí › Ghép chiến dịch — lưu xong là áp lại cho cả các ngày cũ.`,
+    );
+  }
   const lateDays = days.filter((d) => !d.spendKnown && d.total.orders > 0);
   if (lateDays.length) {
     warnings.push(`Nguồn chi quảng cáo mới đồng bộ tới ngày ${spend.observedThrough ?? "—"}. ${lateDays.length} ngày sau đó có đơn nhưng CHƯA BIẾT chi bao nhiêu, nên lợi nhuận của những ngày ấy để trống thay vì chốt một con số; hàng tổng chỉ cộng lợi nhuận của những ngày đã có số chi.`);
@@ -1042,7 +1056,7 @@ export async function getNominalDaily(period: Period, basis: TimeBasis, filter: 
   }
   if (f.productId && nominal.unmatchedAdSpend > 0) {
     warnings.push(
-      `${nominal.unmatchedAdSpend.toLocaleString("vi-VN")} ₫ chi quảng cáo trong kỳ chưa ghép được mã hàng nào — không nằm trong Chi QC của mã này (Báo cáo lợi nhuận cũng trừ khoản ấy ở dòng tổng, không rải vào mã nào).`,
+      `${nominal.unmatchedAdSpend.toLocaleString("vi-VN")} ₫ chi quảng cáo trong kỳ là CHI PHÍ TEST (tên có chữ TEST, khai tay là test, hoặc tên chưa có mã hàng) — không nằm trong Chi QC của mã này; Báo cáo lợi nhuận trừ khoản ấy ở dòng tổng. Đặt mã hàng vào tên chiến dịch thì lượt đồng bộ kế tiếp tự ghép lại cho mọi ngày.`,
     );
   }
   if (days.some((d) => d.day === NO_DAY)) {
