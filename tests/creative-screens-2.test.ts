@@ -193,12 +193,13 @@ function testSourceLevel() {
     }
   }
 
-  // Bốn tab mới có mặt ở cả thanh tab lẫn trang, và "Duyệt lô" đứng đầu.
+  // Thanh tab = QUY TRÌNH (chủ shop 26/09/2026 bỏ lô hằng ngày, thiết kế lại luồng): ① Tạo ảnh → ② Duyệt ảnh → ③ Hàng đợi &
+  // Đăng → ④ Đang chạy → ⑤ Mẫu thắng, đúng thứ tự làm việc; tab phụ đứng sau. Mọi tab có mặt ở cả thanh tab lẫn trang.
   const tabs = doc(`${DIR}/tabs.tsx`);
   const page = doc(`${DIR}/page.tsx`);
   const thuTu = [...tabs.matchAll(/\{ value: "([a-z-]+)", label:/g)].map((m) => m[1]);
-  assert.equal(thuTu[0], "duyet", "Duyệt lô phải là tab đầu tiên");
-  for (const t of ["duyet", "dang-chay", "thu-vien", "hoc", "nguon", "cau-hinh"]) {
+  assert.deepEqual(thuTu.slice(0, 5), ["tao", "duyet", "dang", "dang-chay", "thu-vien"], "năm bước đầu theo đúng thứ tự quy trình");
+  for (const t of ["tao", "duyet", "dang", "dang-chay", "thu-vien", "hoc", "nguon", "cau-hinh", "thiet-ke"]) {
     assert.ok(thuTu.includes(t), `thanh tab thiếu ${t}`);
     assert.ok(page.includes(`"${t}"`), `page.tsx không nhận tab ${t}`);
   }

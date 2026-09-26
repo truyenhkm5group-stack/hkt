@@ -629,6 +629,27 @@ kết quả; ấn Đăng camp là camp được đăng ngay, và đăng camp đ�
 - Sửa lỗi kẹt: `manualTargetDay` nay bỏ qua MỌI lô hằng ngày đã đóng (duyệt / đăng / từ chối / hết hạn / hỏng) của các ngày tới —
   26/09 lô ngày mai bị TỪ CHỐI khiến "Đưa vào lô" báo "Lô 2026-09-27 đã ở trạng thái REJECTED". Không mở lại lô đã đóng.
 
+## 5k. Luồng tay 5 bước · bỏ lô hằng ngày · setup camp · mẫu quảng cáo động (chủ shop 26/09/2026, lần bốn)
+
+*"Thiết kế lại flow cho khoa học hơn, dễ quản lý và sử dụng hơn"* · chốt: **bỏ hẳn lô hằng ngày** · *"chọn TKQC, fanpage, mục
+tiêu, ngân sách, vị trí địa lý… như setup trên FB, mặc định theo lựa chọn dùng nhiều"* · chốt: **giữ trần ngân sách cũ**, TKQC +
+fanpage lấy từ dữ liệu **đã đồng bộ**.
+
+- **Thanh tab = quy trình:** ① Tạo ảnh (gen tay + Mẫu tự làm) → ② Duyệt ảnh (theo ngày) → ③ Hàng đợi & Đăng (+ camp đã đăng
+  gần đây) → ④ Đang chạy → ⑤ Mẫu thắng; tab phụ Thiết kế · Máy đã học gì · Nguồn ảnh · Cấu hình & luật. Mỗi bước mang số việc
+  chờ (`loadMediaCounts`); tab mặc định = bước sớm nhất có việc. Khoá tab cũ giữ nghĩa (`duyet` = ②, `?product=` mở ①).
+- **Bỏ lô hằng ngày** (`DAILY_BATCH_RETIRED`): lượt tick thôi dựng lô; chấm + tắt theo luật, vẽ nốt gen tay vẫn chạy; bài
+  "Đăng camp" đăng dở đi tiếp kể cả khi vòng tắt (`publishApprovedBatches` `includeLoop`). Mã dựng lô và kiểm thử còn nguyên.
+  "Mẫu tự làm" vào THẲNG hàng đợi (`addUploadedDraft`, lượt `UPLOAD`); nút "Đưa vào lô" bỏ. Lô cũ còn chờ duyệt hiện ở bước ③.
+- **Setup camp** (`lib/constants/campaign-setup.ts` + `applyCampaignSetup`): TKQC (xếp theo chi 30 ngày) · fanpage (xếp theo
+  đơn 30 ngày) · mục tiêu (Như quảng cáo mẫu / Tin nhắn / Tiếp cận — chỉ tổ hợp tham số đã rõ) · ngân sách ≤ trần cứng · vị trí
+  (như mẫu / toàn quốc / tỉnh-thành tìm qua Graph `adgeolocation`) · tuổi · giới tính. Lưu cùng bản nháp hàng đợi
+  (`campaign_setup`, migration `0150`) và nằm trong lô `INSTANT` (`plan.setup`) để lượt tick đi tiếp dùng đúng setup. Khác
+  TKQC của mẫu ⇒ bỏ tệp đối tượng tuỳ chỉnh; khác page ⇒ bỏ Instagram của page mẫu, đổi đối tượng quảng bá; đổi tuổi ⇒ tắt
+  Advantage+ đối tượng.
+- **Mẫu quảng cáo động** (PR #298): bài mẫu `asset_feed_spec` dạng ảnh đơn ⇒ dựng một `link_data` ảnh đơn theo nút / đường dẫn
+  / lời chào của mẫu; Đăng camp đọc và kiểm mẫu TRƯỚC khi ghi dòng nào (`templateShapeError`).
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |

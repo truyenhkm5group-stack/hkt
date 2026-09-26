@@ -1,4 +1,5 @@
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { CAMPAIGN_OBJECTIVES, parseCampaignSetup, type CampaignSetup } from "@/lib/constants/campaign-setup";
 import { schema, type Db } from "@/db";
 import { memo } from "@/lib/cache";
 import { CREATIVE_HARD_LIMITS, INSTANT_PUBLISH, PIXEL_SAFE_SOURCE_KINDS, estimateImageUsd, normalizeCreativeConfig, usdToVndRounded, type ManualGenImageStatus, type ManualGenKind } from "@/lib/constants/creative-loop";
@@ -6,7 +7,7 @@ import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { manualGenSpendToday } from "@/lib/creative/generate";
 import { resolveManualTargetDay } from "@/lib/creative/manual";
 import { instantPublishBlockers, parseManualDesignSpec } from "@/lib/creative/manual-gen";
-import { defaultNames, loadNamingContext, nextNameSeq, nextNameSeqOnDay, type DefaultNames } from "@/lib/creative/naming";
+import { agePart, defaultNames, genderPart, geoPart, loadNamingContext, nextNameSeq, nextNameSeqOnDay, readNamingTemplate, type DefaultNames } from "@/lib/creative/naming";
 import { batchWindow } from "@/lib/creative/schedule";
 import { loadDesignInputs } from "@/lib/queries/creative-design";
 import { env } from "@/lib/env";
@@ -51,6 +52,8 @@ export type ManualGenImageCard = {
   /** ISO — bài đang ở HÀNG ĐỢI ĐĂNG CAMP từ lúc này; `null` = không ở hàng đợi. */
   queuedAt: string | null;
   queuedByName: string;
+  /** Setup camp đã lưu cùng bản nháp. `null` = chưa chọn (hộp đăng điền mặc định dùng nhiều). */
+  campaignSetup: CampaignSetup | null;
 };
 
 type ImageRow = typeof schema.creativeManualGenImages.$inferSelect;
@@ -79,12 +82,14 @@ function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | nu
     adName: i.adName,
     queuedAt: i.status === "APPROVED" && i.queuedAt ? i.queuedAt.toISOString() : null,
     queuedByName: i.queuedByName,
+    campaignSetup: parseCampaignSetup(i.campaignSetup),
   };
 }
 
 export type ManualGenRunCard = {
   id: string;
-  kind: ManualGenKind;
+  /** `UPLOAD` = "Mẫu tự làm" người tải lên (vào thẳng hàng đợi). */
+  kind: ManualGenKind | "UPLOAD";
   /** Lượt `DESIGN`: tên các mã cảm hứng người đã chọn. */
   inspirationLabels: string[];
   createdAt: string;
@@ -132,6 +137,8 @@ export type ManualGenPanel = {
   runs: ManualGenRunCard[];
   /** Hàng đợi đăng camp — không theo ngày đang lọc. */
   queue: PublishQueueItem[];
+  /** Lựa chọn + mặc định cho khối Setup camp của hộp Đăng camp. */
+  setup: CampaignSetupOptions;
   sources: PixelSourceOption[];
   /** Mẫu cảm hứng, điểm cao trước. */
   inspirations: DesignInspirationOption[];
@@ -207,7 +214,7 @@ export async function listManualGenRuns(db: Db, limit = RUNS_PER_DAY, rate: numb
     const usd = priced.reduce((t, im) => t + Number(im.costUsd), 0);
     return {
       id: run.id,
-      kind: run.kind === "DESIGN" ? "DESIGN" : "MOCKUP",
+      kind: run.kind === "DESIGN" ? "DESIGN" : run.kind === "UPLOAD" ? "UPLOAD" : "MOCKUP",
       inspirationLabels: run.inspirationProductIds.map((x) => labelOf.get(x) ?? "Mã đã xoá"),
       createdAt: run.createdAt.toISOString(),
       createdByName: run.createdByName,
@@ -280,6 +287,77 @@ export async function listDesignInspirations(db: Db, now: Date): Promise<DesignI
   });
 }
 
+/** Một TKQC chọn được khi "Đăng camp" — tài khoản ĐÃ ĐỒNG BỘ chi tiêu vào ERP (`ad_spends`). `spend30dVnd` để xếp hạng. */
+export type AdAccountOption = { id: string; name: string; spend30dVnd: number };
+/** Một fanpage chọn được — sổ fanpage (`fanpages`, khoá = id page Facebook). `orders30d` để xếp hạng. */
+export type FanpageOption = { id: string; name: string; orders30d: number };
+
+export type CampaignSetupOptions = {
+  accounts: AdAccountOption[];
+  pages: FanpageOption[];
+  /** Mặc định = lựa chọn DÙNG NHIỀU: TKQC chi nhiều nhất 30 ngày · page ra nhiều đơn nhất 30 ngày · mục tiêu / vị trí / tuổi / giới tính như quảng cáo mẫu. */
+  defaults: CampaignSetup;
+  /** TKQC / fanpage của CẤU HÌNH — tên theo khuôn điền sẵn dựng với hai cái này (hộp soạn bài thay khi người chọn cái khác). */
+  configAccountId: string;
+  configPageId: string;
+  /** Quảng cáo mẫu đang nhắm gì (đọc từ bản đệm cài đặt nhóm mẫu) — để ô "như mẫu" nói ra cụ thể. `null` = chưa đọc được. */
+  template: { geo: string; age: string; gender: string; optimizationGoal: string | null } | null;
+};
+
+/**
+ * TKQC đã đồng bộ, CHI NHIỀU NHẤT 30 ngày trước (chủ shop 26/09/2026: "dùng các TKQC và fanpage sync được", mặc định theo
+ * lựa chọn dùng nhiều). Tài khoản của cấu hình luôn có mặt (kể cả khi 30 ngày chưa chi). Dòng đã loại (`excluded`) không tính.
+ */
+export async function listAdAccountOptions(db: Db, now: Date, configAccountId: string): Promise<AdAccountOption[]> {
+  const a = schema.adSpends;
+  const since = new Date(now.getTime() - 30 * 86_400_000);
+  const rows = await db
+    .select({ id: a.accountId, name: sql<string>`max(${a.accountName})`, spend: sql<number>`coalesce(sum(${a.spend}) filter (where ${a.spendDate} >= ${since}), 0)::bigint` })
+    .from(a)
+    .where(and(isNotNull(a.accountId), eq(a.excluded, false)))
+    .groupBy(a.accountId)
+    .orderBy(desc(sql`3`));
+  const out = rows.filter((r) => r.id).map((r) => ({ id: String(r.id).replace(/^act_/, ""), name: r.name || String(r.id), spend30dVnd: Number(r.spend ?? 0) }));
+  const cfgId = configAccountId.replace(/^act_/, "");
+  if (cfgId && !out.some((x) => x.id === cfgId)) out.push({ id: cfgId, name: `TK ${cfgId} (cấu hình)`, spend30dVnd: 0 });
+  return out.sort((x, y) => y.spend30dVnd - x.spend30dVnd);
+}
+
+/** Fanpage trong sổ (đang bật), RA NHIỀU ĐƠN NHẤT 30 ngày trước. Fanpage của cấu hình luôn có mặt. */
+export async function listFanpageOptions(db: Db, now: Date, configPageId: string): Promise<FanpageOption[]> {
+  const f = schema.fanpages;
+  const o = schema.orders;
+  const since = new Date(now.getTime() - 30 * 86_400_000);
+  const counts = db
+    .select({ pageId: o.pageId, n: sql<number>`count(*)::int`.as("n") })
+    .from(o)
+    .where(and(isNotNull(o.pageId), gte(o.insertedAt, since)))
+    .groupBy(o.pageId)
+    .as("c");
+  const rows = await db
+    .select({ id: f.externalPageId, name: f.name, alias: f.alias, n: sql<number>`coalesce(${counts.n}, 0)::int` })
+    .from(f)
+    .leftJoin(counts, eq(counts.pageId, f.externalPageId))
+    .where(eq(f.active, true));
+  const out = rows.map((r) => ({ id: r.id, name: r.alias || r.name || r.id, orders30d: Number(r.n ?? 0) }));
+  if (configPageId && !out.some((x) => x.id === configPageId)) out.push({ id: configPageId, name: `Page ${configPageId} (cấu hình)`, orders30d: 0 });
+  return out.sort((x, y) => y.orders30d - x.orders30d || x.name.localeCompare(y.name));
+}
+
+/** Lựa chọn + mặc định cho khối "Setup camp" của hộp Đăng camp. */
+export async function loadCampaignSetupOptions(db: Db, now: Date, cfg: { adAccountId: string; pageId: string; budgetPerVariantVnd: number }): Promise<CampaignSetupOptions> {
+  const [accounts, pages, tpl] = await Promise.all([listAdAccountOptions(db, now, cfg.adAccountId), listFanpageOptions(db, now, cfg.pageId), readNamingTemplate(db)]);
+  const t = tpl?.targeting ?? null;
+  return {
+    accounts,
+    pages,
+    configAccountId: cfg.adAccountId.replace(/^act_/, ""),
+    configPageId: cfg.pageId,
+    defaults: { adAccountId: accounts[0]?.id ?? cfg.adAccountId, pageId: pages[0]?.id ?? cfg.pageId, objective: CAMPAIGN_OBJECTIVES[0], budgetVnd: cfg.budgetPerVariantVnd, geo: null, ageMin: null, ageMax: null, gender: null },
+    template: tpl && t ? { geo: geoPart(t).text, age: agePart(t).text, gender: genderPart(t).text, optimizationGoal: tpl.optimizationGoal } : null,
+  };
+}
+
 /** Một bài ở HÀNG ĐỢI ĐĂNG CAMP: thẻ ảnh + nhãn lượt gen sinh ra nó (để người nhận ra bài). */
 export type PublishQueueItem = { img: ManualGenImageCard; runLabel: string; runCreatedAt: string };
 
@@ -307,6 +385,30 @@ export async function listPublishQueue(db: Db, rate: number = env.facebook.usdTo
     runLabel: r.run.kind === "DESIGN" ? "Thiết kế mới" : (r.productName ?? "Mã đã xoá"),
     runCreatedAt: r.run.createdAt.toISOString(),
   }));
+}
+
+/** Số việc đang chờ ở từng bước của Thư viện Media — cho thanh tab và tab mặc định. */
+export type MediaCounts = { drawing: number; review: number; approvedUnqueued: number; queue: number; live: number };
+
+/**
+ * Đếm việc đang chờ: ảnh đang vẽ · ảnh chờ duyệt · ảnh đã duyệt chưa soạn vào hàng đợi · bài trong hàng đợi · mẫu đang chạy.
+ * Chỉ đếm, không đọc ảnh — chạy mỗi lần mở trang.
+ */
+export async function loadMediaCounts(db: Db): Promise<MediaCounts> {
+  const g = schema.creativeManualGenImages;
+  const v = schema.creativeVariants;
+  const [[a], [b]] = await Promise.all([
+    db
+      .select({
+        drawing: sql<number>`count(*) filter (where ${g.status} in ('PLANNED', 'DRAWING'))::int`,
+        review: sql<number>`count(*) filter (where ${g.status} = 'GENERATED')::int`,
+        approvedUnqueued: sql<number>`count(*) filter (where ${g.status} = 'APPROVED' and ${g.queuedAt} is null)::int`,
+        queue: sql<number>`count(*) filter (where ${g.status} = 'APPROVED' and ${g.queuedAt} is not null)::int`,
+      })
+      .from(g),
+    db.select({ live: sql<number>`count(*)::int` }).from(v).where(eq(v.status, "LIVE")),
+  ]);
+  return { drawing: Number(a?.drawing ?? 0), review: Number(a?.review ?? 0), approvedUnqueued: Number(a?.approvedUnqueued ?? 0), queue: Number(a?.queue ?? 0), live: Number(b?.live ?? 0) };
 }
 
 /** Một ngày CÓ kết quả ở tab "Duyệt mẫu": số lượt gen tay · số ảnh đã vẽ · số lô chạy ngày ấy. */
@@ -346,7 +448,7 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
   const B = schema.creativeBatches;
   const [batch] = await db.select().from(B).where(and(eq(B.batchDay, targetDay), eq(B.kind, "LOOP"))).limit(1);
   const namingCfg = batch ? normalizeCreativeConfig(batch.configSnapshot).config : config;
-  const [runs, queue, sources, inspirations, today, ctx, predictedSeq, pageName, blockers] = await Promise.all([
+  const [runs, queue, sources, inspirations, today, ctx, predictedSeq, pageName, blockers, setup] = await Promise.all([
     listManualGenRuns(db, RUNS_PER_DAY, rate, day),
     listPublishQueue(db, rate),
     listPixelSafeSourceOptions(db),
@@ -357,6 +459,7 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
     batch ? nextNameSeq(db, batch.id) : Promise.resolve(1),
     fanpageDisplayName(db, namingCfg.pageId),
     instantPublishBlockers(db, config, vnDay(now)),
+    loadCampaignSetupOptions(db, now, config),
   ]);
   const unitUsd = estimateImageUsd(config.imageModel, config.imageQuality, config.imageSize);
   // Bài lẻ đứng tên theo cấu hình HIỆN TẠI (lô `INSTANT` chụp cấu hình lúc bấm), không theo ảnh chụp của lô hằng ngày.
@@ -364,6 +467,7 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
   return {
     runs,
     queue,
+    setup,
     sources,
     inspirations,
     pricing: {

@@ -3,9 +3,6 @@ import { CalendarClock, History, ShieldAlert } from "lucide-react";
 import { ApproveBatchButton, RejectBatchButton, RejectVariantButton } from "@/app/(dashboard)/marketing/creatives/batch-actions";
 import { Countdown, ExpandText } from "@/app/(dashboard)/marketing/creatives/creative-bits";
 import { EditCopyButton } from "@/app/(dashboard)/marketing/creatives/copy-editor";
-import { ManualForm } from "@/app/(dashboard)/marketing/creatives/manual-form";
-import { ManualGenPanel } from "@/app/(dashboard)/marketing/creatives/manual-gen-panel";
-import { ReviewDayFilter } from "@/app/(dashboard)/marketing/creatives/review-day-filter";
 import { EditNamesButton } from "@/app/(dashboard)/marketing/creatives/names-editor";
 import { VariantSelectCheckbox, VariantSelectionBar, VariantSelectionProvider } from "@/app/(dashboard)/marketing/creatives/variant-select";
 import { AdPreview, DnaChips, GeneChips, ModeChip, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
@@ -17,7 +14,6 @@ import {
   CREATIVE_VERDICT_LABEL,
   CREATIVE_WRITE_ACTION_LABEL,
   PUBLISH_REQUIRED_FIELDS,
-  REVIEW_DAY,
   VARIANT_STATUSES,
   VARIANT_STATUS_LABEL,
   type BatchStatus,
@@ -26,13 +22,10 @@ import {
 } from "@/lib/constants/creative-loop";
 import { CAPTION_FALLBACK_PREFIX } from "@/lib/creative/caption";
 import { describeRule } from "@/lib/creative/judge";
-import { publishOrder, resolveManualTargetDay } from "@/lib/creative/manual";
-import { batchWindow } from "@/lib/creative/schedule";
-import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
+import { publishOrder } from "@/lib/creative/manual";
 import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
 import { formatDate, formatDateTime, formatNumber, formatVND, vnShortStamp } from "@/lib/format";
-import { fanpageDisplayName, getBatchDetail, listRecentBatches, readCurrentCreativeConfig, type BatchDetail, type BatchSummary, type PendingBatch, type VariantCard } from "@/lib/queries/creative-loop";
-import { listReviewDays } from "@/lib/queries/creative-manual-gen";
+import { fanpageDisplayName, getBatchDetail, listRecentBatches, type BatchDetail, type BatchSummary, type PendingBatch, type VariantCard } from "@/lib/queries/creative-loop";
 import { cn } from "@/lib/utils";
 
 /**
@@ -328,20 +321,20 @@ function PendingBlock({ pending, now, canApprove, canEdit, pageName }: { pending
   );
 }
 
-function HistoryTable({ rows, openId, day, isToday }: { rows: BatchSummary[]; openId: string | null; day: string; isToday: boolean }) {
+function HistoryTable({ rows, openId }: { rows: BatchSummary[]; openId: string | null }) {
   return (
     <SectionCard
       title={
         <span className="flex items-center gap-1.5">
-          <History className="size-4" /> Lịch sử lô — {isToday ? "hôm nay" : `ngày ${formatDate(day)}`}
+          <History className="size-4" /> Camp đã đăng gần đây
         </span>
       }
-      description="Lô hằng ngày và các bài Đăng camp có NGÀY CHẠY là ngày đang lọc. Bấm một lô để xem máy đã định làm gì với Facebook và cái gì chặn nó."
+      description="Mỗi dòng là một lần Đăng camp (nhãn Đăng lẻ) hoặc một lô cũ, mới trước. Bấm Xem chi tiết để xem máy đã làm gì với Facebook và cái gì chặn nó."
       padded={false}
     >
       {rows.length === 0 ? (
         <div className="p-5">
-          <EmptyState title={isToday ? "Hôm nay chưa có lô nào chạy" : `Không có lô nào chạy ngày ${formatDate(day)}`} description="Chọn ngày khác ở thanh “Kết quả ngày” phía trên để xem lô của ngày ấy." />
+          <EmptyState title="Chưa đăng camp nào" description="Bài đăng từ hàng đợi sẽ hiện ở đây kèm trạng thái và sổ ghi Facebook." />
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -380,7 +373,7 @@ function HistoryTable({ rows, openId, day, isToday }: { rows: BatchSummary[]; op
                     </span>
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <Link href={`/marketing/creatives?tab=duyet&lo=${encodeURIComponent(r.id)}#chi-tiet-lo`} className="whitespace-nowrap text-[12px] font-medium underline-offset-2 hover:underline">
+                    <Link href={`/marketing/creatives?tab=dang&lo=${encodeURIComponent(r.id)}#chi-tiet-lo`} className="whitespace-nowrap text-[12px] font-medium underline-offset-2 hover:underline">
                       {openId === r.id ? "Đang xem" : "Xem chi tiết"}
                     </Link>
                   </td>
@@ -498,77 +491,25 @@ function BatchDetailBlock({ d }: { d: BatchDetail }) {
   );
 }
 
-export async function ApproveTab({
-  pending,
-  batchId,
-  canApprove,
-  canEdit,
-  preselectProductId = null,
-  day,
-  today,
-}: {
-  pending: PendingBatch | null;
-  batchId: string | null;
-  canApprove: boolean;
-  canEdit: boolean;
-  /** `?product=<id>` (đề xuất đẩy tồn, Agent X): mã được CHỌN SẴN ở khối Gen ảnh bằng tay — máy không tự vẽ. */
-  preselectProductId?: string | null;
-  /** Ngày đang lọc (`?ngay=`, giờ VN) — "Kết quả gen tay" và "Lịch sử lô" chỉ hiện ngày này. */
-  day: string;
-  today: string;
-}) {
+/**
+ * KHỐI "ĐÃ ĐĂNG GẦN ĐÂY" của bước ③ Hàng đợi & Đăng (chủ shop 26/09/2026 bỏ lô hằng ngày): các camp đã đăng (lô `INSTANT`)
+ * và lô cũ, mới trước; bấm một dòng để xem máy đã làm gì với Facebook và cái gì chặn nó. Lô hằng ngày CŨ còn đang chờ duyệt
+ * (dựng trước khi bỏ luồng lô) vẫn hiện ở đầu để người xử lý nốt — không lô mới nào được dựng nữa.
+ */
+export async function PostedCampsBlock({ pending, batchId, canApprove, canEdit }: { pending: PendingBatch | null; batchId: string | null; canApprove: boolean; canEdit: boolean }) {
   const db = await getDb();
   const now = new Date();
-  const [recent, detail, current, products, pageName, days] = await Promise.all([
-    listRecentBatches(db, 50, day),
+  const [recent, detail, pageName] = await Promise.all([
+    listRecentBatches(db, 30),
     batchId ? getBatchDetail(db, batchId, now) : Promise.resolve(null),
-    readCurrentCreativeConfig(db),
-    canEdit ? listCreativeProductOptions() : Promise.resolve([]),
-    // Fanpage theo cấu hình CHỤP của lô — đúng page sẽ đứng tên bài khi lô này đăng.
     pending ? fanpageDisplayName(db, pending.config.pageId) : Promise.resolve(null),
-    listReviewDays(db, today, REVIEW_DAY.stripDays),
   ]);
-  // Lô mà mẫu tự làm sẽ vào: lô gần nhất CÒN hạn duyệt — cùng hàm với đường ghi (`lib/creative/manual.ts`).
-  const manualDay = await resolveManualTargetDay(db, now, current.config);
-  const manualDeadline = batchWindow(manualDay, current.config).approvalDeadline;
-
   return (
     <div className="space-y-4">
-      <ReviewDayFilter day={day} today={today} days={days} />
-      {canEdit ? (
-        <SectionCard
-          title="Mẫu tự làm"
-          description={`Mẫu anh/chị tự vẽ (ChatGPT, Grok trên web…) vào lô ${manualDay} — hạn duyệt ${vnShortStamp(manualDeadline)}. Được đăng trước mẫu máy vẽ, và vẫn qua lượt duyệt lô.`}
-          actions={<ManualForm products={products} targetDay={manualDay} deadlineLabel={vnShortStamp(manualDeadline)} />}
-          padded={false}
-        >
-          <span className="sr-only">Tải mẫu tự làm vào lô gần nhất còn hạn duyệt</span>
-        </SectionCard>
-      ) : null}
-      {pending ? (
-        <PendingBlock pending={pending} now={now} canApprove={canApprove} canEdit={canEdit} pageName={pageName} />
-      ) : (
-        <SectionCard>
-          <EmptyState
-            icon={CalendarClock}
-            title="Không có lô nào chờ duyệt"
-            description={
-              current.config.enabled
-                ? `Máy dựng lô cho ngày mai lúc ${current.config.genHourVn}:00 (giờ Việt Nam) và báo khi lô sẵn sàng. Hạn duyệt là ${current.config.approvalLeadMinutes} phút trước giờ chạy ${current.config.startHourVn}:00.`
-                : "Vòng mẫu đang TẮT trong cấu hình — máy không dựng lô mới. Bật ở tab Cấu hình & luật."
-            }
-          />
-        </SectionCard>
-      )}
-
-      <div id="gen-tay" className="scroll-mt-4">
-        <ManualGenPanel canEdit={canEdit} canPublish={canEdit && canApprove} preselectProductId={preselectProductId} day={day} />
-      </div>
-
+      {pending ? <PendingBlock pending={pending} now={now} canApprove={canApprove} canEdit={canEdit} pageName={pageName} /> : null}
       {batchId && !detail ? <EmptyState title="Không tìm thấy lô" description="Lô trong đường dẫn không còn tồn tại." /> : null}
       {detail ? <BatchDetailBlock d={detail} /> : null}
-
-      <HistoryTable rows={recent} openId={batchId} day={day} isToday={day === today} />
+      <HistoryTable rows={recent} openId={batchId} />
     </div>
   );
 }

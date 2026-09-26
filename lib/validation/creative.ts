@@ -15,6 +15,7 @@ import {
   type CreativeLoopConfig,
 } from "@/lib/constants/creative-loop";
 import { IDEA_IMAGE_MAX_BASE64 } from "@/lib/constants/ideas";
+import { CAMPAIGN_GENDERS, CAMPAIGN_OBJECTIVES, CAMPAIGN_SETUP_LIMITS } from "@/lib/constants/campaign-setup";
 
 /**
  * ═══════════ VÒNG MẪU — LƯỢC ĐỒ ĐẦU VÀO CỦA HAI MÀN HÌNH (nguồn ảnh · cấu hình) ═══════════
@@ -208,6 +209,27 @@ export const manualGenPromoteSchema = z
   .strict();
 
 /**
+ * SETUP CAMP (TKQC · fanpage · mục tiêu · ngân sách · vị trí · tuổi · giới tính). `null` ở một ô = như quảng cáo mẫu.
+ * Trần ngân sách máy chủ kiểm lại theo trần cứng (`instantConfig`); ở đây chỉ chặn hình dạng.
+ */
+export const campaignSetupSchema = z
+  .object({
+    adAccountId: z.string().trim().min(1, "Chọn tài khoản quảng cáo").max(40),
+    pageId: z.string().trim().min(1, "Chọn fanpage").max(40),
+    objective: z.enum(CAMPAIGN_OBJECTIVES),
+    budgetVnd: z.number().int("Ngân sách là số nguyên").min(CAMPAIGN_SETUP_LIMITS.minBudgetVnd, `Ngân sách tối thiểu ${CAMPAIGN_SETUP_LIMITS.minBudgetVnd.toLocaleString("vi-VN")}đ`),
+    geo: z
+      .array(z.object({ key: z.string().trim().min(1).max(40), name: z.string().trim().max(120), type: z.enum(["region", "city"]) }).strict())
+      .max(CAMPAIGN_SETUP_LIMITS.maxGeo, `Chọn tối đa ${CAMPAIGN_SETUP_LIMITS.maxGeo} vị trí`)
+      .nullable(),
+    ageMin: z.number().int().min(CAMPAIGN_SETUP_LIMITS.minAge).max(CAMPAIGN_SETUP_LIMITS.maxAge).nullable(),
+    ageMax: z.number().int().min(CAMPAIGN_SETUP_LIMITS.minAge).max(CAMPAIGN_SETUP_LIMITS.maxAge).nullable(),
+    gender: z.enum(CAMPAIGN_GENDERS).nullable(),
+  })
+  .strict()
+  .refine((s) => s.ageMin === null || s.ageMax === null || s.ageMin <= s.ageMax, "Tuổi từ phải nhỏ hơn tuổi đến");
+
+/**
  * "Lưu" bài của một ảnh gen tay đã duyệt vào HÀNG ĐỢI ĐĂNG CAMP — cùng trần câu chữ / tên với "Đưa vào lô", nhưng
  * nội dung chính được để trống (bản nháp dở vẫn lưu được; lúc đăng mới bắt buộc).
  */
@@ -219,6 +241,7 @@ export const manualGenDraftSchema = z
     campaignName: nameField("chiến dịch"),
     adsetName: nameField("nhóm quảng cáo"),
     adName: nameField("quảng cáo"),
+    setup: campaignSetupSchema.nullable().optional(),
   })
   .strict();
 
@@ -228,6 +251,7 @@ export const manualGenDraftSchema = z
  */
 export const manualGenInstantSchema = manualGenPromoteSchema.extend({
   scheduleAt: z.string().datetime({ offset: true, message: "Giờ hẹn không hợp lệ" }).nullable().default(null),
+  setup: campaignSetupSchema.nullable().default(null),
 });
 
 /**

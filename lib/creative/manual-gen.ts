@@ -22,6 +22,8 @@ import {
   type ImageSize,
 } from "@/lib/constants/creative-loop";
 import type { AdsKillSwitchState } from "@/lib/constants/ads-kill-switch";
+import { CAMPAIGN_SETUP_LIMITS, type CampaignSetup } from "@/lib/constants/campaign-setup";
+import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest } from "@/lib/creative/approval";
 import { captionFromImage, type VariantCaptioner } from "@/lib/creative/caption";
@@ -667,7 +669,7 @@ export async function reviewManualGenImage(db: Db, input: { imageId: string; dec
 
 // ───────────────────────────── HÀNG ĐỢI ĐĂNG CAMP ─────────────────────────────
 
-export type DraftInput = { imageId: string; headline: string; primaryText: string; names: { campaign: string; adset: string; ad: string } };
+export type DraftInput = { imageId: string; headline: string; primaryText: string; names: { campaign: string; adset: string; ad: string }; setup?: CampaignSetup | null };
 
 export type DraftResult = { ok: true; queuedAt: Date } | { ok: false; error: string };
 
@@ -691,6 +693,7 @@ export async function saveManualGenDraft(db: Db, input: DraftInput, actor: Manua
       queuedAt: now,
       queuedByUserId: actor.id,
       queuedByName: actor.name,
+      ...(input.setup !== undefined ? { campaignSetup: input.setup as unknown as Record<string, unknown> | null } : {}),
       updatedAt: now,
     })
     .where(and(eq(g.id, input.imageId), eq(g.status, "APPROVED")))
@@ -710,6 +713,51 @@ export async function unqueueManualGenDraft(db: Db, imageId: string, now: Date):
     .where(and(eq(g.id, imageId), isNotNull(g.queuedAt)))
     .returning({ id: g.id });
   return rows.length ? { ok: true } : { ok: false, error: "Bài không còn ở hàng đợi — tải lại để xem." };
+}
+
+// ───────────────────────────── MẪU TỰ LÀM ⇒ HÀNG ĐỢI ─────────────────────────────
+
+export type UploadDraftInput = { productId: string; genes: Genes; headline: string; primaryText: string; note: string; imageBytes: Uint8Array };
+
+/**
+ * "MẪU TỰ LÀM" (ảnh người vẽ trên ChatGPT / Grok hay chụp tay) — chủ shop 26/09/2026 bỏ hẳn lô hằng ngày, nên mẫu tự làm
+ * không vào lô nữa mà vào THẲNG hàng đợi đăng camp: một lượt `UPLOAD` một ảnh, ảnh ở trạng thái ĐÃ DUYỆT (người tải lên
+ * chính là người đã chọn nó) kèm câu chữ + dấu hàng đợi. Từ đó đi đúng đường Soạn bài → Đăng camp như ảnh gen tay. Ảnh
+ * hỏng ⇒ dừng trước khi ghi dòng nào. Trả `{ ok: false }` cho lỗi nghiệp vụ — không ném.
+ */
+export async function addUploadedDraft(db: Db, input: UploadDraftInput, actor: ManualActor, now: Date): Promise<{ ok: true; genId: string; imageId: string } | { ok: false; error: string }> {
+  const product = await loadProductBrief(db, input.productId);
+  if (!product) return { ok: false, error: "Không tìm thấy mã hàng đã chọn — tải lại trang rồi chọn lại." };
+  let stored: Awaited<ReturnType<typeof storeCreativeImage>>;
+  try {
+    stored = await storeCreativeImage(db, input.imageBytes);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error && e.message ? e.message : "Không lưu được ảnh." };
+  }
+  const genId = crypto.randomUUID();
+  const imageRowId = crypto.randomUUID();
+  await db.transaction(async (tx) => {
+    await tx.insert(schema.creativeManualGens).values({ id: genId, kind: "UPLOAD", productId: input.productId, idea: input.note.slice(0, MANUAL_GEN.ideaMaxChars), requested: 1, model: "MANUAL", size: "", quality: "", note: "", createdByUserId: actor.id, createdByName: actor.name });
+    await tx.insert(schema.creativeManualGenImages).values({
+      id: imageRowId,
+      genId,
+      seq: 1,
+      genes: input.genes as Record<string, string>,
+      prompt: "",
+      imageId: stored.id,
+      status: "APPROVED",
+      drawnAt: now,
+      headline: input.headline,
+      primaryText: input.primaryText,
+      reviewedByUserId: actor.id,
+      reviewedByName: actor.name,
+      reviewedAt: now,
+      queuedAt: now,
+      queuedByUserId: actor.id,
+      queuedByName: actor.name,
+    });
+  });
+  return { ok: true, genId, imageId: imageRowId };
 }
 
 // ───────────────────────────── ĐƯA VÀO LÔ ─────────────────────────────
@@ -917,7 +965,27 @@ export async function instantPublishBlockers(db: Db, cfg: CreativeLoopConfig, ba
 /** Lỗi nghiệp vụ giữa giao dịch "Đăng camp" — ném để HUỶ giao dịch (không để lại lô rỗng), bắt lại thành câu cho người. */
 class InstantAbort extends Error {}
 
-export type InstantPublishInput = PromoteInput & { scheduleAt: Date | null };
+export type InstantPublishInput = PromoteInput & { scheduleAt: Date | null; setup?: CampaignSetup | null };
+
+/**
+ * Setup camp người chọn ⇒ cấu hình hiệu lực của MỘT bài lẻ: TKQC · fanpage · ngân sách thay cho cấu hình chung (lô
+ * `INSTANT` chụp đúng cấu hình này, nên digest, trần cam kết, tên theo khuôn đều theo nó). Ngân sách kẹp trong trần cứng
+ * (chủ shop 26/09/2026: GIỮ trần cũ). Sai hình dạng ⇒ câu lỗi. Hàm THUẦN.
+ */
+export function instantConfig(cfg: CreativeLoopConfig, setup: CampaignSetup | null | undefined): { ok: true; cfg: CreativeLoopConfig } | { ok: false; error: string } {
+  if (!setup) return { ok: true, cfg };
+  const acc = setup.adAccountId.replace(/^act_/, "");
+  if (!/^[0-9]+$/.test(acc)) return { ok: false, error: "Tài khoản quảng cáo đã chọn không hợp lệ." };
+  if (!/^[0-9]+$/.test(setup.pageId)) return { ok: false, error: "Fanpage đã chọn không hợp lệ." };
+  if (setup.budgetVnd < CAMPAIGN_SETUP_LIMITS.minBudgetVnd || setup.budgetVnd > CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd) {
+    return { ok: false, error: `Ngân sách phải trong ${CAMPAIGN_SETUP_LIMITS.minBudgetVnd.toLocaleString("vi-VN")}đ – ${CREATIVE_HARD_LIMITS.maxBudgetPerVariantVnd.toLocaleString("vi-VN")}đ (trần một camp).` };
+  }
+  const tuoi = [setup.ageMin, setup.ageMax].filter((x): x is number => x !== null);
+  if (tuoi.some((a) => a < CAMPAIGN_SETUP_LIMITS.minAge || a > CAMPAIGN_SETUP_LIMITS.maxAge)) return { ok: false, error: `Tuổi phải trong ${CAMPAIGN_SETUP_LIMITS.minAge}–${CAMPAIGN_SETUP_LIMITS.maxAge}.` };
+  if (setup.ageMin !== null && setup.ageMax !== null && setup.ageMin > setup.ageMax) return { ok: false, error: "Tuổi từ phải nhỏ hơn tuổi đến." };
+  if (setup.geo && setup.geo.length > CAMPAIGN_SETUP_LIMITS.maxGeo) return { ok: false, error: `Chọn tối đa ${CAMPAIGN_SETUP_LIMITS.maxGeo} vị trí.` };
+  return { ok: true, cfg: { ...cfg, adAccountId: acc, pageId: setup.pageId, budgetPerVariantVnd: setup.budgetVnd } };
+}
 
 /** `LIVE` = đã bật, chạy ngay · `SCHEDULED` = đã lên Facebook, chờ giờ hẹn · `PENDING` = đăng dở, lượt vòng mẫu đi tiếp tới giờ chạy · `FAILED`. */
 export type InstantOutcome = "LIVE" | "SCHEDULED" | "PENDING" | "FAILED";
@@ -937,9 +1005,13 @@ export type InstantPublishResult = (PromoteOk & { startAt: Date; endAt: Date; sc
  *     (bấm lại được), lô `FAILED` có lý do, mẫu gạt khỏi lô. Đã gửi được một phần ⇒ giữ nguyên để lượt vòng mẫu đi
  *     tiếp / người tìm tay — đúng tính chất 4 của `publish.ts`, không tự thử lại một lời gọi tạo.
  */
-export async function publishManualGenImageInstant(db: Db, input: InstantPublishInput, cfg: CreativeLoopConfig, actor: ManualActor, now: Date, deps: InstantPublishDeps = {}): Promise<InstantPublishResult> {
+export async function publishManualGenImageInstant(db: Db, input: InstantPublishInput, baseCfg: CreativeLoopConfig, actor: ManualActor, now: Date, deps: InstantPublishDeps = {}): Promise<InstantPublishResult> {
   const x = await readyImage(db, input.imageId);
   if ("ok" in x) return x;
+  const eff = instantConfig(baseCfg, input.setup);
+  if (!eff.ok) return eff;
+  const cfg = eff.cfg;
+  const setup = input.setup ?? null;
   const w = instantWindow(now, input.scheduleAt, cfg);
   if (!w.ok) return w;
   const blockers = await instantPublishBlockers(db, cfg, w.batchDay, deps);
@@ -949,7 +1021,8 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
   const writer = deps.writer ?? REAL_CREATIVE_WRITER;
   let shape: string | null;
   try {
-    shape = templateShapeError(await writer.readTemplateAd(cfg.templateAdId), cfg.pageId, true);
+    const tpl = await writer.readTemplateAd(cfg.templateAdId);
+    shape = templateShapeError(setup ? applyCampaignSetup(tpl, setup) : tpl, cfg.pageId, true);
   } catch (e) {
     shape = `không đọc được (${errText(e)})`;
   }
@@ -969,7 +1042,8 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
           startAt: w.startAt,
           endAt: w.endAt,
           approvalDeadline: w.startAt,
-          plan: { instant: true, scheduled: w.scheduled, manualGenImageId: input.imageId },
+          // Setup camp nằm trong lô: lượt đăng (và lượt tick đi tiếp nếu đăng dở) áp ĐÚNG setup người đã bấm.
+          plan: { instant: true, scheduled: w.scheduled, manualGenImageId: input.imageId, ...(setup ? { setup } : {}) },
           configSnapshot: cfg as unknown as Record<string, unknown>,
           ruleVersion: CREATIVE_RULE_VERSION,
         })

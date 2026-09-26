@@ -9,10 +9,12 @@ import { imageSpendToday, manualGenSpendToday } from "@/lib/creative/generate";
 import { storeCreativeImage } from "@/lib/creative/images";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { manualTargetDay } from "@/lib/creative/manual";
-import { drawManualGen, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
+import { addUploadedDraft, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
 import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, genderPart, geoPart, refreshNamingTemplate, saveVariantNamesCore, type NamingContext } from "@/lib/creative/naming";
 import { batchApprovalContent, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
 import { MESSENGER_DOC_LINK, buildObjectStorySpec } from "@/lib/creative/story-spec";
+import { applyCampaignSetup } from "@/lib/creative/campaign-setup";
+import { parseCampaignSetup, type CampaignSetup } from "@/lib/constants/campaign-setup";
 import { listRecentBatches } from "@/lib/queries/creative-loop";
 import { listManualGenRuns, listPublishQueue, listReviewDays, loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
 import { batchWindow } from "@/lib/creative/schedule";
@@ -106,6 +108,55 @@ export function testCreativeManualGenPure() {
   assert.ok(!dongQc({ call_to_action_types: ["SHOP_NOW"] }).ok, "nút web mà không có đường dẫn ⇒ từ chối");
   assert.ok(!dongQc({}).ok, "không khai nút ⇒ từ chối");
   assert.ok(!dongQc({ call_to_action_types: ["MESSAGE_PAGE"], videos: [{ video_id: "v" }] }).ok, "mẫu động chỉ có video ⇒ từ chối");
+
+  // ── SETUP CAMP áp lên quảng cáo mẫu (thuần) ──
+  const mau: TemplateAd = {
+    adId: "t",
+    campaignId: "c",
+    accountId: "act_111",
+    campaign: { objective: "OUTCOME_SALES", buyingType: "AUCTION", specialAdCategories: [], dailyBudgetMinor: null, lifetimeBudgetMinor: null },
+    adset: {
+      targeting: { geo_locations: { countries: ["VN"], location_types: ["home", "recent"] }, age_min: 18, age_max: 65, custom_audiences: [{ id: "ca1" }], targeting_automation: { advantage_audience: 1 } },
+      optimizationGoal: "OFFSITE_CONVERSIONS",
+      billingEvent: "IMPRESSIONS",
+      bidStrategy: "COST_CAP",
+      bidAmount: "5000",
+      promotedObject: { page_id: "pg-mau", pixel_id: "px" },
+      destinationType: "MESSENGER",
+      attributionSpec: null,
+    },
+    objectStorySpec: { page_id: "pg-mau", instagram_user_id: "ig-mau", link_data: { link: "x" } },
+    hasAssetFeed: false,
+  };
+  const goc: CampaignSetup = { adAccountId: "111", pageId: "pg-mau", objective: "TEMPLATE", budgetVnd: 100_000, geo: null, ageMin: null, ageMax: null, gender: null };
+  const nguyen = applyCampaignSetup(mau, goc);
+  assert.deepEqual(nguyen.adset, mau.adset, "setup toàn 'như mẫu' + cùng TKQC / page ⇒ nhóm giữ NGUYÊN");
+  assert.equal(nguyen.objectStorySpec?.instagram_user_id, "ig-mau", "cùng page ⇒ giữ Instagram");
+  assert.equal(mau.adset.targeting?.age_min, 18, "không sửa vào đối tượng mẫu của nơi gọi");
+  const tn = applyCampaignSetup(mau, { ...goc, adAccountId: "222", pageId: "pg-moi", objective: "MESSAGES", geo: [{ key: "2566", name: "Hà Nội", type: "region" }, { key: "1569", name: "Đà Nẵng", type: "city" }], ageMin: 22, ageMax: 40, gender: "FEMALE" });
+  assert.equal(tn.campaign?.objective, "OUTCOME_ENGAGEMENT", "Tin nhắn ⇒ mục tiêu chiến dịch ENGAGEMENT");
+  assert.deepEqual([tn.adset.optimizationGoal, tn.adset.billingEvent, tn.adset.destinationType, tn.adset.bidStrategy, tn.adset.bidAmount], ["CONVERSATIONS", "IMPRESSIONS", "MESSENGER", "LOWEST_COST_WITHOUT_CAP", null], "bộ tham số Click-to-Messenger chuẩn — không trộn với giá thầu của mẫu");
+  assert.deepEqual(tn.adset.promotedObject, { page_id: "pg-moi" }, "tin nhắn về ĐÚNG fanpage đã chọn");
+  const tg = tn.adset.targeting as Record<string, unknown>;
+  assert.deepEqual(tg.geo_locations, { location_types: ["home", "recent"], regions: [{ key: "2566" }], cities: [{ key: "1569" }] }, "vị trí đúng khoá Facebook, giữ kiểu vị trí của mẫu");
+  assert.deepEqual([tg.age_min, tg.age_max, tg.genders], [22, 40, [2]]);
+  assert.deepEqual(tg.targeting_automation, { advantage_audience: 0 }, "đổi tuổi ⇒ tắt Advantage+ để tuổi là ràng buộc");
+  assert.ok(!("custom_audiences" in tg), "khác TKQC ⇒ bỏ tệp đối tượng tuỳ chỉnh của tài khoản mẫu");
+  assert.ok(!("instagram_user_id" in (tn.objectStorySpec ?? {})), "khác page ⇒ bỏ Instagram của page mẫu");
+  const toanQuoc = applyCampaignSetup(mau, { ...goc, geo: [], gender: "ALL", objective: "REACH" });
+  assert.deepEqual((toanQuoc.adset.targeting as Record<string, unknown>).geo_locations, { location_types: ["home", "recent"], countries: ["VN"] }, "geo [] = toàn quốc");
+  assert.deepEqual([toanQuoc.campaign?.objective, toanQuoc.adset.optimizationGoal, toanQuoc.adset.destinationType], ["OUTCOME_AWARENESS", "REACH", null]);
+  assert.deepEqual(applyCampaignSetup(mau, { ...goc, pageId: "pg-2" }).adset.promotedObject, { page_id: "pg-2", pixel_id: "px" }, "như mẫu + đổi page ⇒ chỉ đổi page của đối tượng quảng bá");
+  // Cấu hình hiệu lực của bài lẻ + đọc lại setup.
+  const ic = instantConfig(cfgOf(), { ...goc, adAccountId: "act_333", pageId: "444", budgetVnd: 150_000 });
+  assert.ok(ic.ok && ic.cfg.adAccountId === "333" && ic.cfg.pageId === "444" && ic.cfg.budgetPerVariantVnd === 150_000, "setup ⇒ TKQC / page / ngân sách của lô");
+  assert.ok(!instantConfig(cfgOf(), { ...goc, budgetVnd: 250_000 }).ok, "ngân sách vượt trần cứng ⇒ từ chối (chủ shop giữ trần cũ)");
+  assert.ok(!instantConfig(cfgOf(), { ...goc, ageMin: 40, ageMax: 30 }).ok);
+  assert.ok(!instantConfig(cfgOf(), { ...goc, adAccountId: "abc" }).ok);
+  assert.ok(instantConfig(cfgOf(), null).ok, "không setup ⇒ cấu hình chung");
+  const khuHoi: CampaignSetup = { ...goc, geo: [{ key: "1", name: "A", type: "city" }], ageMin: 20, gender: "MALE" };
+  assert.deepEqual(parseCampaignSetup(JSON.parse(JSON.stringify(khuHoi))), khuHoi, "setup đi qua JSON (lô / hàng đợi) đọc lại nguyên vẹn");
+  assert.equal(parseCampaignSetup({ adAccountId: "1" }), null, "setup hỏng ⇒ null (đăng như mẫu)");
 
   // ── Bộ lọc ngày của tab "Duyệt mẫu" (thuần): vắng / hỏng / ngày không có trên lịch ⇒ HÔM NAY ──
   assert.equal(parseReviewDay(null, "2031-05-05"), "2031-05-05");
@@ -428,6 +479,8 @@ export async function testCreativeManualGenDb(db: Db) {
     let readNo = 0;
     let tplNow: TemplateAd = tplPub;
     const specsSent: Record<string, unknown>[] = [];
+    const campaignsSent: { account: string; objective: string | null }[] = [];
+    const adsetsSent: { account: string; template: TemplateAd["adset"]; budget: number }[] = [];
     const fbGia: CreativeWriter = {
       readTemplateAd: async () => {
         fbCalls.push("readTemplateAd");
@@ -441,8 +494,13 @@ export async function testCreativeManualGenDb(db: Db) {
         specsSent.push(i.objectStorySpec);
         return { id: `cr-${++n}`, effectiveObjectStoryId: `post-${n}` };
       },
-      createTestCampaign: async () => (fbCalls.push("createTestCampaign"), `camp-${++n}`),
-      createTestAdset: async (_a, i) => {
+      createTestCampaign: async (acc, i) => {
+        fbCalls.push("createTestCampaign");
+        campaignsSent.push({ account: acc, objective: i.template.objective });
+        return `camp-${++n}`;
+      },
+      createTestAdset: async (acc, i) => {
+        adsetsSent.push({ account: acc, template: i.template, budget: i.lifetimeBudgetMinor });
         fbCalls.push("createTestAdset");
         adsetTimes.push({ start: i.startTime, end: i.endTime, name: i.name });
         return `adset-${++n}`;
@@ -595,6 +653,46 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.deepEqual(ld.call_to_action, { type: "MESSAGE_PAGE", value: { app_destination: "MESSENGER" } }, "nút Gửi tin nhắn đúng như mẫu");
     assert.equal(ld.page_welcome_message, "chào bạn", "lời chào tin nhắn của mẫu chép nguyên");
     tplNow = tplPub;
+
+    // (f6) ĐĂNG CAMP VỚI SETUP (TKQC · page · mục tiêu · ngân sách · vị trí · tuổi · giới tính) ⇒ lời gọi Facebook mang đúng setup.
+    const s6 = await startManualGen(db, { productPhotoSourceId: `${P}photo`, ownAdSourceId: null, idea: "", count: 1 }, cfgKhongTran, actor);
+    assert.ok(s6.ok);
+    await drawManualGen(db, { genId: s6.ok ? s6.genId : "", imageClient });
+    const [anh6] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, s6.ok ? s6.genId : ""));
+    await reviewManualGenImage(db, { imageId: anh6.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
+    const setup6: CampaignSetup = { adAccountId: "8880009", pageId: "9990002", objective: "MESSAGES", budgetVnd: 150_000, geo: [{ key: "2566", name: "Hà Nội", type: "region" }], ageMin: 22, ageMax: 40, gender: "FEMALE" };
+    // Lưu setup cùng bản nháp ⇒ hàng đợi đọc lại đúng setup.
+    assert.ok((await saveManualGenDraft(db, { imageId: anh6.id, headline: "H6", primaryText: "Nội dung 6", names: { campaign: "", adset: "", ad: "" }, setup: setup6 }, actor, new Date())).ok);
+    assert.deepEqual((await trongHang(anh6.id))?.img.campaignSetup, setup6, "setup camp lưu cùng bài ở hàng đợi");
+    campaignsSent.length = 0;
+    adsetsSent.length = 0;
+    specsSent.length = 0;
+    const c6 = await publishManualGenImageInstant(db, { ...camInput(anh6.id, null), setup: setup6 }, cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    assert.ok(c6.ok && c6.outcome === "LIVE", c6.ok ? c6.detail : c6.error);
+    if (c6.ok) instantIds.push(c6.batchId);
+    assert.deepEqual(campaignsSent, [{ account: "8880009", objective: "OUTCOME_ENGAGEMENT" }], "chiến dịch tạo trong TKQC đã chọn, mục tiêu Tin nhắn");
+    assert.equal(adsetsSent[0]?.account, "8880009");
+    const tg6 = adsetsSent[0]?.template.targeting as Record<string, unknown>;
+    assert.deepEqual([tg6?.age_min, tg6?.age_max, tg6?.genders], [22, 40, [2]], "tuổi / giới tính theo setup");
+    assert.deepEqual((tg6?.geo_locations as Record<string, unknown>)?.regions, [{ key: "2566" }], "vị trí theo setup");
+    assert.deepEqual(adsetsSent[0]?.template.promotedObject, { page_id: "9990002" }, "tin nhắn về fanpage đã chọn");
+    assert.equal(specsSent[0]?.page_id, "9990002", "bài đứng tên fanpage đã chọn");
+    const [b6] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.id, c6.ok ? c6.batchId : ""));
+    assert.deepEqual(parseCampaignSetup((b6.plan as Record<string, unknown>).setup), setup6, "setup nằm trong lô — lượt tick đi tiếp dùng đúng setup");
+    assert.equal((b6.configSnapshot as Record<string, unknown>).budgetPerVariantVnd, 150_000, "ngân sách theo setup");
+    const [v6] = await db.select().from(schema.creativeVariants).where(eq(schema.creativeVariants.id, c6.ok ? c6.variantId : ""));
+    assert.equal(v6.committedBudgetVnd, 150_000);
+    const vuot = await publishManualGenImageInstant(db, { ...camInput(anh6.id, null), setup: { ...setup6, budgetVnd: 900_000 } }, cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    assert.ok(!vuot.ok, "ngân sách vượt trần ⇒ từ chối trước mọi lời gọi");
+
+    // (g2) MẪU TỰ LÀM ⇒ vào THẲNG hàng đợi (lô hằng ngày đã bỏ).
+    const up = await addUploadedDraft(db, { productId: `${P}prod`, genes: parseGenes(anh6.genes) as NonNullable<ReturnType<typeof parseGenes>>, headline: "Tự làm", primaryText: "Ảnh tôi tự vẽ", note: "vẽ trên ChatGPT", imageBytes: fakeJpeg(9_101) }, actor, new Date());
+    assert.ok(up.ok, up.ok ? "" : up.error);
+    const hUp = await trongHang(up.ok ? up.imageId : "");
+    assert.ok(hUp && hUp.img.status === "APPROVED" && hUp.img.headline === "Tự làm" && hUp.runLabel.length > 0, "mẫu tự làm nằm ở hàng đợi, coi như đã duyệt");
+    const [runUp] = await db.select().from(schema.creativeManualGens).where(eq(schema.creativeManualGens.id, up.ok ? up.genId : ""));
+    assert.equal(runUp.kind, "UPLOAD");
+    assert.ok(!(await addUploadedDraft(db, { productId: `${P}khong-co`, genes: parseGenes(anh6.genes) as NonNullable<ReturnType<typeof parseGenes>>, headline: "", primaryText: "x", note: "", imageBytes: fakeJpeg(9_102) }, actor, new Date())).ok, "mã hàng không có ⇒ từ chối");
 
     // ── (d) SỬA TÊN ⇒ DIGEST ĐỔI ⇒ PHIẾU CŨ VÔ HIỆU; lô đã duyệt thì không sửa được ──
     const dg0 = approvalDigest(await batchApprovalContent(db, lo));

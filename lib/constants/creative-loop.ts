@@ -1490,6 +1490,14 @@ export function usdToVndRounded(usd: number | null, rate: number): number | null
  */
 export const INSTANT_PUBLISH = { leadSeconds: 120, minScheduleLeadMinutes: 5, maxScheduleDays: 30 } as const;
 
+/**
+ * LÔ HẰNG NGÀY ĐÃ BỎ (chủ shop 26/09/2026: "bỏ hẳn lô hằng ngày" — chỉ còn luồng tay Tạo ảnh → Duyệt ảnh → Hàng đợi →
+ * Đăng camp). Lượt vòng mẫu thôi DỰNG lô mới dù cấu hình còn bật; mọi thứ khác của lượt vẫn chạy: chấm + tắt theo luật
+ * (camp lẻ đang chạy vẫn được canh), vẽ nốt gen tay, đi tiếp bài "Đăng camp" đăng dở. Mã dựng lô (`buildBatch`) còn
+ * nguyên và có kiểm thử — bật lại là đổi hằng số này, không phải viết lại. Lô hằng ngày cũ đã duyệt vẫn đăng nếu vòng bật.
+ */
+export const DAILY_BATCH_RETIRED = true;
+
 /** Loại lô: `LOOP` = lô hằng ngày (một lô một ngày chạy) · `INSTANT` = một bài người bấm "Đăng camp". */
 export const CREATIVE_BATCH_KINDS = ["LOOP", "INSTANT"] as const;
 export type CreativeBatchKind = (typeof CREATIVE_BATCH_KINDS)[number];

@@ -16,10 +16,11 @@ import type { ProductOption } from "@/lib/queries/creative-sources";
 import { manualCreativeInputSchema } from "@/lib/validation/creative";
 
 /**
- * Tải MẪU TỰ LÀM (vẽ trên web ChatGPT / Grok, hoặc chụp tay) vào lô gần nhất còn hạn duyệt.
+ * Tải MẪU TỰ LÀM (vẽ trên web ChatGPT / Grok, hoặc chụp tay) vào THẲNG hàng đợi đăng camp (chủ shop 26/09/2026 bỏ lô
+ * hằng ngày) — từ đó Soạn bài → Đăng camp như ảnh gen tay.
  * Mẫu đi qua đúng cổng duyệt · đăng · chấm · học như mẫu máy làm — xem `lib/creative/manual.ts`.
  */
-export function ManualForm({ products, targetDay, deadlineLabel }: { products: ProductOption[]; targetDay: string; deadlineLabel: string }) {
+export function ManualForm({ products }: { products: ProductOption[] }) {
   const [open, setOpen] = useState(false);
   const [productId, setProductId] = useState("");
   const [primaryText, setPrimaryText] = useState("");
@@ -73,7 +74,7 @@ export function ManualForm({ products, targetDay, deadlineLabel }: { products: P
         toast.error(r.error);
         return;
       }
-      toast.success(`Đã thêm mẫu tự làm vào lô ${r.batchDay}`);
+      toast.success("Đã thêm mẫu tự làm vào hàng đợi đăng camp — mở tab ③ Hàng đợi & Đăng để đăng.");
       for (const w of r.warnings) toast.warning(w);
       dong();
     });
@@ -86,9 +87,9 @@ export function ManualForm({ products, targetDay, deadlineLabel }: { products: P
       <Dialog open={open} onOpenChange={(v) => (v ? setOpen(true) : dong())}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Thêm mẫu tự làm vào lô {targetDay}</DialogTitle>
+            <DialogTitle>Thêm mẫu tự làm vào hàng đợi đăng camp</DialogTitle>
             <DialogDescription>
-              Hạn duyệt {deadlineLabel}. Mẫu tự làm được đăng TRƯỚC mẫu máy vẽ; máy chỉ vẽ phần còn thiếu cho đủ lô. Mẫu vẫn phải qua lượt duyệt lô mới lên Facebook.
+              Ảnh bạn tự làm vào thẳng hàng đợi (coi như đã duyệt). Đăng lên Facebook khi bấm Đăng camp ở tab ③ Hàng đợi & Đăng.
             </DialogDescription>
           </DialogHeader>
 
@@ -170,13 +171,13 @@ export function ManualForm({ products, targetDay, deadlineLabel }: { products: P
             </div>
 
             <DialogFooter className="items-center gap-2 sm:justify-between">
-              <p className="text-[11.5px] text-muted-foreground">{loiTruoc ?? "Đủ thông tin để thêm vào lô."}</p>
+              <p className="text-[11.5px] text-muted-foreground">{loiTruoc ?? "Đủ thông tin để thêm vào hàng đợi."}</p>
               <div className="flex gap-2">
                 <Button type="button" variant="outline" onClick={dong} disabled={pending}>
                   Huỷ
                 </Button>
                 <Button type="submit" disabled={pending || dangXuLyAnh || Boolean(loiTruoc)}>
-                  {pending ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} Thêm vào lô
+                  {pending ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />} Thêm vào hàng đợi
                 </Button>
               </div>
             </DialogFooter>
