@@ -17,7 +17,8 @@ import { getProjectedDeliveryMetrics, type BacktestSummary } from "@/lib/queries
 import { NO_ORDER_VALUE_FILTER, orderValueActive, orderValueKey, orderValueMatches, orderValueWhereSql, type OrderValueFilter } from "@/lib/constants/order-value";
 import { erpStockExpr, LAST_RECEIPT_COST, stockKnownExpr, variantReceiptsSubquery, variantSalesSubquery } from "@/lib/queries/stock";
 import { FINISHED_OUTCOMES_SQL, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
-import { ESTIMATED_COST_KEY, parseEstimatedCosts, type EstimatedCost, type EstimatedCostMap } from "@/lib/constants/estimated-cost";
+import { ESTIMATED_COST_KEY, estimatedCostsWithMarketerPrice, parseEstimatedCosts, type EstimatedCost, type EstimatedCostMap } from "@/lib/constants/estimated-cost";
+import { marketerPriceEntriesByProduct } from "@/lib/queries/marketer-price";
 
 const o = schema.orders;
 const s = schema.shipments;
@@ -704,7 +705,8 @@ async function getNominalProfitReportUncached(period: Period, basis: TimeBasis, 
   const db = await getDb();
   const assumptions = await resolveAssumptions();
   // Chỉ đọc khi được hỏi: mọi đường gọi khác (lương, marketer, AI) giữ nguyên giá vốn 0 ₫ = chưa biết.
-  const giaDuTinh: EstimatedCostMap = withEstimatedCost ? await getEstimatedCosts() : {};
+  // Giá báo MKT hiệu lực vào CUỐI KỲ (luật 5) — kỳ "Toàn bộ" không có mốc cuối thì lấy hôm nay.
+  const giaDuTinh: EstimatedCostMap = withEstimatedCost ? await getEstimatedCosts(period.to ?? new Date()) : {};
   /*
     MỘT NGUỒN cho tỷ lệ / doanh thu GTC ước tính — xem lib/constants/projected-delivery.ts.
     LỖI LÀ LỖI: hợp đồng hỏng thì bảng vẫn dựng được (tiền theo tỷ lệ lịch sử, có nhãn) nhưng lỗi
@@ -1371,7 +1373,11 @@ export async function getNominalProfitReport(
   );
 }
 
-/** Giá vốn dự tính đang lưu, theo `productId`. Dòng hỏng bị bỏ, không thành 0 ₫. */
-export async function getEstimatedCosts(): Promise<EstimatedCostMap> {
-  return parseEstimatedCosts(await getSettingJson<Record<string, unknown>>(ESTIMATED_COST_KEY, {}));
+/**
+ * Giá vốn dự tính theo `productId`: giá báo MKT hiệu lực vào `at` nếu mã đã khai (luật 5 ở
+ * `lib/constants/estimated-cost.ts`), không thì con số đặt tay. Dòng hỏng bị bỏ, không thành 0 ₫.
+ */
+export async function getEstimatedCosts(at: Date = new Date()): Promise<EstimatedCostMap> {
+  const [manual, prices] = await Promise.all([getSettingJson<Record<string, unknown>>(ESTIMATED_COST_KEY, {}), marketerPriceEntriesByProduct()]);
+  return estimatedCostsWithMarketerPrice(parseEstimatedCosts(manual), prices, at);
 }

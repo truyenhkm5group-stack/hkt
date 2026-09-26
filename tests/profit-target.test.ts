@@ -120,7 +120,7 @@ function testKichBan() {
 async function testKhopBaoCao() {
   clearMemo();
   const period = resolvePeriod({ period: "90d" });
-  const [data, report] = await Promise.all([getProfitTargetData(period), getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true)]);
+  const [data, report] = await Promise.all([getProfitTargetData(period), getNominalProfitReport(period, "ORDERED", NO_ORDER_VALUE_FILTER, true, true)]);
   assert.equal(data.periodDays, 90);
   assert.equal(data.shopNetProfit, report.totals.netProfit, "LN shop lấy đúng báo cáo");
   assert.ok(data.defaultSelected.every((id) => (data.skus.find((s) => s.productId === id)?.netProfit ?? 0) > 0), "chọn sẵn chỉ gồm mã đang lãi");

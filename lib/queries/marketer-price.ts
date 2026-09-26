@@ -42,6 +42,24 @@ export const MKT_LINE_UNIT_COST = sql<number>`coalesce(${LINE_MARKETER_PRICE}, $
 
 export type MarketerPriceRow = typeof schema.marketerPrices.$inferSelect;
 
+type PriceEntry = { price: number; effectiveFrom: Date; reason: string; setBy: string };
+
+/**
+ * Mọi dòng giá báo, gom theo mã — đầu vào của luật 5 giá vốn dự tính (`lib/constants/estimated-cost.ts`).
+ * Chỉ trả giá + ngày hiệu lực + lý do + người khai; KHÔNG trả biểu thức giá theo dòng đơn, nên báo
+ * cáo gọi hàm này không thể thay giá vốn THẬT bằng giá báo (luật 1: giá thật luôn thắng).
+ */
+export async function marketerPriceEntriesByProduct(): Promise<Record<string, PriceEntry[]>> {
+  const db = await getDb();
+  const rows = await db.select({ productId: mp.productId, price: mp.price, effectiveFrom: mp.effectiveFrom, reason: mp.reason, setBy: mp.setBy }).from(mp);
+  const out: Record<string, PriceEntry[]> = {};
+  for (const r of rows) {
+    const list = out[r.productId] ?? (out[r.productId] = []);
+    list.push({ price: Number(r.price), effectiveFrom: new Date(r.effectiveFrom), reason: r.reason, setBy: r.setBy });
+  }
+  return out;
+}
+
 export async function listMarketerPrices(): Promise<MarketerPriceRow[]> {
   const db = await getDb();
   return db.select().from(mp).orderBy(asc(mp.productCode), asc(mp.effectiveFrom));

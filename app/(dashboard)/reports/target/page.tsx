@@ -107,7 +107,7 @@ export default async function ProfitTargetPage({ searchParams }: { searchParams:
       <PageHeader
         eyebrow="Tài chính"
         title="Kế hoạch mục tiêu lợi nhuận"
-        hint="Đặt mục tiêu LN ròng mỗi tháng, bảng giải ngược ra số đơn và ngân sách quảng cáo mỗi ngày cần có, theo từng kịch bản. Điểm xuất phát lấy nguyên dòng mã của Báo cáo lợi nhuận danh nghĩa trong kỳ gốc — kịch bản “giữ nguyên” ra đúng lợi nhuận báo cáo tính theo giá vốn THẬT (không dùng giá vốn dự tính đặt tay, nên mã chưa có giá vốn mang ⚠). Đây là phép tính KẾ HOẠCH (để đạt đích thì cần), không phải dự báo."
+        hint="Đặt mục tiêu LN ròng mỗi tháng, bảng giải ngược ra số đơn và ngân sách quảng cáo mỗi ngày cần có, theo từng kịch bản. Điểm xuất phát lấy nguyên dòng mã của Báo cáo lợi nhuận danh nghĩa trong kỳ gốc — kịch bản “giữ nguyên” ra đúng lợi nhuận tab Lợi nhuận danh nghĩa đang in (mã chưa có giá vốn thật lấy giá báo MKT làm giá dự tính; mã chưa có giá nào mang ⚠). Đây là phép tính KẾ HOẠCH (để đạt đích thì cần), không phải dự báo."
       />
       <DataTableToolbar period={{ defaultKey: "30d" }} resultLabel={<span className="text-xs text-muted-foreground">Kỳ gốc: {period.label} · {formatNumber(days)} ngày</span>} />
 

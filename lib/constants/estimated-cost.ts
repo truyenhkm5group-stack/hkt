@@ -1,4 +1,5 @@
 import { breakEvenSpend, spendPerOrder } from "@/lib/constants/break-even-cpo";
+import { receiptPriceEntry, type MarketerPriceEntry } from "@/lib/constants/marketer-price";
 
 /**
  * ═══════════ GIÁ VỐN DỰ TÍNH — CHỖ TRỐNG ĐƯỢC LẤP BẰNG MỘT CON SỐ CÓ TÊN NGƯỜI ĐẶT ═══════════
@@ -28,6 +29,15 @@ import { breakEvenSpend, spendPerOrder } from "@/lib/constants/break-even-cpo";
  *      định thì toàn bộ giá dự tính biến mất, im lặng.
  *   4. MANG NHÃN Ở MỌI CHỖ NÓ ĐI QUA (AGENTS.md mục 8.6): phần tiền dự tính là một trường riêng
  *      (`expectedCogsEstimated`) chứ không tan vào tổng.
+ *   5. GIÁ DỰ TÍNH = GIÁ BÁO MKT (chủ shop chốt 26/09/2026, "mọi chỗ đang dùng giá dự tính"). Mã
+ *      đã khai giá báo thì giá dự tính của nó LÀ giá báo đang hiệu lực vào cuối kỳ — cùng phép chọn
+ *      dòng với phiếu nhập kho (`receiptPriceEntry`); giá báo 0 ₫ coi là chưa định giá, như ở kho.
+ *      Mã chưa khai giá báo mới dùng con số đặt tay ở Bàn dự tính. Nhất quán với quyết định
+ *      25/09/2026 "luôn lấy giá báo MKT" làm giá nhập kho: hàng đã nhập mang giá báo, hàng chưa có
+ *      giá thì dự tính cũng bằng giá báo. Giá THẬT vẫn luôn thắng (luật 1).
+ *      Ngoại lệ thứ hai của luật 2 (cùng ngày): trang Kế hoạch mục tiêu lợi nhuận
+ *      (`lib/queries/profit-target.ts`) bật giá dự tính, để kịch bản "giữ nguyên" nói cùng lợi
+ *      nhuận với tab Lợi nhuận danh nghĩa. Trang ấy không vào lương.
  */
 export const ESTIMATED_COST_KEY = "profit.estimatedCosts";
 
@@ -39,6 +49,8 @@ export type EstimatedCost = {
   setAt: string | null;
   /** Email người đặt — MÁY CHỦ đọc từ phiên đăng nhập, không nhận từ client (mục 34). */
   setBy: string | null;
+  /** Nguồn của con số: đặt tay ở Bàn dự tính, hay giá báo MKT (luật 5). Thiếu = đặt tay. */
+  source?: "MANUAL" | "MARKETER_PRICE";
 };
 
 export type EstimatedCostMap = Record<string, EstimatedCost>;
@@ -63,6 +75,33 @@ export function parseEstimatedCosts(raw: unknown): EstimatedCostMap {
       reason: typeof x.reason === "string" ? x.reason : "",
       setAt: typeof x.setAt === "string" ? x.setAt : null,
       setBy: typeof x.setBy === "string" ? x.setBy : null,
+    };
+  }
+  return out;
+}
+
+export type MarketerPriceForEstimate = MarketerPriceEntry & { reason: string; setBy: string };
+
+/**
+ * LUẬT 5 — giá dự tính của từng mã khi đã có giá báo MKT. Hàm THUẦN.
+ *
+ *  · Có giá báo áp được (> 0) vào thời điểm `at` ⇒ giá báo, nguồn `MARKETER_PRICE`.
+ *  · Không có (chưa khai, hoặc dòng áp được là 0 ₫) ⇒ giữ con số đặt tay nếu có.
+ *  · Không cái nào ⇒ mã không có trong bảng: CHƯA BIẾT, không bao giờ 0 ₫.
+ */
+export function estimatedCostsWithMarketerPrice(manual: EstimatedCostMap, prices: Record<string, readonly MarketerPriceForEstimate[]>, at: Date): EstimatedCostMap {
+  const out: EstimatedCostMap = {};
+  for (const [productId, v] of Object.entries(manual)) out[productId] = { ...v, source: "MANUAL" };
+  for (const [productId, entries] of Object.entries(prices)) {
+    const e = receiptPriceEntry(entries, at);
+    if (!e || !(e.price > 0) || e.price > ESTIMATED_UNIT_COST_MAX) continue;
+    const tu = e.effectiveFrom.toISOString().slice(0, 10).split("-").reverse().join("/");
+    out[productId] = {
+      unitCost: Math.round(e.price),
+      reason: `Giá báo MKT hiệu lực từ ${tu}${e.reason ? ` — ${e.reason}` : ""}`,
+      setAt: e.effectiveFrom.toISOString(),
+      setBy: e.setBy || null,
+      source: "MARKETER_PRICE",
     };
   }
   return out;
