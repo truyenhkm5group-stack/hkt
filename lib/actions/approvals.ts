@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb } from "@/db";
-import { listApprovalRequests } from "@/lib/queries/approvals";
+import { listApprovalSectionItems, type ApprovalSectionItem } from "@/lib/queries/approvals";
 import { can, requireUser, type SessionUser } from "@/lib/auth/session";
 import { guardWithinScope } from "@/lib/approvals/execution";
 import {
@@ -129,29 +129,14 @@ export async function applyLegacyApprovalEnforce(): Promise<{ ok: true; applied:
   return kq;
 }
 
-export type PendingApproval = {
-  id: string;
-  group: ApprovalGroup;
-  groupLabel: string;
-  summary: string;
-  amount: number | null;
-  requestedByEmail: string;
-  requestedAt: Date;
-  /** Người đang xem có được duyệt việc này không — người xin thì KHÔNG. */
-  canDecide: boolean;
-};
+/**
+ * Mục "việc chờ duyệt" trên trang Cần xử lý: yêu cầu ĐANG CHỜ + lời duyệt ĐÃ TRẢ LẠI sau một lần thực thi
+ * không hoàn tất (kèm câu nhắc `execution_error` — Company OS · Agent N). Dữ liệu dựng ở
+ * `listApprovalSectionItems` (lib/queries/approvals.ts); đây chỉ đọc phiên đăng nhập.
+ */
+export type PendingApproval = ApprovalSectionItem;
 
 export async function listPendingApprovals(limit = 50): Promise<PendingApproval[]> {
   const user = await requireUser();
-  const rows = await listApprovalRequests({ limit });
-  return rows.map((r) => ({
-    id: r.id,
-    group: r.group as ApprovalGroup,
-    groupLabel: APPROVAL_GROUP_LABEL[r.group as ApprovalGroup] ?? r.group,
-    summary: r.summary,
-    amount: r.amount ?? null,
-    requestedByEmail: r.requestedByEmail,
-    requestedAt: r.requestedAt,
-    canDecide: coTheDuyet(user) && r.requestedBy !== user.id,
-  }));
+  return listApprovalSectionItems({ id: user.id, canDecide: coTheDuyet(user) }, new Date(), limit);
 }
