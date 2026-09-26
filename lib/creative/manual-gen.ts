@@ -1,24 +1,34 @@
-import { and, asc, eq, inArray, lt } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, like, lt, ne } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import {
   CREATIVE_HARD_LIMITS,
+  DESIGN_DNA_VERSION,
+  DESIGN_NOVELTY,
   GENE_VOCAB,
+  MANUAL_DESIGN,
   MANUAL_GEN,
+  designCode,
   estimateImageUsd,
   normalizeCreativeConfig,
+  parseDna,
   parseGenes,
   type CreativeLoopConfig,
+  type DesignDna,
   type Genes,
   type ImageQuality,
   type ImageSize,
 } from "@/lib/constants/creative-loop";
+import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { captionFromImage, type VariantCaptioner } from "@/lib/creative/caption";
+import { describeDnaVi, designPromptEn, planDesigns, type DesignParent, type DesignPlanInput } from "@/lib/creative/design";
 import { gatherPixels, imageSpendToday, reservedImageSpend } from "@/lib/creative/generate";
 import { readCreativeImage, storeCreativeImage } from "@/lib/creative/images";
 import { insertManualVariant, type ManualActor } from "@/lib/creative/manual";
 import { defaultNames, loadNamingContext, nextNameSeq } from "@/lib/creative/naming";
-import { PRESERVE_PRODUCT_CLAUSE, geneDirectives } from "@/lib/creative/writer";
-import { editImage, type ImageEditClient } from "@/lib/integrations/openai/images";
+import { DESIGN_GENE_EXCLUDE } from "@/lib/creative/plan";
+import { NEW_DESIGN_CLAUSE, PRESERVE_PRODUCT_CLAUSE, geneDirectives } from "@/lib/creative/writer";
+import { editImage, type ImageEditClient, type ImageEditInputImage } from "@/lib/integrations/openai/images";
+import { loadDesignInputs } from "@/lib/queries/creative-design";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 import { loadProductBrief, loadWinningExamples } from "@/lib/queries/creative-plan";
 
@@ -43,6 +53,20 @@ import { loadProductBrief, loadWinningExamples } from "@/lib/queries/creative-pl
  * Ảnh gen tay KHÔNG vào lô cho tới khi người đưa vào: vẽ 10 tấm để chọn 1–2 tấm là cách dùng đúng, và
  * một lô đầy ảnh chưa ai nhìn là một phiếu duyệt không ai đọc.
  *
+ * ─── HAI KIỂU LƯỢT (migration 0143) ───
+ *
+ *   `DESIGN` (mặc định)  chủ shop 25/09/2026: *"gen các mẫu MỚI HOÀN TOÀN, sáng tạo từ các ảnh đầu vào (mẫu
+ *                        đã win và mẫu có chỉ số tốt), không phải tạo mockup mới cho các mẫu cũ"*. Người chọn
+ *                        các mã BÁN TỐT làm cảm hứng (`loadDesignInputs` — cùng điều kiện mã cha của ô thiết
+ *                        kế trong lô); `startManualDesignGen` lập tới 10 THIẾT KẾ khác nhau bằng ĐÚNG
+ *                        `planDesigns` (lai DNA hai mã + đột biến, bắt buộc khác mọi mã đang có, mọi thiết kế
+ *                        30 ngày và mọi thiết kế gen tay 30 ngày ở ≥ 2 thuộc tính). Máy vẽ nhận ảnh sản phẩm
+ *                        THẬT của hai mã cha (ranh giới 2 không nới) cùng câu "thiết kế mới, KHÔNG sao chép".
+ *                        Đưa vào lô ⇒ máy cấp mã `TK-…` (dải 101+), ghi `design_concepts` và nối mẫu vào nó —
+ *                        từ đó đơn, chấm, MOQ đi đúng đường của ô thiết kế máy lập.
+ *   `MOCKUP`             kiểu cũ: ảnh quảng cáo mới cho ĐÚNG sản phẩm của ảnh thật. Còn lại cho đề xuất đẩy
+ *                        tồn (`?product=`): xả hàng đang có cần ảnh của chính mẫu ấy, không phải mẫu mới.
+ *
  * ─── VÌ SAO KHÔNG VẼ TRONG SERVER ACTION ───
  *
  * Mười ảnh gọi ngay mất 1–10 phút (một ảnh có thể tới 180 giây). Chờ trong action là treo nút bấm và
@@ -61,6 +85,47 @@ type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 /** Người mẫu cho ảnh gen tay — shop thời trang nữ; `NONE` chỉ đi với ảnh trải phẳng. */
 const MANUAL_GEN_MODELS: readonly Genes["model"][] = ["FEMALE_YOUNG", "FEMALE_YOUNG", "FEMALE_MATURE"];
 
+/**
+ * Bản mô tả một THIẾT KẾ MỚI của lượt gen tay `DESIGN` — lưu ở `creative_manual_gen_images.design`. Đủ để
+ * vẽ (DNA + ảnh tham chiếu), viết câu chữ (giá đề nghị) và ghi `design_concepts` lúc đưa vào lô.
+ */
+export type ManualDesignSpec = {
+  dna: DesignDna;
+  dnaVersion: number;
+  /** Mã cha — TRỘI đứng đầu (giá đề nghị và giọng văn đi theo mã này). */
+  parentProductIds: string[];
+  /** Ảnh chụp tên mã cha lúc lập — chỉ để người đọc. */
+  parentLabels: string[];
+  /** Nguồn `PRODUCT_PHOTO` gửi máy vẽ — cha trội trước, rồi mẹ nếu mẹ có ảnh thật. */
+  photoSourceIds: string[];
+  /** Giá đề nghị = giá của cha trội; `null` = không suy được (câu chữ không ghi giá). */
+  priceVnd: number | null;
+  mutated: string[];
+  minDiff: number;
+  why: string;
+};
+
+/** Đọc lại bản mô tả thiết kế từ cột JSON — thiếu DNA đủ mười thuộc tính hoặc ảnh tham chiếu ⇒ `null`. */
+export function parseManualDesignSpec(raw: unknown): ManualDesignSpec | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const dna = parseDna(r.dna);
+  const strs = (x: unknown) => (Array.isArray(x) ? x.filter((v): v is string => typeof v === "string" && v.length > 0) : []);
+  const photoSourceIds = strs(r.photoSourceIds);
+  if (!dna || photoSourceIds.length === 0) return null;
+  return {
+    dna,
+    dnaVersion: typeof r.dnaVersion === "number" ? r.dnaVersion : DESIGN_DNA_VERSION,
+    parentProductIds: strs(r.parentProductIds),
+    parentLabels: strs(r.parentLabels),
+    photoSourceIds,
+    priceVnd: typeof r.priceVnd === "number" && Number.isInteger(r.priceVnd) && r.priceVnd > 0 ? r.priceVnd : null,
+    mutated: strs(r.mutated),
+    minDiff: typeof r.minDiff === "number" ? r.minDiff : 0,
+    why: typeof r.why === "string" ? r.why : "",
+  };
+}
+
 function hashSeed(seed: string): number {
   let h = 2166136261;
   for (let i = 0; i < seed.length; i += 1) h = Math.imul(h ^ seed.charCodeAt(i), 16777619) >>> 0;
@@ -73,12 +138,16 @@ function hashSeed(seed: string): number {
  * ĐỦ sáu gen trong từ vựng đóng — vào lô rồi thì máy học được từ nó như mọi mẫu. Chữ trên ảnh luôn `NONE`:
  * ảnh gen tay chưa biết giá sẽ chạy, và chữ in sai trên ảnh không sửa được bằng câu chữ.
  */
-export function manualGenGenes(seed: string, count: number = MANUAL_GEN.imagesPerRun): Genes[] {
+export function manualGenGenes(seed: string, count: number = MANUAL_GEN.imagesPerRun, opts: { design?: boolean } = {}): Genes[] {
   const h = hashSeed(seed);
   const V = GENE_VOCAB;
   const out: Genes[] = [];
+  // Ảnh THIẾT KẾ MỚI: có người mẫu mặc, không trải phẳng (cùng luật gen của ô thiết kế trong lô). Bước 1 trên
+  // 6 bối cảnh × bước 2 trên 5 bố cục ⇒ 10 ảnh đầu là 10 tổ hợp khác nhau (bước 3 trên 6 chỉ ra 2 bối cảnh).
+  const excluded: readonly string[] = DESIGN_GENE_EXCLUDE.scene ?? [];
+  const scenes = opts.design ? V.scene.filter((x) => !excluded.includes(x)) : V.scene;
   for (let i = 0; i < count; i += 1) {
-    const scene = V.scene[(h + 3 * i) % V.scene.length];
+    const scene = scenes[(h + (opts.design ? 1 : 3) * i) % scenes.length];
     const model = scene === "FLATLAY" ? "NONE" : MANUAL_GEN_MODELS[(h + i) % MANUAL_GEN_MODELS.length];
     let composition = V.composition[(h + 2 * i) % V.composition.length];
     if (model === "NONE" && composition === "MIRROR_SELFIE") composition = "SINGLE_HERO";
@@ -98,6 +167,69 @@ export function manualGenPrompt(i: { idea: string; genes: Genes; productName: st
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/**
+ * Câu lệnh cho MỘT ảnh THIẾT KẾ MỚI — hàm THUẦN: mô tả thiết kế tất định theo DNA (`designPromptEn`, cùng hàm
+ * của ô thiết kế trong lô) + sáu chỉ thị gen + "thiết kế mới, KHÔNG sao chép". Ý tưởng của người chỉ lái bối
+ * cảnh / không khí / cách phối: thiết kế trên ảnh phải khớp DNA, nếu không nhãn "cổ vuông" đi kèm một ảnh cổ
+ * tròn và mọi phép học sau đó đếm sai.
+ */
+export function manualDesignPrompt(i: { idea: string; genes: Genes; dna: DesignDna; refCount: number }): string {
+  return [
+    "Facebook feed advertising photo for a Vietnamese fashion shop, presenting one of its NEW garment designs.",
+    i.refCount > 1
+      ? `The ${i.refCount} attached photos are REAL best-selling products of the shop — the new design is inspired by them but is a different garment.`
+      : "The attached photo is a REAL best-selling product of the shop — the new design is inspired by it but is a different garment.",
+    i.idea.trim() ? `Creative direction from the shop owner (may be Vietnamese) — apply it to the scene, mood and styling; the garment itself must follow the NEW GARMENT DESIGN below: ${i.idea.trim()}` : "",
+    designPromptEn(i.dna),
+    ...geneDirectives(i.genes, null, ""),
+    NEW_DESIGN_CLAUSE,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export type ManualDesignPlan = { specs: ManualDesignSpec[]; reasons: string[] };
+
+/**
+ * Lập `count` THIẾT KẾ cho một lượt gen tay — hàm THUẦN, tất định theo `seed` (id lượt). Chỉ các mã NGƯỜI
+ * CHỌN được làm cha mẹ; phép lai / đột biến / kiểm mới lạ là ĐÚNG `planDesigns` của lô (không bản sao luật).
+ * `recentDesigns` phải gồm cả thiết kế gen tay gần đây — hai lượt liên tiếp không được vẽ lại cùng một mẫu.
+ */
+export function planManualDesigns(i: Omit<DesignPlanInput, "batchDay" | "firstIndex" | "seed"> & { seed: string; day: string }): ManualDesignPlan {
+  const plan = planDesigns({ batchDay: i.day, count: i.count, parents: i.parents, existingDna: i.existingDna, recentDesigns: i.recentDesigns, stats: i.stats, seed: `manual:${i.seed}` });
+  const byId = new Map<string, DesignParent>(i.parents.map((p) => [p.productId, p]));
+  const specs = plan.designs.map((d): ManualDesignSpec => {
+    const photos = [d.photoSourceId, ...d.parentProductIds.slice(1).map((id) => byId.get(id)?.photoSourceId ?? null)].filter((x): x is string => x !== null);
+    return {
+      dna: d.dna,
+      dnaVersion: DESIGN_DNA_VERSION,
+      parentProductIds: d.parentProductIds,
+      parentLabels: d.parentProductIds.map((id) => byId.get(id)?.label ?? id),
+      photoSourceIds: [...new Set(photos)].slice(0, MANUAL_DESIGN.refPhotos),
+      priceVnd: d.priceVnd,
+      mutated: d.mutated,
+      minDiff: d.minDiff,
+      why: d.why,
+    };
+  });
+  return { specs, reasons: plan.shortfall?.reasons ?? [] };
+}
+
+/**
+ * Mã `TK-…` cho thiết kế NGƯỜI đưa vào lô ngày `batchDay` — hàm THUẦN: số lớn nhất đã dùng trong dải
+ * `MANUAL_DESIGN.codeBase + 1…` của ngày ấy, cộng một. Dải 01… của ô thiết kế máy lập không bị đụng.
+ */
+export function manualDesignCode(batchDay: string, existingCodes: readonly string[]): string {
+  const prefix = designCode(batchDay, 0).slice(0, -2);
+  let top: number = MANUAL_DESIGN.codeBase;
+  for (const c of existingCodes) {
+    if (!c.startsWith(prefix)) continue;
+    const n = Number(c.slice(prefix.length));
+    if (Number.isInteger(n) && n > top) top = n;
+  }
+  return designCode(batchDay, top + 1);
 }
 
 export type ManualGenCapacity = { allowed: number; reason: string | null };
@@ -170,6 +302,7 @@ export async function startManualGen(db: Db, input: StartManualGenInput, cfg: Cr
     const [g] = await tx
       .insert(schema.creativeManualGens)
       .values({
+        kind: "MOCKUP",
         productId: photo.productId,
         productPhotoSourceId: photo.id,
         ownAdSourceId: ownAdId,
@@ -197,6 +330,89 @@ export async function startManualGen(db: Db, input: StartManualGenInput, cfg: Cr
     return g.id;
   });
   return { ok: true, genId, requested: want, allowed: cap.allowed, reason: cap.reason };
+}
+
+// ───────────────────────────── BẤM "GEN THIẾT KẾ MỚI" ─────────────────────────────
+
+export type StartManualDesignInput = { inspirationProductIds: string[]; idea: string };
+
+/** DNA các thiết kế gen tay gần đây (trừ ảnh vẽ hỏng — chưa ai thấy nó) — để lượt sau không lặp lại lượt trước. */
+async function recentManualDesignDna(db: Db, now: Date): Promise<DesignDna[]> {
+  const g = schema.creativeManualGenImages;
+  const rows = await db
+    .select({ design: g.design })
+    .from(g)
+    .where(and(isNotNull(g.design), ne(g.status, "GEN_FAILED"), gte(g.createdAt, new Date(now.getTime() - DESIGN_NOVELTY.recentDesignDays * 86_400_000))));
+  return rows.map((r) => parseManualDesignSpec(r.design)?.dna ?? null).filter((d): d is DesignDna => d !== null);
+}
+
+/**
+ * Ghi MỘT lượt `DESIGN` + tới `imagesPerRun` dòng ảnh, mỗi dòng một THIẾT KẾ MỚI đã lập sẵn (DNA, mã cha, ảnh
+ * tham chiếu). Không gọi OpenAI. Mã cảm hứng phải CÒN đủ điều kiện mã cha (bán tốt + có DNA) lúc bấm — danh
+ * sách trên màn hình có thể đã cũ. Lập được ít hơn 10 thiết kế đủ mới lạ ⇒ ghi bấy nhiêu và NÓI RA vì sao
+ * (không nhồi thiết kế trùng). Trả `{ ok: false }` cho lỗi nghiệp vụ — không ném.
+ */
+export async function startManualDesignGen(db: Db, input: StartManualDesignInput, cfg: CreativeLoopConfig, actor: ManualActor, now: Date, deps: { seed?: string } = {}): Promise<StartManualGenResult> {
+  const ids = [...new Set(input.inspirationProductIds.map((x) => x.trim()).filter(Boolean))];
+  if (ids.length === 0) return { ok: false, error: "Chọn ít nhất một mẫu bán tốt làm cảm hứng." };
+  if (ids.length > MANUAL_DESIGN.maxInspirations) return { ok: false, error: `Chọn tối đa ${MANUAL_DESIGN.maxInspirations} mẫu cảm hứng mỗi lượt.` };
+
+  const day = vnDay(now);
+  const inputs = await loadDesignInputs(db, day);
+  const byId = new Map(inputs.parents.map((p) => [p.productId, p]));
+  const lost = ids.filter((id) => byId.get(id)?.dna.category === undefined);
+  if (lost.length) return { ok: false, error: `${lost.length} mẫu đã chọn không còn đủ điều kiện làm cảm hứng (bán tốt + đã đọc được DNA) — tải lại trang rồi chọn lại.` };
+  const chosen = ids.map((id) => byId.get(id) as DesignParent);
+  if (!chosen.some((p) => p.photoSourceId !== null)) {
+    return { ok: false, error: "Cần ít nhất một mẫu có ẢNH SẢN PHẨM THẬT (nguồn PRODUCT_PHOTO) — máy vẽ chỉ nhận ảnh thật của shop làm tham chiếu. Nhập ảnh ở tab Nguồn ảnh." };
+  }
+
+  const want = MANUAL_GEN.imagesPerRun;
+  const cap = await manualGenCapacityNow(db, cfg, now, want);
+  if (cap.allowed === 0) return { ok: false, error: `Không vẽ được ảnh nào lúc này. ${cap.reason ?? ""}`.trim() };
+
+  const genId = crypto.randomUUID();
+  // Hạt giống = id lượt. Kiểm thử truyền hạt giống cố định để chứng minh lượt sau không lặp lượt trước vì LUẬT,
+  // không vì hai id ngẫu nhiên tình cờ khác nhau.
+  const seed = deps.seed ?? genId;
+  const plan = planManualDesigns({ seed, day, count: want, parents: chosen, existingDna: inputs.existingDna, recentDesigns: [...inputs.recentDesigns, ...(await recentManualDesignDna(db, now))], stats: inputs.stats });
+  if (plan.specs.length === 0) return { ok: false, error: `Không lập được thiết kế nào đủ mới lạ. ${plan.reasons.join(" ")}`.trim() };
+  const allowed = Math.min(cap.allowed, plan.specs.length);
+  const shortNote = plan.specs.length < want ? `Chỉ lập được ${plan.specs.length}/${want} thiết kế đủ khác mọi mẫu đang có. ${plan.reasons.join(" ")}`.trim() : "";
+  const note = [shortNote, cap.allowed < plan.specs.length ? (cap.reason ?? "") : ""].filter(Boolean).join(" ");
+
+  const idea = input.idea.trim().slice(0, MANUAL_GEN.ideaMaxChars);
+  const genes = manualGenGenes(seed, plan.specs.length, { design: true });
+  await db.transaction(async (tx) => {
+    await tx.insert(schema.creativeManualGens).values({
+      id: genId,
+      kind: "DESIGN",
+      productId: null,
+      productPhotoSourceId: null,
+      ownAdSourceId: null,
+      inspirationProductIds: ids,
+      idea,
+      requested: want,
+      model: cfg.imageModel,
+      size: cfg.imageSize,
+      quality: cfg.imageQuality,
+      note,
+      createdByUserId: actor.id,
+      createdByName: actor.name,
+    });
+    await tx.insert(schema.creativeManualGenImages).values(
+      plan.specs.map((spec, i) => ({
+        genId,
+        seq: i + 1,
+        genes: genes[i] as Record<string, string>,
+        prompt: manualDesignPrompt({ idea, genes: genes[i], dna: spec.dna, refCount: spec.photoSourceIds.length }),
+        design: spec as unknown as Record<string, unknown>,
+        status: i < allowed ? "PLANNED" : "GEN_FAILED",
+        error: i < allowed ? "" : (cap.reason ?? ""),
+      })),
+    );
+  });
+  return { ok: true, genId, requested: want, allowed, reason: note || null };
 }
 
 // ───────────────────────────── VẼ ─────────────────────────────
@@ -228,6 +444,24 @@ async function failStaleDraws(db: Db, now: Date): Promise<number> {
     .where(and(eq(g.status, "DRAWING"), lt(g.claimedAt, new Date(now.getTime() - MANUAL_GEN.staleDrawMinutes * 60_000))))
     .returning({ id: g.id });
   return rows.length;
+}
+
+/**
+ * Điểm ảnh gửi máy vẽ cho MỘT ảnh — mọi nguồn đi qua `gatherPixels` (đường điểm ảnh DUY NHẤT, kiểm lại loại
+ * nguồn lúc đọc). Thiết kế: ảnh sản phẩm thật của cha trội (bắt buộc) + của mẹ (mất thì vẫn vẽ từ ảnh cha
+ * trội — mất một tham chiếu cảm hứng, không mất thiết kế).
+ */
+async function pixelsFor(db: Db, run: GenRow, img: ImageRow): Promise<ImageEditInputImage[]> {
+  if (run.kind !== "DESIGN") return gatherPixels(db, { productPhotoSourceId: run.productPhotoSourceId, parentVariantId: null, ownAdSourceId: run.ownAdSourceId });
+  const spec = parseManualDesignSpec(img.design);
+  if (!spec) throw new Error("Ảnh thiết kế mất bản mô tả thiết kế (DNA / ảnh tham chiếu) — không vẽ.");
+  const [dominant, ...rest] = spec.photoSourceIds;
+  const out = await gatherPixels(db, { productPhotoSourceId: dominant, parentVariantId: null, ownAdSourceId: null });
+  for (const id of rest) {
+    const more = await gatherPixels(db, { productPhotoSourceId: id, parentVariantId: null, ownAdSourceId: null }).catch(() => []);
+    out.push(...more);
+  }
+  return out;
 }
 
 /**
@@ -273,7 +507,7 @@ export async function drawManualGen(db: Db, deps: DrawManualGenDeps = {}): Promi
       .returning({ id: g.id });
     if (claimed.length === 0) continue; // lượt khác vừa giữ chỗ ảnh này
     try {
-      const images = await gatherPixels(db, { productPhotoSourceId: next.run.productPhotoSourceId, parentVariantId: null, ownAdSourceId: next.run.ownAdSourceId });
+      const images = await pixelsFor(db, next.run, next.img);
       const res = await imageClient({ model: next.run.model, prompt: next.img.prompt, images, size, quality });
       const stored = await storeCreativeImage(db, res.bytes);
       await db
@@ -315,13 +549,17 @@ export async function captionManualGenImage(db: Db, id: string, now: Date, deps:
   const r = await loadImage(db, id);
   if (!r) return { ok: false, error: "Không tìm thấy ảnh." };
   if (r.img.status !== "APPROVED") return { ok: false, error: "Chỉ viết câu chữ cho ảnh đã duyệt, chưa đưa vào lô." };
-  const product = r.run.productId ? await loadProductBrief(db, r.run.productId) : null;
+  // Thiết kế mới: "sản phẩm" là thiết kế chưa có mã — giá = GIÁ ĐỀ NGHỊ (null ⇒ câu chữ không ghi con số giá),
+  // giọng văn học từ cha trội (cùng cách ô thiết kế của lô viết câu chữ).
+  const spec = r.run.kind === "DESIGN" ? parseManualDesignSpec(r.img.design) : null;
+  const product = spec ? { name: "Mẫu mới", code: "", priceVnd: spec.priceVnd } : r.run.productId ? await loadProductBrief(db, r.run.productId) : null;
   const pixels = r.img.imageId ? await readCreativeImage(db, r.img.imageId) : null;
   const genes = parseGenes(r.img.genes);
   const fail = async (error: string): Promise<CaptionOutcome> => {
     await db.update(schema.creativeManualGenImages).set({ captionError: error.slice(0, 1000), updatedAt: now }).where(eq(schema.creativeManualGenImages.id, id));
     return { ok: false, error };
   };
+  if (r.run.kind === "DESIGN" && !spec) return fail("Ảnh thiết kế mất bản mô tả thiết kế — không biết giá đề nghị để viết câu chữ.");
   if (!product) return fail("Không tìm thấy mã hàng — không biết giá để viết câu chữ.");
   if (!pixels) return fail("Ảnh đã mất điểm ảnh.");
   const caption = deps.caption ?? captionFromImage;
@@ -332,8 +570,9 @@ export async function captionManualGenImage(db: Db, id: string, now: Date, deps:
       product: { name: product.name, code: product.code, priceVnd: product.priceVnd },
       genes: genes ?? {},
       draft: r.img.headline || r.img.primaryText ? { headline: r.img.headline, primaryText: r.img.primaryText } : null,
-      winningExamples: await loadWinningExamples(db, r.run.productId),
+      winningExamples: await loadWinningExamples(db, spec ? (spec.parentProductIds[0] ?? null) : r.run.productId),
       options: 1,
+      ...(spec ? { productNote: `Đây là MẪU MỚI của shop — thiết kế: ${describeDnaVi(spec.dna)}. Có thể nói "mẫu mới"; không hứa ngày giao cụ thể.` } : {}),
     },
     { now, entityId: id },
   ).catch((e: unknown) => ({ ok: false as const, error: errText(e) }));
@@ -384,7 +623,21 @@ export type PromoteInput = {
   predictedSeq: number | null;
 };
 
-export type PromoteResult = { ok: true; variantId: string; batchId: string; batchDay: string; slot: number; nameSeq: number; names: { campaign: string; adset: string; ad: string } } | { ok: false; error: string };
+export type PromoteResult =
+  | {
+      ok: true;
+      variantId: string;
+      batchId: string;
+      batchDay: string;
+      slot: number;
+      nameSeq: number;
+      names: { campaign: string; adset: string; ad: string };
+      /** Lượt `DESIGN`: mã `TK-…` vừa cấp — chủ shop tạo sản phẩm Pancake đúng mã này để nhận đơn. */
+      designCode: string | null;
+      /** Giá dùng để cảnh báo câu chữ: giá ERP của mã (mockup) hoặc giá đề nghị của thiết kế. */
+      priceVnd: number | null;
+    }
+  | { ok: false; error: string };
 
 /**
  * Chọn tên sẽ lưu cho MỘT ô: người để trống ⇒ mặc định; người giữ NGUYÊN tên mặc định mà màn hình dựng với
@@ -411,25 +664,46 @@ export async function promoteManualGenImage(db: Db, input: PromoteInput, cfg: Cr
   if (!r.img.imageId) return { ok: false, error: "Ảnh chưa có điểm ảnh." };
   const genes = parseGenes(r.img.genes);
   if (!genes) return { ok: false, error: "Bộ gen của ảnh hỏng — máy không học được từ bài này." };
-  if (!r.run.productId) return { ok: false, error: "Lượt gen không còn gắn mã hàng." };
+  const spec = r.run.kind === "DESIGN" ? parseManualDesignSpec(r.img.design) : null;
+  if (r.run.kind === "DESIGN" && !spec) return { ok: false, error: "Ảnh thiết kế mất bản mô tả thiết kế (DNA) — không lập được mã TK cho bài này." };
+  if (!spec && !r.run.productId) return { ok: false, error: "Lượt gen không còn gắn mã hàng." };
   const imageId = r.img.imageId;
-  const productId = r.run.productId;
+  const who = r.run.createdByName || actor.name;
+  const ideaNote = r.run.idea ? `: ${r.run.idea.slice(0, 200)}` : "";
+  const priceVnd = spec ? spec.priceVnd : ((await loadProductBrief(db, r.run.productId as string))?.priceVnd ?? null);
 
   let finalNames = { campaign: "", adset: "", ad: "" };
   let finalSeq = 0;
+  let code: string | null = null;
   try {
     const res = await db.transaction(async (tx: Tx) => {
+      const dc = schema.designConcepts;
       const ins = await insertManualVariant(
         tx as unknown as Db,
         {
-          productId,
+          // Thiết kế mới KHÔNG gắn mã cha: đơn / chấm / MOQ của nó đi theo `design_concept_id`, không cộng vào mã cũ.
+          productId: spec ? null : r.run.productId,
           genes,
           primaryText: input.primaryText,
           headline: input.headline,
-          why: `Gen tay — ${r.run.createdByName || actor.name}${r.run.idea ? `: ${r.run.idea.slice(0, 200)}` : ""}`,
+          why: `Gen tay — ${who}${ideaNote}`,
           imageId,
           genModel: r.run.model,
-          extra: { imagePrompt: r.img.prompt, genCostUsd: r.img.costUsd, productPhotoSourceId: r.run.productPhotoSourceId, inspirationSourceId: r.run.ownAdSourceId },
+          extra: { imagePrompt: r.img.prompt, genCostUsd: r.img.costUsd, productPhotoSourceId: spec ? spec.photoSourceIds[0] : r.run.productPhotoSourceId, inspirationSourceId: spec ? null : r.run.ownAdSourceId },
+          design: spec
+            ? async (batch) => {
+                const taken = await tx.select({ code: dc.code }).from(dc).where(like(dc.code, `${designCode(batch.batchDay, 0).slice(0, -2)}%`));
+                code = manualDesignCode(
+                  batch.batchDay,
+                  taken.map((t) => t.code),
+                );
+                const [c] = await tx
+                  .insert(dc)
+                  .values({ code, batchId: batch.id, dna: spec.dna as Record<string, string>, dnaVersion: spec.dnaVersion, parentProductIds: spec.parentProductIds, why: `Gen tay — ${who}: ${spec.why}`, imageId, priceVnd: spec.priceVnd, status: "DRAFT" })
+                  .returning({ id: dc.id });
+                return { designConceptId: c.id, why: `Thiết kế mới ${code} (gen tay — ${who}${ideaNote}): ${spec.why}` };
+              }
+            : undefined,
           names: async (batch) => {
             const seq = await nextNameSeq(tx as unknown as Db, batch.id);
             const ctx = await loadNamingContext(tx as unknown as Db, normalizeCreativeConfig(batch.configSnapshot).config);
@@ -454,11 +728,12 @@ export async function promoteManualGenImage(db: Db, input: PromoteInput, cfg: Cr
       return ins;
     });
     if (!res.ok) return res;
-    return { ok: true, variantId: res.variantId, batchId: res.batchId, batchDay: res.batchDay, slot: res.slot, nameSeq: finalSeq, names: finalNames };
+    return { ok: true, variantId: res.variantId, batchId: res.batchId, batchDay: res.batchDay, slot: res.slot, nameSeq: finalSeq, names: finalNames, designCode: code, priceVnd };
   } catch (e) {
     const msg = errText(e);
     if (msg === "PROMOTE_RACE") return { ok: false, error: "Ảnh vừa được đưa vào lô hoặc đổi trạng thái — tải lại để xem." };
     if (/name_seq/.test(msg)) return { ok: false, error: "Vừa có bài khác lấy đúng số thứ tự trong ngày — bấm lại để lấy số mới." };
+    if (/design_concepts_code/.test(msg)) return { ok: false, error: "Vừa có thiết kế khác lấy đúng mã TK — bấm lại để lấy mã mới." };
     throw e;
   }
 }

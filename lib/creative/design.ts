@@ -59,6 +59,8 @@ export type DesignParent = {
   photoSourceId: string | null;
   /** Giá bán của mã (một giá duy nhất), `null` = không suy được. */
   priceVnd: number | null;
+  /** Số đo làm nên điểm — chỉ để HIỂN THỊ ở ô chọn cảm hứng của gen tay; phép lập thiết kế không đọc. */
+  metrics?: { delivered: number; returned: number; spendVnd: number | null; messages: number | null };
 };
 
 export type DnaObservation = { dna: DesignDna; dnaVersion: number; verdict: CreativeVerdict };
@@ -76,6 +78,11 @@ export type DesignPlanInput = {
   stats: DnaStat[];
   /** Số thứ tự đầu tiên của mã `TK-…-NN` (mặc định 1). */
   firstIndex?: number;
+  /**
+   * Hạt giống riêng — gen tay truyền id lượt để hai lượt cùng ngày ra hai bộ thiết kế khác nhau (và khác ô
+   * thiết kế của lô cùng ngày). Bỏ trống ⇒ hạt giống là ngày lô, y như trước.
+   */
+  seed?: string;
 };
 
 export type PlannedDesign = {
@@ -209,7 +216,8 @@ export function planDesigns(input: DesignPlanInput): DesignPlan {
     };
   }
 
-  const rand = seededRandom(`design:${input.batchDay}`);
+  const rand = seededRandom(input.seed === undefined ? `design:${input.batchDay}` : `design:${input.seed}`);
+  const seedKey = input.seed ?? input.batchDay;
   const accepted: PlannedDesign[] = [];
   const seen = new Set<string>();
   const others: Partial<DesignDna>[] = [...input.existingDna, ...input.recentDesigns];
@@ -226,7 +234,7 @@ export function planDesigns(input: DesignPlanInput): DesignPlan {
         rand,
       );
       // Lượt thử lại thứ n ÉP đột biến n thuộc tính (chọn tất định) — đủ để thoát khỏi một DNA trùng.
-      const start = hashSeed(`${input.batchDay}:${i}:${attempt}`) % mutable.length;
+      const start = hashSeed(`${seedKey}:${i}:${attempt}`) % mutable.length;
       const forced = new Set(Array.from({ length: Math.min(attempt, mutable.length) }, (_, j) => mutable[(start + j) % mutable.length]));
       const child = { category: a.dna.category } as DesignDna;
       const mutated: DesignDnaKey[] = [];

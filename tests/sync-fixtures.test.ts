@@ -251,6 +251,7 @@ import { testCreativeMoqDb, testCreativeMoqPure } from "./creative-moq.test";
 import { testCreativeEmptyBatch, testCreativeExtendedWindow, testCreativeLoopTick } from "./creative-loop-tick.test";
 import { testCreativeManualDb, testCreativeManualPure } from "./creative-manual.test";
 import { testCreativeManualGenDb, testCreativeManualGenPure } from "./creative-manual-gen.test";
+import { testCreativeManualDesignDb, testCreativeManualDesignPure } from "./creative-manual-design.test";
 import { testCreativeImportDb, testCreativeImportPure } from "./creative-import.test";
 import { testCreativeCopyDb, testCreativeCopyPure } from "./creative-copy.test";
 import { testCreativeImageBatch } from "./creative-image-batch.test";
@@ -1770,6 +1771,8 @@ async function main() {
   await testCreativeManualDb(db);
   testCreativeManualGenPure();
   await testCreativeManualGenDb(db);
+  testCreativeManualDesignPure();
+  await testCreativeManualDesignDb(db);
   testCreativeImportPure();
   await testCreativeImportDb(db);
   testCreativeCopyPure();

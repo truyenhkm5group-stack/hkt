@@ -264,7 +264,7 @@ export type ComposeInput = {
 };
 
 /** Gen QUẢNG CÁO của ô thiết kế: ảnh thời trang có NGƯỜI MẪU MẶC (chủ shop 24/09) — không "không người", không trải phẳng. */
-const DESIGN_GENE_EXCLUDE: Partial<Record<GeneKey, readonly string[]>> = { model: ["NONE"], scene: ["FLATLAY"] };
+export const DESIGN_GENE_EXCLUDE: Partial<Record<GeneKey, readonly string[]>> = { model: ["NONE"], scene: ["FLATLAY"] };
 
 /**
  * LÔ HẰNG NGÀY — hàm THUẦN, tất định theo ngày lô. Thứ tự ô = thứ tự ĐĂNG sau mẫu tự làm (chủ shop

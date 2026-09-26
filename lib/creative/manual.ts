@@ -78,7 +78,8 @@ type VariantInsert = typeof schema.creativeVariants.$inferInsert;
  * `names(batch)` (tuỳ chọn) chạy SAU khi biết lô đích — để số thứ tự trong ngày đăng lấy theo đúng lô ấy.
  */
 export type ManualVariantRow = {
-  productId: string;
+  /** `null` = mẫu quảng cáo một THIẾT KẾ MỚI (gen tay kiểu `DESIGN`) — nối qua `design` chứ không qua mã hàng. */
+  productId: string | null;
   genes: Genes;
   primaryText: string;
   headline: string;
@@ -87,6 +88,11 @@ export type ManualVariantRow = {
   genModel: string;
   extra?: Partial<Pick<VariantInsert, "imagePrompt" | "genCostUsd" | "productPhotoSourceId" | "inspirationSourceId">>;
   names?: (batch: BatchRow) => Promise<Pick<VariantInsert, "nameSeq" | "campaignName" | "adsetName" | "adName">>;
+  /**
+   * (tuỳ chọn) chạy SAU khi biết lô đích và đã qua mọi kiểm tra của lô — ghi thiết kế (`design_concepts`, mã
+   * theo NGÀY LÔ) trong cùng giao dịch và trả khoá thiết kế + câu "vì sao" có mã ấy.
+   */
+  design?: (batch: BatchRow) => Promise<{ designConceptId: string; why: string }>;
 };
 
 /**
@@ -131,6 +137,7 @@ export async function insertManualVariant(db: Db, row: ManualVariantRow, cfg: Cr
     .where(and(eq(v.batchId, batch.id), eq(v.mode, "MANUAL")));
   const slot = Math.max(MANUAL_SLOT_BASE, Number(top?.slot ?? MANUAL_SLOT_BASE)) + 1;
   const names = row.names ? await row.names(batch) : {};
+  const design = row.design ? await row.design(batch) : null;
 
   const mode: SlotMode = "MANUAL";
   const [created] = await db
@@ -149,6 +156,7 @@ export async function insertManualVariant(db: Db, row: ManualVariantRow, cfg: Cr
       genModel: row.genModel,
       ...(row.extra ?? {}),
       ...names,
+      ...(design ? { designConceptId: design.designConceptId, why: design.why } : {}),
       status: "GENERATED",
       createdByUserId: actor.id,
       createdByName: actor.name,

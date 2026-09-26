@@ -6,6 +6,7 @@ import {
   IMAGE_QUALITIES,
   IMAGE_SIZES,
   CAMPAIGN_NAME_MAX_CHARS,
+  MANUAL_DESIGN,
   MANUAL_GEN,
   MANUAL_UPLOAD_SOURCE_KINDS,
   normalizeCreativeConfig,
@@ -154,6 +155,17 @@ export const manualGenStartSchema = z
   .object({
     productPhotoSourceId: z.string().trim().min(1, "Chọn ảnh sản phẩm thật làm gốc"),
     ownAdSourceId: z.string().trim().max(200).default(""),
+    idea: z.string().trim().max(MANUAL_GEN.ideaMaxChars, `Ý tưởng tối đa ${MANUAL_GEN.ideaMaxChars} ký tự`).default(""),
+  })
+  .strict();
+
+/** Bấm "Gen thiết kế mới": các mã bán tốt làm cảm hứng (máy chủ kiểm lại điều kiện) + ý tưởng tự do (tuỳ chọn). */
+export const manualDesignStartSchema = z
+  .object({
+    inspirationProductIds: z
+      .array(z.string().trim().min(1).max(200))
+      .min(1, "Chọn ít nhất một mẫu bán tốt làm cảm hứng")
+      .max(MANUAL_DESIGN.maxInspirations, `Chọn tối đa ${MANUAL_DESIGN.maxInspirations} mẫu cảm hứng mỗi lượt`),
     idea: z.string().trim().max(MANUAL_GEN.ideaMaxChars, `Ý tưởng tối đa ${MANUAL_GEN.ideaMaxChars} ký tự`).default(""),
   })
   .strict();

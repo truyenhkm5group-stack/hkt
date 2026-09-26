@@ -627,9 +627,9 @@ function toVariantCard(r: VariantJoined): VariantCard {
   };
 }
 
-/** Gắn thiết kế vào các thẻ ô `DESIGN` (một câu đọc cho cả lô). */
+/** Gắn thiết kế vào các thẻ mang thiết kế — ô `DESIGN` và mẫu gen tay kiểu thiết kế mới (một câu đọc cho cả lô). */
 async function withDesigns(db: Db, cards: VariantCard[]): Promise<VariantCard[]> {
-  const ids = [...new Set(cards.flatMap((c) => (c.mode === "DESIGN" && c.designConceptId ? [c.designConceptId] : [])))];
+  const ids = [...new Set(cards.flatMap((c) => (c.designConceptId ? [c.designConceptId] : [])))];
   if (ids.length === 0) return cards;
   const dc = schema.designConcepts;
   const rows = await db.select({ id: dc.id, code: dc.code, status: dc.status, dna: dc.dna, parentProductIds: dc.parentProductIds, priceVnd: dc.priceVnd }).from(dc).where(inArray(dc.id, ids));

@@ -1444,6 +1444,27 @@ export const CAMPAIGN_NAME_MAX_CHARS = 255;
 export const MANUAL_GEN = { imagesPerRun: 10, drawPerTick: 4, staleDrawMinutes: 15, ideaMaxChars: 1000 } as const;
 
 /**
+ * Kiểu một lượt gen tay (migration 0143). `DESIGN` là mặc định của khối gen tay (chủ shop 25/09/2026: "gen
+ * các mẫu MỚI HOÀN TOÀN từ các mẫu đã win / có chỉ số tốt, không phải mockup mới cho mẫu cũ"); `MOCKUP` còn
+ * lại cho đề xuất đẩy tồn — xả hàng đang có cần ảnh mới của CHÍNH mẫu ấy.
+ */
+export const MANUAL_GEN_KINDS = ["DESIGN", "MOCKUP"] as const;
+export type ManualGenKind = (typeof MANUAL_GEN_KINDS)[number];
+export const MANUAL_GEN_KIND_LABEL: Record<ManualGenKind, string> = { DESIGN: "Thiết kế mới", MOCKUP: "Ảnh mới cho mẫu đang có" };
+
+/**
+ * Gen tay kiểu THIẾT KẾ MỚI:
+ *  · `maxInspirations` — số mã cảm hứng tối đa một lượt (nhiều hơn thì mỗi thiết kế vẫn chỉ lai hai mã, phần
+ *    còn lại chỉ làm loãng phép chọn có trọng số).
+ *  · `preselect` — số mã điểm cao nhất được TÍCH SẴN khi mở khối (chỉ là giá trị khởi đầu của ô chọn).
+ *  · `refPhotos` — số ảnh sản phẩm thật (của mã cha) gửi máy vẽ cho MỘT thiết kế: cha trội + mẹ.
+ *  · `codeBase` — mã `TK-YYMMDD-NN` của thiết kế NGƯỜI đưa vào lô bắt đầu từ `codeBase + 1` (101…), tách khỏi
+ *    dải 01…(`maxBatchSize` + 10) của ô thiết kế máy lập: lô dựng SAU cú bấm vẫn cấp 01 cho ô của nó, và
+ *    trùng mã thì ô của máy bị bỏ (`insertComposed` không ghi đè thiết kế đã có).
+ */
+export const MANUAL_DESIGN = { maxInspirations: 6, preselect: 3, refPhotos: 2, codeBase: 100 } as const;
+
+/**
  * Vòng đời một ảnh gen tay:
  * `PLANNED` (chờ vẽ) → `DRAWING` (đang vẽ) → `GENERATED` (chờ người duyệt ảnh) → `APPROVED` (đã duyệt,
  * máy viết câu chữ) → `PROMOTED` (đã vào lô chờ duyệt đăng). `REJECTED` = người loại; `GEN_FAILED` = vẽ
