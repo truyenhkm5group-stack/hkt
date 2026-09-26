@@ -124,8 +124,9 @@ export async function setTechTaskStatusAction(input: unknown): Promise<TechResul
   // nhật ký và khiến người đọc tưởng có việc gì đó vừa xảy ra.
   if (!res.skipped) {
     await audit({ userId: user.id, userEmail: user.email, action: "TECH_TASK_STATUS", entity: "TECH_TASK", entityId: data.taskId, after: { status: data.to }, reason: data.note });
-    lamMoi(data.taskId);
   }
+  // Cả nhánh bấm lại đúng trạng thái cũng làm mới — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+  lamMoi(data.taskId);
   return { ok: true };
 }
 
@@ -284,6 +285,8 @@ export async function decideTechApprovalBulkAction(
     reason: data.note,
   });
 
+  // Không việc nào ký được thì vòng lặp không làm mới gì — làm mới danh sách ở đây để lượt gọi luôn mang giao diện mới.
+  lamMoi();
   return { ok: true, daKy, boQua: phan.boQua, cau: nhanLoatKy({ daKy, boQua: phan.boQua }, data.decision) };
 }
 
@@ -566,9 +569,10 @@ export async function setTechIncidentStatusAction(input: unknown): Promise<TechR
   if ("error" in res) return res;
   if (!res.skipped) {
     await audit({ userId: user.id, userEmail: user.email, action: "TECH_INCIDENT_STATUS", entity: "TECH_INCIDENT", entityId: data.incidentId, after: { status: data.to }, reason: data.resolution });
-    lamMoi();
-    revalidatePath(`/tech/incidents/${data.incidentId}`);
   }
+  // Cả nhánh `skipped` cũng làm mới — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+  lamMoi();
+  revalidatePath(`/tech/incidents/${data.incidentId}`);
   return { ok: true };
 }
 
@@ -794,7 +798,7 @@ export async function requestAgentFixAction(input: unknown): Promise<TechResult<
     after: { taskCode: res.taskCode, agentKey: res.agentKey, workflow: res.workflow, ref: res.ref, gates: data.gates, laLuotSua: true },
     reason: `Giao lại cho agent sửa theo review · còn ${res.conLaiGio}/giờ, ${res.conLaiNgay}/ngày`,
   });
-  lamMoi();
+  lamMoi(res.taskId);
   return { ok: true, taskCode: res.taskCode, agentKey: res.agentKey, conLaiGio: res.conLaiGio };
 }
 
@@ -831,6 +835,6 @@ export async function dispatchTaskToAgentAction(input: unknown): Promise<TechRes
     after: { taskCode: res.taskCode, agentKey: res.agentKey, workflow: res.workflow, ref: res.ref, gates: data.gates },
     reason: `Giao việc cho agent từ ERP · còn ${res.conLaiGio}/giờ, ${res.conLaiNgay}/ngày`,
   });
-  lamMoi();
+  lamMoi(res.taskId);
   return { ok: true, taskCode: res.taskCode, agentKey: res.agentKey, conLaiGio: res.conLaiGio };
 }

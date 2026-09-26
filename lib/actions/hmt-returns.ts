@@ -75,6 +75,8 @@ export async function uploadHmtWorkbook(input: unknown): Promise<Result<{ sha256
   */
   if (daCo) {
     await audit({ userId: user.id, userEmail: user.email, action: "HMT_WORKBOOK_UPLOAD", entity: "HMT_WORKBOOK", entityId: daCo.id, detail: { sha256, bytes: buffer.length, reused: true } });
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidate();
     return { ok: true, sha256, bytes: buffer.length, filename: parsed.data.filename, reused: true };
   }
 

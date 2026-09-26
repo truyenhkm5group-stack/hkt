@@ -63,7 +63,6 @@ export function ReviewToolbar({ departments }: { departments: { code: string; na
                 toast.success("Đã mở kỳ review");
                 setOpen(false);
                 router.push(`/work/review?id=${r.id}`);
-                router.refresh();
               })
             }
           >
@@ -86,7 +85,6 @@ export function ReviewPanel({ id, frozen, canManage, highlights, issues, nextAct
   const [i, setI] = useState(issues);
   const [n, setN] = useState(nextActions);
   const [pending, start] = useTransition();
-  const router = useRouter();
   const readOnly = frozen || !canManage;
 
   return (
@@ -96,7 +94,7 @@ export function ReviewPanel({ id, frozen, canManage, highlights, issues, nextAct
       actions={
         !frozen && canManage ? (
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" disabled={pending} onClick={() => start(async () => { const r = await saveReviewNotes({ id, highlights: h, issues: i, nextActions: n }); if ("error" in r) toast.error(r.error); else { toast.success("Đã lưu biên bản"); router.refresh(); } })}>
+            <Button size="sm" variant="outline" disabled={pending} onClick={() => start(async () => { const r = await saveReviewNotes({ id, highlights: h, issues: i, nextActions: n }); if ("error" in r) toast.error(r.error); else { toast.success("Đã lưu biên bản"); } })}>
               Lưu
             </Button>
             <Button
@@ -109,7 +107,6 @@ export function ReviewPanel({ id, frozen, canManage, highlights, issues, nextAct
                   const r = await finalizeReview(id);
                   if ("error" in r) { toast.error(r.error); return; }
                   toast.success("Đã chốt kỳ — số liệu của kỳ này từ nay đọc từ ảnh chụp");
-                  router.refresh();
                 })
               }
             >

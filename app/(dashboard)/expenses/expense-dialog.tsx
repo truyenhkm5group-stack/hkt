@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Plus } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -55,7 +54,6 @@ export function ExpenseDialog({
   const isOpen = open ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const form = useForm<ExpenseInput>({ resolver: zodResolver(expenseSchema), defaultValues: { ...toForm(expense), ...defaultValues } });
 
   useEffect(() => {
@@ -76,7 +74,6 @@ export function ExpenseDialog({
         toast.success(expense ? "Đã cập nhật chi phí" : "Đã thêm chi phí");
       }
       setOpen(false);
-      router.refresh();
     });
   };
 

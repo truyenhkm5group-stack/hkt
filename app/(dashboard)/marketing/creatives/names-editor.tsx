@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Save, Tags } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -16,7 +15,6 @@ import { variantNamesInputSchema } from "@/lib/validation/creative";
  * lưu ⇒ phiếu đã phát mất hiệu lực. Để trống một ô = dùng tên mặc định theo khuôn.
  */
 export function EditNamesButton({ variantId, slot, campaignName, adsetName, adName }: { variantId: string; slot: number; campaignName: string; adsetName: string; adName: string }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [c, setC] = useState(campaignName);
   const [a, setA] = useState(adsetName);
@@ -44,7 +42,6 @@ export function EditNamesButton({ variantId, slot, campaignName, adsetName, adNa
       }
       toast.success(r.changed ? `Đã lưu tên bài #${slot} — lô cần được bấm duyệt lại.` : "Tên không đổi.");
       setOpen(false);
-      router.refresh();
     });
 
   return (

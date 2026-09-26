@@ -44,7 +44,7 @@ import {
 export type PolicyActionResult = { ok: true; id?: string } | { error: string };
 
 /** Các màn hình đọc chính sách lương — không action nào được tự liệt kê chỗ khác. */
-const PAYROLL_SURFACES = ["/payroll", "/payroll/policies", "/payroll/assignments", "/payroll/adjustments", "/reports"] as const;
+const PAYROLL_SURFACES = ["/payroll", "/payroll/policies", "/payroll/assignments", "/payroll/adjustments", "/payroll/settings", "/payroll/migration", "/reports"] as const;
 function revalidate() {
   for (const p of PAYROLL_SURFACES) revalidatePath(p);
 }
@@ -845,6 +845,8 @@ export async function savePayrollStatutoryConfig(input: unknown): Promise<Policy
     if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
     const truoc = await getSettingJson<StatutoryConfig>(STATUTORY_DEDUCTION_KEY, DEFAULT_STATUTORY);
     if (truoc.state === parsed.data.state && truoc.legalBasis === parsed.data.legalBasis && truoc.note === parsed.data.note) {
+      // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+      revalidate();
       return { ok: true };
     }
 

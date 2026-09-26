@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Check, Pencil, Plus, Send, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { SampleStatusBadge } from "@/app/(dashboard)/production/_components/badges";
@@ -69,7 +68,6 @@ export function SamplesPanel({
   const [problems, setProblems] = useState("");
   const [reviewNote, setReviewNote] = useState<Record<string, string>>({});
   const [pending, start] = useNavTransition();
-  const router = useRouter();
   const coMauDangMo = samples.some((s) => SAMPLE_OPEN_STATUSES.includes(s.status));
   const truoc = samples[0];
 
@@ -115,7 +113,6 @@ export function SamplesPanel({
       if ("error" in r) toast.error(r.error);
       else {
         toast.success(r.noop ? "Mẫu đã ở trạng thái chờ duyệt" : `Đã gửi duyệt${r.lifecycle ? ` · ${r.lifecycle}` : ""}`);
-        router.refresh();
       }
     });
 

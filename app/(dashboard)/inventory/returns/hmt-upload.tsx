@@ -3,7 +3,6 @@
 import { useState, useTransition } from "react";
 import { FileUp, Loader2, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -29,7 +28,6 @@ import { formatDateTime, formatNumber } from "@/lib/format";
 export function HmtUpload({ current }: { current: { filename: string; sha256: string; bytes: number; uploadedBy: string; uploadedAt: Date; lastUsedAt: Date | null } | null }) {
   const [pending, start] = useTransition();
   const [ten, setTen] = useState("");
-  const router = useRouter();
 
   const onFile = async (list: FileList | null) => {
     const file = list?.[0];
@@ -47,7 +45,6 @@ export function HmtUpload({ current }: { current: { filename: string; sha256: st
       }
       // "Đã có rồi" KHÔNG phải lỗi: người dùng tải lại vì không chắc lần trước đã ăn chưa.
       toast.success(r.reused ? `Bản này đã có sẵn trên máy chủ (SHA-256 ${r.sha256.slice(0, 12)}…)` : `Đã nhận ${formatNumber(r.bytes)} byte · SHA-256 ${r.sha256.slice(0, 12)}…`);
-      router.refresh();
     });
   };
 

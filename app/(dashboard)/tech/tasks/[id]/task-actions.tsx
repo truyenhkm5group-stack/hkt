@@ -2,7 +2,6 @@
 
 import { CheckCircle2, Loader2, ShieldAlert, XCircle } from "lucide-react";
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -75,7 +74,6 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
   const [lyDoKy, setLyDoKy] = useState("");
   const [nhanh, setNhanh] = useState(branch);
   const [cay, setCay] = useState(worktree);
-  const router = useRouter();
 
   const chay = (fn: () => Promise<{ ok: true } | { error: string }>, thanhCong: string) =>
     start(async () => {
@@ -85,7 +83,6 @@ export function TechTaskActions({ taskId, taskCode, dispatchReason, status, prio
         return;
       }
       toast.success(thanhCong);
-      router.refresh();
     });
 
   const doiTrangThai = (to: TechTaskStatus, note?: string) => chay(() => setTechTaskStatusAction({ taskId, to, note }), `Đã chuyển sang “${TECH_TASK_STATUS_LABEL[to]}”`);

@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, History, Loader2, PackageX } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -124,7 +123,6 @@ function newRequestKey() {
 }
 
 function ActionForm({ row, disposition, onDone, canOverride }: { row: DispositionRowView; disposition: ReturnDisposition; onDone: () => void; canOverride: boolean }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const terminal = isTerminalDisposition(disposition);
   const [qty, setQty] = useState(String(row.remaining));
@@ -159,7 +157,6 @@ function ActionForm({ row, disposition, onDone, canOverride }: { row: Dispositio
           : `Đã ghi: ${DISPOSITION_LABEL[disposition]}${terminal ? ` · ${qty} món` : ""}`,
       );
       onDone();
-      router.refresh();
     });
 
   return (

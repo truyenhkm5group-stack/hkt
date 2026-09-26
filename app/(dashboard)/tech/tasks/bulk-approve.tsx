@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Check, Loader2, X } from "lucide-react";
 import { decideTechApprovalBulkAction } from "@/lib/actions/tech";
 import { Button } from "@/components/ui/button";
@@ -29,7 +28,6 @@ export function BulkApprove({ rows, clear }: { rows: TechTaskListRow[]; clear: (
   const [dang, batDau] = useTransition();
   const [bao, setBao] = useState<{ ok: boolean; text: string } | null>(null);
   const [note, setNote] = useState("");
-  const router = useRouter();
 
   const ids = rows.map((r) => r.id);
   /*
@@ -70,7 +68,6 @@ export function BulkApprove({ rows, clear }: { rows: TechTaskListRow[]; clear: (
            vừa quét mà chưa biết vì sao chẳng có gì xảy ra. */
         if (r.daKy > 0) clear();
       }
-      router.refresh();
     });
 
   return (

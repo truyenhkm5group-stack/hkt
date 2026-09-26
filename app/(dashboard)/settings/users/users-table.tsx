@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { KeyRound, Loader2, Lock, LockOpen, LogOut, MoreHorizontal, Pencil, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { PermissionsDialog } from "@/app/(dashboard)/settings/users/permissions-dialog";
@@ -30,7 +29,6 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
   const [lockOpen, setLockOpen] = useState(false);
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const canLock = !isSelf && !(user.active && isLastAdmin);
 
   const toggleActive = () => {
@@ -42,7 +40,6 @@ function UserRowActions({ user, isSelf, isLastAdmin, templates }: { user: UserRo
       }
       toast.success(user.active ? `Đã khoá ${user.email}` : `Đã mở khoá ${user.email}`);
       setLockOpen(false);
-      router.refresh();
     });
   };
 

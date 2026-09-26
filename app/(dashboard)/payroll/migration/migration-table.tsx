@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import { TableToolsFor } from "@/components/data-table/table-tools";
-import { useRouter } from "next/navigation";
 import { ArrowRight, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -40,7 +39,6 @@ const STATUS_CLASS: Record<MigrationStatus, string> = {
 };
 
 export function MigrationTable({ rows, effectiveFrom }: { rows: Row[]; effectiveFrom: string }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [reasonFor, setReasonFor] = useState<string | null>(null);
   const [reason, setReason] = useState("");
@@ -63,7 +61,6 @@ export function MigrationTable({ rows, effectiveFrom }: { rows: Row[]; effective
       toast.success(`Đã chuyển ${r.proposal.employeeName} sang máy tính chung, hiệu lực từ ${effectiveFrom}`);
       setReasonFor(null);
       setReason("");
-      router.refresh();
     });
 
   if (!rows.length) {

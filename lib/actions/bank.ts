@@ -47,6 +47,7 @@ const b = schema.bankTransactions;
 
 function revalidateAll() {
   revalidatePath("/bank");
+  revalidatePath("/finance-ops");
   revalidatePath("/expenses");
   revalidatePath("/reports");
   revalidatePath("/");
@@ -183,6 +184,8 @@ export async function updateBankAccount(input: unknown): Promise<{ ok: true } | 
   // ai nhận ra là tài khoản nào.
   const tenMoi = label !== undefined && label.length > 0 ? label : truoc.label;
   if (tenMoi === truoc.label && note === undefined && (status === undefined || status === truoc.status)) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidateAll();
     return { ok: true };
   }
 
@@ -550,7 +553,11 @@ export async function autoConfirmExactMatches(): Promise<{ ok: true; confirmed: 
 
   const overview = await getMatchOverview(500);
   const chacChan = overview.suggestions.filter((s) => AUTO_CONFIRMABLE[s.confidence] && s.target);
-  if (!chacChan.length) return { ok: true, confirmed: 0, message: "Không có khớp chắc chắn nào để tự nối" };
+  if (!chacChan.length) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidateAll();
+    return { ok: true, confirmed: 0, message: "Không có khớp chắc chắn nào để tự nối" };
+  }
 
   let done = 0;
   for (const s of chacChan) {

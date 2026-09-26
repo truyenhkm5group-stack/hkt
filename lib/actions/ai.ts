@@ -1,6 +1,7 @@
 "use server";
 
 import { bacChoLuotHoi } from "@/lib/constants/ai-budget";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { CopilotConfirmResult, CopilotResult, CopilotToolInfo } from "@/lib/ai/contracts";
 import { confirmCopilotActions as confirmCore, runCopilot } from "@/lib/ai/copilot";
@@ -37,7 +38,11 @@ export async function confirmCopilotActions(input: z.input<typeof confirmSchema>
   const user = await requireUser();
   const parsed = confirmSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
-  return confirmCore({ user, ...parsed.data });
+  const r = await confirmCore({ user, ...parsed.data });
+  // Copilot nằm trên bố cục (mọi trang): có hành động ghi thành công thì làm mới cả bố cục — lượt gọi
+  // mang luôn giao diện mới của trang đang đứng, client không cần router.refresh().
+  if ("ok" in r && r.data.executed.some((x) => x.ok)) revalidatePath("/", "layout");
+  return r;
 }
 
 /**

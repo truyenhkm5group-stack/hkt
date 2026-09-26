@@ -1,7 +1,6 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Check, Loader2, Play, RefreshCw, Save, Send, Undo2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -55,7 +54,6 @@ export function MarkAllReadButton() {
 /** TIẾP NHẬN — "tôi đang làm việc này". Khác đã đọc, khác đã xong. */
 export function AcknowledgeButton({ id }: { id: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <Button
       variant="outline"
@@ -66,7 +64,6 @@ export function AcknowledgeButton({ id }: { id: string }) {
         startTransition(async () => {
           const r = await acknowledgeCase(id);
           if ("error" in r) toast.error(r.error);
-          else router.refresh();
         })
       }
     >
@@ -119,7 +116,6 @@ export function ResolveButton({ id }: { id: string }) {
 /** BẮT ĐẦU LÀM — khác "tôi nhận": giơ tay không phải là đang chạy. */
 export function StartButton({ id }: { id: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <Button
       variant="outline"
@@ -130,7 +126,6 @@ export function StartButton({ id }: { id: string }) {
         startTransition(async () => {
           const r = await startCase(id);
           if ("error" in r) toast.error(r.error);
-          else router.refresh();
         })
       }
     >
@@ -289,7 +284,6 @@ export function AlertConfigForm({
   const [pending, startTransition] = useTransition();
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const router = useRouter();
   /*
     THAY ĐỔI CHƯA LƯU PHẢI NHÌN THẤY ĐƯỢC.
 
@@ -319,7 +313,6 @@ export function AlertConfigForm({
         setSaveError(null);
         setSavedAt(new Date());
         toast.success("Đã lưu cấu hình cảnh báo");
-        router.refresh();
       }
     });
   const test = () =>

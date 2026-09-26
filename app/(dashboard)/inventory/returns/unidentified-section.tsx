@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Boxes, Check, HelpCircle, Link2, Loader2, PackageSearch, Search, ShieldAlert, Tag } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -431,7 +430,6 @@ function NhanKienSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (v
 // ───────────────────────── MỘT DÒNG HÀNG GIỮ TẠM ─────────────────────────
 
 function HoldingRow({ row, canOverride, inLedger }: { row: UnidentifiedRow; canOverride: boolean; inLedger: boolean }) {
-  const router = useRouter();
   const [dangChay, setDangChay] = React.useState(false);
   const [moTra, setMoTra] = React.useState(false);
   const [picked, setPicked] = React.useState<Candidate | null>(null);
@@ -452,7 +450,6 @@ function HoldingRow({ row, canOverride, inLedger }: { row: UnidentifiedRow; canO
       return false;
     }
     toast.success(("message" in r && r.message) || "Đã cập nhật", { duration: 8000 });
-    router.refresh();
     return true;
   }
 

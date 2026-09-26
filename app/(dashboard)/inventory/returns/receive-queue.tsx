@@ -5,7 +5,6 @@ import { TableToolsFor } from "@/components/data-table/table-tools";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { parseAsString, useQueryState } from "nuqs";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PackageCheck, Search, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
@@ -104,7 +103,6 @@ export function ReceiveQueue({ rows, total, loaded, searching, canWrite }: { row
   }, [q, urlQ, setUrlQ]);
   const [open, setOpen] = useState<QueueRow | null>(null);
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   /*
     Lọc thêm TẠI CHỖ trên phần máy chủ đã trả về — chỉ để gõ tới đâu thấy tới đó trong lúc chờ, và
@@ -140,7 +138,6 @@ export function ReceiveQueue({ rows, total, loaded, searching, canWrite }: { row
       }
       toast.success(r.message);
       setSelected(new Set());
-      router.refresh();
     });
   };
 
@@ -356,7 +353,6 @@ export function ReceiveQueue({ rows, total, loaded, searching, canWrite }: { row
                         }
                         toast.success(r.message);
                         setOpen(null);
-                        router.refresh();
                       })
                     }
                   >

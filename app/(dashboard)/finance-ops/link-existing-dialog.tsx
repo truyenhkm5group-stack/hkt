@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Link2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -27,7 +26,6 @@ export function LinkExistingDialog({ txnId, type, label = "Liên kết khoản c
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   useEffect(() => {
     if (!open) return;
@@ -51,7 +49,6 @@ export function LinkExistingDialog({ txnId, type, label = "Liên kết khoản c
       }
       toast.success("Đã nối giao dịch với chứng từ");
       setOpen(false);
-      router.refresh();
     });
 
   return (

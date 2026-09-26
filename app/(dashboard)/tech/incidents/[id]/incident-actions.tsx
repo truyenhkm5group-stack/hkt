@@ -2,7 +2,6 @@
 
 import { Loader2 } from "lucide-react";
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -41,7 +40,6 @@ export function TechIncidentActions({
   const [giamThieu, setGiamThieu] = useState(mitigation);
   const [ketQua, setKetQua] = useState(resolution);
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   const chuyen = (to: TechIncidentStatus) =>
     start(async () => {
@@ -51,7 +49,6 @@ export function TechIncidentActions({
         return;
       }
       toast.success(`Đã chuyển sang “${TECH_INCIDENT_STATUS_LABEL[to]}”`);
-      router.refresh();
     });
 
   const nuocDi = TECH_INCIDENT_TRANSITIONS[status];

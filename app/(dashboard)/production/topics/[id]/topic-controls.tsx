@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useNavTransition } from "@/components/nav-progress";
 import { Button } from "@/components/ui/button";
@@ -63,7 +62,6 @@ export function TopicStatusControl({ topicId, status }: { topicId: string; statu
   const [note, setNote] = useState("");
   const [option, setOption] = useState("");
   const [pending, start] = useNavTransition();
-  const router = useRouter();
   const doi = () =>
     start(async () => {
       if (!to) return;
@@ -75,7 +73,6 @@ export function TopicStatusControl({ topicId, status }: { topicId: string; statu
       setTo(null);
       setNote("");
       setOption("");
-      router.refresh();
     });
   const nuocDi = TOPIC_TRANSITIONS[status];
   return (

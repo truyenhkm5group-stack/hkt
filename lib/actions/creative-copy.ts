@@ -48,7 +48,11 @@ export async function saveVariantCopy(raw: unknown): Promise<{ ok: true; changed
   const db = await getDb();
   const r = await saveVariantCopyCore(db, parsed.data, new Date());
   if (!r.ok) return { error: r.error };
-  if (!r.changed) return { ok: true, changed: false, warnings: r.warnings };
+  if (!r.changed) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidatePath(PATH);
+    return { ok: true, changed: false, warnings: r.warnings };
+  }
 
   await audit({
     userId: user.id,

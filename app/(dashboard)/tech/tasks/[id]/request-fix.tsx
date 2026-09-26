@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -20,7 +19,6 @@ export function RequestFix({ taskCode, branch, soLuot }: { taskCode: string; bra
   const [pending, start] = useTransition();
   const [mo, setMo] = useState(false);
   const [phanHoi, setPhanHoi] = useState("");
-  const router = useRouter();
 
   const n = phanHoi.trim().length;
   const du = n >= RERUN_RULE.minFeedbackChars && n <= RERUN_RULE.maxFeedbackChars;
@@ -85,7 +83,6 @@ export function RequestFix({ taskCode, branch, soLuot }: { taskCode: string; bra
                 toast.success(`Đã giao ${res.taskCode} cho agent ${res.agentKey} sửa — còn ${res.conLaiGio} lượt trong giờ này.`);
                 setMo(false);
                 setPhanHoi("");
-                router.refresh();
               })
             }
           >

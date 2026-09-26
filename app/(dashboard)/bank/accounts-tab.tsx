@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { AlertTriangle, Check, Loader2, Pencil, Power } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -43,7 +42,6 @@ export function BankAccountsTab({
   const [pending, startTransition] = useTransition();
   const [dang, setDang] = useState<BankAccountRow | null>(null);
   const [ten, setTen] = useState("");
-  const router = useRouter();
 
   const chuaXacNhan = accounts.filter((a) => a.status === "UNCONFIRMED");
 
@@ -56,7 +54,6 @@ export function BankAccountsTab({
       }
       toast.success(values.status === "ACTIVE" ? "Đã xác nhận tài khoản" : values.status === "DISABLED" ? "Đã ngừng dùng tài khoản" : "Đã lưu tên tài khoản");
       setDang(null);
-      router.refresh();
     });
 
   return (

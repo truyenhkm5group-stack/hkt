@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -37,7 +36,6 @@ export function PayrollSettingsForm({
   payrollCovered: boolean;
   statutory: StatutoryConfig;
 }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [c, setC] = useState({ enabled: carryover.enabled, startMonth: carryover.startMonth ?? "", startNote: carryover.startNote });
   const [mode, setMode] = useState(recognitionMode);
@@ -51,7 +49,6 @@ export function PayrollSettingsForm({
         return;
       }
       toast.success(c.enabled ? `Đã bật sổ lỗ lũy kế từ tháng ${c.startMonth}` : "Đã tắt sổ lỗ lũy kế");
-      router.refresh();
     });
 
   const luuMode = (v: "LEGACY_EXPENSES" | "PAYROLL") =>
@@ -63,7 +60,6 @@ export function PayrollSettingsForm({
       }
       setMode(v);
       toast.success("Đã đổi nguồn ghi nhận chi phí nhân sự");
-      router.refresh();
     });
 
   const luuStatutory = () =>
@@ -74,7 +70,6 @@ export function PayrollSettingsForm({
         return;
       }
       toast.success(`Đã khai khấu trừ theo luật: ${STATUTORY_STATE_LABEL[st.state]}`);
-      router.refresh();
     });
 
   return (

@@ -129,7 +129,8 @@ export async function setProductionTopicStatus(input: unknown): Promise<Result<{
   if ("error" in r) return r;
   if (!r.noop) {
     await audit({ userId: user.id, userEmail: user.email, action: "PRODUCTION_TOPIC_STATUS", entity: "PRODUCTION_TOPIC", entityId: parsed.data.topicId, before: { status: r.from }, after: { status: r.to, selectedOption: parsed.data.selectedOption }, reason: parsed.data.note ?? undefined });
-    revalidateProduction(parsed.data.topicId);
   }
+  // Cả nhánh `noop` cũng làm mới — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+  revalidateProduction(parsed.data.topicId);
   return { ok: true, noop: r.noop };
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Check, Clock, X } from "lucide-react";
 import { useNavTransition } from "@/components/nav-progress";
@@ -23,7 +22,6 @@ import { addDays, todayVN } from "@/lib/format";
  */
 export function DecisionControls({ kind, sourceKey, accepted, from }: { kind: OwnerDecisionKind; sourceKey: string; accepted: boolean; from: "home" | "cockpit" }) {
   const [pending, start] = useNavTransition();
-  const router = useRouter();
   const [dialog, setDialog] = useState<null | "DISMISSED" | "SNOOZED">(null);
   const [reason, setReason] = useState("");
   const [date, setDate] = useState(() => addDays(todayVN(), 1));
@@ -38,7 +36,6 @@ export function DecisionControls({ kind, sourceKey, accepted, from }: { kind: Ow
       toast.success(r.skipped ? "Đã ghi từ trước — không ghi thêm" : decision === "ACCEPTED" ? "Đã ghi: chấp nhận. Việc vẫn nằm đây tới khi làm xong ở màn hình chủ." : decision === "DISMISSED" ? "Đã bỏ qua — hiện lại khi nguồn đổi kết luận." : `Sẽ nhắc lại từ ${date.split("-").reverse().join("/")}.`);
       setDialog(null);
       setReason("");
-      router.refresh();
     });
 
   const lyDoDu = reason.trim().length >= DISMISS_REASON_MIN;
