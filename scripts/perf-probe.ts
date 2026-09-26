@@ -527,7 +527,7 @@ async function main() {
   /*
     ═══ THANG BẬC TỶ LỆ ĐO RIÊNG, VÌ NÓ LÀ CHI PHÍ DÙNG CHUNG CHỨ KHÔNG PHẢI CHI PHÍ CỦA TRANG ═══
 
-    `productDeliveryRates` kéo theo hợp đồng `PROJECTED_GTC_V3` — bảng xác suất học từ ~19.000 dòng
+    `productDeliveryRates` kéo theo hợp đồng `PROJECTED_GTC_V4` — bảng xác suất học từ ~19.000 dòng
     `shipment_events`. Nó có bộ đệm riêng 90 giây và Báo cáo lợi nhuận danh nghĩa cũng gọi nó, nên
     LƯỢT ĐẦU của bất kỳ trang nào cũng trả tiền, còn lượt sau thì không.
 

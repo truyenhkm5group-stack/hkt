@@ -13,6 +13,7 @@ import {
   MIN_CELL_SAMPLE,
   MODELLED_SUBSTATES,
   NOT_SHIPPED_STATE,
+  OWN_PRODUCT_BASES,
   PROJECTED_GTC_VERSION,
   projectedRateOf,
   summarizeBacktest,
@@ -77,8 +78,8 @@ type Corpus = {
   shipments: LabelledShipment[];
   /** Sự kiện ĐVVC của các kiện đó, mỗi kiện một danh sách TĂNG DẦN theo thời gian. */
   events: Map<string, CarrierEventLite[]>;
-  /** Đơn chốt trong cửa sổ (cho P(chưa gửi)), nhãn theo ORDER_OUTCOME. */
-  orders: { insertedAt: Date; outcome: string }[];
+  /** Đơn chốt trong cửa sổ (cho P(chưa gửi)), nhãn theo ORDER_OUTCOME. `productCode` chỉ khi đơn thuộc ĐÚNG MỘT mã. */
+  orders: { insertedAt: Date; outcome: string; productCode: string | null }[];
 };
 
 /**
@@ -180,12 +181,12 @@ async function taiKho(): Promise<Corpus> {
       `offset 0` ở dưới là hàng rào tối ưu hoá CỐ Ý (chặn Postgres kéo `where k.outcome in (…)`
       vào trong và tính biểu thức kết quả nhiều lần) — giữ nguyên, nó không liên quan tới JIT.
     */
-    const donRows = rowsOf<{ inserted_at: unknown; outcome: string }>(
+    const donRows = rowsOf<{ id: string; inserted_at: unknown; outcome: string }>(
       await chayKhongJit(db, (tx) =>
         tx.execute(sql`
-        select k.inserted_at, k.outcome
+        select k.id, k.inserted_at, k.outcome
           from (
-            select "orders"."inserted_at" as inserted_at, ${ORDER_OUTCOME_FAST} as outcome
+            select "orders"."id" as id, "orders"."inserted_at" as inserted_at, ${ORDER_OUTCOME_FAST} as outcome
               from "orders"
               left join "shipments" on "shipments"."order_id" = "orders"."id" and ${PRIMARY_ATTEMPT}
              where ${REPORTABLE_ORDER} and "orders"."inserted_at" >= ${since}
@@ -196,9 +197,30 @@ async function taiKho(): Promise<Corpus> {
       `),
       ),
     );
+    /*
+      MÃ HÀNG CỦA ĐƠN CHỐT — cùng luật "đúng một mã" với kiện ở trên, để P(chưa rời kho) học được
+      RIÊNG từng mã (V4). Đơn nhiều mã chỉ góp vào ô toàn shop.
+    */
+    const maTheoDon = new Map<string, string>();
+    const donIds = donRows.map((r) => r.id);
+    for (let i = 0; i < donIds.length; i += EVENT_ID_CHUNK) {
+      const chunk = donIds.slice(i, i + EVENT_ID_CHUNK);
+      const rows = rowsOf<{ order_id: string; code: string | null }>(
+        await db.execute(sql`
+          select oi.order_id,
+                 case when count(distinct p.custom_id) = 1 then min(p.custom_id) else null end as code
+            from order_items oi
+            join product_variants pv on pv.id = oi.variant_id
+            join products p on p.id = pv.product_id and coalesce(p.custom_id, '') <> ''
+           where oi.is_bonus = false and oi.order_id in (${sql.join(chunk.map((id) => sql`${id}`), sql`, `)})
+           group by oi.order_id
+        `),
+      );
+      for (const r of rows) if (r.code) maTheoDon.set(r.order_id, r.code);
+    }
     const orders = donRows.flatMap((r) => {
       const insertedAt = toDate(r.inserted_at);
-      return insertedAt ? [{ insertedAt, outcome: r.outcome }] : [];
+      return insertedAt ? [{ insertedAt, outcome: r.outcome, productCode: maTheoDon.get(r.id) ?? null }] : [];
     });
     return { loadedAt, shipments, events, orders };
   });
@@ -286,11 +308,18 @@ export type StateProbabilities = {
   states: StateProbability[];
   /** Mọi ô của bốn bậc — bậc hẹp dùng trước, và màn hình đọc được ô nào đang đỡ con số nào. */
   cells: ProbabilityCell[];
-  /** P(giao thành công │ đơn chốt nhưng chưa gửi) — chỉ dùng cho doanh thu cohort theo ngày chốt. */
+  /** P(giao thành công │ đơn chốt nhưng chưa gửi) TOÀN SHOP — chỉ còn cho đơn không lần được về một mã. */
   notShipped: StateProbability;
+  /** V4: P(chưa rời kho) của TỪNG mã — học từ đơn chốt đã kết thúc (kể cả huỷ) thuộc đúng mã đó. */
+  notShippedByProduct: ProductRate[];
+  /** V4: bậc `PRODUCT_ALL` — tỷ lệ giao được của từng mã trên mọi kiện đã kết thúc, không tách trạng thái. */
+  productBase: ProductRate[];
   totalSample: number;
   window: MaturityWindow;
 };
+
+/** Một tỷ lệ học riêng cho MỘT mã hàng. `p = null` khi mẫu 0 — chưa đo được, không phải 0%. */
+export type ProductRate = { productCode: string; sample: number; delivered: number; p: number | null; confidence: ProbabilityConfidence };
 
 /** Khoá của một ô. `null` in ra thành chuỗi rỗng — hai khoá khác bậc không bao giờ trùng nhau. */
 function khoaO(basis: ProbabilityBasis, substate: string, productCode: string | null, age: AgeBucket | null): string {
@@ -376,11 +405,20 @@ function hocXacSuat(kho: Corpus, cutoff: Date | null): StateProbabilities {
       if (k.productCode) {
         ghi("PRODUCT_STATE", con, k.productCode, null, k.id, giao);
         ghi("PRODUCT_STATE_AGE", con, k.productCode, age, k.id, giao);
+        // Mọi trạng thái gộp một ô — tập `daDem` giữ một kiện là MỘT quan sát dù nhiều mốc rơi vào.
+        ghi("PRODUCT_ALL", "", k.productCode, null, k.id, giao);
       }
     }
   }
+  const productBase: ProductRate[] = [];
+  const cellsTheoMa: [string, OAcc][] = [];
+  for (const [key, r] of o) {
+    const [basis, , code] = key.split("|");
+    if (basis === "PRODUCT_ALL") productBase.push({ productCode: code, sample: r.mau, delivered: r.giao, p: r.mau > 0 ? r.giao / r.mau : null, confidence: confidenceOf(r.mau) });
+    else cellsTheoMa.push([key, r]);
+  }
 
-  const cells: ProbabilityCell[] = [...o.entries()].map(([key, r]) => {
+  const cells: ProbabilityCell[] = cellsTheoMa.map(([key, r]) => {
     const [basis, substate, code, age] = key.split("|");
     return {
       basis: basis as ProbabilityBasis,
@@ -410,13 +448,21 @@ function hocXacSuat(kho: Corpus, cutoff: Date | null): StateProbabilities {
   */
   let nsMau = 0;
   let nsGiao = 0;
+  const nsTheoMa = new Map<string, OAcc>();
   for (const don of kho.orders) {
     if (don.insertedAt < window.trainedFrom || don.insertedAt > window.trainedUntil) continue;
     nsMau += 1;
     if (don.outcome === "DELIVERED") nsGiao += 1;
+    if (don.productCode) {
+      const cur = nsTheoMa.get(don.productCode) ?? { mau: 0, giao: 0 };
+      cur.mau += 1;
+      if (don.outcome === "DELIVERED") cur.giao += 1;
+      nsTheoMa.set(don.productCode, cur);
+    }
   }
   const notShipped = dong(NOT_SHIPPED_STATE, "Chưa gửi ĐVVC", { mau: nsMau, giao: nsGiao });
-  return { version: PROJECTED_GTC_VERSION, states, cells, notShipped, totalSample: states.reduce((a, s) => a + s.sample, 0), window };
+  const notShippedByProduct: ProductRate[] = [...nsTheoMa].map(([productCode, r]) => ({ productCode, sample: r.mau, delivered: r.giao, p: r.mau > 0 ? r.giao / r.mau : null, confidence: confidenceOf(r.mau) }));
+  return { version: PROJECTED_GTC_VERSION, states, cells, notShipped, notShippedByProduct, productBase, totalSample: states.reduce((a, s) => a + s.sample, 0), window };
 }
 
 const FINISHED_SET = new Set(["DELIVERED", "RETURNED", "RETURNED_BY_RULE"]);
@@ -442,33 +488,50 @@ export type ProbabilityLookup = {
   states: StateProbability[];
   cells: ProbabilityCell[];
   notShipped: StateProbability;
+  notShippedByProduct: ProductRate[];
+  productBase: ProductRate[];
   window: MaturityWindow;
 };
 
 function dungBangTra(bang: StateProbabilities): ProbabilityLookup {
   const theoO = new Map<string, ProbabilityCell>();
   for (const c of bang.cells) theoO.set(khoaO(c.basis, c.substate, c.productCode, c.age), c);
+  const nenCuaMa = new Map(bang.productBase.map((r) => [r.productCode, r]));
+  const chuaGuiCuaMa = new Map(bang.notShippedByProduct.map((r) => [r.productCode, r]));
 
   const chuaDoDuoc = (sample: number, confidence: ProbabilityConfidence): ProbabilityHit => ({ p: null, basis: "NONE", confidence, sample });
+  /** Bậc `PRODUCT_ALL` của một mã, hoặc `null` khi mã chưa đủ `MIN_CELL_SAMPLE` kiện đã kết thúc. */
+  const nenMa = (code: string): ProbabilityHit | null => {
+    const r = nenCuaMa.get(code);
+    return r && r.p !== null && r.sample >= MIN_CELL_SAMPLE ? { p: r.p, basis: "PRODUCT_ALL", confidence: r.confidence, sample: r.sample } : null;
+  };
 
   return {
     version: bang.version,
     states: bang.states,
     cells: bang.cells,
     notShipped: bang.notShipped,
+    notShippedByProduct: bang.notShippedByProduct,
+    productBase: bang.productBase,
     window: bang.window,
     of: (state, ctx) => {
       /*
         ĐƠN CHƯA GỬI không có trạng thái ĐVVC và cũng không có tuổi kiện — nó nằm ngoài mọi bậc điều
         kiện hoá và đọc thẳng ô riêng của nó.
       */
+      const code = ctx?.productCode ?? null;
       if (state === NOT_SHIPPED_STATE) {
+        // V4: có mã ⇒ CHỈ số của chính mã (chưa rời kho → tỷ lệ chung của mã → chưa đo được).
+        if (code) {
+          const r = chuaGuiCuaMa.get(code);
+          if (r && r.p !== null && r.sample >= MIN_CELL_SAMPLE) return { p: r.p, basis: "PRODUCT_STATE", confidence: r.confidence, sample: r.sample };
+          return nenMa(code) ?? chuaDoDuoc(r?.sample ?? 0, r?.confidence ?? "INSUFFICIENT_DATA");
+        }
         const ns = bang.notShipped;
         if (ns.p === null || ns.confidence === "INSUFFICIENT_DATA") return chuaDoDuoc(ns.sample, ns.confidence);
         return { p: ns.p, basis: "GLOBAL_STATE", confidence: ns.confidence, sample: ns.sample };
       }
 
-      const code = ctx?.productCode ?? null;
       const age = typeof ctx?.ageHours === "number" && Number.isFinite(ctx.ageHours) ? ageBucketOf(ctx.ageHours) : null;
 
       /*
@@ -477,17 +540,25 @@ function dungBangTra(bang: StateProbabilities): ProbabilityLookup {
         hệt một con số đo từ 600 quan sát.
       */
       const bacs: { basis: ProbabilityBasis; key: string }[] = [];
-      if (code && age) bacs.push({ basis: "PRODUCT_STATE_AGE", key: khoaO("PRODUCT_STATE_AGE", state, code, age) });
-      if (code) bacs.push({ basis: "PRODUCT_STATE", key: khoaO("PRODUCT_STATE", state, code, null) });
-      if (age) bacs.push({ basis: "GLOBAL_STATE_AGE", key: khoaO("GLOBAL_STATE_AGE", state, null, age) });
-      bacs.push({ basis: "GLOBAL_STATE", key: khoaO("GLOBAL_STATE", state, null, null) });
+      if (code) {
+        // V4: có mã ⇒ KHÔNG có bậc toàn shop. Hết bậc của mã thì `PRODUCT_ALL`, rồi chưa đo được.
+        if (age) bacs.push({ basis: "PRODUCT_STATE_AGE", key: khoaO("PRODUCT_STATE_AGE", state, code, age) });
+        bacs.push({ basis: "PRODUCT_STATE", key: khoaO("PRODUCT_STATE", state, code, null) });
+      } else {
+        if (age) bacs.push({ basis: "GLOBAL_STATE_AGE", key: khoaO("GLOBAL_STATE_AGE", state, null, age) });
+        bacs.push({ basis: "GLOBAL_STATE", key: khoaO("GLOBAL_STATE", state, null, null) });
+      }
 
       let rong: ProbabilityCell | undefined;
       for (const b of bacs) {
         const c = theoO.get(b.key);
-        if (b.basis === "GLOBAL_STATE") rong = c;
+        if (b.basis === "GLOBAL_STATE" || b.basis === "PRODUCT_STATE") rong = c;
         if (!c || c.p === null || c.sample < MIN_CELL_SAMPLE) continue;
         return { p: c.p, basis: b.basis, confidence: c.confidence, sample: c.sample };
+      }
+      if (code) {
+        const nen = nenMa(code);
+        if (nen) return nen;
       }
       // Hết bậc: trả `null` kèm cỡ mẫu của bậc rộng nhất, để màn hình nói được "mới N ca".
       return chuaDoDuoc(rong?.sample ?? 0, rong?.confidence ?? "INSUFFICIENT_DATA");
@@ -769,8 +840,9 @@ function accMoi(): Acc {
  * Hàm này KHÔNG đụng tới `eligibleSent`, `active` hay `projectedDelivered`: tiền và tỷ lệ GTC là
  * hai chiều riêng (đặc tả §1), và một kiện chưa rời kho không nằm trong tỷ lệ nào.
  */
-function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number; qty: number; cogsUnknownQty: number }, lookup: ProbabilityLookup): boolean {
-  const tra = lookup.of(NOT_SHIPPED_STATE);
+function canTienConTrongKho(acc: Acc, don: { revenue: number; cogs: number; qty: number; cogsUnknownQty: number; productCode: string | null }, lookup: ProbabilityLookup): boolean {
+  // V4: P(chưa rời kho) của CHÍNH mã khi đơn mang mã — không bao giờ tỷ lệ toàn shop.
+  const tra = lookup.of(NOT_SHIPPED_STATE, { productCode: don.productCode });
   if (tra.p === null) {
     acc.unmodelledRevenue += don.revenue;
     return false;
@@ -863,7 +935,7 @@ function canMotDon(
         acc.unmodelledRevenue += don.revenue;
       } else {
         // Bậc `PRODUCT_*` là quan sát của CHÍNH MÃ; `GLOBAL_*` là mượn. `NONE` không tới được đây.
-        if (tra.basis === "PRODUCT_STATE_AGE" || tra.basis === "PRODUCT_STATE") acc.projectedFromOwn += tra.p;
+        if (OWN_PRODUCT_BASES.includes(tra.basis)) acc.projectedFromOwn += tra.p;
         else acc.projectedFromGlobal += tra.p;
         acc.projectedDelivered += tra.p;
         acc.projectedDeliveredRevenue += don.revenue * tra.p;
@@ -905,7 +977,7 @@ export function orderDeliveryShare(don: { outcome: string; con: string; productC
       return 0;
     case "NOT_SHIPPED":
     case "AWAITING_PICKUP":
-      return lookup.of(NOT_SHIPPED_STATE).p;
+      return lookup.of(NOT_SHIPPED_STATE, { productCode: don.productCode }).p;
     case "IN_TRANSIT": {
       const con = don.con as CarrierSubstate;
       return isModelledSubstate(con) ? lookup.of(con, { productCode: don.productCode, ageHours: don.ageHours }).p : null;
@@ -1060,7 +1132,7 @@ export async function getProjectedDeliveryMetrics(
     /* Mã hàng THẬT (custom_id) của từng đơn — để biết đơn thuộc đúng một mã hay nhiều mã. */
     const maHangCuaDon = new Map<string, Set<string>>();
     /* Dòng-mã chờ cân: phải đợi quét hết mới biết đơn có mấy mã, mà mã quyết định bậc điều kiện hoá. */
-    const choCan: { key: string; outcome: string; con: string; revenue: number; cogs: number; qty: number; cogsUnknownQty: number; orderId: string }[] = [];
+    const choCan: { key: string; outcome: string; con: string; revenue: number; cogs: number; qty: number; cogsUnknownQty: number; orderId: string; productCode: string | null }[] = [];
 
     for (const r of rows) {
       const cogs = Number(r.line_cogs ?? 0);
@@ -1102,13 +1174,17 @@ export async function getProjectedDeliveryMetrics(
       if (!theoMa.has(key)) theoMa.set(key, { ...accMoi(), key, code: (r.code ?? "").trim() || key, name: r.name ?? "" });
       // Doanh thu của mã trong đơn = tổng dòng hàng của mã đó; không có dòng nào thì lấy tiền đơn.
       const doanhThu = Number(r.line_total ?? 0) || Number(r.order_total ?? 0);
-      choCan.push({ key, outcome: r.outcome, con: r.con, revenue: doanhThu, cogs, qty: soLuong, cogsUnknownQty: Number(r.cogs_unknown_qty ?? 0), orderId: r.order_id });
+      choCan.push({ key, outcome: r.outcome, con: r.con, revenue: doanhThu, cogs, qty: soLuong, cogsUnknownQty: Number(r.cogs_unknown_qty ?? 0), orderId: r.order_id, productCode: maHang || null });
     }
 
     /*
-      MÃ HÀNG DÙNG ĐỂ ĐIỀU KIỆN HOÁ chỉ tồn tại khi đơn thuộc ĐÚNG MỘT mã — cùng luật với kho huấn
-      luyện (`taiKho`). Đơn hai mã đi xuống bậc toàn shop: không có gì trong dữ liệu nói mã nào
-      quyết định kết cục, và dùng một trong hai là gán xác suất của mã này cho kiện của mã kia.
+      MÃ HÀNG DÙNG ĐỂ ĐIỀU KIỆN HOÁ — V4 (chủ shop chốt 26/09/2026):
+        · DÒNG THEO MÃ: mã của CHÍNH dòng (`x.productCode`), kể cả khi đơn có thêm mã khác. Dòng Q004
+          của một đơn Q004 + Q002 được cân bằng số của Q004 — không bao giờ bằng số của Q002, và
+          không bằng tỷ lệ toàn shop (vốn là số của Q002 mặc áo khác).
+        · GRAIN ĐƠN (con số toàn shop): đơn nhiều mã không có một mã để chọn ⇒ bậc toàn shop. Ở đó
+          không có mã nào để bị kéo tụt.
+      Lúc HỌC thì vẫn chỉ đơn đúng một mã vào ô theo mã (`taiKho`) — không đếm một quan sát hai lần.
     */
     const maDuyNhat = (orderId: string): string | null => {
       const set = maHangCuaDon.get(orderId);
@@ -1119,7 +1195,7 @@ export async function getProjectedDeliveryMetrics(
       const row = theoMa.get(x.key);
       if (!row) continue;
       const d = donTheoId.get(x.orderId);
-      canMotDon(row, { outcome: x.outcome, con: x.con, revenue: x.revenue, cogs: x.cogs, qty: x.qty, cogsUnknownQty: x.cogsUnknownQty, productCode: d?.productCode ?? null, ageHours: d?.ageHours ?? null }, lookup);
+      canMotDon(row, { outcome: x.outcome, con: x.con, revenue: x.revenue, cogs: x.cogs, qty: x.qty, cogsUnknownQty: x.cogsUnknownQty, productCode: x.productCode, ageHours: d?.ageHours ?? null }, lookup);
     }
 
     let multiCodeOrders = 0;

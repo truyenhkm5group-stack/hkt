@@ -6,7 +6,7 @@
  * ─── TỆP NÀY KHÔNG ĐỊNH NGHĨA LẠI MỘT CHỈ SỐ NÀO ───
  *
  * "Đã gửi" · "giao thành công" · "hoàn" · "ước tính" đều đọc từ hai hợp đồng đang chạy:
- * `ORDER_OUTCOME` (`lib/queries/return-rate.ts`) và `PROJECTED_GTC_V3`
+ * `ORDER_OUTCOME` (`lib/queries/return-rate.ts`) và `PROJECTED_GTC_V4`
  * (`lib/queries/projected-delivery.ts`). Bảng lý do / marketer đọc từ `getReturnReasonReport`, vốn
  * cũng đứng trên hai hợp đồng ấy. Nhờ vậy mọi con số ở đây khớp với bảng phía trên cùng màn hình
  * — thứ mà một truy vấn "cho nhanh" ở tầng này chắc chắn sẽ phá.
@@ -66,7 +66,7 @@ export type ProductRiskRow = {
   finished: number;
   /** `null` = chưa đơn nào kết thúc. KHÔNG phải 0%. */
   actualRate: number | null;
-  /** `PROJECTED_GTC_V3`. `null` = mô hình chưa dự báo được — không phải 0%. */
+  /** `PROJECTED_GTC_V4`. `null` = mô hình chưa dự báo được — không phải 0%. */
   projectedRate: number | null;
   returnRate: number | null;
   lostRevenue: number;

@@ -164,7 +164,7 @@ export function ProductRiskTable({ rows, hasTarget }: { rows: ReturnIntelligence
                   {formatNumber(p.eligibleSent)}
                 </td>
                 <td className="px-3 py-1.5 text-right tabular-nums font-semibold">{PCT(p.actualRate)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground" title="PROJECTED_GTC_V3 — cùng hợp đồng với cột cùng tên ở bảng theo mẫu mã và ở Báo cáo lợi nhuận.">
+                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground" title="PROJECTED_GTC_V4 — cùng hợp đồng với cột cùng tên ở bảng theo mẫu mã và ở Báo cáo lợi nhuận.">
                   {PCT(p.projectedRate)}
                 </td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{PCT(p.returnRate)}</td>

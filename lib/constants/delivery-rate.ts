@@ -45,7 +45,7 @@
  *
  *   1. `override` GIỮ VĨNH VIỄN — chủ shop gõ tay và khai rõ là giữ kể cả khi mã đã chín. Đây là
  *                    một QUYẾT ĐỊNH, không phải ước lượng, nên nó thắng mọi số đo.
- *   2. `projected` — hợp đồng `PROJECTED_GTC_V3`: mỗi đơn đang chạy cân theo xác suất của CHÍNH
+ *   2. `projected` — hợp đồng `PROJECTED_GTC_V4`: mỗi đơn đang chạy cân theo xác suất của CHÍNH
  *                    trạng thái ĐVVC nó đang ở. Đòi HAI điều kiện, không phải một:
  *                      (a) mã ĐÃ CHÍN — số đơn của chính mã đi tới kết cục đạt `matureMinFinished`;
  *                      (b) TỬ SỐ CHỦ YẾU LÀ CỦA CHÍNH MÃ — phần đi mượn không quá `MAX_BORROWED_SHARE`.
@@ -296,7 +296,7 @@ export function wilsonInterval(successes: number, n: number, z = 1.96): { low: n
 export type DeliveryRateInput = {
   /** Ghi đè của chủ shop cho mã này, đã chuẩn hoá. `null` = không có. */
   override?: DeliveryRateOverride | null;
-  /** Tỷ lệ GIAO THÀNH CÔNG (%) của hợp đồng `PROJECTED_GTC_V3`. `null` = hợp đồng chưa kết luận được. */
+  /** Tỷ lệ GIAO THÀNH CÔNG (%) của hợp đồng `PROJECTED_GTC_V4`. `null` = hợp đồng chưa kết luận được. */
   projectedDeliveryRate: number | null;
   /** Số đơn CỦA CHÍNH MÃ đã đi tới kết cục trong cohort mô hình. */
   projectedFinished: number;

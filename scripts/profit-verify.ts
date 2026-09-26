@@ -35,9 +35,32 @@ async function main() {
   ];
 
   const out: Record<string, unknown>[] = [];
+  let theoMa: Record<string, unknown>[] = [];
+  let phienBan: string | null = null;
   for (const p of ranges) {
     const r = await getNominalProfitReport(p);
     const t = r.totals;
+    /*
+      THEO MÃ, CHỈ KỲ TRỌN THÁNG, CHỈ PHẦN TRĂM VÀ SỐ ĐẾM — để đo trước/sau một lần đổi hợp đồng
+      GTC ước tính (V4, 26/09/2026: mã nào ước tính bằng số của mã đó) mà không in doanh số từng mã
+      ra log công khai. `dt_ut_tren_ds` là DT GTC ƯT ÷ Doanh số POS của mã.
+    */
+    if (!theoMa.length) {
+      phienBan = t.projection?.version ?? null;
+      theoMa = r.rows
+        .filter((x) => x.orders > 0)
+        .sort((a, b) => b.orders - a.orders)
+        .map((x) => ({
+          ma: x.code || "(chưa mã)",
+          nguon: x.returnRateSource,
+          co_so: x.revenueBasis,
+          tl_gtc: x.deliveryRate,
+          dt_ut_tren_ds: x.grossSales > 0 ? Math.round((x.expectedRevenue / x.grossSales) * 1000) / 10 : null,
+          phan_muon: x.borrowedShare === null ? null : Math.round(x.borrowedShare * 1000) / 10,
+          don: x.orders,
+          don_chua_roi_kho: (x.projection?.pending ?? 0) + (x.projection?.awaitingPickup ?? 0),
+        }));
+    }
     out.push({
       ky: `${p.label} (${p.fromKey} → ${p.toKey})`,
       doanh_so_pos: money(t.salesAfterDiscount),
@@ -74,7 +97,7 @@ async function main() {
     },
   ];
 
-  console.log(JSON.stringify({ chup_luc: new Date().toISOString(), ky: out, kiem_tra: kiemTra }, null, 2));
+  console.log(JSON.stringify({ chup_luc: new Date().toISOString(), phien_ban_gtc: phienBan, ky: out, theo_ma_tron_thang: theoMa, kiem_tra: kiemTra }, null, 2));
 }
 
 main()

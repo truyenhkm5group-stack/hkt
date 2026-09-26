@@ -173,7 +173,7 @@ export default async function ReturnRatePage({ searchParams }: { searchParams: P
 
     Chú thích cũ ở đây viết: "Dự kiến X% khi N đơn chờ phát lại kết thúc (xác suất thành hoàn P%)".
     Câu đó mô tả công thức CŨ — chỉ cân nhóm "chờ phát lại" bằng MỘT xác suất của cả shop, bỏ qua
-    mọi đơn đang chạy khác. Con số nay đến từ `PROJECTED_GTC_V3`: MỌI đơn chưa có kết cục đều được
+    mọi đơn đang chạy khác. Con số nay đến từ `PROJECTED_GTC_V4`: MỌI đơn chưa có kết cục đều được
     cân theo xác suất CỦA CHÍNH trạng thái ĐVVC nó đang ở, điều kiện hoá theo mã hàng và tuổi kiện
     khi đủ mẫu. Giữ nguyên câu cũ thì màn hình đang khai sai nguồn của chính con số nó in ra.
 

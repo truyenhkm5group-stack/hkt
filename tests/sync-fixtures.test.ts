@@ -553,7 +553,7 @@ async function main() {
   assert.equal(row.cancelled, 1, "huỷ 1");
   assert.equal(row.rate, 5 / 7 * 100, "tỷ lệ hoàn 5/(2+5)");
   assert.equal(row.successRate, 2 / 7 * 100, "tỷ lệ giao thành công 2/(2+5)");
-  // PROJECTED_GTC_V3: hai đơn đang giao của mã này ở trạng thái chưa đủ mẫu ⇒ ước tính có thể là CHƯA ĐO ĐƯỢC (null); khi có số thì GTC = 100 − hoàn.
+  // PROJECTED_GTC_V4: hai đơn đang giao của mã này ở trạng thái chưa đủ mẫu ⇒ ước tính có thể là CHƯA ĐO ĐƯỢC (null); khi có số thì GTC = 100 − hoàn.
   assert.ok(row.expectedSuccessRate === null ? row.expectedRate === null : Math.abs(row.expectedSuccessRate - (100 - (row.expectedRate ?? 0))) < 1e-9, "dự kiến GTC = 100 − dự kiến hoàn (hoặc cả hai cùng chưa đo được)");
   const summary = await getReturnRateSummary(all, "RR-001");
   assert.equal(summary.returned, 5);
@@ -1086,7 +1086,7 @@ async function main() {
   assert.equal(perf.totals.orders, nominal.totals.ordersDistinct);
   assert.equal(perf.totals.confirmedSales, nominal.totals.salesAfterDiscount);
   for (const p of perf.products.filter((r) => !r.id.startsWith("__"))) {
-    // PROJECTED_GTC_V3: `null` = chưa đo được, hợp lệ; có số thì là phân số và GTC = 1 − hoàn.
+    // PROJECTED_GTC_V4: `null` = chưa đo được, hợp lệ; có số thì là phân số và GTC = 1 − hoàn.
     assert.ok(p.returnRate !== undefined && (p.returnRate === null || (p.returnRate >= 0 && p.returnRate <= 1)), "tỷ lệ hoàn dự kiến là phân số hoặc chưa đo được");
     assert.ok(p.expectedSuccessRate !== undefined && (p.returnRate === null ? p.expectedSuccessRate === null : p.expectedSuccessRate !== null && Math.abs(p.expectedSuccessRate - (1 - p.returnRate)) < 1e-9), "tỷ lệ GTC dự kiến = 1 − tỷ lệ hoàn dự kiến");
     if (p.successRate !== null && p.successRate !== undefined) assert.ok(p.successRate >= 0 && p.successRate <= 1);
