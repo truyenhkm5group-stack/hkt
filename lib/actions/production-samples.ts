@@ -78,8 +78,9 @@ export async function submitSample(sampleId: string): Promise<Result<{ noop: boo
   if ("error" in r) return r;
   if (!r.noop) {
     await audit({ userId: user.id, userEmail: user.email, action: "SAMPLE_SUBMIT", entity: "SAMPLE", entityId: sampleId, after: { status: "SUBMITTED" }, detail: { lifecycle: r.lifecycle } });
-    revalidateProduction();
   }
+  // Cả nhánh `noop` cũng làm mới — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+  revalidateProduction();
   return { ok: true, noop: r.noop, lifecycle: r.lifecycle ? describeFollow(r.lifecycle) : null };
 }
 

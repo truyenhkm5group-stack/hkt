@@ -59,7 +59,11 @@ export async function clearShortageDecision(variantId: string): Promise<{ ok: tr
   if (!id.success) return { error: "Thiếu mẫu mã" };
   const book = await getSettingJson<ShortageDecisionBook>(SHORTAGE_DECISIONS_KEY, {});
   const previous = book[id.data];
-  if (!previous) return { ok: true };
+  if (!previous) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidatePath("/inventory/shortage");
+    return { ok: true };
+  }
   const next = { ...book };
   delete next[id.data];
   await setSettingJson(SHORTAGE_DECISIONS_KEY, next);

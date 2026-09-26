@@ -64,7 +64,12 @@ export async function decideRecommendation(raw: unknown): Promise<Result> {
     now,
   });
   if ("error" in r) return { error: r.error };
-  if (r.skipped) return { ok: true, skipped: true };
+  if (r.skipped) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidatePath("/");
+    revalidatePath("/cockpit");
+    return { ok: true, skipped: true };
+  }
 
   await audit({
     userId: user.id,

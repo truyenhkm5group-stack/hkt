@@ -207,9 +207,11 @@ export function ReceiveScanDesk({ canWrite, awaiting }: { canWrite: boolean; awa
       setDaNhan((n) => n + 1);
       toast.success(r.message);
       /*
-        KHÔNG `router.refresh()` SAU MỖI LƯỢT BẮN.
-        Trang này dựng hàng chục truy vấn báo cáo; làm mới sau từng kiện là bắt máy chủ tính lại tất
-        cả 300 lần trong một ca, và màn hình nhấp nháy đúng lúc người kho đang nhìn dòng vừa hiện.
+        KHÔNG GỌI THÊM `router.refresh()` SAU MỖI LƯỢT BẮN — nhưng trang VẪN dựng lại mỗi kiện nhận:
+        `scanReceiveReturnAction` gọi `revalidatePath` khi RECEIVED, và trên Next 15 lượt gọi đó trả luôn
+        giao diện mới của trang trong cùng phản hồi. Thêm refresh ở đây là lượt dựng thứ hai y hệt.
+        (Bản chú thích cũ nói nó tránh được việc dựng lại — không đúng; muốn bỏ hẳn thì phải bỏ
+        `revalidatePath` ở action cho lượt bắn, việc đó chưa làm.)
       */
     } else if (r.outcome === "NOT_FOUND") {
       toast.error(r.message, { duration: 8000 });

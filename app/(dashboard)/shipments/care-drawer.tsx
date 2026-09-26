@@ -185,7 +185,6 @@ export function CareDrawer({
           setMsg(`Đã ghi nhận, nhưng chưa đóng được việc: ${d.error}`);
           return;
         }
-        router.refresh();
       }
       setNote("");
       if (autoNext && tiep) {

@@ -1,7 +1,6 @@
 "use client";
 
 import { PackageCheck, Undo2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -28,7 +27,6 @@ export function ReceiveReturns({
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, start] = useTransition();
-  const router = useRouter();
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -48,7 +46,6 @@ export function ReceiveReturns({
       else {
         toast.success(result.message);
         setSelected(new Set());
-        router.refresh();
       }
     });
   }
@@ -105,7 +102,6 @@ export function ReceiveReturns({
                       else {
                         toast.success(result.message);
                         setSelected(new Set());
-                        router.refresh();
                       }
                     })
                   }

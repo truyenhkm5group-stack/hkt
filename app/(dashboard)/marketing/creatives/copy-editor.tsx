@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, PenLine, Save, ShieldAlert, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -38,7 +37,6 @@ export function EditCopyButton({
   imageId: string | null;
   imageAvailable: boolean;
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [h, setH] = useState(headline);
   const [t, setT] = useState(primaryText);
@@ -85,7 +83,6 @@ export function EditCopyButton({
       toast.success(r.changed ? `Đã lưu câu chữ mẫu #${slot} — lô cần được bấm duyệt lại.` : "Câu chữ không đổi.");
       for (const w of r.warnings) toast.warning(w);
       setOpen(false);
-      router.refresh();
     });
 
   return (

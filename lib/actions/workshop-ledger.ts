@@ -35,7 +35,8 @@ type Result<T = object> = ({ ok: true } & T) | { error: string };
 const ROOT = "/inventory/workshop";
 
 function refresh(batchId?: string | null) {
-  revalidatePath(ROOT);
+  // "layout" phủ cả trang chi tiết lô `/inventory/workshop/[id]` — nút trên trang đó không cần router.refresh().
+  revalidatePath(ROOT, "layout");
   revalidatePath("/bank");
   if (batchId) revalidatePath(`${ROOT}/${batchId}`);
 }
@@ -178,7 +179,11 @@ export async function setProductionBatchStatus(id: string, status: string): Prom
   const db = await getDb();
   const truoc = await db.query.productionBatches.findFirst({ where: eq(schema.productionBatches.id, id), columns: { status: true, doneAt: true } });
   if (!truoc) return { error: "Không tìm thấy lô" };
-  if (truoc.status === status) return { ok: true };
+  if (truoc.status === status) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    refresh(id);
+    return { ok: true };
+  }
   await db
     .update(schema.productionBatches)
     .set({ status, doneAt: status === "DONE" ? (truoc.doneAt ?? new Date()) : null, updatedAt: new Date() })

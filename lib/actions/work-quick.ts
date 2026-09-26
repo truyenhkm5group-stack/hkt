@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth/session";
 import { parseWorkKey } from "@/lib/constants/work";
@@ -37,7 +38,20 @@ const schema = z.object({
   value: z.string().trim().max(100).optional(),
 });
 
+/**
+ * Các trang hàng đợi hiện `WorkList` (components/work/work-list.tsx). Hành động miền chỉ làm mới trang
+ * của MIỀN mình (CSKH, care, ngân hàng, kho) — nên lớp này làm mới thêm hàng đợi khi thành công, để
+ * lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+ */
+const WORK_QUEUE_PATHS = ["/work", "/work/department", "/work/all"] as const;
+
 export async function runWorkAction(input: unknown): Promise<Result> {
+  const res = await chayHanhDong(input);
+  if ("ok" in res) for (const p of WORK_QUEUE_PATHS) revalidatePath(p);
+  return res;
+}
+
+async function chayHanhDong(input: unknown): Promise<Result> {
   await requireUser();
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { error: "Dữ liệu không hợp lệ" };

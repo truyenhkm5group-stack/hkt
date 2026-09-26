@@ -9,7 +9,6 @@
  * chỉ chặn được người dùng đi qua giao diện.
  */
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2, Plus, Power, PowerOff, ShieldPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,6 @@ const BASE_ROLES = ROLE_ORDER.filter((r) => r !== "ADMIN");
 export function RolesPanel({ roles }: { roles: RolePanelRow[] }) {
   const [editing, setEditing] = useState<RolePanelRow | "new" | null>(null);
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   const toggle = (row: RolePanelRow) =>
     startTransition(async () => {
@@ -40,7 +38,6 @@ export function RolesPanel({ roles }: { roles: RolePanelRow[] }) {
         return;
       }
       toast.success(row.active ? `Đã tắt vai trò ${row.name}` : `Đã bật lại vai trò ${row.name}`);
-      router.refresh();
     });
 
   return (

@@ -96,6 +96,7 @@ export async function saveAlertConfig(input: unknown): Promise<{ ok: true } | { 
   await setSettingJson(ALERT_CONFIG_KEY, data);
   await audit({ userId: user.id, userEmail: user.email, action: "SETTINGS_UPDATE", entity: "SETTINGS", entityId: ALERT_CONFIG_KEY, detail: { ...data, telegramBotToken: data.telegramBotToken ? "***" : "", larkSecret: data.larkSecret ? "***" : "", larkBillingSecret: data.larkBillingSecret ? "***" : "", larkInventorySecret: data.larkInventorySecret ? "***" : "", larkManagerSecret: data.larkManagerSecret ? "***" : "" } });
   revalidatePath("/integrations");
+  revalidatePath("/alerts");
   return { ok: true };
 }
 
@@ -209,6 +210,9 @@ export async function resolveNotification(id: string): Promise<{ ok: true } | { 
   // Đóng việc bằng tay là quyết định vận hành: ai đóng, đóng việc gì, lúc nào.
   await audit({ userId: user.id, userEmail: user.email, action: "case.resolve", entity: "NOTIFICATION", entityId: id, detail: { title: before?.title ?? "", kind: before?.kind ?? "" } });
   revalidatePath("/alerts");
+  // Ngăn kéo care (mở được từ ô tìm kiếm ở MỌI trang) cũng đóng việc qua đây — làm mới cả bố cục để
+  // lượt gọi mang luôn giao diện mới của trang đang đứng, client không cần router.refresh().
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -241,7 +245,11 @@ export async function acknowledgeCase(id: string): Promise<{ ok: true } | { erro
   const n = schema.notifications;
   const [before] = await db.select({ assignedTo: n.assignedTo, acknowledgedAt: n.acknowledgedAt, title: n.title }).from(n).where(eq(n.id, id));
   if (!before) return { error: "Không tìm thấy việc" };
-  if (before.acknowledgedAt) return { ok: true };
+  if (before.acknowledgedAt) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidatePath("/alerts");
+    return { ok: true };
+  }
   await db
     .update(n)
     .set({ acknowledgedBy: user.id, acknowledgedAt: new Date(), assignedTo: before.assignedTo ?? user.id, assignedAt: before.assignedTo ? undefined : new Date() })
@@ -264,7 +272,11 @@ export async function startCase(id: string): Promise<{ ok: true } | { error: str
   const [before] = await db.select({ assignedTo: n.assignedTo, acknowledgedAt: n.acknowledgedAt, startedAt: n.startedAt, ignoredAt: n.ignoredAt, title: n.title }).from(n).where(eq(n.id, id));
   if (!before) return { error: "Không tìm thấy việc" };
   if (before.ignoredAt) return { error: "Việc này đã được bỏ qua — bỏ đánh dấu trước khi làm tiếp" };
-  if (before.startedAt) return { ok: true };
+  if (before.startedAt) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidatePath("/alerts");
+    return { ok: true };
+  }
   const at = new Date();
   await db
     .update(n)

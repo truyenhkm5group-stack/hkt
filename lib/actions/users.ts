@@ -83,7 +83,11 @@ export async function setUserActive(input: unknown): Promise<ActionResult> {
   if (!target) return { error: "Không tìm thấy người dùng" };
   if (target.id === user.id && !active) return { error: "Không thể tự khoá tài khoản của chính bạn" };
   if (!active && target.role === "ADMIN" && target.active && (await otherActiveAdmins(target.id)) === 0) return { error: "Không thể khoá quản trị viên cuối cùng" };
-  if (target.active === active) return { ok: true, id };
+  if (target.active === active) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidatePath("/settings/users");
+    return { ok: true, id };
+  }
   await db.update(schema.users).set({ active }).where(eq(schema.users.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: active ? "USER_UNLOCK" : "USER_LOCK", entity: "USER", entityId: id, detail: { email: target.email } });
   /*

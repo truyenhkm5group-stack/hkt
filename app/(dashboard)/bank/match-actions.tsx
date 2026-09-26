@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { Check, Loader2, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -20,7 +19,6 @@ import type { MatchTargetType } from "@/lib/integrations/bank/match";
 export function MatchActions({ txnId, type, targetId, compact = false }: { txnId: string; type: MatchTargetType; targetId: string; compact?: boolean }) {
   const [dangChay, setDangChay] = React.useState(false);
   const [boQua, setBoQua] = React.useState(false);
-  const router = useRouter();
 
   if (boQua) return <span className="text-[11.5px] text-muted-foreground">đã bỏ qua</span>;
 
@@ -33,7 +31,6 @@ export function MatchActions({ txnId, type, targetId, compact = false }: { txnId
       return;
     }
     toast.success("Đã nối giao dịch với chứng từ");
-    router.refresh();
   };
 
   if (compact) {
@@ -64,7 +61,6 @@ export function MatchActions({ txnId, type, targetId, compact = false }: { txnId
  */
 export function AutoConfirmButton({ count }: { count: number }) {
   const [dangChay, setDangChay] = React.useState(false);
-  const router = useRouter();
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-emerald-300/60 bg-emerald-50/60 px-4 py-2.5 dark:border-emerald-900/60 dark:bg-emerald-950/20">
       <Sparkles className="size-4 shrink-0 text-emerald-600" />
@@ -82,7 +78,6 @@ export function AutoConfirmButton({ count }: { count: number }) {
           if ("error" in r) toast.error(r.error);
           else {
             toast.success(r.message);
-            router.refresh();
           }
         }}
       >

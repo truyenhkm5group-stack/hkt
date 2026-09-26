@@ -55,7 +55,12 @@ export async function setReturnDisposition(raw: unknown): Promise<SetDisposition
       gate: guardSecondApproval,
       canRestockUnidentified: can(user, RESTOCK_UNIDENTIFIED_PERMISSION),
     });
-    if ("error" in res || res.replayed) return res;
+    if ("error" in res) return res;
+    if (res.replayed) {
+      // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+      revalidate();
+      return res;
+    }
 
     await audit({
       userId: user.id,

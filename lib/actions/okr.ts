@@ -25,7 +25,7 @@ import { buildSnapshot, periodRange, REVIEW_KINDS, SNAPSHOT_VERSION, type Review
 type Result<T = object> = ({ ok: true } & T) | { error: string };
 
 function revalidate() {
-  for (const p of ["/work/okr", "/work/performance", "/work/department", "/work"]) revalidatePath(p);
+  for (const p of ["/work/okr", "/work/performance", "/work/department", "/work", "/work/review"]) revalidatePath(p);
 }
 
 async function authorize(permission: "okr:manage" | "review:manage") {
@@ -466,7 +466,11 @@ export async function openReview(input: unknown): Promise<Result<{ id: string }>
     where: and(eq(schema.reviewCycles.kind, d.kind), eq(schema.reviewCycles.scope, scope), eq(schema.reviewCycles.period, period), departmentId ? eq(schema.reviewCycles.departmentId, departmentId) : isNull(schema.reviewCycles.departmentId)),
     columns: { id: true },
   });
-  if (existing) return { ok: true, id: existing.id };
+  if (existing) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidate();
+    return { ok: true, id: existing.id };
+  }
 
   const id = crypto.randomUUID();
   await db.insert(schema.reviewCycles).values({ id, kind: d.kind, scope, departmentId, period, periodStart: start, periodEnd: end, status: "DRAFT", createdBy: user.id });

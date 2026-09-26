@@ -27,7 +27,11 @@ export async function saveVariantNames(raw: unknown): Promise<{ ok: true; change
   const now = new Date();
   const r = await saveVariantNamesCore(db, parsed.data, now);
   if (!r.ok) return { error: r.error };
-  if (!r.changed) return { ok: true, changed: false };
+  if (!r.changed) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidatePath(PATH);
+    return { ok: true, changed: false };
+  }
   // Ô để trống ⇒ điền lại tên mặc định ngay, để người thấy tên sẽ đăng mà không phải đợi lượt vòng mẫu.
   await assignBatchNames(db, r.batchId, now);
   await audit({

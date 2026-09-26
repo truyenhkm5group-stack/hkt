@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle, Check, Loader2, Sparkles, Wrench, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -66,7 +66,6 @@ function Lite({ text }: { text: string }) {
 export function AiCopilot() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<{ enabled: boolean; model: string; modelSauHon: string; reason: string | null } | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -138,7 +137,6 @@ export function AiCopilot() {
     setTurns((t) => t.map((turn, i) => (i === turnIdx ? { ...turn, confirmed: { ...(turn.confirmed ?? {}), [a.token]: { ok: ex.ok, summary: ex.summary } } } : turn)));
     if (ex.ok) {
       toast.success(ex.summary);
-      router.refresh();
     } else toast.error(ex.summary);
   };
 

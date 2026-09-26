@@ -94,7 +94,11 @@ export async function setModelOwner(input: unknown): Promise<Result> {
     source: `ui:/models/${d.modelId}`,
   });
   if ("error" in r) return { error: r.error };
-  if (!r.changed) return { ok: true };
+  if (!r.changed) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    modelPaths(d.modelId);
+    return { ok: true };
+  }
 
   await audit({
     userId: user.id,

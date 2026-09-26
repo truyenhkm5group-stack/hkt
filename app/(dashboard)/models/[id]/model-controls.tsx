@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -118,7 +117,6 @@ const KHONG_AI = "__none__";
 /** Người phụ trách — do NGƯỜI chọn trong danh sách tài khoản đang hoạt động. */
 export function OwnerControl({ modelId, ownerUserId, options }: { modelId: string; ownerUserId: string | null; options: { id: string; name: string }[] }) {
   const [pending, start] = useTransition();
-  const router = useRouter();
   return (
     <Select
       value={ownerUserId ?? KHONG_AI}
@@ -131,7 +129,6 @@ export function OwnerControl({ modelId, ownerUserId, options }: { modelId: strin
             return;
           }
           toast.success("Đã đổi người phụ trách");
-          router.refresh();
         })
       }
     >

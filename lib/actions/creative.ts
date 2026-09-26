@@ -283,7 +283,11 @@ export async function rejectVariant(raw: { variantId: string; reason?: string })
     .limit(1);
   if (!row) return { error: "Không tìm thấy mẫu." };
   if (row.batchStatus !== "PENDING_APPROVAL") return { error: "Chỉ gạt được mẫu khi lô đang chờ duyệt." };
-  if (row.v.status === "REJECTED") return { ok: true };
+  if (row.v.status === "REJECTED") {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidatePath(PATH);
+    return { ok: true };
+  }
   if (row.v.status !== "GENERATED" && row.v.status !== "PLANNED" && row.v.status !== "GEN_FAILED") return { error: `Mẫu đang ở trạng thái ${row.v.status}, không gạt được.` };
 
   const now = new Date();

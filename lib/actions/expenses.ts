@@ -51,7 +51,7 @@ export async function createExpense(input: unknown): Promise<ActionResult> {
       .values({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, costSource: data.costSource, reason: data.reason, createdBy: user.email })
       .returning({ id: schema.expenses.id });
     await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_CREATE", entity: "EXPENSE", entityId: row.id, detail: data });
-    for (const p of ["/expenses", "/ads"]) revalidatePath(p);
+    for (const p of ["/expenses", "/ads", "/finance-ops"]) revalidatePath(p);
     revalidatePath("/reports");
     revalidatePath("/");
     return { ok: true, id: row.id };
@@ -94,7 +94,7 @@ export async function updateExpense(id: string, input: unknown): Promise<ActionR
       .set({ category: data.category, description: data.description, amount: data.amount, occurredAt: vnStartOfDay(data.occurredAt), reference: data.reference, costSource: data.costSource, reason: data.reason })
       .where(eq(schema.expenses.id, id));
     await audit({ userId: user.id, userEmail: user.email, action: "EXPENSE_UPDATE", entity: "EXPENSE", entityId: id, detail: { before: { category: existing.category, description: existing.description, amount: existing.amount, occurredAt: existing.occurredAt, reference: existing.reference }, after: data } });
-    for (const p of ["/expenses", "/ads"]) revalidatePath(p);
+    for (const p of ["/expenses", "/ads", "/finance-ops"]) revalidatePath(p);
     revalidatePath("/reports");
     revalidatePath("/");
     return { ok: true, id };

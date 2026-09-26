@@ -46,7 +46,11 @@ export async function confirmReturnReceived(input: unknown): Promise<ReturnRecei
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
 
   const { count, ids } = await markReturnReceived(parsed.data.ids, khoActor(user), parsed.data.note);
-  if (!count) return { ok: true, count: 0, message: "Các vận đơn đã được ghi nhận trước đó, không thay đổi gì." };
+  if (!count) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidate();
+    return { ok: true, count: 0, message: "Các vận đơn đã được ghi nhận trước đó, không thay đổi gì." };
+  }
   await audit({ userId: user.id, userEmail: user.email, action: "return.received", entity: "shipments", entityId: ids.join(","), detail: { count, note: parsed.data.note ?? "" } });
   revalidate();
   return { ok: true, count, message: `Đã ghi nhận ${count} kiện hàng hoàn về kho, đang CHỜ ĐẾM. Hàng vào tồn sau khi kiểm đếm thực tế.` };
@@ -61,9 +65,10 @@ export async function cancelReturnReceived(input: unknown): Promise<ReturnReceiv
 
   const { count, blocked } = await undoReturnReceived(parsed.data.ids);
   if (!count) {
-    return blocked
-      ? { error: `${blocked} kiện đã được kiểm đếm nên không huỷ được — muốn sửa tồn thì lập phiếu điều chỉnh kho.` }
-      : { ok: true, count: 0, message: "Không có vận đơn nào đang ở trạng thái đã nhận." };
+    if (blocked) return { error: `${blocked} kiện đã được kiểm đếm nên không huỷ được — muốn sửa tồn thì lập phiếu điều chỉnh kho.` };
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidate();
+    return { ok: true, count: 0, message: "Không có vận đơn nào đang ở trạng thái đã nhận." };
   }
   await audit({ userId: user.id, userEmail: user.email, action: "return.received.undo", entity: "shipments", entityId: parsed.data.ids.join(","), detail: { count, blocked } });
   revalidate();
@@ -92,7 +97,11 @@ export async function confirmAllReturnedReceived(input: unknown): Promise<Return
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
 
   const ids = await listPendingReturnedIds(BULK_LIMIT);
-  if (!ids.length) return { ok: true, count: 0, message: "Không còn hàng hoàn nào chờ kho xác nhận." };
+  if (!ids.length) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidate();
+    return { ok: true, count: 0, message: "Không còn hàng hoàn nào chờ kho xác nhận." };
+  }
 
   const { count, ids: done } = await markReturnReceived(ids, khoActor(user), parsed.data.note);
   await audit({ userId: user.id, userEmail: user.email, action: "return.received.bulk", entity: "shipments", entityId: done.join(","), detail: { count, note: parsed.data.note ?? "" } });

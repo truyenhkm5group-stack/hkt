@@ -1,7 +1,6 @@
 "use client";
 
 import { useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { clearShortageDecision, decideShortage } from "@/lib/actions/stock-shortage";
@@ -14,7 +13,6 @@ import { cn } from "@/lib/utils";
  */
 export function ShortageDecisionButtons({ variantId, current, suggested, canWrite }: { variantId: string; current: ShortageDecisionKind | null; suggested: ShortageDecisionKind | null; canWrite: boolean }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   if (!canWrite) return null;
   const decide = (decision: ShortageDecisionKind) =>
     startTransition(async () => {
@@ -30,7 +28,6 @@ export function ShortageDecisionButtons({ variantId, current, suggested, canWrit
       if ("error" in r) toast.error(r.error);
       else {
         toast.success("Đã bỏ quyết định — mẫu này được nhắc lại như bình thường");
-        router.refresh();
       }
     });
   return (

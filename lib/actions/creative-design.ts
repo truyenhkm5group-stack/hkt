@@ -86,7 +86,11 @@ export async function setDesignProduction(input: unknown): Promise<Result<{ stat
   const cu = await db.query.designConcepts.findFirst({ where: eq(dc.id, id), columns: { id: true, status: true, code: true } });
   if (!cu) return { error: "Không tìm thấy thiết kế" };
   const now = new Date();
-  if (on === (cu.status === "PRODUCTION")) return { ok: true, status: cu.status };
+  if (on === (cu.status === "PRODUCTION")) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidatePath(DUONG);
+    return { ok: true, status: cu.status };
+  }
   const status = on ? "PRODUCTION" : "TESTING";
   await db
     .update(dc)

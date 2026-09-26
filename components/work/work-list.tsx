@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { AlarmClock, Ban, CheckCircle2, ExternalLink, Hand, Loader2, MessageSquarePlus, MoreHorizontal, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -25,8 +24,8 @@ import { cn } from "@/lib/utils";
  * Ba luật, cùng ba luật của bảng CSKH (`app/(dashboard)/cs/cs-table.tsx`) vì chúng đã được chứng
  * minh trên người dùng thật:
  *
- *  1. **Phản hồi tại chỗ.** Bấm xong dòng đổi ngay, `router.refresh()` chỉ chạy SAU khi máy chủ
- *     xác nhận. Hỏng thì hoàn tác đúng dòng và báo lỗi tại đó — không nhảy trang, không mất chỗ cuộn.
+ *  1. **Phản hồi tại chỗ.** Bấm xong dòng đổi ngay; giao diện mới của trang chỉ về SAU khi máy chủ
+ *     xác nhận (`runWorkAction` làm mới hàng đợi và trả luôn trong lượt gọi — không `router.refresh()`). Hỏng thì hoàn tác đúng dòng và báo lỗi tại đó — không nhảy trang, không mất chỗ cuộn.
  *  2. **Chữ dài không chiếm chỗ của nút.** Dòng giữ một câu; bằng chứng và giải thích nằm sau ⓘ.
  *  3. **Nút phụ thuộc NGUỒN.** `WORK_SOURCE_SPEC[...].actions` khai việc làm được với từng loại;
  *     ở đây chỉ dịch sang nút. Nút `LINK` không có đích thật thì ẩn — một nút bấm vào không đi đâu
@@ -129,8 +128,6 @@ function SlaCell({ item, now }: { item: WorkItem; now: number }) {
 export function WorkList({ items, emptyTitle, emptyDescription, showDepartment = false, canAct = true, compact = false }: { items: WorkItem[]; emptyTitle: string; emptyDescription?: string; showDepartment?: boolean; canAct?: boolean; compact?: boolean }) {
   const [patches, setPatches] = useState<Record<string, Patch>>({});
   const [pendingKey, setPendingKey] = useState<string | null>(null);
-  const [, startTransition] = useTransition();
-  const router = useRouter();
   const now = Date.now();
 
   // Dữ liệu mới từ máy chủ đã về ⇒ bỏ lớp vẽ tạm, không để hai nguồn sự thật chồng nhau.
@@ -148,7 +145,6 @@ export function WorkList({ items, emptyTitle, emptyDescription, showDepartment =
       return;
     }
     toast.success(okMessage);
-    startTransition(() => router.refresh());
   };
 
   if (!items.length) return <EmptyState title={emptyTitle} description={emptyDescription} icon={CheckCircle2} />;

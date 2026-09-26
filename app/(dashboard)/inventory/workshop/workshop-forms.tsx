@@ -59,7 +59,6 @@ function dateOf(d: Date | string | null | undefined) {
 
 function useRun() {
   const [pending, start] = useNavTransition();
-  const router = useRouter();
   const run = (fn: () => Promise<Result>, okText: string, after?: () => void) =>
     start(async () => {
       const r = await fn();
@@ -69,7 +68,6 @@ function useRun() {
       }
       toast.success(okText);
       after?.();
-      router.refresh();
     });
   return { pending, run };
 }

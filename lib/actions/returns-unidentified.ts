@@ -296,6 +296,8 @@ export async function restockUnidentifiedReturnAction(input: unknown): Promise<R
   if ("error" in r) return { error: r.error };
 
   if (r.already) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    revalidate();
     return { ok: true, row: r.row, restocked: 0, already: true, message: `${r.row.code} đã vào tồn từ trước (phiếu ${r.receiptId}) — không cộng thêm.` };
   }
 

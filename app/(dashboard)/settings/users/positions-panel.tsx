@@ -9,7 +9,6 @@
  * `tests/access-model.test.ts` quét mã nguồn để giữ đúng tính chất đó.
  */
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { BadgeCheck, Loader2, Plus, Power, PowerOff } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -24,7 +23,6 @@ export type PositionPanelRow = { id: string; code: string; name: string; descrip
 export function PositionsPanel({ positions, departments }: { positions: PositionPanelRow[]; departments: { id: string; name: string }[] }) {
   const [editing, setEditing] = useState<PositionPanelRow | "new" | null>(null);
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
 
   const toggle = (row: PositionPanelRow) =>
     startTransition(async () => {
@@ -34,7 +32,6 @@ export function PositionsPanel({ positions, departments }: { positions: Position
         return;
       }
       toast.success(row.active ? `Đã tắt chức danh ${row.name}` : `Đã bật lại chức danh ${row.name}`);
-      router.refresh();
     });
 
   return (

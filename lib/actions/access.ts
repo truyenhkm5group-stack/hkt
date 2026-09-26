@@ -101,7 +101,11 @@ export async function setAccessRoleActive(input: unknown): Promise<AccessResult>
   const db = await getDb();
   const cu = await db.query.accessRoles.findFirst({ where: eq(schema.accessRoles.id, id), columns: { id: true, code: true, name: true, active: true } });
   if (!cu) return { error: "Không tìm thấy vai trò" };
-  if (cu.active === active) return { ok: true, id };
+  if (cu.active === active) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    refreshOrgViews();
+    return { ok: true, id };
+  }
   await db.update(schema.accessRoles).set({ active }).where(eq(schema.accessRoles.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: active ? "ACCESS_ROLE_ENABLE" : "ACCESS_ROLE_DISABLE", entity: "ACCESS_ROLE", entityId: id, detail: { code: cu.code, name: cu.name, before: { active: cu.active }, after: { active } } });
   refreshOrgViews();
@@ -155,7 +159,11 @@ export async function setPositionActive(input: unknown): Promise<AccessResult> {
   const db = await getDb();
   const cu = await db.query.positions.findFirst({ where: eq(schema.positions.id, id), columns: { id: true, code: true, name: true, active: true } });
   if (!cu) return { error: "Không tìm thấy chức danh" };
-  if (cu.active === active) return { ok: true, id };
+  if (cu.active === active) {
+    // Không đổi gì vẫn làm mới: trang có thể đang cũ (người khác vừa làm) — lượt gọi mang luôn giao diện mới, client không cần router.refresh().
+    refreshOrgViews();
+    return { ok: true, id };
+  }
   await db.update(schema.positions).set({ active }).where(eq(schema.positions.id, id));
   await audit({ userId: user.id, userEmail: user.email, action: active ? "POSITION_ENABLE" : "POSITION_DISABLE", entity: "POSITION", entityId: id, detail: { code: cu.code, name: cu.name, before: { active: cu.active }, after: { active } } });
   refreshOrgViews();

@@ -1,7 +1,6 @@
 "use client";
 
 import { useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { ArrowLeftRight, Check, ChevronDown, Loader2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -14,12 +13,13 @@ import { cn } from "@/lib/utils";
  * Phân loại NGAY trên dòng của hàng đợi.
  *
  * Khác `BankGroupSelect` (app/(dashboard)/bank/group-select.tsx) ở đúng một chỗ: dòng này PHẢI BIẾN
- * MẤT khỏi hàng đợi sau khi xong việc (nó không còn "chưa phân loại" nữa), nên gọi `router.refresh()`
- * thay vì chỉ cập nhật lựa chọn tại chỗ như bên Sổ ngân hàng — ở đó dòng vẫn cần hiện dù đã phân loại.
+ * MẤT khỏi hàng đợi sau khi xong việc (nó không còn "chưa phân loại" nữa), nên cần máy chủ dựng lại
+ * trang thay vì chỉ cập nhật lựa chọn tại chỗ như bên Sổ ngân hàng — ở đó dòng vẫn cần hiện dù đã phân
+ * loại. Việc dựng lại đi CÙNG lượt gọi: action `revalidatePath("/finance-ops")` (lib/actions/bank.ts), nên
+ * không gọi thêm `router.refresh()` — đó là một lượt dựng nguội thứ hai.
  */
 export function QueueClassifySelect({ id, value }: { id: string; value: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <select
       defaultValue={value}
@@ -33,7 +33,6 @@ export function QueueClassifySelect({ id, value }: { id: string; value: string }
             return;
           }
           toast.success(`Đã gán "${BANK_GROUP_SPEC[group as BankGroup]?.label ?? group}"`);
-          router.refresh();
         });
       }}
       className={cn("h-7 min-w-[168px] rounded-md border bg-background px-1.5 text-[11.5px]", pending && "opacity-60")}
@@ -61,7 +60,6 @@ export function QueueClassifySelect({ id, value }: { id: string; value: string }
  */
 export function IgnoreOrTransferMenu({ id }: { id: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   const run = (group: "NOT_BUSINESS" | "INTERNAL_TRANSFER") =>
     startTransition(async () => {
       const res = await classifyBankTransactions({ ids: [id], group });
@@ -70,7 +68,6 @@ export function IgnoreOrTransferMenu({ id }: { id: string }) {
         return;
       }
       toast.success(group === "NOT_BUSINESS" ? "Đã đánh dấu không thuộc kinh doanh" : "Đã gán chuyển nội bộ");
-      router.refresh();
     });
   return (
     <DropdownMenu>
@@ -92,7 +89,6 @@ export function IgnoreOrTransferMenu({ id }: { id: string }) {
 /** Một cú bấm gán CẢ HAI vế (tiền ra + tiền vào) của một cặp nghi ngờ chuyển nội bộ. */
 export function ConfirmInternalTransferButton({ outId, inId }: { outId: string; inId: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <Button
       size="sm"
@@ -108,7 +104,6 @@ export function ConfirmInternalTransferButton({ outId, inId }: { outId: string; 
             return;
           }
           toast.success("Đã ghép cặp và gán chuyển nội bộ cho cả hai dòng");
-          router.refresh();
         })
       }
     >
@@ -121,7 +116,6 @@ export function ConfirmInternalTransferButton({ outId, inId }: { outId: string; 
 /** Nút gán nhanh Lương cố định / Hoa hồng khi hàng đợi đã gợi ý đúng nhân sự theo tên/bí danh. */
 export function PayrollClassifyButton({ id, group, label }: { id: string; group: "PAYROLL_SALARY" | "PAYROLL_COMMISSION"; label: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <Button
       size="sm"
@@ -136,7 +130,6 @@ export function PayrollClassifyButton({ id, group, label }: { id: string; group:
             return;
           }
           toast.success(`Đã gán "${label}"`);
-          router.refresh();
         })
       }
     >
@@ -149,7 +142,6 @@ export function PayrollClassifyButton({ id, group, label }: { id: string; group:
 /** Xác nhận một tài khoản ngân hàng đang UNCONFIRMED — quyền riêng `bank:accounts`, đã lọc ở trang cha. */
 export function ConfirmAccountButton({ id }: { id: string }) {
   const [pending, startTransition] = useTransition();
-  const router = useRouter();
   return (
     <Button
       size="sm"
@@ -163,7 +155,6 @@ export function ConfirmAccountButton({ id }: { id: string }) {
             return;
           }
           toast.success("Đã xác nhận tài khoản");
-          router.refresh();
         })
       }
     >

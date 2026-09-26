@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { CheckCheck, Loader2, XCircle, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -183,7 +182,6 @@ export function RejectBatchButton({ batchId, disabledReason }: { batchId: string
 
 /** Gạt một mẫu khỏi lô đang chờ duyệt — hỏi lý do ngắn (không bắt buộc). Mọi phiếu đã phát cho lô tự vô hiệu. */
 export function RejectVariantButton({ variantId, slot }: { variantId: string; slot: number }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [pending, start] = useTransition();
@@ -196,7 +194,6 @@ export function RejectVariantButton({ variantId, slot }: { variantId: string; sl
       }
       toast.success(`Đã gạt mẫu #${slot} khỏi lô.`);
       setOpen(false);
-      router.refresh();
     });
   return (
     <>
