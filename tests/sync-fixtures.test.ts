@@ -307,6 +307,7 @@ import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./comp
 import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
 import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.test";
 import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
+import { testCompanyOsEvidenceGapsDb, testCompanyOsEvidenceGapsPure } from "./company-os-evidence-gaps.test";
 import { testProductionTopicFilesDb, testProductionTopicFilesPure } from "./production-topic-files.test";
 import { testHardeningApprovalExecution, testHardeningLifecycleInTx, testHardeningReceiptLinkedEvent, testHardeningSettingsPrimitive, testHardeningTopicTrackSemantics } from "./company-os-hardening.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
@@ -1970,6 +1971,9 @@ async function main() {
   await testCompanyOsWarmDb();
   testCompanyOsSummaryPure();
   await testCompanyOsSummaryDb(db);
+  // Company OS · Agent P2: lời khai ≠ chứng cứ — trạng thái sản xuất khai mà ERP không có chứng từ · phiếu nhập chưa nối có lệnh SX khớp (mã `cos-p2-`, tự dọn; ngày cố định 2001).
+  testCompanyOsEvidenceGapsPure();
+  await testCompanyOsEvidenceGapsDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();

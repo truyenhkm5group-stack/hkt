@@ -33,6 +33,8 @@ import { getModelEconomics, type EconomicsUnit, type EconomicsValue } from "@/li
 import { getModelInventoryDecisions, getModelOrderOutcome } from "@/lib/queries/model-360";
 import { getModelSignal } from "@/lib/queries/model-signal";
 import { getModelProductionSummary } from "@/lib/queries/model-production";
+import { lifecycleEvidenceGap } from "@/lib/constants/evidence-gaps";
+import { evidenceFactsOfSummary } from "@/lib/queries/evidence-gaps";
 import { getModelReturnDispositions } from "@/lib/queries/model-returns";
 import { getModelStockStates } from "@/lib/queries/model-stock";
 import { mergeStockFeedbackSuggestions } from "@/lib/constants/stock-feedback";
@@ -54,6 +56,7 @@ import { cn } from "@/lib/utils";
 
 export type BlockCtx = {
   modelId: string;
+  modelCode: string;
   productId: string | null;
   productName: string | null;
   declaredState: ModelState | null;
@@ -594,6 +597,35 @@ export async function EconomicsBlock({ ctx }: { ctx: BlockCtx }) {
 }
 
 // ─────────────────────────── SẢN XUẤT ───────────────────────────
+
+/**
+ * LỜI KHAI ≠ CHỨNG CỨ (Agent P2 · lib/constants/evidence-gaps.ts): trạng thái sản xuất đã khai mà ERP không
+ * có chứng từ tương ứng (topic · giá thành · mẫu xưởng · bản duyệt · lệnh SX mở). Đọc CÙNG lượt tóm tắt sản
+ * xuất của khối Sản xuất (`productionOnce` = `loadSource` + `getModelProductionSummary`), không truy vấn thêm.
+ * Chỉ gợi ý: link tới chỗ ghi chứng từ và tới ô sửa trạng thái — không sửa gì.
+ */
+export async function EvidenceGapNote({ ctx }: { ctx: BlockCtx }) {
+  // Chứng cứ sản xuất là dữ liệu của khối Sản xuất ⇒ cùng cổng quyền (`planning:view`). Không quyền ⇒ im lặng:
+  // câu cảnh báo tự nó đã nói "ERP có / không có mẫu xưởng".
+  if (!ctx.allowed.PRODUCTION || !ctx.declaredState) return null;
+  const l = await productionOnce(ctx.modelId);
+  if (!l.ok || !l.data) return null;
+  const gap = lifecycleEvidenceGap(evidenceFactsOfSummary({ id: ctx.modelId, code: ctx.modelCode, state: ctx.declaredState }, l.data));
+  if (!gap) return null;
+  return (
+    <p role="note" className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+      {gap.text}.{" "}
+      <Link href={gap.actionHref} className="font-medium underline underline-offset-2">
+        {gap.actionLabel}
+      </Link>{" "}
+      ·{" "}
+      <a href="#trang-thai-khai" className="underline underline-offset-2">
+        Sửa trạng thái
+      </a>
+      <InfoHint>Trạng thái khai là lời NGƯỜI nói; ERP chỉ chỉ ra chỗ lời khai và chứng từ sản xuất trong ERP không khớp. Máy không tự đổi trạng thái, không tự tạo chứng từ. Mẫu đang bán / xả tồn / ngừng không bị hỏi.</InfoHint>
+    </p>
+  );
+}
 
 /**
  * Khối Sản xuất đọc `getModelProductionSummary(modelId)` của Agent C (topic · giá thành chốt · mẫu thử mới

@@ -1,8 +1,9 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { emitDomainEvent } from "@/lib/events/emit";
 import { batchLinkFacts } from "@/lib/queries/workshop-ledger";
-import type { AuditParams } from "@/lib/audit";
+import { audit, type AuditParams } from "@/lib/audit";
+import { validateProductionLink } from "@/lib/inventory/production-link";
 import { flushApprovalAudits, guardInTransaction } from "@/lib/approvals/execution";
 import { recordApprovalExecutionError, type ApprovalUser, type GuardInput, type GuardResult } from "@/lib/approvals/service";
 import type { Actor } from "@/lib/constants/actor";
@@ -140,4 +141,85 @@ export async function writeStockReceiptCore(db: Db, input: WriteReceiptInput): P
     if (e instanceof SettleError) return { error: e.message, gate: giu.cong };
     throw e;
   }
+}
+
+/**
+ * ═══════════ NỐI MỘT PHIẾU NHẬP ĐÃ CÓ VÀO LỆNH SẢN XUẤT (Company OS · Agent P2) ═══════════
+ *
+ * Phiếu lập TRƯỚC khi có ô "Hàng của lệnh / lô" (0133) — hoặc lập mà quên chọn — trước đây không có đường
+ * nào nối về sau: ô chỉ có trên form TẠO phiếu. Hàm này là đường đó, và đi CÙNG cổng với đường tạo:
+ *
+ *  · `validateProductionLink` (Agent D) — chỉ phiếu `RECEIPT`, lệnh tồn tại, không huỷ. Không luật thứ hai.
+ *  · Thêm đúng MỘT điều kiện mà lúc tạo phiếu chưa kiểm được vì dòng phiếu chưa có: sản phẩm của lệnh
+ *    phải nằm trong các dòng của phiếu. Phiếu không có mã hàng nào của lệnh thì không thể là hàng của lệnh.
+ *  · CHỈ nối phiếu CHƯA nối (cả lệnh lẫn lô đều trống). Đổi một liên kết đã có là sửa lời khai của người
+ *    khác — không làm ở đây. Điều kiện nằm ngay trong câu UPDATE, nên hai người bấm cùng lúc thì đúng
+ *    một người thắng.
+ *  · Sự kiện `stock_receipt.linked_production` phát trong CÙNG giao dịch (khoá chống trùng = id phiếu,
+ *    như đường tạo), nhật ký ghi trước / sau sau khi giao dịch chốt.
+ *
+ * Máy KHÔNG BAO GIỜ gọi hàm này tự động: trang Chất lượng dữ liệu chỉ ĐỀ XUẤT lệnh khớp
+ * (`matchReceiptToOrders`), người mở phiếu chọn và bấm (AGENTS.md mục 35).
+ */
+export type LinkExistingReceiptInput = {
+  receiptId: string;
+  productionOrderId: string;
+  actor: Actor;
+  /** Email người thao tác cho nhật ký. */
+  actorEmail: string;
+  note?: string;
+};
+
+export async function linkExistingReceiptCore(db: Db, input: LinkExistingReceiptInput): Promise<{ ok: true } | { error: string }> {
+  const r = schema.stockReceipts;
+  const [phieu] = await db.select({ id: r.id, kind: r.kind, productionOrderId: r.productionOrderId, productionBatchId: r.productionBatchId, reference: r.reference, totalQuantity: r.totalQuantity }).from(r).where(eq(r.id, input.receiptId));
+  if (!phieu) return { error: "Phiếu kho không tồn tại" };
+  if (phieu.productionOrderId || phieu.productionBatchId) return { error: "Phiếu đã nối với một lệnh / lô — đổi liên kết đã có không làm ở đây" };
+
+  const kiem = await validateProductionLink(db, { kind: phieu.kind, productionOrderId: input.productionOrderId });
+  if ("error" in kiem) return { error: kiem.error };
+  const orderId = kiem.link.productionOrderId;
+  if (!orderId) return { error: "Chưa chọn lệnh sản xuất" };
+
+  const mau = await resolveReceiptLinkModel(db, { productionOrderId: orderId, productionBatchId: null });
+  const sanPhamPhieu = await db
+    .selectDistinct({ productId: schema.productVariants.productId })
+    .from(schema.stockReceiptItems)
+    .innerJoin(schema.productVariants, eq(schema.productVariants.id, schema.stockReceiptItems.variantId))
+    .where(eq(schema.stockReceiptItems.receiptId, phieu.id));
+  if (!mau.productId || !sanPhamPhieu.some((x) => x.productId === mau.productId)) return { error: "Lệnh sản xuất đã chọn là của sản phẩm khác — phiếu này không có mã hàng nào của lệnh" };
+
+  const noi = await db.transaction(async (tx) => {
+    const [capNhat] = await tx
+      .update(r)
+      .set({ productionOrderId: orderId, updatedAt: new Date() })
+      .where(and(eq(r.id, phieu.id), isNull(r.productionOrderId), isNull(r.productionBatchId)))
+      .returning({ id: r.id });
+    if (!capNhat) return false;
+    await emitDomainEvent(tx, {
+      name: "stock_receipt.linked_production",
+      subjectType: "stock_receipt",
+      subjectId: phieu.id,
+      modelId: mau.modelId,
+      payload: { kind: phieu.kind, productionOrderId: orderId, productionBatchId: null, productId: mau.productId, reference: phieu.reference, totalQuantity: phieu.totalQuantity, linkedAfterCreate: true },
+      actorKind: input.actor.id ? "USER" : "SYSTEM",
+      actorId: input.actor.id,
+      source: "ui:/inventory/receipts",
+      dedupeKey: `stock_receipt.linked_production:${phieu.id}`,
+    });
+    return true;
+  });
+  if (!noi) return { error: "Phiếu vừa được nối bởi người khác — tải lại trang để xem" };
+
+  await audit({
+    userId: input.actor.id,
+    userEmail: input.actorEmail,
+    action: "STOCK_RECEIPT_LINK_PRODUCTION",
+    entity: "STOCK_RECEIPT",
+    entityId: phieu.id,
+    before: { productionOrderId: null, productionBatchId: null },
+    after: { productionOrderId: orderId, productionBatchId: null },
+    reason: input.note?.trim() || "Nối phiếu nhập đã có vào lệnh sản xuất (người chọn)",
+  });
+  return { ok: true };
 }
