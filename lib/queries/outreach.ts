@@ -2,6 +2,7 @@ import { and, count, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type S
 import { getDb, schema } from "@/db";
 import type { ListParams } from "@/lib/search-params";
 import { CUSTOMER_OUTCOMES, type CustomerOutcome } from "@/lib/constants/outreach-segment";
+import { NURTURE_MAX_WINDOW_HOURS, NURTURE_WINDOW_MARGIN_MINUTES } from "@/lib/constants/outreach";
 import { FINISHED_OUTCOMES_SQL, OPEN_OUTCOMES, RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
 export const OUTREACH_SORTABLE = ["createdAt", "lastActivityAt", "sentAt", "nextAt"];
@@ -98,14 +99,21 @@ export async function outreachSummary() {
   const db = await getDb();
   const t = schema.outreachTargets;
   const rows = await db.select({ segment: t.segment, status: t.status, count: count() }).from(t).groupBy(t.segment, t.status);
-  const [[today], [dueN], [dueC]] = await Promise.all([
+  /*
+    "Đến hạn" của kịch bản băn khoăn KHÔNG gồm khách đã quá 24 giờ từ tin cuối: Meta không cho nhắn, bấm gửi chỉ
+    ra một dòng bỏ qua. Họ được ĐẾM RIÊNG (`stale`) — tính lúc đọc, không hạ trạng thái dòng nào trong CSDL.
+  */
+  const windowStart = new Date(Date.now() - NURTURE_MAX_WINDOW_HOURS * 3_600_000 + NURTURE_WINDOW_MARGIN_MINUTES * 60_000);
+  const nurtureDue = and(eq(t.segment, "NURTURE"), eq(t.status, "PENDING"), or(isNull(t.nextAt), lte(t.nextAt, new Date())));
+  const [[today], [dueN], [staleN], [dueC]] = await Promise.all([
     db.select({ count: count() }).from(t).where(gte(t.sentAt, new Date(Date.now() - 86_400_000))),
-    db.select({ count: count() }).from(t).where(and(eq(t.segment, "NURTURE"), eq(t.status, "PENDING"), or(isNull(t.nextAt), lte(t.nextAt, new Date())))),
+    db.select({ count: count() }).from(t).where(and(nurtureDue, or(isNull(t.lastActivityAt), gte(t.lastActivityAt, windowStart)))),
+    db.select({ count: count() }).from(t).where(and(eq(t.segment, "NURTURE"), eq(t.status, "PENDING"), sql`${t.lastActivityAt} < ${windowStart.toISOString()}::timestamptz`)),
     db.select({ count: count() }).from(t).where(and(eq(t.segment, "CROSS_SELL"), eq(t.status, "PENDING"), or(isNull(t.nextAt), lte(t.nextAt, new Date())))),
   ]);
   const get = (seg: string, st: string) => Number(rows.find((r) => r.segment === seg && r.status === st)?.count ?? 0);
   return {
-    nurture: { pending: get("NURTURE", "PENDING"), due: Number(dueN?.count ?? 0), sent: get("NURTURE", "SENT"), failed: get("NURTURE", "FAILED"), converted: get("NURTURE", "CONVERTED"), replied: get("NURTURE", "REPLIED") },
+    nurture: { pending: get("NURTURE", "PENDING"), due: Number(dueN?.count ?? 0), stale: Number(staleN?.count ?? 0), sent: get("NURTURE", "SENT"), failed: get("NURTURE", "FAILED"), converted: get("NURTURE", "CONVERTED"), replied: get("NURTURE", "REPLIED") },
     crossSell: { pending: get("CROSS_SELL", "PENDING"), due: Number(dueC?.count ?? 0), sent: get("CROSS_SELL", "SENT"), failed: get("CROSS_SELL", "FAILED") },
     sentToday: Number(today?.count ?? 0),
   };

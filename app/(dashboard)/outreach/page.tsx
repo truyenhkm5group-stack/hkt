@@ -41,7 +41,7 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
         eyebrow="Vận hành"
         title="Chăm sóc khách băn khoăn & bán chéo"
         description="Nhắc khách còn băn khoăn và gợi ý bán chéo sau khi khách nhận hàng."
-        hint="(1) Khách đã nhắn Pancake trong 24 giờ hoặc 7 ngày nhưng chưa đặt đơn → kịch bản băn khoăn nhiều bước, mỗi ngày một tin (ưu đãi chốt nhanh → chất lượng → kiểm hàng trước khi trả tiền → còn ít hàng → hỗ trợ → hỏi lại); tự dừng khi khách đặt đơn hoặc trả lời để nhân viên tiếp quản. (2) Khách đã nhận hàng 3–14 ngày → tin cảm ơn kèm gợi ý sản phẩm phối cùng. Nhân viên duyệt, sửa nội dung rồi gửi qua inbox Pancake; khách không có hội thoại thì xuất CSV để nhắn Zalo/SMS."
+        hint="(1) Khách đã nhắn Pancake trong 12 hoặc 24 giờ nhưng chưa đặt đơn → kịch bản băn khoăn nhiều bước, các bước cách nhau vài giờ (ưu đãi chốt nhanh → chất lượng → kiểm hàng trước khi trả tiền → còn ít hàng → hỗ trợ → hỏi lại). Meta chỉ cho nhắn trong 24 giờ kể từ tin cuối của khách, nên chỉ những bước còn kịp mới được gửi; trước mỗi tin ERP đọc lại hội thoại — khách nhắn lại thì dừng để nhân viên tiếp quản, quá 24 giờ thì kịch bản kết thúc; khách đặt đơn cũng tự dừng. (2) Khách đã nhận hàng 3–14 ngày → tin cảm ơn kèm gợi ý sản phẩm phối cùng. Nhân viên duyệt, sửa nội dung rồi gửi qua inbox Pancake; khách không có hội thoại thì xuất CSV để nhắn Zalo/SMS."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button asChild variant="outline" size="sm">
@@ -54,10 +54,10 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
         }
       />
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Băn khoăn chưa mua · đến hạn gửi" value={formatNumber(summary.nurture.due)} note={`${formatNumber(summary.nurture.pending)} đang trong kịch bản · ${formatNumber(summary.nurture.converted)} đã mua · ${formatNumber(summary.nurture.replied)} khách trả lời · ${formatNumber(summary.nurture.failed)} lỗi`} icon={MessageSquareHeart} tone={summary.nurture.due ? "amber" : "slate"} />
+        <MetricCard label="Băn khoăn chưa mua · đến hạn gửi" value={formatNumber(summary.nurture.due)} note={`${formatNumber(summary.nurture.pending)} đang trong kịch bản${summary.nurture.stale ? ` (${formatNumber(summary.nurture.stale)} đã quá 24 giờ — Meta không cho nhắn)` : ""} · ${formatNumber(summary.nurture.converted)} đã mua · ${formatNumber(summary.nurture.replied)} khách trả lời · ${formatNumber(summary.nurture.failed)} lỗi`} icon={MessageSquareHeart} tone={summary.nurture.due ? "amber" : "slate"} />
         <MetricCard label="Bán chéo sau nhận hàng · chờ gửi" value={formatNumber(summary.crossSell.due)} note={`${formatNumber(summary.crossSell.sent)} đã gửi · ${formatNumber(summary.crossSell.failed)} lỗi`} icon={ShoppingBag} tone={summary.crossSell.pending ? "amber" : "slate"} />
         <MetricCard label="Đã gửi 24 giờ qua" value={formatNumber(summary.sentToday)} note={`Giới hạn ${formatNumber(config.dailyLimit)} tin/ngày`} icon={Send} tone="green" />
-        <MetricCard label="Kịch bản băn khoăn" value={`${config.nurtureSteps.length} bước · ${NURTURE_WINDOWS.find((w) => w.hours === config.nurtureWindowHours)?.label ?? `${config.nurtureWindowHours} giờ`}`} note={`Mỗi bước cách ${config.nurtureStepGapDays} ngày · bán chéo ${config.crossSellFromDays}–${config.crossSellToDays} ngày sau nhận · không nhắn lại trong ${config.cooldownDays} ngày`} icon={HeartHandshake} tone="blue" />
+        <MetricCard label="Kịch bản băn khoăn" value={`${config.nurtureSteps.length} bước · ${NURTURE_WINDOWS.find((w) => w.hours === config.nurtureWindowHours)?.label ?? `${config.nurtureWindowHours} giờ`}`} note={`Mỗi bước cách ${config.nurtureStepGapHours} giờ, chỉ trong 24 giờ · bán chéo ${config.crossSellFromDays}–${config.crossSellToDays} ngày sau nhận · không nhắn lại trong ${config.cooldownDays} ngày`} icon={HeartHandshake} tone="blue" />
       </section>
       <OutreachConfigForm config={config} products={products} canWrite={canConfig} />
       <div className="flex flex-wrap gap-2">

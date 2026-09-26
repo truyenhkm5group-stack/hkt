@@ -21,7 +21,7 @@ import type { CustomerOutcome } from "@/lib/constants/outreach-segment";
 
 export function BuildButton({ segment, defaultHours }: { segment: "NURTURE" | "CROSS_SELL"; defaultHours: number }) {
   const [pending, startTransition] = useTransition();
-  const [hours, setHours] = useState(String(NURTURE_WINDOWS.some((w) => w.hours === defaultHours) ? defaultHours : 168));
+  const [hours, setHours] = useState(String(NURTURE_WINDOWS.some((w) => w.hours === defaultHours) ? defaultHours : 24));
   return (
     <div className="flex items-center gap-2">
       {segment === "NURTURE" ? (
@@ -129,7 +129,7 @@ export function OutreachTable({ rows, segment, canWrite }: { rows: OutreachRow[]
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow><TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">Chưa có khách nào. Chọn cửa sổ 24 giờ / 7 ngày rồi bấm “Lập danh sách” (job cũng tự chạy lúc 08:30).</TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">Chưa có khách nào. Chọn cửa sổ 12 / 24 giờ rồi bấm “Lập danh sách” (job cũng tự chạy lúc 08:30).</TableCell></TableRow>
             ) : rows.map((r) => {
               const chatHref = r.pageId && r.conversationId ? `https://pancake.vn/${r.pageId}?c_id=${r.conversationId}` : null;
               return (
