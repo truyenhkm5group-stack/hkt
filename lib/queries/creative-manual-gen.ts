@@ -44,7 +44,43 @@ export type ManualGenImageCard = {
   variantId: string | null;
   /** Ảnh của lượt `DESIGN`: thiết kế mới trên ảnh. `null` ở lượt `MOCKUP`. */
   design: { dna: Record<string, string>; parentLabels: string[]; why: string; priceVnd: number | null } | null;
+  /** Bản nháp ba tên (rỗng = tên mặc định theo khuôn lúc đăng). */
+  campaignName: string;
+  adsetName: string;
+  adName: string;
+  /** ISO — bài đang ở HÀNG ĐỢI ĐĂNG CAMP từ lúc này; `null` = không ở hàng đợi. */
+  queuedAt: string | null;
+  queuedByName: string;
 };
+
+type ImageRow = typeof schema.creativeManualGenImages.$inferSelect;
+
+/** Một dòng ảnh ⇒ thẻ màn hình. Dùng chung cho "Kết quả gen tay" và "Hàng đợi đăng camp" — một cách dựng, không hai. */
+function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | null, rate: number): ManualGenImageCard {
+  const d = parseManualDesignSpec(i.design);
+  return {
+    id: i.id,
+    seq: i.seq,
+    status: i.status as ManualGenImageStatus,
+    genes: { ...(i.genes ?? {}) },
+    imageId: i.imageId,
+    imageAvailable: i.imageId !== null && imageRowId !== null && purgedAt === null,
+    costUsd: i.costUsd,
+    costVnd: usdToVndRounded(i.costUsd === "" ? null : Number(i.costUsd), rate),
+    error: i.error,
+    headline: i.headline,
+    primaryText: i.primaryText,
+    captionError: i.captionError,
+    reviewedByName: i.reviewedByName,
+    variantId: i.variantId,
+    design: d ? { dna: { ...d.dna }, parentLabels: d.parentLabels, why: d.why, priceVnd: d.priceVnd } : null,
+    campaignName: i.campaignName,
+    adsetName: i.adsetName,
+    adName: i.adName,
+    queuedAt: i.status === "APPROVED" && i.queuedAt ? i.queuedAt.toISOString() : null,
+    queuedByName: i.queuedByName,
+  };
+}
 
 export type ManualGenRunCard = {
   id: string;
@@ -94,6 +130,8 @@ export type DesignInspirationOption = {
 
 export type ManualGenPanel = {
   runs: ManualGenRunCard[];
+  /** Hàng đợi đăng camp — không theo ngày đang lọc. */
+  queue: PublishQueueItem[];
   sources: PixelSourceOption[];
   /** Mẫu cảm hứng, điểm cao trước. */
   inspirations: DesignInspirationOption[];
@@ -156,26 +194,7 @@ export async function listManualGenRuns(db: Db, limit = RUNS_PER_DAY, rate: numb
   return runs.map(({ run, productName }) => {
     const images: ManualGenImageCard[] = imgs
       .filter((x) => x.i.genId === run.id)
-      .map(({ i, purgedAt, imageRow }) => ({
-        id: i.id,
-        seq: i.seq,
-        status: i.status as ManualGenImageStatus,
-        genes: { ...(i.genes ?? {}) },
-        imageId: i.imageId,
-        imageAvailable: i.imageId !== null && imageRow !== null && purgedAt === null,
-        costUsd: i.costUsd,
-        costVnd: usdToVndRounded(i.costUsd === "" ? null : Number(i.costUsd), rate),
-        error: i.error,
-        headline: i.headline,
-        primaryText: i.primaryText,
-        captionError: i.captionError,
-        reviewedByName: i.reviewedByName,
-        variantId: i.variantId,
-        design: (() => {
-          const d = parseManualDesignSpec(i.design);
-          return d ? { dna: { ...d.dna }, parentLabels: d.parentLabels, why: d.why, priceVnd: d.priceVnd } : null;
-        })(),
-      }));
+      .map(({ i, purgedAt, imageRow }) => toImageCard(i, imageRow, purgedAt, rate));
     const counts: Partial<Record<ManualGenImageStatus, number>> = {};
     for (const im of images) counts[im.status] = (counts[im.status] ?? 0) + 1;
     const priced = images.filter((im) => im.costUsd !== "" && Number.isFinite(Number(im.costUsd)));
@@ -255,6 +274,35 @@ export async function listDesignInspirations(db: Db, now: Date): Promise<DesignI
   });
 }
 
+/** Một bài ở HÀNG ĐỢI ĐĂNG CAMP: thẻ ảnh + nhãn lượt gen sinh ra nó (để người nhận ra bài). */
+export type PublishQueueItem = { img: ManualGenImageCard; runLabel: string; runCreatedAt: string };
+
+/** Số bài tối đa hiện ở hàng đợi — một hàng đợi dài hơn thế là hàng đợi không ai đọc hết. */
+const QUEUE_MAX = 50;
+
+/**
+ * HÀNG ĐỢI ĐĂNG CAMP — ảnh ĐÃ DUYỆT mà người đã bấm "Lưu" (`queued_at`), mới lưu trước. KHÔNG lọc theo ngày: đây là
+ * việc phải làm, không phải kết quả của một ngày. Đăng / đưa vào lô xong ⇒ ảnh `PROMOTED`, tự rời hàng đợi.
+ */
+export async function listPublishQueue(db: Db, rate: number = env.facebook.usdToVnd): Promise<PublishQueueItem[]> {
+  const im = schema.creativeManualGenImages;
+  const g = schema.creativeManualGens;
+  const rows = await db
+    .select({ i: im, purgedAt: schema.creativeImages.purgedAt, imageRow: schema.creativeImages.id, run: { kind: g.kind, createdAt: g.createdAt }, productName: schema.products.name })
+    .from(im)
+    .innerJoin(g, eq(g.id, im.genId))
+    .leftJoin(schema.creativeImages, eq(schema.creativeImages.id, im.imageId))
+    .leftJoin(schema.products, eq(schema.products.id, g.productId))
+    .where(and(eq(im.status, "APPROVED"), isNotNull(im.queuedAt)))
+    .orderBy(desc(im.queuedAt))
+    .limit(QUEUE_MAX);
+  return rows.map((r) => ({
+    img: toImageCard(r.i, r.imageRow, r.purgedAt, rate),
+    runLabel: r.run.kind === "DESIGN" ? "Thiết kế mới" : (r.productName ?? "Mã đã xoá"),
+    runCreatedAt: r.run.createdAt.toISOString(),
+  }));
+}
+
 /** Một ngày CÓ kết quả ở tab "Duyệt mẫu": số lượt gen tay · số ảnh đã vẽ · số lô chạy ngày ấy. */
 export type ReviewDayOption = { day: string; runs: number; images: number; batches: number };
 
@@ -292,8 +340,9 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
   const B = schema.creativeBatches;
   const [batch] = await db.select().from(B).where(and(eq(B.batchDay, targetDay), eq(B.kind, "LOOP"))).limit(1);
   const namingCfg = batch ? normalizeCreativeConfig(batch.configSnapshot).config : config;
-  const [runs, sources, inspirations, today, ctx, predictedSeq, pageName, blockers] = await Promise.all([
+  const [runs, queue, sources, inspirations, today, ctx, predictedSeq, pageName, blockers] = await Promise.all([
     listManualGenRuns(db, RUNS_PER_DAY, rate, day),
+    listPublishQueue(db, rate),
     listPixelSafeSourceOptions(db),
     listDesignInspirations(db, now),
     // Tiền gen tay của NGÀY ĐANG LỌC: hàm đo "ngày VN chứa mốc này", nên đưa trưa ngày ấy.
@@ -306,6 +355,7 @@ export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(
   const unitUsd = estimateImageUsd(config.imageModel, config.imageQuality, config.imageSize);
   return {
     runs,
+    queue,
     sources,
     inspirations,
     pricing: {

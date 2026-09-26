@@ -40,6 +40,11 @@ export function testCreativeManualPure() {
   assert.equal(manualTargetDay(truocHan, cfg, "PENDING_APPROVAL"), d, "lô hôm nay còn chờ duyệt ⇒ vào lô hôm nay");
   assert.equal(manualTargetDay(truocHan, cfg, "PLANNED"), d, "lô hôm nay đang dựng ⇒ vào lô hôm nay");
   for (const st of ["APPROVED", "PUBLISHED", "REJECTED", "EXPIRED", "FAILED"]) assert.equal(manualTargetDay(truocHan, cfg, st), shiftDay(d, 1), `lô hôm nay ${st} ⇒ sang lô ngày mai, không kẹt ở lô đã đóng`);
+  // 26/09/2026: lô NGÀY MAI bị từ chối ⇒ bài sang ngày kế tiếp còn mở, không kẹt ở lô đã đóng của ngày mai.
+  const sau = new Date(batchWindow(shiftDay(d, 1), cfg).buildFrom.getTime() + 3_600_000);
+  assert.equal(manualTargetDay(sau, cfg, "PUBLISHED", { [shiftDay(d, 1)]: "REJECTED" }), shiftDay(d, 2), "lô ngày mai REJECTED ⇒ sang ngày kia");
+  assert.equal(manualTargetDay(sau, cfg, "PUBLISHED", { [shiftDay(d, 1)]: "APPROVED", [shiftDay(d, 2)]: "EXPIRED" }), shiftDay(d, 3), "bỏ qua MỌI lô đã đóng liên tiếp");
+  assert.equal(manualTargetDay(sau, cfg, "PUBLISHED", { [shiftDay(d, 1)]: "PENDING_APPROVAL" }), shiftDay(d, 1), "lô ngày mai còn chờ duyệt ⇒ vẫn vào lô ngày mai");
 
   // 2. Thứ tự đăng.
   const order = publishOrder([
@@ -144,16 +149,19 @@ export async function testCreativeManualDb(db: Db) {
     assert.equal(b1.status, "PENDING_APPROVAL");
     assert.ok(!isManualSeed(b1.plan), "đã lập phần còn thiếu");
 
-    // 4. Lô đã duyệt ⇒ không thêm được.
+    // 4. Lô đích đã duyệt ⇒ KHÔNG thêm vào nó (không mở lại lô đã duyệt), mà sang lô kế tiếp còn mở — không kẹt ở
+    // lỗi "Lô … đã ở trạng thái …" (chủ shop gặp 26/09/2026 với lô ngày mai bị TỪ CHỐI).
     await db.update(schema.creativeBatches).set({ status: "APPROVED", approvedAt: sauGioDung, approvalDigest: "x" }).where(eq(schema.creativeBatches.id, b0.id));
     const r3 = await addManualVariant(db, input(13), cfg, actor, sauGioDung);
-    assert.ok(!r3.ok && r3.error.includes("APPROVED"));
+    assert.ok(r3.ok && r3.batchDay === shiftDay(day, 1) && r3.batchId !== b0.id, "lô đích đã đóng ⇒ sang ngày kế tiếp còn mở");
+    const [b1b] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.id, b0.id));
+    assert.equal(b1b.status, "APPROVED", "lô đã duyệt không bị mở lại");
 
     // 5. Lô HÔM NAY đã duyệt mà chưa tới hạn duyệt (02:30 sáng ngày chạy) ⇒ bài mới sang lô NGÀY MAI, không
     // báo lỗi "chỉ thêm được vào lô chờ duyệt" (chủ shop gặp 25/09/2026). Lô đã duyệt giữ nguyên.
     const sangSom = new Date(w.approvalDeadline.getTime() - 3 * 3_600_000);
     const r4 = await addManualVariant(db, input(14), cfg, actor, sangSom);
-    assert.ok(r4.ok && r4.batchDay === shiftDay(day, 1) && r4.createdBatch, "sang lô ngày mai, dựng sẵn Chờ duyệt");
+    assert.ok(r4.ok && r4.batchDay === shiftDay(day, 1), "sang lô ngày mai (Chờ duyệt)");
     const [b2] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.id, b0.id));
     assert.equal(b2.status, "APPROVED", "lô đã duyệt không bị mở lại");
   } finally {
@@ -161,5 +169,5 @@ export async function testCreativeManualDb(db: Db) {
     if (prevCfg) await db.update(schema.settings).set({ value: prevCfg.value }).where(eq(schema.settings.key, CREATIVE_CONFIG_KEY));
     else await db.delete(schema.settings).where(eq(schema.settings.key, CREATIVE_CONFIG_KEY));
   }
-  console.log("✓ Vòng mẫu — mẫu tự làm: vào lô còn hạn duyệt · dựng sẵn lô · máy chỉ lập phần còn thiếu · không qua máy viết/vẽ · lô đã duyệt thì chặn · lô hôm nay đã duyệt thì sang lô ngày mai");
+  console.log("✓ Vòng mẫu — mẫu tự làm: vào lô còn hạn duyệt · dựng sẵn lô · máy chỉ lập phần còn thiếu · không qua máy viết/vẽ · lô đích đã duyệt / từ chối thì sang lô kế tiếp còn mở, không mở lại lô đã đóng");
 }

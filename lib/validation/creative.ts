@@ -208,6 +208,21 @@ export const manualGenPromoteSchema = z
   .strict();
 
 /**
+ * "Lưu" bài của một ảnh gen tay đã duyệt vào HÀNG ĐỢI ĐĂNG CAMP — cùng trần câu chữ / tên với "Đưa vào lô", nhưng
+ * nội dung chính được để trống (bản nháp dở vẫn lưu được; lúc đăng mới bắt buộc).
+ */
+export const manualGenDraftSchema = z
+  .object({
+    imageId: z.string().trim().min(1, "Thiếu mã ảnh"),
+    headline: z.string().trim().max(VARIANT_COPY_LIMITS.headlineMaxChars, `Tiêu đề tối đa ${VARIANT_COPY_LIMITS.headlineMaxChars} ký tự`).default(""),
+    primaryText: z.string().trim().max(VARIANT_COPY_LIMITS.primaryTextMaxChars, `Nội dung chính tối đa ${VARIANT_COPY_LIMITS.primaryTextMaxChars} ký tự`).default(""),
+    campaignName: nameField("chiến dịch"),
+    adsetName: nameField("nhóm quảng cáo"),
+    adName: nameField("quảng cáo"),
+  })
+  .strict();
+
+/**
  * "Đăng camp" một ảnh gen tay đã duyệt — cùng câu chữ + ba tên với "Đưa vào lô", thêm giờ chạy: `null` = chạy
  * ngay; chuỗi ISO có múi giờ = hẹn giờ (máy chủ kiểm khoảng hợp lệ ở `instantWindow`).
  */

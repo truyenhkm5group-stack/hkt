@@ -9,11 +9,11 @@ import { imageSpendToday, manualGenSpendToday } from "@/lib/creative/generate";
 import { storeCreativeImage } from "@/lib/creative/images";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { manualTargetDay } from "@/lib/creative/manual";
-import { drawManualGen, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, startManualGen } from "@/lib/creative/manual-gen";
+import { drawManualGen, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
 import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, genderPart, geoPart, refreshNamingTemplate, saveVariantNamesCore, type NamingContext } from "@/lib/creative/naming";
 import { batchApprovalContent, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
 import { listRecentBatches } from "@/lib/queries/creative-loop";
-import { listManualGenRuns, listReviewDays, loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
+import { listManualGenRuns, listPublishQueue, listReviewDays, loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
 import { batchWindow } from "@/lib/creative/schedule";
 import { applyVariantSelectionCore, planSelection } from "@/lib/creative/selection";
 import { testCampaignFields, type TemplateAd } from "@/lib/integrations/facebook/ads-write";
@@ -323,7 +323,7 @@ export async function testCreativeManualGenDb(db: Db) {
 
     // ── (b5) DUYỆT ⇒ máy viết câu chữ theo ảnh; LOẠI ⇒ ra khỏi lô ──
     const ready = (await db.select().from(schema.creativeManualGenImages).where(and(eq(schema.creativeManualGenImages.genId, s1.genId), eq(schema.creativeManualGenImages.status, "GENERATED")))).sort((a, b) => a.seq - b.seq);
-    assert.ok(ready.length >= 5);
+    assert.ok(ready.length >= 8, `cần ≥ 8 ảnh chờ duyệt cho các ca bên dưới (có ${ready.length})`);
     const ok1 = await reviewManualGenImage(db, { imageId: ready[0].id, decision: "APPROVE", reason: "" }, actor, now, { caption });
     assert.ok(ok1.ok && ok1.status === "APPROVED" && ok1.caption?.ok, "duyệt ⇒ máy viết câu chữ theo ảnh");
     const [a1] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, ready[0].id));
@@ -434,6 +434,31 @@ export async function testCreativeManualGenDb(db: Db) {
     for (const r of cam) await reviewManualGenImage(db, { imageId: r.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
     const camInput = (imageId: string, scheduleAt: Date | null) => ({ imageId, headline: "Đầm đi biển", primaryText: "Nhắn shop để được tư vấn size.", names: { campaign: "", adset: "", ad: "" }, predictedSeq: null, scheduleAt });
 
+    // ── (g) HÀNG ĐỢI ĐĂNG CAMP: Lưu ⇒ vào hàng đợi (không lô, không Facebook) · lưu lại ghi đè · bỏ · loại ảnh thì rời ──
+    const trongHang = async (id: string) => (await listPublishQueue(db)).find((x) => x.img.id === id) ?? null;
+    const nhap = await saveManualGenDraft(db, { imageId: cam[0].id, headline: "Nháp 1", primaryText: "Nội dung nháp", names: { campaign: " Camp tôi đặt ", adset: "", ad: "" } }, actor, new Date());
+    assert.ok(nhap.ok, "ảnh đã duyệt lưu được bản nháp");
+    const h1 = await trongHang(cam[0].id);
+    assert.ok(h1 && h1.img.headline === "Nháp 1" && h1.img.campaignName === "Camp tôi đặt" && h1.img.queuedByName === actor.name, "bài vào hàng đợi với đúng câu chữ + tên (đã cắt khoảng trắng) + người lưu");
+    const [anhNhap] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, cam[0].id));
+    assert.equal(anhNhap.queuedByUserId, actor.id, "quy kết bằng khoá tài khoản (mục 34)");
+    assert.equal(anhNhap.status, "APPROVED", "Lưu KHÔNG đổi trạng thái ảnh, không đăng gì");
+    assert.equal(fbCalls.length, 0, "Lưu không gọi Facebook");
+    const nhap2 = await saveManualGenDraft(db, { imageId: cam[0].id, headline: "Đầm đi biển", primaryText: "Nhắn shop để được tư vấn size.", names: { campaign: "", adset: "", ad: "" } }, actor, new Date());
+    assert.ok(nhap2.ok && (await trongHang(cam[0].id))?.img.headline === "Đầm đi biển", "Lưu lại ⇒ ghi đè bản nháp");
+    const khongDuyet = await saveManualGenDraft(db, { imageId: ready[1].id, headline: "x", primaryText: "y", names: { campaign: "", adset: "", ad: "" } }, actor, new Date());
+    assert.ok(!khongDuyet.ok, "ảnh chưa / không được duyệt ⇒ không lưu vào hàng đợi");
+    const r7 = ready[7];
+    await reviewManualGenImage(db, { imageId: r7.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
+    assert.ok((await saveManualGenDraft(db, { imageId: r7.id, headline: "Sẽ loại", primaryText: "z", names: { campaign: "", adset: "", ad: "" } }, actor, new Date())).ok);
+    assert.ok((await unqueueManualGenDraft(db, r7.id, new Date())).ok && !(await trongHang(r7.id)), "Bỏ khỏi hàng đợi");
+    const [r7b] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, r7.id));
+    assert.equal(r7b.headline, "Sẽ loại", "bỏ khỏi hàng đợi vẫn GIỮ bản nháp câu chữ");
+    assert.ok((await saveManualGenDraft(db, { imageId: r7.id, headline: "Sẽ loại", primaryText: "z", names: { campaign: "", adset: "", ad: "" } }, actor, new Date())).ok && (await trongHang(r7.id)));
+    await reviewManualGenImage(db, { imageId: r7.id, decision: "REJECT", reason: "đổi ý" }, actor, now, { caption });
+    assert.ok(!(await trongHang(r7.id)), "loại ảnh ⇒ rời hàng đợi");
+    assert.ok(!(await unqueueManualGenDraft(db, r7.id, new Date())).ok, "không còn trong hàng đợi ⇒ bỏ lần nữa báo rõ");
+
     // (f1) Đường ghi tắt ⇒ không dựng lô, không gọi Facebook, ảnh vẫn "Đã duyệt".
     const t1 = new Date();
     const tat = await publishManualGenImageInstant(db, camInput(cam[0].id, null), cfgOf(), actor, t1, { writer: fbGia, env: { hardEnabled: false, mode: "COPILOT" }, killSwitch: khongKeo });
@@ -463,6 +488,8 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.equal(vc1.committedBudgetVnd, cfgOf().budgetPerVariantVnd);
     const [ic1] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, cam[0].id));
     assert.equal(ic1.status, "PROMOTED");
+    assert.ok(!(await trongHang(cam[0].id)), "đăng camp xong ⇒ bài tự rời hàng đợi");
+    assert.equal(ic1.campaignName, c1.ok ? c1.names.campaign : "", "ảnh ghi lại đúng tên chiến dịch đã đăng");
     const lai2 = await publishManualGenImageInstant(db, camInput(cam[0].id, null), cfgOf(), actor, t1, { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(!lai2.ok, "một ảnh không đăng hai lần");
 
