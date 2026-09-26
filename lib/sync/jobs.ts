@@ -17,7 +17,7 @@ import { runMarketingDigest } from "@/lib/marketing/digest";
 import { recordDecisionLedger } from "@/lib/marketing/decision-ledger";
 import { evaluateAlerts } from "@/lib/alerts/rules";
 import { rematerializeStale } from "@/lib/queries/canonical-outcome";
-import { warmDashboard } from "@/lib/queries/warm";
+import { warmDashboard, warmDetail } from "@/lib/queries/warm";
 import { trongJobNen } from "@/lib/cache";
 import { buildOutreachTargets } from "@/lib/outreach/build";
 import { runFanpageAttributionJob } from "@/lib/attribution/fanpage";
@@ -402,7 +402,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
     label: "Giữ ấm bảng điều khiển",
     source: "ALL",
     description:
-      "Tính sẵn số liệu Tổng quan và Tóm tắt & rủi ro cho các kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
+      "Tính sẵn số liệu Tổng quan, Tóm tắt & rủi ro và các bộ máy cả shop của khối \"Cần anh quyết\" (tín hiệu mẫu, quyết định quảng cáo, vốn tồn, lệnh sản xuất) cho kỳ người dùng hay mở, để trang chủ luôn đọc từ bộ nhớ đệm. CHỈ ĐỌC — không đụng dữ liệu nghiệp vụ.",
     // Company OS · G: bọc để có dòng `sync_runs` — CHỈ QUAN SÁT (không làm cũ đệm vừa ấm, không phát `sync`).
     // Kỳ lỗi ghi vào `detail`, không vào `failed`: lỗi giữ ấm không đổi dữ liệu nào, và trạng thái
     // PARTIAL ở đây sẽ bật chuỗi sự cố của một job chỉ-đọc mỗi 4 phút.
@@ -410,7 +410,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
       runSyncJob({ source: "ERP", job: "dashboard-warm", trigger: o.trigger, actor: o.actor, observeOnly: true }, async (ctx) => {
         const r = await warmDashboard();
         ctx.summary.skipped = r.failed.length;
-        ctx.summary.detail = `ấm ${r.warmed.length} mục (${r.warmed.join(", ") || "không mục nào"}) · ${r.ms} ms${r.failed.length ? ` · LỖI ${r.failed.map((f) => `${f.key}: ${f.error}`).join(" | ")}` : ""}`.slice(0, 900);
+        ctx.summary.detail = warmDetail(r);
         return r;
       }),
   },
@@ -494,7 +494,7 @@ export const JOB_DEFINITIONS: Record<string, { label: string; source: "PANCAKE" 
         ctx.summary.imported = r.created;
         ctx.summary.updated = r.resolved;
         if (r.lark.error || r.telegram.error) ctx.summary.warning = `gửi cảnh báo hỏng: ${[r.lark.error && `Lark ${r.lark.error}`, r.telegram.error && `Telegram ${r.telegram.error}`].filter(Boolean).join(" · ")}`.slice(0, 500);
-        ctx.summary.detail = `mở mới ${r.created} · đóng ${r.resolved} · thôi theo dõi ${r.stale} · đổi loại ${r.reclassified} · đang mở ${r.open} · Lark ${r.lark.sent}${r.lark.error ? ` (lỗi: ${r.lark.error})` : ""} · Telegram ${r.telegram.sent}${r.telegram.error ? ` (lỗi: ${r.telegram.error})` : ""} · Cần anh quyết ${r.ownerDigest.sent ? `đã gửi (${r.ownerDigest.sent})` : r.ownerDigest.error ? `lỗi: ${r.ownerDigest.error}` : "không gửi"}`.slice(0, 900);
+        ctx.summary.detail = `mở mới ${r.created} · đóng ${r.resolved} · thôi theo dõi ${r.stale} · đổi loại ${r.reclassified} · đang mở ${r.open} · Lark ${r.lark.sent}${r.lark.error ? ` (lỗi: ${r.lark.error})` : ""} · Telegram ${r.telegram.sent}${r.telegram.error ? ` (lỗi: ${r.telegram.error})` : ""} · gửi lại ${r.delivery.retried}${r.delivery.failed ? ` · chờ gửi lại ${r.delivery.failed}` : ""}${r.delivery.gaveUp ? ` · BỎ CUỘC ${r.delivery.gaveUp}` : ""}${r.approvalSweep.released ? ` · trả lại ${r.approvalSweep.released} lời duyệt kẹt` : ""}${r.approvalSweep.error ? ` · dọn lời duyệt lỗi: ${r.approvalSweep.error}` : ""} · Cần anh quyết ${r.ownerDigest.sent ? `đã gửi (${r.ownerDigest.sent})` : r.ownerDigest.error ? `lỗi: ${r.ownerDigest.error}` : "không gửi"}`.slice(0, 900);
         return r;
       }),
   },

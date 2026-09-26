@@ -248,6 +248,7 @@ import { testCompanyOsCreativeAds } from "./company-os-creative-ads.test";
 import { testCreativeWrite, testCreativeWriteDb } from "./creative-write.test";
 import { testCreativeScaleDb, testCreativeScalePure } from "./creative-scale.test";
 import { testCreativeMoqDb, testCreativeMoqPure } from "./creative-moq.test";
+import { testCompanyOsAdOrderUnify } from "./company-os-ad-order-unify.test";
 import { testCreativeEmptyBatch, testCreativeExtendedWindow, testCreativeLoopTick } from "./creative-loop-tick.test";
 import { testCreativeManualDb, testCreativeManualPure } from "./creative-manual.test";
 import { testCreativeManualGenDb, testCreativeManualGenPure } from "./creative-manual-gen.test";
@@ -304,8 +305,11 @@ import { testCompanyOsSignalBatchDb, testCompanyOsSignalBatchSource } from "./co
 import { testCompanyOsStockFeedbackDb, testCompanyOsStockFeedbackPure } from "./company-os-stock-feedback.test";
 import { testCompanyOsOwnerDigestDb, testCompanyOsOwnerDigestPure } from "./company-os-owner-digest.test";
 import { testCompanyOsEarlyTopicDb, testCompanyOsEarlyTopicPure } from "./company-os-early-topic.test";
+import { testCompanyOsWarmDb, testCompanyOsWarmPure } from "./company-os-warm.test";
+import { testCompanyOsSummaryDb, testCompanyOsSummaryPure } from "./company-os-summary.test";
 import { testHardeningApprovalExecution, testHardeningLifecycleInTx, testHardeningReceiptLinkedEvent, testHardeningSettingsPrimitive, testHardeningTopicTrackSemantics } from "./company-os-hardening.test";
 import { testAlertsConfigForm } from "./alerts-config-form.test";
+import { testApprovalReservationSweep, testNotificationRetryDb, testNotificationRetryPure } from "./company-os-retry-sweep.test";
 import { testShipmentStatusAgeDb, testShipmentStatusAgePure } from "./shipment-status-age.test";
 import { testOrderDuplicateDb, testOrderDuplicatePure } from "./order-duplicate.test";
 import { testPreshipValidationDb, testPreshipValidationPure } from "./preship-validation.test";
@@ -1764,6 +1768,8 @@ async function main() {
   await testCreativeScaleDb(db);
   testCreativeMoqPure();
   await testCreativeMoqDb(db);
+  // Company OS · B2 — MOQ thiết kế + /ads/daily nhóm/mẩu đếm đơn QC bằng ORDER_AD_ID / ORDER_ADSET_ID (một cách đếm với /ads).
+  await testCompanyOsAdOrderUnify(db);
   testAdsKillSwitchPure();
   await testAdsKillSwitchDb(db);
   await testCreativeLoopTick(db);
@@ -1955,6 +1961,11 @@ async function main() {
   // Company OS · Agent X: vòng phản hồi tồn → creative / quảng cáo (mã `cos-x-` / `COSX-`, tự dọn; một dòng sổ phản ứng append-only giữ nguyên).
   testCompanyOsStockFeedbackPure();
   await testCompanyOsStockFeedbackDb(db);
+  // Company OS · Agent W: job giữ ấm phủ khoá đệm của "Cần anh quyết" (so TẬP KHOÁ, không gõ tên) + ops company-os-summary (mã `cos-w-` / `COSW`, tự dọn, trả lại `owner.digest`).
+  await testCompanyOsWarmPure();
+  await testCompanyOsWarmDb();
+  testCompanyOsSummaryPure();
+  await testCompanyOsSummaryDb(db);
   await testCodReconciliation();
   await testCodStatementAudit();
   await testOrderSource();
@@ -2322,6 +2333,10 @@ async function main() {
   await testHardeningApprovalExecution(db);
   await testHardeningReceiptLinkedEvent(db);
   await testHardeningTopicTrackSemantics(db);
+  // Company OS · N: gửi lại tin Lark hỏng + dọn lời duyệt kẹt (mã `cos-n-`; dòng thông báo tự xoá).
+  testNotificationRetryPure();
+  await testNotificationRetryDb(db);
+  await testApprovalReservationSweep(db);
   // Company OS · QA: MỘT mẫu đi hết vòng đời qua mọi agent (A–G). Đứng CUỐI để không đổi tổng của bài nào; tự dọn mã `cosqa-` / `COSQA`.
   testCompanyOsE2ePure();
   await testCompanyOsE2eLifecycle(db);

@@ -26,8 +26,9 @@ import { unclassifiedBankRows } from "@/lib/queries/finance-ops";
 import { bankExceptionScore } from "@/lib/constants/finance-ops";
 import { resolvePeriod } from "@/lib/search-params";
 import { APPROVAL_GROUP_LABEL, type ApprovalGroup } from "@/lib/constants/approval";
-import { listApprovalRequests } from "@/lib/queries/approvals";
-import { formatVND } from "@/lib/format";
+import { approvalFailureTimes, listApprovalRequests } from "@/lib/queries/approvals";
+import { approvalExecutionNote } from "@/lib/approvals/execution-note";
+import { formatDateTime, formatVND } from "@/lib/format";
 import { SAMPLE_STATUS_TO_WORK, TOPIC_OPEN_STATUSES, TOPIC_STATUS_LABEL, TOPIC_STATUS_TO_WORK, type SampleStatus, type TopicStatus } from "@/lib/constants/production-os";
 
 /**
@@ -880,8 +881,14 @@ export async function adaptTechTasks(now: Date, includeClosed = false): Promise<
  */
 export async function adaptApprovals(now: Date, includeClosed = false, closedSince: Date | null = null): Promise<WorkItem[]> {
   const rows = await listApprovalRequests({ includeDecided: includeClosed, decidedSince: closedSince });
+  // Company OS · Agent N: yêu cầu mang `execution_error` (lần thực thi trước không hoàn tất) — câu nhắc và
+  // lúc hỏng đi vào tóm tắt + bằng chứng, cùng câu với trang Cần xử lý (`approvalExecutionNote`).
+  const lucHong = await approvalFailureTimes(rows.filter((r) => r.executionError).map((r) => r.id));
   const ms = now.getTime();
   return rows.map((r) => {
+    const nhac = approvalExecutionNote(r.executionError);
+    const luc = lucHong.get(r.id);
+    const nhacDu = nhac ? `${nhac} (${luc ? formatDateTime(luc) : "chưa rõ lúc nào"})` : null;
     const status = APPROVAL_STATUS_TO_WORK[r.status as keyof typeof APPROVAL_STATUS_TO_WORK] ?? "NEW";
     const nhom = APPROVAL_GROUP_LABEL[r.group as ApprovalGroup] ?? r.group;
     const score = caseScore({ severity: "warning", ageHours: hoursSince(r.requestedAt, ms), amount: r.amount ?? 0, type: "OTHER" });
@@ -891,7 +898,7 @@ export async function adaptApprovals(now: Date, includeClosed = false, closedSin
       sourceKey: r.id,
       kind: r.group,
       title: `Chờ duyệt · ${r.summary}`,
-      summary: `${nhom} · ${r.requestedByEmail || "không rõ người xin"} xin — người xin không tự duyệt được việc của mình.`,
+      summary: `${nhom} · ${r.requestedByEmail || "không rõ người xin"} xin — người xin không tự duyệt được việc của mình.${nhacDu ? ` ${nhacDu}.` : ""}`,
       department: "MANAGEMENT" as DepartmentCode,
       assignee: null,
       status,
@@ -909,7 +916,7 @@ export async function adaptApprovals(now: Date, includeClosed = false, closedSin
       sourceUrl: "/alerts",
       money: MONEY_UNKNOWN,
       tags: [r.group],
-      evidence: { source: "Phê duyệt hai bước", detail: `${nhom} · ${r.amount === null ? "chưa rõ số tiền" : formatVND(r.amount)} · ${r.action}` },
+      evidence: { source: "Phê duyệt hai bước", detail: `${nhom} · ${r.amount === null ? "chưa rõ số tiền" : formatVND(r.amount)} · ${r.action}${nhacDu ? ` · ${nhacDu}` : ""}` },
       blockedReason: "",
       creationSource: "AUTO" as WorkItem["creationSource"],
       actions: actionsOf("APPROVAL"),

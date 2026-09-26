@@ -188,6 +188,14 @@ export function memoSize() {
   return store.entries.size;
 }
 
+/**
+ * Khoá đang có trong đệm (kể cả khoá đã cũ còn giữ giá trị) — chỉ để chẩn đoán / kiểm thử: bài kiểm của
+ * job giữ ấm so tập khoá job dựng với tập khoá trang chủ đọc, thay vì gõ lại tên khoá bằng tay.
+ */
+export function memoKeys(): string[] {
+  return [...store.entries.keys()];
+}
+
 export function periodKey(period: { from: Date | null; to: Date | null }) {
   return `${period.from?.toISOString() ?? ""}..${period.to?.toISOString() ?? ""}`;
 }

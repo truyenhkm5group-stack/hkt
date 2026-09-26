@@ -1,5 +1,6 @@
 import { and, desc, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { notificationDeliveryHealth } from "@/lib/alerts/notification-delivery";
 
 export type NotificationRow = typeof schema.notifications.$inferSelect;
 
@@ -72,4 +73,13 @@ export async function openCountsByKind() {
     .where(isNull(schema.notifications.resolvedAt))
     .groupBy(schema.notifications.kind);
   return Object.fromEntries(rows.map((r) => [r.kind, Number(r.count)])) as Record<string, number>;
+}
+
+/**
+ * Đường gửi tin Lark / Telegram có đang hỏng không (Company OS · Agent N): số dòng BỎ CUỘC (tới trần thử
+ * lại), số dòng ĐANG CHỜ GỬI LẠI, câu lỗi gần nhất (đã che). Chỉ tính dòng còn mở, còn trong cửa sổ gửi lại.
+ */
+export async function notificationDeliveryStatus() {
+  const db = await getDb();
+  return notificationDeliveryHealth(db);
 }

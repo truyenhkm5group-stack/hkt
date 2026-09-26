@@ -41,6 +41,7 @@ Hai mốc dùng lại `ReportBasis` của bộ máy lợi nhuận, không dựng
 | Quy kết marketer | `order_attributions` (ảnh chụp) | Đổi người phụ trách **không** viết lại lịch sử |
 | Trùng đơn | `order_attributions.status = 'DUPLICATE'` | Không tự xét lại |
 | Đơn → chiến dịch | `ORDER_CAMPAIGN_ID` (`ad_id` → `post_id`) | Nhập nhằng thì **không** nối |
+| Đơn → nhóm QC · mẩu QC | `ORDER_ADSET_ID` · `ORDER_AD_ID` (`ad_id` → `post_id`), từ 26/09/2026 (B2) | CÙNG biểu thức với `/ads`; bài thuộc nhiều nhóm / nhiều mẩu ⇒ **không** nối ở cấp đó. Trước B2 hai cấp này chỉ đọc `orders.ad_id` ⇒ đơn qua bài viết vắng mặt, ROAS/CPO cấp mẩu thấp hơn `/ads` trên cùng số chi |
 | Đích / ngưỡng | `metric_targets` + `evaluateMetric` | Không có ngưỡng mặc định trong mã |
 
 `pnlFacts()` là **cửa duy nhất**. Chép phép nối `orders ⋈ shipments` sang tệp thứ hai là dựng một
@@ -152,6 +153,10 @@ ngã ngũ. Hai hệ quả, cả hai đều đã được xử lý:
    và tổng kỳ có ngày như vậy cũng `—`. ĐỘ PHỦ (`spendCoverage`: ngày + tiền đã biết ở hạt mẩu, ngày +
    tiền cấp chiến dịch chưa tách) in NGAY trong thẻ Chi quảng cáo. Chiều chiến dịch / mã hàng / marketer
    không đổi — mọi hạt vẫn cộng như trước. Mẩu mà sổ không biết thuộc chiến dịch nào ⇒ cả chiều `—`.
+   PHÍA ĐƠN của nhóm/mẩu (bộ lọc `dimensionFilter` + khoá bóc tách `dimensionKeyExpr`) đi bằng
+   `ORDER_ADSET_ID` / `ORDER_AD_ID` từ 26/09/2026 (B2) — không còn "chỉ `ad_id`" — nên số đơn một dòng
+   nhóm/mẩu ở trang này BẰNG số đơn dòng cùng khoá trên `/ads` (`tests/company-os-ad-order-unify.test.ts`).
+   Phía CHI không đổi (luật hạt mẩu ở trên).
 5. **Chiều CÓ số chi nhưng nguồn chưa biết tới nhóm này** ⇒ `—`. Biên quan sát ở mục 1 trả lời
    "đồng bộ đã chạy tới ngày nào"; nó **không** trả lời được "nhóm này có được khai trong bảng chi
    tiêu không". Để nó trả lời thay là lỗi đã xảy ra trên Bóc tách theo MKTer: đơn được quy kết bằng

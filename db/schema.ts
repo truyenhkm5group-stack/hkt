@@ -685,8 +685,18 @@ export const notifications = pgTable(
      *               chưa biết ai đóng thì ghi là chưa biết, không gán bừa cho hệ thống hay cho người.
      */
     resolution: text("resolution"),
-    /** Đã gửi Telegram lúc */
+    /** Đã gửi Telegram / Lark lúc (ít nhất một kênh nhận) */
     notifiedAt: ts("notified_at"),
+    /**
+     * GỬI LẠI TIN HỎNG (0146 · Company OS · Agent N — `lib/constants/notification-retry.ts`).
+     * Số lần job `alerts` đã NHẬN gửi dòng này (kể cả lần đầu). `NULL` = chưa từng thử — dòng cũ trước
+     * 0146, hoặc dòng không có kênh nào để gửi; những dòng đó KHÔNG BAO GIỜ được gửi lại.
+     */
+    notifyAttempts: integer("notify_attempts"),
+    /** Lúc nhận lượt thử gần nhất — cũng là "khoá giữ chỗ" chống hai lượt chạy gửi trùng. */
+    notifyLastAttemptAt: ts("notify_last_attempt_at"),
+    /** Câu lỗi lần gửi hỏng gần nhất, ĐÃ CHE URL / token. Không bao giờ chứa webhook. */
+    notifyLastError: text("notify_last_error"),
     /** Thời điểm cập nhật gần nhất của đối tượng (trạng thái vận đơn, đơn, case…) lúc tạo cảnh báo */
     occurredAt: ts("occurred_at"),
     /**

@@ -2,7 +2,7 @@ import { ShieldCheck } from "lucide-react";
 import { SectionCard } from "@/components/ui-bits";
 import { listPendingApprovals } from "@/lib/actions/approvals";
 import { APPROVAL_GROUP_REASON } from "@/lib/constants/approval";
-import { formatTimeAgo, formatVND } from "@/lib/format";
+import { formatDateTime, formatTimeAgo, formatVND } from "@/lib/format";
 import { ApprovalDecisionButtons } from "@/app/(dashboard)/alerts/approval-actions";
 
 /**
@@ -16,10 +16,12 @@ import { ApprovalDecisionButtons } from "@/app/(dashboard)/alerts/approval-actio
 export async function ApprovalSection() {
   const list = await listPendingApprovals();
   if (!list.length) return null;
+  const cho = list.filter((r) => !r.returned).length;
+  const traLai = list.length - cho;
 
   return (
     <SectionCard
-      title={`${list.length} việc chờ duyệt`}
+      title={`${cho} việc chờ duyệt${traLai ? ` · ${traLai} lời duyệt bị trả lại` : ""}`}
       description="Những việc một người không được tự làm một mình. Người xin không duyệt được việc của chính mình."
       padded={false}
     >
@@ -37,8 +39,25 @@ export async function ApprovalSection() {
               </div>
               {/* Người duyệt phải biết mình đang gật CÁI GÌ và VÌ SAO việc đó cần gật. */}
               <div className="mt-1 text-[11.5px] text-muted-foreground">{APPROVAL_GROUP_REASON[r.group]}</div>
+              {/*
+                LẦN THỰC THI TRƯỚC KHÔNG HOÀN TẤT (Company OS · Agent N): lời duyệt đã quay về, làm lại ĐÚNG việc
+                sẽ dùng nó. Máy không phân biệt được "dừng trước khi ghi" với "ghi xong rồi mới dừng" — nên câu
+                này phải hiện TRƯỚC khi ai bấm làm lại, không phải sau.
+              */}
+              {r.executionNote ? (
+                <div className="mt-1.5 rounded-md border border-amber-300/70 bg-amber-50/70 px-2 py-1 text-[12px] text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                  {r.executionNote}
+                  <span className="ml-1 text-amber-800/80 dark:text-amber-300/80">
+                    · {r.executionFailedAt ? formatDateTime(r.executionFailedAt) : "chưa rõ lúc nào"}
+                  </span>
+                </div>
+              ) : null}
             </div>
-            {r.canDecide ? (
+            {r.returned ? (
+              <span className="shrink-0 self-center text-[11.5px] text-muted-foreground">
+                {r.isRequester ? "Đã duyệt — làm lại ĐÚNG việc này sẽ dùng lời duyệt đã có" : "Đã duyệt — lời duyệt đã trả lại cho người xin"}
+              </span>
+            ) : r.canDecide ? (
               <ApprovalDecisionButtons id={r.id} />
             ) : (
               <span className="shrink-0 self-center text-[11.5px] text-muted-foreground">

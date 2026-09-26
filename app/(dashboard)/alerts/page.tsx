@@ -20,6 +20,8 @@ import { CareDrawerHost, CareOpenButton } from "@/app/(dashboard)/shipments/care
 import { InfoHint } from "@/components/info-hint";
 import { QueueViewTabs } from "@/components/queue-view-tabs";
 import { ideasWaitingReview } from "@/lib/queries/ideas";
+import { notificationDeliveryStatus } from "@/lib/queries/notifications";
+import { NOTIFY_MAX_ATTEMPTS } from "@/lib/constants/notification-retry";
 import { Lightbulb } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -93,6 +95,8 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
           </>
         }
       />
+      {/* Tin Lark / Telegram gửi hỏng: dòng việc vẫn ở hàng đợi dưới, nhưng nhóm chat KHÔNG biết có nó. */}
+      <DeliveryWarning />
       {/* Việc có NGƯỜI đang chờ đứng trên việc do máy quét ra — để lẫn xuống dưới thì người xin ngồi đợi mà không ai biết. */}
       <ApprovalSection />
       {/* Ý tưởng marketing chờ duyệt cũng là NGƯỜI đang chờ, và trước đây không có chỗ nào báo. */}
@@ -239,6 +243,27 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
           <MarketingDigestForm config={marketingConfig} marketers={marketers} />
         </SectionCard>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * ĐƯỜNG GỬI TIN ĐANG HỎNG (Company OS · Agent N).
+ *
+ * Job `alerts` gửi lại tin hỏng có trần (`lib/constants/notification-retry.ts`); tới trần là BỎ CUỘC. Bỏ
+ * cuộc mà không ai thấy thì y như trước — nhóm chat im lặng và không ai biết vì sao. Dải này chỉ hiện khi có
+ * dòng đang chờ gửi lại hoặc đã bỏ cuộc; câu lỗi đã che URL / token lúc ghi.
+ */
+async function DeliveryWarning() {
+  const h = await notificationDeliveryStatus().catch(() => null);
+  if (!h || (!h.gaveUp && !h.pendingRetry)) return null;
+  return (
+    <div className="rounded-xl border border-rose-300/60 bg-rose-50/60 px-4 py-2.5 text-sm dark:border-rose-900/60 dark:bg-rose-950/20">
+      <b>Tin cảnh báo Lark / Telegram gửi hỏng:</b>
+      {h.gaveUp ? ` ${formatNumber(h.gaveUp)} việc đã thử ${NOTIFY_MAX_ATTEMPTS} lần rồi bỏ cuộc` : ""}
+      {h.gaveUp && h.pendingRetry ? " ·" : ""}
+      {h.pendingRetry ? ` ${formatNumber(h.pendingRetry)} việc đang chờ gửi lại` : ""}
+      {h.lastError ? <span className="block text-[12px] text-muted-foreground">Lỗi gần nhất{h.lastAttemptAt ? ` (${formatDateTime(h.lastAttemptAt)})` : ""}: {h.lastError}</span> : null}
     </div>
   );
 }
