@@ -574,11 +574,38 @@ Tệp: `lib/creative/{manual-gen,naming,selection}.ts` · `lib/creative/{publish
 `variant-select.tsx` · `names-editor.tsx` · `drizzle/0124_creative_manual_gen_campaign_per_post.sql` · `tests/creative-manual-gen.test.ts` ·
 `tests/creative-write.test.ts` (ca 10–14).
 
-**Chờ chủ shop quyết:** (1) trần **30 ảnh / ngày** (`maxImagesPerDay`) và **2 USD / ngày** là CHUNG: ngày có lô đầy 20 ảnh (~1,7 USD) thì
-một lần bấm gen tay chỉ vẽ được ~3 ảnh — muốn đủ 10 ảnh / lần thì nâng trần (sửa mã, AGENTS.md mục 7). (2) Chiến dịch riêng
+**Chờ chủ shop quyết:** (1) ~~trần 30 ảnh / ngày và 2 USD / ngày là CHUNG~~ — chủ shop đã quyết 26/09/2026: gỡ trần gen tay, xem §5j. (2) Chiến dịch riêng
 chép mục tiêu từ chiến dịch test (thường "Tương tác / Tin nhắn") — muốn mục tiêu khác cho bài test thì đổi ở chiến dịch test.
 (3) Nếu tài khoản dùng Graph API ≥ v24 và Facebook đòi `is_adset_budget_sharing_enabled` khi tạo chiến dịch không ngân sách, lượt
 tạo chiến dịch sẽ báo lỗi rõ ràng (không mồ côi gì) — kho đang gọi v21.0.
+
+## 5j. Gen tay không trần · tiền từng ảnh · số ảnh · ảnh tải lên · ý tưởng ưu tiên · ĐĂNG CAMP ngay / hẹn giờ (chủ shop 26/09/2026)
+
+*"Gỡ giới hạn trong phần gen ảnh, thêm tính tiền trên mỗi lượt gen và mỗi ảnh; phần câu lệnh đang không được áp dụng vào
+kết quả; ấn Đăng camp là camp được đăng ngay, và đăng camp đặt lịch hẹn giờ chạy; tuỳ chọn số lượng ảnh; upload thêm ảnh
+đầu vào (kèm với chọn ảnh của các mã có sẵn)."*
+
+- **Không còn trần gen tay.** Bỏ `manualGenCapacity*`; `imageSpendToday` nay chỉ đếm ảnh CỦA LÔ (trần 30 ảnh / 2 USD của lô
+  giữ nguyên, gen tay không ăn vào chỗ của lô). Thay cho trần: số ảnh người chọn mỗi lần bấm (`MANUAL_GEN_RUN`, 1–20 —
+  trần của MỘT lần bấm để chặn gõ nhầm, không phải trần ngày) và tiền ƯỚC TÍNH của lượt in cạnh nút.
+- **Tiền:** mỗi ảnh in tiền THẬT máy vẽ báo về (`cost_usd`, quy ra đồng theo `FACEBOOK_USD_VND`); ảnh không có giá in "—"
+  và không cộng. Mỗi lượt in tổng các ảnh có giá + số ảnh chưa có giá; đầu khối in tiền gen tay HÔM NAY (`manualGenSpendToday`).
+- **Vì sao ý tưởng "không ăn":** câu lệnh cũ đặt ý tưởng ở giữa kèm "làm theo TRỪ KHI mâu thuẫn với luật bên dưới", mà bên dưới
+  là sáu chỉ thị gen mệnh lệnh và (kiểu thiết kế) chất liệu / màu của DNA — ý tưởng thua mọi lần có xung đột. Nay ý tưởng là
+  dòng ĐẦU ("TOP PRIORITY"), nhắc lại ở dòng CUỐI; gen và DNA lùi thành "mặc định". Hai thứ KHÔNG nhường: mockup giữ đúng sản
+  phẩm thật; không logo / watermark. Kiểu thiết kế: ý tưởng đè được thuộc tính DNA nó nói ra — `ownerIdea` lưu trong bản mô tả
+  thiết kế và ghi vào lý do của mã TK, vì nhãn DNA của ảnh ấy có thể lệch đúng ở thuộc tính người đã đè.
+- **Ảnh tải lên** (≤ 4, `creative_manual_gens.upload_image_ids`, migration `0145`): lưu CÙNG lúc ghi lượt (id không nhận từ
+  trình duyệt), gửi máy vẽ dưới nhãn `OWN_VARIANT` SAU ảnh sản phẩm thật — ranh giới 3 giữ nguyên, `assertPixelSafe` không đổi.
+- **Đăng camp** (`publishManualGenImageInstant`, quyền `ideas:write` + `expenses:write`): mỗi lần bấm là MỘT lô
+  `creative_batches.kind = 'INSTANT'` (chỉ mục `creative_batches_day_uq` thành chỉ mục TỪNG PHẦN trên `kind = 'LOOP'`) chứa
+  đúng bài ấy; người bấm là lượt duyệt (digest tính từ CSDL, ràng buộc duyệt ở CSDL giữ nguyên); rồi `publishBatchNow` = ĐÚNG
+  `publishOneBatch` của lượt tick (công tắc khẩn, năm chốt đầu, cổng từng bước, sổ ghi, dấu "đang gửi"). "Chạy ngay" =
+  `start_time` sau lúc bấm `INSTANT_PUBLISH.leadSeconds`; "Hẹn giờ" = đăng NGAY với `start_time` = giờ hẹn (Facebook giữ lịch —
+  ERP chết lúc tới giờ camp vẫn chạy, vẫn tự dừng ở `end_time`). Ngân sách / khung = cấu hình (≤ 200.000đ, ≤ 1 ngày); trần cam
+  kết / ngày CHUNG với lô hằng ngày (đếm trên sổ). Mọi chốt kiểm TRƯỚC khi ghi — bị chặn thì không để lại lô rỗng. Hỏng khi chưa
+  gửi được gì lên Facebook ⇒ ảnh về "Đã duyệt" (bấm lại được), lô `FAILED`; đã gửi một phần ⇒ giữ nguyên, không tự thử lại
+  lời gọi tạo (tính chất 4). Tên theo khuôn lấy số thứ tự theo NGÀY chạy trên mọi lô (`nextNameSeqOnDay`). Lịch sử lô gắn nhãn "Đăng lẻ".
 
 ## 6. Đã dựng gì, ở đâu
 

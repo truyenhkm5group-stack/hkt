@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Loader2, Send, Sparkles, Wand2, X } from "lucide-react";
+import { Check, ImagePlus, Loader2, Rocket, Send, Sparkles, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { AdPreview, GeneChips, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
-import { promoteManualGenImageAction, recaptionManualGenImage, reviewManualGenImageAction, startManualDesignRun, startManualGenRun } from "@/lib/actions/creative-manual-gen";
+import { promoteManualGenImageAction, publishManualGenImageNowAction, recaptionManualGenImage, reviewManualGenImageAction, startManualDesignRun, startManualGenRun } from "@/lib/actions/creative-manual-gen";
 import {
   DESIGN_DNA_KEYS,
   DESIGN_DNA_VALUE_LABEL,
@@ -19,21 +19,27 @@ import {
   MANUAL_GEN_IMAGE_STATUS_LABEL,
   MANUAL_GEN_KINDS,
   MANUAL_GEN_KIND_LABEL,
+  MANUAL_GEN_RUN,
   type ManualGenImageStatus,
   type ManualGenKind,
 } from "@/lib/constants/creative-loop";
-import { formatVND } from "@/lib/format";
-import type { DesignInspirationOption, ManualGenImageCard, PixelSourceOption } from "@/lib/queries/creative-manual-gen";
+import { formatVND, vnShortStamp } from "@/lib/format";
+import { thuNhoAnh, type AnhDaThuNho } from "@/lib/ideas/shrink-image";
+import type { DesignInspirationOption, ManualGenImageCard, ManualGenPanel, PixelSourceOption } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
-import { VARIANT_COPY_LIMITS, manualGenPromoteSchema } from "@/lib/validation/creative";
+import { VARIANT_COPY_LIMITS, manualGenInstantSchema, manualGenPromoteSchema } from "@/lib/validation/creative";
 
 /**
- * GEN ẢNH BẰNG TAY (§5i) — phía trình duyệt: form "Gen ảnh", thẻ từng ảnh (Duyệt / Loại), hộp "Đưa vào lô"
- * (câu chữ AI viết theo ảnh + ba tên sửa được), và bộ tự tải lại khi còn ảnh đang vẽ. Mọi luật ở
- * `lib/creative/manual-gen.ts`; màn hình không tự tính con số tiền nào.
+ * GEN ẢNH BẰNG TAY (§5i) — phía trình duyệt: form "Gen ảnh" (số ảnh · ảnh tải lên · tiền ước tính), thẻ từng ảnh
+ * (Duyệt / Loại · tiền thật), hộp soạn bài dùng cho CẢ "Đưa vào lô" lẫn "Đăng camp" (ngay / hẹn giờ), và bộ tự
+ * tải lại khi còn ảnh đang vẽ. Mọi luật ở `lib/creative/manual-gen.ts`; màn hình chỉ nhân giá ước tính máy chủ
+ * đưa với số ảnh người chọn để người thấy trước khi bấm — không tự tính tiền thật nào.
  */
 
 const box = "h-8 w-full rounded-md border bg-background px-2 text-[12.5px] disabled:opacity-60";
+
+type InstantInfo = ManualGenPanel["instant"];
+type Upload = AnhDaThuNho & { ten: string };
 
 /** Tự tải lại mỗi vài giây khi còn ảnh chờ vẽ / đang vẽ — tiến độ hiện ra mà không ai phải bấm F5. */
 export function ManualGenAutoRefresh({ active }: { active: boolean }) {
@@ -58,14 +64,13 @@ export function ManualGenAutoRefresh({ active }: { active: boolean }) {
 export function ManualGenForm({
   initialKind,
   inspirations,
-  ...mockup
+  ...rest
 }: {
   initialKind: ManualGenKind;
   inspirations: DesignInspirationOption[];
   sources: PixelSourceOption[];
-  allowedNow: number;
-  capReason: string | null;
-  disabledReason: string | null;
+  unitVnd: number | null;
+  unitUsd: number;
   initialPhotoId?: string;
 }) {
   const [kind, setKind] = useState<ManualGenKind>(initialKind);
@@ -85,7 +90,7 @@ export function ManualGenForm({
           </button>
         ))}
       </div>
-      {kind === "DESIGN" ? <DesignGenForm inspirations={inspirations} allowedNow={mockup.allowedNow} capReason={mockup.capReason} disabledReason={mockup.disabledReason} /> : <MockupGenForm {...mockup} />}
+      {kind === "DESIGN" ? <DesignGenForm inspirations={inspirations} unitVnd={rest.unitVnd} unitUsd={rest.unitUsd} /> : <MockupGenForm {...rest} />}
     </div>
   );
 }
@@ -101,7 +106,88 @@ function describeDna(dna: Record<string, string>): string {
     .join(" · ");
 }
 
-function DesignGenForm({ inspirations, allowedNow, capReason, disabledReason }: { inspirations: DesignInspirationOption[]; allowedNow: number; capReason: string | null; disabledReason: string | null }) {
+/** Số ảnh một lần bấm: thanh kéo + ô số, kẹp trong khoảng min…max (máy chủ kẹp lại lần nữa). */
+function CountPicker({ id, value, onChange, disabled }: { id: string; value: number; onChange: (n: number) => void; disabled?: boolean }) {
+  const { minImagesPerRun: min, maxImagesPerRun: max } = MANUAL_GEN_RUN;
+  const set = (n: number) => onChange(Math.max(min, Math.min(max, Number.isFinite(n) ? Math.round(n) : MANUAL_GEN.imagesPerRun)));
+  return (
+    <div className="flex items-center gap-2">
+      <Label htmlFor={id} className="shrink-0 text-[12px]">
+        Số ảnh
+      </Label>
+      <input type="range" min={min} max={max} step={1} value={value} disabled={disabled} onChange={(e) => set(Number(e.target.value))} className="min-w-0 flex-1 accent-primary" aria-label="Số ảnh (kéo)" />
+      <Input id={id} type="number" min={min} max={max} step={1} value={value} disabled={disabled} onChange={(e) => set(Number(e.target.value))} className="h-8 w-16 text-center text-[12.5px]" />
+      <span className="shrink-0 text-[11px] text-muted-foreground">
+        ({min}–{max})
+      </span>
+    </div>
+  );
+}
+
+/** Tiền ƯỚC TÍNH của lượt = giá ước tính một ảnh × số ảnh. Nhãn "ước tính" luôn đi kèm (mục 8.6). */
+function EstimateLine({ count, unitVnd, unitUsd, uploads }: { count: number; unitVnd: number | null; unitUsd: number; uploads: number }) {
+  return (
+    <p className="text-[11px] text-muted-foreground" title={`${unitUsd} USD / ảnh × ${count} ảnh — tiền thật hiện trên từng ảnh sau khi vẽ`}>
+      Ước tính ~<b className="numeric text-foreground">{formatVND(unitVnd === null ? null : unitVnd * count)}</b> cho {count} ảnh ({formatVND(unitVnd)}/ảnh){uploads ? ` · kèm ${uploads} ảnh tải lên` : ""}. Tiền thật hiện trên từng ảnh sau khi vẽ.
+    </p>
+  );
+}
+
+/**
+ * Ảnh đầu vào NGƯỜI TẢI LÊN (chủ shop 26/09/2026) — gửi máy vẽ KÈM ảnh sản phẩm thật của mã đã chọn, không thay
+ * nó. Thu nhỏ ngay trên máy người dùng (cùng hàm của form ý tưởng) trước khi gửi.
+ */
+function UploadPicker({ value, onChange, disabled }: { value: Upload[]; onChange: (v: Upload[]) => void; disabled?: boolean }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const room = MANUAL_GEN_RUN.maxUploads - value.length;
+  const pick = async (list: FileList | null) => {
+    const files = Array.from(list ?? []).slice(0, Math.max(0, room));
+    if (!files.length) return;
+    setBusy(true);
+    const out: Upload[] = [];
+    for (const f of files) {
+      if (!f.type.startsWith("image/")) {
+        toast.error(`${f.name} không phải ảnh`);
+        continue;
+      }
+      try {
+        out.push({ ...(await thuNhoAnh(f)), ten: f.name });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : `Không đọc được ${f.name}`);
+      }
+    }
+    onChange([...value, ...out]);
+    setBusy(false);
+    if (ref.current) ref.current.value = "";
+  };
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {value.map((u, i) => (
+          <span key={`${u.ten}-${i}`} className="relative">
+            {/* eslint-disable-next-line @next/next/no-img-element -- ảnh xem trước dạng data URL, chưa lên máy chủ */}
+            <img src={u.preview} alt={u.ten} className="size-12 rounded border object-cover" />
+            <button type="button" disabled={disabled} onClick={() => onChange(value.filter((_, j) => j !== i))} className="absolute -right-1 -top-1 rounded-full bg-background p-0.5 shadow" aria-label={`Bỏ ảnh ${u.ten}`}>
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+        {room > 0 ? (
+          <Button type="button" size="sm" variant="outline" className="h-12 text-[11.5px]" disabled={disabled || busy} onClick={() => ref.current?.click()}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : <ImagePlus className="size-4" />} Tải ảnh lên
+          </Button>
+        ) : null}
+        <input ref={ref} type="file" accept="image/*" multiple hidden onChange={(e) => void pick(e.target.files)} />
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Tuỳ chọn, tối đa {MANUAL_GEN_RUN.maxUploads} ảnh: dáng, bối cảnh, người mẫu, cách phối muốn máy bám theo — ghi trong ô ý tưởng cách dùng. Chỉ tải ảnh của shop / ảnh bạn có quyền dùng; máy vẽ luôn kèm ảnh sản phẩm thật của mã đã chọn.
+      </p>
+    </div>
+  );
+}
+
+function DesignGenForm({ inspirations, unitVnd, unitUsd }: { inspirations: DesignInspirationOption[]; unitVnd: number | null; unitUsd: number }) {
   // Tích sẵn các mẫu điểm cao nhất CÓ ảnh sản phẩm thật — chỉ là giá trị khởi đầu, không kích lượt vẽ nào.
   const [picked, setPicked] = useState<string[]>(() =>
     inspirations
@@ -110,32 +196,26 @@ function DesignGenForm({ inspirations, allowedNow, capReason, disabledReason }: 
       .map((o) => o.productId),
   );
   const [idea, setIdea] = useState("");
+  const [count, setCount] = useState<number>(MANUAL_GEN.imagesPerRun);
+  const [uploads, setUploads] = useState<Upload[]>([]);
   const [pending, start] = useTransition();
   const toggle = (id: string) => setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : cur.length >= MANUAL_DESIGN.maxInspirations ? cur : [...cur, id]));
   const coAnh = inspirations.some((o) => picked.includes(o.productId) && o.imageId);
 
   const gen = () =>
     start(async () => {
-      const r = await startManualDesignRun({ inspirationProductIds: picked, idea });
+      const r = await startManualDesignRun({ inspirationProductIds: picked, idea, count, uploads: uploads.map((u) => u.base64) });
       if ("error" in r) {
         toast.error(r.error);
         return;
       }
       toast.success(r.note ? `Đang vẽ ${r.allowed} thiết kế mới. ${r.note}` : `Đang vẽ ${r.allowed} thiết kế mới — ảnh hiện dần ở "Kết quả gen tay".`);
       setIdea("");
+      setUploads([]);
     });
 
   const khoa =
-    disabledReason ??
-    (inspirations.length === 0
-      ? "Chưa có mẫu nào đủ điều kiện làm cảm hứng."
-      : picked.length === 0
-        ? "Chọn ít nhất một mẫu cảm hứng."
-        : !coAnh
-          ? "Cần ít nhất một mẫu có ảnh sản phẩm thật — máy vẽ chỉ nhận ảnh thật của shop làm tham chiếu."
-          : allowedNow === 0
-            ? (capReason ?? "Hết trần ảnh hôm nay.")
-            : null);
+    inspirations.length === 0 ? "Chưa có mẫu nào đủ điều kiện làm cảm hứng." : picked.length === 0 ? "Chọn ít nhất một mẫu cảm hứng." : !coAnh ? "Cần ít nhất một mẫu có ảnh sản phẩm thật — máy vẽ chỉ nhận ảnh thật của shop làm tham chiếu." : null;
 
   return (
     <div className="grid gap-2.5 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
@@ -181,7 +261,8 @@ function DesignGenForm({ inspirations, allowedNow, capReason, disabledReason }: 
             })}
           </div>
         )}
-        <p className="text-[11px] text-muted-foreground">Mỗi ảnh là một THIẾT KẾ MỚI lai DNA của hai mẫu đã chọn + đột biến, bắt buộc khác mọi mẫu đang có. Máy vẽ chỉ nhận ảnh sản phẩm THẬT của mẫu cha làm tham chiếu.</p>
+        <p className="text-[11px] text-muted-foreground">Mỗi ảnh là một THIẾT KẾ MỚI lai DNA của hai mẫu đã chọn + đột biến, bắt buộc khác mọi mẫu đang có. Máy vẽ nhận ảnh sản phẩm THẬT của mẫu cha (+ ảnh bạn tải lên) làm tham chiếu.</p>
+        <UploadPicker value={uploads} onChange={setUploads} disabled={pending} />
       </div>
       <div className="flex flex-col gap-1.5">
         <div className="flex items-baseline justify-between">
@@ -190,15 +271,16 @@ function DesignGenForm({ inspirations, allowedNow, capReason, disabledReason }: 
             {idea.trim().length}/{MANUAL_GEN.ideaMaxChars}
           </span>
         </div>
-        <Textarea id="md-idea" rows={4} value={idea} maxLength={MANUAL_GEN.ideaMaxChars} disabled={pending} onChange={(e) => setIdea(e.target.value)} placeholder="Ví dụ: đi biển mùa thu, nắng chiều, dáng đi tự nhiên…" />
-        <p className="text-[11px] text-muted-foreground">Ý tưởng lái bối cảnh / không khí / cách phối; kiểu dáng của thiết kế đi theo DNA máy lập — để máy học được thiết kế nào bán.</p>
-        <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[11px] text-muted-foreground" title={capReason ?? undefined}>
-            Mỗi lần bấm tới {MANUAL_GEN.imagesPerRun} thiết kế · hôm nay còn vẽ được <b className="numeric text-foreground">{allowedNow}</b> ảnh trong trần chung với lô.
-          </p>
-          <Button onClick={gen} disabled={pending || !!khoa} title={khoa ?? undefined}>
-            {pending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Gen {MANUAL_GEN.imagesPerRun} thiết kế mới
-          </Button>
+        <Textarea id="md-idea" rows={4} value={idea} maxLength={MANUAL_GEN.ideaMaxChars} disabled={pending} onChange={(e) => setIdea(e.target.value)} placeholder="Ví dụ: chất thun rayon, đi biển mùa thu, nắng chiều, dáng đi tự nhiên…" />
+        <p className="text-[11px] text-muted-foreground">Ý tưởng là chỉ thị ƯU TIÊN CAO NHẤT: đè bối cảnh / không khí / cách phối và cả thuộc tính thiết kế bạn nói ra (chất liệu, màu, độ dài…); phần không nhắc tới đi theo DNA máy lập.</p>
+        <div className="mt-auto space-y-1.5">
+          <CountPicker id="md-count" value={count} onChange={setCount} disabled={pending} />
+          <EstimateLine count={count} unitVnd={unitVnd} unitUsd={unitUsd} uploads={uploads.length} />
+          <div className="flex justify-end">
+            <Button onClick={gen} disabled={pending || !!khoa} title={khoa ?? undefined}>
+              {pending ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} Gen {count} thiết kế mới
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -207,15 +289,13 @@ function DesignGenForm({ inspirations, allowedNow, capReason, disabledReason }: 
 
 function MockupGenForm({
   sources,
-  allowedNow,
-  capReason,
-  disabledReason,
+  unitVnd,
+  unitUsd,
   initialPhotoId,
 }: {
   sources: PixelSourceOption[];
-  allowedNow: number;
-  capReason: string | null;
-  disabledReason: string | null;
+  unitVnd: number | null;
+  unitUsd: number;
   /** Ảnh chọn sẵn (vd `?product=` từ đề xuất đẩy tồn). Chỉ là giá trị khởi đầu — không kích lượt vẽ nào. */
   initialPhotoId?: string;
 }) {
@@ -223,22 +303,25 @@ function MockupGenForm({
   const [photoId, setPhotoId] = useState(initialPhotoId && photos.some((s) => s.id === initialPhotoId) ? initialPhotoId : (photos[0]?.id ?? ""));
   const [ownAdId, setOwnAdId] = useState("");
   const [idea, setIdea] = useState("");
+  const [count, setCount] = useState<number>(MANUAL_GEN.imagesPerRun);
+  const [uploads, setUploads] = useState<Upload[]>([]);
   const [pending, start] = useTransition();
   const productOf = sources.find((s) => s.id === photoId)?.productId ?? "";
   const ownAds = sources.filter((s) => s.kind === "OWN_AD" && s.productId === productOf);
 
   const gen = () =>
     start(async () => {
-      const r = await startManualGenRun({ productPhotoSourceId: photoId, ownAdSourceId: ownAdId, idea });
+      const r = await startManualGenRun({ productPhotoSourceId: photoId, ownAdSourceId: ownAdId, idea, count, uploads: uploads.map((u) => u.base64) });
       if ("error" in r) {
         toast.error(r.error);
         return;
       }
-      toast.success(r.allowed === r.requested ? `Đang vẽ ${r.requested} ảnh — ảnh hiện dần ở "Kết quả gen tay".` : `Chỉ vẽ được ${r.allowed}/${r.requested} ảnh. ${r.note ?? ""}`);
+      toast.success(`Đang vẽ ${r.requested} ảnh — ảnh hiện dần ở "Kết quả gen tay".`);
       setIdea("");
+      setUploads([]);
     });
 
-  const khoa = disabledReason ?? (photos.length === 0 ? "Chưa có ảnh sản phẩm thật nào — nhập ở tab Nguồn ảnh trước." : allowedNow === 0 ? (capReason ?? "Hết trần ảnh hôm nay.") : null);
+  const khoa = photos.length === 0 ? "Chưa có ảnh sản phẩm thật nào — nhập ở tab Nguồn ảnh trước." : null;
 
   return (
     <div className="grid gap-2.5 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -273,7 +356,8 @@ function MockupGenForm({
             </option>
           ))}
         </select>
-        <p className="text-[11px] text-muted-foreground">Chỉ ảnh sản phẩm thật và quảng cáo cũ của chính shop được gửi sang máy vẽ — ảnh spy / tham khảo tay không bao giờ.</p>
+        <Label className="pt-1">Ảnh đầu vào thêm (tải lên)</Label>
+        <UploadPicker value={uploads} onChange={setUploads} disabled={pending} />
       </div>
       <div className="flex flex-col gap-1.5">
         <div className="flex items-baseline justify-between">
@@ -283,13 +367,15 @@ function MockupGenForm({
           </span>
         </div>
         <Textarea id="mg-idea" rows={4} value={idea} maxLength={MANUAL_GEN.ideaMaxChars} disabled={pending} onChange={(e) => setIdea(e.target.value)} placeholder="Ví dụ: mặc đi biển Đà Nẵng buổi chiều, ánh nắng vàng, dáng đi tự nhiên…" />
-        <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[11px] text-muted-foreground" title={capReason ?? undefined}>
-            Mỗi lần bấm vẽ {MANUAL_GEN.imagesPerRun} ảnh · hôm nay còn vẽ được <b className="numeric text-foreground">{allowedNow}</b> ảnh trong trần chung với lô.
-          </p>
-          <Button onClick={gen} disabled={pending || !!khoa || !photoId} title={khoa ?? undefined}>
-            {pending ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />} Gen {MANUAL_GEN.imagesPerRun} ảnh
-          </Button>
+        <p className="text-[11px] text-muted-foreground">Ý tưởng là chỉ thị ƯU TIÊN CAO NHẤT (bối cảnh, dáng, người mẫu, ánh sáng, cách phối) — chỉ trừ chính sản phẩm: máy luôn giữ đúng món hàng trong ảnh thật.</p>
+        <div className="mt-auto space-y-1.5">
+          <CountPicker id="mg-count" value={count} onChange={setCount} disabled={pending} />
+          <EstimateLine count={count} unitVnd={unitVnd} unitUsd={unitUsd} uploads={uploads.length} />
+          <div className="flex justify-end">
+            <Button onClick={gen} disabled={pending || !!khoa || !photoId} title={khoa ?? undefined}>
+              {pending ? <Loader2 className="size-4 animate-spin" /> : <Wand2 className="size-4" />} Gen {count} ảnh
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -303,9 +389,13 @@ const TONE: Partial<Record<ManualGenImageStatus, string>> = {
   REJECTED: "bg-muted text-muted-foreground",
 };
 
+type Defaults = { campaign: string; adset: string; ad: string; problems: string[] };
+
 export function ManualGenImageTile({
   img,
   canEdit,
+  canPublish,
+  instant,
   pageName,
   defaults,
   predictedSeq,
@@ -313,8 +403,10 @@ export function ManualGenImageTile({
 }: {
   img: ManualGenImageCard;
   canEdit: boolean;
+  canPublish: boolean;
+  instant: InstantInfo;
   pageName: string | null;
-  defaults: { campaign: string; adset: string; ad: string; problems: string[] };
+  defaults: Defaults;
   predictedSeq: number;
   targetDay: string;
 }) {
@@ -326,10 +418,11 @@ export function ManualGenImageTile({
         toast.error(r.error);
         return;
       }
-      if (r.status === "APPROVED") toast.success(r.captionError ? `Đã duyệt — AI chưa viết được câu chữ (${r.captionError}). Gõ tay trong hộp "Đưa vào lô".` : "Đã duyệt — AI đã viết câu chữ theo ảnh.");
+      if (r.status === "APPROVED") toast.success(r.captionError ? `Đã duyệt — AI chưa viết được câu chữ (${r.captionError}). Gõ tay trong hộp soạn bài.` : "Đã duyệt — AI đã viết câu chữ theo ảnh.");
       else toast.success("Đã loại ảnh.");
     });
   const loai = img.status === "REJECTED" || img.status === "GEN_FAILED";
+  const daVe = img.imageId !== null;
   return (
     <div className={cn("flex flex-col overflow-hidden rounded-lg border bg-card", loai && "opacity-60")}>
       <div className="relative">
@@ -343,6 +436,11 @@ export function ManualGenImageTile({
         )}
         <span className="absolute left-1.5 top-1.5 rounded bg-background/90 px-1.5 py-0.5 text-[10.5px] font-bold">#{img.seq}</span>
         <span className={cn("absolute right-1.5 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold", TONE[img.status] ?? "bg-background/90")}>{MANUAL_GEN_IMAGE_STATUS_LABEL[img.status]}</span>
+        {daVe ? (
+          <span className="numeric absolute bottom-1.5 right-1.5 rounded bg-background/90 px-1.5 py-0.5 text-[10.5px] font-semibold" title={img.costUsd ? `${Number(img.costUsd).toFixed(4)} USD — tiền thật máy vẽ báo về` : "Máy vẽ không trả giá cho ảnh này — CHƯA BIẾT"}>
+            {formatVND(img.costVnd)}
+          </span>
+        ) : null}
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-2">
         {img.design ? (
@@ -358,9 +456,17 @@ export function ManualGenImageTile({
           </div>
         ) : null}
         <GeneChips genes={img.genes} className="gap-0.5" />
-        {img.error ? <p className="line-clamp-3 text-[11px] text-destructive" title={img.error}>{img.error}</p> : null}
-        {img.status === "APPROVED" && img.captionError ? <p className="line-clamp-2 text-[11px] text-warning" title={img.captionError}>AI chưa viết được câu chữ: {img.captionError}</p> : null}
-        {img.status === "PROMOTED" ? <p className="text-[11px] text-muted-foreground">Đã vào lô — sửa tiếp ở khối lô chờ duyệt.</p> : null}
+        {img.error ? (
+          <p className="line-clamp-3 text-[11px] text-destructive" title={img.error}>
+            {img.error}
+          </p>
+        ) : null}
+        {img.status === "APPROVED" && img.captionError ? (
+          <p className="line-clamp-2 text-[11px] text-warning" title={img.captionError}>
+            AI chưa viết được câu chữ: {img.captionError}
+          </p>
+        ) : null}
+        {img.status === "PROMOTED" ? <p className="text-[11px] text-muted-foreground">Đã vào lô / đã đăng camp — xem ở khối lô chờ duyệt hoặc Lịch sử lô.</p> : null}
         {canEdit ? (
           <div className="mt-auto flex flex-wrap gap-1 border-t pt-1.5">
             {img.status === "GENERATED" || img.status === "REJECTED" ? (
@@ -373,7 +479,12 @@ export function ManualGenImageTile({
                 <X className="size-3.5" /> Loại
               </Button>
             ) : null}
-            {img.status === "APPROVED" ? <PromoteButton img={img} pageName={pageName} defaults={defaults} predictedSeq={predictedSeq} targetDay={targetDay} /> : null}
+            {img.status === "APPROVED" ? (
+              <>
+                {canPublish ? <ComposeButton mode="CAMP" img={img} pageName={pageName} defaults={defaults} predictedSeq={predictedSeq} targetDay={targetDay} instant={instant} /> : null}
+                <ComposeButton mode="LO" img={img} pageName={pageName} defaults={defaults} predictedSeq={predictedSeq} targetDay={targetDay} instant={instant} />
+              </>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -381,29 +492,61 @@ export function ManualGenImageTile({
   );
 }
 
-function PromoteButton({ img, pageName, defaults, predictedSeq, targetDay }: { img: ManualGenImageCard; pageName: string | null; defaults: { campaign: string; adset: string; ad: string; problems: string[] }; predictedSeq: number; targetDay: string }) {
+/** "YYYY-MM-DDTHH:mm" theo GIỜ VIỆT NAM của một mốc — giá trị cho ô `datetime-local` (luôn đọc là giờ VN). */
+function vnLocalInput(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Ho_Chi_Minh", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(d);
+  const g = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  return `${g("year")}-${g("month")}-${g("day")}T${g("hour") === "24" ? "00" : g("hour")}:${g("minute")}`;
+}
+
+/** Ô `datetime-local` (giờ VN) ⇒ ISO có múi giờ. Rỗng / hỏng ⇒ `null`. */
+function vnInputToIso(v: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v)) return null;
+  const d = new Date(`${v}:00+07:00`);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
+/**
+ * Hộp soạn bài của một ảnh đã duyệt — HAI lối ra dùng chung câu chữ + ba tên:
+ *  · `LO`   "Đưa vào lô": vào lô hằng ngày chờ duyệt cả lô (chạy 6:00).
+ *  · `CAMP` "Đăng camp": lên Facebook NGAY lúc bấm — chạy ngay, hoặc hẹn giờ (Facebook tự giữ lịch). Người bấm là
+ *           lượt duyệt chi, nên hộp in đủ tiền sẽ cam kết, khung chạy và mọi lý do cổng sẽ chặn TRƯỚC khi bấm.
+ */
+function ComposeButton({ mode, img, pageName, defaults, predictedSeq, targetDay, instant }: { mode: "LO" | "CAMP"; img: ManualGenImageCard; pageName: string | null; defaults: Defaults; predictedSeq: number; targetDay: string; instant: InstantInfo }) {
+  const camp = mode === "CAMP";
   const [open, setOpen] = useState(false);
   const [h, setH] = useState(img.headline);
   const [t, setT] = useState(img.primaryText);
-  const [camp, setCamp] = useState(defaults.campaign);
+  const [campName, setCampName] = useState(defaults.campaign);
   const [adset, setAdset] = useState(defaults.adset);
   const [ad, setAd] = useState(defaults.ad);
+  const [hen, setHen] = useState(false);
+  const [henLuc, setHenLuc] = useState("");
   const [writing, startWrite] = useTransition();
   const [saving, startSave] = useTransition();
 
   const mo = () => {
     setH(img.headline);
     setT(img.primaryText);
-    setCamp(defaults.campaign);
+    // Đăng lẻ lấy số thứ tự theo NGÀY lúc bấm — để trống tên chiến dịch / quảng cáo thì máy tự đặt đúng số.
+    setCampName(camp ? "" : defaults.campaign);
     setAdset(defaults.adset);
-    setAd(defaults.ad);
+    setAd(camp ? "" : defaults.ad);
+    setHen(false);
+    setHenLuc(vnLocalInput(new Date(Date.now() + 60 * 60_000)));
     setOpen(true);
   };
-  const input = useMemo(() => ({ imageId: img.id, headline: h, primaryText: t, campaignName: camp, adsetName: adset, adName: ad, predictedSeq }), [img.id, h, t, camp, adset, ad, predictedSeq]);
+  const scheduleAt = camp && hen ? vnInputToIso(henLuc) : null;
+  const input = useMemo(
+    () => ({ imageId: img.id, headline: h, primaryText: t, campaignName: campName, adsetName: adset, adName: ad, predictedSeq: camp ? null : predictedSeq, ...(camp ? { scheduleAt } : {}) }),
+    [img.id, h, t, campName, adset, ad, predictedSeq, camp, scheduleAt],
+  );
   const loiTruoc = useMemo(() => {
-    const r = manualGenPromoteSchema.safeParse(input);
+    if (camp && hen && !scheduleAt) return "Chọn giờ hẹn.";
+    const r = (camp ? manualGenInstantSchema : manualGenPromoteSchema).safeParse(input);
     return r.success ? null : (r.error.issues[0]?.message ?? "Chưa hợp lệ");
-  }, [input]);
+  }, [input, camp, hen, scheduleAt]);
+  const chan = camp && instant.blockers.length > 0;
 
   const vietLai = () =>
     startWrite(async () => {
@@ -415,8 +558,23 @@ function PromoteButton({ img, pageName, defaults, predictedSeq, targetDay }: { i
       setH(r.headline);
       setT(r.primaryText);
     });
-  const dua = () =>
+
+  const gui = () =>
     startSave(async () => {
+      if (camp) {
+        const r = await publishManualGenImageNowAction(input);
+        if ("error" in r) {
+          toast.error(r.error);
+          return;
+        }
+        const msg = `${r.names.campaign || "Camp"}: ${r.detail}${r.designCode ? ` Mã thiết kế ${r.designCode} — tạo sản phẩm Pancake đúng mã này để nhận đơn.` : ""}`;
+        if (r.outcome === "LIVE" || r.outcome === "SCHEDULED") toast.success(msg);
+        else if (r.outcome === "PENDING") toast.warning(msg);
+        else toast.error(msg);
+        for (const w of r.warnings) toast.warning(w);
+        if (r.outcome !== "FAILED" || !/vẫn ở "Đã duyệt"/.test(r.detail)) setOpen(false);
+        return;
+      }
       const r = await promoteManualGenImageAction(input);
       if ("error" in r) {
         toast.error(r.error);
@@ -431,59 +589,101 @@ function PromoteButton({ img, pageName, defaults, predictedSeq, targetDay }: { i
       setOpen(false);
     });
 
+  const startPreview = camp ? (hen ? (scheduleAt ? new Date(scheduleAt) : null) : new Date(Date.now() + instant.leadSeconds * 1000)) : null;
+  const endPreview = startPreview ? new Date(startPreview.getTime() + instant.testDays * 86_400_000) : null;
+
   return (
     <>
-      <Button size="sm" className="h-7 w-full text-[12px]" onClick={mo}>
-        <Send className="size-3.5" /> Soạn bài & đưa vào lô
-      </Button>
+      {camp ? (
+        <Button size="sm" className="h-7 w-full text-[12px]" onClick={mo} title={chan ? instant.blockers.join(" ") : "Đăng lên Facebook ngay hoặc hẹn giờ chạy"}>
+          <Rocket className="size-3.5" /> Đăng camp
+        </Button>
+      ) : (
+        <Button size="sm" variant="outline" className="h-7 w-full text-[12px]" onClick={mo}>
+          <Send className="size-3.5" /> Soạn bài & đưa vào lô
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
-            <DialogTitle>
-              Đưa {img.design ? "thiết kế mới" : "ảnh"} #{img.seq} vào lô chạy ngày {targetDay}
-            </DialogTitle>
+            <DialogTitle>{camp ? `Đăng camp ${img.design ? "thiết kế mới" : "ảnh"} #${img.seq}` : `Đưa ${img.design ? "thiết kế mới" : "ảnh"} #${img.seq} vào lô chạy ngày ${targetDay}`}</DialogTitle>
             <DialogDescription>
-              {img.design ? "Máy cấp mã thiết kế TK-… lúc đưa vào lô (xem ở tab Thiết kế mới; đơn, chấm, MOQ đi theo mã ấy). " : ""}
-              Câu chữ do AI viết theo ảnh — sửa tùy ý. Ba tên theo khuôn mặc định, sửa được; để trống một tên = dùng tên mặc định. Bài vẫn phải qua lượt DUYỆT CẢ LÔ mới được đăng.
+              {img.design ? "Máy cấp mã thiết kế TK-… lúc bấm (xem ở tab Thiết kế mới; đơn, chấm, MOQ đi theo mã ấy). " : ""}
+              Câu chữ do AI viết theo ảnh — sửa tùy ý. Để trống một tên = dùng tên mặc định theo khuôn.{" "}
+              {camp ? "Bấm Đăng là DUYỆT CHI cho đúng bài này: máy tạo chiến dịch → nhóm → quảng cáo trên Facebook ngay lúc bấm." : "Bài vẫn phải qua lượt DUYỆT CẢ LÔ mới được đăng."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 md:grid-cols-[1fr_300px]">
             <div className="space-y-2.5">
+              {camp ? (
+                <div className="space-y-1.5 rounded-lg border border-brand/40 bg-brand/5 p-2.5">
+                  <p className="text-[12.5px] font-semibold">Thời điểm chạy</p>
+                  <div className="flex flex-wrap gap-3 text-[12.5px]">
+                    <label className="flex items-center gap-1.5">
+                      <input type="radio" name={`hen-${img.id}`} checked={!hen} onChange={() => setHen(false)} /> Chạy ngay
+                    </label>
+                    <label className="flex items-center gap-1.5">
+                      <input type="radio" name={`hen-${img.id}`} checked={hen} onChange={() => setHen(true)} /> Hẹn giờ (giờ Việt Nam)
+                    </label>
+                    {hen ? <Input type="datetime-local" value={henLuc} onChange={(e) => setHenLuc(e.target.value)} className="h-8 w-auto text-[12.5px]" /> : null}
+                  </div>
+                  <p className="text-[11.5px] text-muted-foreground">
+                    Ngân sách trọn đời <b className="numeric text-foreground">{formatVND(instant.budgetVnd)}</b> · chạy {instant.testDays} ngày
+                    {startPreview && endPreview ? (
+                      <>
+                        {" "}
+                        · từ <b className="text-foreground">{vnShortStamp(startPreview)}</b> tới {vnShortStamp(endPreview)} — Facebook tự dừng ở giờ kết thúc
+                      </>
+                    ) : null}
+                    .{" "}
+                    {hen
+                      ? `Hẹn giờ vẫn đăng lên Facebook NGAY lúc bấm (camp ở trạng thái lên lịch), tối thiểu sau ${instant.minScheduleLeadMinutes} phút, tối đa ${instant.maxScheduleDays} ngày.`
+                      : `"Chạy ngay" = bắt đầu sau khoảng ${Math.round(instant.leadSeconds / 60)} phút (đủ để máy tạo xong chiến dịch).`}
+                  </p>
+                  {instant.blockers.length ? (
+                    <ul className="list-disc pl-4 text-[11.5px] text-destructive">
+                      {instant.blockers.map((b) => (
+                        <li key={b}>{b}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="space-y-1">
                 <div className="flex items-baseline justify-between">
-                  <Label htmlFor={`pg-h-${img.id}`}>Tiêu đề</Label>
+                  <Label htmlFor={`pg-h-${mode}-${img.id}`}>Tiêu đề</Label>
                   <span className="numeric text-[11px] text-muted-foreground">
                     {h.trim().length}/{VARIANT_COPY_LIMITS.headlineMaxChars}
                   </span>
                 </div>
-                <Input id={`pg-h-${img.id}`} value={h} maxLength={VARIANT_COPY_LIMITS.headlineMaxChars} onChange={(e) => setH(e.target.value)} />
+                <Input id={`pg-h-${mode}-${img.id}`} value={h} maxLength={VARIANT_COPY_LIMITS.headlineMaxChars} onChange={(e) => setH(e.target.value)} />
               </div>
               <div className="space-y-1">
                 <div className="flex items-baseline justify-between">
-                  <Label htmlFor={`pg-t-${img.id}`}>Nội dung chính</Label>
+                  <Label htmlFor={`pg-t-${mode}-${img.id}`}>Nội dung chính</Label>
                   <span className="numeric text-[11px] text-muted-foreground">
                     {t.trim().length}/{VARIANT_COPY_LIMITS.primaryTextMaxChars}
                   </span>
                 </div>
-                <Textarea id={`pg-t-${img.id}`} rows={6} value={t} maxLength={VARIANT_COPY_LIMITS.primaryTextMaxChars} onChange={(e) => setT(e.target.value)} />
+                <Textarea id={`pg-t-${mode}-${img.id}`} rows={6} value={t} maxLength={VARIANT_COPY_LIMITS.primaryTextMaxChars} onChange={(e) => setT(e.target.value)} />
                 <Button type="button" size="sm" variant="secondary" onClick={vietLai} disabled={writing}>
                   {writing ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} AI viết lại theo ảnh
                 </Button>
               </div>
               <div className="space-y-1.5 rounded-lg border p-2.5">
                 <p className="text-[12.5px] font-semibold">Tên trên Ads Manager (mỗi bài một chiến dịch → 1 nhóm → 1 quảng cáo)</p>
-                <Label htmlFor={`pg-c-${img.id}`} className="text-[11.5px]">
+                <Label htmlFor={`pg-c-${mode}-${img.id}`} className="text-[11.5px]">
                   Chiến dịch
                 </Label>
-                <Input id={`pg-c-${img.id}`} value={camp} onChange={(e) => setCamp(e.target.value)} />
-                <Label htmlFor={`pg-a-${img.id}`} className="text-[11.5px]">
+                <Input id={`pg-c-${mode}-${img.id}`} value={campName} onChange={(e) => setCampName(e.target.value)} placeholder={camp ? "(để trống = tên theo khuôn, số thứ tự trong ngày chạy)" : undefined} />
+                <Label htmlFor={`pg-a-${mode}-${img.id}`} className="text-[11.5px]">
                   Nhóm quảng cáo
                 </Label>
-                <Input id={`pg-a-${img.id}`} value={adset} onChange={(e) => setAdset(e.target.value)} placeholder="(chưa đọc được nhóm mẫu — để trống = tên mặc định)" />
-                <Label htmlFor={`pg-d-${img.id}`} className="text-[11.5px]">
+                <Input id={`pg-a-${mode}-${img.id}`} value={adset} onChange={(e) => setAdset(e.target.value)} placeholder="(chưa đọc được nhóm mẫu — để trống = tên mặc định)" />
+                <Label htmlFor={`pg-d-${mode}-${img.id}`} className="text-[11.5px]">
                   Quảng cáo
                 </Label>
-                <Input id={`pg-d-${img.id}`} value={ad} onChange={(e) => setAd(e.target.value)} />
+                <Input id={`pg-d-${mode}-${img.id}`} value={ad} onChange={(e) => setAd(e.target.value)} placeholder={camp ? "(để trống = tên theo khuôn)" : undefined} />
                 {defaults.problems.length ? (
                   <ul className="list-disc pl-4 text-[11px] text-warning">
                     {defaults.problems.map((p) => (
@@ -499,13 +699,13 @@ function PromoteButton({ img, pageName, defaults, predictedSeq, targetDay }: { i
             </div>
           </div>
           <DialogFooter className="items-center gap-2 sm:justify-between">
-            <p className="text-[11.5px] text-muted-foreground">{loiTruoc ?? "Đưa vào lô ⇒ phiếu duyệt đã phát (nếu có) mất hiệu lực."}</p>
+            <p className="text-[11.5px] text-muted-foreground">{loiTruoc ?? (camp ? (chan ? "Cổng ghi đang chặn — xem lý do ở trên." : `Bấm là cam kết tối đa ${formatVND(instant.budgetVnd)} cho bài này.`) : "Đưa vào lô ⇒ phiếu duyệt đã phát (nếu có) mất hiệu lực.")}</p>
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={saving}>
                 Huỷ
               </Button>
-              <Button type="button" onClick={dua} disabled={saving || !!loiTruoc}>
-                {saving ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} Đưa vào lô
+              <Button type="button" onClick={gui} disabled={saving || !!loiTruoc || chan}>
+                {saving ? <Loader2 className="size-4 animate-spin" /> : camp ? <Rocket className="size-4" /> : <Send className="size-4" />} {camp ? (hen ? "Hẹn giờ đăng" : "Đăng camp ngay") : "Đưa vào lô"}
               </Button>
             </div>
           </DialogFooter>

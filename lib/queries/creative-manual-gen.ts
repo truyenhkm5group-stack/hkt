@@ -1,13 +1,15 @@
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { memo } from "@/lib/cache";
-import { MANUAL_GEN, PIXEL_SAFE_SOURCE_KINDS, normalizeCreativeConfig, type ManualGenImageStatus, type ManualGenKind } from "@/lib/constants/creative-loop";
+import { CREATIVE_HARD_LIMITS, INSTANT_PUBLISH, PIXEL_SAFE_SOURCE_KINDS, estimateImageUsd, normalizeCreativeConfig, usdToVndRounded, type ManualGenImageStatus, type ManualGenKind } from "@/lib/constants/creative-loop";
 import { vnDay } from "@/lib/constants/marketing-decision-ledger";
+import { manualGenSpendToday } from "@/lib/creative/generate";
 import { resolveManualTargetDay } from "@/lib/creative/manual";
-import { manualGenCapacityNow, parseManualDesignSpec } from "@/lib/creative/manual-gen";
+import { instantPublishBlockers, parseManualDesignSpec } from "@/lib/creative/manual-gen";
 import { defaultNames, loadNamingContext, nextNameSeq, type DefaultNames } from "@/lib/creative/naming";
 import { batchWindow } from "@/lib/creative/schedule";
 import { loadDesignInputs } from "@/lib/queries/creative-design";
+import { env } from "@/lib/env";
 import { fanpageDisplayName, readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 
 /**
@@ -16,6 +18,11 @@ import { fanpageDisplayName, readCurrentCreativeConfig } from "@/lib/queries/cre
  * Mọi mốc là CHUỖI ISO; không kiểu nào mang điểm ảnh (chỉ `imageId` + `imageAvailable`). Tên mặc định
  * cho hộp "Đưa vào lô" dựng bằng ĐÚNG hàm của đường ghi (`defaultNames`) với số thứ tự DỰ KIẾN — đường ghi
  * tính lại với số thật và giữ tên người đã sửa.
+ *
+ * TIỀN (chủ shop 26/09/2026 — "tính tiền trên mỗi lượt gen và mỗi ảnh"): tiền THẬT của một ảnh là `cost_usd` máy vẽ
+ * trả về (từ `usage`); ảnh đã vẽ mà không có giá là CHƯA BIẾT (`null`, in "—"), KHÔNG lấp bằng giá ước tính — con
+ * số ước tính chỉ đứng ở chỗ ghi rõ "ước tính" (trước khi bấm). Quy ra đồng theo tỷ giá USD của shop
+ * (`FACEBOOK_USD_VND`, cùng tỷ giá quy đổi tài khoản quảng cáo USD).
  */
 
 export type ManualGenImageCard = {
@@ -26,6 +33,8 @@ export type ManualGenImageCard = {
   imageId: string | null;
   imageAvailable: boolean;
   costUsd: string;
+  /** Tiền thật của ảnh quy ra đồng. `null` = CHƯA BIẾT (chưa vẽ, vẽ hỏng, hoặc máy vẽ không trả giá). */
+  costVnd: number | null;
   error: string;
   headline: string;
   primaryText: string;
@@ -53,6 +62,10 @@ export type ManualGenRunCard = {
   size: string;
   photoTitle: string;
   ownAdTitle: string | null;
+  /** Ảnh người tải lên làm đầu vào của lượt (id `creative_images`). */
+  uploadImageIds: string[];
+  /** Tiền THẬT của lượt: cộng các ảnh có giá. `unpricedImages` = ảnh đã vẽ mà không có giá (CHƯA BIẾT — tổng thiếu phần ấy). */
+  cost: { usd: number; vnd: number | null; pricedImages: number; unpricedImages: number };
   images: ManualGenImageCard[];
   counts: Partial<Record<ManualGenImageStatus, number>>;
 };
@@ -83,7 +96,13 @@ export type ManualGenPanel = {
   sources: PixelSourceOption[];
   /** Mẫu cảm hứng, điểm cao trước. */
   inspirations: DesignInspirationOption[];
-  capacity: { allowedNow: number; perRun: number; spentImages: number; spentUsd: number; capUsd: number; unitUsd: number; reason: string | null };
+  /**
+   * Giá để người bấm thấy TRƯỚC khi bấm (ước tính theo cấu hình ảnh đang chạy) và tiền gen tay HÔM NAY (thật).
+   * `todayUnpriced` = ảnh đã vẽ hôm nay mà không có giá — tổng hôm nay THIẾU phần ấy, màn hình phải nói ra.
+   */
+  pricing: { model: string; quality: string; size: string; unitUsd: number; unitVnd: number | null; usdToVnd: number; todayImages: number; todayUsd: number; todayVnd: number | null; todayUnpriced: number };
+  /** Hộp "Đăng camp": ngân sách / khung chạy của một bài lẻ + mọi lý do cổng sẽ chặn lúc này (rỗng = không thấy). */
+  instant: { budgetVnd: number; testDays: number; leadSeconds: number; minScheduleLeadMinutes: number; maxScheduleDays: number; blockers: string[] };
   targetDay: string;
   deadline: string;
   predictedSeq: number;
@@ -95,7 +114,7 @@ export type ManualGenPanel = {
 
 const RECENT_RUNS = 8;
 
-export async function listManualGenRuns(db: Db, limit = RECENT_RUNS): Promise<ManualGenRunCard[]> {
+export async function listManualGenRuns(db: Db, limit = RECENT_RUNS, rate: number = env.facebook.usdToVnd): Promise<ManualGenRunCard[]> {
   const g = schema.creativeManualGens;
   const s = schema.creativeSources;
   const runs = await db
@@ -131,6 +150,7 @@ export async function listManualGenRuns(db: Db, limit = RECENT_RUNS): Promise<Ma
         imageId: i.imageId,
         imageAvailable: i.imageId !== null && imageRow !== null && purgedAt === null,
         costUsd: i.costUsd,
+        costVnd: usdToVndRounded(i.costUsd === "" ? null : Number(i.costUsd), rate),
         error: i.error,
         headline: i.headline,
         primaryText: i.primaryText,
@@ -144,6 +164,8 @@ export async function listManualGenRuns(db: Db, limit = RECENT_RUNS): Promise<Ma
       }));
     const counts: Partial<Record<ManualGenImageStatus, number>> = {};
     for (const im of images) counts[im.status] = (counts[im.status] ?? 0) + 1;
+    const priced = images.filter((im) => im.costUsd !== "" && Number.isFinite(Number(im.costUsd)));
+    const usd = priced.reduce((t, im) => t + Number(im.costUsd), 0);
     return {
       id: run.id,
       kind: run.kind === "DESIGN" ? "DESIGN" : "MOCKUP",
@@ -160,6 +182,8 @@ export async function listManualGenRuns(db: Db, limit = RECENT_RUNS): Promise<Ma
       size: run.size,
       photoTitle: (run.productPhotoSourceId && titleOf.get(run.productPhotoSourceId)) || "Ảnh sản phẩm",
       ownAdTitle: run.ownAdSourceId ? titleOf.get(run.ownAdSourceId) || "Quảng cáo cũ" : null,
+      uploadImageIds: run.uploadImageIds,
+      cost: { usd, vnd: priced.length ? usdToVndRounded(usd, rate) : null, pricedImages: priced.length, unpricedImages: images.filter((im) => im.costUsd === "" && im.imageId !== null).length },
       images,
       counts,
     };
@@ -220,23 +244,46 @@ export async function listDesignInspirations(db: Db, now: Date): Promise<DesignI
 /** Toàn bộ dữ liệu của khu gen tay cho tab Duyệt lô. */
 export async function loadManualGenPanel(db: Db, now: Date): Promise<ManualGenPanel> {
   const { config } = await readCurrentCreativeConfig(db);
+  const rate = env.facebook.usdToVnd;
   const targetDay = await resolveManualTargetDay(db, now, config);
-  const [batch] = await db.select().from(schema.creativeBatches).where(eq(schema.creativeBatches.batchDay, targetDay)).limit(1);
+  const B = schema.creativeBatches;
+  const [batch] = await db.select().from(B).where(and(eq(B.batchDay, targetDay), eq(B.kind, "LOOP"))).limit(1);
   const namingCfg = batch ? normalizeCreativeConfig(batch.configSnapshot).config : config;
-  const [runs, sources, inspirations, capacity, ctx, predictedSeq, pageName] = await Promise.all([
-    listManualGenRuns(db),
+  const [runs, sources, inspirations, today, ctx, predictedSeq, pageName, blockers] = await Promise.all([
+    listManualGenRuns(db, RECENT_RUNS, rate),
     listPixelSafeSourceOptions(db),
     listDesignInspirations(db, now),
-    manualGenCapacityNow(db, config, now, MANUAL_GEN.imagesPerRun),
+    manualGenSpendToday(db, now),
     loadNamingContext(db, namingCfg),
     batch ? nextNameSeq(db, batch.id) : Promise.resolve(1),
     fanpageDisplayName(db, namingCfg.pageId),
+    instantPublishBlockers(db, config, vnDay(now)),
   ]);
+  const unitUsd = estimateImageUsd(config.imageModel, config.imageQuality, config.imageSize);
   return {
     runs,
     sources,
     inspirations,
-    capacity: { allowedNow: capacity.allowed, perRun: MANUAL_GEN.imagesPerRun, spentImages: capacity.spentImages, spentUsd: capacity.spentUsd, capUsd: capacity.capUsd, unitUsd: capacity.unitUsd, reason: capacity.reason },
+    pricing: {
+      model: config.imageModel,
+      quality: config.imageQuality,
+      size: config.imageSize,
+      unitUsd,
+      unitVnd: usdToVndRounded(unitUsd, rate),
+      usdToVnd: rate,
+      todayImages: today.images,
+      todayUsd: today.usd,
+      todayVnd: usdToVndRounded(today.usd, rate),
+      todayUnpriced: today.unpriced,
+    },
+    instant: {
+      budgetVnd: config.budgetPerVariantVnd,
+      testDays: Math.max(1, Math.min(config.testDays, CREATIVE_HARD_LIMITS.maxTestDays)),
+      leadSeconds: INSTANT_PUBLISH.leadSeconds,
+      minScheduleLeadMinutes: INSTANT_PUBLISH.minScheduleLeadMinutes,
+      maxScheduleDays: INSTANT_PUBLISH.maxScheduleDays,
+      blockers,
+    },
     targetDay,
     deadline: (batch?.approvalDeadline ?? batchWindow(targetDay, config).approvalDeadline).toISOString(),
     predictedSeq,

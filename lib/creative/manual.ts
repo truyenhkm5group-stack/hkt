@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, max } from "drizzle-orm";
+import { and, count, eq, inArray, max, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { CREATIVE_RULE_VERSION, GENE_VOCAB_VERSION, MANUAL_SLOT_BASE, SLOT_MODE_PUBLISH_RANK, type CreativeLoopConfig, type Genes, type SlotMode } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
@@ -41,7 +41,8 @@ export function manualTargetDay(now: Date, cfg: Pick<CreativeLoopConfig, "startH
 
 /** `manualTargetDay` với trạng thái lô hôm nay đọc từ CSDL — đường dùng chung của đường ghi và màn hình. */
 export async function resolveManualTargetDay(db: Db, now: Date, cfg: Pick<CreativeLoopConfig, "startHourVn" | "testDays" | "approvalLeadMinutes" | "genHourVn">): Promise<string> {
-  const [row] = await db.select({ status: schema.creativeBatches.status }).from(schema.creativeBatches).where(eq(schema.creativeBatches.batchDay, vnDay(now))).limit(1);
+  const b = schema.creativeBatches;
+  const [row] = await db.select({ status: b.status }).from(b).where(and(eq(b.batchDay, vnDay(now)), eq(b.kind, "LOOP"))).limit(1);
   return manualTargetDay(now, cfg, row?.status ?? null);
 }
 
@@ -98,31 +99,38 @@ export type ManualVariantRow = {
 /**
  * ĐƯỜNG GHI CHUNG: lô gần nhất còn hạn duyệt (chưa có thì dựng sẵn "Chờ duyệt") → kiểm lô còn mở + trần
  * mẫu tự làm → cấp ô 1001+ → chèn mẫu `GENERATED`. Trả `{ ok: false, error }` cho lỗi nghiệp vụ — không ném.
+ *
+ * `target` (tuỳ chọn): lô ĐÃ DỰNG sẵn để chèn vào thay cho lô hằng ngày gần nhất — lô đăng lẻ (`INSTANT`) của
+ * nút "Đăng camp". Mọi kiểm tra còn lại (lô còn mở, còn hạn, trần mẫu tự làm) chạy y như lô hằng ngày.
  */
-export async function insertManualVariant(db: Db, row: ManualVariantRow, cfg: CreativeLoopConfig, actor: ManualActor, now: Date): Promise<AddManualResult> {
-  const day = await resolveManualTargetDay(db, now, cfg);
-  const w = batchWindow(day, cfg);
+export async function insertManualVariant(db: Db, row: ManualVariantRow, cfg: CreativeLoopConfig, actor: ManualActor, now: Date, target?: BatchRow): Promise<AddManualResult> {
   const b = schema.creativeBatches;
   const v = schema.creativeVariants;
-
-  // Lô chưa có thì dựng sẵn. Trùng khoá (máy vừa dựng lô cùng lúc) ⇒ đọc lô đã có, không dựng lại.
-  const [inserted] = await db
-    .insert(b)
-    .values({
-      batchDay: day,
-      status: "PENDING_APPROVAL",
-      slotCount: 0,
-      startAt: w.startAt,
-      endAt: w.endAt,
-      approvalDeadline: w.approvalDeadline,
-      plan: { manualSeed: true },
-      configSnapshot: cfg as unknown as Record<string, unknown>,
-      ruleVersion: CREATIVE_RULE_VERSION,
-    })
-    .onConflictDoNothing({ target: b.batchDay })
-    .returning();
-  const batch = inserted ?? (await db.select().from(b).where(eq(b.batchDay, day)).limit(1))[0];
-  if (!batch) return { ok: false, error: `Không dựng được lô ${day}.` };
+  let batch: BatchRow | undefined = target;
+  let inserted: BatchRow | undefined;
+  if (!batch) {
+    const day = await resolveManualTargetDay(db, now, cfg);
+    const w = batchWindow(day, cfg);
+    // Lô chưa có thì dựng sẵn. Trùng khoá (máy vừa dựng lô cùng lúc) ⇒ đọc lô đã có, không dựng lại.
+    [inserted] = await db
+      .insert(b)
+      .values({
+        batchDay: day,
+        status: "PENDING_APPROVAL",
+        slotCount: 0,
+        startAt: w.startAt,
+        endAt: w.endAt,
+        approvalDeadline: w.approvalDeadline,
+        plan: { manualSeed: true },
+        configSnapshot: cfg as unknown as Record<string, unknown>,
+        ruleVersion: CREATIVE_RULE_VERSION,
+      })
+      .onConflictDoNothing({ target: b.batchDay, where: sql`${b.kind} = 'LOOP'` })
+      .returning();
+    batch = inserted ?? (await db.select().from(b).where(and(eq(b.batchDay, day), eq(b.kind, "LOOP"))).limit(1))[0];
+    if (!batch) return { ok: false, error: `Không dựng được lô ${day}.` };
+  }
+  const day = batch.batchDay;
   if (!OPEN_STATUSES.includes(batch.status)) return { ok: false, error: `Lô ${day} đã ở trạng thái "${batch.status}" — chỉ thêm được mẫu vào lô đang dựng hoặc đang chờ duyệt.` };
   if (now >= batch.approvalDeadline) return { ok: false, error: `Lô ${day} đã quá hạn duyệt.` };
 

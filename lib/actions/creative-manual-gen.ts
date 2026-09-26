@@ -8,10 +8,9 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { priceWarnings } from "@/lib/creative/copy-edit";
-import { captionManualGenImage, drawManualGen, promoteManualGenImage, reviewManualGenImage, startManualDesignGen, startManualGen } from "@/lib/creative/manual-gen";
-import type { CreativeLoopConfig } from "@/lib/constants/creative-loop";
+import { captionManualGenImage, drawManualGen, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, startManualDesignGen, startManualGen, type InstantOutcome } from "@/lib/creative/manual-gen";
 import { readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
-import { manualDesignStartSchema, manualGenPromoteSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
+import { manualDesignStartSchema, manualGenInstantSchema, manualGenPromoteSchema, manualGenReviewSchema, manualGenStartSchema } from "@/lib/validation/creative";
 
 /**
  * ═══════════ VÒNG MẪU — GEN ẢNH BẰNG TAY (chủ shop 25/09/2026, §5i) ═══════════
@@ -20,8 +19,9 @@ import { manualDesignStartSchema, manualGenPromoteSchema, manualGenReviewSchema,
  * từ MÁY CHỦ (AGENTS.md mục 34) → gọi đường ghi → nhật ký.
  *
  * Quyền `ideas:write` — cùng quyền tải mẫu tự làm / soạn câu chữ: gen ảnh và đưa vào lô là BIÊN TẬP nội
- * dung. Tiền quảng cáo vẫn chỉ đi sau lượt duyệt lô (`expenses:write`); tiền VẼ ẢNH đi qua trần ảnh / ngày
- * chung với lô hằng ngày.
+ * dung. Tiền quảng cáo vẫn chỉ đi sau lượt duyệt (`expenses:write`): "Đăng camp" là soạn bài VÀ duyệt chi trong
+ * một cú bấm, nên đòi CẢ HAI quyền. Tiền VẼ ẢNH không còn trần / ngày (chủ shop 26/09/2026) — màn hình in tiền
+ * ước tính trước khi bấm và tiền thật từng ảnh / cả lượt sau khi vẽ.
  *
  * "Gen ảnh" KHÔNG vẽ trong action: ghi lượt rồi trả lời ngay, việc vẽ chạy trong `after()` (sau phản hồi,
  * trên tiến trình máy chủ Node) — lượt vòng mẫu vẽ nốt nếu tiến trình ấy chết. Màn hình tự tải lại để hiện
@@ -47,7 +47,7 @@ export async function startManualGenRun(raw: unknown): Promise<{ ok: true; genId
   const db = await getDb();
   const actor = await actorOf(user.id, user.email);
   const { config } = await readCurrentCreativeConfig(db);
-  const r = await startManualGen(db, { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea }, config, actor, new Date());
+  const r = await startManualGen(db, { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea, count: d.count, uploads: decodeUploads(d.uploads) }, config, actor);
   if (!r.ok) return { error: r.error };
 
   await audit({
@@ -56,18 +56,23 @@ export async function startManualGenRun(raw: unknown): Promise<{ ok: true; genId
     action: "CREATIVE_MANUAL_GEN_START",
     entity: "CREATIVE_MANUAL_GEN",
     entityId: r.genId,
-    after: { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea, requested: r.requested, allowed: r.allowed, capped: r.reason },
+    after: { productPhotoSourceId: d.productPhotoSourceId, ownAdSourceId: d.ownAdSourceId || null, idea: d.idea, requested: r.requested, uploads: d.uploads.length },
   });
-  drawAfterResponse(r.genId, config);
+  drawAfterResponse(r.genId);
   revalidatePath(PATH);
   return { ok: true, genId: r.genId, requested: r.requested, allowed: r.allowed, note: r.reason };
 }
 
+/** Ảnh tải lên (base64 đã qua lược đồ) ⇒ byte. Đường ghi tự kiểm loại ảnh / kích thước khi lưu. */
+function decodeUploads(list: readonly string[]): Uint8Array[] {
+  return list.map((b64) => new Uint8Array(Buffer.from(b64, "base64")));
+}
+
 /** Vẽ SAU phản hồi — nút bấm không treo. Lỗi ở đây không làm hỏng gì: ảnh còn `PLANNED` thì lượt vòng mẫu vẽ nốt. */
-function drawAfterResponse(genId: string, config: CreativeLoopConfig) {
+function drawAfterResponse(genId: string) {
   after(async () => {
     try {
-      await drawManualGen(await getDb(), { genId, config });
+      await drawManualGen(await getDb(), { genId });
     } catch (e) {
       console.error("[creative-manual-gen] vẽ sau phản hồi lỗi:", e instanceof Error ? e.message : String(e));
     }
@@ -84,7 +89,7 @@ export async function startManualDesignRun(raw: unknown): Promise<{ ok: true; ge
   const db = await getDb();
   const actor = await actorOf(user.id, user.email);
   const { config } = await readCurrentCreativeConfig(db);
-  const r = await startManualDesignGen(db, { inspirationProductIds: d.inspirationProductIds, idea: d.idea }, config, actor, new Date());
+  const r = await startManualDesignGen(db, { inspirationProductIds: d.inspirationProductIds, idea: d.idea, count: d.count, uploads: decodeUploads(d.uploads) }, config, actor, new Date());
   if (!r.ok) return { error: r.error };
 
   await audit({
@@ -93,9 +98,9 @@ export async function startManualDesignRun(raw: unknown): Promise<{ ok: true; ge
     action: "CREATIVE_MANUAL_GEN_START",
     entity: "CREATIVE_MANUAL_GEN",
     entityId: r.genId,
-    after: { kind: "DESIGN", inspirationProductIds: d.inspirationProductIds, idea: d.idea, requested: r.requested, allowed: r.allowed, note: r.reason },
+    after: { kind: "DESIGN", inspirationProductIds: d.inspirationProductIds, idea: d.idea, requested: r.requested, allowed: r.allowed, uploads: d.uploads.length, note: r.reason },
   });
-  drawAfterResponse(r.genId, config);
+  drawAfterResponse(r.genId);
   revalidatePath(PATH);
   return { ok: true, genId: r.genId, requested: r.requested, allowed: r.allowed, note: r.reason };
 }
@@ -167,4 +172,41 @@ export async function promoteManualGenImageAction(raw: unknown): Promise<{ ok: t
   });
   revalidatePath(PATH);
   return { ok: true, batchDay: r.batchDay, slot: r.slot, names: r.names, designCode: r.designCode, warnings };
+}
+
+/**
+ * "Đăng camp" — ảnh đã duyệt lên Facebook NGAY (chạy ngay hoặc hẹn giờ), không chờ lô 6:00 hôm sau. Mọi luật ở
+ * `publishManualGenImageInstant`; action chạy ĐỒNG BỘ (sáu lời gọi Facebook, vài giây) để người bấm thấy ngay
+ * camp đã chạy hay vì sao chưa.
+ */
+export async function publishManualGenImageNowAction(
+  raw: unknown,
+): Promise<{ ok: true; outcome: InstantOutcome; detail: string; startAt: string; endAt: string; names: { campaign: string; adset: string; ad: string }; designCode: string | null; warnings: string[] } | Fail> {
+  const user = await requireUser();
+  if (!can(user, "ideas:write") || !can(user, "expenses:write")) return { error: "Đăng camp cần cả quyền soạn bài (ideas:write) lẫn quyền duyệt chi quảng cáo (expenses:write)." };
+  const parsed = manualGenInstantSchema.safeParse(raw);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const db = await getDb();
+  const actor = await actorOf(user.id, user.email);
+  const { config } = await readCurrentCreativeConfig(db);
+  const r = await publishManualGenImageInstant(
+    db,
+    { imageId: d.imageId, headline: d.headline, primaryText: d.primaryText, names: { campaign: d.campaignName, adset: d.adsetName, ad: d.adName }, predictedSeq: d.predictedSeq, scheduleAt: d.scheduleAt ? new Date(d.scheduleAt) : null },
+    config,
+    actor,
+    new Date(),
+  );
+  if (!r.ok) return { error: r.error };
+  const warnings = priceWarnings(`${d.headline}\n${d.primaryText}`, r.priceVnd);
+  await audit({
+    userId: user.id,
+    userEmail: user.email,
+    action: "CREATIVE_INSTANT_PUBLISH",
+    entity: "CREATIVE_VARIANT",
+    entityId: r.variantId,
+    after: { imageId: d.imageId, batchId: r.batchId, batchDay: r.batchDay, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString(), scheduled: r.scheduled, outcome: r.outcome, detail: r.detail, names: r.names, designCode: r.designCode, warnings },
+  });
+  revalidatePath(PATH);
+  return { ok: true, outcome: r.outcome, detail: r.detail, startAt: r.startAt.toISOString(), endAt: r.endAt.toISOString(), names: r.names, designCode: r.designCode, warnings };
 }

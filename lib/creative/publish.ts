@@ -294,6 +294,17 @@ export async function publishApprovedBatches(db: Db, now: Date, deps?: CreativeD
   return out;
 }
 
+/**
+ * Đăng MỘT lô ngay lúc này — đường của nút "Đăng camp" (lô `INSTANT`). Đi qua ĐÚNG `publishOneBatch` của lượt
+ * tick: tính lại digest, công tắc khẩn, năm chốt đầu, cổng từng bước, sổ ghi. Lô không còn `APPROVED` (vd lượt
+ * tick vừa đăng xong) ⇒ `null`, không gọi gì.
+ */
+export async function publishBatchNow(db: Db, batchId: string, now: Date, deps?: CreativeDeps): Promise<PublishBatchReport | null> {
+  const [b] = await db.select().from(T.creativeBatches).where(and(eq(T.creativeBatches.id, batchId), eq(T.creativeBatches.status, "APPROVED"))).limit(1);
+  if (!b) return null;
+  return publishOneBatch(db, b, now, resolveDeps(deps));
+}
+
 async function loadVariants(db: Exec, batchId: string): Promise<VariantRow[]> {
   return db.select().from(T.creativeVariants).where(eq(T.creativeVariants.batchId, batchId)).orderBy(asc(T.creativeVariants.slot));
 }

@@ -201,6 +201,18 @@ export async function nextNameSeq(db: Db, batchId: string): Promise<number> {
   return Number(r?.top ?? 0) + 1;
 }
 
+/**
+ * Số thứ tự kế tiếp trong NGÀY CHẠY, đếm trên MỌI lô của ngày ấy (lô hằng ngày + các lô đăng lẻ) — cho bài
+ * "Đăng camp": lô đăng lẻ chỉ có một bài, đếm trong lô thì bài nào cũng số 1 và trùng tên chiến dịch của lô
+ * hằng ngày cùng ngày trên Ads Manager.
+ */
+export async function nextNameSeqOnDay(db: Db, batchDay: string): Promise<number> {
+  const v = schema.creativeVariants;
+  const b = schema.creativeBatches;
+  const [r] = await db.select({ top: max(v.nameSeq) }).from(v).innerJoin(b, eq(b.id, v.batchId)).where(eq(b.batchDay, batchDay));
+  return Number(r?.top ?? 0) + 1;
+}
+
 /** Lô còn sửa được tên: chưa duyệt (`PLANNED` / `PENDING_APPROVAL`) và còn hạn duyệt. */
 function openBatchesAt(db: Db, now: Date) {
   const b = schema.creativeBatches;

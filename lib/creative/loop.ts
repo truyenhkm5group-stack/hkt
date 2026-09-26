@@ -208,7 +208,7 @@ export async function runCreativeLoopTick(db: Db, now: Date = new Date(), deps: 
   out.named = (await step("đặt tên bài", () => assignOpenBatchNames(db, now))) ?? 0;
 
   // 6. Vẽ nốt ảnh gen tay (§5i).
-  out.manualGen = await step("vẽ nốt gen tay", () => drawManualGen(db, { ...deps.manualGen, limit: deps.manualGen?.limit ?? MANUAL_GEN.drawPerTick, now: deps.manualGen?.now ?? now, config }));
+  out.manualGen = await step("vẽ nốt gen tay", () => drawManualGen(db, { ...deps.manualGen, limit: deps.manualGen?.limit ?? MANUAL_GEN.drawPerTick, now: deps.manualGen?.now ?? now }));
 
   return out;
 }
