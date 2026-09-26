@@ -107,7 +107,7 @@ NGHIỆP VỤ) · `recorded_at` default now(). Chỉ mục: `(model_id, occurred
 
 | Tên | Chủ | Trạng thái ở Wave 1 |
 |---|---|---|
-| `model.registered` · `model.linked` · `model.state_changed` · `model.owner_changed` | A | LIVE |
+| `model.registered` · `model.linked` · `model.state_changed` · `model.owner_changed` · `model.code_assigned` (26/09/2026 — chốt mã chính thức cho mẫu mang mã tạm) | A | LIVE |
 | `production_topic.created` · `production_topic.status_changed` · `production_topic.message_added` | C | LIVE |
 | `costing.version_created` · `costing.finalized` | C | LIVE |
 | `sample.created` · `sample.submitted` · `sample.reviewed` · `sample.approved` · `design_version.approved` | C | LIVE |

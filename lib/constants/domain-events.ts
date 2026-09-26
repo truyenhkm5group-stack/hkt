@@ -70,6 +70,14 @@ export const DOMAIN_EVENTS = [
     why: "Một mẫu vào sổ danh tính — do job đồng bộ sổ (từ sản phẩm Pancake / thiết kế TK) hoặc do người gõ mã mẫu mới.",
   },
   {
+    name: "model.code_assigned",
+    subjectType: MODEL_SUBJECT,
+    owner: "A",
+    status: "LIVE",
+    emitter: MODEL_EMITTER,
+    why: "Người chốt MÃ CHÍNH THỨC cho một mẫu đang mang mã tạm (mẫu mới test mở topic sản xuất trước khi lên mã — chủ shop 26/09/2026). Đổi mã của chính dòng ấy; mọi thứ gắn theo model_id đi theo.",
+  },
+  {
     name: "model.linked",
     subjectType: MODEL_SUBJECT,
     owner: "A",
@@ -155,6 +163,7 @@ export const DOMAIN_EVENT_BY_NAME: Readonly<Record<string, DomainEventSpec>> = O
 export const DOMAIN_EVENT_LABEL: Partial<Record<DomainEventName, string>> = {
   "model.registered": "Vào sổ mẫu",
   "model.linked": "Nối sản phẩm / thiết kế",
+  "model.code_assigned": "Chốt mã chính thức",
   "model.state_changed": "Đổi trạng thái vòng đời",
   "model.owner_changed": "Đổi người phụ trách",
   "production_topic.created": "Mở topic sản xuất",
