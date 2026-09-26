@@ -311,7 +311,14 @@ const ERROR_MARKER = "Có lỗi khi tải trang";
  * Hai dấu hiệu bổ cho nhau: lỗi trong nhánh có Suspense thì hiện thành chữ, lỗi ở thân trang thì
  * chỉ còn mã. Thiếu một trong hai là còn một nửa cửa mở.
  */
-const DIGEST_MARKER = /\\?"digest\\?"\s*:\s*\\?"\d{3,}/;
+/*
+ * SỰ CỐ THẬT (26/09/2026): hai lượt deploy liên tiếp đỏ vì `/audit [APP_ERROR] … (mã 578)` trong khi
+ * trang dựng bình thường và log máy chủ không có lỗi nào. `/audit` gửi dữ liệu nhật ký sang máy khách,
+ * và lượt duyệt lô creative ghi `after: { digest: "578f…" }` — mã băm sha256 dạng HEX. Biểu thức cũ chỉ
+ * đòi ≥ 3 chữ số ĐẦU chuỗi nên đọc dữ liệu thành mã lỗi. Mã lỗi thật của Next là TOÀN chữ số, nên giá
+ * trị phải khép bằng dấu nháy ngay sau dãy số.
+ */
+const DIGEST_MARKER = /\\?"digest\\?"\s*:\s*\\?"\d{3,}\\?"/;
 
 /**
  * ═══════════ PHÂN LOẠI KẾT QUẢ — MỘT CHỮ "LỖI" KHÔNG ĐỦ ═══════════

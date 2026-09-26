@@ -106,6 +106,10 @@ export function testSmokeCoverage() {
     !bieuThuc.test('<p>Bản tin digest tháng 9</p><span>digest: xem báo cáo</span>'),
     "bộ dò KHÔNG được báo nhầm chữ 'digest' bình thường trong nội dung trang",
   );
+  // 26/09/2026: dữ liệu nhật ký mang mã băm HEX (`after.digest` của lượt duyệt lô creative) từng bị đọc
+  // thành mã lỗi — hai lượt deploy đỏ oan vì /audit. Mã lỗi thật TOÀN chữ số; hex bắt đầu bằng số thì không.
+  assert.ok(!bieuThuc.test('self.__next_f.push([1,"{\\"after\\":{\\"digest\\":\\"578f3c9ab1e2\\"}}"])'), "mã băm hex trong DỮ LIỆU (thoát nháy) không phải mã lỗi");
+  assert.ok(!bieuThuc.test('{"after":{"status":"APPROVED","digest":"578f3c9ab1e2d4"}}'), "mã băm hex trong DỮ LIỆU không phải mã lỗi");
   const errorTsx = fs.readFileSync(path.join(goc, "app/(dashboard)/error.tsx"), "utf8");
   const nhan = /const ERROR_MARKER = "([^"]+)"/.exec(smoke)?.[1] ?? "";
   assert.ok(nhan.length > 5, "ERROR_MARKER phải là một chuỗi thật");
