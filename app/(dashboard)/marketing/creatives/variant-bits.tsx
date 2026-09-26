@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Globe, ImageOff, MessageCircle } from "lucide-react";
 import { ExpandText } from "@/app/(dashboard)/marketing/creatives/creative-bits";
+import { ZoomableImg } from "@/app/(dashboard)/marketing/creatives/image-zoom";
 import { DESIGN_DNA_KEYS, DESIGN_DNA_LABEL, DESIGN_DNA_VALUE_LABEL, GENE_KEYS, GENE_LABEL, GENE_VALUE_LABEL, SLOT_MODE_LABEL, type DesignDnaKey, type GeneKey, type SlotMode } from "@/lib/constants/creative-loop";
 import { cn } from "@/lib/utils";
 
@@ -9,13 +10,21 @@ import { cn } from "@/lib/utils";
  * trạng thái, không gọi action — dựng được ở cả Server Component lẫn Client Component.
  */
 
-/** Ảnh của một mẫu. Điểm ảnh đã xoá (mẫu thua quá hạn giữ) nói ra điều đó, không để khung trống. */
-export function VariantImage({ imageId, available, alt, className, iconClassName }: { imageId: string | null; available: boolean; alt: string; className?: string; iconClassName?: string }) {
+/**
+ * Ảnh của một mẫu. Điểm ảnh đã xoá (mẫu thua quá hạn giữ) nói ra điều đó, không để khung trống. `zoomable` ⇒ bấm ảnh để
+ * phóng to (khung xem toàn ảnh + mở / tải ảnh gốc) — tắt ở chỗ cú bấm đã mang nghĩa khác (ô tích chọn mẫu cảm hứng).
+ */
+export function VariantImage({ imageId, available, alt, className, iconClassName, zoomable = false }: { imageId: string | null; available: boolean; alt: string; className?: string; iconClassName?: string; zoomable?: boolean }) {
+  const src = imageId ? `/api/creative/images/${imageId}` : "";
   return (
     <div className={cn("relative overflow-hidden bg-muted", className)}>
       {imageId && available ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={`/api/creative/images/${imageId}`} alt={alt} className="size-full object-cover" loading="lazy" />
+        zoomable ? (
+          <ZoomableImg src={src} alt={alt} />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={src} alt={alt} className="size-full object-cover" loading="lazy" />
+        )
       ) : (
         <div className="flex size-full flex-col items-center justify-center gap-1 text-center text-[10.5px] text-muted-foreground">
           <ImageOff className={cn("size-6", iconClassName)} />
@@ -109,7 +118,7 @@ export function AdPreview({
       </div>
       <ExpandText text={primaryText} className="px-2.5 pb-2" />
       <div className="relative">
-        <VariantImage imageId={imageId} available={imageAvailable} alt={alt} className="aspect-square w-full" />
+        <VariantImage imageId={imageId} available={imageAvailable} alt={alt} className="aspect-square w-full" zoomable />
         {imageOverlay}
       </div>
       <div className="flex items-center gap-2 border-t bg-muted/50 px-2.5 py-2">

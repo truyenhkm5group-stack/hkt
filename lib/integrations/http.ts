@@ -33,6 +33,16 @@ export function loiNghiepVu(parsed: unknown, tho: string): { message: string; de
   const ungVien: string[] = [];
   for (const k of ["message", "Message", "error_description", "errorMessage", "error_message", "detail", "title", "msg"]) ungVien.push(chuoi(r[k]));
   if (typeof r.error === "string") ungVien.push(chuoi(r.error));
+  // Facebook Graph gói lỗi trong ĐỐI TƯỢNG `error{…}`: câu cho người dùng nằm ở `error_user_title` / `error_user_msg`, câu kỹ
+  // thuật ở `message`, kèm mã. Thiếu vế này thì ERP in 200 ký tự JSON thô và cắt cụt đúng câu cần đọc (26/09/2026: lỗi
+  // "ứng dụng đang ở chế độ phát triển" chỉ còn "Bài viết chứa nội dung quảng c…").
+  if (r.error && typeof r.error === "object" && !Array.isArray(r.error)) {
+    const eo = r.error as Record<string, unknown>;
+    const nguoi = [chuoi(eo.error_user_title), chuoi(eo.error_user_msg)].filter(Boolean).join(" — ");
+    const ma = [eo.code, eo.error_subcode].filter((x) => typeof x === "number" || (typeof x === "string" && x !== "")).join("/");
+    const cau = nguoi || chuoi(eo.message);
+    if (cau) ungVien.push(ma ? `${cau} (mã ${ma})` : cau);
+  }
   const data = (r.data ?? {}) as Record<string, unknown>;
   if (data && typeof data === "object" && !Array.isArray(data)) for (const k of ["message", "Message", "error", "detail"]) ungVien.push(chuoi(data[k]));
   const mang = Array.isArray(r.errors) ? r.errors : Array.isArray((r.error as { errors?: unknown[] })?.errors) ? ((r.error as { errors: unknown[] }).errors as unknown[]) : [];

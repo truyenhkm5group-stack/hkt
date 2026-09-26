@@ -54,12 +54,19 @@ export type ManualGenImageCard = {
   queuedByName: string;
   /** Setup camp đã lưu cùng bản nháp. `null` = chưa chọn (hộp đăng điền mặc định dùng nhiều). */
   campaignSetup: CampaignSetup | null;
+  /**
+   * Ảnh đã bấm đăng mà bài HỎNG / bị gạt: lô để xem sổ ghi + có trả về hàng đợi được không (chưa có chiến dịch / nhóm / mẩu
+   * nào trên Facebook). `null` = không hỏng.
+   */
+  publishFailure: { batchId: string; canRequeue: boolean } | null;
 };
+
+type VariantBrief = { status: string | null; batchId: string | null; fbCampaignId: string | null; fbAdsetId: string | null; fbAdId: string | null; fbPendingStep: string | null };
 
 type ImageRow = typeof schema.creativeManualGenImages.$inferSelect;
 
 /** Một dòng ảnh ⇒ thẻ màn hình. Dùng chung cho "Kết quả gen tay" và "Hàng đợi đăng camp" — một cách dựng, không hai. */
-function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | null, rate: number): ManualGenImageCard {
+function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | null, rate: number, vb: VariantBrief | null = null): ManualGenImageCard {
   const d = parseManualDesignSpec(i.design);
   return {
     id: i.id,
@@ -83,6 +90,10 @@ function toImageCard(i: ImageRow, imageRowId: string | null, purgedAt: Date | nu
     queuedAt: i.status === "APPROVED" && i.queuedAt ? i.queuedAt.toISOString() : null,
     queuedByName: i.queuedByName,
     campaignSetup: parseCampaignSetup(i.campaignSetup),
+    publishFailure:
+      i.status === "PROMOTED" && vb && vb.batchId && (vb.status === "PUBLISH_FAILED" || vb.status === "REJECTED")
+        ? { batchId: vb.batchId, canRequeue: !vb.fbCampaignId && !vb.fbAdsetId && !vb.fbAdId && !vb.fbPendingStep }
+        : null,
   };
 }
 
@@ -194,9 +205,22 @@ export async function listManualGenRuns(db: Db, limit = RUNS_PER_DAY, rate: numb
   const inspIds = [...new Set(runs.flatMap((r) => r.run.inspirationProductIds))];
   const [imgs, srcs, insp] = await Promise.all([
     db
-      .select({ i: schema.creativeManualGenImages, purgedAt: schema.creativeImages.purgedAt, imageRow: schema.creativeImages.id })
+      .select({
+        i: schema.creativeManualGenImages,
+        purgedAt: schema.creativeImages.purgedAt,
+        imageRow: schema.creativeImages.id,
+        vb: {
+          status: schema.creativeVariants.status,
+          batchId: schema.creativeVariants.batchId,
+          fbCampaignId: schema.creativeVariants.fbCampaignId,
+          fbAdsetId: schema.creativeVariants.fbAdsetId,
+          fbAdId: schema.creativeVariants.fbAdId,
+          fbPendingStep: schema.creativeVariants.fbPendingStep,
+        },
+      })
       .from(schema.creativeManualGenImages)
       .leftJoin(schema.creativeImages, eq(schema.creativeImages.id, schema.creativeManualGenImages.imageId))
+      .leftJoin(schema.creativeVariants, eq(schema.creativeVariants.id, schema.creativeManualGenImages.variantId))
       .where(inArray(schema.creativeManualGenImages.genId, ids))
       .orderBy(schema.creativeManualGenImages.seq),
     srcIds.length ? db.select({ id: s.id, title: s.title }).from(s).where(inArray(s.id, srcIds)) : Promise.resolve([] as { id: string; title: string }[]),
@@ -207,7 +231,7 @@ export async function listManualGenRuns(db: Db, limit = RUNS_PER_DAY, rate: numb
   return runs.map(({ run, productName }) => {
     const images: ManualGenImageCard[] = imgs
       .filter((x) => x.i.genId === run.id)
-      .map(({ i, purgedAt, imageRow }) => toImageCard(i, imageRow, purgedAt, rate));
+      .map(({ i, purgedAt, imageRow, vb }) => toImageCard(i, imageRow, purgedAt, rate, vb));
     const counts: Partial<Record<ManualGenImageStatus, number>> = {};
     for (const im of images) counts[im.status] = (counts[im.status] ?? 0) + 1;
     const priced = images.filter((im) => im.costUsd !== "" && Number.isFinite(Number(im.costUsd)));

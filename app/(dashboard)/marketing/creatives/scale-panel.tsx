@@ -116,7 +116,7 @@ export async function ScalePanel({ canWrite }: { canWrite: boolean }) {
                 <tr key={r.variantId} className="border-b border-hairline align-top last:border-b-0">
                   <td className="px-3 py-2">
                     <div className="flex gap-2">
-                      <VariantImage imageId={r.imageId} available={r.imageAvailable} alt={r.headline || `Mẫu #${r.slot}`} className="size-12 shrink-0 rounded" iconClassName="size-4" />
+                      <VariantImage imageId={r.imageId} available={r.imageAvailable} alt={r.headline || `Mẫu #${r.slot}`} className="size-12 shrink-0 rounded" iconClassName="size-4" zoomable />
                       <div className="min-w-0 max-w-[240px]">
                         <p className="truncate font-medium" title={r.headline}>
                           #{r.slot} {r.headline || <span className="italic text-muted-foreground">không tiêu đề</span>}

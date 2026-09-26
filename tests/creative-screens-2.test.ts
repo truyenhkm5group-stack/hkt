@@ -204,6 +204,15 @@ function testSourceLevel() {
     assert.ok(page.includes(`"${t}"`), `page.tsx không nhận tab ${t}`);
   }
 
+  // Ảnh bấm để phóng to (chủ shop 27/09/2026): ảnh gen, hàng đợi, ảnh tải lên, Đang chạy, Mẫu thắng, Thiết kế đều bật; ô chọn
+  // mẫu cảm hứng KHÔNG bật (cú bấm ở đó là tích chọn); nút phóng to chặn sự kiện lan ra thẻ chứa ảnh.
+  const zoom = doc(`${DIR}/image-zoom.tsx`);
+  assert.ok(zoom.startsWith('"use client"') && zoom.includes("e.stopPropagation()") && zoom.includes("object-contain"), "khung phóng to: phía trình duyệt, không lan cú bấm, hiện toàn ảnh");
+  const genUi = doc(`${DIR}/manual-gen.tsx`);
+  assert.ok(/alt=\{`Ảnh gen tay #\$\{img\.seq\}`\}[^>]*zoomable/.test(genUi), "ảnh gen bấm phóng to được");
+  assert.ok(!/alt=\{o\.label\}[^>]*zoomable/.test(genUi), "ô chọn mẫu cảm hứng không bật phóng to");
+  for (const f of ["live-tab.tsx", "library-tab.tsx", "design-tab.tsx", "manual-gen-panel.tsx"]) assert.ok(doc(`${DIR}/${f}`).includes("zoomable"), `${f} phải bật phóng to ảnh`);
+
   // Nút thật gọi action thật — không nút "đánh dấu xong" nào.
   const batch = doc(`${DIR}/batch-actions.tsx`);
   for (const a of ["proposeBatchApproval(", "approveBatch(", "rejectBatch(", "rejectVariant("]) assert.ok(batch.includes(a), `batch-actions.tsx phải gọi ${a}`);

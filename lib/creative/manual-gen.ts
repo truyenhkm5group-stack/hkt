@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, inArray, isNotNull, isNull, like, lt, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lt, ne, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import {
   CREATIVE_HARD_LIMITS,
@@ -1076,27 +1076,70 @@ export async function publishManualGenImageInstant(db: Db, input: InstantPublish
   if (v?.status === "LIVE") {
     return { ...base, outcome: w.scheduled ? "SCHEDULED" : "LIVE", detail: w.scheduled ? "Camp đã lên Facebook, tự chạy đúng giờ hẹn." : "Camp đã lên Facebook và đang chạy." };
   }
-  const why = publishError || report?.detail || "Không rõ lý do — xem sổ ghi Facebook của lô.";
-  const sentNothing = !!v && !v.fbImageHash && !v.fbCampaignId && !v.fbAdsetId && !v.fbPendingStep;
-  if (sentNothing) {
-    // Chưa có gì trên Facebook ⇒ trả ảnh về cho người bấm lại. Điều kiện nằm TRONG câu UPDATE: lượt vòng mẫu vừa
-    // chạm vào mẫu (đã tải ảnh / đang gửi) thì không gạt gì cả.
-    const unwound = await db.transaction(async (tx) => {
-      const rows = await tx
-        .update(V)
-        .set({ status: "REJECTED", genError: `Đăng camp chưa được: ${why}`.slice(0, 1000), updatedAt: new Date() })
-        .where(and(eq(V.id, made.variantId), eq(V.status, "GENERATED"), eq(V.fbPendingStep, ""), eq(V.fbImageHash, ""), isNull(V.fbCampaignId), isNull(V.fbAdsetId)))
-        .returning({ id: V.id });
-      if (rows.length === 0) return false;
-      await tx.update(B).set({ status: "FAILED", error: `Đăng camp chưa được: ${why}`.slice(0, 2000), updatedAt: new Date() }).where(eq(B.id, made.batchId));
-      await tx
-        .update(schema.creativeManualGenImages)
-        .set({ status: "APPROVED", variantId: null, updatedAt: new Date() })
-        .where(and(eq(schema.creativeManualGenImages.id, input.imageId), eq(schema.creativeManualGenImages.status, "PROMOTED")));
-      return true;
-    });
-    if (unwound) return { ...base, outcome: "FAILED", detail: `Chưa đăng được, chưa có gì lên Facebook — ảnh vẫn ở "Đã duyệt", sửa xong bấm lại. Lý do: ${why}` };
+  // Câu lỗi THẬT của Facebook (sổ ghi của lô) đứng trước câu tóm tắt "không mẫu nào đăng được" — người bấm cần biết phải
+  // sửa gì, không phải biết là có lỗi.
+  const why = publishError || (await lastFailureOf(db, made.batchId)) || report?.detail || "Không rõ lý do — xem sổ ghi Facebook của lô.";
+  if (v && v.status !== "LIVE" && v.status !== "PAUSED" && v.status !== "ENDED") {
+    const back = await requeueIfNothingSpendable(db, input.imageId, v.id, made.batchId, why);
+    if (back) return { ...base, outcome: "FAILED", detail: `Chưa đăng được — chưa có chiến dịch / nhóm nào trên Facebook, không đồng nào chảy; ảnh đã về hàng đợi, sửa xong bấm Đăng camp lại ("Đã duyệt"). Lý do: ${why}` };
   }
-  if (v?.status === "PUBLISH_FAILED") return { ...base, outcome: "FAILED", detail: `Đăng hỏng giữa chừng: ${why} Xem sổ ghi Facebook của lô (Lịch sử lô → Đăng lẻ) — chiến dịch đã tạo vẫn TẮT, không đồng nào chảy.` };
+  if (v?.status === "PUBLISH_FAILED") return { ...base, outcome: "FAILED", detail: `Đăng hỏng giữa chừng: ${why} Xem sổ ghi Facebook của lô (③ Hàng đợi & Đăng → Camp đã đăng gần đây) — chiến dịch đã tạo vẫn TẮT, không đồng nào chảy.` };
   return { ...base, outcome: "PENDING", detail: `Chưa đăng xong: ${why} Lượt vòng mẫu (10 phút / lần) đi tiếp tới giờ chạy.` };
+}
+
+/** Câu lỗi mới nhất (FAILED) trong sổ ghi Facebook của một lô — `null` nếu chưa có. */
+async function lastFailureOf(db: Db, batchId: string): Promise<string | null> {
+  const fa = schema.creativeFbActions;
+  const [r] = await db
+    .select({ detail: fa.detail })
+    .from(fa)
+    .where(and(eq(fa.batchId, batchId), eq(fa.outcome, "FAILED")))
+    .orderBy(desc(fa.createdAt))
+    .limit(1);
+  return r?.detail || null;
+}
+
+/**
+ * TRẢ ẢNH VỀ HÀNG ĐỢI khi lượt đăng hỏng mà trên Facebook CHƯA có gì tiêu được tiền (chưa chiến dịch, chưa nhóm, chưa mẩu,
+ * không dấu "đang gửi") — ảnh đã tải lên / bài đã tạo trong tài khoản quảng cáo không chạy, không tốn đồng nào. Mẫu đi
+ * `PUBLISH_FAILED` (hoặc `REJECTED` nếu chưa gửi gì), lô `FAILED` có lý do, ảnh về `APPROVED` + vào hàng đợi (giữ mốc lưu
+ * cũ nếu có). Điều kiện nằm TRONG câu UPDATE: lượt vòng mẫu vừa tạo chiến dịch / nhóm thì không gạt gì. Trả `true` nếu đã trả về.
+ */
+async function requeueIfNothingSpendable(db: Db, imageId: string, variantId: string, batchId: string | null, why: string): Promise<boolean> {
+  const V = schema.creativeVariants;
+  const g = schema.creativeManualGenImages;
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(V)
+      .set({ status: sql`case when ${V.status} = 'GENERATED' then 'REJECTED' else 'PUBLISH_FAILED' end`, genError: `Đăng camp chưa được: ${why}`.slice(0, 1000), updatedAt: new Date() })
+      .where(and(eq(V.id, variantId), inArray(V.status, ["GENERATED", "PUBLISH_FAILED", "REJECTED"]), eq(V.fbPendingStep, ""), isNull(V.fbCampaignId), isNull(V.fbAdsetId), isNull(V.fbAdId)))
+      .returning({ id: V.id });
+    if (rows.length === 0) return false;
+    if (batchId) await tx.update(schema.creativeBatches).set({ status: "FAILED", error: `Đăng camp chưa được: ${why}`.slice(0, 2000), updatedAt: new Date() }).where(and(eq(schema.creativeBatches.id, batchId), inArray(schema.creativeBatches.status, ["APPROVED", "FAILED", "PUBLISHED"])));
+    const back = await tx
+      .update(g)
+      .set({ status: "APPROVED", variantId: null, queuedAt: sql`coalesce(${g.queuedAt}, now())`, updatedAt: new Date() })
+      .where(and(eq(g.id, imageId), eq(g.status, "PROMOTED"), eq(g.variantId, variantId)))
+      .returning({ id: g.id });
+    return back.length > 0;
+  });
+}
+
+export type RequeueResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * NÚT "TRẢ VỀ HÀNG ĐỢI" cho ảnh đã bấm đăng mà hỏng (26/09/2026: hai ảnh kẹt vì ứng dụng Facebook còn ở chế độ phát triển).
+ * Chỉ khi mẫu của ảnh đăng HỎNG / bị gạt và trên Facebook chưa có chiến dịch / nhóm / mẩu nào — xem `requeueIfNothingSpendable`.
+ */
+export async function requeueFailedManualGenImage(db: Db, imageId: string): Promise<RequeueResult> {
+  const g = schema.creativeManualGenImages;
+  const V = schema.creativeVariants;
+  const [r] = await db.select({ img: g, v: V }).from(g).leftJoin(V, eq(V.id, g.variantId)).where(eq(g.id, imageId)).limit(1);
+  if (!r) return { ok: false, error: "Không tìm thấy ảnh." };
+  if (r.img.status !== "PROMOTED" || !r.v) return { ok: false, error: "Ảnh không ở trạng thái đã bấm đăng." };
+  if (r.v.status !== "PUBLISH_FAILED" && r.v.status !== "REJECTED") return { ok: false, error: "Bài của ảnh này không hỏng — đang chạy / đã chạy thì xem ở ④ Đang chạy." };
+  if (r.v.fbCampaignId || r.v.fbAdsetId || r.v.fbAdId || r.v.fbPendingStep) return { ok: false, error: "Trên Facebook đã có chiến dịch / nhóm của bài này (đang TẮT) — tìm theo tên trên Ads Manager để xoá tay, không trả ảnh về để tránh đăng trùng." };
+  const why = (await lastFailureOf(db, r.v.batchId)) ?? "lượt đăng trước hỏng";
+  const ok = await requeueIfNothingSpendable(db, imageId, r.v.id, null, why);
+  return ok ? { ok: true } : { ok: false, error: "Ảnh vừa đổi trạng thái — tải lại để xem." };
 }

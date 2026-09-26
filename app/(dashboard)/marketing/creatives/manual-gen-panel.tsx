@@ -185,7 +185,7 @@ function RunBlock({ run, canEdit, ctx }: { run: ManualGenRunCard; canEdit: boole
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
           Ảnh tải lên:
           {run.uploadImageIds.map((id, i) => (
-            <VariantImage key={id} imageId={id} available alt={`Ảnh tải lên #${i + 1}`} className="size-9 rounded" iconClassName="size-3" />
+            <VariantImage key={id} imageId={id} available alt={`Ảnh tải lên #${i + 1}`} className="size-9 rounded" iconClassName="size-3" zoomable />
           ))}
         </div>
       ) : null}

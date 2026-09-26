@@ -9,7 +9,7 @@ import { imageSpendToday, manualGenSpendToday } from "@/lib/creative/generate";
 import { storeCreativeImage } from "@/lib/creative/images";
 import { runCreativeLoopTick } from "@/lib/creative/loop";
 import { manualTargetDay } from "@/lib/creative/manual";
-import { addUploadedDraft, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
+import { addUploadedDraft, requeueFailedManualGenImage, drawManualGen, instantConfig, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, saveManualGenDraft, startManualGen, unqueueManualGenDraft } from "@/lib/creative/manual-gen";
 import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, genderPart, geoPart, refreshNamingTemplate, saveVariantNamesCore, type NamingContext } from "@/lib/creative/naming";
 import { batchApprovalContent, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
 import { MESSENGER_DOC_LINK, buildObjectStorySpec } from "@/lib/creative/story-spec";
@@ -19,7 +19,8 @@ import { listRecentBatches } from "@/lib/queries/creative-loop";
 import { listManualGenRuns, listPublishQueue, listReviewDays, loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
 import { batchWindow } from "@/lib/creative/schedule";
 import { applyVariantSelectionCore, planSelection } from "@/lib/creative/selection";
-import { testCampaignFields, type TemplateAd } from "@/lib/integrations/facebook/ads-write";
+import { facebookErrorText, testCampaignFields, type TemplateAd } from "@/lib/integrations/facebook/ads-write";
+import { IntegrationError, loiNghiepVu } from "@/lib/integrations/http";
 import type { ImageEditClient, ImageEditInputImage } from "@/lib/integrations/openai/images";
 
 /**
@@ -157,6 +158,14 @@ export function testCreativeManualGenPure() {
   const khuHoi: CampaignSetup = { ...goc, geo: [{ key: "1", name: "A", type: "city" }], ageMin: 20, gender: "MALE" };
   assert.deepEqual(parseCampaignSetup(JSON.parse(JSON.stringify(khuHoi))), khuHoi, "setup đi qua JSON (lô / hàng đợi) đọc lại nguyên vẹn");
   assert.equal(parseCampaignSetup({ adAccountId: "1" }), null, "setup hỏng ⇒ null (đăng như mẫu)");
+
+  // ── LỖI FACEBOOK (thuần) — đúng phong bì production trả về 26/09/2026 ──
+  const loiFb = { error: { message: "Invalid parameter", type: "OAuthException", code: 100, error_subcode: 1885183, error_user_title: "Bài viết chứa nội dung quảng cáo do ứng dụng đang ở chế độ phát triển tạo", error_user_msg: "Ứng dụng phải ở chế độ công khai." } };
+  const doc = loiNghiepVu(loiFb, JSON.stringify(loiFb));
+  assert.equal(doc.message, "Bài viết chứa nội dung quảng cáo do ứng dụng đang ở chế độ phát triển tạo — Ứng dụng phải ở chế độ công khai. (mã 100/1885183)", "đọc câu cho người dùng của Facebook, KHÔNG cắt 200 ký tự JSON thô");
+  const goiY = facebookErrorText(new IntegrationError("Facebook: HTTP 400 x", 400, false, loiFb));
+  assert.ok(goiY.includes("LIVE") && goiY.includes("developers.facebook.com"), "mã 1885183 ⇒ chỉ đúng việc phải làm (bật App Mode Live)");
+  assert.equal(facebookErrorText(new IntegrationError("Facebook: khác", 400, false, { error: { error_subcode: 99 } })), "Facebook: khác", "mã lạ ⇒ không bịa chỉ dẫn");
 
   // ── Bộ lọc ngày của tab "Duyệt mẫu" (thuần): vắng / hỏng / ngày không có trên lịch ⇒ HÔM NAY ──
   assert.equal(parseReviewDay(null, "2031-05-05"), "2031-05-05");
@@ -474,6 +483,8 @@ export async function testCreativeManualGenDb(db: Db) {
     let n = 0;
     const tplPub: TemplateAd = { ...tplAd, adset: { ...tplAd.adset, promotedObject: { page_id: `${P}page` } }, objectStorySpec: { page_id: `${P}page`, link_data: { link: "https://m.me/x", call_to_action: { type: "MESSAGE_PAGE" } } } };
     let templateFails = false;
+    /** Tạo bài quảng cáo hỏng đúng như production 26/09/2026 (ứng dụng Facebook ở chế độ phát triển). */
+    let creativeFails = false;
     /** Lượt đọc mẩu mẫu THỨ MẤY (đếm từ 1) sẽ hỏng — để dựng ca "đọc trước được, lượt đăng đọc lại thì hỏng". */
     let failReadNo = 0;
     let readNo = 0;
@@ -490,6 +501,10 @@ export async function testCreativeManualGenDb(db: Db) {
       },
       uploadAdImage: async () => (fbCalls.push("uploadAdImage"), `hash-${++n}`),
       createAdCreative: async (_a, i) => {
+        if (creativeFails) {
+          fbCalls.push("createAdCreative");
+          throw new IntegrationError("Facebook: HTTP 400 Bài viết chứa nội dung quảng cáo do ứng dụng đang ở chế độ phát triển tạo (mã 100/1885183)", 400, false, { error: { code: 100, error_subcode: 1885183 } });
+        }
         fbCalls.push("createAdCreative");
         specsSent.push(i.objectStorySpec);
         return { id: `cr-${++n}`, effectiveObjectStoryId: `post-${n}` };
@@ -684,6 +699,42 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.equal(v6.committedBudgetVnd, 150_000);
     const vuot = await publishManualGenImageInstant(db, { ...camInput(anh6.id, null), setup: { ...setup6, budgetVnd: 900_000 } }, cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(!vuot.ok, "ngân sách vượt trần ⇒ từ chối trước mọi lời gọi");
+
+    // (f7) ĐÚNG SỰ CỐ PRODUCTION 26/09/2026: ảnh tải lên được, TẠO BÀI bị Facebook từ chối (1885183) ⇒ chưa có chiến dịch / nhóm
+    //      nào ⇒ ảnh TỰ về hàng đợi, câu báo mang lý do THẬT + việc phải làm; bấm lại sau khi sửa ⇒ đăng được.
+    const s7 = await startManualGen(db, { productPhotoSourceId: `${P}photo`, ownAdSourceId: null, idea: "", count: 1 }, cfgKhongTran, actor);
+    await drawManualGen(db, { genId: s7.ok ? s7.genId : "", imageClient });
+    const [anh7] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.genId, s7.ok ? s7.genId : ""));
+    await reviewManualGenImage(db, { imageId: anh7.id, decision: "APPROVE", reason: "" }, actor, now, { caption });
+    creativeFails = true;
+    fbCalls.length = 0;
+    const c7 = await publishManualGenImageInstant(db, camInput(anh7.id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    creativeFails = false;
+    assert.ok(c7.ok && c7.outcome === "FAILED", c7.ok ? c7.detail : c7.error);
+    if (c7.ok) instantIds.push(c7.batchId);
+    assert.ok(c7.ok && c7.detail.includes("chế độ phát triển") && c7.detail.includes("LIVE"), `câu báo mang lý do thật + việc phải làm (nhận: ${c7.ok ? c7.detail : ""})`);
+    assert.deepEqual(fbCalls, ["readTemplateAd", "readTemplateAd", "uploadAdImage", "createAdCreative"], "dừng ở bước tạo bài — không chiến dịch, không nhóm");
+    const [anh7b] = await db.select().from(schema.creativeManualGenImages).where(eq(schema.creativeManualGenImages.id, anh7.id));
+    assert.equal(anh7b.status, "APPROVED", "ảnh tự về 'Đã duyệt'");
+    assert.ok(await trongHang(anh7.id), "và nằm ở hàng đợi để đăng lại");
+    const [v7] = await db.select().from(schema.creativeVariants).where(eq(schema.creativeVariants.id, c7.ok ? c7.variantId : ""));
+    assert.equal(v7.status, "PUBLISH_FAILED");
+    // Ảnh KẸT từ trước bản vá (PROMOTED + mẫu hỏng, chưa có chiến dịch) ⇒ nút "Trả về hàng đợi".
+    await db.update(schema.creativeManualGenImages).set({ status: "PROMOTED", variantId: v7.id, queuedAt: null }).where(eq(schema.creativeManualGenImages.id, anh7.id));
+    const ket = (await listManualGenRuns(db, 50, 25_500, null)).flatMap((r) => r.images).find((x) => x.id === anh7.id);
+    assert.deepEqual(ket?.publishFailure, { batchId: v7.batchId, canRequeue: true }, "thẻ ảnh biết bài hỏng và trả về được");
+    assert.ok((await requeueFailedManualGenImage(db, anh7.id)).ok);
+    assert.ok(await trongHang(anh7.id), "ảnh kẹt về lại hàng đợi");
+    // Đã có chiến dịch trên Facebook ⇒ KHÔNG trả về (tránh đăng trùng).
+    await db.update(schema.creativeManualGenImages).set({ status: "PROMOTED", variantId: v7.id }).where(eq(schema.creativeManualGenImages.id, anh7.id));
+    await db.update(schema.creativeVariants).set({ fbCampaignId: "camp-da-tao" }).where(eq(schema.creativeVariants.id, v7.id));
+    const coCamp = await requeueFailedManualGenImage(db, anh7.id);
+    assert.ok(!coCamp.ok && coCamp.error.includes("Ads Manager"), "đã có chiến dịch ⇒ từ chối, chỉ người xoá tay");
+    await db.update(schema.creativeVariants).set({ fbCampaignId: null }).where(eq(schema.creativeVariants.id, v7.id));
+    assert.ok((await requeueFailedManualGenImage(db, anh7.id)).ok);
+    const c7b = await publishManualGenImageInstant(db, camInput(anh7.id, null), cfgOf(), actor, new Date(), { writer: fbGia, env: ON, killSwitch: khongKeo });
+    assert.ok(c7b.ok && c7b.outcome === "LIVE", "sửa xong bấm lại ⇒ đăng được");
+    if (c7b.ok) instantIds.push(c7b.batchId);
 
     // (g2) MẪU TỰ LÀM ⇒ vào THẲNG hàng đợi (lô hằng ngày đã bỏ).
     const up = await addUploadedDraft(db, { productId: `${P}prod`, genes: parseGenes(anh6.genes) as NonNullable<ReturnType<typeof parseGenes>>, headline: "Tự làm", primaryText: "Ảnh tôi tự vẽ", note: "vẽ trên ChatGPT", imageBytes: fakeJpeg(9_101) }, actor, new Date());
