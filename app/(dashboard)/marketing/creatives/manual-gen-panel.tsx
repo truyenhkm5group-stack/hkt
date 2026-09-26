@@ -5,7 +5,7 @@ import { EmptyState, SectionCard } from "@/components/ui-bits";
 import { getDb } from "@/db";
 import { MANUAL_GEN_IMAGE_STATUSES, MANUAL_GEN_IMAGE_STATUS_LABEL, MANUAL_GEN_KIND_LABEL, MANUAL_GEN_RUN } from "@/lib/constants/creative-loop";
 import { manualGenPreselect } from "@/lib/constants/stock-feedback";
-import { formatNumber, formatVND, vnShortStamp } from "@/lib/format";
+import { formatDate, formatNumber, formatVND, vnShortStamp } from "@/lib/format";
 import { loadManualGenPanel, type ManualGenRunCard } from "@/lib/queries/creative-manual-gen";
 
 /**
@@ -18,10 +18,10 @@ import { loadManualGenPanel, type ManualGenRunCard } from "@/lib/queries/creativ
  * (lên Facebook ngay / hẹn giờ). Gen tay KHÔNG còn trần ảnh / ngày: màn hình in tiền ước tính trước khi bấm,
  * tiền thật từng ảnh, từng lượt và cả ngày.
  */
-export async function ManualGenPanel({ canEdit, canPublish = false, preselectProductId = null }: { canEdit: boolean; canPublish?: boolean; preselectProductId?: string | null }) {
+export async function ManualGenPanel({ canEdit, canPublish = false, preselectProductId = null, day }: { canEdit: boolean; canPublish?: boolean; preselectProductId?: string | null; day?: string }) {
   const db = await getDb();
   const now = new Date();
-  const p = await loadManualGenPanel(db, now);
+  const p = await loadManualGenPanel(db, now, day);
   // `?product=` chỉ CHỌN SẴN ô ảnh gốc — không vẽ gì cho tới khi người bấm Gen (vẽ ảnh tốn tiền).
   const chon = manualGenPreselect(p.sources, preselectProductId);
   const pr = p.pricing;
@@ -31,7 +31,7 @@ export async function ManualGenPanel({ canEdit, canPublish = false, preselectPro
         <span className="flex flex-wrap items-center gap-2">
           <Wand2 className="size-4" /> Gen ảnh bằng tay <ManualGenAutoRefresh active={p.drawing} />
           <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground" title={pr.todayUnpriced ? `${pr.todayUnpriced} ảnh đã vẽ hôm nay không có giá từ máy vẽ — tổng CHƯA gồm phần ấy.` : undefined}>
-            Hôm nay đã chi <b className="numeric text-foreground">{formatVND(pr.todayImages ? pr.todayVnd : 0)}</b> · <span className="numeric">{formatNumber(pr.todayImages)}</span> ảnh
+            {p.isToday ? "Hôm nay" : `Ngày ${formatDate(p.day)}`} đã chi <b className="numeric text-foreground">{formatVND(pr.todayImages ? pr.todayVnd : 0)}</b> · <span className="numeric">{formatNumber(pr.todayImages)}</span> ảnh
             {pr.todayUnpriced ? <span className="text-warning"> ({pr.todayUnpriced} ảnh chưa có giá)</span> : null}
           </span>
         </span>
@@ -48,9 +48,15 @@ export async function ManualGenPanel({ canEdit, canPublish = false, preselectPro
         {canEdit && chon.note ? <p className="rounded-md border border-dashed px-2.5 py-1.5 text-[12px] text-muted-foreground">{chon.note}</p> : null}
         {canEdit ? <ManualGenForm key={chon.photoId} initialKind={preselectProductId ? "MOCKUP" : "DESIGN"} inspirations={p.inspirations} sources={p.sources} unitVnd={pr.unitVnd} unitUsd={pr.unitUsd} initialPhotoId={chon.photoId} /> : null}
         <div className="space-y-3">
-          <p className="text-[12.5px] font-semibold">Kết quả gen tay</p>
+          <p className="text-[12.5px] font-semibold">
+            Kết quả gen tay — {p.isToday ? "hôm nay" : `ngày ${formatDate(p.day)}`}
+            {p.runs.length ? <span className="ml-1 font-normal text-muted-foreground">({p.runs.length} lượt, mới nhất trước)</span> : null}
+          </p>
           {p.runs.length === 0 ? (
-            <EmptyState title="Chưa có lượt gen nào" description="Chọn các mẫu bán tốt làm cảm hứng, gõ ý tưởng (tuỳ chọn) rồi bấm Gen thiết kế mới." />
+            <EmptyState
+              title={p.isToday ? "Hôm nay chưa có lượt gen nào" : `Không có lượt gen nào ngày ${formatDate(p.day)}`}
+              description={p.isToday ? "Chọn các mẫu bán tốt làm cảm hứng, gõ ý tưởng (tuỳ chọn) rồi bấm Gen thiết kế mới. Kết quả các ngày trước: chọn ngày ở thanh “Kết quả ngày”." : "Chọn ngày khác ở thanh “Kết quả ngày”, hoặc bấm Hôm nay."}
+            />
           ) : (
             p.runs.map((run) => (
               <div key={run.id} className="space-y-2 rounded-lg border p-2.5">

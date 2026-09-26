@@ -9,12 +9,13 @@ import { CreativeTabs } from "@/app/(dashboard)/marketing/creatives/tabs";
 import { PageHeader } from "@/components/page-header";
 import { getDb } from "@/db";
 import { can, requirePermission } from "@/lib/auth/session";
-import { CREATIVE_HARD_LIMITS } from "@/lib/constants/creative-loop";
+import { CREATIVE_HARD_LIMITS, REVIEW_DAY, parseReviewDay } from "@/lib/constants/creative-loop";
+import { vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { formatNumber, formatVND } from "@/lib/format";
 import { getPendingBatch } from "@/lib/queries/creative-loop";
 import { param, parseListParams, resolvePeriod, type SearchParams } from "@/lib/search-params";
 
-export const metadata = { title: "Vòng mẫu quảng cáo" };
+export const metadata = { title: "Thư viện Media" };
 
 /** Tab đã có màn hình. */
 const TABS = new Set(["duyet", "thiet-ke", "dang-chay", "thu-vien", "hoc", "nguon", "cau-hinh"]);
@@ -33,12 +34,15 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
   const defaultTab = pendingApproval && !SOURCE_KEYS.some((k) => param(raw, k)) ? "duyet" : "nguon";
   const tab = TABS.has(tabRaw) ? tabRaw : defaultTab;
   const L = CREATIVE_HARD_LIMITS;
+  // Tab Duyệt mẫu lọc kết quả theo ngày (giờ VN): mặc định hôm nay, `?ngay=` chọn ngày khác.
+  const today = vnDay(new Date());
+  const reviewDay = parseReviewDay(param(raw, REVIEW_DAY.param), today);
 
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Marketing"
-        title="Vòng mẫu quảng cáo"
+        title="Thư viện Media"
         description={`Ảnh đầu vào → máy dựng lô → người duyệt MỘT lần → chạy test → chấm → học. Trần: ${formatNumber(L.maxBatchSize)} mẫu × ${formatVND(L.maxBudgetPerVariantVnd)} mỗi ngày.`}
         hint={
           <>
@@ -52,7 +56,7 @@ export default async function CreativesPage({ searchParams }: { searchParams: Pr
       <CreativeTabs active={tab} defaultTab={defaultTab} pendingApproval={pendingApproval} />
 
       {tab === "duyet" ? (
-        <ApproveTab pending={pending} batchId={param(raw, "lo") || null} canApprove={can(user, "expenses:write")} canEdit={can(user, "ideas:write")} preselectProductId={param(raw, "product") || null} />
+        <ApproveTab pending={pending} batchId={param(raw, "lo") || null} canApprove={can(user, "expenses:write")} canEdit={can(user, "ideas:write")} preselectProductId={param(raw, "product") || null} day={reviewDay} today={today} />
       ) : tab === "thiet-ke" ? (
         <DesignTab canEdit={can(user, "ideas:write")} canCreateTopic={can(user, "production:write")} />
       ) : tab === "dang-chay" ? (

@@ -1495,6 +1495,22 @@ export const CREATIVE_BATCH_KINDS = ["LOOP", "INSTANT"] as const;
 export type CreativeBatchKind = (typeof CREATIVE_BATCH_KINDS)[number];
 
 /**
+ * LỌC THEO NGÀY ở tab "Duyệt mẫu" (chủ shop 26/09/2026: "chỉ hiển thị kết quả ngày hôm nay, các ngày trước tạm ẩn,
+ * lọc ngày nào hiển thị kết quả ngày đó"). Tham số URL `?ngay=YYYY-MM-DD` (giờ Việt Nam); vắng / hỏng ⇒ HÔM NAY.
+ * Lọc áp cho "Kết quả gen tay" (ngày TẠO lượt) và "Lịch sử lô" (NGÀY CHẠY của lô). Lô chờ duyệt và "Mẫu tự làm"
+ * là việc phải làm, không phải kết quả — luôn hiện. `stripDays`: dải các ngày gần nhất CÓ kết quả, mới → cũ.
+ */
+export const REVIEW_DAY = { param: "ngay", stripDays: 14 } as const;
+
+/** `?ngay=` ⇒ ngày hợp lệ `YYYY-MM-DD` (có thật trên lịch), không thì `today`. Hàm THUẦN. */
+export function parseReviewDay(raw: string | null | undefined, today: string): string {
+  const s = (raw ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return today;
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === s ? s : today;
+}
+
+/**
  * Kiểu một lượt gen tay (migration 0143). `DESIGN` là mặc định của khối gen tay (chủ shop 25/09/2026: "gen
  * các mẫu MỚI HOÀN TOÀN từ các mẫu đã win / có chỉ số tốt, không phải mockup mới cho mẫu cũ"); `MOCKUP` còn
  * lại cho đề xuất đẩy tồn — xả hàng đang có cần ảnh mới của CHÍNH mẫu ấy.

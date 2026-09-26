@@ -795,10 +795,18 @@ export async function getBatchDetail(db: Db, batchId: string, now: Date = new Da
   return { ...base, judged, actions };
 }
 
-/** Các lô gần nhất (mới → cũ) kèm số mẫu theo trạng thái. */
-export async function listRecentBatches(db: Db, limit = 14): Promise<BatchSummary[]> {
+/**
+ * Các lô gần nhất (mới → cũ) kèm số mẫu theo trạng thái. `day` (tuỳ chọn) ⇒ chỉ các lô có NGÀY CHẠY là ngày ấy
+ * (lô hằng ngày + các bài "Đăng camp" chạy ngày ấy) — bộ lọc ngày của tab "Duyệt mẫu".
+ */
+export async function listRecentBatches(db: Db, limit = 14, day: string | null = null): Promise<BatchSummary[]> {
   const n = Math.max(1, Math.min(200, Math.round(limit)));
-  const rows = await db.select().from(schema.creativeBatches).orderBy(desc(schema.creativeBatches.batchDay), desc(schema.creativeBatches.startAt)).limit(n);
+  const rows = await db
+    .select()
+    .from(schema.creativeBatches)
+    .where(day ? eq(schema.creativeBatches.batchDay, day) : undefined)
+    .orderBy(desc(schema.creativeBatches.batchDay), desc(schema.creativeBatches.startAt))
+    .limit(n);
   const counts = await variantCountsByBatch(
     db,
     rows.map((r) => r.id),

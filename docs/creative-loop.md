@@ -607,6 +607,15 @@ kết quả; ấn Đăng camp là camp được đăng ngay, và đăng camp đ�
   gửi được gì lên Facebook ⇒ ảnh về "Đã duyệt" (bấm lại được), lô `FAILED`; đã gửi một phần ⇒ giữ nguyên, không tự thử lại
   lời gọi tạo (tính chất 4). Tên theo khuôn lấy số thứ tự theo NGÀY chạy trên mọi lô (`nextNameSeqOnDay`). Lịch sử lô gắn nhãn "Đăng lẻ".
 
+### Tên màn hình + lọc theo ngày ở tab Duyệt mẫu (chủ shop 26/09/2026, lần hai)
+
+- Màn hình đổi tên **"Thư viện Media"** (menu + tiêu đề; trước là "Vòng mẫu QC" / "Vòng mẫu quảng cáo"); tab "Duyệt lô" đổi tên
+  **"Duyệt mẫu"**. Đường dẫn `/marketing/creatives` và khoá tab (`?tab=duyet`) GIỮ NGUYÊN — link cũ vẫn mở đúng.
+- Tab Duyệt mẫu mặc định chỉ hiện kết quả **HÔM NAY** (giờ VN); `?ngay=YYYY-MM-DD` chọn ngày khác (`parseReviewDay` — hỏng /
+  không có trên lịch ⇒ hôm nay). Lọc áp cho "Kết quả gen tay" (ngày TẠO lượt, mới → cũ) và "Lịch sử lô" (NGÀY CHẠY). Lô chờ duyệt
+  và "Mẫu tự làm" là việc phải làm nên luôn hiện. Thanh lọc có lùi / tiến một ngày, ô chọn ngày, "Hôm nay", và dải các ngày gần
+  nhất CÓ kết quả (`listReviewDays`, mới → cũ, hôm nay luôn có mặt).
+
 ## 6. Đã dựng gì, ở đâu
 
 | Phần | Tệp | Việc |
