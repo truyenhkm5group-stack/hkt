@@ -310,8 +310,14 @@ const ERROR_MARKER = "Có lỗi khi tải trang";
  *
  * Hai dấu hiệu bổ cho nhau: lỗi trong nhánh có Suspense thì hiện thành chữ, lỗi ở thân trang thì
  * chỉ còn mã. Thiếu một trong hai là còn một nửa cửa mở.
+ *
+ * GIÁ TRỊ PHẢI TOÀN CHỮ SỐ, TỚI TẬN DẤU NHÁY ĐÓNG (26/09/2026). Mã lỗi Next là một số băm thập phân.
+ * Bản cũ chỉ đòi "3 chữ số ĐẦU", nên `/audit` đỏ ba lượt liên tiếp mà trang vẫn chạy: nhật ký duyệt lô
+ * quảng cáo (`lib/actions/creative.ts`, `after.digest`) mang một chuỗi băm HEX bắt đầu bằng `578…`, và
+ * trang nhật ký in nguyên JSON đó vào HTML. Log máy chủ không có dòng lỗi nào — lỗi RSC thật thì Next
+ * luôn ghi. Hex 64 ký tự mà toàn chữ số thì xác suất ~1e-13, nên đòi dấu nháy đóng là đủ tách hai loại.
  */
-const DIGEST_MARKER = /\\?"digest\\?"\s*:\s*\\?"\d{3,}/;
+const DIGEST_MARKER = /\\?"digest\\?"\s*:\s*\\?"\d{3,}\\?"/;
 
 /**
  * ═══════════ PHÂN LOẠI KẾT QUẢ — MỘT CHỮ "LỖI" KHÔNG ĐỦ ═══════════

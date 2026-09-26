@@ -106,6 +106,9 @@ export function testSmokeCoverage() {
     !bieuThuc.test('<p>Bản tin digest tháng 9</p><span>digest: xem báo cáo</span>'),
     "bộ dò KHÔNG được báo nhầm chữ 'digest' bình thường trong nội dung trang",
   );
+  // Báo động giả thật (26/09/2026): nhật ký duyệt lô quảng cáo in chuỗi băm HEX bắt đầu bằng chữ số.
+  assert.ok(!bieuThuc.test('{"status":"APPROVED","digest":"578f3c9a1e0b","variants":3}'), "chuỗi băm hex bắt đầu bằng chữ số KHÔNG phải mã lỗi Next");
+  assert.ok(!bieuThuc.test('self.__next_f.push([1,"{\\"digest\\":\\"578f3c9a1e0b\\"}"])'), "kể cả khi nằm trong gói RSC có thoát nháy");
   const errorTsx = fs.readFileSync(path.join(goc, "app/(dashboard)/error.tsx"), "utf8");
   const nhan = /const ERROR_MARKER = "([^"]+)"/.exec(smoke)?.[1] ?? "";
   assert.ok(nhan.length > 5, "ERROR_MARKER phải là một chuỗi thật");
