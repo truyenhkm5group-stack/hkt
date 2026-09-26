@@ -753,5 +753,53 @@ console.log("OK 18: doi chieu dia chi don POS -> bat don chon nham xa, bo qua tr
   console.log("OK 23: bam khach chua chot -> phan loai bang code, chan gia sai/chot don/trung tin, nho so lan bam");
 }
 
+// ---- 24: ban tom tat chot don KHONG duoc tu chon mau khi khach chua chon
+{
+  // Su co 2026-09-10 (khach Hong Nguyen, page Hai An Fashion): bot hoi "Do Do hay Xanh Reu?", khach khong tra
+  // loi mau ma gui luon can nang + dia chi + SDT, bot chot "Dam Q003 mau Xanh Reu".
+  const { isOrderSummaryReply: isOrderSummaryReplyFn } = await import("../src/bot.js");
+  const prevProducts = catalog.products;
+  catalog.setProducts([{
+    id: "p3", code: "Q003", name: "Đầm Q003", note: "", attributes: { "Màu": ["Đỏ Đô", "Xanh Rêu"], Size: ["XL", "2XL"] }, price: { min: 499000, max: 499000 },
+    images: [], variations: [
+      { id: "v3a", sku: "Q003DD2XL", fields: { "Màu": "Đỏ Đô", Size: "2XL" }, price: 499000, stock: 1, available: true, images: [] },
+      { id: "v3b", sku: "Q003XR2XL", fields: { "Màu": "Xanh Rêu", Size: "2XL" }, price: 499000, stock: 1, available: true, images: [] },
+    ],
+  }]);
+  const shop = (t) => ({ from: { id: "PAGE1" }, message: t });
+  const khach = (t) => ({ from: { id: "KHACH" }, message: t });
+  const tomTat = "Dạ em chốt đơn cho chị ạ:\n• Đầm Q003 màu Xanh Rêu size 2XL x 1\n• Tổng: 499.000đ (miễn phí ship)\n• Người nhận: Hồng Nguyễn – 0905494063\n• Địa chỉ: Nông sơn 1, Điện Phước, Điện Bàn, Tỉnh Quảng Nam";
+  const hoiThoai = [
+    shop("Dạ với 77kg, chị mặc size 2XL là vừa đẹp ạ. Chị muốn lấy màu Đỏ Đô hay Xanh Rêu ạ?"),
+    khach("Có cho mặt thử ko shop"),
+    shop("Dạ có ạ, mình được kiểm tra hàng thoải mái trước khi thanh toán nha chị. Chị chốt đơn luôn không ạ?"),
+    khach("Cân nặng 77 kg\nChiều cao 1m 68\nNông sơn 1 điện Phước điện bàn tỉnh quảng nam\nSĐT: 0905494063"),
+  ];
+  const loi = bot.unconfirmedColorInSummary(tomTat, "PAGE1", hoiThoai);
+  assert.ok(loi, "khach chua chon mau ma bot tu chot Xanh Reu -> phai chan");
+  assert.equal(loi.color, "Xanh Rêu");
+  assert.deepEqual(loi.colors, ["Đỏ Đô", "Xanh Rêu"]);
+  // Tin cua SHOP nhac ca hai mau khong duoc tinh la khach da chon
+  assert.ok(bot.unconfirmedColorInSummary(tomTat, "PAGE1", hoiThoai.slice(0, 1)), "chi shop nhac mau thi van la chua chon");
+  // Khach noi day du / noi tu rieng cua mau / anh khach gui nhan dien ra mau -> hop le
+  assert.equal(bot.unconfirmedColorInSummary(tomTat, "PAGE1", [...hoiThoai, khach("lấy màu xanh rêu nha")]), null);
+  assert.equal(bot.unconfirmedColorInSummary(tomTat, "PAGE1", [...hoiThoai, khach("xanh nhé shop")]), null, "\"xanh\" la tu rieng cua Xanh Reu");
+  assert.equal(bot.unconfirmedColorInSummary(tomTat, "PAGE1", [...hoiThoai, khach("XANH REU")]), null, "khach go khong dau van nhan");
+  assert.equal(bot.unconfirmedColorInSummary(tomTat, "PAGE1", hoiThoai, "Xanh Rêu"), null, "anh khach gui nhan dien ra Xanh Reu");
+  // Khach chon mau KHAC mau bot chot -> van chan
+  assert.ok(bot.unconfirmedColorInSummary(tomTat, "PAGE1", [...hoiThoai, khach("đỏ đô nhé")]), "khach chon Do Do ma bot chot Xanh Reu -> chan");
+  // "do" (khong dau, nghia khac) khong duoc hieu la "Do Do"
+  const tomTatDo = tomTat.replace("Xanh Rêu", "Đỏ Đô");
+  assert.ok(bot.unconfirmedColorInSummary(tomTatDo, "PAGE1", [...hoiThoai, khach("do shop tu van nhe")]), "\"do\" khong phai mau Do Do");
+  // Khong phai ban tom tat chot don -> khong dung vao
+  assert.equal(bot.unconfirmedColorInSummary("Dạ mẫu Q003 có màu Đỏ Đô và Xanh Rêu ạ, chị lấy màu nào ạ?", "PAGE1", hoiThoai), null);
+  // Cau hoi mau mac dinh: khong phai tom tat chot don va neu du cac mau
+  const hoi = bot.askColorReply("PAGE1", loi.colors);
+  assert.match(hoi, /Đỏ Đô hay Xanh Rêu/);
+  assert.equal(isOrderSummaryReplyFn(hoi, false), false, "cau hoi mau khong duoc bi coi la ban chot don (khong ghi POS)");
+  catalog.setProducts(prevProducts);
+  console.log("OK 24: ban chot don khong duoc tu chon mau khi khach chua chon (mau co >= 2 mau)");
+}
+
 console.log("\nTAT CA TEST PASS");
 process.exit(0);
