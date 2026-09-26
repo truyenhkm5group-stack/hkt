@@ -7,7 +7,7 @@ import { EXPENSE_CATEGORY_LABEL } from "@/lib/constants/expenses";
 import { lineUnitCost } from "@/lib/queries/cogs";
 import { variantLastCostSubquery } from "@/lib/queries/stock";
 import { marketerLabel, marketerNames as employeeNames } from "@/lib/queries/order-marketer";
-import { ORDER_CAMPAIGN_ID } from "@/lib/queries/ads-attribution-link";
+import { ORDER_AD_ID, ORDER_ADSET_ID, ORDER_CAMPAIGN_ID, orderAdCandidates, orderAdsetCandidates } from "@/lib/queries/ads-attribution-link";
 import { OPEN_OUTCOMES_SQL } from "@/lib/constants/truth";
 import { ELIGIBLE_SENT_SQL } from "@/lib/constants/returns";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
@@ -114,8 +114,15 @@ export function dimensionFilter(f: MarketingFilters): SQL | undefined {
   if (f.campaignId) {
     conds.push(f.campaignId === MARKETING_UNATTRIBUTED ? sql`${ORDER_CAMPAIGN_ID} is null` : sql`${ORDER_CAMPAIGN_ID} = ${f.campaignId}`);
   }
-  if (f.adsetId) conds.push(sql`exists (select 1 from fb_ads fa where fa.id = ${o.adId} and fa.adset_id = ${f.adsetId})`);
-  if (f.adId) conds.push(sql`${o.adId} = ${f.adId}`);
+  /*
+    NHÓM / MẨU: đơn quy về bằng CHÍNH `ORDER_ADSET_ID` / `ORDER_AD_ID` của `/ads` (B2, 26/09/2026) — `ad_id`
+    Pancake gửi trước, không có thì bài viết của đơn, CHỈ khi bài ấy thuộc ĐÚNG MỘT nhóm / một mẩu. Trước
+    đó hai cấp này chỉ đi bằng `orders.ad_id`, nên cùng một mẩu `/ads` đếm N đơn còn trang này đếm ít hơn
+    ⇒ ROAS/CPO cấp mẩu ở hai trang lệch nhau trên cùng một số chi. Siêu tập `order*Candidates` chỉ thu hẹp
+    cho rẻ; biểu thức chung mới QUYẾT. Chiến dịch / mã hàng / marketer / fanpage / nguồn: KHÔNG đổi.
+  */
+  if (f.adsetId) conds.push(and(orderAdsetCandidates([f.adsetId]), sql`${ORDER_ADSET_ID} = ${f.adsetId}`) as SQL);
+  if (f.adId) conds.push(and(orderAdCandidates([f.adId]), sql`${ORDER_AD_ID} = ${f.adId}`) as SQL);
   if (f.source) conds.push(sql`${o.source} = ${f.source}`);
   // Mã hàng lọc ở cấp ĐƠN CÓ CHỨA mã; phần tiền thì phân bổ theo DÒNG (xem `productDayRows`).
   if (f.productId) {
@@ -1171,9 +1178,9 @@ function dimensionKeyExpr(dimension: MarketingDimension): SQL<string | null> {
     case "campaign":
       return sql<string | null>`${ORDER_CAMPAIGN_ID}`;
     case "adset":
-      return sql<string | null>`(select fa.adset_id from fb_ads fa where fa.id = ${o.adId})`;
+      return sql<string | null>`${ORDER_ADSET_ID}`;
     case "ad":
-      return sql<string | null>`(select fa.id from fb_ads fa where fa.id = ${o.adId})`;
+      return sql<string | null>`${ORDER_AD_ID}`;
     case "source":
       return sql<string | null>`nullif(${o.source}, '')`;
     case "product":
@@ -1285,11 +1292,13 @@ async function dimensionKeys(db: Db, period: Period, dimension: MarketingDimensi
     const rows = await db.select({ key: sql<string>`${o.source}`, total: rank }).from(o).where(scope).groupBy(sql`1`).orderBy(sql`2 desc`).limit(limit);
     return rows.filter((r) => r.key).map((r) => ({ key: r.key, label: r.key }));
   }
-  // adset / ad — khoá ĐƠN đi thẳng qua `fb_ads` bằng `ad_id` Pancake gửi (bộ lọc đơn của hai cấp này
-  // cũng vậy — `dimensionFilter`). Tiền của từng khoá đọc ở hạt mẩu (`adGrainSpendByDay`).
-  const col = dimension === "adset" ? sql`fa.adset_id` : sql`fa.id`;
+  // adset / ad — khoá ĐƠN là CHÍNH `ORDER_ADSET_ID` / `ORDER_AD_ID` (cùng `dimensionKeyExpr` + bộ lọc
+  // `dimensionFilter`, cùng `/ads`). Nhãn: mẩu lấy `fb_ads.name` của ĐÚNG mẩu đã quy về; nhóm giữ NGUYÊN nhãn cũ
+  // (tên mẩu mang `ad_id` của đơn — đổi nhãn nằm ngoài lượt B2). Tiền của từng khoá đọc ở hạt mẩu (`adGrainSpendByDay`).
+  const keyExpr = dimensionKeyExpr(dimension);
+  const labelExpr = sql<string>`max((select fa.name from fb_ads fa where fa.id = ${dimension === "ad" ? keyExpr : o.adId}))`;
   const rows = await db
-    .select({ key: sql<string | null>`(select ${col} from fb_ads fa where fa.id = ${o.adId})`, label: sql<string>`max((select fa.name from fb_ads fa where fa.id = ${o.adId}))`, total: rank })
+    .select({ key: sql<string | null>`${keyExpr}`, label: labelExpr, total: rank })
     .from(o)
     .where(scope)
     .groupBy(sql`1`)

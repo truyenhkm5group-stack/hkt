@@ -1,4 +1,4 @@
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { postKeySql } from "@/lib/queries/ads-identity-sql";
 import { getDb, schema } from "@/db";
 
@@ -117,6 +117,37 @@ export const ORDER_AD_ID = sql<string | null>`coalesce(
   nullif(${o.adId}, ''),
   (select p.ad_id from ${POST_TO_AD} p where p.post_id = ${ORDER_POST_KEY})
 )`;
+
+/**
+ * ───────────── THU HẸP TRƯỚC, QUY KẾT SAU (chỉ vì HIỆU NĂNG, không vì nghĩa) ─────────────
+ *
+ * `ORDER_AD_ID` / `ORDER_ADSET_ID` mang truy vấn con tương quan (bài viết → mẩu/nhóm). Tính chúng trên
+ * MỌI đơn trong kỳ để giữ lại đơn của vài mẩu là quét rộng. Hai hàm dưới là SIÊU TẬP rẻ của điều kiện
+ * thật: đơn mang `ad_id` thuộc tập đang xét, HOẶC đơn có bài viết là bài của một mẩu thuộc tập ấy. Mọi
+ * đơn mà biểu thức chung quy về tập ấy đều nằm trong siêu tập (vế 1 của biểu thức là `ad_id`, vế 2 chỉ
+ * trả nút mà bài viết thuộc về) — nên người gọi LUÔN phải kèm chính biểu thức chung để QUYẾT. Siêu tập
+ * một mình KHÔNG phải quy kết: nó nhận cả đơn bài nhiều mẩu lẫn đơn mang `ad_id` của mẩu khác.
+ *
+ * Dùng chung cho vòng mẫu (`variantMetrics`), MOQ thiết kế (`designMoqCounts`) và bộ lọc nhóm/mẩu của
+ * `/ads/daily` (`dimensionFilter`) — một bản, không chép.
+ */
+export function orderAdCandidates(adIds: readonly string[]): SQL {
+  if (adIds.length === 0) return sql`false`;
+  const list = sql.join(
+    adIds.map((a) => sql`${a}`),
+    sql`, `,
+  );
+  return sql`(${o.adId} in (${list}) or (${o.postId} is not null and ${ORDER_POST_KEY} in (select fa.post_id from fb_ads fa where fa.id in (${list}) and fa.post_id is not null)))`;
+}
+
+export function orderAdsetCandidates(adsetIds: readonly string[]): SQL {
+  if (adsetIds.length === 0) return sql`false`;
+  const list = sql.join(
+    adsetIds.map((a) => sql`${a}`),
+    sql`, `,
+  );
+  return sql`(${o.adId} in (select fa.id from fb_ads fa where fa.adset_id in (${list})) or (${o.postId} is not null and ${ORDER_POST_KEY} in (select fa.post_id from fb_ads fa where fa.adset_id in (${list}) and fa.post_id is not null)))`;
+}
 
 /** Đơn nối được về chiến dịch bằng bài viết (không phải bằng ad_id). */
 export const LINKED_BY_POST = sql`(

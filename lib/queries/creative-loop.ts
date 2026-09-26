@@ -23,8 +23,7 @@ import { vnStartOfDay } from "@/lib/format";
 import { CONFIRMED_ORDER } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 import { AD_MESSAGES } from "@/lib/queries/ads-roas";
-import { ORDER_AD_ID } from "@/lib/queries/ads-attribution-link";
-import { postKeySql } from "@/lib/queries/ads-identity-sql";
+import { ORDER_AD_ID, orderAdCandidates } from "@/lib/queries/ads-attribution-link";
 import { RETURNED_OUTCOMES_SQL } from "@/lib/constants/truth";
 
 /**
@@ -202,12 +201,9 @@ export async function variantMetrics(db: Db, variants: VariantMetricsInput[]): P
     HƠN điều kiện thật: đơn mang `ad_id` của một mẩu đang xét, HOẶC đơn có bài viết là bài của một mẩu
     đang xét. Mọi đơn mà `ORDER_AD_ID` quy về một mẩu trong danh sách đều nằm trong tập ấy (vế 1 của
     `ORDER_AD_ID` là `ad_id`, vế 2 chỉ trả mẩu mà bài viết thuộc về) — rồi `ORDER_AD_ID` mới quyết.
+    Siêu tập ấy là `orderAdCandidates` — dùng chung với MOQ thiết kế và bộ lọc mẩu của `/ads/daily`.
   */
-  const postsOfAds = sql`(select fa.post_id from fb_ads fa where fa.id in (${sql.join(
-    adIds.map((a) => sql`${a}`),
-    sql`, `,
-  )}) and fa.post_id is not null)`;
-  const candidate = or(inArray(o.adId, adIds), sql`(${o.postId} is not null and ${postKeySql(o.postId)} in ${postsOfAds})`) as SQL;
+  const candidate = orderAdCandidates(adIds);
   // Mỗi đơn tính kết quả ĐÚNG MỘT LẦN (bảng dẫn xuất + rào `OUTCOME_FENCE`), như ads-decision.
   const facts = db
     .select({

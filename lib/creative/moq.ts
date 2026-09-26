@@ -56,6 +56,8 @@ export function moqSnapshotOf(count: DesignMoqCount, at: Date, linkedExisting: b
     orders: count.orders,
     viaCode: count.viaCode,
     viaAd: count.viaAd,
+    viaAdDirect: count.viaAdDirect,
+    viaAdPost: count.viaAdPost,
     both: count.both,
     adOnly: count.adOnly,
     qtyKnown: count.qtyKnown,
@@ -66,9 +68,23 @@ export function moqSnapshotOf(count: DesignMoqCount, at: Date, linkedExisting: b
   };
 }
 
-/** Câu "x đơn = a qua mã TK + b chỉ qua quảng cáo (c trùng)" — dùng chung cho ghi chú nháp và tin báo. */
-export function moqCountSentence(s: Pick<DesignMoqSnapshot, "orders" | "viaCode" | "adOnly" | "both" | "minOrders">): string {
-  return `${s.orders}/${s.minOrders} đơn đã xác nhận = ${s.viaCode} qua sản phẩm mã TK + ${s.adOnly} chỉ qua quảng cáo (ad_id)${s.both ? ` — ${s.both} đơn thấy ở cả hai đường, tính một lần` : ""}`;
+/**
+ * Câu "x đơn = a qua mã TK + b chỉ qua quảng cáo (c trùng)" — dùng chung cho ghi chú nháp và tin báo.
+ *
+ * Căn cứ của đường quảng cáo LUÔN được nói ra (B2): bao nhiêu đơn mang `ad_id`, bao nhiêu nối qua bài viết
+ * của đúng một mẩu — người nhận tin biết con số MOQ đứng trên bằng chứng nào trước khi bấm gửi xưởng. Ảnh
+ * chụp cũ chưa tách (`viaAdDirect = null`) ⇒ giữ nguyên câu cũ "(ad_id)", vì hồi ấy chỉ đếm `ad_id` thật.
+ */
+export function moqCountSentence(
+  s: Pick<DesignMoqSnapshot, "orders" | "viaCode" | "adOnly" | "both" | "minOrders"> & Partial<Pick<DesignMoqSnapshot, "viaAd" | "viaAdDirect" | "viaAdPost">>,
+): string {
+  const split = s.viaAdDirect != null && s.viaAdPost != null;
+  const adBasis = split
+    ? (s.viaAd ?? 0) > 0
+      ? ` (đường quảng cáo ${s.viaAd} đơn: ${s.viaAdDirect} mang ad_id · ${s.viaAdPost} qua bài viết của đúng một mẩu)`
+      : ""
+    : " (ad_id)";
+  return `${s.orders}/${s.minOrders} đơn đã xác nhận = ${s.viaCode} qua sản phẩm mã TK + ${s.adOnly} chỉ qua quảng cáo${adBasis}${s.both ? ` — ${s.both} đơn thấy ở cả hai đường, tính một lần` : ""}`;
 }
 
 /**

@@ -1255,6 +1255,13 @@ export type DesignMoqSnapshot = {
   orders: number;
   viaCode: number;
   viaAd: number;
+  /**
+   * Căn cứ của `viaAd`: số đơn mang `ad_id` Pancake gửi · số đơn nối qua bài viết của ĐÚNG MỘT mẩu
+   * (`ORDER_AD_ID`, từ B2 26/09/2026). `null` = ảnh chụp dựng TRƯỚC B2 — khi ấy `viaAd` chỉ đếm `ad_id`
+   * và chưa tách, KHÔNG phải "0 đơn qua bài viết".
+   */
+  viaAdDirect: number | null;
+  viaAdPost: number | null;
   both: number;
   adOnly: number;
   /** Tổng số lượng các dòng mã TK (bỏ quà) — `total_qty` của nháp. */
@@ -1280,6 +1287,8 @@ export function parseDesignMoqSnapshot(raw: unknown): DesignMoqSnapshot | null {
     orders,
     viaCode: n(r.viaCode) ?? 0,
     viaAd: n(r.viaAd) ?? 0,
+    viaAdDirect: n(r.viaAdDirect),
+    viaAdPost: n(r.viaAdPost),
     both: n(r.both) ?? 0,
     adOnly: n(r.adOnly) ?? 0,
     qtyKnown: n(r.qtyKnown) ?? 0,

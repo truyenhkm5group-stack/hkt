@@ -18,10 +18,12 @@ import { cn } from "@/lib/utils";
  *
  * Chủ shop 24/09/2026: máy thiết kế mẫu áo / váy CHƯA TỪNG CÓ (lai DNA của mã bán tốt), quảng cáo và
  * nhận đơn như hàng thường, sản xuất sau. Bảng này trả lời: thiết kế nào đang test, đã ra bao nhiêu đơn
- * (qua `orders.ad_id` của các mẩu mang thiết kế — CHỈ ĐỌC), và cái nào đáng đưa vào sản xuất.
+ * (qua `ORDER_AD_ID` về các mẩu mang thiết kế: `ad_id`, không có thì bài viết của ĐÚNG MỘT mẩu — CHỈ ĐỌC),
+ * và cái nào đáng đưa vào sản xuất.
  *
- * Cột MOQ (§5h): `x/50 đơn` đếm SỐNG theo hai đường (sản phẩm Pancake mã TK · `ad_id` của mẩu), hợp theo id
- * đơn; đủ thì máy đã dựng NHÁP lệnh sản xuất — link tới nháp. Máy không gửi xưởng.
+ * Cột MOQ (§5h): `x/50 đơn` đếm SỐNG theo hai đường (sản phẩm Pancake mã TK · `ORDER_AD_ID` về mẩu), hợp theo
+ * id đơn; đủ thì máy đã dựng NHÁP lệnh sản xuất — link tới nháp. Máy không gửi xưởng. Căn cứ đường quảng
+ * cáo (mang `ad_id` · qua bài viết) in ở dòng phụ + tooltip (B2, 26/09/2026).
  *
  * Topic sản xuất SỚM (quy tắc chủ shop 25/09/2026 · Agent T): thiết kế đang test / thắng mà đã có mẫu trong
  * sổ (`product_models.design_concept_id`) ⇒ link "Mở topic sản xuất" để xưởng báo giá, làm mẫu song song
@@ -66,7 +68,7 @@ export async function DesignTab({ canEdit, canCreateTopic = false }: { canEdit: 
             hint: `DNA (nhóm hàng, dáng, cổ, tay, chất liệu, hoạ tiết, màu, chi tiết, phong cách) đọc từ ảnh sản phẩm bằng mô hình đọc ảnh. Mã làm cha khi có ≥ ${DESIGN_PARENT_RULES.minDelivered} đơn giao thành công trong ${DESIGN_PARENT_RULES.lookbackDays} ngày hoặc chi / tin nhắn tốt.`,
           },
           { label: "Đang test", value: formatNumber(dangTest), note: `${formatNumber(thang)} thắng / đưa vào sản xuất` },
-          { label: "Đơn chốt quy về thiết kế", value: formatNumber(don), note: "qua ad_id của mẩu — có thể đếm THIẾU", hint: "Đơn Pancake mang ad_id của các mẩu quảng cáo thiết kế, không huỷ (cùng định nghĩa đơn chốt của vòng mẫu). Pancake gửi ad_id cho khoảng 72,6% đơn Facebook nên con số đếm thiếu, không đếm thừa." },
+          { label: "Đơn chốt quy về thiết kế", value: formatNumber(don), note: "ad_id hoặc bài viết của đúng một mẩu", hint: "Đơn không huỷ quy về các mẩu quảng cáo thiết kế (cùng định nghĩa đơn chốt của vòng mẫu, cùng biểu thức cấp mẩu của /ads): ad_id Pancake gửi trước; đơn không có ad_id thì nối qua bài viết, CHỈ khi bài ấy thuộc đúng một mẩu. Bài nhiều mẩu cùng chạy không được nối — nên vẫn có thể đếm thiếu, không đếm thừa." },
         ]}
       />
       <SectionCard
@@ -91,7 +93,7 @@ export async function DesignTab({ canEdit, canCreateTopic = false }: { canEdit: 
                   <th className="px-3 py-2 font-medium">Trạng thái</th>
                   <th className="px-3 py-2 text-right font-medium">Đơn chốt · giao / hoàn</th>
                   <th className="px-3 py-2 text-right font-medium">Đã chi</th>
-                  <th className="px-3 py-2 font-medium" title={`Đủ ${DESIGN_MOQ.minOrders} đơn đã xác nhận (không huỷ) ⇒ máy dựng NHÁP lệnh sản xuất. Đơn đếm qua hai đường: dòng hàng là sản phẩm Pancake mã TK, và ad_id của mẩu QC mang thiết kế — đơn thấy ở cả hai tính một lần. Máy không gửi xưởng.`}>
+                  <th className="px-3 py-2 font-medium" title={`Đủ ${DESIGN_MOQ.minOrders} đơn đã xác nhận (không huỷ) ⇒ máy dựng NHÁP lệnh sản xuất. Đơn đếm qua hai đường: dòng hàng là sản phẩm Pancake mã TK, và quảng cáo (ad_id của mẩu QC mang thiết kế, hoặc bài viết của đúng một mẩu ấy) — đơn thấy ở cả hai tính một lần. Máy chỉ dựng nháp, không gửi xưởng.`}>
                     MOQ sản xuất
                   </th>
                   <th className="px-3 py-2" />
@@ -146,9 +148,10 @@ export async function DesignTab({ canEdit, canCreateTopic = false }: { canEdit: 
                       </div>
                       <p
                         className="mt-0.5 text-[11px] text-muted-foreground"
-                        title={`${formatNumber(r.moq.viaCode)} đơn có dòng hàng mã ${r.code} · ${formatNumber(r.moq.viaAd)} đơn qua ad_id của mẩu QC · ${formatNumber(r.moq.both)} đơn trùng hai đường (tính một lần). ${r.moq.productIds.length ? `Số lượng mã TK: ${formatNumber(r.moq.qtyKnown)} sp.` : `Chưa có sản phẩm Pancake mã ${r.code}.`}`}
+                        title={`${formatNumber(r.moq.viaCode)} đơn có dòng hàng mã ${r.code} · ${formatNumber(r.moq.viaAd)} đơn qua quảng cáo (${formatNumber(r.moq.viaAdDirect)} mang ad_id · ${formatNumber(r.moq.viaAdPost)} qua bài viết của đúng một mẩu) · ${formatNumber(r.moq.both)} đơn trùng hai đường (tính một lần). ${r.moq.productIds.length ? `Số lượng mã TK: ${formatNumber(r.moq.qtyKnown)} sp.` : `Chưa có sản phẩm Pancake mã ${r.code}.`}`}
                       >
                         mã TK {formatNumber(r.moq.viaCode)} · chỉ QC {formatNumber(r.moq.adOnly)}
+                        {r.moq.viaAdPost > 0 ? ` · qua bài ${formatNumber(r.moq.viaAdPost)}` : ""}
                       </p>
                       {r.productionOrder ? (
                         <Link href={`/inventory/planning/orders/${r.productionOrder.id}`} className="text-[11px] font-medium text-primary hover:underline">
