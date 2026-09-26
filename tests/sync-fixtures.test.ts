@@ -248,6 +248,7 @@ import { testCompanyOsCreativeAds } from "./company-os-creative-ads.test";
 import { testCreativeWrite, testCreativeWriteDb } from "./creative-write.test";
 import { testCreativeScaleDb, testCreativeScalePure } from "./creative-scale.test";
 import { testCreativeMoqDb, testCreativeMoqPure } from "./creative-moq.test";
+import { testCompanyOsAdOrderUnify } from "./company-os-ad-order-unify.test";
 import { testCreativeEmptyBatch, testCreativeExtendedWindow, testCreativeLoopTick } from "./creative-loop-tick.test";
 import { testCreativeManualDb, testCreativeManualPure } from "./creative-manual.test";
 import { testCreativeManualGenDb, testCreativeManualGenPure } from "./creative-manual-gen.test";
@@ -1764,6 +1765,8 @@ async function main() {
   await testCreativeScaleDb(db);
   testCreativeMoqPure();
   await testCreativeMoqDb(db);
+  // Company OS · B2 — MOQ thiết kế + /ads/daily nhóm/mẩu đếm đơn QC bằng ORDER_AD_ID / ORDER_ADSET_ID (một cách đếm với /ads).
+  await testCompanyOsAdOrderUnify(db);
   testAdsKillSwitchPure();
   await testAdsKillSwitchDb(db);
   await testCreativeLoopTick(db);

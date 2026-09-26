@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNotNull, or, sql, type SQL } from "drizzle-orm";
 import { chayKhongJit, schema, type Db } from "@/db";
+import { ORDER_AD_ID, orderAdCandidates } from "@/lib/queries/ads-attribution-link";
 import { CONFIRMED_ORDER } from "@/lib/queries/metrics";
 import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/queries/return-rate";
 
@@ -11,9 +12,14 @@ import { ORDER_OUTCOME_FAST, OUTCOME_FENCE, PRIMARY_ATTEMPT } from "@/lib/querie
  *
  * ─── HAI ĐƯỜNG, KHAI RIÊNG, HỢP BẰNG ID ĐƠN ───
  *
- *  (a) `viaAd`   — đơn mang `orders.ad_id` của một mẩu QC thuộc biến thể có `design_concept_id` này. Cùng
- *                  đường với `variantMetrics` (cột "Đơn chốt" của tab). Pancake gửi `ad_id` cho khoảng 3/4
- *                  đơn Facebook, nên đường này đếm THIẾU, không đếm thừa.
+ *  (a) `viaAd`   — đơn mà `ORDER_AD_ID` (`lib/queries/ads-attribution-link.ts` — CHÍNH biểu thức cấp mẩu
+ *                  của `/ads` và của `variantMetrics`, không bản chép) quy về một mẩu QC thuộc biến thể có
+ *                  `design_concept_id` này: `ad_id` Pancake gửi trước; không có (NULL / rỗng) thì bài viết
+ *                  của đơn, CHỈ khi bài ấy thuộc ĐÚNG MỘT mẩu trong toàn sổ `fb_ads`. Bài nhiều mẩu cùng chạy
+ *                  ⇒ không nối. Đơn mang `ad_id` luôn đi đường trực tiếp — không bị đếm lại qua bài viết,
+ *                  không bị kéo sang mẩu khác vì bài viết của nó. Hai phần tách ở `viaAdDirect` /
+ *                  `viaAdPost` để màn hình và tin báo nói ra được căn cứ. (Trước B2, 26/09/2026, đường này
+ *                  chỉ đọc `orders.ad_id` — tức đếm THIẾU mọi đơn đến qua bình luận/nhắn tin dưới bài.)
  *  (b) `viaCode` — đơn có dòng hàng KHÔNG PHẢI QUÀ là sản phẩm Pancake mã (`products.custom_id`) = mã TK.
  *                  Dòng nối về sản phẩm qua `order_items.product_id` HOẶC `order_items.variant_id →
  *                  product_variants.product_id` (đường quan hệ của `lib/queries/product-code.ts` — không dò
@@ -36,6 +42,10 @@ export type DesignMoqCount = {
   designId: string;
   code: string;
   viaAd: number;
+  /** Phần của `viaAd` mang `ad_id` Pancake gửi — bằng chứng trực tiếp. */
+  viaAdDirect: number;
+  /** Phần của `viaAd` không mang `ad_id`, nối qua bài viết của ĐÚNG MỘT mẩu. `viaAdDirect + viaAdPost = viaAd`. */
+  viaAdPost: number;
   viaCode: number;
   both: number;
   /** HỢP hai đường theo id đơn — con số so với MOQ. */
@@ -54,7 +64,7 @@ export type DesignMoqCount = {
 export type DesignMoqInput = { id: string; code: string };
 
 export function emptyMoqCount(d: DesignMoqInput): DesignMoqCount {
-  return { designId: d.id, code: d.code, viaAd: 0, viaCode: 0, both: 0, orders: 0, adOnly: 0, productIds: [], productName: null, qtyKnown: 0, qtyNoVariant: 0, lines: [] };
+  return { designId: d.id, code: d.code, viaAd: 0, viaAdDirect: 0, viaAdPost: 0, viaCode: 0, both: 0, orders: 0, adOnly: 0, productIds: [], productName: null, qtyKnown: 0, qtyNoVariant: 0, lines: [] };
 }
 
 const norm = (s: string | null | undefined) => (s ?? "").trim().toUpperCase();
@@ -122,12 +132,15 @@ export async function designMoqCounts(db: Db, designs: readonly DesignMoqInput[]
     return and(eq(oi.isBonus, false), or(...conds)) as SQL;
   };
   const scope: SQL[] = [];
-  if (adIds.length) scope.push(inArray(o.adId, adIds));
+  // Siêu tập RẺ (thu hẹp vì hiệu năng) — `ORDER_AD_ID` ở cột dưới mới QUYẾT đơn thuộc mẩu nào.
+  if (adIds.length) scope.push(orderAdCandidates(adIds));
   if (productIds.length) scope.push(inArray(o.id, db.select({ id: oi.orderId }).from(oi).where(tkLine())));
   const facts = db
     .select({
       orderId: sql<string>`${o.id}`.as("moq_order_id"),
-      adId: sql<string | null>`${o.adId}`.as("moq_ad_id"),
+      adId: sql<string | null>`${ORDER_AD_ID}`.as("moq_ad_id"),
+      // Đường quy kết: đơn mang `ad_id` luôn là TRỰC TIẾP — `ORDER_AD_ID` không bao giờ hỏi tới bài viết của nó.
+      viaPost: sql<boolean>`(nullif(${o.adId}, '') is null)`.as("moq_via_post"),
       outcome: ORDER_OUTCOME_FAST.as("moq_outcome"),
     })
     .from(o)
@@ -138,13 +151,14 @@ export async function designMoqCounts(db: Db, designs: readonly DesignMoqInput[]
     .as("design_moq_facts");
   const orderRows = await chayKhongJit(db, (tx) =>
     tx
-      .select({ orderId: sql<string>`${facts.orderId}`, adId: sql<string | null>`${facts.adId}` })
+      .select({ orderId: sql<string>`${facts.orderId}`, adId: sql<string | null>`${facts.adId}`, viaPost: sql<boolean>`${facts.viaPost}` })
       .from(facts)
       .where(sql`${facts.outcome} <> 'CANCELLED'`),
   );
   if (orderRows.length === 0) return out;
 
   const viaAd = new Map<string, Set<string>>();
+  const viaAdPost = new Map<string, Set<string>>();
   const viaCode = new Map<string, Set<string>>();
   const add = (m: Map<string, Set<string>>, designId: string, orderId: string) => {
     const set = m.get(designId) ?? new Set<string>();
@@ -153,7 +167,9 @@ export async function designMoqCounts(db: Db, designs: readonly DesignMoqInput[]
   };
   for (const r of orderRows) {
     const designId = r.adId ? designOfAd.get(String(r.adId).trim()) : undefined;
-    if (designId) add(viaAd, designId, String(r.orderId));
+    if (!designId) continue;
+    add(viaAd, designId, String(r.orderId));
+    if (r.viaPost === true || String(r.viaPost) === "true") add(viaAdPost, designId, String(r.orderId));
   }
 
   // ─── Dòng mã TK của các đơn ấy ───
@@ -201,6 +217,8 @@ export async function designMoqCounts(db: Db, designs: readonly DesignMoqInput[]
     let both = 0;
     for (const id of a) if (b.has(id)) both += 1;
     c.viaAd = a.size;
+    c.viaAdPost = viaAdPost.get(c.designId)?.size ?? 0;
+    c.viaAdDirect = a.size - c.viaAdPost;
     c.viaCode = b.size;
     c.both = both;
     c.orders = a.size + b.size - both;

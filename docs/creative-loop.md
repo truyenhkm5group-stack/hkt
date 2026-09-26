@@ -166,8 +166,8 @@ cũ. Chuyển luật tắt sang `ORDER_AD_ID` là quyết định của chủ sh
 > dấu vết nào, hoặc đến từ bài nhiều mẩu cùng chạy, vẫn không được đếm ⇒ ngưỡng "> 100 đơn" có thể đếm
 > THIẾU, không đếm thừa. Không lấp bằng suy đoán.
 >
-> **Chưa đổi theo:** đếm MOQ thiết kế (`lib/queries/creative-moq.ts`, đường `viaAd`) vẫn đi bằng
-> `orders.ad_id` — nó tự dựng nháp lệnh sản xuất nên đổi định nghĩa là việc riêng, có người quyết.
+> **Đã đổi theo (B2, 26/09/2026):** đếm MOQ thiết kế (`lib/queries/creative-moq.ts`, đường `viaAd`) nay
+> cũng đi bằng `ORDER_AD_ID` — xem §5h. Luật TẮT là chỗ DUY NHẤT còn đếm `ad_id` thô, và đó là cố ý.
 
 ## 5. Học (`geneStats` + Thompson, hàm thuần)
 
@@ -317,8 +317,8 @@ không nhồi. Giá đề nghị = giá của A (một giá duy nhất), không 
 **Bảng `design_concepts`** (migration `0120`): mã `TK-YYMMDD-NN` (duy nhất; chủ shop tạo sản phẩm Pancake
 đúng mã này), DNA, mã cha, lý do, ảnh đại diện, trạng thái `DRAFT · TESTING · WIN · LOSE · PRODUCTION`, giá đề
 nghị. Ô nối bằng `creative_variants.design_concept_id` (chế độ ô `DESIGN`). Trạng thái do lượt chấm đẩy tới
-(chỉ tiến); `PRODUCTION` chỉ NGƯỜI bấm (`setDesignProduction`). Số đơn của thiết kế = đơn mang `ad_id` của các
-mẩu mang nó (`variantMetrics`, chỉ đọc) — tab **Thiết kế mới**.
+(chỉ tiến); `PRODUCTION` chỉ NGƯỜI bấm (`setDesignProduction`). Số đơn của thiết kế = đơn quy về các mẩu mang
+nó bằng `ORDER_AD_ID` (`variantMetrics`, chỉ đọc) — tab **Thiết kế mới**.
 
 **Sinh ảnh:** cùng mô hình / khổ / chất lượng của cấu hình; ảnh tham chiếu DUY NHẤT là ảnh sản phẩm thật của A;
 câu lệnh = mô tả thiết kế tất định theo DNA (`designPromptEn`) + chỉ thị gen + `NEW_DESIGN_CLAUSE` ("thiết kế
@@ -409,7 +409,7 @@ công": thiết kế chưa sản xuất thì chưa có gì để giao. Đơn hu�
 
 | Đường | Nguồn | Ghi chú |
 |---|---|---|
-| (a) `viaAd` | `orders.ad_id` ∈ `fb_ad_id` của các mẩu thuộc biến thể có `design_concept_id` | cùng đường với cột "Đơn chốt"; Pancake gửi `ad_id` cho ~3/4 đơn Facebook ⇒ đếm THIẾU, không thừa |
+| (a) `viaAd` | `ORDER_AD_ID` ∈ `fb_ad_id` của các mẩu thuộc biến thể có `design_concept_id` — `ad_id` Pancake gửi trước; không có (NULL / rỗng) thì bài viết của đơn, CHỈ khi bài ấy thuộc ĐÚNG MỘT mẩu trong sổ `fb_ads` (từ 26/09/2026, B2; trước đó chỉ `orders.ad_id`) | cùng biểu thức với cột "Đơn chốt" và cấp mẩu của `/ads`; tách `viaAdDirect` (mang `ad_id`) · `viaAdPost` (qua bài viết), in ở ô MOQ, ảnh chụp `moq_snapshot` và ghi chú nháp. Bài nhiều mẩu cùng chạy ⇒ không nối ⇒ vẫn có thể đếm THIẾU, không thừa |
 | (b) `viaCode` | đơn có dòng KHÔNG PHẢI QUÀ là sản phẩm Pancake `custom_id` = mã TK (so khớp `upper(trim())`), nối qua `order_items.product_id` hoặc `variant_id → product_variants.product_id` | đường quan hệ của `lib/queries/product-code.ts`, không dò chuỗi SKU / tên |
 | **MOQ** | HỢP (a) ∪ (b) theo id đơn | đơn thấy ở cả hai đường tính MỘT lần (`both`) |
 

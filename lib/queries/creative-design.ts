@@ -348,13 +348,13 @@ export type DesignConceptRow = {
   productionAt: string | null;
   /** Số mẩu QC đã đăng mang thiết kế. */
   ads: number;
-  /** Đơn chốt / giao / hoàn quy về thiết kế qua `orders.ad_id` của các mẩu ấy (`variantMetrics`). */
+  /** Đơn chốt / giao / hoàn quy về thiết kế qua `ORDER_AD_ID` về các mẩu ấy (`variantMetrics`). */
   bookedOrders: number;
   deliveredOrders: number;
   returnedOrders: number;
   /** `null` = chưa mẩu nào có dòng chi (CHƯA BIẾT, không phải 0). */
   spendVnd: number | null;
-  /** Tiến độ MOQ (§5h) đếm SỐNG: hai đường (mã TK · ad_id) hợp theo id đơn. */
+  /** Tiến độ MOQ (§5h) đếm SỐNG: hai đường (mã TK · `ORDER_AD_ID`) hợp theo id đơn; căn cứ quảng cáo tách `viaAdDirect`/`viaAdPost`. */
   moq: DesignMoqCount;
   /** Mốc máy thấy đủ MOQ — có mốc thì máy không bao giờ dựng nháp thứ hai. */
   moqReachedAt: string | null;
@@ -362,7 +362,7 @@ export type DesignConceptRow = {
   productionOrder: { id: string; code: string; status: string } | null;
 };
 
-/** Thiết kế gần nhất (mới → cũ) + số đơn đếm qua `orders.ad_id` của các mẩu mang thiết kế. CHỈ ĐỌC. */
+/** Thiết kế gần nhất (mới → cũ) + số đơn quy về các mẩu mang thiết kế bằng `ORDER_AD_ID`. CHỈ ĐỌC. */
 export async function listDesignConcepts(db: Db, limit = 100): Promise<DesignConceptRow[]> {
   const dc = schema.designConcepts;
   const img = schema.creativeImages;
