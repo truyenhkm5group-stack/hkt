@@ -46,7 +46,9 @@ import { rowsOf } from "@/lib/sql-rows";
  *
  *     DT GTC ƯT · thuế           ← doanh số dòng × phần giao được của CHÍNH đơn đó
  *     giá vốn ƯT · rủi ro tồn    ← giá vốn dòng × phần giao được của CHÍNH đơn đó
- *     cước ƯT · đóng hàng · NV   ← mỗi (đơn × mã) một phần, đúng cách báo cáo đếm "đơn" của mã
+ *     SP giao TC ƯT              ← số lượng dòng × phần giao được — chia PHÂN SỐ, không làm tròn ô
+ *     cước ƯT                    ← cước kỳ vọng của CHÍNH đơn: P(giao) × cước gửi + P(hoàn) × (cước + phí hoàn)
+ *     đóng hàng · NV             ← mỗi (đơn × mã) một phần, đúng cách báo cáo đếm "đơn" của mã
  *     vận hành đã nhập · cố định ← doanh số dòng (báo cáo phân bổ theo doanh số POS)
  *
  * "Phần giao được" là đúng thứ báo cáo đã dùng để ra con số của mã: mã tính theo TỪNG ĐƠN
@@ -194,6 +196,21 @@ export function chiaTheoCanCu(total: number, ...canCu: number[][]): number[] {
 }
 
 /**
+ * CÙNG THỨ TỰ CĂN CỨ với `chiaTheoCanCu`, nhưng KHÔNG làm tròn từng phần — cho những đại lượng
+ * vốn đã là ước tính lẻ (số sản phẩm giao thành công ước tính). Làm tròn từng ô một đại lượng nhỏ
+ * rải lên nhiều ô là biến nó thành chuỗi 0 và 1 ngẫu nhiên; tổng vẫn đúng mà từng ngày thì sai.
+ */
+export function chiaPhanSo(total: number, ...canCu: number[][]): number[] {
+  const n = canCu[0]?.length ?? 0;
+  if (!total || !n) return new Array<number>(n).fill(0);
+  for (const keys of canCu) {
+    const sum = keys.reduce((t, k) => t + Math.max(0, k), 0);
+    if (sum > 0) return keys.map((k) => (total * Math.max(0, k)) / sum);
+  }
+  return new Array<number>(n).fill(total / n);
+}
+
+/**
  * PHẦN CỦA TỪNG MARKETER TRÊN MỘT ĐƠN CHƯA NÓI ĐƯỢC LÀ CỦA AI (fanpage chưa gán, không ad_id).
  *
  * `attributionShares` trả tỷ trọng CẢ MÃ = (phần gán được + phần chia hộ) / tổng. Phần chia hộ của
@@ -337,11 +354,15 @@ async function readLines(period: Period, basis: TimeBasis): Promise<LineRow[]> {
 /** Một dòng chi quảng cáo đã gộp theo (ngày chi × marketer × mã). `null` = nguồn chưa ghép được. */
 type SpendRow = { day: string; marketerId: string | null; productId: string | null; spend: number; messages: number };
 
+/** Một chiến dịch có tiêu tiền trong kỳ mà CHƯA gán marketer nào — để màn hình nêu được TÊN của nó. */
+type UnassignedCampaign = { campaignId: string; campaign: string; productId: string | null; spend: number };
+
 type SpendData = {
   rows: SpendRow[];
   observedThrough: string | null;
   /** Mảng, không phải `Set`: phần này nằm trong bộ đệm và bộ đệm so giá trị bằng `JSON.stringify`. */
   mappedMarketers: string[];
+  unassignedCampaigns: UnassignedCampaign[];
 };
 
 async function readSpend(period: Period): Promise<SpendData> {
@@ -351,7 +372,7 @@ async function readSpend(period: Period): Promise<SpendData> {
   if (period.from) conds.push(gte(ads.spendDate, period.from));
   if (period.to) conds.push(lte(ads.spendDate, period.to));
   const day = sql<string>`to_char(${ads.spendDate} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`;
-  const [rows, frontier, mapped] = await Promise.all([
+  const [rows, frontier, mapped, unassigned] = await Promise.all([
     /*
       MỘT câu cho cả ba cách cộng: theo (ngày × marketer) cho ô MKTer, theo (mã × marketer) cho bậc
       lùi quy kết của `attributionShares`, và theo (ngày × mã) khi lọc một mã hàng. Ba câu riêng là
@@ -366,11 +387,24 @@ async function readSpend(period: Period): Promise<SpendData> {
     db.select({ day: sql<string | null>`to_char(max(${ads.spendDate}) at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')` }).from(ads).where(eq(ads.excluded, false)),
     // "Nguồn chi tiêu có biết tới người này không" — một dòng bất kỳ, mọi thời gian.
     db.selectDistinct({ marketerId: ads.marketerId }).from(ads).where(and(eq(ads.excluded, false), sql`${ads.marketerId} is not null`)),
+    /*
+      TÊN của các chiến dịch chưa gán người, trong kỳ. Tiền của chúng đã có ở `rows` (marketer
+      `null`); câu này chỉ để câu cảnh báo nêu được "chiến dịch nào" — đo production 26/09/2026:
+      mọi chiến dịch `TRINH_Q004_…` tạo sau 12/09 đều chưa gán ai, và bảng lọc T Trinh in Chi QC
+      0 ₫ cho 24/09 trong khi Trình quản lý quảng cáo ghi 684.694 ₫ — không ô nào nói vì sao.
+    */
+    db
+      .select({ campaignId: sql<string>`coalesce(${ads.campaignId}, ${ads.campaign})`, campaign: sql<string>`max(${ads.campaign})`, productId: ads.productId, spend: sql<number>`coalesce(sum(${ads.spend}), 0)` })
+      .from(ads)
+      .where(and(...conds, sql`${ads.marketerId} is null`))
+      .groupBy(sql`1`, ads.productId)
+      .having(sql`sum(${ads.spend}) > 0`),
   ]);
   return {
     rows: rows.map((r) => ({ day: r.day, marketerId: r.marketerId, productId: r.productId, spend: Number(r.spend), messages: Number(r.messages) })),
     observedThrough: frontier[0]?.day ?? null,
     mappedMarketers: mapped.map((r) => r.marketerId as string),
+    unassignedCampaigns: unassigned.map((r) => ({ campaignId: r.campaignId, campaign: r.campaign ?? "", productId: r.productId, spend: Number(r.spend) })).sort((x, y) => y.spend - x.spend),
   };
 }
 
@@ -399,6 +433,8 @@ type Slot = {
   cogs: number;
   /** Số lượng × phần giao được × phần của marketer — căn cứ chia `expectedQty` của mã. */
   qtyKey: number;
+  /** Cước kỳ vọng của CHÍNH đơn × phần của marketer — căn cứ chia `shipCost` của mã. */
+  shipKey: number;
   /** Số sản phẩm chưa có giá vốn nào của dòng × phần của marketer. */
   uncovered: number;
 };
@@ -446,6 +482,8 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
   ]);
   const a = nominal.assumptions;
   const otherPct = Math.max(0, Number(a.otherCostPercentOfAds ?? 0)) / 100;
+  const shipFeeDelivered = Math.max(0, Number(a.shipFeeDeliveredUsed ?? 0));
+  const shipFeeReturned = Math.max(0, Number(a.shipFeeReturnedUsed ?? 0));
   const adMap = await adMarketerMap(lines.map((l) => l.ad_id).filter((x): x is string => Boolean(x)));
 
   const rowByProduct = new Map<string, NominalRow>(nominal.rows.map((r) => [r.productId, r]));
@@ -509,10 +547,16 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
     const r = row.returnRate === null ? 0 : Math.min(Math.max(row.returnRate, 0), 100) / 100;
     const slots: Slot[] = [];
     plines.forEach((l, idx) => {
-      const w =
-        row.revenueBasis === "ORDER_LEVEL"
-          ? (orderDeliveryShare({ outcome: l.outcome, con: l.con, productCode: uniqueCode(l.order_id), ageHours: l.age_hours === null ? null : Number(l.age_hours) }, lookup) ?? 0)
-          : 1 - r;
+      const share = row.revenueBasis === "ORDER_LEVEL" ? orderDeliveryShare({ outcome: l.outcome, con: l.con, productCode: uniqueCode(l.order_id), ageHours: l.age_hours === null ? null : Number(l.age_hours) }, lookup) : 1 - r;
+      const w = share ?? 0;
+      /*
+        CƯỚC KỲ VỌNG CỦA CHÍNH ĐƠN: giao được thì cước gửi, không thì cước gửi + phí hoàn — cùng hai
+        đơn giá báo cáo dùng cho mã. Chia đều mỗi đơn một phần (bản trước) làm ngày có 2/3 đơn đã
+        HOÀN gánh đúng bằng cước của ngày mọi đơn còn đang đi. Trạng thái ngoài mô hình (`null`)
+        không phải "chắc chắn hoàn" ⇒ lấy tỷ lệ của mã, không lấy 0.
+      */
+      const wShip = share ?? 1 - r;
+      const shipOne = wShip * shipFeeDelivered + (1 - wShip) * shipFeeReturned;
       const pos = Number(l.line);
       const cogs = Number(l.cogs);
       const mktDelta = Number(l.mkt_delta ?? 0);
@@ -526,7 +570,7 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
       else attribution.none += pos;
       const orderFrac = 1 / (linesOfOrder.get(l.order_id) ?? 1);
       for (const [mid, frac] of recipients) {
-        slots.push({ day: l.day, key: keyOf(mid), orderId: l.order_id, outcome: l.outcome, frac, orderFrac, pos: pos * frac, revKey: pos * w * frac, cogsKey: cogs * w * frac, cogs: cogs * frac, mktKey: mktDelta * w * frac, qtyKey: qty * w * frac, uncovered: uncovered * frac });
+        slots.push({ day: l.day, key: keyOf(mid), orderId: l.order_id, outcome: l.outcome, frac, orderFrac, pos: pos * frac, revKey: pos * w * frac, cogsKey: cogs * w * frac, cogs: cogs * frac, mktKey: mktDelta * w * frac, qtyKey: qty * w * frac, shipKey: shipOne * frac, uncovered: uncovered * frac });
       }
     });
 
@@ -537,8 +581,13 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
     const cogsK = slots.map((s) => s.cogsKey);
     const expRev = chiaTheoCanCu(row.expectedRevenue, rev, pos, cnt);
     const expCogs = chiaTheoCanCu(row.expectedCogs, cogsK, rev, cnt);
-    const expQty = chiaTheoCanCu(row.expectedQty, slots.map((s) => s.qtyKey), rev, cnt);
-    const ship = chiaTheoCanCu(row.shipCost, cnt);
+    /*
+      SỐ SẢN PHẨM chia theo PHÂN SỐ, không largest remainder: tổng của mã chỉ vài chục cái rải lên
+      hàng trăm ô ⇒ mỗi ô nhận 0 hoặc 1 nguyên, và một ngày 7 đơn còn đang đi in "0 sp" ngay cạnh
+      giá vốn 328.881 ₫ (đo production 26/09/2026, Q004 · T Trinh). Tiền vẫn chia nguyên đồng.
+    */
+    const expQty = chiaPhanSo(row.expectedQty, slots.map((s) => s.qtyKey), rev, cnt);
+    const ship = chiaTheoCanCu(row.shipCost, slots.map((s) => s.shipKey), cnt);
     const opexPos = chiaTheoCanCu(row.operatingAlloc + row.fixedAlloc, pos, cnt);
     const opexCnt = chiaTheoCanCu(row.packingCost + row.opsStaffCost, cnt);
     const risk = chiaTheoCanCu(row.inventoryRisk, cogsK, rev, cnt);
@@ -814,7 +863,20 @@ export async function getMarketerDailyNominal(period: Period): Promise<MarketerD
  */
 export type NominalDailyFilter = { productId: string | null; marketerKey: string | null };
 
-export type NominalDailyDay = { day: string; spendKnown: boolean; cell: NominalCell };
+export type NominalDailyDay = {
+  day: string;
+  spendKnown: boolean;
+  cell: NominalCell;
+  /**
+   * Chỉ khi lọc MỘT MKTer: chi QC của ngày trên CÙNG các mã (mã đang lọc, hoặc mọi mã người này có
+   * đơn trong kỳ) mà CHƯA gán marketer nào. Không nằm trong `cell.adSpend` — có thể là của người
+   * này, có thể không; máy không đoán (mục 67). `0` = không có khoản nào như vậy.
+   */
+  unassignedSpend: number;
+};
+
+/** Chi QC chưa gán người trên các mã của bộ lọc MKTer — `null` khi không lọc MKTer. */
+export type NominalUnassignedSpend = { spend: number; days: number; campaigns: { campaign: string; spend: number }[] };
 
 export type NominalDaily = {
   basis: TimeBasis;
@@ -834,6 +896,7 @@ export type NominalDaily = {
    */
   reconcile: { against: string; expectedRevenue: { ours: number; report: number }; expectedProfit: { ours: number; report: number }; netProfit: { ours: number; report: number } } | null;
   spendObservedThrough: string | null;
+  unassigned: NominalUnassignedSpend | null;
   warnings: string[];
 };
 
@@ -888,6 +951,33 @@ export async function getNominalDaily(period: Period, basis: TimeBasis, filter: 
     rawOf(r.day); // ngày chỉ có tiền mà không đơn nào vẫn phải là một dòng
   }
 
+  /*
+    ─── CHI QC CHƯA GÁN NGƯỜI TRÊN CÙNG CÁC MÃ — CHỈ KHI LỌC MỘT MKTER ───
+
+    Lọc một người thì Chi QC là tiền của các chiến dịch ĐÃ GÁN cho người đó. Chiến dịch chưa gán ai
+    không biến mất — nó nằm ở "Chưa quy kết" — nhưng trên bảng lọc thì ô Chi QC in một con số
+    trông như trọn vẹn. Đo production 26/09/2026: T Trinh không có bí danh nào, 16 chiến dịch
+    `TRINH_…` (19.980.485 ₫ trong tháng 9) chưa gán ai ⇒ lọc Q004 · T Trinh in 0 ₫ cho 24/09 trong
+    khi mã ấy tiêu 684.694 ₫ hôm đó. Máy KHÔNG gán hộ: bí danh là LỜI KHAI của người (Lương ›
+    Nhân sự), còn "chữ TRINH trông giống tên ai" là máy đoán — nó chỉ NÓI RA số tiền ấy, theo từng
+    ngày, cạnh ô Chi QC.
+
+    Phạm vi mã: mã đang lọc; không lọc mã thì mọi mã người này có đơn trong kỳ.
+  */
+  const unassignedByDay = new Map<string, number>();
+  let unassigned: NominalUnassignedSpend | null = null;
+  if (f.marketerKey && f.marketerKey !== MARKETING_UNATTRIBUTED) {
+    const scope = new Set<string>(f.productId ? [f.productId] : cells.filter((s) => s.mkt === f.marketerKey && s.c.orders > 0).map((s) => s.pid));
+    for (const r of spend.rows) {
+      if (r.marketerId !== null || !r.productId || !scope.has(r.productId) || !r.spend) continue;
+      unassignedByDay.set(r.day, (unassignedByDay.get(r.day) ?? 0) + r.spend);
+      rawOf(r.day);
+    }
+    const tong = [...unassignedByDay.values()].reduce((t, v) => t + v, 0);
+    const camps = spend.unassignedCampaigns.filter((c) => c.productId && scope.has(c.productId));
+    unassigned = { spend: tong, days: unassignedByDay.size, campaigns: camps.map((c) => ({ campaign: c.campaign || c.campaignId, spend: c.spend })) };
+  }
+
   const mappedOk = !f.marketerKey || spendMappedOf(f.marketerKey);
   const grand = emptyCell();
   let grandAds = 0;
@@ -914,7 +1004,7 @@ export async function getNominalDaily(period: Period, basis: TimeBasis, filter: 
       grandExp += cell.expectedProfit ?? 0;
       grandNet += cell.netProfit ?? 0;
     }
-    return { day, spendKnown, cell };
+    return { day, spendKnown, cell, unassignedSpend: unassignedByDay.get(day) ?? 0 };
   });
   days.sort((x, y) => y.day.localeCompare(x.day));
   const total: NominalCell = { ...grand, adSpend: anyKnown ? grandAds : null, messages: anyKnown ? grandMsgs : null, otherCost: anyKnown ? Math.round(grandAds * otherPct) : null, expectedProfit: anyKnown ? grandExp : null, netProfit: anyKnown ? grandNet : null };
@@ -946,6 +1036,13 @@ export async function getNominalDaily(period: Period, basis: TimeBasis, filter: 
       `Bảng chi quảng cáo chưa khai chiến dịch nào cho ${labelFor(names, f.marketerKey)}, nên Chi QC và lợi nhuận là CHƯA BIẾT (—), KHÔNG phải 0 — tiền thật của họ đang nằm ở "${MARKETING_UNATTRIBUTED_LABEL}". Ghép chiến dịch với marketer ở trang Quảng cáo thì mới có số.`,
     );
   }
+  if (unassigned && unassigned.spend > 0) {
+    const ten = unassigned.campaigns.slice(0, 4).map((c) => `“${c.campaign}”`).join(" · ");
+    const them = unassigned.campaigns.length > 4 ? ` và ${unassigned.campaigns.length - 4} chiến dịch nữa` : "";
+    warnings.push(
+      `${unassigned.spend.toLocaleString("vi-VN")} ₫ chi QC ${f.productId ? "của mã này" : "trên các mã người này có đơn"} trong ${unassigned.days} ngày đang CHƯA GÁN MKTer nào — KHÔNG nằm trong Chi QC của ${labelFor(names, f.marketerKey as string)}, nên Chi QC ở đây có thể THẤP hơn thật và lợi nhuận CAO hơn thật (số của từng ngày in ngay dưới ô Chi QC). Chiến dịch: ${ten}${them}. Gán bằng bí danh ở Lương › Nhân sự (bí danh xuất hiện trong tên chiến dịch), hoặc ghép tay ở Chi phí › Ghép chiến dịch — lưu xong là áp lại cho cả các ngày cũ.`,
+    );
+  }
   const lateDays = days.filter((d) => !d.spendKnown && d.cell.orders > 0);
   if (lateDays.length) {
     warnings.push(`Nguồn chi quảng cáo mới đồng bộ tới ngày ${spend.observedThrough ?? "—"}. ${lateDays.length} ngày sau đó (hoặc chưa có mốc) có đơn nhưng CHƯA BIẾT chi bao nhiêu, nên lợi nhuận của những ngày ấy để trống; hàng tổng chỉ cộng lợi nhuận của những ngày đã có số chi.`);
@@ -965,5 +1062,5 @@ export async function getNominalDaily(period: Period, basis: TimeBasis, filter: 
     );
   }
 
-  return { basis, filter: f, days, total, products, marketers, marketerPriceCogs, reconcile, spendObservedThrough: spend.observedThrough, warnings };
+  return { basis, filter: f, days, total, products, marketers, marketerPriceCogs, reconcile, spendObservedThrough: spend.observedThrough, unassigned, warnings };
 }
