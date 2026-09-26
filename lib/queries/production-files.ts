@@ -1,6 +1,6 @@
-import { and, asc, between, desc, eq } from "drizzle-orm";
+import { and, asc, between, desc, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { chunkSpan, TOPIC_FILE_CHUNK_BYTES, type TopicFileKind } from "@/lib/constants/production-files";
+import { chunkSpan, TOPIC_FILE_CHUNK_BYTES, TOPIC_FILES_TOTAL_MAX_BYTES, type TopicFileKind } from "@/lib/constants/production-files";
 
 /**
  * ═══════════ ĐỌC: ẢNH / VIDEO ĐÍNH KÈM TOPIC SẢN XUẤT ═══════════
@@ -21,6 +21,13 @@ export async function listTopicFiles(topicId: string): Promise<TopicFileItem[]> 
     .where(and(eq(f.topicId, topicId), eq(f.status, "READY")))
     .orderBy(desc(f.createdAt), asc(f.id));
   return rows.map((r) => ({ ...r, kind: r.kind as TopicFileKind }));
+}
+
+/** Mức đã dùng của kho ảnh / video topic (mọi topic, kể cả lượt đang tải) — in cạnh trần chung. */
+export async function getTopicFileStorage(): Promise<{ usedBytes: number; maxBytes: number }> {
+  const db = await getDb();
+  const [r] = await db.select({ bytes: sql<number>`coalesce(sum(${f.bytes}), 0)::bigint` }).from(f);
+  return { usedBytes: Number(r?.bytes ?? 0), maxBytes: TOPIC_FILES_TOTAL_MAX_BYTES };
 }
 
 export async function getTopicFileMeta(fileId: string) {

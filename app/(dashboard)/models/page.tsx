@@ -161,6 +161,7 @@ export default async function ModelsPage({ searchParams }: { searchParams: Promi
                   { value: "product", label: "Có sản phẩm Pancake" },
                   { value: "design", label: "Có thiết kế TK" },
                   { value: "none", label: "Chưa nối gì" },
+                  { value: "provisional", label: "Mã tạm — chưa lên mã" },
                 ],
               },
             ]}

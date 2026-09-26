@@ -2,6 +2,7 @@
 
 import type { ColumnDef } from "@tanstack/react-table";
 import { Shirt } from "lucide-react";
+import { isProvisionalModel } from "@/lib/constants/provisional-model";
 import { ModelStateBadge } from "@/app/(dashboard)/models/state-badge";
 import { RowLink } from "@/components/data-table/data-table";
 import { formatDate } from "@/lib/format";
@@ -33,6 +34,11 @@ export const modelColumns: ColumnDef<ModelListRow, unknown>[] = [
             <RowLink href={`/models/${r.id}`} className="font-mono font-semibold">
               {r.code}
             </RowLink>
+            {isProvisionalModel(r) ? (
+              <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-900 dark:bg-amber-950/60 dark:text-amber-300" title="Mẫu mới test chưa lên mã — máy cấp mã tạm. Mẫu thắng thì chốt mã chính thức ở trang mẫu.">
+                Mã tạm
+              </span>
+            ) : null}
             <div className="truncate text-xs text-muted-foreground">{r.name || r.productName || "—"}</div>
           </div>
         </div>

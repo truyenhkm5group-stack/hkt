@@ -186,10 +186,21 @@ export function UploadProgressBar({ p }: { p: UploadProgress | null }) {
   );
 }
 
+/** Mức đã dùng của kho ảnh / video chung (mọi topic) — để người tải thấy trần TRƯỚC khi bị từ chối. */
+function StorageLine({ used, max }: { used: number; max: number }) {
+  const pct = Math.min(100, Math.round((used / max) * 100));
+  const tone = pct >= 90 ? "text-rose-700 dark:text-rose-300" : pct >= 75 ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground";
+  return (
+    <p className={`text-xs ${tone}`}>
+      Kho ảnh / video topic (chung mọi topic): đã dùng {formatMb(used)} / {formatMb(max)} ({pct}%){pct >= 75 ? " — gỡ video cũ ở các topic đã đóng để giải phóng chỗ" : ""}
+    </p>
+  );
+}
+
 export type TopicFileView = { id: string; kind: TopicFileKind; fileName: string; bytes: number; uploadedBy: string; createdAt: Date | string };
 
 /** Khung ảnh / video trên trang topic: xem, thêm, gỡ. */
-export function TopicFilesPanel({ topicId, files, canWrite }: { topicId: string; files: TopicFileView[]; canWrite: boolean }) {
+export function TopicFilesPanel({ topicId, files, canWrite, storage = null }: { topicId: string; files: TopicFileView[]; canWrite: boolean; storage?: { usedBytes: number; maxBytes: number } | null }) {
   const [chon, setChon] = useState<File[]>([]);
   const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [busy, setBusy] = useState(false);
@@ -254,6 +265,7 @@ export function TopicFilesPanel({ topicId, files, canWrite }: { topicId: string;
       )}
       {canWrite ? (
         <div className="space-y-2 border-t pt-3">
+          {storage ? <StorageLine used={storage.usedBytes} max={storage.maxBytes} /> : null}
           <TopicFilePicker files={chon} onChange={setChon} disabled={busy} />
           <UploadProgressBar p={progress} />
           {chon.length ? (
