@@ -38,8 +38,14 @@ import type { CarrierSubstate } from "@/lib/constants/carrier-substate";
  * thì con số ước tính mang nhãn tin cậy thấp / chưa đủ dữ liệu — không bao giờ mang vẻ chắc chắn.
  */
 
-/** Phiên bản CÔNG THỨC. Đổi cách tính ⇒ tăng số, để ảnh chụp kỳ cũ không bị đọc bằng luật mới. */
-export const PROJECTED_GTC_VERSION = "PROJECTED_GTC_V3";
+/**
+ * Phiên bản CÔNG THỨC. Đổi cách tính ⇒ tăng số, để ảnh chụp kỳ cũ không bị đọc bằng luật mới.
+ *
+ * V4 (chủ shop chốt 26/09/2026): *"Tỷ lệ GTC của mã nào thì ước tính cho mã đấy, không dùng chung
+ * của toàn shop vì mã hoàn cao, GTC thấp sẽ ảnh hưởng đến các mã khác"*. Có mã hàng thì KHÔNG còn
+ * bậc toàn shop — xem `PROBABILITY_FALLBACK`.
+ */
+export const PROJECTED_GTC_VERSION = "PROJECTED_GTC_V4";
 
 /**
  * ĐỘ TIN CẬY THEO CỠ MẪU của MỘT xác suất trạng thái.
@@ -124,15 +130,39 @@ export const TRAINING_SNAPSHOT_OFFSETS_HOURS = [12, 36, 60, 96, 144, 240] as con
  * với 15–20 mẫu mã bên dưới. Dựng thêm một tầng "họ sản phẩm" phía trên sáu mã hiện có là dựng một
  * tầng có đúng một phần tử — nó không thêm mẫu, chỉ thêm một cái tên.
  *
- * Kiện thuộc NHIỀU mã hàng không được điều kiện hoá theo mã: không có gì trong dữ liệu nói mã nào
- * quyết định kết cục, nên nó đi thẳng xuống bậc toàn shop thay vì được đếm hai lần ở hai mã.
+ * ─── V4: CÓ MÃ HÀNG THÌ KHÔNG BAO GIỜ XUỐNG BẬC TOÀN SHOP ───
+ *
+ * Chủ shop chốt 26/09/2026. Tỷ lệ nền toàn shop là một cái tên lịch sự cho tỷ lệ của Đầm Q002 (62%
+ * tập học, GTC 26,7% — xem `lib/constants/delivery-rate.ts`), nên một mã hoàn cao kéo tụt ước tính
+ * của MỌI mã khác. Đo production 26/09/2026: mọi đơn Q004 chưa gửi được cân bằng P(chưa rời kho)
+ * toàn shop ≈ 25% — ngày nào toàn đơn mới thì DT GTC ƯT in đúng 25,2% doanh số, trong khi Q004
+ * tự giao được hơn một nửa.
+ *
+ *     có mã hàng    PRODUCT_STATE_AGE → PRODUCT_STATE → PRODUCT_ALL → NONE
+ *     không có mã   GLOBAL_STATE_AGE → GLOBAL_STATE → NONE
+ *
+ * `PRODUCT_ALL` = tỷ lệ giao được của CHÍNH mã trên mọi kiện đã kết thúc của nó trong cửa sổ học,
+ * không tách trạng thái — bằng chứng thô hơn nhưng vẫn là của mã đang xem. Nó đỡ những trạng thái
+ * mà mã chưa đủ 10 quan sát; không có nó thì đơn ấy thành "ngoài ước tính" và tiền của nó bị tính
+ * 0 ₫ giao được — lệch xuống còn nặng hơn lệch vì mượn. Mã không có nổi 10 kiện kết thúc thì
+ * `NONE`: bảng lợi nhuận tự rơi về thang bậc tỷ lệ (co ngót / tỷ lệ khai ở Giả định), cũng KHÔNG
+ * mượn của mã khác.
+ *
+ * "Không có mã" chỉ còn là đơn NHIỀU mã khi cộng Ở GRAIN ĐƠN (con số toàn shop) — ở đó không có mã
+ * nào để bị kéo tụt. Ở bảng theo mã, dòng của mã nào cân bằng xác suất của CHÍNH mã đó, kể cả khi
+ * đơn có thêm mã khác. Lúc HỌC thì kiện nhiều mã vẫn không vào ô nào theo mã: đếm nó vào cả hai là
+ * nhân đôi một quan sát.
  */
-export const PROBABILITY_FALLBACK = ["PRODUCT_STATE_AGE", "PRODUCT_STATE", "GLOBAL_STATE_AGE", "GLOBAL_STATE", "NONE"] as const;
+export const PROBABILITY_FALLBACK = ["PRODUCT_STATE_AGE", "PRODUCT_STATE", "PRODUCT_ALL", "GLOBAL_STATE_AGE", "GLOBAL_STATE", "NONE"] as const;
 export type ProbabilityBasis = (typeof PROBABILITY_FALLBACK)[number];
+
+/** Bậc nào là quan sát của CHÍNH mã hàng — đếm vào `projectedFromOwn`, không phải phần đi mượn. */
+export const OWN_PRODUCT_BASES: readonly ProbabilityBasis[] = ["PRODUCT_STATE_AGE", "PRODUCT_STATE", "PRODUCT_ALL"];
 
 export const BASIS_LABEL: Record<ProbabilityBasis, string> = {
   PRODUCT_STATE_AGE: "theo mã hàng + trạng thái + tuổi kiện",
   PRODUCT_STATE: "theo mã hàng + trạng thái",
+  PRODUCT_ALL: "theo mã hàng (mọi trạng thái)",
   GLOBAL_STATE_AGE: "theo trạng thái + tuổi kiện (toàn shop)",
   GLOBAL_STATE: "theo trạng thái (toàn shop)",
   NONE: "chưa đo được",
@@ -182,6 +212,10 @@ export function isModelledSubstate(s: string): s is ModelledSubstate {
  * THU của cohort theo ngày chốt đơn — nó không phải "đã gửi" nên KHÔNG vào mẫu số của tỷ lệ GTC.
  * P(NOT_SHIPPED) học từ đơn đã chốt trong cửa sổ huấn luyện và đã kết thúc, KỂ CẢ HUỶ: một đơn chưa
  * gửi vẫn có thể bị huỷ, và huỷ thì doanh thu bằng 0.
+ *
+ * V4: học RIÊNG từng mã (đơn thuộc đúng một mã). Mã chưa đủ 10 đơn chốt đã kết thúc thì lùi về
+ * `PRODUCT_ALL` của chính mã — con số ấy KHÔNG trừ phần huỷ trước khi gửi nên lệch lên một chút,
+ * và nhãn bậc nói ra điều đó; mượn P(chưa rời kho) của toàn shop thì lệch theo mã hoàn nặng nhất.
  */
 export const NOT_SHIPPED_STATE = "NOT_SHIPPED" as const;
 export type ProjectedState = ModelledSubstate | typeof NOT_SHIPPED_STATE;

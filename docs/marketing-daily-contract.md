@@ -73,7 +73,7 @@ danh nghĩa dùng, không có bản thứ hai:
 | bậc | điều kiện | vì sao xếp ở đó |
 | --- | --- | --- |
 | `override` | chủ shop gõ tỷ lệ cho mã ở Giả định | một QUYẾT ĐỊNH, không phải ước lượng |
-| `projected` | hợp đồng `PROJECTED_GTC_V3` **và** mã đã có ≥ 1 đơn đi tới kết cục | chưa đơn nào kết thúc thì con số là xác suất **mượn** của mã khác (Đầm Q005, 21/09/2026: giao 0 · hoàn 0 · đang giao 62 mà ô in 37,5%) |
+| `projected` | hợp đồng `PROJECTED_GTC_V4` **và** mã đã có ≥ 1 đơn đi tới kết cục | chưa đơn nào kết thúc thì con số là xác suất **mượn** của mã khác (Đầm Q005, 21/09/2026: giao 0 · hoàn 0 · đang giao 62 mà ô in 37,5%) |
 | `history` | tỷ lệ hoàn 90 ngày của mã, ≥ `minFinishedOrders` đơn đã kết thúc | số đo thật, cửa sổ rộng hơn |
 | `default` | `profit.assumptions.defaultReturnRate` (hiện 40 ⇒ **GTC 60%**) | bậc cuối, không một quan sát nào của chính mã đứng sau |
 

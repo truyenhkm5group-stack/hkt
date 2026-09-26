@@ -10,6 +10,7 @@ import {
   calibrationSlope,
   isModelledSubstate,
   MODELLED_SUBSTATES,
+  NOT_SHIPPED_STATE,
   PROJECTED_GTC_VERSION,
   projectedRateOf,
   summarizeBacktest,
@@ -18,10 +19,10 @@ import {
 } from "@/lib/constants/projected-delivery";
 import { adsRatios, DEFAULT_PROFIT_ASSUMPTIONS } from "@/lib/constants/profit";
 import { SUCCESS_RATE_OK } from "@/lib/constants/returns";
-import { getProjectedDeliveryMetrics, getProjectionBacktest, getStateDeliveryProbabilities } from "@/lib/queries/projected-delivery";
+import { getProbabilityLookup, getProjectedDeliveryMetrics, getProjectionBacktest, getStateDeliveryProbabilities } from "@/lib/queries/projected-delivery";
 
 /**
- * ═══════════ HỢP ĐỒNG "TL / DT GTC ƯỚC TÍNH" PHIÊN BẢN V3 ═══════════
+ * ═══════════ HỢP ĐỒNG "TL / DT GTC ƯỚC TÍNH" PHIÊN BẢN V4 ═══════════
  *
  * Bài kiểm CÔNG THỨC cho `lib/queries/projected-delivery.ts` + các trang đọc nó. Mỗi khối gắn với một
  * lỗi đã được soát và đo trên production 13/09/2026 (xem docs/audit-metric-parity-2026-09-13.md).
@@ -170,17 +171,24 @@ export function testBacktestStatsPure() {
 
 /* ───── 3 · Nhãn huấn luyện theo ORDER_OUTCOME, kiện chưa chín ở ngoài, 503 vào mẫu số ───── */
 export async function testTrainingLabelsFromOrderOutcome(db: Db) {
-  await db.insert(schema.products).values({ id: `${P}p-T`, name: "Hàng huấn luyện V3", customId: "PDV-T" }).onConflictDoNothing();
+  /*
+    V4: tập huấn luyện thuộc CHÍNH mã A — mã sẽ được chấm ở khối sau. Trước V4 nó thuộc một mã T
+    riêng, và mã A được cân bằng xác suất học từ mã T: đúng điều chủ shop bác bỏ 26/09/2026.
+  */
+  await db.insert(schema.products).values({ id: `${P}p-A`, name: "Hàng đang giao", customId: "PDV-A" }).onConflictDoNothing();
+  await db.insert(schema.productVariants).values({ id: `${P}v-A`, productId: `${P}p-A`, sku: "PDV-A", retailPrice: 500_000 }).onConflictDoNothing();
+  // Mã T chỉ giữ kiện CHƯA CHÍN — nó nằm trong kỳ chấm nên không được lẫn vào số của mã A.
+  await db.insert(schema.products).values({ id: `${P}p-T`, name: "Hàng chưa chín V4", customId: "PDV-T" }).onConflictDoNothing();
   await db.insert(schema.productVariants).values({ id: `${P}v-T`, productId: `${P}p-T`, sku: "PDV-T", retailPrice: 500_000 }).onConflictDoNothing();
   const huanLuyen: DonFixture[] = [];
   // 8 kiện chờ phát lại rồi GIAO ĐƯỢC thật (501 chiều đi + thu 499K).
-  for (let i = 0; i < 8; i += 1) huanLuyen.push({ id: `t-g${i}`, productId: "T", luc: CHIN, ship: { stage: "DELIVERED", codCollected: 499_000, final: "DELIVERED", events: [...CHO_PHAT_LAI, ["501", "Giao thành công", "OUTBOUND", "DELIVERED"]] } });
+  for (let i = 0; i < 8; i += 1) huanLuyen.push({ id: `t-g${i}`, productId: "A", luc: CHIN, ship: { stage: "DELIVERED", codCollected: 499_000, final: "DELIVERED", events: [...CHO_PHAT_LAI, ["501", "Giao thành công", "OUTBOUND", "DELIVERED"]] } });
   // 2 kiện chuyển hoàn (504).
-  for (let i = 0; i < 2; i += 1) huanLuyen.push({ id: `t-h${i}`, productId: "T", luc: CHIN, ship: { stage: "RETURNED", final: "RETURNED", events: [...CHO_PHAT_LAI, ["504", "Chuyển hoàn", "RETURN", "RETURNED"]] } });
+  for (let i = 0; i < 2; i += 1) huanLuyen.push({ id: `t-h${i}`, productId: "A", luc: CHIN, ship: { stage: "RETURNED", final: "RETURNED", events: [...CHO_PHAT_LAI, ["504", "Chuyển hoàn", "RETURN", "RETURNED"]] } });
   // 1 kiện TIÊU HUỶ (503): stage = CANCELLED nhưng theo luật là ĐƠN HOÀN — V2 làm nó biến mất khỏi mẫu số.
-  huanLuyen.push({ id: "t-tieuhuy", productId: "T", luc: CHIN, ship: { stage: "CANCELLED", final: "RETURNED", events: [...CHO_PHAT_LAI, ["503", "Tiêu huỷ", "OUTBOUND", "CANCELLED"]] } });
+  huanLuyen.push({ id: "t-tieuhuy", productId: "A", luc: CHIN, ship: { stage: "CANCELLED", final: "RETURNED", events: [...CHO_PHAT_LAI, ["503", "Tiêu huỷ", "OUTBOUND", "CANCELLED"]] } });
   // 1 kiện VTP ghi "giao thành công" nhưng thu 30.000đ ⇒ ĐƠN HOÀN theo luật tiền — V2 dạy mô hình là "giao được".
-  huanLuyen.push({ id: "t-30k", productId: "T", luc: CHIN, ship: { stage: "DELIVERED", codCollected: 30_000, final: "DELIVERED", events: [...CHO_PHAT_LAI, ["501", "Giao thành công", "OUTBOUND", "DELIVERED"]] } });
+  huanLuyen.push({ id: "t-30k", productId: "A", luc: CHIN, ship: { stage: "DELIVERED", codCollected: 30_000, final: "DELIVERED", events: [...CHO_PHAT_LAI, ["501", "Giao thành công", "OUTBOUND", "DELIVERED"]] } });
   // 1 kiện CHƯA ĐỦ CHÍN (5 ngày) đã giao — không được vào tập huấn luyện dù đã kết thúc.
   huanLuyen.push({ id: "t-tuoi", productId: "T", luc: TUOI, ship: { stage: "DELIVERED", codCollected: 499_000, final: "DELIVERED", events: [...CHO_PHAT_LAI, ["501", "Giao thành công", "OUTBOUND", "DELIVERED"]] } });
   await gieo(db, huanLuyen);
@@ -193,6 +201,28 @@ export async function testTrainingLabelsFromOrderOutcome(db: Db) {
   assert.ok(cpl.p !== null && Math.abs(cpl.p - 8 / 12) < 1e-9, "P(chờ phát lại) = 8/12");
   assert.equal(cpl.confidence, "LOW", "12 mẫu ≥ 10 ⇒ dùng được nhưng nhãn là MẪU NHỎ");
   assert.ok(window.trainedUntil.getTime() <= Date.now() - TRAINING_WINDOW.maturityDefaultDays * 86_400_000 + 1000 || window.maturitySource === "MEASURED", "cửa sổ huấn luyện phải cắt trước hôm nay ít nhất H ngày");
+
+  /*
+    ═══ V4: MÃ NÀO ƯỚC TÍNH BẰNG SỐ CỦA MÃ ĐÓ (chủ shop chốt 26/09/2026) ═══
+
+    Một mã hoàn cao (Q002 — 62% tập học) từng kéo tụt ước tính của MỌI mã khác qua bậc toàn shop.
+    Khối này khoá các nhánh của luật mới trên CÙNG một bảng tra.
+  */
+  const tra = await getProbabilityLookup();
+  const aCpl = tra.of("WAITING_REDELIVERY", { productCode: "PDV-A", ageHours: 24 * 5 });
+  assert.equal(aCpl.basis, "PRODUCT_STATE", "mã A có 12 quan sát của chính nó ở trạng thái này ⇒ dùng số của mã A");
+  assert.ok(aCpl.p !== null && Math.abs(aCpl.p - 8 / 12) < 1e-9);
+  const aLhtb = tra.of("PICKUP_FAILED", { productCode: "PDV-A" });
+  assert.equal(aLhtb.basis, "PRODUCT_ALL", "trạng thái mã A chưa có quan sát ⇒ tỷ lệ chung của CHÍNH mã A, không xuống toàn shop");
+  assert.ok(aLhtb.p !== null && Math.abs(aLhtb.p - 8 / 12) < 1e-9);
+  const nCpl = tra.of("WAITING_REDELIVERY", { productCode: "PDV-N" });
+  assert.equal(nCpl.p, null, "mã chưa có kết cục nào của CHÍNH nó ⇒ CHƯA ĐO ĐƯỢC — không mượn 8/12 của mã A");
+  assert.equal(nCpl.basis, "NONE");
+  assert.equal(tra.of("WAITING_REDELIVERY", { productCode: null }).basis, "GLOBAL_STATE", "đơn không lần được về một mã (con số toàn shop) vẫn có bậc toàn shop");
+  const aChuaGui = tra.of(NOT_SHIPPED_STATE, { productCode: "PDV-A" });
+  assert.equal(aChuaGui.basis, "PRODUCT_STATE", "P(chưa rời kho) học RIÊNG mã A — trước V4 là một con số chung cả shop (~25% trên production)");
+  assert.ok(aChuaGui.p !== null && Math.abs(aChuaGui.p - 8 / 12) < 1e-9, "12 đơn chốt đã kết thúc của mã A, 8 giao được");
+  assert.equal(tra.of(NOT_SHIPPED_STATE, { productCode: "PDV-N" }).p, null, "mã chưa có đơn chốt nào kết thúc ⇒ chưa đo được, không mượn");
 }
 
 /* ───── 4 · Chấm cohort theo ORDER_OUTCOME, không theo stage / mã thô ───── */
@@ -265,11 +295,17 @@ export async function testScoringUsesOrderOutcome(db: Db) {
   assert.equal(A.active, 2);
   assert.equal(A.activeByState.WAITING_REDELIVERY, 1);
   assert.equal(A.activeByState.PICKUP_FAILED, 1, "trạng thái con của đơn đang giao đọc từ chứng từ ĐVVC");
-  assert.equal(A.unmodelledActive, 1, "“lấy hàng thất bại” chưa đủ mẫu ⇒ NGOÀI ước tính, không gán xác suất đoán");
-  assert.ok(Math.abs(A.projectedDelivered - (1 + 8 / 12)) < 1e-2, "ước tính giao được = 1 đã giao + 1 × P(chờ phát lại = 8/12)");
+  /*
+    V4: “lấy hàng thất bại” CHƯA có quan sát nào của mã A ⇒ lùi về tỷ lệ chung của CHÍNH mã A
+    (`PRODUCT_ALL` = 8/12), không xuống bậc toàn shop. Đơn ngoài ước tính thật sự (mã không có dữ
+    liệu riêng nào) được khoá ở mã U và mã N bên dưới.
+  */
+  assert.equal(A.unmodelledActive, 0, "trạng thái mã A chưa có mẫu ⇒ tỷ lệ chung của CHÍNH mã A, không phải ngoài ước tính");
+  assert.ok(Math.abs(A.projectedDelivered - (1 + 16 / 12)) < 1e-2, "ước tính giao được = 1 đã giao + 2 × 8/12 — cả hai xác suất đều của CHÍNH mã A");
+  assert.equal(A.projectedFromGlobal, 0, "mã A không mượn một chút xác suất nào của toàn shop");
   assert.equal(A.projectedRate, projectedRateOf(A), "cùng một hàm");
-  assert.equal(A.projectedRate, Math.round(((1 + 8 / 12) / 2) * 1000) / 10, "mẫu số = 3 đã gửi − 1 ngoài ước tính");
-  assert.equal(A.unmodelledRevenue, 500_000, "doanh số của đơn ngoài ước tính được nêu riêng");
+  assert.equal(A.projectedRate, Math.round(((1 + 16 / 12) / 3) * 1000) / 10, "mẫu số = 3 đã gửi, không đơn nào ngoài ước tính");
+  assert.equal(A.unmodelledRevenue, 0);
   assert.ok(A.projectedDeliveredRevenue >= 500_000 + Math.round(500_000 * (8 / 12)) - 1, "DT GTC ƯT ≥ đơn đã giao + đơn chờ phát lại × P (chưa gửi cộng thêm nếu P(chưa gửi) đo được)");
   assert.ok(A.projectedCogs >= 200_000 + Math.round(200_000 * (8 / 12)) - 1, "giá vốn cân cùng cách với doanh thu");
   assert.equal(A.cogsUnknownQty, 0);
@@ -352,7 +388,7 @@ export async function testNominalParityWithActiveOrders() {
   assert.equal(A.expectedRevenue, hA.projectedDeliveredRevenue, "DT GTC ƯT = doanh thu cân theo từng đơn của hợp đồng, KHÔNG phải doanh số × (1 − r)");
   assert.notEqual(A.expectedRevenue, Math.round(A.grossSales * (1 - (A.returnRate ?? 0) / 100)), "và nó KHÁC doanh số POS × tỷ lệ — nếu bằng thì bài này chưa chứng minh được gì");
   assert.equal(A.expectedCogs, hA.projectedCogs);
-  assert.equal(A.unmodelledRevenue, 500_000);
+  assert.equal(A.unmodelledRevenue, 0, "V4: mọi đơn của A cân bằng số của chính A");
   assert.equal(A.projection?.pending, 1);
   assert.equal(A.cogsKnown, true);
 
@@ -389,7 +425,10 @@ export async function testNominalParityWithActiveOrders() {
   assert.ok(hN, "hợp đồng phải thấy mã N");
   assert.equal(hN.deliveredActual + hN.failedActual, 0, "mã N chưa đơn nào kết thúc — đó là điều kiện của ca này");
   assert.ok(hN.active > 0, "nhưng nó CÓ đơn đang giao");
-  assert.notEqual(hN.projectedRate, null, "và hợp đồng VẪN ra một con số — nếu null thì bài này chưa thử được điều kiện mới");
+  // V4: hợp đồng KHÔNG còn mượn 8/12 của mã A cho mã N — hai đơn đang chạy của N là ngoài ước tính.
+  assert.equal(hN.projectedRate, null, "mã chưa có dữ liệu riêng ⇒ CHƯA ĐO ĐƯỢC ngay ở hợp đồng, không mượn của mã khác");
+  assert.equal(hN.unmodelledActive, hN.active, "mọi đơn đang chạy của N nằm ngoài ước tính");
+  assert.equal(hN.projectedFromGlobal, 0);
 
   const N = bao.rows.find((r) => r.productId === `${P}p-N`)!;
   assert.ok(N, "bảng lợi nhuận phải thấy mã N");
@@ -560,5 +599,5 @@ export async function testProjectedDeliveryV3(db: Db) {
     await don(db);
     clearMemo();
   }
-  console.log("✓ PROJECTED_GTC_V3: nhãn và cohort theo ORDER_OUTCOME (30K / 501 chiều hoàn / 60K / 503 đều là hoàn) · kiện chưa chín ngoài tập học · ngoài ước tính rời mẫu số, quá nửa ⇒ chưa đo được · DT/giá vốn cân theo từng đơn ở bảng lợi nhuận · tổng hai trang cùng số · thử ngược tách thời gian · một hàm cho ba tỷ lệ QC · một bộ ngưỡng");
+  console.log("✓ PROJECTED_GTC_V4: mã nào ước tính bằng số của mã đó (không bậc toàn shop) · nhãn và cohort theo ORDER_OUTCOME (30K / 501 chiều hoàn / 60K / 503 đều là hoàn) · kiện chưa chín ngoài tập học · ngoài ước tính rời mẫu số, quá nửa ⇒ chưa đo được · DT/giá vốn cân theo từng đơn ở bảng lợi nhuận · tổng hai trang cùng số · thử ngược tách thời gian · một hàm cho ba tỷ lệ QC · một bộ ngưỡng");
 }

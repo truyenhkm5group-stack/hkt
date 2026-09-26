@@ -227,7 +227,7 @@ export type NominalRow = {
   deliveryRate: number | null;
   /**
    * `override`   — chủ shop gõ tay, THẮNG mọi nguồn khác.
-   * `projected`  — hợp đồng `PROJECTED_GTC_V3`: mỗi đơn cân theo xác suất của CHÍNH trạng thái ĐVVC nó đang ở.
+   * `projected`  — hợp đồng `PROJECTED_GTC_V4`: mỗi đơn cân theo xác suất của CHÍNH trạng thái ĐVVC nó đang ở.
    * `unmeasured` — mô hình có cohort nhưng CHƯA ĐO ĐƯỢC (phần ngoài ước tính quá lớn / chưa đủ mẫu).
    *                KHÔNG lùi về lịch sử hay giả định: một con số đoán trông y hệt con số đo được.
    * `blended`    — mã CHƯA CHÍN: số đo của CHÍNH MÃ co ngót về tỷ lệ khai ở Giả định.

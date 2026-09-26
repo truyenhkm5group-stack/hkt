@@ -255,7 +255,7 @@ export function makeReturnRateColumns(probs: StateProb[]): ColumnDef<ReturnRateR
         Người đọc không có cách nào biết cột nào là ước tính.
 
         Ba thứ đã đổi nên nó được quay lại:
-          1. con số đến từ `PROJECTED_GTC_V3` — mỗi đơn cân theo xác suất của CHÍNH trạng thái ĐVVC
+          1. con số đến từ `PROJECTED_GTC_V4` — mỗi đơn cân theo xác suất của CHÍNH trạng thái ĐVVC
              nó đang ở, điều kiện hoá theo mã hàng và tuổi kiện khi đủ mẫu;
           2. ô mang nhãn "ước tính", KHÔNG dùng thang màu đạt/không đạt của cột thực tế;
           3. hover ra đúng phép tính: từng trạng thái, từng xác suất, từng cỡ mẫu.

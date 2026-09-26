@@ -58,9 +58,14 @@ export function testConditioningHierarchy() {
     Đảo hai bậc đầu (lấy toàn shop trước mã hàng) vẫn cho ra một con số hợp lý, và sẽ không có gì
     đỏ lên — chỉ là mã Q002 nhận xác suất của mã Q004.
   */
+  /*
+    V4 (chủ shop chốt 26/09/2026) chèn `PRODUCT_ALL` — tỷ lệ chung của CHÍNH mã — ngay sau hai bậc
+    theo mã: có mã thì hết bậc của mã là dừng, không bao giờ xuống hai bậc toàn shop (các bậc ấy
+    chỉ còn cho đơn không lần được về một mã). `tests/projected-delivery.test.ts` khoá hành vi đó.
+  */
   assert.deepEqual(
     [...PROBABILITY_FALLBACK],
-    ["PRODUCT_STATE_AGE", "PRODUCT_STATE", "GLOBAL_STATE_AGE", "GLOBAL_STATE", "NONE"],
+    ["PRODUCT_STATE_AGE", "PRODUCT_STATE", "PRODUCT_ALL", "GLOBAL_STATE_AGE", "GLOBAL_STATE", "NONE"],
     "bậc lùi phải đi từ HẸP tới RỘNG rồi mới tới 'chưa đo được' — không có bậc nào trả về một con số mặc định",
   );
   assert.equal(PROBABILITY_FALLBACK[PROBABILITY_FALLBACK.length - 1], "NONE", "bậc cuối phải là THỪA NHẬN KHÔNG BIẾT, không phải một giá trị đoán");

@@ -487,19 +487,11 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
   const adMap = await adMarketerMap(lines.map((l) => l.ad_id).filter((x): x is string => Boolean(x)));
 
   const rowByProduct = new Map<string, NominalRow>(nominal.rows.map((r) => [r.productId, r]));
-  // Mã hàng dùng để điều kiện hoá xác suất CHỈ khi đơn thuộc ĐÚNG MỘT mã — cùng luật với hợp đồng.
-  const codesOfOrder = new Map<string, Set<string>>();
   const linesOfOrder = new Map<string, number>();
   for (const l of lines) {
     if (!l.pid) continue;
     linesOfOrder.set(l.order_id, (linesOfOrder.get(l.order_id) ?? 0) + 1);
-    const code = (l.code ?? "").trim();
-    if (code) codesOfOrder.set(l.order_id, (codesOfOrder.get(l.order_id) ?? new Set()).add(code));
   }
-  const uniqueCode = (orderId: string) => {
-    const s = codesOfOrder.get(orderId);
-    return s && s.size === 1 ? [...s][0] : null;
-  };
 
   // Tỷ trọng QC trên từng mã — đầu vào bậc lùi của `attributionShares`, đúng như bảng marketer của báo cáo.
   const adShareByProduct = new Map<string, Map<string | null, number>>();
@@ -547,7 +539,8 @@ async function slicesUncached(period: Period, basis: TimeBasis, withStock: boole
     const r = row.returnRate === null ? 0 : Math.min(Math.max(row.returnRate, 0), 100) / 100;
     const slots: Slot[] = [];
     plines.forEach((l, idx) => {
-      const share = row.revenueBasis === "ORDER_LEVEL" ? orderDeliveryShare({ outcome: l.outcome, con: l.con, productCode: uniqueCode(l.order_id), ageHours: l.age_hours === null ? null : Number(l.age_hours) }, lookup) : 1 - r;
+      // Mã của CHÍNH dòng, kể cả đơn nhiều mã — cùng luật V4 với dòng theo mã của hợp đồng dự báo.
+      const share = row.revenueBasis === "ORDER_LEVEL" ? orderDeliveryShare({ outcome: l.outcome, con: l.con, productCode: (l.code ?? "").trim() || null, ageHours: l.age_hours === null ? null : Number(l.age_hours) }, lookup) : 1 - r;
       const w = share ?? 0;
       /*
         CƯỚC KỲ VỌNG CỦA CHÍNH ĐƠN: giao được thì cước gửi, không thì cước gửi + phí hoàn — cùng hai

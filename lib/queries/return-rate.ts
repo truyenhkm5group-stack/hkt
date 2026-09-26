@@ -656,12 +656,12 @@ export type ReturnRateRow = {
   inTransit: number;
   /** Đang chờ phát lại (giao thất bại chưa kết thúc) */
   failed: number;
-  /** Tỷ lệ hoàn ước tính (%) = 100 − `expectedSuccessRate`, cùng hợp đồng `PROJECTED_GTC_V3`. */
+  /** Tỷ lệ hoàn ước tính (%) = 100 − `expectedSuccessRate`, cùng hợp đồng `PROJECTED_GTC_V4`. */
   expectedRate: number | null;
   /** TỶ LỆ GIAO THÀNH CÔNG (%) = giao thành công (COD thực > 100K) ÷ (giao thành công + không thành công) trên đơn đã kết thúc; null nếu chưa có đơn kết thúc */
   successRate: number | null;
   /**
-   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V3` ở grain MẪU MÃ. Mỗi đơn đang chạy cân theo xác
+   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V4` ở grain MẪU MÃ. Mỗi đơn đang chạy cân theo xác
    * suất của CHÍNH trạng thái ĐVVC nó đang ở. `null` = CHƯA ĐO ĐƯỢC, không phải 0%.
    */
   expectedSuccessRate: number | null;
@@ -996,7 +996,7 @@ export type ReturnRateSummary = {
   /** TỶ LỆ GIAO THÀNH CÔNG chung (%) = giao thành công ÷ (giao thành công + không thành công) */
   successRate: number | null;
   /**
-   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V3`, xem `lib/constants/projected-delivery.ts`.
+   * TỶ LỆ GTC ƯỚC TÍNH (%) — `PROJECTED_GTC_V4`, xem `lib/constants/projected-delivery.ts`.
    * `null` = CHƯA ĐO ĐƯỢC (cohort rỗng, mô hình chưa dự báo được, hoặc phần ngoài ước tính quá lớn), KHÔNG phải 0%.
    */
   expectedSuccessRate: number | null;

@@ -34,7 +34,7 @@ export function testNoHardcodedProbability() {
   assert.equal(confidenceOf(CONFIDENCE_THRESHOLDS.MEDIUM), "MEDIUM");
   assert.equal(confidenceOf(CONFIDENCE_THRESHOLDS.LOW), "LOW");
   assert.equal(confidenceOf(CONFIDENCE_THRESHOLDS.LOW - 1), "INSUFFICIENT_DATA", "dưới ngưỡng thì một kiện đổi kết cục làm tỷ lệ nhảy hơn 10 điểm — đó là tiếng ồn, không phải xác suất");
-  assert.equal(PROJECTED_GTC_VERSION, "PROJECTED_GTC_V3", "đổi công thức phải đổi phiên bản, để kỳ cũ không bị đọc bằng luật mới");
+  assert.equal(PROJECTED_GTC_VERSION, "PROJECTED_GTC_V4", "đổi công thức phải đổi phiên bản, để kỳ cũ không bị đọc bằng luật mới — V4 (26/09/2026): mã nào ước tính bằng số của mã đó");
 }
 
 /* ───── 2 · Xác suất học từ lịch sử: một vận đơn một quan sát ───── */
