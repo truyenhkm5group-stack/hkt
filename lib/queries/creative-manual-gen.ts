@@ -1,8 +1,8 @@
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { schema, type Db } from "@/db";
 import { memo } from "@/lib/cache";
 import { CREATIVE_HARD_LIMITS, INSTANT_PUBLISH, PIXEL_SAFE_SOURCE_KINDS, estimateImageUsd, normalizeCreativeConfig, usdToVndRounded, type ManualGenImageStatus, type ManualGenKind } from "@/lib/constants/creative-loop";
-import { vnDay } from "@/lib/constants/marketing-decision-ledger";
+import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { manualGenSpendToday } from "@/lib/creative/generate";
 import { resolveManualTargetDay } from "@/lib/creative/manual";
 import { instantPublishBlockers, parseManualDesignSpec } from "@/lib/creative/manual-gen";
@@ -10,6 +10,7 @@ import { defaultNames, loadNamingContext, nextNameSeq, type DefaultNames } from 
 import { batchWindow } from "@/lib/creative/schedule";
 import { loadDesignInputs } from "@/lib/queries/creative-design";
 import { env } from "@/lib/env";
+import { vnStartOfDay } from "@/lib/format";
 import { fanpageDisplayName, readCurrentCreativeConfig } from "@/lib/queries/creative-loop";
 
 /**
@@ -110,19 +111,32 @@ export type ManualGenPanel = {
   pageName: string | null;
   /** Còn ảnh chờ vẽ / đang vẽ ⇒ màn hình tự tải lại để hiện tiến độ. */
   drawing: boolean;
+  /** Ngày đang lọc (`YYYY-MM-DD`, giờ VN) — "Kết quả gen tay" và tiền trong ngày đều theo ngày này. */
+  day: string;
+  isToday: boolean;
 };
 
-const RECENT_RUNS = 8;
+/** Số lượt tối đa hiện cho MỘT ngày (mới → cũ) — một ngày bấm nhiều hơn thế là hiếm, và trang vẫn phải nhẹ. */
+const RUNS_PER_DAY = 50;
 
-export async function listManualGenRuns(db: Db, limit = RECENT_RUNS, rate: number = env.facebook.usdToVnd): Promise<ManualGenRunCard[]> {
+/** Khoảng `[00:00, 24:00)` giờ Việt Nam của một ngày. */
+function vnDayRange(day: string): { from: Date; to: Date } {
+  const from = vnStartOfDay(day);
+  return { from, to: vnStartOfDay(shiftDay(day, 1)) };
+}
+
+/** Các lượt gen tay TẠO trong ngày `day` (giờ VN), mới → cũ. `day = null` ⇒ các lượt gần nhất bất kể ngày. */
+export async function listManualGenRuns(db: Db, limit = RUNS_PER_DAY, rate: number = env.facebook.usdToVnd, day: string | null = null): Promise<ManualGenRunCard[]> {
   const g = schema.creativeManualGens;
   const s = schema.creativeSources;
+  const range = day ? vnDayRange(day) : null;
   const runs = await db
     .select({ run: g, productName: schema.products.name })
     .from(g)
     .leftJoin(schema.products, eq(schema.products.id, g.productId))
+    .where(range ? and(gte(g.createdAt, range.from), lt(g.createdAt, range.to)) : undefined)
     .orderBy(desc(g.createdAt))
-    .limit(Math.max(1, Math.min(50, limit)));
+    .limit(Math.max(1, Math.min(RUNS_PER_DAY, limit)));
   if (runs.length === 0) return [];
   const ids = runs.map((r) => r.run.id);
   const srcIds = [...new Set(runs.flatMap((r) => [r.run.productPhotoSourceId, r.run.ownAdSourceId].filter((x): x is string => !!x)))];
@@ -241,8 +255,37 @@ export async function listDesignInspirations(db: Db, now: Date): Promise<DesignI
   });
 }
 
-/** Toàn bộ dữ liệu của khu gen tay cho tab Duyệt lô. */
-export async function loadManualGenPanel(db: Db, now: Date): Promise<ManualGenPanel> {
+/** Một ngày CÓ kết quả ở tab "Duyệt mẫu": số lượt gen tay · số ảnh đã vẽ · số lô chạy ngày ấy. */
+export type ReviewDayOption = { day: string; runs: number; images: number; batches: number };
+
+/**
+ * Dải ngày của bộ lọc "Duyệt mẫu" — các ngày gần nhất CÓ kết quả (lượt gen tay tạo trong ngày, hoặc lô có ngày chạy
+ * là ngày ấy), mới → cũ, tối đa `REVIEW_DAY.stripDays` ngày; HÔM NAY luôn có mặt (kể cả khi chưa có gì) để người
+ * luôn có đường về. Chỉ đếm, không đọc ảnh.
+ */
+export async function listReviewDays(db: Db, today: string, limit: number): Promise<ReviewDayOption[]> {
+  const g = schema.creativeManualGens;
+  const im = schema.creativeManualGenImages;
+  const b = schema.creativeBatches;
+  const vnDate = sql<string>`to_char(${g.createdAt} at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')`;
+  const [genDays, batchDays] = await Promise.all([
+    db
+      .select({ day: vnDate, runs: sql<number>`count(distinct ${g.id})::int`, images: sql<number>`count(${im.imageId})::int` })
+      .from(g)
+      .leftJoin(im, eq(im.genId, g.id))
+      .groupBy(vnDate)
+      .orderBy(desc(vnDate))
+      .limit(limit),
+    db.select({ day: b.batchDay, batches: sql<number>`count(*)::int` }).from(b).where(sql`${b.batchDay} <= ${today}`).groupBy(b.batchDay).orderBy(desc(b.batchDay)).limit(limit),
+  ]);
+  const byDay = new Map<string, ReviewDayOption>([[today, { day: today, runs: 0, images: 0, batches: 0 }]]);
+  for (const r of genDays) byDay.set(r.day, { ...(byDay.get(r.day) ?? { day: r.day, runs: 0, images: 0, batches: 0 }), runs: Number(r.runs), images: Number(r.images) });
+  for (const r of batchDays) byDay.set(r.day, { ...(byDay.get(r.day) ?? { day: r.day, runs: 0, images: 0, batches: 0 }), batches: Number(r.batches) });
+  return [...byDay.values()].sort((x, y) => (x.day < y.day ? 1 : x.day > y.day ? -1 : 0)).slice(0, limit);
+}
+
+/** Toàn bộ dữ liệu của khu gen tay cho tab Duyệt mẫu — "Kết quả gen tay" và tiền trong ngày theo ngày `day` (giờ VN). */
+export async function loadManualGenPanel(db: Db, now: Date, day: string = vnDay(now)): Promise<ManualGenPanel> {
   const { config } = await readCurrentCreativeConfig(db);
   const rate = env.facebook.usdToVnd;
   const targetDay = await resolveManualTargetDay(db, now, config);
@@ -250,10 +293,11 @@ export async function loadManualGenPanel(db: Db, now: Date): Promise<ManualGenPa
   const [batch] = await db.select().from(B).where(and(eq(B.batchDay, targetDay), eq(B.kind, "LOOP"))).limit(1);
   const namingCfg = batch ? normalizeCreativeConfig(batch.configSnapshot).config : config;
   const [runs, sources, inspirations, today, ctx, predictedSeq, pageName, blockers] = await Promise.all([
-    listManualGenRuns(db, RECENT_RUNS, rate),
+    listManualGenRuns(db, RUNS_PER_DAY, rate, day),
     listPixelSafeSourceOptions(db),
     listDesignInspirations(db, now),
-    manualGenSpendToday(db, now),
+    // Tiền gen tay của NGÀY ĐANG LỌC: hàm đo "ngày VN chứa mốc này", nên đưa trưa ngày ấy.
+    manualGenSpendToday(db, day === vnDay(now) ? now : new Date(`${day}T12:00:00+07:00`)),
     loadNamingContext(db, namingCfg),
     batch ? nextNameSeq(db, batch.id) : Promise.resolve(1),
     fanpageDisplayName(db, namingCfg.pageId),
@@ -290,5 +334,7 @@ export async function loadManualGenPanel(db: Db, now: Date): Promise<ManualGenPa
     defaults: defaultNames(ctx, targetDay, predictedSeq),
     pageName,
     drawing: runs.some((r) => (r.counts.PLANNED ?? 0) + (r.counts.DRAWING ?? 0) > 0),
+    day,
+    isToday: day === vnDay(now),
   };
 }

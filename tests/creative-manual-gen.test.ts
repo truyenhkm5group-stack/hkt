@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { and, eq, inArray, like } from "drizzle-orm";
 import { schema, type Db } from "@/db";
-import { DEFAULT_CREATIVE_CONFIG, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
+import { DEFAULT_CREATIVE_CONFIG, INSTANT_PUBLISH, MANUAL_GEN, MANUAL_GEN_RUN, MANUAL_SLOT_BASE, NAMING_TEMPLATE_KEY, estimateImageUsd, parseGenes, parseReviewDay, usdToVndRounded, type CreativeLoopConfig } from "@/lib/constants/creative-loop";
 import { shiftDay, vnDay } from "@/lib/constants/marketing-decision-ledger";
 import { approvalDigest, batchTicket, verifyBatchTicket } from "@/lib/creative/approval";
 import type { VariantCaptioner } from "@/lib/creative/caption";
@@ -12,6 +12,8 @@ import { manualTargetDay } from "@/lib/creative/manual";
 import { drawManualGen, instantWindow, manualGenGenes, manualGenPrompt, manualGenRunCount, pickName, promoteManualGenImage, publishManualGenImageInstant, reviewManualGenImage, startManualGen } from "@/lib/creative/manual-gen";
 import { adsetDefaultName, agePart, assignBatchNames, ddMm, defaultNames, genderPart, geoPart, refreshNamingTemplate, saveVariantNamesCore, type NamingContext } from "@/lib/creative/naming";
 import { batchApprovalContent, isLegacyStructure, nextStep, publishNames, type CreativeWriter } from "@/lib/creative/publish";
+import { listRecentBatches } from "@/lib/queries/creative-loop";
+import { listManualGenRuns, listReviewDays, loadManualGenPanel } from "@/lib/queries/creative-manual-gen";
 import { batchWindow } from "@/lib/creative/schedule";
 import { applyVariantSelectionCore, planSelection } from "@/lib/creative/selection";
 import { testCampaignFields, type TemplateAd } from "@/lib/integrations/facebook/ads-write";
@@ -85,6 +87,13 @@ export function testCreativeManualGenPure() {
   assert.equal(usdToVndRounded(null, 25_500), null, "ảnh không có giá ⇒ null, không thành 0 đồng");
   assert.equal(usdToVndRounded(0, 25_500), 0, "0 thật vẫn là 0");
 
+  // ── Bộ lọc ngày của tab "Duyệt mẫu" (thuần): vắng / hỏng / ngày không có trên lịch ⇒ HÔM NAY ──
+  assert.equal(parseReviewDay(null, "2031-05-05"), "2031-05-05");
+  assert.equal(parseReviewDay("2031-05-01", "2031-05-05"), "2031-05-01");
+  assert.equal(parseReviewDay("2031-02-30", "2031-05-05"), "2031-05-05", "ngày không có trên lịch ⇒ hôm nay, không trượt sang tháng sau");
+  assert.equal(parseReviewDay("01/05/2031", "2031-05-05"), "2031-05-05");
+  assert.equal(parseReviewDay(" 2031-05-01 ", "2031-05-05"), "2031-05-01");
+
   // ── Khung giờ "Đăng camp" (thuần) ──
   const t0 = new Date("2031-05-05T03:00:00Z");
   const ngay = instantWindow(t0, null, { testDays: 1 });
@@ -157,7 +166,7 @@ export function testCreativeManualGenPure() {
   assert.equal(isLegacyStructure({ fbAdsetId: "a", fbCampaignId: null }), true);
   assert.deepEqual(publishNames("2026-09-25", { slot: 3, campaignName: "", adsetName: "N", adName: "" }), { creative: "VM 2026-09-25 #3", campaign: "VM 2026-09-25 #3", adset: "N", ad: "VM 2026-09-25 #3" }, "tên rỗng ⇒ tên cũ");
 
-  console.log("  ✓ Gen tay (thuần): 10 bộ gen đủ sáu khoá, khác nhau · ý tưởng người đứng đầu + nhắc lại cuối · số ảnh kẹp min…max · khung giờ Đăng camp · tiền CHƯA BIẾT giữ null · ba khuôn tên (mã lạ in nguyên, thiếu TKQC để trống + nói ra) · chọn bài · chiến dịch riêng tạo TẮT, CBO bị từ chối");
+  console.log("  ✓ Gen tay (thuần): bộ lọc ngày Duyệt mẫu · 10 bộ gen đủ sáu khoá, khác nhau · ý tưởng người đứng đầu + nhắc lại cuối · số ảnh kẹp min…max · khung giờ Đăng camp · tiền CHƯA BIẾT giữ null · ba khuôn tên (mã lạ in nguyên, thiếu TKQC để trống + nói ra) · chọn bài · chiến dịch riêng tạo TẮT, CBO bị từ chối");
 }
 
 // ═══════════════════════════ PGLITE ═══════════════════════════
@@ -265,6 +274,20 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.ok(Math.abs(tay1.usd - tay0.usd - 10 * unit) < 1e-6, "tiền theo giá máy vẽ trả về");
     // Chạy lại: không ảnh nào vẽ hai lần.
     assert.equal((await drawManualGen(db, { genId: s1.genId, imageClient })).drawn, 0);
+
+    // ── (b2') LỌC THEO NGÀY: lượt tạo hôm nay chỉ hiện ở hôm nay; hôm qua thì ẩn ──
+    // Ngày dựng TỪ CHÍNH DỮ LIỆU (mốc tạo của lượt), không từ đồng hồ — lượt tạo 23:59:59 không làm bài đỏ lúc 00:00 (mục 50).
+    const [runS1] = await db.select({ createdAt: schema.creativeManualGens.createdAt }).from(schema.creativeManualGens).where(eq(schema.creativeManualGens.id, s1.genId));
+    const homNay = vnDay(runS1.createdAt);
+    const homQua = shiftDay(homNay, -1);
+    assert.ok((await listManualGenRuns(db, 50, 25_500, homNay)).some((r) => r.id === s1.genId), "lượt tạo hôm nay hiện khi lọc hôm nay");
+    assert.ok(!(await listManualGenRuns(db, 50, 25_500, homQua)).some((r) => r.id === s1.genId), "lọc hôm qua ⇒ lượt hôm nay ẨN");
+    const panelHomQua = await loadManualGenPanel(db, new Date(), homQua);
+    assert.ok(!panelHomQua.isToday && panelHomQua.day === homQua && !panelHomQua.runs.some((r) => r.id === s1.genId), "khối gen tay theo đúng ngày đang lọc");
+    const dai = await listReviewDays(db, homNay, 14);
+    assert.equal(dai[0]?.day, homNay, "dải ngày: hôm nay đứng đầu (mới → cũ)");
+    assert.ok((dai[0]?.runs ?? 0) >= 1 && (dai[0]?.images ?? 0) >= 10, "dải ngày đếm lượt và ảnh đã vẽ của hôm nay");
+    assert.ok(dai.every((d, i) => i === 0 || d.day < dai[i - 1].day), "dải ngày sắp mới → cũ");
 
     // ── (b3) SỐ ẢNH NGƯỜI CHỌN + ẢNH TẢI LÊN đi kèm ảnh sản phẩm thật ──
     const s2 = await startManualGen(db, { productPhotoSourceId: `${P}photo`, ownAdSourceId: null, idea: "dáng như ảnh tôi tải", count: 3, uploads: [fakeJpeg(7_001)] }, cfgKhongTran, actor);
@@ -442,6 +465,10 @@ export async function testCreativeManualGenDb(db: Db) {
     assert.equal(ic1.status, "PROMOTED");
     const lai2 = await publishManualGenImageInstant(db, camInput(cam[0].id, null), cfgOf(), actor, t1, { writer: fbGia, env: ON, killSwitch: khongKeo });
     assert.ok(!lai2.ok, "một ảnh không đăng hai lần");
+
+    // Lịch sử lô lọc theo NGÀY CHẠY: bài hẹn giờ hiện ở ngày chạy của nó, không hiện ở hôm trước.
+    assert.ok((await listRecentBatches(db, 50, bc1.batchDay)).some((b) => b.id === bc1.id && b.kind === "INSTANT"), "lịch sử lô của ngày chạy có bài đăng lẻ");
+    assert.ok(!(await listRecentBatches(db, 50, shiftDay(bc1.batchDay, -1))).some((b) => b.id === bc1.id), "ngày khác ⇒ ẩn");
 
     // (f3) Chạy ngay ⇒ lô INSTANT THỨ HAI cùng ngày (chỉ mục duy nhất chỉ khoá lô hằng ngày), bắt đầu sau leadSeconds.
     fbCalls.length = 0;

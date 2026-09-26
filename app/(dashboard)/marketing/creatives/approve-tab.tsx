@@ -5,6 +5,7 @@ import { Countdown, ExpandText } from "@/app/(dashboard)/marketing/creatives/cre
 import { EditCopyButton } from "@/app/(dashboard)/marketing/creatives/copy-editor";
 import { ManualForm } from "@/app/(dashboard)/marketing/creatives/manual-form";
 import { ManualGenPanel } from "@/app/(dashboard)/marketing/creatives/manual-gen-panel";
+import { ReviewDayFilter } from "@/app/(dashboard)/marketing/creatives/review-day-filter";
 import { EditNamesButton } from "@/app/(dashboard)/marketing/creatives/names-editor";
 import { VariantSelectCheckbox, VariantSelectionBar, VariantSelectionProvider } from "@/app/(dashboard)/marketing/creatives/variant-select";
 import { AdPreview, DnaChips, GeneChips, ModeChip, VariantImage } from "@/app/(dashboard)/marketing/creatives/variant-bits";
@@ -16,6 +17,7 @@ import {
   CREATIVE_VERDICT_LABEL,
   CREATIVE_WRITE_ACTION_LABEL,
   PUBLISH_REQUIRED_FIELDS,
+  REVIEW_DAY,
   VARIANT_STATUSES,
   VARIANT_STATUS_LABEL,
   type BatchStatus,
@@ -30,6 +32,7 @@ import { listCreativeProductOptions } from "@/lib/queries/creative-sources";
 import { adsWriteDisabledReason } from "@/lib/integrations/facebook/ads-write";
 import { formatDate, formatDateTime, formatNumber, formatVND, vnShortStamp } from "@/lib/format";
 import { fanpageDisplayName, getBatchDetail, listRecentBatches, readCurrentCreativeConfig, type BatchDetail, type BatchSummary, type PendingBatch, type VariantCard } from "@/lib/queries/creative-loop";
+import { listReviewDays } from "@/lib/queries/creative-manual-gen";
 import { cn } from "@/lib/utils";
 
 /**
@@ -325,20 +328,20 @@ function PendingBlock({ pending, now, canApprove, canEdit, pageName }: { pending
   );
 }
 
-function HistoryTable({ rows, openId }: { rows: BatchSummary[]; openId: string | null }) {
+function HistoryTable({ rows, openId, day, isToday }: { rows: BatchSummary[]; openId: string | null; day: string; isToday: boolean }) {
   return (
     <SectionCard
       title={
         <span className="flex items-center gap-1.5">
-          <History className="size-4" /> Lịch sử lô gần đây
+          <History className="size-4" /> Lịch sử lô — {isToday ? "hôm nay" : `ngày ${formatDate(day)}`}
         </span>
       }
-      description="Bấm một lô để xem máy đã định làm gì với Facebook và cái gì chặn nó."
+      description="Lô hằng ngày và các bài Đăng camp có NGÀY CHẠY là ngày đang lọc. Bấm một lô để xem máy đã định làm gì với Facebook và cái gì chặn nó."
       padded={false}
     >
       {rows.length === 0 ? (
         <div className="p-5">
-          <EmptyState title="Chưa có lô nào" description="Máy chưa lập lô nào. Lô đầu tiên xuất hiện sau khi bật vòng mẫu và có ảnh sản phẩm thật." />
+          <EmptyState title={isToday ? "Hôm nay chưa có lô nào chạy" : `Không có lô nào chạy ngày ${formatDate(day)}`} description="Chọn ngày khác ở thanh “Kết quả ngày” phía trên để xem lô của ngày ấy." />
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -501,6 +504,8 @@ export async function ApproveTab({
   canApprove,
   canEdit,
   preselectProductId = null,
+  day,
+  today,
 }: {
   pending: PendingBatch | null;
   batchId: string | null;
@@ -508,16 +513,20 @@ export async function ApproveTab({
   canEdit: boolean;
   /** `?product=<id>` (đề xuất đẩy tồn, Agent X): mã được CHỌN SẴN ở khối Gen ảnh bằng tay — máy không tự vẽ. */
   preselectProductId?: string | null;
+  /** Ngày đang lọc (`?ngay=`, giờ VN) — "Kết quả gen tay" và "Lịch sử lô" chỉ hiện ngày này. */
+  day: string;
+  today: string;
 }) {
   const db = await getDb();
   const now = new Date();
-  const [recent, detail, current, products, pageName] = await Promise.all([
-    listRecentBatches(db, 14),
+  const [recent, detail, current, products, pageName, days] = await Promise.all([
+    listRecentBatches(db, 50, day),
     batchId ? getBatchDetail(db, batchId, now) : Promise.resolve(null),
     readCurrentCreativeConfig(db),
     canEdit ? listCreativeProductOptions() : Promise.resolve([]),
     // Fanpage theo cấu hình CHỤP của lô — đúng page sẽ đứng tên bài khi lô này đăng.
     pending ? fanpageDisplayName(db, pending.config.pageId) : Promise.resolve(null),
+    listReviewDays(db, today, REVIEW_DAY.stripDays),
   ]);
   // Lô mà mẫu tự làm sẽ vào: lô gần nhất CÒN hạn duyệt — cùng hàm với đường ghi (`lib/creative/manual.ts`).
   const manualDay = await resolveManualTargetDay(db, now, current.config);
@@ -525,6 +534,7 @@ export async function ApproveTab({
 
   return (
     <div className="space-y-4">
+      <ReviewDayFilter day={day} today={today} days={days} />
       {canEdit ? (
         <SectionCard
           title="Mẫu tự làm"
@@ -552,13 +562,13 @@ export async function ApproveTab({
       )}
 
       <div id="gen-tay" className="scroll-mt-4">
-        <ManualGenPanel canEdit={canEdit} canPublish={canEdit && canApprove} preselectProductId={preselectProductId} />
+        <ManualGenPanel canEdit={canEdit} canPublish={canEdit && canApprove} preselectProductId={preselectProductId} day={day} />
       </div>
 
       {batchId && !detail ? <EmptyState title="Không tìm thấy lô" description="Lô trong đường dẫn không còn tồn tại." /> : null}
       {detail ? <BatchDetailBlock d={detail} /> : null}
 
-      <HistoryTable rows={recent} openId={batchId} />
+      <HistoryTable rows={recent} openId={batchId} day={day} isToday={day === today} />
     </div>
   );
 }

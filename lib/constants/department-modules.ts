@@ -140,10 +140,10 @@ export const NAV_MODULES = [
   },
   {
     href: "/marketing/creatives",
-    label: "Vòng mẫu QC",
+    label: "Thư viện Media",
     zone: "MARKETING",
     permission: "ideas:view",
-    why: "Vòng mẫu quảng cáo: ảnh nguồn → máy dựng lô → duyệt → test → chấm → học. Người chạy quảng cáo nạp ảnh, khai luật tắt/giữ và duyệt lô.",
+    why: "Thư viện Media (trước 26/09/2026 tên \"Vòng mẫu QC\"): ảnh nguồn → máy dựng lô → duyệt → test → chấm → học. Người chạy quảng cáo nạp ảnh, khai luật tắt/giữ và duyệt lô.",
   },
   {
     href: "/marketing/fanpages",
