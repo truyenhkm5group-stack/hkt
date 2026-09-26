@@ -75,8 +75,11 @@ export type AuditParams = {
   bỏ qua / nhắc lại sau). Nó không chạm một bảng nghiệp vụ nào và không đổi một con số nào; hàng đợi
   "Cần anh quyết" đọc sổ phản ứng thẳng, không qua đệm. Để ngoài danh sách thì MỖI cú bấm trên trang chủ
   xoá sạch đệm báo cáo — và lượt mở trang chủ kế tiếp phải tính lại bảng quyết định quảng cáo (~6 giây nguội).
+
+  `OUTREACH_BROADCAST_*` (gửi tin hàng loạt): chỉ ghi hai bảng `outreach_broadcast*`, không báo cáo nào đọc
+  chúng qua đệm — trang gửi tin đọc thẳng.
 */
-const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "RECOMMENDATION_DECIDED"]);
+const KHONG_DOI_SO_LIEU = new Set(["LOGIN", "LOGOUT", "RECOMMENDATION_DECIDED", "OUTREACH_BROADCAST_START", "OUTREACH_BROADCAST_STOP", "OUTREACH_BROADCAST_RESUME"]);
 
 /**
  * Loại tác nhân cho cột `audit_logs.actor_kind` (Company OS · Agent G).

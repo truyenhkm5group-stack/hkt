@@ -323,6 +323,87 @@ export const outreachTargets = pgTable(
   (t) => [index("outreach_segment_status_idx").on(t.segment, t.status, t.createdAt)],
 );
 
+/**
+ * ═══════════ GỬI TIN HÀNG LOẠT THEO BỘ LỌC (chủ shop 26/09/2026) ═══════════
+ *
+ * Thay bookmarklet bấm tuần tự vị trí 14–16 của cột trái Pancake: bookmarklet không nhớ đã gửi cho
+ * ai, nên cùng một khách có thể nhận nhiều lần, và không để lại dấu vết nào để đo khách có mua hay
+ * không. Ở đây mỗi lượt bấm là MỘT dòng `outreach_broadcasts`. Danh sách người nhận được CHỤP LẠI lúc bấm
+ * (`outreach_broadcast_recipients`), mỗi hội thoại đúng một dòng. Kết quả gửi ghi vào chính dòng đó.
+ *
+ * Luật chọn và luật cửa sổ 24 giờ của Meta nằm ở `lib/constants/outreach-broadcast.ts`. Đường gửi ở
+ * `lib/outreach/broadcast.ts`. Bảng này KHÔNG tham gia phép tính doanh thu hay kết quả đơn nào.
+ */
+export const outreachBroadcasts = pgTable(
+  "outreach_broadcasts",
+  {
+    id: id(),
+    name: text("name").notNull().default(""),
+    /** Bộ lọc người bấm đã chọn — để đọc lại "lượt này nhắm ai" khi con số gây tranh cãi. */
+    filters: jsonb("filters").notNull(),
+    /** Các tin gửi lần lượt cho mỗi khách (mẫu, chưa thay biến). */
+    messages: jsonb("messages").$type<string[]>().notNull(),
+    mediaUrls: jsonb("media_urls").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    /** Giãn cách giữa hai khách (giây). */
+    gapSeconds: integer("gap_seconds").notNull().default(2),
+    /** Số người nhận chụp được lúc bấm. */
+    total: integer("total").notNull().default(0),
+    /** `RUNNING` · `STOPPED` (người bấm dừng — còn dòng chờ thì tiếp tục được) · `DONE`. */
+    status: text("status").notNull().default("RUNNING"),
+    /** Khoá tài khoản người bấm (AGENTS.md mục 34). Tên là ảnh chụp để đọc. */
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdByName: text("created_by_name").notNull().default(""),
+    stoppedByUserId: text("stopped_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Nhịp tim của vòng gửi. RUNNING mà nhịp tim cũ ⇒ tiến trình đã chết (deploy / khởi động lại). */
+    heartbeatAt: ts("heartbeat_at"),
+    /** Vòng gửi đang giữ lượt. Vòng nào thấy mã khác mã của mình thì thoát — mỗi lượt đúng MỘT vòng chạy. */
+    runId: text("run_id"),
+    finishedAt: ts("finished_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("outreach_broadcasts_created_idx").on(t.createdAt), check("outreach_broadcasts_status_check", sql`${t.status} IN ('RUNNING','STOPPED','DONE')`)],
+);
+
+export const outreachBroadcastRecipients = pgTable(
+  "outreach_broadcast_recipients",
+  {
+    id: id(),
+    broadcastId: text("broadcast_id")
+      .notNull()
+      .references(() => outreachBroadcasts.id, { onDelete: "cascade" }),
+    /** Thứ tự gửi (0-based): khách GẦN HẠN 24 giờ nhất đi trước, vì họ là người sắp không nhắn được nữa. */
+    seq: integer("seq").notNull(),
+    pageId: text("page_id").notNull(),
+    conversationId: text("conversation_id").notNull(),
+    pancakeCustomerId: text("pancake_customer_id").notNull().default(""),
+    customerName: text("customer_name").notNull().default(""),
+    phone: text("phone"),
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
+    /** Ảnh chụp mốc từ `conversation_funnel` lúc bấm. Lúc gửi còn kiểm lại bằng tin nhắn thật. */
+    lastCustomerMessageAt: ts("last_customer_message_at"),
+    lastShopMessageAt: ts("last_shop_message_at"),
+    /** `PENDING` · `SENDING` (đang giữ chỗ) · `SENT` · `SKIPPED` · `FAILED`. */
+    status: text("status").notNull().default("PENDING"),
+    /** Mã lý do bỏ qua (`BROADCAST_SKIP_REASONS`) hoặc loại lỗi (`OUTREACH_ERROR_KINDS`). */
+    reason: text("reason"),
+    error: text("error").notNull().default(""),
+    /** Số tin chữ đã được nhà cung cấp nhận. Nhỏ hơn số tin của lượt ⇒ gửi dở. */
+    messagesSent: integer("messages_sent").notNull().default(0),
+    providerMessageId: text("provider_message_id"),
+    claimedAt: ts("claimed_at"),
+    sentAt: ts("sent_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("outreach_broadcast_recipients_uq").on(t.broadcastId, t.pageId, t.conversationId),
+    index("outreach_broadcast_recipients_queue_idx").on(t.broadcastId, t.status, t.seq),
+    index("outreach_broadcast_recipients_conv_idx").on(t.pageId, t.conversationId, t.sentAt),
+    check("outreach_broadcast_recipients_status_check", sql`${t.status} IN ('PENDING','SENDING','SENT','SKIPPED','FAILED')`),
+  ],
+);
+
 /** Dư nợ & ngưỡng thanh toán của từng tài khoản quảng cáo Facebook (cập nhật từ Marketing API, cảnh báo Lark khi sắp tới ngưỡng) */
 export const adAccountBilling = pgTable("ad_account_billing", {
   accountId: text("account_id").primaryKey(),

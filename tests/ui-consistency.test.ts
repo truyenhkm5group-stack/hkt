@@ -232,6 +232,9 @@ export function testNavigationCoverage() {
     // Company OS · Agent C: form mở topic — vào từ nút 'Mở topic' trên /production, trên bàn sản xuất của
     // một mẫu (/production/models/[id]) và từ trang 360 của mẫu (`?model=<id>`, nút do Agent A2 đặt).
     "/production/topics/new": "nút 'Mở topic' trên /production và trên bàn sản xuất của mẫu; trang mẫu /models/[id] trỏ tới với ?model=",
+    // Gửi tin hàng loạt là công cụ CỦA trang Chăm sóc & bán chéo (cùng quyền outreach:*), không phải một
+    // module riêng — vào từ nút 'Gửi tin hàng loạt' ở đầu /outreach.
+    "/outreach/broadcast": "nút 'Gửi tin hàng loạt' ở đầu trang /outreach",
   };
 
   const pages = walkPages("app/(dashboard)");
