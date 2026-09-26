@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { clearMemo } from "@/lib/cache";
 import { attributionShares } from "@/lib/constants/payroll";
-import { chiaTheoCanCu, fallbackShares, finishCell, getMarketerDailyNominal, getNominalDaily, NO_DAY, type NominalCell } from "@/lib/queries/marketer-daily-nominal";
+import { eq, sql } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { rowsOf } from "@/lib/sql-rows";
+import { chiaPhanSo, chiaTheoCanCu, fallbackShares, finishCell, getMarketerDailyNominal, getNominalDaily, NO_DAY, type NominalCell } from "@/lib/queries/marketer-daily-nominal";
 import { MARKETING_UNATTRIBUTED } from "@/lib/constants/marketing-daily";
 import { getNominalProfitReport } from "@/lib/queries/profit-nominal";
 import { orderDeliveryShare, type ProbabilityLookup } from "@/lib/queries/projected-delivery";
@@ -30,6 +33,17 @@ function testChiaTheoCanCu() {
   // Khoản âm (hiếm, nhưng không được đổi dấu).
   assert.equal(sum(chiaTheoCanCu(-500, [1, 3])), -500);
   assert.deepEqual(chiaTheoCanCu(0, [1, 2]), [0, 0]);
+
+  /*
+    SỐ SẢN PHẨM chia PHÂN SỐ. Largest remainder trên một tổng nhỏ rải lên nhiều ô biến nó thành
+    chuỗi 0/1: tổng 2 cái trên 7 ô trọng số bằng nhau ra [1,1,0,0,0,0,0] — năm ngày "0 sp" có thật
+    đơn, có thật giá vốn (đo production 26/09/2026).
+  */
+  const le = chiaPhanSo(2, [1, 1, 1, 1, 1, 1, 1]);
+  assert.ok(le.every((v) => Math.abs(v - 2 / 7) < 1e-12), "chia đều phân số: mỗi ô 2/7, không ô nào 0");
+  assert.ok(Math.abs(sum(le) - 2) < 1e-12);
+  assert.deepEqual(chiaPhanSo(90, [0, 0, 0], [1, 2, 0]), [30, 60, 0], "cùng thứ tự căn cứ lùi với chiaTheoCanCu");
+  assert.ok(Math.abs(sum(chiaPhanSo(5, [0, 0], [0, 0])) - 5) < 1e-12, "hết căn cứ ⇒ chia đều, không rơi mất");
 }
 
 /**
@@ -192,7 +206,12 @@ async function testNominalDailyFilters() {
     assert.equal(d.total.expectedCogs, row.expectedCogs, `${ten}: Σ ngày giá vốn = dòng của mã (giá vốn thật)`);
     assert.equal(d.total.shipCost, row.shipCost, `${ten}: Σ ngày cước = dòng của mã`);
     assert.equal(d.total.posSales, row.grossSales, `${ten}: Σ ngày doanh số POS = dòng của mã`);
-    assert.equal(d.total.expectedQty, Math.round(row.expectedQty), `${ten}: Σ ngày SP giao TC ƯT = dòng của mã`);
+    // Chia PHÂN SỐ (không làm tròn từng ô) ⇒ Σ khớp tới sai số dấu phẩy động, và không ô nào âm.
+    assert.ok(Math.abs(d.total.expectedQty - row.expectedQty) < 1e-6, `${ten}: Σ ngày SP giao TC ƯT = dòng của mã (${d.total.expectedQty} vs ${row.expectedQty})`);
+    assert.ok(
+      d.days.every((x) => x.cell.expectedQty >= 0 && (x.cell.expectedCogs <= 0 || row.expectedQty === 0 || x.cell.expectedQty > 0)),
+      `${ten}: ngày có giá vốn ƯT thì phải có số SP ƯT — không được in "0 sp" cạnh một khoản giá vốn`,
+    );
     // Một đơn hai mã là một đơn của MỖI mã — bảng theo mã đếm như vậy, lọc mã phải ra đúng số ấy (không lẻ).
     assert.ok(Math.abs(d.total.orders - row.orders) < 1e-6, `${ten}: Σ ngày số đơn = dòng của mã (${d.total.orders} vs ${row.orders})`);
     assert.ok(d.reconcile, `${ten}: lọc mã phải đối chiếu với dòng của mã`);
@@ -233,6 +252,74 @@ async function testNominalDailyFilters() {
   assert.ok(giao.days.filter((x) => x.day === NO_DAY).every((x) => x.cell.adSpend === null || x.cell.adSpend === 0), "đơn chưa có mốc không có ngày chi QC nào để ghép");
 }
 
+/**
+ * ═══════════ LỌC MỘT MKTER: CHI QC CHƯA GÁN AI TRÊN CÙNG MÃ PHẢI ĐƯỢC NÓI RA ═══════════
+ *
+ * Đo production 26/09/2026: T Trinh không có bí danh, 16 chiến dịch `TRINH_…` chưa gán ai ⇒ lọc
+ * Q004 · T Trinh in Chi QC 0 ₫ cho 24/09 trong khi Trình quản lý quảng cáo ghi 684.694 ₫. Bảng
+ * KHÔNG được gán hộ khoản ấy (cột Chi QC giữ nguyên nghĩa "đã gán cho người này"), nhưng phải in
+ * ĐÚNG số tiền chưa gán của từng ngày trên đúng mã đó — khớp từng đồng với `ad_spends`.
+ */
+async function testUnassignedSpendOnMarketerFilter() {
+  clearMemo();
+  const db = await getDb();
+  const all = await getNominalDaily(ALL, "ORDERED", { productId: null, marketerKey: null });
+  assert.equal(all.unassigned, null, "không lọc MKTer ⇒ không có khái niệm “chưa gán người này”");
+  assert.equal((await getNominalDaily(ALL, "ORDERED", { productId: null, marketerKey: MARKETING_UNATTRIBUTED })).unassigned, null, "lọc “Chưa quy kết” ⇒ tiền chưa gán đã NẰM TRONG ô rồi");
+
+  // Lọc kèm MÃ thì phạm vi chưa gán là đúng mã ấy, không phụ thuộc người có đơn hay không — fixture
+  // không có MKTer thật nào thì dùng một khoá người không có chiến dịch nào (trường hợp của T Trinh).
+  const mkt = all.marketers.find((m) => m.value !== MARKETING_UNATTRIBUTED) ?? { value: "mkt-chua-co-chien-dich", label: "MKTer chưa có chiến dịch" };
+  /*
+    GIEO MỘT CHIẾN DỊCH CHƯA GÁN AI trên một mã có thật (đúng hình dạng production: có mã, không
+    người) rồi DỌN SẠCH ở `finally` — fixture dùng chung, và các bài chạy sau cộng `ad_spends`.
+  */
+  const maGieo = all.products[0]?.value;
+  assert.ok(maGieo, "fixture phải có ít nhất một mã hàng");
+  const ID_GIEO = "test-chua-gan-mkt";
+  await db.insert(schema.adSpends).values({ id: ID_GIEO, platform: "Facebook", campaign: "TRINH_TEST_chưa gán người", campaignId: "camp-chua-gan-mkt", spend: 123_457, spendDate: new Date("2026-09-24T00:00:00+07:00"), productId: maGieo, marketerId: null, createdBy: "test" });
+  clearMemo();
+  try {
+    await kiemChuaGan(db, all.products, mkt);
+  } finally {
+    await db.delete(schema.adSpends).where(eq(schema.adSpends.id, ID_GIEO));
+    clearMemo();
+  }
+}
+
+async function kiemChuaGan(db: Awaited<ReturnType<typeof getDb>>, products: { value: string; label: string }[], mkt: { value: string; label: string }) {
+  const list = rowsOf<{ pid: string; day: string; spend: string | number }>(
+    await db.execute(
+      sql`select product_id as pid, to_char(spend_date at time zone 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD') as day, sum(spend)::bigint as spend
+            from ad_spends where excluded = false and marketer_id is null and product_id is not null group by 1, 2`,
+    ),
+  );
+  const byProduct = new Map<string, Map<string, number>>();
+  for (const r of list) {
+    const m = byProduct.get(r.pid) ?? new Map<string, number>();
+    m.set(r.day, (m.get(r.day) ?? 0) + Number(r.spend));
+    byProduct.set(r.pid, m);
+  }
+  const candidates = products.filter((p) => [...(byProduct.get(p.value)?.values() ?? [])].some((v) => v > 0));
+  assert.ok(candidates.length > 0, "fixture phải có một mã mang chi QC chưa gán MKTer — nếu không, cổng này không kiểm được gì");
+  for (const p of candidates) {
+    const d = await getNominalDaily(ALL, "ORDERED", { productId: p.value, marketerKey: mkt.value });
+    const kyVong = byProduct.get(p.value) ?? new Map<string, number>();
+    const tong = [...kyVong.values()].reduce((t, v) => t + v, 0);
+    assert.ok(d.unassigned, `${p.label}: lọc MKTer phải có phần chưa gán`);
+    assert.equal(d.unassigned.spend, tong, `${p.label}: tổng chưa gán = Σ ad_spends(marketer NULL) của mã`);
+    for (const [day, v] of kyVong) {
+      const dong = d.days.find((x) => x.day === day);
+      assert.ok(dong, `${p.label} ${day}: ngày có tiền chưa gán phải là một dòng, kể cả khi không có đơn`);
+      assert.equal(dong.unassignedSpend, v, `${p.label} ${day}: số chưa gán của ngày khớp từng đồng`);
+    }
+    assert.ok(d.warnings.some((w) => w.includes("CHƯA GÁN MKTer")), `${p.label}: phải có câu cảnh báo nêu khoản chưa gán`);
+    // Cột Chi QC GIỮ NGUYÊN nghĩa: không gán hộ khoản chưa gán vào người đang lọc.
+    const motMa = await getNominalDaily(ALL, "ORDERED", { productId: p.value, marketerKey: null });
+    assert.ok((d.total.adSpend ?? 0) + d.unassigned.spend <= (motMa.total.adSpend ?? 0), `${p.label}: Chi QC của người + chưa gán không được vượt Chi QC cả mã`);
+  }
+}
+
 export async function testMarketerDailyNominal() {
   testChiaTheoCanCu();
   testFallbackShares();
@@ -240,5 +327,6 @@ export async function testMarketerDailyNominal() {
   testFinishCell();
   await testReconcilesWithNominalReport();
   await testNominalDailyFilters();
+  await testUnassignedSpendOnMarketerFilter();
   console.log("✓ Bóc tách MKTer theo ngày: cộng mọi ô ra đúng Báo cáo lợi nhuận danh nghĩa · LN theo ngày lọc mã = dòng của mã, lọc MKTer = cột của người đó");
 }

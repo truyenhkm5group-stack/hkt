@@ -1089,7 +1089,7 @@ function DoiChieu({ label, ours, report }: { label: string; ours: number; report
  * tỷ lệ giao chưa xảy ra — dòng ngày in "còn x% đang đi" để người đọc biết con số dựa vào ước tính
  * bao nhiêu, và số âm tự mang dấu trừ.
  */
-function DongNgay({ label, sub, c, className }: { label: React.ReactNode; sub?: React.ReactNode; c: NominalCell; className?: string }) {
+function DongNgay({ label, sub, c, className, unassignedSpend = 0 }: { label: React.ReactNode; sub?: React.ReactNode; c: NominalCell; className?: string; unassignedSpend?: number }) {
   const giaVonDu = c.cogsUncoveredQty === 0;
   const chuaDuGiaVon = `${formatNumber(Math.round(c.cogsUncoveredQty))} sản phẩm chưa có giá vốn nào (không phiếu nhập, không giá Pancake, chưa đặt giá dự tính) — giá vốn đang bị tính 0 ₫ nên KHÔNG in ra; số lượng bên dưới vẫn đo được`;
   const loNhuanCao = giaVonDu ? null : <span title="Giá vốn còn thiếu ⇒ lợi nhuận này CAO hơn thực tế"> ⚠</span>;
@@ -1102,11 +1102,24 @@ function DongNgay({ label, sub, c, className }: { label: React.ReactNode; sub?: 
       <OKep sub={`${soDon(c.deliveredOrders)} · ${soDon(c.returnedOrders)} · ${soDon(c.openOrders)}`} subTitle="giao thành công · hoàn · đang đi">
         {soDon(c.orders)}
       </OKep>
-      <OKep sub={c.adSpend === null || c.orders <= 0 ? null : <>{formatVND(Math.round(c.adSpend / c.orders), { compact: true })}/đơn</>}>
+      <OKep sub={c.adSpend === null || c.orders <= 0 ? null : <>{formatVND(Math.round(c.adSpend / c.orders), { compact: true })} QC/đơn</>}>
         <Money value={c.posSales} />
       </OKep>
-      <OKep sub={<>{formatPercent(pctOrNull(c.adSpend, c.posSales))} DS</>}>
+      <OKep
+        sub={
+          <>
+            {formatPercent(pctOrNull(c.adSpend, c.posSales))} DS
+            {unassignedSpend > 0 ? (
+              <span className="text-amber-600 dark:text-amber-400" title="Chi QC cùng mã, cùng ngày, của chiến dịch CHƯA GÁN MKTer nào — không nằm trong con số bên trên. Có thể là của người này, có thể không.">
+                {" "}
+                · +{formatVND(unassignedSpend, { compact: true })} chưa gán MKT
+              </span>
+            ) : null}
+          </>
+        }
+      >
         {c.adSpend === null ? <span className="text-muted-foreground" title="Chưa biết chi bao nhiêu — không phải 0">—</span> : <Money value={c.adSpend} />}
+        {c.adSpend !== null && unassignedSpend > 0 ? <span title="Có chi QC chưa gán MKTer trên cùng mã hôm nay — con số này có thể THẤP hơn thật"> ⚠</span> : null}
       </OKep>
       <OKep sub={<>{formatPercent(pctOrNull(c.expectedRevenue, c.posSales))} DS</>}>
         <Money value={c.expectedRevenue} className="font-semibold" />
@@ -1182,8 +1195,8 @@ function LoiNhuanTheoNgay({ daily, ghiChuLoc }: { daily: NominalDaily; ghiChuLoc
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow>
               <TableHead>Ngày</TableHead>
-              <TableHead className="text-right" title="Đơn đã xác nhận, không huỷ, của ngày theo mốc đang chọn. Dòng nhỏ: giao thành công · hoàn · đang đi. Lẻ khi một đơn chưa rõ người nhận được chia cho nhiều MKTer.">Đơn</TableHead>
-              <TableHead className="text-right" title="Tiền hàng trên đơn của ngày (trước hoàn huỷ). Dòng nhỏ: chi QC trên mỗi đơn.">Doanh số POS</TableHead>
+              <TableHead className="text-right" title="Đơn ĐÃ XÁC NHẬN, không huỷ / không xoá, theo mốc đang chọn (mặc định: ngày tạo đơn, giờ VN). KHÔNG gồm đơn Mới chưa xác nhận, đơn Huỷ, đơn Đã xoá — POScake đếm theo bộ lọc trạng thái của nó nên có thể ra số lớn hơn. Dòng nhỏ: giao thành công · hoàn · đang đi. Lẻ khi một đơn chưa có ảnh chụp quy kết được chia cho nhiều MKTer theo tỷ trọng QC.">Đơn</TableHead>
+              <TableHead className="text-right" title="Σ tiền DÒNG HÀNG của mã trên các đơn ở cột Đơn (số lượng × đơn giá, trừ giảm giá từng dòng), TRƯỚC giảm giá cấp đơn và KHÔNG gồm phí ship; hàng tặng không tính. Khác “Tổng tiền đơn” của POScake (đã trừ giảm giá đơn, cộng phí ship). Dòng nhỏ: chi QC trên mỗi đơn.">Doanh số POS</TableHead>
               <TableHead className="text-right" title="Chi quảng cáo theo NGÀY CHI. “—” = chưa biết (nguồn chưa đồng bộ tới ngày này, hoặc MKTer chưa được ghép chiến dịch nào) — không phải 0. Dòng nhỏ: % doanh số POS.">Chi QC</TableHead>
               <TableHead className="text-right" title="Doanh thu giao thành công ước tính — phần của ngày trong con số của từng mã, chia theo phần giao được của CHÍNH từng đơn. Dòng nhỏ: % doanh số POS.">DT GTC ƯT</TableHead>
               <TableHead className="text-right" title="Giá vốn hàng giao thành công ước tính. “—” = có sản phẩm chưa biết giá vốn. Dòng nhỏ: số sản phẩm giao thành công ước tính (vẫn đo được).">Giá vốn</TableHead>
@@ -1196,7 +1209,7 @@ function LoiNhuanTheoNgay({ daily, ghiChuLoc }: { daily: NominalDaily; ghiChuLoc
           <TableBody>
             {daily.days.map((d) => {
               const dangDi = pctOrNull(d.cell.openOrders, d.cell.orders);
-              return <DongNgay key={d.day || "chua-co-moc"} label={ngayThang(d.day)} sub={<>{thu(d.day)}{dangDi ? <> · còn {formatPercent(dangDi, 0)} đang đi</> : null}</>} c={d.cell} />;
+              return <DongNgay key={d.day || "chua-co-moc"} label={ngayThang(d.day)} sub={<>{thu(d.day)}{dangDi ? <> · còn {formatPercent(dangDi, 0)} đang đi</> : null}</>} c={d.cell} unassignedSpend={d.unassignedSpend} />;
             })}
             {daily.days.length === 0 ? (
               <TableRow>
@@ -1205,7 +1218,7 @@ function LoiNhuanTheoNgay({ daily, ghiChuLoc }: { daily: NominalDaily; ghiChuLoc
                 </TableCell>
               </TableRow>
             ) : (
-              <DongNgay label="Cả kỳ" c={daily.total} className="bg-muted/40 font-semibold hover:bg-muted/40" />
+              <DongNgay label="Cả kỳ" c={daily.total} className="bg-muted/40 font-semibold hover:bg-muted/40" unassignedSpend={daily.unassigned?.spend ?? 0} />
             )}
           </TableBody>
         </Table>
