@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { TopicStatusBadge } from "@/app/(dashboard)/production/_components/badges";
 import { ModelDesk } from "@/app/(dashboard)/production/_components/model-desk";
+import { TopicFilesPanel } from "@/app/(dashboard)/production/_components/topic-files";
 import { TopicMessageForm, TopicStatusControl } from "@/app/(dashboard)/production/topics/[id]/topic-controls";
 import { PageHeader } from "@/components/page-header";
 import { DescriptionList, SectionCard } from "@/components/ui-bits";
@@ -11,6 +12,7 @@ import { MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL } from "@/lib/constant
 import { MODEL_SIGNAL_LABEL } from "@/lib/constants/model-signal";
 import { EMPTY_REQUIREMENTS, TOPIC_MESSAGE_KIND_LABEL, type TopicEvidenceSnapshot, type TopicMessageKind, type TopicRequirements } from "@/lib/constants/production-os";
 import { formatDate, formatDateTime, formatNumber, formatVND } from "@/lib/format";
+import { listTopicFiles } from "@/lib/queries/production-files";
 import { getTopicDetail, listSupplierOptions } from "@/lib/queries/production-os";
 
 export const metadata = { title: "Topic sản xuất" };
@@ -22,7 +24,7 @@ export const metadata = { title: "Topic sản xuất" };
 export default async function TopicPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermission("planning:view");
   const { id } = await params;
-  const [d, suppliers] = await Promise.all([getTopicDetail(id), listSupplierOptions()]);
+  const [d, suppliers, files] = await Promise.all([getTopicDetail(id), listSupplierOptions(), listTopicFiles(id)]);
   if (!d) notFound();
   const canWrite = can(user, "production:write");
   const canApprove = can(user, "production:approve");
@@ -49,6 +51,15 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
               >
                 {openCtx.label}
               </span>
+            ) : null}
+            {d.model?.provisional ? (
+              <Link
+                href={`/models/${d.model.id}`}
+                className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 hover:underline dark:bg-amber-950/60 dark:text-amber-300"
+                title="Mẫu mới chưa lên mã — máy cấp mã tạm. Mẫu thắng thì vào trang mẫu bấm “Chốt mã chính thức”; topic này đi theo mẫu, không phải mở lại."
+              >
+                Mã tạm · chốt mã khi thắng
+              </Link>
             ) : null}
             {d.model ? (
               <Link href={`/models/${d.model.id}`} className="text-sm text-primary hover:underline">
@@ -80,6 +91,10 @@ export default async function TopicPage({ params }: { params: Promise<{ id: stri
                 { label: "Ghi chú thiết kế", value: req.designNotes || "—", span: true },
               ]}
             />
+          </SectionCard>
+
+          <SectionCard title={`Ảnh / video (${formatNumber(files.length)})`} hint="Ảnh mẫu, ảnh chất vải, video test quảng cáo — gửi xưởng xem cùng một chỗ. Ảnh tự thu nhỏ trước khi tải; video dài hơn trần thì dán link vào lượt trao đổi.">
+            <TopicFilesPanel topicId={d.topic.id} files={files} canWrite={canWrite} />
           </SectionCard>
 
           <SectionCard title={`Trao đổi (${formatNumber(d.messages.length)})`} hint="Chỉ thêm, không sửa, không xoá — lịch sử bàn giá là chứng cứ khi xưởng giao khác lời hứa.">

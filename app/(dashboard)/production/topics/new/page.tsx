@@ -20,6 +20,10 @@ export const metadata = { title: "Mở topic sản xuất" };
  * thắng và thiết kế TK chưa có mã Pancake. Ô chọn mẫu KHÔNG lọc theo trạng thái (C không lọc; giữ nguyên),
  * chỉ gắn thêm nhãn trạng thái khai + tín hiệu mẫu (lô của Agent S, có hạn giờ — thiếu thì bỏ nhãn tín
  * hiệu). Mẫu còn trước THẮNG thì biểu mẫu nói rõ đây là topic mở SỚM: vòng đời không đổi.
+ *
+ * Chủ shop 26/09/2026: mẫu MỚI TEST chưa có mã cũng mở được topic — lựa chọn "Mẫu mới chưa có mã" đăng ký
+ * mẫu với mã tạm (lib/constants/provisional-model.ts), cần thêm `models:write` như mọi lượt đăng ký mẫu.
+ * Có quyền ấy thì sổ trống cũng không chặn biểu mẫu nữa.
  */
 export default async function NewTopicPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePermission("production:write");
@@ -41,10 +45,11 @@ export default async function NewTopicPage({ searchParams }: { searchParams: Pro
       id: m.id,
       code: m.code,
       name: m.name,
-      hint: [st ? MODEL_STATE_LABELS[st] : MODEL_STATE_UNDECLARED_LABEL, sig ? `tín hiệu ${MODEL_SIGNAL_LABEL[sig]}` : null].filter(Boolean).join(" · "),
+      hint: [m.provisional ? "mã tạm" : null, st ? MODEL_STATE_LABELS[st] : MODEL_STATE_UNDECLARED_LABEL, sig ? `tín hiệu ${MODEL_SIGNAL_LABEL[sig]}` : null].filter(Boolean).join(" · "),
       notice: topicOpenNotice(st, sig)?.text ?? null,
     };
   });
+  const canRegisterModel = can(user, "models:write");
   const fixedNotice = model ? (topicOpenNotice(stateOf(model.state), signals?.get(model.id) ?? null)?.text ?? null) : null;
   return (
     <div className="space-y-5">
@@ -58,12 +63,12 @@ export default async function NewTopicPage({ searchParams }: { searchParams: Pro
           </Link>
         }
       />
-      {!model && !models.length ? (
+      {!model && !models.length && !canRegisterModel ? (
         <p className="text-sm text-muted-foreground">
           Sổ mẫu đang trống — đồng bộ sổ ở <Link href="/models" className="underline">Vòng đời mẫu</Link> trước khi mở topic.
         </p>
       ) : (
-        <TopicForm models={options} fixedModelId={model?.id ?? null} fixedNotice={fixedNotice} suppliers={suppliers} />
+        <TopicForm models={options} fixedModelId={model?.id ?? null} fixedNotice={fixedNotice} suppliers={suppliers} canRegisterModel={canRegisterModel} />
       )}
     </div>
   );

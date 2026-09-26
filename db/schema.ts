@@ -1,7 +1,7 @@
 // VNXcommerce ERP — Drizzle schema (PostgreSQL)
 // Tiền tệ: VND, lưu dạng integer. Thời gian: timestamptz (UTC).
 import { relations, sql } from "drizzle-orm";
-import { boolean, check, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { boolean, check, customType, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, bigint, type AnyPgColumn } from "drizzle-orm/pg-core";
 
 const id = () => text("id").primaryKey().$defaultFn(() => crypto.randomUUID());
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -7196,6 +7196,66 @@ export const productionTopicMessages = pgTable(
     check("production_topic_messages_body_check", sql`length(btrim(${t.body})) > 0`),
     check("production_topic_messages_price_check", sql`${t.quotedUnitPrice} IS NULL OR ${t.quotedUnitPrice} >= 0`),
   ],
+);
+
+/**
+ * `bytea` — nhị phân thật, không base64 (base64 phình 33%, và video là thứ lớn nhất ERP từng lưu). `pg`
+ * trả `Buffer`, PGlite trả `Uint8Array` ⇒ quy về `Buffer` ở một chỗ.
+ */
+const bytea = customType<{ data: Buffer; driverData: Buffer | Uint8Array }>({
+  dataType: () => "bytea",
+  toDriver: (v) => v,
+  fromDriver: (v) => (Buffer.isBuffer(v) ? v : Buffer.from(v)),
+});
+
+/**
+ * Ảnh / video đính kèm một topic sản xuất (chủ shop 26/09/2026). Tệp nằm trong CSDL — cùng lối với ảnh ý
+ * tưởng — vì máy chủ không có ổ lưu tệp riêng được sao lưu. Nội dung chia KHÚC (`production_topic_file_chunks`,
+ * mỗi khúc ≤ `TOPIC_FILE_CHUNK_BYTES`) để: tải lên qua Server Action không vượt trần thân yêu cầu; phát video
+ * theo `Range` chỉ đọc đúng khúc cần, không nạp cả tệp vào RAM của một VPS ~2 GB.
+ *
+ * `UPLOADING` = đang tải dở (không hiện ở đâu cả); `READY` = đủ khúc, đã kiểm tổng số byte.
+ */
+export const productionTopicFiles = pgTable(
+  "production_topic_files",
+  {
+    id: id(),
+    topicId: text("topic_id")
+      .notNull()
+      .references(() => productionTopics.id, { onDelete: "restrict" }),
+    kind: text("kind").notNull(),
+    fileName: text("file_name").notNull().default(""),
+    contentType: text("content_type").notNull(),
+    bytes: integer("bytes").notNull(),
+    chunkCount: integer("chunk_count").notNull(),
+    status: text("status").notNull().default("UPLOADING"),
+    uploadedByUserId: text("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** ẢNH CHỤP tên người tải — do MÁY CHỦ đọc (mục 34). */
+    uploadedBy: text("uploaded_by").notNull().default(""),
+    createdAt: createdAt(),
+    completedAt: ts("completed_at"),
+  },
+  (t) => [
+    index("production_topic_files_topic_idx").on(t.topicId, t.createdAt),
+    check("production_topic_files_kind_check", sql`${t.kind} IN ('IMAGE', 'VIDEO')`),
+    check("production_topic_files_status_check", sql`${t.status} IN ('UPLOADING', 'READY')`),
+    check("production_topic_files_size_check", sql`${t.bytes} > 0 AND ${t.chunkCount} > 0`),
+    check("production_topic_files_ready_check", sql`${t.status} <> 'READY' OR ${t.completedAt} IS NOT NULL`),
+  ],
+);
+
+/** Một khúc nội dung của tệp đính kèm topic. `seq` từ 0. */
+export const productionTopicFileChunks = pgTable(
+  "production_topic_file_chunks",
+  {
+    id: id(),
+    fileId: text("file_id")
+      .notNull()
+      .references(() => productionTopicFiles.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    data: bytea("data").notNull(),
+  },
+  (t) => [uniqueIndex("production_topic_file_chunks_seq_uq").on(t.fileId, t.seq), check("production_topic_file_chunks_seq_check", sql`${t.seq} >= 0`)],
 );
 
 /** Bảng giá thành — mỗi dòng là MỘT phiên bản của một mẫu. FINAL bất biến. */

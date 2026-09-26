@@ -8,7 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { TopicFilePicker, uploadTopicFiles, UploadProgressBar, type UploadProgress } from "@/app/(dashboard)/production/_components/topic-files";
 import { createProductionTopic } from "@/lib/actions/production-topics";
+import { MODEL_STATE_LABELS } from "@/lib/constants/model-lifecycle";
+import { PROVISIONAL_CODE_PREFIX, PROVISIONAL_DEFAULT_STATE, PROVISIONAL_NAME_MIN, PROVISIONAL_START_STATES, type ProvisionalStartState } from "@/lib/constants/provisional-model";
+
+/** Giá trị ô chọn mẫu cho "mẫu mới chưa có mã" — không trùng được một id (uuid). */
+const NEW_MODEL = "__new__";
 
 const list = (s: string) =>
   s
@@ -32,8 +38,25 @@ export type TopicModelOption = {
   notice?: string | null;
 };
 
-export function TopicForm({ models, fixedModelId, fixedNotice = null, suppliers }: { models: TopicModelOption[]; fixedModelId: string | null; fixedNotice?: string | null; suppliers: { id: string; name: string }[] }) {
+export function TopicForm({
+  models,
+  fixedModelId,
+  fixedNotice = null,
+  suppliers,
+  canRegisterModel = false,
+}: {
+  models: TopicModelOption[];
+  fixedModelId: string | null;
+  fixedNotice?: string | null;
+  suppliers: { id: string; name: string }[];
+  /** Người có `models:write` mới đăng ký được mẫu mới (mã tạm) ngay từ đây. */
+  canRegisterModel?: boolean;
+}) {
   const [modelId, setModelId] = useState(fixedModelId ?? "");
+  const [newName, setNewName] = useState("");
+  const [newState, setNewState] = useState<ProvisionalStartState>(PROVISIONAL_DEFAULT_STATE);
+  const [files, setFiles] = useState<File[]>([]);
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
   const [title, setTitle] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [material, setMaterial] = useState("");
@@ -47,12 +70,15 @@ export function TopicForm({ models, fixedModelId, fixedNotice = null, suppliers 
   const [firstMessage, setFirstMessage] = useState("");
   const [pending, start] = useNavTransition();
   const router = useRouter();
-  const notice = fixedModelId ? fixedNotice : (models.find((m) => m.id === modelId)?.notice ?? null);
+  const isNew = !fixedModelId && modelId === NEW_MODEL;
+  const notice = fixedModelId ? fixedNotice : isNew ? null : (models.find((m) => m.id === modelId)?.notice ?? null);
+  const duMau = isNew ? newName.trim().length >= PROVISIONAL_NAME_MIN : !!modelId;
 
   const luu = () =>
     start(async () => {
       const r = await createProductionTopic({
-        modelId,
+        modelId: isNew ? "" : modelId,
+        newModel: isNew ? { name: newName, state: newState } : null,
         title,
         supplierId: supplierId || null,
         firstMessage: firstMessage.trim() || null,
@@ -71,7 +97,14 @@ export function TopicForm({ models, fixedModelId, fixedNotice = null, suppliers 
         toast.error(r.error);
         return;
       }
-      toast.success(`Đã mở topic${r.lifecycle ? ` · ${r.lifecycle}` : ""}`);
+      toast.success(`Đã mở topic${r.modelCode ? ` · mẫu mang mã tạm ${r.modelCode}` : ""}${r.lifecycle ? ` · ${r.lifecycle}` : ""}`);
+      // Topic đã có rồi mới tải tệp: tệp gắn vào một topic có thật. Tệp nào hỏng thì báo tên, topic vẫn mở —
+      // trang topic có khung tải thêm.
+      if (files.length) {
+        const up = await uploadTopicFiles(r.topicId, files, setProgress);
+        if (up.ok) toast.success(`Đã đính kèm ${up.ok}/${files.length} tệp`);
+        up.errors.forEach((e) => toast.error(e));
+      }
       router.push(`/production/topics/${r.topicId}`);
     });
 
@@ -82,6 +115,7 @@ export function TopicForm({ models, fixedModelId, fixedNotice = null, suppliers 
           <Label>Mẫu</Label>
           <select value={modelId} onChange={(e) => setModelId(e.target.value)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
             <option value="">— Chọn mẫu trong sổ —</option>
+            {canRegisterModel ? <option value={NEW_MODEL}>＋ Mẫu mới chưa có mã (đang test — thắng mới lên mã)</option> : null}
             {models.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.code}
@@ -92,6 +126,30 @@ export function TopicForm({ models, fixedModelId, fixedNotice = null, suppliers 
           </select>
         </div>
       )}
+      {!fixedModelId && !canRegisterModel ? (
+        <p className="text-xs text-muted-foreground sm:col-span-2">Mẫu mới chưa có mã: cần quyền “Vòng đời mẫu: khai &amp; đồng bộ” để đăng ký ngay tại đây.</p>
+      ) : null}
+      {isNew ? (
+        <>
+          <div className="space-y-1">
+            <Label>Tên gọi tạm của mẫu</Label>
+            <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Đầm babydoll hoa nhí cổ vuông" />
+          </div>
+          <div className="space-y-1">
+            <Label>Mẫu đang ở</Label>
+            <select value={newState} onChange={(e) => setNewState(e.target.value as ProvisionalStartState)} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
+              {PROVISIONAL_START_STATES.map((s) => (
+                <option key={s} value={s}>
+                  {MODEL_STATE_LABELS[s]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="rounded-md border border-sky-300/60 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 sm:col-span-2">
+            Máy cấp mã tạm dạng <span className="font-mono">{PROVISIONAL_CODE_PREFIX}ngàythángnăm-số</span> để topic, giá thành, mẫu thử gắn được vào mẫu. Mẫu thắng thì vào trang mẫu bấm “Chốt mã chính thức” (ví dụ Q012) — mọi thứ đã gắn đi theo, không phải làm lại.
+          </p>
+        </>
+      ) : null}
       {notice ? <p className="rounded-md border border-sky-300/60 bg-sky-50 px-2.5 py-1.5 text-xs text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200 sm:col-span-2">{notice}</p> : null}
       <div className="space-y-1 sm:col-span-2">
         <Label>Tiêu đề</Label>
@@ -144,8 +202,13 @@ export function TopicForm({ models, fixedModelId, fixedNotice = null, suppliers 
         <Label>Lời mở đầu gửi xưởng (tuỳ chọn — thành lượt trao đổi đầu tiên)</Label>
         <Textarea rows={2} value={firstMessage} onChange={(e) => setFirstMessage(e.target.value)} />
       </div>
+      <div className="space-y-1 sm:col-span-2">
+        <Label>Ảnh / video mẫu (tuỳ chọn)</Label>
+        <TopicFilePicker files={files} onChange={setFiles} disabled={pending} />
+        <UploadProgressBar p={progress} />
+      </div>
       <div className="flex justify-end sm:col-span-2">
-        <Button onClick={luu} disabled={pending || !modelId || title.trim().length < 3}>
+        <Button onClick={luu} disabled={pending || !duMau || title.trim().length < 3}>
           Mở topic
         </Button>
       </div>

@@ -15,7 +15,7 @@ import {
   SuggestionsBlock,
   type BlockCtx,
 } from "@/app/(dashboard)/models/[id]/blocks";
-import { OwnerControl, TransitionControl } from "@/app/(dashboard)/models/[id]/model-controls";
+import { AssignCodeControl, OwnerControl, TransitionControl } from "@/app/(dashboard)/models/[id]/model-controls";
 import { ModelStateBadge, ObservedStageBadge } from "@/app/(dashboard)/models/state-badge";
 import { PeriodFilter } from "@/components/data-table/toolbar";
 import { DataWarnings } from "@/components/data-warnings";
@@ -31,6 +31,7 @@ import { DOMAIN_ACTOR_KIND_LABEL } from "@/lib/constants/domain-events";
 import { loadSource, MODEL_360_BLOCK_ACCESS, mergeTimelines, type Model360Block } from "@/lib/constants/model-360";
 import { winnerFollowUp } from "@/lib/constants/early-topic";
 import { evidenceUnknowns, MODEL_STATE_LABELS, MODEL_STATE_UNDECLARED_LABEL, MODEL_TIMELINE_DIMENSION_LABEL, MODEL_TIMELINE_DIMENSION_TONE, observeModelStage } from "@/lib/constants/model-lifecycle";
+import { isProvisionalModel } from "@/lib/constants/provisional-model";
 import { formatDateTime, formatNumber, formatVND } from "@/lib/format";
 import { getModelLinkedIdeas, ideaTimelineEntries } from "@/lib/queries/model-360";
 import { getModel, getModelEvidence, getModelStateHistory, getModelTimeline, listModelOwnerOptions } from "@/lib/queries/models";
@@ -105,6 +106,8 @@ export default async function ModelDetailPage({ params, searchParams }: { params
   const production = canWrite && allowed.PRODUCTION && model.state !== "WINNER" ? await productionOnce(model.id) : null;
   const followUp = production && production.ok ? winnerFollowUp(production.data) : null;
 
+  const provisional = isProvisionalModel({ code: model.code, registeredBy: model.registeredBy, productId: model.product?.id ?? null, designConceptId: model.design?.id ?? null });
+
   const ctx: BlockCtx = {
     modelId: model.id,
     productId: model.product?.id ?? null,
@@ -132,6 +135,7 @@ export default async function ModelDetailPage({ params, searchParams }: { params
               </span>
             )}
             <span className="font-mono">{model.code}</span>
+            {provisional ? <span className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-950/60 dark:text-amber-300">Mã tạm</span> : null}
             <span className="text-base font-normal text-muted-foreground">{model.name || model.product?.name || ""}</span>
             <ModelStateBadge state={model.state} />
             <Suspense fallback={<Skeleton className="h-5 w-28 rounded-md" />}>
@@ -188,6 +192,7 @@ export default async function ModelDetailPage({ params, searchParams }: { params
             <div className="flex flex-wrap items-center gap-2 text-sm">
               Hiện tại: <ModelStateBadge state={model.state} />
             </div>
+            {canWrite && provisional ? <AssignCodeControl modelId={model.id} code={model.code} /> : null}
             {canWrite ? <TransitionControl modelId={model.id} state={model.state} winnerFollowUp={followUp} /> : <p className="text-xs text-muted-foreground">Cần quyền &ldquo;Vòng đời mẫu: khai &amp; đồng bộ&rdquo; để đổi trạng thái.</p>}
             <div className="flex flex-wrap items-center gap-2 border-t pt-3 text-sm">
               <span>Người phụ trách:</span>

@@ -48,6 +48,10 @@ Xem `docs/company-os/shared-contracts.md` mục 5 — cột, CHECK, FK, sự ki�
    buộc sẽ chặn ghi mẫu thật. **`cost_vnd` NULL = chưa biết**.
 6. **Đính kèm là URL**: không có kho ảnh chung phù hợp (`creative_images` có luật xoá điểm ảnh của mẫu
    thua; `marketing_idea_images` gắn cứng ý tưởng). Lưu `string[]` URL http(s).
+   **Cập nhật 26/09/2026:** lượt trao đổi vẫn nhận link, nhưng TOPIC nay có kho ảnh / video riêng
+   (`production_topic_files` + khúc bytea, migration 0147 — `lib/production/topic-files.ts`); và mẫu
+   CHƯA CÓ MÃ mở được topic bằng mã tạm `TEST-YYMMDD-NN`, chốt mã chính thức ở trang mẫu
+   (`lib/constants/provisional-model.ts`).
 7. **Gợi ý máy do MÁY CHỦ tính lại lúc lưu** (`buildMatrixForProduct` với đúng `coverDays` /
    `countIncoming` trang đã dùng), không nhận từ trình duyệt — nếu nhận thì gửi "gợi ý = số chốt" là né
    được lý do. Hệ quả: nếu kế hoạch đổi giữa lúc mở trang và lúc lưu, máy chủ báo "khác ở N ô" dù người

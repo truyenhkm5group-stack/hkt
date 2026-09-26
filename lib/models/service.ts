@@ -13,6 +13,16 @@ import {
   type ModelActorKind,
   type ModelState,
 } from "@/lib/constants/model-lifecycle";
+import {
+  hasProvisionalPrefix,
+  isProvisionalModel,
+  nextProvisionalCode,
+  PROVISIONAL_CODE_PREFIX,
+  PROVISIONAL_NAME_MIN,
+  PROVISIONAL_START_STATES,
+  provisionalDayPrefix,
+  type ProvisionalStartState,
+} from "@/lib/constants/provisional-model";
 import { emitDomainEvent } from "@/lib/events/emit";
 import { isOpenTransaction, type DbOrTx } from "@/lib/db-transaction";
 
@@ -198,6 +208,7 @@ export async function registerModelCore(db: Db, input: { code: string; name?: st
   if (loi) return { error: loi };
   const code = normalizeModelCode(input.code);
   if (!code) return { error: "Nhập mã mẫu (ví dụ Q012)" };
+  if (hasProvisionalPrefix(code)) return { error: `Tiền tố ${PROVISIONAL_CODE_PREFIX} dành cho mã tạm máy cấp — mẫu chưa có mã thì mở topic bằng lựa chọn “Mẫu mới chưa có mã”` };
   const name = (input.name ?? "").trim();
 
   return db.transaction(async (tx) => {
@@ -228,6 +239,127 @@ export async function registerModelCore(db: Db, input: { code: string; name?: st
     const chuyen = await applyTransition(tx, { modelId: moi.id, to: "IDEA", reason: REGISTER_REASON, actor: input.actor, actorKind: "USER", source: input.source });
     if ("error" in chuyen) throw new Error(chuyen.error);
     return { ok: true as const, modelId: moi.id, code };
+  });
+}
+
+// ─────────────────────────── MẪU CHƯA CÓ MÃ (MÃ TẠM) ───────────────────────────
+
+/** Lý do dòng lịch sử đầu tiên của mẫu mang mã tạm — người vừa khai chặng hiện tại lúc đăng ký. */
+export function provisionalRegisterReason(state: ProvisionalStartState): string {
+  return `Người đăng ký mẫu mới CHƯA CÓ MÃ (mã tạm) và khai đang ở “${MODEL_STATE_LABELS[state]}”`;
+}
+
+/**
+ * Mẫu mới chưa có mã (chủ shop 26/09/2026): máy cấp mã tạm `TEST-YYMMDD-NN` (lib/constants/provisional-model.ts),
+ * TÊN GỌI do người nhập là bắt buộc — không có mã thì tên là thứ duy nhất để người khác nhận ra mẫu. Chặng
+ * đầu do NGƯỜI chọn trong `PROVISIONAL_START_STATES`; mọi thứ khác đi đúng đường của `registerModelCore`
+ * (sự kiện `model.registered`, dòng lịch sử đầu tiên có lý do).
+ *
+ * Hai người cùng bấm trong một giây có thể cùng tính ra một số ⇒ khoá UNIQUE của `code` chặn người sau;
+ * thử lại với số kế tiếp, tối đa vài lần.
+ */
+export async function registerProvisionalModelCore(
+  db: Db,
+  input: { name: string; state: ProvisionalStartState; actor: Actor; source: string; now?: Date },
+): Promise<RegisterModelResult> {
+  const loi = actorError(input.actor, "USER");
+  if (loi) return { error: loi };
+  const name = input.name.trim();
+  if (name.length < PROVISIONAL_NAME_MIN) return { error: `Mẫu chưa có mã thì phải đặt tên gọi tạm (ít nhất ${PROVISIONAL_NAME_MIN} ký tự) để người khác nhận ra` };
+  if (!(PROVISIONAL_START_STATES as readonly string[]).includes(input.state)) return { error: "Chặng hiện tại của mẫu chưa có mã chỉ được là Ý tưởng / Creative / Đang test QC" };
+  const now = input.now ?? new Date();
+  const prefix = provisionalDayPrefix(now);
+
+  for (let lan = 0; lan < 5; lan++) {
+    try {
+      return await db.transaction(async (tx) => {
+        const cungNgay = await tx.select({ code: pm.code }).from(pm).where(sql`${pm.code} like ${`${prefix}%`}`);
+        const code = nextProvisionalCode(now, cungNgay.map((r) => r.code));
+        const [moi] = await tx.insert(pm).values({ code, name, registeredBy: "USER", ownerUserId: null }).returning({ id: pm.id });
+        await emitDomainEvent(tx, {
+          name: "model.registered",
+          subjectType: MODEL_SUBJECT,
+          subjectId: moi.id,
+          modelId: moi.id,
+          payload: { code, name, registeredBy: "USER", productId: null, designConceptId: null, provisional: true },
+          actorKind: "USER",
+          actorId: input.actor.id,
+          source: input.source,
+          dedupeKey: `model.registered:${moi.id}`,
+        });
+        const chuyen = await applyTransition(tx, { modelId: moi.id, to: input.state, reason: provisionalRegisterReason(input.state), actor: input.actor, actorKind: "USER", source: input.source });
+        if ("error" in chuyen) throw new Error(chuyen.error);
+        return { ok: true as const, modelId: moi.id, code };
+      });
+    } catch (e) {
+      if (!isUniqueViolation(e) || lan === 4) throw e;
+    }
+  }
+  return { error: "Không cấp được mã tạm — thử lại" };
+}
+
+function isUniqueViolation(e: unknown): boolean {
+  let cur: unknown = e;
+  for (let i = 0; i < 5 && cur; i++) {
+    const c = cur as { code?: string; message?: string; cause?: unknown };
+    if (c.code === "23505" || /duplicate key|unique constraint/i.test(c.message ?? "")) return true;
+    cur = c.cause;
+  }
+  return false;
+}
+
+export type AssignModelCodeResult = { ok: true; modelId: string; from: string; to: string; noop: boolean } | { error: string };
+
+/**
+ * CHỐT MÃ CHÍNH THỨC cho một mẫu đang mang mã tạm (thường là lúc mẫu thắng — nhưng KHÔNG tự khai THẮNG:
+ * lên mã và khai vòng đời là hai quyết định riêng của người).
+ *
+ * Đổi `product_models.code` của CHÍNH dòng ấy: mọi thứ đã gắn theo `model_id` (topic, giá thành, mẫu thử,
+ * tệp đính kèm, lịch sử) đi theo nguyên vẹn. Không nối sản phẩm ở đây — lần đồng bộ sổ kế tiếp tự nối sản
+ * phẩm Pancake mang mã mới vào đúng dòng này (một khớp, luật 35).
+ *
+ * Từ chối khi mã mới ĐÃ là một dòng khác trong sổ: đồng bộ đã chạy trước khi chốt mã nên mẫu có HAI dòng,
+ * và gộp hai dòng (chuyển topic, giá thành, lịch sử sang dòng kia) là việc người quyết, không phải một
+ * lệnh UPDATE.
+ */
+export async function assignModelCodeCore(db: Db, input: { modelId: string; code: string; actor: Actor; source: string }): Promise<AssignModelCodeResult> {
+  const loi = actorError(input.actor, "USER");
+  if (loi) return { error: loi };
+  const code = normalizeModelCode(input.code);
+  if (!code) return { error: "Nhập mã chính thức (ví dụ Q012)" };
+  if (hasProvisionalPrefix(code)) return { error: `Mã chính thức không được bắt đầu bằng ${PROVISIONAL_CODE_PREFIX} — tiền tố ấy dành cho mã tạm` };
+
+  return db.transaction(async (tx) => {
+    const [m] = await tx
+      .select({ id: pm.id, code: pm.code, registeredBy: pm.registeredBy, productId: pm.productId, designConceptId: pm.designConceptId })
+      .from(pm)
+      .where(eq(pm.id, input.modelId))
+      .limit(1)
+      .for("update");
+    if (!m) return { error: "Không tìm thấy mẫu trong sổ" };
+    if (m.code === code) return { ok: true as const, modelId: m.id, from: m.code, to: code, noop: true };
+    if (!isProvisionalModel(m)) return { error: `Mẫu ${m.code} không mang mã tạm — mã của mẫu đã lên mã không đổi ở đây` };
+    const [trung] = await tx.select({ id: pm.id }).from(pm).where(eq(pm.code, code)).limit(1);
+    if (trung) return { error: `Mã ${code} đã là một mẫu khác trong sổ (thường do đồng bộ sổ chạy trước khi chốt mã) — hai dòng cần người gộp, máy không chuyển topic / giá thành sang hộ` };
+
+    const doi = await tx
+      .update(pm)
+      .set({ code, updatedAt: new Date() })
+      .where(and(eq(pm.id, m.id), eq(pm.code, m.code)))
+      .returning({ id: pm.id });
+    if (!doi.length) return { error: "Mẫu vừa được người khác đổi mã — tải lại trang" };
+    await emitDomainEvent(tx, {
+      name: "model.code_assigned",
+      subjectType: MODEL_SUBJECT,
+      subjectId: m.id,
+      modelId: m.id,
+      payload: { from: m.code, to: code },
+      actorKind: "USER",
+      actorId: input.actor.id,
+      source: input.source,
+      dedupeKey: `model.code_assigned:${m.id}:${code}`,
+    });
+    return { ok: true as const, modelId: m.id, from: m.code, to: code, noop: false };
   });
 }
 

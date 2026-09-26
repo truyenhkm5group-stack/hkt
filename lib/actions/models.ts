@@ -7,7 +7,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { can, requireUser } from "@/lib/auth/session";
 import { MODEL_STATES } from "@/lib/constants/model-lifecycle";
-import { registerModelCore, setModelOwnerCore, transitionModelCore } from "@/lib/models/service";
+import { assignModelCodeCore, registerModelCore, setModelOwnerCore, transitionModelCore } from "@/lib/models/service";
 import { runModelRegistryJob } from "@/lib/models/registry-job";
 
 /**
@@ -135,6 +135,32 @@ export async function registerModel(input: unknown): Promise<{ ok: true; modelId
   });
   modelPaths(r.modelId);
   return { ok: true, modelId: r.modelId };
+}
+
+const assignCodeInput = z.object({
+  modelId: z.string().min(1),
+  code: z.string().trim().min(1, "Nhập mã chính thức").max(40, "Mã mẫu quá dài"),
+});
+
+/**
+ * Chốt MÃ CHÍNH THỨC cho mẫu đang mang mã tạm (`TEST-…`). Không khai THẮNG hộ — đó là ô trạng thái riêng.
+ * Trang sản xuất cũng in mã mẫu nên làm mới cả nhánh ấy.
+ */
+export async function assignModelCode(input: unknown): Promise<{ ok: true; code: string } | { error: string }> {
+  const user = await requireUser();
+  if (!can(user, "models:write")) return { error: "Không đủ quyền chốt mã mẫu" };
+  const parsed = assignCodeInput.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dữ liệu không hợp lệ" };
+  const d = parsed.data;
+  const db = await getDb();
+  const r = await assignModelCodeCore(db, { modelId: d.modelId, code: d.code, actor: { id: user.id, label: user.name || user.email }, source: `ui:/models/${d.modelId}` });
+  if ("error" in r) return { error: r.error };
+  if (!r.noop) {
+    await audit({ userId: user.id, userEmail: user.email, action: "MODEL_CODE_ASSIGN", entity: "PRODUCT_MODEL", entityId: r.modelId, before: { code: r.from }, after: { code: r.to } });
+  }
+  modelPaths(r.modelId);
+  revalidatePath("/production", "layout");
+  return { ok: true, code: r.to };
 }
 
 /**

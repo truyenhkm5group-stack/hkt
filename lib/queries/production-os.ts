@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { REQUIRE_APPROVED_DESIGN_KEY, TOPIC_OPEN_STATUSES, TOPIC_STATUSES, TOPIC_STATUS_LABEL, type TopicStatus } from "@/lib/constants/production-os";
+import { isProvisionalModel } from "@/lib/constants/provisional-model";
 import { designOptionsForProduct } from "@/lib/production/orders";
 import { getSettingJson } from "@/lib/settings";
 import type { ListParams } from "@/lib/search-params";
@@ -102,20 +103,25 @@ export async function listSupplierOptions(): Promise<{ id: string; name: string 
 }
 
 /** Mẫu chọn được khi mở topic từ `/production/topics/new` (không có `?model=`). */
-export async function listModelOptions(): Promise<{ id: string; code: string; name: string; state: string | null }[]> {
+export async function listModelOptions(): Promise<{ id: string; code: string; name: string; state: string | null; provisional: boolean }[]> {
   const db = await getDb();
-  return db.select({ id: pm.id, code: pm.code, name: pm.name, state: pm.lifecycleState }).from(pm).orderBy(asc(pm.code)).limit(2000);
+  const rows = await db
+    .select({ id: pm.id, code: pm.code, name: pm.name, state: pm.lifecycleState, registeredBy: pm.registeredBy, productId: pm.productId, designConceptId: pm.designConceptId })
+    .from(pm)
+    .orderBy(asc(pm.code))
+    .limit(2000);
+  return rows.map((r) => ({ id: r.id, code: r.code, name: r.name, state: r.state, provisional: isProvisionalModel(r) }));
 }
 
 export async function getModelBrief(modelId: string) {
   const db = await getDb();
   const [m] = await db
-    .select({ id: pm.id, code: pm.code, name: pm.name, state: pm.lifecycleState, productId: pm.productId, productName: schema.products.name, productImage: schema.products.image })
+    .select({ id: pm.id, code: pm.code, name: pm.name, state: pm.lifecycleState, productId: pm.productId, productName: schema.products.name, productImage: schema.products.image, registeredBy: pm.registeredBy, designConceptId: pm.designConceptId })
     .from(pm)
     .leftJoin(schema.products, eq(schema.products.id, pm.productId))
     .where(eq(pm.id, modelId))
     .limit(1);
-  return m ?? null;
+  return m ? { ...m, provisional: isProvisionalModel(m) } : null;
 }
 
 /** Toàn bộ bàn sản xuất của MỘT mẫu: giá thành (mọi phiên bản + dòng), mẫu (mọi phiên bản + phán quyết), bản duyệt. */

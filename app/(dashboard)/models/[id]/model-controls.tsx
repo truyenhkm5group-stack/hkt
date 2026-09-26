@@ -3,10 +3,11 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { setModelOwner, transitionModel } from "@/lib/actions/models";
+import { assignModelCode, setModelOwner, transitionModel } from "@/lib/actions/models";
 import { checkModelTransition, MODEL_REASON_MIN_LENGTH, MODEL_STATE_LABELS, MODEL_STATES, MODEL_TRANSITIONS, reasonIsEnough, type ModelState } from "@/lib/constants/model-lifecycle";
 import type { WinnerFollowUp } from "@/lib/constants/early-topic";
 
@@ -144,5 +145,40 @@ export function OwnerControl({ modelId, ownerUserId, options }: { modelId: strin
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+/**
+ * CHỐT MÃ CHÍNH THỨC cho mẫu đang mang mã tạm (`TEST-…` — mẫu mới test mở topic sản xuất trước khi lên
+ * mã, chủ shop 26/09/2026). Chỉ đổi MÃ của đúng dòng này; khai THẮNG vẫn ở ô trạng thái bên trên.
+ */
+export function AssignCodeControl({ modelId, code }: { modelId: string; code: string }) {
+  const [value, setValue] = useState("");
+  const [pending, start] = useTransition();
+  const luu = () =>
+    start(async () => {
+      const r = await assignModelCode({ modelId, code: value });
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success(`Đã chốt mã ${r.code}`);
+      setValue("");
+    });
+  return (
+    <div className="space-y-2 rounded-md border border-amber-300/60 bg-amber-50 p-2.5 text-sm dark:border-amber-800 dark:bg-amber-950/30">
+      <p className="text-xs text-amber-900 dark:text-amber-200">
+        Mẫu đang mang <b>mã tạm</b> <span className="font-mono">{code}</span>. Mẫu thắng thì chốt mã chính thức — topic, giá thành, mẫu thử, ảnh/video đã gắn đi theo nguyên vẹn; lần đồng bộ sổ sau tự nối sản phẩm Pancake mang mã mới.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Label htmlFor="assign-code" className="text-xs">
+          Mã chính thức
+        </Label>
+        <Input id="assign-code" value={value} onChange={(e) => setValue(e.target.value)} placeholder="Q012" className="h-8 w-40 font-mono" />
+        <Button size="sm" onClick={luu} disabled={pending || !value.trim()}>
+          Chốt mã chính thức
+        </Button>
+      </div>
+    </div>
   );
 }
